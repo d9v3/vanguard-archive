@@ -175,13 +175,16 @@ fn clamav(complet: bool) {
         ".rustup",
         "target",
         "node_modules",
+        // Dossiers privés des services systemd (root seul) : illisibles, ils feraient compter des erreurs.
+        "systemd-private-[^/]*",
         ".local/share/netscan/quarantaine",
         ".snapshots",
         "Library/Caches",
         ".Trash",
     ];
     let mut cmd = Command::new("clamscan");
-    cmd.args(["-r", "-i", "--no-summary", "--max-filesize=200M", "--max-scansize=400M"]);
+    // Le bilan final (fichiers analysés, infectés, erreurs) sert à juger si l'analyse a vraiment eu lieu.
+    cmd.args(["-r", "-i", "--max-filesize=200M", "--max-scansize=400M"]);
     for e in exclusions {
         cmd.arg(format!("--exclude-dir={}", regex_echappe(e)));
     }
@@ -200,7 +203,7 @@ fn clamav(complet: bool) {
         println!("  Impossible de lancer clamscan.");
         return;
     };
-    let Some(infectes) = lire_resultat(sortie.status.code(), &String::from_utf8_lossy(&sortie.stdout)) else {
+    let Some(bilan) = lire_resultat(sortie.status.code(), &String::from_utf8_lossy(&sortie.stdout)) else {
         let erreur = String::from_utf8_lossy(&sortie.stderr);
         println!(
             "  {}✖ L'analyse a échoué : le résultat n'est pas fiable.{RESET}",
@@ -212,6 +215,16 @@ fn clamav(complet: bool) {
         return;
     };
 
+    let illisibles = if bilan.illisibles > 0 {
+        format!(
+            " ; {} élément(s) illisible(s) sans droits root, ignoré(s)",
+            bilan.illisibles
+        )
+    } else {
+        String::new()
+    };
+    println!("  {GRIS}{} fichier(s) analysé(s){illisibles}.{RESET}", bilan.analyses);
+    let infectes = bilan.infectes;
     if infectes.is_empty() {
         println!("  {VERT}✔ Aucun malware trouvé.{RESET}");
         return;
@@ -240,10 +253,21 @@ fn clamav(complet: bool) {
     }
 }
 
-/// Résultat de clamscan : `Some(fichiers infectés)` si l'analyse a abouti, `None` si elle a échoué.
-/// Codes de sortie : 0 = sain, 1 = menaces trouvées, autre = erreur (base absente, disque illisible…).
+/// Bilan d'une analyse ClamAV qui a vraiment eu lieu.
 #[cfg(unix)]
-fn lire_resultat(code: Option<i32>, sortie: &str) -> Option<Vec<(String, String)>> {
+#[derive(Debug, PartialEq)]
+struct Bilan {
+    infectes: Vec<(String, String)>,
+    analyses: u64,
+    /// Fichiers illisibles sans droits root (ignorés) : ClamAV renvoie alors le code 2 même si tout s'est bien passé.
+    illisibles: u64,
+}
+
+/// Résultat de clamscan, `None` si l'analyse n'a pas eu lieu (base absente, plantage…).
+/// On se fie au bilan final plutôt qu'au code de retour : sur un Linux normal, quelques dossiers de /tmp
+/// appartiennent à root, et ClamAV répond « erreur » (code 2) après avoir analysé tout le reste (vu en réel).
+#[cfg(unix)]
+fn lire_resultat(code: Option<i32>, sortie: &str) -> Option<Bilan> {
     let infectes: Vec<(String, String)> = sortie
         .lines()
         .filter_map(|l| {
@@ -251,12 +275,23 @@ fn lire_resultat(code: Option<i32>, sortie: &str) -> Option<Vec<(String, String)
             Some((fichier.to_string(), menace.to_string()))
         })
         .collect();
-    match code {
-        Some(0) => Some(vec![]),
-        // Code 1 sans aucune ligne lisible : on ne peut pas dire quoi isoler, donc pas fiable.
-        Some(1) if !infectes.is_empty() => Some(infectes),
-        _ => None,
+    let champ = |nom: &str| {
+        sortie
+            .lines()
+            .find_map(|l| l.strip_prefix(nom)?.trim().parse::<u64>().ok())
+    };
+    let analyses = champ("Scanned files:")?;
+    let annonces = champ("Infected files:")?;
+    let illisibles = champ("Total errors:").unwrap_or(0);
+    // Le nombre de fichiers infectés annoncé doit correspondre aux lignes lues, sinon on ne sait pas quoi isoler.
+    if !matches!(code, Some(0..=2)) || annonces != infectes.len() as u64 {
+        return None;
     }
+    Some(Bilan {
+        infectes,
+        analyses,
+        illisibles,
+    })
 }
 
 /// Déplace un fichier en quarantaine et lui retire toute permission : il ne peut plus être lancé ni ouvert.
@@ -378,16 +413,28 @@ mod tests {
 
     #[test]
     fn resultat_clamscan() {
-        let sortie =
-            "/home/x/Téléchargements/eicar.com: Eicar-Test-Signature FOUND\n/tmp/a b.exe: Win.Trojan.Agent-123 FOUND\n";
-        let r = lire_resultat(Some(1), sortie).unwrap();
-        assert_eq!(r.len(), 2);
-        assert_eq!(r[1], ("/tmp/a b.exe".to_string(), "Win.Trojan.Agent-123".to_string()));
-        assert_eq!(lire_resultat(Some(0), "").unwrap().len(), 0);
-        // Une erreur n'est jamais un « aucun malware ».
-        assert!(lire_resultat(Some(2), "").is_none());
-        assert!(lire_resultat(None, "").is_none());
-        assert!(lire_resultat(Some(1), "").is_none());
+        let bilan = |infectes: u64, erreurs: u64| {
+            format!(
+                "\n----------- SCAN SUMMARY -----------\nScanned files: 12683\nInfected files: {infectes}\nTotal errors: {erreurs}\n"
+            )
+        };
+        // Cas réel : 0 infecté, 7 dossiers de /tmp illisibles, code 2 → analyse valable.
+        let r = lire_resultat(Some(2), &bilan(0, 7)).unwrap();
+        assert_eq!((r.infectes.len(), r.analyses, r.illisibles), (0, 12683, 7));
+        let deux = format!(
+            "/home/x/Téléchargements/eicar.com: Eicar-Test-Signature FOUND\n/tmp/a b.exe: Win.Trojan.Agent-123 FOUND\n{}",
+            bilan(2, 0)
+        );
+        let r = lire_resultat(Some(1), &deux).unwrap();
+        assert_eq!(
+            r.infectes[1],
+            ("/tmp/a b.exe".to_string(), "Win.Trojan.Agent-123".to_string())
+        );
+        // Pas de bilan (base absente, plantage) : jamais « aucun malware ».
+        assert!(lire_resultat(Some(2), "ERROR: Can't open database").is_none());
+        assert!(lire_resultat(None, &bilan(0, 0)).is_none());
+        // Infectés annoncés mais lignes illisibles : pas fiable.
+        assert!(lire_resultat(Some(1), &bilan(1, 0)).is_none());
     }
 
     #[test]
