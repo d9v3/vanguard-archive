@@ -225,7 +225,9 @@ fn ports_ecoute(pare_feu_actif: bool, ip_lan: Option<String>) -> Vec<Constat> {
             (false, n) => n,
         };
         let constat = alerte("Ports en écoute", niveau, format!("{port}/tcp ({}) ouvert par « {programme} ». {}", i.service, i.conseil));
-        constats.push(if niveau >= Niveau::Moyen {
+        // RDP : pas de blocage aveugle, il coupe l'accès aux machines pilotées à distance (VM…).
+        // Le constat « Bureau à distance » propose déjà NLA ou la désactivation propre.
+        constats.push(if niveau >= Niveau::Moyen && port != 3389 {
             constat.corriger(
                 format!("Bloquer le port {port} en entrée dans le pare-feu Windows"),
                 &[&format!("New-NetFirewallRule -DisplayName 'netscan : bloquer {port}' -Direction Inbound -Protocol TCP -LocalPort {port} -Action Block")],

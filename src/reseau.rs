@@ -142,7 +142,18 @@ impl AppareilConnu {
 
 impl Base {
     fn lire(p: &std::path::Path) -> Base {
-        std::fs::read_to_string(p).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default()
+        let Ok(texte) = std::fs::read_to_string(p) else { return Base::default() };
+        // Le Bloc-notes et PowerShell 5.1 ajoutent une marque d'ordre des octets (BOM) en tête.
+        match serde_json::from_str(texte.trim_start_matches('\u{feff}')) {
+            Ok(base) => base,
+            Err(e) => {
+                // Jamais écraser une base qu'on ne sait pas lire : on la met de côté, intacte.
+                let copie = p.with_extension(format!("illisible-{}.json", chrono::Local::now().format("%Y%m%d-%H%M%S")));
+                let _ = std::fs::copy(p, &copie);
+                eprintln!("Attention : base des appareils illisible ({e}). Copie gardée : {}", copie.display());
+                Base::default()
+            }
+        }
     }
 
     /// La base de la clé, enrichie des scans faits sans elle (copie locale).
@@ -562,6 +573,21 @@ mod tests {
         // Une fois migré, l'ancien champ n'est plus écrit.
         let migre = Base { reseaux: BTreeMap::from([("box".into(), ReseauConnu { nom: None, appareils: base.appareils })]), appareils: BTreeMap::new() };
         assert!(!serde_json::to_value(&migre).unwrap().as_object().unwrap().contains_key("appareils"));
+    }
+
+    #[test]
+    fn base_avec_bom_ou_abimee() {
+        let dossier = std::env::temp_dir().join(format!("netscan-base-{}", std::process::id()));
+        std::fs::create_dir_all(&dossier).unwrap();
+        let p = dossier.join("appareils.json");
+        std::fs::write(&p, "\u{feff}{\"reseaux\":{\"box\":{\"nom\":\"Salon\",\"appareils\":{}}}}").unwrap();
+        assert_eq!(Base::lire(&p).reseaux["box"].nom.as_deref(), Some("Salon"));
+        std::fs::write(&p, "{ abîmé").unwrap();
+        assert!(Base::lire(&p).reseaux.is_empty());
+        // La base abîmée est gardée de côté, pas perdue.
+        let copies = std::fs::read_dir(&dossier).unwrap().filter(|f| f.as_ref().unwrap().file_name().to_string_lossy().contains("illisible")).count();
+        assert_eq!(copies, 1);
+        std::fs::remove_dir_all(&dossier).unwrap();
     }
 
     #[test]
