@@ -51,11 +51,16 @@ impl Paquets {
             Paquets::Apt => ("dpkg", "-S"),
             Paquets::Dnf | Paquets::Zypper => ("rpm", "-qf"),
         };
-        Command::new(cmd)
-            .arg(arg)
-            .arg(fichier)
-            .output()
-            .is_ok_and(|o| o.status.success())
+        let connu = |f: &Path| {
+            Command::new(cmd)
+                .arg(arg)
+                .arg(f)
+                .output()
+                .is_ok_and(|o| o.status.success())
+        };
+        // /bin, /sbin et /lib sont fusionnés dans /usr sur Debian, Ubuntu et Mint, mais dpkg garde souvent
+        // l'ancien chemin : /usr/bin/fusermount3 y est enregistré comme /bin/fusermount3 (vu sur Mint 22).
+        connu(fichier) || chemin_hors_usr(fichier).is_some_and(|ancien| connu(&ancien))
     }
 
     fn mise_a_jour(self) -> &'static str {
@@ -67,6 +72,15 @@ impl Paquets {
             Paquets::Zypper => "sudo zypper --non-interactive update",
         }
     }
+}
+
+/// /usr/bin/x → /bin/x (idem sbin, lib) : chemin d'avant la fusion de /usr.
+fn chemin_hors_usr(fichier: &Path) -> Option<std::path::PathBuf> {
+    let reste = fichier.strip_prefix("/usr").ok()?;
+    ["bin", "sbin", "lib", "lib64"]
+        .iter()
+        .any(|d| reste.starts_with(d))
+        .then(|| Path::new("/").join(reste))
 }
 
 /// systemd est-il le gestionnaire de services ? Sans lui (conteneur, Alpine, Void…), on ne peut pas
@@ -1460,6 +1474,18 @@ fn etat_aur(installes: &[&str], reponse: &serde_json::Value) -> (Vec<String>, Ve
     (absents, orphelins)
 }
 
+/// Encode un nom pour une adresse web : « libc++ » doit devenir « libc%2B%2B », sinon « + » est lu comme une
+/// espace et le paquet passe pour absent de l'AUR (vérifié sur aewm++).
+fn encoder_url(texte: &str) -> String {
+    texte
+        .bytes()
+        .map(|o| match o {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => (o as char).to_string(),
+            _ => format!("%{o:02X}"),
+        })
+        .collect()
+}
+
 /// Un paquet retiré de l'AUR ne reçoit plus jamais de mise à jour, sans que rien ne prévienne.
 fn paquets_aur() -> Option<Constat> {
     if Paquets::detecter() != Some(Paquets::Pacman) {
@@ -1471,20 +1497,24 @@ fn paquets_aur() -> Option<Constat> {
         return None;
     }
     // Même requête que yay ou paru : seuls les noms des paquets partent vers aur.archlinux.org.
-    let requete = format!(
-        "https://aur.archlinux.org/rpc/v5/info?{}",
-        installes
-            .iter()
-            .map(|n| format!("arg[]={n}"))
-            .collect::<Vec<_>>()
-            .join("&")
-    );
-    let Some(json) = sortie_delai("curl", &["-fsS", "--max-time", "20", &requete], 25, &[0])
-        .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
-    else {
-        return Some(impossible("Paquets AUR", "AUR injoignable, hors ligne ?"));
-    };
-    let (absents, orphelins) = etat_aur(&installes, &json);
+    // Par lots de 100, pour ne pas dépasser la longueur maximale d'une adresse.
+    let mut resultats = Vec::new();
+    for lot in installes.chunks(100) {
+        let requete = format!(
+            "https://aur.archlinux.org/rpc/v5/info?{}",
+            lot.iter()
+                .map(|n| format!("arg[]={}", encoder_url(n)))
+                .collect::<Vec<_>>()
+                .join("&")
+        );
+        let Some(json) = sortie_delai("curl", &["-fsS", "--max-time", "20", &requete], 25, &[0])
+            .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
+        else {
+            return Some(impossible("Paquets AUR", "AUR injoignable, hors ligne ?"));
+        };
+        resultats.extend(json["results"].as_array().cloned().unwrap_or_default());
+    }
+    let (absents, orphelins) = etat_aur(&installes, &serde_json::json!({ "results": resultats }));
     Some(if !absents.is_empty() {
         alerte(
             "Paquets AUR",
@@ -1610,6 +1640,24 @@ mod tests {
         assert_eq!(regles_nopasswd(omarchy), (vec![], 1));
         let tout = "    (ALL : ALL) NOPASSWD: ALL\n";
         assert_eq!(regles_nopasswd(tout).0.len(), 1);
+    }
+
+    #[test]
+    fn chemins_avant_fusion_de_usr() {
+        assert_eq!(
+            chemin_hors_usr(Path::new("/usr/bin/fusermount3")).unwrap(),
+            Path::new("/bin/fusermount3")
+        );
+        assert_eq!(chemin_hors_usr(Path::new("/usr/sbin/x")).unwrap(), Path::new("/sbin/x"));
+        assert!(chemin_hors_usr(Path::new("/usr/local/bin/x")).is_none());
+        assert!(chemin_hors_usr(Path::new("/opt/x")).is_none());
+    }
+
+    #[test]
+    fn noms_encodes_pour_l_aur() {
+        assert_eq!(encoder_url("aewm++"), "aewm%2B%2B");
+        assert_eq!(encoder_url("python-foo_bar.1"), "python-foo_bar.1");
+        assert_eq!(encoder_url("a@b"), "a%40b");
     }
 
     #[test]

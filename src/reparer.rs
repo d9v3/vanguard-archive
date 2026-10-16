@@ -63,6 +63,8 @@ fn occupation_racine() -> String {
 pub fn liste() -> Vec<Reparation> {
     use crate::machine::linux::Paquets;
     let gestion = Paquets::detecter();
+    // Sans systemd (conteneur, Alpine, Void…), les réparations qui passent par systemctl ou journalctl ne marchent pas.
+    let systemd = std::path::Path::new("/run/systemd/system").is_dir();
     let mut l = Vec::new();
 
     // Réseau
@@ -74,7 +76,7 @@ pub fn liste() -> Vec<Reparation> {
         vec![]
     };
     if actif("systemd-resolved") {
-        reseau.push("resolvectl flush-caches");
+        reseau.push("sudo resolvectl flush-caches");
     }
     if !reseau.is_empty() {
         let mut r = rep(
@@ -159,7 +161,9 @@ pub fn liste() -> Vec<Reparation> {
         Some(Paquets::Zypper) => vec!["sudo zypper clean --all"],
         None => vec![],
     };
-    menage.push("sudo journalctl --vacuum-time=2weeks");
+    if systemd {
+        menage.push("sudo journalctl --vacuum-time=2weeks");
+    }
     menage.push("rm -rf ~/.cache/thumbnails");
     if present("flatpak") {
         menage.push("flatpak uninstall --unused -y");
@@ -175,6 +179,9 @@ pub fn liste() -> Vec<Reparation> {
         &menage,
     ));
 
+    if !systemd {
+        return l;
+    }
     // Services
     l.push(rep(
         "Services en échec",
@@ -227,12 +234,9 @@ pub fn liste() -> Vec<Reparation> {
         ),
         rep(
             "Disque : erreurs",
-            "Analyse le disque C: en ligne et répare les erreurs trouvées sans redémarrer quand c'est possible.",
+            "Analyse le disque C: sans le bloquer. Si des erreurs sont trouvées, la réparation se fait au redémarrage : chkdsk C: /f (C: ne peut pas être mis hors ligne pendant que Windows tourne).",
             "quelques minutes",
-            &[
-                "Repair-Volume -DriveLetter C -Scan",
-                "Repair-Volume -DriveLetter C -SpotFix",
-            ],
+            &["Repair-Volume -DriveLetter C -Scan"],
         ),
         reseau,
         rep(
