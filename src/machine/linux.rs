@@ -3,7 +3,7 @@
 use std::path::Path;
 use std::process::Command;
 
-use super::{Audit, Constat, alerte, cles_ssh, ok, score, sortie};
+use super::{Audit, Constat, alerte, cles_ssh, impossible, ok, score, sortie};
 use crate::risk::{Niveau, info_port};
 
 pub const NOM: &str = "Linux";
@@ -87,10 +87,6 @@ fn chemin_hors_usr(fichier: &Path) -> Option<std::path::PathBuf> {
 /// savoir quels services tournent : on le dit au lieu de conclure.
 fn systemd() -> bool {
     Path::new("/run/systemd/system").is_dir()
-}
-
-fn impossible(categorie: &'static str, raison: &str) -> Constat {
-    alerte(categorie, Niveau::Info, format!("Impossible de vérifier ({raison})."))
 }
 
 fn service_actif(nom: &str) -> bool {
@@ -412,18 +408,16 @@ fn ssh_serveur() -> Constat {
 
 /// Paquets à mettre à jour, un par ligne commençant par son nom ; `None` si on ne peut pas savoir.
 fn liste_mises_a_jour(gestion: Paquets) -> Option<Vec<String>> {
-    let lignes = |o: &std::process::Output| {
-        String::from_utf8_lossy(&o.stdout)
-            .lines()
-            .map(str::to_string)
-            .collect::<Vec<_>>()
-    };
+    // Ces outils interrogent les dépôts : hors ligne ou serveur lent, ils ne doivent pas figer l'audit.
+    let lancer =
+        |cmd: &str, args: &[&str]| crate::commande::lancer(Command::new(cmd).args(args).env("LC_ALL", "C"), 120);
+    let lignes = |t: &str| t.lines().map(str::to_string).collect::<Vec<_>>();
     match gestion {
         // checkupdates : 0 = mises à jour listées, 2 = rien à faire, autre = erreur (hors ligne…).
         Paquets::Pacman => {
-            let o = Command::new("checkupdates").output().ok()?;
-            match o.status.code() {
-                Some(0) => Some(lignes(&o)),
+            let r = lancer("checkupdates", &[])?;
+            match r.code {
+                Some(0) => Some(lignes(&r.sortie)),
                 Some(2) => Some(vec![]),
                 _ => None,
             }
@@ -433,25 +427,20 @@ fn liste_mises_a_jour(gestion: Paquets) -> Option<Vec<String>> {
         // Sans cache, « rien à mettre à jour » ne voudrait rien dire.
         Paquets::Apt => {
             age_cache_apt()?;
-            let o = Command::new("apt")
-                .args(["list", "--upgradable"])
-                .env("LC_ALL", "C")
-                .output()
-                .ok()?;
-            o.status
-                .success()
-                .then(|| lignes(&o).into_iter().filter(|l| l.contains("[upgradable")).collect())
+            let r = lancer("apt", &["list", "--upgradable"])?;
+            (r.code == Some(0)).then(|| {
+                lignes(&r.sortie)
+                    .into_iter()
+                    .filter(|l| l.contains("[upgradable"))
+                    .collect()
+            })
         }
         // dnf check-update : 100 = mises à jour disponibles, 0 = rien, autre = erreur.
         Paquets::Dnf => {
-            let o = Command::new("dnf")
-                .args(["-q", "check-update"])
-                .env("LC_ALL", "C")
-                .output()
-                .ok()?;
-            match o.status.code() {
+            let r = lancer("dnf", &["-q", "check-update"])?;
+            match r.code {
                 Some(100) => Some(
-                    lignes(&o)
+                    lignes(&r.sortie)
                         .into_iter()
                         .filter(|l| !l.trim().is_empty() && !l.starts_with(' '))
                         .collect(),
@@ -461,14 +450,8 @@ fn liste_mises_a_jour(gestion: Paquets) -> Option<Vec<String>> {
             }
         }
         Paquets::Zypper => {
-            let o = Command::new("zypper")
-                .args(["-q", "list-updates"])
-                .env("LC_ALL", "C")
-                .output()
-                .ok()?;
-            o.status
-                .success()
-                .then(|| lignes(&o).into_iter().filter(|l| l.starts_with("v ")).collect())
+            let r = lancer("zypper", &["-q", "list-updates"])?;
+            (r.code == Some(0)).then(|| lignes(&r.sortie).into_iter().filter(|l| l.starts_with("v ")).collect())
         }
     }
 }
@@ -478,33 +461,8 @@ fn liste_mises_a_jour(gestion: Paquets) -> Option<Vec<String>> {
 /// (vu en test : Docker inaccessible donnait « aucun port exposé »). Certains outils répondent « rien à faire »
 /// par un code non nul (yay -Qua : 1) : on les liste explicitement.
 fn sortie_delai(cmd: &str, args: &[&str], secondes: u64, codes_ok: &[i32]) -> Option<String> {
-    use std::io::Read;
-    let mut enfant = Command::new(cmd)
-        .args(args)
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .ok()?;
-    let mut flux = enfant.stdout.take()?;
-    let lecteur = std::thread::spawn(move || {
-        let mut texte = String::new();
-        let _ = flux.read_to_string(&mut texte);
-        texte
-    });
-    let limite = std::time::Instant::now() + std::time::Duration::from_secs(secondes);
-    let statut = loop {
-        match enfant.try_wait() {
-            Ok(Some(statut)) => break statut,
-            Ok(None) if std::time::Instant::now() < limite => std::thread::sleep(std::time::Duration::from_millis(100)),
-            _ => {
-                let _ = enfant.kill();
-                let _ = enfant.wait();
-                return None;
-            }
-        }
-    };
-    let texte = lecteur.join().ok()?;
-    statut.code().is_some_and(|c| codes_ok.contains(&c)).then_some(texte)
+    let r = crate::commande::lancer(Command::new(cmd).args(args), secondes)?;
+    r.code.is_some_and(|c| codes_ok.contains(&c)).then_some(r.sortie)
 }
 
 /// Logiciels installés hors du gestionnaire de paquets principal : Flatpak, Snap, AUR et firmware.
@@ -635,11 +593,7 @@ fn age_cache_apt() -> Option<u64> {
 
 fn mises_a_jour() -> Constat {
     let Some(gestion) = Paquets::detecter() else {
-        return alerte(
-            "Mises à jour",
-            Niveau::Info,
-            "Impossible de vérifier (gestionnaire de paquets non reconnu).",
-        );
+        return impossible("Mises à jour", "gestionnaire de paquets non reconnu");
     };
     let Some(liste) = liste_mises_a_jour(gestion) else {
         let raison = if gestion == Paquets::Apt {

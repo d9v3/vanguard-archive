@@ -38,6 +38,9 @@ pub struct Constat {
     pub probleme: Option<Niveau>,
     pub message: String,
     pub correctif: Option<Correctif>,
+    /// `false` = la vérification n'a pas pu se faire. C'est ce champ, et non le texte du message,
+    /// qui décide de la note : reformuler un message ne doit pas désactiver ce garde-fou.
+    pub verifie: bool,
 }
 
 #[derive(Serialize)]
@@ -50,19 +53,13 @@ pub struct Audit {
 impl Audit {
     /// Nombre de vérifications qui n'ont pas pu se faire.
     pub fn impossibles(&self) -> usize {
-        self.constats
-            .iter()
-            .filter(|c| c.message.starts_with("Impossible de vérifier"))
-            .count()
+        self.constats.iter().filter(|c| !c.verifie).count()
     }
 
     /// Une note n'a de sens que si le pare-feu a été vérifié et qu'au plus un tiers des vérifications a échoué :
     /// sinon une machine peu vérifiée obtiendrait un « A » rassurant (vu en test sur Fedora en conteneur).
     pub fn fiable(&self) -> bool {
-        let pare_feu_inconnu = self
-            .constats
-            .iter()
-            .any(|c| c.categorie == "Pare-feu" && c.message.starts_with("Impossible de vérifier"));
+        let pare_feu_inconnu = self.constats.iter().any(|c| c.categorie == "Pare-feu" && !c.verifie);
         !pare_feu_inconnu && self.impossibles() * 3 < self.constats.len()
     }
 }
@@ -73,6 +70,7 @@ fn ok(categorie: &'static str, message: impl Into<String>) -> Constat {
         probleme: None,
         message: message.into(),
         correctif: None,
+        verifie: true,
     }
 }
 
@@ -82,6 +80,15 @@ fn alerte(categorie: &'static str, niveau: Niveau, message: impl Into<String>) -
         probleme: Some(niveau),
         message: message.into(),
         correctif: None,
+        verifie: true,
+    }
+}
+
+/// Vérification qui n'a pas pu se faire : on le dit, sans jamais conclure « OK ».
+fn impossible(categorie: &'static str, raison: &str) -> Constat {
+    Constat {
+        verifie: false,
+        ..alerte(categorie, Niveau::Info, format!("Impossible de vérifier ({raison})."))
     }
 }
 
@@ -111,10 +118,8 @@ fn score(constats: &[Constat]) -> u32 {
 /// Sortie standard d'une commande, ou `None` si elle est absente ou échoue.
 #[cfg(unix)]
 fn sortie(cmd: &str, args: &[&str]) -> Option<String> {
-    let o = Command::new(cmd).args(args).output().ok()?;
-    o.status
-        .success()
-        .then(|| String::from_utf8_lossy(&o.stdout).into_owned())
+    let r = crate::commande::lancer(Command::new(cmd).args(args), 30)?;
+    (r.code == Some(0)).then_some(r.sortie)
 }
 
 /// Permissions de ~/.ssh (commun à Linux et macOS).
@@ -372,6 +377,7 @@ mod tests {
         let constats: Vec<Constat> = etats
             .iter()
             .map(|(c, n, m)| Constat {
+                verifie: !m.starts_with("Impossible de vérifier"),
                 categorie: c,
                 probleme: *n,
                 message: m.to_string(),

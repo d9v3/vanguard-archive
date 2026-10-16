@@ -172,14 +172,17 @@ impl Base {
     }
 
     /// La base de la clé, enrichie des scans faits sans elle (copie locale).
-    fn charger() -> (Base, [PathBuf; 2]) {
+    /// Le verrou rendu doit être gardé jusqu'à `enregistrer` : la surveillance horaire et un scan manuel
+    /// ne doivent pas lire et réécrire la base en même temps (l'une effacerait les ajouts de l'autre).
+    fn charger() -> (Base, [PathBuf; 2], Option<Verrou>) {
+        let verrou = Verrou::prendre(&dossier_local());
         let cle = dossier_donnees().join("appareils.json");
         let local = dossier_local().join("appareils.json");
         let mut base = Base::lire(&cle);
         if local != cle {
             base.absorber(Base::lire(&local));
         }
-        (base, [cle, local])
+        (base, [cle, local], verrou)
     }
 
     fn absorber(&mut self, autre: Base) {
@@ -205,11 +208,75 @@ impl Base {
     fn enregistrer(&self, chemins: &[PathBuf; 2]) {
         let json = serde_json::to_string_pretty(self).unwrap_or_default();
         for p in chemins {
-            if let Some(d) = p.parent() {
-                let _ = std::fs::create_dir_all(d);
+            if let Err(e) = ecrire_atomique(p, &json) {
+                eprintln!(
+                    "Attention : base des appareils non enregistrée dans {} ({e}).",
+                    p.display()
+                );
             }
-            let _ = std::fs::write(p, &json);
         }
+    }
+}
+
+/// Écrit d'abord un fichier temporaire, le force sur le disque, puis le renomme à la place de l'ancien :
+/// une coupure, un Ctrl-C ou une clé arrachée laissent soit l'ancienne base, soit la nouvelle, jamais une
+/// base tronquée.
+fn ecrire_atomique(chemin: &std::path::Path, contenu: &str) -> std::io::Result<()> {
+    use std::io::Write;
+    if let Some(d) = chemin.parent() {
+        std::fs::create_dir_all(d)?;
+    }
+    let temporaire = chemin.with_extension(format!("tmp-{}", std::process::id()));
+    let resultat = (|| {
+        let mut f = std::fs::File::create(&temporaire)?;
+        f.write_all(contenu.as_bytes())?;
+        f.sync_all()?;
+        std::fs::rename(&temporaire, chemin)
+    })();
+    if resultat.is_err() {
+        let _ = std::fs::remove_file(&temporaire);
+    }
+    resultat
+}
+
+/// Verrou entre processus netscan (fichier créé de façon exclusive, retiré à la fin).
+struct Verrou(PathBuf);
+
+impl Verrou {
+    /// Attend au plus 10 s. Un verrou de plus de 2 minutes vient d'un netscan interrompu : on le reprend.
+    fn prendre(dossier: &std::path::Path) -> Option<Verrou> {
+        let _ = std::fs::create_dir_all(dossier);
+        let chemin = dossier.join("appareils.verrou");
+        let fin = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        loop {
+            match std::fs::OpenOptions::new().write(true).create_new(true).open(&chemin) {
+                Ok(_) => return Some(Verrou(chemin)),
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                    let ancien = std::fs::metadata(&chemin)
+                        .and_then(|m| m.modified())
+                        .ok()
+                        .and_then(|t| t.elapsed().ok())
+                        .is_some_and(|age| age > std::time::Duration::from_secs(120));
+                    if ancien {
+                        let _ = std::fs::remove_file(&chemin);
+                    } else if std::time::Instant::now() > fin {
+                        eprintln!(
+                            "Attention : base des appareils occupée par un autre netscan, enregistrement sans verrou."
+                        );
+                        return None;
+                    } else {
+                        std::thread::sleep(std::time::Duration::from_millis(200));
+                    }
+                }
+                Err(_) => return None,
+            }
+        }
+    }
+}
+
+impl Drop for Verrou {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
     }
 }
 
@@ -228,7 +295,7 @@ pub fn date_fr(iso: &str) -> String {
 
 /// Donne (ou retire, avec `None`) un surnom à un appareil, désigné par son IP ou son adresse MAC.
 pub fn nommer(qui: &str, surnom: Option<&str>) -> Result<String, String> {
-    let (mut base, chemins) = Base::charger();
+    let (mut base, chemins, _verrou) = Base::charger();
     let qui_min = qui.to_ascii_lowercase();
     let mut trouves = 0;
     let mut decrit = String::new();
@@ -512,7 +579,7 @@ pub async fn executer(o: Options) -> Result<Rapport, String> {
     let arp = scan::table_arp();
     let fabricants = scan::base_fabricants();
 
-    let (mut base, chemins) = Base::charger();
+    let (mut base, chemins, _verrou) = Base::charger();
     // Le carnet de ce réseau : reconnu à la MAC de la box, sinon à la plage d'adresses.
     let id_reseau = gw
         .and_then(|g| arp.get(&g).cloned())
@@ -714,6 +781,30 @@ mod tests {
             .filter(|f| f.as_ref().unwrap().file_name().to_string_lossy().contains("illisible"))
             .count();
         assert_eq!(copies, 1);
+        std::fs::remove_dir_all(&dossier).unwrap();
+    }
+
+    #[test]
+    fn ecriture_atomique_et_verrou() {
+        let dossier = std::env::temp_dir().join(format!("netscan-atomique-{}", std::process::id()));
+        let fichier = dossier.join("appareils.json");
+        ecrire_atomique(&fichier, "{\"reseaux\":{}}").unwrap();
+        ecrire_atomique(&fichier, "{\"reseaux\":{\"box\":{\"nom\":null,\"appareils\":{}}}}").unwrap();
+        assert!(Base::lire(&fichier).reseaux.contains_key("box"));
+        // Aucun fichier temporaire ne traîne.
+        assert_eq!(std::fs::read_dir(&dossier).unwrap().count(), 1);
+        // Le verrou est exclusif tant qu'il est gardé, et libéré à la fin.
+        let v = Verrou::prendre(&dossier).unwrap();
+        assert!(
+            std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&v.0)
+                .is_err()
+        );
+        let chemin = v.0.clone();
+        drop(v);
+        assert!(!chemin.exists());
         std::fs::remove_dir_all(&dossier).unwrap();
     }
 

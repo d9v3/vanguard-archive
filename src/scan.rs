@@ -108,10 +108,8 @@ pub fn reseau_local() -> Option<(String, Ipv4Addr)> {
 
 #[cfg(not(target_os = "linux"))]
 fn commande(cmd: &str, args: &[&str]) -> String {
-    std::process::Command::new(cmd)
-        .args(args)
-        .output()
-        .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+    crate::commande::lancer(std::process::Command::new(cmd).args(args), 10)
+        .map(|r| r.sortie)
         .unwrap_or_default()
 }
 
@@ -400,9 +398,7 @@ pub fn nom_wifi() -> Option<String> {
 }
 
 fn commande_sortie(cmd: &str, args: &[&str]) -> String {
-    std::process::Command::new(cmd)
-        .args(args)
-        .output()
-        .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+    crate::commande::lancer(std::process::Command::new(cmd).args(args), 10)
+        .map(|r| r.sortie)
         .unwrap_or_default()
 }

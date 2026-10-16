@@ -4,6 +4,7 @@
 //! Lancé sans argument, affiche un menu.
 
 mod antivirus;
+mod commande;
 mod corriger;
 mod machine;
 mod rapport;

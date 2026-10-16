@@ -2,7 +2,7 @@
 
 use std::process::Command;
 
-use super::{Audit, Constat, alerte, cles_ssh, ok, score, sortie};
+use super::{Audit, Constat, alerte, cles_ssh, impossible, ok, score, sortie};
 use crate::risk::{Niveau, info_port};
 
 pub const NOM: &str = "macOS";
@@ -11,16 +11,9 @@ const FIREWALL: &str = "/usr/libexec/ApplicationFirewall/socketfilterfw";
 
 /// Sortie standard + erreur (certains outils Apple écrivent sur stderr).
 fn tout(cmd: &str, args: &[&str]) -> String {
-    Command::new(cmd)
-        .args(args)
-        .output()
-        .map(|o| {
-            format!(
-                "{}{}",
-                String::from_utf8_lossy(&o.stdout),
-                String::from_utf8_lossy(&o.stderr)
-            )
-        })
+    // 120 s : softwareupdate interroge les serveurs d'Apple et peut être lent ; jamais bloquant.
+    crate::commande::lancer(Command::new(cmd).args(args), 120)
+        .map(|r| format!("{}{}", r.sortie, r.erreurs))
         .unwrap_or_default()
 }
 
@@ -105,11 +98,7 @@ fn mises_a_jour() -> Constat {
     if n == 0 && liste.contains("No new software available") {
         ok("Mises à jour", "macOS à jour.")
     } else if n == 0 {
-        alerte(
-            "Mises à jour",
-            Niveau::Info,
-            "Impossible de vérifier (softwareupdate n'a pas répondu, hors ligne ?).",
-        )
+        impossible("Mises à jour", "softwareupdate n'a pas répondu, hors ligne ?")
     } else {
         alerte(
             "Mises à jour",

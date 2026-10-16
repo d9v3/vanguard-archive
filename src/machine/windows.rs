@@ -2,7 +2,7 @@
 
 use std::process::Command;
 
-use super::{Audit, Constat, alerte, ok, score};
+use super::{Audit, Constat, alerte, impossible, ok, score};
 use crate::risk::{Niveau, info_port};
 
 pub const NOM: &str = "Windows";
@@ -15,22 +15,18 @@ const FIN: &str = "__NETSCAN_FIN__";
 pub fn ps(script: &str) -> Option<String> {
     let complet =
         format!("[Console]::OutputEncoding=[Text.Encoding]::UTF8; $ErrorActionPreference='Stop'; {script}; '{FIN}'");
-    let o = Command::new("powershell")
-        .args(["-NoProfile", "-NonInteractive", "-Command", &complet])
-        .output()
-        .ok()?;
-    let texte = String::from_utf8_lossy(&o.stdout);
-    let (avant, _) = texte.rsplit_once(FIN)?;
-    o.status.success().then(|| avant.trim().to_string())
+    // 60 s : un cmdlet bloqué (service Defender suspendu…) ne doit pas figer l'audit.
+    let r = crate::commande::lancer(
+        Command::new("powershell").args(["-NoProfile", "-NonInteractive", "-Command", &complet]),
+        60,
+    )?;
+    let (avant, _) = r.sortie.rsplit_once(FIN)?;
+    (r.code == Some(0)).then(|| avant.trim().to_string())
 }
 
 /// Constat quand une vérification n'a pas pu se faire : on le dit, on ne conclut jamais « OK ».
 fn illisible(categorie: &'static str) -> Constat {
-    alerte(
-        categorie,
-        Niveau::Info,
-        "Impossible de vérifier (PowerShell indisponible ou bloqué).",
-    )
+    impossible(categorie, "PowerShell indisponible ou bloqué")
 }
 
 /// Délai maximal d'une correction : au-delà, on rend la main au lieu d'attendre indéfiniment.
@@ -301,11 +297,7 @@ fn mises_a_jour() -> Constat {
             "Mises à jour",
             format!("Dernière mise à jour Windows il y a {j} jours."),
         ),
-        None => alerte(
-            "Mises à jour",
-            Niveau::Info,
-            "Impossible de vérifier (historique Windows Update illisible).",
-        ),
+        None => impossible("Mises à jour", "historique Windows Update illisible"),
     }
 }
 
@@ -325,11 +317,7 @@ fn chiffrement() -> Constat {
             "Paramètres > Confidentialité et sécurité > Chiffrement de l'appareil (ou BitLocker sur Pro)",
             &["Start-Process ms-settings:deviceencryption"],
         ),
-        None => alerte(
-            "Chiffrement",
-            Niveau::Info,
-            "Impossible de vérifier (état BitLocker illisible).",
-        ),
+        None => impossible("Chiffrement", "état BitLocker illisible"),
     }
 }
 
@@ -398,11 +386,7 @@ fn ports_ecoute(pare_feu_actif: bool, ip_lan: Option<String>) -> Vec<Constat> {
 }
 
 fn wifi() -> Option<Constat> {
-    let sortie = Command::new("netsh")
-        .args(["wlan", "show", "interfaces"])
-        .output()
-        .ok()?;
-    let texte = String::from_utf8_lossy(&sortie.stdout);
+    let texte = crate::commande::lancer(Command::new("netsh").args(["wlan", "show", "interfaces"]), 15)?.sortie;
     let champ = |cle: &str| {
         texte
             .lines()
