@@ -87,16 +87,60 @@ fn home() -> String {
     std::env::var("HOME").unwrap_or_default()
 }
 
+/// Politique d'entrée par défaut de ufw (ACCEPT, DROP ou REJECT), lue dans /etc/default/ufw.
+fn politique_ufw(texte: &str) -> Option<String> {
+    texte.lines().find_map(|l| {
+        let v = l.trim().strip_prefix("DEFAULT_INPUT_POLICY=")?;
+        Some(v.trim_matches('"').to_ascii_uppercase())
+    })
+}
+
 fn pare_feu() -> Constat {
+    let installer_ufw = format!(
+        "command -v ufw >/dev/null || {}",
+        Paquets::detecter().map_or("echo 'Installe ufw avec ta distribution'".to_string(), |g| g
+            .installer("ufw"))
+    );
     if !systemd() {
         return impossible("Pare-feu", "systemd absent");
     }
     let ufw = std::fs::read_to_string("/etc/ufw/ufw.conf").is_ok_and(|c| c.lines().any(|l| l.trim() == "ENABLED=yes"))
         && service_actif("ufw");
     if ufw {
-        ok("Pare-feu", "ufw est actif.")
-    } else if service_actif("nftables") || service_actif("firewalld") {
-        ok("Pare-feu", "nftables/firewalld est actif.")
+        // Actif ne suffit pas : encore faut-il qu'il bloque les connexions entrantes par défaut.
+        let politique = std::fs::read_to_string("/etc/default/ufw")
+            .ok()
+            .and_then(|t| politique_ufw(&t));
+        match politique.as_deref() {
+            Some("ACCEPT") => alerte(
+                "Pare-feu",
+                Niveau::Eleve,
+                "ufw est actif mais accepte toutes les connexions entrantes par défaut : il ne protège rien.",
+            )
+            .corriger(
+                "Bloquer par défaut les connexions entrantes",
+                &["sudo ufw default deny incoming"],
+            ),
+            Some(p) => ok("Pare-feu", format!("ufw est actif, entrées refusées par défaut ({p}).")),
+            None => ok("Pare-feu", "ufw est actif."),
+        }
+    } else if service_actif("firewalld") {
+        // La zone « trusted » laisse tout passer.
+        match sortie("firewall-cmd", &["--get-default-zone"]).map(|z| z.trim().to_string()) {
+            Some(z) if z == "trusted" => alerte(
+                "Pare-feu",
+                Niveau::Eleve,
+                "firewalld est actif mais en zone « trusted » : tout est accepté.",
+            )
+            .corriger(
+                "Passer la zone par défaut en « public »",
+                &["sudo firewall-cmd --set-default-zone=public"],
+            ),
+            Some(z) => ok("Pare-feu", format!("firewalld est actif (zone « {z} »).")),
+            None => ok("Pare-feu", "firewalld est actif."),
+        }
+    } else if service_actif("nftables") {
+        ok("Pare-feu", "nftables est actif (règles non lisibles sans droits root).")
     } else {
         alerte(
             "Pare-feu",
@@ -106,7 +150,7 @@ fn pare_feu() -> Constat {
         .corriger(
             "Activer ufw : bloquer les connexions entrantes, autoriser les sortantes",
             &[
-                "command -v ufw >/dev/null || sudo pacman -S --needed --noconfirm ufw",
+                &installer_ufw,
                 "sudo ufw default deny incoming",
                 "sudo ufw default allow outgoing",
                 "sudo ufw --force enable",
@@ -117,70 +161,140 @@ fn pare_feu() -> Constat {
 }
 
 /// Services qui écoutent sur le réseau (pas seulement en local).
+/// Services qui écoutent sur le réseau (pas seulement en local), en TCP et en UDP.
 fn ports_ecoute(pare_feu_actif: bool, ip_lan: Option<String>) -> Vec<Constat> {
-    let Some(ss) = sortie("ss", &["-Htlnp"]) else {
-        return vec![alerte("Ports en écoute", Niveau::Info, "Commande ss indisponible.")];
-    };
     let mut constats = Vec::new();
     let mut vus = Vec::new();
-    for ligne in ss.lines() {
-        let c: Vec<&str> = ligne.split_whitespace().collect();
-        let Some(local) = c.get(3) else { continue };
-        let Some((adresse, port)) = local.rsplit_once(':') else {
-            continue;
+    let mut deja_conseille = std::collections::HashSet::new();
+    for (proto, options) in [("tcp", "-Htlnp"), ("udp", "-Hulnp")] {
+        let Some(ss) = sortie("ss", &[options]) else {
+            return vec![alerte("Ports en écoute", Niveau::Info, "Commande ss indisponible.")];
         };
-        let Ok(port) = port.parse::<u16>() else { continue };
-        let expose = matches!(adresse, "0.0.0.0" | "*" | "[::]") || ip_lan.as_deref() == Some(adresse);
-        if !expose || vus.contains(&port) {
-            continue;
-        }
-        vus.push(port);
-        let programme = c
-            .get(5)
-            .and_then(|u| u.split('"').nth(1))
-            .unwrap_or("programme inconnu (root ?)");
-        let i = info_port(port);
-        // Avec un pare-feu actif, un service exposé n'est en général pas joignable : on baisse d'un cran.
-        let niveau = match (pare_feu_actif, i.niveau) {
-            (true, Niveau::Critique) => Niveau::Eleve,
-            (true, Niveau::Eleve) => Niveau::Moyen,
-            (true, _) => Niveau::Info,
-            (false, Niveau::Info) => Niveau::Moyen,
-            (false, n) => n,
-        };
-        let constat = alerte(
-            "Ports en écoute",
-            niveau,
-            format!(
-                "{port}/tcp ({}) ouvert sur le réseau par « {programme} ». {}",
-                i.service, i.conseil
-            ),
-        );
-        let deny = format!("sudo ufw deny {port}/tcp");
-        constats.push(match programme {
-            "ollama" => constat.corriger(
-                "Faire écouter Ollama uniquement en local (127.0.0.1)",
-                &[
-                    "sudo mkdir -p /etc/systemd/system/ollama.service.d",
-                    "printf '[Service]\\nEnvironment=OLLAMA_HOST=127.0.0.1\\n' | sudo tee /etc/systemd/system/ollama.service.d/netscan.conf >/dev/null",
-                    "sudo systemctl daemon-reload",
-                    "sudo systemctl restart ollama",
-                ],
-            ),
-            "steam" => constat.manuel(
-                "Si tu n'utilises pas Remote Play : Steam > Paramètres > Remote Play > décocher « Activer Remote Play »",
-                &[],
-            ),
-            _ if niveau >= Niveau::Moyen && pare_feu_actif => {
-                constat.corriger(format!("Bloquer le port {port} dans le pare-feu"), &[&deny])
+        for ligne in ss.lines() {
+            let c: Vec<&str> = ligne.split_whitespace().collect();
+            let Some(local) = c.get(3) else { continue };
+            let Some((adresse, port)) = local.rsplit_once(':') else {
+                continue;
+            };
+            let Ok(port) = port.parse::<u16>() else { continue };
+            let adresse = adresse.split('%').next().unwrap_or(adresse);
+            let expose = matches!(adresse, "0.0.0.0" | "*" | "[::]") || ip_lan.as_deref() == Some(adresse);
+            let i = info_port(port);
+            // UDP : client DHCP (68) et ports éphémères anonymes (sockets clientes), ce ne sont pas des services.
+            let bruit = proto == "udp" && (port == 68 || (port >= 32768 && i.service == "Inconnu"));
+            if !expose || bruit || vus.contains(&(proto, port)) {
+                continue;
             }
-            _ => constat,
-        });
+            vus.push((proto, port));
+            let programme = c
+                .get(5)
+                .and_then(|u| u.split('"').nth(1))
+                .unwrap_or("programme inconnu (root ?)");
+            // Avec un pare-feu actif, un service exposé n'est en général pas joignable : on baisse d'un cran.
+            let niveau = match (pare_feu_actif, i.niveau) {
+                (true, Niveau::Critique) => Niveau::Eleve,
+                (true, Niveau::Eleve) => Niveau::Moyen,
+                (true, _) => Niveau::Info,
+                (false, Niveau::Info) => Niveau::Moyen,
+                (false, n) => n,
+            };
+            let constat = alerte(
+                "Ports en écoute",
+                niveau,
+                format!(
+                    "{port}/{proto} ({}) ouvert sur le réseau par « {programme} ». {}",
+                    i.service, i.conseil
+                ),
+            );
+            let deny = format!("sudo ufw deny {port}/{proto}");
+            constats.push(match programme {
+                "ollama" => constat.corriger(
+                    "Faire écouter Ollama uniquement en local (127.0.0.1)",
+                    &[
+                        "sudo mkdir -p /etc/systemd/system/ollama.service.d",
+                        "printf '[Service]\\nEnvironment=OLLAMA_HOST=127.0.0.1\\n' | sudo tee /etc/systemd/system/ollama.service.d/netscan.conf >/dev/null",
+                        "sudo systemctl daemon-reload",
+                        "sudo systemctl restart ollama",
+                    ],
+                ),
+                // Un seul conseil par programme, même s'il ouvre un port TCP et un port UDP.
+                "steam" if !deja_conseille.insert("steam") => constat,
+                "steam" => constat.manuel(
+                    "Si tu n'utilises pas Remote Play : Steam > Paramètres > Remote Play > décocher « Activer Remote Play »",
+                    &[],
+                ),
+                _ if niveau >= Niveau::Moyen && pare_feu_actif => {
+                    constat.corriger(format!("Bloquer le port {port}/{proto} dans le pare-feu"), &[&deny])
+                }
+                _ => constat,
+            });
+        }
     }
     if constats.is_empty() {
         constats.push(ok(
             "Ports en écoute",
-            "Aucun service TCP exposé au réseau (tout écoute en local).",
+            "Aucun service TCP ou UDP exposé au réseau (tout écoute en local).",
+        ));
+    }
+    constats
+}
+
+/// Ports de conteneurs publiés sur toutes les interfaces, dans la colonne « Ports » de `docker ps`.
+/// Ex. « 0.0.0.0:8080->80/tcp, [::]:8080->80/tcp, 127.0.0.1:3389->3389/tcp » → [« 8080/tcp »].
+fn ports_docker_exposes(colonne: &str) -> Vec<String> {
+    let mut ports: Vec<String> = colonne
+        .split(", ")
+        .filter_map(|p| {
+            let (hote, _) = p.split_once("->")?;
+            let (adresse, port) = hote.rsplit_once(':')?;
+            let proto = p.rsplit_once('/').map_or("tcp", |(_, pr)| pr);
+            matches!(adresse, "0.0.0.0" | "::" | "[::]" | "").then(|| format!("{port}/{proto}"))
+        })
+        .collect();
+    ports.dedup();
+    ports
+}
+
+/// Docker écrit ses propres règles et passe devant ufw : un port publié sur 0.0.0.0 est joignable
+/// depuis le réseau même avec le pare-feu actif.
+fn docker() -> Vec<Constat> {
+    if !["/usr/bin/docker", "/bin/docker", "/usr/local/bin/docker"]
+        .iter()
+        .any(|d| Path::new(d).exists())
+    {
+        return vec![];
+    }
+    let Some(liste) = sortie_delai("docker", &["ps", "--format", "{{.Names}}\t{{.Ports}}"], 15) else {
+        return vec![impossible("Docker", "accès au démon Docker refusé ou démon arrêté")];
+    };
+    let mut constats = Vec::new();
+    let mut actifs = 0;
+    for ligne in liste.lines() {
+        let (nom, colonne) = ligne.split_once('\t').unwrap_or((ligne, ""));
+        actifs += 1;
+        let exposes = ports_docker_exposes(colonne);
+        if exposes.is_empty() {
+            continue;
+        }
+        constats.push(
+            alerte(
+                "Docker",
+                Niveau::Eleve,
+                format!(
+                    "Conteneur « {nom} » : port(s) {} publié(s) sur toutes les interfaces. Docker passe devant le pare-feu : joignable(s) depuis le réseau.",
+                    exposes.join(", ")
+                ),
+            )
+            .manuel(
+                "Publier seulement en local, puis recréer le conteneur : -p 127.0.0.1:PORT:PORT, ou dans docker-compose « \"127.0.0.1:PORT:PORT\" »",
+                &[],
+            ),
+        );
+    }
+    if constats.is_empty() {
+        constats.push(ok(
+            "Docker",
+            format!("Aucun port de conteneur exposé au réseau ({actifs} conteneur(s) actif(s))."),
         ));
     }
     constats
@@ -300,6 +414,135 @@ fn liste_mises_a_jour(gestion: Paquets) -> Option<Vec<String>> {
                 .then(|| lignes(&o).into_iter().filter(|l| l.starts_with("v ")).collect())
         }
     }
+}
+
+/// Lance une commande avec un délai maximal (sources réseau lentes) ; `None` si elle échoue ou dépasse le délai.
+/// Retourne la sortie standard même avec un code de retour non nul : certains outils signalent ainsi « rien à faire ».
+fn sortie_delai(cmd: &str, args: &[&str], secondes: u64) -> Option<String> {
+    use std::io::Read;
+    let mut enfant = Command::new(cmd)
+        .args(args)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .ok()?;
+    let mut flux = enfant.stdout.take()?;
+    let lecteur = std::thread::spawn(move || {
+        let mut texte = String::new();
+        let _ = flux.read_to_string(&mut texte);
+        texte
+    });
+    let limite = std::time::Instant::now() + std::time::Duration::from_secs(secondes);
+    loop {
+        match enfant.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) if std::time::Instant::now() < limite => std::thread::sleep(std::time::Duration::from_millis(100)),
+            _ => {
+                let _ = enfant.kill();
+                let _ = enfant.wait();
+                return None;
+            }
+        }
+    }
+    lecteur.join().ok()
+}
+
+/// Logiciels installés hors du gestionnaire de paquets principal : Flatpak, Snap, AUR et firmware.
+fn autres_mises_a_jour() -> Vec<Constat> {
+    let present = |c: &str| {
+        ["/usr/bin", "/bin", "/usr/local/bin"]
+            .iter()
+            .any(|d| Path::new(d).join(c).exists())
+    };
+    let lignes = |t: &str| t.lines().filter(|l| !l.trim().is_empty()).count();
+    let mut constats = Vec::new();
+    std::thread::scope(|portee| {
+        let flatpak = present("flatpak").then(|| {
+            portee.spawn(|| sortie_delai("flatpak", &["remote-ls", "--updates", "--columns=application"], 40))
+        });
+        let snap = present("snap").then(|| portee.spawn(|| sortie_delai("snap", &["refresh", "--list"], 30)));
+        let aur = ["yay", "paru"]
+            .into_iter()
+            .find(|c| present(c))
+            .map(|c| (c, portee.spawn(move || sortie_delai(c, &["-Qua"], 40))));
+        let firmware = present("fwupdmgr").then(|| {
+            portee.spawn(|| sortie_delai("fwupdmgr", &["get-updates", "--json", "--no-unreported-check"], 40))
+        });
+
+        if let Some(t) = flatpak {
+            constats.push(match t.join().ok().flatten() {
+                None => impossible("Flatpak", "hors ligne ?"),
+                Some(l) if lignes(&l) == 0 => ok("Flatpak", "Applications Flatpak à jour."),
+                Some(l) => alerte(
+                    "Flatpak",
+                    Niveau::Moyen,
+                    format!("{} application(s) Flatpak à mettre à jour.", lignes(&l)),
+                )
+                .corriger("Mettre à jour les applications Flatpak", &["flatpak update -y"]),
+            });
+        }
+        if let Some(t) = snap {
+            // « All snaps up to date » part sur la sortie d'erreur : sortie vide = à jour. Une ligne d'en-tête sinon.
+            constats.push(match t.join().ok().flatten() {
+                None => impossible("Snap", "snapd injoignable"),
+                Some(l) if lignes(&l) <= 1 => ok("Snap", "Paquets Snap à jour."),
+                Some(l) => alerte(
+                    "Snap",
+                    Niveau::Moyen,
+                    format!("{} paquet(s) Snap à mettre à jour.", lignes(&l) - 1),
+                )
+                .corriger("Mettre à jour les paquets Snap", &["sudo snap refresh"]),
+            });
+        }
+        if let Some((outil, t)) = aur {
+            constats.push(match t.join().ok().flatten() {
+                None => impossible("AUR", "hors ligne ?"),
+                Some(l) if lignes(&l) == 0 => ok("AUR", "Paquets AUR à jour."),
+                Some(l) => alerte(
+                    "AUR",
+                    Niveau::Moyen,
+                    format!("{} paquet(s) AUR à mettre à jour.", lignes(&l)),
+                )
+                .manuel(
+                    "Les paquets AUR se compilent : mets-les à jour toi-même et relis ce qui change",
+                    &[&format!("{outil} -Sua")],
+                ),
+            });
+        }
+        if let Some(t) = firmware {
+            let json = t
+                .join()
+                .ok()
+                .flatten()
+                .and_then(|j| serde_json::from_str::<serde_json::Value>(&j).ok());
+            constats.push(match json {
+                None => impossible("Firmware", "métadonnées fwupd absentes : fwupdmgr refresh"),
+                Some(v) => {
+                    let appareils: Vec<String> = v["Devices"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .filter(|d| d["Releases"].as_array().is_some_and(|r| !r.is_empty()))
+                        .filter_map(|d| d["Name"].as_str().map(str::to_string))
+                        .collect();
+                    if appareils.is_empty() {
+                        ok("Firmware", "Firmwares à jour (BIOS, SSD, périphériques).")
+                    } else {
+                        alerte(
+                            "Firmware",
+                            Niveau::Moyen,
+                            format!("Mise à jour de firmware disponible : {}.", appareils.join(", ")),
+                        )
+                        .manuel(
+                            "Installer les firmwares (un redémarrage peut être demandé)",
+                            &["fwupdmgr update"],
+                        )
+                    }
+                }
+            });
+        }
+    });
+    constats
 }
 
 /// Âge en jours de la liste des paquets d'apt, `None` si elle n'a jamais été téléchargée.
@@ -517,8 +760,10 @@ pub fn auditer() -> Audit {
 
     let mut constats = vec![feu];
     constats.extend(ports_ecoute(feu_actif, ip_lan));
+    constats.extend(docker());
     constats.push(ssh_serveur());
     constats.push(mises_a_jour());
+    constats.extend(autres_mises_a_jour());
     constats.push(redemarrage());
     constats.push(chiffrement_disque());
     constats.push(demarrage_securise());
@@ -531,5 +776,39 @@ pub fn auditer() -> Audit {
         systeme: NOM,
         score: score(&constats),
         constats,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ports_docker() {
+        let c = "0.0.0.0:8080->80/tcp, [::]:8080->80/tcp, 127.0.0.1:3389->3389/tcp, 0.0.0.0:53->53/udp, 9000/tcp";
+        assert_eq!(ports_docker_exposes(c), vec!["8080/tcp", "53/udp"]);
+        assert!(ports_docker_exposes("127.0.0.1:8006->8006/tcp").is_empty());
+        assert!(ports_docker_exposes("").is_empty());
+    }
+
+    #[test]
+    fn politique_du_pare_feu() {
+        assert_eq!(
+            politique_ufw("# commentaire\nDEFAULT_INPUT_POLICY=\"DROP\"\n").as_deref(),
+            Some("DROP")
+        );
+        assert_eq!(
+            politique_ufw("DEFAULT_INPUT_POLICY=\"accept\"").as_deref(),
+            Some("ACCEPT")
+        );
+        assert_eq!(politique_ufw("rien"), None);
+    }
+
+    #[test]
+    fn delai_respecte() {
+        let debut = std::time::Instant::now();
+        assert!(sortie_delai("sleep", &["5"], 1).is_none());
+        assert!(debut.elapsed().as_secs() < 3);
+        assert_eq!(sortie_delai("echo", &["bonjour"], 5).as_deref(), Some("bonjour\n"));
     }
 }

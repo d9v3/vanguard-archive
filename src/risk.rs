@@ -201,6 +201,37 @@ pub fn info_port(port: u16) -> InfoPort {
             "UPnP/IGD : peut ouvrir des ports sur le routeur. Désactiver si inutile.",
         ),
         62078 => ("iPhone sync", Info, "Appareil iOS (synchronisation lockdownd)."),
+        // Services surtout UDP, vus par l'audit de la machine.
+        69 => (
+            "TFTP",
+            Eleve,
+            "Transfert de fichiers sans aucune authentification. À désactiver.",
+        ),
+        123 => ("NTP", Info, "Synchronisation de l'heure."),
+        137 | 138 => ("NetBIOS", Moyen, "Ancien partage Windows/Samba : à couper si inutile."),
+        161 => (
+            "SNMP",
+            Eleve,
+            "Supervision réseau : avec la communauté « public », n'importe qui lit la configuration.",
+        ),
+        500 | 4500 => ("VPN IPsec", Info, "VPN IPsec : normal si tu l'utilises."),
+        1900 => (
+            "UPnP/SSDP",
+            Moyen,
+            "Découverte UPnP : à couper si aucun appareil n'en a besoin.",
+        ),
+        3702 => ("WS-Discovery", Info, "Découverte d'imprimantes et de partages."),
+        5353 => (
+            "mDNS",
+            Info,
+            "Découverte locale (Avahi, Bonjour) : normal sur un réseau domestique.",
+        ),
+        5355 => (
+            "LLMNR",
+            Moyen,
+            "Résolution de noms locale, usurpable par une machine du réseau : à désactiver si possible.",
+        ),
+        51820 => ("WireGuard", Info, "VPN WireGuard : normal si tu l'utilises."),
         5040 => (
             "Windows CDP",
             Info,

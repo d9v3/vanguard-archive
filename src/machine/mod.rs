@@ -137,6 +137,22 @@ fn cles_ssh() -> Vec<Constat> {
     }
     for f in std::fs::read_dir(&dossier).into_iter().flatten().flatten() {
         let nom = f.file_name().to_string_lossy().into_owned();
+        // Toute clé privée, quel que soit son nom (pas seulement id_*).
+        if let Ok(texte) = std::fs::read_to_string(f.path())
+            && cle_protegee(&texte) == Some(false)
+        {
+            constats.push(
+                alerte(
+                    "Clés SSH",
+                    Niveau::Moyen,
+                    format!("Clé privée ~/.ssh/{nom} sans phrase de passe : volée, elle ouvre tous les serveurs où elle est autorisée."),
+                )
+                .corriger(
+                    format!("Ajouter une phrase de passe à {nom} (la clé publique ne change pas, rien à refaire sur les serveurs)"),
+                    &[&format!("ssh-keygen -p -f ~/.ssh/{nom}")],
+                ),
+            );
+        }
         let privee = nom.starts_with("id_") && !nom.ends_with(".pub");
         if privee
             && f.metadata()
@@ -156,6 +172,53 @@ fn cles_ssh() -> Vec<Constat> {
         constats.push(ok("Clés SSH", "Permissions de ~/.ssh correctes."));
     }
     constats
+}
+
+/// Une clé privée SSH est-elle protégée par une phrase de passe ? `None` si ce n'est pas une clé privée.
+#[cfg(unix)]
+fn cle_protegee(texte: &str) -> Option<bool> {
+    let entete = texte.lines().next()?.trim();
+    if !entete.starts_with("-----BEGIN") || !entete.contains("PRIVATE KEY") {
+        return None;
+    }
+    match entete {
+        // PKCS#8 : le type dit tout.
+        "-----BEGIN ENCRYPTED PRIVATE KEY-----" => Some(true),
+        // Format OpenSSH : le nom du chiffrement est écrit dans la clé (« none » = pas de phrase de passe).
+        "-----BEGIN OPENSSH PRIVATE KEY-----" => {
+            let corps: String = texte.lines().filter(|l| !l.starts_with("-----")).collect();
+            let octets = base64_decoder(&corps)?;
+            let reste = octets.strip_prefix(b"openssh-key-v1\0")?;
+            let longueur = u32::from_be_bytes(reste.get(..4)?.try_into().ok()?) as usize;
+            Some(reste.get(4..4 + longueur)? != b"none")
+        }
+        // Ancien format PEM (RSA, EC, DSA) : un en-tête Proc-Type signale le chiffrement.
+        _ => Some(texte.contains("Proc-Type: 4,ENCRYPTED")),
+    }
+}
+
+#[cfg(unix)]
+fn base64_decoder(texte: &str) -> Option<Vec<u8>> {
+    let valeur = |c: u8| -> Option<u32> {
+        Some(match c {
+            b'A'..=b'Z' => c - b'A',
+            b'a'..=b'z' => c - b'a' + 26,
+            b'0'..=b'9' => c - b'0' + 52,
+            b'+' => 62,
+            b'/' => 63,
+            _ => return None,
+        } as u32)
+    };
+    let propre: Vec<u8> = texte
+        .bytes()
+        .filter(|c| !c.is_ascii_whitespace() && *c != b'=')
+        .collect();
+    let mut sortie = Vec::with_capacity(propre.len() * 3 / 4);
+    for bloc in propre.chunks(4) {
+        let n = bloc.iter().try_fold(0u32, |acc, &c| Some(acc << 6 | valeur(c)?))? << (6 * (4 - bloc.len()));
+        sortie.extend_from_slice(&n.to_be_bytes()[1..bloc.len()]);
+    }
+    Some(sortie)
 }
 
 /// Exécute les commandes d'un correctif. Sous Windows, une seule fenêtre UAC par correctif.
@@ -320,6 +383,36 @@ mod tests {
             score: score(&constats),
             constats,
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn phrase_de_passe_des_cles_ssh() {
+        // Clés générées pour le test, si ssh-keygen est disponible.
+        let dossier = std::env::temp_dir().join(format!("netscan-cles-{}", std::process::id()));
+        std::fs::create_dir_all(&dossier).unwrap();
+        let generer = |nom: &str, phrase: &str| {
+            std::process::Command::new("ssh-keygen")
+                .args(["-q", "-t", "ed25519", "-N", phrase, "-f"])
+                .arg(dossier.join(nom))
+                .status()
+                .is_ok_and(|s| s.success())
+        };
+        if generer("nue", "") && generer("protegee", "phrase de test") {
+            let lire = |n: &str| std::fs::read_to_string(dossier.join(n)).unwrap();
+            assert_eq!(cle_protegee(&lire("nue")), Some(false));
+            assert_eq!(cle_protegee(&lire("protegee")), Some(true));
+            assert_eq!(cle_protegee(&lire("nue.pub")), None);
+        }
+        std::fs::remove_dir_all(&dossier).unwrap();
+        assert_eq!(cle_protegee("-----BEGIN ENCRYPTED PRIVATE KEY-----\nxx"), Some(true));
+        assert_eq!(
+            cle_protegee("-----BEGIN RSA PRIVATE KEY-----\nProc-Type: 4,ENCRYPTED\n"),
+            Some(true)
+        );
+        assert_eq!(cle_protegee("-----BEGIN RSA PRIVATE KEY-----\nMIIE\n"), Some(false));
+        assert_eq!(base64_decoder("TWFu").unwrap(), b"Man");
+        assert_eq!(base64_decoder("TQ==").unwrap(), b"M");
     }
 
     #[test]
