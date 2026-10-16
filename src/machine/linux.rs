@@ -742,7 +742,7 @@ fn chiffrement_disque() -> Constat {
     // On vérifie le volume du système lui-même : un swap chiffré seul ne protège pas les données.
     match racine_chiffree() {
         Some(true) => ok("Chiffrement", "Système chiffré (LUKS)."),
-        None => impossible("Chiffrement", "volume racine introuvable (conteneur ?)"),
+        None => impossible("Chiffrement", "volume racine introuvable, conteneur ?"),
         Some(false) => alerte(
             "Chiffrement",
             Niveau::Moyen,
