@@ -1245,6 +1245,279 @@ fn fichiers_suspects() -> Vec<Constat> {
     constats
 }
 
+/// Failles du processeur (Spectre, Meltdown…) encore ouvertes, d'après ce que le noyau en dit.
+fn failles_vulnerables(etats: &[(String, String)]) -> Vec<String> {
+    etats
+        .iter()
+        .filter(|(_, e)| e.trim_start().starts_with("Vulnerable"))
+        .map(|(n, _)| n.clone())
+        .collect()
+}
+
+fn processeur() -> Constat {
+    let Ok(dossier) = std::fs::read_dir("/sys/devices/system/cpu/vulnerabilities") else {
+        return impossible("Processeur", "état des failles du processeur illisible");
+    };
+    let etats: Vec<(String, String)> = dossier
+        .flatten()
+        .filter_map(|f| {
+            Some((
+                f.file_name().to_string_lossy().into_owned(),
+                std::fs::read_to_string(f.path()).ok()?,
+            ))
+        })
+        .collect();
+    let failles = failles_vulnerables(&etats);
+    if failles.is_empty() {
+        return ok(
+            "Processeur",
+            format!(
+                "Protégé contre les {} failles connues du processeur (Spectre, Meltdown…).",
+                etats.len()
+            ),
+        );
+    }
+    // Le microcode du fabricant corrige la plupart de ces failles ; le paquet change selon la distribution.
+    let amd = std::fs::read_to_string("/proc/cpuinfo").is_ok_and(|c| c.contains("AuthenticAMD"));
+    let paquet = match (Paquets::detecter(), amd) {
+        (Some(Paquets::Pacman), true) => Some("amd-ucode"),
+        (Some(Paquets::Pacman), false) => Some("intel-ucode"),
+        (Some(Paquets::Apt), true) => Some("amd64-microcode"),
+        (Some(Paquets::Apt), false) => Some("intel-microcode"),
+        (Some(Paquets::Dnf), _) => Some("microcode_ctl linux-firmware"),
+        (Some(Paquets::Zypper), true) => Some("ucode-amd"),
+        (Some(Paquets::Zypper), false) => Some("ucode-intel"),
+        (None, _) => None,
+    };
+    let constat = alerte(
+        "Processeur",
+        Niveau::Moyen,
+        format!(
+            "Processeur vulnérable à : {}. Un programme malveillant pourrait lire la mémoire d'autres programmes.",
+            failles.join(", ")
+        ),
+    );
+    match (paquet, Paquets::detecter()) {
+        (Some(p), Some(g)) => constat.corriger(
+            "Installer le microcode du fabricant (effectif après mise à jour du système et redémarrage)",
+            &[&g.installer(p)],
+        ),
+        _ => constat.manuel(
+            "Installer le microcode du fabricant et mettre le noyau à jour, puis redémarrer",
+            &[],
+        ),
+    }
+}
+
+/// Fichiers qui contiennent des mots de passe ou des jetons d'accès, chemin relatif au dossier personnel.
+const SECRETS: &[&str] = &[
+    ".git-credentials",
+    ".netrc",
+    ".pgpass",
+    ".my.cnf",
+    ".npmrc",
+    ".pypirc",
+    ".aws/credentials",
+    ".docker/config.json",
+    ".kube/config",
+    ".config/gh/hosts.yml",
+    ".config/rclone/rclone.conf",
+    ".gnupg",
+];
+
+/// Un secret est mal protégé si le groupe ou les autres utilisateurs peuvent le lire (ou y entrer, pour un dossier).
+fn secret_expose(mode: u32) -> bool {
+    mode & 0o077 != 0
+}
+
+fn fichiers_secrets() -> Vec<Constat> {
+    use std::os::unix::fs::PermissionsExt;
+    let maison = Path::new(&home()).to_path_buf();
+    let mut exposes = Vec::new();
+    let mut commandes = Vec::new();
+    for nom in SECRETS {
+        let chemin = maison.join(nom);
+        let Ok(meta) = std::fs::symlink_metadata(&chemin) else {
+            continue;
+        };
+        if secret_expose(meta.permissions().mode()) {
+            exposes.push(format!("~/{nom}"));
+            commandes.push(format!("chmod {} ~/{nom}", if meta.is_dir() { "700" } else { "600" }));
+        }
+    }
+    let mut constats = Vec::new();
+    if !exposes.is_empty() {
+        let cmds: Vec<&str> = commandes.iter().map(String::as_str).collect();
+        constats.push(
+            alerte(
+                "Fichiers secrets",
+                Niveau::Eleve,
+                format!(
+                    "Lisible(s) par d'autres comptes : {} (mots de passe ou jetons d'accès).",
+                    exposes.join(", ")
+                ),
+            )
+            .corriger("Réserver ces fichiers à toi seul", &cmds),
+        );
+    }
+    // Le dossier personnel lui-même : ouvert en lecture, il laisse voir tous tes fichiers aux autres comptes.
+    if std::fs::metadata(&maison).is_ok_and(|m| m.permissions().mode() & 0o007 != 0) {
+        constats.push(
+            alerte(
+                "Fichiers secrets",
+                Niveau::Info,
+                "Ton dossier personnel est lisible par les autres comptes de la machine.",
+            )
+            .corriger("Fermer ton dossier personnel aux autres comptes", &["chmod 750 ~"]),
+        );
+    }
+    if constats.is_empty() {
+        constats.push(ok(
+            "Fichiers secrets",
+            "Fichiers de mots de passe et de jetons protégés.",
+        ));
+    }
+    constats
+}
+
+/// Groupes qui donnent en pratique les droits root sans mot de passe.
+fn groupes_privilegies() -> Option<Constat> {
+    let groupes = sortie("id", &["-nG"])?;
+    let risques: Vec<&str> = groupes
+        .split_whitespace()
+        .filter(|g| matches!(*g, "docker" | "lxd" | "incus-admin"))
+        .collect();
+    Some(if risques.is_empty() {
+        ok("Groupes", "Aucun groupe qui donne les droits root sans mot de passe.")
+    } else {
+        alerte(
+            "Groupes",
+            Niveau::Moyen,
+            format!(
+                "Tu es dans le groupe {} : tout programme lancé par toi peut devenir root sans mot de passe (via un conteneur).",
+                risques.join(", ")
+            ),
+        )
+        .manuel(
+            "Si tu n'utilises pas Docker au quotidien, sors du groupe (Docker demandera alors sudo) ; sinon, garde-le en connaissance de cause",
+            &[&format!("sudo gpasswd -d $USER {}", risques.first().copied().unwrap_or("docker"))],
+        )
+    })
+}
+
+/// Règles « sudo sans mot de passe » : (règles qui donnent tout, règles limitées à des commandes précises).
+fn regles_nopasswd(liste: &str) -> (Vec<String>, usize) {
+    let mut totales = Vec::new();
+    let mut limitees = 0;
+    for l in liste.lines().map(str::trim).filter(|l| l.contains("NOPASSWD:")) {
+        let commandes = l.split_once("NOPASSWD:").map_or("", |(_, c)| c).trim();
+        if commandes == "ALL" || commandes.starts_with("ALL,") {
+            totales.push(l.to_string());
+        } else {
+            limitees += 1;
+        }
+    }
+    (totales, limitees)
+}
+
+fn sudo_sans_mot_de_passe() -> Option<Constat> {
+    // -n : jamais de demande de mot de passe. Sans règle NOPASSWD (ni sudo récent), la liste est refusée : rien à dire.
+    let liste = sortie("sudo", &["-n", "-l"])?;
+    let (totales, limitees) = regles_nopasswd(&liste);
+    Some(if !totales.is_empty() {
+        alerte(
+            "Sudo",
+            Niveau::Eleve,
+            "sudo sans mot de passe pour TOUTES les commandes : n'importe quel programme lancé par toi peut devenir root.",
+        )
+        .manuel(
+            "Retirer « NOPASSWD: » de cette règle dans /etc/sudoers.d (toujours avec sudo visudo, jamais à la main)",
+            &["sudo visudo"],
+        )
+    } else if limitees > 0 {
+        ok(
+            "Sudo",
+            format!("{limitees} règle(s) sudo sans mot de passe, limitée(s) à des commandes précises."),
+        )
+    } else {
+        ok("Sudo", "sudo demande toujours le mot de passe.")
+    })
+}
+
+/// Paquets AUR introuvables dans la réponse de l'AUR (retirés ou construits à la main) et paquets orphelins.
+fn etat_aur(installes: &[&str], reponse: &serde_json::Value) -> (Vec<String>, Vec<String>) {
+    let resultats: Vec<&serde_json::Value> = reponse["results"].as_array().into_iter().flatten().collect();
+    let absents = installes
+        .iter()
+        .filter(|n| !resultats.iter().any(|r| r["Name"].as_str() == Some(**n)))
+        .map(|n| n.to_string())
+        .collect();
+    let orphelins = resultats
+        .iter()
+        .filter(|r| r["Maintainer"].is_null())
+        .filter_map(|r| r["Name"].as_str().map(str::to_string))
+        .collect();
+    (absents, orphelins)
+}
+
+/// Un paquet retiré de l'AUR ne reçoit plus jamais de mise à jour, sans que rien ne prévienne.
+fn paquets_aur() -> Option<Constat> {
+    if Paquets::detecter() != Some(Paquets::Pacman) {
+        return None;
+    }
+    let liste = sortie("pacman", &["-Qmq"])?;
+    let installes: Vec<&str> = liste.lines().filter(|l| !l.is_empty()).collect();
+    if installes.is_empty() {
+        return None;
+    }
+    // Même requête que yay ou paru : seuls les noms des paquets partent vers aur.archlinux.org.
+    let requete = format!(
+        "https://aur.archlinux.org/rpc/v5/info?{}",
+        installes
+            .iter()
+            .map(|n| format!("arg[]={n}"))
+            .collect::<Vec<_>>()
+            .join("&")
+    );
+    let Some(json) = sortie_delai("curl", &["-fsS", "--max-time", "20", &requete], 25, &[0])
+        .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
+    else {
+        return Some(impossible("Paquets AUR", "AUR injoignable, hors ligne ?"));
+    };
+    let (absents, orphelins) = etat_aur(&installes, &json);
+    Some(if !absents.is_empty() {
+        alerte(
+            "Paquets AUR",
+            Niveau::Moyen,
+            format!(
+                "Absent(s) de l'AUR : {} (retiré, ou construit à la main) : plus aucune mise à jour automatique.",
+                absents.join(", ")
+            ),
+        )
+        .manuel(
+            "Vérifier si un paquet de remplacement existe, sinon le désinstaller s'il n'est plus utile",
+            &["pacman -Qm"],
+        )
+    } else if !orphelins.is_empty() {
+        alerte(
+            "Paquets AUR",
+            Niveau::Info,
+            format!(
+                "Paquet(s) AUR sans mainteneur : {} (les mises à jour risquent de s'arrêter).",
+                orphelins.join(", ")
+            ),
+        )
+    } else {
+        ok(
+            "Paquets AUR",
+            format!(
+                "Les {} paquets AUR installés sont tous suivis dans l'AUR.",
+                installes.len()
+            ),
+        )
+    })
+}
+
 fn services_en_echec() -> Constat {
     if !systemd() {
         return impossible("Services", "systemd absent");
@@ -1279,6 +1552,11 @@ pub fn auditer() -> Audit {
     constats.extend(fichiers_suspects());
     constats.push(demarrage_securise());
     constats.extend(cles_ssh());
+    constats.extend(fichiers_secrets());
+    constats.push(processeur());
+    constats.extend(groupes_privilegies());
+    constats.extend(sudo_sans_mot_de_passe());
+    constats.extend(paquets_aur());
     constats.push(comptes());
     constats.extend(wifi(crate::scan::passerelle().map(|g| g.to_string())));
     constats.push(services_en_echec());
@@ -1303,6 +1581,46 @@ mod tests {
         assert_eq!(ports_docker_exposes("10.0.0.179:8080->80/tcp"), vec!["8080/tcp"]);
         assert_eq!(ports_docker_exposes(":::9000->9000/tcp"), vec!["9000/tcp"]);
         assert!(ports_docker_exposes("").is_empty());
+    }
+
+    #[test]
+    fn failles_du_processeur() {
+        let etats = vec![
+            ("meltdown".to_string(), "Not affected\n".to_string()),
+            ("spectre_v2".to_string(), "Mitigation: Enhanced IBRS\n".to_string()),
+            (
+                "mds".to_string(),
+                "Vulnerable: Clear CPU buffers attempted, no microcode\n".to_string(),
+            ),
+        ];
+        assert_eq!(failles_vulnerables(&etats), vec!["mds"]);
+    }
+
+    #[test]
+    fn droits_des_secrets() {
+        assert!(!secret_expose(0o100600));
+        assert!(!secret_expose(0o40700));
+        assert!(secret_expose(0o100644));
+        assert!(secret_expose(0o100640));
+    }
+
+    #[test]
+    fn regles_sudo() {
+        let omarchy = "User alice may run the following commands on portable:\n    (ALL) ALL\n    (root) NOPASSWD: /usr/bin/omarchy-dns Cloudflare, /usr/bin/omarchy-dns DHCP\n";
+        assert_eq!(regles_nopasswd(omarchy), (vec![], 1));
+        let tout = "    (ALL : ALL) NOPASSWD: ALL\n";
+        assert_eq!(regles_nopasswd(tout).0.len(), 1);
+    }
+
+    #[test]
+    fn suivi_aur() {
+        let reponse = serde_json::json!({"results": [
+            {"Name": "nextdns-bin", "Maintainer": "quelquun"},
+            {"Name": "vieux-outil", "Maintainer": null}
+        ]});
+        let (absents, orphelins) = etat_aur(&["nextdns-bin", "vieux-outil", "fait-maison"], &reponse);
+        assert_eq!(absents, vec!["fait-maison"]);
+        assert_eq!(orphelins, vec!["vieux-outil"]);
     }
 
     #[test]
