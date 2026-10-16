@@ -25,20 +25,6 @@ fn illisible(categorie: &'static str) -> Constat {
     alerte(categorie, Niveau::Info, "Impossible de vérifier (PowerShell indisponible ou bloqué).")
 }
 
-/// Encode en base64 (pour -EncodedCommand, qui évite tout problème de guillemets).
-fn base64(octets: &[u8]) -> String {
-    const T: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut s = String::new();
-    for bloc in octets.chunks(3) {
-        let n = bloc.iter().enumerate().fold(0u32, |acc, (i, &b)| acc | (b as u32) << (16 - 8 * i));
-        for i in 0..4 {
-            s.push(if i <= bloc.len() { T[(n >> (18 - 6 * i) & 63) as usize] as char } else { '=' });
-        }
-    }
-    s
-}
-
-/// Lance un script dans une fenêtre PowerShell administrateur (une demande UAC). Retourne `true` si tout a réussi.
 /// Délai maximal d'une correction : au-delà, on rend la main au lieu d'attendre indéfiniment.
 const DELAI_CORRECTION_MS: u32 = 10 * 60 * 1000;
 
@@ -67,12 +53,27 @@ fn script_admin(commandes: &[String]) -> String {
 }
 
 /// Lance des commandes dans une fenêtre PowerShell administrateur (une demande UAC). Retourne `true` si tout a réussi.
+/// Le script est écrit en clair dans un fichier .ps1 dont le chemin est affiché : on peut le lire avant
+/// d'accepter la demande d'administrateur, et il reste comme trace de ce qui a été modifié.
 pub fn powershell_admin(commandes: &[String]) -> bool {
-    let utf16: Vec<u8> = script_admin(commandes).encode_utf16().flat_map(u16::to_le_bytes).collect();
+    let dossier = crate::reseau::dossier_local().join("corrections");
+    let chemin = dossier.join(format!("correction-{}.ps1", chrono::Local::now().format("%Y%m%d-%H%M%S")));
+    let entete = format!(
+        "# Correction proposée par netscan {} le {}.\r\n# Ce script n'est lancé qu'après ton accord (demande d'administrateur).\r\n\r\n",
+        env!("CARGO_PKG_VERSION"),
+        chrono::Local::now().format("%d/%m/%Y à %H:%M")
+    );
+    // BOM : sans lui, Windows PowerShell 5.1 lit le fichier en ANSI et casse les accents.
+    let contenu = format!("\u{feff}{entete}{}\r\n", script_admin(commandes).replace('\n', "\r\n"));
+    if std::fs::create_dir_all(&dossier).and_then(|_| std::fs::write(&chemin, contenu)).is_err() {
+        println!("    Impossible d'écrire le script de correction dans {}", dossier.display());
+        return false;
+    }
+    println!("    Script de correction (lisible) : {}", chemin.display());
+    let fichier = chemin.display().to_string().replace('\'', "''");
     let lanceur = format!(
-        "$p = Start-Process powershell -Verb RunAs -PassThru -ArgumentList '-NoProfile','-EncodedCommand','{}'; \
-         if (-not $p.WaitForExit({DELAI_CORRECTION_MS})) {{ Write-Host 'Correction trop longue : abandon de l''attente.'; exit 2 }}; exit $p.ExitCode",
-        base64(&utf16)
+        "$p = Start-Process powershell -Verb RunAs -PassThru -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','\"{fichier}\"'; \
+         if (-not $p.WaitForExit({DELAI_CORRECTION_MS})) {{ Write-Host 'Correction trop longue : abandon de l''attente.'; exit 2 }}; exit $p.ExitCode"
     );
     Command::new("powershell")
         .args(["-NoProfile", "-Command", &lanceur])
@@ -182,9 +183,19 @@ fn bureau_distance() -> Constat {
     }
 }
 
-/// Cette session Windows est-elle ouverte à travers le Bureau à distance ?
+#[link(name = "user32")]
+unsafe extern "system" {
+    fn GetSystemMetrics(index: i32) -> i32;
+}
+
+/// Cette session Windows est-elle affichée à travers le Bureau à distance, en ce moment ?
+/// On interroge Windows directement : la variable SESSIONNAME est figée à l'ouverture de session et
+/// reste « Console » quand le Bureau à distance reprend une session ouverte sur l'écran (vu en test réel).
 fn session_a_distance() -> bool {
-    std::env::var("SESSIONNAME").is_ok_and(|s| s.to_ascii_uppercase().starts_with("RDP-"))
+    const SM_REMOTESESSION: i32 = 0x1000;
+    // SAFETY : GetSystemMetrics n'a ni pointeur ni effet de bord.
+    let distante = unsafe { GetSystemMetrics(SM_REMOTESESSION) } != 0;
+    distante || std::env::var("SESSIONNAME").is_ok_and(|s| s.to_ascii_uppercase().starts_with("RDP-"))
 }
 
 fn uac() -> Constat {
@@ -324,16 +335,8 @@ mod tests {
         // SAFETY (test) : variable propre au processus de test.
         unsafe { std::env::set_var("SESSIONNAME", "RDP-Tcp#3") };
         assert!(session_a_distance());
-        unsafe { std::env::set_var("SESSIONNAME", "Console") };
-        assert!(!session_a_distance());
     }
 
-    #[test]
-    fn base64_standard() {
-        assert_eq!(base64(b"Man"), "TWFu");
-        assert_eq!(base64(b"Ma"), "TWE=");
-        assert_eq!(base64(b"M"), "TQ==");
-    }
 
     #[test]
     fn la_fenetre_admin_annonce_chaque_etape() {

@@ -80,7 +80,7 @@ pub fn active() -> bool {
     #[cfg(target_os = "macos")]
     return plist().exists();
     #[cfg(windows)]
-    return reussit("schtasks", &["/Query", "/TN", NOM]);
+    return crate::machine::windows::ps(&format!("Get-ScheduledTask -TaskName '{TACHE_WINDOWS}' | Out-Null")).is_some();
 }
 
 #[cfg(target_os = "macos")]
@@ -142,14 +142,28 @@ fn desinstaller() -> bool {
     std::fs::remove_file(p).is_ok()
 }
 
+/// Nom lisible de la tâche dans le Planificateur de tâches Windows.
+#[cfg(windows)]
+const TACHE_WINDOWS: &str = "netscan - surveillance du reseau";
+
 #[cfg(windows)]
 fn installer(exe: &str) -> bool {
-    // conhost --headless : pas de fenêtre de console qui clignote toutes les heures.
-    let tache = format!("conhost.exe --headless \"{exe}\" surveiller");
-    reussit("schtasks", &["/Create", "/F", "/SC", "HOURLY", "/TN", NOM, "/TR", &tache])
+    use crate::machine::windows::ps;
+    // Ancienne tâche (v0.4 et avant) : retirée au profit de la tâche décrite ci-dessous.
+    let _ = reussit("schtasks", &["/Delete", "/F", "/TN", NOM]);
+    let exe = exe.replace('\'', "''");
+    // Tâche visible et décrite : on voit dans le Planificateur ce qu'elle fait et comment l'arrêter.
+    let script = format!(
+        "$a = New-ScheduledTaskAction -Execute '{exe}' -Argument 'surveiller'; \
+         $t = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -RepetitionInterval (New-TimeSpan -Hours 1); \
+         Register-ScheduledTask -TaskName '{TACHE_WINDOWS}' -Action $a -Trigger $t -Force \
+           -Description 'Scan du réseau local toutes les heures par netscan, notification si un appareil inconnu apparaît. Pour arrêter : netscan surveillance off' | Out-Null"
+    );
+    ps(&script).is_some()
 }
 
 #[cfg(windows)]
 fn desinstaller() -> bool {
-    reussit("schtasks", &["/Delete", "/F", "/TN", NOM])
+    let _ = reussit("schtasks", &["/Delete", "/F", "/TN", NOM]);
+    crate::machine::windows::ps(&format!("Unregister-ScheduledTask -TaskName '{TACHE_WINDOWS}' -Confirm:$false")).is_some()
 }
