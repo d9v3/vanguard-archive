@@ -838,6 +838,413 @@ fn wifi(passerelle: Option<String>) -> Option<Constat> {
     })
 }
 
+/// Verrouillage automatique de l'écran après inactivité, selon l'environnement de bureau.
+fn verrouillage_ecran() -> Option<Constat> {
+    // Pas de session graphique (serveur) : rien à verrouiller.
+    if std::env::var_os("WAYLAND_DISPLAY").is_none() && std::env::var_os("DISPLAY").is_none() {
+        return None;
+    }
+    let bureau = std::env::var("XDG_CURRENT_DESKTOP")
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let maison = Path::new(&home()).to_path_buf();
+    // Délai de verrouillage en secondes : Some(0) = jamais, None = inconnu.
+    let delai: Option<u64> = if Path::new("/usr/share/omarchy").exists() {
+        // Omarchy : idle.lock dans shell.json (celui de l'utilisateur, sinon la valeur par défaut).
+        [
+            maison.join(".config/omarchy/shell.json"),
+            "/usr/share/omarchy/config/omarchy/shell.json".into(),
+        ]
+        .iter()
+        .filter_map(|p| std::fs::read_to_string(p).ok())
+        .filter_map(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
+        .find_map(|v| v["idle"]["lock"].as_u64())
+    } else if bureau.contains("gnome") || bureau.contains("cinnamon") || bureau.contains("x-cinnamon") {
+        let racine = if bureau.contains("cinnamon") {
+            "org.cinnamon.desktop"
+        } else {
+            "org.gnome.desktop"
+        };
+        let actif =
+            sortie("gsettings", &["get", &format!("{racine}.screensaver"), "lock-enabled"]).map(|v| v.trim() == "true");
+        let inactivite = sortie("gsettings", &["get", &format!("{racine}.session"), "idle-delay"])
+            .and_then(|v| v.split_whitespace().last()?.parse::<u64>().ok());
+        match (actif, inactivite) {
+            (Some(false), _) => Some(0),
+            (Some(true), Some(i)) => Some(i),
+            _ => None,
+        }
+    } else if bureau.contains("kde") {
+        // KDE : verrouillage actif par défaut après 5 minutes.
+        let lire = |cle: &str| {
+            ["kreadconfig6", "kreadconfig5"]
+                .iter()
+                .find_map(|k| sortie(k, &["--file", "kscreenlockerrc", "--group", "Daemon", "--key", cle]))
+                .map(|v| v.trim().to_string())
+        };
+        if lire("Autolock").as_deref() == Some("false") {
+            Some(0)
+        } else {
+            Some(lire("Timeout").and_then(|m| m.parse::<u64>().ok()).unwrap_or(5) * 60)
+        }
+    } else if bureau.contains("hyprland") {
+        // Hyprland sans Omarchy : hypridle doit avoir un délai qui verrouille.
+        std::fs::read_to_string(maison.join(".config/hypr/hypridle.conf"))
+            .ok()
+            .map(|t| {
+                if t.contains("lock") && sortie("pgrep", &["-x", "hypridle"]).is_some() {
+                    1
+                } else {
+                    0
+                }
+            })
+    } else {
+        None
+    };
+    Some(match delai {
+        None => impossible("Verrouillage", "environnement de bureau non reconnu"),
+        Some(0) => alerte(
+            "Verrouillage",
+            Niveau::Moyen,
+            "L'écran ne se verrouille jamais tout seul : un ordinateur laissé ouvert est accessible à tous.",
+        )
+        .manuel(
+            "Activer le verrouillage automatique (5 minutes, c'est bien) dans les réglages d'écran du bureau",
+            &[],
+        ),
+        Some(s) if s > 15 * 60 => alerte(
+            "Verrouillage",
+            Niveau::Info,
+            format!(
+                "L'écran se verrouille après {} minutes : 5 à 10 minutes serait plus sûr.",
+                s / 60
+            ),
+        ),
+        Some(s) if s >= 60 => ok(
+            "Verrouillage",
+            format!("L'écran se verrouille après {} minute(s) d'inactivité.", s / 60),
+        ),
+        Some(_) => ok("Verrouillage", "L'écran se verrouille après inactivité."),
+    })
+}
+
+/// Réglages de durcissement du noyau (lisibles sans droits) : (réglage, valeur sûre minimale, rôle).
+const DURCISSEMENT: &[(&str, i64, &str)] = &[
+    ("kernel/randomize_va_space", 2, "adresses mémoire aléatoires (ASLR)"),
+    ("kernel/kptr_restrict", 1, "adresses du noyau cachées"),
+    ("kernel/dmesg_restrict", 1, "journal du noyau réservé à root"),
+    (
+        "kernel/yama/ptrace_scope",
+        1,
+        "un programme ne peut pas espionner les autres",
+    ),
+    ("fs/protected_symlinks", 1, "protection des liens symboliques dans /tmp"),
+    ("fs/protected_hardlinks", 1, "protection des liens physiques"),
+    ("net/ipv4/tcp_syncookies", 1, "résistance aux inondations SYN"),
+];
+
+/// Réglages trop faibles parmi les valeurs lues : (chemin, valeur lue, valeur sûre, rôle).
+fn reglages_faibles(lire: impl Fn(&str) -> Option<i64>) -> Vec<(&'static str, i64, i64, &'static str)> {
+    DURCISSEMENT
+        .iter()
+        .filter_map(|&(cle, min, role)| {
+            let v = lire(cle)?;
+            (v < min).then_some((cle, v, min, role))
+        })
+        .collect()
+}
+
+fn durcissement_noyau() -> Constat {
+    let faibles = reglages_faibles(|cle| {
+        std::fs::read_to_string(format!("/proc/sys/{cle}"))
+            .ok()?
+            .trim()
+            .parse()
+            .ok()
+    });
+    if faibles.is_empty() {
+        return ok(
+            "Noyau durci",
+            "Réglages de sécurité du noyau corrects (ASLR, ptrace, dmesg, liens…).",
+        );
+    }
+    let niveau = if faibles.iter().any(|f| f.0 == "kernel/randomize_va_space") {
+        Niveau::Moyen
+    } else {
+        Niveau::Info
+    };
+    let liste: Vec<String> = faibles
+        .iter()
+        .map(|(c, v, _, r)| format!("{} = {v} ({r})", c.replace('/', ".")))
+        .collect();
+    let lignes: String = faibles
+        .iter()
+        .map(|(c, _, m, _)| format!("{} = {m}\\n", c.replace('/', ".")))
+        .collect();
+    alerte(
+        "Noyau durci",
+        niveau,
+        format!("Réglages faibles : {}.", liste.join(", ")),
+    )
+    .corriger(
+        "Appliquer les valeurs sûres (fichier /etc/sysctl.d/99-netscan.conf, gardé au redémarrage)",
+        &[
+            &format!("printf '{lignes}' | sudo tee /etc/sysctl.d/99-netscan.conf >/dev/null"),
+            "sudo sysctl --system >/dev/null",
+        ],
+    )
+}
+
+/// Module de sécurité obligatoire (AppArmor, SELinux) : actif par défaut sur Ubuntu, Debian et Fedora.
+fn module_securite() -> Constat {
+    let lsm = std::fs::read_to_string("/sys/kernel/security/lsm").unwrap_or_default();
+    if lsm.contains("selinux") {
+        return match std::fs::read_to_string("/sys/fs/selinux/enforce").map(|v| v.trim().to_string()) {
+            Ok(v) if v == "1" => ok("AppArmor/SELinux", "SELinux actif (mode strict)."),
+            Ok(_) => alerte(
+                "AppArmor/SELinux",
+                Niveau::Moyen,
+                "SELinux est en mode permissif : il signale mais ne bloque rien.",
+            )
+            .corriger("Repasser SELinux en mode strict", &["sudo setenforce 1"]),
+            Err(_) => impossible("AppArmor/SELinux", "état de SELinux illisible"),
+        };
+    }
+    if lsm.contains("apparmor") {
+        return ok("AppArmor/SELinux", "AppArmor actif.");
+    }
+    // Arch ne l'active pas par défaut : simple information. Ailleurs, c'est qu'on l'a coupé.
+    let attendu = matches!(Paquets::detecter(), Some(Paquets::Apt | Paquets::Dnf | Paquets::Zypper));
+    if lsm.is_empty() {
+        impossible("AppArmor/SELinux", "liste des modules de sécurité illisible")
+    } else if attendu {
+        alerte(
+            "AppArmor/SELinux",
+            Niveau::Moyen,
+            "Ni AppArmor ni SELinux n'est actif, alors que ta distribution l'active normalement.",
+        )
+        .manuel(
+            "Vérifier pourquoi il a été désactivé (paramètres de démarrage du noyau, paquet retiré)",
+            &[],
+        )
+    } else {
+        alerte(
+            "AppArmor/SELinux",
+            Niveau::Info,
+            "Ni AppArmor ni SELinux (normal sur Arch, où il faut l'activer soi-même).",
+        )
+    }
+}
+
+/// Minuteries systemd (système et utilisateur) : (nom, dernier passage en µs depuis 1970, service lancé, utilisateur ?).
+fn minuteries() -> Vec<(String, u64, String, bool)> {
+    let mut toutes = Vec::new();
+    for utilisateur in [false, true] {
+        let mut args = vec!["list-timers", "--all", "--output=json"];
+        if utilisateur {
+            args.insert(0, "--user");
+        }
+        let Some(json) = sortie("systemctl", &args) else {
+            continue;
+        };
+        let Ok(serde_json::Value::Array(liste)) = serde_json::from_str::<serde_json::Value>(&json) else {
+            continue;
+        };
+        for t in liste {
+            let nom = t["unit"].as_str().unwrap_or_default().to_string();
+            let service = t["activates"].as_str().unwrap_or_default().to_string();
+            toutes.push((nom, t["last"].as_u64().unwrap_or(0), service, utilisateur));
+        }
+    }
+    toutes
+}
+
+/// Une minuterie de sauvegarde ? `Some(true)` = vraie sauvegarde, `Some(false)` = instantanés sur le même disque.
+fn type_sauvegarde(nom: &str) -> Option<bool> {
+    let n = nom.to_ascii_lowercase();
+    if [
+        "restic",
+        "borg",
+        "backup",
+        "sauvegarde",
+        "kopia",
+        "duplicity",
+        "rsnapshot",
+        "timeshift",
+        "deja-dup",
+        "btrbk",
+    ]
+    .iter()
+    .any(|m| n.contains(m))
+    {
+        Some(true)
+    } else if n.contains("snapper") && n.contains("timeline") {
+        Some(false)
+    } else {
+        None
+    }
+}
+
+/// La meilleure défense contre une panne de disque, un vol ou un rançongiciel.
+fn sauvegardes() -> Constat {
+    if !systemd() {
+        return impossible("Sauvegardes", "systemd absent");
+    }
+    let maintenant = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_micros() as u64);
+    let jours = |dernier: u64| (maintenant.saturating_sub(dernier)) / 86_400_000_000;
+    let toutes = minuteries();
+    let vraies: Vec<_> = toutes.iter().filter(|t| type_sauvegarde(&t.0) == Some(true)).collect();
+    let instantanes = toutes.iter().any(|t| type_sauvegarde(&t.0) == Some(false));
+    let Some(meilleure) = vraies.iter().filter(|t| t.1 > 0).max_by_key(|t| t.1) else {
+        return if let Some(t) = vraies.first() {
+            alerte(
+                "Sauvegardes",
+                Niveau::Moyen,
+                format!("La sauvegarde « {} » n'a encore jamais tourné.", t.0),
+            )
+        } else if instantanes {
+            alerte(
+                "Sauvegardes",
+                Niveau::Info,
+                "Seulement des instantanés snapper, sur le même disque : ils ne protègent ni d'une panne de disque ni d'un vol.",
+            )
+            .manuel("Ajouter une vraie sauvegarde vers un autre disque ou en ligne (restic, Borg, Timeshift…)", &[])
+        } else {
+            alerte("Sauvegardes", Niveau::Moyen, "Aucune sauvegarde automatique détectée.").manuel(
+                "Mettre en place une sauvegarde vers un autre disque ou en ligne (restic, Borg, Timeshift, Déjà Dup…)",
+                &[],
+            )
+        };
+    };
+    let (nom, dernier, service, utilisateur) = meilleure;
+    let mut args = vec!["show", service.as_str(), "-p", "Result", "--value"];
+    if *utilisateur {
+        args.insert(0, "--user");
+    }
+    let resultat = sortie("systemctl", &args).map(|r| r.trim().to_string());
+    let age = jours(*dernier);
+    let quand = if age == 0 {
+        "aujourd'hui".to_string()
+    } else {
+        format!("il y a {age} jour(s)")
+    };
+    if resultat.as_deref().is_some_and(|r| r != "success") {
+        alerte(
+            "Sauvegardes",
+            Niveau::Moyen,
+            format!(
+                "La dernière sauvegarde « {nom} » ({quand}) a échoué ({}).",
+                resultat.unwrap_or_default()
+            ),
+        )
+        .manuel(
+            "Voir l'erreur",
+            &[&format!(
+                "journalctl {}-u {service} -n 30",
+                if *utilisateur { "--user " } else { "" }
+            )],
+        )
+    } else if age > 7 {
+        alerte(
+            "Sauvegardes",
+            Niveau::Moyen,
+            format!("Dernière sauvegarde « {nom} » {quand} : trop ancienne."),
+        )
+    } else {
+        ok(
+            "Sauvegardes",
+            format!("Sauvegarde automatique « {nom} », dernière {quand}."),
+        )
+    }
+}
+
+/// Dossiers du PATH dangereux : modifiables par tout le monde (sans « sticky bit ») ou relatifs (« . »).
+fn path_dangereux(path: &str, droits: impl Fn(&str) -> Option<u32>) -> Vec<String> {
+    path.split(':')
+        .filter(|d| d.is_empty() || !d.starts_with('/') || droits(d).is_some_and(|m| m & 0o002 != 0 && m & 0o1000 == 0))
+        .map(|d| {
+            if d.is_empty() {
+                "(vide = dossier courant)".to_string()
+            } else {
+                d.to_string()
+            }
+        })
+        .collect()
+}
+
+/// Programmes setuid (lancés avec les droits de leur propriétaire, souvent root) là où il ne devrait pas y en avoir,
+/// ou qui n'appartiennent à aucun paquet ; et PATH piégeable.
+fn fichiers_suspects() -> Vec<Constat> {
+    use std::os::unix::fs::PermissionsExt;
+    let mut constats = Vec::new();
+    let setuid = |p: &Path| {
+        p.symlink_metadata()
+            .is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o4000 != 0)
+    };
+    fn parcourir(d: &Path, profondeur: u32, trouve: &mut Vec<std::path::PathBuf>, test: &dyn Fn(&Path) -> bool) {
+        for e in std::fs::read_dir(d).into_iter().flatten().flatten() {
+            let p = e.path();
+            if e.file_type().is_ok_and(|t| t.is_dir()) {
+                if profondeur > 0 {
+                    parcourir(&p, profondeur - 1, trouve, test);
+                }
+            } else if test(&p) {
+                trouve.push(p);
+            }
+        }
+    }
+    // Aucun setuid ne devrait vivre dans un dossier temporaire ou personnel.
+    let mut anormaux = Vec::new();
+    for (d, prof) in [("/tmp", 3), ("/var/tmp", 3), ("/dev/shm", 3), (&home() as &str, 2)] {
+        parcourir(Path::new(d), prof, &mut anormaux, &setuid);
+    }
+    // Dans les dossiers système : chaque setuid doit venir d'un paquet.
+    let mut systeme = Vec::new();
+    for d in ["/usr/bin", "/usr/sbin", "/usr/local/bin", "/usr/local/sbin", "/opt"] {
+        parcourir(Path::new(d), if d == "/opt" { 3 } else { 0 }, &mut systeme, &setuid);
+    }
+    if let Some(gestion) = Paquets::detecter() {
+        anormaux.extend(systeme.into_iter().filter(|p| !gestion.possede(p)));
+    }
+    if anormaux.is_empty() {
+        constats.push(ok("Fichiers suspects", "Aucun programme setuid inhabituel."));
+    } else {
+        let liste: Vec<String> = anormaux.iter().take(10).map(|p| p.display().to_string()).collect();
+        constats.push(
+            alerte(
+                "Fichiers suspects",
+                Niveau::Eleve,
+                format!("Programme(s) setuid hors paquet ou dans un dossier temporaire : {}.", liste.join(", ")),
+            )
+            .manuel(
+                "Un setuid inconnu peut donner les droits root : vérifier d'où il vient avant toute chose (ne pas le lancer)",
+                &[&format!("ls -l {}", liste.join(" "))],
+            ),
+        );
+    }
+    let path = std::env::var("PATH").unwrap_or_default();
+    let dangereux = path_dangereux(&path, |d| std::fs::metadata(d).ok().map(|m| m.permissions().mode()));
+    if !dangereux.is_empty() {
+        constats.push(
+            alerte(
+                "Fichiers suspects",
+                Niveau::Eleve,
+                format!(
+                    "PATH piégeable : {} (n'importe qui peut y déposer un faux « ls » ou « sudo »).",
+                    dangereux.join(", ")
+                ),
+            )
+            .manuel(
+                "Retirer ces dossiers du PATH (~/.bashrc, ~/.profile) ou corriger leurs droits",
+                &[],
+            ),
+        );
+    }
+    constats
+}
+
 fn services_en_echec() -> Constat {
     if !systemd() {
         return impossible("Services", "systemd absent");
@@ -865,6 +1272,11 @@ pub fn auditer() -> Audit {
     constats.extend(autres_mises_a_jour());
     constats.push(redemarrage());
     constats.push(chiffrement_disque());
+    constats.extend(verrouillage_ecran());
+    constats.push(durcissement_noyau());
+    constats.push(module_securite());
+    constats.push(sauvegardes());
+    constats.extend(fichiers_suspects());
     constats.push(demarrage_securise());
     constats.extend(cles_ssh());
     constats.push(comptes());
@@ -891,6 +1303,39 @@ mod tests {
         assert_eq!(ports_docker_exposes("10.0.0.179:8080->80/tcp"), vec!["8080/tcp"]);
         assert_eq!(ports_docker_exposes(":::9000->9000/tcp"), vec!["9000/tcp"]);
         assert!(ports_docker_exposes("").is_empty());
+    }
+
+    #[test]
+    fn reglages_du_noyau() {
+        let lu = |c: &str| Some(if c == "kernel/kptr_restrict" { 0 } else { 2 });
+        let faibles = reglages_faibles(lu);
+        assert_eq!(faibles.len(), 1);
+        assert_eq!(faibles[0].0, "kernel/kptr_restrict");
+        // Réglage absent (noyau sans Yama…) : ni faible ni fort, on ne conclut pas.
+        assert!(reglages_faibles(|_| None).is_empty());
+    }
+
+    #[test]
+    fn path_piegeable() {
+        let droits = |d: &str| match d {
+            "/tmp" => Some(0o41777),         // modifiable par tous mais « sticky » : sûr
+            "/srv/partage" => Some(0o40777), // modifiable par tous, sans sticky : piège
+            _ => Some(0o40755),
+        };
+        assert_eq!(
+            path_dangereux("/usr/bin:/tmp:/srv/partage:.::/bin", droits),
+            vec!["/srv/partage", ".", "(vide = dossier courant)"]
+        );
+        assert!(path_dangereux("/usr/local/bin:/usr/bin", droits).is_empty());
+    }
+
+    #[test]
+    fn minuteries_de_sauvegarde() {
+        assert_eq!(type_sauvegarde("backup-home.timer"), Some(true));
+        assert_eq!(type_sauvegarde("restic-nuit.timer"), Some(true));
+        assert_eq!(type_sauvegarde("snapper-timeline.timer"), Some(false));
+        assert_eq!(type_sauvegarde("snapper-cleanup.timer"), None);
+        assert_eq!(type_sauvegarde("fstrim.timer"), None);
     }
 
     #[test]
