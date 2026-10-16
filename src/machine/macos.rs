@@ -101,8 +101,15 @@ fn sip() -> Constat {
 fn mises_a_jour() -> Constat {
     let liste = tout("softwareupdate", &["-l"]);
     let n = liste.lines().filter(|l| l.trim_start().starts_with("* Label:")).count();
-    if n == 0 {
+    // « à jour » seulement si l'outil l'a dit : une sortie vide ou une erreur n'est pas une réponse.
+    if n == 0 && liste.contains("No new software available") {
         ok("Mises à jour", "macOS à jour.")
+    } else if n == 0 {
+        alerte(
+            "Mises à jour",
+            Niveau::Info,
+            "Impossible de vérifier (softwareupdate n'a pas répondu, hors ligne ?).",
+        )
     } else {
         alerte(
             "Mises à jour",

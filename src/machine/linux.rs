@@ -264,7 +264,7 @@ fn docker() -> Vec<Constat> {
     {
         return vec![];
     }
-    let Some(liste) = sortie_delai("docker", &["ps", "--format", "{{.Names}}\t{{.Ports}}"], 15) else {
+    let Some(liste) = sortie_delai("docker", &["ps", "--format", "{{.Names}}\t{{.Ports}}"], 15, &[0]) else {
         return vec![impossible("Docker", "accès au démon Docker refusé ou démon arrêté")];
     };
     let mut constats = Vec::new();
@@ -416,9 +416,11 @@ fn liste_mises_a_jour(gestion: Paquets) -> Option<Vec<String>> {
     }
 }
 
-/// Lance une commande avec un délai maximal (sources réseau lentes) ; `None` si elle échoue ou dépasse le délai.
-/// Retourne la sortie standard même avec un code de retour non nul : certains outils signalent ainsi « rien à faire ».
-fn sortie_delai(cmd: &str, args: &[&str], secondes: u64) -> Option<String> {
+/// Lance une commande avec un délai maximal (sources réseau lentes). `None` si elle dépasse le délai ou si
+/// son code de retour n'est pas dans `codes_ok` : une commande en échec ne doit jamais passer pour « rien à signaler »
+/// (vu en test : Docker inaccessible donnait « aucun port exposé »). Certains outils répondent « rien à faire »
+/// par un code non nul (yay -Qua : 1) : on les liste explicitement.
+fn sortie_delai(cmd: &str, args: &[&str], secondes: u64, codes_ok: &[i32]) -> Option<String> {
     use std::io::Read;
     let mut enfant = Command::new(cmd)
         .args(args)
@@ -433,9 +435,9 @@ fn sortie_delai(cmd: &str, args: &[&str], secondes: u64) -> Option<String> {
         texte
     });
     let limite = std::time::Instant::now() + std::time::Duration::from_secs(secondes);
-    loop {
+    let statut = loop {
         match enfant.try_wait() {
-            Ok(Some(_)) => break,
+            Ok(Some(statut)) => break statut,
             Ok(None) if std::time::Instant::now() < limite => std::thread::sleep(std::time::Duration::from_millis(100)),
             _ => {
                 let _ = enfant.kill();
@@ -443,8 +445,9 @@ fn sortie_delai(cmd: &str, args: &[&str], secondes: u64) -> Option<String> {
                 return None;
             }
         }
-    }
-    lecteur.join().ok()
+    };
+    let texte = lecteur.join().ok()?;
+    statut.code().is_some_and(|c| codes_ok.contains(&c)).then_some(texte)
 }
 
 /// Logiciels installés hors du gestionnaire de paquets principal : Flatpak, Snap, AUR et firmware.
@@ -458,15 +461,29 @@ fn autres_mises_a_jour() -> Vec<Constat> {
     let mut constats = Vec::new();
     std::thread::scope(|portee| {
         let flatpak = present("flatpak").then(|| {
-            portee.spawn(|| sortie_delai("flatpak", &["remote-ls", "--updates", "--columns=application"], 40))
+            portee.spawn(|| {
+                sortie_delai(
+                    "flatpak",
+                    &["remote-ls", "--updates", "--columns=application"],
+                    40,
+                    &[0],
+                )
+            })
         });
-        let snap = present("snap").then(|| portee.spawn(|| sortie_delai("snap", &["refresh", "--list"], 30)));
+        let snap = present("snap").then(|| portee.spawn(|| sortie_delai("snap", &["refresh", "--list"], 30, &[0])));
         let aur = ["yay", "paru"]
             .into_iter()
             .find(|c| present(c))
-            .map(|c| (c, portee.spawn(move || sortie_delai(c, &["-Qua"], 40))));
+            .map(|c| (c, portee.spawn(move || sortie_delai(c, &["-Qua"], 40, &[0, 1]))));
         let firmware = present("fwupdmgr").then(|| {
-            portee.spawn(|| sortie_delai("fwupdmgr", &["get-updates", "--json", "--no-unreported-check"], 40))
+            portee.spawn(|| {
+                sortie_delai(
+                    "fwupdmgr",
+                    &["get-updates", "--json", "--no-unreported-check"],
+                    40,
+                    &[0, 2],
+                )
+            })
         });
 
         if let Some(t) = flatpak {
@@ -677,7 +694,9 @@ fn demarrage_securise() -> Constat {
 }
 
 fn comptes() -> Constat {
-    let passwd = std::fs::read_to_string("/etc/passwd").unwrap_or_default();
+    let Ok(passwd) = std::fs::read_to_string("/etc/passwd") else {
+        return impossible("Comptes", "/etc/passwd illisible");
+    };
     let uid0: Vec<&str> = passwd
         .lines()
         .filter_map(|l| {
@@ -744,7 +763,10 @@ fn services_en_echec() -> Constat {
     if !systemd() {
         return impossible("Services", "systemd absent");
     }
-    let n = sortie("systemctl", &["--failed", "--no-legend", "--plain"]).map_or(0, |s| s.lines().count());
+    let Some(liste) = sortie("systemctl", &["--failed", "--no-legend", "--plain"]) else {
+        return impossible("Services", "systemctl n'a pas répondu");
+    };
+    let n = liste.lines().filter(|l| !l.trim().is_empty()).count();
     if n == 0 {
         ok("Services", "Aucun service système en échec.")
     } else {
@@ -807,8 +829,14 @@ mod tests {
     #[test]
     fn delai_respecte() {
         let debut = std::time::Instant::now();
-        assert!(sortie_delai("sleep", &["5"], 1).is_none());
+        assert!(sortie_delai("sleep", &["5"], 1, &[0]).is_none());
         assert!(debut.elapsed().as_secs() < 3);
-        assert_eq!(sortie_delai("echo", &["bonjour"], 5).as_deref(), Some("bonjour\n"));
+        assert_eq!(
+            sortie_delai("echo", &["bonjour"], 5, &[0]).as_deref(),
+            Some("bonjour\n")
+        );
+        // Une commande en échec n'est jamais une réponse, sauf code explicitement accepté.
+        assert!(sortie_delai("sh", &["-c", "echo rien; exit 1"], 5, &[0]).is_none());
+        assert_eq!(sortie_delai("sh", &["-c", "exit 1"], 5, &[0, 1]).as_deref(), Some(""));
     }
 }
