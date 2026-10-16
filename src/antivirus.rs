@@ -136,22 +136,14 @@ fn clamav(complet: bool) {
         println!("  Impossible de lancer clamscan.");
         return;
     };
-    // clamscan : 0 = sain, 1 = menaces trouvées, autre = erreur (base absente, disque illisible…).
-    if !matches!(sortie.status.code(), Some(0 | 1)) {
+    let Some(infectes) = lire_resultat(sortie.status.code(), &String::from_utf8_lossy(&sortie.stdout)) else {
         let erreur = String::from_utf8_lossy(&sortie.stderr);
         println!("  {}✖ L'analyse a échoué : le résultat n'est pas fiable.{RESET}", couleur(Niveau::Eleve));
         for l in erreur.lines().filter(|l| l.contains("ERROR")).take(5) {
             println!("    {GRIS}{l}{RESET}");
         }
         return;
-    }
-    let infectes: Vec<(String, String)> = String::from_utf8_lossy(&sortie.stdout)
-        .lines()
-        .filter_map(|l| {
-            let (fichier, menace) = l.strip_suffix(" FOUND")?.rsplit_once(": ")?;
-            Some((fichier.to_string(), menace.to_string()))
-        })
-        .collect();
+    };
 
     if infectes.is_empty() {
         println!("  {VERT}✔ Aucun malware trouvé.{RESET}");
@@ -167,17 +159,7 @@ fn clamav(complet: bool) {
     for (f, _) in &infectes {
         let chemin = std::path::Path::new(f);
         let resultat = match rep.as_str() {
-            "q" => {
-                let nom = chemin.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-                let dest = dossier.join(format!("{}.{nom}", std::process::id()));
-                std::fs::rename(chemin, &dest)
-                    .or_else(|_| std::fs::copy(chemin, &dest).and_then(|_| std::fs::remove_file(chemin)))
-                    .and_then(|_| {
-                        use std::os::unix::fs::PermissionsExt;
-                        // Plus aucune permission : le fichier ne peut plus être lancé ni ouvert par erreur.
-                        std::fs::set_permissions(&dest, std::fs::Permissions::from_mode(0o000))
-                    })
-            }
+            "q" => isoler(chemin, &dossier).map(|_| ()),
             "s" => std::fs::remove_file(chemin),
             _ => continue,
         };
@@ -189,6 +171,39 @@ fn clamav(complet: bool) {
     if rep == "q" {
         println!("  {GRIS}Quarantaine : {}{RESET}", dossier.display());
     }
+}
+
+/// Résultat de clamscan : `Some(fichiers infectés)` si l'analyse a abouti, `None` si elle a échoué.
+/// Codes de sortie : 0 = sain, 1 = menaces trouvées, autre = erreur (base absente, disque illisible…).
+#[cfg(unix)]
+fn lire_resultat(code: Option<i32>, sortie: &str) -> Option<Vec<(String, String)>> {
+    let infectes: Vec<(String, String)> = sortie
+        .lines()
+        .filter_map(|l| {
+            let (fichier, menace) = l.strip_suffix(" FOUND")?.rsplit_once(": ")?;
+            Some((fichier.to_string(), menace.to_string()))
+        })
+        .collect();
+    match code {
+        Some(0) => Some(vec![]),
+        // Code 1 sans aucune ligne lisible : on ne peut pas dire quoi isoler, donc pas fiable.
+        Some(1) if !infectes.is_empty() => Some(infectes),
+        _ => None,
+    }
+}
+
+/// Déplace un fichier en quarantaine et lui retire toute permission : il ne peut plus être lancé ni ouvert.
+#[cfg(unix)]
+fn isoler(chemin: &std::path::Path, dossier: &std::path::Path) -> std::io::Result<PathBuf> {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::create_dir_all(dossier)?;
+    let nom = chemin.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let horodatage = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos());
+    let dest = dossier.join(format!("{horodatage}.{nom}"));
+    // rename échoue d'un disque à l'autre (clé USB → disque) : on copie puis on supprime.
+    std::fs::rename(chemin, &dest).or_else(|_| std::fs::copy(chemin, &dest).and_then(|_| std::fs::remove_file(chemin)))?;
+    std::fs::set_permissions(&dest, std::fs::Permissions::from_mode(0o000))?;
+    Ok(dest)
 }
 
 /// --exclude-dir attend une expression régulière : on échappe les points.
@@ -265,4 +280,41 @@ fn demarrage() {
         println!("  • {e}");
     }
     println!("  {GRIS}Si tu ne reconnais pas une entrée, renseigne-toi avant de la supprimer.{RESET}");
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resultat_clamscan() {
+        let sortie = "/home/x/Téléchargements/eicar.com: Eicar-Test-Signature FOUND\n/tmp/a b.exe: Win.Trojan.Agent-123 FOUND\n";
+        let r = lire_resultat(Some(1), sortie).unwrap();
+        assert_eq!(r.len(), 2);
+        assert_eq!(r[1], ("/tmp/a b.exe".to_string(), "Win.Trojan.Agent-123".to_string()));
+        assert_eq!(lire_resultat(Some(0), "").unwrap().len(), 0);
+        // Une erreur n'est jamais un « aucun malware ».
+        assert!(lire_resultat(Some(2), "").is_none());
+        assert!(lire_resultat(None, "").is_none());
+        assert!(lire_resultat(Some(1), "").is_none());
+    }
+
+    #[test]
+    fn quarantaine_retire_le_fichier_et_ses_droits() {
+        use std::os::unix::fs::PermissionsExt;
+        let base = std::env::temp_dir().join(format!("netscan-test-{}", std::process::id()));
+        let suspect = base.join("suspect.sh");
+        std::fs::create_dir_all(&base).unwrap();
+        std::fs::write(&suspect, "#!/bin/sh\necho pirate\n").unwrap();
+        let dest = isoler(&suspect, &base.join("quarantaine")).unwrap();
+        assert!(!suspect.exists());
+        assert_eq!(std::fs::metadata(&dest).unwrap().permissions().mode() & 0o777, 0);
+        std::fs::set_permissions(&dest, std::fs::Permissions::from_mode(0o600)).unwrap();
+        std::fs::remove_dir_all(&base).unwrap();
+    }
+
+    #[test]
+    fn exclusions_en_expression_reguliere() {
+        assert_eq!(regex_echappe(".steam"), "/\\.steam(/|$)");
+    }
 }

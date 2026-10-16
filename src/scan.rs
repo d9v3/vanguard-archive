@@ -216,24 +216,43 @@ pub async fn decouvrir(ips: &[Ipv4Addr], delai: Duration, parallele: usize) -> V
 }
 
 /// Lit ce que le service annonce (SSH, FTP, SMTP…) ou l'en-tête Server en HTTP.
-async fn banniere(mut flux: TcpStream, port: u16) -> Option<String> {
-    if PORTS_HTTP.contains(&port) {
-        flux.write_all(b"HEAD / HTTP/1.0\r\n\r\n").await.ok()?;
-    }
+/// Ce qu'un service répond, ou rien s'il se tait pendant 1,2 s.
+async fn lire(flux: &mut TcpStream) -> Option<String> {
     let mut buf = [0u8; 512];
-    let n = timeout(Duration::from_millis(1200), flux.read(&mut buf))
-        .await
-        .ok()?
-        .ok()?;
-    let texte = String::from_utf8_lossy(&buf[..n]);
-    let ligne = if PORTS_HTTP.contains(&port) {
-        texte
-            .lines()
-            .find(|l| l.to_ascii_lowercase().starts_with("server:"))
-            .map(|l| l[7..].trim().to_string())
+    let n = timeout(Duration::from_millis(1200), flux.read(&mut buf)).await.ok()?.ok()?;
+    (n > 0).then(|| String::from_utf8_lossy(&buf[..n]).into_owned())
+}
+
+/// Résumé d'une réponse HTTP : l'en-tête Server, sinon la ligne d'état.
+fn resume_http(texte: &str) -> String {
+    let serveur = texte
+        .lines()
+        .find(|l| l.to_ascii_lowercase().starts_with("server:"))
+        .map(|l| l[7..].trim().to_string());
+    format!("HTTP · {}", serveur.unwrap_or_else(|| texte.lines().next().unwrap_or("").trim().to_string()))
+}
+
+/// Ce que le service annonce (SSH, FTP, SMTP…). Sur un port web, ou si le service se tait,
+/// on lui envoie une requête HTTP : un serveur web caché sur un port inhabituel est ainsi reconnu.
+async fn banniere(mut flux: TcpStream, port: u16) -> Option<String> {
+    let texte = if PORTS_HTTP.contains(&port) {
+        None
     } else {
-        texte.lines().next().map(|l| l.trim().to_string())
-    }?;
+        lire(&mut flux).await
+    };
+    let ligne = match texte {
+        Some(t) if t.starts_with("HTTP/") => resume_http(&t),
+        Some(t) => t.lines().next().unwrap_or("").trim().to_string(),
+        None => {
+            flux.write_all(b"HEAD / HTTP/1.0\r\n\r\n").await.ok()?;
+            let t = lire(&mut flux).await?;
+            if !t.starts_with("HTTP/") {
+                return None;
+            }
+            resume_http(&t)
+        }
+    };
+    // Les caractères de contrôle sont retirés : une bannière ne doit pas pouvoir piloter le terminal.
     let propre: String = ligne.chars().filter(|c| !c.is_control()).take(80).collect();
     (!propre.is_empty()).then_some(propre)
 }

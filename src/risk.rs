@@ -122,6 +122,25 @@ pub fn info_port(port: u16) -> InfoPort {
     InfoPort { service, niveau, conseil }
 }
 
+/// Reconnaît un service d'après ce qu'il annonce, quel que soit son port.
+/// Retourne le port « type » de ce service, dont on reprend le nom et le niveau de risque.
+pub fn identifier(banniere: &str) -> Option<u16> {
+    let l = banniere.to_ascii_lowercase();
+    let d = |p: &str| l.starts_with(p);
+    Some(match () {
+        _ if d("ssh-") => 22,
+        _ if d("http · ") => 8080,
+        _ if d("220") && l.contains("ftp") => 21,
+        _ if d("220") && (l.contains("smtp") || l.contains("mail")) => 25,
+        _ if d("+ok") => 110,
+        _ if d("* ok") => 143,
+        _ if d("-noauth") || d("+pong") || (d("-err") && l.contains("redis")) => 6379,
+        _ if d("rfb ") => 5900,
+        _ if l.contains("mysql_native_password") || l.contains("mariadb") => 3306,
+        _ => return None,
+    })
+}
+
 /// Note globale à partir d'un score sur 100.
 pub fn note(score: u32) -> &'static str {
     match score {
@@ -130,5 +149,30 @@ pub fn note(score: u32) -> &'static str {
         60..=74 => "C",
         40..=59 => "D",
         _ => "F",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn services_reconnus_a_leur_banniere() {
+        assert_eq!(identifier("SSH-2.0-OpenSSH_9.8"), Some(22));
+        assert_eq!(identifier("220 (vsFTPd 2.3.4)"), Some(21));
+        assert_eq!(identifier("220 mail.exemple.fr ESMTP Postfix"), Some(25));
+        assert_eq!(identifier("HTTP · nginx/1.27"), Some(8080));
+        assert_eq!(identifier("-NOAUTH Authentication required."), Some(6379));
+        assert_eq!(identifier("RFB 003.008"), Some(5900));
+        assert_eq!(identifier("bonjour"), None);
+    }
+
+    #[test]
+    fn notes() {
+        assert_eq!(note(100), "A");
+        assert_eq!(note(75), "B");
+        assert_eq!(note(60), "C");
+        assert_eq!(note(40), "D");
+        assert_eq!(note(0), "F");
     }
 }

@@ -92,11 +92,18 @@ impl Session {
         self.audit = Some(machine::executer(false));
         self.scanner_reseau(None, "courants").await;
         titre("Bilan global");
-        let m = self.audit.as_ref().map_or(100, |a| a.score);
-        let r = self.reseau.as_ref().map_or(100, |r| r.score_global);
-        afficher_note("Cette machine", m);
-        afficher_note("Réseau", r);
-        afficher_note("Global", m.min(r));
+        let m = self.audit.as_ref().filter(|a| a.fiable()).map(|a| a.score);
+        let r = self.reseau.as_ref().map(|r| r.score_global);
+        match m {
+            Some(m) => afficher_note("Cette machine", m),
+            None => println!("  Cette machine : pas de note (vérifications impossibles)"),
+        }
+        if let Some(r) = r {
+            afficher_note("Réseau", r);
+        }
+        if let Some(g) = [m, r].into_iter().flatten().min() {
+            afficher_note("Global", g);
+        }
         let a_corriger = self.audit.as_ref().is_some_and(|a| a.constats.iter().any(|c| c.correctif.as_ref().is_some_and(|k| k.automatique)));
         if a_corriger {
             println!("\n  🔧 Des corrections sont possibles : choix « 2 » du menu ou « netscan corriger ».");

@@ -53,6 +53,13 @@ table{width:100%;border-collapse:collapse;margin-top:8px;font-size:14px}td{paddi
 "#;
 
 pub fn generer(audit: Option<&Audit>, reseau: Option<&Rapport>) -> std::io::Result<PathBuf> {
+    let chemin = crate::reseau::dossier_donnees().join("rapport.html");
+    std::fs::create_dir_all(chemin.parent().unwrap_or(&chemin))?;
+    std::fs::write(&chemin, html(audit, reseau))?;
+    Ok(chemin)
+}
+
+fn html(audit: Option<&Audit>, reseau: Option<&Rapport>) -> String {
     let mut h = String::new();
     let date = chrono::Local::now().format("%d/%m/%Y à %H:%M");
     let _ = write!(
@@ -60,13 +67,15 @@ pub fn generer(audit: Option<&Audit>, reseau: Option<&Rapport>) -> std::io::Resu
         "<!doctype html><html lang=fr><head><meta charset=utf-8><meta name=viewport content=\"width=device-width,initial-scale=1\">\
          <title>Rapport netscan</title><style>{CSS}</style></head><body><main><h1>Bilan de sécurité</h1><p class=sous>Généré par netscan le {date}</p><div class=notes>"
     );
-    if let Some(a) = audit {
+    // Une note de machine n'est montrée que si l'audit a vraiment pu se faire.
+    let audit_note = audit.filter(|a| a.fiable());
+    if let Some(a) = audit_note {
         h += &carte_note("Cette machine", a.score);
     }
     if let Some(r) = reseau {
         h += &carte_note(&format!("Réseau {}", esc(&r.reseau)), r.score_global);
     }
-    if let (Some(a), Some(r)) = (audit, reseau) {
+    if let (Some(a), Some(r)) = (audit_note, reseau) {
         h += &carte_note("Global", a.score.min(r.score_global));
     }
     h += "</div>";
@@ -123,11 +132,7 @@ pub fn generer(audit: Option<&Audit>, reseau: Option<&Rapport>) -> std::io::Resu
         }
     }
     h += "</main></body></html>";
-
-    let chemin = crate::reseau::dossier_donnees().join("rapport.html");
-    std::fs::create_dir_all(chemin.parent().unwrap_or(&chemin))?;
-    std::fs::write(&chemin, h)?;
-    Ok(chemin)
+    h
 }
 
 pub fn ouvrir(audit: Option<&Audit>, reseau: Option<&Rapport>) {
@@ -137,5 +142,40 @@ pub fn ouvrir(audit: Option<&Audit>, reseau: Option<&Rapport>) {
             crate::machine::ouvrir(&p.display().to_string());
         }
         Err(e) => println!("  Impossible d'écrire le rapport : {e}"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::reseau::{Hote, PortOuvert};
+
+    #[test]
+    fn une_banniere_piegee_ne_devient_pas_du_code() {
+        // Un appareil du réseau choisit sa bannière : elle ne doit jamais s'exécuter dans le rapport.
+        let p = PortOuvert {
+            port: 8080,
+            service: "HTTP alt",
+            niveau: Niveau::Moyen,
+            banniere: Some("<script>alert(1)</script>".into()),
+            conseil: "",
+            nouveau: false,
+        };
+        let h = Hote {
+            ip: "10.0.0.9".parse().unwrap(),
+            nom: Some("<img src=x onerror=alert(2)>".into()),
+            mac: None,
+            fabricant: None,
+            role: None,
+            nouvelle: false,
+            ports: vec![p],
+            alertes: vec![],
+            score: 95,
+        };
+        let r = Rapport { reseau: "10.0.0.0/24".into(), duree_s: 1.0, score_global: 95, note: "A", hotes: vec![h] };
+        let page = html(None, Some(&r));
+        assert!(!page.contains("<script>alert"));
+        assert!(!page.contains("<img src=x"));
+        assert!(page.contains("&lt;script&gt;alert(1)&lt;/script&gt;"));
     }
 }

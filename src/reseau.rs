@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 use futures::future::join_all;
 use serde::{Deserialize, Serialize};
 
-use crate::risk::{Niveau, PORTS_COURANTS, info_port, note};
+use crate::risk::{Niveau, PORTS_COURANTS, identifier, info_port, note};
 use crate::scan;
 use crate::ui::*;
 
@@ -254,6 +254,9 @@ pub async fn executer(o: Options) -> Result<Rapport, String> {
 
     if bavard {
         eprintln!("{GRIS}{} appareil(s) trouvé(s). Scan des ports…{RESET}", vivantes.len());
+        if ips.iter().all(|ip| ip.is_loopback()) {
+            eprintln!("{GRIS}Note : 127.0.0.1 montre aussi les services réservés à cette machine. Pour ce qui est vraiment exposé au réseau : netscan machine.{RESET}");
+        }
     }
     let resultats = scan::scanner_ports(&vivantes, &ports, delai, parallele).await;
     let noms = join_all(vivantes.iter().map(|&ip| scan::nom_hote(ip))).await;
@@ -278,6 +281,8 @@ pub async fn executer(o: Options) -> Result<Rapport, String> {
         }
     }
     let premier_scan = histo.appareils.is_empty();
+    // Seul un scan du réseau entier sur les ports courants se compare aux précédents.
+    let scan_comparable = ips.len() > 1 && o.ports == "courants";
     // Un port hors de la liste courante n'a jamais pu être vu par les scans précédents : pas de faux « nouveau ».
     let comparable = |port: u16| PORTS_COURANTS.contains(&port);
     // Une machine est reconnue par sa MAC (l'IP DHCP peut changer), sinon par son IP.
@@ -292,8 +297,13 @@ pub async fn executer(o: Options) -> Result<Rapport, String> {
             let ports: Vec<PortOuvert> = ouverts
                 .into_iter()
                 .map(|(port, banniere)| {
-                    let i = info_port(port);
-                    let nouveau = !premier_scan && comparable(port) && !connu.is_some_and(|c| c.ports.contains(&port));
+                    // Port non répertorié : on se fie à ce que le service annonce (SSH sur 2222, web sur 9999…).
+                    let type_port = match info_port(port).service {
+                        "Inconnu" => banniere.as_deref().and_then(identifier).unwrap_or(port),
+                        _ => port,
+                    };
+                    let i = info_port(type_port);
+                    let nouveau = scan_comparable && !premier_scan && comparable(port) && !connu.is_some_and(|c| c.ports.contains(&port));
                     PortOuvert { port, service: i.service, niveau: i.niveau, banniere, conseil: i.conseil, nouveau }
                 })
                 .collect();
@@ -312,7 +322,7 @@ pub async fn executer(o: Options) -> Result<Rapport, String> {
                 fabricant: mac.as_deref().and_then(|m| scan::fabricant(m, &base)),
                 mac,
                 role,
-                nouvelle: !premier_scan && connu.is_none(),
+                nouvelle: scan_comparable && !premier_scan && connu.is_none(),
                 ports,
                 alertes,
                 score,

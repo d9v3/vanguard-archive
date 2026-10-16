@@ -47,6 +47,18 @@ pub struct Audit {
     pub constats: Vec<Constat>,
 }
 
+impl Audit {
+    /// Nombre de vérifications qui n'ont pas pu se faire.
+    pub fn impossibles(&self) -> usize {
+        self.constats.iter().filter(|c| c.message.starts_with("Impossible de vérifier")).count()
+    }
+
+    /// Une note n'a de sens que si la plupart des vérifications ont abouti.
+    pub fn fiable(&self) -> bool {
+        self.impossibles() * 2 < self.constats.len()
+    }
+}
+
 fn ok(categorie: &'static str, message: impl Into<String>) -> Constat {
     Constat { categorie, probleme: None, message: message.into(), correctif: None }
 }
@@ -171,7 +183,14 @@ pub fn afficher(a: &Audit) {
         }
     }
     println!();
-    afficher_note("Note de la machine", a.score);
+    if a.fiable() {
+        afficher_note("Note de la machine", a.score);
+    } else {
+        println!("  Note de la machine : {}aucune{RESET} (la plupart des vérifications ont échoué)", couleur(Niveau::Eleve));
+    }
+    if a.impossibles() > 0 {
+        println!("  {}⚠ {} vérification(s) impossible(s) : résultat incomplet.{RESET}", couleur(Niveau::Moyen), a.impossibles());
+    }
 }
 
 pub fn executer(json: bool) -> Audit {

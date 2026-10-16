@@ -7,11 +7,22 @@ use crate::risk::{Niveau, info_port};
 
 pub const NOM: &str = "Windows";
 
+const FIN: &str = "__NETSCAN_FIN__";
+
 /// Exécute un script PowerShell et retourne sa sortie (UTF-8), ou `None` en cas d'échec.
+/// Le script doit aller jusqu'au marqueur de fin : une sortie vide sans marqueur (PowerShell bloqué,
+/// absent, ou remplacé par un bouchon comme sous Wine) n'est jamais prise pour une réponse.
 pub fn ps(script: &str) -> Option<String> {
-    let complet = format!("[Console]::OutputEncoding=[Text.Encoding]::UTF8; $ErrorActionPreference='Stop'; {script}");
+    let complet = format!("[Console]::OutputEncoding=[Text.Encoding]::UTF8; $ErrorActionPreference='Stop'; {script}; '{FIN}'");
     let o = Command::new("powershell").args(["-NoProfile", "-NonInteractive", "-Command", &complet]).output().ok()?;
-    o.status.success().then(|| String::from_utf8_lossy(&o.stdout).trim().to_string())
+    let texte = String::from_utf8_lossy(&o.stdout);
+    let (avant, _) = texte.rsplit_once(FIN)?;
+    o.status.success().then(|| avant.trim().to_string())
+}
+
+/// Constat quand une vérification n'a pas pu se faire : on le dit, on ne conclut jamais « OK ».
+fn illisible(categorie: &'static str) -> Constat {
+    alerte(categorie, Niveau::Info, "Impossible de vérifier (PowerShell indisponible ou bloqué).")
 }
 
 /// Encode en base64 (pour -EncodedCommand, qui évite tout problème de guillemets).
@@ -44,17 +55,25 @@ pub fn powershell_admin(script: &str) -> bool {
 }
 
 fn pare_feu() -> Constat {
-    match ps("(Get-NetFirewallProfile | Where-Object { -not $_.Enabled }).Name -join ', '") {
-        Some(off) if off.is_empty() => ok("Pare-feu", "Pare-feu Windows actif sur tous les profils."),
-        Some(off) => alerte("Pare-feu", Niveau::Eleve, format!("Pare-feu désactivé pour : {off}.")).corriger(
+    let Some(etat) = ps("Get-NetFirewallProfile | ForEach-Object { \"$($_.Name)=$($_.Enabled)\" }") else {
+        return illisible("Pare-feu");
+    };
+    let profils: Vec<(&str, &str)> = etat.lines().filter_map(|l| l.trim().split_once('=')).collect();
+    let off: Vec<&str> = profils.iter().filter(|(_, v)| !v.eq_ignore_ascii_case("true")).map(|(n, _)| *n).collect();
+    match (profils.is_empty(), off.join(", ")) {
+        (true, _) => alerte("Pare-feu", Niveau::Info, "Aucun profil de pare-feu lu (pare-feu tiers ?)."),
+        (false, off) if off.is_empty() => ok("Pare-feu", "Pare-feu Windows actif sur tous les profils."),
+        (false, off) => alerte("Pare-feu", Niveau::Eleve, format!("Pare-feu désactivé pour : {off}.")).corriger(
             "Réactiver le pare-feu Windows sur tous les profils",
             &["Set-NetFirewallProfile -Profile Domain,Public,Private -Enabled True"],
         ),
-        None => alerte("Pare-feu", Niveau::Info, "État du pare-feu illisible (pare-feu tiers ?)."),
     }
 }
 
 fn antivirus() -> Vec<Constat> {
+    if ps("1").is_none() {
+        return vec![illisible("Antivirus")];
+    }
     let Some(json) = ps("Get-MpComputerStatus | Select-Object AntivirusEnabled,RealTimeProtectionEnabled,AntivirusSignatureAge,IsTamperProtected | ConvertTo-Json")
     else {
         let tiers = ps("(Get-CimInstance -Namespace root/SecurityCenter2 -ClassName AntivirusProduct).displayName -join ', '").unwrap_or_default();
@@ -66,6 +85,9 @@ fn antivirus() -> Vec<Constat> {
         }];
     };
     let v: serde_json::Value = serde_json::from_str(&json).unwrap_or_default();
+    if !v["RealTimeProtectionEnabled"].is_boolean() {
+        return vec![illisible("Antivirus")];
+    }
     let mut c = Vec::new();
     if v["RealTimeProtectionEnabled"] == false || v["AntivirusEnabled"] == false {
         c.push(alerte("Antivirus", Niveau::Critique, "Protection en temps réel de Defender désactivée.").corriger(
@@ -90,8 +112,11 @@ fn antivirus() -> Vec<Constat> {
 }
 
 fn smb1() -> Option<Constat> {
-    let actif = ps("(Get-SmbServerConfiguration).EnableSMB1Protocol")?;
-    Some(if actif.eq_ignore_ascii_case("true") {
+    let actif = ps("(Get-SmbServerConfiguration).EnableSMB1Protocol")?.to_ascii_lowercase();
+    if actif != "true" && actif != "false" {
+        return Some(illisible("SMBv1"));
+    }
+    Some(if actif == "true" {
         alerte("SMBv1", Niveau::Critique, "SMBv1 activé (exploité par WannaCry / NotPetya).").corriger(
             "Désactiver SMBv1",
             &["Set-SmbServerConfiguration -EnableSMB1Protocol $false -Force"],
@@ -103,7 +128,11 @@ fn smb1() -> Option<Constat> {
 
 fn bureau_distance() -> Constat {
     let cle = r"HKLM:\System\CurrentControlSet\Control\Terminal Server";
-    let actif = ps(&format!("(Get-ItemProperty '{cle}').fDenyTSConnections")).is_some_and(|v| v == "0");
+    let actif = match ps(&format!("(Get-ItemProperty '{cle}').fDenyTSConnections")).as_deref() {
+        Some("0") => true,
+        Some("1") => false,
+        _ => return illisible("Bureau à distance"),
+    };
     if !actif {
         return ok("Bureau à distance", "Bureau à distance (RDP) désactivé.");
     }
@@ -122,7 +151,11 @@ fn bureau_distance() -> Constat {
 
 fn uac() -> Constat {
     let cle = r"HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System";
-    if ps(&format!("(Get-ItemProperty '{cle}').EnableLUA")).is_some_and(|v| v == "0") {
+    let valeur = ps(&format!("(Get-ItemProperty '{cle}').EnableLUA"));
+    if !matches!(valeur.as_deref(), Some("0" | "1")) {
+        return illisible("UAC");
+    }
+    if valeur.as_deref() == Some("0") {
         alerte("UAC", Niveau::Eleve, "Contrôle de compte d'utilisateur (UAC) désactivé : tout programme a les droits admin.")
             .corriger("Réactiver l'UAC (effectif après redémarrage)", &[&format!("Set-ItemProperty '{cle}' -Name EnableLUA -Value 1")])
     } else {
@@ -137,7 +170,7 @@ fn mises_a_jour() -> Constat {
         Some(j) if j > 45 => alerte("Mises à jour", Niveau::Eleve, format!("Dernière mise à jour Windows il y a {j} jours."))
             .manuel("Ouvrir Windows Update et installer les mises à jour", &["Start-Process ms-settings:windowsupdate"]),
         Some(j) => ok("Mises à jour", format!("Dernière mise à jour Windows il y a {j} jours.")),
-        None => alerte("Mises à jour", Niveau::Info, "Impossible de lire l'historique Windows Update."),
+        None => alerte("Mises à jour", Niveau::Info, "Impossible de vérifier (historique Windows Update illisible)."),
     }
 }
 
@@ -148,12 +181,13 @@ fn chiffrement() -> Constat {
         Some("1" | "3" | "5") => ok("Chiffrement", "Disque C: chiffré (BitLocker)."),
         Some(_) => alerte("Chiffrement", Niveau::Moyen, "Disque C: non chiffré : en cas de vol, les données sont lisibles.")
             .manuel("Paramètres > Confidentialité et sécurité > Chiffrement de l'appareil (ou BitLocker sur Pro)", &["Start-Process ms-settings:deviceencryption"]),
-        None => alerte("Chiffrement", Niveau::Info, "État BitLocker illisible."),
+        None => alerte("Chiffrement", Niveau::Info, "Impossible de vérifier (état BitLocker illisible)."),
     }
 }
 
 fn invite() -> Constat {
     match ps("(Get-LocalUser | Where-Object { $_.Enabled -and $_.SID -like '*-501' }).Name") {
+        None => illisible("Comptes"),
         Some(nom) if !nom.is_empty() => alerte("Comptes", Niveau::Eleve, format!("Compte invité « {nom} » activé.")).corriger(
             "Désactiver le compte invité",
             &[&format!("Disable-LocalUser -Name '{nom}'")],
@@ -166,7 +200,7 @@ fn ports_ecoute(pare_feu_actif: bool, ip_lan: Option<String>) -> Vec<Constat> {
     let Some(liste) = ps(
         "Get-NetTCPConnection -State Listen | ForEach-Object { \"$($_.LocalAddress)|$($_.LocalPort)|$((Get-Process -Id $_.OwningProcess -ErrorAction SilentlyContinue).ProcessName)\" }",
     ) else {
-        return vec![];
+        return vec![illisible("Ports en écoute")];
     };
     // Ports RPC dynamiques ouverts par Windows lui-même : normaux et filtrés par le pare-feu.
     let systeme = ["svchost", "lsass", "wininit", "services", "spoolsv", "System", "Idle"];
