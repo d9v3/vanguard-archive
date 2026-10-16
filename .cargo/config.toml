@@ -1,0 +1,4 @@
+# Par défaut on compile la version Linux statique (musl) : elle tourne sur toutes les distributions,
+# c'est celle qui part sur la clé USB et celle installée localement.
+[build]
+target = "x86_64-unknown-linux-musl"

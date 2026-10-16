@@ -1,0 +1,20 @@
+NETSCAN — bilan de sécurité portable (machine + réseau + antivirus + corrections)
+================================================================================
+
+Cette clé contient le programme pour chaque système, sa base de données et son code source.
+
+  Linux/netscan        Linux (toutes distributions, aucune installation)
+                       Ouvrir un terminal dans ce dossier puis :  ./netscan
+  Windows/netscan.exe  Windows 10/11 : double-cliquer.
+                       SmartScreen peut avertir (programme non signé) : « Informations complémentaires » > « Exécuter quand même ».
+  macOS/netscan.command  Mac : double-cliquer. La première fois, il se compile pour ce Mac (environ 5 min).
+                       Si macOS bloque l'ouverture : clic droit > Ouvrir.
+
+  donnees/             Base des appareils déjà vus et dernier rapport HTML. Elle voyage avec la clé :
+                       tout netscan qui voit la clé branchée l'utilise.
+  source/              Code source complet (Rust) avec son historique git.
+
+Utilisation : lancer netscan, puis choisir « 1. Bilan complet ».
+Les corrections ne sont jamais appliquées sans ta confirmation.
+
+À n'utiliser que sur ton propre réseau, ou un réseau que tu as le droit d'auditer.
