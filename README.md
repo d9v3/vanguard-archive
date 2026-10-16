@@ -17,13 +17,16 @@ Outil de sécurité en Rust, en français, pour Linux, Windows et macOS :
   chaque correction est un script `.ps1` lisible, gardé comme trace.
 - **Scan du réseau local** : appareils, fabricant (base IEEE intégrée), surnoms, ports ouverts, services reconnus à
   leur bannière, risques ; un carnet par réseau (box + nom du Wi-Fi), nouveaux appareils et ports, appareils absents.
+- **Réparer** : réseau, fichiers système (SFC/DISM), disque (SMART, btrfs scrub, Repair-Volume, diskutil), disque plein,
+  mises à jour bloquées (pacman, apt, dnf, zypper, Windows Update), services en échec, heure ; chaque réparation est montrée
+  puis confirmée, et celles qui couperaient une connexion à distance en cours sont refusées.
 - **Antivirus** : ClamAV (Linux/macOS) ou Microsoft Defender (Windows), quarantaine, revue des programmes au démarrage.
 - **Surveillance** horaire avec notification si un appareil inconnu rejoint le réseau.
 - **Rapport HTML** autonome et daté.
 
 Sans argument, `netscan` ouvre un menu. Sous-commandes : `complet [--html]`, `machine [--json]`, `corriger`,
 `reseau [cible] [-p courants|tous|22,80,8000-8100] [--json]`, `antivirus [--complet]`, `surveillance on|off`,
-`nommer <ip|mac> <surnom>`.
+`nommer <ip|mac> <surnom>`, `reparer`.
 
 À n'utiliser que sur un réseau qui t'appartient ou que tu as le droit d'auditer.
 

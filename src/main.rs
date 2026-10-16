@@ -7,6 +7,7 @@ mod antivirus;
 mod corriger;
 mod machine;
 mod rapport;
+mod reparer;
 mod reseau;
 mod risk;
 mod scan;
@@ -71,6 +72,8 @@ enum Commande {
         #[arg(value_parser = ["on", "off"])]
         etat: String,
     },
+    /// Réparations courantes : réseau, fichiers système, disque, place, mises à jour, heure.
+    Reparer,
     /// Donne un surnom à un appareil de la base (« imprimante HP »), désigné par son IP ou sa MAC.
     Nommer {
         /// IP (sur le réseau actuel) ou adresse MAC de l'appareil.
@@ -165,6 +168,7 @@ async fn menu() {
             format!("{GRIS}désactivée{RESET}")
         };
         println!("  9. Surveillance du réseau toutes les heures : {etat}");
+        println!("  r. Réparer (réseau, disque, fichiers système, place…)");
         println!("  n. Nommer un appareil (« imprimante HP »)");
         println!("  q. Quitter\n");
         let choix = demander("Choix : ");
@@ -187,6 +191,7 @@ async fn menu() {
                 rapport::ouvrir(s.audit.as_ref(), s.reseau.as_ref());
             }
             "9" => surveillance::activer(!surveillance::active()),
+            "r" | "R" => reparer::menu(),
             "n" | "N" => {
                 let qui = demander("IP ou adresse MAC de l'appareil : ");
                 let surnom = demander("Surnom (vide pour le retirer) : ");
@@ -240,6 +245,7 @@ async fn main() {
         Some(Commande::Antivirus { complet }) => antivirus::analyser(complet),
         Some(Commande::Surveillance { etat }) => surveillance::activer(etat == "on"),
         Some(Commande::Surveiller) => surveillance::surveiller().await,
+        Some(Commande::Reparer) => reparer::menu(),
         Some(Commande::Nommer { appareil, surnom }) => nommer(&appareil, &surnom.join(" ")),
     }
 }

@@ -256,7 +256,7 @@ unsafe extern "system" {
 /// Cette session Windows est-elle affichée à travers le Bureau à distance, en ce moment ?
 /// On interroge Windows directement : la variable SESSIONNAME est figée à l'ouverture de session et
 /// reste « Console » quand le Bureau à distance reprend une session ouverte sur l'écran (vu en test réel).
-fn session_a_distance() -> bool {
+pub fn session_a_distance() -> bool {
     const SM_REMOTESESSION: i32 = 0x1000;
     // SAFETY : GetSystemMetrics n'a ni pointeur ni effet de bord.
     let distante = unsafe { GetSystemMetrics(SM_REMOTESESSION) } != 0;

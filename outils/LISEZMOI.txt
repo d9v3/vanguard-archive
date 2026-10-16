@@ -15,6 +15,7 @@ Cette clé contient le programme pour chaque système, sa base de données et so
   source/              Code source complet (Rust) avec son historique git.
 
 Utilisation : lancer netscan, puis choisir « 1. Bilan complet », puis « 2. Corriger ».
+Un souci (Internet, disque plein, Windows Update bloqué, fichiers système) : choix « r. Réparer ».
 Sous Windows, chaque correction est d'abord écrite dans un script lisible (le chemin est affiché).
 Si tu aides quelqu'un connecté à distance (Bureau à distance, SSH), netscan ne coupe jamais cet accès.
 Les corrections ne sont jamais appliquées sans ta confirmation.
