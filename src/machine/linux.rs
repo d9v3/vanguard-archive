@@ -139,8 +139,14 @@ fn pare_feu() -> Constat {
             Some(z) => ok("Pare-feu", format!("firewalld est actif (zone « {z} »).")),
             None => ok("Pare-feu", "firewalld est actif."),
         }
-    } else if service_actif("nftables") {
-        ok("Pare-feu", "nftables est actif (règles non lisibles sans droits root).")
+    } else if let Some(s) = ["nftables", "iptables", "ip6tables"]
+        .into_iter()
+        .find(|s| service_actif(s))
+    {
+        ok(
+            "Pare-feu",
+            format!("{s} est actif (règles non lisibles sans droits root)."),
+        )
     } else {
         alerte(
             "Pare-feu",
@@ -160,9 +166,29 @@ fn pare_feu() -> Constat {
     }
 }
 
-/// Services qui écoutent sur le réseau (pas seulement en local).
 /// Services qui écoutent sur le réseau (pas seulement en local), en TCP et en UDP.
-fn ports_ecoute(pare_feu_actif: bool, ip_lan: Option<String>) -> Vec<Constat> {
+/// Adresses joignables depuis un autre appareil : celles des vraies interfaces (Wi-Fi, Ethernet, VPN),
+/// au format de `ss` (IPv6 entre crochets). Les ponts virtuels (Docker, libvirt…) ne sont joignables
+/// que depuis cette machine.
+fn adresses_exposees() -> std::collections::HashSet<String> {
+    let virtuelle = |nom: &str| {
+        ["lo", "docker", "br-", "virbr", "veth", "podman", "lxc", "vnet"]
+            .iter()
+            .any(|p| nom.starts_with(p))
+    };
+    if_addrs::get_if_addrs()
+        .into_iter()
+        .flatten()
+        .filter(|i| !virtuelle(&i.name) && !i.addr.ip().is_loopback())
+        .map(|i| match i.addr.ip() {
+            std::net::IpAddr::V4(ip) => ip.to_string(),
+            std::net::IpAddr::V6(ip) => format!("[{ip}]"),
+        })
+        .collect()
+}
+
+fn ports_ecoute(pare_feu_actif: bool) -> Vec<Constat> {
+    let adresses = adresses_exposees();
     let mut constats = Vec::new();
     let mut vus = Vec::new();
     let mut deja_conseille = std::collections::HashSet::new();
@@ -178,7 +204,7 @@ fn ports_ecoute(pare_feu_actif: bool, ip_lan: Option<String>) -> Vec<Constat> {
             };
             let Ok(port) = port.parse::<u16>() else { continue };
             let adresse = adresse.split('%').next().unwrap_or(adresse);
-            let expose = matches!(adresse, "0.0.0.0" | "*" | "[::]") || ip_lan.as_deref() == Some(adresse);
+            let expose = matches!(adresse, "0.0.0.0" | "*" | "[::]") || adresses.contains(adresse);
             let i = info_port(port);
             // UDP : client DHCP (68) et ports éphémères anonymes (sockets clientes), ce ne sont pas des services.
             let bruit = proto == "udp" && (port == 68 || (port >= 32768 && i.service == "Inconnu"));
@@ -239,7 +265,8 @@ fn ports_ecoute(pare_feu_actif: bool, ip_lan: Option<String>) -> Vec<Constat> {
     constats
 }
 
-/// Ports de conteneurs publiés sur toutes les interfaces, dans la colonne « Ports » de `docker ps`.
+/// Ports de conteneurs joignables depuis le réseau, dans la colonne « Ports » de `docker ps` : tout sauf la
+/// boucle locale (127.x, ::1). Une IP du réseau local (`-p 10.0.0.5:8080:80`) est aussi exposée.
 /// Ex. « 0.0.0.0:8080->80/tcp, [::]:8080->80/tcp, 127.0.0.1:3389->3389/tcp » → [« 8080/tcp »].
 fn ports_docker_exposes(colonne: &str) -> Vec<String> {
     let mut ports: Vec<String> = colonne
@@ -248,7 +275,9 @@ fn ports_docker_exposes(colonne: &str) -> Vec<String> {
             let (hote, _) = p.split_once("->")?;
             let (adresse, port) = hote.rsplit_once(':')?;
             let proto = p.rsplit_once('/').map_or("tcp", |(_, pr)| pr);
-            matches!(adresse, "0.0.0.0" | "::" | "[::]" | "").then(|| format!("{port}/{proto}"))
+            let ip = adresse.trim_matches(|c| c == '[' || c == ']');
+            let locale = ip.parse::<std::net::IpAddr>().is_ok_and(|a| a.is_loopback());
+            (!locale).then(|| format!("{port}/{proto}"))
         })
         .collect();
     ports.dedup();
@@ -281,7 +310,7 @@ fn docker() -> Vec<Constat> {
                 "Docker",
                 Niveau::Eleve,
                 format!(
-                    "Conteneur « {nom} » : port(s) {} publié(s) sur toutes les interfaces. Docker passe devant le pare-feu : joignable(s) depuis le réseau.",
+                    "Conteneur « {nom} » : port(s) {} publié(s) hors de la boucle locale. Docker passe devant le pare-feu : joignable(s) depuis le réseau.",
                     exposes.join(", ")
                 ),
             )
@@ -304,8 +333,12 @@ fn ssh_serveur() -> Constat {
     if !systemd() {
         return impossible("SSH", "systemd absent");
     }
-    // « sshd » sur Arch et Fedora, « ssh » sur Debian, Ubuntu et Mint.
-    if !service_actif("sshd") && !service_actif("ssh") {
+    // « sshd » sur Arch et Fedora, « ssh » sur Debian, Ubuntu et Mint. Ubuntu (22.10+) le lance à la demande
+    // par ssh.socket : le service paraît arrêté alors que le port 22 accepte les connexions.
+    if !["sshd", "ssh", "sshd.socket", "ssh.socket"]
+        .iter()
+        .any(|s| service_actif(s))
+    {
         return ok("SSH", "Serveur SSH désactivé.");
     }
     let mut conf = String::new();
@@ -381,21 +414,27 @@ fn liste_mises_a_jour(gestion: Paquets) -> Option<Vec<String>> {
                 _ => None,
             }
         }
+        // Sorties en anglais (LC_ALL=C) : sinon les mots cherchés changent selon la langue du système.
         // Lit le cache d'apt sans le rafraîchir (il faudrait sudo) : il date du dernier « apt update ».
         // Sans cache, « rien à mettre à jour » ne voudrait rien dire.
         Paquets::Apt => {
             age_cache_apt()?;
-            let o = Command::new("apt").args(["list", "--upgradable"]).output().ok()?;
-            o.status.success().then(|| {
-                lignes(&o)
-                    .into_iter()
-                    .filter(|l| l.contains("[upgradable") || l.contains("[pouvant"))
-                    .collect()
-            })
+            let o = Command::new("apt")
+                .args(["list", "--upgradable"])
+                .env("LC_ALL", "C")
+                .output()
+                .ok()?;
+            o.status
+                .success()
+                .then(|| lignes(&o).into_iter().filter(|l| l.contains("[upgradable")).collect())
         }
         // dnf check-update : 100 = mises à jour disponibles, 0 = rien, autre = erreur.
         Paquets::Dnf => {
-            let o = Command::new("dnf").args(["-q", "check-update"]).output().ok()?;
+            let o = Command::new("dnf")
+                .args(["-q", "check-update"])
+                .env("LC_ALL", "C")
+                .output()
+                .ok()?;
             match o.status.code() {
                 Some(100) => Some(
                     lignes(&o)
@@ -408,7 +447,11 @@ fn liste_mises_a_jour(gestion: Paquets) -> Option<Vec<String>> {
             }
         }
         Paquets::Zypper => {
-            let o = Command::new("zypper").args(["-q", "list-updates"]).output().ok()?;
+            let o = Command::new("zypper")
+                .args(["-q", "list-updates"])
+                .env("LC_ALL", "C")
+                .output()
+                .ok()?;
             o.status
                 .success()
                 .then(|| lignes(&o).into_iter().filter(|l| l.starts_with("v ")).collect())
@@ -637,42 +680,78 @@ fn mises_a_jour() -> Constat {
 }
 
 fn redemarrage() -> Constat {
-    let noyau = sortie("uname", &["-r"]).unwrap_or_default();
-    // Arch retire les modules de l'ancien noyau ; Debian, Ubuntu et Mint créent ce fichier témoin.
-    let dossiers: Vec<&Path> = ["/usr/lib/modules", "/lib/modules"]
+    let noyau = sortie("uname", &["-r"]).unwrap_or_default().trim().to_string();
+    let installes: Vec<std::path::PathBuf> = ["/usr/lib/modules", "/lib/modules"]
         .iter()
-        .map(Path::new)
-        .filter(|d| d.is_dir())
+        .filter_map(|d| std::fs::read_dir(d).ok())
+        .flatten()
+        .flatten()
+        .map(|e| e.path())
+        // Un vrai noyau a son image (vmlinuz) ou ses modules ; on écarte les restes vides.
+        .filter(|p| p.join("modules.dep").exists() || p.join("vmlinuz").exists())
         .collect();
-    // Aucun dossier de modules (conteneur, noyau fourni par l'hôte) : rien à comparer.
-    if dossiers
-        .iter()
-        .all(|d| std::fs::read_dir(d).map_or(true, |mut e| e.next().is_none()))
-    {
+    // Aucun noyau ici (conteneur, noyau fourni par l'hôte) : rien à comparer.
+    if installes.is_empty() {
         return impossible("Noyau", "aucun noyau installé ici, conteneur ?");
     }
-    let modules = dossiers.iter().any(|d| d.join(noyau.trim()).exists());
-    if modules && !Path::new("/var/run/reboot-required").exists() {
+    let en_cours = installes
+        .iter()
+        .any(|p| p.file_name().is_some_and(|n| n.to_string_lossy() == noyau));
+    // Fedora, openSUSE et Debian gardent plusieurs noyaux : le plus récemment installé doit être celui qui tourne.
+    let plus_recent = installes
+        .iter()
+        .max_by_key(|p| p.metadata().and_then(|m| m.modified()).ok())
+        .and_then(|p| p.file_name())
+        .map(|n| n.to_string_lossy().into_owned());
+    let a_jour =
+        en_cours && plus_recent.as_deref() == Some(noyau.as_str()) && !Path::new("/var/run/reboot-required").exists();
+    if a_jour {
         ok(
             "Noyau",
-            format!("Le noyau en cours ({}) est celui installé.", noyau.trim()),
+            format!("Le noyau en cours ({noyau}) est le plus récent installé."),
         )
     } else {
+        let nouveau = plus_recent
+            .filter(|n| *n != noyau)
+            .map(|n| format!(" ({n})"))
+            .unwrap_or_default();
         alerte(
             "Noyau",
             Niveau::Moyen,
-            "Noyau mis à jour mais pas encore chargé : les correctifs ne sont pas actifs.",
+            format!("Noyau plus récent installé{nouveau} mais pas encore chargé : les correctifs ne sont pas actifs."),
         )
         .manuel("Redémarrer quand c'est pratique", &["systemctl reboot"])
     }
 }
 
+/// Le système de fichiers racine repose-t-il sur un volume chiffré (LUKS, éventuellement sous LVM) ?
+/// `None` si on ne peut pas remonter la chaîne des périphériques.
+fn racine_chiffree() -> Option<bool> {
+    let source = sortie("findmnt", &["-no", "SOURCE", "/"])?;
+    // Btrfs affiche le sous-volume : « /dev/mapper/root[/@] ».
+    let peripherique = source.trim().split('[').next()?.to_string();
+    if !peripherique.starts_with("/dev/") {
+        return None;
+    }
+    // -s : la chaîne inverse, du volume monté jusqu'au disque (lvm → crypt → part → disk).
+    let chaine = sortie("lsblk", &["-nso", "TYPE", &peripherique])?;
+    Some(chaine.lines().any(|l| l.trim() == "crypt"))
+}
+
 fn chiffrement_disque() -> Constat {
-    if sortie("lsblk", &["-no", "TYPE"]).is_some_and(|s| s.lines().any(|l| l.trim() == "crypt")) {
-        ok("Chiffrement", "Disque chiffré (LUKS).")
-    } else {
-        alerte("Chiffrement", Niveau::Moyen, "Aucun volume chiffré : en cas de vol, les données sont lisibles.")
-            .manuel("Le chiffrement complet se choisit à l'installation (Omarchy le propose) : à prévoir à la prochaine réinstallation", &[])
+    // On vérifie le volume du système lui-même : un swap chiffré seul ne protège pas les données.
+    match racine_chiffree() {
+        Some(true) => ok("Chiffrement", "Système chiffré (LUKS)."),
+        None => impossible("Chiffrement", "volume racine introuvable (conteneur ?)"),
+        Some(false) => alerte(
+            "Chiffrement",
+            Niveau::Moyen,
+            "Le système n'est pas chiffré : en cas de vol, les données sont lisibles.",
+        )
+        .manuel(
+            "Le chiffrement complet se choisit à l'installation (Omarchy le propose) : à prévoir à la prochaine réinstallation",
+            &[],
+        ),
     }
 }
 
@@ -778,10 +857,8 @@ fn services_en_echec() -> Constat {
 pub fn auditer() -> Audit {
     let feu = pare_feu();
     let feu_actif = feu.probleme.is_none();
-    let ip_lan = crate::scan::reseau_local().map(|l| l.1.to_string());
-
     let mut constats = vec![feu];
-    constats.extend(ports_ecoute(feu_actif, ip_lan));
+    constats.extend(ports_ecoute(feu_actif));
     constats.extend(docker());
     constats.push(ssh_serveur());
     constats.push(mises_a_jour());
@@ -809,7 +886,10 @@ mod tests {
     fn ports_docker() {
         let c = "0.0.0.0:8080->80/tcp, [::]:8080->80/tcp, 127.0.0.1:3389->3389/tcp, 0.0.0.0:53->53/udp, 9000/tcp";
         assert_eq!(ports_docker_exposes(c), vec!["8080/tcp", "53/udp"]);
-        assert!(ports_docker_exposes("127.0.0.1:8006->8006/tcp").is_empty());
+        assert!(ports_docker_exposes("127.0.0.1:8006->8006/tcp, [::1]:8006->8006/tcp").is_empty());
+        // Publié sur l'IP du réseau local : exposé aussi.
+        assert_eq!(ports_docker_exposes("10.0.0.179:8080->80/tcp"), vec!["8080/tcp"]);
+        assert_eq!(ports_docker_exposes(":::9000->9000/tcp"), vec!["9000/tcp"]);
         assert!(ports_docker_exposes("").is_empty());
     }
 
