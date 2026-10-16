@@ -98,13 +98,18 @@ fn html(audit: Option<&Audit>, reseau: Option<&Rapport>) -> String {
     }
 
     if let Some(r) = reseau {
-        let _ = write!(h, "<h2>Réseau — {} appareils</h2>", r.hotes.len());
+        let nom = r.nom_reseau.as_deref().map(|n| format!(" « {} »", esc(n))).unwrap_or_default();
+        let _ = write!(h, "<h2>Réseau{nom} — {} appareils</h2>", r.hotes.len());
         for hote in &r.hotes {
             let role = hote.role.map(|r| format!(" · {r}")).unwrap_or_default();
             let neuf = if hote.nouvelle { " <span class=neuf>NOUVEL APPAREIL</span>" } else { "" };
+            let depuis = match (&hote.premier_vu, hote.nouvelle) {
+                (Some(d), false) => format!(" · connu depuis le {}", crate::reseau::date_fr(d)),
+                _ => String::new(),
+            };
             let _ = write!(
                 h,
-                "<div class=\"carte hote\"><h3>{} <span class=meta>{}{}</span>{neuf}</h3><div class=meta>{} · score {}/100</div>",
+                "<div class=\"carte hote\"><h3>{} <span class=meta>{}{}</span>{neuf}</h3><div class=meta>{}{depuis} · score {}/100</div>",
                 hote.ip,
                 esc(&hote.titre()),
                 esc(&role),
@@ -117,6 +122,7 @@ fn html(audit: Option<&Audit>, reseau: Option<&Rapport>) -> String {
                 h += "<table>";
                 for p in &hote.ports {
                     let ban = p.banniere.as_deref().map(|b| format!("<div class=ban>{}</div>", esc(b))).unwrap_or_default();
+                    let ban = ban + &p.programme.as_deref().map(|n| format!("<div class=ban>programme : {}</div>", esc(n))).unwrap_or_default();
                     let _ = write!(h, "<tr><td>{}/tcp</td><td>{}{ban}</td><td>{}</td></tr>", p.port, esc(p.service), badge(Some(p.niveau)));
                 }
                 h += "</table>";
@@ -130,6 +136,14 @@ fn html(audit: Option<&Audit>, reseau: Option<&Rapport>) -> String {
             }
             h += "</div>";
         }
+    }
+    if let Some(r) = reseau.filter(|r| !r.absents.is_empty()) {
+        h += "<h2>Déjà vus, absents aujourd'hui</h2><div class=carte><ul>";
+        for a in &r.absents {
+            let quand = a.dernier_vu.as_deref().map(|d| format!(" — vu le {}", crate::reseau::date_fr(d))).unwrap_or_default();
+            let _ = write!(h, "<li>{} {}{}</li>", a.ip, esc(&a.titre), quand);
+        }
+        h += "</ul></div>";
     }
     h += "</main></body></html>";
     h
@@ -160,22 +174,34 @@ mod tests {
             banniere: Some("<script>alert(1)</script>".into()),
             conseil: "",
             nouveau: false,
+            programme: Some("<b>x</b>".into()),
         };
         let h = Hote {
             ip: "10.0.0.9".parse().unwrap(),
             nom: Some("<img src=x onerror=alert(2)>".into()),
             mac: None,
             fabricant: None,
+            surnom: None,
+            premier_vu: None,
             role: None,
             nouvelle: false,
             ports: vec![p],
             alertes: vec![],
             score: 95,
         };
-        let r = Rapport { reseau: "10.0.0.0/24".into(), duree_s: 1.0, score_global: 95, note: "A", hotes: vec![h] };
+        let r = Rapport {
+            reseau: "10.0.0.0/24".into(),
+            nom_reseau: Some("<i>wifi</i>".into()),
+            absents: vec![],
+            duree_s: 1.0,
+            score_global: 95,
+            note: "A",
+            hotes: vec![h],
+        };
         let page = html(None, Some(&r));
         assert!(!page.contains("<script>alert"));
         assert!(!page.contains("<img src=x"));
+        assert!(!page.contains("<b>x</b>") && !page.contains("<i>wifi</i>"));
         assert!(page.contains("&lt;script&gt;alert(1)&lt;/script&gt;"));
     }
 }

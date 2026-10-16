@@ -68,6 +68,13 @@ enum Commande {
         #[arg(value_parser = ["on", "off"])]
         etat: String,
     },
+    /// Donne un surnom à un appareil de la base (« imprimante HP »), désigné par son IP ou sa MAC.
+    Nommer {
+        /// IP (sur le réseau actuel) ou adresse MAC de l'appareil.
+        appareil: String,
+        /// Le surnom ; vide pour le retirer.
+        surnom: Vec<String>,
+    },
     /// Scan silencieux + notifications (utilisé par la surveillance).
     #[command(hide = true)]
     Surveiller,
@@ -121,6 +128,17 @@ impl Session {
     }
 }
 
+fn nommer(appareil: &str, surnom: &str) {
+    let surnom = Some(surnom.trim()).filter(|s| !s.is_empty());
+    match reseau::nommer(appareil, surnom) {
+        Ok(qui) => match surnom {
+            Some(s) => println!("  {VERT}✔{RESET} {qui} s'appelle maintenant « {s} »."),
+            None => println!("  {VERT}✔{RESET} Surnom retiré pour {qui}."),
+        },
+        Err(e) => println!("  ✖ {e}"),
+    }
+}
+
 async fn menu() {
     let mut s = Session::default();
     loop {
@@ -136,6 +154,7 @@ async fn menu() {
         println!("  8. Ouvrir le rapport détaillé (navigateur)");
         let etat = if surveillance::active() { format!("{VERT}activée{RESET}") } else { format!("{GRIS}désactivée{RESET}") };
         println!("  9. Surveillance du réseau toutes les heures : {etat}");
+        println!("  n. Nommer un appareil (« imprimante HP »)");
         println!("  q. Quitter\n");
         let choix = demander("Choix : ");
         println!();
@@ -157,6 +176,11 @@ async fn menu() {
                 rapport::ouvrir(s.audit.as_ref(), s.reseau.as_ref());
             }
             "9" => surveillance::activer(!surveillance::active()),
+            "n" | "N" => {
+                let qui = demander("IP ou adresse MAC de l'appareil : ");
+                let surnom = demander("Surnom (vide pour le retirer) : ");
+                nommer(&qui, &surnom);
+            }
             "q" | "Q" => break,
             _ => continue,
         }
@@ -192,5 +216,6 @@ async fn main() {
         Some(Commande::Antivirus { complet }) => antivirus::analyser(complet),
         Some(Commande::Surveillance { etat }) => surveillance::activer(etat == "on"),
         Some(Commande::Surveiller) => surveillance::surveiller().await,
+        Some(Commande::Nommer { appareil, surnom }) => nommer(&appareil, &surnom.join(" ")),
     }
 }

@@ -36,6 +36,8 @@ pub struct PortOuvert {
     pub banniere: Option<String>,
     pub conseil: &'static str,
     pub nouveau: bool,
+    /// Programme qui écoute (seulement pour cette machine).
+    pub programme: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -44,6 +46,10 @@ pub struct Hote {
     pub nom: Option<String>,
     pub mac: Option<String>,
     pub fabricant: Option<String>,
+    /// Nom donné par l'utilisateur (« imprimante HP »).
+    pub surnom: Option<String>,
+    /// Date du premier passage, AAAA-MM-JJ.
+    pub premier_vu: Option<String>,
     pub role: Option<&'static str>,
     pub nouvelle: bool,
     pub ports: Vec<PortOuvert>,
@@ -53,7 +59,7 @@ pub struct Hote {
 
 impl Hote {
     pub fn titre(&self) -> String {
-        [self.nom.as_deref(), self.fabricant.as_deref()]
+        [self.surnom.as_deref(), self.nom.as_deref(), self.fabricant.as_deref()]
             .into_iter()
             .flatten()
             .collect::<Vec<_>>()
@@ -61,28 +67,163 @@ impl Hote {
     }
 }
 
+/// Appareil déjà vu sur ce réseau mais absent du scan.
+#[derive(Serialize)]
+pub struct Absent {
+    pub ip: Ipv4Addr,
+    pub titre: String,
+    pub dernier_vu: Option<String>,
+}
+
 #[derive(Serialize)]
 pub struct Rapport {
     pub reseau: String,
+    /// Nom du réseau (Wi-Fi) quand il est connu.
+    pub nom_reseau: Option<String>,
+    pub absents: Vec<Absent>,
     pub duree_s: f64,
     pub score_global: u32,
     pub note: &'static str,
     pub hotes: Vec<Hote>,
 }
 
-/// Tous les appareils déjà vus sur le réseau, pour repérer les nouveaux venus.
+/// Base des appareils, un carnet par réseau : chez toi et chez chaque ami, sans mélange.
+/// Un réseau est reconnu à l'adresse MAC de sa box (stable, contrairement à l'IP).
 #[derive(Serialize, Deserialize, Default)]
-struct Historique {
+struct Base {
+    #[serde(default)]
+    reseaux: BTreeMap<String, ReseauConnu>,
+    /// Ancien format (avant les carnets par réseau) : repris dans le réseau courant au prochain scan.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     appareils: BTreeMap<String, AppareilConnu>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Default)]
+struct ReseauConnu {
+    nom: Option<String>,
+    appareils: BTreeMap<String, AppareilConnu>,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
 struct AppareilConnu {
     ip: Ipv4Addr,
     nom: Option<String>,
     fabricant: Option<String>,
     /// Tous les ports déjà vus ouverts (union : un Chromecast en veille ne doit pas déclencher d'alerte au réveil).
     ports: BTreeSet<u16>,
+    #[serde(default)]
+    surnom: Option<String>,
+    #[serde(default)]
+    premier_vu: Option<String>,
+    #[serde(default)]
+    dernier_vu: Option<String>,
+}
+
+impl AppareilConnu {
+    fn titre(&self) -> String {
+        [self.surnom.as_deref(), self.nom.as_deref(), self.fabricant.as_deref()]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>()
+            .join(" · ")
+    }
+
+    /// Fusion de deux fiches du même appareil (base de la clé + copie locale).
+    fn fusionner(&mut self, autre: AppareilConnu) {
+        self.ports.extend(autre.ports);
+        self.surnom = self.surnom.take().or(autre.surnom);
+        self.premier_vu = [self.premier_vu.take(), autre.premier_vu].into_iter().flatten().min();
+        if autre.dernier_vu > self.dernier_vu {
+            self.dernier_vu = autre.dernier_vu;
+            self.ip = autre.ip;
+        }
+    }
+}
+
+impl Base {
+    fn lire(p: &std::path::Path) -> Base {
+        std::fs::read_to_string(p).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default()
+    }
+
+    /// La base de la clé, enrichie des scans faits sans elle (copie locale).
+    fn charger() -> (Base, [PathBuf; 2]) {
+        let cle = dossier_donnees().join("appareils.json");
+        let local = dossier_local().join("appareils.json");
+        let mut base = Base::lire(&cle);
+        if local != cle {
+            base.absorber(Base::lire(&local));
+        }
+        (base, [cle, local])
+    }
+
+    fn absorber(&mut self, autre: Base) {
+        for (cle, a) in autre.appareils {
+            match self.appareils.get_mut(&cle) {
+                Some(connu) => connu.fusionner(a),
+                None => drop(self.appareils.insert(cle, a)),
+            }
+        }
+        for (id, r) in autre.reseaux {
+            let mien = self.reseaux.entry(id).or_default();
+            mien.nom = mien.nom.take().or(r.nom);
+            for (cle, a) in r.appareils {
+                match mien.appareils.get_mut(&cle) {
+                    Some(connu) => connu.fusionner(a),
+                    None => drop(mien.appareils.insert(cle, a)),
+                }
+            }
+        }
+    }
+
+    /// On écrit la base sur la clé ET en local : la copie locale sert quand la clé est absente.
+    fn enregistrer(&self, chemins: &[PathBuf; 2]) {
+        let json = serde_json::to_string_pretty(self).unwrap_or_default();
+        for p in chemins {
+            if let Some(d) = p.parent() {
+                let _ = std::fs::create_dir_all(d);
+            }
+            let _ = std::fs::write(p, &json);
+        }
+    }
+}
+
+fn aujourd_hui() -> String {
+    chrono::Local::now().format("%Y-%m-%d").to_string()
+}
+
+/// « 2026-10-16 » → « 16/10/2026 »
+pub fn date_fr(iso: &str) -> String {
+    let mut p = iso.split('-');
+    match (p.next(), p.next(), p.next()) {
+        (Some(a), Some(m), Some(j)) => format!("{j}/{m}/{a}"),
+        _ => iso.to_string(),
+    }
+}
+
+/// Donne (ou retire, avec `None`) un surnom à un appareil, désigné par son IP ou son adresse MAC.
+pub fn nommer(qui: &str, surnom: Option<&str>) -> Result<String, String> {
+    let (mut base, chemins) = Base::charger();
+    let qui_min = qui.to_ascii_lowercase();
+    let mut trouves = 0;
+    let mut decrit = String::new();
+    // Par IP, seulement dans le réseau où l'on se trouve (la même IP existe chez chacun) ; par MAC, partout.
+    let ici = scan::passerelle().and_then(|gw| scan::table_arp().get(&gw).cloned());
+    for (id, r) in base.reseaux.iter_mut() {
+        for (cle, a) in r.appareils.iter_mut() {
+            let par_mac = cle.eq_ignore_ascii_case(&qui_min);
+            let par_ip = a.ip.to_string() == qui && ici.as_deref() == Some(id.as_str());
+            if par_mac || par_ip {
+                a.surnom = surnom.map(str::to_string);
+                trouves += 1;
+                decrit = format!("{} ({cle})", a.ip);
+            }
+        }
+    }
+    if trouves == 0 {
+        return Err(format!("aucun appareil « {qui} » dans la base : lance d'abord un scan du réseau (netscan reseau)"));
+    }
+    base.enregistrer(&chemins);
+    Ok(decrit)
 }
 
 /// Fichier témoin à la racine de la clé USB netscan.
@@ -183,20 +324,26 @@ fn alertes(role: Option<&str>, ports: &[PortOuvert]) -> Vec<(Niveau, String)> {
 }
 
 fn afficher(r: &Rapport) {
-    titre(&format!("Réseau {}", r.reseau));
+    let nom = r.nom_reseau.as_deref().map(|n| format!(" « {n} »")).unwrap_or_default();
+    titre(&format!("Réseau{nom} {}", r.reseau));
     for h in &r.hotes {
         let role = h.role.map(|r| format!(" [{r}]")).unwrap_or_default();
         let mac = h.mac.as_deref().map(|m| format!("  {GRIS}{m}{RESET}")).unwrap_or_default();
         let neuve = if h.nouvelle { format!("  {}NOUVEL APPAREIL{RESET}", couleur(Niveau::Moyen)) } else { String::new() };
-        println!("\n{GRAS}● {}{RESET} {}{role}{mac}{neuve}", h.ip, h.titre());
+        let depuis = match (&h.premier_vu, h.nouvelle) {
+            (Some(d), false) => format!("  {GRIS}connu depuis le {}{RESET}", date_fr(d)),
+            _ => String::new(),
+        };
+        println!("\n{GRAS}● {}{RESET} {}{role}{mac}{neuve}{depuis}", h.ip, h.titre());
         if h.ports.is_empty() {
             println!("    {GRIS}aucun port ouvert parmi ceux testés{RESET}");
         }
         for p in &h.ports {
             let b = p.banniere.as_deref().map(|b| format!("  {GRIS}« {b} »{RESET}")).unwrap_or_default();
+            let prog = p.programme.as_deref().map(|n| format!("  {GRAS}programme : {n}{RESET}")).unwrap_or_default();
             let nouv = if p.nouveau && !h.nouvelle { format!(" {}(nouveau){RESET}", couleur(Niveau::Moyen)) } else { String::new() };
             println!(
-                "    {:>5}/tcp  {:<17} {}{:<8}{RESET}{nouv}{b}",
+                "    {:>5}/tcp  {:<17} {}{:<8}{RESET}{nouv}{prog}{b}",
                 p.port, p.service, couleur(p.niveau), p.niveau.libelle()
             );
         }
@@ -204,6 +351,14 @@ fn afficher(r: &Rapport) {
             println!("    {}→{RESET} {msg}", couleur(*n));
         }
         println!("    {GRIS}score : {}/100{RESET}", h.score);
+    }
+
+    if !r.absents.is_empty() {
+        println!("\n{GRIS}Déjà vus sur ce réseau, absents aujourd'hui :{RESET}");
+        for a in &r.absents {
+            let quand = a.dernier_vu.as_deref().map(|d| format!(" — vu le {}", date_fr(d))).unwrap_or_default();
+            println!("  {GRIS}○ {} {}{quand}{RESET}", a.ip, a.titre);
+        }
     }
 
     let compte = |n: Niveau| r.hotes.iter().flat_map(|h| &h.ports).filter(|p| p.niveau == n).count();
@@ -261,25 +416,20 @@ pub async fn executer(o: Options) -> Result<Rapport, String> {
     let resultats = scan::scanner_ports(&vivantes, &ports, delai, parallele).await;
     let noms = join_all(vivantes.iter().map(|&ip| scan::nom_hote(ip))).await;
     let arp = scan::table_arp();
-    let base = scan::base_fabricants();
+    let fabricants = scan::base_fabricants();
 
-    let lire = |p: &PathBuf| -> Historique {
-        std::fs::read_to_string(p).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default()
-    };
-    let chemin = dossier_donnees().join("appareils.json");
-    let mut histo = lire(&chemin);
-    // Scans faits sans la clé : on les fusionne dans la base de la clé dès qu'elle est là.
-    let local = dossier_local().join("appareils.json");
-    if local != chemin {
-        for (cle, a) in lire(&local).appareils {
-            match histo.appareils.get_mut(&cle) {
-                Some(connu) => connu.ports.extend(a.ports),
-                None => {
-                    histo.appareils.insert(cle, a);
-                }
-            }
+    let (mut base, chemins) = Base::charger();
+    // Le carnet de ce réseau : reconnu à la MAC de la box, sinon à la plage d'adresses.
+    let id_reseau = gw.and_then(|g| arp.get(&g).cloned()).unwrap_or_else(|| format!("plage {cible}"));
+    let nom_reseau = scan::nom_wifi();
+    if !base.appareils.is_empty() {
+        let anciens = std::mem::take(&mut base.appareils);
+        let carnet = base.reseaux.entry(id_reseau.clone()).or_default();
+        for (cle, a) in anciens {
+            carnet.appareils.entry(cle).or_insert(a);
         }
     }
+    let histo = base.reseaux.entry(id_reseau.clone()).or_default();
     let premier_scan = histo.appareils.is_empty();
     // Seul un scan du réseau entier sur les ports courants se compare aux précédents.
     let scan_comparable = ips.len() > 1 && o.ports == "courants";
@@ -287,6 +437,8 @@ pub async fn executer(o: Options) -> Result<Rapport, String> {
     let comparable = |port: u16| PORTS_COURANTS.contains(&port);
     // Une machine est reconnue par sa MAC (l'IP DHCP peut changer), sinon par son IP.
     let cle = |ip: Ipv4Addr, mac: &Option<String>| mac.clone().unwrap_or_else(|| ip.to_string());
+    // Pour cette machine (ou 127.0.0.1), on sait quel programme tient chaque port.
+    let programmes = crate::machine::programmes_en_ecoute();
 
     let mut hotes: Vec<Hote> = resultats
         .into_iter()
@@ -304,7 +456,8 @@ pub async fn executer(o: Options) -> Result<Rapport, String> {
                     };
                     let i = info_port(type_port);
                     let nouveau = scan_comparable && !premier_scan && comparable(port) && !connu.is_some_and(|c| c.ports.contains(&port));
-                    PortOuvert { port, service: i.service, niveau: i.niveau, banniere, conseil: i.conseil, nouveau }
+                    let programme = (Some(ip) == moi || ip.is_loopback()).then(|| programmes.get(&port).cloned()).flatten();
+                    PortOuvert { port, service: i.service, niveau: i.niveau, banniere, conseil: i.conseil, nouveau, programme }
                 })
                 .collect();
             let role = if Some(ip) == gw {
@@ -319,7 +472,9 @@ pub async fn executer(o: Options) -> Result<Rapport, String> {
             Hote {
                 ip,
                 nom,
-                fabricant: mac.as_deref().and_then(|m| scan::fabricant(m, &base)),
+                fabricant: mac.as_deref().and_then(|m| scan::fabricant(m, &fabricants)),
+                surnom: connu.and_then(|c| c.surnom.clone()),
+                premier_vu: connu.and_then(|c| c.premier_vu.clone()),
                 mac,
                 role,
                 nouvelle: scan_comparable && !premier_scan && connu.is_none(),
@@ -331,33 +486,45 @@ pub async fn executer(o: Options) -> Result<Rapport, String> {
         .collect();
     hotes.sort_by_key(|h| h.ip);
 
+    let mut absents = Vec::new();
     // On ne mémorise que les scans du réseau complet avec les ports par défaut, pour comparer ce qui est comparable.
-    if ips.len() > 1 && o.ports == "courants" {
+    if scan_comparable {
+        let presents: BTreeSet<String> = hotes.iter().map(|h| cle(h.ip, &h.mac)).collect();
+        absents = histo
+            .appareils
+            .iter()
+            .filter(|(k, _)| !presents.contains(*k))
+            .map(|(_, a)| Absent { ip: a.ip, titre: a.titre(), dernier_vu: a.dernier_vu.clone() })
+            .collect();
+        let jour = aujourd_hui();
         for h in &hotes {
             let a = histo.appareils.entry(cle(h.ip, &h.mac)).or_insert_with(|| AppareilConnu {
                 ip: h.ip,
                 nom: None,
                 fabricant: None,
                 ports: BTreeSet::new(),
+                surnom: None,
+                premier_vu: Some(jour.clone()),
+                dernier_vu: None,
             });
             a.ip = h.ip;
             a.nom = h.nom.clone().or(a.nom.take());
             a.fabricant = h.fabricant.clone();
             a.ports.extend(h.ports.iter().map(|p| p.port));
+            a.premier_vu.get_or_insert_with(|| jour.clone());
+            a.dernier_vu = Some(jour.clone());
         }
-        let json = serde_json::to_string_pretty(&histo).unwrap_or_default();
-        // On écrit la base sur la clé ET en local : la copie locale sert quand la clé est absente.
-        for p in [&chemin, &local] {
-            if let Some(d) = p.parent() {
-                let _ = std::fs::create_dir_all(d);
-            }
-            let _ = std::fs::write(p, &json);
+        if nom_reseau.is_some() {
+            histo.nom = nom_reseau.clone();
         }
+        base.enregistrer(&chemins);
     }
 
     let score_global = hotes.iter().map(|h| h.score).min().unwrap_or(100);
     let rapport = Rapport {
         reseau: cible,
+        nom_reseau: nom_reseau.or_else(|| base.reseaux.get(&id_reseau).and_then(|r| r.nom.clone())),
+        absents,
         duree_s: debut.elapsed().as_secs_f64(),
         score_global,
         note: note(score_global),
@@ -385,10 +552,44 @@ mod tests {
     }
 
     #[test]
+    fn ancienne_base_toujours_lisible() {
+        // Format de la v0.1 à la v0.3 : un seul carnet, sans surnom ni dates.
+        let ancien = r#"{"appareils":{"c4:34:6b:12:34:56":{"ip":"10.0.0.138","nom":null,"fabricant":"Hewlett Packard","ports":[135,445]}}}"#;
+        let base: Base = serde_json::from_str(ancien).unwrap();
+        let a = &base.appareils["c4:34:6b:12:34:56"];
+        assert_eq!(a.ports.len(), 2);
+        assert!(a.surnom.is_none() && a.premier_vu.is_none());
+        // Une fois migré, l'ancien champ n'est plus écrit.
+        let migre = Base { reseaux: BTreeMap::from([("box".into(), ReseauConnu { nom: None, appareils: base.appareils })]), appareils: BTreeMap::new() };
+        assert!(!serde_json::to_value(&migre).unwrap().as_object().unwrap().contains_key("appareils"));
+    }
+
+    #[test]
+    fn fusion_cle_et_copie_locale() {
+        let fiche = |ports: &[u16], premier: &str, dernier: &str, surnom: Option<&str>, ip: [u8; 4]| AppareilConnu {
+            ip: Ipv4Addr::from(ip),
+            nom: None,
+            fabricant: None,
+            ports: ports.iter().copied().collect(),
+            surnom: surnom.map(str::to_string),
+            premier_vu: Some(premier.into()),
+            dernier_vu: Some(dernier.into()),
+        };
+        let mut cle = fiche(&[80], "2026-10-16", "2026-10-16", Some("imprimante HP"), [10, 0, 0, 138]);
+        cle.fusionner(fiche(&[445], "2026-09-01", "2026-10-20", None, [10, 0, 0, 140]));
+        assert_eq!(cle.ports.len(), 2);
+        assert_eq!(cle.premier_vu.as_deref(), Some("2026-09-01"));
+        assert_eq!(cle.dernier_vu.as_deref(), Some("2026-10-20"));
+        assert_eq!(cle.ip, Ipv4Addr::new(10, 0, 0, 140)); // l'IP la plus récente
+        assert_eq!(cle.surnom.as_deref(), Some("imprimante HP"));
+        assert_eq!(date_fr("2026-10-16"), "16/10/2026");
+    }
+
+    #[test]
     fn alertes_croisees() {
         let port = |p: u16| {
             let i = info_port(p);
-            PortOuvert { port: p, service: i.service, niveau: i.niveau, banniere: None, conseil: i.conseil, nouveau: false }
+            PortOuvert { port: p, service: i.service, niveau: i.niveau, banniere: None, conseil: i.conseil, nouveau: false, programme: None }
         };
         let routeur = alertes(Some("passerelle"), &[port(80)]);
         assert!(routeur.iter().any(|(_, m)| m.contains("routeur")));

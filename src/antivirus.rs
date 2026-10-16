@@ -77,11 +77,19 @@ fn preparer() -> bool {
         if !demander("  L'installer maintenant ? [o/N] : ").eq_ignore_ascii_case("o") {
             return false;
         }
+        // Fedora sépare le moteur et l'outil de mise à jour des signatures.
         #[cfg(target_os = "linux")]
-        let installation = "sudo pacman -S --needed --noconfirm clamav";
+        let installation = match crate::machine::linux::Paquets::detecter() {
+            Some(g @ crate::machine::linux::Paquets::Dnf) => g.installer("clamav clamav-update"),
+            Some(g) => g.installer("clamav"),
+            None => {
+                println!("  Gestionnaire de paquets non reconnu : installe ClamAV avec l'outil de ta distribution.");
+                return false;
+            }
+        };
         #[cfg(target_os = "macos")]
-        let installation = "brew install clamav";
-        if !shell(installation) {
+        let installation = String::from("brew install clamav");
+        if !shell(&installation) {
             println!("  Installation impossible (sous macOS, Homebrew est nécessaire : https://brew.sh).");
             return false;
         }
@@ -89,7 +97,9 @@ fn preparer() -> bool {
     if !base_presente() {
         println!("  Téléchargement des signatures de virus (~300 Mo, une seule fois)…");
         #[cfg(target_os = "linux")]
-        let ok = shell("sudo freshclam") && shell("sudo systemctl enable --now clamav-freshclam.service");
+        // Sur Debian/Ubuntu/Mint, le service tourne déjà et verrouille la base : on l'arrête le temps du premier téléchargement.
+        let ok = shell("sudo systemctl stop clamav-freshclam.service 2>/dev/null; sudo freshclam")
+            && shell("sudo systemctl enable --now clamav-freshclam.service");
         #[cfg(target_os = "macos")]
         let ok = shell(
             "C=$(brew --prefix)/etc/clamav; [ -f $C/freshclam.conf ] || sed 's/^Example/#Example/' $C/freshclam.conf.sample > $C/freshclam.conf; freshclam",
@@ -238,7 +248,7 @@ fn demarrage() {
             let p = f.path();
             // Services ajoutés à la main (pas par un paquet) : endroit classique pour une persistance root.
             if p.extension().is_some_and(|e| e == "service") && p.is_file() && !p.is_symlink() {
-                let possede = Command::new("pacman").arg("-Qo").arg(&p).output().is_ok_and(|o| o.status.success());
+                let possede = crate::machine::linux::Paquets::detecter().is_none_or(|g| g.possede(&p));
                 if !possede {
                     entrees.push(format!("{} (service système hors paquet)", p.display()));
                 }

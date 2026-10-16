@@ -8,6 +8,64 @@ use crate::risk::{Niveau, info_port};
 
 pub const NOM: &str = "Linux";
 
+/// Gestionnaire de paquets de la distribution : Arch, Debian/Ubuntu/Mint, Fedora, openSUSE.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Paquets {
+    Pacman,
+    Apt,
+    Dnf,
+    Zypper,
+}
+
+impl Paquets {
+    pub fn detecter() -> Option<Self> {
+        let present = |c: &str| ["/usr/bin", "/bin", "/usr/sbin"].iter().any(|d| Path::new(d).join(c).exists());
+        [("pacman", Paquets::Pacman), ("apt-get", Paquets::Apt), ("dnf", Paquets::Dnf), ("zypper", Paquets::Zypper)]
+            .into_iter()
+            .find_map(|(c, p)| present(c).then_some(p))
+    }
+
+    /// Commande d'installation non interactive.
+    pub fn installer(self, paquets: &str) -> String {
+        match self {
+            Paquets::Pacman => format!("sudo pacman -S --needed --noconfirm {paquets}"),
+            Paquets::Apt => format!("sudo apt-get install -y {paquets}"),
+            Paquets::Dnf => format!("sudo dnf install -y {paquets}"),
+            Paquets::Zypper => format!("sudo zypper --non-interactive install {paquets}"),
+        }
+    }
+
+    /// Le fichier appartient-il à un paquet ? (sinon : ajouté à la main)
+    pub fn possede(self, fichier: &Path) -> bool {
+        let (cmd, arg) = match self {
+            Paquets::Pacman => ("pacman", "-Qo"),
+            Paquets::Apt => ("dpkg", "-S"),
+            Paquets::Dnf | Paquets::Zypper => ("rpm", "-qf"),
+        };
+        Command::new(cmd).arg(arg).arg(fichier).output().is_ok_and(|o| o.status.success())
+    }
+
+    fn mise_a_jour(self) -> &'static str {
+        match self {
+            Paquets::Pacman if Path::new("/usr/bin/omarchy").exists() => "omarchy update",
+            Paquets::Pacman => "sudo pacman -Syu --noconfirm",
+            Paquets::Apt => "sudo apt-get update && sudo apt-get full-upgrade -y",
+            Paquets::Dnf => "sudo dnf upgrade -y",
+            Paquets::Zypper => "sudo zypper --non-interactive update",
+        }
+    }
+}
+
+/// systemd est-il le gestionnaire de services ? Sans lui (conteneur, Alpine, Void…), on ne peut pas
+/// savoir quels services tournent : on le dit au lieu de conclure.
+fn systemd() -> bool {
+    Path::new("/run/systemd/system").is_dir()
+}
+
+fn impossible(categorie: &'static str, raison: &str) -> Constat {
+    alerte(categorie, Niveau::Info, format!("Impossible de vérifier ({raison})."))
+}
+
 fn service_actif(nom: &str) -> bool {
     sortie("systemctl", &["is-active", nom]).is_some_and(|s| s.trim() == "active")
 }
@@ -17,6 +75,9 @@ fn home() -> String {
 }
 
 fn pare_feu() -> Constat {
+    if !systemd() {
+        return impossible("Pare-feu", "systemd absent");
+    }
     let ufw = std::fs::read_to_string("/etc/ufw/ufw.conf")
         .is_ok_and(|c| c.lines().any(|l| l.trim() == "ENABLED=yes"))
         && service_actif("ufw");
@@ -98,7 +159,11 @@ fn ports_ecoute(pare_feu_actif: bool, ip_lan: Option<String>) -> Vec<Constat> {
 }
 
 fn ssh_serveur() -> Constat {
-    if !service_actif("sshd") {
+    if !systemd() {
+        return impossible("SSH", "systemd absent");
+    }
+    // « sshd » sur Arch et Fedora, « ssh » sur Debian, Ubuntu et Mint.
+    if !service_actif("sshd") && !service_actif("ssh") {
         return ok("SSH", "Serveur SSH désactivé.");
     }
     let mut conf = String::new();
@@ -152,31 +217,100 @@ fn ssh_serveur() -> Constat {
     ok("SSH", "Serveur SSH actif, clés uniquement, root interdit.")
 }
 
+/// Paquets à mettre à jour, un par ligne commençant par son nom ; `None` si on ne peut pas savoir.
+fn liste_mises_a_jour(gestion: Paquets) -> Option<Vec<String>> {
+    let lignes = |o: &std::process::Output| String::from_utf8_lossy(&o.stdout).lines().map(str::to_string).collect::<Vec<_>>();
+    match gestion {
+        // checkupdates : 0 = mises à jour listées, 2 = rien à faire, autre = erreur (hors ligne…).
+        Paquets::Pacman => {
+            let o = Command::new("checkupdates").output().ok()?;
+            match o.status.code() {
+                Some(0) => Some(lignes(&o)),
+                Some(2) => Some(vec![]),
+                _ => None,
+            }
+        }
+        // Lit le cache d'apt sans le rafraîchir (il faudrait sudo) : il date du dernier « apt update ».
+        // Sans cache, « rien à mettre à jour » ne voudrait rien dire.
+        Paquets::Apt => {
+            age_cache_apt()?;
+            let o = Command::new("apt").args(["list", "--upgradable"]).output().ok()?;
+            o.status.success().then(|| lignes(&o).into_iter().filter(|l| l.contains("[upgradable") || l.contains("[pouvant")).collect())
+        }
+        // dnf check-update : 100 = mises à jour disponibles, 0 = rien, autre = erreur.
+        Paquets::Dnf => {
+            let o = Command::new("dnf").args(["-q", "check-update"]).output().ok()?;
+            match o.status.code() {
+                Some(100) => Some(lignes(&o).into_iter().filter(|l| !l.trim().is_empty() && !l.starts_with(' ')).collect()),
+                Some(0) => Some(vec![]),
+                _ => None,
+            }
+        }
+        Paquets::Zypper => {
+            let o = Command::new("zypper").args(["-q", "list-updates"]).output().ok()?;
+            o.status.success().then(|| lignes(&o).into_iter().filter(|l| l.starts_with("v ")).collect())
+        }
+    }
+}
+
+/// Âge en jours de la liste des paquets d'apt, `None` si elle n'a jamais été téléchargée.
+fn age_cache_apt() -> Option<u64> {
+    let plus_recent = std::fs::read_dir("/var/lib/apt/lists")
+        .ok()?
+        .flatten()
+        .filter(|f| f.file_name().to_string_lossy().ends_with("Packages") || f.file_name().to_string_lossy().contains("Packages."))
+        .filter_map(|f| f.metadata().ok()?.modified().ok())
+        .max()?;
+    Some(plus_recent.elapsed().map_or(0, |d| d.as_secs() / 86_400))
+}
+
 fn mises_a_jour() -> Constat {
-    // checkupdates : code 0 = mises à jour listées, 2 = rien à faire, autre = erreur (hors ligne…).
-    let resultat = Command::new("checkupdates").output();
-    let liste = match resultat.as_ref().map(|o| o.status.code()) {
-        Ok(Some(0)) => String::from_utf8_lossy(&resultat.as_ref().unwrap().stdout).into_owned(),
-        Ok(Some(2)) => return ok("Mises à jour", "Système à jour."),
-        _ => return alerte("Mises à jour", Niveau::Info, "Impossible de vérifier (pacman-contrib absent ou hors ligne)."),
+    let Some(gestion) = Paquets::detecter() else {
+        return alerte("Mises à jour", Niveau::Info, "Impossible de vérifier (gestionnaire de paquets non reconnu).");
     };
-    let n = liste.lines().count();
+    let Some(liste) = liste_mises_a_jour(gestion) else {
+        let raison = if gestion == Paquets::Apt { "liste des paquets jamais téléchargée" } else { "outil absent ou hors ligne" };
+        return impossible("Mises à jour", raison)
+            .corriger("Télécharger la liste des paquets et mettre à jour", &[gestion.mise_a_jour()]);
+    };
+    // apt ne connaît que les mises à jour vues à son dernier « apt update » : une vieille liste en cache tout.
+    let vieux = (gestion == Paquets::Apt).then(age_cache_apt).flatten().filter(|&j| j > 7);
+    if liste.is_empty() {
+        return match vieux {
+            Some(j) => alerte("Mises à jour", Niveau::Moyen, format!("Aucune mise à jour connue, mais la liste date de {j} jours."))
+                .corriger("Rafraîchir la liste et mettre à jour", &[gestion.mise_a_jour()]),
+            None => ok("Mises à jour", "Système à jour."),
+        };
+    }
+    let n = liste.len();
     let sensibles = liste
-        .lines()
-        .filter(|l| ["linux ", "openssl", "openssh", "glibc", "sudo", "firefox", "nvidia"].iter().any(|p| l.starts_with(p)))
+        .iter()
+        .filter(|l| {
+            let nom = l.trim_start_matches("v | ").to_ascii_lowercase();
+            ["linux", "openssl", "libssl", "openssh", "glibc", "libc6", "sudo", "firefox", "chromium", "nvidia"]
+                .iter()
+                .any(|p| nom.starts_with(p))
+        })
         .count();
     let niveau = if n > 50 || sensibles > 0 { Niveau::Eleve } else { Niveau::Moyen };
-    alerte("Mises à jour", niveau, format!("{n} paquets à mettre à jour (dont {sensibles} sensibles : noyau, openssl, navigateur…)."))
-        .corriger("Mettre le système à jour", &["omarchy update"])
+    alerte("Mises à jour", niveau, format!("{n} paquet(s) à mettre à jour, dont {sensibles} sensible(s) : noyau, openssl, navigateur…"))
+        .corriger("Mettre le système à jour", &[gestion.mise_a_jour()])
 }
 
 fn redemarrage() -> Constat {
     let noyau = sortie("uname", &["-r"]).unwrap_or_default();
-    if Path::new("/usr/lib/modules").join(noyau.trim()).exists() {
+    // Arch retire les modules de l'ancien noyau ; Debian, Ubuntu et Mint créent ce fichier témoin.
+    let dossiers: Vec<&Path> = ["/usr/lib/modules", "/lib/modules"].iter().map(Path::new).filter(|d| d.is_dir()).collect();
+    // Aucun dossier de modules (conteneur, noyau fourni par l'hôte) : rien à comparer.
+    if dossiers.iter().all(|d| std::fs::read_dir(d).map_or(true, |mut e| e.next().is_none())) {
+        return impossible("Noyau", "aucun noyau installé ici, conteneur ?");
+    }
+    let modules = dossiers.iter().any(|d| d.join(noyau.trim()).exists());
+    if modules && !Path::new("/var/run/reboot-required").exists() {
         ok("Noyau", format!("Le noyau en cours ({}) est celui installé.", noyau.trim()))
     } else {
         alerte("Noyau", Niveau::Moyen, "Noyau mis à jour mais pas encore chargé : les correctifs ne sont pas actifs.")
-            .manuel("Redémarrer quand c'est pratique", &["omarchy system reboot"])
+            .manuel("Redémarrer quand c'est pratique", &["systemctl reboot"])
     }
 }
 
@@ -242,6 +376,9 @@ fn wifi(passerelle: Option<String>) -> Option<Constat> {
 }
 
 fn services_en_echec() -> Constat {
+    if !systemd() {
+        return impossible("Services", "systemd absent");
+    }
     let n = sortie("systemctl", &["--failed", "--no-legend", "--plain"]).map_or(0, |s| s.lines().count());
     if n == 0 {
         ok("Services", "Aucun service système en échec.")

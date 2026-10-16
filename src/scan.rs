@@ -354,3 +354,30 @@ mod tests {
         assert!(fabricant("ee:12:34:56:78:9a", &base).unwrap().contains("aléatoire"));
     }
 }
+
+/// Nom du Wi-Fi auquel on est connecté, pour reconnaître le réseau dans la base (« Salon », « Chez Max »…).
+pub fn nom_wifi() -> Option<String> {
+    #[cfg(target_os = "linux")]
+    let nom = commande_sortie("nmcli", &["-t", "-e", "no", "-f", "ACTIVE,SSID", "dev", "wifi"])
+        .lines()
+        .find_map(|l| l.strip_prefix("yes:").map(str::to_string));
+    #[cfg(target_os = "macos")]
+    let nom = commande_sortie("networksetup", &["-getairportnetwork", "en0"])
+        .split_once(": ")
+        .map(|(_, n)| n.trim().to_string());
+    #[cfg(windows)]
+    let nom = commande_sortie("netsh", &["wlan", "show", "interfaces"])
+        .lines()
+        .map(str::trim)
+        .find(|l| l.starts_with("SSID") && !l.starts_with("BSSID"))
+        .and_then(|l| Some(l.split_once(':')?.1.trim().to_string()));
+    nom.filter(|n| !n.is_empty())
+}
+
+fn commande_sortie(cmd: &str, args: &[&str]) -> String {
+    std::process::Command::new(cmd)
+        .args(args)
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+        .unwrap_or_default()
+}

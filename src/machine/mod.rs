@@ -9,7 +9,7 @@ use crate::risk::Niveau;
 use crate::ui::*;
 
 #[cfg(target_os = "linux")]
-mod linux;
+pub mod linux;
 #[cfg(target_os = "linux")]
 use linux as os;
 #[cfg(target_os = "macos")]
@@ -147,6 +147,42 @@ pub fn appliquer(commandes: &[String]) -> bool {
         }
         true
     }
+}
+
+/// Programme qui écoute sur chaque port TCP de cette machine (port → nom du programme).
+/// Sans droits admin, les programmes de root/SYSTEM restent souvent anonymes.
+pub fn programmes_en_ecoute() -> std::collections::HashMap<u16, String> {
+    let mut map = std::collections::HashMap::new();
+    #[cfg(target_os = "linux")]
+    for l in sortie("ss", &["-Htlnp"]).unwrap_or_default().lines() {
+        let c: Vec<&str> = l.split_whitespace().collect();
+        let port = c.get(3).and_then(|a| a.rsplit_once(':')).and_then(|(_, p)| p.parse::<u16>().ok());
+        let nom = c.get(5).and_then(|u| u.split('"').nth(1));
+        if let (Some(port), Some(nom)) = (port, nom) {
+            map.insert(port, nom.to_string());
+        }
+    }
+    #[cfg(target_os = "macos")]
+    for l in sortie("lsof", &["-nP", "-iTCP", "-sTCP:LISTEN"]).unwrap_or_default().lines().skip(1) {
+        let c: Vec<&str> = l.split_whitespace().collect();
+        let port = c.get(8).and_then(|a| a.rsplit(':').next()).and_then(|p| p.parse::<u16>().ok());
+        if let (Some(port), Some(nom)) = (port, c.first()) {
+            map.insert(port, nom.to_string());
+        }
+    }
+    #[cfg(windows)]
+    for l in windows::ps("Get-NetTCPConnection -State Listen | ForEach-Object { \"$($_.LocalPort)|$((Get-Process -Id $_.OwningProcess -ErrorAction SilentlyContinue).ProcessName)\" }")
+        .unwrap_or_default()
+        .lines()
+    {
+        if let Some((p, nom)) = l.split_once('|')
+            && let Ok(port) = p.trim().parse::<u16>()
+            && !nom.trim().is_empty()
+        {
+            map.insert(port, nom.trim().to_string());
+        }
+    }
+    map
 }
 
 /// Ouvre un fichier ou une URL avec l'application par défaut du système.
