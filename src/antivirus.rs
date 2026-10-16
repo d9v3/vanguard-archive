@@ -39,7 +39,7 @@ fn defender(complet: bool) {
             }
             println!("  Defender a normalement déjà mis ces fichiers en quarantaine.");
             if demander("  Supprimer définitivement les menaces détectées ? [o/N] : ").eq_ignore_ascii_case("o")
-                && powershell_admin("Remove-MpThreat")
+                && powershell_admin(&["Remove-MpThreat".to_string()])
             {
                 println!("  {VERT}✔ Menaces supprimées.{RESET}");
             }

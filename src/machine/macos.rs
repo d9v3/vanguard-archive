@@ -117,6 +117,10 @@ fn ports_ecoute(pare_feu_actif: bool) -> Vec<Constat> {
         };
         let constat = alerte("Ports en écoute", niveau, format!("{port}/tcp ({}) ouvert par « {programme} ». {}", i.service, i.conseil));
         constats.push(match port {
+            // Connecté par SSH en ce moment : le couper couperait l'utilisateur lui-même.
+            22 if std::env::var_os("SSH_CONNECTION").is_some() => {
+                constat.manuel("Tu es connecté par SSH : désactive-le depuis l'écran du Mac (Réglages > Général > Partage)", &[])
+            }
             22 => constat.corriger("Désactiver la session à distance (SSH)", &["sudo systemsetup -f -setremotelogin off"]),
             5900 => constat.manuel("Réglages Système > Général > Partage > désactiver « Partage d'écran »", &[]),
             445 => constat.manuel("Réglages Système > Général > Partage > désactiver « Partage de fichiers » si inutile", &[]),

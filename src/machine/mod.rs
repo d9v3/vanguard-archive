@@ -131,11 +131,11 @@ fn cles_ssh() -> Vec<Constat> {
 pub fn appliquer(commandes: &[String]) -> bool {
     #[cfg(windows)]
     {
-        let script = format!("$ErrorActionPreference='Stop'\n{}", commandes.join("\n"));
         for c in commandes {
             println!("    {GRIS}PS> {c}{RESET}");
         }
-        windows::powershell_admin(&script)
+        println!("    {GRIS}Une fenêtre administrateur s'ouvre et montre chaque étape ; attends qu'elle se ferme.{RESET}");
+        windows::powershell_admin(commandes)
     }
     #[cfg(not(windows))]
     {

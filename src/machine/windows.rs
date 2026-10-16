@@ -39,13 +39,39 @@ fn base64(octets: &[u8]) -> String {
 }
 
 /// Lance un script dans une fenêtre PowerShell administrateur (une demande UAC). Retourne `true` si tout a réussi.
-pub fn powershell_admin(script: &str) -> bool {
-    let enveloppe = format!(
-        "try {{\n{script}\nexit 0 }} catch {{ Write-Host $_ -ForegroundColor Red; Read-Host 'Erreur. Entrée pour fermer'; exit 1 }}"
+/// Délai maximal d'une correction : au-delà, on rend la main au lieu d'attendre indéfiniment.
+const DELAI_CORRECTION_MS: u32 = 10 * 60 * 1000;
+
+/// Le script exécuté dans la fenêtre administrateur : chaque commande est annoncée, puis « OK » ou l'erreur.
+/// Une fenêtre muette ne se distingue pas d'une fenêtre figée.
+fn script_admin(commandes: &[String]) -> String {
+    let texte = |s: &str| s.replace('\'', "''");
+    let mut script = String::from(
+        "$Host.UI.RawUI.WindowTitle = 'netscan : correction en cours'\n\
+         [Console]::OutputEncoding = [Text.Encoding]::UTF8\n\
+         $ErrorActionPreference = 'Stop'\n\
+         Write-Host 'netscan applique une correction (cette fenêtre se fermera seule).' -ForegroundColor Cyan\n\
+         try {\n",
     );
-    let utf16: Vec<u8> = enveloppe.encode_utf16().flat_map(u16::to_le_bytes).collect();
+    for c in commandes {
+        let long = ["Update-MpSignature", "Remove-MpThreat", "Start-MpScan"].iter().any(|l| c.contains(l));
+        let note = if long { " (peut prendre quelques minutes)" } else { "" };
+        script += &format!("  Write-Host ''; Write-Host '> {}{note}' -ForegroundColor Yellow\n  {c}\n  Write-Host '  OK' -ForegroundColor Green\n", texte(c));
+    }
+    script += "  Write-Host ''; Write-Host 'Terminé.' -ForegroundColor Green; Start-Sleep -Seconds 2; exit 0\n\
+               } catch {\n\
+                 Write-Host ''; Write-Host ('Erreur : ' + $_.Exception.Message) -ForegroundColor Red\n\
+                 Read-Host 'Appuie sur Entrée pour fermer'; exit 1\n\
+               }";
+    script
+}
+
+/// Lance des commandes dans une fenêtre PowerShell administrateur (une demande UAC). Retourne `true` si tout a réussi.
+pub fn powershell_admin(commandes: &[String]) -> bool {
+    let utf16: Vec<u8> = script_admin(commandes).encode_utf16().flat_map(u16::to_le_bytes).collect();
     let lanceur = format!(
-        "$p = Start-Process powershell -Verb RunAs -Wait -PassThru -ArgumentList '-NoProfile','-EncodedCommand','{}'; exit $p.ExitCode",
+        "$p = Start-Process powershell -Verb RunAs -PassThru -ArgumentList '-NoProfile','-EncodedCommand','{}'; \
+         if (-not $p.WaitForExit({DELAI_CORRECTION_MS})) {{ Write-Host 'Correction trop longue : abandon de l''attente.'; exit 2 }}; exit $p.ExitCode",
         base64(&utf16)
     );
     Command::new("powershell")
@@ -138,7 +164,14 @@ fn bureau_distance() -> Constat {
     }
     let nla = ps(&format!(r"(Get-ItemProperty '{cle}\WinStations\RDP-Tcp').UserAuthentication")).is_some_and(|v| v == "1");
     let couper = format!("Set-ItemProperty '{cle}' -Name fDenyTSConnections -Value 1");
-    if nla {
+    // Session ouverte PAR le Bureau à distance (SESSIONNAME = RDP-Tcp#…) : le couper couperait l'utilisateur
+    // lui-même. Jamais en correction automatique dans ce cas.
+    if session_a_distance() {
+        alerte("Bureau à distance", Niveau::Moyen, "RDP activé ; tu es connecté par lui en ce moment.").manuel(
+            "Ne pas le couper d'ici (tu perdrais la connexion). S'il n'est pas utile, le désactiver depuis l'écran de l'ordinateur : Paramètres > Système > Bureau à distance",
+            &[],
+        )
+    } else if nla {
         alerte("Bureau à distance", Niveau::Moyen, "RDP activé (avec NLA). Très attaqué s'il est exposé.")
             .corriger("Désactiver le Bureau à distance si tu ne l'utilises pas", &[&couper])
     } else {
@@ -147,6 +180,11 @@ fn bureau_distance() -> Constat {
             &[&format!(r"Set-ItemProperty '{cle}\WinStations\RDP-Tcp' -Name UserAuthentication -Value 1")],
         )
     }
+}
+
+/// Cette session Windows est-elle ouverte à travers le Bureau à distance ?
+fn session_a_distance() -> bool {
+    std::env::var("SESSIONNAME").is_ok_and(|s| s.to_ascii_uppercase().starts_with("RDP-"))
 }
 
 fn uac() -> Constat {
@@ -275,4 +313,33 @@ pub fn auditer() -> Audit {
     constats.push(invite());
     constats.extend(wifi());
     Audit { systeme: NOM, score: score(&constats), constats }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn jamais_couper_le_bureau_a_distance_qu_on_utilise() {
+        // SAFETY (test) : variable propre au processus de test.
+        unsafe { std::env::set_var("SESSIONNAME", "RDP-Tcp#3") };
+        assert!(session_a_distance());
+        unsafe { std::env::set_var("SESSIONNAME", "Console") };
+        assert!(!session_a_distance());
+    }
+
+    #[test]
+    fn base64_standard() {
+        assert_eq!(base64(b"Man"), "TWFu");
+        assert_eq!(base64(b"Ma"), "TWE=");
+        assert_eq!(base64(b"M"), "TQ==");
+    }
+
+    #[test]
+    fn la_fenetre_admin_annonce_chaque_etape() {
+        let s = script_admin(&["Update-MpSignature".to_string(), "Disable-LocalUser -Name 'Invité'".to_string()]);
+        assert!(s.contains("> Update-MpSignature (peut prendre quelques minutes)"));
+        assert!(s.contains("> Disable-LocalUser -Name ''Invité''"));
+        assert!(s.contains("Read-Host"));
+    }
 }
