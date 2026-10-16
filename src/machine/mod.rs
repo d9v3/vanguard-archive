@@ -160,6 +160,8 @@ pub fn afficher(a: &Audit) {
     for c in &a.constats {
         let (icone, etiquette) = match c.probleme {
             None => (format!("{VERT}✔{RESET}"), String::new()),
+            // Une simple information n'est pas un problème : pas de croix rouge.
+            Some(Niveau::Info) => (format!("{}ℹ{RESET}", couleur(Niveau::Info)), String::new()),
             Some(n) => (format!("{}✖{RESET}", couleur(n)), format!(" {}[{}]{RESET}", couleur(n), n.libelle())),
         };
         println!("  {icone} {GRAS}{:<16}{RESET}{etiquette} {}", c.categorie, c.message);

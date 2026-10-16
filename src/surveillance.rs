@@ -13,8 +13,24 @@ fn reussit(cmd: &str, args: &[&str]) -> bool {
     Command::new(cmd).args(args).output().is_ok_and(|o| o.status.success())
 }
 
+/// Programme à planifier. Lancé depuis la clé USB, on en installe d'abord une copie locale :
+/// sinon la surveillance s'arrêterait dès que la clé est débranchée.
 fn executable() -> String {
-    std::env::current_exe().map(|p| p.display().to_string()).unwrap_or_else(|_| "netscan".into())
+    let Ok(exe) = std::env::current_exe() else { return "netscan".into() };
+    if reseau::cle_usb().is_some_and(|cle| exe.starts_with(&cle)) {
+        let dest = reseau::dossier_local().join("bin").join(exe.file_name().unwrap_or_default());
+        let copie = std::fs::create_dir_all(dest.parent().unwrap_or(&dest)).and_then(|_| std::fs::copy(&exe, &dest));
+        if copie.is_ok() {
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let _ = std::fs::set_permissions(&dest, std::fs::Permissions::from_mode(0o755));
+            }
+            println!("  {GRIS}Copie locale pour la surveillance : {}{RESET}", dest.display());
+            return dest.display().to_string();
+        }
+    }
+    exe.display().to_string()
 }
 
 fn notifier(titre: &str, corps: &str) {
@@ -73,11 +89,7 @@ fn plist() -> std::path::PathBuf {
 }
 
 pub fn activer(oui: bool) {
-    let exe = executable();
-    if oui && (exe.starts_with("/run/media/") || exe.starts_with("/Volumes/") || (cfg!(windows) && !exe.starts_with("C:"))) {
-        println!("  {GRIS}Note : netscan est lancé depuis une clé USB ; la surveillance ne tournera que si la clé est branchée.{RESET}");
-    }
-    let reussi = if oui { installer(&exe) } else { desinstaller() };
+    let reussi = if oui { installer(&executable()) } else { desinstaller() };
     match (oui, reussi) {
         (true, true) => println!("  {VERT}✔{RESET} Surveillance activée : scan toutes les heures, notification si un appareil inconnu arrive."),
         (true, false) => println!("  ✖ Impossible d'activer la surveillance."),

@@ -54,10 +54,11 @@ table{width:100%;border-collapse:collapse;margin-top:8px;font-size:14px}td{paddi
 
 pub fn generer(audit: Option<&Audit>, reseau: Option<&Rapport>) -> std::io::Result<PathBuf> {
     let mut h = String::new();
+    let date = chrono::Local::now().format("%d/%m/%Y à %H:%M");
     let _ = write!(
         h,
         "<!doctype html><html lang=fr><head><meta charset=utf-8><meta name=viewport content=\"width=device-width,initial-scale=1\">\
-         <title>Rapport netscan</title><style>{CSS}</style></head><body><main><h1>Bilan de sécurité</h1><p class=sous>Généré par netscan</p><div class=notes>"
+         <title>Rapport netscan</title><style>{CSS}</style></head><body><main><h1>Bilan de sécurité</h1><p class=sous>Généré par netscan le {date}</p><div class=notes>"
     );
     if let Some(a) = audit {
         h += &carte_note("Cette machine", a.score);

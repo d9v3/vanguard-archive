@@ -30,6 +30,26 @@ pub async fn sonder(ip: Ipv4Addr, port: u16, delai: Duration) -> (Etat, Option<T
     }
 }
 
+/// Nombre de connexions simultanées réellement possible : chaque connexion consomme un descripteur
+/// de fichier, et macOS n'en autorise que 256 par défaut. On relève la limite si le système le permet.
+pub fn limite_connexions(demande: usize) -> usize {
+    #[cfg(unix)]
+    unsafe {
+        let mut lim = libc::rlimit { rlim_cur: 0, rlim_max: 0 };
+        if libc::getrlimit(libc::RLIMIT_NOFILE, &mut lim) == 0 {
+            let voulu = (demande as libc::rlim_t + 128).min(lim.rlim_max);
+            if lim.rlim_cur < voulu {
+                lim.rlim_cur = voulu;
+                libc::setrlimit(libc::RLIMIT_NOFILE, &lim);
+                libc::getrlimit(libc::RLIMIT_NOFILE, &mut lim);
+            }
+            // On garde une marge pour stdin/stdout, les fichiers lus et les sockets DNS.
+            return demande.min((lim.rlim_cur as usize).saturating_sub(64)).max(16);
+        }
+    }
+    demande
+}
+
 /// Plage d'adresses IPv4 à partir de « 10.0.0.5 », « 10.0.0.0/24 » ou « 10.0.0.1-50 ».
 pub fn parse_cible(cible: &str) -> Result<Vec<Ipv4Addr>, String> {
     if let Some((ip, pref)) = cible.split_once('/') {
@@ -50,6 +70,9 @@ pub fn parse_cible(cible: &str) -> Result<Vec<Ipv4Addr>, String> {
         let debut: Ipv4Addr = debut.parse().map_err(|_| format!("IP invalide : {debut}"))?;
         let fin: u8 = fin.parse().map_err(|_| format!("fin de plage invalide : {fin}"))?;
         let o = debut.octets();
+        if fin < o[3] {
+            return Err(format!("plage invalide : {cible} (la fin doit être ≥ {})", o[3]));
+        }
         return Ok((o[3]..=fin).map(|d| Ipv4Addr::new(o[0], o[1], o[2], d)).collect());
     }
     cible
@@ -249,10 +272,9 @@ pub async fn scanner_ports(
 
 /// Nom DNS inverse (box, mDNS via nss…), sans bloquer le runtime.
 pub async fn nom_hote(ip: Ipv4Addr) -> Option<String> {
-    let nom = tokio::task::spawn_blocking(move || dns_lookup::lookup_addr(&IpAddr::V4(ip)))
-        .await
-        .ok()?
-        .ok()?;
+    // Délai maximal : un DNS qui ne répond pas ne doit pas bloquer tout le scan.
+    let recherche = tokio::task::spawn_blocking(move || dns_lookup::lookup_addr(&IpAddr::V4(ip)));
+    let nom = timeout(Duration::from_secs(2), recherche).await.ok()?.ok()?.ok()?;
     (nom != ip.to_string()).then_some(nom)
 }
 
@@ -273,4 +295,43 @@ pub fn fabricant(mac: &str, base: &HashMap<String, String>) -> Option<String> {
         return Some("MAC aléatoire (téléphone/tablette ?)".into());
     }
     base.get(hex.get(..6)?).cloned()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cible_cidr_exclut_reseau_et_diffusion() {
+        let ips = parse_cible("10.0.0.77/24").unwrap();
+        assert_eq!(ips.len(), 254);
+        assert_eq!(ips[0], Ipv4Addr::new(10, 0, 0, 1));
+        assert_eq!(ips[253], Ipv4Addr::new(10, 0, 0, 254));
+    }
+
+    #[test]
+    fn cible_plage_et_ip_seule() {
+        assert_eq!(parse_cible("192.168.1.10-12").unwrap().len(), 3);
+        assert_eq!(parse_cible("192.168.1.5").unwrap(), vec![Ipv4Addr::new(192, 168, 1, 5)]);
+        assert!(parse_cible("192.168.1.50-10").is_err());
+        assert!(parse_cible("10.0.0.0/8").is_err());
+        assert!(parse_cible("pas une ip").is_err());
+    }
+
+    #[test]
+    fn mac_normalisee_quel_que_soit_le_systeme() {
+        assert_eq!(normaliser_mac("f8:79:a:d:3:a2").as_deref(), Some("f8:79:0a:0d:03:a2")); // macOS
+        assert_eq!(normaliser_mac("F8-79-0A-0D-03-A2").as_deref(), Some("f8:79:0a:0d:03:a2")); // Windows
+        assert_eq!(normaliser_mac("ff-ff-ff-ff-ff-ff"), None); // diffusion
+        assert_eq!(normaliser_mac("01-00-5e-00-00-fb"), None); // multicast
+        assert_eq!(normaliser_mac("incomplete"), None);
+    }
+
+    #[test]
+    fn fabricant_et_mac_aleatoire() {
+        let base = base_fabricants();
+        assert!(base.len() > 30_000);
+        assert_eq!(fabricant("c4:34:6b:12:34:56", &base).as_deref(), Some("Hewlett Packard"));
+        assert!(fabricant("ee:12:34:56:78:9a", &base).unwrap().contains("aléatoire"));
+    }
 }

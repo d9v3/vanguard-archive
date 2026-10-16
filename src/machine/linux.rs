@@ -153,13 +153,12 @@ fn ssh_serveur() -> Constat {
 }
 
 fn mises_a_jour() -> Constat {
-    let Some(liste) = sortie("checkupdates", &[]) else {
-        // checkupdates sort avec le code 2 quand il n'y a rien à mettre à jour.
-        return if Command::new("checkupdates").output().is_ok_and(|o| o.status.code() == Some(2)) {
-            ok("Mises à jour", "Système à jour.")
-        } else {
-            alerte("Mises à jour", Niveau::Info, "Impossible de vérifier (pacman-contrib absent ou hors ligne).")
-        };
+    // checkupdates : code 0 = mises à jour listées, 2 = rien à faire, autre = erreur (hors ligne…).
+    let resultat = Command::new("checkupdates").output();
+    let liste = match resultat.as_ref().map(|o| o.status.code()) {
+        Ok(Some(0)) => String::from_utf8_lossy(&resultat.as_ref().unwrap().stdout).into_owned(),
+        Ok(Some(2)) => return ok("Mises à jour", "Système à jour."),
+        _ => return alerte("Mises à jour", Niveau::Info, "Impossible de vérifier (pacman-contrib absent ou hors ligne)."),
     };
     let n = liste.lines().count();
     let sensibles = liste
@@ -222,10 +221,11 @@ fn comptes() -> Constat {
 }
 
 fn wifi(passerelle: Option<String>) -> Option<Constat> {
-    let s = sortie("nmcli", &["-t", "-f", "ACTIVE,SSID,SECURITY", "dev", "wifi"])?;
+    // SSID en dernier et sans échappement : un nom de réseau contenant « : » reste intact.
+    let s = sortie("nmcli", &["-t", "-e", "no", "-f", "ACTIVE,SECURITY,SSID", "dev", "wifi"])?;
     let actif = s.lines().find(|l| l.starts_with("yes:"))?;
     let mut c = actif.splitn(3, ':').skip(1);
-    let (ssid, secu) = (c.next()?.to_string(), c.next().unwrap_or("").to_string());
+    let (secu, ssid) = (c.next().unwrap_or("").to_string(), c.next()?.to_string());
     let admin = format!("xdg-open https://{}", passerelle.unwrap_or_else(|| "192.168.1.1".into()));
     let routeur = "Ouvrir l'admin du routeur > Wi-Fi > Sécurité : choisir « WPA2/WPA3 » ou « WPA3 »";
     Some(if secu.is_empty() || secu == "--" {

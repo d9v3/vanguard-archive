@@ -38,10 +38,10 @@ fn defender(complet: bool) {
                 println!("  {}✖ {nom}{RESET}  {fichiers}", couleur(Niveau::Critique));
             }
             println!("  Defender a normalement déjà mis ces fichiers en quarantaine.");
-            if demander("  Supprimer définitivement les menaces détectées ? [o/N] : ").eq_ignore_ascii_case("o") {
-                if powershell_admin("Remove-MpThreat") {
-                    println!("  {VERT}✔ Menaces supprimées.{RESET}");
-                }
+            if demander("  Supprimer définitivement les menaces détectées ? [o/N] : ").eq_ignore_ascii_case("o")
+                && powershell_admin("Remove-MpThreat")
+            {
+                println!("  {VERT}✔ Menaces supprimées.{RESET}");
             }
         }
         _ => println!("  Defender n'a pas pu lancer l'analyse (antivirus tiers actif ?)."),
@@ -136,6 +136,15 @@ fn clamav(complet: bool) {
         println!("  Impossible de lancer clamscan.");
         return;
     };
+    // clamscan : 0 = sain, 1 = menaces trouvées, autre = erreur (base absente, disque illisible…).
+    if !matches!(sortie.status.code(), Some(0 | 1)) {
+        let erreur = String::from_utf8_lossy(&sortie.stderr);
+        println!("  {}✖ L'analyse a échoué : le résultat n'est pas fiable.{RESET}", couleur(Niveau::Eleve));
+        for l in erreur.lines().filter(|l| l.contains("ERROR")).take(5) {
+            println!("    {GRIS}{l}{RESET}");
+        }
+        return;
+    }
     let infectes: Vec<(String, String)> = String::from_utf8_lossy(&sortie.stdout)
         .lines()
         .filter_map(|l| {
@@ -185,7 +194,8 @@ fn clamav(complet: bool) {
 /// --exclude-dir attend une expression régulière : on échappe les points.
 #[cfg(unix)]
 fn regex_echappe(dossier: &str) -> String {
-    format!("/{}/", dossier.replace('.', "\\."))
+    // Le chemin du dossier n'a pas de « / » final : on accepte la fin de chaîne.
+    format!("/{}(/|$)", dossier.replace('.', "\\."))
 }
 
 // ───────────────────────────── Démarrage automatique ─────────────────────────────

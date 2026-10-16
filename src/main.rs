@@ -150,7 +150,7 @@ async fn menu() {
                 rapport::ouvrir(s.audit.as_ref(), s.reseau.as_ref());
             }
             "9" => surveillance::activer(!surveillance::active()),
-            "q" | "Q" | "" => break,
+            "q" | "Q" => break,
             _ => continue,
         }
         demander(&format!("\n{GRIS}Entrée pour revenir au menu…{RESET}"));

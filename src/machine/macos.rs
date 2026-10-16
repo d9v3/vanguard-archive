@@ -90,10 +90,10 @@ fn ports_ecoute(pare_feu_actif: bool) -> Vec<Constat> {
     let mut noms = std::collections::HashMap::new();
     for l in tout("lsof", &["-nP", "-iTCP", "-sTCP:LISTEN"]).lines().skip(1) {
         let c: Vec<&str> = l.split_whitespace().collect();
-        if let (Some(nom), Some(adr)) = (c.first(), c.get(8)) {
-            if let Some(p) = adr.rsplit(':').next().and_then(|p| p.parse::<u16>().ok()) {
-                noms.insert(p, nom.to_string());
-            }
+        if let (Some(nom), Some(adr)) = (c.first(), c.get(8))
+            && let Some(p) = adr.rsplit(':').next().and_then(|p| p.parse::<u16>().ok())
+        {
+            noms.insert(p, nom.to_string());
         }
     }
     let mut vus = Vec::new();

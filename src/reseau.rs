@@ -178,7 +178,7 @@ fn alertes(role: Option<&str>, ports: &[PortOuvert]) -> Vec<(Niveau, String)> {
     if ouverts.len() > 15 {
         alertes.push((Niveau::Moyen, format!("{} ports ouverts : surface d'attaque importante.", ouverts.len())));
     }
-    alertes.sort_by(|a, b| b.0.cmp(&a.0));
+    alertes.sort_by_key(|a| std::cmp::Reverse(a.0));
     alertes
 }
 
@@ -235,6 +235,7 @@ pub async fn executer(o: Options) -> Result<Rapport, String> {
     let ports = parse_ports(&o.ports)?;
     let delai = Duration::from_millis(o.timeout);
     let gw = scan::passerelle();
+    let parallele = scan::limite_connexions(o.parallele);
 
     if bavard {
         eprintln!("{GRAS}Scan réseau{RESET} — {cible} ({} adresses, {} ports chacune)", ips.len(), ports.len());
@@ -243,7 +244,7 @@ pub async fn executer(o: Options) -> Result<Rapport, String> {
     let mut vivantes = if ips.len() == 1 {
         ips.clone()
     } else {
-        scan::decouvrir(&ips, Duration::from_millis(o.timeout.min(400)), o.parallele).await
+        scan::decouvrir(&ips, Duration::from_millis(o.timeout.min(400)), parallele).await
     };
     // Cette machine ne répond pas toujours à ses propres sondes sur l'IP du LAN.
     if let Some(m) = moi.filter(|m| ips.contains(m) && !vivantes.contains(m)) {
@@ -254,7 +255,7 @@ pub async fn executer(o: Options) -> Result<Rapport, String> {
     if bavard {
         eprintln!("{GRIS}{} appareil(s) trouvé(s). Scan des ports…{RESET}", vivantes.len());
     }
-    let resultats = scan::scanner_ports(&vivantes, &ports, delai, o.parallele).await;
+    let resultats = scan::scanner_ports(&vivantes, &ports, delai, parallele).await;
     let noms = join_all(vivantes.iter().map(|&ip| scan::nom_hote(ip))).await;
     let arp = scan::table_arp();
     let base = scan::base_fabricants();
@@ -277,6 +278,8 @@ pub async fn executer(o: Options) -> Result<Rapport, String> {
         }
     }
     let premier_scan = histo.appareils.is_empty();
+    // Un port hors de la liste courante n'a jamais pu être vu par les scans précédents : pas de faux « nouveau ».
+    let comparable = |port: u16| PORTS_COURANTS.contains(&port);
     // Une machine est reconnue par sa MAC (l'IP DHCP peut changer), sinon par son IP.
     let cle = |ip: Ipv4Addr, mac: &Option<String>| mac.clone().unwrap_or_else(|| ip.to_string());
 
@@ -290,7 +293,7 @@ pub async fn executer(o: Options) -> Result<Rapport, String> {
                 .into_iter()
                 .map(|(port, banniere)| {
                     let i = info_port(port);
-                    let nouveau = !premier_scan && !connu.is_some_and(|c| c.ports.contains(&port));
+                    let nouveau = !premier_scan && comparable(port) && !connu.is_some_and(|c| c.ports.contains(&port));
                     PortOuvert { port, service: i.service, niveau: i.niveau, banniere, conseil: i.conseil, nouveau }
                 })
                 .collect();
@@ -357,4 +360,31 @@ pub async fn executer(o: Options) -> Result<Rapport, String> {
         afficher(&rapport);
     }
     Ok(rapport)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn listes_de_ports() {
+        assert_eq!(parse_ports("22, 80,8000-8002").unwrap(), vec![22, 80, 8000, 8001, 8002]);
+        assert_eq!(parse_ports("tous").unwrap().len(), 65535);
+        assert_eq!(parse_ports("courants").unwrap(), PORTS_COURANTS);
+        assert!(parse_ports("80,abc").is_err());
+    }
+
+    #[test]
+    fn alertes_croisees() {
+        let port = |p: u16| {
+            let i = info_port(p);
+            PortOuvert { port: p, service: i.service, niveau: i.niveau, banniere: None, conseil: i.conseil, nouveau: false }
+        };
+        let routeur = alertes(Some("passerelle"), &[port(80)]);
+        assert!(routeur.iter().any(|(_, m)| m.contains("routeur")));
+        let windows = alertes(None, &[port(139), port(445)]);
+        assert!(windows.iter().any(|(_, m)| m.contains("SMBv1")));
+        // La plus grave en premier.
+        assert!(windows.windows(2).all(|w| w[0].0 >= w[1].0));
+    }
 }
