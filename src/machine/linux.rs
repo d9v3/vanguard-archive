@@ -255,10 +255,19 @@ fn ports_ecoute(pare_feu_actif: bool) -> Vec<Constat> {
                 ),
                 // Un seul conseil par programme, même s'il ouvre un port TCP et un port UDP.
                 "steam" if !deja_conseille.insert("steam") => constat,
-                "steam" => constat.manuel(
-                    "Si tu n'utilises pas Remote Play : Steam > Paramètres > Remote Play > décocher « Activer Remote Play »",
-                    &[],
-                ),
+                "steam" => match remote_play_steam() {
+                    // Réglage déjà coupé : le port vient d'un Steam pas redémarré, ou de sa découverte locale.
+                    Some(false) => constat.manuel(
+                        "Remote Play est déjà désactivé dans Steam, mais Steam garde le port qu'il a ouvert au démarrage : \
+                         quitte complètement Steam et relance-le. S'il reste ouvert, c'est la découverte des autres PC Steam \
+                         du réseau ; ton pare-feu le bloque de toute façon",
+                        &[],
+                    ),
+                    _ => constat.manuel(
+                        "Si tu n'utilises pas Remote Play : Steam > Paramètres > Remote Play > décocher « Activer Remote Play »",
+                        &[],
+                    ),
+                },
                 _ if niveau >= Niveau::Moyen && pare_feu_actif => {
                     constat.corriger(format!("Bloquer le port {port}/{proto} dans le pare-feu"), &[&deny])
                 }
@@ -273,6 +282,29 @@ fn ports_ecoute(pare_feu_actif: bool) -> Vec<Constat> {
         ));
     }
     constats
+}
+
+/// Remote Play est-il activé dans Steam ? Lu dans le réglage « EnableStreaming » de chaque compte Steam.
+/// `None` si le réglage est introuvable (Steam absent ou jamais configuré).
+fn remote_play_steam() -> Option<bool> {
+    let maison = Path::new(&home()).to_path_buf();
+    let valeurs: Vec<bool> = [".steam/steam/userdata", ".local/share/Steam/userdata"]
+        .iter()
+        .filter_map(|d| std::fs::read_dir(maison.join(d)).ok())
+        .flatten()
+        .flatten()
+        .filter_map(|compte| std::fs::read_to_string(compte.path().join("config/localconfig.vdf")).ok())
+        .filter_map(|t| enable_streaming(&t))
+        .collect();
+    (!valeurs.is_empty()).then(|| valeurs.iter().any(|v| *v))
+}
+
+/// Valeur de « EnableStreaming » dans un fichier de réglages Steam (format VDF : "clé"<tab>"valeur").
+fn enable_streaming(vdf: &str) -> Option<bool> {
+    vdf.lines().find_map(|l| {
+        let mut champs = l.split('"').filter(|c| !c.trim().is_empty());
+        (champs.next()? == "EnableStreaming").then(|| champs.next() == Some("1"))
+    })
 }
 
 /// Ports de conteneurs joignables depuis le réseau, dans la colonne « Ports » de `docker ps` : tout sauf la
@@ -1594,6 +1626,16 @@ mod tests {
         assert_eq!(regles_nopasswd(omarchy), (vec![], 1));
         let tout = "    (ALL : ALL) NOPASSWD: ALL\n";
         assert_eq!(regles_nopasswd(tout).0.len(), 1);
+    }
+
+    #[test]
+    fn reglage_remote_play() {
+        assert_eq!(enable_streaming("\t\t\"EnableStreaming\"\t\t\"0\"\n"), Some(false));
+        assert_eq!(
+            enable_streaming("\"x\" \"y\"\n\t\"EnableStreaming\"\t\"1\""),
+            Some(true)
+        );
+        assert_eq!(enable_streaming("\"Autre\"\t\"1\""), None);
     }
 
     #[test]
