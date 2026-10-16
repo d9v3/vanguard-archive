@@ -35,7 +35,10 @@ pub async fn sonder(ip: Ipv4Addr, port: u16, delai: Duration) -> (Etat, Option<T
 pub fn limite_connexions(demande: usize) -> usize {
     #[cfg(unix)]
     unsafe {
-        let mut lim = libc::rlimit { rlim_cur: 0, rlim_max: 0 };
+        let mut lim = libc::rlimit {
+            rlim_cur: 0,
+            rlim_max: 0,
+        };
         if libc::getrlimit(libc::RLIMIT_NOFILE, &mut lim) == 0 {
             let voulu = (demande as libc::rlim_t + 128).min(lim.rlim_max);
             if lim.rlim_cur < voulu {
@@ -149,9 +152,15 @@ pub fn passerelle() -> Option<Ipv4Addr> {
 
 /// Normalise une MAC en « aa:bb:cc:dd:ee:ff » (macOS écrit « a:b:… », Windows « aa-bb-… »).
 fn normaliser_mac(brut: &str) -> Option<String> {
-    let parties: Vec<String> = brut.split([':', '-']).map(|p| format!("{:0>2}", p.to_ascii_lowercase())).collect();
+    let parties: Vec<String> = brut
+        .split([':', '-'])
+        .map(|p| format!("{:0>2}", p.to_ascii_lowercase()))
+        .collect();
     let mac = parties.join(":");
-    let valide = parties.len() == 6 && parties.iter().all(|p| p.len() == 2 && u8::from_str_radix(p, 16).is_ok());
+    let valide = parties.len() == 6
+        && parties
+            .iter()
+            .all(|p| p.len() == 2 && u8::from_str_radix(p, 16).is_ok());
     // On écarte diffusion et multicast, qui ne sont pas des appareils.
     let multicast = u8::from_str_radix(&parties[0], 16).is_ok_and(|o| o & 1 == 1);
     (valide && !multicast && mac != "00:00:00:00:00:00").then_some(mac)
@@ -166,7 +175,9 @@ pub fn table_arp() -> HashMap<Ipv4Addr, String> {
         .skip(1)
         .filter_map(|l| {
             let c: Vec<&str> = l.split_whitespace().collect();
-            (c.get(2) == Some(&"0x2")).then(|| Some((c.first()?.to_string(), c.get(3)?.to_string()))).flatten()
+            (c.get(2) == Some(&"0x2"))
+                .then(|| Some((c.first()?.to_string(), c.get(3)?.to_string())))
+                .flatten()
         })
         .collect();
     // macOS : « ? (10.0.0.1) at f8:79:a:d:3:a2 on en0 … »
@@ -219,7 +230,10 @@ pub async fn decouvrir(ips: &[Ipv4Addr], delai: Duration, parallele: usize) -> V
 /// Ce qu'un service répond, ou rien s'il se tait pendant 1,2 s.
 async fn lire(flux: &mut TcpStream) -> Option<String> {
     let mut buf = [0u8; 512];
-    let n = timeout(Duration::from_millis(1200), flux.read(&mut buf)).await.ok()?.ok()?;
+    let n = timeout(Duration::from_millis(1200), flux.read(&mut buf))
+        .await
+        .ok()?
+        .ok()?;
     (n > 0).then(|| String::from_utf8_lossy(&buf[..n]).into_owned())
 }
 
@@ -229,7 +243,10 @@ fn resume_http(texte: &str) -> String {
         .lines()
         .find(|l| l.to_ascii_lowercase().starts_with("server:"))
         .map(|l| l[7..].trim().to_string());
-    format!("HTTP · {}", serveur.unwrap_or_else(|| texte.lines().next().unwrap_or("").trim().to_string()))
+    format!(
+        "HTTP · {}",
+        serveur.unwrap_or_else(|| texte.lines().next().unwrap_or("").trim().to_string())
+    )
 }
 
 /// Ce que le service annonce (SSH, FTP, SMTP…). Sur un port web, ou si le service se tait,
@@ -264,9 +281,7 @@ pub async fn scanner_ports(
     delai: Duration,
     parallele: usize,
 ) -> BTreeMap<Ipv4Addr, Vec<(u16, Option<String>)>> {
-    let essais = hotes
-        .iter()
-        .flat_map(|&ip| ports.iter().map(move |&p| (ip, p)));
+    let essais = hotes.iter().flat_map(|&ip| ports.iter().map(move |&p| (ip, p)));
     let trouves: Vec<(Ipv4Addr, u16, Option<String>)> = stream::iter(essais)
         .map(|(ip, p)| async move {
             match sonder(ip, p, delai).await {
@@ -307,7 +322,11 @@ pub fn base_fabricants() -> HashMap<String, String> {
 }
 
 pub fn fabricant(mac: &str, base: &HashMap<String, String>) -> Option<String> {
-    let hex: String = mac.chars().filter(|c| c.is_ascii_hexdigit()).collect::<String>().to_ascii_uppercase();
+    let hex: String = mac
+        .chars()
+        .filter(|c| c.is_ascii_hexdigit())
+        .collect::<String>()
+        .to_ascii_uppercase();
     let premier = u8::from_str_radix(hex.get(..2)?, 16).ok()?;
     // Bit « administré localement » : MAC aléatoire, typique des téléphones et tablettes récents.
     if premier & 0x02 != 0 {
@@ -340,7 +359,10 @@ mod tests {
     #[test]
     fn mac_normalisee_quel_que_soit_le_systeme() {
         assert_eq!(normaliser_mac("f8:79:a:d:3:a2").as_deref(), Some("f8:79:0a:0d:03:a2")); // macOS
-        assert_eq!(normaliser_mac("F8-79-0A-0D-03-A2").as_deref(), Some("f8:79:0a:0d:03:a2")); // Windows
+        assert_eq!(
+            normaliser_mac("F8-79-0A-0D-03-A2").as_deref(),
+            Some("f8:79:0a:0d:03:a2")
+        ); // Windows
         assert_eq!(normaliser_mac("ff-ff-ff-ff-ff-ff"), None); // diffusion
         assert_eq!(normaliser_mac("01-00-5e-00-00-fb"), None); // multicast
         assert_eq!(normaliser_mac("incomplete"), None);
@@ -350,7 +372,10 @@ mod tests {
     fn fabricant_et_mac_aleatoire() {
         let base = base_fabricants();
         assert!(base.len() > 30_000);
-        assert_eq!(fabricant("c4:34:6b:12:34:56", &base).as_deref(), Some("Hewlett Packard"));
+        assert_eq!(
+            fabricant("c4:34:6b:12:34:56", &base).as_deref(),
+            Some("Hewlett Packard")
+        );
         assert!(fabricant("ee:12:34:56:78:9a", &base).unwrap().contains("aléatoire"));
     }
 }

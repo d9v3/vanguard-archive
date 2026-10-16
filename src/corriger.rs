@@ -23,16 +23,29 @@ pub fn corriger(audit: &Audit, reseau: Option<&Rapport>) -> Option<Audit> {
     if auto.is_empty() {
         println!("  {VERT}✔{RESET} Rien à corriger automatiquement sur cette machine.");
     } else {
-        println!("  {} correction(s) possible(s). Chacune te sera montrée avant d'être appliquée.", auto.len());
+        println!(
+            "  {} correction(s) possible(s). Chacune te sera montrée avant d'être appliquée.",
+            auto.len()
+        );
         let mut tout = false;
         for (c, k) in auto {
             let n = c.probleme.unwrap_or(Niveau::Info);
-            println!("\n  {}[{}]{RESET} {GRAS}{}{RESET} — {}", couleur(n), n.libelle(), c.categorie, c.message);
+            println!(
+                "\n  {}[{}]{RESET} {GRAS}{}{RESET} — {}",
+                couleur(n),
+                n.libelle(),
+                c.categorie,
+                c.message
+            );
             println!("  🔧 {}", k.action);
             for cmd in &k.commandes {
                 println!("    {GRIS}{cmd}{RESET}");
             }
-            let rep = if tout { "o".into() } else { demander("  Appliquer ? [o]ui / [n]on / [t]out appliquer : ").to_lowercase() };
+            let rep = if tout {
+                "o".into()
+            } else {
+                demander("  Appliquer ? [o]ui / [n]on / [t]out appliquer : ").to_lowercase()
+            };
             if rep == "t" {
                 tout = true;
             }
@@ -58,7 +71,11 @@ pub fn corriger(audit: &Audit, reseau: Option<&Rapport>) -> Option<Audit> {
     }
 
     if let Some(r) = reseau {
-        let exposes: Vec<_> = r.hotes.iter().filter(|h| h.role != Some("cette machine") && !h.alertes.is_empty()).collect();
+        let exposes: Vec<_> = r
+            .hotes
+            .iter()
+            .filter(|h| h.role != Some("cette machine") && !h.alertes.is_empty())
+            .collect();
         if !exposes.is_empty() {
             titre("Autres appareils du réseau (à corriger sur l'appareil lui-même)");
             for h in exposes {
@@ -70,7 +87,9 @@ pub fn corriger(audit: &Audit, reseau: Option<&Rapport>) -> Option<Audit> {
                     println!("    {GRIS}interface d'admin : http://{}{RESET}", h.ip);
                 }
                 if h.ports.iter().any(|p| [135, 139, 445].contains(&p.port)) {
-                    println!("    {GRIS}PC Windows : Paramètres > Réseau > Propriétés > profil « Public », et dans PowerShell admin :{RESET}");
+                    println!(
+                        "    {GRIS}PC Windows : Paramètres > Réseau > Propriétés > profil « Public », et dans PowerShell admin :{RESET}"
+                    );
                     println!("    {GRIS}  Set-SmbServerConfiguration -EnableSMB1Protocol $false{RESET}");
                 }
             }

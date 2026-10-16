@@ -24,7 +24,14 @@ pub struct Options {
 
 impl Options {
     pub fn defaut(cible: Option<String>, ports: &str) -> Self {
-        Options { cible, ports: ports.into(), timeout: 500, parallele: 512, json: false, silencieux: false }
+        Options {
+            cible,
+            ports: ports.into(),
+            timeout: 500,
+            parallele: 512,
+            json: false,
+            silencieux: false,
+        }
     }
 }
 
@@ -142,15 +149,23 @@ impl AppareilConnu {
 
 impl Base {
     fn lire(p: &std::path::Path) -> Base {
-        let Ok(texte) = std::fs::read_to_string(p) else { return Base::default() };
+        let Ok(texte) = std::fs::read_to_string(p) else {
+            return Base::default();
+        };
         // Le Bloc-notes et PowerShell 5.1 ajoutent une marque d'ordre des octets (BOM) en tête.
         match serde_json::from_str(texte.trim_start_matches('\u{feff}')) {
             Ok(base) => base,
             Err(e) => {
                 // Jamais écraser une base qu'on ne sait pas lire : on la met de côté, intacte.
-                let copie = p.with_extension(format!("illisible-{}.json", chrono::Local::now().format("%Y%m%d-%H%M%S")));
+                let copie = p.with_extension(format!(
+                    "illisible-{}.json",
+                    chrono::Local::now().format("%Y%m%d-%H%M%S")
+                ));
                 let _ = std::fs::copy(p, &copie);
-                eprintln!("Attention : base des appareils illisible ({e}). Copie gardée : {}", copie.display());
+                eprintln!(
+                    "Attention : base des appareils illisible ({e}). Copie gardée : {}",
+                    copie.display()
+                );
                 Base::default()
             }
         }
@@ -231,7 +246,9 @@ pub fn nommer(qui: &str, surnom: Option<&str>) -> Result<String, String> {
         }
     }
     if trouves == 0 {
-        return Err(format!("aucun appareil « {qui} » dans la base : lance d'abord un scan du réseau (netscan reseau)"));
+        return Err(format!(
+            "aucun appareil « {qui} » dans la base : lance d'abord un scan du réseau (netscan reseau)"
+        ));
     }
     base.enregistrer(&chemins);
     Ok(decrit)
@@ -244,7 +261,10 @@ pub const TEMOIN_CLE: &str = "netscan.cle";
 pub fn cle_usb() -> Option<PathBuf> {
     // D'abord : sommes-nous lancés depuis la clé ? (exe dans <clé>/Linux/, <clé>/Windows/…)
     let exe = std::env::current_exe().ok().and_then(|e| e.canonicalize().ok());
-    let depuis_exe = exe.iter().flat_map(|e| e.ancestors().skip(1).take(2).map(PathBuf::from)).collect::<Vec<_>>();
+    let depuis_exe = exe
+        .iter()
+        .flat_map(|e| e.ancestors().skip(1).take(2).map(PathBuf::from))
+        .collect::<Vec<_>>();
     #[cfg(target_os = "linux")]
     let montages: Vec<PathBuf> = std::env::var("USER")
         .ok()
@@ -255,10 +275,18 @@ pub fn cle_usb() -> Option<PathBuf> {
         .map(|d| d.path())
         .collect();
     #[cfg(target_os = "macos")]
-    let montages: Vec<PathBuf> = std::fs::read_dir("/Volumes").into_iter().flatten().flatten().map(|d| d.path()).collect();
+    let montages: Vec<PathBuf> = std::fs::read_dir("/Volumes")
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|d| d.path())
+        .collect();
     #[cfg(windows)]
     let montages: Vec<PathBuf> = ('D'..='Z').map(|l| PathBuf::from(format!("{l}:\\"))).collect();
-    depuis_exe.into_iter().chain(montages).find(|d| d.join(TEMOIN_CLE).is_file())
+    depuis_exe
+        .into_iter()
+        .chain(montages)
+        .find(|d| d.join(TEMOIN_CLE).is_file())
 }
 
 /// Données (historique des appareils, rapports) : sur la clé USB quand elle est branchée,
@@ -312,23 +340,38 @@ fn alertes(role: Option<&str>, ports: &[PortOuvert]) -> Vec<(Niveau, String)> {
         .map(|p| (p.niveau, format!("{} ({}) : {}", p.service, p.port, p.conseil)))
         .collect();
     if role == Some("passerelle") && a(80) && !a(443) {
-        alertes.push((Niveau::Moyen, "Admin du routeur uniquement en HTTP : le mot de passe passe en clair.".into()));
+        alertes.push((
+            Niveau::Moyen,
+            "Admin du routeur uniquement en HTTP : le mot de passe passe en clair.".into(),
+        ));
     }
     if a(139) && a(445) {
-        alertes.push((Niveau::Moyen, "NetBIOS + SMB : vérifier que SMBv1 est désactivé.".into()));
+        alertes.push((
+            Niveau::Moyen,
+            "NetBIOS + SMB : vérifier que SMBv1 est désactivé.".into(),
+        ));
     }
     for p in ports {
         if let Some(b) = &p.banniere {
             if b.starts_with("SSH-1.") {
-                alertes.push((Niveau::Critique, format!("Port {} : SSH version 1, cassé depuis 2001.", p.port)));
+                alertes.push((
+                    Niveau::Critique,
+                    format!("Port {} : SSH version 1, cassé depuis 2001.", p.port),
+                ));
             }
             if b.contains("vsFTPd 2.3.4") {
-                alertes.push((Niveau::Critique, "vsFTPd 2.3.4 : version piégée (backdoor connue).".into()));
+                alertes.push((
+                    Niveau::Critique,
+                    "vsFTPd 2.3.4 : version piégée (backdoor connue).".into(),
+                ));
             }
         }
     }
     if ouverts.len() > 15 {
-        alertes.push((Niveau::Moyen, format!("{} ports ouverts : surface d'attaque importante.", ouverts.len())));
+        alertes.push((
+            Niveau::Moyen,
+            format!("{} ports ouverts : surface d'attaque importante.", ouverts.len()),
+        ));
     }
     alertes.sort_by_key(|a| std::cmp::Reverse(a.0));
     alertes
@@ -339,8 +382,16 @@ fn afficher(r: &Rapport) {
     titre(&format!("Réseau{nom} {}", r.reseau));
     for h in &r.hotes {
         let role = h.role.map(|r| format!(" [{r}]")).unwrap_or_default();
-        let mac = h.mac.as_deref().map(|m| format!("  {GRIS}{m}{RESET}")).unwrap_or_default();
-        let neuve = if h.nouvelle { format!("  {}NOUVEL APPAREIL{RESET}", couleur(Niveau::Moyen)) } else { String::new() };
+        let mac = h
+            .mac
+            .as_deref()
+            .map(|m| format!("  {GRIS}{m}{RESET}"))
+            .unwrap_or_default();
+        let neuve = if h.nouvelle {
+            format!("  {}NOUVEL APPAREIL{RESET}", couleur(Niveau::Moyen))
+        } else {
+            String::new()
+        };
         let depuis = match (&h.premier_vu, h.nouvelle) {
             (Some(d), false) => format!("  {GRIS}connu depuis le {}{RESET}", date_fr(d)),
             _ => String::new(),
@@ -350,12 +401,27 @@ fn afficher(r: &Rapport) {
             println!("    {GRIS}aucun port ouvert parmi ceux testés{RESET}");
         }
         for p in &h.ports {
-            let b = p.banniere.as_deref().map(|b| format!("  {GRIS}« {b} »{RESET}")).unwrap_or_default();
-            let prog = p.programme.as_deref().map(|n| format!("  {GRAS}programme : {n}{RESET}")).unwrap_or_default();
-            let nouv = if p.nouveau && !h.nouvelle { format!(" {}(nouveau){RESET}", couleur(Niveau::Moyen)) } else { String::new() };
+            let b = p
+                .banniere
+                .as_deref()
+                .map(|b| format!("  {GRIS}« {b} »{RESET}"))
+                .unwrap_or_default();
+            let prog = p
+                .programme
+                .as_deref()
+                .map(|n| format!("  {GRAS}programme : {n}{RESET}"))
+                .unwrap_or_default();
+            let nouv = if p.nouveau && !h.nouvelle {
+                format!(" {}(nouveau){RESET}", couleur(Niveau::Moyen))
+            } else {
+                String::new()
+            };
             println!(
                 "    {:>5}/tcp  {:<17} {}{:<8}{RESET}{nouv}{prog}{b}",
-                p.port, p.service, couleur(p.niveau), p.niveau.libelle()
+                p.port,
+                p.service,
+                couleur(p.niveau),
+                p.niveau.libelle()
             );
         }
         for (n, msg) in &h.alertes {
@@ -367,7 +433,11 @@ fn afficher(r: &Rapport) {
     if !r.absents.is_empty() {
         println!("\n{GRIS}Déjà vus sur ce réseau, absents aujourd'hui :{RESET}");
         for a in &r.absents {
-            let quand = a.dernier_vu.as_deref().map(|d| format!(" — vu le {}", date_fr(d))).unwrap_or_default();
+            let quand = a
+                .dernier_vu
+                .as_deref()
+                .map(|d| format!(" — vu le {}", date_fr(d)))
+                .unwrap_or_default();
             println!("  {GRIS}○ {} {}{quand}{RESET}", a.ip, a.titre);
         }
     }
@@ -379,9 +449,12 @@ fn afficher(r: &Rapport) {
         r.hotes.len(),
         r.hotes.iter().filter(|h| h.nouvelle).count(),
         r.hotes.iter().map(|h| h.ports.len()).sum::<usize>(),
-        couleur(Niveau::Critique), compte(Niveau::Critique),
-        couleur(Niveau::Eleve), compte(Niveau::Eleve),
-        couleur(Niveau::Moyen), compte(Niveau::Moyen),
+        couleur(Niveau::Critique),
+        compte(Niveau::Critique),
+        couleur(Niveau::Eleve),
+        compte(Niveau::Eleve),
+        couleur(Niveau::Moyen),
+        compte(Niveau::Moyen),
     );
     afficher_note("Note du réseau (appareil le plus exposé)", r.score_global);
     println!("  {GRIS}Durée : {:.1} s{RESET}", r.duree_s);
@@ -395,7 +468,11 @@ pub async fn executer(o: Options) -> Result<Rapport, String> {
     let moi = local.as_ref().map(|l| l.1);
     let cible = match o.cible {
         Some(c) => c,
-        None => local.ok_or("impossible de détecter le réseau local ; précise une cible (ex. 192.168.1.0/24)")?.0,
+        None => {
+            local
+                .ok_or("impossible de détecter le réseau local ; précise une cible (ex. 192.168.1.0/24)")?
+                .0
+        }
     };
     let ips = scan::parse_cible(&cible)?;
     let ports = parse_ports(&o.ports)?;
@@ -404,7 +481,11 @@ pub async fn executer(o: Options) -> Result<Rapport, String> {
     let parallele = scan::limite_connexions(o.parallele);
 
     if bavard {
-        eprintln!("{GRAS}Scan réseau{RESET} — {cible} ({} adresses, {} ports chacune)", ips.len(), ports.len());
+        eprintln!(
+            "{GRAS}Scan réseau{RESET} — {cible} ({} adresses, {} ports chacune)",
+            ips.len(),
+            ports.len()
+        );
         eprintln!("{GRIS}Découverte des appareils…{RESET}");
     }
     let mut vivantes = if ips.len() == 1 {
@@ -421,7 +502,9 @@ pub async fn executer(o: Options) -> Result<Rapport, String> {
     if bavard {
         eprintln!("{GRIS}{} appareil(s) trouvé(s). Scan des ports…{RESET}", vivantes.len());
         if ips.iter().all(|ip| ip.is_loopback()) {
-            eprintln!("{GRIS}Note : 127.0.0.1 montre aussi les services réservés à cette machine. Pour ce qui est vraiment exposé au réseau : netscan machine.{RESET}");
+            eprintln!(
+                "{GRIS}Note : 127.0.0.1 montre aussi les services réservés à cette machine. Pour ce qui est vraiment exposé au réseau : netscan machine.{RESET}"
+            );
         }
     }
     let resultats = scan::scanner_ports(&vivantes, &ports, delai, parallele).await;
@@ -431,7 +514,9 @@ pub async fn executer(o: Options) -> Result<Rapport, String> {
 
     let (mut base, chemins) = Base::charger();
     // Le carnet de ce réseau : reconnu à la MAC de la box, sinon à la plage d'adresses.
-    let id_reseau = gw.and_then(|g| arp.get(&g).cloned()).unwrap_or_else(|| format!("plage {cible}"));
+    let id_reseau = gw
+        .and_then(|g| arp.get(&g).cloned())
+        .unwrap_or_else(|| format!("plage {cible}"));
     let nom_reseau = scan::nom_wifi();
     if !base.appareils.is_empty() {
         let anciens = std::mem::take(&mut base.appareils);
@@ -466,9 +551,22 @@ pub async fn executer(o: Options) -> Result<Rapport, String> {
                         _ => port,
                     };
                     let i = info_port(type_port);
-                    let nouveau = scan_comparable && !premier_scan && comparable(port) && !connu.is_some_and(|c| c.ports.contains(&port));
-                    let programme = (Some(ip) == moi || ip.is_loopback()).then(|| programmes.get(&port).cloned()).flatten();
-                    PortOuvert { port, service: i.service, niveau: i.niveau, banniere, conseil: i.conseil, nouveau, programme }
+                    let nouveau = scan_comparable
+                        && !premier_scan
+                        && comparable(port)
+                        && !connu.is_some_and(|c| c.ports.contains(&port));
+                    let programme = (Some(ip) == moi || ip.is_loopback())
+                        .then(|| programmes.get(&port).cloned())
+                        .flatten();
+                    PortOuvert {
+                        port,
+                        service: i.service,
+                        niveau: i.niveau,
+                        banniere,
+                        conseil: i.conseil,
+                        nouveau,
+                        programme,
+                    }
                 })
                 .collect();
             let role = if Some(ip) == gw {
@@ -505,19 +603,26 @@ pub async fn executer(o: Options) -> Result<Rapport, String> {
             .appareils
             .iter()
             .filter(|(k, _)| !presents.contains(*k))
-            .map(|(_, a)| Absent { ip: a.ip, titre: a.titre(), dernier_vu: a.dernier_vu.clone() })
+            .map(|(_, a)| Absent {
+                ip: a.ip,
+                titre: a.titre(),
+                dernier_vu: a.dernier_vu.clone(),
+            })
             .collect();
         let jour = aujourd_hui();
         for h in &hotes {
-            let a = histo.appareils.entry(cle(h.ip, &h.mac)).or_insert_with(|| AppareilConnu {
-                ip: h.ip,
-                nom: None,
-                fabricant: None,
-                ports: BTreeSet::new(),
-                surnom: None,
-                premier_vu: Some(jour.clone()),
-                dernier_vu: None,
-            });
+            let a = histo
+                .appareils
+                .entry(cle(h.ip, &h.mac))
+                .or_insert_with(|| AppareilConnu {
+                    ip: h.ip,
+                    nom: None,
+                    fabricant: None,
+                    ports: BTreeSet::new(),
+                    surnom: None,
+                    premier_vu: Some(jour.clone()),
+                    dernier_vu: None,
+                });
             a.ip = h.ip;
             a.nom = h.nom.clone().or(a.nom.take());
             a.fabricant = h.fabricant.clone();
@@ -571,8 +676,23 @@ mod tests {
         assert_eq!(a.ports.len(), 2);
         assert!(a.surnom.is_none() && a.premier_vu.is_none());
         // Une fois migré, l'ancien champ n'est plus écrit.
-        let migre = Base { reseaux: BTreeMap::from([("box".into(), ReseauConnu { nom: None, appareils: base.appareils })]), appareils: BTreeMap::new() };
-        assert!(!serde_json::to_value(&migre).unwrap().as_object().unwrap().contains_key("appareils"));
+        let migre = Base {
+            reseaux: BTreeMap::from([(
+                "box".into(),
+                ReseauConnu {
+                    nom: None,
+                    appareils: base.appareils,
+                },
+            )]),
+            appareils: BTreeMap::new(),
+        };
+        assert!(
+            !serde_json::to_value(&migre)
+                .unwrap()
+                .as_object()
+                .unwrap()
+                .contains_key("appareils")
+        );
     }
 
     #[test]
@@ -580,12 +700,19 @@ mod tests {
         let dossier = std::env::temp_dir().join(format!("netscan-base-{}", std::process::id()));
         std::fs::create_dir_all(&dossier).unwrap();
         let p = dossier.join("appareils.json");
-        std::fs::write(&p, "\u{feff}{\"reseaux\":{\"box\":{\"nom\":\"Salon\",\"appareils\":{}}}}").unwrap();
+        std::fs::write(
+            &p,
+            "\u{feff}{\"reseaux\":{\"box\":{\"nom\":\"Salon\",\"appareils\":{}}}}",
+        )
+        .unwrap();
         assert_eq!(Base::lire(&p).reseaux["box"].nom.as_deref(), Some("Salon"));
         std::fs::write(&p, "{ abîmé").unwrap();
         assert!(Base::lire(&p).reseaux.is_empty());
         // La base abîmée est gardée de côté, pas perdue.
-        let copies = std::fs::read_dir(&dossier).unwrap().filter(|f| f.as_ref().unwrap().file_name().to_string_lossy().contains("illisible")).count();
+        let copies = std::fs::read_dir(&dossier)
+            .unwrap()
+            .filter(|f| f.as_ref().unwrap().file_name().to_string_lossy().contains("illisible"))
+            .count();
         assert_eq!(copies, 1);
         std::fs::remove_dir_all(&dossier).unwrap();
     }
@@ -601,7 +728,13 @@ mod tests {
             premier_vu: Some(premier.into()),
             dernier_vu: Some(dernier.into()),
         };
-        let mut cle = fiche(&[80], "2026-10-16", "2026-10-16", Some("imprimante HP"), [10, 0, 0, 138]);
+        let mut cle = fiche(
+            &[80],
+            "2026-10-16",
+            "2026-10-16",
+            Some("imprimante HP"),
+            [10, 0, 0, 138],
+        );
         cle.fusionner(fiche(&[445], "2026-09-01", "2026-10-20", None, [10, 0, 0, 140]));
         assert_eq!(cle.ports.len(), 2);
         assert_eq!(cle.premier_vu.as_deref(), Some("2026-09-01"));
@@ -615,7 +748,15 @@ mod tests {
     fn alertes_croisees() {
         let port = |p: u16| {
             let i = info_port(p);
-            PortOuvert { port: p, service: i.service, niveau: i.niveau, banniere: None, conseil: i.conseil, nouveau: false, programme: None }
+            PortOuvert {
+                port: p,
+                service: i.service,
+                niveau: i.niveau,
+                banniere: None,
+                conseil: i.conseil,
+                nouveau: false,
+                programme: None,
+            }
         };
         let routeur = alertes(Some("passerelle"), &[port(80)]);
         assert!(routeur.iter().any(|(_, m)| m.contains("routeur")));

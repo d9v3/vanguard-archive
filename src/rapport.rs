@@ -8,7 +8,10 @@ use crate::reseau::Rapport;
 use crate::risk::{Niveau, note};
 
 fn esc(s: &str) -> String {
-    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
 }
 
 fn classe(n: Option<Niveau>) -> &'static str {
@@ -22,12 +25,18 @@ fn classe(n: Option<Niveau>) -> &'static str {
 }
 
 fn badge(n: Option<Niveau>) -> String {
-    format!("<span class=\"badge {}\">{}</span>", classe(n), n.map_or("OK", Niveau::libelle))
+    format!(
+        "<span class=\"badge {}\">{}</span>",
+        classe(n),
+        n.map_or("OK", Niveau::libelle)
+    )
 }
 
 fn carte_note(titre: &str, score: u32) -> String {
     let n = note(score);
-    format!("<div class=\"note n{n}\"><div class=\"lettre\">{n}</div><div><div class=\"etiq\">{titre}</div><div class=\"score\">{score}/100</div></div></div>")
+    format!(
+        "<div class=\"note n{n}\"><div class=\"lettre\">{n}</div><div><div class=\"etiq\">{titre}</div><div class=\"score\">{score}/100</div></div></div>"
+    )
 }
 
 const CSS: &str = r#"
@@ -83,9 +92,19 @@ fn html(audit: Option<&Audit>, reseau: Option<&Rapport>) -> String {
     if let Some(a) = audit {
         h += "<h2>Cette machine</h2><div class=carte>";
         for c in &a.constats {
-            let _ = write!(h, "<div class=ligne>{}<div><span class=cat>{}</span> {}", badge(c.probleme), esc(c.categorie), esc(&c.message));
+            let _ = write!(
+                h,
+                "<div class=ligne>{}<div><span class=cat>{}</span> {}",
+                badge(c.probleme),
+                esc(c.categorie),
+                esc(&c.message)
+            );
             if let Some(k) = &c.correctif {
-                let icone = if k.automatique { "🔧 Correction automatique (netscan → Corriger)" } else { "💡 À faire" };
+                let icone = if k.automatique {
+                    "🔧 Correction automatique (netscan → Corriger)"
+                } else {
+                    "💡 À faire"
+                };
                 let _ = write!(h, "<div class=fix>{icone} : {}", esc(&k.action));
                 for cmd in &k.commandes {
                     let _ = write!(h, "<br><code>{}</code>", esc(cmd));
@@ -98,11 +117,19 @@ fn html(audit: Option<&Audit>, reseau: Option<&Rapport>) -> String {
     }
 
     if let Some(r) = reseau {
-        let nom = r.nom_reseau.as_deref().map(|n| format!(" « {} »", esc(n))).unwrap_or_default();
+        let nom = r
+            .nom_reseau
+            .as_deref()
+            .map(|n| format!(" « {} »", esc(n)))
+            .unwrap_or_default();
         let _ = write!(h, "<h2>Réseau{nom} — {} appareils</h2>", r.hotes.len());
         for hote in &r.hotes {
             let role = hote.role.map(|r| format!(" · {r}")).unwrap_or_default();
-            let neuf = if hote.nouvelle { " <span class=neuf>NOUVEL APPAREIL</span>" } else { "" };
+            let neuf = if hote.nouvelle {
+                " <span class=neuf>NOUVEL APPAREIL</span>"
+            } else {
+                ""
+            };
             let depuis = match (&hote.premier_vu, hote.nouvelle) {
                 (Some(d), false) => format!(" · connu depuis le {}", crate::reseau::date_fr(d)),
                 _ => String::new(),
@@ -121,9 +148,23 @@ fn html(audit: Option<&Audit>, reseau: Option<&Rapport>) -> String {
             } else {
                 h += "<table>";
                 for p in &hote.ports {
-                    let ban = p.banniere.as_deref().map(|b| format!("<div class=ban>{}</div>", esc(b))).unwrap_or_default();
-                    let ban = ban + &p.programme.as_deref().map(|n| format!("<div class=ban>programme : {}</div>", esc(n))).unwrap_or_default();
-                    let _ = write!(h, "<tr><td>{}/tcp</td><td>{}{ban}</td><td>{}</td></tr>", p.port, esc(p.service), badge(Some(p.niveau)));
+                    let ban = p
+                        .banniere
+                        .as_deref()
+                        .map(|b| format!("<div class=ban>{}</div>", esc(b)))
+                        .unwrap_or_default();
+                    let ban = ban
+                        + &p.programme
+                            .as_deref()
+                            .map(|n| format!("<div class=ban>programme : {}</div>", esc(n)))
+                            .unwrap_or_default();
+                    let _ = write!(
+                        h,
+                        "<tr><td>{}/tcp</td><td>{}{ban}</td><td>{}</td></tr>",
+                        p.port,
+                        esc(p.service),
+                        badge(Some(p.niveau))
+                    );
                 }
                 h += "</table>";
             }
@@ -140,7 +181,11 @@ fn html(audit: Option<&Audit>, reseau: Option<&Rapport>) -> String {
     if let Some(r) = reseau.filter(|r| !r.absents.is_empty()) {
         h += "<h2>Déjà vus, absents aujourd'hui</h2><div class=carte><ul>";
         for a in &r.absents {
-            let quand = a.dernier_vu.as_deref().map(|d| format!(" — vu le {}", crate::reseau::date_fr(d))).unwrap_or_default();
+            let quand = a
+                .dernier_vu
+                .as_deref()
+                .map(|d| format!(" — vu le {}", crate::reseau::date_fr(d)))
+                .unwrap_or_default();
             let _ = write!(h, "<li>{} {}{}</li>", a.ip, esc(&a.titre), quand);
         }
         h += "</ul></div>";

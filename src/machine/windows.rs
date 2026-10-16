@@ -13,8 +13,12 @@ const FIN: &str = "__NETSCAN_FIN__";
 /// Le script doit aller jusqu'au marqueur de fin : une sortie vide sans marqueur (PowerShell bloqué,
 /// absent, ou remplacé par un bouchon comme sous Wine) n'est jamais prise pour une réponse.
 pub fn ps(script: &str) -> Option<String> {
-    let complet = format!("[Console]::OutputEncoding=[Text.Encoding]::UTF8; $ErrorActionPreference='Stop'; {script}; '{FIN}'");
-    let o = Command::new("powershell").args(["-NoProfile", "-NonInteractive", "-Command", &complet]).output().ok()?;
+    let complet =
+        format!("[Console]::OutputEncoding=[Text.Encoding]::UTF8; $ErrorActionPreference='Stop'; {script}; '{FIN}'");
+    let o = Command::new("powershell")
+        .args(["-NoProfile", "-NonInteractive", "-Command", &complet])
+        .output()
+        .ok()?;
     let texte = String::from_utf8_lossy(&o.stdout);
     let (avant, _) = texte.rsplit_once(FIN)?;
     o.status.success().then(|| avant.trim().to_string())
@@ -22,7 +26,11 @@ pub fn ps(script: &str) -> Option<String> {
 
 /// Constat quand une vérification n'a pas pu se faire : on le dit, on ne conclut jamais « OK ».
 fn illisible(categorie: &'static str) -> Constat {
-    alerte(categorie, Niveau::Info, "Impossible de vérifier (PowerShell indisponible ou bloqué).")
+    alerte(
+        categorie,
+        Niveau::Info,
+        "Impossible de vérifier (PowerShell indisponible ou bloqué).",
+    )
 }
 
 /// Délai maximal d'une correction : au-delà, on rend la main au lieu d'attendre indéfiniment.
@@ -40,9 +48,14 @@ fn script_admin(commandes: &[String]) -> String {
          try {\n",
     );
     for c in commandes {
-        let long = ["Update-MpSignature", "Remove-MpThreat", "Start-MpScan"].iter().any(|l| c.contains(l));
+        let long = ["Update-MpSignature", "Remove-MpThreat", "Start-MpScan"]
+            .iter()
+            .any(|l| c.contains(l));
         let note = if long { " (peut prendre quelques minutes)" } else { "" };
-        script += &format!("  Write-Host ''; Write-Host '> {}{note}' -ForegroundColor Yellow\n  {c}\n  Write-Host '  OK' -ForegroundColor Green\n", texte(c));
+        script += &format!(
+            "  Write-Host ''; Write-Host '> {}{note}' -ForegroundColor Yellow\n  {c}\n  Write-Host '  OK' -ForegroundColor Green\n",
+            texte(c)
+        );
     }
     script += "  Write-Host ''; Write-Host 'Terminé.' -ForegroundColor Green; Start-Sleep -Seconds 2; exit 0\n\
                } catch {\n\
@@ -57,7 +70,10 @@ fn script_admin(commandes: &[String]) -> String {
 /// d'accepter la demande d'administrateur, et il reste comme trace de ce qui a été modifié.
 pub fn powershell_admin(commandes: &[String]) -> bool {
     let dossier = crate::reseau::dossier_local().join("corrections");
-    let chemin = dossier.join(format!("correction-{}.ps1", chrono::Local::now().format("%Y%m%d-%H%M%S")));
+    let chemin = dossier.join(format!(
+        "correction-{}.ps1",
+        chrono::Local::now().format("%Y%m%d-%H%M%S")
+    ));
     let entete = format!(
         "# Correction proposée par netscan {} le {}.\r\n# Ce script n'est lancé qu'après ton accord (demande d'administrateur).\r\n\r\n",
         env!("CARGO_PKG_VERSION"),
@@ -65,8 +81,14 @@ pub fn powershell_admin(commandes: &[String]) -> bool {
     );
     // BOM : sans lui, Windows PowerShell 5.1 lit le fichier en ANSI et casse les accents.
     let contenu = format!("\u{feff}{entete}{}\r\n", script_admin(commandes).replace('\n', "\r\n"));
-    if std::fs::create_dir_all(&dossier).and_then(|_| std::fs::write(&chemin, contenu)).is_err() {
-        println!("    Impossible d'écrire le script de correction dans {}", dossier.display());
+    if std::fs::create_dir_all(&dossier)
+        .and_then(|_| std::fs::write(&chemin, contenu))
+        .is_err()
+    {
+        println!(
+            "    Impossible d'écrire le script de correction dans {}",
+            dossier.display()
+        );
         return false;
     }
     println!("    Script de correction (lisible) : {}", chemin.display());
@@ -86,9 +108,17 @@ fn pare_feu() -> Constat {
         return illisible("Pare-feu");
     };
     let profils: Vec<(&str, &str)> = etat.lines().filter_map(|l| l.trim().split_once('=')).collect();
-    let off: Vec<&str> = profils.iter().filter(|(_, v)| !v.eq_ignore_ascii_case("true")).map(|(n, _)| *n).collect();
+    let off: Vec<&str> = profils
+        .iter()
+        .filter(|(_, v)| !v.eq_ignore_ascii_case("true"))
+        .map(|(n, _)| *n)
+        .collect();
     match (profils.is_empty(), off.join(", ")) {
-        (true, _) => alerte("Pare-feu", Niveau::Info, "Aucun profil de pare-feu lu (pare-feu tiers ?)."),
+        (true, _) => alerte(
+            "Pare-feu",
+            Niveau::Info,
+            "Aucun profil de pare-feu lu (pare-feu tiers ?).",
+        ),
         (false, off) if off.is_empty() => ok("Pare-feu", "Pare-feu Windows actif sur tous les profils."),
         (false, off) => alerte("Pare-feu", Niveau::Eleve, format!("Pare-feu désactivé pour : {off}.")).corriger(
             "Réactiver le pare-feu Windows sur tous les profils",
@@ -101,12 +131,17 @@ fn antivirus() -> Vec<Constat> {
     if ps("1").is_none() {
         return vec![illisible("Antivirus")];
     }
-    let Some(json) = ps("Get-MpComputerStatus | Select-Object AntivirusEnabled,RealTimeProtectionEnabled,AntivirusSignatureAge,IsTamperProtected | ConvertTo-Json")
-    else {
-        let tiers = ps("(Get-CimInstance -Namespace root/SecurityCenter2 -ClassName AntivirusProduct).displayName -join ', '").unwrap_or_default();
+    let Some(json) = ps(
+        "Get-MpComputerStatus | Select-Object AntivirusEnabled,RealTimeProtectionEnabled,AntivirusSignatureAge,IsTamperProtected | ConvertTo-Json",
+    ) else {
+        let tiers =
+            ps("(Get-CimInstance -Namespace root/SecurityCenter2 -ClassName AntivirusProduct).displayName -join ', '")
+                .unwrap_or_default();
         return vec![if tiers.is_empty() {
-            alerte("Antivirus", Niveau::Critique, "Aucun antivirus détecté.")
-                .manuel("Ouvrir Sécurité Windows et réactiver Microsoft Defender", &["Start-Process windowsdefender:"])
+            alerte("Antivirus", Niveau::Critique, "Aucun antivirus détecté.").manuel(
+                "Ouvrir Sécurité Windows et réactiver Microsoft Defender",
+                &["Start-Process windowsdefender:"],
+            )
         } else {
             ok("Antivirus", format!("Antivirus tiers : {tiers}."))
         }];
@@ -117,18 +152,29 @@ fn antivirus() -> Vec<Constat> {
     }
     let mut c = Vec::new();
     if v["RealTimeProtectionEnabled"] == false || v["AntivirusEnabled"] == false {
-        c.push(alerte("Antivirus", Niveau::Critique, "Protection en temps réel de Defender désactivée.").corriger(
-            "Réactiver la protection en temps réel",
-            &["Set-MpPreference -DisableRealtimeMonitoring $false"],
-        ));
+        c.push(
+            alerte(
+                "Antivirus",
+                Niveau::Critique,
+                "Protection en temps réel de Defender désactivée.",
+            )
+            .corriger(
+                "Réactiver la protection en temps réel",
+                &["Set-MpPreference -DisableRealtimeMonitoring $false"],
+            ),
+        );
     } else {
         c.push(ok("Antivirus", "Microsoft Defender actif, protection en temps réel."));
     }
     let age = v["AntivirusSignatureAge"].as_u64().unwrap_or(0);
     if age > 3 {
         c.push(
-            alerte("Signatures", Niveau::Moyen, format!("Signatures antivirus vieilles de {age} jours."))
-                .corriger("Mettre à jour les signatures", &["Update-MpSignature"]),
+            alerte(
+                "Signatures",
+                Niveau::Moyen,
+                format!("Signatures antivirus vieilles de {age} jours."),
+            )
+            .corriger("Mettre à jour les signatures", &["Update-MpSignature"]),
         );
     }
     if v["IsTamperProtected"] == false {
@@ -144,7 +190,12 @@ fn smb1() -> Option<Constat> {
         return Some(illisible("SMBv1"));
     }
     Some(if actif == "true" {
-        alerte("SMBv1", Niveau::Critique, "SMBv1 activé (exploité par WannaCry / NotPetya).").corriger(
+        alerte(
+            "SMBv1",
+            Niveau::Critique,
+            "SMBv1 activé (exploité par WannaCry / NotPetya).",
+        )
+        .corriger(
             "Désactiver SMBv1",
             &["Set-SmbServerConfiguration -EnableSMB1Protocol $false -Force"],
         )
@@ -163,7 +214,10 @@ fn bureau_distance() -> Constat {
     if !actif {
         return ok("Bureau à distance", "Bureau à distance (RDP) désactivé.");
     }
-    let nla = ps(&format!(r"(Get-ItemProperty '{cle}\WinStations\RDP-Tcp').UserAuthentication")).is_some_and(|v| v == "1");
+    let nla = ps(&format!(
+        r"(Get-ItemProperty '{cle}\WinStations\RDP-Tcp').UserAuthentication"
+    ))
+    .is_some_and(|v| v == "1");
     let couper = format!("Set-ItemProperty '{cle}' -Name fDenyTSConnections -Value 1");
     // Session ouverte PAR le Bureau à distance (SESSIONNAME = RDP-Tcp#…) : le couper couperait l'utilisateur
     // lui-même. Jamais en correction automatique dans ce cas.
@@ -173,12 +227,23 @@ fn bureau_distance() -> Constat {
             &[],
         )
     } else if nla {
-        alerte("Bureau à distance", Niveau::Moyen, "RDP activé (avec NLA). Très attaqué s'il est exposé.")
-            .corriger("Désactiver le Bureau à distance si tu ne l'utilises pas", &[&couper])
+        alerte(
+            "Bureau à distance",
+            Niveau::Moyen,
+            "RDP activé (avec NLA). Très attaqué s'il est exposé.",
+        )
+        .corriger("Désactiver le Bureau à distance si tu ne l'utilises pas", &[&couper])
     } else {
-        alerte("Bureau à distance", Niveau::Eleve, "RDP activé SANS authentification au niveau réseau (NLA).").corriger(
+        alerte(
+            "Bureau à distance",
+            Niveau::Eleve,
+            "RDP activé SANS authentification au niveau réseau (NLA).",
+        )
+        .corriger(
             "Exiger NLA pour le Bureau à distance",
-            &[&format!(r"Set-ItemProperty '{cle}\WinStations\RDP-Tcp' -Name UserAuthentication -Value 1")],
+            &[&format!(
+                r"Set-ItemProperty '{cle}\WinStations\RDP-Tcp' -Name UserAuthentication -Value 1"
+            )],
         )
     }
 }
@@ -205,8 +270,15 @@ fn uac() -> Constat {
         return illisible("UAC");
     }
     if valeur.as_deref() == Some("0") {
-        alerte("UAC", Niveau::Eleve, "Contrôle de compte d'utilisateur (UAC) désactivé : tout programme a les droits admin.")
-            .corriger("Réactiver l'UAC (effectif après redémarrage)", &[&format!("Set-ItemProperty '{cle}' -Name EnableLUA -Value 1")])
+        alerte(
+            "UAC",
+            Niveau::Eleve,
+            "Contrôle de compte d'utilisateur (UAC) désactivé : tout programme a les droits admin.",
+        )
+        .corriger(
+            "Réactiver l'UAC (effectif après redémarrage)",
+            &[&format!("Set-ItemProperty '{cle}' -Name EnableLUA -Value 1")],
+        )
     } else {
         ok("UAC", "Contrôle de compte d'utilisateur actif.")
     }
@@ -216,31 +288,59 @@ fn mises_a_jour() -> Constat {
     let jours = ps("((Get-Date) - (Get-HotFix | Where-Object InstalledOn | Sort-Object InstalledOn -Descending | Select-Object -First 1).InstalledOn).Days")
         .and_then(|j| j.parse::<i64>().ok());
     match jours {
-        Some(j) if j > 45 => alerte("Mises à jour", Niveau::Eleve, format!("Dernière mise à jour Windows il y a {j} jours."))
-            .manuel("Ouvrir Windows Update et installer les mises à jour", &["Start-Process ms-settings:windowsupdate"]),
-        Some(j) => ok("Mises à jour", format!("Dernière mise à jour Windows il y a {j} jours.")),
-        None => alerte("Mises à jour", Niveau::Info, "Impossible de vérifier (historique Windows Update illisible)."),
+        Some(j) if j > 45 => alerte(
+            "Mises à jour",
+            Niveau::Eleve,
+            format!("Dernière mise à jour Windows il y a {j} jours."),
+        )
+        .manuel(
+            "Ouvrir Windows Update et installer les mises à jour",
+            &["Start-Process ms-settings:windowsupdate"],
+        ),
+        Some(j) => ok(
+            "Mises à jour",
+            format!("Dernière mise à jour Windows il y a {j} jours."),
+        ),
+        None => alerte(
+            "Mises à jour",
+            Niveau::Info,
+            "Impossible de vérifier (historique Windows Update illisible).",
+        ),
     }
 }
 
 fn chiffrement() -> Constat {
     // Lisible sans droits admin, contrairement à Get-BitLockerVolume. 1, 3 et 5 = protégé.
-    let etat = ps("(New-Object -ComObject Shell.Application).NameSpace('C:').Self.ExtendedProperty('System.Volume.BitLockerProtection')");
+    let etat = ps(
+        "(New-Object -ComObject Shell.Application).NameSpace('C:').Self.ExtendedProperty('System.Volume.BitLockerProtection')",
+    );
     match etat.as_deref() {
         Some("1" | "3" | "5") => ok("Chiffrement", "Disque C: chiffré (BitLocker)."),
-        Some(_) => alerte("Chiffrement", Niveau::Moyen, "Disque C: non chiffré : en cas de vol, les données sont lisibles.")
-            .manuel("Paramètres > Confidentialité et sécurité > Chiffrement de l'appareil (ou BitLocker sur Pro)", &["Start-Process ms-settings:deviceencryption"]),
-        None => alerte("Chiffrement", Niveau::Info, "Impossible de vérifier (état BitLocker illisible)."),
+        Some(_) => alerte(
+            "Chiffrement",
+            Niveau::Moyen,
+            "Disque C: non chiffré : en cas de vol, les données sont lisibles.",
+        )
+        .manuel(
+            "Paramètres > Confidentialité et sécurité > Chiffrement de l'appareil (ou BitLocker sur Pro)",
+            &["Start-Process ms-settings:deviceencryption"],
+        ),
+        None => alerte(
+            "Chiffrement",
+            Niveau::Info,
+            "Impossible de vérifier (état BitLocker illisible).",
+        ),
     }
 }
 
 fn invite() -> Constat {
     match ps("(Get-LocalUser | Where-Object { $_.Enabled -and $_.SID -like '*-501' }).Name") {
         None => illisible("Comptes"),
-        Some(nom) if !nom.is_empty() => alerte("Comptes", Niveau::Eleve, format!("Compte invité « {nom} » activé.")).corriger(
-            "Désactiver le compte invité",
-            &[&format!("Disable-LocalUser -Name '{nom}'")],
-        ),
+        Some(nom) if !nom.is_empty() => alerte("Comptes", Niveau::Eleve, format!("Compte invité « {nom} » activé."))
+            .corriger(
+                "Désactiver le compte invité",
+                &[&format!("Disable-LocalUser -Name '{nom}'")],
+            ),
         _ => ok("Comptes", "Compte invité désactivé."),
     }
 }
@@ -257,7 +357,9 @@ fn ports_ecoute(pare_feu_actif: bool, ip_lan: Option<String>) -> Vec<Constat> {
     let mut constats = Vec::new();
     for l in liste.lines() {
         let mut c = l.splitn(3, '|');
-        let (Some(adresse), Some(Ok(port)), programme) = (c.next(), c.next().map(str::parse::<u16>), c.next().unwrap_or("?")) else {
+        let (Some(adresse), Some(Ok(port)), programme) =
+            (c.next(), c.next().map(str::parse::<u16>), c.next().unwrap_or("?"))
+        else {
             continue;
         };
         let expose = matches!(adresse, "0.0.0.0" | "::") || ip_lan.as_deref() == Some(adresse);
@@ -273,7 +375,11 @@ fn ports_ecoute(pare_feu_actif: bool, ip_lan: Option<String>) -> Vec<Constat> {
             (false, Niveau::Info) => Niveau::Moyen,
             (false, n) => n,
         };
-        let constat = alerte("Ports en écoute", niveau, format!("{port}/tcp ({}) ouvert par « {programme} ». {}", i.service, i.conseil));
+        let constat = alerte(
+            "Ports en écoute",
+            niveau,
+            format!("{port}/tcp ({}) ouvert par « {programme} ». {}", i.service, i.conseil),
+        );
         // RDP : pas de blocage aveugle, il coupe l'accès aux machines pilotées à distance (VM…).
         // Le constat « Bureau à distance » propose déjà NLA ou la désactivation propre.
         constats.push(if niveau >= Niveau::Moyen && port != 3389 {
@@ -292,10 +398,17 @@ fn ports_ecoute(pare_feu_actif: bool, ip_lan: Option<String>) -> Vec<Constat> {
 }
 
 fn wifi() -> Option<Constat> {
-    let sortie = Command::new("netsh").args(["wlan", "show", "interfaces"]).output().ok()?;
+    let sortie = Command::new("netsh")
+        .args(["wlan", "show", "interfaces"])
+        .output()
+        .ok()?;
     let texte = String::from_utf8_lossy(&sortie.stdout);
     let champ = |cle: &str| {
-        texte.lines().map(str::trim).find(|l| l.starts_with(cle) && !l.starts_with("BSSID")).and_then(|l| Some(l.split_once(':')?.1.trim().to_string()))
+        texte
+            .lines()
+            .map(str::trim)
+            .find(|l| l.starts_with(cle) && !l.starts_with("BSSID"))
+            .and_then(|l| Some(l.split_once(':')?.1.trim().to_string()))
     };
     let ssid = champ("SSID")?;
     let auth = champ("Authenti")?;
@@ -303,9 +416,19 @@ fn wifi() -> Option<Constat> {
     Some(if auth.contains("WPA3") {
         ok("Wi-Fi", format!("« {ssid} » en {auth}."))
     } else if auth.contains("WPA2") {
-        alerte("Wi-Fi", Niveau::Info, format!("« {ssid} » en {auth}. WPA3 serait mieux si le routeur le permet.")).manuel(routeur, &[])
+        alerte(
+            "Wi-Fi",
+            Niveau::Info,
+            format!("« {ssid} » en {auth}. WPA3 serait mieux si le routeur le permet."),
+        )
+        .manuel(routeur, &[])
     } else {
-        alerte("Wi-Fi", Niveau::Eleve, format!("« {ssid} » en {auth} : réseau ouvert ou chiffrement faible.")).manuel(routeur, &[])
+        alerte(
+            "Wi-Fi",
+            Niveau::Eleve,
+            format!("« {ssid} » en {auth} : réseau ouvert ou chiffrement faible."),
+        )
+        .manuel(routeur, &[])
     })
 }
 
@@ -323,7 +446,11 @@ pub fn auditer() -> Audit {
     constats.push(chiffrement());
     constats.push(invite());
     constats.extend(wifi());
-    Audit { systeme: NOM, score: score(&constats), constats }
+    Audit {
+        systeme: NOM,
+        score: score(&constats),
+        constats,
+    }
 }
 
 #[cfg(test)]
@@ -337,10 +464,12 @@ mod tests {
         assert!(session_a_distance());
     }
 
-
     #[test]
     fn la_fenetre_admin_annonce_chaque_etape() {
-        let s = script_admin(&["Update-MpSignature".to_string(), "Disable-LocalUser -Name 'Invité'".to_string()]);
+        let s = script_admin(&[
+            "Update-MpSignature".to_string(),
+            "Disable-LocalUser -Name 'Invité'".to_string(),
+        ]);
         assert!(s.contains("> Update-MpSignature (peut prendre quelques minutes)"));
         assert!(s.contains("> Disable-LocalUser -Name ''Invité''"));
         assert!(s.contains("Read-Host"));

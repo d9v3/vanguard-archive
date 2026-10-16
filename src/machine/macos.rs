@@ -14,7 +14,13 @@ fn tout(cmd: &str, args: &[&str]) -> String {
     Command::new(cmd)
         .args(args)
         .output()
-        .map(|o| format!("{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr)))
+        .map(|o| {
+            format!(
+                "{}{}",
+                String::from_utf8_lossy(&o.stdout),
+                String::from_utf8_lossy(&o.stderr)
+            )
+        })
         .unwrap_or_default()
 }
 
@@ -23,14 +29,24 @@ fn pare_feu() -> Vec<Constat> {
     if !etat.contains("enabled") {
         return vec![alerte("Pare-feu", Niveau::Eleve, "Pare-feu macOS désactivé.").corriger(
             "Activer le pare-feu et le mode furtif",
-            &[&format!("sudo {FIREWALL} --setglobalstate on"), &format!("sudo {FIREWALL} --setstealthmode on")],
+            &[
+                &format!("sudo {FIREWALL} --setglobalstate on"),
+                &format!("sudo {FIREWALL} --setstealthmode on"),
+            ],
         )];
     }
     let mut c = vec![ok("Pare-feu", "Pare-feu macOS actif.")];
     if !tout(FIREWALL, &["--getstealthmode"]).contains("enabled") {
         c.push(
-            alerte("Pare-feu", Niveau::Info, "Mode furtif désactivé : le Mac répond aux sondes réseau.")
-                .corriger("Activer le mode furtif", &[&format!("sudo {FIREWALL} --setstealthmode on")]),
+            alerte(
+                "Pare-feu",
+                Niveau::Info,
+                "Mode furtif désactivé : le Mac répond aux sondes réseau.",
+            )
+            .corriger(
+                "Activer le mode furtif",
+                &[&format!("sudo {FIREWALL} --setstealthmode on")],
+            ),
         );
     }
     c
@@ -41,8 +57,15 @@ fn filevault() -> Constat {
         ok("Chiffrement", "FileVault actif.")
     } else {
         // Manuel : l'activation affiche une clé de secours qu'il faut absolument noter.
-        alerte("Chiffrement", Niveau::Moyen, "FileVault désactivé : en cas de vol, les données sont lisibles.")
-            .manuel("Réglages Système > Confidentialité et sécurité > FileVault > Activer (note la clé de secours !)", &[])
+        alerte(
+            "Chiffrement",
+            Niveau::Moyen,
+            "FileVault désactivé : en cas de vol, les données sont lisibles.",
+        )
+        .manuel(
+            "Réglages Système > Confidentialité et sécurité > FileVault > Activer (note la clé de secours !)",
+            &[],
+        )
     }
 }
 
@@ -50,8 +73,12 @@ fn gatekeeper() -> Constat {
     if tout("spctl", &["--status"]).contains("assessments enabled") {
         ok("Gatekeeper", "Gatekeeper actif (apps vérifiées).")
     } else {
-        alerte("Gatekeeper", Niveau::Eleve, "Gatekeeper désactivé : n'importe quelle app peut se lancer.")
-            .corriger("Réactiver Gatekeeper", &["sudo spctl --master-enable"])
+        alerte(
+            "Gatekeeper",
+            Niveau::Eleve,
+            "Gatekeeper désactivé : n'importe quelle app peut se lancer.",
+        )
+        .corriger("Réactiver Gatekeeper", &["sudo spctl --master-enable"])
     }
 }
 
@@ -59,8 +86,15 @@ fn sip() -> Constat {
     if tout("csrutil", &["status"]).contains("enabled") {
         ok("SIP", "Protection de l'intégrité du système active.")
     } else {
-        alerte("SIP", Niveau::Eleve, "SIP désactivé : les fichiers système ne sont plus protégés.")
-            .manuel("Redémarrer en mode Récupération, ouvrir le Terminal et lancer : csrutil enable", &[])
+        alerte(
+            "SIP",
+            Niveau::Eleve,
+            "SIP désactivé : les fichiers système ne sont plus protégés.",
+        )
+        .manuel(
+            "Redémarrer en mode Récupération, ouvrir le Terminal et lancer : csrutil enable",
+            &[],
+        )
     }
 }
 
@@ -70,14 +104,29 @@ fn mises_a_jour() -> Constat {
     if n == 0 {
         ok("Mises à jour", "macOS à jour.")
     } else {
-        alerte("Mises à jour", Niveau::Eleve, format!("{n} mise(s) à jour macOS en attente."))
-            .corriger("Installer les mises à jour (un redémarrage peut suivre)", &["sudo softwareupdate -ia"])
+        alerte(
+            "Mises à jour",
+            Niveau::Eleve,
+            format!("{n} mise(s) à jour macOS en attente."),
+        )
+        .corriger(
+            "Installer les mises à jour (un redémarrage peut suivre)",
+            &["sudo softwareupdate -ia"],
+        )
     }
 }
 
 fn connexion_auto() -> Constat {
-    match sortie("defaults", &["read", "/Library/Preferences/com.apple.loginwindow", "autoLoginUser"]) {
-        Some(u) => alerte("Session", Niveau::Eleve, format!("Ouverture de session automatique pour « {} ».", u.trim())).corriger(
+    match sortie(
+        "defaults",
+        &["read", "/Library/Preferences/com.apple.loginwindow", "autoLoginUser"],
+    ) {
+        Some(u) => alerte(
+            "Session",
+            Niveau::Eleve,
+            format!("Ouverture de session automatique pour « {} ».", u.trim()),
+        )
+        .corriger(
             "Désactiver l'ouverture de session automatique",
             &["sudo defaults delete /Library/Preferences/com.apple.loginwindow autoLoginUser"],
         ),
@@ -98,9 +147,16 @@ fn ports_ecoute(pare_feu_actif: bool) -> Vec<Constat> {
     }
     let mut vus = Vec::new();
     let mut constats = Vec::new();
-    for l in tout("netstat", &["-anp", "tcp"]).lines().filter(|l| l.contains("LISTEN")) {
-        let Some(local) = l.split_whitespace().nth(3) else { continue };
-        let Some((adresse, port)) = local.rsplit_once('.') else { continue };
+    for l in tout("netstat", &["-anp", "tcp"])
+        .lines()
+        .filter(|l| l.contains("LISTEN"))
+    {
+        let Some(local) = l.split_whitespace().nth(3) else {
+            continue;
+        };
+        let Some((adresse, port)) = local.rsplit_once('.') else {
+            continue;
+        };
         let Ok(port) = port.parse::<u16>() else { continue };
         if adresse != "*" || vus.contains(&port) {
             continue;
@@ -115,16 +171,33 @@ fn ports_ecoute(pare_feu_actif: bool) -> Vec<Constat> {
             (false, Niveau::Info) => Niveau::Moyen,
             (false, n) => n,
         };
-        let constat = alerte("Ports en écoute", niveau, format!("{port}/tcp ({}) ouvert par « {programme} ». {}", i.service, i.conseil));
+        let constat = alerte(
+            "Ports en écoute",
+            niveau,
+            format!("{port}/tcp ({}) ouvert par « {programme} ». {}", i.service, i.conseil),
+        );
         constats.push(match port {
             // Connecté par SSH en ce moment : le couper couperait l'utilisateur lui-même.
-            22 if std::env::var_os("SSH_CONNECTION").is_some() => {
-                constat.manuel("Tu es connecté par SSH : désactive-le depuis l'écran du Mac (Réglages > Général > Partage)", &[])
-            }
-            22 => constat.corriger("Désactiver la session à distance (SSH)", &["sudo systemsetup -f -setremotelogin off"]),
-            5900 => constat.manuel("Réglages Système > Général > Partage > désactiver « Partage d'écran »", &[]),
-            445 => constat.manuel("Réglages Système > Général > Partage > désactiver « Partage de fichiers » si inutile", &[]),
-            5000 | 7000 => constat.manuel("Réglages Système > Général > AirDrop et Handoff > « Récepteur AirPlay » si inutile", &[]),
+            22 if std::env::var_os("SSH_CONNECTION").is_some() => constat.manuel(
+                "Tu es connecté par SSH : désactive-le depuis l'écran du Mac (Réglages > Général > Partage)",
+                &[],
+            ),
+            22 => constat.corriger(
+                "Désactiver la session à distance (SSH)",
+                &["sudo systemsetup -f -setremotelogin off"],
+            ),
+            5900 => constat.manuel(
+                "Réglages Système > Général > Partage > désactiver « Partage d'écran »",
+                &[],
+            ),
+            445 => constat.manuel(
+                "Réglages Système > Général > Partage > désactiver « Partage de fichiers » si inutile",
+                &[],
+            ),
+            5000 | 7000 => constat.manuel(
+                "Réglages Système > Général > AirDrop et Handoff > « Récepteur AirPlay » si inutile",
+                &[],
+            ),
             _ => constat,
         });
     }
@@ -137,14 +210,28 @@ fn ports_ecoute(pare_feu_actif: bool) -> Vec<Constat> {
 fn wifi() -> Option<Constat> {
     let texte = tout("system_profiler", &["SPAirPortDataType"]);
     let actuel = texte.split_once("Current Network Information:")?.1;
-    let secu = actuel.lines().find_map(|l| l.trim().strip_prefix("Security:"))?.trim().to_string();
+    let secu = actuel
+        .lines()
+        .find_map(|l| l.trim().strip_prefix("Security:"))?
+        .trim()
+        .to_string();
     let routeur = "Ouvrir l'admin du routeur > Wi-Fi > Sécurité : choisir « WPA2/WPA3 » ou « WPA3 »";
     Some(if secu.contains("WPA3") {
         ok("Wi-Fi", format!("Réseau actuel en {secu}."))
     } else if secu.contains("WPA2") {
-        alerte("Wi-Fi", Niveau::Info, format!("Réseau actuel en {secu}. WPA3 serait mieux.")).manuel(routeur, &[])
+        alerte(
+            "Wi-Fi",
+            Niveau::Info,
+            format!("Réseau actuel en {secu}. WPA3 serait mieux."),
+        )
+        .manuel(routeur, &[])
     } else {
-        alerte("Wi-Fi", Niveau::Eleve, format!("Réseau actuel en « {secu} » : ouvert ou chiffrement faible.")).manuel(routeur, &[])
+        alerte(
+            "Wi-Fi",
+            Niveau::Eleve,
+            format!("Réseau actuel en « {secu} » : ouvert ou chiffrement faible."),
+        )
+        .manuel(routeur, &[])
     })
 }
 
@@ -159,5 +246,9 @@ pub fn auditer() -> Audit {
     constats.push(connexion_auto());
     constats.extend(cles_ssh());
     constats.extend(wifi());
-    Audit { systeme: NOM, score: score(&constats), constats }
+    Audit {
+        systeme: NOM,
+        score: score(&constats),
+        constats,
+    }
 }

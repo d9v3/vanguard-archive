@@ -16,9 +16,13 @@ fn reussit(cmd: &str, args: &[&str]) -> bool {
 /// Programme à planifier. Lancé depuis la clé USB, on en installe d'abord une copie locale :
 /// sinon la surveillance s'arrêterait dès que la clé est débranchée.
 fn executable() -> String {
-    let Ok(exe) = std::env::current_exe() else { return "netscan".into() };
+    let Ok(exe) = std::env::current_exe() else {
+        return "netscan".into();
+    };
     if reseau::cle_usb().is_some_and(|cle| exe.starts_with(&cle)) {
-        let dest = reseau::dossier_local().join("bin").join(exe.file_name().unwrap_or_default());
+        let dest = reseau::dossier_local()
+            .join("bin")
+            .join(exe.file_name().unwrap_or_default());
         let copie = std::fs::create_dir_all(dest.parent().unwrap_or(&dest)).and_then(|_| std::fs::copy(&exe, &dest));
         if copie.is_ok() {
             #[cfg(unix)]
@@ -35,11 +39,17 @@ fn executable() -> String {
 
 fn notifier(titre: &str, corps: &str) {
     #[cfg(target_os = "linux")]
-    let _ = Command::new("notify-send").args(["-a", "netscan", "-i", "netscan", "-u", "critical", titre, corps]).status();
+    let _ = Command::new("notify-send")
+        .args(["-a", "netscan", "-i", "netscan", "-u", "critical", titre, corps])
+        .status();
     #[cfg(target_os = "macos")]
     {
         let e = |s: &str| s.replace('\\', "\\\\").replace('"', "\\\"");
-        let script = format!("display notification \"{}\" with title \"{}\" sound name \"Basso\"", e(corps), e(titre));
+        let script = format!(
+            "display notification \"{}\" with title \"{}\" sound name \"Basso\"",
+            e(corps),
+            e(titre)
+        );
         let _ = Command::new("osascript").args(["-e", &script]).status();
     }
     #[cfg(windows)]
@@ -60,16 +70,31 @@ fn notifier(titre: &str, corps: &str) {
 
 /// Appelé par le planificateur : scan silencieux, puis notification s'il y a du nouveau.
 pub async fn surveiller() {
-    let Ok(r) = reseau::executer(Options { silencieux: true, ..Options::defaut(None, "courants") }).await else {
+    let Ok(r) = reseau::executer(Options {
+        silencieux: true,
+        ..Options::defaut(None, "courants")
+    })
+    .await
+    else {
         return;
     };
     for h in r.hotes.iter().filter(|h| h.nouvelle) {
-        let qui = if h.titre().is_empty() { "appareil inconnu".into() } else { h.titre() };
-        notifier("Nouvel appareil sur ton réseau", &format!("{} — {qui} {}", h.ip, h.mac.as_deref().unwrap_or("")));
+        let qui = if h.titre().is_empty() {
+            "appareil inconnu".into()
+        } else {
+            h.titre()
+        };
+        notifier(
+            "Nouvel appareil sur ton réseau",
+            &format!("{} — {qui} {}", h.ip, h.mac.as_deref().unwrap_or("")),
+        );
     }
     for h in r.hotes.iter().filter(|h| !h.nouvelle) {
         for p in h.ports.iter().filter(|p| p.nouveau && p.niveau >= Niveau::Eleve) {
-            notifier(&format!("Port {} nouvellement ouvert", p.port), &format!("{} ({}) : {} — {}", h.ip, h.titre(), p.service, p.conseil));
+            notifier(
+                &format!("Port {} nouvellement ouvert", p.port),
+                &format!("{} ({}) : {} — {}", h.ip, h.titre(), p.service, p.conseil),
+            );
         }
     }
 }
@@ -85,13 +110,16 @@ pub fn active() -> bool {
 
 #[cfg(target_os = "macos")]
 fn plist() -> std::path::PathBuf {
-    std::path::PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(format!("Library/LaunchAgents/com.{NOM}.plist"))
+    std::path::PathBuf::from(std::env::var_os("HOME").unwrap_or_default())
+        .join(format!("Library/LaunchAgents/com.{NOM}.plist"))
 }
 
 pub fn activer(oui: bool) {
     let reussi = if oui { installer(&executable()) } else { desinstaller() };
     match (oui, reussi) {
-        (true, true) => println!("  {VERT}✔{RESET} Surveillance activée : scan toutes les heures, notification si un appareil inconnu arrive."),
+        (true, true) => println!(
+            "  {VERT}✔{RESET} Surveillance activée : scan toutes les heures, notification si un appareil inconnu arrive."
+        ),
         (true, false) => println!("  ✖ Impossible d'activer la surveillance."),
         (false, _) => println!("  Surveillance désactivée."),
     }
@@ -101,11 +129,14 @@ pub fn activer(oui: bool) {
 fn installer(exe: &str) -> bool {
     let dossier = std::path::PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".config/systemd/user");
     let _ = std::fs::create_dir_all(&dossier);
-    let service = format!("[Unit]\nDescription=netscan : surveillance du réseau local\n\n[Service]\nType=oneshot\nExecStart={exe} surveiller\nNice=10\n");
+    let service = format!(
+        "[Unit]\nDescription=netscan : surveillance du réseau local\n\n[Service]\nType=oneshot\nExecStart={exe} surveiller\nNice=10\n"
+    );
     let timer = "[Unit]\nDescription=netscan : scan du réseau toutes les heures\n\n[Timer]\nOnBootSec=5min\nOnUnitActiveSec=1h\nPersistent=true\n\n[Install]\nWantedBy=timers.target\n";
     let _ = std::fs::write(dossier.join(format!("{NOM}.service")), service);
     let _ = std::fs::write(dossier.join(format!("{NOM}.timer")), timer);
-    reussit("systemctl", &["--user", "daemon-reload"]) && reussit("systemctl", &["--user", "enable", "--now", &format!("{NOM}.timer")])
+    reussit("systemctl", &["--user", "daemon-reload"])
+        && reussit("systemctl", &["--user", "enable", "--now", &format!("{NOM}.timer")])
 }
 
 #[cfg(target_os = "linux")]
@@ -165,5 +196,8 @@ fn installer(exe: &str) -> bool {
 #[cfg(windows)]
 fn desinstaller() -> bool {
     let _ = reussit("schtasks", &["/Delete", "/F", "/TN", NOM]);
-    crate::machine::windows::ps(&format!("Unregister-ScheduledTask -TaskName '{TACHE_WINDOWS}' -Confirm:$false")).is_some()
+    crate::machine::windows::ps(&format!(
+        "Unregister-ScheduledTask -TaskName '{TACHE_WINDOWS}' -Confirm:$false"
+    ))
+    .is_some()
 }

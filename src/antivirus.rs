@@ -9,11 +9,19 @@ use crate::ui::*;
 
 #[cfg(unix)]
 fn home() -> PathBuf {
-    PathBuf::from(std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")).unwrap_or_default())
+    PathBuf::from(
+        std::env::var_os("HOME")
+            .or_else(|| std::env::var_os("USERPROFILE"))
+            .unwrap_or_default(),
+    )
 }
 
 pub fn analyser(complet: bool) {
-    titre(if complet { "Analyse antivirus complète" } else { "Analyse antivirus rapide" });
+    titre(if complet {
+        "Analyse antivirus complète"
+    } else {
+        "Analyse antivirus rapide"
+    });
     #[cfg(windows)]
     defender(complet);
     #[cfg(unix)]
@@ -26,13 +34,19 @@ pub fn analyser(complet: bool) {
 #[cfg(windows)]
 fn defender(complet: bool) {
     use crate::machine::windows::{powershell_admin, ps};
-    let mpcmd = PathBuf::from(std::env::var_os("ProgramFiles").unwrap_or_default()).join(r"Windows Defender\MpCmdRun.exe");
-    println!("  {GRIS}Moteur : Microsoft Defender. Cela peut prendre de quelques minutes à une heure (analyse complète)…{RESET}");
-    let statut = Command::new(&mpcmd).args(["-Scan", "-ScanType", if complet { "2" } else { "1" }]).status();
+    let mpcmd =
+        PathBuf::from(std::env::var_os("ProgramFiles").unwrap_or_default()).join(r"Windows Defender\MpCmdRun.exe");
+    println!(
+        "  {GRIS}Moteur : Microsoft Defender. Cela peut prendre de quelques minutes à une heure (analyse complète)…{RESET}"
+    );
+    let statut = Command::new(&mpcmd)
+        .args(["-Scan", "-ScanType", if complet { "2" } else { "1" }])
+        .status();
     match statut.map(|s| s.code()) {
         Ok(Some(0)) => println!("  {VERT}✔ Aucun malware trouvé.{RESET}"),
         Ok(Some(2)) => {
-            let menaces = ps("Get-MpThreat | ForEach-Object { \"$($_.ThreatName)|$($_.Resources -join ', ')\" }").unwrap_or_default();
+            let menaces = ps("Get-MpThreat | ForEach-Object { \"$($_.ThreatName)|$($_.Resources -join ', ')\" }")
+                .unwrap_or_default();
             for l in menaces.lines() {
                 let (nom, fichiers) = l.split_once('|').unwrap_or((l, ""));
                 println!("  {}✖ {nom}{RESET}  {fichiers}", couleur(Niveau::Critique));
@@ -53,12 +67,22 @@ fn defender(complet: bool) {
 #[cfg(unix)]
 fn shell(c: &str) -> bool {
     println!("  {GRIS}$ {c}{RESET}");
-    Command::new("bash").arg("-c").arg(c).status().is_ok_and(|s| s.success())
+    Command::new("bash")
+        .arg("-c")
+        .arg(c)
+        .status()
+        .is_ok_and(|s| s.success())
 }
 
 #[cfg(unix)]
 fn base_presente() -> bool {
-    ["/var/lib/clamav", "/opt/homebrew/var/lib/clamav", "/usr/local/var/lib/clamav"].iter().any(|d| {
+    [
+        "/var/lib/clamav",
+        "/opt/homebrew/var/lib/clamav",
+        "/usr/local/var/lib/clamav",
+    ]
+    .iter()
+    .any(|d| {
         std::fs::read_dir(d).is_ok_and(|d| {
             d.flatten().any(|f| {
                 let n = f.file_name().to_string_lossy().into_owned();
@@ -71,7 +95,10 @@ fn base_presente() -> bool {
 /// Installe ClamAV et télécharge les signatures si besoin. Retourne `false` si l'utilisateur refuse.
 #[cfg(unix)]
 fn preparer() -> bool {
-    let present = Command::new("bash").args(["-c", "command -v clamscan"]).output().is_ok_and(|o| o.status.success());
+    let present = Command::new("bash")
+        .args(["-c", "command -v clamscan"])
+        .output()
+        .is_ok_and(|o| o.status.success());
     if !present {
         println!("  ClamAV (antivirus open source) n'est pas installé.");
         if !demander("  L'installer maintenant ? [o/N] : ").eq_ignore_ascii_case("o") {
@@ -121,17 +148,37 @@ fn clamav(complet: bool) {
     let cibles: Vec<PathBuf> = if complet {
         vec![h.clone()]
     } else {
-        ["Downloads", "Téléchargements", "Desktop", "Bureau", "Documents", ".local/bin", ".config/autostart", "Library/LaunchAgents"]
-            .iter()
-            .map(|d| h.join(d))
-            .chain([PathBuf::from("/tmp")])
-            .filter(|p| p.exists())
-            .collect()
+        [
+            "Downloads",
+            "Téléchargements",
+            "Desktop",
+            "Bureau",
+            "Documents",
+            ".local/bin",
+            ".config/autostart",
+            "Library/LaunchAgents",
+        ]
+        .iter()
+        .map(|d| h.join(d))
+        .chain([PathBuf::from("/tmp")])
+        .filter(|p| p.exists())
+        .collect()
     };
     // Jeux, caches et préfixes Wine sont énormes et produisent des faux positifs (cracks, outils anti-triche).
     let exclusions = [
-        "Games", ".steam", ".local/share/Steam", ".cache", "Windows", ".cargo/registry", ".rustup", "target",
-        "node_modules", ".local/share/netscan/quarantaine", ".snapshots", "Library/Caches", ".Trash",
+        "Games",
+        ".steam",
+        ".local/share/Steam",
+        ".cache",
+        "Windows",
+        ".cargo/registry",
+        ".rustup",
+        "target",
+        "node_modules",
+        ".local/share/netscan/quarantaine",
+        ".snapshots",
+        "Library/Caches",
+        ".Trash",
     ];
     let mut cmd = Command::new("clamscan");
     cmd.args(["-r", "-i", "--no-summary", "--max-filesize=200M", "--max-scansize=400M"]);
@@ -139,7 +186,14 @@ fn clamav(complet: bool) {
         cmd.arg(format!("--exclude-dir={}", regex_echappe(e)));
     }
     cmd.args(&cibles);
-    println!("  {GRIS}Moteur : ClamAV. Analyse de : {}{RESET}", cibles.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join(", "));
+    println!(
+        "  {GRIS}Moteur : ClamAV. Analyse de : {}{RESET}",
+        cibles
+            .iter()
+            .map(|p| p.display().to_string())
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
     println!("  {GRIS}Cela peut prendre de quelques secondes à plusieurs minutes…{RESET}");
 
     let Ok(sortie) = cmd.output() else {
@@ -148,7 +202,10 @@ fn clamav(complet: bool) {
     };
     let Some(infectes) = lire_resultat(sortie.status.code(), &String::from_utf8_lossy(&sortie.stdout)) else {
         let erreur = String::from_utf8_lossy(&sortie.stderr);
-        println!("  {}✖ L'analyse a échoué : le résultat n'est pas fiable.{RESET}", couleur(Niveau::Eleve));
+        println!(
+            "  {}✖ L'analyse a échoué : le résultat n'est pas fiable.{RESET}",
+            couleur(Niveau::Eleve)
+        );
         for l in erreur.lines().filter(|l| l.contains("ERROR")).take(5) {
             println!("    {GRIS}{l}{RESET}");
         }
@@ -207,11 +264,17 @@ fn lire_resultat(code: Option<i32>, sortie: &str) -> Option<Vec<(String, String)
 fn isoler(chemin: &std::path::Path, dossier: &std::path::Path) -> std::io::Result<PathBuf> {
     use std::os::unix::fs::PermissionsExt;
     std::fs::create_dir_all(dossier)?;
-    let nom = chemin.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-    let horodatage = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos());
+    let nom = chemin
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let horodatage = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos());
     let dest = dossier.join(format!("{horodatage}.{nom}"));
     // rename échoue d'un disque à l'autre (clé USB → disque) : on copie puis on supprime.
-    std::fs::rename(chemin, &dest).or_else(|_| std::fs::copy(chemin, &dest).and_then(|_| std::fs::remove_file(chemin)))?;
+    std::fs::rename(chemin, &dest)
+        .or_else(|_| std::fs::copy(chemin, &dest).and_then(|_| std::fs::remove_file(chemin)))?;
     std::fs::set_permissions(&dest, std::fs::Permissions::from_mode(0o000))?;
     Ok(dest)
 }
@@ -240,7 +303,10 @@ fn demarrage() {
             }
         }
         if let Ok(o) = Command::new("crontab").arg("-l").output() {
-            for l in String::from_utf8_lossy(&o.stdout).lines().filter(|l| !l.trim().is_empty() && !l.starts_with('#')) {
+            for l in String::from_utf8_lossy(&o.stdout)
+                .lines()
+                .filter(|l| !l.trim().is_empty() && !l.starts_with('#'))
+            {
                 entrees.push(format!("crontab : {l}"));
             }
         }
@@ -259,7 +325,11 @@ fn demarrage() {
     #[cfg(target_os = "macos")]
     {
         let h = home();
-        for d in [h.join("Library/LaunchAgents"), "/Library/LaunchAgents".into(), "/Library/LaunchDaemons".into()] {
+        for d in [
+            h.join("Library/LaunchAgents"),
+            "/Library/LaunchAgents".into(),
+            "/Library/LaunchDaemons".into(),
+        ] {
             for f in std::fs::read_dir(&d).into_iter().flatten().flatten() {
                 let nom = f.file_name().to_string_lossy().into_owned();
                 if !nom.starts_with("com.apple.") {
@@ -267,8 +337,18 @@ fn demarrage() {
                 }
             }
         }
-        if let Ok(o) = Command::new("osascript").args(["-e", "tell application \"System Events\" to get the name of every login item"]).output() {
-            for n in String::from_utf8_lossy(&o.stdout).trim().split(", ").filter(|n| !n.is_empty()) {
+        if let Ok(o) = Command::new("osascript")
+            .args([
+                "-e",
+                "tell application \"System Events\" to get the name of every login item",
+            ])
+            .output()
+        {
+            for n in String::from_utf8_lossy(&o.stdout)
+                .trim()
+                .split(", ")
+                .filter(|n| !n.is_empty())
+            {
                 entrees.push(format!("élément d'ouverture : {n}"));
             }
         }
@@ -298,7 +378,8 @@ mod tests {
 
     #[test]
     fn resultat_clamscan() {
-        let sortie = "/home/x/Téléchargements/eicar.com: Eicar-Test-Signature FOUND\n/tmp/a b.exe: Win.Trojan.Agent-123 FOUND\n";
+        let sortie =
+            "/home/x/Téléchargements/eicar.com: Eicar-Test-Signature FOUND\n/tmp/a b.exe: Win.Trojan.Agent-123 FOUND\n";
         let r = lire_resultat(Some(1), sortie).unwrap();
         assert_eq!(r.len(), 2);
         assert_eq!(r[1], ("/tmp/a b.exe".to_string(), "Win.Trojan.Agent-123".to_string()));

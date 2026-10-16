@@ -20,7 +20,10 @@ use reseau::{Options, Rapport};
 use ui::*;
 
 #[derive(Parser)]
-#[command(version, about = "Bilan de sécurité : cette machine + réseau local, avec correctifs. Sans argument : menu.")]
+#[command(
+    version,
+    about = "Bilan de sécurité : cette machine + réseau local, avec correctifs. Sans argument : menu."
+)]
 struct Args {
     #[command(subcommand)]
     commande: Option<Commande>,
@@ -111,7 +114,11 @@ impl Session {
         if let Some(g) = [m, r].into_iter().flatten().min() {
             afficher_note("Global", g);
         }
-        let a_corriger = self.audit.as_ref().is_some_and(|a| a.constats.iter().any(|c| c.correctif.as_ref().is_some_and(|k| k.automatique)));
+        let a_corriger = self.audit.as_ref().is_some_and(|a| {
+            a.constats
+                .iter()
+                .any(|c| c.correctif.as_ref().is_some_and(|k| k.automatique))
+        });
         if a_corriger {
             println!("\n  🔧 Des corrections sont possibles : choix « 2 » du menu ou « netscan corriger ».");
         }
@@ -152,7 +159,11 @@ async fn menu() {
         println!("  6. Antivirus : analyse rapide");
         println!("  7. Antivirus : analyse complète du dossier personnel");
         println!("  8. Ouvrir le rapport détaillé (navigateur)");
-        let etat = if surveillance::active() { format!("{VERT}activée{RESET}") } else { format!("{GRIS}désactivée{RESET}") };
+        let etat = if surveillance::active() {
+            format!("{VERT}activée{RESET}")
+        } else {
+            format!("{GRIS}désactivée{RESET}")
+        };
         println!("  9. Surveillance du réseau toutes les heures : {etat}");
         println!("  n. Nommer un appareil (« imprimante HP »)");
         println!("  q. Quitter\n");
@@ -206,8 +217,21 @@ async fn main() {
             machine::executer(json);
         }
         Some(Commande::Corriger) => Session::default().corriger(),
-        Some(Commande::Reseau { cible, ports, timeout, parallele, json }) => {
-            let o = Options { cible, ports, timeout, parallele, json, silencieux: false };
+        Some(Commande::Reseau {
+            cible,
+            ports,
+            timeout,
+            parallele,
+            json,
+        }) => {
+            let o = Options {
+                cible,
+                ports,
+                timeout,
+                parallele,
+                json,
+                silencieux: false,
+            };
             if let Err(e) = reseau::executer(o).await {
                 eprintln!("Erreur : {e}");
                 std::process::exit(1);
