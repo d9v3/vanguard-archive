@@ -439,11 +439,6 @@ if ($Auto) { Info 'Sautée : il faut regarder l''écran (test avec questions).' 
     Constat 'Dans l''audit ci-dessus, les couleurs et les accents (é, è, ✔, ✖) s''affichent-ils correctement ?'
 }
 
-if (-not $Auto) {
-    $commentaire = Read-Host '  Un commentaire libre sur ce que tu as vu (Entrée pour passer)'
-    if ($commentaire) { Journal "COMMENTAIRE : $commentaire" }
-}
-
 Journal "FIN $(Get-Date -Format 'HH:mm:ss')"
 $rapport = Rapport
 $toutes = @($script:etapes | ForEach-Object { $_.Verifs })
