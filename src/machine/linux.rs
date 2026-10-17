@@ -52,21 +52,81 @@ impl Paquets {
 
     /// Le fichier appartient-il à un paquet ? (sinon : ajouté à la main)
     pub fn possede(self, fichier: &Path) -> bool {
-        let (cmd, arg) = match self {
-            Paquets::Pacman => ("pacman", "-Qo"),
-            Paquets::Apt => ("dpkg", "-S"),
-            Paquets::Dnf | Paquets::Zypper => ("rpm", "-qf"),
-        };
-        let connu = |f: &Path| {
-            Command::new(cmd)
-                .arg(arg)
-                .arg(f)
-                .output()
-                .is_ok_and(|o| o.status.success())
+        self.proprietaire(fichier).is_some()
+    }
+
+    /// Nom du paquet qui a installé ce fichier, `None` s'il a été ajouté à la main.
+    pub fn proprietaire(self, fichier: &Path) -> Option<String> {
+        let nom = |f: &Path| {
+            let arg = f.to_string_lossy();
+            match self {
+                Paquets::Pacman => sortie("pacman", &["-Qoq", &arg]).map(|s| s.trim().to_string()),
+                Paquets::Apt => sortie("dpkg", &["-S", &arg]).and_then(|s| paquet_dpkg(&s)),
+                Paquets::Dnf | Paquets::Zypper => sortie("rpm", &["-qf", "--qf", "%{NAME}\\n", &arg])
+                    .and_then(|s| s.lines().next().map(str::to_string)),
+            }
+            .filter(|n| !n.is_empty())
         };
         // /bin, /sbin et /lib sont fusionnés dans /usr sur Debian, Ubuntu et Mint, mais dpkg garde souvent
         // l'ancien chemin : /usr/bin/fusermount3 y est enregistré comme /bin/fusermount3 (vu sur Mint 22).
-        connu(fichier) || chemin_hors_usr(fichier).is_some_and(|ancien| connu(&ancien))
+        nom(fichier).or_else(|| chemin_hors_usr(fichier).and_then(|ancien| nom(&ancien)))
+    }
+
+    /// Ces fichiers du paquet ont-ils changé depuis son installation ? Contenu comparé à l'empreinte enregistrée
+    /// par le gestionnaire de paquets. `None` pour un fichier qu'on ne peut pas vérifier (illisible, sans empreinte).
+    pub fn modifies(self, paquet: &str, fichiers: &[std::path::PathBuf]) -> Vec<Option<bool>> {
+        match self {
+            Paquets::Pacman => {
+                // Empreintes SHA-256 dans le mtree du paquet : ne calcule que les fichiers demandés
+                // (pacman -Qkk relirait tout le paquet, des centaines de Mo pour Electron).
+                let mtree = sortie("pacman", &["-Q", paquet])
+                    .map(|s| s.trim().replace(' ', "-"))
+                    .and_then(|dossier| sortie("zcat", &[&format!("/var/lib/pacman/local/{dossier}/mtree")]));
+                fichiers
+                    .iter()
+                    .map(|f| {
+                        let attendue = empreinte_mtree(mtree.as_deref()?, f)?;
+                        let calculee = sortie("sha256sum", &[&f.to_string_lossy()])?;
+                        Some(calculee.split_whitespace().next()? != attendue)
+                    })
+                    .collect()
+            }
+            Paquets::Apt | Paquets::Dnf | Paquets::Zypper => {
+                // dpkg --verify et rpm -V répondent 1 quand ils trouvent une différence : c'est une réponse, pas une erreur.
+                let mut cmd = if self == Paquets::Apt {
+                    Command::new("dpkg")
+                } else {
+                    Command::new("rpm")
+                };
+                cmd.args(if self == Paquets::Apt {
+                    ["--verify", paquet]
+                } else {
+                    ["-V", paquet]
+                })
+                .env("LC_ALL", "C");
+                let verif = crate::commande::lancer(&mut cmd, 60)
+                    .filter(|r| matches!(r.code, Some(0 | 1)))
+                    .map(|r| r.sortie);
+                fichiers
+                    .iter()
+                    .map(|f| {
+                        let verif = verif.as_deref()?;
+                        let ancien = chemin_hors_usr(f);
+                        Some(contenu_modifie(verif, f) || ancien.is_some_and(|a| contenu_modifie(verif, &a)))
+                    })
+                    .collect()
+            }
+        }
+    }
+
+    /// Commande pour remettre les fichiers d'origine d'un paquet.
+    pub fn reinstaller(self, paquet: &str) -> String {
+        match self {
+            Paquets::Pacman => format!("sudo pacman -S --noconfirm {paquet}"),
+            Paquets::Apt => format!("sudo apt-get install --reinstall -y {paquet}"),
+            Paquets::Dnf => format!("sudo dnf reinstall -y {paquet}"),
+            Paquets::Zypper => format!("sudo zypper --non-interactive install -f {paquet}"),
+        }
     }
 
     fn mise_a_jour(self) -> &'static str {
@@ -87,6 +147,35 @@ fn chemin_hors_usr(fichier: &Path) -> Option<std::path::PathBuf> {
         .iter()
         .any(|d| reste.starts_with(d))
         .then(|| Path::new("/").join(reste))
+}
+
+/// Paquet donné par « dpkg -S » : « libc6:amd64, libc6-dbg: /chemin » → « libc6:amd64 ». Les lignes
+/// « diversion by … » parlent d'un fichier détourné, pas de son propriétaire.
+fn paquet_dpkg(texte: &str) -> Option<String> {
+    texte
+        .lines()
+        .filter(|l| !l.starts_with("diversion "))
+        .find_map(|l| l.split_once(": ")?.0.split(", ").next().map(str::to_string))
+}
+
+/// Empreinte SHA-256 enregistrée pour ce fichier dans le mtree d'un paquet pacman (« ./usr/bin/sudo … sha256digest=… »).
+fn empreinte_mtree(mtree: &str, fichier: &Path) -> Option<String> {
+    let debut = format!(".{} ", fichier.display());
+    mtree
+        .lines()
+        .find(|l| l.starts_with(&debut))?
+        .split_whitespace()
+        .find_map(|c| c.strip_prefix("sha256digest="))
+        .map(str::to_string)
+}
+
+/// Sortie de dpkg --verify ou rpm -V : le 3e caractère vaut « 5 » quand le contenu (empreinte) a changé.
+/// Les autres différences (date, droits) ne prouvent pas un remplacement du programme.
+fn contenu_modifie(verif: &str, fichier: &Path) -> bool {
+    let chemin = fichier.to_string_lossy();
+    verif
+        .lines()
+        .any(|l| l.split_whitespace().last() == Some(&*chemin) && l.chars().nth(2) == Some('5'))
 }
 
 /// systemd est-il le gestionnaire de services ? Sans lui (conteneur, Alpine, Void…), on ne peut pas
@@ -792,6 +881,203 @@ fn mises_a_jour() -> Constat {
     .corriger("Mettre le système à jour", &[gestion.mise_a_jour()])
 }
 
+/// Paquet installé touché par une faille publiée (CVE, avis de sécurité de la distribution).
+#[derive(Debug, PartialEq)]
+struct Faille {
+    paquet: String,
+    gravite: Niveau,
+    /// Une version corrigée est déjà dans les dépôts : la mise à jour suffit.
+    corrigee: bool,
+}
+
+/// Gravité écrite par les distributions (anglais), en niveau de netscan. Inconnue : on ne minimise pas.
+fn gravite(texte: &str) -> Niveau {
+    match texte.trim().to_ascii_lowercase().as_str() {
+        "critical" => Niveau::Critique,
+        "high" | "important" => Niveau::Eleve,
+        "low" | "unknown" | "none" => Niveau::Info,
+        _ => Niveau::Moyen,
+    }
+}
+
+/// arch-audit --json : groupes de failles avec la liste des paquets installés touchés.
+fn failles_arch(json: &serde_json::Value) -> Vec<Faille> {
+    json.as_array()
+        .into_iter()
+        .flatten()
+        .flat_map(|g| {
+            let gravite = gravite(g["severity"].as_str().unwrap_or("unknown"));
+            let corrigee = g["fixed"].as_str().is_some_and(|v| !v.is_empty());
+            g["packages"].as_array().into_iter().flatten().filter_map(move |p| {
+                Some(Faille {
+                    paquet: p.as_str()?.to_string(),
+                    gravite,
+                    corrigee,
+                })
+            })
+        })
+        .collect()
+}
+
+/// apt list --upgradable : une mise à jour venue d'un dépôt « -security » (noble-security, stable-security…)
+/// corrige une faille. apt ne donne pas la gravité.
+fn failles_apt(lignes: &[String]) -> Vec<Faille> {
+    lignes
+        .iter()
+        .filter_map(|l| {
+            let (nom, reste) = l.split_once('/')?;
+            let depots = reste.split_whitespace().next()?;
+            depots.split(',').any(|d| d.ends_with("-security")).then(|| Faille {
+                paquet: nom.to_string(),
+                gravite: Niveau::Eleve,
+                corrigee: true,
+            })
+        })
+        .collect()
+}
+
+/// dnf updateinfo list --security. dnf 4 : « FEDORA-2024-1a2b Important/Sec. curl-8.6.0-7.fc40.x86_64 » ;
+/// dnf 5 : « FEDORA-2024-1a2b security Important curl-8.6.0-7.fc40.x86_64 2024-04-01 00:43:20 ».
+fn failles_dnf(texte: &str) -> Vec<Faille> {
+    texte
+        .lines()
+        .filter_map(|l| {
+            let mots: Vec<&str> = l.split_whitespace().collect();
+            let (gravite_txt, paquet) = match mots.as_slice() {
+                [_, g, p, ..] if g.ends_with("/Sec.") => (g.trim_end_matches("/Sec."), *p),
+                [_, "security", g, p, ..] => (*g, *p),
+                _ => return None,
+            };
+            // nom-version-révision.arch → nom
+            let nom = paquet.rsplitn(3, '-').nth(2)?;
+            Some(Faille {
+                paquet: nom.to_string(),
+                gravite: gravite(gravite_txt),
+                corrigee: true,
+            })
+        })
+        .collect()
+}
+
+/// zypper list-patches --category security : tableau « dépôt | nom | catégorie | gravité | interactif | état | résumé ».
+fn failles_zypper(texte: &str) -> Vec<Faille> {
+    texte
+        .lines()
+        .filter_map(|l| {
+            let c: Vec<&str> = l.split('|').map(str::trim).collect();
+            (c.len() >= 6 && c[2] == "security" && c[5].starts_with("needed")).then(|| Faille {
+                paquet: c[1].to_string(),
+                gravite: gravite(c[3]),
+                corrigee: true,
+            })
+        })
+        .collect()
+}
+
+/// Failles connues des paquets installés, d'après le suivi de sécurité de la distribution.
+fn failles_connues() -> Constat {
+    const CAT: &str = "Failles connues";
+    let Some(gestion) = Paquets::detecter() else {
+        return impossible(CAT, "gestionnaire de paquets non reconnu");
+    };
+    let failles = match gestion {
+        Paquets::Pacman => {
+            if !Path::new("/usr/bin/arch-audit").exists() {
+                return impossible(CAT, "arch-audit absent").corriger(
+                    "Installer arch-audit, qui lit le suivi de sécurité d'Arch (security.archlinux.org)",
+                    &[&gestion.installer("arch-audit")],
+                );
+            }
+            match sortie_delai("arch-audit", &["--json"], 40, &[0])
+                .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
+            {
+                Some(json) => failles_arch(&json),
+                None => return impossible(CAT, "suivi de sécurité injoignable, hors ligne ?"),
+            }
+        }
+        Paquets::Apt => match liste_mises_a_jour(gestion) {
+            Some(l) => failles_apt(&l),
+            None => return impossible(CAT, "liste des paquets jamais téléchargée"),
+        },
+        Paquets::Dnf => {
+            match crate::commande::lancer(
+                Command::new("dnf")
+                    .args(["-q", "updateinfo", "list", "--security"])
+                    .env("LC_ALL", "C"),
+                120,
+            ) {
+                Some(r) if r.code == Some(0) => failles_dnf(&r.sortie),
+                _ => return impossible(CAT, "avis de sécurité de dnf injoignables, hors ligne ?"),
+            }
+        }
+        Paquets::Zypper => {
+            match crate::commande::lancer(
+                Command::new("zypper")
+                    .args(["-q", "list-patches", "--category", "security"])
+                    .env("LC_ALL", "C"),
+                120,
+            ) {
+                Some(r) if r.code == Some(0) => failles_zypper(&r.sortie),
+                _ => return impossible(CAT, "avis de sécurité de zypper injoignables, hors ligne ?"),
+            }
+        }
+    };
+    bilan_failles(gestion, &failles)
+}
+
+fn bilan_failles(gestion: Paquets, failles: &[Faille]) -> Constat {
+    const CAT: &str = "Failles connues";
+    let noms = |corrigee: bool| {
+        let mut n: Vec<&str> = failles
+            .iter()
+            .filter(|f| f.corrigee == corrigee)
+            .map(|f| f.paquet.as_str())
+            .collect();
+        n.sort_unstable();
+        n.dedup();
+        n
+    };
+    let (a_corriger, sans_correctif) = (noms(true), noms(false));
+    let resume = |n: &[&str]| {
+        let mut t = n.iter().take(8).copied().collect::<Vec<_>>().join(", ");
+        if n.len() > 8 {
+            let _ = write!(t, "… (+{})", n.len() - 8);
+        }
+        t
+    };
+    // Une faille sans correctif publié : rien à faire de ton côté, la mise à jour viendra. Le suivi d'Arch garde
+    // souvent des failles corrigées en amont : on le dit, sans baisser la note.
+    let attente = (!sans_correctif.is_empty()).then(|| {
+        format!(
+            "{} paquet(s) touché(s) par une faille encore sans correctif publié : {}.",
+            sans_correctif.len(),
+            resume(&sans_correctif)
+        )
+    });
+    if a_corriger.is_empty() {
+        return match attente {
+            Some(t) => alerte(CAT, Niveau::Info, format!("Aucune faille corrigée en attente. {t}")),
+            None => ok(CAT, "Aucun paquet installé n'a de faille connue."),
+        };
+    }
+    let pire = failles
+        .iter()
+        .filter(|f| f.corrigee)
+        .map(|f| f.gravite)
+        .max()
+        .unwrap_or(Niveau::Moyen)
+        .max(Niveau::Moyen);
+    let mut message = format!(
+        "{} paquet(s) avec une faille connue, déjà corrigée dans les dépôts : {}.",
+        a_corriger.len(),
+        resume(&a_corriger)
+    );
+    if let Some(t) = attente {
+        let _ = write!(message, " {t}");
+    }
+    alerte(CAT, pire, message).corriger("Installer les correctifs de sécurité", &[gestion.mise_a_jour()])
+}
+
 fn redemarrage() -> Constat {
     let noyau = sortie("uname", &["-r"]).unwrap_or_default().trim().to_string();
     let installes: Vec<std::path::PathBuf> = ["/usr/lib/modules", "/lib/modules"]
@@ -1315,8 +1601,18 @@ fn path_dangereux(path: &str, droits: impl Fn(&str) -> Option<u32>) -> Vec<Strin
         .collect()
 }
 
-/// Programmes setuid (lancés avec les droits de leur propriétaire, souvent root) là où il ne devrait pas y en avoir,
-/// ou qui n'appartiennent à aucun paquet ; et PATH piégeable.
+/// Fichiers listés par « getcap -r » : « /usr/bin/ping cap_net_raw=ep » (ancien format : « /usr/bin/ping = cap_net_raw+ep »).
+fn fichiers_capacites(texte: &str) -> Vec<std::path::PathBuf> {
+    texte
+        .lines()
+        .filter_map(|l| l.split_once(" = ").or_else(|| l.rsplit_once(' ')))
+        .filter(|(f, caps)| f.starts_with('/') && caps.contains("cap_"))
+        .map(|(f, _)| std::path::PathBuf::from(f))
+        .collect()
+}
+
+/// Programmes privilégiés (setuid, setgid, capacités : lancés avec des droits que l'utilisateur n'a pas) là où il ne
+/// devrait pas y en avoir, qui n'appartiennent à aucun paquet ou qui ont changé depuis leur installation ; et PATH piégeable.
 fn fichiers_suspects() -> Vec<Constat> {
     use std::os::unix::fs::PermissionsExt;
     fn parcourir(d: &Path, profondeur: u32, trouve: &mut Vec<std::path::PathBuf>, test: &dyn Fn(&Path) -> bool) {
@@ -1331,39 +1627,149 @@ fn fichiers_suspects() -> Vec<Constat> {
             }
         }
     }
+    use std::os::unix::fs::MetadataExt;
     let mut constats = Vec::new();
-    let setuid = |p: &Path| {
-        p.symlink_metadata()
-            .is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o4000 != 0)
+    // Propriétaire du processus, lu sur /proc/self (sans dépendance à la libc).
+    let moi = std::fs::metadata("/proc/self").map_or(u32::MAX, |m| m.uid());
+    // Dans un dossier temporaire ou personnel, un setuid à soi ne donne aucun droit de plus ; un setuid à un autre
+    // compte (root) ou un setgid du groupe root, si.
+    let dangereux_hors_systeme = |p: &Path| {
+        p.symlink_metadata().is_ok_and(|m| {
+            m.is_file()
+                && ((m.permissions().mode() & 0o4000 != 0 && m.uid() != moi)
+                    || (m.permissions().mode() & 0o2000 != 0 && m.gid() == 0))
+        })
     };
-    // Aucun setuid ne devrait vivre dans un dossier temporaire ou personnel.
+    let privilegie = |p: &Path| {
+        p.symlink_metadata()
+            .is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o6000 != 0)
+    };
     let mut anormaux = Vec::new();
     for (d, prof) in [("/tmp", 3), ("/var/tmp", 3), ("/dev/shm", 3), (&home() as &str, 2)] {
-        parcourir(Path::new(d), prof, &mut anormaux, &setuid);
+        parcourir(Path::new(d), prof, &mut anormaux, &dangereux_hors_systeme);
     }
-    // Dans les dossiers système : chaque setuid doit venir d'un paquet.
+    // Dans les dossiers système : chaque setuid ou setgid doit venir d'un paquet, et être intact.
     let mut systeme = Vec::new();
-    for d in ["/usr/bin", "/usr/sbin", "/usr/local/bin", "/usr/local/sbin", "/opt"] {
-        parcourir(Path::new(d), if d == "/opt" { 3 } else { 0 }, &mut systeme, &setuid);
+    for (d, prof) in [
+        ("/usr/bin", 0),
+        ("/usr/sbin", 0),
+        ("/usr/local/bin", 0),
+        ("/usr/local/sbin", 0),
+        ("/usr/lib", 2),
+        ("/usr/libexec", 2),
+        ("/opt", 3),
+    ] {
+        parcourir(Path::new(d), prof, &mut systeme, &privilegie);
     }
-    if let Some(gestion) = Paquets::detecter() {
-        anormaux.extend(systeme.into_iter().filter(|p| !gestion.possede(p)));
+    // Capacités (setcap) : droits root partiels, invisibles dans « ls -l ». Poser une capacité demande root.
+    let capacites = sortie(
+        "getcap",
+        &[
+            "-r",
+            "/usr/bin",
+            "/usr/sbin",
+            "/usr/local",
+            "/usr/lib",
+            "/usr/libexec",
+            "/opt",
+            "/tmp",
+            "/var/tmp",
+            "/dev/shm",
+        ],
+    )
+    .map(|s| fichiers_capacites(&s));
+    for p in capacites.iter().flatten() {
+        if ["/tmp/", "/var/tmp/", "/dev/shm/"].iter().any(|d| p.starts_with(d)) {
+            anormaux.push(p.clone());
+        } else if !systeme.contains(p) {
+            systeme.push(p.clone());
+        }
     }
-    if anormaux.is_empty() {
-        constats.push(ok("Fichiers suspects", "Aucun programme setuid inhabituel."));
-    } else {
+    // /usr/sbin est un lien vers /usr/bin sur Arch : chemin réel (celui que connaît le paquet), sans doublon.
+    let mut systeme: Vec<std::path::PathBuf> = systeme
+        .into_iter()
+        .map(|p| std::fs::canonicalize(&p).unwrap_or(p))
+        .collect();
+    systeme.sort();
+    systeme.dedup();
+    let gestion = Paquets::detecter();
+    let mut par_paquet: std::collections::BTreeMap<String, Vec<std::path::PathBuf>> = std::collections::BTreeMap::new();
+    if let Some(gestion) = gestion {
+        for p in &systeme {
+            match gestion.proprietaire(p) {
+                Some(paquet) => par_paquet.entry(paquet).or_default().push(p.clone()),
+                None => anormaux.push(p.clone()),
+            }
+        }
+    }
+    let (mut modifies, mut non_verifies) = (Vec::new(), 0);
+    if let Some(gestion) = gestion {
+        for (paquet, fichiers) in &par_paquet {
+            for (f, etat) in fichiers.iter().zip(gestion.modifies(paquet, fichiers)) {
+                match etat {
+                    Some(true) => modifies.push((f.display().to_string(), paquet.clone())),
+                    Some(false) => {}
+                    None => non_verifies += 1,
+                }
+            }
+        }
+    }
+    if !modifies.is_empty() {
+        let liste: Vec<String> = modifies.iter().map(|(f, p)| format!("{f} (paquet {p})")).collect();
+        let mut paquets: Vec<&str> = modifies.iter().map(|(_, p)| p.as_str()).collect();
+        paquets.dedup();
+        let reinstaller = gestion.map(|g| g.reinstaller(&paquets.join(" "))).unwrap_or_default();
+        constats.push(
+            alerte(
+                "Fichiers suspects",
+                Niveau::Critique,
+                format!(
+                    "Programme(s) privilégié(s) modifié(s) depuis leur installation : {}. Signe possible d'une porte dérobée.",
+                    liste.join(", ")
+                ),
+            )
+            .manuel(
+                "Ne pas le lancer. Remettre l'original depuis les dépôts, puis lancer l'antivirus et changer tes mots de passe",
+                &[&reinstaller],
+            ),
+        );
+    }
+    if !anormaux.is_empty() {
         let liste: Vec<String> = anormaux.iter().take(10).map(|p| p.display().to_string()).collect();
         constats.push(
             alerte(
                 "Fichiers suspects",
                 Niveau::Eleve,
-                format!("Programme(s) setuid hors paquet ou dans un dossier temporaire : {}.", liste.join(", ")),
+                format!(
+                    "Programme(s) setuid, setgid ou à capacités hors paquet ou dans un dossier temporaire : {}.",
+                    liste.join(", ")
+                ),
             )
             .manuel(
-                "Un setuid inconnu peut donner les droits root : vérifier d'où il vient avant toute chose (ne pas le lancer)",
-                &[&format!("ls -l {}", liste.join(" "))],
+                "Ces programmes peuvent donner des droits root : vérifier d'où ils viennent avant toute chose (ne pas les lancer)",
+                &[&format!("ls -l {}", liste.join(" ")), &format!("getcap {}", liste.join(" "))],
             ),
         );
+    }
+    if modifies.is_empty() && anormaux.is_empty() {
+        let n = systeme.len();
+        let mut message = match (gestion, non_verifies) {
+            (None, _) => format!(
+                "Aucun programme privilégié dans les dossiers temporaires ; les {n} du système n'ont pas pu être \
+                 rapprochés d'un paquet (gestionnaire de paquets non reconnu)."
+            ),
+            (Some(_), 0) => format!(
+                "Aucun programme privilégié inhabituel : {n} setuid, setgid ou à capacités, tous d'un paquet et intacts."
+            ),
+            (Some(_), k) => format!(
+                "Aucun programme privilégié inhabituel : {n} setuid, setgid ou à capacités, tous d'un paquet ; \
+                 {k} illisible(s), donc non comparé(s) à l'original."
+            ),
+        };
+        if capacites.is_none() {
+            message.push_str(" Capacités non vérifiées (getcap absent).");
+        }
+        constats.push(ok("Fichiers suspects", message));
     }
     let path = std::env::var("PATH").unwrap_or_default();
     let dangereux = path_dangereux(&path, |d| std::fs::metadata(d).ok().map(|m| m.permissions().mode()));
@@ -1701,6 +2107,7 @@ pub fn auditer() -> Audit {
     constats.extend(docker());
     constats.push(ssh_serveur());
     constats.push(mises_a_jour());
+    constats.push(failles_connues());
     constats.extend(autres_mises_a_jour());
     constats.push(redemarrage());
     constats.push(chiffrement_disque());
@@ -1915,5 +2322,111 @@ mod tests {
         // Une commande en échec n'est jamais une réponse, sauf code explicitement accepté.
         assert!(sortie_delai("sh", &["-c", "echo rien; exit 1"], 5, &[0]).is_none());
         assert_eq!(sortie_delai("sh", &["-c", "exit 1"], 5, &[0, 1]).as_deref(), Some(""));
+    }
+
+    #[test]
+    fn failles_des_distributions() {
+        let arch = serde_json::json!([
+            {"packages": ["openssl", "lib32-openssl"], "severity": "High", "fixed": "3.5.1-1", "status": "Fixed"},
+            {"packages": ["pam"], "severity": "High", "fixed": null, "status": "Vulnerable"},
+            {"packages": ["lua51"], "severity": "Low", "fixed": null}
+        ]);
+        let f = failles_arch(&arch);
+        assert_eq!(f.len(), 4);
+        assert!(f[0].corrigee && f[0].gravite == Niveau::Eleve && f[1].paquet == "lib32-openssl");
+        assert!(!f[2].corrigee && f[3].gravite == Niveau::Info);
+
+        let apt = [
+            "libssl3t64/noble-updates,noble-security 3.0.13-0ubuntu3.4 amd64 [upgradable from: 3.0.13-0ubuntu3.1]",
+            "firefox/noble-updates 1:1snap1 amd64 [upgradable from: 1:1snap0]",
+            "openssl/stable-security 3.0.15-1~deb12u1 amd64 [upgradable from: 3.0.14-1~deb12u2]",
+        ]
+        .map(String::from);
+        let noms: Vec<String> = failles_apt(&apt).into_iter().map(|f| f.paquet).collect();
+        assert_eq!(noms, ["libssl3t64", "openssl"]);
+
+        let dnf4 = "FEDORA-2024-1a2b Important/Sec. curl-8.6.0-7.fc40.x86_64\nFEDORA-2024-9f9f bugfix   bash-5.2-1.fc40.x86_64\n";
+        assert_eq!(
+            failles_dnf(dnf4),
+            [Faille {
+                paquet: "curl".into(),
+                gravite: Niveau::Eleve,
+                corrigee: true
+            }]
+        );
+        let dnf5 = "Name             Type     Severity  Package                         Issued\n\
+                    FEDORA-2024-1a2b security Critical  python3-libs-3.12.4-1.fc40.x86_64 2024-04-01 00:43:20\n";
+        let f = failles_dnf(dnf5);
+        assert_eq!((f[0].paquet.as_str(), f[0].gravite), ("python3-libs", Niveau::Critique));
+
+        let zypper = "Repository | Name                  | Category    | Severity  | Interactive | Status     | Summary\n\
+                      -----------+-----------------------+-------------+-----------+-------------+------------+--------\n\
+                      Update     | openSUSE-2024-123     | security    | important | ---         | needed     | openssl\n\
+                      Update     | openSUSE-2024-124     | security    | low       | ---         | applied    | curl\n\
+                      Update     | openSUSE-2024-125     | recommended | moderate  | ---         | needed     | vim\n";
+        let f = failles_zypper(zypper);
+        assert_eq!(f.len(), 1);
+        assert_eq!(
+            (f[0].paquet.as_str(), f[0].gravite),
+            ("openSUSE-2024-123", Niveau::Eleve)
+        );
+    }
+
+    #[test]
+    fn bilan_des_failles() {
+        let f = |paquet: &str, gravite, corrigee| Faille {
+            paquet: paquet.into(),
+            gravite,
+            corrigee,
+        };
+        assert!(bilan_failles(Paquets::Pacman, &[]).probleme.is_none());
+        // Faille sans correctif : signalée, sans baisser la note ni proposer de correction.
+        let c = bilan_failles(Paquets::Pacman, &[f("pam", Niveau::Eleve, false)]);
+        assert_eq!(c.probleme, Some(Niveau::Info));
+        assert!(c.correctif.is_none() && c.message.contains("pam"));
+        // La pire gravité des failles corrigées donne le niveau ; jamais moins que Moyen.
+        let c = bilan_failles(
+            Paquets::Dnf,
+            &[
+                f("curl", Niveau::Info, true),
+                f("curl", Niveau::Critique, true),
+                f("pam", Niveau::Eleve, false),
+            ],
+        );
+        assert_eq!(c.probleme, Some(Niveau::Critique));
+        assert!(c.message.starts_with("1 paquet(s)") && c.message.contains("pam") && c.correctif.is_some());
+        assert_eq!(
+            bilan_failles(Paquets::Apt, &[f("vim", Niveau::Info, true)]).probleme,
+            Some(Niveau::Moyen)
+        );
+    }
+
+    #[test]
+    fn programmes_privilegies() {
+        assert_eq!(
+            fichiers_capacites(
+                "/usr/bin/newuidmap cap_setuid=ep\n/usr/bin/ping = cap_net_raw+ep\n/tmp/un dossier/x cap_sys_admin=ep\n"
+            ),
+            ["/usr/bin/newuidmap", "/usr/bin/ping", "/tmp/un dossier/x"].map(std::path::PathBuf::from)
+        );
+        assert_eq!(
+            paquet_dpkg("libc6:amd64, libc6-dbg: /usr/bin/ldd\n").as_deref(),
+            Some("libc6:amd64")
+        );
+        assert_eq!(
+            paquet_dpkg("diversion by dash from: /bin/sh\ndash: /bin/sh\n").as_deref(),
+            Some("dash")
+        );
+        let mtree = "#mtree\n./usr/bin/sudoedit time=1.0 type=link link=sudo\n./usr/bin/sudo time=1.0 mode=4755 sha256digest=e9f8\n";
+        assert_eq!(
+            empreinte_mtree(mtree, Path::new("/usr/bin/sudo")).as_deref(),
+            Some("e9f8")
+        );
+        assert_eq!(empreinte_mtree(mtree, Path::new("/usr/bin/sudoedit")), None);
+        // Seul « 5 » (contenu) compte : une date ou des droits changés ne prouvent pas un remplacement.
+        let verif = "??5??????   /usr/bin/passwd\n.M.......   /usr/bin/su\nS.5....T.  c /etc/sudoers\n";
+        assert!(contenu_modifie(verif, Path::new("/usr/bin/passwd")));
+        assert!(!contenu_modifie(verif, Path::new("/usr/bin/su")));
+        assert!(!contenu_modifie(verif, Path::new("/usr/bin/mount")));
     }
 }
