@@ -31,6 +31,10 @@ verdict critère par critère et des conseils.
 
 ![Test de connexion](assets/captures/connexion.png)
 
+**Diagnostic de l'ordinateur** — le premier réflexe d'un dépannage : matériel, système, et les problèmes récents
+(erreurs du journal et programmes plantés sous Linux ; écrans bleus, arrêts brutaux et plantages sous Windows), avec
+une copie texte enregistrée sur la clé.
+
 **Et aussi**
 - Corrections appliquées seulement après confirmation, avec un point de restauration créé automatiquement avant
   (snapper ou timeshift sous Linux, point de restauration Windows) ; sous Windows, chacune est un script lisible.
@@ -68,6 +72,7 @@ Chaque entrée du menu existe aussi en commande :
 | `sentinel machine [--json]` | audit de cette machine |
 | `sentinel reseau [cible] [-p courants\|tous\|22,80,8000-8100] [--json]` | scan du réseau ou d'un appareil |
 | `sentinel connexion` | test de connexion pour le jeu |
+| `sentinel diagnostic` | diagnostic de l'ordinateur : matériel, système, plantages et erreurs récents |
 | `sentinel antivirus [--complet]` | analyse antivirus |
 | `sentinel motdepasse` | mots de passe fuités |
 | `sentinel isoler <fichier>` | lancer un programme inconnu dans un bac à sable (bubblewrap ou firejail, Windows Sandbox) |

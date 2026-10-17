@@ -1,0 +1,547 @@
+//! Diagnostic de l'ordinateur, le premier réflexe d'un dépannage : matériel, système, et surtout les problèmes
+//! récents (erreurs du journal et programmes plantés sous Linux ; écrans bleus, arrêts brutaux et programmes plantés
+//! sous Windows). Lecture seule. Une copie texte est enregistrée pour l'envoyer ou la garder.
+
+use std::fmt::Write;
+
+use crate::risk::Niveau;
+use crate::ui::*;
+
+/// Une ligne du diagnostic : libellé, valeur, et un niveau quand la ligne signale un problème.
+struct Ligne {
+    libelle: String,
+    valeur: String,
+    niveau: Option<Niveau>,
+}
+
+fn ligne(libelle: &str, valeur: impl Into<String>) -> Ligne {
+    Ligne {
+        libelle: libelle.to_string(),
+        valeur: valeur.into(),
+        niveau: None,
+    }
+}
+
+fn alerte(libelle: &str, valeur: impl Into<String>, niveau: Niveau) -> Ligne {
+    Ligne {
+        libelle: libelle.to_string(),
+        valeur: valeur.into(),
+        niveau: Some(niveau),
+    }
+}
+
+type Section = (String, Vec<Ligne>);
+
+fn duree(secondes: u64) -> String {
+    let (j, h, m) = (secondes / 86_400, secondes % 86_400 / 3600, secondes % 3600 / 60);
+    match j {
+        0 => format!("{h} h {m:02}"),
+        _ => trf!("{j} j {h} h", "{j} d {h} h"),
+    }
+}
+
+fn go(octets: u64) -> String {
+    #[allow(clippy::cast_precision_loss)]
+    let g = octets as f64 / f64::from(1u32 << 30);
+    if g >= 1000.0 {
+        trf!("{:.1} To", "{:.1} TB", g / 1024.0)
+    } else {
+        trf!("{g:.1} Go", "{g:.1} GB")
+    }
+}
+
+/// Sources qui reviennent le plus dans une liste : « nextdns (12), kernel (5) ».
+fn plus_frequentes(sources: &[String], max: usize) -> String {
+    let mut comptes: Vec<(String, usize)> = Vec::new();
+    for s in sources {
+        match comptes.iter_mut().find(|(n, _)| n == s) {
+            Some((_, c)) => *c += 1,
+            None => comptes.push((s.clone(), 1)),
+        }
+    }
+    comptes.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    comptes
+        .iter()
+        .take(max)
+        .map(|(n, c)| format!("{n} ({c})"))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+#[cfg(target_os = "linux")]
+mod systeme {
+    use super::{Ligne, Niveau, Section, alerte, duree, go, ligne, plus_frequentes};
+    use crate::{tr, trf};
+
+    fn lire(chemin: &str) -> Option<String> {
+        std::fs::read_to_string(chemin)
+            .ok()
+            .map(|t| t.trim().to_string())
+            .filter(|t| !t.is_empty())
+    }
+
+    fn sortie(cmd: &str, args: &[&str]) -> Option<String> {
+        let r = crate::commande::lancer(std::process::Command::new(cmd).args(args), 20)?;
+        (r.code == Some(0)).then_some(r.sortie)
+    }
+
+    fn valeur_meminfo(texte: &str, cle: &str) -> Option<u64> {
+        texte
+            .lines()
+            .find(|l| l.starts_with(cle))?
+            .split_whitespace()
+            .nth(1)?
+            .parse::<u64>()
+            .ok()
+            .map(|ko| ko * 1024)
+    }
+
+    /// Version du pilote dans /proc/driver/nvidia/version (« … Kernel Module for x86_64  610.57.04  Release … »).
+    pub(super) fn version_nvidia(texte: &str) -> Option<String> {
+        texte
+            .split_whitespace()
+            .find(|m| m.contains('.') && m.chars().all(|c| c.is_ascii_digit() || c == '.'))
+            .map(str::to_string)
+    }
+
+    /// Valeur d'une colonne d'une ligne de `lsblk -P` (`NAME="sda" SIZE="31004295168" …`).
+    pub(super) fn champ_lsblk(ligne: &str, cle: &str) -> Option<String> {
+        let debut = format!("{cle}=\"");
+        let reste = &ligne[ligne.find(&debut)? + debut.len()..];
+        Some(reste[..reste.find('"')?].trim().to_string())
+    }
+
+    /// Source d'une ligne du journal (« Oct 17 15:29:32 omarchy nextdns[1334]: … » → « nextdns »).
+    pub(super) fn source_journal(l: &str) -> Option<String> {
+        let apres_hote = l.splitn(5, ' ').nth(4)?;
+        let source = apres_hote.split(':').next()?;
+        Some(source.split('[').next()?.trim().to_string()).filter(|s| !s.is_empty())
+    }
+
+    pub fn sections() -> Vec<Section> {
+        let mut systeme = Vec::new();
+        let os = lire("/etc/os-release")
+            .and_then(|t| {
+                t.lines()
+                    .find_map(|l| l.strip_prefix("PRETTY_NAME=").map(|v| v.trim_matches('"').to_string()))
+            })
+            .unwrap_or_else(|| "Linux".into());
+        systeme.push(ligne(
+            tr!("Système", "System"),
+            format!(
+                "{os} · noyau {}",
+                lire("/proc/sys/kernel/osrelease").unwrap_or_default()
+            ),
+        ));
+        systeme.push(ligne(
+            tr!("Nom", "Name"),
+            lire("/proc/sys/kernel/hostname").unwrap_or_default(),
+        ));
+        let modele = [
+            lire("/sys/class/dmi/id/sys_vendor"),
+            lire("/sys/class/dmi/id/board_name"),
+        ]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join(" · ");
+        if !modele.is_empty() {
+            let bios = lire("/sys/class/dmi/id/bios_version")
+                .map(|b| format!(" · BIOS {b}"))
+                .unwrap_or_default();
+            systeme.push(ligne(tr!("Modèle", "Model"), format!("{modele}{bios}")));
+        }
+        if let Some(s) = lire("/proc/uptime").and_then(|t| t.split('.').next().and_then(|s| s.parse::<u64>().ok())) {
+            systeme.push(ligne(tr!("Allumé depuis", "Up for"), duree(s)));
+        }
+
+        let mut materiel = Vec::new();
+        let cpuinfo = lire("/proc/cpuinfo").unwrap_or_default();
+        if let Some(cpu) = cpuinfo
+            .lines()
+            .find_map(|l| l.strip_prefix("model name"))
+            .and_then(|l| l.split_once(':'))
+        {
+            let fils = std::thread::available_parallelism().map_or(0, std::num::NonZero::get);
+            materiel.push(ligne(
+                tr!("Processeur", "Processor"),
+                trf!("{} ({fils} fils)", "{} ({fils} threads)", cpu.1.trim()),
+            ));
+        }
+        let meminfo = lire("/proc/meminfo").unwrap_or_default();
+        if let (Some(total), Some(dispo)) = (
+            valeur_meminfo(&meminfo, "MemTotal:"),
+            valeur_meminfo(&meminfo, "MemAvailable:"),
+        ) {
+            materiel.push(ligne(
+                tr!("Mémoire", "Memory"),
+                trf!("{} ({} libres)", "{} ({} free)", go(total), go(dispo)),
+            ));
+        }
+        for l in sortie("lspci", &["-mm"]).unwrap_or_default().lines() {
+            let champs: Vec<&str> = l.split('"').collect();
+            if champs.get(1).is_some_and(|c| c.contains("VGA") || c.contains("3D")) {
+                let nom = format!("{} {}", champs.get(3).unwrap_or(&""), champs.get(5).unwrap_or(&""));
+                let pilote = lire("/proc/driver/nvidia/version")
+                    .filter(|_| nom.contains("NVIDIA"))
+                    .and_then(|v| version_nvidia(&v))
+                    .map(|v| trf!(" · pilote NVIDIA {v}", " · NVIDIA driver {v}"))
+                    .unwrap_or_default();
+                materiel.push(ligne(
+                    tr!("Carte graphique", "Graphics card"),
+                    format!("{}{pilote}", nom.trim()),
+                ));
+            }
+        }
+        for l in sortie("lsblk", &["-dnbP", "-o", "NAME,SIZE,ROTA,TYPE,TRAN,MODEL"])
+            .unwrap_or_default()
+            .lines()
+        {
+            let champ = |cle: &str| champ_lsblk(l, cle).unwrap_or_default();
+            let nom = champ("NAME");
+            if champ("TYPE") != "disk" || nom.starts_with("zram") || nom.starts_with("loop") {
+                continue;
+            }
+            // Une clé USB se déclare souvent « rotative » : le transport dit la vérité.
+            let sorte = match (champ("TRAN").as_str(), champ("ROTA").as_str()) {
+                ("usb", _) => tr!("clé ou disque USB", "USB stick or drive"),
+                (_, "1") => tr!("disque dur", "hard drive"),
+                _ => "SSD",
+            };
+            materiel.push(ligne(
+                tr!("Disque", "Disk"),
+                format!(
+                    "{nom} · {} · {sorte} · {}",
+                    go(champ("SIZE").parse().unwrap_or(0)),
+                    champ("MODEL")
+                ),
+            ));
+        }
+
+        let mut problemes: Vec<Ligne> = Vec::new();
+        match sortie("journalctl", &["-b", "-p", "err", "-q", "--no-pager", "-o", "short"]) {
+            Some(j) => {
+                let sources: Vec<String> = j.lines().filter_map(source_journal).collect();
+                if sources.is_empty() {
+                    problemes.push(ligne(
+                        tr!("Erreurs du journal", "Journal errors"),
+                        tr!("aucune depuis le démarrage", "none since boot"),
+                    ));
+                } else {
+                    let niveau = if sources.len() > 200 {
+                        Niveau::Moyen
+                    } else {
+                        Niveau::Info
+                    };
+                    problemes.push(alerte(
+                        tr!("Erreurs du journal", "Journal errors"),
+                        trf!(
+                            "{} depuis le démarrage : {}",
+                            "{} since boot: {}",
+                            sources.len(),
+                            plus_frequentes(&sources, 5)
+                        ),
+                        niveau,
+                    ));
+                }
+            }
+            None => problemes.push(ligne(
+                tr!("Erreurs du journal", "Journal errors"),
+                tr!("journal illisible sans droits", "journal unreadable without rights"),
+            )),
+        }
+        let plantages: Vec<String> = sortie("coredumpctl", &["list", "--no-pager", "-q", "--since=-7d"])
+            .unwrap_or_default()
+            .lines()
+            .filter_map(|l| {
+                l.split_whitespace()
+                    .find(|m| m.starts_with('/'))
+                    .map(|p| p.rsplit('/').next().unwrap_or(p).to_string())
+            })
+            .collect();
+        problemes.push(if plantages.is_empty() {
+            ligne(
+                tr!("Programmes plantés", "Crashed programs"),
+                tr!("aucun en 7 jours", "none in 7 days"),
+            )
+        } else {
+            alerte(
+                tr!("Programmes plantés", "Crashed programs"),
+                trf!(
+                    "{} en 7 jours : {}",
+                    "{} in 7 days: {}",
+                    plantages.len(),
+                    plus_frequentes(&plantages, 5)
+                ),
+                Niveau::Moyen,
+            )
+        });
+        let en_echec: Vec<String> = sortie("systemctl", &["--failed", "--no-legend", "--plain"])
+            .unwrap_or_default()
+            .lines()
+            .filter_map(|l| l.split_whitespace().next().map(str::to_string))
+            .collect();
+        problemes.push(if en_echec.is_empty() {
+            ligne(tr!("Services en échec", "Failed services"), tr!("aucun", "none"))
+        } else {
+            alerte(
+                tr!("Services en échec", "Failed services"),
+                en_echec.join(", "),
+                Niveau::Moyen,
+            )
+        });
+
+        vec![
+            (tr!("SYSTÈME", "SYSTEM").into(), systeme),
+            (tr!("MATÉRIEL", "HARDWARE").into(), materiel),
+            (tr!("PROBLÈMES RÉCENTS", "RECENT PROBLEMS").into(), problemes),
+        ]
+    }
+}
+
+#[cfg(windows)]
+mod systeme {
+    use serde::Deserialize;
+
+    use super::{Niveau, Section, alerte, duree, go, ligne, plus_frequentes};
+    use crate::{tr, trf};
+
+    #[derive(Default, Deserialize)]
+    #[serde(default)]
+    struct Etat {
+        systeme: String,
+        version: String,
+        nom: String,
+        modele: String,
+        bios: String,
+        allume_s: u64,
+        processeur: String,
+        fils: u32,
+        memoire: u64,
+        memoire_libre: u64,
+        cartes: Vec<String>,
+        disques: Vec<String>,
+        ecrans_bleus: u32,
+        dernier_ecran_bleu: String,
+        arrets_brutaux: u32,
+        plantages: Vec<String>,
+    }
+
+    /// Une seule lecture PowerShell, en JSON : matériel, système, puis les événements des 30 derniers jours
+    /// (1001 = écran bleu, 41 = arrêt brutal) et les programmes plantés des 7 derniers jours (événement 1000).
+    fn lire() -> Option<Etat> {
+        let json = crate::machine::windows::ps(
+            r#"$os = Get-CimInstance Win32_OperatingSystem; $cs = Get-CimInstance Win32_ComputerSystem
+               $cpu = @(Get-CimInstance Win32_Processor)[0]; $mois = (Get-Date).AddDays(-30); $semaine = (Get-Date).AddDays(-7)
+               $bleus = @(Get-WinEvent -FilterHashtable @{ LogName = 'System'; Id = 1001; ProviderName = 'Microsoft-Windows-WER-SystemErrorReporting'; StartTime = $mois } -ErrorAction SilentlyContinue)
+               [pscustomobject]@{
+                 systeme = $os.Caption; version = "$($os.Version)"; nom = $env:COMPUTERNAME
+                 modele = "$($cs.Manufacturer) $($cs.Model)"; bios = "$((Get-CimInstance Win32_BIOS).SMBIOSBIOSVersion)"
+                 allume_s = [uint64]((Get-Date) - $os.LastBootUpTime).TotalSeconds
+                 processeur = "$($cpu.Name)".Trim(); fils = [uint32]$cpu.NumberOfLogicalProcessors
+                 memoire = [uint64]$cs.TotalPhysicalMemory; memoire_libre = [uint64]$os.FreePhysicalMemory * 1024
+                 cartes = @(Get-CimInstance Win32_VideoController | ForEach-Object { "$($_.Name) · pilote $($_.DriverVersion)" })
+                 disques = @(Get-PhysicalDisk | ForEach-Object { "$($_.FriendlyName) · $([math]::Round($_.Size / 1GB)) Go · $($_.MediaType)" })
+                 ecrans_bleus = $bleus.Count
+                 dernier_ecran_bleu = if ($bleus.Count) { $bleus[0].TimeCreated.ToString('yyyy-MM-dd') } else { '' }
+                 arrets_brutaux = @(Get-WinEvent -FilterHashtable @{ LogName = 'System'; Id = 41; StartTime = $mois } -ErrorAction SilentlyContinue).Count
+                 plantages = @(Get-WinEvent -FilterHashtable @{ LogName = 'Application'; Id = 1000; StartTime = $semaine } -ErrorAction SilentlyContinue | ForEach-Object { "$($_.Properties[0].Value)" })
+               } | ConvertTo-Json -Compress -Depth 3"#,
+        )?;
+        serde_json::from_str(&json).ok()
+    }
+
+    pub fn sections() -> Vec<Section> {
+        let Some(e) = lire() else {
+            return vec![(
+                tr!("DIAGNOSTIC", "DIAGNOSTIC").into(),
+                vec![ligne(
+                    tr!("Lecture", "Reading"),
+                    tr!("PowerShell ne répond pas", "PowerShell is not responding"),
+                )],
+            )];
+        };
+        let systeme = vec![
+            ligne(tr!("Système", "System"), format!("{} · {}", e.systeme, e.version)),
+            ligne(tr!("Nom", "Name"), e.nom),
+            ligne(tr!("Modèle", "Model"), format!("{} · BIOS {}", e.modele.trim(), e.bios)),
+            ligne(tr!("Allumé depuis", "Up for"), duree(e.allume_s)),
+        ];
+        let mut materiel = vec![
+            ligne(
+                tr!("Processeur", "Processor"),
+                trf!("{} ({} fils)", "{} ({} threads)", e.processeur, e.fils),
+            ),
+            ligne(
+                tr!("Mémoire", "Memory"),
+                trf!("{} ({} libres)", "{} ({} free)", go(e.memoire), go(e.memoire_libre)),
+            ),
+        ];
+        materiel.extend(
+            e.cartes
+                .iter()
+                .map(|c| ligne(tr!("Carte graphique", "Graphics card"), c.clone())),
+        );
+        materiel.extend(e.disques.iter().map(|d| ligne(tr!("Disque", "Disk"), d.clone())));
+        let mut problemes = vec![if e.ecrans_bleus == 0 {
+            ligne(
+                tr!("Écrans bleus", "Blue screens"),
+                tr!("aucun en 30 jours", "none in 30 days"),
+            )
+        } else {
+            alerte(
+                tr!("Écrans bleus", "Blue screens"),
+                trf!(
+                    "{} en 30 jours, le dernier le {}",
+                    "{} in 30 days, the last one on {}",
+                    e.ecrans_bleus,
+                    e.dernier_ecran_bleu
+                ),
+                Niveau::Eleve,
+            )
+        }];
+        problemes.push(if e.arrets_brutaux == 0 {
+            ligne(
+                tr!("Arrêts brutaux", "Unexpected shutdowns"),
+                tr!("aucun en 30 jours", "none in 30 days"),
+            )
+        } else {
+            alerte(
+                tr!("Arrêts brutaux", "Unexpected shutdowns"),
+                trf!(
+                    "{} en 30 jours (coupure, gel ou bouton maintenu)",
+                    "{} in 30 days (power cut, freeze or held button)",
+                    e.arrets_brutaux
+                ),
+                Niveau::Moyen,
+            )
+        });
+        problemes.push(if e.plantages.is_empty() {
+            ligne(
+                tr!("Programmes plantés", "Crashed programs"),
+                tr!("aucun en 7 jours", "none in 7 days"),
+            )
+        } else {
+            alerte(
+                tr!("Programmes plantés", "Crashed programs"),
+                trf!(
+                    "{} en 7 jours : {}",
+                    "{} in 7 days: {}",
+                    e.plantages.len(),
+                    plus_frequentes(&e.plantages, 5)
+                ),
+                Niveau::Moyen,
+            )
+        });
+        vec![
+            (tr!("SYSTÈME", "SYSTEM").into(), systeme),
+            (tr!("MATÉRIEL", "HARDWARE").into(), materiel),
+            (tr!("PROBLÈMES RÉCENTS", "RECENT PROBLEMS").into(), problemes),
+        ]
+    }
+}
+
+/// Texte simple du diagnostic (sans couleur), pour le fichier enregistré.
+fn en_texte(sections: &[Section]) -> String {
+    let mut t = String::new();
+    let date = chrono::Local::now().format("%Y-%m-%d %H:%M");
+    let _ = writeln!(
+        t,
+        "{} — Sentinel {} — {date}\n",
+        tr!("Diagnostic de l'ordinateur", "Computer diagnostic"),
+        env!("CARGO_PKG_VERSION")
+    );
+    for (nom, lignes) in sections {
+        let _ = writeln!(t, "{nom}");
+        for l in lignes {
+            let marque = l.niveau.map_or("  ", |_| "! ");
+            let _ = writeln!(t, "{marque}{:<20} {}", l.libelle, l.valeur);
+        }
+        t.push('\n');
+    }
+    t
+}
+
+/// « sentinel diagnostic » : affiche le diagnostic et l'enregistre en texte.
+pub fn diagnostic() {
+    println!();
+    cadre(
+        &format!(
+            "{ACCENT}{}{RESET}",
+            tr!("DIAGNOSTIC DE L'ORDINATEUR", "COMPUTER DIAGNOSTIC")
+        ),
+        &format!("{GRIS}{}{RESET}", tr!("lecture seule", "read only")),
+    );
+    trp!(
+        "  {DISCRET}Lecture du matériel et des journaux…{RESET}",
+        "  {DISCRET}Reading hardware and logs…{RESET}"
+    );
+    let sections = systeme::sections();
+    for (nom, lignes) in &sections {
+        section(nom);
+        for l in lignes {
+            let (marque, couleur_valeur) = match l.niveau {
+                Some(n) => (format!("{}●{RESET}", couleur(n)), couleur(n)),
+                None => (format!("{VERT}●{RESET}"), ""),
+            };
+            println!(
+                "  {marque} {GRAS}{}{RESET} {couleur_valeur}{}{RESET}",
+                ajuster(&l.libelle, 19),
+                l.valeur
+            );
+        }
+    }
+    let fichier = crate::reseau::dossier_donnees().join(format!(
+        "diagnostic-{}.txt",
+        chrono::Local::now().format("%Y-%m-%d-%H%M")
+    ));
+    let enregistre = std::fs::create_dir_all(fichier.parent().unwrap_or(&fichier)).is_ok()
+        && std::fs::write(&fichier, en_texte(&sections)).is_ok();
+    if enregistre {
+        trp!(
+            "\n  {DISCRET}Copie texte : {}{RESET}",
+            "\n  {DISCRET}Text copy: {}{RESET}",
+            fichier.display()
+        );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mise_en_forme() {
+        assert_eq!(duree(3 * 3600 + 5 * 60), "3 h 05");
+        assert_eq!(duree(2 * 86_400 + 4 * 3600), "2 j 4 h");
+        let sources: Vec<String> = ["nextdns", "kernel", "nextdns", "foot"]
+            .iter()
+            .map(ToString::to_string)
+            .collect();
+        assert_eq!(plus_frequentes(&sources, 2), "nextdns (2), foot (1)");
+        let t = en_texte(&[(
+            "SYSTÈME".into(),
+            vec![ligne("Nom", "omarchy"), alerte("Erreurs", "3", Niveau::Moyen)],
+        )]);
+        assert!(t.contains("  Nom") && t.contains("! Erreurs") && !t.contains('\x1b'));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn source_des_lignes_du_journal() {
+        assert_eq!(
+            systeme::source_journal("Oct 17 15:29:32 omarchy nextdns[1334]: TCP read: unexpected EOF").as_deref(),
+            Some("nextdns")
+        );
+        assert_eq!(
+            systeme::source_journal("Oct 17 14:42:05 omarchy kernel: kvm_amd: kvm").as_deref(),
+            Some("kernel")
+        );
+        let v = "NVRM version: NVIDIA UNIX Open Kernel Module for x86_64  610.57.04  Release Build  (root@omarchy)";
+        assert_eq!(systeme::version_nvidia(v).as_deref(), Some("610.57.04"));
+        let disque = r#"NAME="sda" SIZE="31004295168" ROTA="1" TYPE="disk" TRAN="usb" MODEL="USB Flash Disk""#;
+        assert_eq!(systeme::champ_lsblk(disque, "TRAN").as_deref(), Some("usb"));
+        assert_eq!(systeme::champ_lsblk(disque, "MODEL").as_deref(), Some("USB Flash Disk"));
+        assert_eq!(go(2_000_398_934_016), "1.8 To");
+    }
+}

@@ -22,6 +22,7 @@ Menu
   8  Rapport détaillé (navigateur), avec la courbe des notes
   9  Surveillance toutes les heures : notification si un appareil inconnu arrive, si un problème apparaît
      sur cette machine, ou si quelqu'un semble se faire passer pour la box (usurpation ARP)
+  o  Diagnostic de l'ordinateur : matériel, système, plantages et erreurs récents (copie texte sur la clé)
   u  Mises à jour : système, programmes, pilotes, firmware
   r  Réparer : Internet, navigation détournée, pare-feu, antivirus, disque, disque plein,
      nettoyage approfondi, mises à jour bloquées, fichiers système, heure

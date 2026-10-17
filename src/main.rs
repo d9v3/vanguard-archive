@@ -7,6 +7,7 @@ mod antivirus;
 mod commande;
 mod connexion;
 mod corriger;
+mod diagnostic;
 mod donnees;
 mod fuites;
 mod gaming;
@@ -100,6 +101,9 @@ enum Commande {
     /// Gaming : composants pour les jeux (Windows : Visual C++, DirectX… ; Linux : Steam, Vulkan, GameMode, Wine…)
     /// et réglages du système.
     Gaming,
+    /// Diagnostic de l'ordinateur : matériel, système et problèmes récents (plantages, erreurs). Lecture seule.
+    #[command(visible_alias = "diag")]
+    Diagnostic,
     /// Test de connexion pour le jeu : ping, gigue, pertes, débit et bufferbloat.
     #[command(visible_alias = "connection")]
     Connexion,
@@ -384,6 +388,11 @@ async fn menu() {
 
         section(tr!("ENTRETIEN", "MAINTENANCE"));
         option(
+            "o",
+            tr!("Diagnostic de l'ordinateur", "Computer diagnostic"),
+            tr!("matériel, plantages, erreurs", "hardware, crashes, errors"),
+        );
+        option(
             "u",
             tr!("Mises à jour", "Updates"),
             tr!("système, programmes, pilotes", "system, programs, drivers"),
@@ -441,6 +450,7 @@ async fn menu() {
             "r" | "R" => reparer::menu(),
             "g" | "G" => gaming::menu(),
             "c" | "C" => connexion::tester().await,
+            "o" | "O" => diagnostic::diagnostic(),
             "p" | "P" => fuites::verifier(),
             "e" | "E" => fuites::verifier_courriel(),
             "b" | "B" => {
@@ -507,6 +517,10 @@ fn ligne_de_commande() -> clap::Command {
         (
             "reparer",
             "Common repairs: network, hijacked browsing, firewall, antivirus, system files, disk, space, updates, time",
+        ),
+        (
+            "diagnostic",
+            "Computer diagnostic: hardware, system and recent problems (crashes, errors). Read only",
         ),
         (
             "connexion",
@@ -642,6 +656,7 @@ async fn main() {
         Some(Commande::Reparer) => reparer::menu(),
         Some(Commande::Gaming) => gaming::menu(),
         Some(Commande::Connexion) => connexion::tester().await,
+        Some(Commande::Diagnostic) => diagnostic::diagnostic(),
         Some(Commande::MotDePasse) => fuites::verifier(),
         Some(Commande::Courriel) => fuites::verifier_courriel(),
         Some(Commande::Isoler { fichier }) => isoler::isoler(&fichier),

@@ -22,6 +22,7 @@ Menu
   8  Detailed report (browser), with the grade history
   9  Hourly monitoring: notification when an unknown device shows up, a problem appears on this machine,
      or someone seems to impersonate the router (ARP spoofing)
+  o  Computer diagnostic: hardware, system, recent crashes and errors (text copy on the key)
   u  Updates: system, programs, drivers, firmware
   r  Repair: Internet, hijacked browsing, firewall, antivirus, disk, disk full,
      deep cleanup, stuck updates, system files, time
