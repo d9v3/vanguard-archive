@@ -41,7 +41,7 @@ fn script_admin(commandes: &[String]) -> String {
         "$Host.UI.RawUI.WindowTitle = 'netscan : correction en cours'\n\
          [Console]::OutputEncoding = [Text.Encoding]::UTF8\n\
          $ErrorActionPreference = 'Stop'\n\
-         Write-Host 'netscan applique une correction (cette fenêtre se fermera seule).' -ForegroundColor Cyan\n\
+         Write-Host 'netscan applique une correction.' -ForegroundColor Cyan\n\
          $echecs = 0\n\
          try {\n",
     );
@@ -70,7 +70,7 @@ fn script_admin(commandes: &[String]) -> String {
         );
     }
     script += "  if ($echecs) { Write-Host ''; Write-Host \"Terminé, avec $echecs étape(s) en échec.\" -ForegroundColor Red; Read-Host 'Appuie sur Entrée pour fermer'; exit 1 }\n\
-               Write-Host ''; Write-Host 'Terminé.' -ForegroundColor Green; Start-Sleep -Seconds 2; exit 0\n\
+               Write-Host ''; Write-Host 'Terminé.' -ForegroundColor Green; Read-Host 'Appuie sur Entrée pour fermer'; exit 0\n\
                } catch {\n\
                  Write-Host ''; Write-Host ('Erreur : ' + $_.Exception.Message) -ForegroundColor Red\n\
                  Read-Host 'Appuie sur Entrée pour fermer'; exit 1\n\
