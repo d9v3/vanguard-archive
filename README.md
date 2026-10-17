@@ -56,7 +56,7 @@ d'affichage). Pour forcer : `SENTINEL_LANG=fr` ou `SENTINEL_LANG=en`. Les comman
 | Fichier | Rôle |
 |---|---|
 | `src/main.rs` | menu et sous-commandes |
-| `src/machine/` | audit local : types communs (`mod.rs`) + `linux.rs`, `windows.rs` |
+| `src/machine/` | audit local : types communs (`mod.rs`), dossiers `linux/` et `windows/` (un fichier par thème) |
 | `src/corriger.rs` | application guidée des correctifs |
 | `src/reseau.rs`, `src/scan.rs` | scan réseau (TCP connect, sans root), ARP, historique |
 | `src/risk.rs` | base de connaissances des ports et niveaux de risque |
@@ -77,7 +77,10 @@ outils/deployer.sh     # compile Linux (musl, statique) + Windows, installe en l
 La clé (exFAT, étiquette `SENTINEL`, fichier témoin `sentinel.cle`) contient `Linux/`, `Windows/`, `donnees/` (base portable),
 `source/` et le guide en deux langues (`LISEZMOI.txt`, `README.txt`, tirés de `outils/`). L'historique des bilans et la quarantaine
 restent sur chaque ordinateur.
-Elle est mise à jour automatiquement à chaque compilation et à chaque branchement (unités systemd dans `outils/systemd/`).
+Elle est mise à jour automatiquement (unités systemd dans `outils/systemd/`) : après chaque compilation
+(`sentinel-copie.service`), et à chaque branchement avec la dernière version de GitHub, compilée si elle est nouvelle
+(`sentinel-cle.service`, `deployer.sh --branchement`). Chaque déploiement pousse aussi les commits vers le dépôt privé
+https://github.com/d9v3/sentinel.
 
 Tests : `cargo test` (Linux) ; vérification croisée : `cargo clippy --target x86_64-pc-windows-gnu` ; tests Windows sous Wine.
 
