@@ -2,11 +2,11 @@
 
 # Sentinel
 
+**Français** · [English](README.en.md)
+
 **Le bilan de sécurité de ton ordinateur et de ton réseau, sur une clé USB.**
 Sentinel vérifie ta machine et tous les appareils de ton réseau, explique chaque problème en français clair, et le
 corrige après ton accord. Linux, Windows et macOS, sans installation, en français ou en anglais.
-
-*Portable security check for your computer and your home network: Linux, Windows and macOS, French or English.*
 
 **Systèmes pris en charge** — Windows 10 et 11 ; macOS 12 et plus récents (Apple Silicon et Intel, encore jamais
 essayé sur un vrai Mac hors des tests automatiques) ; Linux : Arch et dérivées (Omarchy, Manjaro, EndeavourOS, CachyOS),
@@ -104,8 +104,8 @@ Chaque entrée du menu existe aussi en commande :
 | `sentinel gaming` | paquets et réglages pour jouer (Windows et Linux) |
 
 **Langue** : celle du système (français ou anglais). Pour forcer : `SENTINEL_LANG=fr` ou `SENTINEL_LANG=en`. Les
-commandes ont aussi un nom anglais (`full`, `audit`, `fix`, `network`, `connection`, `password`, `update`, `repair`,
-`monitor`, `name`, `backup`, `restore`).
+commandes ont aussi un nom anglais (`full`, `audit`, `fix`, `network`, `connection`, `apps`, `diag`, `password`,
+`sandbox`, `email`, `integrity`, `update`, `repair`, `monitor`, `name`, `backup`, `restore`).
 
 ## Pour les développeurs
 
@@ -115,6 +115,7 @@ commandes ont aussi un nom anglais (`full`, `audit`, `fix`, `network`, `connecti
 |---|---|
 | `src/main.rs` | menu et sous-commandes |
 | `src/ui.rs` | couleurs, titres, cadres, barres |
+| `src/langue.rs` | choix de la langue et macros de traduction |
 | `src/machine/mod.rs` | types communs, affichage, exécution parallèle des vérifications |
 | `src/machine/linux/`, `src/machine/windows/`, `src/machine/macos/` | audit propre à chaque système, un fichier par thème |
 | `src/machine/dns.rs`, `certificats.rs`, `extensions.rs`, `sante.rs` | vérifications communes aux trois systèmes |
@@ -125,7 +126,7 @@ commandes ont aussi un nom anglais (`full`, `audit`, `fix`, `network`, `connecti
 | `src/antivirus.rs` | ClamAV / Defender, quarantaine |
 | `src/surveillance.rs` | minuterie systemd / Planificateur de tâches / agent launchd, notifications |
 | `src/rapport.rs`, `src/historique.rs` | rapport HTML, historique des bilans, courbe des notes |
-| `src/reparer.rs`, `src/maj.rs`, `src/gaming.rs` | réparations, mises à jour, gaming (Windows) |
+| `src/reparer.rs`, `src/maj.rs`, `src/gaming/` | réparations, mises à jour, gaming |
 | `src/fuites.rs`, `src/donnees.rs` | mots de passe fuités, sauvegarde des données |
 | `assets/oui.tsv` | fabricants par préfixe MAC (liste IEEE) |
 | `LICENCES-TIERCES.txt` | avis de licence des bibliothèques incluses (`outils/licences-tierces.py`) |
@@ -167,5 +168,3 @@ reçoit que le journal des erreurs, anonymisé. `outils/preparer-cle.sh` prépar
 garantie. Une version modifiée que tu distribues doit rester sous cette licence, avec son code source.
 
 Les bibliothèques incluses gardent leurs propres licences (MIT, Apache-2.0, BSD, ISC…) : voir `LICENCES-TIERCES.txt`.
-
-*Sentinel is free software, licensed under the GNU GPL v3 or later. See `LICENSE`.*
