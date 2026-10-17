@@ -705,6 +705,8 @@ fn peripheriques(lectures: Option<&str>) -> Constat {
     let en_panne: Vec<String> = lignes
         .iter()
         .filter_map(|l| l.split_once('|'))
+        // Le périphérique fw_cfg des VM QEMU n'a jamais de pilote, et n'en a pas besoin (vu dans la VM de test).
+        .filter(|(_, nom)| !nom.contains("QEMU0002"))
         .map(|(code, nom)| {
             let nom = if nom.trim().is_empty() {
                 "Périphérique inconnu"
