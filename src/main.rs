@@ -9,7 +9,6 @@ mod connexion;
 mod corriger;
 mod donnees;
 mod fuites;
-#[cfg(windows)]
 mod gaming;
 mod historique;
 mod integrite;
@@ -98,8 +97,8 @@ enum Commande {
     /// Réparations courantes : réseau, navigation détournée, pare-feu, antivirus, fichiers système, disque, place, mises à jour, heure.
     #[command(visible_alias = "repair")]
     Reparer,
-    /// Gaming (Windows) : composants pour les jeux (Visual C++, DirectX, .NET…) et réglages de Windows.
-    #[cfg(windows)]
+    /// Gaming : composants pour les jeux (Windows : Visual C++, DirectX… ; Linux : Steam, Vulkan, GameMode, Wine…)
+    /// et réglages du système.
     Gaming,
     /// Test de connexion pour le jeu : ping, gigue, pertes, débit et bufferbloat.
     #[command(visible_alias = "connection")]
@@ -394,11 +393,17 @@ async fn menu() {
             tr!("Réparer et nettoyer", "Repair and clean up"),
             tr!("réseau, disque, système…", "network, disk, system…"),
         );
-        #[cfg(windows)]
         option(
             "g",
             tr!("Gaming", "Gaming"),
-            tr!("composants et réglages de Windows", "components and Windows settings"),
+            if cfg!(windows) {
+                tr!("composants et réglages de Windows", "components and Windows settings")
+            } else {
+                tr!(
+                    "Steam, Vulkan, GameMode, Wine, réglages",
+                    "Steam, Vulkan, GameMode, Wine, settings"
+                )
+            },
         );
         option(
             "d",
@@ -434,7 +439,6 @@ async fn menu() {
             "9" => surveillance::activer(!surveillance::active()),
             "u" | "U" => maj::executer(),
             "r" | "R" => reparer::menu(),
-            #[cfg(windows)]
             "g" | "G" => gaming::menu(),
             "c" | "C" => connexion::tester().await,
             "p" | "P" => fuites::verifier(),
@@ -536,10 +540,9 @@ fn ligne_de_commande() -> clap::Command {
             "nommer",
             "Give a nickname to a device of the database (“HP printer”), by its IP or MAC",
         ),
-        #[cfg(windows)]
         (
             "gaming",
-            "Gaming (Windows): components for games (Visual C++, DirectX, .NET…) and Windows settings",
+            "Gaming: components for games (Windows: Visual C++, DirectX…; Linux: Steam, Vulkan, GameMode, Wine…) and system settings",
         ),
     ];
     for &(nom, aide) in aides {
@@ -637,7 +640,6 @@ async fn main() {
         Some(Commande::Surveiller) => surveillance::surveiller().await,
         Some(Commande::Maj) => maj::executer(),
         Some(Commande::Reparer) => reparer::menu(),
-        #[cfg(windows)]
         Some(Commande::Gaming) => gaming::menu(),
         Some(Commande::Connexion) => connexion::tester().await,
         Some(Commande::MotDePasse) => fuites::verifier(),

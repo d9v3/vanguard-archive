@@ -47,7 +47,8 @@ verdict critère par critère et des conseils.
 - Surveillance toutes les heures : notification si un appareil inconnu arrive, si un port s'ouvre, si la note de
   la machine baisse, ou si la box semble usurpée (adresse MAC partagée ou changée : usurpation ARP).
 - Rapport HTML avec la courbe des notes, et ce qui a changé depuis le bilan précédent.
-- Gaming (Windows) : composants pour les jeux et réglages de Windows.
+- Gaming : sous Windows, composants pour les jeux et réglages de Windows ; sous Linux, Steam, pilotes Vulkan 32 et
+  64 bits selon la carte, GameMode, MangoHud, Gamescope, Wine, Lutris, Heroic, ProtonUp-Qt, vm.max_map_count, ntsync.
 
 Sentinel ne coupe jamais une connexion à distance en cours (Bureau à distance, SSH). À n'utiliser que sur ton propre
 réseau, ou un réseau que tu as le droit d'auditer.
@@ -77,7 +78,7 @@ Chaque entrée du menu existe aussi en commande :
 | `sentinel surveillance on\|off` | surveillance horaire |
 | `sentinel nommer <ip\|mac> <surnom>` | nommer un appareil |
 | `sentinel sauvegarder [fichier]`, `sentinel restaurer <fichier>` | sauvegarde des données |
-| `sentinel gaming` | gaming (Windows) |
+| `sentinel gaming` | paquets et réglages pour jouer (Windows et Linux) |
 
 **Langue** : celle du système (français ou anglais). Pour forcer : `SENTINEL_LANG=fr` ou `SENTINEL_LANG=en`. Les
 commandes ont aussi un nom anglais (`full`, `audit`, `fix`, `network`, `connection`, `password`, `update`, `repair`,

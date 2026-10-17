@@ -25,7 +25,8 @@ Menu
   u  Updates: system, programs, drivers, firmware
   r  Repair: Internet, hijacked browsing, firewall, antivirus, disk, disk full,
      deep cleanup, stuck updates, system files, time
-  g  Gaming (Windows): components for games and Windows settings
+  g  Gaming: packages and settings for gaming (Windows: Visual C++, DirectX…; Linux: Steam, Vulkan drivers,
+     GameMode, MangoHud, Gamescope, Wine, Lutris, Heroic, ntsync…)
   c  Connection test for gaming: ping, jitter, speed, bufferbloat
   p  Passwords: have they leaked? (only 5 characters of their fingerprint are sent)
   e  Email address: has it leaked? (the address is sent to the search service, after your consent)

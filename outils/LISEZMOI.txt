@@ -25,7 +25,8 @@ Menu
   u  Mises à jour : système, programmes, pilotes, firmware
   r  Réparer : Internet, navigation détournée, pare-feu, antivirus, disque, disque plein,
      nettoyage approfondi, mises à jour bloquées, fichiers système, heure
-  g  Gaming (Windows) : composants pour les jeux et réglages de Windows
+  g  Gaming : paquets et réglages pour jouer (Windows : Visual C++, DirectX… ; Linux : Steam, pilotes Vulkan,
+     GameMode, MangoHud, Gamescope, Wine, Lutris, Heroic, ntsync…)
   c  Test de connexion pour le jeu : ping, gigue, débit, bufferbloat
   p  Mots de passe : ont-ils fuité ? (seuls 5 caractères de leur empreinte sont envoyés)
   e  Adresse courriel : a-t-elle fuité ? (l'adresse est envoyée au service de recherche, après ton accord)
