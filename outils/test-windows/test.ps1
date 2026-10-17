@@ -85,6 +85,13 @@ Ref 'Disques physiques (0.15)' { Get-PhysicalDisk | Select-Object FriendlyName, 
 Ref 'Batterie (0.15)' { Get-CimInstance -Namespace root\wmi -ClassName BatteryFullChargedCapacity -ErrorAction Stop | Select-Object FullChargedCapacity; Get-CimInstance -Namespace root\wmi -ClassName BatteryStaticData -ErrorAction Stop | Select-Object DesignedCapacity }
 Ref 'Extensions Edge et Chrome (0.14)' { foreach ($d in "$env:LOCALAPPDATA\Microsoft\Edge\User Data", "$env:LOCALAPPDATA\Google\Chrome\User Data") { Get-ChildItem $d -Directory -ErrorAction SilentlyContinue | Where-Object { Test-Path (Join-Path $_.FullName 'Extensions') } | ForEach-Object { "== $($_.FullName)"; Get-ChildItem (Join-Path $_.FullName 'Extensions') -Name } } }
 Ref 'curl (0.17, 0.18)' { (Get-Command curl.exe -ErrorAction Stop).Source; curl.exe --version | Select-Object -First 1 }
+# Vérifications ajoutées de la 0.20 à la 0.35.
+Ref 'Journaux effacés, événement 104 (0.30)' { Get-WinEvent -FilterHashtable @{ LogName = 'System'; Id = 104 } -MaxEvents 5 -ErrorAction SilentlyContinue | Select-Object TimeCreated, Message | Format-List }
+Ref 'Edge : Safe Browsing et DNS chiffré (0.31)' { $p = Get-Content "$env:LOCALAPPDATA\Microsoft\Edge\User Data\Default\Preferences" -Raw -ErrorAction Stop | ConvertFrom-Json; 'safebrowsing.enabled = ' + $p.safebrowsing.enabled; $l = Get-Content "$env:LOCALAPPDATA\Microsoft\Edge\User Data\Local State" -Raw -ErrorAction Stop | ConvertFrom-Json; 'dns_over_https.mode = ' + $l.dns_over_https.mode }
+Ref 'Zones thermiques (0.24)' { Get-CimInstance Win32_PerfFormattedData_Counters_ThermalZoneInformation -ErrorAction Stop | Select-Object Name, HighPrecisionTemperature | Format-Table -AutoSize }
+Ref 'LLMNR (0.23)' { (Get-ItemProperty 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\DNSClient' -ErrorAction SilentlyContinue).EnableMulticast }
+Ref 'UPnP de la box (0.33)' { $c = (New-Object -ComObject HNetCfg.NATUPnP).StaticPortMappingCollection; if ($null -eq $c) { 'aucune box UPnP' } else { $c | Select-Object Protocol, ExternalPort, InternalClient, InternalPort, Description | Format-Table -AutoSize } }
+Ref 'Windows Sandbox (0.35)' { Test-Path "$env:SystemRoot\System32\WindowsSandbox.exe" }
 Note 'Référence enregistrée.'
 
 Etape '2. Version et aide'
@@ -100,7 +107,7 @@ try {
     $impossibles = @($audit.constats | Where-Object { -not $_.verifie })
     Note "Vérifications impossibles : $($impossibles.Count)"
     $impossibles | ForEach-Object { Note "  IMPOSSIBLE : $($_.categorie) — $($_.message)" }
-    foreach ($cat in 'DNS', 'Certificats', 'Extensions', 'Santé', 'Persistance', 'Comptes') {
+    foreach ($cat in 'DNS', 'Certificats', 'Extensions', 'Navigateur', 'Santé', 'Persistance', 'Comptes', 'Journaux', 'Intégrité') {
         $n = @($audit.constats | Where-Object categorie -eq $cat).Count
         Note "  $cat : $n constat(s)"
     }
@@ -133,6 +140,12 @@ if (Question 'Faire ce test ?') {
         Note 'Fausse tâche et fausse entrée retirées.'
     }
 }
+
+Etape '5b2. Intégrité des fichiers critiques (0.32)'
+Lancer 'integrite-reference' @('integrite')
+Lancer 'integrite-verification' @('integrite')
+$v = Get-Content (Join-Path $res 'integrite-verification.out.txt') -Raw -Encoding UTF8
+if ($v -match 'identiques|identical') { Note 'Intégrité : 2e passage identique à la référence : OK' } else { Note 'Intégrité : 2e passage différent (à regarder)' }
 
 Etape '5c. Test de connexion (0.18)'
 Lancer 'connexion' @('connexion')
