@@ -141,6 +141,31 @@ fn niveau_expose(pare_feu_actif: bool, niveau: Niveau) -> Niveau {
     }
 }
 
+/// Une vérification à lancer : elle rend ses constats.
+pub(crate) type Verification<'a> = Box<dyn FnOnce() -> Vec<Constat> + Send + 'a>;
+
+/// Lance les vérifications en même temps (chacune attend surtout des commandes du système) et rend leurs constats
+/// dans l'ordre de la liste. Une vérification qui plante le dit, sans emporter les autres.
+fn en_parallele(verifications: Vec<Verification<'_>>) -> Vec<Constat> {
+    std::thread::scope(|s| {
+        let fils: Vec<_> = verifications.into_iter().map(|v| s.spawn(v)).collect();
+        fils.into_iter()
+            .flat_map(|f| {
+                f.join()
+                    .unwrap_or_else(|_| vec![impossible("Audit", tr!("erreur interne", "internal error"))])
+            })
+            .collect()
+    })
+}
+
+/// `verif!(f())` : une vérification qui rend un constat, une liste ou une option, mise en boîte pour `en_parallele`.
+macro_rules! verif {
+    ($e:expr) => {
+        Box::new(move || $e.into_iter().collect::<Vec<$crate::machine::Constat>>()) as $crate::machine::Verification<'_>
+    };
+}
+pub(crate) use verif;
+
 fn score(constats: &[Constat]) -> u32 {
     100u32.saturating_sub(constats.iter().filter_map(|c| c.probleme).map(Niveau::penalite).sum())
 }

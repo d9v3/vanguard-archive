@@ -3003,37 +3003,40 @@ fn services_en_echec() -> Constat {
 }
 
 pub fn auditer() -> Audit {
+    use super::verif;
     let feu = pare_feu();
     let feu_actif = feu.probleme.is_none();
     let mut constats = vec![feu];
-    constats.extend(ports_ecoute(feu_actif, feu_actif && ufw_actif()));
-    constats.extend(docker());
-    constats.push(ssh_serveur());
-    constats.push(mises_a_jour());
-    constats.push(failles_connues());
-    constats.extend(autres_mises_a_jour());
-    constats.push(redemarrage());
-    constats.push(chiffrement_disque());
-    constats.extend(verrouillage_ecran());
-    constats.push(durcissement_noyau());
-    constats.push(module_securite());
-    constats.push(sauvegardes());
-    constats.extend(fichiers_suspects());
-    constats.extend(persistance());
-    constats.push(demarrage_securise());
-    constats.extend(cles_ssh());
-    constats.extend(fichiers_secrets());
-    constats.push(processeur());
-    constats.extend(groupes_privilegies());
-    constats.extend(sudo_sans_mot_de_passe());
-    constats.extend(paquets_aur());
-    constats.push(comptes());
-    constats.extend(wifi(crate::scan::passerelle().map(|g| g.to_string())));
-    constats.push(services_en_echec());
-    constats.extend(super::dns::dns());
-    constats.extend(super::certificats::certificats());
-    constats.extend(super::extensions::extensions());
-    constats.extend(super::sante::sante());
+    constats.extend(super::en_parallele(vec![
+        verif!(ports_ecoute(feu_actif, feu_actif && ufw_actif())),
+        verif!(docker()),
+        verif!([ssh_serveur()]),
+        verif!([mises_a_jour()]),
+        verif!([failles_connues()]),
+        verif!(autres_mises_a_jour()),
+        verif!([redemarrage()]),
+        verif!([chiffrement_disque()]),
+        verif!(verrouillage_ecran()),
+        verif!([durcissement_noyau()]),
+        verif!([module_securite()]),
+        verif!([sauvegardes()]),
+        verif!(fichiers_suspects()),
+        verif!(persistance()),
+        verif!([demarrage_securise()]),
+        verif!(cles_ssh()),
+        verif!(fichiers_secrets()),
+        verif!([processeur()]),
+        verif!(groupes_privilegies()),
+        verif!(sudo_sans_mot_de_passe()),
+        verif!(paquets_aur()),
+        verif!([comptes()]),
+        verif!(wifi(crate::scan::passerelle().map(|g| g.to_string()))),
+        verif!([services_en_echec()]),
+        verif!(super::dns::dns()),
+        verif!(super::certificats::certificats()),
+        verif!(super::extensions::extensions()),
+        verif!(super::sante::sante()),
+    ]));
 
     Audit {
         systeme: NOM,
