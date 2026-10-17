@@ -8,6 +8,11 @@ name: macOS
 
 on:
   workflow_dispatch:
+    inputs:
+      essai_complet:
+        description: "Essai complet de chaque fonction (outils/test-macos/essai.sh), en plus de la compilation"
+        type: boolean
+        default: false
   push:
     branches: [macos]
     paths: ["src/**", "Cargo.toml", "Cargo.lock", "build.rs", ".github/workflows/macos.yml"]
@@ -62,6 +67,15 @@ jobs:
           ./sentinel machine --json > audit.json || true
           head -c 3000 audit.json
           ./sentinel diagnostic | tail -20 || true
+      - name: Essai complet
+        if: github.event_name == 'workflow_dispatch' && inputs.essai_complet
+        run: bash outils/test-macos/essai.sh ./sentinel essai
+      - uses: actions/upload-artifact@v4
+        if: github.event_name == 'workflow_dispatch' && inputs.essai_complet
+        with:
+          name: essai-macos
+          path: essai
+          retention-days: 30
       - uses: actions/upload-artifact@v4
         with:
           name: sentinel-macos
