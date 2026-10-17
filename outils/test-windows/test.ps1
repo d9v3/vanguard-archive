@@ -1,6 +1,6 @@
 ﻿# Test complet de sentinel sur un vrai Windows.
 # 1) relève l'état réel du système (référence), 2) lance sentinel, 3) étapes guidées.
-# Tous les résultats vont dans le dossier « resultats » à côté de ce script.
+# Tous les résultats vont dans un dossier « resultats-AAAAMMJJ-HHMMSS » à côté de ce script (un par passe).
 
 # -Auto : aucune question (TEST-SENTINEL-AUTO.bat) ; les étapes qui demandent de taper ou une fenêtre UAC sont sautées.
 param([switch]$Auto)
@@ -10,9 +10,8 @@ $ErrorActionPreference = 'Continue'
 $OutputEncoding = [Text.Encoding]::UTF8
 
 $partage = Split-Path -Parent $MyInvocation.MyCommand.Path
-$res = Join-Path $partage 'resultats'
+$res = Join-Path $partage ('resultats-' + (Get-Date -Format 'yyyyMMdd-HHmmss'))
 New-Item -ItemType Directory -Force $res | Out-Null
-Get-ChildItem $res | Remove-Item -Force -ErrorAction SilentlyContinue
 
 # On lance une copie locale : un .exe sur un partage réseau déclenche des avertissements de sécurité.
 $local = Join-Path $env:LOCALAPPDATA 'sentinel-test'
@@ -172,6 +171,8 @@ Note "menu -> code $LASTEXITCODE"
 $vide = Join-Path $res 'vide.txt'
 Set-Content -Path $vide -Value '' -NoNewline
 $p = Start-Process -FilePath $exe -RedirectStandardInput $vide -RedirectStandardOutput (Join-Path $res 'menu-eof.out.txt') -NoNewWindow -PassThru
+# Sans garder le handle tout de suite, PowerShell ne sait plus lire le code de sortie (il restait vide).
+$null = $p.Handle
 if ($p.WaitForExit(10000)) { Note "menu avec entrée fermée -> quitte (code $($p.ExitCode))" }
 else { $p.Kill(); Note 'menu avec entrée fermée -> BOUCLE SANS FIN (bug)' }
 

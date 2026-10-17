@@ -50,17 +50,28 @@ fn cibles() -> Vec<PathBuf> {
         ".config/autostart",
         ".config/systemd/user",
     ];
+    // Profils PowerShell (relancés à chaque ouverture de PowerShell) et scripts des stratégies de groupe : des
+    // endroits où un programme malveillant aime se faire relancer.
     #[cfg(windows)]
     let systeme: &[&str] = &[
         r"C:\Windows\System32\drivers\etc\hosts",
         r"C:\ProgramData\Microsoft\Windows\Start Menu\Programs\StartUp",
         r"C:\ProgramData\ssh\administrators_authorized_keys",
         r"C:\ProgramData\ssh\sshd_config",
+        r"C:\Windows\System32\WindowsPowerShell\v1.0\profile.ps1",
+        r"C:\Windows\System32\WindowsPowerShell\v1.0\Microsoft.PowerShell_profile.ps1",
+        r"C:\Program Files\PowerShell\7\profile.ps1",
+        r"C:\Windows\System32\GroupPolicy\Machine\Scripts\scripts.ini",
+        r"C:\Windows\System32\GroupPolicy\User\Scripts\scripts.ini",
     ];
     #[cfg(windows)]
     let utilisateur: &[&str] = &[
         r".ssh\authorized_keys",
         r"AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Startup",
+        r"Documents\WindowsPowerShell\Microsoft.PowerShell_profile.ps1",
+        r"Documents\WindowsPowerShell\profile.ps1",
+        r"Documents\PowerShell\Microsoft.PowerShell_profile.ps1",
+        r"Documents\PowerShell\profile.ps1",
     ];
     systeme
         .iter()

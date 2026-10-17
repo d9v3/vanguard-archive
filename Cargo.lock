@@ -577,7 +577,7 @@ dependencies = [
 
 [[package]]
 name = "sentinel"
-version = "0.35.1"
+version = "0.35.2"
 dependencies = [
  "blake3",
  "chrono",
