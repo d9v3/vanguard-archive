@@ -1,7 +1,8 @@
 [Unit]
 Description=netscan : mettre à jour la clé USB NETSCAN
 # Déclenché au montage de la clé (WantedBy) et par netscan-compilation.path après chaque compilation :
-# --sans-compiler, sinon il recompile (environnement différent) et notifie une 2e fois.
+# --sans-compiler, sinon il recompile (environnement différent). Le .path part une fois par binaire écrit :
+# deployer.sh attend la fin de cargo et ne notifie qu'une fois par version.
 After=run-media-alice-NETSCAN.mount
 
 [Service]

@@ -9,6 +9,18 @@ export PATH="$HOME/.cargo/bin:$PATH"
 LINUX=target/x86_64-unknown-linux-musl/release/netscan
 WINDOWS=target/x86_64-pc-windows-gnu/release/netscan.exe
 
+# Un seul déploiement à la fois : le service déclenché par la compilation attend la fin du lancement manuel.
+exec 9>"${XDG_RUNTIME_DIR:-/tmp}/netscan-deployer.lock"
+if [[ ${1:-} == --sans-compiler ]]; then
+  # Le service part dès que le binaire Linux est écrit, alors que Windows compile encore :
+  # attendre que cargo ait fini (3 s sans cargo, 15 min au plus) pour ne copier qu'une fois.
+  for ((calme = 0, tours = 0; calme < 3 && tours < 900; tours++)); do
+    if pgrep -x cargo >/dev/null; then calme=0; else calme=$((calme + 1)); fi
+    sleep 1
+  done
+fi
+flock 9
+
 if [[ ${1:-} != --sans-compiler ]]; then
   cargo build --release --target x86_64-unknown-linux-musl
   cargo build --release --target x86_64-pc-windows-gnu
@@ -32,9 +44,11 @@ cp -f outils/LISEZMOI.txt "$CLE/LISEZMOI.txt"
 rsync -rt --delete --modify-window=2 --exclude /target/ ./ "$CLE/source/"
 sync
 echo "Clé NETSCAN à jour : $CLE ($(./"$LINUX" --version))"
-# Une seule notification à l'écran : la suivante (lancement manuel puis service déclenché par la compilation) la remplace.
-if command -v notify-send >/dev/null; then
-  ID_FICHIER="${XDG_RUNTIME_DIR:-/tmp}/netscan-notification.id"
-  ID=$(cat "$ID_FICHIER" 2>/dev/null || echo 0)
-  notify-send -p -r "$ID" -a netscan -i netscan "Clé NETSCAN à jour" "$(./"$LINUX" --version)" >"$ID_FICHIER" || true
+# Une seule notification par version copiée : le lancement manuel et le service qui le suit copient les mêmes
+# binaires. (Remplacer la notification ne suffit pas : la barre l'oublie dès que la bulle a disparu.)
+EMPREINTE_FICHIER="${XDG_RUNTIME_DIR:-/tmp}/netscan-notification.empreinte"
+EMPREINTE=$({ cat "$LINUX" "$WINDOWS" 2>/dev/null || true; } | sha256sum)
+if command -v notify-send >/dev/null && [[ $(cat "$EMPREINTE_FICHIER" 2>/dev/null) != "$EMPREINTE" ]]; then
+  notify-send -a netscan -i netscan "Clé NETSCAN à jour" "$(./"$LINUX" --version)" || true
+  echo "$EMPREINTE" >"$EMPREINTE_FICHIER"
 fi
