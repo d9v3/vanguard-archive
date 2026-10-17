@@ -128,6 +128,15 @@ pub fn tout(reponse: &str) -> bool {
     matches!(reponse.trim().to_lowercase().as_str(), "t" | "tout" | "a" | "all")
 }
 
+/// Nom affiché du rôle d'un appareil du réseau (son nom interne est français).
+pub fn role(nom: &str) -> &str {
+    match (anglais(), nom) {
+        (true, "passerelle") => "gateway",
+        (true, "cette machine") => "this machine",
+        _ => nom,
+    }
+}
+
 /// Nom affiché d'une catégorie de constat (son nom interne est français).
 pub fn categorie(nom: &str) -> &str {
     if !anglais() {

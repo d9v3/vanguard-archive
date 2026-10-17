@@ -18,9 +18,9 @@ fn home() -> PathBuf {
 
 pub fn analyser(complet: bool) {
     titre(if complet {
-        "Analyse antivirus complète"
+        tr!("Analyse antivirus complète", "Full antivirus scan")
     } else {
-        "Analyse antivirus rapide"
+        tr!("Analyse antivirus rapide", "Quick antivirus scan")
     });
     #[cfg(windows)]
     defender(complet);
@@ -36,14 +36,18 @@ fn defender(complet: bool) {
     use crate::machine::windows::{powershell_admin, ps};
     let mpcmd =
         PathBuf::from(std::env::var_os("ProgramFiles").unwrap_or_default()).join(r"Windows Defender\MpCmdRun.exe");
-    println!(
-        "  {GRIS}Moteur : Microsoft Defender. Cela peut prendre de quelques minutes à une heure (analyse complète)…{RESET}"
+    trp!(
+        "  {GRIS}Moteur : Microsoft Defender. Cela peut prendre de quelques minutes à une heure (analyse complète)…{RESET}",
+        "  {GRIS}Engine: Microsoft Defender. This can take from a few minutes to an hour (full scan)…{RESET}"
     );
     let statut = Command::new(&mpcmd)
         .args(["-Scan", "-ScanType", if complet { "2" } else { "1" }])
         .status();
     match statut.map(|s| s.code()) {
-        Ok(Some(0)) => println!("  {VERT}✔ Aucun malware trouvé.{RESET}"),
+        Ok(Some(0)) => trp!(
+            "  {VERT}✔ Aucun malware trouvé.{RESET}",
+            "  {VERT}✔ No malware found.{RESET}"
+        ),
         Ok(Some(2)) => {
             let menaces = ps("Get-MpThreat | ForEach-Object { \"$($_.ThreatName)|$($_.Resources -join ', ')\" }")
                 .unwrap_or_default();
@@ -51,14 +55,27 @@ fn defender(complet: bool) {
                 let (nom, fichiers) = l.split_once('|').unwrap_or((l, ""));
                 println!("  {}✖ {nom}{RESET}  {fichiers}", couleur(Niveau::Critique));
             }
-            println!("  Defender a normalement déjà mis ces fichiers en quarantaine.");
-            if demander("  Supprimer définitivement les menaces détectées ? [o/N] : ").oui()
+            trp!(
+                "  Defender a normalement déjà mis ces fichiers en quarantaine.",
+                "  Defender has normally already quarantined these files."
+            );
+            if demander(tr!(
+                "  Supprimer définitivement les menaces détectées ? [o/N] : ",
+                "  Permanently delete the detected threats? [y/N]: "
+            ))
+            .oui()
                 && powershell_admin(&["Remove-MpThreat".to_string()])
             {
-                println!("  {VERT}✔ Menaces supprimées.{RESET}");
+                trp!(
+                    "  {VERT}✔ Menaces supprimées.{RESET}",
+                    "  {VERT}✔ Threats deleted.{RESET}"
+                );
             }
         }
-        _ => println!("  Defender n'a pas pu lancer l'analyse (antivirus tiers actif ?)."),
+        _ => trp!(
+            "  Defender n'a pas pu lancer l'analyse (antivirus tiers actif ?).",
+            "  Defender could not start the scan (third-party antivirus active?)."
+        ),
     }
 }
 
@@ -93,8 +110,11 @@ fn preparer() -> bool {
         .output()
         .is_ok_and(|o| o.status.success());
     if !present {
-        println!("  ClamAV (antivirus open source) n'est pas installé.");
-        if !demander("  L'installer maintenant ? [o/N] : ").oui() {
+        trp!(
+            "  ClamAV (antivirus open source) n'est pas installé.",
+            "  ClamAV (open source antivirus) is not installed."
+        );
+        if !demander(tr!("  L'installer maintenant ? [o/N] : ", "  Install it now? [y/N]: ")).oui() {
             return false;
         }
         // Fedora sépare le moteur et l'outil de mise à jour des signatures.
@@ -103,17 +123,23 @@ fn preparer() -> bool {
             Some(g @ crate::machine::linux::Paquets::Dnf) => g.installer("clamav clamav-update"),
             Some(g) => g.installer("clamav"),
             None => {
-                println!("  Gestionnaire de paquets non reconnu : installe ClamAV avec l'outil de ta distribution.");
+                trp!(
+                    "  Gestionnaire de paquets non reconnu : installe ClamAV avec l'outil de ta distribution.",
+                    "  Package manager not recognized: install ClamAV with your distribution's tool."
+                );
                 return false;
             }
         };
         if !shell(&installation) {
-            println!("  Installation impossible.");
+            trp!("  Installation impossible.", "  Installation failed.");
             return false;
         }
     }
     if !base_presente() {
-        println!("  Téléchargement des signatures de virus (~300 Mo, une seule fois)…");
+        trp!(
+            "  Téléchargement des signatures de virus (~300 Mo, une seule fois)…",
+            "  Downloading the virus signatures (~300 MB, only once)…"
+        );
         #[cfg(target_os = "linux")]
         // Sur Debian/Ubuntu/Mint, le service tourne déjà et verrouille la base : on l'arrête le temps du premier téléchargement.
         let ok = shell("sudo systemctl stop clamav-freshclam.service 2>/dev/null; sudo freshclam")
@@ -128,7 +154,7 @@ fn preparer() -> bool {
 #[cfg(unix)]
 fn clamav(complet: bool) {
     if !preparer() {
-        println!("  Analyse annulée.");
+        trp!("  Analyse annulée.", "  Scan cancelled.");
         return;
     }
     let h = home();
@@ -175,24 +201,29 @@ fn clamav(complet: bool) {
         cmd.arg(format!("--exclude-dir={}", regex_echappe(e)));
     }
     cmd.args(&cibles);
-    println!(
+    trp!(
         "  {GRIS}Moteur : ClamAV. Analyse de : {}{RESET}",
+        "  {GRIS}Engine: ClamAV. Scanning: {}{RESET}",
         cibles
             .iter()
             .map(|p| p.display().to_string())
             .collect::<Vec<_>>()
             .join(", ")
     );
-    println!("  {GRIS}Cela peut prendre de quelques secondes à plusieurs minutes…{RESET}");
+    trp!(
+        "  {GRIS}Cela peut prendre de quelques secondes à plusieurs minutes…{RESET}",
+        "  {GRIS}This can take from a few seconds to several minutes…{RESET}"
+    );
 
     let Ok(sortie) = cmd.output() else {
-        println!("  Impossible de lancer clamscan.");
+        trp!("  Impossible de lancer clamscan.", "  Could not start clamscan.");
         return;
     };
     let Some(bilan) = lire_resultat(sortie.status.code(), &String::from_utf8_lossy(&sortie.stdout)) else {
         let erreur = String::from_utf8_lossy(&sortie.stderr);
-        println!(
+        trp!(
             "  {}✖ L'analyse a échoué : le résultat n'est pas fiable.{RESET}",
+            "  {}✖ The scan failed: the result is not reliable.{RESET}",
             couleur(Niveau::Eleve)
         );
         for l in erreur.lines().filter(|l| l.contains("ERROR")).take(5) {
@@ -202,44 +233,64 @@ fn clamav(complet: bool) {
     };
 
     let illisibles = if bilan.illisibles > 0 {
-        format!(
+        trf!(
             " ; {} élément(s) illisible(s) sans droits root, ignoré(s)",
+            "; {} item(s) unreadable without root rights, skipped",
             bilan.illisibles
         )
     } else {
         String::new()
     };
-    println!("  {GRIS}{} fichier(s) analysé(s){illisibles}.{RESET}", bilan.analyses);
+    trp!(
+        "  {GRIS}{} fichier(s) analysé(s){illisibles}.{RESET}",
+        "  {GRIS}{} file(s) scanned{illisibles}.{RESET}",
+        bilan.analyses
+    );
     // Ceinture et bretelles : un même fichier n'est proposé qu'une fois (sinon la 2e mise en quarantaine échoue).
     let mut infectes = bilan.infectes;
     let mut vus = std::collections::HashSet::new();
     infectes.retain(|(f, _)| vus.insert(f.clone()));
     if infectes.is_empty() {
-        println!("  {VERT}✔ Aucun malware trouvé.{RESET}");
+        trp!(
+            "  {VERT}✔ Aucun malware trouvé.{RESET}",
+            "  {VERT}✔ No malware found.{RESET}"
+        );
         return;
     }
     for (f, m) in &infectes {
         println!("  {}✖ {m}{RESET}  {f}", couleur(Niveau::Critique));
     }
-    println!("\n  {} fichier(s) suspect(s).", infectes.len());
-    let rep = demander("  [q]uarantaine (recommandé, réversible) / [s]upprimer / [r]ien : ").to_lowercase();
+    trp!(
+        "\n  {} fichier(s) suspect(s).",
+        "\n  {} suspicious file(s).",
+        infectes.len()
+    );
+    let rep = demander(tr!(
+        "  [q]uarantaine (recommandé, réversible) / [s]upprimer / [r]ien : ",
+        "  [q]uarantine (recommended, reversible) / [d]elete / [n]othing: "
+    ))
+    .to_lowercase();
     let dossier = crate::reseau::dossier_local().join("quarantaine");
     let _ = std::fs::create_dir_all(&dossier);
     for (f, detection) in &infectes {
         let chemin = std::path::Path::new(f);
         let resultat = match rep.as_str() {
             "q" => isoler(chemin, &dossier).map(|dest| noter_quarantaine(&dossier, f, &dest, detection)),
-            "s" => std::fs::remove_file(chemin),
+            "s" | "d" => std::fs::remove_file(chemin),
             _ => continue,
         };
         match resultat {
             Ok(()) => println!("  {VERT}✔{RESET} {f}"),
-            Err(e) => println!("  ✖ {f} : {e} (fichier système ? relancer avec sudo)"),
+            Err(e) => trp!(
+                "  ✖ {f} : {e} (fichier système ? relancer avec sudo)",
+                "  ✖ {f}: {e} (system file? run again with sudo)"
+            ),
         }
     }
     if rep == "q" {
-        println!(
+        trp!(
             "  {GRIS}Quarantaine : {} (emplacement d'origine de chaque fichier noté dans journal.txt){RESET}",
+            "  {GRIS}Quarantine: {} (original location of each file noted in journal.txt){RESET}",
             dossier.display()
         );
     }
@@ -320,7 +371,10 @@ fn noter_quarantaine(dossier: &std::path::Path, origine: &str, dest: &std::path:
         .open(dossier.join("journal.txt"))
         .and_then(|mut j| j.write_all(ligne.as_bytes()));
     if let Err(e) = ecrit {
-        println!("  Attention : journal de la quarantaine non écrit ({e}). Origine : {origine}");
+        trp!(
+            "  Attention : journal de la quarantaine non écrit ({e}). Origine : {origine}",
+            "  Warning: quarantine log not written ({e}). Origin: {origine}"
+        );
     }
 }
 
@@ -359,7 +413,10 @@ fn regex_echappe(dossier: &str) -> String {
 // ───────────────────────────── Démarrage automatique ─────────────────────────────
 
 fn demarrage() {
-    titre("Programmes lancés au démarrage (à vérifier)");
+    titre(tr!(
+        "Programmes lancés au démarrage (à vérifier)",
+        "Programs started at boot (to check)"
+    ));
     let mut entrees: Vec<String> = Vec::new();
 
     #[cfg(target_os = "linux")]
@@ -377,7 +434,7 @@ fn demarrage() {
                 .lines()
                 .filter(|l| !l.trim().is_empty() && !l.starts_with('#'))
             {
-                entrees.push(format!("crontab : {l}"));
+                entrees.push(trf!("crontab : {l}", "crontab: {l}"));
             }
         }
         for f in std::fs::read_dir("/etc/systemd/system").into_iter().flatten().flatten() {
@@ -386,7 +443,11 @@ fn demarrage() {
             if p.extension().is_some_and(|e| e == "service") && p.is_file() && !p.is_symlink() {
                 let possede = crate::machine::linux::Paquets::detecter().is_none_or(|g| g.possede(&p));
                 if !possede {
-                    entrees.push(format!("{} (service système hors paquet)", p.display()));
+                    entrees.push(trf!(
+                        "{} (service système hors paquet)",
+                        "{} (system service not from a package)",
+                        p.display()
+                    ));
                 }
             }
         }
@@ -395,19 +456,30 @@ fn demarrage() {
     #[cfg(windows)]
     {
         use crate::machine::windows::ps;
-        let script = "Get-CimInstance Win32_StartupCommand | ForEach-Object { \"$($_.Name) — $($_.Command)\" }; \
+        let script = tr!(
+            "Get-CimInstance Win32_StartupCommand | ForEach-Object { \"$($_.Name) — $($_.Command)\" }; \
                       Get-ScheduledTask | Where-Object { $_.TaskPath -notlike '\\Microsoft\\*' -and $_.State -ne 'Disabled' } | \
-                      ForEach-Object { \"tâche planifiée : $($_.TaskName) — $($_.Actions.Execute)\" }";
+                      ForEach-Object { \"tâche planifiée : $($_.TaskName) — $($_.Actions.Execute)\" }",
+            "Get-CimInstance Win32_StartupCommand | ForEach-Object { \"$($_.Name) — $($_.Command)\" }; \
+                      Get-ScheduledTask | Where-Object { $_.TaskPath -notlike '\\Microsoft\\*' -and $_.State -ne 'Disabled' } | \
+                      ForEach-Object { \"scheduled task: $($_.TaskName) — $($_.Actions.Execute)\" }"
+        );
         entrees.extend(ps(script).unwrap_or_default().lines().map(str::to_string));
     }
 
     if entrees.is_empty() {
-        println!("  {VERT}✔{RESET} Rien de particulier.");
+        trp!(
+            "  {VERT}✔{RESET} Rien de particulier.",
+            "  {VERT}✔{RESET} Nothing special."
+        );
     }
     for e in entrees {
         println!("  • {e}");
     }
-    println!("  {GRIS}Si tu ne reconnais pas une entrée, renseigne-toi avant de la supprimer.{RESET}");
+    trp!(
+        "  {GRIS}Si tu ne reconnais pas une entrée, renseigne-toi avant de la supprimer.{RESET}",
+        "  {GRIS}If you do not recognize an entry, look it up before deleting it.{RESET}"
+    );
 }
 
 #[cfg(all(test, unix))]

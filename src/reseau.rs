@@ -172,8 +172,9 @@ impl Base {
                     chrono::Local::now().format("%Y%m%d-%H%M%S")
                 ));
                 let _ = std::fs::copy(p, &copie);
-                eprintln!(
+                tre!(
                     "Attention : base des appareils illisible ({e}). Copie gardée : {}",
+                    "Warning: device database unreadable ({e}). Copy kept: {}",
                     copie.display()
                 );
                 Base::default()
@@ -219,8 +220,9 @@ impl Base {
         let json = serde_json::to_string_pretty(self).unwrap_or_default();
         for p in chemins {
             if let Err(e) = ecrire_atomique(p, &json) {
-                eprintln!(
+                tre!(
                     "Attention : base des appareils non enregistrée dans {} ({e}).",
+                    "Warning: device database not saved to {} ({e}).",
                     p.display()
                 );
             }
@@ -270,8 +272,9 @@ impl Verrou {
                     if ancien {
                         let _ = std::fs::remove_file(&chemin);
                     } else if std::time::Instant::now() > fin {
-                        eprintln!(
-                            "Attention : base des appareils occupée par un autre netscan, enregistrement sans verrou."
+                        tre!(
+                            "Attention : base des appareils occupée par un autre netscan, enregistrement sans verrou.",
+                            "Warning: device database locked by another netscan, saving without a lock."
                         );
                         return None;
                     } else {
@@ -299,8 +302,11 @@ fn accord(n: usize, singulier: &str, pluriel: &str) -> String {
     format!("{n} {}", if n > 1 { pluriel } else { singulier })
 }
 
-/// « 2026-10-16 » → « 16/10/2026 »
+/// « 2026-10-16 » → « 16/10/2026 » (en anglais, la date ISO reste telle quelle : pas d'ambiguïté jour/mois).
 pub fn date_fr(iso: &str) -> String {
+    if crate::langue::anglais() {
+        return iso.to_string();
+    }
     let mut p = iso.split('-');
     match (p.next(), p.next(), p.next()) {
         (Some(a), Some(m), Some(j)) => format!("{j}/{m}/{a}"),
@@ -340,7 +346,8 @@ pub fn base_pour_sauvegarde() -> (serde_json::Value, Contenu) {
 /// Ajoute une base sauvegardée à la base actuelle : fusion fiche par fiche (ports réunis, surnom le plus
 /// récent, première et dernière dates), rien n'est effacé. Rend ce que contenait la sauvegarde.
 pub fn restaurer_base(sauvegarde: serde_json::Value) -> Result<Contenu, String> {
-    let autre: Base = serde_json::from_value(sauvegarde).map_err(|e| format!("base des appareils illisible ({e})"))?;
+    let autre: Base = serde_json::from_value(sauvegarde)
+        .map_err(|e| trf!("base des appareils illisible ({e})", "device database unreadable ({e})"))?;
     let contenu = autre.contenu();
     let (mut base, chemins, _verrou) = Base::charger();
     base.absorber(autre);
@@ -360,7 +367,7 @@ pub fn nommer(qui: &str, surnom: Option<&str>) -> Result<String, String> {
     // dont la box n'a pas de MAC connue ne pouvait jamais nommer un appareil par son IP.
     let ici = scan::passerelle()
         .and_then(|gw| scan::table_arp().get(&gw).cloned())
-        .or_else(|| scan::reseau_local().map(|(r, _)| format!("plage {r}")));
+        .or_else(|| scan::reseau_local().map(|(r, _)| trf!("plage {r}", "range {r}")));
     for (id, r) in &mut base.reseaux {
         for (cle, a) in &mut r.appareils {
             let par_mac = cle.eq_ignore_ascii_case(&qui_min);
@@ -374,8 +381,9 @@ pub fn nommer(qui: &str, surnom: Option<&str>) -> Result<String, String> {
         }
     }
     if trouves == 0 {
-        return Err(format!(
-            "aucun appareil « {qui} » dans la base : lance d'abord un scan du réseau (netscan reseau)"
+        return Err(trf!(
+            "aucun appareil « {qui} » dans la base : lance d'abord un scan du réseau (netscan reseau)",
+            "no device “{qui}” in the database: first run a network scan (netscan network)"
         ));
     }
     base.enregistrer(&chemins);
@@ -429,20 +437,23 @@ pub fn dossier_local() -> PathBuf {
 
 fn parse_ports(spec: &str) -> Result<Vec<u16>, String> {
     match spec {
-        "courants" => return Ok(PORTS_COURANTS.to_vec()),
-        "tous" => return Ok((1..=u16::MAX).collect()),
+        "courants" | "common" => return Ok(PORTS_COURANTS.to_vec()),
+        "tous" | "all" => return Ok((1..=u16::MAX).collect()),
         _ => {}
     }
     let mut ports = Vec::new();
     for morceau in spec.split(',') {
-        let err = || format!("port invalide : {morceau}");
+        let err = || trf!("port invalide : {morceau}", "invalid port: {morceau}");
         // Port 0 impossible, et une plage à l'envers (« 100-10 ») ne doit pas devenir silencieusement vide.
         let port = |t: &str| t.trim().parse::<u16>().ok().filter(|&p| p > 0).ok_or_else(err);
         match morceau.trim().split_once('-') {
             Some((a, b)) => {
                 let (a, b) = (port(a)?, port(b)?);
                 if a > b {
-                    return Err(format!("plage de ports à l'envers : {morceau}"));
+                    return Err(trf!(
+                        "plage de ports à l'envers : {morceau}",
+                        "reversed port range: {morceau}"
+                    ));
                 }
                 ports.extend(a..=b);
             }
@@ -466,13 +477,21 @@ fn alertes(role: Option<&str>, ports: &[PortOuvert]) -> Vec<(Niveau, String)> {
     if role == Some("passerelle") && a(80) && !a(443) {
         alertes.push((
             Niveau::Moyen,
-            "Admin du routeur uniquement en HTTP : le mot de passe passe en clair.".into(),
+            tr!(
+                "Admin du routeur uniquement en HTTP : le mot de passe passe en clair.",
+                "Router admin only over HTTP: the password travels in clear text."
+            )
+            .into(),
         ));
     }
     if a(139) && a(445) {
         alertes.push((
             Niveau::Moyen,
-            "NetBIOS + SMB : vérifier que SMBv1 est désactivé.".into(),
+            tr!(
+                "NetBIOS + SMB : vérifier que SMBv1 est désactivé.",
+                "NetBIOS + SMB: make sure SMBv1 is disabled."
+            )
+            .into(),
         ));
     }
     for p in ports {
@@ -480,13 +499,21 @@ fn alertes(role: Option<&str>, ports: &[PortOuvert]) -> Vec<(Niveau, String)> {
             if b.starts_with("SSH-1.") {
                 alertes.push((
                     Niveau::Critique,
-                    format!("Port {} : SSH version 1, cassé depuis 2001.", p.port),
+                    trf!(
+                        "Port {} : SSH version 1, cassé depuis 2001.",
+                        "Port {}: SSH version 1, broken since 2001.",
+                        p.port
+                    ),
                 ));
             }
             if b.contains("vsFTPd 2.3.4") {
                 alertes.push((
                     Niveau::Critique,
-                    "vsFTPd 2.3.4 : version piégée (backdoor connue).".into(),
+                    tr!(
+                        "vsFTPd 2.3.4 : version piégée (backdoor connue).",
+                        "vsFTPd 2.3.4: trojaned version (known backdoor)."
+                    )
+                    .into(),
                 ));
             }
         }
@@ -494,7 +521,11 @@ fn alertes(role: Option<&str>, ports: &[PortOuvert]) -> Vec<(Niveau, String)> {
     if ouverts.len() > 15 {
         alertes.push((
             Niveau::Moyen,
-            format!("{} ports ouverts : surface d'attaque importante.", ouverts.len()),
+            trf!(
+                "{} ports ouverts : surface d'attaque importante.",
+                "{} open ports: large attack surface.",
+                ouverts.len()
+            ),
         ));
     }
     alertes.sort_by_key(|a| std::cmp::Reverse(a.0));
@@ -503,26 +534,40 @@ fn alertes(role: Option<&str>, ports: &[PortOuvert]) -> Vec<(Niveau, String)> {
 
 fn afficher(r: &Rapport) {
     let nom = r.nom_reseau.as_deref().map(|n| format!(" « {n} »")).unwrap_or_default();
-    titre(&format!("Réseau{nom} {}", r.reseau));
+    titre(&trf!("Réseau{nom} {}", "Network{nom} {}", r.reseau));
     for h in &r.hotes {
-        let role = h.role.map(|r| format!(" [{r}]")).unwrap_or_default();
+        let role = h
+            .role
+            .map(|r| format!(" [{}]", crate::langue::role(r)))
+            .unwrap_or_default();
         let mac = h
             .mac
             .as_deref()
             .map(|m| format!("  {GRIS}{m}{RESET}"))
             .unwrap_or_default();
         let neuve = if h.nouvelle {
-            format!("  {}NOUVEL APPAREIL{RESET}", couleur(Niveau::Moyen))
+            trf!(
+                "  {}NOUVEL APPAREIL{RESET}",
+                "  {}NEW DEVICE{RESET}",
+                couleur(Niveau::Moyen)
+            )
         } else {
             String::new()
         };
         let depuis = match (&h.premier_vu, h.nouvelle) {
-            (Some(d), false) => format!("  {GRIS}connu depuis le {}{RESET}", date_fr(d)),
+            (Some(d), false) => trf!(
+                "  {GRIS}connu depuis le {}{RESET}",
+                "  {GRIS}known since {}{RESET}",
+                date_fr(d)
+            ),
             _ => String::new(),
         };
         println!("\n{GRAS}● {}{RESET} {}{role}{mac}{neuve}{depuis}", h.ip, h.titre());
         if h.ports.is_empty() {
-            println!("    {GRIS}aucun port ouvert parmi ceux testés{RESET}");
+            trp!(
+                "    {GRIS}aucun port ouvert parmi ceux testés{RESET}",
+                "    {GRIS}no open port among those tested{RESET}"
+            );
         }
         for p in &h.ports {
             let b = p
@@ -533,10 +578,10 @@ fn afficher(r: &Rapport) {
             let prog = p
                 .programme
                 .as_deref()
-                .map(|n| format!("  {GRAS}programme : {n}{RESET}"))
+                .map(|n| trf!("  {GRAS}programme : {n}{RESET}", "  {GRAS}program: {n}{RESET}"))
                 .unwrap_or_default();
             let nouv = if p.nouveau && !h.nouvelle {
-                format!(" {}(nouveau){RESET}", couleur(Niveau::Moyen))
+                trf!(" {}(nouveau){RESET}", " {}(new){RESET}", couleur(Niveau::Moyen))
             } else {
                 String::new()
             };
@@ -551,42 +596,67 @@ fn afficher(r: &Rapport) {
         for (n, msg) in &h.alertes {
             println!("    {}→{RESET} {msg}", couleur(*n));
         }
-        println!("    {GRIS}score : {}/100{RESET}", h.score);
+        trp!(
+            "    {GRIS}score : {}/100{RESET}",
+            "    {GRIS}score: {}/100{RESET}",
+            h.score
+        );
     }
 
     if !r.absents.is_empty() {
-        println!("\n{GRIS}Déjà vus sur ce réseau, absents aujourd'hui :{RESET}");
+        trp!(
+            "\n{GRIS}Déjà vus sur ce réseau, absents aujourd'hui :{RESET}",
+            "\n{GRIS}Seen before on this network, absent today:{RESET}"
+        );
         for a in &r.absents {
             let quand = a
                 .dernier_vu
                 .as_deref()
-                .map(|d| format!(" — vu le {}", date_fr(d)))
+                .map(|d| trf!(" — vu le {}", " — seen on {}", date_fr(d)))
                 .unwrap_or_default();
             println!("  {GRIS}○ {} {}{quand}{RESET}", a.ip, a.titre);
         }
     }
 
     let compte = |n: Niveau| r.hotes.iter().flat_map(|h| &h.ports).filter(|p| p.niveau == n).count();
-    titre("Bilan réseau");
+    titre(tr!("Bilan réseau", "Network summary"));
     println!(
         "  {} ({}), {} — {}{}{RESET}, {}{}{RESET}, {}{}{RESET}",
-        accord(r.hotes.len(), "appareil", "appareils"),
+        accord(r.hotes.len(), tr!("appareil", "device"), tr!("appareils", "devices")),
         // « (1 nouveaux) » : vu en test.
-        accord(r.hotes.iter().filter(|h| h.nouvelle).count(), "nouveau", "nouveaux"),
+        accord(
+            r.hotes.iter().filter(|h| h.nouvelle).count(),
+            tr!("nouveau", "new"),
+            tr!("nouveaux", "new"),
+        ),
         accord(
             r.hotes.iter().map(|h| h.ports.len()).sum::<usize>(),
-            "port ouvert",
-            "ports ouverts"
+            tr!("port ouvert", "open port"),
+            tr!("ports ouverts", "open ports")
         ),
         couleur(Niveau::Critique),
-        accord(compte(Niveau::Critique), "critique", "critiques"),
+        accord(
+            compte(Niveau::Critique),
+            tr!("critique", "critical"),
+            tr!("critiques", "critical")
+        ),
         couleur(Niveau::Eleve),
-        accord(compte(Niveau::Eleve), "élevé", "élevés"),
+        accord(compte(Niveau::Eleve), tr!("élevé", "high"), tr!("élevés", "high")),
         couleur(Niveau::Moyen),
-        accord(compte(Niveau::Moyen), "moyen", "moyens"),
+        accord(compte(Niveau::Moyen), tr!("moyen", "medium"), tr!("moyens", "medium")),
     );
-    afficher_note("Note du réseau (appareil le plus exposé)", r.score_global);
-    println!("  {GRIS}Durée : {:.1} s{RESET}", r.duree_s);
+    afficher_note(
+        tr!(
+            "Note du réseau (appareil le plus exposé)",
+            "Network grade (most exposed device)"
+        ),
+        r.score_global,
+    );
+    trp!(
+        "  {GRIS}Durée : {:.1} s{RESET}",
+        "  {GRIS}Duration: {:.1} s{RESET}",
+        r.duree_s
+    );
 }
 
 /// Lance le scan réseau et retourne le rapport.
@@ -599,7 +669,10 @@ pub async fn executer(o: Options) -> Result<Rapport, String> {
         Some(c) => c,
         None => {
             local
-                .ok_or("impossible de détecter le réseau local ; précise une cible (ex. 192.168.1.0/24)")?
+                .ok_or(tr!(
+                    "impossible de détecter le réseau local ; précise une cible (ex. 192.168.1.0/24)",
+                    "cannot detect the local network; give a target (e.g. 192.168.1.0/24)"
+                ))?
                 .0
         }
     };
@@ -610,12 +683,16 @@ pub async fn executer(o: Options) -> Result<Rapport, String> {
     let parallele = scan::limite_connexions(o.parallele);
 
     if bavard {
-        eprintln!(
+        tre!(
             "{GRAS}Scan réseau{RESET} — {cible} ({} adresses, {} ports chacune)",
+            "{GRAS}Network scan{RESET} — {cible} ({} addresses, {} ports each)",
             ips.len(),
             ports.len()
         );
-        eprintln!("{GRIS}Découverte des appareils…{RESET}");
+        tre!(
+            "{GRIS}Découverte des appareils…{RESET}",
+            "{GRIS}Discovering devices…{RESET}"
+        );
     }
     let mut vivantes = if ips.len() == 1 {
         ips.clone()
@@ -629,10 +706,15 @@ pub async fn executer(o: Options) -> Result<Rapport, String> {
     }
 
     if bavard {
-        eprintln!("{GRIS}{} appareil(s) trouvé(s). Scan des ports…{RESET}", vivantes.len());
+        tre!(
+            "{GRIS}{} appareil(s) trouvé(s). Scan des ports…{RESET}",
+            "{GRIS}{} device(s) found. Scanning ports…{RESET}",
+            vivantes.len()
+        );
         if ips.iter().all(std::net::Ipv4Addr::is_loopback) {
-            eprintln!(
-                "{GRIS}Note : 127.0.0.1 montre aussi les services réservés à cette machine. Pour ce qui est vraiment exposé au réseau : netscan machine.{RESET}"
+            tre!(
+                "{GRIS}Note : 127.0.0.1 montre aussi les services réservés à cette machine. Pour ce qui est vraiment exposé au réseau : netscan machine.{RESET}",
+                "{GRIS}Note: 127.0.0.1 also shows services reserved to this machine. For what is really exposed to the network: netscan machine.{RESET}"
             );
         }
     }
@@ -645,7 +727,7 @@ pub async fn executer(o: Options) -> Result<Rapport, String> {
     // Le carnet de ce réseau : reconnu à la MAC de la box, sinon à la plage d'adresses.
     let id_reseau = gw
         .and_then(|g| arp.get(&g).cloned())
-        .unwrap_or_else(|| format!("plage {cible}"));
+        .unwrap_or_else(|| trf!("plage {cible}", "range {cible}"));
     let nom_reseau = scan::nom_wifi();
     if !base.appareils.is_empty() {
         let anciens = std::mem::take(&mut base.appareils);
