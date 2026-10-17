@@ -1438,6 +1438,7 @@ pub fn auditer() -> Audit {
     constats.extend(wifi());
     constats.extend(super::dns::dns());
     constats.extend(super::certificats::certificats());
+    constats.extend(super::extensions::extensions());
     Audit {
         systeme: NOM,
         score: score(&constats),

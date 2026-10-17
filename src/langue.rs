@@ -155,6 +155,7 @@ pub fn categorie(nom: &str) -> &str {
         "Chiffrement" => "Encryption",
         "Clés SSH" => "SSH keys",
         "Comptes" => "Accounts",
+        "Extensions" => "Browser extensions",
         "Failles connues" => "Known flaws",
         "Fichiers secrets" => "Secret files",
         "Fichiers suspects" => "Suspicious files",

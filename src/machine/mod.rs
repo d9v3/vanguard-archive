@@ -11,6 +11,7 @@ use crate::ui::*;
 
 mod certificats;
 mod dns;
+mod extensions;
 #[cfg(target_os = "linux")]
 pub mod linux;
 #[cfg(target_os = "linux")]

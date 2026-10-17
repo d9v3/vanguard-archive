@@ -3032,6 +3032,7 @@ pub fn auditer() -> Audit {
     constats.push(services_en_echec());
     constats.extend(super::dns::dns());
     constats.extend(super::certificats::certificats());
+    constats.extend(super::extensions::extensions());
 
     Audit {
         systeme: NOM,
