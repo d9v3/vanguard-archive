@@ -13,6 +13,7 @@ mod fuites;
 mod gaming;
 mod historique;
 mod integrite;
+mod isoler;
 mod langue;
 mod machine;
 mod maj;
@@ -112,6 +113,12 @@ enum Commande {
         /// Surveiller les fichiers critiques en direct jusqu'à Ctrl-C.
         #[arg(long, visible_alias = "live")]
         temps_reel: bool,
+    },
+    /// Lance un programme inconnu dans un bac à sable : pas de réseau, dossier personnel invisible.
+    #[command(visible_alias = "sandbox")]
+    Isoler {
+        /// Programme ou script à lancer.
+        fichier: std::path::PathBuf,
     },
     /// Fuites d'adresse courriel : l'adresse est envoyée au service de recherche, après ton accord.
     #[command(visible_alias = "email")]
@@ -363,6 +370,14 @@ async fn menu() {
             tr!("avec ton accord", "with your consent"),
         );
         option(
+            "b",
+            tr!(
+                "Bac à sable : lancer un programme inconnu",
+                "Sandbox: run an unknown program"
+            ),
+            tr!("sans réseau, isolé", "no network, isolated"),
+        );
+        option(
             "i",
             tr!("Intégrité des fichiers critiques", "Critical file integrity"),
             tr!("comptes, sudo, SSH, démarrage…", "accounts, sudo, SSH, startup…"),
@@ -424,6 +439,13 @@ async fn menu() {
             "c" | "C" => connexion::tester().await,
             "p" | "P" => fuites::verifier(),
             "e" | "E" => fuites::verifier_courriel(),
+            "b" | "B" => {
+                let chemin = demander(tr!("  Programme à isoler (chemin) : ", "  Program to isolate (path): "));
+                let chemin = chemin.trim().trim_matches(['"', '\'']);
+                if !chemin.is_empty() {
+                    isoler::isoler(std::path::Path::new(chemin));
+                }
+            }
             "i" | "I" => integrite::verifier(false),
             "n" | "N" => {
                 let qui = demander(tr!(
@@ -487,6 +509,10 @@ fn ligne_de_commande() -> clap::Command {
             "Connection test for gaming: ping, jitter, packet loss, speed and bufferbloat",
         ),
         (
+            "isoler",
+            "Run an unknown program in a sandbox: no network, home folder hidden",
+        ),
+        (
             "courriel",
             "Email address leaks: the address is sent to the search service, after your consent",
         ),
@@ -541,6 +567,9 @@ fn ligne_de_commande() -> clap::Command {
         s.mut_arg("complet", |a| {
             a.help("The whole home folder instead of the risky places")
         })
+    })
+    .mut_subcommand("isoler", |s| {
+        s.mut_arg("fichier", |a| a.help("Program or script to run"))
     })
     .mut_subcommand("integrite", |s| {
         s.mut_arg("accepter", |a| {
@@ -613,6 +642,7 @@ async fn main() {
         Some(Commande::Connexion) => connexion::tester().await,
         Some(Commande::MotDePasse) => fuites::verifier(),
         Some(Commande::Courriel) => fuites::verifier_courriel(),
+        Some(Commande::Isoler { fichier }) => isoler::isoler(&fichier),
         Some(Commande::Integrite { accepter, temps_reel }) => {
             if temps_reel {
                 integrite::temps_reel();

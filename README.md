@@ -38,6 +38,8 @@ verdict critère par critère et des conseils.
 - Réparations : Internet, navigation détournée, pare-feu, disque, disque plein, nettoyage approfondi, Windows Update
   bloqué, fichiers système, heure.
 - Antivirus : ClamAV (Linux) ou Microsoft Defender (Windows).
+- Bac à sable : lancer un programme inconnu sans réseau, système en lecture seule, dossier personnel invisible
+  (bubblewrap ou firejail sous Linux, Windows Sandbox sous Windows).
 - Intégrité des fichiers critiques (comptes, sudo, SSH, PAM, cron, services, démarrage automatique) : empreintes
   BLAKE3, ce qui a changé depuis la référence, et surveillance en direct.
 - Mots de passe fuités : vérifiés par Have I Been Pwned sans jamais envoyer le mot de passe (5 caractères de son
@@ -67,6 +69,7 @@ Chaque entrée du menu existe aussi en commande :
 | `sentinel connexion` | test de connexion pour le jeu |
 | `sentinel antivirus [--complet]` | analyse antivirus |
 | `sentinel motdepasse` | mots de passe fuités |
+| `sentinel isoler <fichier>` | lancer un programme inconnu dans un bac à sable (bubblewrap ou firejail, Windows Sandbox) |
 | `sentinel courriel` | fuites d'adresse courriel (XposedOrNot, ou Have I Been Pwned avec `SENTINEL_HIBP_CLE`) |
 | `sentinel integrite [--accepter] [--temps-reel]` | intégrité des fichiers critiques (empreintes BLAKE3), en direct possible |
 | `sentinel maj` | mises à jour |

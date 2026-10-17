@@ -29,6 +29,7 @@ Menu
   c  Connection test for gaming: ping, jitter, speed, bufferbloat
   p  Passwords: have they leaked? (only 5 characters of their fingerprint are sent)
   e  Email address: has it leaked? (the address is sent to the search service, after your consent)
+  b  Sandbox: run an unknown program with no network, away from your files
   i  Critical file integrity (accounts, sudo, SSH, startup…): what changed since the reference;
      live with "sentinel integrite --temps-reel"
   n  Name a device ("HP printer")
