@@ -512,7 +512,8 @@ fn ports_ecoute(pare_feu_actif: bool, ip_lan: Option<&str>) -> Vec<Constat> {
         constats.push(if niveau >= Niveau::Moyen && port != 3389 {
             constat.corriger(
                 trf!("Bloquer le port {port} en entrée dans le pare-feu Windows", "Block inbound port {port} in the Windows firewall"),
-                &[&format!("New-NetFirewallRule -DisplayName 'sentinel : bloquer {port}' -Direction Inbound -Protocol TCP -LocalPort {port} -Action Block")],
+                // Sans effet si la règle existe déjà (pare-feu coupé pendant l'audit : les règles n'y étaient pas comptées).
+                &[&format!("if (-not (Get-NetFirewallRule -DisplayName 'sentinel : bloquer {port}' -ErrorAction SilentlyContinue)) {{ New-NetFirewallRule -DisplayName 'sentinel : bloquer {port}' -Direction Inbound -Protocol TCP -LocalPort {port} -Action Block | Out-Null }}")],
             )
             .bloquant(format!("{port}/tcp"))
         } else {

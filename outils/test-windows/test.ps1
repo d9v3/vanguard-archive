@@ -202,7 +202,8 @@ if (Question 'Faire ce test ?') {
     Write-Host '11a. Réponds « o » pour le pare-feu, puis clique NON dans la fenêtre UAC. Réponds « n » à tout le reste.' -ForegroundColor Yellow
     & $exe corriger
     Note "corriger (UAC refusée) -> code $LASTEXITCODE"
-    [void](Question 'sentinel a-t-il dit « Demande d''administrateur refusée : rien n''a été modifié » (et PAS « ✔ fait ») ?')
+    [void](Question 'sentinel a-t-il dit « Demande d''administrateur refusée : rien n''a été modifié » (en anglais : « Administrator prompt refused: nothing was changed. ») et PAS « ✔ fait » ?')
+    Ref 'Pare-feu après UAC refusée (Private doit rester False)' { Get-NetFirewallProfile | Select-Object Name, Enabled | Format-Table -AutoSize }
 
     Write-Host ''
     Write-Host '11b. Réponds « o » pour le pare-feu et accepte l''UAC. Pour les ports, réponds « o » au port 135 seulement, « n » à tout le reste.' -ForegroundColor Yellow
@@ -219,7 +220,7 @@ if (Question 'Faire ce test ?') {
     # Un port bloqué par sentinel ne doit plus être signalé comme à corriger (0.9.6).
     Lancer 'machine-apres-blocage' @('machine')
     $apres = Get-Content (Join-Path $res 'machine-apres-blocage.out.txt') -Raw -Encoding UTF8
-    if ($apres -match 'bloqué en entrée par la règle') { Note 'Port bloqué reconnu à l''audit suivant : OK' }
+    if ($apres -match 'bloqué en entrée par la règle|blocked inbound by the') { Note 'Port bloqué reconnu à l''audit suivant : OK' }
     else { Note 'Aucun port reconnu comme bloqué (normal seulement si aucun port n''a été bloqué en 11b)' }
 
     if (Question 'Retirer maintenant les règles « sentinel : bloquer » créées pendant le test ?') {
