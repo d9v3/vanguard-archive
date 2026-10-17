@@ -32,11 +32,24 @@ fn dossier() -> Option<&'static PathBuf> {
                 .flatten()
                 .map(|d| d.path())
                 .collect();
+            // Sous Wine (tests de la version Windows sur Linux), la clé branchée reçoit une lettre de lecteur, et
+            // l'absence de PowerShell remplirait le journal de fausses erreurs : pas de journal.
             #[cfg(windows)]
-            let montages: Vec<PathBuf> = ('D'..='Z').map(|l| PathBuf::from(format!("{l}:\\"))).collect();
+            let montages: Vec<PathBuf> = if sous_wine() {
+                Vec::new()
+            } else {
+                ('D'..='Z').map(|l| PathBuf::from(format!("{l}:\\"))).collect()
+            };
             montages.into_iter().find(|d| d.join(TEMOIN).is_file())
         })
         .as_ref()
+}
+
+/// Wine installe ses propres programmes dans system32 ; wineboot.exe n'existe pas sur un vrai Windows.
+#[cfg(windows)]
+fn sous_wine() -> bool {
+    let systeme = std::env::var_os("SystemRoot").map_or_else(|| PathBuf::from("C:\\windows"), PathBuf::from);
+    systeme.join("system32").join("wineboot.exe").is_file()
 }
 
 /// Système et version, pour situer l'erreur (« Windows 10.0.26200.9711 », « Arch Linux 6.17.2 »).
