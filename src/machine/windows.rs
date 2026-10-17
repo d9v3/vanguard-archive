@@ -1058,7 +1058,9 @@ pub fn mises_a_jour_completes(seulement: Option<&[&str]>) -> Vec<Constat> {
 /// que les services à risque et ceux des programmes installés, hors ports éphémères (réponses de clients).
 fn ports_udp(pare_feu_actif: bool, ip_lan: Option<&str>) -> Vec<Constat> {
     let Some(liste) = ps(
-        "Get-NetUDPEndpoint | ForEach-Object { \"$($_.LocalAddress)|$($_.LocalPort)|$((Get-Process -Id $_.OwningProcess -ErrorAction SilentlyContinue).ProcessName)\" }",
+        // Première ligne : le réglage LLMNR (0 = coupé, effectif au prochain redémarrage seulement).
+        "'LLMNR|' + (Get-ItemProperty 'HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows NT\\DNSClient' -ErrorAction SilentlyContinue).EnableMulticast; \
+         Get-NetUDPEndpoint | ForEach-Object { \"$($_.LocalAddress)|$($_.LocalPort)|$((Get-Process -Id $_.OwningProcess -ErrorAction SilentlyContinue).ProcessName)\" }",
     ) else {
         return vec![illisible("Ports en écoute")];
     };
@@ -1069,7 +1071,8 @@ fn lire_ports_udp(liste: &str, pare_feu_actif: bool, ip_lan: Option<&str>) -> Ve
     let systeme = ["svchost", "lsass", "wininit", "services", "spoolsv", "System", "Idle", ""];
     let mut vus = Vec::new();
     let mut constats = Vec::new();
-    for l in liste.lines() {
+    let llmnr_coupe = liste.lines().any(|l| l.trim() == "LLMNR|0");
+    for l in liste.lines().filter(|l| !l.starts_with("LLMNR|")) {
         let mut c = l.trim().splitn(3, '|');
         let (Some(adresse), Some(Ok(port)), programme) =
             (c.next(), c.next().map(str::parse::<u16>), c.next().unwrap_or("").trim())
@@ -1088,7 +1091,7 @@ fn lire_ports_udp(liste: &str, pare_feu_actif: bool, ip_lan: Option<&str>) -> Ve
         }
         vus.push(port);
         let programme = if programme.is_empty() { tr!("programme inconnu", "unknown program") } else { programme };
-        constats.push(alerte(
+        let constat = alerte(
             "Ports en écoute",
             super::niveau_expose(pare_feu_actif, i.niveau),
             trf!(
@@ -1097,7 +1100,43 @@ fn lire_ports_udp(liste: &str, pare_feu_actif: bool, ip_lan: Option<&str>) -> Ve
                 i.service,
                 i.conseil
             ),
-        ));
+        );
+        // Services de découverte de Windows : une correction qui les coupe proprement (138 suit 137, une seule fois).
+        constats.push(match port {
+            5355 if llmnr_coupe => alerte(
+                "Ports en écoute",
+                Niveau::Info,
+                tr!(
+                    "5355/udp (LLMNR) encore ouvert, mais LLMNR est coupé : ce sera effectif au prochain redémarrage.",
+                    "5355/udp (LLMNR) still open, but LLMNR is turned off: it takes effect at the next restart."
+                ),
+            ),
+            5355 => constat.corriger(
+                tr!(
+                    "Couper LLMNR (résolution de noms usurpable ; le DNS suffit)",
+                    "Turn off LLMNR (spoofable name resolution; DNS is enough)"
+                ),
+                &[
+                    "New-Item -Path 'HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows NT\\DNSClient' -Force | Out-Null",
+                    "Set-ItemProperty -Path 'HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows NT\\DNSClient' -Name EnableMulticast -Value 0 -Type DWord",
+                ],
+            ),
+            137 | 138 if !vus.contains(&if port == 137 { 138 } else { 137 }) => constat.corriger(
+                tr!(
+                    "Couper NetBIOS sur TCP/IP (vieux partage ; le partage moderne passe par le port 445)",
+                    "Turn off NetBIOS over TCP/IP (old sharing; modern sharing uses port 445)"
+                ),
+                &["Get-CimInstance Win32_NetworkAdapterConfiguration -Filter 'IPEnabled=True' | Invoke-CimMethod -MethodName SetTcpipNetbios -Arguments @{ TcpipNetbiosOptions = [uint32]2 } | Out-Null"],
+            ),
+            1900 => constat.corriger(
+                tr!(
+                    "Couper la découverte UPnP (SSDP) ; à garder si tu diffuses vers une TV ou une console",
+                    "Turn off UPnP discovery (SSDP); keep it if you cast to a TV or console"
+                ),
+                &["Stop-Service SSDPSRV -Force", "Set-Service SSDPSRV -StartupType Disabled"],
+            ),
+            _ => constat,
+        });
     }
     constats
 }
@@ -1539,6 +1578,12 @@ mod tests {
         assert_eq!(c.len(), 2);
         assert!(c[0].message.starts_with("161/udp"));
         assert!(c[1].message.starts_with("27036/udp"));
+        // Découverte de Windows : une correction chacune, une seule pour 137 et 138.
+        let c = lire_ports_udp("0.0.0.0|5355|svchost\n0.0.0.0|137|System\n0.0.0.0|138|System\n0.0.0.0|1900|svchost", false, None);
+        let corrigibles: Vec<bool> = c.iter().map(|c| c.correctif.is_some()).collect();
+        assert_eq!(corrigibles, [true, true, false, true]);
+        let c = lire_ports_udp("LLMNR|0\n0.0.0.0|5355|svchost", false, None);
+        assert!(c.len() == 1 && c[0].correctif.is_none() && c[0].probleme == Some(Niveau::Info));
     }
 
     #[test]
