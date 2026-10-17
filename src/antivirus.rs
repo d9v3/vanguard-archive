@@ -184,7 +184,11 @@ fn clamav(complet: bool) {
     } else {
         let fichiers = fichiers_recents(std::path::Path::new("/tmp"), 7, 5000);
         let chemin = std::env::temp_dir().join(format!("sentinel-clamav-{}.txt", std::process::id()));
-        let texte: String = fichiers.iter().map(|f| format!("{}\n", f.display())).collect();
+        let texte = fichiers
+            .iter()
+            .map(|f| f.display().to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
         (!fichiers.is_empty() && std::fs::write(&chemin, texte).is_ok()).then_some((chemin, fichiers.len()))
     };
     // Jeux, caches et préfixes Wine sont énormes et produisent des faux positifs (cracks, outils anti-triche).
@@ -317,12 +321,9 @@ fn clamav(complet: bool) {
     }
 }
 
-/// Dossiers à analyser sans recouvrement : un ~/Desktop qui pointe vers ~/Bureau, ou un dossier contenu dans un
-/// autre, faisait analyser deux fois les mêmes fichiers ; un fichier infecté était alors signalé deux fois et sa
-/// seconde mise en quarantaine échouait (« fichier système ? »). Vu en test.
-#[cfg(unix)]
 /// Fichiers modifiés depuis moins de `jours` jours sous `dossier`, au plus `max` (les dossiers illisibles sont
 /// sautés sans bruit).
+#[cfg(unix)]
 fn fichiers_recents(dossier: &std::path::Path, jours: u64, max: usize) -> Vec<PathBuf> {
     let limite = std::time::SystemTime::now() - std::time::Duration::from_secs(jours * 86_400);
     let mut trouves = Vec::new();
@@ -343,6 +344,10 @@ fn fichiers_recents(dossier: &std::path::Path, jours: u64, max: usize) -> Vec<Pa
     trouves
 }
 
+/// Dossiers à analyser sans recouvrement : un ~/Desktop qui pointe vers ~/Bureau, ou un dossier contenu dans un
+/// autre, faisait analyser deux fois les mêmes fichiers ; un fichier infecté était alors signalé deux fois et sa
+/// seconde mise en quarantaine échouait (« fichier système ? »). Vu en test.
+#[cfg(unix)]
 fn sans_doublons(cibles: Vec<PathBuf>) -> Vec<PathBuf> {
     let mut reels: Vec<PathBuf> = cibles.into_iter().map(|p| p.canonicalize().unwrap_or(p)).collect();
     // Trié, un dossier parent passe avant ce qu'il contient.
