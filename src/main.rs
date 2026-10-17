@@ -89,6 +89,8 @@ enum Commande {
         /// Tout le dossier personnel au lieu des endroits à risque.
         #[arg(long)]
         complet: bool,
+        /// Une clé USB, un disque externe ou un dossier à analyser en entier.
+        dossier: Option<std::path::PathBuf>,
     },
     /// Active ou désactive la surveillance horaire du réseau (notification si appareil inconnu).
     #[command(visible_alias = "monitor")]
@@ -381,6 +383,11 @@ async fn menu() {
             tr!("dossier personnel", "home folder"),
         );
         option(
+            "a",
+            tr!("Antivirus : clé USB ou dossier", "Antivirus: USB drive or folder"),
+            tr!("et pièges de clé", "and drive traps"),
+        );
+        option(
             "p",
             tr!("Mots de passe : ont-ils fuité ?", "Passwords: have they leaked?"),
             tr!("rien n'est envoyé en clair", "nothing sent in clear"),
@@ -463,8 +470,9 @@ async fn menu() {
                 ));
                 s.scanner_reseau(Some(ip), "tous").await;
             }
-            "6" => antivirus::analyser(false),
-            "7" => antivirus::analyser(true),
+            "6" => antivirus::analyser(antivirus::Portee::Rapide),
+            "7" => antivirus::analyser(antivirus::Portee::Complete),
+            "a" | "A" => antivirus::choisir(),
             "8" => {
                 if s.audit.is_none() && s.reseau.is_none() {
                     s.complet().await;
@@ -615,6 +623,9 @@ fn ligne_de_commande() -> clap::Command {
         s.mut_arg("complet", |a| {
             a.help("The whole home folder instead of the risky places")
         })
+        .mut_arg("dossier", |a| {
+            a.help("A USB drive, external disk or folder to scan entirely")
+        })
     })
     .mut_subcommand("isoler", |s| {
         s.mut_arg("fichier", |a| a.help("Program or script to run"))
@@ -684,7 +695,11 @@ async fn main() {
                 std::process::exit(1);
             }
         }
-        Some(Commande::Antivirus { complet }) => antivirus::analyser(complet),
+        Some(Commande::Antivirus { complet, dossier }) => antivirus::analyser(match (dossier, complet) {
+            (Some(d), _) => antivirus::Portee::Dossier(d),
+            (None, true) => antivirus::Portee::Complete,
+            (None, false) => antivirus::Portee::Rapide,
+        }),
         Some(Commande::Surveillance { etat }) => surveillance::activer(etat == "on"),
         Some(Commande::Surveiller) => surveillance::surveiller().await,
         Some(Commande::Maj) => maj::executer(),

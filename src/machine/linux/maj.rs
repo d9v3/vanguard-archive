@@ -777,6 +777,22 @@ pub(super) fn paquets_aur() -> Option<Constat> {
     if Paquets::detecter() != Some(Paquets::Pacman) {
         return None;
     }
+    // Sans liste des dépôts (jamais téléchargée), pacman -Qm prend chaque paquet pour un paquet de l'AUR et toute
+    // la base serait déclarée « absente de l'AUR » (vu dans un conteneur Arch neuf).
+    let depots = std::fs::read_dir("/var/lib/pacman/sync")
+        .into_iter()
+        .flatten()
+        .flatten()
+        .any(|f| f.path().extension().is_some_and(|e| e == "db"));
+    if !depots {
+        return Some(impossible(
+            "Paquets AUR",
+            tr!(
+                "liste des dépôts jamais téléchargée (sudo pacman -Sy)",
+                "repository list never downloaded (sudo pacman -Sy)"
+            ),
+        ));
+    }
     let liste = sortie("pacman", &["-Qmq"])?;
     let installes: Vec<&str> = liste.lines().filter(|l| !l.is_empty()).collect();
     if installes.is_empty() {

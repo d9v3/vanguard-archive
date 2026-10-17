@@ -16,23 +16,195 @@ fn home() -> PathBuf {
     )
 }
 
-pub fn analyser(complet: bool) {
-    titre(if complet {
-        tr!("Analyse antivirus complète", "Full antivirus scan")
-    } else {
-        tr!("Analyse antivirus rapide", "Quick antivirus scan")
+/// Ce que couvre une analyse.
+pub enum Portee {
+    /// Là où arrivent les menaces : téléchargements, bureau, démarrage automatique, /tmp récent.
+    Rapide,
+    /// Tout le dossier personnel.
+    Complete,
+    /// Une clé USB, un disque externe ou un dossier choisi.
+    Dossier(PathBuf),
+}
+
+pub fn analyser(portee: Portee) {
+    titre(match portee {
+        Portee::Rapide => tr!("Analyse antivirus rapide", "Quick antivirus scan"),
+        Portee::Complete => tr!("Analyse antivirus complète", "Full antivirus scan"),
+        Portee::Dossier(_) => tr!(
+            "Analyse antivirus d'une clé ou d'un dossier",
+            "Antivirus scan of a drive or folder"
+        ),
     });
+    let portee = match portee {
+        Portee::Dossier(d) => {
+            let Ok(reel) = d.canonicalize() else {
+                trp!("  ✖ Introuvable : {}", "  ✖ Not found: {}", d.display());
+                return;
+            };
+            Portee::Dossier(reel)
+        }
+        autre => autre,
+    };
     #[cfg(windows)]
-    defender(complet);
+    defender(&portee);
     #[cfg(unix)]
-    clamav(complet);
-    demarrage();
+    clamav(&portee);
+    match &portee {
+        // Une clé n'a pas de programmes de démarrage : on regarde plutôt les pièges des vers de clé USB.
+        Portee::Dossier(d) => revue_cle(d),
+        _ => demarrage(),
+    }
+}
+
+/// Menu : propose les clés et disques externes branchés, ou un chemin tapé à la main.
+pub fn choisir() {
+    let volumes = volumes_amovibles();
+    titre(tr!("Antivirus : clé USB ou dossier", "Antivirus: USB drive or folder"));
+    if volumes.is_empty() {
+        trp!(
+            "  {GRIS}Aucune clé ni disque externe monté.{RESET}",
+            "  {GRIS}No USB drive or external disk mounted.{RESET}"
+        );
+    }
+    for (i, (chemin, description)) in volumes.iter().enumerate() {
+        println!(
+            "  {TOUCHE}{}{RESET}  {}  {DISCRET}{description}{RESET}",
+            i + 1,
+            chemin.display()
+        );
+    }
+    let reponse = demander(tr!(
+        "\n  Numéro, ou chemin d'un dossier (Entrée pour revenir) : ",
+        "\n  Number, or path of a folder (Enter to go back): "
+    ));
+    let reponse = reponse.trim();
+    if reponse.is_empty() {
+        return;
+    }
+    let cible = match reponse.parse::<usize>() {
+        Ok(n) if (1..=volumes.len()).contains(&n) => volumes[n - 1].0.clone(),
+        _ => PathBuf::from(reponse.trim_matches(['"', '\''])),
+    };
+    analyser(Portee::Dossier(cible));
+}
+
+/// Clés et disques externes montés : (point de montage, description).
+#[cfg(target_os = "linux")]
+fn volumes_amovibles() -> Vec<(PathBuf, String)> {
+    Command::new("lsblk")
+        .args(["-Pno", "RM,HOTPLUG,LABEL,SIZE,MOUNTPOINT"])
+        .output()
+        .map(|o| lire_lsblk(&String::from_utf8_lossy(&o.stdout)))
+        .unwrap_or_default()
+}
+
+/// Lignes de `lsblk -P` : RM="1" HOTPLUG="1" LABEL="CLE" SIZE="28,9G" MOUNTPOINT="/run/media/alice/CLE".
+#[cfg_attr(windows, allow(dead_code))]
+fn lire_lsblk(texte: &str) -> Vec<(PathBuf, String)> {
+    texte
+        .lines()
+        .filter_map(|l| {
+            let champ = |nom: &str| {
+                let debut = l.find(&format!("{nom}=\""))? + nom.len() + 2;
+                let fin = l[debut..].find('"')? + debut;
+                // lsblk échappe les espaces et caractères spéciaux en \xHH.
+                Some(l[debut..fin].replace("\\x20", " "))
+            };
+            let amovible = champ("RM").as_deref() == Some("1") || champ("HOTPLUG").as_deref() == Some("1");
+            let point = champ("MOUNTPOINT").filter(|m| m.starts_with('/'))?;
+            amovible.then(|| {
+                let nom = champ("LABEL").filter(|n| !n.is_empty());
+                let taille = champ("SIZE").unwrap_or_default();
+                (
+                    PathBuf::from(point),
+                    nom.map_or(taille.clone(), |n| format!("{n} · {taille}")),
+                )
+            })
+        })
+        .collect()
+}
+
+#[cfg(windows)]
+fn volumes_amovibles() -> Vec<(PathBuf, String)> {
+    crate::machine::windows::ps(
+        "Get-Volume | Where-Object { $_.DriveType -eq 'Removable' -and $_.DriveLetter } | ForEach-Object { \
+         \"$($_.DriveLetter)|$($_.FileSystemLabel)|$([math]::Round($_.Size / 1GB, 1))\" }",
+    )
+    .unwrap_or_default()
+    .lines()
+    .filter_map(|l| {
+        let mut c = l.trim().splitn(3, '|');
+        let lettre = c.next().filter(|x| !x.is_empty())?;
+        let nom = c.next().unwrap_or("");
+        let taille = c.next().unwrap_or("");
+        Some((PathBuf::from(format!("{lettre}:\\")), format!("{nom} · {taille} Go")))
+    })
+    .collect()
+}
+
+/// Pièges classiques des vers de clé USB, à la racine : raccourci qui imite un dossier (le vrai est caché),
+/// lanceur automatique, scripts. `entrees` = (nom, est un dossier).
+fn signes_de_ver(entrees: &[(String, bool)]) -> Vec<(Niveau, String)> {
+    // La clé Sentinel a son autorun.inf et son lanceur : rien de suspect.
+    if entrees.iter().any(|(n, _)| n.eq_ignore_ascii_case("sentinel.cle")) {
+        return Vec::new();
+    }
+    let mut signes = Vec::new();
+    let dossiers: Vec<String> = entrees
+        .iter()
+        .filter(|(_, d)| *d)
+        .map(|(n, _)| n.to_lowercase())
+        .collect();
+    for (nom, dossier) in entrees.iter().filter(|(_, d)| !*d) {
+        let bas = nom.to_lowercase();
+        let (souche, extension) = bas.rsplit_once('.').unwrap_or((&bas, ""));
+        if bas == "autorun.inf" {
+            signes.push((Niveau::Moyen, trf!(
+                "autorun.inf : Windows ne le lance plus tout seul, mais des vers s'en servent encore. À supprimer si tu ne l'as pas mis.",
+                "autorun.inf: Windows no longer runs it by itself, but worms still use it. Delete it if you did not put it there."
+            )));
+        } else if extension == "lnk" && (dossiers.iter().any(|d| d == souche) || entrees.len() <= 3) && !dossier {
+            signes.push((Niveau::Eleve, trf!(
+                "« {nom} » : un raccourci qui se fait passer pour un dossier, technique classique d'un ver de clé USB (le vrai dossier est caché, le raccourci lance le ver). N'ouvre pas ce raccourci.",
+                "“{nom}”: a shortcut posing as a folder, a classic USB worm trick (the real folder is hidden, the shortcut runs the worm). Do not open this shortcut."
+            )));
+        } else if ["vbs", "vbe", "js", "jse", "wsf", "wsh", "scr", "pif", "hta"].contains(&extension) {
+            signes.push((Niveau::Eleve, trf!(
+                "« {nom} » : script ou programme rarement légitime sur une clé. Ne le lance pas sans savoir d'où il vient.",
+                "“{nom}”: a script or program rarely legitimate on a drive. Do not run it without knowing where it comes from."
+            )));
+        }
+    }
+    signes
+}
+
+fn revue_cle(racine: &std::path::Path) {
+    if !racine.is_dir() {
+        return;
+    }
+    titre(tr!("Pièges de clé USB", "USB drive traps"));
+    let entrees: Vec<(String, bool)> = std::fs::read_dir(racine)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|e| (e.file_name().to_string_lossy().into_owned(), e.path().is_dir()))
+        .collect();
+    let signes = signes_de_ver(&entrees);
+    if signes.is_empty() {
+        trp!(
+            "  {VERT}✔{RESET} Aucun raccourci piégé, lanceur automatique ni script suspect à la racine.",
+            "  {VERT}✔{RESET} No trapped shortcut, autorun or suspicious script at the root."
+        );
+    }
+    for (n, s) in signes {
+        println!("  {}●{RESET} {s}", couleur(n));
+    }
 }
 
 // ───────────────────────────── Windows : Microsoft Defender ─────────────────────────────
 
 #[cfg(windows)]
-fn defender(complet: bool) {
+fn defender(portee: &Portee) {
     use crate::machine::windows::{powershell_admin, ps};
     let mpcmd =
         PathBuf::from(std::env::var_os("ProgramFiles").unwrap_or_default()).join(r"Windows Defender\MpCmdRun.exe");
@@ -40,9 +212,14 @@ fn defender(complet: bool) {
         "  {GRIS}Moteur : Microsoft Defender. Cela peut prendre de quelques minutes à une heure (analyse complète)…{RESET}",
         "  {GRIS}Engine: Microsoft Defender. This can take from a few minutes to an hour (full scan)…{RESET}"
     );
-    let statut = Command::new(&mpcmd)
-        .args(["-Scan", "-ScanType", if complet { "2" } else { "1" }])
-        .status();
+    let mut commande = Command::new(&mpcmd);
+    match portee {
+        Portee::Rapide => commande.args(["-Scan", "-ScanType", "1"]),
+        Portee::Complete => commande.args(["-Scan", "-ScanType", "2"]),
+        // Analyse personnalisée d'un dossier ou d'une clé.
+        Portee::Dossier(d) => commande.args(["-Scan", "-ScanType", "3", "-File"]).arg(d),
+    };
+    let statut = commande.status();
     match statut.map(|s| s.code()) {
         Ok(Some(0)) => trp!(
             "  {VERT}✔ Aucun malware trouvé.{RESET}",
@@ -152,7 +329,7 @@ fn preparer() -> bool {
 }
 
 #[cfg(unix)]
-fn clamav(complet: bool) {
+fn clamav(portee: &Portee) {
     if !preparer() {
         trp!("  Analyse annulée.", "  Scan cancelled.");
         return;
@@ -160,10 +337,10 @@ fn clamav(complet: bool) {
     let h = home();
     // Analyse rapide : là où arrivent les menaces (téléchargements, bureau, démarrage automatique, programmes de
     // l'utilisateur). Documents passe par l'analyse complète : des milliers de fichiers, rarement une porte d'entrée.
-    let cibles: Vec<PathBuf> = if complet {
-        vec![h.clone()]
-    } else {
-        [
+    let cibles: Vec<PathBuf> = match portee {
+        Portee::Dossier(d) => vec![d.clone()],
+        Portee::Complete => vec![h.clone()],
+        Portee::Rapide => [
             "Downloads",
             "Téléchargements",
             "Desktop",
@@ -174,14 +351,12 @@ fn clamav(complet: bool) {
         .iter()
         .map(|d| h.join(d))
         .filter(|p| p.exists())
-        .collect()
+        .collect(),
     };
     let cibles = sans_doublons(cibles);
     // /tmp : seulement les fichiers récents (7 jours), où atterrit un téléchargement en cours ou un script lancé ;
     // le reste peut peser des gigaoctets (caches de compilation, préfixes Wine) sans rien apprendre.
-    let liste_tmp = if complet {
-        None
-    } else {
+    let liste_tmp = if matches!(portee, Portee::Rapide) {
         let fichiers = fichiers_recents(std::path::Path::new("/tmp"), 7, 5000);
         let chemin = std::env::temp_dir().join(format!("sentinel-clamav-{}.txt", std::process::id()));
         let texte = fichiers
@@ -190,9 +365,12 @@ fn clamav(complet: bool) {
             .collect::<Vec<_>>()
             .join("\n");
         (!fichiers.is_empty() && std::fs::write(&chemin, texte).is_ok()).then_some((chemin, fichiers.len()))
+    } else {
+        None
     };
     // Jeux, caches et préfixes Wine sont énormes et produisent des faux positifs (cracks, outils anti-triche).
-    let exclusions = [
+    // Un dossier choisi est analysé en entier : seules les quarantaines restent à l'écart.
+    let tout = [
         "Games",
         ".steam",
         ".local/share/Steam",
@@ -209,6 +387,11 @@ fn clamav(complet: bool) {
         ".snapshots",
         ".Trash",
     ];
+    let exclusions: &[&str] = if matches!(portee, Portee::Dossier(_)) {
+        &[".local/share/sentinel/quarantaine", ".local/share/netscan/quarantaine"]
+    } else {
+        &tout
+    };
     let mut cmd = Command::new("clamscan");
     // Le bilan final (fichiers analysés, infectés, erreurs) sert à juger si l'analyse a vraiment eu lieu.
     cmd.args(["-r", "-i", "--max-filesize=200M", "--max-scansize=400M"]);
@@ -528,6 +711,55 @@ fn demarrage() {
         "  {GRIS}Si tu ne reconnais pas une entrée, renseigne-toi avant de la supprimer.{RESET}",
         "  {GRIS}If you do not recognize an entry, look it up before deleting it.{RESET}"
     );
+}
+
+#[cfg(test)]
+mod tests_cle {
+    use super::*;
+
+    #[test]
+    fn volumes_de_lsblk() {
+        let texte = "RM=\"0\" HOTPLUG=\"0\" LABEL=\"\" SIZE=\"931,5G\" MOUNTPOINT=\"/\"\n\
+                     RM=\"1\" HOTPLUG=\"1\" LABEL=\"\" SIZE=\"28,9G\" MOUNTPOINT=\"\"\n\
+                     RM=\"1\" HOTPLUG=\"1\" LABEL=\"MA\\x20CLE\" SIZE=\"28,8G\" MOUNTPOINT=\"/run/media/alice/MA\\x20CLE\"\n\
+                     RM=\"0\" HOTPLUG=\"1\" LABEL=\"\" SIZE=\"1T\" MOUNTPOINT=\"/run/media/alice/disque\"\n";
+        let v = lire_lsblk(texte);
+        assert_eq!(v.len(), 2);
+        assert_eq!(v[0].0, PathBuf::from("/run/media/alice/MA CLE"));
+        assert_eq!(v[0].1, "MA CLE · 28,8G");
+        assert_eq!(v[1].1, "1T");
+    }
+
+    #[test]
+    fn pieges_de_cle() {
+        let e = |l: &[(&str, bool)]| l.iter().map(|(n, d)| ((*n).to_string(), *d)).collect::<Vec<_>>();
+        // Ver de raccourcis : dossier caché + raccourci du même nom, autorun, script.
+        let s = signes_de_ver(&e(&[
+            ("Photos", true),
+            ("Photos.lnk", false),
+            ("autorun.inf", false),
+            ("x.vbs", false),
+            ("notes.txt", false),
+        ]));
+        assert_eq!(s.len(), 3);
+        assert_eq!(s.iter().filter(|(n, _)| *n == Niveau::Eleve).count(), 2);
+        // Clé normale.
+        assert_eq!(
+            signes_de_ver(&e(&[
+                ("Photos", true),
+                ("cv.pdf", false),
+                ("jeu.lnk", false),
+                ("a", false),
+                ("b", false)
+            ])),
+            vec![]
+        );
+        // Clé Sentinel : son autorun et son lanceur sont attendus.
+        assert_eq!(
+            signes_de_ver(&e(&[("sentinel.cle", false), ("autorun.inf", false)])),
+            vec![]
+        );
+    }
 }
 
 #[cfg(all(test, unix))]

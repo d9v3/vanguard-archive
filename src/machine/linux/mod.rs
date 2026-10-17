@@ -44,6 +44,15 @@ pub fn commande_installation(paquet: &str) -> String {
     )
 }
 
+/// Ubuntu ou une dérivée (Mint, Pop!_OS, Zorin…) : quelques paquets n'y ont pas le nom de Debian.
+pub fn famille_ubuntu() -> bool {
+    std::fs::read_to_string("/etc/os-release").is_ok_and(|t| {
+        t.lines()
+            .filter(|l| l.starts_with("ID=") || l.starts_with("ID_LIKE="))
+            .any(|l| l.split(['=', '"', ' ']).any(|id| id == "ubuntu"))
+    })
+}
+
 /// Système « atomique » : racine en lecture seule, mises à jour par image complète. dnf ou zypper n'y installent
 /// rien ; chacun a son outil, appliqué au prochain redémarrage.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -144,13 +153,13 @@ impl Paquets {
         match (self, atomique()) {
             (Paquets::Dnf, Some(Atomique::RpmOstree)) => {
                 return format!(
-                    "sudo rpm-ostree install --idempotent {paquets} && echo '{}'",
+                    "sudo rpm-ostree install --idempotent {paquets} && echo \"{}\"",
                     tr!("Redémarre pour l'utiliser.", "Reboot to use it.")
                 );
             }
             (Paquets::Zypper, Some(Atomique::Transactionnel)) => {
                 return format!(
-                    "sudo transactional-update --non-interactive pkg install {paquets} && echo '{}'",
+                    "sudo transactional-update --non-interactive pkg install {paquets} && echo \"{}\"",
                     tr!("Redémarre pour l'utiliser.", "Reboot to use it.")
                 );
             }

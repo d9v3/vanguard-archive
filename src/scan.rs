@@ -390,6 +390,130 @@ pub async fn scanner_ports(
     resultat
 }
 
+/// Requête envoyée sur chaque port UDP : un service UDP ne répond qu'à un message de son protocole. Sans réponse, on
+/// ne sait pas (port fermé ou filtré) : seul un port qui répond est déclaré ouvert.
+fn requete_udp(port: u16) -> Option<Vec<u8>> {
+    Some(match port {
+        // DNS : serveurs de la racine (NS de « . »).
+        53 => vec![0x53, 0x45, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 1],
+        // NTP : client, version 3.
+        123 => {
+            let mut r = vec![0u8; 48];
+            r[0] = 0x1b;
+            r
+        }
+        // NetBIOS : liste des noms de l'appareil (NBSTAT sur « * »).
+        137 => {
+            let mut r = vec![0x53, 0x45, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0x20, b'C', b'K'];
+            r.extend([b'A'; 30]);
+            r.extend([0, 0, 0x21, 0, 1]);
+            r
+        }
+        // SNMP v1 : description du système (sysDescr.0) avec la communauté par défaut « public ».
+        161 => vec![
+            0x30, 0x26, 0x02, 0x01, 0x00, 0x04, 0x06, b'p', b'u', b'b', b'l', b'i', b'c', 0xa0, 0x19, 0x02, 0x01, 0x01,
+            0x02, 0x01, 0x00, 0x02, 0x01, 0x00, 0x30, 0x0e, 0x30, 0x0c, 0x06, 0x08, 0x2b, 0x06, 0x01, 0x02, 0x01, 0x01,
+            0x01, 0x00, 0x05, 0x00,
+        ],
+        // SSDP (UPnP) : recherche des appareils.
+        1900 => b"M-SEARCH * HTTP/1.1\r\nHOST: 239.255.255.250:1900\r\nMAN: \"ssdp:discover\"\r\nMX: 1\r\nST: upnp:rootdevice\r\n\r\n"
+            .to_vec(),
+        // mDNS (Bonjour) : liste des services annoncés, en question directe (réponse renvoyée à notre port).
+        5353 => {
+            let mut r = vec![0x53, 0x45, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0];
+            for etiquette in ["_services", "_dns-sd", "_udp", "local"] {
+                r.push(u8::try_from(etiquette.len()).unwrap_or(0));
+                r.extend(etiquette.as_bytes());
+            }
+            r.extend([0, 0, 0x0c, 0, 1]);
+            r
+        }
+        _ => return None,
+    })
+}
+
+/// Ce que la réponse apprend : nom NetBIOS, description SNMP, serveur UPnP.
+fn resume_udp(port: u16, reponse: &[u8]) -> Option<String> {
+    match port {
+        // En-tête (12) + nom (34) + type, classe, durée, longueur (10) = 56 : nombre de noms, puis le premier nom.
+        137 => {
+            let nom = reponse.get(57..72)?;
+            let nom = String::from_utf8_lossy(nom).trim().to_string();
+            (!nom.is_empty()).then(|| trf!("nom : {nom}", "name: {nom}"))
+        }
+        // La valeur suit l'OID de sysDescr.0 : 0x04 (texte), longueur, texte.
+        161 => {
+            let oid = [0x2b, 0x06, 0x01, 0x02, 0x01, 0x01, 0x01, 0x00];
+            let debut = reponse.windows(oid.len()).position(|w| w == oid)? + oid.len();
+            let (&type_, reste) = reponse.get(debut..)?.split_first()?;
+            if type_ != 0x04 {
+                return None;
+            }
+            let (longueur, texte) = match reste.split_first()? {
+                (&0x81, r) => (usize::from(*r.first()?), r.get(1..)?),
+                (&n, r) if n < 0x80 => (usize::from(n), r),
+                _ => return None,
+            };
+            let texte = String::from_utf8_lossy(texte.get(..longueur.min(texte.len()))?);
+            let texte: String = texte
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ")
+                .chars()
+                .take(70)
+                .collect();
+            (!texte.is_empty()).then_some(texte)
+        }
+        1900 => String::from_utf8_lossy(reponse).lines().find_map(|l| {
+            let (cle, valeur) = l.split_once(':')?;
+            (cle.trim().eq_ignore_ascii_case("server")).then(|| valeur.trim().chars().take(70).collect())
+        }),
+        _ => None,
+    }
+}
+
+async fn sonder_udp(ip: Ipv4Addr, port: u16, delai: Duration) -> Option<Option<String>> {
+    let requete = requete_udp(port)?;
+    let socket = tokio::net::UdpSocket::bind("0.0.0.0:0").await.ok()?;
+    // Socket « connectée » : un port fermé renvoie une erreur (ICMP) au lieu de faire attendre tout le délai.
+    socket.connect(SocketAddr::new(IpAddr::V4(ip), port)).await.ok()?;
+    let mut tampon = [0u8; 1500];
+    // Trois envois : un paquet UDP perdu, ou une imprimante lente à répondre (vu en réel : NetBIOS d'une HP), ne doit
+    // pas faire passer un port ouvert pour fermé, puis pour « nouveau » au scan suivant.
+    for _ in 0..3 {
+        socket.send(&requete).await.ok()?;
+        match timeout(delai, socket.recv(&mut tampon)).await {
+            Ok(Ok(n)) if n > 0 => return Some(resume_udp(port, &tampon[..n])),
+            Ok(_) => return None,
+            Err(_) => {}
+        }
+    }
+    None
+}
+
+/// Ports UDP qui répondent, par machine (même forme que `scanner_ports`).
+pub async fn scanner_udp(
+    hotes: &[Ipv4Addr],
+    ports: &[u16],
+    delai: Duration,
+) -> BTreeMap<Ipv4Addr, Vec<(u16, Option<String>)>> {
+    let essais = hotes.iter().flat_map(|&ip| ports.iter().map(move |&p| (ip, p)));
+    let trouves: Vec<(Ipv4Addr, u16, Option<String>)> = stream::iter(essais)
+        .map(|(ip, p)| async move { sonder_udp(ip, p, delai).await.map(|b| (ip, p, b)) })
+        .buffer_unordered(128)
+        .filter_map(|r| async move { r })
+        .collect()
+        .await;
+    let mut resultat: BTreeMap<_, Vec<_>> = BTreeMap::new();
+    for (ip, p, b) in trouves {
+        resultat.entry(ip).or_default().push((p, b));
+    }
+    for ports in resultat.values_mut() {
+        ports.sort_by_key(|(p, _)| *p);
+    }
+    resultat
+}
+
 /// Nom DNS inverse (box, mDNS via nss…), sans bloquer le runtime.
 pub async fn nom_hote(ip: Ipv4Addr) -> Option<String> {
     // Délai maximal : un DNS qui ne répond pas ne doit pas bloquer tout le scan.
@@ -398,7 +522,8 @@ pub async fn nom_hote(ip: Ipv4Addr) -> Option<String> {
     (nom != ip.to_string()).then_some(nom)
 }
 
-/// Base des fabricants (préfixe MAC → nom), extraite de la liste IEEE et intégrée au programme.
+/// Base des fabricants (préfixe MAC → nom), extraite des registres IEEE et intégrée au programme
+/// (outils/maj-fabricants.sh, relancé par deployer.sh quand elle a plus d'un mois).
 pub fn base_fabricants() -> HashMap<String, String> {
     include_str!("../assets/oui.tsv")
         .lines()
@@ -418,7 +543,9 @@ pub fn fabricant(mac: &str, base: &HashMap<String, String>) -> Option<String> {
     if premier & 0x02 != 0 {
         return Some(tr!("MAC aléatoire (téléphone/tablette ?)", "random MAC (phone/tablet?)").into());
     }
-    base.get(hex.get(..6)?).cloned()
+    // Le bloc le plus précis d'abord : MA-S (9 chiffres), MA-M (7), puis MA-L (6). Un grand bloc revendu en petits
+    // morceaux porte sinon le nom du registre (« IEEE Registration Authority ») au lieu de celui du fabricant.
+    [9, 7, 6].iter().find_map(|&n| base.get(hex.get(..n)?).cloned())
 }
 
 /// Nom du Wi-Fi auquel on est connecté, pour reconnaître le réseau dans la base (« Salon », « Chez Max »…).
@@ -476,6 +603,31 @@ mod tests {
     }
 
     #[test]
+    fn reponses_udp() {
+        // NetBIOS : le premier nom de la liste.
+        let mut nb = vec![0u8; 57];
+        nb.extend(b"IMPRIMANTE-HP  ");
+        nb.extend([0x00, 0x04, 0x00]);
+        assert!(resume_udp(137, &nb).unwrap().ends_with("IMPRIMANTE-HP"));
+        // SNMP : sysDescr après son OID.
+        let mut snmp = vec![0x30, 0x2a, 0x2b, 0x06, 0x01, 0x02, 0x01, 0x01, 0x01, 0x00, 0x04, 0x0b];
+        snmp.extend(b"HP LaserJet");
+        assert_eq!(resume_udp(161, &snmp).as_deref(), Some("HP LaserJet"));
+        // SSDP : l'en-tête SERVER.
+        let ssdp =
+            b"HTTP/1.1 200 OK\r\nCACHE-CONTROL: max-age=1800\r\nSERVER: Linux/3.14 UPnP/1.0 MiniUPnPd/2.1\r\n\r\n";
+        assert_eq!(
+            resume_udp(1900, ssdp).as_deref(),
+            Some("Linux/3.14 UPnP/1.0 MiniUPnPd/2.1")
+        );
+        // Requêtes bien formées : SNMP annonce la longueur exacte du message.
+        let r = requete_udp(161).unwrap();
+        assert_eq!(usize::from(r[1]) + 2, r.len());
+        assert_eq!(requete_udp(137).unwrap().len(), 50);
+        assert!(requete_udp(80).is_none());
+    }
+
+    #[test]
     fn fabricant_et_mac_aleatoire() {
         let base = base_fabricants();
         assert!(base.len() > 30_000);
@@ -484,6 +636,11 @@ mod tests {
             Some("Hewlett Packard")
         );
         assert!(fabricant("ee:12:34:56:78:9a", &base).unwrap().contains("aléatoire"));
+        // Bloc MA-M (28 bits) : son fabricant, pas le registre qui détient le grand bloc.
+        assert_eq!(
+            fabricant("00:55:da:0a:bc:de", &base).as_deref(),
+            Some("Shinko Technos co.,ltd.")
+        );
     }
 
     #[test]

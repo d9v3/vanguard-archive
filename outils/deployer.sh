@@ -15,6 +15,15 @@ COMMIT_COMPILE=target/.commit-compile
 MODE=${1:-}
 
 compiler() {
+  # Liste des fabricants de plus d'un mois : on la rafraîchit avant de compiler (elle est intégrée au programme), et
+  # elle part dans son propre commit. Sans Internet, on garde l'ancienne.
+  if [[ -n $(find assets/oui.tsv -mtime +30) ]] && outils/maj-fabricants.sh; then
+    if ! git diff --quiet -- assets/oui.tsv; then
+      git commit -q -m "Fabricants : liste du $(date +%F)" -- assets/oui.tsv && echo "Liste des fabricants mise à jour."
+    else
+      touch assets/oui.tsv
+    fi
+  fi
   cargo build --release --target x86_64-unknown-linux-musl
   cargo build --release --target x86_64-pc-windows-gnu
   git rev-parse HEAD >"$COMMIT_COMPILE"

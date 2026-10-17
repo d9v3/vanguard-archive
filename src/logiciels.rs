@@ -158,8 +158,14 @@ fn liste() -> Option<Vec<Element>> {
     };
     let flatpak = present("flatpak");
     let mut l = Vec::new();
+    // Debian n'a que firefox-esr ; Ubuntu et ses dérivées ont firefox.
+    let ubuntu = gestion == Paquets::Apt && crate::machine::linux::famille_ubuntu();
     for lo in LOGICIELS {
-        let paquets = lo.paquets[rang];
+        let paquets: &[&str] = if ubuntu && lo.paquets[rang] == ["firefox-esr"] {
+            &["firefox"]
+        } else {
+            lo.paquets[rang]
+        };
         if !paquets.is_empty() {
             let fait = installes(gestion, paquets) || lo.flatpak.is_some_and(|id| flatpak && flatpak_installe(id));
             l.push(element(

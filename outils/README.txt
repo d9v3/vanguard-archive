@@ -27,6 +27,7 @@ Menu
   2  Fix the problems found (each fix is shown, then confirmed)
   3  Audit this machine              4  Scan the local network     5  Deep scan of one device
   6  Antivirus: quick scan           7  Antivirus: full scan of the home folder
+  a  Antivirus scan of a USB drive or folder, with USB worm traps (fake shortcuts, autorun)
   8  Detailed report (browser), with the grade history
   9  Hourly monitoring: notification when an unknown device shows up, a problem appears on this machine,
      or someone seems to impersonate the router (ARP spoofing)

@@ -149,7 +149,7 @@ pub fn corriger(audit: &Audit, reseau: Option<&Rapport>) -> Option<Audit> {
                 for (n, msg) in &h.alertes {
                     println!("    {}→{RESET} {msg}", couleur(*n));
                 }
-                let ouvert = |l: &[u16]| h.ports.iter().any(|p| l.contains(&p.port));
+                let ouvert = |l: &[u16]| h.ports.iter().any(|p| !p.udp && l.contains(&p.port));
                 if ouvert(&[80, 8080]) {
                     trp!(
                         "    {GRIS}interface d'admin : http://{}{RESET}",
@@ -163,7 +163,7 @@ pub fn corriger(audit: &Audit, reseau: Option<&Rapport>) -> Option<Audit> {
                         h.ip
                     );
                 }
-                if h.ports.iter().any(|p| [135, 139, 445].contains(&p.port)) {
+                if h.ports.iter().any(|p| !p.udp && [135, 139, 445].contains(&p.port)) {
                     trp!(
                         "    {GRIS}PC Windows : Paramètres > Réseau > Propriétés > profil « Public », et dans PowerShell admin :{RESET}",
                         "    {GRIS}Windows PC: Settings > Network > Properties > “Public” profile, and in an admin PowerShell:{RESET}"

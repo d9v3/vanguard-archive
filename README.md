@@ -26,7 +26,8 @@ sur un système atomique, sinon pacman, apt, dnf ou zypper.
 - Santé : espace disque, état SMART des disques (sans root), batterie, températures.
 - Ce qui n'a pas pu être vérifié est dit, jamais compté comme sain.
 
-**Réseau local** — tous les appareils, leur fabricant, leurs ports ouverts et leurs risques ; les nouveaux venus
+**Réseau local** — tous les appareils, leur fabricant, leurs ports ouverts (TCP, et UDP : SNMP, NetBIOS, UPnP,
+DNS, mDNS) et leurs risques ; les nouveaux venus
 signalés, un carnet par réseau (chez toi, chez chaque ami), des surnoms (« imprimante HP ») ; les ports que des
 appareils ont ouverts vers Internet sur la box par UPnP (lecture seule, avec miniupnpc sous Linux).
 
@@ -49,7 +50,8 @@ une copie texte enregistrée sur la clé.
   Thunderbird, Discord, OBS, GIMP, Notepad++, PowerToys) : winget, paquets de la distribution ou Flatpak.
 - Réparations : Internet, navigation détournée, pare-feu, disque, disque plein, nettoyage approfondi, Windows Update
   bloqué, fichiers système, heure.
-- Antivirus : ClamAV (Linux) ou Microsoft Defender (Windows).
+- Antivirus : ClamAV (Linux) ou Microsoft Defender (Windows), sur l'ordinateur ou sur une clé USB / un dossier
+  choisi, avec les pièges des vers de clé (raccourci qui imite un dossier, autorun.inf, scripts).
 - Bac à sable : lancer un programme inconnu sans réseau, système en lecture seule, dossier personnel invisible
   (bubblewrap ou firejail sous Linux, Windows Sandbox sous Windows).
 - Intégrité des fichiers critiques (comptes, sudo, SSH, PAM, cron, services, démarrage automatique) : empreintes
@@ -82,7 +84,7 @@ Chaque entrée du menu existe aussi en commande :
 | `sentinel connexion` | test de connexion pour le jeu |
 | `sentinel logiciels` | logiciels essentiels à installer (winget, paquets de la distribution ou Flatpak) |
 | `sentinel diagnostic` | diagnostic de l'ordinateur : matériel, système, plantages et erreurs récents |
-| `sentinel antivirus [--complet]` | analyse antivirus |
+| `sentinel antivirus [--complet] [dossier]` | analyse antivirus (ordinateur, ou une clé / un dossier) |
 | `sentinel motdepasse` | mots de passe fuités |
 | `sentinel isoler <fichier>` | lancer un programme inconnu dans un bac à sable (bubblewrap ou firejail, Windows Sandbox) |
 | `sentinel courriel` | fuites d'adresse courriel (XposedOrNot, ou Have I Been Pwned avec `SENTINEL_HIBP_CLE`) |

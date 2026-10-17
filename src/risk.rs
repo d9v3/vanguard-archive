@@ -44,6 +44,70 @@ pub const PORTS_COURANTS: &[u16] = &[
     8443, 8888, 9000, 9090, 9100, 9200, 9443, 10000, 11211, 27017, 32400, 49152, 62078,
 ];
 
+/// Ports UDP sondés : services qui répondent à une requête de leur protocole (voir `scan::scanner_udp`).
+pub const PORTS_UDP: &[u16] = &[53, 123, 137, 161, 1900, 5353];
+
+/// Service et risque d'un port UDP qui a répondu.
+pub fn info_udp(port: u16) -> InfoPort {
+    use Niveau::{Eleve, Info, Moyen};
+    let (service, niveau, conseil) = match port {
+        53 => (
+            "DNS",
+            Info,
+            crate::tr!(
+                "Résout les noms : normal sur la box. Sur un autre appareil, à reconnaître (Pi-hole, serveur…).",
+                "Resolves names: normal on the router. On another device, make sure you know it (Pi-hole, server…)."
+            ),
+        ),
+        123 => (
+            "NTP",
+            Info,
+            crate::tr!(
+                "Donne l'heure au réseau : sans danger.",
+                "Gives the time to the network: harmless."
+            ),
+        ),
+        137 => (
+            "NetBIOS",
+            Moyen,
+            crate::tr!(
+                "Vieux protocole Windows qui annonce le nom de l'appareil à tout le réseau. À couper s'il ne sert pas.",
+                "Old Windows protocol announcing the device name to the whole network. Turn it off if unused."
+            ),
+        ),
+        161 => (
+            "SNMP",
+            Eleve,
+            crate::tr!(
+                "Répond avec le mot de passe par défaut « public » : livre sa configuration à tout le réseau, parfois la laisse modifier. Change la communauté SNMP ou coupe SNMP dans l'appareil.",
+                "Answers with the default password “public”: gives its configuration to the whole network, sometimes lets it be changed. Change the SNMP community or turn SNMP off on the device."
+            ),
+        ),
+        1900 => (
+            "SSDP / UPnP",
+            Moyen,
+            crate::tr!(
+                "Annonce l'appareil par UPnP ; sur la box, permet aux appareils d'ouvrir des ports vers Internet tout seuls. À couper s'il ne sert pas.",
+                "Announces the device over UPnP; on the router, lets devices open ports to the Internet by themselves. Turn it off if unused."
+            ),
+        ),
+        5353 => (
+            "mDNS (Bonjour)",
+            Info,
+            crate::tr!(
+                "Annonce ses services (AirPlay, imprimante, Chromecast) : normal sur un réseau domestique.",
+                "Announces its services (AirPlay, printer, Chromecast): normal on a home network."
+            ),
+        ),
+        _ => (inconnu(), Info, ""),
+    };
+    InfoPort {
+        service,
+        niveau,
+        conseil,
+    }
+}
+
 /// Ports utilisés pour savoir si une machine est en ligne.
 pub const PORTS_DECOUVERTE: &[u16] = &[80, 443, 22, 445, 139, 53, 8080, 62078, 7000, 8009];
 

@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 use futures::future::join_all;
 use serde::{Deserialize, Serialize};
 
-use crate::risk::{Niveau, PORTS_COURANTS, identifier, info_port, note};
+use crate::risk::{Niveau, PORTS_COURANTS, PORTS_UDP, identifier, info_port, info_udp, note};
 use crate::scan;
 use crate::ui::*;
 
@@ -45,6 +45,16 @@ pub struct PortOuvert {
     pub nouveau: bool,
     /// Programme qui écoute (seulement pour cette machine).
     pub programme: Option<String>,
+    /// Port UDP (sinon TCP).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub udp: bool,
+}
+
+impl PortOuvert {
+    /// « 445/tcp », « 161/udp ».
+    pub fn libelle(&self) -> String {
+        format!("{}/{}", self.port, if self.udp { "udp" } else { "tcp" })
+    }
 }
 
 #[derive(Serialize)]
@@ -112,6 +122,9 @@ struct Base {
 struct ReseauConnu {
     nom: Option<String>,
     appareils: BTreeMap<String, AppareilConnu>,
+    /// Ce réseau a déjà été scanné en UDP (depuis la 0.42) : avant, aucun port UDP n'est « nouveau ».
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    udp: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -121,6 +134,8 @@ struct AppareilConnu {
     fabricant: Option<String>,
     /// Tous les ports déjà vus ouverts (union : un Chromecast en veille ne doit pas déclencher d'alerte au réveil).
     ports: BTreeSet<u16>,
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    ports_udp: BTreeSet<u16>,
     #[serde(default)]
     surnom: Option<String>,
     /// Quand le surnom a été donné ou retiré (« AAAA-MM-JJ HH:MM:SS ») : à la fusion clé + copie locale,
@@ -145,6 +160,7 @@ impl AppareilConnu {
     /// Fusion de deux fiches du même appareil (base de la clé + copie locale).
     fn fusionner(&mut self, autre: AppareilConnu) {
         self.ports.extend(autre.ports);
+        self.ports_udp.extend(autre.ports_udp);
         // None < Some : une fiche datée l'emporte sur une fiche d'avant la v0.9.6.
         if autre.surnom_le > self.surnom_le {
             self.surnom = autre.surnom;
@@ -213,6 +229,7 @@ impl Base {
         for (id, r) in autre.reseaux {
             let mien = self.reseaux.entry(id).or_default();
             mien.nom = mien.nom.take().or(r.nom);
+            mien.udp |= r.udp;
             for (cle, a) in r.appareils {
                 match mien.appareils.get_mut(&cle) {
                     Some(connu) => connu.fusionner(a),
@@ -504,7 +521,7 @@ fn parse_ports(spec: &str) -> Result<Vec<u16>, String> {
 
 /// Alertes d'une machine : celles de chaque port, plus celles qui dépendent d'une combinaison.
 fn alertes(role: Option<&str>, ports: &[PortOuvert]) -> Vec<(Niveau, String)> {
-    let ouverts: Vec<u16> = ports.iter().map(|p| p.port).collect();
+    let ouverts: Vec<u16> = ports.iter().filter(|p| !p.udp).map(|p| p.port).collect();
     let a = |p| ouverts.contains(&p);
     let mut alertes: Vec<(Niveau, String)> = ports
         .iter()
@@ -512,7 +529,7 @@ fn alertes(role: Option<&str>, ports: &[PortOuvert]) -> Vec<(Niveau, String)> {
         .map(|p| {
             (
                 p.niveau,
-                trf!("{} ({}) : {}", "{} ({}): {}", p.service, p.port, p.conseil),
+                trf!("{} ({}) : {}", "{} ({}): {}", p.service, p.libelle(), p.conseil),
             )
         })
         .collect();
@@ -756,8 +773,8 @@ fn afficher(r: &Rapport) {
                     .map(|n| format!("  {DISCRET}{n}{RESET}"))
                     .unwrap_or_default();
                 println!(
-                    "    {:>5}/tcp  {}{}{:<8}{RESET}{nouveau}{programme}",
-                    p.port,
+                    "    {:>9}  {}{}{:<8}{RESET}{nouveau}{programme}",
+                    p.libelle(),
                     ajuster(p.service, 16),
                     couleur(p.niveau),
                     p.niveau.libelle()
@@ -785,7 +802,11 @@ fn afficher(r: &Rapport) {
     if !autres.is_empty() {
         section(tr!("AUTRES PORTS OUVERTS", "OTHER OPEN PORTS"));
         for h in autres {
-            let ports: Vec<String> = h.ports.iter().map(|p| format!("{} {}", p.port, p.service)).collect();
+            let ports: Vec<String> = h
+                .ports
+                .iter()
+                .map(|p| format!("{}{} {}", p.port, if p.udp { "/udp" } else { "" }, p.service))
+                .collect();
             println!(
                 "  {} {:<15} {}  {DISCRET}{}{RESET}",
                 pastille(h),
@@ -882,6 +903,13 @@ pub async fn executer(o: Options) -> Result<Rapport, String> {
         }
     }
     let resultats = scan::scanner_ports(&vivantes, &ports, delai, parallele).await;
+    // UDP : quelques services qui se taisent en TCP (SNMP, NetBIOS, UPnP…), avec les listes de ports par défaut.
+    let avec_udp = o.ports == "courants" || o.ports == "tous";
+    let mut resultats_udp = if avec_udp {
+        scan::scanner_udp(&vivantes, PORTS_UDP, Duration::from_millis(o.timeout.clamp(800, 1500))).await
+    } else {
+        BTreeMap::new()
+    };
     let noms = join_all(vivantes.iter().map(|&ip| scan::nom_hote(ip))).await;
     let arp = scan::table_arp();
     let fabricants = scan::base_fabricants();
@@ -901,6 +929,7 @@ pub async fn executer(o: Options) -> Result<Rapport, String> {
     }
     let histo = base.reseaux.entry(id_reseau.clone()).or_default();
     let premier_scan = histo.appareils.is_empty();
+    let udp_deja_vu = histo.udp;
     // Seul un scan du réseau entier sur les ports courants se compare aux précédents.
     let scan_comparable = ips.len() > 1 && o.ports == "courants";
     // Un port hors de la liste courante n'a jamais pu être vu par les scans précédents : pas de faux « nouveau ».
@@ -910,13 +939,14 @@ pub async fn executer(o: Options) -> Result<Rapport, String> {
     // Pour cette machine (ou 127.0.0.1), on sait quel programme tient chaque port.
     let programmes = crate::machine::programmes_en_ecoute();
 
-    let mut hotes: Vec<Hote> = resultats
-        .into_iter()
-        .zip(noms)
-        .map(|((ip, ouverts), nom)| {
-            let mac = arp.get(&ip).cloned();
-            let connu = histo.appareils.get(&cle(ip, &mac));
-            let ports: Vec<PortOuvert> = ouverts
+    let mut hotes: Vec<Hote> =
+        resultats
+            .into_iter()
+            .zip(noms)
+            .map(|((ip, ouverts), nom)| {
+                let mac = arp.get(&ip).cloned();
+                let connu = histo.appareils.get(&cle(ip, &mac));
+                let ports: Vec<PortOuvert> = ouverts
                 .into_iter()
                 .map(|(port, banniere)| {
                     // Port non répertorié : on se fie à ce que le service annonce (SSH sur 2222, web sur 9999…).
@@ -947,6 +977,7 @@ pub async fn executer(o: Options) -> Result<Rapport, String> {
                             ),
                             nouveau,
                             programme,
+                            udp: false,
                         };
                     }
                     PortOuvert {
@@ -957,33 +988,50 @@ pub async fn executer(o: Options) -> Result<Rapport, String> {
                         conseil: i.conseil,
                         nouveau,
                         programme,
+                        udp: false,
                     }
                 })
+                .chain(resultats_udp.remove(&ip).unwrap_or_default().into_iter().map(|(port, banniere)| {
+                    let i = info_udp(port);
+                    PortOuvert {
+                        port,
+                        service: i.service,
+                        niveau: i.niveau,
+                        banniere,
+                        conseil: i.conseil,
+                        nouveau: scan_comparable
+                            && !premier_scan
+                            && udp_deja_vu
+                            && !connu.is_some_and(|c| c.ports_udp.contains(&port)),
+                        programme: None,
+                        udp: true,
+                    }
+                }))
                 .collect();
-            let role = if Some(ip) == gw {
-                Some("passerelle")
-            } else if Some(ip) == moi {
-                Some("cette machine")
-            } else {
-                None
-            };
-            let alertes = alertes(role, &ports);
-            let score = 100u32.saturating_sub(alertes.iter().map(|(n, _)| n.penalite()).sum());
-            Hote {
-                ip,
-                nom,
-                fabricant: mac.as_deref().and_then(|m| scan::fabricant(m, &fabricants)),
-                surnom: connu.and_then(|c| c.surnom.clone()),
-                premier_vu: connu.and_then(|c| c.premier_vu.clone()),
-                mac,
-                role,
-                nouvelle: scan_comparable && !premier_scan && connu.is_none(),
-                ports,
-                alertes,
-                score,
-            }
-        })
-        .collect();
+                let role = if Some(ip) == gw {
+                    Some("passerelle")
+                } else if Some(ip) == moi {
+                    Some("cette machine")
+                } else {
+                    None
+                };
+                let alertes = alertes(role, &ports);
+                let score = 100u32.saturating_sub(alertes.iter().map(|(n, _)| n.penalite()).sum());
+                Hote {
+                    ip,
+                    nom,
+                    fabricant: mac.as_deref().and_then(|m| scan::fabricant(m, &fabricants)),
+                    surnom: connu.and_then(|c| c.surnom.clone()),
+                    premier_vu: connu.and_then(|c| c.premier_vu.clone()),
+                    mac,
+                    role,
+                    nouvelle: scan_comparable && !premier_scan && connu.is_none(),
+                    ports,
+                    alertes,
+                    score,
+                }
+            })
+            .collect();
     hotes.sort_by_key(|h| h.ip);
 
     let mut absents = Vec::new();
@@ -1010,6 +1058,7 @@ pub async fn executer(o: Options) -> Result<Rapport, String> {
                     nom: None,
                     fabricant: None,
                     ports: BTreeSet::new(),
+                    ports_udp: BTreeSet::new(),
                     surnom: None,
                     surnom_le: None,
                     premier_vu: Some(jour.clone()),
@@ -1018,13 +1067,15 @@ pub async fn executer(o: Options) -> Result<Rapport, String> {
             a.ip = h.ip;
             a.nom = h.nom.clone().or(a.nom.take());
             a.fabricant.clone_from(&h.fabricant);
-            a.ports.extend(h.ports.iter().map(|p| p.port));
+            a.ports.extend(h.ports.iter().filter(|p| !p.udp).map(|p| p.port));
+            a.ports_udp.extend(h.ports.iter().filter(|p| p.udp).map(|p| p.port));
             a.premier_vu.get_or_insert_with(|| jour.clone());
             a.dernier_vu = Some(jour.clone());
         }
         if nom_reseau.is_some() {
             histo.nom.clone_from(&nom_reseau);
         }
+        histo.udp |= avec_udp;
         base.enregistrer(&chemins);
     }
 
@@ -1132,6 +1183,7 @@ mod tests {
                 ReseauConnu {
                     nom: None,
                     appareils: base.appareils,
+                    udp: false,
                 },
             )]),
             appareils: BTreeMap::new(),
@@ -1198,6 +1250,7 @@ mod tests {
             nom: None,
             fabricant: None,
             ports: ports.iter().copied().collect(),
+            ports_udp: BTreeSet::new(),
             surnom: surnom.map(str::to_string),
             surnom_le: None,
             premier_vu: Some(premier.into()),
@@ -1255,6 +1308,7 @@ mod tests {
                 conseil: i.conseil,
                 nouveau: false,
                 programme: None,
+                udp: false,
             }
         };
         let routeur = alertes(Some("passerelle"), &[port(80)]);

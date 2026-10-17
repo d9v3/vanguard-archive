@@ -154,7 +154,7 @@ pub fn markdown(audit: Option<&Audit>, reseau: Option<&Rapport>) -> String {
             let ports = h
                 .ports
                 .iter()
-                .map(|p| format!("{} {} ({})", p.port, p.service, p.niveau.libelle()))
+                .map(|p| format!("{} {} ({})", p.libelle(), p.service, p.niveau.libelle()))
                 .collect::<Vec<_>>()
                 .join(", ");
             let _ = writeln!(
@@ -316,8 +316,8 @@ fn html(audit: Option<&Audit>, reseau: Option<&Rapport>) -> String {
                             .unwrap_or_default();
                     let _ = write!(
                         h,
-                        "<tr><td>{}/tcp</td><td>{}{ban}</td><td>{}</td></tr>",
-                        p.port,
+                        "<tr><td>{}</td><td>{}{ban}</td><td>{}</td></tr>",
+                        p.libelle(),
                         esc(p.service),
                         badge(Some(p.niveau))
                     );
@@ -429,6 +429,7 @@ mod tests {
             conseil: "",
             nouveau: false,
             programme: Some("<b>x</b>".into()),
+            udp: false,
         };
         let h = Hote {
             ip: "10.0.0.9".parse().unwrap(),
