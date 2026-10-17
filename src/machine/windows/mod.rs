@@ -717,6 +717,7 @@ pub fn auditer() -> Audit {
         verif!(super::dns::dns()),
         verif!(super::certificats::certificats()),
         verif!(super::extensions::extensions()),
+        verif!(super::navigateur::navigateurs()),
         verif!(super::sante::sante()),
         verif!(super::journaux::journaux()),
     ]));

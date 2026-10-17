@@ -15,6 +15,7 @@ mod extensions;
 mod journaux;
 #[cfg(target_os = "linux")]
 pub mod linux;
+mod navigateur;
 mod sante;
 #[cfg(target_os = "linux")]
 use linux as os;

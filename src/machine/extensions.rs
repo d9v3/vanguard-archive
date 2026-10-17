@@ -229,7 +229,7 @@ fn juger(navigateur: &str, extensions: &[Extension]) -> Vec<Constat> {
 }
 
 /// Dossiers racine des navigateurs : (nom, dossier, famille Firefox).
-fn racines() -> Vec<(&'static str, PathBuf, bool)> {
+pub(super) fn racines() -> Vec<(&'static str, PathBuf, bool)> {
     let mut r = Vec::new();
     #[cfg(target_os = "linux")]
     {
@@ -294,7 +294,7 @@ fn racines() -> Vec<(&'static str, PathBuf, bool)> {
 }
 
 /// Profils d'une racine : (nom du dossier, chemin), ceux qui contiennent le fichier attendu.
-fn profils(racine: &Path, firefox: bool) -> Vec<(String, PathBuf)> {
+pub(super) fn profils(racine: &Path, firefox: bool) -> Vec<(String, PathBuf)> {
     let mut p: Vec<(String, PathBuf)> = std::fs::read_dir(racine)
         .into_iter()
         .flatten()
