@@ -33,7 +33,7 @@ fn ps_delai(script: &str, secondes: u64) -> Option<String> {
 }
 
 /// Constat quand une vérification n'a pas pu se faire : on le dit, on ne conclut jamais « OK ».
-fn illisible(categorie: &'static str) -> Constat {
+pub(super) fn illisible(categorie: &'static str) -> Constat {
     impossible(
         categorie,
         tr!("PowerShell indisponible ou bloqué", "PowerShell unavailable or blocked"),
@@ -1074,6 +1074,8 @@ pub fn auditer() -> Audit {
     constats.push(chiffrement());
     constats.push(invite());
     constats.extend(wifi());
+    constats.extend(super::dns::dns());
+    constats.extend(super::certificats::certificats());
     Audit {
         systeme: NOM,
         score: score(&constats),

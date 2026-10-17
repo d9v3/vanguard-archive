@@ -151,6 +151,7 @@ pub fn categorie(nom: &str) -> &str {
         "Pare-feu" => "Firewall",
         "Bureau à distance" => "Remote Desktop",
         "Carte graphique" => "Graphics card",
+        "Certificats" => "Certificates",
         "Chiffrement" => "Encryption",
         "Clés SSH" => "SSH keys",
         "Comptes" => "Accounts",

@@ -9,6 +9,8 @@ use serde::Serialize;
 use crate::risk::Niveau;
 use crate::ui::*;
 
+mod certificats;
+mod dns;
 #[cfg(target_os = "linux")]
 pub mod linux;
 #[cfg(target_os = "linux")]

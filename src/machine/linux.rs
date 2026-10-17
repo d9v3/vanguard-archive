@@ -3030,6 +3030,8 @@ pub fn auditer() -> Audit {
     constats.push(comptes());
     constats.extend(wifi(crate::scan::passerelle().map(|g| g.to_string())));
     constats.push(services_en_echec());
+    constats.extend(super::dns::dns());
+    constats.extend(super::certificats::certificats());
 
     Audit {
         systeme: NOM,
