@@ -6,6 +6,7 @@
 mod antivirus;
 mod commande;
 mod corriger;
+mod donnees;
 #[cfg(windows)]
 mod gaming;
 mod machine;
@@ -80,6 +81,13 @@ enum Commande {
     /// Gaming (Windows) : composants pour les jeux (Visual C++, DirectX, .NET…) et réglages de Windows.
     #[cfg(windows)]
     Gaming,
+    /// Sauvegarde la base des appareils et l'état de la surveillance dans un fichier JSON.
+    Sauvegarder {
+        /// Fichier à écrire (par défaut : netscan-sauvegarde-AAAA-MM-JJ.json dans le dossier personnel ou Documents).
+        fichier: Option<std::path::PathBuf>,
+    },
+    /// Ajoute une sauvegarde (ou un appareils.json) à la base actuelle, sans rien effacer.
+    Restaurer { fichier: std::path::PathBuf },
     /// Donne un surnom à un appareil de la base (« imprimante HP »), désigné par son IP ou sa MAC.
     Nommer {
         /// IP (sur le réseau actuel) ou adresse MAC de l'appareil.
@@ -178,6 +186,7 @@ async fn menu() {
         #[cfg(windows)]
         println!("  g. Gaming : composants (Visual C++, DirectX, .NET…) et réglages Windows");
         println!("  n. Nommer un appareil (« imprimante HP »)");
+        println!("  d. Données : sauvegarder ou restaurer (surnoms, historique des réseaux)");
         println!("  q. Quitter\n");
         let choix = demander("Choix : ");
         println!();
@@ -207,6 +216,7 @@ async fn menu() {
                 let surnom = demander("Surnom (vide pour le retirer) : ");
                 nommer(&qui, &surnom);
             }
+            "d" | "D" => donnees::menu(),
             "q" | "Q" => break,
             _ => continue,
         }
@@ -258,6 +268,8 @@ async fn main() {
         Some(Commande::Reparer) => reparer::menu(),
         #[cfg(windows)]
         Some(Commande::Gaming) => gaming::menu(),
+        Some(Commande::Sauvegarder { fichier }) => donnees::sauvegarder(fichier),
+        Some(Commande::Restaurer { fichier }) => donnees::restaurer(&fichier),
         Some(Commande::Nommer { appareil, surnom }) => nommer(&appareil, &surnom.join(" ")),
     }
 }

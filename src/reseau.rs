@@ -231,7 +231,7 @@ impl Base {
 /// Écrit d'abord un fichier temporaire, le force sur le disque, puis le renomme à la place de l'ancien :
 /// une coupure, un Ctrl-C ou une clé arrachée laissent soit l'ancienne base, soit la nouvelle, jamais une
 /// base tronquée.
-fn ecrire_atomique(chemin: &std::path::Path, contenu: &str) -> std::io::Result<()> {
+pub(crate) fn ecrire_atomique(chemin: &std::path::Path, contenu: &str) -> std::io::Result<()> {
     use std::io::Write;
     if let Some(d) = chemin.parent() {
         std::fs::create_dir_all(d)?;
@@ -301,6 +301,46 @@ pub fn date_fr(iso: &str) -> String {
         (Some(a), Some(m), Some(j)) => format!("{j}/{m}/{a}"),
         _ => iso.to_string(),
     }
+}
+
+/// Ce que contient une base : réseaux, appareils, surnoms donnés.
+pub struct Contenu {
+    pub reseaux: usize,
+    pub appareils: usize,
+    pub surnoms: usize,
+}
+
+impl Base {
+    fn contenu(&self) -> Contenu {
+        let fiches = || {
+            self.reseaux
+                .values()
+                .flat_map(|r| r.appareils.values())
+                .chain(self.appareils.values())
+        };
+        Contenu {
+            reseaux: self.reseaux.len(),
+            appareils: fiches().count(),
+            surnoms: fiches().filter(|a| a.surnom.is_some()).count(),
+        }
+    }
+}
+
+/// La base des appareils (clé et copie locale fusionnées), pour une sauvegarde.
+pub fn base_pour_sauvegarde() -> (serde_json::Value, Contenu) {
+    let (base, _, _verrou) = Base::charger();
+    (serde_json::to_value(&base).unwrap_or_default(), base.contenu())
+}
+
+/// Ajoute une base sauvegardée à la base actuelle : fusion fiche par fiche (ports réunis, surnom le plus
+/// récent, première et dernière dates), rien n'est effacé. Rend ce que contenait la sauvegarde.
+pub fn restaurer_base(sauvegarde: serde_json::Value) -> Result<Contenu, String> {
+    let autre: Base = serde_json::from_value(sauvegarde).map_err(|e| format!("base des appareils illisible ({e})"))?;
+    let contenu = autre.contenu();
+    let (mut base, chemins, _verrou) = Base::charger();
+    base.absorber(autre);
+    base.enregistrer(&chemins);
+    Ok(contenu)
 }
 
 /// Donne (ou retire, avec `None`) un surnom à un appareil, désigné par son IP ou son adresse MAC.
