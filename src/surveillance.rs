@@ -177,6 +177,68 @@ fn veiller_machine() {
     }
 }
 
+/// Box vue au dernier passage : même Wi-Fi et même adresse, mais une autre adresse MAC = alerte.
+#[derive(serde::Serialize, serde::Deserialize, PartialEq, Debug)]
+struct Passerelle {
+    reseau: String,
+    nom: Option<String>,
+    ip: std::net::Ipv4Addr,
+    mac: String,
+}
+
+fn fichier_passerelle() -> std::path::PathBuf {
+    reseau::dossier_local().join("surveillance-passerelle.json")
+}
+
+fn passerelle_de(r: &reseau::Rapport) -> Option<Passerelle> {
+    let h = r.hotes.iter().find(|h| h.role == Some("passerelle"))?;
+    Some(Passerelle {
+        reseau: r.reseau.clone(),
+        nom: r.nom_reseau.clone(),
+        ip: h.ip,
+        mac: h.mac.clone()?.to_lowercase(),
+    })
+}
+
+/// La box a-t-elle changé d'adresse MAC sur le même réseau (même Wi-Fi, même adresse) ? Rend (ancienne, nouvelle).
+fn mac_changee(avant: &Passerelle, apres: &Passerelle) -> Option<(String, String)> {
+    (avant.reseau == apres.reseau && avant.nom == apres.nom && avant.ip == apres.ip && avant.mac != apres.mac)
+        .then(|| (avant.mac.clone(), apres.mac.clone()))
+}
+
+/// Contrôles contre l'usurpation de la box : MAC partagée avec un autre appareil, MAC changée depuis le passage
+/// précédent. Le changement est retenu seulement s'il n'y a pas d'alerte de partage (on garde l'ancienne référence).
+fn veiller_passerelle(r: &reseau::Rapport) {
+    if let Some((boite, mac, autre)) = reseau::usurpation_arp(r) {
+        notifier(
+            tr!("Sentinel : box usurpée ?", "Sentinel: router impersonated?"),
+            &reseau::message_usurpation(boite, &mac, autre),
+        );
+        return;
+    }
+    let Some(apres) = passerelle_de(r) else { return };
+    let avant: Option<Passerelle> = std::fs::read_to_string(fichier_passerelle())
+        .ok()
+        .and_then(|t| serde_json::from_str(&t).ok());
+    if let Some((ancienne, nouvelle)) = avant.as_ref().and_then(|a| mac_changee(a, &apres)) {
+        notifier(
+            tr!(
+                "Sentinel : la box a changé d'adresse MAC",
+                "Sentinel: the router's MAC address changed"
+            ),
+            &trf!(
+                "La box {} répondait avec {ancienne}, elle répond maintenant avec {nouvelle}. Normal si tu viens de changer de box ; sinon, quelqu'un se fait peut-être passer pour elle (usurpation ARP).",
+                "The router {} answered with {ancienne}, it now answers with {nouvelle}. Normal if you just replaced it; otherwise someone may be impersonating it (ARP spoofing).",
+                apres.ip
+            ),
+        );
+    }
+    if let Ok(texte) = serde_json::to_string(&apres) {
+        let _ = std::fs::create_dir_all(reseau::dossier_local());
+        let _ = std::fs::write(fichier_passerelle(), texte);
+    }
+}
+
 pub async fn surveiller() {
     veiller_machine();
     let Ok(r) = reseau::executer(Options {
@@ -187,6 +249,7 @@ pub async fn surveiller() {
     else {
         return;
     };
+    veiller_passerelle(&r);
     for h in r.hotes.iter().filter(|h| h.nouvelle) {
         let qui = if h.titre().is_empty() {
             tr!("appareil inconnu", "unknown device").into()
@@ -339,6 +402,20 @@ mod tests {
             score: Some(score),
             alertes: alertes.iter().map(ToString::to_string).collect(),
         }
+    }
+
+    #[test]
+    fn box_qui_change_de_mac() {
+        let p = |nom: &str, mac: &str| Passerelle {
+            reseau: "10.0.0.0/24".into(),
+            nom: Some(nom.into()),
+            ip: "10.0.0.1".parse().unwrap(),
+            mac: mac.into(),
+        };
+        assert!(mac_changee(&p("Maison", "aa:aa:aa:aa:aa:aa"), &p("Maison", "aa:aa:aa:aa:aa:aa")).is_none());
+        assert!(mac_changee(&p("Maison", "aa:aa:aa:aa:aa:aa"), &p("Maison", "bb:bb:bb:bb:bb:bb")).is_some());
+        // Autre Wi-Fi (chez un ami) avec la même adresse de box : pas une alerte.
+        assert!(mac_changee(&p("Maison", "aa:aa:aa:aa:aa:aa"), &p("Ami", "bb:bb:bb:bb:bb:bb")).is_none());
     }
 
     #[test]

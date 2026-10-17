@@ -20,7 +20,8 @@ Menu
   3  Audit this machine              4  Scan the local network     5  Deep scan of one device
   6  Antivirus: quick scan           7  Antivirus: full scan of the home folder
   8  Detailed report (browser), with the grade history
-  9  Hourly network monitoring (notification when an unknown device shows up)
+  9  Hourly monitoring: notification when an unknown device shows up, a problem appears on this machine,
+     or someone seems to impersonate the router (ARP spoofing)
   u  Updates: system, programs, drivers, firmware
   r  Repair: Internet, hijacked browsing, firewall, antivirus, disk, disk full,
      deep cleanup, stuck updates, system files, time

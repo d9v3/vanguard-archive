@@ -39,8 +39,8 @@ verdict critère par critère et des conseils.
 - Antivirus : ClamAV (Linux) ou Microsoft Defender (Windows).
 - Mots de passe fuités : vérifiés par Have I Been Pwned sans jamais envoyer le mot de passe (5 caractères de son
   empreinte seulement).
-- Surveillance toutes les heures : notification si un appareil inconnu arrive, si un port s'ouvre, ou si la note de
-  la machine baisse.
+- Surveillance toutes les heures : notification si un appareil inconnu arrive, si un port s'ouvre, si la note de
+  la machine baisse, ou si la box semble usurpée (adresse MAC partagée ou changée : usurpation ARP).
 - Rapport HTML avec la courbe des notes, et ce qui a changé depuis le bilan précédent.
 - Gaming (Windows) : composants pour les jeux et réglages de Windows.
 

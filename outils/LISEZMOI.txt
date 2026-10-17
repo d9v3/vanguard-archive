@@ -20,7 +20,8 @@ Menu
   3  Audit de cette machine          4  Scan du réseau local       5  Scan approfondi d'un appareil
   6  Antivirus : analyse rapide      7  Antivirus : analyse complète du dossier personnel
   8  Rapport détaillé (navigateur), avec la courbe des notes
-  9  Surveillance du réseau toutes les heures (notification si un appareil inconnu arrive)
+  9  Surveillance toutes les heures : notification si un appareil inconnu arrive, si un problème apparaît
+     sur cette machine, ou si quelqu'un semble se faire passer pour la box (usurpation ARP)
   u  Mises à jour : système, programmes, pilotes, firmware
   r  Réparer : Internet, navigation détournée, pare-feu, antivirus, disque, disque plein,
      nettoyage approfondi, mises à jour bloquées, fichiers système, heure

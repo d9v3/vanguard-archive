@@ -546,6 +546,27 @@ fn alertes(role: Option<&str>, ports: &[PortOuvert]) -> Vec<(Niveau, String)> {
     alertes
 }
 
+/// Signe d'usurpation ARP : un autre appareil répond avec l'adresse MAC de la box. Celui qui se fait passer pour
+/// la box voit passer tout le trafic du réseau (attaque « de l'homme du milieu »). Rend (IP de la box, MAC, IP qui
+/// la partage). Un répéteur Wi-Fi qui relaie pour la box peut donner le même signe : c'est un « possible ».
+pub fn usurpation_arp(r: &Rapport) -> Option<(Ipv4Addr, String, Ipv4Addr)> {
+    let boite = r.hotes.iter().find(|h| h.role == Some("passerelle"))?;
+    let mac = boite.mac.as_deref()?;
+    let autre = r
+        .hotes
+        .iter()
+        .find(|h| h.ip != boite.ip && h.mac.as_deref().is_some_and(|m| m.eq_ignore_ascii_case(mac)))?;
+    Some((boite.ip, mac.to_string(), autre.ip))
+}
+
+/// Phrase d'alerte pour une usurpation ARP possible.
+pub fn message_usurpation(boite: Ipv4Addr, mac: &str, autre: Ipv4Addr) -> String {
+    trf!(
+        "{autre} répond avec l'adresse MAC de la box ({boite}, {mac}) : quelqu'un se fait peut-être passer pour elle pour intercepter ton trafic (usurpation ARP). Sauf répéteur Wi-Fi connu, débranche cet appareil et redémarre la box.",
+        "{autre} answers with the router's MAC address ({boite}, {mac}): someone may be impersonating it to intercept your traffic (ARP spoofing). Unless it is a known Wi-Fi repeater, unplug that device and restart the router."
+    )
+}
+
 /// Niveau le plus grave des ports d'un appareil (`None` : aucun port ouvert).
 fn pire_niveau(h: &Hote) -> Option<Niveau> {
     h.ports.iter().map(|p| p.niveau).max()
@@ -619,6 +640,20 @@ fn afficher(r: &Rapport) {
         }
     }
     println!("  {}", resume.join(&format!(" {GRIS}·{RESET} ")));
+    if let Some((boite, mac, autre)) = usurpation_arp(r) {
+        println!();
+        for (i, l) in envelopper(&message_usurpation(boite, &mac, autre), LARGEUR - 6)
+            .iter()
+            .enumerate()
+        {
+            let marque = if i == 0 {
+                format!("{}✖{RESET}", couleur(Niveau::Critique))
+            } else {
+                " ".to_string()
+            };
+            println!("  {marque} {l}");
+        }
+    }
 
     section(&trf!("APPAREILS ({})", "DEVICES ({})", r.hotes.len()));
     for h in &r.hotes {
@@ -960,6 +995,52 @@ pub async fn executer(o: Options) -> Result<Rapport, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn hote(ip: &str, mac: &str, role: Option<&'static str>) -> Hote {
+        Hote {
+            ip: ip.parse().unwrap(),
+            nom: None,
+            mac: Some(mac.into()),
+            fabricant: None,
+            surnom: None,
+            premier_vu: None,
+            role,
+            nouvelle: false,
+            ports: Vec::new(),
+            alertes: Vec::new(),
+            score: 100,
+        }
+    }
+
+    fn rapport(hotes: Vec<Hote>) -> Rapport {
+        Rapport {
+            reseau: "10.0.0.0/24".into(),
+            nom_reseau: Some("Maison".into()),
+            absents: Vec::new(),
+            duree_s: 1.0,
+            score_global: 100,
+            note: "A",
+            hotes,
+        }
+    }
+
+    #[test]
+    fn usurpation_de_la_box() {
+        let sain = rapport(vec![
+            hote("10.0.0.1", "f8:79:0a:0d:03:a2", Some("passerelle")),
+            hote("10.0.0.50", "aa:bb:cc:dd:ee:ff", None),
+        ]);
+        assert!(usurpation_arp(&sain).is_none());
+        let usurpe = rapport(vec![
+            hote("10.0.0.1", "aa:bb:cc:dd:ee:ff", Some("passerelle")),
+            hote("10.0.0.50", "AA:BB:CC:DD:EE:FF", None),
+        ]);
+        let (boite, _, autre) = usurpation_arp(&usurpe).unwrap();
+        assert_eq!(
+            (boite.to_string(), autre.to_string()),
+            ("10.0.0.1".into(), "10.0.0.50".into())
+        );
+    }
 
     #[test]
     fn listes_de_ports() {
