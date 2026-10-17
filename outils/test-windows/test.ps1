@@ -1,6 +1,8 @@
 ﻿# Test complet de sentinel sur un vrai Windows.
-# 1) relève l'état réel du système (référence), 2) lance sentinel, 3) étapes guidées.
-# Tous les résultats vont dans un dossier « resultats-AAAAMMJJ-HHMMSS » à côté de ce script (un par passe).
+# 1) relève l'état réel du système (référence), 2) lance sentinel, 3) vérifie ses réponses.
+# Pendant le test : une ligne par commande et par vérification, sans les sorties brutes. À la fin : un rapport HTML
+# (rapport-test.html, ouvert dans le navigateur), avec la sortie de chaque commande à déplier.
+# Tous les fichiers vont dans un dossier « resultats-AAAAMMJJ-HHMMSS » à côté de ce script (un par passe).
 
 # -Auto : aucune question (TEST-SENTINEL-AUTO.bat) ; les étapes qui demandent de taper ou une fenêtre UAC sont sautées.
 param([switch]$Auto)
@@ -19,13 +21,50 @@ New-Item -ItemType Directory -Force $local | Out-Null
 Copy-Item (Join-Path $partage 'sentinel.exe') $local -Force
 $exe = Join-Path $local 'sentinel.exe'
 Unblock-File $exe -ErrorAction SilentlyContinue
+$version = (& $exe --version 2>$null | Out-String).Trim()
+$debutTest = Get-Date
 
-function Note($texte) { Add-Content -Path (Join-Path $res 'journal.txt') -Value $texte -Encoding UTF8; Write-Host $texte }
+# ── Suivi des résultats : chaque étape garde ses commandes et ses vérifications, pour l'écran et le rapport ──
+$script:etapes = New-Object System.Collections.ArrayList
+$script:etape = $null
+
+function Journal($texte) { Add-Content -Path (Join-Path $res 'journal.txt') -Value $texte -Encoding UTF8 }
 
 function Etape($nom) {
+    $script:etape = [pscustomobject]@{ Titre = $nom; Commandes = New-Object System.Collections.ArrayList; Verifs = New-Object System.Collections.ArrayList }
+    [void]$script:etapes.Add($script:etape)
+    Journal "=== $nom === $(Get-Date -Format 'HH:mm:ss')"
     Write-Host ''
-    Write-Host "=== $nom ===" -ForegroundColor Cyan
-    Note "=== $nom === $(Get-Date -Format 'HH:mm:ss')"
+    Write-Host ("  ▸ " + $nom) -ForegroundColor Cyan
+}
+
+# Une vérification : OK (vert), Bug (rouge), Info (gris). Aussi dans le journal et le rapport.
+function Verif($etat, $texte) {
+    [void]$script:etape.Verifs.Add([pscustomobject]@{ Etat = $etat; Texte = $texte })
+    Journal "$($etat.ToUpper()) : $texte"
+    switch ($etat) {
+        'ok' { Write-Host '      ✔ ' -ForegroundColor Green -NoNewline; Write-Host $texte }
+        'bug' { Write-Host '      ✖ ' -ForegroundColor Red -NoNewline; Write-Host $texte -ForegroundColor Red }
+        default { Write-Host "      · $texte" -ForegroundColor DarkGray }
+    }
+}
+function Ok($texte) { Verif 'ok' $texte }
+function Bug($texte) { Verif 'bug' $texte }
+function Info($texte) { Verif 'info' $texte }
+
+# Texte court d'une commande pour l'écran : les longs chemins sont réduits à leur nom de fichier.
+function Court([string[]]$arguments) {
+    ($arguments | ForEach-Object { if ($_ -match '[\\/]') { Split-Path $_ -Leaf } else { $_ } }) -join ' '
+}
+
+function Noter-Commande($fichier, [string[]]$arguments, $code, $duree, $entree) {
+    [void]$script:etape.Commandes.Add([pscustomobject]@{ Fichier = $fichier; Arguments = ($arguments -join ' '); Code = $code; Duree = $duree; Entree = $entree })
+    Journal ("sentinel {0} -> code {1}, {2:N1} s" -f ($arguments -join ' '), $code, $duree)
+    $texte = if ($arguments) { 'sentinel ' + (Court $arguments) } else { 'sentinel (menu)' }
+    if ($texte.Length -gt 58) { $texte = $texte.Substring(0, 57) + '…' }
+    Write-Host ('      ' + $texte.PadRight(60)) -NoNewline
+    if ($code -eq 0) { Write-Host '✔' -ForegroundColor Green -NoNewline } else { Write-Host "✖ code $code" -ForegroundColor Red -NoNewline }
+    Write-Host (' {0,6:N1} s' -f $duree) -ForegroundColor DarkGray
 }
 
 # Lance sentinel sans interaction ; garde sortie, erreurs, code de retour et durée.
@@ -33,9 +72,7 @@ function Lancer($fichier, [string[]]$arguments) {
     $debut = Get-Date
     $p = Start-Process -FilePath $exe -ArgumentList $arguments -NoNewWindow -Wait -PassThru `
         -RedirectStandardOutput (Join-Path $res "$fichier.out.txt") -RedirectStandardError (Join-Path $res "$fichier.err.txt")
-    $duree = ((Get-Date) - $debut).TotalSeconds
-    Note ("sentinel {0} -> code {1}, {2:N1} s" -f ($arguments -join ' '), $p.ExitCode, $duree)
-    Get-Content (Join-Path $res "$fichier.out.txt") -Encoding UTF8 | Select-Object -First 60 | ForEach-Object { Write-Host $_ }
+    Noter-Commande $fichier $arguments $p.ExitCode ((Get-Date) - $debut).TotalSeconds $null
 }
 
 # Comme Lancer, avec des réponses tapées d'avance (une par ligne) : menus et questions sans personne au clavier.
@@ -48,18 +85,27 @@ function LancerAvec($fichier, [string[]]$arguments, [string]$entree) {
         RedirectStandardOutput = (Join-Path $res "$fichier.out.txt"); RedirectStandardError = (Join-Path $res "$fichier.err.txt") }
     if ($arguments) { $options.ArgumentList = $arguments }
     $p = Start-Process @options
-    $duree = ((Get-Date) - $debut).TotalSeconds
-    Note ("sentinel {0} (réponses fournies) -> code {1}, {2:N1} s" -f ($arguments -join ' '), $p.ExitCode, $duree)
+    Noter-Commande $fichier $arguments $p.ExitCode ((Get-Date) - $debut).TotalSeconds ($entree.Replace("`n", ' ⏎ ').Trim())
 }
+
+function Sortie($fichier) { Get-Content (Join-Path $res "$fichier.out.txt") -Raw -Encoding UTF8 }
 
 function Question($texte, $reponseAuto = 'n') {
     if ($Auto) {
-        Note "AUTO : $texte -> $reponseAuto"
+        Journal "AUTO : $texte -> $reponseAuto"
         return $reponseAuto -eq 'o'
     }
-    $r = Read-Host "$texte [o/n]"
-    Note "QUESTION : $texte -> $r"
-    return $r -match '^(o|oui|y)'
+    Write-Host "      ? $texte [o/n] " -ForegroundColor Yellow -NoNewline
+    $r = Read-Host
+    Journal "QUESTION : $texte -> $r"
+    $oui = $r -match '^(o|oui|y)'
+    return $oui
+}
+
+# Question dont la réponse est elle-même une vérification (« as-tu vu… ? »).
+function Constat($texte) {
+    if ($Auto) { Info "$texte (non vérifié : test sans personne)"; return }
+    if (Question $texte) { Ok $texte } else { Bug $texte }
 }
 
 # Référence : chaque valeur lue directement, pour comparer avec les conclusions de sentinel.
@@ -68,10 +114,89 @@ function Ref($nom, [scriptblock]$bloc) {
     Add-Content -Path (Join-Path $res 'reference.txt') -Value "### $nom`r`n$v`r`n" -Encoding UTF8
 }
 
-Write-Host 'Test complet de sentinel — environ 5 à 15 minutes.' -ForegroundColor Green
-Write-Host 'Quelques questions te seront posées ; réponds o (oui) ou n (non).'
+# ── Rapport HTML : bilan, étapes, vérifications, et la sortie de chaque commande à déplier ──
+function Rapport {
+    $h = { param($t) [System.Net.WebUtility]::HtmlEncode([string]$t) }
+    $ansi = [regex]'\x1b\[[0-9;]*[A-Za-z]'
+    $toutes = @($script:etapes | ForEach-Object { $_.Verifs })
+    $nbOk = @($toutes | Where-Object Etat -eq 'ok').Count
+    $nbBug = @($toutes | Where-Object Etat -eq 'bug').Count
+    $nbCmd = @($script:etapes | ForEach-Object { $_.Commandes }).Count
+    $nbEchec = @($script:etapes | ForEach-Object { $_.Commandes } | Where-Object Code -ne 0).Count
+    $duree = [math]::Round(((Get-Date) - $debutTest).TotalMinutes, 1)
+    $windows = (Get-CimInstance Win32_OperatingSystem).Caption
+    $reussi = $nbBug -eq 0 -and $nbEchec -eq 0
+    $verdict = if ($reussi) { "✓ Tout est passé : $nbOk vérifications réussies" } else { "✗ $nbBug problème(s) · $nbEchec commande(s) en échec" }
+    $sb = New-Object System.Text.StringBuilder
+    [void]$sb.Append(@"
+<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Test de Sentinel</title><style>
+:root{--fond:#0b0808;--carte:#160f10;--trait:#2e2224;--texte:#eee3db;--gris:#a8968c;--rouge:#ff5a4f;--vert:#5fd38d;--jaune:#f2c14e}
+*{box-sizing:border-box}body{margin:0;background:var(--fond);color:var(--texte);font:15px/1.5 system-ui,'Segoe UI',sans-serif}
+main{max-width:980px;margin:0 auto;padding:28px 16px 60px}h1{margin:0 0 4px;font-size:26px}h1 b{color:var(--rouge)}
+.sous{color:var(--gris);margin-bottom:22px}.bilan{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:26px}
+.case{background:var(--carte);border:1px solid var(--trait);border-radius:10px;padding:12px 16px;min-width:150px}
+.case b{display:block;font-size:24px}.case span{color:var(--gris);font-size:13px}
+.etape{background:var(--carte);border:1px solid var(--trait);border-radius:10px;margin:0 0 12px;padding:14px 16px}
+.etape h2{margin:0 0 8px;font-size:16px;display:flex;gap:8px;align-items:center}.pastille{width:10px;height:10px;border-radius:50%;background:var(--vert);flex:none}
+.etape.rouge .pastille{background:var(--rouge)}.etape.grise .pastille{background:var(--gris)}
+ul{margin:4px 0 8px;padding-left:4px;list-style:none}li{margin:2px 0}.ok{color:var(--vert)}.bug{color:var(--rouge)}.info{color:var(--gris)}
+details{border-top:1px solid var(--trait);padding:6px 0}summary{cursor:pointer;display:flex;justify-content:space-between;gap:10px}
+summary code{color:var(--texte);font-variant-ligatures:none}summary .d{color:var(--gris);white-space:nowrap}pre{background:#000;border-radius:8px;padding:10px;overflow:auto;max-height:420px;font:12.5px/1.45 Consolas,monospace;color:#ddd}
+.entree{color:var(--jaune);font-size:12.5px}
+.verdict{border-radius:12px;padding:16px 20px;font-size:20px;font-weight:600;margin-bottom:14px}
+.verdict.vert{background:#0f2a1a;border:1px solid #1f6b3e;color:var(--vert)}.verdict.rouge{background:#2c0d0d;border:1px solid #7e1c1c;color:var(--rouge)}
+</style></head><body><main>
+<h1>Test de <b>Sentinel</b></h1>
+<div class="sous">$(& $h $version) · $(& $h $windows) · $(Get-Date -Format 'yyyy-MM-dd HH:mm') · $duree min$(if ($Auto) { ' · sans questions' })</div>
+<div class="verdict $(if ($reussi) { 'vert' } else { 'rouge' })">$(& $h $verdict)</div>
+<div class="bilan"><div class="case"><b class="ok">$nbOk</b><span>vérifications réussies</span></div>
+<div class="case"><b class="$(if ($nbBug) { 'bug' } else { 'info' })">$nbBug</b><span>problèmes</span></div>
+<div class="case"><b>$nbCmd</b><span>commandes ($nbEchec en échec)</span></div></div>
+"@)
+    foreach ($e in $script:etapes) {
+        $rouge = @($e.Verifs | Where-Object Etat -eq 'bug').Count + @($e.Commandes | Where-Object Code -ne 0).Count
+        $classe = if ($rouge) { 'rouge' } elseif (-not $e.Verifs.Count -and -not $e.Commandes.Count) { 'grise' } else { '' }
+        [void]$sb.Append("<section class=""etape $classe""><h2><span class=""pastille""></span>$(& $h $e.Titre)</h2>")
+        if ($e.Verifs.Count) {
+            [void]$sb.Append('<ul>')
+            foreach ($v in $e.Verifs) {
+                $signe = switch ($v.Etat) { 'ok' { '✓' } 'bug' { '✗' } default { '·' } }
+                [void]$sb.Append("<li class=""$($v.Etat)"">$signe $(& $h $v.Texte)</li>")
+            }
+            [void]$sb.Append('</ul>')
+        }
+        foreach ($c in $e.Commandes) {
+            $sortie = ''
+            foreach ($f in "$($c.Fichier).out.txt", "$($c.Fichier).err.txt") {
+                $chemin = Join-Path $res $f
+                # Un fichier vide se lit comme « rien » ($null) : on ne garde que ce qui a du texte.
+                $texte = if (Test-Path $chemin) { Get-Content $chemin -Raw -Encoding UTF8 } else { $null }
+                if ($texte) { $sortie += $ansi.Replace($texte, '') }
+            }
+            $etat = if ($c.Code -eq 0) { '<span class="ok">✓</span>' } else { "<span class=""bug"">✗ code $($c.Code)</span>" }
+            $entree = if ($c.Entree) { "<div class=""entree"">réponses tapées : $(& $h $c.Entree)</div>" } else { '' }
+            $complete = if ($c.Arguments) { "sentinel $($c.Arguments)" } else { 'sentinel (menu)' }
+            $commande = if ($c.Arguments) { 'sentinel ' + (Court ($c.Arguments -split ' ')) } else { 'sentinel (menu)' }
+            [void]$sb.Append("<details><summary><code title=""$(& $h $complete)"">$(& $h $commande)</code><span class=""d"">$etat $('{0:N1}' -f $c.Duree) s</span></summary>$entree<pre>$(& $h $sortie)</pre></details>")
+        }
+        [void]$sb.Append('</section>')
+    }
+    [void]$sb.Append('</main></body></html>')
+    $chemin = Join-Path $res 'rapport-test.html'
+    [IO.File]::WriteAllText($chemin, $sb.ToString(), (New-Object System.Text.UTF8Encoding($false)))
+    return $chemin
+}
 
-Etape '1. Référence : état réel de Windows'
+Clear-Host
+Write-Host ''
+Write-Host '  ╭──────────────────────────────────────────────────────────╮' -ForegroundColor Red
+Write-Host ('  │  ' + "TEST DE SENTINEL · $version".PadRight(56) + '│') -ForegroundColor Red
+Write-Host '  ╰──────────────────────────────────────────────────────────╯' -ForegroundColor Red
+if ($Auto) { Write-Host '  Sans aucune question : 5 à 15 minutes. Le rapport s''ouvrira à la fin.' -ForegroundColor DarkGray }
+else { Write-Host '  Quelques questions te seront posées : réponds o (oui) ou n (non).' -ForegroundColor DarkGray }
+
+Etape 'Référence : état réel de Windows'
 Ref 'Windows' { Get-CimInstance Win32_OperatingSystem | Select-Object Caption, Version, BuildNumber, OSArchitecture | Format-List }
 Ref 'PowerShell' { $PSVersionTable.PSVersion.ToString() }
 Ref 'Administrateur ?' { ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator) }
@@ -112,37 +237,36 @@ Ref 'Zones thermiques (0.24)' { Get-CimInstance Win32_PerfFormattedData_Counters
 Ref 'LLMNR (0.23)' { (Get-ItemProperty 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\DNSClient' -ErrorAction SilentlyContinue).EnableMulticast }
 Ref 'UPnP de la box (0.33)' { $c = (New-Object -ComObject HNetCfg.NATUPnP).StaticPortMappingCollection; if ($null -eq $c) { 'aucune box UPnP' } else { $c | Select-Object Protocol, ExternalPort, InternalClient, InternalPort, Description | Format-Table -AutoSize } }
 Ref 'Windows Sandbox (0.35)' { Test-Path "$env:SystemRoot\System32\WindowsSandbox.exe" }
-Note 'Référence enregistrée.'
+Info 'Référence enregistrée (reference.txt) : état lu directement dans Windows, pour comparer.'
 
-Etape '2. Version et aide'
+Etape 'Version et aide'
 Lancer 'version' @('--version')
 Lancer 'aide' @('--help')
 
-Etape '3. Audit de la machine (texte et JSON)'
+Etape 'Audit de la machine (texte et JSON)'
 Lancer 'machine' @('machine')
 Lancer 'machine-json' @('machine', '--json')
 # Vérifications qui n'ont pas pu se faire : un script PowerShell de sentinel a échoué (à corriger côté sentinel).
 try {
-    $audit = Get-Content (Join-Path $res 'machine-json.out.txt') -Raw -Encoding UTF8 | ConvertFrom-Json
+    $audit = Sortie 'machine-json' | ConvertFrom-Json
     $impossibles = @($audit.constats | Where-Object { -not $_.verifie })
-    Note "Vérifications impossibles : $($impossibles.Count)"
-    $impossibles | ForEach-Object { Note "  IMPOSSIBLE : $($_.categorie) — $($_.message)" }
-    foreach ($cat in 'DNS', 'Certificats', 'Extensions', 'Navigateur', 'Santé', 'Persistance', 'Comptes', 'Journaux', 'Intégrité') {
-        $n = @($audit.constats | Where-Object categorie -eq $cat).Count
-        Note "  $cat : $n constat(s)"
-    }
-} catch { Note "machine --json illisible : $($_.Exception.Message)" }
+    if ($impossibles.Count) { $impossibles | ForEach-Object { Bug "Vérification impossible : $($_.categorie) — $($_.message)" } }
+    else { Ok "Toutes les vérifications ont pu se faire ($(@($audit.constats).Count) constats, note $($audit.score)/100)" }
+} catch { Bug "machine --json illisible : $($_.Exception.Message)" }
 
-Etape '4. Scan du réseau de la VM'
+Etape 'Scan du réseau de la VM'
 Lancer 'reseau' @('reseau')
 Lancer 'reseau-json' @('reseau', '--json')
+try {
+    $scan = Sortie 'reseau-json' | ConvertFrom-Json
+    Ok "$(@($scan.hotes).Count) appareil(s) trouvé(s) sur $($scan.reseau)"
+} catch { Bug "reseau --json illisible : $($_.Exception.Message)" }
 
-Etape '5. Tous les ports de cette machine (127.0.0.1)'
+Etape 'Tous les ports de cette machine (127.0.0.1)'
 Lancer 'local-tous' @('reseau', '127.0.0.1', '-p', 'tous')
 
-Etape '5b. Persistance suspecte : fausse tâche planifiée et fausse entrée de démarrage (0.13)'
-Write-Host 'Sentinel doit repérer une tâche « PowerShell caché en base64 » et un programme lancé depuis C:\Users\Public.' -ForegroundColor Yellow
-Write-Host 'Les deux sont inoffensives (la tâche affiche « test » et ne se déclenche pas avant 5 ans) et retirées juste après.' -ForegroundColor Yellow
+Etape 'Persistance suspecte : fausse tâche planifiée et fausse entrée de démarrage'
+Info 'Une tâche « PowerShell caché en base64 » et un programme dans C:\Users\Public, inoffensifs, retirés juste après.'
 if (Question 'Faire ce test ?' 'o') {
     try {
         Register-ScheduledTask -TaskName 'sentinel-test-suspect' -Force `
@@ -150,87 +274,83 @@ if (Question 'Faire ce test ?' 'o') {
             -Trigger (New-ScheduledTaskTrigger -Once -At (Get-Date).AddYears(5)) | Out-Null
         Set-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name 'sentinel-test-suspect' -Value 'C:\Users\Public\sentinel-test.exe /q'
         Lancer 'machine-persistance' @('machine')
-        $sortie = Get-Content (Join-Path $res 'machine-persistance.out.txt') -Raw -Encoding UTF8
-        if ($sortie -match 'sentinel-test-suspect.*base64|base64.*sentinel-test-suspect') { Note 'Tâche suspecte repérée : OK' } else { Note 'Tâche suspecte NON repérée (bug)' }
-        if ($sortie -match 'Public') { Note 'Entrée Run suspecte repérée : OK' } else { Note 'Entrée Run suspecte NON repérée (bug)' }
-    } catch { Note "Test de persistance impossible : $($_.Exception.Message)" }
+        $sortie = Sortie 'machine-persistance'
+        if ($sortie -match 'sentinel-test-suspect.*base64|base64.*sentinel-test-suspect') { Ok 'Tâche suspecte repérée' } else { Bug 'Tâche suspecte NON repérée' }
+        if ($sortie -match 'Public') { Ok 'Entrée de démarrage suspecte repérée' } else { Bug 'Entrée de démarrage suspecte NON repérée' }
+    } catch { Bug "Test de persistance impossible : $($_.Exception.Message)" }
     finally {
         Unregister-ScheduledTask -TaskName 'sentinel-test-suspect' -Confirm:$false -ErrorAction SilentlyContinue
         Remove-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name 'sentinel-test-suspect' -ErrorAction SilentlyContinue
-        Note 'Fausse tâche et fausse entrée retirées.'
+        Info 'Fausse tâche et fausse entrée retirées.'
     }
 }
 
-Etape '5b2. Intégrité des fichiers critiques (0.32)'
+Etape 'Intégrité des fichiers critiques'
 Lancer 'integrite-reference' @('integrite')
 Lancer 'integrite-verification' @('integrite')
-$v = Get-Content (Join-Path $res 'integrite-verification.out.txt') -Raw -Encoding UTF8
-if ($v -match 'identiques|identical') { Note 'Intégrité : 2e passage identique à la référence : OK' } else { Note 'Intégrité : 2e passage différent (à regarder)' }
+if ((Sortie 'integrite-verification') -match 'identiques|identical') { Ok '2e passage identique à la référence' } else { Bug '2e passage différent de la référence' }
 
-Etape '5b3. Diagnostic de l''ordinateur (0.37)'
+Etape 'Diagnostic de l''ordinateur'
 Lancer 'diagnostic' @('diagnostic')
-$d = Get-Content (Join-Path $res 'diagnostic.out.txt') -Raw -Encoding UTF8
-if ($d -match 'Blue screens|Écrans bleus') { Note 'Diagnostic : section des problèmes récents présente : OK' } else { Note 'Diagnostic : section des problèmes récents ABSENTE (bug)' }
-if ($d -match 'PowerShell is not responding|PowerShell ne répond pas') { Note 'Diagnostic : lecture PowerShell en échec (bug)' }
+$d = Sortie 'diagnostic'
+if ($d -match 'Blue screens|Écrans bleus') { Ok 'Section des problèmes récents présente' } else { Bug 'Section des problèmes récents ABSENTE' }
+if ($d -match 'PowerShell is not responding|PowerShell ne répond pas') { Bug 'Lecture PowerShell en échec' }
 
-Etape '5b4. Logiciels essentiels : liste seulement, rien installé (0.38)'
-cmd /c "echo.| `"$exe`" logiciels > `"$res\logiciels.out.txt`" 2>&1"
-$l = Get-Content (Join-Path $res 'logiciels.out.txt') -Raw -Encoding UTF8
-$n = ([regex]::Matches($l, '(?m)^\s+\d+\. ')).Count
-Note "Logiciels : $n ligne(s) dans la liste"
+Etape 'Logiciels essentiels : liste seulement, rien installé'
+LancerAvec 'logiciels' @('logiciels') "`n"
+$n = ([regex]::Matches((Sortie 'logiciels'), '(?m)^\s+\d+\. ')).Count
+if ($n -gt 0) { Ok "$n logiciel(s) proposé(s)" } else { Bug 'Liste des logiciels vide' }
 
-Etape '5c. Test de connexion (0.18)'
+Etape 'Test de connexion'
 Lancer 'connexion' @('connexion')
+if ((Sortie 'connexion') -match 'Mbit/s') { Ok 'Débit mesuré' } else { Bug 'Débit non mesuré' }
 
-Etape '5d. Mots de passe fuités (0.17)'
-if ($Auto) { Note 'AUTO : étape sautée (il faut taper un mot de passe).' } else {
-Write-Host 'Tape « password » (il doit être trouvé des millions de fois), puis Entrée seule pour terminer.' -ForegroundColor Yellow
-& $exe motdepasse
-Note "motdepasse -> code $LASTEXITCODE"
-[void](Question 'La saisie était-elle masquée et « password » trouvé dans des fuites ?')
+Etape 'Mots de passe fuités'
+if ($Auto) { Info 'Sautée : il faut taper un mot de passe (test avec questions).' } else {
+    Write-Host '      Tape « password » (il doit être trouvé des millions de fois), puis Entrée seule pour terminer.' -ForegroundColor Yellow
+    & $exe motdepasse
+    Constat 'La saisie était-elle masquée et « password » trouvé dans des fuites ?'
 }
 
-Etape '5e. Réparer (liste), mises à jour (vérification seule), gaming, courriel refusé (0.44)'
+Etape 'Réparer (liste), mises à jour (vérification seule), gaming, courriel refusé'
 LancerAvec 'reparer' @('reparer') "`n"
-$r = Get-Content (Join-Path $res 'reparer.out.txt') -Raw -Encoding UTF8
-$n = ([regex]::Matches($r, '(?m)^\s+\d+\. ')).Count
-Note "Réparer : $n réparation(s) dans la liste"
+$n = ([regex]::Matches((Sortie 'reparer'), '(?m)^\s+\d+\. ')).Count
+if ($n -gt 0) { Ok "$n réparation(s) proposée(s)" } else { Bug 'Liste des réparations vide' }
 LancerAvec 'maj' @('maj') "n`nn`nn`nn`nn`n"
 LancerAvec 'gaming' @('gaming') "`n"
 LancerAvec 'courriel' @('courriel') "test@example.com`nn`n"
-$c = Get-Content (Join-Path $res 'courriel.out.txt') -Raw -Encoding UTF8
-if ($c -match 'XposedOrNot|accord|consent') { Note 'Courriel : accord demandé avant l''envoi : OK' } else { Note 'Courriel : accord NON demandé (à regarder)' }
+if ((Sortie 'courriel') -match 'XposedOrNot|accord|consent') { Ok 'Accord demandé avant d''envoyer l''adresse' } else { Bug 'Accord NON demandé avant l''envoi' }
 
-Etape '5f. Données : sauvegarde puis restauration (0.9.13)'
+Etape 'Données : sauvegarde puis restauration'
 $sauvegarde = Join-Path $res 'sauvegarde.json'
 Lancer 'sauvegarder' @('sauvegarder', $sauvegarde)
 Lancer 'restaurer' @('restaurer', $sauvegarde)
-if ((Test-Path $sauvegarde) -and (Get-Item $sauvegarde).Length -gt 0) { Note 'Sauvegarde écrite : OK' } else { Note 'Sauvegarde ABSENTE (bug)' }
+if ((Test-Path $sauvegarde) -and (Get-Item $sauvegarde).Length -gt 0) { Ok 'Sauvegarde écrite puis relue' } else { Bug 'Sauvegarde ABSENTE' }
 
-Etape '5g. Nommer la box trouvée par le scan, puis retirer le surnom'
+Etape 'Nommer la box trouvée par le scan, puis retirer le surnom'
 try {
-    $scan = Get-Content (Join-Path $res 'reseau-json.out.txt') -Raw -Encoding UTF8 | ConvertFrom-Json
-    $box = ($scan.hotes | Where-Object { $_.role -eq 'passerelle' } | Select-Object -First 1).ip
+    $box = ((Sortie 'reseau-json' | ConvertFrom-Json).hotes | Where-Object { $_.role -eq 'passerelle' } | Select-Object -First 1).ip
     if ($box) {
         Lancer 'nommer' @('nommer', $box, 'box', 'de', 'test')
-        $nm = Get-Content (Join-Path $res 'nommer.out.txt') -Raw -Encoding UTF8
-        if ($nm -match 'box de test') { Note 'Nommer : surnom donné à la box : OK' } else { Note 'Nommer : surnom NON donné (bug)' }
+        if ((Sortie 'nommer') -match 'box de test') { Ok "Surnom donné à la box ($box)" } else { Bug "Surnom NON donné à la box ($box)" }
         Lancer 'nommer-retrait' @('nommer', $box)
-    } else { Note 'Pas de box dans le scan : étape sautée.' }
-} catch { Note "Nommer : scan illisible ($($_.Exception.Message))" }
+    } else { Info 'Pas de box dans le scan : étape sautée.' }
+} catch { Bug "Scan illisible ($($_.Exception.Message))" }
 
-Etape '5h. Antivirus d''un dossier propre (Defender, analyse ciblée)'
+Etape 'Antivirus d''un dossier propre (Defender, analyse ciblée)'
 $propre = Join-Path $env:TEMP 'sentinel-dossier-propre'
 New-Item -ItemType Directory -Force $propre | Out-Null
 Set-Content -Path (Join-Path $propre 'note.txt') -Value 'fichier sans danger' -Encoding UTF8
 LancerAvec 'antivirus-dossier' @('antivirus', $propre) "n`nn`n"
+if ((Sortie 'antivirus-dossier') -match 'No malware found|Aucun malware|aucune menace|found no threats') { Ok 'Dossier analysé, rien trouvé' } else { Bug 'Résultat de l''analyse introuvable' }
 Remove-Item $propre -Recurse -Force -ErrorAction SilentlyContinue
 
-Etape '6. Menu (ouverture de chaque groupe puis q)'
+Etape 'Menu : chaque groupe ouvert puis refermé'
 LancerAvec 'menu' @() "4`n`n5`n`n6`n`n7`n`nq`n"
-$m = Get-Content (Join-Path $res 'menu.out.txt') -Raw -Encoding UTF8
+$m = Sortie 'menu'
 foreach ($g in 'Cette machine|This machine', 'Réseau et Internet|Network and Internet', 'Antivirus et protection|Antivirus and protection', 'Installer et jouer|Install and play') {
-    if ($m -match $g) { Note "Menu : groupe « $g » affiché : OK" } else { Note "Menu : groupe « $g » ABSENT (bug)" }
+    $nom = $g.Split('|')[0]
+    if ($m -match $g) { Ok "Groupe « $nom » affiché" } else { Bug "Groupe « $nom » ABSENT" }
 }
 # Entrée fermée (comme Ctrl-D) : sentinel doit quitter, pas tourner en boucle (bug corrigé en 0.9.7).
 $vide = Join-Path $res 'vide.txt'
@@ -238,18 +358,19 @@ Set-Content -Path $vide -Value '' -NoNewline
 $p = Start-Process -FilePath $exe -RedirectStandardInput $vide -RedirectStandardOutput (Join-Path $res 'menu-eof.out.txt') -NoNewWindow -PassThru
 # Sans garder le handle tout de suite, PowerShell ne sait plus lire le code de sortie (il restait vide).
 $null = $p.Handle
-if ($p.WaitForExit(10000)) { Note "menu avec entrée fermée -> quitte (code $($p.ExitCode))" }
-else { $p.Kill(); Note 'menu avec entrée fermée -> BOUCLE SANS FIN (bug)' }
+if ($p.WaitForExit(10000)) { Ok 'Quitte quand l''entrée est fermée' }
+else { $p.Kill(); Bug 'Boucle sans fin quand l''entrée est fermée' }
 
-Etape '7. Surveillance : activation puis désactivation (Planificateur de tâches)'
+Etape 'Surveillance : activation puis désactivation (Planificateur de tâches)'
 Lancer 'surveillance-on' @('surveillance', 'on')
 # Nom de la tâche depuis la 0.11.0 (les anciennes tâches « netscan… » sont retirées à l'activation).
 $tache = 'sentinel - surveillance du reseau'
+if (Get-ScheduledTask -TaskName $tache -ErrorAction SilentlyContinue) { Ok 'Tâche planifiée créée' } else { Bug 'Tâche planifiée NON créée' }
 Ref 'Tâche planifiée après activation' { Get-ScheduledTask -TaskName $tache | Select-Object TaskName, State, Description | Format-List; (Get-ScheduledTask -TaskName $tache).Actions | Format-List Execute, Arguments }
 Lancer 'surveillance-off' @('surveillance', 'off')
-Ref 'Tâche planifiée après désactivation' { if (Get-ScheduledTask -TaskName $tache -ErrorAction SilentlyContinue) { 'ENCORE PRÉSENTE (bug)' } else { 'absente (normal)' } }
+if (Get-ScheduledTask -TaskName $tache -ErrorAction SilentlyContinue) { Bug 'Tâche planifiée ENCORE PRÉSENTE' } else { Ok 'Tâche planifiée retirée' }
 
-Etape '8. Notification « nouvel appareil »'
+Etape 'Notification « nouvel appareil »'
 $base = Join-Path $env:LOCALAPPDATA 'sentinel\appareils.json'
 if (Test-Path $base) {
     # On retire un appareil de la base de test : au scan suivant, il doit être signalé comme nouveau.
@@ -260,72 +381,79 @@ if (Test-Path $base) {
         if ($premier) { $retire = $premier.Name; $r.Value.appareils.PSObject.Properties.Remove($premier.Name); break }
     }
     $json | ConvertTo-Json -Depth 10 | Set-Content $base -Encoding UTF8
-    Note "Appareil retiré de la base de test : $retire"
-    Write-Host 'Regarde le coin de l''écran : une notification « Nouvel appareil » doit apparaître…' -ForegroundColor Yellow
+    Info "Appareil retiré de la base de test : $retire"
+    if (-not $Auto) { Write-Host '      Regarde le coin de l''écran : une notification « Nouvel appareil » doit apparaître…' -ForegroundColor Yellow }
     Lancer 'surveiller' @('surveiller')
     Start-Sleep -Seconds 3
-    [void](Question 'As-tu vu la notification « Nouvel appareil sur ton réseau » ?')
+    Constat 'As-tu vu la notification « Nouvel appareil sur ton réseau » ?'
 } else {
-    Note 'Pas de base créée par le scan : test de notification sauté.'
+    Info 'Pas de base créée par le scan : test de notification sauté.'
 }
 
-Etape '9. Rapport HTML'
+Etape 'Rapport HTML de sentinel'
 Lancer 'complet-html' @('complet', '--html')
 Start-Sleep -Seconds 3
-[void](Question 'Le rapport s''est-il ouvert dans le navigateur, lisible, avec les accents corrects ?')
+Constat 'Le rapport s''est-il ouvert dans le navigateur, lisible, avec les accents corrects ?'
 
-Etape '10. Antivirus (analyse rapide Microsoft Defender)'
+Etape 'Antivirus (analyse rapide Microsoft Defender)'
 if (Question 'Lancer l''analyse rapide Defender (quelques minutes) ?') {
     Lancer 'antivirus' @('antivirus')
-}
+} else { Info 'Sautée.' }
 
-Etape '11. Corrections avec UAC (refus, puis acceptation, puis port bloqué)'
-Write-Host 'Ce test coupe le pare-feu du profil « Privé » de la VM, puis sentinel doit le réparer.' -ForegroundColor Yellow
-Write-Host 'sentinel ne bloque jamais le port 3389 et ne coupe jamais le Bureau à distance utilisé : ce test est sans risque.' -ForegroundColor Yellow
+Etape 'Corrections avec UAC (refus, puis acceptation, puis port bloqué)'
+Info 'Coupe le pare-feu du profil « Privé » de la VM, puis sentinel doit le réparer. Le port 3389 et le Bureau à distance ne sont jamais touchés.'
 if (Question 'Faire ce test ?') {
     Start-Process powershell -Verb RunAs -Wait -ArgumentList '-NoProfile', '-Command', 'Set-NetFirewallProfile -Profile Private -Enabled False'
     Ref 'Pare-feu après coupure volontaire' { Get-NetFirewallProfile | Select-Object Name, Enabled | Format-Table -AutoSize }
 
     Write-Host ''
-    Write-Host '11a. Réponds « o » pour le pare-feu, puis clique NON dans la fenêtre UAC. Réponds « n » à tout le reste.' -ForegroundColor Yellow
+    Write-Host '      Réponds « o » pour le pare-feu, puis clique NON dans la fenêtre UAC. Réponds « n » à tout le reste.' -ForegroundColor Yellow
     & $exe corriger
-    Note "corriger (UAC refusée) -> code $LASTEXITCODE"
-    [void](Question 'sentinel a-t-il dit « Demande d''administrateur refusée : rien n''a été modifié » (en anglais : « Administrator prompt refused: nothing was changed. ») et PAS « ✔ fait » ?')
-    Ref 'Pare-feu après UAC refusée (Private doit rester False)' { Get-NetFirewallProfile | Select-Object Name, Enabled | Format-Table -AutoSize }
+    Constat 'sentinel a-t-il dit « Demande d''administrateur refusée : rien n''a été modifié » et PAS « ✔ fait » ?'
+    if ((Get-NetFirewallProfile -Profile Private).Enabled) { Bug 'Pare-feu Privé réactivé malgré le refus' } else { Ok 'Refus respecté : pare-feu Privé toujours coupé' }
 
     Write-Host ''
-    Write-Host '11b. Réponds « o » pour le pare-feu et accepte l''UAC. Pour les ports, réponds « o » au port 135 seulement, « n » à tout le reste.' -ForegroundColor Yellow
+    Write-Host '      Réponds « o » pour le pare-feu et accepte l''UAC. Pour les ports, « o » au port 135 seulement, « n » au reste.' -ForegroundColor Yellow
     & $exe corriger
-    Note "corriger (UAC acceptée) -> code $LASTEXITCODE"
-    Ref 'Pare-feu après sentinel corriger' { Get-NetFirewallProfile | Select-Object Name, Enabled | Format-Table -AutoSize }
-    Ref 'Règles sentinel créées' { Get-NetFirewallRule -DisplayName 'sentinel : bloquer *' -ErrorAction SilentlyContinue | Select-Object DisplayName, Enabled, Action | Format-Table -AutoSize }
-    if (-not (Get-NetFirewallProfile -Profile Private).Enabled) {
-        Note 'Pare-feu Privé toujours coupé : remise en marche par le script.'
+    if ((Get-NetFirewallProfile -Profile Private).Enabled) { Ok 'Pare-feu Privé réactivé par sentinel' }
+    else {
+        Bug 'Pare-feu Privé toujours coupé après la correction : remis en marche par le script'
         Start-Process powershell -Verb RunAs -Wait -ArgumentList '-NoProfile', '-Command', 'Set-NetFirewallProfile -Profile Private -Enabled True'
     }
-    [void](Question 'La correction s''est-elle bien passée (affichage clair, une fenêtre UAC par correction, « OK » à chaque étape) ?')
+    Ref 'Règles sentinel créées' { Get-NetFirewallRule -DisplayName 'sentinel : bloquer *' -ErrorAction SilentlyContinue | Select-Object DisplayName, Enabled, Action | Format-Table -AutoSize }
+    Constat 'La correction s''est-elle bien passée (affichage clair, une fenêtre UAC par correction, « OK » à chaque étape) ?'
 
     # Un port bloqué par sentinel ne doit plus être signalé comme à corriger (0.9.6).
     Lancer 'machine-apres-blocage' @('machine')
-    $apres = Get-Content (Join-Path $res 'machine-apres-blocage.out.txt') -Raw -Encoding UTF8
-    if ($apres -match 'bloqué en entrée par la règle|blocked inbound by the') { Note 'Port bloqué reconnu à l''audit suivant : OK' }
-    else { Note 'Aucun port reconnu comme bloqué (normal seulement si aucun port n''a été bloqué en 11b)' }
+    if ((Sortie 'machine-apres-blocage') -match 'bloqué en entrée par la règle|blocked inbound by the') { Ok 'Port bloqué reconnu à l''audit suivant' }
+    else { Info 'Aucun port reconnu comme bloqué (normal si aucun port n''a été bloqué)' }
 
     if (Question 'Retirer maintenant les règles « sentinel : bloquer » créées pendant le test ?') {
         Start-Process powershell -Verb RunAs -Wait -ArgumentList '-NoProfile', '-Command', "Remove-NetFirewallRule -DisplayName 'sentinel : bloquer *'"
-        Ref 'Règles sentinel après nettoyage' { @(Get-NetFirewallRule -DisplayName 'sentinel : bloquer *' -ErrorAction SilentlyContinue).Count }
     }
-}
+} else { Info 'Sautée (il faut répondre aux fenêtres UAC).' }
 
-Etape '12. Couleurs et accents dans la console'
-& $exe machine
-[void](Question 'Dans l''audit ci-dessus, les couleurs et les accents (é, è, ✔, ✖) s''affichent-ils correctement ?')
+Etape 'Couleurs et accents dans la console'
+if ($Auto) { Info 'Sautée : il faut regarder l''écran (test avec questions).' } else {
+    & $exe machine
+    Constat 'Dans l''audit ci-dessus, les couleurs et les accents (é, è, ✔, ✖) s''affichent-ils correctement ?'
+}
 
 if (-not $Auto) {
-    $commentaire = Read-Host 'Un commentaire libre sur ce que tu as vu (Entrée pour passer)'
-    if ($commentaire) { Note "COMMENTAIRE : $commentaire" }
+    $commentaire = Read-Host '  Un commentaire libre sur ce que tu as vu (Entrée pour passer)'
+    if ($commentaire) { Journal "COMMENTAIRE : $commentaire" }
 }
 
-Note "FIN $(Get-Date -Format 'HH:mm:ss')"
+Journal "FIN $(Get-Date -Format 'HH:mm:ss')"
+$rapport = Rapport
+$toutes = @($script:etapes | ForEach-Object { $_.Verifs })
+$nbOk = @($toutes | Where-Object Etat -eq 'ok').Count
+$nbBug = @($toutes | Where-Object Etat -eq 'bug').Count
+$nbEchec = @($script:etapes | ForEach-Object { $_.Commandes } | Where-Object Code -ne 0).Count
 Write-Host ''
-Write-Host 'Test terminé ! Les résultats sont dans le dossier partagé. Tu peux revenir sur Linux.' -ForegroundColor Green
+Write-Host '  ──────────────────────────────────────────────────────────' -ForegroundColor DarkGray
+if ($nbBug -eq 0 -and $nbEchec -eq 0) { Write-Host "  ✔ Tout est passé : $nbOk vérification(s) réussie(s)." -ForegroundColor Green }
+else { Write-Host "  ✖ $nbBug problème(s), $nbEchec commande(s) en échec ; $nbOk vérification(s) réussie(s)." -ForegroundColor Red }
+Write-Host "  Rapport : $rapport" -ForegroundColor DarkGray
+Start-Process $rapport
+Write-Host '  Le rapport s''ouvre dans le navigateur. Tu peux revenir sur Linux.' -ForegroundColor DarkGray

@@ -12,7 +12,32 @@ RES=$(cd "$RES" && pwd)
 export SENTINEL_LANG=fr
 JOURNAL="$RES/journal.txt"
 
-note() { echo "$*" | tee -a "$JOURNAL"; }
+# Le journal garde le détail (relu par le rapport HTML) ; l'écran montre une ligne par commande ou vérification.
+note() { echo "$*" >>"$JOURNAL"; printf '      \033[90m%s\033[0m\n' "$*"; }
+titre() { echo "=== $* ===" >>"$JOURNAL"; printf '\n  \033[1;31mTEST DE SENTINEL\033[0m  \033[90m%s\033[0m\n' "$*"; }
+bilan() {
+  local ok bug
+  ok=$(grep -c '^OK' "$JOURNAL")
+  bug=$(grep -c '^ÉCHEC' "$JOURNAL")
+  echo "=== Fin : $ok vérification(s) OK, $bug échec(s) ===" >>"$JOURNAL"
+  printf '\n  ──────────────────────────────────────────────────────────\n'
+  if [ "$bug" = 0 ]; then printf '  \033[32m✓ Tout est passé : %s vérification(s) réussie(s).\033[0m\n' "$ok"
+  else printf '  \033[31m✗ %s problème(s) ; %s vérification(s) réussie(s).\033[0m\n' "$bug" "$ok"; fi
+}
+section() { echo "--- $*" >>"$JOURNAL"; printf '\n  \033[1;36m▸ %s\033[0m\n' "$*"; }
+ecran_commande() { # ecran_commande <code> <secondes> <arguments…>
+  local code=$1 duree=$2
+  shift 2
+  local texte="sentinel $*"
+  [ $# = 0 ] && texte="sentinel (menu)"
+  texte=$(echo "$texte" | sed -E 's#[^ ]*/([^/ ]+)#\1#g')
+  [ ${#texte} -gt 58 ] && texte="${texte:0:57}…"
+  if [ "$code" = 0 ]; then
+    printf '      %-60s \033[32m✓\033[0m \033[90m%4s s\033[0m\n' "$texte" "$duree"
+  else
+    printf '      %-60s \033[31m✗ code %s\033[0m \033[90m%4s s\033[0m\n' "$texte" "$code" "$duree"
+  fi
+}
 # macOS n'a pas la commande timeout : perl s'en charge (alarme puis exec).
 delai() { perl -e 'alarm shift; exec @ARGV' "$@"; }
 
@@ -23,20 +48,27 @@ lancer() {
   local debut=$SECONDS
   printf '%b' "$entree" | delai "$secondes" "$SENTINEL" "$@" >"$RES/$nom.txt" 2>&1
   local code=$?
-  note "sentinel $* -> code $code, $((SECONDS - debut)) s$([ $code = 142 ] && echo ' (DÉLAI DÉPASSÉ)')"
+  echo "sentinel $* -> code $code, $((SECONDS - debut)) s$([ $code = 142 ] && echo ' (DÉLAI DÉPASSÉ)') · $nom.txt" >>"$JOURNAL"
+  ecran_commande "$code" "$((SECONDS - debut))" "$@"
 }
 
 verifier() { # verifier <description> <commande…>
   local d=$1
   shift
-  if "$@" >/dev/null 2>&1; then note "OK      $d"; else note "ÉCHEC   $d"; fi
+  if "$@" >/dev/null 2>&1; then
+    echo "OK      $d" >>"$JOURNAL"
+    printf '      \033[32m✓\033[0m %s\n' "$d"
+  else
+    echo "ÉCHEC   $d" >>"$JOURNAL"
+    printf '      \033[31m✗ %s\033[0m\n' "$d"
+  fi
 }
 
-note "=== Essai complet de sentinel sur macOS $(sw_vers -productVersion) ($(uname -m)) ==="
+titre "Essai complet de sentinel sur macOS $(sw_vers -productVersion) ($(uname -m))"
 lancer version 10 '' --version
 lancer aide 10 '' --help
 
-note "--- Audit"
+section "Audit"
 lancer machine 300 '' machine
 lancer machine-json 300 '' machine --json
 verifier "audit JSON lisible" python3 -c "import json; json.load(open('$RES/machine-json.txt'))"
@@ -45,55 +77,55 @@ import json,sys; a=json.load(open('$RES/machine-json.txt'))
 bad=[c['categorie']+': '+c['message'] for c in a['constats'] if not c['verifie']]
 print('\n'.join(bad)); sys.exit(1 if bad else 0)"
 
-note "--- Diagnostic"
+section "Diagnostic"
 lancer diagnostic 120 '' diagnostic
 verifier "diagnostic : section MATÉRIEL" grep -q 'MATÉRIEL' "$RES/diagnostic.txt"
 
-note "--- Intégrité (référence, vérification, modification détectée)"
+section "Intégrité (référence, vérification, modification détectée)"
 lancer integrite-reference 60 '' integrite
 lancer integrite-verification 60 '' integrite
 echo "# essai sentinel $(date)" >>~/.zshrc
 lancer integrite-modification 60 '' integrite
 verifier "intégrité : ~/.zshrc modifié repéré" grep -q 'zshrc' "$RES/integrite-modification.txt"
 
-note "--- Ports de cette machine"
+section "Ports de cette machine"
 lancer local 300 '' reseau 127.0.0.1
 lancer local-json 300 '' reseau 127.0.0.1 --json
 
-note "--- Connexion"
+section "Connexion"
 lancer connexion 180 '' connexion
 
-note "--- Menu : chaque groupe ouvert puis refermé, puis q"
+section "Menu : chaque groupe ouvert puis refermé, puis q"
 lancer menu 60 '4\n\n5\n\n6\n\n7\n\nq\n'
 verifier "menu : sous-menus affichés" grep -q 'Antivirus' "$RES/menu.txt"
 
-note "--- Mots de passe fuités (pseudo-terminal : saisie sans écho)"
+section "Mots de passe fuités (pseudo-terminal : saisie sans écho)"
 python3 -I "$(dirname "$0")/../test-commun/mot-de-passe-pty.py" "$SENTINEL" >"$RES/motdepasse.txt" 2>&1
 verifier "mot de passe : « password » trouvé dans des fuites" grep -qE 'Trouvé [0-9 ]+ fois' "$RES/motdepasse.txt"
 verifier "mot de passe : jamais affiché" bash -c "! grep -q 'Mot de passe : password' '$RES/motdepasse.txt'"
 
-note "--- Réparer (liste), mises à jour (sans rien installer), logiciels, gaming"
+section "Réparer (liste), mises à jour (sans rien installer), logiciels, gaming"
 lancer reparer 60 '\n' reparer
 lancer maj 400 'n\nn\nn\nn\n' maj
 verifier "maj : jamais « --install --all » (installerait une nouvelle version majeure)" bash -c "! grep -q -- '--install --all' '$RES/maj.txt'"
 lancer logiciels 60 '\n' logiciels
 lancer gaming 60 '\n' gaming
 
-note "--- Données : sauvegarde puis restauration"
+section "Données : sauvegarde puis restauration"
 lancer sauvegarder 60 '' sauvegarder "$RES/sauvegarde.json"
 lancer restaurer 60 '' restaurer "$RES/sauvegarde.json"
 verifier "sauvegarde écrite" test -s "$RES/sauvegarde.json"
 
-note "--- Courriel (refus de l'envoi)"
+section "Courriel (refus de l'envoi)"
 lancer courriel 60 'test@example.com\nn\n' courriel
 
-note "--- Surveillance : agent launchd"
+section "Surveillance : agent launchd"
 lancer surveillance-on 60 '' surveillance on
 verifier "agent launchd chargé" launchctl print "gui/$(id -u)/com.sentinel.surveillance"
 lancer surveillance-off 60 '' surveillance off
 verifier "agent launchd retiré" bash -c "! launchctl print gui/$(id -u)/com.sentinel.surveillance"
 
-note "--- Bac à sable (sandbox-exec)"
+section "Bac à sable (sandbox-exec)"
 ESSAI_BAC="$RES/bac.sh"
 cat >"$ESSAI_BAC" <<'EOF'
 #!/bin/sh
@@ -109,17 +141,17 @@ verifier "bac : dossier personnel illisible" bash -c "! grep -q LECTURE_MAISON_P
 verifier "bac : écriture refusée" bash -c "! grep -q ECRITURE_MAISON_POSSIBLE '$RES/isoler.txt'"
 verifier "bac : réseau coupé" bash -c "! grep -q RESEAU_POSSIBLE '$RES/isoler.txt'"
 
-note "--- Antivirus : installation de ClamAV par sentinel, puis analyse d'un dossier avec le fichier test EICAR"
+section "Antivirus : installation de ClamAV par sentinel, puis analyse d'un dossier avec le fichier test EICAR"
 ESSAI_AV="$RES/dossier-antivirus"
 mkdir -p "$ESSAI_AV"
 # Le fichier de test standard des antivirus (inoffensif), écrit en deux morceaux.
 printf '%s%s' 'X5O!P%@AP[4\PZX54(P^)7CC)7}$EICAR-STANDARD-' 'ANTIVIRUS-TEST-FILE!$H+H*' >"$ESSAI_AV/eicar.com"
 lancer antivirus 900 'o\nn\nn\nn\n' antivirus "$ESSAI_AV"
 verifier "antivirus : EICAR détecté" grep -qi 'eicar' "$RES/antivirus.txt"
-verifier "antivirus : message « NULL X509 store » de ClamAV masqué" bash -c "! grep -q 'NULL X509' '$RES/antivirus.txt'"
+verifier "antivirus : message « NULL X509 store » de ClamAV masqué" bash -c "! grep -q 'ERROR: NULL X509' '$RES/antivirus.txt'"
 verifier "antivirus : refus de la quarantaine annoncé" grep -q 'Rien n.a été fait' "$RES/antivirus.txt"
 
-note "--- Clé USB simulée (images disque exFAT) : protection et journal d'erreurs"
+section "Clé USB simulée (images disque exFAT) : protection et journal d'erreurs"
 CLE_IMG="$RES/cle.dmg"
 LOG_IMG="$RES/log.dmg"
 hdiutil create -quiet -size 64m -fs ExFAT -volname SENTINEL "$CLE_IMG"
@@ -147,4 +179,6 @@ hdiutil detach -quiet /Volumes/SENTINEL || hdiutil detach -force -quiet /Volumes
 hdiutil detach -quiet /Volumes/SENTINELLOG || hdiutil detach -force -quiet /Volumes/SENTINELLOG
 rm -f "$CLE_IMG" "$LOG_IMG"
 
-note "=== Fin : $(grep -c '^OK' "$JOURNAL") vérification(s) OK, $(grep -c '^ÉCHEC' "$JOURNAL") échec(s) ==="
+bilan
+# Rapport HTML au même style que celui du test Windows (dans l'artefact « essai-macos »).
+python3 -I "$(dirname "$0")/../test-commun/rapport.py" "$RES"
