@@ -1,12 +1,14 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
-  <defs>
-    <linearGradient id="bord" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#ff5a4f"/><stop offset="0.55" stop-color="#d42020"/><stop offset="1" stop-color="#7e0c0c"/>
-    </linearGradient>
-  </defs>
-  <path d="M128 8 L232 46 V122 C232 188 188 232 128 250 C68 232 24 188 24 122 V46 Z" fill="url(#bord)"/>
-  <path d="M128 38 L204 66 V122 C204 172 174 204 128 218 C82 204 52 172 52 122 V66 Z" fill="#0b0808"/>
-  <path d="M58 128 Q128 62 198 128 Q128 194 58 128 Z" fill="#0b0808" stroke="#eee3db" stroke-width="16" stroke-linejoin="round"/>
-  <circle cx="128" cy="128" r="34" fill="#e3261f"/>
-  <circle cx="128" cy="128" r="13" fill="#0b0808"/>
+  <g stroke-linejoin="miter">
+    <path d="M128 4 L128 34 L50 58 L18 36 Z" fill="#ff5a4f"/>
+    <path d="M128 4 L128 34 L206 58 L238 36 Z" fill="#ff5a4f"/>
+    <path d="M18 36 L50 58 L50 130 L18 140 Z" fill="#d42020"/>
+    <path d="M238 36 L206 58 L206 130 L238 140 Z" fill="#d42020"/>
+    <path d="M18 140 L50 130 L128 218 L128 252 Z" fill="#9a1212"/>
+    <path d="M238 140 L206 130 L128 218 L128 252 Z" fill="#9a1212"/>
+  </g>
+  <path d="M128 34 L206 58 V130 L128 218 L50 130 V58 Z" fill="#0b0808"/>
+  <path d="M52 128 L98 92 H158 L204 128 L158 164 H98 Z" fill="#0b0808" stroke="#eee3db" stroke-width="16" stroke-linejoin="miter"/>
+  <path d="M128 98 L158 128 L128 158 L98 128 Z" fill="#e3261f"/>
+  <path d="M128 116 L140 128 L128 140 L116 128 Z" fill="#0b0808"/>
 </svg>
