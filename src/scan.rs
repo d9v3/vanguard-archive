@@ -31,7 +31,7 @@ pub async fn sonder(ip: Ipv4Addr, port: u16, delai: Duration) -> (Etat, Option<T
 }
 
 /// Nombre de connexions simultanées réellement possible : chaque connexion consomme un descripteur
-/// de fichier, et macOS n'en autorise que 256 par défaut. On relève la limite si le système le permet.
+/// de fichier, et certains systèmes n'en autorisent que 256 par défaut. On relève la limite si le système le permet.
 pub fn limite_connexions(demande: usize) -> usize {
     #[cfg(unix)]
     unsafe {
@@ -124,12 +124,6 @@ pub fn passerelle() -> Option<Ipv4Addr> {
         let table = std::fs::read_to_string("/proc/net/route").ok()?;
         passerelle_linux(&table)
     }
-    #[cfg(target_os = "macos")]
-    {
-        commande("route", &["-n", "get", "default"])
-            .lines()
-            .find_map(|l| l.trim().strip_prefix("gateway:")?.trim().parse().ok())
-    }
     #[cfg(windows)]
     {
         // Ligne « 0.0.0.0  0.0.0.0  <passerelle>  <interface>  <métrique> » ; la plus petite métrique gagne.
@@ -168,7 +162,7 @@ fn passerelle_linux(table: &str) -> Option<Ipv4Addr> {
         .map(|(_, ip)| ip)
 }
 
-/// Normalise une MAC en « aa:bb:cc:dd:ee:ff » (macOS écrit « a:b:… », Windows « aa-bb-… »).
+/// Normalise une MAC en « aa:bb:cc:dd:ee:ff » (« a:b:… » sans zéros, Windows « aa-bb-… »).
 fn normaliser_mac(brut: &str) -> Option<String> {
     let parties: Vec<String> = brut
         .split([':', '-'])
@@ -196,16 +190,6 @@ pub fn table_arp() -> HashMap<Ipv4Addr, String> {
             (c.get(2) == Some(&"0x2"))
                 .then(|| Some((c.first()?.to_string(), c.get(3)?.to_string())))
                 .flatten()
-        })
-        .collect();
-    // macOS : « ? (10.0.0.1) at f8:79:a:d:3:a2 on en0 … »
-    #[cfg(target_os = "macos")]
-    let entrees: Vec<(String, String)> = commande("arp", &["-an"])
-        .lines()
-        .filter_map(|l| {
-            let ip = l.split_once('(')?.1.split_once(')')?.0;
-            let mac = l.split_once(" at ")?.1.split_whitespace().next()?;
-            Some((ip.to_string(), mac.to_string()))
         })
         .collect();
     // Windows : « 10.0.0.1   f8-79-0a-0d-03-a2   dynamique »
@@ -432,10 +416,6 @@ pub fn nom_wifi() -> Option<String> {
     let nom = commande_sortie("nmcli", &["-t", "-e", "no", "-f", "ACTIVE,SSID", "dev", "wifi"])
         .lines()
         .find_map(|l| l.strip_prefix("yes:").map(str::to_string));
-    #[cfg(target_os = "macos")]
-    let nom = commande_sortie("networksetup", &["-getairportnetwork", "en0"])
-        .split_once(": ")
-        .map(|(_, n)| n.trim().to_string());
     #[cfg(windows)]
     let nom = commande_sortie("netsh", &["wlan", "show", "interfaces"])
         .lines()
@@ -474,7 +454,7 @@ mod tests {
 
     #[test]
     fn mac_normalisee_quel_que_soit_le_systeme() {
-        assert_eq!(normaliser_mac("f8:79:a:d:3:a2").as_deref(), Some("f8:79:0a:0d:03:a2")); // macOS
+        assert_eq!(normaliser_mac("f8:79:a:d:3:a2").as_deref(), Some("f8:79:0a:0d:03:a2")); // zéros omis
         assert_eq!(
             normaliser_mac("F8-79-0A-0D-03-A2").as_deref(),
             Some("f8:79:0a:0d:03:a2")

@@ -62,7 +62,7 @@ enum Commande {
         #[arg(long)]
         json: bool,
     },
-    /// Recherche de malwares : ClamAV (Linux/macOS) ou Microsoft Defender (Windows).
+    /// Recherche de malwares : ClamAV (Linux) ou Microsoft Defender (Windows).
     Antivirus {
         /// Tout le dossier personnel au lieu des endroits à risque.
         #[arg(long)]

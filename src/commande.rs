@@ -10,8 +10,8 @@ pub struct Resultat {
     /// Code de retour (`None` si le programme a été tué par un signal).
     pub code: Option<i32>,
     pub sortie: String,
-    /// Utilisé par macOS, dont certains outils répondent sur la sortie d'erreur.
-    #[cfg_attr(not(any(target_os = "macos", all(test, unix))), allow(dead_code))]
+    /// Sortie d'erreur, gardée pour les tests (certains outils répondent par là).
+    #[cfg_attr(not(all(test, unix)), allow(dead_code))]
     pub erreurs: String,
 }
 

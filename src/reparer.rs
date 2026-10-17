@@ -269,53 +269,6 @@ pub fn liste() -> Vec<Reparation> {
     ]
 }
 
-#[cfg(target_os = "macos")]
-pub fn liste() -> Vec<Reparation> {
-    let mut reseau = rep(
-        "Internet ne marche plus",
-        "Vide le cache DNS et redemande une adresse au routeur (Wi-Fi en0).",
-        "quelques secondes",
-        &[
-            "sudo dscacheutil -flushcache",
-            "sudo killall -HUP mDNSResponder",
-            "sudo ipconfig set en0 DHCP",
-        ],
-    );
-    if session_ssh() {
-        reseau.bloquee = Some("tu es connecté par SSH : cette réparation couperait ta connexion");
-    }
-    vec![
-        rep(
-            "Disque : vérification",
-            "Vérifie le volume système (comme S.O.S. dans Utilitaire de disque). Pour réparer, démarrer en mode récupération.",
-            "quelques minutes",
-            &["diskutil verifyVolume /"],
-        ),
-        reseau,
-        rep(
-            "Recherche Spotlight cassée",
-            "Reconstruit l'index Spotlight (recherche qui ne trouve plus rien).",
-            "l'index se refait en arrière-plan",
-            &["sudo mdutil -E /"],
-        ),
-        rep(
-            "Disque plein",
-            format!(
-                "Montre ce qui prend de la place dans ton dossier ; {}.",
-                occupation_racine()
-            ),
-            "une minute",
-            &["du -hd1 ~ 2>/dev/null | sort -hr | head -15"],
-        ),
-        rep(
-            "Heure fausse",
-            "Resynchronise l'horloge sur les serveurs d'Apple.",
-            "quelques secondes",
-            &["sudo sntp -sS time.apple.com"],
-        ),
-    ]
-}
-
 /// Menu des réparations : choisir, lire, confirmer.
 pub fn menu() {
     let reparations = liste();

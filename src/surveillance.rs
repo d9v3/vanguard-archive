@@ -1,5 +1,5 @@
 //! Surveillance automatique : scan du réseau toutes les heures, notification si un appareil inconnu apparaît.
-//! Planificateur natif de chaque système : timer systemd (Linux), LaunchAgent (macOS), Planificateur de tâches (Windows).
+//! Planificateur natif de chaque système : timer systemd (Linux), Planificateur de tâches (Windows).
 
 use std::process::Command;
 
@@ -42,16 +42,6 @@ fn notifier(titre: &str, corps: &str) {
     let _ = Command::new("notify-send")
         .args(["-a", "netscan", "-i", "netscan", "-u", "critical", titre, corps])
         .status();
-    #[cfg(target_os = "macos")]
-    {
-        let e = |s: &str| s.replace('\\', "\\\\").replace('"', "\\\"");
-        let script = format!(
-            "display notification \"{}\" with title \"{}\" sound name \"Basso\"",
-            e(corps),
-            e(titre)
-        );
-        let _ = Command::new("osascript").args(["-e", &script]).status();
-    }
     #[cfg(windows)]
     {
         let e = |s: &str| s.replace('\'', "''");
@@ -102,16 +92,8 @@ pub async fn surveiller() {
 pub fn active() -> bool {
     #[cfg(target_os = "linux")]
     return reussit("systemctl", &["--user", "is-enabled", &format!("{NOM}.timer")]);
-    #[cfg(target_os = "macos")]
-    return plist().exists();
     #[cfg(windows)]
     return crate::machine::windows::ps(&format!("Get-ScheduledTask -TaskName '{TACHE_WINDOWS}' | Out-Null")).is_some();
-}
-
-#[cfg(target_os = "macos")]
-fn plist() -> std::path::PathBuf {
-    std::path::PathBuf::from(std::env::var_os("HOME").unwrap_or_default())
-        .join(format!("Library/LaunchAgents/com.{NOM}.plist"))
 }
 
 pub fn activer(oui: bool) {
@@ -146,31 +128,6 @@ fn desinstaller() -> bool {
     let _ = std::fs::remove_file(dossier.join(format!("{NOM}.service")));
     let _ = std::fs::remove_file(dossier.join(format!("{NOM}.timer")));
     reussit("systemctl", &["--user", "daemon-reload"])
-}
-
-#[cfg(target_os = "macos")]
-fn installer(exe: &str) -> bool {
-    let contenu = format!(
-        r#"<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict>
-  <key>Label</key><string>com.{NOM}</string>
-  <key>ProgramArguments</key><array><string>{exe}</string><string>surveiller</string></array>
-  <key>StartInterval</key><integer>3600</integer>
-  <key>RunAtLoad</key><true/>
-</dict></plist>
-"#
-    );
-    let p = plist();
-    let _ = std::fs::create_dir_all(p.parent().unwrap_or(&p));
-    std::fs::write(&p, contenu).is_ok() && reussit("launchctl", &["load", "-w", &p.display().to_string()])
-}
-
-#[cfg(target_os = "macos")]
-fn desinstaller() -> bool {
-    let p = plist();
-    reussit("launchctl", &["unload", "-w", &p.display().to_string()]);
-    std::fs::remove_file(p).is_ok()
 }
 
 /// Nom lisible de la tâche dans le Planificateur de tâches Windows.

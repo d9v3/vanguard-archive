@@ -357,13 +357,6 @@ pub fn cle_usb() -> Option<PathBuf> {
         .flatten()
         .map(|d| d.path())
         .collect();
-    #[cfg(target_os = "macos")]
-    let montages: Vec<PathBuf> = std::fs::read_dir("/Volumes")
-        .into_iter()
-        .flatten()
-        .flatten()
-        .map(|d| d.path())
-        .collect();
     #[cfg(windows)]
     let montages: Vec<PathBuf> = ('D'..='Z').map(|l| PathBuf::from(format!("{l}:\\"))).collect();
     depuis_exe
@@ -382,8 +375,6 @@ pub fn dossier_donnees() -> PathBuf {
 pub fn dossier_local() -> PathBuf {
     #[cfg(windows)]
     let base = std::env::var_os("LOCALAPPDATA").map(PathBuf::from);
-    #[cfg(target_os = "macos")]
-    let base = std::env::var_os("HOME").map(|h| PathBuf::from(h).join("Library/Application Support"));
     #[cfg(target_os = "linux")]
     let base = std::env::var_os("XDG_DATA_HOME")
         .map(PathBuf::from)

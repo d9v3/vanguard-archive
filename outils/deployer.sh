@@ -21,10 +21,11 @@ if [[ -z $CLE ]]; then
   exit 0
 fi
 
-mkdir -p "$CLE"/{Linux,Windows,macOS,donnees,source}
+mkdir -p "$CLE"/{Linux,Windows,donnees,source}
 cp -f "$LINUX" "$CLE/Linux/netscan"
 [[ -f $WINDOWS ]] && cp -f "$WINDOWS" "$CLE/Windows/netscan.exe"
-cp -f outils/macos/*.command "$CLE/macOS/"
+# Version macOS retirée (tag git avec-macos) : son dossier ne reste pas sur la clé.
+rm -rf "$CLE/macOS"
 cp -f outils/LISEZMOI.txt "$CLE/LISEZMOI.txt"
 # Code source complet (avec l'historique git) pour continuer le développement depuis n'importe quel ordinateur.
 # exFAT ne garde ni droits ni liens : -rt suffit, --modify-window tolère sa précision de 2 s.

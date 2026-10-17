@@ -1,4 +1,4 @@
-//! Recherche de malwares avec un moteur reconnu (ClamAV sous Linux/macOS, Microsoft Defender sous Windows)
+//! Recherche de malwares avec un moteur reconnu (ClamAV sous Linux, Microsoft Defender sous Windows)
 //! et revue des programmes lancés au démarrage, là où un malware cherche à se maintenir.
 
 use std::path::PathBuf;
@@ -62,7 +62,7 @@ fn defender(complet: bool) {
     }
 }
 
-// ───────────────────────────── Linux / macOS : ClamAV ─────────────────────────────
+// ───────────────────────────── Linux : ClamAV ─────────────────────────────
 
 #[cfg(unix)]
 fn shell(c: &str) -> bool {
@@ -76,19 +76,11 @@ fn shell(c: &str) -> bool {
 
 #[cfg(unix)]
 fn base_presente() -> bool {
-    [
-        "/var/lib/clamav",
-        "/opt/homebrew/var/lib/clamav",
-        "/usr/local/var/lib/clamav",
-    ]
-    .iter()
-    .any(|d| {
-        std::fs::read_dir(d).is_ok_and(|d| {
-            d.flatten().any(|f| {
-                std::path::Path::new(&f.file_name())
-                    .extension()
-                    .is_some_and(|e| e.eq_ignore_ascii_case("cvd") || e.eq_ignore_ascii_case("cld"))
-            })
+    std::fs::read_dir("/var/lib/clamav").is_ok_and(|d| {
+        d.flatten().any(|f| {
+            std::path::Path::new(&f.file_name())
+                .extension()
+                .is_some_and(|e| e.eq_ignore_ascii_case("cvd") || e.eq_ignore_ascii_case("cld"))
         })
     })
 }
@@ -115,10 +107,8 @@ fn preparer() -> bool {
                 return false;
             }
         };
-        #[cfg(target_os = "macos")]
-        let installation = String::from("brew install clamav");
         if !shell(&installation) {
-            println!("  Installation impossible (sous macOS, Homebrew est nécessaire : https://brew.sh).");
+            println!("  Installation impossible.");
             return false;
         }
     }
@@ -128,10 +118,6 @@ fn preparer() -> bool {
         // Sur Debian/Ubuntu/Mint, le service tourne déjà et verrouille la base : on l'arrête le temps du premier téléchargement.
         let ok = shell("sudo systemctl stop clamav-freshclam.service 2>/dev/null; sudo freshclam")
             && shell("sudo systemctl enable --now clamav-freshclam.service");
-        #[cfg(target_os = "macos")]
-        let ok = shell(
-            "C=$(brew --prefix)/etc/clamav; [ -f $C/freshclam.conf ] || sed 's/^Example/#Example/' $C/freshclam.conf.sample > $C/freshclam.conf; freshclam",
-        );
         if !ok {
             return false;
         }
@@ -157,7 +143,6 @@ fn clamav(complet: bool) {
             "Documents",
             ".local/bin",
             ".config/autostart",
-            "Library/LaunchAgents",
         ]
         .iter()
         .map(|d| h.join(d))
@@ -181,7 +166,6 @@ fn clamav(complet: bool) {
         "systemd-private-[^/]*",
         ".local/share/netscan/quarantaine",
         ".snapshots",
-        "Library/Caches",
         ".Trash",
     ];
     let mut cmd = Command::new("clamscan");
@@ -381,38 +365,6 @@ fn demarrage() {
                 if !possede {
                     entrees.push(format!("{} (service système hors paquet)", p.display()));
                 }
-            }
-        }
-    }
-
-    #[cfg(target_os = "macos")]
-    {
-        let h = home();
-        for d in [
-            h.join("Library/LaunchAgents"),
-            "/Library/LaunchAgents".into(),
-            "/Library/LaunchDaemons".into(),
-        ] {
-            for f in std::fs::read_dir(&d).into_iter().flatten().flatten() {
-                let nom = f.file_name().to_string_lossy().into_owned();
-                if !nom.starts_with("com.apple.") {
-                    entrees.push(f.path().display().to_string());
-                }
-            }
-        }
-        if let Ok(o) = Command::new("osascript")
-            .args([
-                "-e",
-                "tell application \"System Events\" to get the name of every login item",
-            ])
-            .output()
-        {
-            for n in String::from_utf8_lossy(&o.stdout)
-                .trim()
-                .split(", ")
-                .filter(|n| !n.is_empty())
-            {
-                entrees.push(format!("élément d'ouverture : {n}"));
             }
         }
     }

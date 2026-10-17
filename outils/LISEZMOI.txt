@@ -7,8 +7,6 @@ Cette clé contient le programme pour chaque système, sa base de données et so
                        Ouvrir un terminal dans ce dossier puis :  ./netscan
   Windows/netscan.exe  Windows 10/11 : double-cliquer.
                        SmartScreen peut avertir (programme non signé) : « Informations complémentaires » > « Exécuter quand même ».
-  macOS/netscan.command  Mac : double-cliquer. La première fois, il se compile pour ce Mac (environ 5 min).
-                       Si macOS bloque l'ouverture : clic droit > Ouvrir.
 
   donnees/             Base des appareils (un carnet par réseau : chez toi, chez chaque ami) et dernier
                        rapport HTML. Elle voyage avec la clé : tout netscan qui voit la clé branchée l'utilise.

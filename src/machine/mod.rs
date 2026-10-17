@@ -1,5 +1,6 @@
 //! Audit de sécurité de cette machine : types communs, affichage et exécution des correctifs.
-//! Les vérifications elles-mêmes dépendent du système (linux.rs, windows.rs, macos.rs).
+//! Les vérifications elles-mêmes dépendent du système (linux.rs, windows.rs).
+//! Une version macOS a existé jusqu'à la v0.9.7 : `git checkout avec-macos` pour la retrouver.
 
 use std::process::Command;
 
@@ -12,10 +13,6 @@ use crate::ui::*;
 pub mod linux;
 #[cfg(target_os = "linux")]
 use linux as os;
-#[cfg(target_os = "macos")]
-mod macos;
-#[cfg(target_os = "macos")]
-use macos as os;
 #[cfg(windows)]
 pub mod windows;
 #[cfg(windows)]
@@ -25,7 +22,7 @@ use windows as os;
 pub struct Correctif {
     /// Ce que fait la correction, en une phrase.
     pub action: String,
-    /// Commandes exécutées dans l'ordre : bash sous Linux/macOS, PowerShell (administrateur) sous Windows.
+    /// Commandes exécutées dans l'ordre : bash sous Linux, PowerShell (administrateur) sous Windows.
     pub commandes: Vec<String>,
     /// `false` = à faire soi-même (redémarrage, réglage du routeur…) : on affiche seulement la marche à suivre.
     pub automatique: bool,
@@ -106,8 +103,7 @@ impl Constat {
         self
     }
 
-    /// La correction bloque ce port (« 8080/tcp ») dans le pare-feu. macOS ne propose pas de blocage de port.
-    #[cfg_attr(target_os = "macos", allow(dead_code))]
+    /// La correction bloque ce port (« 8080/tcp ») dans le pare-feu.
     fn bloquant(mut self, port: String) -> Self {
         if let Some(k) = &mut self.correctif {
             k.bloque = Some(port);
@@ -148,7 +144,7 @@ fn sortie(cmd: &str, args: &[&str]) -> Option<String> {
     (r.code == Some(0)).then_some(r.sortie)
 }
 
-/// Permissions de ~/.ssh (commun à Linux et macOS).
+/// Permissions de ~/.ssh.
 #[cfg(unix)]
 fn cles_ssh() -> Vec<Constat> {
     let dossier = std::path::PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".ssh");
@@ -337,21 +333,6 @@ pub fn programmes_en_ecoute() -> std::collections::HashMap<u16, String> {
             map.insert(port, nom.to_string());
         }
     }
-    #[cfg(target_os = "macos")]
-    for l in sortie("lsof", &["-nP", "-iTCP", "-sTCP:LISTEN"])
-        .unwrap_or_default()
-        .lines()
-        .skip(1)
-    {
-        let c: Vec<&str> = l.split_whitespace().collect();
-        let port = c
-            .get(8)
-            .and_then(|a| a.rsplit(':').next())
-            .and_then(|p| p.parse::<u16>().ok());
-        if let (Some(port), Some(nom)) = (port, c.first()) {
-            map.insert(port, nom.to_string());
-        }
-    }
     #[cfg(windows)]
     for l in windows::ps("Get-NetTCPConnection -State Listen | ForEach-Object { \"$($_.LocalPort)|$((Get-Process -Id $_.OwningProcess -ErrorAction SilentlyContinue).ProcessName)\" }")
         .unwrap_or_default()
@@ -371,8 +352,6 @@ pub fn programmes_en_ecoute() -> std::collections::HashMap<u16, String> {
 pub fn ouvrir(cible: &str) {
     #[cfg(target_os = "linux")]
     let _ = Command::new("xdg-open").arg(cible).spawn();
-    #[cfg(target_os = "macos")]
-    let _ = Command::new("open").arg(cible).spawn();
     #[cfg(windows)]
     let _ = Command::new("cmd").args(["/C", "start", "", cible]).spawn();
 }
