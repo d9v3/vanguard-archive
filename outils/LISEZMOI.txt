@@ -28,6 +28,7 @@ Menu
   g  Gaming (Windows) : composants pour les jeux et réglages de Windows
   c  Test de connexion pour le jeu : ping, gigue, débit, bufferbloat
   p  Mots de passe : ont-ils fuité ? (seuls 5 caractères de leur empreinte sont envoyés)
+  e  Adresse courriel : a-t-elle fuité ? (l'adresse est envoyée au service de recherche, après ton accord)
   i  Intégrité des fichiers critiques (comptes, sudo, SSH, démarrage…) : ce qui a changé depuis la référence ;
      en direct avec « sentinel integrite --temps-reel »
   n  Nommer un appareil (« imprimante HP »)

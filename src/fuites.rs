@@ -105,6 +105,135 @@ pub fn verifier() {
     }
 }
 
+/// Adresse courriel encodée pour une URL (lettres, chiffres, @ . - _ gardés tels quels).
+fn encoder(adresse: &str) -> String {
+    adresse
+        .bytes()
+        .map(|o| match o {
+            b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'@' | b'.' | b'-' | b'_' => (o as char).to_string(),
+            _ => format!("%{o:02X}"),
+        })
+        .collect()
+}
+
+/// Noms des fuites d'une réponse XposedOrNot : `{"breaches":[["Adobe","LinkedIn"]]}`, ou `{"Error":"Not found"}`
+/// (aucune fuite). `None` : réponse illisible.
+fn lire_xposedornot(texte: &str) -> Option<Vec<String>> {
+    let v: serde_json::Value = serde_json::from_str(texte).ok()?;
+    if v["Error"] == "Not found" {
+        return Some(Vec::new());
+    }
+    Some(
+        v["breaches"][0]
+            .as_array()?
+            .iter()
+            .filter_map(|n| n.as_str().map(str::to_string))
+            .collect(),
+    )
+}
+
+/// Noms des fuites d'une réponse Have I Been Pwned (`[{"Name":"Adobe"},…]`).
+fn lire_hibp(texte: &str) -> Option<Vec<String>> {
+    let v: serde_json::Value = serde_json::from_str(texte).ok()?;
+    Some(
+        v.as_array()?
+            .iter()
+            .filter_map(|f| f["Name"].as_str().map(str::to_string))
+            .collect(),
+    )
+}
+
+/// Fuites où apparaît l'adresse : par Have I Been Pwned si une clé est fournie (SENTINEL_HIBP_CLE), sinon par
+/// XposedOrNot (gratuit, sans clé). `None` : service injoignable.
+fn fuites_courriel(adresse: &str) -> Option<(Vec<String>, &'static str)> {
+    let mut curl = std::process::Command::new("curl");
+    curl.args(["-sS", "--max-time", "20", "-A", "sentinel", "-w", "\n%{http_code}"]);
+    let cle = std::env::var("SENTINEL_HIBP_CLE").ok().filter(|c| !c.is_empty());
+    let service = if let Some(cle) = &cle {
+        curl.args(["-H", &format!("hibp-api-key: {cle}")]);
+        curl.arg(format!(
+            "https://haveibeenpwned.com/api/v3/breachedaccount/{}?truncateResponse=true",
+            encoder(adresse)
+        ));
+        "Have I Been Pwned"
+    } else {
+        curl.arg(format!(
+            "https://api.xposedornot.com/v1/check-email/{}",
+            encoder(adresse)
+        ));
+        "XposedOrNot"
+    };
+    let r = crate::commande::lancer(&mut curl, 25)?;
+    let (corps, code) = r.sortie.trim_end().rsplit_once('\n')?;
+    match (cle.is_some(), code.trim()) {
+        // Have I Been Pwned répond 404 quand l'adresse n'apparaît dans aucune fuite.
+        (true, "404") => Some((Vec::new(), service)),
+        (true, "200") => lire_hibp(corps).map(|l| (l, service)),
+        (false, _) => lire_xposedornot(corps).map(|l| (l, service)),
+        _ => None,
+    }
+}
+
+/// « sentinel courriel » : dans quelles fuites de données une adresse apparaît-elle ?
+pub fn verifier_courriel() {
+    titre(tr!("Fuites d'adresse courriel", "Email address leaks"));
+    let service = if std::env::var("SENTINEL_HIBP_CLE").is_ok_and(|c| !c.is_empty()) {
+        "Have I Been Pwned"
+    } else {
+        "XposedOrNot"
+    };
+    trp!(
+        "  {GRIS}Contrairement aux mots de passe, l'adresse elle-même est envoyée au service ({service}) pour la recherche.{RESET}\n",
+        "  {GRIS}Unlike passwords, the address itself is sent to the service ({service}) for the search.{RESET}\n"
+    );
+    let adresse = demander(tr!(
+        "  Adresse courriel (Entrée pour annuler) : ",
+        "  Email address (Enter to cancel): "
+    ));
+    if adresse.is_empty() {
+        return;
+    }
+    if !adresse.contains('@') || adresse.contains(char::is_whitespace) {
+        trp!(
+            "  ✖ Ce n'est pas une adresse courriel.",
+            "  ✖ That is not an email address."
+        );
+        return;
+    }
+    if !demander(&trf!(
+        "  Envoyer « {adresse} » à {service} pour la recherche ? [o/N] : ",
+        "  Send “{adresse}” to {service} for the search? [y/N]: "
+    ))
+    .oui()
+    {
+        trp!("  Annulé : rien n'a été envoyé.", "  Cancelled: nothing was sent.");
+        return;
+    }
+    match fuites_courriel(&adresse) {
+        None => trp!(
+            "  ✖ Service injoignable (pas d'Internet, curl absent, ou clé refusée).",
+            "  ✖ Service unreachable (no Internet, curl missing, or key refused)."
+        ),
+        Some((liste, _)) if liste.is_empty() => trp!(
+            "\n  {VERT}✔{RESET} Cette adresse n'apparaît dans aucune fuite connue de {service}.",
+            "\n  {VERT}✔{RESET} This address does not appear in any leak known to {service}."
+        ),
+        Some((liste, _)) => {
+            trp!(
+                "\n  {}✖ Trouvée dans {} fuite(s){RESET} : {}",
+                "\n  {}✖ Found in {} leak(s){RESET}: {}",
+                couleur(crate::risk::Niveau::Eleve),
+                liste.len(),
+                resume(&liste, 12, ", ")
+            );
+            trp!(
+                "\n  💡 Change le mot de passe de ces sites (et partout où tu utilisais le même), active la double\n     authentification, et méfie-toi des courriels qui citent ces sites : ils servent à l'hameçonnage.",
+                "\n  💡 Change the password of these sites (and anywhere you used the same one), turn on two-factor\n     authentication, and beware of emails mentioning these sites: they are used for phishing."
+            );
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -121,6 +250,14 @@ mod tests {
         assert_eq!(milliers(52_256_179), "52 256 179");
         assert_eq!(milliers(999), "999");
         assert!(conseil_forme("court").is_some());
+        assert_eq!(encoder("jean+test@exemple.ca"), "jean%2Btest@exemple.ca");
+        assert_eq!(lire_xposedornot(r#"{"Error":"Not found","email":null}"#), Some(vec![]));
+        assert_eq!(
+            lire_xposedornot(r#"{"breaches":[["Adobe","LinkedIn"]]}"#),
+            Some(vec!["Adobe".to_string(), "LinkedIn".to_string()])
+        );
+        assert_eq!(lire_hibp(r#"[{"Name":"Adobe"}]"#), Some(vec!["Adobe".to_string()]));
+        assert_eq!(lire_xposedornot("pas du json"), None);
         assert!(conseil_forme("cheval agrafe batterie correct").is_none());
     }
 }

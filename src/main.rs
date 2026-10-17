@@ -113,6 +113,9 @@ enum Commande {
         #[arg(long, visible_alias = "live")]
         temps_reel: bool,
     },
+    /// Fuites d'adresse courriel : l'adresse est envoyée au service de recherche, après ton accord.
+    #[command(visible_alias = "email")]
+    Courriel,
     /// Vérifie si des mots de passe ont fuité (Have I Been Pwned) ; seuls 5 caractères de leur empreinte partent.
     #[command(name = "motdepasse", visible_alias = "password")]
     MotDePasse,
@@ -355,6 +358,11 @@ async fn menu() {
             tr!("rien n'est envoyé en clair", "nothing sent in clear"),
         );
         option(
+            "e",
+            tr!("Adresse courriel : a-t-elle fuité ?", "Email address: has it leaked?"),
+            tr!("avec ton accord", "with your consent"),
+        );
+        option(
             "i",
             tr!("Intégrité des fichiers critiques", "Critical file integrity"),
             tr!("comptes, sudo, SSH, démarrage…", "accounts, sudo, SSH, startup…"),
@@ -415,6 +423,7 @@ async fn menu() {
             "g" | "G" => gaming::menu(),
             "c" | "C" => connexion::tester().await,
             "p" | "P" => fuites::verifier(),
+            "e" | "E" => fuites::verifier_courriel(),
             "i" | "I" => integrite::verifier(false),
             "n" | "N" => {
                 let qui = demander(tr!(
@@ -476,6 +485,10 @@ fn ligne_de_commande() -> clap::Command {
         (
             "connexion",
             "Connection test for gaming: ping, jitter, packet loss, speed and bufferbloat",
+        ),
+        (
+            "courriel",
+            "Email address leaks: the address is sent to the search service, after your consent",
         ),
         (
             "integrite",
@@ -599,6 +612,7 @@ async fn main() {
         Some(Commande::Gaming) => gaming::menu(),
         Some(Commande::Connexion) => connexion::tester().await,
         Some(Commande::MotDePasse) => fuites::verifier(),
+        Some(Commande::Courriel) => fuites::verifier_courriel(),
         Some(Commande::Integrite { accepter, temps_reel }) => {
             if temps_reel {
                 integrite::temps_reel();

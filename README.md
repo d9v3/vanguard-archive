@@ -41,7 +41,7 @@ verdict critère par critère et des conseils.
 - Intégrité des fichiers critiques (comptes, sudo, SSH, PAM, cron, services, démarrage automatique) : empreintes
   BLAKE3, ce qui a changé depuis la référence, et surveillance en direct.
 - Mots de passe fuités : vérifiés par Have I Been Pwned sans jamais envoyer le mot de passe (5 caractères de son
-  empreinte seulement).
+  empreinte seulement) ; fuites d'adresse courriel, après ton accord (l'adresse est envoyée au service).
 - Surveillance toutes les heures : notification si un appareil inconnu arrive, si un port s'ouvre, si la note de
   la machine baisse, ou si la box semble usurpée (adresse MAC partagée ou changée : usurpation ARP).
 - Rapport HTML avec la courbe des notes, et ce qui a changé depuis le bilan précédent.
@@ -67,6 +67,7 @@ Chaque entrée du menu existe aussi en commande :
 | `sentinel connexion` | test de connexion pour le jeu |
 | `sentinel antivirus [--complet]` | analyse antivirus |
 | `sentinel motdepasse` | mots de passe fuités |
+| `sentinel courriel` | fuites d'adresse courriel (XposedOrNot, ou Have I Been Pwned avec `SENTINEL_HIBP_CLE`) |
 | `sentinel integrite [--accepter] [--temps-reel]` | intégrité des fichiers critiques (empreintes BLAKE3), en direct possible |
 | `sentinel maj` | mises à jour |
 | `sentinel reparer` | réparations et nettoyage |
