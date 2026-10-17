@@ -158,6 +158,8 @@ fn clamav(complet: bool) {
         return;
     }
     let h = home();
+    // Analyse rapide : là où arrivent les menaces (téléchargements, bureau, démarrage automatique, programmes de
+    // l'utilisateur). Documents passe par l'analyse complète : des milliers de fichiers, rarement une porte d'entrée.
     let cibles: Vec<PathBuf> = if complet {
         vec![h.clone()]
     } else {
@@ -166,17 +168,25 @@ fn clamav(complet: bool) {
             "Téléchargements",
             "Desktop",
             "Bureau",
-            "Documents",
             ".local/bin",
             ".config/autostart",
         ]
         .iter()
         .map(|d| h.join(d))
-        .chain([PathBuf::from("/tmp")])
         .filter(|p| p.exists())
         .collect()
     };
     let cibles = sans_doublons(cibles);
+    // /tmp : seulement les fichiers récents (7 jours), où atterrit un téléchargement en cours ou un script lancé ;
+    // le reste peut peser des gigaoctets (caches de compilation, préfixes Wine) sans rien apprendre.
+    let liste_tmp = if complet {
+        None
+    } else {
+        let fichiers = fichiers_recents(std::path::Path::new("/tmp"), 7, 5000);
+        let chemin = std::env::temp_dir().join(format!("sentinel-clamav-{}.txt", std::process::id()));
+        let texte: String = fichiers.iter().map(|f| format!("{}\n", f.display())).collect();
+        (!fichiers.is_empty() && std::fs::write(&chemin, texte).is_ok()).then_some((chemin, fichiers.len()))
+    };
     // Jeux, caches et préfixes Wine sont énormes et produisent des faux positifs (cracks, outils anti-triche).
     let exclusions = [
         "Games",
@@ -202,21 +212,31 @@ fn clamav(complet: bool) {
         cmd.arg(format!("--exclude-dir={}", regex_echappe(e)));
     }
     cmd.args(&cibles);
+    if let Some((chemin, _)) = &liste_tmp {
+        cmd.arg(format!("--file-list={}", chemin.display()));
+    }
+    let mut decrites: Vec<String> = cibles.iter().map(|p| p.display().to_string()).collect();
+    if let Some((_, n)) = &liste_tmp {
+        decrites.push(trf!(
+            "/tmp ({n} fichier(s) de moins de 7 jours)",
+            "/tmp ({n} file(s) under 7 days old)"
+        ));
+    }
     trp!(
         "  {GRIS}Moteur : ClamAV. Analyse de : {}{RESET}",
         "  {GRIS}Engine: ClamAV. Scanning: {}{RESET}",
-        cibles
-            .iter()
-            .map(|p| p.display().to_string())
-            .collect::<Vec<_>>()
-            .join(", ")
+        decrites.join(", ")
     );
     trp!(
         "  {GRIS}Cela peut prendre de quelques secondes à plusieurs minutes…{RESET}",
         "  {GRIS}This can take from a few seconds to several minutes…{RESET}"
     );
 
-    let Ok(sortie) = cmd.output() else {
+    let sortie = cmd.output();
+    if let Some((chemin, _)) = &liste_tmp {
+        let _ = std::fs::remove_file(chemin);
+    }
+    let Ok(sortie) = sortie else {
         trp!("  Impossible de lancer clamscan.", "  Could not start clamscan.");
         return;
     };
@@ -301,6 +321,28 @@ fn clamav(complet: bool) {
 /// autre, faisait analyser deux fois les mêmes fichiers ; un fichier infecté était alors signalé deux fois et sa
 /// seconde mise en quarantaine échouait (« fichier système ? »). Vu en test.
 #[cfg(unix)]
+/// Fichiers modifiés depuis moins de `jours` jours sous `dossier`, au plus `max` (les dossiers illisibles sont
+/// sautés sans bruit).
+fn fichiers_recents(dossier: &std::path::Path, jours: u64, max: usize) -> Vec<PathBuf> {
+    let limite = std::time::SystemTime::now() - std::time::Duration::from_secs(jours * 86_400);
+    let mut trouves = Vec::new();
+    let mut a_voir = vec![dossier.to_path_buf()];
+    while let Some(d) = a_voir.pop() {
+        for e in std::fs::read_dir(&d).into_iter().flatten().flatten() {
+            if trouves.len() >= max {
+                return trouves;
+            }
+            let Ok(m) = e.metadata() else { continue };
+            if m.is_dir() {
+                a_voir.push(e.path());
+            } else if m.is_file() && m.modified().is_ok_and(|t| t >= limite) {
+                trouves.push(e.path());
+            }
+        }
+    }
+    trouves
+}
+
 fn sans_doublons(cibles: Vec<PathBuf>) -> Vec<PathBuf> {
     let mut reels: Vec<PathBuf> = cibles.into_iter().map(|p| p.canonicalize().unwrap_or(p)).collect();
     // Trié, un dossier parent passe avant ce qu'il contient.
