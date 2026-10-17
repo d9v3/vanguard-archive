@@ -194,7 +194,13 @@ fn conseils(box_: Option<&Serie>, internet: &Serie, hausse: Option<f64>) -> Vec<
             "Packets are being lost: in game, that means stutter and “teleporting”. Restart the router; if it persists, call your provider."
         ).to_string());
     }
-    if let Some(b) = box_
+    // Une box qui répond plus lentement qu'Internet n'est pas mesurable (routeur virtuel d'une VM, page web de la
+    // box lente) : pas de conseil sur la liaison dans ce cas.
+    let box_mesurable = box_
+        .and_then(Serie::mediane)
+        .zip(internet.mediane())
+        .is_some_and(|(b, i)| b < i);
+    if let Some(b) = box_.filter(|_| box_mesurable)
         && (b.gigue() > 5.0 || b.mediane().is_some_and(|m| m > 5.0) || b.pertes() > 0.0)
     {
         c.push(tr!(
@@ -309,7 +315,10 @@ mod tests {
         let internet = Serie(vec![Some(12.0); 10]);
         assert_eq!(conseils(Some(&stable), &internet, Some(3.0)), Vec::<String>::new());
         let wifi = Serie(vec![Some(2.0), Some(15.0), Some(3.0), Some(40.0)]);
-        let perdu = Serie(vec![Some(12.0), None, Some(12.0)]);
+        let perdu = Serie(vec![Some(30.0), None, Some(30.0)]);
         assert_eq!(conseils(Some(&wifi), &perdu, Some(120.0)).len(), 3);
+        // Box plus lente qu'Internet (routeur virtuel d'une VM) : pas de conseil de câble.
+        let virtuelle = Serie(vec![Some(20.0), Some(35.0), Some(8.0)]);
+        assert_eq!(conseils(Some(&virtuelle), &Serie(vec![Some(18.0); 3]), Some(3.0)), Vec::<String>::new());
     }
 }
