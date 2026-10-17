@@ -66,7 +66,112 @@ fn notifier(titre: &str, corps: &str) {
 }
 
 /// Appelé par le planificateur : scan silencieux, puis notification s'il y a du nouveau.
+/// Catégories surveillées sur cette machine : ce qui trahit une attaque ou une panne. Les mises à jour
+/// disponibles, qui changent tous les jours, n'en font pas partie.
+const CATEGORIES_SURVEILLEES: &[&str] = &[
+    "Pare-feu",
+    "Antivirus",
+    "Ports en écoute",
+    "Persistance",
+    "Certificats",
+    "DNS",
+    "Santé",
+    "Comptes",
+    "Sudo",
+    "Groupes",
+    "Fichiers suspects",
+    "Clés SSH",
+    "Extensions",
+];
+
+/// État de la machine au dernier passage de la surveillance.
+#[derive(serde::Serialize, serde::Deserialize, Default)]
+struct EtatMachine {
+    score: Option<u32>,
+    /// Problèmes moyens ou plus graves des catégories surveillées, « catégorie : message ».
+    alertes: Vec<String>,
+}
+
+fn fichier_etat() -> std::path::PathBuf {
+    reseau::dossier_local().join("surveillance-machine.json")
+}
+
+fn etat_machine(a: &crate::machine::Audit) -> EtatMachine {
+    EtatMachine {
+        score: a.fiable().then_some(a.score),
+        alertes: a
+            .constats
+            .iter()
+            .filter(|c| c.probleme.is_some_and(|n| n >= Niveau::Moyen) && CATEGORIES_SURVEILLEES.contains(&c.categorie))
+            .map(|c| format!("{} : {}", c.categorie, c.message))
+            .collect(),
+    }
+}
+
+/// Un problème comparé sans ses nombres (« 3 % libres » et « 2 % libres » sont le même problème), sauf les ports :
+/// un autre numéro de port est un autre problème.
+fn cle_alerte(alerte: &str) -> String {
+    if alerte.starts_with("Ports en écoute") {
+        return alerte.to_string();
+    }
+    alerte.chars().map(|c| if c.is_ascii_digit() { '#' } else { c }).collect()
+}
+
+/// Notifications à envoyer entre deux passages : (titre, texte).
+fn nouveautes_machine(avant: &EtatMachine, apres: &EtatMachine) -> Vec<(String, String)> {
+    let connues: Vec<String> = avant.alertes.iter().map(|a| cle_alerte(a)).collect();
+    let nouvelles: Vec<&String> = apres.alertes.iter().filter(|a| !connues.contains(&cle_alerte(a))).collect();
+    let mut notes = Vec::new();
+    for a in nouvelles.iter().take(3) {
+        let (cat, msg) = a.split_once(" : ").unwrap_or(("", a.as_str()));
+        notes.push((
+            trf!("Sentinel : {}", "Sentinel: {}", crate::langue::categorie(cat)),
+            msg.to_string(),
+        ));
+    }
+    if nouvelles.len() > 3 {
+        notes.push((
+            tr!("Sentinel : autres problèmes", "Sentinel: other problems").to_string(),
+            trf!(
+                "{} autre(s) problème(s) nouveau(x) : lance « sentinel machine ».",
+                "{} other new problem(s): run “sentinel machine”.",
+                nouvelles.len() - 3
+            ),
+        ));
+    }
+    if let (Some(a), Some(b)) = (avant.score, apres.score)
+        && b + 10 <= a
+    {
+        notes.push((
+            tr!("Sentinel : note en baisse", "Sentinel: grade dropping").to_string(),
+            trf!(
+                "La note de cette machine passe de {a} à {b} : lance « sentinel machine » pour voir pourquoi.",
+                "This machine's grade drops from {a} to {b}: run “sentinel machine” to see why."
+            ),
+        ));
+    }
+    notes
+}
+
+/// Audit silencieux de cette machine, comparé au passage précédent. Le premier passage mémorise seulement.
+fn veiller_machine() {
+    let apres = etat_machine(&crate::machine::auditer(false));
+    let avant: Option<EtatMachine> = std::fs::read_to_string(fichier_etat())
+        .ok()
+        .and_then(|t| serde_json::from_str(&t).ok());
+    if let Some(avant) = &avant {
+        for (titre, texte) in nouveautes_machine(avant, &apres) {
+            notifier(&titre, &texte);
+        }
+    }
+    if let Ok(texte) = serde_json::to_string(&apres) {
+        let _ = std::fs::create_dir_all(reseau::dossier_local());
+        let _ = std::fs::write(fichier_etat(), texte);
+    }
+}
+
 pub async fn surveiller() {
+    veiller_machine();
     let Ok(r) = reseau::executer(Options {
         silencieux: true,
         ..Options::defaut(None, "courants")
@@ -213,4 +318,30 @@ fn desinstaller() -> bool {
         "Unregister-ScheduledTask -TaskName '{TACHE_WINDOWS}' -Confirm:$false"
     ))
     .is_some()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn etat(score: u32, alertes: &[&str]) -> EtatMachine {
+        EtatMachine {
+            score: Some(score),
+            alertes: alertes.iter().map(ToString::to_string).collect(),
+        }
+    }
+
+    #[test]
+    fn nouveautes_de_la_machine() {
+        let avant = etat(90, &["Santé : Disque presque plein : / n'a plus que 30 Go libres (4 %).", "Ports en écoute : 8080/tcp ouvert."]);
+        // Même disque avec d'autres nombres, même port : rien de nouveau.
+        let pareil = etat(88, &["Santé : Disque presque plein : / n'a plus que 25 Go libres (3 %).", "Ports en écoute : 8080/tcp ouvert."]);
+        assert_eq!(nouveautes_machine(&avant, &pareil), Vec::<(String, String)>::new());
+        // Un nouveau port et une note qui chute de 15 points : deux notifications.
+        let pire = etat(75, &["Ports en écoute : 8080/tcp ouvert.", "Ports en écoute : 4444/tcp ouvert."]);
+        let n = nouveautes_machine(&avant, &pire);
+        assert_eq!(n.len(), 2);
+        assert!(n[0].1.contains("4444"));
+        assert!(n[1].1.contains("90") && n[1].1.contains("75"));
+    }
 }
