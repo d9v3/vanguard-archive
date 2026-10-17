@@ -1,24 +1,40 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
   <defs>
-    <linearGradient id="fond" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#2a0b0b"/><stop offset="1" stop-color="#070505"/>
+    <radialGradient id="lueur" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0.35" stop-color="#ff3b2f" stop-opacity="0.55"/><stop offset="0.65" stop-color="#d42020" stop-opacity="0.18"/><stop offset="1" stop-color="#7e0c0c" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="halo" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0.62" stop-color="#fff1e6"/><stop offset="0.72" stop-color="#ff7a5c"/><stop offset="0.86" stop-color="#d42020" stop-opacity="0.6"/><stop offset="1" stop-color="#7e0c0c" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="disque" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#7e0c0c" stop-opacity="0"/><stop offset="0.18" stop-color="#d42020"/><stop offset="0.38" stop-color="#ff7a5c"/>
+      <stop offset="0.5" stop-color="#fff1e6"/><stop offset="0.62" stop-color="#ff7a5c"/><stop offset="0.82" stop-color="#d42020"/><stop offset="1" stop-color="#7e0c0c" stop-opacity="0"/>
     </linearGradient>
+    <filter id="doux" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="1.5"/></filter>
+    <filter id="flou" x="-20%" y="-50%" width="140%" height="200%"><feGaussianBlur stdDeviation="3"/></filter>
+    <linearGradient id="arc" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fff1e6"/><stop offset="0.35" stop-color="#ff7a5c"/><stop offset="0.5" stop-color="#d42020" stop-opacity="0.3"/>
+      <stop offset="0.65" stop-color="#ff7a5c"/><stop offset="1" stop-color="#fff1e6"/>
+    </linearGradient>
+    <clipPath id="arriere"><rect width="256" height="128"/></clipPath>
+    <clipPath id="avant"><rect y="128" width="256" height="128"/></clipPath>
   </defs>
-  <!-- bouclier à facettes : arêtes vives, symétrie gauche/droite -->
-  <g stroke-linejoin="miter">
-    <path d="M128 8 L128 32 L46 57 L24 40 Z" fill="#ff5a4f"/>
-    <path d="M128 8 L128 32 L210 57 L232 40 Z" fill="#ff5a4f"/>
-    <path d="M24 40 L46 57 L46 130 L24 138 Z" fill="#d42020"/>
-    <path d="M232 40 L210 57 L210 130 L232 138 Z" fill="#d42020"/>
-    <path d="M24 138 L46 130 L128 222 L128 248 Z" fill="#9a1212"/>
-    <path d="M232 138 L210 130 L128 222 L128 248 Z" fill="#9a1212"/>
+  <!-- lueur ambiante -->
+  <circle cx="128" cy="128" r="126" fill="url(#lueur)"/>
+  <!-- disque d'accrétion, partie arrière -->
+  <ellipse cx="128" cy="128" rx="122" ry="15" fill="url(#disque)" opacity="0.8"/>
+  <!-- lumière déviée autour de l'horizon -->
+  <circle cx="128" cy="128" r="88" fill="url(#halo)"/>
+  <!-- image du disque courbée par la gravité, au-dessus et au-dessous -->
+  <path fill-rule="evenodd" fill="url(#arc)" opacity="0.8" filter="url(#doux)"
+        d="M128 59 A64 69 0 1 1 127.9 59 Z M128 72 A56 56 0 1 0 128.1 72 Z"/>
+  <!-- horizon : noir absolu -->
+  <circle cx="128" cy="128" r="54" fill="#000"/>
+  <circle cx="128" cy="128" r="55.5" fill="none" stroke="#fff1e6" stroke-width="2" opacity="0.9"/>
+  <!-- disque d'accrétion, partie avant (passe devant l'ombre) -->
+  <g clip-path="url(#avant)">
+    <ellipse cx="128" cy="128" rx="122" ry="15" fill="url(#disque)" filter="url(#flou)"/>
+    <ellipse cx="128" cy="128" rx="116" ry="10" fill="url(#disque)"/>
   </g>
-  <path d="M128 32 L210 57 V130 L128 222 L46 130 V57 Z" fill="url(#fond)"/>
-  <!-- réticule : hexagones et croix de visée -->
-  <g fill="none" stroke-linejoin="miter">
-    <path d="M128 62 L186 96 V164 L128 198 L70 164 V96 Z" stroke="#ff5a4f" stroke-width="2.5" opacity="0.3"/>
-    <path d="M128 88 L163 108 V148 L128 168 L93 148 V108 Z" stroke="#eee3db" stroke-width="8"/>
-    <path d="M128 48 V96 M128 160 V208 M58 128 H106 M150 128 H198" stroke="#eee3db" stroke-width="8"/>
-  </g>
-  <path d="M128 116 L138 128 L128 140 L118 128 Z" fill="#e3261f"/>
+  <ellipse cx="128" cy="128" rx="96" ry="2.2" fill="#fff1e6" opacity="0.85"/>
 </svg>
