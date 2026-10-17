@@ -26,6 +26,10 @@ if [[ ${1:-} != --sans-compiler ]]; then
   cargo build --release --target x86_64-pc-windows-gnu
 fi
 install -Dm755 "$LINUX" "$HOME/.cargo/bin/sentinel"
+# Sauvegarde hors de la maison : les commits partent vers le dépôt privé GitHub (sans bloquer s'il n'y a pas d'Internet).
+if git remote get-url origin >/dev/null 2>&1; then
+  timeout 30 git push -q origin HEAD 2>/dev/null && echo "Code envoyé sur GitHub." || echo "GitHub injoignable : le code partira au prochain déploiement."
+fi
 # Ancien nom (netscan, jusqu'à 0.10.0) : reste une commande, qui lance sentinel.
 ln -sfn sentinel "$HOME/.cargo/bin/netscan"
 
