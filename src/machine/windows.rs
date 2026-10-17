@@ -10,7 +10,7 @@ use crate::ui::{resume, tr, trf, trp};
 
 pub const NOM: &str = "Windows";
 
-const FIN: &str = "__NETSCAN_FIN__";
+const FIN: &str = "__SENTINEL_FIN__";
 
 /// Exécute un script PowerShell et retourne sa sortie (UTF-8), ou `None` en cas d'échec.
 /// Le script doit aller jusqu'au marqueur de fin : une sortie vide sans marqueur (PowerShell bloqué,
@@ -46,16 +46,16 @@ fn illisible(categorie: &'static str) -> Constat {
 fn script_admin(commandes: &[String]) -> String {
     let texte = |s: &str| s.replace('\'', "''");
     let mut script = String::from(tr!(
-        "$Host.UI.RawUI.WindowTitle = 'netscan : correction en cours'\n\
+        "$Host.UI.RawUI.WindowTitle = 'sentinel : correction en cours'\n\
          [Console]::OutputEncoding = [Text.Encoding]::UTF8\n\
          $ErrorActionPreference = 'Stop'\n\
-         Write-Host 'netscan applique une correction.' -ForegroundColor Cyan\n\
+         Write-Host 'sentinel applique une correction.' -ForegroundColor Cyan\n\
          Write-Host 'Une étape longue (mise à jour, analyse, réparation de Windows) peut durer plusieurs minutes : son heure de début est affichée.'\n\
          $echecs = 0\n",
-        "$Host.UI.RawUI.WindowTitle = 'netscan: applying a fix'\n\
+        "$Host.UI.RawUI.WindowTitle = 'sentinel: applying a fix'\n\
          [Console]::OutputEncoding = [Text.Encoding]::UTF8\n\
          $ErrorActionPreference = 'Stop'\n\
-         Write-Host 'netscan is applying a fix.' -ForegroundColor Cyan\n\
+         Write-Host 'sentinel is applying a fix.' -ForegroundColor Cyan\n\
          Write-Host 'A long step (update, scan, Windows repair) can take several minutes: its start time is shown.'\n\
          $echecs = 0\n"
     ));
@@ -97,8 +97,8 @@ pub fn powershell_admin(commandes: &[String]) -> bool {
         chrono::Local::now().format("%Y%m%d-%H%M%S")
     ));
     let entete = trf!(
-        "# Correction proposée par netscan {} le {}.\r\n# Ce script n'est lancé qu'après ton accord (demande d'administrateur).\r\n\r\n",
-        "# Fix proposed by netscan {} on {}.\r\n# This script only runs after your consent (administrator prompt).\r\n\r\n",
+        "# Correction proposée par sentinel {} le {}.\r\n# Ce script n'est lancé qu'après ton accord (demande d'administrateur).\r\n\r\n",
+        "# Fix proposed by sentinel {} on {}.\r\n# This script only runs after your consent (administrator prompt).\r\n\r\n",
         env!("CARGO_PKG_VERSION"),
         chrono::Local::now().format(tr!("%d/%m/%Y à %H:%M", "%Y-%m-%d %H:%M"))
     );
@@ -468,11 +468,12 @@ fn ports_ecoute(pare_feu_actif: bool, ip_lan: Option<&str>) -> Vec<Constat> {
     ) else {
         return vec![illisible("Ports en écoute")];
     };
-    // Ports déjà bloqués en entrée par une règle netscan active : le port écoute toujours, mais n'est plus joignable.
+    // Ports déjà bloqués en entrée par une règle sentinel (ou netscan, l'ancien nom) active : le port écoute toujours,
+    // mais n'est plus joignable.
     // Sans cette lecture, l'alerte et la même correction (une règle de plus à chaque fois) revenaient à chaque audit.
     let bloques: Vec<u16> = if pare_feu_actif {
         ps(
-            "@(Get-NetFirewallRule -DisplayName 'netscan : bloquer *' -ErrorAction SilentlyContinue | \
+            "@(Get-NetFirewallRule -DisplayName 'sentinel : bloquer *','netscan : bloquer *' -ErrorAction SilentlyContinue | \
             Where-Object { $_.Enabled -eq 'True' -and $_.Action -eq 'Block' -and $_.Direction -eq 'Inbound' } | \
             Get-NetFirewallPortFilter | ForEach-Object { $_.LocalPort }) -join ','",
         )
@@ -505,7 +506,7 @@ fn ports_ecoute(pare_feu_actif: bool, ip_lan: Option<&str>) -> Vec<Constat> {
                 "Ports en écoute",
                 Niveau::Info,
                 trf!(
-                    "{port}/tcp ({}) ouvert par « {programme} », bloqué en entrée par la règle « netscan : bloquer {port} » du pare-feu Windows.", "{port}/tcp ({}) opened by “{programme}”, blocked inbound by the “netscan : bloquer {port}” Windows firewall rule.",
+                    "{port}/tcp ({}) ouvert par « {programme} », bloqué en entrée par la règle « sentinel : bloquer {port} » du pare-feu Windows.", "{port}/tcp ({}) opened by “{programme}”, blocked inbound by the “sentinel : bloquer {port}” Windows firewall rule.",
                     i.service
                 ),
             ));
@@ -527,7 +528,7 @@ fn ports_ecoute(pare_feu_actif: bool, ip_lan: Option<&str>) -> Vec<Constat> {
         constats.push(if niveau >= Niveau::Moyen && port != 3389 {
             constat.corriger(
                 trf!("Bloquer le port {port} en entrée dans le pare-feu Windows", "Block inbound port {port} in the Windows firewall"),
-                &[&format!("New-NetFirewallRule -DisplayName 'netscan : bloquer {port}' -Direction Inbound -Protocol TCP -LocalPort {port} -Action Block")],
+                &[&format!("New-NetFirewallRule -DisplayName 'sentinel : bloquer {port}' -Direction Inbound -Protocol TCP -LocalPort {port} -Action Block")],
             )
             .bloquant(format!("{port}/tcp"))
         } else {
@@ -736,7 +737,7 @@ fn constat_windows_update(
     .corriger(action, &installer_windows_update(pilotes))
 }
 
-/// Les quatre petites lectures de `netscan maj` (redémarrage, signatures, périphériques, cartes graphiques) en un
+/// Les quatre petites lectures de `sentinel maj` (redémarrage, signatures, périphériques, cartes graphiques) en un
 /// seul PowerShell : une seconde de démarrage au lieu de quatre. Chaque section a son try et se termine par
 /// « NOM_FIN » : une lecture qui échoue (Defender remplacé par un antivirus tiers…) ne prive pas les autres.
 fn lectures_rapides() -> Option<String> {
@@ -1006,7 +1007,7 @@ fn cartes_graphiques(lectures: Option<&str>) -> Vec<Constat> {
         .collect()
 }
 
-/// Signatures de Defender : la même règle pour l'audit et pour `netscan maj`.
+/// Signatures de Defender : la même règle pour l'audit et pour `sentinel maj`.
 fn signatures(age: u64) -> Constat {
     if age > 3 {
         alerte(

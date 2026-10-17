@@ -273,7 +273,7 @@ fn base64_decoder(texte: &str) -> Option<Vec<u8>> {
     Some(sortie)
 }
 
-/// Ports que netscan a bloqués dans le pare-feu de cet ordinateur, un par ligne (« 8080/tcp »).
+/// Ports que sentinel a bloqués dans le pare-feu de cet ordinateur, un par ligne (« 8080/tcp »).
 /// Un port bloqué écoute toujours : sans ce registre, l'alerte et la même correction revenaient à chaque audit.
 /// Sous Linux, les règles ufw ne sont pas lisibles sans root ; Windows, lui, relit ses règles directement.
 fn fichier_blocages() -> std::path::PathBuf {
@@ -391,7 +391,7 @@ pub fn auditer(bavard: bool) -> Audit {
     os::auditer()
 }
 
-/// Système, programmes, pilotes et firmware : tout ce qui doit être à jour (`netscan maj`). `seulement` limite
+/// Système, programmes, pilotes et firmware : tout ce qui doit être à jour (`sentinel maj`). `seulement` limite
 /// les longues recherches à ces catégories, pour revérifier ce qui vient d'être installé.
 pub fn mises_a_jour_completes(seulement: Option<&[&str]>) -> Vec<Constat> {
     os::mises_a_jour_completes(seulement)
@@ -485,7 +485,7 @@ mod tests {
     #[test]
     fn phrase_de_passe_des_cles_ssh() {
         // Clés générées pour le test, si ssh-keygen est disponible.
-        let dossier = std::env::temp_dir().join(format!("netscan-cles-{}", std::process::id()));
+        let dossier = std::env::temp_dir().join(format!("sentinel-cles-{}", std::process::id()));
         std::fs::create_dir_all(&dossier).unwrap();
         let generer = |nom: &str, phrase: &str| {
             std::process::Command::new("ssh-keygen")

@@ -1,4 +1,4 @@
-# netscan
+# Sentinel
 
 Outil de sécurité en Rust, en français, pour Linux et Windows :
 
@@ -16,7 +16,7 @@ Outil de sécurité en Rust, en français, pour Linux et Windows :
   chaque correction est un script `.ps1` lisible, gardé comme trace.
 - **Scan du réseau local** : appareils, fabricant (base IEEE intégrée), surnoms, ports ouverts, services reconnus à
   leur bannière, risques ; un carnet par réseau (box + nom du Wi-Fi), nouveaux appareils et ports, appareils absents.
-- **Mises à jour** (`netscan maj`, touche `u` du menu) : tout ce qui doit être à jour, vérifié d'un coup puis installé
+- **Mises à jour** (`sentinel maj`, touche `u` du menu) : tout ce qui doit être à jour, vérifié d'un coup puis installé
   après accord.
   - Linux : paquets, Flatpak, Snap, AUR, firmware (fwupd), pilotes DKMS compilés pour chaque noyau installé
     (NVIDIA…), noyau chargé.
@@ -30,12 +30,12 @@ Outil de sécurité en Rust, en français, pour Linux et Windows :
 - **Surveillance** horaire avec notification si un appareil inconnu rejoint le réseau.
 - **Rapport HTML** autonome et daté.
 
-Sans argument, `netscan` ouvre un menu. Sous-commandes : `complet [--html]`, `machine [--json]`, `corriger`,
+Sans argument, `sentinel` ouvre un menu. Sous-commandes : `complet [--html]`, `machine [--json]`, `corriger`,
 `reseau [cible] [-p courants|tous|22,80,8000-8100] [--json]`, `antivirus [--complet]`, `surveillance on|off`,
 `maj`, `reparer`, `gaming` (Windows), `sauvegarder [fichier]`, `restaurer <fichier>`, `nommer <ip|mac> <surnom>`.
 
 **Langue** : français ou anglais, choisi d'après le système (Linux : `LC_ALL`, `LC_MESSAGES`, `LANG` ; Windows : langue
-d'affichage). Pour forcer : `NETSCAN_LANG=fr` ou `NETSCAN_LANG=en`. Les commandes ont aussi un nom anglais (`full`, `audit`,
+d'affichage). Pour forcer : `SENTINEL_LANG=fr` ou `SENTINEL_LANG=en`. Les commandes ont aussi un nom anglais (`full`, `audit`,
 `fix`, `network`, `monitor`, `update`, `repair`, `backup`, `restore`, `name`) ; les réponses o/y et t/a sont acceptées.
 
 À n'utiliser que sur un réseau qui t'appartient ou que tu as le droit d'auditer.
@@ -57,10 +57,10 @@ d'affichage). Pour forcer : `NETSCAN_LANG=fr` ou `NETSCAN_LANG=en`. Les commande
 ## Compilation et clé USB
 
 ```sh
-outils/deployer.sh     # compile Linux (musl, statique) + Windows, installe en local, met à jour la clé NETSCAN
+outils/deployer.sh     # compile Linux (musl, statique) + Windows, installe en local, met à jour la clé SENTINEL
 ```
 
-La clé (exFAT, étiquette `NETSCAN`, fichier témoin `netscan.cle`) contient `Linux/`, `Windows/`, `donnees/` (base portable) et `source/`.
+La clé (exFAT, étiquette `SENTINEL`, fichier témoin `sentinel.cle`) contient `Linux/`, `Windows/`, `donnees/` (base portable) et `source/`.
 Elle est mise à jour automatiquement à chaque compilation et à chaque branchement (unités systemd dans `outils/systemd/`).
 
 Tests : `cargo test` (Linux) ; vérification croisée : `cargo clippy --target x86_64-pc-windows-gnu` ; tests Windows sous Wine.

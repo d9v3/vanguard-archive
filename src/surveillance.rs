@@ -7,7 +7,10 @@ use crate::reseau::{self, Options};
 use crate::risk::Niveau;
 use crate::ui::*;
 
-const NOM: &str = "netscan-surveillance";
+#[cfg(target_os = "linux")]
+const NOM: &str = "sentinel-surveillance";
+/// Nom d'avant le renommage en sentinel (0.10.0) : minuterie Linux, et tâche Windows de la v0.4 et avant.
+const ANCIEN_NOM: &str = "netscan-surveillance";
 
 fn reussit(cmd: &str, args: &[&str]) -> bool {
     Command::new(cmd).args(args).output().is_ok_and(|o| o.status.success())
@@ -17,7 +20,7 @@ fn reussit(cmd: &str, args: &[&str]) -> bool {
 /// sinon la surveillance s'arrêterait dès que la clé est débranchée.
 fn executable() -> String {
     let Ok(exe) = std::env::current_exe() else {
-        return "netscan".into();
+        return "sentinel".into();
     };
     if reseau::cle_usb().is_some_and(|cle| exe.starts_with(&cle)) {
         let dest = reseau::dossier_local()
@@ -44,7 +47,7 @@ fn executable() -> String {
 fn notifier(titre: &str, corps: &str) {
     #[cfg(target_os = "linux")]
     let _ = Command::new("notify-send")
-        .args(["-a", "netscan", "-i", "netscan", "-u", "critical", titre, corps])
+        .args(["-a", "sentinel", "-i", "sentinel", "-u", "critical", titre, corps])
         .status();
     #[cfg(windows)]
     {
@@ -94,6 +97,11 @@ pub async fn surveiller() {
 }
 
 pub fn active() -> bool {
+    // Surveillance installée sous l'ancien nom : remplacée par la nouvelle (le programme a changé de nom aussi).
+    if ancienne_installee() {
+        retirer_ancienne();
+        return installer(&executable());
+    }
     #[cfg(target_os = "linux")]
     return reussit("systemctl", &["--user", "is-enabled", &format!("{NOM}.timer")]);
     #[cfg(windows)]
@@ -120,12 +128,12 @@ fn installer(exe: &str) -> bool {
     let dossier = std::path::PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".config/systemd/user");
     let _ = std::fs::create_dir_all(&dossier);
     let service = trf!(
-        "[Unit]\nDescription=netscan : surveillance du réseau local\n\n[Service]\nType=oneshot\nExecStart={exe} surveiller\nNice=10\n",
-        "[Unit]\nDescription=netscan: local network monitoring\n\n[Service]\nType=oneshot\nExecStart={exe} surveiller\nNice=10\n"
+        "[Unit]\nDescription=sentinel : surveillance du réseau local\n\n[Service]\nType=oneshot\nExecStart={exe} surveiller\nNice=10\n",
+        "[Unit]\nDescription=sentinel: local network monitoring\n\n[Service]\nType=oneshot\nExecStart={exe} surveiller\nNice=10\n"
     );
     let timer = tr!(
-        "[Unit]\nDescription=netscan : scan du réseau toutes les heures\n\n[Timer]\nOnBootSec=5min\nOnUnitActiveSec=1h\nPersistent=true\n\n[Install]\nWantedBy=timers.target\n",
-        "[Unit]\nDescription=netscan: network scan every hour\n\n[Timer]\nOnBootSec=5min\nOnUnitActiveSec=1h\nPersistent=true\n\n[Install]\nWantedBy=timers.target\n"
+        "[Unit]\nDescription=sentinel : scan du réseau toutes les heures\n\n[Timer]\nOnBootSec=5min\nOnUnitActiveSec=1h\nPersistent=true\n\n[Install]\nWantedBy=timers.target\n",
+        "[Unit]\nDescription=sentinel: network scan every hour\n\n[Timer]\nOnBootSec=5min\nOnUnitActiveSec=1h\nPersistent=true\n\n[Install]\nWantedBy=timers.target\n"
     );
     let _ = std::fs::write(dossier.join(format!("{NOM}.service")), service);
     let _ = std::fs::write(dossier.join(format!("{NOM}.timer")), timer);
@@ -135,40 +143,72 @@ fn installer(exe: &str) -> bool {
 
 #[cfg(target_os = "linux")]
 fn desinstaller() -> bool {
+    retirer_ancienne();
+    retirer_minuterie(NOM)
+}
+
+#[cfg(target_os = "linux")]
+fn retirer_minuterie(nom: &str) -> bool {
     let dossier = std::path::PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".config/systemd/user");
-    reussit("systemctl", &["--user", "disable", "--now", &format!("{NOM}.timer")]);
-    let _ = std::fs::remove_file(dossier.join(format!("{NOM}.service")));
-    let _ = std::fs::remove_file(dossier.join(format!("{NOM}.timer")));
+    reussit("systemctl", &["--user", "disable", "--now", &format!("{nom}.timer")]);
+    let _ = std::fs::remove_file(dossier.join(format!("{nom}.service")));
+    let _ = std::fs::remove_file(dossier.join(format!("{nom}.timer")));
     reussit("systemctl", &["--user", "daemon-reload"])
+}
+
+#[cfg(target_os = "linux")]
+fn ancienne_installee() -> bool {
+    reussit("systemctl", &["--user", "is-enabled", &format!("{ANCIEN_NOM}.timer")])
+}
+
+#[cfg(target_os = "linux")]
+fn retirer_ancienne() {
+    retirer_minuterie(ANCIEN_NOM);
 }
 
 /// Nom lisible de la tâche dans le Planificateur de tâches Windows.
 #[cfg(windows)]
-const TACHE_WINDOWS: &str = "netscan - surveillance du reseau";
+const TACHE_WINDOWS: &str = "sentinel - surveillance du reseau";
+/// Tâche des versions 0.5 à 0.10, sous l'ancien nom netscan.
+#[cfg(windows)]
+const ANCIENNE_TACHE_WINDOWS: &str = "netscan - surveillance du reseau";
+
+#[cfg(windows)]
+fn ancienne_installee() -> bool {
+    crate::machine::windows::ps(&format!("Get-ScheduledTask -TaskName '{ANCIENNE_TACHE_WINDOWS}' | Out-Null")).is_some()
+}
+
+#[cfg(windows)]
+fn retirer_ancienne() {
+    let _ = reussit("schtasks", &["/Delete", "/F", "/TN", ANCIEN_NOM]);
+    let _ = crate::machine::windows::ps(&format!(
+        "Unregister-ScheduledTask -TaskName '{ANCIENNE_TACHE_WINDOWS}' -Confirm:$false"
+    ));
+}
 
 #[cfg(windows)]
 fn installer(exe: &str) -> bool {
     use crate::machine::windows::ps;
-    // Ancienne tâche (v0.4 et avant) : retirée au profit de la tâche décrite ci-dessous.
-    let _ = reussit("schtasks", &["/Delete", "/F", "/TN", NOM]);
+    // Anciennes tâches (v0.4 et avant, puis sous le nom netscan) : retirées au profit de la tâche décrite ci-dessous.
+    retirer_ancienne();
     let exe = exe.replace('\'', "''");
     // Tâche visible et décrite : on voit dans le Planificateur ce qu'elle fait et comment l'arrêter.
     let script = trf!(
         "$a = New-ScheduledTaskAction -Execute '{exe}' -Argument 'surveiller'; \
          $t = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -RepetitionInterval (New-TimeSpan -Hours 1); \
          Register-ScheduledTask -TaskName '{TACHE_WINDOWS}' -Action $a -Trigger $t -Force \
-           -Description 'Scan du réseau local toutes les heures par netscan, notification si un appareil inconnu apparaît. Pour arrêter : netscan surveillance off' | Out-Null",
+           -Description 'Scan du réseau local toutes les heures par sentinel, notification si un appareil inconnu apparaît. Pour arrêter : sentinel surveillance off' | Out-Null",
         "$a = New-ScheduledTaskAction -Execute '{exe}' -Argument 'surveiller'; \
          $t = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -RepetitionInterval (New-TimeSpan -Hours 1); \
          Register-ScheduledTask -TaskName '{TACHE_WINDOWS}' -Action $a -Trigger $t -Force \
-           -Description 'Hourly local network scan by netscan, with a notification when an unknown device appears. To stop it: netscan surveillance off' | Out-Null"
+           -Description 'Hourly local network scan by sentinel, with a notification when an unknown device appears. To stop it: sentinel surveillance off' | Out-Null"
     );
     ps(&script).is_some()
 }
 
 #[cfg(windows)]
 fn desinstaller() -> bool {
-    let _ = reussit("schtasks", &["/Delete", "/F", "/TN", NOM]);
+    retirer_ancienne();
     crate::machine::windows::ps(&format!(
         "Unregister-ScheduledTask -TaskName '{TACHE_WINDOWS}' -Confirm:$false"
     ))

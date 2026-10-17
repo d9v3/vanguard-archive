@@ -1,4 +1,4 @@
-//! netscan — vérifie la sécurité de ta machine et de ton réseau, propose et applique des correctifs.
+//! sentinel — vérifie la sécurité de ta machine et de ton réseau, propose et applique des correctifs.
 //!
 //! N'utilise le scan réseau que sur un réseau qui t'appartient ou que tu as le droit d'auditer.
 //! Lancé sans argument, affiche un menu.
@@ -95,7 +95,7 @@ enum Commande {
     /// Sauvegarde la base des appareils et l'état de la surveillance dans un fichier JSON.
     #[command(visible_alias = "backup")]
     Sauvegarder {
-        /// Fichier à écrire (par défaut : netscan-sauvegarde-AAAA-MM-JJ.json dans le dossier personnel ou Documents).
+        /// Fichier à écrire (par défaut : sentinel-sauvegarde-AAAA-MM-JJ.json dans le dossier personnel ou Documents).
         fichier: Option<std::path::PathBuf>,
     },
     /// Ajoute une sauvegarde (ou un appareils.json) à la base actuelle, sans rien effacer.
@@ -155,8 +155,8 @@ impl Session {
         });
         if a_corriger {
             trp!(
-                "\n  🔧 Des corrections sont possibles : choix « 2 » du menu ou « netscan corriger ».",
-                "\n  🔧 Fixes are available: menu choice “2” or “netscan fix”."
+                "\n  🔧 Des corrections sont possibles : choix « 2 » du menu ou « sentinel corriger ».",
+                "\n  🔧 Fixes are available: menu choice “2” or “sentinel fix”."
             );
         }
         let _ = rapport::generer(self.audit.as_ref(), self.reseau.as_ref());
@@ -194,8 +194,8 @@ async fn menu() {
     loop {
         print!("\x1b[2J\x1b[H");
         trp!(
-            "{GRAS}netscan{RESET} — sécurité de ta machine et de ton réseau\n",
-            "{GRAS}netscan{RESET} — security of your machine and your network\n"
+            "{GRAS}Sentinel{RESET} — sécurité de ta machine et de ton réseau\n",
+            "{GRAS}Sentinel{RESET} — security of your machine and your network\n"
         );
         trp!(
             "  1. Bilan complet (machine + réseau)       {GRIS}← commencer ici{RESET}",
@@ -373,7 +373,7 @@ fn ligne_de_commande() -> clap::Command {
     })
     .mut_subcommand("sauvegarder", |s| {
         s.mut_arg("fichier", |a| {
-            a.help("File to write (default: netscan-sauvegarde-YYYY-MM-DD.json in the home or Documents folder)")
+            a.help("File to write (default: sentinel-sauvegarde-YYYY-MM-DD.json in the home or Documents folder)")
         })
     })
     .mut_subcommand("nommer", |s| {

@@ -251,11 +251,11 @@ pub(crate) fn ecrire_atomique(chemin: &std::path::Path, contenu: &str) -> std::i
     resultat
 }
 
-/// Verrou entre processus netscan (fichier créé de façon exclusive, retiré à la fin).
+/// Verrou entre processus sentinel (fichier créé de façon exclusive, retiré à la fin).
 struct Verrou(PathBuf);
 
 impl Verrou {
-    /// Attend au plus 10 s. Un verrou de plus de 2 minutes vient d'un netscan interrompu : on le reprend.
+    /// Attend au plus 10 s. Un verrou de plus de 2 minutes vient d'un sentinel interrompu : on le reprend.
     fn prendre(dossier: &std::path::Path) -> Option<Verrou> {
         let _ = std::fs::create_dir_all(dossier);
         let chemin = dossier.join("appareils.verrou");
@@ -273,8 +273,8 @@ impl Verrou {
                         let _ = std::fs::remove_file(&chemin);
                     } else if std::time::Instant::now() > fin {
                         tre!(
-                            "Attention : base des appareils occupée par un autre netscan, enregistrement sans verrou.",
-                            "Warning: device database locked by another netscan, saving without a lock."
+                            "Attention : base des appareils occupée par un autre sentinel, enregistrement sans verrou.",
+                            "Warning: device database locked by another sentinel, saving without a lock."
                         );
                         return None;
                     } else {
@@ -382,18 +382,20 @@ pub fn nommer(qui: &str, surnom: Option<&str>) -> Result<String, String> {
     }
     if trouves == 0 {
         return Err(trf!(
-            "aucun appareil « {qui} » dans la base : lance d'abord un scan du réseau (netscan reseau)",
-            "no device “{qui}” in the database: first run a network scan (netscan network)"
+            "aucun appareil « {qui} » dans la base : lance d'abord un scan du réseau (sentinel reseau)",
+            "no device “{qui}” in the database: first run a network scan (sentinel network)"
         ));
     }
     base.enregistrer(&chemins);
     Ok(decrit)
 }
 
-/// Fichier témoin à la racine de la clé USB netscan.
-pub const TEMOIN_CLE: &str = "netscan.cle";
+/// Fichier témoin à la racine de la clé USB sentinel.
+pub const TEMOIN_CLE: &str = "sentinel.cle";
+/// Témoin des clés préparées sous l'ancien nom (netscan, jusqu'à 0.10.0), renommé au prochain déploiement.
+const ANCIEN_TEMOIN_CLE: &str = "netscan.cle";
 
-/// Clé USB netscan branchée, si elle est trouvée (dossier racine contenant `netscan.cle`).
+/// Clé USB sentinel branchée, si elle est trouvée (dossier racine contenant `sentinel.cle` ou `netscan.cle`).
 pub fn cle_usb() -> Option<PathBuf> {
     // D'abord : sommes-nous lancés depuis la clé ? (exe dans <clé>/Linux/, <clé>/Windows/…)
     let exe = std::env::current_exe().ok().and_then(|e| e.canonicalize().ok());
@@ -415,7 +417,7 @@ pub fn cle_usb() -> Option<PathBuf> {
     depuis_exe
         .into_iter()
         .chain(montages)
-        .find(|d| d.join(TEMOIN_CLE).is_file())
+        .find(|d| d.join(TEMOIN_CLE).is_file() || d.join(ANCIEN_TEMOIN_CLE).is_file())
 }
 
 /// Données (historique des appareils, rapports) : sur la clé USB quand elle est branchée,
@@ -432,7 +434,14 @@ pub fn dossier_local() -> PathBuf {
     let base = std::env::var_os("XDG_DATA_HOME")
         .map(PathBuf::from)
         .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share")));
-    base.unwrap_or_default().join("netscan")
+    let base = base.unwrap_or_default();
+    let dossier = base.join("sentinel");
+    // Ancien nom (netscan, jusqu'à 0.10.0) : le dossier est renommé une fois, base et quarantaine comprises.
+    let ancien = base.join("netscan");
+    if !dossier.exists() && ancien.is_dir() {
+        let _ = std::fs::rename(&ancien, &dossier);
+    }
+    dossier
 }
 
 fn parse_ports(spec: &str) -> Result<Vec<u16>, String> {
@@ -722,8 +731,8 @@ pub async fn executer(o: Options) -> Result<Rapport, String> {
         );
         if ips.iter().all(std::net::Ipv4Addr::is_loopback) {
             tre!(
-                "{GRIS}Note : 127.0.0.1 montre aussi les services réservés à cette machine. Pour ce qui est vraiment exposé au réseau : netscan machine.{RESET}",
-                "{GRIS}Note: 127.0.0.1 also shows services reserved to this machine. For what is really exposed to the network: netscan machine.{RESET}"
+                "{GRIS}Note : 127.0.0.1 montre aussi les services réservés à cette machine. Pour ce qui est vraiment exposé au réseau : sentinel machine.{RESET}",
+                "{GRIS}Note: 127.0.0.1 also shows services reserved to this machine. For what is really exposed to the network: sentinel machine.{RESET}"
             );
         }
     }
@@ -921,7 +930,7 @@ mod tests {
 
     #[test]
     fn base_avec_bom_ou_abimee() {
-        let dossier = std::env::temp_dir().join(format!("netscan-base-{}", std::process::id()));
+        let dossier = std::env::temp_dir().join(format!("sentinel-base-{}", std::process::id()));
         std::fs::create_dir_all(&dossier).unwrap();
         let p = dossier.join("appareils.json");
         std::fs::write(
@@ -943,7 +952,7 @@ mod tests {
 
     #[test]
     fn ecriture_atomique_et_verrou() {
-        let dossier = std::env::temp_dir().join(format!("netscan-atomique-{}", std::process::id()));
+        let dossier = std::env::temp_dir().join(format!("sentinel-atomique-{}", std::process::id()));
         let fichier = dossier.join("appareils.json");
         ecrire_atomique(&fichier, "{\"reseaux\":{}}").unwrap();
         ecrire_atomique(&fichier, "{\"reseaux\":{\"box\":{\"nom\":null,\"appareils\":{}}}}").unwrap();

@@ -67,7 +67,7 @@ pub fn proposer(constats: &[Constat]) -> Vec<&'static str> {
                 }
                 trp!("    {VERT}✔ fait{RESET}", "    {VERT}✔ done{RESET}");
             } else {
-                // Sans cette ligne, un échec (UAC refusée, commande en erreur) passait sans un mot de netscan.
+                // Sans cette ligne, un échec (UAC refusée, commande en erreur) passait sans un mot de sentinel.
                 trp!(
                     "    ✖ non appliqué : voir le message ci-dessus",
                     "    ✖ not applied: see the message above"

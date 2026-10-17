@@ -190,6 +190,7 @@ fn clamav(complet: bool) {
         "node_modules",
         // Dossiers privés des services systemd (root seul) : illisibles, ils feraient compter des erreurs.
         "systemd-private-[^/]*",
+        ".local/share/sentinel/quarantaine",
         ".local/share/netscan/quarantaine",
         ".snapshots",
         ".Trash",
@@ -515,7 +516,7 @@ mod tests {
     #[test]
     fn quarantaine_retire_le_fichier_et_ses_droits() {
         use std::os::unix::fs::PermissionsExt;
-        let base = std::env::temp_dir().join(format!("netscan-test-{}", std::process::id()));
+        let base = std::env::temp_dir().join(format!("sentinel-test-{}", std::process::id()));
         let suspect = base.join("suspect.sh");
         std::fs::create_dir_all(&base).unwrap();
         std::fs::write(&suspect, "#!/bin/sh\necho pirate\n").unwrap();
@@ -528,7 +529,7 @@ mod tests {
 
     #[test]
     fn dossiers_analyses_une_seule_fois() {
-        let base = std::env::temp_dir().join(format!("netscan-cibles-{}", std::process::id()));
+        let base = std::env::temp_dir().join(format!("sentinel-cibles-{}", std::process::id()));
         let bureau = base.join("Bureau");
         std::fs::create_dir_all(bureau.join("sous")).unwrap();
         std::os::unix::fs::symlink(&bureau, base.join("Desktop")).unwrap();

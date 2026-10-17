@@ -1,0 +1,14 @@
+[Unit]
+Description=sentinel : mettre à jour la clé USB SENTINEL
+# Déclenché au montage de la clé (WantedBy) et par sentinel-compilation.path après chaque compilation :
+# --sans-compiler, sinon il recompile (environnement différent). Le .path part une fois par binaire écrit :
+# deployer.sh attend la fin de cargo et ne notifie qu'une fois par version.
+# NETSCAN : étiquette des clés préparées sous l'ancien nom.
+After=run-media-alice-SENTINEL.mount run-media-alice-NETSCAN.mount
+
+[Service]
+Type=oneshot
+ExecStart=/home/alice/Projects/sentinel/outils/deployer.sh --sans-compiler
+
+[Install]
+WantedBy=run-media-alice-SENTINEL.mount run-media-alice-NETSCAN.mount

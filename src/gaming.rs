@@ -15,7 +15,7 @@ use crate::ui::*;
 /// ce n'est pas un échec.
 const DEJA_INSTALLE: &str = "-1978335189, -1978335135";
 
-/// Ce que netscan lit avant d'afficher le menu : une photo de l'état, lue telle quelle depuis PowerShell.
+/// Ce que sentinel lit avant d'afficher le menu : une photo de l'état, lue telle quelle depuis PowerShell.
 #[allow(clippy::struct_excessive_bools)]
 #[derive(Default, Deserialize)]
 #[serde(default)]

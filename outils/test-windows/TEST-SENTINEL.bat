@@ -1,5 +1,5 @@
 @echo off
-rem Lance le test complet de netscan (double-clic).
+rem Lance le test complet de sentinel (double-clic).
 rem pushd donne une lettre de lecteur au partage reseau (cmd refuse les chemins \\serveur comme dossier courant).
 pushd "%~dp0"
 echo Dossier : %CD%

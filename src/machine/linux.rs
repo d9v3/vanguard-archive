@@ -6,10 +6,12 @@ use std::process::Command;
 
 use super::{Audit, Constat, alerte, cles_ssh, impossible, ok, score, sortie};
 
-/// Ajouts de netscan à la configuration de sshd (lu en premier : sshd garde la première valeur trouvée).
-const SSHD_NETSCAN: &str = "/etc/ssh/sshd_config.d/00-netscan.conf";
-/// Réglages du noyau posés par netscan, gardés au redémarrage.
-const SYSCTL_NETSCAN: &str = "/etc/sysctl.d/99-netscan.conf";
+/// Ajouts de sentinel à la configuration de sshd (lu en premier : sshd garde la première valeur trouvée).
+const SSHD_SENTINEL: &str = "/etc/ssh/sshd_config.d/00-sentinel.conf";
+/// Réglages du noyau posés par sentinel, gardés au redémarrage.
+const SYSCTL_SENTINEL: &str = "/etc/sysctl.d/99-sentinel.conf";
+/// Même fichier sous l'ancien nom (netscan, jusqu'à 0.10.0) : repris puis remplacé à la prochaine correction.
+const SYSCTL_ANCIEN: &str = "/etc/sysctl.d/99-netscan.conf";
 use crate::risk::{Niveau, info_port};
 use crate::{tr, trf, trw};
 
@@ -396,7 +398,7 @@ fn ports_ecoute(pare_feu_actif: bool, ufw: bool) -> Vec<Constat> {
                     "Ports en écoute",
                     Niveau::Info,
                     trf!(
-                        "{cle} ({}) ouvert par « {programme} », bloqué en entrée par la règle ufw que netscan a ajoutée (vérifier : sudo ufw status).", "{cle} ({}) opened by “{programme}”, blocked inbound by the ufw rule netscan added (check: sudo ufw status).",
+                        "{cle} ({}) ouvert par « {programme} », bloqué en entrée par la règle ufw que sentinel a ajoutée (vérifier : sudo ufw status).", "{cle} ({}) opened by “{programme}”, blocked inbound by the ufw rule sentinel added (check: sudo ufw status).",
                         i.service
                     ),
                 ));
@@ -407,7 +409,7 @@ fn ports_ecoute(pare_feu_actif: bool, ufw: bool) -> Vec<Constat> {
                     tr!("Faire écouter Ollama uniquement en local (127.0.0.1)", "Make Ollama listen locally only (127.0.0.1)"),
                     &[
                         "sudo mkdir -p /etc/systemd/system/ollama.service.d",
-                        "printf '[Service]\\nEnvironment=OLLAMA_HOST=127.0.0.1\\n' | sudo tee /etc/systemd/system/ollama.service.d/netscan.conf >/dev/null",
+                        "printf '[Service]\\nEnvironment=OLLAMA_HOST=127.0.0.1\\n' | sudo tee /etc/systemd/system/ollama.service.d/sentinel.conf >/dev/null",
                         "sudo systemctl daemon-reload",
                         "sudo systemctl restart ollama",
                     ],
@@ -680,7 +682,7 @@ fn ssh_serveur() -> Constat {
         .corriger(
             tr!("Interdire la connexion SSH en root", "Forbid root login over SSH"),
             &[
-                &format!("echo 'PermitRootLogin no' | sudo tee -a {SSHD_NETSCAN} >/dev/null"),
+                &format!("echo 'PermitRootLogin no' | sudo tee -a {SSHD_SENTINEL} >/dev/null"),
                 "sudo sshd -t && sudo systemctl reload sshd",
             ],
         );
@@ -699,7 +701,7 @@ fn ssh_serveur() -> Constat {
             c.corriger(
                 tr!("N'accepter que les clés SSH (tu as déjà des clés autorisées)", "Accept SSH keys only (you already have authorized keys)"),
                 &[
-                    &format!("printf 'PasswordAuthentication no\\nKbdInteractiveAuthentication no\\n' | sudo tee -a {SSHD_NETSCAN} >/dev/null"),
+                    &format!("printf 'PasswordAuthentication no\\nKbdInteractiveAuthentication no\\n' | sudo tee -a {SSHD_SENTINEL} >/dev/null"),
                     "sudo sshd -t && sudo systemctl reload sshd",
                 ],
             )
@@ -1031,7 +1033,7 @@ struct Faille {
     corrigee: bool,
 }
 
-/// Gravité écrite par les distributions (anglais), en niveau de netscan. Inconnue : on ne minimise pas.
+/// Gravité écrite par les distributions (anglais), en niveau de sentinel. Inconnue : on ne minimise pas.
 fn gravite(texte: &str) -> Niveau {
     match texte.trim().to_ascii_lowercase().as_str() {
         "critical" => Niveau::Critique,
@@ -1793,7 +1795,9 @@ fn durcissement_noyau() -> Constat {
     // Le fichier est réécrit en entier : on garde les réglages qu'une correction précédente y avait mis,
     // sinon ils sauteraient au prochain redémarrage.
     let lignes = fusion_sysctl(
-        &std::fs::read_to_string(SYSCTL_NETSCAN).unwrap_or_default(),
+        &std::fs::read_to_string(SYSCTL_SENTINEL)
+            .or_else(|_| std::fs::read_to_string(SYSCTL_ANCIEN))
+            .unwrap_or_default(),
         &faibles
             .iter()
             .map(|(c, _, m, _)| (c.replace('/', "."), *m))
@@ -1807,17 +1811,18 @@ fn durcissement_noyau() -> Constat {
     )
     .corriger(
         tr!(
-            "Appliquer les valeurs sûres (fichier /etc/sysctl.d/99-netscan.conf, gardé au redémarrage)",
-            "Apply the safe values (file /etc/sysctl.d/99-netscan.conf, kept after restart)"
+            "Appliquer les valeurs sûres (fichier /etc/sysctl.d/99-sentinel.conf, gardé au redémarrage)",
+            "Apply the safe values (file /etc/sysctl.d/99-sentinel.conf, kept after restart)"
         ),
         &[
-            &format!("printf '{lignes}' | sudo tee {SYSCTL_NETSCAN} >/dev/null"),
+            &format!("printf '{lignes}' | sudo tee {SYSCTL_SENTINEL} >/dev/null"),
+            &format!("sudo rm -f {SYSCTL_ANCIEN}"),
             "sudo sysctl --system >/dev/null",
         ],
     )
 }
 
-/// Contenu de 99-netscan.conf : les réglages déjà présents, mis à jour ou complétés par les nouveaux.
+/// Contenu de 99-sentinel.conf : les réglages déjà présents, mis à jour ou complétés par les nouveaux.
 fn fusion_sysctl(existant: &str, nouveaux: &[(String, i64)]) -> String {
     let mut reglages: Vec<(String, String)> = existant
         .lines()
@@ -3204,7 +3209,7 @@ mod tests {
 
     #[test]
     fn sysctl_garde_les_reglages_precedents() {
-        let existant = "# netscan\nkernel.kptr_restrict = 1\nkernel.dmesg_restrict=0\nmauvais = $(rm -rf ~)\n";
+        let existant = "# sentinel\nkernel.kptr_restrict = 1\nkernel.dmesg_restrict=0\nmauvais = $(rm -rf ~)\n";
         let nouveaux = [
             ("kernel.dmesg_restrict".to_string(), 1),
             ("fs.protected_symlinks".to_string(), 1),
@@ -3367,7 +3372,7 @@ mod tests {
         assert!(commande_suspecte("~/.cache/.u/agent", true).is_some());
         assert!(commande_suspecte("%h/.mozilla/x", true).is_some());
         assert!(commande_suspecte("~/.local/bin/plein-ecran", true).is_none());
-        assert!(commande_suspecte("%h/.cargo/bin/netscan surveiller", true).is_none());
+        assert!(commande_suspecte("%h/.cargo/bin/sentinel surveiller", true).is_none());
         assert!(commande_suspecte("/usr/bin/xrandr --output DP-1", true).is_none());
         assert!(commande_suspecte("cd /tmp/x", false).is_none());
     }

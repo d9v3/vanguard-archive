@@ -1,0 +1,10 @@
+[Unit]
+Description=sentinel : surveiller les nouvelles compilations
+
+[Path]
+PathChanged=/home/alice/Projects/sentinel/target/x86_64-unknown-linux-musl/release/sentinel
+PathChanged=/home/alice/Projects/sentinel/target/x86_64-pc-windows-gnu/release/sentinel.exe
+Unit=sentinel-cle.service
+
+[Install]
+WantedBy=default.target

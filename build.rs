@@ -1,4 +1,4 @@
-//! Fiche d'identité de netscan.exe (onglet « Détails » des propriétés du fichier) et manifeste Windows.
+//! Fiche d'identité de sentinel.exe (onglet « Détails » des propriétés du fichier) et manifeste Windows.
 
 fn main() {
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("windows") {
@@ -10,12 +10,12 @@ fn main() {
         res.set_windres_path("x86_64-w64-mingw32-windres");
         res.set_ar_path("x86_64-w64-mingw32-ar");
     }
-    res.set("ProductName", "netscan")
-        .set("FileDescription", "netscan - bilan de sécurité personnel (machine, réseau local, antivirus)")
-        .set("CompanyName", "Projet personnel netscan")
+    res.set("ProductName", "Sentinel")
+        .set("FileDescription", "sentinel - bilan de sécurité personnel (machine, réseau local, antivirus)")
+        .set("CompanyName", "Projet personnel Sentinel")
         .set("LegalCopyright", "Projet personnel, usage sur ses propres appareils")
-        .set("OriginalFilename", "netscan.exe")
-        // asInvoker : netscan démarre sans droits admin ; seules les corrections les demandent, une à une.
+        .set("OriginalFilename", "sentinel.exe")
+        // asInvoker : sentinel démarre sans droits admin ; seules les corrections les demandent, une à une.
         .set_manifest(
             r#"<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
   <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">

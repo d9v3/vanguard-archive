@@ -1,5 +1,5 @@
 //! Lancement des commandes système avec un délai maximal : un outil qui ne répond plus (systemctl, gsettings,
-//! PowerShell, gestionnaire de paquets hors ligne…) ne doit jamais figer netscan.
+//! PowerShell, gestionnaire de paquets hors ligne…) ne doit jamais figer sentinel.
 
 use std::io::Read;
 use std::process::{Command, Stdio};

@@ -1,5 +1,5 @@
-﻿# Test complet de netscan sur un vrai Windows.
-# 1) relève l'état réel du système (référence), 2) lance netscan, 3) étapes guidées.
+﻿# Test complet de sentinel sur un vrai Windows.
+# 1) relève l'état réel du système (référence), 2) lance sentinel, 3) étapes guidées.
 # Tous les résultats vont dans le dossier « resultats » à côté de ce script.
 
 $ErrorActionPreference = 'Continue'
@@ -12,10 +12,10 @@ New-Item -ItemType Directory -Force $res | Out-Null
 Get-ChildItem $res | Remove-Item -Force -ErrorAction SilentlyContinue
 
 # On lance une copie locale : un .exe sur un partage réseau déclenche des avertissements de sécurité.
-$local = Join-Path $env:LOCALAPPDATA 'netscan-test'
+$local = Join-Path $env:LOCALAPPDATA 'sentinel-test'
 New-Item -ItemType Directory -Force $local | Out-Null
-Copy-Item (Join-Path $partage 'netscan.exe') $local -Force
-$exe = Join-Path $local 'netscan.exe'
+Copy-Item (Join-Path $partage 'sentinel.exe') $local -Force
+$exe = Join-Path $local 'sentinel.exe'
 Unblock-File $exe -ErrorAction SilentlyContinue
 
 function Note($texte) { Add-Content -Path (Join-Path $res 'journal.txt') -Value $texte -Encoding UTF8; Write-Host $texte }
@@ -26,13 +26,13 @@ function Etape($nom) {
     Note "=== $nom === $(Get-Date -Format 'HH:mm:ss')"
 }
 
-# Lance netscan sans interaction ; garde sortie, erreurs, code de retour et durée.
+# Lance sentinel sans interaction ; garde sortie, erreurs, code de retour et durée.
 function Lancer($fichier, [string[]]$arguments) {
     $debut = Get-Date
     $p = Start-Process -FilePath $exe -ArgumentList $arguments -NoNewWindow -Wait -PassThru `
         -RedirectStandardOutput (Join-Path $res "$fichier.out.txt") -RedirectStandardError (Join-Path $res "$fichier.err.txt")
     $duree = ((Get-Date) - $debut).TotalSeconds
-    Note ("netscan {0} -> code {1}, {2:N1} s" -f ($arguments -join ' '), $p.ExitCode, $duree)
+    Note ("sentinel {0} -> code {1}, {2:N1} s" -f ($arguments -join ' '), $p.ExitCode, $duree)
     Get-Content (Join-Path $res "$fichier.out.txt") -Encoding UTF8 | Select-Object -First 60 | ForEach-Object { Write-Host $_ }
 }
 
@@ -42,13 +42,13 @@ function Question($texte) {
     return $r -match '^(o|oui|y)'
 }
 
-# Référence : chaque valeur lue directement, pour comparer avec les conclusions de netscan.
+# Référence : chaque valeur lue directement, pour comparer avec les conclusions de sentinel.
 function Ref($nom, [scriptblock]$bloc) {
     try { $v = (& $bloc | Out-String).Trim() } catch { $v = "ERREUR : $($_.Exception.Message)" }
     Add-Content -Path (Join-Path $res 'reference.txt') -Value "### $nom`r`n$v`r`n" -Encoding UTF8
 }
 
-Write-Host 'Test complet de netscan — environ 5 à 15 minutes.' -ForegroundColor Green
+Write-Host 'Test complet de sentinel — environ 5 à 15 minutes.' -ForegroundColor Green
 Write-Host 'Quelques questions te seront posées ; réponds o (oui) ou n (non).'
 
 Etape '1. Référence : état réel de Windows'
@@ -90,7 +90,7 @@ Lancer 'local-tous' @('reseau', '127.0.0.1', '-p', 'tous')
 Etape '6. Menu (ouverture puis q)'
 cmd /c "echo q| `"$exe`" > `"$res\menu.out.txt`" 2>&1"
 Note "menu -> code $LASTEXITCODE"
-# Entrée fermée (comme Ctrl-D) : netscan doit quitter, pas tourner en boucle (bug corrigé en 0.9.7).
+# Entrée fermée (comme Ctrl-D) : sentinel doit quitter, pas tourner en boucle (bug corrigé en 0.9.7).
 $vide = Join-Path $res 'vide.txt'
 Set-Content -Path $vide -Value '' -NoNewline
 $p = Start-Process -FilePath $exe -RedirectStandardInput $vide -RedirectStandardOutput (Join-Path $res 'menu-eof.out.txt') -NoNewWindow -PassThru
@@ -99,14 +99,14 @@ else { $p.Kill(); Note 'menu avec entrée fermée -> BOUCLE SANS FIN (bug)' }
 
 Etape '7. Surveillance : activation puis désactivation (Planificateur de tâches)'
 Lancer 'surveillance-on' @('surveillance', 'on')
-# Nom de la tâche depuis la 0.5.0 (l'ancien « netscan-surveillance » n'existe plus).
-$tache = 'netscan - surveillance du reseau'
+# Nom de la tâche depuis la 0.11.0 (les anciennes tâches « netscan… » sont retirées à l'activation).
+$tache = 'sentinel - surveillance du reseau'
 Ref 'Tâche planifiée après activation' { Get-ScheduledTask -TaskName $tache | Select-Object TaskName, State, Description | Format-List; (Get-ScheduledTask -TaskName $tache).Actions | Format-List Execute, Arguments }
 Lancer 'surveillance-off' @('surveillance', 'off')
 Ref 'Tâche planifiée après désactivation' { if (Get-ScheduledTask -TaskName $tache -ErrorAction SilentlyContinue) { 'ENCORE PRÉSENTE (bug)' } else { 'absente (normal)' } }
 
 Etape '8. Notification « nouvel appareil »'
-$base = Join-Path $env:LOCALAPPDATA 'netscan\appareils.json'
+$base = Join-Path $env:LOCALAPPDATA 'sentinel\appareils.json'
 if (Test-Path $base) {
     # On retire un appareil de la base de test : au scan suivant, il doit être signalé comme nouveau.
     $json = Get-Content $base -Raw -Encoding UTF8 | ConvertFrom-Json
@@ -136,8 +136,8 @@ if (Question 'Lancer l''analyse rapide Defender (quelques minutes) ?') {
 }
 
 Etape '11. Corrections avec UAC (refus, puis acceptation, puis port bloqué)'
-Write-Host 'Ce test coupe le pare-feu du profil « Privé » de la VM, puis netscan doit le réparer.' -ForegroundColor Yellow
-Write-Host 'netscan ne bloque jamais le port 3389 et ne coupe jamais le Bureau à distance utilisé : ce test est sans risque.' -ForegroundColor Yellow
+Write-Host 'Ce test coupe le pare-feu du profil « Privé » de la VM, puis sentinel doit le réparer.' -ForegroundColor Yellow
+Write-Host 'sentinel ne bloque jamais le port 3389 et ne coupe jamais le Bureau à distance utilisé : ce test est sans risque.' -ForegroundColor Yellow
 if (Question 'Faire ce test ?') {
     Start-Process powershell -Verb RunAs -Wait -ArgumentList '-NoProfile', '-Command', 'Set-NetFirewallProfile -Profile Private -Enabled False'
     Ref 'Pare-feu après coupure volontaire' { Get-NetFirewallProfile | Select-Object Name, Enabled | Format-Table -AutoSize }
@@ -146,29 +146,29 @@ if (Question 'Faire ce test ?') {
     Write-Host '11a. Réponds « o » pour le pare-feu, puis clique NON dans la fenêtre UAC. Réponds « n » à tout le reste.' -ForegroundColor Yellow
     & $exe corriger
     Note "corriger (UAC refusée) -> code $LASTEXITCODE"
-    [void](Question 'netscan a-t-il dit « Demande d''administrateur refusée : rien n''a été modifié » (et PAS « ✔ fait ») ?')
+    [void](Question 'sentinel a-t-il dit « Demande d''administrateur refusée : rien n''a été modifié » (et PAS « ✔ fait ») ?')
 
     Write-Host ''
     Write-Host '11b. Réponds « o » pour le pare-feu et accepte l''UAC. Pour les ports, réponds « o » au port 135 seulement, « n » à tout le reste.' -ForegroundColor Yellow
     & $exe corriger
     Note "corriger (UAC acceptée) -> code $LASTEXITCODE"
-    Ref 'Pare-feu après netscan corriger' { Get-NetFirewallProfile | Select-Object Name, Enabled | Format-Table -AutoSize }
-    Ref 'Règles netscan créées' { Get-NetFirewallRule -DisplayName 'netscan : bloquer *' -ErrorAction SilentlyContinue | Select-Object DisplayName, Enabled, Action | Format-Table -AutoSize }
+    Ref 'Pare-feu après sentinel corriger' { Get-NetFirewallProfile | Select-Object Name, Enabled | Format-Table -AutoSize }
+    Ref 'Règles sentinel créées' { Get-NetFirewallRule -DisplayName 'sentinel : bloquer *' -ErrorAction SilentlyContinue | Select-Object DisplayName, Enabled, Action | Format-Table -AutoSize }
     if (-not (Get-NetFirewallProfile -Profile Private).Enabled) {
         Note 'Pare-feu Privé toujours coupé : remise en marche par le script.'
         Start-Process powershell -Verb RunAs -Wait -ArgumentList '-NoProfile', '-Command', 'Set-NetFirewallProfile -Profile Private -Enabled True'
     }
     [void](Question 'La correction s''est-elle bien passée (affichage clair, une fenêtre UAC par correction, « OK » à chaque étape) ?')
 
-    # Un port bloqué par netscan ne doit plus être signalé comme à corriger (0.9.6).
+    # Un port bloqué par sentinel ne doit plus être signalé comme à corriger (0.9.6).
     Lancer 'machine-apres-blocage' @('machine')
     $apres = Get-Content (Join-Path $res 'machine-apres-blocage.out.txt') -Raw -Encoding UTF8
     if ($apres -match 'bloqué en entrée par la règle') { Note 'Port bloqué reconnu à l''audit suivant : OK' }
     else { Note 'Aucun port reconnu comme bloqué (normal seulement si aucun port n''a été bloqué en 11b)' }
 
-    if (Question 'Retirer maintenant les règles « netscan : bloquer » créées pendant le test ?') {
-        Start-Process powershell -Verb RunAs -Wait -ArgumentList '-NoProfile', '-Command', "Remove-NetFirewallRule -DisplayName 'netscan : bloquer *'"
-        Ref 'Règles netscan après nettoyage' { @(Get-NetFirewallRule -DisplayName 'netscan : bloquer *' -ErrorAction SilentlyContinue).Count }
+    if (Question 'Retirer maintenant les règles « sentinel : bloquer » créées pendant le test ?') {
+        Start-Process powershell -Verb RunAs -Wait -ArgumentList '-NoProfile', '-Command', "Remove-NetFirewallRule -DisplayName 'sentinel : bloquer *'"
+        Ref 'Règles sentinel après nettoyage' { @(Get-NetFirewallRule -DisplayName 'sentinel : bloquer *' -ErrorAction SilentlyContinue).Count }
     }
 }
 
