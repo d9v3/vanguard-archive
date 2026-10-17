@@ -11,6 +11,7 @@ mod donnees;
 mod fuites;
 #[cfg(windows)]
 mod gaming;
+mod historique;
 mod langue;
 mod machine;
 mod maj;
@@ -155,6 +156,10 @@ impl Session {
         }
         if let Some(g) = [m, r].into_iter().flatten().min() {
             afficher_note(tr!("Global", "Overall"), g);
+        }
+        let (precedent, nouveau) = historique::enregistrer(self.audit.as_ref(), self.reseau.as_ref());
+        if let Some(p) = precedent {
+            historique::afficher_changements(&p, &nouveau);
         }
         let a_corriger = self.audit.as_ref().is_some_and(|a| {
             a.constats

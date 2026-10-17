@@ -91,6 +91,13 @@ fn html(audit: Option<&Audit>, reseau: Option<&Rapport>) -> String {
         h += &carte_note("Global", a.score.min(r.score_global));
     }
     h += "</div>";
+    if let Some(svg) = crate::historique::courbe(&crate::historique::charger()) {
+        let _ = trw!(
+            h,
+            "<h2>Évolution des notes</h2><div class=carte>{svg}<div class=meta><span style=\"color:var(--info)\">●</span> cette machine · <span style=\"color:var(--ok)\">●</span> réseau (30 derniers bilans complets)</div></div>",
+            "<h2>Grade history</h2><div class=carte>{svg}<div class=meta><span style=\"color:var(--info)\">●</span> this machine · <span style=\"color:var(--ok)\">●</span> network (last 30 full checks)</div></div>"
+        );
+    }
 
     if let Some(a) = audit {
         h += tr!(
