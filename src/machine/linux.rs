@@ -95,7 +95,7 @@ fn systemd() -> bool {
     Path::new("/run/systemd/system").is_dir()
 }
 
-fn service_actif(nom: &str) -> bool {
+pub(crate) fn service_actif(nom: &str) -> bool {
     sortie("systemctl", &["is-active", nom]).is_some_and(|s| s.trim() == "active")
 }
 
@@ -104,7 +104,7 @@ fn home() -> String {
 }
 
 /// Politique d'entrée par défaut de ufw (ACCEPT, DROP ou REJECT), lue dans /etc/default/ufw.
-fn politique_ufw(texte: &str) -> Option<String> {
+pub(crate) fn politique_ufw(texte: &str) -> Option<String> {
     texte.lines().find_map(|l| {
         let v = l.trim().strip_prefix("DEFAULT_INPUT_POLICY=")?;
         Some(v.trim_matches('"').to_ascii_uppercase())
@@ -112,7 +112,7 @@ fn politique_ufw(texte: &str) -> Option<String> {
 }
 
 /// ufw est-il le pare-feu actif ? (les corrections « ufw deny » n'ont de sens qu'avec lui)
-fn ufw_actif() -> bool {
+pub(crate) fn ufw_actif() -> bool {
     std::fs::read_to_string("/etc/ufw/ufw.conf").is_ok_and(|c| c.lines().any(|l| l.trim() == "ENABLED=yes"))
         && service_actif("ufw")
 }

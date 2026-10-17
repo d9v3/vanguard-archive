@@ -46,9 +46,16 @@ fn script_admin(commandes: &[String]) -> String {
          try {\n",
     );
     for c in commandes {
-        let long = ["Update-MpSignature", "Remove-MpThreat", "Start-MpScan", "DISM", "sfc"]
-            .iter()
-            .any(|l| c.contains(l));
+        let long = [
+            "Update-MpSignature",
+            "Remove-MpThreat",
+            "Start-MpScan",
+            "DISM",
+            "sfc",
+            "Checkpoint-Computer",
+        ]
+        .iter()
+        .any(|l| c.contains(l));
         let note = if long { " (peut prendre quelques minutes)" } else { "" };
         // Un programme externe (DISM, sfc, netsh…) en échec ne lève pas d'erreur PowerShell : seul son code de
         // retour le dit. On le lit après chaque commande (3010 = réussi, redémarrage demandé) et on continue :
