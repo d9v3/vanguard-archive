@@ -25,28 +25,30 @@ To start: run Sentinel, choose "1. Full check", then "2. Fix".
 Menu
   1  Full check (machine + network), with what changed since the previous check
   2  Fix the problems found (each fix is shown, then confirmed)
-  3  Audit this machine              4  Scan the local network     5  Deep scan of one device
-  6  Antivirus: quick scan           7  Antivirus: full scan of the home folder
-  a  Antivirus scan of a USB drive or folder, with USB worm traps (fake shortcuts, autorun)
-  8  Detailed report (browser), with the grade history
-  9  Hourly monitoring: notification when an unknown device shows up, a problem appears on this machine,
-     or someone seems to impersonate the router (ARP spoofing)
-  o  Computer diagnostic: hardware, system, recent crashes and errors (text copy on the key)
-  l  Essential software: browser, VLC, 7-Zip, LibreOffice, Bitwarden… (for a new PC or a friend's)
-  u  Updates: system, programs, drivers, firmware
-  r  Repair: Internet, hijacked browsing, firewall, antivirus, disk, disk full,
-     deep cleanup, stuck updates, system files, time
-  g  Gaming: packages and settings for gaming (Windows: Visual C++, DirectX…; Linux: Steam, Vulkan drivers,
-     GameMode, MangoHud, Gamescope, Wine, Lutris, Heroic, ntsync…)
-  c  Connection test for gaming: ping, jitter, speed, bufferbloat
-  p  Passwords: have they leaked? (only 5 characters of their fingerprint are sent)
-  e  Email address: has it leaked? (the address is sent to the search service, after your consent)
-  b  Sandbox: run an unknown program with no network, away from your files
-  i  Critical file integrity (accounts, sudo, SSH, startup…): what changed since the reference;
-     live with "sentinel integrite --temps-reel"
-  n  Name a device ("HP printer")
-  d  Data: back up or restore (nicknames, network history)
+  3  Detailed report (browser), with the grade history
+
+  4  This machine ›
+       Security audit · Updates (system, programs, drivers, firmware)
+       Repair and clean up (Internet, hijacked browsing, firewall, disk full, stuck updates…)
+       Diagnostic (hardware, recent crashes and errors, text copy on the key)
+       Critical file integrity (accounts, sudo, SSH, startup; live: sentinel integrite --temps-reel)
+  5  Network and Internet ›
+       Scan the network · Deep scan of one device · Name a device ("HP printer")
+       Hourly monitoring (unknown device, problem on this machine, router impersonation)
+       Connection test for gaming (ping, jitter, speed, bufferbloat)
+  6  Antivirus and protection ›
+       Quick scan · Full scan of the home folder
+       USB drive or folder, with USB worm traps (fake shortcuts, autorun)
+       Sandbox: run an unknown program with no network, away from your files
+       Passwords: have they leaked? (only 5 characters of their fingerprint are sent)
+       Email address: has it leaked? (sent to the search service, after your consent)
+  7  Install and play ›
+       Essential software (browser, VLC, 7-Zip, LibreOffice, Bitwarden…: new PC or a friend's)
+       Gaming (Windows: Visual C++, DirectX…; Linux: Steam, Vulkan, GameMode, MangoHud, Wine, Lutris…)
+  8  Data: back up or restore (nicknames, network history)
   q  Quit
+  Shortcuts from earlier versions, in the main menu: u updates, r repair, o diagnostic, i integrity,
+  n name, c connection, a USB drive, b sandbox, p passwords, e email, l software, g gaming, d data.
 
 The check covers, among others: firewall, open ports, updates, encryption, accounts, programs started at
 boot, DNS, added root certificates, browser extensions, disk and battery health.

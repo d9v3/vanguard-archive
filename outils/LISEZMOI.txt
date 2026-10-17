@@ -26,28 +26,31 @@ Pour commencer : lancer Sentinel, choisir « 1. Bilan complet », puis « 2. Cor
 Menu
   1  Bilan complet (machine + réseau), avec ce qui a changé depuis le bilan précédent
   2  Corriger les problèmes trouvés (chaque correction est montrée, puis confirmée)
-  3  Audit de cette machine          4  Scan du réseau local       5  Scan approfondi d'un appareil
-  6  Antivirus : analyse rapide      7  Antivirus : analyse complète du dossier personnel
-  a  Antivirus d'une clé USB ou d'un dossier, avec les pièges des vers de clé (faux raccourcis, autorun)
-  8  Rapport détaillé (navigateur), avec la courbe des notes
-  9  Surveillance toutes les heures : notification si un appareil inconnu arrive, si un problème apparaît
-     sur cette machine, ou si quelqu'un semble se faire passer pour la box (usurpation ARP)
-  o  Diagnostic de l'ordinateur : matériel, système, plantages et erreurs récents (copie texte sur la clé)
-  l  Logiciels essentiels : navigateur, VLC, 7-Zip, LibreOffice, Bitwarden… (pour un PC neuf ou celui d'un ami)
-  u  Mises à jour : système, programmes, pilotes, firmware
-  r  Réparer : Internet, navigation détournée, pare-feu, antivirus, disque, disque plein,
-     nettoyage approfondi, mises à jour bloquées, fichiers système, heure
-  g  Gaming : paquets et réglages pour jouer (Windows : Visual C++, DirectX… ; Linux : Steam, pilotes Vulkan,
-     GameMode, MangoHud, Gamescope, Wine, Lutris, Heroic, ntsync…)
-  c  Test de connexion pour le jeu : ping, gigue, débit, bufferbloat
-  p  Mots de passe : ont-ils fuité ? (seuls 5 caractères de leur empreinte sont envoyés)
-  e  Adresse courriel : a-t-elle fuité ? (l'adresse est envoyée au service de recherche, après ton accord)
-  b  Bac à sable : lancer un programme inconnu sans réseau, à l'écart de tes fichiers
-  i  Intégrité des fichiers critiques (comptes, sudo, SSH, démarrage…) : ce qui a changé depuis la référence ;
-     en direct avec « sentinel integrite --temps-reel »
-  n  Nommer un appareil (« imprimante HP »)
-  d  Données : sauvegarder ou restaurer (surnoms, historique des réseaux)
+  3  Rapport détaillé (navigateur), avec la courbe des notes
+
+  4  Cette machine ›
+       Audit de sécurité · Mises à jour (système, programmes, pilotes, firmware)
+       Réparer et nettoyer (Internet, navigation détournée, pare-feu, disque plein, mises à jour bloquées…)
+       Diagnostic (matériel, plantages et erreurs récents, copie texte sur la clé)
+       Intégrité des fichiers critiques (comptes, sudo, SSH, démarrage ; en direct : sentinel integrite --temps-reel)
+  5  Réseau et Internet ›
+       Scanner le réseau · Scan approfondi d'un appareil · Nommer un appareil (« imprimante HP »)
+       Surveillance toutes les heures (appareil inconnu, problème sur cette machine, usurpation de la box)
+       Test de connexion pour le jeu (ping, gigue, débit, bufferbloat)
+  6  Antivirus et protection ›
+       Analyse rapide · Analyse complète du dossier personnel
+       Clé USB ou dossier, avec les pièges des vers de clé (faux raccourcis, autorun)
+       Bac à sable : lancer un programme inconnu sans réseau, à l'écart de tes fichiers
+       Mots de passe : ont-ils fuité ? (seuls 5 caractères de leur empreinte sont envoyés)
+       Adresse courriel : a-t-elle fuité ? (envoyée au service de recherche, après ton accord)
+  7  Installer et jouer ›
+       Logiciels essentiels (navigateur, VLC, 7-Zip, LibreOffice, Bitwarden… : PC neuf ou celui d'un ami)
+       Gaming (Windows : Visual C++, DirectX… ; Linux : Steam, Vulkan, GameMode, MangoHud, Wine, Lutris…)
+  8  Données : sauvegarder ou restaurer (surnoms, historique des réseaux)
   q  Quitter
+  Raccourcis des anciennes versions, depuis le menu principal : u mises à jour, r réparer, o diagnostic,
+  i intégrité, n nommer, c connexion, a clé USB, b bac à sable, p mots de passe, e courriel, l logiciels,
+  g gaming, d données.
 
 Le bilan vérifie notamment : pare-feu, ports ouverts, mises à jour, chiffrement, comptes, programmes lancés
 au démarrage, DNS, certificats racine ajoutés, extensions de navigateur, santé des disques et de la batterie.

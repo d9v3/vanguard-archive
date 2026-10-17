@@ -335,186 +335,398 @@ async fn menu() {
             tr!("← commencer ici", "← start here"),
         );
         option("2", tr!("Corriger les problèmes trouvés", "Fix the problems found"), "");
-        option("3", tr!("Audit de cette machine", "Audit this machine"), "");
         option(
-            "8",
+            "3",
             tr!("Rapport détaillé dans le navigateur", "Detailed report in the browser"),
             "",
         );
 
-        section(tr!("RÉSEAU LOCAL", "LOCAL NETWORK"));
-        option(
-            "4",
-            tr!("Scanner le réseau", "Scan the network"),
-            tr!("appareils, ports, nouveautés", "devices, ports, changes"),
-        );
-        option(
-            "5",
-            tr!("Scan approfondi d'un appareil", "Deep scan of one device"),
-            tr!("tous les ports", "all ports"),
-        );
-        option(
-            "n",
-            tr!("Nommer un appareil", "Name a device"),
-            tr!("« imprimante HP »", "“HP printer”"),
-        );
-        option(
-            "9",
-            tr!("Surveillance toutes les heures", "Hourly monitoring"),
-            if surveillance_active {
-                tr!("activée", "on")
-            } else {
-                tr!("désactivée", "off")
-            },
-        );
-
-        section(tr!("CONNEXION", "CONNECTION"));
-        option(
-            "c",
-            tr!("Test pour le jeu", "Gaming test"),
-            tr!("ping, gigue, débit, bufferbloat", "ping, jitter, speed, bufferbloat"),
-        );
-
-        section(tr!("PROTECTION", "PROTECTION"));
-        option("6", tr!("Antivirus : analyse rapide", "Antivirus: quick scan"), "");
-        option(
-            "7",
-            tr!("Antivirus : analyse complète", "Antivirus: full scan"),
-            tr!("dossier personnel", "home folder"),
-        );
-        option(
-            "a",
-            tr!("Antivirus : clé USB ou dossier", "Antivirus: USB drive or folder"),
-            tr!("et pièges de clé", "and drive traps"),
-        );
-        option(
-            "p",
-            tr!("Mots de passe : ont-ils fuité ?", "Passwords: have they leaked?"),
-            tr!("rien n'est envoyé en clair", "nothing sent in clear"),
-        );
-        option(
-            "e",
-            tr!("Adresse courriel : a-t-elle fuité ?", "Email address: has it leaked?"),
-            tr!("avec ton accord", "with your consent"),
-        );
-        option(
-            "b",
-            tr!(
-                "Bac à sable : lancer un programme inconnu",
-                "Sandbox: run an unknown program"
-            ),
-            tr!("sans réseau, isolé", "no network, isolated"),
-        );
-        option(
-            "i",
-            tr!("Intégrité des fichiers critiques", "Critical file integrity"),
-            tr!("comptes, sudo, SSH, démarrage…", "accounts, sudo, SSH, startup…"),
-        );
-
-        section(tr!("ENTRETIEN", "MAINTENANCE"));
-        option(
-            "o",
-            tr!("Diagnostic de l'ordinateur", "Computer diagnostic"),
-            tr!("matériel, plantages, erreurs", "hardware, crashes, errors"),
-        );
-        option(
-            "l",
-            tr!("Logiciels essentiels", "Essential software"),
-            tr!(
-                "navigateur, VLC, 7-Zip, LibreOffice…",
-                "browser, VLC, 7-Zip, LibreOffice…"
-            ),
-        );
-        option(
-            "u",
-            tr!("Mises à jour", "Updates"),
-            tr!("système, programmes, pilotes", "system, programs, drivers"),
-        );
-        option(
-            "r",
-            tr!("Réparer et nettoyer", "Repair and clean up"),
-            tr!("réseau, disque, système…", "network, disk, system…"),
-        );
-        option(
-            "g",
-            tr!("Gaming", "Gaming"),
-            if cfg!(windows) {
-                tr!("composants et réglages de Windows", "components and Windows settings")
-            } else {
-                tr!(
-                    "Steam, Vulkan, GameMode, Wine, réglages",
-                    "Steam, Vulkan, GameMode, Wine, settings"
-                )
-            },
-        );
-        option(
-            "d",
-            tr!("Données", "Data"),
-            tr!("sauvegarder ou restaurer", "back up or restore"),
-        );
+        section(tr!("OUTILS", "TOOLS"));
+        for (touche, groupe) in GROUPES.iter().enumerate() {
+            option(
+                &(touche + 4).to_string(),
+                &format!("{} {ACCENT}›{RESET}", groupe.titre()),
+                groupe.resume(),
+            );
+        }
 
         println!();
         option("q", tr!("Quitter", "Quit"), "");
         println!();
         let choix = demander(&format!("  {ACCENT}›{RESET} {}", tr!("Choix : ", "Choice: ")));
+        let choix = choix.trim().to_lowercase();
         println!();
-        match choix.as_str() {
-            "1" => s.complet().await,
-            "2" => s.corriger(),
-            "3" => s.audit = Some(machine::executer(false)),
-            "4" => s.scanner_reseau(None, "courants").await,
-            "5" => {
-                let ip = demander(tr!(
-                    "Adresse IP de l'appareil (ex. 10.0.0.1) : ",
-                    "IP address of the device (e.g. 10.0.0.1): "
-                ));
-                s.scanner_reseau(Some(ip), "tous").await;
-            }
-            "6" => antivirus::analyser(antivirus::Portee::Rapide),
-            "7" => antivirus::analyser(antivirus::Portee::Complete),
-            "a" | "A" => antivirus::choisir(),
-            "8" => {
-                if s.audit.is_none() && s.reseau.is_none() {
-                    s.complet().await;
-                }
-                rapport::ouvrir(s.audit.as_ref(), s.reseau.as_ref());
-            }
-            "9" => surveillance::activer(!surveillance::active()),
-            "u" | "U" => maj::executer(),
-            "r" | "R" => reparer::menu(),
-            "g" | "G" => gaming::menu(),
-            "c" | "C" => connexion::tester().await,
-            "o" | "O" => diagnostic::diagnostic(),
-            "l" | "L" => logiciels::menu(),
-            "p" | "P" => fuites::verifier(),
-            "e" | "E" => fuites::verifier_courriel(),
-            "b" | "B" => {
-                let chemin = demander(tr!("  Programme à isoler (chemin) : ", "  Program to isolate (path): "));
-                let chemin = chemin.trim().trim_matches(['"', '\'']);
-                if !chemin.is_empty() {
-                    isoler::isoler(std::path::Path::new(chemin));
-                }
-            }
-            "i" | "I" => integrite::verifier(false),
-            "n" | "N" => {
-                let qui = demander(tr!(
-                    "IP ou adresse MAC de l'appareil : ",
-                    "IP or MAC address of the device: "
-                ));
-                let surnom = demander(tr!(
-                    "Surnom (vide pour le retirer) : ",
-                    "Nickname (empty to remove it): "
-                ));
-                nommer(&qui, &surnom);
-            }
-            "d" | "D" => donnees::menu(),
-            "q" | "Q" => break,
-            _ => continue,
+        let groupe = choix
+            .parse::<usize>()
+            .ok()
+            .and_then(|n| n.checked_sub(4))
+            .and_then(|i| GROUPES.get(i));
+        if let Some(g) = groupe {
+            sous_menu(&mut s, *g).await;
+            continue;
         }
+        let action = match choix.as_str() {
+            "1" => Action::Complet,
+            "2" => Action::Corriger,
+            "3" => Action::Rapport,
+            "q" => break,
+            // Raccourcis des versions précédentes (une lettre par outil), toujours acceptés.
+            autre => match Action::TOUTES.iter().find(|a| a.raccourci() == Some(autre)) {
+                Some(&a) => a,
+                None => continue,
+            },
+        };
+        executer(&mut s, action).await;
         demander(&trf!(
             "\n{GRIS}Entrée pour revenir au menu…{RESET}",
             "\n{GRIS}Enter to go back to the menu…{RESET}"
         ));
+    }
+}
+
+/// Ce que le menu sait faire. Chaque outil vit dans un groupe ; son ancienne lettre reste un raccourci.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Action {
+    Complet,
+    Corriger,
+    Rapport,
+    Audit,
+    Integrite,
+    Diagnostic,
+    Maj,
+    Reparer,
+    Scanner,
+    Appareil,
+    Nommer,
+    Surveillance,
+    Connexion,
+    AntivirusRapide,
+    AntivirusComplet,
+    AntivirusDossier,
+    Bac,
+    MotsDePasse,
+    Courriel,
+    Logiciels,
+    Gaming,
+    Sauvegarder,
+}
+
+impl Action {
+    const TOUTES: [Action; 22] = [
+        Action::Complet,
+        Action::Corriger,
+        Action::Rapport,
+        Action::Audit,
+        Action::Integrite,
+        Action::Diagnostic,
+        Action::Maj,
+        Action::Reparer,
+        Action::Scanner,
+        Action::Appareil,
+        Action::Nommer,
+        Action::Surveillance,
+        Action::Connexion,
+        Action::AntivirusRapide,
+        Action::AntivirusComplet,
+        Action::AntivirusDossier,
+        Action::Bac,
+        Action::MotsDePasse,
+        Action::Courriel,
+        Action::Logiciels,
+        Action::Gaming,
+        Action::Sauvegarder,
+    ];
+
+    /// Lettre de l'outil dans les menus d'avant la 0.43 (les chiffres, eux, ont changé de sens).
+    fn raccourci(self) -> Option<&'static str> {
+        Some(match self {
+            Action::Integrite => "i",
+            Action::Diagnostic => "o",
+            Action::Maj => "u",
+            Action::Reparer => "r",
+            Action::Nommer => "n",
+            Action::Connexion => "c",
+            Action::AntivirusDossier => "a",
+            Action::Bac => "b",
+            Action::MotsDePasse => "p",
+            Action::Courriel => "e",
+            Action::Logiciels => "l",
+            Action::Gaming => "g",
+            Action::Sauvegarder => "d",
+            _ => return None,
+        })
+    }
+
+    /// Texte de la ligne de menu et sa précision en gris.
+    fn libelle(self) -> (&'static str, &'static str) {
+        match self {
+            Action::Complet => (
+                tr!("Bilan complet : machine + réseau", "Full check: machine + network"),
+                "",
+            ),
+            Action::Corriger => (tr!("Corriger les problèmes trouvés", "Fix the problems found"), ""),
+            Action::Rapport => (
+                tr!("Rapport détaillé dans le navigateur", "Detailed report in the browser"),
+                "",
+            ),
+            Action::Audit => (
+                tr!("Audit de sécurité", "Security audit"),
+                tr!("pare-feu, comptes, chiffrement…", "firewall, accounts, encryption…"),
+            ),
+            Action::Integrite => (
+                tr!("Intégrité des fichiers critiques", "Critical file integrity"),
+                tr!("comptes, sudo, SSH, démarrage…", "accounts, sudo, SSH, startup…"),
+            ),
+            Action::Diagnostic => (
+                tr!("Diagnostic", "Diagnostic"),
+                tr!("matériel, plantages, erreurs", "hardware, crashes, errors"),
+            ),
+            Action::Maj => (
+                tr!("Mises à jour", "Updates"),
+                tr!("système, programmes, pilotes", "system, programs, drivers"),
+            ),
+            Action::Reparer => (
+                tr!("Réparer et nettoyer", "Repair and clean up"),
+                tr!("réseau, disque, système…", "network, disk, system…"),
+            ),
+            Action::Scanner => (
+                tr!("Scanner le réseau", "Scan the network"),
+                tr!("appareils, ports, nouveautés", "devices, ports, changes"),
+            ),
+            Action::Appareil => (
+                tr!("Scan approfondi d'un appareil", "Deep scan of one device"),
+                tr!("tous les ports", "all ports"),
+            ),
+            Action::Nommer => (
+                tr!("Nommer un appareil", "Name a device"),
+                tr!("« imprimante HP »", "“HP printer”"),
+            ),
+            Action::Surveillance => (
+                tr!("Surveillance toutes les heures", "Hourly monitoring"),
+                if surveillance::active() {
+                    tr!("activée", "on")
+                } else {
+                    tr!("désactivée", "off")
+                },
+            ),
+            Action::Connexion => (
+                tr!("Test de connexion pour le jeu", "Connection test for gaming"),
+                tr!("ping, gigue, débit, bufferbloat", "ping, jitter, speed, bufferbloat"),
+            ),
+            Action::AntivirusRapide => (
+                tr!("Analyse rapide", "Quick scan"),
+                tr!("téléchargements, bureau…", "downloads, desktop…"),
+            ),
+            Action::AntivirusComplet => (
+                tr!("Analyse complète", "Full scan"),
+                tr!("dossier personnel", "home folder"),
+            ),
+            Action::AntivirusDossier => (
+                tr!("Clé USB ou dossier", "USB drive or folder"),
+                tr!("et pièges de clé", "and drive traps"),
+            ),
+            Action::Bac => (
+                tr!(
+                    "Bac à sable : lancer un programme inconnu",
+                    "Sandbox: run an unknown program"
+                ),
+                tr!("sans réseau, isolé", "no network, isolated"),
+            ),
+            Action::MotsDePasse => (
+                tr!("Mots de passe : ont-ils fuité ?", "Passwords: have they leaked?"),
+                tr!("rien n'est envoyé en clair", "nothing sent in clear"),
+            ),
+            Action::Courriel => (
+                tr!("Adresse courriel : a-t-elle fuité ?", "Email address: has it leaked?"),
+                tr!("avec ton accord", "with your consent"),
+            ),
+            Action::Logiciels => (
+                tr!("Logiciels essentiels", "Essential software"),
+                tr!("navigateur, VLC, LibreOffice…", "browser, VLC, LibreOffice…"),
+            ),
+            Action::Gaming => (
+                tr!("Gaming", "Gaming"),
+                if cfg!(windows) {
+                    tr!("composants et réglages de Windows", "components and Windows settings")
+                } else {
+                    tr!("Steam, Vulkan, GameMode, Wine…", "Steam, Vulkan, GameMode, Wine…")
+                },
+            ),
+            Action::Sauvegarder => (
+                tr!("Sauvegarder ou restaurer", "Back up or restore"),
+                tr!("base des appareils, réglages", "device database, settings"),
+            ),
+        }
+    }
+}
+
+/// Un groupe d'outils du menu principal, ouvert en sous-menu.
+#[derive(Clone, Copy)]
+enum Groupe {
+    Machine,
+    Reseau,
+    Protection,
+    Installer,
+    Donnees,
+}
+
+const GROUPES: [Groupe; 5] = [
+    Groupe::Machine,
+    Groupe::Reseau,
+    Groupe::Protection,
+    Groupe::Installer,
+    Groupe::Donnees,
+];
+
+impl Groupe {
+    fn titre(self) -> &'static str {
+        match self {
+            Groupe::Machine => tr!("Cette machine", "This machine"),
+            Groupe::Reseau => tr!("Réseau et Internet", "Network and Internet"),
+            Groupe::Protection => tr!("Antivirus et protection", "Antivirus and protection"),
+            Groupe::Installer => tr!("Installer et jouer", "Install and play"),
+            Groupe::Donnees => tr!("Données", "Data"),
+        }
+    }
+
+    fn resume(self) -> &'static str {
+        match self {
+            Groupe::Machine => tr!("audit, mises à jour, réparer…", "audit, updates, repair…"),
+            Groupe::Reseau => tr!("appareils, surveillance, débit", "devices, monitoring, speed test"),
+            Groupe::Protection => tr!("analyses, clé USB, fuites…", "scans, USB drive, leaks…"),
+            Groupe::Installer => tr!("logiciels essentiels, gaming", "essential software, gaming"),
+            Groupe::Donnees => tr!("sauvegarder ou restaurer", "back up or restore"),
+        }
+    }
+
+    fn actions(self) -> &'static [Action] {
+        match self {
+            Groupe::Machine => &[
+                Action::Audit,
+                Action::Maj,
+                Action::Reparer,
+                Action::Diagnostic,
+                Action::Integrite,
+            ],
+            Groupe::Reseau => &[
+                Action::Scanner,
+                Action::Appareil,
+                Action::Nommer,
+                Action::Surveillance,
+                Action::Connexion,
+            ],
+            Groupe::Protection => &[
+                Action::AntivirusRapide,
+                Action::AntivirusComplet,
+                Action::AntivirusDossier,
+                Action::Bac,
+                Action::MotsDePasse,
+                Action::Courriel,
+            ],
+            Groupe::Installer => &[Action::Logiciels, Action::Gaming],
+            Groupe::Donnees => &[Action::Sauvegarder],
+        }
+    }
+}
+
+/// Sous-menu d'un groupe : ses outils numérotés, Entrée pour revenir au menu principal. Un groupe d'un seul outil
+/// (Données) l'ouvre directement.
+async fn sous_menu(s: &mut Session, groupe: Groupe) {
+    if let [seule] = groupe.actions() {
+        executer(s, *seule).await;
+        demander(&trf!(
+            "\n{GRIS}Entrée pour revenir au menu…{RESET}",
+            "\n{GRIS}Enter to go back to the menu…{RESET}"
+        ));
+        return;
+    }
+    loop {
+        print!("\x1b[2J\x1b[H");
+        cadre(
+            &format!("{ACCENT}SENTINEL{RESET} {GRIS}›{RESET} {}", groupe.titre()),
+            groupe.resume(),
+        );
+        println!();
+        for (i, a) in groupe.actions().iter().enumerate() {
+            let (texte, precision) = a.libelle();
+            option(&(i + 1).to_string(), texte, precision);
+        }
+        println!();
+        option("↵", tr!("Revenir au menu principal", "Back to the main menu"), "");
+        println!();
+        let choix = demander(&format!("  {ACCENT}›{RESET} {}", tr!("Choix : ", "Choice: ")));
+        let choix = choix.trim();
+        if choix.is_empty() || choix.eq_ignore_ascii_case("q") {
+            return;
+        }
+        let Some(&action) = choix
+            .parse::<usize>()
+            .ok()
+            .and_then(|n| n.checked_sub(1))
+            .and_then(|i| groupe.actions().get(i))
+        else {
+            continue;
+        };
+        println!();
+        executer(s, action).await;
+        demander(&trf!(
+            "\n{GRIS}Entrée pour revenir…{RESET}",
+            "\n{GRIS}Enter to go back…{RESET}"
+        ));
+    }
+}
+
+async fn executer(s: &mut Session, action: Action) {
+    match action {
+        Action::Complet => s.complet().await,
+        Action::Corriger => s.corriger(),
+        Action::Rapport => {
+            if s.audit.is_none() && s.reseau.is_none() {
+                s.complet().await;
+            }
+            rapport::ouvrir(s.audit.as_ref(), s.reseau.as_ref());
+        }
+        Action::Audit => s.audit = Some(machine::executer(false)),
+        Action::Integrite => integrite::verifier(false),
+        Action::Diagnostic => diagnostic::diagnostic(),
+        Action::Maj => maj::executer(),
+        Action::Reparer => reparer::menu(),
+        Action::Scanner => s.scanner_reseau(None, "courants").await,
+        Action::Appareil => {
+            let ip = demander(tr!(
+                "Adresse IP de l'appareil (ex. 10.0.0.1) : ",
+                "IP address of the device (e.g. 10.0.0.1): "
+            ));
+            s.scanner_reseau(Some(ip), "tous").await;
+        }
+        Action::Nommer => {
+            let qui = demander(tr!(
+                "IP ou adresse MAC de l'appareil : ",
+                "IP or MAC address of the device: "
+            ));
+            let surnom = demander(tr!(
+                "Surnom (vide pour le retirer) : ",
+                "Nickname (empty to remove it): "
+            ));
+            nommer(&qui, &surnom);
+        }
+        Action::Surveillance => surveillance::activer(!surveillance::active()),
+        Action::Connexion => connexion::tester().await,
+        Action::AntivirusRapide => antivirus::analyser(antivirus::Portee::Rapide),
+        Action::AntivirusComplet => antivirus::analyser(antivirus::Portee::Complete),
+        Action::AntivirusDossier => antivirus::choisir(),
+        Action::Bac => {
+            let chemin = demander(tr!("  Programme à isoler (chemin) : ", "  Program to isolate (path): "));
+            let chemin = chemin.trim().trim_matches(['"', '\'']);
+            if !chemin.is_empty() {
+                isoler::isoler(std::path::Path::new(chemin));
+            }
+        }
+        Action::MotsDePasse => fuites::verifier(),
+        Action::Courriel => fuites::verifier_courriel(),
+        Action::Logiciels => logiciels::menu(),
+        Action::Gaming => gaming::menu(),
+        Action::Sauvegarder => donnees::menu(),
     }
 }
 
@@ -721,5 +933,31 @@ async fn main() {
         Some(Commande::Sauvegarder { fichier }) => donnees::sauvegarder(fichier),
         Some(Commande::Restaurer { fichier }) => donnees::restaurer(&fichier),
         Some(Commande::Nommer { appareil, surnom }) => nommer(&appareil, &surnom.join(" ")),
+    }
+}
+
+#[cfg(test)]
+mod tests_menu {
+    use super::*;
+
+    #[test]
+    fn chaque_outil_a_sa_place() {
+        // 1, 2, 3 au menu principal ; tout le reste dans un seul groupe.
+        let principal = [Action::Complet, Action::Corriger, Action::Rapport];
+        for a in Action::TOUTES {
+            let groupes = GROUPES.iter().filter(|g| g.actions().contains(&a)).count();
+            assert_eq!(groupes + usize::from(principal.contains(&a)), 1);
+        }
+        // Raccourcis uniques, et jamais un chiffre (les chiffres ouvrent les groupes).
+        let mut lettres: Vec<&str> = Action::TOUTES.iter().filter_map(|a| a.raccourci()).collect();
+        assert!(
+            lettres
+                .iter()
+                .all(|l| !l.starts_with(|c: char| c.is_ascii_digit()) && *l != "q")
+        );
+        let n = lettres.len();
+        lettres.sort_unstable();
+        lettres.dedup();
+        assert_eq!(lettres.len(), n);
     }
 }
