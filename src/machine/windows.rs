@@ -510,10 +510,23 @@ fn installer_windows_update(genre: &str) -> Vec<String> {
              foreach ($u in $maj.CreateUpdateSearcher().Search(\"IsInstalled=0 and IsHidden=0 and Type='{genre}'\").Updates) \
              {{ if (-not $u.EulaAccepted) {{ $u.AcceptEula() }}; [void]$liste.Add($u); Write-Host \"  - $($u.Title)\" }}"
         ),
-        "if ($liste.Count) { $t = $maj.CreateUpdateDownloader(); $t.Updates = $liste; [void]$t.Download() }".into(),
-        "if ($liste.Count) { $i = $maj.CreateUpdateInstaller(); $i.Updates = $liste; $r = $i.Install(); \
-         if ($r.RebootRequired) { Write-Host '  Redémarrage nécessaire pour finir.' -ForegroundColor Yellow }; \
-         if ($r.ResultCode -notin 2, 3) { throw \"installation incomplète (code $($r.ResultCode))\" } }"
+        // Une mise à jour non téléchargée (vu dans la VM : Windows Update bloqué sur « En attente de
+        // téléchargement ») ne doit pas passer pour installée : chacune est vérifiée et nommée.
+        "if ($liste.Count) { $t = $maj.CreateUpdateDownloader(); $t.Updates = $liste; \
+         try { [void]$t.Download() } catch { Write-Host \"  Téléchargement interrompu : $($_.Exception.Message)\" -ForegroundColor Red } }; \
+         $pret = New-Object -ComObject Microsoft.Update.UpdateColl; $ko = 0; \
+         foreach ($u in $liste) { if ($u.IsDownloaded) { [void]$pret.Add($u) } \
+         else { $ko++; Write-Host \"  Pas téléchargée : $($u.Title)\" -ForegroundColor Red } }"
+            .into(),
+        // Un échec compte comme celui d'un programme externe ($LASTEXITCODE) : la fenêtre le signale et passe à la
+        // suite (les programmes winget), au lieu de tout arrêter.
+        "$r = $null; if ($pret.Count) { $i = $maj.CreateUpdateInstaller(); $i.Updates = $pret; \
+         try { $r = $i.Install() } catch { $ko += $pret.Count; Write-Host \"  Installation interrompue : $($_.Exception.Message)\" -ForegroundColor Red } }; \
+         if ($r) { for ($n = 0; $n -lt $pret.Count; $n++) { $code = $r.GetUpdateResult($n).ResultCode; \
+         if ($code -eq 2) { Write-Host \"  Installée : $($pret.Item($n).Title)\" -ForegroundColor Green } \
+         else { $ko++; Write-Host \"  Pas installée (code $code) : $($pret.Item($n).Title)\" -ForegroundColor Red } } }; \
+         if ($r -and $r.RebootRequired) { Write-Host '  Redémarrage nécessaire pour finir.' -ForegroundColor Yellow }; \
+         if ($ko) { Write-Host \"  $ko mise(s) à jour à refaire plus tard (ou Paramètres > Windows Update).\"; $global:LASTEXITCODE = 1 }"
             .into(),
     ]
 }
@@ -521,8 +534,11 @@ fn installer_windows_update(genre: &str) -> Vec<String> {
 /// Ce que Windows Update propose et qui n'est pas installé : correctifs (Windows, .NET, Defender) et pilotes.
 fn windows_update() -> Vec<Constat> {
     let Some(sortie) = ps_delai(
+        // La mise à jour cumulative de sécurité arrive souvent sans gravité (vu dans la VM) : sa catégorie
+        // « Mises à jour de sécurité » (identifiant fixe, quelle que soit la langue) la classe alors « Important ».
         "foreach ($u in (New-Object -ComObject Microsoft.Update.Session).CreateUpdateSearcher().Search('IsInstalled=0 and IsHidden=0').Updates) \
-         { \"$([int]$u.Type)|$($u.MsrcSeverity)|$($u.Title)\" }",
+         { $g = $u.MsrcSeverity; foreach ($c in $u.Categories) { if (-not $g -and $c.CategoryID -eq '0fa1201d-4330-4fa8-8ae9-b877473b6441') { $g = 'Important' } }; \
+         \"$([int]$u.Type)|$g|$($u.Title)\" }",
         180,
     ) else {
         return vec![
@@ -591,10 +607,10 @@ fn redemarrage_en_attente() -> Constat {
     }
 }
 
-/// Noms des programmes du tableau de « winget upgrade ». Les colonnes sont alignées sur l'en-tête (traduit selon
+/// (nom, identifiant) des programmes du tableau de « winget upgrade ». Les colonnes sont alignées sur l'en-tête (traduit selon
 /// la langue de Windows), juste au-dessus de la ligne de tirets. Le tableau s'arrête à la première ligne qui n'a
 /// pas d'identifiant ni de source (« 3 mises à niveau disponibles. », ou le second tableau des programmes épinglés).
-fn lire_winget(sortie: &str) -> Option<Vec<String>> {
+fn lire_winget(sortie: &str) -> Option<Vec<(String, String)>> {
     // La barre de progression de winget se réécrit avec des retours chariot : seul le dernier état compte.
     let lignes: Vec<Vec<char>> = sortie
         .lines()
@@ -621,9 +637,24 @@ fn lire_winget(sortie: &str) -> Option<Vec<String>> {
         if id.is_empty() || id.contains(' ') || source.is_empty() || source.contains(' ') {
             break;
         }
-        noms.push(champ(l, 0));
+        noms.push((champ(l, 0), id));
     }
     Some(noms)
+}
+
+/// Une commande par programme : chacun réussit ou échoue à part dans la fenêtre administrateur. App Installer, qui
+/// est winget lui-même, passe en dernier : sa mise à jour coupe winget (vu dans la VM, la suite n'était pas faite).
+fn commandes_winget(programmes: &[(String, String)]) -> Vec<String> {
+    let mut ids: Vec<&str> = programmes.iter().map(|(_, id)| id.as_str()).collect();
+    ids.sort_by_key(|id| id.eq_ignore_ascii_case("Microsoft.AppInstaller"));
+    ids.iter()
+        .map(|id| {
+            format!(
+                "winget upgrade --id '{}' --exact --accept-source-agreements --accept-package-agreements --disable-interactivity",
+                id.replace('\'', "''")
+            )
+        })
+        .collect()
 }
 
 /// Programmes installés que winget sait mettre à jour (navigateurs, 7-Zip, Discord, Steam…).
@@ -645,7 +676,7 @@ fn programmes() -> Constat {
     let code = sortie
         .rsplit_once("CODE=")
         .and_then(|(_, c)| c.trim().parse::<i64>().ok());
-    let noms = match lire_winget(&sortie) {
+    let programmes = match lire_winget(&sortie) {
         Some(n) => n,
         None if matches!(code, Some(0 | -1_978_335_212)) => Vec::new(),
         None => {
@@ -655,9 +686,10 @@ fn programmes() -> Constat {
             );
         }
     };
-    if noms.is_empty() {
+    if programmes.is_empty() {
         return ok("Programmes", "Programmes à jour (winget).");
     }
+    let noms: Vec<String> = programmes.iter().map(|(n, _)| n.clone()).collect();
     alerte(
         "Programmes",
         Niveau::Moyen,
@@ -667,10 +699,7 @@ fn programmes() -> Constat {
             resume(&noms, ", ")
         ),
     )
-    .corriger(
-        "Mettre à jour tous ces programmes avec winget",
-        &["winget upgrade --all --accept-source-agreements --accept-package-agreements --disable-interactivity"],
-    )
+    .corriger_liste("Mettre à jour ces programmes avec winget", commandes_winget(&programmes))
 }
 
 /// Périphériques en erreur dans le Gestionnaire de périphériques (pilote absent, qui ne démarre pas…).
@@ -678,7 +707,7 @@ fn peripheriques() -> Constat {
     // 22 = désactivé à la main : un choix, pas une panne.
     let Some(sortie) = ps(
         "Get-CimInstance Win32_PnPEntity -Filter 'ConfigManagerErrorCode <> 0 AND ConfigManagerErrorCode <> 22' | \
-         ForEach-Object { \"$($_.ConfigManagerErrorCode)|$($_.Name)\" }",
+         ForEach-Object { \"$($_.ConfigManagerErrorCode)|$(if ($_.Name) { $_.Name } else { $_.PNPDeviceID })\" }",
     ) else {
         return illisible("Périphériques");
     };
@@ -686,6 +715,7 @@ fn peripheriques() -> Constat {
         .lines()
         .filter_map(|l| l.trim().split_once('|'))
         .map(|(code, nom)| {
+            // Sans nom, l'identifiant matériel (PCI\VEN_1AF4&DEV_1045…) est ce qu'on cherche sur Internet.
             let nom = if nom.trim().is_empty() { "Périphérique inconnu" } else { nom.trim() };
             match code {
                 "28" | "1" => format!("{nom} (pas de pilote)"),
@@ -830,10 +860,19 @@ Nom    ID        Version Disponible Source\r\n\
 ------------------------------------------\r\n\
 Steam  Valve.Steam 2.10  2.11       winget\r\n\
 CODE=0";
-        assert_eq!(
-            lire_winget(sortie).unwrap(),
-            ["Mozilla Firefox (x64 fr)", "7-Zip 24.07 (x64)", "Discord"]
-        );
+        let noms: Vec<String> = lire_winget(sortie).unwrap().into_iter().map(|(n, _)| n).collect();
+        assert_eq!(noms, ["Mozilla Firefox (x64 fr)", "7-Zip 24.07 (x64)", "Discord"]);
+        // Sortie réelle de la VM Windows 11 (winget 1.29, anglais) : App Installer passe en dernier.
+        let vm = "Name             Id                        Version       Available     Source\r\n\
+-----------------------------------------------------------------------------\r\n\
+App Installer    Microsoft.AppInstaller    1.29.379.0    1.29.380      winget\r\n\
+Microsoft Edge   Microsoft.Edge            155.0.4283.45 155.0.4283.62 winget\r\n\
+Windows Terminal Microsoft.WindowsTerminal 1.24.12741.0  1.25.2733.0   winget\r\n\
+3 upgrades available.\r\nCODE=0";
+        let programmes = lire_winget(vm).unwrap();
+        assert_eq!(programmes.len(), 3);
+        let c = commandes_winget(&programmes);
+        assert!(c[0].contains("--id 'Microsoft.Edge'") && c[2].contains("--id 'Microsoft.AppInstaller'"));
         assert_eq!(lire_winget("Aucun package installé ne correspond aux critères d’entrée.\nCODE=0"), None);
         let resume_noms: Vec<String> = ["a", "b", "c", "d", "e"].iter().map(std::string::ToString::to_string).collect();
         assert_eq!(resume(&resume_noms, ", "), "a, b, c (et 2 autre(s))");
