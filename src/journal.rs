@@ -76,13 +76,13 @@ fn systeme() -> &'static str {
             let noyau = std::fs::read_to_string("/proc/sys/kernel/osrelease").unwrap_or_default();
             format!("{nom} {}", noyau.trim())
         }
-        // « macOS 15.1 (arm64) »
+        // « macOS 15.1 (Apple Silicon) »
         #[cfg(target_os = "macos")]
         {
             let version = crate::commande::lancer(std::process::Command::new("sw_vers").arg("-productVersion"), 5)
                 .map(|r| r.sortie.trim().to_string())
                 .unwrap_or_default();
-            format!("macOS {version} ({})", std::env::consts::ARCH)
+            format!("macOS {version} ({})", crate::machine::macos::architecture())
         }
         #[cfg(windows)]
         {

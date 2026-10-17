@@ -18,6 +18,15 @@ use persistance::persistance;
 
 pub const NOM: &str = "macOS";
 
+/// Famille de processeur, comme Apple la nomme.
+pub fn architecture() -> &'static str {
+    if cfg!(target_arch = "aarch64") {
+        "Apple Silicon"
+    } else {
+        "Intel"
+    }
+}
+
 const PARE_FEU: &str = "/usr/libexec/ApplicationFirewall/socketfilterfw";
 
 /// Commande d'installation d'un outil (Homebrew, le gestionnaire de paquets des Mac).
@@ -172,8 +181,10 @@ fn ports_ecoute(pare_feu_actif: bool) -> Vec<Constat> {
         for (adresse, port) in lire_netstat(&netstat, tcp) {
             let local = adresse.starts_with("127.") || adresse == "::1" || adresse.starts_with("fe80:");
             let i = info_port(port);
-            // UDP : mDNS/Bonjour (5353) fait partie de macOS ; ports éphémères anonymes = sockets clientes.
-            let bruit = !tcp && (port == 5353 || port == 68 || (port >= 49152 && i.service == crate::risk::inconnu()));
+            // UDP : Bonjour (5353) et le service de noms NetBIOS (137, 138, netbiosd) font partie de macOS ; ports
+            // éphémères anonymes = sockets clientes.
+            let bruit = !tcp
+                && (matches!(port, 5353 | 137 | 138 | 68) || (port >= 49152 && i.service == crate::risk::inconnu()));
             if local || bruit || vus.contains(&(proto, port)) {
                 continue;
             }
@@ -409,7 +420,12 @@ fn comptes() -> Constat {
     let Some(texte) = sortie("dscl", &[".", "-read", "/Groups/admin", "GroupMembership"]) else {
         return impossible("Comptes", tr!("dscl illisible", "dscl unreadable"));
     };
-    let admins: Vec<&str> = texte.split_whitespace().skip(1).filter(|n| *n != "root").collect();
+    // root et les comptes internes de macOS (« _mbsetupuser ») ne sont pas des personnes.
+    let admins: Vec<&str> = texte
+        .split_whitespace()
+        .skip(1)
+        .filter(|n| *n != "root" && !n.starts_with('_'))
+        .collect();
     if admins.len() > 2 {
         alerte(
             "Comptes",

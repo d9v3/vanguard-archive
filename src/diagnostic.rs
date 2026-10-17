@@ -366,7 +366,7 @@ mod systeme {
         let build = sortie("sw_vers", &["-buildVersion"]).unwrap_or_default();
         systeme.push(ligne(
             tr!("Système", "System"),
-            format!("{version} ({build}) · {}", std::env::consts::ARCH),
+            format!("{version} ({build}) · {}", crate::machine::macos::architecture()),
         ));
         systeme.push(ligne(
             tr!("Nom", "Name"),
