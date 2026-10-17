@@ -2,11 +2,12 @@
 
 **Le bilan de sécurité de ton ordinateur et de ton réseau, sur une clé USB.**
 Sentinel vérifie ta machine et tous les appareils de ton réseau, explique chaque problème en français clair, et le
-corrige après ton accord. Linux et Windows, sans installation, en français ou en anglais.
+corrige après ton accord. Linux, Windows et macOS, sans installation, en français ou en anglais.
 
-*Portable security check for your computer and your home network: Linux and Windows, French or English.*
+*Portable security check for your computer and your home network: Linux, Windows and macOS, French or English.*
 
-**Systèmes pris en charge** — Windows 10 et 11 ; Linux : Arch et dérivées (Omarchy, Manjaro, EndeavourOS, CachyOS),
+**Systèmes pris en charge** — Windows 10 et 11 ; macOS 12 et plus récents (Apple Silicon et Intel, encore jamais
+essayé sur un vrai Mac hors des tests automatiques) ; Linux : Arch et dérivées (Omarchy, Manjaro, EndeavourOS, CachyOS),
 Debian, Ubuntu, Mint, Pop!_OS, Fedora (et RHEL, Rocky, Nobara), openSUSE, ainsi que les systèmes atomiques
 (Bazzite, Silverblue, Kinoite, Bluefin, Aeon). Sentinel reconnaît la distribution et propose ses propres commandes :
 `omarchy update` / `omarchy pkg add` sous Omarchy, `ujust update` sur Bazzite, `rpm-ostree` ou `transactional-update`
@@ -39,21 +40,23 @@ verdict critère par critère et des conseils.
 ![Test de connexion](assets/captures/connexion.png)
 
 **Diagnostic de l'ordinateur** — le premier réflexe d'un dépannage : matériel, système, et les problèmes récents
-(erreurs du journal et programmes plantés sous Linux ; écrans bleus, arrêts brutaux et plantages sous Windows), avec
+(erreurs du journal et programmes plantés sous Linux ; écrans bleus, arrêts brutaux et plantages sous Windows ;
+paniques du noyau et rapports de plantage sous macOS), avec
 une copie texte enregistrée sur la clé.
 
 **Et aussi**
 - Corrections appliquées seulement après confirmation, avec un point de restauration créé automatiquement avant
-  (snapper ou timeshift sous Linux, point de restauration Windows) ; sous Windows, chacune est un script lisible.
+  (snapper ou timeshift sous Linux, point de restauration Windows, instantané Time Machine sous macOS) ; sous
+  Windows, chacune est un script lisible.
 - Mises à jour de tout d'un coup : système, programmes, pilotes, firmware.
 - Logiciels essentiels pour un PC neuf ou celui d'un ami (navigateurs, VLC, 7-Zip, LibreOffice, Bitwarden,
-  Thunderbird, Discord, OBS, GIMP, Notepad++, PowerToys) : winget, paquets de la distribution ou Flatpak.
+  Thunderbird, Discord, OBS, GIMP, Notepad++, PowerToys) : winget, paquets de la distribution, Flatpak ou Homebrew.
 - Réparations : Internet, navigation détournée, pare-feu, disque, disque plein, nettoyage approfondi, Windows Update
   bloqué, fichiers système, heure.
-- Antivirus : ClamAV (Linux) ou Microsoft Defender (Windows), sur l'ordinateur ou sur une clé USB / un dossier
+- Antivirus : ClamAV (Linux, macOS) ou Microsoft Defender (Windows), sur l'ordinateur ou sur une clé USB / un dossier
   choisi, avec les pièges des vers de clé (raccourci qui imite un dossier, autorun.inf, scripts).
 - Bac à sable : lancer un programme inconnu sans réseau, système en lecture seule, dossier personnel invisible
-  (bubblewrap ou firejail sous Linux, Windows Sandbox sous Windows).
+  (bubblewrap ou firejail sous Linux, Windows Sandbox sous Windows, sandbox-exec sous macOS).
 - Intégrité des fichiers critiques (comptes, sudo, SSH, PAM, cron, services, démarrage automatique) : empreintes
   BLAKE3, ce qui a changé depuis la référence, et surveillance en direct.
 - Mots de passe fuités : vérifiés par Have I Been Pwned sans jamais envoyer le mot de passe (5 caractères de son
@@ -62,14 +65,16 @@ une copie texte enregistrée sur la clé.
   la machine baisse, ou si la box semble usurpée (adresse MAC partagée ou changée : usurpation ARP).
 - Rapport HTML avec la courbe des notes, et ce qui a changé depuis le bilan précédent.
 - Gaming : sous Windows, composants pour les jeux et réglages de Windows ; sous Linux, Steam, pilotes Vulkan 32 et
-  64 bits selon la carte, GameMode, MangoHud, Gamescope, Wine, Lutris, Heroic, ProtonUp-Qt, vm.max_map_count, ntsync.
+  64 bits selon la carte, GameMode, MangoHud, Gamescope, Wine, Lutris, Heroic, ProtonUp-Qt, vm.max_map_count, ntsync ;
+  sous macOS, Steam et Heroic.
 
 Sentinel ne coupe jamais une connexion à distance en cours (Bureau à distance, SSH). À n'utiliser que sur ton propre
 réseau, ou un réseau que tu as le droit d'auditer.
 
 ## Démarrer
 
-- **Depuis la clé** : `Linux/sentinel` (dans un terminal : `./sentinel`) ou `Windows/sentinel.exe` (double-clic).
+- **Depuis la clé** : `Linux/sentinel` (dans un terminal : `./sentinel`), `Windows/sentinel.exe` (double-clic) ou
+  `Lancer Sentinel.command` sous macOS (double-clic, le Terminal s'ouvre).
   Le guide de la clé est dans `LISEZMOI.txt` (français) et `README.txt` (anglais).
 - **Installé** : lancer `sentinel` ouvre le menu. Choisir **1** (bilan complet), puis **2** (corriger).
 
@@ -109,14 +114,14 @@ commandes ont aussi un nom anglais (`full`, `audit`, `fix`, `network`, `connecti
 | `src/main.rs` | menu et sous-commandes |
 | `src/ui.rs` | couleurs, titres, cadres, barres |
 | `src/machine/mod.rs` | types communs, affichage, exécution parallèle des vérifications |
-| `src/machine/linux/`, `src/machine/windows/` | audit propre à chaque système, un fichier par thème |
-| `src/machine/dns.rs`, `certificats.rs`, `extensions.rs`, `sante.rs` | vérifications communes aux deux systèmes |
+| `src/machine/linux/`, `src/machine/windows/`, `src/machine/macos/` | audit propre à chaque système, un fichier par thème |
+| `src/machine/dns.rs`, `certificats.rs`, `extensions.rs`, `sante.rs` | vérifications communes aux trois systèmes |
 | `src/corriger.rs` | application guidée des correctifs |
 | `src/reseau.rs`, `src/scan.rs` | scan réseau (TCP connect, sans root), ARP, carnets des réseaux |
 | `src/risk.rs` | base de connaissances des ports et niveaux de risque |
 | `src/connexion.rs` | test de connexion pour le jeu |
 | `src/antivirus.rs` | ClamAV / Defender, quarantaine |
-| `src/surveillance.rs` | minuterie systemd / Planificateur de tâches, notifications |
+| `src/surveillance.rs` | minuterie systemd / Planificateur de tâches / agent launchd, notifications |
 | `src/rapport.rs`, `src/historique.rs` | rapport HTML, historique des bilans, courbe des notes |
 | `src/reparer.rs`, `src/maj.rs`, `src/gaming.rs` | réparations, mises à jour, gaming (Windows) |
 | `src/fuites.rs`, `src/donnees.rs` | mots de passe fuités, sauvegarde des données |
@@ -132,11 +137,16 @@ outils/deployer.sh     # compile Linux (musl, statique) + Windows, installe en l
 ```
 
 Tests : `cargo test` (Linux) ; tests Windows sous Wine (`cargo test --target x86_64-pc-windows-gnu` avec un lanceur
-Wine) ; `cargo clippy --all-targets` sur les deux cibles, en mode strict (pedantic), sans remarque ; `cargo fmt --check`.
+Wine) ; `cargo clippy --all-targets` sur les quatre cibles (Linux, Windows, `aarch64-apple-darwin`,
+`x86_64-apple-darwin`), en mode strict (pedantic), sans remarque ; `cargo fmt --check`.
+
+macOS : compilé et testé sur un Mac de GitHub (`.github/workflows/macos.yml`, programme universel Apple Silicon +
+Intel), chaque nuit si le code a changé ou à la demande (`gh workflow run macos.yml`). `deployer.sh` récupère la
+dernière compilation réussie pour la clé.
 
 ### La clé USB
 
-La clé (exFAT, étiquette `SENTINEL`, fichier témoin `sentinel.cle`) contient `Linux/`, `Windows/`, `donnees/` (base des
+La clé (exFAT, étiquette `SENTINEL`, fichier témoin `sentinel.cle`) contient `Linux/`, `Windows/`, `macOS/`, `donnees/` (base des
 appareils, portable), `source/` (ce dépôt) et le guide en deux langues (`LISEZMOI.txt`, `README.txt`, tirés de
 `outils/`). L'historique des bilans et la quarantaine restent sur chaque ordinateur.
 
@@ -144,7 +154,9 @@ Sur le PC de développement, elle se met à jour toute seule (unités systemd da
 compilation (`sentinel-copie.service`), et à chaque branchement avec la dernière version de GitHub, compilée si elle
 est nouvelle (`sentinel-cle.service`, `deployer.sh --branchement`).
 
-La version macOS a été retirée après la v0.9.7 (jamais testée sur un vrai Mac) : `git checkout avec-macos` la retrouve.
+La clé a deux partitions : `SENTINEL`, en lecture seule partout sauf sur l'ordinateur du propriétaire (attribut GPT
+respecté par Windows ; sous Linux et macOS, Sentinel la remonte lui-même en lecture seule), et `SENTINELLOG`, qui ne
+reçoit que le journal des erreurs, anonymisé. `outils/preparer-cle.sh` prépare une nouvelle clé.
 
 ## Licence
 
