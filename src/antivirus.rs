@@ -165,6 +165,7 @@ fn clamav(complet: bool) {
         .filter(|p| p.exists())
         .collect()
     };
+    let cibles = sans_doublons(cibles);
     // Jeux, caches et préfixes Wine sont énormes et produisent des faux positifs (cracks, outils anti-triche).
     let exclusions = [
         "Games",
@@ -225,7 +226,10 @@ fn clamav(complet: bool) {
         String::new()
     };
     println!("  {GRIS}{} fichier(s) analysé(s){illisibles}.{RESET}", bilan.analyses);
-    let infectes = bilan.infectes;
+    // Ceinture et bretelles : un même fichier n'est proposé qu'une fois (sinon la 2e mise en quarantaine échoue).
+    let mut infectes = bilan.infectes;
+    let mut vus = std::collections::HashSet::new();
+    infectes.retain(|(f, _)| vus.insert(f.clone()));
     if infectes.is_empty() {
         println!("  {VERT}✔ Aucun malware trouvé.{RESET}");
         return;
@@ -252,6 +256,24 @@ fn clamav(complet: bool) {
     if rep == "q" {
         println!("  {GRIS}Quarantaine : {}{RESET}", dossier.display());
     }
+}
+
+/// Dossiers à analyser sans recouvrement : un ~/Desktop qui pointe vers ~/Bureau, ou un dossier contenu dans un
+/// autre, faisait analyser deux fois les mêmes fichiers ; un fichier infecté était alors signalé deux fois et sa
+/// seconde mise en quarantaine échouait (« fichier système ? »). Vu en test.
+#[cfg(unix)]
+fn sans_doublons(cibles: Vec<PathBuf>) -> Vec<PathBuf> {
+    let mut reels: Vec<PathBuf> = cibles.into_iter().map(|p| p.canonicalize().unwrap_or(p)).collect();
+    // Trié, un dossier parent passe avant ce qu'il contient.
+    reels.sort();
+    reels.dedup();
+    let mut garde: Vec<PathBuf> = Vec::new();
+    for p in reels {
+        if !garde.iter().any(|g| p.starts_with(g)) {
+            garde.push(p);
+        }
+    }
+    garde
 }
 
 /// Bilan d'une analyse ClamAV qui a vraiment eu lieu.
@@ -454,6 +476,21 @@ mod tests {
         assert!(!suspect.exists());
         assert_eq!(std::fs::metadata(&dest).unwrap().permissions().mode() & 0o777, 0);
         std::fs::set_permissions(&dest, std::fs::Permissions::from_mode(0o600)).unwrap();
+        std::fs::remove_dir_all(&base).unwrap();
+    }
+
+    #[test]
+    fn dossiers_analyses_une_seule_fois() {
+        let base = std::env::temp_dir().join(format!("netscan-cibles-{}", std::process::id()));
+        let bureau = base.join("Bureau");
+        std::fs::create_dir_all(bureau.join("sous")).unwrap();
+        std::os::unix::fs::symlink(&bureau, base.join("Desktop")).unwrap();
+        let reel = bureau.canonicalize().unwrap();
+        // Desktop → Bureau, et un sous-dossier de Bureau : il ne reste que Bureau.
+        assert_eq!(
+            sans_doublons(vec![base.join("Desktop"), bureau.clone(), bureau.join("sous")]),
+            vec![reel]
+        );
         std::fs::remove_dir_all(&base).unwrap();
     }
 

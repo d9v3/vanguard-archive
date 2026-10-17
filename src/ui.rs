@@ -39,6 +39,11 @@ pub fn demander(question: &str) -> String {
     print!("{question}");
     let _ = std::io::stdout().flush();
     let mut s = String::new();
-    let _ = std::io::stdin().read_line(&mut s);
+    // Fin de l'entrée (Ctrl-D, terminal fermé, entrée redirigée) : on quitte. Le menu reposait sinon la question
+    // sans fin, en effaçant l'écran à toute vitesse (un cœur du processeur à 100 %). Vu en test.
+    if matches!(std::io::stdin().read_line(&mut s), Ok(0) | Err(_)) {
+        println!();
+        std::process::exit(0);
+    }
     s.trim().to_string()
 }
