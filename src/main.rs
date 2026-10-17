@@ -10,6 +10,7 @@ mod donnees;
 #[cfg(windows)]
 mod gaming;
 mod machine;
+mod maj;
 mod rapport;
 mod reparer;
 mod reseau;
@@ -76,6 +77,9 @@ enum Commande {
         #[arg(value_parser = ["on", "off"])]
         etat: String,
     },
+    /// Mises à jour : système, programmes, pilotes et firmware vérifiés d'un coup, puis installés après accord.
+    #[command(alias = "mises-a-jour")]
+    Maj,
     /// Réparations courantes : réseau, navigation détournée, pare-feu, antivirus, fichiers système, disque, place, mises à jour, heure.
     Reparer,
     /// Gaming (Windows) : composants pour les jeux (Visual C++, DirectX, .NET…) et réglages de Windows.
@@ -182,6 +186,7 @@ async fn menu() {
             format!("{GRIS}désactivée{RESET}")
         };
         println!("  9. Surveillance du réseau toutes les heures : {etat}");
+        println!("  u. Mises à jour : tout vérifier et installer (système, programmes, pilotes)");
         println!("  r. Réparer (réseau, pare-feu, antivirus, disque, système…)");
         #[cfg(windows)]
         println!("  g. Gaming : composants (Visual C++, DirectX, .NET…) et réglages Windows");
@@ -208,6 +213,7 @@ async fn menu() {
                 rapport::ouvrir(s.audit.as_ref(), s.reseau.as_ref());
             }
             "9" => surveillance::activer(!surveillance::active()),
+            "u" | "U" => maj::executer(),
             "r" | "R" => reparer::menu(),
             #[cfg(windows)]
             "g" | "G" => gaming::menu(),
@@ -265,6 +271,7 @@ async fn main() {
         Some(Commande::Antivirus { complet }) => antivirus::analyser(complet),
         Some(Commande::Surveillance { etat }) => surveillance::activer(etat == "on"),
         Some(Commande::Surveiller) => surveillance::surveiller().await,
+        Some(Commande::Maj) => maj::executer(),
         Some(Commande::Reparer) => reparer::menu(),
         #[cfg(windows)]
         Some(Commande::Gaming) => gaming::menu(),

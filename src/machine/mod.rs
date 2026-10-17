@@ -103,6 +103,18 @@ impl Constat {
         self
     }
 
+    /// Comme `corriger`, pour des commandes construites (variables, filtres).
+    #[cfg_attr(not(windows), allow(dead_code))]
+    fn corriger_liste(mut self, action: impl Into<String>, commandes: Vec<String>) -> Self {
+        self.correctif = Some(Correctif {
+            action: action.into(),
+            commandes,
+            automatique: true,
+            bloque: None,
+        });
+        self
+    }
+
     /// La correction bloque ce port (« 8080/tcp ») dans le pare-feu.
     fn bloquant(mut self, port: String) -> Self {
         if let Some(k) = &mut self.correctif {
@@ -364,9 +376,34 @@ pub fn auditer(bavard: bool) -> Audit {
     os::auditer()
 }
 
+/// Système, programmes, pilotes et firmware : tout ce qui doit être à jour (`netscan maj`).
+pub fn mises_a_jour_completes() -> Vec<Constat> {
+    os::mises_a_jour_completes()
+}
+
 pub fn afficher(a: &Audit) {
     titre(&format!("Cette machine ({})", a.systeme));
-    for c in &a.constats {
+    afficher_constats(&a.constats);
+    println!();
+    if a.fiable() {
+        afficher_note("Note de la machine", a.score);
+    } else {
+        println!(
+            "  Note de la machine : {}aucune{RESET} (pare-feu ou trop de vérifications impossibles à faire ici)",
+            couleur(Niveau::Eleve)
+        );
+    }
+    if a.impossibles() > 0 {
+        println!(
+            "  {}⚠ {} vérification(s) impossible(s) : résultat incomplet.{RESET}",
+            couleur(Niveau::Moyen),
+            a.impossibles()
+        );
+    }
+}
+
+pub fn afficher_constats(constats: &[Constat]) {
+    for c in constats {
         let (icone, etiquette) = match c.probleme {
             None => (format!("{VERT}✔{RESET}"), String::new()),
             // Une simple information n'est pas un problème : pas de croix rouge.
@@ -385,22 +422,6 @@ pub fn afficher(a: &Audit) {
             };
             println!("  {:18}{GRIS}{marque} : {}{RESET}", "", k.action);
         }
-    }
-    println!();
-    if a.fiable() {
-        afficher_note("Note de la machine", a.score);
-    } else {
-        println!(
-            "  Note de la machine : {}aucune{RESET} (pare-feu ou trop de vérifications impossibles à faire ici)",
-            couleur(Niveau::Eleve)
-        );
-    }
-    if a.impossibles() > 0 {
-        println!(
-            "  {}⚠ {} vérification(s) impossible(s) : résultat incomplet.{RESET}",
-            couleur(Niveau::Moyen),
-            a.impossibles()
-        );
     }
 }
 

@@ -16,6 +16,13 @@ Outil de sécurité en Rust, en français, pour Linux et Windows :
   chaque correction est un script `.ps1` lisible, gardé comme trace.
 - **Scan du réseau local** : appareils, fabricant (base IEEE intégrée), surnoms, ports ouverts, services reconnus à
   leur bannière, risques ; un carnet par réseau (box + nom du Wi-Fi), nouveaux appareils et ports, appareils absents.
+- **Mises à jour** (`netscan maj`, touche `u` du menu) : tout ce qui doit être à jour, vérifié d'un coup puis installé
+  après accord.
+  - Linux : paquets, Flatpak, Snap, AUR, firmware (fwupd), pilotes DKMS compilés pour chaque noyau installé
+    (NVIDIA…), noyau chargé.
+  - Windows : Windows Update (correctifs, .NET, Defender) et ses pilotes, redémarrage en attente, signatures de
+    Defender, programmes (winget), périphériques sans pilote, âge du pilote de la carte graphique.
+    « Tout installer » passe par une seule fenêtre administrateur.
 - **Réparer** : réseau, fichiers système (SFC/DISM), disque (SMART, btrfs scrub, Repair-Volume), disque plein,
   mises à jour bloquées (pacman, apt, dnf, zypper, Windows Update), services en échec, heure ; chaque réparation est montrée
   puis confirmée, et celles qui couperaient une connexion à distance en cours sont refusées.
@@ -25,7 +32,7 @@ Outil de sécurité en Rust, en français, pour Linux et Windows :
 
 Sans argument, `netscan` ouvre un menu. Sous-commandes : `complet [--html]`, `machine [--json]`, `corriger`,
 `reseau [cible] [-p courants|tous|22,80,8000-8100] [--json]`, `antivirus [--complet]`, `surveillance on|off`,
-`nommer <ip|mac> <surnom>`, `reparer`.
+`nommer <ip|mac> <surnom>`, `maj`, `reparer`.
 
 À n'utiliser que sur un réseau qui t'appartient ou que tu as le droit d'auditer.
 

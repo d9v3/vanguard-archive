@@ -1127,6 +1127,117 @@ fn redemarrage() -> Constat {
     }
 }
 
+/// Noyaux installés (leur image est là) plus celui qui tourne : ceux pour lesquels les modules DKMS doivent exister.
+fn noyaux_installes() -> Vec<String> {
+    let mut noyaux: Vec<String> = std::fs::read_dir("/usr/lib/modules")
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|e| {
+            let nom = e.file_name().to_string_lossy().into_owned();
+            e.path().join("vmlinuz").exists() || Path::new(&format!("/boot/vmlinuz-{nom}")).exists()
+        })
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .collect();
+    if let Some(en_cours) = sortie("uname", &["-r"]).map(|n| n.trim().to_string())
+        && !en_cours.is_empty()
+        && !noyaux.contains(&en_cours)
+    {
+        noyaux.push(en_cours);
+    }
+    noyaux.sort();
+    noyaux
+}
+
+/// Modules de « dkms status » et, pour chacun, les noyaux de `noyaux` où il n'est pas installé.
+/// Lignes « nvidia/610.57, 7.2.5-arch1, x86_64: installed » (ancien format : « nvidia, 610.57, 7.2.5, x86_64: »).
+fn dkms_manquants(status: &str, noyaux: &[String]) -> Vec<(String, Vec<String>)> {
+    let mut installes: Vec<(String, String)> = Vec::new();
+    let mut modules: Vec<String> = Vec::new();
+    for l in status.lines() {
+        let Some((gauche, etat)) = l.split_once(": ") else { continue };
+        let parties: Vec<&str> = gauche.split(", ").map(str::trim).collect();
+        let (nom, noyau) = match parties.first() {
+            Some(p) if p.contains('/') => (p.split('/').next().unwrap_or(p), parties.get(1)),
+            Some(p) => (*p, parties.get(2)),
+            None => continue,
+        };
+        if nom.is_empty() {
+            continue;
+        }
+        if !modules.iter().any(|m| m == nom) {
+            modules.push(nom.to_string());
+        }
+        if let Some(k) = noyau
+            && etat.trim_start().starts_with("installed")
+        {
+            installes.push((nom.to_string(), (*k).to_string()));
+        }
+    }
+    modules
+        .into_iter()
+        .map(|m| {
+            let absents = noyaux
+                .iter()
+                .filter(|k| !installes.iter().any(|(n, i)| *n == m && i == *k))
+                .cloned()
+                .collect();
+            (m, absents)
+        })
+        .collect()
+}
+
+/// Pilotes DKMS (NVIDIA, manette, VirtualBox…) : recompilés pour chaque noyau. S'il en manque un pour le noyau
+/// qu'on va démarrer, c'est l'écran noir ou un périphérique muet au prochain démarrage.
+fn pilotes_dkms() -> Option<Constat> {
+    let status = sortie("dkms", &["status"])?;
+    let noyaux = noyaux_installes();
+    let modules = dkms_manquants(&status, &noyaux);
+    if modules.is_empty() {
+        return None;
+    }
+    let tous: Vec<&str> = modules.iter().map(|(m, _)| m.as_str()).collect();
+    let mut a_refaire: Vec<String> = modules.iter().flat_map(|(_, k)| k.clone()).collect();
+    a_refaire.sort();
+    a_refaire.dedup();
+    if a_refaire.is_empty() {
+        return Some(ok(
+            "Pilotes DKMS",
+            format!("{} compilé(s) pour chaque noyau installé.", tous.join(", ")),
+        ));
+    }
+    let detail: Vec<String> = modules
+        .iter()
+        .filter(|(_, k)| !k.is_empty())
+        .map(|(m, k)| format!("{m} (noyau {})", k.join(", ")))
+        .collect();
+    let commandes: Vec<String> = a_refaire.iter().map(|k| format!("sudo dkms autoinstall -k {k}")).collect();
+    let commandes: Vec<&str> = commandes.iter().map(String::as_str).collect();
+    Some(
+        alerte(
+            "Pilotes DKMS",
+            Niveau::Eleve,
+            format!(
+                "Pilote pas compilé : {}. Écran noir ou périphérique muet possible au prochain démarrage.",
+                detail.join(", ")
+            ),
+        )
+        .corriger(
+            "Recompiler les pilotes DKMS (les en-têtes du noyau doivent être installés)",
+            &commandes,
+        ),
+    )
+}
+
+/// Tout ce qui doit être à jour : paquets, Flatpak, Snap, AUR, firmware, pilotes DKMS, noyau chargé.
+pub fn mises_a_jour_completes() -> Vec<Constat> {
+    let mut constats = vec![mises_a_jour()];
+    constats.extend(autres_mises_a_jour());
+    constats.extend(pilotes_dkms());
+    constats.push(redemarrage());
+    constats
+}
+
 /// Le système de fichiers racine repose-t-il sur un volume chiffré (LUKS, éventuellement sous LVM) ?
 /// `None` si on ne peut pas remonter la chaîne des périphériques.
 fn racine_chiffree() -> Option<bool> {
@@ -2465,6 +2576,26 @@ pub fn auditer() -> Audit {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn modules_dkms_par_noyau() {
+        let noyaux = ["7.2.5-arch1".to_string(), "7.3.0-arch1".to_string()];
+        let status = "nvidia/610.57.04, 7.2.5-arch1, x86_64: installed\n\
+                      nvidia/610.57.04, 7.3.0-arch1, x86_64: built\n\
+                      hid-xpadneo/v0.10.4, 7.2.5-arch1, x86_64: installed\n\
+                      hid-xpadneo/v0.10.4, 7.3.0-arch1, x86_64: installed (WARNING! Diff between built and installed module!)\n\
+                      vboxhost/7.1: added\n\
+                      ancien, 1.0, 7.2.5-arch1, x86_64: installed\n";
+        assert_eq!(
+            dkms_manquants(status, &noyaux),
+            [
+                ("nvidia".to_string(), vec!["7.3.0-arch1".to_string()]),
+                ("hid-xpadneo".to_string(), vec![]),
+                ("vboxhost".to_string(), noyaux.to_vec()),
+                ("ancien".to_string(), vec!["7.3.0-arch1".to_string()]),
+            ]
+        );
+    }
 
     #[test]
     fn ports_docker() {

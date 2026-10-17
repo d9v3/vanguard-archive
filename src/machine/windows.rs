@@ -14,12 +14,17 @@ const FIN: &str = "__NETSCAN_FIN__";
 /// Le script doit aller jusqu'au marqueur de fin : une sortie vide sans marqueur (PowerShell bloqué,
 /// absent, ou remplacé par un bouchon comme sous Wine) n'est jamais prise pour une réponse.
 pub fn ps(script: &str) -> Option<String> {
+    // 60 s : un cmdlet bloqué (service Defender suspendu…) ne doit pas figer l'audit.
+    ps_delai(script, 60)
+}
+
+/// Comme `ps`, avec un délai choisi : la recherche Windows Update ou winget peuvent prendre une minute ou deux.
+fn ps_delai(script: &str, secondes: u64) -> Option<String> {
     let complet =
         format!("[Console]::OutputEncoding=[Text.Encoding]::UTF8; $ErrorActionPreference='Stop'; {script}; '{FIN}'");
-    // 60 s : un cmdlet bloqué (service Defender suspendu…) ne doit pas figer l'audit.
     let r = crate::commande::lancer(
         Command::new("powershell").args(["-NoProfile", "-NonInteractive", "-Command", &complet]),
-        60,
+        secondes,
     )?;
     let (avant, _) = r.sortie.rsplit_once(FIN)?;
     (r.code == Some(0)).then(|| avant.trim().to_string())
@@ -30,8 +35,9 @@ fn illisible(categorie: &'static str) -> Constat {
     impossible(categorie, "PowerShell indisponible ou bloqué")
 }
 
-/// Délai maximal d'une correction : au-delà, on rend la main au lieu d'attendre indéfiniment.
-const DELAI_CORRECTION_MS: u32 = 10 * 60 * 1000;
+/// Délai maximal d'une correction : au-delà, on rend la main au lieu d'attendre indéfiniment. Large : une mise à
+/// jour cumulative de Windows dépasse souvent 10 minutes, et la fenêtre attend Entrée avant de se fermer.
+const DELAI_CORRECTION_MS: u32 = 2 * 60 * 60 * 1000;
 
 /// Le script exécuté dans la fenêtre administrateur : chaque commande est annoncée, puis « OK » ou l'erreur.
 /// Une fenêtre muette ne se distingue pas d'une fenêtre figée.
@@ -53,6 +59,8 @@ fn script_admin(commandes: &[String]) -> String {
             "DISM",
             "sfc",
             "Checkpoint-Computer",
+            "CreateUpdate",
+            "winget",
         ]
         .iter()
         .any(|l| c.contains(l));
@@ -458,6 +466,322 @@ fn wifi() -> Option<Constat> {
     })
 }
 
+/// Une mise à jour proposée par Windows Update.
+#[derive(Debug, PartialEq)]
+struct MiseAJour {
+    pilote: bool,
+    /// Correctif de sécurité classé « Critique » ou « Important » par Microsoft.
+    importante: bool,
+    titre: String,
+}
+
+/// Lignes « type|gravité|titre » écrites par la recherche Windows Update (type 2 = pilote).
+fn lire_windows_update(sortie: &str) -> Vec<MiseAJour> {
+    sortie
+        .lines()
+        .filter_map(|l| {
+            let mut champs = l.trim().splitn(3, '|');
+            let (genre, gravite, titre) = (champs.next()?, champs.next()?, champs.next()?.trim());
+            (!titre.is_empty()).then(|| MiseAJour {
+                pilote: genre == "2",
+                importante: matches!(gravite, "Critical" | "Important"),
+                titre: titre.to_string(),
+            })
+        })
+        .collect()
+}
+
+/// « a ; b ; c (et 2 autres) » : les premiers noms d'une liste, pour un message d'une ligne.
+fn resume(noms: &[String], separateur: &str) -> String {
+    const MAX: usize = 3;
+    let mut t = noms.iter().take(MAX).cloned().collect::<Vec<_>>().join(separateur);
+    if noms.len() > MAX {
+        let _ = write!(t, " (et {} autre(s))", noms.len() - MAX);
+    }
+    t
+}
+
+/// Commandes de la fenêtre administrateur qui téléchargent et installent les mises à jour d'un type
+/// (« Software » ou « Driver ») par l'API de Windows Update, comme le bouton « Tout installer ».
+fn installer_windows_update(genre: &str) -> Vec<String> {
+    vec![
+        format!(
+            "$maj = New-Object -ComObject Microsoft.Update.Session; $liste = New-Object -ComObject Microsoft.Update.UpdateColl; \
+             foreach ($u in $maj.CreateUpdateSearcher().Search(\"IsInstalled=0 and IsHidden=0 and Type='{genre}'\").Updates) \
+             {{ if (-not $u.EulaAccepted) {{ $u.AcceptEula() }}; [void]$liste.Add($u); Write-Host \"  - $($u.Title)\" }}"
+        ),
+        "if ($liste.Count) { $t = $maj.CreateUpdateDownloader(); $t.Updates = $liste; [void]$t.Download() }".into(),
+        "if ($liste.Count) { $i = $maj.CreateUpdateInstaller(); $i.Updates = $liste; $r = $i.Install(); \
+         if ($r.RebootRequired) { Write-Host '  Redémarrage nécessaire pour finir.' -ForegroundColor Yellow }; \
+         if ($r.ResultCode -notin 2, 3) { throw \"installation incomplète (code $($r.ResultCode))\" } }"
+            .into(),
+    ]
+}
+
+/// Ce que Windows Update propose et qui n'est pas installé : correctifs (Windows, .NET, Defender) et pilotes.
+fn windows_update() -> Vec<Constat> {
+    let Some(sortie) = ps_delai(
+        "foreach ($u in (New-Object -ComObject Microsoft.Update.Session).CreateUpdateSearcher().Search('IsInstalled=0 and IsHidden=0').Updates) \
+         { \"$([int]$u.Type)|$($u.MsrcSeverity)|$($u.Title)\" }",
+        180,
+    ) else {
+        return vec![
+            impossible("Windows Update", "recherche impossible, hors ligne ?"),
+            impossible("Pilotes", "recherche Windows Update impossible"),
+        ];
+    };
+    let (pilotes, logiciels): (Vec<_>, Vec<_>) = lire_windows_update(&sortie).into_iter().partition(|m| m.pilote);
+    let titres = |l: &[MiseAJour]| l.iter().map(|m| m.titre.clone()).collect::<Vec<_>>();
+    let systeme = if logiciels.is_empty() {
+        ok("Windows Update", "Windows à jour (correctifs, .NET, Defender).")
+    } else {
+        let niveau = if logiciels.iter().any(|m| m.importante) {
+            Niveau::Eleve
+        } else {
+            Niveau::Moyen
+        };
+        alerte(
+            "Windows Update",
+            niveau,
+            format!(
+                "{} mise(s) à jour en attente : {}.",
+                logiciels.len(),
+                resume(&titres(&logiciels), " ; ")
+            ),
+        )
+        .corriger_liste(
+            "Télécharger et installer les mises à jour de Windows",
+            installer_windows_update("Software"),
+        )
+    };
+    let pilote = if pilotes.is_empty() {
+        ok("Pilotes", "Aucun pilote à mettre à jour dans Windows Update.")
+    } else {
+        alerte(
+            "Pilotes",
+            Niveau::Moyen,
+            format!(
+                "{} pilote(s) à mettre à jour : {}.",
+                pilotes.len(),
+                resume(&titres(&pilotes), " ; ")
+            ),
+        )
+        .corriger_liste(
+            "Installer les pilotes proposés par Windows Update",
+            installer_windows_update("Driver"),
+        )
+    };
+    vec![systeme, pilote]
+}
+
+fn redemarrage_en_attente() -> Constat {
+    let attente = ps(
+        "[bool]((New-Object -ComObject Microsoft.Update.SystemInfo).RebootRequired -or \
+         (Test-Path 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Component Based Servicing\\RebootPending'))",
+    );
+    match attente.as_deref().map(str::to_ascii_lowercase).as_deref() {
+        Some("true") => alerte(
+            "Redémarrage",
+            Niveau::Moyen,
+            "Des mises à jour attendent un redémarrage pour être actives.",
+        )
+        .manuel("Redémarrer quand c'est pratique", &["Restart-Computer"]),
+        Some("false") => ok("Redémarrage", "Aucun redémarrage en attente."),
+        _ => illisible("Redémarrage"),
+    }
+}
+
+/// Noms des programmes du tableau de « winget upgrade ». Les colonnes sont alignées sur l'en-tête (traduit selon
+/// la langue de Windows), juste au-dessus de la ligne de tirets. Le tableau s'arrête à la première ligne qui n'a
+/// pas d'identifiant ni de source (« 3 mises à niveau disponibles. », ou le second tableau des programmes épinglés).
+fn lire_winget(sortie: &str) -> Option<Vec<String>> {
+    // La barre de progression de winget se réécrit avec des retours chariot : seul le dernier état compte.
+    let lignes: Vec<Vec<char>> = sortie
+        .lines()
+        .map(|l| l.rsplit('\r').next().unwrap_or("").trim_end().chars().collect())
+        .collect();
+    let tirets = lignes
+        .iter()
+        .position(|l| l.len() >= 10 && l.iter().all(|&c| c == '-' || c == '─'))?;
+    let entete = lignes.get(tirets.checked_sub(1)?)?;
+    let debuts: Vec<usize> = (0..entete.len())
+        .filter(|&i| entete[i] != ' ' && (i == 0 || entete[i - 1] == ' '))
+        .collect();
+    if debuts.len() < 4 {
+        return None;
+    }
+    let champ = |l: &[char], n: usize| -> String {
+        let debut = debuts[n].min(l.len());
+        let fin = debuts.get(n + 1).map_or(l.len(), |&f| f.min(l.len()));
+        l[debut..fin].iter().collect::<String>().trim().to_string()
+    };
+    let mut noms = Vec::new();
+    for l in &lignes[tirets + 1..] {
+        let (id, source) = (champ(l, 1), champ(l, debuts.len() - 1));
+        if id.is_empty() || id.contains(' ') || source.is_empty() || source.contains(' ') {
+            break;
+        }
+        noms.push(champ(l, 0));
+    }
+    Some(noms)
+}
+
+/// Programmes installés que winget sait mettre à jour (navigateurs, 7-Zip, Discord, Steam…).
+fn programmes() -> Constat {
+    let Some(sortie) = ps_delai(
+        "if (-not (Get-Command winget -ErrorAction SilentlyContinue)) { 'WINGET_ABSENT' } \
+         else { winget upgrade --accept-source-agreements --disable-interactivity | Out-String; \"CODE=$LASTEXITCODE\" }",
+        150,
+    ) else {
+        return illisible("Programmes");
+    };
+    if sortie.contains("WINGET_ABSENT") {
+        return impossible("Programmes", "winget absent").manuel(
+            "Installer « Programme d'installation d'application » depuis le Microsoft Store",
+            &["Start-Process ms-windows-store://pdp/?ProductId=9NBLGGH4NNS1"],
+        );
+    }
+    // 0x8A150014 : aucun programme trouvé, pas une erreur.
+    let code = sortie
+        .rsplit_once("CODE=")
+        .and_then(|(_, c)| c.trim().parse::<i64>().ok());
+    let noms = match lire_winget(&sortie) {
+        Some(n) => n,
+        None if matches!(code, Some(0 | -1_978_335_212)) => Vec::new(),
+        None => {
+            return impossible(
+                "Programmes",
+                &format!("winget en erreur (code {})", code.map_or("?".into(), |c| c.to_string())),
+            );
+        }
+    };
+    if noms.is_empty() {
+        return ok("Programmes", "Programmes à jour (winget).");
+    }
+    alerte(
+        "Programmes",
+        Niveau::Moyen,
+        format!(
+            "{} programme(s) à mettre à jour : {}.",
+            noms.len(),
+            resume(&noms, ", ")
+        ),
+    )
+    .corriger(
+        "Mettre à jour tous ces programmes avec winget",
+        &["winget upgrade --all --accept-source-agreements --accept-package-agreements --disable-interactivity"],
+    )
+}
+
+/// Périphériques en erreur dans le Gestionnaire de périphériques (pilote absent, qui ne démarre pas…).
+fn peripheriques() -> Constat {
+    // 22 = désactivé à la main : un choix, pas une panne.
+    let Some(sortie) = ps(
+        "Get-CimInstance Win32_PnPEntity -Filter 'ConfigManagerErrorCode <> 0 AND ConfigManagerErrorCode <> 22' | \
+         ForEach-Object { \"$($_.ConfigManagerErrorCode)|$($_.Name)\" }",
+    ) else {
+        return illisible("Périphériques");
+    };
+    let en_panne: Vec<String> = sortie
+        .lines()
+        .filter_map(|l| l.trim().split_once('|'))
+        .map(|(code, nom)| {
+            let nom = if nom.trim().is_empty() { "Périphérique inconnu" } else { nom.trim() };
+            match code {
+                "28" | "1" => format!("{nom} (pas de pilote)"),
+                _ => format!("{nom} (erreur {code})"),
+            }
+        })
+        .collect();
+    if en_panne.is_empty() {
+        return ok("Périphériques", "Tous les périphériques ont un pilote qui fonctionne.");
+    }
+    alerte(
+        "Périphériques",
+        Niveau::Moyen,
+        format!(
+            "{} périphérique(s) sans pilote ou en erreur : {}.",
+            en_panne.len(),
+            resume(&en_panne, ", ")
+        ),
+    )
+    .manuel(
+        "Chercher le pilote dans Windows Update > Options avancées > Mises à jour facultatives, sinon sur le site du fabricant",
+        &["Start-Process ms-settings:windowsupdate-optionalupdates", "Start-Process devmgmt.msc"],
+    )
+}
+
+/// Âge du pilote de chaque carte graphique NVIDIA, AMD ou Intel. Son fabricant le publie souvent bien avant
+/// Windows Update, et un pilote vieux d'un an rate des correctifs de sécurité et des optimisations des jeux.
+fn cartes_graphiques() -> Vec<Constat> {
+    let Some(sortie) = ps(
+        "Get-CimInstance Win32_VideoController | ForEach-Object { \
+         \"$($_.Name)|$($_.DriverVersion)|$(if ($_.DriverDate) { ((Get-Date) - $_.DriverDate).Days })\" }",
+    ) else {
+        return vec![illisible("Carte graphique")];
+    };
+    sortie
+        .lines()
+        .filter_map(|l| {
+            let mut c = l.trim().splitn(3, '|');
+            let (nom, version, jours) = (c.next()?.trim(), c.next()?.trim(), c.next()?.trim().parse::<u32>().ok());
+            let bas = nom.to_lowercase();
+            let (outil, lien) = if bas.contains("nvidia") {
+                ("NVIDIA App", "https://www.nvidia.com/fr-fr/software/nvidia-app/")
+            } else if bas.contains("amd") || bas.contains("radeon") {
+                ("AMD Software Adrenalin", "https://www.amd.com/fr/support/download/drivers.html")
+            } else if bas.contains("intel") {
+                ("Intel Driver & Support Assistant", "https://www.intel.com/content/www/fr/fr/support/detect.html")
+            } else {
+                return None;
+            };
+            let manuel = format!("Mettre le pilote à jour avec {outil}");
+            let ouvrir = format!("Start-Process {lien}");
+            Some(match jours {
+                Some(j) if j > 180 => alerte(
+                    "Carte graphique",
+                    Niveau::Moyen,
+                    format!("{nom} : pilote {version} vieux de {j} jours."),
+                )
+                .manuel(manuel, &[&ouvrir]),
+                Some(j) => ok("Carte graphique", format!("{nom} : pilote {version} de {j} jours.")),
+                None => ok("Carte graphique", format!("{nom} : pilote {version}.")),
+            })
+        })
+        .collect()
+}
+
+fn signatures() -> Option<Constat> {
+    let age = ps("(Get-MpComputerStatus).AntivirusSignatureAge")?.parse::<u32>().ok()?;
+    Some(if age > 1 {
+        alerte(
+            "Signatures",
+            Niveau::Moyen,
+            format!("Signatures de Defender vieilles de {age} jours."),
+        )
+        .corriger("Mettre à jour les signatures", &["Update-MpSignature"])
+    } else {
+        ok("Signatures", "Signatures de Defender à jour.")
+    })
+}
+
+/// Tout ce qui doit être à jour : Windows, ses pilotes, les programmes, Defender. Les recherches tournent en
+/// parallèle : Windows Update et winget prennent chacun jusqu'à deux minutes.
+pub fn mises_a_jour_completes() -> Vec<Constat> {
+    std::thread::scope(|portee| {
+        let wu = portee.spawn(windows_update);
+        let winget = portee.spawn(programmes);
+        let cartes = portee.spawn(cartes_graphiques);
+        let mut constats = wu.join().unwrap_or_default();
+        constats.push(redemarrage_en_attente());
+        constats.extend(signatures());
+        constats.push(winget.join().unwrap_or_else(|_| illisible("Programmes")));
+        constats.push(peripheriques());
+        constats.extend(cartes.join().unwrap_or_default());
+        constats
+    })
+}
+
 pub fn auditer() -> Audit {
     let feu = pare_feu();
     let feu_actif = feu.probleme.is_none();
@@ -488,6 +812,45 @@ mod tests {
         // SAFETY (test) : variable propre au processus de test.
         unsafe { std::env::set_var("SESSIONNAME", "RDP-Tcp#3") };
         assert!(session_a_distance());
+    }
+
+    #[test]
+    fn tableau_de_winget() {
+        // Forme de la sortie de winget en français, barre de progression comprise (à confirmer dans la VM).
+        let sortie = "   - \r   \\ \r\r\n\
+Nom                         ID                       Version      Disponible   Source\r\n\
+-------------------------------------------------------------------------------------\r\n\
+Mozilla Firefox (x64 fr)    Mozilla.Firefox.fr       130.0        131.0.2      winget\r\n\
+7-Zip 24.07 (x64)           7zip.7zip                24.07        24.08        winget\r\n\
+Discord                     Discord.Discord          1.0.9163     1.0.9170     winget\r\n\
+3 mises à niveau disponibles.\r\n\
+\r\n\
+Le package suivant a une mise à niveau, mais il nécessite un ciblage explicite :\r\n\
+Nom    ID        Version Disponible Source\r\n\
+------------------------------------------\r\n\
+Steam  Valve.Steam 2.10  2.11       winget\r\n\
+CODE=0";
+        assert_eq!(
+            lire_winget(sortie).unwrap(),
+            ["Mozilla Firefox (x64 fr)", "7-Zip 24.07 (x64)", "Discord"]
+        );
+        assert_eq!(lire_winget("Aucun package installé ne correspond aux critères d’entrée.\nCODE=0"), None);
+        let resume_noms: Vec<String> = ["a", "b", "c", "d", "e"].iter().map(std::string::ToString::to_string).collect();
+        assert_eq!(resume(&resume_noms, ", "), "a, b, c (et 2 autre(s))");
+    }
+
+    #[test]
+    fn liste_de_windows_update() {
+        let l = lire_windows_update(
+            "1|Critical|2026-10 Mise à jour de sécurité (KB5127648) (26200.9711)\n\
+             1||Mise à jour de la plateforme Microsoft Defender | KB4052623\n\
+             2||NVIDIA - Display - 32.0.15.6094\n\n",
+        );
+        assert_eq!(l.len(), 3);
+        assert!(l[0].importante && !l[0].pilote);
+        // Un « | » dans le titre n'est pas un séparateur.
+        assert_eq!(l[1].titre, "Mise à jour de la plateforme Microsoft Defender | KB4052623");
+        assert!(l[2].pilote && !l[2].importante);
     }
 
     #[test]
