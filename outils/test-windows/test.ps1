@@ -153,6 +153,18 @@ Lancer 'integrite-verification' @('integrite')
 $v = Get-Content (Join-Path $res 'integrite-verification.out.txt') -Raw -Encoding UTF8
 if ($v -match 'identiques|identical') { Note 'Intégrité : 2e passage identique à la référence : OK' } else { Note 'Intégrité : 2e passage différent (à regarder)' }
 
+Etape '5b3. Diagnostic de l''ordinateur (0.37)'
+Lancer 'diagnostic' @('diagnostic')
+$d = Get-Content (Join-Path $res 'diagnostic.out.txt') -Raw -Encoding UTF8
+if ($d -match 'Blue screens|Écrans bleus') { Note 'Diagnostic : section des problèmes récents présente : OK' } else { Note 'Diagnostic : section des problèmes récents ABSENTE (bug)' }
+if ($d -match 'PowerShell is not responding|PowerShell ne répond pas') { Note 'Diagnostic : lecture PowerShell en échec (bug)' }
+
+Etape '5b4. Logiciels essentiels : liste seulement, rien installé (0.38)'
+cmd /c "echo.| `"$exe`" logiciels > `"$res\logiciels.out.txt`" 2>&1"
+$l = Get-Content (Join-Path $res 'logiciels.out.txt') -Raw -Encoding UTF8
+$n = ([regex]::Matches($l, '(?m)^\s+\d+\. ')).Count
+Note "Logiciels : $n ligne(s) dans la liste"
+
 Etape '5c. Test de connexion (0.18)'
 Lancer 'connexion' @('connexion')
 
