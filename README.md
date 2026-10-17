@@ -121,6 +121,7 @@ commandes ont aussi un nom anglais (`full`, `audit`, `fix`, `network`, `connecti
 | `src/reparer.rs`, `src/maj.rs`, `src/gaming.rs` | réparations, mises à jour, gaming (Windows) |
 | `src/fuites.rs`, `src/donnees.rs` | mots de passe fuités, sauvegarde des données |
 | `assets/oui.tsv` | fabricants par préfixe MAC (liste IEEE) |
+| `LICENCES-TIERCES.txt` | avis de licence des bibliothèques incluses (`outils/licences-tierces.py`) |
 
 ### Compiler et déployer
 
@@ -144,3 +145,13 @@ compilation (`sentinel-copie.service`), et à chaque branchement avec la derniè
 est nouvelle (`sentinel-cle.service`, `deployer.sh --branchement`).
 
 La version macOS a été retirée après la v0.9.7 (jamais testée sur un vrai Mac) : `git checkout avec-macos` la retrouve.
+
+## Licence
+
+© 2026 d9v3. Sentinel est un logiciel libre : tu peux le redistribuer et le modifier selon les termes de la
+[licence publique générale GNU](LICENSE) (GPL), version 3 ou toute version ultérieure. Il est fourni sans aucune
+garantie. Une version modifiée que tu distribues doit rester sous cette licence, avec son code source.
+
+Les bibliothèques incluses gardent leurs propres licences (MIT, Apache-2.0, BSD, ISC…) : voir `LICENCES-TIERCES.txt`.
+
+*Sentinel is free software, licensed under the GNU GPL v3 or later. See `LICENSE`.*

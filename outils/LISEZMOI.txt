@@ -70,4 +70,7 @@ Bon à savoir
   - Restent sur chaque ordinateur, jamais sur la clé : l'historique des bilans et la quarantaine de
     l'antivirus (pour ne jamais transporter de malware).
 
+Sentinel est un logiciel libre (licence GNU GPL v3 ou ultérieure, voir LICENSE.txt), fourni sans garantie.
+Les bibliothèques qu'il inclut sont listées dans LICENCES-TIERCES.txt.
+
 À n'utiliser que sur ton propre réseau, ou un réseau que tu as le droit d'auditer.

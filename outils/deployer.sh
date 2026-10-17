@@ -120,6 +120,10 @@ cp -f "$LINUX" "$CLE/Linux/sentinel"
 rm -rf "$CLE/macOS"
 cp -f outils/LISEZMOI.txt "$CLE/LISEZMOI.txt"
 cp -f outils/README.txt "$CLE/README.txt"
+# Avis de licence des bibliothèques incluses dans les binaires (MIT, Apache… demandent de les joindre).
+python3 outils/licences-tierces.py >/dev/null
+cp -f LICENSE "$CLE/LICENSE.txt"
+cp -f LICENCES-TIERCES.txt "$CLE/LICENCES-TIERCES.txt"
 # Icône et nom du lecteur dans l'Explorateur, lanceurs à la racine. (Windows ne lance plus rien tout seul depuis une
 # clé USB, depuis Windows 7 ; GNOME, lui, propose de lancer autorun.sh.)
 cp -f assets/sentinel.ico "$CLE/sentinel.ico"

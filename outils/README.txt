@@ -68,4 +68,7 @@ Good to know
   - Kept on each computer, never on the key: the check history and the antivirus quarantine (so malware
     never travels on the key).
 
+Sentinel is free software (GNU GPL v3 or later, see LICENSE.txt), provided without warranty.
+The libraries it includes are listed in LICENCES-TIERCES.txt.
+
 Use it only on your own network, or one you are allowed to audit.
