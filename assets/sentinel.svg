@@ -3,9 +3,6 @@
     <linearGradient id="fond" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0" stop-color="#2a0b0b"/><stop offset="1" stop-color="#070505"/>
     </linearGradient>
-    <linearGradient id="iris" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#ff7a5c"/><stop offset="0.5" stop-color="#e3261f"/><stop offset="1" stop-color="#8f0f0f"/>
-    </linearGradient>
   </defs>
   <!-- bouclier à facettes : arêtes vives, symétrie gauche/droite -->
   <g stroke-linejoin="miter">
@@ -17,13 +14,11 @@
     <path d="M232 138 L210 130 L128 222 L128 248 Z" fill="#9a1212"/>
   </g>
   <path d="M128 32 L210 57 V130 L128 222 L46 130 V57 Z" fill="url(#fond)"/>
-  <!-- radar : hexagones concentriques et réticule -->
-  <g fill="none" stroke="#ff5a4f" stroke-linejoin="miter">
-    <path d="M128 66 L182 97 V159 L128 190 L74 159 V97 Z" stroke-width="2.5" opacity="0.28"/>
-    <path d="M128 50 V82 M128 174 V200" stroke-width="3" opacity="0.55"/>
+  <!-- réticule : hexagones et croix de visée -->
+  <g fill="none" stroke-linejoin="miter">
+    <path d="M128 62 L186 96 V164 L128 198 L70 164 V96 Z" stroke="#ff5a4f" stroke-width="2.5" opacity="0.3"/>
+    <path d="M128 88 L163 108 V148 L128 168 L93 148 V108 Z" stroke="#eee3db" stroke-width="8"/>
+    <path d="M128 48 V96 M128 160 V208 M58 128 H106 M150 128 H198" stroke="#eee3db" stroke-width="8"/>
   </g>
-  <!-- œil -->
-  <path d="M60 128 L102 96 H154 L196 128 L154 160 H102 Z" fill="#0b0808" stroke="#eee3db" stroke-width="8" stroke-linejoin="miter"/>
-  <path d="M128 102 L154 128 L128 154 L102 128 Z" fill="url(#iris)"/>
-  <path d="M128 117 L139 128 L128 139 L117 128 Z" fill="#0b0808"/>
+  <path d="M128 116 L138 128 L128 140 L118 128 Z" fill="#e3261f"/>
 </svg>

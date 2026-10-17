@@ -8,7 +8,9 @@
     <path d="M238 140 L206 130 L128 218 L128 252 Z" fill="#9a1212"/>
   </g>
   <path d="M128 34 L206 58 V130 L128 218 L50 130 V58 Z" fill="#0b0808"/>
-  <path d="M52 128 L98 92 H158 L204 128 L158 164 H98 Z" fill="#0b0808" stroke="#eee3db" stroke-width="16" stroke-linejoin="miter"/>
-  <path d="M128 98 L158 128 L128 158 L98 128 Z" fill="#e3261f"/>
-  <path d="M128 116 L140 128 L128 140 L116 128 Z" fill="#0b0808"/>
+  <g fill="none" stroke="#eee3db" stroke-width="18" stroke-linejoin="miter">
+    <path d="M128 82 L168 105 V151 L128 174 L88 151 V105 Z"/>
+    <path d="M128 40 V96 M128 160 V214 M54 128 H106 M150 128 H202"/>
+  </g>
+  <path d="M128 112 L142 128 L128 144 L114 128 Z" fill="#e3261f"/>
 </svg>
