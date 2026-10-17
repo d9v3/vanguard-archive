@@ -284,10 +284,15 @@ pub(super) fn mises_a_jour() -> Constat {
     alerte(
         "Mises à jour",
         niveau,
-        trf!(
-            "{n} paquet(s) à mettre à jour, dont {sensibles} sensible(s) : noyau, openssl, navigateur…",
-            "{n} package(s) to update, {sensibles} of them sensitive: kernel, openssl, browser…"
-        ),
+        // Sans paquet sensible, on ne cite pas « noyau, openssl… » : la phrase laissait croire qu'ils étaient touchés.
+        if sensibles == 0 {
+            trf!("{n} paquet(s) à mettre à jour.", "{n} package(s) to update.")
+        } else {
+            trf!(
+                "{n} paquet(s) à mettre à jour, dont {sensibles} sensible(s) (noyau, openssl, navigateur…).",
+                "{n} package(s) to update, {sensibles} of them sensitive (kernel, openssl, browser…)."
+            )
+        },
     )
     .corriger(
         tr!("Mettre le système à jour", "Update the system"),
