@@ -546,134 +546,205 @@ fn alertes(role: Option<&str>, ports: &[PortOuvert]) -> Vec<(Niveau, String)> {
     alertes
 }
 
+/// Niveau le plus grave des ports d'un appareil (`None` : aucun port ouvert).
+fn pire_niveau(h: &Hote) -> Option<Niveau> {
+    h.ports.iter().map(|p| p.niveau).max()
+}
+
+/// Pastille de couleur d'un appareil : verte sans port ouvert, sinon de la couleur de son port le plus grave.
+fn pastille(h: &Hote) -> String {
+    match pire_niveau(h) {
+        None => format!("{VERT}●{RESET}"),
+        Some(n) => format!("{}●{RESET}", couleur(n)),
+    }
+}
+
+fn nom_affiche(h: &Hote) -> String {
+    let t = h.titre();
+    if t.is_empty() {
+        tr!("appareil inconnu", "unknown device").to_string()
+    } else {
+        t
+    }
+}
+
 fn afficher(r: &Rapport) {
     let nom = r
         .nom_reseau
         .as_deref()
         .map(|n| trf!(" « {n} »", " “{n}”"))
         .unwrap_or_default();
-    titre(&trf!("Réseau{nom} {}", "Network{nom} {}", r.reseau));
+    println!();
+    cadre(
+        &format!(
+            "{ACCENT}{}{RESET}{GRAS}{nom}{RESET}",
+            tr!("RÉSEAU LOCAL", "LOCAL NETWORK")
+        ),
+        &format!("{GRIS}{} · {:.1} s{RESET}", r.reseau, r.duree_s),
+    );
+    let compte = |n: Niveau| r.hotes.iter().flat_map(|h| &h.ports).filter(|p| p.niveau == n).count();
+    let nouveaux = r.hotes.iter().filter(|h| h.nouvelle).count();
+    trp!(
+        "  {GRAS}Note du réseau{RESET}  {}  {}  {GRIS}(appareil le plus exposé){RESET}",
+        "  {GRAS}Network grade{RESET}   {}  {}  {GRIS}(most exposed device){RESET}",
+        etiquette_note(r.score_global),
+        barre(r.score_global)
+    );
+    let mut resume = vec![
+        accord(r.hotes.len(), tr!("appareil", "device"), tr!("appareils", "devices")),
+        accord(
+            r.hotes.iter().map(|h| h.ports.len()).sum::<usize>(),
+            tr!("port ouvert", "open port"),
+            tr!("ports ouverts", "open ports"),
+        ),
+    ];
+    if nouveaux > 0 {
+        resume.push(format!(
+            "{}{}{RESET}",
+            couleur(Niveau::Moyen),
+            accord(nouveaux, tr!("nouveau", "new"), tr!("nouveaux", "new"))
+        ));
+    }
+    for (n, un, plusieurs) in [
+        (
+            Niveau::Critique,
+            tr!("critique", "critical"),
+            tr!("critiques", "critical"),
+        ),
+        (Niveau::Eleve, tr!("élevé", "high"), tr!("élevés", "high")),
+        (Niveau::Moyen, tr!("moyen", "medium"), tr!("moyens", "medium")),
+    ] {
+        if compte(n) > 0 {
+            resume.push(format!("{}{}{RESET}", couleur(n), accord(compte(n), un, plusieurs)));
+        }
+    }
+    println!("  {}", resume.join(&format!(" {GRIS}·{RESET} ")));
+
+    section(&trf!("APPAREILS ({})", "DEVICES ({})", r.hotes.len()));
     for h in &r.hotes {
-        let role = h
-            .role
-            .map(|r| format!(" [{}]", crate::langue::role(r)))
-            .unwrap_or_default();
-        let mac = h
-            .mac
-            .as_deref()
-            .map(|m| format!("  {GRIS}{m}{RESET}"))
-            .unwrap_or_default();
-        let neuve = if h.nouvelle {
-            trf!(
-                "  {}NOUVEL APPAREIL{RESET}",
-                "  {}NEW DEVICE{RESET}",
-                couleur(Niveau::Moyen)
-            )
-        } else {
-            String::new()
-        };
-        let depuis = match (&h.premier_vu, h.nouvelle) {
-            (Some(d), false) => trf!(
-                "  {GRIS}connu depuis le {}{RESET}",
-                "  {GRIS}known since {}{RESET}",
-                date_fr(d)
-            ),
-            _ => String::new(),
-        };
-        println!("\n{GRAS}● {}{RESET} {}{role}{mac}{neuve}{depuis}", h.ip, h.titre());
-        if h.ports.is_empty() {
-            trp!(
-                "    {GRIS}aucun port ouvert parmi ceux testés{RESET}",
-                "    {GRIS}no open port among those tested{RESET}"
-            );
-        }
-        for p in &h.ports {
-            let b = p
-                .banniere
-                .as_deref()
-                .map(|b| trf!("  {GRIS}« {b} »{RESET}", "  {GRIS}“{b}”{RESET}"))
-                .unwrap_or_default();
-            let prog = p
-                .programme
-                .as_deref()
-                .map(|n| trf!("  {GRAS}programme : {n}{RESET}", "  {GRAS}program: {n}{RESET}"))
-                .unwrap_or_default();
-            let nouv = if p.nouveau && !h.nouvelle {
-                trf!(" {}(nouveau){RESET}", " {}(new){RESET}", couleur(Niveau::Moyen))
-            } else {
-                String::new()
+        let etiquette = if h.nouvelle {
+            format!("{}{}{RESET}", couleur(Niveau::Moyen), ajuster(tr!("NOUVEAU", "NEW"), 8))
+        } else if let Some(role) = h.role {
+            let court = match role {
+                "passerelle" => tr!("box", "router"),
+                "cette machine" => tr!("toi", "you"),
+                autre => autre,
             };
-            println!(
-                "    {:>5}/tcp  {:<17} {}{:<8}{RESET}{nouv}{prog}{b}",
-                p.port,
-                p.service,
-                couleur(p.niveau),
-                p.niveau.libelle()
-            );
-        }
-        for (n, msg) in &h.alertes {
-            println!("    {}→{RESET} {msg}", couleur(*n));
-        }
-        trp!(
-            "    {GRIS}score : {}/100{RESET}",
-            "    {GRIS}score: {}/100{RESET}",
-            h.score
+            format!("{ACCENT}{}{RESET}", ajuster(&format!("[{court}]"), 8))
+        } else {
+            " ".repeat(8)
+        };
+        let ports = match h.ports.len() {
+            0 => format!("{DISCRET}{}{RESET}", ajuster("—", 8)),
+            1 => ajuster(tr!("1 port", "1 port"), 8),
+            n => ajuster(&trf!("{n} ports", "{n} ports"), 8),
+        };
+        println!(
+            "  {} {GRAS}{:<15}{RESET} {} {etiquette}{ports}{}",
+            pastille(h),
+            h.ip.to_string(),
+            ajuster(&nom_affiche(h), 33),
+            etiquette_note(h.score)
         );
     }
 
+    // Détail des appareils qui demandent une action, le plus exposé d'abord.
+    let mut a_regarder: Vec<&Hote> = r
+        .hotes
+        .iter()
+        .filter(|h| pire_niveau(h).is_some_and(|n| n >= Niveau::Moyen) || h.nouvelle)
+        .collect();
+    a_regarder.sort_by_key(|h| h.score);
+    if !a_regarder.is_empty() {
+        section(tr!("À REGARDER", "WORTH A LOOK"));
+        for h in a_regarder {
+            let mac = h.mac.as_deref().map(|m| format!(" · {m}")).unwrap_or_default();
+            let depuis = match (&h.premier_vu, h.nouvelle) {
+                (Some(d), false) => trf!(" · connu depuis le {}", " · known since {}", date_fr(d)),
+                (_, true) => tr!(" · vu pour la première fois", " · seen for the first time").to_string(),
+                _ => String::new(),
+            };
+            println!(
+                "\n  {} {GRAS}{}{RESET}  {}  {}",
+                pastille(h),
+                h.ip,
+                nom_affiche(h),
+                etiquette_note(h.score)
+            );
+            let infos = format!("{mac}{depuis}");
+            if let Some(infos) = infos.strip_prefix(" · ") {
+                println!("    {DISCRET}{infos}{RESET}");
+            }
+            for p in &h.ports {
+                let nouveau = if p.nouveau && !h.nouvelle {
+                    format!(" {}{}{RESET}", couleur(Niveau::Moyen), tr!("nouveau", "new"))
+                } else {
+                    String::new()
+                };
+                let programme = p
+                    .programme
+                    .as_deref()
+                    .map(|n| format!("  {DISCRET}{n}{RESET}"))
+                    .unwrap_or_default();
+                println!(
+                    "    {:>5}/tcp  {}{}{:<8}{RESET}{nouveau}{programme}",
+                    p.port,
+                    ajuster(p.service, 16),
+                    couleur(p.niveau),
+                    p.niveau.libelle()
+                );
+            }
+            for (n, msg) in &h.alertes {
+                for (i, ligne) in envelopper(msg, LARGEUR - 8).iter().enumerate() {
+                    let fleche = if i == 0 {
+                        format!("{}→{RESET}", couleur(*n))
+                    } else {
+                        " ".to_string()
+                    };
+                    println!("    {fleche} {ligne}");
+                }
+            }
+        }
+    }
+
+    // Ports sans danger particulier (diffusion, découverte) : une ligne par appareil suffit.
+    let autres: Vec<&Hote> = r
+        .hotes
+        .iter()
+        .filter(|h| pire_niveau(h) == Some(Niveau::Info) && !h.nouvelle)
+        .collect();
+    if !autres.is_empty() {
+        section(tr!("AUTRES PORTS OUVERTS", "OTHER OPEN PORTS"));
+        for h in autres {
+            let ports: Vec<String> = h.ports.iter().map(|p| format!("{} {}", p.port, p.service)).collect();
+            println!(
+                "  {} {:<15} {}  {DISCRET}{}{RESET}",
+                pastille(h),
+                h.ip.to_string(),
+                ajuster(&nom_affiche(h), 26),
+                ports.join(", ")
+            );
+        }
+    }
+
     if !r.absents.is_empty() {
-        trp!(
-            "\n{GRIS}Déjà vus sur ce réseau, absents aujourd'hui :{RESET}",
-            "\n{GRIS}Seen before on this network, absent today:{RESET}"
-        );
+        section(&trf!("ABSENTS AUJOURD'HUI ({})", "ABSENT TODAY ({})", r.absents.len()));
         for a in &r.absents {
             let quand = a
                 .dernier_vu
                 .as_deref()
-                .map(|d| trf!(" — vu le {}", " — seen on {}", date_fr(d)))
+                .map(|d| trf!("vu le {}", "seen on {}", date_fr(d)))
                 .unwrap_or_default();
-            println!("  {GRIS}○ {} {}{quand}{RESET}", a.ip, a.titre);
+            println!(
+                "  {DISCRET}○ {:<15} {}  {quand}{RESET}",
+                a.ip.to_string(),
+                ajuster(&a.titre, 30)
+            );
         }
     }
-
-    let compte = |n: Niveau| r.hotes.iter().flat_map(|h| &h.ports).filter(|p| p.niveau == n).count();
-    titre(tr!("Bilan réseau", "Network summary"));
-    println!(
-        "  {} ({}), {} — {}{}{RESET}, {}{}{RESET}, {}{}{RESET}",
-        accord(r.hotes.len(), tr!("appareil", "device"), tr!("appareils", "devices")),
-        // « (1 nouveaux) » : vu en test.
-        accord(
-            r.hotes.iter().filter(|h| h.nouvelle).count(),
-            tr!("nouveau", "new"),
-            tr!("nouveaux", "new"),
-        ),
-        accord(
-            r.hotes.iter().map(|h| h.ports.len()).sum::<usize>(),
-            tr!("port ouvert", "open port"),
-            tr!("ports ouverts", "open ports")
-        ),
-        couleur(Niveau::Critique),
-        accord(
-            compte(Niveau::Critique),
-            tr!("critique", "critical"),
-            tr!("critiques", "critical")
-        ),
-        couleur(Niveau::Eleve),
-        accord(compte(Niveau::Eleve), tr!("élevé", "high"), tr!("élevés", "high")),
-        couleur(Niveau::Moyen),
-        accord(compte(Niveau::Moyen), tr!("moyen", "medium"), tr!("moyens", "medium")),
-    );
-    afficher_note(
-        tr!(
-            "Note du réseau (appareil le plus exposé)",
-            "Network grade (most exposed device)"
-        ),
-        r.score_global,
-    );
     trp!(
-        "  {GRIS}Durée : {:.1} s{RESET}",
-        "  {GRIS}Duration: {:.1} s{RESET}",
-        r.duree_s
+        "\n  {DISCRET}Astuce : « n » pour nommer un appareil, « 5 » pour scanner tous ses ports.{RESET}",
+        "\n  {DISCRET}Tip: “n” to name a device, “5” to scan all its ports.{RESET}"
     );
 }
 

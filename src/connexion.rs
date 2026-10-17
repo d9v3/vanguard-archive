@@ -218,16 +218,77 @@ pub fn note_bufferbloat(hausse: f64) -> (&'static str, Niveau) {
     }
 }
 
+/// Couleur d'une latence pour le jeu : vert sous 30 ms, jaune sous 60, orange sous 100, rouge au-delà.
+fn couleur_ping(ms: f64) -> &'static str {
+    match ms {
+        m if m < 30.0 => VERT,
+        m if m < 60.0 => couleur(Niveau::Moyen),
+        m if m < 100.0 => couleur(Niveau::Eleve),
+        _ => couleur(Niveau::Critique),
+    }
+}
+
+fn couleur_gigue(ms: f64) -> &'static str {
+    match ms {
+        m if m < 5.0 => VERT,
+        m if m < 10.0 => couleur(Niveau::Moyen),
+        _ => couleur(Niveau::Eleve),
+    }
+}
+
+fn couleur_pertes(p: f64) -> &'static str {
+    match p {
+        p if p <= 0.0 => VERT,
+        p if p <= 1.0 => couleur(Niveau::Moyen),
+        _ => couleur(Niveau::Critique),
+    }
+}
+
+/// Une mesure : nom, latence colorée, gigue et pertes.
 fn ligne(nom: &str, s: &Serie) {
+    let nom = ajuster(nom, 27);
     match s.mediane() {
         Some(m) => trp!(
-            "  {nom:<27} {m:>5.0} ms   gigue {:>4.1} ms   pertes {:>3.0} %",
-            "  {nom:<27} {m:>5.0} ms   jitter {:>4.1} ms   loss {:>3.0}%",
+            "  {nom} {}{m:>5.0} ms{RESET}   {DISCRET}gigue{RESET} {}{:>4.1} ms{RESET}   {DISCRET}pertes{RESET} {}{:>3.0} %{RESET}",
+            "  {nom} {}{m:>5.0} ms{RESET}   {DISCRET}jitter{RESET} {}{:>4.1} ms{RESET}   {DISCRET}loss{RESET} {}{:>3.0}%{RESET}",
+            couleur_ping(m),
+            couleur_gigue(s.gigue()),
             s.gigue(),
+            couleur_pertes(s.pertes()),
             s.pertes()
         ),
-        None => trp!("  {nom:<27} pas de réponse", "  {nom:<27} no response"),
+        None => trp!(
+            "  {nom} {}pas de réponse{RESET}",
+            "  {nom} {}no response{RESET}",
+            couleur(Niveau::Critique)
+        ),
     }
+}
+
+/// Barre de débit sur une échelle logarithmique : 1 Mbit/s = vide, 1 Gbit/s = pleine.
+fn barre_debit(mbits: f64) -> String {
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    let pleines = ((mbits.max(1.0).log10() / 3.0 * 10.0).round() as usize).min(10);
+    let c = match mbits {
+        d if d >= 50.0 => VERT,
+        d if d >= 15.0 => couleur(Niveau::Moyen),
+        _ => couleur(Niveau::Eleve),
+    };
+    format!("{c}{}{DISCRET}{}{RESET}", "▰".repeat(pleines), "▱".repeat(10 - pleines))
+}
+
+/// Une ligne du verdict : coche ou croix, critère, valeur, explication.
+fn verdict(bon: bool, critere: &str, valeur: &str, explication: &str) {
+    let marque = if bon {
+        format!("{VERT}✔{RESET}")
+    } else {
+        format!("{}✖{RESET}", couleur(Niveau::Eleve))
+    };
+    println!(
+        "  {marque} {GRAS}{}{RESET}{} {DISCRET}{explication}{RESET}",
+        ajuster(critere, 12),
+        ajuster(valeur, 14)
+    );
 }
 
 /// Conseils pour le jeu, du plus important au moins important.
@@ -277,11 +338,22 @@ fn conseils(box_: Option<&Serie>, internet: &Serie, hausse: Option<f64>) -> Vec<
 }
 
 pub async fn tester() {
-    titre(tr!("Test de connexion pour le jeu", "Connection test for gaming"));
-    trp!(
-        "  {GRIS}Environ 25 secondes. Le test de débit télécharge et envoie quelques centaines de Mo au plus.{RESET}\n",
-        "  {GRIS}About 25 seconds. The speed test downloads and uploads a few hundred MB at most.{RESET}\n"
+    println!();
+    cadre(
+        &format!(
+            "{ACCENT}{}{RESET}",
+            tr!("CONNEXION POUR LE JEU", "CONNECTION FOR GAMING")
+        ),
+        &format!(
+            "{GRIS}{}{RESET}",
+            tr!("environ 25 s · Cloudflare", "about 25 s · Cloudflare")
+        ),
     );
+    trp!(
+        "  {DISCRET}Le test de débit télécharge et envoie quelques centaines de Mo au plus.{RESET}",
+        "  {DISCRET}The speed test downloads and uploads a few hundred MB at most.{RESET}"
+    );
+    section(tr!("AU REPOS", "AT REST"));
     let boite = match crate::scan::passerelle() {
         Some(ip) => port_de_la_box(ip).await,
         None => None,
@@ -291,46 +363,47 @@ pub async fn tester() {
         None => None,
     };
     let internet = serie(INTERNET, 20, None).await;
-    trp!("  {GRAS}Au repos{RESET}", "  {GRAS}At rest{RESET}");
     if let (Some(cible), Some(s)) = (boite, &serie_box) {
         ligne(&trf!("Box ({})", "Router ({})", cible.ip()), s);
     }
     ligne("Internet (Cloudflare)", &internet);
     let Some(repos) = internet.mediane() else {
         trp!(
-            "\n  ✖ Internet ne répond pas : test arrêté.",
-            "\n  ✖ Internet does not answer: test stopped."
+            "\n  {}✖ Internet ne répond pas : test arrêté.{RESET}",
+            "\n  {}✖ Internet does not answer: test stopped.{RESET}",
+            couleur(Niveau::Critique)
         );
         return;
     };
-    trp!("\n  {GRAS}Sous charge{RESET}", "\n  {GRAS}Under load{RESET}");
+    section(tr!("SOUS CHARGE", "UNDER LOAD"));
+    trp!(
+        "  {DISCRET}Téléchargement puis envoi, 8 secondes chacun…{RESET}",
+        "  {DISCRET}Download then upload, 8 seconds each…{RESET}"
+    );
     let (en_reception, debit_bas) = sous_charge(Sens::Reception).await;
     let (en_envoi, debit_haut) = sous_charge(Sens::Envoi).await;
     ligne(tr!("Pendant un téléchargement", "During a download"), &en_reception);
     ligne(tr!("Pendant un envoi", "During an upload"), &en_envoi);
-    let debit = |d: Option<f64>| d.map_or_else(|| "?".to_string(), |d| format!("{d:.0}"));
-    trp!(
-        "  {:<27} ↓ {} Mbit/s   ↑ {} Mbit/s",
-        "  {:<27} ↓ {} Mbit/s   ↑ {} Mbit/s",
-        tr!("Débit", "Speed"),
-        debit(debit_bas),
-        debit(debit_haut)
-    );
+
+    section(tr!("DÉBIT", "SPEED"));
+    for (nom, d) in [
+        (tr!("↓ Réception", "↓ Download"), debit_bas),
+        (tr!("↑ Envoi", "↑ Upload"), debit_haut),
+    ] {
+        match d {
+            Some(d) => println!(
+                "  {} {GRAS}{d:>5.0}{RESET} Mbit/s   {}",
+                ajuster(nom, 14),
+                barre_debit(d)
+            ),
+            None => trp!("  {} ?", "  {} ?", ajuster(nom, 14)),
+        }
+    }
     let hausse = [en_reception.mediane(), en_envoi.mediane()]
         .into_iter()
         .flatten()
         .map(|m| (m - repos).max(0.0))
         .reduce(f64::max);
-    if let Some(h) = hausse {
-        let (note, niveau) = note_bufferbloat(h);
-        trp!(
-            "  {:<27} {}{note}{RESET} (+{h:.0} ms quand la connexion est occupée)",
-            "  {:<27} {}{note}{RESET} (+{h:.0} ms when the connection is busy)",
-            "Bufferbloat",
-            couleur(niveau)
-        );
-    }
-    println!();
     enregistrer(Resultat {
         date: chrono::Local::now().format("%Y-%m-%d %H:%M").to_string(),
         internet_ms: repos,
@@ -340,15 +413,70 @@ pub async fn tester() {
         montant: debit_haut,
         hausse_ms: hausse,
     });
+
+    section(tr!("VERDICT POUR LE JEU", "VERDICT FOR GAMING"));
+    let (gigue, pertes) = (internet.gigue(), internet.pertes());
+    verdict(
+        repos < 60.0,
+        "Ping",
+        &format!("{repos:.0} ms"),
+        match repos {
+            r if r < 30.0 => tr!("excellent (moins de 30 ms)", "excellent (under 30 ms)"),
+            r if r < 60.0 => tr!("bon (moins de 60 ms)", "good (under 60 ms)"),
+            _ => tr!("élevé : retard visible en jeu", "high: visible lag in game"),
+        },
+    );
+    verdict(
+        gigue < 10.0,
+        tr!("Gigue", "Jitter"),
+        &format!("{gigue:.1} ms"),
+        if gigue < 10.0 {
+            tr!("stable", "stable")
+        } else {
+            tr!("instable : saccades", "unstable: stutter")
+        },
+    );
+    verdict(
+        pertes <= 1.0,
+        tr!("Pertes", "Loss"),
+        &format!("{pertes:.0} %"),
+        if pertes == 0.0 {
+            tr!("aucune", "none")
+        } else {
+            tr!("paquets perdus", "packets lost")
+        },
+    );
+    if let Some(h) = hausse {
+        let (note, niveau) = note_bufferbloat(h);
+        verdict(
+            h <= 30.0,
+            "Bufferbloat",
+            &format!("{}{note}{RESET} (+{h:.0} ms)", couleur(niveau)),
+            if h <= 30.0 {
+                tr!(
+                    "le ping tient quand la connexion est occupée",
+                    "ping holds when the connection is busy"
+                )
+            } else {
+                tr!(
+                    "le ping monte quand quelqu'un télécharge",
+                    "ping rises when someone downloads"
+                )
+            },
+        );
+    }
     let conseils = conseils(serie_box.as_ref(), &internet, hausse);
+    println!();
     if conseils.is_empty() {
         trp!(
-            "  {VERT}✔{RESET} Connexion excellente pour le jeu.",
-            "  {VERT}✔{RESET} Excellent connection for gaming."
+            "  {VERT}✔ Connexion excellente pour le jeu.{RESET}",
+            "  {VERT}✔ Excellent connection for gaming.{RESET}"
         );
     }
     for c in conseils {
-        println!("  💡 {c}");
+        for (i, l) in envelopper(&c, LARGEUR - 6).iter().enumerate() {
+            println!("  {} {l}", if i == 0 { "💡" } else { "  " });
+        }
     }
 }
 

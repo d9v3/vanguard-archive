@@ -202,74 +202,171 @@ fn nommer(appareil: &str, surnom: &str) {
     }
 }
 
+/// Une ligne du menu : la touche en blanc vif, le texte, et une précision en gris à droite.
+fn option(touche: &str, texte: &str, precision: &str) {
+    if precision.is_empty() {
+        println!("   {TOUCHE}{touche:>2}{RESET}  {texte}");
+    } else {
+        println!(
+            "   {TOUCHE}{touche:>2}{RESET}  {}{DISCRET}{precision}{RESET}",
+            ajuster(texte, 36)
+        );
+    }
+}
+
+/// État affiché en tête du menu : dernier bilan, dernier test de connexion, clé, surveillance.
+fn etat_du_menu(surveillance_active: bool) {
+    let historique = historique::charger();
+    match historique.last() {
+        Some(b) => {
+            let note = |s: Option<u32>| s.map_or_else(|| "—".to_string(), etiquette_note);
+            trp!(
+                "  {GRIS}Dernier bilan{RESET}  {}   machine {}   réseau {}",
+                "  {GRIS}Last check{RESET}     {}   machine {}   network {}",
+                b.date,
+                note(b.machine),
+                note(b.reseau)
+            );
+        }
+        None => trp!(
+            "  {GRIS}Aucun bilan encore : commence par 1.{RESET}",
+            "  {GRIS}No check yet: start with 1.{RESET}"
+        ),
+    }
+    if let Some(c) = connexion::historique().last() {
+        let debit = |d: Option<f64>| d.map_or_else(|| "?".to_string(), |d| format!("{d:.0}"));
+        let bufferbloat = c
+            .hausse_ms
+            .map(|h| {
+                let (n, niveau) = connexion::note_bufferbloat(h);
+                format!("{}{n}{RESET}", couleur(niveau))
+            })
+            .unwrap_or_default();
+        trp!(
+            "  {GRIS}Connexion{RESET}      {:.0} ms · ↓ {} ↑ {} Mbit/s · bufferbloat {bufferbloat}",
+            "  {GRIS}Connection{RESET}     {:.0} ms · ↓ {} ↑ {} Mbit/s · bufferbloat {bufferbloat}",
+            c.internet_ms,
+            debit(c.descendant),
+            debit(c.montant)
+        );
+    }
+    let cle = if reseau::cle_usb().is_some() {
+        format!(
+            "{VERT}{}{RESET}",
+            tr!("clé SENTINEL branchée", "SENTINEL key plugged in")
+        )
+    } else {
+        format!("{GRIS}{}{RESET}", tr!("clé non branchée", "key not plugged in"))
+    };
+    let surveillance = if surveillance_active {
+        format!("{VERT}{}{RESET}", tr!("surveillance active", "monitoring on"))
+    } else {
+        format!("{GRIS}{}{RESET}", tr!("surveillance coupée", "monitoring off"))
+    };
+    println!("  {cle} {GRIS}·{RESET} {surveillance}");
+}
+
 async fn menu() {
     let mut s = Session::default();
     loop {
         print!("\x1b[2J\x1b[H");
-        trp!(
-            "{GRAS}Sentinel{RESET} — sécurité de ta machine et de ton réseau\n",
-            "{GRAS}Sentinel{RESET} — security of your machine and your network\n"
+        cadre(
+            &format!("{ACCENT}SENTINEL{RESET} {GRIS}{}{RESET}", env!("CARGO_PKG_VERSION")),
+            tr!(
+                "sécurité de ta machine et de ton réseau",
+                "security of your machine and your network"
+            ),
         );
-        trp!(
-            "  1. Bilan complet (machine + réseau)       {GRIS}← commencer ici{RESET}",
-            "  1. Full check (machine + network)         {GRIS}← start here{RESET}"
+        let surveillance_active = surveillance::active();
+        etat_du_menu(surveillance_active);
+
+        section(tr!("BILAN DE SÉCURITÉ", "SECURITY CHECK"));
+        option(
+            "1",
+            tr!("Bilan complet : machine + réseau", "Full check: machine + network"),
+            tr!("← commencer ici", "← start here"),
         );
-        trp!("  2. Corriger les problèmes trouvés", "  2. Fix the problems found");
-        trp!("  3. Audit de cette machine", "  3. Audit this machine");
-        trp!("  4. Scan du réseau local", "  4. Scan the local network");
-        trp!(
-            "  5. Scan approfondi d'un appareil (tous les ports)",
-            "  5. Deep scan of one device (all ports)"
+        option("2", tr!("Corriger les problèmes trouvés", "Fix the problems found"), "");
+        option("3", tr!("Audit de cette machine", "Audit this machine"), "");
+        option(
+            "8",
+            tr!("Rapport détaillé dans le navigateur", "Detailed report in the browser"),
+            "",
         );
-        trp!("  6. Antivirus : analyse rapide", "  6. Antivirus: quick scan");
-        trp!(
-            "  7. Antivirus : analyse complète du dossier personnel",
-            "  7. Antivirus: full scan of the home folder"
+
+        section(tr!("RÉSEAU LOCAL", "LOCAL NETWORK"));
+        option(
+            "4",
+            tr!("Scanner le réseau", "Scan the network"),
+            tr!("appareils, ports, nouveautés", "devices, ports, changes"),
         );
-        trp!(
-            "  8. Ouvrir le rapport détaillé (navigateur)",
-            "  8. Open the detailed report (browser)"
+        option(
+            "5",
+            tr!("Scan approfondi d'un appareil", "Deep scan of one device"),
+            tr!("tous les ports", "all ports"),
         );
-        let etat = if surveillance::active() {
-            format!("{VERT}{}{RESET}", tr!("activée", "on"))
-        } else {
-            format!("{GRIS}{}{RESET}", tr!("désactivée", "off"))
-        };
-        trp!(
-            "  9. Surveillance du réseau toutes les heures : {etat}",
-            "  9. Hourly network monitoring: {etat}"
+        option(
+            "n",
+            tr!("Nommer un appareil", "Name a device"),
+            tr!("« imprimante HP »", "“HP printer”"),
         );
-        trp!(
-            "  u. Mises à jour : tout vérifier et installer (système, programmes, pilotes)",
-            "  u. Updates: check and install everything (system, programs, drivers)"
+        option(
+            "9",
+            tr!("Surveillance toutes les heures", "Hourly monitoring"),
+            if surveillance_active {
+                tr!("activée", "on")
+            } else {
+                tr!("désactivée", "off")
+            },
         );
-        trp!(
-            "  r. Réparer (réseau, pare-feu, antivirus, disque, système…)",
-            "  r. Repair (network, firewall, antivirus, disk, system…)"
+
+        section(tr!("CONNEXION", "CONNECTION"));
+        option(
+            "c",
+            tr!("Test pour le jeu", "Gaming test"),
+            tr!("ping, gigue, débit, bufferbloat", "ping, jitter, speed, bufferbloat"),
+        );
+
+        section(tr!("PROTECTION", "PROTECTION"));
+        option("6", tr!("Antivirus : analyse rapide", "Antivirus: quick scan"), "");
+        option(
+            "7",
+            tr!("Antivirus : analyse complète", "Antivirus: full scan"),
+            tr!("dossier personnel", "home folder"),
+        );
+        option(
+            "p",
+            tr!("Mots de passe : ont-ils fuité ?", "Passwords: have they leaked?"),
+            tr!("rien n'est envoyé en clair", "nothing sent in clear"),
+        );
+
+        section(tr!("ENTRETIEN", "MAINTENANCE"));
+        option(
+            "u",
+            tr!("Mises à jour", "Updates"),
+            tr!("système, programmes, pilotes", "system, programs, drivers"),
+        );
+        option(
+            "r",
+            tr!("Réparer et nettoyer", "Repair and clean up"),
+            tr!("réseau, disque, système…", "network, disk, system…"),
         );
         #[cfg(windows)]
-        trp!(
-            "  g. Gaming : composants (Visual C++, DirectX, .NET…) et réglages Windows",
-            "  g. Gaming: components (Visual C++, DirectX, .NET…) and Windows settings"
+        option(
+            "g",
+            tr!("Gaming", "Gaming"),
+            tr!("composants et réglages de Windows", "components and Windows settings"),
         );
-        trp!(
-            "  c. Test de connexion pour le jeu (ping, gigue, débit, bufferbloat)",
-            "  c. Connection test for gaming (ping, jitter, speed, bufferbloat)"
+        option(
+            "d",
+            tr!("Données", "Data"),
+            tr!("sauvegarder ou restaurer", "back up or restore"),
         );
-        trp!(
-            "  p. Mots de passe : ont-ils fuité ? (rien n'est envoyé en clair)",
-            "  p. Passwords: have they leaked? (nothing is sent in clear)"
-        );
-        trp!(
-            "  n. Nommer un appareil (« imprimante HP »)",
-            "  n. Name a device (“HP printer”)"
-        );
-        trp!(
-            "  d. Données : sauvegarder ou restaurer (surnoms, historique des réseaux)",
-            "  d. Data: back up or restore (nicknames, network history)"
-        );
-        trp!("  q. Quitter\n", "  q. Quit\n");
-        let choix = demander(tr!("Choix : ", "Choice: "));
+
+        println!();
+        option("q", tr!("Quitter", "Quit"), "");
+        println!();
+        let choix = demander(&format!("  {ACCENT}›{RESET} {}", tr!("Choix : ", "Choice: ")));
         println!();
         match choix.as_str() {
             "1" => s.complet().await,
