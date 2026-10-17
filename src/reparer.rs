@@ -174,6 +174,98 @@ fn actif(service: &str) -> bool {
 }
 
 /// Place libre sur le volume système, pour l'afficher dans « disque plein ».
+/// Taille d'un dossier, en octets ; `age` : seulement les fichiers non lus depuis ce nombre de jours. Arrêt à
+/// l'échéance (un cache de plusieurs millions de fichiers) : le total est alors un minimum.
+#[cfg(target_os = "linux")]
+fn taille_dossier(dossier: &std::path::Path, age: Option<u64>, echeance: std::time::Instant) -> u64 {
+    let limite = age.map(|j| std::time::SystemTime::now() - std::time::Duration::from_secs(j * 86_400));
+    let mut total = 0;
+    let mut a_voir = vec![dossier.to_path_buf()];
+    while let Some(d) = a_voir.pop() {
+        if std::time::Instant::now() > echeance {
+            break;
+        }
+        for e in std::fs::read_dir(&d).into_iter().flatten().flatten() {
+            let Ok(m) = e.metadata() else { continue };
+            if m.is_dir() {
+                a_voir.push(e.path());
+            } else if limite.is_none_or(|l| m.accessed().or_else(|_| m.modified()).is_ok_and(|a| a < l)) {
+                total += m.len();
+            }
+        }
+    }
+    total
+}
+
+#[cfg(target_os = "linux")]
+fn en_go(octets: u64) -> String {
+    #[allow(clippy::cast_precision_loss)]
+    let go = octets as f64 / f64::from(1u32 << 30);
+    trf!("{go:.1} Go", "{go:.1} GB")
+}
+
+/// Nettoyage plus poussé que « Disque plein » : corbeille, paquets devenus inutiles, caches de compilation AUR,
+/// fichiers de cache non lus depuis 90 jours, rapports de plantage de plus d'une semaine.
+#[cfg(target_os = "linux")]
+fn nettoyage(gestion: Option<machine::linux::Paquets>) -> Reparation {
+    use crate::machine::linux::Paquets;
+    let maison = std::path::PathBuf::from(std::env::var_os("HOME").unwrap_or_default());
+    let echeance = std::time::Instant::now() + std::time::Duration::from_secs(3);
+    let corbeille = maison.join(".local/share/Trash");
+    let mut commandes: Vec<&str> = Vec::new();
+    let mut details = Vec::new();
+    let mut total = 0;
+    let t = taille_dossier(&corbeille, None, echeance);
+    if t > 0 {
+        commandes.push("rm -rf ~/.local/share/Trash/files ~/.local/share/Trash/info ~/.local/share/Trash/expunged");
+        details.push(trf!("corbeille {}", "trash {}", en_go(t)));
+        total += t;
+    }
+    match gestion {
+        Some(Paquets::Pacman) => commandes.push(tr!(
+            "orphelins=$(pacman -Qdtq); if [ -n \"$orphelins\" ]; then sudo pacman -Rns $orphelins; else echo 'Aucun paquet orphelin.'; fi",
+            "orphelins=$(pacman -Qdtq); if [ -n \"$orphelins\" ]; then sudo pacman -Rns $orphelins; else echo 'No orphan package.'; fi"
+        )),
+        Some(Paquets::Apt) => commandes.push("sudo apt-get autoremove --purge"),
+        Some(Paquets::Dnf) => commandes.push("sudo dnf autoremove"),
+        Some(Paquets::Zypper) => commandes.push("zypper packages --unneeded"),
+        None => {}
+    }
+    for (assistant, sous_dossier) in [("yay", ".cache/yay"), ("paru", ".cache/paru/clone")] {
+        let t = taille_dossier(&maison.join(sous_dossier), None, echeance);
+        if t >= 50 << 20 {
+            commandes.push(if assistant == "yay" { "rm -rf ~/.cache/yay/*" } else { "rm -rf ~/.cache/paru/clone/*" });
+            details.push(trf!("compilations {assistant} {}", "{assistant} builds {}", en_go(t)));
+            total += t;
+        }
+    }
+    let t = taille_dossier(&maison.join(".cache"), Some(90), echeance);
+    if t >= 50 << 20 {
+        commandes.push("find ~/.cache -mindepth 1 -type f -atime +90 -delete 2>/dev/null; find ~/.cache -mindepth 1 -type d -empty -delete 2>/dev/null");
+        details.push(trf!("vieux fichiers de cache {}", "old cache files {}", en_go(t)));
+        total += t;
+    }
+    let plantages = std::path::Path::new("/var/lib/systemd/coredump");
+    if plantages.is_dir() {
+        commandes.push("sudo find /var/lib/systemd/coredump -type f -mtime +7 -delete");
+    }
+    commandes.push("df -h /");
+    let mut r = rep(
+        tr!("Nettoyage approfondi", "Deep cleanup"),
+        trf!(
+            "Vide la corbeille, retire les paquets devenus inutiles (la liste s'affiche avant), les compilations AUR gardées, les fichiers de cache non lus depuis 90 jours et les rapports de plantage de plus d'une semaine. À gagner : {}.",
+            "Empties the trash, removes packages no longer needed (the list is shown first), kept AUR builds, cache files unread for 90 days and crash reports older than a week. To gain: {}.",
+            if details.is_empty() { tr!("peu de place", "little space").to_string() } else { details.join(", ") }
+        ),
+        tr!("une minute", "one minute"),
+        &commandes,
+    );
+    if total < 100 << 20 && details.is_empty() {
+        r.inutile = Some(tr!("presque rien à libérer", "almost nothing to free").into());
+    }
+    r
+}
+
 #[cfg(unix)]
 fn occupation_racine() -> String {
     std::process::Command::new("df")
@@ -527,6 +619,7 @@ pub fn liste() -> Vec<Reparation> {
         tr!("une minute", "one minute"),
         &menage,
     ));
+    l.push(nettoyage(gestion));
 
     if !systemd {
         return l;
@@ -772,6 +865,19 @@ pub fn liste() -> Vec<Reparation> {
             &[
                 "Get-ChildItem $env:TEMP -Force | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue",
                 "Dism /Online /Cleanup-Image /StartComponentCleanup",
+                "Get-PSDrive C | Format-Table Used, Free",
+            ],
+        ),
+        rep(
+            tr!("Nettoyage approfondi", "Deep cleanup"),
+            tr!("Vide la corbeille, le dossier temporaire de Windows, le cache de Windows Update et de l'optimisation de distribution, et les anciens rapports de plantage.", "Empties the recycle bin, the Windows temporary folder, the Windows Update and Delivery Optimization caches, and old crash reports."),
+            tr!("quelques minutes", "a few minutes"),
+            &[
+                "Clear-RecycleBin -Force -ErrorAction SilentlyContinue",
+                "Get-ChildItem \"$env:SystemRoot\\Temp\" -Force -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue",
+                "Delete-DeliveryOptimizationCache -Force -ErrorAction SilentlyContinue",
+                "Stop-Service wuauserv -Force; Get-ChildItem \"$env:SystemRoot\\SoftwareDistribution\\Download\" -Force -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue; Start-Service wuauserv",
+                "Remove-Item \"$env:SystemRoot\\Minidump\\*\", \"$env:LOCALAPPDATA\\CrashDumps\\*\" -Force -ErrorAction SilentlyContinue",
                 "Get-PSDrive C | Format-Table Used, Free",
             ],
         ),
