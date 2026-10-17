@@ -2,11 +2,13 @@ SENTINEL — bilan de sécurité portable (machine + réseau + antivirus + corre
 ================================================================================
 English version: README.txt
 
-Cette clé contient le programme pour Linux et Windows, sa base de données et son code source.
+Cette clé contient le programme pour Linux, Windows et macOS, sa base de données et son code source.
 
   Linux/sentinel        Linux (toutes distributions, aucune installation)
                         Double-cliquer autorun.sh, ou dans un terminal (hors de la clé) :  <clé>/Linux/sentinel
   Windows/sentinel.exe  Windows 10/11 : double-cliquer (ou « Lancer Sentinel.bat » à la racine).
+  macOS/sentinel        macOS 12 et plus récents (Apple Silicon et Intel) : double-cliquer « Lancer Sentinel.command »
+                        à la racine (le Terminal s'ouvre).
   autorun.sh            Linux : GNOME propose de le lancer au branchement ; sinon, double-clic ou ./autorun.sh
   donnees/              Base des appareils (un carnet par réseau : chez toi, chez chaque ami) et dernier
                         rapport (rapport.html, et rapport.md en texte simple, lisible sans navigateur). Elle voyage avec la clé : tout Sentinel qui voit la clé branchée l'utilise. Sur un autre
@@ -15,7 +17,7 @@ Cette clé contient le programme pour Linux et Windows, sa base de données et s
   sentinel.cle          Fichier témoin qui fait reconnaître la clé : ne pas le supprimer.
 
 Protection : la clé a deux parties. SENTINEL (tout ce qui précède) est en lecture seule sous Windows, et sous
-Linux Sentinel la remonte lui-même en lecture seule au lancement : un autre ordinateur ne peut pas modifier le
+Linux et macOS Sentinel la remonte lui-même en lecture seule au lancement : un autre ordinateur ne peut pas modifier le
 programme. Seul l'ordinateur de son propriétaire peut écrire dessus. SENTINELLOG, petite et modifiable, ne contient que
 journal-erreurs.txt : les erreurs rencontrées (version, système, message), sans nom d'utilisateur, nom de
 machine ni dossier personnel, pour améliorer Sentinel. Windows ne lance rien tout seul depuis une clé USB
@@ -45,7 +47,8 @@ Menu
        Adresse courriel : a-t-elle fuité ? (envoyée au service de recherche, après ton accord)
   7  Installer et jouer ›
        Logiciels essentiels (navigateur, VLC, 7-Zip, LibreOffice, Bitwarden… : PC neuf ou celui d'un ami)
-       Gaming (Windows : Visual C++, DirectX… ; Linux : Steam, Vulkan, GameMode, MangoHud, Wine, Lutris…)
+       Gaming (Windows : Visual C++, DirectX… ; Linux : Steam, Vulkan, GameMode, MangoHud, Wine, Lutris… ;
+       macOS : Steam, Heroic)
   8  Données : sauvegarder ou restaurer (surnoms, historique des réseaux)
   q  Quitter
   Raccourcis des anciennes versions, depuis le menu principal : u mises à jour, r réparer, o diagnostic,
@@ -58,15 +61,20 @@ au démarrage, DNS, certificats racine ajoutés, extensions de navigateur, sant�
 Langue : français ou anglais selon le système. Pour forcer le français :
   Linux :   SENTINEL_LANG=fr ./sentinel
   Windows : dans l'invite de commandes, set SENTINEL_LANG=fr puis sentinel.exe
+  macOS :   SENTINEL_LANG=fr <clé>/macOS/sentinel
 
 Bon à savoir
   - Les corrections ne sont jamais appliquées sans ta confirmation. Sous Windows, chacune est d'abord écrite
     dans un script lisible (le chemin est affiché) et demande l'accord administrateur.
   - Avant la première correction, mise à jour ou réparation qui modifie le système, un point de restauration est
-    créé automatiquement (snapper ou timeshift sous Linux, point de restauration sous Windows).
+    créé automatiquement (snapper ou timeshift sous Linux, point de restauration sous Windows, instantané local
+    de Time Machine sous macOS).
   - Si tu aides quelqu'un connecté à distance (Bureau à distance, SSH), Sentinel ne coupe jamais cet accès.
   - Le programme n'est pas signé : SmartScreen peut avertir (« Informations complémentaires » > « Exécuter
     quand même ») et Microsoft Defender peut le signaler, car il scanne des ports. Le code source est sur la clé.
+  - macOS : lancé depuis la clé, Sentinel s'ouvre sans avertissement. Copié depuis Internet ou AirDrop, macOS le
+    bloque (« développeur non identifié ») : clic droit > Ouvrir, ou Réglages Système > Confidentialité et
+    sécurité > « Ouvrir quand même ». Antivirus, logiciels et gaming passent par Homebrew (proposé s'il manque).
   - Restent sur chaque ordinateur, jamais sur la clé : l'historique des bilans et la quarantaine de
     l'antivirus (pour ne jamais transporter de malware).
 

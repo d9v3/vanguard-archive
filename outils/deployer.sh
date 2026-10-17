@@ -116,8 +116,28 @@ rm -f "$CLE/Linux/netscan" "$CLE/Windows/netscan.exe"
 printf '%s' "$(cat /etc/machine-id)" | sha1sum | cut -d' ' -f1 >"$CLE/sentinel.cle"
 cp -f "$LINUX" "$CLE/Linux/sentinel"
 [[ -f $WINDOWS ]] && cp -f "$WINDOWS" "$CLE/Windows/sentinel.exe"
-# Version macOS retirée (tag git avec-macos) : son dossier ne reste pas sur la clé.
-rm -rf "$CLE/macOS"
+# Version macOS : compilée sur un Mac de GitHub (.github/workflows/macos.yml, chaque nuit si le code a changé),
+# récupérée ici quand une compilation plus récente a réussi. Sans Internet ou sans gh : on garde la dernière.
+MAC=target/macos
+if command -v gh >/dev/null; then
+  RUN=$(timeout 20 gh run list --workflow macos.yml --branch "$(git rev-parse --abbrev-ref HEAD)" --status success \
+    --limit 1 --json databaseId,headSha -q '.[0] | "\(.databaseId) \(.headSha)"' 2>/dev/null || true)
+  if [[ -n $RUN && ${RUN#* } != $(cat "$MAC/commit.txt" 2>/dev/null) ]]; then
+    rm -rf "$MAC.nouveau"
+    if timeout 120 gh run download "${RUN%% *}" -n sentinel-macos -D "$MAC.nouveau" >/dev/null 2>&1; then
+      rm -rf "$MAC" && mv "$MAC.nouveau" "$MAC" && echo "Version macOS récupérée de GitHub (commit ${RUN#* })."
+    fi
+  fi
+fi
+if [[ -f $MAC/sentinel ]]; then
+  mkdir -p "$CLE/macOS"
+  cp -f "$MAC/sentinel" "$CLE/macOS/sentinel"
+  cp -f "outils/cle/Lancer Sentinel.command" "$CLE/"
+fi
+# macOS écrit dès le branchement (index Spotlight, journal des changements, corbeille) : ces témoins l'en
+# dispensent, la clé reste propre même avant que sentinel la protège.
+touch "$CLE/.metadata_never_index" "$CLE/.Trashes"
+mkdir -p "$CLE/.fseventsd" && touch "$CLE/.fseventsd/no_log"
 cp -f outils/LISEZMOI.txt "$CLE/LISEZMOI.txt"
 cp -f outils/README.txt "$CLE/README.txt"
 # Avis de licence des bibliothèques incluses dans les binaires (MIT, Apache… demandent de les joindre).
