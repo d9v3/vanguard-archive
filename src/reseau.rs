@@ -92,6 +92,9 @@ pub struct Rapport {
     pub score_global: u32,
     pub note: &'static str,
     pub hotes: Vec<Hote>,
+    /// Redirections UPnP de la box (scan du réseau local seulement).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub upnp: Option<crate::upnp::Etat>,
 }
 
 /// Base des appareils, un carnet par réseau : chez toi et chez chaque ami, sans mélange.
@@ -762,6 +765,10 @@ fn afficher(r: &Rapport) {
         }
     }
 
+    if let Some(e) = &r.upnp {
+        crate::upnp::afficher(e);
+    }
+
     if !r.absents.is_empty() {
         section(&trf!("ABSENTS AUJOURD'HUI ({})", "ABSENT TODAY ({})", r.absents.len()));
         for a in &r.absents {
@@ -787,6 +794,7 @@ fn afficher(r: &Rapport) {
 pub async fn executer(o: Options) -> Result<Rapport, String> {
     let bavard = !o.json && !o.silencieux;
     let debut = Instant::now();
+    let reseau_local = o.cible.is_none();
     let local = scan::reseau_local();
     let moi = local.as_ref().map(|l| l.1);
     let cible = match o.cible {
@@ -982,6 +990,7 @@ pub async fn executer(o: Options) -> Result<Rapport, String> {
         score_global,
         note: note(score_global),
         hotes,
+        upnp: reseau_local.then(crate::upnp::etat),
     };
 
     if o.json {
@@ -1021,6 +1030,7 @@ mod tests {
             score_global: 100,
             note: "A",
             hotes,
+            upnp: None,
         }
     }
 

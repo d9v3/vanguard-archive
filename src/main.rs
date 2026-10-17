@@ -23,6 +23,7 @@ mod risk;
 mod scan;
 mod surveillance;
 mod ui;
+mod upnp;
 
 use clap::{CommandFactory, FromArgMatches, Parser, Subcommand};
 

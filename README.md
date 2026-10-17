@@ -21,7 +21,8 @@ corrige après ton accord. Linux et Windows, sans installation, en français ou 
 - Ce qui n'a pas pu être vérifié est dit, jamais compté comme sain.
 
 **Réseau local** — tous les appareils, leur fabricant, leurs ports ouverts et leurs risques ; les nouveaux venus
-signalés, un carnet par réseau (chez toi, chez chaque ami), des surnoms (« imprimante HP »).
+signalés, un carnet par réseau (chez toi, chez chaque ami), des surnoms (« imprimante HP ») ; les ports que des
+appareils ont ouverts vers Internet sur la box par UPnP (lecture seule, avec miniupnpc sous Linux).
 
 ![Scan du réseau local](assets/captures/reseau.png)
 

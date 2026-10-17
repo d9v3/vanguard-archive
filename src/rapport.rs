@@ -451,6 +451,7 @@ mod tests {
             score_global: 95,
             note: "A",
             hotes: vec![h],
+            upnp: None,
         };
         let page = html(None, Some(&r));
         assert!(!page.contains("<script>alert"));
