@@ -6,6 +6,8 @@
 mod antivirus;
 mod commande;
 mod corriger;
+#[cfg(windows)]
+mod gaming;
 mod machine;
 mod rapport;
 mod reparer;
@@ -73,8 +75,11 @@ enum Commande {
         #[arg(value_parser = ["on", "off"])]
         etat: String,
     },
-    /// Réparations courantes : réseau, fichiers système, disque, place, mises à jour, heure.
+    /// Réparations courantes : réseau, navigation détournée, pare-feu, antivirus, fichiers système, disque, place, mises à jour, heure.
     Reparer,
+    /// Gaming (Windows) : composants pour les jeux (Visual C++, DirectX, .NET…) et réglages de Windows.
+    #[cfg(windows)]
+    Gaming,
     /// Donne un surnom à un appareil de la base (« imprimante HP »), désigné par son IP ou sa MAC.
     Nommer {
         /// IP (sur le réseau actuel) ou adresse MAC de l'appareil.
@@ -170,6 +175,8 @@ async fn menu() {
         };
         println!("  9. Surveillance du réseau toutes les heures : {etat}");
         println!("  r. Réparer (réseau, disque, fichiers système, place…)");
+        #[cfg(windows)]
+        println!("  g. Gaming : composants (Visual C++, DirectX, .NET…) et réglages Windows");
         println!("  n. Nommer un appareil (« imprimante HP »)");
         println!("  q. Quitter\n");
         let choix = demander("Choix : ");
@@ -193,6 +200,8 @@ async fn menu() {
             }
             "9" => surveillance::activer(!surveillance::active()),
             "r" | "R" => reparer::menu(),
+            #[cfg(windows)]
+            "g" | "G" => gaming::menu(),
             "n" | "N" => {
                 let qui = demander("IP ou adresse MAC de l'appareil : ");
                 let surnom = demander("Surnom (vide pour le retirer) : ");
@@ -247,6 +256,8 @@ async fn main() {
         Some(Commande::Surveillance { etat }) => surveillance::activer(etat == "on"),
         Some(Commande::Surveiller) => surveillance::surveiller().await,
         Some(Commande::Reparer) => reparer::menu(),
+        #[cfg(windows)]
+        Some(Commande::Gaming) => gaming::menu(),
         Some(Commande::Nommer { appareil, surnom }) => nommer(&appareil, &surnom.join(" ")),
     }
 }
