@@ -3,6 +3,8 @@
 //! Tout est lu d'abord (un seul appel PowerShell), montré avec son état, puis appliqué seulement après accord.
 //! Les réglages qui retirent une protection (intégrité de la mémoire, Defender, pare-feu…) ne sont jamais proposés.
 
+use std::fmt::Write;
+
 use serde::Deserialize;
 
 use crate::machine;
@@ -194,17 +196,19 @@ fn composants(e: &Etat) -> Vec<Element> {
             None,
             vec![],
         );
-        if nom.contains("nvidia") {
-            el.pourquoi += " NVIDIA App installe et tient à jour le pilote (page officielle).";
-            el.lien = Some("https://www.nvidia.com/fr-fr/software/nvidia-app/");
-        } else if nom.contains("amd") || nom.contains("radeon") {
-            el.pourquoi += " AMD Software Adrenalin installe et tient à jour le pilote (page officielle).";
-            el.lien = Some("https://www.amd.com/fr/support/download/drivers.html");
-        } else if nom.contains("intel") {
-            el.pourquoi += " Intel Driver & Support Assistant trouve le bon pilote.";
+        let Some((outil, lien)) = machine::windows::pilote_fabricant(&carte.nom) else {
+            continue;
+        };
+        // Intel : son assistant s'installe par winget ; NVIDIA et AMD, seulement depuis leur page officielle.
+        if nom.contains("intel") {
+            let _ = write!(el.pourquoi, " {outil} trouve le bon pilote.");
             el.commandes = vec![winget("Intel.IntelDriverAndSupportAssistant")];
         } else {
-            continue;
+            let _ = write!(
+                el.pourquoi,
+                " {outil} installe et tient à jour le pilote (page officielle)."
+            );
+            el.lien = Some(lien);
         }
         l.push(el);
     }

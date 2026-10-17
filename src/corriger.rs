@@ -1,34 +1,27 @@
 //! Application interactive des correctifs : chaque action est montrée puis confirmée.
 
-use crate::machine::{self, Audit};
+use crate::machine::{self, Audit, Constat, Correctif};
 use crate::reseau::Rapport;
 use crate::risk::Niveau;
 use crate::ui::*;
 
-/// Propose les corrections de la machine, puis la marche à suivre pour le reste. Retourne le nouvel audit.
-pub fn corriger(audit: &Audit, reseau: Option<&Rapport>) -> Option<Audit> {
-    let auto: Vec<_> = audit
-        .constats
+/// Propose chaque correction automatique, puis liste celles à faire soi-même. « [t]out » applique la correction
+/// en cours et toutes les suivantes en une seule exécution : une seule fenêtre administrateur sous Windows.
+/// Retourne `true` si quelque chose a été appliqué.
+pub fn proposer(constats: &[Constat]) -> bool {
+    let auto: Vec<_> = constats
         .iter()
         .filter_map(|c| Some((c, c.correctif.as_ref().filter(|k| k.automatique)?)))
         .collect();
-    let manuels: Vec<_> = audit
-        .constats
-        .iter()
-        .filter_map(|c| Some((c, c.correctif.as_ref().filter(|k| !k.automatique)?)))
-        .collect();
-
-    titre("Corrections");
     let mut applique = false;
     if auto.is_empty() {
-        println!("  {VERT}✔{RESET} Rien à corriger automatiquement sur cette machine.");
+        println!("  {VERT}✔{RESET} Rien à corriger automatiquement.");
     } else {
         println!(
             "  {} correction(s) possible(s). Chacune te sera montrée avant d'être appliquée.",
             auto.len()
         );
-        let mut tout = false;
-        for (c, k) in auto {
+        for (i, (c, k)) in auto.iter().enumerate() {
             let n = c.probleme.unwrap_or(Niveau::Info);
             println!(
                 "\n  {}[{}]{RESET} {GRAS}{}{RESET} — {}",
@@ -41,29 +34,39 @@ pub fn corriger(audit: &Audit, reseau: Option<&Rapport>) -> Option<Audit> {
             for cmd in &k.commandes {
                 println!("    {GRIS}{cmd}{RESET}");
             }
-            let rep = if tout {
-                "o".into()
-            } else {
-                demander("  Appliquer ? [o]ui / [n]on / [t]out appliquer : ").to_lowercase()
-            };
-            if rep == "t" {
-                tout = true;
-            }
-            if tout || rep == "o" || rep == "oui" {
-                if machine::appliquer(&k.commandes) {
-                    machine::retenir_blocage(k);
-                    println!("    {VERT}✔ fait{RESET}");
-                    applique = true;
-                } else {
-                    // Sans cette ligne, un échec (UAC refusée, commande en erreur) passait sans un mot de netscan.
-                    println!("    ✖ non appliqué : voir le message ci-dessus");
+            let rep = demander("  Appliquer ? [o]ui / [n]on / [t]out appliquer : ").to_lowercase();
+            let lot: Vec<&Correctif> = match rep.as_str() {
+                "t" => auto[i..].iter().map(|(_, k)| *k).collect(),
+                "o" | "oui" => vec![k],
+                _ => {
+                    println!("    {GRIS}ignoré{RESET}");
+                    continue;
                 }
+            };
+            if lot.len() > 1 {
+                println!("    {GRIS}Les {} corrections restantes, en une fois.{RESET}", lot.len());
+            }
+            let commandes: Vec<String> = lot.iter().flat_map(|k| k.commandes.clone()).collect();
+            if machine::appliquer(&commandes) {
+                for k in &lot {
+                    machine::retenir_blocage(k);
+                }
+                println!("    {VERT}✔ fait{RESET}");
+                applique = true;
             } else {
-                println!("    {GRIS}ignoré{RESET}");
+                // Sans cette ligne, un échec (UAC refusée, commande en erreur) passait sans un mot de netscan.
+                println!("    ✖ non appliqué : voir le message ci-dessus");
+            }
+            if rep == "t" {
+                break;
             }
         }
     }
 
+    let manuels: Vec<_> = constats
+        .iter()
+        .filter_map(|c| Some((c, c.correctif.as_ref().filter(|k| !k.automatique)?)))
+        .collect();
     if !manuels.is_empty() {
         titre("À faire toi-même");
         for (c, k) in &manuels {
@@ -73,6 +76,13 @@ pub fn corriger(audit: &Audit, reseau: Option<&Rapport>) -> Option<Audit> {
             }
         }
     }
+    applique
+}
+
+/// Propose les corrections de la machine, puis la marche à suivre pour le reste. Retourne le nouvel audit.
+pub fn corriger(audit: &Audit, reseau: Option<&Rapport>) -> Option<Audit> {
+    titre("Corrections");
+    let applique = proposer(&audit.constats);
 
     if let Some(r) = reseau {
         let exposes: Vec<_> = r

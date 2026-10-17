@@ -1078,17 +1078,40 @@ fn bilan_failles(gestion: Paquets, failles: &[Faille]) -> Constat {
     alerte(CAT, pire, message).corriger("Installer les correctifs de sécurité", &[gestion.mise_a_jour()])
 }
 
-fn redemarrage() -> Constat {
-    let noyau = sortie("uname", &["-r"]).unwrap_or_default().trim().to_string();
-    let installes: Vec<std::path::PathBuf> = ["/usr/lib/modules", "/lib/modules"]
+/// Version du noyau qui tourne (« 7.2.5-3-omarchy »).
+fn noyau_en_cours() -> String {
+    std::fs::read_to_string("/proc/sys/kernel/osrelease")
+        .ok()
+        .or_else(|| sortie("uname", &["-r"]))
+        .unwrap_or_default()
+        .trim()
+        .to_string()
+}
+
+/// Dossiers des noyaux installés, un par version. Un vrai noyau a son image (dans son dossier, ou /boot sous Debian)
+/// ou ses modules ; on écarte les restes vides. /lib/modules est souvent le même dossier que /usr/lib/modules.
+fn noyaux_installes() -> Vec<std::path::PathBuf> {
+    let mut noyaux: Vec<std::path::PathBuf> = ["/usr/lib/modules", "/lib/modules"]
         .iter()
         .filter_map(|d| std::fs::read_dir(d).ok())
         .flatten()
         .flatten()
         .map(|e| e.path())
-        // Un vrai noyau a son image (vmlinuz) ou ses modules ; on écarte les restes vides.
-        .filter(|p| p.join("modules.dep").exists() || p.join("vmlinuz").exists())
+        .filter(|p| {
+            let nom = p.file_name().unwrap_or_default().to_string_lossy();
+            p.join("modules.dep").exists()
+                || p.join("vmlinuz").exists()
+                || Path::new(&format!("/boot/vmlinuz-{nom}")).exists()
+        })
         .collect();
+    noyaux.sort_by(|a, b| a.file_name().cmp(&b.file_name()));
+    noyaux.dedup_by(|a, b| a.file_name() == b.file_name());
+    noyaux
+}
+
+fn redemarrage() -> Constat {
+    let noyau = noyau_en_cours();
+    let installes = noyaux_installes();
     // Aucun noyau ici (conteneur, noyau fourni par l'hôte) : rien à comparer.
     if installes.is_empty() {
         return impossible("Noyau", "aucun noyau installé ici, conteneur ?");
@@ -1127,33 +1150,11 @@ fn redemarrage() -> Constat {
     }
 }
 
-/// Noyaux installés (leur image est là) plus celui qui tourne : ceux pour lesquels les modules DKMS doivent exister.
-fn noyaux_installes() -> Vec<String> {
-    let mut noyaux: Vec<String> = std::fs::read_dir("/usr/lib/modules")
-        .into_iter()
-        .flatten()
-        .flatten()
-        .filter(|e| {
-            let nom = e.file_name().to_string_lossy().into_owned();
-            e.path().join("vmlinuz").exists() || Path::new(&format!("/boot/vmlinuz-{nom}")).exists()
-        })
-        .map(|e| e.file_name().to_string_lossy().into_owned())
-        .collect();
-    if let Some(en_cours) = sortie("uname", &["-r"]).map(|n| n.trim().to_string())
-        && !en_cours.is_empty()
-        && !noyaux.contains(&en_cours)
-    {
-        noyaux.push(en_cours);
-    }
-    noyaux.sort();
-    noyaux
-}
-
 /// Modules de « dkms status » et, pour chacun, les noyaux de `noyaux` où il n'est pas installé.
 /// Lignes « nvidia/610.57, 7.2.5-arch1, x86_64: installed » (ancien format : « nvidia, 610.57, 7.2.5, x86_64: »).
 fn dkms_manquants(status: &str, noyaux: &[String]) -> Vec<(String, Vec<String>)> {
-    let mut installes: Vec<(String, String)> = Vec::new();
-    let mut modules: Vec<String> = Vec::new();
+    // Chaque module, dans l'ordre de « dkms status », avec les noyaux où il est installé.
+    let mut modules: Vec<(String, Vec<String>)> = Vec::new();
     for l in status.lines() {
         let Some((gauche, etat)) = l.split_once(": ") else {
             continue;
@@ -1167,25 +1168,19 @@ fn dkms_manquants(status: &str, noyaux: &[String]) -> Vec<(String, Vec<String>)>
         if nom.is_empty() {
             continue;
         }
-        if !modules.iter().any(|m| m == nom) {
-            modules.push(nom.to_string());
-        }
+        let i = modules.iter().position(|(m, _)| m == nom).unwrap_or_else(|| {
+            modules.push((nom.to_string(), Vec::new()));
+            modules.len() - 1
+        });
         if let Some(k) = noyau
             && etat.trim_start().starts_with("installed")
         {
-            installes.push((nom.to_string(), (*k).to_string()));
+            modules[i].1.push((*k).to_string());
         }
     }
     modules
         .into_iter()
-        .map(|m| {
-            let absents = noyaux
-                .iter()
-                .filter(|k| !installes.iter().any(|(n, i)| *n == m && i == *k))
-                .cloned()
-                .collect();
-            (m, absents)
-        })
+        .map(|(m, installes)| (m, noyaux.iter().filter(|k| !installes.contains(k)).cloned().collect()))
         .collect()
 }
 
@@ -1193,19 +1188,28 @@ fn dkms_manquants(status: &str, noyaux: &[String]) -> Vec<(String, Vec<String>)>
 /// qu'on va démarrer, c'est l'écran noir ou un périphérique muet au prochain démarrage.
 fn pilotes_dkms() -> Option<Constat> {
     let status = sortie("dkms", &["status"])?;
-    let noyaux = noyaux_installes();
+    let mut noyaux: Vec<String> = noyaux_installes()
+        .iter()
+        .filter_map(|p| Some(p.file_name()?.to_string_lossy().into_owned()))
+        .collect();
+    let en_cours = noyau_en_cours();
+    if !en_cours.is_empty() && !noyaux.contains(&en_cours) {
+        noyaux.push(en_cours);
+    }
     let modules = dkms_manquants(&status, &noyaux);
     if modules.is_empty() {
         return None;
     }
-    let tous: Vec<&str> = modules.iter().map(|(m, _)| m.as_str()).collect();
     let mut a_refaire: Vec<String> = modules.iter().flat_map(|(_, k)| k.clone()).collect();
     a_refaire.sort();
     a_refaire.dedup();
     if a_refaire.is_empty() {
         return Some(ok(
             "Pilotes DKMS",
-            format!("{} compilé(s) pour chaque noyau installé.", tous.join(", ")),
+            format!(
+                "{} compilé(s) pour chaque noyau installé.",
+                modules.iter().map(|(m, _)| m.as_str()).collect::<Vec<_>>().join(", ")
+            ),
         ));
     }
     let detail: Vec<String> = modules
@@ -1213,11 +1217,6 @@ fn pilotes_dkms() -> Option<Constat> {
         .filter(|(_, k)| !k.is_empty())
         .map(|(m, k)| format!("{m} (noyau {})", k.join(", ")))
         .collect();
-    let commandes: Vec<String> = a_refaire
-        .iter()
-        .map(|k| format!("sudo dkms autoinstall -k {k}"))
-        .collect();
-    let commandes: Vec<&str> = commandes.iter().map(String::as_str).collect();
     Some(
         alerte(
             "Pilotes DKMS",
@@ -1229,18 +1228,32 @@ fn pilotes_dkms() -> Option<Constat> {
         )
         .corriger(
             "Recompiler les pilotes DKMS (les en-têtes du noyau doivent être installés)",
-            &commandes,
+            &a_refaire
+                .iter()
+                .map(|k| format!("sudo dkms autoinstall -k {k}"))
+                .collect::<Vec<_>>(),
         ),
     )
 }
 
-/// Tout ce qui doit être à jour : paquets, Flatpak, Snap, AUR, firmware, pilotes DKMS, noyau chargé.
+/// Tout ce qui doit être à jour : paquets, Flatpak, Snap, AUR, firmware, pilotes DKMS, noyau chargé. En parallèle :
+/// la liste des paquets interroge les dépôts (jusqu'à 30 s) pendant que le reste se vérifie.
 pub fn mises_a_jour_completes() -> Vec<Constat> {
-    let mut constats = vec![mises_a_jour()];
-    constats.extend(autres_mises_a_jour());
-    constats.extend(pilotes_dkms());
-    constats.push(redemarrage());
-    constats
+    std::thread::scope(|portee| {
+        let paquets = portee.spawn(mises_a_jour);
+        let autres = portee.spawn(autres_mises_a_jour);
+        let dkms = portee.spawn(pilotes_dkms);
+        let noyau = redemarrage();
+        let mut constats = vec![
+            paquets
+                .join()
+                .unwrap_or_else(|_| impossible("Mises à jour", "vérification interrompue")),
+        ];
+        constats.extend(autres.join().unwrap_or_default());
+        constats.extend(dkms.join().ok().flatten());
+        constats.push(noyau);
+        constats
+    })
 }
 
 /// Le système de fichiers racine repose-t-il sur un volume chiffré (LUKS, éventuellement sous LVM) ?

@@ -93,22 +93,10 @@ fn impossible(categorie: &'static str, raison: &str) -> Constat {
 }
 
 impl Constat {
-    fn corriger(mut self, action: impl Into<String>, commandes: &[&str]) -> Self {
+    fn corriger(mut self, action: impl Into<String>, commandes: &[impl ToString]) -> Self {
         self.correctif = Some(Correctif {
             action: action.into(),
-            commandes: commandes.iter().map(std::string::ToString::to_string).collect(),
-            automatique: true,
-            bloque: None,
-        });
-        self
-    }
-
-    /// Comme `corriger`, pour des commandes construites (variables, filtres).
-    #[cfg_attr(not(windows), allow(dead_code))]
-    fn corriger_liste(mut self, action: impl Into<String>, commandes: Vec<String>) -> Self {
-        self.correctif = Some(Correctif {
-            action: action.into(),
-            commandes,
+            commandes: commandes.iter().map(ToString::to_string).collect(),
             automatique: true,
             bloque: None,
         });
