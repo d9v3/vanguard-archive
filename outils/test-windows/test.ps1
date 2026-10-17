@@ -2,6 +2,9 @@
 # 1) relève l'état réel du système (référence), 2) lance sentinel, 3) étapes guidées.
 # Tous les résultats vont dans le dossier « resultats » à côté de ce script.
 
+# -Auto : aucune question (TEST-SENTINEL-AUTO.bat) ; les étapes qui demandent de taper ou une fenêtre UAC sont sautées.
+param([switch]$Auto)
+
 $ErrorActionPreference = 'Continue'
 [Console]::OutputEncoding = [Text.Encoding]::UTF8
 $OutputEncoding = [Text.Encoding]::UTF8
@@ -36,7 +39,11 @@ function Lancer($fichier, [string[]]$arguments) {
     Get-Content (Join-Path $res "$fichier.out.txt") -Encoding UTF8 | Select-Object -First 60 | ForEach-Object { Write-Host $_ }
 }
 
-function Question($texte) {
+function Question($texte, $reponseAuto = 'n') {
+    if ($Auto) {
+        Note "AUTO : $texte -> $reponseAuto"
+        return $reponseAuto -eq 'o'
+    }
     $r = Read-Host "$texte [o/n]"
     Note "QUESTION : $texte -> $r"
     return $r -match '^(o|oui|y)'
@@ -123,7 +130,7 @@ Lancer 'local-tous' @('reseau', '127.0.0.1', '-p', 'tous')
 Etape '5b. Persistance suspecte : fausse tâche planifiée et fausse entrée de démarrage (0.13)'
 Write-Host 'Sentinel doit repérer une tâche « PowerShell caché en base64 » et un programme lancé depuis C:\Users\Public.' -ForegroundColor Yellow
 Write-Host 'Les deux sont inoffensives (la tâche affiche « test » et ne se déclenche pas avant 5 ans) et retirées juste après.' -ForegroundColor Yellow
-if (Question 'Faire ce test ?') {
+if (Question 'Faire ce test ?' 'o') {
     try {
         Register-ScheduledTask -TaskName 'sentinel-test-suspect' -Force `
             -Action (New-ScheduledTaskAction -Execute 'powershell.exe' -Argument '-NoProfile -enc VwByAGkAdABlAC0ASABvAHMAdAAgAHQAZQBzAHQA') `
@@ -151,10 +158,12 @@ Etape '5c. Test de connexion (0.18)'
 Lancer 'connexion' @('connexion')
 
 Etape '5d. Mots de passe fuités (0.17)'
+if ($Auto) { Note 'AUTO : étape sautée (il faut taper un mot de passe).' } else {
 Write-Host 'Tape « password » (il doit être trouvé des millions de fois), puis Entrée seule pour terminer.' -ForegroundColor Yellow
 & $exe motdepasse
 Note "motdepasse -> code $LASTEXITCODE"
 [void](Question 'La saisie était-elle masquée et « password » trouvé dans des fuites ?')
+}
 
 Etape '6. Menu (ouverture puis q)'
 cmd /c "echo q| `"$exe`" > `"$res\menu.out.txt`" 2>&1"
@@ -246,8 +255,10 @@ Etape '12. Couleurs et accents dans la console'
 & $exe machine
 [void](Question 'Dans l''audit ci-dessus, les couleurs et les accents (é, è, ✔, ✖) s''affichent-ils correctement ?')
 
-$commentaire = Read-Host 'Un commentaire libre sur ce que tu as vu (Entrée pour passer)'
-if ($commentaire) { Note "COMMENTAIRE : $commentaire" }
+if (-not $Auto) {
+    $commentaire = Read-Host 'Un commentaire libre sur ce que tu as vu (Entrée pour passer)'
+    if ($commentaire) { Note "COMMENTAIRE : $commentaire" }
+}
 
 Note "FIN $(Get-Date -Format 'HH:mm:ss')"
 Write-Host ''

@@ -549,6 +549,12 @@ fn alertes(role: Option<&str>, ports: &[PortOuvert]) -> Vec<(Niveau, String)> {
     alertes
 }
 
+/// Port dynamique (49152 et plus) tenu par un processus système de Windows.
+fn rpc_dynamique_windows(port: u16, programme: Option<&str>) -> bool {
+    port >= 49152
+        && programme.is_some_and(|p| ["lsass", "wininit", "services", "svchost", "spoolsv", "System"].contains(&p))
+}
+
 /// Signe d'usurpation ARP : un autre appareil répond avec l'adresse MAC de la box. Celui qui se fait passer pour
 /// la box voit passer tout le trafic du réseau (attaque « de l'homme du milieu »). Rend (IP de la box, MAC, IP qui
 /// la partage). Un répéteur Wi-Fi qui relaie pour la box peut donner le même signe : c'est un « possible ».
@@ -902,6 +908,22 @@ pub async fn executer(o: Options) -> Result<Rapport, String> {
                     let programme = (Some(ip) == moi || ip.is_loopback())
                         .then(|| programmes.get(&port).cloned())
                         .flatten();
+                    // Ports dynamiques RPC ouverts par Windows lui-même (vu en test dans la VM : 49664 et suivants,
+                    // tenus par lsass, wininit, services, svchost, spoolsv) : normaux, pas « inconnus moyens ».
+                    if i.service == crate::risk::inconnu() && rpc_dynamique_windows(port, programme.as_deref()) {
+                        return PortOuvert {
+                            port,
+                            service: tr!("RPC de Windows", "Windows RPC"),
+                            niveau: Niveau::Info,
+                            banniere,
+                            conseil: tr!(
+                                "Port dynamique ouvert par Windows pour ses services : normal, filtré par le pare-feu.",
+                                "Dynamic port opened by Windows for its services: normal, filtered by the firewall."
+                            ),
+                            nouveau,
+                            programme,
+                        };
+                    }
                     PortOuvert {
                         port,
                         service: i.service,
@@ -1032,6 +1054,14 @@ mod tests {
             hotes,
             upnp: None,
         }
+    }
+
+    #[test]
+    fn ports_rpc_de_windows() {
+        assert!(rpc_dynamique_windows(49664, Some("lsass")));
+        assert!(!rpc_dynamique_windows(49664, Some("steam")));
+        assert!(!rpc_dynamique_windows(8080, Some("svchost")));
+        assert!(!rpc_dynamique_windows(49664, None));
     }
 
     #[test]
