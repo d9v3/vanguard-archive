@@ -599,7 +599,7 @@ pub fn info_port(port: u16) -> InfoPort {
                 "WireGuard VPN: normal if you use it."
             ),
         ),
-        5040 => (
+        5040 | 5050 => (
             "Windows CDP",
             Info,
             crate::tr!(
@@ -645,6 +645,14 @@ pub fn info_port(port: u16) -> InfoPort {
             crate::tr!(
                 "Diffusion locale Steam. Désactivable dans Steam > Remote Play.",
                 "Steam local streaming. Can be turned off in Steam > Remote Play."
+            ),
+        ),
+        27500 => (
+            "Passim (fwupd)",
+            Info,
+            crate::tr!(
+                "Partage des fichiers de firmware de fwupd avec les autres PC du réseau. Inutile chez soi : sudo systemctl disable --now passim.",
+                "Shares fwupd firmware files with the other PCs on the network. Not needed at home: sudo systemctl disable --now passim."
             ),
         ),
         57621 => (

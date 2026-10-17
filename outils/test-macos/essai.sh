@@ -67,9 +67,15 @@ note "--- Menu : chaque groupe ouvert puis refermé, puis q"
 lancer menu 60 '4\n\n5\n\n6\n\n7\n\nq\n'
 verifier "menu : sous-menus affichés" grep -q 'Antivirus' "$RES/menu.txt"
 
+note "--- Mots de passe fuités (pseudo-terminal : saisie sans écho)"
+python3 -I "$(dirname "$0")/../test-commun/mot-de-passe-pty.py" "$SENTINEL" >"$RES/motdepasse.txt" 2>&1
+verifier "mot de passe : « password » trouvé dans des fuites" grep -qE 'Trouvé [0-9 ]+ fois' "$RES/motdepasse.txt"
+verifier "mot de passe : jamais affiché" bash -c "! grep -q 'Mot de passe : password' '$RES/motdepasse.txt'"
+
 note "--- Réparer (liste), mises à jour (sans rien installer), logiciels, gaming"
 lancer reparer 60 '\n' reparer
 lancer maj 400 'n\nn\nn\nn\n' maj
+verifier "maj : jamais « --install --all » (installerait une nouvelle version majeure)" bash -c "! grep -q -- '--install --all' '$RES/maj.txt'"
 lancer logiciels 60 '\n' logiciels
 lancer gaming 60 '\n' gaming
 
@@ -110,6 +116,8 @@ mkdir -p "$ESSAI_AV"
 printf '%s%s' 'X5O!P%@AP[4\PZX54(P^)7CC)7}$EICAR-STANDARD-' 'ANTIVIRUS-TEST-FILE!$H+H*' >"$ESSAI_AV/eicar.com"
 lancer antivirus 900 'o\nn\nn\nn\n' antivirus "$ESSAI_AV"
 verifier "antivirus : EICAR détecté" grep -qi 'eicar' "$RES/antivirus.txt"
+verifier "antivirus : message « NULL X509 store » de ClamAV masqué" bash -c "! grep -q 'NULL X509' '$RES/antivirus.txt'"
+verifier "antivirus : refus de la quarantaine annoncé" grep -q 'Rien n.a été fait' "$RES/antivirus.txt"
 
 note "--- Clé USB simulée (images disque exFAT) : protection et journal d'erreurs"
 CLE_IMG="$RES/cle.dmg"

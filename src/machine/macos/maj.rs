@@ -4,54 +4,116 @@ use super::super::{Constat, alerte, impossible, ok};
 use crate::risk::Niveau;
 use crate::{tr, trf};
 
-/// Mises à jour proposées par `softwareupdate -l` : « * Label: macOS Sonoma 14.5-23F79 ». La réponse « No new
-/// software available. » arrive sur la sortie d'erreur.
-fn lire_softwareupdate(texte: &str) -> Option<Vec<String>> {
+/// Une mise à jour proposée par `softwareupdate -l` : son étiquette et sa version.
+#[derive(Debug, PartialEq)]
+struct MiseAJour {
+    etiquette: String,
+    version: Option<String>,
+}
+
+/// Mises à jour de `softwareupdate -l` : « * Label: macOS Tahoe 26.7.1-25G241 », suivie de « Title: …, Version:
+/// 26.7.1, … ». La réponse « No new software available. » arrive sur la sortie d'erreur.
+fn lire_softwareupdate(texte: &str) -> Option<Vec<MiseAJour>> {
     if texte.contains("No new software available") {
         return Some(Vec::new());
     }
-    let liste: Vec<String> = texte
-        .lines()
-        .filter_map(|l| l.trim().strip_prefix("* Label:"))
-        .map(|l| l.trim().to_string())
-        .collect();
+    let mut liste: Vec<MiseAJour> = Vec::new();
+    for l in texte.lines().map(str::trim) {
+        if let Some(etiquette) = l.strip_prefix("* Label:") {
+            liste.push(MiseAJour {
+                etiquette: etiquette.trim().to_string(),
+                version: None,
+            });
+        } else if let (Some(derniere), Some((_, reste))) = (liste.last_mut(), l.split_once("Version:")) {
+            derniere.version = reste.split(',').next().map(|v| v.trim().to_string());
+        }
+    }
     (!liste.is_empty() || texte.contains("Software Update found")).then_some(liste)
 }
 
-pub fn mises_a_jour() -> Constat {
+/// Passage à une nouvelle version majeure de macOS (26 → 27) : ce n'est pas une mise à jour de sécurité, c'est un
+/// nouveau système, à installer quand on veut, après une sauvegarde.
+fn mise_a_niveau(m: &MiseAJour, majeure_actuelle: u32) -> bool {
+    m.etiquette.starts_with("macOS")
+        && m.version
+            .as_deref()
+            .and_then(|v| v.split('.').next()?.parse::<u32>().ok())
+            .is_some_and(|majeure| majeure > majeure_actuelle)
+}
+
+pub fn mises_a_jour() -> Vec<Constat> {
     // La recherche interroge les serveurs d'Apple : jusqu'à une ou deux minutes.
     let Some(r) = crate::commande::lancer(std::process::Command::new("softwareupdate").arg("-l"), 180) else {
-        return impossible(
+        return vec![impossible(
             "Mises à jour",
             tr!("softwareupdate sans réponse", "softwareupdate did not answer"),
-        );
+        )];
     };
     let Some(liste) = lire_softwareupdate(&format!("{}\n{}", r.sortie, r.erreurs)) else {
-        return impossible(
+        return vec![impossible(
             "Mises à jour",
             tr!("hors ligne ou réponse illisible", "offline or unreadable answer"),
-        );
+        )];
     };
-    if liste.is_empty() {
-        return ok("Mises à jour", tr!("macOS est à jour.", "macOS is up to date."));
+    let majeure_actuelle = super::super::sortie("sw_vers", &["-productVersion"])
+        .and_then(|v| v.trim().split('.').next()?.parse::<u32>().ok())
+        .unwrap_or(u32::MAX);
+    let (niveaux, mises): (Vec<MiseAJour>, Vec<MiseAJour>) =
+        liste.into_iter().partition(|m| mise_a_niveau(m, majeure_actuelle));
+    let mut constats = Vec::new();
+    if mises.is_empty() {
+        constats.push(ok("Mises à jour", tr!("macOS est à jour.", "macOS is up to date.")));
+    } else {
+        let noms: Vec<&str> = mises.iter().map(|m| m.etiquette.as_str()).collect();
+        // Par leur étiquette : « --all » installerait aussi une nouvelle version majeure de macOS.
+        let commande = format!(
+            "sudo softwareupdate --install {}",
+            noms.iter()
+                .map(|n| format!("'{}'", n.replace('\'', r"'\''")))
+                .collect::<Vec<_>>()
+                .join(" ")
+        );
+        constats.push(
+            alerte(
+                "Mises à jour",
+                Niveau::Eleve,
+                trf!(
+                    "{} mise(s) à jour d'Apple en attente : {}. Elles corrigent souvent des failles déjà exploitées.",
+                    "{} Apple update(s) waiting: {}. They often fix flaws already being exploited.",
+                    noms.len(),
+                    noms.join(", ")
+                ),
+            )
+            .corriger(
+                tr!(
+                    "Installer ces mises à jour d'Apple (un redémarrage peut être demandé)",
+                    "Install these Apple updates (a restart may be needed)"
+                ),
+                &[commande],
+            ),
+        );
     }
-    alerte(
-        "Mises à jour",
-        Niveau::Eleve,
-        trf!(
-            "{} mise(s) à jour d'Apple en attente : {}. Elles corrigent souvent des failles déjà exploitées.",
-            "{} Apple update(s) waiting: {}. They often fix flaws already being exploited.",
-            liste.len(),
-            liste.join(", ")
-        ),
-    )
-    .corriger(
-        tr!(
-            "Installer les mises à jour d'Apple (un redémarrage peut être demandé)",
-            "Install the Apple updates (a restart may be needed)"
-        ),
-        &["sudo softwareupdate --install --all"],
-    )
+    for n in niveaux {
+        let version = n.version.unwrap_or_default();
+        constats.push(
+            alerte(
+                "Mises à jour",
+                Niveau::Info,
+                trf!(
+                    "macOS {version} est disponible : une nouvelle version du système, pas une simple mise à jour. À installer quand tu veux, après une sauvegarde.",
+                    "macOS {version} is available: a new version of the system, not just an update. Install it when you like, after a backup."
+                ),
+            )
+            .manuel(
+                tr!(
+                    "Réglages Système > Général > Mise à jour de logiciels > Mettre à niveau",
+                    "System Settings > General > Software Update > Upgrade Now"
+                ),
+                &[],
+            ),
+        );
+    }
+    constats
 }
 
 /// Programmes Homebrew et App Store en retard. `None` sans Homebrew ni mas.
@@ -134,11 +196,13 @@ pub fn mises_a_jour_completes(seulement: Option<&[&str]>) -> Vec<Constat> {
         let mut constats: Vec<Constat> = systeme
             .map(|t| {
                 t.join().unwrap_or_else(|_| {
-                    impossible("Mises à jour", tr!("vérification interrompue", "check interrupted"))
+                    vec![impossible(
+                        "Mises à jour",
+                        tr!("vérification interrompue", "check interrupted"),
+                    )]
                 })
             })
-            .into_iter()
-            .collect();
+            .unwrap_or_default();
         constats.extend(programmes.map(|t| t.join().unwrap_or_default()).unwrap_or_default());
         constats
     })
@@ -151,12 +215,16 @@ mod tests {
     #[test]
     fn lecture_de_softwareupdate() {
         let attente = "Software Update Tool\n\nFinding available software\nSoftware Update found the following new or updated software:\n\
-                       * Label: macOS Sonoma 14.5-23F79\n\tTitle: macOS Sonoma 14.5, Version: 14.5, Size: 1234567KiB, Recommended: YES, Action: restart,\n\
-                       * Label: Safari17.5MontereyAuto-17.5\n";
-        assert_eq!(
-            lire_softwareupdate(attente).unwrap(),
-            ["macOS Sonoma 14.5-23F79", "Safari17.5MontereyAuto-17.5"]
-        );
+                       * Label: macOS Tahoe 26.7.1-25G241\n\tTitle: macOS Tahoe 26.7.1, Version: 26.7.1, Size: 1234567KiB, Recommended: YES, Action: restart,\n\
+                       * Label: macOS 27.0.1-26A434\n\tTitle: macOS 27.0.1, Version: 27.0.1, Size: 9999999KiB, Recommended: YES, Action: restart,\n\
+                       * Label: Safari27.0TahoeAuto-27.0\n";
+        let liste = lire_softwareupdate(attente).unwrap();
+        assert_eq!(liste.len(), 3);
+        assert_eq!(liste[0].version.as_deref(), Some("26.7.1"));
+        assert_eq!(liste[2].version, None);
+        assert!(!mise_a_niveau(&liste[0], 26));
+        assert!(mise_a_niveau(&liste[1], 26));
+        assert!(!mise_a_niveau(&liste[2], 26));
         assert_eq!(
             lire_softwareupdate("Software Update Tool\n\nFinding available software\nNo new software available.\n"),
             Some(Vec::new())

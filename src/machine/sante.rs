@@ -86,7 +86,14 @@ fn constats_volumes(volumes: &[Volume]) -> Vec<Constat> {
     if constats.is_empty() && !volumes.is_empty() {
         let resume = volumes
             .iter()
-            .map(|v| trf!("{} : {} libres", "{}: {} free", v.point, taille(v.libre)))
+            // « C: » se termine déjà par deux-points : « C: 36 Go libres », pas « C:: ».
+            .map(|v| {
+                if v.point.ends_with(':') {
+                    trf!("{} {} libres", "{} {} free", v.point, taille(v.libre))
+                } else {
+                    trf!("{} : {} libres", "{}: {} free", v.point, taille(v.libre))
+                }
+            })
             .collect::<Vec<_>>()
             .join(", ");
         constats.push(ok(

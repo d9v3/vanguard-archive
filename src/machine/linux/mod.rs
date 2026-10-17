@@ -432,6 +432,15 @@ fn adresses_exposees() -> std::collections::HashSet<String> {
         .collect()
 }
 
+/// Service systemd d'une ligne de `ss -e` (« cgroup:/system.slice/passim.service » → « passim »).
+pub(crate) fn service_du_cgroup(ligne: &str) -> Option<String> {
+    let groupe = ligne.split_whitespace().find_map(|m| m.strip_prefix("cgroup:"))?;
+    let unite = groupe.rsplit('/').next()?;
+    let nom = unite.strip_suffix(".service")?;
+    // Une session (« session-2.scope ») ou une app de l'utilisateur ne dit rien de plus que « programme inconnu ».
+    (!nom.is_empty()).then(|| nom.to_string())
+}
+
 /// `ufw` : le pare-feu actif est ufw. Avec firewalld ou nftables, « ufw deny » ne bloquerait rien
 /// (ou s'ajouterait à un ufw arrêté) tout en s'affichant « fait » : on ne le propose pas.
 fn ports_ecoute(pare_feu_actif: bool, ufw: bool) -> Vec<Constat> {
@@ -440,7 +449,9 @@ fn ports_ecoute(pare_feu_actif: bool, ufw: bool) -> Vec<Constat> {
     let mut vus = Vec::new();
     let mut deja_conseille = std::collections::HashSet::new();
     let bloques = super::ports_bloques();
-    for (proto, options) in [("tcp", "-Htlnp"), ("udp", "-Hulnp")] {
+    // « e » : le groupe de contrôle (« cgroup:/system.slice/passim.service ») nomme le service même quand le programme,
+    // lancé par root ou un compte système, reste invisible sans droits admin.
+    for (proto, options) in [("tcp", "-Htlnpe"), ("udp", "-Hulnpe")] {
         let Some(ss) = sortie("ss", &[options]) else {
             return vec![alerte(
                 "Ports en écoute",
@@ -470,9 +481,11 @@ fn ports_ecoute(pare_feu_actif: bool, ufw: bool) -> Vec<Constat> {
                 continue;
             }
             vus.push((proto, port));
+            let service = service_du_cgroup(ligne);
             let programme = c
                 .get(5)
                 .and_then(|u| u.split('"').nth(1))
+                .or(service.as_deref())
                 .unwrap_or(tr!("programme inconnu (root ?)", "unknown program (root?)"));
             let niveau = super::niveau_expose(pare_feu_actif, i.niveau);
             let constat = alerte(
@@ -1186,6 +1199,16 @@ pub fn auditer() -> Audit {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn service_d_une_ligne_ss() {
+        let l =
+            "LISTEN 0 10 0.0.0.0:27500 0.0.0.0:* uid:958 ino:109369 sk:5003 cgroup:/system.slice/passim.service <->";
+        assert_eq!(service_du_cgroup(l).as_deref(), Some("passim"));
+        let session = "LISTEN 0 4096 0.0.0.0:8080 0.0.0.0:* users:((\"x\",pid=1,fd=3)) uid:1000 cgroup:/user.slice/user-1000.slice/session-2.scope";
+        assert_eq!(service_du_cgroup(session), None);
+        assert_eq!(service_du_cgroup("LISTEN 0 1 0.0.0.0:1 0.0.0.0:*"), None);
+    }
 
     #[test]
     fn familles_de_distributions() {

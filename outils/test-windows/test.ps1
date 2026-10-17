@@ -38,6 +38,20 @@ function Lancer($fichier, [string[]]$arguments) {
     Get-Content (Join-Path $res "$fichier.out.txt") -Encoding UTF8 | Select-Object -First 60 | ForEach-Object { Write-Host $_ }
 }
 
+# Comme Lancer, avec des réponses tapées d'avance (une par ligne) : menus et questions sans personne au clavier.
+function LancerAvec($fichier, [string[]]$arguments, [string]$entree) {
+    $f = Join-Path $res "$fichier.entree.txt"
+    [IO.File]::WriteAllText($f, $entree.Replace("`n", "`r`n"))
+    $debut = Get-Date
+    # Start-Process refuse une liste d'arguments vide (menu sans argument) : on ne la passe que si elle existe.
+    $options = @{ FilePath = $exe; NoNewWindow = $true; Wait = $true; PassThru = $true; RedirectStandardInput = $f
+        RedirectStandardOutput = (Join-Path $res "$fichier.out.txt"); RedirectStandardError = (Join-Path $res "$fichier.err.txt") }
+    if ($arguments) { $options.ArgumentList = $arguments }
+    $p = Start-Process @options
+    $duree = ((Get-Date) - $debut).TotalSeconds
+    Note ("sentinel {0} (réponses fournies) -> code {1}, {2:N1} s" -f ($arguments -join ' '), $p.ExitCode, $duree)
+}
+
 function Question($texte, $reponseAuto = 'n') {
     if ($Auto) {
         Note "AUTO : $texte -> $reponseAuto"
@@ -176,9 +190,48 @@ Note "motdepasse -> code $LASTEXITCODE"
 [void](Question 'La saisie était-elle masquée et « password » trouvé dans des fuites ?')
 }
 
-Etape '6. Menu (ouverture puis q)'
-cmd /c "echo q| `"$exe`" > `"$res\menu.out.txt`" 2>&1"
-Note "menu -> code $LASTEXITCODE"
+Etape '5e. Réparer (liste), mises à jour (vérification seule), gaming, courriel refusé (0.44)'
+LancerAvec 'reparer' @('reparer') "`n"
+$r = Get-Content (Join-Path $res 'reparer.out.txt') -Raw -Encoding UTF8
+$n = ([regex]::Matches($r, '(?m)^\s+\d+\. ')).Count
+Note "Réparer : $n réparation(s) dans la liste"
+LancerAvec 'maj' @('maj') "n`nn`nn`nn`nn`n"
+LancerAvec 'gaming' @('gaming') "`n"
+LancerAvec 'courriel' @('courriel') "test@example.com`nn`n"
+$c = Get-Content (Join-Path $res 'courriel.out.txt') -Raw -Encoding UTF8
+if ($c -match 'XposedOrNot|accord|consent') { Note 'Courriel : accord demandé avant l''envoi : OK' } else { Note 'Courriel : accord NON demandé (à regarder)' }
+
+Etape '5f. Données : sauvegarde puis restauration (0.9.13)'
+$sauvegarde = Join-Path $res 'sauvegarde.json'
+Lancer 'sauvegarder' @('sauvegarder', $sauvegarde)
+Lancer 'restaurer' @('restaurer', $sauvegarde)
+if ((Test-Path $sauvegarde) -and (Get-Item $sauvegarde).Length -gt 0) { Note 'Sauvegarde écrite : OK' } else { Note 'Sauvegarde ABSENTE (bug)' }
+
+Etape '5g. Nommer la box trouvée par le scan, puis retirer le surnom'
+try {
+    $scan = Get-Content (Join-Path $res 'reseau-json.out.txt') -Raw -Encoding UTF8 | ConvertFrom-Json
+    $box = ($scan.hotes | Where-Object { $_.role -eq 'passerelle' } | Select-Object -First 1).ip
+    if ($box) {
+        Lancer 'nommer' @('nommer', $box, 'box', 'de', 'test')
+        $nm = Get-Content (Join-Path $res 'nommer.out.txt') -Raw -Encoding UTF8
+        if ($nm -match 'box de test') { Note 'Nommer : surnom donné à la box : OK' } else { Note 'Nommer : surnom NON donné (bug)' }
+        Lancer 'nommer-retrait' @('nommer', $box)
+    } else { Note 'Pas de box dans le scan : étape sautée.' }
+} catch { Note "Nommer : scan illisible ($($_.Exception.Message))" }
+
+Etape '5h. Antivirus d''un dossier propre (Defender, analyse ciblée)'
+$propre = Join-Path $env:TEMP 'sentinel-dossier-propre'
+New-Item -ItemType Directory -Force $propre | Out-Null
+Set-Content -Path (Join-Path $propre 'note.txt') -Value 'fichier sans danger' -Encoding UTF8
+LancerAvec 'antivirus-dossier' @('antivirus', $propre) "n`nn`n"
+Remove-Item $propre -Recurse -Force -ErrorAction SilentlyContinue
+
+Etape '6. Menu (ouverture de chaque groupe puis q)'
+LancerAvec 'menu' @() "4`n`n5`n`n6`n`n7`n`nq`n"
+$m = Get-Content (Join-Path $res 'menu.out.txt') -Raw -Encoding UTF8
+foreach ($g in 'Cette machine|This machine', 'Réseau et Internet|Network and Internet', 'Antivirus et protection|Antivirus and protection', 'Installer et jouer|Install and play') {
+    if ($m -match $g) { Note "Menu : groupe « $g » affiché : OK" } else { Note "Menu : groupe « $g » ABSENT (bug)" }
+}
 # Entrée fermée (comme Ctrl-D) : sentinel doit quitter, pas tourner en boucle (bug corrigé en 0.9.7).
 $vide = Join-Path $res 'vide.txt'
 Set-Content -Path $vide -Value '' -NoNewline

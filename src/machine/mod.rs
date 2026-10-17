@@ -377,15 +377,19 @@ pub fn appliquer(commandes: &[String]) -> bool {
 pub fn programmes_en_ecoute() -> std::collections::HashMap<u16, String> {
     let mut map = std::collections::HashMap::new();
     #[cfg(target_os = "linux")]
-    for l in sortie("ss", &["-Htlnp"]).unwrap_or_default().lines() {
+    for l in sortie("ss", &["-Htlnpe"]).unwrap_or_default().lines() {
         let c: Vec<&str> = l.split_whitespace().collect();
         let port = c
             .get(3)
             .and_then(|a| a.rsplit_once(':'))
             .and_then(|(_, p)| p.parse::<u16>().ok());
-        let nom = c.get(5).and_then(|u| u.split('"').nth(1));
+        let nom = c
+            .get(5)
+            .and_then(|u| u.split('"').nth(1))
+            .map(str::to_string)
+            .or_else(|| linux::service_du_cgroup(l));
         if let (Some(port), Some(nom)) = (port, nom) {
-            map.insert(port, nom.to_string());
+            map.insert(port, nom);
         }
     }
     // « COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME » … « ControlCe 512 alice 9u IPv4 … TCP *:7000 (LISTEN) ».

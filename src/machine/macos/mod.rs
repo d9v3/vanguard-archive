@@ -600,7 +600,7 @@ pub fn auditer() -> Audit {
         verif!([comptes()]),
         verif!(gestion_a_distance()),
         verif!([mises_a_jour_automatiques()]),
-        verif!([maj::mises_a_jour()]),
+        verif!(maj::mises_a_jour()),
         verif!(maj::homebrew_a_jour()),
         verif!([sauvegardes()]),
         verif!(persistance()),

@@ -392,10 +392,18 @@ pub fn nommer(qui: &str, surnom: Option<&str>) -> Result<String, String> {
     let ici = scan::passerelle()
         .and_then(|gw| scan::table_arp().get(&gw).cloned())
         .or_else(|| scan::reseau_local().map(|(r, _)| trf!("plage {r}", "range {r}")));
+    // La MAC qui répond à cette IP en ce moment : un appareil à deux adresses (box d'une VM, VPN) n'a qu'une fiche,
+    // rangée sous sa MAC avec la dernière adresse vue ; nommé par l'autre adresse, il était introuvable (vu en VM).
+    let mac_actuelle = qui
+        .parse::<std::net::Ipv4Addr>()
+        .ok()
+        .and_then(|ip| scan::table_arp().get(&ip).cloned());
     for (id, r) in &mut base.reseaux {
         for (cle, a) in &mut r.appareils {
             let par_mac = cle.eq_ignore_ascii_case(&qui_min);
-            let par_ip = a.ip.to_string() == qui && ici.as_deref() == Some(id.as_str());
+            let dans_ce_reseau = ici.as_deref() == Some(id.as_str());
+            let par_ip = dans_ce_reseau
+                && (a.ip.to_string() == qui || mac_actuelle.as_deref().is_some_and(|m| cle.eq_ignore_ascii_case(m)));
             if par_mac || par_ip {
                 a.surnom = surnom.map(str::to_string);
                 a.surnom_le = Some(maintenant.clone());
@@ -877,8 +885,8 @@ pub async fn executer(o: Options) -> Result<Rapport, String> {
 
     if bavard {
         tre!(
-            "{GRAS}Scan réseau{RESET} — {cible} ({} adresses, {} ports chacune)",
-            "{GRAS}Network scan{RESET} — {cible} ({} addresses, {} ports each)",
+            "{GRAS}Scan réseau{RESET} — {cible} ({} adresse(s), {} ports chacune)",
+            "{GRAS}Network scan{RESET} — {cible} ({} address(es), {} ports each)",
             ips.len(),
             ports.len()
         );

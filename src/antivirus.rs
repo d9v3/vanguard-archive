@@ -321,6 +321,17 @@ fn base_presente() -> bool {
     })
 }
 
+/// freshclam sous macOS : ClamAV de Homebrew y écrit « ERROR: NULL X509 store » à chaque téléchargement, alors que
+/// les signatures arrivent et sont vérifiées (cause inconnue même des auteurs : Cisco-Talos/clamav#1421). Le
+/// message, alarmant et sans conséquence, est retiré ; le code de retour de freshclam est gardé.
+#[cfg(target_os = "macos")]
+pub(crate) fn commande_freshclam(freshclam: &str) -> String {
+    format!(
+        "set -o pipefail; '{}' 2>&1 | {{ grep -v 'NULL X509 store' || true; }}",
+        freshclam.replace('\'', r"'\''")
+    )
+}
+
 /// Chemin d'un outil de ClamAV. Sous macOS, Homebrew n'est pas toujours dans le PATH du Terminal.
 #[cfg(unix)]
 fn outil_clamav(nom: &str) -> String {
@@ -397,7 +408,8 @@ fn preparer() -> bool {
                 .map(|p| p.display().to_string())
                 .unwrap_or_default();
             shell(&format!(
-                "C='{prefixe}/etc/clamav/freshclam.conf'; [ -f \"$C\" ] || sed '/^Example/d' \"$C.sample\" > \"$C\"; '{freshclam}'"
+                "C='{prefixe}/etc/clamav/freshclam.conf'; [ -f \"$C\" ] || sed '/^Example/d' \"$C.sample\" > \"$C\"; {}",
+                commande_freshclam(&freshclam)
             ))
         };
         if !ok {
@@ -582,6 +594,12 @@ fn clamav(portee: &Portee) {
                 "  ✖ {f}: {e} (system file? run again with sudo)"
             ),
         }
+    }
+    if !matches!(rep.as_str(), "q" | "s" | "d") {
+        trp!(
+            "  Rien n'a été fait : les fichiers restent à leur place.",
+            "  Nothing was done: the files stay where they are."
+        );
     }
     if rep == "q" {
         trp!(
