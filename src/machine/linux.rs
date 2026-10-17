@@ -325,7 +325,7 @@ fn ports_ecoute(pare_feu_actif: bool, ufw: bool) -> Vec<Constat> {
             let expose = matches!(adresse, "0.0.0.0" | "*" | "[::]") || adresses.contains(adresse);
             let i = info_port(port);
             // UDP : client DHCP (68) et ports éphémères anonymes (sockets clientes), ce ne sont pas des services.
-            let bruit = proto == "udp" && (port == 68 || (port >= 32768 && i.service == "Inconnu"));
+            let bruit = proto == "udp" && (port == 68 || (port >= 32768 && i.service == crate::risk::inconnu()));
             if !expose || bruit || vus.contains(&(proto, port)) {
                 continue;
             }

@@ -88,7 +88,11 @@ fn alerte(categorie: &'static str, niveau: Niveau, message: impl Into<String>) -
 fn impossible(categorie: &'static str, raison: &str) -> Constat {
     Constat {
         verifie: false,
-        ..alerte(categorie, Niveau::Info, format!("Impossible de vérifier ({raison})."))
+        ..alerte(
+            categorie,
+            Niveau::Info,
+            trf!("Impossible de vérifier ({raison}).", "Could not check ({raison})."),
+        )
     }
 }
 
@@ -149,7 +153,7 @@ fn sortie(cmd: &str, args: &[&str]) -> Option<String> {
 fn cles_ssh() -> Vec<Constat> {
     let dossier = std::path::PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".ssh");
     let Ok(meta) = std::fs::metadata(&dossier) else {
-        return vec![ok("Clés SSH", "Pas de dossier ~/.ssh.")];
+        return vec![ok("Clés SSH", tr!("Pas de dossier ~/.ssh.", "No ~/.ssh folder."))];
     };
     let mut constats = Vec::new();
     if std::os::unix::fs::PermissionsExt::mode(&meta.permissions()) & 0o077 != 0 {
@@ -157,9 +161,15 @@ fn cles_ssh() -> Vec<Constat> {
             alerte(
                 "Clés SSH",
                 Niveau::Eleve,
-                "~/.ssh est lisible par d'autres utilisateurs.",
+                tr!(
+                    "~/.ssh est lisible par d'autres utilisateurs.",
+                    "~/.ssh is readable by other users."
+                ),
             )
-            .corriger("Restreindre ~/.ssh à toi seul", &["chmod 700 ~/.ssh"]),
+            .corriger(
+                tr!("Restreindre ~/.ssh à toi seul", "Restrict ~/.ssh to you only"),
+                &["chmod 700 ~/.ssh"],
+            ),
         );
     }
     for f in std::fs::read_dir(&dossier).into_iter().flatten().flatten() {
@@ -173,10 +183,10 @@ fn cles_ssh() -> Vec<Constat> {
                 alerte(
                     "Clés SSH",
                     Niveau::Moyen,
-                    format!("Clé privée ~/.ssh/{nom} sans phrase de passe : volée, elle ouvre tous les serveurs où elle est autorisée."),
+                    trf!("Clé privée ~/.ssh/{nom} sans phrase de passe : volée, elle ouvre tous les serveurs où elle est autorisée.", "Private key ~/.ssh/{nom} has no passphrase: if stolen, it opens every server where it is authorized."),
                 )
                 .corriger(
-                    format!("Ajouter une phrase de passe à {nom} (la clé publique ne change pas, rien à refaire sur les serveurs)"),
+                    trf!("Ajouter une phrase de passe à {nom} (la clé publique ne change pas, rien à refaire sur les serveurs)", "Add a passphrase to {nom} (the public key does not change, nothing to redo on the servers)"),
                     &[&format!("ssh-keygen -p -f {chemin}")],
                 ),
             );
@@ -195,14 +205,23 @@ fn cles_ssh() -> Vec<Constat> {
                 alerte(
                     "Clés SSH",
                     Niveau::Critique,
-                    format!("Clé privée ~/.ssh/{nom} lisible par d'autres."),
+                    trf!(
+                        "Clé privée ~/.ssh/{nom} lisible par d'autres.",
+                        "Private key ~/.ssh/{nom} is readable by others."
+                    ),
                 )
-                .corriger(format!("Protéger la clé {nom}"), &[&format!("chmod 600 {chemin}")]),
+                .corriger(
+                    trf!("Protéger la clé {nom}", "Protect the key {nom}"),
+                    &[&format!("chmod 600 {chemin}")],
+                ),
             );
         }
     }
     if constats.is_empty() {
-        constats.push(ok("Clés SSH", "Permissions de ~/.ssh correctes."));
+        constats.push(ok(
+            "Clés SSH",
+            tr!("Permissions de ~/.ssh correctes.", "~/.ssh permissions are correct."),
+        ));
     }
     constats
 }
@@ -295,8 +314,9 @@ pub fn appliquer(commandes: &[String]) -> bool {
         for c in commandes {
             println!("    {GRIS}PS> {c}{RESET}");
         }
-        println!(
-            "    {GRIS}Une fenêtre administrateur s'ouvre et montre chaque étape ; attends qu'elle se ferme.{RESET}"
+        trp!(
+            "    {GRIS}Une fenêtre administrateur s'ouvre et montre chaque étape ; attends qu'elle se ferme.{RESET}",
+            "    {GRIS}An administrator window opens and shows each step; wait for it to close.{RESET}"
         );
         windows::powershell_admin(commandes)
     }
@@ -358,8 +378,15 @@ pub fn ouvrir(cible: &str) {
 
 pub fn auditer(bavard: bool) -> Audit {
     if bavard {
-        eprintln!("{GRAS}Audit de cette machine{RESET} ({})", os::NOM);
-        eprintln!("{GRIS}Vérifications en cours (quelques secondes)…{RESET}");
+        tre!(
+            "{GRAS}Audit de cette machine{RESET} ({})",
+            "{GRAS}Audit of this machine{RESET} ({})",
+            os::NOM
+        );
+        tre!(
+            "{GRIS}Vérifications en cours (quelques secondes)…{RESET}",
+            "{GRIS}Checking (a few seconds)…{RESET}"
+        );
     }
     os::auditer()
 }
@@ -371,20 +398,22 @@ pub fn mises_a_jour_completes(seulement: Option<&[&str]>) -> Vec<Constat> {
 }
 
 pub fn afficher(a: &Audit) {
-    titre(&format!("Cette machine ({})", a.systeme));
+    titre(&trf!("Cette machine ({})", "This machine ({})", a.systeme));
     afficher_constats(&a.constats);
     println!();
     if a.fiable() {
-        afficher_note("Note de la machine", a.score);
+        afficher_note(tr!("Note de la machine", "Machine grade"), a.score);
     } else {
-        println!(
+        trp!(
             "  Note de la machine : {}aucune{RESET} (pare-feu ou trop de vérifications impossibles à faire ici)",
+            "  Machine grade: {}none{RESET} (firewall or too many checks could not be done here)",
             couleur(Niveau::Eleve)
         );
     }
     if a.impossibles() > 0 {
-        println!(
+        trp!(
             "  {}⚠ {} vérification(s) impossible(s) : résultat incomplet.{RESET}",
+            "  {}⚠ {} check(s) could not be done: incomplete result.{RESET}",
             couleur(Niveau::Moyen),
             a.impossibles()
         );
@@ -402,14 +431,20 @@ pub fn afficher_constats(constats: &[Constat]) {
                 format!(" {}[{}]{RESET}", couleur(n), n.libelle()),
             ),
         };
-        println!("  {icone} {GRAS}{:<16}{RESET}{etiquette} {}", c.categorie, c.message);
+        let cat = crate::langue::categorie(c.categorie);
+        println!("  {icone} {GRAS}{cat:<16}{RESET}{etiquette} {}", c.message);
         if let Some(k) = &c.correctif {
             let marque = if k.automatique {
-                "🔧 correction possible"
+                tr!("🔧 correction possible", "🔧 fix available")
             } else {
-                "💡 à faire"
+                tr!("💡 à faire", "💡 to do")
             };
-            println!("  {:18}{GRIS}{marque} : {}{RESET}", "", k.action);
+            trp!(
+                "  {:18}{GRIS}{marque} : {}{RESET}",
+                "  {:18}{GRIS}{marque}: {}{RESET}",
+                "",
+                k.action
+            );
         }
     }
 }

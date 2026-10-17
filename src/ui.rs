@@ -1,6 +1,8 @@
 //! Couleurs et petits éléments d'affichage partagés.
 
+pub use crate::langue::Reponse;
 use crate::risk::Niveau;
+pub use crate::{tr, tre, trf, trp, trpr, trw, trwln};
 
 pub const RESET: &str = "\x1b[0m";
 pub const GRAS: &str = "\x1b[1m";
@@ -30,12 +32,15 @@ pub fn titre(t: &str) {
 
 pub fn afficher_note(quoi: &str, score: u32) {
     let n = crate::risk::note(score);
-    println!("  {quoi} : {}{n}{RESET} ({score}/100)", couleur_note(n));
+    let c = couleur_note(n);
+    crate::trp!(
+        "  {quoi} : {c}{n}{RESET} ({score}/100)",
+        "  {quoi}: {c}{n}{RESET} ({score}/100)"
+    );
 }
 
-/// « a, b, c (et 2 autre(s)) » : les `max` premiers éléments d'une liste, pour un message d'une ligne.
+/// « a, b, c (et 2 autre(s)) » / “a, b, c (and 2 more)” : les `max` premiers éléments d'une liste, pour un message d'une ligne.
 pub fn resume(noms: &[impl AsRef<str>], max: usize, separateur: &str) -> String {
-    use std::fmt::Write;
     let mut t = noms
         .iter()
         .take(max)
@@ -43,7 +48,8 @@ pub fn resume(noms: &[impl AsRef<str>], max: usize, separateur: &str) -> String 
         .collect::<Vec<_>>()
         .join(separateur);
     if noms.len() > max {
-        let _ = write!(t, " (et {} autre(s))", noms.len() - max);
+        let reste = noms.len() - max;
+        t += &crate::trf!(" (et {reste} autre(s))", " (and {reste} more)");
     }
     t
 }

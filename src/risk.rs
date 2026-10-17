@@ -14,9 +14,9 @@ impl Niveau {
     pub fn libelle(self) -> &'static str {
         match self {
             Niveau::Info => "INFO",
-            Niveau::Moyen => "MOYEN",
-            Niveau::Eleve => "ÉLEVÉ",
-            Niveau::Critique => "CRITIQUE",
+            Niveau::Moyen => crate::tr!("MOYEN", "MEDIUM"),
+            Niveau::Eleve => crate::tr!("ÉLEVÉ", "HIGH"),
+            Niveau::Critique => crate::tr!("CRITIQUE", "CRITICAL"),
         }
     }
 
@@ -52,218 +52,553 @@ pub const PORTS_HTTP: &[u16] = &[
     80, 81, 3000, 5000, 7547, 8000, 8008, 8080, 8081, 8086, 8088, 8123, 8888, 9000, 9090, 10000, 32400,
 ];
 
+/// Nom du service d'un port inconnu (comparé ailleurs : toujours passer par cette fonction).
+pub fn inconnu() -> &'static str {
+    crate::tr!("Inconnu", "Unknown")
+}
+
 pub fn info_port(port: u16) -> InfoPort {
     use Niveau::{Critique, Eleve, Info, Moyen};
     let (service, niveau, conseil) = match port {
         21 => (
             "FTP",
             Eleve,
-            "Identifiants et fichiers circulent en clair. Préférer SFTP.",
+            crate::tr!(
+                "Identifiants et fichiers circulent en clair. Préférer SFTP.",
+                "Logins and files travel in clear text. Prefer SFTP."
+            ),
         ),
-        22 => ("SSH", Info, "OK si authentification par clé et mot de passe désactivé."),
+        22 => (
+            "SSH",
+            Info,
+            crate::tr!(
+                "OK si authentification par clé et mot de passe désactivé.",
+                "OK if key authentication is used and password login is disabled."
+            ),
+        ),
         23 => (
             "Telnet",
             Critique,
-            "Protocole en clair, très ciblé par les botnets. À désactiver.",
+            crate::tr!(
+                "Protocole en clair, très ciblé par les botnets. À désactiver.",
+                "Clear-text protocol, heavily targeted by botnets. Disable it."
+            ),
         ),
         25 | 465 | 587 => (
             "SMTP",
             Moyen,
-            "Serveur mail : vérifier qu'il n'est pas un relais ouvert.",
+            crate::tr!(
+                "Serveur mail : vérifier qu'il n'est pas un relais ouvert.",
+                "Mail server: make sure it is not an open relay."
+            ),
         ),
-        53 => ("DNS", Info, "Normal sur le routeur ; suspect sur une autre machine."),
+        53 => (
+            "DNS",
+            Info,
+            crate::tr!(
+                "Normal sur le routeur ; suspect sur une autre machine.",
+                "Normal on the router; suspicious on another machine."
+            ),
+        ),
         80 | 81 => (
             "HTTP",
             Moyen,
-            "Interface web non chiffrée : mots de passe visibles sur le réseau.",
+            crate::tr!(
+                "Interface web non chiffrée : mots de passe visibles sur le réseau.",
+                "Unencrypted web interface: passwords visible on the network."
+            ),
         ),
-        88 => ("Kerberos", Info, "Service d'authentification."),
-        110 | 143 => ("POP3/IMAP", Moyen, "Mail en clair ; préférer 993/995."),
-        111 => ("rpcbind", Eleve, "Expose les services RPC/NFS. À fermer si inutile."),
-        135 => ("MS-RPC", Eleve, "Service Windows souvent exploité. Ne pas exposer."),
+        88 => (
+            "Kerberos",
+            Info,
+            crate::tr!("Service d'authentification.", "Authentication service."),
+        ),
+        110 | 143 => (
+            "POP3/IMAP",
+            Moyen,
+            crate::tr!("Mail en clair ; préférer 993/995.", "Clear-text mail; prefer 993/995."),
+        ),
+        111 => (
+            "rpcbind",
+            Eleve,
+            crate::tr!(
+                "Expose les services RPC/NFS. À fermer si inutile.",
+                "Exposes RPC/NFS services. Close it if unused."
+            ),
+        ),
+        135 => (
+            "MS-RPC",
+            Eleve,
+            crate::tr!(
+                "Service Windows souvent exploité. Ne pas exposer.",
+                "Frequently exploited Windows service. Do not expose it."
+            ),
+        ),
         139 => (
             "NetBIOS",
             Eleve,
-            "Partage Windows ancien (SMBv1 possible). Désactiver NetBIOS.",
+            crate::tr!(
+                "Partage Windows ancien (SMBv1 possible). Désactiver NetBIOS.",
+                "Old Windows sharing (SMBv1 possible). Disable NetBIOS."
+            ),
         ),
-        389 => ("LDAP", Moyen, "Annuaire en clair ; préférer LDAPS (636)."),
-        443 | 8443 | 9443 => ("HTTPS", Info, "Web chiffré. Vérifier que l'interface est à jour."),
+        389 => (
+            "LDAP",
+            Moyen,
+            crate::tr!(
+                "Annuaire en clair ; préférer LDAPS (636).",
+                "Clear-text directory; prefer LDAPS (636)."
+            ),
+        ),
+        443 | 8443 | 9443 => (
+            "HTTPS",
+            Info,
+            crate::tr!(
+                "Web chiffré. Vérifier que l'interface est à jour.",
+                "Encrypted web. Make sure the interface is up to date."
+            ),
+        ),
         445 => (
             "SMB",
             Eleve,
-            "Partage de fichiers (WannaCry…). Désactiver SMBv1, mots de passe forts.",
+            crate::tr!(
+                "Partage de fichiers (WannaCry…). Désactiver SMBv1, mots de passe forts.",
+                "File sharing (WannaCry…). Disable SMBv1, use strong passwords."
+            ),
         ),
         512..=514 => (
             "rsh/rlogin",
             Critique,
-            "Accès distant sans chiffrement, obsolète. À désactiver.",
+            crate::tr!(
+                "Accès distant sans chiffrement, obsolète. À désactiver.",
+                "Unencrypted, obsolete remote access. Disable it."
+            ),
         ),
         515 | 631 => (
-            "Impression",
+            crate::tr!("Impression", "Printing"),
             Moyen,
-            "Imprimante/CUPS : vérifier le firmware et l'accès admin.",
+            crate::tr!(
+                "Imprimante/CUPS : vérifier le firmware et l'accès admin.",
+                "Printer/CUPS: check the firmware and admin access."
+            ),
         ),
-        548 => ("AFP", Moyen, "Partage Apple obsolète. Préférer SMB récent."),
+        548 => (
+            "AFP",
+            Moyen,
+            crate::tr!(
+                "Partage Apple obsolète. Préférer SMB récent.",
+                "Obsolete Apple sharing. Prefer a recent SMB."
+            ),
+        ),
         554 => (
             "RTSP",
             Moyen,
-            "Flux vidéo (caméra IP ?). Vérifier qu'il exige un mot de passe.",
+            crate::tr!(
+                "Flux vidéo (caméra IP ?). Vérifier qu'il exige un mot de passe.",
+                "Video stream (IP camera?). Make sure it requires a password."
+            ),
         ),
-        636 => ("LDAPS", Info, "Annuaire chiffré."),
-        873 => ("rsync", Eleve, "Démon rsync : souvent sans authentification."),
-        993 | 995 => ("IMAPS/POP3S", Info, "Mail chiffré."),
+        636 => ("LDAPS", Info, crate::tr!("Annuaire chiffré.", "Encrypted directory.")),
+        873 => (
+            "rsync",
+            Eleve,
+            crate::tr!(
+                "Démon rsync : souvent sans authentification.",
+                "rsync daemon: often without authentication."
+            ),
+        ),
+        993 | 995 => ("IMAPS/POP3S", Info, crate::tr!("Mail chiffré.", "Encrypted mail.")),
         1080 | 3128 => (
             "Proxy",
             Eleve,
-            "Proxy ouvert : peut servir de rebond. Restreindre l'accès.",
+            crate::tr!(
+                "Proxy ouvert : peut servir de rebond. Restreindre l'accès.",
+                "Open proxy: can be used as a relay. Restrict access."
+            ),
         ),
-        1433 => ("MS-SQL", Eleve, "Base de données exposée sur le réseau."),
-        1521 => ("Oracle DB", Eleve, "Base de données exposée sur le réseau."),
-        1723 => ("PPTP", Eleve, "VPN au chiffrement cassé. Passer à WireGuard/OpenVPN."),
+        1433 => (
+            "MS-SQL",
+            Eleve,
+            crate::tr!(
+                "Base de données exposée sur le réseau.",
+                "Database exposed on the network."
+            ),
+        ),
+        1521 => (
+            "Oracle DB",
+            Eleve,
+            crate::tr!(
+                "Base de données exposée sur le réseau.",
+                "Database exposed on the network."
+            ),
+        ),
+        1723 => (
+            "PPTP",
+            Eleve,
+            crate::tr!(
+                "VPN au chiffrement cassé. Passer à WireGuard/OpenVPN.",
+                "VPN with broken encryption. Switch to WireGuard/OpenVPN."
+            ),
+        ),
         1883 => (
             "MQTT",
             Moyen,
-            "Domotique : vérifier qu'une authentification est exigée.",
+            crate::tr!(
+                "Domotique : vérifier qu'une authentification est exigée.",
+                "Home automation: make sure authentication is required."
+            ),
         ),
-        2049 => ("NFS", Eleve, "Partage NFS : vérifier /etc/exports (pas de * en rw)."),
+        2049 => (
+            "NFS",
+            Eleve,
+            crate::tr!(
+                "Partage NFS : vérifier /etc/exports (pas de * en rw).",
+                "NFS share: check /etc/exports (no * with rw)."
+            ),
+        ),
         2375 => (
             "Docker API",
             Critique,
-            "API Docker sans TLS = accès root à la machine. Fermer immédiatement.",
+            crate::tr!(
+                "API Docker sans TLS = accès root à la machine. Fermer immédiatement.",
+                "Docker API without TLS = root access to the machine. Close it now."
+            ),
         ),
         2376 => (
             "Docker API TLS",
             Moyen,
-            "API Docker chiffrée : vérifier les certificats clients.",
+            crate::tr!(
+                "API Docker chiffrée : vérifier les certificats clients.",
+                "Encrypted Docker API: check the client certificates."
+            ),
         ),
         3000 | 5000 | 5001 | 8000 | 8081 | 8088 | 8888 | 9000 | 9090 => (
             "Web/app",
             Moyen,
-            "Service web de dev ou d'admin : vérifier qu'il doit être joignable.",
+            crate::tr!(
+                "Service web de dev ou d'admin : vérifier qu'il doit être joignable.",
+                "Development or admin web service: make sure it should be reachable."
+            ),
         ),
-        3306 => ("MySQL", Eleve, "Base de données exposée sur le réseau."),
+        3306 => (
+            "MySQL",
+            Eleve,
+            crate::tr!(
+                "Base de données exposée sur le réseau.",
+                "Database exposed on the network."
+            ),
+        ),
         3389 => (
             "RDP",
             Eleve,
-            "Bureau à distance Windows, très attaqué. NLA + mot de passe fort.",
+            crate::tr!(
+                "Bureau à distance Windows, très attaqué. NLA + mot de passe fort.",
+                "Windows Remote Desktop, heavily attacked. Use NLA + a strong password."
+            ),
         ),
-        3689 => ("DAAP/iTunes", Info, "Partage multimédia Apple."),
+        3689 => (
+            "DAAP/iTunes",
+            Info,
+            crate::tr!("Partage multimédia Apple.", "Apple media sharing."),
+        ),
         4444 => (
-            "Inconnu (4444)",
+            crate::tr!("Inconnu (4444)", "Unknown (4444)"),
             Critique,
-            "Port typique de backdoor/Metasploit. À investiguer.",
+            crate::tr!(
+                "Port typique de backdoor/Metasploit. À investiguer.",
+                "Typical backdoor/Metasploit port. Investigate."
+            ),
         ),
-        5432 => ("PostgreSQL", Eleve, "Base de données exposée sur le réseau."),
+        5432 => (
+            "PostgreSQL",
+            Eleve,
+            crate::tr!(
+                "Base de données exposée sur le réseau.",
+                "Database exposed on the network."
+            ),
+        ),
         5555 => (
             "ADB Android",
             Critique,
-            "Débogage Android ouvert = contrôle total de l'appareil.",
+            crate::tr!(
+                "Débogage Android ouvert = contrôle total de l'appareil.",
+                "Open Android debugging = full control of the device."
+            ),
         ),
         5900 | 5901 => (
             "VNC",
             Eleve,
-            "Bureau à distance souvent mal protégé. Mot de passe fort ou tunnel SSH.",
+            crate::tr!(
+                "Bureau à distance souvent mal protégé. Mot de passe fort ou tunnel SSH.",
+                "Remote desktop often poorly protected. Strong password or SSH tunnel."
+            ),
         ),
         6379 => (
             "Redis",
             Critique,
-            "Redis souvent sans mot de passe = exécution de code possible.",
+            crate::tr!(
+                "Redis souvent sans mot de passe = exécution de code possible.",
+                "Redis often has no password = code execution possible."
+            ),
         ),
-        6443 => ("Kubernetes API", Moyen, "API Kubernetes : vérifier l'authentification."),
-        7000 | 7070 => ("AirPlay", Info, "Diffusion Apple/AirPlay."),
-        7547 => ("TR-069", Eleve, "Gestion à distance du FAI, historiquement vulnérable."),
-        8008 | 8009 => ("Chromecast", Info, "Appareil Google Cast."),
-        8080 => ("HTTP alt", Moyen, "Interface web non chiffrée (proxy, admin, caméra…)."),
+        6443 => (
+            "Kubernetes API",
+            Moyen,
+            crate::tr!(
+                "API Kubernetes : vérifier l'authentification.",
+                "Kubernetes API: check authentication."
+            ),
+        ),
+        7000 | 7070 => (
+            "AirPlay",
+            Info,
+            crate::tr!("Diffusion Apple/AirPlay.", "Apple/AirPlay streaming."),
+        ),
+        7547 => (
+            "TR-069",
+            Eleve,
+            crate::tr!(
+                "Gestion à distance du FAI, historiquement vulnérable.",
+                "ISP remote management, historically vulnerable."
+            ),
+        ),
+        8008 | 8009 => (
+            "Chromecast",
+            Info,
+            crate::tr!("Appareil Google Cast.", "Google Cast device."),
+        ),
+        8080 => (
+            "HTTP alt",
+            Moyen,
+            crate::tr!(
+                "Interface web non chiffrée (proxy, admin, caméra…).",
+                "Unencrypted web interface (proxy, admin, camera…)."
+            ),
+        ),
         8086 => (
             "InfluxDB",
             Moyen,
-            "Base de séries temporelles : vérifier l'authentification.",
+            crate::tr!(
+                "Base de séries temporelles : vérifier l'authentification.",
+                "Time-series database: check authentication."
+            ),
         ),
-        8123 => ("Home Assistant", Info, "Domotique : garder à jour, activer la 2FA."),
-        8200 => ("Vault/DLNA", Moyen, "Vérifier l'authentification."),
-        9100 => ("Impression RAW", Moyen, "N'importe qui peut envoyer des impressions."),
+        8123 => (
+            "Home Assistant",
+            Info,
+            crate::tr!(
+                "Domotique : garder à jour, activer la 2FA.",
+                "Home automation: keep it updated, enable 2FA."
+            ),
+        ),
+        8200 => (
+            "Vault/DLNA",
+            Moyen,
+            crate::tr!("Vérifier l'authentification.", "Check authentication."),
+        ),
+        9100 => (
+            crate::tr!("Impression RAW", "RAW printing"),
+            Moyen,
+            crate::tr!(
+                "N'importe qui peut envoyer des impressions.",
+                "Anyone can send print jobs."
+            ),
+        ),
         9200 => (
             "Elasticsearch",
             Critique,
-            "Souvent sans authentification : fuite de données.",
+            crate::tr!(
+                "Souvent sans authentification : fuite de données.",
+                "Often without authentication: data leak."
+            ),
         ),
-        10000 => ("Webmin", Eleve, "Admin système web, cible fréquente. Garder à jour."),
+        10000 => (
+            "Webmin",
+            Eleve,
+            crate::tr!(
+                "Admin système web, cible fréquente. Garder à jour.",
+                "Web system admin, frequent target. Keep it updated."
+            ),
+        ),
         11211 => (
             "Memcached",
             Critique,
-            "Sans authentification, utilisé pour l'amplification DDoS.",
+            crate::tr!(
+                "Sans authentification, utilisé pour l'amplification DDoS.",
+                "No authentication, used for DDoS amplification."
+            ),
         ),
-        27017 => ("MongoDB", Critique, "Souvent sans authentification : fuite de données."),
-        32400 => ("Plex", Info, "Serveur multimédia Plex."),
+        27017 => (
+            "MongoDB",
+            Critique,
+            crate::tr!(
+                "Souvent sans authentification : fuite de données.",
+                "Often without authentication: data leak."
+            ),
+        ),
+        32400 => (
+            "Plex",
+            Info,
+            crate::tr!("Serveur multimédia Plex.", "Plex media server."),
+        ),
         49152 => (
             "UPnP",
             Moyen,
-            "UPnP/IGD : peut ouvrir des ports sur le routeur. Désactiver si inutile.",
+            crate::tr!(
+                "UPnP/IGD : peut ouvrir des ports sur le routeur. Désactiver si inutile.",
+                "UPnP/IGD: can open ports on the router. Disable it if unused."
+            ),
         ),
-        62078 => ("iPhone sync", Info, "Appareil iOS (synchronisation lockdownd)."),
+        62078 => (
+            "iPhone sync",
+            Info,
+            crate::tr!(
+                "Appareil iOS (synchronisation lockdownd).",
+                "iOS device (lockdownd sync)."
+            ),
+        ),
         // Services surtout UDP, vus par l'audit de la machine.
         69 => (
             "TFTP",
             Eleve,
-            "Transfert de fichiers sans aucune authentification. À désactiver.",
+            crate::tr!(
+                "Transfert de fichiers sans aucune authentification. À désactiver.",
+                "File transfer with no authentication at all. Disable it."
+            ),
         ),
-        123 => ("NTP", Info, "Synchronisation de l'heure."),
-        137 | 138 => ("NetBIOS", Moyen, "Ancien partage Windows/Samba : à couper si inutile."),
+        123 => (
+            "NTP",
+            Info,
+            crate::tr!("Synchronisation de l'heure.", "Time synchronization."),
+        ),
+        137 | 138 => (
+            "NetBIOS",
+            Moyen,
+            crate::tr!(
+                "Ancien partage Windows/Samba : à couper si inutile.",
+                "Old Windows/Samba sharing: turn it off if unused."
+            ),
+        ),
         161 => (
             "SNMP",
             Eleve,
-            "Supervision réseau : avec la communauté « public », n'importe qui lit la configuration.",
+            crate::tr!(
+                "Supervision réseau : avec la communauté « public », n'importe qui lit la configuration.",
+                "Network monitoring: with the “public” community, anyone can read the configuration."
+            ),
         ),
-        500 | 4500 => ("VPN IPsec", Info, "VPN IPsec : normal si tu l'utilises."),
+        500 | 4500 => (
+            "VPN IPsec",
+            Info,
+            crate::tr!(
+                "VPN IPsec : normal si tu l'utilises.",
+                "IPsec VPN: normal if you use it."
+            ),
+        ),
         1900 => (
             "UPnP/SSDP",
             Moyen,
-            "Découverte UPnP : à couper si aucun appareil n'en a besoin.",
+            crate::tr!(
+                "Découverte UPnP : à couper si aucun appareil n'en a besoin.",
+                "UPnP discovery: turn it off if no device needs it."
+            ),
         ),
-        3702 => ("WS-Discovery", Info, "Découverte d'imprimantes et de partages."),
+        3702 => (
+            "WS-Discovery",
+            Info,
+            crate::tr!(
+                "Découverte d'imprimantes et de partages.",
+                "Printer and share discovery."
+            ),
+        ),
         5353 => (
             "mDNS",
             Info,
-            "Découverte locale (Avahi, Bonjour) : normal sur un réseau domestique.",
+            crate::tr!(
+                "Découverte locale (Avahi, Bonjour) : normal sur un réseau domestique.",
+                "Local discovery (Avahi, Bonjour): normal on a home network."
+            ),
         ),
         5355 => (
             "LLMNR",
             Moyen,
-            "Résolution de noms locale, usurpable par une machine du réseau : à désactiver si possible.",
+            crate::tr!(
+                "Résolution de noms locale, usurpable par une machine du réseau : à désactiver si possible.",
+                "Local name resolution, spoofable by any machine on the network: disable it if possible."
+            ),
         ),
-        51820 => ("WireGuard", Info, "VPN WireGuard : normal si tu l'utilises."),
+        51820 => (
+            "WireGuard",
+            Info,
+            crate::tr!(
+                "VPN WireGuard : normal si tu l'utilises.",
+                "WireGuard VPN: normal if you use it."
+            ),
+        ),
         5040 => (
             "Windows CDP",
             Info,
-            "Plateforme d'appareils connectés de Windows (normal).",
+            crate::tr!(
+                "Plateforme d'appareils connectés de Windows (normal).",
+                "Windows Connected Devices Platform (normal)."
+            ),
         ),
         5357 => (
             "Windows WSD",
             Info,
-            "Découverte réseau de Windows (imprimantes, partages) : normal sur un réseau privé.",
+            crate::tr!(
+                "Découverte réseau de Windows (imprimantes, partages) : normal sur un réseau privé.",
+                "Windows network discovery (printers, shares): normal on a private network."
+            ),
         ),
         7680 => (
             "Windows Update P2P",
             Info,
-            "Optimisation de la distribution de Windows Update (normal).",
+            crate::tr!(
+                "Optimisation de la distribution de Windows Update (normal).",
+                "Windows Update delivery optimization (normal)."
+            ),
         ),
         1716 => (
             "KDE Connect",
             Info,
-            "Liaison téléphone/PC : n'apparier que tes propres appareils.",
+            crate::tr!(
+                "Liaison téléphone/PC : n'apparier que tes propres appareils.",
+                "Phone/PC link: only pair your own devices."
+            ),
         ),
         11434 => (
             "Ollama",
             Eleve,
-            "API d'IA locale sans authentification : ne l'exposer qu'en 127.0.0.1.",
+            crate::tr!(
+                "API d'IA locale sans authentification : ne l'exposer qu'en 127.0.0.1.",
+                "Local AI API without authentication: only expose it on 127.0.0.1."
+            ),
         ),
         27036 | 27037 => (
             "Steam Remote Play",
             Info,
-            "Diffusion locale Steam. Désactivable dans Steam > Remote Play.",
+            crate::tr!(
+                "Diffusion locale Steam. Désactivable dans Steam > Remote Play.",
+                "Steam local streaming. Can be turned off in Steam > Remote Play."
+            ),
         ),
-        57621 => ("Spotify Connect", Info, "Découverte Spotify sur le réseau local."),
-        _ => ("Inconnu", Moyen, "Service non identifié : vérifier ce qui écoute."),
+        57621 => (
+            "Spotify Connect",
+            Info,
+            crate::tr!(
+                "Découverte Spotify sur le réseau local.",
+                "Spotify discovery on the local network."
+            ),
+        ),
+        _ => (
+            inconnu(),
+            Moyen,
+            crate::tr!(
+                "Service non identifié : vérifier ce qui écoute.",
+                "Unidentified service: check what is listening."
+            ),
+        ),
     };
     InfoPort {
         service,

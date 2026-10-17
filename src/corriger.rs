@@ -15,10 +15,14 @@ pub fn proposer(constats: &[Constat]) -> Vec<&'static str> {
         .collect();
     let mut appliquees = Vec::new();
     if auto.is_empty() {
-        println!("  {VERT}✔{RESET} Rien à corriger automatiquement.");
+        trp!(
+            "  {VERT}✔{RESET} Rien à corriger automatiquement.",
+            "  {VERT}✔{RESET} Nothing to fix automatically."
+        );
     } else {
-        println!(
+        trp!(
             "  {} correction(s) possible(s). Chacune te sera montrée avant d'être appliquée.",
+            "  {} fix(es) available. Each one will be shown to you before it is applied.",
             auto.len()
         );
         for (i, (c, k)) in auto.iter().enumerate() {
@@ -27,24 +31,33 @@ pub fn proposer(constats: &[Constat]) -> Vec<&'static str> {
                 "\n  {}[{}]{RESET} {GRAS}{}{RESET} — {}",
                 couleur(n),
                 n.libelle(),
-                c.categorie,
+                crate::langue::categorie(c.categorie),
                 c.message
             );
             println!("  🔧 {}", k.action);
             for cmd in &k.commandes {
                 println!("    {GRIS}{cmd}{RESET}");
             }
-            let rep = demander("  Appliquer ? [o]ui / [n]on / [t]out appliquer : ").to_lowercase();
-            let lot: Vec<(&Constat, &Correctif)> = match rep.as_str() {
-                "t" => auto[i..].to_vec(),
-                "o" | "oui" => vec![(c, k)],
-                _ => {
-                    println!("    {GRIS}ignoré{RESET}");
-                    continue;
-                }
+            let rep = demander(tr!(
+                "  Appliquer ? [o]ui / [n]on / [t]out appliquer : ",
+                "  Apply? [y]es / [n]o / [a]ll: "
+            ))
+            .to_lowercase();
+            let tout = crate::langue::tout(&rep);
+            let lot: Vec<(&Constat, &Correctif)> = if tout {
+                auto[i..].to_vec()
+            } else if crate::langue::oui(&rep) {
+                vec![(c, k)]
+            } else {
+                trp!("    {GRIS}ignoré{RESET}", "    {GRIS}skipped{RESET}");
+                continue;
             };
             if lot.len() > 1 {
-                println!("    {GRIS}Les {} corrections restantes, en une fois.{RESET}", lot.len());
+                trp!(
+                    "    {GRIS}Les {} corrections restantes, en une fois.{RESET}",
+                    "    {GRIS}The {} remaining fixes, in one go.{RESET}",
+                    lot.len()
+                );
             }
             let commandes: Vec<String> = lot.iter().flat_map(|(_, k)| k.commandes.clone()).collect();
             if machine::appliquer(&commandes) {
@@ -52,12 +65,15 @@ pub fn proposer(constats: &[Constat]) -> Vec<&'static str> {
                     machine::retenir_blocage(k);
                     appliquees.push(c.categorie);
                 }
-                println!("    {VERT}✔ fait{RESET}");
+                trp!("    {VERT}✔ fait{RESET}", "    {VERT}✔ done{RESET}");
             } else {
                 // Sans cette ligne, un échec (UAC refusée, commande en erreur) passait sans un mot de netscan.
-                println!("    ✖ non appliqué : voir le message ci-dessus");
+                trp!(
+                    "    ✖ non appliqué : voir le message ci-dessus",
+                    "    ✖ not applied: see the message above"
+                );
             }
-            if rep == "t" {
+            if tout {
                 break;
             }
         }
@@ -68,9 +84,10 @@ pub fn proposer(constats: &[Constat]) -> Vec<&'static str> {
         .filter_map(|c| Some((c, c.correctif.as_ref().filter(|k| !k.automatique)?)))
         .collect();
     if !manuels.is_empty() {
-        titre("À faire toi-même");
+        titre(tr!("À faire toi-même", "To do yourself"));
         for (c, k) in &manuels {
-            println!("  💡 {GRAS}{}{RESET} : {}", c.categorie, k.action);
+            let cat = crate::langue::categorie(c.categorie);
+            trp!("  💡 {GRAS}{cat}{RESET} : {}", "  💡 {GRAS}{cat}{RESET}: {}", k.action);
             for cmd in &k.commandes {
                 println!("     {GRIS}{cmd}{RESET}");
             }
@@ -91,7 +108,10 @@ pub fn corriger(audit: &Audit, reseau: Option<&Rapport>) -> Option<Audit> {
             .filter(|h| h.role != Some("cette machine") && !h.alertes.is_empty())
             .collect();
         if !exposes.is_empty() {
-            titre("Autres appareils du réseau (à corriger sur l'appareil lui-même)");
+            titre(tr!(
+                "Autres appareils du réseau (à corriger sur l'appareil lui-même)",
+                "Other devices on the network (to fix on the device itself)"
+            ));
             for h in exposes {
                 println!("  {GRAS}{}{RESET} {}", h.ip, h.titre());
                 for (n, msg) in &h.alertes {
@@ -99,13 +119,22 @@ pub fn corriger(audit: &Audit, reseau: Option<&Rapport>) -> Option<Audit> {
                 }
                 let ouvert = |l: &[u16]| h.ports.iter().any(|p| l.contains(&p.port));
                 if ouvert(&[80, 8080]) {
-                    println!("    {GRIS}interface d'admin : http://{}{RESET}", h.ip);
+                    trp!(
+                        "    {GRIS}interface d'admin : http://{}{RESET}",
+                        "    {GRIS}admin interface: http://{}{RESET}",
+                        h.ip
+                    );
                 } else if ouvert(&[443, 8443]) {
-                    println!("    {GRIS}interface d'admin : https://{}{RESET}", h.ip);
+                    trp!(
+                        "    {GRIS}interface d'admin : https://{}{RESET}",
+                        "    {GRIS}admin interface: https://{}{RESET}",
+                        h.ip
+                    );
                 }
                 if h.ports.iter().any(|p| [135, 139, 445].contains(&p.port)) {
-                    println!(
-                        "    {GRIS}PC Windows : Paramètres > Réseau > Propriétés > profil « Public », et dans PowerShell admin :{RESET}"
+                    trp!(
+                        "    {GRIS}PC Windows : Paramètres > Réseau > Propriétés > profil « Public », et dans PowerShell admin :{RESET}",
+                        "    {GRIS}Windows PC: Settings > Network > Properties > “Public” profile, and in an admin PowerShell:{RESET}"
                     );
                     println!("    {GRIS}  Set-SmbServerConfiguration -EnableSMB1Protocol $false{RESET}");
                 }
@@ -114,10 +143,13 @@ pub fn corriger(audit: &Audit, reseau: Option<&Rapport>) -> Option<Audit> {
     }
 
     if applique {
-        println!("\n{GRIS}Nouvelle vérification…{RESET}");
+        trp!(
+            "\n{GRIS}Nouvelle vérification…{RESET}",
+            "\n{GRIS}Checking again…{RESET}"
+        );
         let nouveau = machine::auditer(false);
-        afficher_note("Avant", audit.score);
-        afficher_note("Après", nouveau.score);
+        afficher_note(tr!("Avant", "Before"), audit.score);
+        afficher_note(tr!("Après", "After"), nouveau.score);
         return Some(nouveau);
     }
     None

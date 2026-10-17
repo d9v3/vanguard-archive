@@ -11,6 +11,7 @@ use tokio::net::TcpStream;
 use tokio::time::timeout;
 
 use crate::risk::PORTS_HTTP;
+use crate::{tr, trf};
 
 /// Résultat d'une tentative de connexion.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -58,10 +59,12 @@ pub fn limite_connexions(demande: usize) -> usize {
 /// Plage d'adresses IPv4 à partir de « 10.0.0.5 », « 10.0.0.0/24 » ou « 10.0.0.1-50 ».
 pub fn parse_cible(cible: &str) -> Result<Vec<Ipv4Addr>, String> {
     if let Some((ip, pref)) = cible.split_once('/') {
-        let ip: Ipv4Addr = ip.parse().map_err(|_| format!("IP invalide : {ip}"))?;
-        let pref: u32 = pref.parse().map_err(|_| format!("préfixe invalide : {pref}"))?;
+        let ip: Ipv4Addr = ip.parse().map_err(|_| trf!("IP invalide : {ip}", "invalid IP: {ip}"))?;
+        let pref: u32 = pref
+            .parse()
+            .map_err(|_| trf!("préfixe invalide : {pref}", "invalid prefix: {pref}"))?;
         if !(16..=32).contains(&pref) {
-            return Err("préfixe accepté : /16 à /32".into());
+            return Err(tr!("préfixe accepté : /16 à /32", "accepted prefix: /16 to /32").into());
         }
         let masque = if pref == 32 { u32::MAX } else { !(u32::MAX >> pref) };
         let reseau = u32::from(ip) & masque;
@@ -72,18 +75,26 @@ pub fn parse_cible(cible: &str) -> Result<Vec<Ipv4Addr>, String> {
         return Ok((reseau + 1..diffusion).map(Ipv4Addr::from).collect());
     }
     if let Some((debut, fin)) = cible.split_once('-') {
-        let debut: Ipv4Addr = debut.parse().map_err(|_| format!("IP invalide : {debut}"))?;
-        let fin: u8 = fin.parse().map_err(|_| format!("fin de plage invalide : {fin}"))?;
+        let debut: Ipv4Addr = debut
+            .parse()
+            .map_err(|_| trf!("IP invalide : {debut}", "invalid IP: {debut}"))?;
+        let fin: u8 = fin
+            .parse()
+            .map_err(|_| trf!("fin de plage invalide : {fin}", "invalid end of range: {fin}"))?;
         let o = debut.octets();
         if fin < o[3] {
-            return Err(format!("plage invalide : {cible} (la fin doit être ≥ {})", o[3]));
+            return Err(trf!(
+                "plage invalide : {cible} (la fin doit être ≥ {})",
+                "invalid range: {cible} (the end must be ≥ {})",
+                o[3]
+            ));
         }
         return Ok((o[3]..=fin).map(|d| Ipv4Addr::new(o[0], o[1], o[2], d)).collect());
     }
     cible
         .parse()
         .map(|ip| vec![ip])
-        .map_err(|_| format!("cible invalide : {cible}"))
+        .map_err(|_| trf!("cible invalide : {cible}", "invalid target: {cible}"))
 }
 
 /// Réseau local de l'interface principale (ex. 10.0.0.0/24) et IP de cette machine.
@@ -405,7 +416,7 @@ pub fn fabricant(mac: &str, base: &HashMap<String, String>) -> Option<String> {
     let premier = u8::from_str_radix(hex.get(..2)?, 16).ok()?;
     // Bit « administré localement » : MAC aléatoire, typique des téléphones et tablettes récents.
     if premier & 0x02 != 0 {
-        return Some("MAC aléatoire (téléphone/tablette ?)".into());
+        return Some(tr!("MAC aléatoire (téléphone/tablette ?)", "random MAC (phone/tablet?)").into());
     }
     base.get(hex.get(..6)?).cloned()
 }

@@ -52,7 +52,7 @@ fn defender(complet: bool) {
                 println!("  {}✖ {nom}{RESET}  {fichiers}", couleur(Niveau::Critique));
             }
             println!("  Defender a normalement déjà mis ces fichiers en quarantaine.");
-            if demander("  Supprimer définitivement les menaces détectées ? [o/N] : ").eq_ignore_ascii_case("o")
+            if demander("  Supprimer définitivement les menaces détectées ? [o/N] : ").oui()
                 && powershell_admin(&["Remove-MpThreat".to_string()])
             {
                 println!("  {VERT}✔ Menaces supprimées.{RESET}");
@@ -94,7 +94,7 @@ fn preparer() -> bool {
         .is_ok_and(|o| o.status.success());
     if !present {
         println!("  ClamAV (antivirus open source) n'est pas installé.");
-        if !demander("  L'installer maintenant ? [o/N] : ").eq_ignore_ascii_case("o") {
+        if !demander("  L'installer maintenant ? [o/N] : ").oui() {
             return false;
         }
         // Fedora sépare le moteur et l'outil de mise à jour des signatures.

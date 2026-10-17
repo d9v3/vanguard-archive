@@ -30,7 +30,11 @@ fn executable() -> String {
                 use std::os::unix::fs::PermissionsExt;
                 let _ = std::fs::set_permissions(&dest, std::fs::Permissions::from_mode(0o755));
             }
-            println!("  {GRIS}Copie locale pour la surveillance : {}{RESET}", dest.display());
+            trp!(
+                "  {GRIS}Copie locale pour la surveillance : {}{RESET}",
+                "  {GRIS}Local copy for monitoring: {}{RESET}",
+                dest.display()
+            );
             return dest.display().to_string();
         }
     }
@@ -70,19 +74,19 @@ pub async fn surveiller() {
     };
     for h in r.hotes.iter().filter(|h| h.nouvelle) {
         let qui = if h.titre().is_empty() {
-            "appareil inconnu".into()
+            tr!("appareil inconnu", "unknown device").into()
         } else {
             h.titre()
         };
         notifier(
-            "Nouvel appareil sur ton réseau",
+            tr!("Nouvel appareil sur ton réseau", "New device on your network"),
             &format!("{} — {qui} {}", h.ip, h.mac.as_deref().unwrap_or("")),
         );
     }
     for h in r.hotes.iter().filter(|h| !h.nouvelle) {
         for p in h.ports.iter().filter(|p| p.nouveau && p.niveau >= Niveau::Eleve) {
             notifier(
-                &format!("Port {} nouvellement ouvert", p.port),
+                &trf!("Port {} nouvellement ouvert", "Port {} newly opened", p.port),
                 &format!("{} ({}) : {} — {}", h.ip, h.titre(), p.service, p.conseil),
             );
         }
@@ -99,11 +103,15 @@ pub fn active() -> bool {
 pub fn activer(oui: bool) {
     let reussi = if oui { installer(&executable()) } else { desinstaller() };
     match (oui, reussi) {
-        (true, true) => println!(
-            "  {VERT}✔{RESET} Surveillance activée : scan toutes les heures, notification si un appareil inconnu arrive."
+        (true, true) => trp!(
+            "  {VERT}✔{RESET} Surveillance activée : scan toutes les heures, notification si un appareil inconnu arrive.",
+            "  {VERT}✔{RESET} Monitoring on: scan every hour, notification if an unknown device shows up."
         ),
-        (true, false) => println!("  ✖ Impossible d'activer la surveillance."),
-        (false, _) => println!("  Surveillance désactivée."),
+        (true, false) => trp!(
+            "  ✖ Impossible d'activer la surveillance.",
+            "  ✖ Could not turn monitoring on."
+        ),
+        (false, _) => trp!("  Surveillance désactivée.", "  Monitoring off."),
     }
 }
 
@@ -111,10 +119,14 @@ pub fn activer(oui: bool) {
 fn installer(exe: &str) -> bool {
     let dossier = std::path::PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".config/systemd/user");
     let _ = std::fs::create_dir_all(&dossier);
-    let service = format!(
-        "[Unit]\nDescription=netscan : surveillance du réseau local\n\n[Service]\nType=oneshot\nExecStart={exe} surveiller\nNice=10\n"
+    let service = trf!(
+        "[Unit]\nDescription=netscan : surveillance du réseau local\n\n[Service]\nType=oneshot\nExecStart={exe} surveiller\nNice=10\n",
+        "[Unit]\nDescription=netscan: local network monitoring\n\n[Service]\nType=oneshot\nExecStart={exe} surveiller\nNice=10\n"
     );
-    let timer = "[Unit]\nDescription=netscan : scan du réseau toutes les heures\n\n[Timer]\nOnBootSec=5min\nOnUnitActiveSec=1h\nPersistent=true\n\n[Install]\nWantedBy=timers.target\n";
+    let timer = tr!(
+        "[Unit]\nDescription=netscan : scan du réseau toutes les heures\n\n[Timer]\nOnBootSec=5min\nOnUnitActiveSec=1h\nPersistent=true\n\n[Install]\nWantedBy=timers.target\n",
+        "[Unit]\nDescription=netscan: network scan every hour\n\n[Timer]\nOnBootSec=5min\nOnUnitActiveSec=1h\nPersistent=true\n\n[Install]\nWantedBy=timers.target\n"
+    );
     let _ = std::fs::write(dossier.join(format!("{NOM}.service")), service);
     let _ = std::fs::write(dossier.join(format!("{NOM}.timer")), timer);
     reussit("systemctl", &["--user", "daemon-reload"])
@@ -141,11 +153,15 @@ fn installer(exe: &str) -> bool {
     let _ = reussit("schtasks", &["/Delete", "/F", "/TN", NOM]);
     let exe = exe.replace('\'', "''");
     // Tâche visible et décrite : on voit dans le Planificateur ce qu'elle fait et comment l'arrêter.
-    let script = format!(
+    let script = trf!(
         "$a = New-ScheduledTaskAction -Execute '{exe}' -Argument 'surveiller'; \
          $t = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -RepetitionInterval (New-TimeSpan -Hours 1); \
          Register-ScheduledTask -TaskName '{TACHE_WINDOWS}' -Action $a -Trigger $t -Force \
-           -Description 'Scan du réseau local toutes les heures par netscan, notification si un appareil inconnu apparaît. Pour arrêter : netscan surveillance off' | Out-Null"
+           -Description 'Scan du réseau local toutes les heures par netscan, notification si un appareil inconnu apparaît. Pour arrêter : netscan surveillance off' | Out-Null",
+        "$a = New-ScheduledTaskAction -Execute '{exe}' -Argument 'surveiller'; \
+         $t = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -RepetitionInterval (New-TimeSpan -Hours 1); \
+         Register-ScheduledTask -TaskName '{TACHE_WINDOWS}' -Action $a -Trigger $t -Force \
+           -Description 'Hourly local network scan by netscan, with a notification when an unknown device appears. To stop it: netscan surveillance off' | Out-Null"
     );
     ps(&script).is_some()
 }

@@ -59,22 +59,34 @@ fn chemin_saisi(texte: &str) -> Option<PathBuf> {
 /// Lit une sauvegarde netscan, ou directement un appareils.json (la base copiée à la main depuis la clé).
 /// Rend la base et l'état de la surveillance s'il est connu.
 fn lire_sauvegarde(texte: &str) -> Result<(serde_json::Value, Option<bool>), String> {
-    let valeur: serde_json::Value = serde_json::from_str(texte.trim_start_matches('\u{feff}'))
-        .map_err(|e| format!("ce n'est pas un fichier JSON lisible ({e})"))?;
+    let valeur: serde_json::Value = serde_json::from_str(texte.trim_start_matches('\u{feff}')).map_err(|e| {
+        trf!(
+            "ce n'est pas un fichier JSON lisible ({e})",
+            "this is not a readable JSON file ({e})"
+        )
+    })?;
     if valeur.get("format").and_then(|f| f.as_str()) == Some(FORMAT) {
-        let s: Sauvegarde = serde_json::from_value(valeur).map_err(|e| format!("sauvegarde abîmée ({e})"))?;
+        let s: Sauvegarde =
+            serde_json::from_value(valeur).map_err(|e| trf!("sauvegarde abîmée ({e})", "damaged backup ({e})"))?;
         return Ok((s.base, s.surveillance));
     }
     if valeur.get("reseaux").is_some_and(serde_json::Value::is_object) {
         return Ok((valeur, None));
     }
-    Err("ce fichier n'est ni une sauvegarde netscan ni une base appareils.json".into())
+    Err(tr!(
+        "ce fichier n'est ni une sauvegarde netscan ni une base appareils.json",
+        "this file is neither a netscan backup nor an appareils.json database"
+    )
+    .into())
 }
 
 fn decrire(c: &Contenu) -> String {
-    format!(
+    trf!(
         "{} réseau(x), {} appareil(s), dont {} avec un surnom",
-        c.reseaux, c.appareils, c.surnoms
+        "{} network(s), {} device(s), {} of them with a nickname",
+        c.reseaux,
+        c.appareils,
+        c.surnoms
     )
 }
 
@@ -90,12 +102,17 @@ pub fn sauvegarder(fichier: Option<PathBuf>) {
     };
     let json = serde_json::to_string_pretty(&sauvegarde).unwrap_or_default();
     match reseau::ecrire_atomique(&fichier, &json) {
-        Ok(()) => println!(
+        Ok(()) => trp!(
             "  {VERT}✔{RESET} Sauvegarde écrite : {}\n  {}.",
+            "  {VERT}✔{RESET} Backup written: {}\n  {}.",
             fichier.display(),
             decrire(&contenu)
         ),
-        Err(e) => println!("  ✖ Impossible d'écrire {} ({e}).", fichier.display()),
+        Err(e) => trp!(
+            "  ✖ Impossible d'écrire {} ({e}).",
+            "  ✖ Could not write {} ({e}).",
+            fichier.display()
+        ),
     }
 }
 
@@ -103,63 +120,87 @@ pub fn restaurer(fichier: &Path) {
     let texte = match std::fs::read_to_string(fichier) {
         Ok(t) => t,
         Err(e) => {
-            println!("  ✖ Impossible de lire {} ({e}).", fichier.display());
+            trp!(
+                "  ✖ Impossible de lire {} ({e}).",
+                "  ✖ Could not read {} ({e}).",
+                fichier.display()
+            );
             return;
         }
     };
     let (base, surveillance_avant) = match lire_sauvegarde(&texte) {
         Ok(r) => r,
         Err(e) => {
-            println!("  ✖ Rien de restauré : {e}.");
+            trp!("  ✖ Rien de restauré : {e}.", "  ✖ Nothing restored: {e}.");
             return;
         }
     };
     match reseau::restaurer_base(base) {
-        Ok(c) => println!(
+        Ok(c) => trp!(
             "  {VERT}✔{RESET} Ajouté à la base actuelle : {}.\n  {GRIS}Rien n'a été effacé : les fiches communes ont été fusionnées (le surnom le plus récent gagne).{RESET}",
+            "  {VERT}✔{RESET} Added to the current database: {}.\n  {GRIS}Nothing was erased: shared entries were merged (the most recent nickname wins).{RESET}",
             decrire(&c)
         ),
         Err(e) => {
-            println!("  ✖ Rien de restauré : {e}.");
+            trp!("  ✖ Rien de restauré : {e}.", "  ✖ Nothing restored: {e}.");
             return;
         }
     }
     if surveillance_avant == Some(true)
         && !surveillance::active()
-        && demander("  La surveillance horaire était activée : la réactiver ici ? [o/N] : ").eq_ignore_ascii_case("o")
+        && demander(tr!(
+            "  La surveillance horaire était activée : la réactiver ici ? [o/N] : ",
+            "  Hourly monitoring was on: turn it on here too? [y/N]: "
+        ))
+        .oui()
     {
         surveillance::activer(true);
     }
 }
 
 pub fn menu() {
-    titre("Données de netscan");
-    println!("  Base des appareils (surnoms, historique de chaque réseau) et état de la surveillance.");
-    println!("  {GRIS}La quarantaine de l'antivirus n'est jamais sauvegardée.{RESET}\n");
-    println!("  1. Sauvegarder dans un fichier");
-    println!("  2. Restaurer depuis un fichier (ajouté à la base actuelle, rien n'est effacé)");
-    match demander("\nChoix (Entrée pour revenir) : ").as_str() {
+    titre(tr!("Données de netscan", "netscan data"));
+    trp!(
+        "  Base des appareils (surnoms, historique de chaque réseau) et état de la surveillance.",
+        "  Device database (nicknames, history of each network) and monitoring state."
+    );
+    trp!(
+        "  {GRIS}La quarantaine de l'antivirus n'est jamais sauvegardée.{RESET}\n",
+        "  {GRIS}The antivirus quarantine is never backed up.{RESET}\n"
+    );
+    trp!("  1. Sauvegarder dans un fichier", "  1. Back up to a file");
+    trp!(
+        "  2. Restaurer depuis un fichier (ajouté à la base actuelle, rien n'est effacé)",
+        "  2. Restore from a file (added to the current database, nothing is erased)"
+    );
+    match demander(tr!("\nChoix (Entrée pour revenir) : ", "\nChoice (Enter to go back): ")).as_str() {
         "1" => {
             let defaut = chemin_par_defaut();
-            let saisi = demander(&format!("  Fichier (Entrée pour {}) : ", defaut.display()));
+            let saisi = demander(&trf!(
+                "  Fichier (Entrée pour {}) : ",
+                "  File (Enter for {}): ",
+                defaut.display()
+            ));
             let fichier = chemin_saisi(&saisi).unwrap_or(defaut);
             if fichier.exists()
-                && !demander(&format!(
+                && !demander(&trf!(
                     "  {} existe déjà : le remplacer ? [o/N] : ",
+                    "  {} already exists: replace it? [y/N]: ",
                     fichier.display()
                 ))
-                .eq_ignore_ascii_case("o")
+                .oui()
             {
-                println!("  Annulé.");
+                trp!("  Annulé.", "  Cancelled.");
                 return;
             }
             sauvegarder(Some(fichier));
         }
-        "2" => match chemin_saisi(&demander(
+        "2" => match chemin_saisi(&demander(tr!(
             "  Fichier à restaurer (tu peux le glisser dans la fenêtre) : ",
-        )) {
+            "  File to restore (you can drag it into the window): "
+        ))) {
             Some(f) => restaurer(&f),
-            None => println!("  Annulé."),
+            None => trp!("  Annulé.", "  Cancelled."),
         },
         _ => {}
     }

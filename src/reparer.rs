@@ -723,7 +723,7 @@ pub fn menu() {
     for c in &r.commandes {
         println!("    {GRIS}{c}{RESET}");
     }
-    if !demander("\n  Lancer cette réparation ? [o/N] : ").eq_ignore_ascii_case("o") {
+    if !demander("\n  Lancer cette réparation ? [o/N] : ").oui() {
         println!("  Annulé.");
         return;
     }
@@ -734,15 +734,14 @@ pub fn menu() {
         && !demander(&format!(
             "  Créer d'abord un point de restauration ({outil}) ? [O/n] : "
         ))
-        .eq_ignore_ascii_case("n")
+        .non()
     {
         // Windows : dans la même fenêtre administrateur (une seule demande) ; elle demande quoi faire si ça échoue.
         #[cfg(windows)]
         commandes.insert(0, point);
         #[cfg(not(windows))]
         if !machine::appliquer(&[point])
-            && !demander("  ✖ Point de restauration impossible. Continuer quand même ? [o/N] : ")
-                .eq_ignore_ascii_case("o")
+            && !demander("  ✖ Point de restauration impossible. Continuer quand même ? [o/N] : ").oui()
         {
             println!("  Annulé.");
             return;

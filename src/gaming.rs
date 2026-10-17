@@ -348,7 +348,7 @@ fn proposer(nom: &str, liste: &[Element]) {
     if commandes.is_empty() {
         return;
     }
-    if !demander("\n  Lancer ? [o/N] : ").eq_ignore_ascii_case("o") {
+    if !demander("\n  Lancer ? [o/N] : ").oui() {
         println!("  Annulé.");
         return;
     }

@@ -675,9 +675,10 @@ pub async fn executer(o: Options) -> Result<Rapport, String> {
                 .into_iter()
                 .map(|(port, banniere)| {
                     // Port non répertorié : on se fie à ce que le service annonce (SSH sur 2222, web sur 9999…).
-                    let type_port = match info_port(port).service {
-                        "Inconnu" => banniere.as_deref().and_then(identifier).unwrap_or(port),
-                        _ => port,
+                    let type_port = if info_port(port).service == crate::risk::inconnu() {
+                        banniere.as_deref().and_then(identifier).unwrap_or(port)
+                    } else {
+                        port
                     };
                     let i = info_port(type_port);
                     let nouveau = scan_comparable
