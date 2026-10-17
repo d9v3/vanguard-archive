@@ -70,6 +70,21 @@ Ref 'Wi-Fi' { netsh wlan show interfaces }
 Ref 'Réseau (IP)' { Get-NetIPAddress -AddressFamily IPv4 | Select-Object InterfaceAlias, IPAddress, PrefixLength | Format-Table -AutoSize }
 Ref 'Passerelle (route print)' { route print -4 0.0.0.0 }
 Ref 'Table ARP' { arp -a }
+# Vérifications ajoutées de la 0.12 à la 0.19 : de quoi comparer avec ce que sentinel en conclut.
+Ref 'DNS par carte (0.12)' { Get-DnsClientServerAddress | Where-Object ServerAddresses | Select-Object InterfaceAlias, InterfaceIndex, AddressFamily, ServerAddresses | Format-Table -AutoSize }
+Ref 'Certificats racine avec clé privée (0.12)' { Get-ChildItem Cert:\LocalMachine\Root, Cert:\CurrentUser\Root | Where-Object HasPrivateKey | Select-Object PSParentPath, Subject, Thumbprint | Format-List }
+Ref 'Nombre de certificats racine (0.12)' { @(Get-ChildItem Cert:\LocalMachine\Root, Cert:\CurrentUser\Root | Select-Object -Unique Thumbprint).Count }
+Ref 'Comptes locaux (0.13)' { Get-LocalUser | Select-Object Name, Enabled, PasswordRequired, SID | Format-Table -AutoSize }
+Ref 'LimitBlankPasswordUse (0.13)' { (Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa').LimitBlankPasswordUse }
+Ref 'Tâches planifiées hors Microsoft (0.13)' { Get-ScheduledTask | Where-Object { $_.TaskPath -notlike '\Microsoft\*' } | ForEach-Object { $t = $_; $t.Actions | ForEach-Object { '{0}{1} [{2}] {3} {4}' -f $t.TaskPath, $t.TaskName, $t.State, $_.Execute, $_.Arguments } } }
+Ref 'Clés Run (0.13)' { foreach ($c in 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run', 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Run', 'HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Run') { "== $c"; Get-ItemProperty $c -ErrorAction SilentlyContinue | Select-Object * -ExcludeProperty PS* | Format-List } }
+Ref 'Dossiers Démarrage (0.13)' { Get-ChildItem ([Environment]::GetFolderPath('Startup')), ([Environment]::GetFolderPath('CommonStartup')) -ErrorAction SilentlyContinue | Select-Object FullName }
+Ref 'Ports UDP (0.13)' { Get-NetUDPEndpoint | Sort-Object LocalPort | ForEach-Object { '{0}:{1} {2}' -f $_.LocalAddress, $_.LocalPort, (Get-Process -Id $_.OwningProcess -ErrorAction SilentlyContinue).ProcessName } }
+Ref 'Volumes (0.15)' { Get-Volume | Where-Object DriveLetter | Select-Object DriveLetter, DriveType, SizeRemaining, Size | Format-Table -AutoSize }
+Ref 'Disques physiques (0.15)' { Get-PhysicalDisk | Select-Object FriendlyName, HealthStatus, OperationalStatus, MediaType | Format-Table -AutoSize }
+Ref 'Batterie (0.15)' { Get-CimInstance -Namespace root\wmi -ClassName BatteryFullChargedCapacity -ErrorAction Stop | Select-Object FullChargedCapacity; Get-CimInstance -Namespace root\wmi -ClassName BatteryStaticData -ErrorAction Stop | Select-Object DesignedCapacity }
+Ref 'Extensions Edge et Chrome (0.14)' { foreach ($d in "$env:LOCALAPPDATA\Microsoft\Edge\User Data", "$env:LOCALAPPDATA\Google\Chrome\User Data") { Get-ChildItem $d -Directory -ErrorAction SilentlyContinue | Where-Object { Test-Path (Join-Path $_.FullName 'Extensions') } | ForEach-Object { "== $($_.FullName)"; Get-ChildItem (Join-Path $_.FullName 'Extensions') -Name } } }
+Ref 'curl (0.17, 0.18)' { (Get-Command curl.exe -ErrorAction Stop).Source; curl.exe --version | Select-Object -First 1 }
 Note 'Référence enregistrée.'
 
 Etape '2. Version et aide'
@@ -79,6 +94,17 @@ Lancer 'aide' @('--help')
 Etape '3. Audit de la machine (texte et JSON)'
 Lancer 'machine' @('machine')
 Lancer 'machine-json' @('machine', '--json')
+# Vérifications qui n'ont pas pu se faire : un script PowerShell de sentinel a échoué (à corriger côté sentinel).
+try {
+    $audit = Get-Content (Join-Path $res 'machine-json.out.txt') -Raw -Encoding UTF8 | ConvertFrom-Json
+    $impossibles = @($audit.constats | Where-Object { -not $_.verifie })
+    Note "Vérifications impossibles : $($impossibles.Count)"
+    $impossibles | ForEach-Object { Note "  IMPOSSIBLE : $($_.categorie) — $($_.message)" }
+    foreach ($cat in 'DNS', 'Certificats', 'Extensions', 'Santé', 'Persistance', 'Comptes') {
+        $n = @($audit.constats | Where-Object categorie -eq $cat).Count
+        Note "  $cat : $n constat(s)"
+    }
+} catch { Note "machine --json illisible : $($_.Exception.Message)" }
 
 Etape '4. Scan du réseau de la VM'
 Lancer 'reseau' @('reseau')
@@ -86,6 +112,36 @@ Lancer 'reseau-json' @('reseau', '--json')
 
 Etape '5. Tous les ports de cette machine (127.0.0.1)'
 Lancer 'local-tous' @('reseau', '127.0.0.1', '-p', 'tous')
+
+Etape '5b. Persistance suspecte : fausse tâche planifiée et fausse entrée de démarrage (0.13)'
+Write-Host 'Sentinel doit repérer une tâche « PowerShell caché en base64 » et un programme lancé depuis C:\Users\Public.' -ForegroundColor Yellow
+Write-Host 'Les deux sont inoffensives (la tâche affiche « test » et ne se déclenche pas avant 5 ans) et retirées juste après.' -ForegroundColor Yellow
+if (Question 'Faire ce test ?') {
+    try {
+        Register-ScheduledTask -TaskName 'sentinel-test-suspect' -Force `
+            -Action (New-ScheduledTaskAction -Execute 'powershell.exe' -Argument '-NoProfile -enc VwByAGkAdABlAC0ASABvAHMAdAAgAHQAZQBzAHQA') `
+            -Trigger (New-ScheduledTaskTrigger -Once -At (Get-Date).AddYears(5)) | Out-Null
+        Set-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name 'sentinel-test-suspect' -Value 'C:\Users\Public\sentinel-test.exe /q'
+        Lancer 'machine-persistance' @('machine')
+        $sortie = Get-Content (Join-Path $res 'machine-persistance.out.txt') -Raw -Encoding UTF8
+        if ($sortie -match 'sentinel-test-suspect.*base64|base64.*sentinel-test-suspect') { Note 'Tâche suspecte repérée : OK' } else { Note 'Tâche suspecte NON repérée (bug)' }
+        if ($sortie -match 'Public') { Note 'Entrée Run suspecte repérée : OK' } else { Note 'Entrée Run suspecte NON repérée (bug)' }
+    } catch { Note "Test de persistance impossible : $($_.Exception.Message)" }
+    finally {
+        Unregister-ScheduledTask -TaskName 'sentinel-test-suspect' -Confirm:$false -ErrorAction SilentlyContinue
+        Remove-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name 'sentinel-test-suspect' -ErrorAction SilentlyContinue
+        Note 'Fausse tâche et fausse entrée retirées.'
+    }
+}
+
+Etape '5c. Test de connexion (0.18)'
+Lancer 'connexion' @('connexion')
+
+Etape '5d. Mots de passe fuités (0.17)'
+Write-Host 'Tape « password » (il doit être trouvé des millions de fois), puis Entrée seule pour terminer.' -ForegroundColor Yellow
+& $exe motdepasse
+Note "motdepasse -> code $LASTEXITCODE"
+[void](Question 'La saisie était-elle masquée et « password » trouvé dans des fuites ?')
 
 Etape '6. Menu (ouverture puis q)'
 cmd /c "echo q| `"$exe`" > `"$res\menu.out.txt`" 2>&1"
