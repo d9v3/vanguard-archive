@@ -637,12 +637,16 @@ fn installer_windows_update(pilotes: bool) -> Vec<String> {
          foreach ($u in $liste) { if ($u.IsDownloaded) { [void]$pret.Add($u) } \
          else { $ko++; Write-Host \"  Not downloaded: $($u.Title)\" -ForegroundColor Red } }")
             .into(),
-        tr!("$r = $null; if ($pret.Count) { $i = $maj.CreateUpdateInstaller(); $i.Updates = $pret; $r = $i.Install() }; \
+        // L'API installe sans prévenir le service du panneau Paramètres (UsoSvc) : sans StartScan, il garde sa
+        // liste d'avant, « En attente de téléchargement », même après un redémarrage (vu dans la VM).
+        tr!("$r = $null; if ($pret.Count) { $i = $maj.CreateUpdateInstaller(); $i.Updates = $pret; $r = $i.Install(); \
+         try { UsoClient StartScan } catch {}; $global:LASTEXITCODE = 0 }; \
          if ($r) { for ($n = 0; $n -lt $pret.Count; $n++) { $code = $r.GetUpdateResult($n).ResultCode; \
          if ($code -eq 2) { Write-Host \"  Installée : $($pret.Item($n).Title)\" -ForegroundColor Green } \
          else { $ko++; Write-Host \"  Pas installée (code $code) : $($pret.Item($n).Title)\" -ForegroundColor Red } } }; \
          if ($r -and $r.RebootRequired) { Write-Host '  Redémarrage nécessaire pour finir.' -ForegroundColor Yellow }; \
-         if ($ko) { throw \"$ko mise(s) à jour à refaire plus tard (ou Paramètres > Windows Update)\" }", "$r = $null; if ($pret.Count) { $i = $maj.CreateUpdateInstaller(); $i.Updates = $pret; $r = $i.Install() }; \
+         if ($ko) { throw \"$ko mise(s) à jour à refaire plus tard (ou Paramètres > Windows Update)\" }", "$r = $null; if ($pret.Count) { $i = $maj.CreateUpdateInstaller(); $i.Updates = $pret; $r = $i.Install(); \
+         try { UsoClient StartScan } catch {}; $global:LASTEXITCODE = 0 }; \
          if ($r) { for ($n = 0; $n -lt $pret.Count; $n++) { $code = $r.GetUpdateResult($n).ResultCode; \
          if ($code -eq 2) { Write-Host \"  Installed: $($pret.Item($n).Title)\" -ForegroundColor Green } \
          else { $ko++; Write-Host \"  Not installed (code $code): $($pret.Item($n).Title)\" -ForegroundColor Red } } }; \
