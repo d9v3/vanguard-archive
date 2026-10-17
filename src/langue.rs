@@ -172,6 +172,7 @@ pub fn categorie(nom: &str) -> &str {
         "Programmes" => "Programs",
         "Périphériques" => "Devices",
         "Redémarrage" => "Restart",
+        "Santé" => "Health",
         "Sauvegardes" => "Backups",
         "Verrouillage" => "Screen lock",
         _ => nom,

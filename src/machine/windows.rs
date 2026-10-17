@@ -741,7 +741,7 @@ fn lectures_rapides() -> Option<String> {
 }
 
 /// Lignes d'une section de `lectures_rapides`, sans leur préfixe ; `None` si la section n'a pas pu être lue.
-fn section<'a>(sortie: Option<&'a str>, nom: &str) -> Option<Vec<&'a str>> {
+pub(super) fn section<'a>(sortie: Option<&'a str>, nom: &str) -> Option<Vec<&'a str>> {
     let sortie = sortie?;
     let fin = format!("{nom}_FIN");
     sortie.lines().any(|l| l.trim() == fin).then(|| {
@@ -1439,6 +1439,7 @@ pub fn auditer() -> Audit {
     constats.extend(super::dns::dns());
     constats.extend(super::certificats::certificats());
     constats.extend(super::extensions::extensions());
+    constats.extend(super::sante::sante());
     Audit {
         systeme: NOM,
         score: score(&constats),
