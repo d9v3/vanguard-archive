@@ -125,8 +125,14 @@ fn a_programme(e: &Etat, motif: &str) -> bool {
 fn composants(e: &Etat) -> Vec<Element> {
     let mut l = vec![
         element(
-            "Visual C++ 2015-2022 (64 et 32 bits)",
-            "Bibliothèques demandées par presque tous les jeux récents (erreur « VCRUNTIME140.dll introuvable »).",
+            tr!(
+                "Visual C++ 2015-2022 (64 et 32 bits)",
+                "Visual C++ 2015-2022 (64 and 32 bit)"
+            ),
+            tr!(
+                "Bibliothèques demandées par presque tous les jeux récents (erreur « VCRUNTIME140.dll introuvable »).",
+                "Libraries needed by almost every recent game (“VCRUNTIME140.dll not found” error)."
+            ),
             Some(e.vc14_x64 && e.vc14_x86),
             vec![
                 winget("Microsoft.VCRedist.2015+.x64"),
@@ -140,8 +146,14 @@ fn composants(e: &Etat) -> Vec<Element> {
                 .filter(|a| a_programme(e, &format!("Visual C++ {a}")))
                 .count();
             element(
-                format!("Visual C++ 2005 à 2013 ({presentes}/5 présents)"),
-                "Anciennes versions, pour les jeux d'avant 2015 (erreurs MSVCR100.dll, MSVCP120.dll…).",
+                trf!(
+                    "Visual C++ 2005 à 2013 ({presentes}/5 présents)",
+                    "Visual C++ 2005 to 2013 ({presentes}/5 present)"
+                ),
+                tr!(
+                    "Anciennes versions, pour les jeux d'avant 2015 (erreurs MSVCR100.dll, MSVCP120.dll…).",
+                    "Old versions, for games from before 2015 (MSVCR100.dll, MSVCP120.dll… errors)."
+                ),
                 Some(presentes == annees.len()),
                 annees
                     .iter()
@@ -150,14 +162,23 @@ fn composants(e: &Etat) -> Vec<Element> {
             )
         },
         element(
-            "DirectX 9 à 11 : anciennes bibliothèques (juin 2010)",
-            "d3dx9, d3dx10, d3dx11, XAudio2 et XInput anciens : Windows ne les fournit pas, beaucoup de jeux d'avant 2016 en ont besoin.",
+            tr!(
+                "DirectX 9 à 11 : anciennes bibliothèques (juin 2010)",
+                "DirectX 9 to 11: old libraries (June 2010)"
+            ),
+            tr!(
+                "d3dx9, d3dx10, d3dx11, XAudio2 et XInput anciens : Windows ne les fournit pas, beaucoup de jeux d'avant 2016 en ont besoin.",
+                "Old d3dx9, d3dx10, d3dx11, XAudio2 and XInput: Windows does not include them, and many games from before 2016 need them."
+            ),
             Some(e.directx9),
             vec![winget("Microsoft.DirectX")],
         ),
         element(
-            ".NET Desktop Runtime 8 et 10",
-            "Lanceurs, mods et outils de jeu écrits en .NET (les versions encore suivies par Microsoft).",
+            tr!(".NET Desktop Runtime 8 et 10", ".NET Desktop Runtime 8 and 10"),
+            tr!(
+                "Lanceurs, mods et outils de jeu écrits en .NET (les versions encore suivies par Microsoft).",
+                "Launchers, mods and game tools written in .NET (the versions still supported by Microsoft)."
+            ),
             Some(a_programme(e, "Windows Desktop Runtime - 8.") && a_programme(e, "Windows Desktop Runtime - 10.")),
             vec![
                 winget("Microsoft.DotNet.DesktopRuntime.8"),
@@ -166,19 +187,28 @@ fn composants(e: &Etat) -> Vec<Element> {
         ),
         element(
             ".NET Framework 3.5",
-            "Demandé par des jeux et lanceurs anciens ; c'est une fonctionnalité de Windows (téléchargée par Windows Update).",
+            tr!(
+                "Demandé par des jeux et lanceurs anciens ; c'est une fonctionnalité de Windows (téléchargée par Windows Update).",
+                "Needed by older games and launchers; it is a Windows feature (downloaded by Windows Update)."
+            ),
             Some(e.netfx3),
             vec!["DISM /Online /Enable-Feature /FeatureName:NetFx3 /All /NoRestart".into()],
         ),
         element(
             "XNA Framework 4.0",
-            "Jeux indépendants des années 2010 (Terraria ancien, Stardew Valley ancien, Fez…).",
+            tr!(
+                "Jeux indépendants des années 2010 (Terraria ancien, Stardew Valley ancien, Fez…).",
+                "Indie games from the 2010s (old Terraria, old Stardew Valley, Fez…)."
+            ),
             Some(a_programme(e, "XNA Framework Redistributable 4.0")),
             vec![winget("Microsoft.XNARedist")],
         ),
         element(
-            "PhysX ancien (Legacy)",
-            "Physique des jeux NVIDIA PhysX d'avant 2010 (Mirror's Edge, Mafia II…) ; utile même sans carte NVIDIA.",
+            tr!("PhysX ancien (Legacy)", "Old PhysX (Legacy)"),
+            tr!(
+                "Physique des jeux NVIDIA PhysX d'avant 2010 (Mirror's Edge, Mafia II…) ; utile même sans carte NVIDIA.",
+                "Physics of NVIDIA PhysX games from before 2010 (Mirror's Edge, Mafia II…); useful even without an NVIDIA card."
+            ),
             Some(e.programmes.iter().any(|p| p.contains("PhysX") && p.contains("Legacy"))),
             vec![winget("Nvidia.PhysXLegacy")],
         ),
@@ -187,11 +217,12 @@ fn composants(e: &Etat) -> Vec<Element> {
     // Pilote graphique : celui du fabricant, plus récent que celui de Windows Update.
     for carte in &e.gpu {
         let nom = carte.nom.to_lowercase();
-        let pilote = format!("pilote {} du {}", carte.version, carte.date);
+        let pilote = trf!("pilote {} du {}", "driver {} from {}", carte.version, carte.date);
         let mut el = element(
-            format!("Pilote graphique : {}", carte.nom),
-            format!(
-                "Installé : {pilote}. Le pilote du fabricant est plus récent et mieux optimisé que celui de Windows Update."
+            trf!("Pilote graphique : {}", "Graphics driver: {}", carte.nom),
+            trf!(
+                "Installé : {pilote}. Le pilote du fabricant est plus récent et mieux optimisé que celui de Windows Update.",
+                "Installed: {pilote}. The manufacturer's driver is newer and better optimized than the Windows Update one."
             ),
             None,
             vec![],
@@ -201,12 +232,17 @@ fn composants(e: &Etat) -> Vec<Element> {
         };
         // Intel : son assistant s'installe par winget ; NVIDIA et AMD, seulement depuis leur page officielle.
         if nom.contains("intel") {
-            let _ = write!(el.pourquoi, " {outil} trouve le bon pilote.");
+            let _ = trw!(
+                el.pourquoi,
+                " {outil} trouve le bon pilote.",
+                " {outil} finds the right driver."
+            );
             el.commandes = vec![winget("Intel.IntelDriverAndSupportAssistant")];
         } else {
-            let _ = write!(
+            let _ = trw!(
                 el.pourquoi,
-                " {outil} installe et tient à jour le pilote (page officielle)."
+                " {outil} installe et tient à jour le pilote (page officielle).",
+                " {outil} installs the driver and keeps it up to date (official page)."
             );
             el.lien = Some(lien);
         }
@@ -220,14 +256,23 @@ fn reglages(e: &Etat) -> Vec<Element> {
     let preferences = r"HKCU:\Software\Microsoft\DirectX\UserGpuPreferences";
     let mut l = vec![
         element(
-            "Mode Jeu activé",
-            "Windows donne la priorité au jeu et repousse les mises à jour et notifications pendant la partie.",
+            tr!("Mode Jeu activé", "Game Mode on"),
+            tr!(
+                "Windows donne la priorité au jeu et repousse les mises à jour et notifications pendant la partie.",
+                "Windows gives priority to the game and holds back updates and notifications while you play."
+            ),
             Some(e.mode_jeu != Some(0)),
             vec![dword(r"HKCU:\Software\Microsoft\GameBar", "AutoGameModeEnabled", 1)],
         ),
         element(
-            "Planification GPU à accélération matérielle",
-            "La carte graphique gère sa propre mémoire : un peu moins de latence, et obligatoire pour la génération d'images DLSS 3/4. Cartes GTX 1000 / RX 5000 et plus récentes. Prend effet au redémarrage.",
+            tr!(
+                "Planification GPU à accélération matérielle",
+                "Hardware-accelerated GPU scheduling"
+            ),
+            tr!(
+                "La carte graphique gère sa propre mémoire : un peu moins de latence, et obligatoire pour la génération d'images DLSS 3/4. Cartes GTX 1000 / RX 5000 et plus récentes. Prend effet au redémarrage.",
+                "The graphics card manages its own memory: slightly lower latency, and required for DLSS 3/4 frame generation. GTX 1000 / RX 5000 cards and newer. Takes effect after a restart."
+            ),
             Some(e.hags == Some(2)),
             vec![dword(
                 r"HKLM:\SYSTEM\CurrentControlSet\Control\GraphicsDrivers",
@@ -236,8 +281,14 @@ fn reglages(e: &Etat) -> Vec<Element> {
             )],
         ),
         element(
-            "Enregistrement Xbox en arrière-plan coupé",
-            "La capture de jeu de la Xbox Game Bar consomme un peu de carte graphique et de disque. La Game Bar (Win+G) reste disponible.",
+            tr!(
+                "Enregistrement Xbox en arrière-plan coupé",
+                "Xbox background recording off"
+            ),
+            tr!(
+                "La capture de jeu de la Xbox Game Bar consomme un peu de carte graphique et de disque. La Game Bar (Win+G) reste disponible.",
+                "Xbox Game Bar game capture uses a bit of graphics card and disk. The Game Bar (Win+G) stays available."
+            ),
             Some(e.dvr == Some(0) && e.capture != Some(1)),
             vec![
                 dword(r"HKCU:\System\GameConfigStore", "GameDVR_Enabled", 0),
@@ -249,8 +300,11 @@ fn reglages(e: &Etat) -> Vec<Element> {
             ],
         ),
         element(
-            "Accélération de la souris coupée",
-            "« Améliorer la précision du pointeur » change la distance parcourue selon la vitesse du geste : la visée devient imprévisible. Prend effet à la prochaine ouverture de session.",
+            tr!("Accélération de la souris coupée", "Mouse acceleration off"),
+            tr!(
+                "« Améliorer la précision du pointeur » change la distance parcourue selon la vitesse du geste : la visée devient imprévisible. Prend effet à la prochaine ouverture de session.",
+                "“Enhance pointer precision” changes the distance traveled depending on how fast you move: aiming becomes unpredictable. Takes effect at the next sign-in."
+            ),
             (!e.souris.is_empty()).then(|| e.souris == "0"),
             vec![
                 r"Set-ItemProperty 'HKCU:\Control Panel\Mouse' -Name MouseSpeed -Value '0'".into(),
@@ -263,8 +317,8 @@ fn reglages(e: &Etat) -> Vec<Element> {
         // La valeur regroupe plusieurs réglages (« VRROptimizeEnable=0;SwapEffectUpgradeEnable=1; ») : on ne
         // remplace que le nôtre.
         l.push(element(
-            "Optimisations pour les jeux en fenêtre",
-            "Les jeux DirectX 10/11 en fenêtre ou fenêtre sans bordure passent au mode d'affichage moderne : moins de latence, VRR et HDR automatique possibles.",
+            tr!("Optimisations pour les jeux en fenêtre", "Optimizations for windowed games"),
+            tr!("Les jeux DirectX 10/11 en fenêtre ou fenêtre sans bordure passent au mode d'affichage moderne : moins de latence, VRR et HDR automatique possibles.", "DirectX 10/11 games in windowed or borderless mode switch to the modern presentation model: lower latency, VRR and Auto HDR possible."),
             Some(e.fenetres.contains("SwapEffectUpgradeEnable=1")),
             vec![format!(
                 "$k = '{preferences}'; if (-not (Test-Path $k)) {{ New-Item $k -Force | Out-Null }}; \
@@ -274,8 +328,14 @@ fn reglages(e: &Etat) -> Vec<Element> {
         ));
     }
     let mut alimentation = element(
-        "Mode d'alimentation « Performances élevées »",
-        "Le processeur reste à pleine fréquence : moins de saccades quand le jeu varie beaucoup. Consomme plus au repos.",
+        tr!(
+            "Mode d'alimentation « Performances élevées »",
+            "“High performance” power plan"
+        ),
+        tr!(
+            "Le processeur reste à pleine fréquence : moins de saccades quand le jeu varie beaucoup. Consomme plus au repos.",
+            "The processor stays at full speed: fewer stutters when the game load changes a lot. Uses more power at idle."
+        ),
         (!e.alimentation.is_empty()).then(|| e.alimentation.contains(PERF)),
         vec![
             "powercfg /setactive SCHEME_MIN".into(),
@@ -283,7 +343,10 @@ fn reglages(e: &Etat) -> Vec<Element> {
         ],
     );
     if e.portable {
-        alimentation.deconseille = Some("PC portable : la batterie fondrait et il chaufferait");
+        alimentation.deconseille = Some(tr!(
+            "PC portable : la batterie fondrait et il chaufferait",
+            "Laptop: the battery would drain and it would heat up"
+        ));
     }
     l.push(alimentation);
     l
@@ -291,19 +354,22 @@ fn reglages(e: &Etat) -> Vec<Element> {
 
 fn etat_lisible(el: &Element) -> String {
     if let Some(d) = el.deconseille {
-        return format!("{GRIS}déconseillé ici ({d}){RESET}");
+        return trf!(
+            "{GRIS}déconseillé ici ({d}){RESET}",
+            "{GRIS}not recommended here ({d}){RESET}"
+        );
     }
     match (el.fait, el.lien.is_some()) {
-        (_, true) => format!("{GRIS}page du fabricant{RESET}"),
-        (Some(true), _) => format!("{VERT}✔ fait{RESET}"),
-        (Some(false), _) => "à faire".into(),
+        (_, true) => trf!("{GRIS}page du fabricant{RESET}", "{GRIS}manufacturer's page{RESET}"),
+        (Some(true), _) => trf!("{VERT}✔ fait{RESET}", "{VERT}✔ done{RESET}"),
+        (Some(false), _) => tr!("à faire", "to do").into(),
         (None, _) => format!("{GRIS}?{RESET}"),
     }
 }
 
 /// Choix « 1 3 4 », « 1,3 » ou « tout » (ce qui reste à faire, sans les déconseillés ni les liens).
 fn lire_choix(texte: &str, liste: &[Element]) -> Vec<usize> {
-    if texte.eq_ignore_ascii_case("tout") || texte.eq_ignore_ascii_case("t") {
+    if crate::langue::tout(texte) {
         return liste
             .iter()
             .enumerate()
@@ -326,7 +392,10 @@ fn proposer(nom: &str, liste: &[Element]) {
     for (i, el) in liste.iter().enumerate() {
         println!("  {}. {}  — {}", i + 1, el.titre, etat_lisible(el));
     }
-    let texte = demander("\nNuméros (ex. « 1 3 »), « tout » pour ce qui reste à faire, Entrée pour revenir : ");
+    let texte = demander(tr!(
+        "\nNuméros (ex. « 1 3 »), « tout » pour ce qui reste à faire, Entrée pour revenir : ",
+        "\nNumbers (e.g. “1 3”), “all” for what is left to do, Enter to go back: "
+    ));
     let choix = lire_choix(&texte, liste);
     if choix.is_empty() {
         return;
@@ -337,7 +406,10 @@ fn proposer(nom: &str, liste: &[Element]) {
         println!("\n  {GRAS}{}{RESET}", el.titre);
         println!("  {}", el.pourquoi);
         if let Some(lien) = el.lien {
-            println!("  Ouverture de la page officielle : {lien}");
+            trp!(
+                "  Ouverture de la page officielle : {lien}",
+                "  Opening the official page: {lien}"
+            );
             machine::ouvrir(lien);
         }
         for c in &el.commandes {
@@ -348,35 +420,57 @@ fn proposer(nom: &str, liste: &[Element]) {
     if commandes.is_empty() {
         return;
     }
-    if !demander("\n  Lancer ? [o/N] : ").oui() {
-        println!("  Annulé.");
+    if !demander(tr!("\n  Lancer ? [o/N] : ", "\n  Run? [y/N]: ")).oui() {
+        trp!("  Annulé.", "  Cancelled.");
         return;
     }
     if machine::appliquer(&commandes) {
-        println!("  {VERT}✔ Terminé.{RESET} Certains changements demandent de redémarrer ou de rouvrir la session.");
+        trp!(
+            "  {VERT}✔ Terminé.{RESET} Certains changements demandent de redémarrer ou de rouvrir la session.",
+            "  {VERT}✔ Done.{RESET} Some changes need a restart or a new sign-in."
+        );
     } else {
-        println!("  ✖ Une étape a échoué : lis le message ci-dessus.");
+        trp!(
+            "  ✖ Une étape a échoué : lis le message ci-dessus.",
+            "  ✖ A step failed: read the message above."
+        );
     }
 }
 
 pub fn menu() {
-    println!("  Lecture de l'état de Windows…");
+    trp!("  Lecture de l'état de Windows…", "  Reading the state of Windows…");
     let Some(etat) = lire_etat() else {
-        println!("  ✖ Impossible de lire l'état de Windows (PowerShell ne répond pas).");
+        trp!(
+            "  ✖ Impossible de lire l'état de Windows (PowerShell ne répond pas).",
+            "  ✖ Could not read the state of Windows (PowerShell is not responding)."
+        );
         return;
     };
     titre("Gaming");
-    println!("  1. Composants pour les jeux (Visual C++, DirectX, .NET, pilote graphique…)");
-    println!("  2. Réglages de Windows pour jouer");
+    trp!(
+        "  1. Composants pour les jeux (Visual C++, DirectX, .NET, pilote graphique…)",
+        "  1. Components for games (Visual C++, DirectX, .NET, graphics driver…)"
+    );
+    trp!(
+        "  2. Réglages de Windows pour jouer",
+        "  2. Windows settings for gaming"
+    );
     if !etat.winget {
-        println!(
-            "\n  {GRIS}winget manque : le choix 1 ouvre le Microsoft Store (« Programme d'installation d'application »).{RESET}"
+        trp!(
+            "\n  {GRIS}winget manque : le choix 1 ouvre le Microsoft Store (« Programme d'installation d'application »).{RESET}",
+            "\n  {GRIS}winget is missing: choice 1 opens the Microsoft Store (“App Installer”).{RESET}"
         );
     }
-    match demander("\nChoix (Entrée pour revenir) : ").as_str() {
+    match demander(tr!("\nChoix (Entrée pour revenir) : ", "\nChoice (Enter to go back): ")).as_str() {
         "1" if !etat.winget => machine::ouvrir("ms-windows-store://pdp/?ProductId=9NBLGGH4NNS1"),
-        "1" => proposer("Composants pour les jeux", &composants(&etat)),
-        "2" => proposer("Réglages de Windows pour jouer", &reglages(&etat)),
+        "1" => proposer(
+            tr!("Composants pour les jeux", "Components for games"),
+            &composants(&etat),
+        ),
+        "2" => proposer(
+            tr!("Réglages de Windows pour jouer", "Windows settings for gaming"),
+            &reglages(&etat),
+        ),
         _ => {}
     }
 }

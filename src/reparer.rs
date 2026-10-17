@@ -112,7 +112,7 @@ fn entre_apostrophes(t: &str) -> String {
 /// Outil et commande du point de restauration, s'il y en a un de configuré.
 #[cfg(target_os = "linux")]
 fn point_restauration(titre: &str) -> Option<(&'static str, String)> {
-    let description = entre_apostrophes(&format!("netscan : avant « {titre} »"));
+    let description = entre_apostrophes(&trf!("netscan : avant « {titre} »", "netscan: before “{titre}”"));
     if present("snapper") && std::path::Path::new("/etc/snapper/configs/root").is_file() {
         Some((
             "snapper",
@@ -134,13 +134,16 @@ fn point_restauration(titre: &str) -> Option<(&'static str, String)> {
 #[cfg(windows)]
 #[allow(clippy::unnecessary_wraps)] // même signature que sur Linux, où l'outil peut manquer
 fn point_restauration(titre: &str) -> Option<(&'static str, String)> {
-    let description = entre_apostrophes(&format!("netscan : avant « {titre} »"));
+    let description = entre_apostrophes(&trf!("netscan : avant « {titre} »", "netscan: before “{titre}”"));
     Some((
         "Windows",
-        format!(
+        trf!(
             "try {{ Checkpoint-Computer -Description {description} -RestorePointType MODIFY_SETTINGS }} \
              catch {{ Write-Host 'Point de restauration impossible (protection du système désactivée sur C: ?).' -ForegroundColor Red; \
-             if ((Read-Host 'Continuer sans point de restauration ? [o/N]') -ne 'o') {{ exit 1 }} }}"
+             if ((Read-Host 'Continuer sans point de restauration ? [o/N]') -notin 'o', 'y') {{ exit 1 }} }}",
+            "try {{ Checkpoint-Computer -Description {description} -RestorePointType MODIFY_SETTINGS }} \
+             catch {{ Write-Host 'Restore point not possible (system protection turned off on C:?).' -ForegroundColor Red; \
+             if ((Read-Host 'Continue without a restore point? [y/N]') -notin 'y', 'o') {{ exit 1 }} }}"
         ),
     ))
 }
@@ -178,7 +181,12 @@ fn occupation_racine() -> String {
         .and_then(|o| {
             let t = String::from_utf8_lossy(&o.stdout).into_owned();
             let c: Vec<String> = t.lines().nth(1)?.split_whitespace().map(str::to_string).collect();
-            Some(format!("disque système plein à {} ({} libres)", c.get(4)?, c.get(3)?))
+            Some(trf!(
+                "disque système plein à {} ({} libres)",
+                "system disk {} full ({} free)",
+                c.get(4)?,
+                c.get(3)?
+            ))
         })
         .unwrap_or_default()
 }
@@ -208,7 +216,11 @@ fn navigation() -> Reparation {
     let mut constats = Vec::new();
     let mut commandes = Vec::new();
     if !detournees.is_empty() {
-        constats.push(format!("fichier hosts : {}", resume_redirections(&detournees)));
+        constats.push(trf!(
+            "fichier hosts : {}",
+            "hosts file: {}",
+            resume_redirections(&detournees)
+        ));
         commandes.push("sudo cp -p /etc/hosts /etc/hosts.netscan-$(date +%Y%m%d-%H%M%S)".to_string());
         commandes.push(format!(
             "sudo sed -i -E 's/^([[:space:]]*({})[[:space:]])/# netscan : \\1/' /etc/hosts",
@@ -216,13 +228,17 @@ fn navigation() -> Reparation {
         ));
     }
     if let Some(mode) = &gnome {
-        constats.push(format!("proxy du bureau en mode « {mode} »"));
+        constats.push(trf!(
+            "proxy du bureau en mode « {mode} »",
+            "desktop proxy in “{mode}” mode"
+        ));
         commandes.push("gsettings set org.gnome.system.proxy mode 'none'".to_string());
     }
     if !variables.is_empty() {
         // Définies dans un fichier de démarrage : on montre où, c'est à retirer à la main (peut être voulu).
-        constats.push(format!(
+        constats.push(trf!(
             "variables {} (à retirer à la main du fichier montré)",
+            "{} variables (to remove by hand from the file shown)",
             variables.join(", ")
         ));
         commandes.push(
@@ -231,17 +247,27 @@ fn navigation() -> Reparation {
         );
     }
     let mut r = rep(
-        "Navigation détournée (proxy, fichier hosts)",
-        format!(
+        tr!(
+            "Navigation détournée (proxy, fichier hosts)",
+            "Hijacked browsing (proxy, hosts file)"
+        ),
+        trf!(
             "Met en commentaire les lignes du fichier hosts qui envoient un site vers une adresse d'Internet (une copie est gardée) et coupe le proxy imposé. Les listes de blocage (0.0.0.0) et les appareils du réseau local ne sont pas touchés. Trouvé : {}.",
+            "Comments out the hosts file lines that send a site to an Internet address (a copy is kept) and turns off the forced proxy. Block lists (0.0.0.0) and local network devices are left alone. Found: {}.",
             constats.join(" ; ")
         ),
-        "quelques secondes",
+        tr!("quelques secondes", "a few seconds"),
         &[],
     );
     r.restauration = !detournees.is_empty();
     if commandes.is_empty() {
-        r.inutile = Some("ni redirection dans le fichier hosts, ni proxy imposé".into());
+        r.inutile = Some(
+            tr!(
+                "ni redirection dans le fichier hosts, ni proxy imposé",
+                "no redirection in the hosts file, no forced proxy"
+            )
+            .into(),
+        );
     }
     r.commandes = commandes;
     r
@@ -250,10 +276,20 @@ fn navigation() -> Reparation {
 /// Signatures ClamAV : téléchargement immédiat, puis mise à jour automatique.
 #[cfg(target_os = "linux")]
 fn antivirus(systemd: bool) -> Reparation {
-    let mut r = rep("Antivirus pas à jour", "", "une minute", &[]);
+    let mut r = rep(
+        tr!("Antivirus pas à jour", "Antivirus out of date"),
+        "",
+        tr!("une minute", "one minute"),
+        &[],
+    );
     if !present("clamscan") {
-        r.inutile =
-            Some("ClamAV n'est pas installé : l'analyse antivirus (choix 6 ou 7) propose de l'installer".into());
+        r.inutile = Some(
+            tr!(
+                "ClamAV n'est pas installé : l'analyse antivirus (choix 6 ou 7) propose de l'installer",
+                "ClamAV is not installed: the antivirus scan (choice 6 or 7) offers to install it"
+            )
+            .into(),
+        );
         return r;
     }
     let derniere = ["daily.cld", "daily.cvd"]
@@ -269,10 +305,11 @@ fn antivirus(systemd: bool) -> Reparation {
         .map_or("jamais".to_string(), |d| match d.as_secs() / 86_400 {
             0 => "aujourd'hui".to_string(),
             1 => "hier".to_string(),
-            n => format!("il y a {n} jours"),
+            n => trf!("il y a {n} jours", "{n} days ago"),
         });
-    r.pourquoi = format!(
-        "Télécharge les dernières signatures de virus de ClamAV et active leur mise à jour automatique. Dernière mise à jour : {derniere}."
+    r.pourquoi = trf!(
+        "Télécharge les dernières signatures de virus de ClamAV et active leur mise à jour automatique. Dernière mise à jour : {derniere}.",
+        "Downloads the latest ClamAV virus signatures and turns on their automatic update. Last update: {derniere}."
     );
     if systemd {
         // Le service, s'il tourne, verrouille la base : on l'arrête le temps du téléchargement.
@@ -290,15 +327,20 @@ fn antivirus(systemd: bool) -> Reparation {
 #[cfg(target_os = "linux")]
 fn pare_feu(gestion: Option<machine::linux::Paquets>) -> Reparation {
     use crate::machine::linux::{politique_ufw, service_actif, ufw_actif};
-    let mut r = rep("Pare-feu coupé ou ouvert", "", "quelques secondes", &[]);
+    let mut r = rep(
+        tr!("Pare-feu coupé ou ouvert", "Firewall off or open"),
+        "",
+        tr!("quelques secondes", "a few seconds"),
+        &[],
+    );
     if service_actif("firewalld") {
         let zone = crate::commande::lancer(std::process::Command::new("firewall-cmd").arg("--get-default-zone"), 10)
             .map(|z| z.sortie.trim().to_string());
         if zone.as_deref() == Some("trusted") {
-            r.pourquoi = "firewalld est actif mais en zone « trusted » : il laisse tout entrer. Passe la zone par défaut en « public ».".into();
+            r.pourquoi = tr!("firewalld est actif mais en zone « trusted » : il laisse tout entrer. Passe la zone par défaut en « public ».", "firewalld is running but in the “trusted” zone: it lets everything in. Sets the default zone to “public”.").into();
             r.commandes = vec!["sudo firewall-cmd --set-default-zone=public".into()];
         } else {
-            r.inutile = Some("firewalld est actif".into());
+            r.inutile = Some(tr!("firewalld est actif", "firewalld is running").into());
         }
         return r;
     }
@@ -306,23 +348,36 @@ fn pare_feu(gestion: Option<machine::linux::Paquets>) -> Reparation {
         .ok()
         .and_then(|t| politique_ufw(&t));
     if ufw_actif() && politique.as_deref() != Some("ACCEPT") {
-        r.inutile = Some("ufw est actif et refuse les connexions entrantes".into());
+        r.inutile = Some(
+            tr!(
+                "ufw est actif et refuse les connexions entrantes",
+                "ufw is running and refuses incoming connections"
+            )
+            .into(),
+        );
         return r;
     }
     if !present("ufw") {
         if let Some(autre) = ["nftables", "iptables"].into_iter().find(|s| service_actif(s)) {
-            r.inutile = Some(format!("{autre} est actif : ses règles se gèrent à la main"));
+            r.inutile = Some(trf!(
+                "{autre} est actif : ses règles se gèrent à la main",
+                "{autre} is running: its rules are managed by hand"
+            ));
             return r;
         }
         let Some(g) = gestion else {
             r.inutile = Some(
-                "aucun pare-feu, et gestionnaire de paquets non reconnu : installe ufw avec ta distribution".into(),
+                tr!(
+                    "aucun pare-feu, et gestionnaire de paquets non reconnu : installe ufw avec ta distribution",
+                    "no firewall, and package manager not recognized: install ufw with your distribution"
+                )
+                .into(),
             );
             return r;
         };
         r.commandes.push(g.installer("ufw"));
     }
-    r.pourquoi = "Active ufw et refuse par défaut les connexions entrantes (les sorties restent permises). Un service qui doit rester joignable depuis le réseau (partage, KDE Connect…) sera à autoriser : sudo ufw allow <port>.".into();
+    r.pourquoi = tr!("Active ufw et refuse par défaut les connexions entrantes (les sorties restent permises). Un service qui doit rester joignable depuis le réseau (partage, KDE Connect…) sera à autoriser : sudo ufw allow <port>.", "Turns ufw on and refuses incoming connections by default (outgoing stays allowed). A service that must stay reachable from the network (sharing, KDE Connect…) will need to be allowed: sudo ufw allow <port>.").into();
     r.commandes.extend(
         [
             "sudo ufw default deny incoming",
@@ -334,7 +389,10 @@ fn pare_feu(gestion: Option<machine::linux::Paquets>) -> Reparation {
         .map(String::from),
     );
     if session_ssh() {
-        r.bloquee = Some("tu es connecté par SSH : refuser les connexions entrantes couperait ta connexion");
+        r.bloquee = Some(tr!(
+            "tu es connecté par SSH : refuser les connexions entrantes couperait ta connexion",
+            "you are connected over SSH: refusing incoming connections would cut your connection"
+        ));
     }
     r
 }
@@ -360,13 +418,19 @@ pub fn liste() -> Vec<Reparation> {
     }
     if !reseau.is_empty() {
         let mut r = rep(
-            "Internet ne marche plus",
-            "Relance la gestion du réseau et vide le cache DNS (sites introuvables, Wi-Fi bloqué).",
-            "quelques secondes",
+            tr!("Internet ne marche plus", "Internet no longer works"),
+            tr!(
+                "Relance la gestion du réseau et vide le cache DNS (sites introuvables, Wi-Fi bloqué).",
+                "Restarts network management and clears the DNS cache (sites not found, Wi-Fi stuck)."
+            ),
+            tr!("quelques secondes", "a few seconds"),
             &reseau,
         );
         if session_ssh() {
-            r.bloquee = Some("tu es connecté par SSH : relancer le réseau couperait ta connexion");
+            r.bloquee = Some(tr!(
+                "tu es connecté par SSH : relancer le réseau couperait ta connexion",
+                "you are connected over SSH: restarting the network would cut your connection"
+            ));
         }
         l.push(r);
     }
@@ -376,31 +440,31 @@ pub fn liste() -> Vec<Reparation> {
     // Paquets cassés
     match gestion {
         Some(Paquets::Pacman) => l.push(rep(
-            "Mises à jour en erreur (pacman)",
-            "Débloque pacman après un arrêt brutal, renouvelle les clés de signature (erreurs « invalid or corrupted package »), puis met à jour.",
-            "quelques minutes",
+            tr!("Mises à jour en erreur (pacman)", "Updates failing (pacman)"),
+            tr!("Débloque pacman après un arrêt brutal, renouvelle les clés de signature (erreurs « invalid or corrupted package »), puis met à jour.", "Unlocks pacman after a crash, renews the signing keys (“invalid or corrupted package” errors), then updates."),
+            tr!("quelques minutes", "a few minutes"),
             &[
-                "pgrep -x pacman >/dev/null && echo 'pacman tourne déjà : attends la fin' && exit 1; sudo rm -f /var/lib/pacman/db.lck",
+                tr!("pgrep -x pacman >/dev/null && echo 'pacman tourne déjà : attends la fin' && exit 1; sudo rm -f /var/lib/pacman/db.lck", "pgrep -x pacman >/dev/null && echo 'pacman is already running: wait for it to finish' && exit 1; sudo rm -f /var/lib/pacman/db.lck"),
                 "sudo pacman -Sy --needed --noconfirm archlinux-keyring",
                 "sudo pacman -Syu",
             ],
         ).avec_restauration()),
         Some(Paquets::Apt) => l.push(rep(
-            "Mises à jour en erreur (apt)",
-            "Termine les installations interrompues et répare les dépendances cassées.",
-            "quelques minutes",
+            tr!("Mises à jour en erreur (apt)", "Updates failing (apt)"),
+            tr!("Termine les installations interrompues et répare les dépendances cassées.", "Finishes interrupted installs and repairs broken dependencies."),
+            tr!("quelques minutes", "a few minutes"),
             &["sudo dpkg --configure -a", "sudo apt-get -f install -y", "sudo apt-get update"],
         ).avec_restauration()),
         Some(Paquets::Dnf) => l.push(rep(
-            "Mises à jour en erreur (dnf)",
-            "Vérifie la base des paquets et réaligne les paquets sur les versions de la distribution.",
-            "quelques minutes",
+            tr!("Mises à jour en erreur (dnf)", "Updates failing (dnf)"),
+            tr!("Vérifie la base des paquets et réaligne les paquets sur les versions de la distribution.", "Checks the package database and realigns packages with the distribution's versions."),
+            tr!("quelques minutes", "a few minutes"),
             &["sudo dnf check", "sudo dnf distro-sync -y"],
         ).avec_restauration()),
         Some(Paquets::Zypper) => l.push(rep(
-            "Mises à jour en erreur (zypper)",
-            "Vérifie et répare les dépendances des paquets installés.",
-            "quelques minutes",
+            tr!("Mises à jour en erreur (zypper)", "Updates failing (zypper)"),
+            tr!("Vérifie et répare les dépendances des paquets installés.", "Checks and repairs the dependencies of installed packages."),
+            tr!("quelques minutes", "a few minutes"),
             &["sudo zypper verify"],
         )),
         None => {}
@@ -424,13 +488,13 @@ pub fn liste() -> Vec<Reparation> {
         disque.push("sudo btrfs scrub start -B /");
     }
     l.push(rep(
-        "Disque : santé et erreurs",
+        tr!("Disque : santé et erreurs", "Disk: health and errors"),
         if btrfs {
-            "Lit l'état SMART de chaque disque (usure, secteurs défectueux) et vérifie toutes les données du système (btrfs scrub)."
+            tr!("Lit l'état SMART de chaque disque (usure, secteurs défectueux) et vérifie toutes les données du système (btrfs scrub).", "Reads the SMART state of each disk (wear, bad sectors) and checks all the system data (btrfs scrub).")
         } else {
-            "Lit l'état SMART de chaque disque (usure, secteurs défectueux). Pour réparer un ext4, démarre sur la clé (SystemRescue)."
+            tr!("Lit l'état SMART de chaque disque (usure, secteurs défectueux). Pour réparer un ext4, démarre sur la clé (SystemRescue).", "Reads the SMART state of each disk (wear, bad sectors). To repair ext4, boot from the USB key (SystemRescue).")
         },
-        if btrfs { "de quelques minutes à une heure" } else { "quelques secondes" },
+        if btrfs { tr!("de quelques minutes à une heure", "from a few minutes to an hour") } else { tr!("quelques secondes", "a few seconds") },
         &disque,
     ));
 
@@ -452,12 +516,13 @@ pub fn liste() -> Vec<Reparation> {
     }
     menage.push("df -h /");
     l.push(rep(
-        "Disque plein",
-        format!(
+        tr!("Disque plein", "Disk full"),
+        trf!(
             "Vide les anciens paquets téléchargés, les vieux journaux et les miniatures ; {}.",
+            "Removes old downloaded packages, old logs and thumbnails; {}.",
             occupation_racine()
         ),
-        "une minute",
+        tr!("une minute", "one minute"),
         &menage,
     ));
 
@@ -466,9 +531,9 @@ pub fn liste() -> Vec<Reparation> {
     }
     // Services
     l.push(rep(
-        "Services en échec",
-        "Montre les services qui ont planté, avec leurs dernières erreurs, puis remet leur compteur à zéro.",
-        "quelques secondes",
+        tr!("Services en échec", "Failed services"),
+        tr!("Montre les services qui ont planté, avec leurs dernières erreurs, puis remet leur compteur à zéro.", "Shows the services that crashed, with their latest errors, then resets their counter."),
+        tr!("quelques secondes", "a few seconds"),
         &[
             "systemctl --failed --no-pager",
             "for s in $(systemctl --failed --no-legend --plain | awk '{print $1}'); do echo \"== $s\"; journalctl -u $s -n 5 --no-pager; done",
@@ -480,9 +545,12 @@ pub fn liste() -> Vec<Reparation> {
 
     // Heure
     l.push(rep(
-        "Heure fausse",
-        "Réactive la synchronisation de l'heure (une heure fausse casse le HTTPS et les mises à jour).",
-        "quelques secondes",
+        tr!("Heure fausse", "Wrong time"),
+        tr!(
+            "Réactive la synchronisation de l'heure (une heure fausse casse le HTTPS et les mises à jour).",
+            "Turns time synchronization back on (a wrong time breaks HTTPS and updates)."
+        ),
+        tr!("quelques secondes", "a few seconds"),
         &[
             "sudo timedatectl set-ntp true",
             "timedatectl status | grep -E 'synchronized|NTP'",
@@ -534,7 +602,11 @@ fn navigation(etat: Option<&EtatWindows>) -> Reparation {
     let mut constats = Vec::new();
     let mut commandes = Vec::new();
     if !detournees.is_empty() {
-        constats.push(format!("fichier hosts : {}", resume_redirections(&detournees)));
+        constats.push(trf!(
+            "fichier hosts : {}",
+            "hosts file: {}",
+            resume_redirections(&detournees)
+        ));
         commandes.push(
             r#"$h = "$env:SystemRoot\System32\drivers\etc\hosts"; Copy-Item $h "$h.netscan-$(Get-Date -Format yyyyMMdd-HHmmss)""#
                 .to_string(),
@@ -552,28 +624,40 @@ fn navigation(etat: Option<&EtatWindows>) -> Reparation {
             commandes.push(format!("Set-ItemProperty {REGLAGES} -Name ProxyEnable -Value 0"));
         }
         if !e.pac.is_empty() {
-            constats.push(format!("script de proxy {}", e.pac));
+            constats.push(trf!("script de proxy {}", "proxy script {}", e.pac));
             commandes.push(format!("Remove-ItemProperty {REGLAGES} -Name AutoConfigURL"));
         }
         if !e.winhttp.is_empty() {
-            constats.push(format!("proxy WinHTTP {}", e.winhttp));
+            constats.push(trf!("proxy WinHTTP {}", "WinHTTP proxy {}", e.winhttp));
             commandes.push("netsh winhttp reset proxy".into());
         }
     }
     let mut r = rep(
-        "Navigation détournée (proxy, fichier hosts)",
-        format!(
+        tr!(
+            "Navigation détournée (proxy, fichier hosts)",
+            "Hijacked browsing (proxy, hosts file)"
+        ),
+        trf!(
             "Met en commentaire les lignes du fichier hosts qui envoient un site vers une adresse d'Internet (une copie est gardée) et coupe le proxy imposé. Les listes de blocage (0.0.0.0) et les appareils du réseau local ne sont pas touchés. En entreprise, le proxy peut être voulu. Trouvé : {}.",
+            "Comments out the hosts file lines that send a site to an Internet address (a copy is kept) and turns off the forced proxy. Block lists (0.0.0.0) and local network devices are left alone. In a company, the proxy may be intended. Found: {}.",
             constats.join(" ; ")
         ),
-        "quelques secondes",
+        tr!("quelques secondes", "a few seconds"),
         &[],
     );
     if commandes.is_empty() {
         r.inutile = Some(if etat.is_some() {
-            "ni redirection dans le fichier hosts, ni proxy imposé".into()
+            tr!(
+                "ni redirection dans le fichier hosts, ni proxy imposé",
+                "no redirection in the hosts file, no forced proxy"
+            )
+            .into()
         } else {
-            "aucune redirection dans le fichier hosts (réglages du proxy non lus)".into()
+            tr!(
+                "aucune redirection dans le fichier hosts (réglages du proxy non lus)",
+                "no redirection in the hosts file (proxy settings not read)"
+            )
+            .into()
         });
     } else {
         commandes.push("ipconfig /flushdns".into());
@@ -586,9 +670,12 @@ fn navigation(etat: Option<&EtatWindows>) -> Reparation {
 #[cfg(windows)]
 fn pare_feu(etat: Option<&EtatWindows>) -> Reparation {
     let mut r = rep(
-        "Pare-feu coupé",
-        "Réactive le pare-feu Windows sur les trois profils (domaine, privé, public).",
-        "quelques secondes",
+        tr!("Pare-feu coupé", "Firewall off"),
+        tr!(
+            "Réactive le pare-feu Windows sur les trois profils (domaine, privé, public).",
+            "Turns the Windows firewall back on for the three profiles (domain, private, public)."
+        ),
+        tr!("quelques secondes", "a few seconds"),
         &[
             "Set-NetFirewallProfile -Profile Domain,Public,Private -Enabled True",
             "Get-NetFirewallProfile | Format-Table Name, Enabled",
@@ -596,16 +683,23 @@ fn pare_feu(etat: Option<&EtatWindows>) -> Reparation {
     );
     match etat {
         Some(e) if e.profils > 0 && e.parefeu_coupe.is_empty() => {
-            r.inutile = Some("le pare-feu Windows est actif sur tous les profils".into());
+            r.inutile = Some(
+                tr!(
+                    "le pare-feu Windows est actif sur tous les profils",
+                    "the Windows firewall is on for every profile"
+                )
+                .into(),
+            );
         }
         Some(e) if e.profils > 0 => {
-            let _ = write!(
+            let _ = trw!(
                 r.pourquoi,
                 " Coupé pour : {}. Si un pare-feu tiers le remplace, ne rien faire.",
+                " Off for: {}. If a third-party firewall replaces it, do nothing.",
                 e.parefeu_coupe
             );
         }
-        _ => r.pourquoi += " (état actuel non lu)",
+        _ => r.pourquoi += tr!(" (état actuel non lu)", " (current state not read)"),
     }
     r
 }
@@ -616,9 +710,9 @@ pub fn liste() -> Vec<Reparation> {
     let etat = etat.as_ref();
     let a_distance = machine::windows::session_a_distance();
     let mut reseau = rep(
-        "Internet ne marche plus",
-        "Remet à zéro Winsock et la pile TCP/IP, vide le cache DNS, redemande une adresse. Un redémarrage termine la réparation.",
-        "une minute, puis redémarrer",
+        tr!("Internet ne marche plus", "Internet no longer works"),
+        tr!("Remet à zéro Winsock et la pile TCP/IP, vide le cache DNS, redemande une adresse. Un redémarrage termine la réparation.", "Resets Winsock and the TCP/IP stack, clears the DNS cache, asks for a new address. A restart finishes the repair."),
+        tr!("une minute, puis redémarrer", "one minute, then restart"),
         &[
             "netsh winsock reset",
             "netsh int ip reset",
@@ -628,37 +722,40 @@ pub fn liste() -> Vec<Reparation> {
         ],
     ).avec_restauration();
     if a_distance {
-        reseau.bloquee = Some("tu es connecté par le Bureau à distance : cette réparation couperait ta connexion");
+        reseau.bloquee = Some(tr!(
+            "tu es connecté par le Bureau à distance : cette réparation couperait ta connexion",
+            "you are connected over Remote Desktop: this repair would cut your connection"
+        ));
     }
     vec![
         rep(
-            "Fichiers système abîmés",
-            "Répare l'image de Windows (DISM) puis vérifie et remplace les fichiers système corrompus (SFC). À faire après un plantage ou un écran bleu.",
-            "15 à 45 minutes",
+            tr!("Fichiers système abîmés", "Damaged system files"),
+            tr!("Répare l'image de Windows (DISM) puis vérifie et remplace les fichiers système corrompus (SFC). À faire après un plantage ou un écran bleu.", "Repairs the Windows image (DISM), then checks and replaces corrupted system files (SFC). Do it after a crash or a blue screen."),
+            tr!("15 à 45 minutes", "15 to 45 minutes"),
             &["DISM /Online /Cleanup-Image /RestoreHealth", "sfc /scannow"],
         ).avec_restauration(),
         rep(
-            "Disque : erreurs",
-            "Analyse le disque C: sans le bloquer. Si des erreurs sont trouvées, la réparation se fait au redémarrage : chkdsk C: /f (C: ne peut pas être mis hors ligne pendant que Windows tourne).",
-            "quelques minutes",
+            tr!("Disque : erreurs", "Disk: errors"),
+            tr!("Analyse le disque C: sans le bloquer. Si des erreurs sont trouvées, la réparation se fait au redémarrage : chkdsk C: /f (C: ne peut pas être mis hors ligne pendant que Windows tourne).", "Scans disk C: without locking it. If errors are found, the repair happens at restart: chkdsk C: /f (C: cannot be taken offline while Windows is running)."),
+            tr!("quelques minutes", "a few minutes"),
             &["Repair-Volume -DriveLetter C -Scan"],
         ),
         reseau,
         navigation(etat),
         pare_feu(etat),
         rep(
-            "Antivirus pas à jour",
-            "Télécharge les dernières signatures de Microsoft Defender et affiche leur date.",
-            "une minute",
+            tr!("Antivirus pas à jour", "Antivirus out of date"),
+            tr!("Télécharge les dernières signatures de Microsoft Defender et affiche leur date.", "Downloads the latest Microsoft Defender signatures and shows their date."),
+            tr!("une minute", "one minute"),
             &[
                 "Update-MpSignature",
                 "Get-MpComputerStatus | Format-List AntivirusSignatureLastUpdated, AntivirusSignatureVersion",
             ],
         ),
         rep(
-            "Windows Update bloqué",
-            "Arrête les services de mise à jour, met de côté leurs caches (SoftwareDistribution, catroot2) et les relance.",
-            "une minute",
+            tr!("Windows Update bloqué", "Windows Update stuck"),
+            tr!("Arrête les services de mise à jour, met de côté leurs caches (SoftwareDistribution, catroot2) et les relance.", "Stops the update services, sets their caches aside (SoftwareDistribution, catroot2) and restarts them."),
+            tr!("une minute", "one minute"),
             &[
                 "Stop-Service -Force wuauserv, bits, cryptsvc",
                 "Rename-Item \"$env:SystemRoot\\SoftwareDistribution\" \"SoftwareDistribution.$(Get-Date -Format yyyyMMddHHmm)\"",
@@ -667,9 +764,9 @@ pub fn liste() -> Vec<Reparation> {
             ],
         ).avec_restauration(),
         rep(
-            "Disque plein",
-            "Vide les fichiers temporaires et nettoie les anciennes versions des composants de Windows.",
-            "quelques minutes",
+            tr!("Disque plein", "Disk full"),
+            tr!("Vide les fichiers temporaires et nettoie les anciennes versions des composants de Windows.", "Clears the temporary files and cleans up old versions of Windows components."),
+            tr!("quelques minutes", "a few minutes"),
             &[
                 "Get-ChildItem $env:TEMP -Force | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue",
                 "Dism /Online /Cleanup-Image /StartComponentCleanup",
@@ -677,9 +774,9 @@ pub fn liste() -> Vec<Reparation> {
             ],
         ),
         rep(
-            "Heure fausse",
-            "Resynchronise l'horloge (une heure fausse casse le HTTPS et Windows Update).",
-            "quelques secondes",
+            tr!("Heure fausse", "Wrong time"),
+            tr!("Resynchronise l'horloge (une heure fausse casse le HTTPS et Windows Update).", "Resynchronizes the clock (a wrong time breaks HTTPS and Windows Update)."),
+            tr!("quelques secondes", "a few seconds"),
             &["Start-Service w32time", "w32tm /resync /force"],
         ),
     ]
@@ -688,18 +785,24 @@ pub fn liste() -> Vec<Reparation> {
 /// Menu des réparations : choisir, lire, confirmer.
 pub fn menu() {
     let reparations = liste();
-    titre("Réparer");
+    titre(tr!("Réparer", "Repair"));
     for (i, r) in reparations.iter().enumerate() {
         let note = if r.bloquee.is_some() {
-            format!("  {GRIS}(indisponible ici){RESET}")
+            trf!(
+                "  {GRIS}(indisponible ici){RESET}",
+                "  {GRIS}(not available here){RESET}"
+            )
         } else if r.inutile.is_some() {
-            format!("  {GRIS}(rien à faire){RESET}")
+            trf!("  {GRIS}(rien à faire){RESET}", "  {GRIS}(nothing to do){RESET}")
         } else {
             String::new()
         };
         println!("  {}. {}{note}", i + 1, r.titre);
     }
-    let choix = demander("\nNuméro de la réparation (Entrée pour revenir) : ");
+    let choix = demander(tr!(
+        "\nNuméro de la réparation (Entrée pour revenir) : ",
+        "\nRepair number (Enter to go back): "
+    ));
     let Some(r) = choix
         .parse::<usize>()
         .ok()
@@ -710,29 +813,41 @@ pub fn menu() {
     };
     println!("\n  {GRAS}{}{RESET}", r.titre);
     if let Some(raison) = &r.inutile {
-        println!("  {VERT}✔ Rien à faire : {raison}.{RESET}");
+        trp!(
+            "  {VERT}✔ Rien à faire : {raison}.{RESET}",
+            "  {VERT}✔ Nothing to do: {raison}.{RESET}"
+        );
         return;
     }
     println!("  {}", r.pourquoi);
-    println!("  {GRIS}Durée : {}{RESET}", r.duree);
+    trp!("  {GRIS}Durée : {}{RESET}", "  {GRIS}Duration: {}{RESET}", r.duree);
     if let Some(raison) = r.bloquee {
-        println!("\n  ✖ Pas maintenant : {raison}. Fais-la depuis l'écran de l'ordinateur.");
+        trp!(
+            "\n  ✖ Pas maintenant : {raison}. Fais-la depuis l'écran de l'ordinateur.",
+            "\n  ✖ Not now: {raison}. Do it from the computer's own screen."
+        );
         return;
     }
-    println!("  Commandes :");
+    trp!("  Commandes :", "  Commands:");
     for c in &r.commandes {
         println!("    {GRIS}{c}{RESET}");
     }
-    if !demander("\n  Lancer cette réparation ? [o/N] : ").oui() {
-        println!("  Annulé.");
+    if !demander(tr!(
+        "\n  Lancer cette réparation ? [o/N] : ",
+        "\n  Run this repair? [y/N]: "
+    ))
+    .oui()
+    {
+        trp!("  Annulé.", "  Cancelled.");
         return;
     }
     #[cfg_attr(not(windows), allow(unused_mut))]
     let mut commandes = r.commandes.clone();
     if r.restauration
         && let Some((outil, point)) = point_restauration(r.titre)
-        && !demander(&format!(
-            "  Créer d'abord un point de restauration ({outil}) ? [O/n] : "
+        && !demander(&trf!(
+            "  Créer d'abord un point de restauration ({outil}) ? [O/n] : ",
+            "  First create a restore point ({outil})? [Y/n]: "
         ))
         .non()
     {
@@ -741,16 +856,26 @@ pub fn menu() {
         commandes.insert(0, point);
         #[cfg(not(windows))]
         if !machine::appliquer(&[point])
-            && !demander("  ✖ Point de restauration impossible. Continuer quand même ? [o/N] : ").oui()
+            && !demander(tr!(
+                "  ✖ Point de restauration impossible. Continuer quand même ? [o/N] : ",
+                "  ✖ Restore point not possible. Continue anyway? [y/N]: "
+            ))
+            .oui()
         {
-            println!("  Annulé.");
+            trp!("  Annulé.", "  Cancelled.");
             return;
         }
     }
     if machine::appliquer(&commandes) {
-        println!("  {VERT}✔ Réparation terminée.{RESET}");
+        trp!(
+            "  {VERT}✔ Réparation terminée.{RESET}",
+            "  {VERT}✔ Repair finished.{RESET}"
+        );
     } else {
-        println!("  ✖ Une étape a échoué : lis le message ci-dessus.");
+        trp!(
+            "  ✖ Une étape a échoué : lis le message ci-dessus.",
+            "  ✖ A step failed: read the message above."
+        );
     }
 }
 
