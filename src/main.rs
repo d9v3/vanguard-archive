@@ -47,6 +47,9 @@ enum Commande {
         /// Ouvrir aussi le rapport HTML dans le navigateur.
         #[arg(long)]
         html: bool,
+        /// Afficher le rapport en texte simple (Markdown) dans le terminal : sans navigateur ni affichage graphique.
+        #[arg(long, visible_alias = "text")]
+        texte: bool,
     },
     /// Audit de cette machine (pare-feu, ports, SSH, mises à jour, chiffrement…).
     #[command(visible_alias = "audit")]
@@ -483,6 +486,11 @@ fn ligne_de_commande() -> clap::Command {
     }
     c.mut_subcommand("complet", |s| {
         s.mut_arg("html", |a| a.help("Also open the HTML report in the browser"))
+            .mut_arg("texte", |a| {
+                a.help(
+                    "Show the report as plain text (Markdown) in the terminal: no browser or graphical display needed",
+                )
+            })
     })
     .mut_subcommand("reseau", |s| {
         s.mut_arg("cible", |a| {
@@ -520,11 +528,14 @@ async fn main() {
     let args = Args::from_arg_matches(&ligne_de_commande().get_matches()).unwrap_or_else(|e| e.exit());
     match args.commande {
         None => menu().await,
-        Some(Commande::Complet { html }) => {
+        Some(Commande::Complet { html, texte }) => {
             let mut s = Session::default();
             s.complet().await;
             if html {
                 rapport::ouvrir(s.audit.as_ref(), s.reseau.as_ref());
+            }
+            if texte {
+                println!("\n{}", rapport::markdown(s.audit.as_ref(), s.reseau.as_ref()));
             }
         }
         Some(Commande::Machine { json }) => {

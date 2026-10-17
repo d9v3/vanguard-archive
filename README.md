@@ -56,7 +56,7 @@ Chaque entrée du menu existe aussi en commande :
 
 | Commande | Rôle |
 |---|---|
-| `sentinel complet [--html]` | bilan complet : machine + réseau |
+| `sentinel complet [--html] [--texte]` | bilan complet : machine + réseau ; `--texte` l'affiche en texte simple (mode urgence) |
 | `sentinel corriger` | corriger les problèmes trouvés |
 | `sentinel machine [--json]` | audit de cette machine |
 | `sentinel reseau [cible] [-p courants\|tous\|22,80,8000-8100] [--json]` | scan du réseau ou d'un appareil |

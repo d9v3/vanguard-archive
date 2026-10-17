@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use crate::machine::Audit;
 use crate::reseau::Rapport;
 use crate::risk::{Niveau, note};
-use crate::{tr, trf, trp, trw};
+use crate::{tr, trf, trp, trw, trwln};
 
 fn esc(s: &str) -> String {
     s.replace('&', "&amp;")
@@ -100,7 +100,85 @@ pub fn generer(audit: Option<&Audit>, reseau: Option<&Rapport>) -> std::io::Resu
     let chemin = crate::reseau::dossier_donnees().join("rapport.html");
     std::fs::create_dir_all(chemin.parent().unwrap_or(&chemin))?;
     std::fs::write(&chemin, html(audit, reseau))?;
+    // Version texte à côté : lisible sans navigateur ni affichage graphique (mode urgence).
+    std::fs::write(chemin.with_extension("md"), markdown(audit, reseau))?;
     Ok(chemin)
+}
+
+/// Rapport en Markdown, sans couleur ni code : il se lit avec `cat`, un éditeur de texte ou sur un téléphone.
+pub fn markdown(audit: Option<&Audit>, reseau: Option<&Rapport>) -> String {
+    let mut m = String::new();
+    let date = chrono::Local::now().format(tr!("%d/%m/%Y à %H:%M", "%Y-%m-%d %H:%M"));
+    let _ = trwln!(
+        m,
+        "# Bilan de sécurité Sentinel\n\nGénéré le {date} par Sentinel {}.\n",
+        "# Sentinel security check\n\nGenerated on {date} by Sentinel {}.\n",
+        env!("CARGO_PKG_VERSION")
+    );
+    let ligne_note = |quoi: &str, score: u32| format!("- {quoi} : **{}** ({score}/100)\n", note(score));
+    if let Some(a) = audit.filter(|a| a.fiable()) {
+        m += &ligne_note(tr!("Cette machine", "This machine"), a.score);
+    }
+    if let Some(r) = reseau {
+        m += &ligne_note(&trf!("Réseau {}", "Network {}", r.reseau), r.score_global);
+    }
+    if let Some(a) = audit {
+        let _ = trwln!(m, "\n## Cette machine ({})\n", "\n## This machine ({})\n", a.systeme);
+        // Les problèmes d'abord, les plus graves en tête ; puis ce qui va bien.
+        let mut constats: Vec<_> = a.constats.iter().collect();
+        constats.sort_by_key(|c| std::cmp::Reverse(c.probleme));
+        for c in constats {
+            let etiquette = c.probleme.map_or("OK", Niveau::libelle);
+            let _ = writeln!(
+                m,
+                "- [{etiquette}] **{}** : {}",
+                crate::langue::categorie(c.categorie),
+                c.message
+            );
+            if let Some(k) = &c.correctif {
+                let _ = trwln!(m, "  - À faire : {}", "  - To do: {}", k.action);
+                for cmd in &k.commandes {
+                    let _ = writeln!(m, "    `{cmd}`");
+                }
+            }
+        }
+    }
+    if let Some(r) = reseau {
+        let _ = trwln!(
+            m,
+            "\n## Réseau {}\n\n| Adresse | Appareil | Ports ouverts | Note |\n|---|---|---|---|",
+            "\n## Network {}\n\n| Address | Device | Open ports | Grade |\n|---|---|---|---|",
+            r.reseau
+        );
+        for h in &r.hotes {
+            let ports = h
+                .ports
+                .iter()
+                .map(|p| format!("{} {} ({})", p.port, p.service, p.niveau.libelle()))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let _ = writeln!(
+                m,
+                "| {} | {} | {} | {} {} |",
+                h.ip,
+                h.titre().replace('|', "/"),
+                if ports.is_empty() { "—".to_string() } else { ports },
+                note(h.score),
+                h.score
+            );
+        }
+        let conseils: Vec<String> = r
+            .hotes
+            .iter()
+            .flat_map(|h| h.alertes.iter().map(move |(_, a)| format!("- {} : {a}", h.ip)))
+            .collect();
+        if !conseils.is_empty() {
+            let _ = trwln!(m, "\n### Conseils\n", "\n### Advice\n");
+            m += &conseils.join("\n");
+            m.push('\n');
+        }
+    }
+    m
 }
 
 fn html(audit: Option<&Audit>, reseau: Option<&Rapport>) -> String {
@@ -291,6 +369,37 @@ pub fn ouvrir(audit: Option<&Audit>, reseau: Option<&Rapport>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rapport_texte() {
+        use crate::machine::{Audit, Constat};
+        let audit = Audit {
+            systeme: "Linux",
+            score: 85,
+            constats: vec![
+                Constat {
+                    categorie: "Pare-feu",
+                    probleme: None,
+                    message: "ufw actif.".into(),
+                    correctif: None,
+                    verifie: true,
+                },
+                Constat {
+                    categorie: "Ports en écoute",
+                    probleme: Some(Niveau::Eleve),
+                    message: "445/tcp ouvert.".into(),
+                    correctif: None,
+                    verifie: true,
+                },
+            ],
+        };
+        let m = markdown(Some(&audit), None);
+        assert!(m.starts_with("# Bilan de sécurité Sentinel"));
+        assert!(m.contains("**B** (85/100)"));
+        // Le problème passe avant ce qui va bien.
+        assert!(m.find("445/tcp").unwrap() < m.find("ufw actif").unwrap());
+        assert!(!m.contains('\x1b'));
+    }
 
     #[test]
     fn tests_de_connexion_dans_le_rapport() {

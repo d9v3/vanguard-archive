@@ -8,7 +8,7 @@ This USB key holds the program for Linux and Windows, its database and its sourc
                         Open a terminal in this folder, then:  ./sentinel
   Windows/sentinel.exe  Windows 10/11: double-click.
   donnees/              Device database (one notebook per network: yours, each friend's) and the latest
-                        HTML report. It travels with the key: any Sentinel that sees the key plugged in uses it.
+                        report (rapport.html, and rapport.md as plain text, readable without a browser). It travels with the key: any Sentinel that sees the key plugged in uses it.
   source/               Full source code (Rust) with its git history.
   sentinel.cle          Marker file that makes the key recognized: do not delete it.
 

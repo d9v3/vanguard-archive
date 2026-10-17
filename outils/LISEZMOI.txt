@@ -8,7 +8,7 @@ Cette clé contient le programme pour Linux et Windows, sa base de données et s
                         Ouvrir un terminal dans ce dossier puis :  ./sentinel
   Windows/sentinel.exe  Windows 10/11 : double-cliquer.
   donnees/              Base des appareils (un carnet par réseau : chez toi, chez chaque ami) et dernier
-                        rapport HTML. Elle voyage avec la clé : tout Sentinel qui voit la clé branchée l'utilise.
+                        rapport (rapport.html, et rapport.md en texte simple, lisible sans navigateur). Elle voyage avec la clé : tout Sentinel qui voit la clé branchée l'utilise.
   source/               Code source complet (Rust) avec son historique git.
   sentinel.cle          Fichier témoin qui fait reconnaître la clé : ne pas le supprimer.
 
