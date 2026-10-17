@@ -7,8 +7,10 @@ use crate::ui::*;
 
 /// Propose chaque correction automatique, puis liste celles à faire soi-même. « [t]out » applique la correction
 /// en cours et toutes les suivantes en une seule exécution : une seule fenêtre administrateur sous Windows.
-/// Retourne les catégories des corrections appliquées.
-pub fn proposer(constats: &[Constat]) -> Vec<&'static str> {
+/// Retourne les catégories des corrections appliquées. `contexte` nomme le point de restauration créé
+/// automatiquement avant la première correction appliquée (« corrections », « mises à jour »).
+pub fn proposer(constats: &[Constat], contexte: &str) -> Vec<&'static str> {
+    let mut point_cree = false;
     let auto: Vec<_> = constats
         .iter()
         .filter_map(|c| Some((c, c.correctif.as_ref().filter(|k| k.automatique)?)))
@@ -59,7 +61,37 @@ pub fn proposer(constats: &[Constat]) -> Vec<&'static str> {
                     lot.len()
                 );
             }
-            let commandes: Vec<String> = lot.iter().flat_map(|(_, k)| k.commandes.clone()).collect();
+            #[cfg_attr(not(windows), allow(unused_mut))]
+            let mut commandes: Vec<String> = lot.iter().flat_map(|(_, k)| k.commandes.clone()).collect();
+            if !point_cree {
+                point_cree = true;
+                match crate::reparer::point_restauration(contexte) {
+                    Some((outil, point)) => {
+                        trp!(
+                            "    {GRIS}Point de restauration d'abord ({outil}), pour pouvoir revenir en arrière.{RESET}",
+                            "    {GRIS}Restore point first ({outil}), so you can go back.{RESET}"
+                        );
+                        // Windows : dans la même fenêtre administrateur que la correction (une seule demande).
+                        #[cfg(windows)]
+                        commandes.insert(0, point);
+                        #[cfg(not(windows))]
+                        if !machine::appliquer(&[point])
+                            && !demander(tr!(
+                                "    ✖ Point de restauration impossible. Continuer quand même ? [o/N] : ",
+                                "    ✖ Restore point not possible. Continue anyway? [y/N]: "
+                            ))
+                            .oui()
+                        {
+                            trp!("    {GRIS}ignoré{RESET}", "    {GRIS}skipped{RESET}");
+                            continue;
+                        }
+                    }
+                    None => trp!(
+                        "    {GRIS}Pas de snapper ni de timeshift configuré : pas de point de restauration possible.{RESET}",
+                        "    {GRIS}No snapper or timeshift configured: no restore point possible.{RESET}"
+                    ),
+                }
+            }
             if machine::appliquer(&commandes) {
                 for (c, k) in &lot {
                     machine::retenir_blocage(k);
@@ -99,7 +131,7 @@ pub fn proposer(constats: &[Constat]) -> Vec<&'static str> {
 /// Propose les corrections de la machine, puis la marche à suivre pour le reste. Retourne le nouvel audit.
 pub fn corriger(audit: &Audit, reseau: Option<&Rapport>) -> Option<Audit> {
     titre(tr!("Corrections", "Fixes"));
-    let applique = !proposer(&audit.constats).is_empty();
+    let applique = !proposer(&audit.constats, tr!("corrections", "fixes")).is_empty();
 
     if let Some(r) = reseau {
         let exposes: Vec<_> = r

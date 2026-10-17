@@ -41,6 +41,8 @@ Language: French or English, following the system. To force English:
 Good to know
   - Fixes are never applied without your consent. On Windows, each one is first written to a readable
     script (its path is shown) and asks for administrator approval.
+  - Before the first fix, update or repair that changes the system, a restore point is created automatically
+    (snapper or timeshift on Linux, a restore point on Windows).
   - If you help someone connected remotely (Remote Desktop, SSH), Sentinel never cuts that access.
   - The program is not signed: SmartScreen may warn ("More info" > "Run anyway") and Microsoft Defender may
     flag it, because it scans ports. The source code is on the key.

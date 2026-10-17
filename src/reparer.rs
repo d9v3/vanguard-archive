@@ -113,7 +113,7 @@ fn entre_apostrophes(t: &str) -> String {
 
 /// Outil et commande du point de restauration, s'il y en a un de configuré.
 #[cfg(target_os = "linux")]
-fn point_restauration(titre: &str) -> Option<(&'static str, String)> {
+pub(crate) fn point_restauration(titre: &str) -> Option<(&'static str, String)> {
     let description = entre_apostrophes(&trf!("sentinel : avant « {titre} »", "sentinel: before “{titre}”"));
     if present("snapper") && std::path::Path::new("/etc/snapper/configs/root").is_file() {
         Some((
@@ -135,7 +135,7 @@ fn point_restauration(titre: &str) -> Option<(&'static str, String)> {
 /// Windows ne crée qu'un point par 24 h : il l'écrit alors en avertissement, le plus récent sert.
 #[cfg(windows)]
 #[allow(clippy::unnecessary_wraps)] // même signature que sur Linux, où l'outil peut manquer
-fn point_restauration(titre: &str) -> Option<(&'static str, String)> {
+pub(crate) fn point_restauration(titre: &str) -> Option<(&'static str, String)> {
     let description = entre_apostrophes(&trf!("sentinel : avant « {titre} »", "sentinel: before “{titre}”"));
     Some((
         "Windows",
@@ -959,14 +959,14 @@ pub fn menu() {
     }
     #[cfg_attr(not(windows), allow(unused_mut))]
     let mut commandes = r.commandes.clone();
+    // Point de restauration automatique avant une réparation qui modifie le système : on peut revenir en arrière.
     if r.restauration
         && let Some((outil, point)) = point_restauration(r.titre)
-        && !demander(&trf!(
-            "  Créer d'abord un point de restauration ({outil}) ? [O/n] : ",
-            "  First create a restore point ({outil})? [Y/n]: "
-        ))
-        .non()
     {
+        trp!(
+            "  {GRIS}Point de restauration d'abord ({outil}).{RESET}",
+            "  {GRIS}Restore point first ({outil}).{RESET}"
+        );
         // Windows : dans la même fenêtre administrateur (une seule demande) ; elle demande quoi faire si ça échoue.
         #[cfg(windows)]
         commandes.insert(0, point);

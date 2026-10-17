@@ -34,7 +34,7 @@ pub fn executer() {
         return;
     }
     titre("Installation");
-    let installees = crate::corriger::proposer(&constats);
+    let installees = crate::corriger::proposer(&constats, tr!("mises à jour", "updates"));
     if installees.is_empty() {
         return;
     }

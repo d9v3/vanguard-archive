@@ -116,15 +116,11 @@ pub fn oui(reponse: &str) -> bool {
 /// `demander(…).oui()` : la réponse à une question [o/N] / [y/N], dans les deux langues.
 pub trait Reponse {
     fn oui(&self) -> bool;
-    fn non(&self) -> bool;
 }
 
 impl Reponse for String {
     fn oui(&self) -> bool {
         oui(self)
-    }
-    fn non(&self) -> bool {
-        matches!(self.trim().to_lowercase().as_str(), "n" | "non" | "no")
     }
 }
 

@@ -41,6 +41,8 @@ Langue : français ou anglais selon le système. Pour forcer le français :
 Bon à savoir
   - Les corrections ne sont jamais appliquées sans ta confirmation. Sous Windows, chacune est d'abord écrite
     dans un script lisible (le chemin est affiché) et demande l'accord administrateur.
+  - Avant la première correction, mise à jour ou réparation qui modifie le système, un point de restauration est
+    créé automatiquement (snapper ou timeshift sous Linux, point de restauration sous Windows).
   - Si tu aides quelqu'un connecté à distance (Bureau à distance, SSH), Sentinel ne coupe jamais cet accès.
   - Le programme n'est pas signé : SmartScreen peut avertir (« Informations complémentaires » > « Exécuter
     quand même ») et Microsoft Defender peut le signaler, car il scanne des ports. Le code source est sur la clé.

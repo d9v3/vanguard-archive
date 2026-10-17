@@ -31,7 +31,8 @@ verdict critère par critère et des conseils.
 ![Test de connexion](assets/captures/connexion.png)
 
 **Et aussi**
-- Corrections appliquées seulement après confirmation ; sous Windows, chacune est un script lisible.
+- Corrections appliquées seulement après confirmation, avec un point de restauration créé automatiquement avant
+  (snapper ou timeshift sous Linux, point de restauration Windows) ; sous Windows, chacune est un script lisible.
 - Mises à jour de tout d'un coup : système, programmes, pilotes, firmware.
 - Réparations : Internet, navigation détournée, pare-feu, disque, disque plein, nettoyage approfondi, Windows Update
   bloqué, fichiers système, heure.
