@@ -39,7 +39,7 @@ fn carte_note(titre: &str, score: u32) -> String {
     )
 }
 
-const CSS: &str = r#"
+const CSS: &str = r"
 :root{--bg:#f6f6f4;--carte:#fff;--texte:#1b1b1b;--doux:#666;--bord:#e2e2de;
 --ok:#1f8a4c;--info:#2a7bb5;--moyen:#b58900;--eleve:#d0611b;--critique:#c62828;color-scheme:light}
 @media (prefers-color-scheme:dark){:root:not([data-theme=light]){--bg:#000;--carte:#0d0d0d;--texte:#ececec;--doux:#9a9a9a;--bord:#222;
@@ -59,7 +59,7 @@ main{max-width:960px;margin:0 auto;padding:24px 16px 64px}h1{font-size:26px;marg
 table{width:100%;border-collapse:collapse;margin-top:8px;font-size:14px}td{padding:4px 6px;border-top:1px solid var(--bord);vertical-align:top}
 .ban{color:var(--doux);font-size:12px}ul{margin:8px 0 0;padding-left:20px}
 @media (max-width:600px){.ligne{flex-wrap:wrap}.cat{min-width:0}}
-"#;
+";
 
 pub fn generer(audit: Option<&Audit>, reseau: Option<&Rapport>) -> std::io::Result<PathBuf> {
     let chemin = crate::reseau::dossier_donnees().join("rapport.html");

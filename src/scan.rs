@@ -39,15 +39,17 @@ pub fn limite_connexions(demande: usize) -> usize {
             rlim_cur: 0,
             rlim_max: 0,
         };
-        if libc::getrlimit(libc::RLIMIT_NOFILE, &mut lim) == 0 {
+        if libc::getrlimit(libc::RLIMIT_NOFILE, &raw mut lim) == 0 {
             let voulu = (demande as libc::rlim_t + 128).min(lim.rlim_max);
             if lim.rlim_cur < voulu {
                 lim.rlim_cur = voulu;
-                libc::setrlimit(libc::RLIMIT_NOFILE, &lim);
-                libc::getrlimit(libc::RLIMIT_NOFILE, &mut lim);
+                libc::setrlimit(libc::RLIMIT_NOFILE, &raw const lim);
+                libc::getrlimit(libc::RLIMIT_NOFILE, &raw mut lim);
             }
             // On garde une marge pour stdin/stdout, les fichiers lus et les sockets DNS.
-            return demande.min((lim.rlim_cur as usize).saturating_sub(64)).max(16);
+            return demande
+                .min(usize::try_from(lim.rlim_cur).unwrap_or(usize::MAX).saturating_sub(64))
+                .max(16);
         }
     }
     demande
@@ -413,7 +415,7 @@ pub fn base_fabricants() -> HashMap<String, String> {
 pub fn fabricant(mac: &str, base: &HashMap<String, String>) -> Option<String> {
     let hex: String = mac
         .chars()
-        .filter(|c| c.is_ascii_hexdigit())
+        .filter(char::is_ascii_hexdigit)
         .collect::<String>()
         .to_ascii_uppercase();
     let premier = u8::from_str_radix(hex.get(..2)?, 16).ok()?;

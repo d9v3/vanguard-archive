@@ -23,7 +23,7 @@ fn executable() -> String {
         let dest = reseau::dossier_local()
             .join("bin")
             .join(exe.file_name().unwrap_or_default());
-        let copie = std::fs::create_dir_all(dest.parent().unwrap_or(&dest)).and_then(|_| std::fs::copy(&exe, &dest));
+        let copie = std::fs::create_dir_all(dest.parent().unwrap_or(&dest)).and_then(|()| std::fs::copy(&exe, &dest));
         if copie.is_ok() {
             #[cfg(unix)]
             {

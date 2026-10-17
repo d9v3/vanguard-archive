@@ -176,13 +176,7 @@ fn ports_ecoute(pare_feu_actif: bool) -> Vec<Constat> {
         vus.push(port);
         let programme = noms.get(&port).cloned().unwrap_or_else(|| "service système".into());
         let i = info_port(port);
-        let niveau = match (pare_feu_actif, i.niveau) {
-            (true, Niveau::Critique) => Niveau::Eleve,
-            (true, Niveau::Eleve) => Niveau::Moyen,
-            (true, _) => Niveau::Info,
-            (false, Niveau::Info) => Niveau::Moyen,
-            (false, n) => n,
-        };
+        let niveau = super::niveau_expose(pare_feu_actif, i.niveau);
         let constat = alerte(
             "Ports en écoute",
             niveau,

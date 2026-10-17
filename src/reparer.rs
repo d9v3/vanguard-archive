@@ -18,7 +18,7 @@ fn rep(titre: &'static str, pourquoi: impl Into<String>, duree: &'static str, co
         titre,
         pourquoi: pourquoi.into(),
         duree,
-        commandes: commandes.iter().map(|c| c.to_string()).collect(),
+        commandes: commandes.iter().map(std::string::ToString::to_string).collect(),
         bloquee: None,
     }
 }

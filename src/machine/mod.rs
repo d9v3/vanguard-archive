@@ -99,7 +99,7 @@ impl Constat {
     fn corriger(mut self, action: impl Into<String>, commandes: &[&str]) -> Self {
         self.correctif = Some(Correctif {
             action: action.into(),
-            commandes: commandes.iter().map(|c| c.to_string()).collect(),
+            commandes: commandes.iter().map(std::string::ToString::to_string).collect(),
             automatique: true,
             bloque: None,
         });
@@ -121,6 +121,19 @@ impl Constat {
             k.automatique = false;
         }
         c
+    }
+}
+
+/// Niveau d'un service ouvert sur le réseau. Avec un pare-feu actif, il n'est en général pas joignable : on baisse
+/// d'un cran ; sans pare-feu, même un service anodin est exposé (Info → Moyen). Une ligne par cas, pour la lecture.
+#[allow(clippy::match_same_arms)]
+fn niveau_expose(pare_feu_actif: bool, niveau: Niveau) -> Niveau {
+    match (pare_feu_actif, niveau) {
+        (true, Niveau::Critique) => Niveau::Eleve,
+        (true, Niveau::Eleve) => Niveau::Moyen,
+        (true, _) => Niveau::Info,
+        (false, Niveau::Info) => Niveau::Moyen,
+        (false, n) => n,
     }
 }
 
@@ -173,7 +186,11 @@ fn cles_ssh() -> Vec<Constat> {
             );
         }
         // Même règle que ci-dessus : une clé « github » ou « serveur » compte autant qu'« id_ed25519 ».
-        let privee = protegee.is_some() || (nom.starts_with("id_") && !nom.ends_with(".pub"));
+        let privee = protegee.is_some()
+            || (nom.starts_with("id_")
+                && !std::path::Path::new(&nom)
+                    .extension()
+                    .is_some_and(|e| e.eq_ignore_ascii_case("pub")));
         if privee
             && f.metadata()
                 .is_ok_and(|m| std::os::unix::fs::PermissionsExt::mode(&m.permissions()) & 0o077 != 0)
@@ -220,14 +237,14 @@ fn cle_protegee(texte: &str) -> Option<bool> {
 #[cfg(unix)]
 fn base64_decoder(texte: &str) -> Option<Vec<u8>> {
     let valeur = |c: u8| -> Option<u32> {
-        Some(match c {
+        Some(u32::from(match c {
             b'A'..=b'Z' => c - b'A',
             b'a'..=b'z' => c - b'a' + 26,
             b'0'..=b'9' => c - b'0' + 52,
             b'+' => 62,
             b'/' => 63,
             _ => return None,
-        } as u32)
+        }))
     };
     let propre: Vec<u8> = texte
         .bytes()

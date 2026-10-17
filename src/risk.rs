@@ -53,7 +53,7 @@ pub const PORTS_HTTP: &[u16] = &[
 ];
 
 pub fn info_port(port: u16) -> InfoPort {
-    use Niveau::*;
+    use Niveau::{Critique, Eleve, Info, Moyen};
     let (service, niveau, conseil) = match port {
         21 => (
             "FTP",
@@ -278,16 +278,16 @@ pub fn identifier(banniere: &str) -> Option<u16> {
     let l = banniere.to_ascii_lowercase();
     let d = |p: &str| l.starts_with(p);
     Some(match () {
-        _ if d("ssh-") => 22,
-        _ if d("http · ") => 8080,
-        _ if d("220") && l.contains("ftp") => 21,
-        _ if d("220") && (l.contains("smtp") || l.contains("mail")) => 25,
-        _ if d("+ok") => 110,
-        _ if d("* ok") => 143,
-        _ if d("-noauth") || d("+pong") || (d("-err") && l.contains("redis")) => 6379,
-        _ if d("rfb ") => 5900,
-        _ if l.contains("mysql_native_password") || l.contains("mariadb") => 3306,
-        _ => return None,
+        () if d("ssh-") => 22,
+        () if d("http · ") => 8080,
+        () if d("220") && l.contains("ftp") => 21,
+        () if d("220") && (l.contains("smtp") || l.contains("mail")) => 25,
+        () if d("+ok") => 110,
+        () if d("* ok") => 143,
+        () if d("-noauth") || d("+pong") || (d("-err") && l.contains("redis")) => 6379,
+        () if d("rfb ") => 5900,
+        () if l.contains("mysql_native_password") || l.contains("mariadb") => 3306,
+        () => return None,
     })
 }
 

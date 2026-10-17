@@ -26,3 +26,11 @@ codegen-units = 1
 
 [build-dependencies]
 winresource = "0.1.34"
+
+# Mode strict de clippy (pedantic) par défaut, sauf trois règles qui ne sont ici que du bruit :
+# noms propres dans les commentaires en français, longues fonctions d'audit, `use ui::*`.
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+doc_markdown = "allow"
+too_many_lines = "allow"
+wildcard_imports = "allow"

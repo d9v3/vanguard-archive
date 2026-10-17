@@ -1,9 +1,15 @@
 //! Audit de sécurité Linux (Arch/Omarchy), sans privilèges root.
 
+use std::fmt::Write;
 use std::path::Path;
 use std::process::Command;
 
 use super::{Audit, Constat, alerte, cles_ssh, impossible, ok, score, sortie};
+
+/// Ajouts de netscan à la configuration de sshd (lu en premier : sshd garde la première valeur trouvée).
+const SSHD_NETSCAN: &str = "/etc/ssh/sshd_config.d/00-netscan.conf";
+/// Réglages du noyau posés par netscan, gardés au redémarrage.
+const SYSCTL_NETSCAN: &str = "/etc/sysctl.d/99-netscan.conf";
 use crate::risk::{Niveau, info_port};
 
 pub const NOM: &str = "Linux";
@@ -239,14 +245,7 @@ fn ports_ecoute(pare_feu_actif: bool, ufw: bool) -> Vec<Constat> {
                 .get(5)
                 .and_then(|u| u.split('"').nth(1))
                 .unwrap_or("programme inconnu (root ?)");
-            // Avec un pare-feu actif, un service exposé n'est en général pas joignable : on baisse d'un cran.
-            let niveau = match (pare_feu_actif, i.niveau) {
-                (true, Niveau::Critique) => Niveau::Eleve,
-                (true, Niveau::Eleve) => Niveau::Moyen,
-                (true, _) => Niveau::Info,
-                (false, Niveau::Info) => Niveau::Moyen,
-                (false, n) => n,
-            };
+            let niveau = super::niveau_expose(pare_feu_actif, i.niveau);
             let constat = alerte(
                 "Ports en écoute",
                 niveau,
@@ -429,12 +428,11 @@ fn ssh_serveur() -> Constat {
                 k.eq_ignore_ascii_case(cle).then(|| v.trim().to_ascii_lowercase())
             })
     };
-    const FICHIER: &str = "/etc/ssh/sshd_config.d/00-netscan.conf";
     if valeur("PermitRootLogin").as_deref() == Some("yes") {
         return alerte("SSH", Niveau::Eleve, "Connexion root autorisée en SSH.").corriger(
             "Interdire la connexion SSH en root",
             &[
-                &format!("echo 'PermitRootLogin no' | sudo tee -a {FICHIER} >/dev/null"),
+                &format!("echo 'PermitRootLogin no' | sudo tee -a {SSHD_NETSCAN} >/dev/null"),
                 "sudo sshd -t && sudo systemctl reload sshd",
             ],
         );
@@ -450,7 +448,7 @@ fn ssh_serveur() -> Constat {
             c.corriger(
                 "N'accepter que les clés SSH (tu as déjà des clés autorisées)",
                 &[
-                    &format!("printf 'PasswordAuthentication no\\nKbdInteractiveAuthentication no\\n' | sudo tee -a {FICHIER} >/dev/null"),
+                    &format!("printf 'PasswordAuthentication no\\nKbdInteractiveAuthentication no\\n' | sudo tee -a {SSHD_NETSCAN} >/dev/null"),
                     "sudo sshd -t && sudo systemctl reload sshd",
                 ],
             )
@@ -922,13 +920,7 @@ fn verrouillage_ecran() -> Option<Constat> {
         // Hyprland sans Omarchy : hypridle doit avoir un délai qui verrouille.
         std::fs::read_to_string(maison.join(".config/hypr/hypridle.conf"))
             .ok()
-            .map(|t| {
-                if t.contains("lock") && sortie("pgrep", &["-x", "hypridle"]).is_some() {
-                    1
-                } else {
-                    0
-                }
-            })
+            .map(|t| u64::from(t.contains("lock") && sortie("pgrep", &["-x", "hypridle"]).is_some()))
     } else {
         None
     };
@@ -1010,9 +1002,8 @@ fn durcissement_noyau() -> Constat {
         .collect();
     // Le fichier est réécrit en entier : on garde les réglages qu'une correction précédente y avait mis,
     // sinon ils sauteraient au prochain redémarrage.
-    const FICHIER: &str = "/etc/sysctl.d/99-netscan.conf";
     let lignes = fusion_sysctl(
-        &std::fs::read_to_string(FICHIER).unwrap_or_default(),
+        &std::fs::read_to_string(SYSCTL_NETSCAN).unwrap_or_default(),
         &faibles
             .iter()
             .map(|(c, _, m, _)| (c.replace('/', "."), *m))
@@ -1027,7 +1018,7 @@ fn durcissement_noyau() -> Constat {
     .corriger(
         "Appliquer les valeurs sûres (fichier /etc/sysctl.d/99-netscan.conf, gardé au redémarrage)",
         &[
-            &format!("printf '{lignes}' | sudo tee {FICHIER} >/dev/null"),
+            &format!("printf '{lignes}' | sudo tee {SYSCTL_NETSCAN} >/dev/null"),
             "sudo sysctl --system >/dev/null",
         ],
     )
@@ -1051,7 +1042,10 @@ fn fusion_sysctl(existant: &str, nouveaux: &[(String, i64)]) -> String {
             None => reglages.push((cle.clone(), valeur.to_string())),
         }
     }
-    reglages.iter().map(|(k, v)| format!("{k} = {v}\n")).collect()
+    reglages.iter().fold(String::new(), |mut texte, (k, v)| {
+        let _ = writeln!(texte, "{k} = {v}");
+        texte
+    })
 }
 
 /// Module de sécurité obligatoire (AppArmor, SELinux) : actif par défaut sur Ubuntu, Debian et Fedora.
@@ -1151,7 +1145,7 @@ fn sauvegardes() -> Constat {
     }
     let maintenant = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |d| d.as_micros() as u64);
+        .map_or(0, |d| u64::try_from(d.as_micros()).unwrap_or(u64::MAX));
     let jours = |dernier: u64| (maintenant.saturating_sub(dernier)) / 86_400_000_000;
     let toutes = minuteries();
     let vraies: Vec<_> = toutes.iter().filter(|t| type_sauvegarde(&t.0) == Some(true)).collect();
@@ -1237,11 +1231,6 @@ fn path_dangereux(path: &str, droits: impl Fn(&str) -> Option<u32>) -> Vec<Strin
 /// ou qui n'appartiennent à aucun paquet ; et PATH piégeable.
 fn fichiers_suspects() -> Vec<Constat> {
     use std::os::unix::fs::PermissionsExt;
-    let mut constats = Vec::new();
-    let setuid = |p: &Path| {
-        p.symlink_metadata()
-            .is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o4000 != 0)
-    };
     fn parcourir(d: &Path, profondeur: u32, trouve: &mut Vec<std::path::PathBuf>, test: &dyn Fn(&Path) -> bool) {
         for e in std::fs::read_dir(d).into_iter().flatten().flatten() {
             let p = e.path();
@@ -1254,6 +1243,11 @@ fn fichiers_suspects() -> Vec<Constat> {
             }
         }
     }
+    let mut constats = Vec::new();
+    let setuid = |p: &Path| {
+        p.symlink_metadata()
+            .is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o4000 != 0)
+    };
     // Aucun setuid ne devrait vivre dans un dossier temporaire ou personnel.
     let mut anormaux = Vec::new();
     for (d, prof) in [("/tmp", 3), ("/var/tmp", 3), ("/dev/shm", 3), (&home() as &str, 2)] {
@@ -1511,7 +1505,7 @@ fn etat_aur(installes: &[&str], reponse: &serde_json::Value) -> (Vec<String>, Ve
     let absents = installes
         .iter()
         .filter(|n| !resultats.iter().any(|r| r["Name"].as_str() == Some(**n)))
-        .map(|n| n.to_string())
+        .map(std::string::ToString::to_string)
         .collect();
     let orphelins = resultats
         .iter()
@@ -1653,11 +1647,14 @@ mod tests {
     fn ports_docker() {
         let c = "0.0.0.0:8080->80/tcp, [::]:8080->80/tcp, 127.0.0.1:3389->3389/tcp, 0.0.0.0:53->53/udp, 9000/tcp";
         assert_eq!(ports_docker_exposes(c), vec!["8080/tcp", "53/udp"]);
-        assert!(ports_docker_exposes("127.0.0.1:8006->8006/tcp, [::1]:8006->8006/tcp").is_empty());
+        assert_eq!(
+            ports_docker_exposes("127.0.0.1:8006->8006/tcp, [::1]:8006->8006/tcp"),
+            [] as [std::string::String; 0]
+        );
         // Publié sur l'IP du réseau local : exposé aussi.
         assert_eq!(ports_docker_exposes("10.0.0.179:8080->80/tcp"), vec!["8080/tcp"]);
         assert_eq!(ports_docker_exposes(":::9000->9000/tcp"), vec!["9000/tcp"]);
-        assert!(ports_docker_exposes("").is_empty());
+        assert_eq!(ports_docker_exposes(""), [] as [std::string::String; 0]);
     }
 
     #[test]
@@ -1675,10 +1672,10 @@ mod tests {
 
     #[test]
     fn droits_des_secrets() {
-        assert!(!secret_expose(0o100600));
+        assert!(!secret_expose(0o100_600));
         assert!(!secret_expose(0o40700));
-        assert!(secret_expose(0o100644));
-        assert!(secret_expose(0o100640));
+        assert!(secret_expose(0o100_644));
+        assert!(secret_expose(0o100_640));
     }
 
     #[test]
@@ -1735,7 +1732,7 @@ mod tests {
         assert_eq!(faibles.len(), 1);
         assert_eq!(faibles[0].0, "kernel/kptr_restrict");
         // Réglage absent (noyau sans Yama…) : ni faible ni fort, on ne conclut pas.
-        assert!(reglages_faibles(|_| None).is_empty());
+        assert_eq!(reglages_faibles(|_| None), [] as [(&str, i64, i64, &str); 0]);
     }
 
     #[test]
@@ -1749,7 +1746,10 @@ mod tests {
             path_dangereux("/usr/bin:/tmp:/srv/partage:.::/bin", droits),
             vec!["/srv/partage", ".", "(vide = dossier courant)"]
         );
-        assert!(path_dangereux("/usr/local/bin:/usr/bin", droits).is_empty());
+        assert_eq!(
+            path_dangereux("/usr/local/bin:/usr/bin", droits),
+            [] as [std::string::String; 0]
+        );
     }
 
     #[test]

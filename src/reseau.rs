@@ -316,8 +316,8 @@ pub fn nommer(qui: &str, surnom: Option<&str>) -> Result<String, String> {
     let ici = scan::passerelle()
         .and_then(|gw| scan::table_arp().get(&gw).cloned())
         .or_else(|| scan::reseau_local().map(|(r, _)| format!("plage {r}")));
-    for (id, r) in base.reseaux.iter_mut() {
-        for (cle, a) in r.appareils.iter_mut() {
+    for (id, r) in &mut base.reseaux {
+        for (cle, a) in &mut r.appareils {
             let par_mac = cle.eq_ignore_ascii_case(&qui_min);
             let par_ip = a.ip.to_string() == qui && ici.as_deref() == Some(id.as_str());
             if par_mac || par_ip {
@@ -375,7 +375,7 @@ pub fn cle_usb() -> Option<PathBuf> {
 /// Données (historique des appareils, rapports) : sur la clé USB quand elle est branchée,
 /// pour qu'elles voyagent avec le programme ; sinon dans le dossier local de l'ordinateur.
 pub fn dossier_donnees() -> PathBuf {
-    cle_usb().map(|c| c.join("donnees")).unwrap_or_else(dossier_local)
+    cle_usb().map_or_else(dossier_local, |c| c.join("donnees"))
 }
 
 /// Données propres à cet ordinateur (quarantaine antivirus : on ne transporte pas de malware sur une clé).
@@ -413,7 +413,7 @@ fn parse_ports(spec: &str) -> Result<Vec<u16>, String> {
             None => ports.push(port(morceau)?),
         }
     }
-    ports.sort();
+    ports.sort_unstable();
     ports.dedup();
     Ok(ports)
 }
@@ -589,7 +589,7 @@ pub async fn executer(o: Options) -> Result<Rapport, String> {
 
     if bavard {
         eprintln!("{GRIS}{} appareil(s) trouvé(s). Scan des ports…{RESET}", vivantes.len());
-        if ips.iter().all(|ip| ip.is_loopback()) {
+        if ips.iter().all(std::net::Ipv4Addr::is_loopback) {
             eprintln!(
                 "{GRIS}Note : 127.0.0.1 montre aussi les services réservés à cette machine. Pour ce qui est vraiment exposé au réseau : netscan machine.{RESET}"
             );
@@ -714,13 +714,13 @@ pub async fn executer(o: Options) -> Result<Rapport, String> {
                 });
             a.ip = h.ip;
             a.nom = h.nom.clone().or(a.nom.take());
-            a.fabricant = h.fabricant.clone();
+            a.fabricant.clone_from(&h.fabricant);
             a.ports.extend(h.ports.iter().map(|p| p.port));
             a.premier_vu.get_or_insert_with(|| jour.clone());
             a.dernier_vu = Some(jour.clone());
         }
         if nom_reseau.is_some() {
-            histo.nom = nom_reseau.clone();
+            histo.nom.clone_from(&nom_reseau);
         }
         base.enregistrer(&chemins);
     }

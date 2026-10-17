@@ -1,5 +1,6 @@
 //! Audit de sécurité Windows 10/11 via PowerShell (sans droits administrateur pour l'audit).
 
+use std::fmt::Write;
 use std::process::Command;
 
 use super::{Audit, Constat, alerte, impossible, ok, score};
@@ -52,7 +53,8 @@ fn script_admin(commandes: &[String]) -> String {
         // Un programme externe (DISM, sfc, netsh…) en échec ne lève pas d'erreur PowerShell : seul son code de
         // retour le dit. On le lit après chaque commande (3010 = réussi, redémarrage demandé) et on continue :
         // dans « Internet ne marche plus », un netsh en échec ne doit pas empêcher de renouveler l'adresse.
-        script += &format!(
+        let _ = write!(
+            script,
             "  Write-Host ''; Write-Host '> {}{note}' -ForegroundColor Yellow\n  $global:LASTEXITCODE = 0\n  {c}\n  \
              if ($LASTEXITCODE -eq 3010) {{ Write-Host '  OK (redémarrage nécessaire)' -ForegroundColor Green }}\n  \
              elseif ($LASTEXITCODE) {{ $echecs++; Write-Host \"  Échec (code $LASTEXITCODE) : voir le message ci-dessus\" -ForegroundColor Red }}\n  \
@@ -86,7 +88,7 @@ pub fn powershell_admin(commandes: &[String]) -> bool {
     // BOM : sans lui, Windows PowerShell 5.1 lit le fichier en ANSI et casse les accents.
     let contenu = format!("\u{feff}{entete}{}\r\n", script_admin(commandes).replace('\n', "\r\n"));
     if std::fs::create_dir_all(&dossier)
-        .and_then(|_| std::fs::write(&chemin, contenu))
+        .and_then(|()| std::fs::write(&chemin, contenu))
         .is_err()
     {
         println!(
@@ -345,7 +347,7 @@ fn invite() -> Constat {
     }
 }
 
-fn ports_ecoute(pare_feu_actif: bool, ip_lan: Option<String>) -> Vec<Constat> {
+fn ports_ecoute(pare_feu_actif: bool, ip_lan: Option<&str>) -> Vec<Constat> {
     let Some(liste) = ps(
         "Get-NetTCPConnection -State Listen | ForEach-Object { \"$($_.LocalAddress)|$($_.LocalPort)|$((Get-Process -Id $_.OwningProcess -ErrorAction SilentlyContinue).ProcessName)\" }",
     ) else {
@@ -377,7 +379,7 @@ fn ports_ecoute(pare_feu_actif: bool, ip_lan: Option<String>) -> Vec<Constat> {
         else {
             continue;
         };
-        let expose = matches!(adresse, "0.0.0.0" | "::") || ip_lan.as_deref() == Some(adresse);
+        let expose = matches!(adresse, "0.0.0.0" | "::") || ip_lan == Some(adresse);
         if !expose || vus.contains(&port) || (port >= 49152 && systeme.contains(&programme)) {
             continue;
         }
@@ -394,13 +396,7 @@ fn ports_ecoute(pare_feu_actif: bool, ip_lan: Option<String>) -> Vec<Constat> {
             ));
             continue;
         }
-        let niveau = match (pare_feu_actif, i.niveau) {
-            (true, Niveau::Critique) => Niveau::Eleve,
-            (true, Niveau::Eleve) => Niveau::Moyen,
-            (true, _) => Niveau::Info,
-            (false, Niveau::Info) => Niveau::Moyen,
-            (false, n) => n,
-        };
+        let niveau = super::niveau_expose(pare_feu_actif, i.niveau);
         let constat = alerte(
             "Ports en écoute",
             niveau,
@@ -461,7 +457,7 @@ pub fn auditer() -> Audit {
     let ip_lan = crate::scan::reseau_local().map(|l| l.1.to_string());
     let mut constats = vec![feu];
     constats.extend(antivirus());
-    constats.extend(ports_ecoute(feu_actif, ip_lan));
+    constats.extend(ports_ecoute(feu_actif, ip_lan.as_deref()));
     constats.extend(smb1());
     constats.push(bureau_distance());
     constats.push(uac());

@@ -85,8 +85,9 @@ fn base_presente() -> bool {
     .any(|d| {
         std::fs::read_dir(d).is_ok_and(|d| {
             d.flatten().any(|f| {
-                let n = f.file_name().to_string_lossy().into_owned();
-                n.ends_with(".cvd") || n.ends_with(".cld")
+                std::path::Path::new(&f.file_name())
+                    .extension()
+                    .is_some_and(|e| e.eq_ignore_ascii_case("cvd") || e.eq_ignore_ascii_case("cld"))
             })
         })
     })
