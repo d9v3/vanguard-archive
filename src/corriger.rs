@@ -98,7 +98,7 @@ pub fn proposer(constats: &[Constat]) -> Vec<&'static str> {
 
 /// Propose les corrections de la machine, puis la marche à suivre pour le reste. Retourne le nouvel audit.
 pub fn corriger(audit: &Audit, reseau: Option<&Rapport>) -> Option<Audit> {
-    titre("Corrections");
+    titre(tr!("Corrections", "Fixes"));
     let applique = !proposer(&audit.constats).is_empty();
 
     if let Some(r) = reseau {

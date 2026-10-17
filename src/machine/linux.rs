@@ -11,6 +11,7 @@ const SSHD_NETSCAN: &str = "/etc/ssh/sshd_config.d/00-netscan.conf";
 /// Réglages du noyau posés par netscan, gardés au redémarrage.
 const SYSCTL_NETSCAN: &str = "/etc/sysctl.d/99-netscan.conf";
 use crate::risk::{Niveau, info_port};
+use crate::{tr, trf, trw};
 
 pub const NOM: &str = "Linux";
 
@@ -209,11 +210,17 @@ pub(crate) fn ufw_actif() -> bool {
 fn pare_feu() -> Constat {
     let installer_ufw = format!(
         "command -v ufw >/dev/null || {}",
-        Paquets::detecter().map_or("echo 'Installe ufw avec ta distribution'".to_string(), |g| g
-            .installer("ufw"))
+        Paquets::detecter().map_or(
+            tr!(
+                "echo 'Installe ufw avec ta distribution'",
+                "echo 'Install ufw with your distribution'"
+            )
+            .to_string(),
+            |g| g.installer("ufw")
+        )
     );
     if !systemd() {
-        return impossible("Pare-feu", "systemd absent");
+        return impossible("Pare-feu", tr!("systemd absent", "systemd missing"));
     }
     if ufw_actif() {
         // Actif ne suffit pas : encore faut-il qu'il bloque les connexions entrantes par défaut.
@@ -224,14 +231,26 @@ fn pare_feu() -> Constat {
             Some("ACCEPT") => alerte(
                 "Pare-feu",
                 Niveau::Eleve,
-                "ufw est actif mais accepte toutes les connexions entrantes par défaut : il ne protège rien.",
+                tr!(
+                    "ufw est actif mais accepte toutes les connexions entrantes par défaut : il ne protège rien.",
+                    "ufw is running but accepts all incoming connections by default: it protects nothing."
+                ),
             )
             .corriger(
-                "Bloquer par défaut les connexions entrantes",
+                tr!(
+                    "Bloquer par défaut les connexions entrantes",
+                    "Block incoming connections by default"
+                ),
                 &["sudo ufw default deny incoming"],
             ),
-            Some(p) => ok("Pare-feu", format!("ufw est actif, entrées refusées par défaut ({p}).")),
-            None => ok("Pare-feu", "ufw est actif."),
+            Some(p) => ok(
+                "Pare-feu",
+                trf!(
+                    "ufw est actif, entrées refusées par défaut ({p}).",
+                    "ufw is running, incoming refused by default ({p})."
+                ),
+            ),
+            None => ok("Pare-feu", tr!("ufw est actif.", "ufw is running.")),
         }
     } else if service_actif("firewalld") {
         // La zone « trusted » laisse tout passer.
@@ -239,14 +258,26 @@ fn pare_feu() -> Constat {
             Some(z) if z == "trusted" => alerte(
                 "Pare-feu",
                 Niveau::Eleve,
-                "firewalld est actif mais en zone « trusted » : tout est accepté.",
+                tr!(
+                    "firewalld est actif mais en zone « trusted » : tout est accepté.",
+                    "firewalld is running but in the “trusted” zone: everything is accepted."
+                ),
             )
             .corriger(
-                "Passer la zone par défaut en « public »",
+                tr!(
+                    "Passer la zone par défaut en « public »",
+                    "Set the default zone to “public”"
+                ),
                 &["sudo firewall-cmd --set-default-zone=public"],
             ),
-            Some(z) => ok("Pare-feu", format!("firewalld est actif (zone « {z} »).")),
-            None => ok("Pare-feu", "firewalld est actif."),
+            Some(z) => ok(
+                "Pare-feu",
+                trf!(
+                    "firewalld est actif (zone « {z} »).",
+                    "firewalld is running (zone “{z}”)."
+                ),
+            ),
+            None => ok("Pare-feu", tr!("firewalld est actif.", "firewalld is running.")),
         }
     } else if let Some(s) = ["nftables", "iptables", "ip6tables"]
         .into_iter()
@@ -254,16 +285,25 @@ fn pare_feu() -> Constat {
     {
         ok(
             "Pare-feu",
-            format!("{s} est actif (règles non lisibles sans droits root)."),
+            trf!(
+                "{s} est actif (règles non lisibles sans droits root).",
+                "{s} is running (rules not readable without root rights)."
+            ),
         )
     } else {
         alerte(
             "Pare-feu",
             Niveau::Eleve,
-            "Aucun pare-feu actif : tout service ouvert est joignable depuis le réseau.",
+            tr!(
+                "Aucun pare-feu actif : tout service ouvert est joignable depuis le réseau.",
+                "No firewall running: every open service can be reached from the network."
+            ),
         )
         .corriger(
-            "Activer ufw : bloquer les connexions entrantes, autoriser les sortantes",
+            tr!(
+                "Activer ufw : bloquer les connexions entrantes, autoriser les sortantes",
+                "Turn ufw on: block incoming connections, allow outgoing ones"
+            ),
             &[
                 &installer_ufw,
                 "sudo ufw default deny incoming",
@@ -306,7 +346,11 @@ fn ports_ecoute(pare_feu_actif: bool, ufw: bool) -> Vec<Constat> {
     let bloques = super::ports_bloques();
     for (proto, options) in [("tcp", "-Htlnp"), ("udp", "-Hulnp")] {
         let Some(ss) = sortie("ss", &[options]) else {
-            return vec![alerte("Ports en écoute", Niveau::Info, "Commande ss indisponible.")];
+            return vec![alerte(
+                "Ports en écoute",
+                Niveau::Info,
+                tr!("Commande ss indisponible.", "ss command unavailable."),
+            )];
         };
         for ligne in ss.lines() {
             let c: Vec<&str> = ligne.split_whitespace().collect();
@@ -333,14 +377,16 @@ fn ports_ecoute(pare_feu_actif: bool, ufw: bool) -> Vec<Constat> {
             let programme = c
                 .get(5)
                 .and_then(|u| u.split('"').nth(1))
-                .unwrap_or("programme inconnu (root ?)");
+                .unwrap_or(tr!("programme inconnu (root ?)", "unknown program (root?)"));
             let niveau = super::niveau_expose(pare_feu_actif, i.niveau);
             let constat = alerte(
                 "Ports en écoute",
                 niveau,
-                format!(
+                trf!(
                     "{port}/{proto} ({}) ouvert sur le réseau par « {programme} ». {}",
-                    i.service, i.conseil
+                    "{port}/{proto} ({}) open to the network by “{programme}”. {}",
+                    i.service,
+                    i.conseil
                 ),
             );
             let deny = format!("sudo ufw deny {port}/{proto}");
@@ -349,8 +395,8 @@ fn ports_ecoute(pare_feu_actif: bool, ufw: bool) -> Vec<Constat> {
                 constats.push(alerte(
                     "Ports en écoute",
                     Niveau::Info,
-                    format!(
-                        "{cle} ({}) ouvert par « {programme} », bloqué en entrée par la règle ufw que netscan a ajoutée (vérifier : sudo ufw status).",
+                    trf!(
+                        "{cle} ({}) ouvert par « {programme} », bloqué en entrée par la règle ufw que netscan a ajoutée (vérifier : sudo ufw status).", "{cle} ({}) opened by “{programme}”, blocked inbound by the ufw rule netscan added (check: sudo ufw status).",
                         i.service
                     ),
                 ));
@@ -358,7 +404,7 @@ fn ports_ecoute(pare_feu_actif: bool, ufw: bool) -> Vec<Constat> {
             }
             constats.push(match programme {
                 "ollama" => constat.corriger(
-                    "Faire écouter Ollama uniquement en local (127.0.0.1)",
+                    tr!("Faire écouter Ollama uniquement en local (127.0.0.1)", "Make Ollama listen locally only (127.0.0.1)"),
                     &[
                         "sudo mkdir -p /etc/systemd/system/ollama.service.d",
                         "printf '[Service]\\nEnvironment=OLLAMA_HOST=127.0.0.1\\n' | sudo tee /etc/systemd/system/ollama.service.d/netscan.conf >/dev/null",
@@ -371,19 +417,21 @@ fn ports_ecoute(pare_feu_actif: bool, ufw: bool) -> Vec<Constat> {
                 "steam" => match remote_play_steam() {
                     // Réglage déjà coupé : le port vient d'un Steam pas redémarré, ou de sa découverte locale.
                     Some(false) => constat.manuel(
-                        "Remote Play est déjà désactivé dans Steam, mais Steam garde le port qu'il a ouvert au démarrage : \
+                        tr!("Remote Play est déjà désactivé dans Steam, mais Steam garde le port qu'il a ouvert au démarrage : \
                          quitte complètement Steam et relance-le. S'il reste ouvert, c'est la découverte des autres PC Steam \
-                         du réseau ; ton pare-feu le bloque de toute façon",
+                         du réseau ; ton pare-feu le bloque de toute façon", "Remote Play is already off in Steam, but Steam keeps the port it opened at startup: \
+                         quit Steam completely and start it again. If it stays open, it is the discovery of the other Steam PCs \
+                         on the network; your firewall blocks it anyway"),
                         &[],
                     ),
                     _ => constat.manuel(
-                        "Si tu n'utilises pas Remote Play : Steam > Paramètres > Remote Play > décocher « Activer Remote Play »",
+                        tr!("Si tu n'utilises pas Remote Play : Steam > Paramètres > Remote Play > décocher « Activer Remote Play »", "If you do not use Remote Play: Steam > Settings > Remote Play > uncheck “Enable Remote Play”"),
                         &[],
                     ),
                 },
                 _ if niveau >= Niveau::Moyen && ufw => {
                     constat
-                        .corriger(format!("Bloquer le port {port}/{proto} dans le pare-feu"), &[&deny])
+                        .corriger(trf!("Bloquer le port {port}/{proto} dans le pare-feu", "Block port {port}/{proto} in the firewall"), &[&deny])
                         .bloquant(cle)
                 }
                 _ => constat,
@@ -393,7 +441,10 @@ fn ports_ecoute(pare_feu_actif: bool, ufw: bool) -> Vec<Constat> {
     if constats.is_empty() {
         constats.push(ok(
             "Ports en écoute",
-            "Aucun service TCP ou UDP exposé au réseau (tout écoute en local).",
+            tr!(
+                "Aucun service TCP ou UDP exposé au réseau (tout écoute en local).",
+                "No TCP or UDP service exposed to the network (everything listens locally)."
+            ),
         ));
     }
     constats
@@ -466,13 +517,13 @@ fn docker() -> Vec<Constat> {
             alerte(
                 "Docker",
                 Niveau::Eleve,
-                format!(
-                    "Conteneur « {nom} » : port(s) {} publié(s) hors de la boucle locale. Docker passe devant le pare-feu : joignable(s) depuis le réseau.",
+                trf!(
+                    "Conteneur « {nom} » : port(s) {} publié(s) hors de la boucle locale. Docker passe devant le pare-feu : joignable(s) depuis le réseau.", "Container “{nom}”: port(s) {} published outside the loopback. Docker bypasses the firewall: reachable from the network.",
                     exposes.join(", ")
                 ),
             )
             .manuel(
-                "Publier seulement en local, puis recréer le conteneur : -p 127.0.0.1:PORT:PORT, ou dans docker-compose « \"127.0.0.1:PORT:PORT\" »",
+                tr!("Publier seulement en local, puis recréer le conteneur : -p 127.0.0.1:PORT:PORT, ou dans docker-compose « \"127.0.0.1:PORT:PORT\" »", "Publish locally only, then recreate the container: -p 127.0.0.1:PORT:PORT, or in docker-compose “\"127.0.0.1:PORT:PORT\"”"),
                 &[],
             ),
         );
@@ -480,7 +531,10 @@ fn docker() -> Vec<Constat> {
     if constats.is_empty() {
         constats.push(ok(
             "Docker",
-            format!("Aucun port de conteneur exposé au réseau ({actifs} conteneur(s) actif(s))."),
+            trf!(
+                "Aucun port de conteneur exposé au réseau ({actifs} conteneur(s) actif(s)).",
+                "No container port exposed to the network ({actifs} running container(s))."
+            ),
         ));
     }
     constats
@@ -525,11 +579,17 @@ fn port_docker_proxy(args: &[String]) -> Option<(String, String)> {
 fn docker_sans_acces(procs: &[(String, Vec<String>)]) -> Constat {
     // /proc masqué (hidepid) : on ne verrait aucun processus d'un autre compte, donc on ne conclut rien.
     if !procs.iter().any(|(n, _)| n == "dockerd") {
-        return impossible("Docker", "démon arrêté ou processus d'un autre compte masqués");
+        return impossible(
+            "Docker",
+            tr!(
+                "démon arrêté ou processus d'un autre compte masqués",
+                "daemon stopped or processes of another account hidden"
+            ),
+        );
     }
     let conteneurs = procs.iter().filter(|(n, _)| n.starts_with("containerd-shim")).count();
     if conteneurs == 0 {
-        return ok("Docker", "Aucun conteneur actif.");
+        return ok("Docker", tr!("Aucun conteneur actif.", "No running container."));
     }
     let mut exposes: Vec<String> = procs
         .iter()
@@ -548,13 +608,13 @@ fn docker_sans_acces(procs: &[(String, Vec<String>)]) -> Constat {
         return alerte(
             "Docker",
             Niveau::Eleve,
-            format!(
-                "{conteneurs} conteneur(s) actif(s), port(s) {} publié(s) hors de la boucle locale. Docker passe devant le pare-feu : joignable(s) depuis le réseau.",
+            trf!(
+                "{conteneurs} conteneur(s) actif(s), port(s) {} publié(s) hors de la boucle locale. Docker passe devant le pare-feu : joignable(s) depuis le réseau.", "{conteneurs} running container(s), port(s) {} published outside the loopback. Docker bypasses the firewall: reachable from the network.",
                 exposes.join(", ")
             ),
         )
         .manuel(
-            "Publier seulement en local, puis recréer le conteneur : -p 127.0.0.1:PORT:PORT, ou dans docker-compose « \"127.0.0.1:PORT:PORT\" »",
+            tr!("Publier seulement en local, puis recréer le conteneur : -p 127.0.0.1:PORT:PORT, ou dans docker-compose « \"127.0.0.1:PORT:PORT\" »", "Publish locally only, then recreate the container: -p 127.0.0.1:PORT:PORT, or in docker-compose “\"127.0.0.1:PORT:PORT\"”"),
             &[],
         );
     }
@@ -564,19 +624,25 @@ fn docker_sans_acces(procs: &[(String, Vec<String>)]) -> Constat {
     if sans_proxy {
         impossible(
             "Docker",
-            "conteneurs actifs et userland-proxy coupé : ports publiés illisibles sans le groupe docker",
+            tr!(
+                "conteneurs actifs et userland-proxy coupé : ports publiés illisibles sans le groupe docker",
+                "running containers and userland-proxy off: published ports unreadable without the docker group"
+            ),
         )
     } else {
         ok(
             "Docker",
-            format!("{conteneurs} conteneur(s) actif(s), aucun port publié hors de la boucle locale."),
+            trf!(
+                "{conteneurs} conteneur(s) actif(s), aucun port publié hors de la boucle locale.",
+                "{conteneurs} running container(s), no port published outside the loopback."
+            ),
         )
     }
 }
 
 fn ssh_serveur() -> Constat {
     if !systemd() {
-        return impossible("SSH", "systemd absent");
+        return impossible("SSH", tr!("systemd absent", "systemd missing"));
     }
     // « sshd » sur Arch et Fedora, « ssh » sur Debian, Ubuntu et Mint. Ubuntu (22.10+) le lance à la demande
     // par ssh.socket : le service paraît arrêté alors que le port 22 accepte les connexions.
@@ -584,7 +650,7 @@ fn ssh_serveur() -> Constat {
         .iter()
         .any(|s| service_actif(s))
     {
-        return ok("SSH", "Serveur SSH désactivé.");
+        return ok("SSH", tr!("Serveur SSH désactivé.", "SSH server off."));
     }
     let mut conf = String::new();
     // sshd garde la première valeur trouvée ; sur Arch, les fichiers .d sont inclus avant le reste.
@@ -606,8 +672,13 @@ fn ssh_serveur() -> Constat {
             })
     };
     if valeur("PermitRootLogin").as_deref() == Some("yes") {
-        return alerte("SSH", Niveau::Eleve, "Connexion root autorisée en SSH.").corriger(
-            "Interdire la connexion SSH en root",
+        return alerte(
+            "SSH",
+            Niveau::Eleve,
+            tr!("Connexion root autorisée en SSH.", "Root login allowed over SSH."),
+        )
+        .corriger(
+            tr!("Interdire la connexion SSH en root", "Forbid root login over SSH"),
             &[
                 &format!("echo 'PermitRootLogin no' | sudo tee -a {SSHD_NETSCAN} >/dev/null"),
                 "sudo sshd -t && sudo systemctl reload sshd",
@@ -619,11 +690,14 @@ fn ssh_serveur() -> Constat {
         let c = alerte(
             "SSH",
             Niveau::Moyen,
-            "Connexion SSH par mot de passe permise (vulnérable au brute force).",
+            tr!(
+                "Connexion SSH par mot de passe permise (vulnérable au brute force).",
+                "SSH password login allowed (vulnerable to brute force)."
+            ),
         );
         return if a_des_cles {
             c.corriger(
-                "N'accepter que les clés SSH (tu as déjà des clés autorisées)",
+                tr!("N'accepter que les clés SSH (tu as déjà des clés autorisées)", "Accept SSH keys only (you already have authorized keys)"),
                 &[
                     &format!("printf 'PasswordAuthentication no\\nKbdInteractiveAuthentication no\\n' | sudo tee -a {SSHD_NETSCAN} >/dev/null"),
                     "sudo sshd -t && sudo systemctl reload sshd",
@@ -632,12 +706,18 @@ fn ssh_serveur() -> Constat {
         } else {
             // Sans clé autorisée, couper les mots de passe t'enfermerait dehors.
             c.manuel(
-                "Ajoute d'abord ta clé depuis l'autre ordinateur (ssh-copy-id), puis relance la correction. Ou désactive SSH si inutile :",
+                tr!("Ajoute d'abord ta clé depuis l'autre ordinateur (ssh-copy-id), puis relance la correction. Ou désactive SSH si inutile :", "First add your key from the other computer (ssh-copy-id), then run the fix again. Or turn SSH off if unused:"),
                 &["sudo systemctl disable --now sshd"],
             )
         };
     }
-    ok("SSH", "Serveur SSH actif, clés uniquement, root interdit.")
+    ok(
+        "SSH",
+        tr!(
+            "Serveur SSH actif, clés uniquement, root interdit.",
+            "SSH server running, keys only, root forbidden."
+        ),
+    )
 }
 
 /// Paquets à mettre à jour, un par ligne commençant par son nom ; `None` si on ne peut pas savoir.
@@ -737,40 +817,64 @@ fn autres_mises_a_jour() -> Vec<Constat> {
 
         if let Some(t) = flatpak {
             constats.push(match t.join().ok().flatten() {
-                None => impossible("Flatpak", "hors ligne ?"),
-                Some(l) if lignes(&l) == 0 => ok("Flatpak", "Applications Flatpak à jour."),
+                None => impossible("Flatpak", tr!("hors ligne ?", "offline?")),
+                Some(l) if lignes(&l) == 0 => ok(
+                    "Flatpak",
+                    tr!("Applications Flatpak à jour.", "Flatpak apps up to date."),
+                ),
                 Some(l) => alerte(
                     "Flatpak",
                     Niveau::Moyen,
-                    format!("{} application(s) Flatpak à mettre à jour.", lignes(&l)),
+                    trf!(
+                        "{} application(s) Flatpak à mettre à jour.",
+                        "{} Flatpak app(s) to update.",
+                        lignes(&l)
+                    ),
                 )
-                .corriger("Mettre à jour les applications Flatpak", &["flatpak update -y"]),
+                .corriger(
+                    tr!("Mettre à jour les applications Flatpak", "Update the Flatpak apps"),
+                    &["flatpak update -y"],
+                ),
             });
         }
         if let Some(t) = snap {
             // « All snaps up to date » part sur la sortie d'erreur : sortie vide = à jour. Une ligne d'en-tête sinon.
             constats.push(match t.join().ok().flatten() {
-                None => impossible("Snap", "snapd injoignable"),
-                Some(l) if lignes(&l) <= 1 => ok("Snap", "Paquets Snap à jour."),
+                None => impossible("Snap", tr!("snapd injoignable", "snapd unreachable")),
+                Some(l) if lignes(&l) <= 1 => ok("Snap", tr!("Paquets Snap à jour.", "Snap packages up to date.")),
                 Some(l) => alerte(
                     "Snap",
                     Niveau::Moyen,
-                    format!("{} paquet(s) Snap à mettre à jour.", lignes(&l) - 1),
+                    trf!(
+                        "{} paquet(s) Snap à mettre à jour.",
+                        "{} Snap package(s) to update.",
+                        lignes(&l) - 1
+                    ),
                 )
-                .corriger("Mettre à jour les paquets Snap", &["sudo snap refresh"]),
+                .corriger(
+                    tr!("Mettre à jour les paquets Snap", "Update the Snap packages"),
+                    &["sudo snap refresh"],
+                ),
             });
         }
         if let Some((outil, t)) = aur {
             constats.push(match t.join().ok().flatten() {
-                None => impossible("AUR", "hors ligne ?"),
-                Some(l) if lignes(&l) == 0 => ok("AUR", "Paquets AUR à jour."),
+                None => impossible("AUR", tr!("hors ligne ?", "offline?")),
+                Some(l) if lignes(&l) == 0 => ok("AUR", tr!("Paquets AUR à jour.", "AUR packages up to date.")),
                 Some(l) => alerte(
                     "AUR",
                     Niveau::Moyen,
-                    format!("{} paquet(s) AUR à mettre à jour.", lignes(&l)),
+                    trf!(
+                        "{} paquet(s) AUR à mettre à jour.",
+                        "{} AUR package(s) to update.",
+                        lignes(&l)
+                    ),
                 )
                 .manuel(
-                    "Les paquets AUR se compilent : mets-les à jour toi-même et relis ce qui change",
+                    tr!(
+                        "Les paquets AUR se compilent : mets-les à jour toi-même et relis ce qui change",
+                        "AUR packages are compiled: update them yourself and read what changes"
+                    ),
                     &[&format!("{outil} -Sua")],
                 ),
             });
@@ -782,7 +886,13 @@ fn autres_mises_a_jour() -> Vec<Constat> {
                 .flatten()
                 .and_then(|j| serde_json::from_str::<serde_json::Value>(&j).ok());
             constats.push(match json {
-                None => impossible("Firmware", "métadonnées fwupd absentes : fwupdmgr refresh"),
+                None => impossible(
+                    "Firmware",
+                    tr!(
+                        "métadonnées fwupd absentes : fwupdmgr refresh",
+                        "fwupd metadata missing: fwupdmgr refresh"
+                    ),
+                ),
                 Some(v) => {
                     let appareils: Vec<String> = v["Devices"]
                         .as_array()
@@ -792,15 +902,28 @@ fn autres_mises_a_jour() -> Vec<Constat> {
                         .filter_map(|d| d["Name"].as_str().map(str::to_string))
                         .collect();
                     if appareils.is_empty() {
-                        ok("Firmware", "Firmwares à jour (BIOS, SSD, périphériques).")
+                        ok(
+                            "Firmware",
+                            tr!(
+                                "Firmwares à jour (BIOS, SSD, périphériques).",
+                                "Firmware up to date (BIOS, SSD, devices)."
+                            ),
+                        )
                     } else {
                         alerte(
                             "Firmware",
                             Niveau::Moyen,
-                            format!("Mise à jour de firmware disponible : {}.", appareils.join(", ")),
+                            trf!(
+                                "Mise à jour de firmware disponible : {}.",
+                                "Firmware update available: {}.",
+                                appareils.join(", ")
+                            ),
                         )
                         .manuel(
-                            "Installer les firmwares (un redémarrage peut être demandé)",
+                            tr!(
+                                "Installer les firmwares (un redémarrage peut être demandé)",
+                                "Install the firmware (a restart may be requested)"
+                            ),
                             &["fwupdmgr update"],
                         )
                     }
@@ -827,16 +950,22 @@ fn age_cache_apt() -> Option<u64> {
 
 fn mises_a_jour() -> Constat {
     let Some(gestion) = Paquets::detecter() else {
-        return impossible("Mises à jour", "gestionnaire de paquets non reconnu");
+        return impossible(
+            "Mises à jour",
+            tr!("gestionnaire de paquets non reconnu", "package manager not recognized"),
+        );
     };
     let Some(liste) = liste_mises_a_jour(gestion) else {
         let raison = if gestion == Paquets::Apt {
-            "liste des paquets jamais téléchargée"
+            tr!("liste des paquets jamais téléchargée", "package list never downloaded")
         } else {
-            "outil absent ou hors ligne"
+            tr!("outil absent ou hors ligne", "tool missing or offline")
         };
         return impossible("Mises à jour", raison).corriger(
-            "Télécharger la liste des paquets et mettre à jour",
+            tr!(
+                "Télécharger la liste des paquets et mettre à jour",
+                "Download the package list and update"
+            ),
             &[gestion.mise_a_jour()],
         );
     };
@@ -850,10 +979,16 @@ fn mises_a_jour() -> Constat {
             Some(j) => alerte(
                 "Mises à jour",
                 Niveau::Moyen,
-                format!("Aucune mise à jour connue, mais la liste date de {j} jours."),
+                trf!(
+                    "Aucune mise à jour connue, mais la liste date de {j} jours.",
+                    "No known update, but the list is {j} days old."
+                ),
             )
-            .corriger("Rafraîchir la liste et mettre à jour", &[gestion.mise_a_jour()]),
-            None => ok("Mises à jour", "Système à jour."),
+            .corriger(
+                tr!("Rafraîchir la liste et mettre à jour", "Refresh the list and update"),
+                &[gestion.mise_a_jour()],
+            ),
+            None => ok("Mises à jour", tr!("Système à jour.", "System up to date.")),
         };
     }
     let n = liste.len();
@@ -876,9 +1011,15 @@ fn mises_a_jour() -> Constat {
     alerte(
         "Mises à jour",
         niveau,
-        format!("{n} paquet(s) à mettre à jour, dont {sensibles} sensible(s) : noyau, openssl, navigateur…"),
+        trf!(
+            "{n} paquet(s) à mettre à jour, dont {sensibles} sensible(s) : noyau, openssl, navigateur…",
+            "{n} package(s) to update, {sensibles} of them sensitive: kernel, openssl, browser…"
+        ),
     )
-    .corriger("Mettre le système à jour", &[gestion.mise_a_jour()])
+    .corriger(
+        tr!("Mettre le système à jour", "Update the system"),
+        &[gestion.mise_a_jour()],
+    )
 }
 
 /// Paquet installé touché par une faille publiée (CVE, avis de sécurité de la distribution).
@@ -978,13 +1119,19 @@ fn failles_zypper(texte: &str) -> Vec<Faille> {
 fn failles_connues() -> Constat {
     const CAT: &str = "Failles connues";
     let Some(gestion) = Paquets::detecter() else {
-        return impossible(CAT, "gestionnaire de paquets non reconnu");
+        return impossible(
+            CAT,
+            tr!("gestionnaire de paquets non reconnu", "package manager not recognized"),
+        );
     };
     let failles = match gestion {
         Paquets::Pacman => {
             if !Path::new("/usr/bin/arch-audit").exists() {
-                return impossible(CAT, "arch-audit absent").corriger(
-                    "Installer arch-audit, qui lit le suivi de sécurité d'Arch (security.archlinux.org)",
+                return impossible(CAT, tr!("arch-audit absent", "arch-audit missing")).corriger(
+                    tr!(
+                        "Installer arch-audit, qui lit le suivi de sécurité d'Arch (security.archlinux.org)",
+                        "Install arch-audit, which reads the Arch security tracker (security.archlinux.org)"
+                    ),
                     &[&gestion.installer("arch-audit")],
                 );
             }
@@ -992,12 +1139,25 @@ fn failles_connues() -> Constat {
                 .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
             {
                 Some(json) => failles_arch(&json),
-                None => return impossible(CAT, "suivi de sécurité injoignable, hors ligne ?"),
+                None => {
+                    return impossible(
+                        CAT,
+                        tr!(
+                            "suivi de sécurité injoignable, hors ligne ?",
+                            "security tracker unreachable, offline?"
+                        ),
+                    );
+                }
             }
         }
         Paquets::Apt => match liste_mises_a_jour(gestion) {
             Some(l) => failles_apt(&l),
-            None => return impossible(CAT, "liste des paquets jamais téléchargée"),
+            None => {
+                return impossible(
+                    CAT,
+                    tr!("liste des paquets jamais téléchargée", "package list never downloaded"),
+                );
+            }
         },
         Paquets::Dnf => {
             match crate::commande::lancer(
@@ -1007,7 +1167,15 @@ fn failles_connues() -> Constat {
                 120,
             ) {
                 Some(r) if r.code == Some(0) => failles_dnf(&r.sortie),
-                _ => return impossible(CAT, "avis de sécurité de dnf injoignables, hors ligne ?"),
+                _ => {
+                    return impossible(
+                        CAT,
+                        tr!(
+                            "avis de sécurité de dnf injoignables, hors ligne ?",
+                            "dnf security advisories unreachable, offline?"
+                        ),
+                    );
+                }
             }
         }
         Paquets::Zypper => {
@@ -1018,7 +1186,15 @@ fn failles_connues() -> Constat {
                 120,
             ) {
                 Some(r) if r.code == Some(0) => failles_zypper(&r.sortie),
-                _ => return impossible(CAT, "avis de sécurité de zypper injoignables, hors ligne ?"),
+                _ => {
+                    return impossible(
+                        CAT,
+                        tr!(
+                            "avis de sécurité de zypper injoignables, hors ligne ?",
+                            "zypper security advisories unreachable, offline?"
+                        ),
+                    );
+                }
             }
         }
     };
@@ -1042,16 +1218,27 @@ fn bilan_failles(gestion: Paquets, failles: &[Faille]) -> Constat {
     // Une faille sans correctif publié : rien à faire de ton côté, la mise à jour viendra. Le suivi d'Arch garde
     // souvent des failles corrigées en amont : on le dit, sans baisser la note.
     let attente = (!sans_correctif.is_empty()).then(|| {
-        format!(
+        trf!(
             "{} paquet(s) touché(s) par une faille encore sans correctif publié : {}.",
+            "{} package(s) affected by a flaw with no published fix yet: {}.",
             sans_correctif.len(),
             resume(&sans_correctif)
         )
     });
     if a_corriger.is_empty() {
         return match attente {
-            Some(t) => alerte(CAT, Niveau::Info, format!("Aucune faille corrigée en attente. {t}")),
-            None => ok(CAT, "Aucun paquet installé n'a de faille connue."),
+            Some(t) => alerte(
+                CAT,
+                Niveau::Info,
+                trf!("Aucune faille corrigée en attente. {t}", "No fixed flaw pending. {t}"),
+            ),
+            None => ok(
+                CAT,
+                tr!(
+                    "Aucun paquet installé n'a de faille connue.",
+                    "No installed package has a known flaw."
+                ),
+            ),
         };
     }
     let pire = failles
@@ -1061,15 +1248,19 @@ fn bilan_failles(gestion: Paquets, failles: &[Faille]) -> Constat {
         .max()
         .unwrap_or(Niveau::Moyen)
         .max(Niveau::Moyen);
-    let mut message = format!(
+    let mut message = trf!(
         "{} paquet(s) avec une faille connue, déjà corrigée dans les dépôts : {}.",
+        "{} package(s) with a known flaw, already fixed in the repositories: {}.",
         a_corriger.len(),
         resume(&a_corriger)
     );
     if let Some(t) = attente {
         let _ = write!(message, " {t}");
     }
-    alerte(CAT, pire, message).corriger("Installer les correctifs de sécurité", &[gestion.mise_a_jour()])
+    alerte(CAT, pire, message).corriger(
+        tr!("Installer les correctifs de sécurité", "Install the security fixes"),
+        &[gestion.mise_a_jour()],
+    )
 }
 
 /// Version du noyau qui tourne (« 7.2.5-3-omarchy »).
@@ -1108,7 +1299,13 @@ fn redemarrage() -> Constat {
     let installes = noyaux_installes();
     // Aucun noyau ici (conteneur, noyau fourni par l'hôte) : rien à comparer.
     if installes.is_empty() {
-        return impossible("Noyau", "aucun noyau installé ici, conteneur ?");
+        return impossible(
+            "Noyau",
+            tr!(
+                "aucun noyau installé ici, conteneur ?",
+                "no kernel installed here, container?"
+            ),
+        );
     }
     let en_cours = installes
         .iter()
@@ -1128,7 +1325,10 @@ fn redemarrage() -> Constat {
     if a_jour {
         ok(
             "Noyau",
-            format!("Le noyau en cours ({noyau}) est le plus récent installé."),
+            trf!(
+                "Le noyau en cours ({noyau}) est le plus récent installé.",
+                "The running kernel ({noyau}) is the newest installed."
+            ),
         )
     } else {
         let nouveau = plus_recent
@@ -1138,9 +1338,15 @@ fn redemarrage() -> Constat {
         alerte(
             "Noyau",
             Niveau::Moyen,
-            format!("Noyau plus récent installé{nouveau} mais pas encore chargé : les correctifs ne sont pas actifs."),
+            trf!(
+                "Noyau plus récent installé{nouveau} mais pas encore chargé : les correctifs ne sont pas actifs.",
+                "Newer kernel installed{nouveau} but not loaded yet: its fixes are not active."
+            ),
         )
-        .manuel("Redémarrer quand c'est pratique", &["systemctl reboot"])
+        .manuel(
+            tr!("Redémarrer quand c'est pratique", "Restart when convenient"),
+            &["systemctl reboot"],
+        )
     }
 }
 
@@ -1200,8 +1406,9 @@ fn pilotes_dkms() -> Option<Constat> {
     if a_refaire.is_empty() {
         return Some(ok(
             "Pilotes DKMS",
-            format!(
+            trf!(
                 "{} compilé(s) pour chaque noyau installé.",
+                "{} built for every installed kernel.",
                 modules.iter().map(|(m, _)| m.as_str()).collect::<Vec<_>>().join(", ")
             ),
         ));
@@ -1209,19 +1416,23 @@ fn pilotes_dkms() -> Option<Constat> {
     let detail: Vec<String> = modules
         .iter()
         .filter(|(_, k)| !k.is_empty())
-        .map(|(m, k)| format!("{m} (noyau {})", k.join(", ")))
+        .map(|(m, k)| trf!("{m} (noyau {})", "{m} (kernel {})", k.join(", ")))
         .collect();
     Some(
         alerte(
             "Pilotes DKMS",
             Niveau::Eleve,
-            format!(
+            trf!(
                 "Pilote pas compilé : {}. Écran noir ou périphérique muet possible au prochain démarrage.",
+                "Driver not built: {}. Black screen or silent device possible at the next boot.",
                 detail.join(", ")
             ),
         )
         .corriger(
-            "Recompiler les pilotes DKMS (les en-têtes du noyau doivent être installés)",
+            tr!(
+                "Recompiler les pilotes DKMS (les en-têtes du noyau doivent être installés)",
+                "Rebuild the DKMS drivers (the kernel headers must be installed)"
+            ),
             &a_refaire
                 .iter()
                 .map(|k| format!("sudo dkms autoinstall -k {k}"))
@@ -1242,8 +1453,9 @@ pub fn mises_a_jour_completes(seulement: Option<&[&str]>) -> Vec<Constat> {
         let noyau = redemarrage();
         let mut constats: Vec<Constat> = paquets
             .map(|t| {
-                t.join()
-                    .unwrap_or_else(|_| impossible("Mises à jour", "vérification interrompue"))
+                t.join().unwrap_or_else(|_| {
+                    impossible("Mises à jour", tr!("vérification interrompue", "check interrupted"))
+                })
             })
             .into_iter()
             .collect();
@@ -1271,15 +1483,15 @@ fn racine_chiffree() -> Option<bool> {
 fn chiffrement_disque() -> Constat {
     // On vérifie le volume du système lui-même : un swap chiffré seul ne protège pas les données.
     match racine_chiffree() {
-        Some(true) => ok("Chiffrement", "Système chiffré (LUKS)."),
-        None => impossible("Chiffrement", "volume racine introuvable, conteneur ?"),
+        Some(true) => ok("Chiffrement", tr!("Système chiffré (LUKS).", "System encrypted (LUKS).")),
+        None => impossible("Chiffrement", tr!("volume racine introuvable, conteneur ?", "root volume not found, container?")),
         Some(false) => alerte(
             "Chiffrement",
             Niveau::Moyen,
-            "Le système n'est pas chiffré : en cas de vol, les données sont lisibles.",
+            tr!("Le système n'est pas chiffré : en cas de vol, les données sont lisibles.", "The system is not encrypted: if stolen, the data can be read."),
         )
         .manuel(
-            "Le chiffrement complet se choisit à l'installation (Omarchy le propose) : à prévoir à la prochaine réinstallation",
+            tr!("Le chiffrement complet se choisit à l'installation (Omarchy le propose) : à prévoir à la prochaine réinstallation", "Full encryption is chosen at install time (Omarchy offers it): plan it for the next reinstall"),
             &[],
         ),
     }
@@ -1295,16 +1507,16 @@ fn demarrage_securise() -> Constat {
         .and_then(|f| std::fs::read(f.path()).ok())
         .is_some_and(|o| o.last() == Some(&1));
     if actif {
-        ok("Secure Boot", "Démarrage sécurisé actif.")
+        ok("Secure Boot", tr!("Démarrage sécurisé actif.", "Secure Boot on."))
     } else {
-        alerte("Secure Boot", Niveau::Info, "Secure Boot désactivé (protège contre les bootkits).")
-            .manuel("Se configure avec sbctl puis dans le BIOS ; voir le wiki Arch « Unified Extensible Firmware Interface/Secure Boot »", &[])
+        alerte("Secure Boot", Niveau::Info, tr!("Secure Boot désactivé (protège contre les bootkits).", "Secure Boot off (it protects against bootkits)."))
+            .manuel(tr!("Se configure avec sbctl puis dans le BIOS ; voir le wiki Arch « Unified Extensible Firmware Interface/Secure Boot »", "Set up with sbctl, then in the BIOS; see the Arch wiki “Unified Extensible Firmware Interface/Secure Boot”"), &[])
     }
 }
 
 fn comptes() -> Constat {
     let Ok(passwd) = std::fs::read_to_string("/etc/passwd") else {
-        return impossible("Comptes", "/etc/passwd illisible");
+        return impossible("Comptes", tr!("/etc/passwd illisible", "/etc/passwd unreadable"));
     };
     let uid0: Vec<&str> = passwd
         .lines()
@@ -1314,15 +1526,22 @@ fn comptes() -> Constat {
         })
         .collect();
     if uid0.is_empty() {
-        ok("Comptes", "Seul root a l'UID 0.")
+        ok("Comptes", tr!("Seul root a l'UID 0.", "Only root has UID 0."))
     } else {
         alerte(
             "Comptes",
             Niveau::Critique,
-            format!("Comptes avec droits root cachés (UID 0) : {}", uid0.join(", ")),
+            trf!(
+                "Comptes avec droits root cachés (UID 0) : {}",
+                "Hidden accounts with root rights (UID 0): {}",
+                uid0.join(", ")
+            ),
         )
         .manuel(
-            "Signe possible d'intrusion : ne pas supprimer à l'aveugle, vérifier d'abord leur origine",
+            tr!(
+                "Signe possible d'intrusion : ne pas supprimer à l'aveugle, vérifier d'abord leur origine",
+                "Possible sign of intrusion: do not delete blindly, check where they come from first"
+            ),
             &["grep ':0:' /etc/passwd"],
         )
     }
@@ -1341,28 +1560,40 @@ fn wifi(passerelle: Option<String>) -> Option<Constat> {
         "xdg-open https://{}",
         passerelle.unwrap_or_else(|| "192.168.1.1".into())
     );
-    let routeur = "Ouvrir l'admin du routeur > Wi-Fi > Sécurité : choisir « WPA2/WPA3 » ou « WPA3 »";
+    let routeur = tr!(
+        "Ouvrir l'admin du routeur > Wi-Fi > Sécurité : choisir « WPA2/WPA3 » ou « WPA3 »",
+        "Open the router admin > Wi-Fi > Security: choose “WPA2/WPA3” or “WPA3”"
+    );
     Some(if secu.is_empty() || secu == "--" {
         alerte(
             "Wi-Fi",
             Niveau::Eleve,
-            format!("« {ssid} » est un réseau ouvert : le trafic non chiffré est visible."),
+            trf!(
+                "« {ssid} » est un réseau ouvert : le trafic non chiffré est visible.",
+                "“{ssid}” is an open network: unencrypted traffic is visible."
+            ),
         )
         .manuel(routeur, &[&admin])
     } else if secu.contains("WEP") || (secu.contains("WPA1") && !secu.contains("WPA2")) {
         alerte(
             "Wi-Fi",
             Niveau::Eleve,
-            format!("« {ssid} » utilise {secu}, cassable en minutes."),
+            trf!(
+                "« {ssid} » utilise {secu}, cassable en minutes.",
+                "“{ssid}” uses {secu}, crackable in minutes."
+            ),
         )
         .manuel(routeur, &[&admin])
     } else if secu.contains("WPA3") {
-        ok("Wi-Fi", format!("« {ssid} » en {secu}."))
+        ok("Wi-Fi", trf!("« {ssid} » en {secu}.", "“{ssid}” uses {secu}."))
     } else {
         alerte(
             "Wi-Fi",
             Niveau::Info,
-            format!("« {ssid} » en {secu}. WPA3 serait mieux si le routeur le permet."),
+            trf!(
+                "« {ssid} » en {secu}. WPA3 serait mieux si le routeur le permet.",
+                "“{ssid}” uses {secu}. WPA3 would be better if the router allows it."
+            ),
         )
         .manuel(routeur, &[&admin])
     })
@@ -1426,53 +1657,108 @@ fn verrouillage_ecran() -> Option<Constat> {
         None
     };
     Some(match delai {
-        None => impossible("Verrouillage", "environnement de bureau non reconnu"),
+        None => impossible(
+            "Verrouillage",
+            tr!(
+                "environnement de bureau non reconnu",
+                "desktop environment not recognized"
+            ),
+        ),
         Some(0) => alerte(
             "Verrouillage",
             Niveau::Moyen,
-            "L'écran ne se verrouille jamais tout seul : un ordinateur laissé ouvert est accessible à tous.",
+            tr!(
+                "L'écran ne se verrouille jamais tout seul : un ordinateur laissé ouvert est accessible à tous.",
+                "The screen never locks by itself: a computer left open is accessible to anyone."
+            ),
         )
         .manuel(
-            "Activer le verrouillage automatique (5 minutes, c'est bien) dans les réglages d'écran du bureau",
+            tr!(
+                "Activer le verrouillage automatique (5 minutes, c'est bien) dans les réglages d'écran du bureau",
+                "Turn on automatic locking (5 minutes is good) in the desktop's display settings"
+            ),
             &[],
         ),
         Some(s) if s > 15 * 60 => alerte(
             "Verrouillage",
             Niveau::Info,
-            format!(
+            trf!(
                 "L'écran se verrouille après {} minutes : 5 à 10 minutes serait plus sûr.",
+                "The screen locks after {} minutes: 5 to 10 minutes would be safer.",
                 s / 60
             ),
         ),
         Some(s) if s >= 60 => ok(
             "Verrouillage",
-            format!("L'écran se verrouille après {} minute(s) d'inactivité.", s / 60),
+            trf!(
+                "L'écran se verrouille après {} minute(s) d'inactivité.",
+                "The screen locks after {} minute(s) of inactivity.",
+                s / 60
+            ),
         ),
-        Some(_) => ok("Verrouillage", "L'écran se verrouille après inactivité."),
+        Some(_) => ok(
+            "Verrouillage",
+            tr!(
+                "L'écran se verrouille après inactivité.",
+                "The screen locks after inactivity."
+            ),
+        ),
     })
 }
 
-/// Réglages de durcissement du noyau (lisibles sans droits) : (réglage, valeur sûre minimale, rôle).
-const DURCISSEMENT: &[(&str, i64, &str)] = &[
-    ("kernel/randomize_va_space", 2, "adresses mémoire aléatoires (ASLR)"),
-    ("kernel/kptr_restrict", 1, "adresses du noyau cachées"),
-    ("kernel/dmesg_restrict", 1, "journal du noyau réservé à root"),
+/// Réglages de durcissement du noyau (lisibles sans droits) : (réglage, valeur sûre minimale, rôle en français
+/// et en anglais ; une constante ne peut pas choisir la langue, `reglages_faibles` le fait).
+const DURCISSEMENT: &[(&str, i64, (&str, &str))] = &[
+    (
+        "kernel/randomize_va_space",
+        2,
+        ("adresses mémoire aléatoires (ASLR)", "random memory addresses (ASLR)"),
+    ),
+    (
+        "kernel/kptr_restrict",
+        1,
+        ("adresses du noyau cachées", "hidden kernel addresses"),
+    ),
+    (
+        "kernel/dmesg_restrict",
+        1,
+        ("journal du noyau réservé à root", "kernel log reserved to root"),
+    ),
     (
         "kernel/yama/ptrace_scope",
         1,
-        "un programme ne peut pas espionner les autres",
+        (
+            "un programme ne peut pas espionner les autres",
+            "a program cannot spy on the others",
+        ),
     ),
-    ("fs/protected_symlinks", 1, "protection des liens symboliques dans /tmp"),
-    ("fs/protected_hardlinks", 1, "protection des liens physiques"),
-    ("net/ipv4/tcp_syncookies", 1, "résistance aux inondations SYN"),
+    (
+        "fs/protected_symlinks",
+        1,
+        (
+            "protection des liens symboliques dans /tmp",
+            "symbolic link protection in /tmp",
+        ),
+    ),
+    (
+        "fs/protected_hardlinks",
+        1,
+        ("protection des liens physiques", "hard link protection"),
+    ),
+    (
+        "net/ipv4/tcp_syncookies",
+        1,
+        ("résistance aux inondations SYN", "SYN flood resistance"),
+    ),
 ];
 
 /// Réglages trop faibles parmi les valeurs lues : (chemin, valeur lue, valeur sûre, rôle).
 fn reglages_faibles(lire: impl Fn(&str) -> Option<i64>) -> Vec<(&'static str, i64, i64, &'static str)> {
     DURCISSEMENT
         .iter()
-        .filter_map(|&(cle, min, role)| {
+        .filter_map(|&(cle, min, (fr, en))| {
             let v = lire(cle)?;
+            let role = if crate::langue::anglais() { en } else { fr };
             (v < min).then_some((cle, v, min, role))
         })
         .collect()
@@ -1489,7 +1775,10 @@ fn durcissement_noyau() -> Constat {
     if faibles.is_empty() {
         return ok(
             "Noyau durci",
-            "Réglages de sécurité du noyau corrects (ASLR, ptrace, dmesg, liens…).",
+            tr!(
+                "Réglages de sécurité du noyau corrects (ASLR, ptrace, dmesg, liens…).",
+                "Kernel security settings are correct (ASLR, ptrace, dmesg, links…)."
+            ),
         );
     }
     let niveau = if faibles.iter().any(|f| f.0 == "kernel/randomize_va_space") {
@@ -1514,10 +1803,13 @@ fn durcissement_noyau() -> Constat {
     alerte(
         "Noyau durci",
         niveau,
-        format!("Réglages faibles : {}.", liste.join(", ")),
+        trf!("Réglages faibles : {}.", "Weak settings: {}.", liste.join(", ")),
     )
     .corriger(
-        "Appliquer les valeurs sûres (fichier /etc/sysctl.d/99-netscan.conf, gardé au redémarrage)",
+        tr!(
+            "Appliquer les valeurs sûres (fichier /etc/sysctl.d/99-netscan.conf, gardé au redémarrage)",
+            "Apply the safe values (file /etc/sysctl.d/99-netscan.conf, kept after restart)"
+        ),
         &[
             &format!("printf '{lignes}' | sudo tee {SYSCTL_NETSCAN} >/dev/null"),
             "sudo sysctl --system >/dev/null",
@@ -1554,38 +1846,65 @@ fn module_securite() -> Constat {
     let lsm = std::fs::read_to_string("/sys/kernel/security/lsm").unwrap_or_default();
     if lsm.contains("selinux") {
         return match std::fs::read_to_string("/sys/fs/selinux/enforce").map(|v| v.trim().to_string()) {
-            Ok(v) if v == "1" => ok("AppArmor/SELinux", "SELinux actif (mode strict)."),
+            Ok(v) if v == "1" => ok(
+                "AppArmor/SELinux",
+                tr!("SELinux actif (mode strict).", "SELinux on (enforcing mode)."),
+            ),
             Ok(_) => alerte(
                 "AppArmor/SELinux",
                 Niveau::Moyen,
-                "SELinux est en mode permissif : il signale mais ne bloque rien.",
+                tr!(
+                    "SELinux est en mode permissif : il signale mais ne bloque rien.",
+                    "SELinux is in permissive mode: it reports but blocks nothing."
+                ),
             )
-            .corriger("Repasser SELinux en mode strict", &["sudo setenforce 1"]),
-            Err(_) => impossible("AppArmor/SELinux", "état de SELinux illisible"),
+            .corriger(
+                tr!("Repasser SELinux en mode strict", "Put SELinux back in enforcing mode"),
+                &["sudo setenforce 1"],
+            ),
+            Err(_) => impossible(
+                "AppArmor/SELinux",
+                tr!("état de SELinux illisible", "SELinux state unreadable"),
+            ),
         };
     }
     if lsm.contains("apparmor") {
-        return ok("AppArmor/SELinux", "AppArmor actif.");
+        return ok("AppArmor/SELinux", tr!("AppArmor actif.", "AppArmor on."));
     }
     // Arch ne l'active pas par défaut : simple information. Ailleurs, c'est qu'on l'a coupé.
     let attendu = matches!(Paquets::detecter(), Some(Paquets::Apt | Paquets::Dnf | Paquets::Zypper));
     if lsm.is_empty() {
-        impossible("AppArmor/SELinux", "liste des modules de sécurité illisible")
+        impossible(
+            "AppArmor/SELinux",
+            tr!(
+                "liste des modules de sécurité illisible",
+                "security module list unreadable"
+            ),
+        )
     } else if attendu {
         alerte(
             "AppArmor/SELinux",
             Niveau::Moyen,
-            "Ni AppArmor ni SELinux n'est actif, alors que ta distribution l'active normalement.",
+            tr!(
+                "Ni AppArmor ni SELinux n'est actif, alors que ta distribution l'active normalement.",
+                "Neither AppArmor nor SELinux is on, although your distribution normally turns it on."
+            ),
         )
         .manuel(
-            "Vérifier pourquoi il a été désactivé (paramètres de démarrage du noyau, paquet retiré)",
+            tr!(
+                "Vérifier pourquoi il a été désactivé (paramètres de démarrage du noyau, paquet retiré)",
+                "Check why it was turned off (kernel boot parameters, package removed)"
+            ),
             &[],
         )
     } else {
         alerte(
             "AppArmor/SELinux",
             Niveau::Info,
-            "Ni AppArmor ni SELinux (normal sur Arch, où il faut l'activer soi-même).",
+            tr!(
+                "Ni AppArmor ni SELinux (normal sur Arch, où il faut l'activer soi-même).",
+                "Neither AppArmor nor SELinux (normal on Arch, where you turn it on yourself)."
+            ),
         )
     }
 }
@@ -1642,7 +1961,7 @@ fn type_sauvegarde(nom: &str) -> Option<bool> {
 /// La meilleure défense contre une panne de disque, un vol ou un rançongiciel.
 fn sauvegardes() -> Constat {
     if !systemd() {
-        return impossible("Sauvegardes", "systemd absent");
+        return impossible("Sauvegardes", tr!("systemd absent", "systemd missing"));
     }
     let maintenant = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -1656,18 +1975,22 @@ fn sauvegardes() -> Constat {
             alerte(
                 "Sauvegardes",
                 Niveau::Moyen,
-                format!("La sauvegarde « {} » n'a encore jamais tourné.", t.0),
+                trf!(
+                    "La sauvegarde « {} » n'a encore jamais tourné.",
+                    "The “{}” backup has never run yet.",
+                    t.0
+                ),
             )
         } else if instantanes {
             alerte(
                 "Sauvegardes",
                 Niveau::Info,
-                "Seulement des instantanés snapper, sur le même disque : ils ne protègent ni d'une panne de disque ni d'un vol.",
+                tr!("Seulement des instantanés snapper, sur le même disque : ils ne protègent ni d'une panne de disque ni d'un vol.", "Only snapper snapshots, on the same disk: they protect neither against a disk failure nor against theft."),
             )
-            .manuel("Ajouter une vraie sauvegarde vers un autre disque ou en ligne (restic, Borg, Timeshift…)", &[])
+            .manuel(tr!("Ajouter une vraie sauvegarde vers un autre disque ou en ligne (restic, Borg, Timeshift…)", "Add a real backup to another disk or online (restic, Borg, Timeshift…)"), &[])
         } else {
-            alerte("Sauvegardes", Niveau::Moyen, "Aucune sauvegarde automatique détectée.").manuel(
-                "Mettre en place une sauvegarde vers un autre disque ou en ligne (restic, Borg, Timeshift, Déjà Dup…)",
+            alerte("Sauvegardes", Niveau::Moyen, tr!("Aucune sauvegarde automatique détectée.", "No automatic backup detected.")).manuel(
+                tr!("Mettre en place une sauvegarde vers un autre disque ou en ligne (restic, Borg, Timeshift, Déjà Dup…)", "Set up a backup to another disk or online (restic, Borg, Timeshift, Déjà Dup…)"),
                 &[],
             )
         };
@@ -1680,21 +2003,22 @@ fn sauvegardes() -> Constat {
     let resultat = sortie("systemctl", &args).map(|r| r.trim().to_string());
     let age = jours(*dernier);
     let quand = if age == 0 {
-        "aujourd'hui".to_string()
+        tr!("aujourd'hui", "today").to_string()
     } else {
-        format!("il y a {age} jour(s)")
+        trf!("il y a {age} jour(s)", "{age} day(s) ago")
     };
     if resultat.as_deref().is_some_and(|r| r != "success") {
         alerte(
             "Sauvegardes",
             Niveau::Moyen,
-            format!(
+            trf!(
                 "La dernière sauvegarde « {nom} » ({quand}) a échoué ({}).",
+                "The last “{nom}” backup ({quand}) failed ({}).",
                 resultat.unwrap_or_default()
             ),
         )
         .manuel(
-            "Voir l'erreur",
+            tr!("Voir l'erreur", "See the error"),
             &[&format!(
                 "journalctl {}-u {service} -n 30",
                 if *utilisateur { "--user " } else { "" }
@@ -1704,12 +2028,18 @@ fn sauvegardes() -> Constat {
         alerte(
             "Sauvegardes",
             Niveau::Moyen,
-            format!("Dernière sauvegarde « {nom} » {quand} : trop ancienne."),
+            trf!(
+                "Dernière sauvegarde « {nom} » {quand} : trop ancienne.",
+                "Last “{nom}” backup {quand}: too old."
+            ),
         )
     } else {
         ok(
             "Sauvegardes",
-            format!("Sauvegarde automatique « {nom} », dernière {quand}."),
+            trf!(
+                "Sauvegarde automatique « {nom} », dernière {quand}.",
+                "Automatic “{nom}” backup, last one {quand}."
+            ),
         )
     }
 }
@@ -1755,10 +2085,16 @@ fn commande_suspecte(commande: &str, lancement: bool) -> Option<&'static str> {
     let mots: Vec<&str> = commande.split_whitespace().collect();
     let a = |m: &str| mots.iter().any(|x| x.trim_matches(|c| c == '"' || c == '\'') == m);
     if commande.contains("/dev/tcp/") || commande.contains("/dev/udp/") {
-        return Some("connexion réseau ouverte par le shell (shell inversé)");
+        return Some(tr!(
+            "connexion réseau ouverte par le shell (shell inversé)",
+            "network connection opened by the shell (reverse shell)"
+        ));
     }
     if (a("nc") || a("ncat") || a("netcat")) && (a("-e") || a("-c")) {
-        return Some("netcat qui donne un shell (shell inversé)");
+        return Some(tr!(
+            "netcat qui donne un shell (shell inversé)",
+            "netcat giving a shell (reverse shell)"
+        ));
     }
     if (commande.contains("curl") || commande.contains("wget"))
         && commande.split('|').skip(1).any(|suite| {
@@ -1766,10 +2102,13 @@ fn commande_suspecte(commande: &str, lancement: bool) -> Option<&'static str> {
             ["sh", "bash", "zsh", "dash", "python", "python3", "perl"].contains(&prog.rsplit('/').next().unwrap_or(""))
         })
     {
-        return Some("télécharge un script et l'exécute aussitôt");
+        return Some(tr!(
+            "télécharge un script et l'exécute aussitôt",
+            "downloads a script and runs it right away"
+        ));
     }
     if commande.contains("base64 -d") || commande.contains("base64 --decode") {
-        return Some("commande cachée en base64");
+        return Some(tr!("commande cachée en base64", "command hidden in base64"));
     }
     if !lancement {
         return None;
@@ -1783,7 +2122,10 @@ fn commande_suspecte(commande: &str, lancement: bool) -> Option<&'static str> {
         .iter()
         .any(|d| programme.starts_with(d))
     {
-        return Some("programme lancé depuis un dossier temporaire");
+        return Some(tr!(
+            "programme lancé depuis un dossier temporaire",
+            "program started from a temporary folder"
+        ));
     }
     let maison = home();
     let relatif = programme
@@ -1798,7 +2140,10 @@ fn commande_suspecte(commande: &str, lancement: bool) -> Option<&'static str> {
     if let Some(r) = relatif {
         let premier = r.split('/').next().unwrap_or("");
         if premier.starts_with('.') && r.contains('/') && !DOSSIERS_CACHES_NORMAUX.contains(&premier) {
-            return Some("programme rangé dans un dossier caché du dossier personnel");
+            return Some(tr!(
+                "programme rangé dans un dossier caché du dossier personnel",
+                "program stored in a hidden folder of the home folder"
+            ));
         }
     }
     None
@@ -1869,17 +2214,25 @@ fn persistance() -> Vec<Constat> {
         {
             let connue = gestion.is_some_and(|g| g.possede(Path::new(lib)));
             if connue {
-                suspects.push(format!("/etc/ld.so.preload charge {lib} dans tous les programmes"));
+                suspects.push(trf!(
+                    "/etc/ld.so.preload charge {lib} dans tous les programmes",
+                    "/etc/ld.so.preload loads {lib} into every program"
+                ));
             } else {
-                critiques.push(format!(
-                    "/etc/ld.so.preload charge {lib} (hors paquet) dans tous les programmes"
+                critiques.push(trf!(
+                    "/etc/ld.so.preload charge {lib} (hors paquet) dans tous les programmes",
+                    "/etc/ld.so.preload loads {lib} (not from a package) into every program"
                 ));
             }
         }
     }
     for var in ["LD_PRELOAD", "LD_AUDIT"] {
         if let Some(v) = std::env::var_os(var).filter(|v| !v.is_empty()) {
-            suspects.push(format!("{var}={} est défini pour cette session", v.to_string_lossy()));
+            suspects.push(trf!(
+                "{var}={} est défini pour cette session",
+                "{var}={} is set for this session",
+                v.to_string_lossy()
+            ));
         }
     }
 
@@ -1946,8 +2299,9 @@ fn persistance() -> Vec<Constat> {
         };
         for (n, l) in texte.lines().enumerate() {
             if definit_prechargement(l) {
-                suspects.push(format!(
+                suspects.push(trf!(
                     "{}:{} précharge une bibliothèque (LD_PRELOAD)",
+                    "{}:{} preloads a library (LD_PRELOAD)",
                     court(f),
                     n + 1
                 ));
@@ -1955,7 +2309,7 @@ fn persistance() -> Vec<Constat> {
                 && !demarrage.contains(f)
                 && let Some(raison) = commande_suspecte(l, false)
             {
-                suspects.push(format!("{}:{} : {raison}", court(f), n + 1));
+                suspects.push(trf!("{}:{} : {raison}", "{}:{}: {raison}", court(f), n + 1));
             }
         }
     }
@@ -1965,7 +2319,7 @@ fn persistance() -> Vec<Constat> {
         };
         for (n, l) in texte.lines().enumerate() {
             if let Some(raison) = commande_lancee(l).and_then(|c| commande_suspecte(&c, true)) {
-                suspects.push(format!("{}:{} : {raison}", court(f), n + 1));
+                suspects.push(trf!("{}:{} : {raison}", "{}:{}: {raison}", court(f), n + 1));
             }
         }
     }
@@ -1990,7 +2344,7 @@ fn persistance() -> Vec<Constat> {
     }
     for (source, l) in cron.iter().filter(|(_, l)| !commentaire(l)) {
         if let Some(raison) = commande_suspecte(l, false) {
-            suspects.push(format!("{source} : {raison}"));
+            suspects.push(trf!("{source} : {raison}", "{source}: {raison}"));
         }
     }
 
@@ -2000,7 +2354,10 @@ fn persistance() -> Vec<Constat> {
     if critiques.is_empty() && suspects.is_empty() {
         constats.push(ok(
             CAT,
-            "Aucun lancement automatique suspect (préchargement, services, démarrage de session, cron).",
+            tr!(
+                "Aucun lancement automatique suspect (préchargement, services, démarrage de session, cron).",
+                "No suspicious autostart (preloading, services, session startup, cron)."
+            ),
         ));
     } else {
         let niveau = if critiques.is_empty() {
@@ -2012,13 +2369,17 @@ fn persistance() -> Vec<Constat> {
         liste.extend(suspects);
         let reste = liste.len().saturating_sub(6);
         liste.truncate(6);
-        let mut message = format!("Lancement automatique suspect : {}", liste.join(" ; "));
+        let mut message = trf!(
+            "Lancement automatique suspect : {}",
+            "Suspicious autostart: {}",
+            liste.join(" ; ")
+        );
         if reste > 0 {
-            let _ = write!(message, " ; et {reste} autre(s)");
+            let _ = trw!(message, " ; et {reste} autre(s)", "; and {reste} more");
         }
         message.push('.');
         constats.push(alerte(CAT, niveau, message).manuel(
-            "Ne rien lancer : lire chaque ligne signalée et supprimer celles que tu n'as pas ajoutées, puis lancer l'antivirus",
+            tr!("Ne rien lancer : lire chaque ligne signalée et supprimer celles que tu n'as pas ajoutées, puis lancer l'antivirus", "Do not run anything: read each reported line and delete the ones you did not add, then run the antivirus"),
             &[],
         ));
     }
@@ -2039,14 +2400,18 @@ fn persistance() -> Vec<Constat> {
                 alerte(
                     CAT,
                     Niveau::Info,
-                    format!(
+                    trf!(
                         "{} service(s) système ajouté(s) à la main, hors paquet : {}. À reconnaître.",
+                        "{} system service(s) added by hand, not from a package: {}. Check that you recognize them.",
                         maison.len(),
                         maison.join(", ")
                     ),
                 )
                 .manuel(
-                    "Si tu n'en reconnais pas un, lis ce qu'il lance avant de le désactiver",
+                    tr!(
+                        "Si tu n'en reconnais pas un, lis ce qu'il lance avant de le désactiver",
+                        "If you do not recognize one, read what it starts before turning it off"
+                    ),
                     &[&format!("systemctl cat {premier}")],
                 ),
             );
@@ -2169,7 +2534,10 @@ fn fichiers_suspects() -> Vec<Constat> {
         }
     }
     if !modifies.is_empty() {
-        let liste: Vec<String> = modifies.iter().map(|(f, p)| format!("{f} (paquet {p})")).collect();
+        let liste: Vec<String> = modifies
+            .iter()
+            .map(|(f, p)| trf!("{f} (paquet {p})", "{f} (package {p})"))
+            .collect();
         let mut paquets: Vec<&str> = modifies.iter().map(|(_, p)| p.as_str()).collect();
         paquets.dedup();
         let reinstaller = gestion.map(|g| g.reinstaller(&paquets.join(" "))).unwrap_or_default();
@@ -2177,13 +2545,13 @@ fn fichiers_suspects() -> Vec<Constat> {
             alerte(
                 "Fichiers suspects",
                 Niveau::Critique,
-                format!(
-                    "Programme(s) privilégié(s) modifié(s) depuis leur installation : {}. Signe possible d'une porte dérobée.",
+                trf!(
+                    "Programme(s) privilégié(s) modifié(s) depuis leur installation : {}. Signe possible d'une porte dérobée.", "Privileged program(s) modified since install: {}. Possible sign of a backdoor.",
                     liste.join(", ")
                 ),
             )
             .manuel(
-                "Ne pas le lancer. Remettre l'original depuis les dépôts, puis lancer l'antivirus et changer tes mots de passe",
+                tr!("Ne pas le lancer. Remettre l'original depuis les dépôts, puis lancer l'antivirus et changer tes mots de passe", "Do not run it. Restore the original from the repositories, then run the antivirus and change your passwords"),
                 &[&reinstaller],
             ),
         );
@@ -2194,13 +2562,13 @@ fn fichiers_suspects() -> Vec<Constat> {
             alerte(
                 "Fichiers suspects",
                 Niveau::Eleve,
-                format!(
-                    "Programme(s) setuid, setgid ou à capacités hors paquet ou dans un dossier temporaire : {}.",
+                trf!(
+                    "Programme(s) setuid, setgid ou à capacités hors paquet ou dans un dossier temporaire : {}.", "Setuid, setgid or capability program(s) not from a package or in a temporary folder: {}.",
                     liste.join(", ")
                 ),
             )
             .manuel(
-                "Ces programmes peuvent donner des droits root : vérifier d'où ils viennent avant toute chose (ne pas les lancer)",
+                tr!("Ces programmes peuvent donner des droits root : vérifier d'où ils viennent avant toute chose (ne pas les lancer)", "These programs can give root rights: check where they come from before anything else (do not run them)"),
                 &[&format!("ls -l {}", liste.join(" ")), &format!("getcap {}", liste.join(" "))],
             ),
         );
@@ -2208,20 +2576,28 @@ fn fichiers_suspects() -> Vec<Constat> {
     if modifies.is_empty() && anormaux.is_empty() {
         let n = systeme.len();
         let mut message = match (gestion, non_verifies) {
-            (None, _) => format!(
+            (None, _) => trf!(
                 "Aucun programme privilégié dans les dossiers temporaires ; les {n} du système n'ont pas pu être \
-                 rapprochés d'un paquet (gestionnaire de paquets non reconnu)."
+                 rapprochés d'un paquet (gestionnaire de paquets non reconnu).",
+                "No privileged program in temporary folders; the {n} system ones could not be \
+                 matched to a package (package manager not recognized)."
             ),
-            (Some(_), 0) => format!(
-                "Aucun programme privilégié inhabituel : {n} setuid, setgid ou à capacités, tous d'un paquet et intacts."
+            (Some(_), 0) => trf!(
+                "Aucun programme privilégié inhabituel : {n} setuid, setgid ou à capacités, tous d'un paquet et intacts.",
+                "No unusual privileged program: {n} setuid, setgid or capability programs, all from a package and intact."
             ),
-            (Some(_), k) => format!(
+            (Some(_), k) => trf!(
                 "Aucun programme privilégié inhabituel : {n} setuid, setgid ou à capacités, tous d'un paquet ; \
-                 {k} illisible(s), donc non comparé(s) à l'original."
+                 {k} illisible(s), donc non comparé(s) à l'original.",
+                "No unusual privileged program: {n} setuid, setgid or capability programs, all from a package; \
+                 {k} unreadable, so not compared to the original."
             ),
         };
         if capacites.is_none() {
-            message.push_str(" Capacités non vérifiées (getcap absent).");
+            message.push_str(tr!(
+                " Capacités non vérifiées (getcap absent).",
+                " Capabilities not checked (getcap missing)."
+            ));
         }
         constats.push(ok("Fichiers suspects", message));
     }
@@ -2232,13 +2608,17 @@ fn fichiers_suspects() -> Vec<Constat> {
             alerte(
                 "Fichiers suspects",
                 Niveau::Eleve,
-                format!(
+                trf!(
                     "PATH piégeable : {} (n'importe qui peut y déposer un faux « ls » ou « sudo »).",
+                    "Hijackable PATH: {} (anyone can drop a fake “ls” or “sudo” there).",
                     dangereux.join(", ")
                 ),
             )
             .manuel(
-                "Retirer ces dossiers du PATH (~/.bashrc, ~/.profile) ou corriger leurs droits",
+                tr!(
+                    "Retirer ces dossiers du PATH (~/.bashrc, ~/.profile) ou corriger leurs droits",
+                    "Remove these folders from the PATH (~/.bashrc, ~/.profile) or fix their permissions"
+                ),
                 &[],
             ),
         );
@@ -2257,7 +2637,13 @@ fn failles_vulnerables(etats: &[(String, String)]) -> Vec<String> {
 
 fn processeur() -> Constat {
     let Ok(dossier) = std::fs::read_dir("/sys/devices/system/cpu/vulnerabilities") else {
-        return impossible("Processeur", "état des failles du processeur illisible");
+        return impossible(
+            "Processeur",
+            tr!(
+                "état des failles du processeur illisible",
+                "processor flaw state unreadable"
+            ),
+        );
     };
     let etats: Vec<(String, String)> = dossier
         .flatten()
@@ -2272,8 +2658,9 @@ fn processeur() -> Constat {
     if failles.is_empty() {
         return ok(
             "Processeur",
-            format!(
+            trf!(
                 "Protégé contre les {} failles connues du processeur (Spectre, Meltdown…).",
+                "Protected against the {} known processor flaws (Spectre, Meltdown…).",
                 etats.len()
             ),
         );
@@ -2293,18 +2680,25 @@ fn processeur() -> Constat {
     let constat = alerte(
         "Processeur",
         Niveau::Moyen,
-        format!(
+        trf!(
             "Processeur vulnérable à : {}. Un programme malveillant pourrait lire la mémoire d'autres programmes.",
+            "Processor vulnerable to: {}. A malicious program could read the memory of other programs.",
             failles.join(", ")
         ),
     );
     match (paquet, Paquets::detecter()) {
         (Some(p), Some(g)) => constat.corriger(
-            "Installer le microcode du fabricant (effectif après mise à jour du système et redémarrage)",
+            tr!(
+                "Installer le microcode du fabricant (effectif après mise à jour du système et redémarrage)",
+                "Install the manufacturer's microcode (effective after a system update and a restart)"
+            ),
             &[&g.installer(p)],
         ),
         _ => constat.manuel(
-            "Installer le microcode du fabricant et mettre le noyau à jour, puis redémarrer",
+            tr!(
+                "Installer le microcode du fabricant et mettre le noyau à jour, puis redémarrer",
+                "Install the manufacturer's microcode and update the kernel, then restart"
+            ),
             &[],
         ),
     }
@@ -2355,12 +2749,16 @@ fn fichiers_secrets() -> Vec<Constat> {
             alerte(
                 "Fichiers secrets",
                 Niveau::Eleve,
-                format!(
+                trf!(
                     "Lisible(s) par d'autres comptes : {} (mots de passe ou jetons d'accès).",
+                    "Readable by other accounts: {} (passwords or access tokens).",
                     exposes.join(", ")
                 ),
             )
-            .corriger("Réserver ces fichiers à toi seul", &cmds),
+            .corriger(
+                tr!("Réserver ces fichiers à toi seul", "Restrict these files to you only"),
+                &cmds,
+            ),
         );
     }
     // Le dossier personnel lui-même : ouvert en lecture, il laisse voir tous tes fichiers aux autres comptes.
@@ -2369,15 +2767,27 @@ fn fichiers_secrets() -> Vec<Constat> {
             alerte(
                 "Fichiers secrets",
                 Niveau::Info,
-                "Ton dossier personnel est lisible par les autres comptes de la machine.",
+                tr!(
+                    "Ton dossier personnel est lisible par les autres comptes de la machine.",
+                    "Your home folder is readable by the other accounts of the machine."
+                ),
             )
-            .corriger("Fermer ton dossier personnel aux autres comptes", &["chmod 750 ~"]),
+            .corriger(
+                tr!(
+                    "Fermer ton dossier personnel aux autres comptes",
+                    "Close your home folder to the other accounts"
+                ),
+                &["chmod 750 ~"],
+            ),
         );
     }
     if constats.is_empty() {
         constats.push(ok(
             "Fichiers secrets",
-            "Fichiers de mots de passe et de jetons protégés.",
+            tr!(
+                "Fichiers de mots de passe et de jetons protégés.",
+                "Password and token files are protected."
+            ),
         ));
     }
     constats
@@ -2391,18 +2801,24 @@ fn groupes_privilegies() -> Option<Constat> {
         .filter(|g| matches!(*g, "docker" | "lxd" | "incus-admin"))
         .collect();
     Some(if risques.is_empty() {
-        ok("Groupes", "Aucun groupe qui donne les droits root sans mot de passe.")
+        ok(
+            "Groupes",
+            tr!(
+                "Aucun groupe qui donne les droits root sans mot de passe.",
+                "No group gives root rights without a password."
+            ),
+        )
     } else {
         alerte(
             "Groupes",
             Niveau::Moyen,
-            format!(
-                "Tu es dans le groupe {} : tout programme lancé par toi peut devenir root sans mot de passe (via un conteneur).",
+            trf!(
+                "Tu es dans le groupe {} : tout programme lancé par toi peut devenir root sans mot de passe (via un conteneur).", "You are in the {} group: any program you run can become root without a password (through a container).",
                 risques.join(", ")
             ),
         )
         .manuel(
-            "Si tu n'utilises pas Docker au quotidien, sors du groupe (Docker demandera alors sudo) ; sinon, garde-le en connaissance de cause",
+            tr!("Si tu n'utilises pas Docker au quotidien, sors du groupe (Docker demandera alors sudo) ; sinon, garde-le en connaissance de cause", "If you do not use Docker every day, leave the group (Docker will then ask for sudo); otherwise, keep it knowingly"),
             &[&format!("sudo gpasswd -d $USER {}", risques.first().copied().unwrap_or("docker"))],
         )
     })
@@ -2431,19 +2847,28 @@ fn sudo_sans_mot_de_passe() -> Option<Constat> {
         alerte(
             "Sudo",
             Niveau::Eleve,
-            "sudo sans mot de passe pour TOUTES les commandes : n'importe quel programme lancé par toi peut devenir root.",
+            tr!("sudo sans mot de passe pour TOUTES les commandes : n'importe quel programme lancé par toi peut devenir root.", "sudo without a password for ALL commands: any program you run can become root."),
         )
         .manuel(
-            "Retirer « NOPASSWD: » de cette règle dans /etc/sudoers.d (toujours avec sudo visudo, jamais à la main)",
+            tr!("Retirer « NOPASSWD: » de cette règle dans /etc/sudoers.d (toujours avec sudo visudo, jamais à la main)", "Remove “NOPASSWD:” from this rule in /etc/sudoers.d (always with sudo visudo, never by hand)"),
             &["sudo visudo"],
         )
     } else if limitees > 0 {
         ok(
             "Sudo",
-            format!("{limitees} règle(s) sudo sans mot de passe, limitée(s) à des commandes précises."),
+            trf!(
+                "{limitees} règle(s) sudo sans mot de passe, limitée(s) à des commandes précises.",
+                "{limitees} passwordless sudo rule(s), limited to specific commands."
+            ),
         )
     } else {
-        ok("Sudo", "sudo demande toujours le mot de passe.")
+        ok(
+            "Sudo",
+            tr!(
+                "sudo demande toujours le mot de passe.",
+                "sudo always asks for the password."
+            ),
+        )
     })
 }
 
@@ -2499,7 +2924,10 @@ fn paquets_aur() -> Option<Constat> {
         let Some(json) = sortie_delai("curl", &["-fsS", "--max-time", "20", &requete], 25, &[0])
             .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
         else {
-            return Some(impossible("Paquets AUR", "AUR injoignable, hors ligne ?"));
+            return Some(impossible(
+                "Paquets AUR",
+                tr!("AUR injoignable, hors ligne ?", "AUR unreachable, offline?"),
+            ));
         };
         resultats.extend(json["results"].as_array().cloned().unwrap_or_default());
     }
@@ -2508,29 +2936,35 @@ fn paquets_aur() -> Option<Constat> {
         alerte(
             "Paquets AUR",
             Niveau::Moyen,
-            format!(
+            trf!(
                 "Absent(s) de l'AUR : {} (retiré, ou construit à la main) : plus aucune mise à jour automatique.",
+                "Missing from the AUR: {} (removed, or built by hand): no more automatic updates.",
                 absents.join(", ")
             ),
         )
         .manuel(
-            "Vérifier si un paquet de remplacement existe, sinon le désinstaller s'il n'est plus utile",
+            tr!(
+                "Vérifier si un paquet de remplacement existe, sinon le désinstaller s'il n'est plus utile",
+                "Check whether a replacement package exists, otherwise uninstall it if no longer needed"
+            ),
             &["pacman -Qm"],
         )
     } else if !orphelins.is_empty() {
         alerte(
             "Paquets AUR",
             Niveau::Info,
-            format!(
+            trf!(
                 "Paquet(s) AUR sans mainteneur : {} (les mises à jour risquent de s'arrêter).",
+                "Orphaned AUR package(s): {} (updates may stop).",
                 orphelins.join(", ")
             ),
         )
     } else {
         ok(
             "Paquets AUR",
-            format!(
+            trf!(
                 "Les {} paquets AUR installés sont tous suivis dans l'AUR.",
+                "The {} installed AUR packages are all tracked in the AUR.",
                 installes.len()
             ),
         )
@@ -2539,17 +2973,27 @@ fn paquets_aur() -> Option<Constat> {
 
 fn services_en_echec() -> Constat {
     if !systemd() {
-        return impossible("Services", "systemd absent");
+        return impossible("Services", tr!("systemd absent", "systemd missing"));
     }
     let Some(liste) = sortie("systemctl", &["--failed", "--no-legend", "--plain"]) else {
-        return impossible("Services", "systemctl n'a pas répondu");
+        return impossible("Services", tr!("systemctl n'a pas répondu", "systemctl did not answer"));
     };
     let n = liste.lines().filter(|l| !l.trim().is_empty()).count();
     if n == 0 {
-        ok("Services", "Aucun service système en échec.")
+        ok(
+            "Services",
+            tr!("Aucun service système en échec.", "No failed system service."),
+        )
     } else {
-        alerte("Services", Niveau::Info, format!("{n} service(s) en échec."))
-            .manuel("Voir lesquels et leurs erreurs", &["systemctl --failed"])
+        alerte(
+            "Services",
+            Niveau::Info,
+            trf!("{n} service(s) en échec.", "{n} failed service(s)."),
+        )
+        .manuel(
+            tr!("Voir lesquels et leurs erreurs", "See which ones and their errors"),
+            &["systemctl --failed"],
+        )
     }
 }
 

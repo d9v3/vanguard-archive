@@ -472,7 +472,12 @@ fn alertes(role: Option<&str>, ports: &[PortOuvert]) -> Vec<(Niveau, String)> {
     let mut alertes: Vec<(Niveau, String)> = ports
         .iter()
         .filter(|p| p.niveau >= Niveau::Moyen)
-        .map(|p| (p.niveau, format!("{} ({}) : {}", p.service, p.port, p.conseil)))
+        .map(|p| {
+            (
+                p.niveau,
+                trf!("{} ({}) : {}", "{} ({}): {}", p.service, p.port, p.conseil),
+            )
+        })
         .collect();
     if role == Some("passerelle") && a(80) && !a(443) {
         alertes.push((
@@ -533,7 +538,11 @@ fn alertes(role: Option<&str>, ports: &[PortOuvert]) -> Vec<(Niveau, String)> {
 }
 
 fn afficher(r: &Rapport) {
-    let nom = r.nom_reseau.as_deref().map(|n| format!(" « {n} »")).unwrap_or_default();
+    let nom = r
+        .nom_reseau
+        .as_deref()
+        .map(|n| trf!(" « {n} »", " “{n}”"))
+        .unwrap_or_default();
     titre(&trf!("Réseau{nom} {}", "Network{nom} {}", r.reseau));
     for h in &r.hotes {
         let role = h
@@ -573,7 +582,7 @@ fn afficher(r: &Rapport) {
             let b = p
                 .banniere
                 .as_deref()
-                .map(|b| format!("  {GRIS}« {b} »{RESET}"))
+                .map(|b| trf!("  {GRIS}« {b} »{RESET}", "  {GRIS}“{b}”{RESET}"))
                 .unwrap_or_default();
             let prog = p
                 .programme

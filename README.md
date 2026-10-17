@@ -34,6 +34,10 @@ Sans argument, `netscan` ouvre un menu. Sous-commandes : `complet [--html]`, `ma
 `reseau [cible] [-p courants|tous|22,80,8000-8100] [--json]`, `antivirus [--complet]`, `surveillance on|off`,
 `maj`, `reparer`, `gaming` (Windows), `sauvegarder [fichier]`, `restaurer <fichier>`, `nommer <ip|mac> <surnom>`.
 
+**Langue** : français ou anglais, choisi d'après le système (Linux : `LC_ALL`, `LC_MESSAGES`, `LANG` ; Windows : langue
+d'affichage). Pour forcer : `NETSCAN_LANG=fr` ou `NETSCAN_LANG=en`. Les commandes ont aussi un nom anglais (`full`, `audit`,
+`fix`, `network`, `monitor`, `update`, `repair`, `backup`, `restore`, `name`) ; les réponses o/y et t/a sont acceptées.
+
 À n'utiliser que sur un réseau qui t'appartient ou que tu as le droit d'auditer.
 
 ## Structure

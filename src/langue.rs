@@ -13,6 +13,7 @@ fn code(valeur: &str) -> Option<String> {
 }
 
 #[cfg(windows)]
+#[allow(clippy::unnecessary_wraps)] // même signature que sous Linux, où la langue peut être inconnue
 fn langue_systeme() -> Option<String> {
     #[link(name = "kernel32")]
     unsafe extern "system" {

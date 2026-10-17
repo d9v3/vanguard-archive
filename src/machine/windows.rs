@@ -5,7 +5,8 @@ use std::process::Command;
 
 use super::{Audit, Constat, alerte, impossible, ok, score};
 use crate::risk::{Niveau, info_port};
-use crate::ui::resume;
+use crate::trw;
+use crate::ui::{resume, tr, trf, trp};
 
 pub const NOM: &str = "Windows";
 
@@ -33,7 +34,10 @@ fn ps_delai(script: &str, secondes: u64) -> Option<String> {
 
 /// Constat quand une vérification n'a pas pu se faire : on le dit, on ne conclut jamais « OK ».
 fn illisible(categorie: &'static str) -> Constat {
-    impossible(categorie, "PowerShell indisponible ou bloqué")
+    impossible(
+        categorie,
+        tr!("PowerShell indisponible ou bloqué", "PowerShell unavailable or blocked"),
+    )
 }
 
 /// Le script exécuté dans la fenêtre administrateur : chaque commande est annoncée, puis « OK » ou l'erreur.
@@ -41,30 +45,45 @@ fn illisible(categorie: &'static str) -> Constat {
 /// compte, comme un programme externe en échec, pour une étape ratée, et la fenêtre passe à la suivante.
 fn script_admin(commandes: &[String]) -> String {
     let texte = |s: &str| s.replace('\'', "''");
-    let mut script = String::from(
+    let mut script = String::from(tr!(
         "$Host.UI.RawUI.WindowTitle = 'netscan : correction en cours'\n\
          [Console]::OutputEncoding = [Text.Encoding]::UTF8\n\
          $ErrorActionPreference = 'Stop'\n\
          Write-Host 'netscan applique une correction.' -ForegroundColor Cyan\n\
          Write-Host 'Une étape longue (mise à jour, analyse, réparation de Windows) peut durer plusieurs minutes : son heure de début est affichée.'\n\
          $echecs = 0\n",
-    );
+        "$Host.UI.RawUI.WindowTitle = 'netscan: applying a fix'\n\
+         [Console]::OutputEncoding = [Text.Encoding]::UTF8\n\
+         $ErrorActionPreference = 'Stop'\n\
+         Write-Host 'netscan is applying a fix.' -ForegroundColor Cyan\n\
+         Write-Host 'A long step (update, scan, Windows repair) can take several minutes: its start time is shown.'\n\
+         $echecs = 0\n"
+    ));
     for c in commandes {
         // Un programme externe (DISM, sfc, netsh…) en échec ne lève pas d'erreur PowerShell : seul son code de
         // retour le dit. On le lit après chaque commande (3010 = réussi, redémarrage demandé) et on continue :
         // dans « Internet ne marche plus », un netsh en échec ne doit pas empêcher de renouveler l'adresse.
-        let _ = write!(
+        let _ = trw!(
             script,
             "Write-Host ''; Write-Host ('> ' + (Get-Date -Format 'HH:mm') + '  {}') -ForegroundColor Yellow\n$global:LASTEXITCODE = 0\ntry {{\n  {c}\n  \
              if ($LASTEXITCODE -eq 3010) {{ Write-Host '  OK (redémarrage nécessaire)' -ForegroundColor Green }}\n  \
              elseif ($LASTEXITCODE) {{ $echecs++; Write-Host \"  Échec (code $LASTEXITCODE) : voir le message ci-dessus\" -ForegroundColor Red }}\n  \
              else {{ Write-Host '  OK' -ForegroundColor Green }}\n\
              }} catch {{ $echecs++; Write-Host ('  Échec : ' + $_.Exception.Message) -ForegroundColor Red }}\n",
+            "Write-Host ''; Write-Host ('> ' + (Get-Date -Format 'HH:mm') + '  {}') -ForegroundColor Yellow\n$global:LASTEXITCODE = 0\ntry {{\n  {c}\n  \
+             if ($LASTEXITCODE -eq 3010) {{ Write-Host '  OK (restart needed)' -ForegroundColor Green }}\n  \
+             elseif ($LASTEXITCODE) {{ $echecs++; Write-Host \"  Failed (code $LASTEXITCODE): see the message above\" -ForegroundColor Red }}\n  \
+             else {{ Write-Host '  OK' -ForegroundColor Green }}\n\
+             }} catch {{ $echecs++; Write-Host ('  Failed: ' + $_.Exception.Message) -ForegroundColor Red }}\n",
             texte(c)
         );
     }
-    script += "if ($echecs) { Write-Host ''; Write-Host \"Terminé, avec $echecs étape(s) en échec.\" -ForegroundColor Red; Read-Host 'Appuie sur Entrée pour fermer'; exit 1 }\n\
-               Write-Host ''; Write-Host 'Terminé.' -ForegroundColor Green; Read-Host 'Appuie sur Entrée pour fermer'; exit 0";
+    script += tr!(
+        "if ($echecs) { Write-Host ''; Write-Host \"Terminé, avec $echecs étape(s) en échec.\" -ForegroundColor Red; Read-Host 'Appuie sur Entrée pour fermer'; exit 1 }\n\
+               Write-Host ''; Write-Host 'Terminé.' -ForegroundColor Green; Read-Host 'Appuie sur Entrée pour fermer'; exit 0",
+        "if ($echecs) { Write-Host ''; Write-Host \"Finished, with $echecs failed step(s).\" -ForegroundColor Red; Read-Host 'Press Enter to close'; exit 1 }\n\
+               Write-Host ''; Write-Host 'Finished.' -ForegroundColor Green; Read-Host 'Press Enter to close'; exit 0"
+    );
     script
 }
 
@@ -77,10 +96,11 @@ pub fn powershell_admin(commandes: &[String]) -> bool {
         "correction-{}.ps1",
         chrono::Local::now().format("%Y%m%d-%H%M%S")
     ));
-    let entete = format!(
+    let entete = trf!(
         "# Correction proposée par netscan {} le {}.\r\n# Ce script n'est lancé qu'après ton accord (demande d'administrateur).\r\n\r\n",
+        "# Fix proposed by netscan {} on {}.\r\n# This script only runs after your consent (administrator prompt).\r\n\r\n",
         env!("CARGO_PKG_VERSION"),
-        chrono::Local::now().format("%d/%m/%Y à %H:%M")
+        chrono::Local::now().format(tr!("%d/%m/%Y à %H:%M", "%Y-%m-%d %H:%M"))
     );
     // BOM : sans lui, Windows PowerShell 5.1 lit le fichier en ANSI et casse les accents.
     let contenu = format!("\u{feff}{entete}{}\r\n", script_admin(commandes).replace('\n', "\r\n"));
@@ -88,20 +108,29 @@ pub fn powershell_admin(commandes: &[String]) -> bool {
         .and_then(|()| std::fs::write(&chemin, contenu))
         .is_err()
     {
-        println!(
+        trp!(
             "    Impossible d'écrire le script de correction dans {}",
+            "    Could not write the fix script to {}",
             dossier.display()
         );
         return false;
     }
-    println!("    Script de correction (lisible) : {}", chemin.display());
+    trp!(
+        "    Script de correction (lisible) : {}",
+        "    Fix script (readable): {}",
+        chemin.display()
+    );
     let fichier = chemin.display().to_string().replace('\'', "''");
     // Demande d'administrateur refusée : Start-Process échoue et $p reste vide. Sans ce test, l'appel de méthode
     // sur $null était sauté et « exit $p.ExitCode » devenait « exit 0 » : la correction s'affichait « fait ».
     // Attente sans limite : la fenêtre est visible et attend Entrée, un délai compterait aussi le temps de lecture.
-    let lanceur = format!(
+    let lanceur = trf!(
         "$p = Start-Process powershell -Verb RunAs -PassThru -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','\"{fichier}\"'; \
          if (-not $p) {{ Write-Host 'Demande d''administrateur refusée : rien n''a été modifié.'; exit 3 }}; \
+         $p.WaitForExit(); \
+         if ($null -eq $p.ExitCode) {{ exit 4 }}; exit $p.ExitCode",
+        "$p = Start-Process powershell -Verb RunAs -PassThru -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','\"{fichier}\"'; \
+         if (-not $p) {{ Write-Host 'Administrator prompt refused: nothing was changed.'; exit 3 }}; \
          $p.WaitForExit(); \
          if ($null -eq $p.ExitCode) {{ exit 4 }}; exit $p.ExitCode"
     );
@@ -125,11 +154,28 @@ fn pare_feu() -> Constat {
         (true, _) => alerte(
             "Pare-feu",
             Niveau::Info,
-            "Aucun profil de pare-feu lu (pare-feu tiers ?).",
+            tr!(
+                "Aucun profil de pare-feu lu (pare-feu tiers ?).",
+                "No firewall profile read (third-party firewall?)."
+            ),
         ),
-        (false, off) if off.is_empty() => ok("Pare-feu", "Pare-feu Windows actif sur tous les profils."),
-        (false, off) => alerte("Pare-feu", Niveau::Eleve, format!("Pare-feu désactivé pour : {off}.")).corriger(
-            "Réactiver le pare-feu Windows sur tous les profils",
+        (false, off) if off.is_empty() => ok(
+            "Pare-feu",
+            tr!(
+                "Pare-feu Windows actif sur tous les profils.",
+                "Windows firewall on for every profile."
+            ),
+        ),
+        (false, off) => alerte(
+            "Pare-feu",
+            Niveau::Eleve,
+            trf!("Pare-feu désactivé pour : {off}.", "Firewall off for: {off}."),
+        )
+        .corriger(
+            tr!(
+                "Réactiver le pare-feu Windows sur tous les profils",
+                "Turn the Windows firewall back on for every profile"
+            ),
             &["Set-NetFirewallProfile -Profile Domain,Public,Private -Enabled True"],
         ),
     }
@@ -146,12 +192,23 @@ fn antivirus() -> Vec<Constat> {
             ps("(Get-CimInstance -Namespace root/SecurityCenter2 -ClassName AntivirusProduct).displayName -join ', '")
                 .unwrap_or_default();
         return vec![if tiers.is_empty() {
-            alerte("Antivirus", Niveau::Critique, "Aucun antivirus détecté.").manuel(
-                "Ouvrir Sécurité Windows et réactiver Microsoft Defender",
+            alerte(
+                "Antivirus",
+                Niveau::Critique,
+                tr!("Aucun antivirus détecté.", "No antivirus detected."),
+            )
+            .manuel(
+                tr!(
+                    "Ouvrir Sécurité Windows et réactiver Microsoft Defender",
+                    "Open Windows Security and turn Microsoft Defender back on"
+                ),
                 &["Start-Process windowsdefender:"],
             )
         } else {
-            ok("Antivirus", format!("Antivirus tiers : {tiers}."))
+            ok(
+                "Antivirus",
+                trf!("Antivirus tiers : {tiers}.", "Third-party antivirus: {tiers}."),
+            )
         }];
     };
     let v: serde_json::Value = serde_json::from_str(&json).unwrap_or_default();
@@ -164,20 +221,32 @@ fn antivirus() -> Vec<Constat> {
             alerte(
                 "Antivirus",
                 Niveau::Critique,
-                "Protection en temps réel de Defender désactivée.",
+                tr!(
+                    "Protection en temps réel de Defender désactivée.",
+                    "Defender real-time protection is off."
+                ),
             )
             .corriger(
-                "Réactiver la protection en temps réel",
+                tr!(
+                    "Réactiver la protection en temps réel",
+                    "Turn real-time protection back on"
+                ),
                 &["Set-MpPreference -DisableRealtimeMonitoring $false"],
             ),
         );
     } else {
-        c.push(ok("Antivirus", "Microsoft Defender actif, protection en temps réel."));
+        c.push(ok(
+            "Antivirus",
+            tr!(
+                "Microsoft Defender actif, protection en temps réel.",
+                "Microsoft Defender on, real-time protection."
+            ),
+        ));
     }
     c.push(signatures(v["AntivirusSignatureAge"].as_u64().unwrap_or(0)));
     if v["IsTamperProtected"] == false {
-        c.push(alerte("Antivirus", Niveau::Moyen, "Protection contre les falsifications désactivée : un malware peut couper Defender.")
-            .manuel("Sécurité Windows > Protection contre les virus > Gérer les paramètres > Protection contre les falsifications", &["Start-Process windowsdefender://threatsettings"]));
+        c.push(alerte("Antivirus", Niveau::Moyen, tr!("Protection contre les falsifications désactivée : un malware peut couper Defender.", "Tamper protection is off: malware can turn Defender off."))
+            .manuel(tr!("Sécurité Windows > Protection contre les virus > Gérer les paramètres > Protection contre les falsifications", "Windows Security > Virus protection > Manage settings > Tamper protection"), &["Start-Process windowsdefender://threatsettings"]));
     }
     c
 }
@@ -191,14 +260,17 @@ fn smb1() -> Option<Constat> {
         alerte(
             "SMBv1",
             Niveau::Critique,
-            "SMBv1 activé (exploité par WannaCry / NotPetya).",
+            tr!(
+                "SMBv1 activé (exploité par WannaCry / NotPetya).",
+                "SMBv1 on (exploited by WannaCry / NotPetya)."
+            ),
         )
         .corriger(
-            "Désactiver SMBv1",
+            tr!("Désactiver SMBv1", "Turn SMBv1 off"),
             &["Set-SmbServerConfiguration -EnableSMB1Protocol $false -Force"],
         )
     } else {
-        ok("SMBv1", "SMBv1 désactivé.")
+        ok("SMBv1", tr!("SMBv1 désactivé.", "SMBv1 off."))
     })
 }
 
@@ -210,7 +282,10 @@ fn bureau_distance() -> Constat {
         _ => return illisible("Bureau à distance"),
     };
     if !actif {
-        return ok("Bureau à distance", "Bureau à distance (RDP) désactivé.");
+        return ok(
+            "Bureau à distance",
+            tr!("Bureau à distance (RDP) désactivé.", "Remote Desktop (RDP) off."),
+        );
     }
     let nla = ps(&format!(
         r"(Get-ItemProperty '{cle}\WinStations\RDP-Tcp').UserAuthentication"
@@ -220,25 +295,37 @@ fn bureau_distance() -> Constat {
     // Session ouverte PAR le Bureau à distance (SESSIONNAME = RDP-Tcp#…) : le couper couperait l'utilisateur
     // lui-même. Jamais en correction automatique dans ce cas.
     if session_a_distance() {
-        alerte("Bureau à distance", Niveau::Moyen, "RDP activé ; tu es connecté par lui en ce moment.").manuel(
-            "Ne pas le couper d'ici (tu perdrais la connexion). S'il n'est pas utile, le désactiver depuis l'écran de l'ordinateur : Paramètres > Système > Bureau à distance",
+        alerte("Bureau à distance", Niveau::Moyen, tr!("RDP activé ; tu es connecté par lui en ce moment.", "RDP on; you are connected through it right now.")).manuel(
+            tr!("Ne pas le couper d'ici (tu perdrais la connexion). S'il n'est pas utile, le désactiver depuis l'écran de l'ordinateur : Paramètres > Système > Bureau à distance", "Do not turn it off from here (you would lose the connection). If it is not needed, turn it off from the computer's own screen: Settings > System > Remote Desktop"),
             &[],
         )
     } else if nla {
         alerte(
             "Bureau à distance",
             Niveau::Moyen,
-            "RDP activé (avec NLA). Très attaqué s'il est exposé.",
+            tr!(
+                "RDP activé (avec NLA). Très attaqué s'il est exposé.",
+                "RDP on (with NLA). Heavily attacked if exposed."
+            ),
         )
-        .corriger("Désactiver le Bureau à distance si tu ne l'utilises pas", &[&couper])
+        .corriger(
+            tr!(
+                "Désactiver le Bureau à distance si tu ne l'utilises pas",
+                "Turn Remote Desktop off if you do not use it"
+            ),
+            &[&couper],
+        )
     } else {
         alerte(
             "Bureau à distance",
             Niveau::Eleve,
-            "RDP activé SANS authentification au niveau réseau (NLA).",
+            tr!(
+                "RDP activé SANS authentification au niveau réseau (NLA).",
+                "RDP on WITHOUT Network Level Authentication (NLA)."
+            ),
         )
         .corriger(
-            "Exiger NLA pour le Bureau à distance",
+            tr!("Exiger NLA pour le Bureau à distance", "Require NLA for Remote Desktop"),
             &[&format!(
                 r"Set-ItemProperty '{cle}\WinStations\RDP-Tcp' -Name UserAuthentication -Value 1"
             )],
@@ -271,14 +358,23 @@ fn uac() -> Constat {
         alerte(
             "UAC",
             Niveau::Eleve,
-            "Contrôle de compte d'utilisateur (UAC) désactivé : tout programme a les droits admin.",
+            tr!(
+                "Contrôle de compte d'utilisateur (UAC) désactivé : tout programme a les droits admin.",
+                "User Account Control (UAC) is off: every program has admin rights."
+            ),
         )
         .corriger(
-            "Réactiver l'UAC (effectif après redémarrage)",
+            tr!(
+                "Réactiver l'UAC (effectif après redémarrage)",
+                "Turn UAC back on (effective after a restart)"
+            ),
             &[&format!("Set-ItemProperty '{cle}' -Name EnableLUA -Value 1")],
         )
     } else {
-        ok("UAC", "Contrôle de compte d'utilisateur actif.")
+        ok(
+            "UAC",
+            tr!("Contrôle de compte d'utilisateur actif.", "User Account Control on."),
+        )
     }
 }
 
@@ -289,17 +385,32 @@ fn mises_a_jour() -> Constat {
         Some(j) if j > 45 => alerte(
             "Mises à jour",
             Niveau::Eleve,
-            format!("Dernière mise à jour Windows il y a {j} jours."),
+            trf!(
+                "Dernière mise à jour Windows il y a {j} jours.",
+                "Last Windows update {j} days ago."
+            ),
         )
         .manuel(
-            "Ouvrir Windows Update et installer les mises à jour",
+            tr!(
+                "Ouvrir Windows Update et installer les mises à jour",
+                "Open Windows Update and install the updates"
+            ),
             &["Start-Process ms-settings:windowsupdate"],
         ),
         Some(j) => ok(
             "Mises à jour",
-            format!("Dernière mise à jour Windows il y a {j} jours."),
+            trf!(
+                "Dernière mise à jour Windows il y a {j} jours.",
+                "Last Windows update {j} days ago."
+            ),
         ),
-        None => impossible("Mises à jour", "historique Windows Update illisible"),
+        None => impossible(
+            "Mises à jour",
+            tr!(
+                "historique Windows Update illisible",
+                "Windows Update history unreadable"
+            ),
+        ),
     }
 }
 
@@ -309,29 +420,45 @@ fn chiffrement() -> Constat {
         "(New-Object -ComObject Shell.Application).NameSpace('C:').Self.ExtendedProperty('System.Volume.BitLockerProtection')",
     );
     match etat.as_deref() {
-        Some("1" | "3" | "5") => ok("Chiffrement", "Disque C: chiffré (BitLocker)."),
+        Some("1" | "3" | "5") => ok(
+            "Chiffrement",
+            tr!("Disque C: chiffré (BitLocker).", "Disk C: encrypted (BitLocker)."),
+        ),
         Some(_) => alerte(
             "Chiffrement",
             Niveau::Moyen,
-            "Disque C: non chiffré : en cas de vol, les données sont lisibles.",
+            tr!(
+                "Disque C: non chiffré : en cas de vol, les données sont lisibles.",
+                "Disk C: not encrypted: if stolen, the data can be read."
+            ),
         )
         .manuel(
-            "Paramètres > Confidentialité et sécurité > Chiffrement de l'appareil (ou BitLocker sur Pro)",
+            tr!(
+                "Paramètres > Confidentialité et sécurité > Chiffrement de l'appareil (ou BitLocker sur Pro)",
+                "Settings > Privacy & security > Device encryption (or BitLocker on Pro)"
+            ),
             &["Start-Process ms-settings:deviceencryption"],
         ),
-        None => impossible("Chiffrement", "état BitLocker illisible"),
+        None => impossible(
+            "Chiffrement",
+            tr!("état BitLocker illisible", "BitLocker state unreadable"),
+        ),
     }
 }
 
 fn invite() -> Constat {
     match ps("(Get-LocalUser | Where-Object { $_.Enabled -and $_.SID -like '*-501' }).Name") {
         None => illisible("Comptes"),
-        Some(nom) if !nom.is_empty() => alerte("Comptes", Niveau::Eleve, format!("Compte invité « {nom} » activé."))
-            .corriger(
-                "Désactiver le compte invité",
-                &[&format!("Disable-LocalUser -Name '{nom}'")],
-            ),
-        _ => ok("Comptes", "Compte invité désactivé."),
+        Some(nom) if !nom.is_empty() => alerte(
+            "Comptes",
+            Niveau::Eleve,
+            trf!("Compte invité « {nom} » activé.", "Guest account “{nom}” enabled."),
+        )
+        .corriger(
+            tr!("Désactiver le compte invité", "Disable the guest account"),
+            &[&format!("Disable-LocalUser -Name '{nom}'")],
+        ),
+        _ => ok("Comptes", tr!("Compte invité désactivé.", "Guest account disabled.")),
     }
 }
 
@@ -377,8 +504,8 @@ fn ports_ecoute(pare_feu_actif: bool, ip_lan: Option<&str>) -> Vec<Constat> {
             constats.push(alerte(
                 "Ports en écoute",
                 Niveau::Info,
-                format!(
-                    "{port}/tcp ({}) ouvert par « {programme} », bloqué en entrée par la règle « netscan : bloquer {port} » du pare-feu Windows.",
+                trf!(
+                    "{port}/tcp ({}) ouvert par « {programme} », bloqué en entrée par la règle « netscan : bloquer {port} » du pare-feu Windows.", "{port}/tcp ({}) opened by “{programme}”, blocked inbound by the “netscan : bloquer {port}” Windows firewall rule.",
                     i.service
                 ),
             ));
@@ -388,13 +515,18 @@ fn ports_ecoute(pare_feu_actif: bool, ip_lan: Option<&str>) -> Vec<Constat> {
         let constat = alerte(
             "Ports en écoute",
             niveau,
-            format!("{port}/tcp ({}) ouvert par « {programme} ». {}", i.service, i.conseil),
+            trf!(
+                "{port}/tcp ({}) ouvert par « {programme} ». {}",
+                "{port}/tcp ({}) opened by “{programme}”. {}",
+                i.service,
+                i.conseil
+            ),
         );
         // RDP : pas de blocage aveugle, il coupe l'accès aux machines pilotées à distance (VM…).
         // Le constat « Bureau à distance » propose déjà NLA ou la désactivation propre.
         constats.push(if niveau >= Niveau::Moyen && port != 3389 {
             constat.corriger(
-                format!("Bloquer le port {port} en entrée dans le pare-feu Windows"),
+                trf!("Bloquer le port {port} en entrée dans le pare-feu Windows", "Block inbound port {port} in the Windows firewall"),
                 &[&format!("New-NetFirewallRule -DisplayName 'netscan : bloquer {port}' -Direction Inbound -Protocol TCP -LocalPort {port} -Action Block")],
             )
             .bloquant(format!("{port}/tcp"))
@@ -403,7 +535,13 @@ fn ports_ecoute(pare_feu_actif: bool, ip_lan: Option<&str>) -> Vec<Constat> {
         });
     }
     if constats.is_empty() {
-        constats.push(ok("Ports en écoute", "Aucun service TCP sensible exposé au réseau."));
+        constats.push(ok(
+            "Ports en écoute",
+            tr!(
+                "Aucun service TCP sensible exposé au réseau.",
+                "No sensitive TCP service exposed to the network."
+            ),
+        ));
     }
     constats
 }
@@ -419,21 +557,30 @@ fn wifi() -> Option<Constat> {
     };
     let ssid = champ("SSID")?;
     let auth = champ("Authenti")?;
-    let routeur = "Ouvrir l'admin du routeur > Wi-Fi > Sécurité : choisir « WPA2/WPA3 » ou « WPA3 »";
+    let routeur = tr!(
+        "Ouvrir l'admin du routeur > Wi-Fi > Sécurité : choisir « WPA2/WPA3 » ou « WPA3 »",
+        "Open the router admin > Wi-Fi > Security: choose “WPA2/WPA3” or “WPA3”"
+    );
     Some(if auth.contains("WPA3") {
-        ok("Wi-Fi", format!("« {ssid} » en {auth}."))
+        ok("Wi-Fi", trf!("« {ssid} » en {auth}.", "“{ssid}” uses {auth}."))
     } else if auth.contains("WPA2") {
         alerte(
             "Wi-Fi",
             Niveau::Info,
-            format!("« {ssid} » en {auth}. WPA3 serait mieux si le routeur le permet."),
+            trf!(
+                "« {ssid} » en {auth}. WPA3 serait mieux si le routeur le permet.",
+                "“{ssid}” uses {auth}. WPA3 would be better if the router allows it."
+            ),
         )
         .manuel(routeur, &[])
     } else {
         alerte(
             "Wi-Fi",
             Niveau::Eleve,
-            format!("« {ssid} » en {auth} : réseau ouvert ou chiffrement faible."),
+            trf!(
+                "« {ssid} » en {auth} : réseau ouvert ou chiffrement faible.",
+                "“{ssid}” uses {auth}: open network or weak encryption."
+            ),
         )
         .manuel(routeur, &[])
     })
@@ -479,18 +626,27 @@ fn installer_windows_update(pilotes: bool) -> Vec<String> {
         ),
         // Une mise à jour non téléchargée (vu dans la VM : Windows Update bloqué sur « En attente de
         // téléchargement ») ne doit pas passer pour installée : chacune est vérifiée et nommée.
-        "if ($liste.Count) { $t = $maj.CreateUpdateDownloader(); $t.Updates = $liste; \
+        tr!("if ($liste.Count) { $t = $maj.CreateUpdateDownloader(); $t.Updates = $liste; \
          try { [void]$t.Download() } catch { Write-Host \"  Téléchargement interrompu : $($_.Exception.Message)\" -ForegroundColor Red } }; \
          $pret = New-Object -ComObject Microsoft.Update.UpdateColl; $ko = 0; \
          foreach ($u in $liste) { if ($u.IsDownloaded) { [void]$pret.Add($u) } \
-         else { $ko++; Write-Host \"  Pas téléchargée : $($u.Title)\" -ForegroundColor Red } }"
+         else { $ko++; Write-Host \"  Pas téléchargée : $($u.Title)\" -ForegroundColor Red } }", "if ($liste.Count) { $t = $maj.CreateUpdateDownloader(); $t.Updates = $liste; \
+         try { [void]$t.Download() } catch { Write-Host \"  Download interrupted: $($_.Exception.Message)\" -ForegroundColor Red } }; \
+         $pret = New-Object -ComObject Microsoft.Update.UpdateColl; $ko = 0; \
+         foreach ($u in $liste) { if ($u.IsDownloaded) { [void]$pret.Add($u) } \
+         else { $ko++; Write-Host \"  Not downloaded: $($u.Title)\" -ForegroundColor Red } }")
             .into(),
-        "$r = $null; if ($pret.Count) { $i = $maj.CreateUpdateInstaller(); $i.Updates = $pret; $r = $i.Install() }; \
+        tr!("$r = $null; if ($pret.Count) { $i = $maj.CreateUpdateInstaller(); $i.Updates = $pret; $r = $i.Install() }; \
          if ($r) { for ($n = 0; $n -lt $pret.Count; $n++) { $code = $r.GetUpdateResult($n).ResultCode; \
          if ($code -eq 2) { Write-Host \"  Installée : $($pret.Item($n).Title)\" -ForegroundColor Green } \
          else { $ko++; Write-Host \"  Pas installée (code $code) : $($pret.Item($n).Title)\" -ForegroundColor Red } } }; \
          if ($r -and $r.RebootRequired) { Write-Host '  Redémarrage nécessaire pour finir.' -ForegroundColor Yellow }; \
-         if ($ko) { throw \"$ko mise(s) à jour à refaire plus tard (ou Paramètres > Windows Update)\" }"
+         if ($ko) { throw \"$ko mise(s) à jour à refaire plus tard (ou Paramètres > Windows Update)\" }", "$r = $null; if ($pret.Count) { $i = $maj.CreateUpdateInstaller(); $i.Updates = $pret; $r = $i.Install() }; \
+         if ($r) { for ($n = 0; $n -lt $pret.Count; $n++) { $code = $r.GetUpdateResult($n).ResultCode; \
+         if ($code -eq 2) { Write-Host \"  Installed: $($pret.Item($n).Title)\" -ForegroundColor Green } \
+         else { $ko++; Write-Host \"  Not installed (code $code): $($pret.Item($n).Title)\" -ForegroundColor Red } } }; \
+         if ($r -and $r.RebootRequired) { Write-Host '  Restart needed to finish.' -ForegroundColor Yellow }; \
+         if ($ko) { throw \"$ko update(s) to retry later (or Settings > Windows Update)\" }")
             .into(),
     ]
 }
@@ -506,25 +662,43 @@ fn windows_update() -> Vec<Constat> {
         180,
     ) else {
         return vec![
-            impossible("Windows Update", "recherche impossible, hors ligne ?"),
-            impossible("Pilotes", "recherche Windows Update impossible"),
+            impossible(
+                "Windows Update",
+                tr!("recherche impossible, hors ligne ?", "search failed, offline?"),
+            ),
+            impossible(
+                "Pilotes",
+                tr!("recherche Windows Update impossible", "Windows Update search failed"),
+            ),
         ];
     };
     let (pilotes, logiciels): (Vec<_>, Vec<_>) = lire_windows_update(&sortie).into_iter().partition(|m| m.pilote);
     vec![
         constat_windows_update(
             "Windows Update",
-            "Windows à jour (correctifs, .NET, Defender).",
-            "mise(s) à jour en attente",
-            "Télécharger et installer les mises à jour de Windows",
+            tr!(
+                "Windows à jour (correctifs, .NET, Defender).",
+                "Windows up to date (fixes, .NET, Defender)."
+            ),
+            tr!("mise(s) à jour en attente", "update(s) pending"),
+            tr!(
+                "Télécharger et installer les mises à jour de Windows",
+                "Download and install the Windows updates"
+            ),
             false,
             &logiciels,
         ),
         constat_windows_update(
             "Pilotes",
-            "Aucun pilote à mettre à jour dans Windows Update.",
-            "pilote(s) à mettre à jour",
-            "Installer les pilotes proposés par Windows Update",
+            tr!(
+                "Aucun pilote à mettre à jour dans Windows Update.",
+                "No driver to update in Windows Update."
+            ),
+            tr!("pilote(s) à mettre à jour", "driver(s) to update"),
+            tr!(
+                "Installer les pilotes proposés par Windows Update",
+                "Install the drivers offered by Windows Update"
+            ),
             true,
             &pilotes,
         ),
@@ -552,7 +726,12 @@ fn constat_windows_update(
     alerte(
         categorie,
         niveau,
-        format!("{} {quoi} : {}.", liste.len(), resume(&titres, 3, " ; ")),
+        trf!(
+            "{} {quoi} : {}.",
+            "{} {quoi}: {}.",
+            liste.len(),
+            resume(&titres, 3, tr!(" ; ", "; "))
+        ),
     )
     .corriger(action, &installer_windows_update(pilotes))
 }
@@ -589,10 +768,19 @@ fn redemarrage_en_attente(lectures: Option<&str>) -> Constat {
         Some([a]) if a.eq_ignore_ascii_case("true") => alerte(
             "Redémarrage",
             Niveau::Moyen,
-            "Des mises à jour attendent un redémarrage pour être actives.",
+            tr!(
+                "Des mises à jour attendent un redémarrage pour être actives.",
+                "Updates are waiting for a restart to take effect."
+            ),
         )
-        .manuel("Redémarrer quand c'est pratique", &["Restart-Computer"]),
-        Some([a]) if a.eq_ignore_ascii_case("false") => ok("Redémarrage", "Aucun redémarrage en attente."),
+        .manuel(
+            tr!("Redémarrer quand c'est pratique", "Restart when convenient"),
+            &["Restart-Computer"],
+        ),
+        Some([a]) if a.eq_ignore_ascii_case("false") => ok(
+            "Redémarrage",
+            tr!("Aucun redémarrage en attente.", "No restart pending."),
+        ),
         _ => illisible("Redémarrage"),
     }
 }
@@ -658,7 +846,10 @@ fn programmes() -> Constat {
     };
     if sortie.contains("WINGET_ABSENT") {
         return impossible("Programmes", "winget absent").manuel(
-            "Installer « Programme d'installation d'application » depuis le Microsoft Store",
+            tr!(
+                "Installer « Programme d'installation d'application » depuis le Microsoft Store",
+                "Install “App Installer” from the Microsoft Store"
+            ),
             &["Start-Process ms-windows-store://pdp/?ProductId=9NBLGGH4NNS1"],
         );
     }
@@ -672,25 +863,36 @@ fn programmes() -> Constat {
         None => {
             return impossible(
                 "Programmes",
-                &format!("winget en erreur (code {})", code.map_or("?".into(), |c| c.to_string())),
+                &trf!(
+                    "winget en erreur (code {})",
+                    "winget failed (code {})",
+                    code.map_or("?".into(), |c| c.to_string())
+                ),
             );
         }
     };
     if programmes.is_empty() {
-        return ok("Programmes", "Programmes à jour (winget).");
+        return ok(
+            "Programmes",
+            tr!("Programmes à jour (winget).", "Programs up to date (winget)."),
+        );
     }
     let noms: Vec<&str> = programmes.iter().map(|(n, _)| n.as_str()).collect();
     alerte(
         "Programmes",
         Niveau::Moyen,
-        format!(
+        trf!(
             "{} programme(s) à mettre à jour : {}.",
+            "{} program(s) to update: {}.",
             noms.len(),
             resume(&noms, 3, ", ")
         ),
     )
     .corriger(
-        "Mettre à jour ces programmes avec winget",
+        tr!(
+            "Mettre à jour ces programmes avec winget",
+            "Update these programs with winget"
+        ),
         &commandes_winget(&programmes),
     )
 }
@@ -709,30 +911,36 @@ fn peripheriques(lectures: Option<&str>) -> Constat {
         .filter(|(_, nom)| !nom.contains("QEMU0002"))
         .map(|(code, nom)| {
             let nom = if nom.trim().is_empty() {
-                "Périphérique inconnu"
+                tr!("Périphérique inconnu", "Unknown device")
             } else {
                 nom.trim()
             };
             match code {
-                "28" | "1" => format!("{nom} (pas de pilote)"),
-                _ => format!("{nom} (erreur {code})"),
+                "28" | "1" => trf!("{nom} (pas de pilote)", "{nom} (no driver)"),
+                _ => trf!("{nom} (erreur {code})", "{nom} (error {code})"),
             }
         })
         .collect();
     if en_panne.is_empty() {
-        return ok("Périphériques", "Tous les périphériques ont un pilote qui fonctionne.");
+        return ok(
+            "Périphériques",
+            tr!(
+                "Tous les périphériques ont un pilote qui fonctionne.",
+                "Every device has a working driver."
+            ),
+        );
     }
     alerte(
         "Périphériques",
         Niveau::Moyen,
-        format!(
-            "{} périphérique(s) sans pilote ou en erreur : {}.",
+        trf!(
+            "{} périphérique(s) sans pilote ou en erreur : {}.", "{} device(s) without a driver or in error: {}.",
             en_panne.len(),
             resume(&en_panne, 3, ", ")
         ),
     )
     .manuel(
-        "Chercher le pilote dans Windows Update > Options avancées > Mises à jour facultatives, sinon sur le site du fabricant",
+        tr!("Chercher le pilote dans Windows Update > Options avancées > Mises à jour facultatives, sinon sur le site du fabricant", "Look for the driver in Windows Update > Advanced options > Optional updates, otherwise on the manufacturer's website"),
         &["Start-Process ms-settings:windowsupdate-optionalupdates", "Start-Process devmgmt.msc"],
     )
 }
@@ -770,17 +978,29 @@ fn cartes_graphiques(lectures: Option<&str>) -> Vec<Constat> {
             let mut c = l.splitn(3, '|');
             let (nom, version, jours) = (c.next()?.trim(), c.next()?.trim(), c.next()?.trim().parse::<u32>().ok());
             let (outil, lien) = pilote_fabricant(nom)?;
-            let manuel = format!("Mettre le pilote à jour avec {outil}");
+            let manuel = trf!("Mettre le pilote à jour avec {outil}", "Update the driver with {outil}");
             let ouvrir = format!("Start-Process {lien}");
             Some(match jours {
                 Some(j) if j > 180 => alerte(
                     "Carte graphique",
                     Niveau::Moyen,
-                    format!("{nom} : pilote {version} vieux de {j} jours."),
+                    trf!(
+                        "{nom} : pilote {version} vieux de {j} jours.",
+                        "{nom}: driver {version}, {j} days old."
+                    ),
                 )
                 .manuel(manuel, &[&ouvrir]),
-                Some(j) => ok("Carte graphique", format!("{nom} : pilote {version} de {j} jours.")),
-                None => ok("Carte graphique", format!("{nom} : pilote {version}.")),
+                Some(j) => ok(
+                    "Carte graphique",
+                    trf!(
+                        "{nom} : pilote {version} de {j} jours.",
+                        "{nom}: driver {version}, {j} days old."
+                    ),
+                ),
+                None => ok(
+                    "Carte graphique",
+                    trf!("{nom} : pilote {version}.", "{nom}: driver {version}."),
+                ),
             })
         })
         .collect()
@@ -792,11 +1012,20 @@ fn signatures(age: u64) -> Constat {
         alerte(
             "Signatures",
             Niveau::Moyen,
-            format!("Signatures antivirus vieilles de {age} jours."),
+            trf!(
+                "Signatures antivirus vieilles de {age} jours.",
+                "Antivirus signatures {age} days old."
+            ),
         )
-        .corriger("Mettre à jour les signatures", &["Update-MpSignature"])
+        .corriger(
+            tr!("Mettre à jour les signatures", "Update the signatures"),
+            &["Update-MpSignature"],
+        )
     } else {
-        ok("Signatures", "Signatures de Defender à jour.")
+        ok(
+            "Signatures",
+            tr!("Signatures de Defender à jour.", "Defender signatures up to date."),
+        )
     }
 }
 

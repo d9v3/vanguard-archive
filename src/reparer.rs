@@ -8,6 +8,8 @@ use std::fmt::Write;
 use std::net::IpAddr;
 
 use crate::machine;
+#[cfg(windows)]
+use crate::trw;
 use crate::ui::*;
 
 pub struct Reparation {
@@ -302,9 +304,9 @@ fn antivirus(systemd: bool) -> Reparation {
         })
         .max()
         .and_then(|m| m.elapsed().ok())
-        .map_or("jamais".to_string(), |d| match d.as_secs() / 86_400 {
-            0 => "aujourd'hui".to_string(),
-            1 => "hier".to_string(),
+        .map_or(tr!("jamais", "never").to_string(), |d| match d.as_secs() / 86_400 {
+            0 => tr!("aujourd'hui", "today").to_string(),
+            1 => tr!("hier", "yesterday").to_string(),
             n => trf!("il y a {n} jours", "{n} days ago"),
         });
     r.pourquoi = trf!(

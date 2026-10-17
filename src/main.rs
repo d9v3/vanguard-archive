@@ -146,7 +146,7 @@ impl Session {
             afficher_note(tr!("Réseau", "Network"), r);
         }
         if let Some(g) = [m, r].into_iter().flatten().min() {
-            afficher_note("Global", g);
+            afficher_note(tr!("Global", "Overall"), g);
         }
         let a_corriger = self.audit.as_ref().is_some_and(|a| {
             a.constats

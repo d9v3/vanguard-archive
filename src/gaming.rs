@@ -8,6 +8,7 @@ use std::fmt::Write;
 use serde::Deserialize;
 
 use crate::machine;
+use crate::trw;
 use crate::ui::*;
 
 /// winget sort ces codes quand le paquet est déjà là (« aucune mise à jour applicable », « déjà installé ») :

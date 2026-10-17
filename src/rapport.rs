@@ -71,7 +71,7 @@ pub fn generer(audit: Option<&Audit>, reseau: Option<&Rapport>) -> std::io::Resu
 
 fn html(audit: Option<&Audit>, reseau: Option<&Rapport>) -> String {
     let mut h = String::new();
-    let date = chrono::Local::now().format("%d/%m/%Y à %H:%M");
+    let date = chrono::Local::now().format(tr!("%d/%m/%Y à %H:%M", "%Y-%m-%d %H:%M"));
     let _ = trw!(
         h,
         "<!doctype html><html lang=fr><head><meta charset=utf-8><meta name=viewport content=\"width=device-width,initial-scale=1\">\
@@ -134,7 +134,7 @@ fn html(audit: Option<&Audit>, reseau: Option<&Rapport>) -> String {
         let nom = r
             .nom_reseau
             .as_deref()
-            .map(|n| format!(" « {} »", esc(n)))
+            .map(|n| trf!(" « {} »", " “{}”", esc(n)))
             .unwrap_or_default();
         let _ = trw!(
             h,
@@ -222,7 +222,7 @@ fn html(audit: Option<&Audit>, reseau: Option<&Rapport>) -> String {
             let quand = a
                 .dernier_vu
                 .as_deref()
-                .map(|d| format!(" — vu le {}", crate::reseau::date_fr(d)))
+                .map(|d| trf!(" — vu le {}", " — seen on {}", crate::reseau::date_fr(d)))
                 .unwrap_or_default();
             let _ = write!(h, "<li>{} {}{}</li>", a.ip, esc(&a.titre), quand);
         }

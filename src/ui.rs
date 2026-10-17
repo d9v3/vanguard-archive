@@ -2,7 +2,7 @@
 
 pub use crate::langue::Reponse;
 use crate::risk::Niveau;
-pub use crate::{tr, tre, trf, trp, trpr, trw, trwln};
+pub use crate::{tr, tre, trf, trp};
 
 pub const RESET: &str = "\x1b[0m";
 pub const GRAS: &str = "\x1b[1m";
