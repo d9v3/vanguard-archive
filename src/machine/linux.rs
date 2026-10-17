@@ -105,6 +105,12 @@ fn politique_ufw(texte: &str) -> Option<String> {
     })
 }
 
+/// ufw est-il le pare-feu actif ? (les corrections « ufw deny » n'ont de sens qu'avec lui)
+fn ufw_actif() -> bool {
+    std::fs::read_to_string("/etc/ufw/ufw.conf").is_ok_and(|c| c.lines().any(|l| l.trim() == "ENABLED=yes"))
+        && service_actif("ufw")
+}
+
 fn pare_feu() -> Constat {
     let installer_ufw = format!(
         "command -v ufw >/dev/null || {}",
@@ -114,9 +120,7 @@ fn pare_feu() -> Constat {
     if !systemd() {
         return impossible("Pare-feu", "systemd absent");
     }
-    let ufw = std::fs::read_to_string("/etc/ufw/ufw.conf").is_ok_and(|c| c.lines().any(|l| l.trim() == "ENABLED=yes"))
-        && service_actif("ufw");
-    if ufw {
+    if ufw_actif() {
         // Actif ne suffit pas : encore faut-il qu'il bloque les connexions entrantes par défaut.
         let politique = std::fs::read_to_string("/etc/default/ufw")
             .ok()
@@ -197,7 +201,9 @@ fn adresses_exposees() -> std::collections::HashSet<String> {
         .collect()
 }
 
-fn ports_ecoute(pare_feu_actif: bool) -> Vec<Constat> {
+/// `ufw` : le pare-feu actif est ufw. Avec firewalld ou nftables, « ufw deny » ne bloquerait rien
+/// (ou s'ajouterait à un ufw arrêté) tout en s'affichant « fait » : on ne le propose pas.
+fn ports_ecoute(pare_feu_actif: bool, ufw: bool) -> Vec<Constat> {
     let adresses = adresses_exposees();
     let mut constats = Vec::new();
     let mut vus = Vec::new();
@@ -213,7 +219,13 @@ fn ports_ecoute(pare_feu_actif: bool) -> Vec<Constat> {
                 continue;
             };
             let Ok(port) = port.parse::<u16>() else { continue };
-            let adresse = adresse.split('%').next().unwrap_or(adresse);
+            // Zone d'une IPv6 de lien local (« [fe80::1%wlan0] ») : retirée, crochet fermant gardé.
+            let sans_zone = match adresse.split_once('%') {
+                Some((ip, _)) if adresse.starts_with('[') => format!("{ip}]"),
+                Some((ip, _)) => ip.to_string(),
+                None => adresse.to_string(),
+            };
+            let adresse = sans_zone.as_str();
             let expose = matches!(adresse, "0.0.0.0" | "*" | "[::]") || adresses.contains(adresse);
             let i = info_port(port);
             // UDP : client DHCP (68) et ports éphémères anonymes (sockets clientes), ce ne sont pas des services.
@@ -268,7 +280,7 @@ fn ports_ecoute(pare_feu_actif: bool) -> Vec<Constat> {
                         &[],
                     ),
                 },
-                _ if niveau >= Niveau::Moyen && pare_feu_actif => {
+                _ if niveau >= Niveau::Moyen && ufw => {
                     constat.corriger(format!("Bloquer le port {port}/{proto} dans le pare-feu"), &[&deny])
                 }
                 _ => constat,
@@ -703,8 +715,12 @@ fn redemarrage() -> Constat {
         .max_by_key(|p| p.metadata().and_then(|m| m.modified()).ok())
         .and_then(|p| p.file_name())
         .map(|n| n.to_string_lossy().into_owned());
-    let a_jour =
-        en_cours && plus_recent.as_deref() == Some(noyau.as_str()) && !Path::new("/var/run/reboot-required").exists();
+    // Arch efface le dossier de l'ancien noyau à la mise à jour : s'il existe encore, le noyau chargé est le bon.
+    // La date n'y veut rien dire : avec linux + linux-lts (ou DKMS qui recompile pour chacun), le dernier
+    // dossier touché n'est pas forcément celui qui devrait tourner.
+    let dernier_installe =
+        Paquets::detecter() == Some(Paquets::Pacman) || plus_recent.as_deref() == Some(noyau.as_str());
+    let a_jour = en_cours && dernier_installe && !Path::new("/var/run/reboot-required").exists();
     if a_jour {
         ok(
             "Noyau",
@@ -977,10 +993,17 @@ fn durcissement_noyau() -> Constat {
         .iter()
         .map(|(c, v, _, r)| format!("{} = {v} ({r})", c.replace('/', ".")))
         .collect();
-    let lignes: String = faibles
-        .iter()
-        .map(|(c, _, m, _)| format!("{} = {m}\\n", c.replace('/', ".")))
-        .collect();
+    // Le fichier est réécrit en entier : on garde les réglages qu'une correction précédente y avait mis,
+    // sinon ils sauteraient au prochain redémarrage.
+    const FICHIER: &str = "/etc/sysctl.d/99-netscan.conf";
+    let lignes = fusion_sysctl(
+        &std::fs::read_to_string(FICHIER).unwrap_or_default(),
+        &faibles
+            .iter()
+            .map(|(c, _, m, _)| (c.replace('/', "."), *m))
+            .collect::<Vec<_>>(),
+    )
+    .replace('\n', "\\n");
     alerte(
         "Noyau durci",
         niveau,
@@ -989,10 +1012,31 @@ fn durcissement_noyau() -> Constat {
     .corriger(
         "Appliquer les valeurs sûres (fichier /etc/sysctl.d/99-netscan.conf, gardé au redémarrage)",
         &[
-            &format!("printf '{lignes}' | sudo tee /etc/sysctl.d/99-netscan.conf >/dev/null"),
+            &format!("printf '{lignes}' | sudo tee {FICHIER} >/dev/null"),
             "sudo sysctl --system >/dev/null",
         ],
     )
+}
+
+/// Contenu de 99-netscan.conf : les réglages déjà présents, mis à jour ou complétés par les nouveaux.
+fn fusion_sysctl(existant: &str, nouveaux: &[(String, i64)]) -> String {
+    let mut reglages: Vec<(String, String)> = existant
+        .lines()
+        .filter_map(|l| {
+            let (k, v) = l.split_once('=')?;
+            let (k, v) = (k.trim(), v.trim());
+            // Le contenu repasse par printf dans le shell : seuls des caractères sans effet y sont gardés.
+            let sur = |s: &str| !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric() || " ._-/".contains(c));
+            (sur(k) && sur(v)).then(|| (k.to_string(), v.to_string()))
+        })
+        .collect();
+    for (cle, valeur) in nouveaux {
+        match reglages.iter_mut().find(|(k, _)| k == cle) {
+            Some(r) => r.1 = valeur.to_string(),
+            None => reglages.push((cle.clone(), valeur.to_string())),
+        }
+    }
+    reglages.iter().map(|(k, v)| format!("{k} = {v}\n")).collect()
 }
 
 /// Module de sécurité obligatoire (AppArmor, SELinux) : actif par défaut sur Ubuntu, Debian et Fedora.
@@ -1337,7 +1381,9 @@ fn fichiers_secrets() -> Vec<Constat> {
     let mut commandes = Vec::new();
     for nom in SECRETS {
         let chemin = maison.join(nom);
-        let Ok(meta) = std::fs::symlink_metadata(&chemin) else {
+        // Droits du fichier lui-même, pas du lien : un lien symbolique (stow, chezmoi…) a toujours 777,
+        // ce qui donnait une fausse alerte, jamais corrigée par le chmod.
+        let Ok(meta) = std::fs::metadata(&chemin) else {
             continue;
         };
         if secret_expose(meta.permissions().mode()) {
@@ -1554,7 +1600,7 @@ pub fn auditer() -> Audit {
     let feu = pare_feu();
     let feu_actif = feu.probleme.is_none();
     let mut constats = vec![feu];
-    constats.extend(ports_ecoute(feu_actif));
+    constats.extend(ports_ecoute(feu_actif, feu_actif && ufw_actif()));
     constats.extend(docker());
     constats.push(ssh_serveur());
     constats.push(mises_a_jour());
@@ -1698,6 +1744,20 @@ mod tests {
         assert_eq!(type_sauvegarde("snapper-timeline.timer"), Some(false));
         assert_eq!(type_sauvegarde("snapper-cleanup.timer"), None);
         assert_eq!(type_sauvegarde("fstrim.timer"), None);
+    }
+
+    #[test]
+    fn sysctl_garde_les_reglages_precedents() {
+        let existant = "# netscan\nkernel.kptr_restrict = 1\nkernel.dmesg_restrict=0\nmauvais = $(rm -rf ~)\n";
+        let nouveaux = [
+            ("kernel.dmesg_restrict".to_string(), 1),
+            ("fs.protected_symlinks".to_string(), 1),
+        ];
+        assert_eq!(
+            fusion_sysctl(existant, &nouveaux),
+            "kernel.kptr_restrict = 1\nkernel.dmesg_restrict = 1\nfs.protected_symlinks = 1\n"
+        );
+        assert_eq!(fusion_sysctl("", &nouveaux[..1]), "kernel.dmesg_restrict = 1\n");
     }
 
     #[test]

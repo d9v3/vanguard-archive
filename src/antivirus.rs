@@ -308,8 +308,13 @@ fn isoler(chemin: &std::path::Path, dossier: &std::path::Path) -> std::io::Resul
         .map_or(0, |d| d.as_nanos());
     let dest = dossier.join(format!("{horodatage}.{nom}"));
     // rename échoue d'un disque à l'autre (clé USB → disque) : on copie puis on supprime.
-    std::fs::rename(chemin, &dest)
-        .or_else(|_| std::fs::copy(chemin, &dest).and_then(|_| std::fs::remove_file(chemin)))?;
+    std::fs::rename(chemin, &dest).or_else(|_| {
+        std::fs::copy(chemin, &dest)?;
+        // Original impossible à supprimer : on ne laisse pas une seconde copie, encore exécutable, en quarantaine.
+        std::fs::remove_file(chemin).inspect_err(|_| {
+            let _ = std::fs::remove_file(&dest);
+        })
+    })?;
     std::fs::set_permissions(&dest, std::fs::Permissions::from_mode(0o000))?;
     Ok(dest)
 }

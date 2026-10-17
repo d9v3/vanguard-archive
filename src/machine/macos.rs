@@ -17,9 +17,25 @@ fn tout(cmd: &str, args: &[&str]) -> String {
         .unwrap_or_default()
 }
 
+/// État global du pare-feu d'après « (State = N) » : 0 = coupé, 1 = actif, 2 = tout bloquer.
+/// Chercher le mot « enabled » ratait l'état 2 (« Firewall is blocking all… »), le plus strict.
+fn etat_pare_feu(texte: &str) -> Option<u32> {
+    let apres = texte.split_once("State = ")?.1;
+    apres.split(|c: char| !c.is_ascii_digit()).next()?.parse().ok()
+}
+
+/// Mode furtif : « Stealth mode enabled » (anciens macOS) ou « Firewall stealth mode is on » (récents).
+fn furtif_actif(texte: &str) -> bool {
+    let t = texte.to_ascii_lowercase();
+    (t.contains("enabled") && !t.contains("disabled")) || t.contains("is on")
+}
+
 fn pare_feu() -> Vec<Constat> {
     let etat = tout(FIREWALL, &["--getglobalstate"]);
-    if !etat.contains("enabled") {
+    let Some(etat) = etat_pare_feu(&etat) else {
+        return vec![impossible("Pare-feu", "socketfilterfw n'a pas répondu")];
+    };
+    if etat == 0 {
         return vec![alerte("Pare-feu", Niveau::Eleve, "Pare-feu macOS désactivé.").corriger(
             "Activer le pare-feu et le mode furtif",
             &[
@@ -29,7 +45,7 @@ fn pare_feu() -> Vec<Constat> {
         )];
     }
     let mut c = vec![ok("Pare-feu", "Pare-feu macOS actif.")];
-    if !tout(FIREWALL, &["--getstealthmode"]).contains("enabled") {
+    if !furtif_actif(&tout(FIREWALL, &["--getstealthmode"])) {
         c.push(
             alerte(
                 "Pare-feu",
@@ -246,5 +262,25 @@ pub fn auditer() -> Audit {
         systeme: NOM,
         score: score(&constats),
         constats,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sorties_du_pare_feu() {
+        assert_eq!(etat_pare_feu("Firewall is disabled. (State = 0)"), Some(0));
+        assert_eq!(etat_pare_feu("Firewall is enabled. (State = 1)"), Some(1));
+        assert_eq!(
+            etat_pare_feu("Firewall is blocking all non-essential incoming connections. (State = 2)"),
+            Some(2)
+        );
+        assert_eq!(etat_pare_feu(""), None);
+        assert!(furtif_actif("Firewall stealth mode is on"));
+        assert!(furtif_actif("Stealth mode enabled"));
+        assert!(!furtif_actif("Firewall stealth mode is off"));
+        assert!(!furtif_actif("Stealth mode disabled"));
     }
 }

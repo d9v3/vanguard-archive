@@ -101,8 +101,10 @@ pub fn reseau_local() -> Option<(String, Ipv4Addr)> {
         .iter()
         .find(|v4| gw.is_some_and(|g| g & masque(v4) == u32::from(v4.ip) & masque(v4)))
         .or(candidats.first())?;
+    // Réseau plus grand qu'un /16 (10.0.0.0/8…) : on scanne le /16 qui contient cette machine. Le calculer
+    // avec le masque d'origine donnait 10.0.0.0/16 même pour l'IP 10.5.3.2, donc le mauvais morceau.
     let pref = masque(choisi).count_ones().max(16);
-    let reseau = Ipv4Addr::from(u32::from(choisi.ip) & masque(choisi));
+    let reseau = Ipv4Addr::from(u32::from(choisi.ip) & !(u32::MAX >> pref));
     Some((format!("{reseau}/{pref}"), choisi.ip))
 }
 
@@ -118,13 +120,7 @@ pub fn passerelle() -> Option<Ipv4Addr> {
     #[cfg(target_os = "linux")]
     {
         let table = std::fs::read_to_string("/proc/net/route").ok()?;
-        table.lines().skip(1).find_map(|l| {
-            let c: Vec<&str> = l.split_whitespace().collect();
-            (c.get(1) == Some(&"00000000"))
-                .then(|| u32::from_str_radix(c[2], 16).ok())
-                .flatten()
-                .map(|g| Ipv4Addr::from(g.swap_bytes()))
-        })
+        passerelle_linux(&table)
     }
     #[cfg(target_os = "macos")]
     {
@@ -146,6 +142,28 @@ pub fn passerelle() -> Option<Ipv4Addr> {
             .min()
             .map(|(_, ip)| ip)
     }
+}
+
+/// Route par défaut dans /proc/net/route (Iface Destination Gateway Flags RefCnt Use Metric…).
+/// Seules les routes « via une passerelle » comptent (un VPN « default dev tun0 » a la passerelle 0.0.0.0),
+/// et avec Ethernet + Wi-Fi, la plus petite métrique gagne, comme pour le système.
+#[cfg(any(target_os = "linux", test))]
+fn passerelle_linux(table: &str) -> Option<Ipv4Addr> {
+    const RTF_UP: u32 = 0x1;
+    const RTF_GATEWAY: u32 = 0x2;
+    table
+        .lines()
+        .skip(1)
+        .filter_map(|l| {
+            let c: Vec<&str> = l.split_whitespace().collect();
+            let hex = |i: usize| u32::from_str_radix(c.get(i)?, 16).ok();
+            let (dest, gw, drapeaux) = (hex(1)?, hex(2)?, hex(3)?);
+            let metrique: u32 = c.get(6)?.parse().ok()?;
+            let utile = dest == 0 && gw != 0 && drapeaux & (RTF_UP | RTF_GATEWAY) == RTF_UP | RTF_GATEWAY;
+            utile.then_some((metrique, Ipv4Addr::from(gw.swap_bytes())))
+        })
+        .min()
+        .map(|(_, ip)| ip)
 }
 
 /// Normalise une MAC en « aa:bb:cc:dd:ee:ff » (macOS écrit « a:b:… », Windows « aa-bb-… »).
@@ -333,6 +351,31 @@ pub fn fabricant(mac: &str, base: &HashMap<String, String>) -> Option<String> {
     base.get(hex.get(..6)?).cloned()
 }
 
+/// Nom du Wi-Fi auquel on est connecté, pour reconnaître le réseau dans la base (« Salon », « Chez Max »…).
+pub fn nom_wifi() -> Option<String> {
+    #[cfg(target_os = "linux")]
+    let nom = commande_sortie("nmcli", &["-t", "-e", "no", "-f", "ACTIVE,SSID", "dev", "wifi"])
+        .lines()
+        .find_map(|l| l.strip_prefix("yes:").map(str::to_string));
+    #[cfg(target_os = "macos")]
+    let nom = commande_sortie("networksetup", &["-getairportnetwork", "en0"])
+        .split_once(": ")
+        .map(|(_, n)| n.trim().to_string());
+    #[cfg(windows)]
+    let nom = commande_sortie("netsh", &["wlan", "show", "interfaces"])
+        .lines()
+        .map(str::trim)
+        .find(|l| l.starts_with("SSID") && !l.starts_with("BSSID"))
+        .and_then(|l| Some(l.split_once(':')?.1.trim().to_string()));
+    nom.filter(|n| !n.is_empty())
+}
+
+fn commande_sortie(cmd: &str, args: &[&str]) -> String {
+    crate::commande::lancer(std::process::Command::new(cmd).args(args), 10)
+        .map(|r| r.sortie)
+        .unwrap_or_default()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -376,29 +419,18 @@ mod tests {
         );
         assert!(fabricant("ee:12:34:56:78:9a", &base).unwrap().contains("aléatoire"));
     }
-}
 
-/// Nom du Wi-Fi auquel on est connecté, pour reconnaître le réseau dans la base (« Salon », « Chez Max »…).
-pub fn nom_wifi() -> Option<String> {
-    #[cfg(target_os = "linux")]
-    let nom = commande_sortie("nmcli", &["-t", "-e", "no", "-f", "ACTIVE,SSID", "dev", "wifi"])
-        .lines()
-        .find_map(|l| l.strip_prefix("yes:").map(str::to_string));
-    #[cfg(target_os = "macos")]
-    let nom = commande_sortie("networksetup", &["-getairportnetwork", "en0"])
-        .split_once(": ")
-        .map(|(_, n)| n.trim().to_string());
-    #[cfg(windows)]
-    let nom = commande_sortie("netsh", &["wlan", "show", "interfaces"])
-        .lines()
-        .map(str::trim)
-        .find(|l| l.starts_with("SSID") && !l.starts_with("BSSID"))
-        .and_then(|l| Some(l.split_once(':')?.1.trim().to_string()));
-    nom.filter(|n| !n.is_empty())
-}
-
-fn commande_sortie(cmd: &str, args: &[&str]) -> String {
-    crate::commande::lancer(std::process::Command::new(cmd).args(args), 10)
-        .map(|r| r.sortie)
-        .unwrap_or_default()
+    #[test]
+    fn passerelle_par_defaut_linux() {
+        let entete = "Iface\tDestination\tGateway \tFlags\tRefCnt\tUse\tMetric\tMask\t\tMTU\tWindow\tIRTT\n";
+        // VPN « default dev tun0 » (passerelle 0), Wi-Fi (métrique 600) et Ethernet (métrique 100).
+        let table = format!(
+            "{entete}tun0\t00000000\t00000000\t0001\t0\t0\t50\t00000000\t0\t0\t0\n\
+             wlan0\t00000000\t0101A8C0\t0003\t0\t0\t600\t00000000\t0\t0\t0\n\
+             eth0\t00000000\t0100000A\t0003\t0\t0\t100\t00000000\t0\t0\t0\n\
+             eth0\t0000000A\t00000000\t0001\t0\t0\t100\t00FFFFFF\t0\t0\t0\n"
+        );
+        assert_eq!(passerelle_linux(&table), Some(Ipv4Addr::new(10, 0, 0, 1)));
+        assert_eq!(passerelle_linux(entete), None);
+    }
 }

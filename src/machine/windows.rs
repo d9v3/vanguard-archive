@@ -89,9 +89,13 @@ pub fn powershell_admin(commandes: &[String]) -> bool {
     }
     println!("    Script de correction (lisible) : {}", chemin.display());
     let fichier = chemin.display().to_string().replace('\'', "''");
+    // Demande d'administrateur refusée : Start-Process échoue et $p reste vide. Sans ce test, l'appel de méthode
+    // sur $null était sauté et « exit $p.ExitCode » devenait « exit 0 » : la correction s'affichait « fait ».
     let lanceur = format!(
         "$p = Start-Process powershell -Verb RunAs -PassThru -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','\"{fichier}\"'; \
-         if (-not $p.WaitForExit({DELAI_CORRECTION_MS})) {{ Write-Host 'Correction trop longue : abandon de l''attente.'; exit 2 }}; exit $p.ExitCode"
+         if (-not $p) {{ Write-Host 'Demande d''administrateur refusée : rien n''a été modifié.'; exit 3 }}; \
+         if (-not $p.WaitForExit({DELAI_CORRECTION_MS})) {{ Write-Host 'Correction trop longue : abandon de l''attente.'; exit 2 }}; \
+         if ($null -eq $p.ExitCode) {{ exit 4 }}; exit $p.ExitCode"
     );
     Command::new("powershell")
         .args(["-NoProfile", "-Command", &lanceur])

@@ -83,8 +83,11 @@ pub fn corriger(audit: &Audit, reseau: Option<&Rapport>) -> Option<Audit> {
                 for (n, msg) in &h.alertes {
                     println!("    {}→{RESET} {msg}", couleur(*n));
                 }
-                if h.ports.iter().any(|p| [80, 443, 8080, 8443].contains(&p.port)) {
+                let ouvert = |l: &[u16]| h.ports.iter().any(|p| l.contains(&p.port));
+                if ouvert(&[80, 8080]) {
                     println!("    {GRIS}interface d'admin : http://{}{RESET}", h.ip);
+                } else if ouvert(&[443, 8443]) {
+                    println!("    {GRIS}interface d'admin : https://{}{RESET}", h.ip);
                 }
                 if h.ports.iter().any(|p| [135, 139, 445].contains(&p.port)) {
                     println!(

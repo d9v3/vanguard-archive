@@ -300,7 +300,11 @@ pub fn nommer(qui: &str, surnom: Option<&str>) -> Result<String, String> {
     let mut trouves = 0;
     let mut decrit = String::new();
     // Par IP, seulement dans le réseau où l'on se trouve (la même IP existe chez chacun) ; par MAC, partout.
-    let ici = scan::passerelle().and_then(|gw| scan::table_arp().get(&gw).cloned());
+    // Même identifiant que le scan : MAC de la box, sinon « plage <réseau local> ». Sans ce repli, un réseau
+    // dont la box n'a pas de MAC connue ne pouvait jamais nommer un appareil par son IP.
+    let ici = scan::passerelle()
+        .and_then(|gw| scan::table_arp().get(&gw).cloned())
+        .or_else(|| scan::reseau_local().map(|(r, _)| format!("plage {r}")));
     for (id, r) in base.reseaux.iter_mut() {
         for (cle, a) in r.appareils.iter_mut() {
             let par_mac = cle.eq_ignore_ascii_case(&qui_min);
@@ -384,12 +388,17 @@ fn parse_ports(spec: &str) -> Result<Vec<u16>, String> {
     let mut ports = Vec::new();
     for morceau in spec.split(',') {
         let err = || format!("port invalide : {morceau}");
+        // Port 0 impossible, et une plage à l'envers (« 100-10 ») ne doit pas devenir silencieusement vide.
+        let port = |t: &str| t.trim().parse::<u16>().ok().filter(|&p| p > 0).ok_or_else(err);
         match morceau.trim().split_once('-') {
             Some((a, b)) => {
-                let (a, b): (u16, u16) = (a.parse().map_err(|_| err())?, b.parse().map_err(|_| err())?);
+                let (a, b) = (port(a)?, port(b)?);
+                if a > b {
+                    return Err(format!("plage de ports à l'envers : {morceau}"));
+                }
                 ports.extend(a..=b);
             }
-            None => ports.push(morceau.trim().parse().map_err(|_| err())?),
+            None => ports.push(port(morceau)?),
         }
     }
     ports.sort();
@@ -732,6 +741,8 @@ mod tests {
         assert_eq!(parse_ports("tous").unwrap().len(), 65535);
         assert_eq!(parse_ports("courants").unwrap(), PORTS_COURANTS);
         assert!(parse_ports("80,abc").is_err());
+        assert!(parse_ports("0").is_err());
+        assert!(parse_ports("100-10").is_err());
     }
 
     #[test]

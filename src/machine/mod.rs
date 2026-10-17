@@ -143,9 +143,10 @@ fn cles_ssh() -> Vec<Constat> {
     for f in std::fs::read_dir(&dossier).into_iter().flatten().flatten() {
         let nom = f.file_name().to_string_lossy().into_owned();
         // Toute clé privée, quel que soit son nom (pas seulement id_*).
-        if let Ok(texte) = std::fs::read_to_string(f.path())
-            && cle_protegee(&texte) == Some(false)
-        {
+        let protegee = std::fs::read_to_string(f.path()).ok().and_then(|t| cle_protegee(&t));
+        // Nom entre apostrophes dans les commandes : une clé « ma cle » ne casse pas la commande.
+        let chemin = format!("~/.ssh/'{}'", nom.replace('\'', r"'\''"));
+        if protegee == Some(false) {
             constats.push(
                 alerte(
                     "Clés SSH",
@@ -154,11 +155,12 @@ fn cles_ssh() -> Vec<Constat> {
                 )
                 .corriger(
                     format!("Ajouter une phrase de passe à {nom} (la clé publique ne change pas, rien à refaire sur les serveurs)"),
-                    &[&format!("ssh-keygen -p -f ~/.ssh/{nom}")],
+                    &[&format!("ssh-keygen -p -f {chemin}")],
                 ),
             );
         }
-        let privee = nom.starts_with("id_") && !nom.ends_with(".pub");
+        // Même règle que ci-dessus : une clé « github » ou « serveur » compte autant qu'« id_ed25519 ».
+        let privee = protegee.is_some() || (nom.starts_with("id_") && !nom.ends_with(".pub"));
         if privee
             && f.metadata()
                 .is_ok_and(|m| std::os::unix::fs::PermissionsExt::mode(&m.permissions()) & 0o077 != 0)
@@ -169,7 +171,7 @@ fn cles_ssh() -> Vec<Constat> {
                     Niveau::Critique,
                     format!("Clé privée ~/.ssh/{nom} lisible par d'autres."),
                 )
-                .corriger(format!("Protéger la clé {nom}"), &[&format!("chmod 600 ~/.ssh/{nom}")]),
+                .corriger(format!("Protéger la clé {nom}"), &[&format!("chmod 600 {chemin}")]),
             );
         }
     }
