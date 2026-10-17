@@ -294,6 +294,11 @@ fn aujourd_hui() -> String {
     chrono::Local::now().format("%Y-%m-%d").to_string()
 }
 
+/// « 0 appareil », « 1 appareil », « 2 appareils » (en français, 0 et 1 sont au singulier).
+fn accord(n: usize, singulier: &str, pluriel: &str) -> String {
+    format!("{n} {}", if n > 1 { pluriel } else { singulier })
+}
+
 /// « 2026-10-16 » → « 16/10/2026 »
 pub fn date_fr(iso: &str) -> String {
     let mut p = iso.split('-');
@@ -564,16 +569,21 @@ fn afficher(r: &Rapport) {
     let compte = |n: Niveau| r.hotes.iter().flat_map(|h| &h.ports).filter(|p| p.niveau == n).count();
     titre("Bilan réseau");
     println!(
-        "  {} appareils ({} nouveaux), {} ports ouverts — {}{} critiques{RESET}, {}{} élevés{RESET}, {}{} moyens{RESET}",
-        r.hotes.len(),
-        r.hotes.iter().filter(|h| h.nouvelle).count(),
-        r.hotes.iter().map(|h| h.ports.len()).sum::<usize>(),
+        "  {} ({}), {} — {}{}{RESET}, {}{}{RESET}, {}{}{RESET}",
+        accord(r.hotes.len(), "appareil", "appareils"),
+        // « (1 nouveaux) » : vu en test.
+        accord(r.hotes.iter().filter(|h| h.nouvelle).count(), "nouveau", "nouveaux"),
+        accord(
+            r.hotes.iter().map(|h| h.ports.len()).sum::<usize>(),
+            "port ouvert",
+            "ports ouverts"
+        ),
         couleur(Niveau::Critique),
-        compte(Niveau::Critique),
+        accord(compte(Niveau::Critique), "critique", "critiques"),
         couleur(Niveau::Eleve),
-        compte(Niveau::Eleve),
+        accord(compte(Niveau::Eleve), "élevé", "élevés"),
         couleur(Niveau::Moyen),
-        compte(Niveau::Moyen),
+        accord(compte(Niveau::Moyen), "moyen", "moyens"),
     );
     afficher_note("Note du réseau (appareil le plus exposé)", r.score_global);
     println!("  {GRIS}Durée : {:.1} s{RESET}", r.duree_s);

@@ -225,10 +225,10 @@ fn clamav(complet: bool) {
     let rep = demander("  [q]uarantaine (recommandé, réversible) / [s]upprimer / [r]ien : ").to_lowercase();
     let dossier = crate::reseau::dossier_local().join("quarantaine");
     let _ = std::fs::create_dir_all(&dossier);
-    for (f, _) in &infectes {
+    for (f, detection) in &infectes {
         let chemin = std::path::Path::new(f);
         let resultat = match rep.as_str() {
-            "q" => isoler(chemin, &dossier).map(|_| ()),
+            "q" => isoler(chemin, &dossier).map(|dest| noter_quarantaine(&dossier, f, &dest, detection)),
             "s" => std::fs::remove_file(chemin),
             _ => continue,
         };
@@ -238,7 +238,10 @@ fn clamav(complet: bool) {
         }
     }
     if rep == "q" {
-        println!("  {GRIS}Quarantaine : {}{RESET}", dossier.display());
+        println!(
+            "  {GRIS}Quarantaine : {} (emplacement d'origine de chaque fichier noté dans journal.txt){RESET}",
+            dossier.display()
+        );
     }
 }
 
@@ -299,6 +302,26 @@ fn lire_resultat(code: Option<i32>, sortie: &str) -> Option<Bilan> {
         analyses,
         illisibles,
     })
+}
+
+/// Note d'où vient chaque fichier mis en quarantaine : sans cela, un faux positif ne pouvait pas être remis à
+/// sa place (son nom en quarantaine ne garde pas le dossier d'origine). Vu en test.
+#[cfg(unix)]
+fn noter_quarantaine(dossier: &std::path::Path, origine: &str, dest: &std::path::Path, detection: &str) {
+    use std::io::Write;
+    let ligne = format!(
+        "{}\t{detection}\t{origine}\t{}\n",
+        chrono::Local::now().format("%Y-%m-%d %H:%M:%S"),
+        dest.file_name().unwrap_or_default().to_string_lossy()
+    );
+    let ecrit = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(dossier.join("journal.txt"))
+        .and_then(|mut j| j.write_all(ligne.as_bytes()));
+    if let Err(e) = ecrit {
+        println!("  Attention : journal de la quarantaine non écrit ({e}). Origine : {origine}");
+    }
 }
 
 /// Déplace un fichier en quarantaine et lui retire toute permission : il ne peut plus être lancé ni ouvert.

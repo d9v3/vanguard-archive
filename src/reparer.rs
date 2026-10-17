@@ -167,8 +167,10 @@ fn present(cmd: &str) -> bool {
 
 #[cfg(target_os = "linux")]
 fn actif(service: &str) -> bool {
+    // Sans bus système (conteneur, espace de noms), systemctl écrit son erreur au milieu du menu : on la tait.
     std::process::Command::new("systemctl")
         .args(["is-active", "--quiet", service])
+        .stderr(std::process::Stdio::null())
         .status()
         .is_ok_and(|s| s.success())
 }

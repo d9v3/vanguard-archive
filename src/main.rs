@@ -182,7 +182,7 @@ async fn menu() {
             format!("{GRIS}désactivée{RESET}")
         };
         println!("  9. Surveillance du réseau toutes les heures : {etat}");
-        println!("  r. Réparer (réseau, disque, fichiers système, place…)");
+        println!("  r. Réparer (réseau, pare-feu, antivirus, disque, système…)");
         #[cfg(windows)]
         println!("  g. Gaming : composants (Visual C++, DirectX, .NET…) et réglages Windows");
         println!("  n. Nommer un appareil (« imprimante HP »)");
