@@ -120,6 +120,10 @@ struct AppareilConnu {
     ports: BTreeSet<u16>,
     #[serde(default)]
     surnom: Option<String>,
+    /// Quand le surnom a été donné ou retiré (« AAAA-MM-JJ HH:MM:SS ») : à la fusion clé + copie locale,
+    /// le plus récent gagne, même s'il a été donné sans la clé.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    surnom_le: Option<String>,
     #[serde(default)]
     premier_vu: Option<String>,
     #[serde(default)]
@@ -138,7 +142,13 @@ impl AppareilConnu {
     /// Fusion de deux fiches du même appareil (base de la clé + copie locale).
     fn fusionner(&mut self, autre: AppareilConnu) {
         self.ports.extend(autre.ports);
-        self.surnom = self.surnom.take().or(autre.surnom);
+        // None < Some : une fiche datée l'emporte sur une fiche d'avant la v0.9.6.
+        if autre.surnom_le > self.surnom_le {
+            self.surnom = autre.surnom;
+            self.surnom_le = autre.surnom_le;
+        } else if self.surnom_le.is_none() {
+            self.surnom = self.surnom.take().or(autre.surnom);
+        }
         self.premier_vu = [self.premier_vu.take(), autre.premier_vu].into_iter().flatten().min();
         if autre.dernier_vu > self.dernier_vu {
             self.dernier_vu = autre.dernier_vu;
@@ -299,6 +309,7 @@ pub fn nommer(qui: &str, surnom: Option<&str>) -> Result<String, String> {
     let qui_min = qui.to_ascii_lowercase();
     let mut trouves = 0;
     let mut decrit = String::new();
+    let maintenant = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
     // Par IP, seulement dans le réseau où l'on se trouve (la même IP existe chez chacun) ; par MAC, partout.
     // Même identifiant que le scan : MAC de la box, sinon « plage <réseau local> ». Sans ce repli, un réseau
     // dont la box n'a pas de MAC connue ne pouvait jamais nommer un appareil par son IP.
@@ -311,6 +322,7 @@ pub fn nommer(qui: &str, surnom: Option<&str>) -> Result<String, String> {
             let par_ip = a.ip.to_string() == qui && ici.as_deref() == Some(id.as_str());
             if par_mac || par_ip {
                 a.surnom = surnom.map(str::to_string);
+                a.surnom_le = Some(maintenant.clone());
                 trouves += 1;
                 decrit = format!("{} ({cle})", a.ip);
             }
@@ -696,6 +708,7 @@ pub async fn executer(o: Options) -> Result<Rapport, String> {
                     fabricant: None,
                     ports: BTreeSet::new(),
                     surnom: None,
+                    surnom_le: None,
                     premier_vu: Some(jour.clone()),
                     dernier_vu: None,
                 });
@@ -827,6 +840,7 @@ mod tests {
             fabricant: None,
             ports: ports.iter().copied().collect(),
             surnom: surnom.map(str::to_string),
+            surnom_le: None,
             premier_vu: Some(premier.into()),
             dernier_vu: Some(dernier.into()),
         };
@@ -844,6 +858,30 @@ mod tests {
         assert_eq!(cle.ip, Ipv4Addr::new(10, 0, 0, 140)); // l'IP la plus récente
         assert_eq!(cle.surnom.as_deref(), Some("imprimante HP"));
         assert_eq!(date_fr("2026-10-16"), "16/10/2026");
+
+        // Surnom changé sans la clé (copie locale plus récente) : il remplace celui de la clé.
+        let date = |mut f: AppareilConnu, le: &str| {
+            f.surnom_le = Some(le.into());
+            f
+        };
+        let mut cle = date(
+            fiche(&[], "2026-10-16", "2026-10-16", Some("ancien"), [10, 0, 0, 5]),
+            "2026-10-16 10:00:00",
+        );
+        cle.fusionner(date(
+            fiche(&[], "2026-10-16", "2026-10-16", Some("nouveau"), [10, 0, 0, 5]),
+            "2026-10-17 09:00:00",
+        ));
+        assert_eq!(cle.surnom.as_deref(), Some("nouveau"));
+        // Surnom retiré plus récemment : le retrait gagne aussi.
+        cle.fusionner(date(
+            fiche(&[], "2026-10-16", "2026-10-16", None, [10, 0, 0, 5]),
+            "2026-10-17 12:00:00",
+        ));
+        assert_eq!(cle.surnom, None);
+        // Une fiche plus ancienne ou sans date ne l'écrase pas.
+        cle.fusionner(fiche(&[], "2026-10-16", "2026-10-16", Some("vieux"), [10, 0, 0, 5]));
+        assert_eq!(cle.surnom, None);
     }
 
     #[test]

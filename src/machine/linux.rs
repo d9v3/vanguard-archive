@@ -208,6 +208,7 @@ fn ports_ecoute(pare_feu_actif: bool, ufw: bool) -> Vec<Constat> {
     let mut constats = Vec::new();
     let mut vus = Vec::new();
     let mut deja_conseille = std::collections::HashSet::new();
+    let bloques = super::ports_bloques();
     for (proto, options) in [("tcp", "-Htlnp"), ("udp", "-Hulnp")] {
         let Some(ss) = sortie("ss", &[options]) else {
             return vec![alerte("Ports en écoute", Niveau::Info, "Commande ss indisponible.")];
@@ -255,6 +256,18 @@ fn ports_ecoute(pare_feu_actif: bool, ufw: bool) -> Vec<Constat> {
                 ),
             );
             let deny = format!("sudo ufw deny {port}/{proto}");
+            let cle = format!("{port}/{proto}");
+            if ufw && bloques.contains(&cle) {
+                constats.push(alerte(
+                    "Ports en écoute",
+                    Niveau::Info,
+                    format!(
+                        "{cle} ({}) ouvert par « {programme} », bloqué en entrée par la règle ufw que netscan a ajoutée (vérifier : sudo ufw status).",
+                        i.service
+                    ),
+                ));
+                continue;
+            }
             constats.push(match programme {
                 "ollama" => constat.corriger(
                     "Faire écouter Ollama uniquement en local (127.0.0.1)",
@@ -281,7 +294,9 @@ fn ports_ecoute(pare_feu_actif: bool, ufw: bool) -> Vec<Constat> {
                     ),
                 },
                 _ if niveau >= Niveau::Moyen && ufw => {
-                    constat.corriger(format!("Bloquer le port {port}/{proto} dans le pare-feu"), &[&deny])
+                    constat
+                        .corriger(format!("Bloquer le port {port}/{proto} dans le pare-feu"), &[&deny])
+                        .bloquant(cle)
                 }
                 _ => constat,
             });

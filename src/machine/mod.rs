@@ -29,6 +29,9 @@ pub struct Correctif {
     pub commandes: Vec<String>,
     /// `false` = à faire soi-même (redémarrage, réglage du routeur…) : on affiche seulement la marche à suivre.
     pub automatique: bool,
+    /// Port bloqué en entrée par cette correction (« 8080/tcp »), retenu une fois appliquée.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bloque: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -98,7 +101,17 @@ impl Constat {
             action: action.into(),
             commandes: commandes.iter().map(|c| c.to_string()).collect(),
             automatique: true,
+            bloque: None,
         });
+        self
+    }
+
+    /// La correction bloque ce port (« 8080/tcp ») dans le pare-feu. macOS ne propose pas de blocage de port.
+    #[cfg_attr(target_os = "macos", allow(dead_code))]
+    fn bloquant(mut self, port: String) -> Self {
+        if let Some(k) = &mut self.correctif {
+            k.bloque = Some(port);
+        }
         self
     }
 
@@ -226,6 +239,40 @@ fn base64_decoder(texte: &str) -> Option<Vec<u8>> {
         sortie.extend_from_slice(&n.to_be_bytes()[1..bloc.len()]);
     }
     Some(sortie)
+}
+
+/// Ports que netscan a bloqués dans le pare-feu de cet ordinateur, un par ligne (« 8080/tcp »).
+/// Un port bloqué écoute toujours : sans ce registre, l'alerte et la même correction revenaient à chaque audit.
+/// Sous Linux, les règles ufw ne sont pas lisibles sans root ; Windows, lui, relit ses règles directement.
+fn fichier_blocages() -> std::path::PathBuf {
+    crate::reseau::dossier_local().join("ports-bloques.txt")
+}
+
+fn lire_blocages(texte: &str) -> std::collections::HashSet<String> {
+    texte
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+#[cfg(target_os = "linux")]
+fn ports_bloques() -> std::collections::HashSet<String> {
+    lire_blocages(&std::fs::read_to_string(fichier_blocages()).unwrap_or_default())
+}
+
+/// À appeler après une correction réussie : retient le port qu'elle a bloqué.
+pub fn retenir_blocage(k: &Correctif) {
+    let Some(port) = &k.bloque else { return };
+    let chemin = fichier_blocages();
+    let mut deja = lire_blocages(&std::fs::read_to_string(&chemin).unwrap_or_default());
+    if deja.insert(port.clone()) {
+        let mut lignes: Vec<_> = deja.into_iter().collect();
+        lignes.sort();
+        let _ = std::fs::create_dir_all(chemin.parent().unwrap_or(&chemin));
+        let _ = std::fs::write(&chemin, lignes.join("\n") + "\n");
+    }
 }
 
 /// Exécute les commandes d'un correctif. Sous Windows, une seule fenêtre UAC par correctif.

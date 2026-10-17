@@ -51,6 +51,7 @@ pub fn corriger(audit: &Audit, reseau: Option<&Rapport>) -> Option<Audit> {
             }
             if tout || rep == "o" || rep == "oui" {
                 if machine::appliquer(&k.commandes) {
+                    machine::retenir_blocage(k);
                     println!("    {VERT}✔ fait{RESET}");
                     applique = true;
                 }

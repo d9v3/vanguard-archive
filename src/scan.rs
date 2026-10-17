@@ -236,10 +236,83 @@ pub async fn decouvrir(ips: &[Ipv4Addr], delai: Duration, parallele: usize) -> V
 
     // Nos tentatives ont rempli la table ARP : les machines qui bloquent tout y apparaissent quand même.
     let arp = table_arp();
-    vivantes.extend(ips.iter().filter(|ip| arp.contains_key(ip)));
+    let deja: std::collections::HashSet<Ipv4Addr> = vivantes.iter().copied().collect();
+    let seulement_arp: Vec<Ipv4Addr> = ips
+        .iter()
+        .filter(|ip| arp.contains_key(ip) && !deja.contains(ip))
+        .copied()
+        .collect();
+    #[cfg(target_os = "linux")]
+    let seulement_arp = confirmer_voisins(ips, &deja, seulement_arp).await;
+    vivantes.extend(seulement_arp);
     vivantes.sort();
     vivantes.dedup();
     vivantes
+}
+
+/// État de chaque voisin dans `ip -4 neigh show` (« 10.0.0.1 dev wlan0 lladdr … REACHABLE » : l'état est le
+/// dernier mot). `None` si la commande manque.
+#[cfg(target_os = "linux")]
+fn etats_voisins() -> Option<HashMap<Ipv4Addr, String>> {
+    let r = crate::commande::lancer(std::process::Command::new("ip").args(["-4", "neigh", "show"]), 5)?;
+    (r.code == Some(0)).then(|| lire_etats_voisins(&r.sortie))
+}
+
+#[cfg(any(target_os = "linux", test))]
+fn lire_etats_voisins(texte: &str) -> HashMap<Ipv4Addr, String> {
+    texte
+        .lines()
+        .filter_map(|l| {
+            let mut mots = l.split_whitespace();
+            let ip = mots.next()?.parse().ok()?;
+            Some((ip, mots.last()?.to_string()))
+        })
+        .collect()
+}
+
+/// État ARP en cours de vérification par le noyau : la réponse n'est pas encore connue.
+#[cfg(any(target_os = "linux", test))]
+fn etat_en_cours(etat: Option<&str>) -> bool {
+    matches!(etat, Some("DELAY" | "PROBE" | "INCOMPLETE"))
+}
+
+/// Un voisin compte comme présent, sauf si le noyau a constaté qu'il ne répond plus (ou l'a oublié).
+#[cfg(any(target_os = "linux", test))]
+fn voisin_present(etat: Option<&str>) -> bool {
+    !matches!(etat, None | Some("FAILED" | "INCOMPLETE"))
+}
+
+/// Linux garde les entrées ARP périmées (STALE) des appareils partis : sur un petit réseau, rien ne les efface.
+/// Elles sont encore « complètes » quand on les lit juste après nos sondes, et l'appareil passait pour présent.
+/// À l'inverse, un téléphone en veille répond à l'ARP en une ou deux secondes : lu trop tôt (INCOMPLETE), il
+/// passait pour absent. Nos sondes ont lancé la vérification (5 s d'attente puis 3 essais d'1 s pour une entrée
+/// périmée, 3 essais d'1 s pour une nouvelle) : on attend son verdict, au plus 10 s, pour les adresses qui n'ont
+/// pas répondu en TCP. `repli` = l'ancienne liste, gardée si la commande ip manque.
+#[cfg(target_os = "linux")]
+async fn confirmer_voisins(
+    ips: &[Ipv4Addr],
+    deja: &std::collections::HashSet<Ipv4Addr>,
+    repli: Vec<Ipv4Addr>,
+) -> Vec<Ipv4Addr> {
+    let fin = std::time::Instant::now() + Duration::from_secs(10);
+    let mut candidats: Option<Vec<Ipv4Addr>> = None;
+    loop {
+        let Some(etats) = tokio::task::spawn_blocking(etats_voisins).await.ok().flatten() else {
+            return repli;
+        };
+        let etat = |ip: &Ipv4Addr| etats.get(ip).map(String::as_str);
+        // Au premier passage : toute adresse sans réponse TCP que le noyau connaît ou cherche encore.
+        let liste = candidats.get_or_insert_with(|| {
+            ips.iter()
+                .filter(|ip| !deja.contains(ip) && (voisin_present(etat(ip)) || etat_en_cours(etat(ip))))
+                .copied()
+                .collect()
+        });
+        if !liste.iter().any(|ip| etat_en_cours(etat(ip))) || std::time::Instant::now() >= fin {
+            return liste.iter().filter(|ip| voisin_present(etat(ip))).copied().collect();
+        }
+        tokio::time::sleep(Duration::from_millis(300)).await;
+    }
 }
 
 /// Lit ce que le service annonce (SSH, FTP, SMTP…) ou l'en-tête Server en HTTP.
@@ -432,5 +505,21 @@ mod tests {
         );
         assert_eq!(passerelle_linux(&table), Some(Ipv4Addr::new(10, 0, 0, 1)));
         assert_eq!(passerelle_linux(entete), None);
+    }
+
+    #[test]
+    fn voisins_perimes_ecartes() {
+        let etats = lire_etats_voisins(
+            "10.0.0.1 dev wlan0 lladdr f8:79:0a:0d:03:a2 router REACHABLE\n\
+             10.0.0.48 dev wlan0 lladdr f4:6c:68:11:22:33 STALE\n\
+             10.0.0.75 dev wlan0 lladdr 08:6a:c5:44:55:66 DELAY\n\
+             10.0.0.99 dev wlan0  FAILED\n",
+        );
+        let etat = |d: u8| etats.get(&Ipv4Addr::new(10, 0, 0, d)).map(String::as_str);
+        assert_eq!(etat(1), Some("REACHABLE"));
+        assert!(etat_en_cours(etat(75)) && !etat_en_cours(etat(48)));
+        // Confirmé pendant le scan puis vieilli (STALE) : présent. Sans réponse (FAILED) ou oublié : absent.
+        assert!(voisin_present(etat(1)) && voisin_present(etat(48)));
+        assert!(!voisin_present(etat(99)) && !voisin_present(etat(200)));
     }
 }

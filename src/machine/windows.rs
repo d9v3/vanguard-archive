@@ -41,19 +41,27 @@ fn script_admin(commandes: &[String]) -> String {
          [Console]::OutputEncoding = [Text.Encoding]::UTF8\n\
          $ErrorActionPreference = 'Stop'\n\
          Write-Host 'netscan applique une correction (cette fenêtre se fermera seule).' -ForegroundColor Cyan\n\
+         $echecs = 0\n\
          try {\n",
     );
     for c in commandes {
-        let long = ["Update-MpSignature", "Remove-MpThreat", "Start-MpScan"]
+        let long = ["Update-MpSignature", "Remove-MpThreat", "Start-MpScan", "DISM", "sfc"]
             .iter()
             .any(|l| c.contains(l));
         let note = if long { " (peut prendre quelques minutes)" } else { "" };
+        // Un programme externe (DISM, sfc, netsh…) en échec ne lève pas d'erreur PowerShell : seul son code de
+        // retour le dit. On le lit après chaque commande (3010 = réussi, redémarrage demandé) et on continue :
+        // dans « Internet ne marche plus », un netsh en échec ne doit pas empêcher de renouveler l'adresse.
         script += &format!(
-            "  Write-Host ''; Write-Host '> {}{note}' -ForegroundColor Yellow\n  {c}\n  Write-Host '  OK' -ForegroundColor Green\n",
+            "  Write-Host ''; Write-Host '> {}{note}' -ForegroundColor Yellow\n  $global:LASTEXITCODE = 0\n  {c}\n  \
+             if ($LASTEXITCODE -eq 3010) {{ Write-Host '  OK (redémarrage nécessaire)' -ForegroundColor Green }}\n  \
+             elseif ($LASTEXITCODE) {{ $echecs++; Write-Host \"  Échec (code $LASTEXITCODE) : voir le message ci-dessus\" -ForegroundColor Red }}\n  \
+             else {{ Write-Host '  OK' -ForegroundColor Green }}\n",
             texte(c)
         );
     }
-    script += "  Write-Host ''; Write-Host 'Terminé.' -ForegroundColor Green; Start-Sleep -Seconds 2; exit 0\n\
+    script += "  if ($echecs) { Write-Host ''; Write-Host \"Terminé, avec $echecs étape(s) en échec.\" -ForegroundColor Red; Read-Host 'Appuie sur Entrée pour fermer'; exit 1 }\n\
+               Write-Host ''; Write-Host 'Terminé.' -ForegroundColor Green; Start-Sleep -Seconds 2; exit 0\n\
                } catch {\n\
                  Write-Host ''; Write-Host ('Erreur : ' + $_.Exception.Message) -ForegroundColor Red\n\
                  Read-Host 'Appuie sur Entrée pour fermer'; exit 1\n\
@@ -343,6 +351,21 @@ fn ports_ecoute(pare_feu_actif: bool, ip_lan: Option<String>) -> Vec<Constat> {
     ) else {
         return vec![illisible("Ports en écoute")];
     };
+    // Ports déjà bloqués en entrée par une règle netscan active : le port écoute toujours, mais n'est plus joignable.
+    // Sans cette lecture, l'alerte et la même correction (une règle de plus à chaque fois) revenaient à chaque audit.
+    let bloques: Vec<u16> = if pare_feu_actif {
+        ps(
+            "@(Get-NetFirewallRule -DisplayName 'netscan : bloquer *' -ErrorAction SilentlyContinue | \
+            Where-Object { $_.Enabled -eq 'True' -and $_.Action -eq 'Block' -and $_.Direction -eq 'Inbound' } | \
+            Get-NetFirewallPortFilter | ForEach-Object { $_.LocalPort }) -join ','",
+        )
+        .unwrap_or_default()
+        .split(',')
+        .filter_map(|p| p.trim().parse().ok())
+        .collect()
+    } else {
+        Vec::new()
+    };
     // Ports RPC dynamiques ouverts par Windows lui-même : normaux et filtrés par le pare-feu.
     let systeme = ["svchost", "lsass", "wininit", "services", "spoolsv", "System", "Idle"];
     let mut vus = Vec::new();
@@ -360,6 +383,17 @@ fn ports_ecoute(pare_feu_actif: bool, ip_lan: Option<String>) -> Vec<Constat> {
         }
         vus.push(port);
         let i = info_port(port);
+        if bloques.contains(&port) {
+            constats.push(alerte(
+                "Ports en écoute",
+                Niveau::Info,
+                format!(
+                    "{port}/tcp ({}) ouvert par « {programme} », bloqué en entrée par la règle « netscan : bloquer {port} » du pare-feu Windows.",
+                    i.service
+                ),
+            ));
+            continue;
+        }
         let niveau = match (pare_feu_actif, i.niveau) {
             (true, Niveau::Critique) => Niveau::Eleve,
             (true, Niveau::Eleve) => Niveau::Moyen,
@@ -379,6 +413,7 @@ fn ports_ecoute(pare_feu_actif: bool, ip_lan: Option<String>) -> Vec<Constat> {
                 format!("Bloquer le port {port} en entrée dans le pare-feu Windows"),
                 &[&format!("New-NetFirewallRule -DisplayName 'netscan : bloquer {port}' -Direction Inbound -Protocol TCP -LocalPort {port} -Action Block")],
             )
+            .bloquant(format!("{port}/tcp"))
         } else {
             constat
         });
@@ -461,5 +496,8 @@ mod tests {
         assert!(s.contains("> Update-MpSignature (peut prendre quelques minutes)"));
         assert!(s.contains("> Disable-LocalUser -Name ''Invité''"));
         assert!(s.contains("Read-Host"));
+        // Un programme externe en échec est signalé, pas affiché « OK ».
+        assert_eq!(s.matches("$global:LASTEXITCODE = 0").count(), 2);
+        assert!(s.contains("$echecs++") && s.contains("exit 1 }"));
     }
 }
