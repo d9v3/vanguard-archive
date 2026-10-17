@@ -15,7 +15,7 @@ This USB key holds the program for Linux and Windows, its database and its sourc
   sentinel.cle          Marker file that makes the key recognized: do not delete it.
 
 Protection: the key has two parts. SENTINEL (everything above) is read-only on Windows: an infected computer
-cannot modify the program. SENTINEL-LOG, small and writable, only holds journal-erreurs.txt: the errors met
+cannot modify the program. SENTINELLOG, small and writable, only holds journal-erreurs.txt: the errors met
 (version, system, message), without user name, computer name or home folder, to improve Sentinel. Windows
 never starts anything by itself from a USB key (protection against viruses since Windows 7): double-click it.
 

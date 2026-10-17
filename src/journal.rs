@@ -1,5 +1,5 @@
 //! Journal des erreurs, pour améliorer sentinel après coup : plantages, scripts PowerShell en échec, vérifications
-//! impossibles, scans ratés. Il est écrit sur la petite partition SENTINEL-LOG de la clé, la seule modifiable sur les
+//! impossibles, scans ratés. Il est écrit sur la petite partition SENTINELLOG de la clé, la seule modifiable sur les
 //! autres ordinateurs (la partition SENTINEL y est en lecture seule), et rapatrié par outils/deployer.sh au
 //! branchement sur l'ordinateur de développement. Écrit en français : il est destiné au développement, pas à
 //! l'utilisateur.
@@ -10,7 +10,7 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::sync::OnceLock;
 
-/// Fichier témoin à la racine de la partition SENTINEL-LOG.
+/// Fichier témoin à la racine de la partition SENTINELLOG.
 pub const TEMOIN: &str = "sentinel-journal.cle";
 pub const FICHIER: &str = "journal-erreurs.txt";
 /// Au-delà, plus rien n'est ajouté : une erreur répétée en boucle ne remplit pas la partition.
@@ -18,7 +18,7 @@ const TAILLE_MAX: u64 = 4 * 1024 * 1024;
 /// Longueur maximale d'un détail (sortie d'erreur de PowerShell…).
 const DETAIL_MAX: usize = 3000;
 
-/// Partition SENTINEL-LOG de la clé, si elle est branchée.
+/// Partition SENTINELLOG de la clé, si elle est branchée.
 fn dossier() -> Option<&'static PathBuf> {
     static DOSSIER: OnceLock<Option<PathBuf>> = OnceLock::new();
     DOSSIER

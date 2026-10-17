@@ -76,11 +76,11 @@ if [[ -z $CLE ]]; then
   exit 0
 fi
 
-# Partition SENTINEL-LOG (la seule modifiable sur les autres ordinateurs) : elle se monte en même temps que SENTINEL,
+# Partition SENTINELLOG (la seule modifiable sur les autres ordinateurs) : elle se monte en même temps que SENTINEL,
 # parfois une seconde après. Son journal d'erreurs est rapatrié ici puis vidé, pour améliorer sentinel.
 JOURNAL=""
 for _ in {1..10}; do
-  JOURNAL=$(findmnt -nro TARGET -S LABEL=SENTINEL-LOG 2>/dev/null | head -1 || true)
+  JOURNAL=$(findmnt -nro TARGET -S LABEL=SENTINELLOG 2>/dev/null | head -1 || true)
   [[ -n $JOURNAL ]] && break
   sleep 1
 done

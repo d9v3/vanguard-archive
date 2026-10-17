@@ -15,7 +15,7 @@ Cette clé contient le programme pour Linux et Windows, sa base de données et s
   sentinel.cle          Fichier témoin qui fait reconnaître la clé : ne pas le supprimer.
 
 Protection : la clé a deux parties. SENTINEL (tout ce qui précède) est en lecture seule sous Windows : un
-ordinateur infecté ne peut pas modifier le programme. SENTINEL-LOG, petite et modifiable, ne contient que
+ordinateur infecté ne peut pas modifier le programme. SENTINELLOG, petite et modifiable, ne contient que
 journal-erreurs.txt : les erreurs rencontrées (version, système, message), sans nom d'utilisateur, nom de
 machine ni dossier personnel, pour améliorer Sentinel. Windows ne lance rien tout seul depuis une clé USB
 (protection contre les virus depuis Windows 7) : il faut double-cliquer.
