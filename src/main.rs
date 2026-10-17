@@ -7,6 +7,7 @@ mod antivirus;
 mod commande;
 mod corriger;
 mod donnees;
+mod fuites;
 #[cfg(windows)]
 mod gaming;
 mod langue;
@@ -92,6 +93,9 @@ enum Commande {
     /// Gaming (Windows) : composants pour les jeux (Visual C++, DirectX, .NET…) et réglages de Windows.
     #[cfg(windows)]
     Gaming,
+    /// Vérifie si des mots de passe ont fuité (Have I Been Pwned) ; seuls 5 caractères de leur empreinte partent.
+    #[command(name = "motdepasse", visible_alias = "password")]
+    MotDePasse,
     /// Sauvegarde la base des appareils et l'état de la surveillance dans un fichier JSON.
     #[command(visible_alias = "backup")]
     Sauvegarder {
@@ -240,6 +244,10 @@ async fn menu() {
             "  g. Gaming: components (Visual C++, DirectX, .NET…) and Windows settings"
         );
         trp!(
+            "  p. Mots de passe : ont-ils fuité ? (rien n'est envoyé en clair)",
+            "  p. Passwords: have they leaked? (nothing is sent in clear)"
+        );
+        trp!(
             "  n. Nommer un appareil (« imprimante HP »)",
             "  n. Name a device (“HP printer”)"
         );
@@ -275,6 +283,7 @@ async fn menu() {
             "r" | "R" => reparer::menu(),
             #[cfg(windows)]
             "g" | "G" => gaming::menu(),
+            "p" | "P" => fuites::verifier(),
             "n" | "N" => {
                 let qui = demander(tr!(
                     "IP ou adresse MAC de l'appareil : ",
@@ -331,6 +340,10 @@ fn ligne_de_commande() -> clap::Command {
         (
             "reparer",
             "Common repairs: network, hijacked browsing, firewall, antivirus, system files, disk, space, updates, time",
+        ),
+        (
+            "motdepasse",
+            "Check whether passwords have leaked (Have I Been Pwned); only 5 characters of their fingerprint are sent",
         ),
         (
             "sauvegarder",
@@ -430,6 +443,7 @@ async fn main() {
         Some(Commande::Reparer) => reparer::menu(),
         #[cfg(windows)]
         Some(Commande::Gaming) => gaming::menu(),
+        Some(Commande::MotDePasse) => fuites::verifier(),
         Some(Commande::Sauvegarder { fichier }) => donnees::sauvegarder(fichier),
         Some(Commande::Restaurer { fichier }) => donnees::restaurer(&fichier),
         Some(Commande::Nommer { appareil, surnom }) => nommer(&appareil, &surnom.join(" ")),
