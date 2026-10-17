@@ -32,7 +32,7 @@ Outil de sécurité en Rust, en français, pour Linux et Windows :
 
 Sans argument, `netscan` ouvre un menu. Sous-commandes : `complet [--html]`, `machine [--json]`, `corriger`,
 `reseau [cible] [-p courants|tous|22,80,8000-8100] [--json]`, `antivirus [--complet]`, `surveillance on|off`,
-`nommer <ip|mac> <surnom>`, `maj`, `reparer`.
+`maj`, `reparer`, `gaming` (Windows), `sauvegarder [fichier]`, `restaurer <fichier>`, `nommer <ip|mac> <surnom>`.
 
 À n'utiliser que sur un réseau qui t'appartient ou que tu as le droit d'auditer.
 

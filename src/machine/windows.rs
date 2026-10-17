@@ -693,18 +693,18 @@ fn programmes() -> Constat {
     alerte(
         "Programmes",
         Niveau::Moyen,
-        format!(
-            "{} programme(s) à mettre à jour : {}.",
-            noms.len(),
-            resume(&noms, ", ")
-        ),
+        format!("{} programme(s) à mettre à jour : {}.", noms.len(), resume(&noms, ", ")),
     )
-    .corriger_liste("Mettre à jour ces programmes avec winget", commandes_winget(&programmes))
+    .corriger_liste(
+        "Mettre à jour ces programmes avec winget",
+        commandes_winget(&programmes),
+    )
 }
 
 /// Périphériques en erreur dans le Gestionnaire de périphériques (pilote absent, qui ne démarre pas…).
 fn peripheriques() -> Constat {
-    // 22 = désactivé à la main : un choix, pas une panne.
+    // 22 = désactivé à la main : un choix, pas une panne. Sans nom, l'identifiant matériel (PCI\VEN_1AF4&DEV_1045…)
+    // le remplace : c'est lui qu'on cherche sur Internet pour trouver le pilote.
     let Some(sortie) = ps(
         "Get-CimInstance Win32_PnPEntity -Filter 'ConfigManagerErrorCode <> 0 AND ConfigManagerErrorCode <> 22' | \
          ForEach-Object { \"$($_.ConfigManagerErrorCode)|$(if ($_.Name) { $_.Name } else { $_.PNPDeviceID })\" }",
@@ -715,8 +715,11 @@ fn peripheriques() -> Constat {
         .lines()
         .filter_map(|l| l.trim().split_once('|'))
         .map(|(code, nom)| {
-            // Sans nom, l'identifiant matériel (PCI\VEN_1AF4&DEV_1045…) est ce qu'on cherche sur Internet.
-            let nom = if nom.trim().is_empty() { "Périphérique inconnu" } else { nom.trim() };
+            let nom = if nom.trim().is_empty() {
+                "Périphérique inconnu"
+            } else {
+                nom.trim()
+            };
             match code {
                 "28" | "1" => format!("{nom} (pas de pilote)"),
                 _ => format!("{nom} (erreur {code})"),
@@ -744,10 +747,9 @@ fn peripheriques() -> Constat {
 /// Âge du pilote de chaque carte graphique NVIDIA, AMD ou Intel. Son fabricant le publie souvent bien avant
 /// Windows Update, et un pilote vieux d'un an rate des correctifs de sécurité et des optimisations des jeux.
 fn cartes_graphiques() -> Vec<Constat> {
-    let Some(sortie) = ps(
-        "Get-CimInstance Win32_VideoController | ForEach-Object { \
-         \"$($_.Name)|$($_.DriverVersion)|$(if ($_.DriverDate) { ((Get-Date) - $_.DriverDate).Days })\" }",
-    ) else {
+    let Some(sortie) = ps("Get-CimInstance Win32_VideoController | ForEach-Object { \
+         \"$($_.Name)|$($_.DriverVersion)|$(if ($_.DriverDate) { ((Get-Date) - $_.DriverDate).Days })\" }")
+    else {
         return vec![illisible("Carte graphique")];
     };
     sortie
@@ -759,9 +761,15 @@ fn cartes_graphiques() -> Vec<Constat> {
             let (outil, lien) = if bas.contains("nvidia") {
                 ("NVIDIA App", "https://www.nvidia.com/fr-fr/software/nvidia-app/")
             } else if bas.contains("amd") || bas.contains("radeon") {
-                ("AMD Software Adrenalin", "https://www.amd.com/fr/support/download/drivers.html")
+                (
+                    "AMD Software Adrenalin",
+                    "https://www.amd.com/fr/support/download/drivers.html",
+                )
             } else if bas.contains("intel") {
-                ("Intel Driver & Support Assistant", "https://www.intel.com/content/www/fr/fr/support/detect.html")
+                (
+                    "Intel Driver & Support Assistant",
+                    "https://www.intel.com/content/www/fr/fr/support/detect.html",
+                )
             } else {
                 return None;
             };
@@ -782,7 +790,9 @@ fn cartes_graphiques() -> Vec<Constat> {
 }
 
 fn signatures() -> Option<Constat> {
-    let age = ps("(Get-MpComputerStatus).AntivirusSignatureAge")?.parse::<u32>().ok()?;
+    let age = ps("(Get-MpComputerStatus).AntivirusSignatureAge")?
+        .parse::<u32>()
+        .ok()?;
     Some(if age > 1 {
         alerte(
             "Signatures",
@@ -873,8 +883,14 @@ Windows Terminal Microsoft.WindowsTerminal 1.24.12741.0  1.25.2733.0   winget\r\
         assert_eq!(programmes.len(), 3);
         let c = commandes_winget(&programmes);
         assert!(c[0].contains("--id 'Microsoft.Edge'") && c[2].contains("--id 'Microsoft.AppInstaller'"));
-        assert_eq!(lire_winget("Aucun package installé ne correspond aux critères d’entrée.\nCODE=0"), None);
-        let resume_noms: Vec<String> = ["a", "b", "c", "d", "e"].iter().map(std::string::ToString::to_string).collect();
+        assert_eq!(
+            lire_winget("Aucun package installé ne correspond aux critères d’entrée.\nCODE=0"),
+            None
+        );
+        let resume_noms: Vec<String> = ["a", "b", "c", "d", "e"]
+            .iter()
+            .map(std::string::ToString::to_string)
+            .collect();
         assert_eq!(resume(&resume_noms, ", "), "a, b, c (et 2 autre(s))");
     }
 
@@ -888,7 +904,10 @@ Windows Terminal Microsoft.WindowsTerminal 1.24.12741.0  1.25.2733.0   winget\r\
         assert_eq!(l.len(), 3);
         assert!(l[0].importante && !l[0].pilote);
         // Un « | » dans le titre n'est pas un séparateur.
-        assert_eq!(l[1].titre, "Mise à jour de la plateforme Microsoft Defender | KB4052623");
+        assert_eq!(
+            l[1].titre,
+            "Mise à jour de la plateforme Microsoft Defender | KB4052623"
+        );
         assert!(l[2].pilote && !l[2].importante);
     }
 

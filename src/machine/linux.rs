@@ -1155,7 +1155,9 @@ fn dkms_manquants(status: &str, noyaux: &[String]) -> Vec<(String, Vec<String>)>
     let mut installes: Vec<(String, String)> = Vec::new();
     let mut modules: Vec<String> = Vec::new();
     for l in status.lines() {
-        let Some((gauche, etat)) = l.split_once(": ") else { continue };
+        let Some((gauche, etat)) = l.split_once(": ") else {
+            continue;
+        };
         let parties: Vec<&str> = gauche.split(", ").map(str::trim).collect();
         let (nom, noyau) = match parties.first() {
             Some(p) if p.contains('/') => (p.split('/').next().unwrap_or(p), parties.get(1)),
@@ -1211,7 +1213,10 @@ fn pilotes_dkms() -> Option<Constat> {
         .filter(|(_, k)| !k.is_empty())
         .map(|(m, k)| format!("{m} (noyau {})", k.join(", ")))
         .collect();
-    let commandes: Vec<String> = a_refaire.iter().map(|k| format!("sudo dkms autoinstall -k {k}")).collect();
+    let commandes: Vec<String> = a_refaire
+        .iter()
+        .map(|k| format!("sudo dkms autoinstall -k {k}"))
+        .collect();
     let commandes: Vec<&str> = commandes.iter().map(String::as_str).collect();
     Some(
         alerte(

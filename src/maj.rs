@@ -12,7 +12,9 @@ fn corrections(constats: &[Constat], automatique: bool) -> Vec<(&Constat, &Corre
 }
 
 fn verifier() -> Vec<Constat> {
-    println!("  {GRIS}Recherche en cours (jusqu'à deux minutes : les serveurs de mises à jour sont interrogés)…{RESET}");
+    println!(
+        "  {GRIS}Recherche en cours (jusqu'à deux minutes : les serveurs de mises à jour sont interrogés)…{RESET}"
+    );
     machine::mises_a_jour_completes()
 }
 
