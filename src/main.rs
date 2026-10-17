@@ -5,6 +5,7 @@
 
 mod antivirus;
 mod commande;
+mod connexion;
 mod corriger;
 mod donnees;
 mod fuites;
@@ -93,6 +94,9 @@ enum Commande {
     /// Gaming (Windows) : composants pour les jeux (Visual C++, DirectX, .NET…) et réglages de Windows.
     #[cfg(windows)]
     Gaming,
+    /// Test de connexion pour le jeu : ping, gigue, pertes, débit et bufferbloat.
+    #[command(visible_alias = "connection")]
+    Connexion,
     /// Vérifie si des mots de passe ont fuité (Have I Been Pwned) ; seuls 5 caractères de leur empreinte partent.
     #[command(name = "motdepasse", visible_alias = "password")]
     MotDePasse,
@@ -244,6 +248,10 @@ async fn menu() {
             "  g. Gaming: components (Visual C++, DirectX, .NET…) and Windows settings"
         );
         trp!(
+            "  c. Test de connexion pour le jeu (ping, gigue, débit, bufferbloat)",
+            "  c. Connection test for gaming (ping, jitter, speed, bufferbloat)"
+        );
+        trp!(
             "  p. Mots de passe : ont-ils fuité ? (rien n'est envoyé en clair)",
             "  p. Passwords: have they leaked? (nothing is sent in clear)"
         );
@@ -283,6 +291,7 @@ async fn menu() {
             "r" | "R" => reparer::menu(),
             #[cfg(windows)]
             "g" | "G" => gaming::menu(),
+            "c" | "C" => connexion::tester().await,
             "p" | "P" => fuites::verifier(),
             "n" | "N" => {
                 let qui = demander(tr!(
@@ -340,6 +349,10 @@ fn ligne_de_commande() -> clap::Command {
         (
             "reparer",
             "Common repairs: network, hijacked browsing, firewall, antivirus, system files, disk, space, updates, time",
+        ),
+        (
+            "connexion",
+            "Connection test for gaming: ping, jitter, packet loss, speed and bufferbloat",
         ),
         (
             "motdepasse",
@@ -443,6 +456,7 @@ async fn main() {
         Some(Commande::Reparer) => reparer::menu(),
         #[cfg(windows)]
         Some(Commande::Gaming) => gaming::menu(),
+        Some(Commande::Connexion) => connexion::tester().await,
         Some(Commande::MotDePasse) => fuites::verifier(),
         Some(Commande::Sauvegarder { fichier }) => donnees::sauvegarder(fichier),
         Some(Commande::Restaurer { fichier }) => donnees::restaurer(&fichier),
