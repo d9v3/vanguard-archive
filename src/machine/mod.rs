@@ -364,9 +364,10 @@ pub fn auditer(bavard: bool) -> Audit {
     os::auditer()
 }
 
-/// Système, programmes, pilotes et firmware : tout ce qui doit être à jour (`netscan maj`).
-pub fn mises_a_jour_completes() -> Vec<Constat> {
-    os::mises_a_jour_completes()
+/// Système, programmes, pilotes et firmware : tout ce qui doit être à jour (`netscan maj`). `seulement` limite
+/// les longues recherches à ces catégories, pour revérifier ce qui vient d'être installé.
+pub fn mises_a_jour_completes(seulement: Option<&[&str]>) -> Vec<Constat> {
+    os::mises_a_jour_completes(seulement)
 }
 
 pub fn afficher(a: &Audit) {

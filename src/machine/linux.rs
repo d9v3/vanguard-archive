@@ -1038,13 +1038,7 @@ fn bilan_failles(gestion: Paquets, failles: &[Faille]) -> Constat {
         n
     };
     let (a_corriger, sans_correctif) = (noms(true), noms(false));
-    let resume = |n: &[&str]| {
-        let mut t = n.iter().take(8).copied().collect::<Vec<_>>().join(", ");
-        if n.len() > 8 {
-            let _ = write!(t, "… (+{})", n.len() - 8);
-        }
-        t
-    };
+    let resume = |n: &[&str]| crate::ui::resume(n, 8, ", ");
     // Une faille sans correctif publié : rien à faire de ton côté, la mise à jour viendra. Le suivi d'Arch garde
     // souvent des failles corrigées en amont : on le dit, sans baisser la note.
     let attente = (!sans_correctif.is_empty()).then(|| {
@@ -1238,19 +1232,23 @@ fn pilotes_dkms() -> Option<Constat> {
 
 /// Tout ce qui doit être à jour : paquets, Flatpak, Snap, AUR, firmware, pilotes DKMS, noyau chargé. En parallèle :
 /// la liste des paquets interroge les dépôts (jusqu'à 30 s) pendant que le reste se vérifie.
-pub fn mises_a_jour_completes() -> Vec<Constat> {
+/// `seulement` : les catégories à revérifier (après une installation) ; le noyau chargé est toujours vérifié.
+pub fn mises_a_jour_completes(seulement: Option<&[&str]>) -> Vec<Constat> {
+    let voulu = |categories: &[&str]| seulement.is_none_or(|s| categories.iter().any(|c| s.contains(c)));
     std::thread::scope(|portee| {
-        let paquets = portee.spawn(mises_a_jour);
-        let autres = portee.spawn(autres_mises_a_jour);
-        let dkms = portee.spawn(pilotes_dkms);
+        let paquets = voulu(&["Mises à jour"]).then(|| portee.spawn(mises_a_jour));
+        let autres = voulu(&["Flatpak", "Snap", "AUR", "Firmware"]).then(|| portee.spawn(autres_mises_a_jour));
+        let dkms = voulu(&["Pilotes DKMS"]).then(|| portee.spawn(pilotes_dkms));
         let noyau = redemarrage();
-        let mut constats = vec![
-            paquets
-                .join()
-                .unwrap_or_else(|_| impossible("Mises à jour", "vérification interrompue")),
-        ];
-        constats.extend(autres.join().unwrap_or_default());
-        constats.extend(dkms.join().ok().flatten());
+        let mut constats: Vec<Constat> = paquets
+            .map(|t| {
+                t.join()
+                    .unwrap_or_else(|_| impossible("Mises à jour", "vérification interrompue"))
+            })
+            .into_iter()
+            .collect();
+        constats.extend(autres.map(|t| t.join().unwrap_or_default()).unwrap_or_default());
+        constats.extend(dkms.and_then(|t| t.join().ok().flatten()));
         constats.push(noyau);
         constats
     })

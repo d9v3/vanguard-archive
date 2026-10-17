@@ -3,6 +3,7 @@
 //! Chaque réparation est montrée (pourquoi, durée, commandes) puis confirmée avant d'être lancée ; celles qui
 //! modifient le système proposent d'abord un point de restauration.
 
+#[cfg(windows)]
 use std::fmt::Write;
 use std::net::IpAddr;
 
@@ -92,18 +93,10 @@ fn motif_adresses(lignes: &[(String, String)]) -> String {
     ips.join("|")
 }
 
-/// Résumé lisible : « 1.2.3.4 → banque.fr, 5.6.7.8 → update.microsoft.com (et 3 autres) ».
+/// Résumé lisible : « 1.2.3.4 → banque.fr, 5.6.7.8 → update.microsoft.com (et 3 autre(s)) ».
 fn resume_redirections(lignes: &[(String, String)]) -> String {
-    let mut t = lignes
-        .iter()
-        .take(3)
-        .map(|(ip, noms)| format!("{ip} → {noms}"))
-        .collect::<Vec<_>>()
-        .join(", ");
-    if lignes.len() > 3 {
-        let _ = write!(t, " (et {} autres)", lignes.len() - 3);
-    }
-    t
+    let textes: Vec<String> = lignes.iter().map(|(ip, noms)| format!("{ip} → {noms}")).collect();
+    resume(&textes, 3, ", ")
 }
 
 /// Texte entre apostrophes pour bash ('…') ou PowerShell ('…').

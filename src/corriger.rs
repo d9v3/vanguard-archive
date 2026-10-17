@@ -7,13 +7,13 @@ use crate::ui::*;
 
 /// Propose chaque correction automatique, puis liste celles à faire soi-même. « [t]out » applique la correction
 /// en cours et toutes les suivantes en une seule exécution : une seule fenêtre administrateur sous Windows.
-/// Retourne `true` si quelque chose a été appliqué.
-pub fn proposer(constats: &[Constat]) -> bool {
+/// Retourne les catégories des corrections appliquées.
+pub fn proposer(constats: &[Constat]) -> Vec<&'static str> {
     let auto: Vec<_> = constats
         .iter()
         .filter_map(|c| Some((c, c.correctif.as_ref().filter(|k| k.automatique)?)))
         .collect();
-    let mut applique = false;
+    let mut appliquees = Vec::new();
     if auto.is_empty() {
         println!("  {VERT}✔{RESET} Rien à corriger automatiquement.");
     } else {
@@ -35,9 +35,9 @@ pub fn proposer(constats: &[Constat]) -> bool {
                 println!("    {GRIS}{cmd}{RESET}");
             }
             let rep = demander("  Appliquer ? [o]ui / [n]on / [t]out appliquer : ").to_lowercase();
-            let lot: Vec<&Correctif> = match rep.as_str() {
-                "t" => auto[i..].iter().map(|(_, k)| *k).collect(),
-                "o" | "oui" => vec![k],
+            let lot: Vec<(&Constat, &Correctif)> = match rep.as_str() {
+                "t" => auto[i..].to_vec(),
+                "o" | "oui" => vec![(c, k)],
                 _ => {
                     println!("    {GRIS}ignoré{RESET}");
                     continue;
@@ -46,13 +46,13 @@ pub fn proposer(constats: &[Constat]) -> bool {
             if lot.len() > 1 {
                 println!("    {GRIS}Les {} corrections restantes, en une fois.{RESET}", lot.len());
             }
-            let commandes: Vec<String> = lot.iter().flat_map(|k| k.commandes.clone()).collect();
+            let commandes: Vec<String> = lot.iter().flat_map(|(_, k)| k.commandes.clone()).collect();
             if machine::appliquer(&commandes) {
-                for k in &lot {
+                for (c, k) in &lot {
                     machine::retenir_blocage(k);
+                    appliquees.push(c.categorie);
                 }
                 println!("    {VERT}✔ fait{RESET}");
-                applique = true;
             } else {
                 // Sans cette ligne, un échec (UAC refusée, commande en erreur) passait sans un mot de netscan.
                 println!("    ✖ non appliqué : voir le message ci-dessus");
@@ -76,13 +76,13 @@ pub fn proposer(constats: &[Constat]) -> bool {
             }
         }
     }
-    applique
+    appliquees
 }
 
 /// Propose les corrections de la machine, puis la marche à suivre pour le reste. Retourne le nouvel audit.
 pub fn corriger(audit: &Audit, reseau: Option<&Rapport>) -> Option<Audit> {
     titre("Corrections");
-    let applique = proposer(&audit.constats);
+    let applique = !proposer(&audit.constats).is_empty();
 
     if let Some(r) = reseau {
         let exposes: Vec<_> = r

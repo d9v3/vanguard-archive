@@ -5,6 +5,7 @@ use std::process::Command;
 
 use super::{Audit, Constat, alerte, impossible, ok, score};
 use crate::risk::{Niveau, info_port};
+use crate::ui::resume;
 
 pub const NOM: &str = "Windows";
 
@@ -45,28 +46,16 @@ fn script_admin(commandes: &[String]) -> String {
          [Console]::OutputEncoding = [Text.Encoding]::UTF8\n\
          $ErrorActionPreference = 'Stop'\n\
          Write-Host 'netscan applique une correction.' -ForegroundColor Cyan\n\
+         Write-Host 'Une étape longue (mise à jour, analyse, réparation de Windows) peut durer plusieurs minutes : son heure de début est affichée.'\n\
          $echecs = 0\n",
     );
     for c in commandes {
-        let long = [
-            "Update-MpSignature",
-            "Remove-MpThreat",
-            "Start-MpScan",
-            "DISM",
-            "sfc",
-            "Checkpoint-Computer",
-            "CreateUpdate",
-            "winget",
-        ]
-        .iter()
-        .any(|l| c.contains(l));
-        let note = if long { " (peut prendre quelques minutes)" } else { "" };
         // Un programme externe (DISM, sfc, netsh…) en échec ne lève pas d'erreur PowerShell : seul son code de
         // retour le dit. On le lit après chaque commande (3010 = réussi, redémarrage demandé) et on continue :
         // dans « Internet ne marche plus », un netsh en échec ne doit pas empêcher de renouveler l'adresse.
         let _ = write!(
             script,
-            "Write-Host ''; Write-Host '> {}{note}' -ForegroundColor Yellow\n$global:LASTEXITCODE = 0\ntry {{\n  {c}\n  \
+            "Write-Host ''; Write-Host ('> ' + (Get-Date -Format 'HH:mm') + '  {}') -ForegroundColor Yellow\n$global:LASTEXITCODE = 0\ntry {{\n  {c}\n  \
              if ($LASTEXITCODE -eq 3010) {{ Write-Host '  OK (redémarrage nécessaire)' -ForegroundColor Green }}\n  \
              elseif ($LASTEXITCODE) {{ $echecs++; Write-Host \"  Échec (code $LASTEXITCODE) : voir le message ci-dessus\" -ForegroundColor Red }}\n  \
              else {{ Write-Host '  OK' -ForegroundColor Green }}\n\
@@ -475,29 +464,18 @@ fn lire_windows_update(sortie: &str) -> Vec<MiseAJour> {
         .collect()
 }
 
-/// « a ; b ; c (et 2 autres) » : les premiers noms d'une liste, pour un message d'une ligne.
-fn resume(noms: &[impl AsRef<str>], separateur: &str) -> String {
-    const MAX: usize = 3;
-    let mut t = noms
-        .iter()
-        .take(MAX)
-        .map(AsRef::as_ref)
-        .collect::<Vec<_>>()
-        .join(separateur);
-    if noms.len() > MAX {
-        let _ = write!(t, " (et {} autre(s))", noms.len() - MAX);
-    }
-    t
-}
-
-/// Commandes de la fenêtre administrateur qui téléchargent et installent les mises à jour d'un type
-/// (« Software » ou « Driver ») par l'API de Windows Update, comme le bouton « Tout installer ».
-fn installer_windows_update(genre: &str) -> Vec<String> {
+/// Commandes de la fenêtre administrateur qui téléchargent et installent les mises à jour Windows (`pilotes` =
+/// false) ou les pilotes, par l'API de Windows Update, comme le bouton « Tout installer ». La recherche (jusqu'à
+/// deux minutes) est gardée dans la fenêtre : installer les deux en une fois ne la refait pas.
+fn installer_windows_update(pilotes: bool) -> Vec<String> {
+    let genre = if pilotes { 2 } else { 1 };
     vec![
         format!(
-            "$maj = New-Object -ComObject Microsoft.Update.Session; $liste = New-Object -ComObject Microsoft.Update.UpdateColl; \
-             foreach ($u in $maj.CreateUpdateSearcher().Search(\"IsInstalled=0 and IsHidden=0 and Type='{genre}'\").Updates) \
-             {{ if (-not $u.EulaAccepted) {{ $u.AcceptEula() }}; [void]$liste.Add($u); Write-Host \"  - $($u.Title)\" }}"
+            "$maj = New-Object -ComObject Microsoft.Update.Session; \
+             if ($null -eq $trouvees) {{ $trouvees = $maj.CreateUpdateSearcher().Search('IsInstalled=0 and IsHidden=0').Updates }}; \
+             $liste = New-Object -ComObject Microsoft.Update.UpdateColl; \
+             foreach ($u in $trouvees) {{ if ([int]$u.Type -eq {genre}) {{ if (-not $u.EulaAccepted) {{ $u.AcceptEula() }}; \
+             [void]$liste.Add($u); Write-Host \"  - $($u.Title)\" }} }}"
         ),
         // Une mise à jour non téléchargée (vu dans la VM : Windows Update bloqué sur « En attente de
         // téléchargement ») ne doit pas passer pour installée : chacune est vérifiée et nommée.
@@ -539,7 +517,7 @@ fn windows_update() -> Vec<Constat> {
             "Windows à jour (correctifs, .NET, Defender).",
             "mise(s) à jour en attente",
             "Télécharger et installer les mises à jour de Windows",
-            "Software",
+            false,
             &logiciels,
         ),
         constat_windows_update(
@@ -547,19 +525,19 @@ fn windows_update() -> Vec<Constat> {
             "Aucun pilote à mettre à jour dans Windows Update.",
             "pilote(s) à mettre à jour",
             "Installer les pilotes proposés par Windows Update",
-            "Driver",
+            true,
             &pilotes,
         ),
     ]
 }
 
-/// « À jour », ou la liste des mises à jour d'un type (« Software », « Driver ») avec leur installation.
+/// « À jour », ou la liste des mises à jour (ou des pilotes) avec leur installation.
 fn constat_windows_update(
     categorie: &'static str,
     a_jour: &str,
     quoi: &str,
     action: &str,
-    genre: &str,
+    pilotes: bool,
     liste: &[MiseAJour],
 ) -> Constat {
     if liste.is_empty() {
@@ -574,24 +552,47 @@ fn constat_windows_update(
     alerte(
         categorie,
         niveau,
-        format!("{} {quoi} : {}.", liste.len(), resume(&titres, " ; ")),
+        format!("{} {quoi} : {}.", liste.len(), resume(&titres, 3, " ; ")),
     )
-    .corriger(action, &installer_windows_update(genre))
+    .corriger(action, &installer_windows_update(pilotes))
 }
 
-fn redemarrage_en_attente() -> Constat {
-    let attente = ps(
-        "[bool]((New-Object -ComObject Microsoft.Update.SystemInfo).RebootRequired -or \
-         (Test-Path 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Component Based Servicing\\RebootPending'))",
-    );
-    match attente.as_deref() {
-        Some(a) if a.eq_ignore_ascii_case("true") => alerte(
+/// Les quatre petites lectures de `netscan maj` (redémarrage, signatures, périphériques, cartes graphiques) en un
+/// seul PowerShell : une seconde de démarrage au lieu de quatre. Chaque section a son try et se termine par
+/// « NOM_FIN » : une lecture qui échoue (Defender remplacé par un antivirus tiers…) ne prive pas les autres.
+fn lectures_rapides() -> Option<String> {
+    ps(
+        "try { 'REB|' + [bool]((New-Object -ComObject Microsoft.Update.SystemInfo).RebootRequired -or \
+         (Test-Path 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Component Based Servicing\\RebootPending')); 'REB_FIN' } catch {}; \
+         try { 'SIG|' + (Get-MpComputerStatus).AntivirusSignatureAge; 'SIG_FIN' } catch {}; \
+         try { Get-CimInstance Win32_PnPEntity -Filter 'ConfigManagerErrorCode <> 0 AND ConfigManagerErrorCode <> 22' | \
+         ForEach-Object { \"PNP|$($_.ConfigManagerErrorCode)|$(if ($_.Name) { $_.Name } else { $_.PNPDeviceID })\" }; 'PNP_FIN' } catch {}; \
+         try { Get-CimInstance Win32_VideoController | ForEach-Object { \
+         \"GPU|$($_.Name)|$($_.DriverVersion)|$(if ($_.DriverDate) { ((Get-Date) - $_.DriverDate).Days })\" }; 'GPU_FIN' } catch {}",
+    )
+}
+
+/// Lignes d'une section de `lectures_rapides`, sans leur préfixe ; `None` si la section n'a pas pu être lue.
+fn section<'a>(sortie: Option<&'a str>, nom: &str) -> Option<Vec<&'a str>> {
+    let sortie = sortie?;
+    let fin = format!("{nom}_FIN");
+    sortie.lines().any(|l| l.trim() == fin).then(|| {
+        sortie
+            .lines()
+            .filter_map(|l| l.trim().strip_prefix(nom)?.strip_prefix('|'))
+            .collect()
+    })
+}
+
+fn redemarrage_en_attente(lectures: Option<&str>) -> Constat {
+    match section(lectures, "REB").as_deref() {
+        Some([a]) if a.eq_ignore_ascii_case("true") => alerte(
             "Redémarrage",
             Niveau::Moyen,
             "Des mises à jour attendent un redémarrage pour être actives.",
         )
         .manuel("Redémarrer quand c'est pratique", &["Restart-Computer"]),
-        Some(a) if a.eq_ignore_ascii_case("false") => ok("Redémarrage", "Aucun redémarrage en attente."),
+        Some([a]) if a.eq_ignore_ascii_case("false") => ok("Redémarrage", "Aucun redémarrage en attente."),
         _ => illisible("Redémarrage"),
     }
 }
@@ -682,7 +683,11 @@ fn programmes() -> Constat {
     alerte(
         "Programmes",
         Niveau::Moyen,
-        format!("{} programme(s) à mettre à jour : {}.", noms.len(), resume(&noms, ", ")),
+        format!(
+            "{} programme(s) à mettre à jour : {}.",
+            noms.len(),
+            resume(&noms, 3, ", ")
+        ),
     )
     .corriger(
         "Mettre à jour ces programmes avec winget",
@@ -691,18 +696,15 @@ fn programmes() -> Constat {
 }
 
 /// Périphériques en erreur dans le Gestionnaire de périphériques (pilote absent, qui ne démarre pas…).
-fn peripheriques() -> Constat {
-    // 22 = désactivé à la main : un choix, pas une panne. Sans nom, l'identifiant matériel (PCI\VEN_1AF4&DEV_1045…)
-    // le remplace : c'est lui qu'on cherche sur Internet pour trouver le pilote.
-    let Some(sortie) = ps(
-        "Get-CimInstance Win32_PnPEntity -Filter 'ConfigManagerErrorCode <> 0 AND ConfigManagerErrorCode <> 22' | \
-         ForEach-Object { \"$($_.ConfigManagerErrorCode)|$(if ($_.Name) { $_.Name } else { $_.PNPDeviceID })\" }",
-    ) else {
+/// Code 22 (désactivé à la main) écarté : un choix, pas une panne. Sans nom, l'identifiant matériel
+/// (PCI\VEN_1AF4&DEV_1045…) le remplace : c'est lui qu'on cherche sur Internet pour trouver le pilote.
+fn peripheriques(lectures: Option<&str>) -> Constat {
+    let Some(lignes) = section(lectures, "PNP") else {
         return illisible("Périphériques");
     };
-    let en_panne: Vec<String> = sortie
-        .lines()
-        .filter_map(|l| l.trim().split_once('|'))
+    let en_panne: Vec<String> = lignes
+        .iter()
+        .filter_map(|l| l.split_once('|'))
         .map(|(code, nom)| {
             let nom = if nom.trim().is_empty() {
                 "Périphérique inconnu"
@@ -724,7 +726,7 @@ fn peripheriques() -> Constat {
         format!(
             "{} périphérique(s) sans pilote ou en erreur : {}.",
             en_panne.len(),
-            resume(&en_panne, ", ")
+            resume(&en_panne, 3, ", ")
         ),
     )
     .manuel(
@@ -756,16 +758,14 @@ pub fn pilote_fabricant(carte: &str) -> Option<(&'static str, &'static str)> {
 
 /// Âge du pilote de chaque carte graphique NVIDIA, AMD ou Intel. Son fabricant le publie souvent bien avant
 /// Windows Update, et un pilote vieux d'un an rate des correctifs de sécurité et des optimisations des jeux.
-fn cartes_graphiques() -> Vec<Constat> {
-    let Some(sortie) = ps("Get-CimInstance Win32_VideoController | ForEach-Object { \
-         \"$($_.Name)|$($_.DriverVersion)|$(if ($_.DriverDate) { ((Get-Date) - $_.DriverDate).Days })\" }")
-    else {
+fn cartes_graphiques(lectures: Option<&str>) -> Vec<Constat> {
+    let Some(lignes) = section(lectures, "GPU") else {
         return vec![illisible("Carte graphique")];
     };
-    sortie
-        .lines()
+    lignes
+        .iter()
         .filter_map(|l| {
-            let mut c = l.trim().splitn(3, '|');
+            let mut c = l.splitn(3, '|');
             let (nom, version, jours) = (c.next()?.trim(), c.next()?.trim(), c.next()?.trim().parse::<u32>().ok());
             let (outil, lien) = pilote_fabricant(nom)?;
             let manuel = format!("Mettre le pilote à jour avec {outil}");
@@ -799,27 +799,27 @@ fn signatures(age: u64) -> Constat {
 }
 
 /// `None` avec un antivirus tiers : Defender n'a alors pas de signatures à tenir à jour.
-fn signatures_defender() -> Option<Constat> {
-    let age = ps("(Get-MpComputerStatus).AntivirusSignatureAge")?.parse().ok()?;
+fn signatures_defender(lectures: Option<&str>) -> Option<Constat> {
+    let age = section(lectures, "SIG")?.first()?.trim().parse().ok()?;
     Some(signatures(age))
 }
 
-/// Tout ce qui doit être à jour : Windows, ses pilotes, les programmes, Defender. Tout tourne en parallèle :
-/// Windows Update et winget prennent chacun jusqu'à deux minutes, chaque PowerShell met une seconde à démarrer.
-pub fn mises_a_jour_completes() -> Vec<Constat> {
+/// Tout ce qui doit être à jour : Windows, ses pilotes, les programmes, Defender. Windows Update et winget (jusqu'à
+/// deux minutes chacun) tournent en parallèle pendant les lectures rapides.
+/// `seulement` : les catégories à revérifier (après une installation) ; les lectures rapides sont toujours faites.
+pub fn mises_a_jour_completes(seulement: Option<&[&str]>) -> Vec<Constat> {
+    let voulu = |categories: &[&str]| seulement.is_none_or(|s| categories.iter().any(|c| s.contains(c)));
     std::thread::scope(|portee| {
-        let wu = portee.spawn(windows_update);
-        let redemarrage = portee.spawn(redemarrage_en_attente);
-        let signatures = portee.spawn(signatures_defender);
-        let winget = portee.spawn(programmes);
-        let peripheriques = portee.spawn(peripheriques);
-        let cartes = portee.spawn(cartes_graphiques);
-        let mut constats = wu.join().unwrap_or_default();
-        constats.push(redemarrage.join().unwrap_or_else(|_| illisible("Redémarrage")));
-        constats.extend(signatures.join().ok().flatten());
-        constats.push(winget.join().unwrap_or_else(|_| illisible("Programmes")));
-        constats.push(peripheriques.join().unwrap_or_else(|_| illisible("Périphériques")));
-        constats.extend(cartes.join().unwrap_or_default());
+        let wu = voulu(&["Windows Update", "Pilotes"]).then(|| portee.spawn(windows_update));
+        let winget = voulu(&["Programmes"]).then(|| portee.spawn(programmes));
+        let lectures = lectures_rapides();
+        let l = lectures.as_deref();
+        let mut constats = wu.map(|t| t.join().unwrap_or_default()).unwrap_or_default();
+        constats.push(redemarrage_en_attente(l));
+        constats.extend(signatures_defender(l));
+        constats.extend(winget.map(|t| t.join().unwrap_or_else(|_| illisible("Programmes"))));
+        constats.push(peripheriques(l));
+        constats.extend(cartes_graphiques(l));
         constats
     })
 }
@@ -893,7 +893,18 @@ Windows Terminal Microsoft.WindowsTerminal 1.24.12741.0  1.25.2733.0   winget\r\
             .iter()
             .map(std::string::ToString::to_string)
             .collect();
-        assert_eq!(resume(&resume_noms, ", "), "a, b, c (et 2 autre(s))");
+        assert_eq!(crate::ui::resume(&resume_noms, 3, ", "), "a, b, c (et 2 autre(s))");
+    }
+
+    #[test]
+    fn sections_des_lectures_rapides() {
+        // Defender absent (antivirus tiers) : sa section manque, les autres restent lisibles.
+        let l = "REB|False\r\nREB_FIN\r\nPNP|28|PCI\\VEN_1AF4&DEV_1045\r\nPNP_FIN\r\nGPU_FIN\r\n";
+        assert_eq!(section(Some(l), "REB"), Some(vec!["False"]));
+        assert_eq!(section(Some(l), "SIG"), None);
+        assert_eq!(section(Some(l), "PNP"), Some(vec!["28|PCI\\VEN_1AF4&DEV_1045"]));
+        assert_eq!(section(Some(l), "GPU"), Some(vec![]));
+        assert_eq!(section(None, "REB"), None);
     }
 
     #[test]
@@ -919,8 +930,8 @@ Windows Terminal Microsoft.WindowsTerminal 1.24.12741.0  1.25.2733.0   winget\r\
             "Update-MpSignature".to_string(),
             "Disable-LocalUser -Name 'Invité'".to_string(),
         ]);
-        assert!(s.contains("> Update-MpSignature (peut prendre quelques minutes)"));
-        assert!(s.contains("> Disable-LocalUser -Name ''Invité''"));
+        assert!(s.contains("+ '  Update-MpSignature')"));
+        assert!(s.contains("+ '  Disable-LocalUser -Name ''Invité'''"));
         assert!(s.contains("Read-Host"));
         // Un programme externe en échec est signalé, pas affiché « OK ».
         assert_eq!(s.matches("$global:LASTEXITCODE = 0").count(), 2);

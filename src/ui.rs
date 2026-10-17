@@ -33,6 +33,21 @@ pub fn afficher_note(quoi: &str, score: u32) {
     println!("  {quoi} : {}{n}{RESET} ({score}/100)", couleur_note(n));
 }
 
+/// « a, b, c (et 2 autre(s)) » : les `max` premiers éléments d'une liste, pour un message d'une ligne.
+pub fn resume(noms: &[impl AsRef<str>], max: usize, separateur: &str) -> String {
+    use std::fmt::Write;
+    let mut t = noms
+        .iter()
+        .take(max)
+        .map(AsRef::as_ref)
+        .collect::<Vec<_>>()
+        .join(separateur);
+    if noms.len() > max {
+        let _ = write!(t, " (et {} autre(s))", noms.len() - max);
+    }
+    t
+}
+
 /// Pose une question dans le terminal et retourne la réponse sans espaces autour.
 pub fn demander(question: &str) -> String {
     use std::io::Write;
