@@ -319,12 +319,27 @@ mod systeme {
         fils: u32,
         memoire: u64,
         memoire_libre: u64,
-        cartes: Vec<String>,
-        disques: Vec<String>,
+        cartes: Vec<Carte>,
+        disques: Vec<Disque>,
         ecrans_bleus: u32,
         dernier_ecran_bleu: String,
         arrets_brutaux: u32,
         plantages: Vec<String>,
+    }
+
+    #[derive(Default, Deserialize)]
+    #[serde(default)]
+    struct Carte {
+        nom: String,
+        pilote: String,
+    }
+
+    #[derive(Default, Deserialize)]
+    #[serde(default)]
+    struct Disque {
+        nom: String,
+        taille: u64,
+        sorte: String,
     }
 
     /// Une seule lecture PowerShell, en JSON : matériel, système, puis les événements des 30 derniers jours
@@ -340,8 +355,8 @@ mod systeme {
                  allume_s = [uint64]((Get-Date) - $os.LastBootUpTime).TotalSeconds
                  processeur = "$($cpu.Name)".Trim(); fils = [uint32]$cpu.NumberOfLogicalProcessors
                  memoire = [uint64]$cs.TotalPhysicalMemory; memoire_libre = [uint64]$os.FreePhysicalMemory * 1024
-                 cartes = @(Get-CimInstance Win32_VideoController | ForEach-Object { "$($_.Name) · pilote $($_.DriverVersion)" })
-                 disques = @(Get-PhysicalDisk | ForEach-Object { "$($_.FriendlyName) · $([math]::Round($_.Size / 1GB)) Go · $($_.MediaType)" })
+                 cartes = @(Get-CimInstance Win32_VideoController | ForEach-Object { @{ nom = "$($_.Name)"; pilote = "$($_.DriverVersion)" } })
+                 disques = @(Get-PhysicalDisk | ForEach-Object { @{ nom = "$($_.FriendlyName)"; taille = [uint64]$_.Size; sorte = "$($_.MediaType)" } })
                  ecrans_bleus = $bleus.Count
                  dernier_ecran_bleu = if ($bleus.Count) { $bleus[0].TimeCreated.ToString('yyyy-MM-dd') } else { '' }
                  arrets_brutaux = @(Get-WinEvent -FilterHashtable @{ LogName = 'System'; Id = 41; StartTime = $mois } -ErrorAction SilentlyContinue).Count
@@ -377,12 +392,20 @@ mod systeme {
                 trf!("{} ({} libres)", "{} ({} free)", go(e.memoire), go(e.memoire_libre)),
             ),
         ];
-        materiel.extend(
-            e.cartes
-                .iter()
-                .map(|c| ligne(tr!("Carte graphique", "Graphics card"), c.clone())),
-        );
-        materiel.extend(e.disques.iter().map(|d| ligne(tr!("Disque", "Disk"), d.clone())));
+        materiel.extend(e.cartes.iter().map(|c| {
+            ligne(
+                tr!("Carte graphique", "Graphics card"),
+                trf!("{} · pilote {}", "{} · driver {}", c.nom, c.pilote),
+            )
+        }));
+        materiel.extend(e.disques.iter().map(|d| {
+            let sorte = match d.sorte.as_str() {
+                "HDD" => tr!("disque dur", "hard drive"),
+                "SSD" => "SSD",
+                _ => tr!("type inconnu", "unknown type"),
+            };
+            ligne(tr!("Disque", "Disk"), format!("{} · {} · {sorte}", d.nom, go(d.taille)))
+        }));
         let mut problemes = vec![if e.ecrans_bleus == 0 {
             ligne(
                 tr!("Écrans bleus", "Blue screens"),
@@ -455,7 +478,7 @@ fn en_texte(sections: &[Section]) -> String {
         let _ = writeln!(t, "{nom}");
         for l in lignes {
             let marque = l.niveau.map_or("  ", |_| "! ");
-            let _ = writeln!(t, "{marque}{:<20} {}", l.libelle, l.valeur);
+            let _ = writeln!(t, "{marque}{:<22} {}", l.libelle, l.valeur);
         }
         t.push('\n');
     }
@@ -486,7 +509,7 @@ pub fn diagnostic() {
             };
             println!(
                 "  {marque} {GRAS}{}{RESET} {couleur_valeur}{}{RESET}",
-                ajuster(&l.libelle, 19),
+                ajuster(&l.libelle, 22),
                 l.valeur
             );
         }
