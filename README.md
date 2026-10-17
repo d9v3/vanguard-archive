@@ -39,6 +39,8 @@ une copie texte enregistrée sur la clé.
 - Corrections appliquées seulement après confirmation, avec un point de restauration créé automatiquement avant
   (snapper ou timeshift sous Linux, point de restauration Windows) ; sous Windows, chacune est un script lisible.
 - Mises à jour de tout d'un coup : système, programmes, pilotes, firmware.
+- Logiciels essentiels pour un PC neuf ou celui d'un ami (navigateurs, VLC, 7-Zip, LibreOffice, Bitwarden,
+  Thunderbird, Discord, OBS, GIMP, Notepad++, PowerToys) : winget, paquets de la distribution ou Flatpak.
 - Réparations : Internet, navigation détournée, pare-feu, disque, disque plein, nettoyage approfondi, Windows Update
   bloqué, fichiers système, heure.
 - Antivirus : ClamAV (Linux) ou Microsoft Defender (Windows).
@@ -72,6 +74,7 @@ Chaque entrée du menu existe aussi en commande :
 | `sentinel machine [--json]` | audit de cette machine |
 | `sentinel reseau [cible] [-p courants\|tous\|22,80,8000-8100] [--json]` | scan du réseau ou d'un appareil |
 | `sentinel connexion` | test de connexion pour le jeu |
+| `sentinel logiciels` | logiciels essentiels à installer (winget, paquets de la distribution ou Flatpak) |
 | `sentinel diagnostic` | diagnostic de l'ordinateur : matériel, système, plantages et erreurs récents |
 | `sentinel antivirus [--complet]` | analyse antivirus |
 | `sentinel motdepasse` | mots de passe fuités |

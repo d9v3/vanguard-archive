@@ -5,23 +5,23 @@ use crate::machine;
 use crate::ui::*;
 
 #[cfg(target_os = "linux")]
-mod linux;
+pub(crate) mod linux;
 #[cfg(windows)]
 mod windows;
 
-struct Element {
-    titre: String,
-    pourquoi: String,
+pub(crate) struct Element {
+    pub(crate) titre: String,
+    pub(crate) pourquoi: String,
     /// `None` : état inconnu ; `Some(true)` : déjà fait.
-    fait: Option<bool>,
-    commandes: Vec<String>,
+    pub(crate) fait: Option<bool>,
+    pub(crate) commandes: Vec<String>,
     /// Lien à ouvrir au lieu de commandes (pilotes NVIDIA et AMD : pas dans winget).
-    lien: Option<&'static str>,
+    pub(crate) lien: Option<&'static str>,
     /// Déconseillé sur cette machine : affiché, mais pas inclus dans « tout ».
-    deconseille: Option<&'static str>,
+    pub(crate) deconseille: Option<&'static str>,
 }
 
-fn element(
+pub(crate) fn element(
     titre: impl Into<String>,
     pourquoi: impl Into<String>,
     fait: Option<bool>,
@@ -72,7 +72,7 @@ fn lire_choix(texte: &str, liste: &[Element]) -> Vec<usize> {
     choix
 }
 
-fn proposer(nom: &str, liste: &[Element]) {
+pub(crate) fn proposer(nom: &str, liste: &[Element]) {
     titre(nom);
     for (i, el) in liste.iter().enumerate() {
         println!("  {}. {}  — {}", i + 1, el.titre, etat_lisible(el));

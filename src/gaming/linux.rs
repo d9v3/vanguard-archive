@@ -38,12 +38,12 @@ fn reussit(cmd: &str, args: &[&str]) -> bool {
     crate::commande::lancer(Command::new(cmd).args(args), 20).is_some_and(|r| r.code == Some(0))
 }
 
-fn present(cmd: &str) -> bool {
+pub(crate) fn present(cmd: &str) -> bool {
     reussit("sh", &["-c", &format!("command -v {cmd}")])
 }
 
 /// Tous les paquets de la liste sont-ils installés ?
-fn installes(gestion: Paquets, paquets: &[&str]) -> bool {
+pub(crate) fn installes(gestion: Paquets, paquets: &[&str]) -> bool {
     paquets.iter().all(|p| match gestion {
         Paquets::Pacman => reussit("pacman", &["-Q", p]),
         Paquets::Apt => reussit("dpkg", &["-s", p]),
@@ -52,12 +52,12 @@ fn installes(gestion: Paquets, paquets: &[&str]) -> bool {
 }
 
 /// Application Flatpak installée (pour l'utilisateur ou pour le système) ?
-fn flatpak_installe(id: &str) -> bool {
+pub(crate) fn flatpak_installe(id: &str) -> bool {
     reussit("flatpak", &["info", id])
 }
 
 /// Installation Flatpak pour l'utilisateur seul : pas de mot de passe administrateur.
-fn installer_flatpak(id: &str) -> Vec<String> {
+pub(crate) fn installer_flatpak(id: &str) -> Vec<String> {
     vec![
         "flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo".into(),
         format!("flatpak install --user -y --noninteractive flathub {id}"),

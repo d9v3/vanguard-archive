@@ -15,6 +15,7 @@ mod historique;
 mod integrite;
 mod isoler;
 mod langue;
+mod logiciels;
 mod machine;
 mod maj;
 mod rapport;
@@ -104,6 +105,9 @@ enum Commande {
     /// Diagnostic de l'ordinateur : matériel, système et problèmes récents (plantages, erreurs). Lecture seule.
     #[command(visible_alias = "diag")]
     Diagnostic,
+    /// Logiciels essentiels (navigateur, VLC, 7-Zip, LibreOffice, Bitwarden…) : choisir puis installer.
+    #[command(visible_alias = "apps")]
+    Logiciels,
     /// Test de connexion pour le jeu : ping, gigue, pertes, débit et bufferbloat.
     #[command(visible_alias = "connection")]
     Connexion,
@@ -393,6 +397,14 @@ async fn menu() {
             tr!("matériel, plantages, erreurs", "hardware, crashes, errors"),
         );
         option(
+            "l",
+            tr!("Logiciels essentiels", "Essential software"),
+            tr!(
+                "navigateur, VLC, 7-Zip, LibreOffice…",
+                "browser, VLC, 7-Zip, LibreOffice…"
+            ),
+        );
+        option(
             "u",
             tr!("Mises à jour", "Updates"),
             tr!("système, programmes, pilotes", "system, programs, drivers"),
@@ -451,6 +463,7 @@ async fn menu() {
             "g" | "G" => gaming::menu(),
             "c" | "C" => connexion::tester().await,
             "o" | "O" => diagnostic::diagnostic(),
+            "l" | "L" => logiciels::menu(),
             "p" | "P" => fuites::verifier(),
             "e" | "E" => fuites::verifier_courriel(),
             "b" | "B" => {
@@ -517,6 +530,10 @@ fn ligne_de_commande() -> clap::Command {
         (
             "reparer",
             "Common repairs: network, hijacked browsing, firewall, antivirus, system files, disk, space, updates, time",
+        ),
+        (
+            "logiciels",
+            "Essential software (browser, VLC, 7-Zip, LibreOffice, Bitwarden…): choose, then install",
         ),
         (
             "diagnostic",
@@ -657,6 +674,7 @@ async fn main() {
         Some(Commande::Gaming) => gaming::menu(),
         Some(Commande::Connexion) => connexion::tester().await,
         Some(Commande::Diagnostic) => diagnostic::diagnostic(),
+        Some(Commande::Logiciels) => logiciels::menu(),
         Some(Commande::MotDePasse) => fuites::verifier(),
         Some(Commande::Courriel) => fuites::verifier_courriel(),
         Some(Commande::Isoler { fichier }) => isoler::isoler(&fichier),
