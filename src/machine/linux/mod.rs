@@ -1049,6 +1049,7 @@ pub fn auditer() -> Audit {
         verif!(super::navigateur::navigateurs()),
         verif!(super::sante::sante()),
         verif!(super::journaux::journaux()),
+        verif!([crate::integrite::constat()]),
     ]));
 
     Audit {

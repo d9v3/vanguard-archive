@@ -37,6 +37,8 @@ verdict critère par critère et des conseils.
 - Réparations : Internet, navigation détournée, pare-feu, disque, disque plein, nettoyage approfondi, Windows Update
   bloqué, fichiers système, heure.
 - Antivirus : ClamAV (Linux) ou Microsoft Defender (Windows).
+- Intégrité des fichiers critiques (comptes, sudo, SSH, PAM, cron, services, démarrage automatique) : empreintes
+  BLAKE3, ce qui a changé depuis la référence, et surveillance en direct.
 - Mots de passe fuités : vérifiés par Have I Been Pwned sans jamais envoyer le mot de passe (5 caractères de son
   empreinte seulement).
 - Surveillance toutes les heures : notification si un appareil inconnu arrive, si un port s'ouvre, si la note de
@@ -64,6 +66,7 @@ Chaque entrée du menu existe aussi en commande :
 | `sentinel connexion` | test de connexion pour le jeu |
 | `sentinel antivirus [--complet]` | analyse antivirus |
 | `sentinel motdepasse` | mots de passe fuités |
+| `sentinel integrite [--accepter] [--temps-reel]` | intégrité des fichiers critiques (empreintes BLAKE3), en direct possible |
 | `sentinel maj` | mises à jour |
 | `sentinel reparer` | réparations et nettoyage |
 | `sentinel surveillance on\|off` | surveillance horaire |

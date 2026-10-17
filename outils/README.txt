@@ -28,6 +28,8 @@ Menu
   g  Gaming (Windows): components for games and Windows settings
   c  Connection test for gaming: ping, jitter, speed, bufferbloat
   p  Passwords: have they leaked? (only 5 characters of their fingerprint are sent)
+  i  Critical file integrity (accounts, sudo, SSH, startup…): what changed since the reference;
+     live with "sentinel integrite --temps-reel"
   n  Name a device ("HP printer")
   d  Data: back up or restore (nicknames, network history)
   q  Quit

@@ -12,6 +12,7 @@ mod fuites;
 #[cfg(windows)]
 mod gaming;
 mod historique;
+mod integrite;
 mod langue;
 mod machine;
 mod maj;
@@ -101,6 +102,16 @@ enum Commande {
     /// Test de connexion pour le jeu : ping, gigue, pertes, débit et bufferbloat.
     #[command(visible_alias = "connection")]
     Connexion,
+    /// Intégrité des fichiers critiques : référence d'empreintes BLAKE3, puis ce qui a changé depuis.
+    #[command(visible_alias = "integrity")]
+    Integrite {
+        /// Prendre l'état actuel comme nouvelle référence (après une mise à jour du système).
+        #[arg(long, visible_alias = "accept")]
+        accepter: bool,
+        /// Surveiller les fichiers critiques en direct jusqu'à Ctrl-C.
+        #[arg(long, visible_alias = "live")]
+        temps_reel: bool,
+    },
     /// Vérifie si des mots de passe ont fuité (Have I Been Pwned) ; seuls 5 caractères de leur empreinte partent.
     #[command(name = "motdepasse", visible_alias = "password")]
     MotDePasse,
@@ -342,6 +353,11 @@ async fn menu() {
             tr!("Mots de passe : ont-ils fuité ?", "Passwords: have they leaked?"),
             tr!("rien n'est envoyé en clair", "nothing sent in clear"),
         );
+        option(
+            "i",
+            tr!("Intégrité des fichiers critiques", "Critical file integrity"),
+            tr!("comptes, sudo, SSH, démarrage…", "accounts, sudo, SSH, startup…"),
+        );
 
         section(tr!("ENTRETIEN", "MAINTENANCE"));
         option(
@@ -398,6 +414,7 @@ async fn menu() {
             "g" | "G" => gaming::menu(),
             "c" | "C" => connexion::tester().await,
             "p" | "P" => fuites::verifier(),
+            "i" | "I" => integrite::verifier(false),
             "n" | "N" => {
                 let qui = demander(tr!(
                     "IP ou adresse MAC de l'appareil : ",
@@ -460,6 +477,10 @@ fn ligne_de_commande() -> clap::Command {
             "Connection test for gaming: ping, jitter, packet loss, speed and bufferbloat",
         ),
         (
+            "integrite",
+            "Critical file integrity: BLAKE3 fingerprint reference, then what changed since",
+        ),
+        (
             "motdepasse",
             "Check whether passwords have leaked (Have I Been Pwned); only 5 characters of their fingerprint are sent",
         ),
@@ -506,6 +527,12 @@ fn ligne_de_commande() -> clap::Command {
         s.mut_arg("complet", |a| {
             a.help("The whole home folder instead of the risky places")
         })
+    })
+    .mut_subcommand("integrite", |s| {
+        s.mut_arg("accepter", |a| {
+            a.help("Take the current state as the new reference (after a system update)")
+        })
+        .mut_arg("temps_reel", |a| a.help("Watch the critical files live until Ctrl-C"))
     })
     .mut_subcommand("sauvegarder", |s| {
         s.mut_arg("fichier", |a| {
@@ -571,6 +598,13 @@ async fn main() {
         Some(Commande::Gaming) => gaming::menu(),
         Some(Commande::Connexion) => connexion::tester().await,
         Some(Commande::MotDePasse) => fuites::verifier(),
+        Some(Commande::Integrite { accepter, temps_reel }) => {
+            if temps_reel {
+                integrite::temps_reel();
+            } else {
+                integrite::verifier(accepter);
+            }
+        }
         Some(Commande::Sauvegarder { fichier }) => donnees::sauvegarder(fichier),
         Some(Commande::Restaurer { fichier }) => donnees::restaurer(&fichier),
         Some(Commande::Nommer { appareil, surnom }) => nommer(&appareil, &surnom.join(" ")),

@@ -44,7 +44,7 @@ fn executable() -> String {
     exe.display().to_string()
 }
 
-fn notifier(titre: &str, corps: &str) {
+pub(crate) fn notifier(titre: &str, corps: &str) {
     #[cfg(target_os = "linux")]
     let _ = Command::new("notify-send")
         .args(["-a", "sentinel", "-i", "sentinel", "-u", "critical", titre, corps])
@@ -241,6 +241,15 @@ fn veiller_passerelle(r: &reseau::Rapport) {
 
 pub async fn surveiller() {
     veiller_machine();
+    if let Some(fichiers) = crate::integrite::changements_a_signaler() {
+        notifier(
+            tr!(
+                "Sentinel : fichiers critiques modifiés",
+                "Sentinel: critical files changed"
+            ),
+            &fichiers,
+        );
+    }
     let Ok(r) = reseau::executer(Options {
         silencieux: true,
         ..Options::defaut(None, "courants")
