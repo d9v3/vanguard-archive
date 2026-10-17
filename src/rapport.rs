@@ -62,6 +62,40 @@ table{width:100%;border-collapse:collapse;margin-top:8px;font-size:14px}td{paddi
 @media (max-width:600px){.ligne{flex-wrap:wrap}.cat{min-width:0}}
 ";
 
+/// Les 5 derniers tests de connexion, le plus récent en haut ; vide s'il n'y en a pas.
+fn connexions(tests: &[crate::connexion::Resultat]) -> String {
+    if tests.is_empty() {
+        return String::new();
+    }
+    let mut h = String::from(tr!(
+        "<h2>Connexion pour le jeu</h2><div class=carte><table><tr><td>Date</td><td>Ping</td><td>Gigue</td><td>Pertes</td><td>↓ Mbit/s</td><td>↑ Mbit/s</td><td>Bufferbloat</td></tr>",
+        "<h2>Connection for gaming</h2><div class=carte><table><tr><td>Date</td><td>Ping</td><td>Jitter</td><td>Loss</td><td>↓ Mbit/s</td><td>↑ Mbit/s</td><td>Bufferbloat</td></tr>"
+    ));
+    let debit = |d: Option<f64>| d.map_or_else(|| "?".to_string(), |d| format!("{d:.0}"));
+    for t in tests.iter().rev().take(5) {
+        let bufferbloat = t.hausse_ms.map_or_else(
+            || "?".to_string(),
+            |m| format!("{} (+{m:.0} ms)", crate::connexion::note_bufferbloat(m).0),
+        );
+        let _ = write!(
+            h,
+            "<tr><td>{}</td><td>{:.0} ms</td><td>{:.1} ms</td><td>{:.0} %</td><td>{}</td><td>{}</td><td>{}</td></tr>",
+            esc(&t.date),
+            t.internet_ms,
+            t.gigue_ms,
+            t.pertes,
+            debit(t.descendant),
+            debit(t.montant),
+            bufferbloat
+        );
+    }
+    h += tr!(
+        "</table><div class=meta>Menu c ou « sentinel connexion » pour un nouveau test.</div></div>",
+        "</table><div class=meta>Menu c or “sentinel connexion” for a new test.</div></div>"
+    );
+    h
+}
+
 pub fn generer(audit: Option<&Audit>, reseau: Option<&Rapport>) -> std::io::Result<PathBuf> {
     let chemin = crate::reseau::dossier_donnees().join("rapport.html");
     std::fs::create_dir_all(chemin.parent().unwrap_or(&chemin))?;
@@ -98,6 +132,8 @@ fn html(audit: Option<&Audit>, reseau: Option<&Rapport>) -> String {
             "<h2>Grade history</h2><div class=carte>{svg}<div class=meta><span style=\"color:var(--info)\">●</span> this machine · <span style=\"color:var(--ok)\">●</span> network (last 30 full checks)</div></div>"
         );
     }
+
+    h += &connexions(&crate::connexion::historique());
 
     if let Some(a) = audit {
         h += tr!(
@@ -255,6 +291,22 @@ pub fn ouvrir(audit: Option<&Audit>, reseau: Option<&Rapport>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tests_de_connexion_dans_le_rapport() {
+        assert_eq!(connexions(&[]), "");
+        let r = crate::connexion::Resultat {
+            date: "2026-10-17 15:00".into(),
+            internet_ms: 17.2,
+            gigue_ms: 3.4,
+            pertes: 0.0,
+            descendant: Some(106.4),
+            montant: None,
+            hausse_ms: Some(43.0),
+        };
+        let h = connexions(&[r]);
+        assert!(h.contains("<td>17 ms</td>") && h.contains("<td>106</td><td>?</td>") && h.contains("B (+43 ms)"));
+    }
     use crate::reseau::{Hote, PortOuvert};
 
     #[test]

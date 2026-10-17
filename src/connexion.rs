@@ -161,8 +161,48 @@ async fn sous_charge(sens: Sens) -> (Serie, Option<f64>) {
     (mesures, charge.await.ok().flatten())
 }
 
+/// Résultat d'un test, gardé sur cet ordinateur pour le rapport HTML.
+#[derive(serde::Serialize, serde::Deserialize, Clone)]
+pub struct Resultat {
+    /// « AAAA-MM-JJ HH:MM ».
+    pub date: String,
+    pub internet_ms: f64,
+    pub gigue_ms: f64,
+    pub pertes: f64,
+    pub descendant: Option<f64>,
+    pub montant: Option<f64>,
+    /// Hausse de latence sous charge (bufferbloat), en ms.
+    pub hausse_ms: Option<f64>,
+}
+
+/// Nombre de tests gardés.
+const GARDES: usize = 50;
+
+fn fichier() -> std::path::PathBuf {
+    crate::reseau::dossier_local().join("connexion.json")
+}
+
+/// Tests précédents, du plus ancien au plus récent.
+pub fn historique() -> Vec<Resultat> {
+    std::fs::read_to_string(fichier())
+        .ok()
+        .and_then(|t| serde_json::from_str(&t).ok())
+        .unwrap_or_default()
+}
+
+fn enregistrer(r: Resultat) {
+    let mut tous = historique();
+    tous.push(r);
+    let surplus = tous.len().saturating_sub(GARDES);
+    tous.drain(..surplus);
+    if let Ok(texte) = serde_json::to_string(&tous) {
+        let _ = std::fs::create_dir_all(crate::reseau::dossier_local());
+        let _ = std::fs::write(fichier(), texte);
+    }
+}
+
 /// Note du bufferbloat d'après la hausse de latence sous charge (barème de Waveform).
-fn note_bufferbloat(hausse: f64) -> (&'static str, Niveau) {
+pub fn note_bufferbloat(hausse: f64) -> (&'static str, Niveau) {
     match hausse {
         h if h <= 5.0 => ("A+", Niveau::Info),
         h if h <= 30.0 => ("A", Niveau::Info),
@@ -280,6 +320,15 @@ pub async fn tester() {
         );
     }
     println!();
+    enregistrer(Resultat {
+        date: chrono::Local::now().format("%Y-%m-%d %H:%M").to_string(),
+        internet_ms: repos,
+        gigue_ms: internet.gigue(),
+        pertes: internet.pertes(),
+        descendant: debit_bas,
+        montant: debit_haut,
+        hausse_ms: hausse,
+    });
     let conseils = conseils(serie_box.as_ref(), &internet, hausse);
     if conseils.is_empty() {
         trp!(
