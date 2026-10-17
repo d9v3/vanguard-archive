@@ -44,6 +44,7 @@ cp -f "$LINUX" "$CLE/Linux/sentinel"
 # Version macOS retirée (tag git avec-macos) : son dossier ne reste pas sur la clé.
 rm -rf "$CLE/macOS"
 cp -f outils/LISEZMOI.txt "$CLE/LISEZMOI.txt"
+cp -f outils/README.txt "$CLE/README.txt"
 # Code source complet (avec l'historique git) pour continuer le développement depuis n'importe quel ordinateur.
 # exFAT ne garde ni droits ni liens : -rt suffit, --modify-window tolère sa précision de 2 s.
 rsync -rt --delete --modify-window=2 --exclude /target/ ./ "$CLE/source/"

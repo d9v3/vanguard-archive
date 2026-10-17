@@ -1,21 +1,50 @@
 SENTINEL — bilan de sécurité portable (machine + réseau + antivirus + corrections)
 ================================================================================
+English version: README.txt
 
-Cette clé contient le programme pour chaque système, sa base de données et son code source.
+Cette clé contient le programme pour Linux et Windows, sa base de données et son code source.
 
-  Linux/sentinel       Linux (toutes distributions, aucune installation)
-                       Ouvrir un terminal dans ce dossier puis :  ./sentinel
-  Windows/sentinel.exe Windows 10/11 : double-cliquer.
-                       SmartScreen peut avertir (programme non signé) : « Informations complémentaires » > « Exécuter quand même ».
+  Linux/sentinel        Linux (toutes distributions, aucune installation)
+                        Ouvrir un terminal dans ce dossier puis :  ./sentinel
+  Windows/sentinel.exe  Windows 10/11 : double-cliquer.
+  donnees/              Base des appareils (un carnet par réseau : chez toi, chez chaque ami) et dernier
+                        rapport HTML. Elle voyage avec la clé : tout Sentinel qui voit la clé branchée l'utilise.
+  source/               Code source complet (Rust) avec son historique git.
+  sentinel.cle          Fichier témoin qui fait reconnaître la clé : ne pas le supprimer.
 
-  donnees/             Base des appareils (un carnet par réseau : chez toi, chez chaque ami) et dernier
-                       rapport HTML. Elle voyage avec la clé : tout sentinel qui voit la clé branchée l'utilise.
-  source/              Code source complet (Rust) avec son historique git.
+Pour commencer : lancer Sentinel, choisir « 1. Bilan complet », puis « 2. Corriger ».
 
-Utilisation : lancer sentinel, puis choisir « 1. Bilan complet », puis « 2. Corriger ».
-Un souci (Internet, disque plein, Windows Update bloqué, fichiers système) : choix « r. Réparer ».
-Sous Windows, chaque correction est d'abord écrite dans un script lisible (le chemin est affiché).
-Si tu aides quelqu'un connecté à distance (Bureau à distance, SSH), sentinel ne coupe jamais cet accès.
-Les corrections ne sont jamais appliquées sans ta confirmation.
+Menu
+  1  Bilan complet (machine + réseau), avec ce qui a changé depuis le bilan précédent
+  2  Corriger les problèmes trouvés (chaque correction est montrée, puis confirmée)
+  3  Audit de cette machine          4  Scan du réseau local       5  Scan approfondi d'un appareil
+  6  Antivirus : analyse rapide      7  Antivirus : analyse complète du dossier personnel
+  8  Rapport détaillé (navigateur), avec la courbe des notes
+  9  Surveillance du réseau toutes les heures (notification si un appareil inconnu arrive)
+  u  Mises à jour : système, programmes, pilotes, firmware
+  r  Réparer : Internet, navigation détournée, pare-feu, antivirus, disque, disque plein,
+     nettoyage approfondi, mises à jour bloquées, fichiers système, heure
+  g  Gaming (Windows) : composants pour les jeux et réglages de Windows
+  c  Test de connexion pour le jeu : ping, gigue, débit, bufferbloat
+  p  Mots de passe : ont-ils fuité ? (seuls 5 caractères de leur empreinte sont envoyés)
+  n  Nommer un appareil (« imprimante HP »)
+  d  Données : sauvegarder ou restaurer (surnoms, historique des réseaux)
+  q  Quitter
+
+Le bilan vérifie notamment : pare-feu, ports ouverts, mises à jour, chiffrement, comptes, programmes lancés
+au démarrage, DNS, certificats racine ajoutés, extensions de navigateur, santé des disques et de la batterie.
+
+Langue : français ou anglais selon le système. Pour forcer le français :
+  Linux :   SENTINEL_LANG=fr ./sentinel
+  Windows : dans l'invite de commandes, set SENTINEL_LANG=fr puis sentinel.exe
+
+Bon à savoir
+  - Les corrections ne sont jamais appliquées sans ta confirmation. Sous Windows, chacune est d'abord écrite
+    dans un script lisible (le chemin est affiché) et demande l'accord administrateur.
+  - Si tu aides quelqu'un connecté à distance (Bureau à distance, SSH), Sentinel ne coupe jamais cet accès.
+  - Le programme n'est pas signé : SmartScreen peut avertir (« Informations complémentaires » > « Exécuter
+    quand même ») et Microsoft Defender peut le signaler, car il scanne des ports. Le code source est sur la clé.
+  - Restent sur chaque ordinateur, jamais sur la clé : l'historique des bilans et la quarantaine de
+    l'antivirus (pour ne jamais transporter de malware).
 
 À n'utiliser que sur ton propre réseau, ou un réseau que tu as le droit d'auditer.

@@ -74,7 +74,9 @@ d'affichage). Pour forcer : `SENTINEL_LANG=fr` ou `SENTINEL_LANG=en`. Les comman
 outils/deployer.sh     # compile Linux (musl, statique) + Windows, installe en local, met à jour la clé SENTINEL
 ```
 
-La clé (exFAT, étiquette `SENTINEL`, fichier témoin `sentinel.cle`) contient `Linux/`, `Windows/`, `donnees/` (base portable) et `source/`.
+La clé (exFAT, étiquette `SENTINEL`, fichier témoin `sentinel.cle`) contient `Linux/`, `Windows/`, `donnees/` (base portable),
+`source/` et le guide en deux langues (`LISEZMOI.txt`, `README.txt`, tirés de `outils/`). L'historique des bilans et la quarantaine
+restent sur chaque ordinateur.
 Elle est mise à jour automatiquement à chaque compilation et à chaque branchement (unités systemd dans `outils/systemd/`).
 
 Tests : `cargo test` (Linux) ; vérification croisée : `cargo clippy --target x86_64-pc-windows-gnu` ; tests Windows sous Wine.
