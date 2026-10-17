@@ -1072,7 +1072,8 @@ fn lire_ports_udp(liste: &str, pare_feu_actif: bool, ip_lan: Option<&str>) -> Ve
         }
         let i = info_port(port);
         let du_systeme = systeme.contains(&programme);
-        if du_systeme && i.niveau == Niveau::Info {
+        // 3389/udp : la moitié UDP du Bureau à distance, déjà jugé par son propre constat.
+        if (du_systeme && i.niveau == Niveau::Info) || port == 3389 {
             continue;
         }
         vus.push(port);
@@ -1519,7 +1520,7 @@ mod tests {
 
     #[test]
     fn ports_udp_retenus() {
-        let liste = "0.0.0.0|5353|svchost\n0.0.0.0|123|svchost\n0.0.0.0|161|snmp\n127.0.0.1|1900|svchost\n0.0.0.0|27036|steam\n0.0.0.0|60000|chrome\n0.0.0.0|161|snmp";
+        let liste = "0.0.0.0|3389|svchost\n0.0.0.0|5353|svchost\n0.0.0.0|123|svchost\n0.0.0.0|161|snmp\n127.0.0.1|1900|svchost\n0.0.0.0|27036|steam\n0.0.0.0|60000|chrome\n0.0.0.0|161|snmp";
         let c = lire_ports_udp(liste, true, None);
         assert_eq!(c.len(), 2);
         assert!(c[0].message.starts_with("161/udp"));

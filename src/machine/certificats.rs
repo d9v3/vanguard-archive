@@ -287,8 +287,11 @@ pub fn certificats() -> Vec<Constat> {
 #[cfg(windows)]
 pub fn certificats() -> Vec<Constat> {
     let Some(sortie) = super::windows::ps(
-        "foreach ($m in 'LocalMachine', 'CurrentUser') { Get-ChildItem \"Cert:\\$m\\Root\" | ForEach-Object { \
-         \"CERT|$m|$($_.HasPrivateKey)|$($_.Thumbprint)|$($_.GetNameInfo('SimpleName', $false))\" } }",
+        // Le lecteur Cert: n'existe qu'une fois le module chargé : avec -NoProfile, le nommer ne le charge pas.
+        "Import-Module Microsoft.PowerShell.Security -ErrorAction SilentlyContinue; \
+         foreach ($m in 'LocalMachine', 'CurrentUser') { Get-ChildItem \"Cert:\\$m\\Root\" | ForEach-Object { $c = $_; \
+         $nom = try { $c.GetNameInfo([Security.Cryptography.X509Certificates.X509NameType]::SimpleName, $false) } catch { $c.Subject }; \
+         \"CERT|$m|$($c.HasPrivateKey)|$($c.Thumbprint)|$nom\" } }",
     ) else {
         return vec![super::windows::illisible(CAT)];
     };
