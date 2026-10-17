@@ -5,13 +5,19 @@ Chaque pixel est un rayon de lumière suivi à rebours depuis la caméra, courb�
 Le disque d'accrétion vu « par-dessus » et « par-dessous » l'ombre (effet Interstellar) n'est
 pas dessiné : il sort tout seul du calcul.
 
+Le trou noir est posé sur une plaque noire aux coins arrondis, comme une fenêtre ouverte sur l'espace. Un halo est
+de la lumière : il ne brille que sur du noir. Sans plaque, sur un fond clair (Explorateur de Windows, GitHub), il
+devenait une tache rose-brun ; sur le noir de la barre, la plaque ne se voit pas.
+
 Lancer depuis la racine du dépôt :
     uv run --no-project --with numpy --with pillow python outils/icone.py
-Produit assets/sentinel.png (512 px) et assets/sentinel.ico (16 à 256 px).
+Produit assets/icones/sentinel-<taille>.png (Linux, 16 à 512 px) et assets/sentinel.ico (Windows, 16 à 256 px).
 """
 
+from pathlib import Path
+
 import numpy as np
-from PIL import Image, ImageFilter
+from PIL import Image, ImageDraw, ImageFilter
 
 # Unités : rayon de Schwarzschild = 1 (sphère des photons à 1,5, dernière orbite stable à 3).
 TAILLE = 512
@@ -19,8 +25,15 @@ SURECH = 3  # suréchantillonnage : 3 × 3 rayons par pixel final
 DISTANCE = 26.0  # caméra
 ELEVATION = np.radians(9.0)  # au-dessus du plan du disque : presque de profil, comme Gargantua
 INCLINAISON = np.radians(16.0)  # roulis de l'image : le disque monte de gauche à droite
-CHAMP = np.radians(16.5)  # demi-angle de vue
+CHAMP = np.radians(13.6)  # demi-angle de vue : cadrage serré, les pointes du disque frôlent le bord de la plaque
 DISQUE_INT, DISQUE_EXT = 2.6, 8.6
+ARRONDI = 0.225  # rayon des coins de la plaque, en fraction du côté
+
+# Une image par taille, réduite depuis le grand rendu : le système n'a jamais à la réduire lui-même.
+# Linux : les dossiers de hicolor (la barre et le lanceur prennent la taille la plus proche).
+TAILLES_LINUX = [16, 22, 24, 32, 48, 64, 128, 256, 512]
+# Windows : ses tailles de base (16, 24, 32, 48, 256) et leurs versions pour les écrans agrandis de 125 à 300 %.
+TAILLES_WINDOWS = [16, 20, 24, 30, 32, 36, 40, 48, 60, 64, 72, 80, 96, 256]
 
 # Palette du thème Rouge OLED, du plus froid au plus chaud.
 PALETTE = np.array(
@@ -160,24 +173,60 @@ def halo(rgb, opac):
         lueur += np.asarray(img.filter(ImageFilter.GaussianBlur(rayon)), dtype=np.float64) / 255 * poids
     # La lueur rougit en s'éloignant.
     lueur *= np.array([1.0, 0.42, 0.34])
-    total = rgb + lueur * (1 - opac[..., None] * 0.6)
-    a = np.clip(opac + lueur.max(axis=2), 0, 1)
-    return total, a
+    return rgb + lueur * (1 - opac[..., None] * 0.6)
+
+
+def plaque(n):
+    """Masque de la plaque : carré aux coins arrondis, dessiné en grand pour des bords lisses une fois réduit."""
+    masque = Image.new("L", (n, n), 0)
+    ImageDraw.Draw(masque).rounded_rectangle((0, 0, n - 1, n - 1), radius=round(n * ARRONDI), fill=255)
+    return np.asarray(masque, dtype=np.float64) / 255
+
+
+def lineaire(c):
+    """Valeurs d'écran (sRGB) → quantité de lumière."""
+    return np.where(c <= 0.04045, c / 12.92, ((c + 0.055) / 1.055) ** 2.4)
+
+
+def ecran(c):
+    """Quantité de lumière → valeurs d'écran (sRGB)."""
+    c = np.clip(c, 0, 1)
+    return np.where(c <= 0.0031308, c * 12.92, 1.055 * c ** (1 / 2.4) - 0.055)
+
+
+def reduire(lumiere, masque, t):
+    """Image de t px. La moyenne se fait sur la lumière, pas sur les valeurs d'écran : sinon un anneau fin et
+    brillant, mêlé au noir qui l'entoure, s'assombrit et disparaît dans les petites tailles."""
+
+    def plan(p):
+        petit = Image.fromarray(p.astype(np.float32)).resize((t, t), Image.Resampling.LANCZOS)
+        return np.asarray(petit, dtype=np.float64)
+
+    rgb = np.dstack([plan(lumiere[..., c]) for c in range(3)])
+    im = Image.fromarray((ecran(rgb) * 255 + 0.5).astype(np.uint8))
+    if t <= 48:
+        # Un peu de netteté en petit, sur la couleur seulement : le bord de la plaque reste tel quel.
+        im = im.filter(ImageFilter.UnsharpMask(radius=0.7 if t <= 24 else 1.0, percent=90, threshold=0))
+    im.putalpha(Image.fromarray((np.clip(plan(masque), 0, 1) * 255 + 0.5).astype(np.uint8)))
+    return im
 
 
 def main():
     rgb, opac = lancer()
-    rgb, a = halo(rgb, opac)
+    rgb = halo(rgb, opac)
     # Tonalité douce : les blancs ne saturent pas brutalement.
     rgb = 1 - np.exp(-1.15 * rgb)
-    couleur_vraie = np.where(a[..., None] > 1e-4, rgb / np.maximum(a, 1e-4)[..., None], 0)
-    rgba = np.dstack([np.clip(couleur_vraie, 0, 1), a])
-    grande = Image.fromarray((rgba * 255 + 0.5).astype(np.uint8), "RGBA")
-    finale = grande.resize((TAILLE, TAILLE), Image.Resampling.LANCZOS)
-    finale.save("assets/sentinel.png", optimize=True)
-    tailles = [16, 24, 32, 48, 64, 128, 256]
-    finale.save("assets/sentinel.ico", sizes=[(t, t) for t in tailles])
-    print("assets/sentinel.png et assets/sentinel.ico écrits.")
+    # Couleurs prémultipliées : posées sur le noir de la plaque, elles s'affichent telles quelles.
+    lumiere = lineaire(np.clip(rgb, 0, 1))
+    masque = plaque(rgb.shape[0])
+    dossier = Path("assets/icones")
+    dossier.mkdir(exist_ok=True)
+    for t in TAILLES_LINUX:
+        reduire(lumiere, masque, t).save(dossier / f"sentinel-{t}.png", optimize=True)
+    windows = [reduire(lumiere, masque, t) for t in TAILLES_WINDOWS]
+    # Le fichier part de la plus grande ; les autres y sont mises telles quelles au lieu d'être recalculées.
+    windows[-1].save("assets/sentinel.ico", sizes=[im.size for im in windows], append_images=windows[:-1])
+    print("assets/icones/ et assets/sentinel.ico écrits.")
 
 
 if __name__ == "__main__":

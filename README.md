@@ -1,3 +1,5 @@
+<img src="assets/icones/sentinel-256.png" alt="Logo de Sentinel : un trou noir" width="128" align="right">
+
 # Sentinel
 
 **Le bilan de sécurité de ton ordinateur et de ton réseau, sur une clé USB.**

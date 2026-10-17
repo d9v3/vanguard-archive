@@ -72,11 +72,16 @@ if git remote get-url origin >/dev/null 2>&1; then
 fi
 # Ancien nom (netscan, jusqu'à 0.10.0) : reste une commande, qui lance sentinel.
 ln -sfn sentinel "$HOME/.cargo/bin/netscan"
-# Icône du lanceur (Sentinel.desktop : Icon=sentinel) : rendu du trou noir (outils/icone.py).
+# Icône du lanceur (Sentinel.desktop : Icon=sentinel) : rendu du trou noir (outils/icone.py), une image par taille
+# de 16 à 512 px, pour que la barre et le lanceur n'aient pas à réduire eux-mêmes la plus grande.
 ICONES="${XDG_DATA_HOME:-$HOME/.local/share}/icons/hicolor"
 # Les anciennes icônes SVG passeraient avant le PNG : on les retire.
 rm -f "$ICONES"/{scalable,256x256,16x16,24x24,32x32}/apps/sentinel.svg
-install -Dm644 assets/sentinel.png "$ICONES/512x512/apps/sentinel.png"
+for png in assets/icones/sentinel-*.png; do
+  t=${png##*-}
+  t=${t%.png}
+  install -Dm644 "$png" "$ICONES/${t}x$t/apps/sentinel.png"
+done
 command -v gtk-update-icon-cache >/dev/null && gtk-update-icon-cache -qtf "$ICONES" || true
 
 CLE=$(find "/run/media/$USER" -maxdepth 2 \( -name sentinel.cle -o -name netscan.cle \) -printf '%h\n' 2>/dev/null | head -1)
