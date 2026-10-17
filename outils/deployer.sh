@@ -32,4 +32,9 @@ cp -f outils/LISEZMOI.txt "$CLE/LISEZMOI.txt"
 rsync -rt --delete --modify-window=2 --exclude /target/ ./ "$CLE/source/"
 sync
 echo "Clé NETSCAN à jour : $CLE ($(./"$LINUX" --version))"
-command -v notify-send >/dev/null && notify-send -a netscan -i netscan "Clé NETSCAN à jour" "$(./"$LINUX" --version)" || true
+# Une seule notification à l'écran : la suivante (lancement manuel puis service déclenché par la compilation) la remplace.
+if command -v notify-send >/dev/null; then
+  ID_FICHIER="${XDG_RUNTIME_DIR:-/tmp}/netscan-notification.id"
+  ID=$(cat "$ID_FICHIER" 2>/dev/null || echo 0)
+  notify-send -p -r "$ID" -a netscan -i netscan "Clé NETSCAN à jour" "$(./"$LINUX" --version)" >"$ID_FICHIER" || true
+fi

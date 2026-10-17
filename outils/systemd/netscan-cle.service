@@ -1,11 +1,12 @@
 [Unit]
 Description=netscan : mettre à jour la clé USB NETSCAN
-# Déclenché au montage de la clé (WantedBy) et par netscan-compilation.path après chaque compilation.
+# Déclenché au montage de la clé (WantedBy) et par netscan-compilation.path après chaque compilation :
+# --sans-compiler, sinon il recompile (environnement différent) et notifie une 2e fois.
 After=run-media-alice-NETSCAN.mount
 
 [Service]
 Type=oneshot
-ExecStart=/home/alice/Projects/netscan/outils/deployer.sh
+ExecStart=/home/alice/Projects/netscan/outils/deployer.sh --sans-compiler
 
 [Install]
 WantedBy=run-media-alice-NETSCAN.mount
