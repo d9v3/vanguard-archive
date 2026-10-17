@@ -1,17 +1,39 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
   <defs>
-    <linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#ff4d4d"/><stop offset="1" stop-color="#a31515"/>
+    <linearGradient id="bord" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ff5a4f"/><stop offset="0.55" stop-color="#d42020"/><stop offset="1" stop-color="#7e0c0c"/>
     </linearGradient>
+    <radialGradient id="fond" cx="0.5" cy="0.45" r="0.6">
+      <stop offset="0" stop-color="#2a0c0c"/><stop offset="1" stop-color="#080606"/>
+    </radialGradient>
+    <radialGradient id="iris" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#ff7a5c"/><stop offset="0.7" stop-color="#e3261f"/><stop offset="1" stop-color="#8f0f0f"/>
+    </radialGradient>
+    <linearGradient id="balayage" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#ff4a3d" stop-opacity="0"/><stop offset="1" stop-color="#ff4a3d" stop-opacity="0.55"/>
+    </linearGradient>
+    <clipPath id="interieur">
+      <path d="M128 36 L206 64 V122 C206 172 175 205 128 220 C81 205 50 172 50 122 V64 Z"/>
+    </clipPath>
   </defs>
-  <path d="M128 16 L224 52 V124 C224 186 182 226 128 242 C74 226 32 186 32 124 V52 Z" fill="url(#g)"/>
-  <path d="M128 34 L208 64 V124 C208 176 174 210 128 224 C82 210 48 176 48 124 V64 Z" fill="#0b0b0b"/>
-  <g fill="none" stroke="#ff5a5a" stroke-width="6" opacity="0.9">
-    <circle cx="128" cy="128" r="22"/>
-    <circle cx="128" cy="128" r="46" opacity="0.6"/>
-    <circle cx="128" cy="128" r="70" opacity="0.3"/>
+  <!-- bouclier -->
+  <path d="M128 12 L226 48 V122 C226 186 184 228 128 246 C72 228 30 186 30 122 V48 Z" fill="url(#bord)"/>
+  <path d="M128 17 L221 51 V122 C221 183 181 223 128 240 C75 223 35 183 35 122 V51 Z" fill="none" stroke="#fff" stroke-width="3" opacity="0.22"/>
+  <path d="M128 36 L206 64 V122 C206 172 175 205 128 220 C81 205 50 172 50 122 V64 Z" fill="url(#fond)"/>
+  <!-- radar -->
+  <g clip-path="url(#interieur)">
+    <g fill="none" stroke="#ff5a4f">
+      <circle cx="128" cy="128" r="60" stroke-width="2.5" opacity="0.35"/>
+      <circle cx="128" cy="128" r="88" stroke-width="2.5" opacity="0.2"/>
+      <path d="M128 40 V216 M40 128 H216" stroke-width="2" opacity="0.15"/>
+    </g>
+    <path d="M128 128 L128 28 A100 100 0 0 1 214 78 Z" fill="url(#balayage)" transform="rotate(0 128 128)"/>
+    <circle cx="176" cy="74" r="5" fill="#eee3db"/>
+    <circle cx="80" cy="176" r="3.5" fill="#ff5a4f" opacity="0.7"/>
   </g>
-  <path d="M128 128 L186 86" stroke="#fff" stroke-width="7" stroke-linecap="round"/>
-  <circle cx="128" cy="128" r="9" fill="#fff"/>
-  <circle cx="168" cy="100" r="7" fill="#fff"/>
+  <!-- œil -->
+  <path d="M70 128 Q128 74 186 128 Q128 182 70 128 Z" fill="#0b0808" stroke="#eee3db" stroke-width="7" stroke-linejoin="round"/>
+  <circle cx="128" cy="128" r="27" fill="url(#iris)"/>
+  <circle cx="128" cy="128" r="11" fill="#0b0808"/>
+  <circle cx="137" cy="119" r="5" fill="#fff" opacity="0.9"/>
 </svg>

@@ -1,4 +1,4 @@
-//! Fiche d'identité de sentinel.exe (onglet « Détails » des propriétés du fichier) et manifeste Windows.
+//! Fiche d'identité de sentinel.exe (onglet « Détails » des propriétés du fichier), icône et manifeste Windows.
 
 fn main() {
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("windows") {
@@ -15,6 +15,8 @@ fn main() {
         .set("CompanyName", "Projet personnel Sentinel")
         .set("LegalCopyright", "Projet personnel, usage sur ses propres appareils")
         .set("OriginalFilename", "sentinel.exe")
+        // Icône de l'Explorateur et de la barre des tâches (16 à 256 px, voir assets/).
+        .set_icon("assets/sentinel.ico")
         // asInvoker : sentinel démarre sans droits admin ; seules les corrections les demandent, une à une.
         .set_manifest(
             r#"<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
