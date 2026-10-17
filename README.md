@@ -1,89 +1,120 @@
 # Sentinel
 
-Outil de sécurité en Rust, en français, pour Linux et Windows :
+**Le bilan de sécurité de ton ordinateur et de ton réseau, sur une clé USB.**
+Sentinel vérifie ta machine et tous les appareils de ton réseau, explique chaque problème en français clair, et le
+corrige après ton accord. Linux et Windows, sans installation, en français ou en anglais.
 
-- **Audit de la machine**
-  - Linux (Arch, Debian, Ubuntu, Mint, Fedora, openSUSE) : pare-feu et sa politique, ports TCP/UDP exposés,
-    ports Docker qui contournent le pare-feu, SSH (y compris lancé par socket), mises à jour (pacman, apt, dnf,
-    zypper, Flatpak, Snap, AUR, firmware), redémarrage en attente, chiffrement du volume système, Secure Boot,
-    verrouillage de l'écran, durcissement du noyau, AppArmor/SELinux, sauvegardes, setuid et PATH suspects,
-    clés SSH (droits, phrase de passe), comptes UID 0, Wi-Fi, services en échec.
-  - Windows : pare-feu, Defender, SMBv1, Bureau à distance (jamais coupé depuis une session à distance), UAC,
-    BitLocker, Windows Update, comptes (invité, Administrateur intégré, sans mot de passe), ports TCP/UDP exposés,
-    persistance (tâches planifiées, clés Run, dossier Démarrage), Wi-Fi.
-  - Les deux : DNS réellement utilisé (réglé à la main vers un inconnu, réponses inventées), certificats racine
-    ajoutés (interception, logiciel publicitaire), extensions de navigateur (Firefox, Zen, Chrome, Brave, Edge…),
-    santé de l'ordinateur (espace disque, SMART sans root, batterie, températures).
-  - Ce qui ne peut pas être vérifié est dit (« impossible de vérifier »), jamais compté comme sain ; sans pare-feu
-    vérifié, pas de note.
-- **Corrections** proposées pour chaque problème ; appliquées seulement après confirmation (sudo / UAC). Sous Windows,
-  chaque correction est un script `.ps1` lisible, gardé comme trace.
-- **Scan du réseau local** : appareils, fabricant (base IEEE intégrée), surnoms, ports ouverts, services reconnus à
-  leur bannière, risques ; un carnet par réseau (box + nom du Wi-Fi), nouveaux appareils et ports, appareils absents.
-- **Mises à jour** (`sentinel maj`, touche `u` du menu) : tout ce qui doit être à jour, vérifié d'un coup puis installé
-  après accord.
-  - Linux : paquets, Flatpak, Snap, AUR, firmware (fwupd), pilotes DKMS compilés pour chaque noyau installé
-    (NVIDIA…), noyau chargé.
-  - Windows : Windows Update (correctifs, .NET, Defender) et ses pilotes, redémarrage en attente, signatures de
-    Defender, programmes (winget), périphériques sans pilote, âge du pilote de la carte graphique.
-    « Tout installer » passe par une seule fenêtre administrateur.
-- **Réparer** : réseau, fichiers système (SFC/DISM), disque (SMART, btrfs scrub, Repair-Volume), disque plein,
-  nettoyage approfondi (corbeille, paquets orphelins, caches, rapports de plantage),
-  mises à jour bloquées (pacman, apt, dnf, zypper, Windows Update), services en échec, heure ; chaque réparation est montrée
-  puis confirmée, et celles qui couperaient une connexion à distance en cours sont refusées.
-- **Antivirus** : ClamAV (Linux) ou Microsoft Defender (Windows), quarantaine, revue des programmes au démarrage.
-- **Surveillance** horaire avec notification si un appareil inconnu rejoint le réseau.
-- **Test de connexion pour le jeu** (`sentinel connexion`, touche `c`) : ping, gigue, pertes, débit, bufferbloat
-  noté A+ à F, conseils (câble, SQM).
-- **Mots de passe fuités** (`sentinel motdepasse`, touche `p`) : Have I Been Pwned par k-anonymat (5 caractères
-  d'empreinte envoyés, comparaison locale).
-- **Rapport HTML** autonome et daté, avec la courbe des notes ; chaque bilan complet dit ce qui a changé depuis le
-  précédent (notes, problèmes nouveaux ou réglés).
+*Portable security check for your computer and your home network: Linux and Windows, French or English.*
 
-Sans argument, `sentinel` ouvre un menu. Sous-commandes : `complet [--html]`, `machine [--json]`, `corriger`,
-`reseau [cible] [-p courants|tous|22,80,8000-8100] [--json]`, `antivirus [--complet]`, `surveillance on|off`,
-`maj`, `reparer`, `gaming` (Windows), `connexion`, `motdepasse`, `sauvegarder [fichier]`, `restaurer <fichier>`,
-`nommer <ip|mac> <surnom>`.
+![Menu de Sentinel](assets/captures/menu.png)
 
-**Langue** : français ou anglais, choisi d'après le système (Linux : `LC_ALL`, `LC_MESSAGES`, `LANG` ; Windows : langue
-d'affichage). Pour forcer : `SENTINEL_LANG=fr` ou `SENTINEL_LANG=en`. Les commandes ont aussi un nom anglais (`full`, `audit`,
-`fix`, `network`, `monitor`, `update`, `repair`, `connection`, `password`, `backup`, `restore`, `name`) ; les réponses o/y et t/a sont acceptées.
+## Ce que fait Sentinel
 
-À n'utiliser que sur un réseau qui t'appartient ou que tu as le droit d'auditer.
+**Bilan de sécurité** — une note de A à F, puis chaque problème avec sa correction.
+- Pare-feu, ports ouverts (TCP et UDP), mises à jour et failles connues, chiffrement du disque, Secure Boot,
+  verrouillage de l'écran, comptes, SSH, sudo, durcissement du noyau, sauvegardes.
+- Ce qui se cache : programmes lancés au démarrage, tâches planifiées, préchargement de bibliothèques, programmes
+  privilégiés modifiés.
+- DNS réellement utilisé (et réponses inventées), certificats racine ajoutés (interception du HTTPS), extensions de
+  navigateur qui lisent tous les sites.
+- Santé : espace disque, état SMART des disques (sans root), batterie, températures.
+- Ce qui n'a pas pu être vérifié est dit, jamais compté comme sain.
 
-## Structure
+**Réseau local** — tous les appareils, leur fabricant, leurs ports ouverts et leurs risques ; les nouveaux venus
+signalés, un carnet par réseau (chez toi, chez chaque ami), des surnoms (« imprimante HP »).
+
+![Scan du réseau local](assets/captures/reseau.png)
+
+**Connexion pour le jeu** — ping, gigue, pertes, débit et bufferbloat (le lag quand quelqu'un télécharge), avec un
+verdict critère par critère et des conseils.
+
+![Test de connexion](assets/captures/connexion.png)
+
+**Et aussi**
+- Corrections appliquées seulement après confirmation ; sous Windows, chacune est un script lisible.
+- Mises à jour de tout d'un coup : système, programmes, pilotes, firmware.
+- Réparations : Internet, navigation détournée, pare-feu, disque, disque plein, nettoyage approfondi, Windows Update
+  bloqué, fichiers système, heure.
+- Antivirus : ClamAV (Linux) ou Microsoft Defender (Windows).
+- Mots de passe fuités : vérifiés par Have I Been Pwned sans jamais envoyer le mot de passe (5 caractères de son
+  empreinte seulement).
+- Surveillance toutes les heures : notification si un appareil inconnu arrive, si un port s'ouvre, ou si la note de
+  la machine baisse.
+- Rapport HTML avec la courbe des notes, et ce qui a changé depuis le bilan précédent.
+- Gaming (Windows) : composants pour les jeux et réglages de Windows.
+
+Sentinel ne coupe jamais une connexion à distance en cours (Bureau à distance, SSH). À n'utiliser que sur ton propre
+réseau, ou un réseau que tu as le droit d'auditer.
+
+## Démarrer
+
+- **Depuis la clé** : `Linux/sentinel` (dans un terminal : `./sentinel`) ou `Windows/sentinel.exe` (double-clic).
+  Le guide de la clé est dans `LISEZMOI.txt` (français) et `README.txt` (anglais).
+- **Installé** : lancer `sentinel` ouvre le menu. Choisir **1** (bilan complet), puis **2** (corriger).
+
+Chaque entrée du menu existe aussi en commande :
+
+| Commande | Rôle |
+|---|---|
+| `sentinel complet [--html]` | bilan complet : machine + réseau |
+| `sentinel corriger` | corriger les problèmes trouvés |
+| `sentinel machine [--json]` | audit de cette machine |
+| `sentinel reseau [cible] [-p courants\|tous\|22,80,8000-8100] [--json]` | scan du réseau ou d'un appareil |
+| `sentinel connexion` | test de connexion pour le jeu |
+| `sentinel antivirus [--complet]` | analyse antivirus |
+| `sentinel motdepasse` | mots de passe fuités |
+| `sentinel maj` | mises à jour |
+| `sentinel reparer` | réparations et nettoyage |
+| `sentinel surveillance on\|off` | surveillance horaire |
+| `sentinel nommer <ip\|mac> <surnom>` | nommer un appareil |
+| `sentinel sauvegarder [fichier]`, `sentinel restaurer <fichier>` | sauvegarde des données |
+| `sentinel gaming` | gaming (Windows) |
+
+**Langue** : celle du système (français ou anglais). Pour forcer : `SENTINEL_LANG=fr` ou `SENTINEL_LANG=en`. Les
+commandes ont aussi un nom anglais (`full`, `audit`, `fix`, `network`, `connection`, `password`, `update`, `repair`,
+`monitor`, `name`, `backup`, `restore`).
+
+## Pour les développeurs
+
+### Structure
 
 | Fichier | Rôle |
 |---|---|
 | `src/main.rs` | menu et sous-commandes |
-| `src/machine/` | audit local : types communs (`mod.rs`), dossiers `linux/` et `windows/` (un fichier par thème) |
-| `src/corriger.rs` | application guidée des correctifs |
-| `src/reseau.rs`, `src/scan.rs` | scan réseau (TCP connect, sans root), ARP, historique |
-| `src/risk.rs` | base de connaissances des ports et niveaux de risque |
-| `src/antivirus.rs` | ClamAV / Defender, quarantaine, démarrage automatique |
-| `src/surveillance.rs` | systemd timer / Planificateur de tâches + notifications |
+| `src/ui.rs` | couleurs, titres, cadres, barres |
+| `src/machine/mod.rs` | types communs, affichage, exécution parallèle des vérifications |
+| `src/machine/linux/`, `src/machine/windows/` | audit propre à chaque système, un fichier par thème |
 | `src/machine/dns.rs`, `certificats.rs`, `extensions.rs`, `sante.rs` | vérifications communes aux deux systèmes |
-| `src/rapport.rs`, `src/historique.rs` | rapport HTML, historique des bilans et courbe des notes |
+| `src/corriger.rs` | application guidée des correctifs |
+| `src/reseau.rs`, `src/scan.rs` | scan réseau (TCP connect, sans root), ARP, carnets des réseaux |
+| `src/risk.rs` | base de connaissances des ports et niveaux de risque |
 | `src/connexion.rs` | test de connexion pour le jeu |
-| `src/fuites.rs` | mots de passe fuités (Have I Been Pwned) |
+| `src/antivirus.rs` | ClamAV / Defender, quarantaine |
+| `src/surveillance.rs` | minuterie systemd / Planificateur de tâches, notifications |
+| `src/rapport.rs`, `src/historique.rs` | rapport HTML, historique des bilans, courbe des notes |
+| `src/reparer.rs`, `src/maj.rs`, `src/gaming.rs` | réparations, mises à jour, gaming (Windows) |
+| `src/fuites.rs`, `src/donnees.rs` | mots de passe fuités, sauvegarde des données |
 | `assets/oui.tsv` | fabricants par préfixe MAC (liste IEEE) |
 
-## Compilation et clé USB
+### Compiler et déployer
+
+Prérequis : `rustup target add x86_64-unknown-linux-musl x86_64-pc-windows-gnu` et `mingw-w64-gcc`.
 
 ```sh
-outils/deployer.sh     # compile Linux (musl, statique) + Windows, installe en local, met à jour la clé SENTINEL
+outils/deployer.sh     # compile Linux (musl, statique) + Windows, installe en local, pousse sur GitHub, met à jour la clé
 ```
 
-La clé (exFAT, étiquette `SENTINEL`, fichier témoin `sentinel.cle`) contient `Linux/`, `Windows/`, `donnees/` (base portable),
-`source/` et le guide en deux langues (`LISEZMOI.txt`, `README.txt`, tirés de `outils/`). L'historique des bilans et la quarantaine
-restent sur chaque ordinateur.
-Elle est mise à jour automatiquement (unités systemd dans `outils/systemd/`) : après chaque compilation
-(`sentinel-copie.service`), et à chaque branchement avec la dernière version de GitHub, compilée si elle est nouvelle
-(`sentinel-cle.service`, `deployer.sh --branchement`). Chaque déploiement pousse aussi les commits vers le dépôt privé
-https://github.com/d9v3/sentinel.
+Tests : `cargo test` (Linux) ; tests Windows sous Wine (`cargo test --target x86_64-pc-windows-gnu` avec un lanceur
+Wine) ; `cargo clippy --all-targets` sur les deux cibles, en mode strict (pedantic), sans remarque ; `cargo fmt --check`.
 
-Tests : `cargo test` (Linux) ; vérification croisée : `cargo clippy --target x86_64-pc-windows-gnu` ; tests Windows sous Wine.
+### La clé USB
+
+La clé (exFAT, étiquette `SENTINEL`, fichier témoin `sentinel.cle`) contient `Linux/`, `Windows/`, `donnees/` (base des
+appareils, portable), `source/` (ce dépôt) et le guide en deux langues (`LISEZMOI.txt`, `README.txt`, tirés de
+`outils/`). L'historique des bilans et la quarantaine restent sur chaque ordinateur.
+
+Sur le PC de développement, elle se met à jour toute seule (unités systemd dans `outils/systemd/`) : après chaque
+compilation (`sentinel-copie.service`), et à chaque branchement avec la dernière version de GitHub, compilée si elle
+est nouvelle (`sentinel-cle.service`, `deployer.sh --branchement`).
 
 La version macOS a été retirée après la v0.9.7 (jamais testée sur un vrai Mac) : `git checkout avec-macos` la retrouve.
-
-Prérequis de compilation : `rustup target add x86_64-unknown-linux-musl x86_64-pc-windows-gnu` et `mingw-w64-gcc`.
