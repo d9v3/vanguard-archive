@@ -379,7 +379,9 @@ mod systeme {
              try { Get-PhysicalDisk | ForEach-Object { \"DSK|$($_.HealthStatus)|$($_.FriendlyName)\" }; 'DSK_FIN' } catch {}; \
              try { $p = @(Get-CimInstance -Namespace root\\wmi -ClassName BatteryFullChargedCapacity -ErrorAction Stop)[0].FullChargedCapacity; \
              $o = @(Get-CimInstance -Namespace root\\wmi -ClassName BatteryStaticData -ErrorAction Stop)[0].DesignedCapacity; \
-             if ($p -and $o) { \"BAT|$p|$o\" }; 'BAT_FIN' } catch {}",
+             if ($p -and $o) { \"BAT|$p|$o\" }; 'BAT_FIN' } catch {}; \
+             try { Get-CimInstance Win32_PerfFormattedData_Counters_ThermalZoneInformation -ErrorAction Stop | ForEach-Object { \
+             \"TZ|$($_.HighPrecisionTemperature)\" }; 'TZ_FIN' } catch {}",
         )
     }
 
@@ -423,10 +425,25 @@ mod systeme {
         (plein * 100).checked_div(origine).map(|s| s.min(100))
     }
 
-    pub fn temperatures() -> Vec<(&'static str, f64, f64)> {
-        super::degres_nvidia()
-            .map(|t| vec![(crate::tr!("carte graphique", "graphics card"), t, 88.0)])
+    /// Zones thermiques de la carte mère (en dixièmes de kelvin, sans droits admin ; souvent le processeur sur un
+    /// portable), la plus chaude, et la carte graphique NVIDIA. Une VM n'a pas de zone thermique.
+    pub fn temperatures(lectures: Option<&str>) -> Vec<(&'static str, f64, f64)> {
+        let mut mesures = Vec::new();
+        let zone = crate::machine::windows::section(lectures, "TZ")
             .unwrap_or_default()
+            .iter()
+            .filter_map(|l| l.trim().parse::<f64>().ok())
+            .map(|dixiemes_kelvin| dixiemes_kelvin / 10.0 - 273.15)
+            // Zones factices de certaines cartes mères (0 K ou valeur figée absurde).
+            .filter(|t| (5.0..130.0).contains(t))
+            .reduce(f64::max);
+        if let Some(t) = zone {
+            mesures.push((crate::tr!("zone thermique", "thermal zone"), t, 90.0));
+        }
+        if let Some(t) = super::degres_nvidia() {
+            mesures.push((crate::tr!("carte graphique", "graphics card"), t, 88.0));
+        }
+        mesures
     }
 }
 
@@ -434,14 +451,21 @@ pub fn sante() -> Vec<Constat> {
     #[cfg(target_os = "linux")]
     let (volumes, disques, batterie) = (systeme::volumes(), systeme::disques(), systeme::batterie());
     #[cfg(windows)]
-    let (volumes, disques, batterie) = {
-        let l = systeme::lectures();
-        (systeme::volumes(l.as_deref()), systeme::disques(l.as_deref()), systeme::batterie(l.as_deref()))
-    };
+    let lectures = systeme::lectures();
+    #[cfg(windows)]
+    let (volumes, disques, batterie) = (
+        systeme::volumes(lectures.as_deref()),
+        systeme::disques(lectures.as_deref()),
+        systeme::batterie(lectures.as_deref()),
+    );
     let mut constats = constats_volumes(&volumes);
     constats.extend(constats_disques(&disques));
     constats.extend(batterie.map(constat_batterie));
-    constats.extend(constat_temperatures(&systeme::temperatures()));
+    #[cfg(target_os = "linux")]
+    let temperatures = systeme::temperatures();
+    #[cfg(windows)]
+    let temperatures = systeme::temperatures(lectures.as_deref());
+    constats.extend(constat_temperatures(&temperatures));
     constats
 }
 
