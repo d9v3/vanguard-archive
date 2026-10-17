@@ -19,7 +19,12 @@ fn reussit(cmd: &str, args: &[&str]) -> bool {
 /// Programme à planifier. Lancé depuis la clé USB, on en installe d'abord une copie locale :
 /// sinon la surveillance s'arrêterait dès que la clé est débranchée.
 fn executable() -> String {
-    let Ok(exe) = std::env::current_exe() else {
+    // Sous Linux, le programme peut tourner depuis une copie temporaire (protection de la clé), effacée à la fin.
+    #[cfg(target_os = "linux")]
+    let exe = crate::protection::exe_d_origine();
+    #[cfg(windows)]
+    let exe = std::env::current_exe().ok();
+    let Some(exe) = exe else {
         return "sentinel".into();
     };
     if reseau::cle_usb().is_some_and(|cle| exe.starts_with(&cle)) {

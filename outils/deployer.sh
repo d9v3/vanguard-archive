@@ -102,6 +102,9 @@ mkdir -p "$CLE"/{Linux,Windows,donnees,source}
 # Clé préparée sous l'ancien nom : témoin et programmes renommés (l'étiquette du volume, elle, demande root).
 [[ -f $CLE/netscan.cle ]] && mv -f "$CLE/netscan.cle" "$CLE/sentinel.cle"
 rm -f "$CLE/Linux/netscan" "$CLE/Windows/netscan.exe"
+# Empreinte de cet ordinateur (SHA-1 de /etc/machine-id) : partout ailleurs, sentinel remonte la clé en lecture seule
+# sous Linux (src/protection.rs).
+printf '%s' "$(cat /etc/machine-id)" | sha1sum | cut -d' ' -f1 >"$CLE/sentinel.cle"
 cp -f "$LINUX" "$CLE/Linux/sentinel"
 [[ -f $WINDOWS ]] && cp -f "$WINDOWS" "$CLE/Windows/sentinel.exe"
 # Version macOS retirée (tag git avec-macos) : son dossier ne reste pas sur la clé.

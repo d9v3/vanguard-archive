@@ -405,6 +405,11 @@ const ANCIEN_TEMOIN_CLE: &str = "netscan.cle";
 /// Clé USB sentinel branchée, si elle est trouvée (dossier racine contenant `sentinel.cle` ou `netscan.cle`).
 pub fn cle_usb() -> Option<PathBuf> {
     // D'abord : sommes-nous lancés depuis la clé ? (exe dans <clé>/Linux/, <clé>/Windows/…)
+    // Sous Linux, le programme peut tourner depuis une copie temporaire (protection de la clé) : on part du
+    // programme d'origine.
+    #[cfg(target_os = "linux")]
+    let exe = crate::protection::exe_d_origine();
+    #[cfg(windows)]
     let exe = std::env::current_exe().ok().and_then(|e| e.canonicalize().ok());
     let depuis_exe = exe
         .iter()

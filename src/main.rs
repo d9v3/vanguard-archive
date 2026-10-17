@@ -19,6 +19,8 @@ mod langue;
 mod logiciels;
 mod machine;
 mod maj;
+#[cfg(target_os = "linux")]
+mod protection;
 mod rapport;
 mod reparer;
 mod reseau;
@@ -642,6 +644,8 @@ async fn main() {
     #[cfg(windows)]
     let _ = enable_ansi_support::enable_ansi_support();
     journal::installer();
+    #[cfg(target_os = "linux")]
+    protection::proteger_cle();
     let args = Args::from_arg_matches(&ligne_de_commande().get_matches()).unwrap_or_else(|e| e.exit());
     match args.commande {
         None => menu().await,
