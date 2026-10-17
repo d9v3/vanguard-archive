@@ -54,6 +54,9 @@ pub fn corriger(audit: &Audit, reseau: Option<&Rapport>) -> Option<Audit> {
                     machine::retenir_blocage(k);
                     println!("    {VERT}✔ fait{RESET}");
                     applique = true;
+                } else {
+                    // Sans cette ligne, un échec (UAC refusée, commande en erreur) passait sans un mot de netscan.
+                    println!("    ✖ non appliqué : voir le message ci-dessus");
                 }
             } else {
                 println!("    {GRIS}ignoré{RESET}");
