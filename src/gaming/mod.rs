@@ -6,6 +6,8 @@ use crate::ui::*;
 
 #[cfg(target_os = "linux")]
 pub(crate) mod linux;
+#[cfg(target_os = "macos")]
+mod macos;
 #[cfg(windows)]
 mod windows;
 
@@ -127,4 +129,6 @@ pub fn menu() {
     windows::menu();
     #[cfg(target_os = "linux")]
     linux::menu();
+    #[cfg(target_os = "macos")]
+    macos::menu();
 }

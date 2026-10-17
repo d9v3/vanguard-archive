@@ -50,6 +50,34 @@ fn cibles() -> Vec<PathBuf> {
         ".config/autostart",
         ".config/systemd/user",
     ];
+    // macOS : /etc est un lien vers /private/etc ; les démons et agents de launchd sont le démarrage automatique.
+    #[cfg(target_os = "macos")]
+    let systeme: &[&str] = &[
+        "/etc/hosts",
+        "/etc/sudoers",
+        "/etc/sudoers.d",
+        "/etc/pam.d",
+        "/etc/ssh/sshd_config",
+        "/etc/ssh/sshd_config.d",
+        "/etc/zshrc",
+        "/etc/zprofile",
+        "/etc/profile",
+        "/etc/paths",
+        "/etc/paths.d",
+        "/etc/periodic/daily",
+        "/Library/LaunchDaemons",
+        "/Library/LaunchAgents",
+    ];
+    #[cfg(target_os = "macos")]
+    let utilisateur: &[&str] = &[
+        ".zshrc",
+        ".zprofile",
+        ".zshenv",
+        ".bash_profile",
+        ".profile",
+        ".ssh/authorized_keys",
+        "Library/LaunchAgents",
+    ];
     // Profils PowerShell (relancés à chaque ouverture de PowerShell) et scripts des stratégies de groupe : des
     // endroits où un programme malveillant aime se faire relancer.
     #[cfg(windows)]

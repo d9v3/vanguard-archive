@@ -84,7 +84,7 @@ fn adresse(texte: &str) -> Option<IpAddr> {
 }
 
 /// Serveurs listés par `resolvectl dns` (« Global: 127.0.0.1 », « Link 3 (wlan0): 10.0.0.1 »).
-#[cfg_attr(windows, allow(dead_code))]
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 fn lire_resolvectl(sortie: &str) -> Vec<IpAddr> {
     sortie
         .lines()
@@ -94,7 +94,7 @@ fn lire_resolvectl(sortie: &str) -> Vec<IpAddr> {
         .collect()
 }
 
-#[cfg_attr(windows, allow(dead_code))]
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 fn lire_resolv_conf(texte: &str) -> Vec<IpAddr> {
     texte
         .lines()
@@ -169,6 +169,81 @@ fn serveurs() -> Option<Serveurs> {
         chiffre,
         resolveur_local,
         remise: Vec::new(),
+    })
+}
+
+/// Serveurs de `scutil --dns` (« nameserver[0] : 10.0.0.1 »), section principale seulement : celle « for scoped
+/// queries » répète les mêmes serveurs par interface.
+#[cfg(any(target_os = "macos", test))]
+fn lire_scutil(sortie: &str) -> Vec<IpAddr> {
+    let mut liste = Vec::new();
+    for l in sortie.lines().take_while(|l| !l.contains("for scoped queries")) {
+        if let Some((cle, valeur)) = l.split_once(':')
+            && cle.trim().starts_with("nameserver[")
+            && let Some(ip) = adresse(valeur.trim())
+            && !liste.contains(&ip)
+        {
+            liste.push(ip);
+        }
+    }
+    liste
+}
+
+/// Résolveurs locaux connus : (processus, nom affiché, chiffre ses requêtes).
+#[cfg(target_os = "macos")]
+const RESOLVEURS: &[(&str, &str, bool)] = &[
+    ("nextdns", "NextDNS", true),
+    ("dnscrypt-proxy", "dnscrypt-proxy", true),
+    ("cloudflared", "cloudflared", true),
+    ("AdGuardHome", "AdGuard Home", false),
+    ("unbound", "Unbound", false),
+    ("dnsmasq", "dnsmasq", false),
+];
+
+/// macOS : serveurs en service d'après `scutil --dns` ; un serveur est « réglé à la main » s'il figure dans les
+/// réglages d'un service réseau (`networksetup -getdnsservers`), sinon il vient de la box (DHCP).
+#[cfg(target_os = "macos")]
+fn serveurs() -> Option<Serveurs> {
+    let liste = lire_scutil(&super::sortie("scutil", &["--dns"])?);
+    let services: Vec<String> = super::sortie("networksetup", &["-listallnetworkservices"])
+        .unwrap_or_default()
+        .lines()
+        .skip(1)
+        // Un service désactivé commence par « * ».
+        .filter(|l| !l.starts_with('*') && !l.trim().is_empty())
+        .map(str::to_string)
+        .collect();
+    let mut manuels: Vec<(IpAddr, String)> = Vec::new();
+    for service in &services {
+        for ip in super::sortie("networksetup", &["-getdnsservers", service])
+            .unwrap_or_default()
+            .lines()
+            .filter_map(|l| adresse(l.trim()))
+        {
+            let echappe = service.replace('\'', r"'\''");
+            manuels.push((ip, format!("sudo networksetup -setdnsservers '{echappe}' empty")));
+        }
+    }
+    let mut resolveur_local = None;
+    let mut chiffre = None;
+    if liste.iter().any(IpAddr::is_loopback)
+        && let Some((_, nom, chiffrant)) = RESOLVEURS
+            .iter()
+            .find(|(p, _, _)| super::sortie("pgrep", &["-x", p]).is_some())
+    {
+        resolveur_local = Some(*nom);
+        if *chiffrant {
+            chiffre = Some(true);
+        }
+    }
+    Some(Serveurs {
+        liste: liste
+            .iter()
+            .map(|ip| (*ip, manuels.iter().any(|(m, _)| m == ip)))
+            .collect(),
+        chiffre,
+        resolveur_local,
+        remise: manuels,
     })
 }
 
@@ -375,6 +450,14 @@ mod tests {
         assert_eq!(origine(ip("2620:fe::fe")), Origine::Connu("Quad9"));
         assert_eq!(origine(ip("2a07:a8c1::ab")), Origine::Connu("NextDNS"));
         assert_eq!(origine(ip("203.0.113.53")), Origine::Inconnu);
+    }
+
+    #[test]
+    fn lecture_de_scutil() {
+        let sortie = "DNS configuration\n\nresolver #1\n  search domain[0] : home\n  nameserver[0] : 10.0.0.1\n  \
+                      nameserver[1] : 2001:db8::1\n  if_index : 14 (en0)\n\nresolver #2\n  domain   : local\n\n\
+                      DNS configuration (for scoped queries)\n\nresolver #1\n  nameserver[0] : 9.9.9.9\n";
+        assert_eq!(lire_scutil(sortie), [ip("10.0.0.1"), ip("2001:db8::1")]);
     }
 
     #[test]

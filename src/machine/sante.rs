@@ -48,6 +48,11 @@ fn juger_volume(v: &Volume) -> Option<Constat> {
             "Get-ChildItem '{}' -Directory -Force -ErrorAction SilentlyContinue | ForEach-Object {{ [pscustomobject]@{{ Go = [math]::Round(((Get-ChildItem $_.FullName -Recurse -File -Force -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum) / 1GB, 1); Dossier = $_.FullName }} }} | Sort-Object Go -Descending | Select-Object -First 15 | Format-Table -AutoSize",
             v.point
         )
+    } else if cfg!(target_os = "macos") {
+        format!(
+            "du -xh -d 2 '{}' 2>/dev/null | sort -h | tail -15",
+            v.point.replace('\'', r"'\''")
+        )
     } else {
         format!(
             "du -xh --max-depth=2 '{}' 2>/dev/null | sort -h | tail -15",
@@ -203,6 +208,7 @@ fn constat_temperatures(mesures: &[(&'static str, f64, f64)]) -> Option<Constat>
     })
 }
 
+#[cfg_attr(target_os = "macos", allow(dead_code))]
 fn degres_nvidia() -> Option<f64> {
     let r = crate::commande::lancer(
         std::process::Command::new("nvidia-smi").args(["--query-gpu=temperature.gpu", "--format=csv,noheader,nounits"]),
@@ -412,6 +418,85 @@ mod systeme {
     }
 }
 
+#[cfg(target_os = "macos")]
+mod systeme {
+    use super::{Disque, Volume};
+
+    fn sortie(cmd: &str, args: &[&str]) -> String {
+        crate::commande::lancer(std::process::Command::new(cmd).args(args), 20)
+            .map(|r| r.sortie)
+            .unwrap_or_default()
+    }
+
+    /// Le volume de données (le volume système scellé partage la même place) : `df -k -P`, en kibioctets.
+    pub fn volumes() -> Vec<Volume> {
+        let point = if std::path::Path::new("/System/Volumes/Data").is_dir() {
+            "/System/Volumes/Data"
+        } else {
+            "/"
+        };
+        sortie("df", &["-k", "-P", point])
+            .lines()
+            .skip(1)
+            .filter_map(|l| {
+                let c: Vec<&str> = l.split_whitespace().collect();
+                let total: u64 = c.get(1)?.parse().ok()?;
+                let libre: u64 = c.get(3)?.parse().ok()?;
+                Some(Volume {
+                    point: "/".into(),
+                    libre: libre * 1024,
+                    total: total * 1024,
+                })
+            })
+            .collect()
+    }
+
+    /// Valeur d'une clé dans un plist XML : « <key>SMARTStatus</key> <string>Verified</string> ».
+    pub(super) fn valeur_plist(plist: &str, cle: &str) -> Option<String> {
+        let apres = plist.split_once(&format!("<key>{cle}</key>"))?.1;
+        let debut = apres.find('>')? + 1;
+        let fin = apres[debut..].find('<')? + debut;
+        Some(apres[debut..fin].trim().to_string())
+    }
+
+    /// Disques physiques internes et leur état SMART selon diskutil (« Verified », « Failing », « Not Supported »).
+    pub fn disques() -> Vec<Disque> {
+        sortie("diskutil", &["list", "internal", "physical"])
+            .lines()
+            .filter_map(|l| l.strip_prefix("/dev/")?.split_whitespace().next().map(str::to_string))
+            .filter_map(|disque| {
+                let plist = sortie("diskutil", &["info", "-plist", &disque]);
+                let etat = valeur_plist(&plist, "SMARTStatus")?;
+                (etat != "Not Supported").then(|| Disque {
+                    modele: valeur_plist(&plist, "MediaName").unwrap_or(disque),
+                    defaillant: etat == "Failing",
+                    ..Disque::default()
+                })
+            })
+            .collect()
+    }
+
+    /// Santé de la batterie en % : capacité maximale actuelle / capacité d'origine (« AppleRawMaxCapacity » sur
+    /// les Mac Apple Silicon, où « MaxCapacity » est déjà un pourcentage ; « MaxCapacity » en mAh sur les Intel).
+    pub fn batterie() -> Option<u64> {
+        let ioreg = sortie("ioreg", &["-rn", "AppleSmartBattery"]);
+        let lire = |cle: &str| -> Option<u64> {
+            ioreg
+                .lines()
+                .find_map(|l| l.trim().strip_prefix(&format!("\"{cle}\" = ")))
+                .and_then(|v| v.trim().parse().ok())
+        };
+        let origine = lire("DesignCapacity").filter(|c| *c > 0)?;
+        let actuelle = lire("AppleRawMaxCapacity").or_else(|| lire("MaxCapacity").filter(|c| *c > 100))?;
+        Some((actuelle * 100 / origine).min(100))
+    }
+
+    /// Les capteurs de température demandent les droits root sous macOS (powermetrics) : rien sans eux.
+    pub fn temperatures() -> Vec<(&'static str, f64, f64)> {
+        Vec::new()
+    }
+}
+
 #[cfg(windows)]
 mod systeme {
     use super::{Disque, Volume};
@@ -493,7 +578,7 @@ mod systeme {
 }
 
 pub fn sante() -> Vec<Constat> {
-    #[cfg(target_os = "linux")]
+    #[cfg(unix)]
     let (volumes, disques, batterie) = (systeme::volumes(), systeme::disques(), systeme::batterie());
     #[cfg(windows)]
     let lectures = systeme::lectures();
@@ -506,7 +591,7 @@ pub fn sante() -> Vec<Constat> {
     let mut constats = constats_volumes(&volumes);
     constats.extend(constats_disques(&disques));
     constats.extend(batterie.map(constat_batterie));
-    #[cfg(target_os = "linux")]
+    #[cfg(unix)]
     let temperatures = systeme::temperatures();
     #[cfg(windows)]
     let temperatures = systeme::temperatures(lectures.as_deref());
@@ -517,6 +602,18 @@ pub fn sante() -> Vec<Constat> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn lecture_de_diskutil() {
+        let plist = "<dict>\n\t<key>MediaName</key>\n\t<string>APPLE SSD AP0512Z</string>\n\t<key>SMARTStatus</key>\n\t<string>Verified</string>\n</dict>";
+        assert_eq!(systeme::valeur_plist(plist, "SMARTStatus").as_deref(), Some("Verified"));
+        assert_eq!(
+            systeme::valeur_plist(plist, "MediaName").as_deref(),
+            Some("APPLE SSD AP0512Z")
+        );
+        assert_eq!(systeme::valeur_plist(plist, "Absent"), None);
+    }
 
     #[test]
     fn place_sur_les_disques() {

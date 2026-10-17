@@ -24,6 +24,10 @@ enable-ansi-support = "0.3.1"
 [target."cfg(unix)".dependencies]
 libc = "0.2.190"
 
+# Surveillance des fichiers en direct (intégrité) : FSEvents sous macOS.
+[target."cfg(target_os = \"macos\")".dependencies]
+notify = { version = "8.2.0", default-features = false, features = ["macos_fsevent"] }
+
 [profile.release]
 strip = true
 lto = true

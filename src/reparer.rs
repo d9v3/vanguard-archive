@@ -38,6 +38,7 @@ fn rep(titre: &'static str, pourquoi: impl Into<String>, duree: &'static str, co
 }
 
 impl Reparation {
+    #[cfg_attr(target_os = "macos", allow(dead_code))]
     fn avec_restauration(mut self) -> Self {
         self.restauration = true;
         self
@@ -677,6 +678,242 @@ pub fn liste() -> Vec<Reparation> {
             "sudo timedatectl set-ntp true",
             "timedatectl status | grep -E 'synchronized|NTP'",
         ],
+    ));
+    l
+}
+
+// ───────────────────────────── macOS ─────────────────────────────
+
+/// Instantané local de Time Machine (APFS) : macOS le garde 24 heures, de quoi revenir en arrière si la
+/// réparation tourne mal (Récupération > Restaurer depuis Time Machine).
+#[cfg(target_os = "macos")]
+#[allow(clippy::unnecessary_wraps)] // même signature que sous Linux, où l'outil peut manquer
+pub(crate) fn point_restauration(_titre: &str) -> Option<(&'static str, String)> {
+    Some(("Time Machine", "tmutil localsnapshot".to_string()))
+}
+
+/// Services réseau actifs de macOS (« Wi-Fi », « Ethernet »…), pour networksetup.
+#[cfg(target_os = "macos")]
+fn services_reseau() -> Vec<String> {
+    crate::commande::lancer(
+        std::process::Command::new("networksetup").arg("-listallnetworkservices"),
+        10,
+    )
+    .map(|r| r.sortie)
+    .unwrap_or_default()
+    .lines()
+    .skip(1)
+    .filter(|l| !l.starts_with('*') && !l.trim().is_empty())
+    .map(str::to_string)
+    .collect()
+}
+
+/// Proxy imposé (`scutil --proxy` : « HTTPEnable : 1 ») et redirections du fichier hosts.
+#[cfg(target_os = "macos")]
+fn navigation_macos() -> Reparation {
+    let detournees = redirections(&std::fs::read_to_string("/etc/hosts").unwrap_or_default());
+    let proxy = crate::commande::lancer(std::process::Command::new("scutil").arg("--proxy"), 5)
+        .map(|r| r.sortie)
+        .unwrap_or_default();
+    let actifs: Vec<&str> = ["HTTPEnable", "HTTPSEnable", "SOCKSEnable", "ProxyAutoConfigEnable"]
+        .into_iter()
+        .filter(|cle| {
+            proxy
+                .lines()
+                .any(|l| l.trim().starts_with(cle) && l.trim().ends_with(": 1"))
+        })
+        .collect();
+    let mut constats = Vec::new();
+    let mut commandes = Vec::new();
+    if !detournees.is_empty() {
+        constats.push(trf!(
+            "fichier hosts : {}",
+            "hosts file: {}",
+            resume_redirections(&detournees)
+        ));
+        commandes.push("sudo cp -p /etc/hosts /etc/hosts.sentinel-$(date +%Y%m%d-%H%M%S)".to_string());
+        // sed de macOS : -i demande un suffixe (vide) ; puis vider le cache DNS pour que ça compte tout de suite.
+        commandes.push(format!(
+            "sudo sed -i '' -E 's/^([[:space:]]*({})[[:space:]])/# sentinel : \\1/' /etc/hosts",
+            motif_adresses(&detournees)
+        ));
+        commandes.push("sudo dscacheutil -flushcache; sudo killall -HUP mDNSResponder".to_string());
+    }
+    if !actifs.is_empty() {
+        constats.push(trf!("proxy actif ({})", "proxy on ({})", actifs.join(", ")));
+        for service in services_reseau() {
+            let s = entre_apostrophes(&service);
+            commandes.push(format!(
+                "sudo networksetup -setwebproxystate {s} off; sudo networksetup -setsecurewebproxystate {s} off; \
+                 sudo networksetup -setsocksfirewallproxystate {s} off; sudo networksetup -setautoproxystate {s} off"
+            ));
+        }
+    }
+    let mut r = rep(
+        tr!(
+            "Navigation détournée (proxy, fichier hosts)",
+            "Hijacked browsing (proxy, hosts file)"
+        ),
+        trf!(
+            "Met en commentaire les lignes du fichier hosts qui envoient un site vers une adresse d'Internet (une copie est gardée) et coupe les proxys réglés dans le réseau. Les listes de blocage (0.0.0.0) et les appareils du réseau local ne sont pas touchés. Trouvé : {}.",
+            "Comments out the hosts file lines that send a site to an Internet address (a copy is kept) and turns off the proxies set in the network settings. Block lists (0.0.0.0) and local network devices are left alone. Found: {}.",
+            constats.join(" ; ")
+        ),
+        tr!("quelques secondes", "a few seconds"),
+        &[],
+    );
+    r.restauration = !detournees.is_empty();
+    if commandes.is_empty() {
+        r.inutile = Some(
+            tr!(
+                "ni redirection dans le fichier hosts, ni proxy imposé",
+                "no redirection in the hosts file, no forced proxy"
+            )
+            .into(),
+        );
+    }
+    r.commandes = commandes;
+    r
+}
+
+#[cfg(target_os = "macos")]
+pub fn liste() -> Vec<Reparation> {
+    const PARE_FEU: &str = "/usr/libexec/ApplicationFirewall/socketfilterfw";
+    let mut l = Vec::new();
+
+    // Réseau : cache DNS, nouvelle adresse (DHCP) et Wi-Fi coupé puis rallumé, sur chaque interface active.
+    let mut r = rep(
+        tr!("Internet ne marche plus", "Internet no longer works"),
+        tr!(
+            "Vide le cache DNS, redemande une adresse à la box et relance le Wi-Fi (sites introuvables, Wi-Fi bloqué).",
+            "Clears the DNS cache, asks the router for a new address and restarts Wi-Fi (sites not found, Wi-Fi stuck)."
+        ),
+        tr!("quelques secondes", "a few seconds"),
+        &[
+            "sudo dscacheutil -flushcache; sudo killall -HUP mDNSResponder",
+            "for i in $(ifconfig -lu); do ipconfig getifaddr $i >/dev/null 2>&1 && sudo ipconfig set $i DHCP; done",
+            "W=$(networksetup -listallhardwareports | awk '/Wi-Fi/{getline; print $2}'); \
+             [ -n \"$W\" ] && networksetup -setairportpower $W off && sleep 3 && networksetup -setairportpower $W on; true",
+        ],
+    );
+    if session_ssh() {
+        r.bloquee = Some(tr!(
+            "tu es connecté par SSH : relancer le réseau couperait ta connexion",
+            "you are connected over SSH: restarting the network would cut your connection"
+        ));
+    }
+    l.push(r);
+    l.push(navigation_macos());
+
+    // Pare-feu
+    let actif = crate::commande::lancer(std::process::Command::new(PARE_FEU).arg("--getglobalstate"), 5)
+        .is_some_and(|r| r.sortie.contains("enabled"));
+    let mut feu = rep(
+        tr!("Pare-feu coupé", "Firewall off"),
+        tr!(
+            "Active le pare-feu de macOS et son mode furtif (le Mac ne répond plus aux sondes du réseau).",
+            "Turns on the macOS firewall and its stealth mode (the Mac no longer answers network probes)."
+        ),
+        tr!("quelques secondes", "a few seconds"),
+        &[
+            &format!("sudo {PARE_FEU} --setglobalstate on"),
+            &format!("sudo {PARE_FEU} --setstealthmode on"),
+        ],
+    );
+    if actif {
+        feu.inutile = Some(tr!("le pare-feu est déjà actif", "the firewall is already on").into());
+    }
+    l.push(feu);
+
+    // Antivirus : signatures ClamAV de Homebrew.
+    let freshclam = machine::macos::homebrew()
+        .map(|b| std::path::Path::new(b).with_file_name("freshclam"))
+        .filter(|f| f.is_file());
+    let mut av = rep(
+        tr!("Antivirus pas à jour", "Antivirus out of date"),
+        tr!(
+            "Télécharge les dernières signatures de virus de ClamAV.",
+            "Downloads the latest ClamAV virus signatures."
+        ),
+        tr!("une minute", "one minute"),
+        &[],
+    );
+    match freshclam {
+        Some(f) => av.commandes = vec![entre_apostrophes(&f.display().to_string())],
+        None => {
+            av.inutile = Some(
+                tr!(
+                    "ClamAV n'est pas installé : l'analyse antivirus propose de l'installer",
+                    "ClamAV is not installed: the antivirus scan offers to install it"
+                )
+                .into(),
+            );
+        }
+    }
+    l.push(av);
+
+    // Homebrew en erreur
+    if let Some(brew) = machine::macos::homebrew() {
+        l.push(rep(
+            tr!("Homebrew en erreur", "Homebrew failing"),
+            tr!(
+                "Remet Homebrew dans un état propre (dépôts réalignés), puis montre ce qu'il reste à corriger.",
+                "Puts Homebrew back in a clean state (repositories realigned), then shows what is left to fix."
+            ),
+            tr!("quelques minutes", "a few minutes"),
+            &[
+                &format!("{brew} update-reset"),
+                &format!("{brew} update"),
+                &format!("{brew} doctor; true"),
+            ],
+        ));
+    }
+
+    // Disque
+    l.push(rep(
+        tr!("Disque : santé et erreurs", "Disk: health and errors"),
+        tr!(
+            "Lit l'état SMART du disque interne et vérifie le volume du système (sans le démonter). Pour réparer, Utilitaire de disque > S.O.S. en mode de secours.",
+            "Reads the SMART state of the internal disk and checks the system volume (without unmounting it). To repair, Disk Utility > First Aid in Recovery."
+        ),
+        tr!("quelques minutes", "a few minutes"),
+        &[
+            "diskutil info disk0 | grep -i smart",
+            "diskutil verifyVolume /",
+        ],
+    ));
+    let mut menage = vec![
+        // Caches de plus d'une semaine : les apps en cours gardent les leurs.
+        "find ~/Library/Caches -mindepth 1 -maxdepth 1 -mtime +7 -exec rm -rf {} + 2>/dev/null; true".to_string(),
+        // Instantanés locaux de Time Machine : macOS les garde tant qu'il y a de la place, mais ils comptent.
+        "sudo tmutil thinlocalsnapshots / 999999999999 4".to_string(),
+    ];
+    if let Some(brew) = machine::macos::homebrew() {
+        menage.push(format!("{brew} cleanup --prune=all"));
+    }
+    menage.push("df -h /".to_string());
+    let mut plein = rep(
+        tr!("Disque plein", "Disk full"),
+        trf!(
+            "Vide les caches anciens, les instantanés locaux de Time Machine et les téléchargements de Homebrew ; {}. La corbeille n'est pas touchée : vide-la toi-même.",
+            "Removes old caches, local Time Machine snapshots and Homebrew downloads; {}. The Trash is left alone: empty it yourself.",
+            occupation_racine()
+        ),
+        tr!("une minute", "one minute"),
+        &[],
+    );
+    plein.commandes = menage;
+    l.push(plein);
+
+    // Heure
+    l.push(rep(
+        tr!("Heure fausse", "Wrong time"),
+        tr!(
+            "Réactive la mise à l'heure automatique et resynchronise tout de suite (une heure fausse casse le HTTPS et les mises à jour).",
+            "Turns automatic time back on and syncs right away (a wrong time breaks HTTPS and updates)."
+        ),
+        tr!("quelques secondes", "a few seconds"),
+        &["sudo systemsetup -setusingnetworktime on", "sudo sntp -sS time.apple.com"],
     ));
     l
 }

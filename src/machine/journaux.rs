@@ -10,7 +10,7 @@ use crate::{tr, trf};
 const CAT: &str = "Journaux";
 
 /// État du journal de journald : conservé sur disque ou non, scellé ou non.
-#[cfg_attr(windows, allow(dead_code))]
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 fn juger_journald(persistant: bool, scelle: bool) -> Constat {
     match (persistant, scelle) {
         (false, _) => alerte(
@@ -81,6 +81,13 @@ fn juger_effacements(effacements: &[(String, String)], aujourdhui: chrono::Naive
             "Event log cleared on {date} ({detail}). If it was not you, someone may have erased their tracks."
         ),
     )
+}
+
+/// macOS : le journal unifié est géré par le système, qui le garde et ne permet pas de l'effacer simplement ;
+/// rien à vérifier ici.
+#[cfg(target_os = "macos")]
+pub fn journaux() -> Vec<Constat> {
+    Vec::new()
 }
 
 #[cfg(windows)]

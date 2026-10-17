@@ -1,9 +1,11 @@
-//! Protection de la clé USB sous Linux. Sous Windows, la partition SENTINEL est en lecture seule grâce à son
-//! attribut GPT ; Linux ignore cet attribut. Sur tout ordinateur autre que celui du propriétaire, sentinel remonte
-//! donc lui-même la partition en lecture seule (udisks, sans mot de passe) avant de commencer.
+//! Protection de la clé USB sous Linux et macOS. Sous Windows, la partition SENTINEL est en lecture seule grâce à
+//! son attribut GPT ; Linux et macOS ignorent cet attribut. Sur tout ordinateur autre que celui du propriétaire,
+//! sentinel remonte donc lui-même la partition en lecture seule (udisks ou diskutil, sans mot de passe) avant de
+//! commencer.
 //!
-//! Le propriétaire est reconnu par l'empreinte SHA-1 de son /etc/machine-id, que outils/deployer.sh écrit dans le
-//! fichier témoin `sentinel.cle`. Témoin vide (clé jamais déployée) : pas de protection.
+//! Le propriétaire est reconnu par l'empreinte SHA-1 de son /etc/machine-id (IOPlatformUUID sous macOS), que
+//! outils/deployer.sh écrit dans le fichier témoin `sentinel.cle`. Témoin vide (clé jamais déployée) : pas de
+//! protection.
 //!
 //! Lancé depuis la clé, le programme s'y lit encore : la partition ne pourrait pas être démontée. Il se recopie
 //! donc d'abord dans un dossier temporaire et s'y relance. C'est une barrière contre les écritures par erreur ou
@@ -16,6 +18,11 @@ use crate::ui::*;
 
 /// Variable posée par la copie temporaire : chemin du programme d'origine, sur la clé.
 const ORIGINE: &str = "SENTINEL_ORIGINE";
+/// Dossier du programme sur la clé.
+#[cfg(target_os = "linux")]
+const DOSSIER_PROGRAMME: &str = "Linux";
+#[cfg(target_os = "macos")]
+const DOSSIER_PROGRAMME: &str = "macOS";
 
 /// Le programme tel que lancé par la personne (sur la clé), même quand c'est sa copie temporaire qui tourne.
 pub fn exe_d_origine() -> Option<PathBuf> {
@@ -27,12 +34,26 @@ pub fn exe_d_origine() -> Option<PathBuf> {
 
 /// Empreinte de cet ordinateur, comparée à celle écrite sur la clé.
 pub fn empreinte_machine() -> Option<String> {
+    #[cfg(target_os = "linux")]
     let id = std::fs::read_to_string("/etc/machine-id").ok()?;
+    // « "IOPlatformUUID" = "564D…" »
+    #[cfg(target_os = "macos")]
+    let id = crate::commande::lancer(
+        std::process::Command::new("ioreg").args(["-rd1", "-c", "IOPlatformExpertDevice"]),
+        10,
+    )?
+    .sortie
+    .lines()
+    .find(|l| l.contains("\"IOPlatformUUID\""))?
+    .rsplit('"')
+    .nth(1)?
+    .to_string();
     let id = id.trim();
     (!id.is_empty()).then(|| sha1_smol::Sha1::from(id).digest().to_string())
 }
 
 /// Périphérique et état (lecture seule ou non) du point de montage `dossier`, d'après /proc/self/mountinfo.
+#[cfg(target_os = "linux")]
 fn montage(dossier: &Path) -> Option<(String, bool)> {
     let infos = std::fs::read_to_string("/proc/self/mountinfo").ok()?;
     // Les espaces des chemins y sont écrits \040.
@@ -49,12 +70,55 @@ fn montage(dossier: &Path) -> Option<(String, bool)> {
     })
 }
 
-/// Lance udisksctl ; en cas d'échec, son message d'erreur.
-fn udisksctl(args: &[&str]) -> Result<(), String> {
-    match crate::commande::lancer(std::process::Command::new("udisksctl").args(args), 30) {
+/// Périphérique et état du point de montage `dossier`, d'après `mount` :
+/// « /dev/disk4s1 on /Volumes/SENTINEL (exfat, local, nodev, nosuid, read-only, noowners) ».
+#[cfg(target_os = "macos")]
+fn montage(dossier: &Path) -> Option<(String, bool)> {
+    let r = crate::commande::lancer(&mut std::process::Command::new("mount"), 10)?;
+    let marque = format!(" on {} (", dossier.display());
+    r.sortie.lines().find_map(|l| {
+        let (source, reste) = l.split_once(&marque)?;
+        Some((
+            source.to_string(),
+            reste.split(", ").any(|o| o.trim_end_matches(')') == "read-only"),
+        ))
+    })
+}
+
+/// Lance l'outil de montage (udisksctl, diskutil) ; en cas d'échec, son message d'erreur.
+fn outil(cmd: &str, args: &[&str]) -> Result<(), String> {
+    match crate::commande::lancer(std::process::Command::new(cmd).args(args), 30) {
         Some(r) if r.code == Some(0) => Ok(()),
-        Some(r) => Err(r.erreurs.trim().to_string()),
-        None => Err("udisksctl absent ou sans réponse".into()),
+        Some(r) => Err(format!("{} {}", r.erreurs.trim(), r.sortie.trim()).trim().to_string()),
+        None => Err(format!("{cmd} absent ou sans réponse")),
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn demonter(peripherique: &str) -> Result<(), String> {
+    outil("udisksctl", &["unmount", "-b", peripherique])
+}
+
+#[cfg(target_os = "linux")]
+fn monter(peripherique: &str, lecture_seule: bool) -> Result<(), String> {
+    if lecture_seule {
+        outil("udisksctl", &["mount", "-b", peripherique, "-o", "ro"])
+    } else {
+        outil("udisksctl", &["mount", "-b", peripherique])
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn demonter(peripherique: &str) -> Result<(), String> {
+    outil("diskutil", &["unmount", peripherique])
+}
+
+#[cfg(target_os = "macos")]
+fn monter(peripherique: &str, lecture_seule: bool) -> Result<(), String> {
+    if lecture_seule {
+        outil("diskutil", &["mount", "readOnly", peripherique])
+    } else {
+        outil("diskutil", &["mount", peripherique])
     }
 }
 
@@ -96,26 +160,26 @@ pub fn proteger_cle() {
         let _ = std::env::set_current_dir(maison);
     }
     // Un programme du bureau (indexation, miniatures) peut lire la clé un court instant : on réessaie un peu.
-    let mut demontage = udisksctl(&["unmount", "-b", &peripherique]);
+    let mut demontage = demonter(&peripherique);
     for _ in 0..4 {
         if demontage.is_ok() {
             break;
         }
         std::thread::sleep(std::time::Duration::from_secs(1));
-        demontage = udisksctl(&["unmount", "-b", &peripherique]);
+        demontage = demonter(&peripherique);
     }
     if let Err(e) = demontage {
         trp!(
-            "  ⚠ Clé SENTINEL non protégée : elle est utilisée (terminal ou fenêtre ouverts dans la clé ?).\n    {GRIS}Ferme-les, puis relance sentinel depuis un autre dossier : {}/Linux/sentinel{RESET}",
-            "  ⚠ SENTINEL key not protected: it is in use (terminal or window open inside the key?).\n    {GRIS}Close them, then run sentinel from another folder: {}/Linux/sentinel{RESET}",
+            "  ⚠ Clé SENTINEL non protégée : elle est utilisée (terminal ou fenêtre ouverts dans la clé ?).\n    {GRIS}Ferme-les, puis relance sentinel depuis un autre dossier : {}/{DOSSIER_PROGRAMME}/sentinel{RESET}",
+            "  ⚠ SENTINEL key not protected: it is in use (terminal or window open inside the key?).\n    {GRIS}Close them, then run sentinel from another folder: {}/{DOSSIER_PROGRAMME}/sentinel{RESET}",
             cle.display()
         );
         crate::journal::erreur("protection de la clé", &format!("démontage impossible : {e}"));
         return;
     }
-    if let Err(e) = udisksctl(&["mount", "-b", &peripherique, "-o", "ro"]) {
+    if let Err(e) = monter(&peripherique, true) {
         // Remontée impossible : on la remonte comme avant plutôt que de la laisser invisible.
-        let _ = udisksctl(&["mount", "-b", &peripherique]);
+        let _ = monter(&peripherique, false);
         crate::journal::erreur(
             "protection de la clé",
             &format!("remontage en lecture seule refusé : {e}"),
@@ -157,7 +221,14 @@ mod tests {
 
     #[test]
     fn montage_de_la_racine() {
-        let (_, lecture_seule) = montage(Path::new("/")).expect("/ est monté");
+        // macOS : la racine est le volume système scellé, en lecture seule ; les données sont à part.
+        #[cfg(target_os = "macos")]
+        assert!(montage(Path::new("/")).expect("/ est monté").1);
+        #[cfg(target_os = "macos")]
+        let donnees = Path::new("/System/Volumes/Data");
+        #[cfg(target_os = "linux")]
+        let donnees = Path::new("/");
+        let (_, lecture_seule) = montage(donnees).expect("volume de données monté");
         assert!(!lecture_seule);
         assert!(montage(Path::new("/pas/un/montage")).is_none());
     }

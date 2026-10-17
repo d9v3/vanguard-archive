@@ -1,6 +1,5 @@
 //! Audit de sécurité de cette machine : types communs, affichage et exécution des correctifs.
-//! Les vérifications elles-mêmes dépendent du système (linux.rs, windows.rs).
-//! Une version macOS a existé jusqu'à la v0.9.7 : `git checkout avec-macos` pour la retrouver.
+//! Les vérifications elles-mêmes dépendent du système (linux/, windows/, macos/).
 
 use std::process::Command;
 
@@ -23,6 +22,10 @@ use linux as os;
 pub mod windows;
 #[cfg(windows)]
 use windows as os;
+#[cfg(target_os = "macos")]
+pub mod macos;
+#[cfg(target_os = "macos")]
+use macos as os;
 
 #[derive(Serialize, Clone)]
 pub struct Correctif {
@@ -114,6 +117,7 @@ impl Constat {
     }
 
     /// La correction bloque ce port (« 8080/tcp ») dans le pare-feu.
+    #[cfg_attr(target_os = "macos", allow(dead_code))]
     fn bloquant(mut self, port: String) -> Self {
         if let Some(k) = &mut self.correctif {
             k.bloque = Some(port);
@@ -384,6 +388,25 @@ pub fn programmes_en_ecoute() -> std::collections::HashMap<u16, String> {
             map.insert(port, nom.to_string());
         }
     }
+    // « COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME » … « ControlCe 512 alice 9u IPv4 … TCP *:7000 (LISTEN) ».
+    // Sans droits admin, lsof ne montre que les programmes de l'utilisateur.
+    #[cfg(target_os = "macos")]
+    for l in sortie("lsof", &["-nP", "-iTCP", "-sTCP:LISTEN"])
+        .unwrap_or_default()
+        .lines()
+        .skip(1)
+    {
+        let c: Vec<&str> = l.split_whitespace().collect();
+        let port = c
+            .iter()
+            .rev()
+            .find_map(|m| m.rsplit_once(':'))
+            .and_then(|(_, p)| p.parse::<u16>().ok());
+        if let (Some(port), Some(nom)) = (port, c.first()) {
+            // lsof échappe les espaces des noms : « Google\x20Chrome ».
+            map.insert(port, nom.replace("\\x20", " "));
+        }
+    }
     #[cfg(windows)]
     for l in windows::ps("Get-NetTCPConnection -State Listen | ForEach-Object { \"$($_.LocalPort)|$((Get-Process -Id $_.OwningProcess -ErrorAction SilentlyContinue).ProcessName)\" }")
         .unwrap_or_default()
@@ -405,6 +428,8 @@ pub fn ouvrir(cible: &str) {
     let _ = Command::new("xdg-open").arg(cible).spawn();
     #[cfg(windows)]
     let _ = Command::new("cmd").args(["/C", "start", "", cible]).spawn();
+    #[cfg(target_os = "macos")]
+    let _ = Command::new("open").arg(cible).spawn();
 }
 
 pub fn auditer(bavard: bool) -> Audit {

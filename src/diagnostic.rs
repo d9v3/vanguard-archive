@@ -299,6 +299,189 @@ mod systeme {
     }
 }
 
+#[cfg(target_os = "macos")]
+mod systeme {
+    use super::{Niveau, Section, alerte, duree, go, ligne, plus_frequentes};
+    use crate::{tr, trf};
+
+    fn sortie(cmd: &str, args: &[&str]) -> Option<String> {
+        let r = crate::commande::lancer(std::process::Command::new(cmd).args(args), 30)?;
+        (r.code == Some(0)).then(|| r.sortie.trim().to_string())
+    }
+
+    /// Valeur d'une ligne « Clé: valeur » (system_profiler, diskutil info), espaces de tête ignorés.
+    pub(super) fn valeur(texte: &str, cle: &str) -> Option<String> {
+        texte
+            .lines()
+            .find_map(|l| l.trim().strip_prefix(cle)?.trim().strip_prefix(':'))
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty())
+    }
+
+    /// Secondes depuis le démarrage, d'après `sysctl -n kern.boottime` : « { sec = 1715000000, usec = 0 } … ».
+    pub(super) fn depuis_demarrage(boottime: &str, maintenant: u64) -> Option<u64> {
+        let sec: u64 = boottime
+            .split_once("sec = ")?
+            .1
+            .split(',')
+            .next()?
+            .trim()
+            .parse()
+            .ok()?;
+        maintenant.checked_sub(sec)
+    }
+
+    /// Rapports de plantage récents (moins de `jours`) : nom du programme avant la date (« Safari-2024-05-01-… »).
+    fn rapports(dossiers: &[std::path::PathBuf], extensions: &[&str], jours: u64) -> Vec<String> {
+        let limite = std::time::Duration::from_secs(jours * 86_400);
+        dossiers
+            .iter()
+            .filter_map(|d| std::fs::read_dir(d).ok())
+            .flatten()
+            .flatten()
+            .filter(|f| f.path().extension().is_some_and(|e| extensions.iter().any(|x| e == *x)))
+            .filter(|f| {
+                f.metadata()
+                    .and_then(|m| m.modified())
+                    .is_ok_and(|m| m.elapsed().is_ok_and(|e| e < limite))
+            })
+            .map(|f| {
+                let nom = f.file_name().to_string_lossy().into_owned();
+                // Le nom s'arrête au premier « -2 » d'une date (« Google Chrome Helper-2024-… »).
+                nom.split_once("-20").map_or(nom.clone(), |(n, _)| n.to_string())
+            })
+            .collect()
+    }
+
+    pub fn sections() -> Vec<Section> {
+        let mut systeme = Vec::new();
+        let version = [
+            sortie("sw_vers", &["-productName"]),
+            sortie("sw_vers", &["-productVersion"]),
+        ]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join(" ");
+        let build = sortie("sw_vers", &["-buildVersion"]).unwrap_or_default();
+        systeme.push(ligne(
+            tr!("Système", "System"),
+            format!("{version} ({build}) · {}", std::env::consts::ARCH),
+        ));
+        systeme.push(ligne(
+            tr!("Nom", "Name"),
+            sortie("scutil", &["--get", "ComputerName"]).unwrap_or_default(),
+        ));
+        let materiel_txt = sortie("system_profiler", &["SPHardwareDataType"]).unwrap_or_default();
+        let modele = [
+            valeur(&materiel_txt, "Model Name"),
+            valeur(&materiel_txt, "Model Identifier"),
+        ]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join(" · ");
+        if !modele.is_empty() {
+            systeme.push(ligne(tr!("Modèle", "Model"), modele));
+        }
+        let maintenant = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_secs());
+        if let Some(s) = sortie("sysctl", &["-n", "kern.boottime"])
+            .as_deref()
+            .and_then(|b| depuis_demarrage(b, maintenant))
+        {
+            systeme.push(ligne(tr!("Allumé depuis", "Up for"), duree(s)));
+        }
+
+        let mut materiel = Vec::new();
+        if let Some(cpu) = sortie("sysctl", &["-n", "machdep.cpu.brand_string"]) {
+            let fils = std::thread::available_parallelism().map_or(0, std::num::NonZero::get);
+            materiel.push(ligne(
+                tr!("Processeur", "Processor"),
+                trf!("{cpu} ({fils} cœurs)", "{cpu} ({fils} cores)"),
+            ));
+        }
+        if let Some(total) = sortie("sysctl", &["-n", "hw.memsize"]).and_then(|t| t.parse::<u64>().ok()) {
+            materiel.push(ligne(tr!("Mémoire", "Memory"), go(total)));
+        }
+        let ecrans = sortie("system_profiler", &["SPDisplaysDataType"]).unwrap_or_default();
+        if let Some(puce) = valeur(&ecrans, "Chipset Model") {
+            materiel.push(ligne(tr!("Carte graphique", "Graphics card"), puce));
+        }
+        for disque in sortie("diskutil", &["list", "internal", "physical"])
+            .unwrap_or_default()
+            .lines()
+            .filter_map(|l| l.strip_prefix("/dev/")?.split_whitespace().next().map(str::to_string))
+        {
+            let info = sortie("diskutil", &["info", &disque]).unwrap_or_default();
+            let taille = valeur(&info, "Disk Size")
+                .map(|t| t.split(" (").next().unwrap_or(&t).to_string())
+                .unwrap_or_default();
+            let sorte = if valeur(&info, "Solid State").as_deref() == Some("Yes") {
+                "SSD"
+            } else {
+                tr!("disque dur", "hard drive")
+            };
+            materiel.push(ligne(
+                tr!("Disque", "Disk"),
+                format!(
+                    "{disque} · {taille} · {sorte} · {}",
+                    valeur(&info, "Device / Media Name").unwrap_or_default()
+                ),
+            ));
+        }
+
+        let maison = std::path::PathBuf::from(std::env::var_os("HOME").unwrap_or_default());
+        let dossiers = [
+            maison.join("Library/Logs/DiagnosticReports"),
+            std::path::PathBuf::from("/Library/Logs/DiagnosticReports"),
+        ];
+        let mut problemes = Vec::new();
+        let paniques = rapports(&dossiers, &["panic"], 30);
+        problemes.push(if paniques.is_empty() {
+            ligne(
+                tr!("Redémarrages brutaux", "Kernel panics"),
+                tr!("aucun en 30 jours", "none in 30 days"),
+            )
+        } else {
+            alerte(
+                tr!("Redémarrages brutaux", "Kernel panics"),
+                trf!(
+                    "{} en 30 jours (panique du noyau : matériel, pilote ou extension)",
+                    "{} in 30 days (kernel panic: hardware, driver or extension)",
+                    paniques.len()
+                ),
+                Niveau::Moyen,
+            )
+        });
+        let plantages = rapports(&dossiers, &["ips", "crash"], 7);
+        problemes.push(if plantages.is_empty() {
+            ligne(
+                tr!("Programmes plantés", "Crashed programs"),
+                tr!("aucun en 7 jours", "none in 7 days"),
+            )
+        } else {
+            alerte(
+                tr!("Programmes plantés", "Crashed programs"),
+                trf!(
+                    "{} en 7 jours : {}",
+                    "{} in 7 days: {}",
+                    plantages.len(),
+                    plus_frequentes(&plantages, 5)
+                ),
+                Niveau::Moyen,
+            )
+        });
+
+        vec![
+            (tr!("SYSTÈME", "SYSTEM").into(), systeme),
+            (tr!("MATÉRIEL", "HARDWARE").into(), materiel),
+            (tr!("PROBLÈMES RÉCENTS", "RECENT PROBLEMS").into(), problemes),
+        ]
+    }
+}
+
 #[cfg(windows)]
 mod systeme {
     use serde::Deserialize;
@@ -547,6 +730,22 @@ mod tests {
             vec![ligne("Nom", "omarchy"), alerte("Erreurs", "3", Niveau::Moyen)],
         )]);
         assert!(t.contains("  Nom") && t.contains("! Erreurs") && !t.contains('\x1b'));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn lectures_macos() {
+        let profil =
+            "Hardware:\n\n    Hardware Overview:\n\n      Model Name: MacBook Air\n      Model Identifier: Mac14,2\n";
+        assert_eq!(systeme::valeur(profil, "Model Name").as_deref(), Some("MacBook Air"));
+        assert_eq!(systeme::valeur(profil, "Model Identifier").as_deref(), Some("Mac14,2"));
+        assert_eq!(
+            systeme::depuis_demarrage(
+                "{ sec = 1715000000, usec = 123 } Mon May  6 12:53:20 2024",
+                1_715_003_600
+            ),
+            Some(3600)
+        );
     }
 
     #[cfg(target_os = "linux")]

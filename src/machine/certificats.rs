@@ -156,7 +156,7 @@ fn base64(texte: &str) -> Option<Vec<u8>> {
 }
 
 /// Noms des certificats d'un fichier : un ou plusieurs blocs PEM, ou un certificat DER brut.
-#[cfg_attr(windows, allow(dead_code))]
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 fn noms_du_fichier(octets: &[u8]) -> Vec<String> {
     let texte = String::from_utf8_lossy(octets);
     if !texte.contains("-----BEGIN CERTIFICATE-----") {
@@ -289,6 +289,66 @@ pub fn certificats() -> Vec<Constat> {
     constats
 }
 
+/// Noms des certificats auxquels une confiance particulière a été donnée (`security dump-trust-settings`) :
+/// « Cert 0: Charles Proxy CA (12 Jan 2023, MacBook) ». Les racines d'Apple n'y figurent pas : elles ont leur
+/// propre trousseau, que l'utilisateur ne modifie pas.
+#[cfg(any(target_os = "macos", test))]
+fn lire_reglages_confiance(sortie: &str) -> Vec<String> {
+    sortie
+        .lines()
+        .filter_map(|l| l.trim().strip_prefix("Cert ")?.split_once(": ").map(|(_, nom)| nom))
+        // La date et la machine d'ajout, entre parenthèses à la fin, ne font pas partie du nom.
+        .map(|nom| {
+            nom.rsplit_once(" (")
+                .filter(|_| nom.ends_with(')'))
+                .map_or(nom, |(n, _)| n)
+        })
+        .map(|nom| nom.trim().to_string())
+        .collect()
+}
+
+/// macOS : certificats rendus « de confiance » par l'administrateur (trousseau Système) ou par l'utilisateur
+/// (trousseau de session). C'est ce que font les outils d'interception et les logiciels publicitaires.
+#[cfg(target_os = "macos")]
+pub fn certificats() -> Vec<Constat> {
+    let mut constats = Vec::new();
+    for (admin, ou) in [
+        (true, tr!("trousseau Système", "System keychain")),
+        (false, tr!("trousseau de session", "login keychain")),
+    ] {
+        let args: &[&str] = if admin {
+            &["dump-trust-settings", "-d"]
+        } else {
+            &["dump-trust-settings"]
+        };
+        // Sans réglage, la commande répond « No Trust Settings were found » avec un code d'erreur.
+        let sortie = crate::commande::lancer(std::process::Command::new("security").args(args), 20)
+            .map(|r| r.sortie)
+            .unwrap_or_default();
+        for nom in lire_reglages_confiance(&sortie) {
+            let echappe = nom.replace('\'', r"'\''");
+            let retirer = if admin {
+                vec![format!(
+                    "sudo security delete-certificate -c '{echappe}' /Library/Keychains/System.keychain"
+                )]
+            } else {
+                vec![format!("security delete-certificate -c '{echappe}'")]
+            };
+            constats.push(juger(&nom, ou, false, &retirer));
+        }
+    }
+    if constats.is_empty() {
+        constats.push(ok(
+            CAT,
+            tr!(
+                "Aucun certificat racine ajouté aux certificats du système.",
+                "No root certificate added to the system certificates."
+            ),
+        ));
+    }
+    constats
+}
+
 /// Racines des magasins de la machine et de l'utilisateur : « CERT|magasin|clé privée|empreinte|sujet ».
 /// Le magasin de l'utilisateur montre aussi ceux de la machine : un certificat présent dans les deux est de la
 /// machine. Windows met à jour lui-même ses racines : seules les marques d'un ajout sont examinées.
@@ -344,6 +404,16 @@ pub fn certificats() -> Vec<Constat> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reglages_de_confiance_macos() {
+        let sortie = "Number of trusted certs = 2\nCert 0: Charles Proxy CA (12 Jan 2023, MacBook)\n   Number of trust settings : 0\nCert 1: mitmproxy\n";
+        assert_eq!(lire_reglages_confiance(sortie), ["Charles Proxy CA", "mitmproxy"]);
+        assert_eq!(
+            lire_reglages_confiance("SecTrustSettingsCopyCertificates: No Trust Settings were found."),
+            Vec::<String>::new()
+        );
+    }
 
     /// Certificat autosigné « CN=Sentinel Test CA, O=Sentinel » (openssl req -x509, clé EC P-256).
     const PEM: &str = "-----BEGIN CERTIFICATE-----

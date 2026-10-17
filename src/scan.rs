@@ -149,6 +149,14 @@ pub fn passerelle() -> Option<Ipv4Addr> {
             .min()
             .map(|(_, ip)| ip)
     }
+    // macOS : « gateway: 10.0.0.1 » dans `route -n get default`.
+    #[cfg(target_os = "macos")]
+    {
+        commande("route", &["-n", "get", "default"])
+            .lines()
+            .find_map(|l| l.trim().strip_prefix("gateway:"))
+            .and_then(|g| g.trim().parse().ok())
+    }
 }
 
 /// Route par défaut dans /proc/net/route (Iface Destination Gateway Flags RefCnt Use Metric…).
@@ -201,6 +209,16 @@ pub fn table_arp() -> HashMap<Ipv4Addr, String> {
             (c.get(2) == Some(&"0x2"))
                 .then(|| Some((c.first()?.to_string(), c.get(3)?.to_string())))
                 .flatten()
+        })
+        .collect();
+    // macOS : « ? (10.0.0.1) at f8:79:a:d:3:a2 on en0 ifscope [ethernet] » ; « (incomplete) » sans réponse.
+    #[cfg(target_os = "macos")]
+    let entrees: Vec<(String, String)> = commande("arp", &["-an"])
+        .lines()
+        .filter_map(|l| {
+            let ip = l.split_once('(')?.1.split_once(')')?.0;
+            let mac = l.split_once(" at ")?.1.split_whitespace().next()?;
+            Some((ip.to_string(), mac.to_string()))
         })
         .collect();
     // Windows : « 10.0.0.1   f8-79-0a-0d-03-a2   dynamique »
@@ -560,6 +578,17 @@ pub fn nom_wifi() -> Option<String> {
         .map(str::trim)
         .find(|l| l.starts_with("SSID") && !l.starts_with("BSSID"))
         .and_then(|l| Some(l.split_once(':')?.1.trim().to_string()));
+    // macOS : « SSID : Salon » dans le résumé de l'interface Wi-Fi (en0 en général). Depuis macOS 14, le nom peut
+    // être masqué (« <redacted> ») faute d'autorisation de localisation : le réseau est alors reconnu par sa box.
+    #[cfg(target_os = "macos")]
+    let nom = ["en0", "en1"].iter().find_map(|i| {
+        commande_sortie("ipconfig", &["getsummary", i])
+            .lines()
+            .map(str::trim)
+            .find_map(|l| l.strip_prefix("SSID : "))
+            .map(str::to_string)
+            .filter(|n| !n.starts_with('<'))
+    });
     nom.filter(|n| !n.is_empty())
 }
 

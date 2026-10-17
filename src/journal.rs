@@ -40,6 +40,13 @@ fn dossier() -> Option<&'static PathBuf> {
             } else {
                 ('D'..='Z').map(|l| PathBuf::from(format!("{l}:\\"))).collect()
             };
+            #[cfg(target_os = "macos")]
+            let montages: Vec<PathBuf> = std::fs::read_dir("/Volumes")
+                .into_iter()
+                .flatten()
+                .flatten()
+                .map(|d| d.path())
+                .collect();
             montages.into_iter().find(|d| d.join(TEMOIN).is_file())
         })
         .as_ref()
@@ -52,7 +59,7 @@ fn sous_wine() -> bool {
     systeme.join("system32").join("wineboot.exe").is_file()
 }
 
-/// Système et version, pour situer l'erreur (« Windows 10.0.26200.9711 », « Arch Linux 6.17.2 »).
+/// Système et version, pour situer l'erreur (« Windows 10.0.26200.9711 », « Arch Linux 6.17.2 », « macOS 15.1 »).
 fn systeme() -> &'static str {
     static SYSTEME: OnceLock<String> = OnceLock::new();
     SYSTEME.get_or_init(|| {
@@ -68,6 +75,14 @@ fn systeme() -> &'static str {
                 .unwrap_or_else(|| "Linux".into());
             let noyau = std::fs::read_to_string("/proc/sys/kernel/osrelease").unwrap_or_default();
             format!("{nom} {}", noyau.trim())
+        }
+        // « macOS 15.1 (arm64) »
+        #[cfg(target_os = "macos")]
+        {
+            let version = crate::commande::lancer(std::process::Command::new("sw_vers").arg("-productVersion"), 5)
+                .map(|r| r.sortie.trim().to_string())
+                .unwrap_or_default();
+            format!("macOS {version} ({})", std::env::consts::ARCH)
         }
         #[cfg(windows)]
         {

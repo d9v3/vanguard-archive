@@ -1,6 +1,6 @@
 //! Logiciels essentiels : préparer un ordinateur neuf (ou celui d'un ami) en quelques choix. Chaque logiciel est
 //! montré installé ou à faire, puis installé seulement après accord. Linux : paquets de la distribution, ou Flatpak
-//! quand elle n'en a pas ; Windows : winget.
+//! quand elle n'en a pas ; Windows : winget ; macOS : Homebrew.
 
 use crate::gaming::{Element, element, proposer};
 use crate::ui::*;
@@ -10,14 +10,17 @@ struct Logiciel {
     nom: &'static str,
     role: (&'static str, &'static str),
     /// Paquets pour pacman, apt, dnf, zypper (vide : pas dans la distribution, voir `flatpak`).
-    #[cfg_attr(windows, allow(dead_code))]
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     paquets: [&'static [&'static str]; 4],
     /// Identifiant Flathub, quand la distribution n'a pas le logiciel.
-    #[cfg_attr(windows, allow(dead_code))]
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     flatpak: Option<&'static str>,
     /// Identifiant winget, et un bout du nom affiché dans « Applications installées » pour le reconnaître.
     #[cfg_attr(not(windows), allow(dead_code))]
     winget: Option<(&'static str, &'static str)>,
+    /// macOS : cask Homebrew et nom de l'application dans /Applications.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    mac: Option<(&'static str, &'static str)>,
 }
 
 const LOGICIELS: &[Logiciel] = &[
@@ -30,6 +33,7 @@ const LOGICIELS: &[Logiciel] = &[
         paquets: [&["firefox"], &["firefox-esr"], &["firefox"], &["MozillaFirefox"]],
         flatpak: Some("org.mozilla.firefox"),
         winget: Some(("Mozilla.Firefox", "Mozilla Firefox")),
+        mac: Some(("firefox", "Firefox")),
     },
     Logiciel {
         nom: "Google Chrome",
@@ -37,6 +41,7 @@ const LOGICIELS: &[Logiciel] = &[
         paquets: [&[], &[], &[], &[]],
         flatpak: Some("com.google.Chrome"),
         winget: Some(("Google.Chrome", "Google Chrome")),
+        mac: Some(("google-chrome", "Google Chrome")),
     },
     Logiciel {
         nom: "VLC",
@@ -47,6 +52,7 @@ const LOGICIELS: &[Logiciel] = &[
         paquets: [&["vlc"], &["vlc"], &["vlc"], &["vlc"]],
         flatpak: Some("org.videolan.VLC"),
         winget: Some(("VideoLAN.VLC", "VLC media player")),
+        mac: Some(("vlc", "VLC")),
     },
     Logiciel {
         nom: "7-Zip",
@@ -57,6 +63,7 @@ const LOGICIELS: &[Logiciel] = &[
         paquets: [&["7zip"], &["7zip"], &["p7zip", "p7zip-plugins"], &["7zip"]],
         flatpak: None,
         winget: Some(("7zip.7zip", "7-Zip")),
+        mac: Some(("keka", "Keka")),
     },
     Logiciel {
         nom: "LibreOffice",
@@ -72,6 +79,7 @@ const LOGICIELS: &[Logiciel] = &[
         ],
         flatpak: Some("org.libreoffice.LibreOffice"),
         winget: Some(("TheDocumentFoundation.LibreOffice", "LibreOffice")),
+        mac: Some(("libreoffice", "LibreOffice")),
     },
     Logiciel {
         nom: "Bitwarden",
@@ -82,6 +90,7 @@ const LOGICIELS: &[Logiciel] = &[
         paquets: [&["bitwarden"], &[], &[], &[]],
         flatpak: Some("com.bitwarden.desktop"),
         winget: Some(("Bitwarden.Bitwarden", "Bitwarden")),
+        mac: Some(("bitwarden", "Bitwarden")),
     },
     Logiciel {
         nom: "Thunderbird",
@@ -94,6 +103,7 @@ const LOGICIELS: &[Logiciel] = &[
         ],
         flatpak: Some("org.mozilla.Thunderbird"),
         winget: Some(("Mozilla.Thunderbird", "Mozilla Thunderbird")),
+        mac: Some(("thunderbird", "Thunderbird")),
     },
     Logiciel {
         nom: "Discord",
@@ -104,6 +114,7 @@ const LOGICIELS: &[Logiciel] = &[
         paquets: [&["discord"], &[], &[], &[]],
         flatpak: Some("com.discordapp.Discord"),
         winget: Some(("Discord.Discord", "Discord")),
+        mac: Some(("discord", "Discord")),
     },
     Logiciel {
         nom: "OBS Studio",
@@ -114,6 +125,7 @@ const LOGICIELS: &[Logiciel] = &[
         paquets: [&["obs-studio"], &["obs-studio"], &["obs-studio"], &["obs-studio"]],
         flatpak: Some("com.obsproject.Studio"),
         winget: Some(("OBSProject.OBSStudio", "OBS Studio")),
+        mac: Some(("obs", "OBS")),
     },
     Logiciel {
         nom: "GIMP",
@@ -121,6 +133,7 @@ const LOGICIELS: &[Logiciel] = &[
         paquets: [&["gimp"], &["gimp"], &["gimp"], &["gimp"]],
         flatpak: Some("org.gimp.GIMP"),
         winget: None,
+        mac: Some(("gimp", "GIMP")),
     },
     Logiciel {
         nom: "Notepad++",
@@ -128,6 +141,7 @@ const LOGICIELS: &[Logiciel] = &[
         paquets: [&[], &[], &[], &[]],
         flatpak: None,
         winget: Some(("Notepad++.Notepad++", "Notepad++")),
+        mac: None,
     },
     Logiciel {
         nom: "PowerToys",
@@ -138,6 +152,7 @@ const LOGICIELS: &[Logiciel] = &[
         paquets: [&[], &[], &[], &[]],
         flatpak: None,
         winget: Some(("Microsoft.PowerToys", "PowerToys")),
+        mac: None,
     },
 ];
 
@@ -210,6 +225,28 @@ fn liste() -> Option<Vec<Element>> {
     )
 }
 
+/// macOS : applications de Homebrew ; une app déjà dans /Applications compte comme installée. Le nom de l'app
+/// est précisé quand il diffère (7-Zip n'existe pas sur Mac : Keka fait la même chose).
+#[cfg(target_os = "macos")]
+#[allow(clippy::unnecessary_wraps)] // même signature que sous Linux et Windows, où la lecture peut échouer
+fn liste() -> Option<Vec<Element>> {
+    use crate::machine::macos::{app_installee, installer_cask};
+    Some(
+        LOGICIELS
+            .iter()
+            .filter_map(|lo| {
+                let (cask, app) = lo.mac?;
+                let titre = if app == lo.nom || lo.nom.contains(app) {
+                    lo.nom.to_string()
+                } else {
+                    format!("{} ({app})", lo.nom)
+                };
+                Some(element(titre, role(lo), Some(app_installee(app)), installer_cask(cask)))
+            })
+            .collect(),
+    )
+}
+
 /// « sentinel logiciels » : choisir et installer les logiciels essentiels.
 pub fn menu() {
     trp!(
@@ -233,7 +270,11 @@ mod tests {
     fn chaque_logiciel_s_installe_quelque_part() {
         for l in LOGICIELS {
             let linux = l.paquets.iter().any(|p| !p.is_empty()) || l.flatpak.is_some();
-            assert!(linux || l.winget.is_some(), "{} ne s'installe nulle part", l.nom);
+            assert!(
+                linux || l.winget.is_some() || l.mac.is_some(),
+                "{} ne s'installe nulle part",
+                l.nom
+            );
             assert!(!l.role.0.is_empty() && !l.role.1.is_empty());
         }
     }

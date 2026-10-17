@@ -62,7 +62,7 @@ fn lire_upnpc(sortie: &str) -> Etat {
     Etat::Actif(liste)
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(unix)]
 pub fn etat() -> Etat {
     let Some(r) = crate::commande::lancer(std::process::Command::new("upnpc").arg("-l"), 20) else {
         return Etat::OutilAbsent;
@@ -107,6 +107,11 @@ pub fn etat() -> Etat {
 #[cfg(target_os = "linux")]
 fn outil_upnp() -> String {
     crate::machine::linux::commande_installation("miniupnpc")
+}
+
+#[cfg(target_os = "macos")]
+fn outil_upnp() -> String {
+    crate::machine::macos::commande_installation("miniupnpc")
 }
 
 /// Sous Windows, l'interface UPnP fait partie du système : seul PowerShell bloqué l'empêche de répondre.

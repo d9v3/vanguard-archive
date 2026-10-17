@@ -98,8 +98,41 @@ fn volumes_amovibles() -> Vec<(PathBuf, String)> {
         .unwrap_or_default()
 }
 
+/// Clés et disques externes montés sous macOS : tout ce qui est dans /Volumes, sauf le disque du système (un
+/// lien vers « / »). Description : nom et taille (df).
+#[cfg(target_os = "macos")]
+fn volumes_amovibles() -> Vec<(PathBuf, String)> {
+    let racine = std::fs::canonicalize("/").unwrap_or_default();
+    std::fs::read_dir("/Volumes")
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|d| d.path())
+        .filter(|p| std::fs::canonicalize(p).is_ok_and(|r| r != racine))
+        .map(|p| {
+            let taille = Command::new("df")
+                .args(["-h", "-P"])
+                .arg(&p)
+                .output()
+                .ok()
+                .and_then(|o| {
+                    String::from_utf8_lossy(&o.stdout)
+                        .lines()
+                        .nth(1)
+                        .and_then(|l| l.split_whitespace().nth(1).map(str::to_string))
+                })
+                .unwrap_or_default();
+            let nom = p
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            (p, format!("{nom} · {taille}"))
+        })
+        .collect()
+}
+
 /// Lignes de `lsblk -P` : RM="1" HOTPLUG="1" LABEL="CLE" SIZE="28,9G" MOUNTPOINT="/run/media/alice/CLE".
-#[cfg_attr(windows, allow(dead_code))]
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 fn lire_lsblk(texte: &str) -> Vec<(PathBuf, String)> {
     texte
         .lines()
@@ -270,20 +303,43 @@ fn shell(c: &str) -> bool {
 
 #[cfg(unix)]
 fn base_presente() -> bool {
-    std::fs::read_dir("/var/lib/clamav").is_ok_and(|d| {
-        d.flatten().any(|f| {
-            std::path::Path::new(&f.file_name())
-                .extension()
-                .is_some_and(|e| e.eq_ignore_ascii_case("cvd") || e.eq_ignore_ascii_case("cld"))
+    // Homebrew : /opt/homebrew (Apple Silicon) ou /usr/local (Intel).
+    [
+        "/var/lib/clamav",
+        "/opt/homebrew/var/lib/clamav",
+        "/usr/local/var/lib/clamav",
+    ]
+    .iter()
+    .any(|dossier| {
+        std::fs::read_dir(dossier).is_ok_and(|d| {
+            d.flatten().any(|f| {
+                std::path::Path::new(&f.file_name())
+                    .extension()
+                    .is_some_and(|e| e.eq_ignore_ascii_case("cvd") || e.eq_ignore_ascii_case("cld"))
+            })
         })
     })
+}
+
+/// Chemin d'un outil de ClamAV. Sous macOS, Homebrew n'est pas toujours dans le PATH du Terminal.
+#[cfg(unix)]
+fn outil_clamav(nom: &str) -> String {
+    #[cfg(target_os = "macos")]
+    if let Some(brew) = crate::machine::macos::homebrew() {
+        let chemin = std::path::Path::new(brew).with_file_name(nom);
+        if chemin.is_file() {
+            return chemin.display().to_string();
+        }
+    }
+    nom.to_string()
 }
 
 /// Installe ClamAV et télécharge les signatures si besoin. Retourne `false` si l'utilisateur refuse.
 #[cfg(unix)]
 fn preparer() -> bool {
     let present = Command::new("bash")
-        .args(["-c", "command -v clamscan"])
+        .arg("-c")
+        .arg(format!("command -v '{}'", outil_clamav("clamscan")))
         .output()
         .is_ok_and(|o| o.status.success());
     if !present {
@@ -307,6 +363,16 @@ fn preparer() -> bool {
                 return false;
             }
         };
+        #[cfg(target_os = "macos")]
+        let Some(brew) = crate::machine::macos::homebrew() else {
+            trp!(
+                "  Homebrew est nécessaire pour installer ClamAV : https://brew.sh",
+                "  Homebrew is needed to install ClamAV: https://brew.sh"
+            );
+            return false;
+        };
+        #[cfg(target_os = "macos")]
+        let installation = format!("{brew} install clamav");
         if !shell(&installation) {
             trp!("  Installation impossible.", "  Installation failed.");
             return false;
@@ -321,6 +387,19 @@ fn preparer() -> bool {
         // Sur Debian/Ubuntu/Mint, le service tourne déjà et verrouille la base : on l'arrête le temps du premier téléchargement.
         let ok = shell("sudo systemctl stop clamav-freshclam.service 2>/dev/null; sudo freshclam")
             && shell("sudo systemctl enable --now clamav-freshclam.service");
+        // Homebrew livre seulement un modèle de configuration (« Example » à retirer) ; pas besoin de sudo.
+        #[cfg(target_os = "macos")]
+        let ok = {
+            let freshclam = outil_clamav("freshclam");
+            let prefixe = std::path::Path::new(&freshclam)
+                .parent()
+                .and_then(std::path::Path::parent)
+                .map(|p| p.display().to_string())
+                .unwrap_or_default();
+            shell(&format!(
+                "C='{prefixe}/etc/clamav/freshclam.conf'; [ -f \"$C\" ] || sed '/^Example/d' \"$C.sample\" > \"$C\"; '{freshclam}'"
+            ))
+        };
         if !ok {
             return false;
         }
@@ -347,6 +426,7 @@ fn clamav(portee: &Portee) {
             "Bureau",
             ".local/bin",
             ".config/autostart",
+            "Library/LaunchAgents",
         ]
         .iter()
         .map(|d| h.join(d))
@@ -386,13 +466,21 @@ fn clamav(portee: &Portee) {
         ".local/share/netscan/quarantaine",
         ".snapshots",
         ".Trash",
+        // macOS : caches et conteneurs d'apps (énormes), quarantaine de sentinel.
+        "Library/Caches",
+        "Library/Containers",
+        "Library/Application Support/sentinel/quarantaine",
     ];
     let exclusions: &[&str] = if matches!(portee, Portee::Dossier(_)) {
-        &[".local/share/sentinel/quarantaine", ".local/share/netscan/quarantaine"]
+        &[
+            ".local/share/sentinel/quarantaine",
+            ".local/share/netscan/quarantaine",
+            "Library/Application Support/sentinel/quarantaine",
+        ]
     } else {
         &tout
     };
-    let mut cmd = Command::new("clamscan");
+    let mut cmd = Command::new(outil_clamav("clamscan"));
     // Le bilan final (fichiers analysés, infectés, erreurs) sert à juger si l'analyse a vraiment eu lieu.
     cmd.args(["-r", "-i", "--max-filesize=200M", "--max-scansize=400M"]);
     for e in exclusions {
@@ -679,6 +767,23 @@ fn demarrage() {
                         "{} (system service not from a package)",
                         p.display()
                     ));
+                }
+            }
+        }
+    }
+
+    // macOS : agents et démons de launchd ajoutés par des programmes (ceux d'Apple sont dans /System).
+    #[cfg(target_os = "macos")]
+    {
+        let h = home();
+        for d in [
+            h.join("Library/LaunchAgents"),
+            "/Library/LaunchAgents".into(),
+            "/Library/LaunchDaemons".into(),
+        ] {
+            for f in std::fs::read_dir(&d).into_iter().flatten().flatten() {
+                if f.path().extension().is_some_and(|e| e == "plist") {
+                    entrees.push(f.path().display().to_string());
                 }
             }
         }

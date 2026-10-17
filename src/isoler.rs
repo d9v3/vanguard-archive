@@ -1,7 +1,8 @@
 //! Bac à sable : lancer un programme inconnu à l'écart du reste. Linux : bubblewrap (ou firejail), système en
 //! lecture seule, dossier personnel et /tmp vides, pas de réseau, programme copié dans un dossier jetable.
 //! Windows : Windows Sandbox, une machine jetable effacée à la fermeture, dossier du programme en lecture seule,
-//! réseau coupé.
+//! réseau coupé. macOS : sandbox-exec (le bac à sable intégré au système), pas de réseau, dossier personnel
+//! illisible, écriture seulement dans le dossier jetable.
 
 use std::path::{Path, PathBuf};
 
@@ -14,7 +15,7 @@ fn dossier_jetable() -> PathBuf {
 
 /// Arguments de bubblewrap. Le dossier de session (/run/user/…) est masqué : son bus de session permettrait de
 /// demander à systemd, hors du bac, de lancer un programme. Seul l'affichage Wayland est rendu visible.
-#[cfg_attr(windows, allow(dead_code))]
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 fn arguments_bwrap(jetable: &Path, programme: &Path, session: Option<&str>, wayland: Option<&str>) -> Vec<String> {
     let mut a: Vec<String> = [
         "--ro-bind",
@@ -168,6 +169,69 @@ fn lancer(source: &Path) {
     }
 }
 
+/// Profil de sandbox-exec : tout est permis sauf le réseau, la lecture du dossier personnel et l'écriture hors du
+/// dossier jetable (et des terminaux, pour afficher).
+#[cfg(any(target_os = "macos", test))]
+fn profil_sandbox(jetable: &str, maison: &str) -> String {
+    let echapper = |t: &str| t.replace('\\', "\\\\").replace('"', "\\\"");
+    let (jetable, maison) = (echapper(jetable), echapper(maison));
+    format!(
+        "(version 1)\n(allow default)\n(deny network*)\n\
+         (deny file-read* (subpath \"{maison}\"))\n\
+         (deny file-write*)\n\
+         (allow file-read* file-write* (subpath \"{jetable}\"))\n\
+         (allow file-write* (literal \"/dev/null\") (regex #\"^/dev/tty\") (regex #\"^/dev/fd/\"))\n"
+    )
+}
+
+#[cfg(target_os = "macos")]
+fn lancer(source: &Path) {
+    use std::os::unix::fs::PermissionsExt;
+    let jetable = dossier_jetable();
+    let nom = source.file_name().unwrap_or_default();
+    if std::fs::create_dir_all(&jetable).is_err() {
+        trp!(
+            "  ✖ Dossier jetable impossible à créer.",
+            "  ✖ Could not create the disposable folder."
+        );
+        return;
+    }
+    // sandbox-exec compare des chemins réels : /var est un lien vers /private/var.
+    let jetable = jetable.canonicalize().unwrap_or(jetable);
+    let copie = jetable.join(nom);
+    if std::fs::copy(source, &copie).is_err() {
+        trp!(
+            "  ✖ Copie impossible dans le dossier jetable.",
+            "  ✖ Could not copy into the disposable folder."
+        );
+        let _ = std::fs::remove_dir_all(&jetable);
+        return;
+    }
+    let _ = std::fs::set_permissions(&copie, std::fs::Permissions::from_mode(0o755));
+    let maison = std::env::var("HOME").unwrap_or_default();
+    let maison = std::fs::canonicalize(&maison).map_or(maison, |m| m.display().to_string());
+    trp!(
+        "  {GRIS}Isolé : pas de réseau, dossier personnel illisible, écriture seulement dans la copie jetable : {}{RESET}\n",
+        "  {GRIS}Isolated: no network, home folder unreadable, writing only in the disposable copy: {}{RESET}\n",
+        copie.display()
+    );
+    let statut = std::process::Command::new("sandbox-exec")
+        .arg("-p")
+        .arg(profil_sandbox(&jetable.display().to_string(), &maison))
+        .arg(&copie)
+        .current_dir(&jetable)
+        .status();
+    let _ = std::fs::remove_dir_all(&jetable);
+    match statut {
+        Ok(s) => trp!(
+            "\n  {VERT}✔{RESET} Programme terminé (code {}). Le dossier jetable est effacé.",
+            "\n  {VERT}✔{RESET} Program finished (code {}). The disposable folder is erased.",
+            s.code().map_or_else(|| "?".to_string(), |c| c.to_string())
+        ),
+        Err(e) => trp!("  ✖ Lancement impossible : {e}", "  ✖ Could not start: {e}"),
+    }
+}
+
 #[cfg(windows)]
 fn lancer(source: &Path) {
     let sandbox = PathBuf::from(std::env::var_os("SystemRoot").unwrap_or_else(|| "C:\\Windows".into()))
@@ -205,6 +269,14 @@ fn lancer(source: &Path) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn profil_de_sandbox_exec() {
+        let p = profil_sandbox("/private/var/folders/x/T/sentinel-bac-1", "/Users/a \"b\"");
+        assert!(p.contains("(deny network*)"));
+        assert!(p.contains("(deny file-read* (subpath \"/Users/a \\\"b\\\"\"))"));
+        assert!(p.contains("(allow file-read* file-write* (subpath \"/private/var/folders/x/T/sentinel-bac-1\"))"));
+    }
 
     #[test]
     fn arguments_du_bac() {

@@ -267,6 +267,28 @@ pub(super) fn racines() -> Vec<(&'static str, PathBuf, bool)> {
             r.push((nom, d, false));
         }
     }
+    #[cfg(target_os = "macos")]
+    {
+        let support = PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join("Library/Application Support");
+        for (nom, d) in [
+            ("Firefox", support.join("Firefox/Profiles")),
+            ("Zen", support.join("zen/Profiles")),
+            ("LibreWolf", support.join("librewolf/Profiles")),
+            ("Floorp", support.join("Floorp/Profiles")),
+            ("Waterfox", support.join("Waterfox/Profiles")),
+        ] {
+            r.push((nom, d, true));
+        }
+        for (nom, d) in [
+            ("Chrome", support.join("Google/Chrome")),
+            ("Chromium", support.join("Chromium")),
+            ("Brave", support.join("BraveSoftware/Brave-Browser")),
+            ("Edge", support.join("Microsoft Edge")),
+            ("Vivaldi", support.join("Vivaldi")),
+        ] {
+            r.push((nom, d, false));
+        }
+    }
     #[cfg(windows)]
     {
         let appdata = PathBuf::from(std::env::var_os("APPDATA").unwrap_or_default());

@@ -1,5 +1,6 @@
 //! Surveillance automatique : scan du réseau toutes les heures, notification si un appareil inconnu apparaît.
-//! Planificateur natif de chaque système : timer systemd (Linux), Planificateur de tâches (Windows).
+//! Planificateur natif de chaque système : timer systemd (Linux), Planificateur de tâches (Windows), agent launchd
+//! (macOS).
 
 use std::process::Command;
 
@@ -10,6 +11,7 @@ use crate::ui::*;
 #[cfg(target_os = "linux")]
 const NOM: &str = "sentinel-surveillance";
 /// Nom d'avant le renommage en sentinel (0.10.0) : minuterie Linux, et tâche Windows de la v0.4 et avant.
+#[cfg_attr(target_os = "macos", allow(dead_code))]
 const ANCIEN_NOM: &str = "netscan-surveillance";
 
 fn reussit(cmd: &str, args: &[&str]) -> bool {
@@ -19,8 +21,9 @@ fn reussit(cmd: &str, args: &[&str]) -> bool {
 /// Programme à planifier. Lancé depuis la clé USB, on en installe d'abord une copie locale :
 /// sinon la surveillance s'arrêterait dès que la clé est débranchée.
 fn executable() -> String {
-    // Sous Linux, le programme peut tourner depuis une copie temporaire (protection de la clé), effacée à la fin.
-    #[cfg(target_os = "linux")]
+    // Sous Linux et macOS, le programme peut tourner depuis une copie temporaire (protection de la clé), effacée
+    // à la fin.
+    #[cfg(unix)]
     let exe = crate::protection::exe_d_origine();
     #[cfg(windows)]
     let exe = std::env::current_exe().ok();
@@ -54,6 +57,19 @@ pub(crate) fn notifier(titre: &str, corps: &str) {
     let _ = Command::new("notify-send")
         .args(["-a", "sentinel", "-i", "sentinel", "-u", "critical", titre, corps])
         .status();
+    // macOS : notification du Centre de notifications, par AppleScript (texte entre guillemets échappés).
+    #[cfg(target_os = "macos")]
+    {
+        let e = |s: &str| s.replace('\\', "\\\\").replace('"', "\\\"");
+        let _ = Command::new("osascript")
+            .arg("-e")
+            .arg(format!(
+                "display notification \"{}\" with title \"{}\" sound name \"Basso\"",
+                e(corps),
+                e(titre)
+            ))
+            .status();
+    }
     #[cfg(windows)]
     {
         let e = |s: &str| s.replace('\'', "''");
@@ -295,6 +311,8 @@ pub fn active() -> bool {
     return reussit("systemctl", &["--user", "is-enabled", &format!("{NOM}.timer")]);
     #[cfg(windows)]
     return crate::machine::windows::ps(&format!("Get-ScheduledTask -TaskName '{TACHE_WINDOWS}' | Out-Null")).is_some();
+    #[cfg(target_os = "macos")]
+    return reussit("launchctl", &["print", &format!("{}/{AGENT_MACOS}", domaine_launchd())]);
 }
 
 pub fn activer(oui: bool) {
@@ -355,6 +373,77 @@ fn retirer_ancienne() {
     retirer_minuterie(ANCIEN_NOM);
 }
 
+/// Agent launchd de la surveillance sous macOS (~/Library/LaunchAgents/<nom>.plist).
+#[cfg(target_os = "macos")]
+const AGENT_MACOS: &str = "com.sentinel.surveillance";
+
+#[cfg(target_os = "macos")]
+fn plist_agent() -> std::path::PathBuf {
+    std::path::PathBuf::from(std::env::var_os("HOME").unwrap_or_default())
+        .join(format!("Library/LaunchAgents/{AGENT_MACOS}.plist"))
+}
+
+/// Domaine launchd de la session graphique de l'utilisateur (« gui/501 »).
+#[cfg(target_os = "macos")]
+fn domaine_launchd() -> String {
+    let uid = Command::new("id")
+        .arg("-u")
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .unwrap_or_default();
+    format!("gui/{uid}")
+}
+
+/// Agent launchd : relancé toutes les heures (StartInterval), et 5 minutes après l'ouverture de session.
+#[cfg(any(target_os = "macos", test))]
+fn plist_surveillance(exe: &str, nom: &str) -> String {
+    let exe = exe.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;");
+    format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
+         <!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n\
+         <plist version=\"1.0\">\n<dict>\n\
+         \t<key>Label</key>\n\t<string>{nom}</string>\n\
+         \t<key>ProgramArguments</key>\n\t<array>\n\t\t<string>{exe}</string>\n\t\t<string>surveiller</string>\n\t</array>\n\
+         \t<key>StartInterval</key>\n\t<integer>3600</integer>\n\
+         \t<key>LowPriorityIO</key>\n\t<true/>\n\
+         \t<key>Nice</key>\n\t<integer>10</integer>\n\
+         </dict>\n</plist>\n"
+    )
+}
+
+#[cfg(target_os = "macos")]
+fn installer(exe: &str) -> bool {
+    let plist = plist_agent();
+    let _ = std::fs::create_dir_all(plist.parent().unwrap_or(&plist));
+    if std::fs::write(&plist, plist_surveillance(exe, AGENT_MACOS)).is_err() {
+        return false;
+    }
+    let chemin = plist.display().to_string();
+    // Déjà chargé (réactivation) : on le retire d'abord, sinon bootstrap refuse.
+    let _ = reussit("launchctl", &["bootout", &domaine_launchd(), &chemin]);
+    reussit("launchctl", &["bootstrap", &domaine_launchd(), &chemin])
+}
+
+#[cfg(target_os = "macos")]
+fn desinstaller() -> bool {
+    let plist = plist_agent();
+    let _ = reussit(
+        "launchctl",
+        &["bootout", &domaine_launchd(), &plist.display().to_string()],
+    );
+    let _ = std::fs::remove_file(&plist);
+    true
+}
+
+/// Rien à migrer sous macOS : la surveillance n'y a jamais existé sous l'ancien nom.
+#[cfg(target_os = "macos")]
+fn ancienne_installee() -> bool {
+    false
+}
+
+#[cfg(target_os = "macos")]
+fn retirer_ancienne() {}
+
 /// Nom lisible de la tâche dans le Planificateur de tâches Windows.
 #[cfg(windows)]
 const TACHE_WINDOWS: &str = "sentinel - surveillance du reseau";
@@ -410,6 +499,17 @@ fn desinstaller() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn agent_launchd() {
+        let p = plist_surveillance(
+            "/Users/a b/Library/Application Support/sentinel/bin/sentinel",
+            "com.sentinel.surveillance",
+        );
+        assert!(p.contains("<string>/Users/a b/Library/Application Support/sentinel/bin/sentinel</string>"));
+        assert!(p.contains("<key>StartInterval</key>\n\t<integer>3600</integer>"));
+        assert!(p.contains("<string>surveiller</string>"));
+    }
 
     fn etat(score: u32, alertes: &[&str]) -> EtatMachine {
         EtatMachine {

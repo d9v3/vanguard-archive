@@ -19,7 +19,7 @@ mod langue;
 mod logiciels;
 mod machine;
 mod maj;
-#[cfg(target_os = "linux")]
+#[cfg(unix)]
 mod protection;
 mod rapport;
 mod reparer;
@@ -548,6 +548,8 @@ impl Action {
                 tr!("Gaming", "Gaming"),
                 if cfg!(windows) {
                     tr!("composants et réglages de Windows", "components and Windows settings")
+                } else if cfg!(target_os = "macos") {
+                    tr!("Steam, Heroic", "Steam, Heroic")
                 } else {
                     tr!("Steam, Vulkan, GameMode, Wine…", "Steam, Vulkan, GameMode, Wine…")
                 },
@@ -867,7 +869,7 @@ async fn main() {
     #[cfg(windows)]
     let _ = enable_ansi_support::enable_ansi_support();
     journal::installer();
-    #[cfg(target_os = "linux")]
+    #[cfg(unix)]
     protection::proteger_cle();
     let args = Args::from_arg_matches(&ligne_de_commande().get_matches()).unwrap_or_else(|e| e.exit());
     match args.commande {
