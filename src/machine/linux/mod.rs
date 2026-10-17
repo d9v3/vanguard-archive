@@ -1047,6 +1047,7 @@ pub fn auditer() -> Audit {
         verif!(super::certificats::certificats()),
         verif!(super::extensions::extensions()),
         verif!(super::sante::sante()),
+        verif!(super::journaux::journaux()),
     ]));
 
     Audit {

@@ -12,6 +12,7 @@ use crate::ui::*;
 mod certificats;
 mod dns;
 mod extensions;
+mod journaux;
 #[cfg(target_os = "linux")]
 pub mod linux;
 mod sante;

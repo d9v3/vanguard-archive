@@ -156,6 +156,7 @@ pub fn categorie(nom: &str) -> &str {
         "Fichiers secrets" => "Secret files",
         "Fichiers suspects" => "Suspicious files",
         "Groupes" => "Groups",
+        "Journaux" => "Logs",
         "Mises à jour" => "Updates",
         "Noyau" => "Kernel",
         "Noyau durci" => "Kernel hardening",
