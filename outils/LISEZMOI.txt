@@ -6,11 +6,19 @@ Cette clé contient le programme pour Linux et Windows, sa base de données et s
 
   Linux/sentinel        Linux (toutes distributions, aucune installation)
                         Ouvrir un terminal dans ce dossier puis :  ./sentinel
-  Windows/sentinel.exe  Windows 10/11 : double-cliquer.
+  Windows/sentinel.exe  Windows 10/11 : double-cliquer (ou « Lancer Sentinel.bat » à la racine).
+  autorun.sh            Linux : GNOME propose de le lancer au branchement ; sinon, double-clic ou ./autorun.sh
   donnees/              Base des appareils (un carnet par réseau : chez toi, chez chaque ami) et dernier
-                        rapport (rapport.html, et rapport.md en texte simple, lisible sans navigateur). Elle voyage avec la clé : tout Sentinel qui voit la clé branchée l'utilise.
+                        rapport (rapport.html, et rapport.md en texte simple, lisible sans navigateur). Elle voyage avec la clé : tout Sentinel qui voit la clé branchée l'utilise. Sur un autre
+                        ordinateur, la clé est protégée : la base y est lue, et ce qui est ajouté reste sur cet ordinateur.
   source/               Code source complet (Rust) avec son historique git.
   sentinel.cle          Fichier témoin qui fait reconnaître la clé : ne pas le supprimer.
+
+Protection : la clé a deux parties. SENTINEL (tout ce qui précède) est en lecture seule sous Windows : un
+ordinateur infecté ne peut pas modifier le programme. SENTINEL-LOG, petite et modifiable, ne contient que
+journal-erreurs.txt : les erreurs rencontrées (version, système, message), sans nom d'utilisateur, nom de
+machine ni dossier personnel, pour améliorer Sentinel. Windows ne lance rien tout seul depuis une clé USB
+(protection contre les virus depuis Windows 7) : il faut double-cliquer.
 
 Pour commencer : lancer Sentinel, choisir « 1. Bilan complet », puis « 2. Corriger ».
 

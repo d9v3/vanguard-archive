@@ -6,11 +6,18 @@ This USB key holds the program for Linux and Windows, its database and its sourc
 
   Linux/sentinel        Linux (any distribution, nothing to install)
                         Open a terminal in this folder, then:  ./sentinel
-  Windows/sentinel.exe  Windows 10/11: double-click.
+  Windows/sentinel.exe  Windows 10/11: double-click (or "Lancer Sentinel.bat" at the root).
+  autorun.sh            Linux: GNOME offers to run it when the key is plugged in; otherwise double-click or ./autorun.sh
   donnees/              Device database (one notebook per network: yours, each friend's) and the latest
-                        report (rapport.html, and rapport.md as plain text, readable without a browser). It travels with the key: any Sentinel that sees the key plugged in uses it.
+                        report (rapport.html, and rapport.md as plain text, readable without a browser). It travels with the key: any Sentinel that sees the key plugged in uses it. On another
+                        computer the key is protected: the database is read there, and what is added stays on that computer.
   source/               Full source code (Rust) with its git history.
   sentinel.cle          Marker file that makes the key recognized: do not delete it.
+
+Protection: the key has two parts. SENTINEL (everything above) is read-only on Windows: an infected computer
+cannot modify the program. SENTINEL-LOG, small and writable, only holds journal-erreurs.txt: the errors met
+(version, system, message), without user name, computer name or home folder, to improve Sentinel. Windows
+never starts anything by itself from a USB key (protection against viruses since Windows 7): double-click it.
 
 To start: run Sentinel, choose "1. Full check", then "2. Fix".
 

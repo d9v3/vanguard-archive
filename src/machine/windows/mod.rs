@@ -42,12 +42,33 @@ pub fn ps(script: &str) -> Option<String> {
 fn ps_delai(script: &str, secondes: u64) -> Option<String> {
     let complet =
         format!("[Console]::OutputEncoding=[Text.Encoding]::UTF8; $ErrorActionPreference='Stop'; {script}; '{FIN}'");
-    let r = crate::commande::lancer(
+    // Début du script, pour retrouver lequel a échoué dans le journal.
+    let debut: String = script.trim().chars().take(240).collect();
+    let Some(r) = crate::commande::lancer(
         powershell().args(["-NoProfile", "-NonInteractive", "-Command", &complet]),
         secondes,
-    )?;
-    let (avant, _) = r.sortie.rsplit_once(FIN)?;
-    (r.code == Some(0)).then(|| avant.trim().to_string())
+    ) else {
+        crate::journal::erreur(
+            "PowerShell",
+            &format!("délai de {secondes} s dépassé, ou lancement impossible\n{debut}"),
+        );
+        return None;
+    };
+    match r.sortie.rsplit_once(FIN) {
+        Some((avant, _)) if r.code == Some(0) => Some(avant.trim().to_string()),
+        _ => {
+            let etat = match r.code {
+                Some(0) => "sortie incomplète (marqueur de fin absent)".to_string(),
+                Some(c) => format!("code de retour {c}"),
+                None => "arrêté par le système".to_string(),
+            };
+            crate::journal::erreur(
+                "PowerShell",
+                &format!("{etat}\n{debut}\n--- erreurs ---\n{}", r.erreurs.trim()),
+            );
+            None
+        }
+    }
 }
 
 /// Constat quand une vérification n'a pas pu se faire : on le dit, on ne conclut jamais « OK ».

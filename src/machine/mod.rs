@@ -419,7 +419,15 @@ pub fn auditer(bavard: bool) -> Audit {
             "{GRIS}Checking (a few seconds)…{RESET}"
         );
     }
-    os::auditer()
+    let a = os::auditer();
+    // Vérifications impossibles : souvent une version de Windows ou une distribution que le code ne connaît pas.
+    // Seulement à la demande : la surveillance horaire répéterait les mêmes lignes.
+    if bavard {
+        for c in a.constats.iter().filter(|c| !c.verifie) {
+            crate::journal::erreur("vérification impossible", &format!("{} : {}", c.categorie, c.message));
+        }
+    }
+    a
 }
 
 /// Système, programmes, pilotes et firmware : tout ce qui doit être à jour (`sentinel maj`). `seulement` limite

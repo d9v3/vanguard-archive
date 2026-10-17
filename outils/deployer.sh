@@ -76,6 +76,28 @@ if [[ -z $CLE ]]; then
   exit 0
 fi
 
+# Partition SENTINEL-LOG (la seule modifiable sur les autres ordinateurs) : elle se monte en même temps que SENTINEL,
+# parfois une seconde après. Son journal d'erreurs est rapatrié ici puis vidé, pour améliorer sentinel.
+JOURNAL=""
+for _ in {1..10}; do
+  JOURNAL=$(findmnt -nro TARGET -S LABEL=SENTINEL-LOG 2>/dev/null | head -1 || true)
+  [[ -n $JOURNAL ]] && break
+  sleep 1
+done
+if [[ -n $JOURNAL ]]; then
+  touch "$JOURNAL/sentinel-journal.cle"
+  if [[ -s $JOURNAL/journal-erreurs.txt ]]; then
+    RETOURS="${XDG_DATA_HOME:-$HOME/.local/share}/sentinel/retours"
+    mkdir -p "$RETOURS"
+    NB=$(grep -c '^== ' "$JOURNAL/journal-erreurs.txt" || true)
+    cat "$JOURNAL/journal-erreurs.txt" >>"$RETOURS/journal-erreurs.txt"
+    : >"$JOURNAL/journal-erreurs.txt"
+    echo "Journal de la clé : $NB erreur(s) rapatriée(s) dans $RETOURS/journal-erreurs.txt"
+    command -v notify-send >/dev/null &&
+      notify-send -a sentinel -i sentinel "Clé SENTINEL : $NB erreur(s) rapportée(s)" "$RETOURS/journal-erreurs.txt" || true
+  fi
+fi
+
 mkdir -p "$CLE"/{Linux,Windows,donnees,source}
 # Clé préparée sous l'ancien nom : témoin et programmes renommés (l'étiquette du volume, elle, demande root).
 [[ -f $CLE/netscan.cle ]] && mv -f "$CLE/netscan.cle" "$CLE/sentinel.cle"
@@ -86,6 +108,10 @@ cp -f "$LINUX" "$CLE/Linux/sentinel"
 rm -rf "$CLE/macOS"
 cp -f outils/LISEZMOI.txt "$CLE/LISEZMOI.txt"
 cp -f outils/README.txt "$CLE/README.txt"
+# Icône et nom du lecteur dans l'Explorateur, lanceurs à la racine. (Windows ne lance plus rien tout seul depuis une
+# clé USB, depuis Windows 7 ; GNOME, lui, propose de lancer autorun.sh.)
+cp -f assets/sentinel.ico "$CLE/sentinel.ico"
+cp -f outils/cle/autorun.inf outils/cle/autorun.sh "outils/cle/Lancer Sentinel.bat" "$CLE/"
 # Code source complet (avec l'historique git) pour continuer le développement depuis n'importe quel ordinateur.
 # exFAT ne garde ni droits ni liens : -rt suffit, --modify-window tolère sa précision de 2 s.
 rsync -rt --delete --modify-window=2 --exclude /target/ ./ "$CLE/source/"

@@ -14,6 +14,7 @@ mod gaming;
 mod historique;
 mod integrite;
 mod isoler;
+mod journal;
 mod langue;
 mod logiciels;
 mod machine;
@@ -166,7 +167,10 @@ impl Session {
     async fn scanner_reseau(&mut self, cible: Option<String>, ports: &str) {
         match reseau::executer(Options::defaut(cible, ports)).await {
             Ok(r) => self.reseau = Some(r),
-            Err(e) => eprintln!("{}", trf!("Scan réseau impossible : {e}", "Network scan failed: {e}")),
+            Err(e) => {
+                journal::erreur("scan réseau", &e);
+                eprintln!("{}", trf!("Scan réseau impossible : {e}", "Network scan failed: {e}"));
+            }
         }
     }
 
@@ -282,7 +286,15 @@ fn etat_du_menu(surveillance_active: bool) {
             debit(c.montant)
         );
     }
-    let cle = if reseau::cle_usb().is_some() {
+    let cle = if reseau::cle_protegee().is_some() {
+        format!(
+            "{VERT}{}{RESET}",
+            tr!(
+                "clé SENTINEL branchée (protégée en écriture)",
+                "SENTINEL key plugged in (write-protected)"
+            )
+        )
+    } else if reseau::cle_usb().is_some() {
         format!(
             "{VERT}{}{RESET}",
             tr!("clé SENTINEL branchée", "SENTINEL key plugged in")
@@ -629,6 +641,7 @@ async fn main() {
     // Couleurs ANSI dans l'ancienne console Windows (Windows Terminal les gère déjà).
     #[cfg(windows)]
     let _ = enable_ansi_support::enable_ansi_support();
+    journal::installer();
     let args = Args::from_arg_matches(&ligne_de_commande().get_matches()).unwrap_or_else(|e| e.exit());
     match args.commande {
         None => menu().await,
@@ -662,6 +675,7 @@ async fn main() {
                 silencieux: false,
             };
             if let Err(e) = reseau::executer(o).await {
+                journal::erreur("scan réseau", &e);
                 eprintln!("{}", trf!("Erreur : {e}", "Error: {e}"));
                 std::process::exit(1);
             }

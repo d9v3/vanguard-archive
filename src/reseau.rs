@@ -193,6 +193,10 @@ impl Base {
         let cle = dossier_donnees().join("appareils.json");
         let local = dossier_local().join("appareils.json");
         let mut base = Base::lire(&cle);
+        // Clé protégée en écriture (autre ordinateur) : sa base sert quand même, les ajouts restent ici.
+        if let Some(protegee) = cle_protegee() {
+            base.absorber(Base::lire(&protegee.join("donnees").join("appareils.json")));
+        }
         if local != cle {
             base.absorber(Base::lire(&local));
         }
@@ -423,10 +427,26 @@ pub fn cle_usb() -> Option<PathBuf> {
         .find(|d| d.join(TEMOIN_CLE).is_file() || d.join(ANCIEN_TEMOIN_CLE).is_file())
 }
 
-/// Données (historique des appareils, rapports) : sur la clé USB quand elle est branchée,
+/// La partition SENTINEL est en lecture seule sur les autres ordinateurs (attribut GPT respecté par Windows) :
+/// on essaie d'y écrire plutôt que de deviner.
+fn modifiable(dossier: &std::path::Path) -> bool {
+    let essai = dossier.join(format!(".sentinel-ecriture-{}", std::process::id()));
+    let ok = std::fs::write(&essai, b"").is_ok();
+    let _ = std::fs::remove_file(&essai);
+    ok
+}
+
+/// Clé branchée mais protégée en écriture : on lit sa base, sans rien y écrire.
+pub fn cle_protegee() -> Option<PathBuf> {
+    cle_usb().filter(|c| !modifiable(c))
+}
+
+/// Données (historique des appareils, rapports) : sur la clé USB quand elle est branchée et modifiable,
 /// pour qu'elles voyagent avec le programme ; sinon dans le dossier local de l'ordinateur.
 pub fn dossier_donnees() -> PathBuf {
-    cle_usb().map_or_else(dossier_local, |c| c.join("donnees"))
+    cle_usb()
+        .filter(|c| modifiable(c))
+        .map_or_else(dossier_local, |c| c.join("donnees"))
 }
 
 /// Données propres à cet ordinateur (quarantaine antivirus : on ne transporte pas de malware sur une clé).
