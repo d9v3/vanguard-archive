@@ -616,7 +616,9 @@ fn ports_udp(pare_feu_actif: bool, ip_lan: Option<&str>) -> Vec<Constat> {
 }
 
 fn lire_ports_udp(liste: &str, pare_feu_actif: bool, ip_lan: Option<&str>) -> Vec<Constat> {
-    let systeme = ["svchost", "lsass", "wininit", "services", "spoolsv", "System", "Idle", ""];
+    let systeme = [
+        "svchost", "lsass", "wininit", "services", "spoolsv", "System", "Idle", "",
+    ];
     let mut vus = Vec::new();
     let mut constats = Vec::new();
     let llmnr_coupe = liste.lines().any(|l| l.trim() == "LLMNR|0");
@@ -638,7 +640,11 @@ fn lire_ports_udp(liste: &str, pare_feu_actif: bool, ip_lan: Option<&str>) -> Ve
             continue;
         }
         vus.push(port);
-        let programme = if programme.is_empty() { tr!("programme inconnu", "unknown program") } else { programme };
+        let programme = if programme.is_empty() {
+            tr!("programme inconnu", "unknown program")
+        } else {
+            programme
+        };
         let constat = alerte(
             "Ports en écoute",
             super::niveau_expose(pare_feu_actif, i.niveau),
@@ -732,7 +738,11 @@ mod tests {
         assert!(c[0].message.starts_with("161/udp"));
         assert!(c[1].message.starts_with("27036/udp"));
         // Découverte de Windows : une correction chacune, une seule pour 137 et 138.
-        let c = lire_ports_udp("0.0.0.0|5355|svchost\n0.0.0.0|137|System\n0.0.0.0|138|System\n0.0.0.0|1900|svchost", false, None);
+        let c = lire_ports_udp(
+            "0.0.0.0|5355|svchost\n0.0.0.0|137|System\n0.0.0.0|138|System\n0.0.0.0|1900|svchost",
+            false,
+            None,
+        );
         let corrigibles: Vec<bool> = c.iter().map(|c| c.correctif.is_some()).collect();
         assert_eq!(corrigibles, [true, true, false, true]);
         let c = lire_ports_udp("LLMNR|0\n0.0.0.0|5355|svchost", false, None);

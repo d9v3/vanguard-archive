@@ -75,7 +75,10 @@ pub fn enregistrer(audit: Option<&Audit>, reseau: Option<&Rapport>) -> (Option<B
 
 /// Un problème sans ses nombres (« 3 mises à jour » et « 4 mises à jour » sont le même problème).
 fn cle(probleme: &str) -> String {
-    probleme.chars().map(|c| if c.is_ascii_digit() { '#' } else { c }).collect()
+    probleme
+        .chars()
+        .map(|c| if c.is_ascii_digit() { '#' } else { c })
+        .collect()
 }
 
 /// (nouveaux, réglés) entre deux bilans.
@@ -124,7 +127,11 @@ pub fn afficher_changements(avant: &Bilan, apres: &Bilan) {
         None => p.to_string(),
     };
     for p in regles.iter().take(8) {
-        trp!("  {VERT}✔ réglé{RESET}   {}", "  {VERT}✔ fixed{RESET}   {}", traduire(p));
+        trp!(
+            "  {VERT}✔ réglé{RESET}   {}",
+            "  {VERT}✔ fixed{RESET}   {}",
+            traduire(p)
+        );
     }
     for p in nouveaux.iter().take(8) {
         trp!(
@@ -154,7 +161,12 @@ pub fn courbe(historique: &[Bilan]) -> Option<String> {
     #[allow(clippy::cast_precision_loss)]
     let pas = (largeur - 2.0 * marge) / (derniers.len() - 1) as f64;
     // Échelle à partir de la dizaine sous la note la plus basse (au plus 40) : le haut de l'échelle reste lisible.
-    let plus_basse = derniers.iter().flat_map(|b| [b.machine, b.reseau]).flatten().min().unwrap_or(40);
+    let plus_basse = derniers
+        .iter()
+        .flat_map(|b| [b.machine, b.reseau])
+        .flatten()
+        .min()
+        .unwrap_or(40);
     let bas = plus_basse.min(40) / 10 * 10;
     let y = |note: u32| {
         hauteur - marge - f64::from(note.saturating_sub(bas)) / f64::from(100 - bas) * (hauteur - 2.0 * marge)
@@ -164,7 +176,10 @@ pub fn courbe(historique: &[Bilan]) -> Option<String> {
         tr!("Évolution des notes", "Grade history")
     );
     // Seuils des lettres : A ≥ 90, B ≥ 75, C ≥ 60, D ≥ 40.
-    for (seuil, lettre) in [(90, "A"), (75, "B"), (60, "C"), (40, "D")].into_iter().filter(|(s, _)| *s >= bas) {
+    for (seuil, lettre) in [(90, "A"), (75, "B"), (60, "C"), (40, "D")]
+        .into_iter()
+        .filter(|(s, _)| *s >= bas)
+    {
         let y0 = y(seuil);
         let _ = write!(
             svg,
@@ -196,7 +211,11 @@ pub fn courbe(historique: &[Bilan]) -> Option<String> {
             let _ = write!(svg, "<circle cx={x} cy={yy} r=3 style=\"fill:var({couleur})\"/>");
         }
     };
-    serie(derniers.iter().map(|b| b.machine).collect(), "--info", tr!("Cette machine", "This machine"));
+    serie(
+        derniers.iter().map(|b| b.machine).collect(),
+        "--info",
+        tr!("Cette machine", "This machine"),
+    );
     serie(
         derniers
             .iter()
@@ -239,8 +258,14 @@ mod tests {
 
     #[test]
     fn problemes_nouveaux_et_regles() {
-        let avant = b(80, &["Mises à jour : 3 mises à jour en attente.", "Pare-feu : inactif."]);
-        let apres = b(90, &["Mises à jour : 5 mises à jour en attente.", "DNS : réponses inventées."]);
+        let avant = b(
+            80,
+            &["Mises à jour : 3 mises à jour en attente.", "Pare-feu : inactif."],
+        );
+        let apres = b(
+            90,
+            &["Mises à jour : 5 mises à jour en attente.", "DNS : réponses inventées."],
+        );
         let (nouveaux, regles) = differences(&avant, &apres);
         assert_eq!(nouveaux, ["DNS : réponses inventées."]);
         assert_eq!(regles, ["Pare-feu : inactif."]);

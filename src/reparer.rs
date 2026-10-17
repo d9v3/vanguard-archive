@@ -234,7 +234,11 @@ fn nettoyage(gestion: Option<machine::linux::Paquets>) -> Reparation {
     for (assistant, sous_dossier) in [("yay", ".cache/yay"), ("paru", ".cache/paru/clone")] {
         let t = taille_dossier(&maison.join(sous_dossier), None, echeance);
         if t >= 50 << 20 {
-            commandes.push(if assistant == "yay" { "rm -rf ~/.cache/yay/*" } else { "rm -rf ~/.cache/paru/clone/*" });
+            commandes.push(if assistant == "yay" {
+                "rm -rf ~/.cache/yay/*"
+            } else {
+                "rm -rf ~/.cache/paru/clone/*"
+            });
             details.push(trf!("compilations {assistant} {}", "{assistant} builds {}", en_go(t)));
             total += t;
         }
@@ -255,7 +259,11 @@ fn nettoyage(gestion: Option<machine::linux::Paquets>) -> Reparation {
         trf!(
             "Vide la corbeille, retire les paquets devenus inutiles (la liste s'affiche avant), les compilations AUR gardées, les fichiers de cache non lus depuis 90 jours et les rapports de plantage de plus d'une semaine. À gagner : {}.",
             "Empties the trash, removes packages no longer needed (the list is shown first), kept AUR builds, cache files unread for 90 days and crash reports older than a week. To gain: {}.",
-            if details.is_empty() { tr!("peu de place", "little space").to_string() } else { details.join(", ") }
+            if details.is_empty() {
+                tr!("peu de place", "little space").to_string()
+            } else {
+                details.join(", ")
+            }
         ),
         tr!("une minute", "one minute"),
         &commandes,

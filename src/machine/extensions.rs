@@ -38,7 +38,10 @@ fn pouvoirs(permissions: &[&str]) -> Vec<&'static str> {
         p.push(tr!("piloter les pages", "control web pages"));
     }
     if permissions.contains(&"nativeMessaging") {
-        p.push(tr!("parler aux programmes de l'ordinateur", "talk to programs on the computer"));
+        p.push(tr!(
+            "parler aux programmes de l'ordinateur",
+            "talk to programs on the computer"
+        ));
     }
     if permissions.contains(&"proxy") {
         p.push(tr!("détourner le trafic (proxy)", "reroute traffic (proxy)"));
@@ -79,7 +82,11 @@ fn lire_firefox(texte: &str) -> Vec<Extension> {
             None
         };
         extensions.push(Extension {
-            nom: a["defaultLocale"]["name"].as_str().or(a["id"].as_str()).unwrap_or("?").to_string(),
+            nom: a["defaultLocale"]["name"]
+                .as_str()
+                .or(a["id"].as_str())
+                .unwrap_or("?")
+                .to_string(),
             partout: origines.iter().any(|o| acces_partout(o)),
             pouvoirs: pouvoirs(&permissions),
             origine_suspecte,
@@ -133,7 +140,11 @@ fn lire_chromium(texte: &str, profil: &Path) -> Vec<Extension> {
             .any(|c| chaines(&c["matches"]).iter().any(|m| acces_partout(m)));
         let chemin = e["path"].as_str().map(|p| {
             let p = Path::new(p);
-            if p.is_absolute() { p.to_path_buf() } else { profil.join("Extensions").join(p) }
+            if p.is_absolute() {
+                p.to_path_buf()
+            } else {
+                profil.join("Extensions").join(p)
+            }
         });
         let de_la_boutique = e["from_webstore"] == true;
         let origine_suspecte = match emplacement {
@@ -172,7 +183,11 @@ fn juger(navigateur: &str, extensions: &[Extension]) -> Vec<Constat> {
                     "{navigateur} : extension « {} » {raison}{}. Retire-la si tu ne l'as pas installée toi-même.",
                     "{navigateur}: extension “{}” {raison}{}. Remove it if you did not install it yourself.",
                     e.nom,
-                    if e.partout { tr!(", avec accès à tous les sites", ", with access to every site") } else { "" }
+                    if e.partout {
+                        tr!(", avec accès à tous les sites", ", with access to every site")
+                    } else {
+                        ""
+                    }
                 ),
             ));
         }
@@ -237,9 +252,15 @@ fn racines() -> Vec<(&'static str, PathBuf, bool)> {
             ("Chrome", config.join("google-chrome")),
             ("Chrome", maison.join(".var/app/com.google.Chrome/config/google-chrome")),
             ("Chromium", config.join("chromium")),
-            ("Chromium", maison.join(".var/app/org.chromium.Chromium/config/chromium")),
+            (
+                "Chromium",
+                maison.join(".var/app/org.chromium.Chromium/config/chromium"),
+            ),
             ("Brave", config.join("BraveSoftware/Brave-Browser")),
-            ("Brave", maison.join(".var/app/com.brave.Browser/config/BraveSoftware/Brave-Browser")),
+            (
+                "Brave",
+                maison.join(".var/app/com.brave.Browser/config/BraveSoftware/Brave-Browser"),
+            ),
             ("Edge", config.join("microsoft-edge")),
             ("Vivaldi", config.join("vivaldi")),
         ] {
@@ -310,7 +331,10 @@ pub fn extensions() -> Vec<Constat> {
                 // Windows range les extensions dans Secure Preferences, Linux dans Preferences.
                 let mut e = Vec::new();
                 for f in ["Preferences", "Secure Preferences"] {
-                    e.extend(lire_chromium(&std::fs::read_to_string(chemin.join(f)).unwrap_or_default(), &chemin));
+                    e.extend(lire_chromium(
+                        &std::fs::read_to_string(chemin.join(f)).unwrap_or_default(),
+                        &chemin,
+                    ));
                 }
                 e
             };
@@ -319,7 +343,10 @@ pub fn extensions() -> Vec<Constat> {
             }
             // Profil nommé seulement s'il y en a plusieurs ; « ippds1dt.Default (release) » → « Default (release) ».
             let navigateur = if plusieurs {
-                let court = dossier.split_once('.').filter(|_| firefox).map_or(dossier.as_str(), |(_, n)| n);
+                let court = dossier
+                    .split_once('.')
+                    .filter(|_| firefox)
+                    .map_or(dossier.as_str(), |(_, n)| n);
                 format!("{nom} ({court})")
             } else {
                 nom.to_string()
@@ -330,7 +357,10 @@ pub fn extensions() -> Vec<Constat> {
     if constats.is_empty() {
         constats.push(ok(
             CAT,
-            tr!("Aucune extension de navigateur installée.", "No browser extension installed."),
+            tr!(
+                "Aucune extension de navigateur installée.",
+                "No browser extension installed."
+            ),
         ));
     }
     constats
@@ -358,7 +388,10 @@ mod tests {
         assert!(e[0].partout && e[0].origine_suspecte.is_none());
         assert!(e[1].origine_suspecte.is_some() && e[1].pouvoirs.len() == 1);
         let c = juger("Zen", &e);
-        assert_eq!(c.iter().map(|c| c.probleme).collect::<Vec<_>>(), [Some(Niveau::Eleve), Some(Niveau::Info)]);
+        assert_eq!(
+            c.iter().map(|c| c.probleme).collect::<Vec<_>>(),
+            [Some(Niveau::Eleve), Some(Niveau::Info)]
+        );
         assert!(c[1].message.contains("Espion ["));
         assert!(lire_firefox("pas du json").is_empty());
     }

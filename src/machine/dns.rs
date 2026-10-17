@@ -74,7 +74,13 @@ fn origine(ip: IpAddr) -> Origine {
 /// Adresse d'une ligne de configuration : « 1.1.1.1#cloudflare-dns.com » (DNS chiffré de resolved) ou
 /// « fe80::1%3 » (zone IPv6) gardent seulement l'adresse.
 fn adresse(texte: &str) -> Option<IpAddr> {
-    texte.split(['#', '%']).next()?.trim().trim_matches(['[', ']']).parse().ok()
+    texte
+        .split(['#', '%'])
+        .next()?
+        .trim()
+        .trim_matches(['[', ']'])
+        .parse()
+        .ok()
 }
 
 /// Serveurs listés par `resolvectl dns` (« Global: 127.0.0.1 », « Link 3 (wlan0): 10.0.0.1 »).
@@ -239,7 +245,11 @@ fn constat_serveurs(s: &Serveurs) -> Constat {
         .map(|(ip, _)| *ip)
         .collect();
     if !inconnus_manuels.is_empty() {
-        let liste = inconnus_manuels.iter().map(ToString::to_string).collect::<Vec<_>>().join(", ");
+        let liste = inconnus_manuels
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join(", ");
         let constat = alerte(
             CAT,
             Niveau::Moyen,
@@ -292,7 +302,9 @@ fn constat_serveurs(s: &Serveurs) -> Constat {
 fn nom_inexistant() -> String {
     let graine = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |d| d.as_secs().wrapping_mul(1_000_000_007) ^ u64::from(d.subsec_nanos()))
+        .map_or(0, |d| {
+            d.as_secs().wrapping_mul(1_000_000_007) ^ u64::from(d.subsec_nanos())
+        })
         ^ u64::from(std::process::id());
     format!("sentinel-{graine:016x}.com")
 }
@@ -369,7 +381,8 @@ mod tests {
     fn lecture_des_configurations() {
         let conf = "# généré\nnameserver 127.0.0.53\noptions edns0 trust-ad\nnameserver fe80::1%wlan0\n";
         assert_eq!(lire_resolv_conf(conf), [ip("127.0.0.53"), ip("fe80::1")]);
-        let resolvectl = "Global: 127.0.0.1\nLink 2 (enp12s0):\nLink 3 (wlp13s0): 10.0.0.1 1.1.1.1#cloudflare-dns.com fe80::1%3\n";
+        let resolvectl =
+            "Global: 127.0.0.1\nLink 2 (enp12s0):\nLink 3 (wlp13s0): 10.0.0.1 1.1.1.1#cloudflare-dns.com fe80::1%3\n";
         assert_eq!(
             lire_resolvectl(resolvectl),
             [ip("127.0.0.1"), ip("10.0.0.1"), ip("1.1.1.1"), ip("fe80::1")]
@@ -382,13 +395,19 @@ mod tests {
             liste,
             chiffre: None,
             resolveur_local: None,
-            remise: vec![(ip("45.13.105.2"), "Set-DnsClientServerAddress -InterfaceIndex 7 -ResetServerAddresses".into())],
+            remise: vec![(
+                ip("45.13.105.2"),
+                "Set-DnsClientServerAddress -InterfaceIndex 7 -ResetServerAddresses".into(),
+            )],
         };
         let c = constat_serveurs(&s(vec![(ip("45.13.105.2"), true)]));
         assert_eq!(c.probleme, Some(Niveau::Moyen));
         assert!(c.correctif.is_some());
         // Le même serveur donné par le réseau (DHCP) : sans doute celui du fournisseur, simple information.
-        assert_eq!(constat_serveurs(&s(vec![(ip("45.13.105.2"), false)])).probleme, Some(Niveau::Info));
+        assert_eq!(
+            constat_serveurs(&s(vec![(ip("45.13.105.2"), false)])).probleme,
+            Some(Niveau::Info)
+        );
         // Un service connu réglé à la main : un choix, pas un problème.
         assert_eq!(constat_serveurs(&s(vec![(ip("1.1.1.1"), true)])).probleme, None);
         assert!(nom_inexistant().starts_with("sentinel-"));

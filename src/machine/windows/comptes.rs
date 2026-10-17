@@ -61,7 +61,10 @@ fn juger_comptes(utilisateurs: &[&str], moi: Option<&str>, lbp: Option<u32>) -> 
                 )
             } else {
                 constat.corriger(
-                    tr!("Désactiver le compte Administrateur intégré", "Disable the built-in Administrator account"),
+                    tr!(
+                        "Désactiver le compte Administrateur intégré",
+                        "Disable the built-in Administrator account"
+                    ),
                     &[&format!("Disable-LocalUser -Name '{nom_ps}'")],
                 )
             });
@@ -136,7 +139,12 @@ mod tests {
         let niveaux: Vec<_> = c.iter().map(|c| c.probleme).collect();
         assert_eq!(
             niveaux,
-            [Some(Niveau::Moyen), Some(Niveau::Eleve), Some(Niveau::Moyen), Some(Niveau::Eleve)]
+            [
+                Some(Niveau::Moyen),
+                Some(Niveau::Eleve),
+                Some(Niveau::Moyen),
+                Some(Niveau::Eleve)
+            ]
         );
         // Administrateur intégré utilisé en ce moment : conseil, pas de désactivation automatique.
         assert!(c[2].correctif.as_ref().is_some_and(|k| !k.automatique));

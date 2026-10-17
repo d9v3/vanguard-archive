@@ -12,9 +12,9 @@ use crate::ui::*;
 mod certificats;
 mod dns;
 mod extensions;
-mod sante;
 #[cfg(target_os = "linux")]
 pub mod linux;
+mod sante;
 #[cfg(target_os = "linux")]
 use linux as os;
 #[cfg(windows)]

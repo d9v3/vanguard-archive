@@ -112,7 +112,10 @@ fn charger(sens: Sens, duree: Duration, arret: &Arc<AtomicBool>) -> Option<f64> 
         .map(|_| {
             let (octets, arret, fichier) = (Arc::clone(&octets), Arc::clone(arret), fichier.clone());
             std::thread::spawn(move || {
-                while !arret.load(Ordering::Relaxed) && debut.elapsed() < duree && octets.load(Ordering::Relaxed) < PLAFOND {
+                while !arret.load(Ordering::Relaxed)
+                    && debut.elapsed() < duree
+                    && octets.load(Ordering::Relaxed) < PLAFOND
+                {
                     let reste = duree.saturating_sub(debut.elapsed()).as_secs().max(1).to_string();
                     let mut curl = std::process::Command::new("curl");
                     curl.args(["-s", "-o", nul, "--max-time", &reste, "-A", "sentinel"]);
@@ -126,7 +129,9 @@ fn charger(sens: Sens, duree: Duration, arret: &Arc<AtomicBool>) -> Option<f64> 
                             ENVOI,
                         ]),
                     };
-                    let Some(r) = crate::commande::lancer(&mut curl, 30) else { break };
+                    let Some(r) = crate::commande::lancer(&mut curl, 30) else {
+                        break;
+                    };
                     let n: u64 = r.sortie.trim().parse().unwrap_or(0);
                     if n == 0 {
                         break;
@@ -243,10 +248,13 @@ fn conseils(box_: Option<&Serie>, internet: &Serie, hausse: Option<f64>) -> Vec<
     if let Some(b) = box_.filter(|_| box_mesurable)
         && (b.gigue() > 5.0 || b.mediane().is_some_and(|m| m > 5.0) || b.pertes() > 0.0)
     {
-        c.push(tr!(
-            "La liaison avec la box est instable (souvent le Wi-Fi) : un câble Ethernet règle presque toujours ça.",
-            "The link to the router is unstable (often Wi-Fi): an Ethernet cable almost always fixes it."
-        ).to_string());
+        c.push(
+            tr!(
+                "La liaison avec la box est instable (souvent le Wi-Fi) : un câble Ethernet règle presque toujours ça.",
+                "The link to the router is unstable (often Wi-Fi): an Ethernet cable almost always fixes it."
+            )
+            .to_string(),
+        );
     }
     if let Some(h) = hausse
         && h > 30.0
@@ -257,10 +265,13 @@ fn conseils(box_: Option<&Serie>, internet: &Serie, hausse: Option<f64>) -> Vec<
         ));
     }
     if internet.gigue() > 10.0 {
-        c.push(tr!(
-            "Le ping varie beaucoup (gigue) : ferme les téléchargements et le streaming en arrière-plan.",
-            "Ping varies a lot (jitter): close background downloads and streaming."
-        ).to_string());
+        c.push(
+            tr!(
+                "Le ping varie beaucoup (gigue) : ferme les téléchargements et le streaming en arrière-plan.",
+                "Ping varies a lot (jitter): close background downloads and streaming."
+            )
+            .to_string(),
+        );
     }
     c
 }
@@ -368,6 +379,9 @@ mod tests {
         assert_eq!(conseils(Some(&wifi), &perdu, Some(120.0)).len(), 3);
         // Box plus lente qu'Internet (routeur virtuel d'une VM) : pas de conseil de câble.
         let virtuelle = Serie(vec![Some(20.0), Some(35.0), Some(8.0)]);
-        assert_eq!(conseils(Some(&virtuelle), &Serie(vec![Some(18.0); 3]), Some(3.0)), Vec::<String>::new());
+        assert_eq!(
+            conseils(Some(&virtuelle), &Serie(vec![Some(18.0); 3]), Some(3.0)),
+            Vec::<String>::new()
+        );
     }
 }

@@ -98,7 +98,10 @@ fn attribut(nom: &[u8], code: u8) -> Option<String> {
         {
             return Some(if genre == 0x1e {
                 // BMPString : UTF-16 gros-boutiste.
-                let unites: Vec<u16> = valeur.chunks(2).map(|c| u16::from_be_bytes([c[0], *c.get(1).unwrap_or(&0)])).collect();
+                let unites: Vec<u16> = valeur
+                    .chunks(2)
+                    .map(|c| u16::from_be_bytes([c[0], *c.get(1).unwrap_or(&0)]))
+                    .collect();
                 String::from_utf16_lossy(&unites)
             } else {
                 String::from_utf8_lossy(valeur).into_owned()
@@ -121,7 +124,9 @@ fn sujet(der: &[u8]) -> Option<String> {
         champs = tlv(champs)?.2;
     }
     let (_, nom, _) = tlv(champs)?;
-    attribut(nom, 3).or_else(|| attribut(nom, 10)).or_else(|| attribut(nom, 11))
+    attribut(nom, 3)
+        .or_else(|| attribut(nom, 10))
+        .or_else(|| attribut(nom, 11))
 }
 
 fn base64(texte: &str) -> Option<Vec<u8>> {
@@ -135,7 +140,10 @@ fn base64(texte: &str) -> Option<Vec<u8>> {
             _ => return None,
         }))
     };
-    let propre: Vec<u8> = texte.bytes().filter(|c| !c.is_ascii_whitespace() && *c != b'=').collect();
+    let propre: Vec<u8> = texte
+        .bytes()
+        .filter(|c| !c.is_ascii_whitespace() && *c != b'=')
+        .collect();
     let mut sortie = Vec::with_capacity(propre.len() * 3 / 4);
     for bloc in propre.chunks(4) {
         if bloc.len() < 2 {
@@ -300,7 +308,9 @@ pub fn certificats() -> Vec<Constat> {
     let mut constats = Vec::new();
     for l in sortie.lines() {
         let c: Vec<&str> = l.trim().splitn(5, '|').collect();
-        let ["CERT", magasin, cle, empreinte, nom] = c[..] else { continue };
+        let ["CERT", magasin, cle, empreinte, nom] = c[..] else {
+            continue;
+        };
         if !vus.insert(empreinte.to_string()) {
             continue;
         }
@@ -369,7 +379,10 @@ wdpi4zlo
         // Fichier qui n'est pas un certificat : rien, sans planter.
         let rien: Vec<String> = Vec::new();
         assert_eq!(noms_du_fichier(b"pas un certificat"), rien);
-        assert_eq!(noms_du_fichier(b"-----BEGIN CERTIFICATE-----\n!!!\n-----END CERTIFICATE-----\n"), rien);
+        assert_eq!(
+            noms_du_fichier(b"-----BEGIN CERTIFICATE-----\n!!!\n-----END CERTIFICATE-----\n"),
+            rien
+        );
     }
 
     #[test]
@@ -381,6 +394,9 @@ wdpi4zlo
         let c = juger("Mon entreprise CA", "/x", false, &retirer);
         assert_eq!(c.probleme, Some(Niveau::Info));
         assert!(c.correctif.as_ref().is_some_and(|k| !k.automatique));
-        assert_eq!(juger("Mon entreprise CA", "/x", true, &retirer).probleme, Some(Niveau::Eleve));
+        assert_eq!(
+            juger("Mon entreprise CA", "/x", true, &retirer).probleme,
+            Some(Niveau::Eleve)
+        );
     }
 }

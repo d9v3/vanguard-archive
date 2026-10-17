@@ -114,13 +114,20 @@ fn cle_alerte(alerte: &str) -> String {
     if alerte.starts_with("Ports en écoute") {
         return alerte.to_string();
     }
-    alerte.chars().map(|c| if c.is_ascii_digit() { '#' } else { c }).collect()
+    alerte
+        .chars()
+        .map(|c| if c.is_ascii_digit() { '#' } else { c })
+        .collect()
 }
 
 /// Notifications à envoyer entre deux passages : (titre, texte).
 fn nouveautes_machine(avant: &EtatMachine, apres: &EtatMachine) -> Vec<(String, String)> {
     let connues: Vec<String> = avant.alertes.iter().map(|a| cle_alerte(a)).collect();
-    let nouvelles: Vec<&String> = apres.alertes.iter().filter(|a| !connues.contains(&cle_alerte(a))).collect();
+    let nouvelles: Vec<&String> = apres
+        .alertes
+        .iter()
+        .filter(|a| !connues.contains(&cle_alerte(a)))
+        .collect();
     let mut notes = Vec::new();
     for a in nouvelles.iter().take(3) {
         let (cat, msg) = a.split_once(" : ").unwrap_or(("", a.as_str()));
@@ -280,7 +287,10 @@ const ANCIENNE_TACHE_WINDOWS: &str = "netscan - surveillance du reseau";
 
 #[cfg(windows)]
 fn ancienne_installee() -> bool {
-    crate::machine::windows::ps(&format!("Get-ScheduledTask -TaskName '{ANCIENNE_TACHE_WINDOWS}' | Out-Null")).is_some()
+    crate::machine::windows::ps(&format!(
+        "Get-ScheduledTask -TaskName '{ANCIENNE_TACHE_WINDOWS}' | Out-Null"
+    ))
+    .is_some()
 }
 
 #[cfg(windows)]
@@ -333,12 +343,30 @@ mod tests {
 
     #[test]
     fn nouveautes_de_la_machine() {
-        let avant = etat(90, &["Santé : Disque presque plein : / n'a plus que 30 Go libres (4 %).", "Ports en écoute : 8080/tcp ouvert."]);
+        let avant = etat(
+            90,
+            &[
+                "Santé : Disque presque plein : / n'a plus que 30 Go libres (4 %).",
+                "Ports en écoute : 8080/tcp ouvert.",
+            ],
+        );
         // Même disque avec d'autres nombres, même port : rien de nouveau.
-        let pareil = etat(88, &["Santé : Disque presque plein : / n'a plus que 25 Go libres (3 %).", "Ports en écoute : 8080/tcp ouvert."]);
+        let pareil = etat(
+            88,
+            &[
+                "Santé : Disque presque plein : / n'a plus que 25 Go libres (3 %).",
+                "Ports en écoute : 8080/tcp ouvert.",
+            ],
+        );
         assert_eq!(nouveautes_machine(&avant, &pareil), Vec::<(String, String)>::new());
         // Un nouveau port et une note qui chute de 15 points : deux notifications.
-        let pire = etat(75, &["Ports en écoute : 8080/tcp ouvert.", "Ports en écoute : 4444/tcp ouvert."]);
+        let pire = etat(
+            75,
+            &[
+                "Ports en écoute : 8080/tcp ouvert.",
+                "Ports en écoute : 4444/tcp ouvert.",
+            ],
+        );
         let n = nouveautes_machine(&avant, &pire);
         assert_eq!(n.len(), 2);
         assert!(n[0].1.contains("4444"));

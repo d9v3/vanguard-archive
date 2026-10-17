@@ -44,9 +44,15 @@ fn juger_volume(v: &Volume) -> Option<Constat> {
         return None;
     };
     let commande = if cfg!(windows) {
-        format!("Get-ChildItem '{}' -Directory -Force -ErrorAction SilentlyContinue | ForEach-Object {{ [pscustomobject]@{{ Go = [math]::Round(((Get-ChildItem $_.FullName -Recurse -File -Force -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum) / 1GB, 1); Dossier = $_.FullName }} }} | Sort-Object Go -Descending | Select-Object -First 15 | Format-Table -AutoSize", v.point)
+        format!(
+            "Get-ChildItem '{}' -Directory -Force -ErrorAction SilentlyContinue | ForEach-Object {{ [pscustomobject]@{{ Go = [math]::Round(((Get-ChildItem $_.FullName -Recurse -File -Force -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum) / 1GB, 1); Dossier = $_.FullName }} }} | Sort-Object Go -Descending | Select-Object -First 15 | Format-Table -AutoSize",
+            v.point
+        )
     } else {
-        format!("du -xh --max-depth=2 '{}' 2>/dev/null | sort -h | tail -15", v.point.replace('\'', r"'\''"))
+        format!(
+            "du -xh --max-depth=2 '{}' 2>/dev/null | sort -h | tail -15",
+            v.point.replace('\'', r"'\''")
+        )
     };
     Some(
         alerte(
@@ -78,7 +84,10 @@ fn constats_volumes(volumes: &[Volume]) -> Vec<Constat> {
             .map(|v| trf!("{} : {} libres", "{}: {} free", v.point, taille(v.libre)))
             .collect::<Vec<_>>()
             .join(", ");
-        constats.push(ok(CAT, trf!("Espace disque suffisant ({resume}).", "Enough disk space ({resume}).")));
+        constats.push(ok(
+            CAT,
+            trf!("Espace disque suffisant ({resume}).", "Enough disk space ({resume})."),
+        ));
     }
     constats
 }
@@ -137,7 +146,11 @@ fn constats_disques(disques: &[Disque]) -> Vec<Constat> {
     if !sains.is_empty() {
         constats.push(ok(
             CAT,
-            trf!("Disques en bonne santé : {}.", "Disks in good health: {}.", sains.join(", ")),
+            trf!(
+                "Disques en bonne santé : {}.",
+                "Disks in good health: {}.",
+                sains.join(", ")
+            ),
         ));
     }
     constats
@@ -154,7 +167,13 @@ fn constat_batterie(sante: u64) -> Constat {
             ),
         )
     } else {
-        ok(CAT, trf!("Batterie en bon état ({sante} % de sa capacité d'origine).", "Battery in good condition ({sante}% of its original capacity)."))
+        ok(
+            CAT,
+            trf!(
+                "Batterie en bon état ({sante} % de sa capacité d'origine).",
+                "Battery in good condition ({sante}% of its original capacity)."
+            ),
+        )
     }
 }
 
@@ -167,7 +186,10 @@ fn constat_temperatures(mesures: &[(&'static str, f64, f64)]) -> Option<Constat>
     let chauds: Vec<String> = mesures.iter().filter(|(_, t, seuil)| t >= seuil).map(texte).collect();
     Some(if chauds.is_empty() {
         let liste = mesures.iter().map(texte).collect::<Vec<_>>().join(", ");
-        ok(CAT, trf!("Températures normales : {liste}.", "Normal temperatures: {liste}."))
+        ok(
+            CAT,
+            trf!("Températures normales : {liste}.", "Normal temperatures: {liste}."),
+        )
     } else {
         alerte(
             CAT,
@@ -189,7 +211,10 @@ fn degres_nvidia() -> Option<f64> {
     if r.code != Some(0) {
         return None;
     }
-    r.sortie.lines().filter_map(|l| l.trim().parse::<f64>().ok()).reduce(f64::max)
+    r.sortie
+        .lines()
+        .filter_map(|l| l.trim().parse::<f64>().ok())
+        .reduce(f64::max)
 }
 
 #[cfg(target_os = "linux")]
@@ -211,17 +236,23 @@ mod systeme {
         let mut volumes = Vec::new();
         for l in montages.lines() {
             let c: Vec<&str> = l.split_whitespace().collect();
-            let [peripherique, point, genre, ..] = c[..] else { continue };
+            let [peripherique, point, genre, ..] = c[..] else {
+                continue;
+            };
             // /proc/mounts écrit les espaces en « \040 ».
             let point = point.replace("\\040", " ");
             if !SYSTEMES_DE_FICHIERS.contains(&genre)
                 || vus.contains(&peripherique)
-                || ["/run/media/", "/media/", "/mnt/", "/var/lib/docker", "/snap/"].iter().any(|p| point.starts_with(p))
+                || ["/run/media/", "/media/", "/mnt/", "/var/lib/docker", "/snap/"]
+                    .iter()
+                    .any(|p| point.starts_with(p))
             {
                 continue;
             }
             vus.push(peripherique);
-            let Ok(chemin) = std::ffi::CString::new(point.as_bytes()) else { continue };
+            let Ok(chemin) = std::ffi::CString::new(point.as_bytes()) else {
+                continue;
+            };
             // SAFETY : statvfs remplit la structure fournie à partir d'un chemin C valide.
             let mut s: libc::statvfs = unsafe { std::mem::zeroed() };
             if unsafe { libc::statvfs(chemin.as_ptr(), &raw mut s) } != 0 {
@@ -252,12 +283,19 @@ mod systeme {
 
     /// Disques internes lus par udisks2, sans droits root : NVMe (attributs SMART complets) et SATA (verdict SMART).
     pub fn disques() -> Vec<Disque> {
-        let Some(r) = crate::commande::lancer(std::process::Command::new("busctl").args(["--list", "tree", UDISKS]), 10)
-        else {
+        let Some(r) = crate::commande::lancer(
+            std::process::Command::new("busctl").args(["--list", "tree", UDISKS]),
+            10,
+        ) else {
             return Vec::new();
         };
         let mut disques = Vec::new();
-        for chemin in r.sortie.lines().map(str::trim).filter(|l| l.starts_with("/org/freedesktop/UDisks2/drives/")) {
+        for chemin in r
+            .sortie
+            .lines()
+            .map(str::trim)
+            .filter(|l| l.starts_with("/org/freedesktop/UDisks2/drives/"))
+        {
             let propriete = |interface: &str, nom: &str| busctl(&["get-property", UDISKS, chemin, interface, nom]);
             let modele = propriete("org.freedesktop.UDisks2.Drive", "Model")
                 .and_then(|v| v.as_str().map(str::to_string))
@@ -269,7 +307,8 @@ mod systeme {
                     .and_then(|d| d.get(0).cloned())
                     .unwrap_or_default();
                 let nombre = |cle: &str| attributs[cle]["data"].as_u64();
-                let reserve_epuisee = matches!((nombre("avail_spare"), nombre("spare_thresh")), (Some(r), Some(s)) if r < s);
+                let reserve_epuisee =
+                    matches!((nombre("avail_spare"), nombre("spare_thresh")), (Some(r), Some(s)) if r < s);
                 disques.push(Disque {
                     modele,
                     defaillant: avertissements.as_array().is_some_and(|a| !a.is_empty()) || reserve_epuisee,
@@ -300,9 +339,15 @@ mod systeme {
 
     /// Santé de la batterie de l'ordinateur (pas celle d'une souris ou d'une manette), en pourcentage.
     pub fn batterie() -> Option<u64> {
-        for e in std::fs::read_dir("/sys/class/power_supply").into_iter().flatten().flatten() {
+        for e in std::fs::read_dir("/sys/class/power_supply")
+            .into_iter()
+            .flatten()
+            .flatten()
+        {
             let d = e.path();
-            if lire(&d.join("type")).as_deref() != Some("Battery") || lire(&d.join("scope")).as_deref() == Some("Device") {
+            if lire(&d.join("type")).as_deref() != Some("Battery")
+                || lire(&d.join("scope")).as_deref() == Some("Device")
+            {
                 continue;
             }
             let nombre = |f: &str| lire(&d.join(f)).and_then(|t| t.parse::<u64>().ok());
@@ -487,22 +532,49 @@ mod tests {
         // 60 Go libres sur 1 To (6 %) : assez de place, pas d'alerte.
         assert!(juger_volume(&v(60, 1000)).is_none());
         // Petite partition de démarrage (1 Go) : 8 % libres = moyen, sous 5 % = élevé (un noyau ne s'installe plus).
-        let demarrage = |libre| Volume { point: "/boot".into(), libre, total: GIO };
-        assert_eq!(juger_volume(&demarrage(GIO / 12)).unwrap().probleme, Some(Niveau::Moyen));
-        assert_eq!(juger_volume(&demarrage(GIO / 25)).unwrap().probleme, Some(Niveau::Eleve));
+        let demarrage = |libre| Volume {
+            point: "/boot".into(),
+            libre,
+            total: GIO,
+        };
+        assert_eq!(
+            juger_volume(&demarrage(GIO / 12)).unwrap().probleme,
+            Some(Niveau::Moyen)
+        );
+        assert_eq!(
+            juger_volume(&demarrage(GIO / 25)).unwrap().probleme,
+            Some(Niveau::Eleve)
+        );
         assert_eq!(constats_volumes(&[v(500, 1800)])[0].probleme, None);
     }
 
     #[test]
     fn etat_des_disques() {
-        let d = |defaillant, usure, erreurs| Disque { modele: "SSD".into(), defaillant, usure, erreurs };
+        let d = |defaillant, usure, erreurs| Disque {
+            modele: "SSD".into(),
+            defaillant,
+            usure,
+            erreurs,
+        };
         assert_eq!(constats_disques(&[d(false, Some(6), 0)])[0].probleme, None);
-        assert_eq!(constats_disques(&[d(true, Some(6), 0)])[0].probleme, Some(Niveau::Eleve));
-        assert_eq!(constats_disques(&[d(false, Some(95), 0)])[0].probleme, Some(Niveau::Moyen));
+        assert_eq!(
+            constats_disques(&[d(true, Some(6), 0)])[0].probleme,
+            Some(Niveau::Eleve)
+        );
+        assert_eq!(
+            constats_disques(&[d(false, Some(95), 0)])[0].probleme,
+            Some(Niveau::Moyen)
+        );
         assert_eq!(constats_disques(&[d(false, None, 3)])[0].probleme, Some(Niveau::Moyen));
         assert_eq!(constat_batterie(72).probleme, Some(Niveau::Info));
-        assert_eq!(constat_temperatures(&[("processeur", 43.0, 90.0)]).unwrap().probleme, None);
-        assert_eq!(constat_temperatures(&[("processeur", 96.0, 90.0)]).unwrap().probleme, Some(Niveau::Info));
+        assert_eq!(
+            constat_temperatures(&[("processeur", 43.0, 90.0)]).unwrap().probleme,
+            None
+        );
+        assert_eq!(
+            constat_temperatures(&[("processeur", 96.0, 90.0)]).unwrap().probleme,
+            Some(Niveau::Info)
+        );
         assert!(constat_temperatures(&[]).is_none());
     }
 }
