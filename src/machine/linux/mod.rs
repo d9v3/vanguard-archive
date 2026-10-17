@@ -25,6 +25,78 @@ use privileges::*;
 const SSHD_SENTINEL: &str = "/etc/ssh/sshd_config.d/00-sentinel.conf";
 pub const NOM: &str = "Linux";
 
+/// Omarchy installé : ses outils de mise à jour et d'installation passent avant pacman (instantané, migrations,
+/// vérifications). Sur un Arch pur, on garde pacman.
+pub fn omarchy() -> bool {
+    Path::new("/usr/bin/omarchy").exists()
+}
+
+/// Commande pour installer un outil manquant sur cette distribution (texte d'aide).
+pub fn commande_installation(paquet: &str) -> String {
+    Paquets::detecter().map_or_else(
+        || {
+            trf!(
+                "installe « {paquet} » avec ta distribution",
+                "install “{paquet}” with your distribution"
+            )
+        },
+        |g| g.installer(paquet),
+    )
+}
+
+/// Système « atomique » : racine en lecture seule, mises à jour par image complète. dnf ou zypper n'y installent
+/// rien ; chacun a son outil, appliqué au prochain redémarrage.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Atomique {
+    /// Fedora Silverblue/Kinoite, Bazzite, Bluefin, Aurora.
+    RpmOstree,
+    /// openSUSE Aeon, Kalpa, MicroOS.
+    Transactionnel,
+}
+
+pub fn atomique() -> Option<Atomique> {
+    if Path::new("/run/ostree-booted").exists() && Path::new("/usr/bin/rpm-ostree").exists() {
+        return Some(Atomique::RpmOstree);
+    }
+    let racine = std::fs::read_to_string("/proc/mounts").unwrap_or_default();
+    (Path::new("/usr/sbin/transactional-update").exists() && racine_lecture_seule(&racine))
+        .then_some(Atomique::Transactionnel)
+}
+
+/// La racine est-elle montée en lecture seule ? (ligne « /dev/… / btrfs ro,… » de /proc/mounts)
+fn racine_lecture_seule(mounts: &str) -> bool {
+    mounts
+        .lines()
+        .rev()
+        .find_map(|l| {
+            let c: Vec<&str> = l.split_whitespace().collect();
+            (c.get(1) == Some(&"/")).then(|| c.get(3).copied().unwrap_or(""))
+        })
+        .is_some_and(|options| options.split(',').any(|o| o == "ro"))
+}
+
+/// Famille de la distribution d'après /etc/os-release : ID, puis ID_LIKE pour les dérivées (Mint et Pop!_OS
+/// → ubuntu, Manjaro et CachyOS → arch, Nobara et Rocky → fedora…).
+fn famille(os_release: &str) -> Option<Paquets> {
+    let valeur = |cle: &str| {
+        os_release
+            .lines()
+            .find_map(|l| l.strip_prefix(cle)?.strip_prefix('='))
+            .map(|v| v.trim().trim_matches('"').to_lowercase())
+            .unwrap_or_default()
+    };
+    format!("{} {}", valeur("ID"), valeur("ID_LIKE"))
+        .split_whitespace()
+        .find_map(|id| match id {
+            "arch" | "archarm" => Some(Paquets::Pacman),
+            "debian" | "ubuntu" => Some(Paquets::Apt),
+            "fedora" | "rhel" | "centos" => Some(Paquets::Dnf),
+            "suse" | "sles" => Some(Paquets::Zypper),
+            id if id.starts_with("opensuse") => Some(Paquets::Zypper),
+            _ => None,
+        })
+}
+
 /// Gestionnaire de paquets de la distribution : Arch, Debian/Ubuntu/Mint, Fedora, openSUSE.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Paquets {
@@ -35,12 +107,27 @@ pub enum Paquets {
 }
 
 impl Paquets {
+    /// La distribution d'abord (os-release), confirmée par la présence de son outil ; sinon le premier outil
+    /// trouvé, pour une distribution que l'on ne connaît pas.
     pub fn detecter() -> Option<Self> {
         let present = |c: &str| {
             ["/usr/bin", "/bin", "/usr/sbin"]
                 .iter()
                 .any(|d| Path::new(d).join(c).exists())
         };
+        let outil = |p: Paquets| match p {
+            Paquets::Pacman => present("pacman"),
+            Paquets::Apt => present("apt-get"),
+            // Les Fedora atomiques n'ont pas toujours dnf : rpm-ostree le remplace.
+            Paquets::Dnf => present("dnf") || present("rpm-ostree"),
+            Paquets::Zypper => present("zypper"),
+        };
+        let os_release = std::fs::read_to_string("/etc/os-release")
+            .or_else(|_| std::fs::read_to_string("/usr/lib/os-release"))
+            .unwrap_or_default();
+        if let Some(p) = famille(&os_release).filter(|&p| outil(p)) {
+            return Some(p);
+        }
         [
             ("pacman", Paquets::Pacman),
             ("apt-get", Paquets::Apt),
@@ -51,9 +138,26 @@ impl Paquets {
         .find_map(|(c, p)| present(c).then_some(p))
     }
 
-    /// Commande d'installation non interactive.
+    /// Commande d'installation non interactive. Sous Omarchy, son propre outil (il vérifie ensuite que chaque paquet
+    /// est bien là) ; sur un Arch pur, pacman. Sur un système atomique, l'ajout se fait à l'image suivante.
     pub fn installer(self, paquets: &str) -> String {
+        match (self, atomique()) {
+            (Paquets::Dnf, Some(Atomique::RpmOstree)) => {
+                return format!(
+                    "sudo rpm-ostree install --idempotent {paquets} && echo '{}'",
+                    tr!("Redémarre pour l'utiliser.", "Reboot to use it.")
+                );
+            }
+            (Paquets::Zypper, Some(Atomique::Transactionnel)) => {
+                return format!(
+                    "sudo transactional-update --non-interactive pkg install {paquets} && echo '{}'",
+                    tr!("Redémarre pour l'utiliser.", "Reboot to use it.")
+                );
+            }
+            _ => {}
+        }
         match self {
+            Paquets::Pacman if omarchy() => format!("omarchy pkg add {paquets}"),
             Paquets::Pacman => format!("sudo pacman -S --needed --noconfirm {paquets}"),
             Paquets::Apt => format!("sudo apt-get install -y {paquets}"),
             Paquets::Dnf => format!("sudo dnf install -y {paquets}"),
@@ -140,9 +244,20 @@ impl Paquets {
         }
     }
 
-    fn mise_a_jour(self) -> &'static str {
+    /// Commande de mise à jour complète : l'outil propre à la distribution quand elle en a un (Omarchy,
+    /// Universal Blue), l'image suivante sur un système atomique, sinon le gestionnaire de paquets.
+    pub(crate) fn mise_a_jour(self) -> &'static str {
+        match (self, atomique()) {
+            // Bazzite, Bluefin, Aurora : met aussi à jour les Flatpak et les conteneurs.
+            (Paquets::Dnf, Some(Atomique::RpmOstree)) if Path::new("/usr/bin/ujust").exists() => return "ujust update",
+            (Paquets::Dnf, Some(Atomique::RpmOstree)) => return "sudo rpm-ostree upgrade",
+            (Paquets::Zypper, Some(Atomique::Transactionnel)) => {
+                return "sudo transactional-update --non-interactive dup";
+            }
+            _ => {}
+        }
         match self {
-            Paquets::Pacman if Path::new("/usr/bin/omarchy").exists() => "omarchy update",
+            Paquets::Pacman if omarchy() => "omarchy update",
             Paquets::Pacman => "sudo pacman -Syu --noconfirm",
             Paquets::Apt => "sudo apt-get update && sudo apt-get full-upgrade -y",
             Paquets::Dnf => "sudo dnf upgrade -y",
@@ -1062,6 +1177,36 @@ pub fn auditer() -> Audit {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn familles_de_distributions() {
+        let f = |t: &str| famille(t);
+        assert!(f("ID=arch\n") == Some(Paquets::Pacman));
+        assert!(f("NAME=\"Manjaro Linux\"\nID=manjaro\nID_LIKE=arch\n") == Some(Paquets::Pacman));
+        assert!(f("ID=cachyos\nID_LIKE=\"arch\"\n") == Some(Paquets::Pacman));
+        assert!(f("ID=debian\nVERSION_ID=\"12\"\n") == Some(Paquets::Apt));
+        assert!(f("ID=linuxmint\nID_LIKE=\"ubuntu debian\"\n") == Some(Paquets::Apt));
+        assert!(f("ID=pop\nID_LIKE=\"ubuntu debian\"\n") == Some(Paquets::Apt));
+        assert!(f("ID=fedora\nVARIANT_ID=kinoite\n") == Some(Paquets::Dnf));
+        assert!(f("ID=bazzite\nID_LIKE=\"fedora\"\n") == Some(Paquets::Dnf));
+        assert!(f("ID=\"rocky\"\nID_LIKE=\"rhel centos fedora\"\n") == Some(Paquets::Dnf));
+        assert!(f("ID=\"opensuse-tumbleweed\"\nID_LIKE=\"opensuse suse\"\n") == Some(Paquets::Zypper));
+        assert!(f("ID=alpine\n").is_none());
+        // VERSION_ID ne doit pas passer pour ID.
+        assert!(f("VERSION_ID=arch\n").is_none());
+    }
+
+    #[test]
+    fn racine_en_lecture_seule() {
+        assert!(racine_lecture_seule(
+            "/dev/vda3 / btrfs ro,relatime,ssd,subvol=/@/.snapshots/5/snapshot 0 0\n/dev/vda3 /var btrfs rw 0 0\n"
+        ));
+        assert!(!racine_lecture_seule(
+            "/dev/nvme0n1p2 / btrfs rw,noatime 0 0\nproc /proc proc ro 0 0\n"
+        ));
+        // Dernier montage sur / : c'est lui qui compte.
+        assert!(!racine_lecture_seule("none / rootfs ro 0 0\n/dev/sda1 / ext4 rw 0 0\n"));
+    }
 
     #[test]
     fn failles_du_processeur() {

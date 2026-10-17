@@ -150,8 +150,9 @@ fn lancer(source: &Path) {
             .status()
     } else {
         trp!(
-            "  ✖ Ni bubblewrap ni firejail : installe-en un (sudo pacman -S bubblewrap, ou apt/dnf install bubblewrap).",
-            "  ✖ Neither bubblewrap nor firejail: install one (sudo pacman -S bubblewrap, or apt/dnf install bubblewrap)."
+            "  ✖ Ni bubblewrap ni firejail. Pour installer bubblewrap : {}",
+            "  ✖ Neither bubblewrap nor firejail. To install bubblewrap: {}",
+            crate::machine::linux::commande_installation("bubblewrap")
         );
         let _ = std::fs::remove_dir_all(&jetable);
         return;

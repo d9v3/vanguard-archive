@@ -227,6 +227,8 @@ fn nettoyage(gestion: Option<machine::linux::Paquets>) -> Reparation {
             "orphelins=$(pacman -Qdtq); if [ -n \"$orphelins\" ]; then sudo pacman -Rns $orphelins; else echo 'No orphan package.'; fi"
         )),
         Some(Paquets::Apt) => commandes.push("sudo apt-get autoremove --purge"),
+        // Image en lecture seule (rpm-ostree) : rien à retirer à la main.
+        Some(Paquets::Dnf) if crate::machine::linux::atomique().is_some() => {}
         Some(Paquets::Dnf) => commandes.push("sudo dnf autoremove"),
         Some(Paquets::Zypper) => commandes.push("zypper packages --unneeded"),
         None => {}
@@ -501,8 +503,9 @@ fn pare_feu(gestion: Option<machine::linux::Paquets>) -> Reparation {
 
 #[cfg(target_os = "linux")]
 pub fn liste() -> Vec<Reparation> {
-    use crate::machine::linux::Paquets;
+    use crate::machine::linux::{Atomique, Paquets, atomique};
     let gestion = Paquets::detecter();
+    let atomique = atomique();
     // Sans systemd (conteneur, Alpine, Void…), les réparations qui passent par systemctl ou journalctl ne marchent pas.
     let systemd = std::path::Path::new("/run/systemd/system").is_dir();
     let mut l = Vec::new();
@@ -541,6 +544,20 @@ pub fn liste() -> Vec<Reparation> {
 
     // Paquets cassés
     match gestion {
+        // Système atomique : on ne répare pas l'image en place, on annule une opération restée bloquée puis on
+        // repart d'une image propre (l'ancienne reste au menu de démarrage).
+        Some(Paquets::Dnf) if atomique == Some(Atomique::RpmOstree) => l.push(rep(
+            tr!("Mises à jour en erreur (rpm-ostree)", "Updates failing (rpm-ostree)"),
+            tr!("Annule une opération restée bloquée, vide le cache, puis prépare l'image suivante. L'image actuelle reste au menu de démarrage en cas de problème.", "Cancels a stuck operation, clears the cache, then prepares the next image. The current image stays in the boot menu in case of trouble."),
+            tr!("quelques minutes", "a few minutes"),
+            &["sudo rpm-ostree cancel", "sudo rpm-ostree cleanup -m", "sudo rpm-ostree upgrade"],
+        )),
+        Some(Paquets::Zypper) if atomique == Some(Atomique::Transactionnel) => l.push(rep(
+            tr!("Mises à jour en erreur (transactional-update)", "Updates failing (transactional-update)"),
+            tr!("Prépare un nouvel instantané à jour, dépendances réparées. L'actuel reste au menu de démarrage en cas de problème.", "Prepares a new up-to-date snapshot with dependencies repaired. The current one stays in the boot menu in case of trouble."),
+            tr!("quelques minutes", "a few minutes"),
+            &["sudo transactional-update --non-interactive dup"],
+        )),
         Some(Paquets::Pacman) => l.push(rep(
             tr!("Mises à jour en erreur (pacman)", "Updates failing (pacman)"),
             tr!("Débloque pacman après un arrêt brutal, renouvelle les clés de signature (erreurs « invalid or corrupted package »), puis met à jour.", "Unlocks pacman after a crash, renews the signing keys (“invalid or corrupted package” errors), then updates."),
@@ -548,7 +565,8 @@ pub fn liste() -> Vec<Reparation> {
             &[
                 tr!("pgrep -x pacman >/dev/null && echo 'pacman tourne déjà : attends la fin' && exit 1; sudo rm -f /var/lib/pacman/db.lck", "pgrep -x pacman >/dev/null && echo 'pacman is already running: wait for it to finish' && exit 1; sudo rm -f /var/lib/pacman/db.lck"),
                 "sudo pacman -Sy --needed --noconfirm archlinux-keyring",
-                "sudo pacman -Syu",
+                // Sous Omarchy, sa mise à jour (instantané, migrations) plutôt qu'un pacman -Syu brut.
+                if machine::linux::omarchy() { "omarchy update" } else { "sudo pacman -Syu" },
             ],
         ).avec_restauration()),
         Some(Paquets::Apt) => l.push(rep(
@@ -605,6 +623,7 @@ pub fn liste() -> Vec<Reparation> {
         Some(Paquets::Pacman) if present("paccache") => vec!["sudo paccache -rk2", "sudo paccache -ruk0"],
         Some(Paquets::Pacman) => vec!["sudo pacman -Sc --noconfirm"],
         Some(Paquets::Apt) => vec!["sudo apt-get autoremove -y", "sudo apt-get clean"],
+        Some(Paquets::Dnf) if atomique == Some(Atomique::RpmOstree) => vec!["sudo rpm-ostree cleanup -bm"],
         Some(Paquets::Dnf) => vec!["sudo dnf autoremove -y", "sudo dnf clean all"],
         Some(Paquets::Zypper) => vec!["sudo zypper clean --all"],
         None => vec![],

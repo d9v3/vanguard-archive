@@ -104,6 +104,21 @@ pub fn etat() -> Etat {
     )
 }
 
+#[cfg(target_os = "linux")]
+fn outil_upnp() -> String {
+    crate::machine::linux::commande_installation("miniupnpc")
+}
+
+/// Sous Windows, l'interface UPnP fait partie du système : seul PowerShell bloqué l'empêche de répondre.
+#[cfg(windows)]
+fn outil_upnp() -> String {
+    tr!(
+        "PowerShell est bloqué sur ce poste.",
+        "PowerShell is blocked on this computer."
+    )
+    .to_string()
+}
+
 /// Niveau d'une redirection : celui du service exposé (bureau à distance, partage, SSH… = élevé).
 pub fn niveau(r: &Redirection) -> Niveau {
     info_port(r.port_appareil).niveau
@@ -121,8 +136,9 @@ pub fn afficher(e: &Etat) {
             "  {VERT}✔{RESET} UPnP off or absent on the router: no device can open a port to the Internet by itself."
         ),
         Etat::OutilAbsent => trp!(
-            "  {DISCRET}Pour voir les ports que tes appareils ont ouverts sur la box : sudo pacman -S miniupnpc (ou apt/dnf install miniupnpc).{RESET}",
-            "  {DISCRET}To see the ports your devices opened on the router: sudo pacman -S miniupnpc (or apt/dnf install miniupnpc).{RESET}"
+            "  {DISCRET}Pour voir les ports que tes appareils ont ouverts sur la box : {}{RESET}",
+            "  {DISCRET}To see the ports your devices opened on the router: {}{RESET}",
+            outil_upnp()
         ),
         Etat::Actif(liste) if liste.is_empty() => trp!(
             "  {GRIS}UPnP actif sur la box, aucun port ouvert pour l'instant. À couper dans la box si aucun appareil n'en a besoin.{RESET}",

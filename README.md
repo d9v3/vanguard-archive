@@ -6,6 +6,12 @@ corrige après ton accord. Linux et Windows, sans installation, en français ou 
 
 *Portable security check for your computer and your home network: Linux and Windows, French or English.*
 
+**Systèmes pris en charge** — Windows 10 et 11 ; Linux : Arch et dérivées (Omarchy, Manjaro, EndeavourOS, CachyOS),
+Debian, Ubuntu, Mint, Pop!_OS, Fedora (et RHEL, Rocky, Nobara), openSUSE, ainsi que les systèmes atomiques
+(Bazzite, Silverblue, Kinoite, Bluefin, Aeon). Sentinel reconnaît la distribution et propose ses propres commandes :
+`omarchy update` / `omarchy pkg add` sous Omarchy, `ujust update` sur Bazzite, `rpm-ostree` ou `transactional-update`
+sur un système atomique, sinon pacman, apt, dnf ou zypper.
+
 ![Menu de Sentinel](assets/captures/menu.png)
 
 ## Ce que fait Sentinel
