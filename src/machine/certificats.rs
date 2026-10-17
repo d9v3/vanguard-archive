@@ -287,7 +287,7 @@ pub fn certificats() -> Vec<Constat> {
 #[cfg(windows)]
 pub fn certificats() -> Vec<Constat> {
     let Some(sortie) = super::windows::ps(
-        // Le lecteur Cert: n'existe qu'une fois le module chargé : avec -NoProfile, le nommer ne le charge pas.
+        // Module du lecteur Cert: chargé d'office (voir windows::powershell pour la cause de la panne vue en VM).
         "Import-Module Microsoft.PowerShell.Security -ErrorAction SilentlyContinue; \
          foreach ($m in 'LocalMachine', 'CurrentUser') { Get-ChildItem \"Cert:\\$m\\Root\" | ForEach-Object { $c = $_; \
          $nom = try { $c.GetNameInfo([Security.Cryptography.X509Certificates.X509NameType]::SimpleName, $false) } catch { $c.Subject }; \

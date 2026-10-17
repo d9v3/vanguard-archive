@@ -15,6 +15,15 @@ const FIN: &str = "__SENTINEL_FIN__";
 /// Exécute un script PowerShell et retourne sa sortie (UTF-8), ou `None` en cas d'échec.
 /// Le script doit aller jusqu'au marqueur de fin : une sortie vide sans marqueur (PowerShell bloqué,
 /// absent, ou remplacé par un bouchon comme sous Wine) n'est jamais prise pour une réponse.
+/// Windows PowerShell 5.1, avec ses propres modules. Lancé depuis PowerShell 7 (Windows Terminal), il hériterait
+/// de son PSModulePath et chargerait des modules de la version 7, incompatibles : le lecteur Cert: manquait ainsi
+/// dans le test de la VM. Sans la variable, la 5.1 reprend ses chemins par défaut.
+fn powershell() -> Command {
+    let mut c = Command::new("powershell");
+    c.env_remove("PSModulePath");
+    c
+}
+
 pub fn ps(script: &str) -> Option<String> {
     // 60 s : un cmdlet bloqué (service Defender suspendu…) ne doit pas figer l'audit.
     ps_delai(script, 60)
@@ -25,7 +34,7 @@ fn ps_delai(script: &str, secondes: u64) -> Option<String> {
     let complet =
         format!("[Console]::OutputEncoding=[Text.Encoding]::UTF8; $ErrorActionPreference='Stop'; {script}; '{FIN}'");
     let r = crate::commande::lancer(
-        Command::new("powershell").args(["-NoProfile", "-NonInteractive", "-Command", &complet]),
+        powershell().args(["-NoProfile", "-NonInteractive", "-Command", &complet]),
         secondes,
     )?;
     let (avant, _) = r.sortie.rsplit_once(FIN)?;
@@ -134,7 +143,7 @@ pub fn powershell_admin(commandes: &[String]) -> bool {
          $p.WaitForExit(); \
          if ($null -eq $p.ExitCode) {{ exit 4 }}; exit $p.ExitCode"
     );
-    Command::new("powershell")
+    powershell()
         .args(["-NoProfile", "-Command", &lanceur])
         .status()
         .is_ok_and(|s| s.success())
