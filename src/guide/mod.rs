@@ -287,6 +287,16 @@ fn afficher_commande(c: &Commande) {
     }
 }
 
+/// Un programme seul à l'écran, jusqu'à Entrée.
+fn montrer_programme(s: Systeme, p: &Programme) {
+    print!("\x1b[2J\x1b[H");
+    afficher_programme(s, p);
+    demander(&trf!(
+        "\n{GRIS}Entrée pour revenir…{RESET}",
+        "\n{GRIS}Enter to go back…{RESET}"
+    ));
+}
+
 fn afficher_programme(s: Systeme, p: &Programme) {
     titre(&format!("{} › {}", s.nom(), nom(p)));
     let installe = if absent(s, p) {
@@ -372,12 +382,7 @@ fn menu_systeme(s: Systeme) {
             continue;
         };
         dernier = choix.to_string();
-        print!("\x1b[2J\x1b[H");
-        afficher_programme(s, p);
-        demander(&trf!(
-            "\n{GRIS}Entrée pour revenir…{RESET}",
-            "\n{GRIS}Enter to go back…{RESET}"
-        ));
+        montrer_programme(s, p);
     }
 }
 
@@ -468,14 +473,7 @@ pub fn ouvrir(systeme: usize, programme: Option<usize>) {
         .and_then(|p| p.checked_sub(1))
         .and_then(|p| s.programmes().get(p))
     {
-        Some(p) => {
-            print!("\x1b[2J\x1b[H");
-            afficher_programme(s, p);
-            demander(&trf!(
-                "\n{GRIS}Entrée pour revenir…{RESET}",
-                "\n{GRIS}Enter to go back…{RESET}"
-            ));
-        }
+        Some(p) => montrer_programme(s, p),
         None => menu_systeme(s),
     }
 }

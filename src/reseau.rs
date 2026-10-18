@@ -51,6 +51,27 @@ pub struct PortOuvert {
 }
 
 impl PortOuvert {
+    /// Un port ouvert, décrit par `i` (service, gravité, conseil).
+    fn decrit(
+        port: u16,
+        i: &crate::risk::InfoPort,
+        banniere: Option<String>,
+        nouveau: bool,
+        programme: Option<String>,
+        udp: bool,
+    ) -> Self {
+        PortOuvert {
+            port,
+            service: i.service,
+            niveau: i.niveau,
+            banniere,
+            conseil: i.conseil,
+            nouveau,
+            programme,
+            udp,
+        }
+    }
+
     /// « 445/tcp », « 161/udp ».
     pub fn libelle(&self) -> String {
         format!("{}/{}", self.port, if self.udp { "udp" } else { "tcp" })
@@ -1109,46 +1130,24 @@ pub async fn executer(o: Options) -> Result<Rapport, String> {
                     // Ports dynamiques RPC ouverts par Windows lui-même (vu en test dans la VM : 49664 et suivants,
                     // tenus par lsass, wininit, services, svchost, spoolsv) : normaux, pas « inconnus moyens ».
                     if i.service == crate::risk::inconnu() && rpc_dynamique_windows(port, programme.as_deref()) {
-                        return PortOuvert {
-                            port,
+                        let rpc = crate::risk::InfoPort {
                             service: tr!("RPC de Windows", "Windows RPC"),
                             niveau: Niveau::Info,
-                            banniere,
                             conseil: tr!(
                                 "Port dynamique ouvert par Windows pour ses services : normal, filtré par le pare-feu.",
                                 "Dynamic port opened by Windows for its services: normal, filtered by the firewall."
                             ),
-                            nouveau,
-                            programme,
-                            udp: false,
                         };
+                        return PortOuvert::decrit(port, &rpc, banniere, nouveau, programme, false);
                     }
-                    PortOuvert {
-                        port,
-                        service: i.service,
-                        niveau: i.niveau,
-                        banniere,
-                        conseil: i.conseil,
-                        nouveau,
-                        programme,
-                        udp: false,
-                    }
+                    PortOuvert::decrit(port, &i, banniere, nouveau, programme, false)
                 })
                 .chain(resultats_udp.remove(&ip).unwrap_or_default().into_iter().map(|(port, banniere)| {
-                    let i = info_udp(port);
-                    PortOuvert {
-                        port,
-                        service: i.service,
-                        niveau: i.niveau,
-                        banniere,
-                        conseil: i.conseil,
-                        nouveau: scan_comparable
-                            && !premier_scan
-                            && udp_deja_vu
-                            && !connu.is_some_and(|c| c.ports_udp.contains(&port)),
-                        programme: None,
-                        udp: true,
-                    }
+                    let nouveau = scan_comparable
+                        && !premier_scan
+                        && udp_deja_vu
+                        && !connu.is_some_and(|c| c.ports_udp.contains(&port));
+                    PortOuvert::decrit(port, &info_udp(port), banniere, nouveau, None, true)
                 }))
                 .collect();
                 let role = if Some(ip) == gw {

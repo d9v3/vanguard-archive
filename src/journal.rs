@@ -588,15 +588,27 @@ fn hasard(graine: &[u8]) -> u64 {
 /// Adresses MAC : le préfixe du fabricant (trois premiers octets) reste, le reste est inventé. Une adresse aléatoire
 /// (téléphones : bit « local » du premier octet) est inventée en entier, sorte gardée.
 fn masquer_mac(texte: &str) -> String {
+    remplacer_passages(texte, |b, i| {
+        let libre = i == 0 || !(b[i - 1].is_ascii_alphanumeric() || b[i - 1] == b':' || b[i - 1] == b'-');
+        if !libre {
+            return None;
+        }
+        let (fin, octets, separateur) = lire_mac(b, i)?;
+        let majuscules = b[i..fin].iter().any(u8::is_ascii_uppercase);
+        Some((fin, mac_inventee(octets, separateur, majuscules)))
+    })
+}
+
+/// Le texte où chaque passage que `trouver` reconnaît à une position (sa fin et son remplaçant) est remplacé, de gauche
+/// à droite ; la recherche reprend après chaque passage remplacé.
+fn remplacer_passages(texte: &str, trouver: impl Fn(&[u8], usize) -> Option<(usize, String)>) -> String {
     let b = texte.as_bytes();
     let mut sortie = String::with_capacity(texte.len());
     let (mut copie, mut i) = (0, 0);
     while i < b.len() {
-        let libre = i == 0 || !(b[i - 1].is_ascii_alphanumeric() || b[i - 1] == b':' || b[i - 1] == b'-');
-        if libre && let Some((fin, octets, separateur)) = lire_mac(b, i) {
-            let majuscules = texte[i..fin].bytes().any(|c| c.is_ascii_uppercase());
+        if let Some((fin, remplacant)) = trouver(b, i) {
             sortie.push_str(&texte[copie..i]);
-            sortie.push_str(&mac_inventee(octets, separateur, majuscules));
+            sortie.push_str(&remplacant);
             copie = fin;
             i = fin;
         } else {
@@ -736,27 +748,14 @@ fn ipv6_inventee(ip: Ipv6Addr, ecrite: &str) -> Option<String> {
 /// adresses privées (192.168…, 10…) sont les mêmes dans des millions de maisons et aident à comprendre une erreur de
 /// scan : elles restent, comme les DNS publics connus.
 fn masquer_ipv4(texte: &str) -> String {
-    let b = texte.as_bytes();
-    let mut sortie = String::with_capacity(texte.len());
-    let (mut copie, mut i) = (0, 0);
-    while i < b.len() {
+    remplacer_passages(texte, |b, i| {
         let libre = i == 0 || !(b[i - 1].is_ascii_alphanumeric() || b[i - 1] == b'.');
-        if libre
-            && b[i].is_ascii_digit()
-            && let Some((fin, ip)) = lire_ipv4(b, i)
-            && !ipv4_commune(ip)
-        {
-            sortie.push_str(&texte[copie..i]);
-            sortie.push_str("203.0.113.");
-            sortie.push_str(&(1 + hasard(&ip.octets()) % 254).to_string());
-            copie = fin;
-            i = fin;
-        } else {
-            i += 1;
+        if !libre || !b[i].is_ascii_digit() {
+            return None;
         }
-    }
-    sortie.push_str(&texte[copie..]);
-    sortie
+        let (fin, ip) = lire_ipv4(b, i).filter(|(_, ip)| !ipv4_commune(*ip))?;
+        Some((fin, format!("203.0.113.{}", 1 + hasard(&ip.octets()) % 254)))
+    })
 }
 
 /// Quatre nombres de 0 à 255 séparés par des points, ni collés à une lettre ni suivis d'un cinquième (« 5.1.2.3.4 »,
