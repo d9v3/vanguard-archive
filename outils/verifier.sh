@@ -34,10 +34,15 @@ etape() {
 clippy() { cargo clippy -q --all-targets --target "$1" -- -D warnings; }
 
 tests_wine() {
-  local prefixe
+  local prefixe resultat
   prefixe=$(mktemp -d "$TRAVAIL/wine.XXXX")
   WINEPREFIX=$prefixe WINEDEBUG=-all CARGO_TARGET_X86_64_PC_WINDOWS_GNU_RUNNER=$WINE \
     cargo test -q --target x86_64-pc-windows-gnu
+  resultat=$?
+  # Le serveur de Wine survit quelques secondes aux tests et écrit encore dans le préfixe : arrêté avant le ménage.
+  WINEPREFIX=$prefixe "${WINE%/*}/wineserver" -k 2>/dev/null
+  WINEPREFIX=$prefixe "${WINE%/*}/wineserver" -w 2>/dev/null
+  return "$resultat"
 }
 
 scripts_powershell() {
