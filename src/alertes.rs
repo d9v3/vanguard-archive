@@ -1,8 +1,10 @@
 //! Alertes sur le téléphone, par ntfy (logiciel libre, application gratuite pour Android et iPhone) : la surveillance
 //! et l'entretien du mois y envoient aussi leurs alertes. Le serveur public ntfy.sh ne demande aucun compte : qui
-//! connaît le sujet lit les messages. Le sujet est donc tiré au hasard (120 bits, il sert de mot de passe) et gardé
-//! sur cet ordinateur seulement ; le message reste minimal, sans adresse IP ni MAC (masquées si un texte en
-//! contenait). Un envoi raté est noté au journal, sans jamais rien bloquer.
+//! connaît le sujet lit les messages, et le serveur lit tout. Le sujet est donc tiré au hasard (120 bits, il sert de
+//! mot de passe) et gardé sur cet ordinateur seulement ; le message reste minimal : ni adresse IP ou MAC, ni nom de
+//! réseau ou d'appareil (le fabricant seulement), les données des autres comptant comme celles de la personne. Un
+//! second filet masque ce qui en passerait (adresses, noms de la base des appareils). Un envoi raté est noté au
+//! journal, sans jamais rien bloquer.
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -220,11 +222,18 @@ fn poster(r: &Reglage, titre: &str, message: &str, essai: bool) -> Result<(), St
     }
 }
 
+/// Le texte tel qu'il part vers ntfy : sans les noms de `noms` (réseaux, appareils, surnoms de la base, compte et
+/// machine), puis sans adresse IP ni MAC. Les appelants n'en mettent pas ; c'est le second filet.
+fn pour_ntfy(texte: &str, noms: &[(String, &str)]) -> String {
+    masquer(&crate::journal::sans_noms_avec(texte, noms))
+}
+
 /// Envoie une alerte au téléphone, si les alertes sont activées. Ne bloque jamais : un envoi raté (pas d'Internet,
 /// serveur absent) est noté au journal.
 pub fn envoyer(titre: &str, message: &str) {
     let Some(r) = lire() else { return };
-    if let Err(e) = poster(&r, &masquer(titre), &masquer(message), false) {
+    let noms = crate::journal::noms_a_retirer();
+    if let Err(e) = poster(&r, &pour_ntfy(titre, &noms), &pour_ntfy(message, &noms), false) {
         crate::journal::erreur("alertes sur le téléphone", &e);
     }
 }
@@ -254,8 +263,8 @@ fn expliquer() {
             "Monitoring and the monthly check-up can also alert your phone, through ntfy: a free and open source app (Android: Google Play or F-Droid; iPhone: App Store)."
         ),
         tr!(
-            "Le serveur public ntfy.sh ne demande aucun compte, mais qui connaît le sujet lit les messages. Gardien tire donc un sujet au hasard, impossible à deviner, gardé sur cet ordinateur seulement. Les messages restent courts : jamais d'adresse IP ni MAC. Tu peux aussi donner l'adresse de ton propre serveur ntfy.",
-            "The public server ntfy.sh needs no account, but whoever knows the topic reads the messages. Gardien therefore draws a random topic, impossible to guess, kept on this computer only. Messages stay short: never an IP or MAC address. You can also give the address of your own ntfy server."
+            "Le serveur public ntfy.sh ne demande aucun compte, mais qui connaît le sujet lit les messages. Gardien tire donc un sujet au hasard, impossible à deviner, gardé sur cet ordinateur seulement. Les messages restent courts : jamais d'adresse IP ou MAC, ni le nom d'un réseau ou d'un appareil (seulement son fabricant). Tu peux aussi donner l'adresse de ton propre serveur ntfy.",
+            "The public server ntfy.sh needs no account, but whoever knows the topic reads the messages. Gardien therefore draws a random topic, impossible to guess, kept on this computer only. Messages stay short: never an IP or MAC address, nor the name of a network or a device (only its maker). You can also give the address of your own ntfy server."
         ),
     ] {
         println!();
@@ -485,6 +494,22 @@ mod tests {
         assert_eq!(masquer("box-3c:22:fb:12:34:56, "), "box-…, ");
         assert_eq!(masquer("caméra 10.0.0.5:8080 ouverte"), "caméra …:8080 ouverte");
         assert_eq!(masquer("deadbeef.192.168.1.2"), "deadbeef.…");
+    }
+
+    #[test]
+    fn ni_nom_de_reseau_ni_nom_d_appareil() {
+        // Second filet : un nom de la base (réseau, appareil, surnom) qui passerait est masqué ; le fabricant reste.
+        let noms = vec![
+            ("iPhone de Zoé".to_string(), "<appareil>"),
+            ("Chez Max".to_string(), "<réseau>"),
+        ];
+        assert_eq!(
+            pour_ntfy(
+                "Nouvel appareil : iphone de zoé (Apple), réseau « Chez Max », 192.168.1.37.",
+                &noms
+            ),
+            "Nouvel appareil : <appareil> (Apple), réseau « <réseau> », …."
+        );
     }
 
     #[test]

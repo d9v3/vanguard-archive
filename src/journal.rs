@@ -198,7 +198,7 @@ fn generique(nom: &str) -> bool {
 /// Les noms à retirer, du plus long au plus court (un nom contenu dans un autre, « alex » dans « alex-pc », ne le
 /// coupe pas en deux) : la personne et la machine, puis ce que la base des appareils garde sur les gens d'ici,
 /// relue à chaque erreur (un scan a pu l'enrichir).
-fn noms_a_retirer() -> Vec<(String, &'static str)> {
+pub(crate) fn noms_a_retirer() -> Vec<(String, &'static str)> {
     let (reseaux, appareils) = crate::reseau::noms_connus();
     let mut noms = noms_personnels().to_vec();
     let base = reseaux.into_iter().map(|n| (n, "<réseau>"));
@@ -238,9 +238,7 @@ fn anonymiser_avec(texte: &str, maisons: &[String], noms: &[(String, &str)]) -> 
             );
         }
     }
-    for (nom, remplacement) in noms {
-        t = remplacer(&t, nom, remplacement, mot_entier, mot_entier);
-    }
+    let t = sans_noms_avec(&t, noms);
     let t = masquer_comptes(&t);
     let t = masquer_courriels(&t);
     let t = masquer_sid(&t);
@@ -249,6 +247,16 @@ fn anonymiser_avec(texte: &str, maisons: &[String], noms: &[(String, &str)]) -> 
     let t = masquer_mac(&t);
     let t = masquer_ipv6(&t);
     masquer_ipv4(&t)
+}
+
+/// Le texte sans ces noms (personne, machine, réseaux et appareils de la base, voir `noms_a_retirer`), en mots
+/// entiers et à la casse près : aussi le second filet des alertes envoyées au téléphone.
+pub(crate) fn sans_noms_avec(texte: &str, noms: &[(String, &str)]) -> String {
+    let mut t = texte.to_string();
+    for (nom, remplacement) in noms {
+        t = remplacer(&t, nom, remplacement, mot_entier, mot_entier);
+    }
+    t
 }
 
 /// Un mot entier : ni lettre ni chiffre collés avant ou après (« Max » ne coupe pas « Maxime »).

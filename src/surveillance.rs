@@ -245,13 +245,10 @@ fn veiller_passerelle(r: &reseau::Rapport) {
         );
         crate::alertes::envoyer(
             tr!("Gardien : box usurpée ?", "Gardien: router impersonated?"),
-            &sur_le_reseau(
-                r,
-                tr!(
-                    "une autre machine répond à sa place",
-                    "another machine answers in its place"
-                ),
-            ),
+            &sur_le_reseau(tr!(
+                "une autre machine répond à sa place",
+                "another machine answers in its place"
+            )),
         );
         return;
     }
@@ -276,7 +273,7 @@ fn veiller_passerelle(r: &reseau::Rapport) {
                 "Gardien : la box a changé d'adresse MAC",
                 "Gardien: the router's MAC address changed"
             ),
-            &sur_le_reseau(r, tr!("lance Gardien pour le détail", "open Gardien for the details")),
+            &sur_le_reseau(tr!("lance Gardien pour le détail", "open Gardien for the details")),
         );
     }
     if let Ok(texte) = serde_json::to_string(&apres) {
@@ -285,13 +282,24 @@ fn veiller_passerelle(r: &reseau::Rapport) {
     }
 }
 
-/// Texte d'une alerte pour le téléphone : le réseau par son nom, jamais par ses adresses (« … sur le réseau
-/// « Salon » »).
-fn sur_le_reseau(r: &reseau::Rapport, quoi: &str) -> String {
-    match &r.nom_reseau {
-        Some(nom) => trf!("{quoi}, sur le réseau « {nom} ».", "{quoi}, on the “{nom}” network."),
-        None => trf!("{quoi}, sur ton réseau.", "{quoi}, on your network."),
-    }
+/// Texte d'une alerte pour le téléphone : ni les adresses, ni le nom du réseau. Le message passe par ntfy.sh, qui lit
+/// tout, et le nom d'un Wi-Fi nomme souvent la maison ou ses gens (« Chez Max ») : « …, sur le réseau de cet
+/// ordinateur ».
+fn sur_le_reseau(quoi: &str) -> String {
+    trf!(
+        "{quoi}, sur le réseau de cet ordinateur.",
+        "{quoi}, on this computer's network."
+    )
+}
+
+/// Ce qu'une alerte du téléphone dit d'un appareil : son fabricant (« Apple »), jamais son nom ni son surnom, souvent
+/// ceux de quelqu'un (« iPhone de Zoé »). Sans fabricant connu : `sinon`.
+fn appareil_pour_le_telephone(h: &reseau::Hote, sinon: &str) -> String {
+    h.fabricant
+        .as_deref()
+        .map(crate::scan::fabricant_traduit)
+        .filter(|f| !f.trim().is_empty())
+        .map_or_else(|| sinon.to_string(), str::to_string)
 }
 
 pub async fn surveiller() {
@@ -336,7 +344,10 @@ pub async fn surveiller() {
         );
         crate::alertes::envoyer(
             tr!("Nouvel appareil sur ton réseau", "New device on your network"),
-            &sur_le_reseau(&r, &qui),
+            &sur_le_reseau(&appareil_pour_le_telephone(
+                h,
+                tr!("appareil inconnu", "unknown device"),
+            )),
         );
     }
     for h in r.hotes.iter().filter(|h| !h.nouvelle) {
@@ -345,14 +356,10 @@ pub async fn surveiller() {
                 &trf!("Port {} nouvellement ouvert", "Port {} newly opened", p.port),
                 &format!("{} ({}) : {} — {}", h.ip, h.titre(), p.service, p.conseil),
             );
-            let qui = if h.titre().is_empty() {
-                tr!("un appareil", "a device").to_string()
-            } else {
-                h.titre()
-            };
+            let qui = appareil_pour_le_telephone(h, tr!("un appareil", "a device"));
             crate::alertes::envoyer(
                 &trf!("Port {} nouvellement ouvert", "Port {} newly opened", p.port),
-                &sur_le_reseau(&r, &format!("{qui} : {}", p.service)),
+                &sur_le_reseau(&format!("{qui} : {}", p.service)),
             );
         }
     }
@@ -650,5 +657,30 @@ mod tests {
         assert_eq!(n.len(), 2);
         assert!(n[0].1.contains("4444"));
         assert!(n[1].1.contains("90") && n[1].1.contains("75"));
+    }
+
+    #[test]
+    fn le_telephone_ne_recoit_ni_nom_d_appareil_ni_nom_de_reseau() {
+        let mut h = reseau::Hote {
+            ip: std::net::Ipv4Addr::new(192, 168, 1, 37),
+            nom: Some("iPhone-de-Zoe.local".into()),
+            mac: Some("3c:22:fb:12:34:56".into()),
+            fabricant: Some("Apple".into()),
+            surnom: Some("Téléphone de Zoé".into()),
+            premier_vu: None,
+            role: None,
+            nouvelle: true,
+            ports: Vec::new(),
+            alertes: Vec::new(),
+            score: 100,
+        };
+        let texte = sur_le_reseau(&appareil_pour_le_telephone(&h, "appareil inconnu"));
+        assert!(texte.starts_with("Apple, "), "{texte}");
+        assert!(!texte.contains("Zo") && !texte.contains("iPhone") && !texte.contains("192.168"));
+        // Sans fabricant connu : la formule générale, toujours sans le nom.
+        h.fabricant = None;
+        assert_eq!(appareil_pour_le_telephone(&h, "appareil inconnu"), "appareil inconnu");
+        // Le réseau n'est jamais nommé.
+        assert!(sur_le_reseau("x").contains("cet ordinateur") || sur_le_reseau("x").contains("this computer"));
     }
 }
