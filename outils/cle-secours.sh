@@ -19,6 +19,8 @@
 #   outils/cle-secours.sh --telecharger DOSSIER       télécharge les images et les vérifie
 #   outils/cle-secours.sh --verifier DOSSIER          vérifie les images, et la partition WIN11 si elle est montée
 #   outils/cle-secours.sh --ecrire /dev/sdX DOSSIER   sauvegarde, EFFACE et refait la clé (root : une fenêtre pkexec)
+#   outils/cle-secours.sh --windows /dev/sdX DOSSIER  remplit ou répare la partition WIN11 d'une clé déjà faite,
+#                                                     sans rien effacer d'autre (ni root)
 # Windows 11 se télécharge à la main chez Microsoft (lien valable 24 h) : --telecharger dit comment.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -121,6 +123,13 @@ volume_macos() { # BaseSystem.dmg
   7z l -tdmg "$1" 2>/dev/null | awk '$NF ~ /\.hfs$/ && $(NF-2) ~ /^[0-9]+$/ {print $NF, $(NF-2); exit}'
 }
 
+# L'image de Windows a-t-elle un sources/install.wim ? awk lit toute la liste : avec « | grep -q », grep s'arrête à la
+# première ligne trouvée, la commande qui écrit la liste reçoit SIGPIPE, et pipefail fait échouer le test. C'est ce
+# qui avait laissé une partition WIN11 sans install.wim, et sa vérification muette.
+a_install_wim() { # image
+  fichiers_iso "$1" | awk -F'\t' '$2 ~ /(^|\/)sources\/install\.wim$/ {t = 1} END {exit !t}'
+}
+
 # Partition WIN11 comparée à l'image : chaque fichier (sauf install.wim) présent à la même taille, les morceaux .swm
 # à la taille préparée et lisibles par wimlib, le démarrage UEFI là, et rien au-delà de 4 Go (limite de FAT32).
 verifier_windows() { # point_de_montage image dossier_des_morceaux (facultatif)
@@ -144,7 +153,7 @@ verifier_windows() { # point_de_montage image dossier_des_morceaux (facultatif)
   else
     echo "  ✔ WIN11 : les $fichiers fichiers de l'image, à la bonne taille"
   fi
-  if fichiers_iso "$iso" | grep -q $'\t''sources/install\.wim$'; then
+  if a_install_wim "$iso"; then
     local morceaux=("$win"/sources/install*.swm)
     if [[ ! -f ${morceaux[0]} ]]; then
       echo "  ✖ WIN11 : install.wim n'y est pas (morceaux sources/install*.swm absents)"
@@ -390,7 +399,12 @@ preparer_windows() { # dossier
   attendue=$(empreinte_windows "$iso")
   [[ -n $attendue ]] || erreur "l'image de Windows doit être vérifiée avant d'être préparée."
   prep=$d/windows-${attendue:0:16}
-  if [[ -f $prep/pret ]]; then echo "$prep"; return; fi
+  # Déjà prêt, sauf si l'image a un install.wim dont les morceaux manquent (préparation d'avant le correctif de
+  # a_install_wim, qui concluait à tort qu'il n'y en avait pas).
+  if [[ -f $prep/pret ]] && { ! a_install_wim "$iso" || compgen -G "$prep/install*.swm" >/dev/null; }; then
+    echo "$prep"
+    return
+  fi
   # FAT32 ne garde pas un fichier de 4 Go ou plus : seul install.wim est découpé, rien d'autre ne doit dépasser.
   local trop
   trop=$(fichiers_iso "$iso" | awk -F'\t' -v max="$FAT32_MAX" '$1 > max && $2 !~ /(^|\/)install\.wim$/ {print $2}')
@@ -398,7 +412,7 @@ preparer_windows() { # dossier
   (une image faite par l'outil de création de média a install.esd : prendre l'ISO de la page de Microsoft)."
   rm -rf "$prep"
   mkdir -p "$prep"
-  if fichiers_iso "$iso" | grep -q $'\t''sources/install\.wim$'; then
+  if a_install_wim "$iso"; then
     echo "Windows : install.wim découpé en morceaux de $MORCEAU_MIO Mio (quelques minutes)…" >&2
     7z e -y -o"$prep" "$iso" 'sources/install.wim' >/dev/null
     [[ -f $prep/install.wim ]] || erreur "install.wim ne s'extrait pas de l'image de Windows."
@@ -576,6 +590,26 @@ monter() { # partition
   return 1
 }
 
+# Partition WIN11 d'une clé de secours déjà faite, remplie ou réparée sans rien effacer d'autre ni root : après une
+# nouvelle image de Windows, ou une écriture restée incomplète. Les fichiers de l'image sont recopiés par-dessus, les
+# morceaux de install.wim ajoutés, puis tout est revérifié.
+completer_windows() { # disque dossier
+  local disque=$1 d=$2 part win prep
+  part=$(partition "$disque" 5)
+  [[ -b $part && $(lsblk -no PARTLABEL "$part") == WIN11 ]] ||
+    erreur "$disque n'a pas de partition WIN11 : ce n'est pas une clé de secours (voir --ecrire)."
+  command -v wimlib-imagex >/dev/null ||
+    erreur "il manque wimlib-imagex, qui découpe install.wim pour la partition FAT32 : sudo pacman -S wimlib."
+  verifier "$d" || erreur "toutes les images doivent être vérifiées avant d'écrire."
+  prep=$(preparer_windows "$d")
+  # Montée en lecture seule par une vérification précédente : démontée puis remontée pour écrire.
+  if [[ ,$(findmnt -rno OPTIONS -S "$part" || true), == *,ro,* ]]; then udisksctl unmount -b "$part" >/dev/null; fi
+  win=$(monter "$part") || erreur "partition WIN11 impossible à monter."
+  remplir_windows "$win" "$(fichier_windows "$d")" "$prep"
+  udisksctl unmount -b "$part" >/dev/null
+  echo "Partition WIN11 complète et vérifiée."
+}
+
 ecrire() { # disque dossier
   local disque=$1 d=$2
   [[ -b $disque && $(lsblk -dno RM,TRAN "$disque" | tr -s ' ') == "1 usb" ]] ||
@@ -665,6 +699,7 @@ case ${1:-} in
   --telecharger) telecharger "${2:?dossier des images}" ;;
   --verifier) verifier "${2:?dossier des images}" cle ;;
   --ecrire) ecrire "${2:?disque, par exemple /dev/sdb}" "${3:?dossier des images vérifiées}" ;;
+  --windows) completer_windows "${2:?disque, par exemple /dev/sdb}" "${3:?dossier des images vérifiées}" ;;
   --racine) [[ $EUID -eq 0 ]] || erreur "--racine se lance par pkexec, depuis --ecrire."; racine "${@:2}" ;;
-  *) sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
+  *) sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
 esac
