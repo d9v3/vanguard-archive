@@ -34,10 +34,16 @@ fn fichier() -> PathBuf {
 }
 
 pub fn charger() -> Vec<Bilan> {
-    std::fs::read_to_string(fichier())
-        .ok()
-        .and_then(|t| serde_json::from_str(&t).ok())
-        .unwrap_or_default()
+    lire().unwrap_or_default()
+}
+
+/// L'historique tel qu'il est écrit ; `Err` s'il existe mais ne se lit pas.
+fn lire() -> Result<Vec<Bilan>, String> {
+    match std::fs::read_to_string(fichier()) {
+        Ok(t) => serde_json::from_str(t.trim_start_matches('\u{feff}')).map_err(|e| e.to_string()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Vec::new()),
+        Err(e) => Err(e.to_string()),
+    }
 }
 
 fn bilan(audit: Option<&Audit>, reseau: Option<&Rapport>) -> Bilan {
@@ -60,15 +66,36 @@ fn bilan(audit: Option<&Audit>, reseau: Option<&Rapport>) -> Bilan {
 
 /// Ajoute ce bilan à l'historique ; rend le précédent, s'il y en a un.
 pub fn enregistrer(audit: Option<&Audit>, reseau: Option<&Rapport>) -> (Option<Bilan>, Bilan) {
-    let mut tous = charger();
+    let mut tous = match lire() {
+        Ok(tous) => tous,
+        Err(e) => {
+            // Jamais écraser un historique qu'on ne sait pas relire : il est mis de côté, intact, avant le nouveau.
+            let copie = fichier().with_extension(format!(
+                "illisible-{}.json",
+                chrono::Local::now().format("%Y%m%d-%H%M%S")
+            ));
+            let _ = std::fs::copy(fichier(), &copie);
+            tre!(
+                "Attention : historique des bilans illisible ({e}). Copie gardée : {}",
+                "Warning: check history unreadable ({e}). Copy kept: {}",
+                copie.display()
+            );
+            Vec::new()
+        }
+    };
     let precedent = tous.last().cloned();
     let nouveau = bilan(audit, reseau);
     tous.push(nouveau.clone());
     let surplus = tous.len().saturating_sub(GARDES);
     tous.drain(..surplus);
-    if let Ok(texte) = serde_json::to_string(&tous) {
-        let _ = std::fs::create_dir_all(crate::reseau::dossier_local());
-        let _ = std::fs::write(fichier(), texte);
+    // D'un bloc : une coupure pendant l'écriture laisse l'ancien historique ou le nouveau, jamais un fichier tronqué.
+    if let Ok(texte) = serde_json::to_string(&tous)
+        && let Err(e) = crate::reseau::ecrire_atomique(&fichier(), &texte)
+    {
+        tre!(
+            "Attention : bilan non enregistré dans l'historique ({e}).",
+            "Warning: check not saved to the history ({e})."
+        );
     }
     (precedent, nouveau)
 }
@@ -269,6 +296,23 @@ mod tests {
         let (nouveaux, regles) = differences(&avant, &apres);
         assert_eq!(nouveaux, ["DNS : réponses inventées."]);
         assert_eq!(regles, ["Pare-feu : inactif."]);
+    }
+
+    /// Un historique tronqué n'est pas remplacé en silence par le seul nouveau bilan : il est mis de côté.
+    #[test]
+    fn historique_illisible_mis_de_cote() {
+        std::fs::create_dir_all(crate::reseau::dossier_local()).unwrap();
+        std::fs::write(fichier(), "[{\"date\":\"2026-10-17 12:00\",\"machine\":8").unwrap();
+        assert!(charger().is_empty());
+        let (precedent, _) = enregistrer(None, None);
+        assert!(precedent.is_none());
+        let copies = std::fs::read_dir(crate::reseau::dossier_local())
+            .unwrap()
+            .flatten()
+            .filter(|e| e.file_name().to_string_lossy().starts_with("historique.illisible-"))
+            .count();
+        assert!(copies >= 1, "l'historique illisible n'a pas été gardé");
+        assert_eq!(charger().len(), 1);
     }
 
     #[test]
