@@ -237,7 +237,7 @@ fn commandes_winget(programmes: &[(String, String)]) -> Vec<String> {
         .map(|id| {
             format!(
                 "winget upgrade --id '{}' --exact --accept-source-agreements --accept-package-agreements --disable-interactivity",
-                id.replace('\'', "''")
+                crate::commande::ps_texte(id)
             )
         })
         .collect()

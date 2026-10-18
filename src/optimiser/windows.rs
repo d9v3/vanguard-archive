@@ -313,11 +313,10 @@ impl Changement {
             Changement::Registre {
                 racine, chemin, nom, ..
             } => {
-                let p = match racine {
+                let p = crate::commande::ps_texte(&match racine {
                     Racine::Hklm => format!("HKLM:\\{chemin}"),
                     Racine::Hkcu | Racine::HkcuStrategie => crate::reparer::hkcu_de_la_personne(sid, chemin),
-                }
-                .replace('\'', "''");
+                });
                 // Clé créée seulement si elle manque : New-Item -Force sur une clé existante l'écraserait, valeurs
                 // comprises.
                 let creer =
@@ -331,7 +330,7 @@ impl Changement {
                     }
                     Some(Lue::Texte(t)) => format!(
                         "{creer}; Set-ItemProperty -LiteralPath '{p}' -Name '{nom}' -Value '{}' -Type String",
-                        t.replace('\'', "''")
+                        crate::commande::ps_texte(&t)
                     ),
                 })
             }

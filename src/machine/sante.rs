@@ -45,11 +45,11 @@ fn juger_volume(v: &Volume) -> Option<Constat> {
     };
     let commande = if cfg!(windows) {
         // « C: » seul désigne le dossier courant sur C:, pas la racine du disque : « C:\ ».
-        let racine = if v.point.ends_with(':') {
+        let racine = crate::commande::ps_texte(&if v.point.ends_with(':') {
             format!("{}\\", v.point)
         } else {
             v.point.clone()
-        };
+        });
         format!(
             "Get-ChildItem '{racine}' -Directory -Force -ErrorAction SilentlyContinue | ForEach-Object {{ [pscustomobject]@{{ Go = [math]::Round(((Get-ChildItem $_.FullName -Recurse -File -Force -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum) / 1GB, 1); Dossier = $_.FullName }} }} | Sort-Object Go -Descending | Select-Object -First 15 | Format-Table -AutoSize"
         )

@@ -97,7 +97,7 @@ pub(super) fn illisible(categorie: &'static str) -> Constat {
 /// compte, comme un programme externe en échec, pour une étape ratée, et la fenêtre passe à la suivante. Après chaque
 /// correctif, une ligne « ok » ou « echec » s'ajoute au fichier `resultats`, que Gardien lit à la fermeture.
 fn script_admin(correctifs: &[Vec<String>], resultats: &str) -> String {
-    let texte = |s: &str| s.replace('\'', "''");
+    let texte = crate::commande::ps_texte;
     let mut script = String::from(tr!(
         "$Host.UI.RawUI.WindowTitle = 'Gardien : correction en cours'\n\
          [Console]::OutputEncoding = [Text.Encoding]::UTF8\n\
@@ -189,7 +189,7 @@ pub fn powershell_admin_chacune(correctifs: &[Vec<String>]) -> Vec<bool> {
         "    Fix script (readable): {}",
         chemin.display()
     );
-    let fichier = chemin.display().to_string().replace('\'', "''");
+    let fichier = crate::commande::ps_texte(&chemin.display().to_string());
     // Demande d'administrateur refusée : Start-Process échoue et $p reste vide. Sans ce test, l'appel de méthode
     // sur $null était sauté et « exit $p.ExitCode » devenait « exit 0 » : la correction s'affichait « fait ».
     // Attente sans limite : la fenêtre est visible et attend Entrée, un délai compterait aussi le temps de lecture.

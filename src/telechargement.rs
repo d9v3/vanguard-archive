@@ -136,7 +136,7 @@ fn calculer(fichier: &Path, algo: Algo) -> Result<String, String> {
             Algo::Sha256 => "SHA256",
             Algo::Sha512 => "SHA512",
         };
-        let chemin = fichier.display().to_string().replace('\'', "''");
+        let chemin = crate::commande::ps_texte(&fichier.display().to_string());
         crate::machine::windows::ps(&format!("(Get-FileHash -Algorithm {nom} -LiteralPath '{chemin}').Hash"))
             .ok_or_else(|| tr!("Get-FileHash a échoué", "Get-FileHash failed").to_string())?
     };

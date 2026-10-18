@@ -26,7 +26,7 @@ fn juger_comptes(utilisateurs: &[&str], moi: Option<&str>, lbp: Option<u32>) -> 
         if !actif.eq_ignore_ascii_case("true") {
             continue;
         }
-        let nom_ps = nom.replace('\'', "''");
+        let nom_ps = crate::commande::ps_texte(nom);
         if sid.ends_with("-501") {
             constats.push(
                 alerte(

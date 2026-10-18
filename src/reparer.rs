@@ -132,7 +132,7 @@ fn entre_apostrophes(t: &str) -> String {
 }
 #[cfg(windows)]
 fn entre_apostrophes(t: &str) -> String {
-    format!("'{}'", t.replace('\'', "''"))
+    crate::commande::ps_chaine(t)
 }
 
 /// Outil et commande du point de restauration, s'il y en a un de configuré.

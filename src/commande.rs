@@ -95,6 +95,72 @@ fn arreter(enfant: &mut Child) {
     let _ = enfant.wait();
 }
 
+/// Apostrophes qui ouvrent et ferment une chaîne '…' de PowerShell : la droite, et aussi les typographiques ‘ ’ ‚ ‛
+/// (U+2018 à U+201B), courantes dans un nom de fichier, de compte ou d'appareil.
+const APOSTROPHES_PS: [char; 5] = ['\'', '\u{2018}', '\u{2019}', '\u{201a}', '\u{201b}'];
+
+/// Le texte à placer entre apostrophes dans un script PowerShell : chaque apostrophe, droite ou typographique,
+/// doublée. Ne doubler que « ' » laissait « ’ » fermer la chaîne : la suite d'un nom de fichier téléchargé ou d'un
+/// appareil du réseau s'exécutait comme une commande.
+pub fn ps_texte(t: &str) -> String {
+    let mut s = String::with_capacity(t.len() + 2);
+    for c in t.chars() {
+        s.push(c);
+        if APOSTROPHES_PS.contains(&c) {
+            s.push(c);
+        }
+    }
+    s
+}
+
+/// Le texte entre apostrophes, pour PowerShell : « '…' ».
+#[cfg(any(windows, test))]
+pub fn ps_chaine(t: &str) -> String {
+    format!("'{}'", ps_texte(t))
+}
+
+#[cfg(test)]
+mod tests_powershell {
+    use super::*;
+
+    /// Un nom piégé : chaque sorte d'apostrophe tente de fermer la chaîne pour lancer une commande.
+    const PIEGE: &str = "a'; Write-Output INJECTE; 'b ‘; Write-Output INJECTE; ‘ ’; Write-Output INJECTE; ’ \
+                         ‚; Write-Output INJECTE; ‚ ‛; Write-Output INJECTE; ‛ L’outil";
+
+    #[test]
+    fn apostrophes_doublees() {
+        assert_eq!(ps_texte("L'outil"), "L''outil");
+        assert_eq!(ps_texte("L’outil ‘x‚ ‛"), "L’’outil ‘‘x‚‚ ‛‛");
+        assert_eq!(ps_chaine("C:\\Users\\Zoé"), "'C:\\Users\\Zoé'");
+        // Les guillemets doubles et le « $ » ne comptent pas entre apostrophes.
+        assert_eq!(ps_texte("\"$x\" “y”"), "\"$x\" “y”");
+    }
+
+    /// La chaîne piégée, passée à un vrai PowerShell, reste du texte. Windows : powershell ; ailleurs, pwsh s'il est
+    /// installé (sinon l'essai est sauté : sous Wine, PowerShell n'existe pas).
+    #[test]
+    fn chaine_piegee_reste_du_texte() {
+        let programme = if cfg!(windows) { "powershell" } else { "pwsh" };
+        let script = format!(
+            "[Console]::OutputEncoding = [Text.Encoding]::UTF8; $x = {}; Write-Output ('<' + $x + '>')",
+            ps_chaine(PIEGE)
+        );
+        let Some(r) = lancer(
+            Command::new(programme).args(["-NoProfile", "-NonInteractive", "-Command", &script]),
+            60,
+        ) else {
+            eprintln!("{programme} absent : essai sauté");
+            return;
+        };
+        // Une injection réussie écrirait « INJECTE » sur une ligne à part.
+        assert!(!r.sortie.lines().any(|l| l.trim() == "INJECTE"), "{}", r.sortie);
+        // Un PowerShell factice (Wine) ne répond rien : rien à comparer.
+        if !r.sortie.trim().is_empty() {
+            assert_eq!(r.sortie.trim(), format!("<{PIEGE}>"), "{}", r.erreurs);
+        }
+    }
+}
+
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;

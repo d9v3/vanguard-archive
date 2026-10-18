@@ -73,7 +73,7 @@ pub(crate) fn notifier(titre: &str, corps: &str) {
     }
     #[cfg(windows)]
     {
-        let e = |s: &str| s.replace('\'', "''");
+        let e = crate::commande::ps_texte;
         // Identifiant d'application de PowerShell : sans lui, Windows 10/11 n'affiche pas la notification.
         let script = format!(
             "[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null; \
@@ -560,7 +560,7 @@ fn installer(exe: &str) -> bool {
     // Anciennes tâches (v0.4 et avant, puis sous les noms netscan et sentinel) : retirées au profit de la tâche
     // décrite ci-dessous.
     retirer_ancienne();
-    let exe = exe.replace('\'', "''");
+    let exe = crate::commande::ps_texte(exe);
     // Tâche visible et décrite : on voit dans le Planificateur ce qu'elle fait et comment l'arrêter.
     let script = trf!(
         "$a = New-ScheduledTaskAction -Execute '{exe}' -Argument 'surveiller'; \

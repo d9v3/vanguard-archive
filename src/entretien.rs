@@ -391,7 +391,7 @@ fn desinstaller() -> bool {
 /// éteint (New-ScheduledTaskTrigger ne sait pas faire « chaque mois »).
 #[cfg(any(windows, test))]
 fn script_tache(exe: &str, nom: &str) -> String {
-    let exe = exe.replace('\'', "''");
+    let exe = crate::commande::ps_texte(exe);
     trf!(
         "$a = New-ScheduledTaskAction -Execute '{exe}' -Argument 'entretenir'; \
          $t = New-ScheduledTaskTrigger -Weekly -WeeksInterval 4 -DaysOfWeek Saturday -At '12:00'; \
@@ -496,6 +496,9 @@ mod tests {
         assert!(p.contains("<string>entretenir</string>"));
         let s = script_tache("C:\\Program Files\\L'outil\\gardien.exe", "gardien - entretien du mois");
         assert!(s.contains("-Execute 'C:\\Program Files\\L''outil\\gardien.exe'"));
+        // L'apostrophe typographique ferme aussi une chaîne PowerShell : doublée de même.
+        let s2 = script_tache("C:\\Users\\Zoé\\L’outil\\gardien.exe", "gardien - entretien du mois");
+        assert!(s2.contains("-Execute 'C:\\Users\\Zoé\\L’’outil\\gardien.exe'"));
         assert!(s.contains("-WeeksInterval 4") && s.contains("-StartWhenAvailable"));
         assert!(s.contains("'entretenir'"));
     }

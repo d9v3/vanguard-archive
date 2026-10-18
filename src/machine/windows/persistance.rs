@@ -174,7 +174,7 @@ pub(super) fn persistance() -> Vec<Constat> {
 }
 
 fn juger_persistance(taches: &[&str], run: &[&str], demarrage: &[&str]) -> Vec<Constat> {
-    let ps_texte = |s: &str| s.replace('\'', "''");
+    let ps_texte = crate::commande::ps_texte;
     let mut constats = Vec::new();
     for t in taches {
         let c: Vec<&str> = t.trim().splitn(4, '|').collect();
