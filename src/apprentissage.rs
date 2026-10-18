@@ -140,9 +140,36 @@ fn appliquer_le(appris: &Appris, constats: &mut [Constat], jour: NaiveDate) -> u
     n
 }
 
-/// Menu Cette machine › Ce que Gardien a appris : tes choix, et les oublier.
+/// Ce qui est habituel ici, appris des mesures passées : la connexion (médiane des derniers tests).
+fn habitudes() {
+    section(tr!("TES HABITUDES", "YOUR HABITS"));
+    let Some(h) = crate::connexion::habitudes(&crate::connexion::historique()) else {
+        trp!(
+            "  {GRIS}Pas encore assez de tests de connexion (il en faut 3) pour connaître la normale.{RESET}",
+            "  {GRIS}Not enough connection tests yet (3 are needed) to know what is normal.{RESET}"
+        );
+        return;
+    };
+    let debit = |d: Option<f64>| d.map_or_else(|| "?".to_string(), |d| format!("{d:.0}"));
+    trp!(
+        "  Connexion : ping {:.0} ms, ↓ {} Mbit/s, ↑ {} Mbit/s",
+        "  Connection: ping {:.0} ms, ↓ {} Mbit/s, ↑ {} Mbit/s",
+        h.ping_ms,
+        debit(h.descendant),
+        debit(h.montant)
+    );
+    trp!(
+        "  {GRIS}médiane de tes {} derniers tests ; chaque nouveau test s'y compare{RESET}",
+        "  {GRIS}median of your last {} tests; each new test is compared to it{RESET}",
+        h.tests
+    );
+}
+
+/// Menu Cette machine › Ce que Gardien a appris : tes habitudes, tes choix, et les oublier.
 pub fn menu() {
     titre(tr!("Ce que Gardien a appris", "What Gardien has learned"));
+    habitudes();
+    section(tr!("TES CHOIX", "YOUR CHOICES"));
     let mut appris = charger();
     let jour = aujourd_hui();
     if appris.acceptees.is_empty() {

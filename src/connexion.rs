@@ -218,6 +218,44 @@ fn enregistrer(r: Resultat) {
     }
 }
 
+/// Ce qui est habituel ici : médianes des derniers tests (au moins 3), pour comparer le test du jour.
+#[derive(Debug, PartialEq)]
+pub struct Habitudes {
+    pub tests: usize,
+    pub ping_ms: f64,
+    pub descendant: Option<f64>,
+    pub montant: Option<f64>,
+}
+
+fn mediane(mut valeurs: Vec<f64>) -> Option<f64> {
+    valeurs.sort_by(f64::total_cmp);
+    valeurs.get(valeurs.len() / 2).copied()
+}
+
+/// Habitudes d'après les 10 derniers tests, s'il y en a au moins 3 (un seul test peut tomber un mauvais soir).
+pub fn habitudes(precedents: &[Resultat]) -> Option<Habitudes> {
+    let derniers = &precedents[precedents.len().saturating_sub(10)..];
+    if derniers.len() < 3 {
+        return None;
+    }
+    Some(Habitudes {
+        tests: derniers.len(),
+        ping_ms: mediane(derniers.iter().map(|r| r.internet_ms).collect())?,
+        descendant: mediane(derniers.iter().filter_map(|r| r.descendant).collect()),
+        montant: mediane(derniers.iter().filter_map(|r| r.montant).collect()),
+    })
+}
+
+/// Ping nettement plus haut que d'habitude : de moitié, et d'au moins 10 ms (5 ms de plus sur 8 ms, c'est rien).
+fn ping_degrade(h: &Habitudes, ping: f64) -> bool {
+    ping > h.ping_ms * 1.5 && ping - h.ping_ms >= 10.0
+}
+
+/// Débit nettement plus bas que d'habitude : sous 70 %.
+fn debit_degrade(habituel: Option<f64>, mesure: Option<f64>) -> bool {
+    matches!((habituel, mesure), (Some(h), Some(m)) if m < h * 0.7)
+}
+
 /// Note du bufferbloat d'après la hausse de latence sous charge (barème de Waveform).
 pub fn note_bufferbloat(hausse: f64) -> (&'static str, Niveau) {
     match hausse {
@@ -416,6 +454,37 @@ pub async fn tester() {
         .flatten()
         .map(|m| (m - repos).max(0.0))
         .reduce(f64::max);
+    // Apprendre la normale : le test du jour comparé aux habitudes de cette connexion.
+    let habituel = habitudes(&historique());
+    if let Some(h) = &habituel {
+        section(tr!("PAR RAPPORT À D'HABITUDE", "COMPARED WITH USUAL"));
+        let moins_bon = couleur(Niveau::Moyen);
+        let ping = if ping_degrade(h, repos) { moins_bon } else { "" };
+        trp!(
+            "  {} {ping}{repos:>5.0}{RESET} ms       d'habitude {:.0} ms",
+            "  {} {ping}{repos:>5.0}{RESET} ms       usually {:.0} ms",
+            ajuster("Ping", 14),
+            h.ping_ms
+        );
+        for (nom, habituel, mesure) in [
+            (tr!("↓ Réception", "↓ Download"), h.descendant, debit_bas),
+            (tr!("↑ Envoi", "↑ Upload"), h.montant, debit_haut),
+        ] {
+            if let (Some(hab), Some(m)) = (habituel, mesure) {
+                let teinte = if debit_degrade(habituel, mesure) { moins_bon } else { "" };
+                trp!(
+                    "  {} {teinte}{m:>5.0}{RESET} Mbit/s   d'habitude {hab:.0}",
+                    "  {} {teinte}{m:>5.0}{RESET} Mbit/s   usually {hab:.0}",
+                    ajuster(nom, 14)
+                );
+            }
+        }
+        trp!(
+            "  {GRIS}d'après tes {} derniers tests{RESET}",
+            "  {GRIS}from your last {} tests{RESET}",
+            h.tests
+        );
+    }
     enregistrer(Resultat {
         date: chrono::Local::now().format("%Y-%m-%d %H:%M").to_string(),
         internet_ms: repos,
@@ -477,7 +546,18 @@ pub async fn tester() {
             },
         );
     }
-    let conseils = conseils(serie_box.as_ref(), &internet, hausse);
+    let mut conseils = conseils(serie_box.as_ref(), &internet, hausse);
+    if let Some(h) = &habituel
+        && (ping_degrade(h, repos) || debit_degrade(h.descendant, debit_bas) || debit_degrade(h.montant, debit_haut))
+    {
+        conseils.push(
+            tr!(
+                "Ta connexion est nettement moins bonne que d'habitude : quelqu'un télécharge peut-être en ce moment ; sinon, redémarre la box, et si ça dure, appelle ton fournisseur.",
+                "Your connection is clearly worse than usual: someone may be downloading right now; otherwise, restart the router, and if it lasts, call your provider."
+            )
+            .to_string(),
+        );
+    }
     println!();
     if conseils.is_empty() {
         trp!(
@@ -507,6 +587,34 @@ mod tests {
         assert_eq!(note_bufferbloat(3.0).0, "A+");
         assert_eq!(note_bufferbloat(45.0).0, "B");
         assert_eq!(note_bufferbloat(900.0).0, "F");
+    }
+
+    #[test]
+    fn habitudes_de_la_connexion() {
+        let test = |ping: f64, bas: f64| Resultat {
+            date: String::new(),
+            internet_ms: ping,
+            gigue_ms: 1.0,
+            pertes: 0.0,
+            descendant: Some(bas),
+            montant: Some(30.0),
+            hausse_ms: None,
+        };
+        assert_eq!(habitudes(&[test(18.0, 98.0), test(20.0, 100.0)]), None);
+        let h = habitudes(&[test(18.0, 98.0), test(20.0, 100.0), test(60.0, 40.0)]).unwrap();
+        // Médianes : un mauvais soir ne fait pas l'habitude.
+        assert_eq!((h.ping_ms, h.descendant), (20.0, Some(98.0)));
+        assert!(ping_degrade(&h, 61.0) && !ping_degrade(&h, 25.0));
+        // Sur une connexion très rapide, quelques ms de plus ne comptent pas.
+        let rapide = Habitudes {
+            tests: 3,
+            ping_ms: 4.0,
+            descendant: None,
+            montant: None,
+        };
+        assert!(!ping_degrade(&rapide, 9.0));
+        assert!(debit_degrade(Some(98.0), Some(66.0)) && !debit_degrade(Some(98.0), Some(80.0)));
+        assert!(!debit_degrade(None, Some(10.0)));
     }
 
     #[test]
