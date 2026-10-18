@@ -1,5 +1,5 @@
 # Intégration continue : à chaque envoi, sur Linux, la mise en forme, clippy sans aucune remarque sur les quatre
-# cibles (Linux, Windows, les deux Mac) et les tests. Sur un vrai Windows de GitHub (PowerShell, registre, winget) :
+# cibles (Linux, Windows, les deux Mac) et les tests ; et le garde-fou de confidentialité sur les commits envoyés. Sur un vrai Windows de GitHub (PowerShell, registre, winget) :
 # chaque nuit si le code a changé, à chaque demande de fusion, et à la demande (gh workflow run ci.yml). macOS a son
 # propre workflow (macos.yml), qui teste et compile le programme universel pour la clé.
 #
@@ -68,6 +68,28 @@ jobs:
       # avant chaque envoi et chaque version (outils/liens.py) : un site en panne ne doit pas faire échouer la CI.
       - name: Liens internes
         run: python3 outils/liens.py --hors-ligne
+
+  # Garde-fou de confidentialité (outils/confidentialite.py) sur les commits de chaque envoi et de chaque demande de
+  # fusion, second filet de celui qui tourne avant chaque commit et chaque envoi sur l'ordinateur de développement. Ici
+  # en mode générique : seulement ce qui se reconnaît à sa forme (dossier personnel d'un compte, courriel, SID de
+  # Windows) ; l'identité de la machine qui le lance n'y entre pas, le compte « runner » et /home/runner ne sont à
+  # personne. Les valeurs trouvées sont coupées dans le journal, lisible sur GitHub.
+  confidentialite:
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      # Tout l'historique : le commit d'avant l'envoi doit être là pour savoir ce qui a été envoyé.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      # AVANT vide ou fait de zéros (branche neuve), ou disparu (historique réécrit) : les commits qu'aucune autre
+      # branche de GitHub n'a déjà. Les empreintes passent par l'environnement, jamais collées dans le script.
+      - name: Rien de personnel dans les commits envoyés
+        env:
+          AVANT: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          APRES: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: python3 outils/confidentialite.py --generique --plage "$AVANT" "$APRES"
 
   # Windows la nuit seulement si le code a changé depuis le dernier passage réussi (comme macos.yml).
   utile:

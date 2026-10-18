@@ -118,7 +118,9 @@ Ce qui est personnel est lu sur l'ordinateur, jamais écrit dans le dépôt : `~
 (une expression par ligne : nom, courriels, adresse…), l'identité Git globale, le dossier personnel, les appareils et
 adresses MAC de la base de Gardien, les réseaux Wi-Fi enregistrés. Les données des autres (la clé passe chez des
 amis, et leur journal d'erreurs revient ici) sont reconnues à leur forme : compte d'un dossier personnel, courriel,
-SID de Windows ; un ticket du journal est masqué avant l'envoi, adresses MAC et IP comprises.
+SID de Windows ; un ticket du journal est masqué avant l'envoi, adresses MAC et IP comprises. Sur GitHub, la CI le
+repasse sur les commits de chaque envoi et de chaque demande de fusion (`--generique --plage`) : seulement les données
+reconnues à leur forme, sans l'identité de la machine qui le lance.
 `python3 outils/confidentialite.py --depot` relit tout le dépôt et son historique. Dans les tests, des valeurs
 inventées : adresses MAC au préfixe du fabricant gardé, réseau « Salon », comptes « alice », « bob », « Zoé »,
 « Jean Dupont », courriels `@example.com`.

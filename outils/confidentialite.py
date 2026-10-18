@@ -25,6 +25,11 @@ Depuis la racine du dépôt :
     python3 outils/confidentialite.py --binaire FICHIER… des programmes compilés (textes lisibles, métadonnées)
     python3 outils/confidentialite.py --depot            les fichiers et tout l'historique (avant de rendre le dépôt
                                                          public)
+    python3 outils/confidentialite.py --plage AVANT APRÈS
+                                                         les commits de AVANT (exclu) à APRÈS : ceux d'un envoi
+Avec --generique (la CI de GitHub) : seulement ce qui se reconnaît à sa forme (dossier personnel d'un compte,
+courriel, SID de Windows), sans rien lire de la machine qui le lance : sur GitHub, son compte « runner » et
+/home/runner ne sont à personne.
 Sort en erreur (code 1) en disant quoi et où dès qu'un détail personnel paraît.
 """
 
@@ -384,7 +389,9 @@ COMPTES_COMMUNS = {"public", "default", "default user", "all users", "defaultuse
 # Comptes inventés des tests, et des machines de GitHub (« runner ») : permis dans le dépôt, masqués dans un ticket
 # (quelqu'un peut vraiment s'appeler Alice).
 COMPTES_INVENTES = {"alice", "bob", "zoé", "jean dupont", "moi", "x", "a", "a&b", "root", "runner", "capture", "user",
-                    "utilisateur", "compte", "account", "username", "nom", "name", "test", "zoé d'alice"}
+                    "utilisateur", "compte", "account", "username", "nom", "name", "test", "zoé d'alice",
+                    # Et sa forme dans une chaîne PowerShell, l'apostrophe doublée.
+                    "zoé o'brien", "zoé o''brien"}
 DEBUT_COMPTE_UNIX = re.compile(r"(?:/var/home|/run/media|/home|/Users|/media)/", re.IGNORECASE)
 DEBUT_COMPTE_WINDOWS = re.compile(r"(?<![A-Za-z])[A-Za-z]:(\\\\|\\|/)Users\1", re.IGNORECASE)
 FIN_COMPTE_WINDOWS = set("\\/\"\n\r\t:;,|<>*?)]")
@@ -537,8 +544,24 @@ def message(detecteur, chemin):
 
 
 def commits_a_envoyer(detecteur):
+    return verifier_commits(detecteur, git("rev-list", "--reverse", "HEAD", "--not", "--remotes=origin").split())
+
+
+def commits_de_la_plage(avant, apres):
+    """Les commits d'un envoi : de `avant` (exclu, le commit d'avant sur GitHub) à `apres`. Branche neuve (`avant` vide
+    ou fait de zéros) ou historique réécrit (`avant` disparu) : ceux qu'aucune autre branche de GitHub n'a déjà."""
+    connu = avant.strip("0") and subprocess.run(["git", "cat-file", "-e", f"{avant}^{{commit}}"],
+                                                capture_output=True).returncode == 0
+    if connu:
+        return git("rev-list", "--reverse", f"{avant}..{apres}").split()
+    autres = [r for r in git("for-each-ref", "--format=%(refname)", "refs/remotes/origin").split()
+              if r != "refs/remotes/origin/HEAD" and git("rev-parse", r).strip() != git("rev-parse", apres).strip()]
+    return git("rev-list", "--reverse", apres, "--not", *autres).split()
+
+
+def verifier_commits(detecteur, shas):
     trouves = []
-    for sha in git("rev-list", "--reverse", "HEAD", "--not", "--remotes=origin").split():
+    for sha in shas:
         court = sha[:9]
         entete = git("show", "-s", "--format=%an <%ae>%n%cn <%ce>%n%B", sha)
         auteurs, _, corps = entete.partition("\n")
@@ -605,7 +628,9 @@ def chaines(chemin):
     return "\n".join(textes)
 
 
-def rapport(trouves, quoi) -> int:
+def rapport(trouves, quoi, en_clair=True) -> int:
+    """Dit ce qui a été trouvé et où. Sans `en_clair` (CI : son journal est lisible sur GitHub, même après que
+    l'historique a été réécrit), seulement le début de chaque valeur."""
     if not trouves:
         return 0
     print(f"Confidentialité : {len(trouves)} détail(s) personnel(s) dans {quoi}.", file=sys.stderr)
@@ -613,7 +638,11 @@ def rapport(trouves, quoi) -> int:
     for trouve in trouves:
         fois[trouve] = fois.get(trouve, 0) + 1
     for (ou, terme), n in fois.items():
-        print(f"  {ou} — {terme.origine} : {terme.texte}" + (f" ({n} fois)" if n > 1 else ""), file=sys.stderr)
+        valeur = terme.texte if en_clair else f"{terme.texte[:2]}… ({len(terme.texte)} caractères)"
+        print(f"  {ou} — {terme.origine} : {valeur}" + (f" ({n} fois)" if n > 1 else ""), file=sys.stderr)
+    if not en_clair:
+        print("Valeurs coupées : le journal de la CI se lit sur GitHub. En entier, sur l'ordinateur de développement : "
+              "python3 outils/confidentialite.py --generique --plage AVANT APRÈS.", file=sys.stderr)
     print("Remplace-les par des valeurs inventées (adresses MAC : garder les 3 premiers octets, ceux du fabricant). "
           f"Une expression de {PRIVE} qui n'a rien de personnel s'y retire.", file=sys.stderr)
     # Trouvé par sa forme (donnees_d_autrui), pas dans une liste : la donnée de quelqu'un, ou une valeur à ajouter
@@ -630,13 +659,21 @@ def main():
     if args[:1] in (["--message"], ["--binaire"]):
         args[1:] = [os.path.abspath(a) for a in args[1:]]
     os.chdir(git("rev-parse", "--show-toplevel").strip())
-    detecteur = Detecteur(termes(), autrui=True)
+    generique = "--generique" in args
+    if generique:
+        args.remove("--generique")
+    # Générique : sans la liste des détails de cet ordinateur (identité Git, compte, nom, appareils, Wi-Fi).
+    detecteur = Detecteur([] if generique else termes(), autrui=True)
     if args[:1] == ["--commit"]:
         sys.exit(rapport(commit_en_cours(detecteur), "ce commit (rien n'est commité)"))
     if args[:1] == ["--message"] and len(args) == 2:
         sys.exit(rapport(message(detecteur, args[1]), "le message du commit (rien n'est commité)"))
     if args[:1] == ["--envoi"]:
         sys.exit(rapport(commits_a_envoyer(detecteur), "les commits à envoyer"))
+    if args[:1] == ["--plage"] and len(args) == 3:
+        shas = commits_de_la_plage(args[1], args[2])
+        print(f"Confidentialité : {len(shas)} commit(s) relu(s).", file=sys.stderr)
+        sys.exit(rapport(verifier_commits(detecteur, shas), "les commits envoyés", en_clair=not os.environ.get("CI")))
     if args[:1] == ["--texte"]:
         texte = sys.stdin.read()
         sys.exit(rapport([(f"ligne {n}", t) for t, n in detecteur.trouver(texte)], "le texte"))
