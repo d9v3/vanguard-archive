@@ -396,54 +396,43 @@ fn date_dans(dossier: &str, prefixe: &str) -> Option<NaiveDate> {
         .and_then(|e| date_de(e.metadata().and_then(|m| m.modified())))
 }
 
-/// Paquets du système (pacman, dpkg ou rpm) dont le nom est celui d'un logiciel de prise de contrôle.
+/// Paquets de la distribution dont le nom est celui d'un logiciel de prise de contrôle ; le retrait passe par
+/// l'outil de la distribution (Omarchy, rpm-ostree et transactional-update compris : `Paquets::retirer`).
 #[cfg(target_os = "linux")]
 fn paquets(t: &mut Vec<Trouvaille>) {
-    let (gestionnaire, liste) = if let Some(s) = sortie_de("pacman", &["-Qq"], 60) {
-        ("pacman", s)
-    } else if let Some(s) = sortie_de("dpkg-query", &["-W", "-f=${binary:Package}\n"], 60) {
-        ("dpkg", s)
-    } else if let Some(s) = sortie_de("rpm", &["-qa", "--qf", "%{NAME}\n"], 60) {
-        ("rpm", s)
-    } else {
+    use crate::machine::linux::Paquets;
+    let Some(gestionnaire) = Paquets::detecter() else {
+        return;
+    };
+    let liste = match gestionnaire {
+        Paquets::Pacman => sortie_de("pacman", &["-Qq"], 60),
+        Paquets::Apt => sortie_de("dpkg-query", &["-W", "-f=${binary:Package}\n"], 60),
+        Paquets::Dnf | Paquets::Zypper => sortie_de("rpm", &["-qa", "--qf", "%{NAME}\n"], 60),
+    };
+    let Some(liste) = liste else {
         return;
     };
     for p in liste.lines().map(str::trim).filter(|p| !p.is_empty()) {
         let Some(i) = reconnu(p) else {
             continue;
         };
-        let (depuis, retrait) = match gestionnaire {
-            "pacman" => (
-                date_dans("/var/lib/pacman/local", &format!("{p}-")),
-                format!("sudo pacman -Rns --noconfirm {}", shell(p)),
+        let depuis = match gestionnaire {
+            Paquets::Pacman => date_dans("/var/lib/pacman/local", &format!("{p}-")),
+            Paquets::Apt => date_dans(
+                "/var/lib/dpkg/info",
+                &format!("{}.list", p.split(':').next().unwrap_or(p)),
             ),
-            "dpkg" => (
-                date_dans(
-                    "/var/lib/dpkg/info",
-                    &format!("{}.list", p.split(':').next().unwrap_or(p)),
-                ),
-                format!("sudo apt-get remove -y {}", shell(p)),
-            ),
-            _ => {
-                let secondes = sortie_de("rpm", &["-q", "--qf", "%{INSTALLTIME}\n", p], 30)
-                    .and_then(|s| s.trim().parse::<i64>().ok());
-                let depuis = secondes
-                    .and_then(|s| chrono::DateTime::from_timestamp(s, 0))
-                    .map(|d| d.with_timezone(&chrono::Local).date_naive());
-                let outil = if std::path::Path::new("/usr/bin/zypper").exists() {
-                    "sudo zypper --non-interactive remove"
-                } else {
-                    "sudo dnf -y remove"
-                };
-                (depuis, format!("{outil} {}", shell(p)))
-            }
+            Paquets::Dnf | Paquets::Zypper => sortie_de("rpm", &["-q", "--qf", "%{INSTALLTIME}\n", p], 30)
+                .and_then(|s| s.trim().parse::<i64>().ok())
+                .and_then(|s| chrono::DateTime::from_timestamp(s, 0))
+                .map(|d| d.with_timezone(&chrono::Local).date_naive()),
         };
         t.push(Trouvaille {
             logiciel: i,
             trace: Trace::Installe,
             ou: trf!("paquet {p}", "package {p}"),
             depuis,
-            retrait: vec![retrait],
+            retrait: vec![gestionnaire.retirer(&shell(p))],
             arret: Vec::new(),
         });
     }

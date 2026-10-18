@@ -236,6 +236,39 @@ impl Paquets {
         }
     }
 
+    /// Commande de retrait non interactive, avec ce que le paquet seul exigeait. Sous Omarchy, son outil (il ne
+    /// touche pas à un paquet absent) ; sur un système atomique, le retrait d'un paquet superposé se fait à l'image
+    /// suivante.
+    pub fn retirer(self, paquets: &str) -> String {
+        self.commande_retrait(omarchy(), atomique(), paquets)
+    }
+
+    fn commande_retrait(self, omarchy: bool, atomique: Option<Atomique>, paquets: &str) -> String {
+        let image = match (self, atomique) {
+            (Paquets::Dnf, Some(Atomique::RpmOstree)) => Some("sudo rpm-ostree uninstall"),
+            (Paquets::Zypper, Some(Atomique::Transactionnel)) => {
+                Some("sudo transactional-update --non-interactive pkg remove")
+            }
+            _ => None,
+        };
+        if let Some(outil) = image {
+            return format!(
+                "{outil} {paquets} && echo \"{}\"",
+                tr!(
+                    "Redémarre pour que le retrait prenne effet.",
+                    "Reboot for the removal to take effect."
+                )
+            );
+        }
+        match self {
+            Paquets::Pacman if omarchy => format!("omarchy pkg drop {paquets}"),
+            Paquets::Pacman => format!("sudo pacman -Rns --noconfirm {paquets}"),
+            Paquets::Apt => format!("sudo apt-get remove -y {paquets}"),
+            Paquets::Dnf => format!("sudo dnf remove -y {paquets}"),
+            Paquets::Zypper => format!("sudo zypper --non-interactive remove {paquets}"),
+        }
+    }
+
     /// Commande pour remettre les fichiers d'origine d'un paquet.
     pub fn reinstaller(self, paquet: &str) -> String {
         match self {
@@ -1316,6 +1349,38 @@ pub fn auditer() -> Audit {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn retrait_selon_la_distribution() {
+        assert_eq!(
+            Paquets::Pacman.commande_retrait(false, None, "'anydesk'"),
+            "sudo pacman -Rns --noconfirm 'anydesk'"
+        );
+        assert_eq!(
+            Paquets::Pacman.commande_retrait(true, None, "'anydesk'"),
+            "omarchy pkg drop 'anydesk'"
+        );
+        assert_eq!(
+            Paquets::Apt.commande_retrait(false, None, "x"),
+            "sudo apt-get remove -y x"
+        );
+        assert_eq!(Paquets::Dnf.commande_retrait(false, None, "x"), "sudo dnf remove -y x");
+        // Bazzite, Silverblue : dnf n'y retire rien, le paquet superposé part de l'image suivante.
+        assert!(
+            Paquets::Dnf
+                .commande_retrait(false, Some(Atomique::RpmOstree), "x")
+                .starts_with("sudo rpm-ostree uninstall x && echo")
+        );
+        assert!(
+            Paquets::Zypper
+                .commande_retrait(false, Some(Atomique::Transactionnel), "x")
+                .starts_with("sudo transactional-update --non-interactive pkg remove x && echo")
+        );
+        assert_eq!(
+            Paquets::Zypper.commande_retrait(false, None, "x"),
+            "sudo zypper --non-interactive remove x"
+        );
+    }
 
     #[test]
     fn configuration_de_sshd() {
