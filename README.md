@@ -205,6 +205,12 @@ depuis Linux, par exemple), et le guide dit si un programme manque sur cet ordin
 - Ce lien est-il dangereux ? : un lien reçu examiné sans jamais l'ouvrir (lettres déguisées, sous-domaine trompeur,
   marque imitée, raccourcisseur, adresse IP brute) ; après accord, l'âge du domaine et trois listes publiques de
   sites dangereux (URLhaus, Spamhaus, SURBL). Seul le nom du domaine sort de l'ordinateur.
+- Vérifier Gardien lui-même : sa version, la date de son dernier commit et son empreinte SHA-256, à comparer à la
+  page de la version (Gardien n'est pas signé : c'est cette comparaison qui prouve qu'il est bien lui). Une copie de
+  plus de six mois le dit au menu. Et le manifeste de la clé : au déploiement, l'empreinte de chaque fichier de la
+  clé est gardée sur ton ordinateur ; au retour de chez quelqu'un, le bilan nomme ce qui a été ajouté, remplacé ou
+  retiré (un autorun planté, un programme remplacé). Les données, les images ISO et le menu Ventoy, qui changent
+  normalement, ne sont pas comparés.
 - Vérifier un fichier téléchargé : son empreinte comparée à celle que publie le site (collée, ou un SHA256SUMS posé
   à côté), son nom et son contenu (double extension, programme déguisé en document), puis YARA et l'antivirus.
 - Surveillance toutes les heures : notification si un appareil inconnu arrive, si un port s'ouvre, si la note de
@@ -290,6 +296,7 @@ Chaque entrée du menu existe aussi en commande.
 | `gardien isoler <fichier>` | lancer un programme inconnu dans un bac à sable (bubblewrap ou firejail, Windows Sandbox) |
 | `gardien courriel` | fuites d'adresse courriel (XposedOrNot, ou Have I Been Pwned avec `GARDIEN_HIBP_CLE`) |
 | `gardien sortantes` | qui parle à Internet : les connexions de chaque programme (lecture seule) |
+| `gardien verifier-moi` | vérifier Gardien lui-même : version, date de compilation, empreinte SHA-256 à comparer à la page de la version ; sur la clé du propriétaire, le manifeste de la clé |
 | `gardien distance` | quelqu'un contrôle mon ordi ? logiciels de prise de contrôle à distance (faux technicien), retrait après accord |
 | `gardien lien <adresse>` | ce lien est-il dangereux ? (examiné sans l'ouvrir ; en ligne après accord) |
 | `gardien verifier-fichier <fichier> [empreinte]` | vérifier un fichier téléchargé : empreinte, nom et contenu, YARA, antivirus |

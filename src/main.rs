@@ -282,6 +282,17 @@ enum Commande {
         /// Le sujet : internet, wifi, lent, son, imprimante, disque (ou des mots qui le décrivent).
         sujet: Vec<String>,
     },
+    /// Vérifier Gardien lui-même : version, date de compilation, empreinte SHA-256 du programme (à comparer à la
+    /// page de la version) et, sur la clé du propriétaire, le manifeste de la clé.
+    #[command(name = "verifier-moi", visible_alias = "self-check")]
+    VerifierMoi,
+    /// Manifeste de la clé GARDIEN : écrit au déploiement (outils/deployer.sh), comparé à la clé branchée.
+    #[command(hide = true)]
+    Manifeste {
+        /// Écrire le manifeste de ce dossier (la racine de la clé) dans la référence de cet ordinateur.
+        #[arg(long)]
+        ecrire: Option<std::path::PathBuf>,
+    },
     /// Scan silencieux + notifications (utilisé par la surveillance).
     #[command(hide = true)]
     Surveiller,
@@ -428,6 +439,9 @@ fn etat_du_menu(surveillance_active: bool) -> Vec<String> {
         format!("{GRIS}{}{RESET}", tr!("surveillance coupée", "monitoring off"))
     };
     lignes.push(format!("  {cle} {GRIS}·{RESET} {surveillance}"));
+    if let Some(a) = protection::manifeste::avertissement_perime() {
+        lignes.push(format!("  {}⚠{RESET} {a}", couleur(risk::Niveau::Moyen)));
+    }
     lignes
 }
 
@@ -1322,6 +1336,8 @@ async fn main() {
         Some(Commande::Courriel) => protection::fuites::verifier_courriel(),
         Some(Commande::Sortantes) => protection::sortantes::afficher(),
         Some(Commande::Distance) => protection::distance::menu(),
+        Some(Commande::VerifierMoi) => protection::manifeste::verifier_moi(),
+        Some(Commande::Manifeste { ecrire }) => protection::manifeste::commande(ecrire.as_deref()),
         Some(Commande::Lien { adresse }) => protection::lien::verifier(Some(&adresse)),
         Some(Commande::VerifierFichier { fichier, empreinte }) => {
             protection::telechargement::verifier(Some(&fichier), empreinte.as_deref());

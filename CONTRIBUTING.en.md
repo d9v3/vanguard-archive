@@ -41,6 +41,7 @@ turn on once with `/install-github-app`).
 | `src/reseau/listes_noires.rs` | the home's Internet address in blocklists (DNSBL), after consent |
 | `src/entretien.rs` | monthly check-up: grade, updates, space, new problems, in one notification |
 | `src/protection/sortantes.rs` | who talks to the Internet: established connections by program (ss, PowerShell, lsof), reverse DNS |
+| `src/protection/manifeste.rs` | check Gardien itself (version, commit date, SHA-256) and key manifest (BLAKE3 checksums kept on the owner's computer, compared in the check) |
 | `src/protection/distance.rs` | is someone controlling my PC? remote control tools (installed, at boot, running, downloaded), in the check and as a guided walkthrough |
 | `src/protection/lien.rs` | is this link dangerous? local check (punycode, imitated brands…), then RDAP, URLhaus, Spamhaus DBL, SURBL |
 | `src/protection/telechargement.rs` | check a downloaded file: checksum by the system's tool, name and content, YARA and antivirus |

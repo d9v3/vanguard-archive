@@ -99,6 +99,25 @@ jobs:
           APRES: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
         run: python3 outils/confidentialite.py --generique --plage "$AVANT" "$APRES"
 
+  # Failles connues dans les dépendances (base RustSec, cargo audit) : chaque nuit, même sans changement de code, car
+  # les failles arrivent sans lui ; et à la demande. Linux seulement, lecture seule : un avis le lendemain plutôt que
+  # des mois plus tard.
+  audit:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - name: Rust à jour
+        run: |
+          rustup update stable
+          rustup default stable
+      - uses: Swatinem/rust-cache@v2
+      - name: cargo audit
+        run: |
+          cargo install cargo-audit --locked
+          cargo audit
+
   # Windows la nuit seulement si le code a changé depuis le dernier passage réussi (comme macos.yml).
   utile:
     if: github.event_name != 'push'

@@ -11,7 +11,7 @@ use crate::ui::*;
 
 /// Sorte d'empreinte, reconnue à sa longueur en chiffres hexadécimaux.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Algo {
+pub(crate) enum Algo {
     Md5,
     Sha1,
     Sha256,
@@ -134,7 +134,7 @@ fn empreinte_a_cote(fichier: &Path) -> Option<(Algo, String, PathBuf)> {
 }
 
 /// L'empreinte du fichier, calculée par l'outil du système.
-fn calculer(fichier: &Path, algo: Algo) -> Result<String, String> {
+pub(crate) fn calculer(fichier: &Path, algo: Algo) -> Result<String, String> {
     #[cfg(windows)]
     let sortie = {
         let nom = match algo {

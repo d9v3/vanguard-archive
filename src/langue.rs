@@ -152,6 +152,7 @@ pub fn categorie(nom: &str) -> &str {
         "Certificats" => "Certificates",
         "Clé GARDIEN" => "GARDIEN key",
         "Chiffrement" => "Encryption",
+        "Clé USB" => "USB key",
         "Clés SSH" => "SSH keys",
         "Comptes" => "Accounts",
         "Extensions" => "Browser extensions",

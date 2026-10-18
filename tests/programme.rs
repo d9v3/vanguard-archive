@@ -416,6 +416,21 @@ fn distance_sans_rien_retirer() {
     assert!(!t.contains("retiré."), "{t}");
 }
 
+/// Vérifier Gardien lui-même : version, date et empreinte, sans rien changer.
+#[test]
+fn verifier_moi_en_lecture_seule() {
+    let s = gardien("fr", &["verifier-moi"], "", 120);
+    assert_eq!(s.code, Some(0), "{}", s.erreurs);
+    let t = sans_couleurs(&s.texte);
+    assert!(
+        t.contains("Vérifier Gardien lui-même") && t.contains(env!("CARGO_PKG_VERSION")),
+        "{t}"
+    );
+    // Sous Wine, pas de PowerShell : l'empreinte est dite impossible, jamais inventée.
+    assert!(t.contains("SHA-256") || t.contains("Empreinte impossible"), "{t}");
+    assert!(t.contains("Compilé le"), "{t}");
+}
+
 /// Programmes au démarrage : la liste se montre, et Entrée sans rien décocher ne change rien.
 #[test]
 fn demarrage_sans_rien_changer() {

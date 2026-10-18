@@ -7,11 +7,57 @@ use std::fmt::Write as _;
 use std::path::Path;
 
 fn main() {
+    date_compilation();
     fabricants();
     regles_yara();
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
         ressources_windows();
     }
+}
+
+/// Date du dernier commit, pour « cette copie a N mois » (src/protection/manifeste.rs) : jamais l'horloge, pour qu'un
+/// même code donne le même programme (outils/deployer.sh ne recopie que ce qui change, et une compilation
+/// reproductible reste possible). SOURCE_DATE_EPOCH d'abord, sinon git ; sans git (archive du code), pas de date.
+fn date_compilation() {
+    println!("cargo:rerun-if-env-changed=SOURCE_DATE_EPOCH");
+    // HEAD change à chaque changement de branche, le journal des références à chaque commit (y compris dans un
+    // worktree, où .git est un fichier qui ne bouge pas).
+    for fichier in ["HEAD", "logs/HEAD"] {
+        if let Some(chemin) = git(&["rev-parse", "--git-path", fichier]) {
+            println!("cargo:rerun-if-changed={chemin}");
+        }
+    }
+    let secondes = std::env::var("SOURCE_DATE_EPOCH")
+        .ok()
+        .and_then(|s| s.trim().parse::<i64>().ok())
+        .or_else(|| git(&["log", "-1", "--format=%ct"]).and_then(|s| s.parse().ok()));
+    let date = secondes.map(date_civile).unwrap_or_default();
+    println!("cargo:rustc-env=GARDIEN_COMPILE={date}");
+}
+
+/// La sortie de git, `None` s'il manque ou échoue (archive du code sans dépôt).
+fn git(args: &[&str]) -> Option<String> {
+    let sortie = std::process::Command::new("git").args(args).output().ok()?;
+    let texte = String::from_utf8_lossy(&sortie.stdout).trim().to_string();
+    (sortie.status.success() && !texte.is_empty()).then_some(texte)
+}
+
+/// « AAAA-MM-JJ » (UTC) d'un instant en secondes depuis 1970 (algorithme civil de Howard Hinnant).
+fn date_civile(secondes: i64) -> String {
+    let z = secondes.div_euclid(86400) + 719_468;
+    let ere = z.div_euclid(146_097);
+    let jour_ere = z.rem_euclid(146_097);
+    let an_ere = (jour_ere - jour_ere / 1460 + jour_ere / 36524 - jour_ere / 146_096) / 365;
+    let jour_an = jour_ere - (365 * an_ere + an_ere / 4 - an_ere / 100);
+    let mois_decale = (5 * jour_an + 2) / 153;
+    let jour = jour_an - (153 * mois_decale + 2) / 5 + 1;
+    let mois = if mois_decale < 10 {
+        mois_decale + 3
+    } else {
+        mois_decale - 9
+    };
+    let an = an_ere + ere * 400 + i64::from(mois <= 2);
+    format!("{an:04}-{mois:02}-{jour:02}")
 }
 
 /// La base des fabricants, rangée une fois pour toutes : pour chaque longueur de préfixe (6, 7 ou 9 chiffres

@@ -191,6 +191,11 @@ example), and the guide tells when a program is missing on this computer.
 - Is this link dangerous?: a link you received, checked without ever opening it (disguised letters, misleading
   subdomain, imitated brand, link shortener, raw IP address); after your consent, the domain's age and three public
   lists of dangerous sites (URLhaus, Spamhaus, SURBL). Only the domain name leaves the computer.
+- Check Gardien itself: its version, the date of its last commit and its SHA-256 checksum, to compare with the
+  release page (Gardien is not signed: this comparison is what proves it is genuine). A copy older than six months
+  says so in the menu. And the key manifest: at deployment, the checksum of every file on the key is kept on your
+  computer; back from someone's place, the check names what was added, replaced or removed (a planted autorun, a
+  replaced program). Data, ISO images and the Ventoy menu, which change normally, are not compared.
 - Check a downloaded file: its checksum compared with the one the site publishes (pasted, or a SHA256SUMS next to
   it), its name and content (double extension, program disguised as a document), then YARA and the antivirus.
 - Hourly monitoring: a notification if an unknown device shows up, if a port opens, if the machine's grade drops, or
@@ -275,6 +280,7 @@ Each menu entry is also a command.
 | `gardien sandbox <file>` | run an unknown program in a sandbox (bubblewrap or firejail, Windows Sandbox) |
 | `gardien email` | email address leaks (XposedOrNot, or Have I Been Pwned with `GARDIEN_HIBP_CLE`) |
 | `gardien outbound` | who talks to the Internet: each program's connections (read-only) |
+| `gardien self-check` | check Gardien itself: version, build date, SHA-256 checksum to compare with the release page; on the owner's key, the key manifest |
 | `gardien remote-access` | is someone controlling my PC? remote control tools (tech-support scam), removed after consent |
 | `gardien link <address>` | is this link dangerous? (checked without opening it; online after your consent) |
 | `gardien check-file <file> [checksum]` | check a downloaded file: checksum, name and content, YARA, antivirus |

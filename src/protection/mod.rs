@@ -11,6 +11,7 @@ pub mod fuites;
 pub mod integrite;
 pub mod isoler;
 pub mod lien;
+pub mod manifeste;
 pub mod pieges;
 pub mod sortantes;
 pub mod telechargement;
