@@ -16,6 +16,8 @@ const CAT: &str = "Extensions";
 /// Une extension installée et active.
 #[derive(Debug, Default)]
 struct Extension {
+    /// Identifiant de l'extension dans le navigateur : la même extension peut figurer dans deux fichiers.
+    id: String,
     nom: String,
     /// Accès à tous les sites.
     partout: bool,
@@ -82,6 +84,7 @@ fn lire_firefox(texte: &str) -> Vec<Extension> {
             None
         };
         extensions.push(Extension {
+            id: a["id"].as_str().unwrap_or_default().to_string(),
             nom: a["defaultLocale"]["name"]
                 .as_str()
                 .or(a["id"].as_str())
@@ -122,7 +125,7 @@ fn lire_chromium(texte: &str, profil: &Path) -> Vec<Extension> {
         return Vec::new();
     };
     let mut extensions = Vec::new();
-    for (_, e) in json["extensions"]["settings"].as_object().into_iter().flatten() {
+    for (id, e) in json["extensions"]["settings"].as_object().into_iter().flatten() {
         let manifeste = &e["manifest"];
         let emplacement = e["location"].as_i64().unwrap_or(0);
         let desactivee = e["disable_reasons"].as_array().is_some_and(|r| !r.is_empty())
@@ -160,12 +163,21 @@ fn lire_chromium(texte: &str, profil: &Path) -> Vec<Extension> {
             _ => None,
         };
         extensions.push(Extension {
+            id: id.clone(),
             nom: nom_chromium(manifeste, chemin.as_deref()),
             partout: scripts_partout || permissions.iter().any(|p| acces_partout(p)),
             pouvoirs: pouvoirs(&permissions),
             origine_suspecte,
         });
     }
+    extensions.sort_by_key(|e| e.nom.to_lowercase());
+    extensions
+}
+
+/// Une seule fois chaque extension (par identifiant), triées par nom.
+fn sans_doublons(mut extensions: Vec<Extension>) -> Vec<Extension> {
+    extensions.sort_by(|a, b| a.id.cmp(&b.id));
+    extensions.dedup_by(|a, b| a.id == b.id);
     extensions.sort_by_key(|e| e.nom.to_lowercase());
     extensions
 }
@@ -350,7 +362,8 @@ pub fn extensions() -> Vec<Constat> {
             let extensions = if firefox {
                 lire_firefox(&std::fs::read_to_string(chemin.join("extensions.json")).unwrap_or_default())
             } else {
-                // Windows range les extensions dans Secure Preferences, Linux dans Preferences.
+                // Windows range les extensions dans Secure Preferences, Linux dans Preferences. Une extension
+                // inscrite dans les deux ne compte qu'une fois.
                 let mut e = Vec::new();
                 for f in ["Preferences", "Secure Preferences"] {
                     e.extend(lire_chromium(
@@ -358,7 +371,7 @@ pub fn extensions() -> Vec<Constat> {
                         &chemin,
                     ));
                 }
-                e
+                sans_doublons(e)
             };
             if extensions.is_empty() {
                 continue;
@@ -438,6 +451,11 @@ mod tests {
             c.iter().map(|c| c.probleme).collect::<Vec<_>>(),
             [Some(Niveau::Eleve), Some(Niveau::Moyen), Some(Niveau::Info)]
         );
+        // La même extension dans Preferences et dans Secure Preferences : comptée une seule fois.
+        let mut deux_fois = lire_chromium(json, Path::new("/profil"));
+        deux_fois.extend(lire_chromium(json, Path::new("/profil")));
+        let uniques: Vec<String> = sans_doublons(deux_fois).into_iter().map(|e| e.nom).collect();
+        assert_eq!(uniques, noms);
         // Nom à traduire sans dossier de langues : le nom brut reste, sans planter.
         let m: Value = serde_json::from_str(r#"{"name":"__MSG_extName__"}"#).unwrap();
         assert_eq!(nom_chromium(&m, None), "__MSG_extName__");

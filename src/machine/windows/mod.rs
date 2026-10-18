@@ -731,8 +731,10 @@ fn lire_ports_udp(liste: &str, pare_feu_actif: bool, ip_lan: Option<&str>) -> Ve
                     "Couper LLMNR (résolution de noms usurpable ; le DNS suffit)",
                     "Turn off LLMNR (spoofable name resolution; DNS is enough)"
                 ),
+                // Clé créée seulement si elle manque : « New-Item -Force » sur une clé existante l'écraserait, avec
+                // les autres stratégies DNS qu'elle contient.
                 &[
-                    "New-Item -Path 'HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows NT\\DNSClient' -Force | Out-Null",
+                    "if (-not (Test-Path 'HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows NT\\DNSClient')) { New-Item -Path 'HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows NT\\DNSClient' -Force | Out-Null }",
                     "Set-ItemProperty -Path 'HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows NT\\DNSClient' -Name EnableMulticast -Value 0 -Type DWord",
                 ],
             ),
@@ -809,6 +811,9 @@ mod tests {
         );
         let corrigibles: Vec<bool> = c.iter().map(|c| c.correctif.is_some()).collect();
         assert_eq!(corrigibles, [true, true, false, true]);
+        // LLMNR : la clé des stratégies DNS n'est créée que si elle manque, jamais écrasée.
+        let llmnr = &c[0].correctif.as_ref().unwrap().commandes[0];
+        assert!(llmnr.starts_with("if (-not (Test-Path ") && llmnr.contains("New-Item"));
         let c = lire_ports_udp("LLMNR|0\n0.0.0.0|5355|svchost", false, None);
         assert!(c.len() == 1 && c[0].correctif.is_none() && c[0].probleme == Some(Niveau::Info));
     }

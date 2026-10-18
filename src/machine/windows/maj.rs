@@ -357,17 +357,30 @@ fn peripheriques(lectures: Option<&str>) -> Constat {
 /// `None` pour une carte virtuelle ou de base (VM, Bureau à distance) : pas de pilote de fabricant à chercher.
 pub fn pilote_fabricant(carte: &str) -> Option<(&'static str, &'static str)> {
     let nom = carte.to_lowercase();
+    // Pages dans la langue de l'interface.
     if nom.contains("nvidia") {
-        Some(("NVIDIA App", "https://www.nvidia.com/fr-fr/software/nvidia-app/"))
+        Some((
+            "NVIDIA App",
+            tr!(
+                "https://www.nvidia.com/fr-fr/software/nvidia-app/",
+                "https://www.nvidia.com/en-us/software/nvidia-app/"
+            ),
+        ))
     } else if nom.contains("amd") || nom.contains("radeon") {
         Some((
             "AMD Software Adrenalin",
-            "https://www.amd.com/fr/support/download/drivers.html",
+            tr!(
+                "https://www.amd.com/fr/support/download/drivers.html",
+                "https://www.amd.com/en/support/download/drivers.html"
+            ),
         ))
     } else if nom.contains("intel") {
         Some((
             "Intel Driver & Support Assistant",
-            "https://www.intel.com/content/www/fr/fr/support/detect.html",
+            tr!(
+                "https://www.intel.com/content/www/fr/fr/support/detect.html",
+                "https://www.intel.com/content/www/us/en/support/detect.html"
+            ),
         ))
     } else {
         None
