@@ -55,7 +55,7 @@ In the menu, choose **1** (full check), then **2** (fix). Arrows, Enter, and Esc
 | **Protection** | Decoy files against ransomware, Windows Defender blocking, 308 YARA rules, antivirus, sandbox, integrity of critical files, leaked passwords, outbound connections, tech-support scam (remote control tools), dangerous links, downloaded files. |
 | **Follow-up** | Hourly monitoring, monthly check-up, HTML report with the grade curve, learning on your computer. |
 | **Software and games** | The best software in 8 categories, from its official source; update everything at once; settings for gaming. |
-| **Tools** | Copy my files (checked copy), my computers (tracked by the key), command guide, search in every menu. |
+| **Tools** | Copy my files (checked copy), my computers (tracked by the key), key data protected by a passphrase, command guide, search in every menu. |
 
 <details>
 <summary><b>The details, feature by feature</b></summary>
@@ -113,6 +113,12 @@ nothing is deleted or overwritten, and an interrupted copy resumes where it stop
 renamable), grade, remaining problems (their category and level only, the five worst), date of the last check. The
 table travels on the key's GARDIENLOG partition, without computer name, account, address or Wi-Fi name; it never
 goes to GitHub.
+
+**Protect the key's data** — the key's device record (names, MAC addresses, nicknames) encrypted by a passphrase
+(XChaCha20-Poly1305, passphrase derived by Argon2id), against a lost or lent key. At home, nothing changes: the data
+key is kept on the owner's computer. Elsewhere, Gardien asks for the passphrase, or goes on without the record. The
+report and the diagnostic are no longer written to the key. On request, reversible, with a backup offered first; the
+check reports a record left in clear.
 
 **Optimize** — privacy, performance and comfort settings written for Gardien. On Windows: telemetry kept to a
 minimum, ads and tracking off, Recall without screen snapshots, file extensions shown, no autorun from USB drives,

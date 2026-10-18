@@ -104,6 +104,13 @@ fn monter(peripherique: &str, lecture_seule: bool) -> Result<(), String> {
 
 /// Empreinte de l'ordinateur du propriétaire, écrite dans le témoin de la clé. Une clé préparée sous un ancien nom
 /// la garde dans l'ancien témoin : sans lui, elle passerait pour une clé sans protection, modifiable partout.
+/// Cet ordinateur est-il celui du propriétaire de la clé (empreinte écrite par deployer.sh) ?
+pub fn chez_le_proprietaire(cle: &Path) -> bool {
+    let attendue = empreinte_attendue(cle);
+    let attendue = attendue.trim();
+    !attendue.is_empty() && Some(attendue) == crate::machine::empreinte_machine().as_deref()
+}
+
 fn empreinte_attendue(cle: &Path) -> String {
     std::iter::once(crate::reseau::TEMOIN_CLE)
         .chain(crate::reseau::ANCIENS_TEMOINS_CLE)

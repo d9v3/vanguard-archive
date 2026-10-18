@@ -322,7 +322,7 @@ fn enregistrer(pieges: &[Piege], liste: &Path) -> std::io::Result<()> {
     if let Some(dossier) = liste.parent() {
         std::fs::create_dir_all(dossier)?;
     }
-    crate::reseau::ecrire_atomique(liste, &serde_json::to_string_pretty(pieges).unwrap_or_default())
+    crate::reseau::ecrire_atomique(liste, serde_json::to_string_pretty(pieges).unwrap_or_default())
 }
 
 /// Retire exactement les fichiers posés et intacts, puis la liste. Un piège modifié ou renommé reste : c'est la preuve

@@ -51,6 +51,7 @@ turn on once with `/install-github-app`).
 | `src/lenteur.rs`, `src/fiche.rs` | why it is slow (two-sample snapshot, startup); computer specs |
 | `src/copier.rs` | copy my files to an external disk: checked copy (BLAKE3), resume, never overwrites |
 | `src/ordinateurs.rs` | my computers: each computer's visit noted on GARDIENLOG (categories and levels only) |
+| `src/chiffrement.rs` | protected key data: encrypted record (XChaCha20-Poly1305), data key kept by the owner and wrapped by the passphrase (Argon2id) |
 | `assets/oui.tsv` | manufacturers by MAC prefix (IEEE list), stored as sorted tables at compile time (`build.rs`) |
 | `assets/yara/` | ReversingLabs YARA rules (MIT license), gathered by `outils/maj-yara.sh` |
 | `assets/icones/`, `assets/gardien.ico` | the logo, computed by `outils/icone.py` |

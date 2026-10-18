@@ -21,9 +21,12 @@ Linux, Windows and macOS folders.
 
 Protection: the key has two parts. GARDIEN (everything above) is read-only on Windows, and on Linux and macOS
 Gardien remounts it read-only itself at startup: another computer cannot modify the program. Only its owner's computer
-can write to it. GARDIENLOG, small and writable, only holds journal-erreurs.txt: the errors met
+can write to it. GARDIENLOG, small and writable, holds journal-erreurs.txt: the errors met
 (version, system, message), without user name, computer name or home folder. Back on the owner's computer, they
-become GitHub issues, to improve Gardien. Windows
+become GitHub issues, to improve Gardien. It also holds ordinateurs.json (My computers: grade and problem categories
+of each computer, without names), which never goes to GitHub.
+Protected data: if the owner protected the key's data (Data menu), Gardien asks for the passphrase on another
+computer to read the device record; Enter with nothing, it goes on without the record. Windows
 never starts anything by itself from a USB key (protection against viruses since Windows 7): double-click it.
 
 To start: run Gardien, choose "1. Full check", then "2. Fix".
@@ -82,6 +85,7 @@ highlighted one, Esc clears it. In the main menu, it also finds each tool of the
        Back up or restore (nicknames, network history)
        Copy my files to an external disk (checked copy, nothing deleted, resumes after an interruption)
        My computers: those where the key ran a check, their grade and remaining problems (gardien ordinateurs)
+       Protect the key's data: device record encrypted by a passphrase, asked only elsewhere
  10  Command guide › the useful commands of Linux, Windows, macOS and all systems, by program, each one
        explained (⚠: it changes something); nothing runs from there, a number copies it. From the command line:
        gardien guide windows, gardien guide winget, gardien guide dns cache

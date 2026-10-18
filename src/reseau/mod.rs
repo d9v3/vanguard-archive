@@ -257,6 +257,29 @@ fn absorber_carnet(carnet: &mut BTreeMap<String, AppareilConnu>, autre: BTreeMap
 }
 
 impl Base {
+    /// Le carnet d'un dossier `donnees` : en clair, ou chiffré par la phrase (`chiffrement`). `None` : chiffré et pas
+    /// ouvert (pas de phrase, mauvaise phrase) ; il ne faut alors rien y réécrire, ce serait l'écraser.
+    fn ouvrir_carnet(donnees: &std::path::Path) -> Option<Base> {
+        if !crate::chiffrement::protegee(donnees) {
+            return Some(Base::lire(&donnees.join("appareils.json")));
+        }
+        let texte = crate::chiffrement::lire_carnet(donnees)?;
+        crate::chiffrement::retenir_carnet(&texte);
+        match serde_json::from_str::<Base>(&texte) {
+            Ok(mut base) => {
+                base.rendre_affichable();
+                Some(base)
+            }
+            Err(e) => {
+                tre!(
+                    "Attention : carnet chiffré de la clé illisible ({e}) : il n'est ni lu ni réécrit.",
+                    "Warning: the key's encrypted record unreadable ({e}): it is neither read nor rewritten."
+                );
+                None
+            }
+        }
+    }
+
     fn lire(p: &std::path::Path) -> Base {
         let Ok(texte) = std::fs::read_to_string(p) else {
             return Base::default();
@@ -289,14 +312,24 @@ impl Base {
     /// ne doivent pas lire et réécrire la base en même temps (l'une effacerait les ajouts de l'autre).
     fn charger() -> (Base, [PathBuf; 2], Option<Verrou>) {
         let verrou = Verrou::prendre(&dossier_local());
-        let cle = dossier_donnees().join("appareils.json");
         let local = dossier_local().join("appareils.json");
-        let mut base = Base::lire(&cle);
+        let donnees = donnees_de_la_cle().unwrap_or_else(dossier_local);
+        let carnet = Base::ouvrir_carnet(&donnees);
+        // Carnet chiffré pas ouvert : il n'est pas réécrit, tout reste sur cet ordinateur.
+        let cle = if carnet.is_some() {
+            donnees.join("appareils.json")
+        } else {
+            local.clone()
+        };
+        let ouvert = carnet.is_some();
+        let mut base = carnet.unwrap_or_default();
         // Clé protégée en écriture (autre ordinateur) : sa base sert quand même, les ajouts restent ici.
-        if let Some(protegee) = cle_protegee() {
-            base.absorber(Base::lire(&protegee.join("donnees").join("appareils.json")));
+        if let Some(protegee) = cle_protegee()
+            && let Some(sienne) = Base::ouvrir_carnet(&protegee.join("donnees"))
+        {
+            base.absorber(sienne);
         }
-        if local != cle {
+        if local != cle || !ouvert {
             base.absorber(Base::lire(&local));
         }
         (base, [cle, local], verrou)
@@ -331,7 +364,12 @@ impl Base {
     fn enregistrer(&self, chemins: &[PathBuf; 2]) {
         let json = serde_json::to_string_pretty(self).unwrap_or_default();
         for p in chemins {
-            if let Err(e) = ecrire_atomique(p, &json) {
+            // Le carnet d'une clé protégée s'écrit chiffré ; jamais en clair à côté.
+            let ecrit = match p.parent().filter(|d| crate::chiffrement::protegee(d)) {
+                Some(donnees) => crate::chiffrement::ecrire_carnet(donnees, &json),
+                None => ecrire_atomique(p, &json),
+            };
+            if let Err(e) = ecrit {
                 tre!(
                     "Attention : base des appareils non enregistrée dans {} ({e}).",
                     "Warning: device database not saved to {} ({e}).",
@@ -345,7 +383,7 @@ impl Base {
 /// Écrit d'abord un fichier temporaire, le force sur le disque, puis le renomme à la place de l'ancien :
 /// une coupure, un Ctrl-C ou une clé arrachée laissent soit l'ancienne base, soit la nouvelle, jamais une
 /// base tronquée.
-pub(crate) fn ecrire_atomique(chemin: &std::path::Path, contenu: &str) -> std::io::Result<()> {
+pub(crate) fn ecrire_atomique(chemin: &std::path::Path, contenu: impl AsRef<[u8]>) -> std::io::Result<()> {
     use std::io::Write;
     if let Some(d) = chemin.parent() {
         std::fs::create_dir_all(d)?;
@@ -353,7 +391,7 @@ pub(crate) fn ecrire_atomique(chemin: &std::path::Path, contenu: &str) -> std::i
     let temporaire = chemin.with_extension(format!("tmp-{}", std::process::id()));
     let resultat = (|| {
         let mut f = std::fs::File::create(&temporaire)?;
-        f.write_all(contenu.as_bytes())?;
+        f.write_all(contenu.as_ref())?;
         f.sync_all()?;
         std::fs::rename(&temporaire, chemin)
     })();
@@ -575,6 +613,8 @@ pub fn noms_connus() -> (Vec<String>, Vec<String>) {
         .into_iter()
         .chain([dossier_local()])
         .filter_map(|d| std::fs::read_to_string(d.join("appareils.json")).ok())
+        // Le carnet chiffré, s'il a été ouvert pendant ce lancement : ses noms aussi restent hors du journal.
+        .chain(crate::chiffrement::carnet_ouvert())
         .collect();
     noms_des_bases(&textes)
 }
@@ -618,12 +658,18 @@ pub fn cle_protegee() -> Option<PathBuf> {
     cle_usb().filter(|c| !modifiable(c))
 }
 
-/// Données (historique des appareils, rapports) : sur la clé USB quand elle est branchée et modifiable,
-/// pour qu'elles voyagent avec le programme ; sinon dans le dossier local de l'ordinateur.
+/// Le dossier `donnees` de la clé USB, quand elle est branchée et modifiable (ordinateur du propriétaire).
+pub fn donnees_de_la_cle() -> Option<PathBuf> {
+    cle_usb().filter(|c| modifiable(c)).map(|c| c.join("donnees"))
+}
+
+/// Données (rapport, diagnostic) : sur la clé USB quand elle est branchée et modifiable, pour qu'elles voyagent avec
+/// le programme ; sinon, ou quand les données de la clé sont protégées par une phrase (une clé perdue ne doit rien
+/// livrer en clair), dans le dossier local de l'ordinateur.
 pub fn dossier_donnees() -> PathBuf {
-    cle_usb()
-        .filter(|c| modifiable(c))
-        .map_or_else(dossier_local, |c| c.join("donnees"))
+    donnees_de_la_cle()
+        .filter(|d| !crate::chiffrement::protegee(d))
+        .unwrap_or_else(dossier_local)
 }
 
 /// Données propres à cet ordinateur (quarantaine antivirus : on ne transporte pas de malware sur une clé).
@@ -1445,6 +1491,33 @@ mod tests {
             (Vec::new(), Vec::new()),
             "jamais la vraie base pendant un test"
         );
+    }
+
+    /// Clé protégée par une phrase : le carnet s'ouvre avec la clé de données gardée ici (comme chez le propriétaire),
+    /// s'enregistre chiffré sur la clé et en clair sur cet ordinateur, et jamais en clair sur la clé.
+    #[test]
+    fn carnet_chiffre_lu_et_enregistre() {
+        let d = std::env::temp_dir().join(format!("gardien-carnet-chiffre-{}", std::process::id()));
+        let donnees = d.join("donnees");
+        std::fs::create_dir_all(&donnees).unwrap();
+        let carnet = r#"{"reseaux":{"3c:22:fb:00:00:01":{"nom":"Salon","appareils":{}}}}"#;
+        std::fs::write(donnees.join("appareils.json"), carnet).unwrap();
+        let cle_locale = dossier_local().join("cle-donnees");
+        let phrase = "phrase de test assez longue";
+        crate::chiffrement::proteger_dans(&donnees, &cle_locale, &d.join("local"), phrase, (64, 1, 1)).unwrap();
+        let mut base = Base::ouvrir_carnet(&donnees).unwrap();
+        assert_eq!(base.reseaux["3c:22:fb:00:00:01"].nom.as_deref(), Some("Salon"));
+        base.reseaux.get_mut("3c:22:fb:00:00:01").unwrap().nom = Some("Cuisine".into());
+        let local = d.join("local").join("appareils.json");
+        base.enregistrer(&[donnees.join("appareils.json"), local.clone()]);
+        assert!(!donnees.join("appareils.json").exists());
+        assert!(std::fs::read_to_string(&local).unwrap().contains("Cuisine"));
+        let relue = Base::ouvrir_carnet(&donnees).unwrap();
+        assert_eq!(relue.reseaux["3c:22:fb:00:00:01"].nom.as_deref(), Some("Cuisine"));
+        // Les noms du carnet ouvert restent connus du journal des erreurs.
+        assert!(crate::chiffrement::carnet_ouvert().is_some_and(|t| t.contains("Cuisine")));
+        let _ = std::fs::remove_file(&cle_locale);
+        let _ = std::fs::remove_dir_all(&d);
     }
 
     /// La base voyage sur la clé : écrite ailleurs (autre ordinateur, copie à la main), ses textes arrivent inoffensifs

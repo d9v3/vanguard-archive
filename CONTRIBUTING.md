@@ -51,6 +51,7 @@ modification. Sur GitHub, `@claude` dans un ticket ou une demande de fusion le f
 | `src/lenteur.rs`, `src/fiche.rs` | pourquoi c'est lent (instantané en deux mesures, démarrage) ; fiche de l'ordinateur |
 | `src/copier.rs` | copier mes fichiers vers un disque externe : copie vérifiée (BLAKE3), reprise, jamais d'écrasement |
 | `src/ordinateurs.rs` | mes ordinateurs : la visite de chaque ordinateur notée sur GARDIENLOG (catégories et niveaux seulement) |
+| `src/chiffrement.rs` | données de la clé protégées : carnet chiffré (XChaCha20-Poly1305), clé de données gardée chez le propriétaire et enveloppée par la phrase (Argon2id) |
 | `assets/oui.tsv` | fabricants par préfixe MAC (liste IEEE), rangés en tableaux triés à la compilation (`build.rs`) |
 | `assets/yara/` | règles YARA de ReversingLabs (licence MIT), rassemblées par `outils/maj-yara.sh` |
 | `assets/icones/`, `assets/gardien.ico` | le logo, calculé par `outils/icone.py` |

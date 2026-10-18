@@ -4,6 +4,7 @@
 //! Lancé sans argument, affiche un menu.
 
 mod apprentissage;
+mod chiffrement;
 mod commande;
 mod copier;
 mod corriger;
@@ -651,6 +652,7 @@ enum Action {
     Sauvegarder,
     CopierFichiers,
     Ordinateurs,
+    ProtegerDonnees,
     Guide,
     Depanner,
 }
@@ -856,6 +858,11 @@ const OUTILS: &[Outil] = &[
         titre: ["Mes ordinateurs", "My computers"],
         precision: ["suivis par la clé GARDIEN", "tracked by the GARDIEN key"],
         mots: "ordinateurs computers tableau dashboard suivi parc famille family clé key" },
+    Outil { action: Action::ProtegerDonnees, groupe: Some(Groupe::Donnees), lettre: "",
+        titre: ["Protéger les données de la clé", "Protect the key's data"],
+        precision: ["carnet chiffré par une phrase", "record encrypted by a passphrase"],
+        mots: "chiffrer encrypt chiffrement encryption phrase passphrase mot de passe password protéger protect \
+               perdue lost" },
     Outil { action: Action::Guide, groupe: Some(Groupe::Guide), lettre: "",
         titre: ["Guide des commandes", "Command guide"],
         precision: ["Linux, Windows, macOS, tous", "Linux, Windows, macOS, all"],
@@ -1104,6 +1111,7 @@ async fn executer(s: &mut Session, action: Action) {
         Action::Sauvegarder => donnees::menu(),
         Action::CopierFichiers => copier::menu(),
         Action::Ordinateurs => ordinateurs::menu(),
+        Action::ProtegerDonnees => chiffrement::menu(),
         Action::Guide => guide::menu(),
         Action::Depanner => depanner::menu(),
     }

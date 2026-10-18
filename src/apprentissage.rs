@@ -48,7 +48,7 @@ fn charger() -> Result<Appris, ()> {
 
 fn enregistrer(appris: &Appris) -> std::io::Result<()> {
     std::fs::create_dir_all(crate::reseau::dossier_local())?;
-    crate::reseau::ecrire_atomique(&fichier(), &serde_json::to_string_pretty(appris).unwrap_or_default())
+    crate::reseau::ecrire_atomique(&fichier(), serde_json::to_string_pretty(appris).unwrap_or_default())
 }
 
 /// Une alerte reconnue d'un bilan à l'autre sans ses quantités (« 12 % libres » et « 9 % libres » sont la même). Une

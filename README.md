@@ -60,7 +60,7 @@ pour revenir.
 | **Protection** | Fichiers-pièges contre les rançongiciels, blocages de Windows Defender, 308 règles YARA, antivirus, bac à sable, intégrité des fichiers critiques, mots de passe fuités, connexions sortantes, faux technicien (logiciels de prise de contrôle à distance), liens dangereux, fichiers téléchargés. |
 | **Suivi** | Surveillance toutes les heures, entretien du mois, rapport HTML avec la courbe des notes, apprentissage sur ton ordinateur. |
 | **Logiciels et jeux** | Les meilleurs logiciels en 8 catégories, depuis leur source officielle ; mises à jour de tout d'un coup ; réglages pour jouer. |
-| **Outils** | Copier mes fichiers (copie vérifiée), mes ordinateurs (suivis par la clé), guide des commandes, recherche dans tous les menus. |
+| **Outils** | Copier mes fichiers (copie vérifiée), mes ordinateurs (suivis par la clé), données de la clé protégées par une phrase, guide des commandes, recherche dans tous les menus. |
 
 <details>
 <summary><b>Le détail, fonction par fonction</b></summary>
@@ -123,6 +123,12 @@ BLAKE3), rien n'est effacé ni écrasé, et une copie interrompue reprend où el
 modèle », renommable), note, problèmes restants (leur catégorie et leur niveau seulement, les cinq plus graves),
 date du dernier bilan. Le tableau voyage sur la partition GARDIENLOG de la clé, sans nom de machine, compte, adresse
 ni nom de Wi-Fi ; il ne part jamais sur GitHub.
+
+**Protéger les données de la clé** — le carnet des appareils de la clé (noms, adresses MAC, surnoms) chiffré par une
+phrase (XChaCha20-Poly1305, phrase dérivée par Argon2id), contre une clé perdue ou prêtée. Chez soi, rien ne change :
+la clé de données est gardée sur l'ordinateur du propriétaire. Ailleurs, Gardien demande la phrase, ou continue sans
+le carnet. Le rapport et le diagnostic ne s'écrivent plus sur la clé. Sur demande, réversible, avec une sauvegarde
+proposée avant ; le bilan signale un carnet resté en clair.
 
 **Optimiser** — des réglages de confidentialité, de performance et de confort, écrits pour Gardien. Sous Windows :
 télémétrie au minimum, publicités et suivi coupés, Recall sans captures d'écran, extensions des fichiers visibles, pas

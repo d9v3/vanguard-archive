@@ -496,6 +496,15 @@ mod tests {
         assert!(detail(&o).iter().any(|t| t.contains("81/100")));
     }
 
+    /// Les messages tiennent dans `LARGEUR` colonnes, dans les deux langues.
+    #[test]
+    fn messages_dans_la_largeur() {
+        assert_eq!(
+            crate::gaming::tests::textes_trop_larges(include_str!("ordinateurs.rs")),
+            Vec::<String>::new()
+        );
+    }
+
     #[test]
     fn nom_de_windows() {
         assert_eq!(nom_windows("Windows 10 Pro", "26100", "24H2"), "Windows 11 Pro 24H2");
