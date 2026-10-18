@@ -560,7 +560,12 @@ mod tests {
     /// décalait la liste à cocher, qui compte une rangée par ligne.
     #[test]
     fn entete_dans_la_largeur() {
-        for c in [Categorie::Confidentialite, Categorie::Performance, Categorie::Confort] {
+        for c in [
+            Categorie::Confidentialite,
+            Categorie::Performance,
+            Categorie::Confort,
+            Categorie::Protection,
+        ] {
             for l in entete(c).iter().flat_map(|t| t.split('\n')) {
                 assert!(largeur_affichee(l) <= LARGEUR, "{} colonnes : {l}", largeur_affichee(l));
             }
