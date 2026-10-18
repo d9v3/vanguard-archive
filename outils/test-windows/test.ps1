@@ -709,6 +709,15 @@ if ($Auto) { Info 'Sautée : il faut regarder l''écran (test avec questions).' 
 Journal "FIN $(Get-Date -Format 'HH:mm:ss')"
 $rapport = Rapport
 $toutes = @($script:etapes | ForEach-Object { $_.Verifs })
+# Les journaux des fenêtres administrateur de cette passe (outils de Gardien, %LOCALAPPDATA%\gardien\corrections) :
+# ce qui s'est vraiment exécuté après chaque UAC, lisible depuis Linux.
+$corrections = Join-Path $env:LOCALAPPDATA 'gardien\corrections'
+$journauxAdmin = @(Get-ChildItem -LiteralPath $corrections -Filter '*.log' -ErrorAction SilentlyContinue | Where-Object LastWriteTime -ge $debutTest)
+if ($journauxAdmin) {
+    $versJournaux = Join-Path $res 'corrections'
+    New-Item -ItemType Directory -Force $versJournaux | Out-Null
+    $journauxAdmin | Copy-Item -Destination $versJournaux -Force
+}
 $nbOk = @($toutes | Where-Object Etat -eq 'ok').Count
 $nbBug = @($toutes | Where-Object Etat -eq 'bug').Count
 $nbEchec = @($script:etapes | ForEach-Object { $_.Commandes } | Where-Object Code -ne 0).Count
