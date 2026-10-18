@@ -55,6 +55,15 @@ pub(super) fn path_dangereux(path: &str, droits: impl Fn(&str) -> Option<u32>) -
         .collect()
 }
 
+/// Un fichier de démarrage ou de configuration tel qu'il est montré : « ~/… » sous le dossier personnel `maison`, et
+/// rendu inoffensif (dans /etc/profile.d ou ~/.config/autostart, le nom est celui qu'a choisi qui a posé le fichier).
+pub(super) fn court(p: &Path, maison: &Path) -> String {
+    crate::ui::affichable(
+        &p.strip_prefix(maison)
+            .map_or_else(|_| p.display().to_string(), |r| format!("~/{}", r.display())),
+    )
+}
+
 /// Ligne de configuration vide ou en commentaire (shell, systemd, .desktop : « # » ; Lua : « -- » ; « ; »).
 pub(super) fn commentaire(ligne: &str) -> bool {
     let l = ligne.trim_start();
@@ -210,6 +219,8 @@ pub(super) fn persistance() -> Vec<Constat> {
             .flat_map(str::split_whitespace)
         {
             let connue = gestion.is_some_and(|g| g.possede(Path::new(lib)));
+            // Écrit par qui a posé le préchargement (un rootkit, souvent) : montré rendu inoffensif.
+            let lib = crate::ui::affichable(lib);
             if connue {
                 suspects.push(trf!(
                     "/etc/ld.so.preload charge {lib} dans tous les programmes",
@@ -228,7 +239,7 @@ pub(super) fn persistance() -> Vec<Constat> {
             suspects.push(trf!(
                 "{var}={} est défini pour cette session",
                 "{var}={} is set for this session",
-                v.to_string_lossy()
+                crate::ui::affichable(&v.to_string_lossy())
             ));
         }
     }
@@ -286,10 +297,6 @@ pub(super) fn persistance() -> Vec<Constat> {
     demarrage.extend(hypr.iter().cloned());
     configuration.extend(hypr);
 
-    let court = |p: &Path| {
-        p.strip_prefix(&h)
-            .map_or_else(|_| p.display().to_string(), |r| format!("~/{}", r.display()))
-    };
     for f in &configuration {
         let Ok(texte) = std::fs::read_to_string(f) else {
             continue;
@@ -299,14 +306,14 @@ pub(super) fn persistance() -> Vec<Constat> {
                 suspects.push(trf!(
                     "{}:{} précharge une bibliothèque (LD_PRELOAD)",
                     "{}:{} preloads a library (LD_PRELOAD)",
-                    court(f),
+                    court(f, &h),
                     n + 1
                 ));
             } else if !commentaire(l)
                 && !demarrage.contains(f)
                 && let Some(raison) = commande_suspecte(l, false)
             {
-                suspects.push(trf!("{}:{} : {raison}", "{}:{}: {raison}", court(f), n + 1));
+                suspects.push(trf!("{}:{} : {raison}", "{}:{}: {raison}", court(f, &h), n + 1));
             }
         }
     }
@@ -316,7 +323,7 @@ pub(super) fn persistance() -> Vec<Constat> {
         };
         for (n, l) in texte.lines().enumerate() {
             if let Some(raison) = commande_lancee(l).and_then(|c| commande_suspecte(&c, true)) {
-                suspects.push(trf!("{}:{} : {raison}", "{}:{}: {raison}", court(f), n + 1));
+                suspects.push(trf!("{}:{} : {raison}", "{}:{}: {raison}", court(f, &h), n + 1));
             }
         }
     }
@@ -336,7 +343,7 @@ pub(super) fn persistance() -> Vec<Constat> {
     );
     for f in fichiers_cron {
         for l in std::fs::read_to_string(&f).unwrap_or_default().lines() {
-            cron.push((f.display().to_string(), l.to_string()));
+            cron.push((crate::ui::chemin_affichable(&f), l.to_string()));
         }
     }
     for (source, l) in cron.iter().filter(|(_, l)| !commentaire(l)) {
@@ -388,7 +395,7 @@ pub(super) fn persistance() -> Vec<Constat> {
             .into_iter()
             .filter(|p| p.parent() == Some(Path::new("/etc/systemd/system")) && !p.is_symlink())
             .filter(|p| !gestion.possede(p))
-            .filter_map(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
+            .filter_map(|p| p.file_name().map(|n| crate::ui::affichable(&n.to_string_lossy())))
             .collect();
         maison.sort();
         if !maison.is_empty() {
@@ -711,6 +718,24 @@ mod tests {
         assert!(commande_suspecte("%h/.cargo/bin/gardien surveiller", true).is_none());
         assert!(commande_suspecte("/usr/bin/xrandr --output DP-1", true).is_none());
         assert!(commande_suspecte("cd /tmp/x", false).is_none());
+    }
+
+    /// Le fichier qui lance un programme, tel qu'il est montré : court sous le dossier personnel, et inoffensif.
+    #[test]
+    fn fichiers_de_demarrage_montres() {
+        let maison = Path::new("/home/alice");
+        assert_eq!(
+            court(Path::new("/home/alice/.config/autostart/x.desktop"), maison),
+            "~/.config/autostart/x.desktop"
+        );
+        assert_eq!(court(Path::new("/etc/profile.d/a.sh"), maison), "/etc/profile.d/a.sh");
+        assert_eq!(
+            court(
+                Path::new("/home/alice/.config/autostart/x\x1b]0;t\x07\x1b[2K\r\u{202e}.desktop"),
+                maison
+            ),
+            "~/.config/autostart/x�]0;t��[2K��.desktop"
+        );
     }
 
     #[test]

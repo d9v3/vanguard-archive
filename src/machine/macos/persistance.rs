@@ -105,13 +105,16 @@ pub fn persistance() -> Vec<Constat> {
             if chemin.extension().is_none_or(|e| e != "plist") {
                 continue;
             }
-            let nom = f.file_name().to_string_lossy().trim_end_matches(".plist").to_string();
+            // Le nom du fichier et le programme lancé sont choisis par qui a posé l'agent : montrés rendus
+            // inoffensifs ; les commandes, elles, visent le vrai fichier.
+            let nom = crate::ui::affichable(f.file_name().to_string_lossy().trim_end_matches(".plist"));
             // Les services d'Apple vivent dans /System : ceux-ci sont tous ajoutés par des programmes installés.
             let Some((prog, args)) = programme(&chemin) else {
                 continue;
             };
             tiers.push(nom.clone());
             let Some(raison) = soupcon(&prog, &args) else { continue };
+            let prog = crate::ui::affichable(&prog);
             let plist = format!("'{}'", chemin.display().to_string().replace('\'', r"'\''"));
             let (arret, retrait) = if systeme {
                 (

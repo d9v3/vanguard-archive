@@ -175,11 +175,22 @@ pub(super) fn persistance() -> Vec<Constat> {
 
 fn juger_persistance(taches: &[&str], run: &[&str], demarrage: &[&str]) -> Vec<Constat> {
     let ps_texte = crate::commande::ps_texte;
+    // Noms, chemins et commandes sont choisis par le programme qui se fait relancer : les corrections visent le vrai
+    // nom, les messages le montrent rendu inoffensif.
+    let montre = crate::ui::affichable;
     let mut constats = Vec::new();
     for t in taches {
         let c: Vec<&str> = t.trim().splitn(4, '|').collect();
-        let [chemin, nom, exe, args] = c[..] else { continue };
-        if let Some(raison) = lancement_suspect(exe, args) {
+        let [chemin_brut, nom_brut, exe_brut, args_brut] = c[..] else {
+            continue;
+        };
+        if let Some(raison) = lancement_suspect(exe_brut, args_brut) {
+            let (chemin, nom, exe, args) = (
+                montre(chemin_brut),
+                montre(nom_brut),
+                montre(exe_brut),
+                montre(args_brut),
+            );
             constats.push(
                 alerte(
                     "Persistance",
@@ -196,8 +207,8 @@ fn juger_persistance(taches: &[&str], run: &[&str], demarrage: &[&str]) -> Vec<C
                     ),
                     &[&format!(
                         "Disable-ScheduledTask -TaskPath '{}' -TaskName '{}' | Out-Null",
-                        ps_texte(chemin),
-                        ps_texte(nom)
+                        ps_texte(chemin_brut),
+                        ps_texte(nom_brut)
                     )],
                 ),
             );
@@ -205,9 +216,12 @@ fn juger_persistance(taches: &[&str], run: &[&str], demarrage: &[&str]) -> Vec<C
     }
     for r in run {
         let c: Vec<&str> = r.trim().splitn(3, '|').collect();
-        let [cle, nom, valeur] = c[..] else { continue };
-        let (exe, args) = decouper_commande(valeur);
+        let [cle_brute, nom_brut, valeur_brute] = c[..] else {
+            continue;
+        };
+        let (exe, args) = decouper_commande(valeur_brute);
         if let Some(raison) = lancement_suspect(&exe, &args) {
+            let (cle, nom, valeur) = (montre(cle_brute), montre(nom_brut), montre(valeur_brute));
             constats.push(
                 alerte(
                     "Persistance",
@@ -221,19 +235,20 @@ fn juger_persistance(taches: &[&str], run: &[&str], demarrage: &[&str]) -> Vec<C
                     trf!("Retirer « {nom} » du démarrage", "Remove “{nom}” from startup"),
                     &[&format!(
                         "Remove-ItemProperty -Path '{}' -Name '{}'",
-                        ps_texte(cle),
-                        ps_texte(nom)
+                        ps_texte(cle_brute),
+                        ps_texte(nom_brut)
                     )],
                 ),
             );
         }
     }
     for d in demarrage {
-        let Some((fichier, cible)) = d.trim().split_once('|') else {
+        let Some((fichier_brut, cible_brute)) = d.trim().split_once('|') else {
             continue;
         };
-        let (exe, args) = decouper_commande(cible);
+        let (exe, args) = decouper_commande(cible_brute);
         if let Some(raison) = lancement_suspect(&exe, &args) {
+            let (fichier, cible) = (montre(fichier_brut), montre(cible_brute));
             constats.push(
                 alerte(
                     "Persistance",
@@ -245,7 +260,7 @@ fn juger_persistance(taches: &[&str], run: &[&str], demarrage: &[&str]) -> Vec<C
                 )
                 .corriger(
                     trf!("Supprimer « {fichier} »", "Delete “{fichier}”"),
-                    &[&format!("Remove-Item -LiteralPath '{}'", ps_texte(fichier))],
+                    &[&format!("Remove-Item -LiteralPath '{}'", ps_texte(fichier_brut))],
                 ),
             );
         }
@@ -324,5 +339,28 @@ mod tests {
         ];
         let c = juger_persistance(&[], &run, &[]);
         assert!(c.len() == 1 && c[0].probleme.is_none());
+        // Nom de tâche, valeur Run et raccourci choisis par le programme qui les pose : montrés inoffensifs, mais la
+        // correction vise le vrai nom.
+        let piege = "Maj\x1b]52;c;eA==\x07\x1b[2K\r\u{202e}";
+        let taches = [format!(r"\|{piege}|C:\Users\alice\AppData\Local\Temp\a.exe|")];
+        let run = [format!(
+            r"HKCU:\Software\Microsoft\Windows\CurrentVersion\Run|{piege}|C:\Users\Public\b.exe"
+        )];
+        let dem = [format!(
+            r"C:\Users\alice\Start Menu\Programs\Startup\{piege}.lnk|C:\Users\Public\c.exe"
+        )];
+        let (taches, run, dem): (Vec<&str>, Vec<&str>, Vec<&str>) = (
+            taches.iter().map(String::as_str).collect(),
+            run.iter().map(String::as_str).collect(),
+            dem.iter().map(String::as_str).collect(),
+        );
+        let c = juger_persistance(&taches, &run, &dem);
+        assert_eq!(c.len(), 3);
+        for c in &c {
+            let k = c.correctif.as_ref().unwrap();
+            assert!(!crate::ui::contient_un_piege(&c.message), "{}", c.message);
+            assert!(!crate::ui::contient_un_piege(&k.action), "{}", k.action);
+            assert!(k.commandes[0].contains(piege), "{}", k.commandes[0]);
+        }
     }
 }

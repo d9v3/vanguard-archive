@@ -887,6 +887,7 @@ fn demarrage() {
         "Programmes lancés au démarrage (à vérifier)",
         "Programs started at boot (to check)"
     ));
+    // Chaque entrée est écrite par qui l'a posée (le programme qui veut se faire relancer) : montrée rendue inoffensive.
     let mut entrees: Vec<String> = Vec::new();
 
     #[cfg(target_os = "linux")]
@@ -895,7 +896,7 @@ fn demarrage() {
         for d in [".config/autostart", ".config/systemd/user"] {
             for f in std::fs::read_dir(h.join(d)).into_iter().flatten().flatten() {
                 if f.path().is_file() {
-                    entrees.push(f.path().display().to_string());
+                    entrees.push(chemin_affichable(&f.path()));
                 }
             }
         }
@@ -904,6 +905,7 @@ fn demarrage() {
                 .lines()
                 .filter(|l| !l.trim().is_empty() && !l.starts_with('#'))
             {
+                let l = affichable(l);
                 entrees.push(trf!("crontab : {l}", "crontab: {l}"));
             }
         }
@@ -916,7 +918,7 @@ fn demarrage() {
                     entrees.push(trf!(
                         "{} (service système hors paquet)",
                         "{} (system service not from a package)",
-                        p.display()
+                        chemin_affichable(&p)
                     ));
                 }
             }
@@ -934,7 +936,7 @@ fn demarrage() {
         ] {
             for f in std::fs::read_dir(&d).into_iter().flatten().flatten() {
                 if f.path().extension().is_some_and(|e| e == "plist") {
-                    entrees.push(f.path().display().to_string());
+                    entrees.push(chemin_affichable(&f.path()));
                 }
             }
         }
@@ -951,7 +953,7 @@ fn demarrage() {
                       Get-ScheduledTask | Where-Object { $_.TaskPath -notlike '\\Microsoft\\*' -and $_.State -ne 'Disabled' } | \
                       ForEach-Object { \"scheduled task: $($_.TaskName) — $($_.Actions.Execute)\" }"
         );
-        entrees.extend(ps(script).unwrap_or_default().lines().map(str::to_string));
+        entrees.extend(ps(script).unwrap_or_default().lines().map(affichable));
     }
 
     if entrees.is_empty() {

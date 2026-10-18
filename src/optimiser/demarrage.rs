@@ -29,8 +29,10 @@ pub struct Programme {
     pub changement: systeme::Changement,
 }
 
-/// Le réglage qui retire ce programme du démarrage.
+/// Le réglage qui retire ce programme du démarrage. Le nom, écrit par qui a posé l'entrée, est montré rendu
+/// inoffensif ; le changement, lui, vise la vraie entrée.
 fn reglage(nom: &str, changement: systeme::Changement) -> Option<Reglage> {
+    let nom = affichable(nom);
     Some(Reglage {
         id: Cow::Owned(format!("{PREFIXE}{}", changement.identite_demarrage()?)),
         // Hors des menus de catégorie : la catégorie ne sert pas.
@@ -285,8 +287,8 @@ fn lignes(programmes: Vec<Programme>, h: &Historique) -> Vec<Ligne> {
         if p.actif || par_gardien {
             l.push(Ligne {
                 garder: a_garder(&p.nom, &p.commande, p.bureau),
-                nom: p.nom,
-                commande: p.commande,
+                nom: affichable(&p.nom),
+                commande: affichable(&p.commande),
                 actif: p.actif,
                 machine: p.machine,
                 par_gardien,
@@ -299,8 +301,8 @@ fn lignes(programmes: Vec<Programme>, h: &Historique) -> Vec<Ligne> {
         if !l.iter().any(|x| x.reglage.id == r.id) {
             let identite = r.id.strip_prefix(PREFIXE).unwrap_or_default();
             l.push(Ligne {
-                nom: systeme::Changement::nom_demarrage(identite),
-                commande: identite.to_string(),
+                nom: affichable(&systeme::Changement::nom_demarrage(identite)),
+                commande: affichable(identite),
                 actif: false,
                 machine: false,
                 garder: None,
@@ -555,6 +557,33 @@ mod tests {
         let n = notes(&h);
         assert_eq!(n.len(), 1);
         assert_eq!(n[0].id, "demarrage:systemd|retire.service");
+    }
+
+    /// Le nom d'un programme au démarrage, et ce qu'il lance, sont écrits par qui a posé l'entrée : piégés, ils
+    /// arrivent inoffensifs dans la liste à cocher et dans la confirmation.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn noms_pieges_au_demarrage() {
+        use super::systeme::{Changement, Entree};
+        let piege = Programme {
+            nom: "x\x1b]52;c;eA==\x07\x1b[2K\rfaux\u{202e}".into(),
+            commande: "/tmp/x\x1b[8m --cache".into(),
+            actif: true,
+            machine: false,
+            bureau: false,
+            changement: Changement::Demarrage {
+                entree: Entree::Service("x.service".into()),
+                cible: Some("disabled".into()),
+            },
+        };
+        let l = lignes(vec![piege], &Historique::default());
+        assert_eq!(l[0].nom, "x�]52;c;eA==��[2K�faux�");
+        assert_eq!(l[0].commande, "/tmp/x�[8m --cache");
+        assert!(
+            !crate::ui::contient_un_piege(&l[0].reglage.titre),
+            "{}",
+            l[0].reglage.titre
+        );
     }
 
     #[test]
