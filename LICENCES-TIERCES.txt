@@ -1,5 +1,5 @@
-Sentinel inclut les bibliothèques libres suivantes. Voici leurs avis de droit d'auteur et de licence.
-Sentinel includes the following open source libraries. Their copyright and license notices follow.
+Gardien inclut les bibliothèques libres suivantes. Voici leurs avis de droit d'auteur et de licence.
+Gardien includes the following open source libraries. Their copyright and license notices follow.
 
 91 bibliothèques / libraries.
 
