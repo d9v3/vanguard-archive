@@ -9,7 +9,9 @@
 name: CI
 
 on:
+  # Les branches seulement : l'étiquette vX.Y.Z que crée outils/publier-version.sh vise un commit déjà testé.
   push:
+    branches: ["**"]
   pull_request:
   workflow_dispatch:
   schedule:
