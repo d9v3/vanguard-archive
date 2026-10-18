@@ -174,10 +174,10 @@ const PROGRAMMES: &[&str] = &[
 // ───────────────────────────── Découpage ─────────────────────────────
 
 /// Le lien tel qu'on le colle, sans espaces ni guillemets autour, « désamorcé » remis en état : les alertes de
-/// sécurité écrivent « hxxp://exemple[.]com » pour qu'on ne clique pas.
+/// sécurité écrivent « hxxp://exemple[.]com » pour qu'on ne clique pas. Il vient d'un message reçu : ce qui piloterait
+/// le terminal ou retournerait l'écriture devient « � » (`affichable`), visible dans tout ce qui en est montré.
 fn nettoyer(entree: &str) -> String {
-    let t = entree
-        .trim()
+    let t = affichable(entree.trim())
         .trim_matches(['<', '>', '"', '\'', '`', '«', '»', ' ', '\u{a0}'])
         .replace("[.]", ".")
         .replace("(.)", ".")
@@ -319,13 +319,14 @@ fn adapter(delta: u32, nombre: u32, premier: bool) -> u32 {
     k + (36 * delta) / (delta + 38)
 }
 
-/// L'hôte tel qu'un navigateur peut l'afficher : étiquettes punycode décodées.
+/// L'hôte tel qu'un navigateur peut l'afficher : étiquettes punycode décodées. Le punycode code n'importe quel
+/// caractère, bidi compris : le nom décodé est rendu `affichable`.
 fn affiche(hote: &str) -> String {
     hote.split('.')
         .map(|l| {
             l.strip_prefix("xn--")
                 .and_then(punycode)
-                .unwrap_or_else(|| l.to_string())
+                .map_or_else(|| l.to_string(), |n| affichable(&n))
         })
         .collect::<Vec<_>>()
         .join(".")
@@ -1412,6 +1413,26 @@ mod tests {
         assert_eq!(punycode("e1afmkfd").as_deref(), Some("пример"));
         assert_eq!(punycode("!!"), None);
         assert_eq!(affiche("www.xn--80ak6aa92e.com"), "www.аррӏе.com");
+    }
+
+    /// Un lien reçu peut cacher ce qui pilote le terminal ou retourne l'écriture : collé, il arrive inoffensif, et ce
+    /// qui en est montré aussi (lien, faux nom devant « @ », site, nom décodé du punycode, signes). Le danger, lui,
+    /// reste jugé : une lettre invisible au milieu d'une marque est toujours un mélange d'alphabets.
+    #[test]
+    fn lien_piege_inoffensif() {
+        assert_eq!(
+            nettoyer("https://exemple.com/\x1b]52;c;eA==\x07\x1b[2K\r\u{202e}fdp.exe"),
+            "https://exemple.com/�]52;c;eA==��[2K��fdp.exe"
+        );
+        let l = lien("https://\x1b[8mpaypal.com@pay\u{200b}pal.xyz/\u{202e}gpj.exe");
+        let signes = examiner(&l);
+        assert!(signes.iter().any(|s| s.niveau == Niveau::Eleve));
+        for s in &signes {
+            assert!(!crate::ui::contient_un_piege(&s.texte), "{}", s.texte);
+        }
+        // « xn--paypal-dm0c » se décode en « pay[U+202E]pal ».
+        assert_eq!(affiche("xn--paypal-dm0c.com"), "pay�pal.com");
+        assert_eq!(pire("https://xn--paypal-dm0c.com/"), Some(Niveau::Eleve));
     }
 
     #[test]

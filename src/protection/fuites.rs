@@ -117,7 +117,7 @@ fn encoder(adresse: &str) -> String {
 }
 
 /// Noms des fuites d'une réponse XposedOrNot : `{"breaches":[["Adobe","LinkedIn"]]}`, ou `{"Error":"Not found"}`
-/// (aucune fuite). `None` : réponse illisible.
+/// (aucune fuite). `None` : réponse illisible. Les noms, écrits par le service, sont lus prêts à montrer.
 fn lire_xposedornot(texte: &str) -> Option<Vec<String>> {
     let v: serde_json::Value = serde_json::from_str(texte).ok()?;
     if v["Error"] == "Not found" {
@@ -127,18 +127,18 @@ fn lire_xposedornot(texte: &str) -> Option<Vec<String>> {
         v["breaches"][0]
             .as_array()?
             .iter()
-            .filter_map(|n| n.as_str().map(str::to_string))
+            .filter_map(|n| n.as_str().map(affichable))
             .collect(),
     )
 }
 
-/// Noms des fuites d'une réponse Have I Been Pwned (`[{"Name":"Adobe"},…]`).
+/// Noms des fuites d'une réponse Have I Been Pwned (`[{"Name":"Adobe"},…]`), prêts à montrer.
 fn lire_hibp(texte: &str) -> Option<Vec<String>> {
     let v: serde_json::Value = serde_json::from_str(texte).ok()?;
     Some(
         v.as_array()?
             .iter()
-            .filter_map(|f| f["Name"].as_str().map(str::to_string))
+            .filter_map(|f| f["Name"].as_str().map(affichable))
             .collect(),
     )
 }
@@ -294,6 +294,15 @@ mod tests {
             Some(vec!["Adobe".to_string(), "LinkedIn".to_string()])
         );
         assert_eq!(lire_hibp(r#"[{"Name":"Adobe"}]"#), Some(vec!["Adobe".to_string()]));
+        // Les noms viennent du service : piégés, ils arrivent inoffensifs.
+        assert_eq!(
+            lire_hibp(r#"[{"Name":"Ad\u001b]52;c;eA==\u0007obe\u202e"}]"#),
+            Some(vec!["Ad�]52;c;eA==�obe�".to_string()])
+        );
+        assert_eq!(
+            lire_xposedornot(r#"{"breaches":[["Linked\u001b[2K\rIn"]]}"#),
+            Some(vec!["Linked�[2K�In".to_string()])
+        );
         assert_eq!(lire_xposedornot("pas du json"), None);
         assert!(conseil_forme("cheval agrafe batterie correct").is_none());
     }
