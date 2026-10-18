@@ -219,9 +219,10 @@ fn juger(m: &Mesure, upnp: Option<bool>) -> Option<(TypeNat, &'static str)> {
     })
 }
 
-/// Double NAT ou adresse partagée par le fournisseur, d'après l'adresse que la box dit avoir sur Internet.
+/// Double NAT ou adresse partagée par le fournisseur, d'après l'adresse que la box dit avoir sur Internet. Une box sans
+/// adresse Internet (0.0.0.0, 169.254.x : lien coupé) ne dit rien du partage.
 fn adresse_partagee(box_internet: Option<Ipv4Addr>, publique: IpAddr) -> Option<&'static str> {
-    let b = box_internet?;
+    let b = box_internet.filter(|b| !b.is_unspecified() && !b.is_link_local())?;
     match b.octets() {
         [100, 64..128, ..] => Some(tr!(
             "Ton fournisseur partage ton adresse Internet avec d'autres abonnés (CGNAT) : aucune redirection de ports ne peut marcher. Demande-lui une adresse IPv4 publique, ou sers-toi de l'IPv6.",
@@ -440,6 +441,9 @@ mod tests {
         assert!(adresse_partagee(Some(Ipv4Addr::new(198, 51, 100, 3)), publique).is_some());
         assert_eq!(adresse_partagee(Some(Ipv4Addr::new(203, 0, 113, 7)), publique), None);
         assert_eq!(adresse_partagee(None, publique), None);
+        // Une box sans adresse Internet (lien coupé, 0.0.0.0 ou 169.254.x) ne dit rien du partage d'adresses.
+        assert_eq!(adresse_partagee(Some(Ipv4Addr::UNSPECIFIED), publique), None);
+        assert_eq!(adresse_partagee(Some(Ipv4Addr::new(169, 254, 3, 4)), publique), None);
     }
 
     /// L'attente commune au NAT, au DNS et aux caméras, sur cet ordinateur (127.0.0.1) : rien ne sort sur le réseau.
