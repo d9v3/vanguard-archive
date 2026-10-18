@@ -1,0 +1,65 @@
+GARDIEN pour Windows — comment le lancer
+========================================
+English: README.txt
+
+Le programme : « gardien.exe », dans ce dossier. Windows 10 et 11 (64 bits), rien à installer.
+
+
+1. LE PLUS SIMPLE
+
+   Double-cliquer « gardien.exe » (ici), ou « Lancer Gardien.bat » à la racine de la clé.
+   Windows ne lance rien tout seul depuis une clé USB (protection contre les virus) : il faut
+   double-cliquer.
+
+
+2. DANS POWERSHELL OU LE TERMINAL WINDOWS
+
+   Clic droit sur le bouton Démarrer > « Terminal » (Windows 11) ou « Windows PowerShell » (Windows 10).
+   Cette commande trouve la clé quelle que soit sa lettre (D:, E:…) et lance Gardien :
+
+     & "$((Get-Volume -FileSystemLabel GARDIEN).DriveLetter):\Windows\gardien.exe"
+
+   Si tu connais la lettre de la clé (ici E:, voir l'Explorateur de fichiers > Ce PC) :
+
+     & "E:\Windows\gardien.exe"
+     & "E:\Windows\gardien.exe" complet
+
+
+3. DANS L'INVITE DE COMMANDES (cmd)
+
+   Touche Windows, taper « cmd », Entrée. Puis (remplacer E: par la lettre de la clé) :
+
+     E:\Windows\gardien.exe
+     E:\Windows\gardien.exe complet
+
+
+4. COMMANDES UTILES
+
+   Sans rien après « gardien.exe » : le menu. Sinon :
+
+     gardien.exe complet              bilan complet : cette machine, puis le réseau
+     gardien.exe complet --texte      même bilan, rapport en texte simple
+     gardien.exe corriger             bilan, puis chaque correction montrée et confirmée
+     gardien.exe machine              audit de cette machine seulement
+     gardien.exe reseau               scan du réseau local
+     gardien.exe maj                  mises à jour : Windows, programmes (winget), pilotes…
+     gardien.exe reparer              réparations : Internet, Windows Update bloqué, disque plein…
+     gardien.exe nettoyer --liste     place à gagner, sans rien effacer
+     gardien.exe connexion            test de connexion : ping, débit, bufferbloat
+     gardien.exe antivirus <dossier>  analyser une clé, un disque ou un dossier (Defender)
+     gardien.exe --help               toutes les commandes (gardien.exe <commande> --help : le détail)
+     gardien.exe --version            la version
+
+
+5. BON À SAVOIR
+
+   - Inutile d'ouvrir le terminal en administrateur : chaque correction montre d'abord ce qu'elle va
+     faire, puis demande elle-même l'accord administrateur (fenêtre UAC).
+   - Le programme n'est pas signé : SmartScreen peut avertir (« Informations complémentaires » >
+     « Exécuter quand même ») et Microsoft Defender peut le signaler, car il scanne des ports. Lancé
+     depuis la clé, SmartScreen ne dit en général rien.
+   - En anglais :  $env:GARDIEN_LANG = "en"  (PowerShell)  ou  set GARDIEN_LANG=en  (cmd), puis la
+     commande.
+   - Quitter : q dans le menu, ou Ctrl+C.
+
+Guide complet (menu, protection de la clé, langue) : LISEZMOI.txt à la racine de la clé.

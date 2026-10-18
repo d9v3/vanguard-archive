@@ -219,6 +219,12 @@ touch "$CLE/.metadata_never_index" "$CLE/.Trashes"
 mkdir -p "$CLE/.fseventsd" && touch "$CLE/.fseventsd/no_log"
 cp -f outils/LISEZMOI.txt "$CLE/LISEZMOI.txt"
 cp -f outils/README.txt "$CLE/README.txt"
+# Mode d'emploi de chaque version, à côté de son programme : double-clic, terminal, PowerShell, invite de commandes.
+for systeme in Linux Windows macOS; do
+  if [[ -d $CLE/$systeme ]]; then
+    cp -f "outils/cle/$systeme/LISEZMOI.txt" "outils/cle/$systeme/README.txt" "$CLE/$systeme/"
+  fi
+done
 # Avis de licence des bibliothèques incluses dans les binaires (MIT, Apache… demandent de les joindre).
 python3 outils/licences-tierces.py >/dev/null
 cp -f LICENSE "$CLE/LICENSE.txt"

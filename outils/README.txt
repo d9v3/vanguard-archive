@@ -16,6 +16,9 @@ This USB key holds the program for Linux, Windows and macOS, its database and it
   source/               Full source code (Rust) with its git history.
   gardien.cle          Marker file that makes the key recognized: do not delete it.
 
+How to run each version, command line included (Terminal, PowerShell, Command Prompt): README.txt in the
+Linux, Windows and macOS folders.
+
 Protection: the key has two parts. GARDIEN (everything above) is read-only on Windows, and on Linux and macOS
 Gardien remounts it read-only itself at startup: another computer cannot modify the program. Only its owner's computer
 can write to it. GARDIENLOG, small and writable, only holds journal-erreurs.txt: the errors met

@@ -1,0 +1,56 @@
+GARDIEN pour Linux — comment le lancer
+======================================
+English: README.txt
+
+Le programme : « gardien », dans ce dossier. Toutes les distributions 64 bits (x86_64), rien à installer.
+
+
+1. LE PLUS SIMPLE
+
+   Double-cliquer « autorun.sh » à la racine de la clé : un terminal s'ouvre avec le menu.
+   GNOME le propose aussi au branchement de la clé (« Lancer le logiciel ? »).
+
+
+2. DANS UN TERMINAL
+
+   Ouvrir un terminal (Ctrl+Alt+T sur la plupart des bureaux) et taper le chemin du programme, sans
+   aller d'abord dans la clé avec « cd » : sur un autre ordinateur, Gardien remonte la clé en lecture
+   seule pour la protéger, ce qui échoue si un terminal y est ouvert.
+
+     /run/media/$USER/GARDIEN/Linux/gardien     Arch, Fedora, openSUSE, Manjaro…
+     /media/$USER/GARDIEN/Linux/gardien         Ubuntu, Debian, Mint, Pop!_OS…
+
+   Où la clé est-elle branchée ?   lsblk -o LABEL,MOUNTPOINT | grep GARDIEN
+   Astuce : taper le début du chemin, puis la touche Tab pour le compléter.
+
+
+3. COMMANDES UTILES
+
+   Sans rien après « gardien » : le menu. Sinon (« gardien » = le chemin complet ci-dessus) :
+
+     gardien complet              bilan complet : cette machine, puis le réseau
+     gardien complet --texte      même bilan, rapport en texte simple (serveur sans écran)
+     gardien corriger             bilan, puis chaque correction montrée et confirmée
+     gardien machine              audit de cette machine seulement
+     gardien reseau               scan du réseau local
+     gardien maj                  mises à jour : système, Flatpak, Snap, firmware…
+     gardien reparer              réparations : Internet, disque plein, mises à jour bloquées…
+     gardien nettoyer --liste     place à gagner, sans rien effacer
+     gardien connexion            test de connexion : ping, débit, bufferbloat
+     gardien antivirus <dossier>  analyser une clé, un disque ou un dossier
+     gardien --help               toutes les commandes (gardien <commande> --help : le détail)
+     gardien --version            la version
+
+
+4. BON À SAVOIR
+
+   - Le terminal n'a pas besoin d'être lancé en root : une correction demande ton mot de passe (sudo) au
+     moment où tu l'acceptes, jamais avant.
+   - « Permission non accordée » : la clé est montée sans droit d'exécution (option noexec). Copier le
+     programme puis le lancer :  cp /run/media/$USER/GARDIEN/Linux/gardien ~/ && ~/gardien
+   - L'installer sur cet ordinateur : copier « gardien » dans ~/.local/bin, puis taper simplement
+     « gardien » dans n'importe quel terminal.
+   - En anglais :  GARDIEN_LANG=en /run/media/$USER/GARDIEN/Linux/gardien
+   - Quitter : q dans le menu, ou Ctrl+C.
+
+Guide complet (menu, protection de la clé, langue) : LISEZMOI.txt à la racine de la clé.

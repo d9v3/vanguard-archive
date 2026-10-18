@@ -16,6 +16,9 @@ Cette clé contient le programme pour Linux, Windows et macOS, sa base de donné
   source/               Code source complet (Rust) avec son historique git.
   gardien.cle          Fichier témoin qui fait reconnaître la clé : ne pas le supprimer.
 
+Mode d'emploi de chaque version, ligne de commande comprise (Terminal, PowerShell, invite de commandes) :
+LISEZMOI.txt dans les dossiers Linux, Windows et macOS.
+
 Protection : la clé a deux parties. GARDIEN (tout ce qui précède) est en lecture seule sous Windows, et sous
 Linux et macOS Gardien la remonte lui-même en lecture seule au lancement : un autre ordinateur ne peut pas modifier le
 programme. Seul l'ordinateur de son propriétaire peut écrire dessus. GARDIENLOG, petite et modifiable, ne contient que
