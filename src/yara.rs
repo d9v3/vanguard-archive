@@ -1,6 +1,6 @@
 //! Analyse YARA : 308 règles de ReversingLabs (rançongiciels, voleurs de mots de passe, chevaux de Troie, portes
-//! dérobées…), intégrées au programme (assets/yara, outils/maj-yara.sh) et appliquées par le moteur « yara » du
-//! système. En complément de l'antivirus : une règle décrit une famille entière, variantes comprises. Lecture seule :
+//! dérobées…), intégrées au programme (assets/yara, outils/maj-yara.sh ; allégées par build.rs, de 2,7 Mo à 1,2 Mo,
+//! sans en changer le sens) et appliquées par le moteur « yara » du système. En complément de l'antivirus : une règle décrit une famille entière, variantes comprises. Lecture seule :
 //! rien n'est déplacé ni supprimé. Le moteur s'installe après accord (paquet de la distribution, Homebrew, winget).
 
 use std::path::{Path, PathBuf};
@@ -9,7 +9,7 @@ use std::process::Command;
 use crate::antivirus::{Examen, Portee};
 use crate::ui::*;
 
-const REGLES: &str = include_str!("../assets/yara/reversinglabs.yara");
+const REGLES: &str = include_str!(concat!(env!("OUT_DIR"), "/reversinglabs.yara"));
 
 /// Le moteur : dans le PATH, ou, sous Windows, là où winget pose ses commandes (juste après l'installation, le PATH
 /// de ce programme ne le connaît pas encore).
@@ -310,6 +310,87 @@ mod tests {
             .filter(|l| l.trim_start().starts_with("rule ") || l.trim_start().starts_with("private rule "))
             .count();
         assert_eq!(regles, 308, "le message « 308 règles » doit suivre outils/maj-yara.sh");
+    }
+
+    const ORIGINE: &str = include_str!("../assets/yara/reversinglabs.yara");
+
+    /// Les noms des règles, dans l'ordre : chaque déclaration commence une ligne (« rule » paraît aussi dans les
+    /// descriptions d'origine, « Yara rule that detects… »).
+    fn noms(texte: &str) -> Vec<&str> {
+        texte
+            .lines()
+            .filter_map(|l| l.trim_start().strip_prefix("rule "))
+            .filter_map(|r| r.split([' ', ':']).next())
+            .collect()
+    }
+
+    /// Chaque chaîne hexadécimale (« = { … } »), sans espaces, chaque saut fixe « [n] » redéveloppé en n « ?? » : la
+    /// forme à laquelle l'origine et les règles allégées doivent se ramener.
+    fn hexadecimales(texte: &str) -> Vec<String> {
+        let mut liste = Vec::new();
+        let mut reste = texte;
+        while let Some(p) = reste.find('=') {
+            reste = &reste[p + 1..];
+            let Some(dedans) = reste.trim_start().strip_prefix('{') else {
+                continue;
+            };
+            let fin = dedans.find('}').unwrap();
+            let compact: String = dedans[..fin].chars().filter(|c| !c.is_whitespace()).collect();
+            let mut forme = String::new();
+            let mut morceaux = compact.split('[');
+            forme.push_str(morceaux.next().unwrap_or_default());
+            for m in morceaux {
+                let (saut, apres) = m.split_once(']').unwrap();
+                if let Ok(n) = saut.parse::<usize>() {
+                    forme.push_str(&"??".repeat(n));
+                } else {
+                    forme.push('[');
+                    forme.push_str(saut);
+                    forme.push(']');
+                }
+                forme.push_str(apres);
+            }
+            liste.push(forme);
+            reste = &dedans[fin..];
+        }
+        liste
+    }
+
+    /// Ce qui suit chaque « condition: », sans espaces, jusqu'à l'accolade qui ferme la règle (avant la règle suivante
+    /// et ses imports).
+    fn conditions(texte: &str) -> Vec<String> {
+        texte
+            .split("condition:")
+            .skip(1)
+            .map(|c| {
+                let suite = c.find("\nrule ").unwrap_or(c.len());
+                let fin = c[..suite].rfind('}').unwrap_or(suite);
+                c[..fin].chars().filter(|x| !x.is_whitespace()).collect()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn regles_allegees_sans_changer_de_sens() {
+        // Au moins deux fois plus légères : c'est la raison d'être de l'allègement.
+        assert!(
+            REGLES.len() * 2 < ORIGINE.len(),
+            "{} contre {}",
+            REGLES.len(),
+            ORIGINE.len()
+        );
+        assert!(!REGLES.contains("meta:"));
+        // L'en-tête (source et licence MIT) reste.
+        assert!(REGLES.lines().nth(1).is_some_and(|l| l.contains("Licence MIT")));
+        assert_eq!(noms(REGLES), noms(ORIGINE));
+        let (allegees, origine) = (hexadecimales(REGLES), hexadecimales(ORIGINE));
+        assert_eq!(allegees.len(), origine.len());
+        for (a, o) in allegees.iter().zip(&origine) {
+            assert_eq!(a, o);
+        }
+        assert_eq!(conditions(REGLES), conditions(ORIGINE));
+        // Un module importé une seule fois.
+        assert_eq!(REGLES.matches("import \"pe\"").count(), 1);
     }
 
     #[test]

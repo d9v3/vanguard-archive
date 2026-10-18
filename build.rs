@@ -1,5 +1,6 @@
-//! Préparé à la compilation : la base des fabricants (assets/oui.tsv) rangée en tableaux triés, et, pour Windows, la
-//! fiche d'identité de gardien.exe (onglet « Détails » des propriétés du fichier), son icône et son manifeste.
+//! Préparé à la compilation : la base des fabricants (assets/oui.tsv) rangée en tableaux triés, les règles YARA
+//! allégées, et, pour Windows, la fiche d'identité de gardien.exe (onglet « Détails » des propriétés du fichier), son
+//! icône et son manifeste.
 
 use std::collections::HashMap;
 use std::fmt::Write as _;
@@ -7,6 +8,7 @@ use std::path::Path;
 
 fn main() {
     fabricants();
+    regles_yara();
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
         ressources_windows();
     }
@@ -65,6 +67,229 @@ fn fabricants() {
     }
     let sortie = std::env::var("OUT_DIR").expect("OUT_DIR");
     std::fs::write(Path::new(&sortie).join("fabricants.rs"), rs).expect("fabricants.rs non écrit");
+}
+
+/// Les règles YARA (assets/yara, 2,7 Mo de texte), allégées pour le programme sans en changer le sens : sans les blocs
+/// « meta: » (auteur, description… que Gardien n'affiche pas), sans indentation, un import de module une seule fois,
+/// les octets des chaînes hexadécimales collés (« 4D5A ») et chaque suite de « ?? » écrite en saut (« [6] » vaut six
+/// « ?? », documentation de YARA). Le moteur du système les lit comme les règles d'origine ; l'en-tête (source et
+/// licence) reste.
+fn regles_yara() {
+    println!("cargo:rerun-if-changed=assets/yara/reversinglabs.yara");
+    let texte = std::fs::read_to_string("assets/yara/reversinglabs.yara").expect("règles YARA illisibles");
+    let sortie = std::env::var("OUT_DIR").expect("OUT_DIR");
+    std::fs::write(Path::new(&sortie).join("reversinglabs.yara"), alleger_yara(&texte))
+        .expect("règles YARA allégées non écrites");
+}
+
+/// Un morceau du texte des règles.
+#[derive(Debug, PartialEq)]
+enum Jeton {
+    /// Mot : mot-clé, nom, nombre, identifiant de chaîne (« $a », « #a »), champ d'un module (« pe.is_dll »).
+    Mot(String),
+    /// Chaîne de texte, guillemets compris, recopiée telle quelle.
+    Texte(String),
+    /// Chaîne hexadécimale déjà allégée, accolades comprises ; ou expression régulière, telle quelle.
+    Motif(String),
+    Signe(char),
+    Espace,
+}
+
+/// Découpe le texte des règles ; les commentaires disparaissent.
+fn jetons(texte: &str) -> Vec<Jeton> {
+    let c: Vec<char> = texte.chars().collect();
+    let mut liste = Vec::new();
+    let mut i = 0;
+    // Après « = », une accolade ouvre une chaîne hexadécimale, une barre oblique une expression régulière.
+    let apres_egal = |liste: &Vec<Jeton>| {
+        liste
+            .iter()
+            .rev()
+            .find(|j| **j != Jeton::Espace)
+            .is_some_and(|j| *j == Jeton::Signe('='))
+    };
+    while i < c.len() {
+        let x = c[i];
+        if x.is_whitespace() {
+            while i < c.len() && c[i].is_whitespace() {
+                i += 1;
+            }
+            liste.push(Jeton::Espace);
+        } else if x == '/' && c.get(i + 1) == Some(&'/') {
+            while i < c.len() && c[i] != '\n' {
+                i += 1;
+            }
+        } else if x == '/' && c.get(i + 1) == Some(&'*') {
+            i += 2;
+            while i + 1 < c.len() && !(c[i] == '*' && c[i + 1] == '/') {
+                i += 1;
+            }
+            i += 2;
+        } else if x == '"' {
+            let debut = i;
+            i += 1;
+            while i < c.len() && c[i] != '"' {
+                i += if c[i] == '\\' { 2 } else { 1 };
+            }
+            i += 1;
+            liste.push(Jeton::Texte(c[debut..i.min(c.len())].iter().collect()));
+        } else if x == '{' && apres_egal(&liste) {
+            let debut = i;
+            while i < c.len() && c[i] != '}' {
+                i += 1;
+            }
+            i += 1;
+            let dedans: String = c[debut + 1..i - 1].iter().collect();
+            liste.push(Jeton::Motif(format!("{{{}}}", hexadecimal(&dedans))));
+        } else if x == '/' && apres_egal(&liste) {
+            let debut = i;
+            i += 1;
+            while i < c.len() && c[i] != '/' {
+                i += if c[i] == '\\' { 2 } else { 1 };
+            }
+            i += 1;
+            while i < c.len() && c[i].is_ascii_alphabetic() {
+                i += 1;
+            }
+            liste.push(Jeton::Motif(c[debut..i.min(c.len())].iter().collect()));
+        } else if x.is_alphanumeric() || "_$#@!.*".contains(x) {
+            let debut = i;
+            while i < c.len() && (c[i].is_alphanumeric() || "_$#@!.*".contains(c[i])) {
+                i += 1;
+            }
+            liste.push(Jeton::Mot(c[debut..i].iter().collect()));
+        } else {
+            liste.push(Jeton::Signe(x));
+            i += 1;
+        }
+    }
+    liste
+}
+
+/// Le contenu d'une chaîne hexadécimale, allégé : sans espaces ni commentaires, et chaque suite d'au moins deux
+/// « ?? » entre deux octets connus, hors d'une alternative « ( … | … ) », écrite en saut « [n] ».
+fn hexadecimal(dedans: &str) -> String {
+    let mut sans_commentaires = String::new();
+    for ligne in dedans.lines() {
+        sans_commentaires.push_str(ligne.split("//").next().unwrap_or_default());
+        sans_commentaires.push(' ');
+    }
+    let c: Vec<char> = sans_commentaires.chars().filter(|x| !x.is_whitespace()).collect();
+    // Les morceaux : un octet (deux signes, « ?? » compris), un saut « […] », ou « ( », « | », « ) ».
+    let mut morceaux: Vec<String> = Vec::new();
+    let mut i = 0;
+    while i < c.len() {
+        let fin = match c[i] {
+            '[' => c[i..].iter().position(|x| *x == ']').map_or(c.len(), |p| i + p + 1),
+            '(' | '|' | ')' => i + 1,
+            '~' => (i + 3).min(c.len()),
+            _ => (i + 2).min(c.len()),
+        };
+        morceaux.push(c[i..fin].iter().collect());
+        i = fin;
+    }
+    let octet = |m: &str| m.len() == 2 && m != "??" && m.chars().all(|x| x.is_ascii_hexdigit() || x == '?');
+    let mut sortie = String::new();
+    let mut profondeur = 0usize;
+    let mut i = 0;
+    while i < morceaux.len() {
+        let m = morceaux[i].as_str();
+        match m {
+            "(" => profondeur += 1,
+            ")" => profondeur = profondeur.saturating_sub(1),
+            _ => {}
+        }
+        if m == "??" && profondeur == 0 {
+            let n = morceaux[i..].iter().take_while(|x| *x == "??").count();
+            let entoure = i > 0 && octet(&morceaux[i - 1]) && morceaux.get(i + n).is_some_and(|x| octet(x));
+            if n >= 2 && entoure {
+                let _ = write!(sortie, "[{n}]");
+            } else {
+                sortie.push_str(&"??".repeat(n));
+            }
+            i += n;
+            continue;
+        }
+        sortie.push_str(m);
+        i += 1;
+    }
+    sortie
+}
+
+/// Les règles allégées : l'en-tête (les commentaires du début : source, licence), puis une règle par ligne.
+fn alleger_yara(texte: &str) -> String {
+    let mut sortie = String::new();
+    for l in texte.lines().take_while(|l| l.trim_start().starts_with("//")) {
+        let _ = writeln!(sortie, "{l}");
+    }
+    let jetons = jetons(texte);
+    let mut profondeur = 0usize;
+    let mut dans_meta = false;
+    let mut imports: Vec<String> = Vec::new();
+    let mut ligne = String::new();
+    let mut i = 0;
+    // Le prochain jeton qui n'est pas un espace.
+    let suivant = |i: usize| jetons[i + 1..].iter().find(|j| **j != Jeton::Espace);
+    let mut finir_ligne = |ligne: &mut String, sortie: &mut String| {
+        let l = ligne.trim();
+        if !l.is_empty() {
+            // Un module importé une seule fois : chaque fichier d'origine refaisait « import "pe" ».
+            if l.starts_with("import ") {
+                if imports.iter().any(|x| x == l) {
+                    ligne.clear();
+                    return;
+                }
+                imports.push(l.to_string());
+            }
+            sortie.push_str(l);
+            sortie.push('\n');
+        }
+        ligne.clear();
+    };
+    while i < jetons.len() {
+        let j = &jetons[i];
+        let deux_points = suivant(i) == Some(&Jeton::Signe(':'));
+        if profondeur == 1
+            && deux_points
+            && let Jeton::Mot(m) = j
+        {
+            match m.as_str() {
+                "meta" => dans_meta = true,
+                "strings" | "condition" => dans_meta = false,
+                _ => {}
+            }
+        }
+        match j {
+            Jeton::Signe('{') => profondeur += 1,
+            Jeton::Signe('}') => profondeur = profondeur.saturating_sub(1),
+            _ => {}
+        }
+        if dans_meta {
+            i += 1;
+            continue;
+        }
+        if profondeur == 0
+            && matches!(j, Jeton::Mot(m) if m == "rule" || m == "import" || m == "private" || m == "global")
+        {
+            // Une règle ou un import par ligne ; « private rule » reste sur une seule.
+            let deja = ligne.trim_end().ends_with("private") || ligne.trim_end().ends_with("global");
+            if !deja {
+                finir_ligne(&mut ligne, &mut sortie);
+            }
+        }
+        match j {
+            Jeton::Espace => {
+                if !ligne.is_empty() && !ligne.ends_with(' ') {
+                    ligne.push(' ');
+                }
+            }
+            Jeton::Mot(t) | Jeton::Texte(t) | Jeton::Motif(t) => ligne.push_str(t),
+            Jeton::Signe(s) => ligne.push(*s),
+        }
+        i += 1;
+    }
+    finir_ligne(&mut ligne, &mut sortie);
+    sortie
 }
 
 fn ressources_windows() {
