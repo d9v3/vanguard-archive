@@ -473,17 +473,6 @@ pub fn cles_montees() -> Vec<PathBuf> {
 
 /// Clé USB de Gardien branchée, si elle est trouvée (dossier racine contenant son témoin, ou celui d'un ancien nom).
 pub fn cle_usb() -> Option<PathBuf> {
-    // D'abord : sommes-nous lancés depuis la clé ? (exe dans <clé>/Linux/, <clé>/Windows/…)
-    // Sous Linux et macOS, le programme peut tourner depuis une copie temporaire (protection de la clé) : on part
-    // du programme d'origine.
-    #[cfg(unix)]
-    let exe = crate::protection::exe_d_origine();
-    #[cfg(windows)]
-    let exe = std::env::current_exe().ok().and_then(|e| e.canonicalize().ok());
-    let depuis_exe = exe
-        .iter()
-        .flat_map(|e| e.ancestors().skip(1).take(2).map(PathBuf::from))
-        .collect::<Vec<_>>();
     #[cfg(target_os = "linux")]
     let montages = cles_montees();
     #[cfg(target_os = "macos")]
@@ -495,11 +484,63 @@ pub fn cle_usb() -> Option<PathBuf> {
         .collect();
     #[cfg(windows)]
     let montages: Vec<PathBuf> = ('D'..='Z').map(|l| PathBuf::from(format!("{l}:\\"))).collect();
-    depuis_exe.into_iter().chain(montages).find(|d| {
-        std::iter::once(TEMOIN_CLE)
-            .chain(ANCIENS_TEMOINS_CLE)
-            .any(|t| d.join(t).is_file())
-    })
+    cle_du_programme().or_else(|| montages.into_iter().find(|d| est_une_cle(d)))
+}
+
+/// La clé d'où tourne le programme (exe dans <clé>/Linux/, <clé>/Windows/…), trouvée par son seul chemin, sans
+/// parcourir les lecteurs : un lecteur réseau déconnecté ferait attendre.
+fn cle_du_programme() -> Option<PathBuf> {
+    // Sous Linux et macOS, le programme peut tourner depuis une copie temporaire (protection de la clé) : on part
+    // du programme d'origine.
+    #[cfg(unix)]
+    let exe = crate::protection::exe_d_origine();
+    #[cfg(windows)]
+    let exe = std::env::current_exe().ok().and_then(|e| e.canonicalize().ok());
+    exe.iter()
+        .flat_map(|e| e.ancestors().skip(1).take(2).map(PathBuf::from))
+        .find(|d| est_une_cle(d))
+}
+
+fn est_une_cle(dossier: &std::path::Path) -> bool {
+    std::iter::once(TEMOIN_CLE)
+        .chain(ANCIENS_TEMOINS_CLE)
+        .any(|t| dossier.join(t).is_file())
+}
+
+/// Ce que la base garde sur les gens : (noms des réseaux, souvent celui du Wi-Fi ; noms et surnoms des appareils),
+/// de la clé d'où tourne le programme et de la copie de cet ordinateur. Le journal des erreurs les retire de ce qu'il
+/// écrit. Lus sans rien toucher : ni verrou, ni copie d'une base abîmée, ni message, ni lecteur parcouru.
+pub fn noms_connus() -> (Vec<String>, Vec<String>) {
+    // Pendant les tests, jamais les vraies données (la clé branchée sur l'ordinateur de développement).
+    if cfg!(test) {
+        return (Vec::new(), Vec::new());
+    }
+    let textes: Vec<String> = cle_du_programme()
+        .map(|c| c.join("donnees"))
+        .into_iter()
+        .chain([dossier_local()])
+        .filter_map(|d| std::fs::read_to_string(d.join("appareils.json")).ok())
+        .collect();
+    noms_des_bases(&textes)
+}
+
+fn noms_des_bases(textes: &[String]) -> (Vec<String>, Vec<String>) {
+    let (mut reseaux, mut appareils) = (Vec::new(), Vec::new());
+    for texte in textes {
+        let Ok(base) = serde_json::from_str::<Base>(texte.trim_start_matches('\u{feff}')) else {
+            continue;
+        };
+        let fiches = base
+            .reseaux
+            .values()
+            .flat_map(|r| r.appareils.values())
+            .chain(base.appareils.values());
+        for fiche in fiches {
+            appareils.extend(fiche.nom.iter().chain(&fiche.surnom).cloned());
+        }
+        reseaux.extend(base.reseaux.into_values().filter_map(|r| r.nom));
+    }
+    (reseaux, appareils)
 }
 
 /// La partition GARDIEN est en lecture seule sur les autres ordinateurs (attribut GPT respecté par Windows) :
@@ -1366,6 +1407,22 @@ mod tests {
             .count();
         assert_eq!(copies, 1);
         std::fs::remove_dir_all(&dossier).unwrap();
+    }
+
+    #[test]
+    fn noms_gardes_par_la_base() {
+        // Le journal des erreurs les retire de ce qu'il écrit : réseaux, appareils et surnoms, des deux formats.
+        let base = r#"{"reseaux":{"box":{"nom":"Chez Max","appareils":{"3c:22:fb:65:43:21":{"ip":"192.168.1.20","nom":"iPhone-de-Zoe","fabricant":"Apple","ports":[],"surnom":"tablette de Zoé"}}}}}"#;
+        let ancienne = r#"{"appareils":{"c4:34:6b:12:34:56":{"ip":"10.0.0.138","nom":"imprimante-salon","fabricant":"Hewlett Packard","ports":[631]}}}"#;
+        let (reseaux, appareils) =
+            noms_des_bases(&[format!("\u{feff}{base}"), ancienne.to_string(), "abîmée".to_string()]);
+        assert_eq!(reseaux, ["Chez Max"]);
+        assert_eq!(appareils, ["iPhone-de-Zoe", "tablette de Zoé", "imprimante-salon"]);
+        assert_eq!(
+            noms_connus(),
+            (Vec::new(), Vec::new()),
+            "jamais la vraie base pendant un test"
+        );
     }
 
     #[test]
