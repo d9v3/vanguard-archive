@@ -163,6 +163,14 @@ le guide dit si un programme manque sur cet ordinateur.
   BLAKE3, ce qui a changé depuis la référence, et surveillance en direct.
 - Mots de passe fuités : vérifiés par Have I Been Pwned sans jamais envoyer le mot de passe (5 caractères de son
   empreinte seulement) ; fuites d'adresse courriel, après ton accord (l'adresse est envoyée au service).
+- Qui parle à Internet ? : les connexions en cours de chaque programme, avec le nom du serveur ; un programme lancé
+  depuis un dossier temporaire ou les Téléchargements, un port de logiciel d'accès à distance ou un serveur sans nom
+  sont signalés. Lecture seule : rien n'est coupé.
+- Ce lien est-il dangereux ? : un lien reçu examiné sans jamais l'ouvrir (lettres déguisées, sous-domaine trompeur,
+  marque imitée, raccourcisseur, adresse IP brute) ; après accord, l'âge du domaine et trois listes publiques de
+  sites dangereux (URLhaus, Spamhaus, SURBL). Seul le nom du domaine sort de l'ordinateur.
+- Vérifier un fichier téléchargé : son empreinte comparée à celle que publie le site (collée, ou un SHA256SUMS posé
+  à côté), son nom et son contenu (double extension, programme déguisé en document), puis YARA et l'antivirus.
 - Surveillance toutes les heures : notification si un appareil inconnu arrive, si un port s'ouvre, si la note de
   la machine baisse, ou si la box semble usurpée (adresse MAC partagée ou changée : usurpation ARP).
 - Entretien du mois : une notification par mois avec la note de la machine, les mises à jour en attente, la place
@@ -199,6 +207,9 @@ Chaque entrée du menu existe aussi en commande :
 | `gardien motdepasse` | mots de passe fuités |
 | `gardien isoler <fichier>` | lancer un programme inconnu dans un bac à sable (bubblewrap ou firejail, Windows Sandbox) |
 | `gardien courriel` | fuites d'adresse courriel (XposedOrNot, ou Have I Been Pwned avec `GARDIEN_HIBP_CLE`) |
+| `gardien sortantes` | qui parle à Internet : les connexions de chaque programme (lecture seule) |
+| `gardien lien <adresse>` | ce lien est-il dangereux ? (examiné sans l'ouvrir ; en ligne après accord) |
+| `gardien verifier-fichier <fichier> [empreinte]` | vérifier un fichier téléchargé : empreinte, nom et contenu, YARA, antivirus |
 | `gardien integrite [--accepter] [--temps-reel]` | intégrité des fichiers critiques (empreintes BLAKE3), en direct possible |
 | `gardien maj` | mises à jour |
 | `gardien reparer` | réparations et nettoyage |

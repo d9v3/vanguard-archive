@@ -52,7 +52,7 @@ fn refus(codes: &[Ipv4Addr]) -> bool {
 /// `None` si le DNS n'a pas répondu. La bibliothèque ne distingue pas « nom inconnu » d'une panne (ses messages
 /// changent avec le système et la langue) : un refus rapide est un nom inconnu, une erreur après plusieurs secondes
 /// d'attente est un DNS muet, jamais compté comme « pas listée ».
-fn resoudre(nom: &str) -> Option<Vec<Ipv4Addr>> {
+pub(crate) fn resoudre(nom: &str) -> Option<Vec<Ipv4Addr>> {
     let debut = std::time::Instant::now();
     match (nom, 0).to_socket_addrs() {
         Ok(adresses) => Some(

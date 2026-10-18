@@ -57,7 +57,10 @@ Entrée ouvre celle en surbrillance, Échap efface. Au menu principal, elle trou
        Fichiers-pièges : des leurres dans tes dossiers ; un rançongiciel qui les touche déclenche l'alerte
        Bac à sable : lancer un programme inconnu sans réseau, à l'écart de tes fichiers
        Mots de passe : ont-ils fuité ? (seuls 5 caractères de leur empreinte sont envoyés)
-       Adresse courriel : a-t-elle fuité ? (envoyée au service de recherche, après ton accord)
+       Courriel : a-t-il fuité ? (l'adresse est envoyée au service de recherche, après ton accord)
+       Qui parle à Internet ? Les connexions de chaque programme, avec le nom du serveur (lecture seule)
+       Ce lien est-il dangereux ? Examiné sans l'ouvrir ; son âge et des listes publiques, après accord
+       Vérifier un fichier téléchargé : empreinte comparée à celle du site, nom et contenu, YARA, antivirus
   7  Installer et jouer ›
        Logiciels : les meilleurs, libres pour la plupart, par catégorie (navigateurs, mots de passe,
        bureautique, vidéo, création, outils système…) et un pack de départ, depuis la source officielle

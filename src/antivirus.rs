@@ -16,6 +16,16 @@ fn home() -> PathBuf {
     )
 }
 
+/// Ce qu'un moteur a conclu sur un fichier.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum Examen {
+    Sain,
+    /// Détections : nom de la menace ou de la famille.
+    Trouve(Vec<String>),
+    /// Pas pu analyser, avec la raison : jamais compté comme sain.
+    Impossible(String),
+}
+
 /// Ce que couvre une analyse.
 pub enum Portee {
     /// Là où arrivent les menaces : téléchargements, bureau, démarrage automatique, /tmp récent.
@@ -290,6 +300,91 @@ fn defender(portee: &Portee) {
             "  Defender n'a pas pu lancer l'analyse (antivirus tiers actif ?).",
             "  Defender could not start the scan (third-party antivirus active?)."
         ),
+    }
+}
+
+/// Un seul fichier, pour « Vérifier un fichier téléchargé » : le résultat de Defender, qui met lui-même en
+/// quarantaine ce qu'il reconnaît.
+#[cfg(windows)]
+pub(crate) fn examiner(fichier: &std::path::Path) -> Examen {
+    let mpcmd =
+        PathBuf::from(std::env::var_os("ProgramFiles").unwrap_or_default()).join(r"Windows Defender\MpCmdRun.exe");
+    let Some(r) = crate::commande::lancer(
+        Command::new(&mpcmd)
+            .args(["-Scan", "-ScanType", "3", "-File"])
+            .arg(fichier),
+        900,
+    ) else {
+        return Examen::Impossible(tr!("Defender n'a pas pu aller au bout", "Defender could not finish").into());
+    };
+    match r.code {
+        Some(0) => Examen::Sain,
+        Some(2) => Examen::Trouve(menaces_mpcmdrun(&r.sortie)),
+        _ => Examen::Impossible(
+            tr!(
+                "Defender n'a pas pu analyser (antivirus tiers actif ?)",
+                "Defender could not scan (third-party antivirus active?)"
+            )
+            .into(),
+        ),
+    }
+}
+
+/// Noms des menaces dans la sortie de MpCmdRun : « Threat                  : Virus:DOS/EICAR_Test_File ».
+#[cfg(any(windows, test))]
+fn menaces_mpcmdrun(sortie: &str) -> Vec<String> {
+    let noms: Vec<String> = sortie
+        .lines()
+        .filter_map(|l| {
+            let (cle, valeur) = l.split_once(':')?;
+            (cle.trim() == "Threat").then(|| valeur.trim().to_string())
+        })
+        .filter(|v| !v.is_empty())
+        .collect();
+    if noms.is_empty() {
+        vec![tr!("menace reconnue par Defender", "threat recognized by Defender").to_string()]
+    } else {
+        noms
+    }
+}
+
+/// Un seul fichier, pour « Vérifier un fichier téléchargé » : le résultat de ClamAV, sans rien déplacer.
+#[cfg(unix)]
+pub(crate) fn examiner(fichier: &std::path::Path) -> Examen {
+    if !preparer() {
+        return Examen::Impossible(
+            tr!(
+                "ClamAV absent (installation refusée ou impossible)",
+                "ClamAV missing (installation declined or failed)"
+            )
+            .into(),
+        );
+    }
+    // Au-delà de 200 Mo, ClamAV saute le fichier sans le lire (--max-filesize) : rien ne serait conclu.
+    if std::fs::metadata(fichier).is_ok_and(|m| m.len() > 200 * 1024 * 1024) {
+        return Examen::Impossible(
+            tr!(
+                "fichier de plus de 200 Mo, que ClamAV ne lit pas",
+                "file over 200 MB, which ClamAV does not read"
+            )
+            .into(),
+        );
+    }
+    let Some(r) = crate::commande::lancer(
+        Command::new(outil_clamav("clamscan"))
+            .args(["-i", "--max-filesize=200M", "--max-scansize=400M"])
+            .arg(fichier),
+        900,
+    ) else {
+        return Examen::Impossible(tr!("ClamAV n'a pas pu aller au bout", "ClamAV could not finish").into());
+    };
+    match lire_resultat(r.code, &r.sortie) {
+        Some(b) if b.analyses == 0 => {
+            Examen::Impossible(tr!("fichier illisible pour ClamAV", "file unreadable for ClamAV").into())
+        }
+        Some(b) if b.infectes.is_empty() => Examen::Sain,
+        Some(b) => Examen::Trouve(b.infectes.into_iter().map(|(_, menace)| menace).collect()),
+        None => Examen::Impossible(tr!("l'analyse de ClamAV a échoué", "the ClamAV scan failed").into()),
     }
 }
 
@@ -902,6 +997,17 @@ mod tests_cle {
             signes_de_ver(&e(&[("gardien.cle", false), ("autorun.inf", false)])),
             vec![]
         );
+    }
+
+    #[test]
+    fn menaces_de_defender() {
+        let sortie = "Scan starting...\nScan finished.\nScanning C:\\Users\\alice\\Downloads\\x.exe found 1 threats.\n\n\
+                      ----------------------------- Threat information ------------------------------\n\
+                      Threat                  : Virus:DOS/EICAR_Test_File\n\
+                      Resources               : 1 total\n";
+        assert_eq!(menaces_mpcmdrun(sortie), ["Virus:DOS/EICAR_Test_File"]);
+        // Sortie inattendue : la menace est quand même dite.
+        assert_eq!(menaces_mpcmdrun("").len(), 1);
     }
 }
 

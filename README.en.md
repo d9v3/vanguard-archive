@@ -151,6 +151,14 @@ tells when a program is missing on this computer.
   since the reference, and live monitoring.
 - Leaked passwords: checked with Have I Been Pwned without ever sending the password (only 5 characters of its hash);
   email address leaks, after your consent (the address is sent to the service).
+- Who talks to the Internet?: each program's current connections, with the server's name; a program started from a
+  temporary folder or Downloads, a remote access tool's port or a server without a name are flagged. Read-only:
+  nothing is cut.
+- Is this link dangerous?: a link you received, checked without ever opening it (disguised letters, misleading
+  subdomain, imitated brand, link shortener, raw IP address); after your consent, the domain's age and three public
+  lists of dangerous sites (URLhaus, Spamhaus, SURBL). Only the domain name leaves the computer.
+- Check a downloaded file: its checksum compared with the one the site publishes (pasted, or a SHA256SUMS next to
+  it), its name and content (double extension, program disguised as a document), then YARA and the antivirus.
 - Hourly monitoring: a notification if an unknown device shows up, if a port opens, if the machine's grade drops, or
   if the router seems spoofed (shared or changed MAC address: ARP spoofing).
 - Monthly check-up: one notification a month with the machine's grade, waiting updates, the space a cleanup would
@@ -187,6 +195,9 @@ Each menu entry is also a command:
 | `gardien password` | leaked passwords |
 | `gardien sandbox <file>` | run an unknown program in a sandbox (bubblewrap or firejail, Windows Sandbox) |
 | `gardien email` | email address leaks (XposedOrNot, or Have I Been Pwned with `GARDIEN_HIBP_CLE`) |
+| `gardien outbound` | who talks to the Internet: each program's connections (read-only) |
+| `gardien link <address>` | is this link dangerous? (checked without opening it; online after your consent) |
+| `gardien check-file <file> [checksum]` | check a downloaded file: checksum, name and content, YARA, antivirus |
 | `gardien integrity [--accept] [--live]` | integrity of critical files (BLAKE3 fingerprints), live if wanted |
 | `gardien update` | updates |
 | `gardien repair` | repairs and cleaning |
@@ -201,7 +212,8 @@ Each menu entry is also a command:
 **Language**: the system's (English or French). To force it: `GARDIEN_LANG=en` or `GARDIEN_LANG=fr`. The commands
 also keep their French names (`complet`, `machine`, `corriger`, `reseau`, `connexion`, `logiciels`, `diagnostic`,
 `motdepasse`, `isoler`, `courriel`, `integrite`, `maj`, `reparer`, `surveillance`, `nommer`, `sauvegarder`,
-`restaurer`, `nettoyer`, `pieges`, `listes-noires`, `appris`, `entretien`, `alertes`).
+`restaurer`, `nettoyer`, `pieges`, `listes-noires`, `appris`, `entretien`, `alertes`, `sortantes`, `lien`,
+`verifier-fichier`).
 
 ## Development
 

@@ -6,7 +6,7 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use crate::antivirus::Portee;
+use crate::antivirus::{Examen, Portee};
 use crate::ui::*;
 
 const REGLES: &str = include_str!("../assets/yara/reversinglabs.yara");
@@ -156,43 +156,29 @@ fn famille(regle: &str) -> &'static str {
     tr!("logiciel malveillant", "malware")
 }
 
-pub fn analyser(portee: &Portee) {
-    titre(tr!("Analyse YARA", "YARA scan"));
-    let cibles = match portee {
-        Portee::Dossier(d) => vec![d.clone()],
-        Portee::Complete => vec![PathBuf::from(
-            std::env::var_os("HOME")
-                .or_else(|| std::env::var_os("USERPROFILE"))
-                .unwrap_or_default(),
-        )],
-        Portee::Rapide => endroits_a_risque(),
-    };
-    if cibles.is_empty() {
-        trp!("  Rien à analyser ici.", "  Nothing to scan here.");
-        return;
-    }
-    let Some(moteur) = moteur().or_else(|| installer().then(moteur).flatten()) else {
-        return;
-    };
+/// Applique les 308 règles aux cibles : (correspondances, erreurs du moteur). `None` : moteur absent (installation
+/// refusée) ou règles impossibles à écrire, ce qui est déjà dit.
+fn appliquer(cibles: &[PathBuf]) -> Option<(Vec<Trouve>, Vec<String>)> {
+    let moteur = moteur().or_else(|| installer().then(moteur).flatten())?;
     // Les règles sont écrites dans un dossier jetable réservé à l'utilisateur, puis effacées.
     let Ok(dossier) = crate::isoler::dossier_jetable() else {
         trp!(
             "  ✖ Dossier temporaire impossible à créer.",
             "  ✖ Could not create a temporary folder."
         );
-        return;
+        return None;
     };
     let regles = dossier.join("reversinglabs.yara");
     if std::fs::write(&regles, REGLES).is_err() {
         let _ = std::fs::remove_dir_all(&dossier);
         trp!("  ✖ Règles impossibles à écrire.", "  ✖ Could not write the rules.");
-        return;
+        return None;
     }
     let recent = version(&moteur) >= (4, 2);
     let mut trouves = Vec::new();
     // Toute sortie en erreur du moteur est dite : ce qu'il n'a pas pu lire n'est jamais compté comme sain.
     let mut erreurs: Vec<String> = Vec::new();
-    for cible in &cibles {
+    for cible in cibles {
         trp!("  Analyse de {}…", "  Scanning {}…", cible.display());
         let mut commande = Command::new(&moteur);
         commande.args(["-r", "-w", "-p", "4", "-a", "30"]);
@@ -222,6 +208,27 @@ pub fn analyser(portee: &Portee) {
         }
     }
     let _ = std::fs::remove_dir_all(&dossier);
+    Some((trouves, erreurs))
+}
+
+pub fn analyser(portee: &Portee) {
+    titre(tr!("Analyse YARA", "YARA scan"));
+    let cibles = match portee {
+        Portee::Dossier(d) => vec![d.clone()],
+        Portee::Complete => vec![PathBuf::from(
+            std::env::var_os("HOME")
+                .or_else(|| std::env::var_os("USERPROFILE"))
+                .unwrap_or_default(),
+        )],
+        Portee::Rapide => endroits_a_risque(),
+    };
+    if cibles.is_empty() {
+        trp!("  Rien à analyser ici.", "  Nothing to scan here.");
+        return;
+    }
+    let Some((trouves, erreurs)) = appliquer(&cibles) else {
+        return;
+    };
     println!();
     for e in &erreurs {
         for (i, ligne) in envelopper(
@@ -259,6 +266,21 @@ pub fn analyser(portee: &Portee) {
         LARGEUR - 2,
     ) {
         println!("  {ligne}");
+    }
+}
+
+/// Un seul fichier, pour « Vérifier un fichier téléchargé » : le résultat, que l'appelant affiche.
+pub(crate) fn examiner(fichier: &Path) -> Examen {
+    match appliquer(&[fichier.to_path_buf()]) {
+        None => Examen::Impossible(tr!("moteur YARA absent", "YARA engine missing").into()),
+        Some((trouves, _)) if !trouves.is_empty() => Examen::Trouve(
+            trouves
+                .iter()
+                .map(|t| format!("{} ({})", famille(&t.regle), t.regle))
+                .collect(),
+        ),
+        Some((_, erreurs)) if !erreurs.is_empty() => Examen::Impossible(erreurs.join(" ; ")),
+        Some(_) => Examen::Sain,
     }
 }
 

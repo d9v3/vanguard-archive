@@ -20,6 +20,7 @@ mod integrite;
 mod isoler;
 mod journal;
 mod langue;
+mod lien;
 mod listes_noires;
 mod logiciels;
 mod machine;
@@ -35,7 +36,9 @@ mod reseau;
 mod risk;
 mod scan;
 mod selection;
+mod sortantes;
 mod surveillance;
+mod telechargement;
 mod ui;
 mod upnp;
 mod yara;
@@ -202,6 +205,23 @@ enum Commande {
     /// Vérifie si des mots de passe ont fuité (Have I Been Pwned) ; seuls 5 caractères de leur empreinte partent.
     #[command(name = "motdepasse", visible_alias = "password")]
     MotDePasse,
+    /// Qui parle à Internet ? Les connexions en cours de chaque programme, avec le nom du serveur. Lecture seule.
+    #[command(visible_alias = "outbound")]
+    Sortantes,
+    /// Ce lien est-il dangereux ? Examiné sans jamais l'ouvrir ; après accord, son âge et des listes publiques.
+    #[command(visible_alias = "link")]
+    Lien {
+        /// Le lien reçu (entre guillemets s'il contient « & » ou « ? »).
+        adresse: String,
+    },
+    /// Vérifier un fichier téléchargé : empreinte comparée à celle du site, nom et contenu, YARA et antivirus.
+    #[command(name = "verifier-fichier", visible_alias = "check-file")]
+    VerifierFichier {
+        /// Le fichier téléchargé.
+        fichier: std::path::PathBuf,
+        /// L'empreinte publiée par le site (SHA-256 de préférence). Sinon : un SHA256SUMS ou .sha256 à côté.
+        empreinte: Option<String>,
+    },
     /// Sauvegarde la base des appareils et l'état de la surveillance dans un fichier JSON.
     #[command(visible_alias = "backup")]
     Sauvegarder {
@@ -564,6 +584,9 @@ enum Action {
     Bac,
     MotsDePasse,
     Courriel,
+    QuiParle,
+    Lien,
+    VerifierFichier,
     Logiciels,
     Gaming,
     Nettoyer,
@@ -604,6 +627,9 @@ impl Action {
         Action::Bac,
         Action::MotsDePasse,
         Action::Courriel,
+        Action::QuiParle,
+        Action::Lien,
+        Action::VerifierFichier,
         Action::Logiciels,
         Action::Gaming,
         Action::Nettoyer,
@@ -682,6 +708,13 @@ impl Action {
             Action::Bac => "sandbox isoler firejail bubblewrap",
             Action::MotsDePasse => "password hibp pwned fuite leak",
             Action::Courriel => "email mail fuite leak",
+            Action::QuiParle => {
+                "connexions connections sortantes outbound espion spyware mouchard télémétrie telemetry serveurs servers"
+            }
+            Action::Lien => "url lien link phishing hameçonnage arnaque scam texto sms courriel email domaine domain",
+            Action::VerifierFichier => {
+                "sha256 empreinte checksum hash télécharger download iso installateur installer fichier file"
+            }
             Action::Logiciels => "apps programmes programs installer install firefox vlc libreoffice",
             Action::Gaming => "jeux games steam directx vulkan",
             Action::Nettoyer => "place space disque plein disk full cache corbeille trash",
@@ -796,11 +829,10 @@ impl Action {
                 tr!("Fichiers-pièges", "Decoy files"),
                 tr!("alerte si un rançongiciel chiffre", "early ransomware warning"),
             ),
+            // Textes de 34 caractères au plus dans ce groupe : au-delà, la colonne des précisions recule et les plus
+            // longues (YARA, fichiers-pièges) sortent des 76 colonnes.
             Action::Bac => (
-                tr!(
-                    "Bac à sable : lancer un programme inconnu",
-                    "Sandbox: run an unknown program"
-                ),
+                tr!("Bac à sable : programme inconnu", "Sandbox: run an unknown program"),
                 tr!("sans réseau, isolé", "no network, isolated"),
             ),
             Action::MotsDePasse => (
@@ -808,8 +840,20 @@ impl Action {
                 tr!("rien n'est envoyé en clair", "nothing sent in clear"),
             ),
             Action::Courriel => (
-                tr!("Adresse courriel : a-t-elle fuité ?", "Email address: has it leaked?"),
+                tr!("Courriel : a-t-il fuité ?", "Email address: has it leaked?"),
                 tr!("avec ton accord", "with your consent"),
+            ),
+            Action::QuiParle => (
+                tr!("Qui parle à Internet ?", "Who talks to the Internet?"),
+                tr!("connexions de chaque programme", "each program's connections"),
+            ),
+            Action::Lien => (
+                tr!("Ce lien est-il dangereux ?", "Is this link dangerous?"),
+                tr!("examiné sans l'ouvrir", "checked without opening it"),
+            ),
+            Action::VerifierFichier => (
+                tr!("Vérifier un fichier téléchargé", "Check a downloaded file"),
+                tr!("empreinte, YARA, antivirus", "checksum, YARA, antivirus"),
             ),
             Action::Logiciels => (
                 tr!("Logiciels", "Software"),
@@ -954,6 +998,9 @@ impl Groupe {
                 Action::Bac,
                 Action::MotsDePasse,
                 Action::Courriel,
+                Action::QuiParle,
+                Action::Lien,
+                Action::VerifierFichier,
             ],
             Groupe::Installer => &[Action::Logiciels, Action::Gaming],
             Groupe::Optimiser => &[
@@ -1091,6 +1138,9 @@ async fn executer(s: &mut Session, action: Action) {
         }
         Action::MotsDePasse => fuites::verifier(),
         Action::Courriel => fuites::verifier_courriel(),
+        Action::QuiParle => sortantes::afficher(),
+        Action::Lien => lien::verifier(None),
+        Action::VerifierFichier => telechargement::verifier(None, None),
         Action::Logiciels => logiciels::menu(),
         Action::Gaming => gaming::menu(),
         Action::Nettoyer => nettoyer::menu(),
@@ -1198,6 +1248,18 @@ fn ligne_de_commande() -> clap::Command {
             "Check whether passwords have leaked (Have I Been Pwned); only 5 characters of their fingerprint are sent",
         ),
         (
+            "sortantes",
+            "Who talks to the Internet? Each program's current connections, with the server's name. Read-only",
+        ),
+        (
+            "lien",
+            "Is this link dangerous? Checked without ever opening it; after your consent, its age and public lists",
+        ),
+        (
+            "verifier-fichier",
+            "Check a downloaded file: checksum compared with the site's, name and content, YARA and antivirus",
+        ),
+        (
             "sauvegarder",
             "Back up the device database and the monitoring state to a JSON file",
         ),
@@ -1291,6 +1353,17 @@ fn ligne_de_commande() -> clap::Command {
         })
         .mut_arg("surnom", |a| a.help("The nickname; empty to remove it"))
     })
+    .mut_subcommand("lien", |s| {
+        s.mut_arg("adresse", |a| {
+            a.help("The link you received (in quotes if it contains “&” or “?”)")
+        })
+    })
+    .mut_subcommand("verifier-fichier", |s| {
+        s.mut_arg("fichier", |a| a.help("The downloaded file"))
+            .mut_arg("empreinte", |a| {
+                a.help("The checksum published by the site (preferably SHA-256). Otherwise: a SHA256SUMS or .sha256 next to it")
+            })
+    })
     .mut_subcommand("guide", |s| {
         s.mut_arg("quoi", |a| {
             a.help("A system (linux, windows, macos, all), a program (systemctl, winget…) or words to look for")
@@ -1380,6 +1453,11 @@ async fn main() {
         }
         Some(Commande::MotDePasse) => fuites::verifier(),
         Some(Commande::Courriel) => fuites::verifier_courriel(),
+        Some(Commande::Sortantes) => sortantes::afficher(),
+        Some(Commande::Lien { adresse }) => lien::verifier(Some(&adresse)),
+        Some(Commande::VerifierFichier { fichier, empreinte }) => {
+            telechargement::verifier(Some(&fichier), empreinte.as_deref());
+        }
         Some(Commande::Isoler { fichier }) => isoler::isoler(&fichier),
         Some(Commande::Pieges { retirer }) => pieges::commande(retirer),
         Some(Commande::Yara { complet, dossier }) => yara::analyser(&match (dossier, complet) {

@@ -57,6 +57,9 @@ highlighted one, Esc clears it. In the main menu, it also finds each tool of the
        Sandbox: run an unknown program with no network, away from your files
        Passwords: have they leaked? (only 5 characters of their fingerprint are sent)
        Email address: has it leaked? (sent to the search service, after your consent)
+       Who talks to the Internet? Each program's connections, with the server's name (read-only)
+       Is this link dangerous? Checked without opening it; its age and public lists, after your consent
+       Check a downloaded file: checksum compared with the site's, name and content, YARA, antivirus
   7  Install and play ›
        Software: the best ones, mostly open source, by category (browsers, passwords, office, video,
        design, system tools…) plus a starter pack, from the official source

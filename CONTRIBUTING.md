@@ -39,6 +39,9 @@ modification. Sur GitHub, `@claude` dans un ticket ou une demande de fusion le f
 | `src/listes_noires.rs` | adresse Internet de la maison dans les listes noires (DNSBL), après accord |
 | `src/entretien.rs` | entretien du mois : note, mises à jour, place, problèmes nouveaux, en une notification |
 | `src/alertes.rs` | alertes sur le téléphone par ntfy : sujet tiré au hasard, messages sans IP ni MAC |
+| `src/sortantes.rs` | qui parle à Internet : connexions établies par programme (ss, PowerShell, lsof), DNS inverse |
+| `src/lien.rs` | ce lien est-il dangereux ? examen local (punycode, marques imitées…), puis RDAP, URLhaus, Spamhaus DBL, SURBL |
+| `src/telechargement.rs` | vérifier un fichier téléchargé : empreinte par l'outil du système, nom et contenu, YARA et antivirus |
 | `assets/oui.tsv` | fabricants par préfixe MAC (liste IEEE), rangés en tableaux triés à la compilation (`build.rs`) |
 | `assets/yara/` | règles YARA de ReversingLabs (licence MIT), rassemblées par `outils/maj-yara.sh` |
 | `assets/icones/`, `assets/gardien.ico` | le logo, calculé par `outils/icone.py` |

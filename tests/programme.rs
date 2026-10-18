@@ -286,3 +286,85 @@ fn entretien_du_mois_sans_rien_installer() {
         "{t}"
     );
 }
+
+#[test]
+fn sous_menu_protection() {
+    // 6 : Antivirus et protection ; Entrée : revenir ; q : quitter.
+    let s = gardien("fr", &[], "6\n\nq\n", 60);
+    let t = sans_couleurs(&s.texte);
+    for outil in [
+        "Qui parle à Internet ?",
+        "Ce lien est-il dangereux ?",
+        "Vérifier un fichier téléchargé",
+    ] {
+        assert!(t.contains(outil), "{outil} absent : {t}");
+    }
+    // Chaque ligne du sous-menu tient dans 76 colonnes (sans terminal, l'écran suivant suit la question « Choix » sur
+    // la même ligne : celles-là ne comptent pas).
+    let longues: Vec<&str> = t
+        .lines()
+        .filter(|l| !l.contains("Choix :") && l.chars().count() > 76)
+        .collect();
+    assert_eq!(longues, Vec::<&str>::new(), "lignes trop longues");
+    assert_eq!(s.code, Some(0));
+}
+
+#[test]
+fn lien_examine_sans_rien_envoyer() {
+    // Refus de la vérification en ligne : rien ne sort de l'ordinateur, le verdict vient du lien lui-même. Des noms
+    // réservés aux exemples (.example) : outils/liens.py ne cherche pas à les ouvrir.
+    let s = gardien(
+        "fr",
+        &["lien", "https://paypal.com.compte-secure.example/login"],
+        "n\n",
+        60,
+    );
+    assert_eq!(s.code, Some(0), "{}", s.erreurs);
+    let t = sans_couleurs(&s.texte);
+    assert!(
+        t.contains("Sous-domaine trompeur") && t.contains("compte-secure.example"),
+        "{t}"
+    );
+    assert!(t.contains("Rien n'a été envoyé") && t.contains("Dangereux"), "{t}");
+    let en = gardien("en", &["link", "https://paypa1.example/"], "n\n", 60);
+    let t = sans_couleurs(&en.texte);
+    assert!(t.contains("Looks like PayPal") && t.contains("Nothing was sent"), "{t}");
+    let aide = gardien("en", &["lien", "--help"], "", 30);
+    assert!(aide.texte.contains("The link you received"), "{}", aide.texte);
+}
+
+#[test]
+fn verifier_fichier_absent_ou_dossier() {
+    let s = gardien("fr", &["verifier-fichier", "/nexiste/pas/outil.zip"], "", 30);
+    assert_eq!(s.code, Some(0), "{}", s.erreurs);
+    assert!(sans_couleurs(&s.texte).contains("Introuvable"), "{}", s.texte);
+    let dossier = std::env::temp_dir();
+    let d = gardien("fr", &["verifier-fichier", dossier.to_str().unwrap()], "", 30);
+    assert!(
+        sans_couleurs(&d.texte).contains("Ce n'est pas un fichier"),
+        "{}",
+        d.texte
+    );
+    let aide = gardien("en", &["check-file", "--help"], "", 30);
+    assert!(
+        aide.texte.contains("The checksum published by the site"),
+        "{}",
+        aide.texte
+    );
+}
+
+#[test]
+fn sortantes_en_lecture_seule() {
+    let s = gardien("fr", &["sortantes"], "", 90);
+    assert_eq!(s.code, Some(0), "{}", s.erreurs);
+    let t = sans_couleurs(&s.texte);
+    assert!(
+        t.contains("Qui parle à Internet ?") && t.contains("Rien n'est coupé ni bloqué"),
+        "{t}"
+    );
+    // Sous Wine, pas de PowerShell : c'est dit, rien n'est inventé.
+    assert!(
+        t.contains("vers Internet") || t.contains("Impossible de lire les connexions"),
+        "{t}"
+    );
+}
