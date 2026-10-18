@@ -168,7 +168,10 @@ outils/deployer.sh     # compile Linux (musl, statique) + Windows, installe en l
 
 Tests : `cargo test` (Linux) ; tests Windows sous Wine (`cargo test --target x86_64-pc-windows-gnu` avec un lanceur
 Wine) ; `cargo clippy --all-targets` sur les quatre cibles (Linux, Windows, `aarch64-apple-darwin`,
-`x86_64-apple-darwin`), en mode strict (pedantic), sans remarque ; `cargo fmt --check`.
+`x86_64-apple-darwin`), en mode strict (pedantic), sans remarque ; `cargo fmt --check`. Les fonctions internes sont
+testées dans leur module ; `tests/programme.rs` lance le vrai programme comme le ferait quelqu'un (aide dans les deux
+langues, menus quittés, listes, refus respectés, audit et scan de 127.0.0.1 en JSON), avec un dossier personnel
+jetable.
 
 macOS : compilé et testé sur un Mac de GitHub (`.github/workflows/macos.yml`, programme universel Apple Silicon +
 Intel), chaque nuit si le code a changé ou à la demande (`gh workflow run macos.yml`). `deployer.sh` récupère la

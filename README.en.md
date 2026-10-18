@@ -166,7 +166,9 @@ outils/deployer.sh     # builds Linux (musl, static) + Windows, installs locally
 
 Tests: `cargo test` (Linux); Windows tests under Wine (`cargo test --target x86_64-pc-windows-gnu` with a Wine
 runner); `cargo clippy --all-targets` on the four targets (Linux, Windows, `aarch64-apple-darwin`,
-`x86_64-apple-darwin`), in strict mode (pedantic), without any warning; `cargo fmt --check`.
+`x86_64-apple-darwin`), in strict mode (pedantic), without any warning; `cargo fmt --check`. Internal functions are
+tested in their module; `tests/programme.rs` runs the real program the way a person would (help in both languages,
+menus left, lists, refusals respected, audit and scan of 127.0.0.1 in JSON), with a throwaway home folder.
 
 macOS: built and tested on a GitHub Mac (`.github/workflows/macos.yml`, universal Apple Silicon + Intel binary),
 every night if the code changed or on demand (`gh workflow run macos.yml`). `deployer.sh` fetches the latest

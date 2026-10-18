@@ -7,7 +7,8 @@ Réponses à l'utilisateur en français, claires, avec le pourquoi.
 
 ## Commandes
 
-- Tests : `cargo test` (cible par défaut x86_64-unknown-linux-musl, voir `.cargo/config.toml`).
+- Tests : `cargo test` (cible par défaut x86_64-unknown-linux-musl, voir `.cargo/config.toml`). Unitaires dans chaque
+  module ; `tests/programme.rs` lance le vrai programme (dossier personnel jetable, rien ne change le système).
 - Lint, zéro remarque (clippy pedantic, voir Cargo.toml) sur les quatre cibles :
   `for c in x86_64-unknown-linux-musl x86_64-pc-windows-gnu aarch64-apple-darwin x86_64-apple-darwin; do cargo clippy -q --all-targets --target $c; done`
 - Mise en forme : `cargo fmt`, toujours avant un commit.
