@@ -4,7 +4,7 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use super::demarrage::{Programme, desactives_launchd, label_valide};
+use super::demarrage::{Programme, agent_actif, agent_au_demarrage, etats_launchd, label_valide};
 use super::{Categorie, Reglage, Valeur};
 use crate::ui::*;
 
@@ -26,8 +26,8 @@ pub enum Changement {
     Demarrage { label: String },
 }
 
-/// Les agents désactivés pour ce compte (`launchctl print-disabled`) ; `None` : illisible.
-fn agents_desactives() -> Option<std::collections::HashSet<String>> {
+/// Les réglages de launchd pour ce compte (`launchctl print-disabled`), nom → désactivé ; `None` : illisible.
+fn agents_etats() -> Option<std::collections::HashMap<String, bool>> {
     let uid = crate::commande::lancer(Command::new("id").arg("-u"), 10)?
         .sortie
         .trim()
@@ -39,7 +39,7 @@ fn agents_desactives() -> Option<std::collections::HashSet<String>> {
         Command::new("launchctl").args(["print-disabled", &format!("gui/{uid}")]),
         10,
     )?;
-    (r.code == Some(0)).then(|| desactives_launchd(&r.sortie))
+    (r.code == Some(0)).then(|| etats_launchd(&r.sortie))
 }
 
 fn bool_texte(b: bool) -> String {
@@ -74,7 +74,16 @@ impl Changement {
                     .then(|| format!("{service}\n{}", lire_networksetup(&r.sortie)))
             }
             Changement::Demarrage { label } => {
-                agents_desactives().map(|d| if d.contains(label) { "disabled" } else { "enabled" }.to_string())
+                // Remettre écrit « enabled » dans launchd, même si l'agent n'y figurait pas avant : le même effet, car
+                // seul un agent qui se lançait est proposé (agent_actif tient compte de « Disabled » dans son plist).
+                agents_etats().map(|e| {
+                    if e.get(label) == Some(&true) {
+                        "disabled"
+                    } else {
+                        "enabled"
+                    }
+                    .to_string()
+                })
             }
         }
     }
@@ -266,11 +275,22 @@ pub fn ecrire(lots: &[Vec<(&Changement, Valeur)>]) -> Vec<bool> {
     crate::machine::appliquer_chacune(&commandes)
 }
 
-/// Les programmes lancés à l'ouverture de session de ce compte : ses agents de launchd (~/Library/LaunchAgents), avec
-/// leur état. Ceux de toute la machine (/Library) et les éléments de connexion des Réglages ne sont pas touchés.
+/// Les programmes lancés à l'ouverture de session de ce compte : ses agents de launchd (~/Library/LaunchAgents) qui
+/// partent à la connexion, avec leur état. Ceux de toute la machine (/Library), les éléments de connexion des
+/// Réglages et les agents à la demande ou à heure fixe ne sont pas touchés.
 pub fn au_demarrage() -> Vec<Programme> {
     let dossier = PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join("Library/LaunchAgents");
-    let desactives = agents_desactives().unwrap_or_default();
+    let etats = agents_etats().unwrap_or_default();
+    // Une clé du plist en XML (un booléen, ou les conditions de KeepAlive) ; `None` : absente.
+    let xml = |fichier: &Path, cle: &str| -> Option<String> {
+        let r = crate::commande::lancer(
+            Command::new("plutil")
+                .args(["-extract", cle, "xml1", "-o", "-"])
+                .arg(fichier),
+            10,
+        )?;
+        (r.code == Some(0)).then_some(r.sortie)
+    };
     let plutil = |fichier: &Path, cle: &str| -> Option<String> {
         let r = crate::commande::lancer(
             Command::new("plutil")
@@ -293,6 +313,9 @@ pub fn au_demarrage() -> Vec<Programme> {
         .iter()
         .filter_map(|f| {
             let label = plutil(f, "Label").filter(|l| label_valide(l))?;
+            if !agent_au_demarrage(xml(f, "RunAtLoad").as_deref(), xml(f, "KeepAlive").as_deref()) {
+                return None;
+            }
             let programme = plutil(f, "Program")
                 .or_else(|| plutil(f, "ProgramArguments.0"))
                 .unwrap_or_else(|| f.display().to_string());
@@ -301,7 +324,7 @@ pub fn au_demarrage() -> Vec<Programme> {
                     .file_name()
                     .map_or_else(|| label.clone(), |n| n.to_string_lossy().into_owned()),
                 commande: programme,
-                actif: !desactives.contains(&label),
+                actif: agent_actif(etats.get(&label).copied(), xml(f, "Disabled").as_deref()),
                 machine: false,
                 bureau: label.starts_with("com.apple."),
                 changement: Changement::Demarrage { label },

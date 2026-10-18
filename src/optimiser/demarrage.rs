@@ -223,8 +223,8 @@ fn ailleurs() -> &'static str {
         )
     } else if cfg!(target_os = "macos") {
         tr!(
-            "Éléments de connexion et agents de toute la machine : Réglages Système › Général › Ouverture (« − » pour retirer). Ils demandent un geste dans les Réglages ou l'administrateur.",
-            "Login items and machine-wide agents: System Settings › General › Login Items (“−” to remove). They need a step in Settings or an administrator."
+            "Éléments de connexion et agents de toute la machine : Réglages Système › Général › Ouverture (« − » pour retirer). Ils demandent un geste dans les Réglages ou l'administrateur. Les agents qui ne partent qu'à la demande ou à heure fixe ne sont pas dans cette liste.",
+            "Login items and machine-wide agents: System Settings › General › Login Items (“−” to remove). They need a step in Settings or an administrator. Agents that only start on demand or on a schedule are not in this list."
         )
     } else {
         tr!(
@@ -316,18 +316,53 @@ pub(super) fn label_valide(t: &str) -> bool {
     !t.is_empty() && t.len() <= 255 && t.chars().all(|c| c.is_ascii_alphanumeric() || "._-".contains(c))
 }
 
-/// Les agents désactivés, d'après `launchctl print-disabled gui/<uid>` : « "com.x" => disabled » (ou « => true »
-/// pour les anciens macOS).
+/// Les réglages de launchd pour ce compte, d'après `launchctl print-disabled gui/<uid>` : nom de l'agent → désactivé.
+/// « "com.x" => disabled » ou « => enabled » (« => true » ou « => false » sur les anciens macOS). Un agent absent de
+/// la liste suit la clé « Disabled » de son plist.
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-pub(super) fn desactives_launchd(texte: &str) -> std::collections::HashSet<String> {
+pub(super) fn etats_launchd(texte: &str) -> std::collections::HashMap<String, bool> {
     texte
         .lines()
         .filter_map(|l| {
             let (label, etat) = l.trim().split_once("=>")?;
-            let label = label.trim().trim_matches('"');
-            matches!(etat.trim(), "disabled" | "true").then(|| label.to_string())
+            let desactive = match etat.trim() {
+                "disabled" | "true" => true,
+                "enabled" | "false" => false,
+                _ => return None,
+            };
+            Some((label.trim().trim_matches('"').to_string(), desactive))
         })
         .collect()
+}
+
+/// La valeur d'une clé extraite par `plutil -extract <clé> xml1` : le premier élément sous `<plist …>` (« <true/> »,
+/// « <dict> »…).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn valeur_plist(xml: &str) -> Option<&str> {
+    let apres = &xml[xml.find("<plist")?..];
+    let apres = apres[apres.find('>')? + 1..].trim_start();
+    let fin = apres.find('>')? + 1;
+    Some(&apres[..fin])
+}
+
+/// Un agent du compte se lance-t-il à l'ouverture de session ? `run_at_load`, `keep_alive` : ces clés de son plist,
+/// extraites en XML (`None` : absentes). Sans « RunAtLoad » vrai ni « KeepAlive » (vrai, ou des conditions), il ne part
+/// qu'à la demande ou à heure fixe, comme une tâche planifiée : il n'est pas dans la liste.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub(super) fn agent_au_demarrage(run_at_load: Option<&str>, keep_alive: Option<&str>) -> bool {
+    run_at_load.and_then(valeur_plist) == Some("<true/>")
+        || keep_alive.and_then(valeur_plist).is_some_and(|v| v != "<false/>")
+}
+
+/// L'agent est-il actif ? Le réglage de launchd (`surcharge`, désactivé ou non) l'emporte sur la clé « Disabled » du
+/// plist (`disabled`, extraite en XML). Sans ce calcul, un agent que son plist désactive paraissait actif : le retirer
+/// puis le remettre l'aurait activé (« launchctl enable » l'emporte sur le plist), ce qu'il n'était pas avant.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub(super) fn agent_actif(surcharge: Option<bool>, disabled: Option<&str>) -> bool {
+    match surcharge {
+        Some(desactive) => !desactive,
+        None => disabled.and_then(valeur_plist) != Some("<true/>"),
+    }
 }
 
 /// Un programme de la liste : ce qui l'affiche et le réglage qui le retire.
@@ -633,9 +668,34 @@ mod tests {
     #[test]
     fn agents_desactives_de_launchd() {
         let texte = "disabled services = {\n\t\"com.exemple.agent\" => disabled\n\t\"com.exemple.autre\" => enabled\n\t\"org.ancien.mac\" => true\n\t\"org.ancien.actif\" => false\n}\n";
-        let d = desactives_launchd(texte);
-        assert!(d.contains("com.exemple.agent") && d.contains("org.ancien.mac"));
-        assert!(!d.contains("com.exemple.autre") && !d.contains("org.ancien.actif"));
+        let e = etats_launchd(texte);
+        assert_eq!(e.get("com.exemple.agent"), Some(&true));
+        assert_eq!(e.get("org.ancien.mac"), Some(&true));
+        assert_eq!(e.get("com.exemple.autre"), Some(&false));
+        assert_eq!(e.get("org.ancien.actif"), Some(&false));
+        assert_eq!(e.get("com.absent"), None);
+        // Valeurs extraites par plutil en XML.
+        let xml = |v: &str| {
+            format!(
+                "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\">\n{v}\n</plist>\n"
+            )
+        };
+        let (vrai, faux) = (xml("<true/>"), xml("<false/>"));
+        let conditions = xml("<dict>\n\t<key>SuccessfulExit</key>\n\t<false/>\n</dict>");
+        assert_eq!(valeur_plist(&vrai), Some("<true/>"));
+        assert_eq!(valeur_plist(&conditions), Some("<dict>"));
+        // Au démarrage : RunAtLoad vrai, ou KeepAlive vrai ou à conditions ; pas un agent à la demande.
+        assert!(agent_au_demarrage(Some(&vrai), None));
+        assert!(agent_au_demarrage(None, Some(&vrai)));
+        assert!(agent_au_demarrage(Some(&faux), Some(&conditions)));
+        assert!(!agent_au_demarrage(Some(&faux), Some(&faux)));
+        assert!(!agent_au_demarrage(None, None));
+        // Actif : le réglage de launchd d'abord, sinon la clé Disabled du plist.
+        assert!(agent_actif(None, None));
+        assert!(!agent_actif(None, Some(&vrai)));
+        assert!(agent_actif(None, Some(&faux)));
+        assert!(agent_actif(Some(false), Some(&vrai)));
+        assert!(!agent_actif(Some(true), None));
         assert!(label_valide("com.exemple.agent-2_b"));
         assert!(!label_valide("com.exemple;rm"));
         assert!(!label_valide(""));
