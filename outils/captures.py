@@ -18,7 +18,7 @@ dépôt (outils/confidentialite.py) relit chaque image : si un détail personnel
 Depuis la racine du dépôt :
     uv run --no-project --with pyte python outils/captures.py [programme gardien] [--connexion]
 --connexion refait aussi le test de connexion (quelques centaines de Mo) ; sans lui, seulement si l'image manque ou si
-src/connexion.rs, src/ui.rs, src/langue.rs ou ce script ont changé depuis. --sans-connexion ne le refait jamais.
+src/reseau/connexion.rs, src/ui.rs, src/langue.rs ou ce script ont changé depuis. --sans-connexion ne le refait jamais.
 """
 
 import html
@@ -424,7 +424,7 @@ def connexion_a_refaire(force: bool) -> bool:
                               capture_output=True, text=True).stdout.strip()
     if not derniere:
         return True
-    return subprocess.run(["git", "diff", "--quiet", derniere, "HEAD", "--", "src/connexion.rs", "src/ui.rs",
+    return subprocess.run(["git", "diff", "--quiet", derniere, "HEAD", "--", "src/reseau/connexion.rs", "src/ui.rs",
                            "src/langue.rs", "outils/captures.py"]).returncode != 0
 
 

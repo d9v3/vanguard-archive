@@ -9,7 +9,7 @@ use std::net::{IpAddr, SocketAddr, UdpSocket};
 use std::time::{Duration, Instant};
 
 use crate::machine::dns::{Actuel, service_public};
-use crate::nat::{hasard, recevoir};
+use crate::reseau::nat::{hasard, recevoir};
 use crate::selection::{Ligne, choisir};
 use crate::ui::*;
 
@@ -221,7 +221,7 @@ pub fn mesurer_et_proposer() {
         );
         return;
     };
-    let passerelle = crate::scan::passerelle().map(IpAddr::V4);
+    let passerelle = crate::reseau::scan::passerelle().map(IpAddr::V4);
     let garde = protection(&actuel, passerelle);
     // Les deux premiers serveurs différents.
     let mut a_mesurer: Vec<IpAddr> = actuel.serveurs.iter().map(|(ip, _)| *ip).collect();

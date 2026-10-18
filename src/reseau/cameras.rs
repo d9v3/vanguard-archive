@@ -13,9 +13,9 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::time::timeout;
 
+use crate::reseau::{nat, scan};
 use crate::risk::Niveau;
 use crate::ui::*;
-use crate::{nat, scan};
 
 /// Fabricants de caméras tels que les nomme le registre des adresses MAC (en minuscules), et le nom à montrer.
 /// Les marques qui font aussi des box, des prises ou des téléphones (TP-Link, Xiaomi, Tuya) n'y sont pas : leur

@@ -1198,7 +1198,7 @@ fn en_ligne(lien: &Lien, adresse: &str) -> Vec<Verification> {
                     "dbl.spamhaus.org",
                     "dbltest.com",
                     refus_dbl,
-                    crate::listes_noires::resoudre,
+                    crate::reseau::listes_noires::resoudre,
                 )
                 .map_or_else(Inscription::Impossible, |c| sens_dbl(&c))
             })
@@ -1210,7 +1210,7 @@ fn en_ligne(lien: &Lien, adresse: &str) -> Vec<Verification> {
                     "multi.surbl.org",
                     "test.surbl.org",
                     refus_surbl,
-                    crate::listes_noires::resoudre,
+                    crate::reseau::listes_noires::resoudre,
                 )
                 .map_or_else(Inscription::Impossible, |c| sens_surbl(&c))
             })

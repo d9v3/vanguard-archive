@@ -512,7 +512,7 @@ fn poser() {
                 "  {VERT}✔{RESET} {}",
                 trf!("{} fichiers-pièges posés.", "{} decoy files placed.", poses.len())
             );
-            if !crate::surveillance::active() {
+            if !crate::reseau::surveillance::active() {
                 dire(tr!(
                     "Active la surveillance (menu Réseau et Internet) pour qu'ils soient vérifiés toutes les heures, et pas seulement à chaque bilan.",
                     "Turn monitoring on (Network and Internet menu) so they are checked every hour, not only at each check."

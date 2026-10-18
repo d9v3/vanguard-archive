@@ -1215,7 +1215,7 @@ mod tests {
 
     #[test]
     fn liens_d_autostart_laisses_tels_quels() {
-        let base = crate::isoler::dossier_jetable().unwrap();
+        let base = crate::protection::isoler::dossier_jetable().unwrap();
         let (compte, systeme, ailleurs) = (base.join("compte"), base.join("systeme"), base.join("dotfiles"));
         for d in [&compte, &systeme, &ailleurs] {
             std::fs::create_dir_all(d).unwrap();

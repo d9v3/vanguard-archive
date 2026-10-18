@@ -167,7 +167,7 @@ fn appliquer_le(appris: &Appris, constats: &mut [Constat], jour: NaiveDate) -> u
 /// Ce qui est habituel ici, appris des mesures passées : la connexion (médiane des derniers tests).
 fn habitudes() {
     section(tr!("TES HABITUDES", "YOUR HABITS"));
-    let Some(h) = crate::connexion::habitudes_ici() else {
+    let Some(h) = crate::reseau::connexion::habitudes_ici() else {
         for ligne in envelopper(
             tr!(
                 "Pas encore assez de tests de connexion (il en faut 3) pour connaître la normale.",

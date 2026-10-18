@@ -72,7 +72,7 @@ fn chemin_de(sorte: Sorte) -> Option<PathBuf> {
     let maison = crate::nettoyer::maison();
     let config = std::env::var_os("XDG_CONFIG_HOME").map_or_else(|| maison.join(".config"), PathBuf::from);
     let declares = std::fs::read_to_string(config.join("user-dirs.dirs")).unwrap_or_default();
-    crate::pieges::dossier_declare(&declares, cle, &maison)
+    crate::protection::pieges::dossier_declare(&declares, cle, &maison)
         .or_else(|| noms.iter().map(|n| maison.join(n)).find(|d| d.is_dir()))
 }
 
@@ -84,7 +84,7 @@ fn chemin_de(sorte: Sorte) -> Option<PathBuf> {
         .open_subkey(r"Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders")
         .ok()
         .and_then(|k| k.get_value::<String, _>(valeur).ok())
-        .map(|c| PathBuf::from(crate::pieges::developper(&c)))
+        .map(|c| PathBuf::from(crate::protection::pieges::developper(&c)))
         .or_else(|| std::env::var_os("USERPROFILE").map(|p| PathBuf::from(p).join(profil)))
 }
 

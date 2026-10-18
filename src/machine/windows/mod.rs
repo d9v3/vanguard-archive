@@ -754,7 +754,7 @@ pub fn auditer() -> Audit {
     use super::verif;
     let feu = pare_feu();
     let feu_actif = feu.probleme.is_none();
-    let ip_lan = crate::scan::reseau_local().map(|l| l.1.to_string());
+    let ip_lan = crate::reseau::scan::reseau_local().map(|l| l.1.to_string());
     let lan = ip_lan.as_deref();
     super::audit(
         NOM,

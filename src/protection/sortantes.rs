@@ -350,7 +350,7 @@ fn dossier_risque(chemin: &str) -> Option<&'static str> {
 
 /// Le nom à montrer pour un serveur : son domaine (« github.com »), ou l'entreprise derrière un grand hébergeur.
 fn qui(nom: &str) -> String {
-    let domaine = crate::lien::domaine_enregistrable(nom);
+    let domaine = crate::protection::lien::domaine_enregistrable(nom);
     PROPRIETAIRES
         .lines()
         .find_map(|l| {

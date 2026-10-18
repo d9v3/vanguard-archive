@@ -3,12 +3,8 @@
 //! N'utilise le scan réseau que sur un réseau qui t'appartient ou que tu as le droit d'auditer.
 //! Lancé sans argument, affiche un menu.
 
-mod antivirus;
 mod apprentissage;
-mod cameras;
-mod canaux;
 mod commande;
-mod connexion;
 mod copier;
 mod corriger;
 mod depanner;
@@ -17,38 +13,24 @@ mod dns_rapide;
 mod donnees;
 mod entretien;
 mod fiche;
-mod fuites;
 mod gaming;
 mod guide;
 mod historique;
-mod integrite;
-mod isoler;
 mod journal;
 mod langue;
 mod lenteur;
-mod lien;
-mod listes_noires;
 mod logiciels;
 mod machine;
 mod maj;
-mod nat;
 mod nettoyer;
 mod optimiser;
-mod pieges;
-#[cfg(unix)]
 mod protection;
 mod rapport;
 mod reparer;
 mod reseau;
 mod risk;
-mod scan;
 mod selection;
-mod sortantes;
-mod surveillance;
-mod telechargement;
 mod ui;
-mod upnp;
-mod yara;
 
 use clap::{CommandFactory, FromArgMatches, Parser, Subcommand};
 
@@ -395,12 +377,12 @@ fn etat_du_menu(surveillance_active: bool) -> Vec<String> {
             "  {GRIS}No check yet: start with 1.{RESET}"
         ),
     });
-    if let Some(c) = connexion::historique().last() {
+    if let Some(c) = reseau::connexion::historique().last() {
         let debit = |d: Option<f64>| d.map_or_else(|| "?".to_string(), |d| format!("{d:.0}"));
         let bufferbloat = c
             .hausse_ms
             .map(|h| {
-                let (n, niveau) = connexion::note_bufferbloat(h);
+                let (n, niveau) = reseau::connexion::note_bufferbloat(h);
                 format!("{}{n}{RESET}", couleur(niveau))
             })
             .unwrap_or_default();
@@ -535,7 +517,7 @@ async fn menu() {
     let mut dernier = String::from("1");
     loop {
         print!("\x1b[2J\x1b[H");
-        let lignes = lignes_du_menu(etat_du_menu(surveillance::active()));
+        let lignes = lignes_du_menu(etat_du_menu(reseau::surveillance::active()));
         let Some(choix) = choisir(
             &lignes,
             &format!("  {ACCENT}›{RESET} {}", tr!("Choix : ", "Choice: ")),
@@ -865,7 +847,7 @@ impl Action {
         let precision = match self {
             Action::Entretien if entretien::active() => tr!("activé : une notification", "on: one notification"),
             Action::Entretien => tr!("désactivé", "off"),
-            Action::Surveillance if surveillance::active() => tr!("activée", "on"),
+            Action::Surveillance if reseau::surveillance::active() => tr!("activée", "on"),
             Action::Surveillance => tr!("désactivée", "off"),
             _ => texte(self.outil().precision),
         };
@@ -1028,7 +1010,7 @@ async fn executer(s: &mut Session, action: Action) {
             rapport::ouvrir(s.audit.as_ref(), s.reseau.as_ref());
         }
         Action::Audit => s.audit = Some(machine::executer(false)),
-        Action::Integrite => integrite::verifier(false),
+        Action::Integrite => protection::integrite::verifier(false),
         Action::Appris => apprentissage::menu(),
         Action::Lenteur => lenteur::menu(),
         Action::Fiche => fiche::fiche(false),
@@ -1055,29 +1037,29 @@ async fn executer(s: &mut Session, action: Action) {
             ));
             nommer(&qui, &surnom);
         }
-        Action::Surveillance => surveillance::activer(!surveillance::active()),
-        Action::Connexion => connexion::tester().await,
-        Action::ListesNoires => listes_noires::verifier(),
-        Action::WifiCanaux => canaux::analyser(),
-        Action::Nat => nat::tester(),
-        Action::Cameras => cameras::chercher_cameras().await,
-        Action::AntivirusRapide => antivirus::analyser(antivirus::Portee::Rapide),
-        Action::AntivirusComplet => antivirus::analyser(antivirus::Portee::Complete),
-        Action::AntivirusDossier => antivirus::choisir(),
-        Action::Yara => yara::menu(),
-        Action::Pieges => pieges::menu(),
+        Action::Surveillance => reseau::surveillance::activer(!reseau::surveillance::active()),
+        Action::Connexion => reseau::connexion::tester().await,
+        Action::ListesNoires => reseau::listes_noires::verifier(),
+        Action::WifiCanaux => reseau::canaux::analyser(),
+        Action::Nat => reseau::nat::tester(),
+        Action::Cameras => reseau::cameras::chercher_cameras().await,
+        Action::AntivirusRapide => protection::antivirus::analyser(protection::antivirus::Portee::Rapide),
+        Action::AntivirusComplet => protection::antivirus::analyser(protection::antivirus::Portee::Complete),
+        Action::AntivirusDossier => protection::antivirus::choisir(),
+        Action::Yara => protection::yara::menu(),
+        Action::Pieges => protection::pieges::menu(),
         Action::Bac => {
             let chemin = demander(tr!("  Programme à isoler (chemin) : ", "  Program to isolate (path): "));
             let chemin = chemin.trim().trim_matches(['"', '\'']);
             if !chemin.is_empty() {
-                isoler::isoler(std::path::Path::new(chemin));
+                protection::isoler::isoler(std::path::Path::new(chemin));
             }
         }
-        Action::MotsDePasse => fuites::verifier(),
-        Action::Courriel => fuites::verifier_courriel(),
-        Action::QuiParle => sortantes::afficher(),
-        Action::Lien => lien::verifier(None),
-        Action::VerifierFichier => telechargement::verifier(None, None),
+        Action::MotsDePasse => protection::fuites::verifier(),
+        Action::Courriel => protection::fuites::verifier_courriel(),
+        Action::QuiParle => protection::sortantes::afficher(),
+        Action::Lien => protection::lien::verifier(None),
+        Action::VerifierFichier => protection::telechargement::verifier(None, None),
         Action::Logiciels => logiciels::menu(),
         Action::Gaming => gaming::menu(),
         Action::Nettoyer => nettoyer::menu(),
@@ -1209,11 +1191,11 @@ fn ligne_de_commande() -> clap::Command {
 
 /// La portée d'une analyse demandée en ligne de commande : le dossier donné, sinon tout le dossier personnel
 /// (--complet), sinon les endroits à risque.
-fn portee(dossier: Option<std::path::PathBuf>, complet: bool) -> antivirus::Portee {
+fn portee(dossier: Option<std::path::PathBuf>, complet: bool) -> protection::antivirus::Portee {
     match (dossier, complet) {
-        (Some(d), _) => antivirus::Portee::Dossier(d),
-        (None, true) => antivirus::Portee::Complete,
-        (None, false) => antivirus::Portee::Rapide,
+        (Some(d), _) => protection::antivirus::Portee::Dossier(d),
+        (None, true) => protection::antivirus::Portee::Complete,
+        (None, false) => protection::antivirus::Portee::Rapide,
     }
 }
 
@@ -1224,7 +1206,7 @@ async fn main() {
     let _ = enable_ansi_support::enable_ansi_support();
     journal::installer();
     #[cfg(unix)]
-    protection::proteger_cle();
+    protection::cle::proteger_cle();
     let args = Args::from_arg_matches(&ligne_de_commande().get_matches()).unwrap_or_else(|e| e.exit());
     match args.commande {
         None => menu().await,
@@ -1263,9 +1245,9 @@ async fn main() {
                 std::process::exit(1);
             }
         }
-        Some(Commande::Antivirus { complet, dossier }) => antivirus::analyser(portee(dossier, complet)),
-        Some(Commande::Surveillance { etat }) => surveillance::activer(etat == "on"),
-        Some(Commande::Surveiller) => surveillance::surveiller().await,
+        Some(Commande::Antivirus { complet, dossier }) => protection::antivirus::analyser(portee(dossier, complet)),
+        Some(Commande::Surveillance { etat }) => reseau::surveillance::activer(etat == "on"),
+        Some(Commande::Surveiller) => reseau::surveillance::surveiller().await,
         Some(Commande::Entretien { etat }) => match etat {
             Some(e) => entretien::activer(e == "on"),
             None => entretien::maintenant(),
@@ -1281,7 +1263,7 @@ async fn main() {
                 nettoyer::menu();
             }
         }
-        Some(Commande::Connexion) => connexion::tester().await,
+        Some(Commande::Connexion) => reseau::connexion::tester().await,
         Some(Commande::Diagnostic) => diagnostic::diagnostic(),
         Some(Commande::Logiciels { liste, recommandes }) => {
             if liste {
@@ -1292,27 +1274,27 @@ async fn main() {
                 logiciels::menu();
             }
         }
-        Some(Commande::MotDePasse) => fuites::verifier(),
-        Some(Commande::Courriel) => fuites::verifier_courriel(),
-        Some(Commande::Sortantes) => sortantes::afficher(),
-        Some(Commande::Lien { adresse }) => lien::verifier(Some(&adresse)),
+        Some(Commande::MotDePasse) => protection::fuites::verifier(),
+        Some(Commande::Courriel) => protection::fuites::verifier_courriel(),
+        Some(Commande::Sortantes) => protection::sortantes::afficher(),
+        Some(Commande::Lien { adresse }) => protection::lien::verifier(Some(&adresse)),
         Some(Commande::VerifierFichier { fichier, empreinte }) => {
-            telechargement::verifier(Some(&fichier), empreinte.as_deref());
+            protection::telechargement::verifier(Some(&fichier), empreinte.as_deref());
         }
-        Some(Commande::Isoler { fichier }) => isoler::isoler(&fichier),
-        Some(Commande::Pieges { retirer }) => pieges::commande(retirer),
-        Some(Commande::Yara { complet, dossier }) => yara::analyser(&portee(dossier, complet)),
-        Some(Commande::ListesNoires) => listes_noires::verifier(),
-        Some(Commande::Canaux) => canaux::analyser(),
-        Some(Commande::Nat) => nat::tester(),
-        Some(Commande::Cameras) => cameras::chercher_cameras().await,
+        Some(Commande::Isoler { fichier }) => protection::isoler::isoler(&fichier),
+        Some(Commande::Pieges { retirer }) => protection::pieges::commande(retirer),
+        Some(Commande::Yara { complet, dossier }) => protection::yara::analyser(&portee(dossier, complet)),
+        Some(Commande::ListesNoires) => reseau::listes_noires::verifier(),
+        Some(Commande::Canaux) => reseau::canaux::analyser(),
+        Some(Commande::Nat) => reseau::nat::tester(),
+        Some(Commande::Cameras) => reseau::cameras::chercher_cameras().await,
         Some(Commande::DnsRapide) => dns_rapide::mesurer_et_proposer(),
         Some(Commande::Appris) => apprentissage::menu(),
         Some(Commande::Integrite { accepter, temps_reel }) => {
             if temps_reel {
-                integrite::temps_reel();
+                protection::integrite::temps_reel();
             } else {
-                integrite::verifier(accepter);
+                protection::integrite::verifier(accepter);
             }
         }
         Some(Commande::Sauvegarder { fichier }) => donnees::sauvegarder(fichier),

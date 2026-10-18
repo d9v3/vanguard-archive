@@ -9,9 +9,9 @@ use std::hash::{BuildHasher, Hasher};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, ToSocketAddrs, UdpSocket};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use crate::reseau::upnp::Etat;
 use crate::risk::Niveau;
 use crate::ui::*;
-use crate::upnp::Etat;
 
 /// Valeur fixe des messages STUN (« magic cookie »), qui masque aussi les adresses rendues.
 const MAGIC: u32 = 0x2112_A442;
@@ -294,7 +294,7 @@ pub fn tester() {
         afficher_aligne("  ✖ ", muet, 4, "");
         return;
     };
-    let (upnp, box_internet) = crate::upnp::etat_et_adresse();
+    let (upnp, box_internet) = crate::reseau::upnp::etat_et_adresse();
     let (upnp_actif, etat_upnp) = match upnp {
         Etat::Actif(_) => (Some(true), tr!("actif", "on")),
         Etat::Absent => (Some(false), tr!("coupé ou absent", "off or absent")),

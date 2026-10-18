@@ -23,28 +23,29 @@ modification. Sur GitHub, `@claude` dans un ticket ou une demande de fusion le f
 | `src/machine/dns.rs`, `certificats.rs`, `extensions.rs`, `sante.rs`, `wifi.rs` | vérifications communes aux trois systèmes |
 | `src/machine/unix.rs` | vérifications communes à Linux et macOS : fichiers secrets, sudo |
 | `src/corriger.rs` | application guidée des correctifs |
-| `src/reseau.rs`, `src/scan.rs` | scan réseau (TCP connect, sans root), ARP, carnets des réseaux |
+| `src/reseau/mod.rs`, `src/reseau/scan.rs` | scan réseau (TCP connect, sans root), ARP, carnets des réseaux |
 | `src/risk.rs` | base de connaissances des ports et niveaux de risque |
-| `src/connexion.rs` | test de connexion pour le jeu |
-| `src/antivirus.rs` | ClamAV / Defender, quarantaine |
-| `src/yara.rs`, `src/pieges.rs` | analyse YARA (règles intégrées, moteur du système) ; fichiers-pièges contre les rançongiciels |
-| `src/surveillance.rs` | minuterie systemd / Planificateur de tâches / agent launchd, notifications |
+| `src/reseau/connexion.rs` | test de connexion pour le jeu |
+| `src/protection/antivirus.rs` | ClamAV / Defender, quarantaine |
+| `src/protection/yara.rs`, `src/protection/pieges.rs` | analyse YARA (règles intégrées, moteur du système) ; fichiers-pièges contre les rançongiciels |
+| `src/reseau/surveillance.rs` | minuterie systemd / Planificateur de tâches / agent launchd, notifications |
 | `src/rapport.rs`, `src/historique.rs` | rapport HTML, historique des bilans, courbe des notes |
 | `src/reparer.rs`, `src/maj.rs`, `src/gaming/` | réparations, mises à jour, gaming |
 | `src/optimiser/` | réglages de confidentialité, de performance et de confort, avec annulation exacte ; programmes au démarrage (`demarrage.rs`) |
 | `src/nettoyer/` | nettoyage : éléments par système, place mesurée avant et après |
 | `src/logiciels/` | logiciels à installer : catalogue vérifié (`catalogue.rs`), état et installation par système |
-| `src/fuites.rs`, `src/donnees.rs` | mots de passe fuités, sauvegarde des données |
+| `src/protection/fuites.rs`, `src/donnees.rs` | mots de passe fuités, sauvegarde des données |
+| `src/protection/cle.rs` | protection de la clé USB sous Linux et macOS : partition remontée en lecture seule hors de l'ordinateur du propriétaire |
 | `src/guide/` | guide des commandes : un fichier par système (`linux.rs`, `windows.rs`, `macos.rs`, `tous.rs`), menus et recherche (`mod.rs`) |
 | `src/apprentissage.rs` | ce que Gardien apprend ici : alertes déclarées normales (appris.json), habitudes |
-| `src/listes_noires.rs` | adresse Internet de la maison dans les listes noires (DNSBL), après accord |
+| `src/reseau/listes_noires.rs` | adresse Internet de la maison dans les listes noires (DNSBL), après accord |
 | `src/entretien.rs` | entretien du mois : note, mises à jour, place, problèmes nouveaux, en une notification |
-| `src/sortantes.rs` | qui parle à Internet : connexions établies par programme (ss, PowerShell, lsof), DNS inverse |
-| `src/lien.rs` | ce lien est-il dangereux ? examen local (punycode, marques imitées…), puis RDAP, URLhaus, Spamhaus DBL, SURBL |
-| `src/telechargement.rs` | vérifier un fichier téléchargé : empreinte par l'outil du système, nom et contenu, YARA et antivirus |
-| `src/canaux.rs`, `src/nat.rs` | Wi-Fi encombré (réseaux voisins par canal) ; type de NAT (client STUN maison) |
+| `src/protection/sortantes.rs` | qui parle à Internet : connexions établies par programme (ss, PowerShell, lsof), DNS inverse |
+| `src/protection/lien.rs` | ce lien est-il dangereux ? examen local (punycode, marques imitées…), puis RDAP, URLhaus, Spamhaus DBL, SURBL |
+| `src/protection/telechargement.rs` | vérifier un fichier téléchargé : empreinte par l'outil du système, nom et contenu, YARA et antivirus |
+| `src/reseau/canaux.rs`, `src/reseau/nat.rs` | Wi-Fi encombré (réseaux voisins par canal) ; type de NAT (client STUN maison) |
 | `src/dns_rapide.rs` | DNS le plus rapide : mesure, DNS qui protège gardé, réglage annulable par `optimiser/` |
-| `src/cameras.rs` | caméras cachées : fabricant, flux RTSP, recherche ONVIF (WS-Discovery), page web |
+| `src/reseau/cameras.rs` | caméras cachées : fabricant, flux RTSP, recherche ONVIF (WS-Discovery), page web |
 | `src/depanner/` | dépanner pas à pas : les parcours (`mod.rs`), réseau et Wi-Fi (`reseau.rs`), son (`son.rs`), imprimante (`imprimante.rs`) |
 | `src/lenteur.rs`, `src/fiche.rs` | pourquoi c'est lent (instantané en deux mesures, démarrage) ; fiche de l'ordinateur |
 | `src/copier.rs` | copier mes fichiers vers un disque externe : copie vérifiée (BLAKE3), reprise, jamais d'écrasement |

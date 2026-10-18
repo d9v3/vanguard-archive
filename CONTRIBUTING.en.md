@@ -23,28 +23,29 @@ turn on once with `/install-github-app`).
 | `src/machine/dns.rs`, `certificats.rs`, `extensions.rs`, `sante.rs`, `wifi.rs` | checks shared by the three systems |
 | `src/machine/unix.rs` | checks shared by Linux and macOS: secret files, sudo |
 | `src/corriger.rs` | guided application of fixes |
-| `src/reseau.rs`, `src/scan.rs` | network scan (TCP connect, without root), ARP, network notebooks |
+| `src/reseau/mod.rs`, `src/reseau/scan.rs` | network scan (TCP connect, without root), ARP, network notebooks |
 | `src/risk.rs` | knowledge base of ports and risk levels |
-| `src/connexion.rs` | connection test for gaming |
-| `src/antivirus.rs` | ClamAV / Defender, quarantine |
-| `src/yara.rs`, `src/pieges.rs` | YARA scan (bundled rules, system engine); decoy files against ransomware |
-| `src/surveillance.rs` | systemd timer / Task Scheduler / launchd agent, notifications |
+| `src/reseau/connexion.rs` | connection test for gaming |
+| `src/protection/antivirus.rs` | ClamAV / Defender, quarantine |
+| `src/protection/yara.rs`, `src/protection/pieges.rs` | YARA scan (bundled rules, system engine); decoy files against ransomware |
+| `src/reseau/surveillance.rs` | systemd timer / Task Scheduler / launchd agent, notifications |
 | `src/rapport.rs`, `src/historique.rs` | HTML report, check history, grade curve |
 | `src/reparer.rs`, `src/maj.rs`, `src/gaming/` | repairs, updates, gaming |
 | `src/optimiser/` | privacy, performance and comfort settings, with exact undo; startup programs (`demarrage.rs`) |
 | `src/nettoyer/` | cleanup: items per system, space measured before and after |
 | `src/logiciels/` | software to install: checked catalog (`catalogue.rs`), state and installation per system |
-| `src/fuites.rs`, `src/donnees.rs` | leaked passwords, data backup |
+| `src/protection/fuites.rs`, `src/donnees.rs` | leaked passwords, data backup |
+| `src/protection/cle.rs` | USB drive protection on Linux and macOS: partition remounted read-only away from the owner's computer |
 | `src/guide/` | command guide: one file per system (`linux.rs`, `windows.rs`, `macos.rs`, `tous.rs`), menus and search (`mod.rs`) |
 | `src/apprentissage.rs` | what Gardien learns here: alerts declared normal (appris.json), habits |
-| `src/listes_noires.rs` | the home's Internet address in blocklists (DNSBL), after consent |
+| `src/reseau/listes_noires.rs` | the home's Internet address in blocklists (DNSBL), after consent |
 | `src/entretien.rs` | monthly check-up: grade, updates, space, new problems, in one notification |
-| `src/sortantes.rs` | who talks to the Internet: established connections by program (ss, PowerShell, lsof), reverse DNS |
-| `src/lien.rs` | is this link dangerous? local check (punycode, imitated brands…), then RDAP, URLhaus, Spamhaus DBL, SURBL |
-| `src/telechargement.rs` | check a downloaded file: checksum by the system's tool, name and content, YARA and antivirus |
-| `src/canaux.rs`, `src/nat.rs` | crowded Wi-Fi (nearby networks by channel); NAT type (home-made STUN client) |
+| `src/protection/sortantes.rs` | who talks to the Internet: established connections by program (ss, PowerShell, lsof), reverse DNS |
+| `src/protection/lien.rs` | is this link dangerous? local check (punycode, imitated brands…), then RDAP, URLhaus, Spamhaus DBL, SURBL |
+| `src/protection/telechargement.rs` | check a downloaded file: checksum by the system's tool, name and content, YARA and antivirus |
+| `src/reseau/canaux.rs`, `src/reseau/nat.rs` | crowded Wi-Fi (nearby networks by channel); NAT type (home-made STUN client) |
 | `src/dns_rapide.rs` | fastest DNS: measurement, protecting DNS kept, setting undone through `optimiser/` |
-| `src/cameras.rs` | hidden cameras: maker, RTSP stream, ONVIF discovery (WS-Discovery), web page |
+| `src/reseau/cameras.rs` | hidden cameras: maker, RTSP stream, ONVIF discovery (WS-Discovery), web page |
 | `src/depanner/` | troubleshoot step by step: the paths (`mod.rs`), network and Wi-Fi (`reseau.rs`), sound (`son.rs`), printer (`imprimante.rs`) |
 | `src/lenteur.rs`, `src/fiche.rs` | why it is slow (two-sample snapshot, startup); computer specs |
 | `src/copier.rs` | copy my files to an external disk: checked copy (BLAKE3), resume, never overwrites |

@@ -701,7 +701,7 @@ mod tests {
         assert!(base::PREFIXES_7.windows(2).all(|w| w[0] < w[1]));
         assert!(base::PREFIXES_9.windows(2).all(|w| w[0] < w[1]));
         let total = base::PREFIXES_6.len() + base::PREFIXES_7.len() + base::PREFIXES_9.len();
-        let lignes = include_str!("../assets/oui.tsv")
+        let lignes = include_str!("../../assets/oui.tsv")
             .lines()
             .filter(|l| l.contains('\t'))
             .count();

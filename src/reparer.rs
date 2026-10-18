@@ -835,7 +835,11 @@ pub fn liste() -> Vec<Reparation> {
         &[],
     );
     match freshclam {
-        Some(f) => av.commandes = vec![crate::antivirus::commande_freshclam(&f.display().to_string())],
+        Some(f) => {
+            av.commandes = vec![crate::protection::antivirus::commande_freshclam(
+                &f.display().to_string(),
+            )];
+        }
         None => {
             av.inutile = Some(
                 tr!(

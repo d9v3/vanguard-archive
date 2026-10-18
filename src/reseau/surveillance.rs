@@ -25,7 +25,7 @@ pub(crate) fn executable() -> String {
     // Sous Linux et macOS, le programme peut tourner depuis une copie temporaire (protection de la clé), effacée
     // à la fin.
     #[cfg(unix)]
-    let exe = crate::protection::exe_d_origine();
+    let exe = crate::protection::cle::exe_d_origine();
     #[cfg(windows)]
     let exe = std::env::current_exe().ok();
     let Some(exe) = exe else {
@@ -263,7 +263,7 @@ fn veiller_passerelle(r: &reseau::Rapport) {
 
 pub async fn surveiller() {
     veiller_machine();
-    if let Some(fichiers) = crate::integrite::changements_a_signaler() {
+    if let Some(fichiers) = crate::protection::integrite::changements_a_signaler() {
         notifier(
             tr!(
                 "Gardien : fichiers critiques modifiés",

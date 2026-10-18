@@ -391,7 +391,7 @@ pub fn temps_reel() {
                 couleur(Niveau::Eleve),
                 ajuster(etat, 10)
             );
-            crate::surveillance::notifier(
+            crate::reseau::surveillance::notifier(
                 &trf!("Gardien : fichier critique {etat}", "Gardien: critical file {etat}"),
                 &cle,
             );

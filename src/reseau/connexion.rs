@@ -198,8 +198,8 @@ pub struct Resultat {
 
 /// Le réseau où l'on est : adresse MAC de la box (la table ARP la connaît, le test vient de la joindre).
 fn reseau_actuel() -> Option<String> {
-    let box_ = crate::scan::passerelle()?;
-    crate::scan::table_arp().get(&box_).cloned()
+    let box_ = crate::reseau::scan::passerelle()?;
+    crate::reseau::scan::table_arp().get(&box_).cloned()
 }
 
 /// Habitudes du réseau où l'on est (pour « Ce que Gardien a appris »).
@@ -424,7 +424,7 @@ pub async fn tester() {
         "  {DISCRET}The speed test downloads and uploads a few hundred MB at most.{RESET}"
     );
     section(tr!("AU REPOS", "AT REST"));
-    let boite = match crate::scan::passerelle() {
+    let boite = match crate::reseau::scan::passerelle() {
         Some(ip) => port_de_la_box(ip).await,
         None => None,
     };

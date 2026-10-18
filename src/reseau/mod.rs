@@ -1,5 +1,15 @@
 //! Scan du réseau : machines, ports ouverts, risques, et comparaison avec les scans précédents.
 
+// Les outils du groupe « Réseau et Internet » du menu.
+pub mod cameras;
+pub mod canaux;
+pub mod connexion;
+pub mod listes_noires;
+pub mod nat;
+pub mod scan;
+pub mod surveillance;
+pub mod upnp;
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::Ipv4Addr;
 use std::path::PathBuf;
@@ -9,7 +19,6 @@ use futures::future::join_all;
 use serde::{Deserialize, Serialize};
 
 use crate::risk::{Niveau, PORTS_COURANTS, PORTS_UDP, identifier, info_port, info_udp, note};
-use crate::scan;
 use crate::ui::*;
 
 pub struct Options {
@@ -125,7 +134,7 @@ pub struct Rapport {
     pub hotes: Vec<Hote>,
     /// Redirections UPnP de la box (scan du réseau local seulement).
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub upnp: Option<crate::upnp::Etat>,
+    pub upnp: Option<crate::reseau::upnp::Etat>,
 }
 
 /// Délai par port de la revérification d'un appareil en veille (ms) : trois fois celui d'un scan.
@@ -514,7 +523,7 @@ fn cle_du_programme() -> Option<PathBuf> {
     // Sous Linux et macOS, le programme peut tourner depuis une copie temporaire (protection de la clé) : on part
     // du programme d'origine.
     #[cfg(unix)]
-    let exe = crate::protection::exe_d_origine();
+    let exe = crate::protection::cle::exe_d_origine();
     #[cfg(windows)]
     let exe = std::env::current_exe().ok().and_then(|e| e.canonicalize().ok());
     exe.iter()
@@ -949,7 +958,7 @@ fn afficher(r: &Rapport) {
     }
 
     if let Some(e) = &r.upnp {
-        crate::upnp::afficher(e);
+        crate::reseau::upnp::afficher(e);
     }
 
     if !r.absents.is_empty() {
@@ -1230,7 +1239,7 @@ pub async fn executer(o: Options) -> Result<Rapport, String> {
         score_global,
         note: note(score_global),
         hotes,
-        upnp: reseau_local.then(crate::upnp::etat),
+        upnp: reseau_local.then(crate::reseau::upnp::etat),
     };
 
     if o.json {

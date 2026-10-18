@@ -1318,7 +1318,7 @@ pub fn auditer() -> Audit {
             verif!(sudo_sans_mot_de_passe()),
             verif!(paquets_aur()),
             verif!([comptes()]),
-            verif!(wifi(crate::scan::passerelle().map(|g| g.to_string()))),
+            verif!(wifi(crate::reseau::scan::passerelle().map(|g| g.to_string()))),
             verif!([services_en_echec()]),
         ],
     )

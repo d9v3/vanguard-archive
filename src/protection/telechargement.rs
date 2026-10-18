@@ -5,7 +5,7 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::antivirus::Examen;
+use crate::protection::antivirus::Examen;
 use crate::risk::Niveau;
 use crate::ui::*;
 
@@ -477,8 +477,8 @@ pub fn verifier(fichier: Option<&Path>, empreinte: Option<&str>) {
     let antivirus = if cfg!(windows) { "Defender" } else { "ClamAV" };
     let mut detecte = false;
     for (moteur, examen) in [
-        ("YARA", crate::yara::examiner(&chemin)),
-        (antivirus, crate::antivirus::examiner(&chemin)),
+        ("YARA", crate::protection::yara::examiner(&chemin)),
+        (antivirus, crate::protection::antivirus::examiner(&chemin)),
     ] {
         match examen {
             Examen::Sain => ligne(None, &trf!("{moteur} : rien trouvé.", "{moteur}: nothing found.")),
@@ -627,7 +627,7 @@ mod tests {
 
     #[test]
     fn empreinte_posee_a_cote() {
-        let dossier = crate::isoler::dossier_jetable().unwrap();
+        let dossier = crate::protection::isoler::dossier_jetable().unwrap();
         let fichier = dossier.join("outil.zip");
         std::fs::write(&fichier, b"test").unwrap();
         assert_eq!(empreinte_a_cote(&fichier), None);

@@ -63,7 +63,7 @@ table{width:100%;border-collapse:collapse;margin-top:8px;font-size:14px}td{paddi
 ";
 
 /// Les 5 derniers tests de connexion, le plus récent en haut ; vide s'il n'y en a pas.
-fn connexions(tests: &[crate::connexion::Resultat]) -> String {
+fn connexions(tests: &[crate::reseau::connexion::Resultat]) -> String {
     if tests.is_empty() {
         return String::new();
     }
@@ -75,7 +75,7 @@ fn connexions(tests: &[crate::connexion::Resultat]) -> String {
     for t in tests.iter().rev().take(5) {
         let bufferbloat = t.hausse_ms.map_or_else(
             || "?".to_string(),
-            |m| format!("{} (+{m:.0} ms)", crate::connexion::note_bufferbloat(m).0),
+            |m| format!("{} (+{m:.0} ms)", crate::reseau::connexion::note_bufferbloat(m).0),
         );
         let _ = write!(
             h,
@@ -231,7 +231,7 @@ fn html(audit: Option<&Audit>, reseau: Option<&Rapport>) -> String {
         );
     }
 
-    h += &connexions(&crate::connexion::historique());
+    h += &connexions(&crate::reseau::connexion::historique());
 
     if let Some(a) = audit {
         h += tr!(
@@ -424,7 +424,7 @@ mod tests {
     #[test]
     fn tests_de_connexion_dans_le_rapport() {
         assert_eq!(connexions(&[]), "");
-        let r = crate::connexion::Resultat {
+        let r = crate::reseau::connexion::Resultat {
             date: "2026-10-17 15:00".into(),
             internet_ms: 17.2,
             gigue_ms: 3.4,

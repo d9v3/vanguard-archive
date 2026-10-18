@@ -595,7 +595,7 @@ fn wifi() -> Vec<Constat> {
     } else {
         actif.ssid.as_str()
     };
-    let admin = crate::scan::passerelle().map(|g| format!("open http://{g}"));
+    let admin = crate::reseau::scan::passerelle().map(|g| format!("open http://{g}"));
     let admin: Vec<&str> = admin.iter().map(String::as_str).collect();
     let mut constats = vec![super::wifi::securite(nom, &actif.securite, &admin)];
     constats.extend(super::wifi::jumeau(&visibles));

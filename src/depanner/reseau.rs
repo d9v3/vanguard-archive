@@ -119,16 +119,16 @@ fn lire_etat() -> EtatReseau {
             .filter(|i| !i.is_loopback())
             .any(|i| matches!(&i.addr, if_addrs::IfAddr::V4(v4) if v4.ip.is_link_local()))
     };
-    let adresse = match crate::scan::reseau_local() {
+    let adresse = match crate::reseau::scan::reseau_local() {
         Some((_, ip)) => Adresse::Locale(ip),
         None if autoattribuee() => Adresse::Autoattribuee,
         None => Adresse::Aucune,
     };
     let relie = matches!(adresse, Adresse::Locale(_));
-    let passerelle = crate::scan::passerelle();
+    let passerelle = crate::reseau::scan::passerelle();
     let passerelle_repond = passerelle.is_some_and(|box_| {
         let ports: Vec<SocketAddr> = [80, 443, 53].iter().map(|&p| SocketAddr::from((box_, p))).collect();
-        un_seul_suffit(&ports, Duration::from_millis(1500)) || crate::scan::table_arp().contains_key(&box_)
+        un_seul_suffit(&ports, Duration::from_millis(1500)) || crate::reseau::scan::table_arp().contains_key(&box_)
     });
     let serveurs: Vec<SocketAddr> = [[1, 1, 1, 1], [9, 9, 9, 9], [8, 8, 8, 8]]
         .iter()

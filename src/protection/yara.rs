@@ -6,7 +6,7 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use crate::antivirus::{Examen, Portee};
+use crate::protection::antivirus::{Examen, Portee};
 use crate::ui::*;
 
 const REGLES: &str = include_str!(concat!(env!("OUT_DIR"), "/reversinglabs.yara"));
@@ -101,7 +101,7 @@ fn endroits_a_risque() -> Vec<PathBuf> {
         .flatten(),
     );
     #[cfg(unix)]
-    let liste: Vec<PathBuf> = crate::antivirus::ENDROITS_A_RISQUE
+    let liste: Vec<PathBuf> = crate::protection::antivirus::ENDROITS_A_RISQUE
         .iter()
         .map(|d| maison.join(d))
         .collect();
@@ -153,7 +153,7 @@ fn famille(regle: &str) -> &'static str {
 fn appliquer(cibles: &[PathBuf]) -> Option<(Vec<Trouve>, Vec<String>)> {
     let moteur = moteur().or_else(|| installer().then(moteur).flatten())?;
     // Les règles sont écrites dans un dossier jetable réservé à l'utilisateur, puis effacées.
-    let Ok(dossier) = crate::isoler::dossier_jetable() else {
+    let Ok(dossier) = crate::protection::isoler::dossier_jetable() else {
         trp!(
             "  ✖ Dossier temporaire impossible à créer.",
             "  ✖ Could not create a temporary folder."
@@ -304,7 +304,7 @@ mod tests {
         assert_eq!(regles, 308, "le message « 308 règles » doit suivre outils/maj-yara.sh");
     }
 
-    const ORIGINE: &str = include_str!("../assets/yara/reversinglabs.yara");
+    const ORIGINE: &str = include_str!("../../assets/yara/reversinglabs.yara");
 
     /// Les noms des règles, dans l'ordre : chaque déclaration commence une ligne (« rule » paraît aussi dans les
     /// descriptions d'origine, « Yara rule that detects… »).

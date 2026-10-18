@@ -5,12 +5,12 @@
 
 use std::sync::atomic::{AtomicU8, Ordering};
 
-use crate::risk::Niveau;
 #[cfg(target_os = "macos")]
-use crate::surveillance::domaine_launchd;
+use crate::reseau::surveillance::domaine_launchd;
 #[cfg(unix)]
-use crate::surveillance::reussit;
-use crate::surveillance::{cle_alerte, executable};
+use crate::reseau::surveillance::reussit;
+use crate::reseau::surveillance::{cle_alerte, executable};
+use crate::risk::Niveau;
 use crate::ui::*;
 
 #[cfg(target_os = "linux")]
@@ -143,7 +143,7 @@ pub fn entretenir() {
     let avant = lire_etat();
     let nouvelles = avant.as_ref().map(|a| nouvelles(&a.alertes, &examen.alertes));
     let (titre, lignes) = rediger(&examen, nouvelles.as_deref());
-    crate::surveillance::notifier(titre, &lignes.join("\n"));
+    crate::reseau::surveillance::notifier(titre, &lignes.join("\n"));
     let etat = Etat {
         date: chrono::Local::now().format("%Y-%m-%d").to_string(),
         score: examen.score,
@@ -208,7 +208,7 @@ pub fn active() -> bool {
         #[cfg(target_os = "macos")]
         let installe = reussit("launchctl", &["print", &format!("{}/{AGENT_MACOS}", domaine_launchd())]);
         #[cfg(windows)]
-        let installe = crate::surveillance::tache_existe(&[TACHE_WINDOWS]);
+        let installe = crate::reseau::surveillance::tache_existe(&[TACHE_WINDOWS]);
         ETAT.store(1 + u8::from(installe), Ordering::Relaxed);
     }
     ETAT.load(Ordering::Relaxed) == 2

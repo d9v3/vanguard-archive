@@ -185,8 +185,8 @@ fn audit(systeme: &'static str, premier: Constat, mut propres: Vec<Verification<
         verif!(navigateur::navigateurs()),
         verif!(sante::sante()),
         verif!(journaux::journaux()),
-        verif!([crate::integrite::constat()]),
-        verif!(crate::pieges::constat()),
+        verif!([crate::protection::integrite::constat()]),
+        verif!(crate::protection::pieges::constat()),
     ]);
     let mut constats = vec![premier];
     constats.extend(en_parallele(propres));

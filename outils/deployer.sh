@@ -233,7 +233,7 @@ for ancien in sentinel netscan; do
 done
 rm -f "$CLE/Lancer Sentinel.bat" "$CLE/Lancer Sentinel.command"
 # Empreinte de cet ordinateur (SHA-1 de /etc/machine-id) : partout ailleurs, Gardien remonte la clé en lecture seule
-# sous Linux (src/protection.rs).
+# sous Linux (src/protection/cle.rs).
 printf '%s' "$(cat /etc/machine-id)" | sha1sum | cut -d' ' -f1 >"$CLE/gardien.cle"
 cp -f "$LINUX" "$CLE/Linux/gardien"
 [[ -f $WINDOWS ]] && cp -f "$WINDOWS" "$CLE/Windows/gardien.exe"

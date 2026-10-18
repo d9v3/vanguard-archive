@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Règles YARA de ReversingLabs (licence MIT), rassemblées dans assets/yara/reversinglabs.yara et intégrées au
-# programme (src/yara.rs). Familles gardées : rançongiciels, voleurs de mots de passe, chevaux de Troie, portes
-# dérobées, téléchargeurs, exploits, rootkits, virus. « certificate » (empreintes de certificats volés) et « pua »
-# (logiciels seulement indésirables) restent dehors : beaucoup de bruit pour un ordinateur personnel.
+# programme (src/protection/yara.rs). Familles gardées : rançongiciels, voleurs de mots de passe, chevaux de Troie,
+# portes dérobées, téléchargeurs, exploits, rootkits, virus. « certificate » (empreintes de certificats volés) et
+# « pua » (logiciels seulement indésirables) restent dehors : beaucoup de bruit pour un ordinateur personnel.
 #   outils/maj-yara.sh [commit]     (par défaut : le dernier de la branche develop)
 set -euo pipefail
 cd "$(dirname "$0")/.."
