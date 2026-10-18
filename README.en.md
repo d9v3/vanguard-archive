@@ -29,6 +29,8 @@
 — or the whole [releases page](../../releases/latest), with the SHA-256 checksums.
 
 - **Windows**: double-click the program. It is not signed: SmartScreen may warn (“More info”, then “Run anyway”).
+  Microsoft Defender sometimes mistakes it for a virus (“Trojan:Win32/Bearfoos.A!ml”, an automatic detection of
+  a new program): it is a false positive; check the SHA-256 checksum on the release page.
 - **Linux**: `chmod +x gardien-linux-x86_64`, then `./gardien-linux-x86_64` in a terminal (any distribution, nothing
   to install).
 - **macOS**: copied from the Internet, the program is blocked the first time: `xattr -d com.apple.quarantine
@@ -41,39 +43,23 @@ In the menu, choose **1** (full check), then **2** (fix). Arrows, Enter, and Esc
 > Gardien was called Sentinel up to version 0.50: the `sentinel` command still starts Gardien, and its data,
 > monitoring and key are carried over as they are.
 
-## In pictures
-
-<table>
-  <tr>
-    <td width="50%"><img src="assets/captures/menu-en.png" alt="Gardien's menu"><br><sub>The menu: last check,
-    connection, key plugged in.</sub></td>
-    <td width="50%"><img src="assets/captures/rapport-en.png" alt="Gardien's HTML report"><br><sub>The HTML report and
-    the grade history.</sub></td>
-  </tr>
-  <tr>
-    <td width="50%"><img src="assets/captures/reseau-en.png" alt="Local network scan"><br><sub>The network: every
-    device, its ports and what deserves a look.</sub></td>
-    <td width="50%"><img src="assets/captures/connexion-en.png" alt="Connection test for gaming"><br><sub>The
-    connection for gaming: ping, jitter, speed, bufferbloat.</sub></td>
-  </tr>
-</table>
-
-<sub>Screenshots retaken at each version, on a copy of the data; the home's addresses and names are masked.</sub>
-
-## Supported systems
-
-| System | Versions |
-|---|---|
-| Windows | 10 and 11 |
-| macOS | 12 and later, Apple Silicon and Intel (tested on GitHub's Macs, not yet on a real Mac) |
-| Linux | Arch and derivatives (Omarchy, Manjaro, EndeavourOS, CachyOS), Debian, Ubuntu, Mint, Pop!_OS, Fedora (and RHEL, Rocky, Nobara), openSUSE |
-| Atomic Linux | Bazzite, Silverblue, Kinoite, Bluefin, Aeon |
-
-Gardien recognizes the distribution and offers its own commands: `omarchy update` / `omarchy pkg add` on Omarchy,
-`ujust update` on Bazzite, `rpm-ostree` or `transactional-update` on an atomic system, otherwise pacman, apt, dnf or
-zypper.
-
 ## What Gardien does
+
+| Area | What Gardien does |
+|---|---|
+| **Security check** | A grade from A to F: firewall, updates and vulnerabilities, encryption, open ports, accounts, SSH, what starts in secret, Wi-Fi, disk health… Each problem is explained, with its fix. |
+| **Local network** | Every device, its manufacturer, its open ports and its risks; newcomers flagged, ports opened on the router, the home's address on a blocklist. |
+| **Wi-Fi, NAT, DNS, cameras** | The freest Wi-Fi channel, the NAT type for gaming, the fastest DNS (without removing a DNS that protects you), hidden cameras. |
+| **Connection for gaming** | Ping, jitter, loss, speed and bufferbloat, compared with your habits. |
+| **Troubleshoot** | Computer diagnostic, everyday problems step by step (Internet, Wi-Fi, slowness, sound, printer, full disk), “Why is it slow?”, computer specs, repairs. |
+| **Optimize and clean up** | Privacy and performance settings undone exactly, a cleanup checklist with the space gained measured, startup programs. |
+| **Protection** | Decoy files against ransomware, 308 YARA rules, antivirus, sandbox, integrity of critical files, leaked passwords, outbound connections, dangerous links, downloaded files. |
+| **Follow-up** | Hourly monitoring, monthly check-up, HTML report with the grade curve, learning on your computer. |
+| **Software and games** | The best software in 8 categories, from its official source; update everything at once; settings for gaming. |
+| **Tools** | Copy my files (checked copy), command guide, search in every menu. |
+
+<details>
+<summary><b>The details, feature by feature</b></summary>
 
 **Security check** — a grade from A to F, then each problem with its fix.
 - Firewall, open ports (TCP and UDP), updates and known vulnerabilities, disk encryption, Secure Boot, screen lock,
@@ -192,12 +178,49 @@ example), and the guide tells when a program is missing on this computer.
   graphics card, GameMode, MangoHud, Gamescope, Wine, Lutris, Heroic, ProtonUp-Qt, vm.max_map_count, ntsync; on
   macOS, Rosetta 2, Steam, Heroic, Epic Games, GOG Galaxy, Prism Launcher and the Metal frame counter.
 
+</details>
+
 Gardien never cuts a remote connection in use (Remote Desktop, SSH). Only use it on your own network, or a network
 you are allowed to audit.
 
+## In pictures
+
+<table>
+  <tr>
+    <td width="50%"><img src="assets/captures/menu-en.png" alt="Gardien's menu"><br><sub>The menu: last check,
+    connection, key plugged in.</sub></td>
+    <td width="50%"><img src="assets/captures/rapport-en.png" alt="Gardien's HTML report"><br><sub>The HTML report and
+    the grade history.</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="assets/captures/reseau-en.png" alt="Local network scan"><br><sub>The network: every
+    device, its ports and what deserves a look.</sub></td>
+    <td width="50%"><img src="assets/captures/connexion-en.png" alt="Connection test for gaming"><br><sub>The
+    connection for gaming: ping, jitter, speed, bufferbloat.</sub></td>
+  </tr>
+</table>
+
+<sub>Screenshots retaken at each version, on a copy of the data; the home's addresses and names are masked.</sub>
+
+## Supported systems
+
+| System | Versions |
+|---|---|
+| Windows | 10 and 11 |
+| macOS | 12 and later, Apple Silicon and Intel (tested on GitHub's Macs, not yet on a real Mac) |
+| Linux | Arch and derivatives (Omarchy, Manjaro, EndeavourOS, CachyOS), Debian, Ubuntu, Mint, Pop!_OS, Fedora (and RHEL, Rocky, Nobara), openSUSE |
+| Atomic Linux | Bazzite, Silverblue, Kinoite, Bluefin, Aeon |
+
+Gardien recognizes the distribution and offers its own commands: `omarchy update` / `omarchy pkg add` on Omarchy,
+`ujust update` on Bazzite, `rpm-ostree` or `transactional-update` on an atomic system, otherwise pacman, apt, dnf or
+zypper.
+
 ## Commands
 
-Each menu entry is also a command:
+Each menu entry is also a command.
+
+<details>
+<summary><b>All the commands</b></summary>
 
 | Command | Purpose |
 |---|---|
@@ -238,6 +261,8 @@ Each menu entry is also a command:
 | `gardien backup [file]`, `gardien restore <file>` | data backup |
 | `gardien gaming` | packages and settings for gaming (Windows and Linux) |
 | `gardien guide [system\|program\|words]` | command guide: a system (`linux`, `windows`, `macos`, `all`), a program (`winget`, `systemctl`…) or words to look for (`dns cache`) |
+
+</details>
 
 **Language**: the system's (English or French). To force it: `GARDIEN_LANG=en` or `GARDIEN_LANG=fr`. The commands
 also keep their French names (`complet`, `machine`, `corriger`, `reseau`, `connexion`, `logiciels`, `diagnostic`,
