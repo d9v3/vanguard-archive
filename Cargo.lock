@@ -375,7 +375,7 @@ dependencies = [
 
 [[package]]
 name = "gardien"
-version = "0.57.2"
+version = "0.57.3"
 dependencies = [
  "blake3",
  "chrono",
