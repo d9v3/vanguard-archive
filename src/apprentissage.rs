@@ -53,8 +53,10 @@ fn enregistrer(appris: &Appris) -> std::io::Result<()> {
 
 /// Une alerte reconnue d'un bilan à l'autre sans ses quantités (« 12 % libres » et « 9 % libres » sont la même). Une
 /// adresse, une heure ou une version (des nombres liés par « . » ou « : ») reste telle quelle : accepter un DNS
-/// réglé vers 10.0.0.5 ne doit jamais faire taire un DNS détourné vers une autre adresse ; un port non plus. Le
-/// message est dans la langue de l'interface : changer de langue fait revenir les alertes acceptées, du bon côté.
+/// réglé vers 10.0.0.5 ne doit jamais faire taire un DNS détourné vers une autre adresse ; un port non plus. Un
+/// nombre collé à un nom (« maj2.desktop », « S-1-5-21-… », « id_ed25519 ») en fait partie et reste aussi :
+/// accepter un programme ne fait pas taire son voisin au numéro près. Le message est dans la langue de l'interface :
+/// changer de langue fait revenir les alertes acceptées, du bon côté.
 fn signature(categorie: &str, message: &str) -> String {
     if categorie == "Ports en écoute" {
         return format!("{categorie} : {message}");
@@ -77,7 +79,12 @@ fn signature(categorie: &str, message: &str) -> String {
             i += 1;
         }
         let bloc: String = lettres[debut..i].iter().collect();
-        if bloc.contains(['.', ':']) {
+        let lie = |c: Option<&char>| c.is_some_and(|c| c.is_alphanumeric() || *c == '_');
+        // Avant : une lettre, « _ », ou un « - » qui suit lui-même une lettre ou un chiffre (« S-1-5 », pas « -60 »).
+        let avant = lie(debut.checked_sub(1).and_then(|j| lettres.get(j)))
+            || (debut >= 2 && lettres[debut - 1] == '-' && lie(lettres.get(debut - 2)));
+        let apres = lettres.get(i).is_some_and(|c| c.is_alphabetic() || *c == '_');
+        if bloc.contains(['.', ':']) || avant || apres {
             sortie.push_str(&bloc);
         } else {
             sortie.push('#');
@@ -336,6 +343,25 @@ mod tests {
         assert_eq!(
             signature("DNS", "Vers 10.0.0.5, 3 fois."),
             "DNS : Vers 10.0.0.5, # fois."
+        );
+    }
+
+    // Un chiffre collé à des lettres fait partie d'un nom (programme, compte, SID) : accepter « maj2.desktop » ne doit
+    // pas faire taire un « maj3.desktop » posé plus tard, ni un autre compte. Les quantités, elles, restent effacées.
+    #[test]
+    fn noms_avec_chiffres_distincts() {
+        assert_ne!(
+            signature("Persistance", "Lancement suspect : ~/.config/autostart/maj2.desktop"),
+            signature("Persistance", "Lancement suspect : ~/.config/autostart/maj3.desktop")
+        );
+        assert_ne!(
+            signature("Comptes", "Compte administrateur inconnu : S-1-5-21-111-222-333-1001."),
+            signature("Comptes", "Compte administrateur inconnu : S-1-5-21-111-222-333-1002.")
+        );
+        assert_eq!(signature("Santé", "x86_64, id_ed25519"), "Santé : x86_64, id_ed25519");
+        assert_eq!(
+            signature("Santé", "Disque : 12 % libres (512 Go), signal -60 dBm, 3 fois."),
+            "Santé : Disque : # % libres (# Go), signal -# dBm, # fois."
         );
     }
 
