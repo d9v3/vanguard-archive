@@ -694,7 +694,7 @@ pub fn cocher(titre: &[String], cases: &[Case]) -> Option<Vec<bool>> {
     };
 
     let aide = trf!(
-        "  {GRIS}↑ ↓ choisir · Espace cocher · R recommandés · Entrée valider · Échap revenir{RESET}",
+        "  {GRIS}↑ ↓ choisir · Espace cocher · R recommandés · Entrée OK · Échap revenir{RESET}",
         "  {GRIS}↑ ↓ select · Space check · R recommended · Enter confirm · Esc back{RESET}"
     );
     let mut en_cours = 0;
@@ -904,6 +904,28 @@ mod tests {
                     );
                 }
             }
+        }
+    }
+
+    /// Chaque ligne d'aide, dans les deux langues, tient dans `LARGEUR` colonnes : lue dans ce fichier, « {echap} »
+    /// remplacé par un mot de dix lettres, plus long que ceux que les menus donnent.
+    #[test]
+    fn lignes_d_aide_dans_la_largeur() {
+        let aides: Vec<&str> = include_str!("selection.rs")
+            .lines()
+            .filter_map(|l| l.trim().strip_prefix("\"  {GRIS}↑ ↓"))
+            .collect();
+        assert!(aides.len() >= 6, "{aides:?}");
+        for aide in aides {
+            let texte = format!(
+                "  ↑ ↓{}",
+                aide.split("{RESET}").next().unwrap().replace("{echap}", "xxxxxxxxxx")
+            );
+            assert!(
+                largeur_affichee(&texte) <= LARGEUR,
+                "{} colonnes : {texte}",
+                largeur_affichee(&texte)
+            );
         }
     }
 }
