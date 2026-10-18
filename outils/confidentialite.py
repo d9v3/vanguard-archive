@@ -384,10 +384,10 @@ COMPTES_COMMUNS = {"public", "default", "default user", "all users", "defaultuse
 # Comptes inventés des tests, et des machines de GitHub (« runner ») : permis dans le dépôt, masqués dans un ticket
 # (quelqu'un peut vraiment s'appeler Alice).
 COMPTES_INVENTES = {"alice", "bob", "zoé", "jean dupont", "moi", "x", "a", "a&b", "root", "runner", "capture", "user",
-                    "utilisateur", "compte", "account", "username", "nom", "name", "test"}
+                    "utilisateur", "compte", "account", "username", "nom", "name", "test", "zoé d'alice"}
 DEBUT_COMPTE_UNIX = re.compile(r"(?:/var/home|/run/media|/home|/Users|/media)/", re.IGNORECASE)
 DEBUT_COMPTE_WINDOWS = re.compile(r"(?<![A-Za-z])[A-Za-z]:(\\\\|\\|/)Users\1", re.IGNORECASE)
-FIN_COMPTE_WINDOWS = set("\\/\"'\n\r\t:;,|<>*?)]")
+FIN_COMPTE_WINDOWS = set("\\/\"\n\r\t:;,|<>*?)]")
 COURRIEL = re.compile(r"(?<![\w.%+-])[\w.%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}(?![\w-])")
 # Adresses qui ne sont celles de personne : exemples, rôles (noreply…), identifiants publics (extension uBlock Origin).
 DOMAINES_EXEMPLES = re.compile(r"(?:^|\.)(?:example\.(?:com|net|org)|exemple\.[a-z]+)$|\.(?:example|invalid|test|"
@@ -419,8 +419,10 @@ def comptes(texte):
     for m in DEBUT_COMPTE_WINDOWS.finditer(texte):
         reste = texte[m.end():]
         fin = next((i for i, c in enumerate(reste) if c in FIN_COMPTE_WINDOWS), len(reste))
-        # Un nom peut avoir des espaces (« Jean Dupont ») : gardées seulement si le chemin continue après.
-        nom = (reste[:fin] if reste[fin:fin + 1] in ("\\", "/") else reste[:fin].split(" ")[0]).rstrip(" .")
+        # Un nom peut avoir des espaces ou une apostrophe (« Jean Dupont », « Zoé d'Alice ») : gardées seulement si le
+        # chemin continue après ; sinon l'apostrophe peut fermer une chaîne (« 'C:\\Users\\bob' »).
+        nom = reste[:fin] if reste[fin:fin + 1] in ("\\", "/") else re.split(r"[ ']", reste[:fin])[0]
+        nom = nom.rstrip(" .")
         yield m.end(), m.end() + len(nom), nom
 
 

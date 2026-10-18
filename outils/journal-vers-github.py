@@ -45,6 +45,13 @@ def signature(entree):
     return contexte, detail, hashlib.sha1(stable.encode()).hexdigest()[:12]
 
 
+def bloc(texte):
+    """Le texte dans un bloc de code Markdown, dont la clôture est plus longue que toute suite de « ` » du texte : une
+    entrée qui contient « ``` » ne doit pas sortir du bloc (une mention « @ » préviendrait alors quelqu'un)."""
+    longueur = max([3] + [len(m) + 1 for m in re.findall(r"`{3,}", texte)])
+    return f"{'`' * longueur}\n{texte}\n{'`' * longueur}"
+
+
 def gh(*args):
     return subprocess.run(["gh", *args], capture_output=True, text=True, timeout=60)
 
@@ -93,10 +100,10 @@ def main():
             if numero:
                 ouverts[sig] = numero
         if numero:
-            r = gh("issue", "comment", numero, "--body", f"Encore vu :\n\n```\n{e}\n```")
+            r = gh("issue", "comment", numero, "--body", f"Encore vu :\n\n{bloc(e)}")
         else:
             r = gh("issue", "create", "--label", ETIQUETTE, "--title", f"{contexte} {detail}"[:120],
-                   "--body", f"```\n{e}\n```\n\n<!-- {marque} -->")
+                   "--body", f"{bloc(e)}\n\n<!-- {marque} -->")
             if r.returncode == 0:
                 ouverts[sig] = r.stdout.strip().rsplit("/", 1)[-1]
         if r.returncode == 0:

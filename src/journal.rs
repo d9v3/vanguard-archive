@@ -345,8 +345,9 @@ fn debut_dossier_personnel(texte: &str) -> Option<(usize, bool)> {
     None
 }
 
-/// Fin du nom de compte qui commence `texte`. Sous Windows, il peut avoir des espaces (« Jean Dupont ») : gardées
-/// seulement si le chemin continue après.
+/// Fin du nom de compte qui commence `texte`. Sous Windows, il peut avoir des espaces ou une apostrophe (« Jean
+/// Dupont », « Zoé d'Alice ») : gardées seulement si le chemin continue après ; sinon l'apostrophe peut fermer une chaîne
+/// (« 'C:\Users\bob' »).
 fn fin_du_compte(texte: &str, windows: bool) -> usize {
     if !windows {
         return texte
@@ -354,12 +355,12 @@ fn fin_du_compte(texte: &str, windows: bool) -> usize {
             .unwrap_or(texte.len());
     }
     let fin = texte
-        .find(|c: char| "\\/\"'\n\r\t:;,|<>*?)]".contains(c))
+        .find(|c: char| "\\/\"\n\r\t:;,|<>*?)]".contains(c))
         .unwrap_or(texte.len());
     let nom = if texte[fin..].starts_with(['\\', '/']) {
         &texte[..fin]
     } else {
-        texte[..fin].split(' ').next().unwrap_or_default()
+        texte[..fin].split([' ', '\'']).next().unwrap_or_default()
     };
     nom.trim_end_matches([' ', '.']).len()
 }
@@ -933,6 +934,11 @@ mod tests {
         assert_eq!(
             t,
             r"C:\Users\<compte>\Documents\x.ps1 | C:\Users\Public\Desktop | /home/<compte>/.config | /run/media/<compte>/GARDIEN | /Users/Shared/a | %USERPROFILE%\x | C:\Users\<compte> est introuvable"
+        );
+        // Une apostrophe dans le nom, ou qui ferme la chaîne d'un script.
+        assert_eq!(
+            anonyme(r"C:\Users\Zoé d'Alice\Desktop et 'C:\Users\bob' -Force"),
+            r"C:\Users\<compte>\Desktop et 'C:\Users\<compte>' -Force"
         );
     }
 
