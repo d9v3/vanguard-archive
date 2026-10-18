@@ -297,7 +297,11 @@ fn html(audit: Option<&Audit>, reseau: Option<&Rapport>) -> String {
                 ""
             };
             let depuis = match (&hote.premier_vu, hote.nouvelle) {
-                (Some(d), false) => trf!(" · connu depuis le {}", " · known since {}", crate::reseau::date_fr(d)),
+                (Some(d), false) => trf!(
+                    " · connu depuis le {}",
+                    " · known since {}",
+                    esc(&crate::reseau::date_fr(d))
+                ),
                 _ => String::new(),
             };
             let _ = trw!(
@@ -363,7 +367,7 @@ fn html(audit: Option<&Audit>, reseau: Option<&Rapport>) -> String {
             let quand = a
                 .dernier_vu
                 .as_deref()
-                .map(|d| trf!(" — vu le {}", " — seen on {}", crate::reseau::date_fr(d)))
+                .map(|d| trf!(" — vu le {}", " — seen on {}", esc(&crate::reseau::date_fr(d))))
                 .unwrap_or_default();
             let _ = write!(h, "<li>{} {}{}</li>", a.ip, esc(&a.titre), quand);
         }
@@ -492,5 +496,44 @@ mod tests {
         assert!(!page.contains("<img src=x"));
         assert!(!page.contains("<b>x</b>") && !page.contains("<i>wifi</i>"));
         assert!(page.contains("&lt;script&gt;alert(1)&lt;/script&gt;"));
+    }
+
+    /// Les dates du premier et du dernier passage d'un appareil viennent de la base, un fichier : une sauvegarde
+    /// restaurée ou la base d'une clé peuvent en apporter de piégées. Elles restent du texte dans le rapport.
+    #[test]
+    fn une_date_piegee_ne_devient_pas_du_code() {
+        let h = Hote {
+            ip: "10.0.0.9".parse().unwrap(),
+            nom: None,
+            mac: None,
+            fabricant: None,
+            surnom: None,
+            premier_vu: Some("<img src=x onerror=alert(3)>".into()),
+            role: None,
+            nouvelle: false,
+            ports: vec![],
+            alertes: vec![],
+            score: 100,
+        };
+        let r = Rapport {
+            reseau: "10.0.0.0/24".into(),
+            nom_reseau: None,
+            absents: vec![crate::reseau::Absent {
+                ip: "10.0.0.20".parse().unwrap(),
+                titre: "Imprimante".into(),
+                dernier_vu: Some("<script>alert(4)</script>".into()),
+            }],
+            duree_s: 1.0,
+            score_global: 100,
+            note: "A",
+            hotes: vec![h],
+            upnp: None,
+        };
+        let page = html(None, Some(&r));
+        assert!(
+            !page.contains("<img src=x") && !page.contains("<script>alert(4)"),
+            "{page}"
+        );
+        assert!(page.contains("&lt;script&gt;alert(4)&lt;/script&gt;"));
     }
 }
