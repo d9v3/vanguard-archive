@@ -22,11 +22,9 @@ src/connexion.rs, src/ui.rs, src/langue.rs ou ce script ont changé depuis. --sa
 """
 
 import html
-import ipaddress
 import json
 import os
 import pty
-import random
 import re
 import select
 import shutil
@@ -76,24 +74,6 @@ SUITE = {"fr": "  ⋮ et {} autres vérifications, pas montrées ici", "en": "  
 REMPLACABLES = {"liste privée", "identité Git de l'ordinateur", "nom complet du compte", "nom de l'ordinateur",
                 "appareil ou réseau de la maison"}
 
-IPV4 = re.compile(r"(?<![\w.])(?:\d{1,3}\.){3}\d{1,3}(?!\w|\.\d)")
-IPV6 = re.compile(r"(?<![\w:.])[0-9A-Fa-f]{0,4}(?::[0-9A-Fa-f]{0,4}){2,7}(?![\w:])")
-# Valeurs d'un octet selon leur nombre de chiffres : un remplaçant garde la longueur de l'original.
-OCTETS = {1: range(0, 10), 2: range(10, 100), 3: range(100, 256)}
-# Réseau, box et diffusion : les mêmes chez tout le monde, gardés.
-HOTES_FIXES = {0, 1, 254, 255}
-LOCAUX = [ipaddress.ip_network(n) for n in
-          ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16", "100.64.0.0/10")]
-# Services DNS publics connus (fournisseur() de src/machine/dns.rs) : les mêmes pour tout le monde, gardés.
-RESOLVEURS = [ipaddress.ip_network(n) for n in (
-    "1.1.1.0/24", "1.0.0.0/24", "8.8.8.8/32", "8.8.4.4/32", "9.9.9.0/24", "149.112.112.0/24", "208.67.222.0/24",
-    "208.67.220.0/24", "45.90.28.0/24", "45.90.30.0/24", "94.140.14.0/24", "94.140.15.0/24", "194.242.2.0/24",
-    "185.228.168.0/24", "185.228.169.0/24", "76.76.2.0/24", "76.76.10.0/24", "100.100.100.100/32",
-    "2606:4700::/32", "2001:4860::/32", "2620:fe::/32", "2620:119::/32", "2a07:a8c0::/32", "2a07:a8c1::/32",
-    "2a10:50c0::/32", "2a07:e340::/32")]
-# Adresses réservées à la documentation (RFC 5737, RFC 3849) : elles remplacent les adresses publiques.
-DOCUMENTATION = ("192.0.2.", "203.0.113.", "198.51.100.")
-DOC6 = ipaddress.ip_network("2001:db8::/32")
 
 
 # --- Bac à sable ---------------------------------------------------------------------------------------------------
@@ -233,144 +213,6 @@ def texte(rangee):
 
 
 # --- Ce qui ne doit pas paraître -----------------------------------------------------------------------------------
-
-class Masque:
-    """Remplaçants des adresses de la maison, pour une passe. Tirés au hasard : un remplaçant calculé sans secret
-    (empreinte de l'adresse) se retrouverait en essayant toutes les adresses possibles, 2²⁴ par fabricant pour une
-    adresse MAC. Chacun a la longueur de l'original : les tableaux restent alignés."""
-
-    def __init__(self, textes):
-        self.hasard = random.SystemRandom()
-        self.adresses = {}  # vraie adresse (MAC, IPv4, IPv6) → remplaçant
-        self.reseaux = {}  # trois premiers octets d'un réseau local → ceux du réseau inventé
-        locales = {a for t in textes for a in IPV4.findall(t) if self.locale(a)}
-        self.reels = {a.rsplit(".", 1)[0] for a in locales}
-        # Tous les hôtes d'un réseau sont tirés ensemble, dans l'ordre : un tableau trié par adresse le reste.
-        for prefixe in sorted(self.reels):
-            self.reseau(prefixe, sorted({int(a.rsplit(".", 1)[1]) for a in locales if a.startswith(prefixe + ".")}))
-
-    @staticmethod
-    def locale(adresse):
-        try:
-            ip = ipaddress.IPv4Address(adresse)
-        except ValueError:
-            return False
-        return any(ip in r for r in LOCAUX) and not any(ip in r for r in RESOLVEURS)
-
-    def reseau(self, prefixe, hotes):
-        """Réseau inventé de la même sorte (10.x.y, 172.16-31.y, 192.168.y…), puis ses hôtes : même nombre de
-        chiffres, même ordre, réseau, box et diffusion gardés."""
-        if prefixe not in self.reseaux:
-            o1, o2, o3 = prefixe.split(".")
-            if o1 == "10":
-                deuxiemes = OCTETS[len(o2)]
-            elif o1 == "172":
-                deuxiemes = range(16, 32)
-            elif o1 == "100":
-                deuxiemes = [x for x in range(64, 128) if len(str(x)) == len(o2)]
-            else:  # 192.168, 169.254
-                deuxiemes = [int(o2)]
-            pris = self.reels | set(self.reseaux.values())
-            libres = [f"{o1}.{a}.{b}" for a in deuxiemes for b in OCTETS[len(o3)] if f"{o1}.{a}.{b}" not in pris]
-            self.reseaux[prefixe] = self.hasard.choice(libres)
-        faux = self.reseaux[prefixe]
-        deja = {int(v.rsplit(".", 1)[1]) for k, v in self.adresses.items() if k.startswith(prefixe + ".")}
-        for chiffres, valeurs in OCTETS.items():
-            a_tirer = [h for h in hotes if h not in HOTES_FIXES and len(str(h)) == chiffres]
-            choix = sorted(self.hasard.sample([v for v in valeurs if v not in HOTES_FIXES | deja], len(a_tirer)))
-            for reel, neuf in zip(a_tirer, choix):
-                self.adresses[f"{prefixe}.{reel}"] = f"{faux}.{neuf}"
-        for h in hotes:
-            if h in HOTES_FIXES:
-                self.adresses[f"{prefixe}.{h}"] = f"{faux}.{h}"
-
-    def ipv4(self, adresse):
-        if adresse in self.adresses:
-            return self.adresses[adresse]
-        try:
-            ip = ipaddress.IPv4Address(adresse)
-        except ValueError:
-            return adresse
-        if self.locale(adresse):
-            prefixe, hote = adresse.rsplit(".", 1)
-            self.reseau(prefixe, [int(hote)])
-        elif not ip.is_global or ip.is_multicast or any(ip in r for r in RESOLVEURS):
-            return adresse
-        else:
-            self.adresses[adresse] = self.publique(adresse)
-        return self.adresses[adresse]
-
-    def publique(self, adresse):
-        """Adresse de documentation de même longueur ; sinon (7, 8 ou 15 caractères), quatre nombres au hasard de
-        mêmes longueurs, qui ne mènent ni chez soi ni à un service connu."""
-        pris = set(self.adresses.values())
-        for prefixe in DOCUMENTATION:
-            chiffres = len(adresse) - len(prefixe)
-            if chiffres in OCTETS:
-                libres = [f"{prefixe}{h}" for h in OCTETS[chiffres] if h not in HOTES_FIXES]
-                libres = [a for a in libres if a not in pris]
-                if libres:
-                    return self.hasard.choice(libres)
-        while True:
-            faux = ".".join(str(self.hasard.choice(OCTETS[len(o)])) for o in adresse.split("."))
-            ip = ipaddress.IPv4Address(faux)
-            if ip.is_global and faux != adresse and faux not in pris and not any(ip in r for r in RESOLVEURS):
-                return faux
-
-    def ipv6(self, adresse):
-        if adresse in self.adresses:
-            return self.adresses[adresse]
-        try:
-            ip = ipaddress.IPv6Address(adresse)
-        except ValueError:
-            return adresse
-        groupes = adresse.split(":")
-        premier = next(i for i, g in enumerate(groupes) if g) if any(groupes) else 0
-        # Le premier groupe dit seulement la sorte d'adresse (2xxx Internet, fdxx réseau local, fe80 lien local) ;
-        # une adresse presque vide (« fe80::1 », « fd00::1 ») est la même chez tout le monde.
-        if (ip.is_loopback or ip.is_unspecified or ip.is_multicast or ip in DOC6
-                or any(ip in r for r in RESOLVEURS) or sum(len(g) for g in groupes[premier + 1 :]) <= 4):
-            return adresse
-        while True:
-            faux = ":".join(g if i <= premier or not g else self.hexa(len(g)) for i, g in enumerate(groupes))
-            if faux != adresse and faux not in self.adresses.values():
-                self.adresses[adresse] = faux
-                return faux
-
-    def hexa(self, longueur):
-        chiffres = "0123456789abcdef"
-        return self.hasard.choice(chiffres[1:]) + "".join(self.hasard.choice(chiffres) for _ in range(longueur - 1))
-
-    def mac(self, adresse):
-        cle = adresse.lower()
-        if cle not in self.adresses:
-            octets = cle.split(":")
-            premier = int(octets[0], 16)
-            while True:
-                if premier & 0x02:
-                    # Adresse aléatoire (téléphones…) : aléatoire elle aussi, mêmes bits de sorte.
-                    debut = [f"{(self.hasard.randrange(256) & 0xFC) | (premier & 0x03):02x}"]
-                    debut += [f"{self.hasard.randrange(256):02x}" for _ in range(2)]
-                else:
-                    # Préfixe du fabricant gardé : son nom est écrit en clair à côté.
-                    debut = octets[:3]
-                faux = ":".join(debut + [f"{self.hasard.randrange(256):02x}" for _ in range(3)])
-                if faux != cle and faux not in self.adresses.values():
-                    self.adresses[cle] = faux
-                    break
-        return self.adresses[cle]
-
-    def texte(self, t):
-        t = conf.MAC.sub(lambda m: self.mac(m.group()), t)
-        t = IPV4.sub(lambda m: self.ipv4(m.group()), t)
-        return IPV6.sub(lambda m: self.ipv6(m.group()), t)
-
-    def termes(self):
-        """Les vraies adresses remplacées, pour vérifier qu'aucune ne reste."""
-        return [conf.Terme(a, "adresse de la maison",
-                           conf.motif_mac(a) if conf.MAC.fullmatch(a) else rf"(?<![\w.:]){re.escape(a)}(?![\w:]|\.\d)")
-                for a, faux in self.adresses.items() if a != faux]
-
 
 def remplacements(noms, langue):
     """Nom → remplaçant passe-partout de même longueur (le tableau des appareils reste aligné)."""
@@ -611,7 +453,7 @@ def main():
             ecrans[f"menu{suffixe}.png"] = (langue, lancer(exe, [], env, attendre="›", touches=b"q\r", delai=30))
             if connexion:
                 ecrans[f"connexion{suffixe}.png"] = (langue, lancer(exe, ["connexion"], env, delai=180))
-        masque = Masque([texte(r) for _, rangees in ecrans.values() for r in rangees]
+        masque = conf.Masque([texte(r) for _, rangees in ecrans.values() for r in rangees]
                         + [page for _, page in rapports.values()])
         moi = conf.compte()
         termes = conf.termes()

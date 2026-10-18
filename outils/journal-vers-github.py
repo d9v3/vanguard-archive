@@ -7,9 +7,10 @@ dans le programme ni sur la clé.
     python3 outils/journal-vers-github.py <fichier des entrées à envoyer>
 
 Les entrées envoyées sont retirées du fichier ; celles qui n'ont pas pu partir (pas d'Internet) y restent pour le
-déploiement suivant. Le journal est anonymisé par Gardien avant d'être écrit (dossier personnel, nom d'utilisateur
-et nom de la machine remplacés) ; ce qu'il aurait laissé passer de cet ordinateur-ci (outils/confidentialite.py) est
-masqué avant l'envoi.
+déploiement suivant. Le journal vient aussi des ordinateurs des autres (la clé l'écrit partout où elle passe) : Gardien
+l'anonymise en l'écrivant (src/journal.rs), puis, avant l'envoi, deux filets (outils/confidentialite.py) : ce qu'il
+aurait laissé passer de cet ordinateur-ci, et ce qui pourrait nommer n'importe qui (comptes, courriels, SID, numéros
+de série, noms d'appareils et du Wi-Fi ; adresses MAC et IP remplacées, préfixe du fabricant gardé).
 """
 
 import hashlib
@@ -32,11 +33,15 @@ def entrees(texte):
 
 
 def signature(entree):
-    """Contexte, première ligne du détail, et une empreinte qui ignore les nombres (délais, codes, lignes)."""
+    """Contexte, première ligne du détail, et une empreinte qui ignore les nombres (délais, codes, lignes) et les
+    adresses : leurs remplaçants sont tirés au hasard à chaque envoi, la même erreur doit retrouver son ticket."""
     lignes = entree.splitlines()
     contexte = lignes[1].strip() if len(lignes) > 1 else ""
     detail = next((l.strip() for l in lignes[2:] if l.strip()), "")
-    stable = re.sub(r"\d+", "#", f"{contexte} {detail}")
+    stable = f"{contexte} {detail}"
+    for adresse in (confidentialite.MAC, confidentialite.MAC_TIRETS, confidentialite.IPV6, confidentialite.IPV4):
+        stable = adresse.sub("<adresse>", stable)
+    stable = re.sub(r"\d+", "#", stable)
     return contexte, detail, hashlib.sha1(stable.encode()).hexdigest()[:12]
 
 
@@ -62,12 +67,15 @@ def main():
         ouverts = {}
     restantes, envoyees = [], 0
     personnel = confidentialite.Detecteur(confidentialite.termes()).motif
+    # Un même réseau inventé pour tout l'envoi : les tickets d'une même maison restent comparables entre eux.
+    masque = confidentialite.Masque(liste)
     for e in liste:
         if personnel:
             e, n = personnel.subn(MASQUE, e)
             if n:
                 print(f"Journal : {n} détail(s) personnel(s) masqué(s) avant l'envoi : l'anonymisation de journal.rs "
                       "les a laissés passer.", file=sys.stderr)
+        e = confidentialite.masquer_autrui(e, masque)
         contexte, detail, sig = signature(e)
         # Marque gardée de l'ancien nom : les tickets déjà ouverts la portent.
         marque = f"sentinel-signature-{sig}"

@@ -12,6 +12,10 @@ Ce qui est personnel est lu sur cet ordinateur, jamais écrit dans le dépôt, q
 - le courriel et le nom de l'identité Git de l'ordinateur, le nom complet du compte, ses dossiers (/home/<compte>…) ;
 - les appareils de la base de Gardien (noms, adresses MAC), les réseaux Wi-Fi enregistrés et leurs bornes, le nom de
   l'ordinateur.
+S'y ajoute, reconnu à sa forme, ce qui pourrait être la donnée de quelqu'un d'autre (les gens chez qui la clé passe) :
+compte d'un dossier personnel (« C:\\Users\\<nom> »), courriel, SID de Windows. Les valeurs inventées des tests sont
+permises (COMPTES_INVENTES : alice, bob, Zoé… ; courriels d'exemple ; SID de la documentation de Microsoft). Un
+ticket du journal, lui, est masqué avant l'envoi (masquer_autrui), adresses MAC et IP comprises.
 
 Depuis la racine du dépôt :
     python3 outils/confidentialite.py --commit           ce qui va être commité : lignes ajoutées, fichiers, auteur
@@ -25,8 +29,10 @@ Sort en erreur (code 1) en disant quoi et où dès qu'un détail personnel para�
 """
 
 import getpass
+import ipaddress
 import json
 import os
+import random
 import re
 import socket
 import subprocess
@@ -184,17 +190,289 @@ def termes():
 
 
 class Detecteur:
-    def __init__(self, liste):
+    def __init__(self, liste, autrui=False):
         self.termes = liste
         self.motif = re.compile("|".join(f"(?P<t{i}>{t.motif})" for i, t in enumerate(liste)), re.IGNORECASE) \
             if liste else None
+        self.autrui = autrui
 
-    def trouver(self, texte: str):
-        """(terme, numéro de ligne) de chaque détail personnel du texte."""
-        if not self.motif:
-            return []
-        return [(self.termes[int(m.lastgroup[1:])], texte.count("\n", 0, m.start()) + 1)
-                for m in self.motif.finditer(texte)]
+    def trouver(self, texte: str, autrui=None):
+        """(terme, numéro de ligne) de chaque détail personnel du texte ; avec `autrui`, aussi ce qui pourrait être
+        la donnée de quelqu'un d'autre (donnees_d_autrui)."""
+        trouves = [(self.termes[int(m.lastgroup[1:])], texte.count("\n", 0, m.start()) + 1)
+                   for m in self.motif.finditer(texte)] if self.motif else []
+        if self.autrui if autrui is None else autrui:
+            trouves += [(t, texte.count("\n", 0, p) + 1) for t, p in donnees_d_autrui(texte)]
+        return trouves
+
+
+# --- Masque : adresses remplacées (captures du README, tickets du journal) ------------------------------------------
+
+MAC_TIRETS = re.compile(r"(?<![0-9A-Fa-f-])[0-9A-Fa-f]{2}(?:-[0-9A-Fa-f]{2}){5}(?![0-9A-Fa-f-])")
+IPV4 = re.compile(r"(?<![\w.])(?:\d{1,3}\.){3}\d{1,3}(?!\w|\.\d)")
+IPV6 = re.compile(r"(?<![\w:.])[0-9A-Fa-f]{0,4}(?::[0-9A-Fa-f]{0,4}){2,7}(?![\w:])")
+# Valeurs d'un octet selon leur nombre de chiffres : un remplaçant garde la longueur de l'original.
+OCTETS = {1: range(0, 10), 2: range(10, 100), 3: range(100, 256)}
+# Réseau, box et diffusion : les mêmes chez tout le monde, gardés.
+HOTES_FIXES = {0, 1, 254, 255}
+LOCAUX = [ipaddress.ip_network(n) for n in
+          ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16", "100.64.0.0/10")]
+# Services DNS publics connus (fournisseur() de src/machine/dns.rs) : les mêmes pour tout le monde, gardés.
+RESOLVEURS = [ipaddress.ip_network(n) for n in (
+    "1.1.1.0/24", "1.0.0.0/24", "8.8.8.8/32", "8.8.4.4/32", "9.9.9.0/24", "149.112.112.0/24", "208.67.222.0/24",
+    "208.67.220.0/24", "45.90.28.0/24", "45.90.30.0/24", "94.140.14.0/24", "94.140.15.0/24", "194.242.2.0/24",
+    "185.228.168.0/24", "185.228.169.0/24", "76.76.2.0/24", "76.76.10.0/24", "100.100.100.100/32",
+    "2606:4700::/32", "2001:4860::/32", "2620:fe::/32", "2620:119::/32", "2a07:a8c0::/32", "2a07:a8c1::/32",
+    "2a10:50c0::/32", "2a07:e340::/32")]
+# Adresses réservées à la documentation (RFC 5737, RFC 3849) : elles remplacent les adresses publiques.
+DOCUMENTATION = ("192.0.2.", "203.0.113.", "198.51.100.")
+DOC6 = ipaddress.ip_network("2001:db8::/32")
+
+
+class Masque:
+    """Remplaçants des adresses de la maison, pour une passe. Tirés au hasard : un remplaçant calculé sans secret
+    (empreinte de l'adresse) se retrouverait en essayant toutes les adresses possibles, 2²⁴ par fabricant pour une
+    adresse MAC. Chacun a la longueur de l'original : les tableaux restent alignés."""
+
+    def __init__(self, textes):
+        self.hasard = random.SystemRandom()
+        self.adresses = {}  # vraie adresse (MAC, IPv4, IPv6) → remplaçant
+        self.reseaux = {}  # trois premiers octets d'un réseau local → ceux du réseau inventé
+        locales = {a for t in textes for a in IPV4.findall(t) if self.locale(a)}
+        self.reels = {a.rsplit(".", 1)[0] for a in locales}
+        # Tous les hôtes d'un réseau sont tirés ensemble, dans l'ordre : un tableau trié par adresse le reste.
+        for prefixe in sorted(self.reels):
+            self.reseau(prefixe, sorted({int(a.rsplit(".", 1)[1]) for a in locales if a.startswith(prefixe + ".")}))
+
+    @staticmethod
+    def locale(adresse):
+        try:
+            ip = ipaddress.IPv4Address(adresse)
+        except ValueError:
+            return False
+        return any(ip in r for r in LOCAUX) and not any(ip in r for r in RESOLVEURS)
+
+    def reseau(self, prefixe, hotes):
+        """Réseau inventé de la même sorte (10.x.y, 172.16-31.y, 192.168.y…), puis ses hôtes : même nombre de
+        chiffres, même ordre, réseau, box et diffusion gardés."""
+        if prefixe not in self.reseaux:
+            o1, o2, o3 = prefixe.split(".")
+            if o1 == "10":
+                deuxiemes = OCTETS[len(o2)]
+            elif o1 == "172":
+                deuxiemes = range(16, 32)
+            elif o1 == "100":
+                deuxiemes = [x for x in range(64, 128) if len(str(x)) == len(o2)]
+            else:  # 192.168, 169.254
+                deuxiemes = [int(o2)]
+            pris = self.reels | set(self.reseaux.values())
+            libres = [f"{o1}.{a}.{b}" for a in deuxiemes for b in OCTETS[len(o3)] if f"{o1}.{a}.{b}" not in pris]
+            self.reseaux[prefixe] = self.hasard.choice(libres)
+        faux = self.reseaux[prefixe]
+        deja = {int(v.rsplit(".", 1)[1]) for k, v in self.adresses.items() if k.startswith(prefixe + ".")}
+        for chiffres, valeurs in OCTETS.items():
+            a_tirer = [h for h in hotes if h not in HOTES_FIXES and len(str(h)) == chiffres]
+            choix = sorted(self.hasard.sample([v for v in valeurs if v not in HOTES_FIXES | deja], len(a_tirer)))
+            for reel, neuf in zip(a_tirer, choix):
+                self.adresses[f"{prefixe}.{reel}"] = f"{faux}.{neuf}"
+        for h in hotes:
+            if h in HOTES_FIXES:
+                self.adresses[f"{prefixe}.{h}"] = f"{faux}.{h}"
+
+    def ipv4(self, adresse):
+        if adresse in self.adresses:
+            return self.adresses[adresse]
+        try:
+            ip = ipaddress.IPv4Address(adresse)
+        except ValueError:
+            return adresse
+        if self.locale(adresse):
+            prefixe, hote = adresse.rsplit(".", 1)
+            self.reseau(prefixe, [int(hote)])
+        elif not ip.is_global or ip.is_multicast or any(ip in r for r in RESOLVEURS):
+            return adresse
+        else:
+            self.adresses[adresse] = self.publique(adresse)
+        return self.adresses[adresse]
+
+    def publique(self, adresse):
+        """Adresse de documentation de même longueur ; sinon (7, 8 ou 15 caractères), quatre nombres au hasard de
+        mêmes longueurs, qui ne mènent ni chez soi ni à un service connu."""
+        pris = set(self.adresses.values())
+        for prefixe in DOCUMENTATION:
+            chiffres = len(adresse) - len(prefixe)
+            if chiffres in OCTETS:
+                libres = [f"{prefixe}{h}" for h in OCTETS[chiffres] if h not in HOTES_FIXES]
+                libres = [a for a in libres if a not in pris]
+                if libres:
+                    return self.hasard.choice(libres)
+        while True:
+            faux = ".".join(str(self.hasard.choice(OCTETS[len(o)])) for o in adresse.split("."))
+            ip = ipaddress.IPv4Address(faux)
+            if ip.is_global and faux != adresse and faux not in pris and not any(ip in r for r in RESOLVEURS):
+                return faux
+
+    def ipv6(self, adresse):
+        if adresse in self.adresses:
+            return self.adresses[adresse]
+        try:
+            ip = ipaddress.IPv6Address(adresse)
+        except ValueError:
+            return adresse
+        groupes = adresse.split(":")
+        premier = next(i for i, g in enumerate(groupes) if g) if any(groupes) else 0
+        # Le premier groupe dit seulement la sorte d'adresse (2xxx Internet, fdxx réseau local, fe80 lien local) ;
+        # une adresse presque vide (« fe80::1 », « fd00::1 ») est la même chez tout le monde.
+        if (ip.is_loopback or ip.is_unspecified or ip.is_multicast or ip in DOC6
+                or any(ip in r for r in RESOLVEURS) or sum(len(g) for g in groupes[premier + 1 :]) <= 4):
+            return adresse
+        while True:
+            faux = ":".join(g if i <= premier or not g else self.hexa(len(g)) for i, g in enumerate(groupes))
+            if faux != adresse and faux not in self.adresses.values():
+                self.adresses[adresse] = faux
+                return faux
+
+    def hexa(self, longueur):
+        chiffres = "0123456789abcdef"
+        return self.hasard.choice(chiffres[1:]) + "".join(self.hasard.choice(chiffres) for _ in range(longueur - 1))
+
+    def mac(self, adresse):
+        cle = adresse.lower()
+        if cle not in self.adresses:
+            octets = cle.split(":")
+            premier = int(octets[0], 16)
+            while True:
+                if premier & 0x02:
+                    # Adresse aléatoire (téléphones…) : aléatoire elle aussi, mêmes bits de sorte.
+                    debut = [f"{(self.hasard.randrange(256) & 0xFC) | (premier & 0x03):02x}"]
+                    debut += [f"{self.hasard.randrange(256):02x}" for _ in range(2)]
+                else:
+                    # Préfixe du fabricant gardé : son nom est écrit en clair à côté.
+                    debut = octets[:3]
+                faux = ":".join(debut + [f"{self.hasard.randrange(256):02x}" for _ in range(3)])
+                if faux != cle and faux not in self.adresses.values():
+                    self.adresses[cle] = faux
+                    break
+        return self.adresses[cle]
+
+    def mac_tirets(self, adresse):
+        """Écriture de Windows (« 3C-22-FB-… ») : le même remplaçant, écrit pareil."""
+        faux = self.mac(adresse.replace("-", ":")).replace(":", "-")
+        return faux.upper() if any(c.isupper() for c in adresse) else faux
+
+    def texte(self, t):
+        t = MAC.sub(lambda m: self.mac(m.group()), t)
+        t = MAC_TIRETS.sub(lambda m: self.mac_tirets(m.group()), t)
+        t = IPV4.sub(lambda m: self.ipv4(m.group()), t)
+        return IPV6.sub(lambda m: self.ipv6(m.group()), t)
+
+    def termes(self):
+        """Les vraies adresses remplacées, pour vérifier qu'aucune ne reste."""
+        return [Terme(a, "adresse de la maison",
+                      motif_mac(a) if MAC.fullmatch(a) else rf"(?<![\w.:]){re.escape(a)}(?![\w:]|\.\d)")
+                for a, faux in self.adresses.items() if a != faux]
+
+
+# --- Données des autres ----------------------------------------------------------------------------------------------
+# Ce que les listes ne peuvent pas connaître d'avance : les gens chez qui la clé est passée (leur journal d'erreurs
+# revient ici, puis part en tickets), un journal recopié dans un test. Leurs données ont une forme : compte d'un
+# dossier personnel, courriel, SID de Windows, numéro de série, nom d'un appareil du réseau local, nom du Wi-Fi.
+
+# Dossiers communs à tous les ordinateurs : ils ne nomment personne.
+COMPTES_COMMUNS = {"public", "default", "default user", "all users", "defaultuser0", "shared", "guest",
+                   "wdagutilityaccount"}
+# Comptes inventés des tests, et des machines de GitHub (« runner ») : permis dans le dépôt, masqués dans un ticket
+# (quelqu'un peut vraiment s'appeler Alice).
+COMPTES_INVENTES = {"alice", "bob", "zoé", "jean dupont", "moi", "x", "a", "a&b", "root", "runner", "capture", "user",
+                    "utilisateur", "compte", "account", "username", "nom", "name", "test"}
+DEBUT_COMPTE_UNIX = re.compile(r"(?:/var/home|/run/media|/home|/Users|/media)/", re.IGNORECASE)
+DEBUT_COMPTE_WINDOWS = re.compile(r"(?<![A-Za-z])[A-Za-z]:(\\\\|\\|/)Users\1", re.IGNORECASE)
+FIN_COMPTE_WINDOWS = set("\\/\"'\n\r\t:;,|<>*?)]")
+COURRIEL = re.compile(r"(?<![\w.%+-])[\w.%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}(?![\w-])")
+# Adresses qui ne sont celles de personne : exemples, rôles (noreply…), identifiants publics (extension uBlock Origin).
+DOMAINES_EXEMPLES = re.compile(r"(?:^|\.)(?:example\.(?:com|net|org)|exemple\.[a-z]+)$|\.(?:example|invalid|test|"
+                               r"localhost|local)$|^users\.noreply\.github\.com$", re.IGNORECASE)
+ROLES = {"noreply", "no-reply", "security", "support", "contact", "info", "admin", "abuse", "postmaster",
+         "webmaster", "git"}
+COURRIELS_PUBLICS = {"ublock0@raymondhill.net"}
+SID = re.compile(r"S-1-5-21-(\d+)-(\d+)-(\d+)")
+# SID d'exemple de la documentation de Microsoft.
+SID_EXEMPLE = ("1004336348", "1177238915", "682003330")
+SERIE = re.compile(r"(?<!\w)(serial[ _]?number|serial no|serial|numéro de série|ioplatformuuid|ioplatformserialnumber|"
+                   r"uuid)(?!\w)([ \t\"\d]*[:=][ \t\"]*)(?!<)([^\s\",;]+)", re.IGNORECASE)
+WIFI_CLE = re.compile(r"(?<!\w)(ssid|all user profile|profil tous les utilisateurs|current user profile)(?!\w)"
+                      r"([ \t\"\d]*[:=][ \t\"]*)(?!<)([^\n\r\"]*[^\s\"])", re.IGNORECASE)
+LIGNE_WIFI = re.compile(r"wi-?fi|ssid|wlan|wireless|sans fil", re.IGNORECASE)
+NOM_LOCAL = re.compile(r"(?<![\w.-])[\w-][\w.-]*?(?=\.(?:home\.arpa|internal|local|home|lan)(?![\w-]))",
+                       re.IGNORECASE)
+# Les licences des bibliothèques nomment leurs auteurs avec leur courriel : publics, voulus.
+TIERS = {"LICENCES-TIERCES.txt", "Cargo.lock"}
+
+
+def comptes(texte):
+    """(début, fin, nom) de chaque compte nommé par un dossier personnel : « /home/<nom> », « C:\\Users\\<nom> »."""
+    for m in DEBUT_COMPTE_UNIX.finditer(texte):
+        if re.search(r"[A-Za-z]:$", texte[max(0, m.start() - 2):m.start()]):
+            continue  # « C:/Users/… » : un chemin de Windows, vu plus bas
+        nom = re.match(r"[\w.-]*", texte[m.end():]).group()
+        yield m.end(), m.end() + len(nom), nom
+    for m in DEBUT_COMPTE_WINDOWS.finditer(texte):
+        reste = texte[m.end():]
+        fin = next((i for i, c in enumerate(reste) if c in FIN_COMPTE_WINDOWS), len(reste))
+        # Un nom peut avoir des espaces (« Jean Dupont ») : gardées seulement si le chemin continue après.
+        nom = (reste[:fin] if reste[fin:fin + 1] in ("\\", "/") else reste[:fin].split(" ")[0]).rstrip(" .")
+        yield m.end(), m.end() + len(nom), nom
+
+
+def compte_de_personne(nom, inventes=True):
+    """Un compte qui nomme peut-être quelqu'un : ni dossier commun, ni variable (« %USERNAME% »), ni, avec `inventes`,
+    compte inventé des tests."""
+    bas = nom.lower()
+    return (any(c.isalnum() for c in nom) and not any(c in nom for c in "%${<~") and bas not in COMPTES_COMMUNS
+            and not (inventes and bas in COMPTES_INVENTES))
+
+
+def courriel_de_personne(adresse):
+    locale, _, domaine = adresse.rpartition("@")
+    return not (DOMAINES_EXEMPLES.search(domaine) or locale.lower() in ROLES or adresse.lower() in COURRIELS_PUBLICS)
+
+
+def donnees_d_autrui(texte, courriels=True):
+    """(terme, position) de ce qui pourrait être la donnée de quelqu'un d'autre : compte d'un dossier personnel,
+    courriel, SID de Windows. Pas les adresses MAC et IP, ni les noms d'appareils ou de Wi-Fi : les tests en inventent
+    (préfixe d'un vrai fabricant, réseau « Salon »), rien ne les distinguerait des vrais."""
+    for debut, _, nom in comptes(texte):
+        if compte_de_personne(nom):
+            yield Terme(nom, "compte d'un dossier personnel (de quelqu'un ?)", ""), debut
+    for m in COURRIEL.finditer(texte) if courriels else ():
+        if courriel_de_personne(m.group()):
+            yield Terme(m.group(), "courriel (de quelqu'un ?)", ""), m.start()
+    for m in SID.finditer(texte):
+        if m.groups() != SID_EXEMPLE and any(len(g) >= 5 for g in m.groups()):
+            yield Terme(m.group(), "SID d'un compte Windows", ""), m.start()
+
+
+def masquer_autrui(texte, masque):
+    """Masque ce qui pourrait nommer quelqu'un dans un texte qui part sur GitHub (ticket du journal) : comptes des
+    dossiers personnels, courriels, SID, numéros de série, noms du réseau local et du Wi-Fi ; adresses MAC et IP par
+    `masque` (préfixe du fabricant gardé, réseau inventé). Second filet : Gardien anonymise déjà le journal en
+    l'écrivant (src/journal.rs)."""
+    morceaux, fin = [], 0
+    for debut, fin_du_nom, nom in sorted(comptes(texte)):
+        if debut >= fin and compte_de_personne(nom, inventes=False):
+            morceaux += [texte[fin:debut], "<compte>"]
+            fin = fin_du_nom
+    texte = COURRIEL.sub("<courriel>", "".join(morceaux) + texte[fin:])
+    texte = SID.sub("S-1-5-21-0-0-0", texte)
+    lignes = []
+    for ligne in texte.splitlines(keepends=True):
+        ligne = SERIE.sub(lambda m: m.group(1) + m.group(2) + "<numéro>", ligne)
+        ligne = WIFI_CLE.sub(lambda m: m.group(1) + m.group(2) + "<wifi>", ligne)
+        if LIGNE_WIFI.search(ligne):
+            ligne = re.sub(r"« [^»\n]*? »", "« <wifi> »", ligne)
+            ligne = re.sub(r"“[^”\n]*”", "“<wifi>”", ligne)
+        lignes.append(ligne)
+    return masque.texte(NOM_LOCAL.sub("<appareil>", "".join(lignes)))
 
 
 # --- Où chercher -----------------------------------------------------------------------------------------------------
@@ -233,7 +511,8 @@ def lignes_ajoutees(diff: str):
 
 def chercher_diff(detecteur, diff, prefixe=""):
     return [(f"{prefixe}{fichier}" + (f":{numero}" if numero else " (nom du fichier)"), terme)
-            for fichier, numero, texte in lignes_ajoutees(diff) for terme, _ in detecteur.trouver(texte)]
+            for fichier, numero, texte in lignes_ajoutees(diff)
+            for terme, _ in detecteur.trouver(texte, False if fichier in TIERS else None)]
 
 
 def identite(detecteur, texte, ou):
@@ -279,7 +558,8 @@ def depot_entier(detecteur):
         brut = Path(chemin).read_bytes()
         if b"\0" in brut[:8000]:
             continue
-        trouves += [(f"{chemin}:{n}", t) for t, n in detecteur.trouver(brut.decode(errors="replace"))]
+        tiers = False if chemin in TIERS else None
+        trouves += [(f"{chemin}:{n}", t) for t, n in detecteur.trouver(brut.decode(errors="replace"), tiers)]
         trouves += [(f"{chemin} (nom du fichier)", t) for t, _ in detecteur.trouver(chemin)]
     vus = set()
     for ligne in git("log", "--all", "--format=%h%x1f%an <%ae>%x1f%cn <%ce>%x1f%B%x1e").split("\x1e"):
@@ -307,7 +587,8 @@ def depot_entier(detecteur):
         contenu = lot[fin + 1 : fin + 1 + int(taille)]
         position = fin + 2 + int(taille)
         if genre == "blob" and b"\0" not in contenu[:8000]:
-            for terme, _ in detecteur.trouver(contenu.decode(errors="replace")):
+            tiers = False if objets[sha].rsplit("/", 1)[-1] in TIERS else None
+            for terme, _ in detecteur.trouver(contenu.decode(errors="replace"), tiers):
                 vus.add((f"historique : {objets[sha]}", terme))
         for terme, _ in detecteur.trouver(objets.get(sha, "")):
             vus.add((f"historique : {objets[sha]} (nom du fichier)", terme))
@@ -333,6 +614,12 @@ def rapport(trouves, quoi) -> int:
         print(f"  {ou} — {terme.origine} : {terme.texte}" + (f" ({n} fois)" if n > 1 else ""), file=sys.stderr)
     print("Remplace-les par des valeurs inventées (adresses MAC : garder les 3 premiers octets, ceux du fabricant). "
           f"Une expression de {PRIVE} qui n'a rien de personnel s'y retire.", file=sys.stderr)
+    # Trouvé par sa forme (donnees_d_autrui), pas dans une liste : la donnée de quelqu'un, ou une valeur à ajouter
+    # aux valeurs inventées permises.
+    if any(not terme.motif for _, terme in fois):
+        print("Donnée de quelqu'un d'autre ? Dans un test : comptes alice, bob, Zoé, Jean Dupont ; courriels "
+              "@example.com ; SID d'exemple S-1-5-21-1004336348-1177238915-682003330-… (COMPTES_INVENTES, "
+              "COURRIELS_PUBLICS de outils/confidentialite.py pour une valeur publique).", file=sys.stderr)
     return 1
 
 
@@ -341,7 +628,7 @@ def main():
     if args[:1] in (["--message"], ["--binaire"]):
         args[1:] = [os.path.abspath(a) for a in args[1:]]
     os.chdir(git("rev-parse", "--show-toplevel").strip())
-    detecteur = Detecteur(termes())
+    detecteur = Detecteur(termes(), autrui=True)
     if args[:1] == ["--commit"]:
         sys.exit(rapport(commit_en_cours(detecteur), "ce commit (rien n'est commité)"))
     if args[:1] == ["--message"] and len(args) == 2:
@@ -352,7 +639,10 @@ def main():
         texte = sys.stdin.read()
         sys.exit(rapport([(f"ligne {n}", t) for t, n in detecteur.trouver(texte)], "le texte"))
     if args[:1] == ["--binaire"] and len(args) > 1:
-        trouves = [(Path(f).name, t) for f in args[1:] for t, _ in detecteur.trouver(chaines(f))]
+        # Un programme range ses textes bout à bout, sans séparateur : une forme (dossier, courriel) s'y colle au
+        # texte suivant et ne se juge plus. Seuls les détails connus d'ici sont cherchés ; les données des autres
+        # l'ont été dans le code, à chaque commit.
+        trouves = [(Path(f).name, t) for f in args[1:] for t, _ in detecteur.trouver(chaines(f), False)]
         sys.exit(rapport(trouves, "les programmes compilés"))
     if args[:1] == ["--depot"]:
         sys.exit(rapport(depot_entier(detecteur), "le dépôt et son historique"))
