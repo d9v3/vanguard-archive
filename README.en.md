@@ -53,7 +53,7 @@ In the menu, choose **1** (full check), then **2** (fix). Arrows, Enter, and Esc
 | **Connection for gaming** | Ping, jitter, loss, speed and bufferbloat, compared with your habits. |
 | **Troubleshoot** | Computer diagnostic, everyday problems step by step (Internet, Wi-Fi, slowness, sound, printer, full disk), “Why is it slow?”, computer specs, repairs. |
 | **Optimize and clean up** | Privacy and performance settings undone exactly, a cleanup checklist with the space gained measured, startup programs. |
-| **Protection** | Decoy files against ransomware, 308 YARA rules, antivirus, sandbox, integrity of critical files, leaked passwords, outbound connections, dangerous links, downloaded files. |
+| **Protection** | Decoy files against ransomware, Windows Defender blocking, 308 YARA rules, antivirus, sandbox, integrity of critical files, leaked passwords, outbound connections, dangerous links, downloaded files. |
 | **Follow-up** | Hourly monitoring, monthly check-up, HTML report with the grade curve, learning on your computer. |
 | **Software and games** | The best software in 8 categories, from its official source; update everything at once; settings for gaming. |
 | **Tools** | Copy my files (checked copy), command guide, search in every menu. |
@@ -127,6 +127,13 @@ which nobody has a reason to touch. Ransomware that encrypts or renames them tri
 check and hourly through monitoring, with what to do; placed and removed after your consent. And a YARA scan: 308
 ReversingLabs rules that recognize whole families (ransomware, password stealers, trojans, backdoors…), alongside
 the antivirus.
+
+**Windows Defender blocking** — Gardien blocks nothing itself: after your consent, it turns on what Windows blocks
+from its kernel and protects against being turned off. Attack surface reduction rules (password theft from memory,
+vulnerable drivers, booby-trapped Office documents and attachments), network protection against dangerous sites,
+unwanted software, controlled folder access against ransomware. Each rule is named before you agree and undoes
+exactly; those that would block Gardien on its USB drive or troubleshooting are never turned on, and nothing is
+offered when another antivirus replaces Defender.
 
 **Learning** — Gardien learns on your computer, sending nothing. An alert you declare normal for you ("i" when it is
 offered as a fix) drops to information for 90 days, or until it gets worse; each connection test is compared with

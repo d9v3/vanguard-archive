@@ -57,7 +57,7 @@ pour revenir.
 | **Connexion pour le jeu** | Ping, gigue, pertes, débit et bufferbloat, comparés à tes habitudes. |
 | **Dépanner** | Diagnostic de l'ordinateur, pannes de tous les jours pas à pas (Internet, Wi-Fi, lenteur, son, imprimante, disque plein), « Pourquoi c'est lent ? », fiche de l'ordinateur, réparations. |
 | **Optimiser et nettoyer** | Réglages de confidentialité et de performance qui s'annulent exactement, nettoyage à cocher avec la place gagnée mesurée, programmes du démarrage. |
-| **Protection** | Fichiers-pièges contre les rançongiciels, 308 règles YARA, antivirus, bac à sable, intégrité des fichiers critiques, mots de passe fuités, connexions sortantes, liens dangereux, fichiers téléchargés. |
+| **Protection** | Fichiers-pièges contre les rançongiciels, blocages de Windows Defender, 308 règles YARA, antivirus, bac à sable, intégrité des fichiers critiques, mots de passe fuités, connexions sortantes, liens dangereux, fichiers téléchargés. |
 | **Suivi** | Surveillance toutes les heures, entretien du mois, rapport HTML avec la courbe des notes, apprentissage sur ton ordinateur. |
 | **Logiciels et jeux** | Les meilleurs logiciels en 8 catégories, depuis leur source officielle ; mises à jour de tout d'un coup ; réglages pour jouer. |
 | **Outils** | Copier mes fichiers (copie vérifiée), guide des commandes, recherche dans tous les menus. |
@@ -139,6 +139,13 @@ renomme déclenche une alerte critique, au bilan et toutes les heures par la sur
 posés et retirés après accord. Et une analyse YARA : 308 règles de ReversingLabs qui reconnaissent des familles
 entières (rançongiciels, voleurs de mots de passe, chevaux de Troie, portes dérobées…), en complément de
 l'antivirus.
+
+**Blocages de Windows Defender** — Gardien ne bloque rien lui-même : il active, après accord, ce que Windows bloque
+depuis son noyau et protège contre la désactivation. Règles de réduction de la surface d'attaque (vol des mots de
+passe en mémoire, pilotes vulnérables, documents Office et pièces jointes piégés), protection réseau contre les
+sites dangereux, logiciels indésirables, accès contrôlé aux dossiers contre les rançongiciels. Chaque règle est
+nommée avant l'accord et s'annule exactement ; celles qui bloqueraient Gardien sur sa clé ou le dépannage ne sont
+jamais activées, et rien n'est proposé si un autre antivirus remplace Defender.
 
 **Apprentissage** — Gardien apprend sur ton ordinateur, sans rien envoyer. Une alerte que tu déclares normale chez
 toi (« i » à la correction) passe au niveau info pendant 90 jours, ou jusqu'à ce qu'elle s'aggrave ; chaque test de
