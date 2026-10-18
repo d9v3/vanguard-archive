@@ -4,6 +4,7 @@
 //! Lancé sans argument, affiche un menu.
 
 mod antivirus;
+mod apprentissage;
 mod commande;
 mod connexion;
 mod corriger;
@@ -136,6 +137,9 @@ enum Commande {
         #[arg(long, visible_alias = "list")]
         liste: bool,
     },
+    /// Ce que Gardien a appris sur cet ordinateur : les alertes déclarées normales, et les oublier.
+    #[command(visible_alias = "learned")]
+    Appris,
     /// Test de connexion pour le jeu : ping, gigue, pertes, débit et bufferbloat.
     #[command(visible_alias = "connection")]
     Connexion,
@@ -444,6 +448,7 @@ enum Action {
     Rapport,
     Audit,
     Integrite,
+    Appris,
     Diagnostic,
     Maj,
     Reparer,
@@ -480,6 +485,7 @@ impl Action {
         Action::Rapport,
         Action::Audit,
         Action::Integrite,
+        Action::Appris,
         Action::Diagnostic,
         Action::Maj,
         Action::Reparer,
@@ -560,6 +566,10 @@ impl Action {
             Action::Integrite => (
                 tr!("Intégrité des fichiers critiques", "Critical file integrity"),
                 tr!("comptes, sudo, SSH, démarrage…", "accounts, sudo, SSH, startup…"),
+            ),
+            Action::Appris => (
+                tr!("Ce que Gardien a appris", "What Gardien has learned"),
+                tr!("tes choix, tes habitudes", "your choices, your habits"),
             ),
             Action::Diagnostic => (
                 tr!("Diagnostic", "Diagnostic"),
@@ -750,6 +760,7 @@ impl Groupe {
                 Action::Reparer,
                 Action::Diagnostic,
                 Action::Integrite,
+                Action::Appris,
             ],
             Groupe::Reseau => &[
                 Action::Scanner,
@@ -860,6 +871,7 @@ async fn executer(s: &mut Session, action: Action) {
         }
         Action::Audit => s.audit = Some(machine::executer(false)),
         Action::Integrite => integrite::verifier(false),
+        Action::Appris => apprentissage::menu(),
         Action::Diagnostic => diagnostic::diagnostic(),
         Action::Maj => maj::executer(),
         Action::Reparer => reparer::menu(),
@@ -963,6 +975,10 @@ fn ligne_de_commande() -> clap::Command {
         (
             "connexion",
             "Connection test for gaming: ping, jitter, packet loss, speed and bufferbloat",
+        ),
+        (
+            "appris",
+            "What Gardien has learned on this computer: the alerts declared normal, and forgetting them",
         ),
         (
             "listes-noires",
@@ -1168,6 +1184,7 @@ async fn main() {
             (None, false) => antivirus::Portee::Rapide,
         }),
         Some(Commande::ListesNoires) => listes_noires::verifier(),
+        Some(Commande::Appris) => apprentissage::menu(),
         Some(Commande::Integrite { accepter, temps_reel }) => {
             if temps_reel {
                 integrite::temps_reel();

@@ -41,10 +41,14 @@ pub fn proposer(constats: &[Constat], contexte: &str) -> Vec<&'static str> {
                 println!("    {GRIS}{cmd}{RESET}");
             }
             let rep = demander(tr!(
-                "  Appliquer ? [o]ui / [n]on / [t]out appliquer : ",
-                "  Apply? [y]es / [n]o / [a]ll: "
+                "  Appliquer ? [o]ui / [n]on / [t]out appliquer / [i]gnorer, c'est normal chez moi : ",
+                "  Apply? [y]es / [n]o / [a]ll / [i]gnore, this is normal for me: "
             ))
             .to_lowercase();
+            if rep.trim() == "i" {
+                crate::apprentissage::accepter(c);
+                continue;
+            }
             let tout = crate::langue::tout(&rep);
             let lot: Vec<(&Constat, &Correctif)> = if tout {
                 auto[i..].to_vec()

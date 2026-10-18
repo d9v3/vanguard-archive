@@ -468,7 +468,11 @@ pub fn auditer(bavard: bool) -> Audit {
             "{GRIS}Checking (a few seconds)…{RESET}"
         );
     }
-    let a = os::auditer();
+    let mut a = os::auditer();
+    // Alertes que tu as déclarées normales : au niveau info, sans correction proposée (apprentissage.rs).
+    if crate::apprentissage::appliquer(&mut a.constats) > 0 {
+        a.score = score(&a.constats);
+    }
     // Vérifications impossibles : souvent une version de Windows ou une distribution que le code ne connaît pas.
     // Seulement à la demande : la surveillance horaire répéterait les mêmes lignes.
     if bavard {

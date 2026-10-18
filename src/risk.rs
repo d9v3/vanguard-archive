@@ -1,8 +1,8 @@
 //! Base de connaissances : service attendu sur chaque port et niveau de risque.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum Niveau {
     Info,
     Moyen,
