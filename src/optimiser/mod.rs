@@ -228,7 +228,11 @@ fn a_changer(a_faire: &[&Reglage], a_annuler: &[&Reglage], h: &Historique) -> Ve
         for r in a_faire {
             lignes.push(format!("    {VERT}+{RESET} {}", r.titre));
             for c in &r.changements {
-                lignes.push(format!("        {GRIS}{}{RESET}", c.decrire(c.cible().as_deref())));
+                // Un réglage peut reprendre un nom venu d'ailleurs (fichier d'autostart, valeur StartupApproved).
+                lignes.push(format!(
+                    "        {GRIS}{}{RESET}",
+                    crate::ui::affichable(&c.decrire(c.cible().as_deref()))
+                ));
             }
             if let Some(p) = r.prudence {
                 let mut morceaux = envelopper(p, LARGEUR - 10).into_iter();
@@ -247,7 +251,10 @@ fn a_changer(a_faire: &[&Reglage], a_annuler: &[&Reglage], h: &Historique) -> Ve
             };
             lignes.push(format!("    − {} {GRIS}({note}){RESET}", r.titre));
             for (c, v) in r.changements.iter().zip(valeurs_d_avant(r, h)) {
-                lignes.push(format!("        {GRIS}{}{RESET}", c.decrire(v.as_deref())));
+                lignes.push(format!(
+                    "        {GRIS}{}{RESET}",
+                    crate::ui::affichable(&c.decrire(v.as_deref()))
+                ));
             }
         }
     }

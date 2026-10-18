@@ -103,11 +103,24 @@ pub fn largeur_car(c: char) -> usize {
 /// qui ouvre les séquences ANSI et OSC, le retour chariot et le saut de ligne), DEL et les contrôles C1 (U+009B ouvre
 /// une séquence comme ESC [), et la mise en forme invisible : sens d'écriture bidi (U+202A à U+202E, U+2066 à U+2069,
 /// U+061C), espace, liaisons et marques de largeur nulle (U+200B à U+200F, U+2060 à U+2064), marque d'ordre des
-/// octets (U+FEFF).
+/// octets (U+FEFF). Et ce qui rend un nom trompeur sans rien piloter : séparateurs de ligne et de paragraphe (U+2028,
+/// U+2029), trait d'union conditionnel (U+00AD), séparateur mongol (U+180E), étiquettes invisibles (U+E0000 à
+/// U+E007F). Le sélecteur de variante des émojis (U+FE0F) reste.
 fn piege(c: char) -> bool {
     matches!(
         u32::from(c),
-        0x00..=0x1F | 0x7F..=0x9F | 0x061C | 0x200B..=0x200F | 0x202A..=0x202E | 0x2060..=0x2064 | 0x2066..=0x2069 | 0xFEFF
+        0x00..=0x1F
+            | 0x7F..=0x9F
+            | 0xAD
+            | 0x061C
+            | 0x180E
+            | 0x200B..=0x200F
+            | 0x2028..=0x2029
+            | 0x202A..=0x202E
+            | 0x2060..=0x2064
+            | 0x2066..=0x2069
+            | 0xFEFF
+            | 0xE0000..=0xE007F
     )
 }
 
@@ -129,18 +142,17 @@ pub fn chemin_affichable(chemin: &std::path::Path) -> String {
 
 /// Une commande prête à montrer avant d'être lancée. Elle reprend souvent un nom venu de l'extérieur (fichier à
 /// isoler, cache à effacer, tâche planifiée, imprimante) : piégé, il effacerait ou retournerait une partie de la
-/// ligne, et ce qui est montré ne serait plus ce qui est lancé. Les sauts de ligne et les tabulations, que Gardien
-/// peut écrire lui-même dans une commande, restent ; le reste passe par le filtre d'`affichable`. La commande lancée,
-/// elle, ne change pas.
+/// ligne, et ce qui est montré ne serait plus ce qui est lancé. Les tabulations restent ; un saut de ligne devient
+/// « ⏎ » sur la même ligne, pour qu'un nom de fichier qui en contient n'ajoute pas sous la commande une fausse ligne
+/// (« ✔ … ») ; le reste passe par le filtre d'`affichable`. La commande lancée, elle, ne change pas.
 pub fn commande_affichable(commande: &str) -> String {
     commande
         .chars()
-        .map(|c| {
-            if piege(c) && c != '\n' && c != '\t' {
-                '\u{fffd}'
-            } else {
-                c
-            }
+        .map(|c| match c {
+            '\n' => " ⏎ ".to_string(),
+            '\t' => c.to_string(),
+            _ if piege(c) => '\u{fffd}'.to_string(),
+            _ => c.to_string(),
         })
         .collect()
 }
@@ -388,6 +400,13 @@ mod tests {
         );
         // Invisibles : « Sa[U+200B]lon » ressemble à « Salon ».
         assert_eq!(affichable("Sa\u{200b}lon"), "Sa�lon");
+        // Trompeurs sans rien piloter : séparateurs de ligne, trait d'union conditionnel, séparateur mongol, étiquettes.
+        assert_eq!(
+            affichable("a\u{2028}b\u{2029}c\u{ad}d\u{180e}e\u{e0041}\u{e007f}"),
+            "a�b�c�d�e��"
+        );
+        // Le sélecteur de variante des émojis reste.
+        assert_eq!(affichable("❤\u{fe0f}"), "❤\u{fe0f}");
         assert_eq!(
             affichable("\u{200c}\u{200d}\u{200e}\u{200f}\u{2060}\u{2061}\u{2062}\u{2063}\u{2064}\u{feff}"),
             "����������"
@@ -439,9 +458,17 @@ mod tests {
             "Unregister-ScheduledTask -TaskName 'Maj�exe.txt' -Confirm:$false"
         );
         assert_eq!(commande_affichable("\u{9b}2K\x1b]52;c;eA==\x07"), "�2K�]52;c;eA==�");
+        // Un saut de ligne, de Gardien ou d'un nom de fichier, reste sur la ligne de la commande : pas de fausse ligne.
+        assert_eq!(
+            commande_affichable("rm -- ~/.cache/'x\n  ✔ Tout est propre'"),
+            "rm -- ~/.cache/'x ⏎   ✔ Tout est propre'"
+        );
+        assert_eq!(
+            commande_affichable("printf '%s\\n' a | sudo tee /etc/x >/dev/null\nsudo sysctl --system"),
+            "printf '%s\\n' a | sudo tee /etc/x >/dev/null ⏎ sudo sysctl --system"
+        );
         for c in [
             "sudo systemctl disable --now cups.service",
-            "printf '%s\\n' a | sudo tee /etc/x >/dev/null\nsudo sysctl --system",
             "Set-ItemProperty -LiteralPath 'HKCU:\\Software\\Été' -Name 'a\tb' -Value 0",
         ] {
             assert_eq!(commande_affichable(c).as_bytes(), c.as_bytes());

@@ -322,7 +322,11 @@ fn a_nettoyer(choisis: &[&Element]) -> Vec<String> {
     let mut lignes = Vec::new();
     for e in choisis {
         lignes.push(format!("    {VERT}−{RESET} {}  {GRIS}{}{RESET}", e.titre, precision(e)));
-        lignes.extend(e.commandes.iter().map(|c| format!("        {GRIS}{c}{RESET}")));
+        lignes.extend(
+            e.commandes
+                .iter()
+                .map(|c| format!("        {GRIS}{}{RESET}", crate::ui::commande_affichable(c))),
+        );
         if let Some(p) = e.prudence {
             let morceaux = envelopper(p, LARGEUR - 10);
             for (i, m) in morceaux.iter().enumerate() {

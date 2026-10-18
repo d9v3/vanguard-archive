@@ -829,10 +829,14 @@ fn lire_resultat(code: Option<i32>, sortie: &str) -> Option<Bilan> {
 #[cfg(unix)]
 fn noter_quarantaine(dossier: &std::path::Path, origine: &str, dest: &std::path::Path, detection: &str) {
     use std::io::Write;
+    // Lu par une personne (cat, éditeur) : un nom piégé n'y pilote pas le terminal, et une tabulation ou un saut de
+    // ligne dans un nom ne casse pas les colonnes.
     let ligne = format!(
-        "{}\t{detection}\t{origine}\t{}\n",
+        "{}\t{}\t{}\t{}\n",
         chrono::Local::now().format("%Y-%m-%d %H:%M:%S"),
-        dest.file_name().unwrap_or_default().to_string_lossy()
+        affichable(detection),
+        affichable(origine),
+        affichable(&dest.file_name().unwrap_or_default().to_string_lossy())
     );
     let ecrit = std::fs::OpenOptions::new()
         .create(true)
@@ -1050,6 +1054,23 @@ mod tests_cle {
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
+
+    /// Le journal de la quarantaine se lit avec cat : un nom piégé n'y pilote pas le terminal, et ses tabulations ou
+    /// sauts de ligne ne cassent pas les quatre colonnes.
+    #[cfg(unix)]
+    #[test]
+    fn journal_de_quarantaine_sans_piege() {
+        let d = std::env::temp_dir().join(format!("gardien-journal-quarantaine-{}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        noter_quarantaine(&d, "/home/alice/a\tb\x1b[2K\nc", &d.join("x.q"), "Eicar\x07");
+        let journal = std::fs::read_to_string(d.join("journal.txt")).unwrap();
+        assert_eq!(journal.lines().count(), 1, "{journal:?}");
+        let champs: Vec<&str> = journal.trim_end().split('\t').collect();
+        assert_eq!(champs.len(), 4, "{journal:?}");
+        assert_eq!(champs[1], "Eicar\u{fffd}");
+        assert_eq!(champs[2], "/home/alice/a\u{fffd}b\u{fffd}[2K\u{fffd}c");
+        let _ = std::fs::remove_dir_all(&d);
+    }
 
     #[test]
     fn resultat_clamscan() {

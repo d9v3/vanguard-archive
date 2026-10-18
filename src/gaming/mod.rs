@@ -268,7 +268,7 @@ pub(crate) fn remettre(
         println!("\n  {GRAS}{}{RESET}", a.titre);
         let c = commandes(id, &a.valeurs);
         for l in &c {
-            println!("    {GRIS}{l}{RESET}");
+            println!("    {GRIS}{}{RESET}", crate::ui::commande_affichable(l));
         }
         a_lancer.push(c);
         choisis.push((*id).clone());

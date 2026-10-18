@@ -160,7 +160,13 @@ fn lire_onvif(xml: &str) -> Option<String> {
     }
     let texte: Vec<String> = [nom, modele].into_iter().flatten().collect();
     // Une réponse du réseau ne doit pas pouvoir piloter le terminal.
-    Some(affichable(&texte.join(" · ")).chars().take(60).collect())
+    // Une tabulation est un blanc, comme avant, et non un « � ».
+    Some(
+        affichable(&texte.join(" · ").replace('\t', " "))
+            .chars()
+            .take(60)
+            .collect(),
+    )
 }
 
 /// Identifiant de message au format d'un UUID, tiré du hasard du système.

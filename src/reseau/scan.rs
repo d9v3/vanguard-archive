@@ -377,7 +377,8 @@ async fn banniere(mut flux: TcpStream, port: u16) -> Option<String> {
     };
     // Une bannière ne doit pas pouvoir piloter le terminal (`affichable`). Une réponse binaire, faite seulement de
     // contrôles, ne dit rien : pas de bannière, comme avant.
-    let propre: String = affichable(&ligne).chars().take(80).collect();
+    // Une tabulation dans une bannière est un blanc, comme avant, et non un « � ».
+    let propre: String = affichable(&ligne.replace('\t', " ")).chars().take(80).collect();
     propre.chars().any(|c| c != '\u{fffd}').then_some(propre)
 }
 
