@@ -10,8 +10,10 @@ use super::{Audit, Constat, alerte, cles_ssh, impossible, ok, score, sortie};
 use crate::risk::{Niveau, info_port};
 use crate::{tr, trf};
 
+mod durcissement;
 mod maj;
 mod persistance;
+mod privileges;
 
 pub use maj::mises_a_jour_completes;
 use persistance::persistance;
@@ -601,9 +603,15 @@ pub fn auditer() -> Audit {
         verif!(ports_ecoute(feu_actif)),
         verif!([chiffrement_disque()]),
         verif!(protection_systeme()),
+        verif!(durcissement::systeme_signe()),
+        verif!([durcissement::extensions_tierces()]),
+        verif!(durcissement::airdrop()),
         verif!(verrouillage_ecran()),
         verif!(ouverture_de_session()),
         verif!([comptes()]),
+        verif!(privileges::compte_root()),
+        verif!(privileges::sudo_sans_mot_de_passe()),
+        verif!(privileges::fichiers_secrets()),
         verif!(gestion_a_distance()),
         verif!([mises_a_jour_automatiques()]),
         verif!(maj::mises_a_jour()),
