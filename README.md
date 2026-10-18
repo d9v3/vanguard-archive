@@ -181,6 +181,7 @@ commandes ont aussi un nom anglais (`full`, `audit`, `fix`, `network`, `connecti
 ## Développer
 
 Compiler, tester, déployer, la clé USB, le journal des erreurs : voir [CONTRIBUTING.md](CONTRIBUTING.md).
+Une faille de sécurité dans Gardien ? Signale-la en privé : voir [SECURITY.md](SECURITY.md).
 
 ## Licence
 

@@ -171,6 +171,7 @@ also keep their French names (`complet`, `machine`, `corriger`, `reseau`, `conne
 ## Development
 
 Building, testing, deploying, the USB key, the error journal: see [CONTRIBUTING.en.md](CONTRIBUTING.en.md).
+A security flaw in Gardien? Report it privately: see [SECURITY.md](SECURITY.md#security).
 
 ## License
 
