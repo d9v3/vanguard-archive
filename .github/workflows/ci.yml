@@ -64,6 +64,10 @@ jobs:
           python3 -m venv /tmp/yara
           /tmp/yara/bin/pip install -q yara-python
           /tmp/yara/bin/python -c "import yara; yara.compile(filepath='assets/yara/reversinglabs.yara'); print('règles YARA compilées')"
+      # Liens internes de la documentation : fichiers visés, titres des ancres. Les liens web, eux, sont vérifiés
+      # avant chaque envoi et chaque version (outils/liens.py) : un site en panne ne doit pas faire échouer la CI.
+      - name: Liens internes
+        run: python3 outils/liens.py --hors-ligne
 
   # Windows la nuit seulement si le code a changé depuis le dernier passage réussi (comme macos.yml).
   utile:

@@ -1,0 +1,24 @@
+# Liens à part pour outils/liens.py : ceux qu'on ne peut pas ouvrir tels quels. Un par ligne, le début du lien suffit
+# (la règle au début le plus long l'emporte) ; « # » en commentaire.
+#   ignorer <lien>          pas une page : espace de noms XML, identifiant de document
+#   serveur <lien>          point d'accès d'une API, qui attend une vraie demande : seul compte que le serveur réponde
+#   protege <lien>          site qui refuse les programmes (403) : seul un « page introuvable » y compte
+#   essai <lien> <autre>    ouvrir <autre> à la place : une petite demande, que le service sait traiter
+
+# Identifiants écrits dans des fichiers (manifeste du .exe, plist de launchd), jamais ouverts.
+ignorer http://schemas.microsoft.com/
+ignorer http://www.apple.com/DTDs/
+
+# Test de connexion : le téléchargement ferait 25 Mo, l'envoi n'accepte que POST.
+essai https://speed.cloudflare.com/__down https://speed.cloudflare.com/__down?bytes=1
+serveur https://speed.cloudflare.com/__up
+
+# Mots de passe fuités : le programme ajoute les 5 premiers caractères de l'empreinte (ici 00000, un début quelconque).
+essai https://api.pwnedpasswords.com/range/ https://api.pwnedpasswords.com/range/00000
+
+# Paquets AUR : le programme ajoute leurs noms.
+essai https://aur.archlinux.org/rpc/v5/info? https://aur.archlinux.org/rpc/v5/info?arg[]=yay
+
+# Intel refuse tous les programmes (403, même pour une page qui n'existe pas) : pages ouvertes à la main le
+# 18 oct. 2026 ; elles ne se verront mortes que si Intel répond un jour « introuvable ».
+protege https://www.intel.com/

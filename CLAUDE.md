@@ -20,6 +20,9 @@ Réponses à l'utilisateur en français, claires, avec le pourquoi.
 - Déployer (binaire local, clé USB, GitHub) : `outils/deployer.sh`. À chaque nouvelle version, il refait aussi les
   captures du README (`outils/captures.py`, sur une copie des données, ce qui identifierait la maison masqué) et les
   commite à part.
+- Liens : `outils/liens.py` les vérifie tous (`--hors-ligne` : les internes seulement), tout seul avant chaque envoi
+  et chaque version. Un lien qu'on ne peut pas ouvrir tel quel (API, espace de noms, site qui refuse les programmes)
+  se décrit dans `outils/liens.txt`.
 - Skills du projet : `/verifier` (tout tester) et `/livrer` (version, déploiement, mises à jour qui suivent).
 
 ## Règles du code

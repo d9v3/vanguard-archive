@@ -96,12 +96,15 @@ if [[ -z $MODE ]]; then
 fi
 install -Dm755 "$LINUX" "$HOME/.cargo/bin/gardien"
 # Sauvegarde hors de la maison : les commits partent vers le dépôt GitHub (sans bloquer s'il n'y a pas d'Internet),
-# seulement si rien de personnel n'y paraît : code, messages, auteur (outils/confidentialite.py).
+# seulement si rien de personnel n'y paraît : code, messages, auteur (outils/confidentialite.py), et si aucun lien
+# n'est mort : documentation, programme, scripts, licences (outils/liens.py).
 if [[ -n $LOCAL ]]; then
   echo "Rien n'est envoyé sur GitHub (déploiement local)."
 elif git remote get-url origin >/dev/null 2>&1; then
   if ! python3 outils/confidentialite.py --envoi; then
     echo "Rien n'est envoyé sur GitHub : un détail personnel paraît dans les commits (voir ci-dessus)."
+  elif ! python3 outils/liens.py; then
+    echo "Rien n'est envoyé sur GitHub : un lien est mort (voir ci-dessus)."
   elif timeout 30 git push -q origin HEAD 2>/dev/null; then
     echo "Code envoyé sur GitHub."
   else

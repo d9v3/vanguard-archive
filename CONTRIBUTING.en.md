@@ -67,6 +67,13 @@ the four targets and the tests, on Linux; on a real Windows (PowerShell, registr
 on each pull request and on demand (`gh workflow run ci.yml`). Not Windows or Mac on each push: on a private
 repository, their minutes count double and ten times.
 
+Dead links: `outils/liens.py` opens every link of the repository (documentation, the program's code except tests,
+scripts, licences) and checks the internal links of the Markdown pages: target file, heading of an anchor, downloads
+of the latest release. It runs by itself before each push by `deployer.sh` and before each release page; CI checks
+the internal links (`--hors-ligne`). A dead link stops the push, a doubtful one (a site refusing programs, a server
+down) is only shown. Links that cannot be opened as they are (an API endpoint, a namespace) are described in
+`outils/liens.txt`.
+
 ## Screenshots and social preview
 
 `outils/captures.py` retakes the README screenshots (`assets/captures/`, in French and English) and the repository's

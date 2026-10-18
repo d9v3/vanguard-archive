@@ -32,6 +32,10 @@ if gh release view "$TAG" >/dev/null 2>&1; then
   echo "La version $TAG est déjà publiée."
   exit 0
 fi
+# Aucun lien mort, avant d'attendre le Mac : les téléchargements du README (…/releases/latest/download/<nom>) visent
+# les fichiers de cette version, qui sera la dernière (outils/liens.py).
+python3 outils/liens.py --version gardien-windows-x86_64.exe gardien-linux-x86_64 gardien-macos SHA256SUMS.txt ||
+  { echo "Liens : rien de publié."; exit 1; }
 
 DOSSIER=$(mktemp -d)
 trap 'rm -rf "$DOSSIER"' EXIT
@@ -77,6 +81,7 @@ SHA-256 checksums: \`SHA256SUMS.txt\`."
 # Rien de personnel dans la page de la version ni dans les programmes : chemins du dossier personnel, nom dans les
 # métadonnées du .exe… (outils/confidentialite.py).
 printf '%s\n' "$NOTES" | python3 outils/confidentialite.py --texte || { echo "Notes de la version : rien de publié."; exit 1; }
+printf '%s\n' "$NOTES" | python3 outils/liens.py --texte || { echo "Liens des notes : rien de publié."; exit 1; }
 python3 outils/confidentialite.py --binaire "$DOSSIER/gardien-windows-x86_64.exe" "$DOSSIER/gardien-linux-x86_64" \
   "$DOSSIER/gardien-macos" || { echo "Programmes : rien de publié."; exit 1; }
 gh release create "$TAG" --target "$COMMIT" --title "Gardien $VERSION" --notes "$NOTES" \

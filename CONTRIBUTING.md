@@ -68,6 +68,13 @@ remarque sur les quatre cibles et les tests, sous Linux ; sur un vrai Windows (P
 le code a changé, à chaque demande de fusion et à la demande (`gh workflow run ci.yml`). Pas Windows ni Mac à chaque
 envoi : sur un dépôt privé, leurs minutes comptent double et dix fois.
 
+Liens morts : `outils/liens.py` ouvre tous les liens du dépôt (documentation, code du programme hors tests, scripts,
+licences) et vérifie les liens internes des pages Markdown : fichier visé, titre d'une ancre, téléchargements de la
+dernière version. Il est lancé tout seul avant chaque envoi par `deployer.sh` et avant chaque page de version ; la CI
+vérifie les liens internes (`--hors-ligne`). Un lien mort arrête l'envoi, un lien douteux (site qui refuse les
+programmes, serveur en panne) est seulement montré. Les liens qu'on ne peut pas ouvrir tels quels (point d'accès
+d'une API, espace de noms) se décrivent dans `outils/liens.txt`.
+
 ## Captures d'écran et image de partage
 
 `outils/captures.py` refait les captures du README (`assets/captures/`, en français et en anglais) et l'image de

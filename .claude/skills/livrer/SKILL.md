@@ -10,7 +10,9 @@ description: Livrer une version de Gardien — numéro de version, commit, inté
 3. Rebase sur master, puis `git -C <arbre principal> merge --ff-only <branche>`. Si l'arbre principal a des
    changements non committés d'une autre session sur les mêmes fichiers : arrête-toi et demande.
 4. `outils/deployer.sh` : compile, refait les captures du README (nouvelle version : commit à part), installe,
-   pousse sur GitHub, met la clé à jour si elle est branchée. Si les captures n'ont pas pu se faire, le dire.
+   pousse sur GitHub, met la clé à jour si elle est branchée. Si les captures n'ont pas pu se faire, le dire. Rien
+   n'est poussé si un détail personnel paraît ou si un lien est mort (`outils/liens.py`) : corriger, puis relancer.
+   Un lien douteux montré : l'ouvrir (WebFetch) ; bon mais refusé aux programmes, l'ajouter à `outils/liens.txt`.
 5. `outils/publier-version.sh` : page de la version sur GitHub (Releases), avec les trois programmes et leurs
    empreintes SHA-256. S'il manque la version macOS de ce commit, il la fait compiler sur un Mac de GitHub
    (quelques minutes) ; ensuite, copier `target/macos/gardien` sur la clé (`macOS/`) si elle est branchée.
