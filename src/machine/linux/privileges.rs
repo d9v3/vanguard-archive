@@ -94,11 +94,7 @@ pub(super) fn fichiers_secrets() -> Vec<Constat> {
 /// Groupes qui donnent en pratique les droits root sans mot de passe.
 pub(super) fn groupes_privilegies() -> Option<Constat> {
     let groupes = sortie("id", &["-nG"])?;
-    let risques: Vec<&str> = groupes
-        .split_whitespace()
-        // « disk » : lecture et écriture directes des disques, donc de /etc/shadow et de tout le système.
-        .filter(|g| matches!(*g, "docker" | "lxd" | "incus-admin" | "disk"))
-        .collect();
+    let risques = groupes_a_risque(&groupes);
     Some(if risques.is_empty() {
         ok(
             "Groupes",
@@ -112,15 +108,25 @@ pub(super) fn groupes_privilegies() -> Option<Constat> {
             "Groupes",
             Niveau::Moyen,
             trf!(
-                "Tu es dans le groupe {} : tout programme lancé par toi peut devenir root sans mot de passe (via un conteneur).", "You are in the {} group: any program you run can become root without a password (through a container).",
+                "Tu es dans le groupe {} : tout programme lancé par toi peut devenir root sans mot de passe (par un conteneur, une machine virtuelle ou le disque lui-même).", "You are in the {} group: any program you run can become root without a password (through a container, a virtual machine or the disk itself).",
                 risques.join(", ")
             ),
         )
         .manuel(
-            tr!("Si tu n'utilises pas Docker au quotidien, sors du groupe (Docker demandera alors sudo) ; sinon, garde-le en connaissance de cause", "If you do not use Docker every day, leave the group (Docker will then ask for sudo); otherwise, keep it knowingly"),
+            tr!("Si tu n'en as pas besoin chaque jour, sors du groupe (l'outil demandera alors sudo) ; sinon, garde-le en connaissance de cause", "If you do not need it every day, leave the group (the tool will then ask for sudo); otherwise, keep it knowingly"),
             &[&format!("sudo gpasswd -d $USER {}", risques.first().copied().unwrap_or("docker"))],
         )
     })
+}
+
+/// Groupes de `id -nG` qui valent root : docker, lxd et incus-admin par un conteneur qui monte /, libvirt par une
+/// machine virtuelle qui reçoit le disque de l'ordinateur, disk par la lecture et l'écriture directes du disque (donc
+/// de /etc/shadow).
+fn groupes_a_risque(groupes: &str) -> Vec<&str> {
+    groupes
+        .split_whitespace()
+        .filter(|g| matches!(*g, "docker" | "lxd" | "incus-admin" | "libvirt" | "disk"))
+        .collect()
 }
 
 /// Règles « sudo sans mot de passe » : (règles qui donnent tout, règles limitées à des commandes précises).
@@ -181,6 +187,15 @@ mod tests {
         assert!(!secret_expose(0o40700));
         assert!(secret_expose(0o100_644));
         assert!(secret_expose(0o100_640));
+    }
+
+    #[test]
+    fn groupes_qui_valent_root() {
+        assert_eq!(
+            groupes_a_risque("alice wheel libvirt kvm docker"),
+            ["libvirt", "docker"]
+        );
+        assert_eq!(groupes_a_risque("alice wheel video audio kvm"), Vec::<&str>::new());
     }
 
     #[test]

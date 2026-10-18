@@ -627,18 +627,16 @@ fn mots_de_passe_sshd(conf: &str) -> bool {
         || (valeur("UsePAM").as_deref() == Some("yes") && clavier.as_deref() != Some("no"))
 }
 
-fn ssh_serveur() -> Constat {
-    if !systemd() {
-        return impossible("SSH", tr!("systemd absent", "systemd missing"));
-    }
-    // « sshd » sur Arch et Fedora, « ssh » sur Debian, Ubuntu et Mint. Ubuntu (22.10+) le lance à la demande
-    // par ssh.socket : le service paraît arrêté alors que le port 22 accepte les connexions.
-    if !["sshd", "ssh", "sshd.socket", "ssh.socket"]
+/// Le serveur SSH tourne-t-il ? « sshd » sur Arch et Fedora, « ssh » sur Debian, Ubuntu et Mint. Ubuntu (22.10+) le
+/// lance à la demande par ssh.socket : le service paraît arrêté alors que le port 22 accepte les connexions.
+fn sshd_actif() -> bool {
+    ["sshd", "ssh", "sshd.socket", "ssh.socket"]
         .iter()
         .any(|s| service_actif(s))
-    {
-        return ok("SSH", tr!("Serveur SSH désactivé.", "SSH server off."));
-    }
+}
+
+/// Configuration de sshd qui vaut pour toutes les connexions ; `None` si elle est réservée à root.
+fn configuration_sshd() -> Option<String> {
     // sshd garde la première valeur trouvée ; sur Arch, les fichiers .d sont inclus avant le reste.
     let mut fichiers: Vec<std::path::PathBuf> = std::fs::read_dir("/etc/ssh/sshd_config.d")
         .into_iter()
@@ -654,18 +652,29 @@ fn ssh_serveur() -> Constat {
             Ok(t) => conf += &partie_globale_sshd(&t),
             // Fedora et RHEL réservent la configuration à root : un fichier vide passerait pour les valeurs par
             // défaut (mot de passe permis), une fausse alerte.
-            Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
-                return impossible(
-                    "SSH",
-                    tr!(
-                        "configuration de sshd lisible seulement par root",
-                        "sshd configuration readable by root only"
-                    ),
-                );
-            }
+            Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => return None,
             Err(_) => {}
         }
     }
+    Some(conf)
+}
+
+fn ssh_serveur() -> Constat {
+    if !systemd() {
+        return impossible("SSH", tr!("systemd absent", "systemd missing"));
+    }
+    if !sshd_actif() {
+        return ok("SSH", tr!("Serveur SSH désactivé.", "SSH server off."));
+    }
+    let Some(conf) = configuration_sshd() else {
+        return impossible(
+            "SSH",
+            tr!(
+                "configuration de sshd lisible seulement par root",
+                "sshd configuration readable by root only"
+            ),
+        );
+    };
     let valeur = |cle: &str| valeur_sshd(&conf, cle);
     if valeur("PermitRootLogin").as_deref() == Some("yes") {
         return alerte(
@@ -714,6 +723,126 @@ fn ssh_serveur() -> Constat {
             "SSH server running, keys only, root forbidden."
         ),
     )
+}
+
+/// Quelqu'un essaie-t-il de deviner un mot de passe SSH ? Tentatives ratées des dernières 24 h, dans le journal.
+fn ssh_echecs() -> Option<Constat> {
+    if !systemd() || !sshd_actif() {
+        return None;
+    }
+    // « sshd-session » : depuis OpenSSH 9.8, c'est lui qui écrit les échecs de connexion.
+    let r = crate::commande::lancer(
+        Command::new("journalctl").args([
+            "_COMM=sshd",
+            "+",
+            "_COMM=sshd-session",
+            "--since",
+            "-24h",
+            "-o",
+            "cat",
+            "--no-pager",
+        ]),
+        20,
+    )?;
+    // Hors des groupes adm, wheel ou systemd-journal, journalctl ne montre que le journal de l'utilisateur : zéro
+    // échec passerait pour rien à signaler.
+    if r.erreurs.contains("other users and the system") || r.erreurs.contains("insufficient permissions") {
+        return Some(impossible(
+            "SSH",
+            tr!(
+                "journal du système réservé aux groupes adm, wheel et systemd-journal",
+                "system journal reserved to the adm, wheel and systemd-journal groups"
+            ),
+        ));
+    }
+    let (tentatives, adresses) = echecs_ssh(&r.sortie);
+    let internet = adresses.iter().filter(|ip| d_internet(ip)).count();
+    // Configuration illisible : on suppose les mots de passe permis (la valeur par défaut de sshd).
+    let mots_de_passe = configuration_sshd().is_none_or(|c| mots_de_passe_sshd(&c));
+    let niveau = niveau_echecs_ssh(tentatives, internet > 0, mots_de_passe)?;
+    let n = adresses.len();
+    let origine = if internet > 0 {
+        trf!(
+            ", dont {internet} sur Internet : le port SSH est ouvert vers l'extérieur",
+            ", {internet} of them on the Internet: the SSH port is open to the outside"
+        )
+    } else {
+        tr!(", toutes du réseau local", ", all from the local network").to_string()
+    };
+    let texte = if mots_de_passe {
+        trf!(
+            "{tentatives} tentative(s) de connexion SSH ratée(s) en 24 h, depuis {n} adresse(s){origine}. Quelqu'un essaie sans doute de deviner un mot de passe.",
+            "{tentatives} failed SSH login attempt(s) in 24 h, from {n} address(es){origine}. Someone is probably trying to guess a password."
+        )
+    } else {
+        trf!(
+            "{tentatives} tentative(s) de connexion SSH ratée(s) en 24 h, depuis {n} adresse(s){origine}. Sans danger tant que seules les clés sont acceptées.",
+            "{tentatives} failed SSH login attempt(s) in 24 h, from {n} address(es){origine}. Harmless as long as only keys are accepted."
+        )
+    };
+    let mut conseil = trf!(
+        "Bloquer les adresses qui insistent : sshguard (ou fail2ban), à régler avec ton pare-feu selon la documentation de ta distribution : {}",
+        "Block the addresses that keep trying: sshguard (or fail2ban), to set up with your firewall following your distribution's documentation: {}",
+        commande_installation("sshguard")
+    );
+    if internet > 0 {
+        conseil += tr!(
+            ". Si tu n'as pas besoin de SSH depuis l'extérieur, retire la redirection du port sur ta box",
+            ". If you do not need SSH from outside, remove the port forwarding on your router"
+        );
+    }
+    Some(alerte("SSH", niveau, texte).manuel(&conseil, &[]))
+}
+
+/// Tentatives de connexion SSH ratées dans le journal de sshd : (nombre, adresses d'origine). Une tentative laisse
+/// plusieurs lignes (« Invalid user », puis « Failed password ») qui partagent l'adresse et le port d'origine :
+/// comptée une fois.
+fn echecs_ssh(journal: &str) -> (usize, std::collections::BTreeSet<std::net::IpAddr>) {
+    const ECHECS: [&str; 4] = [
+        "Failed password",
+        "Failed keyboard-interactive",
+        "Invalid user",
+        "maximum authentication attempts",
+    ];
+    let mut tentatives = std::collections::BTreeSet::new();
+    for l in journal.lines().filter(|l| ECHECS.iter().any(|e| l.contains(e))) {
+        let mots: Vec<&str> = l.split_whitespace().collect();
+        if let Some(i) = mots.iter().position(|m| *m == "port")
+            && i > 0
+            && let Ok(ip) = mots[i - 1].parse::<std::net::IpAddr>()
+            && let Some(port) = mots
+                .get(i + 1)
+                .and_then(|p| p.trim_end_matches(':').parse::<u16>().ok())
+        {
+            tentatives.insert((ip, port));
+        }
+    }
+    let adresses = tentatives.iter().map(|(ip, _)| *ip).collect();
+    (tentatives.len(), adresses)
+}
+
+/// Adresse d'Internet, pas du réseau local (privé, lien local, partagé du fournisseur, la machine elle-même).
+fn d_internet(ip: &std::net::IpAddr) -> bool {
+    match ip {
+        std::net::IpAddr::V4(v4) => {
+            let o = v4.octets();
+            !(v4.is_private() || v4.is_loopback() || v4.is_link_local() || (o[0] == 100 && (64..128).contains(&o[1])))
+        }
+        std::net::IpAddr::V6(v6) => !(v6.is_loopback() || v6.is_unique_local() || v6.is_unicast_link_local()),
+    }
+}
+
+/// Gravité des tentatives ratées. Moins de 5 en 24 h, c'est du bruit (une faute de frappe, un vieux script) ; avec
+/// les mots de passe permis, des tentatives venues d'Internet sont une attaque en cours.
+fn niveau_echecs_ssh(tentatives: usize, internet: bool, mots_de_passe: bool) -> Option<Niveau> {
+    if tentatives < 5 {
+        return None;
+    }
+    Some(match (mots_de_passe, internet) {
+        (true, true) => Niveau::Eleve,
+        (true, false) => Niveau::Moyen,
+        (false, _) => Niveau::Info,
+    })
 }
 
 /// Lance une commande avec un délai maximal (sources réseau lentes). `None` si elle dépasse le délai ou si
@@ -1213,6 +1342,7 @@ pub fn auditer() -> Audit {
         verif!(ports_ecoute(feu_actif, feu_actif && ufw_actif())),
         verif!(docker()),
         verif!([ssh_serveur()]),
+        verif!(ssh_echecs()),
         verif!([mises_a_jour()]),
         verif!([failles_connues()]),
         verif!(autres_mises_a_jour()),
@@ -1341,6 +1471,28 @@ mod tests {
             Some(true)
         );
         assert_eq!(enable_streaming("\"Autre\"\t\"1\""), None);
+    }
+
+    #[test]
+    fn tentatives_ssh_ratees() {
+        let journal = "Invalid user admin from 203.0.113.5 port 52314
+Failed password for invalid user admin from 203.0.113.5 port 52314 ssh2
+Connection closed by invalid user admin 203.0.113.5 port 52314 [preauth]
+Failed password for root from 198.51.100.7 port 41122 ssh2
+Failed password for root from 198.51.100.7 port 41122 ssh2
+error: maximum authentication attempts exceeded for root from 198.51.100.7 port 41122 ssh2 [preauth]
+Failed keyboard-interactive/pam for alice from 2001:db8::5 port 40000 ssh2
+pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=203.0.113.5
+Accepted publickey for alice from 10.0.0.12 port 50000 ssh2
+Failed password for alice from 10.0.0.12 port 50001 ssh2";
+        let (n, adresses) = echecs_ssh(journal);
+        assert_eq!(n, 4);
+        assert_eq!(adresses.len(), 4);
+        assert_eq!(adresses.iter().filter(|ip| d_internet(ip)).count(), 3);
+        assert_eq!(niveau_echecs_ssh(4, true, true), None);
+        assert_eq!(niveau_echecs_ssh(30, true, true), Some(Niveau::Eleve));
+        assert_eq!(niveau_echecs_ssh(30, false, true), Some(Niveau::Moyen));
+        assert_eq!(niveau_echecs_ssh(30, true, false), Some(Niveau::Info));
     }
 
     #[test]
