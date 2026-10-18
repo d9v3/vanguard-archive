@@ -173,6 +173,7 @@ pub fn categorie(nom: &str) -> &str {
         "Programmes" => "Programs",
         "Protection système" => "System protection",
         "Périphériques" => "Devices",
+        "Rançongiciels" => "Ransomware",
         "Redémarrage" => "Restart",
         "Santé" => "Health",
         "Sauvegardes" => "Backups",

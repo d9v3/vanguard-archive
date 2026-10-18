@@ -21,6 +21,7 @@ mod machine;
 mod maj;
 mod nettoyer;
 mod optimiser;
+mod pieges;
 #[cfg(unix)]
 mod protection;
 mod rapport;
@@ -145,6 +146,13 @@ enum Commande {
         /// Surveiller les fichiers critiques en direct jusqu'à Ctrl-C.
         #[arg(long, visible_alias = "live")]
         temps_reel: bool,
+    },
+    /// Fichiers-pièges contre les rançongiciels : les poser (après accord), voir s'ils sont intacts, ou les retirer.
+    #[command(visible_alias = "decoys")]
+    Pieges {
+        /// Retirer les fichiers-pièges posés.
+        #[arg(long, visible_alias = "remove")]
+        retirer: bool,
     },
     /// Lance un programme inconnu dans un bac à sable : pas de réseau, dossier personnel invisible.
     #[command(visible_alias = "sandbox")]
@@ -432,6 +440,7 @@ enum Action {
     AntivirusRapide,
     AntivirusComplet,
     AntivirusDossier,
+    Pieges,
     Bac,
     MotsDePasse,
     Courriel,
@@ -465,6 +474,7 @@ impl Action {
         Action::AntivirusRapide,
         Action::AntivirusComplet,
         Action::AntivirusDossier,
+        Action::Pieges,
         Action::Bac,
         Action::MotsDePasse,
         Action::Courriel,
@@ -579,6 +589,10 @@ impl Action {
             Action::AntivirusDossier => (
                 tr!("Clé USB ou dossier", "USB drive or folder"),
                 tr!("et pièges de clé", "and drive traps"),
+            ),
+            Action::Pieges => (
+                tr!("Fichiers-pièges", "Decoy files"),
+                tr!("alerte si un rançongiciel chiffre", "early ransomware warning"),
             ),
             Action::Bac => (
                 tr!(
@@ -721,6 +735,7 @@ impl Groupe {
                 Action::AntivirusRapide,
                 Action::AntivirusComplet,
                 Action::AntivirusDossier,
+                Action::Pieges,
                 Action::Bac,
                 Action::MotsDePasse,
                 Action::Courriel,
@@ -843,6 +858,7 @@ async fn executer(s: &mut Session, action: Action) {
         Action::AntivirusRapide => antivirus::analyser(antivirus::Portee::Rapide),
         Action::AntivirusComplet => antivirus::analyser(antivirus::Portee::Complete),
         Action::AntivirusDossier => antivirus::choisir(),
+        Action::Pieges => pieges::menu(),
         Action::Bac => {
             let chemin = demander(tr!("  Programme à isoler (chemin) : ", "  Program to isolate (path): "));
             let chemin = chemin.trim().trim_matches(['"', '\'']);
@@ -916,6 +932,10 @@ fn ligne_de_commande() -> clap::Command {
         (
             "connexion",
             "Connection test for gaming: ping, jitter, packet loss, speed and bufferbloat",
+        ),
+        (
+            "pieges",
+            "Decoy files against ransomware: place them (after your consent), see whether they are intact, or remove them",
         ),
         (
             "isoler",
@@ -994,6 +1014,9 @@ fn ligne_de_commande() -> clap::Command {
     })
     .mut_subcommand("isoler", |s| {
         s.mut_arg("fichier", |a| a.help("Program or script to run"))
+    })
+    .mut_subcommand("pieges", |s| {
+        s.mut_arg("retirer", |a| a.help("Remove the decoy files placed"))
     })
     .mut_subcommand("integrite", |s| {
         s.mut_arg("accepter", |a| {
@@ -1091,6 +1114,7 @@ async fn main() {
         Some(Commande::MotDePasse) => fuites::verifier(),
         Some(Commande::Courriel) => fuites::verifier_courriel(),
         Some(Commande::Isoler { fichier }) => isoler::isoler(&fichier),
+        Some(Commande::Pieges { retirer }) => pieges::commande(retirer),
         Some(Commande::Integrite { accepter, temps_reel }) => {
             if temps_reel {
                 integrite::temps_reel();
