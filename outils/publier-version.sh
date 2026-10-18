@@ -40,7 +40,7 @@ notes() {
   [[ $nombre -gt 0 ]] || printf '**%s %s**\n\n' "$NOM" "$VERSION"
   while read -r sha sujet; do
     [[ -n $sha ]] || continue
-    puces=$(git log -1 --format=%b "$sha" | grep -viE '^(co-authored-by|signed-off-by):' || true)
+    puces=$(git log -1 --format=%b "$sha" | grep -viE '^(co-authored-by|signed-off-by|claude-session):' || true)
     puces=$(sed -e :a -e '/^\n*$/{$d;N;ba' -e '}' <<<"$puces")
     if [[ $nombre -gt 1 ]]; then
       printf '### %s : %s\n\n' "$(sed -E 's/.* \(v([0-9.]+)\)$/\1/' <<<"$sujet")" "${sujet% (v*)}"
