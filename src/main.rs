@@ -26,6 +26,7 @@ mod reparer;
 mod reseau;
 mod risk;
 mod scan;
+mod selection;
 mod surveillance;
 mod ui;
 mod upnp;
@@ -34,6 +35,7 @@ use clap::{CommandFactory, FromArgMatches, Parser, Subcommand};
 
 use machine::Audit;
 use reseau::{Options, Rapport};
+use selection::{Ligne, choisir};
 use ui::*;
 
 #[derive(Parser)]
@@ -242,37 +244,26 @@ fn nommer(appareil: &str, surnom: &str) {
     }
 }
 
-/// Une ligne du menu : la touche en blanc vif, le texte, et une précision en gris à droite.
-fn option(touche: &str, texte: &str, precision: &str) {
-    if precision.is_empty() {
-        println!("   {TOUCHE}{touche:>2}{RESET}  {texte}");
-    } else {
-        println!(
-            "   {TOUCHE}{touche:>2}{RESET}  {}{DISCRET}{precision}{RESET}",
-            ajuster(texte, 36)
-        );
-    }
-}
-
 /// État affiché en tête du menu : dernier bilan, dernier test de connexion, clé, surveillance.
-fn etat_du_menu(surveillance_active: bool) {
+fn etat_du_menu(surveillance_active: bool) -> Vec<String> {
+    let mut lignes = Vec::new();
     let historique = historique::charger();
-    match historique.last() {
+    lignes.push(match historique.last() {
         Some(b) => {
             let note = |s: Option<u32>| s.map_or_else(|| "—".to_string(), etiquette_note);
-            trp!(
+            trf!(
                 "  {GRIS}Dernier bilan{RESET}  {}   machine {}   réseau {}",
                 "  {GRIS}Last check{RESET}     {}   machine {}   network {}",
                 b.date,
                 note(b.machine),
                 note(b.reseau)
-            );
+            )
         }
-        None => trp!(
+        None => trf!(
             "  {GRIS}Aucun bilan encore : commence par 1.{RESET}",
             "  {GRIS}No check yet: start with 1.{RESET}"
         ),
-    }
+    });
     if let Some(c) = connexion::historique().last() {
         let debit = |d: Option<f64>| d.map_or_else(|| "?".to_string(), |d| format!("{d:.0}"));
         let bufferbloat = c
@@ -282,13 +273,13 @@ fn etat_du_menu(surveillance_active: bool) {
                 format!("{}{n}{RESET}", couleur(niveau))
             })
             .unwrap_or_default();
-        trp!(
+        lignes.push(trf!(
             "  {GRIS}Connexion{RESET}      {:.0} ms · ↓ {} ↑ {} Mbit/s · bufferbloat {bufferbloat}",
             "  {GRIS}Connection{RESET}     {:.0} ms · ↓ {} ↑ {} Mbit/s · bufferbloat {bufferbloat}",
             c.internet_ms,
             debit(c.descendant),
             debit(c.montant)
-        );
+        ));
     }
     let cle = if reseau::cle_protegee().is_some() {
         format!(
@@ -311,49 +302,70 @@ fn etat_du_menu(surveillance_active: bool) {
     } else {
         format!("{GRIS}{}{RESET}", tr!("surveillance coupée", "monitoring off"))
     };
-    println!("  {cle} {GRIS}·{RESET} {surveillance}");
+    lignes.push(format!("  {cle} {GRIS}·{RESET} {surveillance}"));
+    lignes
+}
+
+/// Lignes vides et sous-titre « ── NOM ──── » d'un menu.
+fn section_du_menu(t: &str) -> [Ligne; 2] {
+    [Ligne::Texte(String::new()), Ligne::Texte(ligne_section(t))]
 }
 
 async fn menu() {
     let mut s = Session::default();
+    // La ligne en surbrillance au retour dans le menu : la dernière choisie.
+    let mut dernier = String::from("1");
     loop {
         print!("\x1b[2J\x1b[H");
-        cadre(
+        let mut lignes: Vec<Ligne> = lignes_cadre(
             &format!("{ACCENT}SENTINEL{RESET} {GRIS}{}{RESET}", env!("CARGO_PKG_VERSION")),
             tr!(
                 "sécurité de ta machine et de ton réseau",
                 "security of your machine and your network"
             ),
-        );
-        let surveillance_active = surveillance::active();
-        etat_du_menu(surveillance_active);
+        )
+        .into_iter()
+        .map(Ligne::Texte)
+        .collect();
+        lignes.extend(etat_du_menu(surveillance::active()).into_iter().map(Ligne::Texte));
 
-        section(tr!("BILAN DE SÉCURITÉ", "SECURITY CHECK"));
-        option(
+        lignes.extend(section_du_menu(tr!("BILAN DE SÉCURITÉ", "SECURITY CHECK")));
+        lignes.push(Ligne::choix(
             "1",
             tr!("Bilan complet : machine + réseau", "Full check: machine + network"),
             tr!("← commencer ici", "← start here"),
-        );
-        option("2", tr!("Corriger les problèmes trouvés", "Fix the problems found"), "");
-        option(
+        ));
+        lignes.push(Ligne::choix(
+            "2",
+            tr!("Corriger les problèmes trouvés", "Fix the problems found"),
+            "",
+        ));
+        lignes.push(Ligne::choix(
             "3",
             tr!("Rapport détaillé dans le navigateur", "Detailed report in the browser"),
             "",
-        );
+        ));
 
-        section(tr!("OUTILS", "TOOLS"));
+        lignes.extend(section_du_menu(tr!("OUTILS", "TOOLS")));
         for (touche, groupe) in GROUPES.iter().enumerate() {
-            option(
+            lignes.push(Ligne::choix(
                 &(touche + 4).to_string(),
                 &format!("{} {ACCENT}›{RESET}", groupe.titre()),
                 groupe.resume(),
-            );
+            ));
         }
 
-        println!();
-        option("q", tr!("Quitter", "Quit"), "");
-        println!();
-        let choix = demander(&format!("  {ACCENT}›{RESET} {}", tr!("Choix : ", "Choice: ")));
+        lignes.push(Ligne::Texte(String::new()));
+        lignes.push(Ligne::choix("q", tr!("Quitter", "Quit"), ""));
+        lignes.push(Ligne::Texte(String::new()));
+        let Some(choix) = choisir(
+            &lignes,
+            &format!("  {ACCENT}›{RESET} {}", tr!("Choix : ", "Choice: ")),
+            &dernier,
+            tr!("quitter", "quit"),
+        ) else {
+            break;
+        };
         let choix = choix.trim().to_lowercase();
         println!();
         let groupe = choix
@@ -362,6 +374,7 @@ async fn menu() {
             .and_then(|n| n.checked_sub(4))
             .and_then(|i| GROUPES.get(i));
         if let Some(g) = groupe {
+            dernier = choix;
             sous_menu(&mut s, *g).await;
             continue;
         }
@@ -376,6 +389,7 @@ async fn menu() {
                 None => continue,
             },
         };
+        dernier = choix;
         executer(&mut s, action).await;
         demander(&trf!(
             "\n{GRIS}Entrée pour revenir au menu…{RESET}",
@@ -642,23 +656,38 @@ async fn sous_menu(s: &mut Session, groupe: Groupe) {
         ));
         return;
     }
+    let mut dernier = String::from("1");
     loop {
         print!("\x1b[2J\x1b[H");
-        cadre(
+        let mut lignes: Vec<Ligne> = lignes_cadre(
             &format!("{ACCENT}SENTINEL{RESET} {GRIS}›{RESET} {}", groupe.titre()),
             groupe.resume(),
-        );
-        println!();
+        )
+        .into_iter()
+        .map(Ligne::Texte)
+        .collect();
+        lignes.push(Ligne::Texte(String::new()));
         for (i, a) in groupe.actions().iter().enumerate() {
             let (texte, precision) = a.libelle();
-            option(&(i + 1).to_string(), texte, precision);
+            lignes.push(Ligne::choix(&(i + 1).to_string(), texte, precision));
         }
-        println!();
-        option("↵", tr!("Revenir au menu principal", "Back to the main menu"), "");
-        println!();
-        let choix = demander(&format!("  {ACCENT}›{RESET} {}", tr!("Choix : ", "Choice: ")));
+        lignes.push(Ligne::Texte(String::new()));
+        lignes.push(Ligne::choix(
+            "↵",
+            tr!("Revenir au menu principal", "Back to the main menu"),
+            "",
+        ));
+        lignes.push(Ligne::Texte(String::new()));
+        let Some(choix) = choisir(
+            &lignes,
+            &format!("  {ACCENT}›{RESET} {}", tr!("Choix : ", "Choice: ")),
+            &dernier,
+            tr!("revenir", "back"),
+        ) else {
+            return;
+        };
         let choix = choix.trim();
-        if choix.is_empty() || choix.eq_ignore_ascii_case("q") {
+        if choix.is_empty() || choix == "↵" || choix.eq_ignore_ascii_case("q") {
             return;
         }
         let Some(&action) = choix
@@ -669,6 +698,7 @@ async fn sous_menu(s: &mut Session, groupe: Groupe) {
         else {
             continue;
         };
+        dernier = choix.to_string();
         println!();
         executer(s, action).await;
         demander(&trf!(

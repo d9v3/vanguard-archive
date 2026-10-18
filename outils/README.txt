@@ -24,7 +24,7 @@ never starts anything by itself from a USB key (protection against viruses since
 
 To start: run Sentinel, choose "1. Full check", then "2. Fix".
 
-Menu
+Menu (↑ ↓ to select, Enter to run, Esc to go back; or the number, then Enter)
   1  Full check (machine + network), with what changed since the previous check
   2  Fix the problems found (each fix is shown, then confirmed)
   3  Detailed report (browser), with the grade history

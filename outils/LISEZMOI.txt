@@ -25,7 +25,7 @@ machine ni dossier personnel, pour améliorer Sentinel. Windows ne lance rien to
 
 Pour commencer : lancer Sentinel, choisir « 1. Bilan complet », puis « 2. Corriger ».
 
-Menu
+Menu (↑ ↓ pour choisir, Entrée pour lancer, Échap pour revenir ; ou le chiffre, puis Entrée)
   1  Bilan complet (machine + réseau), avec ce qui a changé depuis le bilan précédent
   2  Corriger les problèmes trouvés (chaque correction est montrée, puis confirmée)
   3  Rapport détaillé (navigateur), avec la courbe des notes

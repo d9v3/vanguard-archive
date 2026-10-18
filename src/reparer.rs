@@ -1192,25 +1192,35 @@ pub fn liste() -> Vec<Reparation> {
 
 /// Menu des réparations : choisir, lire, confirmer.
 pub fn menu() {
+    use crate::selection::{Ligne, choisir};
     let reparations = liste();
-    titre(tr!("Réparer", "Repair"));
+    let mut lignes = vec![
+        Ligne::Texte(String::new()),
+        Ligne::Texte(ligne_titre(tr!("Réparer", "Repair"))),
+    ];
     for (i, r) in reparations.iter().enumerate() {
         let note = if r.bloquee.is_some() {
-            trf!(
-                "  {GRIS}(indisponible ici){RESET}",
-                "  {GRIS}(not available here){RESET}"
-            )
+            tr!("indisponible ici", "not available here")
         } else if r.inutile.is_some() {
-            trf!("  {GRIS}(rien à faire){RESET}", "  {GRIS}(nothing to do){RESET}")
+            tr!("rien à faire", "nothing to do")
         } else {
-            String::new()
+            ""
         };
-        println!("  {}. {}{note}", i + 1, r.titre);
+        lignes.push(Ligne::choix(&(i + 1).to_string(), r.titre, note));
     }
-    let choix = demander(tr!(
-        "\nNuméro de la réparation (Entrée pour revenir) : ",
-        "\nRepair number (Enter to go back): "
-    ));
+    lignes.push(Ligne::Texte(String::new()));
+    lignes.push(Ligne::choix("↵", tr!("Revenir", "Back"), ""));
+    lignes.push(Ligne::Texte(String::new()));
+    let choix = choisir(
+        &lignes,
+        tr!(
+            "Numéro de la réparation (Entrée pour revenir) : ",
+            "Repair number (Enter to go back): "
+        ),
+        "1",
+        tr!("revenir", "back"),
+    )
+    .unwrap_or_default();
     let Some(r) = choix
         .parse::<usize>()
         .ok()

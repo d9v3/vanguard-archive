@@ -85,26 +85,45 @@ pub fn envelopper(t: &str, largeur: usize) -> Vec<String> {
 
 /// Titre de section : « ━━ Titre ━━━━━━━━… » sur toute la largeur.
 pub fn titre(t: &str) {
+    println!("\n{}", ligne_titre(t));
+}
+
+/// La ligne d'un titre de section, pour un menu qui se redessine.
+pub fn ligne_titre(t: &str) -> String {
     let reste = LARGEUR.saturating_sub(largeur_affichee(t) + 4);
-    println!("\n{ACCENT}━━ {t} {}{RESET}", "━".repeat(reste));
+    format!("{ACCENT}━━ {t} {}{RESET}", "━".repeat(reste))
 }
 
 /// Sous-titre discret à l'intérieur d'un écran : « ── NOM ──────… ».
 pub fn section(t: &str) {
+    println!("\n{}", ligne_section(t));
+}
+
+/// La ligne d'un sous-titre, pour un menu qui se redessine.
+pub fn ligne_section(t: &str) -> String {
     let reste = LARGEUR.saturating_sub(largeur_affichee(t) + 6);
-    println!("\n  {ACCENT}── {t}{RESET} {GRIS}{}{RESET}", "─".repeat(reste));
+    format!("  {ACCENT}── {t}{RESET} {GRIS}{}{RESET}", "─".repeat(reste))
 }
 
 /// Cadre de tête d'écran : un titre à gauche, une précision à droite.
 pub fn cadre(gauche: &str, droite: &str) {
+    for l in lignes_cadre(gauche, droite) {
+        println!("{l}");
+    }
+}
+
+/// Les trois lignes du cadre de tête, pour un menu qui se redessine.
+pub fn lignes_cadre(gauche: &str, droite: &str) -> [String; 3] {
     let interieur = LARGEUR - 2;
     let espace = interieur.saturating_sub(largeur_affichee(gauche) + largeur_affichee(droite) + 4);
-    println!("{ACCENT}╭{}╮{RESET}", "─".repeat(interieur));
-    println!(
-        "{ACCENT}│{RESET}  {gauche}{}{droite}  {ACCENT}│{RESET}",
-        " ".repeat(espace)
-    );
-    println!("{ACCENT}╰{}╯{RESET}", "─".repeat(interieur));
+    [
+        format!("{ACCENT}╭{}╮{RESET}", "─".repeat(interieur)),
+        format!(
+            "{ACCENT}│{RESET}  {gauche}{}{droite}  {ACCENT}│{RESET}",
+            " ".repeat(espace)
+        ),
+        format!("{ACCENT}╰{}╯{RESET}", "─".repeat(interieur)),
+    ]
 }
 
 /// Barre de score sur 10 cases, de la couleur de sa lettre : « ▰▰▰▰▰▰▰▰▱▱ ».
