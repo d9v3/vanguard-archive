@@ -48,21 +48,27 @@ pub fn homebrew() -> Option<&'static str> {
         .find(|p| std::path::Path::new(p).is_file())
 }
 
-/// Commandes qui installent une application avec Homebrew (« cask »). Sans Homebrew, on l'installe d'abord
-/// (script officiel, il demande le mot de passe et explique ce qu'il fait).
-pub fn installer_cask(cask: &str) -> Vec<String> {
-    if let Some(brew) = homebrew() {
-        return vec![format!("{brew} install --cask {cask}")];
-    }
-    let brew = if cfg!(target_arch = "aarch64") {
+/// Installation officielle de Homebrew : le script demande le mot de passe et explique ce qu'il fait.
+pub const INSTALLER_HOMEBREW: &str =
+    "/bin/bash -c \"$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\"";
+
+/// Le programme brew : celui qui est installé, sinon l'endroit où l'installation officielle le mettra.
+pub fn brew() -> &'static str {
+    homebrew().unwrap_or(if cfg!(target_arch = "aarch64") {
         "/opt/homebrew/bin/brew"
     } else {
         "/usr/local/bin/brew"
-    };
-    vec![
-        "/bin/bash -c \"$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\"".into(),
-        format!("{brew} install --cask {cask}"),
-    ]
+    })
+}
+
+/// Commandes qui installent une application avec Homebrew (« cask »). Sans Homebrew, on l'installe d'abord.
+pub fn installer_cask(cask: &str) -> Vec<String> {
+    let installer = format!("{} install --cask {cask}", brew());
+    if homebrew().is_some() {
+        vec![installer]
+    } else {
+        vec![INSTALLER_HOMEBREW.into(), installer]
+    }
 }
 
 /// Application présente dans /Applications ou ~/Applications (installée par Homebrew ou à la main).

@@ -58,8 +58,11 @@ n'affaiblit la sécurité.
   (snapper ou timeshift sous Linux, point de restauration Windows, instantané Time Machine sous macOS) ; sous
   Windows, chacune est un script lisible.
 - Mises à jour de tout d'un coup : système, programmes, pilotes, firmware.
-- Logiciels essentiels pour un PC neuf ou celui d'un ami (navigateurs, VLC, 7-Zip, LibreOffice, Bitwarden,
-  Thunderbird, Discord, OBS, GIMP, Notepad++, PowerToys) : winget, paquets de la distribution, Flatpak ou Homebrew.
+- Logiciels : les meilleurs de chaque usage, libres pour la plupart, rangés en 8 catégories (navigateurs et
+  courriel, messagerie et partage, sécurité et vie privée, bureautique, vidéo et musique, images et création, outils
+  système, programmation) et un pack de départ (Firefox, Bitwarden, VLC, LibreOffice, 7-Zip) : liste à cocher, déjà
+  installés reconnus, installation depuis la source officielle qui vérifie chaque téléchargement (winget, paquets de
+  la distribution ou Flathub, Homebrew).
 - Réparations : Internet, navigation détournée, pare-feu, disque, disque plein, nettoyage approfondi, Windows Update
   bloqué, fichiers système, heure.
 - Antivirus : ClamAV (Linux, macOS) ou Microsoft Defender (Windows), sur l'ordinateur ou sur une clé USB / un dossier
@@ -96,7 +99,7 @@ Chaque entrée du menu existe aussi en commande :
 | `sentinel machine [--json]` | audit de cette machine |
 | `sentinel reseau [cible] [-p courants\|tous\|22,80,8000-8100] [--json]` | scan du réseau ou d'un appareil |
 | `sentinel connexion` | test de connexion pour le jeu |
-| `sentinel logiciels` | logiciels essentiels à installer (winget, paquets de la distribution ou Flatpak) |
+| `sentinel logiciels [--liste] [--recommandes]` | logiciels à installer par catégorie ; `--liste` : leur état, sans rien installer |
 | `sentinel diagnostic` | diagnostic de l'ordinateur : matériel, système, plantages et erreurs récents |
 | `sentinel antivirus [--complet] [dossier]` | analyse antivirus (ordinateur, ou une clé / un dossier) |
 | `sentinel motdepasse` | mots de passe fuités |
@@ -141,6 +144,7 @@ modification. Sur GitHub, `@claude` dans un ticket ou une demande de fusion le f
 | `src/rapport.rs`, `src/historique.rs` | rapport HTML, historique des bilans, courbe des notes |
 | `src/reparer.rs`, `src/maj.rs`, `src/gaming/` | réparations, mises à jour, gaming |
 | `src/optimiser/` | réglages de confidentialité, de performance et de confort, avec annulation exacte |
+| `src/logiciels/` | logiciels à installer : catalogue vérifié (`catalogue.rs`), état et installation par système |
 | `src/fuites.rs`, `src/donnees.rs` | mots de passe fuités, sauvegarde des données |
 | `assets/oui.tsv` | fabricants par préfixe MAC (liste IEEE) |
 | `LICENCES-TIERCES.txt` | avis de licence des bibliothèques incluses (`outils/licences-tierces.py`) |

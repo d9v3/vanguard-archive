@@ -14,10 +14,6 @@ use crate::machine;
 use crate::trw;
 use crate::ui::*;
 
-/// winget sort ces codes quand le paquet est déjà là (« aucune mise à jour applicable », « déjà installé ») :
-/// ce n'est pas un échec.
-const DEJA_INSTALLE: &str = "-1978335189, -1978335135";
-
 /// Ce que sentinel lit avant d'afficher le menu : une photo de l'état, lue telle quelle depuis PowerShell.
 #[allow(clippy::struct_excessive_bools)]
 #[derive(Default, Deserialize)]
@@ -77,12 +73,8 @@ fn lire_etat() -> Option<Etat> {
     serde_json::from_str(&json).ok()
 }
 
-/// Installation silencieuse par winget, sans erreur si le paquet est déjà là.
 fn winget(id: &str) -> String {
-    format!(
-        "winget install --id {id} --exact --silent --accept-package-agreements --accept-source-agreements --disable-interactivity; \
-         if ($LASTEXITCODE -in {DEJA_INSTALLE}) {{ $global:LASTEXITCODE = 0 }}"
-    )
+    machine::windows::winget_installer(id)
 }
 
 /// Écrit une valeur DWORD en créant la clé si besoin (jamais « New-Item -Force » sur une clé existante :

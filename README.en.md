@@ -54,8 +54,10 @@ is recorded, then put back. None of them weakens security.
   timeshift on Linux, Windows restore point, Time Machine snapshot on macOS); on Windows, each one is a readable
   script.
 - Update everything at once: system, programs, drivers, firmware.
-- Essential software for a new PC or a friend's (browsers, VLC, 7-Zip, LibreOffice, Bitwarden, Thunderbird, Discord,
-  OBS, GIMP, Notepad++, PowerToys): winget, distribution packages, Flatpak or Homebrew.
+- Software: the best program for each use, mostly open source, in 8 categories (browsers and email, messaging and
+  sharing, security and privacy, office, video and music, images and design, system tools, programming) plus a
+  starter pack (Firefox, Bitwarden, VLC, LibreOffice, 7-Zip): checklist, installed ones recognized, installation from
+  the official source that checks each download (winget, distribution packages or Flathub, Homebrew).
 - Repairs: Internet, hijacked browsing, firewall, disk, full disk, deep cleaning, stuck Windows Update, system files,
   clock.
 - Antivirus: ClamAV (Linux, macOS) or Microsoft Defender (Windows), on the computer or on a chosen USB key / folder,
@@ -92,7 +94,7 @@ Each menu entry is also a command:
 | `sentinel audit [--json]` | audit of this machine |
 | `sentinel network [target] [-p common\|all\|22,80,8000-8100] [--json]` | scan the network or one device |
 | `sentinel connection` | connection test for gaming |
-| `sentinel apps` | essential software to install (winget, distribution packages or Flatpak) |
+| `sentinel apps [--list] [--recommended]` | software to install by category; `--list`: their state, installing nothing |
 | `sentinel diag` | computer diagnostic: hardware, system, recent crashes and errors |
 | `sentinel antivirus [--complet] [folder]` | antivirus scan (computer, or a key / a folder) |
 | `sentinel password` | leaked passwords |
@@ -141,6 +143,7 @@ The code, its comments and its internal names are in French; every text shown to
 | `src/rapport.rs`, `src/historique.rs` | HTML report, check history, grade curve |
 | `src/reparer.rs`, `src/maj.rs`, `src/gaming/` | repairs, updates, gaming |
 | `src/optimiser/` | privacy, performance and comfort settings, with exact undo |
+| `src/logiciels/` | software to install: checked catalog (`catalogue.rs`), state and installation per system |
 | `src/fuites.rs`, `src/donnees.rs` | leaked passwords, data backup |
 | `assets/oui.tsv` | manufacturers by MAC prefix (IEEE list) |
 | `LICENCES-TIERCES.txt` | license notices of the included libraries (`outils/licences-tierces.py`) |

@@ -21,6 +21,19 @@ pub const NOM: &str = "Windows";
 
 const FIN: &str = "__SENTINEL_FIN__";
 
+/// winget sort ces codes quand le paquet est déjà là (« aucune mise à jour applicable », « déjà installé ») :
+/// ce n'est pas un échec.
+const DEJA_INSTALLE: &str = "-1978335189, -1978335135";
+
+/// Installation silencieuse par winget, sans erreur si le paquet est déjà là. La source est imposée : un
+/// identifiant ne peut pas être pris pour une application du Microsoft Store au nom voisin.
+pub fn winget_installer(id: &str) -> String {
+    format!(
+        "winget install --id {id} --exact --source winget --silent --accept-package-agreements --accept-source-agreements --disable-interactivity; \
+         if ($LASTEXITCODE -in {DEJA_INSTALLE}) {{ $global:LASTEXITCODE = 0 }}"
+    )
+}
+
 /// Windows PowerShell 5.1, avec ses propres modules. Lancé depuis PowerShell 7 (Windows Terminal), il hériterait
 /// de son PSModulePath et chargerait des modules de la version 7, incompatibles : le lecteur Cert: manquait ainsi
 /// dans le test de la VM. Sans la variable, la 5.1 reprend ses chemins par défaut.

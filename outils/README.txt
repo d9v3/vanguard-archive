@@ -46,7 +46,8 @@ Menu (↑ ↓ to select, Enter to run, Esc to go back; or the number, then Enter
        Passwords: have they leaked? (only 5 characters of their fingerprint are sent)
        Email address: has it leaked? (sent to the search service, after your consent)
   7  Install and play ›
-       Essential software (browser, VLC, 7-Zip, LibreOffice, Bitwarden…: new PC or a friend's)
+       Software: the best ones, mostly open source, by category (browsers, passwords, office, video,
+       design, system tools…) plus a starter pack, from the official source
        Gaming (Windows: Visual C++, DirectX…; Linux: Steam, Vulkan, GameMode, MangoHud, Wine, Lutris…;
        macOS: Steam, Heroic)
   8  Optimize ›

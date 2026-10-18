@@ -120,7 +120,10 @@ verifier "mot de passe : jamais affiché" bash -c "! grep -q 'Mot de passe : pas
 section "Réparer (liste), mises à jour (sans rien installer), logiciels, gaming, courriel refusé"
 lancer reparer 60 '\n' reparer
 lancer maj 600 'n\nn\nn\nn\nn\n' maj
+lancer logiciels-liste 120 '' logiciels --liste
+verifier "logiciels : au moins 20 proposés" python3 -c "import re, sys; t = open('$RES/logiciels-liste.txt', encoding='utf-8').read(); sys.exit(len(re.findall(r'(?m)^ +(?:\x1b\[[0-9;]*m)?[✔·]', t)) < 20)"
 lancer logiciels 60 '\n' logiciels
+verifier "logiciels : menu affiché" grep -qE 'Pack de départ|Starter pack' "$RES/logiciels.txt"
 lancer gaming 60 '\n' gaming
 lancer courriel 60 'test@example.com\nn\n' courriel
 

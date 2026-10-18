@@ -205,6 +205,8 @@ pub struct Case {
     pub cochee: bool,
     /// Cochée par R (« recommandés »).
     pub recommandee: bool,
+    /// Déjà faite (un logiciel installé) : montrée « [✔] », ni Espace ni R ne la changent.
+    pub fixe: bool,
 }
 
 fn rendu_case(n: usize, c: &Case, cochee: bool, colonne: usize, en_cours: bool) -> String {
@@ -213,7 +215,9 @@ fn rendu_case(n: usize, c: &Case, cochee: bool, colonne: usize, en_cours: bool) 
     } else {
         (" ".to_string(), "")
     };
-    let case = if cochee {
+    let case = if c.fixe {
+        format!("{VERT}[✔]{RESET}")
+    } else if cochee {
         format!("{VERT}[x]{RESET}")
     } else {
         "[ ]".to_string()
@@ -227,7 +231,8 @@ fn rendu_case(n: usize, c: &Case, cochee: bool, colonne: usize, en_cours: bool) 
 
 /// Liste à cocher, sous un titre : ↑ ↓ pour se déplacer, Espace pour cocher ou décocher, R pour cocher les
 /// recommandés, Entrée pour valider, Échap pour revenir sans rien changer. Retourne l'état final des cases, ou
-/// `None` pour Échap. Sans terminal, les numéros à inverser se tapent sur une ligne (« 1 4 », « r »).
+/// `None` pour Échap. Sans terminal, les numéros à inverser se tapent sur une ligne (« 1 4 », « r »). Une case
+/// `fixe` garde son état.
 pub fn cocher(titre: &[String], cases: &[Case]) -> Option<Vec<bool>> {
     let mut etats: Vec<bool> = cases.iter().map(|c| c.cochee).collect();
     if cases.is_empty() {
@@ -264,15 +269,15 @@ pub fn cocher(titre: &[String], cases: &[Case]) -> Option<Vec<bool>> {
         {
             if mot.eq_ignore_ascii_case("r") {
                 for (e, c) in etats.iter_mut().zip(cases) {
-                    *e |= c.recommandee;
+                    *e |= c.recommandee && !c.fixe;
                 }
-            } else if let Some(e) = mot
+            } else if let Some(i) = mot
                 .parse::<usize>()
                 .ok()
                 .and_then(|n| n.checked_sub(1))
-                .and_then(|i| etats.get_mut(i))
+                .filter(|&i| cases.get(i).is_some_and(|c| !c.fixe))
             {
-                *e = !*e;
+                etats[i] = !etats[i];
             }
         }
         return Some(etats);
@@ -319,10 +324,10 @@ pub fn cocher(titre: &[String], cases: &[Case]) -> Option<Vec<bool>> {
             KeyCode::Down | KeyCode::Tab => en_cours = if en_cours == derniere { 0 } else { en_cours + 1 },
             KeyCode::Home | KeyCode::PageUp => en_cours = 0,
             KeyCode::End | KeyCode::PageDown => en_cours = derniere,
-            KeyCode::Char(' ') => etats[en_cours] = !etats[en_cours],
+            KeyCode::Char(' ') if !cases[en_cours].fixe => etats[en_cours] = !etats[en_cours],
             KeyCode::Char('r' | 'R') if !ctrl => {
                 for (e, c) in etats.iter_mut().zip(cases) {
-                    *e |= c.recommandee;
+                    *e |= c.recommandee && !c.fixe;
                 }
             }
             KeyCode::Enter => {

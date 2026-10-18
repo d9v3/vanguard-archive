@@ -47,7 +47,8 @@ Menu (↑ ↓ pour choisir, Entrée pour lancer, Échap pour revenir ; ou le chi
        Mots de passe : ont-ils fuité ? (seuls 5 caractères de leur empreinte sont envoyés)
        Adresse courriel : a-t-elle fuité ? (envoyée au service de recherche, après ton accord)
   7  Installer et jouer ›
-       Logiciels essentiels (navigateur, VLC, 7-Zip, LibreOffice, Bitwarden… : PC neuf ou celui d'un ami)
+       Logiciels : les meilleurs, libres pour la plupart, par catégorie (navigateurs, mots de passe,
+       bureautique, vidéo, création, outils système…) et un pack de départ, depuis la source officielle
        Gaming (Windows : Visual C++, DirectX… ; Linux : Steam, Vulkan, GameMode, MangoHud, Wine, Lutris… ;
        macOS : Steam, Heroic)
   8  Optimiser ›

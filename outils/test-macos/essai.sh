@@ -108,7 +108,10 @@ section "Réparer (liste), mises à jour (sans rien installer), logiciels, gamin
 lancer reparer 60 '\n' reparer
 lancer maj 400 'n\nn\nn\nn\n' maj
 verifier "maj : jamais « --install --all » (installerait une nouvelle version majeure)" bash -c "! grep -q -- '--install --all' '$RES/maj.txt'"
+lancer logiciels-liste 120 '' logiciels --liste
+verifier "logiciels : au moins 20 proposés" python3 -c "import re, sys; t = open('$RES/logiciels-liste.txt', encoding='utf-8').read(); sys.exit(len(re.findall(r'(?m)^ +(?:\x1b\[[0-9;]*m)?[✔·]', t)) < 20)"
 lancer logiciels 60 '\n' logiciels
+verifier "logiciels : menu affiché" grep -qE 'Pack de départ|Starter pack' "$RES/logiciels.txt"
 lancer gaming 60 '\n' gaming
 
 section "Données : sauvegarde puis restauration"

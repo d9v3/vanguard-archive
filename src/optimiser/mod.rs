@@ -261,6 +261,7 @@ pub fn menu(categorie: Categorie) {
             },
             cochee: *e == Etat::Fait,
             recommandee: r.recommande,
+            fixe: false,
         })
         .collect();
     let entete = vec![

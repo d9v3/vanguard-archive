@@ -113,9 +113,17 @@ enum Commande {
     /// Diagnostic de l'ordinateur : matériel, système et problèmes récents (plantages, erreurs). Lecture seule.
     #[command(visible_alias = "diag")]
     Diagnostic,
-    /// Logiciels essentiels (navigateur, VLC, 7-Zip, LibreOffice, Bitwarden…) : choisir puis installer.
+    /// Logiciels : les meilleurs, libres pour la plupart (navigateurs, mots de passe, bureautique, vidéo, création,
+    /// outils système…), par catégorie : choisir puis installer depuis la source officielle du système.
     #[command(visible_alias = "apps")]
-    Logiciels,
+    Logiciels {
+        /// Montrer chaque logiciel proposé et son état, sans rien installer.
+        #[arg(long, visible_alias = "list")]
+        liste: bool,
+        /// Installer le pack de départ (navigateur, mots de passe, vidéo, bureautique, archives), après accord.
+        #[arg(long, visible_alias = "recommended")]
+        recommandes: bool,
+    },
     /// Test de connexion pour le jeu : ping, gigue, pertes, débit et bufferbloat.
     #[command(visible_alias = "connection")]
     Connexion,
@@ -579,8 +587,8 @@ impl Action {
                 tr!("avec ton accord", "with your consent"),
             ),
             Action::Logiciels => (
-                tr!("Logiciels essentiels", "Essential software"),
-                tr!("navigateur, VLC, LibreOffice…", "browser, VLC, LibreOffice…"),
+                tr!("Logiciels", "Software"),
+                tr!("les meilleurs, par catégorie", "the best ones, by category"),
             ),
             Action::Gaming => (
                 tr!("Gaming", "Gaming"),
@@ -674,7 +682,7 @@ impl Groupe {
             Groupe::Machine => tr!("audit, mises à jour, réparer…", "audit, updates, repair…"),
             Groupe::Reseau => tr!("appareils, surveillance, débit", "devices, monitoring, speed test"),
             Groupe::Protection => tr!("analyses, clé USB, fuites…", "scans, USB drive, leaks…"),
-            Groupe::Installer => tr!("logiciels essentiels, gaming", "essential software, gaming"),
+            Groupe::Installer => tr!("logiciels libres, gaming", "open source software, gaming"),
             Groupe::Optimiser => tr!("confidentialité, confort…", "privacy, comfort…"),
             Groupe::Donnees => tr!("sauvegarder ou restaurer", "back up or restore"),
         }
@@ -879,7 +887,7 @@ fn ligne_de_commande() -> clap::Command {
         ),
         (
             "logiciels",
-            "Essential software (browser, VLC, 7-Zip, LibreOffice, Bitwarden…): choose, then install",
+            "Software: the best programs, mostly open source (browsers, passwords, office, video, design, system tools…), by category: choose, then install from the system's official source",
         ),
         (
             "diagnostic",
@@ -925,7 +933,15 @@ fn ligne_de_commande() -> clap::Command {
     for &(nom, aide) in aides {
         c = c.mut_subcommand(nom, |s| s.about(aide));
     }
-    c.mut_subcommand("complet", |s| {
+    c.mut_subcommand("logiciels", |s| {
+        s.mut_arg("liste", |a| {
+            a.help("Show each program offered and its state, without installing anything")
+        })
+        .mut_arg("recommandes", |a| {
+            a.help("Install the starter pack (browser, passwords, video, office, archives), after your consent")
+        })
+    })
+    .mut_subcommand("complet", |s| {
         s.mut_arg("html", |a| a.help("Also open the HTML report in the browser"))
             .mut_arg("texte", |a| {
                 a.help(
@@ -1031,7 +1047,15 @@ async fn main() {
         Some(Commande::Gaming) => gaming::menu(),
         Some(Commande::Connexion) => connexion::tester().await,
         Some(Commande::Diagnostic) => diagnostic::diagnostic(),
-        Some(Commande::Logiciels) => logiciels::menu(),
+        Some(Commande::Logiciels { liste, recommandes }) => {
+            if liste {
+                logiciels::liste();
+            } else if recommandes {
+                logiciels::recommandes();
+            } else {
+                logiciels::menu();
+            }
+        }
         Some(Commande::MotDePasse) => fuites::verifier(),
         Some(Commande::Courriel) => fuites::verifier_courriel(),
         Some(Commande::Isoler { fichier }) => isoler::isoler(&fichier),
