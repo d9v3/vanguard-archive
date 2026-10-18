@@ -3,10 +3,10 @@
 //! (lpstat) ; Windows : le spouleur et Get-Printer. Vider la file, réactiver l'imprimante ou relancer le service :
 //! montré, puis fait après accord.
 
-use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
+use std::net::{SocketAddr, ToSocketAddrs};
 use std::time::Duration;
 
-use super::{Etat, a_savoir, constat, question, verifications};
+use super::{Etat, a_savoir, fait, question, verifications};
 use crate::ui::*;
 
 /// Une imprimante installée.
@@ -83,22 +83,16 @@ fn repond(hote: &str) -> bool {
         .filter_map(|&p| (hote, p).to_socket_addrs().ok()?.next())
         .collect();
     adresses
-        .iter()
-        .any(|a| match TcpStream::connect_timeout(a, Duration::from_millis(1500)) {
-            Ok(_) => true,
-            Err(e) => e.kind() == std::io::ErrorKind::ConnectionRefused,
-        })
+        .into_iter()
+        .any(|a| super::reseau::joignable(a, Duration::from_millis(1500)))
 }
 
 fn montrer(imprimantes: &[Imprimante]) {
     if imprimantes.is_empty() {
-        constat(
-            Etat::Mauvais,
-            tr!(
-                "Aucune imprimante n'est installée sur cet ordinateur.",
-                "No printer is installed on this computer."
-            ),
-        );
+        Etat::Mauvais.dire(tr!(
+            "Aucune imprimante n'est installée sur cet ordinateur.",
+            "No printer is installed on this computer."
+        ));
         return;
     }
     for i in imprimantes {
@@ -108,43 +102,31 @@ fn montrer(imprimantes: &[Imprimante]) {
             ""
         };
         if i.en_pause {
-            constat(
-                Etat::Mauvais,
-                &trf!("{}{defaut} : en pause.", "{}{defaut}: paused.", i.nom),
-            );
+            Etat::Mauvais.dire(&trf!("{}{defaut} : en pause.", "{}{defaut}: paused.", i.nom));
         } else {
-            constat(Etat::Bon, &trf!("{}{defaut} : prête.", "{}{defaut}: ready.", i.nom));
+            Etat::Bon.dire(&trf!("{}{defaut} : prête.", "{}{defaut}: ready.", i.nom));
         }
         if !i.hote.is_empty() {
             if repond(&i.hote) {
-                constat(
-                    Etat::Bon,
-                    &trf!(
-                        "Elle répond sur le réseau ({}).",
-                        "It answers on the network ({}).",
-                        i.hote
-                    ),
-                );
+                Etat::Bon.dire(&trf!(
+                    "Elle répond sur le réseau ({}).",
+                    "It answers on the network ({}).",
+                    i.hote
+                ));
             } else {
-                constat(
-                    Etat::Mauvais,
-                    &trf!(
-                        "Elle ne répond pas sur le réseau ({}) : éteinte, sur un autre Wi-Fi, ou son adresse a changé.",
-                        "It does not answer on the network ({}): turned off, on another Wi-Fi, or its address changed.",
-                        i.hote
-                    ),
-                );
+                Etat::Mauvais.dire(&trf!(
+                    "Elle ne répond pas sur le réseau ({}) : éteinte, sur un autre Wi-Fi, ou son adresse a changé.",
+                    "It does not answer on the network ({}): turned off, on another Wi-Fi, or its address changed.",
+                    i.hote
+                ));
             }
         }
         if i.en_attente > 0 {
-            constat(
-                Etat::Mauvais,
-                &trf!(
-                    "{} impression(s) en attente dans sa file.",
-                    "{} print job(s) waiting in its queue.",
-                    i.en_attente
-                ),
-            );
+            Etat::Mauvais.dire(&trf!(
+                "{} impression(s) en attente dans sa file.",
+                "{} print job(s) waiting in its queue.",
+                i.en_attente
+            ));
         }
     }
 }
@@ -220,7 +202,8 @@ pub(super) fn imprimante() {
 mod systeme {
     use std::process::Command;
 
-    use super::{Etat, Imprimante, constat, imprimantes_lpstat, montrer};
+    use super::super::proposer;
+    use super::{Etat, Imprimante, fait, imprimantes_lpstat, montrer};
     use crate::ui::*;
 
     fn lpstat(args: &[&str]) -> Option<String> {
@@ -228,33 +211,20 @@ mod systeme {
         Some(format!("{}{}", r.sortie, r.erreurs))
     }
 
-    fn proposer(question: &str, commandes: &[String]) -> bool {
-        for c in commandes {
-            println!("    {GRIS}$ {c}{RESET}");
-        }
-        demander(question).oui() && crate::machine::appliquer(commandes)
-    }
-
     /// Vérifie et propose ; rend les imprimantes installées, si CUPS a pu les dire.
     pub fn verifier() -> Option<Vec<Imprimante>> {
         let Some(etat) = lpstat(&["-r"]) else {
-            constat(
-                Etat::Mauvais,
-                tr!(
-                    "CUPS, le service d'impression, n'est pas installé.",
-                    "CUPS, the printing service, is not installed."
-                ),
-            );
+            Etat::Mauvais.dire(tr!(
+                "CUPS, le service d'impression, n'est pas installé.",
+                "CUPS, the printing service, is not installed."
+            ));
             return None;
         };
         if etat.contains("not running") {
-            constat(
-                Etat::Mauvais,
-                tr!(
-                    "Le service d'impression (CUPS) est arrêté.",
-                    "The printing service (CUPS) is stopped."
-                ),
-            );
+            Etat::Mauvais.dire(tr!(
+                "Le service d'impression (CUPS) est arrêté.",
+                "The printing service (CUPS) is stopped."
+            ));
             let demarrer = if cfg!(target_os = "macos") {
                 "sudo launchctl kickstart -k system/org.cups.cupsd"
             } else {
@@ -267,18 +237,15 @@ mod systeme {
                 ),
                 &[demarrer.to_string()],
             ) {
-                trp!("  {VERT}✔{RESET} Service démarré.", "  {VERT}✔{RESET} Service started.");
+                fait(tr!("Service démarré.", "Service started."));
             } else {
                 return None;
             }
         } else {
-            constat(
-                Etat::Bon,
-                tr!(
-                    "Le service d'impression (CUPS) tourne.",
-                    "The printing service (CUPS) is running."
-                ),
-            );
+            Etat::Bon.dire(tr!(
+                "Le service d'impression (CUPS) tourne.",
+                "The printing service (CUPS) is running."
+            ));
         }
         let imprimantes = imprimantes_lpstat(&lpstat(&["-p", "-d", "-v", "-o"]).unwrap_or_default());
         montrer(&imprimantes);
@@ -289,11 +256,7 @@ mod systeme {
                 &trf!("\n  Réactiver {} ? [o/N] : ", "\n  Re-enable {}? [y/N]: ", i.nom),
                 &[format!("cupsenable {nom} || sudo cupsenable {nom}")],
             ) {
-                trp!(
-                    "  {VERT}✔{RESET} {} réactivée.",
-                    "  {VERT}✔{RESET} {} re-enabled.",
-                    i.nom
-                );
+                fait(&trf!("{} réactivée.", "{} re-enabled.", i.nom));
             }
         }
         if imprimantes.iter().any(|i| i.en_attente > 0)
@@ -305,7 +268,7 @@ mod systeme {
                 &["cancel -a".to_string()],
             )
         {
-            trp!("  {VERT}✔{RESET} File vidée.", "  {VERT}✔{RESET} Queue cleared.");
+            fait(tr!("File vidée.", "Queue cleared."));
         }
         Some(imprimantes)
     }
@@ -313,7 +276,7 @@ mod systeme {
 
 #[cfg(windows)]
 mod systeme {
-    use super::{Etat, Imprimante, constat, montrer};
+    use super::{Etat, Imprimante, fait, montrer};
     use crate::ui::*;
 
     /// Vérifie et propose ; rend les imprimantes installées, si Windows a pu les dire.
@@ -327,7 +290,7 @@ mod systeme {
                   attente = @(try { Get-PrintJob -PrinterName $p.Name -ErrorAction Stop } catch { }).Count; defaut = ($p.Name -eq $defaut) } } } catch { })
              [pscustomobject]@{ spouleur = \"$s\"; imprimantes = $l } | ConvertTo-Json -Compress -Depth 3",
         ) else {
-            constat(Etat::Info, tr!("État de l'impression illisible (PowerShell).", "Printing state not readable (PowerShell)."));
+            Etat::Info.dire(tr!("État de l'impression illisible (PowerShell).", "Printing state not readable (PowerShell)."));
             return None;
         };
         let v: serde_json::Value = serde_json::from_str(&json).unwrap_or_default();
@@ -345,14 +308,11 @@ mod systeme {
             })
             .collect();
         let marche = spouleur == "Running";
-        constat(
-            if marche { Etat::Bon } else { Etat::Mauvais },
-            if marche {
-                tr!("Le spouleur d'impression tourne.", "The print spooler is running.")
-            } else {
-                tr!("Le spouleur d'impression est arrêté.", "The print spooler is stopped.")
-            },
-        );
+        Etat::selon(marche).dire(if marche {
+            tr!("Le spouleur d'impression tourne.", "The print spooler is running.")
+        } else {
+            tr!("Le spouleur d'impression est arrêté.", "The print spooler is stopped.")
+        });
         montrer(&imprimantes);
         let bloque = imprimantes.iter().any(|i| i.en_attente > 0);
         if (!marche || bloque)
@@ -367,10 +327,10 @@ mod systeme {
                 "Start-Service Spooler".to_string(),
             ])
         {
-            trp!(
-                "  {VERT}✔{RESET} Spouleur relancé, file vidée.",
-                "  {VERT}✔{RESET} Spooler restarted, queue cleared."
-            );
+            fait(tr!(
+                "Spouleur relancé, file vidée.",
+                "Spooler restarted, queue cleared."
+            ));
         }
         Some(imprimantes)
     }

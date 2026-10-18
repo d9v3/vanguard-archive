@@ -5,7 +5,7 @@
 use std::net::{Ipv4Addr, SocketAddr, TcpStream, ToSocketAddrs};
 use std::time::{Duration, Instant};
 
-use super::{Etat, conseil, constat, proposer_outil, proposer_reparation, question, verifications};
+use super::{Etat, conseil, proposer_outil, proposer_reparation, question, verifications};
 use crate::ui::*;
 
 pub(super) fn titre_internet() -> &'static str {
@@ -71,7 +71,7 @@ pub(super) fn panne(e: &EtatReseau) -> Panne {
     Panne::Aucune
 }
 
-fn joignable(adresse: SocketAddr, delai: Duration) -> bool {
+pub(super) fn joignable(adresse: SocketAddr, delai: Duration) -> bool {
     match TcpStream::connect_timeout(&adresse, delai) {
         Ok(_) => true,
         // Refusé : l'appareil a répondu (aucun service sur ce port, mais il est là).
@@ -145,78 +145,69 @@ fn lire_etat() -> EtatReseau {
 
 fn afficher_etat(e: &EtatReseau) {
     match e.adresse {
-        Adresse::Locale(ip) => constat(
-            Etat::Bon,
-            &trf!(
-                "Cet ordinateur a une adresse sur le réseau ({ip}).",
-                "This computer has an address on the network ({ip})."
-            ),
-        ),
-        Adresse::Autoattribuee => constat(
-            Etat::Mauvais,
-            tr!(
-                "Adresse en 169.254.x.x : la box n'a pas donné d'adresse à cet ordinateur.",
-                "Address in 169.254.x.x: the router gave no address to this computer."
-            ),
-        ),
-        Adresse::Aucune => constat(
-            Etat::Mauvais,
-            tr!(
-                "Cet ordinateur n'est relié à aucun réseau (câble débranché, Wi-Fi coupé, mode avion).",
-                "This computer is connected to no network (cable unplugged, Wi-Fi off, airplane mode)."
-            ),
-        ),
+        Adresse::Locale(ip) => Etat::Bon.dire(&trf!(
+            "Cet ordinateur a une adresse sur le réseau ({ip}).",
+            "This computer has an address on the network ({ip})."
+        )),
+        Adresse::Autoattribuee => Etat::Mauvais.dire(tr!(
+            "Adresse en 169.254.x.x : la box n'a pas donné d'adresse à cet ordinateur.",
+            "Address in 169.254.x.x: the router gave no address to this computer."
+        )),
+        Adresse::Aucune => Etat::Mauvais.dire(tr!(
+            "Cet ordinateur n'est relié à aucun réseau (câble débranché, Wi-Fi coupé, mode avion).",
+            "This computer is connected to no network (cable unplugged, Wi-Fi off, airplane mode)."
+        )),
     }
     if !matches!(e.adresse, Adresse::Locale(_)) {
         return;
     }
     match (e.passerelle, e.passerelle_repond) {
-        (Some(b), true) => constat(Etat::Bon, &trf!("La box ({b}) répond.", "The router ({b}) answers.")),
-        (Some(b), false) => constat(
-            if e.internet { Etat::Info } else { Etat::Mauvais },
-            &trf!(
-                "La box ({b}) ne répond pas aux essais.",
-                "The router ({b}) does not answer the tests."
-            ),
-        ),
-        (None, _) => constat(
-            Etat::Mauvais,
-            tr!(
-                "Aucune box (passerelle) n'est connue de cet ordinateur.",
-                "No router (gateway) is known to this computer."
-            ),
-        ),
+        (Some(b), true) => Etat::Bon.dire(&trf!("La box ({b}) répond.", "The router ({b}) answers.")),
+        (Some(b), false) => (if e.internet { Etat::Info } else { Etat::Mauvais }).dire(&trf!(
+            "La box ({b}) ne répond pas aux essais.",
+            "The router ({b}) does not answer the tests."
+        )),
+        (None, _) => Etat::Mauvais.dire(tr!(
+            "Aucune box (passerelle) n'est connue de cet ordinateur.",
+            "No router (gateway) is known to this computer."
+        )),
     }
-    constat(
-        if e.internet { Etat::Bon } else { Etat::Mauvais },
-        if e.internet {
+    Etat::selon(e.internet).dire(if e.internet {
+        tr!(
+            "Internet répond (Cloudflare, Quad9 ou Google).",
+            "The Internet answers (Cloudflare, Quad9 or Google)."
+        )
+    } else {
+        tr!(
+            "Internet ne répond pas (ni Cloudflare, ni Quad9, ni Google).",
+            "The Internet does not answer (neither Cloudflare, Quad9 nor Google)."
+        )
+    });
+    if e.internet {
+        Etat::selon(e.noms).dire(if e.noms {
             tr!(
-                "Internet répond (Cloudflare, Quad9 ou Google).",
-                "The Internet answers (Cloudflare, Quad9 or Google)."
+                "Les noms de sites se traduisent en adresses (DNS).",
+                "Site names are translated into addresses (DNS)."
             )
         } else {
             tr!(
-                "Internet ne répond pas (ni Cloudflare, ni Quad9, ni Google).",
-                "The Internet does not answer (neither Cloudflare, Quad9 nor Google)."
+                "Les noms de sites ne se traduisent plus en adresses (DNS).",
+                "Site names are no longer translated into addresses (DNS)."
             )
-        },
-    );
-    if e.internet {
-        constat(
-            if e.noms { Etat::Bon } else { Etat::Mauvais },
-            if e.noms {
-                tr!(
-                    "Les noms de sites se traduisent en adresses (DNS).",
-                    "Site names are translated into addresses (DNS)."
-                )
-            } else {
-                tr!(
-                    "Les noms de sites ne se traduisent plus en adresses (DNS).",
-                    "Site names are no longer translated into addresses (DNS)."
-                )
-            },
-        );
+        });
     }
+}
+
+/// Le début des vérifications : les essais, puis ce qu'ils ont trouvé.
+fn essais() -> EtatReseau {
+    verifications();
+    trp!(
+        "  {DISCRET}Essais en cours (quelques secondes)…{RESET}",
+        "  {DISCRET}Testing (a few seconds)…{RESET}"
+    );
+    let e = lire_etat();
+    afficher_etat(&e);
+    e
 }
 
 /// La navigation est-elle détournée (proxy imposé, fichier hosts) ? Lu par la réparation du même nom.
@@ -269,102 +260,72 @@ pub(super) fn internet() {
     ) else {
         return;
     };
-    verifications();
-    trp!(
-        "  {DISCRET}Essais en cours (quelques secondes)…{RESET}",
-        "  {DISCRET}Testing (a few seconds)…{RESET}"
-    );
-    let e = lire_etat();
-    afficher_etat(&e);
+    let e = essais();
     let detournee = e.internet && navigation_detournee();
     if e.internet {
-        constat(
-            if detournee { Etat::Mauvais } else { Etat::Bon },
-            if detournee {
-                tr!(
-                    "Un proxy ou le fichier hosts détourne la navigation.",
-                    "A proxy or the hosts file hijacks browsing."
-                )
-            } else {
-                tr!(
-                    "Navigation non détournée (ni proxy imposé, ni fichier hosts modifié).",
-                    "Browsing not hijacked (no forced proxy, no modified hosts file)."
-                )
-            },
-        );
+        Etat::selon(!detournee).dire(if detournee {
+            tr!(
+                "Un proxy ou le fichier hosts détourne la navigation.",
+                "A proxy or the hosts file hijacks browsing."
+            )
+        } else {
+            tr!(
+                "Navigation non détournée (ni proxy imposé, ni fichier hosts modifié).",
+                "Browsing not hijacked (no forced proxy, no modified hosts file)."
+            )
+        });
     }
     section(tr!("CE QUE ÇA VEUT DIRE", "WHAT IT MEANS"));
     let tous = qui == 0;
     match panne(&e) {
         Panne::PasConnecte => {
-            constat(
-                Etat::Info,
-                tr!(
-                    "Cet ordinateur n'est pas sur le réseau : rebranche le câble, ou rallume le Wi-Fi (touche ou bouton « avion ») et choisis ton réseau.",
-                    "This computer is not on the network: plug the cable back in, or turn Wi-Fi back on (airplane key or button) and choose your network."
-                ),
-            );
+            Etat::Info.dire(tr!(
+                "Cet ordinateur n'est pas sur le réseau : rebranche le câble, ou rallume le Wi-Fi (touche ou bouton « avion ») et choisis ton réseau.",
+                "This computer is not on the network: plug the cable back in, or turn Wi-Fi back on (airplane key or button) and choose your network."
+            ));
             reparer_le_reseau();
         }
         Panne::PasDAdresse => {
-            constat(
-                Etat::Info,
-                tr!(
-                    "La box ne donne plus d'adresse : souvent, elle est plantée.",
-                    "The router no longer gives addresses: often, it has crashed."
-                ),
-            );
+            Etat::Info.dire(tr!(
+                "La box ne donne plus d'adresse : souvent, elle est plantée.",
+                "The router no longer gives addresses: often, it has crashed."
+            ));
             redemarrer_la_box();
             reparer_le_reseau();
         }
         Panne::BoxMuette if tous => {
-            constat(
-                Etat::Info,
-                tr!(
-                    "Rien ne passe par la box, pour aucun appareil : c'est la box.",
-                    "Nothing goes through the router, for any device: it is the router."
-                ),
-            );
+            Etat::Info.dire(tr!(
+                "Rien ne passe par la box, pour aucun appareil : c'est la box.",
+                "Nothing goes through the router, for any device: it is the router."
+            ));
             redemarrer_la_box();
         }
         Panne::BoxMuette => {
-            constat(
-                Etat::Info,
-                tr!(
-                    "Cet ordinateur ne joint pas la box.",
-                    "This computer cannot reach the router."
-                ),
-            );
+            Etat::Info.dire(tr!(
+                "Cet ordinateur ne joint pas la box.",
+                "This computer cannot reach the router."
+            ));
             reparer_le_reseau();
         }
         Panne::InternetCoupe if tous => {
-            constat(
-                Etat::Info,
-                tr!(
-                    "La box répond, mais Internet ne passe pas : panne chez le fournisseur d'accès, ou box à redémarrer.",
-                    "The router answers, but the Internet does not get through: outage at the Internet provider, or router to restart."
-                ),
-            );
+            Etat::Info.dire(tr!(
+                "La box répond, mais Internet ne passe pas : panne chez le fournisseur d'accès, ou box à redémarrer.",
+                "The router answers, but the Internet does not get through: outage at the Internet provider, or router to restart."
+            ));
             redemarrer_la_box();
         }
         Panne::InternetCoupe => {
-            constat(
-                Etat::Info,
-                tr!(
-                    "La box répond, mais cet ordinateur ne sort pas sur Internet : un VPN, un pare-feu ou un proxy l'en empêche peut-être.",
-                    "The router answers, but this computer does not get out to the Internet: a VPN, a firewall or a proxy may prevent it."
-                ),
-            );
+            Etat::Info.dire(tr!(
+                "La box répond, mais cet ordinateur ne sort pas sur Internet : un VPN, un pare-feu ou un proxy l'en empêche peut-être.",
+                "The router answers, but this computer does not get out to the Internet: a VPN, a firewall or a proxy may prevent it."
+            ));
             reparer_le_reseau();
         }
         Panne::Noms => {
-            constat(
-                Etat::Info,
-                tr!(
-                    "Internet répond, mais les noms de sites ne se traduisent plus : le DNS est en panne ou mal réglé.",
-                    "The Internet answers, but site names are no longer translated: DNS is down or misconfigured."
-                ),
-            );
+            Etat::Info.dire(tr!(
+                "Internet répond, mais les noms de sites ne se traduisent plus : le DNS est en panne ou mal réglé.",
+                "The Internet answers, but site names are no longer translated: DNS is down or misconfigured."
+            ));
             conseil(tr!(
                 "Un DNS public (Cloudflare 1.1.1.1, Quad9 9.9.9.9) se règle dans la box, ou sur cet ordinateur.",
                 "A public DNS (Cloudflare 1.1.1.1, Quad9 9.9.9.9) can be set in the router, or on this computer."
@@ -372,23 +333,17 @@ pub(super) fn internet() {
             reparer_le_reseau();
         }
         Panne::Aucune if detournee => {
-            constat(
-                Etat::Info,
-                tr!(
-                    "Internet marche, mais la navigation est détournée : des sites ne s'ouvrent pas, ou pas les vrais.",
-                    "The Internet works, but browsing is hijacked: some sites do not open, or not the real ones."
-                ),
-            );
+            Etat::Info.dire(tr!(
+                "Internet marche, mais la navigation est détournée : des sites ne s'ouvrent pas, ou pas les vrais.",
+                "The Internet works, but browsing is hijacked: some sites do not open, or not the real ones."
+            ));
             proposer_reparation(titre_navigation());
         }
         Panne::Aucune => {
-            constat(
-                Etat::Bon,
-                tr!(
-                    "Internet marche depuis cet ordinateur, en ce moment.",
-                    "The Internet works from this computer, right now."
-                ),
-            );
+            Etat::Bon.dire(tr!(
+                "Internet marche depuis cet ordinateur, en ce moment.",
+                "The Internet works from this computer, right now."
+            ));
             conseil(tr!(
                 "Si un site ne s'ouvre pas, essaie un autre navigateur : s'il s'ouvre, une extension ou le cache du premier est en cause. Si c'était passager, le test de connexion (Réseau et Internet) mesure les pertes et les coupures.",
                 "If a site does not open, try another browser: if it opens, an extension or the cache of the first one is to blame. If it was temporary, the connection test (Network and Internet) measures losses and drops."
@@ -411,13 +366,7 @@ pub(super) fn internet() {
 
 /// Internet lent, depuis le parcours « L'ordinateur est lent » : la connexion marche-t-elle, puis où mesurer.
 pub(super) fn internet_lent() {
-    verifications();
-    trp!(
-        "  {DISCRET}Essais en cours (quelques secondes)…{RESET}",
-        "  {DISCRET}Testing (a few seconds)…{RESET}"
-    );
-    let e = lire_etat();
-    afficher_etat(&e);
+    let e = essais();
     let s = signal();
     if let Some(s) = &s {
         afficher_signal(s);
@@ -523,16 +472,9 @@ fn signal() -> Option<Signal> {
         };
         let mut s = signal_nmcli(&sortie(
             "nmcli",
-            &[
-                "-t",
-                "-f",
-                "IN-USE,SIGNAL,CHAN",
-                "dev",
-                "wifi",
-                "list",
-                "--rescan",
-                "no",
-            ],
+            &"-t -f IN-USE,SIGNAL,CHAN dev wifi list --rescan no"
+                .split(' ')
+                .collect::<Vec<_>>(),
         ))?;
         // « Interface wlan0 » dans `iw dev`, puis « Power save: on ».
         let interfaces = sortie("iw", &["dev"]);
@@ -580,33 +522,27 @@ fn afficher_signal(s: &Signal) {
             trf!("Signal Wi-Fi faible ({} %).", "Weak Wi-Fi signal ({}%).", s.qualite),
         ),
     };
-    constat(etat, &texte);
+    etat.dire(&texte);
     if let Some(c) = s.canal {
-        constat(
-            Etat::Info,
-            &if c <= 14 {
-                trf!(
-                    "Bande {}, canal {c} : elle porte loin et traverse les murs, mais elle est plus lente et plus encombrée.",
-                    "{} band, channel {c}: it reaches far and goes through walls, but it is slower and more crowded.",
-                    bande(c)
-                )
-            } else {
-                trf!(
-                    "Bande {}, canal {c} : rapide, mais elle porte moins loin et traverse mal les murs.",
-                    "{} band, channel {c}: fast, but it reaches less far and goes poorly through walls.",
-                    bande(c)
-                )
-            },
-        );
+        Etat::Info.dire(&if c <= 14 {
+            trf!(
+                "Bande {}, canal {c} : elle porte loin et traverse les murs, mais elle est plus lente et plus encombrée.",
+                "{} band, channel {c}: it reaches far and goes through walls, but it is slower and more crowded.",
+                bande(c)
+            )
+        } else {
+            trf!(
+                "Bande {}, canal {c} : rapide, mais elle porte moins loin et traverse mal les murs.",
+                "{} band, channel {c}: fast, but it reaches less far and goes poorly through walls.",
+                bande(c)
+            )
+        });
     }
     if s.economie == Some(true) {
-        constat(
-            Etat::Info,
-            tr!(
-                "Économie d'énergie du Wi-Fi activée : elle peut couper la connexion après un moment sans activité ou après la veille.",
-                "Wi-Fi power saving is on: it can cut the connection after a while without activity or after sleep."
-            ),
-        );
+        Etat::Info.dire(tr!(
+            "Économie d'énergie du Wi-Fi activée : elle peut couper la connexion après un moment sans activité ou après la veille.",
+            "Wi-Fi power saving is on: it can cut the connection after a while without activity or after sleep."
+        ));
     }
 }
 
@@ -664,13 +600,10 @@ pub(super) fn wifi() {
     let s = signal();
     match &s {
         Some(s) => afficher_signal(s),
-        None => constat(
-            Etat::Mauvais,
-            tr!(
-                "Cet ordinateur n'est connecté à aucun Wi-Fi en ce moment.",
-                "This computer is not connected to any Wi-Fi right now."
-            ),
-        ),
+        None => Etat::Mauvais.dire(tr!(
+            "Cet ordinateur n'est connecté à aucun Wi-Fi en ce moment.",
+            "This computer is not connected to any Wi-Fi right now."
+        )),
     }
     let e = lire_etat();
     afficher_etat(&e);

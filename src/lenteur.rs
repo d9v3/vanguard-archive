@@ -263,81 +263,32 @@ pub struct Conseil {
     pub outil: Option<Outil>,
 }
 
+fn conseil(grave: bool, texte: String, outil: Option<Outil>) -> Conseil {
+    Conseil { grave, texte, outil }
+}
+
 /// Programmes qui travaillent fort pendant un moment, puis se calment seuls : les nommer évite d'accuser l'ordinateur.
-const PASSAGERS: &[(&str, &str, &str)] = &[
-    (
-        "msmpeng",
-        "l'antivirus de Windows analyse les fichiers",
-        "Windows' antivirus is scanning files",
-    ),
-    (
-        "mpdefendercoreservice",
-        "l'antivirus de Windows analyse les fichiers",
-        "Windows' antivirus is scanning files",
-    ),
-    (
-        "tiworker",
-        "Windows installe des mises à jour",
-        "Windows is installing updates",
-    ),
-    (
-        "trustedinstaller",
-        "Windows installe des mises à jour",
-        "Windows is installing updates",
-    ),
-    (
-        "searchindexer",
-        "Windows indexe les fichiers pour la recherche",
-        "Windows is indexing files for search",
-    ),
-    (
-        "mdworker",
-        "macOS indexe les fichiers pour Spotlight",
-        "macOS is indexing files for Spotlight",
-    ),
-    (
-        "mds_stores",
-        "macOS indexe les fichiers pour Spotlight",
-        "macOS is indexing files for Spotlight",
-    ),
-    (
-        "localsearch",
-        "le bureau indexe les fichiers pour la recherche",
-        "the desktop is indexing files for search",
-    ),
-    (
-        "tracker-miner",
-        "le bureau indexe les fichiers pour la recherche",
-        "the desktop is indexing files for search",
-    ),
-    (
-        "baloo_file",
-        "KDE indexe les fichiers pour la recherche",
-        "KDE is indexing files for search",
-    ),
-    (
-        "packagekitd",
-        "les mises à jour se téléchargent",
-        "updates are downloading",
-    ),
-    (
-        "plocate",
-        "la base de recherche des fichiers se refait",
-        "the file search database is being rebuilt",
-    ),
-    (
-        "updatedb",
-        "la base de recherche des fichiers se refait",
-        "the file search database is being rebuilt",
-    ),
-];
+/// Une ligne par raison : débuts de leurs noms | en français | en anglais.
+const PASSAGERS: &str = "\
+msmpeng mpdefendercoreservice | l'antivirus de Windows analyse les fichiers | Windows' antivirus is scanning files
+tiworker trustedinstaller | Windows installe des mises à jour | Windows is installing updates
+searchindexer | Windows indexe les fichiers pour la recherche | Windows is indexing files for search
+mdworker mds_stores | macOS indexe les fichiers pour Spotlight | macOS is indexing files for Spotlight
+localsearch tracker-miner | le bureau indexe les fichiers pour la recherche | the desktop is indexing files for search
+baloo_file | KDE indexe les fichiers pour la recherche | KDE is indexing files for search
+packagekitd | les mises à jour se téléchargent | updates are downloading
+plocate updatedb | la base de recherche des fichiers se refait | the file search database is being rebuilt";
 
 fn passager(nom: &str) -> Option<&'static str> {
     let n = nom.to_lowercase();
-    PASSAGERS
-        .iter()
-        .find(|(cle, ..)| n.starts_with(cle))
-        .map(|(_, fr, en)| if crate::langue::anglais() { *en } else { *fr })
+    PASSAGERS.lines().find_map(|l| {
+        let mut champs = l.split(" | ");
+        let cles = champs.next()?;
+        let (fr, en) = (champs.next()?, champs.next()?);
+        cles.split_whitespace()
+            .any(|c| n.starts_with(c))
+            .then_some(if crate::langue::anglais() { en } else { fr })
+    })
 }
 
 #[allow(clippy::cast_precision_loss)]
@@ -377,11 +328,7 @@ pub fn conseils(i: &Instantane) -> Vec<Conseil> {
             },
             None => trf!("Processeur occupé à {occupe:.0} %.", "Processor {occupe:.0}% busy."),
         };
-        c.push(Conseil {
-            grave: true,
-            texte,
-            outil: None,
-        });
+        c.push(conseil(true, texte, None));
     }
     if let Some((total, dispo)) = i.memoire
         && pourcent(dispo, total) < 10.0
@@ -391,9 +338,7 @@ pub fn conseils(i: &Instantane) -> Vec<Conseil> {
             let m = p.memoire as f64;
             m
         });
-        c.push(Conseil {
-            grave: true,
-            texte: match gros {
+        c.push(conseil(true, match gros {
                 Some(p) => trf!(
                     "Mémoire presque pleine ({} libres sur {}) : l'ordinateur écrit sur le disque ce qui ne tient plus, d'où la lenteur. {} en occupe {} : le fermer, ou fermer des onglets.",
                     "Memory almost full ({} free out of {}): the computer writes what no longer fits to the disk, hence the slowness. {} uses {}: close it, or close some tabs.",
@@ -408,9 +353,7 @@ pub fn conseils(i: &Instantane) -> Vec<Conseil> {
                     taille(dispo),
                     taille(total)
                 ),
-            },
-            outil: Some(Outil::Demarrage),
-        });
+            }, Some(Outil::Demarrage)));
     }
     if let Some(occupe) = i.disque
         && occupe >= 80.0
@@ -428,25 +371,21 @@ pub fn conseils(i: &Instantane) -> Vec<Conseil> {
                 "Disk busy {occupe:.0}% of the time: everything that reads or writes it waits its turn."
             ),
         };
-        c.push(Conseil {
-            grave: true,
-            texte,
-            outil: None,
-        });
+        c.push(conseil(true, texte, None));
     }
     if let Some((libre, total)) = i.place
         && pourcent(libre, total) < 10.0
     {
-        c.push(Conseil {
-            grave: true,
-            texte: trf!(
+        c.push(conseil(
+            true,
+            trf!(
                 "Disque du système presque plein ({} libres sur {}) : le système a besoin de place pour travailler.",
                 "System disk almost full ({} free out of {}): the system needs room to work.",
                 taille(libre),
                 taille(total)
             ),
-            outil: Some(Outil::Nettoyer),
-        });
+            Some(Outil::Nettoyer),
+        ));
     }
     if let Ok(d) = &i.demarrage
         && d.total >= 60.0
@@ -458,9 +397,9 @@ pub fn conseils(i: &Instantane) -> Vec<Conseil> {
             .map(|(n, s)| format!("{n} {}", secondes_lisibles(*s)))
             .collect::<Vec<_>>()
             .join(", ");
-        c.push(Conseil {
-            grave: false,
-            texte: if lents.is_empty() {
+        c.push(conseil(
+            false,
+            if lents.is_empty() {
                 trf!("Démarrage long ({}).", "Slow startup ({}).", secondes_lisibles(d.total))
             } else {
                 trf!(
@@ -469,32 +408,24 @@ pub fn conseils(i: &Instantane) -> Vec<Conseil> {
                     secondes_lisibles(d.total)
                 )
             },
-            outil: Some(Outil::Performance),
-        });
+            Some(Outil::Performance),
+        ));
     }
     let lourds: Vec<&AuDemarrage> = i.au_demarrage.iter().filter(|p| p.poids.is_some()).collect();
     if i.au_demarrage.len() >= 8 || lourds.iter().filter_map(|p| p.poids).sum::<u64>() >= 1 << 30 {
-        c.push(Conseil {
-            grave: false,
-            texte: trf!(
+        c.push(conseil(false, trf!(
                 "{} programmes se lancent à l'ouverture de session : ceux dont tu n'as pas besoin tout de suite peuvent attendre que tu les ouvres.",
                 "{} programs start when you log in: those you do not need right away can wait until you open them.",
                 i.au_demarrage.len()
-            ),
-            outil: Some(Outil::Demarrage),
-        });
+            ), Some(Outil::Demarrage)));
     }
     // Windows surtout : des semaines sans redémarrer, et des mises à jour attendent, des fuites de mémoire s'accumulent.
     if i.allume_depuis.is_some_and(|s| s >= 14 * 86_400) {
-        c.push(Conseil {
-            grave: false,
-            texte: trf!(
+        c.push(conseil(false, trf!(
                 "Allumé depuis {} jours sans redémarrer : redémarrer libère la mémoire et termine les mises à jour en attente.",
                 "On for {} days without a restart: restarting frees memory and finishes pending updates.",
                 i.allume_depuis.unwrap_or(0) / 86_400
-            ),
-            outil: Some(Outil::MisesAJour),
-        });
+            ), Some(Outil::MisesAJour)));
     }
     c
 }
@@ -1394,18 +1325,9 @@ mod systeme {
         let (processeur, programmes) = lire_top(
             &sortie(
                 "top",
-                &[
-                    "-l",
-                    "2",
-                    "-s",
-                    "2",
-                    "-n",
-                    "20",
-                    "-o",
-                    "cpu",
-                    "-stats",
-                    "pid,command,cpu,mem",
-                ],
+                &"-l 2 -s 2 -n 20 -o cpu -stats pid,command,cpu,mem"
+                    .split(' ')
+                    .collect::<Vec<_>>(),
             ),
             fils,
         );

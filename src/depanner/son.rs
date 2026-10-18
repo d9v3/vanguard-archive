@@ -2,13 +2,14 @@
 //! Linux : PulseAudio ou PipeWire (pactl) ; macOS : volume de sortie (osascript) ; Windows : les services du son.
 //! Remettre le son, choisir la sortie ou relancer le service : montré, puis fait après accord.
 
-use super::{Etat, a_savoir, constat, question, verifications};
+use super::{Etat, a_savoir, fait, question, verifications};
 use crate::ui::*;
 
 /// Une sortie du son (Linux : un « sink » de pactl).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct Sortie {
     pub nom: String,
+    /// Ce qu'on montre : la description de pactl, sinon le nom.
     pub description: String,
 }
 
@@ -37,9 +38,12 @@ fn sorties_pactl(texte: &str) -> Vec<Sortie> {
                 bloc.lines()
                     .find_map(|l| l.trim().strip_prefix(cle).map(|v| v.trim().to_string()))
             };
+            let nom = champ("Name:")?;
             Some(Sortie {
-                nom: champ("Name:")?,
-                description: champ("Description:").unwrap_or_default(),
+                description: champ("Description:")
+                    .filter(|d| !d.is_empty())
+                    .unwrap_or_else(|| nom.clone()),
+                nom,
             })
         })
         .collect()
@@ -109,7 +113,8 @@ pub(super) fn son() {
 mod systeme {
     use std::process::Command;
 
-    use super::{Etat, Sortie, constat, genre, sorties_pactl, volume_pactl};
+    use super::super::proposer;
+    use super::{Etat, Sortie, fait, genre, sorties_pactl, volume_pactl};
     use crate::ui::*;
 
     fn pactl(args: &[&str]) -> Option<String> {
@@ -130,22 +135,12 @@ mod systeme {
         }
     }
 
-    fn proposer(question: &str, commandes: &[String]) -> bool {
-        for c in commandes {
-            println!("    {GRIS}$ {c}{RESET}");
-        }
-        demander(question).oui() && crate::machine::appliquer(commandes)
-    }
-
     pub fn verifier(_ou: usize, voulue: usize) {
         let Some(info) = pactl(&["info"]) else {
-            constat(
-                Etat::Mauvais,
-                tr!(
-                    "Le service du son ne répond pas (ni PipeWire, ni PulseAudio).",
-                    "The sound service does not answer (neither PipeWire nor PulseAudio)."
-                ),
-            );
+            Etat::Mauvais.dire(tr!(
+                "Le service du son ne répond pas (ni PipeWire, ni PulseAudio).",
+                "The sound service does not answer (neither PipeWire nor PulseAudio)."
+            ));
             if proposer(
                 tr!(
                     "\n  Relancer le service du son ? [o/N] : ",
@@ -153,10 +148,7 @@ mod systeme {
                 ),
                 &relancer(),
             ) {
-                trp!(
-                    "  {VERT}✔{RESET} Service relancé.",
-                    "  {VERT}✔{RESET} Service restarted."
-                );
+                fait(tr!("Service relancé.", "Service restarted."));
             }
             return;
         };
@@ -164,46 +156,33 @@ mod systeme {
             .lines()
             .find_map(|l| l.strip_prefix("Server Name:"))
             .map_or("PulseAudio", str::trim);
-        constat(
-            Etat::Bon,
-            &trf!("Service du son : {serveur}.", "Sound service: {serveur}."),
-        );
+        Etat::Bon.dire(&trf!("Service du son : {serveur}.", "Sound service: {serveur}."));
         let sorties = sorties_pactl(&pactl(&["list", "sinks"]).unwrap_or_default());
         let defaut = pactl(&["get-default-sink"]).unwrap_or_default().trim().to_string();
         let Some(actuelle) = sorties.iter().find(|s| s.nom == defaut) else {
-            constat(
-                Etat::Mauvais,
-                tr!(
-                    "Aucune sortie du son n'est choisie (carte son non reconnue, ou casque Bluetooth déconnecté).",
-                    "No sound output is selected (sound card not recognized, or Bluetooth headset disconnected)."
-                ),
-            );
+            Etat::Mauvais.dire(tr!(
+                "Aucune sortie du son n'est choisie (carte son non reconnue, ou casque Bluetooth déconnecté).",
+                "No sound output is selected (sound card not recognized, or Bluetooth headset disconnected)."
+            ));
             return;
         };
-        let nom = if actuelle.description.is_empty() {
-            &actuelle.nom
-        } else {
-            &actuelle.description
-        };
-        constat(Etat::Info, &trf!("Sortie choisie : {nom}.", "Selected output: {nom}."));
+        let nom = &actuelle.description;
+        Etat::Info.dire(&trf!("Sortie choisie : {nom}.", "Selected output: {nom}."));
         let muette = pactl(&["get-sink-mute", "@DEFAULT_SINK@"]).is_some_and(|m| m.contains("yes"));
         let volume = pactl(&["get-sink-volume", "@DEFAULT_SINK@"])
             .as_deref()
             .and_then(volume_pactl);
         if muette {
-            constat(Etat::Mauvais, tr!("Le son est coupé (muet).", "The sound is muted."));
+            Etat::Mauvais.dire(tr!("Le son est coupé (muet).", "The sound is muted."));
             if proposer(
                 tr!("\n  Remettre le son ? [o/N] : ", "\n  Unmute? [y/N]: "),
                 &["pactl set-sink-mute @DEFAULT_SINK@ 0".into()],
             ) {
-                trp!("  {VERT}✔{RESET} Son remis.", "  {VERT}✔{RESET} Sound unmuted.");
+                fait(tr!("Son remis.", "Sound unmuted."));
             }
         } else if let Some(v) = volume {
             if v < 10 {
-                constat(
-                    Etat::Mauvais,
-                    &trf!("Volume très bas ({v} %).", "Volume very low ({v}%)."),
-                );
+                Etat::Mauvais.dire(&trf!("Volume très bas ({v} %).", "Volume very low ({v}%)."));
                 if proposer(
                     tr!(
                         "\n  Mettre le volume à 50 % ? [o/N] : ",
@@ -211,42 +190,28 @@ mod systeme {
                     ),
                     &["pactl set-sink-volume @DEFAULT_SINK@ 50%".into()],
                 ) {
-                    trp!("  {VERT}✔{RESET} Volume à 50 %.", "  {VERT}✔{RESET} Volume at 50%.");
+                    fait(tr!("Volume à 50 %.", "Volume at 50%."));
                 }
             } else {
-                constat(
-                    Etat::Bon,
-                    &trf!("Volume à {v} %, son non coupé.", "Volume at {v}%, not muted."),
-                );
+                Etat::Bon.dire(&trf!("Volume à {v} %, son non coupé.", "Volume at {v}%, not muted."));
             }
         }
         // La sortie choisie n'est pas celle qu'on attend : proposer celles qui y ressemblent.
         if genre(&actuelle.nom) != voulue {
             let candidates: Vec<&Sortie> = sorties.iter().filter(|s| s.nom != actuelle.nom).collect();
             if candidates.is_empty() {
-                constat(
-                    Etat::Mauvais,
-                    tr!(
-                        "Aucune autre sortie n'est disponible : la prise, le câble ou l'appairage Bluetooth sont à vérifier.",
-                        "No other output is available: the port, the cable or the Bluetooth pairing need checking."
-                    ),
-                );
+                Etat::Mauvais.dire(tr!(
+                    "Aucune autre sortie n'est disponible : la prise, le câble ou l'appairage Bluetooth sont à vérifier.",
+                    "No other output is available: the port, the cable or the Bluetooth pairing need checking."
+                ));
                 return;
             }
-            constat(
-                Etat::Info,
-                tr!(
-                    "Le son sort peut-être ailleurs que là où tu l'attends. Sorties disponibles :",
-                    "The sound may be going somewhere else than where you expect. Available outputs:"
-                ),
-            );
+            Etat::Info.dire(tr!(
+                "Le son sort peut-être ailleurs que là où tu l'attends. Sorties disponibles :",
+                "The sound may be going somewhere else than where you expect. Available outputs:"
+            ));
             for (i, s) in candidates.iter().enumerate() {
-                let d = if s.description.is_empty() {
-                    &s.nom
-                } else {
-                    &s.description
-                };
-                println!("    {TOUCHE}{}{RESET}  {d}", i + 1);
+                println!("    {TOUCHE}{}{RESET}  {}", i + 1, s.description);
             }
             let choix = demander(tr!(
                 "\n  Numéro de la sortie à utiliser (Entrée pour garder celle-ci) : ",
@@ -262,7 +227,7 @@ mod systeme {
                 // Le nom vient de pactl ; entre apostrophes, il reste un seul mot pour le shell.
                 let commande = format!("pactl set-default-sink '{}'", s.nom.replace('\'', r"'\''"));
                 if crate::machine::appliquer(&[commande]) {
-                    trp!("  {VERT}✔{RESET} Sortie changée.", "  {VERT}✔{RESET} Output changed.");
+                    fait(tr!("Sortie changée.", "Output changed."));
                 }
             }
         }
@@ -273,10 +238,7 @@ mod systeme {
             ),
             &relancer(),
         ) {
-            trp!(
-                "  {VERT}✔{RESET} Service relancé.",
-                "  {VERT}✔{RESET} Service restarted."
-            );
+            fait(tr!("Service relancé.", "Service restarted."));
         }
     }
 }
@@ -285,7 +247,7 @@ mod systeme {
 mod systeme {
     use std::process::Command;
 
-    use super::{Etat, constat};
+    use super::{Etat, fait};
     use crate::ui::*;
 
     fn osascript(script: &str) -> Option<String> {
@@ -298,18 +260,15 @@ mod systeme {
         let volume: Option<u32> = osascript("output volume of (get volume settings)").and_then(|v| v.parse().ok());
         match (muet.as_deref(), volume) {
             (Some("true"), _) => {
-                constat(Etat::Mauvais, tr!("Le son est coupé (muet).", "The sound is muted."));
+                Etat::Mauvais.dire(tr!("Le son est coupé (muet).", "The sound is muted."));
                 if demander(tr!("\n  Remettre le son ? [o/N] : ", "\n  Unmute? [y/N]: ")).oui()
                     && crate::machine::appliquer(&["osascript -e 'set volume without output muted'".to_string()])
                 {
-                    trp!("  {VERT}✔{RESET} Son remis.", "  {VERT}✔{RESET} Sound unmuted.");
+                    fait(tr!("Son remis.", "Sound unmuted."));
                 }
             }
             (_, Some(v)) if v < 10 => {
-                constat(
-                    Etat::Mauvais,
-                    &trf!("Volume très bas ({v} %).", "Volume very low ({v}%)."),
-                );
+                Etat::Mauvais.dire(&trf!("Volume très bas ({v} %).", "Volume very low ({v}%)."));
                 if demander(tr!(
                     "\n  Mettre le volume à 50 % ? [o/N] : ",
                     "\n  Set the volume to 50%? [y/N]: "
@@ -317,22 +276,16 @@ mod systeme {
                 .oui()
                     && crate::machine::appliquer(&["osascript -e 'set volume output volume 50'".to_string()])
                 {
-                    trp!("  {VERT}✔{RESET} Volume à 50 %.", "  {VERT}✔{RESET} Volume at 50%.");
+                    fait(tr!("Volume à 50 %.", "Volume at 50%."));
                 }
             }
-            (_, Some(v)) => constat(
-                Etat::Bon,
-                &trf!("Volume à {v} %, son non coupé.", "Volume at {v}%, not muted."),
-            ),
-            _ => constat(Etat::Info, tr!("Volume illisible.", "Volume not readable.")),
+            (_, Some(v)) => Etat::Bon.dire(&trf!("Volume à {v} %, son non coupé.", "Volume at {v}%, not muted.")),
+            _ => Etat::Info.dire(tr!("Volume illisible.", "Volume not readable.")),
         }
-        constat(
-            Etat::Info,
-            tr!(
-                "La sortie se choisit dans Réglages Système › Son › Sortie (ou en cliquant sur le haut-parleur de la barre des menus).",
-                "The output is chosen in System Settings › Sound › Output (or by clicking the speaker in the menu bar)."
-            ),
-        );
+        Etat::Info.dire(tr!(
+            "La sortie se choisit dans Réglages Système › Son › Sortie (ou en cliquant sur le haut-parleur de la barre des menus).",
+            "The output is chosen in System Settings › Sound › Output (or by clicking the speaker in the menu bar)."
+        ));
         if demander(tr!(
             "\n  Ouvrir les réglages du son ? [o/N] : ",
             "\n  Open the sound settings? [y/N]: "
@@ -348,17 +301,14 @@ mod systeme {
         .oui()
             && crate::machine::appliquer(&["sudo killall coreaudiod".to_string()])
         {
-            trp!(
-                "  {VERT}✔{RESET} Service relancé.",
-                "  {VERT}✔{RESET} Service restarted."
-            );
+            fait(tr!("Service relancé.", "Service restarted."));
         }
     }
 }
 
 #[cfg(windows)]
 mod systeme {
-    use super::{Etat, constat};
+    use super::{Etat, fait};
     use crate::ui::*;
 
     pub fn verifier(_ou: usize, _voulue: usize) {
@@ -372,48 +322,36 @@ mod systeme {
         for l in etat.lines() {
             let c: Vec<&str> = l.trim().split('|').collect();
             match c[..] {
-                ["carte", nom, statut] => constat(
-                    if statut == "OK" { Etat::Bon } else { Etat::Mauvais },
-                    &if statut == "OK" {
-                        trf!("Carte son : {nom}.", "Sound card: {nom}.")
-                    } else {
-                        trf!(
-                            "Carte son en erreur : {nom} ({statut}).",
-                            "Sound card in error: {nom} ({statut})."
-                        )
-                    },
-                ),
+                ["carte", nom, statut] => Etat::selon(statut == "OK").dire(&if statut == "OK" {
+                    trf!("Carte son : {nom}.", "Sound card: {nom}.")
+                } else {
+                    trf!(
+                        "Carte son en erreur : {nom} ({statut}).",
+                        "Sound card in error: {nom} ({statut})."
+                    )
+                }),
                 [service, statut] => {
                     let marche = statut == "Running";
                     arrete |= !marche;
-                    constat(
-                        if marche { Etat::Bon } else { Etat::Mauvais },
-                        &if marche {
-                            trf!("Service {service} : démarré.", "Service {service}: running.")
-                        } else {
-                            trf!("Service {service} : arrêté.", "Service {service}: stopped.")
-                        },
-                    );
+                    Etat::selon(marche).dire(&if marche {
+                        trf!("Service {service} : démarré.", "Service {service}: running.")
+                    } else {
+                        trf!("Service {service} : arrêté.", "Service {service}: stopped.")
+                    });
                 }
                 _ => {}
             }
         }
         if etat.is_empty() {
-            constat(
-                Etat::Info,
-                tr!(
-                    "État du son illisible (PowerShell).",
-                    "Sound state not readable (PowerShell)."
-                ),
-            );
+            Etat::Info.dire(tr!(
+                "État du son illisible (PowerShell).",
+                "Sound state not readable (PowerShell)."
+            ));
         }
-        constat(
-            Etat::Info,
-            tr!(
-                "Le volume et la sortie se règlent en cliquant sur le haut-parleur, près de l'horloge (flèche à droite du curseur : choisir la sortie).",
-                "Volume and output are set by clicking the speaker, near the clock (arrow right of the slider: choose the output)."
-            ),
-        );
+        Etat::Info.dire(tr!(
+            "Le volume et la sortie se règlent en cliquant sur le haut-parleur, près de l'horloge (flèche à droite du curseur : choisir la sortie).",
+            "Volume and output are set by clicking the speaker, near the clock (arrow right of the slider: choose the output)."
+        ));
         if demander(tr!(
             "\n  Ouvrir les réglages du son ? [o/N] : ",
             "\n  Open the sound settings? [y/N]: "
@@ -439,10 +377,7 @@ mod systeme {
                 "Start-Service Audiosrv".to_string(),
             ])
         {
-            trp!(
-                "  {VERT}✔{RESET} Services relancés.",
-                "  {VERT}✔{RESET} Services restarted."
-            );
+            fait(tr!("Services relancés.", "Services restarted."));
         }
     }
 }

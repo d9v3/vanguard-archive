@@ -25,36 +25,38 @@ struct Connexion {
     udp: bool,
 }
 
-/// Grands hébergeurs, dont le nom inverse dit mal à qui l'on parle (« lhr25s34-in-f14.1e100.net » : Google).
-const PROPRIETAIRES: &[(&str, &str)] = &[
-    ("1e100.net", "Google"),
-    ("googleusercontent.com", "Google"),
-    ("googlevideo.com", "YouTube"),
-    ("akamaitechnologies.com", "Akamai"),
-    ("akamai.net", "Akamai"),
-    ("akamaiedge.net", "Akamai"),
-    ("amazonaws.com", "Amazon AWS"),
-    ("cloudfront.net", "Amazon CloudFront"),
-    ("fbcdn.net", "Meta"),
-    ("facebook.com", "Meta"),
-    ("whatsapp.net", "WhatsApp"),
-    ("msedge.net", "Microsoft"),
-    ("microsoft.com", "Microsoft"),
-    ("windows.net", "Microsoft"),
-    ("azure.com", "Microsoft Azure"),
-    ("apple.com", "Apple"),
-    ("aaplimg.com", "Apple"),
-    ("icloud.com", "Apple"),
-    ("cloudflare.com", "Cloudflare"),
-    ("cloudflare.net", "Cloudflare"),
-    ("fastly.net", "Fastly"),
-    ("valve.net", "Valve (Steam)"),
-    ("steamcontent.com", "Valve (Steam)"),
-    ("steamserver.net", "Valve (Steam)"),
-    ("nflxvideo.net", "Netflix"),
-    ("spotify.com", "Spotify"),
-    ("github.com", "GitHub"),
-];
+impl Connexion {
+    fn vers(distante: IpAddr, port: u16) -> Connexion {
+        Connexion {
+            pid: None,
+            programme: None,
+            chemin: None,
+            distante,
+            port,
+            udp: false,
+        }
+    }
+}
+
+/// Grands hébergeurs, dont le nom inverse dit mal à qui l'on parle (« lhr25s34-in-f14.1e100.net » : Google). Une
+/// ligne par entreprise : son nom | ses domaines.
+const PROPRIETAIRES: &str = "\
+Google | 1e100.net googleusercontent.com
+YouTube | googlevideo.com
+Akamai | akamaitechnologies.com akamai.net akamaiedge.net
+Amazon AWS | amazonaws.com
+Amazon CloudFront | cloudfront.net
+Meta | fbcdn.net facebook.com
+WhatsApp | whatsapp.net
+Microsoft | msedge.net microsoft.com windows.net
+Microsoft Azure | azure.com
+Apple | apple.com aaplimg.com icloud.com
+Cloudflare | cloudflare.com cloudflare.net
+Fastly | fastly.net
+Valve (Steam) | valve.net steamcontent.com steamserver.net
+Netflix | nflxvideo.net
+Spotify | spotify.com
+GitHub | github.com";
 
 // ───────────────────────────── Lecture des connexions ─────────────────────────────
 
@@ -98,10 +100,8 @@ fn lire_ss(sortie: &str) -> Vec<Connexion> {
             Some(Connexion {
                 pid,
                 programme,
-                chemin: None,
-                distante,
-                port,
                 udp,
+                ..Connexion::vers(distante, port)
             })
         })
         .collect()
@@ -124,9 +124,7 @@ fn lire_windows(sortie: &str) -> Vec<Connexion> {
                 pid,
                 programme,
                 chemin,
-                distante,
-                port,
-                udp: false,
+                ..Connexion::vers(distante, port)
             })
         })
         .collect()
@@ -153,10 +151,7 @@ fn lire_lsof(sortie: &str) -> Vec<Connexion> {
                     liste.push(Connexion {
                         pid,
                         programme: programme.clone(),
-                        chemin: None,
-                        distante,
-                        port,
-                        udp: false,
+                        ..Connexion::vers(distante, port)
                     });
                 }
             }
@@ -186,14 +181,7 @@ fn invisibles(netstat: &str, visibles: &[Connexion]) -> Vec<Connexion> {
             }
             None => true,
         })
-        .map(|(distante, port)| Connexion {
-            pid: None,
-            programme: None,
-            chemin: None,
-            distante,
-            port,
-            udp: false,
-        })
+        .map(|(distante, port)| Connexion::vers(distante, port))
         .collect()
 }
 
@@ -364,9 +352,15 @@ fn dossier_risque(chemin: &str) -> Option<&'static str> {
 fn qui(nom: &str) -> String {
     let domaine = crate::lien::domaine_enregistrable(nom);
     PROPRIETAIRES
-        .iter()
-        .find(|(d, _)| *d == domaine)
-        .map_or(domaine, |(_, q)| (*q).to_string())
+        .lines()
+        .find_map(|l| {
+            let (qui, domaines) = l.split_once(" | ")?;
+            domaines
+                .split_whitespace()
+                .any(|d| d == domaine)
+                .then(|| qui.to_string())
+        })
+        .unwrap_or(domaine)
 }
 
 /// Ce qui mérite l'attention dans les connexions d'un programme : (gravité, texte).

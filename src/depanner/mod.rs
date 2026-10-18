@@ -74,7 +74,8 @@ fn dans_la_langue(t: (&'static str, &'static str)) -> &'static str {
 /// Le titre du parcours en cours, pour le cadre de chaque question.
 static EN_COURS: std::sync::Mutex<&str> = std::sync::Mutex::new("");
 
-fn entete(titre: &str) -> Vec<String> {
+fn entete() -> Vec<String> {
+    let titre = *EN_COURS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     lignes_cadre(
         &format!(
             "{ACCENT}GARDIEN{RESET} {GRIS}›{RESET} {} {GRIS}›{RESET} {titre}",
@@ -89,8 +90,7 @@ fn entete(titre: &str) -> Vec<String> {
 /// `None` (Échap, ou réponse vide).
 fn question(texte: &str, reponses: &[&str]) -> Option<usize> {
     print!("\x1b[2J\x1b[H");
-    let titre = *EN_COURS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    let mut lignes: Vec<Ligne> = entete(titre).into_iter().map(Ligne::Texte).collect();
+    let mut lignes: Vec<Ligne> = entete().into_iter().map(Ligne::Texte).collect();
     lignes.push(Ligne::Texte(String::new()));
     lignes.extend(
         envelopper(texte, LARGEUR - 4)
@@ -119,13 +119,35 @@ enum Etat {
     Info,
 }
 
-fn constat(etat: Etat, texte: &str) {
-    let marque = match etat {
-        Etat::Bon => format!("{VERT}✔{RESET}"),
-        Etat::Mauvais => format!("{}✖{RESET}", couleur(crate::risk::Niveau::Eleve)),
-        Etat::Info => format!("{}ℹ{RESET}", couleur(crate::risk::Niveau::Info)),
-    };
-    afficher_aligne(&format!("  {marque} "), texte, 4, "");
+impl Etat {
+    /// Bon si c'est le cas, mauvais sinon.
+    fn selon(ok: bool) -> Etat {
+        if ok { Etat::Bon } else { Etat::Mauvais }
+    }
+
+    /// Dit ce qui a été vérifié, marqué de son état.
+    fn dire(self, texte: &str) {
+        let marque = match self {
+            Etat::Bon => format!("{VERT}✔{RESET}"),
+            Etat::Mauvais => format!("{}✖{RESET}", couleur(crate::risk::Niveau::Eleve)),
+            Etat::Info => format!("{}ℹ{RESET}", couleur(crate::risk::Niveau::Info)),
+        };
+        afficher_aligne(&format!("  {marque} "), texte, 4, "");
+    }
+}
+
+/// Une réparation faite.
+fn fait(texte: &str) {
+    println!("  {VERT}✔{RESET} {texte}");
+}
+
+/// Montre les commandes, puis les lance si on le veut.
+#[cfg(unix)]
+fn proposer(question: &str, commandes: &[String]) -> bool {
+    for c in commandes {
+        println!("    {GRIS}$ {c}{RESET}");
+    }
+    demander(question).oui() && crate::machine::appliquer(commandes)
 }
 
 /// Un conseil à suivre soi-même.
@@ -136,8 +158,7 @@ fn conseil(texte: &str) {
 /// Un écran neuf sous le cadre du parcours.
 fn ecran() {
     print!("\x1b[2J\x1b[H");
-    let titre = *EN_COURS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    for l in entete(titre) {
+    for l in entete() {
         println!("{l}");
     }
 }
@@ -150,14 +171,12 @@ fn verifications() {
 
 /// La réparation de ce titre (menu Réparer), si ce système en a une : montrée, puis lancée après accord.
 fn proposer_reparation(titre: &str) -> bool {
-    match crate::reparer::par_titre(titre) {
-        Some(r) => {
-            section(tr!("RÉPARATION PROPOSÉE", "SUGGESTED REPAIR"));
-            crate::reparer::lancer(&r);
-            true
-        }
-        None => false,
-    }
+    let Some(r) = crate::reparer::par_titre(titre) else {
+        return false;
+    };
+    section(tr!("RÉPARATION PROPOSÉE", "SUGGESTED REPAIR"));
+    crate::reparer::lancer(&r);
+    true
 }
 
 /// « À savoir » et ses conseils, seulement s'il y en a.
@@ -280,10 +299,7 @@ fn disque_plein() {
     verifications();
     let volumes = volumes();
     if volumes.is_empty() {
-        constat(
-            Etat::Info,
-            tr!("Place des disques illisible ici.", "Disk space not readable here."),
-        );
+        Etat::Info.dire(tr!("Place des disques illisible ici.", "Disk space not readable here."));
     }
     for (point, libre, total) in &volumes {
         #[allow(clippy::cast_precision_loss)]
@@ -298,7 +314,7 @@ fn disque_plein() {
             taille(*libre),
             taille(*total)
         );
-        constat(if pct < 10.0 { Etat::Mauvais } else { Etat::Bon }, &texte);
+        Etat::selon(pct >= 10.0).dire(&texte);
     }
     let gros = plus_gros_dossiers();
     if !gros.is_empty() {
@@ -307,13 +323,10 @@ fn disque_plein() {
             .map(|(nom, octets)| format!("{nom} {}", taille(*octets)))
             .collect::<Vec<_>>()
             .join(", ");
-        constat(
-            Etat::Info,
-            &trf!(
-                "Plus gros dossiers du dossier personnel : {texte}.",
-                "Largest folders of the home folder: {texte}."
-            ),
-        );
+        Etat::Info.dire(&trf!(
+            "Plus gros dossiers du dossier personnel : {texte}.",
+            "Largest folders of the home folder: {texte}."
+        ));
     }
     section(tr!("QUE FAIRE", "WHAT TO DO"));
     if ou == 1 {
@@ -574,7 +587,7 @@ pub fn executer(sujet: &str) {
             "  Unknown subject: “{sujet}”. The subjects:"
         );
         for p in &PARCOURS {
-            let cle = if crate::langue::anglais() { p.cles.1 } else { p.cles.0 };
+            let cle = dans_la_langue(p.cles);
             println!("    {TOUCHE}{cle:<11}{RESET} {}", dans_la_langue(p.titre));
         }
         return;

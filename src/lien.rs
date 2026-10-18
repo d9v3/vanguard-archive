@@ -34,441 +34,115 @@ struct Signe {
     texte: String,
 }
 
-fn signe(niveau: Niveau, texte: String) -> Signe {
-    Signe { niveau, texte }
+fn signe(niveau: Niveau, texte: impl Into<String>) -> Signe {
+    Signe {
+        niveau,
+        texte: texte.into(),
+    }
 }
 
-/// Une marque souvent imitée : ses mots dans un nom de domaine, et ses vrais domaines.
+/// Une marque souvent imitée : ses mots dans un nom de domaine, et ses vrais domaines (le premier est celui qu'on
+/// conseille).
 struct Marque {
     nom: &'static str,
-    mots: &'static [&'static str],
-    domaines: &'static [&'static str],
+    mots: Vec<&'static str>,
+    domaines: Vec<&'static str>,
 }
 
-const MARQUES: &[Marque] = &[
-    Marque {
-        nom: "PayPal",
-        mots: &["paypal"],
-        domaines: &["paypal.com", "paypal.me", "paypal.ca", "paypal.fr"],
-    },
-    Marque {
-        nom: "Apple",
-        mots: &["apple", "icloud", "appleid", "itunes"],
-        domaines: &["apple.com", "icloud.com", "me.com", "itunes.com", "apple.ca"],
-    },
-    Marque {
-        nom: "Microsoft",
-        mots: &[
-            "microsoft",
-            "outlook",
-            "office365",
-            "onedrive",
-            "hotmail",
-            "sharepoint",
-            "microsoftonline",
-        ],
-        domaines: &[
-            "microsoft.com",
-            "live.com",
-            "outlook.com",
-            "office.com",
-            "office365.com",
-            "onedrive.com",
-            "hotmail.com",
-            "microsoftonline.com",
-            "sharepoint.com",
-            "windows.com",
-            "msn.com",
-            "skype.com",
-            "bing.com",
-            "xbox.com",
-        ],
-    },
-    Marque {
-        nom: "Google",
-        mots: &["google", "gmail", "youtube"],
-        domaines: &[
-            "google.com",
-            "google.ca",
-            "google.fr",
-            "gmail.com",
-            "youtube.com",
-            "youtu.be",
-            "googleapis.com",
-            "gstatic.com",
-        ],
-    },
-    Marque {
-        nom: "Meta",
-        mots: &["facebook", "instagram", "whatsapp", "messenger"],
-        domaines: &[
-            "facebook.com",
-            "fb.com",
-            "instagram.com",
-            "whatsapp.com",
-            "messenger.com",
-            "meta.com",
-            "wa.me",
-        ],
-    },
-    Marque {
-        nom: "Amazon",
-        mots: &["amazon"],
-        domaines: &[
-            "amazon.com",
-            "amazon.ca",
-            "amazon.fr",
-            "amazon.co.uk",
-            "amazon.de",
-            "amzn.to",
-            "amazonaws.com",
-        ],
-    },
-    Marque {
-        nom: "Netflix",
-        mots: &["netflix"],
-        domaines: &["netflix.com"],
-    },
-    Marque {
-        nom: "Steam",
-        mots: &["steam", "steampowered", "steamcommunity"],
-        domaines: &[
-            "steampowered.com",
-            "steamcommunity.com",
-            "steamstatic.com",
-            "valvesoftware.com",
-        ],
-    },
-    Marque {
-        nom: "Epic Games",
-        mots: &["epicgames", "fortnite"],
-        domaines: &["epicgames.com", "fortnite.com", "unrealengine.com"],
-    },
-    Marque {
-        nom: "Discord",
-        mots: &["discord", "discordapp"],
-        domaines: &[
-            "discord.com",
-            "discord.gg",
-            "discordapp.com",
-            "discordapp.net",
-            "discord.media",
-        ],
-    },
-    Marque {
-        nom: "Roblox",
-        mots: &["roblox"],
-        domaines: &["roblox.com"],
-    },
-    Marque {
-        nom: "PlayStation",
-        mots: &["playstation"],
-        domaines: &["playstation.com", "sony.com"],
-    },
-    Marque {
-        nom: "Nintendo",
-        mots: &["nintendo"],
-        domaines: &["nintendo.com", "nintendo.net"],
-    },
-    Marque {
-        nom: "Spotify",
-        mots: &["spotify"],
-        domaines: &["spotify.com"],
-    },
-    Marque {
-        nom: "Twitch",
-        mots: &["twitch"],
-        domaines: &["twitch.tv"],
-    },
-    Marque {
-        nom: "eBay",
-        mots: &["ebay"],
-        domaines: &["ebay.com", "ebay.ca", "ebay.fr"],
-    },
-    Marque {
-        nom: "LinkedIn",
-        mots: &["linkedin"],
-        domaines: &["linkedin.com", "lnkd.in"],
-    },
-    Marque {
-        nom: "Dropbox",
-        mots: &["dropbox"],
-        domaines: &["dropbox.com"],
-    },
-    Marque {
-        nom: "DocuSign",
-        mots: &["docusign"],
-        domaines: &["docusign.com", "docusign.net"],
-    },
-    Marque {
-        nom: "Adobe",
-        mots: &["adobe"],
-        domaines: &["adobe.com"],
-    },
-    Marque {
-        nom: "Airbnb",
-        mots: &["airbnb"],
-        domaines: &["airbnb.com", "airbnb.ca", "airbnb.fr"],
-    },
-    Marque {
-        nom: "Telegram",
-        mots: &["telegram"],
-        domaines: &["telegram.org", "t.me"],
-    },
-    Marque {
-        nom: "DHL",
-        mots: &["dhl"],
-        domaines: &["dhl.com", "dhl.ca", "dhl.fr", "dhl.de"],
-    },
-    Marque {
-        nom: "FedEx",
-        mots: &["fedex"],
-        domaines: &["fedex.com"],
-    },
-    Marque {
-        nom: "UPS",
-        mots: &["ups"],
-        domaines: &["ups.com"],
-    },
-    Marque {
-        nom: "Postes Canada",
-        mots: &["postescanada", "canadapost"],
-        domaines: &["canadapost.ca", "postescanada.ca", "canadapost-postescanada.ca"],
-    },
-    Marque {
-        nom: "La Poste",
-        mots: &["laposte", "colissimo", "chronopost"],
-        domaines: &["laposte.fr", "laposte.net", "colissimo.fr", "chronopost.fr"],
-    },
-    Marque {
-        nom: "Desjardins",
-        mots: &["desjardins"],
-        domaines: &["desjardins.com"],
-    },
-    Marque {
-        nom: "Banque Nationale",
-        mots: &["bnc", "banquenationale"],
-        domaines: &["bnc.ca", "nbc.ca"],
-    },
-    Marque {
-        nom: "RBC",
-        mots: &["rbc", "rbcroyalbank"],
-        domaines: &["rbc.com", "rbcroyalbank.com"],
-    },
-    Marque {
-        nom: "BMO",
-        mots: &["bmo"],
-        domaines: &["bmo.com"],
-    },
-    Marque {
-        nom: "TD",
-        mots: &["td", "tdbank", "tdcanadatrust"],
-        domaines: &["td.com", "tdbank.com", "tdcanadatrust.com"],
-    },
-    Marque {
-        nom: "Scotiabank",
-        mots: &["scotiabank"],
-        domaines: &["scotiabank.com"],
-    },
-    Marque {
-        nom: "Tangerine",
-        mots: &["tangerine"],
-        domaines: &["tangerine.ca"],
-    },
-    Marque {
-        nom: "Interac",
-        mots: &["interac"],
-        domaines: &["interac.ca"],
-    },
-    Marque {
-        nom: "Hydro-Québec",
-        mots: &["hydroquebec"],
-        domaines: &["hydroquebec.com"],
-    },
-    Marque {
-        nom: "Revenu Québec",
-        mots: &["revenuquebec"],
-        domaines: &["revenuquebec.ca"],
-    },
-    Marque {
-        nom: "SAAQ",
-        mots: &["saaq"],
-        domaines: &["saaq.gouv.qc.ca"],
-    },
-    Marque {
-        nom: "Agence du revenu du Canada",
-        mots: &["cra", "craarc", "arccra"],
-        domaines: &["canada.ca", "gc.ca"],
-    },
-    Marque {
-        nom: "Vidéotron",
-        mots: &["videotron"],
-        domaines: &["videotron.com"],
-    },
-    Marque {
-        nom: "Rogers",
-        mots: &["rogers"],
-        domaines: &["rogers.com"],
-    },
-    Marque {
-        nom: "Telus",
-        mots: &["telus"],
-        domaines: &["telus.com"],
-    },
-    Marque {
-        nom: "Ameli",
-        mots: &["ameli"],
-        domaines: &["ameli.fr"],
-    },
-    Marque {
-        nom: "Impôts (France)",
-        mots: &["impots", "dgfip"],
-        domaines: &["impots.gouv.fr"],
-    },
-    Marque {
-        nom: "ANTAI",
-        mots: &["antai"],
-        domaines: &["antai.gouv.fr"],
-    },
-    Marque {
-        nom: "La Banque Postale",
-        mots: &["labanquepostale"],
-        domaines: &["labanquepostale.fr"],
-    },
-    Marque {
-        nom: "Crédit Agricole",
-        mots: &["creditagricole"],
-        domaines: &["credit-agricole.fr", "credit-agricole.com"],
-    },
-    Marque {
-        nom: "Mastercard",
-        mots: &["mastercard"],
-        domaines: &["mastercard.com", "mastercard.ca"],
-    },
-    Marque {
-        nom: "American Express",
-        mots: &["americanexpress", "amex"],
-        domaines: &["americanexpress.com"],
-    },
-    Marque {
-        nom: "Binance",
-        mots: &["binance"],
-        domaines: &["binance.com"],
-    },
-    Marque {
-        nom: "Coinbase",
-        mots: &["coinbase"],
-        domaines: &["coinbase.com"],
-    },
-    Marque {
-        nom: "MetaMask",
-        mots: &["metamask"],
-        domaines: &["metamask.io"],
-    },
-];
+/// Les marques souvent imitées, une par ligne : nom | mots de ses noms de domaine | ses vrais domaines.
+const TABLE_DES_MARQUES: &str = "\
+PayPal | paypal | paypal.com paypal.me paypal.ca paypal.fr
+Apple | apple icloud appleid itunes | apple.com icloud.com me.com itunes.com apple.ca
+Microsoft | microsoft outlook office365 onedrive hotmail sharepoint microsoftonline | microsoft.com live.com \
+    outlook.com office.com office365.com onedrive.com hotmail.com microsoftonline.com sharepoint.com windows.com \
+    msn.com skype.com bing.com xbox.com
+Google | google gmail youtube | google.com google.ca google.fr gmail.com youtube.com youtu.be googleapis.com \
+    gstatic.com
+Meta | facebook instagram whatsapp messenger | facebook.com fb.com instagram.com whatsapp.com messenger.com \
+    meta.com wa.me
+Amazon | amazon | amazon.com amazon.ca amazon.fr amazon.co.uk amazon.de amzn.to amazonaws.com
+Netflix | netflix | netflix.com
+Steam | steam steampowered steamcommunity | steampowered.com steamcommunity.com steamstatic.com \
+    valvesoftware.com
+Epic Games | epicgames fortnite | epicgames.com fortnite.com unrealengine.com
+Discord | discord discordapp | discord.com discord.gg discordapp.com discordapp.net discord.media
+Roblox | roblox | roblox.com
+PlayStation | playstation | playstation.com sony.com
+Nintendo | nintendo | nintendo.com nintendo.net
+Spotify | spotify | spotify.com
+Twitch | twitch | twitch.tv
+eBay | ebay | ebay.com ebay.ca ebay.fr
+LinkedIn | linkedin | linkedin.com lnkd.in
+Dropbox | dropbox | dropbox.com
+DocuSign | docusign | docusign.com docusign.net
+Adobe | adobe | adobe.com
+Airbnb | airbnb | airbnb.com airbnb.ca airbnb.fr
+Telegram | telegram | telegram.org t.me
+DHL | dhl | dhl.com dhl.ca dhl.fr dhl.de
+FedEx | fedex | fedex.com
+UPS | ups | ups.com
+Postes Canada | postescanada canadapost | canadapost.ca postescanada.ca canadapost-postescanada.ca
+La Poste | laposte colissimo chronopost | laposte.fr laposte.net colissimo.fr chronopost.fr
+Desjardins | desjardins | desjardins.com
+Banque Nationale | bnc banquenationale | bnc.ca nbc.ca
+RBC | rbc rbcroyalbank | rbc.com rbcroyalbank.com
+BMO | bmo | bmo.com
+TD | td tdbank tdcanadatrust | td.com tdbank.com tdcanadatrust.com
+Scotiabank | scotiabank | scotiabank.com
+Tangerine | tangerine | tangerine.ca
+Interac | interac | interac.ca
+Hydro-Québec | hydroquebec | hydroquebec.com
+Revenu Québec | revenuquebec | revenuquebec.ca
+SAAQ | saaq | saaq.gouv.qc.ca
+Agence du revenu du Canada | cra craarc arccra | canada.ca gc.ca
+Vidéotron | videotron | videotron.com
+Rogers | rogers | rogers.com
+Telus | telus | telus.com
+Ameli | ameli | ameli.fr
+Impôts (France) | impots dgfip | impots.gouv.fr
+ANTAI | antai | antai.gouv.fr
+La Banque Postale | labanquepostale | labanquepostale.fr
+Crédit Agricole | creditagricole | credit-agricole.fr credit-agricole.com
+Mastercard | mastercard | mastercard.com mastercard.ca
+American Express | americanexpress amex | americanexpress.com
+Binance | binance | binance.com
+Coinbase | coinbase | coinbase.com
+MetaMask | metamask | metamask.io";
+
+fn marques() -> &'static [Marque] {
+    static MARQUES: std::sync::LazyLock<Vec<Marque>> = std::sync::LazyLock::new(|| {
+        TABLE_DES_MARQUES
+            .lines()
+            .filter_map(|l| {
+                let mut champs = l.split('|').map(str::trim);
+                Some(Marque {
+                    nom: champs.next()?,
+                    mots: champs.next()?.split_whitespace().collect(),
+                    domaines: champs.next()?.split_whitespace().collect(),
+                })
+            })
+            .collect()
+    });
+    &MARQUES
+}
 
 /// Mots qu'un faux site colle à une marque (« paypal-verification », « appleidlogin ») pour faire sérieux.
-const MOTS_DE_PIEGE: &[&str] = &[
-    "login",
-    "signin",
-    "logon",
-    "verify",
-    "verification",
-    "secure",
-    "security",
-    "account",
-    "accounts",
-    "update",
-    "confirm",
-    "support",
-    "service",
-    "services",
-    "help",
-    "auth",
-    "wallet",
-    "billing",
-    "payment",
-    "pay",
-    "refund",
-    "id",
-    "online",
-    "web",
-    "app",
-    "client",
-    "clients",
-    "compte",
-    "connexion",
-    "securite",
-    "remboursement",
-    "colis",
-    "livraison",
-    "delivery",
-    "parcel",
-    "tracking",
-    "suivi",
-    "gift",
-    "free",
-    "bonus",
-    "promo",
-];
+const MOTS_DE_PIEGE: &str = "\
+login signin logon verify verification secure security account accounts update confirm support service services \
+help auth wallet billing payment pay refund id online web app client clients compte connexion securite \
+remboursement colis livraison delivery parcel tracking suivi gift free bonus promo";
 
 /// Raccourcisseurs : on ne voit pas où mène le lien avant de l'ouvrir.
-const RACCOURCISSEURS: &[&str] = &[
-    "bit.ly",
-    "bitly.com",
-    "tinyurl.com",
-    "t.co",
-    "goo.gl",
-    "ow.ly",
-    "is.gd",
-    "v.gd",
-    "buff.ly",
-    "rebrand.ly",
-    "cutt.ly",
-    "shorturl.at",
-    "tiny.cc",
-    "rb.gy",
-    "s.id",
-    "t.ly",
-    "bl.ink",
-    "x.co",
-    "qrco.de",
-    "tr.im",
-    "clck.ru",
-    "u.to",
-    "short.gy",
-    "lnk.bio",
-];
+const RACCOURCISSEURS: &str = "\
+bit.ly bitly.com tinyurl.com t.co goo.gl ow.ly is.gd v.gd buff.ly rebrand.ly cutt.ly shorturl.at tiny.cc rb.gy \
+s.id t.ly bl.ink x.co qrco.de tr.im clck.ru u.to short.gy lnk.bio";
 
 /// Hébergements gratuits où chacun crée son site en une minute : le vrai propriétaire est le sous-domaine. Comptés
 /// comme suffixes publics, comme le fait la liste publique des suffixes (« evil.github.io » appartient à « evil »).
-const HEBERGEURS: &[&str] = &[
-    "github.io",
-    "gitlab.io",
-    "blogspot.com",
-    "wordpress.com",
-    "wixsite.com",
-    "weebly.com",
-    "webflow.io",
-    "netlify.app",
-    "vercel.app",
-    "pages.dev",
-    "workers.dev",
-    "web.app",
-    "firebaseapp.com",
-    "herokuapp.com",
-    "glitch.me",
-    "repl.co",
-    "replit.app",
-    "azurewebsites.net",
-    "appspot.com",
-    "000webhostapp.com",
-    "ngrok.io",
-    "ngrok-free.app",
-    "trycloudflare.com",
-    "duckdns.org",
-    "s3.amazonaws.com",
-];
+const HEBERGEURS: &str = "\
+github.io gitlab.io blogspot.com wordpress.com wixsite.com weebly.com webflow.io netlify.app vercel.app \
+pages.dev workers.dev web.app firebaseapp.com herokuapp.com glitch.me repl.co replit.app azurewebsites.net \
+appspot.com 000webhostapp.com ngrok.io ngrok-free.app trycloudflare.com duckdns.org s3.amazonaws.com";
 
 /// Suffixes publics à deux étiquettes les plus courants : le domaine de « shop.exemple.co.uk » est
 /// « exemple.co.uk », pas « co.uk ». Une liste courte, pas la liste publique entière : un suffixe rare donne un
@@ -656,9 +330,10 @@ fn adapter(delta: u32, nombre: u32, premier: bool) -> u32 {
 /// L'hôte tel qu'un navigateur peut l'afficher : étiquettes punycode décodées.
 fn affiche(hote: &str) -> String {
     hote.split('.')
-        .map(|l| match l.strip_prefix("xn--").and_then(punycode) {
-            Some(u) => u,
-            None => l.to_string(),
+        .map(|l| {
+            l.strip_prefix("xn--")
+                .and_then(punycode)
+                .unwrap_or_else(|| l.to_string())
         })
         .collect::<Vec<_>>()
         .join(".")
@@ -670,7 +345,8 @@ pub(crate) fn domaine_enregistrable(hote: &str) -> String {
     let etiquettes: Vec<&str> = hote.split('.').collect();
     let suffixe = SUFFIXES_DOUBLES
         .iter()
-        .chain(HEBERGEURS)
+        .copied()
+        .chain(HEBERGEURS.split_whitespace())
         .filter(|s| hote.ends_with(&format!(".{s}")))
         .map(|s| s.matches('.').count() + 1)
         .max()
@@ -799,7 +475,8 @@ fn parle_de(etiquette: &str, cle: &str) -> bool {
     }
     let colle = etiquette.replace('-', "");
     let piege = |reste: &str| {
-        !reste.is_empty() && (MOTS_DE_PIEGE.contains(&reste) || reste.chars().all(|c| c.is_ascii_digit()))
+        !reste.is_empty()
+            && (MOTS_DE_PIEGE.split_whitespace().any(|m| m == reste) || reste.chars().all(|c| c.is_ascii_digit()))
     };
     colle == cle || colle.strip_prefix(cle).is_some_and(piege) || colle.strip_suffix(cle).is_some_and(piege)
 }
@@ -824,8 +501,7 @@ fn examiner(lien: &Lien) -> Vec<Signe> {
                 tr!(
                     "Ce lien n'ouvre pas un site : il exécute du code ou contient une page cachée.",
                     "This link does not open a site: it runs code or carries a hidden page."
-                )
-                .into(),
+                ),
             ));
             return signes;
         }
@@ -866,8 +542,7 @@ fn examiner(lien: &Lien) -> Vec<Signe> {
                 tr!(
                     "Adresse d'un appareil de ton réseau (box, imprimante…), pas un site d'Internet.",
                     "Address of a device on your network (router, printer…), not an Internet site."
-                )
-                .into(),
+                ),
             )
         } else {
             signe(
@@ -875,8 +550,7 @@ fn examiner(lien: &Lien) -> Vec<Signe> {
                 tr!(
                     "Adresse IP brute au lieu d'un nom : les vrais services ont un nom, les pièges souvent pas.",
                     "Raw IP address instead of a name: real services have a name, traps often do not."
-                )
-                .into(),
+                ),
             )
         });
     } else if ip_deguisee(hote) {
@@ -885,8 +559,7 @@ fn examiner(lien: &Lien) -> Vec<Signe> {
             tr!(
                 "Adresse IP déguisée (en un seul nombre ou en hexadécimal) : une ruse pour cacher où mène le lien.",
                 "Disguised IP address (one number or hexadecimal): a trick to hide where the link leads."
-            )
-            .into(),
+            ),
         ));
     } else {
         signes.extend(examiner_nom(hote, &domaine));
@@ -895,14 +568,15 @@ fn examiner(lien: &Lien) -> Vec<Signe> {
     if lien.schema == "http" {
         // Une page de connexion ou de paiement sans chiffrement : plus grave qu'une simple page.
         let reste = lien.reste.to_lowercase();
-        let piege = MOTS_DE_PIEGE.iter().any(|m| m.len() > 4 && reste.contains(m));
+        let piege = MOTS_DE_PIEGE
+            .split_whitespace()
+            .any(|m| m.len() > 4 && reste.contains(m));
         signes.push(signe(
             if piege { Niveau::Moyen } else { Niveau::Info },
             tr!(
                 "Pas chiffré (http, sans « s ») : ce qu'on y tape peut être lu en route.",
                 "Not encrypted (http, without “s”): what you type there can be read on the way."
-            )
-            .into(),
+            ),
         ));
     }
     if let Some(p) = lien.port.filter(|p| ![80, 443].contains(p)) {
@@ -938,8 +612,7 @@ fn examiner(lien: &Lien) -> Vec<Signe> {
             tr!(
                 "Lien très long ou rempli de caractères codés : souvent pour cacher sa vraie destination.",
                 "Very long link or full of encoded characters: often to hide where it really goes."
-            )
-            .into(),
+            ),
         ));
     }
     signes
@@ -965,7 +638,7 @@ fn examiner_nom(hote: &str, domaine: &str) -> Vec<Signe> {
             }
             lu.extend(etiquette.chars().map(|c| latine(c).unwrap_or('?')));
         }
-        let imitee = MARQUES.iter().find(|m| officiel(&lu, m));
+        let imitee = marques().iter().find(|m| officiel(&lu, m));
         // Lettres accentuées seules (« québec.ca ») : un nom honnête, sauf s'il imite une marque.
         if imitee.is_none() && !melange && !etranger {
             return examiner_marques(hote, domaine, signes);
@@ -1006,7 +679,7 @@ fn examiner_marques(hote: &str, domaine: &str, mut signes: Vec<Signe>) -> Vec<Si
     let sous_domaine = &etiquettes[..etiquettes.len().saturating_sub(n_domaine)];
     let principal = domaine.split('.').next().unwrap_or(domaine);
     let mut marques_vues = Vec::new();
-    for marque in MARQUES {
+    for marque in marques() {
         if officiel(hote, marque) {
             signes.push(signe(
                 Niveau::Info,
@@ -1085,17 +758,16 @@ fn examiner_marques(hote: &str, domaine: &str, mut signes: Vec<Signe>) -> Vec<Si
             ),
         ));
     }
-    if RACCOURCISSEURS.contains(&domaine) {
+    if RACCOURCISSEURS.split_whitespace().any(|r| r == domaine) {
         signes.push(signe(
             Niveau::Moyen,
             tr!(
                 "Raccourcisseur de liens : on ne voit pas où il mène avant de l'ouvrir. Ne l'ouvre que si tu connais l'expéditeur.",
                 "Link shortener: you cannot see where it leads before opening it. Only open it if you know the sender."
-            )
-            .into(),
+            ),
         ));
     }
-    if let Some(h) = HEBERGEURS.iter().find(|h| hote.ends_with(&format!(".{h}"))) {
+    if let Some(h) = HEBERGEURS.split_whitespace().find(|h| hote.ends_with(&format!(".{h}"))) {
         signes.push(signe(
             if marques_vues.is_empty() { Niveau::Info } else { Niveau::Eleve },
             trf!(
@@ -1744,6 +1416,18 @@ mod tests {
 
     fn pire(t: &str) -> Option<Niveau> {
         niveaux(t).into_iter().max()
+    }
+
+    #[test]
+    fn table_des_marques_lue_en_entier() {
+        // Une ligne mal formée serait sautée sans bruit par filter_map : chaque ligne doit donner une marque complète.
+        assert_eq!(marques().len(), TABLE_DES_MARQUES.lines().count());
+        assert!(
+            marques()
+                .iter()
+                .all(|m| !m.nom.is_empty() && !m.mots.is_empty() && !m.domaines.is_empty())
+        );
+        assert_eq!(marques()[0].domaines[0], "paypal.com");
     }
 
     #[test]

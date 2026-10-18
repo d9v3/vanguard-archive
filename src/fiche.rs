@@ -59,36 +59,18 @@ pub struct Disque {
     pub sorte: String,
 }
 
+/// Textes d'usine des cartes mères vendues nues, séparés par « | » : ils ne disent rien.
+const TEXTES_D_USINE: &str = "\
+to be filled by o.e.m.|default string|system product name|system manufacturer|system serial number|\
+system version|not specified|not applicable|unknown|none|o.e.m.|oem|0|00000000|0123456789|123456789|\
+base board serial number|chassis serial number|invalid|n/a";
+
 /// Valeur réellement renseignée par le fabricant : les cartes mères vendues nues laissent des textes d'usine
 /// (« To be filled by O.E.M. », « Default string »…), qui ne disent rien.
 #[cfg_attr(target_os = "macos", allow(dead_code))]
 fn renseigne(valeur: &str) -> bool {
     let v = valeur.trim().to_ascii_lowercase();
-    !v.is_empty()
-        && ![
-            "to be filled by o.e.m.",
-            "default string",
-            "system product name",
-            "system manufacturer",
-            "system serial number",
-            "system version",
-            "not specified",
-            "not applicable",
-            "unknown",
-            "none",
-            "o.e.m.",
-            "oem",
-            "0",
-            "00000000",
-            "0123456789",
-            "123456789",
-            "base board serial number",
-            "chassis serial number",
-            "invalid",
-            "n/a",
-        ]
-        .contains(&v.as_str())
-        && !v.starts_with("type1productconfigid")
+    !v.is_empty() && !TEXTES_D_USINE.split('|').any(|x| x == v) && !v.starts_with("type1productconfigid")
 }
 
 /// Le texte s'il est renseigné, sinon rien.
