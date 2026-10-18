@@ -316,6 +316,23 @@ pub fn place_a_liberer() -> u64 {
         .sum()
 }
 
+/// Ce qui va être nettoyé, montré avant de demander : titre et place, commandes, et le revers coupé pour tenir dans
+/// `LARGEUR` (d'une traite, le terminal le coupait au milieu des mots).
+fn a_nettoyer(choisis: &[&Element]) -> Vec<String> {
+    let mut lignes = Vec::new();
+    for e in choisis {
+        lignes.push(format!("    {VERT}−{RESET} {}  {GRIS}{}{RESET}", e.titre, precision(e)));
+        lignes.extend(e.commandes.iter().map(|c| format!("        {GRIS}{c}{RESET}")));
+        if let Some(p) = e.prudence {
+            let morceaux = envelopper(p, LARGEUR - 10);
+            for (i, m) in morceaux.iter().enumerate() {
+                lignes.push(format!("{}{m}", if i == 0 { "        ⚠ " } else { "          " }));
+            }
+        }
+    }
+    lignes
+}
+
 /// « gardien nettoyer » : liste à cocher, puis nettoyage après accord et bilan de la place gagnée.
 pub fn menu() {
     let elements = mesurer();
@@ -357,14 +374,8 @@ pub fn menu() {
         return;
     }
     trp!("\n  {GRAS}À nettoyer{RESET}", "\n  {GRAS}To clean{RESET}");
-    for e in &choisis {
-        println!("    {VERT}−{RESET} {}  {GRIS}{}{RESET}", e.titre, precision(e));
-        for c in &e.commandes {
-            println!("        {GRIS}{c}{RESET}");
-        }
-        if let Some(p) = e.prudence {
-            println!("        ⚠ {p}");
-        }
+    for l in a_nettoyer(&choisis) {
+        println!("{l}");
     }
     let connu: u64 = choisis.iter().filter_map(|e| e.taille).sum();
     if connu >= PRESQUE_RIEN {
@@ -428,12 +439,16 @@ pub fn liste() {
             .filter_map(|e| e.taille)
             .sum()
     };
-    trp!(
-        "\n  « + » : coché d'office, au moins {} à libérer ({} avec le reste). Rien n'a été effacé.",
-        "\n  “+”: checked by default, at least {} to free ({} with the rest). Nothing was deleted.",
+    let bilan = trf!(
+        "« + » : coché d'office, au moins {} à libérer ({} avec le reste).",
+        "“+”: checked by default, at least {} to free ({} with the rest).",
         taille_lisible(somme(true)),
         taille_lisible(somme(false))
     );
+    println!();
+    afficher_aligne("  ", &bilan, 2, "");
+    // Sur sa ligne : coupée en deux, la phrase ne se lirait plus d'un trait.
+    trp!("  Rien n'a été effacé.", "  Nothing was deleted.");
 }
 
 #[cfg(test)]
@@ -515,6 +530,40 @@ mod tests {
         let e = caches_inutilises(&cache, "~/.cache", &["comptee-a-part"], true).unwrap();
         assert_eq!(e.taille, Some(0), "plus rien d'oublié après le nettoyage");
         std::fs::remove_dir_all(&racine).unwrap();
+    }
+
+    /// Les messages de Nettoyer tiennent dans `LARGEUR` colonnes, dans les deux langues (les fichiers de chaque
+    /// système ne font que décrire les éléments).
+    #[test]
+    fn messages_dans_la_largeur() {
+        let larges = crate::gaming::tests::textes_trop_larges(include_str!("mod.rs"));
+        assert_eq!(larges, Vec::<String>::new());
+    }
+
+    /// Avant de demander, la liste de ce qui va être nettoyé montre le revers de chaque élément, coupé pour tenir
+    /// dans `LARGEUR` ; les commandes, elles, restent entières (elles se copient).
+    #[test]
+    fn resume_dans_la_largeur() {
+        let e = Element {
+            titre: "Paquets devenus inutiles",
+            effet: "Paquets installés pour un autre que plus rien n'utilise.".into(),
+            prudence: Some(
+                "La liste s'affiche et se confirme avant : vérifie qu'elle ne contient rien que tu utilises.",
+            ),
+            taille: None,
+            commandes: vec!["sudo apt-get autoremove --purge".into()],
+            recommande: false,
+            admin: true,
+        };
+        let lignes = a_nettoyer(&[&e]);
+        let commande = format!("        {GRIS}");
+        for l in lignes.iter().filter(|l| !l.starts_with(&commande)) {
+            assert!(largeur_affichee(l) <= LARGEUR, "{} colonnes : {l}", largeur_affichee(l));
+        }
+        assert!(
+            lignes.iter().any(|l| l.starts_with("        ⚠ La liste")),
+            "{lignes:#?}"
+        );
     }
 
     #[test]
