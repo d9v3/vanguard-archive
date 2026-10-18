@@ -111,6 +111,8 @@ verifier "maj : jamais « --install --all » (installerait une nouvelle version 
 lancer logiciels-liste 120 '' logiciels --liste
 verifier "logiciels : au moins 20 proposés" python3 -c "import re, sys; t = open('$RES/logiciels-liste.txt', encoding='utf-8').read(); sys.exit(len(re.findall(r'(?m)^ +(?:\x1b\[[0-9;]*m)?[✔·]', t)) < 20)"
 lancer logiciels 60 '\n' logiciels
+lancer nettoyer-liste 120 '' nettoyer --liste
+verifier "nettoyer : place à gagner mesurée, rien effacé" grep -qiE 'rien n.a été effacé|nothing was deleted' "$RES/nettoyer-liste.txt"
 verifier "logiciels : menu affiché" grep -qE 'Pack de départ|Starter pack' "$RES/logiciels.txt"
 lancer gaming 60 '\n' gaming
 

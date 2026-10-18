@@ -53,6 +53,13 @@ taille du journal, rapports envoyés par GNOME ou Ubuntu. Sous macOS : publicit�
 clés. Chaque réglage montre son état et s'annule exactement : la valeur d'avant est notée, puis remise. Aucun
 n'affaiblit la sécurité.
 
+**Nettoyer le système** — une liste à cocher de ce qui prend de la place sans servir : paquets téléchargés et devenus
+inutiles, anciennes versions des Snap, Flatpak inutilisés, compilations AUR, vieux caches, miniatures, vieux journaux,
+rapports de plantage (Linux) ; fichiers temporaires, cache de Windows Update et de l'optimisation de distribution,
+anciens composants (Windows) ; vieux caches, Homebrew, Xcode, instantanés locaux (macOS). La place que libère chaque
+élément est mesurée avant, ce qui se refait seul est coché d'office, la corbeille jamais ; la place libre relue après
+dit ce qui a vraiment été gagné.
+
 **Et aussi**
 - Corrections appliquées seulement après confirmation, avec un point de restauration créé automatiquement avant
   (snapper ou timeshift sous Linux, point de restauration Windows, instantané Time Machine sous macOS) ; sous
@@ -99,6 +106,7 @@ Chaque entrée du menu existe aussi en commande :
 | `sentinel machine [--json]` | audit de cette machine |
 | `sentinel reseau [cible] [-p courants\|tous\|22,80,8000-8100] [--json]` | scan du réseau ou d'un appareil |
 | `sentinel connexion` | test de connexion pour le jeu |
+| `sentinel nettoyer [--liste]` | nettoyer le système ; `--liste` : la place à gagner, sans rien effacer |
 | `sentinel logiciels [--liste] [--recommandes]` | logiciels à installer par catégorie ; `--liste` : leur état, sans rien installer |
 | `sentinel diagnostic` | diagnostic de l'ordinateur : matériel, système, plantages et erreurs récents |
 | `sentinel antivirus [--complet] [dossier]` | analyse antivirus (ordinateur, ou une clé / un dossier) |
@@ -144,6 +152,7 @@ modification. Sur GitHub, `@claude` dans un ticket ou une demande de fusion le f
 | `src/rapport.rs`, `src/historique.rs` | rapport HTML, historique des bilans, courbe des notes |
 | `src/reparer.rs`, `src/maj.rs`, `src/gaming/` | réparations, mises à jour, gaming |
 | `src/optimiser/` | réglages de confidentialité, de performance et de confort, avec annulation exacte |
+| `src/nettoyer/` | nettoyage : éléments par système, place mesurée avant et après |
 | `src/logiciels/` | logiciels à installer : catalogue vérifié (`catalogue.rs`), état et installation par système |
 | `src/fuites.rs`, `src/donnees.rs` | mots de passe fuités, sauvegarde des données |
 | `assets/oui.tsv` | fabricants par préfixe MAC (liste IEEE) |

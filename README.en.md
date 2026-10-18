@@ -49,6 +49,12 @@ fast startup, full right-click menu. On Linux: SSD maintenance, journal size, re
 macOS: ads, analytics, no .DS_Store on drives. Each setting shows its state and is undone exactly: the previous value
 is recorded, then put back. None of them weakens security.
 
+**Clean up the system** — a checklist of what takes space for nothing: downloaded and unneeded packages, old Snap
+versions, unused Flatpak runtimes, AUR builds, old caches, thumbnails, old logs, crash reports (Linux); temporary
+files, Windows Update and Delivery Optimization caches, old components (Windows); old caches, Homebrew, Xcode, local
+snapshots (macOS). The space each item frees is measured first, what rebuilds itself is checked by default, the trash
+never; the free space read again afterwards tells what was really gained.
+
 **And also**
 - Fixes applied only after confirmation, with a restore point created automatically beforehand (snapper or
   timeshift on Linux, Windows restore point, Time Machine snapshot on macOS); on Windows, each one is a readable
@@ -94,6 +100,7 @@ Each menu entry is also a command:
 | `sentinel audit [--json]` | audit of this machine |
 | `sentinel network [target] [-p common\|all\|22,80,8000-8100] [--json]` | scan the network or one device |
 | `sentinel connection` | connection test for gaming |
+| `sentinel clean [--list]` | clean up the system; `--list`: the space to gain, deleting nothing |
 | `sentinel apps [--list] [--recommended]` | software to install by category; `--list`: their state, installing nothing |
 | `sentinel diag` | computer diagnostic: hardware, system, recent crashes and errors |
 | `sentinel antivirus [--complet] [folder]` | antivirus scan (computer, or a key / a folder) |
@@ -143,6 +150,7 @@ The code, its comments and its internal names are in French; every text shown to
 | `src/rapport.rs`, `src/historique.rs` | HTML report, check history, grade curve |
 | `src/reparer.rs`, `src/maj.rs`, `src/gaming/` | repairs, updates, gaming |
 | `src/optimiser/` | privacy, performance and comfort settings, with exact undo |
+| `src/nettoyer/` | cleanup: items per system, space measured before and after |
 | `src/logiciels/` | software to install: checked catalog (`catalogue.rs`), state and installation per system |
 | `src/fuites.rs`, `src/donnees.rs` | leaked passwords, data backup |
 | `assets/oui.tsv` | manufacturers by MAC prefix (IEEE list) |

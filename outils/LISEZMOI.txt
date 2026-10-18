@@ -52,6 +52,7 @@ Menu (↑ ↓ pour choisir, Entrée pour lancer, Échap pour revenir ; ou le chi
        Gaming (Windows : Visual C++, DirectX… ; Linux : Steam, Vulkan, GameMode, MangoHud, Wine, Lutris… ;
        macOS : Steam, Heroic)
   8  Optimiser ›
+       Nettoyer le système (caches, fichiers temporaires, paquets, corbeille… : la place de chacun, à cocher)
        Réglages recommandés, en une fois · Confidentialité (télémétrie, publicités, suivi, Recall…)
        Performance et fiabilité (démarrage rapide, SSD…) · Confort et fichiers (extensions visibles,
        pas de lancement automatique des clés, menu complet au clic droit…) · Tout remettre comme avant

@@ -51,6 +51,7 @@ Menu (↑ ↓ to select, Enter to run, Esc to go back; or the number, then Enter
        Gaming (Windows: Visual C++, DirectX…; Linux: Steam, Vulkan, GameMode, MangoHud, Wine, Lutris…;
        macOS: Steam, Heroic)
   8  Optimize ›
+       Clean up the system (caches, temporary files, packages, trash…: the space of each, to check)
        Recommended settings, in one go · Privacy (telemetry, ads, tracking, Recall…)
        Performance and reliability (fast startup, SSD…) · Comfort and files (file extensions shown,
        no autorun from USB drives, full right-click menu…) · Put everything back

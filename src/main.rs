@@ -19,6 +19,7 @@ mod langue;
 mod logiciels;
 mod machine;
 mod maj;
+mod nettoyer;
 mod optimiser;
 #[cfg(unix)]
 mod protection;
@@ -123,6 +124,14 @@ enum Commande {
         /// Installer le pack de départ (navigateur, mots de passe, vidéo, bureautique, archives), après accord.
         #[arg(long, visible_alias = "recommended")]
         recommandes: bool,
+    },
+    /// Nettoyer le système : caches, fichiers temporaires, paquets téléchargés, vieux journaux, corbeille… La place
+    /// libérée par chaque élément est montrée avant ; on coche, puis on accepte.
+    #[command(visible_alias = "clean")]
+    Nettoyer {
+        /// Montrer ce qui pourrait être nettoyé et la place à gagner, sans rien effacer.
+        #[arg(long, visible_alias = "list")]
+        liste: bool,
     },
     /// Test de connexion pour le jeu : ping, gigue, pertes, débit et bufferbloat.
     #[command(visible_alias = "connection")]
@@ -431,6 +440,7 @@ enum Action {
     Courriel,
     Logiciels,
     Gaming,
+    Nettoyer,
     OptimiserRecommandes,
     OptimiserConfidentialite,
     #[cfg(not(target_os = "macos"))]
@@ -463,6 +473,7 @@ impl Action {
         Action::Courriel,
         Action::Logiciels,
         Action::Gaming,
+        Action::Nettoyer,
         Action::OptimiserRecommandes,
         Action::OptimiserConfidentialite,
         #[cfg(not(target_os = "macos"))]
@@ -487,6 +498,7 @@ impl Action {
             Action::Courriel => "e",
             Action::Logiciels => "l",
             Action::Gaming => "g",
+            Action::Nettoyer => "v",
             Action::Sauvegarder => "d",
             _ => return None,
         })
@@ -600,6 +612,10 @@ impl Action {
                     tr!("Steam, Vulkan, GameMode, Wine…", "Steam, Vulkan, GameMode, Wine…")
                 },
             ),
+            Action::Nettoyer => (
+                tr!("Nettoyer le système", "Clean up the system"),
+                tr!("caches, temporaires, corbeille…", "caches, temp files, trash…"),
+            ),
             Action::OptimiserRecommandes => (
                 tr!("Réglages recommandés", "Recommended settings"),
                 tr!("en une fois, tout s'annule", "in one go, all undoable"),
@@ -683,7 +699,7 @@ impl Groupe {
             Groupe::Reseau => tr!("appareils, surveillance, débit", "devices, monitoring, speed test"),
             Groupe::Protection => tr!("analyses, clé USB, fuites…", "scans, USB drive, leaks…"),
             Groupe::Installer => tr!("logiciels libres, gaming", "open source software, gaming"),
-            Groupe::Optimiser => tr!("confidentialité, confort…", "privacy, comfort…"),
+            Groupe::Optimiser => tr!("nettoyer, confidentialité…", "clean up, privacy…"),
             Groupe::Donnees => tr!("sauvegarder ou restaurer", "back up or restore"),
         }
     }
@@ -714,6 +730,7 @@ impl Groupe {
             ],
             Groupe::Installer => &[Action::Logiciels, Action::Gaming],
             Groupe::Optimiser => &[
+                Action::Nettoyer,
                 Action::OptimiserRecommandes,
                 Action::OptimiserConfidentialite,
                 #[cfg(not(target_os = "macos"))]
@@ -840,6 +857,7 @@ async fn executer(s: &mut Session, action: Action) {
         Action::Courriel => fuites::verifier_courriel(),
         Action::Logiciels => logiciels::menu(),
         Action::Gaming => gaming::menu(),
+        Action::Nettoyer => nettoyer::menu(),
         Action::OptimiserRecommandes => optimiser::recommandes(),
         Action::OptimiserConfidentialite => optimiser::menu(optimiser::Categorie::Confidentialite),
         #[cfg(not(target_os = "macos"))]
@@ -894,6 +912,10 @@ fn ligne_de_commande() -> clap::Command {
             "Computer diagnostic: hardware, system and recent problems (crashes, errors). Read only",
         ),
         (
+            "nettoyer",
+            "Clean up the system: caches, temporary files, downloaded packages, old logs, trash… The space each item frees is shown first; check, then accept",
+        ),
+        (
             "connexion",
             "Connection test for gaming: ping, jitter, packet loss, speed and bufferbloat",
         ),
@@ -933,7 +955,12 @@ fn ligne_de_commande() -> clap::Command {
     for &(nom, aide) in aides {
         c = c.mut_subcommand(nom, |s| s.about(aide));
     }
-    c.mut_subcommand("logiciels", |s| {
+    c.mut_subcommand("nettoyer", |s| {
+        s.mut_arg("liste", |a| {
+            a.help("Show what could be cleaned up and the space to gain, deleting nothing")
+        })
+    })
+    .mut_subcommand("logiciels", |s| {
         s.mut_arg("liste", |a| {
             a.help("Show each program offered and its state, without installing anything")
         })
@@ -1045,6 +1072,13 @@ async fn main() {
         Some(Commande::Maj) => maj::executer(),
         Some(Commande::Reparer) => reparer::menu(),
         Some(Commande::Gaming) => gaming::menu(),
+        Some(Commande::Nettoyer { liste }) => {
+            if liste {
+                nettoyer::liste();
+            } else {
+                nettoyer::menu();
+            }
+        }
         Some(Commande::Connexion) => connexion::tester().await,
         Some(Commande::Diagnostic) => diagnostic::diagnostic(),
         Some(Commande::Logiciels { liste, recommandes }) => {

@@ -23,6 +23,8 @@ pub struct Reparation {
     pub inutile: Option<String>,
     /// Modifie le système : on propose un point de restauration avant (snapper, timeshift, Windows).
     pub restauration: bool,
+    /// Un autre outil de sentinel fait la réparation (Disque plein : Nettoyer), à la place des commandes.
+    pub ouvrir: Option<fn()>,
 }
 
 fn rep(titre: &'static str, pourquoi: impl Into<String>, duree: &'static str, commandes: &[&str]) -> Reparation {
@@ -34,7 +36,23 @@ fn rep(titre: &'static str, pourquoi: impl Into<String>, duree: &'static str, co
         bloquee: None,
         inutile: None,
         restauration: false,
+        ouvrir: None,
     }
+}
+
+/// Disque plein : l'outil Nettoyer, qui mesure ce que libère chaque élément et laisse choisir.
+fn disque_plein() -> Reparation {
+    let mut r = rep(
+        tr!("Disque plein", "Disk full"),
+        tr!(
+            "Ouvre « Nettoyer le système » : la place que libère chaque élément (caches, fichiers temporaires, paquets, corbeille…), à cocher.",
+            "Opens “Clean up the system”: the space each item frees (caches, temporary files, packages, trash…), to check."
+        ),
+        tr!("une minute", "one minute"),
+        &[],
+    );
+    r.ouvrir = Some(crate::nettoyer::menu);
+    r
 }
 
 impl Reparation {
@@ -172,146 +190,6 @@ fn actif(service: &str) -> bool {
         .stderr(std::process::Stdio::null())
         .status()
         .is_ok_and(|s| s.success())
-}
-
-/// Place libre sur le volume système, pour l'afficher dans « disque plein ».
-/// Taille d'un dossier, en octets ; `age` : seulement les fichiers non lus depuis ce nombre de jours. Arrêt à
-/// l'échéance (un cache de plusieurs millions de fichiers) : le total est alors un minimum.
-#[cfg(target_os = "linux")]
-fn taille_dossier(dossier: &std::path::Path, age: Option<u64>, echeance: std::time::Instant) -> u64 {
-    let limite = age.map(|j| std::time::SystemTime::now() - std::time::Duration::from_secs(j * 86_400));
-    let mut total = 0;
-    let mut a_voir = vec![dossier.to_path_buf()];
-    while let Some(d) = a_voir.pop() {
-        if std::time::Instant::now() > echeance {
-            break;
-        }
-        for e in std::fs::read_dir(&d).into_iter().flatten().flatten() {
-            let Ok(m) = e.metadata() else { continue };
-            if m.is_dir() {
-                a_voir.push(e.path());
-            } else if limite.is_none_or(|l| m.accessed().or_else(|_| m.modified()).is_ok_and(|a| a < l)) {
-                total += m.len();
-            }
-        }
-    }
-    total
-}
-
-/// La date de dernière lecture est-elle tenue à jour là où se trouve `dossier` ? Monté en `noatime`, elle ne bouge
-/// plus : « non lu depuis 90 jours » ne voudrait rien dire, et des fichiers lus chaque jour seraient effacés.
-#[cfg(target_os = "linux")]
-fn lectures_datees(dossier: &std::path::Path) -> bool {
-    crate::commande::lancer(
-        std::process::Command::new("findmnt")
-            .args(["-no", "OPTIONS", "--target"])
-            .arg(dossier),
-        5,
-    )
-    .is_none_or(|r| !r.sortie.trim().split(',').any(|o| o == "noatime"))
-}
-
-#[cfg(target_os = "linux")]
-fn en_go(octets: u64) -> String {
-    #[allow(clippy::cast_precision_loss)]
-    let go = octets as f64 / f64::from(1u32 << 30);
-    trf!("{go:.1} Go", "{go:.1} GB")
-}
-
-/// Nettoyage plus poussé que « Disque plein » : corbeille, paquets devenus inutiles, caches de compilation AUR,
-/// fichiers de cache non lus depuis 90 jours, rapports de plantage de plus d'une semaine.
-#[cfg(target_os = "linux")]
-fn nettoyage(gestion: Option<machine::linux::Paquets>) -> Reparation {
-    use crate::machine::linux::Paquets;
-    let maison = std::path::PathBuf::from(std::env::var_os("HOME").unwrap_or_default());
-    let echeance = std::time::Instant::now() + std::time::Duration::from_secs(3);
-    let corbeille = maison.join(".local/share/Trash");
-    let mut commandes: Vec<&str> = Vec::new();
-    let mut details = Vec::new();
-    let mut total = 0;
-    let t = taille_dossier(&corbeille, None, echeance);
-    if t > 0 {
-        commandes.push("rm -rf ~/.local/share/Trash/files ~/.local/share/Trash/info ~/.local/share/Trash/expunged");
-        details.push(trf!("corbeille {}", "trash {}", en_go(t)));
-        total += t;
-    }
-    match gestion {
-        Some(Paquets::Pacman) => commandes.push(tr!(
-            "orphelins=$(pacman -Qdtq); if [ -n \"$orphelins\" ]; then sudo pacman -Rns $orphelins; else echo 'Aucun paquet orphelin.'; fi",
-            "orphelins=$(pacman -Qdtq); if [ -n \"$orphelins\" ]; then sudo pacman -Rns $orphelins; else echo 'No orphan package.'; fi"
-        )),
-        Some(Paquets::Apt) => commandes.push("sudo apt-get autoremove --purge"),
-        // Image en lecture seule (rpm-ostree) : rien à retirer à la main.
-        Some(Paquets::Dnf) if crate::machine::linux::atomique().is_some() => {}
-        Some(Paquets::Dnf) => commandes.push("sudo dnf autoremove"),
-        Some(Paquets::Zypper) => commandes.push("zypper packages --unneeded"),
-        None => {}
-    }
-    for (assistant, sous_dossier) in [("yay", ".cache/yay"), ("paru", ".cache/paru/clone")] {
-        let t = taille_dossier(&maison.join(sous_dossier), None, echeance);
-        if t >= 50 << 20 {
-            commandes.push(if assistant == "yay" {
-                "rm -rf ~/.cache/yay/*"
-            } else {
-                "rm -rf ~/.cache/paru/clone/*"
-            });
-            details.push(trf!("compilations {assistant} {}", "{assistant} builds {}", en_go(t)));
-            total += t;
-        }
-    }
-    let cache = maison.join(".cache");
-    let t = if lectures_datees(&cache) {
-        taille_dossier(&cache, Some(90), echeance)
-    } else {
-        0
-    };
-    if t >= 50 << 20 {
-        commandes.push("find ~/.cache -mindepth 1 -type f -atime +90 -delete 2>/dev/null; find ~/.cache -mindepth 1 -type d -empty -delete 2>/dev/null");
-        details.push(trf!("vieux fichiers de cache {}", "old cache files {}", en_go(t)));
-        total += t;
-    }
-    let plantages = std::path::Path::new("/var/lib/systemd/coredump");
-    if plantages.is_dir() {
-        commandes.push("sudo find /var/lib/systemd/coredump -type f -mtime +7 -delete");
-    }
-    commandes.push("df -h /");
-    let mut r = rep(
-        tr!("Nettoyage approfondi", "Deep cleanup"),
-        trf!(
-            "Vide la corbeille, retire les paquets devenus inutiles (la liste s'affiche avant), les compilations AUR gardées, les fichiers de cache non lus depuis 90 jours et les rapports de plantage de plus d'une semaine. À gagner : {}.",
-            "Empties the trash, removes packages no longer needed (the list is shown first), kept AUR builds, cache files unread for 90 days and crash reports older than a week. To gain: {}.",
-            if details.is_empty() {
-                tr!("peu de place", "little space").to_string()
-            } else {
-                details.join(", ")
-            }
-        ),
-        tr!("une minute", "one minute"),
-        &commandes,
-    );
-    if total < 100 << 20 && details.is_empty() {
-        r.inutile = Some(tr!("presque rien à libérer", "almost nothing to free").into());
-    }
-    r
-}
-
-#[cfg(unix)]
-fn occupation_racine() -> String {
-    std::process::Command::new("df")
-        .args(["-h", "/"])
-        .output()
-        .ok()
-        .and_then(|o| {
-            let t = String::from_utf8_lossy(&o.stdout).into_owned();
-            let c: Vec<String> = t.lines().nth(1)?.split_whitespace().map(str::to_string).collect();
-            Some(trf!(
-                "disque système plein à {} ({} libres)",
-                "system disk {} full ({} free)",
-                c.get(4)?,
-                c.get(3)?
-            ))
-        })
-        .unwrap_or_default()
 }
 
 /// Proxy imposé et redirections du fichier hosts : les deux façons classiques de détourner la navigation.
@@ -644,36 +522,7 @@ pub fn liste() -> Vec<Reparation> {
     ));
 
     // Place
-    // autoremove sans -y : la liste des paquets retirés s'affiche et se confirme (retirer un métapaquet peut
-    // emporter tout un bureau).
-    let mut menage: Vec<&str> = match gestion {
-        Some(Paquets::Pacman) if present("paccache") => vec!["sudo paccache -rk2", "sudo paccache -ruk0"],
-        Some(Paquets::Pacman) => vec!["sudo pacman -Sc --noconfirm"],
-        Some(Paquets::Apt) => vec!["sudo apt-get autoremove", "sudo apt-get clean"],
-        Some(Paquets::Dnf) if atomique == Some(Atomique::RpmOstree) => vec!["sudo rpm-ostree cleanup -bm"],
-        Some(Paquets::Dnf) => vec!["sudo dnf autoremove", "sudo dnf clean all"],
-        Some(Paquets::Zypper) => vec!["sudo zypper clean --all"],
-        None => vec![],
-    };
-    if systemd {
-        menage.push("sudo journalctl --vacuum-time=2weeks");
-    }
-    menage.push("rm -rf ~/.cache/thumbnails");
-    if present("flatpak") {
-        menage.push("flatpak uninstall --unused -y");
-    }
-    menage.push("df -h /");
-    l.push(rep(
-        tr!("Disque plein", "Disk full"),
-        trf!(
-            "Vide les anciens paquets téléchargés, les vieux journaux et les miniatures ; {}.",
-            "Removes old downloaded packages, old logs and thumbnails; {}.",
-            occupation_racine()
-        ),
-        tr!("une minute", "one minute"),
-        &menage,
-    ));
-    l.push(nettoyage(gestion));
+    l.push(disque_plein());
 
     if !systemd {
         return l;
@@ -910,29 +759,7 @@ pub fn liste() -> Vec<Reparation> {
             "diskutil verifyVolume /",
         ],
     ));
-    let mut menage = vec![
-        // Fichiers de cache pas modifiés depuis une semaine, puis les dossiers restés vides : la date d'un dossier ne dit
-        // pas si l'app y a écrit récemment plus bas, et l'effacer en entier emporterait ses fichiers du jour.
-        "find ~/Library/Caches -type f -mtime +7 -delete 2>/dev/null; find ~/Library/Caches -mindepth 2 -type d -empty -delete 2>/dev/null; true".to_string(),
-        // Instantanés locaux de Time Machine : macOS les garde tant qu'il y a de la place, mais ils comptent.
-        "sudo tmutil thinlocalsnapshots / 999999999999 4".to_string(),
-    ];
-    if let Some(brew) = machine::macos::homebrew() {
-        menage.push(format!("{brew} cleanup --prune=all"));
-    }
-    menage.push("df -h /".to_string());
-    let mut plein = rep(
-        tr!("Disque plein", "Disk full"),
-        trf!(
-            "Vide les caches anciens, les instantanés locaux de Time Machine et les téléchargements de Homebrew ; {}. La corbeille n'est pas touchée : vide-la toi-même.",
-            "Removes old caches, local Time Machine snapshots and Homebrew downloads; {}. The Trash is left alone: empty it yourself.",
-            occupation_racine()
-        ),
-        tr!("une minute", "one minute"),
-        &[],
-    );
-    plein.commandes = menage;
-    l.push(plein);
+    l.push(disque_plein());
 
     // Heure
     l.push(rep(
@@ -1153,29 +980,7 @@ pub fn liste() -> Vec<Reparation> {
                 "Start-Service wuauserv, bits, cryptsvc",
             ],
         ).avec_restauration(),
-        rep(
-            tr!("Disque plein", "Disk full"),
-            tr!("Vide les fichiers temporaires et nettoie les anciennes versions des composants de Windows.", "Clears the temporary files and cleans up old versions of Windows components."),
-            tr!("quelques minutes", "a few minutes"),
-            &[
-                "Get-ChildItem $env:TEMP -Force | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue",
-                "Dism /Online /Cleanup-Image /StartComponentCleanup",
-                "Get-PSDrive C | Format-Table Used, Free",
-            ],
-        ),
-        rep(
-            tr!("Nettoyage approfondi", "Deep cleanup"),
-            tr!("Vide la corbeille, le dossier temporaire de Windows, le cache de Windows Update et de l'optimisation de distribution, et les anciens rapports de plantage.", "Empties the recycle bin, the Windows temporary folder, the Windows Update and Delivery Optimization caches, and old crash reports."),
-            tr!("quelques minutes", "a few minutes"),
-            &[
-                "Clear-RecycleBin -Force -ErrorAction SilentlyContinue",
-                "Get-ChildItem \"$env:SystemRoot\\Temp\" -Force -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue",
-                "Delete-DeliveryOptimizationCache -Force -ErrorAction SilentlyContinue",
-                "Stop-Service wuauserv -Force; Get-ChildItem \"$env:SystemRoot\\SoftwareDistribution\\Download\" -Force -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue; Start-Service wuauserv",
-                "Remove-Item \"$env:SystemRoot\\Minidump\\*\", \"$env:LOCALAPPDATA\\CrashDumps\\*\" -Force -ErrorAction SilentlyContinue",
-                "Get-PSDrive C | Format-Table Used, Free",
-            ],
-        ),
+        disque_plein(),
         rep(
             tr!("Heure fausse", "Wrong time"),
             tr!("Resynchronise l'horloge (une heure fausse casse le HTTPS et Windows Update).", "Resynchronizes the clock (a wrong time breaks HTTPS and Windows Update)."),
@@ -1229,6 +1034,10 @@ pub fn menu() {
     else {
         return;
     };
+    if let Some(outil) = r.ouvrir {
+        outil();
+        return;
+    }
     println!("\n  {GRAS}{}{RESET}", r.titre);
     if let Some(raison) = &r.inutile {
         trp!(
@@ -1309,7 +1118,11 @@ mod tests {
             assert!(!r.titre.is_empty() && !r.duree.is_empty());
             if r.inutile.is_none() {
                 assert!(!r.pourquoi.is_empty(), "{} n'explique rien", r.titre);
-                assert!(!r.commandes.is_empty(), "{} n'a pas de commande", r.titre);
+                assert!(
+                    !r.commandes.is_empty() || r.ouvrir.is_some(),
+                    "{} n'a pas de commande",
+                    r.titre
+                );
             }
         }
     }

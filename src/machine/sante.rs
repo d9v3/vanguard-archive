@@ -73,8 +73,8 @@ fn juger_volume(v: &Volume) -> Option<Constat> {
         )
         .manuel(
             tr!(
-                "Voir les plus gros dossiers, puis « Réparer → Disque plein »",
-                "See the biggest folders, then “Repair → Disk full”"
+                "Voir les plus gros dossiers, puis « Optimiser → Nettoyer le système »",
+                "See the biggest folders, then “Optimize → Clean up the system”"
             ),
             &[&commande],
         ),

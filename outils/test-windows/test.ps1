@@ -318,6 +318,13 @@ if ([Environment]::OSVersion.Version.Build -ge 22000) {
 LancerAvec 'logiciels' @('logiciels') "`n"
 if ((Sortie 'logiciels') -match 'Pack de départ|Starter pack') { Ok 'Menu des logiciels affiché' } else { Bug 'Menu des logiciels absent' }
 
+Etape 'Nettoyer le système : place à gagner, rien effacé'
+Lancer 'nettoyer-liste' @('nettoyer', '--liste')
+$n = Sortie 'nettoyer-liste'
+if ($n -match 'rien n.a été effacé|nothing was deleted') { Ok 'Liste du nettoyage affichée' } else { Bug 'Liste du nettoyage absente' }
+if ($n -match '(?m)(Tes fichiers temporaires|Your temporary files)\s+\S') { Ok 'Fichiers temporaires mesurés' } else { Bug 'Fichiers temporaires non mesurés' }
+if ($n -match 'Disque du système|System disk') { Ok 'Place libre du disque lue' } else { Bug 'Place libre du disque non lue (PowerShell)' }
+
 Etape 'Test de connexion'
 Lancer 'connexion' @('connexion')
 if ((Sortie 'connexion') -match 'Mbit/s') { Ok 'Débit mesuré' } else { Bug 'Débit non mesuré' }
