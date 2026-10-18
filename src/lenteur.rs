@@ -6,15 +6,12 @@
 
 use std::collections::HashMap;
 
+use crate::risk::Niveau;
 use crate::ui::*;
 
-/// Durée entre les deux mesures : assez pour lisser un pic, assez courte pour qu'on attende sans s'impatienter.
-/// (Windows et macOS mesurent eux-mêmes sur deux secondes : PowerShell, top.)
-#[cfg(target_os = "linux")]
-const ECART: std::time::Duration = std::time::Duration::from_secs(2);
-
-/// Un programme (tous ses processus réunis : Firefox en compte une dizaine).
-#[derive(Debug, Clone, PartialEq)]
+/// Un programme (tous ses processus réunis : Firefox en compte une dizaine), tel que le script de Windows le donne.
+#[derive(Debug, Clone, PartialEq, Default, serde::Deserialize)]
+#[serde(default)]
 pub struct Programme {
     pub nom: String,
     /// Part de toute la machine (tous les cœurs), en %.
@@ -86,33 +83,32 @@ impl Default for Instantane {
 fn reunir(processus: impl Iterator<Item = Programme>) -> Vec<Programme> {
     let mut par_nom: HashMap<String, Programme> = HashMap::new();
     for p in processus {
-        let e = par_nom.entry(p.nom.clone()).or_insert(Programme {
-            nom: p.nom.clone(),
-            processeur: 0.0,
-            memoire: 0,
-            disque: None,
-        });
+        let e = par_nom.entry(p.nom).or_default();
         e.processeur += p.processeur;
         e.memoire += p.memoire;
-        if let Some(d) = p.disque {
-            e.disque = Some(e.disque.unwrap_or(0.0) + d);
-        }
+        e.disque = p.disque.map(|d| e.disque.unwrap_or(0.0) + d).or(e.disque);
     }
-    par_nom.into_values().collect()
+    par_nom.into_iter().map(|(nom, p)| Programme { nom, ..p }).collect()
+}
+
+/// Les programmes au démarrage, (nom, programme lancé), avec la mémoire qu'occupe ce programme en ce moment.
+fn avec_poids(programmes: &[Programme], liste: impl Iterator<Item = (String, String)>) -> Vec<AuDemarrage> {
+    let mut par_nom: HashMap<String, u64> = HashMap::new();
+    for p in programmes {
+        *par_nom.entry(p.nom.to_lowercase()).or_default() += p.memoire;
+    }
+    let poids = |programme: &str| par_nom.get(&programme.to_lowercase()).copied();
+    liste.map(|(nom, p)| AuDemarrage { poids: poids(&p), nom }).collect()
 }
 
 /// « 1min 2.105s », « 835ms », « 1.186s », « 2h 3min » (durées de systemd) → secondes.
-#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 fn secondes_systemd(texte: &str) -> Option<f64> {
-    let mut total = 0.0;
-    let mut vu = false;
+    let mut total = None;
     for morceau in texte.split_whitespace() {
         let morceau = morceau.trim_start_matches('+');
-        let (nombre, unite) = morceau
-            .find(|c: char| c.is_ascii_alphabetic())
-            .map(|i| morceau.split_at(i))?;
+        let (nombre, unite) = morceau.split_at(morceau.find(|c: char| c.is_ascii_alphabetic())?);
         let n: f64 = nombre.parse().ok()?;
-        total += n * match unite {
+        let facteur = match unite {
             "h" => 3600.0,
             "min" => 60.0,
             "s" => 1.0,
@@ -120,37 +116,32 @@ fn secondes_systemd(texte: &str) -> Option<f64> {
             "us" | "µs" => 0.000_001,
             _ => return None,
         };
-        vu = true;
+        total = Some(total.unwrap_or(0.0) + n * facteur);
     }
-    vu.then_some(total)
+    total
 }
 
 /// `systemd-analyze` : « Startup finished in 11.846s (firmware) + 8.083s (loader) + 15.167s (kernel) + 5.575s
 /// (userspace) = 40.673s » → (total, étapes).
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 fn duree_systemd(texte: &str) -> Option<(f64, String)> {
-    let ligne = texte.lines().find(|l| l.starts_with("Startup finished in "))?;
-    let (etapes, total) = ligne.strip_prefix("Startup finished in ")?.rsplit_once(" = ")?;
+    let ligne = texte.lines().find_map(|l| l.strip_prefix("Startup finished in "))?;
+    let (etapes, total) = ligne.rsplit_once(" = ")?;
     let total = secondes_systemd(total.trim())?;
-    let noms = |e: &str| match e {
-        "firmware" => tr!("micrologiciel", "firmware"),
-        "loader" => tr!("chargeur", "loader"),
-        "kernel" => tr!("noyau", "kernel"),
-        "initrd" => "initrd",
-        "userspace" => tr!("système", "userspace"),
-        _ => "",
+    let etape = |e: &str| {
+        let (duree, nom) = e.trim().split_once(" (")?;
+        let nom = match nom.trim_end_matches(')') {
+            "firmware" => tr!("micrologiciel", "firmware"),
+            "loader" => tr!("chargeur", "loader"),
+            "kernel" => tr!("noyau", "kernel"),
+            "initrd" => "initrd",
+            "userspace" => tr!("système", "userspace"),
+            _ => return None,
+        };
+        Some(format!("{nom} {}", secondes_lisibles(secondes_systemd(duree)?)))
     };
-    let etapes = etapes
-        .split(" + ")
-        .filter_map(|e| {
-            let (duree, nom) = e.trim().split_once(" (")?;
-            let nom = noms(nom.trim_end_matches(')'));
-            let secondes = secondes_systemd(duree)?;
-            (!nom.is_empty()).then(|| format!("{nom} {}", secondes_lisibles(secondes)))
-        })
-        .collect::<Vec<_>>()
-        .join(" · ");
-    Some((total, etapes))
+    let etapes: Vec<String> = etapes.split(" + ").filter_map(etape).collect();
+    Some((total, etapes.join(" · ")))
 }
 
 /// `systemd-analyze critical-chain` : les unités du chemin critique et le temps que chacune a pris à démarrer
@@ -158,16 +149,11 @@ fn duree_systemd(texte: &str) -> Option<(f64, String)> {
 /// base de locate, par exemple) avec ce qui le retarde vraiment.
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 fn chaine_critique(texte: &str) -> Vec<(String, f64)> {
-    let mut lents: Vec<(String, f64)> = texte
-        .lines()
-        .filter_map(|l| {
-            let l = l.trim_start_matches(|c: char| !c.is_alphanumeric());
-            let (nom, reste) = l.split_once(' ')?;
-            let duree = reste.split_once('+')?.1;
-            Some((nom.to_string(), secondes_systemd(duree)?))
-        })
-        .filter(|(_, s)| *s >= 0.5)
-        .collect();
+    let unite = |l: &str| {
+        let (nom, reste) = l.trim_start_matches(|c: char| !c.is_alphanumeric()).split_once(' ')?;
+        Some((nom.to_string(), secondes_systemd(reste.split_once('+')?.1)?))
+    };
+    let mut lents: Vec<(String, f64)> = texte.lines().filter_map(unite).filter(|(_, s)| *s >= 0.5).collect();
     lents.sort_by(|a, b| b.1.total_cmp(&a.1));
     lents.truncate(5);
     lents
@@ -178,12 +164,9 @@ fn secondes_lisibles(s: f64) -> String {
     if s >= 60.0 {
         #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
         let s = s.round() as u64;
-        format!("{} min {:02} s", s / 60, s % 60)
-    } else if crate::langue::anglais() {
-        format!("{s:.1} s")
-    } else {
-        format!("{s:.1} s").replace('.', ",")
+        return format!("{} min {:02} s", s / 60, s % 60);
     }
+    format!("{s:.1} s").replace('.', if crate::langue::anglais() { "." } else { "," })
 }
 
 /// Une entrée de démarrage automatique (fichier .desktop d'autostart) : (nom affiché, programme) si elle est active
@@ -193,78 +176,53 @@ fn secondes_lisibles(s: f64) -> String {
 pub(crate) fn entree_autostart(texte: &str, bureau: &str) -> Option<(String, String)> {
     let mut dans_entree = false;
     let mut champs: HashMap<&str, &str> = HashMap::new();
-    for l in texte.lines() {
-        let l = l.trim();
+    for l in texte.lines().map(str::trim) {
         if l.starts_with('[') {
             dans_entree = l == "[Desktop Entry]";
-            continue;
-        }
-        if dans_entree && let Some((cle, valeur)) = l.split_once('=') {
+        } else if dans_entree && let Some((cle, valeur)) = l.split_once('=') {
             champs.entry(cle.trim()).or_insert(valeur.trim());
         }
     }
-    let vrai = |cle: &str| champs.get(cle).is_some_and(|v| v.eq_ignore_ascii_case("true"));
-    if vrai("Hidden")
-        || champs
-            .get("X-GNOME-Autostart-enabled")
-            .is_some_and(|v| v.eq_ignore_ascii_case("false"))
+    let vaut = |cle: &str, v: &str| champs.get(cle).is_some_and(|x| x.eq_ignore_ascii_case(v));
+    // Les bureaux d'une liste (« GNOME;Unity; »), sans les vides : un nom vide de la session ne peut rien y trouver.
+    let liste = |cle: &str| -> Vec<String> {
+        let v = champs.get(cle).copied().unwrap_or_default().split(';');
+        v.map(|b| b.trim().to_lowercase()).filter(|b| !b.is_empty()).collect()
+    };
+    let bureaux: Vec<String> = bureau.split(':').map(str::to_lowercase).collect();
+    let ici = |l: Vec<String>| l.iter().any(|b| bureaux.contains(b));
+    let seulement = liste("OnlyShowIn");
+    if vaut("Hidden", "true")
+        || vaut("X-GNOME-Autostart-enabled", "false")
+        || (!seulement.is_empty() && !ici(seulement))
+        || ici(liste("NotShowIn"))
     {
         return None;
     }
-    let bureaux: Vec<String> = bureau
-        .split(':')
-        .map(str::to_lowercase)
-        .filter(|b| !b.is_empty())
-        .collect();
-    let liste = |cle: &str| -> Vec<String> {
-        champs
-            .get(cle)
-            .map(|v| {
-                v.split(';')
-                    .map(|b| b.trim().to_lowercase())
-                    .filter(|b| !b.is_empty())
-                    .collect()
-            })
-            .unwrap_or_default()
-    };
-    let seulement = liste("OnlyShowIn");
-    if !seulement.is_empty() && !seulement.iter().any(|b| bureaux.contains(b)) {
-        return None;
-    }
-    if liste("NotShowIn").iter().any(|b| bureaux.contains(b)) {
-        return None;
-    }
-    let commande = champs.get("Exec")?;
     // « env VAR=1 programme --option %u » → « programme ».
-    let programme = commande
+    let programme = champs
+        .get("Exec")?
         .split_whitespace()
         .find(|m| *m != "env" && !m.contains('=') && !m.starts_with('-'))?
         .trim_matches('"');
     let programme = programme.rsplit('/').next().unwrap_or(programme).to_string();
-    let nom = champs
-        .get("Name")
-        .map_or_else(|| programme.clone(), ToString::to_string);
+    let nom = champs.get("Name").map_or(programme.clone(), ToString::to_string);
     Some((nom, programme))
 }
 
-/// Les conseils d'un instantané : (niveau d'alerte, texte, outil à proposer).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Outil {
     Nettoyer,
     Demarrage,
-    #[cfg_attr(target_os = "macos", allow(dead_code))]
     Performance,
     MisesAJour,
 }
 
+/// Les conseils d'un instantané : (niveau d'alerte, texte, outil à proposer).
 pub struct Conseil {
     pub grave: bool,
     pub texte: String,
     pub outil: Option<Outil>,
-}
-
-fn conseil(grave: bool, texte: String, outil: Option<Outil>) -> Conseil {
-    Conseil { grave, texte, outil }
 }
 
 /// Programmes qui travaillent fort pendant un moment, puis se calment seuls : les nommer évite d'accuser l'ordinateur.
@@ -283,35 +241,29 @@ fn passager(nom: &str) -> Option<&'static str> {
     let n = nom.to_lowercase();
     PASSAGERS.lines().find_map(|l| {
         let mut champs = l.split(" | ");
-        let cles = champs.next()?;
-        let (fr, en) = (champs.next()?, champs.next()?);
-        cles.split_whitespace()
-            .any(|c| n.starts_with(c))
-            .then_some(if crate::langue::anglais() { en } else { fr })
+        let (cles, fr, en) = (champs.next()?, champs.next()?, champs.next()?);
+        let trouve = cles.split_whitespace().any(|c| n.starts_with(c));
+        trouve.then_some(if crate::langue::anglais() { en } else { fr })
     })
 }
 
 #[allow(clippy::cast_precision_loss)]
-fn pourcent(partie: u64, tout: u64) -> f64 {
-    if tout == 0 {
-        0.0
-    } else {
-        partie as f64 * 100.0 / tout as f64
-    }
+fn pourcent(n: u64, sur: u64) -> f64 {
+    if sur == 0 { 0.0 } else { n as f64 * 100.0 / sur as f64 }
 }
 
 /// Ce qu'on peut conclure de l'instantané, le plus grave d'abord.
+#[allow(clippy::cast_precision_loss)]
 pub fn conseils(i: &Instantane) -> Vec<Conseil> {
     let mut c = Vec::new();
+    let mut pousser = |grave, texte, outil| c.push(Conseil { grave, texte, outil });
     let plus = |cle: fn(&Programme) -> f64| {
         i.programmes
             .iter()
             .max_by(|a, b| cle(a).total_cmp(&cle(b)))
             .filter(|p| cle(p) > 0.0)
     };
-    if let Some(occupe) = i.processeur
-        && occupe >= 80.0
-    {
+    if let Some(occupe) = i.processeur.filter(|&o| o >= 80.0) {
         let texte = match plus(|p| p.processeur) {
             Some(p) => match passager(&p.nom) {
                 Some(raison) => trf!(
@@ -328,42 +280,34 @@ pub fn conseils(i: &Instantane) -> Vec<Conseil> {
             },
             None => trf!("Processeur occupé à {occupe:.0} %.", "Processor {occupe:.0}% busy."),
         };
-        c.push(conseil(true, texte, None));
+        pousser(true, texte, None);
     }
-    if let Some((total, dispo)) = i.memoire
-        && pourcent(dispo, total) < 10.0
-    {
-        let gros = plus(|p| {
-            #[allow(clippy::cast_precision_loss)]
-            let m = p.memoire as f64;
-            m
-        });
-        c.push(conseil(true, match gros {
-                Some(p) => trf!(
-                    "Mémoire presque pleine ({} libres sur {}) : l'ordinateur écrit sur le disque ce qui ne tient plus, d'où la lenteur. {} en occupe {} : le fermer, ou fermer des onglets.",
-                    "Memory almost full ({} free out of {}): the computer writes what no longer fits to the disk, hence the slowness. {} uses {}: close it, or close some tabs.",
-                    taille(dispo),
-                    taille(total),
-                    p.nom,
-                    taille(p.memoire)
-                ),
-                None => trf!(
-                    "Mémoire presque pleine ({} libres sur {}).",
-                    "Memory almost full ({} free out of {}).",
-                    taille(dispo),
-                    taille(total)
-                ),
-            }, Some(Outil::Demarrage)));
+    if let Some((total, dispo)) = i.memoire.filter(|&(t, d)| pourcent(d, t) < 10.0) {
+        let texte = match plus(|p| p.memoire as f64) {
+            Some(p) => trf!(
+                "Mémoire presque pleine ({} libres sur {}) : l'ordinateur écrit sur le disque ce qui ne tient plus, d'où la lenteur. {} en occupe {} : le fermer, ou fermer des onglets.",
+                "Memory almost full ({} free out of {}): the computer writes what no longer fits to the disk, hence the slowness. {} uses {}: close it, or close some tabs.",
+                taille(dispo),
+                taille(total),
+                p.nom,
+                taille(p.memoire)
+            ),
+            None => trf!(
+                "Mémoire presque pleine ({} libres sur {}).",
+                "Memory almost full ({} free out of {}).",
+                taille(dispo),
+                taille(total)
+            ),
+        };
+        pousser(true, texte, Some(Outil::Demarrage));
     }
-    if let Some(occupe) = i.disque
-        && occupe >= 80.0
-    {
+    if let Some(occupe) = i.disque.filter(|&o| o >= 80.0) {
         let texte = match plus(|p| p.disque.unwrap_or(0.0)) {
             Some(p) => trf!(
                 "Disque occupé {occupe:.0} % du temps, surtout par {} ({}/s){}.",
                 "Disk busy {occupe:.0}% of the time, mostly by {} ({}/s){}.",
                 p.nom,
-                taille(debit(p.disque.unwrap_or(0.0))),
+                taille(debit(p)),
                 passager(&p.nom).map(|r| format!(" : {r}")).unwrap_or_default()
             ),
             None => trf!(
@@ -371,68 +315,53 @@ pub fn conseils(i: &Instantane) -> Vec<Conseil> {
                 "Disk busy {occupe:.0}% of the time: everything that reads or writes it waits its turn."
             ),
         };
-        c.push(conseil(true, texte, None));
+        pousser(true, texte, None);
     }
-    if let Some((libre, total)) = i.place
-        && pourcent(libre, total) < 10.0
-    {
-        c.push(conseil(
-            true,
+    if let Some((libre, total)) = i.place.filter(|&(l, t)| pourcent(l, t) < 10.0) {
+        let texte = trf!(
+            "Disque du système presque plein ({} libres sur {}) : le système a besoin de place pour travailler.",
+            "System disk almost full ({} free out of {}): the system needs room to work.",
+            taille(libre),
+            taille(total)
+        );
+        pousser(true, texte, Some(Outil::Nettoyer));
+    }
+    if let Some(d) = i.demarrage.as_ref().ok().filter(|d| d.total >= 60.0) {
+        let lents = retards(&d.lents[..d.lents.len().min(3)]);
+        let texte = if lents.is_empty() {
+            trf!("Démarrage long ({}).", "Slow startup ({}).", secondes_lisibles(d.total))
+        } else {
             trf!(
-                "Disque du système presque plein ({} libres sur {}) : le système a besoin de place pour travailler.",
-                "System disk almost full ({} free out of {}): the system needs room to work.",
-                taille(libre),
-                taille(total)
-            ),
-            Some(Outil::Nettoyer),
-        ));
+                "Démarrage long ({}) ; ce qui le retarde le plus : {lents}.",
+                "Slow startup ({}); what delays it most: {lents}.",
+                secondes_lisibles(d.total)
+            )
+        };
+        pousser(false, texte, Some(Outil::Performance));
     }
-    if let Ok(d) = &i.demarrage
-        && d.total >= 60.0
-    {
-        let lents = d
-            .lents
-            .iter()
-            .take(3)
-            .map(|(n, s)| format!("{n} {}", secondes_lisibles(*s)))
-            .collect::<Vec<_>>()
-            .join(", ");
-        c.push(conseil(
-            false,
-            if lents.is_empty() {
-                trf!("Démarrage long ({}).", "Slow startup ({}).", secondes_lisibles(d.total))
-            } else {
-                trf!(
-                    "Démarrage long ({}) ; ce qui le retarde le plus : {lents}.",
-                    "Slow startup ({}); what delays it most: {lents}.",
-                    secondes_lisibles(d.total)
-                )
-            },
-            Some(Outil::Performance),
-        ));
-    }
-    let lourds: Vec<&AuDemarrage> = i.au_demarrage.iter().filter(|p| p.poids.is_some()).collect();
-    if i.au_demarrage.len() >= 8 || lourds.iter().filter_map(|p| p.poids).sum::<u64>() >= 1 << 30 {
-        c.push(conseil(false, trf!(
-                "{} programmes se lancent à l'ouverture de session : ceux dont tu n'as pas besoin tout de suite peuvent attendre que tu les ouvres.",
-                "{} programs start when you log in: those you do not need right away can wait until you open them.",
-                i.au_demarrage.len()
-            ), Some(Outil::Demarrage)));
+    if i.au_demarrage.len() >= 8 || i.au_demarrage.iter().filter_map(|p| p.poids).sum::<u64>() >= 1 << 30 {
+        let texte = trf!(
+            "{} programmes se lancent à l'ouverture de session : ceux dont tu n'as pas besoin tout de suite peuvent attendre que tu les ouvres.",
+            "{} programs start when you log in: those you do not need right away can wait until you open them.",
+            i.au_demarrage.len()
+        );
+        pousser(false, texte, Some(Outil::Demarrage));
     }
     // Windows surtout : des semaines sans redémarrer, et des mises à jour attendent, des fuites de mémoire s'accumulent.
     if i.allume_depuis.is_some_and(|s| s >= 14 * 86_400) {
-        c.push(conseil(false, trf!(
-                "Allumé depuis {} jours sans redémarrer : redémarrer libère la mémoire et termine les mises à jour en attente.",
-                "On for {} days without a restart: restarting frees memory and finishes pending updates.",
-                i.allume_depuis.unwrap_or(0) / 86_400
-            ), Some(Outil::MisesAJour)));
+        let texte = trf!(
+            "Allumé depuis {} jours sans redémarrer : redémarrer libère la mémoire et termine les mises à jour en attente.",
+            "On for {} days without a restart: restarting frees memory and finishes pending updates.",
+            i.allume_depuis.unwrap_or(0) / 86_400
+        );
+        pousser(false, texte, Some(Outil::MisesAJour));
     }
     c
 }
 
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-fn debit(octets_par_seconde: f64) -> u64 {
-    octets_par_seconde.max(0.0) as u64
+fn debit(p: &Programme) -> u64 {
+    p.disque.unwrap_or(0.0).max(0.0) as u64
 }
 
 fn taille(octets: u64) -> String {
@@ -447,314 +376,219 @@ fn taille(octets: u64) -> String {
     }
 }
 
-/// Une barre de 10 cases, colorée selon la charge.
+/// « docker.service 4,5 s, … » : ce qui a retardé le démarrage.
+fn retards(lents: &[(String, f64)]) -> String {
+    let texte = |(n, s): &(String, f64)| format!("{n} {}", secondes_lisibles(*s));
+    lents.iter().map(texte).collect::<Vec<_>>().join(", ")
+}
+
+/// Une barre de 10 cases (le `clamp` en garde 10 au plus), colorée selon la charge.
 fn jauge(pct: f64) -> String {
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     let pleines = ((pct.clamp(0.0, 100.0) + 5.0) / 10.0) as usize;
-    let couleur_jauge = if pct >= 80.0 {
-        couleur(crate::risk::Niveau::Eleve)
-    } else if pct >= 50.0 {
-        couleur(crate::risk::Niveau::Moyen)
-    } else {
-        VERT
+    let c = match pct {
+        p if p >= 80.0 => couleur(Niveau::Eleve),
+        p if p >= 50.0 => couleur(Niveau::Moyen),
+        _ => VERT,
     };
-    format!(
-        "{couleur_jauge}{}{GRIS}{}{RESET}",
-        "▰".repeat(pleines.min(10)),
-        "▱".repeat(10 - pleines.min(10))
-    )
-}
-
-/// Les trois plus gros selon `cle`, en une ligne : « firefox 22 %, code 9 % ». Sous `seuil`, rien à dire : un
-/// programme à « 0 % » n'est pas un suspect.
-fn plus_gros(
-    programmes: &[Programme],
-    seuil: f64,
-    cle: impl Fn(&Programme) -> f64,
-    texte: impl Fn(&Programme) -> String,
-) -> String {
-    let mut tries: Vec<&Programme> = programmes.iter().filter(|p| cle(p) >= seuil).collect();
-    tries.sort_by(|a, b| cle(b).total_cmp(&cle(a)));
-    tries
-        .iter()
-        .take(3)
-        .map(|p| format!("{} {}", p.nom, texte(p)))
-        .collect::<Vec<_>>()
-        .join(", ")
+    format!("{c}{}{GRIS}{}{RESET}", "▰".repeat(pleines), "▱".repeat(10 - pleines))
 }
 
 fn ligne_mesure(libelle: &str, valeur: &str) {
     afficher_aligne(&format!("  {GRAS}{}{RESET} ", ajuster(libelle, 13)), valeur, 16, "");
 }
 
+/// Une mesure de « ce qui pèse le plus » : libellé, seuil, valeur d'un programme, et cette valeur en texte.
+type Mesure = (&'static str, f64, fn(&Programme) -> f64, fn(&Programme) -> String);
+
+#[allow(clippy::cast_precision_loss)]
 fn afficher(i: &Instantane) {
+    let processeur = tr!("Processeur", "Processor");
+    let memoire = tr!("Mémoire", "Memory");
+    let disque = tr!("Disque", "Disk");
     section(tr!("EN CE MOMENT", "RIGHT NOW"));
-    match i.processeur {
-        Some(p) => ligne_mesure(
-            tr!("Processeur", "Processor"),
-            &trf!("{} {p:.0} % ({} fils)", "{} {p:.0}% ({} threads)", jauge(p), i.fils),
-        ),
-        None => ligne_mesure(tr!("Processeur", "Processor"), tr!("non mesuré", "not measured")),
-    }
+    let texte = match i.processeur {
+        Some(p) => trf!("{} {p:.0} % ({} fils)", "{} {p:.0}% ({} threads)", jauge(p), i.fils),
+        None => tr!("non mesuré", "not measured").into(),
+    };
+    ligne_mesure(processeur, &texte);
     if let Some((total, dispo)) = i.memoire {
         let utilise = pourcent(total.saturating_sub(dispo), total);
         let echange = match i.echange {
-            Some((t, u)) if t > 0 && u >= 1 << 20 => {
-                trf!(", échange {} utilisés", ", swap {} used", taille(u))
-            }
+            Some((t, u)) if t > 0 && u >= 1 << 20 => trf!(", échange {} utilisés", ", swap {} used", taille(u)),
             _ => String::new(),
         };
-        ligne_mesure(
-            tr!("Mémoire", "Memory"),
-            &trf!(
-                "{} {utilise:.0} % ({} libres sur {}){echange}",
-                "{} {utilise:.0}% ({} free out of {}){echange}",
-                jauge(utilise),
-                taille(dispo),
-                taille(total)
-            ),
+        let texte = trf!(
+            "{} {utilise:.0} % ({} libres sur {}){echange}",
+            "{} {utilise:.0}% ({} free out of {}){echange}",
+            jauge(utilise),
+            taille(dispo),
+            taille(total)
         );
+        ligne_mesure(memoire, &texte);
     }
-    match i.disque {
-        Some(d) => ligne_mesure(
-            tr!("Disque", "Disk"),
-            &trf!("{} occupé {d:.0} % du temps", "{} busy {d:.0}% of the time", jauge(d)),
-        ),
-        None => ligne_mesure(
-            tr!("Disque", "Disk"),
-            tr!("activité non mesurable ici", "activity not measurable here"),
-        ),
-    }
+    let texte = match i.disque {
+        Some(d) => trf!("{} occupé {d:.0} % du temps", "{} busy {d:.0}% of the time", jauge(d)),
+        None => tr!("activité non mesurable ici", "activity not measurable here").into(),
+    };
+    ligne_mesure(disque, &texte);
     if let Some((libre, total)) = i.place {
-        ligne_mesure(
-            tr!("Place", "Space"),
-            &trf!(
-                "{} libres sur {} (disque du système)",
-                "{} free out of {} (system disk)",
-                taille(libre),
-                taille(total)
-            ),
+        let texte = trf!(
+            "{} libres sur {} (disque du système)",
+            "{} free out of {} (system disk)",
+            taille(libre),
+            taille(total)
         );
+        ligne_mesure(tr!("Place", "Space"), &texte);
     }
 
     section(tr!("CE QUI PÈSE LE PLUS", "WHAT WEIGHS THE MOST"));
-    let cpu = plus_gros(
-        &i.programmes,
-        1.0,
-        |p| p.processeur,
-        |p| trf!("{:.0} %", "{:.0}%", p.processeur),
-    );
-    #[allow(clippy::cast_precision_loss)]
-    let mem = plus_gros(
-        &i.programmes,
-        100.0 * 1_048_576.0,
-        |p| p.memoire as f64,
-        |p| taille(p.memoire),
-    );
-    let dsk = plus_gros(
-        &i.programmes,
-        1_048_576.0,
-        |p| p.disque.unwrap_or(0.0),
-        |p| format!("{}/s", taille(debit(p.disque.unwrap_or(0.0)))),
-    );
     let rien = tr!("rien de notable", "nothing notable");
-    ligne_mesure(
-        tr!("Processeur", "Processor"),
-        if cpu.is_empty() { rien } else { cpu.as_str() },
-    );
-    ligne_mesure(
-        tr!("Mémoire", "Memory"),
-        if mem.is_empty() { rien } else { mem.as_str() },
-    );
-    ligne_mesure(tr!("Disque", "Disk"), if dsk.is_empty() { rien } else { dsk.as_str() });
+    // Les trois plus gros, au-dessus d'un seuil : un programme à « 0 % » n'est pas un suspect.
+    #[rustfmt::skip] // une ligne par mesure, que rustfmt étalerait sur six
+    let mesures: [Mesure; 3] = [
+        (processeur, 1.0, |p| p.processeur, |p| trf!("{:.0} %", "{:.0}%", p.processeur)),
+        (memoire, 100.0 * 1_048_576.0, |p| p.memoire as f64, |p| taille(p.memoire)),
+        (disque, 1_048_576.0, |p| p.disque.unwrap_or(0.0), |p| format!("{}/s", taille(debit(p)))),
+    ];
+    for (libelle, seuil, cle, texte) in mesures {
+        let mut tries: Vec<&Programme> = i.programmes.iter().filter(|p| cle(p) >= seuil).collect();
+        tries.sort_by(|a, b| cle(b).total_cmp(&cle(a)));
+        tries.truncate(3);
+        let liste: Vec<String> = tries.iter().map(|p| format!("{} {}", p.nom, texte(p))).collect();
+        let liste = liste.join(", ");
+        ligne_mesure(libelle, if liste.is_empty() { rien } else { &liste });
+    }
 
     section(tr!("DÉMARRAGE", "STARTUP"));
+    let duree = tr!("Durée", "Duration");
     match &i.demarrage {
         Ok(d) => {
-            let etapes = if d.etapes.is_empty() {
-                String::new()
-            } else {
-                format!(" ({})", d.etapes)
-            };
-            ligne_mesure(
-                tr!("Durée", "Duration"),
-                &format!("{}{etapes}", secondes_lisibles(d.total)),
-            );
+            let mut texte = secondes_lisibles(d.total);
+            if !d.etapes.is_empty() {
+                texte = format!("{texte} ({})", d.etapes);
+            }
+            ligne_mesure(duree, &texte);
             if !d.lents.is_empty() {
-                let lents = d
-                    .lents
-                    .iter()
-                    .map(|(n, s)| format!("{n} {}", secondes_lisibles(*s)))
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                ligne_mesure(tr!("Retardé par", "Delayed by"), &lents);
+                ligne_mesure(tr!("Retardé par", "Delayed by"), &retards(&d.lents));
             }
         }
-        Err(raison) => ligne_mesure(tr!("Durée", "Duration"), &format!("{GRIS}{raison}{RESET}")),
+        Err(raison) => ligne_mesure(duree, &format!("{GRIS}{raison}{RESET}")),
     }
     if let Some(s) = i.allume_depuis {
         let (j, h) = (s / 86_400, s % 86_400 / 3600);
-        ligne_mesure(
-            tr!("Allumé depuis", "On for"),
-            &if j > 0 {
-                trf!("{j} j {h} h", "{j} d {h} h")
-            } else {
-                trf!("{h} h {:02}", "{h} h {:02}", s % 3600 / 60)
-            },
-        );
+        let texte = if j > 0 {
+            trf!("{j} j {h} h", "{j} d {h} h")
+        } else {
+            trf!("{h} h {:02}", "{h} h {:02}", s % 3600 / 60)
+        };
+        ligne_mesure(tr!("Allumé depuis", "On for"), &texte);
     }
+    let a_l_ouverture = tr!("À l'ouverture", "At login");
     if i.au_demarrage.is_empty() {
-        ligne_mesure(
-            tr!("À l'ouverture", "At login"),
-            tr!("aucun programme trouvé", "no program found"),
-        );
-    } else {
-        let mut liste: Vec<&AuDemarrage> = i.au_demarrage.iter().collect();
-        liste.sort_by(|a, b| b.poids.cmp(&a.poids).then_with(|| a.nom.cmp(&b.nom)));
-        let noms = liste
-            .iter()
-            .take(8)
-            .map(|p| match p.poids {
-                Some(o) => format!("{} ({})", p.nom, taille(o)),
-                None => p.nom.clone(),
-            })
-            .collect::<Vec<_>>();
-        let reste = liste.len().saturating_sub(8);
-        let texte = if reste > 0 {
-            format!(
-                "{}{}",
-                noms.join(", "),
-                trf!(" et {reste} autre(s)", " and {reste} more")
-            )
-        } else {
-            noms.join(", ")
-        };
-        ligne_mesure(
-            tr!("À l'ouverture", "At login"),
-            &trf!("{} programme(s) : {texte}", "{} program(s): {texte}", liste.len()),
-        );
+        ligne_mesure(a_l_ouverture, tr!("aucun programme trouvé", "no program found"));
+        return;
     }
+    let mut liste: Vec<&AuDemarrage> = i.au_demarrage.iter().collect();
+    liste.sort_by(|a, b| b.poids.cmp(&a.poids).then_with(|| a.nom.cmp(&b.nom)));
+    let avec_taille = |p: &&AuDemarrage| match p.poids {
+        Some(o) => format!("{} ({})", p.nom, taille(o)),
+        None => p.nom.clone(),
+    };
+    let noms: Vec<String> = liste.iter().take(8).map(avec_taille).collect();
+    let mut texte = noms.join(", ");
+    let reste = liste.len().saturating_sub(8);
+    if reste > 0 {
+        texte += &trf!(" et {reste} autre(s)", " and {reste} more");
+    }
+    let texte = trf!("{} programme(s) : {texte}", "{} program(s): {texte}", liste.len());
+    ligne_mesure(a_l_ouverture, &texte);
 }
 
-fn afficher_conseils(c: &[Conseil]) {
-    section(tr!("CE QUE ÇA VEUT DIRE", "WHAT IT MEANS"));
-    if c.is_empty() {
-        afficher_aligne(
-            &format!("  {VERT}✔{RESET} "),
-            tr!(
-                "Rien ne force en ce moment : si c'est lent par moments, relance la mesure à ce moment-là.",
-                "Nothing is straining right now: if it is slow at times, run the measure again at that moment."
-            ),
-            4,
-            "",
-        );
-    }
-    for k in c {
-        let marque = if k.grave {
-            format!("{}⚠{RESET} ", couleur(crate::risk::Niveau::Moyen))
-        } else {
-            "💡 ".to_string()
-        };
-        afficher_aligne(&format!("  {marque}"), &k.texte, 5, "");
-    }
-}
-
-/// Mesure, puis montre.
-fn mesurer() -> Instantane {
-    trp!(
-        "  {DISCRET}Mesure pendant deux secondes : continue à utiliser l'ordinateur comme d'habitude…{RESET}",
-        "  {DISCRET}Measuring for two seconds: keep using the computer as usual…{RESET}"
-    );
-    systeme::instantane()
-}
-
-fn entete() {
+/// L'écran : l'en-tête, la mesure de deux secondes, puis ce qu'elle veut dire. Rend les conseils.
+fn mesurer() -> Vec<Conseil> {
     println!();
     cadre(
         &format!("{ACCENT}{}{RESET}", tr!("POURQUOI C'EST LENT ?", "WHY IS IT SLOW?")),
         &format!("{GRIS}{}{RESET}", tr!("lecture seule", "read only")),
     );
+    trp!(
+        "  {DISCRET}Mesure pendant deux secondes : continue à utiliser l'ordinateur comme d'habitude…{RESET}",
+        "  {DISCRET}Measuring for two seconds: keep using the computer as usual…{RESET}"
+    );
+    let i = systeme::instantane();
+    afficher(&i);
+    let c = conseils(&i);
+    section(tr!("CE QUE ÇA VEUT DIRE", "WHAT IT MEANS"));
+    if c.is_empty() {
+        let rien = tr!(
+            "Rien ne force en ce moment : si c'est lent par moments, relance la mesure à ce moment-là.",
+            "Nothing is straining right now: if it is slow at times, run the measure again at that moment."
+        );
+        afficher_aligne(&format!("  {VERT}✔{RESET} "), rien, 4, "");
+    }
+    let attention = format!("  {}⚠{RESET} ", couleur(Niveau::Moyen));
+    for k in &c {
+        afficher_aligne(if k.grave { &attention } else { "  💡 " }, &k.texte, 5, "");
+    }
+    c
 }
 
 /// « gardien lenteur » : l'instantané et ses conseils.
 pub fn commande() {
-    entete();
-    let i = mesurer();
-    afficher(&i);
-    afficher_conseils(&conseils(&i));
+    mesurer();
 }
 
 /// L'outil au menu : l'instantané, ses conseils, puis l'outil qui règle ce qui a été trouvé.
 pub fn menu() {
     loop {
-        entete();
-        let i = mesurer();
-        afficher(&i);
-        let c = conseils(&i);
-        afficher_conseils(&c);
+        let c = mesurer();
         // Les choix s'écrivent sous la mesure, qui reste à l'écran (un menu au clavier redessinerait tout l'écran).
         section(tr!("ET MAINTENANT", "WHAT NEXT"));
-        let mut outils: Vec<(String, Outil)> = Vec::new();
-        let proposer = |outils: &mut Vec<(String, Outil)>, outil: Outil| {
-            if outils.iter().any(|(_, o)| *o == outil) {
-                return;
-            }
-            let (texte, precision) = match outil {
-                Outil::Nettoyer => (
-                    tr!("Nettoyer le système", "Clean up the system"),
-                    tr!("caches, temporaires, corbeille…", "caches, temp files, trash…"),
-                ),
-                Outil::Demarrage => (
-                    tr!("Programmes au démarrage", "Startup programs"),
-                    tr!("les retirer ou les remettre", "remove or put back"),
-                ),
-                Outil::Performance => (
-                    tr!("Réglages de performance", "Performance settings"),
-                    tr!("Optimiser, tout s'annule", "Optimize, all undoable"),
-                ),
-                Outil::MisesAJour => (
-                    tr!("Mises à jour", "Updates"),
-                    tr!("système, programmes, pilotes", "system, programs, drivers"),
-                ),
-            };
-            let touche = (outils.len() + 1).to_string();
-            println!(
-                "   {TOUCHE}{touche}{RESET}  {}{DISCRET}{precision}{RESET}",
-                ajuster(texte, 34)
-            );
-            outils.push((touche, outil));
-        };
-        for k in &c {
-            if let Some(o) = k.outil {
-                proposer(&mut outils, o);
+        // Les outils des conseils, puis ceux toujours sous la main, même quand rien ne force.
+        let proposes = c.iter().filter_map(|k| k.outil);
+        let mut outils: Vec<Outil> = Vec::new();
+        for o in proposes.chain([Outil::Demarrage, Outil::Nettoyer]) {
+            if !outils.contains(&o) {
+                outils.push(o);
             }
         }
-        // Toujours sous la main, même quand rien ne force.
-        proposer(&mut outils, Outil::Demarrage);
-        proposer(&mut outils, Outil::Nettoyer);
+        for (n, outil) in (1..).zip(&outils) {
+            #[rustfmt::skip] // deux lignes par outil, que rustfmt étalerait sur quatre
+            let (texte, precision) = match outil {
+                Outil::Nettoyer => (tr!("Nettoyer le système", "Clean up the system"),
+                    tr!("caches, temporaires, corbeille…", "caches, temp files, trash…")),
+                Outil::Demarrage => (tr!("Programmes au démarrage", "Startup programs"),
+                    tr!("les retirer ou les remettre", "remove or put back")),
+                Outil::Performance => (tr!("Réglages de performance", "Performance settings"),
+                    tr!("Optimiser, tout s'annule", "Optimize, all undoable")),
+                Outil::MisesAJour => (tr!("Mises à jour", "Updates"),
+                    tr!("système, programmes, pilotes", "system, programs, drivers")),
+            };
+            let texte = ajuster(texte, 34);
+            println!("   {TOUCHE}{n}{RESET}  {texte}{DISCRET}{precision}{RESET}");
+        }
         println!("   {TOUCHE}m{RESET}  {}", tr!("Mesurer de nouveau", "Measure again"));
         println!("   {TOUCHE}↵{RESET}  {}", tr!("Revenir", "Back"));
         let choix = demander(tr!(
             "\n  Choix (Entrée pour revenir) : ",
             "\n  Choice (Enter to go back): "
-        ))
-        .trim()
-        .to_lowercase();
+        ));
+        let choix = choix.to_lowercase();
         if choix == "m" {
             continue;
         }
-        let Some((_, outil)) = outils.iter().find(|(t, _)| *t == choix) else {
-            return;
-        };
-        println!();
-        match outil {
-            Outil::Nettoyer => crate::nettoyer::menu(),
-            Outil::Demarrage => crate::optimiser::programmes_au_demarrage(),
-            #[cfg(not(target_os = "macos"))]
-            Outil::Performance => crate::optimiser::menu(crate::optimiser::Categorie::Performance),
-            #[cfg(target_os = "macos")]
-            Outil::Performance => {}
-            Outil::MisesAJour => crate::maj::executer(),
+        if let Some(n) = (1..=outils.len()).find(|n| n.to_string() == choix) {
+            println!();
+            match outils[n - 1] {
+                Outil::Nettoyer => crate::nettoyer::menu(),
+                Outil::Demarrage => crate::optimiser::programmes_au_demarrage(),
+                #[cfg(not(target_os = "macos"))]
+                Outil::Performance => crate::optimiser::menu(crate::optimiser::Categorie::Performance),
+                #[cfg(target_os = "macos")]
+                Outil::Performance => {}
+                Outil::MisesAJour => crate::maj::executer(),
+            }
         }
         return;
     }
@@ -769,13 +603,10 @@ fn nom_de_processus(exe: Option<&str>, comm: &str) -> String {
     const MOTEURS: &[&str] = &[
         "python", "perl", "ruby", "node", "electron", "java", "bash", "sh", "dash", "zsh", "lua",
     ];
-    let court = comm.split('/').next().unwrap_or(comm).trim().to_string();
-    match exe
-        .and_then(|e| e.rsplit('/').next())
-        .map(|e| e.trim_end_matches(" (deleted)"))
-    {
+    let fichier = exe.and_then(|e| e.rsplit('/').next());
+    match fichier.map(|e| e.trim_end_matches(" (deleted)")) {
         Some(e) if !e.is_empty() && !MOTEURS.iter().any(|m| e.starts_with(m)) => e.to_string(),
-        _ => court,
+        _ => comm.split('/').next().unwrap_or(comm).trim().to_string(),
     }
 }
 
@@ -785,22 +616,16 @@ fn nom_de_processus(exe: Option<&str>, comm: &str) -> String {
 fn stat_processus(texte: &str) -> Option<(u64, u64)> {
     let champs: Vec<&str> = texte.get(texte.rfind(')')? + 1..)?.split_whitespace().collect();
     // Après le nom : état (3e champ), …, utime (14e), stime (15e), …, rss (24e).
-    let utime: u64 = champs.get(11)?.parse().ok()?;
-    let stime: u64 = champs.get(12)?.parse().ok()?;
-    let rss: u64 = champs.get(21)?.parse().ok()?;
+    let nombre = |i: usize| champs.get(i)?.parse::<u64>().ok();
+    let (utime, stime, rss) = (nombre(11)?, nombre(12)?, nombre(21)?);
     Some((utime + stime, rss))
 }
 
 /// Première ligne de /proc/stat : (occupé, total) en tops d'horloge, toute la machine.
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 fn stat_processeur(texte: &str) -> Option<(u64, u64)> {
-    let valeurs: Vec<u64> = texte
-        .lines()
-        .next()?
-        .strip_prefix("cpu ")?
-        .split_whitespace()
-        .filter_map(|v| v.parse().ok())
-        .collect();
+    let ligne = texte.strip_prefix("cpu ")?.lines().next()?;
+    let valeurs: Vec<u64> = ligne.split_whitespace().filter_map(|v| v.parse().ok()).collect();
     // user nice system idle iowait irq softirq steal (guest est déjà compté dans user).
     let total: u64 = valeurs.iter().take(8).sum();
     let repos = valeurs.get(3)? + valeurs.get(4).copied().unwrap_or(0);
@@ -810,29 +635,27 @@ fn stat_processeur(texte: &str) -> Option<(u64, u64)> {
 /// /proc/diskstats : temps passé à servir des entrées-sorties (ms), par disque.
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 fn occupation_disques(texte: &str, disques: &[String]) -> HashMap<String, u64> {
-    texte
-        .lines()
-        .filter_map(|l| {
-            let c: Vec<&str> = l.split_whitespace().collect();
-            let nom = (*c.get(2)?).to_string();
-            disques.contains(&nom).then_some((nom, c.get(12)?.parse().ok()?))
-        })
-        .collect()
+    let disque = |l: &str| {
+        let c: Vec<&str> = l.split_whitespace().collect();
+        let nom = (*c.get(2)?).to_string();
+        disques.contains(&nom).then_some((nom, c.get(12)?.parse().ok()?))
+    };
+    texte.lines().filter_map(disque).collect()
 }
 
 #[cfg(target_os = "linux")]
 mod systeme {
-    use std::collections::HashMap;
+    use std::fs::{read_dir, read_link, read_to_string};
     use std::path::{Path, PathBuf};
     use std::process::Command;
-    use std::time::Instant;
+    use std::time::{Duration, Instant};
 
-    use super::{
-        AuDemarrage, Demarrage, Instantane, Programme, chaine_critique, duree_systemd, entree_autostart,
-        nom_de_processus, occupation_disques, reunir, stat_processeur, stat_processus,
-    };
+    use super::*;
     use crate::commande::lancer;
-    use crate::tr;
+
+    /// Durée entre les deux mesures : assez pour lisser un pic, assez courte pour qu'on attende sans s'impatienter.
+    /// (Windows et macOS mesurent eux-mêmes sur deux secondes : PowerShell, top.)
+    const ECART: Duration = Duration::from_secs(2);
 
     struct Echantillon {
         quand: Instant,
@@ -843,212 +666,153 @@ mod systeme {
     }
 
     fn getconf(variable: &str, defaut: u64) -> u64 {
-        lancer(Command::new("getconf").arg(variable), 5)
-            .and_then(|r| r.sortie.trim().parse().ok())
-            .unwrap_or(defaut)
+        let r = lancer(Command::new("getconf").arg(variable), 5);
+        r.and_then(|r| r.sortie.trim().parse().ok()).unwrap_or(defaut)
+    }
+
+    /// La sortie d'une commande qui a réussi (« systemd-analyze critical-chain --no-pager »).
+    fn sortie(commande: &str) -> Option<String> {
+        let mut mots = commande.split(' ');
+        let r = lancer(Command::new(mots.next()?).args(mots), 20)?;
+        (r.code == Some(0)).then_some(r.sortie)
     }
 
     /// Les disques entiers (pas les partitions), sans les disques virtuels.
     fn disques() -> Vec<String> {
-        std::fs::read_dir("/sys/block")
+        const VIRTUELS: [&str; 6] = ["loop", "ram", "zram", "dm-", "sr", "fd"];
+        read_dir("/sys/block")
             .into_iter()
             .flatten()
             .flatten()
             .map(|d| d.file_name().to_string_lossy().into_owned())
-            .filter(|n| {
-                !["loop", "ram", "zram", "dm-", "sr", "fd"]
-                    .iter()
-                    .any(|p| n.starts_with(p))
-            })
+            .filter(|n| !VIRTUELS.iter().any(|p| n.starts_with(p)))
             .collect()
     }
 
-    fn octets_es(pid: &str) -> Option<u64> {
-        let io = std::fs::read_to_string(format!("/proc/{pid}/io")).ok()?;
-        let lire = |cle: &str| io.lines().find_map(|l| l.strip_prefix(cle)?.trim().parse::<u64>().ok());
-        Some(lire("read_bytes:")? + lire("write_bytes:")?)
-    }
-
     fn echantillon(disques: &[String]) -> Echantillon {
-        let mut processus = HashMap::new();
-        for e in std::fs::read_dir("/proc").into_iter().flatten().flatten() {
-            let pid = e.file_name().to_string_lossy().into_owned();
-            let Ok(n) = pid.parse::<u32>() else {
-                continue;
-            };
-            let Some((temps, pages)) = std::fs::read_to_string(format!("/proc/{pid}/stat"))
-                .ok()
-                .and_then(|t| stat_processus(&t))
-            else {
-                continue;
-            };
-            let comm = std::fs::read_to_string(format!("/proc/{pid}/comm")).unwrap_or_default();
-            let exe = std::fs::read_link(format!("/proc/{pid}/exe")).ok();
-            let nom = nom_de_processus(exe.as_deref().and_then(Path::to_str), comm.trim());
-            processus.insert(n, (nom, temps, pages, octets_es(&pid)));
-        }
+        let processus = read_dir("/proc")
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter_map(|e| {
+                let pid = e.file_name().to_string_lossy().into_owned();
+                let n = pid.parse::<u32>().ok()?;
+                let (temps, pages) = stat_processus(&read_to_string(format!("/proc/{pid}/stat")).ok()?)?;
+                let comm = read_to_string(format!("/proc/{pid}/comm")).unwrap_or_default();
+                let exe = read_link(format!("/proc/{pid}/exe")).ok();
+                let nom = nom_de_processus(exe.as_deref().and_then(Path::to_str), comm.trim());
+                // Octets lus et écrits : illisibles pour les programmes d'un autre compte.
+                let io = read_to_string(format!("/proc/{pid}/io")).unwrap_or_default();
+                let lire = |cle: &str| io.lines().find_map(|l| l.strip_prefix(cle)?.trim().parse::<u64>().ok());
+                let es = lire("read_bytes:").zip(lire("write_bytes:")).map(|(l, e)| l + e);
+                Some((n, (nom, temps, pages, es)))
+            })
+            .collect();
         Echantillon {
             quand: Instant::now(),
-            processeur: std::fs::read_to_string("/proc/stat")
-                .ok()
-                .and_then(|t| stat_processeur(&t)),
+            processeur: read_to_string("/proc/stat").ok().and_then(|t| stat_processeur(&t)),
             processus,
-            disques: occupation_disques(&std::fs::read_to_string("/proc/diskstats").unwrap_or_default(), disques),
+            disques: occupation_disques(&read_to_string("/proc/diskstats").unwrap_or_default(), disques),
         }
-    }
-
-    fn sortie(cmd: &str, args: &[&str]) -> Option<String> {
-        let r = lancer(Command::new(cmd).args(args), 20)?;
-        (r.code == Some(0)).then_some(r.sortie)
     }
 
     fn demarrage() -> Result<Demarrage, String> {
-        let Some(temps) = sortie("systemd-analyze", &[]) else {
-            return Err(tr!(
-                "durée illisible (systemd-analyze absent, ou démarrage pas encore fini)",
-                "duration not readable (no systemd-analyze, or startup not finished yet)"
-            )
-            .into());
-        };
+        let absent = tr!(
+            "durée illisible (systemd-analyze absent, ou démarrage pas encore fini)",
+            "duration not readable (no systemd-analyze, or startup not finished yet)"
+        );
+        let temps = sortie("systemd-analyze").ok_or(absent)?;
         let (total, etapes) =
             duree_systemd(&temps).ok_or_else(|| tr!("durée illisible", "duration not readable").to_string())?;
-        Ok(Demarrage {
-            total,
-            etapes,
-            lents: chaine_critique(&sortie("systemd-analyze", &["critical-chain", "--no-pager"]).unwrap_or_default()),
-        })
+        let lents = chaine_critique(&sortie("systemd-analyze critical-chain --no-pager").unwrap_or_default());
+        Ok(Demarrage { total, etapes, lents })
     }
 
-    /// Les programmes lancés à l'ouverture de session : entrées d'autostart actives (celles de l'utilisateur
-    /// remplacent celles du système au même nom) et services ajoutés par l'utilisateur (~/.config/systemd/user).
-    fn au_demarrage(memoire_par_nom: &HashMap<String, u64>) -> Vec<AuDemarrage> {
+    /// Les programmes lancés à l'ouverture de session, (nom, programme) : entrées d'autostart actives (celles de
+    /// l'utilisateur remplacent celles du système au même nom) et services ajoutés par l'utilisateur
+    /// (~/.config/systemd/user).
+    fn au_demarrage() -> Vec<(String, String)> {
         let maison = PathBuf::from(std::env::var_os("HOME").unwrap_or_default());
         let config = std::env::var_os("XDG_CONFIG_HOME").map_or_else(|| maison.join(".config"), PathBuf::from);
-        let systeme: Vec<PathBuf> = std::env::var("XDG_CONFIG_DIRS")
-            .ok()
-            .filter(|v| !v.is_empty())
-            .unwrap_or_else(|| "/etc/xdg".into())
-            .split(':')
-            .map(|d| Path::new(d).join("autostart"))
-            .collect();
+        let systeme = std::env::var("XDG_CONFIG_DIRS").unwrap_or_default();
+        let systeme = if systeme.is_empty() { "/etc/xdg" } else { &systeme };
         let bureau = std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default();
-        // Nom du fichier → contenu ; l'utilisateur d'abord, il l'emporte.
-        let mut entrees: Vec<(String, String)> = Vec::new();
-        for dossier in std::iter::once(config.join("autostart")).chain(systeme) {
-            for f in std::fs::read_dir(&dossier).into_iter().flatten().flatten() {
-                let nom = f.file_name().to_string_lossy().into_owned();
-                if Path::new(&nom).extension().is_none_or(|e| e != "desktop") || entrees.iter().any(|(n, _)| *n == nom)
-                {
-                    continue;
-                }
-                entrees.push((nom, std::fs::read_to_string(f.path()).unwrap_or_default()));
+        let mut liste = Vec::new();
+        // L'utilisateur d'abord : son entrée l'emporte sur celle du système au même nom, même désactivée.
+        let mut vus: Vec<String> = Vec::new();
+        for f in std::iter::once(config.join("autostart"))
+            .chain(systeme.split(':').map(|d| Path::new(d).join("autostart")))
+            .flat_map(|d| read_dir(d).into_iter().flatten().flatten())
+        {
+            let nom = f.file_name().to_string_lossy().into_owned();
+            if Path::new(&nom).extension().is_some_and(|e| e == "desktop") && !vus.contains(&nom) {
+                liste.extend(entree_autostart(&read_to_string(f.path()).unwrap_or_default(), &bureau));
+                vus.push(nom);
             }
         }
-        let mut liste: Vec<AuDemarrage> = entrees
-            .iter()
-            .filter_map(|(_, texte)| entree_autostart(texte, &bureau))
-            .map(|(nom, programme)| AuDemarrage {
-                poids: memoire_par_nom.get(&programme.to_lowercase()).copied(),
-                nom,
-            })
-            .collect();
         let services = config.join("systemd/user");
-        for l in sortie(
-            "systemctl",
-            &[
-                "--user",
-                "list-unit-files",
-                "--type=service",
-                "--state=enabled",
-                "--no-legend",
-                "--no-pager",
-            ],
-        )
-        .unwrap_or_default()
-        .lines()
-        {
-            let Some(unite) = l.split_whitespace().next() else {
-                continue;
-            };
+        let actives = sortie("systemctl --user list-unit-files --type=service --state=enabled --no-legend --no-pager")
+            .unwrap_or_default();
+        for unite in actives.lines().filter_map(|l| l.split_whitespace().next()) {
             if services.join(unite).is_file() {
                 let nom = unite.trim_end_matches(".service").to_string();
-                liste.push(AuDemarrage {
-                    poids: memoire_par_nom.get(&nom.to_lowercase()).copied(),
-                    nom,
-                });
+                liste.push((nom.clone(), nom));
             }
         }
         liste
     }
 
+    #[allow(clippy::cast_precision_loss)]
     pub fn instantane() -> Instantane {
         let disques = disques();
         let horloge = getconf("CLK_TCK", 100).max(1);
         let page = getconf("PAGESIZE", 4096);
         let fils = std::thread::available_parallelism().map_or(1, std::num::NonZero::get);
         let a = echantillon(&disques);
-        std::thread::sleep(super::ECART);
+        std::thread::sleep(ECART);
         let b = echantillon(&disques);
-        #[allow(clippy::cast_precision_loss)]
         let ecart_s = b.quand.duration_since(a.quand).as_secs_f64().max(0.001);
-        #[allow(clippy::cast_precision_loss)]
-        let processeur = match (a.processeur, b.processeur) {
-            (Some((oa, ta)), Some((ob, tb))) if tb > ta => {
-                Some((ob.saturating_sub(oa)) as f64 * 100.0 / (tb - ta) as f64)
-            }
-            _ => None,
-        };
-        #[allow(clippy::cast_precision_loss)]
+        let releves = a.processeur.zip(b.processeur).filter(|((_, ta), (_, tb))| tb > ta);
+        let processeur = releves.map(|((oa, ta), (ob, tb))| ob.saturating_sub(oa) as f64 * 100.0 / (tb - ta) as f64);
         let programmes = reunir(b.processus.iter().map(|(pid, (nom, temps, pages, es))| {
             let avant = a.processus.get(pid);
             let tops = avant.map_or(0, |(_, t, ..)| temps.saturating_sub(*t));
-            let disque = match (avant.and_then(|(.., e)| *e), es) {
-                (Some(x), Some(y)) => Some(y.saturating_sub(x) as f64 / ecart_s),
-                _ => None,
-            };
             Programme {
                 nom: nom.clone(),
                 // Tops d'horloge → secondes de processeur, rapportées au temps écoulé et à tous les fils.
                 processeur: tops as f64 / horloge as f64 / ecart_s / fils as f64 * 100.0,
                 memoire: pages * page,
-                disque,
+                disque: avant
+                    .and_then(|(.., e)| *e)
+                    .zip(*es)
+                    .map(|(x, y)| y.saturating_sub(x) as f64 / ecart_s),
             }
         }));
-        #[allow(clippy::cast_precision_loss)]
         let disque = b
             .disques
             .iter()
-            .filter_map(|(nom, ms)| {
-                let avant = a.disques.get(nom)?;
-                Some(ms.saturating_sub(*avant) as f64 / (ecart_s * 1000.0) * 100.0)
-            })
+            .filter_map(|(nom, ms)| Some(ms.saturating_sub(*a.disques.get(nom)?) as f64 / (ecart_s * 1000.0) * 100.0))
             .reduce(f64::max)
             .map(|d| d.min(100.0));
-        let meminfo = std::fs::read_to_string("/proc/meminfo").unwrap_or_default();
+        let meminfo = read_to_string("/proc/meminfo").unwrap_or_default();
         let lire = |cle: &str| {
             meminfo
                 .lines()
                 .find_map(|l| l.strip_prefix(cle)?.split_whitespace().next()?.parse::<u64>().ok())
                 .map(|ko| ko * 1024)
         };
-        let memoire = lire("MemTotal:").zip(lire("MemAvailable:"));
-        let echange = lire("SwapTotal:")
-            .zip(lire("SwapFree:"))
-            .map(|(t, l)| (t, t.saturating_sub(l)));
-        let mut memoire_par_nom: HashMap<String, u64> = HashMap::new();
-        for p in &programmes {
-            *memoire_par_nom.entry(p.nom.to_lowercase()).or_default() += p.memoire;
-        }
         Instantane {
             processeur,
             fils,
-            memoire,
-            echange,
+            memoire: lire("MemTotal:").zip(lire("MemAvailable:")),
+            echange: lire("SwapTotal:")
+                .zip(lire("SwapFree:"))
+                .map(|(t, l)| (t, t.saturating_sub(l))),
             disque,
-            au_demarrage: au_demarrage(&memoire_par_nom),
+            au_demarrage: avec_poids(&programmes, au_demarrage().into_iter()),
             programmes,
             demarrage: demarrage(),
-            allume_depuis: std::fs::read_to_string("/proc/uptime")
+            allume_depuis: read_to_string("/proc/uptime")
                 .ok()
                 .and_then(|t| t.split('.').next()?.parse().ok()),
             place: crate::nettoyer::volume(Path::new("/")),
@@ -1059,7 +823,6 @@ mod systeme {
 // ───────────────────────────── Windows ─────────────────────────────
 
 /// Ce que lit le script PowerShell, en JSON.
-#[cfg_attr(not(windows), allow(dead_code))]
 #[derive(serde::Deserialize, Default)]
 #[serde(default)]
 struct LectureWindows {
@@ -1070,7 +833,7 @@ struct LectureWindows {
     echange: u64,
     echange_utilise: u64,
     disque: Option<f64>,
-    programmes: Vec<ProgrammeWindows>,
+    programmes: Vec<Programme>,
     demarrage_ms: Option<u64>,
     apres_ms: Option<u64>,
     demarrage_illisible: bool,
@@ -1081,17 +844,6 @@ struct LectureWindows {
     total: u64,
 }
 
-#[cfg_attr(not(windows), allow(dead_code))]
-#[derive(serde::Deserialize, Default)]
-#[serde(default)]
-struct ProgrammeWindows {
-    nom: String,
-    processeur: f64,
-    memoire: u64,
-    disque: Option<f64>,
-}
-
-#[cfg_attr(not(windows), allow(dead_code))]
 #[derive(serde::Deserialize, Default)]
 #[serde(default)]
 struct LentWindows {
@@ -1099,7 +851,6 @@ struct LentWindows {
     ms: u64,
 }
 
-#[cfg_attr(not(windows), allow(dead_code))]
 #[derive(serde::Deserialize, Default)]
 #[serde(default)]
 struct DemarrageWindows {
@@ -1112,15 +863,10 @@ struct DemarrageWindows {
 #[allow(clippy::cast_precision_loss)]
 fn instantane_windows(l: LectureWindows) -> Instantane {
     let programmes = reunir(l.programmes.into_iter().map(|p| Programme {
-        nom: p.nom,
         processeur: p.processeur.max(0.0),
-        memoire: p.memoire,
         disque: p.disque.map(|d| d.max(0.0)),
+        ..p
     }));
-    let mut memoire_par_nom: HashMap<String, u64> = HashMap::new();
-    for p in &programmes {
-        *memoire_par_nom.entry(p.nom.to_lowercase()).or_default() += p.memoire;
-    }
     let demarrage = match (l.demarrage_ms, l.demarrage_illisible) {
         (Some(ms), _) => {
             let mut lents: Vec<(String, f64)> = l
@@ -1134,21 +880,15 @@ fn instantane_windows(l: LectureWindows) -> Instantane {
             let mut vus = std::collections::HashSet::new();
             lents.retain(|(nom, _)| vus.insert(nom.clone()));
             lents.truncate(5);
-            Ok(Demarrage {
-                total: ms as f64 / 1000.0,
-                etapes: l
-                    .apres_ms
-                    .filter(|&a| a > 0)
-                    .map(|a| {
-                        trf!(
-                            "dont {} après l'ouverture de session",
-                            "including {} after login",
-                            secondes_lisibles(a as f64 / 1000.0)
-                        )
-                    })
-                    .unwrap_or_default(),
-                lents,
-            })
+            let total = ms as f64 / 1000.0;
+            let apres = l
+                .apres_ms
+                .filter(|&a| a > 0)
+                .map(|a| secondes_lisibles(a as f64 / 1000.0));
+            let etapes = apres
+                .map(|a| trf!("dont {} après l'ouverture de session", "including {} after login", a))
+                .unwrap_or_default();
+            Ok(Demarrage { total, etapes, lents })
         }
         (None, true) => Err(tr!(
             "durée lisible seulement avec les droits d'administrateur",
@@ -1163,14 +903,7 @@ fn instantane_windows(l: LectureWindows) -> Instantane {
         memoire: Some((l.memoire, l.disponible)).filter(|(t, _)| *t > 0),
         echange: Some((l.echange, l.echange_utilise)).filter(|(t, _)| *t > 0),
         disque: l.disque.map(|d| d.clamp(0.0, 100.0)),
-        au_demarrage: l
-            .au_demarrage
-            .into_iter()
-            .map(|d| AuDemarrage {
-                poids: memoire_par_nom.get(&d.programme.to_lowercase()).copied(),
-                nom: d.nom,
-            })
-            .collect(),
+        au_demarrage: avec_poids(&programmes, l.au_demarrage.into_iter().map(|d| (d.nom, d.programme))),
         programmes,
         demarrage,
         allume_depuis: l.allume_s,
@@ -1248,7 +981,6 @@ mod systeme {
 // ───────────────────────────── macOS ─────────────────────────────
 
 /// « 1234M », « 12K », « 1.2G », « 512B » (colonne MEM de top, parfois suivie de « + » ou « - ») → octets.
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn taille_top(texte: &str) -> Option<u64> {
     let t = texte.trim_end_matches(['+', '-']);
     let (nombre, unite) = t.split_at(t.len().checked_sub(1)?);
@@ -1267,54 +999,51 @@ fn taille_top(texte: &str) -> Option<u64> {
 /// `top -l 2 -s 2 -n 20 -o cpu -stats pid,command,cpu,mem` : la seconde mesure seulement (la première compte depuis le
 /// lancement de top). Rend (processeur occupé en %, programmes).
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+#[allow(clippy::cast_precision_loss)]
 fn lire_top(texte: &str, fils: usize) -> (Option<f64>, Vec<Programme>) {
     let derniere = texte.rsplit("Processes:").next().unwrap_or_default();
     let processeur = derniere.lines().find_map(|l| {
-        let reste = l.strip_prefix("CPU usage:")?;
-        let repos = reste.split(',').find(|p| p.contains("idle"))?;
-        let repos: f64 = repos.trim().split('%').next()?.trim().parse().ok()?;
-        Some(100.0 - repos)
+        let repos = l.strip_prefix("CPU usage:")?.split(',').find(|p| p.contains("idle"))?;
+        Some(100.0 - repos.trim().split('%').next()?.trim().parse::<f64>().ok()?)
     });
-    let mut programmes = Vec::new();
-    let mut dans_liste = false;
-    for l in derniere.lines() {
-        if l.trim_start().starts_with("PID") {
-            dans_liste = true;
-            continue;
-        }
-        if !dans_liste {
-            continue;
-        }
-        let mots: Vec<&str> = l.split_whitespace().collect();
-        let [_pid, nom @ .., cpu, mem] = mots.as_slice() else {
-            continue;
-        };
-        let (Ok(cpu), Some(memoire)) = (cpu.parse::<f64>(), taille_top(mem)) else {
-            continue;
-        };
-        #[allow(clippy::cast_precision_loss)]
-        programmes.push(Programme {
-            nom: nom.join(" "),
-            // top compte 100 % par cœur : rapporté à toute la machine.
-            processeur: cpu / fils.max(1) as f64,
-            memoire,
-            disque: None,
+    // Les lignes sous l'en-tête « PID COMMAND %CPU MEM », sans l'en-tête.
+    let en_tete = |l: &&str| l.trim_start().starts_with("PID");
+    let programmes = derniere
+        .lines()
+        .skip_while(|l| !en_tete(l))
+        .filter(|l| !en_tete(l))
+        .filter_map(|l| {
+            let mots: Vec<&str> = l.split_whitespace().collect();
+            let [_pid, nom @ .., cpu, mem] = mots.as_slice() else {
+                return None;
+            };
+            let (Ok(cpu), Some(memoire)) = (cpu.parse::<f64>(), taille_top(mem)) else {
+                return None;
+            };
+            Some(Programme {
+                nom: nom.join(" "),
+                // top compte 100 % par cœur : rapporté à toute la machine.
+                processeur: cpu / fils.max(1) as f64,
+                memoire,
+                disque: None,
+            })
         });
-    }
-    (processeur, reunir(programmes.into_iter()))
+    (processeur, reunir(programmes))
 }
 
 #[cfg(target_os = "macos")]
 mod systeme {
     use std::path::{Path, PathBuf};
     use std::process::Command;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
-    use super::{AuDemarrage, Instantane, lire_top};
+    use super::*;
     use crate::commande::lancer;
-    use crate::tr;
 
-    fn sortie(cmd: &str, args: &[&str]) -> String {
-        lancer(Command::new(cmd).args(args), 30)
+    /// La sortie d'une commande qui a réussi (« sysctl -n hw.memsize »), vide sinon.
+    fn sortie(commande: &str) -> String {
+        let mut mots = commande.split(' ');
+        lancer(Command::new(mots.next().unwrap_or_default()).args(mots), 30)
             .filter(|r| r.code == Some(0))
             .map(|r| r.sortie)
             .unwrap_or_default()
@@ -1322,60 +1051,41 @@ mod systeme {
 
     pub fn instantane() -> Instantane {
         let fils = std::thread::available_parallelism().map_or(1, std::num::NonZero::get);
-        let (processeur, programmes) = lire_top(
-            &sortie(
-                "top",
-                &"-l 2 -s 2 -n 20 -o cpu -stats pid,command,cpu,mem"
-                    .split(' ')
-                    .collect::<Vec<_>>(),
-            ),
-            fils,
-        );
-        let total: Option<u64> = sortie("sysctl", &["-n", "hw.memsize"]).trim().parse().ok();
+        let top = sortie("top -l 2 -s 2 -n 20 -o cpu -stats pid,command,cpu,mem");
+        let (processeur, programmes) = lire_top(&top, fils);
+        let total: Option<u64> = sortie("sysctl -n hw.memsize").trim().parse().ok();
         // « System-wide memory free percentage: 63% ».
-        let libre_pct: Option<u64> = sortie("memory_pressure", &[])
+        let libre_pct: Option<u64> = sortie("memory_pressure")
             .lines()
             .find_map(|l| l.strip_prefix("System-wide memory free percentage:"))
             .and_then(|v| v.trim().trim_end_matches('%').parse().ok());
         // « total = 2048.00M  used = 1024.50M  free = 1023.50M  (encrypted) ».
-        let echange = sortie("sysctl", &["-n", "vm.swapusage"]);
+        let echange = sortie("sysctl -n vm.swapusage");
         let valeur = |cle: &str| {
-            echange
-                .split(cle)
-                .nth(1)?
-                .split_whitespace()
-                .next()?
-                .trim_end_matches('M')
-                .parse::<f64>()
-                .ok()
+            let mo = echange.split(cle).nth(1)?.split_whitespace().next()?;
+            mo.trim_end_matches('M').parse::<f64>().ok()
         };
         #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
         let echange = valeur("total = ")
             .zip(valeur("used = "))
             .map(|(t, u)| ((t * 1_048_576.0) as u64, (u * 1_048_576.0) as u64));
-        let maintenant = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_or(0, |d| d.as_secs());
-        let allume_depuis = sortie("sysctl", &["-n", "kern.boottime"])
+        let maintenant = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs());
+        let allume_depuis = sortie("sysctl -n kern.boottime")
             .split_once("sec = ")
             .and_then(|(_, r)| r.split(',').next()?.trim().parse::<u64>().ok())
             .and_then(|s| maintenant.checked_sub(s));
         let maison = PathBuf::from(std::env::var_os("HOME").unwrap_or_default());
         // Agents lancés à l'ouverture de session par des programmes installés (pas ceux d'Apple).
-        let au_demarrage = [
-            maison.join("Library/LaunchAgents"),
-            PathBuf::from("/Library/LaunchAgents"),
-        ]
-        .iter()
-        .filter_map(|d| std::fs::read_dir(d).ok())
-        .flatten()
-        .flatten()
-        .filter_map(|f| {
-            let nom = f.file_name().to_string_lossy().into_owned();
-            let nom = nom.strip_suffix(".plist")?.to_string();
-            (!nom.starts_with("com.apple.")).then_some(AuDemarrage { nom, poids: None })
-        })
-        .collect();
+        let dossiers = [maison, PathBuf::from("/")].map(|d| d.join("Library/LaunchAgents"));
+        let au_demarrage = dossiers
+            .iter()
+            .flat_map(|d| std::fs::read_dir(d).into_iter().flatten().flatten())
+            .filter_map(|f| {
+                let nom = f.file_name().to_string_lossy().strip_suffix(".plist")?.to_string();
+                (!nom.starts_with("com.apple.")).then_some(AuDemarrage { nom, poids: None })
+            })
+            .collect();
+        let donnees = Path::new("/System/Volumes/Data");
         Instantane {
             processeur,
             fils,
@@ -1390,11 +1100,7 @@ mod systeme {
             .into()),
             au_demarrage,
             allume_depuis,
-            place: crate::nettoyer::volume(Path::new(if Path::new("/System/Volumes/Data").is_dir() {
-                "/System/Volumes/Data"
-            } else {
-                "/"
-            })),
+            place: crate::nettoyer::volume(if donnees.is_dir() { donnees } else { Path::new("/") }),
         }
     }
 }

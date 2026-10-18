@@ -63,155 +63,57 @@ pub(super) fn notes(h: &Historique) -> Vec<Reglage> {
 /// minuscules au nom et à la commande ; un motif court est un mot entier (« avg » ne doit pas trouver « savgame »).
 pub(super) fn a_garder(nom: &str, commande: &str, bureau: bool) -> Option<&'static str> {
     const GARDIEN: &[&str] = &["gardien", "sentinel", "netscan"];
+    // Des listes de motifs, que rustfmt étalerait sur une ligne chacun.
+    #[rustfmt::skip]
     const SECURITE: &[&str] = &[
-        "securityhealth",
-        "windows security",
-        "defender",
-        "msmpeng",
-        "smartscreen",
-        "mcafee",
-        "norton",
-        "symantec",
-        "avast",
-        "avg",
-        "avira",
-        "bitdefender",
-        "eset",
-        "kaspersky",
-        "avp",
-        "malwarebytes",
-        "mbam",
-        "sophos",
-        "trendmicro",
-        "trend micro",
-        "f-secure",
-        "webroot",
-        "clamav",
-        "clamtk",
-        "firewall",
-        "firewalld",
-        "gufw",
-        "ufw",
-        "opensnitch",
-        "little snitch",
-        "lulu",
+        "securityhealth", "windows security", "defender", "msmpeng", "smartscreen", "mcafee", "norton", "symantec",
+        "avast", "avg", "avira", "bitdefender", "eset", "kaspersky", "avp", "malwarebytes", "mbam", "sophos",
+        "trendmicro", "trend micro", "f-secure", "webroot", "clamav", "clamtk", "firewall", "firewalld", "gufw", "ufw",
+        "opensnitch", "little snitch", "lulu",
         // Notifications d'AppArmor (Ubuntu), contrôle des clés USB.
-        "apparmor",
-        "usbguard",
+        "apparmor", "usbguard",
         // Protections d'entreprise et autres antivirus.
-        "crowdstrike",
-        "csfalcon",
-        "sentinelone",
-        "cylance",
-        "carbon black",
-        "cbdefense",
-        "comodo",
-        "zonealarm",
-        "panda",
-        "emsisoft",
-        "antivirus",
-        "gdata",
-        "avktray",
-        "hitmanpro",
-        "zemana",
-        "acronis",
-        "forticlient",
-        "globalprotect",
-        "zscaler",
-        "netskope",
+        "crowdstrike", "csfalcon", "sentinelone", "cylance", "carbon black", "cbdefense", "comodo", "zonealarm",
+        "panda", "emsisoft", "antivirus", "gdata", "avktray", "hitmanpro", "zemana", "acronis", "forticlient",
+        "globalprotect", "zscaler", "netskope",
         // Mac : Intego, ClamXAV, les outils d'Objective-See (BlockBlock, KnockKnock, LuLu…).
-        "intego",
-        "virusbarrier",
-        "clamxav",
-        "objective-see",
-        "blockblock",
+        "intego", "virusbarrier", "clamxav", "objective-see", "blockblock",
         // Un VPN qui démarre avec la session protège la connexion (souvent avec un coupe-circuit).
-        "wireguard",
-        "openvpn",
-        "protonvpn",
-        "mullvad",
-        "nordvpn",
-        "expressvpn",
-        "surfshark",
+        "wireguard", "openvpn", "protonvpn", "mullvad", "nordvpn", "expressvpn", "surfshark",
     ];
+    #[rustfmt::skip]
     const PILOTES: &[&str] = &[
-        "realtek",
-        "rtkaud",
-        "rtkngui",
-        "ravcpl",
-        "ravbg",
-        "synaptics",
-        "syntp",
-        "etdctrl",
-        "elantech",
-        "igfx",
-        "hkcmd",
-        "nvidia",
-        "nvbackend",
-        "radeon",
-        "amdrsserv",
-        "wacom",
+        "realtek", "rtkaud", "rtkngui", "ravcpl", "ravbg", "synaptics", "syntp", "etdctrl", "elantech", "igfx", "hkcmd",
+        "nvidia", "nvbackend", "radeon", "amdrsserv", "wacom",
     ];
+    #[rustfmt::skip]
     const ACCESSIBILITE: &[&str] = &[
-        "narrator",
-        "magnify",
-        "osk",
-        "sapisvr",
-        "nvda",
-        "jaws",
-        "zoomtext",
-        "orca",
-        "onboard",
-        "at-spi",
-        "accessibility",
-        "voiceover",
-        "atbroker",
-        "utilman",
+        "narrator", "magnify", "osk", "sapisvr", "nvda", "jaws", "zoomtext", "orca", "onboard", "at-spi",
+        "accessibility", "voiceover", "atbroker", "utilman",
     ];
+    #[rustfmt::skip]
     const BUREAU: &[&str] = &[
-        "pipewire",
-        "wireplumber",
-        "pulseaudio",
-        "xdg-desktop-portal",
-        "gnome-keyring",
-        "polkit",
-        "dbus",
-        "gsd",
-        "settingsdaemon",
-        "plasmashell",
-        "kded",
-        "ksmserver",
+        "pipewire", "wireplumber", "pulseaudio", "xdg-desktop-portal", "gnome-keyring", "polkit", "dbus", "gsd",
+        "settingsdaemon", "plasmashell", "kded", "ksmserver",
     ];
     let texte = format!("{nom} {commande}").to_lowercase();
-    let mots: Vec<&str> = texte
-        .split(|c: char| !c.is_alphanumeric())
-        .filter(|m| !m.is_empty())
-        .collect();
+    // Les mots vides ne gênent pas : aucun motif n'est vide.
+    let mots: Vec<&str> = texte.split(|c: char| !c.is_alphanumeric()).collect();
     // Un motif d'au moins six lettres, ou avec une espace ou un tiret, se cherche dans le texte ; plus court, c'est un
     // mot entier.
-    let trouve = |motifs: &[&str]| {
-        motifs.iter().any(|m| {
-            if m.len() >= 6 || m.contains([' ', '-']) {
-                texte.contains(m)
-            } else {
-                mots.contains(m)
-            }
-        })
-    };
+    let entier = |m: &str| m.len() < 6 && !m.contains([' ', '-']);
+    let cherche = |m: &&str| if entier(m) { mots.contains(m) } else { texte.contains(m) };
+    let trouve = |motifs: &[&str]| motifs.iter().any(cherche);
     // La sécurité d'abord : « sentinelone » contient « sentinel », l'ancien nom de Gardien.
-    if trouve(SECURITE) {
-        Some(tr!("à garder : sécurité", "keep: security"))
-    } else if trouve(GARDIEN) {
-        Some(tr!("à garder : Gardien", "keep: Gardien"))
-    } else if trouve(PILOTES) {
-        Some(tr!("à garder : pilote", "keep: driver"))
-    } else if trouve(ACCESSIBILITE) {
-        Some(tr!("à garder : accessibilité", "keep: accessibility"))
-    } else if bureau || trouve(BUREAU) {
-        Some(tr!("à garder : le bureau", "keep: desktop"))
-    } else {
-        None
-    }
+    #[rustfmt::skip] // une ligne par raison, que rustfmt étalerait
+    let raisons = [
+        (trouve(SECURITE), tr!("à garder : sécurité", "keep: security")),
+        (trouve(GARDIEN), tr!("à garder : Gardien", "keep: Gardien")),
+        (trouve(PILOTES), tr!("à garder : pilote", "keep: driver")),
+        (trouve(ACCESSIBILITE), tr!("à garder : accessibilité", "keep: accessibility")),
+        (bureau || trouve(BUREAU), tr!("à garder : le bureau", "keep: desktop")),
+    ];
+    raisons.into_iter().find_map(|(oui, raison)| oui.then_some(raison))
 }
 
 /// Ce que Gardien ne retire pas d'ici, et où le faire.
@@ -238,16 +140,13 @@ fn ailleurs() -> &'static str {
 
 /// Où Windows note les programmes de démarrage désactivés, sous HKCU (le compte) ou HKLM (la machine), puis Run,
 /// Run32 ou StartupFolder.
-#[cfg_attr(not(windows), allow(dead_code))]
 pub(super) const APPROUVES: &str = r"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved";
 
 /// Les listes de StartupApproved que Gardien touche (une note ne doit pas en viser une autre).
-#[cfg_attr(not(windows), allow(dead_code))]
 pub(super) fn liste_approuvee(l: &str) -> Option<&'static str> {
     ["Run", "Run32", "StartupFolder"].into_iter().find(|x| *x == l)
 }
 
-#[cfg_attr(not(windows), allow(dead_code))]
 pub(super) fn hex(octets: &[u8]) -> String {
     use std::fmt::Write;
     octets.iter().fold(String::with_capacity(octets.len() * 2), |mut s, o| {
@@ -256,7 +155,6 @@ pub(super) fn hex(octets: &[u8]) -> String {
     })
 }
 
-#[cfg_attr(not(windows), allow(dead_code))]
 pub(super) fn octets(hex: &str) -> Option<Vec<u8>> {
     if !hex.len().is_multiple_of(2) || !hex.is_ascii() {
         return None;
@@ -337,7 +235,6 @@ pub(super) fn etats_launchd(texte: &str) -> std::collections::HashMap<String, bo
 
 /// La valeur d'une clé extraite par `plutil -extract <clé> xml1` : le premier élément sous `<plist …>` (« <true/> »,
 /// « <dict> »…).
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn valeur_plist(xml: &str) -> Option<&str> {
     let apres = &xml[xml.find("<plist")?..];
     let apres = apres[apres.find('>')? + 1..].trim_start();
@@ -385,34 +282,32 @@ fn lignes(programmes: Vec<Programme>, h: &Historique) -> Vec<Ligne> {
             continue;
         };
         let par_gardien = h.reglages.contains_key(r.id.as_ref());
-        if !p.actif && !par_gardien {
-            continue;
+        if p.actif || par_gardien {
+            l.push(Ligne {
+                garder: a_garder(&p.nom, &p.commande, p.bureau),
+                nom: p.nom,
+                commande: p.commande,
+                actif: p.actif,
+                machine: p.machine,
+                par_gardien,
+                reglage: r,
+            });
         }
-        l.push(Ligne {
-            garder: a_garder(&p.nom, &p.commande, p.bureau),
-            nom: p.nom,
-            commande: p.commande,
-            actif: p.actif,
-            machine: p.machine,
-            par_gardien,
-            reglage: r,
-        });
     }
     // Retirés par Gardien mais introuvables ici (un service désactivé ne se liste plus) : rebâtis d'après la note.
     for r in notes(h) {
-        if l.iter().any(|x| x.reglage.id == r.id) {
-            continue;
+        if !l.iter().any(|x| x.reglage.id == r.id) {
+            let identite = r.id.strip_prefix(PREFIXE).unwrap_or_default();
+            l.push(Ligne {
+                nom: systeme::Changement::nom_demarrage(identite),
+                commande: identite.to_string(),
+                actif: false,
+                machine: false,
+                garder: None,
+                par_gardien: true,
+                reglage: r,
+            });
         }
-        let identite = r.id.strip_prefix(PREFIXE).unwrap_or_default();
-        l.push(Ligne {
-            nom: systeme::Changement::nom_demarrage(identite),
-            commande: identite.to_string(),
-            actif: false,
-            machine: false,
-            garder: None,
-            par_gardien: true,
-            reglage: r,
-        });
     }
     l.sort_by_key(|x| x.nom.to_lowercase());
     l
@@ -474,18 +369,15 @@ pub fn menu() {
     let Some(voulu) = cocher(&entete, &cases) else {
         return;
     };
-    let a_retirer: Vec<&Reglage> = l
-        .iter()
-        .zip(&voulu)
-        .filter(|(x, v)| x.actif && !**v && x.garder.is_none())
-        .map(|(x, _)| &x.reglage)
-        .collect();
-    let a_remettre: Vec<&Reglage> = l
-        .iter()
-        .zip(&voulu)
-        .filter(|(x, v)| !x.actif && **v && x.par_gardien)
-        .map(|(x, _)| &x.reglage)
-        .collect();
+    let choisis = |garde: fn(&Ligne, bool) -> bool| -> Vec<&Reglage> {
+        l.iter()
+            .zip(&voulu)
+            .filter(|(x, v)| garde(x, **v))
+            .map(|(x, _)| &x.reglage)
+            .collect()
+    };
+    let a_retirer = choisis(|x, v| x.actif && !v && x.garder.is_none());
+    let a_remettre = choisis(|x, v| !x.actif && v && x.par_gardien);
     if a_retirer.is_empty() && a_remettre.is_empty() {
         trp!("  {GRIS}Rien à changer.{RESET}", "  {GRIS}Nothing to change.{RESET}");
     } else {
