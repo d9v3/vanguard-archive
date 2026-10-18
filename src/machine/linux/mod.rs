@@ -422,13 +422,14 @@ fn adresses_exposees() -> std::collections::HashSet<String> {
         .collect()
 }
 
-/// Service systemd d'une ligne de `ss -e` (« cgroup:/system.slice/passim.service » → « passim »).
+/// Service systemd d'une ligne de `ss -e` (« cgroup:/system.slice/passim.service » → « passim »), prêt à montrer :
+/// le nom d'un service de l'utilisateur est le sien.
 pub(crate) fn service_du_cgroup(ligne: &str) -> Option<String> {
     let groupe = ligne.split_whitespace().find_map(|m| m.strip_prefix("cgroup:"))?;
     let unite = groupe.rsplit('/').next()?;
     let nom = unite.strip_suffix(".service")?;
     // Une session (« session-2.scope ») ou une app de l'utilisateur ne dit rien de plus que « programme inconnu ».
-    (!nom.is_empty()).then(|| nom.to_string())
+    (!nom.is_empty()).then(|| crate::ui::affichable(nom))
 }
 
 /// Services qui écoutent sur le réseau (pas seulement en local), en TCP et en UDP.
@@ -471,11 +472,14 @@ fn ports_ecoute(pare_feu_actif: bool, ufw: bool) -> Vec<Constat> {
             if !expose || bruit || !vus.insert((proto, port)) {
                 continue;
             }
-            let service = service_du_cgroup(ligne);
-            let programme = c
+            // Le nom que s'est donné le programme, prêt à montrer ; sinon son service.
+            let nomme = c
                 .get(5)
                 .and_then(|u| u.split('"').nth(1))
-                .or(service.as_deref())
+                .map(crate::ui::affichable)
+                .or_else(|| service_du_cgroup(ligne));
+            let programme = nomme
+                .as_deref()
                 .unwrap_or(tr!("programme inconnu (root ?)", "unknown program (root?)"));
             let (niveau, constat) = super::port_expose(port, proto, &i, programme, pare_feu_actif);
             let cle = format!("{port}/{proto}");

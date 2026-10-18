@@ -4,7 +4,8 @@ use super::*;
 
 /// Ports de conteneurs joignables depuis le réseau, dans la colonne « Ports » de `docker ps` : tout sauf la
 /// boucle locale (127.x, ::1). Une IP du réseau local (`-p 10.0.0.5:8080:80`) est aussi exposée.
-/// Ex. « 0.0.0.0:8080->80/tcp, [::]:8080->80/tcp, 127.0.0.1:3389->3389/tcp » → [« 8080/tcp »].
+/// Ex. « 0.0.0.0:8080->80/tcp, [::]:8080->80/tcp, 127.0.0.1:3389->3389/tcp » → [« 8080/tcp »], prêts à montrer
+/// (un port mal formé reste du texte : rendu inoffensif, comme le nom d'un conteneur).
 pub(super) fn ports_docker_exposes(colonne: &str) -> Vec<String> {
     let mut ports: Vec<String> = colonne
         .split(", ")
@@ -14,7 +15,7 @@ pub(super) fn ports_docker_exposes(colonne: &str) -> Vec<String> {
             let proto = p.rsplit_once('/').map_or("tcp", |(_, pr)| pr);
             let ip = adresse.trim_matches(|c| c == '[' || c == ']');
             let locale = ip.parse::<std::net::IpAddr>().is_ok_and(|a| a.is_loopback());
-            (!locale).then(|| format!("{port}/{proto}"))
+            (!locale).then(|| crate::ui::affichable(&format!("{port}/{proto}")))
         })
         .collect();
     ports.dedup();
@@ -37,6 +38,7 @@ pub(super) fn docker() -> Vec<Constat> {
     let mut actifs = 0;
     for ligne in liste.lines() {
         let (nom, colonne) = ligne.split_once('\t').unwrap_or((ligne, ""));
+        let nom = crate::ui::affichable(nom);
         actifs += 1;
         let exposes = ports_docker_exposes(colonne);
         if exposes.is_empty() {
@@ -91,6 +93,7 @@ pub(super) fn processus() -> Vec<(String, Vec<String>)> {
 
 /// Port publié par un processus docker-proxy : (adresse de l'hôte, « 8080/tcp »).
 /// Ligne de commande : « -proto tcp -host-ip 0.0.0.0 -host-port 8080 -container-ip 172.17.0.2 -container-port 80 ».
+/// N'importe quel programme peut porter ce nom et ces arguments : le port, montré, est rendu inoffensif.
 pub(super) fn port_docker_proxy(args: &[String]) -> Option<(String, String)> {
     let valeur = |cle: &str| {
         args.iter()
@@ -99,7 +102,10 @@ pub(super) fn port_docker_proxy(args: &[String]) -> Option<(String, String)> {
             .cloned()
     };
     let proto = valeur("-proto").unwrap_or_else(|| "tcp".into());
-    Some((valeur("-host-ip")?, format!("{}/{proto}", valeur("-host-port")?)))
+    Some((
+        valeur("-host-ip")?,
+        crate::ui::affichable(&format!("{}/{proto}", valeur("-host-port")?)),
+    ))
 }
 
 /// Docker sans accès au démon (on n'est pas dans le groupe docker, et c'est mieux ainsi : ce groupe vaut root).
@@ -185,6 +191,19 @@ mod tests {
         assert_eq!(ports_docker_exposes("10.0.0.179:8080->80/tcp"), vec!["8080/tcp"]);
         assert_eq!(ports_docker_exposes(":::9000->9000/tcp"), vec!["9000/tcp"]);
         assert_eq!(ports_docker_exposes(""), [] as [std::string::String; 0]);
+        // Lu dans la ligne de commande d'un processus (que n'importe quel programme peut imiter) ou dans docker ps :
+        // piégé, le port arrive inoffensif.
+        assert_eq!(
+            ports_docker_exposes("0.0.0.0:80\x1b[2K\r->80/tcp\u{202e}"),
+            vec!["80�[2K�/tcp�"]
+        );
+        let args: Vec<String> = ["-host-ip", "0.0.0.0", "-host-port", "53\x1b]52;c;eA==\x07"]
+            .map(str::to_string)
+            .to_vec();
+        assert_eq!(
+            port_docker_proxy(&args),
+            Some(("0.0.0.0".to_string(), "53�]52;c;eA==�/tcp".to_string()))
+        );
     }
 
     #[test]

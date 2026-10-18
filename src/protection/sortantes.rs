@@ -70,14 +70,15 @@ fn adresse_et_port(t: &str) -> Option<(IpAddr, u16)> {
 }
 
 /// Le programme d'une ligne de ss : users:(("firefox",pid=4242,fd=56)). Son nom peut contenir des espaces
-/// (« Web Content »).
+/// (« Web Content »). N'importe quel programme choisit son nom : lu prêt à montrer, comme dans chaque lecture de ce
+/// fichier (le chemin, lui, reste tel quel pour juger d'où le programme a été lancé).
 #[cfg(any(target_os = "linux", test))]
 fn lire_processus(ligne: &str) -> (Option<String>, Option<u32>) {
     let Some(debut) = ligne.find("users:((\"") else {
         return (None, None);
     };
     let reste = &ligne[debut + 9..];
-    let nom = reste.split_once('"').map(|(n, _)| n.to_string());
+    let nom = reste.split_once('"').map(|(n, _)| affichable(n));
     let pid = reste
         .split_once("pid=")
         .and_then(|(_, r)| r.split([',', ')']).next()?.parse().ok());
@@ -118,7 +119,7 @@ fn lire_windows(sortie: &str) -> Vec<Connexion> {
             let distante: IpAddr = p.next()?.trim().parse().ok()?;
             let port = p.next()?.trim().parse().ok()?;
             let pid = p.next()?.trim().parse().ok();
-            let programme = p.next().map(str::trim).filter(|n| !n.is_empty()).map(String::from);
+            let programme = p.next().map(str::trim).filter(|n| !n.is_empty()).map(affichable);
             let chemin = p.next().map(str::trim).filter(|c| !c.is_empty()).map(String::from);
             Some(Connexion {
                 pid,
@@ -145,7 +146,7 @@ fn lire_lsof(sortie: &str) -> Vec<Connexion> {
                 pid = valeur.parse().ok();
                 programme = None;
             }
-            Some('c') => programme = Some(valeur.to_string()),
+            Some('c') => programme = Some(affichable(valeur)),
             Some('n') => {
                 if let Some((distante, port)) = valeur.split_once("->").and_then(|(_, d)| adresse_et_port(d)) {
                     liste.push(Connexion {
@@ -620,7 +621,8 @@ pub fn afficher() {
             Programme {
                 pire: signes.iter().map(|(n, _)| *n).filter(|n| *n > Niveau::Info).max(),
                 nom: g.programme.clone().unwrap_or_default(),
-                chemin: g.chemin.clone(),
+                // Jugé tel quel (plus haut) ; montré, le chemin est rendu inoffensif.
+                chemin: g.chemin.as_deref().map(affichable),
                 signes,
                 serveurs: serveurs(&g.liste),
                 connexions: g.liste.len(),
@@ -790,6 +792,22 @@ mod tests {
         assert_eq!(autres.len(), 1);
         assert_eq!(autres[0].distante, ip("17.253.1.1"));
         assert_eq!(autres[0].programme, None);
+    }
+
+    /// N'importe quel programme choisit son nom (et celui de son fichier) : piégé, le nom arrive inoffensif dans
+    /// chaque lecture ; le chemin, lui, reste tel quel pour juger d'où le programme a été lancé.
+    #[test]
+    fn noms_de_programmes_pieges() {
+        let ss = lire_ss(
+            "tcp 0 0 192.168.1.20:43180 140.82.112.4:443 users:((\"x\x1b]52;c;eA==\x07\x1b[2K\rfaux\u{202e}\",pid=4242,fd=18))\n",
+        );
+        assert_eq!(ss[0].programme.as_deref(), Some("x�]52;c;eA==��[2K�faux�"));
+        assert_eq!(ss[0].pid, Some(4242));
+        let lsof = lire_lsof("p501\ncChrome\x1b[8m\u{2066}\nf23\nn192.168.1.20:50000->142.250.1.1:443\n");
+        assert_eq!(lsof[0].programme.as_deref(), Some("Chrome�[8m�"));
+        let w = lire_windows("140.82.112.4|443|4242|fire\x1b]0;x\x07fox|C:\\Temp\\a\x1b.exe\n");
+        assert_eq!(w[0].programme.as_deref(), Some("fire�]0;x�fox"));
+        assert_eq!(w[0].chemin.as_deref(), Some("C:\\Temp\\a\x1b.exe"));
     }
 
     #[test]

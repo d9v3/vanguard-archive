@@ -576,6 +576,8 @@ fn ports_ecoute(pare_feu_actif: bool, ip_lan: Option<&str>) -> Vec<Constat> {
             continue;
         }
         vus.push(port);
+        // Chaque programme choisit son nom : montré, il est rendu inoffensif.
+        let programme = crate::ui::affichable(programme);
         let i = info_port(port);
         if bloques.contains(&port) {
             constats.push(alerte(
@@ -695,10 +697,11 @@ fn lire_ports_udp(liste: &str, pare_feu_actif: bool, ip_lan: Option<&str>) -> Ve
             continue;
         }
         vus.push(port);
+        // Chaque programme choisit son nom : montré, il est rendu inoffensif.
         let programme = if programme.is_empty() {
-            tr!("programme inconnu", "unknown program")
+            tr!("programme inconnu", "unknown program").to_string()
         } else {
-            programme
+            crate::ui::affichable(programme)
         };
         let constat = alerte(
             "Ports en écoute",
@@ -801,6 +804,9 @@ mod tests {
         assert!(llmnr.starts_with("if (-not (Test-Path ") && llmnr.contains("New-Item"));
         let c = lire_ports_udp("LLMNR|0\n0.0.0.0|5355|svchost", false, None);
         assert!(c.len() == 1 && c[0].correctif.is_none() && c[0].probleme == Some(Niveau::Info));
+        // Un programme au nom piégé : rendu inoffensif dans le message.
+        let c = lire_ports_udp("0.0.0.0|161|snmp\x1b]52;c;eA==\x07\u{202e}", true, None);
+        assert!(c[0].message.contains("« snmp�]52;c;eA==�� »"), "{}", c[0].message);
     }
 
     #[test]

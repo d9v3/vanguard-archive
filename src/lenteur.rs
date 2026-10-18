@@ -79,11 +79,12 @@ impl Default for Instantane {
     }
 }
 
-/// Les processus d'un même programme réunis, triés plus tard selon ce qu'on regarde.
+/// Les processus d'un même programme réunis, triés plus tard selon ce qu'on regarde. Par ici passent les programmes
+/// des trois systèmes : chacun choisit son nom, rendu prêt à montrer (`affichable`).
 fn reunir(processus: impl Iterator<Item = Programme>) -> Vec<Programme> {
     let mut par_nom: HashMap<String, Programme> = HashMap::new();
     for p in processus {
-        let e = par_nom.entry(p.nom).or_default();
+        let e = par_nom.entry(affichable(&p.nom)).or_default();
         e.processeur += p.processeur;
         e.memoire += p.memoire;
         e.disque = p.disque.map(|d| e.disque.unwrap_or(0.0) + d).or(e.disque);
@@ -91,14 +92,20 @@ fn reunir(processus: impl Iterator<Item = Programme>) -> Vec<Programme> {
     par_nom.into_iter().map(|(nom, p)| Programme { nom, ..p }).collect()
 }
 
-/// Les programmes au démarrage, (nom, programme lancé), avec la mémoire qu'occupe ce programme en ce moment.
+/// Les programmes au démarrage, (nom, programme lancé), avec la mémoire qu'occupe ce programme en ce moment. Le nom,
+/// écrit par qui a posé l'entrée, est rendu prêt à montrer.
 fn avec_poids(programmes: &[Programme], liste: impl Iterator<Item = (String, String)>) -> Vec<AuDemarrage> {
     let mut par_nom: HashMap<String, u64> = HashMap::new();
     for p in programmes {
         *par_nom.entry(p.nom.to_lowercase()).or_default() += p.memoire;
     }
-    let poids = |programme: &str| par_nom.get(&programme.to_lowercase()).copied();
-    liste.map(|(nom, p)| AuDemarrage { poids: poids(&p), nom }).collect()
+    let poids = |programme: &str| par_nom.get(&affichable(programme).to_lowercase()).copied();
+    liste
+        .map(|(nom, p)| AuDemarrage {
+            poids: poids(&p),
+            nom: affichable(&nom),
+        })
+        .collect()
 }
 
 /// « 1min 2.105s », « 835ms », « 1.186s », « 2h 3min » (durées de systemd) → secondes.
@@ -146,12 +153,13 @@ fn duree_systemd(texte: &str) -> Option<(f64, String)> {
 
 /// `systemd-analyze critical-chain` : les unités du chemin critique et le temps que chacune a pris à démarrer
 /// (« +1.186s »), les plus longues d'abord. `blame` mélangerait ce qui tourne après le démarrage (mise à jour de la
-/// base de locate, par exemple) avec ce qui le retarde vraiment.
+/// base de locate, par exemple) avec ce qui le retarde vraiment. Le nom d'une unité de l'utilisateur est le sien :
+/// lu prêt à montrer.
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 fn chaine_critique(texte: &str) -> Vec<(String, f64)> {
     let unite = |l: &str| {
         let (nom, reste) = l.trim_start_matches(|c: char| !c.is_alphanumeric()).split_once(' ')?;
-        Some((nom.to_string(), secondes_systemd(reste.split_once('+')?.1)?))
+        Some((affichable(nom), secondes_systemd(reste.split_once('+')?.1)?))
     };
     let mut lents: Vec<(String, f64)> = texte.lines().filter_map(unite).filter(|(_, s)| *s >= 0.5).collect();
     lents.sort_by(|a, b| b.1.total_cmp(&a.1));
@@ -873,7 +881,7 @@ fn instantane_windows(l: LectureWindows) -> Instantane {
                 .lents
                 .into_iter()
                 .filter(|x| !x.nom.trim().is_empty())
-                .map(|x| (x.nom.trim().to_string(), x.ms as f64 / 1000.0))
+                .map(|x| (affichable(x.nom.trim()), x.ms as f64 / 1000.0))
                 .collect();
             lents.sort_by(|a, b| b.1.total_cmp(&a.1));
             // Un même programme ralentit souvent plusieurs démarrages : une fois, avec son pire retard.
@@ -1081,7 +1089,7 @@ mod systeme {
             .iter()
             .flat_map(|d| std::fs::read_dir(d).into_iter().flatten().flatten())
             .filter_map(|f| {
-                let nom = f.file_name().to_string_lossy().strip_suffix(".plist")?.to_string();
+                let nom = affichable(f.file_name().to_string_lossy().strip_suffix(".plist")?);
                 (!nom.starts_with("com.apple.")).then_some(AuDemarrage { nom, poids: None })
             })
             .collect();
@@ -1135,6 +1143,37 @@ mod tests {
                 ("docker.service".to_string(), 4.512)
             ]
         );
+    }
+
+    /// Un programme choisit son nom, un service ou une entrée de démarrage aussi : piégés, ils arrivent inoffensifs à
+    /// l'écran et dans les conseils, sur les trois systèmes.
+    #[test]
+    fn noms_de_programmes_pieges() {
+        let piege = "x\x1b]52;c;eA==\x07\x1b[2K\rfaux\u{202e}";
+        let vu = "x�]52;c;eA==��[2K�faux�";
+        let p = reunir(
+            [Programme {
+                nom: piege.into(),
+                processeur: 90.0,
+                memoire: 1 << 30,
+                disque: None,
+            }]
+            .into_iter(),
+        );
+        assert_eq!(p[0].nom, vu);
+        let chaine = format!("graphical.target @13.750s\n└─{piege}.service @9.1s +4.512s\n");
+        assert_eq!(chaine_critique(&chaine)[0].0, format!("{vu}.service"));
+        assert_eq!(
+            avec_poids(&p, [(piege.to_string(), "x".to_string())].into_iter())[0].nom,
+            vu
+        );
+        let l: LectureWindows = serde_json::from_str(
+            r#"{"demarrage_ms":95000,"lents":[{"nom":"Lent\u001b[2K","ms":12000}],"programmes":[{"nom":"chrome\u001b]0;x\u0007","processeur":30,"memoire":1}]}"#,
+        )
+        .unwrap();
+        let i = instantane_windows(l);
+        assert_eq!(i.demarrage.as_ref().unwrap().lents[0].0, "Lent�[2K");
+        assert_eq!(i.programmes[0].nom, "chrome�]0;x�");
     }
 
     #[test]

@@ -444,8 +444,8 @@ pub fn appliquer_chacune(correctifs: &[Vec<String>]) -> Vec<bool> {
     }
 }
 
-/// Programme qui écoute sur chaque port TCP de cette machine (port → nom du programme).
-/// Sans droits admin, les programmes de root/SYSTEM restent souvent anonymes.
+/// Programme qui écoute sur chaque port TCP de cette machine (port → nom du programme, que chaque programme choisit :
+/// prêt à montrer). Sans droits admin, les programmes de root/SYSTEM restent souvent anonymes.
 pub fn programmes_en_ecoute() -> std::collections::HashMap<u16, String> {
     let mut map = std::collections::HashMap::new();
     #[cfg(target_os = "linux")]
@@ -458,7 +458,7 @@ pub fn programmes_en_ecoute() -> std::collections::HashMap<u16, String> {
         let nom = c
             .get(5)
             .and_then(|u| u.split('"').nth(1))
-            .map(str::to_string)
+            .map(affichable)
             .or_else(|| linux::service_du_cgroup(l));
         if let (Some(port), Some(nom)) = (port, nom) {
             map.insert(port, nom);
@@ -480,7 +480,7 @@ pub fn programmes_en_ecoute() -> std::collections::HashMap<u16, String> {
             .and_then(|(_, p)| p.parse::<u16>().ok());
         if let (Some(port), Some(nom)) = (port, c.first()) {
             // lsof échappe les espaces des noms : « Google\x20Chrome ».
-            map.insert(port, nom.replace("\\x20", " "));
+            map.insert(port, affichable(&nom.replace("\\x20", " ")));
         }
     }
     #[cfg(windows)]
@@ -492,7 +492,7 @@ pub fn programmes_en_ecoute() -> std::collections::HashMap<u16, String> {
             && let Ok(port) = p.trim().parse::<u16>()
             && !nom.trim().is_empty()
         {
-            map.insert(port, nom.trim().to_string());
+            map.insert(port, affichable(nom.trim()));
         }
     }
     map
