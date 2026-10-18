@@ -3,6 +3,7 @@
 //! N'utilise le scan réseau que sur un réseau qui t'appartient ou que tu as le droit d'auditer.
 //! Lancé sans argument, affiche un menu.
 
+mod alertes;
 mod antivirus;
 mod apprentissage;
 mod commande;
@@ -10,6 +11,7 @@ mod connexion;
 mod corriger;
 mod diagnostic;
 mod donnees;
+mod entretien;
 mod fuites;
 mod gaming;
 mod guide;
@@ -106,6 +108,20 @@ enum Commande {
     Surveillance {
         #[arg(value_parser = ["on", "off"])]
         etat: String,
+    },
+    /// Entretien du mois : une fois par mois, en silence, la note, les mises à jour en attente, la place à libérer et
+    /// les problèmes nouveaux, en une notification ; rien n'est changé. Sans argument : ce qu'il dirait maintenant.
+    #[command(visible_alias = "maintenance")]
+    Entretien {
+        #[arg(value_parser = ["on", "off"])]
+        etat: Option<String>,
+    },
+    /// Alertes sur le téléphone, par ntfy (surveillance, entretien du mois) : les activer après accord, les couper,
+    /// ou envoyer une alerte d'essai. Sans argument : le menu.
+    #[command(visible_alias = "alerts")]
+    Alertes {
+        #[arg(value_parser = ["on", "off", "essai", "test"])]
+        etat: Option<String>,
     },
     /// Mises à jour : système, programmes, pilotes et firmware vérifiés d'un coup, puis installés après accord.
     #[command(visible_alias = "update", alias = "mises-a-jour")]
@@ -211,6 +227,9 @@ enum Commande {
     /// Scan silencieux + notifications (utilisé par la surveillance).
     #[command(hide = true)]
     Surveiller,
+    /// Entretien silencieux + notification (utilisé par le planificateur, une fois par mois).
+    #[command(hide = true)]
+    Entretenir,
 }
 
 /// Résultats de la session, pour le rapport HTML et les corrections.
@@ -526,6 +545,7 @@ enum Action {
     Audit,
     Integrite,
     Appris,
+    Entretien,
     Diagnostic,
     Maj,
     Reparer,
@@ -535,6 +555,7 @@ enum Action {
     Surveillance,
     Connexion,
     ListesNoires,
+    Alertes,
     AntivirusRapide,
     AntivirusComplet,
     AntivirusDossier,
@@ -564,6 +585,7 @@ impl Action {
         Action::Audit,
         Action::Integrite,
         Action::Appris,
+        Action::Entretien,
         Action::Diagnostic,
         Action::Maj,
         Action::Reparer,
@@ -573,6 +595,7 @@ impl Action {
         Action::Surveillance,
         Action::Connexion,
         Action::ListesNoires,
+        Action::Alertes,
         Action::AntivirusRapide,
         Action::AntivirusComplet,
         Action::AntivirusDossier,
@@ -640,6 +663,7 @@ impl Action {
             Action::Audit => "sécurité security pare-feu firewall ports ssh chiffrement encryption comptes accounts",
             Action::Integrite => "blake3 empreintes fingerprints fichiers files",
             Action::Appris => "apprentissage learning appris learned choix choices normal oublier forget",
+            Action::Entretien => "maintenance mensuel monthly mois month rappel reminder notification",
             Action::Diagnostic => "plantages crashes erreurs errors écran bleu bsod journal logs matériel hardware",
             Action::Maj => "update upgrade pilotes drivers firmware bios windows update",
             Action::Reparer => {
@@ -650,6 +674,7 @@ impl Action {
             Action::Surveillance => "monitor surveiller notification",
             Action::Connexion => "ping latence latency débit speed jitter gigue bufferbloat jeu",
             Action::ListesNoires => "spamhaus botnet liste noire blocklist blacklist dnsbl",
+            Action::Alertes => "ntfy téléphone phone mobile portable notification push",
             Action::AntivirusRapide | Action::AntivirusComplet => "virus malware clamav defender",
             Action::AntivirusDossier => "virus usb clé autorun",
             Action::Yara => "yara règles rules malware",
@@ -695,6 +720,14 @@ impl Action {
                 tr!("Ce que Gardien a appris", "What Gardien has learned"),
                 tr!("tes choix, tes habitudes", "your choices, your habits"),
             ),
+            Action::Entretien => (
+                tr!("Entretien du mois", "Monthly check-up"),
+                if entretien::active() {
+                    tr!("activé : une notification", "on: one notification")
+                } else {
+                    tr!("désactivé", "off")
+                },
+            ),
             Action::Diagnostic => (
                 tr!("Diagnostic", "Diagnostic"),
                 tr!("matériel, plantages, erreurs", "hardware, crashes, errors"),
@@ -734,6 +767,14 @@ impl Action {
             Action::ListesNoires => (
                 tr!("Adresse sur liste noire ?", "Address on blocklists?"),
                 tr!("si oui, un appareil est infecté", "if so, a device is infected"),
+            ),
+            Action::Alertes => (
+                tr!("Alertes sur le téléphone", "Alerts on your phone"),
+                if alertes::actives() {
+                    tr!("activées (ntfy)", "on (ntfy)")
+                } else {
+                    tr!("désactivées", "off")
+                },
             ),
             Action::AntivirusRapide => (
                 tr!("Analyse rapide", "Quick scan"),
@@ -893,6 +934,7 @@ impl Groupe {
                 Action::Diagnostic,
                 Action::Integrite,
                 Action::Appris,
+                Action::Entretien,
             ],
             Groupe::Reseau => &[
                 Action::Scanner,
@@ -901,6 +943,7 @@ impl Groupe {
                 Action::Surveillance,
                 Action::Connexion,
                 Action::ListesNoires,
+                Action::Alertes,
             ],
             Groupe::Protection => &[
                 Action::AntivirusRapide,
@@ -1007,6 +1050,7 @@ async fn executer(s: &mut Session, action: Action) {
         Action::Audit => s.audit = Some(machine::executer(false)),
         Action::Integrite => integrite::verifier(false),
         Action::Appris => apprentissage::menu(),
+        Action::Entretien => entretien::activer(!entretien::active()),
         Action::Diagnostic => diagnostic::diagnostic(),
         Action::Maj => maj::executer(),
         Action::Reparer => reparer::menu(),
@@ -1032,6 +1076,7 @@ async fn executer(s: &mut Session, action: Action) {
         Action::Surveillance => surveillance::activer(!surveillance::active()),
         Action::Connexion => connexion::tester().await,
         Action::ListesNoires => listes_noires::verifier(),
+        Action::Alertes => alertes::menu(),
         Action::AntivirusRapide => antivirus::analyser(antivirus::Portee::Rapide),
         Action::AntivirusComplet => antivirus::analyser(antivirus::Portee::Complete),
         Action::AntivirusDossier => antivirus::choisir(),
@@ -1087,6 +1132,14 @@ fn ligne_de_commande() -> clap::Command {
         (
             "surveillance",
             "Turn hourly network monitoring on or off (notification for unknown devices)",
+        ),
+        (
+            "entretien",
+            "Monthly check-up: once a month, silently, the grade, waiting updates, space to free and new problems, in one notification; nothing is changed. Without argument: what it would say now",
+        ),
+        (
+            "alertes",
+            "Alerts on your phone through ntfy (monitoring, monthly check-up): turn them on after your consent, off, or send a test alert. Without argument: the menu",
         ),
         (
             "maj",
@@ -1298,6 +1351,12 @@ async fn main() {
         }),
         Some(Commande::Surveillance { etat }) => surveillance::activer(etat == "on"),
         Some(Commande::Surveiller) => surveillance::surveiller().await,
+        Some(Commande::Entretien { etat }) => match etat {
+            Some(e) => entretien::activer(e == "on"),
+            None => entretien::maintenant(),
+        },
+        Some(Commande::Entretenir) => entretien::entretenir(),
+        Some(Commande::Alertes { etat }) => alertes::commande(etat.as_deref()),
         Some(Commande::Maj) => maj::executer(),
         Some(Commande::Reparer) => reparer::menu(),
         Some(Commande::Gaming) => gaming::menu(),

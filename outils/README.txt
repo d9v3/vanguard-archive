@@ -42,11 +42,13 @@ highlighted one, Esc clears it. In the main menu, it also finds each tool of the
        Diagnostic (hardware, recent crashes and errors, text copy on the key)
        Critical file integrity (accounts, sudo, SSH, startup; live: gardien integrite --temps-reel)
        What Gardien has learned: your habits, and the alerts you declared normal ("i" when fixing)
+       Monthly check-up: one notification a month (grade, updates, space to free, new problems)
   5  Network and Internet ›
        Scan the network · Deep scan of one device · Name a device ("HP printer")
        Hourly monitoring (unknown device, problem on this machine, router impersonation)
        Connection test for gaming (ping, jitter, speed, bufferbloat), compared with your habits
        Internet address on blocklists? (Spamhaus, SpamCop, DroneBL, PSBL, after your consent)
+       Alerts on your phone (ntfy, after your consent: secret topic, never an IP or MAC address)
   6  Antivirus and protection ›
        Quick scan · Full scan of the home folder
        USB drive or folder, with USB worm traps (fake shortcuts, autorun)

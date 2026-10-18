@@ -15,13 +15,13 @@ const NOM: &str = "gardien-surveillance";
 #[cfg_attr(target_os = "macos", allow(dead_code))]
 const ANCIENS_NOMS: [&str; 2] = ["sentinel-surveillance", "netscan-surveillance"];
 
-fn reussit(cmd: &str, args: &[&str]) -> bool {
+pub(crate) fn reussit(cmd: &str, args: &[&str]) -> bool {
     Command::new(cmd).args(args).output().is_ok_and(|o| o.status.success())
 }
 
 /// Programme à planifier. Lancé depuis la clé USB, on en installe d'abord une copie locale :
-/// sinon la surveillance s'arrêterait dès que la clé est débranchée.
-fn executable() -> String {
+/// sinon la surveillance (et l'entretien du mois) s'arrêterait dès que la clé est débranchée.
+pub(crate) fn executable() -> String {
     // Sous Linux et macOS, le programme peut tourner depuis une copie temporaire (protection de la clé), effacée
     // à la fin.
     #[cfg(unix)]
@@ -132,7 +132,7 @@ fn etat_machine(a: &crate::machine::Audit) -> EtatMachine {
 
 /// Un problème comparé sans ses nombres (« 3 % libres » et « 2 % libres » sont le même problème), sauf les ports :
 /// un autre numéro de port est un autre problème.
-fn cle_alerte(alerte: &str) -> String {
+pub(crate) fn cle_alerte(alerte: &str) -> String {
     if alerte.starts_with("Ports en écoute") {
         return alerte.to_string();
     }
@@ -191,6 +191,13 @@ fn veiller_machine() {
     if let Some(avant) = &avant {
         for (titre, texte) in nouveautes_machine(avant, &apres) {
             notifier(&titre, &texte);
+            crate::alertes::envoyer(
+                &titre,
+                tr!(
+                    "Nouveau sur cet ordinateur : lance « gardien machine » pour le détail.",
+                    "New on this computer: run “gardien machine” for the details."
+                ),
+            );
         }
     }
     if let Ok(texte) = serde_json::to_string(&apres) {
@@ -236,6 +243,16 @@ fn veiller_passerelle(r: &reseau::Rapport) {
             tr!("Gardien : box usurpée ?", "Gardien: router impersonated?"),
             &reseau::message_usurpation(boite, &mac, autre),
         );
+        crate::alertes::envoyer(
+            tr!("Gardien : box usurpée ?", "Gardien: router impersonated?"),
+            &sur_le_reseau(
+                r,
+                tr!(
+                    "une autre machine répond à sa place",
+                    "another machine answers in its place"
+                ),
+            ),
+        );
         return;
     }
     let Some(apres) = passerelle_de(r) else { return };
@@ -254,10 +271,26 @@ fn veiller_passerelle(r: &reseau::Rapport) {
                 apres.ip
             ),
         );
+        crate::alertes::envoyer(
+            tr!(
+                "Gardien : la box a changé d'adresse MAC",
+                "Gardien: the router's MAC address changed"
+            ),
+            &sur_le_reseau(r, tr!("lance Gardien pour le détail", "open Gardien for the details")),
+        );
     }
     if let Ok(texte) = serde_json::to_string(&apres) {
         let _ = std::fs::create_dir_all(reseau::dossier_local());
         let _ = std::fs::write(fichier_passerelle(), texte);
+    }
+}
+
+/// Texte d'une alerte pour le téléphone : le réseau par son nom, jamais par ses adresses (« … sur le réseau
+/// « Salon » »).
+fn sur_le_reseau(r: &reseau::Rapport, quoi: &str) -> String {
+    match &r.nom_reseau {
+        Some(nom) => trf!("{quoi}, sur le réseau « {nom} ».", "{quoi}, on the “{nom}” network."),
+        None => trf!("{quoi}, sur ton réseau.", "{quoi}, on your network."),
     }
 }
 
@@ -270,6 +303,16 @@ pub async fn surveiller() {
                 "Gardien: critical files changed"
             ),
             &fichiers,
+        );
+        crate::alertes::envoyer(
+            tr!(
+                "Gardien : fichiers critiques modifiés",
+                "Gardien: critical files changed"
+            ),
+            tr!(
+                "Lance « gardien integrite » sur cet ordinateur pour voir lesquels.",
+                "Run “gardien integrite” on this computer to see which ones."
+            ),
         );
     }
     let Ok(r) = reseau::executer(Options {
@@ -291,12 +334,25 @@ pub async fn surveiller() {
             tr!("Nouvel appareil sur ton réseau", "New device on your network"),
             &format!("{} — {qui} {}", h.ip, h.mac.as_deref().unwrap_or("")),
         );
+        crate::alertes::envoyer(
+            tr!("Nouvel appareil sur ton réseau", "New device on your network"),
+            &sur_le_reseau(&r, &qui),
+        );
     }
     for h in r.hotes.iter().filter(|h| !h.nouvelle) {
         for p in h.ports.iter().filter(|p| p.nouveau && p.niveau >= Niveau::Eleve) {
             notifier(
                 &trf!("Port {} nouvellement ouvert", "Port {} newly opened", p.port),
                 &format!("{} ({}) : {} — {}", h.ip, h.titre(), p.service, p.conseil),
+            );
+            let qui = if h.titre().is_empty() {
+                tr!("un appareil", "a device").to_string()
+            } else {
+                h.titre()
+            };
+            crate::alertes::envoyer(
+                &trf!("Port {} nouvellement ouvert", "Port {} newly opened", p.port),
+                &sur_le_reseau(&r, &format!("{qui} : {}", p.service)),
             );
         }
     }
@@ -401,7 +457,7 @@ fn plist_agent() -> std::path::PathBuf {
 
 /// Domaine launchd de la session graphique de l'utilisateur (« gui/501 »).
 #[cfg(target_os = "macos")]
-fn domaine_launchd() -> String {
+pub(crate) fn domaine_launchd() -> String {
     let uid = Command::new("id")
         .arg("-u")
         .output()
@@ -475,7 +531,7 @@ const ANCIENNES_TACHES_WINDOWS: [&str; 2] = ["sentinel - surveillance du reseau"
 
 /// Une de ces tâches existe-t-elle ? Sans erreur quand aucune n'existe : un échec de PowerShell irait au journal.
 #[cfg(windows)]
-fn tache_existe(noms: &[&str]) -> bool {
+pub(crate) fn tache_existe(noms: &[&str]) -> bool {
     let liste = noms.iter().map(|n| format!("'{n}'")).collect::<Vec<_>>().join(",");
     crate::machine::windows::ps(&format!(
         "if (Get-ScheduledTask -ErrorAction SilentlyContinue | Where-Object {{ $_.TaskName -in @({liste}) }}) {{ 'oui' }}"

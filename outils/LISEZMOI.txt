@@ -43,11 +43,13 @@ Entrée ouvre celle en surbrillance, Échap efface. Au menu principal, elle trou
        Diagnostic (matériel, plantages et erreurs récents, copie texte sur la clé)
        Intégrité des fichiers critiques (comptes, sudo, SSH, démarrage ; en direct : gardien integrite --temps-reel)
        Ce que Gardien a appris : tes habitudes, et les alertes que tu as déclarées normales (« i » à la correction)
+       Entretien du mois : une notification par mois (note, mises à jour, place à libérer, problèmes nouveaux)
   5  Réseau et Internet ›
        Scanner le réseau · Scan approfondi d'un appareil · Nommer un appareil (« imprimante HP »)
        Surveillance toutes les heures (appareil inconnu, problème sur cette machine, usurpation de la box)
        Test de connexion pour le jeu (ping, gigue, débit, bufferbloat), comparé à tes habitudes
        Adresse Internet sur liste noire ? (Spamhaus, SpamCop, DroneBL, PSBL, après ton accord)
+       Alertes sur le téléphone (ntfy, après ton accord : sujet secret, jamais d'adresse IP ni MAC)
   6  Antivirus et protection ›
        Analyse rapide · Analyse complète du dossier personnel
        Clé USB ou dossier, avec les pièges des vers de clé (faux raccourcis, autorun)

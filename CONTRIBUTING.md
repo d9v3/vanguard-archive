@@ -37,6 +37,8 @@ modification. Sur GitHub, `@claude` dans un ticket ou une demande de fusion le f
 | `src/guide/` | guide des commandes : un fichier par système (`linux.rs`, `windows.rs`, `macos.rs`, `tous.rs`), menus et recherche (`mod.rs`) |
 | `src/apprentissage.rs` | ce que Gardien apprend ici : alertes déclarées normales (appris.json), habitudes |
 | `src/listes_noires.rs` | adresse Internet de la maison dans les listes noires (DNSBL), après accord |
+| `src/entretien.rs` | entretien du mois : note, mises à jour, place, problèmes nouveaux, en une notification |
+| `src/alertes.rs` | alertes sur le téléphone par ntfy : sujet tiré au hasard, messages sans IP ni MAC |
 | `assets/oui.tsv` | fabricants par préfixe MAC (liste IEEE), rangés en tableaux triés à la compilation (`build.rs`) |
 | `assets/yara/` | règles YARA de ReversingLabs (licence MIT), rassemblées par `outils/maj-yara.sh` |
 | `assets/icones/`, `assets/gardien.ico` | le logo, calculé par `outils/icone.py` |

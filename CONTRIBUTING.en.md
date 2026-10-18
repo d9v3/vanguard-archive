@@ -37,6 +37,8 @@ turn on once with `/install-github-app`).
 | `src/guide/` | command guide: one file per system (`linux.rs`, `windows.rs`, `macos.rs`, `tous.rs`), menus and search (`mod.rs`) |
 | `src/apprentissage.rs` | what Gardien learns here: alerts declared normal (appris.json), habits |
 | `src/listes_noires.rs` | the home's Internet address in blocklists (DNSBL), after consent |
+| `src/entretien.rs` | monthly check-up: grade, updates, space, new problems, in one notification |
+| `src/alertes.rs` | alerts on the phone through ntfy: random topic, messages without IP or MAC |
 | `assets/oui.tsv` | manufacturers by MAC prefix (IEEE list), stored as sorted tables at compile time (`build.rs`) |
 | `assets/yara/` | ReversingLabs YARA rules (MIT license), gathered by `outils/maj-yara.sh` |
 | `assets/icones/`, `assets/gardien.ico` | the logo, computed by `outils/icone.py` |

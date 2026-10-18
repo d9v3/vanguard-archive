@@ -306,6 +306,16 @@ fn mesurer() -> Vec<Element> {
     systeme::elements()
 }
 
+/// Place que le nettoyage recommandé (ce qui se refait seul) libérerait, mesurée sans rien afficher ni effacer :
+/// pour l'entretien du mois.
+pub fn place_a_liberer() -> u64 {
+    systeme::elements()
+        .iter()
+        .filter(|e| e.recommande && !e.propre())
+        .filter_map(|e| e.taille)
+        .sum()
+}
+
 /// « gardien nettoyer » : liste à cocher, puis nettoyage après accord et bilan de la place gagnée.
 pub fn menu() {
     let elements = mesurer();
