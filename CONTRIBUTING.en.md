@@ -31,7 +31,7 @@ turn on once with `/install-github-app`).
 | `src/reseau/surveillance.rs` | systemd timer / Task Scheduler / launchd agent, notifications |
 | `src/rapport.rs`, `src/historique.rs` | HTML report, check history, grade curve |
 | `src/reparer.rs`, `src/maj.rs`, `src/gaming/` | repairs, updates, gaming |
-| `src/optimiser/` | privacy, performance and comfort settings, with exact undo; startup programs (`demarrage.rs`) |
+| `src/optimiser/` | privacy, performance and comfort settings, with exact undo; startup programs (`demarrage.rs`); Windows Defender blocking: ASR rules, network protection, PUA, controlled folder access (`defender.rs`) |
 | `src/nettoyer/` | cleanup: items per system, space measured before and after |
 | `src/logiciels/` | software to install: checked catalog (`catalogue.rs`), state and installation per system |
 | `src/protection/fuites.rs`, `src/donnees.rs` | leaked passwords, data backup |

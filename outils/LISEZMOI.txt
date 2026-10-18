@@ -59,6 +59,7 @@ Entrée ouvre celle en surbrillance, Échap efface. Au menu principal, elle trou
        Clé USB ou dossier, avec les pièges des vers de clé (faux raccourcis, autorun)
        Analyse YARA : 308 règles de familles de logiciels malveillants (rançongiciels, voleurs de mots de passe…)
        Fichiers-pièges : des leurres dans tes dossiers ; un rançongiciel qui les touche déclenche l'alerte
+       Blocages de Windows Defender : vol de mots de passe, pièces jointes piégées, sites dangereux, rançongiciels
        Bac à sable : lancer un programme inconnu sans réseau, à l'écart de tes fichiers
        Mots de passe : ont-ils fuité ? (seuls 5 caractères de leur empreinte sont envoyés)
        Courriel : a-t-il fuité ? (l'adresse est envoyée au service de recherche, après ton accord)

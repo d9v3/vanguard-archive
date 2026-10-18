@@ -58,6 +58,7 @@ highlighted one, Esc clears it. In the main menu, it also finds each tool of the
        USB drive or folder, with USB worm traps (fake shortcuts, autorun)
        YARA scan: 308 rules for malware families (ransomware, password stealers…)
        Decoy files: decoys in your folders; ransomware touching them triggers the alert
+       Windows Defender blocking: password theft, booby-trapped attachments, dangerous sites, ransomware
        Sandbox: run an unknown program with no network, away from your files
        Passwords: have they leaked? (only 5 characters of their fingerprint are sent)
        Email address: has it leaked? (sent to the search service, after your consent)
