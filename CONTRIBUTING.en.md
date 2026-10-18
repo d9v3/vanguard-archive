@@ -69,12 +69,35 @@ social preview (`assets/partage.png`). `deployer.sh` runs it for each new versio
 and commits the images separately.
 
 Gardien really runs there, in an 80-column pseudo-terminal, from a fake key and on a copy of the data: nothing real is
-touched. The network becomes “Salon”, MAC addresses and device names are replaced, and only an excerpt of the machine
-check with nothing personal in it is shown. If a detail of the home were still visible, no image is written.
+touched. The network becomes “Salon”; MAC addresses (vendor prefix kept), IP addresses (a made-up network, lengths and
+order kept), device names and the account's folders are replaced, at random on each run; only an excerpt of the
+machine check with nothing personal in it is shown. Then the privacy guard rereads each image: if a detail of the
+home were still visible, none is written.
 
 ```sh
 uv run --no-project --with pyte python outils/captures.py [program] [--connexion | --sans-connexion]
 ```
+
+## Privacy
+
+`outils/confidentialite.py` keeps personal details from reaching GitHub. It runs by itself: on each commit (added
+lines, file names, author, message), before each push by `deployer.sh`, before each release page (notes and compiled
+programs), before each journal issue and before writing the screenshots. Once per copy of the repository:
+
+```sh
+git config core.hooksPath outils/hooks                                     # pre-commit and commit-msg hooks
+git config user.email "<id>+<account>@users.noreply.github.com"           # commits without your email
+```
+
+What is personal is read on the computer, never written in the repository: `~/.config/gardien-dev/confidentiel.txt`
+(one phrase per line: name, emails, address…), the global Git identity, the home folder, the devices and MAC
+addresses of Gardien's database, the saved Wi-Fi networks. `python3 outils/confidentialite.py --depot` rereads the
+whole repository and its history. In tests, made-up values: MAC addresses keeping the vendor prefix, network
+“Salon”, account “alice”.
+
+Rust keeps the libraries' path in the programs (`/home/<account>/.cargo/registry/…`): to publish a version, build
+with `rustflags = ["--remap-path-prefix=/home/<account>=~"]` in `~/.cargo/config.toml` (`publier-version.sh` refuses
+a program that still contains the home folder).
 
 ## Publishing a version
 

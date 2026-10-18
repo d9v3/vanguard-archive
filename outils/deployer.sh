@@ -82,9 +82,16 @@ if [[ -z $MODE ]]; then
   fi
 fi
 install -Dm755 "$LINUX" "$HOME/.cargo/bin/gardien"
-# Sauvegarde hors de la maison : les commits partent vers le dépôt privé GitHub (sans bloquer s'il n'y a pas d'Internet).
+# Sauvegarde hors de la maison : les commits partent vers le dépôt GitHub (sans bloquer s'il n'y a pas d'Internet),
+# seulement si rien de personnel n'y paraît : code, messages, auteur (outils/confidentialite.py).
 if git remote get-url origin >/dev/null 2>&1; then
-  timeout 30 git push -q origin HEAD 2>/dev/null && echo "Code envoyé sur GitHub." || echo "GitHub injoignable : le code partira au prochain déploiement."
+  if ! python3 outils/confidentialite.py --envoi; then
+    echo "Rien n'est envoyé sur GitHub : un détail personnel paraît dans les commits (voir ci-dessus)."
+  elif timeout 30 git push -q origin HEAD 2>/dev/null; then
+    echo "Code envoyé sur GitHub."
+  else
+    echo "GitHub injoignable : le code partira au prochain déploiement."
+  fi
 fi
 # Anciens noms (sentinel jusqu'à 0.50, netscan jusqu'à 0.10.0) : restent des commandes, qui lancent gardien.
 ln -sfn gardien "$HOME/.cargo/bin/sentinel"

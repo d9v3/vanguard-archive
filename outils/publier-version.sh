@@ -74,6 +74,11 @@ info” then “Run anyway”), \`gardien-linux-x86_64\` (any distribution: \`ch
 \`gardien-macos\` (Apple Silicon and Intel: \`xattr -d com.apple.quarantine gardien-macos\`, then run it in Terminal).
 SHA-256 checksums: \`SHA256SUMS.txt\`."
 
+# Rien de personnel dans la page de la version ni dans les programmes : chemins du dossier personnel, nom dans les
+# métadonnées du .exe… (outils/confidentialite.py).
+printf '%s\n' "$NOTES" | python3 outils/confidentialite.py --texte || { echo "Notes de la version : rien de publié."; exit 1; }
+python3 outils/confidentialite.py --binaire "$DOSSIER/gardien-windows-x86_64.exe" "$DOSSIER/gardien-linux-x86_64" \
+  "$DOSSIER/gardien-macos" || { echo "Programmes : rien de publié."; exit 1; }
 gh release create "$TAG" --target "$COMMIT" --title "Gardien $VERSION" --notes "$NOTES" \
   "$DOSSIER/gardien-windows-x86_64.exe" "$DOSSIER/gardien-linux-x86_64" "$DOSSIER/gardien-macos" "$DOSSIER/SHA256SUMS.txt"
 echo "Version $TAG publiée : $(gh release view "$TAG" --json url -q .url)"

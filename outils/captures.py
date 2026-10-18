@@ -8,22 +8,25 @@ une fausse clé USB, sur une copie des données. Rien de vrai n'est touché : au
 du journal sont cherchées dans /run/media/$USER), XDG_DATA_HOME jetable, pas de bus de session (systemctl --user et
 les notifications échouent sans rien faire), faux xdg-open (le rapport ne s'ouvre pas).
 
-Ce qui identifierait la maison est remplacé avant chaque image : adresses MAC, nom du réseau, noms des appareils.
-Du bilan de la machine, seul un extrait est montré (catégories sans rien de personnel : pas le Wi-Fi, les extensions,
-les services ajoutés à la main…), les coupures marquées « ⋮ ». Si un nom ou une adresse de la maison reste visible
-malgré tout, aucune image n'est écrite.
+Ce qui identifierait la maison est remplacé avant chaque image, tiré au hasard à chaque passe : adresses MAC (le
+préfixe du fabricant, déjà écrit en clair à côté, est gardé), adresses IP (un réseau inventé, le même dans toutes les
+images ; longueurs et ordre gardés, les tableaux restent alignés et triés), nom du réseau, noms des appareils, compte
+et dossiers de l'utilisateur. Du bilan de la machine, seul un extrait est montré (catégories sans rien de personnel :
+pas le Wi-Fi, les extensions, les services ajoutés à la main…), les coupures marquées « ⋮ ». Enfin le garde-fou du
+dépôt (outils/confidentialite.py) relit chaque image : si un détail personnel reste visible, aucune n'est écrite.
 
 Depuis la racine du dépôt :
     uv run --no-project --with pyte python outils/captures.py [programme gardien] [--connexion]
 --connexion refait aussi le test de connexion (quelques centaines de Mo) ; sans lui, seulement si l'image manque ou si
-src/connexion.rs, src/ui.rs ou src/langue.rs ont changé depuis. --sans-connexion ne le refait jamais.
+src/connexion.rs, src/ui.rs, src/langue.rs ou ce script ont changé depuis. --sans-connexion ne le refait jamais.
 """
 
-import hashlib
 import html
+import ipaddress
 import json
 import os
 import pty
+import random
 import re
 import select
 import shutil
@@ -35,6 +38,9 @@ import time
 from pathlib import Path
 
 import pyte
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import confidentialite as conf  # noqa: E402
 
 COLONNES = 80
 RANGEES = 400
@@ -66,37 +72,36 @@ PROBLEMES = ("✖", "⚠", "✘")
 # en ferait des emoji de deux colonnes, qui mordraient sur le mot suivant.
 SYMBOLES_TEXTE = set("✔✖ℹ⚠✘✓✗☐☑")
 SUITE = {"fr": "  ⋮ et {} autres vérifications, pas montrées ici", "en": "  ⋮ and {} more checks, not shown here"}
+# Ce que le garde-fou connaît comme simple texte : remplacé dans les images (les adresses ont leur propre masque).
+REMPLACABLES = {"liste privée", "identité Git de l'ordinateur", "nom complet du compte", "nom de l'ordinateur",
+                "appareil ou réseau de la maison"}
 
-# Noms d'appareils sans rien de personnel : gardés tels quels. Tout autre nom est remplacé.
-MOTS_GENERIQUES = set(
-    "imprimante printer box routeur router modem téléphone telephone phone tablette tablet ordinateur computer pc "
-    "portable laptop console télé tele tv télévision television caméra camera enceinte speaker montre watch nas "
-    "serveur server switch répéteur repeater borne wifi hp lg local gateway _gateway localhost".split()
-)
-DISTRIBUTIONS = {"omarchy", "archlinux", "arch", "ubuntu", "fedora", "debian", "linuxmint", "mint", "pop-os",
-                 "manjaro", "endeavouros", "cachyos", "bazzite", "opensuse", "localhost"}
-MAC = re.compile(r"\b[0-9a-fA-F]{2}(?::[0-9a-fA-F]{2}){5}\b")
+IPV4 = re.compile(r"(?<![\w.])(?:\d{1,3}\.){3}\d{1,3}(?!\w|\.\d)")
+IPV6 = re.compile(r"(?<![\w:.])[0-9A-Fa-f]{0,4}(?::[0-9A-Fa-f]{0,4}){2,7}(?![\w:])")
+# Valeurs d'un octet selon leur nombre de chiffres : un remplaçant garde la longueur de l'original.
+OCTETS = {1: range(0, 10), 2: range(10, 100), 3: range(100, 256)}
+# Réseau, box et diffusion : les mêmes chez tout le monde, gardés.
+HOTES_FIXES = {0, 1, 254, 255}
+LOCAUX = [ipaddress.ip_network(n) for n in
+          ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16", "100.64.0.0/10")]
+# Services DNS publics connus (fournisseur() de src/machine/dns.rs) : les mêmes pour tout le monde, gardés.
+RESOLVEURS = [ipaddress.ip_network(n) for n in (
+    "1.1.1.0/24", "1.0.0.0/24", "8.8.8.8/32", "8.8.4.4/32", "9.9.9.0/24", "149.112.112.0/24", "208.67.222.0/24",
+    "208.67.220.0/24", "45.90.28.0/24", "45.90.30.0/24", "94.140.14.0/24", "94.140.15.0/24", "194.242.2.0/24",
+    "185.228.168.0/24", "185.228.169.0/24", "76.76.2.0/24", "76.76.10.0/24", "100.100.100.100/32",
+    "2606:4700::/32", "2001:4860::/32", "2620:fe::/32", "2620:119::/32", "2a07:a8c0::/32", "2a07:a8c1::/32",
+    "2a10:50c0::/32", "2a07:e340::/32")]
+# Adresses réservées à la documentation (RFC 5737, RFC 3849) : elles remplacent les adresses publiques.
+DOCUMENTATION = ("192.0.2.", "203.0.113.", "198.51.100.")
+DOC6 = ipaddress.ip_network("2001:db8::/32")
 
 
 # --- Bac à sable ---------------------------------------------------------------------------------------------------
 
-def donnees_reelles():
-    """Dossier des données de cet ordinateur, et celui de la clé s'il y en a une (la base des appareils y vit)."""
-    base = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local/share")
-    local = next((base / n for n in ("gardien", "sentinel") if (base / n).is_dir()), None)
-    cle = None
-    media = Path("/run/media") / os.environ.get("USER", "")
-    if media.is_dir():
-        for d in media.iterdir():
-            if any((d / t).is_file() for t in ("gardien.cle", "sentinel.cle", "netscan.cle")):
-                cle = d / "donnees"
-    return local, cle
-
-
 def preparer_bac(programme: Path, bac: Path):
     """Fausse clé (programme dans Linux/, témoin vide : jamais protégée) et données copiées. Le réseau prend un nom
     passe-partout ; les surnoms qui pourraient nommer quelqu'un sont retirés."""
-    local, cle = donnees_reelles()
+    local, cle = conf.dossiers_gardien()
     (bac / "cle/Linux").mkdir(parents=True)
     (bac / "cle/donnees").mkdir()
     (bac / "donnees/gardien").mkdir(parents=True)
@@ -117,7 +122,7 @@ def preparer_bac(programme: Path, bac: Path):
         for reseau in base.get("reseaux", {}).values():
             reseau["nom"] = NOM_RESEAU
             for appareil in reseau.get("appareils", {}).values():
-                if appareil.get("surnom") and not generique(appareil["surnom"]):
+                if appareil.get("surnom") and not conf.generique(appareil["surnom"]):
                     appareil["surnom"] = None
         copie.write_text(json.dumps(base, ensure_ascii=False))
     xdg_open = bac / "bin/xdg-open"
@@ -127,27 +132,23 @@ def preparer_bac(programme: Path, bac: Path):
     # remplacé.
     vrai = shutil.which("nmcli")
     if vrai:
+        noms = sorted(reseaux_wifi() | conf.reseaux_enregistres()[0], key=len, reverse=True)
         faux = bac / "bin/nmcli"
         faux.write_text(
             f"#!{sys.executable}\nimport subprocess, sys\n"
             f"r = subprocess.run([{vrai!r}, *sys.argv[1:]], capture_output=True, text=True)\n"
-            f"sortie = r.stdout\nfor nom in {sorted(reseaux_wifi(), key=len, reverse=True)!r}:\n"
+            f"sortie = r.stdout\nfor nom in {noms!r}:\n"
             f"    sortie = sortie.replace(nom, {NOM_RESEAU!r})\n"
             "sys.stdout.write(sortie)\nsys.stderr.write(r.stderr)\nsys.exit(r.returncode)\n"
         )
         faux.chmod(0o755)
-    return local, cle
 
 
 def reseaux_wifi():
     """Noms des réseaux Wi-Fi enregistrés et visibles."""
     noms = set()
     for args in (["-t", "-f", "NAME,TYPE", "connection", "show"], ["-t", "-e", "no", "-f", "SSID", "dev", "wifi"]):
-        try:
-            sortie = subprocess.run(["nmcli", *args], capture_output=True, text=True, timeout=15).stdout
-        except (OSError, subprocess.TimeoutExpired):
-            continue
-        for ligne in sortie.splitlines():
+        for ligne in conf.nmcli(*args).splitlines():
             nom, _, genre = ligne.rpartition(":") if "connection" in args else (ligne, "", "wireless")
             if nom and "wireless" in genre:
                 noms.add(nom)
@@ -233,58 +234,142 @@ def texte(rangee):
 
 # --- Ce qui ne doit pas paraître -----------------------------------------------------------------------------------
 
-def generique(nom: str) -> bool:
-    mots = re.findall(r"[\wÀ-ÿ-]+", nom.lower())
-    return bool(mots) and all(m in MOTS_GENERIQUES or m in DISTRIBUTIONS for m in mots)
+class Masque:
+    """Remplaçants des adresses de la maison, pour une passe. Tirés au hasard : un remplaçant calculé sans secret
+    (empreinte de l'adresse) se retrouverait en essayant toutes les adresses possibles, 2²⁴ par fabricant pour une
+    adresse MAC. Chacun a la longueur de l'original : les tableaux restent alignés."""
 
+    def __init__(self, textes):
+        self.hasard = random.SystemRandom()
+        self.adresses = {}  # vraie adresse (MAC, IPv4, IPv6) → remplaçant
+        self.reseaux = {}  # trois premiers octets d'un réseau local → ceux du réseau inventé
+        locales = {a for t in textes for a in IPV4.findall(t) if self.locale(a)}
+        self.reels = {a.rsplit(".", 1)[0] for a in locales}
+        # Tous les hôtes d'un réseau sont tirés ensemble, dans l'ordre : un tableau trié par adresse le reste.
+        for prefixe in sorted(self.reels):
+            self.reseau(prefixe, sorted({int(a.rsplit(".", 1)[1]) for a in locales if a.startswith(prefixe + ".")}))
 
-def noms_a_cacher(*bases):
-    """Noms d'appareils et de réseaux des bases (vraie et copie) qui pourraient nommer quelqu'un."""
-    noms = set()
-    for base in bases:
-        if not base or not base.is_file():
-            continue
-        for reseau in json.loads(base.read_text()).get("reseaux", {}).values():
-            if reseau.get("nom") and reseau["nom"] != NOM_RESEAU:
-                noms.add(reseau["nom"])
-            for appareil in reseau.get("appareils", {}).values():
-                for champ in ("nom", "surnom"):
-                    v = appareil.get(champ)
-                    if v and not generique(v):
-                        noms.add(v)
-    return {n for n in noms if len(n) >= 3}
+    @staticmethod
+    def locale(adresse):
+        try:
+            ip = ipaddress.IPv4Address(adresse)
+        except ValueError:
+            return False
+        return any(ip in r for r in LOCAUX) and not any(ip in r for r in RESOLVEURS)
 
+    def reseau(self, prefixe, hotes):
+        """Réseau inventé de la même sorte (10.x.y, 172.16-31.y, 192.168.y…), puis ses hôtes : même nombre de
+        chiffres, même ordre, réseau, box et diffusion gardés."""
+        if prefixe not in self.reseaux:
+            o1, o2, o3 = prefixe.split(".")
+            if o1 == "10":
+                deuxiemes = OCTETS[len(o2)]
+            elif o1 == "172":
+                deuxiemes = range(16, 32)
+            elif o1 == "100":
+                deuxiemes = [x for x in range(64, 128) if len(str(x)) == len(o2)]
+            else:  # 192.168, 169.254
+                deuxiemes = [int(o2)]
+            pris = self.reels | set(self.reseaux.values())
+            libres = [f"{o1}.{a}.{b}" for a in deuxiemes for b in OCTETS[len(o3)] if f"{o1}.{a}.{b}" not in pris]
+            self.reseaux[prefixe] = self.hasard.choice(libres)
+        faux = self.reseaux[prefixe]
+        deja = {int(v.rsplit(".", 1)[1]) for k, v in self.adresses.items() if k.startswith(prefixe + ".")}
+        for chiffres, valeurs in OCTETS.items():
+            a_tirer = [h for h in hotes if h not in HOTES_FIXES and len(str(h)) == chiffres]
+            choix = sorted(self.hasard.sample([v for v in valeurs if v not in HOTES_FIXES | deja], len(a_tirer)))
+            for reel, neuf in zip(a_tirer, choix):
+                self.adresses[f"{prefixe}.{reel}"] = f"{faux}.{neuf}"
+        for h in hotes:
+            if h in HOTES_FIXES:
+                self.adresses[f"{prefixe}.{h}"] = f"{faux}.{h}"
 
-def secrets_de_la_maison(local, cle):
-    """Ce qui ne doit jamais paraître : noms des réseaux Wi-Fi enregistrés, noms d'appareils, adresses MAC,
-    utilisateur, nom de la machine (s'il n'est pas celui d'une distribution)."""
-    secrets = set()
-    bases = [d / "appareils.json" for d in (local, cle) if d]
-    secrets |= noms_a_cacher(*bases)
-    for base in bases:
-        if base.is_file():
-            secrets |= {m.lower() for m in MAC.findall(base.read_text())}
-    try:
-        sortie = subprocess.run(["nmcli", "-t", "-f", "NAME", "connection", "show"], capture_output=True, text=True,
-                                timeout=10).stdout
-        secrets |= {n for n in sortie.splitlines() if len(n) >= 3 and not n.startswith(("lo", "Wired", "Ethernet",
-                                                                                        "Connexion filaire"))}
-    except (OSError, subprocess.TimeoutExpired):
-        pass
-    utilisateur = os.environ.get("USER", "")
-    if utilisateur:
-        secrets |= {f"/home/{utilisateur}", f"{utilisateur}@"}
-        if len(utilisateur) >= 4:
-            secrets.add(utilisateur)
-    hote = os.uname().nodename.split(".")[0]
-    if hote.lower() not in DISTRIBUTIONS:
-        secrets.add(hote)
-    return secrets
+    def ipv4(self, adresse):
+        if adresse in self.adresses:
+            return self.adresses[adresse]
+        try:
+            ip = ipaddress.IPv4Address(adresse)
+        except ValueError:
+            return adresse
+        if self.locale(adresse):
+            prefixe, hote = adresse.rsplit(".", 1)
+            self.reseau(prefixe, [int(hote)])
+        elif not ip.is_global or ip.is_multicast or any(ip in r for r in RESOLVEURS):
+            return adresse
+        else:
+            self.adresses[adresse] = self.publique(adresse)
+        return self.adresses[adresse]
 
+    def publique(self, adresse):
+        """Adresse de documentation de même longueur ; sinon (7, 8 ou 15 caractères), quatre nombres au hasard de
+        mêmes longueurs, qui ne mènent ni chez soi ni à un service connu."""
+        pris = set(self.adresses.values())
+        for prefixe in DOCUMENTATION:
+            chiffres = len(adresse) - len(prefixe)
+            if chiffres in OCTETS:
+                libres = [f"{prefixe}{h}" for h in OCTETS[chiffres] if h not in HOTES_FIXES]
+                libres = [a for a in libres if a not in pris]
+                if libres:
+                    return self.hasard.choice(libres)
+        while True:
+            faux = ".".join(str(self.hasard.choice(OCTETS[len(o)])) for o in adresse.split("."))
+            ip = ipaddress.IPv4Address(faux)
+            if ip.is_global and faux != adresse and faux not in pris and not any(ip in r for r in RESOLVEURS):
+                return faux
 
-def fausse_mac(mac: str) -> str:
-    h = hashlib.sha256(("gardien " + mac.lower()).encode()).hexdigest()
-    return ":".join(h[i : i + 2] for i in range(0, 12, 2))
+    def ipv6(self, adresse):
+        if adresse in self.adresses:
+            return self.adresses[adresse]
+        try:
+            ip = ipaddress.IPv6Address(adresse)
+        except ValueError:
+            return adresse
+        groupes = adresse.split(":")
+        premier = next(i for i, g in enumerate(groupes) if g) if any(groupes) else 0
+        # Le premier groupe dit seulement la sorte d'adresse (2xxx Internet, fdxx réseau local, fe80 lien local) ;
+        # une adresse presque vide (« fe80::1 », « fd00::1 ») est la même chez tout le monde.
+        if (ip.is_loopback or ip.is_unspecified or ip.is_multicast or ip in DOC6
+                or any(ip in r for r in RESOLVEURS) or sum(len(g) for g in groupes[premier + 1 :]) <= 4):
+            return adresse
+        while True:
+            faux = ":".join(g if i <= premier or not g else self.hexa(len(g)) for i, g in enumerate(groupes))
+            if faux != adresse and faux not in self.adresses.values():
+                self.adresses[adresse] = faux
+                return faux
+
+    def hexa(self, longueur):
+        chiffres = "0123456789abcdef"
+        return self.hasard.choice(chiffres[1:]) + "".join(self.hasard.choice(chiffres) for _ in range(longueur - 1))
+
+    def mac(self, adresse):
+        cle = adresse.lower()
+        if cle not in self.adresses:
+            octets = cle.split(":")
+            premier = int(octets[0], 16)
+            while True:
+                if premier & 0x02:
+                    # Adresse aléatoire (téléphones…) : aléatoire elle aussi, mêmes bits de sorte.
+                    debut = [f"{(self.hasard.randrange(256) & 0xFC) | (premier & 0x03):02x}"]
+                    debut += [f"{self.hasard.randrange(256):02x}" for _ in range(2)]
+                else:
+                    # Préfixe du fabricant gardé : son nom est écrit en clair à côté.
+                    debut = octets[:3]
+                faux = ":".join(debut + [f"{self.hasard.randrange(256):02x}" for _ in range(3)])
+                if faux != cle and faux not in self.adresses.values():
+                    self.adresses[cle] = faux
+                    break
+        return self.adresses[cle]
+
+    def texte(self, t):
+        t = conf.MAC.sub(lambda m: self.mac(m.group()), t)
+        t = IPV4.sub(lambda m: self.ipv4(m.group()), t)
+        return IPV6.sub(lambda m: self.ipv6(m.group()), t)
+
+    def termes(self):
+        """Les vraies adresses remplacées, pour vérifier qu'aucune ne reste."""
+        return [conf.Terme(a, "adresse de la maison",
+                           conf.motif_mac(a) if conf.MAC.fullmatch(a) else rf"(?<![\w.:]){re.escape(a)}(?![\w:]|\.\d)")
+                for a, faux in self.adresses.items() if a != faux]
 
 
 def remplacements(noms, langue):
@@ -297,9 +382,18 @@ def remplacements(noms, langue):
     return sortie
 
 
-def anonymiser(rangees, noms):
-    """Remplace adresses MAC et noms dans les cellules, en gardant couleurs et alignement. Un nom coupé par le
-    tableau (« iPhone-de-Mar… ») est reconnu à son début."""
+def remplacements_compte(moi):
+    """Dossiers et adresse du compte : un prénom inventé de même longueur."""
+    faux = next(f for f in (("alexandrine" + "x" * len(moi))[: len(moi)], ("camille" + "y" * len(moi))[: len(moi)])
+                if f != moi)
+    sortie = {f"{dossier}{moi}": f"{dossier}{faux}" for dossier in ("/home/", "/run/media/", "/media/", "/Users/")}
+    sortie[f"{moi}@"] = f"{faux}@"
+    return sortie
+
+
+def anonymiser(rangees, noms, masque):
+    """Remplace adresses et noms dans les cellules, en gardant couleurs et alignement. Un nom coupé par le tableau
+    (« iPhone-de-Mar… ») est reconnu à son début."""
     for rangee in rangees:
         # Une cellule = un caractère du texte (les emoji de plusieurs points de code comptent pour un).
         indices = [x for x, c in enumerate(rangee) if c[0] != ""]
@@ -310,10 +404,13 @@ def anonymiser(rangees, noms):
                 x = indices[debut + k]
                 rangee[x] = (ch, rangee[x][1], rangee[x][2])
 
-        for m in MAC.finditer(t):
-            ecrire(m.start(), fausse_mac(m.group()))
+        masque_t = masque.texte(t)
+        for k, (avant, apres) in enumerate(zip(t, masque_t)):
+            if avant != apres:
+                ecrire(k, apres)
+        t = masque_t
         for nom, neuf in noms.items():
-            for longueur in range(len(nom), 3, -1):
+            for longueur in [len(nom), *range(len(nom) - 1, 3, -1)]:
                 motif = nom if longueur == len(nom) else nom[:longueur] + "…"
                 debut = t.find(motif)
                 while debut >= 0:
@@ -323,11 +420,18 @@ def anonymiser(rangees, noms):
     return rangees
 
 
-def verifier(textes, secrets, quoi):
-    tout = "\n".join(textes)
-    restes = [s for s in secrets if s and (s.lower() in tout.lower())]
-    if restes:
-        raise SystemExit(f"captures : {quoi} montrerait encore {len(restes)} détail(s) de la maison : rien n'est écrit.")
+def anonymiser_page(page, noms, masque):
+    page = masque.texte(page)
+    for nom, neuf in noms.items():
+        page = page.replace(html.escape(nom), html.escape(neuf.strip())).replace(nom, neuf.strip())
+    return page
+
+
+def verifier(textes, detecteur, quoi):
+    trouves = detecteur.trouver("\n".join(textes))
+    if trouves:
+        raise SystemExit(f"captures : {quoi} montrerait encore {len(trouves)} détail(s) personnel(s) : rien n'est "
+                         "écrit.")
 
 
 # --- Découpage de l'écran du bilan complet -------------------------------------------------------------------------
@@ -379,6 +483,15 @@ def ligne_simple(t, couleur):
     return [(c, couleur, False) for c in t.ljust(COLONNES)]
 
 
+def haut_du_rapport(page):
+    """Haut du rapport : les notes et leur évolution. Le détail (appareils, réglages de la machine) est coupé."""
+    corps = page.find("<svg")
+    coupe = page.find("<h2>", corps if corps >= 0 else 0)
+    if coupe < 0:
+        coupe = page.find("</main>")
+    return page[:coupe].replace("<html", '<html data-theme="dark"', 1) + "</main></body></html>"
+
+
 # --- Images ----------------------------------------------------------------------------------------------------------
 
 def chromium():
@@ -418,7 +531,7 @@ def terminal_html(rangees):
         for x, (car, fg, gras) in enumerate(rangee):
             if car == "":
                 continue
-            car = car.replace("\ufe0f", "")
+            car = car.replace("️", "")
             symbole = car in SYMBOLES_TEXTE
             large = x + 1 < len(rangee) and rangee[x + 1][0] == ""
             couleur = PALETTE.get(fg) or (f"#{fg}" if re.fullmatch(r"[0-9a-fA-F]{6}", str(fg)) else PALETTE["default"])
@@ -436,22 +549,6 @@ body{{padding:22px 20px;font:15px/20px 'JetBrainsMono Nerd Font Mono','JetBrains
 
 def capture_terminal(rangees, sortie: Path, bac: Path):
     photographier(terminal_html(rangees), sortie, 20 + COLONNES * 9 + 40, 44 + 20 * len(rangees), bac)
-
-
-def capture_rapport(rapport: Path, noms, secrets, sortie: Path, bac: Path):
-    """Haut du rapport : les notes et leur évolution. Le détail (appareils, réglages de la machine) est coupé."""
-    page = rapport.read_text()
-    corps = page.find("<svg")
-    coupe = page.find("<h2>", corps if corps >= 0 else 0)
-    if coupe < 0:
-        coupe = page.find("</main>")
-    page = page[:coupe] + "</main></body></html>"
-    page = MAC.sub(lambda m: fausse_mac(m.group()), page)
-    for nom, neuf in noms.items():
-        page = page.replace(html.escape(nom), html.escape(neuf.strip())).replace(nom, neuf.strip())
-    page = page.replace("<html", '<html data-theme="dark"', 1)
-    verifier([re.sub(r"<[^>]+>", " ", page)], secrets, sortie.name)
-    photographier(page, sortie, 900, 1400, bac, rogner=True)
 
 
 def capture_partage(bac: Path):
@@ -486,7 +583,7 @@ def connexion_a_refaire(force: bool) -> bool:
     if not derniere:
         return True
     return subprocess.run(["git", "diff", "--quiet", derniere, "HEAD", "--", "src/connexion.rs", "src/ui.rs",
-                           "src/langue.rs"]).returncode != 0
+                           "src/langue.rs", "outils/captures.py"]).returncode != 0
 
 
 def main():
@@ -499,28 +596,45 @@ def main():
     DOSSIER.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="gardien-captures-") as t:
         bac = Path(t)
-        local, cle = preparer_bac(programme, bac)
-        secrets = secrets_de_la_maison(local, cle)
+        preparer_bac(programme, bac)
         exe = bac / "cle/Linux/gardien"
+        # Tout est pris avant d'être masqué : un même réseau inventé pour toutes les images, dans les deux langues.
+        ecrans, rapports = {}, {}
         for langue in ("fr", "en"):
             suffixe = "" if langue == "fr" else "-en"
             env = environnement(bac, langue)
             complet = lancer(exe, ["complet", "--html"], env)
-            noms = remplacements(noms_a_cacher(bac / "cle/donnees/appareils.json") | (secrets - {s for s in secrets
-                                 if MAC.fullmatch(s) or s.startswith("/home/") or s.endswith("@")}), langue)
+            rapports[f"rapport{suffixe}.png"] = (langue, haut_du_rapport((bac / "cle/donnees/rapport.html").read_text()))
             machine, reseau = decouper(complet)
-            images = {
-                f"bilan{suffixe}.png": anonymiser(extrait_machine(machine, langue), noms),
-                f"reseau{suffixe}.png": anonymiser(reseau, noms),
-                f"menu{suffixe}.png": anonymiser(lancer(exe, [], env, attendre="›", touches=b"q\r", delai=30), noms),
-            }
+            ecrans[f"bilan{suffixe}.png"] = (langue, extrait_machine(machine, langue))
+            ecrans[f"reseau{suffixe}.png"] = (langue, reseau)
+            ecrans[f"menu{suffixe}.png"] = (langue, lancer(exe, [], env, attendre="›", touches=b"q\r", delai=30))
             if connexion:
-                images[f"connexion{suffixe}.png"] = anonymiser(lancer(exe, ["connexion"], env, delai=180), noms)
-            for nom, rangees in images.items():
-                verifier([texte(r) for r in rangees], secrets, nom)
-            for nom, rangees in images.items():
-                capture_terminal(rangees, DOSSIER / nom, bac)
-            capture_rapport(bac / "cle/donnees/rapport.html", noms, secrets, DOSSIER / f"rapport{suffixe}.png", bac)
+                ecrans[f"connexion{suffixe}.png"] = (langue, lancer(exe, ["connexion"], env, delai=180))
+        masque = Masque([texte(r) for _, rangees in ecrans.values() for r in rangees]
+                        + [page for _, page in rapports.values()])
+        moi = conf.compte()
+        termes = conf.termes()
+        noms_vus, _ = conf.appareils(bac / "cle/donnees/appareils.json")
+        caches = noms_vus | {t.texte for t in termes if t.origine in REMPLACABLES} | ({moi} if len(moi) >= 4 else set())
+        noms = {}
+        for langue in ("fr", "en"):
+            tous = remplacements(caches, langue) | remplacements_compte(moi)
+            noms[langue] = dict(sorted(tous.items(), key=lambda kv: -len(kv[0])))
+        images = {nom: anonymiser(rangees, noms[langue], masque) for nom, (langue, rangees) in ecrans.items()}
+        pages = {nom: anonymiser_page(page, noms[langue], masque) for nom, (langue, page) in rapports.items()}
+        compte = [conf.Terme(f"{moi}@", "compte", rf"(?<![\w.-]){re.escape(moi)}@")]
+        if len(moi) >= 4:
+            compte.append(conf.Terme(moi, "compte", conf.motif_texte(moi)))
+        detecteur = conf.Detecteur(termes + compte + masque.termes())
+        for nom, rangees in images.items():
+            verifier([texte(r) for r in rangees], detecteur, nom)
+        for nom, page in pages.items():
+            verifier([re.sub(r"<[^>]+>", " ", page)], detecteur, nom)
+        for nom, rangees in images.items():
+            capture_terminal(rangees, DOSSIER / nom, bac)
+        for nom, page in pages.items():
+            photographier(page, DOSSIER / nom, 900, 1400, bac, rogner=True)
         capture_partage(bac)
     (DOSSIER / "VERSION").write_text(version + "\n")
     print(f"Captures de la version {version} : {DOSSIER}/")

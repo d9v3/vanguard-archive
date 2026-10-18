@@ -8,7 +8,8 @@ dans le programme ni sur la clé.
 
 Les entrées envoyées sont retirées du fichier ; celles qui n'ont pas pu partir (pas d'Internet) y restent pour le
 déploiement suivant. Le journal est anonymisé par Gardien avant d'être écrit (dossier personnel, nom d'utilisateur
-et nom de la machine remplacés).
+et nom de la machine remplacés) ; ce qu'il aurait laissé passer de cet ordinateur-ci (outils/confidentialite.py) est
+masqué avant l'envoi.
 """
 
 import hashlib
@@ -18,7 +19,11 @@ import re
 import subprocess
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import confidentialite  # noqa: E402
+
 ETIQUETTE = "journal"
+MASQUE = "‹masqué›"
 
 
 def entrees(texte):
@@ -56,7 +61,13 @@ def main():
     except (OSError, ValueError):
         ouverts = {}
     restantes, envoyees = [], 0
+    personnel = confidentialite.Detecteur(confidentialite.termes()).motif
     for e in liste:
+        if personnel:
+            e, n = personnel.subn(MASQUE, e)
+            if n:
+                print(f"Journal : {n} détail(s) personnel(s) masqué(s) avant l'envoi : l'anonymisation de journal.rs "
+                      "les a laissés passer.", file=sys.stderr)
         contexte, detail, sig = signature(e)
         # Marque gardée de l'ancien nom : les tickets déjà ouverts la portent.
         marque = f"sentinel-signature-{sig}"

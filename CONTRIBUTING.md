@@ -70,13 +70,36 @@ partage du dépôt (`assets/partage.png`). `deployer.sh` le lance à chaque nouv
 numéro, et commite les images à part.
 
 Gardien y tourne pour de vrai, dans un pseudo-terminal de 80 colonnes, depuis une fausse clé et sur une copie des
-données : rien de vrai n'est touché. Le nom du réseau devient « Salon », les adresses MAC et les noms d'appareils sont
-remplacés, et du bilan de la machine seul un extrait sans rien de personnel est montré. Si un détail de la maison
-restait visible, aucune image n'est écrite.
+données : rien de vrai n'est touché. Le nom du réseau devient « Salon » ; adresses MAC (préfixe du fabricant gardé),
+adresses IP (un réseau inventé, longueurs et ordre gardés), noms d'appareils et dossiers du compte sont remplacés, au
+hasard à chaque passe ; du bilan de la machine, seul un extrait sans rien de personnel est montré. Puis le garde-fou
+de confidentialité relit chaque image : si un détail de la maison restait visible, aucune n'est écrite.
 
 ```sh
 uv run --no-project --with pyte python outils/captures.py [programme] [--connexion | --sans-connexion]
 ```
+
+## Confidentialité
+
+`outils/confidentialite.py` empêche qu'un détail personnel parte sur GitHub. Il est lancé tout seul : à chaque commit
+(lignes ajoutées, noms de fichiers, auteur, message), avant chaque envoi par `deployer.sh`, avant chaque page de
+version (notes et programmes compilés), avant chaque ticket du journal et avant d'écrire les captures. Une fois par
+copie du dépôt :
+
+```sh
+git config core.hooksPath outils/hooks                                     # crochets pre-commit et commit-msg
+git config user.email "<id>+<compte>@users.noreply.github.com"            # commits sans ton courriel
+```
+
+Ce qui est personnel est lu sur l'ordinateur, jamais écrit dans le dépôt : `~/.config/gardien-dev/confidentiel.txt`
+(une expression par ligne : nom, courriels, adresse…), l'identité Git globale, le dossier personnel, les appareils et
+adresses MAC de la base de Gardien, les réseaux Wi-Fi enregistrés. `python3 outils/confidentialite.py --depot` relit
+tout le dépôt et son historique. Dans les tests, des valeurs inventées : adresses MAC au préfixe du fabricant gardé,
+réseau « Salon », compte « alice ».
+
+Rust garde le chemin des bibliothèques dans les programmes (`/home/<compte>/.cargo/registry/…`) : pour publier une
+version, compiler avec `rustflags = ["--remap-path-prefix=/home/<compte>=~"]` dans `~/.cargo/config.toml`
+(`publier-version.sh` refuse un programme qui contient encore le dossier personnel).
 
 ## Publier une version
 

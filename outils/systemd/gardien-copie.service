@@ -6,5 +6,5 @@ Description=Gardien : copier la dernière compilation sur la clé USB GARDIEN
 
 [Service]
 Type=oneshot
-ExecStart=/home/alice/Projects/sentinel/outils/deployer.sh --sans-compiler
+ExecStart=%h/Projects/sentinel/outils/deployer.sh --sans-compiler
 TimeoutStartSec=20min

@@ -7,6 +7,10 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 UNITES="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
+# Les unités lancent %h/Projects/sentinel/outils/deployer.sh (%h : dossier personnel) : le dépôt doit être là.
+if [[ $(cd ../.. && pwd -P) != $(cd "$HOME/Projects/sentinel" 2>/dev/null && pwd -P) ]]; then
+  echo "Attention : les unités lancent ~/Projects/sentinel/outils/deployer.sh, pas celui de $(cd ../.. && pwd)." >&2
+fi
 
 for ancienne in sentinel-compilation.path sentinel-cle.service sentinel-copie.service; do
   systemctl --user disable --now "$ancienne" >/dev/null 2>&1 || true
