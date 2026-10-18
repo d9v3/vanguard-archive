@@ -2,8 +2,8 @@
 # Installe (ou réinstalle) sur le PC de développement les unités systemd de l'utilisateur qui tiennent la clé USB à
 # jour : gardien-compilation.path (après chaque compilation) lance gardien-copie.service, et gardien-cle.service part
 # au branchement de la clé. Les images Linux de la clé (outils/images-cle.sh) : gardien-images.timer les cherche
-# chaque semaine, gardien-images-cle.service les copie au branchement. Celles de l'ancien nom (sentinel-…) sont retirées : elles pointaient vers des fichiers
-# renommés.
+# chaque semaine, gardien-images-cle.service les copie au branchement. Celles de l'ancien nom (sentinel-…) sont
+# retirées : elles pointaient vers des fichiers renommés.
 #   outils/systemd/installer.sh
 set -euo pipefail
 cd "$(dirname "$0")"
