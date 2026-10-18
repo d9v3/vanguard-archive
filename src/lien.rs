@@ -1400,6 +1400,23 @@ fn afficher_reponse(liste: &str, reponse: &Inscription) {
 
 /// Les vérifications en ligne, en parallèle : (âge, URLhaus, Spamhaus DBL, SURBL). Aucune n'ouvre le site.
 fn en_ligne(lien: &Lien, adresse: &str) -> Vec<(String, Inscription, Option<Signe>)> {
+    // Un nom tapé en lettres non latines (« pаypal.com », avec un « а » cyrillique) : les listes et les registres ne
+    // connaissent que sa forme « xn-- ». Le demander tel quel ferait répondre « absent » sans l'avoir vraiment cherché.
+    if !lien.hote.is_ascii() {
+        let raison = || {
+            Inscription::Impossible(
+                tr!(
+                    "nom en lettres non latines, que les listes ne connaissent que sous sa forme « xn-- »",
+                    "name in non-Latin letters, which the lists only know in its “xn--” form"
+                )
+                .into(),
+            )
+        };
+        return [tr!("Âge", "Age"), "URLhaus", "Spamhaus DBL", "SURBL"]
+            .into_iter()
+            .map(|liste| (liste.to_string(), raison(), None))
+            .collect();
+    }
     let domaine = site(lien);
     // Une adresse IP n'a ni âge ni place dans les listes de noms : seule URLhaus la connaît.
     let ip = adresse_ip(&lien.hote);
@@ -1578,7 +1595,12 @@ pub fn verifier(adresse: Option<&str>) {
         }
     }
     println!();
-    let couleur_verdict = pire.map_or(VERT, couleur);
+    // Pas en vert quand des vérifications n'ont pas pu se faire, comme pour un fichier téléchargé.
+    let couleur_verdict = match pire {
+        Some(n) => couleur(n),
+        None if incomplet => couleur(Niveau::Moyen),
+        None => VERT,
+    };
     for ligne in envelopper(&verdict(pire, incomplet), LARGEUR - 2) {
         println!("  {couleur_verdict}{ligne}{RESET}");
     }
@@ -1800,5 +1822,14 @@ mod tests {
         assert_eq!(signe_d_age(date, 3).niveau, Niveau::Eleve);
         assert_eq!(signe_d_age(date, 90).niveau, Niveau::Moyen);
         assert_eq!(signe_d_age(date, 9000).niveau, Niveau::Info);
+    }
+
+    #[test]
+    fn nom_non_latin_jamais_dit_absent() {
+        // Rien ne part sur le réseau : chaque liste dit qu'elle n'a pas pu chercher.
+        let lien = decouper("https://pаypal.com/connexion").unwrap();
+        let reponses = en_ligne(&lien, "https://pаypal.com/connexion");
+        assert_eq!(reponses.len(), 4);
+        assert!(reponses.iter().all(|(_, r, _)| matches!(r, Inscription::Impossible(_))));
     }
 }
