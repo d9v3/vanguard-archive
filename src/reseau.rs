@@ -107,6 +107,33 @@ pub struct Rapport {
     pub upnp: Option<crate::upnp::Etat>,
 }
 
+/// Délai par port de la revérification d'un appareil en veille (ms) : trois fois celui d'un scan.
+const DELAI_PATIENT: u64 = 1500;
+
+/// Appareils trouvés sans aucun port ouvert, alors que la base leur en a déjà vu : (adresse, ports déjà vus parmi ceux
+/// de ce scan).
+fn silencieux_a_revoir(
+    resultats: &BTreeMap<Ipv4Addr, Vec<(u16, Option<String>)>>,
+    connus: &BTreeMap<String, AppareilConnu>,
+    cle: impl Fn(Ipv4Addr) -> String,
+    ports: &[u16],
+) -> Vec<(Ipv4Addr, Vec<u16>)> {
+    resultats
+        .iter()
+        .filter(|(_, ouverts)| ouverts.is_empty())
+        .filter_map(|(&ip, _)| {
+            let deja_vus: Vec<u16> = connus
+                .get(&cle(ip))?
+                .ports
+                .iter()
+                .copied()
+                .filter(|p| ports.contains(p))
+                .collect();
+            (!deja_vus.is_empty()).then_some((ip, deja_vus))
+        })
+        .collect()
+}
+
 /// Base des appareils, un carnet par réseau : chez toi et chez chaque ami, sans mélange.
 /// Un réseau est reconnu à l'adresse MAC de sa box (stable, contrairement à l'IP).
 #[derive(Serialize, Deserialize, Default)]
@@ -951,7 +978,7 @@ pub async fn executer(o: Options) -> Result<Rapport, String> {
             );
         }
     }
-    let resultats = scan::scanner_ports(&vivantes, &ports, delai, parallele).await;
+    let mut resultats = scan::scanner_ports(&vivantes, &ports, delai, parallele).await;
     // Listes nommées, en français ou en anglais (comme parse_ports).
     let courants = matches!(o.ports.as_str(), "courants" | "common");
     let tous = matches!(o.ports.as_str(), "tous" | "all");
@@ -989,6 +1016,30 @@ pub async fn executer(o: Options) -> Result<Rapport, String> {
     let cle = |ip: Ipv4Addr, mac: &Option<String>| mac.clone().unwrap_or_else(|| ip.to_string());
     // Pour cette machine (ou 127.0.0.1), on sait quel programme tient chaque port.
     let programmes = crate::machine::programmes_en_ecoute();
+    // Ce que Gardien a appris des scans d'avant : un appareil connu qui paraît soudain tout fermé est souvent en
+    // veille, lent à répondre. Ses ports déjà vus sont revérifiés avec plus de patience : quelques essais ajoutés,
+    // aucun retiré.
+    if scan_comparable {
+        let a_revoir = silencieux_a_revoir(
+            &resultats,
+            &histo.appareils,
+            |ip| cle(ip, &arp.get(&ip).cloned()),
+            &ports,
+        );
+        if bavard && !a_revoir.is_empty() {
+            tre!(
+                "{GRIS}{} appareil(s) connu(s) silencieux : leurs ports déjà vus sont revérifiés plus patiemment (veille ?).{RESET}",
+                "{GRIS}{} known device(s) silent: their ports seen before are checked again more patiently (asleep?).{RESET}",
+                a_revoir.len()
+            );
+        }
+        for (ip, connus) in a_revoir {
+            let trouves = scan::scanner_ports(&[ip], &connus, Duration::from_millis(DELAI_PATIENT), parallele).await;
+            if let Some(ouverts) = trouves.get(&ip).filter(|o| !o.is_empty()) {
+                resultats.insert(ip, ouverts.clone());
+            }
+        }
+    }
 
     let mut hotes: Vec<Hote> =
         resultats
@@ -1226,6 +1277,44 @@ mod tests {
         let a: AppareilConnu = serde_json::from_str(note).unwrap();
         assert_eq!(a.titre(), "MAC aléatoire (téléphone/tablette ?)");
         assert_eq!(scan::fabricant_traduit("Intel Corporate"), "Intel Corporate");
+    }
+
+    #[test]
+    fn appareils_en_veille_revus() {
+        let ip = |d: u8| Ipv4Addr::new(10, 0, 0, d);
+        let connu = |ports: &[u16]| AppareilConnu {
+            ip: ip(1),
+            nom: None,
+            fabricant: None,
+            ports: ports.iter().copied().collect(),
+            ports_udp: BTreeSet::new(),
+            surnom: None,
+            surnom_le: None,
+            premier_vu: None,
+            dernier_vu: None,
+        };
+        let resultats = BTreeMap::from([
+            (ip(2), vec![]),           // connu, ports déjà vus, muet : à revoir
+            (ip(3), vec![(80, None)]), // répond : rien à revoir
+            (ip(4), vec![]),           // jamais vu de port ouvert : rien à revoir
+            (ip(5), vec![]),           // inconnu de la base
+        ]);
+        let connus = BTreeMap::from([
+            ("aa".to_string(), connu(&[22, 8009, 60000])),
+            ("bb".to_string(), connu(&[80])),
+            ("cc".to_string(), connu(&[])),
+        ]);
+        let cle = |i: Ipv4Addr| match i.octets()[3] {
+            2 => "aa".to_string(),
+            3 => "bb".to_string(),
+            4 => "cc".to_string(),
+            _ => i.to_string(),
+        };
+        // 60000 n'est pas dans les ports de ce scan : pas revérifié.
+        assert_eq!(
+            silencieux_a_revoir(&resultats, &connus, cle, &[22, 80, 8009]),
+            [(ip(2), vec![22, 8009])]
+        );
     }
 
     #[test]

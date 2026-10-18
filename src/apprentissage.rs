@@ -144,10 +144,15 @@ fn appliquer_le(appris: &Appris, constats: &mut [Constat], jour: NaiveDate) -> u
 fn habitudes() {
     section(tr!("TES HABITUDES", "YOUR HABITS"));
     let Some(h) = crate::connexion::habitudes(&crate::connexion::historique()) else {
-        trp!(
-            "  {GRIS}Pas encore assez de tests de connexion (il en faut 3) pour connaître la normale.{RESET}",
-            "  {GRIS}Not enough connection tests yet (3 are needed) to know what is normal.{RESET}"
-        );
+        for ligne in envelopper(
+            tr!(
+                "Pas encore assez de tests de connexion (il en faut 3) pour connaître la normale.",
+                "Not enough connection tests yet (3 are needed) to know what is normal."
+            ),
+            LARGEUR - 2,
+        ) {
+            println!("  {GRIS}{ligne}{RESET}");
+        }
         return;
     };
     let debit = |d: Option<f64>| d.map_or_else(|| "?".to_string(), |d| format!("{d:.0}"));
