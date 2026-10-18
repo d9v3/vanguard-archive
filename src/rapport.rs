@@ -432,6 +432,7 @@ mod tests {
             descendant: Some(106.4),
             montant: None,
             hausse_ms: Some(43.0),
+            reseau: None,
         };
         let h = connexions(&[r]);
         assert!(h.contains("<td>17 ms</td>") && h.contains("<td>106</td><td>?</td>") && h.contains("B (+43 ms)"));

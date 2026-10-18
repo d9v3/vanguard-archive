@@ -190,6 +190,21 @@ pub struct Resultat {
     pub montant: Option<f64>,
     /// Hausse de latence sous charge (bufferbloat), en ms.
     pub hausse_ms: Option<f64>,
+    /// Le réseau du test : adresse MAC de la box. Un portable fait des tests à la maison, au café, chez un ami : on ne
+    /// compare qu'à ceux du même réseau. Absent des tests d'avant la 0.52 : ils ne servent plus de référence.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reseau: Option<String>,
+}
+
+/// Le réseau où l'on est : adresse MAC de la box (la table ARP la connaît, le test vient de la joindre).
+fn reseau_actuel() -> Option<String> {
+    let box_ = crate::scan::passerelle()?;
+    crate::scan::table_arp().get(&box_).cloned()
+}
+
+/// Habitudes du réseau où l'on est (pour « Ce que Gardien a appris »).
+pub fn habitudes_ici() -> Option<Habitudes> {
+    habitudes(&historique(), reseau_actuel().as_deref())
 }
 
 /// Nombre de tests gardés.
@@ -233,8 +248,13 @@ fn mediane(mut valeurs: Vec<f64>) -> Option<f64> {
 }
 
 /// Habitudes d'après les 10 derniers tests, s'il y en a au moins 3 (un seul test peut tomber un mauvais soir).
-pub fn habitudes(precedents: &[Resultat]) -> Option<Habitudes> {
-    let derniers = &precedents[precedents.len().saturating_sub(10)..];
+pub fn habitudes(precedents: &[Resultat], reseau: Option<&str>) -> Option<Habitudes> {
+    let reseau = reseau?;
+    let memes: Vec<&Resultat> = precedents
+        .iter()
+        .filter(|r| r.reseau.as_deref() == Some(reseau))
+        .collect();
+    let derniers = &memes[memes.len().saturating_sub(10)..];
     if derniers.len() < 3 {
         return None;
     }
@@ -455,7 +475,8 @@ pub async fn tester() {
         .map(|m| (m - repos).max(0.0))
         .reduce(f64::max);
     // Apprendre la normale : le test du jour comparé aux habitudes de cette connexion.
-    let habituel = habitudes(&historique());
+    let reseau = reseau_actuel();
+    let habituel = habitudes(&historique(), reseau.as_deref());
     if let Some(h) = &habituel {
         section(tr!("PAR RAPPORT À D'HABITUDE", "COMPARED WITH USUAL"));
         let moins_bon = couleur(Niveau::Moyen);
@@ -493,6 +514,7 @@ pub async fn tester() {
         descendant: debit_bas,
         montant: debit_haut,
         hausse_ms: hausse,
+        reseau,
     });
 
     section(tr!("VERDICT POUR LE JEU", "VERDICT FOR GAMING"));
@@ -552,8 +574,8 @@ pub async fn tester() {
     {
         conseils.push(
             tr!(
-                "Ta connexion est nettement moins bonne que d'habitude : quelqu'un télécharge peut-être en ce moment ; sinon, redémarre la box, et si ça dure, appelle ton fournisseur.",
-                "Your connection is clearly worse than usual: someone may be downloading right now; otherwise, restart the router, and if it lasts, call your provider."
+                "Ta connexion est nettement moins bonne que d'habitude : quelqu'un envoie ou télécharge peut-être en ce moment ; sinon, redémarre la box, et si ça dure, appelle ton fournisseur.",
+                "Your connection is clearly worse than usual: someone may be uploading or downloading right now; otherwise, restart the router, and if it lasts, call your provider."
             )
             .to_string(),
         );
@@ -591,7 +613,7 @@ mod tests {
 
     #[test]
     fn habitudes_de_la_connexion() {
-        let test = |ping: f64, bas: f64| Resultat {
+        let sur = |reseau: Option<&str>, ping: f64, bas: f64| Resultat {
             date: String::new(),
             internet_ms: ping,
             gigue_ms: 1.0,
@@ -599,9 +621,24 @@ mod tests {
             descendant: Some(bas),
             montant: Some(30.0),
             hausse_ms: None,
+            reseau: reseau.map(str::to_string),
         };
-        assert_eq!(habitudes(&[test(18.0, 98.0), test(20.0, 100.0)]), None);
-        let h = habitudes(&[test(18.0, 98.0), test(20.0, 100.0), test(60.0, 40.0)]).unwrap();
+        let test = |ping: f64, bas: f64| sur(Some("box"), ping, bas);
+        let ici = Some("box");
+        assert_eq!(habitudes(&[test(18.0, 98.0), test(20.0, 100.0)], ici), None);
+        // Les tests d'un autre réseau (le café) ou d'avant la 0.52 (sans réseau) ne comptent pas.
+        let autres = [
+            sur(Some("cafe"), 90.0, 5.0),
+            sur(None, 90.0, 5.0),
+            test(18.0, 98.0),
+            test(20.0, 100.0),
+        ];
+        assert_eq!(habitudes(&autres, ici), None);
+        assert_eq!(
+            habitudes(&[test(18.0, 98.0), test(18.0, 98.0), test(18.0, 98.0)], None),
+            None
+        );
+        let h = habitudes(&[test(18.0, 98.0), test(20.0, 100.0), test(60.0, 40.0)], ici).unwrap();
         // Médianes : un mauvais soir ne fait pas l'habitude.
         assert_eq!((h.ping_ms, h.descendant), (20.0, Some(98.0)));
         assert!(ping_degrade(&h, 61.0) && !ping_degrade(&h, 25.0));

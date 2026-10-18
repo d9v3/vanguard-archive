@@ -190,7 +190,8 @@ pub fn analyser(portee: &Portee) {
     }
     let recent = version(&moteur) >= (4, 2);
     let mut trouves = Vec::new();
-    let mut erreur = None;
+    // Toute sortie en erreur du moteur est dite : ce qu'il n'a pas pu lire n'est jamais compté comme sain.
+    let mut erreurs: Vec<String> = Vec::new();
     for cible in &cibles {
         trp!("  Analyse de {}…", "  Scanning {}…", cible.display());
         let mut commande = Command::new(&moteur);
@@ -203,22 +204,45 @@ pub fn analyser(portee: &Portee) {
         match crate::commande::lancer(&mut commande, 3600) {
             Some(r) => {
                 trouves.extend(lire_sortie(&r.sortie));
-                if r.code != Some(0) && r.sortie.is_empty() && r.erreurs.contains("error") {
-                    erreur = r.erreurs.lines().next().map(str::to_string);
+                if r.code != Some(0) {
+                    let raison = r
+                        .erreurs
+                        .lines()
+                        .map(str::trim)
+                        .find(|l| !l.is_empty())
+                        .map_or_else(|| trf!("code {:?}", "code {:?}", r.code), str::to_string);
+                    erreurs.push(format!("{} : {raison}", cible.display()));
                 }
             }
-            None => erreur = Some(tr!("analyse trop longue, arrêtée", "scan too long, stopped").to_string()),
+            None => erreurs.push(trf!(
+                "{} : le moteur n'a pas pu aller au bout (lancement impossible, ou plus d'une heure)",
+                "{}: the engine could not finish (could not start, or over an hour)",
+                cible.display()
+            )),
         }
     }
     let _ = std::fs::remove_dir_all(&dossier);
     println!();
+    for e in &erreurs {
+        for (i, ligne) in envelopper(
+            &trf!(
+                "Analyse incomplète, rien n'est conclu pour ce qui n'a pas été lu. {e}",
+                "Incomplete scan, nothing is concluded for what was not read. {e}"
+            ),
+            LARGEUR - 4,
+        )
+        .iter()
+        .enumerate()
+        {
+            println!("  {} {ligne}", if i == 0 { "⚠" } else { " " });
+        }
+    }
     if trouves.is_empty() {
-        match erreur {
-            Some(e) => trp!("  ✖ Analyse incomplète : {e}", "  ✖ Incomplete scan: {e}"),
-            None => trp!(
+        if erreurs.is_empty() {
+            trp!(
                 "  {VERT}✔{RESET} Aucun fichier ne correspond aux 308 règles.",
                 "  {VERT}✔{RESET} No file matches the 308 rules."
-            ),
+            );
         }
         return;
     }

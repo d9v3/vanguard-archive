@@ -33,16 +33,13 @@ enum Etat {
     /// Renommé avec une extension en plus, comme le font la plupart des rançongiciels.
     Renomme(PathBuf),
     Supprime,
+    /// Présent mais pas lisible (verrouillé par un antivirus, fichier OneDrive en ligne seulement, droits) : rien n'est
+    /// conclu.
+    Illisible,
 }
 
 fn fichier() -> PathBuf {
     crate::reseau::dossier_local().join("pieges.json")
-}
-
-fn empreinte(chemin: &Path) -> Option<String> {
-    std::fs::read(chemin)
-        .ok()
-        .map(|o| blake3::hash(&o).to_hex().to_string())
 }
 
 /// Les fichiers-pièges posés ; `Err` si la liste existe mais ne se lit plus.
@@ -55,10 +52,13 @@ fn charger() -> Result<Vec<Piege>, ()> {
 }
 
 fn etat(piege: &Piege) -> Etat {
-    match empreinte(&piege.chemin) {
-        Some(e) if e == piege.empreinte => Etat::Intact,
-        Some(_) => Etat::Modifie,
-        None => renomme(&piege.chemin).map_or(Etat::Supprime, Etat::Renomme),
+    match std::fs::read(&piege.chemin) {
+        Ok(octets) if blake3::hash(&octets).to_hex().as_str() == piege.empreinte => Etat::Intact,
+        Ok(_) => Etat::Modifie,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            renomme(&piege.chemin).map_or(Etat::Supprime, Etat::Renomme)
+        }
+        Err(_) => Etat::Illisible,
     }
 }
 
@@ -120,14 +120,19 @@ fn dossier_declare(declares: &str, cle: &str, maison: &Path) -> Option<PathBuf> 
 }
 
 /// Windows : les dossiers déclarés pour le compte (déplacés dans OneDrive le cas échéant), sinon ceux du profil.
+/// « User Shell Folders » fait foi (chemins à développer, « %USERPROFILE%\Documents ») ; « Shell Folders » n'en est
+/// qu'une copie de compatibilité, parfois périmée : en secours seulement.
 #[cfg(windows)]
 fn dossiers_du_systeme() -> Vec<PathBuf> {
     use winreg::RegKey;
     use winreg::enums::HKEY_CURRENT_USER;
     let profil = PathBuf::from(std::env::var_os("USERPROFILE").unwrap_or_default());
-    let dossiers = RegKey::predef(HKEY_CURRENT_USER)
-        .open_subkey(r"Software\Microsoft\Windows\CurrentVersion\Explorer\Shell Folders")
-        .ok();
+    let cle = |nom: &str| {
+        RegKey::predef(HKEY_CURRENT_USER)
+            .open_subkey(format!(r"Software\Microsoft\Windows\CurrentVersion\Explorer\{nom}"))
+            .ok()
+    };
+    let (declares, copie) = (cle("User Shell Folders"), cle("Shell Folders"));
     [
         ("Personal", "Documents"),
         ("My Pictures", "Pictures"),
@@ -135,12 +140,43 @@ fn dossiers_du_systeme() -> Vec<PathBuf> {
     ]
     .iter()
     .map(|(valeur, defaut)| {
-        dossiers
+        declares
             .as_ref()
             .and_then(|d| d.get_value::<String, _>(valeur).ok())
+            .map(|c| developper(&c))
+            .or_else(|| copie.as_ref().and_then(|d| d.get_value::<String, _>(valeur).ok()))
             .map_or_else(|| profil.join(defaut), PathBuf::from)
     })
     .collect()
+}
+
+/// « %USERPROFILE%\Documents » → le vrai chemin, d'après les variables d'environnement ; une variable inconnue reste
+/// telle quelle.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn developper(chemin: &str) -> String {
+    let mut sortie = String::new();
+    let mut reste = chemin;
+    while let Some(debut) = reste.find('%') {
+        sortie.push_str(&reste[..debut]);
+        let apres = &reste[debut + 1..];
+        let Some(fin) = apres.find('%') else {
+            sortie.push_str(&reste[debut..]);
+            reste = "";
+            break;
+        };
+        let nom = &apres[..fin];
+        match std::env::var(nom) {
+            Ok(valeur) if !nom.is_empty() => sortie.push_str(&valeur),
+            _ => {
+                sortie.push('%');
+                sortie.push_str(nom);
+                sortie.push('%');
+            }
+        }
+        reste = &apres[fin + 1..];
+    }
+    sortie.push_str(reste);
+    sortie
 }
 
 #[cfg(target_os = "macos")]
@@ -246,18 +282,28 @@ fn enregistrer(pieges: &[Piege]) -> std::io::Result<()> {
     crate::reseau::ecrire_atomique(&fichier(), &serde_json::to_string_pretty(pieges).unwrap_or_default())
 }
 
-/// Retire exactement les fichiers posés (pas ceux qu'un rançongiciel aurait renommés : ils sont la preuve), puis la
-/// liste. Rend les fichiers qui n'ont pas pu être retirés.
-fn retirer_tous(pieges: &[Piege]) -> Vec<PathBuf> {
-    let restes: Vec<PathBuf> = pieges
-        .iter()
-        .filter(|p| p.chemin.is_file() && std::fs::remove_file(&p.chemin).is_err())
-        .map(|p| p.chemin.clone())
-        .collect();
+/// Retire exactement les fichiers posés et intacts, puis la liste. Un piège modifié ou renommé reste : c'est la preuve
+/// d'un rançongiciel ; un piège illisible reste aussi (on ne sait pas ce qu'il est devenu). Rend (fichiers qui n'ont
+/// pas pu être retirés, fichiers gardés comme preuve).
+fn retirer_tous(pieges: &[Piege]) -> (Vec<PathBuf>, Vec<PathBuf>) {
+    let (mut restes, mut preuves) = (Vec::new(), Vec::new());
+    for p in pieges {
+        match etat(p) {
+            Etat::Intact => {
+                if std::fs::remove_file(&p.chemin).is_err() {
+                    restes.push(p.chemin.clone());
+                }
+            }
+            Etat::Modifie => preuves.push(p.chemin.clone()),
+            Etat::Renomme(nouveau) => preuves.push(nouveau),
+            Etat::Illisible => restes.push(p.chemin.clone()),
+            Etat::Supprime => {}
+        }
+    }
     if restes.is_empty() {
         let _ = std::fs::remove_file(fichier());
     }
-    restes
+    (restes, preuves)
 }
 
 /// Un constat de la catégorie, avec une marche à suivre à faire soi-même.
@@ -314,6 +360,11 @@ pub fn constat() -> Option<Constat> {
         .filter(|(_, e)| *e == Etat::Supprime)
         .map(|(p, _)| p.chemin.display().to_string())
         .collect();
+    let illisibles: Vec<String> = etats
+        .iter()
+        .filter(|(_, e)| *e == Etat::Illisible)
+        .map(|(p, _)| p.chemin.display().to_string())
+        .collect();
     Some(if !touches.is_empty() {
         constat_de(
             Some(Niveau::Critique),
@@ -340,6 +391,24 @@ pub fn constat() -> Option<Constat> {
                 "If it was you, set the decoy files again (Antivirus and protection menu); otherwise, run an antivirus scan"
             )),
         )
+    } else if !illisibles.is_empty() {
+        // Verrouillé ou en ligne seulement : ce qu'il contient n'est pas connu, donc jamais compté comme intact.
+        Constat {
+            verifie: false,
+            ..constat_de(
+                Some(Niveau::Info),
+                trf!(
+                    "Impossible de vérifier ({}).",
+                    "Could not check ({}).",
+                    trf!(
+                        "fichier-piège illisible, verrouillé ou en ligne seulement : {}",
+                        "decoy file unreadable, locked or online-only: {}",
+                        illisibles.join(", ")
+                    )
+                ),
+                None,
+            )
+        }
     } else {
         constat_de(
             None,
@@ -392,6 +461,7 @@ pub fn menu() {
                     format!("{}⚠{RESET}", couleur(Niveau::Moyen)),
                     tr!("supprimé", "deleted").to_string(),
                 ),
+                Etat::Illisible => (format!("{GRIS}?{RESET}"), tr!("illisible", "unreadable").to_string()),
             };
             println!("  {marque} {}  {GRIS}{texte}{RESET}", p.chemin.display());
         }
@@ -471,7 +541,7 @@ fn retirer(pieges: &[Piege], force: bool) {
     {
         return;
     }
-    let restes = retirer_tous(pieges);
+    let (restes, preuves) = retirer_tous(pieges);
     if restes.is_empty() {
         trp!(
             "  {VERT}✔{RESET} Fichiers-pièges retirés.",
@@ -481,6 +551,13 @@ fn retirer(pieges: &[Piege], force: bool) {
         for r in &restes {
             trp!("  ✖ Impossible de retirer {}", "  ✖ Could not remove {}", r.display());
         }
+    }
+    for p in &preuves {
+        trp!(
+            "  ⚠ Gardé, c'est la preuve d'un passage : {}",
+            "  ⚠ Kept, it is the evidence of an attack: {}",
+            p.display()
+        );
     }
 }
 
@@ -530,12 +607,39 @@ mod tests {
         assert_eq!(etat(&pieges[1]), Etat::Renomme(verrouille.clone()));
         std::fs::remove_file(&verrouille).unwrap();
         assert_eq!(etat(&pieges[1]), Etat::Supprime);
-        // Retrait exact : seul le fichier posé part ; un fichier de la personne reste.
+        // Retrait exact : les pièges intacts partent ; le modifié reste, c'est la preuve ; un fichier de la personne
+        // n'est pas touché.
         std::fs::write(d.join("mes notes.txt"), "à garder").unwrap();
-        assert_eq!(retirer_tous(&pieges), Vec::<PathBuf>::new());
-        assert!(!pieges[0].chemin.exists());
+        let (restes, preuves) = retirer_tous(&pieges);
+        assert_eq!(restes, Vec::<PathBuf>::new());
+        assert_eq!(preuves, [pieges[0].chemin.clone()]);
+        assert!(pieges[0].chemin.exists());
         assert!(d.join("mes notes.txt").exists());
         let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // Un fichier sans droit de lecture : « illisible », jamais « supprimé » (root lit tout : rien à essayer alors).
+    #[cfg(unix)]
+    #[test]
+    fn piege_illisible() {
+        use std::os::unix::fs::PermissionsExt;
+        let d = dossier_jetable("illisible");
+        let pieges = poser_dans(std::slice::from_ref(&d));
+        std::fs::set_permissions(&pieges[0].chemin, std::fs::Permissions::from_mode(0o000)).unwrap();
+        if std::fs::read(&pieges[0].chemin).is_err() {
+            assert_eq!(etat(&pieges[0]), Etat::Illisible);
+        }
+        std::fs::set_permissions(&pieges[0].chemin, std::fs::Permissions::from_mode(0o600)).unwrap();
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn variables_developpees() {
+        let path = std::env::var("PATH").unwrap_or_default();
+        assert_eq!(developper("%PATH%\\x"), format!("{path}\\x"));
+        assert_eq!(developper("%GARDIEN_INCONNUE%\\y"), "%GARDIEN_INCONNUE%\\y");
+        assert_eq!(developper("50% de 10"), "50% de 10");
+        assert_eq!(developper("sans"), "sans");
     }
 
     #[test]

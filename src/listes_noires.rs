@@ -48,19 +48,24 @@ fn refus(codes: &[Ipv4Addr]) -> bool {
     codes.iter().any(|c| c.octets()[..3] == [127, 255, 255])
 }
 
-/// Adresses IPv4 d'un nom, par le DNS du système. Vide si le nom n'existe pas (adresse absente de la liste).
-fn resoudre(nom: &str) -> Vec<Ipv4Addr> {
-    (nom, 0)
-        .to_socket_addrs()
-        .map(|adresses| {
+/// Adresses IPv4 d'un nom, par le DNS du système : vide si le nom n'existe pas (adresse absente de la liste),
+/// `None` si le DNS n'a pas répondu. La bibliothèque ne distingue pas « nom inconnu » d'une panne (ses messages
+/// changent avec le système et la langue) : un refus rapide est un nom inconnu, une erreur après plusieurs secondes
+/// d'attente est un DNS muet, jamais compté comme « pas listée ».
+fn resoudre(nom: &str) -> Option<Vec<Ipv4Addr>> {
+    let debut = std::time::Instant::now();
+    match (nom, 0).to_socket_addrs() {
+        Ok(adresses) => Some(
             adresses
                 .filter_map(|a| match a.ip() {
                     std::net::IpAddr::V4(v4) => Some(v4),
                     std::net::IpAddr::V6(_) => None,
                 })
-                .collect()
-        })
-        .unwrap_or_default()
+                .collect(),
+        ),
+        Err(_) if debut.elapsed() < std::time::Duration::from_secs(3) => Some(Vec::new()),
+        Err(_) => None,
+    }
 }
 
 /// Nom à demander pour une adresse : ses quatre nombres à l'envers, puis la zone de la liste.
@@ -69,8 +74,11 @@ fn requete(ip: Ipv4Addr, zone: &str) -> String {
     format!("{d}.{c}.{b}.{a}.{zone}")
 }
 
-fn chercher_avec(ip: Ipv4Addr, zone: &str, resoudre: impl Fn(&str) -> Vec<Ipv4Addr>) -> Verdict {
-    let essai = resoudre(&requete(Ipv4Addr::new(127, 0, 0, 2), zone));
+fn chercher_avec(ip: Ipv4Addr, zone: &str, resoudre: impl Fn(&str) -> Option<Vec<Ipv4Addr>>) -> Verdict {
+    let muet = || Verdict::Impossible(tr!("ton DNS n'a pas répondu", "your DNS did not answer").into());
+    let Some(essai) = resoudre(&requete(Ipv4Addr::new(127, 0, 0, 2), zone)) else {
+        return muet();
+    };
     if essai.is_empty() {
         // Certains DNS (filtres, protection contre le « DNS rebinding ») retirent les réponses en 127.x de certaines
         // listes : la vraie réponse serait retirée de même, et « absente » serait un mensonge.
@@ -91,7 +99,9 @@ fn chercher_avec(ip: Ipv4Addr, zone: &str, resoudre: impl Fn(&str) -> Vec<Ipv4Ad
             .into(),
         );
     }
-    let codes = resoudre(&requete(ip, zone));
+    let Some(codes) = resoudre(&requete(ip, zone)) else {
+        return muet();
+    };
     if refus(&codes) {
         Verdict::Impossible(tr!("la liste a refusé la requête", "the list refused the query").into())
     } else if codes.is_empty() {
@@ -269,31 +279,37 @@ mod tests {
     fn essai_puis_adresse() {
         // La liste répond à l'essai ; l'adresse n'y est pas.
         let liste = |nom: &str| {
-            if nom.starts_with("2.0.0.127.") {
+            Some(if nom.starts_with("2.0.0.127.") {
                 vec![ip("127.0.0.2")]
             } else {
                 vec![]
-            }
+            })
         };
         assert_eq!(
             chercher_avec(ip("203.0.113.7"), "bl.spamcop.net", liste),
             Verdict::Absente
         );
         // L'adresse y est.
-        let liste = |_: &str| vec![ip("127.0.0.2")];
+        let liste = |_: &str| Some(vec![ip("127.0.0.2")]);
         assert_eq!(
             chercher_avec(ip("203.0.113.7"), "bl.spamcop.net", liste),
             Verdict::Listee(vec![ip("127.0.0.2")])
         );
         // Résolveur public refusé par Spamhaus : impossible, jamais « absente ».
-        let public = |_: &str| vec![ip("127.255.255.254")];
+        let public = |_: &str| Some(vec![ip("127.255.255.254")]);
         assert!(matches!(
             chercher_avec(ip("203.0.113.7"), "zen.spamhaus.org", public),
             Verdict::Impossible(_)
         ));
         // Liste muette : impossible aussi.
         assert!(matches!(
-            chercher_avec(ip("203.0.113.7"), "psbl.surriel.com", |_: &str| vec![]),
+            chercher_avec(ip("203.0.113.7"), "psbl.surriel.com", |_: &str| Some(vec![])),
+            Verdict::Impossible(_)
+        ));
+        // L'essai répond, mais la vraie question reste sans réponse (délai dépassé) : impossible, pas « absente ».
+        let muet_ensuite = |nom: &str| nom.starts_with("2.0.0.127.").then(|| vec![ip("127.0.0.2")]);
+        assert!(matches!(
+            chercher_avec(ip("203.0.113.7"), "bl.spamcop.net", muet_ensuite),
             Verdict::Impossible(_)
         ));
     }

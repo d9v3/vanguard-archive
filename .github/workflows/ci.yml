@@ -57,6 +57,13 @@ jobs:
           ./target/x86_64-unknown-linux-musl/release/gardien --version
           ./target/x86_64-unknown-linux-musl/release/gardien logiciels --liste
           ./target/x86_64-unknown-linux-musl/release/gardien nettoyer --liste
+      # Les règles YARA intégrées au programme, compilées par le moteur de VirusTotal (libyara dans yara-python) : une
+      # règle cassée par une mise à jour (outils/maj-yara.sh) se voit ici, pas chez quelqu'un.
+      - name: Règles YARA
+        run: |
+          python3 -m venv /tmp/yara
+          /tmp/yara/bin/pip install -q yara-python
+          /tmp/yara/bin/python -c "import yara; yara.compile(filepath='assets/yara/reversinglabs.yara'); print('règles YARA compilées')"
 
   # Windows la nuit seulement si le code a changé depuis le dernier passage réussi (comme macos.yml).
   utile:

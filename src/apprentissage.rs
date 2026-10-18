@@ -36,12 +36,14 @@ fn fichier() -> std::path::PathBuf {
     crate::reseau::dossier_local().join("appris.json")
 }
 
-/// Liste illisible : aucun choix appliqué (les alertes se montrent comme d'habitude), jamais l'inverse.
-fn charger() -> Appris {
-    std::fs::read_to_string(fichier())
-        .ok()
-        .and_then(|t| serde_json::from_str(&t).ok())
-        .unwrap_or_default()
+/// Les choix retenus ; `Err` si la liste existe mais ne se lit plus. Alors aucun choix n'est appliqué (les alertes se
+/// montrent comme d'habitude, jamais l'inverse) et rien ne l'écrase : les choix d'avant ne se perdent pas en silence.
+fn charger() -> Result<Appris, ()> {
+    match std::fs::read_to_string(fichier()) {
+        Ok(texte) => serde_json::from_str(&texte).map_err(|_| ()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Appris::default()),
+        Err(_) => Err(()),
+    }
 }
 
 fn enregistrer(appris: &Appris) -> std::io::Result<()> {
@@ -49,24 +51,39 @@ fn enregistrer(appris: &Appris) -> std::io::Result<()> {
     crate::reseau::ecrire_atomique(&fichier(), &serde_json::to_string_pretty(appris).unwrap_or_default())
 }
 
-/// Une alerte reconnue d'un bilan à l'autre sans ses nombres (« 3 % libres » et « 2 % libres » sont la même), sauf
-/// pour les ports : un autre numéro de port est une autre alerte.
+/// Une alerte reconnue d'un bilan à l'autre sans ses quantités (« 12 % libres » et « 9 % libres » sont la même). Une
+/// adresse, une heure ou une version (des nombres liés par « . » ou « : ») reste telle quelle : accepter un DNS
+/// réglé vers 10.0.0.5 ne doit jamais faire taire un DNS détourné vers une autre adresse ; un port non plus. Le
+/// message est dans la langue de l'interface : changer de langue fait revenir les alertes acceptées, du bon côté.
 fn signature(categorie: &str, message: &str) -> String {
-    let message: String = if categorie == "Ports en écoute" {
-        message.to_string()
-    } else {
-        // Un nombre entier devient un seul « # » : « 12 % » et « 9 % » se ressemblent.
-        let mut sans_nombres = String::new();
-        for c in message.chars() {
-            if !c.is_ascii_digit() {
-                sans_nombres.push(c);
-            } else if !sans_nombres.ends_with('#') {
-                sans_nombres.push('#');
-            }
+    if categorie == "Ports en écoute" {
+        return format!("{categorie} : {message}");
+    }
+    let lettres: Vec<char> = message.chars().collect();
+    let mut sortie = String::new();
+    let mut i = 0;
+    while i < lettres.len() {
+        if !lettres[i].is_ascii_digit() {
+            sortie.push(lettres[i]);
+            i += 1;
+            continue;
         }
-        sans_nombres
-    };
-    format!("{categorie} : {message}")
+        // Un bloc de chiffres, avec ce qui les lie (« 10.0.0.5 », « 12:30 », « 4.5.4 »).
+        let debut = i;
+        while i < lettres.len()
+            && (lettres[i].is_ascii_digit()
+                || (matches!(lettres[i], '.' | ':') && lettres.get(i + 1).is_some_and(char::is_ascii_digit)))
+        {
+            i += 1;
+        }
+        let bloc: String = lettres[debut..i].iter().collect();
+        if bloc.contains(['.', ':']) {
+            sortie.push_str(&bloc);
+        } else {
+            sortie.push('#');
+        }
+    }
+    format!("{categorie} : {sortie}")
 }
 
 fn aujourd_hui() -> NaiveDate {
@@ -91,7 +108,14 @@ pub fn accepter(c: &Constat) {
     let Some(niveau) = c.probleme else {
         return;
     };
-    let mut appris = charger();
+    let Ok(mut appris) = charger() else {
+        trp!(
+            "    ✖ La liste de tes choix ne se lit plus ({}) : rien n'est retenu, pour ne pas l'écraser.",
+            "    ✖ Your choice list can no longer be read ({}): nothing is saved, so as not to overwrite it.",
+            fichier().display()
+        );
+        return;
+    };
     appris.acceptees.insert(
         signature(c.categorie, &c.message),
         Acceptee {
@@ -103,8 +127,8 @@ pub fn accepter(c: &Constat) {
     );
     match enregistrer(&appris) {
         Ok(()) => trp!(
-            "    {GRIS}retenu : je ne te la proposerai plus avant {DUREE_JOURS} jours, sauf si elle s'aggrave{RESET}",
-            "    {GRIS}noted: I will not offer it again for {DUREE_JOURS} days, unless it gets worse{RESET}"
+            "    {GRIS}retenu pour {DUREE_JOURS} jours, sauf si elle s'aggrave{RESET}",
+            "    {GRIS}noted for {DUREE_JOURS} days, unless it gets worse{RESET}"
         ),
         Err(e) => trp!("    ✖ Choix non retenu ({e}).", "    ✖ Choice not saved ({e})."),
     }
@@ -113,7 +137,7 @@ pub fn accepter(c: &Constat) {
 /// Applique tes choix au bilan : une alerte acceptée passe au niveau info, avec la date du choix, sans correction
 /// proposée. Rend le nombre d'alertes concernées.
 pub fn appliquer(constats: &mut [Constat]) -> usize {
-    appliquer_le(&charger(), constats, aujourd_hui())
+    charger().map_or(0, |appris| appliquer_le(&appris, constats, aujourd_hui()))
 }
 
 fn appliquer_le(appris: &Appris, constats: &mut [Constat], jour: NaiveDate) -> usize {
@@ -143,7 +167,7 @@ fn appliquer_le(appris: &Appris, constats: &mut [Constat], jour: NaiveDate) -> u
 /// Ce qui est habituel ici, appris des mesures passées : la connexion (médiane des derniers tests).
 fn habitudes() {
     section(tr!("TES HABITUDES", "YOUR HABITS"));
-    let Some(h) = crate::connexion::habitudes(&crate::connexion::historique()) else {
+    let Some(h) = crate::connexion::habitudes_ici() else {
         for ligne in envelopper(
             tr!(
                 "Pas encore assez de tests de connexion (il en faut 3) pour connaître la normale.",
@@ -175,7 +199,14 @@ pub fn menu() {
     titre(tr!("Ce que Gardien a appris", "What Gardien has learned"));
     habitudes();
     section(tr!("TES CHOIX", "YOUR CHOICES"));
-    let mut appris = charger();
+    let Ok(mut appris) = charger() else {
+        trp!(
+            "  ✖ La liste de tes choix ne se lit plus : {}",
+            "  ✖ Your choice list can no longer be read: {}",
+            fichier().display()
+        );
+        return;
+    };
     let jour = aujourd_hui();
     if appris.acceptees.is_empty() {
         for ligne in envelopper(
@@ -212,7 +243,7 @@ pub fn menu() {
         "\n  Oublier : numéro(s), « t » pour tout, Entrée pour garder : ",
         "\n  Forget: number(s), “a” for all, Enter to keep: "
     ));
-    let a_oublier: Vec<usize> = if crate::langue::tout(&reponse) {
+    let mut a_oublier: Vec<usize> = if crate::langue::tout(&reponse) {
         (0..liste.len()).collect()
     } else {
         reponse
@@ -222,6 +253,9 @@ pub fn menu() {
             .map(|n| n - 1)
             .collect()
     };
+    // « 1 1 » ou « 1,1 » : un seul choix.
+    a_oublier.sort_unstable();
+    a_oublier.dedup();
     if a_oublier.is_empty() {
         return;
     }
@@ -286,6 +320,23 @@ mod tests {
         let mut c = [constat("Groupes", Niveau::Moyen, "Tu es dans le groupe docker.")];
         assert_eq!(appliquer_le(&a, &mut c, jour("2027-01-16")), 0);
         assert_eq!(c[0].probleme, Some(Niveau::Moyen));
+    }
+
+    #[test]
+    fn adresses_gardees_dans_la_signature() {
+        // Une quantité change, la même alerte ; une autre adresse, une autre alerte.
+        assert_eq!(
+            signature("Santé", "Disque : 12 % libres sur 512 Go."),
+            signature("Santé", "Disque : 9 % libres sur 1000 Go.")
+        );
+        assert_ne!(
+            signature("DNS", "DNS réglé à la main vers un serveur inconnu : 10.0.0.5."),
+            signature("DNS", "DNS réglé à la main vers un serveur inconnu : 185.1.2.3.")
+        );
+        assert_eq!(
+            signature("DNS", "Vers 10.0.0.5, 3 fois."),
+            "DNS : Vers 10.0.0.5, # fois."
+        );
     }
 
     #[test]
