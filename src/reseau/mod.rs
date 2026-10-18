@@ -212,6 +212,21 @@ impl AppareilConnu {
         titre_de([self.surnom.as_deref(), self.nom.as_deref(), fabricant])
     }
 
+    /// Les textes de la fiche rendus inoffensifs : voir `Base::rendre_affichable`.
+    fn rendre_affichable(&mut self) {
+        let textes = [
+            &mut self.nom,
+            &mut self.fabricant,
+            &mut self.surnom,
+            &mut self.surnom_le,
+            &mut self.premier_vu,
+            &mut self.dernier_vu,
+        ];
+        for t in textes.into_iter().flatten() {
+            *t = affichable(t);
+        }
+    }
+
     /// Fusion de deux fiches du même appareil (base de la clé + copie locale).
     fn fusionner(&mut self, autre: AppareilConnu) {
         self.ports.extend(autre.ports);
@@ -247,8 +262,11 @@ impl Base {
             return Base::default();
         };
         // Le Bloc-notes et PowerShell 5.1 ajoutent une marque d'ordre des octets (BOM) en tête.
-        match serde_json::from_str(texte.trim_start_matches('\u{feff}')) {
-            Ok(base) => base,
+        match serde_json::from_str::<Base>(texte.trim_start_matches('\u{feff}')) {
+            Ok(mut base) => {
+                base.rendre_affichable();
+                base
+            }
             Err(e) => {
                 // Jamais écraser une base qu'on ne sait pas lire : on la met de côté, intacte.
                 let copie = p.with_extension(format!(
@@ -282,6 +300,21 @@ impl Base {
             base.absorber(Base::lire(&local));
         }
         (base, [cle, local], verrou)
+    }
+
+    /// La base voyage sur la clé : branchée sur un autre ordinateur, copiée ou restaurée à la main, elle a pu être
+    /// écrite par autre chose que Gardien. Ses textes montrés (noms, surnoms, fabricants, dates) sont rendus
+    /// inoffensifs dès la lecture : à l'écran, dans le JSON et dans ce que Gardien y réécrit.
+    fn rendre_affichable(&mut self) {
+        for r in self.reseaux.values_mut() {
+            if let Some(nom) = &mut r.nom {
+                *nom = affichable(nom);
+            }
+        }
+        let fiches = self.reseaux.values_mut().flat_map(|r| r.appareils.values_mut());
+        for a in fiches.chain(self.appareils.values_mut()) {
+            a.rendre_affichable();
+        }
     }
 
     fn absorber(&mut self, autre: Base) {
@@ -556,6 +589,17 @@ fn noms_des_bases(textes: &[String]) -> (Vec<String>, Vec<String>) {
             appareils.extend(fiche.nom.iter().chain(&fiche.surnom).cloned());
         }
         reseaux.extend(base.reseaux.into_values().filter_map(|r| r.nom));
+    }
+    // Montrés, ces noms sont rendus inoffensifs (`affichable`) : un message peut les contenir sous cette forme.
+    for noms in [&mut reseaux, &mut appareils] {
+        let mut montres: Vec<String> = noms
+            .iter()
+            .map(|n| affichable(n))
+            .filter(|m| !noms.contains(m))
+            .collect();
+        montres.sort_unstable();
+        montres.dedup();
+        noms.extend(montres);
     }
     (reseaux, appareils)
 }
@@ -1401,6 +1445,38 @@ mod tests {
             (Vec::new(), Vec::new()),
             "jamais la vraie base pendant un test"
         );
+    }
+
+    /// La base voyage sur la clé : écrite ailleurs (autre ordinateur, copie à la main), ses textes arrivent inoffensifs
+    /// à la lecture. Le journal des erreurs, lui, reconnaît les noms sous leurs deux formes.
+    #[test]
+    fn base_piegee_lue_inoffensive() {
+        let dossier = std::env::temp_dir().join(format!("gardien-base-piegee-{}", std::process::id()));
+        let fichier = dossier.join("appareils.json");
+        let piege = "Salon\u{1b}]52;c;eA==\u{7}\u{1b}[2K\r\u{202e}";
+        let vu = "Salon�]52;c;eA==��[2K��";
+        let base = serde_json::json!({
+            "reseaux": {"3c:22:fb:00:00:01": {"nom": piege, "appareils": {"3c:22:fb:00:00:02": {
+                "ip": "192.168.1.20", "nom": piege, "fabricant": piege, "ports": [], "surnom": piege,
+                "surnom_le": "2026-10-18 10:00:00", "premier_vu": piege}}}},
+            "appareils": {"c4:34:6b:00:00:03": {"ip": "10.0.0.138", "nom": null, "fabricant": null, "ports": [631],
+                "surnom": piege}}
+        })
+        .to_string();
+        ecrire_atomique(&fichier, &base).unwrap();
+        let lue = Base::lire(&fichier);
+        std::fs::remove_dir_all(&dossier).unwrap();
+        let reseau = &lue.reseaux["3c:22:fb:00:00:01"];
+        assert_eq!(reseau.nom.as_deref(), Some(vu));
+        let a = &reseau.appareils["3c:22:fb:00:00:02"];
+        for t in [&a.nom, &a.fabricant, &a.surnom, &a.premier_vu] {
+            assert_eq!(t.as_deref(), Some(vu));
+        }
+        assert_eq!(a.surnom_le.as_deref(), Some("2026-10-18 10:00:00"));
+        assert_eq!(lue.appareils["c4:34:6b:00:00:03"].surnom.as_deref(), Some(vu));
+        let (reseaux, appareils) = noms_des_bases(&[base]);
+        assert_eq!(reseaux, [piege, vu]);
+        assert_eq!(appareils, [piege, piege, piege, vu]);
     }
 
     #[test]
