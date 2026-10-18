@@ -209,7 +209,7 @@ pub fn envoyer(titre: &str, message: &str) {
     }
 }
 
-/// Adresse d'un serveur ntfy tapée par la personne : « ntfy.exemple.fr » devient « https://ntfy.exemple.fr ».
+/// Adresse d'un serveur ntfy tapée par la personne : « ntfy.example.com » devient « https://ntfy.example.com ».
 fn adresse_serveur(tape: &str) -> Option<String> {
     let tape = tape.trim();
     if tape.is_empty() {
@@ -328,7 +328,7 @@ fn activer() {
         match adresse_serveur(&tape) {
             Some(s) => break s,
             None => trp!(
-                "  ✖ Adresse incomprise : « ntfy.exemple.fr » ou « https://ntfy.exemple.fr ».",
+                "  ✖ Adresse incomprise : « ntfy.example.com » ou « https://ntfy.example.com ».",
                 "  ✖ Address not understood: “ntfy.example.com” or “https://ntfy.example.com”."
             ),
         }
