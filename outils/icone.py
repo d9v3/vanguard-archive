@@ -12,7 +12,7 @@ Le trou noir est posé sur un bouclier noir : un halo est de la lumière, il ne 
 clair, Explorateur de Windows, GitHub, il devenait une tache rose-brun). Un liseré du rouge au cyan dessine le
 bouclier sur un fond noir aussi (barre, mode sombre de GitHub), où le noir seul ne se voyait pas.
 
-Lancer depuis la racine du dépôt :
+Lancer depuis n'importe où (les images vont toujours dans le dépôt) :
     uv run --no-project --with numpy --with pillow python outils/icone.py
 Produit assets/icones/gardien-<taille>.png (Linux, 16 à 512 px) et assets/gardien.ico (Windows, 16 à 256 px).
 """
@@ -33,6 +33,8 @@ DISQUE_INT, DISQUE_EXT = 2.6, 8.6
 # Sens de rotation du disque : le côté droit vient vers nous (cyan), le gauche s'éloigne (rouge).
 SENS = 1.0
 REMONTEE = 0.04  # le trou noir monte un peu dans le bouclier, plus large en haut qu'en bas (fraction du côté)
+# Lancé depuis un autre dossier, le script écrivait dans un « assets » de ce dossier-là, ou s'arrêtait.
+ASSETS = Path(__file__).resolve().parent.parent / "assets"
 
 # Une image par taille, réduite depuis le grand rendu : le système n'a jamais à la réduire lui-même.
 # Linux : les dossiers de hicolor (la barre et le lanceur prennent la taille la plus proche).
@@ -276,14 +278,14 @@ def main():
     n = lumiere.shape[0]
     dy = round(n * REMONTEE)
     lumiere = np.concatenate([lumiere[dy:], np.zeros((dy, n, 3))])
-    dossier = Path("assets/icones")
+    dossier = ASSETS / "icones"
     dossier.mkdir(exist_ok=True)
     for t in TAILLES_LINUX:
         reduire(lumiere, t).save(dossier / f"gardien-{t}.png", optimize=True)
     windows = [reduire(lumiere, t) for t in TAILLES_WINDOWS]
     # Le fichier part de la plus grande ; les autres y sont mises telles quelles au lieu d'être recalculées.
-    windows[-1].save("assets/gardien.ico", sizes=[im.size for im in windows], append_images=windows[:-1])
-    print("assets/icones/ et assets/gardien.ico écrits.")
+    windows[-1].save(ASSETS / "gardien.ico", sizes=[im.size for im in windows], append_images=windows[:-1])
+    print(f"{dossier}/ et {ASSETS / 'gardien.ico'} écrits.")
 
 
 if __name__ == "__main__":
