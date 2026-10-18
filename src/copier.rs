@@ -110,7 +110,62 @@ pub(crate) fn est_la_cle(racine: &Path) -> bool {
 }
 
 /// Le volume de `p` porte-t-il le système ou le dossier personnel ? `None` : le volume ne peut pas être lu.
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
+fn sur_le_systeme(p: &Path) -> Option<bool> {
+    let montages = std::fs::read_to_string("/proc/self/mountinfo").ok()?;
+    sur_le_systeme_selon(&montages, &p.canonicalize().ok()?, &crate::nettoyer::maison())
+}
+
+/// D'après /proc/self/mountinfo : le système de fichiers (« majeur:mineur ») du montage le plus profond qui contient
+/// chaque chemin. `st_dev` ne suffit pas : chaque sous-volume d'un btrfs a le sien, et /var/log ou un sous-volume
+/// monté dans /mnt passait pour un autre disque.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn sur_le_systeme_selon(montages: &str, p: &Path, maison: &Path) -> Option<bool> {
+    let volume = |chemin: &Path| {
+        montages
+            .lines()
+            .filter_map(|l| {
+                let mut c = l.split_whitespace().skip(2);
+                let dev = c.next()?;
+                let point = PathBuf::from(sans_echappements(c.nth(1)?));
+                chemin.starts_with(&point).then_some((point, dev))
+            })
+            // Le plus long ; à longueur égale, le dernier monté, qui recouvre les autres.
+            .max_by_key(|(point, _)| point.as_os_str().len())
+            .map(|(_, dev)| dev)
+    };
+    let v = volume(p)?;
+    Some([volume(Path::new("/")), volume(maison)].contains(&Some(v)))
+}
+
+/// Un chemin de /proc/mounts ou mountinfo : l'espace, la tabulation, le saut de ligne et la barre oblique inverse y
+/// sont écrits en octal (« \040 » pour l'espace).
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn sans_echappements(t: &str) -> String {
+    let mut sortie = Vec::with_capacity(t.len());
+    let octets = t.as_bytes();
+    let mut i = 0;
+    while i < octets.len() {
+        let code = octets
+            .get(i + 1..i + 4)
+            .and_then(|o| u8::from_str_radix(std::str::from_utf8(o).ok()?, 8).ok());
+        match (octets[i], code) {
+            (b'\\', Some(c)) => {
+                sortie.push(c);
+                i += 4;
+            }
+            (o, _) => {
+                sortie.push(o);
+                i += 1;
+            }
+        }
+    }
+    String::from_utf8_lossy(&sortie).into_owned()
+}
+
+/// macOS : chaque volume a son `st_dev` (les volumes d'un même conteneur APFS aussi, mais le compte est sur celui des
+/// données, comparé lui aussi).
+#[cfg(target_os = "macos")]
 fn sur_le_systeme(p: &Path) -> Option<bool> {
     use std::os::unix::fs::MetadataExt;
     let volume = |p: &Path| std::fs::metadata(p).ok().map(|m| m.dev());
@@ -144,7 +199,7 @@ fn disques() -> Vec<Disque> {
         let [_, point, genre, options, ..] = c[..] else {
             continue;
         };
-        let point = PathBuf::from(point.replace("\\040", " "));
+        let point = PathBuf::from(sans_echappements(point));
         let monte_pour_l_utilisateur = ["/run/media/", "/media/", "/mnt/"]
             .iter()
             .any(|d| point.starts_with(d) && point.as_os_str().len() > d.len());
@@ -739,6 +794,27 @@ pub fn menu() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Les sous-volumes d'un même btrfs (/, /home, /var/log) ont chacun leur `st_dev` : ils comptaient pour d'autres
+    /// disques, et une copie vers /var/log ou un sous-volume monté dans /mnt était acceptée. Le montage qui contient
+    /// le chemin, lui, dit le vrai système de fichiers.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn sous_volumes_du_systeme() {
+        let montages = "23 1 0:30 /@ / rw,relatime shared:1 - btrfs /dev/mapper/root rw\n\
+                        24 23 0:30 /@home /home rw,relatime shared:2 - btrfs /dev/mapper/root rw\n\
+                        25 23 0:30 /@log /var/log rw,relatime shared:3 - btrfs /dev/mapper/root rw\n\
+                        26 23 0:30 /@sauve /mnt/sauve rw,relatime shared:4 - btrfs /dev/mapper/root rw\n\
+                        90 23 8:17 / /run/media/alice/Mon\\040disque rw,nosuid - exfat /dev/sdb1 rw\n";
+        let maison = Path::new("/home/alice");
+        let systeme = |p: &str| sur_le_systeme_selon(montages, Path::new(p), maison);
+        assert_eq!(systeme("/var/log/copie"), Some(true));
+        assert_eq!(systeme("/mnt/sauve"), Some(true));
+        assert_eq!(systeme("/home/alice/Documents"), Some(true));
+        assert_eq!(systeme("/run/media/alice/Mon disque/x"), Some(false));
+        // Un nom qui commence pareil n'est pas sous ce montage.
+        assert_eq!(systeme("/run/media/alice/Mon disque2"), Some(true));
+    }
 
     fn jetable(nom: &str) -> PathBuf {
         let d = std::env::temp_dir().join(format!("gardien-copie-{nom}-{}", std::process::id()));
