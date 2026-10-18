@@ -51,7 +51,7 @@ pour revenir.
 
 | Domaine | Ce que fait Gardien |
 |---|---|
-| **Bilan de sécurité** | Une note de A à F : pare-feu, mises à jour et failles, chiffrement, ports ouverts, comptes, SSH, ce qui se lance en cachette, Wi-Fi, santé des disques… Chaque problème est expliqué, avec sa correction. |
+| **Bilan de sécurité** | Une note de A à F : pare-feu, mises à jour et failles, chiffrement, ports ouverts, comptes, SSH, ce qui se lance en cachette, partages ouverts à tous, Wi-Fi, santé des disques… Chaque problème est expliqué, avec sa correction. |
 | **Réseau local** | Chaque appareil, son fabricant, ses ports ouverts et ses risques ; les nouveaux venus signalés, les ports ouverts sur la box, l'adresse de la maison sur liste noire. |
 | **Wi-Fi, NAT, DNS, caméras** | Le canal Wi-Fi le plus libre, le type de NAT pour le jeu, le DNS le plus rapide (sans retirer un DNS qui protège), les caméras cachées. |
 | **Connexion pour le jeu** | Ping, gigue, pertes, débit et bufferbloat, comparés à tes habitudes. |
@@ -70,7 +70,8 @@ pour revenir.
   verrouillage de l'écran, comptes, SSH (et ses tentatives de connexion ratées, venues d'Internet ou de la maison),
   sudo, groupes qui valent root (docker, lxd, libvirt, disk), durcissement du noyau (sous macOS : volume du système scellé,
   signature du code imposée, validation des bibliothèques, extensions ajoutées), fichiers secrets mal protégés,
-  sauvegardes.
+  sauvegardes, partages de fichiers ouverts à tout le monde (Samba, NFS, partages Windows, Partage de fichiers de
+  macOS : l'accès sans mot de passe est fermé après accord, les comptes nommés gardent le leur).
 - Ce qui se cache : programmes lancés au démarrage, tâches planifiées, préchargement de bibliothèques, programmes
   privilégiés modifiés.
 - DNS réellement utilisé (et réponses inventées), certificats racine ajoutés (interception du HTTPS), extensions de

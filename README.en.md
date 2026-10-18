@@ -46,7 +46,7 @@ In the menu, choose **1** (full check), then **2** (fix). Arrows, Enter, and Esc
 
 | Area | What Gardien does |
 |---|---|
-| **Security check** | A grade from A to F: firewall, updates and vulnerabilities, encryption, open ports, accounts, SSH, what starts in secret, Wi-Fi, disk health… Each problem is explained, with its fix. |
+| **Security check** | A grade from A to F: firewall, updates and vulnerabilities, encryption, open ports, accounts, SSH, what starts in secret, shares open to everyone, Wi-Fi, disk health… Each problem is explained, with its fix. |
 | **Local network** | Every device, its manufacturer, its open ports and its risks; newcomers flagged, ports opened on the router, the home's address on a blocklist. |
 | **Wi-Fi, NAT, DNS, cameras** | The freest Wi-Fi channel, the NAT type for gaming, the fastest DNS (without removing a DNS that protects you), hidden cameras. |
 | **Connection for gaming** | Ping, jitter, loss, speed and bufferbloat, compared with your habits. |
@@ -64,7 +64,9 @@ In the menu, choose **1** (full check), then **2** (fix). Arrows, Enter, and Esc
 - Firewall, open ports (TCP and UDP), updates and known vulnerabilities, disk encryption, Secure Boot, screen lock,
   accounts, SSH (and its failed login attempts, from the Internet or from home), sudo, groups worth root (docker,
   lxd, libvirt, disk), kernel hardening (on macOS: sealed system volume, enforced code signing, library
-  validation, added extensions), badly protected secret files, backups.
+  validation, added extensions), badly protected secret files, backups, file shares open to everyone (Samba, NFS,
+  Windows shares, macOS File Sharing: the password-less access is closed after your consent, named accounts keep
+  theirs).
 - What hides: programs started at boot, scheduled tasks, library preloading, modified privileged programs.
 - The DNS actually used (and forged answers), added root certificates (HTTPS interception), browser extensions that
   read every site.

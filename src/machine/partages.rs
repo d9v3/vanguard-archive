@@ -17,6 +17,7 @@ enum Nuance {
     /// Le service de partage n'est pas lancé.
     ServiceArrete,
     /// Windows : « Tout le monde » désigne les comptes connus de l'ordinateur tant que le compte invité est désactivé.
+    #[cfg_attr(not(windows), allow(dead_code))]
     InviteDesactive,
 }
 
@@ -326,6 +327,8 @@ mod systeme {
         }
     }
 
+    // Même signature que sous Windows, où la lecture PowerShell peut échouer.
+    #[allow(clippy::unnecessary_wraps)]
     pub fn relever() -> Option<Releve> {
         let mut partages = Vec::new();
         let mut service_vu_arrete = false;
@@ -448,7 +451,7 @@ fn lire_sharing(sortie: &str, nuance: Nuance, dossier_modifiable: impl Fn(&str) 
     let mut partages = Vec::new();
     let (mut nom, mut chemin, mut partage, mut invite) = (String::new(), String::new(), false, false);
     let mut ouvert = false;
-    let mut clore = |nom: &str, chemin: &str, ouvert: bool, partages: &mut Vec<Partage>| {
+    let clore = |nom: &str, chemin: &str, ouvert: bool, partages: &mut Vec<Partage>| {
         if ouvert && !nom.is_empty() {
             partages.push(Partage {
                 nom: nom.to_string(),
@@ -477,7 +480,7 @@ fn lire_sharing(sortie: &str, nuance: Nuance, dossier_modifiable: impl Fn(&str) 
             (true, "afp" | "smb" | "ftp") => (partage, invite) = (false, false),
             (true, "shared") => partage = valeur == "1",
             (true, "guest access") => invite = valeur == "1",
-            (true, "}") | (true, "") if ligne.trim() == "}" => ouvert |= partage && invite,
+            (true, "") if ligne.trim() == "}" => ouvert |= partage && invite,
             _ => {}
         }
     }
@@ -583,14 +586,14 @@ mod tests {
             Nuance::Aucune,
         );
         assert_eq!(vieux.len(), 1);
-        assert!(vieux[0].fermeture.is_empty());
-        assert!(
+        assert_eq!(vieux[0].fermeture, Vec::<String>::new());
+        assert_eq!(
             samba(
                 "[global]\nworkgroup = X\n[x]\npath = /x\n",
                 "/etc/samba/smb.conf",
                 Nuance::Aucune
-            )
-            .is_empty()
+            ),
+            Vec::new()
         );
     }
 
