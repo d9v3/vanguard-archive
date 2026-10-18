@@ -96,12 +96,17 @@ function LancerAvec($fichier, [string[]]$arguments, [string]$entree) {
 
 function Sortie($fichier) { Get-Content (Join-Path $res "$fichier.out.txt") -Raw -Encoding UTF8 }
 
+# Les touches tapées pendant une étape longue (test de connexion…) restent dans la console : sans les vider, un
+# Entrée en trop répond à la place de la personne (mot de passe vide, question sans réponse).
+function Vider-Clavier { try { $Host.UI.RawUI.FlushInputBuffer() } catch { } }
+
 function Question($texte, $reponseAuto = 'n') {
     if ($Auto) {
         Journal "AUTO : $texte -> $reponseAuto"
         return $reponseAuto -eq 'o'
     }
     Write-Host "      ? $texte [o/n] " -ForegroundColor Yellow -NoNewline
+    Vider-Clavier
     $r = Read-Host
     Journal "QUESTION : $texte -> $r"
     $oui = $r -match '^(o|oui|y)'
@@ -332,6 +337,7 @@ if ((Sortie 'connexion') -match 'Mbit/s') { Ok 'Débit mesuré' } else { Bug 'D�
 Etape 'Mots de passe fuités'
 if ($Auto) { Info 'Sautée : il faut taper un mot de passe (test avec questions).' } else {
     Write-Host '      Tape « password » (il doit être trouvé des millions de fois), puis Entrée seule pour terminer.' -ForegroundColor Yellow
+    Vider-Clavier
     & $exe motdepasse
     Constat 'La saisie était-elle masquée et « password » trouvé dans des fuites ?'
 }
@@ -513,13 +519,18 @@ LancerAvec 'copier-refus' @('copier-fichiers', $refuse) "`nn`n"
 if ((Sortie 'copier-refus') -match 'disque du système|system disk') { Ok 'Copie sur le disque du système refusée' } else { Bug 'Copie sur le disque du système PAS refusée' }
 Remove-Item $refuse -Recurse -Force -ErrorAction SilentlyContinue
 if (Question 'Faire une vraie copie de tes dossiers vers le dossier partagé (dans les résultats, effacée après) ?') {
-    $temoin = Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'gardien-test-copie.txt'
-    Set-Content -Path $temoin -Value "copie de test $(Get-Date -Format o)" -Encoding UTF8
+    # Sur le Bureau : l'accès contrôlé aux dossiers de Defender, s'il est actif, empêche PowerShell d'écrire dans
+    # Documents, et le témoin n'existerait pas. Le Bureau n'est pas protégé d'office.
+    $temoin = Join-Path ([Environment]::GetFolderPath('Desktop')) 'gardien-test-copie.txt'
+    Set-Content -Path $temoin -Value "copie de test $(Get-Date -Format o)" -Encoding UTF8 -ErrorAction SilentlyContinue
+    if (-not (Test-Path -LiteralPath $temoin)) { Info "Fichier témoin impossible à poser : $temoin" }
     $vers = Join-Path $res 'copie'
     New-Item -ItemType Directory -Force $vers | Out-Null
     LancerAvec 'copier' @('copier-fichiers', $vers) "`no`n"
     $copie = Get-ChildItem $vers -Recurse -Filter 'gardien-test-copie.txt' -ErrorAction SilentlyContinue | Select-Object -First 1
-    if ($copie -and (Get-FileHash $copie.FullName).Hash -eq (Get-FileHash $temoin).Hash) { Ok 'Fichier témoin copié à l''identique' } else { Bug 'Fichier témoin PAS copié à l''identique' }
+    if (-not (Test-Path -LiteralPath $temoin)) { Info 'Témoin absent : copie à l''identique non vérifiée.' }
+    elseif ($copie -and (Get-FileHash $copie.FullName).Hash -eq (Get-FileHash $temoin).Hash) { Ok 'Fichier témoin copié à l''identique' }
+    else { Bug 'Fichier témoin PAS copié à l''identique' }
     if ((Sortie 'copier') -match 'Copie terminée et vérifiée|Copy finished and checked') { Ok 'Copie vérifiée par Gardien' } else { Bug 'Copie PAS vérifiée' }
     Remove-Item $temoin -Force -ErrorAction SilentlyContinue
     Remove-Item $vers -Recurse -Force -ErrorAction SilentlyContinue
@@ -661,12 +672,14 @@ if (Question 'Faire ce test ?') {
 
     Write-Host ''
     Write-Host '      Réponds « o » pour le pare-feu, puis clique NON dans la fenêtre UAC. Réponds « n » à tout le reste.' -ForegroundColor Yellow
+    Vider-Clavier
     & $exe corriger
     Constat 'Gardien a-t-il dit « Demande d''administrateur refusée : rien n''a été modifié » et PAS « ✔ fait » ?'
     if ((Get-NetFirewallProfile -Profile Private).Enabled) { Bug 'Pare-feu Privé réactivé malgré le refus' } else { Ok 'Refus respecté : pare-feu Privé toujours coupé' }
 
     Write-Host ''
     Write-Host '      Réponds « o » pour le pare-feu et accepte l''UAC. Pour les ports, « o » au port 135 seulement, « n » au reste.' -ForegroundColor Yellow
+    Vider-Clavier
     & $exe corriger
     if ((Get-NetFirewallProfile -Profile Private).Enabled) { Ok 'Pare-feu Privé réactivé par Gardien' }
     else {
@@ -688,6 +701,7 @@ if (Question 'Faire ce test ?') {
 
 Etape 'Couleurs et accents dans la console'
 if ($Auto) { Info 'Sautée : il faut regarder l''écran (test avec questions).' } else {
+    Vider-Clavier
     & $exe machine
     Constat 'Dans l''audit ci-dessus, les couleurs et les accents (é, è, ✔, ✖) s''affichent-ils correctement ?'
 }
