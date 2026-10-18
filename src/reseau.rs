@@ -929,7 +929,6 @@ pub async fn executer(o: Options) -> Result<Rapport, String> {
     };
     let noms = join_all(vivantes.iter().map(|&ip| scan::nom_hote(ip))).await;
     let arp = scan::table_arp();
-    let fabricants = scan::base_fabricants();
 
     let (mut base, chemins, _verrou) = Base::charger();
     // Le carnet de ce réseau : reconnu à la MAC de la box, sinon à la plage d'adresses.
@@ -1037,7 +1036,7 @@ pub async fn executer(o: Options) -> Result<Rapport, String> {
                 Hote {
                     ip,
                     nom,
-                    fabricant: mac.as_deref().and_then(|m| scan::fabricant(m, &fabricants)),
+                    fabricant: mac.as_deref().and_then(scan::fabricant),
                     surnom: connu.and_then(|c| c.surnom.clone()),
                     premier_vu: connu.and_then(|c| c.premier_vu.clone()),
                     mac,

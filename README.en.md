@@ -153,7 +153,7 @@ The code, its comments and its internal names are in French; every text shown to
 | `src/nettoyer/` | cleanup: items per system, space measured before and after |
 | `src/logiciels/` | software to install: checked catalog (`catalogue.rs`), state and installation per system |
 | `src/fuites.rs`, `src/donnees.rs` | leaked passwords, data backup |
-| `assets/oui.tsv` | manufacturers by MAC prefix (IEEE list) |
+| `assets/oui.tsv` | manufacturers by MAC prefix (IEEE list), stored as sorted tables at compile time (`build.rs`) |
 | `LICENCES-TIERCES.txt` | license notices of the included libraries (`outils/licences-tierces.py`) |
 
 ### Build and deploy

@@ -540,17 +540,29 @@ pub async fn nom_hote(ip: Ipv4Addr) -> Option<String> {
     (nom != ip.to_string()).then_some(nom)
 }
 
-/// Base des fabricants (préfixe MAC → nom), extraite des registres IEEE et intégrée au programme
-/// (outils/maj-fabricants.sh, relancé par deployer.sh quand elle a plus d'un mois).
-pub fn base_fabricants() -> HashMap<String, String> {
-    include_str!("../assets/oui.tsv")
-        .lines()
-        .filter_map(|l| l.split_once('\t'))
-        .map(|(p, n)| (p.to_string(), n.to_string()))
-        .collect()
+/// Base des fabricants (préfixe MAC → nom), extraite des registres IEEE (outils/maj-fabricants.sh, relancé par
+/// deployer.sh quand elle a plus d'un mois), rangée en tableaux triés à la compilation par build.rs.
+#[allow(clippy::all, clippy::pedantic)] // fichier produit, des milliers de nombres
+mod base {
+    include!(concat!(env!("OUT_DIR"), "/fabricants.rs"));
 }
 
-pub fn fabricant(mac: &str, base: &HashMap<String, String>) -> Option<String> {
+/// Le nom du fabricant pour les `n` premiers chiffres hexadécimaux de la MAC, cherché par dichotomie.
+fn nom_du_bloc(hex: &str, n: usize) -> Option<&'static str> {
+    let valeur = u64::from_str_radix(hex.get(..n)?, 16).ok()?;
+    let numero = match n {
+        6 => base::NOMS_6[base::PREFIXES_6.binary_search(&u32::try_from(valeur).ok()?).ok()?],
+        7 => base::NOMS_7[base::PREFIXES_7.binary_search(&u32::try_from(valeur).ok()?).ok()?],
+        9 => base::NOMS_9[base::PREFIXES_9.binary_search(&valeur).ok()?],
+        _ => return None,
+    };
+    let i = usize::from(numero);
+    let debut = usize::try_from(*base::DEBUTS.get(i)?).ok()?;
+    let fin = usize::try_from(*base::DEBUTS.get(i + 1)?).ok()?;
+    base::NOMS.get(debut..fin)
+}
+
+pub fn fabricant(mac: &str) -> Option<String> {
     let hex: String = mac
         .chars()
         .filter(char::is_ascii_hexdigit)
@@ -563,7 +575,7 @@ pub fn fabricant(mac: &str, base: &HashMap<String, String>) -> Option<String> {
     }
     // Le bloc le plus précis d'abord : MA-S (9 chiffres), MA-M (7), puis MA-L (6). Un grand bloc revendu en petits
     // morceaux porte sinon le nom du registre (« IEEE Registration Authority ») au lieu de celui du fabricant.
-    [9, 7, 6].iter().find_map(|&n| base.get(hex.get(..n)?).cloned())
+    [9, 7, 6].iter().find_map(|&n| nom_du_bloc(&hex, n)).map(str::to_string)
 }
 
 /// Nom du Wi-Fi auquel on est connecté, pour reconnaître le réseau dans la base (« Salon », « Chez Max »…).
@@ -658,18 +670,34 @@ mod tests {
 
     #[test]
     fn fabricant_et_mac_aleatoire() {
-        let base = base_fabricants();
-        assert!(base.len() > 30_000);
-        assert_eq!(
-            fabricant("c4:34:6b:12:34:56", &base).as_deref(),
-            Some("Hewlett Packard")
-        );
-        assert!(fabricant("ee:12:34:56:78:9a", &base).unwrap().contains("aléatoire"));
+        assert_eq!(fabricant("c4:34:6b:12:34:56").as_deref(), Some("Hewlett Packard"));
+        assert!(fabricant("ee:12:34:56:78:9a").unwrap().contains("aléatoire"));
         // Bloc MA-M (28 bits) : son fabricant, pas le registre qui détient le grand bloc.
         assert_eq!(
-            fabricant("00:55:da:0a:bc:de", &base).as_deref(),
+            fabricant("00:55:da:0a:bc:de").as_deref(),
             Some("Shinko Technos co.,ltd.")
         );
+        assert_eq!(fabricant("zz"), None);
+    }
+
+    /// Les tableaux produits par build.rs : triés (la dichotomie en dépend), complets, chaque nom trouvable.
+    #[test]
+    fn base_des_fabricants_rangee() {
+        assert!(base::PREFIXES_6.windows(2).all(|w| w[0] < w[1]));
+        assert!(base::PREFIXES_7.windows(2).all(|w| w[0] < w[1]));
+        assert!(base::PREFIXES_9.windows(2).all(|w| w[0] < w[1]));
+        let total = base::PREFIXES_6.len() + base::PREFIXES_7.len() + base::PREFIXES_9.len();
+        let lignes = include_str!("../assets/oui.tsv")
+            .lines()
+            .filter(|l| l.contains('\t'))
+            .count();
+        assert_eq!(total, lignes, "un préfixe de oui.tsv manque dans les tableaux");
+        assert_eq!(base::DEBUTS.last().copied(), u32::try_from(base::NOMS.len()).ok());
+        for (prefixes, n) in [(&base::PREFIXES_6[..], 6), (&base::PREFIXES_7[..], 7)] {
+            for &p in prefixes.iter().step_by(997) {
+                assert!(nom_du_bloc(&format!("{p:0n$X}"), n).is_some_and(|nom| !nom.is_empty()));
+            }
+        }
     }
 
     #[test]
