@@ -2,8 +2,10 @@
 # Publie la version de Cargo.toml sur GitHub (page « Releases ») : les trois programmes, sous des noms fixes que le
 # README relie (…/releases/latest/download/<nom>), et leurs empreintes SHA-256. À lancer après outils/deployer.sh,
 # quand la version est compilée et poussée. La version macOS vient d'un Mac de GitHub (.github/workflows/macos.yml) :
-# compilée pour ce commit si elle manque, en quelques minutes.
-#   outils/publier-version.sh
+# compilée pour ce commit si elle manque, en quelques minutes. Les notes reprennent toutes les versions déployées depuis
+# la page précédente : outils/deployer.sh ne publie pas chaque 0.x.y.
+#   outils/publier-version.sh           publier la version de Cargo.toml
+#   outils/publier-version.sh --notes   montrer les notes qu'elle aurait, sans rien publier
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -16,6 +18,62 @@ COMMIT=$(git rev-parse HEAD)
 LINUX=target/x86_64-unknown-linux-musl/release/gardien
 WINDOWS=target/x86_64-pc-windows-gnu/release/gardien.exe
 
+# Les commits « … (vX.Y.Z) » depuis la dernière page publiée, le plus récent en tête ; sans page d'avant (ou si elle
+# manque ici), celui de cette version seulement.
+versions() {
+  local precedente
+  precedente=$(gh release view --json tagName -q .tagName 2>/dev/null || true)
+  if [[ -n $precedente && $precedente != "$TAG" ]] && git rev-parse -q --verify "$precedente^{commit}" >/dev/null; then
+    git log --format='%H %s' "$precedente..HEAD"
+  else
+    git log --format='%H %s' --grep="(v$VERSION)" -1
+  fi | grep -E ' \(v[0-9]+\.[0-9]+\.[0-9]+\)$' || true
+}
+
+# Ce qui change, version par version : le titre de son commit, ses puces dessous (sans les lignes de co-auteur). Une
+# seule version : son titre en gras, comme avant ; plusieurs : un titre « X.Y.Z : … » chacune. Puis comment
+# télécharger.
+notes() {
+  local lignes nombre sha sujet puces
+  lignes=$(versions)
+  nombre=$(grep -c . <<<"$lignes" || true)
+  [[ $nombre -gt 0 ]] || printf '**%s %s**\n\n' "$NOM" "$VERSION"
+  while read -r sha sujet; do
+    [[ -n $sha ]] || continue
+    puces=$(git log -1 --format=%b "$sha" | grep -viE '^(co-authored-by|signed-off-by):' || true)
+    puces=$(sed -e :a -e '/^\n*$/{$d;N;ba' -e '}' <<<"$puces")
+    if [[ $nombre -gt 1 ]]; then
+      printf '### %s : %s\n\n' "$(sed -E 's/.* \(v([0-9.]+)\)$/\1/' <<<"$sujet")" "${sujet% (v*)}"
+    else
+      printf '**%s**\n\n' "${sujet% (v*)}"
+    fi
+    [[ -z $puces ]] || printf '%s\n\n' "$puces"
+  done <<<"$lignes"
+  printf '%s\n' "$TELECHARGER"
+}
+
+TELECHARGER="Télécharge le programme de ton système :
+- **Windows** : \`gardien-windows-x86_64.exe\`, double-clic. Il n'est pas signé : SmartScreen peut avertir
+  (« Informations complémentaires » puis « Exécuter quand même »).
+- **Linux** : \`gardien-linux-x86_64\` (toutes les distributions), \`chmod +x\` puis lancer dans un terminal.
+- **macOS** (Apple Silicon et Intel) : \`gardien-macos\`, puis \`xattr -d com.apple.quarantine gardien-macos\` et
+  lancer dans le Terminal.
+
+Empreintes SHA-256 : \`SHA256SUMS.txt\` (\`sha256sum -c SHA256SUMS.txt\`).
+
+---
+
+Download the program for your system: \`gardien-windows-x86_64.exe\` (Windows, unsigned: SmartScreen may warn, “More
+info” then “Run anyway”), \`gardien-linux-x86_64\` (any distribution: \`chmod +x\`, then run it in a terminal),
+\`gardien-macos\` (Apple Silicon and Intel: \`xattr -d com.apple.quarantine gardien-macos\`, then run it in Terminal).
+SHA-256 checksums: \`SHA256SUMS.txt\`."
+
+if [[ ${1:-} == --notes ]]; then
+  git fetch -q --tags origin 2>/dev/null || true
+  notes
+  exit 0
+fi
+
 # Les programmes publiés doivent être ceux de ce commit, et ce commit celui de GitHub : la page de la version y
 # renvoie, et le Mac de GitHub compile la tête de master.
 if [[ -n $(git status --porcelain --untracked-files=no) ]]; then
@@ -26,7 +84,7 @@ if [[ $(cat target/.commit-compile 2>/dev/null) != "$COMMIT" || ! -f $LINUX || !
   echo "Les programmes compilés ne viennent pas de ce commit : lancer d'abord outils/deployer.sh."
   exit 1
 fi
-git fetch -q origin
+git fetch -q --tags origin
 if [[ $(git rev-parse origin/master) != "$COMMIT" ]]; then
   echo "Ce commit n'est pas la tête de master sur GitHub : lancer d'abord outils/deployer.sh."
   exit 1
@@ -61,29 +119,7 @@ gh run download "$RUN" -n gardien-macos -D "$DOSSIER/mac" >/dev/null
 cp "$DOSSIER/mac/gardien" "$DOSSIER/gardien-macos"
 (cd "$DOSSIER" && sha256sum gardien-windows-x86_64.exe gardien-linux-x86_64 gardien-macos >SHA256SUMS.txt)
 
-# Ce qui change : le commit de la version (« … (v0.49.0) ») ; son titre en tête des notes, ses puces dessous (sans
-# les lignes de co-auteur).
-CHANGEMENT=$(git log --format=%s --grep="(v$VERSION)" -1 | sed -E 's/ \(v[0-9.]+\)$//')
-DETAILS=$(git log --format=%b --grep="(v$VERSION)" -1 | grep -viE '^(co-authored-by|signed-off-by):' || true)
-NOTES="**${CHANGEMENT:-$NOM $VERSION}**
-${DETAILS:+
-$DETAILS
-}
-Télécharge le programme de ton système :
-- **Windows** : \`gardien-windows-x86_64.exe\`, double-clic. Il n'est pas signé : SmartScreen peut avertir
-  (« Informations complémentaires » puis « Exécuter quand même »).
-- **Linux** : \`gardien-linux-x86_64\` (toutes les distributions), \`chmod +x\` puis lancer dans un terminal.
-- **macOS** (Apple Silicon et Intel) : \`gardien-macos\`, puis \`xattr -d com.apple.quarantine gardien-macos\` et
-  lancer dans le Terminal.
-
-Empreintes SHA-256 : \`SHA256SUMS.txt\` (\`sha256sum -c SHA256SUMS.txt\`).
-
----
-
-Download the program for your system: \`gardien-windows-x86_64.exe\` (Windows, unsigned: SmartScreen may warn, “More
-info” then “Run anyway”), \`gardien-linux-x86_64\` (any distribution: \`chmod +x\`, then run it in a terminal),
-\`gardien-macos\` (Apple Silicon and Intel: \`xattr -d com.apple.quarantine gardien-macos\`, then run it in Terminal).
-SHA-256 checksums: \`SHA256SUMS.txt\`."
+NOTES=$(notes)
 
 # Rien de personnel dans la page de la version ni dans les programmes : chemins du dossier personnel, nom dans les
 # métadonnées du .exe… (outils/confidentialite.py).

@@ -3,7 +3,7 @@
 
 Ce qui est voulu est écrit dans le dépôt, jamais seulement sur GitHub : le nom du programme et sa version
 (Cargo.toml), et .github/depot.json (description en anglais, sans la version, que ce script ajoute au bout :
-« … · v0.52.0 » ; lien de la page d'accueil ; sujets ; options). Lancé tout seul par outils/deployer.sh après chaque
+« … · v0.52.0 », celle de la dernière page publiée, qu'on télécharge ; lien de la page d'accueil ; sujets ; options). Lancé tout seul par outils/deployer.sh après chaque
 envoi : seul ce qui diffère est changé, et dit. Rien ne part sans le garde-fou de confidentialité
 (outils/confidentialite.py). Pas possible par gh : l'image de partage (Settings > Social preview, à la main).
 
@@ -53,6 +53,18 @@ def paquet():
     return tuple(re.search(rf'^{cle}\s*=\s*"([^"]+)"', section, re.M).group(1) for cle in ("name", "version"))
 
 
+def version_publiee(version):
+    """La version de la dernière page publiée (Releases) : une 0.x.y n'en a pas toujours une (outils/deployer.sh), et
+    la description montre ce qu'on télécharge. Sans page, ou sans réponse de GitHub : celle de Cargo.toml."""
+    try:
+        r = subprocess.run(["gh", "release", "view", "--json", "tagName", "-q", ".tagName"],
+                           capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.TimeoutExpired):
+        return version
+    etiquette = r.stdout.strip() if r.returncode == 0 else ""
+    return etiquette[1:] if re.fullmatch(r"v\d+\.\d+\.\d+", etiquette) else version
+
+
 def voulu(version):
     """Ce que la page doit montrer, vérifié : (description, lien, sujets, options)."""
     page = json.loads(VOULU.read_text(encoding="utf-8"))
@@ -82,6 +94,7 @@ def main():
     voir, renommer = args == ["--voir"], args == ["--renommer"]
     os.chdir(lancer("git", "rev-parse", "--show-toplevel").strip())
     nom, version = paquet()
+    version = version_publiee(version)
     description, accueil, sujets, options = voulu(version)
     origine = lancer("git", "remote", "get-url", "origin").strip()
     m = re.search(r"github\.com[:/]([\w.-]+)/([\w.-]+?)(?:\.git)?/?$", origine)

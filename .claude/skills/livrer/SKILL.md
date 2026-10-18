@@ -9,13 +9,15 @@ description: Livrer une version de Gardien — numéro de version, commit, inté
    par sujet, avec la ligne Co-Authored-By. Vérifie avec `git show --stat HEAD`.
 3. Rebase sur master, puis `git -C <arbre principal> merge --ff-only <branche>`. Si l'arbre principal a des
    changements non committés d'une autre session sur les mêmes fichiers : arrête-toi et demande.
-4. `outils/deployer.sh` : compile, refait les captures du README (nouvelle version : commit à part), installe,
-   pousse sur GitHub, met la clé à jour si elle est branchée. Si les captures n'ont pas pu se faire, le dire. Rien
+4. `outils/deployer.sh` : compile, installe, pousse sur GitHub, met la clé et la VM à jour ; pour une version
+   publiée, refait aussi les captures du README (commit à part). Une 0.x.y importante (sécurité, défaut qui gêne) :
+   `outils/deployer.sh --publier`. Si les captures n'ont pas pu se faire, le dire. Rien
    n'est poussé si un détail personnel paraît ou si un lien est mort (`outils/liens.py`) : corriger, puis relancer.
    Un lien douteux montré : l'ouvrir (WebFetch) ; bon mais refusé aux programmes, l'ajouter à `outils/liens.txt`.
-5. Page de la version (Releases) : `deployer.sh` la publie tout seul à la fin d'une nouvelle version
-   (`outils/publier-version.sh` : trois programmes, empreintes, notes tirées du commit de la version, version
-   macOS compilée sur un Mac de GitHub puis copiée sur la clé, notification). S'il l'a ratée, il dit pourquoi :
+5. Page de la version (Releases) : `deployer.sh` la publie tout seul pour une 0.x.0 ou avec `--publier`
+   (`outils/publier-version.sh` : trois programmes, empreintes, notes tirées des commits de chaque version depuis
+   la page précédente, aperçu par `--notes` ; version macOS compilée sur un Mac de GitHub puis copiée sur la clé,
+   notification). Sans page : la ligne « sans page sur GitHub » le dit, et la suivante la reprendra. S'il l'a ratée, il dit pourquoi :
    corriger, puis relancer `outils/publier-version.sh`.
 6. Mises à jour qui suivent chaque version :
    - page du dépôt : toute seule après chaque envoi (`outils/github.py` applique `.github/depot.json` : description

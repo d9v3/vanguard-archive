@@ -90,8 +90,8 @@ d'une API, espace de noms) se décrivent dans `outils/liens.txt`.
 ## Captures d'écran et image de partage
 
 `outils/captures.py` refait les captures du README (`assets/captures/`, en français et en anglais) et l'image de
-partage du dépôt (`assets/partage.png`). `deployer.sh` le lance à chaque nouvelle version, puisque le menu montre son
-numéro, et commite les images à part.
+partage du dépôt (`assets/partage.png`). `deployer.sh` le lance pour chaque version publiée, puisque le menu montre
+son numéro, et commite les images à part.
 
 Gardien y tourne pour de vrai, dans un pseudo-terminal de 80 colonnes, depuis une fausse clé et sur une copie des
 données : rien de vrai n'est touché. Le nom du réseau devient « Salon » ; adresses MAC (préfixe du fabricant gardé),
@@ -134,10 +134,17 @@ version, compiler avec `rustflags = ["--remap-path-prefix=/home/<compte>=~"]` da
 
 `outils/publier-version.sh` crée la page de la version sur GitHub (Releases) avec les trois programmes
 (`gardien-windows-x86_64.exe`, `gardien-linux-x86_64`, `gardien-macos`), leurs empreintes SHA-256 et, en notes, le
-commit de la version (titre et puces) ; les liens de téléchargement du README pointent toujours vers la dernière.
-`deployer.sh` le lance tout seul à la fin du déploiement d'une nouvelle version. Après chaque envoi, il met aussi à
-jour la page du dépôt (`outils/github.py`) : description en anglais suivie de la version, lien, sujets et options,
-écrits dans `.github/depot.json`. Seule l'image de partage se change à la main (Settings > Social preview).
+commit de chaque version depuis la page précédente (titre et puces), la plus récente en tête ; les liens de
+téléchargement du README pointent toujours vers la dernière. `--notes` montre ces notes sans rien publier.
+
+Chaque version va sur la clé, dans la VM et sur GitHub (le code), mais toutes n'ont pas leur page : `deployer.sh`
+publie tout seul une 0.x.0, et une 0.x.y seulement avec `deployer.sh --publier` (un correctif important). Moins de
+pages, c'est moins de minutes de Mac sur GitHub, et moins de programmes neufs que Defender et SmartScreen ne
+connaissent pas encore ; rien ne se perd, puisque la page suivante reprend les versions d'avant. Le Mac de GitHub
+compile la nuit quand le code a changé, et pour chaque page : la version macOS de la clé peut retarder sur les deux
+autres, et le déploiement le dit. Après chaque envoi, il met aussi à jour la page du dépôt (`outils/github.py`) :
+description en anglais suivie de la dernière version publiée, lien, sujets et options, écrits dans
+`.github/depot.json`. Seule l'image de partage se change à la main (Settings > Social preview).
 
 ## La clé USB
 

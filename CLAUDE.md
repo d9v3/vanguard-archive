@@ -17,7 +17,9 @@ Réponses à l'utilisateur en français, claires, avec le pourquoi.
 - macOS : compilé et testé sur un Mac de GitHub (`gh workflow run macos.yml --ref master`) ; ici, clippy seulement.
 - CI (`.github/workflows/ci.yml`) : Linux à chaque envoi (fmt, clippy -D warnings ×4, tests) ; vrai Windows la nuit
   si le code a changé, ou `gh workflow run ci.yml --ref master` (résultat : `gh run list --workflow ci.yml`).
-- Déployer (binaire local, clé USB, GitHub) : `outils/deployer.sh`. À chaque nouvelle version, il refait aussi les
+- Déployer (binaire local, clé USB, VM, code sur GitHub) : `outils/deployer.sh`, à chaque version. Une page de
+  version (Releases) seulement pour une 0.x.0, ou une 0.x.y importante avec `--publier` (correctif de sécurité,
+  défaut qui gêne) ; elle reprend toutes les versions d'avant sans page. Pour chaque page, il refait aussi les
   captures du README (`outils/captures.py`, sur une copie des données, ce qui identifierait la maison masqué) et les
   commite à part.
 - Liens : `outils/liens.py` les vérifie tous (`--hors-ligne` : les internes seulement), tout seul avant chaque envoi
@@ -72,12 +74,12 @@ Réponses à l'utilisateur en français, claires, avec le pourquoi.
   `\\host.lan\Data` dans Windows ; `TESTER-GARDIEN.bat` ouvre le menu). Chaque passe y laisse son dossier dans
   `resultats/`, avec `historique.txt` et `dernier-rapport.html`, lisibles d'ici. Ne jamais lancer un `.exe` d'ici :
   binfmt le confie à Wine, qui crée un `~/.wine`.
-- Après chaque version, tout seul au déploiement : la page de la version (`outils/publier-version.sh`) et celle du
-  dépôt (`outils/github.py` applique `.github/depot.json` : description et version, lien du journal, sujets,
-  options). Si les fonctions changent, réécrire la description dans `.github/depot.json` (en anglais, 350
-  caractères au plus avec la version). À la main : journal du projet, liste des fonctions (README.md, README.en.md,
-  outils/LISEZMOI.txt, outils/README.txt) et tableau Structure (CONTRIBUTING.md, CONTRIBUTING.en.md) si un module
-  change.
+- Tout seul au déploiement : la page de la version quand il en faut une (`outils/publier-version.sh` ; aperçu de
+  ses notes : `--notes`) et celle du dépôt (`outils/github.py` applique `.github/depot.json` : description et
+  dernière version publiée, lien du journal, sujets, options). Si les fonctions changent, réécrire la description
+  dans `.github/depot.json` (en anglais, 350 caractères au plus avec la version). À la main : journal du projet,
+  liste des fonctions (README.md, README.en.md, outils/LISEZMOI.txt, outils/README.txt) et tableau Structure
+  (CONTRIBUTING.md, CONTRIBUTING.en.md) si un module change.
 
 ## Erreurs rapportées
 

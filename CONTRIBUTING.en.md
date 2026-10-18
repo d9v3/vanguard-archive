@@ -89,8 +89,8 @@ down) is only shown. Links that cannot be opened as they are (an API endpoint, a
 ## Screenshots and social preview
 
 `outils/captures.py` retakes the README screenshots (`assets/captures/`, in French and English) and the repository's
-social preview (`assets/partage.png`). `deployer.sh` runs it for each new version, since the menu shows its number,
-and commits the images separately.
+social preview (`assets/partage.png`). `deployer.sh` runs it for each published version, since the menu shows its
+number, and commits the images separately.
 
 Gardien really runs there, in an 80-column pseudo-terminal, from a fake key and on a copy of the data: nothing real is
 touched. The network becomes “Salon”; MAC addresses (vendor prefix kept), IP addresses (a made-up network, lengths and
@@ -131,10 +131,16 @@ a program that still contains the home folder).
 
 `outils/publier-version.sh` creates the version's GitHub release with the three programs
 (`gardien-windows-x86_64.exe`, `gardien-linux-x86_64`, `gardien-macos`), their SHA-256 checksums and, as notes, the
-version's commit (title and bullets); the README's download links always point to the latest one. `deployer.sh`
-runs it by itself at the end of the deployment of a new version. After each push, it also updates the repository
-page (`outils/github.py`): English description followed by the version, link, topics and options, written in
-`.github/depot.json`. Only the social preview image is changed by hand (Settings > Social preview).
+commit of each version since the previous release (title and bullets), the newest first; the README's download
+links always point to the latest one. `--notes` shows these notes without publishing anything.
+
+Every version goes to the key, the VM and GitHub (the code), but not every one gets a release: `deployer.sh`
+publishes a 0.x.0 by itself, and a 0.x.y only with `deployer.sh --publier` (an important fix). Fewer releases mean
+fewer Mac minutes on GitHub, and fewer new programs that Defender and SmartScreen do not know yet; nothing is lost,
+since the next release takes over the versions before it. GitHub's Mac builds at night when the code changed, and
+for each release: the key's macOS version can lag behind the other two, and the deployment says so. After each push,
+it also updates the repository page (`outils/github.py`): English description followed by the latest published
+version, link, topics and options, written in `.github/depot.json`. Only the social preview image is changed by hand (Settings > Social preview).
 
 ## The USB key
 

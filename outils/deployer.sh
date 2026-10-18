@@ -6,6 +6,8 @@
 #   outils/deployer.sh --sans-compiler copier les dernières versions compilées (après chaque compilation)
 #   outils/deployer.sh --local         comme sans option, mais rien ne part sur GitHub (ni le code, ni les tickets
 #                                      du journal) ; le service de copie qui suit la compilation le respecte aussi
+#   outils/deployer.sh --publier       comme sans option, et publie la page de la version (Releases) même pour une
+#                                      0.x.y : sans l'option, seule une 0.x.0 a la sienne
 set -euo pipefail
 cd "$(dirname "$0")/.."
 export PATH="$HOME/.cargo/bin:$PATH"
@@ -15,6 +17,11 @@ WINDOWS=target/x86_64-pc-windows-gnu/release/gardien.exe
 # Commit dont viennent les binaires compilés : on ne recompile pas une version déjà compilée.
 COMMIT_COMPILE=target/.commit-compile
 MODE=${1:-}
+FORCER_PUBLICATION=""
+if [[ $MODE == --publier ]]; then
+  MODE=""
+  FORCER_PUBLICATION=1
+fi
 # « Seulement sur cet ordinateur » : rien n'est envoyé sur GitHub. Le repère dure 2 h, assez pour le service de copie
 # que la compilation déclenche (--sans-compiler, qui sinon pousserait) ; un déploiement normal l'efface.
 REPERE_LOCAL="${XDG_RUNTIME_DIR:-/tmp}/gardien-deployer-local"
@@ -78,13 +85,22 @@ if [[ $MODE == --branchement ]]; then
 elif [[ $MODE != --sans-compiler ]]; then
   compiler
 fi
-# Captures d'écran du README (assets/captures/) : refaites à chaque nouvelle version, puisque le menu montre son
-# numéro. Gardien y tourne sur une copie des données, sans rien toucher de vrai, et ce qui identifierait la maison
-# est masqué (outils/captures.py). Elles partent dans leur propre commit, comme la liste des fabricants. En cas
-# d'échec, le README garde celles d'avant.
+# Page de la version sur GitHub (Releases) : une 0.x.0 a la sienne, une 0.x.y seulement avec --publier. Les autres
+# vont quand même sur la clé, dans la VM et sur GitHub (le code), et la page suivante les reprend toutes
+# (outils/publier-version.sh). Moins de pages : moins de minutes de Mac sur GitHub, et moins de programmes neufs, que
+# Defender et SmartScreen ne connaissent pas encore.
+# Captures d'écran du README (assets/captures/) : refaites pour chaque page publiée, puisque le menu montre le numéro
+# de la version téléchargée. Gardien y tourne sur une copie des données, sans rien toucher de vrai, et ce qui
+# identifierait la maison est masqué (outils/captures.py). Elles partent dans leur propre commit, comme la liste des
+# fabricants. En cas d'échec, le README garde celles d'avant.
+A_PUBLIER=""
 if [[ -z $MODE ]]; then
   VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
-  if [[ $(cat assets/captures/VERSION 2>/dev/null) != "$VERSION" ]]; then
+  if [[ -z $LOCAL && ( $VERSION =~ ^[0-9]+\.[0-9]+\.0$ || -n $FORCER_PUBLICATION ) ]] &&
+    ! timeout 30 gh release view "v$VERSION" >/dev/null 2>&1; then
+    A_PUBLIER=1
+  fi
+  if [[ -n $A_PUBLIER && $(cat assets/captures/VERSION 2>/dev/null) != "$VERSION" ]]; then
     if command -v uv >/dev/null && timeout 900 uv run -q --no-project --with pyte python outils/captures.py "$LINUX"; then
       git add assets/captures assets/partage.png
       # Les captures ne sont pas dans le programme : celui qui vient d'être compilé reste celui de ce commit, que
@@ -111,9 +127,11 @@ elif git remote get-url origin >/dev/null 2>&1; then
     echo "Code envoyé sur GitHub."
     # La page du dépôt suit le dépôt : description et version, lien, sujets (outils/github.py, .github/depot.json).
     python3 outils/github.py || echo "Page du dépôt sur GitHub pas mise à jour (voir ci-dessus)."
-    # Une nouvelle version aura sa page (Releases) à la fin du déploiement.
-    if [[ -z $MODE ]] && ! timeout 30 gh release view "v$VERSION" >/dev/null 2>&1; then
+    # La page de la version, s'il en faut une (A_PUBLIER, plus haut), vient à la fin du déploiement.
+    if [[ -n $A_PUBLIER ]]; then
       PUBLIER=1
+    elif [[ -z $MODE ]] && ! timeout 30 gh release view "v$VERSION" >/dev/null 2>&1; then
+      echo "Version v$VERSION sans page sur GitHub (une 0.x.y n'en a qu'avec --publier) : la prochaine page la reprendra."
     fi
   else
     echo "GitHub injoignable : le code partira au prochain déploiement."
@@ -202,7 +220,12 @@ fi
 publier_la_version() {
   [[ -n ${PUBLIER:-} ]] || return 0
   echo "Nouvelle version v$VERSION : sa page sur GitHub…"
-  outils/publier-version.sh || echo "Page de la version pas publiée (voir ci-dessus) : relancer outils/publier-version.sh."
+  if outils/publier-version.sh; then
+    # La description du dépôt montre la dernière version publiée : elle change maintenant.
+    python3 outils/github.py || echo "Page du dépôt sur GitHub pas mise à jour (voir ci-dessus)."
+  else
+    echo "Page de la version pas publiée (voir ci-dessus) : relancer outils/publier-version.sh."
+  fi
 }
 
 CLE=$(find "/run/media/$USER" -maxdepth 2 \( -name gardien.cle -o -name sentinel.cle -o -name netscan.cle \) -printf '%h\n' 2>/dev/null | head -1)
@@ -259,6 +282,14 @@ if [[ -f $MAC/gardien ]]; then
   mkdir -p "$CLE/macOS"
   cp -f "$MAC/gardien" "$CLE/macOS/gardien"
   cp -f "outils/cle/Lancer Gardien.command" "$CLE/"
+  # Le Mac de GitHub ne compile pas chaque version (la nuit si le code a changé, et pour chaque page publiée) : la
+  # version macOS de la clé peut retarder sur les deux autres, et c'est dit.
+  VERSION_MAC=$(git show "$(cat "$MAC/commit.txt" 2>/dev/null):Cargo.toml" 2>/dev/null |
+    sed -n 's/^version = "\(.*\)"/\1/p' | head -1)
+  VERSION_ICI=$(./"$LINUX" --version | awk '{print $2}')
+  if [[ -n $VERSION_MAC && $VERSION_MAC != "$VERSION_ICI" ]]; then
+    echo "Clé : macOS en $VERSION_MAC (dernière compilation sur un Mac de GitHub), Linux et Windows en $VERSION_ICI."
+  fi
 fi
 # macOS écrit dès le branchement (index Spotlight, journal des changements, corbeille) : ces témoins l'en
 # dispensent, la clé reste propre même avant que Gardien la protège.
