@@ -935,56 +935,26 @@ fn comptes() -> Constat {
     }
 }
 
-fn wifi(passerelle: Option<String>) -> Option<Constat> {
+/// Wi-Fi : protection du réseau connecté, et un éventuel jumeau maléfique parmi les réseaux visibles.
+fn wifi(passerelle: Option<String>) -> Vec<Constat> {
     // SSID en dernier et sans échappement : un nom de réseau contenant « : » reste intact.
-    let s = sortie(
+    let Some(s) = sortie(
         "nmcli",
         &["-t", "-e", "no", "-f", "ACTIVE,SECURITY,SSID", "dev", "wifi"],
-    )?;
-    let actif = s.lines().find(|l| l.starts_with("yes:"))?;
-    let mut c = actif.splitn(3, ':').skip(1);
-    let (secu, ssid) = (c.next().unwrap_or("").to_string(), c.next()?.to_string());
+    ) else {
+        return Vec::new();
+    };
+    let visibles = super::wifi::lire_nmcli(&s);
+    let Some(actif) = visibles.iter().find(|v| v.actif) else {
+        return Vec::new();
+    };
     let admin = format!(
         "xdg-open https://{}",
         passerelle.unwrap_or_else(|| "192.168.1.1".into())
     );
-    let routeur = tr!(
-        "Ouvrir l'admin du routeur > Wi-Fi > Sécurité : choisir « WPA2/WPA3 » ou « WPA3 »",
-        "Open the router admin > Wi-Fi > Security: choose “WPA2/WPA3” or “WPA3”"
-    );
-    Some(if secu.is_empty() || secu == "--" {
-        alerte(
-            "Wi-Fi",
-            Niveau::Eleve,
-            trf!(
-                "« {ssid} » est un réseau ouvert : le trafic non chiffré est visible.",
-                "“{ssid}” is an open network: unencrypted traffic is visible."
-            ),
-        )
-        .manuel(routeur, &[&admin])
-    } else if secu.contains("WEP") || (secu.contains("WPA1") && !secu.contains("WPA2")) {
-        alerte(
-            "Wi-Fi",
-            Niveau::Eleve,
-            trf!(
-                "« {ssid} » utilise {secu}, cassable en minutes.",
-                "“{ssid}” uses {secu}, crackable in minutes."
-            ),
-        )
-        .manuel(routeur, &[&admin])
-    } else if secu.contains("WPA3") {
-        ok("Wi-Fi", trf!("« {ssid} » en {secu}.", "“{ssid}” uses {secu}."))
-    } else {
-        alerte(
-            "Wi-Fi",
-            Niveau::Info,
-            trf!(
-                "« {ssid} » en {secu}. WPA3 serait mieux si le routeur le permet.",
-                "“{ssid}” uses {secu}. WPA3 would be better if the router allows it."
-            ),
-        )
-        .manuel(routeur, &[&admin])
-    })
+    let mut constats = vec![super::wifi::securite(&actif.ssid, &actif.securite, &[&admin])];
+    constats.extend(super::wifi::jumeau(&visibles));
+    constats
 }
 
 /// Verrouillage automatique de l'écran après inactivité, selon l'environnement de bureau.

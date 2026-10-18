@@ -16,6 +16,7 @@ mod journaux;
 pub mod linux;
 mod navigateur;
 mod sante;
+mod wifi;
 #[cfg(target_os = "linux")]
 use linux as os;
 #[cfg(windows)]

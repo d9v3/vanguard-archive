@@ -593,6 +593,31 @@ fn sauvegardes() -> Constat {
     }
 }
 
+/// Wi-Fi : protection du réseau connecté, et un éventuel jumeau maléfique parmi les réseaux visibles.
+/// system_profiler met quelques secondes : il tourne en même temps que les autres vérifications.
+fn wifi() -> Vec<Constat> {
+    let Some(r) = crate::commande::lancer(
+        std::process::Command::new("system_profiler").arg("SPAirPortDataType"),
+        40,
+    ) else {
+        return Vec::new();
+    };
+    let visibles = super::wifi::lire_system_profiler(&r.sortie);
+    let Some(actif) = visibles.iter().find(|v| v.actif) else {
+        return Vec::new();
+    };
+    let nom = if actif.ssid == super::wifi::CACHE {
+        tr!("nom caché par macOS", "name hidden by macOS")
+    } else {
+        actif.ssid.as_str()
+    };
+    let admin = crate::scan::passerelle().map(|g| format!("open http://{g}"));
+    let admin: Vec<&str> = admin.iter().map(String::as_str).collect();
+    let mut constats = vec![super::wifi::securite(nom, &actif.securite, &admin)];
+    constats.extend(super::wifi::jumeau(&visibles));
+    constats
+}
+
 pub fn auditer() -> Audit {
     use super::verif;
     let feu = pare_feu();
@@ -600,6 +625,7 @@ pub fn auditer() -> Audit {
     let mut constats = vec![feu];
     constats.extend(super::en_parallele(vec![
         verif!(mode_furtif()),
+        verif!(wifi()),
         verif!(ports_ecoute(feu_actif)),
         verif!([chiffrement_disque()]),
         verif!(protection_systeme()),

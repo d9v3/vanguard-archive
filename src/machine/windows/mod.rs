@@ -611,8 +611,13 @@ fn ports_ecoute(pare_feu_actif: bool, ip_lan: Option<&str>) -> Vec<Constat> {
     constats
 }
 
-fn wifi() -> Option<Constat> {
-    let texte = crate::commande::lancer(Command::new("netsh").args(["wlan", "show", "interfaces"]), 15)?.sortie;
+/// Wi-Fi : protection du réseau connecté, et un éventuel jumeau maléfique parmi les réseaux visibles.
+fn wifi() -> Vec<Constat> {
+    let Some(texte) =
+        crate::commande::lancer(Command::new("netsh").args(["wlan", "show", "interfaces"]), 15).map(|r| r.sortie)
+    else {
+        return Vec::new();
+    };
     let champ = |cle: &str| {
         texte
             .lines()
@@ -620,35 +625,22 @@ fn wifi() -> Option<Constat> {
             .find(|l| l.starts_with(cle) && !l.starts_with("BSSID"))
             .and_then(|l| Some(l.split_once(':')?.1.trim().to_string()))
     };
-    let ssid = champ("SSID")?;
-    let auth = champ("Authenti")?;
-    let routeur = tr!(
-        "Ouvrir l'admin du routeur > Wi-Fi > Sécurité : choisir « WPA2/WPA3 » ou « WPA3 »",
-        "Open the router admin > Wi-Fi > Security: choose “WPA2/WPA3” or “WPA3”"
-    );
-    Some(if auth.contains("WPA3") {
-        ok("Wi-Fi", trf!("« {ssid} » en {auth}.", "“{ssid}” uses {auth}."))
-    } else if auth.contains("WPA2") {
-        alerte(
-            "Wi-Fi",
-            Niveau::Info,
-            trf!(
-                "« {ssid} » en {auth}. WPA3 serait mieux si le routeur le permet.",
-                "“{ssid}” uses {auth}. WPA3 would be better if the router allows it."
-            ),
-        )
-        .manuel(routeur, &[])
-    } else {
-        alerte(
-            "Wi-Fi",
-            Niveau::Eleve,
-            trf!(
-                "« {ssid} » en {auth} : réseau ouvert ou chiffrement faible.",
-                "“{ssid}” uses {auth}: open network or weak encryption."
-            ),
-        )
-        .manuel(routeur, &[])
-    })
+    let (Some(ssid), Some(auth)) = (champ("SSID"), champ("Authenti")) else {
+        return Vec::new();
+    };
+    let mut constats = vec![super::wifi::securite(&ssid, &auth, &[])];
+    // Windows 11 24H2 réserve la liste à l'autorisation de localisation : sans elle, netsh ne liste rien, et il n'y a
+    // simplement pas de jumeau à chercher.
+    if let Some(r) = crate::commande::lancer(Command::new("netsh").args(["wlan", "show", "networks"]), 15) {
+        let mut visibles = super::wifi::lire_netsh(&r.sortie);
+        visibles.push(super::wifi::Visible {
+            ssid,
+            securite: auth,
+            actif: true,
+        });
+        constats.extend(super::wifi::jumeau(&visibles));
+    }
+    constats
 }
 
 /// Lignes d'une section de `lectures_rapides`, sans leur préfixe ; `None` si la section n'a pas pu être lue.
