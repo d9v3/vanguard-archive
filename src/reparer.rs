@@ -89,7 +89,8 @@ fn publique(ip: IpAddr) -> bool {
 }
 
 /// Lignes du fichier hosts qui envoient un nom vers une adresse d'Internet (adresse telle qu'écrite, noms).
-/// Un malware s'en sert pour détourner une banque, un antivirus ou les mises à jour vers son serveur.
+/// Un malware s'en sert pour détourner une banque, un antivirus ou les mises à jour vers son serveur. Les noms,
+/// écrits par lui, sont seulement montrés : rendus inoffensifs. L'adresse, qui sert aux commandes, en est une.
 fn redirections(hosts: &str) -> Vec<(String, String)> {
     hosts
         .lines()
@@ -102,7 +103,7 @@ fn redirections(hosts: &str) -> Vec<(String, String)> {
                 return None;
             }
             let noms = mots.collect::<Vec<_>>().join(" ");
-            (!noms.is_empty()).then(|| (ip.to_string(), noms))
+            (!noms.is_empty()).then(|| (ip.to_string(), affichable(&noms)))
         })
         .collect()
 }
@@ -267,17 +268,24 @@ fn present(cmd: &str) -> bool {
 #[cfg(target_os = "linux")]
 const TROUVER_PROXY: &str = "grep -insE '^[^#]*(https?|all|ftp)_proxy='";
 
+/// Variables de proxy de l'environnement (`lire` en donne la valeur), en « nom=valeur ». La valeur vient d'un
+/// fichier de démarrage que tout programme de la session peut écrire : montrée rendue inoffensive.
+#[cfg(target_os = "linux")]
+fn variables_proxy(lire: impl Fn(&str) -> Option<String>) -> Vec<String> {
+    ["http_proxy", "https_proxy", "all_proxy", "ftp_proxy"]
+        .iter()
+        .filter_map(|v| {
+            let valeur = lire(v).or_else(|| lire(&v.to_uppercase()))?;
+            (!valeur.is_empty()).then(|| format!("{v}={}", affichable(&valeur)))
+        })
+        .collect()
+}
+
 /// Proxy imposé et redirections du fichier hosts : les deux façons classiques de détourner la navigation.
 #[cfg(target_os = "linux")]
 fn navigation() -> Reparation {
     let detournees = redirections(&std::fs::read_to_string("/etc/hosts").unwrap_or_default());
-    let variables: Vec<String> = ["http_proxy", "https_proxy", "all_proxy", "ftp_proxy"]
-        .iter()
-        .filter_map(|v| {
-            let valeur = std::env::var(v).or_else(|_| std::env::var(v.to_uppercase())).ok()?;
-            (!valeur.is_empty()).then(|| format!("{v}={valeur}"))
-        })
-        .collect();
+    let variables = variables_proxy(|v| std::env::var(v).ok());
     let gnome = present("gsettings")
         .then(|| {
             crate::commande::lancer(
@@ -909,7 +917,18 @@ fn etat_windows() -> Option<EtatWindows> {
             profils = $profils.Count
           } | ConvertTo-Json -Compress",
     )?;
-    serde_json::from_str(&json).ok()
+    lire_etat_windows(&json)
+}
+
+/// La réponse d'`etat_windows`. Proxy et script de proxy viennent du registre, que tout programme de la session peut
+/// écrire, et ne servent qu'à être montrés : rendus inoffensifs.
+#[cfg(windows)]
+fn lire_etat_windows(json: &str) -> Option<EtatWindows> {
+    let mut e: EtatWindows = serde_json::from_str(json).ok()?;
+    for t in [&mut e.proxy, &mut e.pac, &mut e.winhttp] {
+        *t = affichable(t);
+    }
+    Some(e)
 }
 
 #[cfg(windows)]
@@ -1433,5 +1452,47 @@ mod tests {
             r"185\.12\.0\.9|2a00:1450::1|::ffff:93\.184\.216\.34"
         );
         assert!(resume_redirections(&r).starts_with("185.12.0.9 → banque.fr www.banque.fr, "));
+    }
+
+    /// Le fichier hosts s'écrit par qui détourne la navigation : un nom piégé arrive inoffensif dans ce qui est
+    /// montré. L'adresse, qui sert à la commande, est déjà vérifiée (c'en est une).
+    #[test]
+    fn redirection_piegee() {
+        let r = redirections("185.12.0.9 banque.fr\x1b]52;c;eA==\x07\u{202e}\x1b[2K\n");
+        assert_eq!(
+            r,
+            [("185.12.0.9".to_string(), "banque.fr�]52;c;eA==���[2K".to_string())]
+        );
+        assert!(!crate::ui::contient_un_piege(&resume_redirections(&r)));
+        assert_eq!(motif_adresses(&r), r"185\.12\.0\.9");
+    }
+
+    /// Une variable de proxy vient d'un fichier de démarrage que tout programme de la session peut écrire.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn variable_de_proxy_piegee() {
+        let v = variables_proxy(|n| {
+            (n == "HTTPS_PROXY").then(|| "http://10.0.0.9:3128\x1b]52;c;eA==\x07\u{202e}".to_string())
+        });
+        assert_eq!(v, ["https_proxy=http://10.0.0.9:3128�]52;c;eA==��"]);
+    }
+
+    /// Proxy et script de proxy viennent du registre, que tout programme de la session peut écrire.
+    #[cfg(windows)]
+    #[test]
+    fn proxy_windows_piege() {
+        let json = serde_json::json!({
+            "proxy": "10.0.0.9:3128\u{1b}]52;c;eA==\u{7}",
+            "pac": "http://pac.exemple\u{1b}[2K\r\u{202e}/p.pac",
+            "winhttp": "proxy\u{1b}[8m",
+            "parefeu_coupe": "",
+            "profils": 3
+        })
+        .to_string();
+        let e = lire_etat_windows(&json).unwrap();
+        assert_eq!(e.proxy, "10.0.0.9:3128�]52;c;eA==�");
+        assert_eq!(e.pac, "http://pac.exemple�[2K��/p.pac");
+        assert_eq!(e.winhttp, "proxy�[8m");
+        assert_eq!(e.profils, 3);
     }
 }
