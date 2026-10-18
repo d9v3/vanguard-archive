@@ -121,21 +121,87 @@ fn sur_le_systeme(p: &Path) -> Option<bool> {
 /// monté dans /mnt passait pour un autre disque.
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 fn sur_le_systeme_selon(montages: &str, p: &Path, maison: &Path) -> Option<bool> {
-    let volume = |chemin: &Path| {
-        montages
-            .lines()
-            .filter_map(|l| {
-                let mut c = l.split_whitespace().skip(2);
-                let dev = c.next()?;
-                let point = PathBuf::from(sans_echappements(c.nth(1)?));
-                chemin.starts_with(&point).then_some((point, dev))
-            })
-            // Le plus long ; à longueur égale, le dernier monté, qui recouvre les autres.
-            .max_by_key(|(point, _)| point.as_os_str().len())
-            .map(|(_, dev)| dev)
-    };
+    let volume = |chemin: &Path| montage(montages, chemin).map(|(dev, _)| dev);
     let v = volume(p)?;
     Some([volume(Path::new("/")), volume(maison)].contains(&Some(v)))
+}
+
+/// Le montage le plus profond qui contient `chemin`, d'après /proc/self/mountinfo : (majeur:mineur, type de système
+/// de fichiers, écrit après « - »).
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn montage<'a>(montages: &'a str, chemin: &Path) -> Option<(&'a str, &'a str)> {
+    montages
+        .lines()
+        .filter_map(|l| {
+            let mut c = l.split_whitespace().skip(2);
+            let dev = c.next()?;
+            let point = PathBuf::from(sans_echappements(c.nth(1)?));
+            let genre = l.split(" - ").nth(1)?.split_whitespace().next()?;
+            chemin.starts_with(&point).then_some((point, dev, genre))
+        })
+        // Le plus long ; à longueur égale, le dernier monté, qui recouvre les autres.
+        .max_by_key(|(point, ..)| point.as_os_str().len())
+        .map(|(_, dev, genre)| (dev, genre))
+}
+
+/// Un système de fichiers qui ne garde pas un fichier de 4 Go ou plus : FAT32 (« vfat » sous Linux, « msdos » sous
+/// macOS, « FAT32 » sous Windows).
+fn limite_4_go(genre: &str) -> bool {
+    matches!(genre.to_ascii_lowercase().as_str(), "vfat" | "msdos" | "fat32" | "fat")
+}
+
+/// Le type du système de fichiers de `p` ; `None` s'il ne se lit pas.
+#[cfg(target_os = "linux")]
+fn genre_du_volume(p: &Path) -> Option<String> {
+    let montages = std::fs::read_to_string("/proc/self/mountinfo").ok()?;
+    montage(&montages, &p.canonicalize().ok()?).map(|(_, genre)| genre.to_string())
+}
+
+#[cfg(target_os = "macos")]
+fn genre_du_volume(p: &Path) -> Option<String> {
+    use std::os::unix::ffi::OsStrExt;
+    let c = std::ffi::CString::new(p.as_os_str().as_bytes()).ok()?;
+    // SAFETY : `statfs` est une structure C de nombres et de tableaux de caractères, valide à zéro.
+    let mut s: libc::statfs = unsafe { std::mem::zeroed() };
+    // SAFETY : `c` est une chaîne C terminée par un zéro, `s` une structure à nous, écrite par statfs seulement.
+    if unsafe { libc::statfs(c.as_ptr(), &raw mut s) } != 0 {
+        return None;
+    }
+    // SAFETY : statfs a rempli f_fstypename, une chaîne terminée par un zéro dans son tableau.
+    let nom = unsafe { std::ffi::CStr::from_ptr(s.f_fstypename.as_ptr()) };
+    Some(nom.to_string_lossy().into_owned())
+}
+
+#[cfg(windows)]
+fn genre_du_volume(p: &Path) -> Option<String> {
+    let lecteur: String = p
+        .to_string_lossy()
+        .trim_start_matches(r"\\?\")
+        .chars()
+        .take(3)
+        .collect();
+    let format = crate::machine::windows::ps(&format!(
+        "[IO.DriveInfo]::new('{}').DriveFormat",
+        crate::commande::ps_texte(&lecteur)
+    ))?;
+    Some(format.trim().to_string()).filter(|f| !f.is_empty())
+}
+
+/// Les fichiers de 4 Go ou plus des dossiers choisis : un disque en FAT32 ne peut pas les recevoir.
+fn gros_fichiers(dossiers: &[(Sorte, PathBuf)]) -> Vec<PathBuf> {
+    let mut gros = Vec::new();
+    let mut a_voir: Vec<PathBuf> = dossiers.iter().map(|(_, d)| d.clone()).collect();
+    while let Some(d) = a_voir.pop() {
+        for e in std::fs::read_dir(&d).into_iter().flatten().flatten() {
+            let Ok(m) = e.path().symlink_metadata() else { continue };
+            if m.is_dir() {
+                a_voir.push(e.path());
+            } else if m.is_file() && m.len() > u64::from(u32::MAX) {
+                gros.push(e.path());
+            }
+        }
+    }
+    gros
 }
 
 /// Un chemin de /proc/mounts ou mountinfo : l'espace, la tabulation, le saut de ligne et la barre oblique inverse y
@@ -782,6 +848,22 @@ pub fn commande(destination: Option<&Path>) {
         taille_lisible(total.1),
         chemin_affichable(&dossier)
     );
+    if genre_du_volume(&racine).is_some_and(|g| limite_4_go(&g)) {
+        let gros = gros_fichiers(&choisis);
+        if let Some(exemple) = gros.first() {
+            afficher_aligne(
+                "  ⚠ ",
+                &trf!(
+                    "{} fichier(s) de 4 Go ou plus (dont {}) : ce disque, en FAT32, ne peut pas les recevoir ; ils iront dans les échecs. Un disque en exFAT ou NTFS les accepte.",
+                    "{} file(s) of 4 GB or more (including {}): this disk, in FAT32, cannot hold them; they will end up in the failures. A disk in exFAT or NTFS accepts them.",
+                    gros.len(),
+                    chemin_affichable(exemple)
+                ),
+                4,
+                "",
+            );
+        }
+    }
     if !demander(tr!("  Copier ? [o/N] : ", "  Copy? [y/N]: ")).oui() {
         trp!("  Annulé.", "  Cancelled.");
         return;
@@ -917,6 +999,34 @@ mod tests {
         // Ouvert en écriture : Windows refuse de vider sur le disque un fichier ouvert en lecture seule.
         OpenOptions::new().write(true).open(&f).unwrap().sync_all().unwrap();
         assert_eq!(empreinte_relue(&f).unwrap(), empreinte(&f).unwrap());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// Vers une clé en FAT32, les fichiers de 4 Go ou plus sont trouvés avant de commencer.
+    #[test]
+    fn fichiers_trop_gros_pour_fat32() {
+        assert!(limite_4_go("vfat") && limite_4_go("msdos") && limite_4_go("FAT32"));
+        assert!(!limite_4_go("exfat") && !limite_4_go("NTFS") && !limite_4_go("btrfs"));
+        let montages = "23 1 0:30 /@ / rw - btrfs /dev/mapper/root rw\n\
+                        90 23 8:17 / /run/media/alice/CLE rw,nosuid - vfat /dev/sdb1 rw\n";
+        assert_eq!(
+            montage(montages, Path::new("/run/media/alice/CLE/x")),
+            Some(("8:17", "vfat"))
+        );
+        assert_eq!(montage(montages, Path::new("/home/alice")), Some(("0:30", "btrfs")));
+        let d = jetable("gros");
+        let videos = d.join("Vidéos");
+        std::fs::create_dir_all(videos.join("vacances")).unwrap();
+        // Creux : 4 Go annoncés, rien d'écrit sur le disque.
+        File::create(videos.join("vacances/film.mkv"))
+            .unwrap()
+            .set_len(4 << 30)
+            .unwrap();
+        std::fs::write(videos.join("petit.mp4"), b"x").unwrap();
+        assert_eq!(
+            gros_fichiers(&[(Sorte::Videos, videos.clone())]),
+            [videos.join("vacances/film.mkv")]
+        );
         let _ = std::fs::remove_dir_all(&d);
     }
 
