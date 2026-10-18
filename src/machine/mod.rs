@@ -439,9 +439,20 @@ pub fn ouvrir(cible: &str) {
     #[cfg(target_os = "linux")]
     let _ = Command::new("xdg-open").arg(cible).spawn();
     #[cfg(windows)]
-    let _ = Command::new("cmd").args(["/C", "start", "", cible]).spawn();
+    {
+        use std::os::windows::process::CommandExt;
+        let _ = Command::new("cmd").raw_arg(ligne_ouvrir(cible)).spawn();
+    }
     #[cfg(target_os = "macos")]
     let _ = Command::new("open").arg(cible).spawn();
+}
+
+/// Ligne de cmd qui ouvre `cible`, toujours entre guillemets : « & », « | » ou « ^ » d'un lien ou d'un dossier
+/// (Windows permet « & » dans un nom de compte) y restent du texte. Sans guillemets, cmd coupait la ligne au « & »
+/// et lançait la suite comme une commande.
+#[cfg(any(windows, test))]
+fn ligne_ouvrir(cible: &str) -> String {
+    format!("/C start \"\" \"{}\"", cible.replace('"', ""))
 }
 
 pub fn auditer(bavard: bool) -> Audit {
@@ -540,6 +551,19 @@ pub fn executer(json: bool) -> Audit {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn lien_ouvert_d_un_seul_morceau() {
+        assert_eq!(
+            ligne_ouvrir(r"C:\Users\A&B\AppData\Local\gardien\rapport.html"),
+            r#"/C start "" "C:\Users\A&B\AppData\Local\gardien\rapport.html""#
+        );
+        assert_eq!(
+            ligne_ouvrir("https://exemple.org/page?a=1&b=2|c"),
+            r#"/C start "" "https://exemple.org/page?a=1&b=2|c""#
+        );
+        assert_eq!(ligne_ouvrir(r#"a"b"#), r#"/C start "" "ab""#);
+    }
 
     fn audit(etats: &[(&'static str, Option<Niveau>, &str)]) -> Audit {
         let constats: Vec<Constat> = etats
