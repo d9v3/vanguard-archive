@@ -146,6 +146,7 @@ pub fn categorie(nom: &str) -> &str {
     }
     match nom {
         "Pare-feu" => "Firewall",
+        "Accès à distance" => "Remote access",
         "Bureau à distance" => "Remote Desktop",
         "Carte graphique" => "Graphics card",
         "Certificats" => "Certificates",
