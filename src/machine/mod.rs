@@ -418,7 +418,7 @@ pub fn appliquer_chacune(correctifs: &[Vec<String>]) -> Vec<bool> {
     #[cfg(windows)]
     {
         for c in correctifs.iter().flatten() {
-            println!("    {GRIS}PS> {c}{RESET}");
+            println!("    {GRIS}PS> {}{RESET}", crate::ui::commande_affichable(c));
         }
         trp!(
             "    {GRIS}Une fenêtre administrateur s'ouvre et montre chaque étape ; attends qu'elle se ferme.{RESET}",
@@ -432,7 +432,7 @@ pub fn appliquer_chacune(correctifs: &[Vec<String>]) -> Vec<bool> {
             .iter()
             .map(|commandes| {
                 commandes.iter().all(|c| {
-                    println!("    {GRIS}$ {c}{RESET}");
+                    println!("    {GRIS}$ {}{RESET}", crate::ui::commande_affichable(c));
                     Command::new("bash")
                         .arg("-c")
                         .arg(c)

@@ -148,7 +148,7 @@ pub(crate) fn proposer(nom: &str, liste: &[Element], restauration: bool) {
             machine::ouvrir(lien);
         }
         for c in &el.commandes {
-            println!("    {GRIS}{c}{RESET}");
+            println!("    {GRIS}{}{RESET}", crate::ui::commande_affichable(c));
         }
         commandes.extend(el.commandes.iter().cloned());
     }

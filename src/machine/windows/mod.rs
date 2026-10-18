@@ -138,7 +138,8 @@ fn script_admin(correctifs: &[Vec<String>], resultats: &str) -> String {
                  elseif ($LASTEXITCODE) {{ $echecs++; Write-Host \"  Failed (code $LASTEXITCODE): see the message above\" -ForegroundColor Red }}\n  \
                  else {{ Write-Host '  OK' -ForegroundColor Green }}\n\
                  }} catch {{ $echecs++; Write-Host ('  Failed: ' + $_.Exception.Message) -ForegroundColor Red }}\n",
-                texte(c)
+                // Annoncée filtrée (un nom piégé ne réécrit pas la fenêtre), lancée telle quelle.
+                texte(&crate::ui::commande_affichable(c))
             );
         }
         let _ = writeln!(
@@ -840,6 +841,19 @@ mod tests {
                 .count(),
             2
         );
+    }
+
+    /// Une commande qui reprend un nom piégé : la fenêtre administrateur l'annonce filtrée, rien ne s'efface à l'écran,
+    /// et lance la vraie commande, inchangée.
+    #[test]
+    fn la_fenetre_admin_annonce_sans_piege() {
+        let c = "Unregister-ScheduledTask -TaskName 'Maj\u{1b}[2K' -Confirm:$false".to_string();
+        let s = script_admin(&[vec![c.clone()]], r"C:\x\correction-1.resultats");
+        assert!(
+            s.contains("'  Unregister-ScheduledTask -TaskName ''Maj\u{fffd}[2K'' -Confirm:$false')"),
+            "{s}"
+        );
+        assert!(s.contains(&format!("try {{\n  {c}\n")), "{s}");
     }
 
     #[test]

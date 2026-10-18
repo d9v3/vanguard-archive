@@ -183,7 +183,7 @@ pub fn executer(choisis: &[&Element]) -> Vec<bool> {
                 resultats.next().unwrap_or(false)
             } else {
                 e.commandes.iter().all(|c| {
-                    println!("    {GRIS}PS> {c}{RESET}");
+                    println!("    {GRIS}PS> {}{RESET}", crate::ui::commande_affichable(c));
                     crate::machine::windows::ps(c).is_some()
                 })
             }

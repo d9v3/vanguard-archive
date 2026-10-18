@@ -91,7 +91,7 @@ pub fn verifier() {
                     "  {VERT}✔{RESET} Not in known leaks. That does not mean it is strong: only that it has not circulated."
                 );
                 if let Some(c) = conseil_forme(&mot_de_passe) {
-                    println!("    {GRIS}{c}{RESET}");
+                    println!("    {GRIS}{}{RESET}", crate::ui::commande_affichable(c));
                 }
             }
             n => trp!(

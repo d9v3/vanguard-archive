@@ -309,13 +309,13 @@ fn installer(etat: &Etat, choisis: &[&Offre]) -> Suite {
             p.nom
         );
         for c in &p.commandes {
-            println!("        {GRIS}{c}{RESET}");
+            println!("        {GRIS}{}{RESET}", crate::ui::commande_affichable(c));
         }
     }
     for o in choisis {
         println!("    {VERT}+{RESET} {}  {GRIS}{}{RESET}", o.logiciel.nom, o.source);
         for c in &o.commandes {
-            println!("        {GRIS}{c}{RESET}");
+            println!("        {GRIS}{}{RESET}", crate::ui::commande_affichable(c));
         }
     }
     let verifie = tr!(

@@ -400,7 +400,7 @@ pub(crate) fn examiner(fichier: &std::path::Path) -> Examen {
 
 #[cfg(unix)]
 fn shell(c: &str) -> bool {
-    println!("  {GRIS}$ {c}{RESET}");
+    println!("  {GRIS}$ {}{RESET}", crate::ui::commande_affichable(c));
     Command::new("bash")
         .arg("-c")
         .arg(c)

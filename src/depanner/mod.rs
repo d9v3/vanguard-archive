@@ -145,7 +145,7 @@ fn fait(texte: &str) {
 #[cfg(unix)]
 fn proposer(question: &str, commandes: &[String]) -> bool {
     for c in commandes {
-        println!("    {GRIS}$ {c}{RESET}");
+        println!("    {GRIS}$ {}{RESET}", crate::ui::commande_affichable(c));
     }
     demander(question).oui() && crate::machine::appliquer(commandes)
 }

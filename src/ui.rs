@@ -127,6 +127,24 @@ pub fn chemin_affichable(chemin: &std::path::Path) -> String {
     affichable(&chemin.to_string_lossy())
 }
 
+/// Une commande prête à montrer avant d'être lancée. Elle reprend souvent un nom venu de l'extérieur (fichier à
+/// isoler, cache à effacer, tâche planifiée, imprimante) : piégé, il effacerait ou retournerait une partie de la
+/// ligne, et ce qui est montré ne serait plus ce qui est lancé. Les sauts de ligne et les tabulations, que Gardien
+/// peut écrire lui-même dans une commande, restent ; le reste passe par le filtre d'`affichable`. La commande lancée,
+/// elle, ne change pas.
+pub fn commande_affichable(commande: &str) -> String {
+    commande
+        .chars()
+        .map(|c| {
+            if piege(c) && c != '\n' && c != '\t' {
+                '\u{fffd}'
+            } else {
+                c
+            }
+        })
+        .collect()
+}
+
 /// Le texte contient-il encore un caractère piégé ? Pour les tests des lectures.
 #[cfg(test)]
 pub(crate) fn contient_un_piege(texte: &str) -> bool {
@@ -405,6 +423,28 @@ mod tests {
             assert_eq!(affichable(t), t);
             assert_eq!(affichable(t).as_bytes(), t.as_bytes());
             assert!(!contient_un_piege(t), "{t}");
+        }
+    }
+
+    /// Une commande montrée : le nom piégé qu'elle reprend ne peut plus effacer la ligne ni en retourner la fin ; ses
+    /// propres sauts de ligne et tabulations restent, et une commande normale ne change pas.
+    #[test]
+    fn commandes_montrees_telles_qu_elles_seront_lancees() {
+        assert_eq!(
+            commande_affichable("rm -rf -- ~/.cache/'x\x1b[2K\recho rassurant'"),
+            "rm -rf -- ~/.cache/'x�[2K�echo rassurant'"
+        );
+        assert_eq!(
+            commande_affichable("Unregister-ScheduledTask -TaskName 'Maj\u{202e}exe.txt' -Confirm:$false"),
+            "Unregister-ScheduledTask -TaskName 'Maj�exe.txt' -Confirm:$false"
+        );
+        assert_eq!(commande_affichable("\u{9b}2K\x1b]52;c;eA==\x07"), "�2K�]52;c;eA==�");
+        for c in [
+            "sudo systemctl disable --now cups.service",
+            "printf '%s\\n' a | sudo tee /etc/x >/dev/null\nsudo sysctl --system",
+            "Set-ItemProperty -LiteralPath 'HKCU:\\Software\\Été' -Name 'a\tb' -Value 0",
+        ] {
+            assert_eq!(commande_affichable(c).as_bytes(), c.as_bytes());
         }
     }
 

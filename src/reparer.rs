@@ -1183,7 +1183,7 @@ pub fn lancer(r: &Reparation) {
     }
     trp!("  Commandes :", "  Commands:");
     for c in &r.commandes {
-        println!("    {GRIS}{c}{RESET}");
+        println!("    {GRIS}{}{RESET}", crate::ui::commande_affichable(c));
     }
     if !demander(tr!(
         "\n  Lancer cette réparation ? [o/N] : ",
