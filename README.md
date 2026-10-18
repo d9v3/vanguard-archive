@@ -257,7 +257,8 @@ Chaque entrée du menu existe aussi en commande :
 **Langue** : celle du système (français ou anglais). Pour forcer : `GARDIEN_LANG=fr` ou `GARDIEN_LANG=en`. Les
 commandes ont aussi un nom anglais (`full`, `audit`, `fix`, `network`, `connection`, `apps`, `diag`, `password`,
 `sandbox`, `email`, `integrity`, `update`, `repair`, `monitor`, `name`, `backup`, `restore`, `clean`, `decoys`,
-`blocklists`, `learned`, `channels`, `fast-dns`).
+`blocklists`, `learned`, `channels`, `fast-dns`, `outbound`, `link`, `check-file`, `maintenance`, `alerts`, `slow`,
+`specs`, `copy-files`, `troubleshoot`).
 
 ## Développer
 

@@ -1,6 +1,6 @@
 {
   "_lisez-moi": "Page du dépôt sur GitHub, appliquée par outils/github.py après chaque envoi. La version (Cargo.toml) s'ajoute seule au bout de la description ; le nom du dépôt suit celui du programme.",
-  "description": "Security check & tune-up for your computer and home network, from a USB key: grade A–F, plain-language fixes, undoable settings, ransomware decoys, YARA scan, evil-twin Wi-Fi alerts, and it learns what is normal for you. Linux · Windows · macOS · French & English",
+  "description": "Security check & tune-up for your computer and home network, from a USB key: grade A–F, plain-language fixes, step-by-step troubleshooting, undoable settings, ransomware decoys, YARA scan, phishing-link, hidden-camera and evil-twin Wi-Fi checks, and it learns what is normal for you. Linux · Windows · macOS · French & English",
   "accueil": "https://claude.ai/code/artifact/d0b6d00e-38d4-4d9d-ad29-75dbdbecf37f",
   "sujets": [
     "security",
@@ -10,7 +10,7 @@
     "privacy",
     "network-security",
     "network-scanner",
-    "bufferbloat",
+    "troubleshooting",
     "optimization",
     "cleanup",
     "software-installer",
