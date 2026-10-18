@@ -1,5 +1,6 @@
 //! Gaming : composants dont les jeux ont besoin et réglages utiles en jeu, pour chaque système. Tout est lu
-//! d'abord, montré avec son état (fait / à faire), puis appliqué seulement après accord.
+//! d'abord, montré avec son état (fait / à faire), puis appliqué seulement après accord. Les réglages du système
+//! notent leurs valeurs d'avant et se remettent exactement (`annulation`).
 
 use crate::machine;
 use crate::selection::{Case, cocher};
@@ -7,6 +8,7 @@ use crate::selection::{Case, cocher};
 use crate::selection::{Ligne, choisir};
 use crate::ui::*;
 
+mod annulation;
 #[cfg(target_os = "linux")]
 pub(crate) mod linux;
 #[cfg(target_os = "macos")]
@@ -24,6 +26,17 @@ pub(crate) struct Element {
     pub(crate) lien: Option<&'static str>,
     /// Déconseillé sur cette machine : affiché, mais pas inclus dans « tout ».
     pub(crate) deconseille: Option<&'static str>,
+    /// Réglage du système : ses valeurs d'avant, notées avant de l'appliquer pour pouvoir le remettre.
+    pub(crate) annulable: Option<annulation::Annulable>,
+}
+
+impl Element {
+    // macOS : pas de réglage du système à remettre (le compteur de Metal dit comment l'enlever).
+    #[cfg_attr(target_os = "macos", allow(dead_code))]
+    pub(crate) fn annulable(mut self, id: &'static str, avant: Vec<annulation::Valeur>) -> Element {
+        self.annulable = Some(annulation::Annulable { id, avant });
+        self
+    }
 }
 
 pub(crate) fn element(
@@ -39,6 +52,7 @@ pub(crate) fn element(
         commandes,
         lien: None,
         deconseille: None,
+        annulable: None,
     }
 }
 
@@ -120,7 +134,9 @@ pub(crate) fn proposer(nom: &str, liste: &[Element], restauration: bool) {
         return;
     };
     let mut commandes = Vec::new();
+    let mut a_noter = Vec::new();
     for (el, _) in liste.iter().zip(&voulu).filter(|(el, v)| **v && el.fait != Some(true)) {
+        a_noter.extend(el.annulable.as_ref().map(|a| (a, el.titre.as_str())));
         for l in presentation(el) {
             println!("{l}");
         }
@@ -147,6 +163,17 @@ pub(crate) fn proposer(nom: &str, liste: &[Element], restauration: bool) {
         trp!("  Annulé.", "  Cancelled.");
         return;
     }
+    // Sans valeurs d'avant notées, un réglage ne pourrait plus se remettre exactement : rien n'est changé.
+    if !a_noter.is_empty() {
+        let mut notes = annulation::charger();
+        for (a, titre) in &a_noter {
+            notes.noter(a, titre);
+        }
+        if !annulation::sauver(&notes) {
+            trp!("  Rien n'a été changé.", "  Nothing was changed.");
+            return;
+        }
+    }
     if machine::appliquer(&commandes) {
         let fait = trf!(
             "{VERT}✔ Terminé.{RESET} Certains changements demandent de redémarrer ou de rouvrir la session.",
@@ -161,10 +188,12 @@ pub(crate) fn proposer(nom: &str, liste: &[Element], restauration: bool) {
     }
 }
 
-/// Le menu de Linux et de Windows : deux listes (composants, réglages), et ce qu'il faut savoir dessous. Rend la
-/// touche choisie, « 1 » ou « 2 » ; `None` pour revenir. (macOS n'a qu'une liste, ouverte directement.)
+/// Le menu de Linux et de Windows : deux listes (composants, réglages), « 3 » pour remettre les réglages appliqués
+/// par Gardien, et ce qu'il faut savoir dessous. Rend la touche choisie ; `None` pour revenir. (macOS n'a qu'une
+/// liste, ouverte directement.)
 #[cfg(not(target_os = "macos"))]
 pub(crate) fn choisir_liste(composants: (&str, &str), reglages: (&str, &str), note: Option<String>) -> Option<String> {
+    let notes = annulation::charger().reglages.len();
     let mut lignes = vec![
         Ligne::Texte(String::new()),
         Ligne::Texte(ligne_titre("Gaming")),
@@ -172,6 +201,13 @@ pub(crate) fn choisir_liste(composants: (&str, &str), reglages: (&str, &str), no
         Ligne::choix("1", composants.0, composants.1),
         Ligne::choix("2", reglages.0, reglages.1),
     ];
+    if notes > 0 {
+        lignes.push(Ligne::choix(
+            "3",
+            tr!("Remettre les réglages comme avant", "Put the settings back as before"),
+            &trf!("{notes} réglage(s) de Gardien", "{notes} setting(s) by Gardien"),
+        ));
+    }
     if let Some(n) = note {
         lignes.push(Ligne::Texte(String::new()));
         lignes.push(Ligne::Texte(n));
@@ -187,7 +223,99 @@ pub(crate) fn choisir_liste(composants: (&str, &str), reglages: (&str, &str), no
         "1",
         tr!("revenir", "back"),
     )?;
-    Some(choix.trim().to_string()).filter(|c| c == "1" || c == "2")
+    Some(choix.trim().to_string()).filter(|c| c == "1" || c == "2" || (c == "3" && notes > 0))
+}
+
+/// Remet comme avant les réglages pour jouer appliqués par Gardien : ceux cochés reprennent leurs valeurs notées
+/// (`commandes`), puis ne perdent leur note que si `relire` les retrouve en place.
+#[cfg(not(target_os = "macos"))]
+pub(crate) fn remettre(
+    commandes: impl Fn(&str, &[annulation::Valeur]) -> Vec<String>,
+    relire: impl Fn(&str, &[annulation::Valeur]) -> Vec<annulation::Valeur>,
+) {
+    let mut notes = annulation::charger();
+    let entete = vec![
+        String::new(),
+        ligne_titre(tr!(
+            "Remettre les réglages comme avant",
+            "Put the settings back as before"
+        )),
+        trf!(
+            "  {GRIS}Les valeurs notées avant que Gardien les change.{RESET}",
+            "  {GRIS}The values noted before Gardien changed them.{RESET}"
+        ),
+        String::new(),
+    ];
+    let liste: Vec<(&String, &annulation::Avant)> = notes.reglages.iter().collect();
+    let cases: Vec<Case> = liste
+        .iter()
+        .map(|(_, a)| Case {
+            texte: a.titre.clone(),
+            precision: trf!("réglé le {}", "set on {}", a.date),
+            detail: String::new(),
+            cochee: false,
+            recommandee: true,
+            fixe: false,
+        })
+        .collect();
+    let Some(voulu) = cocher(&entete, &cases) else {
+        return;
+    };
+    // Un correctif par réglage : un réglage qui ne revient pas (module encore utilisé) n'empêche pas les autres.
+    let mut a_lancer: Vec<Vec<String>> = Vec::new();
+    let mut choisis = Vec::new();
+    for ((id, a), _) in liste.iter().zip(&voulu).filter(|(_, v)| **v) {
+        println!("\n  {GRAS}{}{RESET}", a.titre);
+        let c = commandes(id, &a.valeurs);
+        for l in &c {
+            println!("    {GRIS}{l}{RESET}");
+        }
+        a_lancer.push(c);
+        choisis.push((*id).clone());
+    }
+    if a_lancer.iter().all(Vec::is_empty) || !demander(tr!("\n  Remettre ? [o/N] : ", "\n  Put back? [y/N]: ")).oui() {
+        trp!("  Rien n'a été changé.", "  Nothing was changed.");
+        return;
+    }
+    let mut point = Vec::new();
+    if !avec_restauration(&mut point) {
+        trp!("  Annulé.", "  Cancelled.");
+        return;
+    }
+    if !point.is_empty() {
+        a_lancer.insert(0, point);
+    }
+    machine::appliquer_chacune(&a_lancer);
+    // Seuls les réglages choisis sont relus : les autres gardent leur note telle quelle.
+    let mut a_relire = annulation::Notes::default();
+    for id in &choisis {
+        if let Some(a) = notes.reglages.remove(id) {
+            a_relire.reglages.insert(id.clone(), a);
+        }
+    }
+    let titres: std::collections::BTreeMap<String, String> = a_relire
+        .reglages
+        .iter()
+        .map(|(id, a)| (id.clone(), a.titre.clone()))
+        .collect();
+    let remis = annulation::retirer_remis(&mut a_relire, relire);
+    for (id, a) in &a_relire.reglages {
+        afficher_aligne(
+            "  ✖ ",
+            &trf!(
+                "{} : pas tout à fait revenu (programme encore ouvert, ou redémarrage nécessaire). La note reste pour réessayer.",
+                "{}: not fully back (program still open, or restart needed). The note stays so you can try again.",
+                a.titre
+            ),
+            4,
+            "",
+        );
+        notes.reglages.insert(id.clone(), a.clone());
+    }
+    for id in &remis {
+        println!("  {VERT}✔{RESET} {}", titres[id]);
+    }
+    annulation::sauver(&notes);
 }
 
 pub fn menu() {

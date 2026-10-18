@@ -6,6 +6,7 @@
 use std::path::Path;
 use std::process::Command;
 
+use super::annulation::Valeur;
 use super::{Element, element, proposer};
 use crate::machine::linux::Paquets;
 use crate::ui::*;
@@ -357,6 +358,64 @@ fn composants(gestion: Paquets) -> Vec<Element> {
     l
 }
 
+/// Les fichiers de Gardien, à son nom : jamais 80-gamer.conf ou ntsync.conf, que la personne ou sa distribution ont pu
+/// écrire avant lui et qu'il écraserait sans pouvoir les rendre.
+const SYSCTL_JEUX: &str = "/etc/sysctl.d/80-gardien-jeux.conf";
+const NTSYNC_CONF: &str = "/etc/modules-load.d/gardien-ntsync.conf";
+
+/// Les valeurs d'un réglage telles qu'elles sont maintenant : notées avant de l'appliquer, relues après l'avoir remis.
+pub(super) fn valeurs(id: &str) -> Vec<Valeur> {
+    let fichier = |c: &str| (c.to_string(), std::fs::read_to_string(c).ok());
+    match id {
+        "max_map_count" => vec![
+            (
+                "vm.max_map_count".into(),
+                std::fs::read_to_string("/proc/sys/vm/max_map_count")
+                    .ok()
+                    .map(|t| t.trim().to_string()),
+            ),
+            fichier(SYSCTL_JEUX),
+        ],
+        // Chargé maintenant (ou compris dans le noyau), et le fichier qui le charge au démarrage.
+        "ntsync" => vec![
+            (
+                "ntsync".into(),
+                Path::new("/sys/module/ntsync").exists().then(|| "charge".to_string()),
+            ),
+            fichier(NTSYNC_CONF),
+        ],
+        _ => Vec::new(),
+    }
+}
+
+/// Texte entre apostrophes pour le shell, tel quel.
+fn shell(t: &str) -> String {
+    format!("'{}'", t.replace('\'', r"'\''"))
+}
+
+/// Les commandes qui remettent les valeurs notées : les fichiers de Gardien d'abord (retirés, ou rendus à leur
+/// contenu d'avant), puis la valeur du noyau, puis le module s'il n'était pas chargé (refusé tant qu'un jeu
+/// l'utilise : la note reste alors pour réessayer).
+pub(super) fn remettre_commandes(_id: &str, avant: &[Valeur]) -> Vec<String> {
+    let mut fichiers = Vec::new();
+    let mut reste = Vec::new();
+    for (nom, v) in avant {
+        match (nom.as_str(), v) {
+            (SYSCTL_JEUX | NTSYNC_CONF, None) => fichiers.push(format!("sudo rm -f {nom}")),
+            (SYSCTL_JEUX | NTSYNC_CONF, Some(contenu)) => {
+                fichiers.push(format!("printf '%s' {} | sudo tee {nom} >/dev/null", shell(contenu)));
+            }
+            ("vm.max_map_count", Some(n)) if !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()) => {
+                reste.push(format!("sudo sysctl -w vm.max_map_count={n} >/dev/null"));
+            }
+            ("ntsync", None) => reste.push("sudo modprobe -r ntsync".into()),
+            _ => {}
+        }
+    }
+    fichiers.extend(reste);
+    fichiers
+}
+
 fn reglages() -> Vec<Element> {
     let mut l = Vec::new();
     // vm.max_map_count : certains jeux récents (Hogwarts Legacy, Starfield, CS2…) plantent sous la valeur de SteamOS.
@@ -364,21 +423,24 @@ fn reglages() -> Vec<Element> {
         .ok()
         .and_then(|t| t.trim().parse().ok())
         .unwrap_or(0);
-    l.push(element(
-        trf!(
-            "vm.max_map_count (actuel : {actuel})",
-            "vm.max_map_count (current: {actuel})"
-        ),
-        tr!(
-            "Certains jeux récents plantent si cette limite de mémoire est basse ; SteamOS utilise 2147483642.",
-            "Some recent games crash if this memory limit is low; SteamOS uses 2147483642."
-        ),
-        Some(actuel >= 1_048_576),
-        vec![
-            "echo 'vm.max_map_count = 2147483642' | sudo tee /etc/sysctl.d/80-gamer.conf >/dev/null".into(),
-            "sudo sysctl --system >/dev/null".into(),
-        ],
-    ));
+    l.push(
+        element(
+            trf!(
+                "vm.max_map_count (actuel : {actuel})",
+                "vm.max_map_count (current: {actuel})"
+            ),
+            tr!(
+                "Certains jeux récents plantent si cette limite de mémoire est basse ; SteamOS utilise 2147483642.",
+                "Some recent games crash if this memory limit is low; SteamOS uses 2147483642."
+            ),
+            Some(actuel >= 1_048_576),
+            vec![
+                format!("echo 'vm.max_map_count = 2147483642' | sudo tee {SYSCTL_JEUX} >/dev/null"),
+                format!("sudo sysctl -p {SYSCTL_JEUX} >/dev/null"),
+            ],
+        )
+        .annulable("max_map_count", valeurs("max_map_count")),
+    );
     // ntsync : synchronisation de Wine/Proton faite par le noyau (Linux 6.14 et plus), plus rapide.
     let module_present = reussit("modinfo", &["ntsync"]);
     if module_present || Path::new("/dev/ntsync").exists() {
@@ -390,10 +452,11 @@ fn reglages() -> Vec<Element> {
             ),
             Some(Path::new("/dev/ntsync").exists()),
             vec![
-                "echo ntsync | sudo tee /etc/modules-load.d/ntsync.conf >/dev/null".into(),
+                format!("echo ntsync | sudo tee {NTSYNC_CONF} >/dev/null"),
                 "sudo modprobe ntsync".into(),
             ],
-        ));
+        )
+        .annulable("ntsync", valeurs("ntsync")));
     }
     l
 }
@@ -437,6 +500,7 @@ pub(super) fn menu() {
             &reglages(),
             true,
         ),
+        Some("3") => super::remettre(remettre_commandes, |id, _| valeurs(id)),
         _ => {}
     }
 }
@@ -474,6 +538,65 @@ mod tests {
                 .flat_map(|el| &el.commandes)
                 .any(|c| c.contains("pacman -Sy") && !c.contains("-Syu"))
         );
+    }
+
+    // Gardien n'écrit que dans ses propres fichiers : un 80-gamer.conf ou un ntsync.conf posé par la personne ou sa
+    // distribution n'est jamais écrasé.
+    #[test]
+    fn fichiers_existants_gardes() {
+        for c in reglages().iter().flat_map(|el| &el.commandes) {
+            assert!(
+                !c.contains("80-gamer.conf") && !c.contains("modules-load.d/ntsync.conf"),
+                "{c}"
+            );
+        }
+        assert!(SYSCTL_JEUX.contains("gardien") && NTSYNC_CONF.contains("gardien"));
+    }
+
+    // Fichier absent avant : retiré ; valeur du noyau remise telle quelle ; module qui n'était pas chargé : retiré.
+    #[test]
+    fn fichier_absent_retire() {
+        let avant = [
+            ("vm.max_map_count".to_string(), Some("1048576".to_string())),
+            (SYSCTL_JEUX.to_string(), None),
+        ];
+        assert_eq!(
+            remettre_commandes("max_map_count", &avant),
+            [
+                format!("sudo rm -f {SYSCTL_JEUX}"),
+                "sudo sysctl -w vm.max_map_count=1048576 >/dev/null".to_string(),
+            ]
+        );
+        let avant = [("ntsync".to_string(), None), (NTSYNC_CONF.to_string(), None)];
+        assert_eq!(
+            remettre_commandes("ntsync", &avant),
+            [
+                format!("sudo rm -f {NTSYNC_CONF}"),
+                "sudo modprobe -r ntsync".to_string()
+            ]
+        );
+        // Une valeur qui n'est pas un nombre n'entre jamais dans la commande.
+        let piege = [("vm.max_map_count".to_string(), Some("1; rm -rf ~".to_string()))];
+        assert_eq!(remettre_commandes("max_map_count", &piege), Vec::<String>::new());
+    }
+
+    // Fichier de Gardien déjà là avant (posé à la main, ou par une autre version) : rendu octet pour octet, apostrophes
+    // et sauts de ligne compris. La commande est jouée pour de vrai, sur une copie dans un dossier jetable.
+    #[test]
+    fn fichier_existant_rendu_tel_quel() {
+        let d = std::env::temp_dir().join(format!("gardien-jeux-linux-{}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        let copie = d.join("80-gardien-jeux.conf");
+        let contenu = "# réglé à la main, l'été\nvm.max_map_count = 262144\n";
+        let avant = [(SYSCTL_JEUX.to_string(), Some(contenu.to_string()))];
+        let commandes = remettre_commandes("max_map_count", &avant);
+        assert_eq!(commandes.len(), 1);
+        let jouee = commandes[0]
+            .replace("sudo ", "")
+            .replace(SYSCTL_JEUX, &copie.display().to_string());
+        assert!(Command::new("bash").args(["-c", &jouee]).status().unwrap().success());
+        assert_eq!(std::fs::read_to_string(&copie).unwrap(), contenu);
+        let _ = std::fs::remove_dir_all(&d);
     }
 
     #[test]

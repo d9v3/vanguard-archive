@@ -7,6 +7,7 @@ use std::fmt::Write;
 
 use serde::Deserialize;
 
+use super::annulation::Valeur;
 use super::{Element, element, proposer};
 use crate::machine;
 use crate::trw;
@@ -29,10 +30,13 @@ struct Etat {
     windows11: bool,
     mode_jeu: Option<u32>,
     hags: Option<u32>,
-    fenetres: String,
     dvr: Option<u32>,
     capture: Option<u32>,
-    souris: String,
+    /// Valeurs de « Améliorer la précision du pointeur » ; `None` : absente.
+    souris: Option<String>,
+    seuil1: Option<String>,
+    seuil2: Option<String>,
+    fenetres: Option<String>,
     alimentation: String,
 }
 
@@ -61,10 +65,12 @@ fn lire_etat() -> Option<Etat> {
             windows11 = [Environment]::OSVersion.Version.Build -ge 22000
             mode_jeu = Lire 'HKCU:\Software\Microsoft\GameBar' AutoGameModeEnabled
             hags = Lire 'HKLM:\SYSTEM\CurrentControlSet\Control\GraphicsDrivers' HwSchMode
-            fenetres = [string](Lire 'HKCU:\Software\Microsoft\DirectX\UserGpuPreferences' DirectXUserGlobalSettings)
+            fenetres = Lire 'HKCU:\Software\Microsoft\DirectX\UserGpuPreferences' DirectXUserGlobalSettings
             dvr = Lire 'HKCU:\System\GameConfigStore' GameDVR_Enabled
             capture = Lire 'HKCU:\Software\Microsoft\Windows\CurrentVersion\GameDVR' AppCaptureEnabled
-            souris = [string](Lire 'HKCU:\Control Panel\Mouse' MouseSpeed)
+            souris = Lire 'HKCU:\Control Panel\Mouse' MouseSpeed
+            seuil1 = Lire 'HKCU:\Control Panel\Mouse' MouseThreshold1
+            seuil2 = Lire 'HKCU:\Control Panel\Mouse' MouseThreshold2
             alimentation = [string](powercfg /getactivescheme)
           } | ConvertTo-Json -Compress -Depth 4"#,
     )?;
@@ -82,6 +88,143 @@ fn dword(cle: &str, nom: &str, valeur: u32) -> String {
         "if (-not (Test-Path '{cle}')) {{ New-Item '{cle}' -Force | Out-Null }}; \
          Set-ItemProperty '{cle}' -Name {nom} -Value {valeur} -Type DWord"
     )
+}
+
+/// Où vit une valeur notée : dans le compte de la personne (sa ruche, même depuis la fenêtre d'un autre
+/// administrateur), ou dans la machine.
+#[derive(Clone, Copy, PartialEq)]
+enum Ruche {
+    Compte,
+    Machine,
+}
+
+/// Les valeurs du registre que chaque réglage change : (réglage, ruche, clé, nom, DWORD plutôt que texte).
+const VALEURS: &[(&str, Ruche, &str, &str, bool)] = &[
+    (
+        "mode_jeu",
+        Ruche::Compte,
+        r"Software\Microsoft\GameBar",
+        "AutoGameModeEnabled",
+        true,
+    ),
+    (
+        "hags",
+        Ruche::Machine,
+        r"SYSTEM\CurrentControlSet\Control\GraphicsDrivers",
+        "HwSchMode",
+        true,
+    ),
+    (
+        "capture",
+        Ruche::Compte,
+        r"System\GameConfigStore",
+        "GameDVR_Enabled",
+        true,
+    ),
+    (
+        "capture",
+        Ruche::Compte,
+        r"Software\Microsoft\Windows\CurrentVersion\GameDVR",
+        "AppCaptureEnabled",
+        true,
+    ),
+    ("souris", Ruche::Compte, r"Control Panel\Mouse", "MouseSpeed", false),
+    (
+        "souris",
+        Ruche::Compte,
+        r"Control Panel\Mouse",
+        "MouseThreshold1",
+        false,
+    ),
+    (
+        "souris",
+        Ruche::Compte,
+        r"Control Panel\Mouse",
+        "MouseThreshold2",
+        false,
+    ),
+    (
+        "fenetres",
+        Ruche::Compte,
+        r"Software\Microsoft\DirectX\UserGpuPreferences",
+        "DirectXUserGlobalSettings",
+        false,
+    ),
+];
+
+/// Le mode d'alimentation actif, dans la sortie de « powercfg /getactivescheme » (son GUID, dans toutes les langues).
+fn guid_alimentation(sortie: &str) -> Option<String> {
+    sortie
+        .split(|c: char| !(c.is_ascii_hexdigit() || c == '-'))
+        .find_map(|m| {
+            let parties: Vec<usize> = m.split('-').map(str::len).collect();
+            (parties == [8, 4, 4, 4, 12]).then(|| m.to_ascii_lowercase())
+        })
+}
+
+/// Une valeur lue dans l'état, par son nom dans le registre.
+fn lue(e: &Etat, nom: &str) -> Option<String> {
+    match nom {
+        "AutoGameModeEnabled" => e.mode_jeu.map(|v| v.to_string()),
+        "HwSchMode" => e.hags.map(|v| v.to_string()),
+        "GameDVR_Enabled" => e.dvr.map(|v| v.to_string()),
+        "AppCaptureEnabled" => e.capture.map(|v| v.to_string()),
+        "MouseSpeed" => e.souris.clone(),
+        "MouseThreshold1" => e.seuil1.clone(),
+        "MouseThreshold2" => e.seuil2.clone(),
+        "DirectXUserGlobalSettings" => e.fenetres.clone(),
+        _ => None,
+    }
+}
+
+/// Les valeurs d'un réglage dans l'état lu : notées avant de l'appliquer, relues après l'avoir remis.
+fn valeurs(e: &Etat, id: &str) -> Vec<Valeur> {
+    if id == "alimentation" {
+        return vec![("powercfg".into(), guid_alimentation(&e.alimentation))];
+    }
+    VALEURS
+        .iter()
+        .filter(|v| v.0 == id)
+        .map(|&(_, _, cle, nom, _)| (format!(r"{cle}\{nom}"), lue(e, nom)))
+        .collect()
+}
+
+/// Les commandes qui remettent les valeurs notées : la valeur d'avant réécrite, ou retirée si elle n'existait pas ;
+/// le mode d'alimentation d'avant réactivé. `sid` : la personne, dont le compte reçoit ses valeurs.
+fn remettre_commandes(sid: Option<&str>, id: &str, avant: &[Valeur]) -> Vec<String> {
+    let mut l = Vec::new();
+    for (nom_note, v) in avant {
+        if nom_note == "powercfg" {
+            l.extend(
+                v.as_deref()
+                    .and_then(guid_alimentation)
+                    .map(|g| format!("powercfg /setactive {g}")),
+            );
+            continue;
+        }
+        let Some(&(_, ruche, cle, nom, dw)) = VALEURS
+            .iter()
+            .find(|x| x.0 == id && format!(r"{}\{}", x.2, x.3) == *nom_note)
+        else {
+            continue;
+        };
+        let chemin = match ruche {
+            Ruche::Machine => format!(r"HKLM:\{cle}"),
+            Ruche::Compte => crate::reparer::hkcu_de_la_personne(sid, cle),
+        };
+        l.extend(match v {
+            None => Some(format!(
+                "Remove-ItemProperty '{chemin}' -Name {nom} -ErrorAction SilentlyContinue"
+            )),
+            Some(n) if dw => n.parse::<u32>().ok().map(|n| dword(&chemin, nom, n)),
+            Some(t) => Some(format!(
+                "if (-not (Test-Path '{chemin}')) {{ New-Item '{chemin}' -Force | Out-Null }}; \
+                 Set-ItemProperty '{chemin}' -Name {nom} -Value '{}' -Type String",
+                crate::commande::ps_texte(t)
+            )),
+        });
+    }
+    l
 }
 
 fn a_programme(e: &Etat, motif: &str) -> bool {
@@ -233,7 +376,8 @@ fn reglages(e: &Etat, sid: Option<&str>) -> Vec<Element> {
             ),
             Some(e.mode_jeu != Some(0)),
             vec![dword(&compte(r"Software\Microsoft\GameBar"), "AutoGameModeEnabled", 1)],
-        ),
+        )
+        .annulable("mode_jeu", valeurs(e, "mode_jeu")),
         element(
             tr!(
                 "Planification GPU matérielle (HAGS)",
@@ -249,7 +393,8 @@ fn reglages(e: &Etat, sid: Option<&str>) -> Vec<Element> {
                 "HwSchMode",
                 2,
             )],
-        ),
+        )
+        .annulable("hags", valeurs(e, "hags")),
         element(
             tr!("Capture Xbox en arrière-plan coupée", "Xbox background recording off"),
             tr!(
@@ -265,18 +410,20 @@ fn reglages(e: &Etat, sid: Option<&str>) -> Vec<Element> {
                     0,
                 ),
             ],
-        ),
+        )
+        .annulable("capture", valeurs(e, "capture")),
         element(
             tr!("Accélération de la souris coupée", "Mouse acceleration off"),
             tr!(
                 "« Améliorer la précision du pointeur » change la distance parcourue selon la vitesse du geste : la visée devient imprévisible. Prend effet à la prochaine ouverture de session.",
                 "“Enhance pointer precision” changes the distance traveled depending on how fast you move: aiming becomes unpredictable. Takes effect at the next sign-in."
             ),
-            (!e.souris.is_empty()).then(|| e.souris == "0"),
+            e.souris.as_ref().map(|s| s == "0"),
             ["MouseSpeed", "MouseThreshold1", "MouseThreshold2"]
                 .map(|nom| format!("Set-ItemProperty '{souris}' -Name {nom} -Value '0'"))
                 .into(),
-        ),
+        )
+        .annulable("souris", valeurs(e, "souris")),
     ];
     if e.windows11 {
         // La valeur regroupe plusieurs réglages (« VRROptimizeEnable=0;SwapEffectUpgradeEnable=1; ») : on ne
@@ -284,13 +431,14 @@ fn reglages(e: &Etat, sid: Option<&str>) -> Vec<Element> {
         l.push(element(
             tr!("Optimisations pour les jeux en fenêtre", "Optimizations for windowed games"),
             tr!("Les jeux DirectX 10/11 en fenêtre ou fenêtre sans bordure passent au mode d'affichage moderne : moins de latence, VRR et HDR automatique possibles.", "DirectX 10/11 games in windowed or borderless mode switch to the modern presentation model: lower latency, VRR and Auto HDR possible."),
-            Some(e.fenetres.contains("SwapEffectUpgradeEnable=1")),
+            Some(e.fenetres.as_deref().is_some_and(|f| f.contains("SwapEffectUpgradeEnable=1"))),
             vec![format!(
                 "$k = '{preferences}'; if (-not (Test-Path $k)) {{ New-Item $k -Force | Out-Null }}; \
                  $v = [string](Get-ItemProperty $k -ErrorAction SilentlyContinue).DirectXUserGlobalSettings; \
                  Set-ItemProperty $k -Name DirectXUserGlobalSettings -Value (($v -replace 'SwapEffectUpgradeEnable=[0-9];?', '') + 'SwapEffectUpgradeEnable=1;')"
             )],
-        ));
+        )
+        .annulable("fenetres", valeurs(e, "fenetres")));
     }
     let mut alimentation = element(
         tr!("Alimentation « Performances élevées »", "“High performance” power plan"),
@@ -303,7 +451,8 @@ fn reglages(e: &Etat, sid: Option<&str>) -> Vec<Element> {
             "powercfg /setactive SCHEME_MIN".into(),
             "powercfg /getactivescheme".into(),
         ],
-    );
+    )
+    .annulable("alimentation", valeurs(e, "alimentation"));
     if e.portable {
         alimentation.deconseille = Some(tr!(
             "PC portable : la batterie fondrait et il chaufferait",
@@ -353,6 +502,20 @@ pub(super) fn menu() {
             &reglages(&etat, crate::reparer::sid_de_la_personne().as_deref()),
             true,
         ),
+        Some("3") => {
+            let sid = crate::reparer::sid_de_la_personne();
+            // L'état relu une seule fois, après la remise (un appel PowerShell pour tous les réglages).
+            let relu = std::cell::OnceCell::new();
+            super::remettre(
+                |id, avant| remettre_commandes(sid.as_deref(), id, avant),
+                |id, _| {
+                    relu.get_or_init(lire_etat)
+                        .as_ref()
+                        .map(|e| valeurs(e, id))
+                        .unwrap_or_default()
+                },
+            );
+        }
         _ => {}
     }
 }
@@ -368,7 +531,7 @@ mod tests {
                 "Microsoft Visual C++ 2013 Redistributable (x86) - 12.0.40664".into(),
                 "Microsoft Windows Desktop Runtime - 8.0.11 (x64)".into(),
             ],
-            souris: "1".into(),
+            souris: Some("1".into()),
             portable: true,
             windows11: true,
             ..Etat::default()
@@ -413,6 +576,95 @@ mod tests {
         assert!(reglages(&e, None)[0].commandes[0].contains(r"'HKCU:\Software\Microsoft\GameBar'"));
         super::super::tests::tient_dans_la_liste(&l);
         super::super::tests::tient_dans_la_liste(&composants(&e));
+    }
+
+    // Chaque valeur est notée telle qu'elle était, puis remise : réécrite si elle existait (DWORD ou texte), retirée
+    // sinon, dans le compte de la personne ou dans la machine ; le mode d'alimentation d'avant est réactivé.
+    #[test]
+    fn valeurs_notees_puis_remises() {
+        let e = Etat {
+            hags: Some(1),
+            dvr: Some(1),
+            souris: Some("1".into()),
+            seuil1: Some("6".into()),
+            seuil2: Some("10".into()),
+            fenetres: Some("VRROptimizeEnable=0;".into()),
+            alimentation: "Power Scheme GUID: 381B4222-F694-41F0-9685-FF5BB260DF2E  (Balanced)".into(),
+            windows11: true,
+            ..Etat::default()
+        };
+        let sid = Some("S-1-5-21-1-2-3-1001");
+        let remettre = |id: &str| remettre_commandes(sid, id, &valeurs(&e, id));
+        assert_eq!(
+            valeurs(&e, "hags"),
+            [(
+                r"SYSTEM\CurrentControlSet\Control\GraphicsDrivers\HwSchMode".to_string(),
+                Some("1".to_string())
+            )]
+        );
+        assert_eq!(
+            remettre("hags"),
+            [dword(
+                r"HKLM:\SYSTEM\CurrentControlSet\Control\GraphicsDrivers",
+                "HwSchMode",
+                1
+            )]
+        );
+        // Absente avant (Mode Jeu jamais réglé) : retirée, dans la ruche de la personne.
+        let mode_jeu = remettre("mode_jeu");
+        assert_eq!(mode_jeu.len(), 1);
+        assert!(
+            mode_jeu[0].starts_with(
+                r"Remove-ItemProperty 'Registry::HKEY_USERS\S-1-5-21-1-2-3-1001\Software\Microsoft\GameBar'"
+            ) && mode_jeu[0].contains("-Name AutoGameModeEnabled"),
+            "{mode_jeu:?}"
+        );
+        let capture = remettre("capture");
+        assert!(
+            capture[0].ends_with("-Name GameDVR_Enabled -Value 1 -Type DWord"),
+            "{capture:?}"
+        );
+        assert!(capture[1].starts_with("Remove-ItemProperty") && capture[1].contains("AppCaptureEnabled"));
+        let souris = remettre("souris");
+        assert_eq!(souris.len(), 3);
+        assert!(
+            souris[1].ends_with("-Name MouseThreshold1 -Value '6' -Type String"),
+            "{souris:?}"
+        );
+        assert_eq!(
+            remettre("alimentation"),
+            ["powercfg /setactive 381b4222-f694-41f0-9685-ff5bb260df2e"]
+        );
+        // Une valeur piégée reste du texte pour PowerShell.
+        let piege = Etat {
+            fenetres: Some("x';Remove-Item C:\\Windows;'".into()),
+            ..Etat::default()
+        };
+        let c = remettre_commandes(sid, "fenetres", &valeurs(&piege, "fenetres"));
+        assert!(c[0].contains("-Value 'x'';Remove-Item C:\\Windows;'''"), "{c:?}");
+        // Relue en place après la remise : la note peut partir.
+        let mut notes = super::super::annulation::Notes::default();
+        let reglages_lus = reglages(&e, sid);
+        for el in &reglages_lus {
+            if let Some(a) = &el.annulable {
+                notes.noter(a, &el.titre);
+            }
+        }
+        assert_eq!(notes.reglages.len(), 6);
+        let remis = super::super::annulation::retirer_remis(&mut notes, |id, _| valeurs(&e, id));
+        assert_eq!(remis.len(), 6);
+    }
+
+    #[test]
+    fn mode_d_alimentation_lu_dans_toutes_les_langues() {
+        assert_eq!(
+            guid_alimentation(
+                "GUID du mode de gestion de l'alimentation : 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c  (Performances élevées)"
+            ),
+            Some("8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c".into())
+        );
+        assert_eq!(guid_alimentation("pas de mode"), None);
+        assert_eq!(guid_alimentation(""), None);
     }
 
     #[test]
