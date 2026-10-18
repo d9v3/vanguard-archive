@@ -116,8 +116,11 @@ version, compiler avec `rustflags = ["--remap-path-prefix=/home/<compte>=~"]` da
 ## Publier une version
 
 `outils/publier-version.sh` crée la page de la version sur GitHub (Releases) avec les trois programmes
-(`gardien-windows-x86_64.exe`, `gardien-linux-x86_64`, `gardien-macos`) et leurs empreintes SHA-256 ; les liens de
-téléchargement du README pointent toujours vers la dernière.
+(`gardien-windows-x86_64.exe`, `gardien-linux-x86_64`, `gardien-macos`), leurs empreintes SHA-256 et, en notes, le
+commit de la version (titre et puces) ; les liens de téléchargement du README pointent toujours vers la dernière.
+`deployer.sh` le lance tout seul à la fin du déploiement d'une nouvelle version. Après chaque envoi, il met aussi à
+jour la page du dépôt (`outils/github.py`) : description en anglais suivie de la version, lien, sujets et options,
+écrits dans `.github/depot.json`. Seule l'image de partage se change à la main (Settings > Social preview).
 
 ## La clé USB
 

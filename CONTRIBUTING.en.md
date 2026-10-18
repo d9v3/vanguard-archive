@@ -114,8 +114,11 @@ a program that still contains the home folder).
 ## Publishing a version
 
 `outils/publier-version.sh` creates the version's GitHub release with the three programs
-(`gardien-windows-x86_64.exe`, `gardien-linux-x86_64`, `gardien-macos`) and their SHA-256 checksums; the README's
-download links always point to the latest one.
+(`gardien-windows-x86_64.exe`, `gardien-linux-x86_64`, `gardien-macos`), their SHA-256 checksums and, as notes, the
+version's commit (title and bullets); the README's download links always point to the latest one. `deployer.sh`
+runs it by itself at the end of the deployment of a new version. After each push, it also updates the repository
+page (`outils/github.py`): English description followed by the version, link, topics and options, written in
+`.github/depot.json`. Only the social preview image is changed by hand (Settings > Social preview).
 
 ## The USB key
 

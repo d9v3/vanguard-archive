@@ -87,8 +87,10 @@ if [[ -z $MODE ]]; then
   if [[ $(cat assets/captures/VERSION 2>/dev/null) != "$VERSION" ]]; then
     if command -v uv >/dev/null && timeout 900 uv run -q --no-project --with pyte python outils/captures.py "$LINUX"; then
       git add assets/captures assets/partage.png
+      # Les captures ne sont pas dans le programme : celui qui vient d'être compilé reste celui de ce commit, que
+      # outils/publier-version.sh publiera.
       git commit -q -m "Captures d'écran : v$VERSION" -- assets/captures assets/partage.png &&
-        echo "Captures d'écran refaites (v$VERSION)."
+        echo "Captures d'écran refaites (v$VERSION)." && git rev-parse HEAD >"$COMMIT_COMPILE"
     else
       echo "Captures d'écran non refaites : le README garde celles d'avant."
     fi
@@ -107,6 +109,12 @@ elif git remote get-url origin >/dev/null 2>&1; then
     echo "Rien n'est envoyé sur GitHub : un lien est mort (voir ci-dessus)."
   elif timeout 30 git push -q origin HEAD 2>/dev/null; then
     echo "Code envoyé sur GitHub."
+    # La page du dépôt suit le dépôt : description et version, lien, sujets (outils/github.py, .github/depot.json).
+    python3 outils/github.py || echo "Page du dépôt sur GitHub pas mise à jour (voir ci-dessus)."
+    # Une nouvelle version aura sa page (Releases) à la fin du déploiement.
+    if [[ -z $MODE ]] && ! timeout 30 gh release view "v$VERSION" >/dev/null 2>&1; then
+      PUBLIER=1
+    fi
   else
     echo "GitHub injoignable : le code partira au prochain déploiement."
   fi
@@ -184,9 +192,18 @@ if [[ -d $HOME/Windows && -f $WINDOWS ]]; then
   fi
 fi
 
+# Nouvelle version envoyée : sa page sur GitHub (Releases), en dernier, car la version macOS se compile sur un Mac de
+# GitHub (quelques minutes d'attente) ; la clé et la VM sont alors déjà à jour.
+publier_la_version() {
+  [[ -n ${PUBLIER:-} ]] || return 0
+  echo "Nouvelle version v$VERSION : sa page sur GitHub…"
+  outils/publier-version.sh || echo "Page de la version pas publiée (voir ci-dessus) : relancer outils/publier-version.sh."
+}
+
 CLE=$(find "/run/media/$USER" -maxdepth 2 \( -name gardien.cle -o -name sentinel.cle -o -name netscan.cle \) -printf '%h\n' 2>/dev/null | head -1)
 if [[ -z $CLE ]]; then
   echo "Clé GARDIEN non branchée : elle sera mise à jour au prochain branchement."
+  publier_la_version
   exit 0
 fi
 
@@ -272,3 +289,4 @@ if command -v notify-send >/dev/null && [[ $(cat "$EMPREINTE_FICHIER" 2>/dev/nul
   notify-send -a Gardien -i gardien "Clé GARDIEN à jour${VENU_DE_GITHUB:+ (depuis GitHub)}" "$(./"$LINUX" --version)" || true
   echo "$EMPREINTE" >"$EMPREINTE_FICHIER"
 fi
+publier_la_version

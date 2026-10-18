@@ -8,6 +8,9 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+# Le nom du programme, avec sa majuscule (« Gardien ») : titre de la page de la version.
+NOM=$(sed -n 's/^name = "\(.*\)"/\1/p' Cargo.toml | head -1)
+NOM=${NOM^}
 TAG="v$VERSION"
 COMMIT=$(git rev-parse HEAD)
 LINUX=target/x86_64-unknown-linux-musl/release/gardien
@@ -58,10 +61,14 @@ gh run download "$RUN" -n gardien-macos -D "$DOSSIER/mac" >/dev/null
 cp "$DOSSIER/mac/gardien" "$DOSSIER/gardien-macos"
 (cd "$DOSSIER" && sha256sum gardien-windows-x86_64.exe gardien-linux-x86_64 gardien-macos >SHA256SUMS.txt)
 
-# Ce qui change : le commit de la version (« … (v0.49.0) »), en tête des notes.
+# Ce qui change : le commit de la version (« … (v0.49.0) ») ; son titre en tête des notes, ses puces dessous (sans
+# les lignes de co-auteur).
 CHANGEMENT=$(git log --format=%s --grep="(v$VERSION)" -1 | sed -E 's/ \(v[0-9.]+\)$//')
-NOTES="**${CHANGEMENT:-Gardien $VERSION}**
-
+DETAILS=$(git log --format=%b --grep="(v$VERSION)" -1 | grep -viE '^(co-authored-by|signed-off-by):' || true)
+NOTES="**${CHANGEMENT:-$NOM $VERSION}**
+${DETAILS:+
+$DETAILS
+}
 Télécharge le programme de ton système :
 - **Windows** : \`gardien-windows-x86_64.exe\`, double-clic. Il n'est pas signé : SmartScreen peut avertir
   (« Informations complémentaires » puis « Exécuter quand même »).
@@ -84,6 +91,16 @@ printf '%s\n' "$NOTES" | python3 outils/confidentialite.py --texte || { echo "No
 printf '%s\n' "$NOTES" | python3 outils/liens.py --texte || { echo "Liens des notes : rien de publié."; exit 1; }
 python3 outils/confidentialite.py --binaire "$DOSSIER/gardien-windows-x86_64.exe" "$DOSSIER/gardien-linux-x86_64" \
   "$DOSSIER/gardien-macos" || { echo "Programmes : rien de publié."; exit 1; }
-gh release create "$TAG" --target "$COMMIT" --title "Gardien $VERSION" --notes "$NOTES" \
+gh release create "$TAG" --target "$COMMIT" --title "$NOM $VERSION" --notes "$NOTES" \
   "$DOSSIER/gardien-windows-x86_64.exe" "$DOSSIER/gardien-linux-x86_64" "$DOSSIER/gardien-macos" "$DOSSIER/SHA256SUMS.txt"
 echo "Version $TAG publiée : $(gh release view "$TAG" --json url -q .url)"
+command -v notify-send >/dev/null &&
+  notify-send -a Gardien -i gardien "$NOM $VERSION publiée sur GitHub" "Page de la version : les trois programmes et leurs empreintes." || true
+
+# La version macOS publiée est gardée comme une compilation récupérée (outils/deployer.sh ne la redemande pas) et
+# copiée sur la clé si elle est branchée : sinon la clé garderait celle d'avant jusqu'au déploiement suivant.
+rm -rf target/macos && mkdir -p target/macos && cp "$DOSSIER/mac/"* target/macos/
+CLE=$(find "/run/media/$USER" -maxdepth 2 \( -name gardien.cle -o -name sentinel.cle -o -name netscan.cle \) -printf '%h\n' 2>/dev/null | head -1)
+if [[ -n $CLE && -d $CLE/macOS ]] && cp -f target/macos/gardien "$CLE/macOS/gardien" && sync; then
+  echo "Version macOS $VERSION copiée sur la clé."
+fi
