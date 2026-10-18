@@ -121,17 +121,24 @@ pub fn isoler(fichier: &Path) {
     lancer(&source);
 }
 
-#[cfg(target_os = "linux")]
-fn lancer(source: &Path) {
+/// Le dossier jetable et, dedans, la copie exécutable du programme ; `None` (déjà dit) si l'un des deux manque.
+/// `reel` : le chemin réel du dossier, sans lien.
+#[cfg(unix)]
+fn copie_jetable(source: &Path, reel: bool) -> Option<(PathBuf, PathBuf)> {
     use std::os::unix::fs::PermissionsExt;
     let Ok(jetable) = dossier_jetable() else {
         trp!(
             "  ✖ Dossier jetable impossible à créer.",
             "  ✖ Could not create the disposable folder."
         );
-        return;
+        return None;
     };
     let nom = source.file_name().unwrap_or_default();
+    let jetable = if reel {
+        jetable.canonicalize().unwrap_or(jetable)
+    } else {
+        jetable
+    };
     let copie = jetable.join(nom);
     if std::fs::copy(source, &copie).is_err() {
         trp!(
@@ -139,9 +146,30 @@ fn lancer(source: &Path) {
             "  ✖ Could not copy into the disposable folder."
         );
         let _ = std::fs::remove_dir_all(&jetable);
-        return;
+        return None;
     }
     let _ = std::fs::set_permissions(&copie, std::fs::Permissions::from_mode(0o755));
+    Some((jetable, copie))
+}
+
+/// Ce que dit la fin du programme isolé, une fois le dossier jetable effacé.
+#[cfg(unix)]
+fn dire_la_fin(statut: std::io::Result<std::process::ExitStatus>) {
+    match statut {
+        Ok(s) => trp!(
+            "\n  {VERT}✔{RESET} Programme terminé (code {}). Le dossier jetable est effacé.",
+            "\n  {VERT}✔{RESET} Program finished (code {}). The disposable folder is erased.",
+            s.code().map_or_else(|| "?".to_string(), |c| c.to_string())
+        ),
+        Err(e) => trp!("  ✖ Lancement impossible : {e}", "  ✖ Could not start: {e}"),
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn lancer(source: &Path) {
+    let Some((jetable, copie)) = copie_jetable(source, false) else {
+        return;
+    };
     trp!(
         "  {GRIS}Isolé : système en lecture seule, dossier personnel invisible, pas de réseau. Copie jetable : {}{RESET}\n",
         "  {GRIS}Isolated: read-only system, home folder hidden, no network. Disposable copy: {}{RESET}\n",
@@ -180,14 +208,7 @@ fn lancer(source: &Path) {
         return;
     };
     let _ = std::fs::remove_dir_all(&jetable);
-    match statut {
-        Ok(s) => trp!(
-            "\n  {VERT}✔{RESET} Programme terminé (code {}). Le dossier jetable est effacé.",
-            "\n  {VERT}✔{RESET} Program finished (code {}). The disposable folder is erased.",
-            s.code().map_or_else(|| "?".to_string(), |c| c.to_string())
-        ),
-        Err(e) => trp!("  ✖ Lancement impossible : {e}", "  ✖ Could not start: {e}"),
-    }
+    dire_la_fin(statut);
 }
 
 /// Profil de sandbox-exec : tout est permis sauf le réseau, la lecture du dossier personnel et l'écriture hors du
@@ -207,27 +228,10 @@ fn profil_sandbox(jetable: &str, maison: &str) -> String {
 
 #[cfg(target_os = "macos")]
 fn lancer(source: &Path) {
-    use std::os::unix::fs::PermissionsExt;
-    let Ok(jetable) = dossier_jetable() else {
-        trp!(
-            "  ✖ Dossier jetable impossible à créer.",
-            "  ✖ Could not create the disposable folder."
-        );
+    // sandbox-exec compare des chemins réels : /var est un lien vers /private/var.
+    let Some((jetable, copie)) = copie_jetable(source, true) else {
         return;
     };
-    let nom = source.file_name().unwrap_or_default();
-    // sandbox-exec compare des chemins réels : /var est un lien vers /private/var.
-    let jetable = jetable.canonicalize().unwrap_or(jetable);
-    let copie = jetable.join(nom);
-    if std::fs::copy(source, &copie).is_err() {
-        trp!(
-            "  ✖ Copie impossible dans le dossier jetable.",
-            "  ✖ Could not copy into the disposable folder."
-        );
-        let _ = std::fs::remove_dir_all(&jetable);
-        return;
-    }
-    let _ = std::fs::set_permissions(&copie, std::fs::Permissions::from_mode(0o755));
     let maison = std::env::var("HOME").unwrap_or_default();
     let maison = std::fs::canonicalize(&maison).map_or(maison, |m| m.display().to_string());
     trp!(
@@ -242,14 +246,7 @@ fn lancer(source: &Path) {
         .current_dir(&jetable)
         .status();
     let _ = std::fs::remove_dir_all(&jetable);
-    match statut {
-        Ok(s) => trp!(
-            "\n  {VERT}✔{RESET} Programme terminé (code {}). Le dossier jetable est effacé.",
-            "\n  {VERT}✔{RESET} Program finished (code {}). The disposable folder is erased.",
-            s.code().map_or_else(|| "?".to_string(), |c| c.to_string())
-        ),
-        Err(e) => trp!("  ✖ Lancement impossible : {e}", "  ✖ Could not start: {e}"),
-    }
+    dire_la_fin(statut);
 }
 
 #[cfg(windows)]

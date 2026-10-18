@@ -6,7 +6,7 @@
 
 use std::path::PathBuf;
 
-use super::{Audit, Constat, alerte, cles_ssh, impossible, ok, score, sortie};
+use super::{Audit, Constat, alerte, cles_ssh, impossible, ok, sortie};
 use crate::risk::{Niveau, info_port};
 use crate::{tr, trf};
 
@@ -200,17 +200,7 @@ fn ports_ecoute(pare_feu_actif: bool) -> Vec<Constat> {
             let programme = programmes
                 .get(&port)
                 .map_or(tr!("programme du système", "system program"), String::as_str);
-            let niveau = super::niveau_expose(pare_feu_actif, i.niveau);
-            let constat = alerte(
-                "Ports en écoute",
-                niveau,
-                trf!(
-                    "{port}/{proto} ({}) ouvert sur le réseau par « {programme} ». {}",
-                    "{port}/{proto} ({}) open to the network by “{programme}”. {}",
-                    i.service,
-                    i.conseil
-                ),
-            );
+            let (_, constat) = super::port_expose(port, proto, &i, programme, pare_feu_actif);
             constats.push(match partage(port) {
                 Some(service) => constat.manuel(
                     trf!(
@@ -224,13 +214,7 @@ fn ports_ecoute(pare_feu_actif: bool) -> Vec<Constat> {
         }
     }
     if constats.is_empty() {
-        constats.push(ok(
-            "Ports en écoute",
-            tr!(
-                "Aucun service TCP ou UDP exposé au réseau (tout écoute en local).",
-                "No TCP or UDP service exposed to the network (everything listens locally)."
-            ),
-        ));
+        constats.push(super::aucun_port_expose());
     }
     constats
 }
@@ -622,43 +606,33 @@ pub fn auditer() -> Audit {
     use super::verif;
     let feu = pare_feu();
     let feu_actif = feu.probleme.is_none();
-    let mut constats = vec![feu];
-    constats.extend(super::en_parallele(vec![
-        verif!(mode_furtif()),
-        verif!(wifi()),
-        verif!(ports_ecoute(feu_actif)),
-        verif!([chiffrement_disque()]),
-        verif!(protection_systeme()),
-        verif!(durcissement::systeme_signe()),
-        verif!([durcissement::extensions_tierces()]),
-        verif!(durcissement::airdrop()),
-        verif!(verrouillage_ecran()),
-        verif!(ouverture_de_session()),
-        verif!([comptes()]),
-        verif!(privileges::compte_root()),
-        verif!(privileges::sudo_sans_mot_de_passe()),
-        verif!(privileges::fichiers_secrets()),
-        verif!(gestion_a_distance()),
-        verif!([mises_a_jour_automatiques()]),
-        verif!(maj::mises_a_jour()),
-        verif!(maj::homebrew_a_jour()),
-        verif!([sauvegardes()]),
-        verif!(persistance()),
-        verif!(cles_ssh()),
-        verif!(super::dns::dns()),
-        verif!(super::certificats::certificats()),
-        verif!(super::extensions::extensions()),
-        verif!(super::navigateur::navigateurs()),
-        verif!(super::sante::sante()),
-        verif!(super::journaux::journaux()),
-        verif!([crate::integrite::constat()]),
-        verif!(crate::pieges::constat()),
-    ]));
-    Audit {
-        systeme: NOM,
-        score: score(&constats),
-        constats,
-    }
+    super::audit(
+        NOM,
+        feu,
+        vec![
+            verif!(mode_furtif()),
+            verif!(wifi()),
+            verif!(ports_ecoute(feu_actif)),
+            verif!([chiffrement_disque()]),
+            verif!(protection_systeme()),
+            verif!(durcissement::systeme_signe()),
+            verif!([durcissement::extensions_tierces()]),
+            verif!(durcissement::airdrop()),
+            verif!(verrouillage_ecran()),
+            verif!(ouverture_de_session()),
+            verif!([comptes()]),
+            verif!(privileges::compte_root()),
+            verif!(privileges::sudo_sans_mot_de_passe()),
+            verif!(privileges::fichiers_secrets()),
+            verif!(gestion_a_distance()),
+            verif!([mises_a_jour_automatiques()]),
+            verif!(maj::mises_a_jour()),
+            verif!(maj::homebrew_a_jour()),
+            verif!([sauvegardes()]),
+            verif!(persistance()),
+            verif!(cles_ssh()),
+        ],
+    )
 }
 
 #[cfg(test)]

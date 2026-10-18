@@ -211,6 +211,40 @@ fn session_ssh() -> bool {
     std::env::var_os("SSH_CONNECTION").is_some()
 }
 
+/// Relancer le réseau couperait une session SSH : la réparation est alors bloquée.
+#[cfg(unix)]
+fn sauf_en_ssh(r: &mut Reparation) {
+    if session_ssh() {
+        r.bloquee = Some(tr!(
+            "tu es connecté par SSH : relancer le réseau couperait ta connexion",
+            "you are connected over SSH: restarting the network would cut your connection"
+        ));
+    }
+}
+
+/// Ce que dit « Navigation détournée » des redirections trouvées dans le fichier hosts.
+fn constat_hosts(detournees: &[(String, String)]) -> String {
+    trf!("fichier hosts : {}", "hosts file: {}", resume_redirections(detournees))
+}
+
+/// La fin de « Navigation détournée » sous Linux et macOS : un point de restauration si le fichier hosts change,
+/// « rien à faire » sans commande.
+#[cfg(unix)]
+fn finir_navigation(mut r: Reparation, commandes: Vec<String>, hosts: bool) -> Reparation {
+    r.restauration = hosts;
+    if commandes.is_empty() {
+        r.inutile = Some(
+            tr!(
+                "ni redirection dans le fichier hosts, ni proxy imposé",
+                "no redirection in the hosts file, no forced proxy"
+            )
+            .into(),
+        );
+    }
+    r.commandes = commandes;
+    r
+}
+
 #[cfg(target_os = "linux")]
 fn present(cmd: &str) -> bool {
     ["/usr/bin", "/bin", "/usr/sbin", "/sbin"]
@@ -248,11 +282,7 @@ fn navigation() -> Reparation {
     let mut constats = Vec::new();
     let mut commandes = Vec::new();
     if !detournees.is_empty() {
-        constats.push(trf!(
-            "fichier hosts : {}",
-            "hosts file: {}",
-            resume_redirections(&detournees)
-        ));
+        constats.push(constat_hosts(&detournees));
         commandes.push("sudo cp -p /etc/hosts /etc/hosts.gardien-$(date +%Y%m%d-%H%M%S)".to_string());
         commandes.push(format!(
             "sudo sed -i -E 's/^([[:space:]]*({})[[:space:]])/# Gardien : \\1/' /etc/hosts",
@@ -277,7 +307,7 @@ fn navigation() -> Reparation {
             format!("{TROUVER_PROXY} /etc/environment /etc/profile /etc/profile.d/* ~/.profile ~/.bashrc ~/.bash_profile ~/.zshrc ~/.config/environment.d/*; true"),
         );
     }
-    let mut r = rep(
+    let r = rep(
         tr!(
             "Navigation détournée (proxy, fichier hosts)",
             "Hijacked browsing (proxy, hosts file)"
@@ -290,18 +320,7 @@ fn navigation() -> Reparation {
         tr!("quelques secondes", "a few seconds"),
         &[],
     );
-    r.restauration = !detournees.is_empty();
-    if commandes.is_empty() {
-        r.inutile = Some(
-            tr!(
-                "ni redirection dans le fichier hosts, ni proxy imposé",
-                "no redirection in the hosts file, no forced proxy"
-            )
-            .into(),
-        );
-    }
-    r.commandes = commandes;
-    r
+    finir_navigation(r, commandes, !detournees.is_empty())
 }
 
 /// ClamAV absent : où le menu propose de l'installer (Antivirus et protection › analyse rapide ou complète).
@@ -604,12 +623,7 @@ pub fn liste() -> Vec<Reparation> {
             tr!("quelques secondes", "a few seconds"),
             &reseau,
         );
-        if session_ssh() {
-            r.bloquee = Some(tr!(
-                "tu es connecté par SSH : relancer le réseau couperait ta connexion",
-                "you are connected over SSH: restarting the network would cut your connection"
-            ));
-        }
+        sauf_en_ssh(&mut r);
         l.push(r);
     }
     l.push(navigation());
@@ -726,11 +740,7 @@ fn navigation_macos() -> Reparation {
     let mut constats = Vec::new();
     let mut commandes = Vec::new();
     if !detournees.is_empty() {
-        constats.push(trf!(
-            "fichier hosts : {}",
-            "hosts file: {}",
-            resume_redirections(&detournees)
-        ));
+        constats.push(constat_hosts(&detournees));
         commandes.push("sudo cp -p /etc/hosts /etc/hosts.gardien-$(date +%Y%m%d-%H%M%S)".to_string());
         // sed de macOS : -i demande un suffixe (vide) ; puis vider le cache DNS pour que ça compte tout de suite.
         commandes.push(format!(
@@ -749,7 +759,7 @@ fn navigation_macos() -> Reparation {
             ));
         }
     }
-    let mut r = rep(
+    let r = rep(
         tr!(
             "Navigation détournée (proxy, fichier hosts)",
             "Hijacked browsing (proxy, hosts file)"
@@ -762,18 +772,7 @@ fn navigation_macos() -> Reparation {
         tr!("quelques secondes", "a few seconds"),
         &[],
     );
-    r.restauration = !detournees.is_empty();
-    if commandes.is_empty() {
-        r.inutile = Some(
-            tr!(
-                "ni redirection dans le fichier hosts, ni proxy imposé",
-                "no redirection in the hosts file, no forced proxy"
-            )
-            .into(),
-        );
-    }
-    r.commandes = commandes;
-    r
+    finir_navigation(r, commandes, !detournees.is_empty())
 }
 
 #[cfg(target_os = "macos")]
@@ -798,12 +797,7 @@ pub fn liste() -> Vec<Reparation> {
              [ -n \"$W\" ] && networksetup -setairportpower $W off && sleep 3 && networksetup -setairportpower $W on; true",
         ],
     );
-    if session_ssh() {
-        r.bloquee = Some(tr!(
-            "tu es connecté par SSH : relancer le réseau couperait ta connexion",
-            "you are connected over SSH: restarting the network would cut your connection"
-        ));
-    }
+    sauf_en_ssh(&mut r);
     l.push(r);
     l.push(navigation_macos());
 
@@ -942,11 +936,7 @@ fn navigation(etat: Option<&EtatWindows>) -> Reparation {
     let mut constats = Vec::new();
     let mut commandes = Vec::new();
     if !detournees.is_empty() {
-        constats.push(trf!(
-            "fichier hosts : {}",
-            "hosts file: {}",
-            resume_redirections(&detournees)
-        ));
+        constats.push(constat_hosts(&detournees));
         commandes.push(
             r#"$h = "$env:SystemRoot\System32\drivers\etc\hosts"; Copy-Item $h "$h.gardien-$(Get-Date -Format yyyyMMdd-HHmmss)""#
                 .to_string(),

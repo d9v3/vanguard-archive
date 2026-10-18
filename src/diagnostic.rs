@@ -68,6 +68,36 @@ fn plus_frequentes(sources: &[String], max: usize) -> String {
         .join(", ")
 }
 
+/// La ligne des programmes plantés en 7 jours, la même sur les trois systèmes.
+fn programmes_plantes(plantages: &[String]) -> Ligne {
+    if plantages.is_empty() {
+        ligne(
+            tr!("Programmes plantés", "Crashed programs"),
+            tr!("aucun en 7 jours", "none in 7 days"),
+        )
+    } else {
+        alerte(
+            tr!("Programmes plantés", "Crashed programs"),
+            trf!(
+                "{} en 7 jours : {}",
+                "{} in 7 days: {}",
+                plantages.len(),
+                plus_frequentes(plantages, 5)
+            ),
+            Niveau::Moyen,
+        )
+    }
+}
+
+/// Les trois sections du diagnostic, dans leur ordre.
+fn trois_sections(systeme: Vec<Ligne>, materiel: Vec<Ligne>, problemes: Vec<Ligne>) -> Vec<Section> {
+    vec![
+        (tr!("SYSTÈME", "SYSTEM").into(), systeme),
+        (tr!("MATÉRIEL", "HARDWARE").into(), materiel),
+        (tr!("PROBLÈMES RÉCENTS", "RECENT PROBLEMS").into(), problemes),
+    ]
+}
+
 #[cfg(target_os = "linux")]
 mod systeme {
     use super::{Ligne, Niveau, Section, alerte, duree, go, ligne, plus_frequentes};
@@ -274,23 +304,7 @@ mod systeme {
                     .map(|p| p.rsplit('/').next().unwrap_or(p).to_string())
             })
             .collect();
-        problemes.push(if plantages.is_empty() {
-            ligne(
-                tr!("Programmes plantés", "Crashed programs"),
-                tr!("aucun en 7 jours", "none in 7 days"),
-            )
-        } else {
-            alerte(
-                tr!("Programmes plantés", "Crashed programs"),
-                trf!(
-                    "{} en 7 jours : {}",
-                    "{} in 7 days: {}",
-                    plantages.len(),
-                    plus_frequentes(&plantages, 5)
-                ),
-                Niveau::Moyen,
-            )
-        });
+        problemes.push(super::programmes_plantes(&plantages));
         let en_echec: Vec<String> = sortie("systemctl", &["--failed", "--no-legend", "--plain"])
             .unwrap_or_default()
             .lines()
@@ -305,18 +319,13 @@ mod systeme {
                 Niveau::Moyen,
             )
         });
-
-        vec![
-            (tr!("SYSTÈME", "SYSTEM").into(), systeme),
-            (tr!("MATÉRIEL", "HARDWARE").into(), materiel),
-            (tr!("PROBLÈMES RÉCENTS", "RECENT PROBLEMS").into(), problemes),
-        ]
+        super::trois_sections(systeme, materiel, problemes)
     }
 }
 
 #[cfg(target_os = "macos")]
 mod systeme {
-    use super::{Niveau, Section, alerte, duree, go, ligne, plus_frequentes};
+    use super::{Niveau, Section, alerte, duree, go, ligne};
     use crate::{tr, trf};
 
     fn sortie(cmd: &str, args: &[&str]) -> Option<String> {
@@ -471,29 +480,8 @@ mod systeme {
             )
         });
         let plantages = rapports(&dossiers, &["ips", "crash"], 7);
-        problemes.push(if plantages.is_empty() {
-            ligne(
-                tr!("Programmes plantés", "Crashed programs"),
-                tr!("aucun en 7 jours", "none in 7 days"),
-            )
-        } else {
-            alerte(
-                tr!("Programmes plantés", "Crashed programs"),
-                trf!(
-                    "{} en 7 jours : {}",
-                    "{} in 7 days: {}",
-                    plantages.len(),
-                    plus_frequentes(&plantages, 5)
-                ),
-                Niveau::Moyen,
-            )
-        });
-
-        vec![
-            (tr!("SYSTÈME", "SYSTEM").into(), systeme),
-            (tr!("MATÉRIEL", "HARDWARE").into(), materiel),
-            (tr!("PROBLÈMES RÉCENTS", "RECENT PROBLEMS").into(), problemes),
-        ]
+        problemes.push(super::programmes_plantes(&plantages));
+        super::trois_sections(systeme, materiel, problemes)
     }
 }
 
@@ -501,7 +489,7 @@ mod systeme {
 mod systeme {
     use serde::Deserialize;
 
-    use super::{Niveau, Section, alerte, duree, go, ligne, plus_frequentes};
+    use super::{Niveau, Section, alerte, duree, go, ligne};
     use crate::{tr, trf};
 
     #[derive(Default, Deserialize)]
@@ -637,28 +625,8 @@ mod systeme {
                 Niveau::Moyen,
             )
         });
-        problemes.push(if e.plantages.is_empty() {
-            ligne(
-                tr!("Programmes plantés", "Crashed programs"),
-                tr!("aucun en 7 jours", "none in 7 days"),
-            )
-        } else {
-            alerte(
-                tr!("Programmes plantés", "Crashed programs"),
-                trf!(
-                    "{} en 7 jours : {}",
-                    "{} in 7 days: {}",
-                    e.plantages.len(),
-                    plus_frequentes(&e.plantages, 5)
-                ),
-                Niveau::Moyen,
-            )
-        });
-        vec![
-            (tr!("SYSTÈME", "SYSTEM").into(), systeme),
-            (tr!("MATÉRIEL", "HARDWARE").into(), materiel),
-            (tr!("PROBLÈMES RÉCENTS", "RECENT PROBLEMS").into(), problemes),
-        ]
+        problemes.push(super::programmes_plantes(&e.plantages));
+        super::trois_sections(systeme, materiel, problemes)
     }
 }
 

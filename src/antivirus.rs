@@ -518,6 +518,19 @@ fn preparer() -> bool {
     true
 }
 
+/// Les endroits à risque du dossier personnel sous Linux et macOS : là où arrivent les menaces (téléchargements,
+/// bureau, démarrage automatique, programmes de l'utilisateur). L'analyse rapide de l'antivirus et celle de YARA.
+#[cfg(unix)]
+pub(crate) const ENDROITS_A_RISQUE: [&str; 7] = [
+    "Downloads",
+    "Téléchargements",
+    "Desktop",
+    "Bureau",
+    ".local/bin",
+    ".config/autostart",
+    "Library/LaunchAgents",
+];
+
 #[cfg(unix)]
 fn clamav(portee: &Portee) {
     if !preparer() {
@@ -530,19 +543,11 @@ fn clamav(portee: &Portee) {
     let cibles: Vec<PathBuf> = match portee {
         Portee::Dossier(d) => vec![d.clone()],
         Portee::Complete => vec![h.clone()],
-        Portee::Rapide => [
-            "Downloads",
-            "Téléchargements",
-            "Desktop",
-            "Bureau",
-            ".local/bin",
-            ".config/autostart",
-            "Library/LaunchAgents",
-        ]
-        .iter()
-        .map(|d| h.join(d))
-        .filter(|p| p.exists())
-        .collect(),
+        Portee::Rapide => ENDROITS_A_RISQUE
+            .iter()
+            .map(|d| h.join(d))
+            .filter(|p| p.exists())
+            .collect(),
     };
     let cibles = sans_doublons(cibles);
     // /tmp : seulement les fichiers récents (7 jours), où atterrit un téléchargement en cours ou un script lancé ;

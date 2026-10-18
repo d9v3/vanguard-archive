@@ -101,18 +101,10 @@ fn endroits_a_risque() -> Vec<PathBuf> {
         .flatten(),
     );
     #[cfg(unix)]
-    let liste: Vec<PathBuf> = [
-        "Downloads",
-        "Téléchargements",
-        "Desktop",
-        "Bureau",
-        ".local/bin",
-        ".config/autostart",
-        "Library/LaunchAgents",
-    ]
-    .iter()
-    .map(|d| maison.join(d))
-    .collect();
+    let liste: Vec<PathBuf> = crate::antivirus::ENDROITS_A_RISQUE
+        .iter()
+        .map(|d| maison.join(d))
+        .collect();
     liste.into_iter().filter(|p| p.is_dir()).collect()
 }
 

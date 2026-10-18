@@ -129,30 +129,13 @@ fn sujet(der: &[u8]) -> Option<String> {
         .or_else(|| attribut(nom, 11))
 }
 
+/// Le base64 d'un certificat : un dernier bloc d'un seul caractère (texte tronqué) le rend illisible.
 fn base64(texte: &str) -> Option<Vec<u8>> {
-    let valeur = |c: u8| -> Option<u32> {
-        Some(u32::from(match c {
-            b'A'..=b'Z' => c - b'A',
-            b'a'..=b'z' => c - b'a' + 26,
-            b'0'..=b'9' => c - b'0' + 52,
-            b'+' => 62,
-            b'/' => 63,
-            _ => return None,
-        }))
-    };
-    let propre: Vec<u8> = texte
-        .bytes()
-        .filter(|c| !c.is_ascii_whitespace() && *c != b'=')
-        .collect();
-    let mut sortie = Vec::with_capacity(propre.len() * 3 / 4);
-    for bloc in propre.chunks(4) {
-        if bloc.len() < 2 {
-            return None;
-        }
-        let n = bloc.iter().try_fold(0u32, |acc, &c| Some(acc << 6 | valeur(c)?))? << (6 * (4 - bloc.len()));
-        sortie.extend_from_slice(&n.to_be_bytes()[1..bloc.len()]);
+    let utiles = texte.bytes().filter(|c| !c.is_ascii_whitespace() && *c != b'=').count();
+    if utiles % 4 == 1 {
+        return None;
     }
-    Some(sortie)
+    super::base64_decoder(texte)
 }
 
 /// Noms des certificats d'un fichier : un ou plusieurs blocs PEM, ou un certificat DER brut.

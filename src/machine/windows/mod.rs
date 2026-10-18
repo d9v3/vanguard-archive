@@ -3,7 +3,7 @@
 use std::fmt::Write;
 use std::process::Command;
 
-use super::{Audit, Constat, alerte, impossible, ok, score};
+use super::{Audit, Constat, alerte, impossible, ok};
 use crate::risk::{Niveau, info_port};
 use crate::trw;
 use crate::ui::{resume, tr, trf, trp};
@@ -756,33 +756,23 @@ pub fn auditer() -> Audit {
     let feu_actif = feu.probleme.is_none();
     let ip_lan = crate::scan::reseau_local().map(|l| l.1.to_string());
     let lan = ip_lan.as_deref();
-    let mut constats = vec![feu];
-    constats.extend(super::en_parallele(vec![
-        verif!(antivirus()),
-        verif!(ports_ecoute(feu_actif, lan)),
-        verif!(ports_udp(feu_actif, lan)),
-        verif!(smb1()),
-        verif!([bureau_distance()]),
-        verif!([uac()]),
-        verif!([mises_a_jour()]),
-        verif!([chiffrement()]),
-        verif!(comptes()),
-        verif!(persistance()),
-        verif!(wifi()),
-        verif!(super::dns::dns()),
-        verif!(super::certificats::certificats()),
-        verif!(super::extensions::extensions()),
-        verif!(super::navigateur::navigateurs()),
-        verif!(super::sante::sante()),
-        verif!(super::journaux::journaux()),
-        verif!([crate::integrite::constat()]),
-        verif!(crate::pieges::constat()),
-    ]));
-    Audit {
-        systeme: NOM,
-        score: score(&constats),
-        constats,
-    }
+    super::audit(
+        NOM,
+        feu,
+        vec![
+            verif!(antivirus()),
+            verif!(ports_ecoute(feu_actif, lan)),
+            verif!(ports_udp(feu_actif, lan)),
+            verif!(smb1()),
+            verif!([bureau_distance()]),
+            verif!([uac()]),
+            verif!([mises_a_jour()]),
+            verif!([chiffrement()]),
+            verif!(comptes()),
+            verif!(persistance()),
+            verif!(wifi()),
+        ],
+    )
 }
 
 #[cfg(test)]

@@ -4,7 +4,7 @@ use std::fmt::Write;
 use std::path::Path;
 use std::process::Command;
 
-use super::{Audit, Constat, alerte, cles_ssh, impossible, ok, score, sortie};
+use super::{Audit, Constat, alerte, cles_ssh, impossible, ok, sortie};
 use crate::risk::{Niveau, info_port};
 use crate::{tr, trf, trw};
 
@@ -489,17 +489,7 @@ fn ports_ecoute(pare_feu_actif: bool, ufw: bool) -> Vec<Constat> {
                 .and_then(|u| u.split('"').nth(1))
                 .or(service.as_deref())
                 .unwrap_or(tr!("programme inconnu (root ?)", "unknown program (root?)"));
-            let niveau = super::niveau_expose(pare_feu_actif, i.niveau);
-            let constat = alerte(
-                "Ports en écoute",
-                niveau,
-                trf!(
-                    "{port}/{proto} ({}) ouvert sur le réseau par « {programme} ». {}",
-                    "{port}/{proto} ({}) open to the network by “{programme}”. {}",
-                    i.service,
-                    i.conseil
-                ),
-            );
+            let (niveau, constat) = super::port_expose(port, proto, &i, programme, pare_feu_actif);
             let deny = format!("sudo ufw deny {port}/{proto}");
             let cle = format!("{port}/{proto}");
             if ufw && bloques.contains(&cle) {
@@ -550,13 +540,7 @@ fn ports_ecoute(pare_feu_actif: bool, ufw: bool) -> Vec<Constat> {
         }
     }
     if constats.is_empty() {
-        constats.push(ok(
-            "Ports en écoute",
-            tr!(
-                "Aucun service TCP ou UDP exposé au réseau (tout écoute en local).",
-                "No TCP or UDP service exposed to the network (everything listens locally)."
-            ),
-        ));
+        constats.push(super::aucun_port_expose());
     }
     constats
 }
@@ -1307,48 +1291,37 @@ pub fn auditer() -> Audit {
     use super::verif;
     let feu = pare_feu();
     let feu_actif = feu.probleme.is_none();
-    let mut constats = vec![feu];
-    constats.extend(super::en_parallele(vec![
-        verif!(ports_ecoute(feu_actif, feu_actif && ufw_actif())),
-        verif!(docker()),
-        verif!([ssh_serveur()]),
-        verif!(ssh_echecs()),
-        verif!([mises_a_jour()]),
-        verif!([failles_connues()]),
-        verif!(autres_mises_a_jour()),
-        verif!([redemarrage()]),
-        verif!([chiffrement_disque()]),
-        verif!(verrouillage_ecran()),
-        verif!([durcissement_noyau()]),
-        verif!([module_securite()]),
-        verif!([sauvegardes()]),
-        verif!(fichiers_suspects()),
-        verif!(persistance()),
-        verif!([demarrage_securise()]),
-        verif!(cles_ssh()),
-        verif!(fichiers_secrets()),
-        verif!([processeur()]),
-        verif!(groupes_privilegies()),
-        verif!(sudo_sans_mot_de_passe()),
-        verif!(paquets_aur()),
-        verif!([comptes()]),
-        verif!(wifi(crate::scan::passerelle().map(|g| g.to_string()))),
-        verif!([services_en_echec()]),
-        verif!(super::dns::dns()),
-        verif!(super::certificats::certificats()),
-        verif!(super::extensions::extensions()),
-        verif!(super::navigateur::navigateurs()),
-        verif!(super::sante::sante()),
-        verif!(super::journaux::journaux()),
-        verif!([crate::integrite::constat()]),
-        verif!(crate::pieges::constat()),
-    ]));
-
-    Audit {
-        systeme: NOM,
-        score: score(&constats),
-        constats,
-    }
+    super::audit(
+        NOM,
+        feu,
+        vec![
+            verif!(ports_ecoute(feu_actif, feu_actif && ufw_actif())),
+            verif!(docker()),
+            verif!([ssh_serveur()]),
+            verif!(ssh_echecs()),
+            verif!([mises_a_jour()]),
+            verif!([failles_connues()]),
+            verif!(autres_mises_a_jour()),
+            verif!([redemarrage()]),
+            verif!([chiffrement_disque()]),
+            verif!(verrouillage_ecran()),
+            verif!([durcissement_noyau()]),
+            verif!([module_securite()]),
+            verif!([sauvegardes()]),
+            verif!(fichiers_suspects()),
+            verif!(persistance()),
+            verif!([demarrage_securise()]),
+            verif!(cles_ssh()),
+            verif!(fichiers_secrets()),
+            verif!([processeur()]),
+            verif!(groupes_privilegies()),
+            verif!(sudo_sans_mot_de_passe()),
+            verif!(paquets_aur()),
+            verif!([comptes()]),
+            verif!(wifi(crate::scan::passerelle().map(|g| g.to_string()))),
+            verif!([services_en_echec()]),
+        ],
+    )
 }
 
 #[cfg(test)]

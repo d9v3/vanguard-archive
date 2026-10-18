@@ -1,152 +1,37 @@
 //! Privilèges sous macOS : fichiers de mots de passe et de jetons lisibles par d'autres comptes, sudo sans mot de
-//! passe, compte root activé. Mêmes vérifications que sous Linux (machine/linux/privileges.rs), avec ce que macOS
-//! a en propre.
+//! passe (vérifiés comme sous Linux : machine/unix.rs), compte root activé.
 
-use std::os::unix::fs::PermissionsExt;
 use std::process::Command;
 
-use super::{Constat, alerte, maison, ok, sortie};
+use super::{Constat, alerte, maison, ok};
+#[cfg(test)]
+use crate::machine::unix::secret_expose;
 use crate::risk::Niveau;
-use crate::{tr, trf};
-
-/// Fichiers qui contiennent des mots de passe ou des jetons d'accès, chemin relatif au dossier personnel.
-const SECRETS: &[&str] = &[
-    ".git-credentials",
-    ".netrc",
-    ".pgpass",
-    ".my.cnf",
-    ".npmrc",
-    ".pypirc",
-    ".aws/credentials",
-    ".docker/config.json",
-    ".kube/config",
-    ".config/gh/hosts.yml",
-    ".config/rclone/rclone.conf",
-    ".gnupg",
-];
-
-/// Un secret est mal protégé si le groupe ou les autres comptes peuvent le lire (ou y entrer, pour un dossier).
-fn secret_expose(mode: u32) -> bool {
-    mode & 0o077 != 0
-}
+use crate::tr;
 
 pub(super) fn fichiers_secrets() -> Vec<Constat> {
-    let maison = maison();
-    let mut exposes = Vec::new();
-    let mut commandes = Vec::new();
-    for nom in SECRETS {
-        // Droits du fichier lui-même, pas du lien (un lien symbolique a toujours 777).
-        let Ok(meta) = std::fs::metadata(maison.join(nom)) else {
-            continue;
-        };
-        if secret_expose(meta.permissions().mode()) {
-            exposes.push(format!("~/{nom}"));
-            commandes.push(format!("chmod {} ~/{nom}", if meta.is_dir() { "700" } else { "600" }));
-        }
-    }
-    let mut constats = Vec::new();
-    if !exposes.is_empty() {
-        let cmds: Vec<&str> = commandes.iter().map(String::as_str).collect();
-        constats.push(
-            alerte(
-                "Fichiers secrets",
-                Niveau::Eleve,
-                trf!(
-                    "Lisible(s) par d'autres comptes : {} (mots de passe ou jetons d'accès).",
-                    "Readable by other accounts: {} (passwords or access tokens).",
-                    exposes.join(", ")
-                ),
-            )
-            .corriger(
-                tr!("Réserver ces fichiers à toi seul", "Restrict these files to you only"),
-                &cmds,
-            ),
-        );
-    }
-    // macOS ferme le dossier personnel aux autres comptes (droits 750) : ouvert, il laisse voir tous tes fichiers.
-    if std::fs::metadata(&maison).is_ok_and(|m| m.permissions().mode() & 0o007 != 0) {
-        constats.push(
-            alerte(
-                "Fichiers secrets",
-                Niveau::Info,
-                tr!(
-                    "Ton dossier personnel est lisible par les autres comptes du Mac.",
-                    "Your home folder is readable by the Mac's other accounts."
-                ),
-            )
-            .corriger(
-                tr!(
-                    "Fermer ton dossier personnel aux autres comptes",
-                    "Close your home folder to the other accounts"
-                ),
-                &["chmod 750 ~"],
-            ),
-        );
-    }
-    if constats.is_empty() {
-        constats.push(ok(
-            "Fichiers secrets",
-            tr!(
-                "Fichiers de mots de passe et de jetons protégés.",
-                "Password and token files are protected."
-            ),
-        ));
-    }
-    constats
-}
-
-/// Règles « sudo sans mot de passe » qui donnent tout, et nombre de celles limitées à des commandes précises.
-fn regles_nopasswd(liste: &str) -> (usize, usize) {
-    let mut totales = 0;
-    let mut limitees = 0;
-    for l in liste.lines().map(str::trim).filter(|l| l.contains("NOPASSWD:")) {
-        let commandes = l.split_once("NOPASSWD:").map_or("", |(_, c)| c).trim();
-        if commandes == "ALL" || commandes.starts_with("ALL,") {
-            totales += 1;
-        } else {
-            limitees += 1;
-        }
-    }
-    (totales, limitees)
+    crate::machine::unix::fichiers_secrets(
+        &maison(),
+        tr!(
+            "Ton dossier personnel est lisible par les autres comptes du Mac.",
+            "Your home folder is readable by the Mac's other accounts."
+        ),
+    )
 }
 
 pub(super) fn sudo_sans_mot_de_passe() -> Option<Constat> {
-    // -n : jamais de demande de mot de passe. Sans règle NOPASSWD (ni sudo récent), la liste est refusée : rien à dire.
-    let liste = sortie("sudo", &["-n", "-l"])?;
-    let (totales, limitees) = regles_nopasswd(&liste);
-    Some(if totales > 0 {
-        alerte(
-            "Sudo",
-            Niveau::Eleve,
-            tr!(
-                "sudo sans mot de passe pour TOUTES les commandes : n'importe quel programme lancé par toi peut prendre la main sur le Mac.",
-                "sudo without a password for ALL commands: any program you run can take over the Mac."
-            ),
-        )
-        .manuel(
-            tr!(
-                "Retirer « NOPASSWD: » de cette règle dans /etc/sudoers.d (toujours avec sudo visudo, jamais à la main)",
-                "Remove “NOPASSWD:” from this rule in /etc/sudoers.d (always with sudo visudo, never by hand)"
-            ),
-            &["sudo visudo"],
-        )
-    } else if limitees > 0 {
-        ok(
-            "Sudo",
-            trf!(
-                "{limitees} règle(s) sudo sans mot de passe, limitée(s) à des commandes précises.",
-                "{limitees} passwordless sudo rule(s), limited to specific commands."
-            ),
-        )
-    } else {
-        ok(
-            "Sudo",
-            tr!(
-                "sudo demande toujours le mot de passe.",
-                "sudo always asks for the password."
-            ),
-        )
-    })
+    crate::machine::unix::sudo_sans_mot_de_passe(tr!(
+        "sudo sans mot de passe pour TOUTES les commandes : n'importe quel programme lancé par toi peut prendre la main sur le Mac.",
+        "sudo without a password for ALL commands: any program you run can take over the Mac."
+    ))
+}
+
+/// Règles « sudo sans mot de passe » qui donnent tout, et nombre de celles limitées à des commandes précises : la forme
+/// que lisent les tests de ce fichier.
+#[cfg(test)]
+fn regles_nopasswd(liste: &str) -> (usize, usize) {
+    let (totales, limitees) = crate::machine::unix::regles_nopasswd(liste);
+    (totales.len(), limitees)
 }
 
 /// Le compte root a-t-il un mot de passe (activé) ? macOS le laisse désactivé d'origine. `None` : illisible.

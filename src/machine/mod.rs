@@ -25,6 +25,8 @@ pub mod windows;
 use windows as os;
 #[cfg(target_os = "macos")]
 pub mod macos;
+#[cfg(unix)]
+mod unix;
 #[cfg(target_os = "macos")]
 use macos as os;
 
@@ -173,8 +175,66 @@ macro_rules! verif {
 }
 pub(crate) use verif;
 
+/// L'audit d'un système : `premier` (le pare-feu, dont d'autres vérifications dépendent), puis ses vérifications et
+/// celles communes aux trois systèmes, lancées en même temps et rendues dans l'ordre de la liste.
+fn audit(systeme: &'static str, premier: Constat, mut propres: Vec<Verification<'_>>) -> Audit {
+    propres.extend([
+        verif!(dns::dns()),
+        verif!(certificats::certificats()),
+        verif!(extensions::extensions()),
+        verif!(navigateur::navigateurs()),
+        verif!(sante::sante()),
+        verif!(journaux::journaux()),
+        verif!([crate::integrite::constat()]),
+        verif!(crate::pieges::constat()),
+    ]);
+    let mut constats = vec![premier];
+    constats.extend(en_parallele(propres));
+    Audit {
+        systeme,
+        score: score(&constats),
+        constats,
+    }
+}
+
 fn score(constats: &[Constat]) -> u32 {
     100u32.saturating_sub(constats.iter().filter_map(|c| c.probleme).map(Niveau::penalite).sum())
+}
+
+/// Un port ouvert sur le réseau par un programme, sous Linux et macOS : (niveau qu'il vaut derrière ce pare-feu,
+/// alerte).
+#[cfg(unix)]
+fn port_expose(
+    port: u16,
+    proto: &str,
+    i: &crate::risk::InfoPort,
+    programme: &str,
+    pare_feu_actif: bool,
+) -> (Niveau, Constat) {
+    let niveau = niveau_expose(pare_feu_actif, i.niveau);
+    let constat = alerte(
+        "Ports en écoute",
+        niveau,
+        trf!(
+            "{port}/{proto} ({}) ouvert sur le réseau par « {programme} ». {}",
+            "{port}/{proto} ({}) open to the network by “{programme}”. {}",
+            i.service,
+            i.conseil
+        ),
+    );
+    (niveau, constat)
+}
+
+/// Aucun service exposé au réseau, sous Linux et macOS.
+#[cfg(unix)]
+fn aucun_port_expose() -> Constat {
+    ok(
+        "Ports en écoute",
+        tr!(
+            "Aucun service TCP ou UDP exposé au réseau (tout écoute en local).",
+            "No TCP or UDP service exposed to the network (everything listens locally)."
+        ),
+    )
 }
 
 /// Sortie standard d'une commande, ou `None` si elle est absente ou échoue.
@@ -285,7 +345,8 @@ fn cle_protegee(texte: &str) -> Option<bool> {
     }
 }
 
-#[cfg(unix)]
+/// Décode du base64, espaces et « = » ignorés ; `None` si un caractère n'est pas de l'alphabet. Un dernier bloc d'un
+/// seul caractère ne donne aucun octet.
 fn base64_decoder(texte: &str) -> Option<Vec<u8>> {
     let valeur = |c: u8| -> Option<u32> {
         Some(u32::from(match c {
