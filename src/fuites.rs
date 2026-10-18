@@ -153,12 +153,37 @@ fn cle_hibp() -> Option<String> {
 
 /// Fuites où apparaît l'adresse : par Have I Been Pwned si une clé est fournie (`cle_hibp`), sinon par
 /// XposedOrNot (gratuit, sans clé). `None` : service injoignable.
+/// En-tête portant la clé, dans un fichier réservé à l'utilisateur, passé à curl par « -H @fichier » : sur la ligne
+/// de commande, la clé serait lisible par tous les comptes de l'ordinateur (ps, /proc/<pid>/cmdline).
+fn fichier_entete(cle: &str) -> Option<std::path::PathBuf> {
+    use std::io::Write;
+    let dossier = crate::reseau::dossier_local();
+    std::fs::create_dir_all(&dossier).ok()?;
+    let chemin = dossier.join(format!("hibp-entete-{}.txt", std::process::id()));
+    let _ = std::fs::remove_file(&chemin);
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+    let ecrit = options
+        .open(&chemin)
+        .and_then(|mut f| f.write_all(format!("hibp-api-key: {cle}\n").as_bytes()));
+    if ecrit.is_err() {
+        let _ = std::fs::remove_file(&chemin);
+        return None;
+    }
+    Some(chemin)
+}
+
 fn fuites_courriel(adresse: &str) -> Option<(Vec<String>, &'static str)> {
     let mut curl = std::process::Command::new("curl");
     curl.args(["-sS", "--max-time", "20", "-A", "gardien", "-w", "\n%{http_code}"]);
     let cle = cle_hibp();
+    let mut entete = None;
     let service = if let Some(cle) = &cle {
-        curl.args(["-H", &format!("hibp-api-key: {cle}")]);
+        let fichier = fichier_entete(cle)?;
+        curl.arg("-H").arg(format!("@{}", fichier.display()));
+        entete = Some(fichier);
         curl.arg(format!(
             "https://haveibeenpwned.com/api/v3/breachedaccount/{}?truncateResponse=true",
             encoder(adresse)
@@ -171,7 +196,11 @@ fn fuites_courriel(adresse: &str) -> Option<(Vec<String>, &'static str)> {
         ));
         "XposedOrNot"
     };
-    let r = crate::commande::lancer(&mut curl, 25)?;
+    let r = crate::commande::lancer(&mut curl, 25);
+    if let Some(fichier) = &entete {
+        let _ = std::fs::remove_file(fichier);
+    }
+    let r = r?;
     let (corps, code) = r.sortie.trim_end().rsplit_once('\n')?;
     match (cle.is_some(), code.trim()) {
         // Have I Been Pwned répond 404 quand l'adresse n'apparaît dans aucune fuite.
@@ -267,5 +296,18 @@ mod tests {
         assert_eq!(lire_hibp(r#"[{"Name":"Adobe"}]"#), Some(vec!["Adobe".to_string()]));
         assert_eq!(lire_xposedornot("pas du json"), None);
         assert!(conseil_forme("cheval agrafe batterie correct").is_none());
+    }
+
+    #[test]
+    fn cle_hors_de_la_ligne_de_commande() {
+        let f = fichier_entete("0123456789abcdef").unwrap();
+        assert_eq!(std::fs::read_to_string(&f).unwrap(), "hibp-api-key: 0123456789abcdef\n");
+        // Réservé à l'utilisateur : aucun autre compte ne lit la clé.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(std::fs::metadata(&f).unwrap().permissions().mode() & 0o777, 0o600);
+        }
+        std::fs::remove_file(&f).unwrap();
     }
 }

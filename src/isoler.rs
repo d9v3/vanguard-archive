@@ -8,9 +8,23 @@ use std::path::{Path, PathBuf};
 
 use crate::ui::*;
 
-/// Dossier jetable qui reçoit une copie du programme (le bac à sable n'écrit jamais à côté de l'original).
-fn dossier_jetable() -> PathBuf {
-    std::env::temp_dir().join(format!("gardien-bac-{}", std::process::id()))
+/// Dossier jetable qui reçoit une copie du programme (le bac à sable n'écrit jamais à côté de l'original). Créé de
+/// façon exclusive, sous un nom imprévisible et réservé à l'utilisateur : dans un /tmp partagé, un dossier préparé
+/// d'avance par un autre compte (avec un lien piégé au nom du programme) aurait fait écraser un de tes fichiers par
+/// la copie.
+fn dossier_jetable() -> std::io::Result<PathBuf> {
+    static COMPTEUR: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    let n = COMPTEUR.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.subsec_nanos());
+    let dossier = std::env::temp_dir().join(format!("gardien-bac-{}-{nanos}-{n}", std::process::id()));
+    #[cfg_attr(windows, allow(unused_mut))]
+    let mut createur = std::fs::DirBuilder::new();
+    #[cfg(unix)]
+    std::os::unix::fs::DirBuilderExt::mode(&mut createur, 0o700);
+    createur.create(&dossier)?;
+    Ok(dossier)
 }
 
 /// Arguments de bubblewrap. Le dossier de session (/run/user/…) est masqué : son bus de session permettrait de
@@ -110,14 +124,21 @@ pub fn isoler(fichier: &Path) {
 #[cfg(target_os = "linux")]
 fn lancer(source: &Path) {
     use std::os::unix::fs::PermissionsExt;
-    let jetable = dossier_jetable();
+    let Ok(jetable) = dossier_jetable() else {
+        trp!(
+            "  ✖ Dossier jetable impossible à créer.",
+            "  ✖ Could not create the disposable folder."
+        );
+        return;
+    };
     let nom = source.file_name().unwrap_or_default();
     let copie = jetable.join(nom);
-    if std::fs::create_dir_all(&jetable).is_err() || std::fs::copy(source, &copie).is_err() {
+    if std::fs::copy(source, &copie).is_err() {
         trp!(
             "  ✖ Copie impossible dans le dossier jetable.",
             "  ✖ Could not copy into the disposable folder."
         );
+        let _ = std::fs::remove_dir_all(&jetable);
         return;
     }
     let _ = std::fs::set_permissions(&copie, std::fs::Permissions::from_mode(0o755));
@@ -187,15 +208,14 @@ fn profil_sandbox(jetable: &str, maison: &str) -> String {
 #[cfg(target_os = "macos")]
 fn lancer(source: &Path) {
     use std::os::unix::fs::PermissionsExt;
-    let jetable = dossier_jetable();
-    let nom = source.file_name().unwrap_or_default();
-    if std::fs::create_dir_all(&jetable).is_err() {
+    let Ok(jetable) = dossier_jetable() else {
         trp!(
             "  ✖ Dossier jetable impossible à créer.",
             "  ✖ Could not create the disposable folder."
         );
         return;
-    }
+    };
+    let nom = source.file_name().unwrap_or_default();
     // sandbox-exec compare des chemins réels : /var est un lien vers /private/var.
     let jetable = jetable.canonicalize().unwrap_or(jetable);
     let copie = jetable.join(nom);
@@ -248,9 +268,15 @@ fn lancer(source: &Path) {
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_default();
-    let jetable = dossier_jetable();
+    let Ok(jetable) = dossier_jetable() else {
+        trp!(
+            "  ✖ Configuration impossible à écrire.",
+            "  ✖ Could not write the configuration."
+        );
+        return;
+    };
     let wsb = jetable.join("gardien.wsb");
-    if std::fs::create_dir_all(&jetable).is_err() || std::fs::write(&wsb, configuration_wsb(&dossier, &nom)).is_err() {
+    if std::fs::write(&wsb, configuration_wsb(&dossier, &nom)).is_err() {
         trp!(
             "  ✖ Configuration impossible à écrire.",
             "  ✖ Could not write the configuration."
@@ -276,6 +302,21 @@ mod tests {
         assert!(p.contains("(deny network*)"));
         assert!(p.contains("(deny file-read* (subpath \"/Users/a \\\"b\\\"\"))"));
         assert!(p.contains("(allow file-read* file-write* (subpath \"/private/var/folders/x/T/gardien-bac-1\"))"));
+    }
+
+    #[test]
+    fn dossier_jetable_exclusif() {
+        let a = dossier_jetable().unwrap();
+        let b = dossier_jetable().unwrap();
+        // Deux dossiers distincts, chacun créé neuf (jamais un dossier préparé d'avance), réservés à l'utilisateur.
+        assert_ne!(a, b);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(std::fs::metadata(&a).unwrap().permissions().mode() & 0o777, 0o700);
+        }
+        std::fs::remove_dir(&a).unwrap();
+        std::fs::remove_dir(&b).unwrap();
     }
 
     #[test]

@@ -428,6 +428,21 @@ pub const TEMOIN_CLE: &str = "gardien.cle";
 /// prochain déploiement.
 pub const ANCIENS_TEMOINS_CLE: [&str; 2] = ["sentinel.cle", "netscan.cle"];
 
+/// Volumes montés pour l'utilisateur, un sous-dossier par clé : /run/media/<utilisateur> (Arch, Fedora, openSUSE…)
+/// et /media/<utilisateur> (Debian, Ubuntu, Mint), où udisks range les clés selon la distribution.
+#[cfg(target_os = "linux")]
+pub fn cles_montees() -> Vec<PathBuf> {
+    std::env::var("USER")
+        .ok()
+        .into_iter()
+        .flat_map(|u| [format!("/run/media/{u}"), format!("/media/{u}")])
+        .filter_map(|d| std::fs::read_dir(d).ok())
+        .flatten()
+        .flatten()
+        .map(|d| d.path())
+        .collect()
+}
+
 /// Clé USB de Gardien branchée, si elle est trouvée (dossier racine contenant son témoin, ou celui d'un ancien nom).
 pub fn cle_usb() -> Option<PathBuf> {
     // D'abord : sommes-nous lancés depuis la clé ? (exe dans <clé>/Linux/, <clé>/Windows/…)
@@ -442,14 +457,7 @@ pub fn cle_usb() -> Option<PathBuf> {
         .flat_map(|e| e.ancestors().skip(1).take(2).map(PathBuf::from))
         .collect::<Vec<_>>();
     #[cfg(target_os = "linux")]
-    let montages: Vec<PathBuf> = std::env::var("USER")
-        .ok()
-        .and_then(|u| std::fs::read_dir(format!("/run/media/{u}")).ok())
-        .into_iter()
-        .flatten()
-        .flatten()
-        .map(|d| d.path())
-        .collect();
+    let montages = cles_montees();
     #[cfg(target_os = "macos")]
     let montages: Vec<PathBuf> = std::fs::read_dir("/Volumes")
         .into_iter()
@@ -869,9 +877,16 @@ fn afficher(r: &Rapport) {
             );
         }
     }
-    trp!(
-        "\n  {DISCRET}Astuce : « n » pour nommer un appareil, « 5 » pour scanner tous ses ports.{RESET}",
-        "\n  {DISCRET}Tip: “n” to name a device, “5” to scan all its ports.{RESET}"
+    // Chemins du menu depuis la 0.43 (groupe 5 « Réseau et Internet »), et la même chose en ligne de commande.
+    println!();
+    afficher_aligne(
+        "  ",
+        tr!(
+            "Astuce : menu 5 › 3 pour nommer un appareil (gardien nommer <ip> <surnom>), 5 › 2 pour scanner tous ses ports (gardien reseau <ip> -p tous).",
+            "Tip: menu 5 › 3 to name a device (gardien name <ip> <nickname>), 5 › 2 to scan all its ports (gardien network <ip> -p all)."
+        ),
+        2,
+        DISCRET,
     );
 }
 
@@ -936,8 +951,11 @@ pub async fn executer(o: Options) -> Result<Rapport, String> {
         }
     }
     let resultats = scan::scanner_ports(&vivantes, &ports, delai, parallele).await;
+    // Listes nommées, en français ou en anglais (comme parse_ports).
+    let courants = matches!(o.ports.as_str(), "courants" | "common");
+    let tous = matches!(o.ports.as_str(), "tous" | "all");
     // UDP : quelques services qui se taisent en TCP (SNMP, NetBIOS, UPnP…), avec les listes de ports par défaut.
-    let avec_udp = o.ports == "courants" || o.ports == "tous";
+    let avec_udp = courants || tous;
     let mut resultats_udp = if avec_udp {
         scan::scanner_udp(&vivantes, PORTS_UDP, Duration::from_millis(o.timeout.clamp(800, 1500))).await
     } else {
@@ -963,7 +981,7 @@ pub async fn executer(o: Options) -> Result<Rapport, String> {
     let premier_scan = histo.appareils.is_empty();
     let udp_deja_vu = histo.udp;
     // Seul un scan du réseau entier sur les ports courants se compare aux précédents.
-    let scan_comparable = ips.len() > 1 && o.ports == "courants";
+    let scan_comparable = ips.len() > 1 && courants;
     // Un port hors de la liste courante n'a jamais pu être vu par les scans précédents : pas de faux « nouveau ».
     let comparable = |port: u16| PORTS_COURANTS.contains(&port);
     // Une machine est reconnue par sa MAC (l'IP DHCP peut changer), sinon par son IP.

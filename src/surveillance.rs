@@ -335,6 +335,9 @@ pub fn activer(oui: bool) {
 fn installer(exe: &str) -> bool {
     let dossier = std::path::PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".config/systemd/user");
     let _ = std::fs::create_dir_all(&dossier);
+    // Chemin entre guillemets (un dossier personnel peut contenir une espace), « % » doublé (spécificateurs de
+    // systemd).
+    let exe = format!("\"{}\"", exe.replace('%', "%%").replace('"', "\\\""));
     let service = trf!(
         "[Unit]\nDescription=Gardien : surveillance du réseau local\n\n[Service]\nType=oneshot\nExecStart={exe} surveiller\nNice=10\n",
         "[Unit]\nDescription=Gardien: local network monitoring\n\n[Service]\nType=oneshot\nExecStart={exe} surveiller\nNice=10\n"

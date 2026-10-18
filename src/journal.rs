@@ -53,14 +53,7 @@ fn partition_de_la_cle() -> Option<PathBuf> {
     #[cfg(unix)]
     {
         #[cfg(target_os = "linux")]
-        let montages: Vec<PathBuf> = std::env::var("USER")
-            .ok()
-            .and_then(|u| std::fs::read_dir(format!("/run/media/{u}")).ok())
-            .into_iter()
-            .flatten()
-            .flatten()
-            .map(|d| d.path())
-            .collect();
+        let montages = crate::reseau::cles_montees();
         #[cfg(target_os = "macos")]
         let montages: Vec<PathBuf> = std::fs::read_dir("/Volumes")
             .into_iter()

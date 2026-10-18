@@ -454,13 +454,24 @@ fn clamav(portee: &Portee) {
     // le reste peut peser des gigaoctets (caches de compilation, préfixes Wine) sans rien apprendre.
     let liste_tmp = if matches!(portee, Portee::Rapide) {
         let fichiers = fichiers_recents(std::path::Path::new("/tmp"), 7, 5000);
-        let chemin = std::env::temp_dir().join(format!("gardien-clamav-{}.txt", std::process::id()));
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.subsec_nanos());
+        let chemin = std::env::temp_dir().join(format!("gardien-clamav-{}-{nanos}.txt", std::process::id()));
         let texte = fichiers
             .iter()
             .map(|f| f.display().to_string())
             .collect::<Vec<_>>()
             .join("\n");
-        (!fichiers.is_empty() && std::fs::write(&chemin, texte).is_ok()).then_some((chemin, fichiers.len()))
+        // Création exclusive : jamais un fichier ou un lien posé d'avance par un autre compte dans /tmp.
+        let ecrit = !fichiers.is_empty()
+            && std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&chemin)
+                .and_then(|mut f| std::io::Write::write_all(&mut f, texte.as_bytes()))
+                .is_ok();
+        ecrit.then_some((chemin, fichiers.len()))
     } else {
         None
     };

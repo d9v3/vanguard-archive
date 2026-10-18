@@ -34,6 +34,7 @@ pub async fn sonder(ip: Ipv4Addr, port: u16, delai: Duration) -> (Etat, Option<T
 /// Nombre de connexions simultanées réellement possible : chaque connexion consomme un descripteur
 /// de fichier, et certains systèmes n'en autorisent que 256 par défaut. On relève la limite si le système le permet.
 pub fn limite_connexions(demande: usize) -> usize {
+    // SAFETY : getrlimit et setrlimit lisent et écrivent la structure locale `lim`, passée par pointeur valide.
     #[cfg(unix)]
     unsafe {
         let mut lim = libc::rlimit {

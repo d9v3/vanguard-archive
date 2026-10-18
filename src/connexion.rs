@@ -102,8 +102,20 @@ enum Sens {
 /// en Mbit/s. `None` : aucun transfert n'a abouti (pas de curl, pas d'Internet).
 fn charger(sens: Sens, duree: Duration, arret: &Arc<AtomicBool>) -> Option<f64> {
     let nul = if cfg!(windows) { "NUL" } else { "/dev/null" };
-    let fichier = std::env::temp_dir().join(format!("gardien-envoi-{}.bin", std::process::id()));
-    if sens == Sens::Envoi && std::fs::write(&fichier, vec![0u8; 25_000_000]).is_err() {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.subsec_nanos());
+    let fichier = std::env::temp_dir().join(format!("gardien-envoi-{}-{nanos}.bin", std::process::id()));
+    // Création exclusive : jamais un fichier ou un lien posé d'avance par un autre compte dans un /tmp partagé (le
+    // contenu, 25 Mo de zéros, l'aurait écrasé).
+    if sens == Sens::Envoi
+        && std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&fichier)
+            .and_then(|mut f| std::io::Write::write_all(&mut f, &vec![0u8; 25_000_000]))
+            .is_err()
+    {
         return None;
     }
     let octets = Arc::new(AtomicU64::new(0));
