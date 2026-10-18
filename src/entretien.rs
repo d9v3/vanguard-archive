@@ -6,6 +6,11 @@
 use std::sync::atomic::{AtomicU8, Ordering};
 
 use crate::risk::Niveau;
+#[cfg(target_os = "macos")]
+use crate::surveillance::domaine_launchd;
+#[cfg(unix)]
+use crate::surveillance::reussit;
+use crate::surveillance::{cle_alerte, executable};
 use crate::ui::*;
 
 #[cfg(target_os = "linux")]
@@ -16,16 +21,9 @@ const AGENT_MACOS: &str = "com.gardien.entretien";
 const TACHE_WINDOWS: &str = "gardien - entretien du mois";
 
 /// Catégories de l'audit qui disent « des mises à jour attendent ».
-const CATEGORIES_MAJ: &[&str] = &[
-    "Mises à jour",
-    "Programmes",
-    "Pilotes",
-    "Firmware",
-    "Flatpak",
-    "Snap",
-    "AUR",
-    "Paquets AUR",
-];
+#[rustfmt::skip] // une ligne, que rustfmt étalerait sur huit
+const CATEGORIES_MAJ: &[&str] =
+    &["Mises à jour", "Programmes", "Pilotes", "Firmware", "Flatpak", "Snap", "AUR", "Paquets AUR"];
 
 /// Ce que l'entretien retient d'un mois à l'autre.
 #[derive(serde::Serialize, serde::Deserialize, Default)]
@@ -40,10 +38,8 @@ fn fichier_etat() -> std::path::PathBuf {
     crate::reseau::dossier_local().join("entretien.json")
 }
 
-/// Ce que l'entretien a trouvé.
 struct Examen {
     score: Option<u32>,
-    /// Catégories (noms internes) où des mises à jour attendent.
     maj: Vec<&'static str>,
     /// Catégories de mises à jour qui n'ont pas pu être vérifiées : jamais « rien n'attend ».
     maj_inconnues: Vec<&'static str>,
@@ -54,134 +50,84 @@ struct Examen {
 
 fn examiner() -> Examen {
     let audit = crate::machine::auditer(false);
-    let probleme = |c: &crate::machine::Constat| c.probleme.is_some_and(|n| n >= Niveau::Moyen);
-    let mut maj: Vec<&'static str> = audit
-        .constats
-        .iter()
-        .filter(|c| probleme(c) && CATEGORIES_MAJ.contains(&c.categorie))
-        .map(|c| c.categorie)
-        .collect();
-    maj.dedup();
-    let mut maj_inconnues: Vec<&'static str> = audit
-        .constats
-        .iter()
-        .filter(|c| !c.verifie && CATEGORIES_MAJ.contains(&c.categorie))
-        .map(|c| c.categorie)
-        .collect();
-    maj_inconnues.dedup();
+    let probleme = |c: &&crate::machine::Constat| c.probleme.is_some_and(|n| n >= Niveau::Moyen);
+    let des_maj = |c: &&crate::machine::Constat| CATEGORIES_MAJ.contains(&c.categorie);
+    let alerte = |c: &&crate::machine::Constat| format!("{} : {}", c.categorie, c.message);
+    let (maj, autres): (Vec<_>, Vec<_>) = audit.constats.iter().partition(des_maj);
     Examen {
         score: audit.fiable().then_some(audit.score),
-        maj,
-        maj_inconnues,
+        maj: maj.iter().filter(|c| probleme(c)).map(|c| c.categorie).collect(),
+        maj_inconnues: maj.iter().filter(|c| !c.verifie).map(|c| c.categorie).collect(),
         place: crate::nettoyer::place_a_liberer(),
-        alertes: audit
-            .constats
-            .iter()
-            .filter(|c| probleme(c) && !CATEGORIES_MAJ.contains(&c.categorie))
-            .map(|c| format!("{} : {}", c.categorie, c.message))
-            .collect(),
+        alertes: autres.iter().filter(|c| probleme(c)).map(alerte).collect(),
     }
 }
 
 /// Les problèmes de ce mois que le mois d'avant n'avait pas (comparés sans leurs nombres, comme la surveillance).
 fn nouvelles(avant: &[String], apres: &[String]) -> Vec<String> {
-    let connues: Vec<String> = avant.iter().map(|a| crate::surveillance::cle_alerte(a)).collect();
-    apres
-        .iter()
-        .filter(|a| !connues.contains(&crate::surveillance::cle_alerte(a)))
-        .cloned()
-        .collect()
+    let connues: Vec<String> = avant.iter().map(|a| cle_alerte(a)).collect();
+    let nouvelle = |a: &&String| !connues.contains(&cle_alerte(a));
+    apres.iter().filter(nouvelle).cloned().collect()
 }
 
 /// Texte de l'entretien : (titre, lignes). `nouvelles` vaut `None` au premier passage (rien à comparer).
-fn rediger(e: &Examen, nouvelles: Option<&[String]>) -> (String, Vec<String>) {
-    let mut lignes = Vec::new();
-    lignes.push(match e.score {
+fn rediger(e: &Examen, nouvelles: Option<&[String]>) -> (&'static str, Vec<String>) {
+    let mut lignes = vec![match e.score {
         Some(s) => trf!(
             "Note de cette machine : {} ({s}/100).",
             "This machine's grade: {} ({s}/100).",
             crate::risk::note(s)
         ),
-        None => tr!(
+        None => String::from(tr!(
             "Note de cette machine : aucune (des vérifications n'ont pas pu se faire).",
             "This machine's grade: none (some checks could not be done)."
-        )
-        .to_string(),
-    });
-    let inconnues: Vec<&str> = e.maj_inconnues.iter().map(|c| crate::langue::categorie(c)).collect();
-    lignes.push(if e.maj.is_empty() && !inconnues.is_empty() {
-        trf!(
+        )),
+    }];
+    lignes.push(match (e.maj.as_slice(), e.maj_inconnues.as_slice()) {
+        ([], []) => tr!("Mises à jour : rien n'attend.", "Updates: nothing waiting.").to_string(),
+        ([], inconnues) => trf!(
             "Mises à jour : impossible à vérifier ({}).",
             "Updates: could not be checked ({}).",
-            resume_liste(&inconnues)
-        )
-    } else if e.maj.is_empty() {
-        tr!("Mises à jour : rien n'attend.", "Updates: nothing waiting.").to_string()
-    } else {
-        let quoi: Vec<&str> = e.maj.iter().map(|c| crate::langue::categorie(c)).collect();
-        trf!(
-            "Mises à jour en attente : {}.",
-            "Updates waiting: {}.",
-            resume_liste(&quoi)
-        )
+            categories(inconnues)
+        ),
+        (m, _) => trf!("Mises à jour en attente : {}.", "Updates waiting: {}.", categories(m)),
     });
-    if e.place >= 1 << 30 {
-        lignes.push(trf!(
-            "Le nettoyage libérerait {}.",
-            "Cleaning up would free {}.",
-            crate::nettoyer::taille_lisible(e.place)
-        ));
+    let place = (e.place >= 1 << 30).then(|| crate::nettoyer::taille_lisible(e.place));
+    if let Some(p) = &place {
+        lignes.push(trf!("Le nettoyage libérerait {}.", "Cleaning up would free {}.", p));
     }
-    match nouvelles {
-        None => lignes.push(
-            tr!(
-                "Premier entretien : la suite comparera avec aujourd'hui.",
-                "First check-up: the next ones will compare with today."
-            )
-            .to_string(),
+    lignes.push(match nouvelles {
+        None => String::from(tr!(
+            "Premier entretien : la suite comparera avec aujourd'hui.",
+            "First check-up: the next ones will compare with today."
+        )),
+        Some([]) => String::from(tr!(
+            "Aucun problème nouveau depuis le mois dernier.",
+            "No new problem since last month."
+        )),
+        Some(n) => trf!(
+            "{} problème(s) nouveau(x) depuis le mois dernier : {}.",
+            "{} new problem(s) since last month: {}.",
+            n.len(),
+            categories(n)
         ),
-        Some([]) => lignes.push(
-            tr!(
-                "Aucun problème nouveau depuis le mois dernier.",
-                "No new problem since last month."
-            )
-            .to_string(),
-        ),
-        Some(n) => {
-            let categories: Vec<&str> = n
-                .iter()
-                .map(|a| crate::langue::categorie(a.split_once(" : ").map_or(a.as_str(), |(c, _)| c)))
-                .collect();
-            lignes.push(trf!(
-                "{} problème(s) nouveau(x) depuis le mois dernier : {}.",
-                "{} new problem(s) since last month: {}.",
-                n.len(),
-                resume_liste(&categories)
-            ));
-        }
+    });
+    if !e.maj.is_empty() || place.is_some() || nouvelles.is_some_and(|n| !n.is_empty()) {
+        lignes.push(String::from(tr!(
+            "Ouvre Gardien pour t'en occuper : rien n'a été changé.",
+            "Open Gardien to deal with it: nothing was changed."
+        )));
     }
-    let a_faire = !e.maj.is_empty() || e.place >= 1 << 30 || nouvelles.is_some_and(|n| !n.is_empty());
-    if a_faire {
-        lignes.push(
-            tr!(
-                "Ouvre Gardien pour t'en occuper : rien n'a été changé.",
-                "Open Gardien to deal with it: nothing was changed."
-            )
-            .to_string(),
-        );
-    }
-    (
-        tr!("Gardien : entretien du mois", "Gardien: monthly check-up").to_string(),
-        lignes,
-    )
+    (tr!("Gardien : entretien du mois", "Gardien: monthly check-up"), lignes)
 }
 
-/// « a, b, c » sans doublon, trois au plus.
-fn resume_liste(noms: &[&str]) -> String {
+/// « a, b, c » : les catégories (noms internes, ou alertes « catégorie : message ») traduites, sans doublon, 3 au plus.
+fn categories(noms: &[impl AsRef<str>]) -> String {
     let mut uniques: Vec<&str> = Vec::new();
-    for n in noms {
-        if !uniques.contains(n) {
-            uniques.push(n);
+    for nom in noms.iter().map(AsRef::as_ref) {
+        let c = crate::langue::categorie(nom.split_once(" : ").map_or(nom, |(c, _)| c));
+        if !uniques.contains(&c) {
+            uniques.push(c);
         }
     }
     resume(&uniques, 3, ", ")
@@ -197,8 +143,7 @@ pub fn entretenir() {
     let avant = lire_etat();
     let nouvelles = avant.as_ref().map(|a| nouvelles(&a.alertes, &examen.alertes));
     let (titre, lignes) = rediger(&examen, nouvelles.as_deref());
-    let texte = lignes.join("\n");
-    crate::surveillance::notifier(&titre, &texte);
+    crate::surveillance::notifier(titre, &lignes.join("\n"));
     let etat = Etat {
         date: chrono::Local::now().format("%Y-%m-%d").to_string(),
         score: examen.score,
@@ -228,9 +173,7 @@ pub fn maintenant() {
             println!("  {} {morceau}", if i == 0 { "•" } else { " " });
         }
     }
-    if let (Some(a), Some(n)) = (&avant, &nouvelles)
-        && !n.is_empty()
-    {
+    if let (Some(a), Some(n @ [_, ..])) = (&avant, nouvelles.as_deref()) {
         trp!(
             "\n  {GRIS}Nouveau depuis l'entretien du {} :{RESET}",
             "\n  {GRIS}New since the check-up of {}:{RESET}",
@@ -259,22 +202,20 @@ pub fn maintenant() {
 static ETAT: AtomicU8 = AtomicU8::new(0);
 
 pub fn active() -> bool {
-    match ETAT.load(Ordering::Relaxed) {
-        0 => {
-            let a = installe();
-            ETAT.store(if a { 2 } else { 1 }, Ordering::Relaxed);
-            a
-        }
-        e => e == 2,
+    if ETAT.load(Ordering::Relaxed) == 0 {
+        #[cfg(target_os = "linux")]
+        let installe = reussit("systemctl", &["--user", "is-enabled", &format!("{NOM}.timer")]);
+        #[cfg(target_os = "macos")]
+        let installe = reussit("launchctl", &["print", &format!("{}/{AGENT_MACOS}", domaine_launchd())]);
+        #[cfg(windows)]
+        let installe = crate::surveillance::tache_existe(&[TACHE_WINDOWS]);
+        ETAT.store(1 + u8::from(installe), Ordering::Relaxed);
     }
+    ETAT.load(Ordering::Relaxed) == 2
 }
 
 pub fn activer(oui: bool) {
-    let reussi = if oui {
-        installer(&crate::surveillance::executable())
-    } else {
-        desinstaller()
-    };
+    let reussi = if oui { installer(&executable()) } else { desinstaller() };
     ETAT.store(0, Ordering::Relaxed);
     match (oui, reussi) {
         (true, true) => trp!(
@@ -291,9 +232,8 @@ pub fn activer(oui: bool) {
 
 /// Unités systemd : le 1er du mois à midi (rattrapé au démarrage suivant si l'ordinateur était éteint).
 #[cfg(any(target_os = "linux", test))]
-fn unites_systemd(exe: &str) -> (String, String) {
-    // Chemin entre guillemets (un dossier personnel peut contenir une espace), « % » doublé (spécificateurs de
-    // systemd).
+fn unites_systemd(exe: &str) -> (String, &'static str) {
+    // Chemin entre guillemets (un dossier personnel peut contenir une espace), « % » doublé (spécificateurs systemd).
     let exe = format!("\"{}\"", exe.replace('%', "%%").replace('"', "\\\""));
     (
         trf!(
@@ -303,8 +243,7 @@ fn unites_systemd(exe: &str) -> (String, String) {
         tr!(
             "[Unit]\nDescription=Gardien : entretien une fois par mois\n\n[Timer]\nOnCalendar=*-*-01 12:00\nRandomizedDelaySec=15min\nPersistent=true\n\n[Install]\nWantedBy=timers.target\n",
             "[Unit]\nDescription=Gardien: check-up once a month\n\n[Timer]\nOnCalendar=*-*-01 12:00\nRandomizedDelaySec=15min\nPersistent=true\n\n[Install]\nWantedBy=timers.target\n"
-        )
-        .to_string(),
+        ),
     )
 }
 
@@ -314,30 +253,21 @@ fn dossier_systemd() -> std::path::PathBuf {
 }
 
 #[cfg(target_os = "linux")]
-fn installe() -> bool {
-    crate::surveillance::reussit("systemctl", &["--user", "is-enabled", &format!("{NOM}.timer")])
-}
-
-#[cfg(target_os = "linux")]
 fn installer(exe: &str) -> bool {
-    use crate::surveillance::reussit;
     let dossier = dossier_systemd();
     let _ = std::fs::create_dir_all(&dossier);
     let (service, minuterie) = unites_systemd(exe);
-    let ecrit = std::fs::write(dossier.join(format!("{NOM}.service")), service).is_ok()
-        && std::fs::write(dossier.join(format!("{NOM}.timer")), minuterie).is_ok();
-    ecrit
+    std::fs::write(dossier.join(format!("{NOM}.service")), service).is_ok()
+        && std::fs::write(dossier.join(format!("{NOM}.timer")), minuterie).is_ok()
         && reussit("systemctl", &["--user", "daemon-reload"])
         && reussit("systemctl", &["--user", "enable", "--now", &format!("{NOM}.timer")])
 }
 
 #[cfg(target_os = "linux")]
 fn desinstaller() -> bool {
-    use crate::surveillance::reussit;
-    let dossier = dossier_systemd();
     reussit("systemctl", &["--user", "disable", "--now", &format!("{NOM}.timer")]);
-    let _ = std::fs::remove_file(dossier.join(format!("{NOM}.service")));
-    let _ = std::fs::remove_file(dossier.join(format!("{NOM}.timer")));
+    let _ = std::fs::remove_file(dossier_systemd().join(format!("{NOM}.service")));
+    let _ = std::fs::remove_file(dossier_systemd().join(format!("{NOM}.timer")));
     reussit("systemctl", &["--user", "daemon-reload"])
 }
 
@@ -366,19 +296,7 @@ fn plist_agent() -> std::path::PathBuf {
 }
 
 #[cfg(target_os = "macos")]
-fn installe() -> bool {
-    crate::surveillance::reussit(
-        "launchctl",
-        &[
-            "print",
-            &format!("{}/{AGENT_MACOS}", crate::surveillance::domaine_launchd()),
-        ],
-    )
-}
-
-#[cfg(target_os = "macos")]
 fn installer(exe: &str) -> bool {
-    use crate::surveillance::{domaine_launchd, reussit};
     let plist = plist_agent();
     let _ = std::fs::create_dir_all(plist.parent().unwrap_or(&plist));
     if std::fs::write(&plist, plist_entretien(exe, AGENT_MACOS)).is_err() {
@@ -392,12 +310,9 @@ fn installer(exe: &str) -> bool {
 
 #[cfg(target_os = "macos")]
 fn desinstaller() -> bool {
-    use crate::surveillance::{domaine_launchd, reussit};
     let plist = plist_agent();
-    let _ = reussit(
-        "launchctl",
-        &["bootout", &domaine_launchd(), &plist.display().to_string()],
-    );
+    let chemin = plist.display().to_string();
+    let _ = reussit("launchctl", &["bootout", &domaine_launchd(), &chemin]);
     let _ = std::fs::remove_file(&plist);
     true
 }
@@ -419,11 +334,6 @@ fn script_tache(exe: &str, nom: &str) -> String {
          Register-ScheduledTask -TaskName '{nom}' -Action $a -Trigger $t -Settings $s -Force \
            -Description 'Gardien check-up every four weeks: one notification (grade, updates, space, new problems), nothing is changed. To stop it: gardien entretien off' | Out-Null"
     )
-}
-
-#[cfg(windows)]
-fn installe() -> bool {
-    crate::surveillance::tache_existe(&[TACHE_WINDOWS])
 }
 
 #[cfg(windows)]

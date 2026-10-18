@@ -6,10 +6,10 @@
 
 use std::process::Command;
 
+use crate::commande::lancer;
 use crate::machine::wifi::{self, Bande, Borne};
 use crate::ui::*;
 
-/// Canaux de 2,4 GHz qui ne se recouvrent pas.
 const CANAUX_24: [u16; 3] = [1, 6, 11];
 
 /// Un bloc de 80 MHz en 5 GHz : (premier canal, dernier canal, sans radar).
@@ -17,13 +17,9 @@ type Bloc = (u16, u16, bool);
 
 /// Les blocs de 5 GHz. Les canaux 52 à 144 (DFS) se partagent avec des radars : la box doit écouter avant
 /// d'émettre, et change de canal si un radar passe.
+#[rustfmt::skip] // une ligne, que rustfmt étalerait sur six
 const BLOCS_5: [Bloc; 6] = [
-    (36, 48, true),
-    (52, 64, false),
-    (100, 112, false),
-    (116, 128, false),
-    (132, 144, false),
-    (149, 161, true),
+    (36, 48, true), (52, 64, false), (100, 112, false), (116, 128, false), (132, 144, false), (149, 161, true),
 ];
 
 /// Ce que le système a pu lire : les bornes, et pourquoi la liste des voisins peut manquer.
@@ -50,7 +46,6 @@ fn gene_24(voisines: &[&Borne], c: u16) -> f64 {
         .sum()
 }
 
-/// Nombre de réseaux de 2,4 GHz qui recouvrent le canal `c`.
 fn recouvrent_24(voisines: &[&Borne], c: u16) -> usize {
     voisines
         .iter()
@@ -60,23 +55,19 @@ fn recouvrent_24(voisines: &[&Borne], c: u16) -> usize {
 
 /// Bornes d'un bloc de 5 GHz, et leur gêne.
 fn bloc_5(voisines: &[&Borne], (debut, fin, _): Bloc) -> (usize, f64) {
-    let dedans: Vec<&&Borne> = voisines
+    let dedans = voisines
         .iter()
-        .filter(|b| b.bande == Bande::G5 && (debut..=fin).contains(&b.canal))
-        .collect();
-    (dedans.len(), dedans.iter().map(|b| poids(b)).sum())
+        .filter(|b| b.bande == Bande::G5 && (debut..=fin).contains(&b.canal));
+    (dedans.clone().count(), dedans.map(|b| poids(b)).sum())
 }
 
 /// Le canal de 2,4 GHz le moins gêné ; à gêne égale (à un dixième près), le plus petit.
 fn meilleur_24(voisines: &[&Borne]) -> u16 {
-    let mut meilleur = (CANAUX_24[0], gene_24(voisines, CANAUX_24[0]));
-    for &c in &CANAUX_24[1..] {
+    let plus_libre = |meilleur: (u16, f64), c| {
         let g = gene_24(voisines, c);
-        if g + 0.1 < meilleur.1 {
-            meilleur = (c, g);
-        }
-    }
-    meilleur.0
+        if g + 0.1 < meilleur.1 { (c, g) } else { meilleur }
+    };
+    CANAUX_24.into_iter().fold((0, f64::INFINITY), plus_libre).0
 }
 
 /// Le bloc de 5 GHz sans radar le moins occupé ; et un bloc à radar entièrement libre, s'il y en a un alors que les
@@ -84,34 +75,26 @@ fn meilleur_24(voisines: &[&Borne]) -> u16 {
 fn meilleur_5(voisines: &[&Borne]) -> (Bloc, Option<Bloc>) {
     let gene = |b| bloc_5(voisines, b).1;
     let sans_radar = BLOCS_5
-        .iter()
-        .copied()
+        .into_iter()
         .filter(|b| b.2)
         .min_by(|a, b| gene(*a).total_cmp(&gene(*b)))
         .unwrap_or(BLOCS_5[0]);
-    let libre = (gene(sans_radar) > 0.0)
-        .then(|| BLOCS_5.iter().copied().find(|b| !b.2 && bloc_5(voisines, *b).0 == 0))
-        .flatten();
-    (sans_radar, libre)
+    let libre = BLOCS_5.into_iter().find(|b| !b.2 && bloc_5(voisines, *b).0 == 0);
+    (sans_radar, libre.filter(|_| gene(sans_radar) > 0.0))
 }
 
 /// Barre de gêne sur 10 cases, relative à la plus forte gêne montrée (au moins 1).
 fn barre_gene(gene: f64, maximum: f64) -> String {
     let dixiemes = gene / maximum.max(1.0) * 10.0;
     // Le nombre de cases pleines, arrondi : le plus grand de 0 à 10 qui ne dépasse pas la valeur d'une demi-case.
-    let pleines = (0..=10u8)
-        .rfind(|&n| f64::from(n) <= dixiemes + 0.5)
-        .map_or(0, usize::from);
-    let teinte = match pleines {
+    let n = (0..=10u8).rfind(|&n| f64::from(n) <= dixiemes + 0.5).unwrap_or(0);
+    let teinte = match n {
         0..=3 => VERT,
         4..=6 => "\x1b[1;93m",
         _ => "\x1b[1;91m",
     };
-    format!(
-        "{teinte}{}{GRIS}{}{RESET}",
-        "▰".repeat(pleines),
-        "▱".repeat(10 - pleines)
-    )
+    let (pleines, vides) = ("▰".repeat(usize::from(n)), "▱".repeat(usize::from(10 - n)));
+    format!("{teinte}{pleines}{GRIS}{vides}{RESET}")
 }
 
 fn accord_reseaux(n: usize) -> String {
@@ -122,7 +105,6 @@ fn accord_reseaux(n: usize) -> String {
     }
 }
 
-/// Qualité d'un signal, en clair.
 fn qualite(signal: u8) -> &'static str {
     match signal {
         70.. => tr!("excellent", "excellent"),
@@ -140,34 +122,20 @@ fn qualite(signal: u8) -> &'static str {
 
 #[cfg(target_os = "linux")]
 fn lire() -> Result<Lecture, &'static str> {
+    let reussie = |c: &mut Command, delai| lancer(c, delai).filter(|r| r.code == Some(0)).map(|r| r.sortie);
     // NetworkManager d'abord ; sans lui (iwd, systemd-networkd), le dernier balayage gardé par le noyau.
-    if let Some(r) = crate::commande::lancer(
-        Command::new("nmcli").args([
-            "-t",
-            "-e",
-            "no",
-            "-f",
-            "ACTIVE,SIGNAL,FREQ,CHAN,SSID",
-            "dev",
-            "wifi",
-            "list",
-        ]),
-        30,
-    ) && r.code == Some(0)
-    {
-        let bornes = wifi::bornes_nmcli(&r.sortie);
-        if !bornes.is_empty() {
-            return Ok(Lecture { bornes, note: None });
-        }
+    let champs = "-t -e no -f ACTIVE,SIGNAL,FREQ,CHAN,SSID dev wifi list".split(' ');
+    let bornes = reussie(Command::new("nmcli").args(champs), 30).map_or_else(Vec::new, |s| wifi::bornes_nmcli(&s));
+    if !bornes.is_empty() {
+        return Ok(Lecture { bornes, note: None });
     }
     let cartes: Vec<String> = std::fs::read_dir("/sys/class/net")
-        .map(|d| {
-            d.flatten()
-                .filter(|e| e.path().join("wireless").is_dir())
-                .map(|e| e.file_name().to_string_lossy().into_owned())
-                .collect()
-        })
-        .unwrap_or_default();
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|e| e.path().join("wireless").is_dir())
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .collect();
     if cartes.is_empty() {
         return Err(tr!(
             "Pas de carte Wi-Fi sur cet ordinateur.",
@@ -175,18 +143,13 @@ fn lire() -> Result<Lecture, &'static str> {
         ));
     }
     let dump = |carte: &str| {
-        crate::commande::lancer(Command::new("iw").args(["dev", carte, "scan", "dump"]), 15)
-            .filter(|r| r.code == Some(0))
-            .map(|r| wifi::bornes_iw(&r.sortie))
-            .unwrap_or_default()
+        let iw = reussie(Command::new("iw").args(["dev", carte, "scan", "dump"]), 15);
+        iw.map_or_else(Vec::new, |s| wifi::bornes_iw(&s))
     };
     for carte in &cartes {
         let mut bornes = dump(carte);
         // Rien en mémoire : iwd sait balayer sans droits d'administrateur ; on lit le résultat quelques secondes après.
-        if bornes.is_empty()
-            && crate::commande::lancer(Command::new("iwctl").args(["station", carte, "scan"]), 10)
-                .is_some_and(|r| r.code == Some(0))
-        {
+        if bornes.is_empty() && reussie(Command::new("iwctl").args(["station", carte, "scan"]), 10).is_some() {
             std::thread::sleep(std::time::Duration::from_secs(4));
             bornes = dump(carte);
         }
@@ -202,114 +165,91 @@ fn lire() -> Result<Lecture, &'static str> {
 
 #[cfg(windows)]
 fn lire() -> Result<Lecture, &'static str> {
-    let netsh = |args: &[&str]| crate::commande::lancer(Command::new("netsh").args(args), 20).map(|r| r.sortie);
+    let netsh = |args: &[&str]| lancer(Command::new("netsh").args(args), 20).map(|r| r.sortie);
     let active = netsh(&["wlan", "show", "interfaces"]).and_then(|s| wifi::borne_active_netsh(&s));
-    let mut bornes = netsh(&["wlan", "show", "networks", "mode=bssid"])
-        .map(|s| wifi::bornes_netsh(&s))
-        .unwrap_or_default();
+    let voisins = netsh(&["wlan", "show", "networks", "mode=bssid"]);
+    let mut bornes = voisins.map_or_else(Vec::new, |s| wifi::bornes_netsh(&s));
     // Windows 11 24H2 ne liste les réseaux voisins qu'avec l'autorisation de localisation.
     let note = (bornes.is_empty() && active.is_some()).then_some(tr!(
         "Windows ne montre les réseaux voisins qu'avec la localisation : Paramètres > Confidentialité et sécurité > Localisation, autoriser les applications de bureau.",
         "Windows shows nearby networks only with location access: Settings > Privacy & security > Location, allow desktop apps."
     ));
-    match active {
-        Some(a) => match bornes.iter_mut().find(|b| b.ssid == a.ssid && b.canal == a.canal) {
-            Some(b) => {
-                b.actif = true;
-                b.signal = b.signal.or(a.signal);
-            }
+    if let Some(a) = active {
+        match bornes.iter_mut().find(|b| b.ssid == a.ssid && b.canal == a.canal) {
+            Some(b) => (b.actif, b.signal) = (true, b.signal.or(a.signal)),
             None => bornes.push(a),
-        },
-        None if bornes.is_empty() => {
-            return Err(tr!(
-                "Pas de Wi-Fi sur cet ordinateur, ou le service WLAN est arrêté.",
-                "No Wi-Fi on this computer, or the WLAN service is stopped."
-            ));
         }
-        None => {}
+    } else if bornes.is_empty() {
+        return Err(tr!(
+            "Pas de Wi-Fi sur cet ordinateur, ou le service WLAN est arrêté.",
+            "No Wi-Fi on this computer, or the WLAN service is stopped."
+        ));
     }
     Ok(Lecture { bornes, note })
 }
 
 #[cfg(target_os = "macos")]
 fn lire() -> Result<Lecture, &'static str> {
-    let Some(r) = crate::commande::lancer(Command::new("system_profiler").arg("SPAirPortDataType"), 40) else {
+    let Some(r) = lancer(Command::new("system_profiler").arg("SPAirPortDataType"), 40) else {
         return Err(tr!("Réseaux Wi-Fi illisibles.", "Wi-Fi networks unreadable."));
     };
-    let bornes = wifi::bornes_system_profiler(&r.sortie);
-    if bornes.is_empty() {
-        return Err(tr!(
+    match wifi::bornes_system_profiler(&r.sortie) {
+        b if b.is_empty() => Err(tr!(
             "Pas de Wi-Fi sur ce Mac, ou il est éteint.",
             "No Wi-Fi on this Mac, or it is turned off."
-        ));
+        )),
+        bornes => Ok(Lecture { bornes, note: None }),
     }
-    Ok(Lecture { bornes, note: None })
 }
 
 /// Menu Réseau et Internet › Wi-Fi encombré, ou `gardien canaux`.
 pub fn analyser() {
     titre(tr!("Wi-Fi encombré ?", "Crowded Wi-Fi?"));
-    for ligne in envelopper(
-        tr!(
-            "Les réseaux des voisins qui émettent sur le même canal que ta box se partagent l'antenne avec elle : le Wi-Fi ralentit et coupe. Gardien regarde qui émet où, sans rien changer.",
-            "Neighbors' networks on the same channel as your router share the air with it: the Wi-Fi slows down and drops. Gardien looks at who transmits where, without changing anything."
-        ),
-        LARGEUR - 2,
-    ) {
+    let intro = tr!(
+        "Les réseaux des voisins qui émettent sur le même canal que ta box se partagent l'antenne avec elle : le Wi-Fi ralentit et coupe. Gardien regarde qui émet où, sans rien changer.",
+        "Neighbors' networks on the same channel as your router share the air with it: the Wi-Fi slows down and drops. Gardien looks at who transmits where, without changing anything."
+    );
+    for ligne in envelopper(intro, LARGEUR - 2) {
         println!("  {ligne}");
     }
-    let lecture = match lire() {
-        Ok(l) => l,
+    match lire() {
+        Ok(lecture) => afficher(&lecture),
         Err(raison) => {
             println!();
             afficher_aligne("  ✖ ", raison, 4, "");
-            return;
         }
-    };
-    afficher(&lecture);
+    }
 }
 
 fn afficher(lecture: &Lecture) {
     let bornes = &lecture.bornes;
     let active = bornes.iter().find(|b| b.actif);
     // Les bornes de son propre réseau (les deux bandes, les répéteurs) ne gênent pas : elles sont la box.
-    let voisines: Vec<&Borne> = bornes
-        .iter()
-        .filter(|b| active.is_none_or(|a| a.ssid.is_empty() || b.ssid != a.ssid))
-        .collect();
+    let du_reseau = |b: &Borne| active.is_some_and(|a| !a.ssid.is_empty() && b.ssid == a.ssid);
+    let voisines: Vec<&Borne> = bornes.iter().filter(|b| !du_reseau(b)).collect();
     println!();
-    match active {
-        Some(a) => {
-            let nom = if a.ssid.is_empty() {
-                tr!("réseau caché", "hidden network").to_string()
-            } else {
-                format!("« {} »", a.ssid)
-            };
-            let signal = a
-                .signal
-                .map(|s| trf!(", signal {s} % ({})", ", signal {s}% ({})", qualite(s)))
-                .unwrap_or_default();
-            afficher_aligne(
-                "  ",
-                &trf!(
-                    "Connecté à {nom} : {}, canal {}{signal}.",
-                    "Connected to {nom}: {}, channel {}{signal}.",
-                    a.bande.libelle(),
-                    a.canal
-                ),
-                2,
-                "",
-            );
-        }
-        None => afficher_aligne(
-            "  ",
-            tr!(
-                "Pas connecté en Wi-Fi : les conseils valent pour ta box, si elle est à portée.",
-                "Not connected over Wi-Fi: the advice applies to your router, if it is within range."
-            ),
-            2,
-            GRIS,
-        ),
+    if let Some(a) = active {
+        let nom = match a.ssid.as_str() {
+            "" => tr!("réseau caché", "hidden network").to_string(),
+            ssid => format!("« {ssid} »"),
+        };
+        let signal = match a.signal {
+            Some(s) => trf!(", signal {s} % ({})", ", signal {s}% ({})", qualite(s)),
+            None => String::new(),
+        };
+        let connexion = trf!(
+            "Connecté à {nom} : {}, canal {}{signal}.",
+            "Connected to {nom}: {}, channel {}{signal}.",
+            a.bande.libelle(),
+            a.canal
+        );
+        afficher_aligne("  ", &connexion, 2, "");
+    } else {
+        let ailleurs = tr!(
+            "Pas connecté en Wi-Fi : les conseils valent pour ta box, si elle est à portée.",
+            "Not connected over Wi-Fi: the advice applies to your router, if it is within range."
+        );
+        afficher_aligne("  ", ailleurs, 2, GRIS);
     }
     if let Some(n) = lecture.note {
         afficher_aligne("  ", n, 2, DISCRET);
@@ -323,46 +263,32 @@ fn afficher(lecture: &Lecture) {
         ),
     };
     afficher_aligne("  ", &autres, 2, GRIS);
-    // La borne de ta box dans chaque bande : celle de la connexion, sinon une borne du même réseau (la plus forte).
-    let de_ta_box = |bande: Bande| {
-        bornes
-            .iter()
-            .filter(|b| b.bande == bande)
-            .filter(|b| b.actif || active.is_some_and(|a| !a.ssid.is_empty() && b.ssid == a.ssid))
-            .max_by_key(|b| (b.actif, b.signal))
+    // Le canal de ta box par bande : celui de la connexion, sinon celui de la borne la plus forte du même réseau.
+    let canal_de_ta_box = |bande: Bande| {
+        let siennes = bornes.iter().filter(|b| b.bande == bande && (b.actif || du_reseau(b)));
+        siennes.max_by_key(|b| (b.actif, b.signal)).map(|b| b.canal)
     };
     let ta_box = tr!(" ← ta box", " ← your router");
-
-    // 2,4 GHz : les trois canaux qui ne se recouvrent pas.
     section(tr!("2,4 GHz", "2.4 GHz"));
-    let box_24 = de_ta_box(Bande::G24);
-    let genes: Vec<f64> = CANAUX_24.iter().map(|&c| gene_24(&voisines, c)).collect();
-    let maximum = genes.iter().copied().fold(0.0, f64::max);
-    for (&c, &g) in CANAUX_24.iter().zip(&genes) {
-        println!(
-            "  {} {c:>2}  {}  {}{}",
-            tr!("Canal", "Channel"),
-            barre_gene(g, maximum),
-            accord_reseaux(recouvrent_24(&voisines, c)),
-            if box_24.is_some_and(|b| b.canal == c) {
-                ta_box
-            } else {
-                ""
-            }
-        );
+    let canal_24 = canal_de_ta_box(Bande::G24);
+    let genes = CANAUX_24.map(|c| gene_24(&voisines, c));
+    let maximum = genes.into_iter().fold(0.0, f64::max);
+    for (c, g) in CANAUX_24.into_iter().zip(genes) {
+        let tien = if canal_24 == Some(c) { ta_box } else { "" };
+        let (barre, reseaux) = (barre_gene(g, maximum), accord_reseaux(recouvrent_24(&voisines, c)));
+        println!("  {} {c:>2}  {barre}  {reseaux}{tien}", tr!("Canal", "Channel"));
     }
     let meilleur = meilleur_24(&voisines);
-    let conseil_24 = match box_24 {
-        Some(a) if !CANAUX_24.contains(&a.canal) => trf!(
+    let conseil_24 = match canal_24 {
+        Some(c) if !CANAUX_24.contains(&c) => trf!(
             "Ta box est sur le canal {}, qui chevauche ses voisins des deux côtés : règle-la sur le canal {meilleur}.",
             "Your router is on channel {}, which overlaps its neighbors on both sides: set it to channel {meilleur}.",
-            a.canal
+            c
         ),
-        Some(a) if gene_24(&voisines, a.canal) <= gene_24(&voisines, meilleur) + 0.1 => tr!(
+        Some(c) if gene_24(&voisines, c) <= gene_24(&voisines, meilleur) + 0.1 => String::from(tr!(
             "Ton canal est déjà le plus libre : rien à changer.",
             "Your channel is already the freest: nothing to change."
-        )
-        .to_string(),
+        )),
         Some(_) => trf!(
             "Le canal {meilleur} est plus libre : à régler dans l'administration de la box (Wi-Fi 2,4 GHz, canal), au lieu de « automatique » si elle reste sur un canal chargé.",
             "Channel {meilleur} is freer: set it in the router's admin page (2.4 GHz Wi-Fi, channel), instead of “automatic” if it stays on a busy channel."
@@ -373,31 +299,24 @@ fn afficher(lecture: &Lecture) {
         ),
     };
     afficher_aligne("  → ", &conseil_24, 4, "");
-
-    // 5 GHz : par blocs de 80 MHz.
     if bornes.iter().any(|b| b.bande == Bande::G5) {
         section("5 GHz");
-        let box_5 = de_ta_box(Bande::G5);
-        let occupation: Vec<(usize, f64)> = BLOCS_5.iter().map(|&b| bloc_5(&voisines, b)).collect();
+        let canal_5 = canal_de_ta_box(Bande::G5);
+        let occupation = BLOCS_5.map(|b| bloc_5(&voisines, b));
         let maximum = occupation.iter().map(|o| o.1).fold(0.0, f64::max);
-        for (&(debut, fin, sans_radar), &(n, g)) in BLOCS_5.iter().zip(&occupation) {
-            let tien = box_5.is_some_and(|b| (debut..=fin).contains(&b.canal));
+        for ((debut, fin, sans_radar), (n, g)) in BLOCS_5.into_iter().zip(occupation) {
+            let tien = canal_5.filter(|c| (debut..=fin).contains(c)).map_or("", |_| ta_box);
             let radar = if sans_radar { "" } else { tr!(" radar", " radar") };
-            println!(
-                "  {:<17}{}  {}{GRIS}{radar}{RESET}{}",
-                trf!("Canaux {debut}-{fin}", "Channels {debut}-{fin}"),
-                barre_gene(g, maximum),
-                accord_reseaux(n),
-                if tien { ta_box } else { "" }
-            );
+            let canaux = trf!("Canaux {debut}-{fin}", "Channels {debut}-{fin}");
+            let barre = barre_gene(g, maximum);
+            println!("  {canaux:<17}{barre}  {}{GRIS}{radar}{RESET}{tien}", accord_reseaux(n));
         }
         let ((debut, fin, _), libre) = meilleur_5(&voisines);
-        let mut conseil = match box_5 {
-            Some(a) if (debut..=fin).contains(&a.canal) => tr!(
+        let mut conseil = match canal_5 {
+            Some(c) if (debut..=fin).contains(&c) => String::from(tr!(
                 "Ta box est déjà dans le bloc le plus libre sans radar.",
                 "Your router is already in the freest block without radar."
-            )
-            .to_string(),
+            )),
             _ => trf!(
                 "Le bloc le plus libre sans radar : canaux {debut} à {fin} (canal {debut} dans l'administration de la box).",
                 "The freest block without radar: channels {debut} to {fin} (channel {debut} in the router's admin page)."
@@ -413,32 +332,21 @@ fn afficher(lecture: &Lecture) {
     }
     if bornes.iter().any(|b| b.bande == Bande::G6) {
         section("6 GHz");
-        afficher_aligne(
-            "  ",
-            &trf!(
-                "{} : cette bande, réservée au Wi-Fi 6E et 7, est rarement encombrée.",
-                "{}: this band, reserved for Wi-Fi 6E and 7, is rarely crowded.",
-                accord_reseaux(voisines.iter().filter(|b| b.bande == Bande::G6).count())
-            ),
-            2,
-            GRIS,
+        let six = trf!(
+            "{} : cette bande, réservée au Wi-Fi 6E et 7, est rarement encombrée.",
+            "{}: this band, reserved for Wi-Fi 6E and 7, is rarely crowded.",
+            accord_reseaux(voisines.iter().filter(|b| b.bande == Bande::G6).count())
         );
+        afficher_aligne("  ", &six, 2, GRIS);
     }
-
     // Connecté en 2,4 GHz alors que la box émet aussi en 5 GHz : plus rapide et moins encombré, de près.
-    if let Some(a) = active.filter(|a| a.bande == Bande::G24 && !a.ssid.is_empty())
-        && bornes.iter().any(|b| b.ssid == a.ssid && b.bande != Bande::G24)
-    {
+    if active.is_some_and(|a| a.bande == Bande::G24) && bornes.iter().any(|b| b.bande != Bande::G24 && du_reseau(b)) {
         println!();
-        afficher_aligne(
-            "  💡 ",
-            tr!(
-                "Ta box émet aussi en 5 GHz sous le même nom : près d'elle, c'est plus rapide et moins encombré. Si l'appareil reste en 2,4 GHz, donne un nom différent à chaque bande dans la box.",
-                "Your router also broadcasts in 5 GHz under the same name: near it, that is faster and less crowded. If the device stays on 2.4 GHz, give each band a different name in the router."
-            ),
-            5,
-            "",
+        let astuce = tr!(
+            "Ta box émet aussi en 5 GHz sous le même nom : près d'elle, c'est plus rapide et moins encombré. Si l'appareil reste en 2,4 GHz, donne un nom différent à chaque bande dans la box.",
+            "Your router also broadcasts in 5 GHz under the same name: near it, that is faster and less crowded. If the device stays on 2.4 GHz, give each band a different name in the router."
         );
+        afficher_aligne("  💡 ", astuce, 5, "");
     }
 }
 
