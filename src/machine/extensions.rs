@@ -9,6 +9,7 @@ use serde_json::Value;
 
 use super::{Constat, alerte, ok};
 use crate::risk::Niveau;
+use crate::ui::affichable;
 use crate::{tr, trf};
 
 const CAT: &str = "Extensions";
@@ -61,7 +62,8 @@ fn chaines(v: &Value) -> Vec<&str> {
 }
 
 /// Extensions actives d'un `extensions.json` de la famille Firefox (installées par l'utilisateur seulement :
-/// thèmes, dictionnaires et modules du navigateur exclus).
+/// thèmes, dictionnaires et modules du navigateur exclus). Le nom, choisi par l'auteur de l'extension, est lu prêt
+/// à montrer, comme dans la famille Chromium.
 fn lire_firefox(texte: &str) -> Vec<Extension> {
     let Ok(json) = serde_json::from_str::<Value>(texte) else {
         return Vec::new();
@@ -85,11 +87,7 @@ fn lire_firefox(texte: &str) -> Vec<Extension> {
         };
         extensions.push(Extension {
             id: a["id"].as_str().unwrap_or_default().to_string(),
-            nom: a["defaultLocale"]["name"]
-                .as_str()
-                .or(a["id"].as_str())
-                .unwrap_or("?")
-                .to_string(),
+            nom: affichable(a["defaultLocale"]["name"].as_str().or(a["id"].as_str()).unwrap_or("?")),
             partout: origines.iter().any(|o| acces_partout(o)),
             pouvoirs: pouvoirs(&permissions),
             origine_suspecte,
@@ -98,11 +96,12 @@ fn lire_firefox(texte: &str) -> Vec<Extension> {
     extensions
 }
 
-/// Nom affiché d'une extension Chromium : « __MSG_extName__ » se lit dans `_locales/<langue>/messages.json`.
+/// Nom affiché d'une extension Chromium : « __MSG_extName__ » se lit dans `_locales/<langue>/messages.json`. Prêt à
+/// montrer : son auteur le choisit.
 fn nom_chromium(manifeste: &Value, dossier: Option<&Path>) -> String {
     let brut = manifeste["name"].as_str().unwrap_or("?");
     let Some(cle) = brut.strip_prefix("__MSG_").and_then(|r| r.strip_suffix("__")) else {
-        return brut.to_string();
+        return affichable(brut);
     };
     let langue = manifeste["default_locale"].as_str().unwrap_or("en");
     dossier
@@ -112,9 +111,9 @@ fn nom_chromium(manifeste: &Value, dossier: Option<&Path>) -> String {
             m.as_object()?
                 .iter()
                 .find(|(k, _)| k.eq_ignore_ascii_case(cle))
-                .and_then(|(_, v)| v["message"].as_str().map(str::to_string))
+                .and_then(|(_, v)| v["message"].as_str().map(affichable))
         })
-        .unwrap_or_else(|| brut.to_string())
+        .unwrap_or_else(|| affichable(brut))
 }
 
 /// Extensions actives de `extensions.settings` (Preferences ou Secure Preferences d'un profil Chromium).
@@ -327,13 +326,14 @@ pub(super) fn racines() -> Vec<(&'static str, PathBuf, bool)> {
     r
 }
 
-/// Profils d'une racine : (nom du dossier, chemin), ceux qui contiennent le fichier attendu.
+/// Profils d'une racine : (nom du dossier, prêt à montrer ; chemin, tel quel), ceux qui contiennent le fichier
+/// attendu.
 pub(super) fn profils(racine: &Path, firefox: bool) -> Vec<(String, PathBuf)> {
     let mut p: Vec<(String, PathBuf)> = std::fs::read_dir(racine)
         .into_iter()
         .flatten()
         .flatten()
-        .map(|e| (e.file_name().to_string_lossy().into_owned(), e.path()))
+        .map(|e| (affichable(&e.file_name().to_string_lossy()), e.path()))
         .filter(|(nom, chemin)| {
             if firefox {
                 chemin.join("extensions.json").is_file()
@@ -459,5 +459,36 @@ mod tests {
         // Nom à traduire sans dossier de langues : le nom brut reste, sans planter.
         let m: Value = serde_json::from_str(r#"{"name":"__MSG_extName__"}"#).unwrap();
         assert_eq!(nom_chromium(&m, None), "__MSG_extName__");
+    }
+
+    /// Le nom d'une extension est choisi par son auteur, et celui d'un profil par qui l'a créé : piégés, ils arrivent
+    /// inoffensifs dans les constats.
+    #[test]
+    fn noms_pieges() {
+        let firefox = r#"{"addons":[{"id":"x@y","type":"extension","location":"app-profile","active":true,"signedState":2,
+            "defaultLocale":{"name":"Espion\u001b]52;c;eA==\u0007\u001b[2K\r\u202e"},"userPermissions":{"origins":["<all_urls>"]},
+            "installTelemetryInfo":{"method":"sideload"}}]}"#;
+        let e = lire_firefox(firefox);
+        assert_eq!(e[0].nom, "Espion�]52;c;eA==��[2K��");
+        for c in juger("Firefox", &e) {
+            assert!(!crate::ui::contient_un_piege(&c.message), "{}", c.message);
+        }
+        let chromium = r#"{"extensions":{"settings":{"a":{"location":4,"manifest":{"name":"Outil\u001b[8m\u2066"}}}}}"#;
+        assert_eq!(lire_chromium(chromium, Path::new("/profil"))[0].nom, "Outil�[8m�");
+    }
+
+    /// Le nom d'un dossier de profil, montré quand il y en a plusieurs : inoffensif, le chemin restant le vrai. Windows
+    /// refuse les caractères de contrôle dans un nom de fichier : essayé sous Linux et macOS.
+    #[cfg(unix)]
+    #[test]
+    fn nom_de_profil_piege() {
+        let dossier = crate::protection::isoler::dossier_jetable().unwrap();
+        let profil = dossier.join("ab12.P\x1b]0;t\x07rofil\u{202e}");
+        std::fs::create_dir_all(&profil).unwrap();
+        std::fs::write(profil.join("extensions.json"), "{}").unwrap();
+        let profils = profils(&dossier, true);
+        assert_eq!(profils[0].0, "ab12.P�]0;t�rofil�");
+        assert_eq!(profils[0].1, profil);
+        std::fs::remove_dir_all(&dossier).unwrap();
     }
 }

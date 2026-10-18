@@ -156,7 +156,8 @@ fn extensions_noyau(texte: &str) -> Vec<String> {
     l
 }
 
-/// `systemextensionsctl list` : les extensions du système actives (VPN, antivirus, pilotes), « nom (identifiant) ».
+/// `systemextensionsctl list` : les extensions du système actives (VPN, antivirus, pilotes), « nom (identifiant) »,
+/// prêtes à montrer (l'éditeur de l'extension choisit son nom).
 fn extensions_systeme(texte: &str) -> Vec<String> {
     texte
         .lines()
@@ -165,7 +166,7 @@ fn extensions_systeme(texte: &str) -> Vec<String> {
             let c: Vec<&str> = l.split('\t').map(str::trim).collect();
             let id = c.get(3)?.split_whitespace().next()?;
             let nom = c.get(4).copied().filter(|n| !n.is_empty()).unwrap_or(id);
-            Some(format!("{nom} ({id})"))
+            Some(crate::ui::affichable(&format!("{nom} ({id})")))
         })
         .collect()
 }
@@ -271,5 +272,7 @@ mod tests {
                    *\t*\tABCDE12345\tcom.exemple.vpn.extension (1.0/1)\tExemple VPN\t[activated enabled]\n\
                    \t\tABCDE12345\tcom.exemple.vieux (0.9/1)\tVieux\t[terminated waiting to uninstall on reboot]\n";
         assert_eq!(extensions_systeme(ctl), ["Exemple VPN (com.exemple.vpn.extension)"]);
+        let piege = "*\t*\tABCDE12345\tcom.exemple.vpn (1.0/1)\tVPN\x1b]0;t\x07\u{202e}\t[activated enabled]\n";
+        assert_eq!(extensions_systeme(piege), ["VPN�]0;t�� (com.exemple.vpn)"]);
     }
 }

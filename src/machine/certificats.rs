@@ -154,9 +154,13 @@ fn noms_du_fichier(octets: &[u8]) -> Vec<String> {
         .collect()
 }
 
-/// Constat pour un certificat ajouté. `cle_privee` : sa clé privée est sur cette machine (Windows le sait).
+/// Constat pour un certificat ajouté. `cle_privee` : sa clé privée est sur cette machine (Windows le sait). Le nom
+/// (sujet du certificat, écrit par qui l'a fabriqué) et l'endroit sont montrés rendus inoffensifs ; `retirer` garde
+/// le vrai nom.
 fn juger(nom: &str, ou: &str, cle_privee: bool, retirer: &[String]) -> Constat {
-    let (niveau, message, retrait) = match famille(nom) {
+    let sorte = famille(nom);
+    let (nom, ou) = (crate::ui::affichable(nom), crate::ui::affichable(ou));
+    let (niveau, message, retrait) = match sorte {
         Famille::Compromis => (
             Niveau::Critique,
             trf!(
@@ -436,6 +440,23 @@ wdpi4zlo
             noms_du_fichier(b"-----BEGIN CERTIFICATE-----\n!!!\n-----END CERTIFICATE-----\n"),
             rien
         );
+    }
+
+    /// Le sujet d'un certificat est écrit par qui l'a fabriqué : celui qui installe une fausse autorité peut y mettre
+    /// de quoi effacer l'alerte. Montré inoffensif ; la commande qui le retire garde le vrai nom (macOS le cherche par
+    /// son nom).
+    #[test]
+    fn sujet_piege() {
+        let piege = "Faux CA\x1b]52;c;eA==\x07\x1b[2K\r\u{202e}";
+        let retirer = vec![format!("security delete-certificate -c '{piege}'")];
+        for cle_privee in [false, true] {
+            let c = juger(piege, "/etc/x\x1b[8m.pem", cle_privee, &retirer);
+            assert!(!crate::ui::contient_un_piege(&c.message), "{}", c.message);
+            let k = c.correctif.as_ref().unwrap();
+            assert!(!crate::ui::contient_un_piege(&k.action), "{}", k.action);
+            assert_eq!(k.commandes, retirer);
+        }
+        assert_eq!(lire_reglages_confiance(&format!("Cert 0: {piege}\n")), [piege]);
     }
 
     #[test]
