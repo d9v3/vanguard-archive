@@ -100,8 +100,13 @@ fn redirections(hosts: &str) -> Vec<(String, String)> {
         .filter_map(|l| {
             let mut mots = l.split('#').next()?.split_whitespace();
             let ip = mots.next()?;
+            // L'adresse d'abord : un fichier hosts de liste de blocage compte des millions de lignes « 0.0.0.0 nom »,
+            // et l'ouverture du menu ne doit pas en assembler les noms un par un.
+            if !ip.parse().is_ok_and(publique) {
+                return None;
+            }
             let noms = mots.collect::<Vec<_>>().join(" ");
-            (!noms.is_empty() && ip.parse().is_ok_and(publique)).then(|| (ip.to_string(), noms))
+            (!noms.is_empty()).then(|| (ip.to_string(), noms))
         })
         .collect()
 }
@@ -169,6 +174,37 @@ pub(crate) fn point_restauration(titre: &str) -> Option<(&'static str, String)> 
     ))
 }
 
+/// SID du compte de la personne (« S-1-5-21-… »). La fenêtre administrateur peut s'ouvrir sous un autre compte
+/// (mot de passe d'un autre administrateur, cas courant quand on dépanne la famille) : son HKCU est alors celui de
+/// cet autre compte, et un réglage de la personne doit s'écrire dans sa propre ruche, sous HKEY_USERS.
+#[cfg(windows)]
+pub(crate) fn sid_de_la_personne() -> Option<String> {
+    let r = crate::commande::lancer(
+        std::process::Command::new("whoami").args(["/user", "/fo", "csv", "/nh"]),
+        10,
+    )?;
+    lire_sid(&r.sortie)
+}
+
+/// `whoami /user /fo csv /nh` : « "pc\alice","S-1-5-21-1-2-3-1001" ». Seulement des chiffres et des tirets après
+/// « S-1- » : le SID entre tel quel dans une commande PowerShell.
+#[cfg(any(windows, test))]
+fn lire_sid(sortie: &str) -> Option<String> {
+    let sid = sortie.trim().rsplit(',').next()?.trim().trim_matches('"');
+    let chiffres = sid.strip_prefix("S-1-")?;
+    (!chiffres.is_empty() && chiffres.chars().all(|c| c.is_ascii_digit() || c == '-')).then(|| sid.to_string())
+}
+
+/// Chemin PowerShell d'une clé du HKCU de la personne, pour la fenêtre administrateur. Sans SID, le HKCU de la
+/// fenêtre : le bon quand la personne est elle-même administratrice.
+#[cfg(windows)]
+pub(crate) fn hkcu_de_la_personne(sid: Option<&str>, chemin: &str) -> String {
+    match sid {
+        Some(sid) => format!(r"Registry::HKEY_USERS\{sid}\{chemin}"),
+        None => format!(r"HKCU:\{chemin}"),
+    }
+}
+
 /// Connecté à cette machine à distance (SSH) : une réparation du réseau couperait la session.
 #[cfg(unix)]
 fn session_ssh() -> bool {
@@ -182,15 +218,10 @@ fn present(cmd: &str) -> bool {
         .any(|d| std::path::Path::new(d).join(cmd).exists())
 }
 
+/// Montre où sont définies les variables de proxy. -i : HTTP_PROXY et HTTPS_PROXY, en majuscules, comptent aussi
+/// (lues plus bas dans les deux casses).
 #[cfg(target_os = "linux")]
-fn actif(service: &str) -> bool {
-    // Sans bus système (conteneur, espace de noms), systemctl écrit son erreur au milieu du menu : on la tait.
-    std::process::Command::new("systemctl")
-        .args(["is-active", "--quiet", service])
-        .stderr(std::process::Stdio::null())
-        .status()
-        .is_ok_and(|s| s.success())
-}
+const TROUVER_PROXY: &str = "grep -insE '^[^#]*(https?|all|ftp)_proxy='";
 
 /// Proxy imposé et redirections du fichier hosts : les deux façons classiques de détourner la navigation.
 #[cfg(target_os = "linux")]
@@ -243,8 +274,7 @@ fn navigation() -> Reparation {
             variables.join(", ")
         ));
         commandes.push(
-            "grep -nsE '^[^#]*(https?|all|ftp)_proxy=' /etc/environment /etc/profile /etc/profile.d/* ~/.profile ~/.bashrc ~/.bash_profile ~/.zshrc ~/.config/environment.d/*; true"
-                .to_string(),
+            format!("{TROUVER_PROXY} /etc/environment /etc/profile /etc/profile.d/* ~/.profile ~/.bashrc ~/.bash_profile ~/.zshrc ~/.config/environment.d/*; true"),
         );
     }
     let mut r = rep(
@@ -274,6 +304,15 @@ fn navigation() -> Reparation {
     r
 }
 
+/// ClamAV absent : où le menu propose de l'installer (Antivirus et protection › analyse rapide ou complète).
+#[cfg(target_os = "linux")]
+fn sans_clamav() -> &'static str {
+    tr!(
+        "ClamAV n'est pas installé : l'analyse antivirus (menu 6 › 1 ou 6 › 2) propose de l'installer",
+        "ClamAV is not installed: the antivirus scan (menu 6 › 1 or 6 › 2) offers to install it"
+    )
+}
+
 /// Signatures ClamAV : téléchargement immédiat, puis mise à jour automatique.
 #[cfg(target_os = "linux")]
 fn antivirus(systemd: bool) -> Reparation {
@@ -284,13 +323,7 @@ fn antivirus(systemd: bool) -> Reparation {
         &[],
     );
     if !present("clamscan") {
-        r.inutile = Some(
-            tr!(
-                "ClamAV n'est pas installé : l'analyse antivirus (choix 6 ou 7) propose de l'installer",
-                "ClamAV is not installed: the antivirus scan (choice 6 or 7) offers to install it"
-            )
-            .into(),
-        );
+        r.inutile = Some(sans_clamav().into());
         return r;
     }
     let derniere = ["daily.cld", "daily.cvd"]
@@ -324,31 +357,107 @@ fn antivirus(systemd: bool) -> Reparation {
     r
 }
 
-/// Pare-feu coupé ou qui laisse tout entrer : on garde celui qui est en place (firewalld), sinon ufw.
+/// firewalld sur cette machine.
 #[cfg(target_os = "linux")]
-fn pare_feu(gestion: Option<machine::linux::Paquets>) -> Reparation {
-    use crate::machine::linux::{politique_ufw, service_actif, ufw_actif};
+#[derive(Clone, Default)]
+enum Firewalld {
+    /// Pas installé, ou masqué (coupé exprès).
+    #[default]
+    Absent,
+    Arrete,
+    /// En service, avec sa zone par défaut si elle se lit.
+    Actif(Option<String>),
+}
+
+/// ufw sur cette machine.
+#[cfg(target_os = "linux")]
+#[derive(Clone, Copy, Default)]
+enum Ufw {
+    #[default]
+    Absent,
+    /// Installé, mais coupé ou réglé pour tout laisser entrer.
+    Installe,
+    /// Actif, et refuse les connexions entrantes.
+    Protege,
+}
+
+/// Ce que la réparation du pare-feu Linux sait de la machine, lu à l'ouverture du menu.
+#[cfg(target_os = "linux")]
+#[derive(Clone, Default)]
+struct EtatPareFeu {
+    firewalld: Firewalld,
+    ufw: Ufw,
+    /// nftables ou iptables en service : des règles écrites à la main.
+    autre: Option<&'static str>,
+    gestion: Option<machine::linux::Paquets>,
+    ssh: bool,
+}
+
+#[cfg(target_os = "linux")]
+impl EtatPareFeu {
+    fn lire(gestion: Option<machine::linux::Paquets>) -> Self {
+        use crate::machine::linux::{politique_ufw, service_actif, ufw_actif};
+        use std::process::Command;
+        let firewalld = if service_actif("firewalld") {
+            let zone = crate::commande::lancer(Command::new("firewall-cmd").arg("--get-default-zone"), 10);
+            Firewalld::Actif(zone.map(|z| z.sortie.trim().to_string()))
+        } else if present("firewalld")
+            && crate::commande::lancer(Command::new("systemctl").args(["is-enabled", "firewalld"]), 10)
+                .is_none_or(|r| r.sortie.trim() != "masked")
+        {
+            Firewalld::Arrete
+        } else {
+            Firewalld::Absent
+        };
+        let politique = std::fs::read_to_string("/etc/default/ufw")
+            .ok()
+            .and_then(|t| politique_ufw(&t));
+        let ufw = if ufw_actif() && politique.as_deref() != Some("ACCEPT") {
+            Ufw::Protege
+        } else if present("ufw") {
+            Ufw::Installe
+        } else {
+            Ufw::Absent
+        };
+        EtatPareFeu {
+            firewalld,
+            ufw,
+            autre: ["nftables", "iptables"].into_iter().find(|s| service_actif(s)),
+            gestion,
+            ssh: session_ssh(),
+        }
+    }
+}
+
+/// Pare-feu coupé ou qui laisse tout entrer : on garde celui qui est installé (firewalld), sinon ufw.
+#[cfg(target_os = "linux")]
+fn pare_feu(e: &EtatPareFeu) -> Reparation {
     let mut r = rep(
         tr!("Pare-feu coupé ou ouvert", "Firewall off or open"),
         "",
         tr!("quelques secondes", "a few seconds"),
         &[],
     );
-    if service_actif("firewalld") {
-        let zone = crate::commande::lancer(std::process::Command::new("firewall-cmd").arg("--get-default-zone"), 10)
-            .map(|z| z.sortie.trim().to_string());
+    // Une règle de plus ou une zone changée peut couper la session SSH en cours : seulement depuis l'écran.
+    let ssh = |r: &mut Reparation| {
+        if e.ssh {
+            r.bloquee = Some(tr!(
+                "tu es connecté par SSH : changer le pare-feu pourrait couper ta connexion",
+                "you are connected over SSH: changing the firewall could cut your connection"
+            ));
+        }
+    };
+    if let Firewalld::Actif(zone) = &e.firewalld {
         if zone.as_deref() == Some("trusted") {
             r.pourquoi = tr!("firewalld est actif mais en zone « trusted » : il laisse tout entrer. Passe la zone par défaut en « public ».", "firewalld is running but in the “trusted” zone: it lets everything in. Sets the default zone to “public”.").into();
             r.commandes = vec!["sudo firewall-cmd --set-default-zone=public".into()];
+            ssh(&mut r);
         } else {
             r.inutile = Some(tr!("firewalld est actif", "firewalld is running").into());
         }
         return r;
     }
-    let politique = std::fs::read_to_string("/etc/default/ufw")
-        .ok()
-        .and_then(|t| politique_ufw(&t));
-    if ufw_actif() && politique.as_deref() != Some("ACCEPT") {
+    if matches!(e.ufw, Ufw::Protege) {
         r.inutile = Some(
             tr!(
                 "ufw est actif et refuse les connexions entrantes",
@@ -358,15 +467,25 @@ fn pare_feu(gestion: Option<machine::linux::Paquets>) -> Reparation {
         );
         return r;
     }
-    if !present("ufw") {
-        if let Some(autre) = ["nftables", "iptables"].into_iter().find(|s| service_actif(s)) {
+    if matches!(e.ufw, Ufw::Absent) {
+        if let Some(autre) = e.autre {
             r.inutile = Some(trf!(
                 "{autre} est actif : ses règles se gèrent à la main",
                 "{autre} is running: its rules are managed by hand"
             ));
             return r;
         }
-        let Some(g) = gestion else {
+        // Installé mais arrêté (Fedora, openSUSE) : on le remet en route plutôt que d'en installer un second.
+        if matches!(e.firewalld, Firewalld::Arrete) {
+            r.pourquoi = tr!("firewalld est installé mais arrêté : le démarre avec sa zone par défaut et l'active au démarrage de l'ordinateur.", "firewalld is installed but stopped: starts it with its default zone and turns it on at boot.").into();
+            r.commandes = vec![
+                "sudo systemctl enable --now firewalld".into(),
+                "sudo firewall-cmd --get-default-zone".into(),
+            ];
+            ssh(&mut r);
+            return r;
+        }
+        let Some(g) = e.gestion else {
             r.inutile = Some(
                 tr!(
                     "aucun pare-feu, et gestionnaire de paquets non reconnu : installe ufw avec ta distribution",
@@ -389,18 +508,75 @@ fn pare_feu(gestion: Option<machine::linux::Paquets>) -> Reparation {
         ]
         .map(String::from),
     );
-    if session_ssh() {
-        r.bloquee = Some(tr!(
-            "tu es connecté par SSH : refuser les connexions entrantes couperait ta connexion",
-            "you are connected over SSH: refusing incoming connections would cut your connection"
-        ));
-    }
+    ssh(&mut r);
     r
+}
+
+/// Mises à jour en erreur : la réparation propre au gestionnaire de paquets (et au système atomique, s'il l'est).
+#[cfg(target_os = "linux")]
+fn paquets_casses(
+    gestion: machine::linux::Paquets,
+    atomique: Option<machine::linux::Atomique>,
+    omarchy: bool,
+) -> Reparation {
+    use crate::machine::linux::{Atomique, Paquets};
+    match gestion {
+        // Système atomique : on ne répare pas l'image en place, on annule une opération restée bloquée puis on
+        // repart d'une image propre (l'ancienne reste au menu de démarrage).
+        Paquets::Dnf if atomique == Some(Atomique::RpmOstree) => rep(
+            tr!("Mises à jour en erreur (rpm-ostree)", "Updates failing (rpm-ostree)"),
+            tr!("Annule une opération restée bloquée, vide le cache, puis prépare l'image suivante. L'image actuelle reste au menu de démarrage en cas de problème.", "Cancels a stuck operation, clears the cache, then prepares the next image. The current image stays in the boot menu in case of trouble."),
+            tr!("quelques minutes", "a few minutes"),
+            &["sudo rpm-ostree cancel", "sudo rpm-ostree cleanup -m", "sudo rpm-ostree upgrade"],
+        ),
+        Paquets::Zypper if atomique == Some(Atomique::Transactionnel) => rep(
+            tr!("Mises à jour en erreur (transactional-update)", "Updates failing (transactional-update)"),
+            tr!("Prépare un nouvel instantané à jour, dépendances réparées. L'actuel reste au menu de démarrage en cas de problème.", "Prepares a new up-to-date snapshot with dependencies repaired. The current one stays in the boot menu in case of trouble."),
+            tr!("quelques minutes", "a few minutes"),
+            &["sudo transactional-update --non-interactive dup"],
+        ),
+        Paquets::Pacman => rep(
+            tr!("Mises à jour en erreur (pacman)", "Updates failing (pacman)"),
+            tr!("Débloque pacman après un arrêt brutal, renouvelle les clés de signature (erreurs « invalid or corrupted package »), puis met à jour.", "Unlocks pacman after a crash, renews the signing keys (“invalid or corrupted package” errors), then updates."),
+            tr!("quelques minutes", "a few minutes"),
+            &[
+                // pamac (Manjaro) et PackageKit (Discover) travaillent sur la même base sans lancer pacman : effacer
+                // leur verrou en pleine opération l'abîmerait.
+                tr!("pgrep -x 'pacman|pamac-daemon|packagekitd' >/dev/null && echo 'un gestionnaire de paquets tourne déjà (pacman, pamac ou PackageKit) : attends la fin' && exit 1; sudo rm -f /var/lib/pacman/db.lck", "pgrep -x 'pacman|pamac-daemon|packagekitd' >/dev/null && echo 'a package manager is already running (pacman, pamac or PackageKit): wait for it to finish' && exit 1; sudo rm -f /var/lib/pacman/db.lck"),
+                // Les dérivées signent aussi leurs paquets avec leurs propres clés.
+                "sudo pacman -Sy --needed --noconfirm archlinux-keyring $(pacman -Qq manjaro-keyring endeavouros-keyring cachyos-keyring omarchy-keyring 2>/dev/null)",
+                // Sous Omarchy, sa mise à jour (instantané, migrations) plutôt qu'un pacman -Syu brut.
+                if omarchy { "omarchy update" } else { "sudo pacman -Syu" },
+            ],
+        ).avec_restauration(),
+        Paquets::Apt => rep(
+            tr!("Mises à jour en erreur (apt)", "Updates failing (apt)"),
+            tr!("Termine les installations interrompues et répare les dépendances cassées.", "Finishes interrupted installs and repairs broken dependencies."),
+            tr!("quelques minutes", "a few minutes"),
+            // Une étape en échec n'arrête pas les suivantes : ce sont elles qui réparent. La liste des paquets est
+            // relue avant la réparation, qui sinon chercherait des versions disparues des dépôts.
+            &["sudo dpkg --configure -a || true", "sudo apt-get update || true", "sudo apt-get -f install -y"],
+        ).avec_restauration(),
+        Paquets::Dnf => rep(
+            tr!("Mises à jour en erreur (dnf)", "Updates failing (dnf)"),
+            tr!("Vérifie la base des paquets et réaligne les paquets sur les versions de la distribution.", "Checks the package database and realigns packages with the distribution's versions."),
+            tr!("quelques minutes", "a few minutes"),
+            // « dnf check » sort en erreur quand il trouve un problème : c'est distro-sync qui le répare ensuite. Sans
+            // -y : il peut rétrograder ou retirer des paquets, la liste se lit et se confirme d'abord.
+            &["sudo dnf check || true", "sudo dnf distro-sync"],
+        ).avec_restauration(),
+        Paquets::Zypper => rep(
+            tr!("Mises à jour en erreur (zypper)", "Updates failing (zypper)"),
+            tr!("Vérifie et répare les dépendances des paquets installés.", "Checks and repairs the dependencies of installed packages."),
+            tr!("quelques minutes", "a few minutes"),
+            &["sudo zypper verify"],
+        ),
+    }
 }
 
 #[cfg(target_os = "linux")]
 pub fn liste() -> Vec<Reparation> {
-    use crate::machine::linux::{Atomique, Paquets, atomique};
+    use crate::machine::linux::{Paquets, atomique, service_actif};
     let gestion = Paquets::detecter();
     let atomique = atomique();
     // Sans systemd (conteneur, Alpine, Void…), les réparations qui passent par systemctl ou journalctl ne marchent pas.
@@ -408,14 +584,14 @@ pub fn liste() -> Vec<Reparation> {
     let mut l = Vec::new();
 
     // Réseau
-    let mut reseau = if actif("NetworkManager") {
+    let mut reseau = if service_actif("NetworkManager") {
         vec!["sudo systemctl restart NetworkManager"]
-    } else if actif("systemd-networkd") {
+    } else if service_actif("systemd-networkd") {
         vec!["sudo systemctl restart systemd-networkd"]
     } else {
         vec![]
     };
-    if actif("systemd-resolved") {
+    if service_actif("systemd-resolved") {
         reseau.push("sudo resolvectl flush-caches");
     }
     if !reseau.is_empty() {
@@ -440,57 +616,8 @@ pub fn liste() -> Vec<Reparation> {
     l.push(antivirus(systemd));
 
     // Paquets cassés
-    match gestion {
-        // Système atomique : on ne répare pas l'image en place, on annule une opération restée bloquée puis on
-        // repart d'une image propre (l'ancienne reste au menu de démarrage).
-        Some(Paquets::Dnf) if atomique == Some(Atomique::RpmOstree) => l.push(rep(
-            tr!("Mises à jour en erreur (rpm-ostree)", "Updates failing (rpm-ostree)"),
-            tr!("Annule une opération restée bloquée, vide le cache, puis prépare l'image suivante. L'image actuelle reste au menu de démarrage en cas de problème.", "Cancels a stuck operation, clears the cache, then prepares the next image. The current image stays in the boot menu in case of trouble."),
-            tr!("quelques minutes", "a few minutes"),
-            &["sudo rpm-ostree cancel", "sudo rpm-ostree cleanup -m", "sudo rpm-ostree upgrade"],
-        )),
-        Some(Paquets::Zypper) if atomique == Some(Atomique::Transactionnel) => l.push(rep(
-            tr!("Mises à jour en erreur (transactional-update)", "Updates failing (transactional-update)"),
-            tr!("Prépare un nouvel instantané à jour, dépendances réparées. L'actuel reste au menu de démarrage en cas de problème.", "Prepares a new up-to-date snapshot with dependencies repaired. The current one stays in the boot menu in case of trouble."),
-            tr!("quelques minutes", "a few minutes"),
-            &["sudo transactional-update --non-interactive dup"],
-        )),
-        Some(Paquets::Pacman) => l.push(rep(
-            tr!("Mises à jour en erreur (pacman)", "Updates failing (pacman)"),
-            tr!("Débloque pacman après un arrêt brutal, renouvelle les clés de signature (erreurs « invalid or corrupted package »), puis met à jour.", "Unlocks pacman after a crash, renews the signing keys (“invalid or corrupted package” errors), then updates."),
-            tr!("quelques minutes", "a few minutes"),
-            &[
-                // pamac (Manjaro) et PackageKit (Discover) travaillent sur la même base sans lancer pacman : effacer
-                // leur verrou en pleine opération l'abîmerait.
-                tr!("pgrep -x 'pacman|pamac-daemon|packagekitd' >/dev/null && echo 'un gestionnaire de paquets tourne déjà (pacman, pamac ou PackageKit) : attends la fin' && exit 1; sudo rm -f /var/lib/pacman/db.lck", "pgrep -x 'pacman|pamac-daemon|packagekitd' >/dev/null && echo 'a package manager is already running (pacman, pamac or PackageKit): wait for it to finish' && exit 1; sudo rm -f /var/lib/pacman/db.lck"),
-                // Les dérivées signent aussi leurs paquets avec leurs propres clés.
-                "sudo pacman -Sy --needed --noconfirm archlinux-keyring $(pacman -Qq manjaro-keyring endeavouros-keyring cachyos-keyring omarchy-keyring 2>/dev/null)",
-                // Sous Omarchy, sa mise à jour (instantané, migrations) plutôt qu'un pacman -Syu brut.
-                if machine::linux::omarchy() { "omarchy update" } else { "sudo pacman -Syu" },
-            ],
-        ).avec_restauration()),
-        Some(Paquets::Apt) => l.push(rep(
-            tr!("Mises à jour en erreur (apt)", "Updates failing (apt)"),
-            tr!("Termine les installations interrompues et répare les dépendances cassées.", "Finishes interrupted installs and repairs broken dependencies."),
-            tr!("quelques minutes", "a few minutes"),
-            // Une étape en échec n'arrête pas les suivantes : ce sont elles qui réparent. La liste des paquets est
-            // relue avant la réparation, qui sinon chercherait des versions disparues des dépôts.
-            &["sudo dpkg --configure -a || true", "sudo apt-get update || true", "sudo apt-get -f install -y"],
-        ).avec_restauration()),
-        Some(Paquets::Dnf) => l.push(rep(
-            tr!("Mises à jour en erreur (dnf)", "Updates failing (dnf)"),
-            tr!("Vérifie la base des paquets et réaligne les paquets sur les versions de la distribution.", "Checks the package database and realigns packages with the distribution's versions."),
-            tr!("quelques minutes", "a few minutes"),
-            // « dnf check » sort en erreur quand il trouve un problème : c'est distro-sync qui le répare ensuite.
-            &["sudo dnf check || true", "sudo dnf distro-sync -y"],
-        ).avec_restauration()),
-        Some(Paquets::Zypper) => l.push(rep(
-            tr!("Mises à jour en erreur (zypper)", "Updates failing (zypper)"),
-            tr!("Vérifie et répare les dépendances des paquets installés.", "Checks and repairs the dependencies of installed packages."),
-            tr!("quelques minutes", "a few minutes"),
-            &["sudo zypper verify"],
-        )),
-        None => {}
+    if let Some(g) = gestion {
+        l.push(paquets_casses(g, atomique, machine::linux::omarchy()));
     }
 
     // Santé des disques
@@ -503,10 +630,8 @@ pub fn liste() -> Vec<Reparation> {
         // zram (mémoire compressée) et loop ne sont pas des disques physiques : pas de SMART.
         "for d in $(lsblk -dno NAME,TYPE | awk '$2==\"disk\" && $1 !~ /^(zram|loop)/{print $1}'); do echo \"== /dev/$d\"; sudo smartctl -H /dev/$d | tail -n +4; done",
     );
-    let btrfs = std::process::Command::new("findmnt")
-        .args(["-no", "FSTYPE", "/"])
-        .output()
-        .is_ok_and(|o| String::from_utf8_lossy(&o.stdout).trim() == "btrfs");
+    let btrfs = crate::commande::lancer(std::process::Command::new("findmnt").args(["-no", "FSTYPE", "/"]), 10)
+        .is_some_and(|r| r.sortie.trim() == "btrfs");
     if btrfs {
         disque.push("sudo btrfs scrub start -B /");
     }
@@ -539,7 +664,7 @@ pub fn liste() -> Vec<Reparation> {
         ],
     ));
 
-    l.push(pare_feu(gestion));
+    l.push(pare_feu(&EtatPareFeu::lire(gestion)));
 
     // Heure
     l.push(rep(
@@ -810,7 +935,7 @@ fn etat_windows() -> Option<EtatWindows> {
 
 #[cfg(windows)]
 fn navigation(etat: Option<&EtatWindows>) -> Reparation {
-    const REGLAGES: &str = r"'HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings'";
+    const INTERNET: &str = r"Software\Microsoft\Windows\CurrentVersion\Internet Settings";
     let racine = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".into());
     let hosts = std::path::Path::new(&racine).join(r"System32\drivers\etc\hosts");
     let detournees = redirections(&String::from_utf8_lossy(&std::fs::read(hosts).unwrap_or_default()));
@@ -833,16 +958,25 @@ fn navigation(etat: Option<&EtatWindows>) -> Reparation {
             motif_adresses(&detournees)
         ));
     }
-    // La fenêtre administrateur écrit dans le HKCU du compte qui l'ouvre : le même que le tien quand tu es
-    // administrateur (cas courant), pas si tu tapes le mot de passe d'un autre compte.
+    // Le proxy est un réglage de la personne : écrit dans sa ruche, même si la fenêtre administrateur est celle d'un
+    // autre compte.
     if let Some(e) = etat {
+        let reglages = if e.proxy.is_empty() && e.pac.is_empty() {
+            String::new()
+        } else {
+            entre_apostrophes(&hkcu_de_la_personne(sid_de_la_personne().as_deref(), INTERNET))
+        };
         if !e.proxy.is_empty() {
             constats.push(format!("proxy {}", e.proxy));
-            commandes.push(format!("Set-ItemProperty {REGLAGES} -Name ProxyEnable -Value 0"));
+            commandes.push(format!(
+                "Set-ItemProperty -LiteralPath {reglages} -Name ProxyEnable -Value 0"
+            ));
         }
         if !e.pac.is_empty() {
             constats.push(trf!("script de proxy {}", "proxy script {}", e.pac));
-            commandes.push(format!("Remove-ItemProperty {REGLAGES} -Name AutoConfigURL"));
+            commandes.push(format!(
+                "Remove-ItemProperty -LiteralPath {reglages} -Name AutoConfigURL"
+            ));
         }
         if !e.winhttp.is_empty() {
             constats.push(trf!("proxy WinHTTP {}", "WinHTTP proxy {}", e.winhttp));
@@ -1140,6 +1274,160 @@ mod tests {
                 assert!(valide, "« {} » : {c}", r.titre);
             }
         }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn pare_feu_selon_ce_qui_est_installe() {
+        let base = EtatPareFeu {
+            gestion: Some(machine::linux::Paquets::Dnf),
+            ..EtatPareFeu::default()
+        };
+        // firewalld installé mais arrêté (Fedora, openSUSE) : relancé, pas doublé d'un ufw.
+        let r = pare_feu(&EtatPareFeu {
+            firewalld: Firewalld::Arrete,
+            ..base.clone()
+        });
+        assert_eq!(r.commandes[0], "sudo systemctl enable --now firewalld");
+        assert!(r.inutile.is_none() && r.bloquee.is_none() && !r.commandes.iter().any(|c| c.contains("ufw")));
+        // Par SSH, ni firewalld démarré ni zone changée : la session pourrait tomber.
+        let ssh = EtatPareFeu {
+            ssh: true,
+            ..base.clone()
+        };
+        assert!(
+            pare_feu(&EtatPareFeu {
+                firewalld: Firewalld::Arrete,
+                ..ssh.clone()
+            })
+            .bloquee
+            .is_some()
+        );
+        let r = pare_feu(&EtatPareFeu {
+            firewalld: Firewalld::Actif(Some("trusted".into())),
+            ..ssh.clone()
+        });
+        assert_eq!(r.commandes, ["sudo firewall-cmd --set-default-zone=public"]);
+        assert!(r.bloquee.is_some());
+        assert!(pare_feu(&ssh).bloquee.is_some());
+        // Aucun pare-feu : ufw, installé depuis la distribution.
+        let r = pare_feu(&base);
+        assert!(r.commandes[0].contains("ufw") && r.commandes.iter().any(|c| c == "sudo ufw --force enable"));
+        // Des règles écrites à la main, ou un pare-feu qui protège déjà : rien à faire.
+        assert!(
+            pare_feu(&EtatPareFeu {
+                autre: Some("nftables"),
+                ..base.clone()
+            })
+            .inutile
+            .is_some()
+        );
+        assert!(
+            pare_feu(&EtatPareFeu {
+                firewalld: Firewalld::Actif(Some("public".into())),
+                ..base.clone()
+            })
+            .inutile
+            .is_some()
+        );
+    }
+
+    /// Les commandes de chaque distribution, pas seulement celle de la machine de test.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn reparations_des_paquets_pour_chaque_distribution() {
+        use crate::machine::linux::{Atomique, Paquets};
+        for g in [Paquets::Pacman, Paquets::Apt, Paquets::Dnf, Paquets::Zypper] {
+            for atomique in [None, Some(Atomique::RpmOstree), Some(Atomique::Transactionnel)] {
+                for omarchy in [false, true] {
+                    let r = paquets_casses(g, atomique, omarchy);
+                    for c in &r.commandes {
+                        let valide = std::process::Command::new("bash")
+                            .args(["-n", "-c", c])
+                            .status()
+                            .is_ok_and(|s| s.success());
+                        assert!(valide, "« {} » : {c}", r.titre);
+                        // Ce qui peut rétrograder ou retirer des paquets montre sa liste et se confirme.
+                        assert!(!c.contains("distro-sync -y"), "{c}");
+                    }
+                }
+            }
+        }
+    }
+
+    /// Le renvoi suit la numérotation du menu principal : un groupe ajouté ou déplacé le rendrait faux.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn renvoi_au_menu_de_l_antivirus() {
+        use crate::{Action, GROUPES};
+        let ou = |a: Action| {
+            GROUPES.iter().enumerate().find_map(|(g, groupe)| {
+                let i = groupe
+                    .actions()
+                    .iter()
+                    .filter(|x| x.disponible())
+                    .position(|x| *x == a)?;
+                // Les groupes d'outils suivent les trois choix du bilan.
+                Some(format!("{} › {}", g + 4, i + 1))
+            })
+        };
+        for a in [Action::AntivirusRapide, Action::AntivirusComplet] {
+            let renvoi = ou(a).expect("analyse antivirus absente du menu");
+            assert!(
+                sans_clamav().contains(&renvoi),
+                "« {} » ne renvoie pas à {renvoi}",
+                sans_clamav()
+            );
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn variables_de_proxy_trouvees_dans_les_deux_casses() {
+        let f = std::env::temp_dir().join(format!("gardien-test-proxy-{}", std::process::id()));
+        std::fs::write(
+            &f,
+            "export HTTPS_PROXY=http://10.0.0.1:3128\n# http_proxy=http://commentaire\nall_proxy=socks5://h\n",
+        )
+        .unwrap();
+        let sortie = std::process::Command::new("bash")
+            .args(["-c", &format!("{TROUVER_PROXY} {}", f.display())])
+            .output()
+            .unwrap();
+        let lignes = String::from_utf8_lossy(&sortie.stdout).to_string();
+        assert!(lignes.contains("1:export HTTPS_PROXY="), "{lignes}");
+        assert!(
+            lignes.contains("3:all_proxy=") && !lignes.contains("commentaire"),
+            "{lignes}"
+        );
+        let _ = std::fs::remove_file(&f);
+    }
+
+    #[test]
+    fn sid_lu_et_controle() {
+        assert_eq!(
+            lire_sid("\"pc\\alice\",\"S-1-5-21-1004336348-1177238915-682003330-1001\"\r\n").as_deref(),
+            Some("S-1-5-21-1004336348-1177238915-682003330-1001")
+        );
+        // Rien d'autre que des chiffres et des tirets n'entre dans la commande PowerShell.
+        assert_eq!(lire_sid("\"pc\\alice\",\"S-1-5-21'; Remove-Item C:\\\""), None);
+        assert_eq!(lire_sid("\"pc\\alice\",\"S-1-\""), None);
+        assert_eq!(lire_sid(""), None);
+    }
+
+    /// Un fichier hosts de liste de blocage : des centaines de milliers de lignes, une seule redirection.
+    #[test]
+    fn grand_fichier_hosts_de_liste_de_blocage() {
+        use std::fmt::Write as _;
+        let mut hosts = String::new();
+        for i in 0..300_000 {
+            let _ = writeln!(hosts, "0.0.0.0 pub{i}.exemple.com");
+        }
+        hosts.push_str("185.12.0.9 banque.fr\n");
+        assert_eq!(
+            redirections(&hosts),
+            [("185.12.0.9".to_string(), "banque.fr".to_string())]
+        );
     }
 
     #[test]
