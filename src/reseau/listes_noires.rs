@@ -68,6 +68,12 @@ pub(crate) fn resoudre(nom: &str) -> Option<Vec<Ipv4Addr>> {
     }
 }
 
+/// Une liste ne répond qu'en 127.x : une autre adresse vient d'ailleurs, d'un fournisseur qui remplace « ce nom
+/// n'existe pas » par l'adresse d'une page à lui.
+fn detournee(codes: &[Ipv4Addr]) -> bool {
+    codes.iter().any(|c| c.octets()[0] != 127)
+}
+
 /// Nom à demander pour une adresse : ses quatre nombres à l'envers, puis la zone de la liste.
 fn requete(ip: Ipv4Addr, zone: &str) -> String {
     let [a, b, c, d] = ip.octets();
@@ -76,6 +82,15 @@ fn requete(ip: Ipv4Addr, zone: &str) -> String {
 
 fn chercher_avec(ip: Ipv4Addr, zone: &str, resoudre: impl Fn(&str) -> Option<Vec<Ipv4Addr>>) -> Verdict {
     let muet = || Verdict::Impossible(tr!("ton DNS n'a pas répondu", "your DNS did not answer").into());
+    let remplace = || {
+        Verdict::Impossible(
+            tr!(
+                "ton DNS remplace les réponses de la liste (fournisseur qui détourne les noms inconnus)",
+                "your DNS replaces the list's answers (provider redirecting unknown names)"
+            )
+            .into(),
+        )
+    };
     let Some(essai) = resoudre(&requete(Ipv4Addr::new(127, 0, 0, 2), zone)) else {
         return muet();
     };
@@ -90,6 +105,9 @@ fn chercher_avec(ip: Ipv4Addr, zone: &str, resoudre: impl Fn(&str) -> Option<Vec
             .into(),
         );
     }
+    if detournee(&essai) {
+        return remplace();
+    }
     if refus(&essai) {
         return Verdict::Impossible(
             tr!(
@@ -102,7 +120,9 @@ fn chercher_avec(ip: Ipv4Addr, zone: &str, resoudre: impl Fn(&str) -> Option<Vec
     let Some(codes) = resoudre(&requete(ip, zone)) else {
         return muet();
     };
-    if refus(&codes) {
+    if detournee(&codes) {
+        remplace()
+    } else if refus(&codes) {
         Verdict::Impossible(tr!("la liste a refusé la requête", "the list refused the query").into())
     } else if codes.is_empty() {
         Verdict::Absente
@@ -310,6 +330,30 @@ mod tests {
         let muet_ensuite = |nom: &str| nom.starts_with("2.0.0.127.").then(|| vec![ip("127.0.0.2")]);
         assert!(matches!(
             chercher_avec(ip("203.0.113.7"), "bl.spamcop.net", muet_ensuite),
+            Verdict::Impossible(_)
+        ));
+    }
+
+    // Certains fournisseurs remplacent « ce nom n'existe pas » par l'adresse d'une page à eux : une liste ne répond
+    // qu'en 127.x, une autre adresse n'est pas une inscription. Jamais « listée » ni « absente », alors.
+    #[test]
+    fn reponse_remplacee_par_le_fournisseur() {
+        let detourne = |nom: &str| {
+            Some(if nom.starts_with("2.0.0.127.") {
+                vec![ip("127.0.0.2")]
+            } else {
+                vec![ip("92.242.132.24")]
+            })
+        };
+        assert!(matches!(
+            chercher_avec(ip("203.0.113.7"), "bl.spamcop.net", detourne),
+            Verdict::Impossible(_)
+        ));
+        // Même l'essai détourné : impossible.
+        assert!(matches!(
+            chercher_avec(ip("203.0.113.7"), "bl.spamcop.net", |_: &str| Some(vec![ip(
+                "92.242.132.24"
+            )])),
             Verdict::Impossible(_)
         ));
     }
