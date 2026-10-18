@@ -95,6 +95,44 @@ pub(super) fn a_garder(nom: &str, commande: &str, bureau: bool) -> Option<&'stat
         "opensnitch",
         "little snitch",
         "lulu",
+        // Notifications d'AppArmor (Ubuntu), contrôle des clés USB.
+        "apparmor",
+        "usbguard",
+        // Protections d'entreprise et autres antivirus.
+        "crowdstrike",
+        "csfalcon",
+        "sentinelone",
+        "cylance",
+        "carbon black",
+        "cbdefense",
+        "comodo",
+        "zonealarm",
+        "panda",
+        "emsisoft",
+        "antivirus",
+        "gdata",
+        "avktray",
+        "hitmanpro",
+        "zemana",
+        "acronis",
+        "forticlient",
+        "globalprotect",
+        "zscaler",
+        "netskope",
+        // Mac : Intego, ClamXAV, les outils d'Objective-See (BlockBlock, KnockKnock, LuLu…).
+        "intego",
+        "virusbarrier",
+        "clamxav",
+        "objective-see",
+        "blockblock",
+        // Un VPN qui démarre avec la session protège la connexion (souvent avec un coupe-circuit).
+        "wireguard",
+        "openvpn",
+        "protonvpn",
+        "mullvad",
+        "nordvpn",
+        "expressvpn",
+        "surfshark",
     ];
     const PILOTES: &[&str] = &[
         "realtek",
@@ -160,10 +198,11 @@ pub(super) fn a_garder(nom: &str, commande: &str, bureau: bool) -> Option<&'stat
             }
         })
     };
-    if trouve(GARDIEN) {
-        Some(tr!("à garder : Gardien", "keep: Gardien"))
-    } else if trouve(SECURITE) {
+    // La sécurité d'abord : « sentinelone » contient « sentinel », l'ancien nom de Gardien.
+    if trouve(SECURITE) {
         Some(tr!("à garder : sécurité", "keep: security"))
+    } else if trouve(GARDIEN) {
+        Some(tr!("à garder : Gardien", "keep: Gardien"))
     } else if trouve(PILOTES) {
         Some(tr!("à garder : pilote", "keep: driver"))
     } else if trouve(ACCESSIBILITE) {
@@ -189,8 +228,8 @@ fn ailleurs() -> &'static str {
         )
     } else {
         tr!(
-            "Ce que lance la configuration du bureau (exec-once de Hyprland, par exemple) et les services du système : dans leurs fichiers.",
-            "What the desktop configuration starts (Hyprland's exec-once, for example) and system services: in their files."
+            "Ce que lance la configuration du bureau (exec-once de Hyprland, par exemple), les services du système, et les entrées qui sont des liens (dotfiles, home-manager) : dans leurs fichiers.",
+            "What the desktop configuration starts (Hyprland's exec-once, for example), system services, and entries that are links (dotfiles, home-manager): in their files."
         )
     }
 }
@@ -448,6 +487,40 @@ mod tests {
             None
         );
         assert_eq!(a_garder("Steam", "/usr/bin/steam -silent", false), None);
+        // Outils de sécurité ajoutés : notifications d'AppArmor, protections d'entreprise, VPN, outils du Mac.
+        assert!(a_garder("AppArmor Notify", "aa-notify -p -s 1 -w 60 -f /var/log/kern.log", false).is_some());
+        assert!(
+            a_garder("SentinelOne", r"C:\Program Files\SentinelOne\SentinelUI.exe", false)
+                .is_some_and(|r| r.contains("sécurité") || r.contains("security"))
+        );
+        assert!(
+            a_garder(
+                "blockblock",
+                "/Applications/BlockBlock Helper.app/Contents/MacOS/BlockBlock",
+                false
+            )
+            .is_some()
+        );
+        assert!(a_garder("NordVPN", r"C:\Program Files\NordVPN\NordVPN.exe", false).is_some());
+        assert!(a_garder("mullvad-vpn", "/opt/Mullvad VPN/mullvad-gui", false).is_some());
+        assert!(
+            a_garder(
+                "AVKTray",
+                r"C:\Program Files (x86)\G DATA\AntiVirus\AVK\AVKTray.exe",
+                false
+            )
+            .is_some()
+        );
+        // Et pas les programmes ordinaires.
+        for (nom, commande) in [
+            ("Spotify", "spotify --minimized"),
+            ("Slack", "slack -u"),
+            ("Pandoc", "pandoc"),
+            ("Telegram", "telegram-desktop"),
+            ("Big Data Studio", "bigdata --tray"),
+        ] {
+            assert_eq!(a_garder(nom, commande, false), None, "{nom}");
+        }
     }
 
     #[test]

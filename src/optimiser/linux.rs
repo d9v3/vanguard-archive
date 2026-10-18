@@ -652,7 +652,7 @@ pub fn au_demarrage() -> Vec<Programme> {
     )
     .unwrap_or_default();
     for unite in activees.lines().filter_map(|l| l.split_whitespace().next()) {
-        if unite_valide(unite) && dossier.join(unite).is_file() {
+        if unite_valide(unite) && fichier_ordinaire(&dossier.join(unite)) {
             let texte = std::fs::read_to_string(dossier.join(unite)).unwrap_or_default();
             l.push(Programme {
                 nom: unite.trim_end_matches(".service").to_string(),
@@ -674,8 +674,17 @@ pub fn au_demarrage() -> Vec<Programme> {
     l
 }
 
+/// Un vrai fichier, pas un lien. Une entrée d'autostart ou une unité de systemd du compte qui est un lien vient d'un
+/// gestionnaire de configuration (dotfiles, stow, home-manager) : l'écrire remplacerait le lien par un fichier, et
+/// `systemctl disable` retire aussi le lien d'une unité ajoutée par `systemctl link`. Rien ne s'annulerait exactement :
+/// Gardien n'y touche pas.
+fn fichier_ordinaire(p: &Path) -> bool {
+    std::fs::symlink_metadata(p).is_ok_and(|m| m.file_type().is_file())
+}
+
 /// Les entrées d'autostart : chaque fichier .desktop du compte, puis celles du système au nom qu'il n'a pas et qui se
-/// lancent sur ce bureau (une entrée pour un autre bureau, ou déjà masquée, n'a rien à retirer).
+/// lancent sur ce bureau (une entrée pour un autre bureau, ou déjà masquée, n'a rien à retirer). Une entrée du compte
+/// qui est un lien n'est pas proposée, ni celle du système qu'elle remplace.
 fn autostart(compte: &Path, systeme: &[PathBuf], bureau: &str) -> Vec<Programme> {
     let fichiers = |d: &Path| -> Vec<(String, String)> {
         let mut l: Vec<(String, String)> = std::fs::read_dir(d)
@@ -694,7 +703,9 @@ fn autostart(compte: &Path, systeme: &[PathBuf], bureau: &str) -> Vec<Programme>
     let mut vus: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut l = Vec::new();
     for (nom, texte) in fichiers(compte) {
-        l.push(programme_autostart(compte.join(&nom), &texte, bureau));
+        if fichier_ordinaire(&compte.join(&nom)) {
+            l.push(programme_autostart(compte.join(&nom), &texte, bureau));
+        }
         vus.insert(nom);
     }
     for d in systeme {
@@ -1200,5 +1211,31 @@ mod tests {
         assert_eq!(s.commande(Some("static")), None);
         assert_eq!(Changement::nom_demarrage("systemd|syncthing.service"), "syncthing");
         assert!(!s.admin() && !c.admin());
+    }
+
+    #[test]
+    fn liens_d_autostart_laisses_tels_quels() {
+        let base = crate::isoler::dossier_jetable().unwrap();
+        let (compte, systeme, ailleurs) = (base.join("compte"), base.join("systeme"), base.join("dotfiles"));
+        for d in [&compte, &systeme, &ailleurs] {
+            std::fs::create_dir_all(d).unwrap();
+        }
+        let entree = |nom: &str| format!("[Desktop Entry]\nType=Application\nName={nom}\nExec={nom}\n");
+        std::fs::write(compte.join("note.desktop"), entree("Note")).unwrap();
+        // Géré par des dotfiles : un lien vers leur dossier.
+        std::fs::write(ailleurs.join("synchro.desktop"), entree("Synchro")).unwrap();
+        std::os::unix::fs::symlink(ailleurs.join("synchro.desktop"), compte.join("synchro.desktop")).unwrap();
+        // Le système a une entrée du même nom que le lien, et une autre.
+        std::fs::write(systeme.join("synchro.desktop"), entree("Synchro du système")).unwrap();
+        std::fs::write(systeme.join("horloge.desktop"), entree("Horloge")).unwrap();
+        let noms: Vec<String> = autostart(&compte, std::slice::from_ref(&systeme), "Hyprland")
+            .into_iter()
+            .map(|p| p.nom)
+            .collect();
+        assert_eq!(noms, ["Note", "Horloge"]);
+        assert!(fichier_ordinaire(&compte.join("note.desktop")));
+        assert!(!fichier_ordinaire(&compte.join("synchro.desktop")));
+        assert!(!fichier_ordinaire(&compte.join("absent.desktop")));
+        std::fs::remove_dir_all(&base).unwrap();
     }
 }
