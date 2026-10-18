@@ -5,9 +5,12 @@
 
 use std::process::Command;
 
-use winreg::RegKey;
-use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_QUERY_VALUE, KEY_READ, KEY_SET_VALUE};
+use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_QUERY_VALUE, KEY_READ, KEY_SET_VALUE, REG_BINARY};
+use winreg::{RegKey, RegValue};
 
+use super::demarrage::{
+    APPROUVES, Programme, desactive_windows, hex, liste_approuvee, octets, script_machine, valeur_desactivee,
+};
 use super::{Categorie, Reglage, Valeur};
 use crate::ui::*;
 
@@ -57,6 +60,16 @@ pub enum Changement {
     /// Valeur : « {guid}\nipv4,…|ipv6,… », vide pour ceux de la box. `cible` : `None` quand le réglage n'est rebâti
     /// que pour être annulé.
     Dns { carte: String, cible: Option<String> },
+    /// Programme lancé à l'ouverture de session (outil « Programmes au démarrage »), désactivé comme le fait le
+    /// Gestionnaire des tâches : sa valeur dans StartupApproved\<liste> (Run, Run32, StartupFolder), de la machine
+    /// (fenêtre administrateur) ou du compte. Valeur : ses octets en hexadécimal, vide si elle manque (= activé).
+    /// `cible` : `None` quand le réglage n'est rebâti que pour être annulé.
+    Demarrage {
+        machine: bool,
+        liste: &'static str,
+        nom: String,
+        cible: Option<String>,
+    },
 }
 
 /// Liste de serveurs normalisée : « 1.1.1.1,1.0.0.1 », quel que soit le séparateur écrit.
@@ -196,6 +209,21 @@ impl Changement {
                     serveurs("Tcpip6").unwrap_or_default()
                 ))
             }
+            Changement::Demarrage {
+                machine, liste, nom, ..
+            } => {
+                let predef = if *machine {
+                    HKEY_LOCAL_MACHINE
+                } else {
+                    HKEY_CURRENT_USER
+                };
+                // Clé ou valeur absente : le programme est activé, comme Windows le compte.
+                let valeur = RegKey::predef(predef)
+                    .open_subkey_with_flags(format!(r"{APPROUVES}\{liste}"), KEY_READ)
+                    .ok()
+                    .and_then(|k| k.get_raw_value(nom).ok());
+                Some(valeur.map_or_else(String::new, |v| hex(&v.bytes)))
+            }
         }
     }
 
@@ -208,6 +236,7 @@ impl Changement {
             Changement::Service { cible, .. } => format!("start:{cible}"),
             // Rebâti pour être annulé : une cible qu'aucune lecture ne donne.
             Changement::Dns { carte, cible } => format!("{carte}\n{}", cible.as_deref().unwrap_or("?")),
+            Changement::Demarrage { cible, .. } => cible.clone().unwrap_or_else(|| "?".to_string()),
         })
     }
 
@@ -218,7 +247,47 @@ impl Changement {
             Changement::Service { defaut, .. } => Some(format!("start:{defaut}")),
             // Les DNS donnés par la box.
             Changement::Dns { carte, .. } => Some(format!("{carte}\n|")),
+            // Sans valeur dans StartupApproved, le programme se lance.
+            Changement::Demarrage { .. } => Some(String::new()),
         }
+    }
+
+    /// L'identité stable d'un réglage de démarrage (« hkcu|Run|Discord »), notée dans l'historique.
+    pub fn identite_demarrage(&self) -> Option<String> {
+        match self {
+            Changement::Demarrage {
+                machine, liste, nom, ..
+            } => Some(format!("{}|{liste}|{nom}", if *machine { "hklm" } else { "hkcu" })),
+            _ => None,
+        }
+    }
+
+    /// Le réglage de démarrage rebâti d'après son identité notée, pour l'annuler. La note ne doit viser qu'une des
+    /// listes de StartupApproved.
+    pub fn demarrage_depuis(identite: &str) -> Option<Changement> {
+        let mut parties = identite.splitn(3, '|');
+        let machine = match parties.next()? {
+            "hklm" => true,
+            "hkcu" => false,
+            _ => return None,
+        };
+        let liste = liste_approuvee(parties.next()?)?;
+        let nom = parties.next().filter(|n| !n.is_empty())?;
+        Some(Changement::Demarrage {
+            machine,
+            liste,
+            nom: nom.to_string(),
+            cible: None,
+        })
+    }
+
+    /// Le nom d'un programme d'après l'identité notée : la valeur de Run, ou le raccourci sans son extension.
+    pub fn nom_demarrage(identite: &str) -> String {
+        let nom = identite.splitn(3, '|').nth(2).unwrap_or(identite);
+        std::path::Path::new(nom)
+            .file_stem()
+            .filter(|_| nom.to_lowercase().ends_with(".lnk"))
+            .map_or_else(|| nom.to_string(), |s| s.to_string_lossy().into_owned())
     }
 
     /// La carte réseau d'un réglage de DNS.
@@ -264,6 +333,22 @@ impl Changement {
                 trf!("service {nom} : {mode}", "service {nom}: {mode}")
             }
             Changement::Dns { .. } => decrire_dns(v),
+            Changement::Demarrage {
+                machine, liste, nom, ..
+            } => {
+                let ou = format!(
+                    r"{}\…\StartupApproved\{liste}\{nom}",
+                    if *machine { "HKLM" } else { "HKCU" }
+                );
+                match v.filter(|h| !h.is_empty()) {
+                    Some(h) if desactive_windows(h) => trf!(
+                        "{ou} : désactivé, comme le fait le Gestionnaire des tâches",
+                        "{ou}: disabled, as Task Manager does"
+                    ),
+                    Some(_) => trf!("{ou} : activé", "{ou}: enabled"),
+                    None => trf!("{ou} : valeur retirée (activé)", "{ou}: value removed (enabled)"),
+                }
+            }
         }
     }
 
@@ -275,6 +360,7 @@ impl Changement {
                 racine: Racine::Hkcu,
                 ..
             } | Changement::Cle { .. }
+                | Changement::Demarrage { machine: false, .. }
         )
     }
 
@@ -303,7 +389,36 @@ impl Changement {
                     .is_ok_and(|(k, _)| k.set_value("", &String::new()).is_ok()),
                 None => hkcu.delete_subkey_all(retirer).is_ok() || hkcu.open_subkey(retirer).is_err(),
             },
-            Changement::Service { .. } | Changement::Dns { .. } => false,
+            // Les octets d'avant remis tels quels ; vide : la valeur retirée (le programme se lance).
+            Changement::Demarrage {
+                machine: false,
+                liste,
+                nom,
+                ..
+            } => {
+                let chemin = format!(r"{APPROUVES}\{liste}");
+                match v.filter(|h| !h.is_empty()) {
+                    None => hkcu
+                        .open_subkey_with_flags(&chemin, KEY_SET_VALUE | KEY_QUERY_VALUE)
+                        .map_or(true, |k| k.delete_value(nom).is_ok() || k.get_raw_value(nom).is_err()),
+                    Some(h) => {
+                        let Some(o) = octets(h) else {
+                            return false;
+                        };
+                        hkcu.create_subkey(&chemin).is_ok_and(|(k, _)| {
+                            k.set_raw_value(
+                                nom,
+                                &RegValue {
+                                    bytes: o.into(),
+                                    vtype: REG_BINARY,
+                                },
+                            )
+                            .is_ok()
+                        })
+                    }
+                }
+            }
+            Changement::Service { .. } | Changement::Dns { .. } | Changement::Demarrage { machine: true, .. } => false,
         }
     }
 
@@ -347,7 +462,8 @@ impl Changement {
                     demarrage(n)?
                 ))
             }
-            Changement::Cle { .. } => None,
+            // Écrits dans le compte de la personne par Gardien lui-même (`ecrire_ici`).
+            Changement::Cle { .. } | Changement::Demarrage { machine: false, .. } => None,
             Changement::Dns { carte, .. } => {
                 let (id, reste) = v?.split_once('\n')?;
                 if id != carte || !guid_valide(carte) {
@@ -376,8 +492,92 @@ impl Changement {
                      Set-DnsClientServerAddress -InterfaceIndex $carteDns.ifIndex -ResetServerAddresses{reglage}"
                 ))
             }
+            Changement::Demarrage {
+                machine: true,
+                liste,
+                nom,
+                ..
+            } => script_machine(liste, nom, v),
         }
     }
+}
+
+/// Les programmes lancés à l'ouverture de session : valeurs de Run (du compte, de la machine, et des programmes 32
+/// bits) et dossiers Démarrage (du compte et de toute la machine), avec leur état dans StartupApproved. Lus dans le
+/// registre et le dossier, sans PowerShell.
+pub fn au_demarrage() -> Vec<Programme> {
+    const RUN: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
+    const RUN32: &str = r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Run";
+    // Une seule heure pour tout l'écran : la valeur écrite pour désactiver, comme le Gestionnaire des tâches.
+    let desactivee = valeur_desactivee(std::time::SystemTime::now());
+    let racine = |machine: bool| RegKey::predef(if machine { HKEY_LOCAL_MACHINE } else { HKEY_CURRENT_USER });
+    // Les états notés par Windows, nom en minuscules (le registre ne distingue pas la casse) → octets.
+    let etats = |machine: bool, liste: &str| -> std::collections::HashMap<String, String> {
+        racine(machine)
+            .open_subkey_with_flags(format!(r"{APPROUVES}\{liste}"), KEY_READ)
+            .map(|k| {
+                k.enum_values()
+                    .flatten()
+                    .map(|(n, v)| (n.to_lowercase(), hex(&v.bytes)))
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    let mut l = Vec::new();
+    for (machine, chemin, liste) in [(false, RUN, "Run"), (true, RUN, "Run"), (true, RUN32, "Run32")] {
+        let Ok(cle) = racine(machine).open_subkey_with_flags(chemin, KEY_READ) else {
+            continue;
+        };
+        let notes = etats(machine, liste);
+        for (nom, valeur) in cle.enum_values().flatten() {
+            l.push(Programme {
+                actif: !notes.get(&nom.to_lowercase()).is_some_and(|h| desactive_windows(h)),
+                commande: valeur.to_string(),
+                machine,
+                bureau: false,
+                changement: Changement::Demarrage {
+                    machine,
+                    liste,
+                    nom: nom.clone(),
+                    cible: Some(desactivee.clone()),
+                },
+                nom,
+            });
+        }
+    }
+    for (machine, variable, dossier) in [
+        (false, "APPDATA", r"Microsoft\Windows\Start Menu\Programs\Startup"),
+        (true, "ProgramData", r"Microsoft\Windows\Start Menu\Programs\StartUp"),
+    ] {
+        let Some(base) = std::env::var_os(variable) else {
+            continue;
+        };
+        let notes = etats(machine, "StartupFolder");
+        for f in std::fs::read_dir(std::path::PathBuf::from(base).join(dossier))
+            .into_iter()
+            .flatten()
+            .flatten()
+        {
+            let fichier = f.file_name().to_string_lossy().into_owned();
+            if fichier.eq_ignore_ascii_case("desktop.ini") || !f.path().is_file() {
+                continue;
+            }
+            l.push(Programme {
+                nom: Changement::nom_demarrage(&fichier),
+                commande: f.path().display().to_string(),
+                actif: !notes.get(&fichier.to_lowercase()).is_some_and(|h| desactive_windows(h)),
+                machine,
+                bureau: false,
+                changement: Changement::Demarrage {
+                    machine,
+                    liste: "StartupFolder",
+                    nom: fichier,
+                    cible: Some(desactivee.clone()),
+                },
+            });
+        }
+    }
+    l
 }
 
 /// Applique des lots de changements (un lot par réglage) et dit lesquels ont réussi. La fenêtre administrateur passe
@@ -445,7 +645,7 @@ pub fn apres(touches: &[&Reglage]) {
         "menu_classique",
         "fin_de_tache",
     ];
-    if !touches.iter().any(|r| EXPLORATEUR.contains(&r.id)) {
+    if !touches.iter().any(|r| EXPLORATEUR.contains(&r.id.as_ref())) {
         return;
     }
     if !demander(tr!(
@@ -504,10 +704,10 @@ pub fn catalogue() -> Vec<Reglage> {
     use Val::{Dword, Texte};
     let b = build();
     let windows_11 = b >= 22_000;
-    let r = |id, categorie, titre, effet, prudence, recommande, changements| Reglage {
-        id,
+    let r = |id: &'static str, categorie, titre: &'static str, effet, prudence, recommande, changements| Reglage {
+        id: id.into(),
         categorie,
-        titre,
+        titre: titre.into(),
         effet,
         prudence,
         recommande,
@@ -1123,5 +1323,45 @@ mod tests {
             super::super::texte_dns(&["1.1.1.1", "1.0.0.1", "2606:4700:4700::1111"], false)
         );
         assert_eq!(liste_dns("1.1.1.1 1.0.0.1,"), "1.1.1.1,1.0.0.1");
+    }
+
+    /// Programmes au démarrage : le compte s'écrit sans fenêtre administrateur, la machine par elle ; une note qui
+    /// viserait une autre clé est refusée. Rien n'est écrit dans le registre.
+    #[test]
+    fn reglages_de_demarrage() {
+        let compte = Changement::Demarrage {
+            machine: false,
+            liste: "Run",
+            nom: "Discord".to_string(),
+            cible: None,
+        };
+        let id = compte.identite_demarrage().unwrap();
+        assert_eq!(id, "hkcu|Run|Discord");
+        assert!(matches!(
+            Changement::demarrage_depuis(&id),
+            Some(Changement::Demarrage {
+                machine: false,
+                liste: "Run",
+                ..
+            })
+        ));
+        assert!(!compte.admin());
+        assert_eq!(compte.commande_admin(Some("0300"), None), None);
+        let machine = Changement::demarrage_depuis("hklm|StartupFolder|L’appli.lnk").unwrap();
+        assert!(machine.admin());
+        assert_eq!(Changement::nom_demarrage("hklm|StartupFolder|L’appli.lnk"), "L’appli");
+        assert_eq!(Changement::nom_demarrage("hkcu|Run|Appli.v2"), "Appli.v2");
+        let script = machine.commande_admin(None, None).unwrap();
+        assert!(script.contains("DeleteValue('L’’appli.lnk', $false)"), "{script}");
+        for mauvaise in ["hkcu|Policies|x", "hkxx|Run|x", "hkcu|Run|", "hkcu"] {
+            assert!(Changement::demarrage_depuis(mauvaise).is_none(), "{mauvaise}");
+        }
+        assert!(compte.decrire(Some("")).contains("valeur retirée"));
+        assert!(
+            compte
+                .decrire(Some(&valeur_desactivee(std::time::SystemTime::now())))
+                .contains("désactivé")
+        );
+        assert_eq!(compte.defaut().as_deref(), Some(""));
     }
 }

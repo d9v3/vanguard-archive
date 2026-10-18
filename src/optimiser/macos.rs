@@ -1,8 +1,10 @@
 //! Réglages de macOS : préférences `defaults` (booléens) du compte, ou de la machine pour celles qui demandent les
 //! droits administrateur. Le Finder est relancé à la fin quand un de ses réglages a changé.
 
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use super::demarrage::{Programme, desactives_launchd, label_valide};
 use super::{Categorie, Reglage, Valeur};
 use crate::ui::*;
 
@@ -19,6 +21,25 @@ pub enum Changement {
     /// Serveurs DNS d'un service réseau (« Wi-Fi »), outil « DNS le plus rapide ». Valeur : « service\n1.1.1.1,… »,
     /// vide pour ceux de la box. `cible` : `None` quand le réglage n'est rebâti que pour être annulé.
     Dns { service: String, cible: Option<String> },
+    /// Agent de launchd du compte (outil « Programmes au démarrage ») : « enabled » ou « disabled » pour
+    /// `launchctl`. Le nom (label) est vérifié : il entre tel quel dans la commande.
+    Demarrage { label: String },
+}
+
+/// Les agents désactivés pour ce compte (`launchctl print-disabled`) ; `None` : illisible.
+fn agents_desactives() -> Option<std::collections::HashSet<String>> {
+    let uid = crate::commande::lancer(Command::new("id").arg("-u"), 10)?
+        .sortie
+        .trim()
+        .to_string();
+    if uid.is_empty() || !uid.chars().all(|c| c.is_ascii_digit()) {
+        return None;
+    }
+    let r = crate::commande::lancer(
+        Command::new("launchctl").args(["print-disabled", &format!("gui/{uid}")]),
+        10,
+    )?;
+    (r.code == Some(0)).then(|| desactives_launchd(&r.sortie))
 }
 
 fn bool_texte(b: bool) -> String {
@@ -52,6 +73,9 @@ impl Changement {
                 (r.code == Some(0) && !r.sortie.contains("not a recognized"))
                     .then(|| format!("{service}\n{}", lire_networksetup(&r.sortie)))
             }
+            Changement::Demarrage { label } => {
+                agents_desactives().map(|d| if d.contains(label) { "disabled" } else { "enabled" }.to_string())
+            }
         }
     }
 
@@ -62,6 +86,7 @@ impl Changement {
             Changement::Preference { cible, .. } => bool_texte(*cible),
             // Rebâti pour être annulé : une cible qu'aucune lecture ne donne.
             Changement::Dns { service, cible } => format!("{service}\n{}", cible.as_deref().unwrap_or("?")),
+            Changement::Demarrage { .. } => "disabled".to_string(),
         })
     }
 
@@ -70,6 +95,7 @@ impl Changement {
             Changement::Preference { defaut, .. } => defaut.map(bool_texte),
             // Les DNS donnés par la box.
             Changement::Dns { service, .. } => Some(format!("{service}\n")),
+            Changement::Demarrage { .. } => Some("enabled".to_string()),
         }
     }
 
@@ -89,6 +115,10 @@ impl Changement {
                     .collect();
                 super::texte_dns(&serveurs, false)
             }
+            Changement::Demarrage { label } => format!(
+                "launchctl {} gui/<uid>/{label}",
+                if v == Some("disabled") { "disable" } else { "enable" }
+            ),
         }
     }
 
@@ -130,6 +160,18 @@ impl Changement {
                     shell(service)
                 ))
             }
+            // Pour le compte, sans sudo ; l'agent qui tourne finit la session, il ne repart simplement plus.
+            Changement::Demarrage { label } => {
+                if !label_valide(label) {
+                    return None;
+                }
+                let action = match v? {
+                    "disabled" => "disable",
+                    "enabled" => "enable",
+                    _ => return None,
+                };
+                Some(format!("launchctl {action} \"gui/$(id -u)/{label}\""))
+            }
         }
     }
 
@@ -137,8 +179,29 @@ impl Changement {
     pub fn identite_dns(&self) -> Option<&str> {
         match self {
             Changement::Dns { service, .. } => Some(service),
-            Changement::Preference { .. } => None,
+            Changement::Preference { .. } | Changement::Demarrage { .. } => None,
         }
+    }
+
+    /// L'identité stable d'un réglage de démarrage (« launchd|com.exemple.agent »), notée dans l'historique.
+    pub fn identite_demarrage(&self) -> Option<String> {
+        match self {
+            Changement::Demarrage { label } => Some(format!("launchd|{label}")),
+            _ => None,
+        }
+    }
+
+    /// Le réglage de démarrage rebâti d'après son identité notée, pour l'annuler.
+    pub fn demarrage_depuis(identite: &str) -> Option<Changement> {
+        let label = identite.strip_prefix("launchd|")?;
+        label_valide(label).then(|| Changement::Demarrage {
+            label: label.to_string(),
+        })
+    }
+
+    /// Le nom d'un programme d'après l'identité notée : le nom de l'agent.
+    pub fn nom_demarrage(identite: &str) -> String {
+        identite.strip_prefix("launchd|").unwrap_or(identite).to_string()
     }
 
     /// Le réglage de DNS rebâti d'après sa valeur d'avant notée, pour l'annuler.
@@ -203,11 +266,55 @@ pub fn ecrire(lots: &[Vec<(&Changement, Valeur)>]) -> Vec<bool> {
     crate::machine::appliquer_chacune(&commandes)
 }
 
+/// Les programmes lancés à l'ouverture de session de ce compte : ses agents de launchd (~/Library/LaunchAgents), avec
+/// leur état. Ceux de toute la machine (/Library) et les éléments de connexion des Réglages ne sont pas touchés.
+pub fn au_demarrage() -> Vec<Programme> {
+    let dossier = PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join("Library/LaunchAgents");
+    let desactives = agents_desactives().unwrap_or_default();
+    let plutil = |fichier: &Path, cle: &str| -> Option<String> {
+        let r = crate::commande::lancer(
+            Command::new("plutil")
+                .args(["-extract", cle, "raw", "-o", "-"])
+                .arg(fichier),
+            10,
+        )?;
+        let t = r.sortie.trim();
+        (r.code == Some(0) && !t.is_empty()).then(|| t.to_string())
+    };
+    let mut fichiers: Vec<PathBuf> = std::fs::read_dir(&dossier)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|f| f.path())
+        .filter(|p| p.extension().is_some_and(|e| e == "plist"))
+        .collect();
+    fichiers.sort();
+    fichiers
+        .iter()
+        .filter_map(|f| {
+            let label = plutil(f, "Label").filter(|l| label_valide(l))?;
+            let programme = plutil(f, "Program")
+                .or_else(|| plutil(f, "ProgramArguments.0"))
+                .unwrap_or_else(|| f.display().to_string());
+            Some(Programme {
+                nom: Path::new(&programme)
+                    .file_name()
+                    .map_or_else(|| label.clone(), |n| n.to_string_lossy().into_owned()),
+                commande: programme,
+                actif: !desactives.contains(&label),
+                machine: false,
+                bureau: label.starts_with("com.apple."),
+                changement: Changement::Demarrage { label },
+            })
+        })
+        .collect()
+}
+
 /// Le Finder relit ses préférences à son démarrage : on le relance si l'une d'elles a changé.
 pub fn apres(touches: &[&Reglage]) {
     if touches
         .iter()
-        .any(|r| matches!(r.id, "extensions" | "fichiers_caches" | "chemin_finder"))
+        .any(|r| matches!(r.id.as_ref(), "extensions" | "fichiers_caches" | "chemin_finder"))
     {
         let _ = Command::new("killall").arg("Finder").status();
     }
@@ -228,12 +335,13 @@ pub fn catalogue() -> Vec<Reglage> {
     const DIAGNOSTICS: &str = "/Library/Application Support/CrashReporter/DiagnosticMessagesHistory";
     vec![
         Reglage {
-            id: "pub_personnalisee",
+            id: "pub_personnalisee".into(),
             categorie: Confidentialite,
             titre: tr!(
                 "Publicités personnalisées d'Apple coupées",
                 "Apple personalized ads off"
-            ),
+            )
+            .into(),
             effet: tr!(
                 "Apple ne se sert plus de ce qu'il sait de toi pour choisir les publicités de l'App Store, d'Apple News et de Bourse.",
                 "Apple no longer uses what it knows about you to pick ads in the App Store, Apple News and Stocks."
@@ -243,9 +351,9 @@ pub fn catalogue() -> Vec<Reglage> {
             changements: vec![pref("com.apple.AdLib", "allowApplePersonalizedAdvertising", false)],
         },
         Reglage {
-            id: "analyses",
+            id: "analyses".into(),
             categorie: Confidentialite,
-            titre: tr!("Analyses du Mac gardées pour toi", "Mac analytics kept to yourself"),
+            titre: tr!("Analyses du Mac gardées pour toi", "Mac analytics kept to yourself").into(),
             effet: tr!(
                 "Les rapports d'utilisation et de plantage ne partent plus chez Apple ni chez les développeurs des applications.",
                 "Usage and crash reports no longer go to Apple or to app developers."
@@ -264,9 +372,9 @@ pub fn catalogue() -> Vec<Reglage> {
                 .collect(),
         },
         Reglage {
-            id: "extensions",
+            id: "extensions".into(),
             categorie: Confort,
-            titre: tr!("Extensions des fichiers visibles", "File extensions shown"),
+            titre: tr!("Extensions des fichiers visibles", "File extensions shown").into(),
             effet: tr!(
                 "Le Finder affiche « facture.pdf.app » au lieu de « facture.pdf » : un programme ne peut plus se faire passer pour un document.",
                 "Finder shows “invoice.pdf.app” instead of “invoice.pdf”: a program can no longer pass for a document."
@@ -276,12 +384,13 @@ pub fn catalogue() -> Vec<Reglage> {
             changements: vec![pref("NSGlobalDomain", "AppleShowAllExtensions", true)],
         },
         Reglage {
-            id: "ds_store",
+            id: "ds_store".into(),
             categorie: Confort,
             titre: tr!(
                 "Pas de .DS_Store sur les clés et partages",
                 "No .DS_Store on drives and shares"
-            ),
+            )
+            .into(),
             effet: tr!(
                 "Le Mac n'écrit plus ses fichiers cachés .DS_Store sur les clés USB et les dossiers partagés : rien de laissé chez les autres.",
                 "The Mac no longer writes its hidden .DS_Store files on USB drives and shared folders: nothing left behind on other people's things."
@@ -294,9 +403,9 @@ pub fn catalogue() -> Vec<Reglage> {
             ],
         },
         Reglage {
-            id: "fichiers_caches",
+            id: "fichiers_caches".into(),
             categorie: Confort,
-            titre: tr!("Fichiers cachés visibles", "Hidden files shown"),
+            titre: tr!("Fichiers cachés visibles", "Hidden files shown").into(),
             effet: tr!(
                 "Le Finder montre aussi les fichiers et dossiers cachés (Cmd-Maj-. les masque à nouveau).",
                 "Finder also shows hidden files and folders (Cmd-Shift-. hides them again)."
@@ -306,9 +415,9 @@ pub fn catalogue() -> Vec<Reglage> {
             changements: vec![pref("com.apple.finder", "AppleShowAllFiles", true)],
         },
         Reglage {
-            id: "chemin_finder",
+            id: "chemin_finder".into(),
             categorie: Confort,
-            titre: tr!("Chemin complet dans le Finder", "Full path in Finder"),
+            titre: tr!("Chemin complet dans le Finder", "Full path in Finder").into(),
             effet: tr!(
                 "Le titre des fenêtres du Finder montre le chemin complet du dossier.",
                 "Finder window titles show the folder's full path."

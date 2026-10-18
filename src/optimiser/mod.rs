@@ -4,12 +4,15 @@
 //! sans note (réglage fait ailleurs), c'est la valeur d'un système neuf qui revient. Aucun réglage n'affaiblit la
 //! sécurité, et ceux qui ne conviennent pas à cette machine (version du système, bureau, matériel) ne sont pas proposés.
 
+mod demarrage;
 #[cfg(target_os = "linux")]
 mod linux;
 #[cfg(target_os = "macos")]
 mod macos;
 #[cfg(windows)]
 mod windows;
+
+pub use demarrage::menu as programmes_au_demarrage;
 
 #[cfg(target_os = "linux")]
 use linux as systeme;
@@ -18,6 +21,7 @@ use macos as systeme;
 #[cfg(windows)]
 use windows as systeme;
 
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 
 use crate::selection::{Case, cocher};
@@ -48,10 +52,11 @@ impl Categorie {
 
 /// Un réglage proposé par Gardien.
 pub struct Reglage {
-    /// Nom stable, noté dans l'historique pour pouvoir annuler.
-    pub id: &'static str,
+    /// Nom stable, noté dans l'historique pour pouvoir annuler. Construit à la demande pour un programme au
+    /// démarrage (« demarrage:… »), fixe pour le catalogue.
+    pub id: Cow<'static, str>,
     pub categorie: Categorie,
-    pub titre: &'static str,
+    pub titre: Cow<'static, str>,
     /// Ce que ça change, et pourquoi.
     pub effet: &'static str,
     /// Le revers, s'il y en a un.
@@ -134,7 +139,7 @@ fn sauver(h: &Historique) -> bool {
 
 /// Valeurs à remettre pour annuler `r` : celles notées avant le changement, sinon celles d'un système neuf.
 fn valeurs_d_avant(r: &Reglage, h: &Historique) -> Vec<Valeur> {
-    let notees = h.reglages.get(r.id);
+    let notees = h.reglages.get(r.id.as_ref());
     r.changements
         .iter()
         .enumerate()
@@ -182,7 +187,7 @@ fn executer(a_faire: &[&Reglage], a_annuler: &[&Reglage], h: &mut Historique) ->
     // Échec sans aucun changement : la note n'a pas lieu d'être (en partie fait, elle reste pour pouvoir annuler).
     for (r, ok) in a_faire.iter().zip(faits) {
         if !*ok && etat(r) == Etat::AFaire {
-            h.reglages.remove(r.id);
+            h.reglages.remove(r.id.as_ref());
         }
     }
     // Annulé = les valeurs d'avant relues en place, pas seulement des commandes sans erreur : une valeur qu'aucune
@@ -193,7 +198,7 @@ fn executer(a_faire: &[&Reglage], a_annuler: &[&Reglage], h: &mut Historique) ->
         .map(|(r, ok)| *ok && remis_en_place(r, h))
         .collect();
     for (r, _) in a_annuler.iter().zip(&remis).filter(|(_, remis)| **remis) {
-        h.reglages.remove(r.id);
+        h.reglages.remove(r.id.as_ref());
     }
     sauver(h);
     (faits.to_vec(), remis)
@@ -226,7 +231,7 @@ fn confirmer_et_executer(a_faire: &[&Reglage], a_annuler: &[&Reglage]) {
     if !a_annuler.is_empty() {
         trp!("\n  {GRAS}À annuler{RESET}", "\n  {GRAS}To undo{RESET}");
         for r in a_annuler {
-            let note = if h.reglages.contains_key(r.id) {
+            let note = if h.reglages.contains_key(r.id.as_ref()) {
                 tr!("valeurs d'avant remises", "previous values restored")
             } else {
                 tr!("valeurs d'un système neuf", "values of a fresh system")
@@ -292,7 +297,7 @@ pub fn menu(categorie: Categorie) {
         .zip(&etats)
         .map(|(r, e)| Case {
             texte: r.titre.to_string(),
-            precision: libelle(*e, h.reglages.contains_key(r.id)).to_string(),
+            precision: libelle(*e, h.reglages.contains_key(r.id.as_ref())).to_string(),
             detail: match r.prudence {
                 Some(p) => format!("{} ⚠ {p}", r.effet),
                 None => r.effet.to_string(),
@@ -377,10 +382,10 @@ const DNS: &str = "dns_rapide";
 
 fn reglage_dns(c: systeme::Changement) -> Reglage {
     Reglage {
-        id: DNS,
+        id: Cow::Borrowed(DNS),
         // Hors des menus de catégorie (il n'est pas au catalogue) : la catégorie ne sert pas.
         categorie: Categorie::Confort,
-        titre: tr!("DNS le plus rapide", "Fastest DNS"),
+        titre: tr!("DNS le plus rapide", "Fastest DNS").into(),
         effet: tr!(
             "Les noms de sites sont traduits par le DNS le plus rapide mesuré ici.",
             "Site names are translated by the fastest DNS measured here."
@@ -392,15 +397,18 @@ fn reglage_dns(c: systeme::Changement) -> Reglage {
 }
 
 /// Les réglages hors catalogue que Gardien a appliqués et pas encore annulés : ceux dont une note garde la valeur
-/// d'avant.
+/// d'avant (le DNS, les programmes retirés du démarrage).
 fn hors_catalogue(h: &Historique) -> Vec<Reglage> {
-    h.reglages
+    let mut l: Vec<Reglage> = h
+        .reglages
         .get(DNS)
         .and_then(|a| a.valeurs.first().cloned().flatten())
         .and_then(|v| systeme::Changement::dns_note(&v))
         .map(reglage_dns)
         .into_iter()
-        .collect()
+        .collect();
+    l.extend(demarrage::notes(h));
+    l
 }
 
 /// Le DNS changé par Gardien, s'il l'a fait : (date du changement, réseau concerné : connexion, carte ou service).
@@ -452,7 +460,10 @@ pub fn tout_annuler() {
     let h = charger();
     let mut reglages = systeme::catalogue();
     reglages.extend(hors_catalogue(&h));
-    let a_annuler: Vec<&Reglage> = reglages.iter().filter(|r| h.reglages.contains_key(r.id)).collect();
+    let a_annuler: Vec<&Reglage> = reglages
+        .iter()
+        .filter(|r| h.reglages.contains_key(r.id.as_ref()))
+        .collect();
     if a_annuler.is_empty() {
         trp!(
             "  {GRIS}Gardien n'a changé aucun réglage sur cette machine.{RESET}",
@@ -470,7 +481,7 @@ mod tests {
     #[test]
     fn catalogue_complet_et_sans_doublon() {
         let c = systeme::catalogue();
-        let mut ids: Vec<&str> = c.iter().map(|r| r.id).collect();
+        let mut ids: Vec<&str> = c.iter().map(|r| r.id.as_ref()).collect();
         let n = ids.len();
         ids.sort_unstable();
         ids.dedup();
@@ -479,7 +490,7 @@ mod tests {
             assert!(!r.titre.is_empty() && !r.effet.is_empty(), "{}", r.id);
             assert!(!r.changements.is_empty(), "{} ne change rien", r.id);
             // Le titre tient dans la liste à cocher sans être coupé.
-            assert!(largeur_affichee(r.titre) <= 42, "{} : titre trop long", r.id);
+            assert!(largeur_affichee(&r.titre) <= 42, "{} : titre trop long", r.id);
         }
     }
 
@@ -531,9 +542,9 @@ mod tests {
         std::fs::write(&f, "ENABLED=0\n").unwrap();
         let chemin: &'static str = Box::leak(f.display().to_string().into_boxed_str());
         let r = Reglage {
-            id: "essai",
+            id: "essai".into(),
             categorie: Categorie::Confort,
-            titre: "Essai",
+            titre: "Essai".into(),
             effet: "Essai",
             prudence: None,
             recommande: false,

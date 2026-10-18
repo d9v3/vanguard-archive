@@ -1,7 +1,8 @@
 //! « Pourquoi c'est lent ? » : un instantané en deux mesures, à deux secondes d'écart. Ce qui occupe le processeur,
 //! la mémoire et le disque, programme par programme ; le démarrage (sa durée, ce qui le retarde) ; les programmes
-//! lancés à l'ouverture de session et leur poids. Lecture seule : les conseils disent quel outil de Gardien règle
-//! quoi (Nettoyer, Optimiser, Mises à jour), et l'écran les ouvre.
+//! lancés à l'ouverture de session et leur poids. La mesure est en lecture seule : les conseils disent quel outil de
+//! Gardien règle quoi (Nettoyer, Optimiser, Mises à jour, programmes au démarrage à retirer ou remettre, après accord
+//! et de façon annulable), et l'écran les ouvre.
 
 use std::collections::HashMap;
 
@@ -189,7 +190,7 @@ fn secondes_lisibles(s: f64) -> String {
 /// pour ce bureau. `Hidden=true` ou `X-GNOME-Autostart-enabled=false` : désactivée ; `OnlyShowIn`/`NotShowIn` :
 /// selon le bureau.
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
-fn entree_autostart(texte: &str, bureau: &str) -> Option<(String, String)> {
+pub(crate) fn entree_autostart(texte: &str, bureau: &str) -> Option<(String, String)> {
     let mut dans_entree = false;
     let mut champs: HashMap<&str, &str> = HashMap::new();
     for l in texte.lines() {
@@ -727,26 +728,6 @@ fn afficher_conseils(c: &[Conseil]) {
     }
 }
 
-/// Où retirer un programme du démarrage, sur ce système.
-fn ou_retirer_du_demarrage() -> &'static str {
-    if cfg!(windows) {
-        tr!(
-            "Gestionnaire des tâches (Ctrl+Maj+Échap) › Applications de démarrage : clic droit sur un programme › Désactiver. Il reste installé, il ne se lance plus tout seul.",
-            "Task Manager (Ctrl+Shift+Esc) › Startup apps: right-click a program › Disable. It stays installed, it no longer starts by itself."
-        )
-    } else if cfg!(target_os = "macos") {
-        tr!(
-            "Réglages Système › Général › Ouverture : retirer un programme de la liste avec « − ». Il reste installé, il ne se lance plus tout seul.",
-            "System Settings › General › Login Items: remove a program from the list with “−”. It stays installed, it no longer starts by itself."
-        )
-    } else {
-        tr!(
-            "Réglages du bureau › Applications au démarrage, ou les fichiers de ~/.config/autostart (une ligne « Hidden=true » désactive l'entrée). Le programme reste installé.",
-            "Desktop settings › Startup applications, or the files in ~/.config/autostart (a “Hidden=true” line disables the entry). The program stays installed."
-        )
-    }
-}
-
 /// Mesure, puis montre.
 fn mesurer() -> Instantane {
     trp!(
@@ -794,7 +775,7 @@ pub fn menu() {
                 ),
                 Outil::Demarrage => (
                     tr!("Programmes au démarrage", "Startup programs"),
-                    tr!("où les retirer", "where to remove them"),
+                    tr!("les retirer ou les remettre", "remove or put back"),
                 ),
                 Outil::Performance => (
                     tr!("Réglages de performance", "Performance settings"),
@@ -837,10 +818,7 @@ pub fn menu() {
         println!();
         match outil {
             Outil::Nettoyer => crate::nettoyer::menu(),
-            Outil::Demarrage => {
-                section(tr!("PROGRAMMES AU DÉMARRAGE", "STARTUP PROGRAMS"));
-                afficher_aligne("  ", ou_retirer_du_demarrage(), 2, "");
-            }
+            Outil::Demarrage => crate::optimiser::programmes_au_demarrage(),
             #[cfg(not(target_os = "macos"))]
             Outil::Performance => crate::optimiser::menu(crate::optimiser::Categorie::Performance),
             #[cfg(target_os = "macos")]

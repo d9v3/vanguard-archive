@@ -949,6 +949,15 @@ fn demarrage() {
         "  {GRIS}Si tu ne reconnais pas une entrée, renseigne-toi avant de la supprimer.{RESET}",
         "  {GRIS}If you do not recognize an entry, look it up before deleting it.{RESET}"
     );
+    afficher_aligne(
+        "  ",
+        tr!(
+            "Pour qu'un programme ne se lance plus à l'ouverture de session, sans le désinstaller et de façon annulable : gardien demarrage (ou Cette machine › Pourquoi c'est lent ?).",
+            "To stop a program from starting at login, without uninstalling it and in an undoable way: gardien startup (or This machine › Why is it slow?)."
+        ),
+        2,
+        GRIS,
+    );
 }
 
 #[cfg(test)]

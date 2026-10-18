@@ -43,7 +43,8 @@ Entrée ouvre celle en surbrillance, Échap efface. Au menu principal, elle trou
        Diagnostic (matériel, plantages et erreurs récents, copie texte sur la clé)
        Intégrité des fichiers critiques (comptes, sudo, SSH, démarrage ; en direct : gardien integrite --temps-reel)
        Ce que Gardien a appris : tes habitudes, et les alertes que tu as déclarées normales (« i » à la correction)
-       Pourquoi c'est lent ? (processeur, mémoire, disque, démarrage, programmes à l'ouverture de session)
+       Pourquoi c'est lent ? (processeur, mémoire, disque, démarrage, programmes à l'ouverture de session ;
+       les retirer du démarrage ou les remettre, après accord : gardien demarrage)
        Fiche de l'ordinateur (modèle, processeur, mémoire, carte graphique, disques ; numéros de série à l'écran)
        Entretien du mois : une notification par mois (note, mises à jour, place à libérer, problèmes nouveaux)
   5  Réseau et Internet ›

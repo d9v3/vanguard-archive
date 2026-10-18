@@ -30,7 +30,7 @@ modification. Sur GitHub, `@claude` dans un ticket ou une demande de fusion le f
 | `src/surveillance.rs` | minuterie systemd / Planificateur de tâches / agent launchd, notifications |
 | `src/rapport.rs`, `src/historique.rs` | rapport HTML, historique des bilans, courbe des notes |
 | `src/reparer.rs`, `src/maj.rs`, `src/gaming/` | réparations, mises à jour, gaming |
-| `src/optimiser/` | réglages de confidentialité, de performance et de confort, avec annulation exacte |
+| `src/optimiser/` | réglages de confidentialité, de performance et de confort, avec annulation exacte ; programmes au démarrage (`demarrage.rs`) |
 | `src/nettoyer/` | nettoyage : éléments par système, place mesurée avant et après |
 | `src/logiciels/` | logiciels à installer : catalogue vérifié (`catalogue.rs`), état et installation par système |
 | `src/fuites.rs`, `src/donnees.rs` | mots de passe fuités, sauvegarde des données |

@@ -268,6 +268,10 @@ enum Commande {
     /// à l'ouverture de session. Lecture seule.
     #[command(visible_alias = "slow")]
     Lenteur,
+    /// Programmes au démarrage : ceux qui se lancent à l'ouverture de session, à retirer ou à remettre après accord.
+    /// Chaque retrait s'annule exactement (Optimiser › Tout remettre comme avant).
+    #[command(visible_alias = "startup")]
+    Demarrage,
     /// Fiche de l'ordinateur : modèle, carte mère, processeur, mémoire, carte graphique, disques, système. Les numéros
     /// de série s'affichent à l'écran seulement.
     #[command(visible_alias = "specs")]
@@ -1436,6 +1440,10 @@ fn ligne_de_commande() -> clap::Command {
             "Why is it slow? What keeps the processor, memory and disk busy, startup, the programs started at login. Read only",
         ),
         (
+            "demarrage",
+            "Startup programs: those that start at login, to remove or put back after your consent. Each removal is undone exactly (Optimize › Put everything back)",
+        ),
+        (
             "fiche",
             "Computer specs: model, motherboard, processor, memory, graphics card, disks, system. Serial numbers are shown on screen only",
         ),
@@ -1666,6 +1674,7 @@ async fn main() {
         Some(Commande::Nommer { appareil, surnom }) => nommer(&appareil, &surnom.join(" ")),
         Some(Commande::Guide { quoi }) => guide::executer(&quoi.join(" ")),
         Some(Commande::Lenteur) => lenteur::commande(),
+        Some(Commande::Demarrage) => optimiser::programmes_au_demarrage(),
         Some(Commande::Fiche { json }) => fiche::fiche(json),
         Some(Commande::CopierFichiers { destination }) => copier::commande(destination.as_deref()),
         Some(Commande::Depanner { sujet }) => depanner::executer(&sujet.join(" ")),

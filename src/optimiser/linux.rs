@@ -2,11 +2,21 @@
 //! distributions (Ubuntu, Debian). Chacun n'est proposé que si cette machine en a l'usage : un SSD pour l'entretien
 //! des SSD, GNOME pour ses préférences, le paquet concerné pour les options des distributions.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use super::demarrage::Programme;
 use super::{Categorie, Reglage, Valeur};
 use crate::ui::*;
+
+/// Ce que retire un réglage de démarrage.
+pub enum Entree {
+    /// Fichier .desktop d'autostart du compte (chemin complet). Une entrée du système s'y masque par une copie qui
+    /// porte « Hidden=true » ; la retirer fait revenir celle du système.
+    Autostart(PathBuf),
+    /// Service de systemd --user installé par la personne (~/.config/systemd/user).
+    Service(String),
+}
 
 pub enum Changement {
     /// Minuterie ou service de systemd : « enabled » ou « disabled ». `defaut` : son état sur un système neuf.
@@ -41,6 +51,104 @@ pub enum Changement {
     /// les serveurs séparés par des virgules ; « ignore » (yes, no) dit si ceux de la box sont écartés. `cible` :
     /// `None` quand le réglage n'est rebâti que pour être annulé.
     Dns { connexion: String, cible: Option<String> },
+    /// Programme lancé à l'ouverture de session (outil « Programmes au démarrage »). Valeur : « +contenu » du fichier
+    /// d'autostart du compte (« - » : absent), ou l'état du service pour systemd (enabled, disabled). `cible` :
+    /// `None` quand le réglage n'est rebâti que pour être annulé.
+    Demarrage { entree: Entree, cible: Option<String> },
+}
+
+/// Un nom de service de systemd : il entre tel quel dans la commande.
+fn unite_valide(t: &str) -> bool {
+    t.len() <= 255
+        && t.strip_suffix(".service")
+            .is_some_and(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_alphanumeric() || "@._:-".contains(c)))
+}
+
+/// La valeur d'une clé du groupe [Desktop Entry] d'un fichier .desktop.
+fn champ<'a>(texte: &'a str, cle: &str) -> Option<&'a str> {
+    let mut dans_entree = false;
+    for l in texte.lines() {
+        let l = l.trim();
+        if l.starts_with('[') {
+            dans_entree = l == "[Desktop Entry]";
+        } else if dans_entree
+            && let Some((k, v)) = l.split_once('=')
+            && k.trim() == cle
+        {
+            return Some(v.trim());
+        }
+    }
+    None
+}
+
+/// Le fichier d'autostart masqué : « Hidden=true » juste sous [Desktop Entry], à la place de toute autre valeur
+/// « Hidden » de ce groupe ; le reste est gardé à l'octet près. Masquer deux fois ne change plus rien.
+fn masquer(texte: &str) -> String {
+    let mut sortie = String::with_capacity(texte.len() + 16);
+    let mut dans_entree = false;
+    let mut pose = false;
+    for l in texte.split_inclusive('\n') {
+        let t = l.trim();
+        if t.starts_with('[') {
+            dans_entree = t == "[Desktop Entry]";
+            sortie.push_str(l);
+            if dans_entree && !pose {
+                if !l.ends_with('\n') {
+                    sortie.push('\n');
+                }
+                sortie.push_str("Hidden=true\n");
+                pose = true;
+            }
+            continue;
+        }
+        if dans_entree && t.split_once('=').is_some_and(|(k, _)| k.trim() == "Hidden") {
+            continue;
+        }
+        sortie.push_str(l);
+    }
+    if !pose {
+        if !sortie.is_empty() && !sortie.ends_with('\n') {
+            sortie.push('\n');
+        }
+        sortie.push_str("[Desktop Entry]\nHidden=true\n");
+    }
+    sortie
+}
+
+/// Le fichier d'autostart sans ses lignes « Hidden » : la forme où l'entrée se lance.
+fn demasquer(texte: &str) -> String {
+    let mut dans_entree = false;
+    texte
+        .split_inclusive('\n')
+        .filter(|l| {
+            let t = l.trim();
+            if t.starts_with('[') {
+                dans_entree = t == "[Desktop Entry]";
+                return true;
+            }
+            !(dans_entree && t.split_once('=').is_some_and(|(k, _)| k.trim() == "Hidden"))
+        })
+        .collect()
+}
+
+/// Les dossiers d'autostart du système (XDG_CONFIG_DIRS, sinon /etc/xdg).
+fn dossiers_systeme() -> Vec<PathBuf> {
+    std::env::var("XDG_CONFIG_DIRS")
+        .ok()
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| "/etc/xdg".into())
+        .split(':')
+        .map(|d| Path::new(d).join("autostart"))
+        .collect()
+}
+
+/// Un chemin du dossier personnel, écrit court (« ~/.config/autostart/… »).
+fn court(p: &Path) -> String {
+    let maison = std::env::var_os("HOME").map(PathBuf::from);
+    match maison.as_deref().and_then(|m| p.strip_prefix(m).ok()) {
+        Some(reste) if !reste.as_os_str().is_empty() => format!("~/{}", reste.display()),
+        _ => p.display().to_string(),
+    }
 }
 
 /// Une propriété d'une connexion de NetworkManager, sans échappement (les « : » des adresses IPv6 restent).
@@ -186,6 +294,15 @@ impl Changement {
                     champ("ipv6.ignore-auto-dns")?
                 ))
             }
+            Changement::Demarrage { entree, .. } => match entree {
+                Entree::Autostart(p) => match std::fs::read_to_string(p) {
+                    Ok(t) => Some(format!("+{t}")),
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => Some("-".to_string()),
+                    // Illisible : ni présent ni absent, rien ne doit s'écrire d'après cette lecture.
+                    Err(_) => None,
+                },
+                Entree::Service(u) => sortie("systemctl", &["--user", "is-enabled", u]).filter(|t| !t.is_empty()),
+            },
         }
     }
 
@@ -199,6 +316,7 @@ impl Changement {
             Changement::Fichier { .. } => "present".to_string(),
             // Rebâti pour être annulé : une cible qu'aucune lecture ne donne.
             Changement::Dns { connexion, cible } => format!("{connexion}\n{}", cible.as_deref().unwrap_or("?")),
+            Changement::Demarrage { cible, .. } => cible.clone().unwrap_or_else(|| "?".to_string()),
         })
     }
 
@@ -210,7 +328,92 @@ impl Changement {
             Changement::Fichier { .. } => None,
             // Les DNS donnés par la box, en IPv4 comme en IPv6.
             Changement::Dns { connexion, .. } => Some(format!("{connexion}\n|no||no")),
+            // La forme où le programme se lance, sans rien effacer : le fichier sans sa ligne Hidden (absent reste
+            // absent) ; « ? » si on ne sait pas le relire, qu'aucune écriture n'accepte.
+            Changement::Demarrage { entree, .. } => Some(match entree {
+                Entree::Autostart(_) => match self.lire() {
+                    Some(v) => v.strip_prefix('+').map_or(v.clone(), |t| format!("+{}", demasquer(t))),
+                    None => "?".to_string(),
+                },
+                Entree::Service(_) => "enabled".to_string(),
+            }),
         }
+    }
+
+    /// L'identité stable d'un réglage de démarrage (« autostart|chemin », « systemd|service »), notée dans
+    /// l'historique.
+    pub fn identite_demarrage(&self) -> Option<String> {
+        match self {
+            Changement::Demarrage {
+                entree: Entree::Autostart(p),
+                ..
+            } => Some(format!("autostart|{}", p.display())),
+            Changement::Demarrage {
+                entree: Entree::Service(u),
+                ..
+            } => Some(format!("systemd|{u}")),
+            _ => None,
+        }
+    }
+
+    /// Le réglage de démarrage rebâti d'après son identité notée, pour l'annuler. La note ne doit viser qu'un fichier
+    /// .desktop d'un dossier autostart, ou un service au nom valide.
+    pub fn demarrage_depuis(identite: &str) -> Option<Changement> {
+        let (sorte, reste) = identite.split_once('|')?;
+        let entree = match sorte {
+            "autostart" => {
+                let p = PathBuf::from(reste);
+                let valide = p.is_absolute()
+                    && p.extension().is_some_and(|e| e == "desktop")
+                    && p.parent().is_some_and(|d| d.ends_with("autostart"));
+                valide.then_some(Entree::Autostart(p))?
+            }
+            "systemd" => unite_valide(reste).then(|| Entree::Service(reste.to_string()))?,
+            _ => return None,
+        };
+        Some(Changement::Demarrage { entree, cible: None })
+    }
+
+    /// Le nom d'un programme d'après l'identité notée : le fichier ou le service, sans extension.
+    pub fn nom_demarrage(identite: &str) -> String {
+        let reste = identite.split_once('|').map_or(identite, |(_, r)| r);
+        let p = Path::new(reste);
+        // Une entrée d'autostart : le nom qu'affiche son fichier, celui du compte ou celui du système au même nom.
+        if identite.starts_with("autostart|")
+            && let Some(fichier) = p.file_name()
+        {
+            let nom = std::iter::once(p.to_path_buf())
+                .chain(dossiers_systeme().into_iter().map(|d| d.join(fichier)))
+                .find_map(|f| champ(&std::fs::read_to_string(f).ok()?, "Name").map(str::to_string));
+            if let Some(nom) = nom {
+                return nom;
+            }
+        }
+        p.file_stem()
+            .map_or_else(|| reste.to_string(), |n| n.to_string_lossy().into_owned())
+    }
+
+    /// Écrit ce qui est propre au compte sans passer par une commande : le fichier d'autostart, son contenu entier
+    /// remis à l'octet près, ou retiré. `None` : ce changement passe par une commande.
+    fn ecrire_ici(&self, v: Option<&str>) -> Option<bool> {
+        let Changement::Demarrage {
+            entree: Entree::Autostart(p),
+            ..
+        } = self
+        else {
+            return None;
+        };
+        Some(match v {
+            Some(t) if t.starts_with('+') => {
+                p.parent().is_some_and(|d| std::fs::create_dir_all(d).is_ok())
+                    && crate::reseau::ecrire_atomique(p, &t[1..]).is_ok()
+            }
+            Some("-") => match std::fs::remove_file(p) {
+                Ok(()) => true,
+                Err(e) => e.kind() == std::io::ErrorKind::NotFound,
+            },
+            _ => false,
+        })
     }
 
     /// La connexion d'un réglage de DNS.
@@ -246,6 +449,36 @@ impl Changement {
                 None => trf!("{fichier} : ligne {cle} retirée", "{fichier}: line {cle} removed"),
             },
             Changement::Dns { .. } => decrire_dns(v),
+            Changement::Demarrage {
+                entree: Entree::Autostart(p),
+                ..
+            } => {
+                let f = court(p);
+                match v.and_then(|v| v.strip_prefix('+')) {
+                    Some(t) if champ(t, "Hidden").is_some_and(|h| h.eq_ignore_ascii_case("true")) => {
+                        trf!(
+                            "{f} : Hidden=true, ne se lance plus",
+                            "{f}: Hidden=true, no longer starts"
+                        )
+                    }
+                    Some(_) => trf!("{f} : remis comme avant", "{f}: put back as before"),
+                    None => trf!(
+                        "{f} : retiré, l'entrée du système revient",
+                        "{f}: removed, the system entry comes back"
+                    ),
+                }
+            }
+            Changement::Demarrage {
+                entree: Entree::Service(u),
+                ..
+            } => format!(
+                "systemctl --user {} {u}",
+                match v {
+                    Some("disabled") => "disable",
+                    Some("enabled") => "enable",
+                    _ => "?",
+                }
+            ),
         }
     }
 
@@ -323,11 +556,31 @@ impl Changement {
                     oui_non(ignore6)
                 )
             }
+            // Écrit par Gardien lui-même (`ecrire_ici`).
+            Changement::Demarrage {
+                entree: Entree::Autostart(_),
+                ..
+            } => return None,
+            // Sans « --now » : le service tourne jusqu'à la fin de la session, il ne repart simplement plus.
+            Changement::Demarrage {
+                entree: Entree::Service(u),
+                ..
+            } => {
+                if !unite_valide(u) {
+                    return None;
+                }
+                match v? {
+                    "enabled" => format!("systemctl --user enable {}", shell(u)),
+                    "disabled" => format!("systemctl --user disable {}", shell(u)),
+                    _ => return None,
+                }
+            }
         })
     }
 
+    /// Demande sudo, et un point de restauration avant (tout sauf ce qui est propre au compte).
     fn admin(&self) -> bool {
-        !matches!(self, Changement::Gnome { .. })
+        !matches!(self, Changement::Gnome { .. } | Changement::Demarrage { .. })
     }
 }
 
@@ -363,7 +616,117 @@ pub fn ecrire(lots: &[Vec<(&Changement, Valeur)>]) -> Vec<bool> {
         .iter()
         .map(|lot| lot.iter().filter_map(|(c, v)| c.commande(v.as_deref())).collect())
         .collect();
-    crate::machine::appliquer_chacune(&commandes)
+    let mut resultats = crate::machine::appliquer_chacune(&commandes);
+    // Ce qui est propre au compte et s'écrit sans commande (fichiers d'autostart), montré comme une commande.
+    for (lot, ok) in lots.iter().zip(resultats.iter_mut()) {
+        for (c, v) in lot {
+            if let Some(ecrit) = c.ecrire_ici(v.as_deref()) {
+                println!("    {GRIS}{}{RESET}", c.decrire(v.as_deref()));
+                *ok &= ecrit;
+            }
+        }
+    }
+    resultats
+}
+
+/// Les programmes lancés à l'ouverture de session de ce compte : entrées d'autostart (celles du compte, et celles
+/// du système qu'il ne remplace pas et qui se lancent sur ce bureau) et services de systemd --user installés par la
+/// personne.
+pub fn au_demarrage() -> Vec<Programme> {
+    let maison = PathBuf::from(std::env::var_os("HOME").unwrap_or_default());
+    let config = std::env::var_os("XDG_CONFIG_HOME").map_or_else(|| maison.join(".config"), PathBuf::from);
+    let systeme = dossiers_systeme();
+    let bureau = std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default();
+    let mut l = autostart(&config.join("autostart"), &systeme, &bureau);
+    let dossier = config.join("systemd/user");
+    let activees = sortie(
+        "systemctl",
+        &[
+            "--user",
+            "list-unit-files",
+            "--type=service",
+            "--state=enabled",
+            "--no-legend",
+            "--no-pager",
+        ],
+    )
+    .unwrap_or_default();
+    for unite in activees.lines().filter_map(|l| l.split_whitespace().next()) {
+        if unite_valide(unite) && dossier.join(unite).is_file() {
+            let texte = std::fs::read_to_string(dossier.join(unite)).unwrap_or_default();
+            l.push(Programme {
+                nom: unite.trim_end_matches(".service").to_string(),
+                commande: texte
+                    .lines()
+                    .find_map(|l| l.trim().strip_prefix("ExecStart="))
+                    .unwrap_or(unite)
+                    .to_string(),
+                actif: true,
+                machine: false,
+                bureau: false,
+                changement: Changement::Demarrage {
+                    entree: Entree::Service(unite.to_string()),
+                    cible: Some("disabled".to_string()),
+                },
+            });
+        }
+    }
+    l
+}
+
+/// Les entrées d'autostart : chaque fichier .desktop du compte, puis celles du système au nom qu'il n'a pas et qui se
+/// lancent sur ce bureau (une entrée pour un autre bureau, ou déjà masquée, n'a rien à retirer).
+fn autostart(compte: &Path, systeme: &[PathBuf], bureau: &str) -> Vec<Programme> {
+    let fichiers = |d: &Path| -> Vec<(String, String)> {
+        let mut l: Vec<(String, String)> = std::fs::read_dir(d)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter(|f| f.path().extension().is_some_and(|e| e == "desktop") && f.path().is_file())
+            .filter_map(|f| {
+                let texte = std::fs::read_to_string(f.path()).ok()?;
+                Some((f.file_name().to_string_lossy().into_owned(), texte))
+            })
+            .collect();
+        l.sort();
+        l
+    };
+    let mut vus: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut l = Vec::new();
+    for (nom, texte) in fichiers(compte) {
+        l.push(programme_autostart(compte.join(&nom), &texte, bureau));
+        vus.insert(nom);
+    }
+    for d in systeme {
+        for (nom, texte) in fichiers(d) {
+            if vus.insert(nom.clone()) && crate::lenteur::entree_autostart(&texte, bureau).is_some() {
+                l.push(programme_autostart(compte.join(&nom), &texte, bureau));
+            }
+        }
+    }
+    l
+}
+
+/// Une entrée d'autostart : `chemin`, le fichier du compte où elle se masque (sa copie, pour une entrée du système).
+fn programme_autostart(chemin: PathBuf, texte: &str, bureau: &str) -> Programme {
+    let actif = crate::lenteur::entree_autostart(texte, bureau);
+    let nom = actif
+        .as_ref()
+        .map(|(n, _)| n.clone())
+        .or_else(|| champ(texte, "Name").map(str::to_string))
+        .unwrap_or_else(|| Changement::nom_demarrage(&chemin.display().to_string()));
+    Programme {
+        nom,
+        commande: champ(texte, "Exec").unwrap_or_default().to_string(),
+        actif: actif.is_some(),
+        machine: false,
+        // Une étape de la session de GNOME ou de KDE : le bureau en a besoin.
+        bureau: champ(texte, "X-GNOME-Autostart-Phase").is_some() || champ(texte, "X-KDE-autostart-phase").is_some(),
+        changement: Changement::Demarrage {
+            entree: Entree::Autostart(chemin),
+            cible: Some(format!("+{}", masquer(texte))),
+        },
+    }
 }
 
 pub fn apres(_touches: &[&Reglage]) {}
@@ -397,9 +760,9 @@ pub fn catalogue() -> Vec<Reglage> {
     let mut l = Vec::new();
     if systemd && unite_existe("fstrim.timer") && ssd() {
         l.push(Reglage {
-            id: "fstrim",
+            id: "fstrim".into(),
             categorie: Performance,
-            titre: tr!("Entretien du SSD chaque semaine", "Weekly SSD maintenance"),
+            titre: tr!("Entretien du SSD chaque semaine", "Weekly SSD maintenance").into(),
             effet: tr!(
                 "Une fois par semaine, le système dit au SSD quelles zones sont libres (TRIM) : les écritures restent rapides et le disque s'use moins.",
                 "Once a week, the system tells the SSD which areas are free (TRIM): writes stay fast and the drive wears less."
@@ -415,9 +778,9 @@ pub fn catalogue() -> Vec<Reglage> {
     }
     if systemd {
         l.push(Reglage {
-            id: "journal_taille",
+            id: "journal_taille".into(),
             categorie: Performance,
-            titre: tr!("Journal du système limité à 500 Mo", "System journal capped at 500 MB"),
+            titre: tr!("Journal du système limité à 500 Mo", "System journal capped at 500 MB").into(),
             effet: tr!(
                 "Les journaux du système ne prennent plus jusqu'à 4 Go : les plus anciens s'effacent au-delà de 500 Mo.",
                 "System logs no longer take up to 4 GB: the oldest are removed beyond 500 MB."
@@ -437,9 +800,9 @@ pub fn catalogue() -> Vec<Reglage> {
     }
     if gnome() {
         l.push(Reglage {
-            id: "gnome_rapports",
+            id: "gnome_rapports".into(),
             categorie: Confidentialite,
-            titre: tr!("GNOME : pas de rapports envoyés", "GNOME: no reports sent"),
+            titre: tr!("GNOME : pas de rapports envoyés", "GNOME: no reports sent").into(),
             effet: tr!(
                 "GNOME n'envoie plus de rapports de problèmes techniques.",
                 "GNOME no longer sends technical problem reports."
@@ -456,9 +819,9 @@ pub fn catalogue() -> Vec<Reglage> {
     }
     if systemd && unite_existe("apport.service") {
         l.push(Reglage {
-            id: "apport",
+            id: "apport".into(),
             categorie: Confidentialite,
-            titre: tr!("Ubuntu : rapports de plantage coupés", "Ubuntu: crash reports off"),
+            titre: tr!("Ubuntu : rapports de plantage coupés", "Ubuntu: crash reports off").into(),
             effet: tr!(
                 "Ubuntu ne propose plus d'envoyer les plantages à ses serveurs, et n'en garde plus de copie.",
                 "Ubuntu no longer offers to send crashes to its servers, and keeps no copy of them."
@@ -482,9 +845,9 @@ pub fn catalogue() -> Vec<Reglage> {
     }
     if Path::new("/etc/popularity-contest.conf").is_file() {
         l.push(Reglage {
-            id: "popcon",
+            id: "popcon".into(),
             categorie: Confidentialite,
-            titre: tr!("Statistiques de paquets coupées", "Package statistics off"),
+            titre: tr!("Statistiques de paquets coupées", "Package statistics off").into(),
             effet: tr!(
                 "La liste des programmes installés n'est plus envoyée chaque semaine à Debian ou Ubuntu.",
                 "The list of installed programs is no longer sent to Debian or Ubuntu every week."
@@ -501,9 +864,9 @@ pub fn catalogue() -> Vec<Reglage> {
     }
     if Path::new("/etc/default/motd-news").is_file() {
         l.push(Reglage {
-            id: "motd_news",
+            id: "motd_news".into(),
             categorie: Confort,
-            titre: tr!("Ubuntu : pas d'annonces au terminal", "Ubuntu: no terminal ads"),
+            titre: tr!("Ubuntu : pas d'annonces au terminal", "Ubuntu: no terminal ads").into(),
             effet: tr!(
                 "Les annonces d'Ubuntu affichées à l'ouverture d'une session en terminal disparaissent.",
                 "The Ubuntu announcements shown when opening a terminal session go away."
@@ -679,5 +1042,163 @@ mod tests {
         };
         assert_eq!(o.lire().as_deref(), Some("1"));
         let _ = std::fs::remove_file(&f);
+    }
+
+    /// Un dossier jetable par essai : les essais tournent en même temps.
+    fn dossier_jetable(nom: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("gardien-test-demarrage-{nom}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    #[test]
+    fn autostart_masque_puis_demasque() {
+        let t = "[Desktop Entry]\nType=Application\nName=Discord\nExec=/usr/bin/discord --start-minimized\nHidden=false\n\n[Desktop Action Nouveau]\nHidden=autre\n";
+        let m = masquer(t);
+        assert_eq!(
+            m,
+            "[Desktop Entry]\nHidden=true\nType=Application\nName=Discord\nExec=/usr/bin/discord --start-minimized\n\n[Desktop Action Nouveau]\nHidden=autre\n"
+        );
+        assert_eq!(masquer(&m), m, "masquer deux fois ne change plus rien");
+        assert!(crate::lenteur::entree_autostart(&m, "Hyprland").is_none());
+        assert_eq!(
+            demasquer(&m),
+            "[Desktop Entry]\nType=Application\nName=Discord\nExec=/usr/bin/discord --start-minimized\n\n[Desktop Action Nouveau]\nHidden=autre\n"
+        );
+        // Sans saut de ligne après l'en-tête, ou sans en-tête du tout.
+        assert_eq!(masquer("[Desktop Entry]"), "[Desktop Entry]\nHidden=true\n");
+        assert_eq!(masquer("Name=x"), "Name=x\n[Desktop Entry]\nHidden=true\n");
+        assert_eq!(champ(t, "Exec"), Some("/usr/bin/discord --start-minimized"));
+        assert_eq!(champ(t, "Absent"), None);
+    }
+
+    #[test]
+    fn entrees_d_autostart_du_compte_et_du_systeme() {
+        let base = dossier_jetable("liste");
+        let (compte, systeme) = (base.join("compte/autostart"), base.join("systeme/autostart"));
+        std::fs::create_dir_all(&compte).unwrap();
+        std::fs::create_dir_all(&systeme).unwrap();
+        let entree =
+            |nom: &str, suite: &str| format!("[Desktop Entry]\nType=Application\nName={nom}\nExec={nom}\n{suite}");
+        std::fs::write(compte.join("discord.desktop"), entree("Discord", "")).unwrap();
+        std::fs::write(compte.join("vieux.desktop"), entree("Vieux", "Hidden=true\n")).unwrap();
+        std::fs::write(systeme.join("discord.desktop"), entree("Discord du système", "")).unwrap();
+        std::fs::write(systeme.join("syncthing.desktop"), entree("Syncthing", "")).unwrap();
+        std::fs::write(
+            systeme.join("gnome.desktop"),
+            entree("Seulement GNOME", "OnlyShowIn=GNOME;\n"),
+        )
+        .unwrap();
+        std::fs::write(
+            systeme.join("session.desktop"),
+            entree("Session", "X-GNOME-Autostart-Phase=Initialization\n"),
+        )
+        .unwrap();
+        let l = autostart(&compte, std::slice::from_ref(&systeme), "Hyprland");
+        let vus: Vec<(&str, bool, bool)> = l.iter().map(|p| (p.nom.as_str(), p.actif, p.bureau)).collect();
+        // Celui du compte l'emporte sur l'entrée du système au même nom ; celle d'un autre bureau n'a rien à retirer.
+        assert_eq!(
+            vus,
+            [
+                ("Discord", true, false),
+                ("Vieux", false, false),
+                ("Session", true, true),
+                ("Syncthing", true, false)
+            ]
+        );
+        // Une entrée du système se masque par une copie dans le dossier du compte.
+        let syncthing = l.iter().find(|p| p.nom == "Syncthing").unwrap();
+        assert_eq!(
+            syncthing.changement.identite_demarrage(),
+            Some(format!("autostart|{}", compte.join("syncthing.desktop").display()))
+        );
+        assert!(
+            syncthing
+                .changement
+                .cible()
+                .unwrap()
+                .starts_with("+[Desktop Entry]\nHidden=true\n")
+        );
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// Retirer puis remettre redonne le fichier d'avant à l'octet près ; pour une entrée du système, la copie masquée
+    /// du compte disparaît.
+    #[test]
+    fn retrait_d_autostart_annule_exactement() {
+        let base = dossier_jetable("annuler");
+        let compte = base.join("autostart");
+        std::fs::create_dir_all(&compte).unwrap();
+        let p = compte.join("discord.desktop");
+        let original = "[Desktop Entry]\r\nName=Discord\nExec=discord\n# commentaire gardé  \n";
+        std::fs::write(&p, original).unwrap();
+        let c = Changement::Demarrage {
+            entree: Entree::Autostart(p.clone()),
+            cible: Some(format!("+{}", masquer(original))),
+        };
+        let avant = c.lire();
+        assert_eq!(c.ecrire_ici(c.cible().as_deref()), Some(true));
+        assert_eq!(c.lire(), c.cible());
+        assert_eq!(c.ecrire_ici(avant.as_deref()), Some(true));
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), original);
+
+        let q = compte.join("syncthing.desktop");
+        let s = Changement::Demarrage {
+            entree: Entree::Autostart(q.clone()),
+            cible: Some("+[Desktop Entry]\nHidden=true\nName=Syncthing\n".to_string()),
+        };
+        let avant = s.lire();
+        assert_eq!(avant.as_deref(), Some("-"));
+        assert_eq!(s.ecrire_ici(s.cible().as_deref()), Some(true));
+        assert!(q.is_file());
+        assert_eq!(s.ecrire_ici(avant.as_deref()), Some(true));
+        assert!(!q.exists());
+        // Une valeur qu'on n'a pas su lire ne s'écrit jamais.
+        assert_eq!(s.ecrire_ici(Some("?")), Some(false));
+        assert!(s.decrire(Some("-")).contains("syncthing.desktop"));
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn identite_des_reglages_de_demarrage() {
+        let c = Changement::Demarrage {
+            entree: Entree::Autostart(PathBuf::from("/home/alice/.config/autostart/essai-gardien-x.desktop")),
+            cible: None,
+        };
+        let id = c.identite_demarrage().unwrap();
+        assert_eq!(id, "autostart|/home/alice/.config/autostart/essai-gardien-x.desktop");
+        assert!(matches!(
+            Changement::demarrage_depuis(&id),
+            Some(Changement::Demarrage {
+                entree: Entree::Autostart(_),
+                cible: None
+            })
+        ));
+        assert_eq!(Changement::nom_demarrage(&id), "essai-gardien-x");
+        // Une note qui viserait autre chose qu'un .desktop d'un dossier autostart, ou un service douteux : refusée.
+        for mauvaise in [
+            "autostart|/etc/passwd",
+            "autostart|relatif/autostart/x.desktop",
+            "autostart|/home/alice/.bashrc.desktop",
+            "systemd|x;rm -rf ~.service",
+            "systemd|.service",
+            "systemd|x",
+            "inconnu|x",
+        ] {
+            assert!(Changement::demarrage_depuis(mauvaise).is_none(), "{mauvaise}");
+        }
+        let s = Changement::demarrage_depuis("systemd|syncthing.service").unwrap();
+        assert_eq!(
+            s.commande(Some("disabled")).as_deref(),
+            Some("systemctl --user disable 'syncthing.service'")
+        );
+        assert_eq!(
+            s.commande(Some("enabled")).as_deref(),
+            Some("systemctl --user enable 'syncthing.service'")
+        );
+        assert_eq!(s.commande(Some("static")), None);
+        assert_eq!(Changement::nom_demarrage("systemd|syncthing.service"), "syncthing");
+        assert!(!s.admin() && !c.admin());
     }
 }

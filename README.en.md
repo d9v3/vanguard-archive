@@ -114,7 +114,8 @@ the network; disk space) and suggests the right repair or the right tool, always
 
 **Why is it slow?** — a two-second snapshot: what keeps the processor, memory and disk busy, program by program;
 how long startup takes and what delays it; the programs started at login and their weight. Those that work for a
-while then calm down (antivirus scanning, indexing, updates) are named as such.
+while then calm down (antivirus scanning, indexing, updates) are named as such. Startup programs are removed from
+there, after your consent: they stay installed, and each removal is undone exactly (`gardien startup`).
 
 **Computer specs** — model, motherboard, BIOS, processor, memory (modules, type, speed), graphics card and driver,
 disks: what you are asked on the phone or to buy a part. Serial numbers are shown on screen only, never written.
@@ -211,6 +212,7 @@ Each menu entry is also a command:
 | `gardien diag` | computer diagnostic: hardware, system, recent crashes and errors |
 | `gardien troubleshoot [subject]` | troubleshoot step by step: `internet`, `wifi`, `slow`, `sound`, `printer`, `disk` |
 | `gardien slow` | why it is slow: processor, memory, disk, startup, programs at login |
+| `gardien startup` | startup programs: remove or put them back, after your consent; each removal is undone exactly |
 | `gardien specs [--json]` | computer specs; `--json` without the serial numbers |
 | `gardien copy-files [destination]` | copy my files to an external disk, checked copy |
 | `gardien antivirus [--complet] [folder]` | antivirus scan (computer, or a key / a folder) |

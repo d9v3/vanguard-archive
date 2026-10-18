@@ -403,3 +403,19 @@ fn sortantes_en_lecture_seule() {
         "{t}"
     );
 }
+
+/// Programmes au démarrage : la liste se montre, et Entrée sans rien décocher ne change rien.
+#[test]
+fn demarrage_sans_rien_changer() {
+    let s = gardien("fr", &["demarrage"], "\n", 60);
+    assert_eq!(s.code, Some(0), "{}", s.erreurs);
+    let t = sans_couleurs(&s.texte);
+    assert!(!t.contains("À appliquer") && !t.contains("À annuler"), "{t}");
+    assert!(t.contains("Rien à changer") || t.contains("Aucun programme"), "{t}");
+    let aide = gardien("en", &["startup", "--help"], "", 30);
+    assert!(
+        sans_couleurs(&aide.texte).contains("Startup programs"),
+        "{}",
+        aide.texte
+    );
+}

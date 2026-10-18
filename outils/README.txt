@@ -42,7 +42,8 @@ highlighted one, Esc clears it. In the main menu, it also finds each tool of the
        Diagnostic (hardware, recent crashes and errors, text copy on the key)
        Critical file integrity (accounts, sudo, SSH, startup; live: gardien integrite --temps-reel)
        What Gardien has learned: your habits, and the alerts you declared normal ("i" when fixing)
-       Why is it slow? (processor, memory, disk, startup, programs started at login)
+       Why is it slow? (processor, memory, disk, startup, programs started at login; remove them from
+       startup or put them back, after your consent: gardien startup)
        Computer specs (model, processor, memory, graphics card, disks; serial numbers on screen)
        Monthly check-up: one notification a month (grade, updates, space to free, new problems)
   5  Network and Internet ›

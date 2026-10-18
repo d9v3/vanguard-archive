@@ -123,7 +123,8 @@ bon outil, toujours après accord.
 **Pourquoi c'est lent ?** — un instantané de deux secondes : ce qui occupe le processeur, la mémoire et le disque,
 programme par programme ; la durée du démarrage et ce qui le retarde ; les programmes lancés à l'ouverture de
 session et leur poids. Ceux qui travaillent un moment puis se calment (antivirus qui analyse, indexation, mises à
-jour) sont nommés comme tels.
+jour) sont nommés comme tels. Les programmes du démarrage se retirent de là, après accord : ils restent installés,
+et chaque retrait s'annule exactement (`gardien demarrage`).
 
 **Fiche de l'ordinateur** — modèle, carte mère, BIOS, processeur, mémoire (barrettes, type, vitesse), carte graphique
 et pilote, disques : ce qu'on demande au téléphone ou pour acheter une pièce. Les numéros de série s'affichent à
@@ -226,6 +227,7 @@ Chaque entrée du menu existe aussi en commande :
 | `gardien diagnostic` | diagnostic de l'ordinateur : matériel, système, plantages et erreurs récents |
 | `gardien depanner [sujet]` | dépanner pas à pas : `internet`, `wifi`, `lent`, `son`, `imprimante`, `disque` |
 | `gardien lenteur` | pourquoi c'est lent : processeur, mémoire, disque, démarrage, programmes à l'ouverture |
+| `gardien demarrage` | programmes au démarrage : les retirer ou les remettre, après accord ; chaque retrait s'annule |
 | `gardien fiche [--json]` | fiche de l'ordinateur ; `--json` sans les numéros de série |
 | `gardien copier-fichiers [destination]` | copier mes fichiers vers un disque externe, copie vérifiée |
 | `gardien antivirus [--complet] [dossier]` | analyse antivirus (ordinateur, ou une clé / un dossier) |
@@ -258,7 +260,7 @@ Chaque entrée du menu existe aussi en commande :
 commandes ont aussi un nom anglais (`full`, `audit`, `fix`, `network`, `connection`, `apps`, `diag`, `password`,
 `sandbox`, `email`, `integrity`, `update`, `repair`, `monitor`, `name`, `backup`, `restore`, `clean`, `decoys`,
 `blocklists`, `learned`, `channels`, `fast-dns`, `outbound`, `link`, `check-file`, `maintenance`, `alerts`, `slow`,
-`specs`, `copy-files`, `troubleshoot`).
+`startup`, `specs`, `copy-files`, `troubleshoot`).
 
 ## Développer
 
