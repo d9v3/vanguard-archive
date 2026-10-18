@@ -15,6 +15,12 @@ on:
   schedule:
     - cron: "43 7 * * *" # 3 h 43, heure de Montréal (après macos.yml)
 
+# Le jeton par défaut du dépôt ne lit que le code : la vérification de nuit lit aussi les exécutions passées
+# (gh api …/actions/workflows/…/runs), sinon GitHub répond 403.
+permissions:
+  contents: read
+  actions: read
+
 concurrency:
   group: ci-${{ github.ref }}-${{ github.event_name }}
   cancel-in-progress: true
