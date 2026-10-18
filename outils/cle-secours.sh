@@ -434,7 +434,10 @@ print(p["start"], p["size"])' "$2"
 
 essai() { # dossier d'images (facultatif : la récupération de macOS y est écrite pour de vrai, l'image de Windows lue)
   local images=${1:-} dossier image octets=31037849600
-  dossier=$(mktemp -d "${TMPDIR:-/tmp}/gardien-cle-secours.XXXX")
+  # Dans le cache, pas dans /tmp : /tmp est souvent en mémoire, avec un quota trop petit pour une clé de 29 Gio
+  # (l'image est creuse, mais la récupération de macOS y est écrite pour de vrai).
+  mkdir -p "${XDG_CACHE_HOME:-$HOME/.cache}/gardien-dev"
+  dossier=$(mktemp -d "${XDG_CACHE_HOME:-$HOME/.cache}/gardien-dev/cle-secours-essai.XXXX")
   image=$dossier/cle.img
   truncate -s "$octets" "$image"
   local macos windows reserve gardien
@@ -528,16 +531,38 @@ racine() { # disque serie octets dossier macos_mio windows_mio
   (cd "$tmp/ventoy-$VENTOY" && printf 'y\ny\n' | sh Ventoy2Disk.sh -I -g -r "$(reserve_mio "$macos" "$windows")" \
     -L GARDIEN "$disque")
   udevadm settle
-  partitions_ajoutees "$macos" "$windows" | sfdisk --append "$disque"
+  # Le bureau monte tout seul les partitions neuves de Ventoy (VTOYEFI, GARDIEN) : sfdisk refuse alors un disque
+  # « utilisé ». On démonte, on ajoute les partitions sans relire tout le disque (--no-reread), et le noyau les prend
+  # par partx, ce qu'il accepte même si le bureau remonte une partition entre-temps.
+  demonter_partitions "$disque"
+  partitions_ajoutees "$macos" "$windows" | sfdisk --no-reread --append "$disque"
+  partx -u "$disque"
   udevadm settle
+  local n
+  for n in 3 4 5; do liberer "$(partition "$disque" "$n")"; done
   mkfs.exfat -L GARDIENLOG "$(partition "$disque" 3)"
   local volume
   volume=$(volume_macos "$(fichier_macos "$d")")
   7z e -so -tdmg "$(fichier_macos "$d")" "${volume% *}" | dd of="$(partition "$disque" 4)" bs=4M conv=fsync status=progress
   mkfs.fat -F 32 -n WIN11 "$(partition "$disque" 5)"
-  sfdisk --part-attrs "$disque" 1 GUID:60
+  sfdisk --no-reread --part-attrs "$disque" 1 GUID:60
   sync
   rm -rf "$tmp"
+}
+
+# Partie root : démonte les partitions d'un disque que le bureau a montées.
+demonter_partitions() { # disque
+  local part
+  while read -r part; do
+    if findmnt -rno TARGET -S "$part" >/dev/null; then umount "$part"; fi
+  done < <(lsblk -lnpo NAME "$1" | tail -n +2)
+}
+
+# Partie root : une partition neuve, démontée si le bureau l'a montée, et vidée des signatures d'un ancien système
+# de fichiers resté à cet endroit de la clé (le bureau pourrait sinon la monter pendant qu'on l'écrit).
+liberer() { # partition
+  if findmnt -rno TARGET -S "$1" >/dev/null; then umount "$1"; fi
+  wipefs -aq "$1"
 }
 
 # Le bureau monte souvent les nouvelles partitions tout seul : on prend le point de montage, ou on monte.
@@ -618,9 +643,17 @@ ecrire() { # disque dossier
     echo "Pas la place pour Windows 11 en secours dans ISO/ : il démarre par sa partition WIN11 seulement."
   fi
   ventoy_json "$nom_windows" >"$cle/ventoy/ventoy.json"
+  # La base donnees/ : celle de cette sauvegarde, sinon celle de la plus récente sauvegarde qui en a une. Une passe
+  # interrompue après l'effacement laisse une clé vide, dont la sauvegarde suivante n'a plus de base.
   local ancienne
   ancienne=$(find "$sauvegarde" -maxdepth 2 -type d -name donnees -print -quit 2>/dev/null || true)
-  [[ -n $ancienne ]] && cp -r "$ancienne" "$cle/" && echo "Base remise sur la clé : $ancienne"
+  [[ -n $ancienne ]] || ancienne=$(find "${sauvegarde%/*}" -maxdepth 3 -type d \
+    \( -path '*/sauvegarde-cle-*/donnees' -o -path '*/sauvegarde-cle-*/*/donnees' \) 2>/dev/null | sort -r | head -1)
+  if [[ -n $ancienne ]]; then
+    cp -r "$ancienne" "$cle/" && echo "Base remise sur la clé : $ancienne"
+  else
+    echo "Aucune base donnees/ trouvée dans les sauvegardes : la clé démarre sans base."
+  fi
   sync
   outils/deployer.sh --sans-compiler
   lsblk -o NAME,SIZE,FSTYPE,LABEL,PARTLABEL,MOUNTPOINTS "$disque"
