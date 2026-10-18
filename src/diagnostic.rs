@@ -164,6 +164,23 @@ mod systeme {
         Some(source.split('[').next()?.trim().to_string()).filter(|s| !s.is_empty())
     }
 
+    /// Cartes graphiques de `lspci -mm` (« 01:00.0 "VGA compatible controller" "NVIDIA Corporation" "GB205 …" … ») :
+    /// fabricant et modèle. Classes VGA, 3D et Display, comme la fiche : bien des cartes AMD de portable sont des
+    /// « Display controller ».
+    pub(super) fn cartes_lspci(texte: &str) -> Vec<String> {
+        texte
+            .lines()
+            .filter_map(|l| {
+                let champs: Vec<&str> = l.split('"').collect();
+                let classe = champs.get(1).copied().unwrap_or_default();
+                ["VGA", "3D", "Display"].iter().any(|c| classe.contains(c)).then(|| {
+                    let nom = format!("{} {}", champs.get(3).unwrap_or(&""), champs.get(5).unwrap_or(&""));
+                    nom.trim().to_string()
+                })
+            })
+            .collect()
+    }
+
     /// Programmes plantés d'après `coredumpctl list` : le nom du programme, à la fin du chemin de la colonne EXE. Ce
     /// chemin peut contenir des espaces (« …/common/Hollow Knight/hollow_knight ») : il va du premier mot qui
     /// commence par « / » jusqu'à la colonne SIZE, la dernière quand l'en-tête l'annonce (systemd 248 et plus).
@@ -245,20 +262,13 @@ mod systeme {
                 trf!("{} ({} libres)", "{} ({} free)", go(total), go(dispo)),
             ));
         }
-        for l in sortie("lspci", &["-mm"]).unwrap_or_default().lines() {
-            let champs: Vec<&str> = l.split('"').collect();
-            if champs.get(1).is_some_and(|c| c.contains("VGA") || c.contains("3D")) {
-                let nom = format!("{} {}", champs.get(3).unwrap_or(&""), champs.get(5).unwrap_or(&""));
-                let pilote = lire("/proc/driver/nvidia/version")
-                    .filter(|_| nom.contains("NVIDIA"))
-                    .and_then(|v| version_nvidia(&v))
-                    .map(|v| trf!(" · pilote NVIDIA {v}", " · NVIDIA driver {v}"))
-                    .unwrap_or_default();
-                materiel.push(ligne(
-                    tr!("Carte graphique", "Graphics card"),
-                    format!("{}{pilote}", nom.trim()),
-                ));
-            }
+        for nom in cartes_lspci(&sortie("lspci", &["-mm"]).unwrap_or_default()) {
+            let pilote = lire("/proc/driver/nvidia/version")
+                .filter(|_| nom.contains("NVIDIA"))
+                .and_then(|v| version_nvidia(&v))
+                .map(|v| trf!(" · pilote NVIDIA {v}", " · NVIDIA driver {v}"))
+                .unwrap_or_default();
+            materiel.push(ligne(tr!("Carte graphique", "Graphics card"), format!("{nom}{pilote}")));
         }
         for l in sortie("lsblk", &["-dnbP", "-o", "NAME,SIZE,ROTA,TYPE,TRAN,MODEL"])
             .unwrap_or_default()
@@ -810,5 +820,27 @@ mod tests {
         let sans_taille = "TIME                            PID   UID   GID SIG COREFILE  EXE\n\
                            Sat 2021-05-01 10:00:00 UTC    1234  1000  1000  11 present   /opt/Mon Jeu/jeu\n";
         assert_eq!(systeme::programmes_coredumpctl(sans_taille), ["jeu"]);
+    }
+
+    /// Les cartes graphiques de lspci : « VGA », « 3D » (la carte NVIDIA d'un portable), et aussi « Display
+    /// controller », la classe de bien des cartes AMD de portable, comme dans la fiche de l'ordinateur.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn cartes_graphiques_de_lspci() {
+        let lspci = [
+            r#"00:02.0 "VGA compatible controller" "Intel Corporation" "Alder Lake-P GT2" -r0c "Lenovo" "Device 3b2f""#,
+            r#"01:00.0 "3D controller" "NVIDIA Corporation" "AD107M [GeForce RTX 4060]" -ra1 "Lenovo" "Device 3b2f""#,
+            r#"03:00.0 "Display controller" "Advanced Micro Devices, Inc. [AMD/ATI]" "Navi 24 [Radeon RX 6500M]" -rc3"#,
+            r#"04:00.0 "Network controller" "Intel Corporation" "Wi-Fi 6E AX211 160MHz" -r01 "Intel Corporation" "0094""#,
+        ]
+        .join("\n");
+        assert_eq!(
+            systeme::cartes_lspci(&lspci),
+            [
+                "Intel Corporation Alder Lake-P GT2",
+                "NVIDIA Corporation AD107M [GeForce RTX 4060]",
+                "Advanced Micro Devices, Inc. [AMD/ATI] Navi 24 [Radeon RX 6500M]"
+            ]
+        );
     }
 }
