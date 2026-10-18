@@ -1,7 +1,9 @@
 //! Menus au clavier : ↑ ↓ pour se déplacer, Entrée pour lancer, Échap pour revenir. Les touches d'avant (un chiffre
-//! ou une lettre, puis Entrée) marchent toujours, et la ligne en surbrillance les suit. Sans vrai terminal (réponses
-//! envoyées par un tube : tests, scripts), ou dans une fenêtre trop petite pour le menu, la réponse se lit ligne
-//! par ligne, comme avant.
+//! ou une lettre, puis Entrée) marchent toujours, et la ligne en surbrillance les suit. Taper un mot cherche : seules
+//! les lignes qui le contiennent restent à l'écran, sans tenir compte des accents ni des majuscules ; au menu
+//! principal, la recherche voit aussi les outils des sous-menus et les pages du guide (lignes « cachées »). Sans vrai
+//! terminal (réponses envoyées par un tube : tests, scripts), ou dans une fenêtre trop petite pour le menu, la réponse
+//! se lit ligne par ligne, comme avant ; un mot qui ne désigne qu'un seul choix le choisit.
 
 use std::fmt::Write as _;
 use std::io::{IsTerminal, Write};
@@ -15,11 +17,22 @@ use crate::ui::*;
 pub enum Ligne {
     /// Affichée telle quelle : cadre, titre, état, ligne vide.
     Texte(String),
-    /// Ligne qu'on peut choisir : la touche qui la désigne, son texte, une précision en gris à droite.
+    /// Ligne qu'on peut choisir : la touche qui la désigne, son texte, une précision en gris à droite, et des mots que
+    /// la recherche trouve sans qu'ils s'affichent.
     Choix {
         touche: String,
         texte: String,
         precision: String,
+        mots: String,
+    },
+    /// Choix que seule la recherche montre : un outil d'un sous-menu, une page du guide. `chemin` dit où il se trouve
+    /// (« Réseau et Internet › »).
+    Cachee {
+        touche: String,
+        chemin: String,
+        texte: String,
+        precision: String,
+        mots: String,
     },
 }
 
@@ -29,6 +42,220 @@ impl Ligne {
             touche: touche.into(),
             texte: texte.into(),
             precision: precision.into(),
+            mots: String::new(),
+        }
+    }
+
+    pub fn cachee(touche: &str, chemin: &str, texte: &str, precision: &str) -> Self {
+        Ligne::Cachee {
+            touche: touche.into(),
+            chemin: chemin.into(),
+            texte: texte.into(),
+            precision: precision.into(),
+            mots: String::new(),
+        }
+    }
+
+    /// Des mots de plus pour la recherche : ce qu'un outil sait faire, les commandes d'un programme du guide.
+    #[must_use]
+    pub fn avec_mots(mut self, en_plus: &str) -> Self {
+        if let Ligne::Choix { mots, .. } | Ligne::Cachee { mots, .. } = &mut self {
+            mots.push(' ');
+            mots.push_str(en_plus);
+        }
+        self
+    }
+}
+
+/// Minuscules, sans accents, sans tirets et sans codes de couleur : « Wi-Fi » se trouve en tapant « wifi », « Réseau »
+/// en tapant « reseau ».
+pub fn simplifier(t: &str) -> String {
+    let mut sortie = String::with_capacity(t.len());
+    let mut code = false;
+    for c in t.chars() {
+        if code {
+            code = c != 'm';
+            continue;
+        }
+        if c == '\x1b' {
+            code = true;
+            continue;
+        }
+        if c == '-' {
+            continue;
+        }
+        for m in c.to_lowercase() {
+            match m {
+                'à' | 'â' | 'ä' | 'á' => sortie.push('a'),
+                'é' | 'è' | 'ê' | 'ë' => sortie.push('e'),
+                'î' | 'ï' | 'í' => sortie.push('i'),
+                'ô' | 'ö' | 'ó' => sortie.push('o'),
+                'ù' | 'û' | 'ü' | 'ú' => sortie.push('u'),
+                'ç' => sortie.push('c'),
+                'œ' => sortie.push_str("oe"),
+                autre => sortie.push(autre),
+            }
+        }
+    }
+    sortie
+}
+
+/// Tous les mots de `recherche` paraissent-ils dans `texte`, déjà passé par `simplifier` ? Un mot de trois lettres au
+/// plus doit commencer un mot (« ip » ne trouve pas « description ») ; un plus long peut être n'importe où (« update »
+/// trouve « windowsupdate »), et sa fin peut changer : on tape « vider », « réparer », « disques », le texte dit
+/// « Vide », « Répare », « disque ».
+pub fn correspond(recherche: &str, texte: &str) -> bool {
+    let voulus: Vec<String> = recherche
+        .split_whitespace()
+        .map(simplifier)
+        .filter(|m| !m.is_empty())
+        .collect();
+    !voulus.is_empty()
+        && voulus.iter().all(|v| {
+            let n = v.chars().count();
+            if n <= 3 {
+                return texte
+                    .split(|c: char| !c.is_alphanumeric())
+                    .any(|m| m.starts_with(v.as_str()));
+            }
+            // La racine garde au moins quatre lettres (cinq quand on en retire deux) : « réseau » ne devient pas
+            // « rese », qui trouverait « reset ».
+            let racine = |retire: usize| v.chars().take(n - retire).collect::<String>();
+            texte.contains(v.as_str())
+                || (n >= 5 && texte.contains(&racine(1)))
+                || (n >= 7 && texte.contains(&racine(2)))
+        })
+}
+
+/// Ce qui est tapé est-il une recherche ? Pas une touche du menu ni le début d'une touche (« 1 » de « 10 », « 4. » de
+/// « 4.2 »), et au moins deux lettres : une lettre seule reste un raccourci des anciennes versions (u, r, o…).
+fn est_une_recherche(tape: &str, touches: &[&str]) -> bool {
+    let t = tape.trim().to_lowercase();
+    t.chars().count() >= 2 && !touches.iter().any(|k| k.to_lowercase().starts_with(&t))
+}
+
+/// Une ligne qu'on peut choisir, telle que la recherche la voit.
+struct Choisissable<'a> {
+    touche: &'a str,
+    /// Le texte sans couleurs, précédé de son chemin pour une ligne cachée (« Réseau et Internet › Scanner le réseau »).
+    texte: String,
+    precision: &'a str,
+    /// Tout ce que lit la recherche, simplifié une fois pour toutes.
+    cherche: String,
+    visible: bool,
+}
+
+fn choisissables(lignes: &[Ligne]) -> Vec<Choisissable<'_>> {
+    lignes
+        .iter()
+        .filter_map(|l| match l {
+            Ligne::Texte(_) => None,
+            Ligne::Choix {
+                touche,
+                texte,
+                precision,
+                mots,
+            } => Some(Choisissable {
+                touche,
+                texte: simplement_affiche(texte),
+                precision,
+                cherche: simplifier(&format!("{texte} {precision} {mots}")),
+                visible: true,
+            }),
+            Ligne::Cachee {
+                touche,
+                chemin,
+                texte,
+                precision,
+                mots,
+            } => Some(Choisissable {
+                touche,
+                texte: simplement_affiche(&format!("{chemin} {texte}")),
+                precision,
+                cherche: simplifier(&format!("{chemin} {texte} {precision} {mots}")),
+                visible: false,
+            }),
+        })
+        .collect()
+}
+
+/// Le texte sans ses codes de couleur, pour pouvoir le couper.
+fn simplement_affiche(t: &str) -> String {
+    let mut sortie = String::with_capacity(t.len());
+    let mut code = false;
+    for c in t.chars() {
+        match (code, c) {
+            (false, '\x1b') => code = true,
+            (true, 'm') => code = false,
+            (false, _) => sortie.push(c),
+            _ => {}
+        }
+    }
+    sortie
+}
+
+/// Coupe un texte trop long (« … » à la fin), sans le compléter d'espaces.
+fn couper(t: &str, n: usize) -> String {
+    if t.chars().count() <= n {
+        return t.to_string();
+    }
+    let mut court: String = t.chars().take(n.saturating_sub(1)).collect();
+    court.push('…');
+    court
+}
+
+/// Une ligne trouvée par la recherche : la touche, le texte, puis la précision s'il reste de la place. Toujours dans
+/// `LARGEUR` colonnes, même avec un long chemin : l'écran est redessiné depuis le haut et ne doit pas défiler.
+fn rendu_trouve(c: &Choisissable<'_>, largeur_touche: usize, en_cours: bool) -> String {
+    let (marque, gras) = if en_cours {
+        (format!("{ACCENT}►{RESET}"), GRAS)
+    } else {
+        (" ".to_string(), "")
+    };
+    let dispo = LARGEUR.saturating_sub(largeur_touche + 5);
+    let texte = couper(&c.texte, dispo);
+    let reste = dispo.saturating_sub(texte.chars().count() + 2);
+    let precision = simplement_affiche(c.precision);
+    let precision = if precision.is_empty() || reste < 10 {
+        String::new()
+    } else {
+        format!("  {DISCRET}{}{RESET}", couper(&precision, reste))
+    };
+    format!(
+        " {marque} {TOUCHE}{:>largeur_touche$}{RESET}  {gras}{texte}{RESET}{precision}",
+        c.touche
+    )
+}
+
+fn largeur_des_touches<'a>(trouves: impl Iterator<Item = &'a Choisissable<'a>>) -> usize {
+    trouves.map(|c| c.touche.chars().count()).max().unwrap_or(2).max(2)
+}
+
+/// Sans terminal : la réponse se lit ligne par ligne. Un mot qui n'est pas une touche cherche : un seul choix trouvé
+/// est choisi ; plusieurs sont montrés avec leur touche, et la question revient.
+fn par_ligne(choix: &[Choisissable<'_>], touches: &[&str], invite: &str) -> String {
+    loop {
+        let reponse = demander(invite);
+        if !est_une_recherche(&reponse, touches) {
+            return reponse;
+        }
+        let trouves: Vec<&Choisissable> = choix.iter().filter(|c| correspond(&reponse, &c.cherche)).collect();
+        match trouves.as_slice() {
+            [seul] => return seul.touche.to_string(),
+            [] => trp!(
+                "  Rien ne correspond à « {reponse} ».",
+                "  Nothing matches “{reponse}”."
+            ),
+            plusieurs => {
+                let largeur = largeur_des_touches(plusieurs.iter().copied());
+                for c in plusieurs {
+                    println!("{}", rendu_trouve(c, largeur, false));
+                }
+                trp!(
+                    "  {GRIS}Tape la touche de ton choix, ou d'autres mots.{RESET}",
+                    "  {GRIS}Type the key of your choice, or other words.{RESET}"
+                );
+            }
         }
     }
 }
@@ -57,21 +284,24 @@ fn colonne(lignes: &[Ligne]) -> usize {
         .iter()
         .filter_map(|l| match l {
             Ligne::Choix { texte, .. } => Some(largeur_affichee(texte)),
-            Ligne::Texte(_) => None,
+            Ligne::Texte(_) | Ligne::Cachee { .. } => None,
         })
         .max()
         .unwrap_or(0);
     (plus_long + 2).clamp(36, 48)
 }
 
-fn texte(l: &Ligne, colonne: usize, en_cours: bool) -> String {
+/// La ligne à l'écran, ou rien pour une ligne cachée (seule la recherche la montre).
+fn texte(l: &Ligne, colonne: usize, en_cours: bool) -> Option<String> {
     match l {
-        Ligne::Texte(t) => t.clone(),
+        Ligne::Texte(t) => Some(t.clone()),
         Ligne::Choix {
             touche,
             texte,
             precision,
-        } => rendu(touche, texte, precision, colonne, en_cours),
+            ..
+        } => Some(rendu(touche, texte, precision, colonne, en_cours)),
+        Ligne::Cachee { .. } => None,
     }
 }
 
@@ -94,49 +324,122 @@ impl Drop for ModeClavier {
 /// Échap. `invite` : la question quand la réponse se lit ligne par ligne. `depart` : la touche de la ligne en
 /// surbrillance au départ (la dernière choisie). `echap` : ce que fait Échap (« revenir », « quitter »).
 pub fn choisir(lignes: &[Ligne], invite: &str, depart: &str, echap: &str) -> Option<String> {
-    let touches: Vec<&str> = lignes
-        .iter()
-        .filter_map(|l| match l {
-            Ligne::Choix { touche, .. } => Some(touche.as_str()),
-            Ligne::Texte(_) => None,
-        })
-        .collect();
+    let choix = choisissables(lignes);
+    let touches: Vec<&str> = choix.iter().map(|c| c.touche).collect();
+    // Les flèches ne parcourent que les lignes affichées ; la recherche, elle, voit aussi les lignes cachées.
+    let visibles: Vec<&str> = choix.iter().filter(|c| c.visible).map(|c| c.touche).collect();
     let colonne = colonne(lignes);
     // Le menu est redessiné depuis le haut de la fenêtre : il doit y tenir en entier, sans retour à la ligne.
     let hauteur: usize = lignes
         .iter()
-        .map(|l| 1 + texte(l, colonne, false).matches('\n').count())
+        .filter_map(|l| texte(l, colonne, false))
+        .map(|t| 1 + t.matches('\n').count())
         .sum();
     let tient = terminal::size()
         .is_ok_and(|(largeur, rangees)| usize::from(largeur) > LARGEUR && usize::from(rangees) >= hauteur + 2);
-    let clavier = std::io::stdin().is_terminal() && std::io::stdout().is_terminal() && tient && !touches.is_empty();
+    let clavier = std::io::stdin().is_terminal() && std::io::stdout().is_terminal() && tient && !visibles.is_empty();
     let Some(_mode) = clavier.then(ModeClavier::activer).flatten() else {
-        for l in lignes {
-            println!("{}", texte(l, colonne, false));
+        for t in lignes.iter().filter_map(|l| texte(l, colonne, false)) {
+            println!("{t}");
         }
-        return Some(demander(invite));
+        return Some(par_ligne(&choix, &touches, invite));
     };
 
-    let mut en_cours = touches.iter().position(|t| t.eq_ignore_ascii_case(depart)).unwrap_or(0);
-    // Ce qui est tapé au clavier : un raccourci, validé par Entrée comme avant.
+    let mut en_cours = visibles
+        .iter()
+        .position(|t| t.eq_ignore_ascii_case(depart))
+        .unwrap_or(0);
+    // La ligne en surbrillance parmi celles que la recherche a trouvées.
+    let mut en_cours_trouve = 0;
+    // Ce qui est tapé au clavier : un raccourci validé par Entrée, comme avant, ou des mots à chercher.
     let mut tape = String::new();
     let aide = trf!(
-        "  {GRIS}↑ ↓ choisir · Entrée lancer · Échap {echap}{RESET}",
-        "  {GRIS}↑ ↓ select · Enter run · Esc {echap}{RESET}"
+        "  {GRIS}↑ ↓ choisir · Entrée lancer · un mot : chercher · Échap {echap}{RESET}",
+        "  {GRIS}↑ ↓ select · Enter run · a word: search · Esc {echap}{RESET}"
     );
+    let aide_recherche = trf!(
+        "  {GRIS}↑ ↓ choisir · Entrée lancer · Échap effacer la recherche{RESET}",
+        "  {GRIS}↑ ↓ select · Enter run · Esc clear the search{RESET}"
+    );
+    // L'en-tête (cadre, titre, état) reste en place pendant la recherche, sans le sous-titre ni la ligne vide qui
+    // annonçaient la première section (« BILAN DE SÉCURITÉ ») : les lignes trouvées viennent de partout.
+    let mut entete: Vec<String> = lignes
+        .iter()
+        .take_while(|l| matches!(l, Ligne::Texte(_)))
+        .filter_map(|l| texte(l, colonne, false))
+        .collect();
+    while entete.last().is_some_and(|t| {
+        let t = simplement_affiche(t);
+        t.trim().is_empty() || t.trim_start().starts_with("── ")
+    }) {
+        entete.pop();
+    }
+    entete.push(String::new());
+    let hauteur_entete: usize = entete.iter().map(|t| 1 + t.matches('\n').count()).sum();
     let mut sortie = std::io::stdout();
     let _ = sortie.write_all(b"\x1b[2J");
     loop {
+        let recherche = est_une_recherche(&tape, &touches);
+        let trouves: Vec<&Choisissable> = if recherche {
+            choix.iter().filter(|c| correspond(&tape, &c.cherche)).collect()
+        } else {
+            Vec::new()
+        };
+        en_cours_trouve = en_cours_trouve.min(trouves.len().saturating_sub(1));
         // En mode clavier, le terminal ne revient plus seul au début de la ligne : d'où les « \r\n ».
         let mut ecran = String::from("\x1b[H");
-        let mut n = 0;
-        for l in lignes {
-            let choix = matches!(l, Ligne::Choix { .. });
-            ecran += &texte(l, colonne, choix && n == en_cours).replace('\n', "\x1b[K\r\n");
+        if recherche {
+            for t in &entete {
+                ecran += &t.replace('\n', "\x1b[K\r\n");
+                ecran += "\x1b[K\r\n";
+            }
+            ecran += &ligne_section(&trf!("RECHERCHE « {} »", "SEARCH “{}”", couper(tape.trim(), 40)));
             ecran += "\x1b[K\r\n";
-            n += usize::from(choix);
+            // Ce qui tient sous l'en-tête, au-dessus de l'aide et de la saisie ; au-delà, une ligne le dit.
+            let rangees = terminal::size().map_or(24, |(_, r)| usize::from(r));
+            let mut place = rangees.saturating_sub(hauteur_entete + 4).max(1);
+            if trouves.len() > place {
+                place = place.saturating_sub(1).max(1);
+            }
+            let debut = (en_cours_trouve + 1).saturating_sub(place);
+            let largeur = largeur_des_touches(trouves.iter().copied());
+            for (i, c) in trouves.iter().enumerate().skip(debut).take(place) {
+                ecran += &rendu_trouve(c, largeur, i == en_cours_trouve);
+                ecran += "\x1b[K\r\n";
+            }
+            if trouves.is_empty() {
+                let _ = write!(
+                    ecran,
+                    "  {GRIS}{}{RESET}\x1b[K\r\n",
+                    tr!(
+                        "Rien ne correspond : Retour arrière pour corriger, Échap pour effacer.",
+                        "Nothing matches: Backspace to correct, Esc to clear."
+                    )
+                );
+            } else if trouves.len() > place {
+                let _ = write!(
+                    ecran,
+                    "  {GRIS}{}{RESET}\x1b[K\r\n",
+                    trf!(
+                        "… {} en tout : ajoute un mot pour préciser.",
+                        "… {} in all: add a word to narrow it down.",
+                        trouves.len()
+                    )
+                );
+            }
+            let _ = write!(ecran, "{aide_recherche}\x1b[K\r\n  {ACCENT}›{RESET} {tape}\x1b[K\x1b[J");
+        } else {
+            let mut n = 0;
+            for l in lignes {
+                let ligne_de_choix = matches!(l, Ligne::Choix { .. });
+                if let Some(t) = texte(l, colonne, ligne_de_choix && n == en_cours) {
+                    ecran += &t.replace('\n', "\x1b[K\r\n");
+                    ecran += "\x1b[K\r\n";
+                }
+                n += usize::from(ligne_de_choix);
+            }
+            let _ = write!(ecran, "{aide}\x1b[K\r\n  {ACCENT}›{RESET} {tape}\x1b[K\x1b[J");
         }
-        let _ = write!(ecran, "{aide}\x1b[K\r\n  {ACCENT}›{RESET} {tape}\x1b[K\x1b[J");
         let _ = sortie.write_all(ecran.as_bytes());
         let _ = sortie.flush();
 
@@ -148,10 +451,13 @@ pub fn choisir(lignes: &[Ligne], invite: &str, depart: &str, echap: &str) -> Opt
             continue;
         }
         let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
-        let derniere = touches.len() - 1;
+        // Les flèches parcourent les lignes trouvées pendant une recherche, celles du menu sinon.
+        let nombre = if recherche { trouves.len() } else { visibles.len() };
+        let actuelle = if recherche { en_cours_trouve } else { en_cours };
+        let derniere = nombre.saturating_sub(1);
         let deplacement = match k.code {
-            KeyCode::Up | KeyCode::BackTab => Some(en_cours.checked_sub(1).unwrap_or(derniere)),
-            KeyCode::Down | KeyCode::Tab => Some(if en_cours == derniere { 0 } else { en_cours + 1 }),
+            KeyCode::Up | KeyCode::BackTab => Some(actuelle.checked_sub(1).unwrap_or(derniere)),
+            KeyCode::Down | KeyCode::Tab => Some(if actuelle >= derniere { 0 } else { actuelle + 1 }),
             KeyCode::Home | KeyCode::PageUp => Some(0),
             KeyCode::End | KeyCode::PageDown => Some(derniere),
             _ => None,
@@ -159,12 +465,24 @@ pub fn choisir(lignes: &[Ligne], invite: &str, depart: &str, echap: &str) -> Opt
         // Ctrl-J ou Ctrl-M : le saut de ligne que certains terminaux envoient pour Entrée.
         let entree = k.code == KeyCode::Enter || (ctrl && matches!(k.code, KeyCode::Char('j' | 'm')));
         if let Some(i) = deplacement {
-            en_cours = i;
-            tape.clear();
+            if recherche {
+                en_cours_trouve = i;
+            } else {
+                en_cours = i;
+                tape.clear();
+            }
         } else if entree {
+            if recherche {
+                // Rien de trouvé : Entrée ne lance rien, on corrige ou on efface.
+                let Some(c) = trouves.get(en_cours_trouve) else {
+                    continue;
+                };
+                let _ = sortie.write_all(b"\r\n");
+                return Some(c.touche.to_string());
+            }
             let _ = sortie.write_all(b"\r\n");
             return Some(if tape.is_empty() {
-                touches[en_cours].to_string()
+                visibles[en_cours].to_string()
             } else {
                 tape
             });
@@ -179,7 +497,9 @@ pub fn choisir(lignes: &[Ligne], invite: &str, depart: &str, echap: &str) -> Opt
                 let _ = sortie.write_all(b"\r\n");
                 return None;
             }
+            // Échap pendant une recherche l'efface : le menu revient en entier.
             tape.clear();
+            en_cours_trouve = 0;
         } else {
             match k.code {
                 KeyCode::Backspace => {
@@ -188,8 +508,10 @@ pub fn choisir(lignes: &[Ligne], invite: &str, depart: &str, echap: &str) -> Opt
                 KeyCode::Char(c) if !ctrl => tape.push(c),
                 _ => continue,
             }
+            // Chaque lettre change ce qui est trouvé : la surbrillance repart du premier.
+            en_cours_trouve = 0;
             // La surbrillance suit la touche tapée.
-            if let Some(i) = touches.iter().position(|t| t.eq_ignore_ascii_case(&tape)) {
+            if let Some(i) = visibles.iter().position(|t| t.eq_ignore_ascii_case(&tape)) {
                 en_cours = i;
             }
         }
@@ -373,5 +695,69 @@ mod tests {
         let long = "Navigation détournée (proxy, fichier hosts)";
         let c = colonne(&[Ligne::choix("2", long, "rien à faire")]);
         assert!(rendu("2", long, "rien à faire", c, false).contains(long));
+    }
+
+    #[test]
+    fn recherche_sans_accents_ni_majuscules() {
+        let t = simplifier("Réseau et Internet › Scanner le Wi-Fi");
+        assert_eq!(t, "reseau et internet › scanner le wifi");
+        assert!(correspond("RESEAU", &t));
+        // Tous les mots comptent, dans n'importe quel ordre.
+        assert!(correspond("wi-fi scanner", &t));
+        assert!(!correspond("wifi imprimante", &t));
+        // Un mot court commence un mot : « sc » trouve « scanner », « an » ne trouve rien.
+        assert!(correspond("sc", &t));
+        assert!(!correspond("an", &t));
+        assert!(!correspond("", &t));
+        // La fin d'un mot peut changer : l'infinitif, le pluriel.
+        let vide = simplifier("Vide le cache DNS. Répare les disques.");
+        assert!(correspond("vider dns", &vide) && correspond("réparer", &vide) && correspond("disque", &vide));
+        assert!(!correspond("réseau", &simplifier("Resets the TCP/IP settings")));
+        assert_eq!(simplifier("\x1b[1;96mCœur\x1b[0m"), "coeur");
+    }
+
+    #[test]
+    fn une_lettre_ou_une_touche_n_est_pas_une_recherche() {
+        let touches = ["1", "10", "4.2", "q", "↵"];
+        // Les raccourcis des anciennes versions (une lettre) et les touches, même à moitié tapées.
+        assert!(!est_une_recherche("u", &touches));
+        assert!(!est_une_recherche("10", &touches));
+        assert!(!est_une_recherche("4.", &touches));
+        assert!(!est_une_recherche(" 4.2 ", &touches));
+        assert!(est_une_recherche("wifi", &touches));
+        assert!(est_une_recherche("1a", &touches));
+    }
+
+    #[test]
+    fn les_lignes_cachees_se_trouvent_et_tiennent_dans_l_ecran() {
+        let lignes = [
+            Ligne::Texte("titre".into()),
+            Ligne::choix("1", "Bilan complet", "← commencer ici"),
+            Ligne::cachee(
+                "5.2",
+                "Réseau et Internet ›",
+                "Scan approfondi d'un appareil",
+                "tous les ports",
+            )
+            .avec_mots("nmap"),
+        ];
+        let choix = choisissables(&lignes);
+        assert_eq!(choix.len(), 2);
+        assert!(choix[0].visible && !choix[1].visible);
+        assert!(correspond("approfondi", &choix[1].cherche));
+        // Les mots en plus se trouvent sans s'afficher.
+        assert!(correspond("nmap", &choix[1].cherche));
+        assert!(!choix[1].texte.contains("nmap"));
+        // Hors recherche, une ligne cachée ne s'affiche pas.
+        assert!(texte(&lignes[2], 36, false).is_none());
+        // Un très long chemin est coupé : la ligne trouvée tient dans LARGEUR.
+        let long = [Ligne::cachee(
+            "10.1.12",
+            &"chemin très long ".repeat(10),
+            "texte",
+            "précision",
+        )];
+        let c = choisissables(&long);
+        assert!(largeur_affichee(&rendu_trouve(&c[0], 7, true)) <= LARGEUR);
     }
 }

@@ -29,6 +29,9 @@ never starts anything by itself from a USB key (protection against viruses since
 To start: run Gardien, choose "1. Full check", then "2. Fix".
 
 Menu (↑ ↓ to select, Enter to run, Esc or Backspace to go back; or the number, then Enter)
+Search: in any menu, type a word (wifi, disk, dns…): only the lines containing it stay, Enter opens the
+highlighted one, Esc clears it. In the main menu, it also finds each tool of the submenus (“5.3”: group 5,
+3rd tool, which can also be typed as is) and each page of the guide.
   1  Full check (machine + network), with what changed since the previous check
   2  Fix the problems found (each fix is shown, then confirmed)
   3  Detailed report (browser), with the grade history
@@ -60,6 +63,9 @@ Menu (↑ ↓ to select, Enter to run, Esc or Backspace to go back; or the numbe
        no autorun from USB drives, full right-click menu…) · Put everything back
        Each setting shows its state and is undone exactly: the previous value is put back.
   9  Data: back up or restore (nicknames, network history)
+ 10  Command guide › the useful commands of Linux, Windows, macOS and all systems, by program, each one
+       explained (⚠: it changes something); nothing runs from there. From the command line:
+       gardien guide windows, gardien guide winget, gardien guide dns cache
   q  Quit
   Shortcuts from earlier versions, in the main menu: u updates, r repair, o diagnostic, i integrity,
   n name, c connection, a USB drive, b sandbox, p passwords, e email, l software, g gaming, d data.

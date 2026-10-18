@@ -16,7 +16,7 @@ turn on once with `/install-github-app`).
 |---|---|
 | `src/main.rs` | menu and subcommands |
 | `src/ui.rs` | colors, titles, frames, bars, lines wrapped and aligned within 76 columns |
-| `src/selection.rs` | keyboard menus and checklists (arrows, Enter, Esc or Backspace) |
+| `src/selection.rs` | keyboard menus and checklists (arrows, Enter, Esc or Backspace), word search in menus |
 | `src/langue.rs` | language choice and translation macros |
 | `src/machine/mod.rs` | shared types, display, parallel execution of the checks |
 | `src/machine/linux/`, `src/machine/windows/`, `src/machine/macos/` | per-system audit, one file per topic |
@@ -33,6 +33,7 @@ turn on once with `/install-github-app`).
 | `src/nettoyer/` | cleanup: items per system, space measured before and after |
 | `src/logiciels/` | software to install: checked catalog (`catalogue.rs`), state and installation per system |
 | `src/fuites.rs`, `src/donnees.rs` | leaked passwords, data backup |
+| `src/guide/` | command guide: one file per system (`linux.rs`, `windows.rs`, `macos.rs`, `tous.rs`), menus and search (`mod.rs`) |
 | `assets/oui.tsv` | manufacturers by MAC prefix (IEEE list), stored as sorted tables at compile time (`build.rs`) |
 | `assets/icones/`, `assets/gardien.ico` | the logo, computed by `outils/icone.py` |
 | `LICENCES-TIERCES.txt` | license notices of the included libraries (`outils/licences-tierces.py`) |

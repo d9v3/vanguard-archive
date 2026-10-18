@@ -108,7 +108,15 @@ files, Windows Update and Delivery Optimization caches, old components (Windows)
 snapshots (macOS). The space each item frees is measured first, what rebuilds itself is checked by default, the trash
 never; the free space read again afterwards tells what was really gained.
 
+**Command guide** — the useful commands of Linux, Windows, macOS and the ones typed the same way everywhere
+(Gardien, ping, nslookup, ssh, curl, git…), sorted by system, then by program, each one explained; ⚠ marks the
+ones that change something. Nothing runs from there: you read, then type the command, here or on the computer of
+the person you help. Every system can be read everywhere (Windows commands from Linux, for example), and the guide
+tells when a program is missing on this computer.
+
 **And also**
+- Search in every menu: type a word (wifi, disk, dns, update…), only the lines containing it stay, whatever the
+  accents or capitals; in the main menu, it also finds each tool of the submenus and each page of the guide.
 - Fixes applied only after confirmation, with a restore point created automatically beforehand (snapper or
   timeshift on Linux, Windows restore point, Time Machine snapshot on macOS); on Windows, each one is a readable
   script.
@@ -162,6 +170,7 @@ Each menu entry is also a command:
 | `gardien name <ip\|mac> <nickname>` | name a device |
 | `gardien backup [file]`, `gardien restore <file>` | data backup |
 | `gardien gaming` | packages and settings for gaming (Windows and Linux) |
+| `gardien guide [system\|program\|words]` | command guide: a system (`linux`, `windows`, `macos`, `all`), a program (`winget`, `systemctl`…) or words to look for (`dns cache`) |
 
 **Language**: the system's (English or French). To force it: `GARDIEN_LANG=en` or `GARDIEN_LANG=fr`. The commands
 also keep their French names (`complet`, `machine`, `corriger`, `reseau`, `connexion`, `logiciels`, `diagnostic`,

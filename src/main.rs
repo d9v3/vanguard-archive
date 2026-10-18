@@ -12,6 +12,7 @@ mod diagnostic;
 mod donnees;
 mod fuites;
 mod gaming;
+mod guide;
 mod historique;
 mod integrite;
 mod isoler;
@@ -202,6 +203,11 @@ enum Commande {
         /// Le surnom ; vide pour le retirer.
         surnom: Vec<String>,
     },
+    /// Guide des commandes : celles de Linux, de Windows, de macOS et de tous les systèmes, rangées par programme.
+    Guide {
+        /// Un système (linux, windows, macos, tous), un programme (systemctl, winget…) ou des mots à chercher.
+        quoi: Vec<String>,
+    },
     /// Scan silencieux + notifications (utilisé par la surveillance).
     #[command(hide = true)]
     Surveiller,
@@ -353,53 +359,101 @@ fn section_du_menu(t: &str) -> [Ligne; 2] {
     [Ligne::Texte(String::new()), Ligne::Texte(ligne_section(t))]
 }
 
+/// Les lignes du menu principal, sous l'état (dernier bilan, clé, surveillance).
+fn lignes_du_menu(etat: Vec<String>) -> Vec<Ligne> {
+    let mut lignes: Vec<Ligne> = lignes_cadre(
+        &format!("{ACCENT}GARDIEN{RESET} {GRIS}{}{RESET}", env!("CARGO_PKG_VERSION")),
+        tr!(
+            "sécurise et optimise ta machine et ton réseau",
+            "secures and optimizes your machine and network"
+        ),
+    )
+    .into_iter()
+    .map(Ligne::Texte)
+    .collect();
+    lignes.extend(etat.into_iter().map(Ligne::Texte));
+
+    lignes.extend(section_du_menu(tr!("BILAN DE SÉCURITÉ", "SECURITY CHECK")));
+    lignes.push(Ligne::choix(
+        "1",
+        tr!("Bilan complet : machine + réseau", "Full check: machine + network"),
+        tr!("← commencer ici", "← start here"),
+    ));
+    lignes.push(Ligne::choix(
+        "2",
+        tr!("Corriger les problèmes trouvés", "Fix the problems found"),
+        "",
+    ));
+    lignes.push(Ligne::choix(
+        "3",
+        tr!("Rapport détaillé dans le navigateur", "Detailed report in the browser"),
+        "",
+    ));
+
+    lignes.extend(section_du_menu(tr!("OUTILS", "TOOLS")));
+    for (touche, groupe) in GROUPES.iter().enumerate() {
+        lignes.push(Ligne::choix(
+            &(touche + 4).to_string(),
+            &format!("{} {ACCENT}›{RESET}", groupe.titre()),
+            groupe.resume(),
+        ));
+    }
+
+    // « q » suit les groupes sans ligne vide : avec le 7e groupe (le guide), le menu tient encore dans un terminal
+    // de 24 lignes (macOS, beaucoup de Linux), où les flèches marchent.
+    lignes.push(Ligne::choix("q", tr!("Quitter", "Quit"), ""));
+    lignes.push(Ligne::Texte(String::new()));
+
+    // Ce que la recherche trouve en plus, sans l'afficher : chaque outil des sous-menus (« 5.2 » : groupe 5, 2e outil,
+    // aussi tapable tel quel) et chaque page du guide.
+    for (i, groupe) in GROUPES.iter().enumerate() {
+        let cle = (i + 4).to_string();
+        if matches!(groupe, Groupe::Guide) {
+            lignes.extend(guide::lignes_de_recherche(&cle));
+            continue;
+        }
+        let chemin = format!("{} ›", groupe.titre());
+        for (j, a) in groupe.actions().iter().filter(|a| a.disponible()).enumerate() {
+            let (texte, precision) = a.libelle();
+            lignes.push(Ligne::cachee(&format!("{cle}.{}", j + 1), &chemin, texte, precision).avec_mots(a.mots_cles()));
+        }
+    }
+    lignes
+}
+
+/// Une catégorie de réglages a-t-elle de quoi proposer ici ? Lire les réglages lance des commandes du système : une
+/// fois par session suffit, alors que le menu principal le demande à chaque affichage (pour sa recherche).
+fn reglages_disponibles(c: optimiser::Categorie) -> bool {
+    use optimiser::Categorie::{Confidentialite, Confort, Performance};
+    static CATEGORIES: std::sync::OnceLock<[bool; 3]> = std::sync::OnceLock::new();
+    let [confidentialite, performance, confort] =
+        *CATEGORIES.get_or_init(|| [Confidentialite, Performance, Confort].map(optimiser::a_des_reglages));
+    match c {
+        Confidentialite => confidentialite,
+        Performance => performance,
+        Confort => confort,
+    }
+}
+
+/// Un outil désigné par son chemin, tapé ou trouvé par la recherche : « 5.2 », le 2e outil du groupe 5.
+fn outil_au_chemin(chemin: &str) -> Option<Action> {
+    let (groupe, outil) = chemin.split_once('.')?;
+    let groupe = GROUPES.get(groupe.parse::<usize>().ok()?.checked_sub(4)?)?;
+    // Le guide a ses propres chemins : système, puis programme (`guide::chemin`).
+    if matches!(groupe, Groupe::Guide) {
+        return None;
+    }
+    let outil = outil.parse::<usize>().ok()?.checked_sub(1)?;
+    groupe.actions().iter().copied().filter(|a| a.disponible()).nth(outil)
+}
+
 async fn menu() {
     let mut s = Session::default();
     // La ligne en surbrillance au retour dans le menu : la dernière choisie.
     let mut dernier = String::from("1");
     loop {
         print!("\x1b[2J\x1b[H");
-        let mut lignes: Vec<Ligne> = lignes_cadre(
-            &format!("{ACCENT}GARDIEN{RESET} {GRIS}{}{RESET}", env!("CARGO_PKG_VERSION")),
-            tr!(
-                "sécurise et optimise ta machine et ton réseau",
-                "secures and optimizes your machine and network"
-            ),
-        )
-        .into_iter()
-        .map(Ligne::Texte)
-        .collect();
-        lignes.extend(etat_du_menu(surveillance::active()).into_iter().map(Ligne::Texte));
-
-        lignes.extend(section_du_menu(tr!("BILAN DE SÉCURITÉ", "SECURITY CHECK")));
-        lignes.push(Ligne::choix(
-            "1",
-            tr!("Bilan complet : machine + réseau", "Full check: machine + network"),
-            tr!("← commencer ici", "← start here"),
-        ));
-        lignes.push(Ligne::choix(
-            "2",
-            tr!("Corriger les problèmes trouvés", "Fix the problems found"),
-            "",
-        ));
-        lignes.push(Ligne::choix(
-            "3",
-            tr!("Rapport détaillé dans le navigateur", "Detailed report in the browser"),
-            "",
-        ));
-
-        lignes.extend(section_du_menu(tr!("OUTILS", "TOOLS")));
-        for (touche, groupe) in GROUPES.iter().enumerate() {
-            lignes.push(Ligne::choix(
-                &(touche + 4).to_string(),
-                &format!("{} {ACCENT}›{RESET}", groupe.titre()),
-                groupe.resume(),
-            ));
-        }
-
-        lignes.push(Ligne::Texte(String::new()));
-        lignes.push(Ligne::choix("q", tr!("Quitter", "Quit"), ""));
-        lignes.push(Ligne::Texte(String::new()));
+        let lignes = lignes_du_menu(etat_du_menu(surveillance::active()));
         let Some(choix) = choisir(
             &lignes,
             &format!("  {ACCENT}›{RESET} {}", tr!("Choix : ", "Choice: ")),
@@ -410,6 +464,29 @@ async fn menu() {
         };
         let choix = choix.trim().to_lowercase();
         println!();
+        // Un outil ou une page du guide, trouvés par la recherche (ou leur chemin tapé : « 5.2 », « 10.2.4 »).
+        if let Some((groupe, reste)) = choix.split_once('.') {
+            let cle_du_guide = GROUPES
+                .iter()
+                .position(|g| matches!(g, Groupe::Guide))
+                .map(|i| (i + 4).to_string());
+            if cle_du_guide.as_deref() == Some(groupe) {
+                if let Some((systeme, programme)) = guide::chemin(reste) {
+                    dernier = groupe.to_string();
+                    guide::ouvrir(systeme, programme);
+                }
+            } else if let Some(action) = outil_au_chemin(&choix) {
+                dernier = groupe.to_string();
+                executer(&mut s, action).await;
+                if action.attendre_apres() {
+                    demander(&trf!(
+                        "\n{GRIS}Entrée pour revenir au menu…{RESET}",
+                        "\n{GRIS}Enter to go back to the menu…{RESET}"
+                    ));
+                }
+            }
+            continue;
+        }
         let groupe = choix
             .parse::<usize>()
             .ok()
@@ -476,6 +553,7 @@ enum Action {
     OptimiserConfort,
     OptimiserAnnuler,
     Sauvegarder,
+    Guide,
 }
 
 impl Action {
@@ -513,6 +591,7 @@ impl Action {
         Action::OptimiserConfort,
         Action::OptimiserAnnuler,
         Action::Sauvegarder,
+        Action::Guide,
     ];
 
     /// Lettre de l'outil dans les menus d'avant la 0.43 (les chiffres, eux, ont changé de sens).
@@ -539,11 +618,56 @@ impl Action {
     /// L'outil a-t-il quelque chose à proposer sur ce système ? (une catégorie de réglages vide n'est pas montrée)
     fn disponible(self) -> bool {
         match self {
-            Action::OptimiserConfidentialite => optimiser::a_des_reglages(optimiser::Categorie::Confidentialite),
+            Action::OptimiserConfidentialite => reglages_disponibles(optimiser::Categorie::Confidentialite),
             #[cfg(not(target_os = "macos"))]
-            Action::OptimiserPerformance => optimiser::a_des_reglages(optimiser::Categorie::Performance),
-            Action::OptimiserConfort => optimiser::a_des_reglages(optimiser::Categorie::Confort),
+            Action::OptimiserPerformance => reglages_disponibles(optimiser::Categorie::Performance),
+            Action::OptimiserConfort => reglages_disponibles(optimiser::Categorie::Confort),
             _ => true,
+        }
+    }
+
+    /// Après l'outil, attendre Entrée avant de revenir au menu ? Pas pour celui qui a ses propres écrans et se quitte
+    /// par Échap (le guide) : on y reviendrait deux fois.
+    fn attendre_apres(self) -> bool {
+        self != Action::Guide
+    }
+
+    /// Des mots que la recherche du menu principal trouve, en plus du texte affiché : ce que l'outil sait faire, en
+    /// français et en anglais (jamais affichés).
+    fn mots_cles(self) -> &'static str {
+        match self {
+            Action::Complet | Action::Corriger | Action::Rapport => "bilan check",
+            Action::Audit => "sécurité security pare-feu firewall ports ssh chiffrement encryption comptes accounts",
+            Action::Integrite => "blake3 empreintes fingerprints fichiers files",
+            Action::Appris => "apprentissage learning appris learned choix choices normal oublier forget",
+            Action::Diagnostic => "plantages crashes erreurs errors écran bleu bsod journal logs matériel hardware",
+            Action::Maj => "update upgrade pilotes drivers firmware bios windows update",
+            Action::Reparer => {
+                "internet wifi dns proxy hosts pare-feu firewall antivirus disque disk smart heure time sfc dism winsock"
+            }
+            Action::Scanner | Action::Appareil => "appareils devices ports réseau network lan nmap",
+            Action::Nommer => "surnom nickname",
+            Action::Surveillance => "monitor surveiller notification",
+            Action::Connexion => "ping latence latency débit speed jitter gigue bufferbloat jeu",
+            Action::ListesNoires => "spamhaus botnet liste noire blocklist blacklist dnsbl",
+            Action::AntivirusRapide | Action::AntivirusComplet => "virus malware clamav defender",
+            Action::AntivirusDossier => "virus usb clé autorun",
+            Action::Yara => "yara règles rules malware",
+            Action::Pieges => "rançongiciel ransomware leurre decoy piège trap",
+            Action::Bac => "sandbox isoler firejail bubblewrap",
+            Action::MotsDePasse => "password hibp pwned fuite leak",
+            Action::Courriel => "email mail fuite leak",
+            Action::Logiciels => "apps programmes programs installer install firefox vlc libreoffice",
+            Action::Gaming => "jeux games steam directx vulkan",
+            Action::Nettoyer => "place space disque plein disk full cache corbeille trash",
+            Action::OptimiserRecommandes => "réglages settings",
+            Action::OptimiserConfidentialite => "télémétrie telemetry vie privée privacy publicité ads",
+            #[cfg(not(target_os = "macos"))]
+            Action::OptimiserPerformance => "ssd démarrage startup journal",
+            Action::OptimiserConfort => "extensions fichiers cachés hidden files",
+            Action::OptimiserAnnuler => "annuler undo restaurer",
+            Action::Sauvegarder => "backup restore sauvegarde base",
+            Action::Guide => "commandes commands terminal aide help",
         }
     }
 
@@ -705,6 +829,10 @@ impl Action {
                 tr!("Sauvegarder ou restaurer", "Back up or restore"),
                 tr!("base des appareils, réglages", "device database, settings"),
             ),
+            Action::Guide => (
+                tr!("Guide des commandes", "Command guide"),
+                tr!("Linux, Windows, macOS, tous", "Linux, Windows, macOS, all"),
+            ),
         }
     }
 }
@@ -718,15 +846,17 @@ enum Groupe {
     Installer,
     Optimiser,
     Donnees,
+    Guide,
 }
 
-const GROUPES: [Groupe; 6] = [
+const GROUPES: [Groupe; 7] = [
     Groupe::Machine,
     Groupe::Reseau,
     Groupe::Protection,
     Groupe::Installer,
     Groupe::Optimiser,
     Groupe::Donnees,
+    Groupe::Guide,
 ];
 
 impl Groupe {
@@ -738,6 +868,7 @@ impl Groupe {
             Groupe::Installer => tr!("Installer et jouer", "Install and play"),
             Groupe::Optimiser => tr!("Optimiser", "Optimize"),
             Groupe::Donnees => tr!("Données", "Data"),
+            Groupe::Guide => tr!("Guide des commandes", "Command guide"),
         }
     }
 
@@ -749,6 +880,7 @@ impl Groupe {
             Groupe::Installer => tr!("logiciels libres, gaming", "open source software, gaming"),
             Groupe::Optimiser => tr!("nettoyer, confidentialité…", "clean up, privacy…"),
             Groupe::Donnees => tr!("sauvegarder ou restaurer", "back up or restore"),
+            Groupe::Guide => tr!("Linux, Windows, macOS, tous", "Linux, Windows, macOS, all"),
         }
     }
 
@@ -791,6 +923,7 @@ impl Groupe {
                 Action::OptimiserAnnuler,
             ],
             Groupe::Donnees => &[Action::Sauvegarder],
+            Groupe::Guide => &[Action::Guide],
         }
     }
 }
@@ -801,10 +934,12 @@ async fn sous_menu(s: &mut Session, groupe: Groupe) {
     let actions: Vec<Action> = groupe.actions().iter().copied().filter(|a| a.disponible()).collect();
     if let [seule] = actions[..] {
         executer(s, seule).await;
-        demander(&trf!(
-            "\n{GRIS}Entrée pour revenir au menu…{RESET}",
-            "\n{GRIS}Enter to go back to the menu…{RESET}"
-        ));
+        if seule.attendre_apres() {
+            demander(&trf!(
+                "\n{GRIS}Entrée pour revenir au menu…{RESET}",
+                "\n{GRIS}Enter to go back to the menu…{RESET}"
+            ));
+        }
         return;
     }
     let mut dernier = String::from("1");
@@ -921,6 +1056,7 @@ async fn executer(s: &mut Session, action: Action) {
         Action::OptimiserConfort => optimiser::menu(optimiser::Categorie::Confort),
         Action::OptimiserAnnuler => optimiser::tout_annuler(),
         Action::Sauvegarder => donnees::menu(),
+        Action::Guide => guide::menu(),
     }
 }
 
@@ -1024,6 +1160,10 @@ fn ligne_de_commande() -> clap::Command {
             "gaming",
             "Gaming: components for games (Windows: Visual C++, DirectX…; Linux: Steam, Vulkan, GameMode, Wine…; macOS: Rosetta, Steam, Epic…) and system settings",
         ),
+        (
+            "guide",
+            "Command guide: the useful commands of Linux, Windows, macOS and all systems, sorted by program",
+        ),
     ];
     for &(nom, aide) in aides {
         c = c.mut_subcommand(nom, |s| s.about(aide));
@@ -1097,6 +1237,11 @@ fn ligne_de_commande() -> clap::Command {
             a.help("IP (on the current network) or MAC address of the device")
         })
         .mut_arg("surnom", |a| a.help("The nickname; empty to remove it"))
+    })
+    .mut_subcommand("guide", |s| {
+        s.mut_arg("quoi", |a| {
+            a.help("A system (linux, windows, macos, all), a program (systemctl, winget…) or words to look for")
+        })
     })
 }
 
@@ -1195,6 +1340,7 @@ async fn main() {
         Some(Commande::Sauvegarder { fichier }) => donnees::sauvegarder(fichier),
         Some(Commande::Restaurer { fichier }) => donnees::restaurer(&fichier),
         Some(Commande::Nommer { appareil, surnom }) => nommer(&appareil, &surnom.join(" ")),
+        Some(Commande::Guide { quoi }) => guide::executer(&quoi.join(" ")),
     }
 }
 
@@ -1221,5 +1367,30 @@ mod tests_menu {
         lettres.sort_unstable();
         lettres.dedup();
         assert_eq!(lettres.len(), n);
+    }
+
+    #[test]
+    fn le_menu_principal_tient_dans_24_lignes() {
+        // Trois lignes d'état (dernier bilan, connexion, clé) : le menu le plus haut. Avec l'aide et la saisie, il doit
+        // tenir dans un terminal de 24 lignes, sinon les flèches ne marchent plus.
+        let lignes = lignes_du_menu(vec![String::new(); 3]);
+        let affichees = lignes.iter().filter(|l| !matches!(l, Ligne::Cachee { .. })).count();
+        assert!(affichees + 2 <= 24, "{affichees} lignes affichées");
+        // La recherche voit plus que l'écran : outils des sous-menus et pages du guide.
+        assert!(lignes.len() > affichees + 50);
+    }
+
+    #[test]
+    fn chaque_outil_trouve_par_la_recherche_s_ouvre() {
+        for (i, g) in GROUPES.iter().enumerate() {
+            if matches!(g, Groupe::Guide) {
+                continue;
+            }
+            for (j, a) in g.actions().iter().filter(|a| a.disponible()).enumerate() {
+                assert!(outil_au_chemin(&format!("{}.{}", i + 4, j + 1)) == Some(*a));
+            }
+        }
+        assert!(outil_au_chemin("4.99").is_none() && outil_au_chemin("x.1").is_none());
+        assert!(outil_au_chemin("10.1").is_none(), "le guide a ses propres chemins");
     }
 }

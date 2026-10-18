@@ -118,7 +118,16 @@ anciens composants (Windows) ; vieux caches, Homebrew, Xcode, instantanés locau
 élément est mesurée avant, ce qui se refait seul est coché d'office, la corbeille jamais ; la place libre relue après
 dit ce qui a vraiment été gagné.
 
+**Guide des commandes** — les commandes utiles de Linux, de Windows, de macOS et celles qui s'écrivent pareil
+partout (Gardien, ping, nslookup, ssh, curl, git…), rangées par système puis par programme, chacune expliquée ; ⚠
+marque celles qui changent quelque chose. Rien ne s'y lance : on lit, puis on tape la commande, ici ou chez la
+personne qu'on aide. Tous les systèmes sont lisibles partout (les commandes de Windows depuis Linux, par exemple), et
+le guide dit si un programme manque sur cet ordinateur.
+
 **Et aussi**
+- Recherche dans tous les menus : tape un mot (wifi, disque, dns, mise à jour…), seules les lignes qui le
+  contiennent restent, sans souci d'accents ni de majuscules ; au menu principal, elle trouve aussi chaque outil des
+  sous-menus et chaque page du guide.
 - Corrections appliquées seulement après confirmation, avec un point de restauration créé automatiquement avant
   (snapper ou timeshift sous Linux, point de restauration Windows, instantané Time Machine sous macOS) ; sous
   Windows, chacune est un script lisible.
@@ -173,6 +182,7 @@ Chaque entrée du menu existe aussi en commande :
 | `gardien nommer <ip\|mac> <surnom>` | nommer un appareil |
 | `gardien sauvegarder [fichier]`, `gardien restaurer <fichier>` | sauvegarde des données |
 | `gardien gaming` | paquets et réglages pour jouer (Windows et Linux) |
+| `gardien guide [système\|programme\|mots]` | guide des commandes : un système (`linux`, `windows`, `macos`, `tous`), un programme (`winget`, `systemctl`…) ou des mots à chercher (`cache dns`) |
 
 **Langue** : celle du système (français ou anglais). Pour forcer : `GARDIEN_LANG=fr` ou `GARDIEN_LANG=en`. Les
 commandes ont aussi un nom anglais (`full`, `audit`, `fix`, `network`, `connection`, `apps`, `diag`, `password`,

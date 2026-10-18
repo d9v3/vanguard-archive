@@ -30,6 +30,9 @@ pour améliorer Gardien. Windows ne lance rien tout seul depuis une clé USB
 Pour commencer : lancer Gardien, choisir « 1. Bilan complet », puis « 2. Corriger ».
 
 Menu (↑ ↓ pour choisir, Entrée pour lancer, Échap ou Retour arrière pour revenir ; ou le chiffre, puis Entrée)
+Recherche : dans tout menu, tape un mot (wifi, disque, dns…) : seules les lignes qui le contiennent restent,
+Entrée ouvre celle en surbrillance, Échap efface. Au menu principal, elle trouve aussi chaque outil des sous-menus
+(« 5.3 » : groupe 5, 3e outil, aussi tapable tel quel) et chaque page du guide.
   1  Bilan complet (machine + réseau), avec ce qui a changé depuis le bilan précédent
   2  Corriger les problèmes trouvés (chaque correction est montrée, puis confirmée)
   3  Rapport détaillé (navigateur), avec la courbe des notes
@@ -61,6 +64,9 @@ Menu (↑ ↓ pour choisir, Entrée pour lancer, Échap ou Retour arrière pour 
        pas de lancement automatique des clés, menu complet au clic droit…) · Tout remettre comme avant
        Chaque réglage montre son état et s'annule exactement : la valeur d'avant est remise.
   9  Données : sauvegarder ou restaurer (surnoms, historique des réseaux)
+ 10  Guide des commandes › les commandes utiles de Linux, Windows, macOS et de tous les systèmes, par programme,
+       chacune expliquée (⚠ : elle change quelque chose) ; rien ne s'y lance. En ligne de commande :
+       gardien guide windows, gardien guide winget, gardien guide cache dns
   q  Quitter
   Raccourcis des anciennes versions, depuis le menu principal : u mises à jour, r réparer, o diagnostic,
   i intégrité, n nommer, c connexion, a clé USB, b bac à sable, p mots de passe, e courriel, l logiciels,
