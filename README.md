@@ -162,14 +162,14 @@ veille) est revérifié plus patiemment. « Ce que Gardien a appris » montre to
 
 **Guide des commandes** — les commandes utiles de Linux, de Windows, de macOS et celles qui s'écrivent pareil
 partout (Gardien, ping, nslookup, ssh, curl, git…), rangées par système puis par programme, chacune expliquée ; ⚠
-marque celles qui changent quelque chose. Rien ne s'y lance : on lit, puis on tape la commande, ici ou chez la
-personne qu'on aide. Tous les systèmes sont lisibles partout (les commandes de Windows depuis Linux, par exemple), et
-le guide dit si un programme manque sur cet ordinateur.
+marque celles qui changent quelque chose. Rien ne s'y lance : on lit, puis on tape la commande, ou on la copie par
+son numéro, ici ou chez la personne qu'on aide. Tous les systèmes sont lisibles partout (les commandes de Windows
+depuis Linux, par exemple), et le guide dit si un programme manque sur cet ordinateur.
 
 **Et aussi**
-- Recherche dans tous les menus : tape un mot (wifi, disque, dns, mise à jour…), seules les lignes qui le
-  contiennent restent, sans souci d'accents ni de majuscules ; au menu principal, elle trouve aussi chaque outil des
-  sous-menus et chaque page du guide.
+- Recherche dans tous les menus et les listes à cocher : tape un mot (wifi, disque, dns, mise à jour…), seules les
+  lignes qui le contiennent restent, sans souci d'accents ni de majuscules ; au menu principal, elle trouve aussi
+  chaque outil des sous-menus et chaque page du guide.
 - Corrections appliquées seulement après confirmation, avec un point de restauration créé automatiquement avant
   (snapper ou timeshift sous Linux, point de restauration Windows, instantané Time Machine sous macOS) ; sous
   Windows, chacune est un script lisible.

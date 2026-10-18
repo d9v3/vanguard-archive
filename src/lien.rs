@@ -1315,11 +1315,7 @@ pub fn verifier(adresse: Option<&str>) {
         return;
     };
     println!();
-    let montre: String = if propre.chars().count() > LARGEUR - 12 {
-        propre.chars().take(LARGEUR - 13).chain(['…']).collect()
-    } else {
-        propre.clone()
-    };
+    let montre = couper(&propre, LARGEUR - 12);
     println!("  {GRIS}{}{RESET} {montre}", ajuster(tr!("Lien", "Link"), 9));
     if !lien.hote.is_empty() {
         println!(

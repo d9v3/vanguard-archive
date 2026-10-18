@@ -80,7 +80,7 @@ highlighted one, Esc clears it. In the main menu, it also finds each tool of the
        Back up or restore (nicknames, network history)
        Copy my files to an external disk (checked copy, nothing deleted, resumes after an interruption)
  10  Command guide › the useful commands of Linux, Windows, macOS and all systems, by program, each one
-       explained (⚠: it changes something); nothing runs from there. From the command line:
+       explained (⚠: it changes something); nothing runs from there, a number copies it. From the command line:
        gardien guide windows, gardien guide winget, gardien guide dns cache
  11  Troubleshoot step by step › no Internet, Wi-Fi dropping, slow computer, no sound, printer, disk full:
        two or three questions, then Gardien checks and suggests the right repair.

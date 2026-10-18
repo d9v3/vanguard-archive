@@ -37,7 +37,7 @@ pub fn winget_installer(id: &str) -> String {
 /// Windows PowerShell 5.1, avec ses propres modules. Lancé depuis PowerShell 7 (Windows Terminal), il hériterait
 /// de son PSModulePath et chargerait des modules de la version 7, incompatibles : le lecteur Cert: manquait ainsi
 /// dans le test de la VM. Sans la variable, la 5.1 reprend ses chemins par défaut.
-fn powershell() -> Command {
+pub fn powershell() -> Command {
     let mut c = Command::new("powershell");
     c.env_remove("PSModulePath");
     c

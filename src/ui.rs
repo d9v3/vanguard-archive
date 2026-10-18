@@ -36,7 +36,70 @@ pub fn couleur_note(n: &str) -> &'static str {
     }
 }
 
-/// Largeur affichée d'un texte (sans les codes de couleur).
+/// Colonnes qu'un caractère prend dans le terminal : deux pour un emoji (💡) ou une lettre pleine largeur (ａ, 漢),
+/// aucune pour ce qui se pose sur le caractère d'avant (accent combiné, variante d'emoji, liaison). Les plages sont
+/// celles que les terminaux affichent sur deux colonnes ; les symboles comme ⚠ ✔ ✖, en une colonne par défaut,
+/// restent à un.
+pub fn largeur_car(c: char) -> usize {
+    match u32::from(c) {
+        0x0300..=0x036F | 0x200B..=0x200D | 0x20D0..=0x20FF | 0xFE00..=0xFE0F => 0,
+        0x1100..=0x115F
+        | 0x231A..=0x231B
+        | 0x23E9..=0x23EC
+        | 0x23F0
+        | 0x23F3
+        | 0x25FD..=0x25FE
+        | 0x2614..=0x2615
+        | 0x2648..=0x2653
+        | 0x267F
+        | 0x2693
+        | 0x26A1
+        | 0x26AA..=0x26AB
+        | 0x26BD..=0x26BE
+        | 0x26C4..=0x26C5
+        | 0x26CE
+        | 0x26D4
+        | 0x26EA
+        | 0x26F2..=0x26F3
+        | 0x26F5
+        | 0x26FA
+        | 0x26FD
+        | 0x2705
+        | 0x270A..=0x270B
+        | 0x2728
+        | 0x274C
+        | 0x274E
+        | 0x2753..=0x2755
+        | 0x2757
+        | 0x2795..=0x2797
+        | 0x27B0
+        | 0x27BF
+        | 0x2B1B..=0x2B1C
+        | 0x2B50
+        | 0x2B55
+        | 0x2E80..=0x303E
+        | 0x3041..=0xA4CF
+        | 0xAC00..=0xD7A3
+        | 0xF900..=0xFAFF
+        | 0xFE30..=0xFE4F
+        | 0xFF00..=0xFF60
+        | 0xFFE0..=0xFFE6
+        | 0x1F004
+        | 0x1F0CF
+        | 0x1F18E
+        | 0x1F191..=0x1F19A
+        | 0x1F200..=0x1F2FF
+        | 0x1F300..=0x1F64F
+        | 0x1F680..=0x1F6FF
+        | 0x1F7E0..=0x1F7EB
+        | 0x1F900..=0x1F9FF
+        | 0x1FA70..=0x1FAFF
+        | 0x20000..=0x3FFFD => 2,
+        _ => 1,
+    }
+}
+
+/// Largeur affichée d'un texte, en colonnes du terminal (sans les codes de couleur).
 pub fn largeur_affichee(t: &str) -> usize {
     let mut n = 0;
     let mut code = false;
@@ -44,27 +107,46 @@ pub fn largeur_affichee(t: &str) -> usize {
         match (code, c) {
             (false, '\x1b') => code = true,
             (true, 'm') => code = false,
-            (false, _) => n += 1,
+            (false, _) => n += largeur_car(c),
             _ => {}
         }
     }
     n
 }
 
-/// Coupe un texte trop long (« … » à la fin) ou le complète d'espaces jusqu'à `n` caractères.
+/// Le début de `t` (sans codes de couleur) qui tient dans `n` colonnes, « … » compris s'il a fallu couper.
+pub fn couper(t: &str, n: usize) -> String {
+    if largeur_affichee(t) <= n {
+        return t.to_string();
+    }
+    let mut court = String::new();
+    let mut l = 0;
+    for c in t.chars() {
+        // Une colonne gardée pour « … ».
+        if l + largeur_car(c) >= n {
+            break;
+        }
+        l += largeur_car(c);
+        court.push(c);
+    }
+    court.push('…');
+    court
+}
+
+/// Coupe un texte trop long (« … » à la fin) ou le complète d'espaces jusqu'à `n` colonnes.
 pub fn ajuster(t: &str, n: usize) -> String {
     let l = largeur_affichee(t);
     // Un texte en couleur n'est jamais coupé (on couperait un code) : seulement complété.
     if l > n && !t.contains('\x1b') {
-        let mut court: String = t.chars().take(n.saturating_sub(1)).collect();
-        court.push('…');
-        court
+        let court = couper(t, n);
+        let reste = n.saturating_sub(largeur_affichee(&court));
+        format!("{court}{}", " ".repeat(reste))
     } else {
         format!("{t}{}", " ".repeat(n.saturating_sub(l)))
     }
 }
 
-/// Coupe un texte en lignes d'au plus `largeur` caractères, aux espaces.
+/// Coupe un texte en lignes d'au plus `largeur` colonnes, aux espaces.
 pub fn envelopper(t: &str, largeur: usize) -> Vec<String> {
     envelopper_decale(t, largeur, largeur)
 }
@@ -75,7 +157,7 @@ pub fn envelopper_decale(t: &str, premiere: usize, suivantes: usize) -> Vec<Stri
     let mut ligne = String::new();
     for mot in t.split_whitespace() {
         let largeur = if lignes.is_empty() { premiere } else { suivantes };
-        if !ligne.is_empty() && ligne.chars().count() + 1 + mot.chars().count() > largeur {
+        if !ligne.is_empty() && largeur_affichee(&ligne) + 1 + largeur_affichee(mot) > largeur {
             lignes.push(std::mem::take(&mut ligne));
         }
         if !ligne.is_empty() {
@@ -200,4 +282,40 @@ pub fn demander(question: &str) -> String {
         std::process::exit(0);
     }
     s.trim().to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn un_emoji_ou_une_lettre_pleine_largeur_prend_deux_colonnes() {
+        assert_eq!(largeur_affichee("💡 à faire"), 10);
+        assert_eq!(largeur_affichee("🔧 ｐａｙｐａｌ"), 15);
+        // Ces symboles restent sur une colonne ; les codes de couleur, la variante d'emoji et l'accent combiné, sur
+        // aucune.
+        assert_eq!(largeur_affichee(&format!("{VERT}✔ ⚠ ✖ ℹ →{RESET}")), 9);
+        assert_eq!(largeur_affichee("⚠\u{fe0f}e\u{301}"), 2);
+    }
+
+    #[test]
+    fn couper_et_ajuster_tiennent_dans_les_colonnes_demandees() {
+        // Couper au milieu d'un emoji le laisserait déborder : il part entier.
+        for n in 1..12 {
+            let court = couper("ab💡💡💡cdef", n);
+            assert!(largeur_affichee(&court) <= n, "{n} : {court}");
+            assert_eq!(largeur_affichee(&ajuster("ab💡💡💡cdef", n)), n, "{n}");
+        }
+        assert_eq!(couper("ab💡cd", 4), "ab…");
+        assert_eq!(couper("court", 9), "court");
+        assert_eq!(ajuster("Lien", 9), "Lien     ");
+        assert_eq!(ajuster("Navigation", 6), "Navig…");
+    }
+
+    #[test]
+    fn envelopper_compte_les_colonnes() {
+        let lignes = envelopper("💡 💡 💡 💡 💡", 8);
+        assert_eq!(lignes, ["💡 💡 💡", "💡 💡"]);
+        assert!(lignes.iter().all(|l| largeur_affichee(l) <= 8));
+    }
 }

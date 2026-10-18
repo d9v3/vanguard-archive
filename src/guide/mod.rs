@@ -275,29 +275,115 @@ fn absent(s: Systeme, p: &Programme) -> bool {
     (s == Systeme::actuel() || s == Systeme::Tous) && !installe(p)
 }
 
-fn afficher_commande(c: &Commande) {
+/// Une commande et son explication. `numero` : celui qui la copie, à la place des deux espaces de la marge (la
+/// plus longue commande remplit déjà la ligne).
+fn afficher_commande(c: &Commande, numero: Option<usize>) {
     let marque = if c.modifie {
         format!("{}⚠{RESET}", couleur(Niveau::Moyen))
     } else {
         " ".to_string()
     };
-    println!("  {marque} {GRAS}{}{RESET}", ligne(c));
+    let marge = numero.map_or_else(|| "  ".to_string(), |n| format!("{TOUCHE}{n:>2}{RESET}"));
+    println!("{marge}{marque} {GRAS}{}{RESET}", ligne(c));
     for l in envelopper(dans_la_langue(c.texte), LARGEUR - 6) {
         println!("      {GRIS}{l}{RESET}");
     }
 }
 
-/// Un programme seul à l'écran, jusqu'à Entrée.
+/// Un programme seul à l'écran, ses commandes numérotées : un numéro copie la sienne, Entrée revient.
 fn montrer_programme(s: Systeme, p: &Programme) {
     print!("\x1b[2J\x1b[H");
-    afficher_programme(s, p);
-    demander(&trf!(
-        "\n{GRIS}Entrée pour revenir…{RESET}",
-        "\n{GRIS}Enter to go back…{RESET}"
-    ));
+    afficher_programme(s, p, true);
+    loop {
+        let reponse = demander(&trf!(
+            "\n  {GRIS}Numéro d'une commande à copier, ou Entrée pour revenir :{RESET} ",
+            "\n  {GRIS}Number of a command to copy, or Enter to go back:{RESET} "
+        ));
+        if reponse.is_empty() {
+            return;
+        }
+        let Some(c) = reponse
+            .parse::<usize>()
+            .ok()
+            .and_then(|n| n.checked_sub(1))
+            .and_then(|i| p.commandes.get(i))
+        else {
+            trp!(
+                "  Pas de commande n° « {reponse} » ici.",
+                "  No command number “{reponse}” here."
+            );
+            continue;
+        };
+        let commande = ligne(c);
+        if copier(&commande) {
+            trp!(
+                "  {VERT}✔{RESET} Copiée : {GRAS}{commande}{RESET}",
+                "  {VERT}✔{RESET} Copied: {GRAS}{commande}{RESET}"
+            );
+        } else {
+            // Sans presse-papier (pas de bureau, outil absent), la commande reste à sélectionner à la souris.
+            println!(
+                "  {}✖{RESET} {}\n    {GRAS}{commande}{RESET}",
+                couleur(Niveau::Moyen),
+                tr!(
+                    "Presse-papier inaccessible ici : sélectionne la commande à la souris.",
+                    "Clipboard unavailable here: select the command with the mouse."
+                )
+            );
+        }
+    }
 }
 
-fn afficher_programme(s: Systeme, p: &Programme) {
+/// Les façons de remplir le presse-papier sous Linux et macOS, à essayer dans l'ordre : des scripts `sh` qui
+/// reçoivent le texte en premier argument (« $1 »), jamais mêlé au script, pour qu'aucun caractère de la commande ne
+/// s'y exécute. Leurs sorties vont à /dev/null : wl-copy et xclip restent en fond pour servir le presse-papier, et
+/// garderaient sinon ouverte la sortie que lit `commande::lancer`.
+#[cfg(any(not(windows), test))]
+fn scripts_presse_papier(macos: bool, wayland: bool, x11: bool) -> Vec<&'static str> {
+    let mut scripts = Vec::new();
+    if macos {
+        scripts.push("printf %s \"$1\" | pbcopy");
+    }
+    if wayland {
+        scripts.push("wl-copy -- \"$1\" >/dev/null 2>&1");
+    }
+    if x11 {
+        scripts.push("printf %s \"$1\" | xclip -selection clipboard >/dev/null 2>&1");
+        scripts.push("printf %s \"$1\" | xsel --clipboard --input >/dev/null 2>&1");
+    }
+    scripts
+}
+
+/// Met `texte` dans le presse-papier par l'outil du système (Set-Clipboard, pbcopy, wl-copy, xclip ou xsel). Faux
+/// si aucun n'a marché : pas de bureau (SSH, console), ou outil absent.
+fn copier(texte: &str) -> bool {
+    #[cfg(windows)]
+    {
+        let script = format!("Set-Clipboard -Value {}", crate::commande::ps_chaine(texte));
+        crate::commande::lancer(
+            crate::machine::windows::powershell().args(["-NoProfile", "-NonInteractive", "-Command", &script]),
+            15,
+        )
+        .is_some_and(|r| r.code == Some(0))
+    }
+    #[cfg(not(windows))]
+    {
+        let present = |variable: &str| std::env::var_os(variable).is_some_and(|v| !v.is_empty());
+        scripts_presse_papier(
+            cfg!(target_os = "macos"),
+            present("WAYLAND_DISPLAY"),
+            present("DISPLAY"),
+        )
+        .into_iter()
+        .any(|script| {
+            crate::commande::lancer(std::process::Command::new("sh").args(["-c", script, "sh", texte]), 5)
+                .is_some_and(|r| r.code == Some(0))
+        })
+    }
+}
+
+/// Un programme et toutes ses commandes ; `numeros` : numérotées, pour les copier.
+fn afficher_programme(s: Systeme, p: &Programme, numeros: bool) {
     titre(&format!("{} › {}", s.nom(), nom(p)));
     let installe = if absent(s, p) {
         tr!(" (pas installé ici)", " (not installed here)")
@@ -305,8 +391,8 @@ fn afficher_programme(s: Systeme, p: &Programme) {
         ""
     };
     println!("  {GRIS}{}{installe}{RESET}\n", dans_la_langue(p.role));
-    for c in p.commandes {
-        afficher_commande(c);
+    for (i, c) in p.commandes.iter().enumerate() {
+        afficher_commande(c, numeros.then_some(i + 1));
     }
 }
 
@@ -513,7 +599,7 @@ fn afficher_resultats(recherche: &str, trouvees: &[Trouvee]) {
             println!("\n  {ACCENT}{} › {}{RESET}", s.nom(), nom(p));
             programme_en_cours = Some((s, p.nom));
         }
-        afficher_commande(c);
+        afficher_commande(c, None);
     }
 }
 
@@ -641,7 +727,7 @@ pub fn executer(quoi: &str) {
             println!("{l}");
         }
         for p in s.programmes() {
-            afficher_programme(s, p);
+            afficher_programme(s, p, false);
         }
         return;
     }
@@ -651,7 +737,7 @@ pub fn executer(quoi: &str) {
         afficher_resultats(quoi, &trouver(quoi));
     } else {
         for (s, p) in nommes {
-            afficher_programme(s, p);
+            afficher_programme(s, p, false);
         }
     }
 }
@@ -719,6 +805,26 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn le_presse_papier_suit_le_bureau() {
+        assert_eq!(scripts_presse_papier(false, false, false), [] as [&str; 0]);
+        assert!(scripts_presse_papier(true, false, false)[0].contains("pbcopy"));
+        let linux = scripts_presse_papier(false, true, true);
+        assert!(linux[0].contains("wl-copy") && linux[1].contains("xclip") && linux[2].contains("xsel"));
+    }
+
+    /// La commande copiée arrive telle quelle à l'outil : ni « $( ) », ni apostrophe, ni « ; » ne s'exécutent. `cat`
+    /// prend la place de pbcopy pour lire ce qu'il reçoit.
+    #[cfg(unix)]
+    #[test]
+    fn la_commande_copiee_reste_du_texte() {
+        let piege = r#"-n echo "$(touch /tmp/x)" '; echo INJECTE; ' `id` $HOME \ <fichier>"#;
+        let script = scripts_presse_papier(true, false, false)[0].replace("pbcopy", "cat");
+        let r =
+            crate::commande::lancer(std::process::Command::new("sh").args(["-c", &script, "sh", piege]), 5).unwrap();
+        assert_eq!((r.code, r.sortie.as_str()), (Some(0), piege));
     }
 
     #[test]

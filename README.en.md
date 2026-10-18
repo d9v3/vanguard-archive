@@ -149,13 +149,14 @@ patiently. "What Gardien has learned" shows everything and lets you forget.
 
 **Command guide** — the useful commands of Linux, Windows, macOS and the ones typed the same way everywhere
 (Gardien, ping, nslookup, ssh, curl, git…), sorted by system, then by program, each one explained; ⚠ marks the
-ones that change something. Nothing runs from there: you read, then type the command, here or on the computer of
-the person you help. Every system can be read everywhere (Windows commands from Linux, for example), and the guide
-tells when a program is missing on this computer.
+ones that change something. Nothing runs from there: you read, then type the command, or copy it by its number,
+here or on the computer of the person you help. Every system can be read everywhere (Windows commands from Linux, for
+example), and the guide tells when a program is missing on this computer.
 
 **And also**
-- Search in every menu: type a word (wifi, disk, dns, update…), only the lines containing it stay, whatever the
-  accents or capitals; in the main menu, it also finds each tool of the submenus and each page of the guide.
+- Search in every menu and checklist: type a word (wifi, disk, dns, update…), only the lines containing it stay,
+  whatever the accents or capitals; in the main menu, it also finds each tool of the submenus and each page of the
+  guide.
 - Fixes applied only after confirmation, with a restore point created automatically beforehand (snapper or
   timeshift on Linux, Windows restore point, Time Machine snapshot on macOS); on Windows, each one is a readable
   script.
