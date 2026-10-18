@@ -58,6 +58,16 @@ pub fn lancer(commande: &mut Command, secondes: u64) -> Option<Resultat> {
     })
 }
 
+/// Comme `lancer`, l'outil répondant en anglais, avec les nombres et les dates du « C » : pour une sortie que Gardien
+/// analyse et que l'outil traduit (nmcli écrit « oui » pour « yes », lscpu « Nom de modèle » pour « Model name »).
+/// En UTF-8, un nom de réseau accentué reste intact ; sans C.UTF-8, le système se replie sur le « C ». LANGUAGE est
+/// retirée : selon la bibliothèque C, elle l'emporterait sur C.UTF-8. Une sortie montrée telle quelle à la personne
+/// garde sa langue : `lancer`.
+#[cfg(target_os = "linux")]
+pub fn lancer_en_anglais(commande: &mut Command, secondes: u64) -> Option<Resultat> {
+    lancer(commande.env("LC_ALL", "C.UTF-8").env_remove("LANGUAGE"), secondes)
+}
+
 /// Arrête le programme et tout ce qu'il a lancé : sinon un sous-processus (winget sous PowerShell, un outil sous un
 /// script) continuerait en arrière-plan, avec ses verrous.
 fn arreter(enfant: &mut Child) {
@@ -164,6 +174,65 @@ mod tests_powershell {
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
+
+    /// Les sorties analysées que leur outil traduit (relevées outil par outil, en français et en anglais) passent
+    /// toutes par `lancer_en_anglais` : nmcli écrit « oui » pour « yes » dans la colonne ACTIVE, lscpu « Nom de
+    /// modèle : » pour « Model name: », dpkg -S traduit ses lignes « diversion by … ». Lu dans les fichiers : l'appel
+    /// de l'outil et `lancer_en_anglais` dans la même instruction.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn sorties_traduites_lues_en_anglais() {
+        let dans_la_langue_du_systeme: Vec<String> = [
+            (
+                "machine/linux/mod.rs",
+                include_str!("machine/linux/mod.rs"),
+                "Command::new(\"nmcli\")",
+            ),
+            (
+                "machine/linux/mod.rs",
+                include_str!("machine/linux/mod.rs"),
+                "Command::new(\"dpkg\").args([\"-S\"",
+            ),
+            (
+                "reseau/canaux.rs",
+                include_str!("reseau/canaux.rs"),
+                "Command::new(\"nmcli\")",
+            ),
+            (
+                "reseau/scan.rs",
+                include_str!("reseau/scan.rs"),
+                "Command::new(\"nmcli\")",
+            ),
+            ("fiche.rs", include_str!("fiche.rs"), "Command::new(\"lscpu\")"),
+        ]
+        .into_iter()
+        .filter(|(_, source, appel)| {
+            source.find(appel).is_none_or(|i| {
+                let instruction = &source[source[..i].rfind(';').map_or(0, |d| d + 1)..i];
+                !instruction.contains("lancer_en_anglais(")
+            })
+        })
+        .map(|(fichier, _, appel)| format!("{fichier} : {appel}"))
+        .collect();
+        assert!(dans_la_langue_du_systeme.is_empty(), "{dans_la_langue_du_systeme:#?}");
+    }
+
+    /// La langue de la personne (ici donnée à la commande : LC_ALL et LANGUAGE en français) arrive à l'outil par
+    /// `lancer`, jamais par `lancer_en_anglais`.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn lancer_en_anglais_remplace_la_langue_de_la_personne() {
+        let langue = |r: Option<Resultat>| r.map(|r| r.sortie.trim().to_string()).unwrap_or_default();
+        let en_francais = || {
+            let mut c = Command::new("sh");
+            c.args(["-c", "echo \"$LC_ALL|${LANGUAGE-aucune}\""])
+                .env("LC_ALL", "fr_CA.UTF-8")
+                .env("LANGUAGE", "fr_CA:fr");
+            c
+        };
+        assert_eq!(langue(lancer(&mut en_francais(), 5)), "fr_CA.UTF-8|fr_CA:fr");
+        assert_eq!(langue(lancer_en_anglais(&mut en_francais(), 5)), "C.UTF-8|aucune");
+    }
 
     #[test]
     fn delai_et_sorties() {

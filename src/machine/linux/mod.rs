@@ -181,7 +181,10 @@ impl Paquets {
             let arg = f.to_string_lossy();
             match self {
                 Paquets::Pacman => sortie("pacman", &["-Qoq", &arg]).map(|s| s.trim().to_string()),
-                Paquets::Apt => sortie("dpkg", &["-S", &arg]).and_then(|s| paquet_dpkg(&s)),
+                // En anglais : dpkg traduit les lignes « diversion by … » que paquet_dpkg écarte.
+                Paquets::Apt => crate::commande::lancer_en_anglais(Command::new("dpkg").args(["-S", &*arg]), 30)
+                    .filter(|r| r.code == Some(0))
+                    .and_then(|r| paquet_dpkg(&r.sortie)),
                 Paquets::Dnf | Paquets::Zypper => sortie("rpm", &["-qf", "--qf", "%{NAME}\\n", &arg])
                     .and_then(|s| s.lines().next().map(str::to_string)),
             }
@@ -901,11 +904,14 @@ fn comptes() -> Constat {
 
 /// Wi-Fi : protection du réseau connecté, et un éventuel jumeau maléfique parmi les réseaux visibles.
 fn wifi(passerelle: Option<String>) -> Vec<Constat> {
-    // SSID en dernier et sans échappement : un nom de réseau contenant « : » reste intact.
-    let Some(s) = sortie(
-        "nmcli",
-        &["-t", "-e", "no", "-f", "ACTIVE,SECURITY,SSID", "dev", "wifi"],
-    ) else {
+    // SSID en dernier et sans échappement : un nom de réseau contenant « : » reste intact. En anglais : nmcli
+    // traduit la colonne ACTIVE (« oui » en français), et le réseau connecté n'était plus trouvé.
+    let Some(s) = crate::commande::lancer_en_anglais(
+        Command::new("nmcli").args(["-t", "-e", "no", "-f", "ACTIVE,SECURITY,SSID", "dev", "wifi"]),
+        30,
+    )
+    .filter(|r| r.code == Some(0))
+    .map(|r| r.sortie) else {
         return Vec::new();
     };
     let visibles = super::wifi::lire_nmcli(&s);

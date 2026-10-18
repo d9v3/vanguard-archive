@@ -123,9 +123,12 @@ fn qualite(signal: u8) -> &'static str {
 #[cfg(target_os = "linux")]
 fn lire() -> Result<Lecture, &'static str> {
     let reussie = |c: &mut Command, delai| lancer(c, delai).filter(|r| r.code == Some(0)).map(|r| r.sortie);
-    // NetworkManager d'abord ; sans lui (iwd, systemd-networkd), le dernier balayage gardé par le noyau.
+    // NetworkManager d'abord ; sans lui (iwd, systemd-networkd), le dernier balayage gardé par le noyau. En anglais :
+    // nmcli traduit la colonne ACTIVE (« oui » en français), et la borne de la connexion n'était plus reconnue.
     let champs = "-t -e no -f ACTIVE,SIGNAL,FREQ,CHAN,SSID dev wifi list".split(' ');
-    let bornes = reussie(Command::new("nmcli").args(champs), 30).map_or_else(Vec::new, |s| wifi::bornes_nmcli(&s));
+    let bornes = crate::commande::lancer_en_anglais(Command::new("nmcli").args(champs), 30)
+        .filter(|r| r.code == Some(0))
+        .map_or_else(Vec::new, |r| wifi::bornes_nmcli(&r.sortie));
     if !bornes.is_empty() {
         return Ok(Lecture { bornes, note: None });
     }

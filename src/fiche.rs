@@ -257,7 +257,11 @@ fn lire() -> Fiche {
     };
     f.processeur = valeur("model name")
         .or_else(|| {
-            sortie("lscpu", &[])
+            // En anglais : lscpu traduit ses libellés (« Nom de modèle : » en français).
+            crate::commande::lancer_en_anglais(&mut std::process::Command::new("lscpu"), 20)
+                .filter(|r| r.code == Some(0))
+                .map(|r| r.sortie)
+                .unwrap_or_default()
                 .lines()
                 .find_map(|l| l.strip_prefix("Model name:").map(|v| v.trim().to_string()))
         })

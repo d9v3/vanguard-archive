@@ -594,10 +594,16 @@ pub fn fabricant_traduit(note: &str) -> &str {
 
 /// Nom du Wi-Fi auquel on est connecté, pour reconnaître le réseau dans la base (« Salon », « Chez Max »…).
 pub fn nom_wifi() -> Option<String> {
+    // En anglais : nmcli traduit la colonne ACTIVE (« oui: » en français), et le réseau n'était plus reconnu.
     #[cfg(target_os = "linux")]
-    let nom = commande_sortie("nmcli", &["-t", "-e", "no", "-f", "ACTIVE,SSID", "dev", "wifi"])
-        .lines()
-        .find_map(|l| l.strip_prefix("yes:").map(str::to_string));
+    let nom = crate::commande::lancer_en_anglais(
+        std::process::Command::new("nmcli").args(["-t", "-e", "no", "-f", "ACTIVE,SSID", "dev", "wifi"]),
+        10,
+    )
+    .map(|r| r.sortie)
+    .unwrap_or_default()
+    .lines()
+    .find_map(|l| l.strip_prefix("yes:").map(str::to_string));
     #[cfg(windows)]
     let nom = commande_sortie("netsh", &["wlan", "show", "interfaces"])
         .lines()
@@ -618,6 +624,7 @@ pub fn nom_wifi() -> Option<String> {
     nom.filter(|n| !n.is_empty())
 }
 
+#[cfg(not(target_os = "linux"))]
 fn commande_sortie(cmd: &str, args: &[&str]) -> String {
     crate::commande::lancer(std::process::Command::new(cmd).args(args), 10)
         .map(|r| r.sortie)
