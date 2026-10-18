@@ -370,11 +370,21 @@ if ((Sortie 'antivirus-dossier') -match 'No malware found|Aucun malware|aucune m
 Remove-Item $propre -Recurse -Force -ErrorAction SilentlyContinue
 
 Etape 'Menu : chaque groupe ouvert puis refermé'
-LancerAvec 'menu' @() "4`n`n5`n`n6`n`n7`n`nq`n"
+LancerAvec 'menu' @() "4`n`n5`n`n6`n`n7`n`n8`n`n9`n`n10`n`n11`n`nq`n"
 $m = Sortie 'menu'
-foreach ($g in 'Cette machine|This machine', 'Réseau et Internet|Network and Internet', 'Antivirus et protection|Antivirus and protection', 'Installer et jouer|Install and play') {
-    $nom = $g.Split('|')[0]
-    if ($m -match $g) { Ok "Groupe « $nom » affiché" } else { Bug "Groupe « $nom » ABSENT" }
+# Une ligne propre à chaque sous-menu (le titre d'un groupe s'affiche aussi au menu principal), majuscules comprises.
+$sousMenus = [ordered]@{
+    'Cette machine' = "Fiche de l'ordinateur|Computer specs"
+    'Réseau et Internet' = 'Surveillance toutes les heures|Hourly monitoring'
+    'Antivirus et protection' = 'Ce lien est-il dangereux|Is this link dangerous'
+    'Installer et jouer' = 'les meilleurs, par catégorie|the best ones, by category'
+    'Optimiser' = 'Nettoyer le système|Clean up the system'
+    'Données' = 'Copier mes fichiers|Copy my files'
+    'Guide des commandes' = 'Tous les systèmes|All systems'
+    'Dépanner pas à pas' = "Pas d'Internet|No Internet"
+}
+foreach ($g in $sousMenus.Keys) {
+    if ($m -cmatch $sousMenus[$g]) { Ok "Sous-menu « $g » ouvert" } else { Bug "Sous-menu « $g » PAS ouvert" }
 }
 # Entrée fermée (comme Ctrl-D) : Gardien doit quitter, pas tourner en boucle (bug corrigé en 0.9.7).
 $vide = Join-Path $res 'vide.txt'
@@ -384,6 +394,147 @@ $p = Start-Process -FilePath $exe -RedirectStandardInput $vide -RedirectStandard
 $null = $p.Handle
 if ($p.WaitForExit(10000)) { Ok 'Quitte quand l''entrée est fermée' }
 else { $p.Kill(); Bug 'Boucle sans fin quand l''entrée est fermée' }
+
+Etape 'Pourquoi c''est lent ? Fiche de l''ordinateur'
+LancerAvec 'lenteur' @('lenteur') "`n"
+$t = Sortie 'lenteur'
+if ($t -match "POURQUOI C'EST LENT|WHY IS IT SLOW") { Ok 'Instantané affiché' } else { Bug 'Instantané ABSENT' }
+if ($t -match 'PowerShell ne répond pas|PowerShell is not responding') { Bug 'Lecture PowerShell en échec' }
+Lancer 'fiche-json' @('fiche', '--json')
+try {
+    $f = Sortie 'fiche-json' | ConvertFrom-Json
+    if ($f.processeur) { Ok "Processeur : $($f.processeur)" } else { Bug 'Processeur non lu' }
+    if ($f.memoire) { Ok 'Mémoire lue' } else { Bug 'Mémoire non lue' }
+    if (@($f.disques).Count) { Ok "$(@($f.disques).Count) disque(s) lu(s)" } else { Bug 'Disques non lus' }
+} catch { Bug "fiche --json illisible : $($_.Exception.Message)" }
+
+Etape 'Programmes au démarrage : liste, rien retiré sans accord'
+$runAvant = Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -ErrorAction SilentlyContinue | Out-String
+LancerAvec 'demarrage' @('demarrage') "q`n"
+if ((Sortie 'demarrage') -match 'Programmes au démarrage|Startup programs') { Ok 'Liste affichée' } else { Bug 'Liste ABSENTE' }
+$runApres = Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -ErrorAction SilentlyContinue | Out-String
+if ($runAvant -eq $runApres) { Ok 'Rien retiré sans accord' } else { Bug 'Démarrage modifié sans accord' }
+
+Etape 'Entretien du mois, et ce que Gardien a appris'
+Lancer 'entretien' @('entretien')
+if ((Sortie 'entretien') -match 'Entretien du mois|Monthly check-up') { Ok 'Résumé du mois affiché' } else { Bug 'Résumé du mois ABSENT' }
+LancerAvec 'appris' @('appris') "`n"
+if ((Sortie 'appris') -match 'Ce que Gardien a appris|What Gardien has learned') { Ok 'Page « appris » affichée' } else { Bug 'Page « appris » ABSENTE' }
+
+Etape 'Réseau : Wi-Fi encombré, type de NAT, caméras, listes noires refusées'
+Lancer 'canaux' @('canaux')
+if ((Sortie 'canaux') -match 'Wi-Fi encombré|Crowded Wi-Fi') { Ok 'Wi-Fi examiné (la VM n''en a pas : la sortie doit le dire)' } else { Bug 'Wi-Fi encombré : rien affiché' }
+Lancer 'nat' @('nat')
+if ((Sortie 'nat') -match 'Type de NAT|NAT type') { Ok 'Type de NAT examiné' } else { Bug 'Type de NAT : rien affiché' }
+Lancer 'cameras' @('cameras')
+if ((Sortie 'cameras') -match 'Caméras cachées|Hidden cameras') { Ok 'Recherche de caméras faite' } else { Bug 'Caméras : rien affiché' }
+LancerAvec 'listes-noires' @('listes-noires') "n`n"
+if ((Sortie 'listes-noires') -match "Rien n'a été envoyé|Nothing was sent") { Ok 'Accord demandé, refus respecté' } else { Bug 'Refus des listes noires PAS respecté' }
+
+Etape 'DNS le plus rapide : mesuré, rien changé sans accord'
+$dnsAvant = Get-DnsClientServerAddress -AddressFamily IPv4 | Format-Table -AutoSize | Out-String
+LancerAvec 'dns-rapide' @('dns-rapide') "n`nn`n"
+if ((Sortie 'dns-rapide') -match 'DNS le plus rapide|Fastest DNS') { Ok 'DNS mesurés' } else { Bug 'DNS le plus rapide : rien affiché' }
+$dnsApres = Get-DnsClientServerAddress -AddressFamily IPv4 | Format-Table -AutoSize | Out-String
+if ($dnsAvant -eq $dnsApres) { Ok 'DNS inchangés (refusé)' } else { Bug 'DNS changés malgré le refus' }
+
+Etape 'Qui parle à Internet ? Ce lien est-il dangereux ?'
+Lancer 'sortantes' @('sortantes')
+$s = Sortie 'sortantes'
+if ($s -match 'Qui parle à Internet|Who talks to the Internet') { Ok 'Connexions listées' } else { Bug 'Connexions : rien affiché' }
+if ($s -match 'PowerShell ne répond pas|PowerShell is not responding') { Bug 'Lecture PowerShell en échec' }
+# Un « & » dans le lien : il ne doit pas couper la commande.
+LancerAvec 'lien' @('lien', 'https://paypal.com.secure-login.example/connexion?a=1&b=2') "n`n"
+$l = Sortie 'lien'
+if ($l -match 'secure-login\.example') { Ok 'Vrai site trouvé : secure-login.example' } else { Bug 'Vrai site PAS trouvé' }
+if ($l -match 'Sous-domaine trompeur|Misleading subdomain') { Ok 'Sous-domaine trompeur signalé' } else { Bug 'Sous-domaine trompeur PAS signalé' }
+if ($l -match "Rien n'a été envoyé|Nothing was sent") { Ok 'Rien envoyé sans accord' } else { Bug 'Refus de l''examen en ligne PAS respecté' }
+
+Etape 'Vérifier un fichier téléchargé : bonne, puis mauvaise empreinte'
+$fichier = Join-Path $env:TEMP 'gardien-telechargement-test.txt'
+Set-Content -Path $fichier -Value 'contenu de test' -Encoding UTF8
+$empreinte = (Get-FileHash $fichier -Algorithm SHA256).Hash.ToLower()
+LancerAvec 'verifier-bon' @('verifier-fichier', $fichier, $empreinte) "n`nn`nn`n"
+$v = Sortie 'verifier-bon'
+if ($v -match '\) correspond :|\) matches:' -and $v -notmatch 'ne correspond pas|does not match') { Ok 'Bonne empreinte reconnue' } else { Bug 'Bonne empreinte PAS reconnue' }
+LancerAvec 'verifier-faux' @('verifier-fichier', $fichier, ('0' * 64)) "n`nn`nn`n"
+if ((Sortie 'verifier-faux') -match 'ne correspond pas|does not match') { Ok 'Mauvaise empreinte signalée' } else { Bug 'Mauvaise empreinte PAS signalée' }
+Remove-Item $fichier -Force -ErrorAction SilentlyContinue
+
+Etape 'Fichiers-pièges : posés, un renommé comme par un rançongiciel, retirés'
+$dossiersPieges = @([Environment]::GetFolderPath('MyDocuments'), [Environment]::GetFolderPath('MyPictures'), [Environment]::GetFolderPath('Desktop'))
+if (Question 'Faire ce test (six fichiers posés puis retirés dans Documents, Images et Bureau) ?' 'o') {
+    LancerAvec 'pieges-poser' @('pieges') "o`n"
+    if ((Sortie 'pieges-poser') -match 'fichiers-pièges posés|decoy files placed') { Ok 'Fichiers-pièges posés' } else { Bug 'Fichiers-pièges PAS posés' }
+    $piege = Get-ChildItem $dossiersPieges[0] -Filter '!Gardien*.txt' -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($piege) {
+        Rename-Item $piege.FullName ($piege.Name + '.locked')
+        LancerAvec 'pieges-etat' @('pieges') "`n"
+        if ((Sortie 'pieges-etat') -match 'RENOMMÉ en|RENAMED to') { Ok 'Fichier-piège renommé repéré' } else { Bug 'Fichier-piège renommé PAS repéré' }
+        Rename-Item (Join-Path $piege.DirectoryName ($piege.Name + '.locked')) $piege.Name
+    } else { Bug 'Aucun fichier-piège dans Documents' }
+    LancerAvec 'pieges-retirer' @('pieges', '--retirer') "o`n"
+    if (Get-ChildItem $dossiersPieges -Filter '!Gardien*' -ErrorAction SilentlyContinue) { Bug 'Fichiers-pièges ENCORE présents' } else { Ok 'Fichiers-pièges retirés' }
+} else { Info 'Sautée.' }
+
+Etape 'YARA : moteur installé par winget, puis analyse d''un dossier'
+$yaraLien = Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Links\yara.exe'
+$dossierYara = Join-Path $env:TEMP 'gardien-dossier-yara'
+New-Item -ItemType Directory -Force $dossierYara | Out-Null
+Set-Content -Path (Join-Path $dossierYara 'note.txt') -Value 'fichier sans danger' -Encoding UTF8
+if ((Test-Path $yaraLien) -or (Question 'Installer le moteur YARA par winget (VirusTotal.YARA), puis analyser un dossier ?')) {
+    LancerAvec 'yara' @('yara', $dossierYara) "o`n"
+    if (Test-Path $yaraLien) { Ok 'Moteur trouvé dans WinGet\Links' } else { Bug 'yara.exe ABSENT de WinGet\Links' }
+    $y = Sortie 'yara'
+    if ($y -match 'Analyse de|Scanning') { Ok 'Analyse lancée' } else { Bug 'Analyse PAS lancée' }
+    if ($y -match "n'a pas pu aller au bout|could not finish") { Bug 'Le moteur n''est pas allé au bout' }
+} else {
+    LancerAvec 'yara-refus' @('yara', $dossierYara) "n`n"
+    if ((Sortie 'yara-refus') -match "n'est pas installé|is not installed") { Ok 'Moteur absent dit, refus de l''installer respecté' } else { Bug 'Moteur absent PAS dit' }
+}
+Remove-Item $dossierYara -Recurse -Force -ErrorAction SilentlyContinue
+
+Etape 'Copier mes fichiers : disque du système refusé, puis vraie copie vers le dossier partagé'
+$refuse = Join-Path $env:TEMP 'gardien-copie-test'
+New-Item -ItemType Directory -Force $refuse | Out-Null
+LancerAvec 'copier-refus' @('copier-fichiers', $refuse) "`nn`n"
+if ((Sortie 'copier-refus') -match 'disque du système|system disk') { Ok 'Copie sur le disque du système refusée' } else { Bug 'Copie sur le disque du système PAS refusée' }
+Remove-Item $refuse -Recurse -Force -ErrorAction SilentlyContinue
+if (Question 'Faire une vraie copie de tes dossiers vers le dossier partagé (dans les résultats, effacée après) ?') {
+    $temoin = Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'gardien-test-copie.txt'
+    Set-Content -Path $temoin -Value "copie de test $(Get-Date -Format o)" -Encoding UTF8
+    $vers = Join-Path $res 'copie'
+    New-Item -ItemType Directory -Force $vers | Out-Null
+    LancerAvec 'copier' @('copier-fichiers', $vers) "`no`n"
+    $copie = Get-ChildItem $vers -Recurse -Filter 'gardien-test-copie.txt' -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($copie -and (Get-FileHash $copie.FullName).Hash -eq (Get-FileHash $temoin).Hash) { Ok 'Fichier témoin copié à l''identique' } else { Bug 'Fichier témoin PAS copié à l''identique' }
+    if ((Sortie 'copier') -match 'Copie terminée et vérifiée|Copy finished and checked') { Ok 'Copie vérifiée par Gardien' } else { Bug 'Copie PAS vérifiée' }
+    Remove-Item $temoin -Force -ErrorAction SilentlyContinue
+    Remove-Item $vers -Recurse -Force -ErrorAction SilentlyContinue
+} else { Info 'Vraie copie sautée.' }
+
+Etape 'Dépanner : pas de son, et les réglages du son ouverts par Gardien'
+# Un lien ouvert par Gardien (ms-settings:sound), sauf en arrière-plan : rien ne doit surgir à l'écran.
+$ouvrirReglages = if ($SansOuvrir -or $Auto) { 'n' } else { 'o' }
+LancerAvec 'depanner-son' @('depanner', 'son') "1`n1`n$ouvrirReglages`nn`n`n"
+$d = Sortie 'depanner-son'
+if ($d -match 'Où manque le son|Where is the sound missing') { Ok 'Parcours « pas de son » suivi' } else { Bug 'Parcours « pas de son » PAS suivi' }
+if ($d -match 'PowerShell ne répond pas|PowerShell is not responding|État du son illisible|Sound state not readable') { Bug 'État du son PAS lu (PowerShell)' }
+if ($ouvrirReglages -eq 'o') { Start-Sleep -Seconds 2; Constat 'Les réglages du son de Windows se sont-ils ouverts ?' }
+Lancer 'depanner-sujets' @('depanner', 'xyz')
+if ((Sortie 'depanner-sujets') -match "Pas d'Internet|No Internet") { Ok 'Sujets listés pour un sujet inconnu' } else { Bug 'Sujets PAS listés' }
+
+Etape 'Guide des commandes : une page, et la copie d''une commande'
+Lancer 'guide-winget' @('guide', 'winget')
+if ((Sortie 'guide-winget') -match 'winget upgrade --all') { Ok 'Page de winget affichée' } else { Bug 'Page de winget ABSENTE' }
+$presseAvant = Get-Clipboard -Raw -ErrorAction SilentlyContinue
+# « 10.2.1 » : guide, Windows, winget ; « 2 » copie sa 2e commande.
+LancerAvec 'guide-copie' @() "10.2.1`n2`n`nq`n"
+$copiee = Get-Clipboard -Raw -ErrorAction SilentlyContinue
+if ($copiee -and $copiee.Trim() -eq 'winget upgrade --all') { Ok 'Commande copiée dans le presse-papier (Set-Clipboard)' }
+elseif ((Sortie 'guide-copie') -match 'Presse-papier inaccessible|Clipboard unavailable') { Info 'Presse-papier inaccessible ici (test en arrière-plan ?) : Gardien l''a dit et a remontré la commande' }
+else { Bug "Commande PAS copiée (presse-papier : « $copiee »)" }
+if ($presseAvant) { Set-Clipboard -Value $presseAvant }
 
 Etape 'Surveillance : activation puis désactivation (Planificateur de tâches)'
 Lancer 'surveillance-on' @('surveillance', 'on')
