@@ -123,6 +123,12 @@ pub fn ps_texte(t: &str) -> String {
     s
 }
 
+/// Le texte entre apostrophes, pour bash : « '…' » ; une apostrophe du texte ferme, s'échappe et rouvre.
+#[cfg(any(unix, test))]
+pub fn sh_chaine(t: &str) -> String {
+    format!("'{}'", t.replace('\'', "'\\''"))
+}
+
 /// Le texte entre apostrophes, pour PowerShell : « '…' ».
 #[cfg(any(windows, test))]
 pub fn ps_chaine(t: &str) -> String {

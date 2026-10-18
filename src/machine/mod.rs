@@ -15,6 +15,7 @@ mod journaux;
 #[cfg(target_os = "linux")]
 pub mod linux;
 mod navigateur;
+mod partages;
 mod sante;
 pub(crate) mod wifi;
 #[cfg(target_os = "linux")]
@@ -184,6 +185,7 @@ fn audit(systeme: &'static str, premier: Constat, mut propres: Vec<Verification<
         verif!(extensions::extensions()),
         verif!(navigateur::navigateurs()),
         verif!(sante::sante()),
+        verif!(partages::partages()),
         verif!(journaux::journaux()),
         verif!([crate::protection::integrite::constat()]),
         verif!(crate::protection::pieges::constat()),

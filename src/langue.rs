@@ -167,6 +167,7 @@ pub fn categorie(nom: &str) -> &str {
         "Noyau" => "Kernel",
         "Noyau durci" => "Kernel hardening",
         "Paquets AUR" => "AUR packages",
+        "Partages de fichiers" => "File shares",
         "Persistance" => "Persistence",
         "Pilotes" => "Drivers",
         "Pilotes DKMS" => "DKMS drivers",
