@@ -212,8 +212,9 @@ mod systeme {
             .unwrap_or_else(|| "Linux".into());
         systeme.push(ligne(
             tr!("Système", "System"),
-            format!(
+            trf!(
                 "{os} · noyau {}",
+                "{os} · kernel {}",
                 lire("/proc/sys/kernel/osrelease").unwrap_or_default()
             ),
         ));
@@ -820,6 +821,18 @@ mod tests {
         let sans_taille = "TIME                            PID   UID   GID SIG COREFILE  EXE\n\
                            Sat 2021-05-01 10:00:00 UTC    1234  1000  1000  11 present   /opt/Mon Jeu/jeu\n";
         assert_eq!(systeme::programmes_coredumpctl(sans_taille), ["jeu"]);
+    }
+
+    /// La ligne « Système » de Linux existe dans les deux langues : « noyau » s'affichait aussi en anglais. Les tests
+    /// tournent en français : le texte anglais est cherché dans le code de ce fichier.
+    #[test]
+    fn noyau_dans_les_deux_langues() {
+        let source = include_str!("diagnostic.rs");
+        let code = &source[..source.find("#[cfg(test)]\nmod tests").unwrap_or(source.len())];
+        assert!(
+            code.contains("\"{os} · kernel {}\""),
+            "ligne « Système » sans texte anglais"
+        );
     }
 
     /// Les cartes graphiques de lspci : « VGA », « 3D » (la carte NVIDIA d'un portable), et aussi « Display
