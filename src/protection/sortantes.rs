@@ -324,13 +324,15 @@ fn dossier_risque(chemin: &str, montages: &str) -> Option<&'static str> {
     if c.contains("/apptranslocation/") || appimage(chemin, montages) {
         return None;
     }
-    // Dossiers temporaires : à la racine sous Linux et macOS, sous le dossier du compte ou de Windows ailleurs.
+    // Dossiers temporaires : à la racine sous Linux et macOS, sous le dossier du compte ou de Windows ailleurs. Sous
+    // macOS, celui du compte ($TMPDIR) se lit sous deux noms : /var/folders est un lien vers /private/var/folders.
     let racines = [
         "/tmp/",
         "/var/tmp/",
         "/dev/shm/",
         "/private/tmp/",
         "/private/var/folders/",
+        "/var/folders/",
     ];
     if racines.iter().any(|t| c.starts_with(t))
         || ["/appdata/local/temp/", "/windows/temp/"].iter().any(|t| c.contains(t))
@@ -832,6 +834,10 @@ mod tests {
     #[test]
     fn jugement() {
         assert_eq!(dossier_risque("/tmp/.x/miner", ""), Some("un dossier temporaire"));
+        // macOS : le dossier temporaire du compte, sous ses deux noms.
+        for t in ["/var/folders/ab/cdef/T/miner", "/private/var/folders/ab/cdef/T/miner"] {
+            assert_eq!(dossier_risque(t, ""), Some("un dossier temporaire"), "{t}");
+        }
         assert_eq!(
             dossier_risque("/home/alice/Téléchargements/outil", ""),
             Some("les Téléchargements")
