@@ -147,9 +147,11 @@ The key has two partitions: `GARDIEN`, read-only everywhere except on its owner'
 Windows; on Linux and macOS, Gardien remounts it read-only itself), and `GARDIENLOG`, which only receives the error
 log, anonymized. `outils/preparer-cle.sh` prepares a new key.
 
-In preparation, a rescue key that also boots computers: `outils/cle-secours.sh` (Ventoy for Windows 11, Omarchy and
-SystemRescue, an HFS+ partition for the macOS recovery of Intel Macs, `GARDIEN` and `GARDIENLOG` as before).
-`--plan` and `--essai` (on a disk image) touch no disk; only `--ecrire` erases the key.
+In preparation, a rescue key that also boots computers: `outils/cle-secours.sh`. Ventoy boots Omarchy and
+SystemRescue (and Windows 11 as a fallback); a FAT32 `WIN11` partition installs Windows 11 with Secure Boot on,
+without adding a key to the PC (`install.wim` split by wimlib under the 4 GB limit); an HFS+ partition holds the macOS
+recovery of Intel Macs; `GARDIEN` and `GARDIENLOG` as before. `--plan` and `--essai` (on a disk image) touch no disk;
+only `--ecrire` erases the key.
 
 ## Errors and crashes
 
