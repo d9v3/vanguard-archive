@@ -484,10 +484,12 @@ struct Programme {
     connexions: usize,
 }
 
-fn marque(niveau: Option<Niveau>) -> String {
+/// La marque d'un programme : sans signe, ✔ seulement si son chemin a pu être examiné ; sinon « ? » (non vérifié).
+fn marque(niveau: Option<Niveau>, chemin_lu: bool) -> String {
     match niveau {
         Some(n @ (Niveau::Eleve | Niveau::Critique)) => format!("{}✖{RESET}", couleur(n)),
         Some(Niveau::Moyen) => format!("{}⚠{RESET}", couleur(Niveau::Moyen)),
+        _ if !chemin_lu => format!("{GRIS}?{RESET}"),
         _ => format!("{VERT}✔{RESET}"),
     }
 }
@@ -588,7 +590,7 @@ pub fn afficher() {
         let n = p.connexions;
         println!(
             "  {} {ACCENT}{}{RESET} {GRIS}· {}{RESET}",
-            marque(p.pire),
+            marque(p.pire, p.chemin.is_some()),
             p.nom,
             trf!("{n} connexion(s)", "{n} connection(s)")
         );
@@ -819,5 +821,12 @@ mod tests {
         assert_eq!(qui("lhr25s34-in-f14.1e100.net"), "Google");
         assert_eq!(qui("lb-140-82-112-4-iad.github.com"), "GitHub");
         assert_eq!(qui("serveur.exemple.co.uk"), "exemple.co.uk");
+    }
+
+    #[test]
+    fn chemin_invisible_jamais_coche() {
+        assert!(marque(None, true).contains('✔'));
+        assert!(marque(None, false).contains('?') && !marque(None, false).contains('✔'));
+        assert!(marque(Some(Niveau::Eleve), false).contains('✖'));
     }
 }
