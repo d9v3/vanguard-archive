@@ -21,6 +21,7 @@ modification. Sur GitHub, `@claude` dans un ticket ou une demande de fusion le f
 | `src/machine/mod.rs` | types communs, affichage, exécution parallèle des vérifications |
 | `src/machine/linux/`, `src/machine/windows/`, `src/machine/macos/` | audit propre à chaque système, un fichier par thème |
 | `src/machine/dns.rs`, `certificats.rs`, `extensions.rs`, `sante.rs`, `wifi.rs` | vérifications communes aux trois systèmes |
+| `src/machine/unix.rs` | vérifications communes à Linux et macOS : fichiers secrets, sudo |
 | `src/corriger.rs` | application guidée des correctifs |
 | `src/reseau.rs`, `src/scan.rs` | scan réseau (TCP connect, sans root), ARP, carnets des réseaux |
 | `src/risk.rs` | base de connaissances des ports et niveaux de risque |

@@ -21,6 +21,7 @@ turn on once with `/install-github-app`).
 | `src/machine/mod.rs` | shared types, display, parallel execution of the checks |
 | `src/machine/linux/`, `src/machine/windows/`, `src/machine/macos/` | per-system audit, one file per topic |
 | `src/machine/dns.rs`, `certificats.rs`, `extensions.rs`, `sante.rs`, `wifi.rs` | checks shared by the three systems |
+| `src/machine/unix.rs` | checks shared by Linux and macOS: secret files, sudo |
 | `src/corriger.rs` | guided application of fixes |
 | `src/reseau.rs`, `src/scan.rs` | network scan (TCP connect, without root), ARP, network notebooks |
 | `src/risk.rs` | knowledge base of ports and risk levels |
