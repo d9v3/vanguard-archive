@@ -50,6 +50,10 @@ Réponses à l'utilisateur en français, claires, avec le pourquoi.
 - Enchaîner édition && vérification && commit, et regarder `git show --stat` avant de dire que c'est fait.
 - Tester pour de vrai ce qui peut l'être : menus dans un pseudo-terminal (pty + pyte), scripts PowerShell générés
   analysés par pwsh, commandes shell par `bash -n`, clé USB réelle.
+- Vrai Windows : `outils/deployer.sh` dépose le programme et les tests dans la VM (`~/Windows/SENTINEL-TEST`,
+  `\\host.lan\Data` dans Windows ; `TESTER-SENTINEL.bat` ouvre le menu). Chaque passe y laisse son dossier dans
+  `resultats/`, avec `historique.txt` et `dernier-rapport.html`, lisibles d'ici. Ne jamais lancer un `.exe` d'ici :
+  binfmt le confie à Wine, qui crée un `~/.wine`.
 - Après chaque version : description GitHub (le texte ; le crochet `outils/hooks/pre-push` ne change que la
   version), lien du dépôt (journal du projet), journal du projet, liste des fonctions (README.md, README.en.md,
   outils/LISEZMOI.txt, outils/README.txt).

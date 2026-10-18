@@ -109,6 +109,24 @@ envoyer_journal() {
 rapatrier_journal "${XDG_DATA_HOME:-$HOME/.local/share}/sentinel/journal-erreurs.txt" "de cet ordinateur"
 envoyer_journal
 
+# Dossier partagé avec la machine virtuelle Windows (\\host.lan\Data\SENTINEL-TEST dans Windows) : à chaque
+# déploiement, le programme et les scripts de test y sont remplacés par les derniers ; les résultats restent. Dans la
+# VM, TESTER-SENTINEL.bat ouvre le menu des tests (son choix 6 teste seul chaque nouvelle version, en arrière-plan).
+VM="$HOME/Windows/SENTINEL-TEST"
+if [[ -d $HOME/Windows && -f $WINDOWS ]]; then
+  mkdir -p "$VM/programme" "$VM/resultats"
+  cp -f "$WINDOWS" "$VM/programme/sentinel.exe"
+  cp -f outils/test-windows/test.ps1 outils/test-windows/menu.ps1 "$VM/programme/"
+  cp -f outils/test-windows/TESTER-SENTINEL.bat outils/test-windows/LISEZMOI.txt "$VM/"
+  # La version déposée et l'empreinte du programme : le menu les montre, le test automatique part quand elles changent.
+  printf '%s\r\n%s\r\n' "$(./"$LINUX" --version)" "$(sha256sum "$WINDOWS" | cut -c1-16)" >"$VM/programme/version.txt"
+  if [[ -s $VM/resultats/historique.txt ]]; then
+    echo "VM Windows : version déposée. Dernière passe : $(tail -n 1 "$VM/resultats/historique.txt" | sed 's/ *->.*//')"
+  else
+    echo "VM Windows : version déposée dans $VM."
+  fi
+fi
+
 CLE=$(find "/run/media/$USER" -maxdepth 2 \( -name sentinel.cle -o -name netscan.cle \) -printf '%h\n' 2>/dev/null | head -1)
 if [[ -z $CLE ]]; then
   echo "Clé SENTINEL non branchée : elle sera mise à jour au prochain branchement."

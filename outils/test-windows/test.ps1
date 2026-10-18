@@ -2,26 +2,32 @@
 # 1) relève l'état réel du système (référence), 2) lance sentinel, 3) vérifie ses réponses.
 # Pendant le test : une ligne par commande et par vérification, sans les sorties brutes. À la fin : un rapport HTML
 # (rapport-test.html, ouvert dans le navigateur), avec la sortie de chaque commande à déplier.
-# Tous les fichiers vont dans un dossier « resultats-AAAAMMJJ-HHMMSS » à côté de ce script (un par passe).
+# Rangement du dossier partagé : ce script et sentinel.exe dans « programme » (remplacés à chaque déploiement),
+# chaque passe dans « resultats\AAAA-MM-JJ_HH-MM-SS_vX.Y.Z », une ligne par passe dans « resultats\historique.txt »
+# et le dernier rapport dans « resultats\dernier-rapport.html ». Lancé par le menu (TESTER-SENTINEL.bat).
 
-# -Auto : aucune question (TEST-SENTINEL-AUTO.bat) ; les étapes qui demandent de taper ou une fenêtre UAC sont sautées.
-param([switch]$Auto)
+# -Auto : aucune question ; les étapes qui demandent de taper ou une fenêtre UAC sont sautées.
+# -SansOuvrir : rien ne s'ouvre à l'écran (test lancé en arrière-plan par la tâche planifiée du menu).
+param([switch]$Auto, [switch]$SansOuvrir)
 
 $ErrorActionPreference = 'Continue'
 [Console]::OutputEncoding = [Text.Encoding]::UTF8
 $OutputEncoding = [Text.Encoding]::UTF8
 
-$partage = Split-Path -Parent $MyInvocation.MyCommand.Path
-$res = Join-Path $partage ('resultats-' + (Get-Date -Format 'yyyyMMdd-HHmmss'))
-New-Item -ItemType Directory -Force $res | Out-Null
+$ici = Split-Path -Parent $MyInvocation.MyCommand.Path
+$racine = if ((Split-Path -Leaf $ici) -eq 'programme') { Split-Path -Parent $ici } else { $ici }
+$resultats = Join-Path $racine 'resultats'
 
 # On lance une copie locale : un .exe sur un partage réseau déclenche des avertissements de sécurité.
 $local = Join-Path $env:LOCALAPPDATA 'sentinel-test'
 New-Item -ItemType Directory -Force $local | Out-Null
-Copy-Item (Join-Path $partage 'sentinel.exe') $local -Force
+Copy-Item (Join-Path $ici 'sentinel.exe') $local -Force
 $exe = Join-Path $local 'sentinel.exe'
 Unblock-File $exe -ErrorAction SilentlyContinue
 $version = (& $exe --version 2>$null | Out-String).Trim()
+$numero = if ($version -match '\d+\.\d+\.\d+') { $Matches[0] } else { 'inconnue' }
+$res = Join-Path $resultats ((Get-Date -Format 'yyyy-MM-dd_HH-mm-ss') + "_v$numero")
+New-Item -ItemType Directory -Force $res | Out-Null
 $debutTest = Get-Date
 
 # ── Suivi des résultats : chaque étape garde ses commandes et ses vérifications, pour l'écran et le rapport ──
@@ -193,7 +199,8 @@ Write-Host ''
 Write-Host '  ╭──────────────────────────────────────────────────────────╮' -ForegroundColor Red
 Write-Host ('  │  ' + "TEST DE SENTINEL · $version".PadRight(56) + '│') -ForegroundColor Red
 Write-Host '  ╰──────────────────────────────────────────────────────────╯' -ForegroundColor Red
-if ($Auto) { Write-Host '  Sans aucune question : 5 à 15 minutes. Le rapport s''ouvrira à la fin.' -ForegroundColor DarkGray }
+if ($SansOuvrir) { Write-Host '  En arrière-plan : rien ne s''ouvre, le rapport ira dans resultats.' -ForegroundColor DarkGray }
+elseif ($Auto) { Write-Host '  Sans aucune question : 5 à 15 minutes. Le rapport s''ouvrira à la fin.' -ForegroundColor DarkGray }
 else { Write-Host '  Quelques questions te seront posées : réponds o (oui) ou n (non).' -ForegroundColor DarkGray }
 
 Etape 'Référence : état réel de Windows'
@@ -296,10 +303,20 @@ $d = Sortie 'diagnostic'
 if ($d -match 'Blue screens|Écrans bleus') { Ok 'Section des problèmes récents présente' } else { Bug 'Section des problèmes récents ABSENTE' }
 if ($d -match 'PowerShell is not responding|PowerShell ne répond pas') { Bug 'Lecture PowerShell en échec' }
 
-Etape 'Logiciels essentiels : liste seulement, rien installé'
+Etape 'Logiciels : liste et menu, rien installé'
+Lancer 'logiciels-liste' @('logiciels', '--liste')
+$l = Sortie 'logiciels-liste'
+# Une ligne par logiciel : « ✔ » (installé, en couleur) ou « · ».
+$n = ([regex]::Matches($l, '(?m)^\s+(?:\x1b\[[0-9;]*m)?[✔·](?:\x1b\[[0-9;]*m)? ')).Count
+if ($n -ge 30) { Ok "$n logiciels proposés" } else { Bug "Liste des logiciels trop courte ($n)" }
+if ($l -match 'winget, Mozilla\.Firefox') { Ok 'Firefox proposé par winget' } else { Bug 'Firefox absent de la liste' }
+if ($l -match 'PowerShell ne répond pas|PowerShell is not responding') { Bug 'Lecture des logiciels installés en échec' }
+# Windows 11 a Windows Terminal d'office : application du Store, reconnue par son paquet (pas dans le registre).
+if ([Environment]::OSVersion.Version.Build -ge 22000) {
+    if ($l -match '(?m)✔(?:\x1b\[[0-9;]*m)? Windows Terminal') { Ok 'Windows Terminal reconnu (application du Store)' } else { Bug 'Windows Terminal, présent sur Windows 11, pas reconnu' }
+}
 LancerAvec 'logiciels' @('logiciels') "`n"
-$n = ([regex]::Matches((Sortie 'logiciels'), '(?m)^\s+\d+\. ')).Count
-if ($n -gt 0) { Ok "$n logiciel(s) proposé(s)" } else { Bug 'Liste des logiciels vide' }
+if ((Sortie 'logiciels') -match 'Pack de départ|Starter pack') { Ok 'Menu des logiciels affiché' } else { Bug 'Menu des logiciels absent' }
 
 Etape 'Test de connexion'
 Lancer 'connexion' @('connexion')
@@ -391,9 +408,15 @@ if (Test-Path $base) {
 }
 
 Etape 'Rapport HTML de sentinel'
-Lancer 'complet-html' @('complet', '--html')
-Start-Sleep -Seconds 3
-Constat 'Le rapport s''est-il ouvert dans le navigateur, lisible, avec les accents corrects ?'
+if ($SansOuvrir) {
+    # En arrière-plan, le navigateur ne doit pas surgir : le bilan complet, en texte.
+    Lancer 'complet' @('complet', '--texte')
+    Info 'Rapport HTML pas ouvert : test en arrière-plan.'
+} else {
+    Lancer 'complet-html' @('complet', '--html')
+    Start-Sleep -Seconds 3
+    Constat 'Le rapport s''est-il ouvert dans le navigateur, lisible, avec les accents corrects ?'
+}
 
 Etape 'Antivirus (analyse rapide Microsoft Defender)'
 if (Question 'Lancer l''analyse rapide Defender (quelques minutes) ?') {
@@ -449,6 +472,14 @@ Write-Host ''
 Write-Host '  ──────────────────────────────────────────────────────────' -ForegroundColor DarkGray
 if ($nbBug -eq 0 -and $nbEchec -eq 0) { Write-Host "  ✔ Tout est passé : $nbOk vérification(s) réussie(s)." -ForegroundColor Green }
 else { Write-Host "  ✖ $nbBug problème(s), $nbEchec commande(s) en échec ; $nbOk vérification(s) réussie(s)." -ForegroundColor Red }
+# Le dernier rapport toujours au même endroit, et une ligne par passe dans l'historique.
+Copy-Item $rapport (Join-Path $resultats 'dernier-rapport.html') -Force
+$bilan = if ($nbBug -eq 0 -and $nbEchec -eq 0) { "OK, tout est passé ($nbOk vérifications)" } else { "$nbBug problème(s), $nbEchec commande(s) en échec, $nbOk réussies" }
+$mode = if ($SansOuvrir) { 'automatique' } elseif ($Auto) { 'sans questions' } else { 'avec questions' }
+Add-Content -Path (Join-Path $resultats 'historique.txt') -Encoding UTF8 -Value ('{0}  v{1,-8} {2}  ({3:N1} min, {4})  -> {5}' -f `
+    (Get-Date -Format 'yyyy-MM-dd HH:mm'), $numero, $bilan, ((Get-Date) - $debutTest).TotalMinutes, $mode, (Split-Path -Leaf $res))
 Write-Host "  Rapport : $rapport" -ForegroundColor DarkGray
-Start-Process $rapport
-Write-Host '  Le rapport s''ouvre dans le navigateur. Tu peux revenir sur Linux.' -ForegroundColor DarkGray
+if (-not $SansOuvrir) {
+    Start-Process $rapport
+    Write-Host '  Le rapport s''ouvre dans le navigateur. Tu peux revenir sur Linux.' -ForegroundColor DarkGray
+}

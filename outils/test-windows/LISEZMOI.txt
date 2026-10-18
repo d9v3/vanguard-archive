@@ -1,0 +1,29 @@
+﻿SENTINEL — TESTS DANS LA MACHINE VIRTUELLE WINDOWS
+==================================================
+
+Double-clic sur TESTER-SENTINEL.bat : un menu propose
+
+  1  Test complet automatique, sans question (5 à 15 min, conseillé)
+  2  Test complet avec questions (fenêtres UAC, mot de passe, écran)
+  3  Ouvrir Sentinel, pour essayer à la main
+  4  Voir le dernier rapport
+  5  Ouvrir le dossier des résultats
+  6  Tester seul chaque nouvelle version (activer / désactiver)
+
+Avec le choix 6 activé, chaque nouvelle version déposée depuis Linux est testée
+toute seule, en arrière-plan, sans rien ouvrir à l'écran ; une notification
+prévient à la fin. Rien à faire de ton côté.
+
+CE QU'IL Y A ICI
+----------------
+programme\    sentinel.exe et les scripts de test. Remplacé à chaque mise à
+              jour de Sentinel (outils/deployer.sh, côté Linux) : ne rien y
+              mettre.
+resultats\    une passe par dossier, nommée AAAA-MM-JJ_HH-MM-SS_vX.Y.Z (date et
+              version testée), avec son rapport (rapport-test.html) et la
+              sortie de chaque commande.
+resultats\historique.txt       une ligne par passe : date, version, bilan.
+resultats\dernier-rapport.html le rapport de la dernière passe.
+
+Les résultats restent d'une version à l'autre : rien n'est effacé.
+Si l'Explorateur ne montre pas un fichier nouveau : touche F5.
