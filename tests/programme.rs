@@ -431,3 +431,51 @@ fn demarrage_sans_rien_changer() {
         aide.texte
     );
 }
+
+/// Lancés sans Internet : outils/verifier.sh refait toute la suite dans un espace réseau vide (unshare -rn, la boucle
+/// locale seule) et pose GARDIEN_HORS_LIGNE. Ailleurs, ce test ne fait rien : Internet y répondrait.
+fn hors_ligne() -> bool {
+    std::env::var_os("GARDIEN_HORS_LIGNE").is_some()
+}
+
+/// Sans Internet, chaque outil qui en dépend s'arrête de lui-même, vite, sans planter, et dit pourquoi : jamais une
+/// attente sans fin, jamais un « tout va bien » qu'il n'a pas pu vérifier.
+#[test]
+fn sans_internet_chaque_outil_le_dit() {
+    if !hors_ligne() || cfg!(not(target_os = "linux")) {
+        return;
+    }
+    let cas: [(&[&str], &str, &str); 6] = [
+        (&["listes-noires"], "o\n", "Adresse publique introuvable"),
+        (&["nat"], "", "Aucun serveur n'a répondu"),
+        (&["dns-rapide"], "", "ne répond pas"),
+        (&["sortantes"], "", "Aucune connexion vers Internet"),
+        (&["connexion"], "", "Internet ne répond pas : test arrêté"),
+        (
+            &["lien", "https://exemple.com/a"],
+            "n\n",
+            "listes et âge du domaine non vérifiés",
+        ),
+    ];
+    for (args, entree, attendu) in cas {
+        let debut = Instant::now();
+        let s = gardien("fr", args, entree, 90);
+        let texte = sans_couleurs(&s.texte);
+        assert_eq!(s.code, Some(0), "{args:?} : {}", s.erreurs);
+        assert!(!s.erreurs.contains("panicked"), "{args:?} : {}", s.erreurs);
+        assert!(texte.contains(attendu), "{args:?} : « {attendu} » absent de\n{texte}");
+        assert!(
+            debut.elapsed() < Duration::from_secs(60),
+            "{args:?} : {:?}",
+            debut.elapsed()
+        );
+    }
+    // Le scan sans réseau local : une erreur claire, pas une attente.
+    let s = gardien("fr", &["reseau"], "", 60);
+    assert_eq!(s.code, Some(1), "{}", s.texte);
+    assert!(
+        sans_couleurs(&s.erreurs).contains("impossible de détecter le réseau local"),
+        "{}",
+        s.erreurs
+    );
+}

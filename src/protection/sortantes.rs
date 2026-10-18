@@ -929,6 +929,12 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn programme_du_systeme_mis_a_jour() {
+        // Dans un espace de noms sans root (tests hors ligne : unshare -r), les fichiers de root paraissent à
+        // « personne » : rien à essayer là.
+        use std::os::unix::fs::MetadataExt;
+        if std::fs::metadata("/usr/bin/env").map_or(true, |m| m.uid() != 0) {
+            return;
+        }
         let c = Connexion::vers(ip("140.82.112.4"), 443);
         let nom = "github.com".to_string();
         let s = signes(Some("/usr/bin/env (deleted)"), &[(&c, Some(&nom))], "", None);
@@ -942,6 +948,16 @@ mod tests {
         let dossier = crate::protection::isoler::dossier_jetable().unwrap();
         let repose = dossier.join("firefox");
         std::fs::write(&repose, b"n'importe quoi").unwrap();
+        // En root (ou root d'un espace de noms : tests hors ligne), ce que le test pose appartient à root : il ne peut
+        // pas imiter « la personne ».
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            if std::fs::metadata(&repose).is_ok_and(|m| m.uid() == 0) {
+                let _ = std::fs::remove_dir_all(&dossier);
+                return;
+            }
+        }
         let efface = format!("{} (deleted)", repose.display());
         let c = Connexion::vers(ip("140.82.112.4"), 443);
         let s = signes(Some(&efface), &[(&c, None)], "", None);

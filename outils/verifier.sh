@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Tout vérifier en une commande, avant un commit ou une livraison : mise en forme, clippy sur les quatre cibles, tests
-# Linux et Windows (sous Wine), scripts PowerShell, shell et Python, liens internes, textes français et anglais.
+# Linux et Windows (sous Wine), les tests Linux refaits sans Internet, scripts PowerShell, shell et Python, liens
+# internes, textes français et anglais.
 # Chaque cible de compilation a sa chaîne (clippy, puis ses tests) et les quatre tournent en même temps : cargo garde
 # un dossier par cible, elles ne s'attendent presque pas. À la fin, une ligne par étape ; le code de sortie dit si tout
 # est vert.
@@ -55,6 +56,14 @@ scripts_powershell() {
   ((erreurs == 0))
 }
 
+# Toute la suite Linux refaite sans Internet : dans un espace réseau vide (unshare -rn, sans root ; la boucle locale
+# seule, remontée), GARDIEN_HORS_LIGNE posé pour les essais qui le demandent. Chaque outil doit s'y arrêter de
+# lui-même et dire pourquoi. Sans espaces de noms d'utilisateur (noyau qui les refuse), l'étape n'est pas lancée.
+hors_ligne() {
+  unshare -rn true 2>/dev/null || { echo "espaces de noms d'utilisateur indisponibles"; return 2; }
+  unshare -rn sh -c 'ip link set lo up && GARDIEN_HORS_LIGNE=1 exec cargo test -q --offline'
+}
+
 scripts_shell() { find outils -name '*.sh' -print0 | xargs -0 -n1 bash -n; }
 
 # Analysés sans être compilés sur disque : py_compile laisserait des __pycache__ dans outils/.
@@ -76,7 +85,10 @@ if ! etape mise-en-forme cargo fmt --check; then
   exit 1
 fi
 
-{ etape clippy-linux clippy x86_64-unknown-linux-musl && etape tests-linux cargo test -q; } &
+{
+  etape clippy-linux clippy x86_64-unknown-linux-musl && etape tests-linux cargo test -q &&
+    if [[ $MODE != --rapide ]]; then etape tests-hors-ligne hors_ligne; fi
+} &
 if [[ $MODE != --rapide ]]; then
   if [[ $MODE == --sans-wine ]]; then
     etape clippy-windows clippy x86_64-pc-windows-gnu &
@@ -121,6 +133,7 @@ ligne mise-en-forme "mise en forme"
 ligne clippy-linux "clippy Linux"
 ligne tests-linux "tests Linux ($(passes tests-linux))"
 if [[ $MODE != --rapide ]]; then
+  ligne tests-hors-ligne "tests Linux sans Internet ($(passes tests-hors-ligne))"
   ligne clippy-windows "clippy Windows"
   [[ $MODE == --sans-wine ]] || ligne tests-windows "tests Windows sous Wine ($(passes tests-windows))"
   ligne clippy-macos-arm "clippy macOS Apple Silicon"
