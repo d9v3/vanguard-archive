@@ -39,7 +39,13 @@ pub fn charger() -> Vec<Bilan> {
 
 /// L'historique tel qu'il est écrit ; `Err` s'il existe mais ne se lit pas.
 fn lire() -> Result<Vec<Bilan>, String> {
-    match std::fs::read_to_string(fichier()) {
+    lire_de(&fichier())
+}
+
+/// Celui d'un fichier donné : les tests ont chacun le leur, sans quoi l'un réécrirait celui qu'un autre lit (le menu,
+/// le rapport ; sous Windows, un fichier ouvert ne se remplace pas).
+fn lire_de(chemin: &std::path::Path) -> Result<Vec<Bilan>, String> {
+    match std::fs::read_to_string(chemin) {
         Ok(t) => serde_json::from_str(t.trim_start_matches('\u{feff}')).map_err(|e| e.to_string()),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Vec::new()),
         Err(e) => Err(e.to_string()),
@@ -66,15 +72,19 @@ fn bilan(audit: Option<&Audit>, reseau: Option<&Rapport>) -> Bilan {
 
 /// Ajoute ce bilan à l'historique ; rend le précédent, s'il y en a un.
 pub fn enregistrer(audit: Option<&Audit>, reseau: Option<&Rapport>) -> (Option<Bilan>, Bilan) {
-    let mut tous = match lire() {
+    enregistrer_dans(&fichier(), bilan(audit, reseau))
+}
+
+fn enregistrer_dans(chemin: &std::path::Path, nouveau: Bilan) -> (Option<Bilan>, Bilan) {
+    let mut tous = match lire_de(chemin) {
         Ok(tous) => tous,
         Err(e) => {
             // Jamais écraser un historique qu'on ne sait pas relire : il est mis de côté, intact, avant le nouveau.
-            let copie = fichier().with_extension(format!(
+            let copie = chemin.with_extension(format!(
                 "illisible-{}.json",
                 chrono::Local::now().format("%Y%m%d-%H%M%S")
             ));
-            let _ = std::fs::copy(fichier(), &copie);
+            let _ = std::fs::copy(chemin, &copie);
             tre!(
                 "Attention : historique des bilans illisible ({e}). Copie gardée : {}",
                 "Warning: check history unreadable ({e}). Copy kept: {}",
@@ -84,13 +94,12 @@ pub fn enregistrer(audit: Option<&Audit>, reseau: Option<&Rapport>) -> (Option<B
         }
     };
     let precedent = tous.last().cloned();
-    let nouveau = bilan(audit, reseau);
     tous.push(nouveau.clone());
     let surplus = tous.len().saturating_sub(GARDES);
     tous.drain(..surplus);
     // D'un bloc : une coupure pendant l'écriture laisse l'ancien historique ou le nouveau, jamais un fichier tronqué.
     if let Ok(texte) = serde_json::to_string(&tous)
-        && let Err(e) = crate::reseau::ecrire_atomique(&fichier(), &texte)
+        && let Err(e) = crate::reseau::ecrire_atomique(chemin, &texte)
     {
         tre!(
             "Attention : bilan non enregistré dans l'historique ({e}).",
@@ -301,18 +310,22 @@ mod tests {
     /// Un historique tronqué n'est pas remplacé en silence par le seul nouveau bilan : il est mis de côté.
     #[test]
     fn historique_illisible_mis_de_cote() {
-        std::fs::create_dir_all(crate::reseau::dossier_local()).unwrap();
-        std::fs::write(fichier(), "[{\"date\":\"2026-10-17 12:00\",\"machine\":8").unwrap();
-        assert!(charger().is_empty());
-        let (precedent, _) = enregistrer(None, None);
+        let dossier = std::env::temp_dir().join(format!("gardien-historique-illisible-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dossier);
+        std::fs::create_dir_all(&dossier).unwrap();
+        let chemin = dossier.join("historique.json");
+        std::fs::write(&chemin, "[{\"date\":\"2026-10-17 12:00\",\"machine\":8").unwrap();
+        assert!(lire_de(&chemin).is_err());
+        let (precedent, _) = enregistrer_dans(&chemin, bilan(None, None));
         assert!(precedent.is_none());
-        let copies = std::fs::read_dir(crate::reseau::dossier_local())
+        let copies = std::fs::read_dir(&dossier)
             .unwrap()
             .flatten()
             .filter(|e| e.file_name().to_string_lossy().starts_with("historique.illisible-"))
             .count();
         assert!(copies >= 1, "l'historique illisible n'a pas été gardé");
-        assert_eq!(charger().len(), 1);
+        assert_eq!(lire_de(&chemin).map(|t| t.len()), Ok(1));
+        let _ = std::fs::remove_dir_all(&dossier);
     }
 
     #[test]

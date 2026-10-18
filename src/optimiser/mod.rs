@@ -105,8 +105,13 @@ fn fichier_historique() -> std::path::PathBuf {
 }
 
 fn charger() -> Historique {
-    let chemin = fichier_historique();
-    let Ok(texte) = std::fs::read_to_string(&chemin) else {
+    charger_de(&fichier_historique())
+}
+
+/// L'historique d'un fichier donné : les tests ont chacun le leur, sans quoi l'un réécrirait celui qu'un autre lit
+/// (sous Windows, un fichier ouvert ne se remplace pas).
+fn charger_de(chemin: &std::path::Path) -> Historique {
+    let Ok(texte) = std::fs::read_to_string(chemin) else {
         return Historique::default();
     };
     match serde_json::from_str(texte.trim_start_matches('\u{feff}')) {
@@ -117,7 +122,7 @@ fn charger() -> Historique {
                 "illisible-{}.json",
                 chrono::Local::now().format("%Y%m%d-%H%M%S")
             ));
-            let _ = std::fs::copy(&chemin, &copie);
+            let _ = std::fs::copy(chemin, &copie);
             tre!(
                 "Attention : valeurs d'avant des réglages illisibles ({e}). Copie gardée : {}",
                 "Warning: previous setting values unreadable ({e}). Copy kept: {}",
@@ -131,9 +136,13 @@ fn charger() -> Historique {
 /// Écrit l'historique d'un bloc (fichier temporaire, puis renommé) : une coupure ou un Ctrl-C laissent l'ancien ou
 /// le nouveau, jamais un fichier tronqué qui, relu vide, ferait perdre toutes les valeurs d'avant.
 fn sauver(h: &Historique) -> bool {
+    sauver_dans(h, &fichier_historique())
+}
+
+fn sauver_dans(h: &Historique, chemin: &std::path::Path) -> bool {
     let ecrit = serde_json::to_string_pretty(h)
         .map_err(std::io::Error::other)
-        .and_then(|texte| crate::reseau::ecrire_atomique(&fichier_historique(), &texte));
+        .and_then(|texte| crate::reseau::ecrire_atomique(chemin, &texte));
     if let Err(e) = &ecrit {
         tre!(
             "Attention : valeurs d'avant des réglages non enregistrées ({e}).",
@@ -644,12 +653,13 @@ mod tests {
     /// Un historique tronqué (coupure pendant l'écriture) n'est pas pris pour vide puis écrasé : il est mis de côté.
     #[test]
     fn historique_illisible_mis_de_cote() {
-        let chemin = fichier_historique();
-        let dossier = chemin.parent().unwrap();
-        std::fs::create_dir_all(dossier).unwrap();
+        let dossier = std::env::temp_dir().join(format!("gardien-reglages-illisible-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dossier);
+        std::fs::create_dir_all(&dossier).unwrap();
+        let chemin = dossier.join("reglages.json");
         std::fs::write(&chemin, "{\"reglages\":{\"x\":{\"date\":\"2026-10").unwrap();
-        assert!(charger().reglages.is_empty());
-        let copies = std::fs::read_dir(dossier)
+        assert!(charger_de(&chemin).reglages.is_empty());
+        let copies = std::fs::read_dir(&dossier)
             .unwrap()
             .flatten()
             .filter(|e| e.file_name().to_string_lossy().starts_with("reglages.illisible-"))
@@ -663,8 +673,9 @@ mod tests {
                 valeurs: vec![Some("1".into())],
             },
         );
-        assert!(sauver(&h));
-        assert_eq!(charger().reglages["x"].valeurs, [Some("1".to_string())]);
+        assert!(sauver_dans(&h, &chemin));
+        assert_eq!(charger_de(&chemin).reglages["x"].valeurs, [Some("1".to_string())]);
+        let _ = std::fs::remove_dir_all(&dossier);
     }
 
     /// L'annulation se juge sur les valeurs relues : une ligne qui était absente doit l'être de nouveau.
