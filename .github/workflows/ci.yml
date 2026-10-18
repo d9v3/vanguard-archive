@@ -1,0 +1,114 @@
+# Intégration continue : à chaque envoi, sur Linux, la mise en forme, clippy sans aucune remarque sur les quatre
+# cibles (Linux, Windows, les deux Mac) et les tests. Sur un vrai Windows de GitHub (PowerShell, registre, winget) :
+# chaque nuit si le code a changé, à chaque demande de fusion, et à la demande (gh workflow run ci.yml). macOS a son
+# propre workflow (macos.yml), qui teste et compile le programme universel pour la clé.
+#
+# Pourquoi pas Windows à chaque envoi : sur un dépôt privé, une minute de Windows en compte deux (une de Mac, dix),
+# sur 2000 minutes gratuites par mois. Une dizaine d'envois par jour les épuiserait en quelques jours. Pour tester
+# Windows à chaque envoi malgré tout : ajouter « push » à la condition du travail « utile » plus bas.
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: "43 7 * * *" # 3 h 43, heure de Montréal (après macos.yml)
+
+concurrency:
+  group: ci-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  linux:
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      # MinGW : build.rs intègre l'icône et le manifeste au .exe avec windres, même pour clippy.
+      - name: Rust à jour, cibles et outils de compilation croisée
+        run: |
+          rustup update stable
+          rustup default stable
+          rustup component add rustfmt clippy
+          rustup target add x86_64-unknown-linux-musl x86_64-pc-windows-gnu aarch64-apple-darwin x86_64-apple-darwin
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq musl-tools binutils-mingw-w64-x86-64
+      - uses: Swatinem/rust-cache@v2
+      - name: Mise en forme
+        run: cargo fmt --check
+      - name: Clippy, zéro remarque, sur les quatre cibles
+        run: |
+          for c in x86_64-unknown-linux-musl x86_64-pc-windows-gnu aarch64-apple-darwin x86_64-apple-darwin; do
+            echo "::group::$c"
+            cargo clippy --all-targets --target "$c" -- -D warnings
+            echo "::endgroup::"
+          done
+      # .cargo/config.toml vise la cible musl : « cargo test » teste la version qui part sur la clé.
+      - name: Tests
+        run: cargo test
+      - name: Le programme démarre et répond
+        run: |
+          cargo build --release
+          ./target/x86_64-unknown-linux-musl/release/sentinel --version
+          ./target/x86_64-unknown-linux-musl/release/sentinel logiciels --liste
+          ./target/x86_64-unknown-linux-musl/release/sentinel nettoyer --liste
+
+  # Windows la nuit seulement si le code a changé depuis le dernier passage réussi (comme macos.yml).
+  utile:
+    if: github.event_name != 'push'
+    runs-on: ubuntu-latest
+    outputs:
+      windows: ${{ steps.verifier.outputs.windows }}
+    steps:
+      - id: verifier
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          case "${{ github.event_name }}" in
+            workflow_dispatch|pull_request) echo "windows=oui" >> "$GITHUB_OUTPUT"; exit 0 ;;
+            schedule) ;;
+            *) echo "windows=non" >> "$GITHUB_OUTPUT"; exit 0 ;;
+          esac
+          dernier=""
+          for evenement in schedule workflow_dispatch; do
+            sha=$(gh api "repos/${{ github.repository }}/actions/workflows/ci.yml/runs?status=success&event=$evenement&branch=${{ github.ref_name }}&per_page=1" -q '.workflow_runs[0] | "\(.created_at) \(.head_sha)"' 2>/dev/null || true)
+            if [ -n "$sha" ] && [ "$sha" \> "$dernier" ]; then dernier=$sha; fi
+          done
+          if [ "${dernier#* }" = "${{ github.sha }}" ]; then echo "windows=non" >> "$GITHUB_OUTPUT"; else echo "windows=oui" >> "$GITHUB_OUTPUT"; fi
+
+  windows:
+    needs: utile
+    if: needs.utile.outputs.windows == 'oui'
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Rust à jour
+        run: |
+          rustup update stable
+          rustup default stable
+      - uses: Swatinem/rust-cache@v2
+      # La cible est donnée : .cargo/config.toml vise Linux par défaut. Ici, PowerShell existe vraiment (pas comme
+      # sous Wine) : les tests lisent le vrai registre et le vrai système.
+      - name: Tests sur un vrai Windows
+        run: cargo test --target x86_64-pc-windows-msvc
+      - name: Essai du programme (lecture seule)
+        run: |
+          cargo build --release --target x86_64-pc-windows-msvc
+          $s = ".\target\x86_64-pc-windows-msvc\release\sentinel.exe"
+          & $s --version
+          & $s machine --json > audit.json
+          Get-Content audit.json -TotalCount 40
+          & $s logiciels --liste
+          & $s nettoyer --liste
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: essai-windows
+          path: audit.json
+          retention-days: 14

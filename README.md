@@ -174,6 +174,11 @@ macOS : compilé et testé sur un Mac de GitHub (`.github/workflows/macos.yml`, 
 Intel), chaque nuit si le code a changé ou à la demande (`gh workflow run macos.yml`). `deployer.sh` récupère la
 dernière compilation réussie pour la clé.
 
+Intégration continue (`.github/workflows/ci.yml`) : à chaque envoi sur GitHub, la mise en forme, clippy sans
+remarque sur les quatre cibles et les tests, sous Linux ; sur un vrai Windows (PowerShell, registre), chaque nuit si
+le code a changé, à chaque demande de fusion et à la demande (`gh workflow run ci.yml`). Pas Windows ni Mac à chaque
+envoi : sur un dépôt privé, leurs minutes comptent double et dix fois.
+
 ### La clé USB
 
 La clé (exFAT, étiquette `SENTINEL`, fichier témoin `sentinel.cle`) contient `Linux/`, `Windows/`, `macOS/`, `donnees/` (base des

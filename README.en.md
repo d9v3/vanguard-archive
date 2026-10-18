@@ -172,6 +172,11 @@ macOS: built and tested on a GitHub Mac (`.github/workflows/macos.yml`, universa
 every night if the code changed or on demand (`gh workflow run macos.yml`). `deployer.sh` fetches the latest
 successful build for the key.
 
+Continuous integration (`.github/workflows/ci.yml`): on each push to GitHub, formatting, clippy without warnings on
+the four targets and the tests, on Linux; on a real Windows (PowerShell, registry), every night if the code changed,
+on each pull request and on demand (`gh workflow run ci.yml`). Not Windows or Mac on each push: on a private
+repository, their minutes count double and ten times.
+
 ### The USB key
 
 The key (exFAT, label `SENTINEL`, marker file `sentinel.cle`) holds `Linux/`, `Windows/`, `macOS/`, `donnees/`

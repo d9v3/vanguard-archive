@@ -14,6 +14,8 @@ Réponses à l'utilisateur en français, claires, avec le pourquoi.
 - Tests Windows sous Wine (pas de PowerShell sous Wine ; le registre, lui, marche) :
   `WINEPREFIX=<dossier jetable> WINEDEBUG=-all CARGO_TARGET_X86_64_PC_WINDOWS_GNU_RUNNER=~/.local/share/Steam/compatibilitytools.d/GE-Proton11-9-x86_64/files/bin/wine cargo test --target x86_64-pc-windows-gnu`
 - macOS : compilé et testé sur un Mac de GitHub (`gh workflow run macos.yml --ref master`) ; ici, clippy seulement.
+- CI (`.github/workflows/ci.yml`) : Linux à chaque envoi (fmt, clippy -D warnings ×4, tests) ; vrai Windows la nuit
+  si le code a changé, ou `gh workflow run ci.yml --ref master` (résultat : `gh run list --workflow ci.yml`).
 - Déployer (binaire local, clé USB, GitHub) : `outils/deployer.sh`.
 - Skills du projet : `/verifier` (tout tester) et `/livrer` (version, déploiement, mises à jour qui suivent).
 
