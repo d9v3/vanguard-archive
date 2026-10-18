@@ -379,6 +379,38 @@ fn empreinte(chemin: &Path) -> std::io::Result<blake3::Hash> {
     Ok(blake3::Hasher::new().update_reader(File::open(chemin)?)?.finalize())
 }
 
+/// L'empreinte relue sur le disque, pas dans la mémoire où la copie vient de passer : sans cela, une erreur
+/// d'écriture du disque passerait inaperçue. Linux : les pages du fichier, propres après `sync_all`, sont retirées du
+/// cache avant de lire ; macOS : lecture sans cache. Windows : lecture ordinaire.
+fn empreinte_relue(chemin: &Path) -> std::io::Result<blake3::Hash> {
+    let f = File::open(chemin)?;
+    sans_cache(&f);
+    Ok(blake3::Hasher::new().update_reader(f)?.finalize())
+}
+
+#[cfg(target_os = "linux")]
+fn sans_cache(f: &File) {
+    use std::os::fd::AsRawFd;
+    // SAFETY : un descripteur ouvert, gardé par `f` pendant l'appel ; posix_fadvise ne fait que conseiller le noyau
+    // (retirer du cache les pages propres du fichier) et n'écrit dans aucune mémoire de ce programme.
+    unsafe {
+        libc::posix_fadvise(f.as_raw_fd(), 0, 0, libc::POSIX_FADV_DONTNEED);
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn sans_cache(f: &File) {
+    use std::os::fd::AsRawFd;
+    // SAFETY : un descripteur ouvert, gardé par `f` pendant l'appel ; F_NOCACHE change seulement la façon dont le
+    // système lit ce fichier, sans toucher à la mémoire de ce programme.
+    unsafe {
+        libc::fcntl(f.as_raw_fd(), libc::F_NOCACHE, 1);
+    }
+}
+
+#[cfg(windows)]
+fn sans_cache(_: &File) {}
+
 /// Copie `source` vers `cible` (qui n'existe pas) en passant par un fichier partiel, puis vérifie.
 fn copier_vers(source: &Path, cible: &Path) -> std::io::Result<()> {
     let nom = cible.file_name().unwrap_or_default().to_string_lossy();
@@ -417,7 +449,7 @@ fn copier_vers(source: &Path, cible: &Path) -> std::io::Result<()> {
     })?;
     std::fs::rename(&partiel, cible)?;
     // Relue sur le disque : une copie différente de l'original n'est pas gardée.
-    if empreinte(cible)? != original {
+    if empreinte_relue(cible)? != original {
         let _ = std::fs::remove_file(cible);
         return Err(std::io::Error::other(tr!(
             "la copie relue diffère de l'original",
@@ -873,6 +905,18 @@ mod tests {
         copier_fichier(&source.join(&nom), &cible, &mut bilan);
         assert_eq!(bilan.copies, 1, "{bilan:?}");
         assert_eq!(std::fs::read_to_string(cible.join(&nom)).unwrap(), "long");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// La relecture sans cache donne la même empreinte que la lecture ordinaire.
+    #[test]
+    fn relecture_sans_cache() {
+        let d = jetable("sans-cache");
+        let f = d.join("a.bin");
+        std::fs::write(&f, vec![7u8; 3 << 20]).unwrap();
+        // Ouvert en écriture : Windows refuse de vider sur le disque un fichier ouvert en lecture seule.
+        OpenOptions::new().write(true).open(&f).unwrap().sync_all().unwrap();
+        assert_eq!(empreinte_relue(&f).unwrap(), empreinte(&f).unwrap());
         let _ = std::fs::remove_dir_all(&d);
     }
 
