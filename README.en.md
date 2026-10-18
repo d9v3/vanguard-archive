@@ -21,7 +21,8 @@ otherwise pacman, apt, dnf or zypper.
 
 **Security check** — a grade from A to F, then each problem with its fix.
 - Firewall, open ports (TCP and UDP), updates and known vulnerabilities, disk encryption, Secure Boot, screen lock,
-  accounts, SSH, sudo, kernel hardening, backups.
+  accounts, SSH, sudo, kernel hardening (on macOS: sealed system volume, enforced code signing, library
+  validation, added extensions), badly protected secret files, backups.
 - What hides: programs started at boot, scheduled tasks, library preloading, modified privileged programs.
 - The DNS actually used (and forged answers), added root certificates (HTTPS interception), browser extensions that
   read every site.
@@ -79,7 +80,7 @@ never; the free space read again afterwards tells what was really gained.
 - HTML report with the grade history curve, and what changed since the previous check.
 - Gaming: on Windows, game components and Windows settings; on Linux, Steam, 32- and 64-bit Vulkan drivers for your
   graphics card, GameMode, MangoHud, Gamescope, Wine, Lutris, Heroic, ProtonUp-Qt, vm.max_map_count, ntsync; on
-  macOS, Steam and Heroic.
+  macOS, Rosetta 2, Steam, Heroic, Epic Games, GOG Galaxy, Prism Launcher and the Metal frame counter.
 
 Sentinel never cuts a remote connection in use (Remote Desktop, SSH). Only use it on your own network, or a network
 you are allowed to audit.

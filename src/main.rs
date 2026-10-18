@@ -607,7 +607,7 @@ impl Action {
                 if cfg!(windows) {
                     tr!("composants et réglages de Windows", "components and Windows settings")
                 } else if cfg!(target_os = "macos") {
-                    tr!("Steam, Heroic", "Steam, Heroic")
+                    tr!("Rosetta, Steam, Epic, GOG…", "Rosetta, Steam, Epic, GOG…")
                 } else {
                     tr!("Steam, Vulkan, GameMode, Wine…", "Steam, Vulkan, GameMode, Wine…")
                 },

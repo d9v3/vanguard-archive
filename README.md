@@ -21,7 +21,9 @@ sur un système atomique, sinon pacman, apt, dnf ou zypper.
 
 **Bilan de sécurité** — une note de A à F, puis chaque problème avec sa correction.
 - Pare-feu, ports ouverts (TCP et UDP), mises à jour et failles connues, chiffrement du disque, Secure Boot,
-  verrouillage de l'écran, comptes, SSH, sudo, durcissement du noyau, sauvegardes.
+  verrouillage de l'écran, comptes, SSH, sudo, durcissement du noyau (sous macOS : volume du système scellé,
+  signature du code imposée, validation des bibliothèques, extensions ajoutées), fichiers secrets mal protégés,
+  sauvegardes.
 - Ce qui se cache : programmes lancés au démarrage, tâches planifiées, préchargement de bibliothèques, programmes
   privilégiés modifiés.
 - DNS réellement utilisé (et réponses inventées), certificats racine ajoutés (interception du HTTPS), extensions de
@@ -85,7 +87,7 @@ dit ce qui a vraiment été gagné.
 - Rapport HTML avec la courbe des notes, et ce qui a changé depuis le bilan précédent.
 - Gaming : sous Windows, composants pour les jeux et réglages de Windows ; sous Linux, Steam, pilotes Vulkan 32 et
   64 bits selon la carte, GameMode, MangoHud, Gamescope, Wine, Lutris, Heroic, ProtonUp-Qt, vm.max_map_count, ntsync ;
-  sous macOS, Steam et Heroic.
+  sous macOS, Rosetta 2, Steam, Heroic, Epic Games, GOG Galaxy, Prism Launcher et le compteur d'images de Metal.
 
 Sentinel ne coupe jamais une connexion à distance en cours (Bureau à distance, SSH). À n'utiliser que sur ton propre
 réseau, ou un réseau que tu as le droit d'auditer.

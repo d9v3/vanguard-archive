@@ -50,7 +50,7 @@ Menu (↑ ↓ pour choisir, Entrée pour lancer, Échap pour revenir ; ou le chi
        Logiciels : les meilleurs, libres pour la plupart, par catégorie (navigateurs, mots de passe,
        bureautique, vidéo, création, outils système…) et un pack de départ, depuis la source officielle
        Gaming (Windows : Visual C++, DirectX… ; Linux : Steam, Vulkan, GameMode, MangoHud, Wine, Lutris… ;
-       macOS : Steam, Heroic)
+       macOS : Rosetta 2, Steam, Heroic, Epic, GOG, Prism, compteur Metal)
   8  Optimiser ›
        Nettoyer le système (caches, fichiers temporaires, paquets, corbeille… : la place de chacun, à cocher)
        Réglages recommandés, en une fois · Confidentialité (télémétrie, publicités, suivi, Recall…)

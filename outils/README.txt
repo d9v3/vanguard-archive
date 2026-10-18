@@ -49,7 +49,7 @@ Menu (↑ ↓ to select, Enter to run, Esc to go back; or the number, then Enter
        Software: the best ones, mostly open source, by category (browsers, passwords, office, video,
        design, system tools…) plus a starter pack, from the official source
        Gaming (Windows: Visual C++, DirectX…; Linux: Steam, Vulkan, GameMode, MangoHud, Wine, Lutris…;
-       macOS: Steam, Heroic)
+       macOS: Rosetta 2, Steam, Heroic, Epic, GOG, Prism, Metal counter)
   8  Optimize ›
        Clean up the system (caches, temporary files, packages, trash…: the space of each, to check)
        Recommended settings, in one go · Privacy (telemetry, ads, tracking, Recall…)
