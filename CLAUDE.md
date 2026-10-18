@@ -7,9 +7,11 @@ Réponses à l'utilisateur en français, claires, avec le pourquoi.
 
 ## Commandes
 
-- Tout vérifier en une commande : `outils/verifier.sh` (mise en forme, clippy ×4, tests Linux et Wine, scripts
-  PowerShell, shell et Python, liens internes, textes FR/EN ; les cibles en parallèle, une ligne par étape à la fin).
-  `--rapide` : Linux seulement ; `--sans-wine`. Le détail de chaque étape suit.
+- Tout vérifier en une commande : `outils/verifier.sh` (mise en forme, clippy ×4, tests Linux et Wine, la suite Linux
+  refaite sans Internet, scripts PowerShell, shell et Python, liens internes, textes FR/EN ; les cibles en parallèle,
+  une ligne par étape à la fin). `--rapide` : Linux seulement, avec Internet ; `--sans-wine`. Le détail suit.
+- Sans Internet : `unshare -rn` (sans root, la boucle locale seule) et `GARDIEN_HORS_LIGNE=1` ; chaque outil qui
+  dépend d'Internet doit s'y arrêter de lui-même, en moins d'une minute, et dire pourquoi il ne conclut pas.
 - Tests : `cargo test` (cible par défaut x86_64-unknown-linux-musl, voir `.cargo/config.toml`). Unitaires dans chaque
   module ; `tests/programme.rs` lance le vrai programme (dossier personnel jetable, rien ne change le système).
 - Lint, zéro remarque (clippy pedantic, voir Cargo.toml) sur les quatre cibles :
