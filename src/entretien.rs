@@ -45,6 +45,8 @@ struct Examen {
     score: Option<u32>,
     /// Catégories (noms internes) où des mises à jour attendent.
     maj: Vec<&'static str>,
+    /// Catégories de mises à jour qui n'ont pas pu être vérifiées : jamais « rien n'attend ».
+    maj_inconnues: Vec<&'static str>,
     /// Place que le nettoyage recommandé libérerait, en octets.
     place: u64,
     alertes: Vec<String>,
@@ -60,9 +62,17 @@ fn examiner() -> Examen {
         .map(|c| c.categorie)
         .collect();
     maj.dedup();
+    let mut maj_inconnues: Vec<&'static str> = audit
+        .constats
+        .iter()
+        .filter(|c| !c.verifie && CATEGORIES_MAJ.contains(&c.categorie))
+        .map(|c| c.categorie)
+        .collect();
+    maj_inconnues.dedup();
     Examen {
         score: audit.fiable().then_some(audit.score),
         maj,
+        maj_inconnues,
         place: crate::nettoyer::place_a_liberer(),
         alertes: audit
             .constats
@@ -98,7 +108,14 @@ fn rediger(e: &Examen, nouvelles: Option<&[String]>) -> (String, Vec<String>) {
         )
         .to_string(),
     });
-    lignes.push(if e.maj.is_empty() {
+    let inconnues: Vec<&str> = e.maj_inconnues.iter().map(|c| crate::langue::categorie(c)).collect();
+    lignes.push(if e.maj.is_empty() && !inconnues.is_empty() {
+        trf!(
+            "Mises à jour : impossible à vérifier ({}).",
+            "Updates: could not be checked ({}).",
+            resume_liste(&inconnues)
+        )
+    } else if e.maj.is_empty() {
         tr!("Mises à jour : rien n'attend.", "Updates: nothing waiting.").to_string()
     } else {
         let quoi: Vec<&str> = e.maj.iter().map(|c| crate::langue::categorie(c)).collect();
@@ -432,6 +449,7 @@ mod tests {
         Examen {
             score,
             maj: maj.to_vec(),
+            maj_inconnues: Vec::new(),
             place,
             alertes: Vec::new(),
         }
@@ -468,6 +486,17 @@ mod tests {
         // Tout va bien : ni place à signaler (moins d'un Go), ni rappel à agir.
         let (_, calme) = rediger(&examen(Some(95), &[], 200 << 20), Some(&[]));
         assert_eq!(calme.len(), 3, "{calme:?}");
+        // Mises à jour pas vérifiées : jamais « rien n'attend ».
+        let inconnu = Examen {
+            maj_inconnues: vec!["Mises à jour"],
+            ..examen(Some(95), &[], 0)
+        };
+        let (_, l) = rediger(&inconnu, Some(&[]));
+        assert!(
+            l[1].contains("impossible à vérifier") || l[1].contains("could not be checked"),
+            "{l:?}"
+        );
+        assert!(!l[1].contains("rien n'attend") && !l[1].contains("nothing waiting"));
         // Premier passage : rien à comparer.
         let (_, premier) = rediger(&examen(None, &[], 0), None);
         assert!(premier[0].contains("aucune") || premier[0].contains("none"));
