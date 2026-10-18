@@ -6,10 +6,12 @@
 //! reprend là où elle s'est arrêtée : ce qui est déjà copié, à l'identique, n'est pas recopié. Jamais vers la clé
 //! GARDIEN ni vers le disque du système.
 
-use std::io::{IsTerminal, Read, Write};
+use std::fs::{File, OpenOptions};
+use std::io::{ErrorKind, IsTerminal, Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
+use crate::nettoyer::taille_lisible;
 use crate::selection::{Case, Ligne, choisir, cocher};
 use crate::ui::*;
 
@@ -17,12 +19,10 @@ use crate::ui::*;
 const TEMOIN: &str = ".gardien-copie-en-cours";
 /// Fichier en cours d'écriture : renommé seulement une fois complet, il n'est jamais pris pour une vraie copie.
 const PARTIEL: &str = ".gardien-partiel";
-/// Le compte rendu, dans le dossier daté.
 const COMPTE_RENDU: &str = "gardien-copie.txt";
 /// Début du nom des dossiers datés, en français puis en anglais (une copie se reprend dans les deux langues).
 const PREFIXES: [&str; 2] = ["Gardien-copie-", "Gardien-copy-"];
 
-/// Les dossiers qu'on peut copier.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Sorte {
     Documents,
@@ -32,12 +32,14 @@ pub enum Sorte {
     Musique,
 }
 
-const SORTES: [Sorte; 5] = [
-    Sorte::Documents,
-    Sorte::Images,
-    Sorte::Bureau,
-    Sorte::Videos,
-    Sorte::Musique,
+/// Où trouver chaque dossier : user-dirs.dirs, puis noms usuels (Linux) ; registre, puis profil (Windows) ; macOS.
+#[rustfmt::skip] // une ligne par dossier, que rustfmt étalerait sur huit
+const DOSSIERS: [(Sorte, &str, &[&str], [&str; 3]); 5] = [
+    (Sorte::Documents, "XDG_DOCUMENTS_DIR", &["Documents"], ["Personal", "Documents", "Documents"]),
+    (Sorte::Images, "XDG_PICTURES_DIR", &["Images", "Pictures"], ["My Pictures", "Pictures", "Pictures"]),
+    (Sorte::Bureau, "XDG_DESKTOP_DIR", &["Bureau", "Desktop"], ["Desktop", "Desktop", "Desktop"]),
+    (Sorte::Videos, "XDG_VIDEOS_DIR", &["Vidéos", "Videos"], ["My Video", "Videos", "Movies"]),
+    (Sorte::Musique, "XDG_MUSIC_DIR", &["Musique", "Music"], ["My Music", "Music", "Music"]),
 ];
 
 impl Sorte {
@@ -54,71 +56,44 @@ impl Sorte {
 
 /// Les dossiers personnels qui existent, chacun avec son chemin dans la langue du système.
 fn sources() -> Vec<(Sorte, PathBuf)> {
-    let mut vus: Vec<PathBuf> = Vec::new();
-    SORTES
-        .iter()
-        .filter_map(|&s| {
-            let chemin = chemin_de(s)?;
-            // Deux sortes au même endroit (Bureau non configuré = dossier personnel) : une seule fois.
-            (chemin.is_dir() && !vus.contains(&chemin)).then(|| {
-                vus.push(chemin.clone());
-                (s, chemin)
-            })
-        })
-        .collect()
+    let mut liste: Vec<(Sorte, PathBuf)> = Vec::new();
+    for (sorte, ..) in DOSSIERS {
+        // Deux sortes au même endroit (Bureau non configuré = dossier personnel) : une seule fois.
+        if let Some(chemin) = chemin_de(sorte).filter(|c| c.is_dir() && liste.iter().all(|(_, vu)| vu != c)) {
+            liste.push((sorte, chemin));
+        }
+    }
+    liste
 }
 
 #[cfg(target_os = "linux")]
-fn chemin_de(s: Sorte) -> Option<PathBuf> {
+fn chemin_de(sorte: Sorte) -> Option<PathBuf> {
+    let &(_, cle, noms, _) = DOSSIERS.iter().find(|d| d.0 == sorte)?;
     let maison = crate::nettoyer::maison();
     let config = std::env::var_os("XDG_CONFIG_HOME").map_or_else(|| maison.join(".config"), PathBuf::from);
     let declares = std::fs::read_to_string(config.join("user-dirs.dirs")).unwrap_or_default();
-    let (cle, noms): (&str, &[&str]) = match s {
-        Sorte::Documents => ("XDG_DOCUMENTS_DIR", &["Documents"]),
-        Sorte::Images => ("XDG_PICTURES_DIR", &["Images", "Pictures"]),
-        Sorte::Bureau => ("XDG_DESKTOP_DIR", &["Bureau", "Desktop"]),
-        Sorte::Videos => ("XDG_VIDEOS_DIR", &["Vidéos", "Videos"]),
-        Sorte::Musique => ("XDG_MUSIC_DIR", &["Musique", "Music"]),
-    };
     crate::pieges::dossier_declare(&declares, cle, &maison)
         .or_else(|| noms.iter().map(|n| maison.join(n)).find(|d| d.is_dir()))
 }
 
 /// Windows : les dossiers déclarés pour le compte (déplacés dans OneDrive le cas échéant), sinon ceux du profil.
 #[cfg(windows)]
-fn chemin_de(s: Sorte) -> Option<PathBuf> {
-    use winreg::RegKey;
-    use winreg::enums::HKEY_CURRENT_USER;
-    let (valeur, defaut) = match s {
-        Sorte::Documents => ("Personal", "Documents"),
-        Sorte::Images => ("My Pictures", "Pictures"),
-        Sorte::Bureau => ("Desktop", "Desktop"),
-        Sorte::Videos => ("My Video", "Videos"),
-        Sorte::Musique => ("My Music", "Music"),
-    };
-    let lu = RegKey::predef(HKEY_CURRENT_USER)
+fn chemin_de(sorte: Sorte) -> Option<PathBuf> {
+    let &(.., [valeur, profil, _]) = DOSSIERS.iter().find(|d| d.0 == sorte)?;
+    winreg::RegKey::predef(winreg::enums::HKEY_CURRENT_USER)
         .open_subkey(r"Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders")
         .ok()
         .and_then(|k| k.get_value::<String, _>(valeur).ok())
-        .map(|c| PathBuf::from(crate::pieges::developper(&c)));
-    lu.or_else(|| std::env::var_os("USERPROFILE").map(|p| PathBuf::from(p).join(defaut)))
+        .map(|c| PathBuf::from(crate::pieges::developper(&c)))
+        .or_else(|| std::env::var_os("USERPROFILE").map(|p| PathBuf::from(p).join(profil)))
 }
 
 #[cfg(target_os = "macos")]
-#[allow(clippy::unnecessary_wraps)] // même signature que sous Linux et Windows, où le dossier peut manquer
-fn chemin_de(s: Sorte) -> Option<PathBuf> {
-    let nom = match s {
-        Sorte::Documents => "Documents",
-        Sorte::Images => "Pictures",
-        Sorte::Bureau => "Desktop",
-        Sorte::Videos => "Movies",
-        Sorte::Musique => "Music",
-    };
+fn chemin_de(sorte: Sorte) -> Option<PathBuf> {
+    let &(.., [_, _, nom]) = DOSSIERS.iter().find(|d| d.0 == sorte)?;
     Some(crate::nettoyer::maison().join(nom))
 }
 
-/// Un disque où copier.
-#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Disque {
     pub racine: PathBuf,
     pub nom: String,
@@ -134,19 +109,35 @@ pub(crate) fn est_la_cle(racine: &Path) -> bool {
         .any(|t| racine.join(t).is_file())
 }
 
+/// Le volume de `p` porte-t-il le système ou le dossier personnel ? `None` : le volume ne peut pas être lu.
+#[cfg(unix)]
+fn sur_le_systeme(p: &Path) -> Option<bool> {
+    use std::os::unix::fs::MetadataExt;
+    let volume = |p: &Path| std::fs::metadata(p).ok().map(|m| m.dev());
+    let v = volume(p)?;
+    Some([volume(Path::new("/")), volume(&crate::nettoyer::maison())].contains(&Some(v)))
+}
+
+#[cfg(windows)]
+#[allow(clippy::unnecessary_wraps)] // même signature que sous Linux et macOS, où le volume peut être illisible
+fn sur_le_systeme(p: &Path) -> Option<bool> {
+    let lecteur: String = p
+        .to_string_lossy()
+        .trim_start_matches(r"\\?\")
+        .chars()
+        .take(2)
+        .collect();
+    let systeme = std::env::var("SystemDrive").map_or("C:".into(), |s| s.to_uppercase());
+    Some(lecteur.to_uppercase() == systeme)
+}
+
 /// Linux : les systèmes de fichiers montés pour l'utilisateur (/run/media, /media, /mnt), modifiables, hors du disque
 /// du système et du dossier personnel, et pas la clé.
 #[cfg(target_os = "linux")]
 fn disques() -> Vec<Disque> {
-    use std::os::unix::fs::MetadataExt;
     const SYSTEMES: &[&str] = &[
         "vfat", "exfat", "ntfs", "ntfs3", "fuseblk", "ext2", "ext3", "ext4", "btrfs", "xfs", "f2fs", "hfsplus", "udf",
     ];
-    let peripherique = |p: &Path| std::fs::metadata(p).ok().map(|m| m.dev());
-    let interdits: Vec<u64> = [Path::new("/"), &crate::nettoyer::maison()]
-        .iter()
-        .filter_map(|p| peripherique(p))
-        .collect();
     let mut liste = Vec::new();
     for l in std::fs::read_to_string("/proc/mounts").unwrap_or_default().lines() {
         let c: Vec<&str> = l.split_whitespace().collect();
@@ -157,20 +148,17 @@ fn disques() -> Vec<Disque> {
         let monte_pour_l_utilisateur = ["/run/media/", "/media/", "/mnt/"]
             .iter()
             .any(|d| point.starts_with(d) && point.as_os_str().len() > d.len());
-        if !monte_pour_l_utilisateur
-            || !SYSTEMES.contains(&genre)
-            || options.split(',').any(|o| o == "ro")
-            || est_la_cle(&point)
-            || peripherique(&point).is_none_or(|d| interdits.contains(&d))
+        if monte_pour_l_utilisateur
+            && SYSTEMES.contains(&genre)
+            && !options.split(',').any(|o| o == "ro")
+            && !est_la_cle(&point)
+            && sur_le_systeme(&point) == Some(false)
+            && let Some((libre, total)) = crate::nettoyer::volume(&point)
         {
-            continue;
-        }
-        if let Some((libre, total)) = crate::nettoyer::volume(&point) {
+            let nom = point.file_name().unwrap_or_default().to_string_lossy().into_owned();
             liste.push(Disque {
-                nom: point
-                    .file_name()
-                    .map_or_else(String::new, |n| n.to_string_lossy().into_owned()),
                 racine: point,
+                nom,
                 libre,
                 total,
             });
@@ -188,8 +176,7 @@ fn disques() -> Vec<Disque> {
         .flatten()
         .flatten()
         .filter_map(|e| {
-            let racine = e.path();
-            let nom = e.file_name().to_string_lossy().into_owned();
+            let (racine, nom) = (e.path(), e.file_name().to_string_lossy().into_owned());
             let dev = std::fs::metadata(&racine).ok()?.dev();
             if Some(dev) == systeme || nom.starts_with("com.apple.") || est_la_cle(&racine) {
                 return None;
@@ -208,20 +195,14 @@ fn disques() -> Vec<Disque> {
 /// Windows : les lecteurs prêts, amovibles ou fixes, sauf celui du système et la clé.
 #[cfg(windows)]
 fn disques() -> Vec<Disque> {
-    let systeme = std::env::var("SystemDrive")
-        .unwrap_or_else(|_| "C:".into())
-        .to_uppercase();
-    lire_lecteurs(
-        &crate::machine::windows::ps(
-            "[IO.DriveInfo]::GetDrives() | Where-Object { $_.IsReady -and ($_.DriveType -eq 'Removable' -or $_.DriveType -eq 'Fixed') } | \
-             ForEach-Object { \"$($_.Name)|$($_.VolumeLabel)|$($_.AvailableFreeSpace)|$($_.TotalSize)\" }",
-        )
-        .unwrap_or_default(),
-        &systeme,
-    )
-    .into_iter()
-    .filter(|d| !est_la_cle(&d.racine))
-    .collect()
+    let lecteurs = crate::machine::windows::ps(
+        "[IO.DriveInfo]::GetDrives() | Where-Object { $_.IsReady -and ($_.DriveType -eq 'Removable' -or $_.DriveType -eq 'Fixed') } | \
+         ForEach-Object { \"$($_.Name)|$($_.VolumeLabel)|$($_.AvailableFreeSpace)|$($_.TotalSize)\" }",
+    );
+    let systeme = std::env::var("SystemDrive").map_or("C:".into(), |s| s.to_uppercase());
+    let mut liste = lire_lecteurs(&lecteurs.unwrap_or_default(), &systeme);
+    liste.retain(|d| !est_la_cle(&d.racine));
+    liste
 }
 
 /// « E:\|Sauvegarde|1000|2000 » par ligne, sans le lecteur du système (« C: »).
@@ -234,16 +215,15 @@ fn lire_lecteurs(texte: &str, systeme: &str) -> Vec<Disque> {
             let [racine, etiquette, libre, total] = c[..] else {
                 return None;
             };
-            if racine.to_uppercase().trim_end_matches('\\') == systeme.trim_end_matches('\\') {
+            let lettre = racine.trim_end_matches('\\');
+            if lettre.to_uppercase() == systeme.trim_end_matches('\\') {
                 return None;
             }
-            let lettre = racine.trim_end_matches('\\');
             Some(Disque {
                 racine: PathBuf::from(racine),
-                nom: if etiquette.is_empty() {
-                    lettre.to_string()
-                } else {
-                    format!("{etiquette} ({lettre})")
+                nom: match etiquette {
+                    "" => lettre.to_string(),
+                    _ => format!("{etiquette} ({lettre})"),
                 },
                 libre: libre.parse().ok()?,
                 total: total.parse().ok()?,
@@ -258,9 +238,7 @@ fn mesurer(dossier: &Path) -> (u64, u64) {
     let mut a_voir = vec![dossier.to_path_buf()];
     while let Some(d) = a_voir.pop() {
         for e in std::fs::read_dir(&d).into_iter().flatten().flatten() {
-            let Ok(m) = std::fs::symlink_metadata(e.path()) else {
-                continue;
-            };
+            let Ok(m) = e.path().symlink_metadata() else { continue };
             if m.is_dir() {
                 a_voir.push(e.path());
             } else if m.is_file() {
@@ -299,26 +277,24 @@ struct Avancement {
 }
 
 impl Avancement {
-    fn montrer(&mut self, force: bool) {
-        if !self.terminal || (!force && self.dernier.elapsed() < Duration::from_millis(500)) {
+    /// `fin` : le dernier affichage, toujours montré, qui termine la ligne.
+    fn montrer(&mut self, fin: bool) {
+        if !self.terminal || (!fin && self.dernier.elapsed() < Duration::from_millis(500)) {
             return;
         }
         self.dernier = Instant::now();
         #[allow(clippy::cast_precision_loss)]
-        let debit = self.octets as f64 / self.debut.elapsed().as_secs_f64().max(0.1);
         #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-        let debit = crate::nettoyer::taille_lisible(debit as u64);
-        print!(
-            "\r  {}\x1b[K",
-            trf!(
-                "{} / {} fichiers · {} / {} · {debit}/s",
-                "{} / {} files · {} / {} · {debit}/s",
-                self.fichiers,
-                self.total_fichiers,
-                crate::nettoyer::taille_lisible(self.octets),
-                crate::nettoyer::taille_lisible(self.total_octets)
-            )
+        let debit = taille_lisible((self.octets as f64 / self.debut.elapsed().as_secs_f64().max(0.1)) as u64);
+        let texte = trf!(
+            "{} / {} fichiers · {} / {} · {debit}/s",
+            "{} / {} files · {} / {} · {debit}/s",
+            self.fichiers,
+            self.total_fichiers,
+            taille_lisible(self.octets),
+            taille_lisible(self.total_octets)
         );
+        print!("\r  {texte}\x1b[K{}", if fin { "\n" } else { "" });
         let _ = std::io::stdout().flush();
     }
 }
@@ -326,26 +302,16 @@ impl Avancement {
 /// Un nom permis partout (FAT, exFAT, NTFS) : les caractères interdits par Windows remplacés par « _ », sans point
 /// ni espace à la fin.
 fn nom_permis(nom: &str) -> String {
-    let propre: String = nom
-        .chars()
-        .map(|c| {
-            if c.is_control() || "<>:\"/\\|?*".contains(c) {
-                '_'
-            } else {
-                c
-            }
-        })
-        .collect();
-    let propre = propre.trim_end_matches(['.', ' ']).to_string();
-    if propre.is_empty() { "_".into() } else { propre }
+    let propre = nom.replace(|c: char| c.is_control() || "<>:\"/\\|?*".contains(c), "_");
+    let propre = propre.trim_end_matches(['.', ' ']);
+    if propre.is_empty() { "_".into() } else { propre.into() }
 }
 
 /// « photo.jpg » → « photo (2).jpg », « photo (3).jpg »… : le premier nom libre du dossier.
 fn nom_libre(dossier: &Path, nom: &str) -> PathBuf {
-    let chemin = Path::new(nom);
-    let (base, extension) = match (chemin.file_stem(), chemin.extension()) {
-        (Some(b), Some(e)) if !b.is_empty() => (b.to_string_lossy().into_owned(), format!(".{}", e.to_string_lossy())),
-        _ => (nom.to_string(), String::new()),
+    let (base, extension) = match nom.rsplit_once('.') {
+        Some((base, extension)) if !base.is_empty() => (base, format!(".{extension}")),
+        _ => (nom, String::new()),
     };
     (2..=9999)
         .map(|n| dossier.join(format!("{base} ({n}){extension}")))
@@ -353,38 +319,21 @@ fn nom_libre(dossier: &Path, nom: &str) -> PathBuf {
         .unwrap_or_else(|| dossier.join(nom))
 }
 
-/// Empreinte BLAKE3 d'un fichier.
 fn empreinte(chemin: &Path) -> std::io::Result<blake3::Hash> {
-    let mut f = std::fs::File::open(chemin)?;
-    let mut h = blake3::Hasher::new();
-    let mut tampon = vec![0u8; 1 << 20];
-    loop {
-        let n = f.read(&mut tampon)?;
-        if n == 0 {
-            break;
-        }
-        h.update(&tampon[..n]);
-    }
-    Ok(h.finalize())
+    Ok(blake3::Hasher::new().update_reader(File::open(chemin)?)?.finalize())
 }
 
-/// Copie `source` vers `cible` (qui n'existe pas) en passant par un fichier partiel, puis vérifie. Rend l'empreinte
-/// de l'original.
+/// Copie `source` vers `cible` (qui n'existe pas) en passant par un fichier partiel, puis vérifie.
 fn copier_vers(source: &Path, cible: &Path) -> std::io::Result<()> {
-    let nom = cible
-        .file_name()
-        .map_or_else(String::new, |n| n.to_string_lossy().into_owned());
+    let nom = cible.file_name().unwrap_or_default().to_string_lossy();
     let partiel = cible.with_file_name(format!(".{nom}{PARTIEL}"));
     // Un partiel laissé par une copie interrompue est à nous : on le remplace.
     let _ = std::fs::remove_file(&partiel);
-    let mut entree = std::fs::File::open(source)?;
-    let mut sortie = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&partiel)?;
-    let mut h = blake3::Hasher::new();
-    let mut tampon = vec![0u8; 1 << 20];
-    let ecrit = (|| -> std::io::Result<()> {
+    let mut entree = File::open(source)?;
+    let mut sortie = OpenOptions::new().write(true).create_new(true).open(&partiel)?;
+    // Le partiel se ferme à la fin de l'écriture, réussie ou non : il peut alors être renommé ou retiré.
+    let ecrit = (move || -> std::io::Result<blake3::Hash> {
+        let (mut h, mut tampon) = (blake3::Hasher::new(), vec![0u8; 1 << 20]);
         loop {
             let n = entree.read(&mut tampon)?;
             if n == 0 {
@@ -398,21 +347,18 @@ fn copier_vers(source: &Path, cible: &Path) -> std::io::Result<()> {
         if let Ok(date) = std::fs::metadata(source).and_then(|m| m.modified()) {
             let _ = sortie.set_modified(date);
         }
-        Ok(())
+        // Personne n'a pris la place entre-temps : sinon, renommer l'écraserait.
+        if std::fs::symlink_metadata(cible).is_ok() {
+            return Err(std::io::Error::new(ErrorKind::AlreadyExists, "occupé"));
+        }
+        Ok(h.finalize())
     })();
-    drop(sortie);
-    if let Err(e) = ecrit {
+    let original = ecrit.inspect_err(|_| {
         let _ = std::fs::remove_file(&partiel);
-        return Err(e);
-    }
-    // Personne n'a pris la place entre-temps : sinon, renommer l'écraserait.
-    if std::fs::symlink_metadata(cible).is_ok() {
-        let _ = std::fs::remove_file(&partiel);
-        return Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists, "occupé"));
-    }
+    })?;
     std::fs::rename(&partiel, cible)?;
     // Relue sur le disque : une copie différente de l'original n'est pas gardée.
-    if empreinte(cible)? != h.finalize() {
+    if empreinte(cible)? != original {
         let _ = std::fs::remove_file(cible);
         return Err(std::io::Error::other(tr!(
             "la copie relue diffère de l'original",
@@ -424,18 +370,13 @@ fn copier_vers(source: &Path, cible: &Path) -> std::io::Result<()> {
 
 /// Un fichier : déjà là à l'identique (rien à faire), ou copié, sous son nom ou un autre.
 fn copier_fichier(source: &Path, dossier: &Path, bilan: &mut Bilan) {
-    let nom = source
-        .file_name()
-        .map_or_else(String::new, |n| n.to_string_lossy().into_owned());
-    let mut cible = dossier.join(&nom);
+    let nom = source.file_name().unwrap_or_default().to_string_lossy();
+    let mut cible = dossier.join(&*nom);
     if let Ok(m) = std::fs::symlink_metadata(&cible) {
         let taille = std::fs::metadata(source).map_or(u64::MAX, |s| s.len());
         if m.is_file()
             && m.len() == taille
-            && empreinte(&cible)
-                .ok()
-                .zip(empreinte(source).ok())
-                .is_some_and(|(a, b)| a == b)
+            && matches!((empreinte(&cible), empreinte(source)), (Ok(a), Ok(b)) if a == b)
         {
             bilan.deja += 1;
             bilan.octets += taille;
@@ -445,19 +386,15 @@ fn copier_fichier(source: &Path, dossier: &Path, bilan: &mut Bilan) {
     }
     let mut essai = copier_vers(source, &cible);
     // Nom refusé par ce disque (« : », « ? » sur un disque formaté pour Windows) : un nom permis partout.
+    let permis = nom_permis(&nom);
     if let Err(e) = &essai
-        && matches!(
-            e.kind(),
-            std::io::ErrorKind::InvalidInput | std::io::ErrorKind::InvalidFilename
-        )
-        && nom_permis(&nom) != nom
+        && matches!(e.kind(), ErrorKind::InvalidInput | ErrorKind::InvalidFilename)
+        && permis != nom
     {
-        let permis = nom_permis(&nom);
-        cible = if std::fs::symlink_metadata(dossier.join(&permis)).is_ok() {
-            nom_libre(dossier, &permis)
-        } else {
-            dossier.join(&permis)
-        };
+        cible = dossier.join(&permis);
+        if std::fs::symlink_metadata(&cible).is_ok() {
+            cible = nom_libre(dossier, &permis);
+        }
         essai = copier_vers(source, &cible);
     }
     match essai {
@@ -472,31 +409,20 @@ fn copier_fichier(source: &Path, dossier: &Path, bilan: &mut Bilan) {
     }
 }
 
-/// Copie l'arbre `source` dans `cible` (créé au besoin).
 fn copier_arbre(source: &Path, cible: &Path, bilan: &mut Bilan, avancement: &mut Avancement) {
     let mut a_voir = vec![(source.to_path_buf(), cible.to_path_buf())];
     while let Some((de, vers)) = a_voir.pop() {
-        if let Err(e) = std::fs::create_dir_all(&vers) {
-            bilan.echecs.push((de, e.to_string()));
+        let entrees = std::fs::create_dir_all(&vers).and_then(|()| std::fs::read_dir(&de));
+        let Ok(entrees) = entrees.inspect_err(|e| bilan.echecs.push((de, e.to_string()))) else {
             continue;
-        }
-        let entrees = match std::fs::read_dir(&de) {
-            Ok(e) => e,
-            Err(e) => {
-                bilan.echecs.push((de, e.to_string()));
-                continue;
-            }
         };
         for e in entrees.flatten() {
             let chemin = e.path();
-            let Ok(m) = std::fs::symlink_metadata(&chemin) else {
-                continue;
-            };
+            let Ok(m) = chemin.symlink_metadata() else { continue };
             if m.is_symlink() {
                 bilan.liens += 1;
             } else if m.is_dir() {
-                let nom = e.file_name().to_string_lossy().into_owned();
-                a_voir.push((chemin, vers.join(nom_permis(&nom))));
+                a_voir.push((chemin, vers.join(nom_permis(&e.file_name().to_string_lossy()))));
             } else if m.is_file() {
                 copier_fichier(&chemin, &vers, bilan);
                 avancement.fichiers += 1;
@@ -509,38 +435,28 @@ fn copier_arbre(source: &Path, cible: &Path, bilan: &mut Bilan, avancement: &mut
 
 /// Le dossier daté où copier : celui d'une copie interrompue à reprendre (le plus récent), sinon un nouveau.
 fn dossier_de_copie(racine: &Path, reprendre: impl Fn(&str) -> bool) -> PathBuf {
-    let mut interrompues: Vec<PathBuf> = std::fs::read_dir(racine)
+    let interrompue = std::fs::read_dir(racine)
         .into_iter()
         .flatten()
         .flatten()
         .map(|e| e.path())
         .filter(|p| {
-            p.file_name()
-                .is_some_and(|n| PREFIXES.iter().any(|pre| n.to_string_lossy().starts_with(pre)))
-                && p.join(TEMOIN).is_file()
+            let nom = p.file_name().unwrap_or_default().to_string_lossy();
+            PREFIXES.iter().any(|pre| nom.starts_with(pre)) && p.join(TEMOIN).is_file()
         })
-        .collect();
-    interrompues.sort();
-    if let Some(d) = interrompues.last()
-        && reprendre(
-            &d.file_name()
-                .map_or_else(String::new, |n| n.to_string_lossy().into_owned()),
-        )
-    {
-        return d.clone();
+        .max()
+        .filter(|d| reprendre(&d.file_name().unwrap_or_default().to_string_lossy()));
+    if let Some(d) = interrompue {
+        return d;
     }
-    let base = trf!(
-        "Gardien-copie-{}",
-        "Gardien-copy-{}",
-        chrono::Local::now().format("%Y-%m-%d")
-    );
+    let date = chrono::Local::now().format("%Y-%m-%d");
+    let base = trf!("Gardien-copie-{}", "Gardien-copy-{}", date);
     std::iter::once(racine.join(&base))
         .chain((2..=999).map(|n| racine.join(format!("{base}-{n}"))))
         .find(|d| std::fs::symlink_metadata(d).is_err())
         .unwrap_or_else(|| racine.join(base))
 }
 
-/// Copie les dossiers choisis dans `dossier` (le dossier daté) et rend le bilan.
 fn copier(choisis: &[(Sorte, PathBuf)], dossier: &Path, total: (u64, u64)) -> Bilan {
     let mut bilan = Bilan::default();
     let mut avancement = Avancement {
@@ -559,15 +475,10 @@ fn copier(choisis: &[(Sorte, PathBuf)], dossier: &Path, total: (u64, u64)) -> Bi
         return bilan;
     }
     for (sorte, source) in choisis {
-        let nom = source
-            .file_name()
-            .map_or_else(|| sorte.nom().to_string(), |n| n.to_string_lossy().into_owned());
+        let nom = source.file_name().map_or(sorte.nom().into(), |n| n.to_string_lossy());
         copier_arbre(source, &dossier.join(nom_permis(&nom)), &mut bilan, &mut avancement);
     }
     avancement.montrer(true);
-    if avancement.terminal {
-        println!();
-    }
     let _ = std::fs::write(dossier.join(COMPTE_RENDU), compte_rendu(choisis, &bilan));
     // Tout est copié : la copie n'est plus « en cours ». Avec des échecs, le témoin reste, pour réessayer.
     if bilan.echecs.is_empty() {
@@ -578,10 +489,8 @@ fn copier(choisis: &[(Sorte, PathBuf)], dossier: &Path, total: (u64, u64)) -> Bi
 
 fn compte_rendu(choisis: &[(Sorte, PathBuf)], b: &Bilan) -> String {
     use std::fmt::Write as _;
-    let mut t = String::new();
-    let _ = writeln!(
-        t,
-        "{} — Gardien {} — {}\n",
+    let mut t = format!(
+        "{} — Gardien {} — {}\n\n",
         tr!("Copie de fichiers", "File copy"),
         env!("CARGO_PKG_VERSION"),
         chrono::Local::now().format("%Y-%m-%d %H:%M")
@@ -589,26 +498,18 @@ fn compte_rendu(choisis: &[(Sorte, PathBuf)], b: &Bilan) -> String {
     for (s, chemin) in choisis {
         let _ = writeln!(t, "{} : {}", s.nom(), chemin.display());
     }
-    let _ = writeln!(
-        t,
-        "\n{}",
-        trf!(
-            "{} fichier(s) copié(s), {} déjà présent(s) à l'identique, {} lien(s) non copié(s), {} échec(s).",
-            "{} file(s) copied, {} already there unchanged, {} link(s) not copied, {} failure(s).",
-            b.copies,
-            b.deja,
-            b.liens,
-            b.echecs.len()
-        )
+    let resume = trf!(
+        "{} fichier(s) copié(s), {} déjà présent(s) à l'identique, {} lien(s) non copié(s), {} échec(s).",
+        "{} file(s) copied, {} already there unchanged, {} link(s) not copied, {} failure(s).",
+        b.copies,
+        b.deja,
+        b.liens,
+        b.echecs.len()
     );
+    let _ = writeln!(t, "\n{resume}");
+    let autre_nom = tr!("Autre nom", "Other name");
     for (de, vers) in &b.renommes {
-        let _ = writeln!(
-            t,
-            "{} : {} → {}",
-            tr!("Autre nom", "Other name"),
-            de.display(),
-            vers.display()
-        );
+        let _ = writeln!(t, "{autre_nom} : {} → {}", de.display(), vers.display());
     }
     for (chemin, erreur) in &b.echecs {
         let _ = writeln!(t, "{} : {} ({erreur})", tr!("Échec", "Failed"), chemin.display());
@@ -623,76 +524,41 @@ fn destination_permise(chemin: &Path, sources: &[(Sorte, PathBuf)]) -> Result<Pa
         .canonicalize()
         .map_err(|e| trf!("{} : {e}", "{}: {e}", chemin.display()))?;
     if !chemin.is_dir() {
-        return Err(trf!(
-            "{} n'est pas un dossier.",
-            "{} is not a folder.",
-            chemin.display()
-        ));
+        let dossier = chemin.display();
+        return Err(trf!("{} n'est pas un dossier.", "{} is not a folder.", dossier));
     }
-    if chemin.ancestors().any(est_la_cle) {
-        return Err(tr!(
+    let refus = if chemin.ancestors().any(est_la_cle) {
+        tr!(
             "La clé GARDIEN n'est pas un disque de copie.",
             "The GARDIEN key is not a copy disk."
         )
-        .into());
-    }
-    if sources
+    } else if sources
         .iter()
         .any(|(_, s)| s.canonicalize().is_ok_and(|s| chemin.starts_with(s)))
     {
-        return Err(tr!(
+        tr!(
             "Ce dossier est dans un des dossiers à copier.",
             "This folder is inside one of the folders to copy."
         )
-        .into());
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::MetadataExt;
-        let dev = |p: &Path| std::fs::metadata(p).ok().map(|m| m.dev());
-        if dev(&chemin).is_some() && [dev(Path::new("/")), dev(&crate::nettoyer::maison())].contains(&dev(&chemin)) {
-            return Err(tr!(
-                "Ce dossier est sur le disque du système : une copie n'y protège de rien.",
-                "This folder is on the system disk: a copy there protects from nothing."
-            )
-            .into());
-        }
-    }
-    #[cfg(windows)]
-    {
-        let systeme = std::env::var("SystemDrive")
-            .unwrap_or_else(|_| "C:".into())
-            .to_uppercase();
-        let lecteur = chemin
-            .to_string_lossy()
-            .trim_start_matches(r"\\?\")
-            .chars()
-            .take(2)
-            .collect::<String>();
-        if lecteur.to_uppercase() == systeme {
-            return Err(tr!(
-                "Ce dossier est sur le disque du système : une copie n'y protège de rien.",
-                "This folder is on the system disk: a copy there protects from nothing."
-            )
-            .into());
-        }
-    }
-    Ok(chemin)
+    } else if sur_le_systeme(&chemin) == Some(true) {
+        tr!(
+            "Ce dossier est sur le disque du système : une copie n'y protège de rien.",
+            "This folder is on the system disk: a copy there protects from nothing."
+        )
+    } else {
+        return Ok(chemin);
+    };
+    Err(refus.into())
 }
 
-/// Choisir le disque parmi ceux qui sont branchés.
-fn choisir_disque() -> Option<Disque> {
+fn choisir_disque() -> Option<PathBuf> {
     let liste = disques();
     if liste.is_empty() {
-        afficher_aligne(
-            "  ✖ ",
-            tr!(
-                "Aucun disque externe branché (la clé GARDIEN et le disque du système ne comptent pas). Branche un disque ou une clé assez grande, attends qu'il apparaisse, puis recommence.",
-                "No external disk plugged in (the GARDIEN key and the system disk do not count). Plug in a large enough disk or USB stick, wait for it to appear, then start again."
-            ),
-            4,
-            "",
+        let aucun = tr!(
+            "Aucun disque externe branché (la clé GARDIEN et le disque du système ne comptent pas). Branche un disque ou une clé assez grande, attends qu'il apparaisse, puis recommence.",
+            "No external disk plugged in (the GARDIEN key and the system disk do not count). Plug in a large enough disk or USB stick, wait for it to appear, then start again."
         );
+        afficher_aligne("  ✖ ", aucun, 4, "");
         return None;
     }
     let mut lignes = vec![
@@ -700,38 +566,23 @@ fn choisir_disque() -> Option<Disque> {
         Ligne::Texte(ligne_section(tr!("OÙ COPIER", "WHERE TO COPY"))),
     ];
     for (i, d) in liste.iter().enumerate() {
-        lignes.push(Ligne::choix(
-            &(i + 1).to_string(),
-            &d.nom,
-            &trf!(
-                "{} libres sur {}",
-                "{} free out of {}",
-                crate::nettoyer::taille_lisible(d.libre),
-                crate::nettoyer::taille_lisible(d.total)
-            ),
-        ));
+        let (libre, total) = (taille_lisible(d.libre), taille_lisible(d.total));
+        let place = trf!("{} libres sur {}", "{} free out of {}", libre, total);
+        lignes.push(Ligne::choix(&(i + 1).to_string(), &d.nom, &place));
     }
     lignes.push(Ligne::choix("↵", tr!("Revenir", "Back"), ""));
     lignes.push(Ligne::Texte(String::new()));
-    let choix = choisir(
-        &lignes,
-        tr!(
-            "  Numéro du disque (Entrée pour revenir) : ",
-            "  Disk number (Enter to go back): "
-        ),
-        "1",
-        tr!("revenir", "back"),
-    )?;
-    choix
-        .trim()
-        .parse::<usize>()
-        .ok()
-        .and_then(|n| n.checked_sub(1))
-        .and_then(|i| liste.get(i).cloned())
+    let invite = tr!(
+        "  Numéro du disque (Entrée pour revenir) : ",
+        "  Disk number (Enter to go back): "
+    );
+    let choix = choisir(&lignes, invite, "1", tr!("revenir", "back"))?;
+    let i = choix.trim().parse::<usize>().ok()?.checked_sub(1)?;
+    liste.into_iter().nth(i).map(|d| d.racine)
 }
 
-/// Copier mes fichiers, de bout en bout : quels dossiers, où, la place, l'accord, la copie, le bilan.
-fn lancer(destination: Option<&Path>) {
+/// « gardien copier-fichiers [destination] » ; sans destination, le disque se choisit parmi ceux qui sont branchés.
+pub fn commande(destination: Option<&Path>) {
     println!();
     cadre(
         &format!("{ACCENT}{}{RESET}", tr!("COPIER MES FICHIERS", "COPY MY FILES")),
@@ -745,19 +596,11 @@ fn lancer(destination: Option<&Path>) {
         );
         return;
     }
-    let racine = match destination {
-        Some(d) => match destination_permise(d, &sources) {
-            Ok(r) => r,
-            Err(e) => {
-                println!("  ✖ {e}");
-                return;
-            }
-        },
-        None => match choisir_disque() {
-            Some(d) => d.racine,
-            None => return,
-        },
+    let racine = match destination.map(|d| destination_permise(d, &sources)) {
+        None => choisir_disque(),
+        Some(permise) => permise.inspect_err(|e| println!("  ✖ {e}")).ok(),
     };
+    let Some(racine) = racine else { return };
     trp!(
         "  {DISCRET}Mesure des dossiers…{RESET}",
         "  {DISCRET}Measuring the folders…{RESET}"
@@ -766,42 +609,29 @@ fn lancer(destination: Option<&Path>) {
     let cases: Vec<Case> = sources
         .iter()
         .zip(&mesures)
-        .map(|((s, chemin), (n, octets))| Case {
+        .map(|((s, chemin), &(n, octets))| Case {
             texte: s.nom().to_string(),
-            precision: trf!(
-                "{} · {n} fichier(s)",
-                "{} · {n} file(s)",
-                crate::nettoyer::taille_lisible(*octets)
-            ),
+            precision: trf!("{} · {n} fichier(s)", "{} · {n} file(s)", taille_lisible(octets)),
             detail: chemin.display().to_string(),
-            cochee: *n > 0,
-            recommandee: *n > 0,
+            cochee: n > 0,
+            recommandee: n > 0,
             fixe: false,
         })
         .collect();
-    let entete = vec![
+    let entete = [
         String::new(),
         ligne_titre(tr!("Quels dossiers copier ?", "Which folders to copy?")),
         trf!("  {GRIS}Vers : {}{RESET}", "  {GRIS}To: {}{RESET}", racine.display()),
         String::new(),
     ];
-    let Some(coches) = cocher(&entete, &cases) else {
-        return;
-    };
-    let choisis: Vec<(Sorte, PathBuf)> = sources
-        .iter()
-        .zip(&coches)
-        .filter(|(_, c)| **c)
-        .map(|(s, _)| s.clone())
-        .collect();
-    let total = sources
-        .iter()
-        .zip(&mesures)
-        .zip(&coches)
-        .filter(|(_, c)| **c)
-        .fold((0, 0), |(n, o), ((_, (fichiers, octets)), _)| {
-            (n + fichiers, o + octets)
-        });
+    let Some(coches) = cocher(&entete, &cases) else { return };
+    let (choisis, tailles): (Vec<_>, Vec<(u64, u64)>) = sources
+        .into_iter()
+        .zip(mesures)
+        .zip(coches)
+        .filter_map(|(choisi, coche)| coche.then_some(choisi))
+        .unzip();
+    let total = tailles.iter().fold((0, 0), |(n, o), (f, b)| (n + f, o + b));
     if choisis.is_empty() {
         trp!("  Rien à copier.", "  Nothing to copy.");
         return;
@@ -811,14 +641,19 @@ fn lancer(destination: Option<&Path>) {
             "\n  Une copie commencée n'est pas finie ({nom}). La reprendre ? [O/n] : ",
             "\n  A started copy is not finished ({nom}). Resume it? [Y/n]: "
         ))
-        .trim()
         .chars()
         .next()
         .is_none_or(|c| matches!(c, 'o' | 'O' | 'y' | 'Y'))
     });
     // En reprise, ce qui est déjà copié ne reprend pas de place.
     let deja = if dossier.is_dir() { mesurer(&dossier).1 } else { 0 };
-    let libre = crate_libre(&racine);
+    #[cfg(unix)]
+    let libre = crate::nettoyer::volume(&racine).map(|(libre, _)| libre);
+    #[cfg(windows)]
+    let libre = disques()
+        .into_iter()
+        .find(|d| racine.starts_with(&d.racine))
+        .map(|d| d.libre);
     let besoin = total.1.saturating_sub(deja);
     if let Some(libre) = libre
         && besoin > libre
@@ -826,8 +661,8 @@ fn lancer(destination: Option<&Path>) {
         trp!(
             "\n  ✖ Pas assez de place : il faut {}, le disque n'a que {} de libre. Décoche des dossiers, ou prends un disque plus grand.",
             "\n  ✖ Not enough space: {} needed, the disk only has {} free. Uncheck some folders, or use a larger disk.",
-            crate::nettoyer::taille_lisible(besoin),
-            crate::nettoyer::taille_lisible(libre)
+            taille_lisible(besoin),
+            taille_lisible(libre)
         );
         return;
     }
@@ -835,7 +670,7 @@ fn lancer(destination: Option<&Path>) {
         "\n  {} fichier(s), {} → {}",
         "\n  {} file(s), {} → {}",
         total.0,
-        crate::nettoyer::taille_lisible(total.1),
+        taille_lisible(total.1),
         dossier.display()
     );
     if !demander(tr!("  Copier ? [o/N] : ", "  Copy? [y/N]: ")).oui() {
@@ -843,23 +678,7 @@ fn lancer(destination: Option<&Path>) {
         return;
     }
     let debut = Instant::now();
-    let bilan = copier(&choisis, &dossier, total);
-    afficher_bilan(&bilan, &dossier, debut.elapsed());
-}
-
-/// La place libre du disque où copier.
-fn crate_libre(racine: &Path) -> Option<u64> {
-    #[cfg(unix)]
-    {
-        crate::nettoyer::volume(racine).map(|(libre, _)| libre)
-    }
-    #[cfg(windows)]
-    {
-        disques()
-            .into_iter()
-            .find(|d| racine.starts_with(&d.racine))
-            .map(|d| d.libre)
-    }
+    afficher_bilan(&copier(&choisis, &dossier, total), &dossier, debut.elapsed());
 }
 
 fn afficher_bilan(b: &Bilan, dossier: &Path, duree: Duration) {
@@ -870,7 +689,7 @@ fn afficher_bilan(b: &Bilan, dossier: &Path, duree: Duration) {
             "  {VERT}✔{RESET} Copy finished and checked: {} file(s) copied, {} already there unchanged, {} in {} s.",
             b.copies,
             b.deja,
-            crate::nettoyer::taille_lisible(b.octets),
+            taille_lisible(b.octets),
             duree.as_secs()
         );
     } else {
@@ -902,14 +721,8 @@ fn afficher_bilan(b: &Bilan, dossier: &Path, duree: Duration) {
     trp!("  {GRIS}Dans : {}{RESET}", "  {GRIS}In: {}{RESET}", dossier.display());
 }
 
-/// L'outil au menu.
 pub fn menu() {
-    lancer(None);
-}
-
-/// « gardien copier-fichiers [destination] ».
-pub fn commande(destination: Option<&Path>) {
-    lancer(destination);
+    commande(None);
 }
 
 #[cfg(test)]
@@ -1060,5 +873,47 @@ mod tests {
         assert_eq!(d[0].nom, "Sauvegarde (E:)");
         assert_eq!(d[1].nom, "F:");
         assert_eq!(d[0].libre, 500);
+    }
+
+    #[test]
+    fn noms_reprises_et_refus_cas_limites() {
+        let base = jetable("limites");
+        assert_eq!(nom_libre(&base, ".bashrc"), base.join(".bashrc (2)"));
+        assert_eq!(nom_libre(&base, "archive.tar.gz"), base.join("archive.tar (2).gz"));
+        assert_eq!(nom_libre(&base, "fin."), base.join("fin (2)."));
+        assert_eq!(nom_permis("a\tb\u{7f}c"), "a_b_c");
+        assert_eq!(nom_permis(". ."), "_");
+        // La plus récente des copies interrompues, quelle que soit la langue ; un dossier sans témoin n'en est pas une.
+        for nom in [
+            "Gardien-copie-2026-10-01",
+            "Gardien-copy-2026-10-02",
+            "Gardien-copy-2026-10-03",
+        ] {
+            std::fs::create_dir_all(base.join(nom)).unwrap();
+        }
+        std::fs::write(base.join("Gardien-copie-2026-10-01").join(TEMOIN), "").unwrap();
+        std::fs::write(base.join("Gardien-copy-2026-10-02").join(TEMOIN), "").unwrap();
+        let proposee = std::cell::RefCell::new(String::new());
+        let reprise = dossier_de_copie(&base, |nom| {
+            *proposee.borrow_mut() = nom.to_string();
+            true
+        });
+        assert_eq!(reprise, base.join("Gardien-copy-2026-10-02"));
+        assert_eq!(*proposee.borrow(), "Gardien-copy-2026-10-02");
+        // Le lecteur du système est écarté, en minuscules comme avec sa barre.
+        let d = lire_lecteurs("c:\\|Windows|1|2\nD:\\|Données|3|4\n", "C:\\");
+        assert_eq!((d.len(), d[0].nom.as_str(), d[0].total), (1, "Données (D:)", 4));
+        // Refus : un fichier, la clé GARDIEN et ses sous-dossiers.
+        let cle = base.join("cle");
+        std::fs::create_dir_all(cle.join("sous")).unwrap();
+        std::fs::write(cle.join(crate::reseau::TEMOIN_CLE), "").unwrap();
+        std::fs::write(base.join("note.txt"), "x").unwrap();
+        let refus = destination_permise(&base.join("note.txt"), &[]).unwrap_err();
+        assert!(refus.ends_with("note.txt n'est pas un dossier."), "{refus}");
+        assert_eq!(
+            destination_permise(&cle.join("sous"), &[]).unwrap_err(),
+            "La clé GARDIEN n'est pas un disque de copie."
+        );
+        let _ = std::fs::remove_dir_all(&base);
     }
 }
