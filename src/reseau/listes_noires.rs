@@ -125,7 +125,11 @@ fn chercher_avec(ip: Ipv4Addr, zone: &str, resoudre: impl Fn(&str) -> Option<Vec
     } else if refus(&codes) {
         Verdict::Impossible(tr!("la liste a refusé la requête", "the list refused the query").into())
     } else if codes.is_empty() {
-        Verdict::Absente
+        // Une réponse vide peut être une panne rapide plutôt que « nom inconnu » : l'essai, reposé, doit répondre encore.
+        match resoudre(&requete(Ipv4Addr::new(127, 0, 0, 2), zone)) {
+            Some(essai) if !essai.is_empty() && !detournee(&essai) && !refus(&essai) => Verdict::Absente,
+            _ => muet(),
+        }
     } else {
         Verdict::Listee(codes)
     }
@@ -354,6 +358,25 @@ mod tests {
             chercher_avec(ip("203.0.113.7"), "bl.spamcop.net", |_: &str| Some(vec![ip(
                 "92.242.132.24"
             )])),
+            Verdict::Impossible(_)
+        ));
+    }
+
+    // « Absente » ne se conclut que si le DNS répond encore à l'essai juste après : une erreur rapide sur la vraie
+    // question (panne passagère, DNS qui tombe) ressemble à « nom inconnu » et donnait « pas listée ».
+    #[test]
+    fn absente_seulement_si_le_dns_repond_encore() {
+        let essais = std::cell::Cell::new(0);
+        let tombe = |nom: &str| {
+            if nom.starts_with("2.0.0.127.") {
+                essais.set(essais.get() + 1);
+                (essais.get() == 1).then(|| vec![ip("127.0.0.2")])
+            } else {
+                Some(vec![])
+            }
+        };
+        assert!(matches!(
+            chercher_avec(ip("203.0.113.7"), "bl.spamcop.net", tombe),
             Verdict::Impossible(_)
         ));
     }
