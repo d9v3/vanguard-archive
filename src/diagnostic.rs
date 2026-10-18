@@ -50,7 +50,7 @@ fn go(octets: u64) -> String {
     }
 }
 
-/// Sources qui reviennent le plus dans une liste : « nextdns (12), kernel (5) ».
+/// Sources qui reviennent le plus dans une liste : « NetworkManager (12), kernel (5) ».
 fn plus_frequentes(sources: &[String], max: usize) -> String {
     let mut comptes: Vec<(String, usize)> = Vec::new();
     for s in sources {
@@ -111,7 +111,19 @@ mod systeme {
         Some(reste[..reste.find('"')?].trim().to_string())
     }
 
-    /// Source d'une ligne du journal (« Oct 17 15:29:32 omarchy nextdns[1334]: … » → « nextdns »).
+    /// Le journal du système se lit-il ? Sans être root ni dans les groupes adm, systemd-journal ou wheel,
+    /// journalctl ne montre que les messages de la session, sans le dire (-q) : « aucune erreur » serait faux.
+    fn journal_systeme_lisible() -> bool {
+        ["/var/log/journal", "/run/log/journal"].iter().any(|d| {
+            std::fs::read_dir(d)
+                .into_iter()
+                .flatten()
+                .flatten()
+                .any(|e| std::fs::File::open(e.path().join("system.journal")).is_ok())
+        })
+    }
+
+    /// Source d'une ligne du journal (« Oct 17 15:29:32 portable NetworkManager[1334]: … » → « NetworkManager »).
     pub(super) fn source_journal(l: &str) -> Option<String> {
         let apres_hote = l.splitn(5, ' ').nth(4)?;
         let source = apres_hote.split(':').next()?;
@@ -219,7 +231,10 @@ mod systeme {
         }
 
         let mut problemes: Vec<Ligne> = Vec::new();
-        match sortie("journalctl", &["-b", "-p", "err", "-q", "--no-pager", "-o", "short"]) {
+        let journal = journal_systeme_lisible()
+            .then(|| sortie("journalctl", &["-b", "-p", "err", "-q", "--no-pager", "-o", "short"]))
+            .flatten();
+        match journal {
             Some(j) => {
                 let sources: Vec<String> = j.lines().filter_map(source_journal).collect();
                 if sources.is_empty() {
@@ -539,7 +554,7 @@ mod systeme {
                  processeur = "$($cpu.Name)".Trim(); fils = [uint32]$cpu.NumberOfLogicalProcessors
                  memoire = [uint64]$cs.TotalPhysicalMemory; memoire_libre = [uint64]$os.FreePhysicalMemory * 1024
                  cartes = @(Get-CimInstance Win32_VideoController | ForEach-Object { @{ nom = "$($_.Name)"; pilote = "$($_.DriverVersion)" } })
-                 disques = @(Get-PhysicalDisk | ForEach-Object { @{ nom = "$($_.FriendlyName)"; taille = [uint64]$_.Size; sorte = "$($_.MediaType)" } })
+                 disques = @(try { Get-PhysicalDisk | ForEach-Object { @{ nom = "$($_.FriendlyName)"; taille = [uint64]$_.Size; sorte = "$($_.MediaType)" } } } catch { })
                  ecrans_bleus = $bleus.Count
                  dernier_ecran_bleu = if ($bleus.Count) { $bleus[0].TimeCreated.ToString('yyyy-MM-dd') } else { '' }
                  arrets_brutaux = @(Get-WinEvent -FilterHashtable @{ LogName = 'System'; Id = 41; StartTime = $mois } -ErrorAction SilentlyContinue).Count
@@ -720,14 +735,14 @@ mod tests {
     fn mise_en_forme() {
         assert_eq!(duree(3 * 3600 + 5 * 60), "3 h 05");
         assert_eq!(duree(2 * 86_400 + 4 * 3600), "2 j 4 h");
-        let sources: Vec<String> = ["nextdns", "kernel", "nextdns", "foot"]
+        let sources: Vec<String> = ["dnsmasq", "kernel", "dnsmasq", "firefox"]
             .iter()
             .map(ToString::to_string)
             .collect();
-        assert_eq!(plus_frequentes(&sources, 2), "nextdns (2), foot (1)");
+        assert_eq!(plus_frequentes(&sources, 2), "dnsmasq (2), firefox (1)");
         let t = en_texte(&[(
             "SYSTÈME".into(),
-            vec![ligne("Nom", "omarchy"), alerte("Erreurs", "3", Niveau::Moyen)],
+            vec![ligne("Nom", "portable"), alerte("Erreurs", "3", Niveau::Moyen)],
         )]);
         assert!(t.contains("  Nom") && t.contains("! Erreurs") && !t.contains('\x1b'));
     }
@@ -752,14 +767,15 @@ mod tests {
     #[test]
     fn source_des_lignes_du_journal() {
         assert_eq!(
-            systeme::source_journal("Oct 17 15:29:32 omarchy nextdns[1334]: TCP read: unexpected EOF").as_deref(),
-            Some("nextdns")
+            systeme::source_journal("Oct 07 15:29:32 portable NetworkManager[1334]: dhcp4: request timed out")
+                .as_deref(),
+            Some("NetworkManager")
         );
         assert_eq!(
-            systeme::source_journal("Oct 17 14:42:05 omarchy kernel: kvm_amd: kvm").as_deref(),
+            systeme::source_journal("Oct 17 14:42:05 portable kernel: kvm_amd: kvm").as_deref(),
             Some("kernel")
         );
-        let v = "NVRM version: NVIDIA UNIX Open Kernel Module for x86_64  610.57.04  Release Build  (root@omarchy)";
+        let v = "NVRM version: NVIDIA UNIX Open Kernel Module for x86_64  610.57.04  Release Build  (root@builder)";
         assert_eq!(systeme::version_nvidia(v).as_deref(), Some("610.57.04"));
         let disque = r#"NAME="sda" SIZE="31004295168" ROTA="1" TYPE="disk" TRAN="usb" MODEL="USB Flash Disk""#;
         assert_eq!(systeme::champ_lsblk(disque, "TRAN").as_deref(), Some("usb"));
