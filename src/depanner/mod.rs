@@ -384,7 +384,8 @@ fn volumes() -> Vec<(String, u64, u64)> {
                     return None;
                 }
                 vus.push(peripherique);
-                let point = point.replace("\\040", " ");
+                // Espaces, tabulations… écrits en octal (« \\040 ») : décodés en entier, comme pour Copier.
+                let point = crate::copier::sans_echappements(point);
                 // La clé GARDIEN n'est pas un disque à libérer : elle est faite pour rester telle quelle.
                 if crate::copier::est_la_cle(std::path::Path::new(&point)) {
                     return None;

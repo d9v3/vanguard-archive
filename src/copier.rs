@@ -141,7 +141,7 @@ fn sur_le_systeme_selon(montages: &str, p: &Path, maison: &Path) -> Option<bool>
 /// Un chemin de /proc/mounts ou mountinfo : l'espace, la tabulation, le saut de ligne et la barre oblique inverse y
 /// sont écrits en octal (« \040 » pour l'espace).
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
-fn sans_echappements(t: &str) -> String {
+pub(crate) fn sans_echappements(t: &str) -> String {
     let mut sortie = Vec::with_capacity(t.len());
     let octets = t.as_bytes();
     let mut i = 0;
@@ -814,6 +814,17 @@ mod tests {
         assert_eq!(systeme("/run/media/alice/Mon disque/x"), Some(false));
         // Un nom qui commence pareil n'est pas sous ce montage.
         assert_eq!(systeme("/run/media/alice/Mon disque2"), Some(true));
+    }
+
+    /// Les quatre échappements de /proc/mounts, et un « \\ » qui n'en est pas un (gardé tel quel).
+    #[test]
+    fn chemins_de_montage_decodes() {
+        assert_eq!(
+            sans_echappements(r"/run/media/alice/Mon\040disque\011a\012b\134c"),
+            "/run/media/alice/Mon disque\ta\nb\\c"
+        );
+        assert_eq!(sans_echappements(r"/mnt/a\9"), r"/mnt/a\9");
+        assert_eq!(sans_echappements("/mnt/été"), "/mnt/été");
     }
 
     fn jetable(nom: &str) -> PathBuf {
