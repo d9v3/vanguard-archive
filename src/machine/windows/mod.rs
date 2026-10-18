@@ -81,8 +81,9 @@ pub(super) fn illisible(categorie: &'static str) -> Constat {
 
 /// Le script exécuté dans la fenêtre administrateur : chaque commande est annoncée, puis « OK » ou l'erreur.
 /// Une fenêtre muette ne se distingue pas d'une fenêtre figée. Chaque étape a son try/catch : une erreur PowerShell
-/// compte, comme un programme externe en échec, pour une étape ratée, et la fenêtre passe à la suivante.
-fn script_admin(commandes: &[String]) -> String {
+/// compte, comme un programme externe en échec, pour une étape ratée, et la fenêtre passe à la suivante. Après chaque
+/// correctif, une ligne « ok » ou « echec » s'ajoute au fichier `resultats`, que sentinel lit à la fermeture.
+fn script_admin(correctifs: &[Vec<String>], resultats: &str) -> String {
     let texte = |s: &str| s.replace('\'', "''");
     let mut script = String::from(tr!(
         "$Host.UI.RawUI.WindowTitle = 'sentinel : correction en cours'\n\
@@ -98,23 +99,31 @@ fn script_admin(commandes: &[String]) -> String {
          Write-Host 'A long step (update, scan, Windows repair) can take several minutes: its start time is shown.'\n\
          $echecs = 0\n"
     ));
-    for c in commandes {
-        // Un programme externe (DISM, sfc, netsh…) en échec ne lève pas d'erreur PowerShell : seul son code de
-        // retour le dit. On le lit après chaque commande (3010 = réussi, redémarrage demandé) et on continue :
-        // dans « Internet ne marche plus », un netsh en échec ne doit pas empêcher de renouveler l'adresse.
-        let _ = trw!(
+    for commandes in correctifs {
+        script += "$avant = $echecs\n";
+        for c in commandes {
+            // Un programme externe (DISM, sfc, netsh…) en échec ne lève pas d'erreur PowerShell : seul son code de
+            // retour le dit. On le lit après chaque commande (3010 = réussi, redémarrage demandé) et on continue :
+            // dans « Internet ne marche plus », un netsh en échec ne doit pas empêcher de renouveler l'adresse.
+            let _ = trw!(
+                script,
+                "Write-Host ''; Write-Host ('> ' + (Get-Date -Format 'HH:mm') + '  {}') -ForegroundColor Yellow\n$global:LASTEXITCODE = 0\ntry {{\n  {c}\n  \
+                 if ($LASTEXITCODE -eq 3010) {{ Write-Host '  OK (redémarrage nécessaire)' -ForegroundColor Green }}\n  \
+                 elseif ($LASTEXITCODE) {{ $echecs++; Write-Host \"  Échec (code $LASTEXITCODE) : voir le message ci-dessus\" -ForegroundColor Red }}\n  \
+                 else {{ Write-Host '  OK' -ForegroundColor Green }}\n\
+                 }} catch {{ $echecs++; Write-Host ('  Échec : ' + $_.Exception.Message) -ForegroundColor Red }}\n",
+                "Write-Host ''; Write-Host ('> ' + (Get-Date -Format 'HH:mm') + '  {}') -ForegroundColor Yellow\n$global:LASTEXITCODE = 0\ntry {{\n  {c}\n  \
+                 if ($LASTEXITCODE -eq 3010) {{ Write-Host '  OK (restart needed)' -ForegroundColor Green }}\n  \
+                 elseif ($LASTEXITCODE) {{ $echecs++; Write-Host \"  Failed (code $LASTEXITCODE): see the message above\" -ForegroundColor Red }}\n  \
+                 else {{ Write-Host '  OK' -ForegroundColor Green }}\n\
+                 }} catch {{ $echecs++; Write-Host ('  Failed: ' + $_.Exception.Message) -ForegroundColor Red }}\n",
+                texte(c)
+            );
+        }
+        let _ = writeln!(
             script,
-            "Write-Host ''; Write-Host ('> ' + (Get-Date -Format 'HH:mm') + '  {}') -ForegroundColor Yellow\n$global:LASTEXITCODE = 0\ntry {{\n  {c}\n  \
-             if ($LASTEXITCODE -eq 3010) {{ Write-Host '  OK (redémarrage nécessaire)' -ForegroundColor Green }}\n  \
-             elseif ($LASTEXITCODE) {{ $echecs++; Write-Host \"  Échec (code $LASTEXITCODE) : voir le message ci-dessus\" -ForegroundColor Red }}\n  \
-             else {{ Write-Host '  OK' -ForegroundColor Green }}\n\
-             }} catch {{ $echecs++; Write-Host ('  Échec : ' + $_.Exception.Message) -ForegroundColor Red }}\n",
-            "Write-Host ''; Write-Host ('> ' + (Get-Date -Format 'HH:mm') + '  {}') -ForegroundColor Yellow\n$global:LASTEXITCODE = 0\ntry {{\n  {c}\n  \
-             if ($LASTEXITCODE -eq 3010) {{ Write-Host '  OK (restart needed)' -ForegroundColor Green }}\n  \
-             elseif ($LASTEXITCODE) {{ $echecs++; Write-Host \"  Failed (code $LASTEXITCODE): see the message above\" -ForegroundColor Red }}\n  \
-             else {{ Write-Host '  OK' -ForegroundColor Green }}\n\
-             }} catch {{ $echecs++; Write-Host ('  Failed: ' + $_.Exception.Message) -ForegroundColor Red }}\n",
-            texte(c)
+            "try {{ Add-Content -LiteralPath '{}' -Value $(if ($echecs -gt $avant) {{ 'echec' }} else {{ 'ok' }}) }} catch {{ }}",
+            texte(resultats)
         );
     }
     script += tr!(
@@ -127,14 +136,20 @@ fn script_admin(commandes: &[String]) -> String {
 }
 
 /// Lance des commandes dans une fenêtre PowerShell administrateur (une demande UAC). Retourne `true` si tout a réussi.
-/// Le script est écrit en clair dans un fichier .ps1 dont le chemin est affiché : on peut le lire avant
-/// d'accepter la demande d'administrateur, et il reste comme trace de ce qui a été modifié.
 pub fn powershell_admin(commandes: &[String]) -> bool {
+    powershell_admin_chacune(&[commandes.to_vec()]) == [true]
+}
+
+/// Lance des correctifs (chacun sa liste de commandes) dans une seule fenêtre PowerShell administrateur et dit
+/// lesquels ont réussi. Le script est écrit en clair dans un fichier .ps1 dont le chemin est affiché : on peut le
+/// lire avant d'accepter la demande d'administrateur, et il reste comme trace de ce qui a été modifié.
+pub fn powershell_admin_chacune(correctifs: &[Vec<String>]) -> Vec<bool> {
+    let echec = vec![false; correctifs.len()];
     let dossier = crate::reseau::dossier_local().join("corrections");
-    let chemin = dossier.join(format!(
-        "correction-{}.ps1",
-        chrono::Local::now().format("%Y%m%d-%H%M%S")
-    ));
+    let nom = format!("correction-{}", chrono::Local::now().format("%Y%m%d-%H%M%S"));
+    let chemin = dossier.join(format!("{nom}.ps1"));
+    // La fenêtre administrateur est un autre processus : elle répond par ce fichier, une ligne par correctif.
+    let resultats = dossier.join(format!("{nom}.resultats"));
     let entete = trf!(
         "# Correction proposée par sentinel {} le {}.\r\n# Ce script n'est lancé qu'après ton accord (demande d'administrateur).\r\n\r\n",
         "# Fix proposed by sentinel {} on {}.\r\n# This script only runs after your consent (administrator prompt).\r\n\r\n",
@@ -142,7 +157,8 @@ pub fn powershell_admin(commandes: &[String]) -> bool {
         chrono::Local::now().format(tr!("%d/%m/%Y à %H:%M", "%Y-%m-%d %H:%M"))
     );
     // BOM : sans lui, Windows PowerShell 5.1 lit le fichier en ANSI et casse les accents.
-    let contenu = format!("\u{feff}{entete}{}\r\n", script_admin(commandes).replace('\n', "\r\n"));
+    let script = script_admin(correctifs, &resultats.display().to_string());
+    let contenu = format!("\u{feff}{entete}{}\r\n", script.replace('\n', "\r\n"));
     if std::fs::create_dir_all(&dossier)
         .and_then(|()| std::fs::write(&chemin, contenu))
         .is_err()
@@ -152,8 +168,9 @@ pub fn powershell_admin(commandes: &[String]) -> bool {
             "    Could not write the fix script to {}",
             dossier.display()
         );
-        return false;
+        return echec;
     }
+    let _ = std::fs::remove_file(&resultats);
     trp!(
         "    Script de correction (lisible) : {}",
         "    Fix script (readable): {}",
@@ -173,10 +190,20 @@ pub fn powershell_admin(commandes: &[String]) -> bool {
          $p.WaitForExit(); \
          if ($null -eq $p.ExitCode) {{ exit 4 }}; exit $p.ExitCode"
     );
-    powershell()
+    let reussi = powershell()
         .args(["-NoProfile", "-Command", &lanceur])
         .status()
-        .is_ok_and(|s| s.success())
+        .is_ok_and(|s| s.success());
+    let lus = std::fs::read_to_string(&resultats).unwrap_or_default();
+    let _ = std::fs::remove_file(&resultats);
+    if reussi {
+        return vec![true; correctifs.len()];
+    }
+    // Demande refusée, point de restauration refusé, fenêtre fermée en route : un correctif sans sa ligne « ok »
+    // n'a pas été fait, ou pas en entier.
+    let mut etats: Vec<bool> = lus.lines().map(|l| l.trim() == "ok").collect();
+    etats.resize(correctifs.len(), false);
+    etats
 }
 
 fn pare_feu() -> Constat {
@@ -782,10 +809,13 @@ mod tests {
 
     #[test]
     fn la_fenetre_admin_annonce_chaque_etape() {
-        let s = script_admin(&[
-            "Update-MpSignature".to_string(),
-            "Disable-LocalUser -Name 'Invité'".to_string(),
-        ]);
+        let s = script_admin(
+            &[
+                vec!["Update-MpSignature".to_string()],
+                vec!["Disable-LocalUser -Name 'Invité'".to_string()],
+            ],
+            r"C:\Users\Zoé O'Brien\correction.resultats",
+        );
         assert!(s.contains("+ '  Update-MpSignature')"));
         assert!(s.contains("+ '  Disable-LocalUser -Name ''Invité'''"));
         assert!(s.contains("Read-Host"));
@@ -793,6 +823,13 @@ mod tests {
         assert_eq!(s.matches("$global:LASTEXITCODE = 0").count(), 2);
         assert!(s.contains("$echecs++") && s.contains("exit 1 }"));
         // Chaque étape a son try/catch : une erreur PowerShell n'arrête pas les suivantes.
-        assert_eq!(s.matches("} catch {").count(), 2);
+        assert_eq!(s.matches("} catch { $echecs++").count(), 2);
+        // Une ligne de résultat par correctif, pour savoir lesquels ont réussi.
+        assert_eq!(s.matches("$avant = $echecs").count(), 2);
+        assert_eq!(
+            s.matches(r"Add-Content -LiteralPath 'C:\Users\Zoé O''Brien\correction.resultats'")
+                .count(),
+            2
+        );
     }
 }

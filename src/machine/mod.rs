@@ -344,31 +344,39 @@ pub fn retenir_blocage(k: &Correctif) {
 
 /// Exécute les commandes d'un correctif. Sous Windows, une seule fenêtre UAC par correctif.
 pub fn appliquer(commandes: &[String]) -> bool {
+    appliquer_chacune(&[commandes.to_vec()]) == [true]
+}
+
+/// Applique plusieurs correctifs indépendants (chacun sa liste de commandes) et dit lesquels ont réussi : un
+/// correctif en échec n'empêche pas les suivants. Sous Linux et macOS, les commandes d'un correctif s'arrêtent à la
+/// première en échec ; sous Windows, une seule fenêtre UAC pour tous.
+pub fn appliquer_chacune(correctifs: &[Vec<String>]) -> Vec<bool> {
     #[cfg(windows)]
     {
-        for c in commandes {
+        for c in correctifs.iter().flatten() {
             println!("    {GRIS}PS> {c}{RESET}");
         }
         trp!(
             "    {GRIS}Une fenêtre administrateur s'ouvre et montre chaque étape ; attends qu'elle se ferme.{RESET}",
             "    {GRIS}An administrator window opens and shows each step; wait for it to close.{RESET}"
         );
-        windows::powershell_admin(commandes)
+        windows::powershell_admin_chacune(correctifs)
     }
     #[cfg(not(windows))]
     {
-        for c in commandes {
-            println!("    {GRIS}$ {c}{RESET}");
-            if !Command::new("bash")
-                .arg("-c")
-                .arg(c)
-                .status()
-                .is_ok_and(|s| s.success())
-            {
-                return false;
-            }
-        }
-        true
+        correctifs
+            .iter()
+            .map(|commandes| {
+                commandes.iter().all(|c| {
+                    println!("    {GRIS}$ {c}{RESET}");
+                    Command::new("bash")
+                        .arg("-c")
+                        .arg(c)
+                        .status()
+                        .is_ok_and(|s| s.success())
+                })
+            })
+            .collect()
     }
 }
 
@@ -603,5 +611,16 @@ mod tests {
             ("Comptes", None, "Seul root a l'UID 0."),
         ]);
         assert!(complet.fiable());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn un_correctif_en_echec_n_arrete_pas_les_autres() {
+        let temoin = std::env::temp_dir().join(format!("sentinel-test-appliquer-{}", std::process::id()));
+        let toucher = format!("touch '{}'", temoin.display());
+        let r = appliquer_chacune(&[vec!["true".into()], vec!["false".into(), toucher], vec!["true".into()]]);
+        assert_eq!(r, [true, false, true]);
+        // Dans un même correctif, rien ne part après une commande en échec.
+        assert!(!temoin.exists());
     }
 }

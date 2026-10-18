@@ -2,7 +2,7 @@
 //! PowerShell, gestionnaire de paquets hors ligne…) ne doit jamais figer sentinel.
 
 use std::io::Read;
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Stdio};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
@@ -46,8 +46,7 @@ pub fn lancer(commande: &mut Command, secondes: u64) -> Option<Resultat> {
             Ok(Some(statut)) => break statut,
             Ok(None) if Instant::now() < limite => std::thread::sleep(Duration::from_millis(50)),
             _ => {
-                let _ = enfant.kill();
-                let _ = enfant.wait();
+                arreter(&mut enfant);
                 return None;
             }
         }
@@ -57,6 +56,43 @@ pub fn lancer(commande: &mut Command, secondes: u64) -> Option<Resultat> {
         sortie: sortie.recv_timeout(DELAI_LECTURE).ok()?,
         erreurs: erreurs.recv_timeout(DELAI_LECTURE).unwrap_or_default(),
     })
+}
+
+/// Arrête le programme et tout ce qu'il a lancé : sinon un sous-processus (winget sous PowerShell, un outil sous un
+/// script) continuerait en arrière-plan, avec ses verrous.
+fn arreter(enfant: &mut Child) {
+    // Windows : taskkill suit lui-même l'arbre des processus.
+    #[cfg(windows)]
+    let _ = Command::new("taskkill")
+        .args(["/T", "/F", "/PID", &enfant.id().to_string()])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+    // Unix : les descendants sont d'abord tous repérés (pgrep -P, de proche en proche), puis tués. Tué en premier, le
+    // programme laisserait ses enfants rattachés à init, introuvables.
+    #[cfg(unix)]
+    {
+        let mut pids = vec![enfant.id()];
+        let mut i = 0;
+        while let Some(&pid) = pids.get(i)
+            && pids.len() < 1000
+        {
+            i += 1;
+            if let Ok(o) = Command::new("pgrep").args(["-P", &pid.to_string()]).output() {
+                pids.extend(
+                    String::from_utf8_lossy(&o.stdout)
+                        .split_whitespace()
+                        .filter_map(|p| p.parse::<u32>().ok()),
+                );
+            }
+        }
+        for pid in pids.into_iter().skip(1).filter_map(|p| libc::pid_t::try_from(p).ok()) {
+            // SAFETY : simple envoi d'un signal à un numéro de processus.
+            unsafe { libc::kill(pid, libc::SIGKILL) };
+        }
+    }
+    let _ = enfant.kill();
+    let _ = enfant.wait();
 }
 
 #[cfg(all(test, unix))]
@@ -81,5 +117,25 @@ mod tests {
         let debut = Instant::now();
         let _ = lancer(Command::new("sh").args(["-c", "sleep 20 & echo fini"]), 5);
         assert!(debut.elapsed() < Duration::from_secs(5));
+    }
+
+    #[test]
+    fn le_delai_arrete_aussi_ce_que_le_programme_a_lance() {
+        let fichier = std::env::temp_dir().join(format!("sentinel-test-arbre-{}", std::process::id()));
+        let script = format!("sleep 30 & echo $! > '{}'; wait", fichier.display());
+        assert!(lancer(Command::new("sh").args(["-c", &script]), 1).is_none());
+        let pid = std::fs::read_to_string(&fichier).unwrap().trim().to_string();
+        let _ = std::fs::remove_file(&fichier);
+        // Arrêté = absent de la liste des processus, ou zombie qui attend d'être ramassé.
+        let vivant = || {
+            let ps = Command::new("ps").args(["-o", "stat=", "-p", &pid]).output().unwrap();
+            let etat = String::from_utf8_lossy(&ps.stdout).trim().to_string();
+            !etat.is_empty() && !etat.starts_with('Z')
+        };
+        let debut = Instant::now();
+        while vivant() && debut.elapsed() < Duration::from_secs(3) {
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        assert!(!vivant(), "le sous-processus {pid} tourne encore");
     }
 }

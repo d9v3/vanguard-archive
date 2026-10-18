@@ -127,6 +127,7 @@ pub fn proteger_cle() {
     // Copie temporaire relancée : elle supprime son fichier (Linux le garde lisible jusqu'à la fin du programme).
     if std::env::var_os(ORIGINE).is_some()
         && let Ok(copie) = std::env::current_exe()
+        && est_une_copie(&copie)
     {
         let _ = std::fs::remove_file(&copie);
         if let Some(dossier) = copie.parent() {
@@ -192,26 +193,74 @@ pub fn proteger_cle() {
     }
 }
 
+/// Où faire la copie temporaire, dans l'ordre essayé. Linux : d'abord /run/user/<uid>, réservé à la personne (/tmp
+/// est partagé par tous les comptes de l'ordinateur) ; macOS : son dossier temporaire, déjà personnel.
+fn dossiers_temporaires() -> Vec<PathBuf> {
+    std::env::var_os("XDG_RUNTIME_DIR")
+        .map(PathBuf::from)
+        .filter(|d| d.is_dir())
+        .into_iter()
+        .chain([std::env::temp_dir()])
+        .collect()
+}
+
+/// `exe` est-il une copie faite par `relancer_depuis_une_copie` (<dossier temporaire>/sentinel-<…>/sentinel) ?
+/// La variable SENTINEL_ORIGINE ne suffit pas : tout programme lancé depuis la copie en hérite, et un sentinel
+/// relancé de là effacerait sinon son propre programme.
+fn est_une_copie(exe: &Path) -> bool {
+    let Some(dossier) = exe.parent() else {
+        return false;
+    };
+    let base = dossier.parent().and_then(|b| b.canonicalize().ok());
+    exe.file_name() == Some(std::ffi::OsStr::new("sentinel"))
+        && dossier
+            .file_name()
+            .is_some_and(|n| n.to_string_lossy().starts_with("sentinel-"))
+        && base.is_some_and(|b| {
+            dossiers_temporaires()
+                .iter()
+                .any(|t| t.canonicalize().is_ok_and(|t| t == b))
+        })
+}
+
 /// Copie le programme hors de la clé et le relance avec les mêmes arguments. Ne revient qu'en cas d'échec.
 fn relancer_depuis_une_copie(exe: &Path) {
-    use std::os::unix::fs::PermissionsExt;
+    use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
     use std::os::unix::process::CommandExt;
-    let dossier = std::env::temp_dir().join(format!("sentinel-{}", std::process::id()));
-    let copie = dossier.join("sentinel");
-    let copiee = std::fs::create_dir_all(&dossier)
-        .and_then(|()| std::fs::copy(exe, &copie))
-        .and_then(|_| std::fs::set_permissions(&copie, std::fs::Permissions::from_mode(0o755)));
-    if copiee.is_err() {
-        return;
+    // Nom imprévisible, dossier réservé à la personne et refusé s'il existe déjà : sinon un autre compte de
+    // l'ordinateur pourrait le préparer d'avance et remplacer le programme entre la copie et son lancement.
+    let nom = format!(
+        "sentinel-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_nanos())
+    );
+    let mut erreurs = Vec::new();
+    for base in dossiers_temporaires() {
+        let dossier = base.join(&nom);
+        let copie = dossier.join("sentinel");
+        let copiee = std::fs::DirBuilder::new()
+            .mode(0o700)
+            .create(&dossier)
+            .and_then(|()| std::fs::copy(exe, &copie))
+            .and_then(|_| std::fs::set_permissions(&copie, std::fs::Permissions::from_mode(0o700)));
+        // exec ne revient qu'en cas d'échec (dossier monté sans droit d'exécution…) : on essaie le suivant.
+        let erreur = match copiee {
+            Ok(()) => std::process::Command::new(&copie)
+                .args(std::env::args_os().skip(1))
+                .env(ORIGINE, exe)
+                .exec(),
+            Err(e) => e,
+        };
+        erreurs.push(format!("{} : {erreur}", base.display()));
+        let _ = std::fs::remove_file(&copie);
+        let _ = std::fs::remove_dir(&dossier);
     }
-    // exec ne revient qu'en cas d'échec : le programme continue alors depuis la clé, sans protection.
-    let erreur = std::process::Command::new(&copie)
-        .args(std::env::args_os().skip(1))
-        .env(ORIGINE, exe)
-        .exec();
+    // Aucune copie n'a pu être lancée : le programme continue depuis la clé, sans protection.
     crate::journal::erreur(
         "protection de la clé",
-        &format!("relance depuis la copie impossible : {erreur}"),
+        &format!("relance depuis une copie impossible : {}", erreurs.join(" ; ")),
     );
 }
 
@@ -231,5 +280,20 @@ mod tests {
         let (_, lecture_seule) = montage(donnees).expect("volume de données monté");
         assert!(!lecture_seule);
         assert!(montage(Path::new("/pas/un/montage")).is_none());
+    }
+
+    #[test]
+    fn seule_la_copie_temporaire_s_efface() {
+        let base = dossiers_temporaires().remove(0);
+        let dossier = base.join(format!("sentinel-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dossier).unwrap();
+        let copie = dossier.join("sentinel");
+        std::fs::write(&copie, "").unwrap();
+        assert!(est_une_copie(&copie));
+        // Le programme installé, ou un « sentinel » posé ailleurs : jamais effacés.
+        assert!(!est_une_copie(Path::new("/usr/bin/sentinel")));
+        assert!(!est_une_copie(&base.join("sentinel")));
+        let _ = std::fs::remove_file(&copie);
+        let _ = std::fs::remove_dir(&dossier);
     }
 }

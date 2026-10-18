@@ -23,33 +23,58 @@ fn dossier() -> Option<&'static PathBuf> {
     static DOSSIER: OnceLock<Option<PathBuf>> = OnceLock::new();
     DOSSIER
         .get_or_init(|| {
-            #[cfg(target_os = "linux")]
-            let montages: Vec<PathBuf> = std::env::var("USER")
-                .ok()
-                .and_then(|u| std::fs::read_dir(format!("/run/media/{u}")).ok())
-                .into_iter()
-                .flatten()
-                .flatten()
-                .map(|d| d.path())
-                .collect();
             // Sous Wine (tests de la version Windows sur Linux), la clé branchée reçoit une lettre de lecteur, et
             // l'absence de PowerShell remplirait le journal de fausses erreurs : pas de journal.
             #[cfg(windows)]
-            let montages: Vec<PathBuf> = if sous_wine() {
-                Vec::new()
-            } else {
-                ('D'..='Z').map(|l| PathBuf::from(format!("{l}:\\"))).collect()
-            };
-            #[cfg(target_os = "macos")]
-            let montages: Vec<PathBuf> = std::fs::read_dir("/Volumes")
-                .into_iter()
-                .flatten()
-                .flatten()
-                .map(|d| d.path())
-                .collect();
-            montages.into_iter().find(|d| d.join(TEMOIN).is_file())
+            {
+                if sous_wine() { None } else { lecteur_windows() }
+            }
+            #[cfg(unix)]
+            {
+                #[cfg(target_os = "linux")]
+                let montages: Vec<PathBuf> = std::env::var("USER")
+                    .ok()
+                    .and_then(|u| std::fs::read_dir(format!("/run/media/{u}")).ok())
+                    .into_iter()
+                    .flatten()
+                    .flatten()
+                    .map(|d| d.path())
+                    .collect();
+                #[cfg(target_os = "macos")]
+                let montages: Vec<PathBuf> = std::fs::read_dir("/Volumes")
+                    .into_iter()
+                    .flatten()
+                    .flatten()
+                    .map(|d| d.path())
+                    .collect();
+                montages.into_iter().find(|d| d.join(TEMOIN).is_file())
+            }
         })
         .as_ref()
+}
+
+/// Lecteurs D: à Z: interrogés en même temps, 2 s au plus : un lecteur réseau déconnecté peut mettre de longues
+/// secondes à répondre, et le journal ne doit jamais faire attendre le programme.
+#[cfg(windows)]
+fn lecteur_windows() -> Option<PathBuf> {
+    use std::time::{Duration, Instant};
+    let (envoi, reception) = std::sync::mpsc::channel();
+    for lettre in 'D'..='Z' {
+        let envoi = envoi.clone();
+        std::thread::spawn(move || {
+            let lecteur = PathBuf::from(format!("{lettre}:\\"));
+            let _ = envoi.send(lecteur.join(TEMOIN).is_file().then_some(lecteur));
+        });
+    }
+    drop(envoi);
+    let limite = Instant::now() + Duration::from_secs(2);
+    // Fin : le lecteur trouvé, toutes les réponses reçues (canal fermé), ou le délai passé.
+    while let Ok(reponse) = reception.recv_timeout(limite.saturating_duration_since(Instant::now())) {
+        if reponse.is_some() {
+            return reponse;
+        }
+    }
+    None
 }
 
 /// Wine installe ses propres programmes dans system32 ; wineboot.exe n'existe pas sur un vrai Windows.
@@ -98,6 +123,41 @@ fn systeme() -> &'static str {
     })
 }
 
+/// Noms de la personne et de la machine, avec leur remplacement, du plus long au plus court : un nom contenu dans
+/// un autre (« alex » dans « alex-pc ») ne le coupe pas en deux.
+fn noms_personnels() -> &'static [(String, &'static str)] {
+    static NOMS: OnceLock<Vec<(String, &'static str)>> = OnceLock::new();
+    NOMS.get_or_init(|| {
+        let mut noms: Vec<(String, &str)> = ["USER", "USERNAME", "LOGNAME"]
+            .iter()
+            .filter_map(|v| std::env::var(v).ok())
+            .map(|n| (n, "<utilisateur>"))
+            .collect();
+        #[cfg_attr(not(target_os = "macos"), allow(unused_mut))]
+        let mut machines: Vec<String> = ["COMPUTERNAME", "HOSTNAME"]
+            .iter()
+            .filter_map(|v| std::env::var(v).ok())
+            .chain(std::fs::read_to_string("/proc/sys/kernel/hostname").ok())
+            .collect();
+        // macOS n'exporte pas le nom de la machine et n'a pas /proc : on le demande (nom affiché « MacBook Pro de… »,
+        // nom réseau, nom d'hôte « ….local »).
+        #[cfg(target_os = "macos")]
+        {
+            let lire = |cmd: &str, args: &[&str]| {
+                crate::commande::lancer(std::process::Command::new(cmd).args(args), 5).map(|r| r.sortie)
+            };
+            machines.extend(lire("scutil", &["--get", "ComputerName"]));
+            machines.extend(lire("scutil", &["--get", "LocalHostName"]));
+            machines.extend(lire("hostname", &[]));
+        }
+        noms.extend(machines.into_iter().map(|n| (n.trim().to_string(), "<machine>")));
+        // Un nom très court (« pc », « a ») remplacerait des morceaux de mots.
+        noms.retain(|(n, _)| n.chars().count() >= 3);
+        noms.sort_by_key(|(n, _)| std::cmp::Reverse(n.len()));
+        noms
+    })
+}
+
 /// Retire ce qui identifie la personne ou la machine.
 fn anonymiser(texte: &str) -> String {
     let mut t = texte.to_string();
@@ -108,23 +168,8 @@ fn anonymiser(texte: &str) -> String {
             t = t.replace(&maison, "~");
         }
     }
-    let mut noms: Vec<(String, &str)> = ["USER", "USERNAME", "LOGNAME"]
-        .iter()
-        .filter_map(|v| std::env::var(v).ok())
-        .map(|n| (n, "<utilisateur>"))
-        .collect();
-    noms.extend(
-        ["COMPUTERNAME", "HOSTNAME"]
-            .iter()
-            .filter_map(|v| std::env::var(v).ok())
-            .chain(std::fs::read_to_string("/proc/sys/kernel/hostname").ok())
-            .map(|n| (n.trim().to_string(), "<machine>")),
-    );
-    for (nom, remplacement) in noms {
-        // Un nom très court (« pc », « a ») remplacerait des morceaux de mots.
-        if nom.chars().count() >= 3 {
-            t = t.replace(&nom, remplacement);
-        }
+    for (nom, remplacement) in noms_personnels() {
+        t = t.replace(nom.as_str(), remplacement);
     }
     t
 }
@@ -188,5 +233,16 @@ mod tests {
         let t = anonymiser(&format!("échec dans {maison}/Documents/x.ps1"));
         assert!(!t.contains(&maison), "{t}");
         assert!(t.contains('~'), "{t}");
+    }
+
+    #[test]
+    fn nom_de_la_machine_retire() {
+        for (nom, _) in noms_personnels() {
+            let t = anonymiser(&format!("hôte {nom} injoignable"));
+            assert!(!t.contains(nom.as_str()), "{t}");
+        }
+        // Linux le lit dans /proc, macOS le demande à scutil : il doit avoir été trouvé.
+        #[cfg(unix)]
+        assert!(noms_personnels().iter().any(|(_, r)| *r == "<machine>"));
     }
 }

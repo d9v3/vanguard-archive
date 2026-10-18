@@ -1,7 +1,7 @@
 //! Application interactive des correctifs : chaque action est montrée puis confirmée.
 
 use crate::machine::{self, Audit, Constat, Correctif};
-use crate::reseau::Rapport;
+use crate::reseau::{Hote, Rapport};
 use crate::risk::Niveau;
 use crate::ui::*;
 
@@ -61,8 +61,9 @@ pub fn proposer(constats: &[Constat], contexte: &str) -> Vec<&'static str> {
                     lot.len()
                 );
             }
+            // Une liste de commandes par correction : chacune réussit ou échoue pour elle-même.
             #[cfg_attr(not(windows), allow(unused_mut))]
-            let mut commandes: Vec<String> = lot.iter().flat_map(|(_, k)| k.commandes.clone()).collect();
+            let mut groupes: Vec<Vec<String>> = lot.iter().map(|(_, k)| k.commandes.clone()).collect();
             if !point_cree {
                 point_cree = true;
                 match crate::reparer::point_restauration(contexte) {
@@ -73,7 +74,7 @@ pub fn proposer(constats: &[Constat], contexte: &str) -> Vec<&'static str> {
                         );
                         // Windows : dans la même fenêtre administrateur que la correction (une seule demande).
                         #[cfg(windows)]
-                        commandes.insert(0, point);
+                        groupes.insert(0, vec![point]);
                         #[cfg(not(windows))]
                         if !machine::appliquer(&[point])
                             && !demander(tr!(
@@ -82,6 +83,9 @@ pub fn proposer(constats: &[Constat], contexte: &str) -> Vec<&'static str> {
                             ))
                             .oui()
                         {
+                            // Pas de correction sans point de restauration : on le retentera avant la prochaine
+                            // correction acceptée, au lieu de l'appliquer sans rien dire.
+                            point_cree = false;
                             trp!("    {GRIS}ignoré{RESET}", "    {GRIS}skipped{RESET}");
                             continue;
                         }
@@ -92,18 +96,31 @@ pub fn proposer(constats: &[Constat], contexte: &str) -> Vec<&'static str> {
                     ),
                 }
             }
-            if machine::appliquer(&commandes) {
-                for (c, k) in &lot {
+            let mut resultats = machine::appliquer_chacune(&groupes);
+            // Windows : le point de restauration est passé en premier dans la fenêtre administrateur. Refusé là, ou
+            // fenêtre refusée : rien n'a été fait, il sera retenté avant la prochaine correction acceptée.
+            if groupes.len() > lot.len() && !resultats.remove(0) {
+                point_cree = false;
+            }
+            for ((c, k), reussi) in lot.iter().zip(resultats) {
+                if reussi {
                     machine::retenir_blocage(k);
                     appliquees.push(c.categorie);
                 }
-                trp!("    {VERT}✔ fait{RESET}", "    {VERT}✔ done{RESET}");
-            } else {
-                // Sans cette ligne, un échec (UAC refusée, commande en erreur) passait sans un mot de sentinel.
-                trp!(
-                    "    ✖ non appliqué : voir le message ci-dessus",
-                    "    ✖ not applied: see the message above"
-                );
+                let cat = crate::langue::categorie(c.categorie);
+                // Sans ces lignes, un échec (UAC refusée, commande en erreur) passait sans un mot de sentinel.
+                match (lot.len() > 1, reussi) {
+                    (false, true) => trp!("    {VERT}✔ fait{RESET}", "    {VERT}✔ done{RESET}"),
+                    (false, false) => trp!(
+                        "    ✖ non appliqué : voir le message ci-dessus",
+                        "    ✖ not applied: see the message above"
+                    ),
+                    (true, true) => trp!("    {VERT}✔ {cat}{RESET}", "    {VERT}✔ {cat}{RESET}"),
+                    (true, false) => trp!(
+                        "    ✖ {cat} : non appliqué, voir le message ci-dessus",
+                        "    ✖ {cat}: not applied, see the message above"
+                    ),
+                }
             }
             if tout {
                 break;
@@ -149,18 +166,10 @@ pub fn corriger(audit: &Audit, reseau: Option<&Rapport>) -> Option<Audit> {
                 for (n, msg) in &h.alertes {
                     println!("    {}→{RESET} {msg}", couleur(*n));
                 }
-                let ouvert = |l: &[u16]| h.ports.iter().any(|p| !p.udp && l.contains(&p.port));
-                if ouvert(&[80, 8080]) {
+                if let Some(lien) = interface_admin(h) {
                     trp!(
-                        "    {GRIS}interface d'admin : http://{}{RESET}",
-                        "    {GRIS}admin interface: http://{}{RESET}",
-                        h.ip
-                    );
-                } else if ouvert(&[443, 8443]) {
-                    trp!(
-                        "    {GRIS}interface d'admin : https://{}{RESET}",
-                        "    {GRIS}admin interface: https://{}{RESET}",
-                        h.ip
+                        "    {GRIS}interface d'admin : {lien}{RESET}",
+                        "    {GRIS}admin interface: {lien}{RESET}"
                     );
                 }
                 if h.ports.iter().any(|p| !p.udp && [135, 139, 445].contains(&p.port)) {
@@ -185,4 +194,56 @@ pub fn corriger(audit: &Audit, reseau: Option<&Rapport>) -> Option<Audit> {
         return Some(nouveau);
     }
     None
+}
+
+/// Adresse de la page d'administration d'un appareil, d'après ses ports ouverts (http d'abord). Hors des ports
+/// habituels (80, 443), le port fait partie de l'adresse : sans lui, le lien viserait un port fermé.
+fn interface_admin(h: &Hote) -> Option<String> {
+    [
+        (80, "http", ""),
+        (8080, "http", ":8080"),
+        (443, "https", ""),
+        (8443, "https", ":8443"),
+    ]
+    .into_iter()
+    .find(|&(port, ..)| h.ports.iter().any(|p| !p.udp && p.port == port))
+    .map(|(_, schema, port)| format!("{schema}://{}{port}", h.ip))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::reseau::PortOuvert;
+
+    #[test]
+    fn lien_d_administration_avec_son_port() {
+        let port = |port| PortOuvert {
+            port,
+            service: "",
+            niveau: Niveau::Info,
+            banniere: None,
+            conseil: "",
+            nouveau: false,
+            programme: None,
+            udp: false,
+        };
+        let hote = |ports| Hote {
+            ip: "192.168.1.20".parse().unwrap(),
+            nom: None,
+            mac: None,
+            fabricant: None,
+            surnom: None,
+            premier_vu: None,
+            role: None,
+            nouvelle: false,
+            ports,
+            alertes: Vec::new(),
+            score: 100,
+        };
+        let lien = |ports| interface_admin(&hote(ports));
+        assert_eq!(lien(vec![port(8080)]).as_deref(), Some("http://192.168.1.20:8080"));
+        assert_eq!(lien(vec![port(8443), port(80)]).as_deref(), Some("http://192.168.1.20"));
+        assert_eq!(lien(vec![port(8443)]).as_deref(), Some("https://192.168.1.20:8443"));
+        assert_eq!(lien(vec![port(22)]), None);
+    }
 }
