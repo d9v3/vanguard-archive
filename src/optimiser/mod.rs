@@ -4,6 +4,8 @@
 //! sans note (réglage fait ailleurs), c'est la valeur d'un système neuf qui revient. Aucun réglage n'affaiblit la
 //! sécurité, et ceux qui ne conviennent pas à cette machine (version du système, bureau, matériel) ne sont pas proposés.
 
+#[cfg(windows)]
+mod defender;
 mod demarrage;
 #[cfg(target_os = "linux")]
 mod linux;
@@ -38,6 +40,9 @@ pub enum Categorie {
     #[cfg_attr(target_os = "macos", allow(dead_code))]
     Performance,
     Confort,
+    /// Protections de Defender qui bloquent les attaques (Windows seulement).
+    #[cfg_attr(not(windows), allow(dead_code))]
+    Protection,
 }
 
 impl Categorie {
@@ -46,6 +51,7 @@ impl Categorie {
             Categorie::Confidentialite => tr!("Confidentialité", "Privacy"),
             Categorie::Performance => tr!("Performance et fiabilité", "Performance and reliability"),
             Categorie::Confort => tr!("Confort et fichiers", "Comfort and files"),
+            Categorie::Protection => tr!("Protection contre les attaques", "Protection against attacks"),
         }
     }
 }
@@ -300,6 +306,26 @@ fn entete(categorie: Categorie) -> Vec<String> {
         ),
         String::new(),
     ]
+}
+
+/// Les protections de Defender : seulement s'il est l'antivirus actif, puisque sinon ses blocages ne s'appliquent
+/// pas (un autre antivirus le met en mode passif).
+pub fn protection() {
+    #[cfg(windows)]
+    if !windows::defender_actif() {
+        titre(Categorie::Protection.titre());
+        afficher_aligne(
+            "  ",
+            tr!(
+                "Microsoft Defender n'est pas l'antivirus actif ici (coupé, ou remplacé par un autre antivirus) : ses blocages ne s'appliqueraient pas. Rien à proposer.",
+                "Microsoft Defender is not the active antivirus here (off, or replaced by another antivirus): its blocking would not apply. Nothing to offer."
+            ),
+            2,
+            "",
+        );
+        return;
+    }
+    menu(Categorie::Protection);
 }
 
 /// Une catégorie : liste à cocher. Coché = réglage en place ; cocher applique, décocher annule.

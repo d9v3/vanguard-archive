@@ -1,0 +1,345 @@
+//! Protections de Microsoft Defender qui bloquent elles-mêmes les attaques : règles de réduction de la surface
+//! d'attaque (ASR), protection réseau, applications potentiellement indésirables, accès contrôlé aux dossiers.
+//! Gardien ne bloque rien lui-même : il active, après accord, ce que Windows applique depuis son noyau et protège
+//! contre la désactivation. Chaque préférence s'annule exactement, comme tout réglage (valeur d'avant notée).
+//!
+//! Écartées, parce qu'elles bloqueraient Gardien ou l'administration de la machine : processus non signés lancés
+//! depuis une clé USB (Gardien sur la clé), exécutables sans réputation suffisante et protection avancée contre les
+//! rançongiciels (un programme neuf et non signé comme Gardien), PsExec et WMI, outils système copiés (heuristique),
+//! scripts brouillés, redémarrage en mode sans échec (dépannage), et celle des serveurs Exchange.
+//!
+//! Lues par Get-MpPreference, la seule source qui dit ce que Defender applique : son registre n'est pas lisible par
+//! la personne. Une lecture par session, refaite après chaque écriture.
+
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+
+use crate::ui::*;
+
+/// Une préférence de Defender réglée par Gardien.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Pref {
+    DossiersControles,
+    ProtectionReseau,
+    Pua,
+    /// Règle ASR, par son identifiant (en minuscules, comme Microsoft l'écrit).
+    Asr(&'static str),
+}
+
+/// Règles ASR que Microsoft dit sans revers (« standard protection rules »).
+pub const ASR_BASE: [&str; 3] = [
+    "56a863a9-875e-4185-98a7-b882c64b5ce5",
+    "9e6c4e1f-7d60-472f-ba1a-a39ef669e4b2",
+    "e6db77e5-3df2-4cf1-b95a-636979351e5b",
+];
+
+/// Règles ASR contre les documents et pièces jointes piégés : Office, Outlook, Adobe Reader, courriel, scripts.
+pub const ASR_BUREAUTIQUE: [&str; 8] = [
+    "d4f940ab-401b-4efc-aadc-ad5f3c50688a",
+    "3b576869-a4ec-4529-8536-b80a7769e899",
+    "75668c1f-73b5-4cf0-bb93-3ecf5cb7cc84",
+    "92e97fa1-2edf-4476-bdd6-9dd0b4dddc7b",
+    "26190899-1602-49e8-8b27-eb1d0a1ce869",
+    "7674ba52-37eb-4a4f-a9a1-f0f9a1619a2c",
+    "be9ba2d9-53ea-4cdc-84e5-9b1eeee46550",
+    "d3e037e1-3eb8-44c8-a917-57927947596d",
+];
+
+/// Ce que bloque une règle ASR, pour l'écran.
+fn nom_asr(id: &str) -> &'static str {
+    match id {
+        "56a863a9-875e-4185-98a7-b882c64b5ce5" => {
+            tr!("pilotes signés mais vulnérables", "vulnerable signed drivers")
+        }
+        "9e6c4e1f-7d60-472f-ba1a-a39ef669e4b2" => {
+            tr!("vol de mots de passe dans LSASS", "credential theft from LSASS")
+        }
+        "e6db77e5-3df2-4cf1-b95a-636979351e5b" => tr!("persistance par WMI", "persistence through WMI"),
+        "d4f940ab-401b-4efc-aadc-ad5f3c50688a" => {
+            tr!("Office qui lance des programmes", "Office launching programs")
+        }
+        "3b576869-a4ec-4529-8536-b80a7769e899" => {
+            tr!("Office qui crée des exécutables", "Office creating executables")
+        }
+        "75668c1f-73b5-4cf0-bb93-3ecf5cb7cc84" => tr!("Office qui injecte du code", "Office injecting code"),
+        "92e97fa1-2edf-4476-bdd6-9dd0b4dddc7b" => {
+            tr!("macros Office qui appellent Win32", "Office macros calling Win32")
+        }
+        "26190899-1602-49e8-8b27-eb1d0a1ce869" => {
+            tr!("Outlook qui lance des programmes", "Outlook launching programs")
+        }
+        "7674ba52-37eb-4a4f-a9a1-f0f9a1619a2c" => {
+            tr!(
+                "Adobe Reader qui lance des programmes",
+                "Adobe Reader launching programs"
+            )
+        }
+        "be9ba2d9-53ea-4cdc-84e5-9b1eeee46550" => {
+            tr!("exécutables reçus par courriel", "executables from email")
+        }
+        "d3e037e1-3eb8-44c8-a917-57927947596d" => {
+            tr!(
+                "scripts JS/VBS qui lancent un téléchargement",
+                "JS/VBS launching downloads"
+            )
+        }
+        _ => "?",
+    }
+}
+
+/// Ce que Defender applique, tel que Get-MpPreference le dit.
+#[derive(Default, Debug, PartialEq)]
+pub struct Etat {
+    /// Defender est l'antivirus actif (ni coupé, ni en mode passif derrière un autre antivirus).
+    pub actif: bool,
+    /// « cfa », « np », « pua », ou l'identifiant d'une règle ASR → sa valeur.
+    valeurs: HashMap<String, u32>,
+    /// Programmes autorisés dans l'accès contrôlé aux dossiers ; `None` : liste illisible (réservée aux
+    /// administrateurs sur certains Windows).
+    autorises: Option<Vec<String>>,
+}
+
+const SCRIPT: &str = "$s = Get-MpComputerStatus; $p = Get-MpPreference; \
+    \"mode|$($s.AMRunningMode)\"; \"av|$($s.AntivirusEnabled)\"; \
+    \"cfa|$([int]$p.EnableControlledFolderAccess)\"; \"np|$([int]$p.EnableNetworkProtection)\"; \
+    \"pua|$([int]$p.PUAProtection)\"; \
+    $ids = @($p.AttackSurfaceReductionRules_Ids); $act = @($p.AttackSurfaceReductionRules_Actions); \
+    for ($i = 0; $i -lt $ids.Count; $i++) { if ($ids[$i]) { \"asr|$($ids[$i])|$([int]$act[$i])\" } }; \
+    foreach ($a in @($p.ControlledFolderAccessAllowedApplications)) { if ($a) { \"autorise|$a\" } }";
+
+/// La sortie de `SCRIPT`, une valeur par ligne.
+pub fn lire_sortie(texte: &str) -> Etat {
+    let mut e = Etat {
+        autorises: Some(Vec::new()),
+        ..Etat::default()
+    };
+    let (mut mode, mut antivirus) = (String::new(), false);
+    for ligne in texte.lines() {
+        let mut champs = ligne.trim().splitn(3, '|');
+        match (champs.next(), champs.next(), champs.next()) {
+            (Some("mode"), Some(m), _) => mode = m.trim().to_string(),
+            (Some("av"), Some(a), _) => antivirus = a.trim().eq_ignore_ascii_case("true"),
+            (Some(cle @ ("cfa" | "np" | "pua")), Some(n), _) => {
+                if let Ok(n) = n.trim().parse() {
+                    e.valeurs.insert(cle.to_string(), n);
+                }
+            }
+            (Some("asr"), Some(id), Some(n)) => {
+                if let Ok(n) = n.trim().parse() {
+                    e.valeurs.insert(id.trim().to_lowercase(), n);
+                }
+            }
+            // « N/A: Must be an administrator to view… » : la liste n'est pas lisible ici.
+            (Some("autorise"), Some(chemin), _) if chemin.starts_with("N/A") => e.autorises = None,
+            (Some("autorise"), Some(chemin), _) => {
+                if let Some(l) = e.autorises.as_mut() {
+                    l.push(chemin.trim().to_string());
+                }
+            }
+            _ => {}
+        }
+    }
+    // AMRunningMode manque sur les Windows 10 d'avant 2004 : l'antivirus allumé suffit alors.
+    e.actif = mode == "Normal" || (mode.is_empty() && antivirus);
+    e
+}
+
+static ETAT: Mutex<Option<Arc<Etat>>> = Mutex::new(None);
+
+/// L'état de Defender, lu une fois puis gardé jusqu'à la prochaine écriture. PowerShell muet : Defender inactif.
+pub fn etat() -> Arc<Etat> {
+    let mut garde = ETAT.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    garde
+        .get_or_insert_with(|| {
+            Arc::new(crate::machine::windows::ps(SCRIPT).map_or_else(Etat::default, |t| lire_sortie(&t)))
+        })
+        .clone()
+}
+
+/// Après une écriture : la prochaine lecture redemande à Defender.
+pub fn oublier() {
+    *ETAT.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+}
+
+fn cle(pref: Pref) -> &'static str {
+    match pref {
+        Pref::DossiersControles => "cfa",
+        Pref::ProtectionReseau => "np",
+        Pref::Pua => "pua",
+        Pref::Asr(id) => id,
+    }
+}
+
+impl Etat {
+    /// La valeur d'une préférence (« mp:1 ») ; `None` pour une règle ASR jamais réglée.
+    pub fn valeur(&self, pref: Pref) -> Option<String> {
+        self.valeurs.get(cle(pref)).map(|n| format!("mp:{n}"))
+    }
+
+    /// « autorise » si ce programme est dans la liste de l'accès contrôlé aux dossiers.
+    pub fn autorise(&self, chemin: &str) -> Option<String> {
+        self.autorises
+            .as_ref()?
+            .iter()
+            .any(|a| a.eq_ignore_ascii_case(chemin))
+            .then(|| "autorise".to_string())
+    }
+}
+
+fn nombre(v: Option<&str>) -> Option<u32> {
+    v?.strip_prefix("mp:")?.parse().ok()
+}
+
+/// La commande de la fenêtre administrateur qui remet la préférence à `v`.
+pub fn commande(pref: Pref, v: Option<&str>) -> Option<String> {
+    let parametre = match pref {
+        // Add-MpPreference ajoute ou change une seule règle ; Set-MpPreference remplacerait toute la liste.
+        Pref::Asr(id) => {
+            return Some(match v {
+                None => format!("Remove-MpPreference -AttackSurfaceReductionRules_Ids '{id}'"),
+                Some(_) => format!(
+                    "Add-MpPreference -AttackSurfaceReductionRules_Ids '{id}' -AttackSurfaceReductionRules_Actions {}",
+                    nombre(v)?
+                ),
+            });
+        }
+        Pref::DossiersControles => "EnableControlledFolderAccess",
+        Pref::ProtectionReseau => "EnableNetworkProtection",
+        Pref::Pua => "PUAProtection",
+    };
+    // Sans valeur notée : celle d'un Windows neuf, coupée.
+    Some(format!("Set-MpPreference -{parametre} {}", nombre(v).unwrap_or(0)))
+}
+
+/// Ajoute ou retire un programme de la liste de l'accès contrôlé aux dossiers.
+pub fn commande_autorise(chemin: &str, v: Option<&str>) -> String {
+    let p = crate::commande::ps_texte(chemin);
+    match v {
+        Some(_) => format!("Add-MpPreference -ControlledFolderAccessAllowedApplications '{p}'"),
+        None => format!("Remove-MpPreference -ControlledFolderAccessAllowedApplications '{p}'"),
+    }
+}
+
+/// Ce qui est écrit, en clair : « Defender, protection réseau : bloque ».
+pub fn decrire(pref: Pref, v: Option<&str>) -> String {
+    let quoi = match pref {
+        Pref::DossiersControles => tr!("accès contrôlé aux dossiers", "controlled folder access").to_string(),
+        Pref::ProtectionReseau => tr!("protection réseau", "network protection").to_string(),
+        Pref::Pua => tr!("applications indésirables (PUA)", "potentially unwanted apps (PUA)").to_string(),
+        Pref::Asr(id) => trf!("règle « {} »", "rule “{}”", nom_asr(id)),
+    };
+    let mode = match nombre(v) {
+        None => tr!("non réglée", "not configured").to_string(),
+        Some(0) => tr!("coupée", "off").to_string(),
+        Some(1) => tr!("bloque", "blocks").to_string(),
+        Some(2) => tr!("audit (signale sans bloquer)", "audit (reports, does not block)").to_string(),
+        Some(6) => tr!("avertit", "warns").to_string(),
+        Some(n) => trf!("mode {n}", "mode {n}"),
+    };
+    trf!("Defender, {quoi} : {mode}", "Defender, {quoi}: {mode}")
+}
+
+pub fn decrire_autorise(chemin: &str, v: Option<&str>) -> String {
+    match v {
+        Some(_) => trf!(
+            "Defender, accès contrôlé aux dossiers : {chemin} autorisé",
+            "Defender, controlled folder access: {chemin} allowed"
+        ),
+        None => trf!(
+            "Defender, accès contrôlé aux dossiers : {chemin} retiré des programmes autorisés",
+            "Defender, controlled folder access: {chemin} removed from allowed apps"
+        ),
+    }
+}
+
+/// Gardien, s'il tourne depuis le disque du système : jamais depuis la clé USB ni un autre lecteur, puisque
+/// l'autorisation tient au chemin et profiterait à tout programme posé au même endroit sur un support amovible.
+pub fn gardien_sur_le_disque_systeme() -> Option<String> {
+    let exe = std::env::current_exe().ok()?;
+    let systeme = std::env::var("SystemDrive").ok()?;
+    let chemin = exe.to_string_lossy().into_owned();
+    (chemin.len() > systeme.len()
+        && chemin[..systeme.len()].eq_ignore_ascii_case(&systeme)
+        && chemin[systeme.len()..].starts_with('\\'))
+    .then_some(chemin)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sortie_lue() {
+        let e = lire_sortie(
+            "mode|Normal\nav|True\ncfa|0\nnp|1\npua|2\n\
+             asr|9E6C4E1F-7D60-472F-BA1A-A39EF669E4B2|1\nasr|d4f940ab-401b-4efc-aadc-ad5f3c50688a|2\n\
+             autorise|C:\\Jeux\\jeu.exe\n",
+        );
+        assert!(e.actif);
+        assert_eq!(e.valeur(Pref::DossiersControles).as_deref(), Some("mp:0"));
+        assert_eq!(e.valeur(Pref::ProtectionReseau).as_deref(), Some("mp:1"));
+        assert_eq!(e.valeur(Pref::Pua).as_deref(), Some("mp:2"));
+        // Identifiant en majuscules chez Windows, en minuscules chez Gardien.
+        assert_eq!(e.valeur(Pref::Asr(ASR_BASE[1])).as_deref(), Some("mp:1"));
+        assert_eq!(e.valeur(Pref::Asr(ASR_BASE[0])), None);
+        assert_eq!(e.autorise("c:\\jeux\\JEU.exe").as_deref(), Some("autorise"));
+        assert_eq!(e.autorise("C:\\autre.exe"), None);
+    }
+
+    #[test]
+    fn defender_passif_ou_illisible() {
+        // Un autre antivirus : Defender passe en mode passif, ses blocages ne s'appliquent pas.
+        assert!(!lire_sortie("mode|Passive Mode\nav|True\n").actif);
+        assert!(!lire_sortie("").actif);
+        // Windows 10 d'avant 2004 : pas d'AMRunningMode.
+        assert!(lire_sortie("mode|\nav|True\n").actif);
+        let e = lire_sortie("mode|Normal\nautorise|N/A: Must be an administrator to view allowed applications\n");
+        assert_eq!(e.autorises, None);
+        assert_eq!(e.autorise("C:\\x.exe"), None);
+    }
+
+    #[test]
+    fn commandes() {
+        let r = Pref::Asr(ASR_BASE[0]);
+        assert_eq!(
+            commande(r, Some("mp:1")).unwrap(),
+            "Add-MpPreference -AttackSurfaceReductionRules_Ids '56a863a9-875e-4185-98a7-b882c64b5ce5' -AttackSurfaceReductionRules_Actions 1"
+        );
+        // Jamais réglée avant : retirée à l'annulation, pas mise à « coupée ».
+        assert_eq!(
+            commande(r, None).unwrap(),
+            "Remove-MpPreference -AttackSurfaceReductionRules_Ids '56a863a9-875e-4185-98a7-b882c64b5ce5'"
+        );
+        assert_eq!(commande(r, Some("mp:x")), None);
+        assert_eq!(
+            commande(Pref::DossiersControles, Some("mp:1")).unwrap(),
+            "Set-MpPreference -EnableControlledFolderAccess 1"
+        );
+        assert_eq!(commande(Pref::Pua, None).unwrap(), "Set-MpPreference -PUAProtection 0");
+        // Une apostrophe dans le chemin ne ferme pas la chaîne PowerShell.
+        assert_eq!(
+            commande_autorise("C:\\Users\\alice\\Outils d'été\\gardien.exe", Some("autorise")),
+            "Add-MpPreference -ControlledFolderAccessAllowedApplications 'C:\\Users\\alice\\Outils d''été\\gardien.exe'"
+        );
+        assert!(commande_autorise("C:\\g.exe", None).starts_with("Remove-MpPreference"));
+    }
+
+    #[test]
+    fn regles_connues_et_sans_celles_qui_bloqueraient_gardien() {
+        for id in ASR_BASE.iter().chain(&ASR_BUREAUTIQUE) {
+            assert_ne!(nom_asr(id), "?", "{id}");
+            assert_eq!(*id, id.to_lowercase());
+        }
+        for interdite in [
+            "b2b3f03d-6a65-4f7b-a9c7-1c7ef74a9ba4",
+            "01443614-cd74-433a-b99e-2ecdc07bfc25",
+            "c1db55ab-c21a-4637-bb3f-a12568109d35",
+            "d1e49aac-8f56-4280-b9ba-993a6d77406c",
+            "c0033c00-d16d-4114-a5a0-dc9b3a7d2ceb",
+            "5beb7efe-fd9a-4556-801d-275e5ffc04cc",
+            "33ddedf1-c6e0-47cb-833e-de6133960387",
+        ] {
+            assert!(!ASR_BASE.contains(&interdite) && !ASR_BUREAUTIQUE.contains(&interdite));
+        }
+    }
+}

@@ -590,6 +590,44 @@ if (Question 'Lancer l''analyse rapide Defender (quelques minutes) ?') {
     Lancer 'antivirus' @('antivirus')
 } else { Info 'Sautée.' }
 
+Etape 'Blocages de Windows Defender : liste, rien changé sans accord'
+function Etat-Defender {
+    $p = Get-MpPreference
+    "cfa=$($p.EnableControlledFolderAccess) np=$($p.EnableNetworkProtection) pua=$($p.PUAProtection) asr=$((@($p.AttackSurfaceReductionRules_Ids) | Where-Object { $_ }) -join ',')/$(@($p.AttackSurfaceReductionRules_Actions) -join ',')"
+}
+$defAvant = Etat-Defender
+$modeDefender = (Get-MpComputerStatus).AMRunningMode
+Info "Defender ($modeDefender) : $defAvant"
+# Le numéro de l'outil dans le groupe Antivirus et protection (6), lu à l'écran : il change quand un outil s'ajoute.
+LancerAvec 'protection-groupe' @() "6`n`nq`n"
+$groupe = (Sortie 'protection-groupe') -replace '\x1b\[[0-9;]*m', ''
+$numero = if ($groupe -match '(?m)^\s*(\d+)\s+(Blocages de Windows Defender|Windows Defender blocking)') { $Matches[1] } else { '' }
+if ($numero) {
+    Ok "Outil présent dans le groupe (6.$numero)"
+    LancerAvec 'protection' @() "6.$numero`n`n`nq`n"
+    $t = Sortie 'protection'
+    foreach ($titre in 'Blocages de base de Defender|Defender basic blocking', 'Protection réseau de Defender|Defender network protection', 'Accès contrôlé aux dossiers|Controlled folder access') {
+        if ($t -match $titre) { Ok "Réglage affiché : $($titre.Split('|')[0])" } else { Bug "Réglage ABSENT : $($titre.Split('|')[0])" }
+    }
+    if ($modeDefender -eq 'Normal' -and $t -match "n'est pas l'antivirus actif|is not the active antivirus") { Bug 'Defender actif, mais dit inactif' }
+    if ((Etat-Defender) -eq $defAvant) { Ok 'Rien changé sans accord' } else { Bug "Defender modifié sans accord : $(Etat-Defender)" }
+} else { Bug 'Outil « Blocages de Windows Defender » ABSENT du groupe' }
+
+Etape 'Blocages de Windows Defender : protection réseau activée puis annulée (UAC)'
+$npAvant = (Get-MpPreference).EnableNetworkProtection
+if (-not $numero) { Info 'Sautée : outil absent.' }
+elseif ($npAvant -eq 1) { Info 'Sautée : la protection réseau est déjà active dans la VM.' }
+elseif (Question 'Faire ce test (deux fenêtres UAC à accepter) ?') {
+    # Ligne 3 de la liste : la protection réseau. Cochée, validée, acceptée ; puis décochée de la même façon.
+    LancerAvec 'protection-activer' @() "6.$numero`n3`n`no`n`nq`n"
+    $np = (Get-MpPreference).EnableNetworkProtection
+    if ($np -eq 1) { Ok 'Protection réseau activée par Gardien' } else { Bug "Protection réseau PAS activée ($np)" }
+    LancerAvec 'protection-annuler' @() "6.$numero`n3`n`no`n`nq`n"
+    $np = (Get-MpPreference).EnableNetworkProtection
+    if ($np -eq $npAvant) { Ok 'Protection réseau remise comme avant' } else { Bug "Protection réseau PAS remise ($np au lieu de $npAvant)" }
+    if ((Etat-Defender) -eq $defAvant) { Ok 'Defender exactement comme avant' } else { Bug "Defender différent d'avant : $(Etat-Defender)" }
+} else { Info 'Sautée (il faut accepter les fenêtres UAC).' }
+
 Etape 'Corrections avec UAC (refus, puis acceptation, puis port bloqué)'
 Info 'Coupe le pare-feu du profil « Privé » de la VM, puis Gardien doit le réparer. Le port 3389 et le Bureau à distance ne sont jamais touchés.'
 if (Question 'Faire ce test ?') {

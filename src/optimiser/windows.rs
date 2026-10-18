@@ -8,6 +8,7 @@ use std::process::Command;
 use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_QUERY_VALUE, KEY_READ, KEY_SET_VALUE, REG_BINARY};
 use winreg::{RegKey, RegValue};
 
+use super::defender::{self, Pref};
 use super::demarrage::{
     APPROUVES, Programme, desactive_windows, hex, liste_approuvee, octets, script_machine, valeur_desactivee,
 };
@@ -70,6 +71,10 @@ pub enum Changement {
         nom: String,
         cible: Option<String>,
     },
+    /// Préférence de Microsoft Defender (voir `defender`). Valeur : « mp:1 » ; `None`, une règle ASR jamais réglée.
+    Defender { pref: Pref, cible: u32 },
+    /// Programme autorisé dans l'accès contrôlé aux dossiers. Valeur : « autorise » s'il est dans la liste.
+    DefenderAutorise { chemin: String },
 }
 
 /// Liste de serveurs normalisée : « 1.1.1.1,1.0.0.1 », quel que soit le séparateur écrit.
@@ -227,6 +232,8 @@ impl Changement {
                     .and_then(|k| k.get_raw_value(nom).ok());
                 Some(valeur.map_or_else(String::new, |v| hex(&v.bytes)))
             }
+            Changement::Defender { pref, .. } => defender::etat().valeur(*pref),
+            Changement::DefenderAutorise { chemin } => defender::etat().autorise(chemin),
         }
     }
 
@@ -240,18 +247,25 @@ impl Changement {
             // Rebâti pour être annulé : une cible qu'aucune lecture ne donne.
             Changement::Dns { carte, cible } => format!("{carte}\n{}", cible.as_deref().unwrap_or("?")),
             Changement::Demarrage { cible, .. } => cible.clone().unwrap_or_else(|| "?".to_string()),
+            Changement::Defender { cible, .. } => format!("mp:{cible}"),
+            Changement::DefenderAutorise { .. } => "autorise".to_string(),
         })
     }
 
     pub fn defaut(&self) -> Valeur {
         match self {
             Changement::Registre { defaut, .. } => defaut.map(Val::coder),
-            Changement::Cle { .. } => None,
+            // Un Windows neuf : pas de clé ; règles ASR jamais réglées, aucun programme autorisé dans Defender.
+            Changement::Cle { .. }
+            | Changement::Defender { pref: Pref::Asr(_), .. }
+            | Changement::DefenderAutorise { .. } => None,
             Changement::Service { defaut, .. } => Some(format!("start:{defaut}")),
             // Les DNS donnés par la box.
             Changement::Dns { carte, .. } => Some(format!("{carte}\n|")),
             // Sans valeur dans StartupApproved, le programme se lance.
             Changement::Demarrage { .. } => Some(String::new()),
+            // Defender d'un Windows neuf : coupé.
+            Changement::Defender { .. } => Some("mp:0".to_string()),
         }
     }
 
@@ -352,6 +366,8 @@ impl Changement {
                     None => trf!("{ou} : valeur retirée (activé)", "{ou}: value removed (enabled)"),
                 }
             }
+            Changement::Defender { pref, .. } => defender::decrire(*pref, v),
+            Changement::DefenderAutorise { chemin } => defender::decrire_autorise(chemin, v),
         }
     }
 
@@ -416,7 +432,11 @@ impl Changement {
                     }
                 }
             }
-            Changement::Service { .. } | Changement::Dns { .. } | Changement::Demarrage { machine: true, .. } => false,
+            Changement::Service { .. }
+            | Changement::Dns { .. }
+            | Changement::Demarrage { machine: true, .. }
+            | Changement::Defender { .. }
+            | Changement::DefenderAutorise { .. } => false,
         }
     }
 
@@ -498,6 +518,8 @@ impl Changement {
                 nom,
                 ..
             } => script_machine(liste, nom, v),
+            Changement::Defender { pref, .. } => defender::commande(*pref, v),
+            Changement::DefenderAutorise { chemin } => Some(defender::commande_autorise(chemin, v)),
         }
     }
 }
@@ -623,6 +645,14 @@ pub fn ecrire(lots: &[Vec<(&Changement, Valeur)>]) -> Vec<bool> {
             println!("    {GRIS}{}{RESET}", c.decrire(v.as_deref()));
             resultats[i] &= c.ecrire_ici(v.as_deref());
         }
+    }
+    // Defender relu à la prochaine lecture : c'est elle qui dit si le changement a pris.
+    if lots
+        .iter()
+        .flatten()
+        .any(|(c, _)| matches!(c, Changement::Defender { .. } | Changement::DefenderAutorise { .. }))
+    {
+        defender::oublier();
     }
     resultats
 }
@@ -1188,11 +1218,117 @@ pub fn catalogue() -> Vec<Reglage> {
             )],
         ));
     }
+    l.extend(protection());
     // Un service absent (édition allégée de Windows) n'est pas proposé.
     for reglage in &mut l {
         reglage
             .changements
             .retain(|c| !matches!(c, Changement::Service { .. }) || c.lire().is_some());
+    }
+    l
+}
+
+/// Defender est-il l'antivirus actif ? Sinon (coupé, ou passif derrière un autre antivirus), ses blocages ne
+/// s'appliquent pas : rien n'est proposé.
+pub fn defender_actif() -> bool {
+    defender::etat().actif
+}
+
+/// Les protections de Defender qui bloquent elles-mêmes. Aucune n'est « recommandée » : elles ne sont proposées que
+/// dans leur catégorie, ouverte seulement si Defender est l'antivirus actif (`defender_actif`). Leur état n'est lu
+/// qu'à l'affichage, pour ne pas lancer PowerShell à chaque ouverture d'un autre menu.
+fn protection() -> Vec<Reglage> {
+    let defender = |pref, cible| Changement::Defender { pref, cible };
+    let mut l = vec![
+        Reglage {
+            id: "defender_asr_base".into(),
+            categorie: Categorie::Protection,
+            titre: tr!("Blocages de base de Defender", "Defender basic blocking").into(),
+            effet: tr!(
+                "Defender bloque trois techniques d'attaque courantes : le vol des mots de passe en mémoire (LSASS), l'installation de pilotes signés mais vulnérables, et la persistance cachée par WMI. Microsoft les dit sans revers. C'est Windows qui bloque, et il se protège lui-même contre la désactivation.",
+                "Defender blocks three common attack techniques: stealing passwords from memory (LSASS), installing signed but vulnerable drivers, and hidden persistence through WMI. Microsoft says they have no downside. Windows does the blocking, and protects itself against being turned off."
+            ),
+            prudence: None,
+            recommande: false,
+            changements: defender::ASR_BASE.iter().map(|id| defender(Pref::Asr(id), 1)).collect(),
+        },
+        Reglage {
+            id: "defender_asr_bureautique".into(),
+            categorie: Categorie::Protection,
+            titre: tr!(
+                "Documents et pièces jointes piégés",
+                "Booby-trapped documents and attachments"
+            )
+            .into(),
+            effet: tr!(
+                "Word, Excel, PowerPoint, Outlook et Adobe Reader ne peuvent plus lancer de programmes, créer d'exécutables ni injecter de code ; les exécutables reçus par courriel et les scripts qui lancent un téléchargement sont bloqués. C'est le chemin habituel des pièces jointes piégées.",
+                "Word, Excel, PowerPoint, Outlook and Adobe Reader can no longer launch programs, create executables or inject code; executables received by email and scripts that launch a download are blocked. That is the usual path of booby-trapped attachments."
+            ),
+            prudence: Some(tr!(
+                "Une macro ou un module Office qui lance un programme sera bloqué, avec une notification de Windows ; décocher ce réglage remet tout comme avant.",
+                "An Office macro or add-in that launches a program will be blocked, with a Windows notification; unchecking this setting puts everything back."
+            )),
+            recommande: false,
+            changements: defender::ASR_BUREAUTIQUE
+                .iter()
+                .map(|id| defender(Pref::Asr(id), 1))
+                .collect(),
+        },
+        Reglage {
+            id: "defender_reseau".into(),
+            categorie: Categorie::Protection,
+            titre: tr!("Protection réseau de Defender", "Defender network protection").into(),
+            effet: tr!(
+                "Tous les programmes, pas seulement Edge, sont empêchés de joindre les sites connus pour l'hameçonnage ou les logiciels malveillants (filtre SmartScreen de Microsoft).",
+                "Every program, not only Edge, is kept from reaching sites known for phishing or malware (Microsoft's SmartScreen filter)."
+            ),
+            prudence: None,
+            recommande: false,
+            changements: vec![defender(Pref::ProtectionReseau, 1)],
+        },
+        Reglage {
+            id: "defender_pua".into(),
+            categorie: Categorie::Protection,
+            titre: tr!("Logiciels indésirables bloqués", "Unwanted software blocked").into(),
+            effet: tr!(
+                "Defender bloque les logiciels potentiellement indésirables : publicitaires, barres d'outils, mineurs de cryptomonnaie, installateurs qui en ajoutent d'autres.",
+                "Defender blocks potentially unwanted software: adware, toolbars, cryptocurrency miners, installers that add other programs."
+            ),
+            prudence: None,
+            recommande: false,
+            changements: vec![defender(Pref::Pua, 1)],
+        },
+        Reglage {
+            id: "defender_dossiers".into(),
+            categorie: Categorie::Protection,
+            titre: tr!("Accès contrôlé aux dossiers", "Controlled folder access").into(),
+            effet: tr!(
+                "Seuls les programmes reconnus par Microsoft peuvent modifier Documents, Images, Vidéos, Musique, Bureau et Favoris : un rançongiciel ne peut plus les chiffrer.",
+                "Only programs Microsoft recognizes can change Documents, Pictures, Videos, Music, Desktop and Favorites: ransomware can no longer encrypt them."
+            ),
+            prudence: Some(tr!(
+                "Des jeux sauvegardent dans Documents (My Games…) et des programmes peu connus y écrivent : ils seront bloqués, avec une notification. Pour en autoriser un : Sécurité Windows › Protection contre les virus et menaces › Protection contre les rançongiciels › Autoriser une application. Lancé depuis la clé, Gardien n'y posera plus ses fichiers-pièges.",
+                "Some games save in Documents (My Games…) and lesser-known programs write there: they will be blocked, with a notification. To allow one: Windows Security › Virus & threat protection › Ransomware protection › Allow an app. Run from the USB drive, Gardien will no longer place its decoy files there."
+            )),
+            recommande: false,
+            changements: vec![defender(Pref::DossiersControles, 1)],
+        },
+    ];
+    // Gardien autorisé seulement depuis le disque du système (voir `gardien_sur_le_disque_systeme`). L'annulation ne
+    // retire que ce chemin-là, et seulement s'il n'était pas déjà dans la liste.
+    if let Some(chemin) = defender::gardien_sur_le_disque_systeme() {
+        l.push(Reglage {
+            id: "defender_gardien_autorise".into(),
+            categorie: Categorie::Protection,
+            titre: tr!("Gardien autorisé (dossiers contrôlés)", "Gardien allowed (controlled folders)").into(),
+            effet: tr!(
+                "Avec l'accès contrôlé aux dossiers, Gardien peut encore poser ses fichiers-pièges dans les dossiers protégés. L'autorisation vaut pour ce chemin exact, sur le disque du système.",
+                "With controlled folder access, Gardien can still place its decoy files in protected folders. The permission is for this exact path, on the system drive."
+            ),
+            prudence: None,
+            recommande: false,
+            changements: vec![Changement::DefenderAutorise { chemin }],
+        });
     }
     l
 }

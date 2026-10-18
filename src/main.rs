@@ -485,7 +485,7 @@ fn lignes_du_menu(etat: Vec<String>) -> Vec<Ligne> {
 /// Une catégorie de réglages a-t-elle de quoi proposer ici ? Lire les réglages lance des commandes du système : une
 /// fois par session suffit, alors que le menu principal le demande à chaque affichage (pour sa recherche).
 fn reglages_disponibles(c: optimiser::Categorie) -> bool {
-    use optimiser::Categorie::{Confidentialite, Confort, Performance};
+    use optimiser::Categorie::{Confidentialite, Confort, Performance, Protection};
     static CATEGORIES: std::sync::OnceLock<[bool; 3]> = std::sync::OnceLock::new();
     let [confidentialite, performance, confort] =
         *CATEGORIES.get_or_init(|| [Confidentialite, Performance, Confort].map(optimiser::a_des_reglages));
@@ -493,6 +493,7 @@ fn reglages_disponibles(c: optimiser::Categorie) -> bool {
         Confidentialite => confidentialite,
         Performance => performance,
         Confort => confort,
+        Protection => cfg!(windows),
     }
 }
 
@@ -613,6 +614,7 @@ enum Action {
     AntivirusDossier,
     Yara,
     Pieges,
+    Protection,
     Bac,
     MotsDePasse,
     Courriel,
@@ -746,6 +748,10 @@ const OUTILS: &[Outil] = &[
         titre: ["Fichiers-pièges", "Decoy files"],
         precision: ["alerte si un rançongiciel chiffre", "early ransomware warning"],
         mots: "rançongiciel ransomware leurre decoy piège trap" },
+    Outil { action: Action::Protection, groupe: Some(Groupe::Protection), lettre: "",
+        titre: ["Blocages de Windows Defender", "Windows Defender blocking"],
+        precision: ["ASR, réseau, dossiers contrôlés", "ASR, network, folders"],
+        mots: "defender asr bloquer block exploit dossiers contrôlés controlled folder pua" },
     // Titres de 34 caractères au plus dans ce groupe : au-delà, la colonne des précisions recule et les plus
     // longues (YARA, fichiers-pièges) sortent des 76 colonnes.
     Outil { action: Action::Bac, groupe: Some(Groupe::Protection), lettre: "b",
@@ -860,6 +866,8 @@ impl Action {
             #[cfg(not(target_os = "macos"))]
             Action::OptimiserPerformance => reglages_disponibles(optimiser::Categorie::Performance),
             Action::OptimiserConfort => reglages_disponibles(optimiser::Categorie::Confort),
+            // Lire l'état de Defender lance PowerShell : vérifié seulement à l'ouverture (`optimiser::protection`).
+            Action::Protection => cfg!(windows),
             _ => true,
         }
     }
@@ -1062,6 +1070,7 @@ async fn executer(s: &mut Session, action: Action) {
         #[cfg(not(target_os = "macos"))]
         Action::OptimiserPerformance => optimiser::menu(optimiser::Categorie::Performance),
         Action::OptimiserConfort => optimiser::menu(optimiser::Categorie::Confort),
+        Action::Protection => optimiser::protection(),
         Action::DnsRapide => dns_rapide::mesurer_et_proposer(),
         Action::OptimiserAnnuler => optimiser::tout_annuler(),
         Action::Sauvegarder => donnees::menu(),
