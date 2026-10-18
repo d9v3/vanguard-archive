@@ -43,13 +43,61 @@ pub fn executer() {
         "Checking again what was installed"
     ));
     let apres = verifier(Some(&installees));
-    let restent = apres
-        .iter()
-        .filter(|c| installees.contains(&c.categorie) && c.correctif.is_some());
-    if restent.count() == 0 {
-        trp!(
+    println!("{}", bilan_apres(&apres, &installees));
+}
+
+/// Ce qui reste après l'installation, relu : « vérifié » seulement si la vérification a pu se faire.
+fn bilan_apres(apres: &[Constat], installees: &[&str]) -> String {
+    let concernes: Vec<&Constat> = apres.iter().filter(|c| installees.contains(&c.categorie)).collect();
+    let restent = concernes.iter().filter(|c| c.correctif.is_some()).count();
+    let impossibles = concernes.iter().filter(|c| !c.verifie).count();
+    if restent > 0 {
+        trf!(
+            "\n  ⚠ {restent} mise(s) à jour encore à faire : voir ci-dessus.",
+            "\n  ⚠ {restent} update(s) still to do: see above."
+        )
+    } else if impossibles > 0 {
+        trf!(
+            "\n  ⚠ Installé, mais {impossibles} vérification(s) impossible(s) : je ne peux pas dire que tout est à jour.",
+            "\n  ⚠ Installed, but {impossibles} check(s) could not be done: I cannot say everything is up to date."
+        )
+    } else {
+        trf!(
             "\n  {VERT}✔ Installé et vérifié.{RESET}",
             "\n  {VERT}✔ Installed and checked.{RESET}"
-        );
+        )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::machine::Correctif;
+
+    fn constat(categorie: &'static str, a_faire: bool, verifie: bool) -> Constat {
+        Constat {
+            categorie,
+            probleme: None,
+            message: String::new(),
+            correctif: a_faire.then(|| Correctif {
+                action: "Installer".into(),
+                commandes: vec![],
+                automatique: true,
+                bloque: None,
+            }),
+            verifie,
+        }
+    }
+
+    #[test]
+    fn verifie_seulement_si_la_verification_a_pu_se_faire() {
+        let installees = ["Mises à jour"];
+        assert!(bilan_apres(&[constat("Mises à jour", false, true)], &installees).contains("✔"));
+        // La recherche n'a pas pu se refaire : rien ne dit que c'est installé.
+        let impossible = bilan_apres(&[constat("Mises à jour", false, false)], &installees);
+        assert!(impossible.contains('⚠') && !impossible.contains('✔'), "{impossible}");
+        assert!(bilan_apres(&[constat("Mises à jour", true, true)], &installees).contains("1 "));
+        // Une autre catégorie, non installée cette fois, ne compte pas.
+        assert!(bilan_apres(&[constat("Pilotes", true, false)], &installees).contains("✔"));
     }
 }
