@@ -150,6 +150,11 @@ pub(crate) fn point_restauration(titre: &str) -> Option<(&'static str, String)> 
     }
 }
 
+/// Code de sortie de la fenêtre administrateur quand la personne refuse de continuer sans point de restauration :
+/// Gardien le distingue d'un échec, pour dire pourquoi rien n'a changé.
+#[cfg(windows)]
+pub(crate) const SANS_POINT_ARRETE: i32 = 5;
+
 /// Windows : la commande va dans la même fenêtre administrateur que la réparation (une seule demande).
 /// Protection du système coupée sur C: : on le dit et on demande s'il faut continuer sans.
 /// Windows ne crée qu'un point par 24 h : il l'écrit alors en avertissement, le plus récent sert.
@@ -162,10 +167,10 @@ pub(crate) fn point_restauration(titre: &str) -> Option<(&'static str, String)> 
         trf!(
             "try {{ Checkpoint-Computer -Description {description} -RestorePointType MODIFY_SETTINGS }} \
              catch {{ Write-Host 'Point de restauration impossible (protection du système désactivée sur C: ?).' -ForegroundColor Red; \
-             if ((Read-Host 'Continuer sans point de restauration ? [o/N]') -notin 'o', 'y') {{ exit 1 }} }}",
+             if ((Read-Host 'Continuer sans point de restauration ? [o/N]') -notin 'o', 'y') {{ exit {SANS_POINT_ARRETE} }} }}",
             "try {{ Checkpoint-Computer -Description {description} -RestorePointType MODIFY_SETTINGS }} \
              catch {{ Write-Host 'Restore point not possible (system protection turned off on C:?).' -ForegroundColor Red; \
-             if ((Read-Host 'Continue without a restore point? [y/N]') -notin 'y', 'o') {{ exit 1 }} }}"
+             if ((Read-Host 'Continue without a restore point? [y/N]') -notin 'y', 'o') {{ exit {SANS_POINT_ARRETE} }} }}"
         ),
     ))
 }
@@ -1211,6 +1216,16 @@ pub fn lancer(r: &Reparation) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Refuser de continuer sans point de restauration sort avec un code à part, que Gardien explique au lieu d'un
+    /// « pas changé » sans raison.
+    #[cfg(windows)]
+    #[test]
+    fn arret_sans_point_de_restauration_reconnu() {
+        let (_, commande) = point_restauration("essai").unwrap();
+        assert!(commande.contains(&format!("exit {SANS_POINT_ARRETE} }}")), "{commande}");
+        assert!(!commande.contains("exit 1"), "{commande}");
+    }
 
     #[test]
     fn chaque_reparation_est_complete() {

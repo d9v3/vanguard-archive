@@ -212,10 +212,14 @@ pub fn powershell_admin_chacune(correctifs: &[Vec<String>]) -> Vec<bool> {
          $p.WaitForExit(); \
          if ($null -eq $p.ExitCode) {{ exit 4 }}; exit $p.ExitCode"
     );
-    let reussi = powershell()
-        .args(["-NoProfile", "-Command", &lanceur])
-        .status()
-        .is_ok_and(|s| s.success());
+    let statut = powershell().args(["-NoProfile", "-Command", &lanceur]).status();
+    let reussi = statut.as_ref().is_ok_and(std::process::ExitStatus::success);
+    if statut.is_ok_and(|s| s.code() == Some(crate::reparer::SANS_POINT_ARRETE)) {
+        trp!(
+            "    Pas de point de restauration : arrêté à ta demande, rien n'a changé.",
+            "    No restore point: stopped as you asked, nothing was changed."
+        );
+    }
     let lus = std::fs::read_to_string(&resultats).unwrap_or_default();
     let _ = std::fs::remove_file(&resultats);
     if reussi {
