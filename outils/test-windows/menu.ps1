@@ -30,17 +30,20 @@ function Version-Deja-Testee {
 # Un test à la fois : un autre (manuel ou automatique) peut tourner. Au-delà de 3 h, le témoin est périmé.
 # -Force : le partage de la VM (Samba) marque caché un fichier qui commence par un point ; sans -Force, Get-Item ne
 # le trouve pas et Remove-Item ne l'enlève pas, et le témoin restait pour toujours.
-# Deuxième ligne du témoin : le PowerShell du menu qui a lancé le test. Fermé en route (fenêtre fermée, VM éteinte), il
-# n'a pas pu retirer le témoin, qui bloquerait le menu et le dépôt pendant 3 h : il est retiré ici.
+# Le témoin seul ne suffit pas : vu d'ici à travers le partage, il peut rester après avoir été retiré côté Linux, ou
+# survivre à un test fermé en route. Un test tourne vraiment s'il existe un PowerShell qui exécute test.ps1 ; sinon le
+# témoin est périmé et retiré (par Windows lui-même, ce qui met aussi le partage à jour).
+function Tests-Lances {
+    @(Get-CimInstance Win32_Process -Filter "Name = 'powershell.exe'" -ErrorAction SilentlyContinue |
+        Where-Object { $_.CommandLine -like '*test.ps1*' })
+}
+
 function Test-En-Cours {
     $temoin = Get-Item -LiteralPath $enCours -Force -ErrorAction SilentlyContinue
-    if (-not $temoin -or ((Get-Date) - $temoin.LastWriteTime).TotalHours -ge 3) { return $false }
-    $lanceur = Get-Content -LiteralPath $enCours -Force -ErrorAction SilentlyContinue | Select-Object -Skip 1 -First 1
-    if ($lanceur -match '^\d+$' -and -not (Get-Process -Id ([int]$lanceur) -ErrorAction SilentlyContinue)) {
-        Remove-Item -LiteralPath $enCours -Force -ErrorAction SilentlyContinue
-        return $false
-    }
-    return $true
+    if (-not $temoin) { return $false }
+    if (((Get-Date) - $temoin.LastWriteTime).TotalHours -lt 3 -and (Tests-Lances).Count) { return $true }
+    Remove-Item -LiteralPath $enCours -Force -ErrorAction SilentlyContinue
+    return $false
 }
 
 # Dans un PowerShell à part : le test garde ses variables pour lui et ne peut pas fermer ce menu. Start-Process lui
@@ -48,11 +51,15 @@ function Test-En-Cours {
 # fonction et ne s'afficherait pas.
 function Lancer-Test([string[]]$options) {
     if (Test-En-Cours) {
-        Write-Host '  Un test tourne déjà (peut-être le test automatique) : attends qu''il finisse.' -ForegroundColor Yellow
-        return $false
+        # Le test automatique tourne en arrière-plan, sans fenêtre : bloqué, il ne pourrait pas être fermé autrement.
+        $debut = (Get-Item -LiteralPath $enCours -Force -ErrorAction SilentlyContinue).LastWriteTime
+        Write-Host "  Un test tourne déjà depuis $('{0:HH:mm}' -f $debut) (peut-être le test automatique, sans fenêtre)." -ForegroundColor Yellow
+        if ((Read-Host '  L''arrêter pour lancer celui-ci ? [o/N]') -notmatch '^(o|oui|y)') { return $false }
+        Tests-Lances | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+        Remove-Item -LiteralPath $enCours -Force -ErrorAction SilentlyContinue
     }
     $version = Version-Deposee
-    Set-Content -LiteralPath $enCours -Value @((Get-Date -Format o), $PID) -Force
+    Set-Content -LiteralPath $enCours -Value (Get-Date -Format o) -Force
     try {
         $arguments = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$(Join-Path $programme 'test.ps1')`"") + $options
         Start-Process powershell.exe -ArgumentList $arguments -NoNewWindow -Wait
