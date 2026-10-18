@@ -177,6 +177,26 @@ fn secondes_lisibles(s: f64) -> String {
     format!("{s:.1} s").replace('.', if crate::langue::anglais() { "." } else { "," })
 }
 
+/// Un service de l'utilisateur lancé à l'ouverture de session : voulu par default.target (ou la session graphique). Un
+/// service activé pour autre chose (au branchement d'une clé, par une minuterie, un chemin surveillé) ne l'est pas.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn lance_a_l_ouverture(unite: &str) -> bool {
+    let mut dans_install = false;
+    unite.lines().map(str::trim).any(|l| {
+        if l.starts_with('[') {
+            dans_install = l == "[Install]";
+            return false;
+        }
+        dans_install
+            && l.split_once('=').is_some_and(|(cle, cibles)| {
+                matches!(cle.trim(), "WantedBy" | "RequiredBy")
+                    && cibles
+                        .split_whitespace()
+                        .any(|c| matches!(c, "default.target" | "graphical-session.target"))
+            })
+    })
+}
+
 /// Une entrée de démarrage automatique (fichier .desktop d'autostart) : (nom affiché, programme) si elle est active
 /// pour ce bureau. `Hidden=true` ou `X-GNOME-Autostart-enabled=false` : désactivée ; `OnlyShowIn`/`NotShowIn` :
 /// selon le bureau.
@@ -762,7 +782,8 @@ mod systeme {
         let actives = sortie("systemctl --user list-unit-files --type=service --state=enabled --no-legend --no-pager")
             .unwrap_or_default();
         for unite in actives.lines().filter_map(|l| l.split_whitespace().next()) {
-            if services.join(unite).is_file() {
+            let fichier = services.join(unite);
+            if fichier.is_file() && lance_a_l_ouverture(&read_to_string(&fichier).unwrap_or_default()) {
                 let nom = unite.trim_end_matches(".service").to_string();
                 liste.push((nom.clone(), nom));
             }
@@ -1116,6 +1137,26 @@ mod systeme {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Seuls les services voulus par l'ouverture de session comptent ; un service déclenché au branchement d'une clé
+    /// (WantedBy=…mount) ou par une minuterie, non.
+    #[test]
+    fn services_de_l_ouverture_de_session() {
+        assert!(lance_a_l_ouverture(
+            "[Unit]\nDescription=x\n[Service]\nExecStart=/usr/bin/x\n[Install]\nWantedBy=default.target\n"
+        ));
+        assert!(lance_a_l_ouverture(
+            "[Install]\nWantedBy = graphical-session.target other.target\n"
+        ));
+        assert!(!lance_a_l_ouverture(
+            "[Service]\nType=oneshot\n[Install]\nWantedBy=run-media-alice-GARDIEN.mount\n"
+        ));
+        assert!(!lance_a_l_ouverture("[Install]\nWantedBy=timers.target\n"));
+        // Ailleurs que dans [Install], la même ligne ne compte pas.
+        assert!(!lance_a_l_ouverture(
+            "[Unit]\nWantedBy=default.target\n[Install]\nAlso=x.timer\n"
+        ));
+    }
 
     #[test]
     fn durees_de_systemd() {
