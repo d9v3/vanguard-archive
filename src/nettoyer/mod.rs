@@ -74,11 +74,8 @@ pub fn maison() -> PathBuf {
 #[derive(Clone, Copy)]
 pub enum Age {
     Tout,
-    /// Fichiers non lus depuis ce nombre de jours (date de dernière lecture).
-    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
-    NonLuDepuis(u64),
     /// Fichiers non modifiés depuis ce nombre de jours.
-    #[cfg_attr(windows, allow(dead_code))]
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     NonModifieDepuis(u64),
 }
 
@@ -87,11 +84,9 @@ pub enum Age {
 /// de fichiers) : le total est alors un minimum.
 pub fn taille_dossier(dossier: &Path, age: Age, exclus: &[PathBuf]) -> Option<u64> {
     let echeance = Instant::now() + Duration::from_secs(2);
-    let jours = |j: u64| SystemTime::now() - Duration::from_secs(j * 86_400);
     let limite = match age {
         Age::Tout => None,
-        Age::NonLuDepuis(j) => Some((jours(j), true)),
-        Age::NonModifieDepuis(j) => Some((jours(j), false)),
+        Age::NonModifieDepuis(j) => Some(SystemTime::now() - Duration::from_secs(j * 86_400)),
     };
     let mut total = 0;
     let mut a_voir = vec![std::fs::read_dir(dossier).ok()?];
@@ -111,10 +106,7 @@ pub fn taille_dossier(dossier: &Path, age: Age, exclus: &[PathBuf]) -> Option<u6
                 {
                     a_voir.push(sous);
                 }
-            } else if limite.is_none_or(|(l, lecture)| {
-                let date = if lecture { m.accessed() } else { m.modified() };
-                date.or_else(|_| m.modified()).is_ok_and(|d| d < l)
-            }) {
+            } else if limite.is_none_or(|l| m.modified().is_ok_and(|d| d < l)) {
                 total += m.len();
             }
         }
@@ -122,24 +114,157 @@ pub fn taille_dossier(dossier: &Path, age: Age, exclus: &[PathBuf]) -> Option<u6
     Some(total)
 }
 
-/// Place libre et taille du volume qui contient `chemin`, en octets.
+/// Les caches d'applications (dossiers ou fichiers posés directement dans `dossier`) dont aucun fichier n'a été lu
+/// ni écrit depuis `jours` jours : ceux des applications qu'on n'utilise plus, avec leur taille. Un cache part en
+/// entier ou pas du tout : vidé à moitié, un environnement Python, un navigateur de test ou un dépôt git rangé là
+/// casserait son application. Un cache illisible, ou pas mesuré en entier avant l'échéance, est gardé : rien ne dit
+/// qu'il dort. Un lien symbolique est gardé aussi : il mène souvent le cache sur un autre disque, exprès.
 #[cfg(unix)]
-pub fn volume(chemin: &Path) -> Option<(u64, u64)> {
+fn caches_endormis(dossier: &Path, jours: u64, exclus: &[&str]) -> Vec<(String, u64)> {
+    let echeance = Instant::now() + Duration::from_secs(3);
+    let limite = SystemTime::now() - Duration::from_secs(jours * 86_400);
+    let Ok(entrees) = std::fs::read_dir(dossier) else {
+        return Vec::new();
+    };
+    let mut l: Vec<(String, u64)> = entrees
+        .flatten()
+        .filter_map(|e| {
+            let nom = e.file_name().into_string().ok()?;
+            if exclus.contains(&nom.as_str()) || e.file_type().ok()?.is_symlink() {
+                return None;
+            }
+            let (taille, recent) = dernier_usage(&e.path(), echeance)?;
+            (taille > 0 && recent < limite).then_some((nom, taille))
+        })
+        .collect();
+    l.sort();
+    l
+}
+
+/// Taille des fichiers sous `chemin` (lui compris) et leur dernière lecture ou écriture ; `None` si un dossier ne se
+/// lit pas ou si l'échéance passe avant la fin. Les dates des dossiers ne comptent pas : les parcourir les change.
+#[cfg(unix)]
+fn dernier_usage(chemin: &Path, echeance: Instant) -> Option<(u64, SystemTime)> {
+    let mut total = 0;
+    let mut recent = SystemTime::UNIX_EPOCH;
+    let mut a_voir = vec![chemin.to_path_buf()];
+    while let Some(p) = a_voir.pop() {
+        if Instant::now() > echeance {
+            return None;
+        }
+        // Un lien symbolique n'est pas suivi : sa cible n'est pas dans le cache.
+        let Ok(m) = std::fs::symlink_metadata(&p) else {
+            continue;
+        };
+        if m.is_dir() {
+            a_voir.extend(std::fs::read_dir(&p).ok()?.flatten().map(|e| e.path()));
+        } else {
+            total += m.len();
+            recent = [m.accessed(), m.modified()]
+                .into_iter()
+                .flatten()
+                .fold(recent, SystemTime::max);
+        }
+    }
+    Some((total, recent))
+}
+
+/// « rm -rf -- ~/.cache/a ~/.cache/'b c' » : les caches à effacer, entre apostrophes quand leur nom l'exige.
+#[cfg(unix)]
+fn effacer_caches(dossier: &str, caches: &[(String, u64)]) -> String {
+    let mut commande = String::from("rm -rf --");
+    for (nom, _) in caches {
+        commande.push(' ');
+        commande.push_str(dossier);
+        commande.push('/');
+        if nom
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "._-+@%,=:".contains(c))
+        {
+            commande.push_str(nom);
+        } else {
+            commande.push('\'');
+            commande.push_str(&nom.replace('\'', r"'\''"));
+            commande.push('\'');
+        }
+    }
+    commande
+}
+
+/// Le volume qui contient `chemin`, vu par statvfs.
+#[cfg(unix)]
+fn statvfs(chemin: &Path) -> Option<libc::statvfs> {
     use std::os::unix::ffi::OsStrExt;
     let c = std::ffi::CString::new(chemin.as_os_str().as_bytes()).ok()?;
     let mut s = std::mem::MaybeUninit::<libc::statvfs>::uninit();
     // SAFETY : `c` est une chaîne C valide pendant tout l'appel ; statvfs remplit `s` en entier quand elle réussit
     // (retour 0), et `s` n'est lue qu'après.
-    let s = unsafe {
+    unsafe {
         if libc::statvfs(c.as_ptr(), s.as_mut_ptr()) != 0 {
             return None;
         }
-        s.assume_init()
-    };
+        Some(s.assume_init())
+    }
+}
+
+/// Place libre et taille du volume qui contient `chemin`, en octets.
+#[cfg(unix)]
+pub fn volume(chemin: &Path) -> Option<(u64, u64)> {
+    let s = statvfs(chemin)?;
     #[allow(clippy::useless_conversion)] // les types de statvfs changent d'un système à l'autre
     let bloc = u64::from(s.f_frsize);
     #[allow(clippy::useless_conversion)]
     Some((u64::from(s.f_bavail) * bloc, u64::from(s.f_blocks) * bloc))
+}
+
+/// La date de dernière lecture est-elle tenue à jour sur le volume de `chemin` ? Monté en `noatime` (conseil courant
+/// pour les SSD), elle ne bouge plus : un cache lu chaque jour mais jamais réécrit passerait pour oublié. Les options
+/// du volume illisibles : non, dans le doute.
+#[cfg(target_os = "linux")]
+pub fn lectures_datees(chemin: &Path) -> bool {
+    statvfs(chemin).is_some_and(|s| s.f_flag & libc::ST_NOATIME == 0)
+}
+
+/// Sous macOS, statvfs ne dit rien de `noatime` : statfs, si.
+#[cfg(target_os = "macos")]
+pub fn lectures_datees(chemin: &Path) -> bool {
+    use std::os::unix::ffi::OsStrExt;
+    let Ok(c) = std::ffi::CString::new(chemin.as_os_str().as_bytes()) else {
+        return false;
+    };
+    let mut s = std::mem::MaybeUninit::<libc::statfs>::uninit();
+    // SAFETY : `c` est une chaîne C valide pendant tout l'appel ; statfs remplit `s` en entier quand elle réussit
+    // (retour 0), et `s` n'est lue qu'après.
+    let s = unsafe {
+        if libc::statfs(c.as_ptr(), s.as_mut_ptr()) != 0 {
+            return false;
+        }
+        s.assume_init()
+    };
+    u32::try_from(libc::MNT_NOATIME).is_ok_and(|noatime| s.f_flags & noatime == 0)
+}
+
+/// « Caches d'applications inutilisées » dans `cache` (écrit `affiche` dans la commande montrée), sans les dossiers
+/// comptés à part. Sans dates de lecture tenues à jour, pas proposé : un cache lu chaque jour pourrait y figurer.
+#[cfg(unix)]
+pub fn caches_inutilises(cache: &Path, affiche: &str, exclus: &[&str], lectures_datees: bool) -> Option<Element> {
+    if !lectures_datees {
+        return None;
+    }
+    let endormis = caches_endormis(cache, 90, exclus);
+    Some(Element {
+        titre: tr!("Caches d'applications inutilisées", "Caches of unused apps"),
+        effet: tr!(
+            "Caches que rien n'a lus ni écrits depuis 90 jours, chacun effacé en entier : vidé à moitié, un cache casserait son application, qui le refait si elle revient.",
+            "Caches nothing has read or written for 90 days, each removed entirely: half emptied, a cache would break its app, which rebuilds it if it comes back."
+        )
+        .into(),
+        prudence: None,
+        taille: Some(endormis.iter().map(|(_, t)| t).sum()),
+        commandes: vec![effacer_caches(affiche, &endormis)],
+        recommande: true,
+        admin: false,
+    })
 }
 
 /// Place libre et taille du volume du système (pour l'afficher), puis la place libre de tous les volumes que le
@@ -329,6 +454,56 @@ mod tests {
         // Rien d'assez vieux : des fichiers écrits à l'instant.
         assert_eq!(taille_dossier(&racine, Age::NonModifieDepuis(7), &[]), Some(0));
         assert_eq!(taille_dossier(&racine.join("absent"), Age::Tout, &[]), None);
+        std::fs::remove_dir_all(&racine).unwrap();
+    }
+
+    /// Un faux ~/.cache : une application oubliée, une encore servie (un seul fichier lu récemment), un dossier
+    /// compté à part, un lien vers un autre disque. Seule l'oubliée part, en entier, par la vraie commande.
+    #[cfg(unix)]
+    #[test]
+    fn un_cache_part_en_entier_ou_pas_du_tout() {
+        let racine = std::env::temp_dir().join(format!("gardien-caches-{}", std::process::id()));
+        let cache = racine.join("cache");
+        let ecrire = |f: &str, jours: u64| {
+            let chemin = cache.join(f);
+            std::fs::create_dir_all(chemin.parent().unwrap()).unwrap();
+            std::fs::write(&chemin, "abc").unwrap();
+            let date = SystemTime::now() - Duration::from_secs(jours * 86_400);
+            let dates = std::fs::FileTimes::new().set_accessed(date).set_modified(date);
+            std::fs::File::options()
+                .write(true)
+                .open(&chemin)
+                .unwrap()
+                .set_times(dates)
+                .unwrap();
+        };
+        ecrire("oubliee/venv/lib/module.py", 200);
+        ecrire("oubliee/venv/bin/python", 120);
+        ecrire("servie/navigateur/chrome", 300);
+        ecrire("servie/navigateur/lu-hier", 1);
+        ecrire("comptee-a-part/vieux", 200);
+        ecrire("fichier seul", 100);
+        std::fs::create_dir_all(cache.join("vide")).unwrap();
+        std::os::unix::fs::symlink(racine.join("ailleurs"), cache.join("lien")).unwrap();
+
+        let endormis = caches_endormis(&cache, 90, &["comptee-a-part"]);
+        assert_eq!(endormis, [("fichier seul".to_string(), 3), ("oubliee".to_string(), 6)]);
+        let affiche = cache.display().to_string();
+        let commande = effacer_caches(&affiche, &endormis);
+        assert_eq!(
+            commande,
+            format!("rm -rf -- {affiche}/'fichier seul' {affiche}/oubliee")
+        );
+        let lancee = std::process::Command::new("bash").args(["-c", &commande]).status();
+        assert!(lancee.is_ok_and(|s| s.success()));
+        assert!(!cache.join("oubliee").exists() && !cache.join("fichier seul").exists());
+        for garde in ["servie/navigateur/chrome", "comptee-a-part/vieux", "vide", "lien"] {
+            assert!(cache.join(garde).symlink_metadata().is_ok(), "{garde} effacé");
+        }
+        // Dates de lecture pas tenues (noatime) : l'élément n'est pas proposé du tout.
+        assert!(caches_inutilises(&cache, "~/.cache", &[], false).is_none());
+        let e = caches_inutilises(&cache, "~/.cache", &["comptee-a-part"], true).unwrap();
+        assert_eq!(e.taille, Some(0), "plus rien d'oublié après le nettoyage");
         std::fs::remove_dir_all(&racine).unwrap();
     }
 

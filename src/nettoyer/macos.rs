@@ -1,33 +1,18 @@
-//! Nettoyer sous macOS : vieux caches des applications, téléchargements de Homebrew, compilations de Xcode,
+//! Nettoyer sous macOS : caches des applications inutilisées, téléchargements de Homebrew, compilations de Xcode,
 //! instantanés locaux de Time Machine. La corbeille n'est pas touchée : macOS la protège (accès complet au disque),
 //! elle se vide depuis le Finder.
 
-use super::{Age, Element, maison, taille_dossier, volume};
+use super::{Age, Element, caches_inutilises, lectures_datees, maison, taille_dossier, volume};
 use crate::machine::macos::homebrew;
 use crate::ui::*;
 
 pub fn elements() -> Vec<Element> {
     let maison = maison();
     let caches = maison.join("Library/Caches");
-    let mut l = vec![Element {
-        titre: tr!("Vieux caches des applications", "Old app caches"),
-        effet: tr!(
-            "Fichiers de cache que les applications n'ont pas modifiés depuis une semaine ; elles les refont au besoin.",
-            "Cache files apps have not changed for a week; they make them again when needed."
-        )
-        .into(),
-        prudence: None,
-        // Les téléchargements de Homebrew sont comptés à part.
-        taille: taille_dossier(&caches, Age::NonModifieDepuis(7), &[caches.join("Homebrew")]),
-        // Fichiers puis dossiers restés vides : la date d'un dossier ne dit pas si l'app y a écrit récemment plus bas,
-        // et l'effacer en entier emporterait ses fichiers du jour.
-        commandes: vec![
-            "find ~/Library/Caches -mindepth 1 -path \"$HOME/Library/Caches/Homebrew\" -prune -o -type f -mtime +7 -delete 2>/dev/null; find ~/Library/Caches -mindepth 2 -type d -empty -delete 2>/dev/null; true"
-                .into(),
-        ],
-        recommande: true,
-        admin: false,
-    }];
+    // Les téléchargements de Homebrew sont comptés à part.
+    let mut l: Vec<Element> = caches_inutilises(&caches, "~/Library/Caches", &["Homebrew"], lectures_datees(&caches))
+        .into_iter()
+        .collect();
     if let Some(brew) = homebrew() {
         l.push(Element {
             titre: tr!("Téléchargements de Homebrew", "Homebrew downloads"),

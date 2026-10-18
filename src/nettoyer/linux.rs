@@ -1,12 +1,13 @@
 //! Nettoyer sous Linux : paquets téléchargés et devenus inutiles, anciennes versions des Snap, applications Flatpak
-//! inutilisées, compilations AUR, vieux fichiers de cache, miniatures, vieux journaux, rapports de plantage, corbeille.
+//! inutilisées, compilations AUR, caches des applications inutilisées, miniatures, vieux journaux, rapports de
+//! plantage, corbeille.
 //! La place à gagner est mesurée avant (simulations de paccache, tailles des dossiers) quand on peut le faire sans
 //! droits d'administrateur.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Command;
 
-use super::{Age, Element, maison, taille_dossier, volume};
+use super::{Age, Element, caches_inutilises, lectures_datees, maison, taille_dossier, volume};
 use crate::machine::linux::{Atomique, Paquets, atomique};
 use crate::ui::*;
 
@@ -241,37 +242,15 @@ fn compilations_aur(maison: &Path) -> Vec<Element> {
     .collect()
 }
 
-/// La date de dernière lecture est-elle tenue à jour là où se trouve `dossier` ? Monté en `noatime`, elle ne bouge
-/// plus : « non lu depuis 90 jours » ne voudrait rien dire, et des fichiers lus chaque jour seraient effacés.
-fn lectures_datees(dossier: &Path) -> bool {
-    let cible = dossier.to_string_lossy();
-    sortie("findmnt", &["-no", "OPTIONS", "--target", cible.as_ref()])
-        .is_none_or(|s| !s.trim().split(',').any(|o| o == "noatime"))
-}
-
+/// Les caches d'applications de ~/.cache qui dorment ; ceux comptés à part (miniatures, AUR) n'y sont pas.
 fn vieux_cache(maison: &Path) -> Option<Element> {
     let cache = maison.join(".cache");
-    if !lectures_datees(&cache) {
-        return None;
-    }
-    // Les dossiers comptés à part ne sont ni mesurés ni effacés ici.
-    let exclus: Vec<PathBuf> = ["thumbnails", "yay", "paru"].iter().map(|d| cache.join(d)).collect();
-    Some(Element {
-        titre: tr!("Vieux fichiers de cache", "Old cache files"),
-        effet: tr!(
-            "Fichiers des caches des applications que rien n'a lus depuis 90 jours ; une application qui en a besoin les refait.",
-            "App cache files nothing has read for 90 days; an app that needs them makes them again."
-        )
-        .into(),
-        prudence: None,
-        taille: taille_dossier(&cache, Age::NonLuDepuis(90), &exclus),
-        commandes: vec![
-            "find ~/.cache -mindepth 1 \\( -path \"$HOME/.cache/thumbnails\" -o -path \"$HOME/.cache/yay\" -o -path \"$HOME/.cache/paru\" \\) -prune -o -type f -atime +90 -delete 2>/dev/null; find ~/.cache -mindepth 1 -type d -empty -delete 2>/dev/null; true"
-                .into(),
-        ],
-        recommande: true,
-        admin: false,
-    })
+    caches_inutilises(
+        &cache,
+        "~/.cache",
+        &["thumbnails", "yay", "paru"],
+        lectures_datees(&cache),
+    )
 }
 
 fn miniatures(maison: &Path) -> Element {
