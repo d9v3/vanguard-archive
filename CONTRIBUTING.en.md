@@ -138,6 +138,10 @@ The key has two partitions: `GARDIEN`, read-only everywhere except on its owner'
 Windows; on Linux and macOS, Gardien remounts it read-only itself), and `GARDIENLOG`, which only receives the error
 log, anonymized. `outils/preparer-cle.sh` prepares a new key.
 
+In preparation, a rescue key that also boots computers: `outils/cle-secours.sh` (Ventoy for Windows 11, Omarchy and
+SystemRescue, an HFS+ partition for the macOS recovery of Intel Macs, `GARDIEN` and `GARDIENLOG` as before).
+`--plan` and `--essai` (on a disk image) touch no disk; only `--ecrire` erases the key.
+
 ## Errors and crashes
 
 Gardien records them with nothing personal (on the key, or in its folder when the key is not plugged in). On

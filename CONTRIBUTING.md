@@ -141,6 +141,10 @@ La clé a deux partitions : `GARDIEN`, en lecture seule partout sauf sur l'ordin
 respecté par Windows ; sous Linux et macOS, Gardien la remonte lui-même en lecture seule), et `GARDIENLOG`, qui ne
 reçoit que le journal des erreurs, anonymisé. `outils/preparer-cle.sh` prépare une nouvelle clé.
 
+En préparation, une clé de secours qui démarre aussi les ordinateurs : `outils/cle-secours.sh` (Ventoy pour Windows 11,
+Omarchy et SystemRescue, partition HFS+ pour la récupération de macOS des Mac Intel, `GARDIEN` et `GARDIENLOG` comme
+avant). `--plan` et `--essai` (sur une image de disque) ne touchent à aucun disque ; seul `--ecrire` efface la clé.
+
 ## Erreurs et plantages
 
 Gardien les note sans rien de personnel (sur la clé, ou dans son dossier quand la clé n'est pas branchée). Au
