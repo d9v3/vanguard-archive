@@ -94,20 +94,42 @@ fn fichier_historique() -> std::path::PathBuf {
 }
 
 fn charger() -> Historique {
-    std::fs::read_to_string(fichier_historique())
-        .ok()
-        .and_then(|t| serde_json::from_str(&t).ok())
-        .unwrap_or_default()
+    let chemin = fichier_historique();
+    let Ok(texte) = std::fs::read_to_string(&chemin) else {
+        return Historique::default();
+    };
+    match serde_json::from_str(texte.trim_start_matches('\u{feff}')) {
+        Ok(h) => h,
+        Err(e) => {
+            // Jamais écraser des valeurs d'avant qu'on ne sait pas relire : le fichier est mis de côté, intact.
+            let copie = chemin.with_extension(format!(
+                "illisible-{}.json",
+                chrono::Local::now().format("%Y%m%d-%H%M%S")
+            ));
+            let _ = std::fs::copy(&chemin, &copie);
+            tre!(
+                "Attention : valeurs d'avant des réglages illisibles ({e}). Copie gardée : {}",
+                "Warning: previous setting values unreadable ({e}). Copy kept: {}",
+                copie.display()
+            );
+            Historique::default()
+        }
+    }
 }
 
-fn sauver(h: &Historique) {
-    let chemin = fichier_historique();
-    if let Some(dossier) = chemin.parent() {
-        let _ = std::fs::create_dir_all(dossier);
+/// Écrit l'historique d'un bloc (fichier temporaire, puis renommé) : une coupure ou un Ctrl-C laissent l'ancien ou
+/// le nouveau, jamais un fichier tronqué qui, relu vide, ferait perdre toutes les valeurs d'avant.
+fn sauver(h: &Historique) -> bool {
+    let ecrit = serde_json::to_string_pretty(h)
+        .map_err(std::io::Error::other)
+        .and_then(|texte| crate::reseau::ecrire_atomique(&fichier_historique(), &texte));
+    if let Err(e) = &ecrit {
+        tre!(
+            "Attention : valeurs d'avant des réglages non enregistrées ({e}).",
+            "Warning: previous setting values not saved ({e})."
+        );
     }
-    if let Ok(texte) = serde_json::to_string_pretty(h) {
-        let _ = std::fs::write(chemin, texte);
-    }
+    ecrit.is_ok()
 }
 
 /// Valeurs à remettre pour annuler `r` : celles notées avant le changement, sinon celles d'un système neuf.
@@ -124,6 +146,14 @@ fn valeurs_d_avant(r: &Reglage, h: &Historique) -> Vec<Valeur> {
         .collect()
 }
 
+/// Les valeurs à remettre pour annuler `r` sont-elles relues en place ?
+fn remis_en_place(r: &Reglage, h: &Historique) -> bool {
+    r.changements
+        .iter()
+        .zip(valeurs_d_avant(r, h))
+        .all(|(c, v)| c.lire() == v)
+}
+
 /// Applique et annule, d'un seul passage (un point de restauration, une demande administrateur), puis met
 /// l'historique à jour. Retourne la réussite de chaque réglage appliqué, puis de chaque réglage annulé.
 fn executer(a_faire: &[&Reglage], a_annuler: &[&Reglage], h: &mut Historique) -> (Vec<bool>, Vec<bool>) {
@@ -136,7 +166,10 @@ fn executer(a_faire: &[&Reglage], a_annuler: &[&Reglage], h: &mut Historique) ->
             valeurs: r.changements.iter().map(systeme::Changement::lire).collect(),
         });
     }
-    sauver(h);
+    // Sans valeurs d'avant notées, un réglage ne pourrait plus s'annuler exactement : rien n'est changé.
+    if !a_faire.is_empty() && !sauver(h) {
+        return (vec![false; a_faire.len()], vec![false; a_annuler.len()]);
+    }
     let mut groupes: Vec<Vec<(&systeme::Changement, Valeur)>> = a_faire
         .iter()
         .map(|r| r.changements.iter().map(|c| (c, c.cible())).collect())
@@ -152,13 +185,18 @@ fn executer(a_faire: &[&Reglage], a_annuler: &[&Reglage], h: &mut Historique) ->
             h.reglages.remove(r.id);
         }
     }
-    for (r, ok) in a_annuler.iter().zip(annules) {
-        if *ok {
-            h.reglages.remove(r.id);
-        }
+    // Annulé = les valeurs d'avant relues en place, pas seulement des commandes sans erreur : une valeur qu'aucune
+    // commande ne sait remettre laisse la note, pour pouvoir réessayer.
+    let remis: Vec<bool> = a_annuler
+        .iter()
+        .zip(annules)
+        .map(|(r, ok)| *ok && remis_en_place(r, h))
+        .collect();
+    for (r, _) in a_annuler.iter().zip(&remis).filter(|(_, remis)| **remis) {
+        h.reglages.remove(r.id);
     }
     sauver(h);
-    (faits.to_vec(), annules.to_vec())
+    (faits.to_vec(), remis)
 }
 
 fn libelle(e: Etat, par_gardien: bool) -> &'static str {
@@ -367,5 +405,70 @@ mod tests {
         );
         let relu: Historique = serde_json::from_str(&serde_json::to_string(&h).unwrap()).unwrap();
         assert_eq!(relu.reglages["x"].valeurs, [Some("dword:1".to_string()), None]);
+    }
+
+    /// Un historique tronqué (coupure pendant l'écriture) n'est pas pris pour vide puis écrasé : il est mis de côté.
+    #[test]
+    fn historique_illisible_mis_de_cote() {
+        let chemin = fichier_historique();
+        let dossier = chemin.parent().unwrap();
+        std::fs::create_dir_all(dossier).unwrap();
+        std::fs::write(&chemin, "{\"reglages\":{\"x\":{\"date\":\"2026-10").unwrap();
+        assert!(charger().reglages.is_empty());
+        let copies = std::fs::read_dir(dossier)
+            .unwrap()
+            .flatten()
+            .filter(|e| e.file_name().to_string_lossy().starts_with("reglages.illisible-"))
+            .count();
+        assert!(copies >= 1, "le fichier illisible n'a pas été gardé");
+        let mut h = Historique::default();
+        h.reglages.insert(
+            "x".into(),
+            Avant {
+                date: "2026-10-18 01:00".into(),
+                valeurs: vec![Some("1".into())],
+            },
+        );
+        assert!(sauver(&h));
+        assert_eq!(charger().reglages["x"].valeurs, [Some("1".to_string())]);
+    }
+
+    /// L'annulation se juge sur les valeurs relues : une ligne qui était absente doit l'être de nouveau.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn annulation_jugee_sur_les_valeurs_relues() {
+        let f = std::env::temp_dir().join(format!("gardien-test-annuler-{}", std::process::id()));
+        std::fs::write(&f, "ENABLED=0\n").unwrap();
+        let chemin: &'static str = Box::leak(f.display().to_string().into_boxed_str());
+        let r = Reglage {
+            id: "essai",
+            categorie: Categorie::Confort,
+            titre: "Essai",
+            effet: "Essai",
+            prudence: None,
+            recommande: false,
+            changements: vec![systeme::Changement::Option {
+                fichier: chemin,
+                cle: "ENABLED",
+                cible: "0",
+                defaut: "1",
+            }],
+        };
+        let mut h = Historique::default();
+        h.reglages.insert(
+            "essai".into(),
+            Avant {
+                date: String::new(),
+                valeurs: vec![None],
+            },
+        );
+        assert!(!remis_en_place(&r, &h), "la ligne posée par Gardien est encore là");
+        std::fs::write(&f, "# ligne retirée\n").unwrap();
+        assert!(remis_en_place(&r, &h));
+        // Sans note, c'est la valeur d'un système neuf qui doit revenir.
+        assert!(!remis_en_place(&r, &Historique::default()));
+        std::fs::write(&f, "ENABLED=1\n").unwrap();
+        assert!(remis_en_place(&r, &Historique::default()));
+        let _ = std::fs::remove_file(&f);
     }
 }

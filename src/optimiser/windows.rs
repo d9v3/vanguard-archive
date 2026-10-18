@@ -15,7 +15,8 @@ use crate::ui::*;
 pub enum Racine {
     /// HKCU : le compte de la personne ; Gardien y écrit lui-même.
     Hkcu,
-    /// HKCU\Software\Policies : en lecture seule pour l'utilisateur, écrit par la fenêtre administrateur.
+    /// HKCU\Software\Policies : en lecture seule pour l'utilisateur, écrit par la fenêtre administrateur dans la ruche
+    /// de la personne (HKEY_USERS\<SID>), même si la fenêtre s'ouvre sous un autre compte.
     HkcuStrategie,
     /// HKLM : toute la machine, par la fenêtre administrateur.
     Hklm,
@@ -198,14 +199,17 @@ impl Changement {
         }
     }
 
-    /// La commande PowerShell pour la fenêtre administrateur.
-    fn commande_admin(&self, v: Option<&str>) -> Option<String> {
+    /// La commande PowerShell pour la fenêtre administrateur ; `sid`, celui de la personne (voir `HkcuStrategie`).
+    fn commande_admin(&self, v: Option<&str>, sid: Option<&str>) -> Option<String> {
         match self {
             Changement::Registre {
                 racine, chemin, nom, ..
             } => {
-                let p =
-                    format!("{}:\\{chemin}", if *racine == Racine::Hklm { "HKLM" } else { "HKCU" }).replace('\'', "''");
+                let p = match racine {
+                    Racine::Hklm => format!("HKLM:\\{chemin}"),
+                    Racine::Hkcu | Racine::HkcuStrategie => crate::reparer::hkcu_de_la_personne(sid, chemin),
+                }
+                .replace('\'', "''");
                 // Clé créée seulement si elle manque : New-Item -Force sur une clé existante l'écraserait, valeurs
                 // comprises.
                 let creer =
@@ -244,6 +248,20 @@ impl Changement {
 /// Applique des lots de changements (un lot par réglage) et dit lesquels ont réussi. La fenêtre administrateur passe
 /// d'abord, point de restauration en tête : refusée, rien n'est changé, pas même dans le compte de la personne.
 pub fn ecrire(lots: &[Vec<(&Changement, Valeur)>]) -> Vec<bool> {
+    let strategie_du_compte = lots.iter().flatten().any(|(c, _)| {
+        matches!(
+            c,
+            Changement::Registre {
+                racine: Racine::HkcuStrategie,
+                ..
+            }
+        )
+    });
+    let sid = if strategie_du_compte {
+        crate::reparer::sid_de_la_personne()
+    } else {
+        None
+    };
     let admin: Vec<(usize, Vec<String>)> = lots
         .iter()
         .enumerate()
@@ -251,7 +269,7 @@ pub fn ecrire(lots: &[Vec<(&Changement, Valeur)>]) -> Vec<bool> {
             let commandes: Vec<String> = lot
                 .iter()
                 .filter(|(c, _)| c.admin())
-                .filter_map(|(c, v)| c.commande_admin(v.as_deref()))
+                .filter_map(|(c, v)| c.commande_admin(v.as_deref(), sid.as_deref()))
                 .collect();
             (!commandes.is_empty()).then_some((i, commandes))
         })
@@ -886,25 +904,48 @@ mod tests {
     #[test]
     fn commandes_de_la_fenetre_administrateur() {
         let c = reg(Racine::Hklm, ANALYSE, "AllowTelemetry", Val::Dword(0), None);
-        let ecrire = c.commande_admin(Some("dword:0")).unwrap();
+        let ecrire = c.commande_admin(Some("dword:0"), None).unwrap();
         assert!(
             ecrire.contains("Test-Path -LiteralPath 'HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\DataCollection'")
         );
         assert!(ecrire.ends_with("-Name 'AllowTelemetry' -Value 0 -Type DWord"));
-        assert!(c.commande_admin(None).unwrap().starts_with("Remove-ItemProperty"));
+        assert!(c.commande_admin(None, None).unwrap().starts_with("Remove-ItemProperty"));
+        // Une stratégie du compte va dans la ruche de la personne, même par la fenêtre d'un autre administrateur.
+        let strategie = reg(
+            Racine::HkcuStrategie,
+            r"Software\Policies\Microsoft\Windows\Explorer",
+            "DisableSearchBoxSuggestions",
+            Val::Dword(1),
+            None,
+        );
+        let ecrire = strategie
+            .commande_admin(Some("dword:1"), Some("S-1-5-21-1-2-3-1001"))
+            .unwrap();
+        assert!(
+            ecrire.contains(
+                r"Test-Path -LiteralPath 'Registry::HKEY_USERS\S-1-5-21-1-2-3-1001\Software\Policies\Microsoft\Windows\Explorer'"
+            ),
+            "{ecrire}"
+        );
+        assert!(
+            strategie
+                .commande_admin(Some("dword:1"), None)
+                .unwrap()
+                .contains(r"'HKCU:\Software\Policies\Microsoft\Windows\Explorer'")
+        );
         let s = Changement::Service {
             nom: "DiagTrack",
             cible: 4,
             defaut: 2,
         };
         assert_eq!(
-            s.commande_admin(Some("start:4")).as_deref(),
+            s.commande_admin(Some("start:4"), None).as_deref(),
             Some(
                 "Set-Service -Name 'DiagTrack' -StartupType Disabled; Stop-Service -Name 'DiagTrack' -Force -ErrorAction SilentlyContinue"
             )
         );
         assert_eq!(
-            s.commande_admin(Some("start:2")).as_deref(),
+            s.commande_admin(Some("start:2"), None).as_deref(),
             Some(
                 "Set-Service -Name 'DiagTrack' -StartupType Automatic; Start-Service -Name 'DiagTrack' -ErrorAction SilentlyContinue"
             )

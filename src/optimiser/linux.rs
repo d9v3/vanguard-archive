@@ -109,7 +109,10 @@ impl Changement {
                 Some(v) => format!("gsettings set {schema} {cle} {v}"),
                 None => format!("gsettings reset {schema} {cle}"),
             },
-            Changement::Option { fichier, cle, .. } => format!("{fichier} : {cle}={}", v.unwrap_or("?")),
+            Changement::Option { fichier, cle, .. } => match v {
+                Some(v) => format!("{fichier} : {cle}={v}"),
+                None => trf!("{fichier} : ligne {cle} retirée", "{fichier}: line {cle} removed"),
+            },
         }
     }
 
@@ -150,14 +153,21 @@ impl Changement {
                 None => format!("gsettings reset {schema} {cle}"),
             },
             Changement::Option { fichier, cle, .. } => {
-                let v = v?;
-                // La ligne est remplacée si elle existe, ajoutée sinon.
-                format!(
-                    "if grep -q '^{cle}=' {f}; then sudo sed -i 's|^{cle}=.*|{cle}={}|' {f}; else echo {} | sudo tee -a {f} >/dev/null; fi",
-                    v.replace('|', r"\|").replace('\'', r"'\''"),
-                    shell(&format!("{cle}={v}")),
-                    f = shell(fichier)
-                )
+                let f = shell(fichier);
+                match v {
+                    // La ligne est remplacée si elle existe, ajoutée sinon. Dans le remplacement de sed, « \ », « | »
+                    // et « & » sont protégés : une valeur d'avant remise doit l'être telle quelle.
+                    Some(v) => format!(
+                        "if grep -q '^{cle}=' {f}; then sudo sed -i 's|^{cle}=.*|{cle}={}|' {f}; else echo {} | sudo tee -a {f} >/dev/null; fi",
+                        v.replace('\\', r"\\")
+                            .replace('|', r"\|")
+                            .replace('&', r"\&")
+                            .replace('\'', r"'\''"),
+                        shell(&format!("{cle}={v}")),
+                    ),
+                    // Absente avant le changement : la ligne est retirée.
+                    None => format!("sudo sed -i '/^{cle}=/d' {f}"),
+                }
             }
         })
     }
@@ -205,21 +215,20 @@ pub fn ecrire(lots: &[Vec<(&Changement, Valeur)>]) -> Vec<bool> {
 pub fn apres(_touches: &[&Reglage]) {}
 
 fn unite_existe(nom: &str) -> bool {
-    Command::new("systemctl")
-        .args(["cat", nom])
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .is_ok_and(|s| s.success())
+    crate::commande::lancer(Command::new("systemctl").args(["cat", nom]), 10).is_some_and(|r| r.code == Some(0))
 }
 
 /// Au moins un disque sans pièce mobile (SSD, NVMe) : `lsblk` le marque ROTA 0.
 fn ssd() -> bool {
-    sortie("lsblk", &["-dno", "ROTA,TYPE"]).is_some_and(|t| {
-        t.lines().any(|l| {
-            let mut c = l.split_whitespace();
-            c.next() == Some("0") && c.next() == Some("disk")
-        })
+    sortie("lsblk", &["-dno", "NAME,ROTA,TYPE"]).is_some_and(|t| a_un_ssd(&t))
+}
+
+/// `lsblk -dno NAME,ROTA,TYPE` : la mémoire compressée (zram) se dit aussi « disque » sans pièce mobile, mais TRIM
+/// n'y a pas de sens.
+fn a_un_ssd(lsblk: &str) -> bool {
+    lsblk.lines().any(|l| {
+        let c: Vec<&str> = l.split_whitespace().collect();
+        matches!(c[..], [nom, "0", "disk"] if !nom.starts_with("zram") && !nom.starts_with("loop"))
     })
 }
 
@@ -402,6 +411,45 @@ mod tests {
             Some("sudo systemctl enable --now fstrim.timer")
         );
         assert_eq!(u.commande(Some("static")), None);
+    }
+
+    /// Les commandes d'une option, lancées pour de vrai sur un fichier jetable (sans sudo) : une valeur aux caractères
+    /// spéciaux revient telle quelle, et « absente » retire la ligne.
+    #[test]
+    fn option_posee_remise_puis_retiree() {
+        let f = std::env::temp_dir().join(format!("gardien-test-option-sed-{}", std::process::id()));
+        std::fs::write(&f, "# réglage\nPARTICIPATE=\"yes\"\nAUTRE=1\n").unwrap();
+        let chemin: &'static str = Box::leak(f.display().to_string().into_boxed_str());
+        let o = Changement::Option {
+            fichier: chemin,
+            cle: "PARTICIPATE",
+            cible: "\"no\"",
+            defaut: "\"yes\"",
+        };
+        let lancer = |v: Option<&str>| {
+            let c = o.commande(v).unwrap().replace("sudo ", "");
+            assert!(Command::new("bash").args(["-c", &c]).status().unwrap().success(), "{c}");
+        };
+        let etrange = r"a&b|c\d'e";
+        lancer(Some(etrange));
+        assert_eq!(o.lire().as_deref(), Some(etrange));
+        lancer(None);
+        assert_eq!(o.lire(), None);
+        lancer(Some("\"no\""));
+        assert_eq!(o.lire().as_deref(), Some("\"no\""));
+        let texte = std::fs::read_to_string(&f).unwrap();
+        assert!(
+            texte.contains("AUTRE=1\n") && texte.starts_with("# réglage\n"),
+            "{texte}"
+        );
+        let _ = std::fs::remove_file(&f);
+    }
+
+    #[test]
+    fn la_memoire_compressee_n_est_pas_un_ssd() {
+        assert!(!a_un_ssd("zram0 0 disk\nsda 1 disk\nloop0 0 loop\n"));
+        assert!(a_un_ssd("zram0 0 disk\nnvme0n1 0 disk\n"));
+        assert!(!a_un_ssd(""));
     }
 
     #[test]
