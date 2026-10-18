@@ -1,4 +1,4 @@
-//! sentinel — vérifie la sécurité de ta machine et de ton réseau, propose et applique des correctifs.
+//! sentinel — sécurise et optimise ta machine et ton réseau : bilan, correctifs, réglages.
 //!
 //! N'utilise le scan réseau que sur un réseau qui t'appartient ou que tu as le droit d'auditer.
 //! Lancé sans argument, affiche un menu.
@@ -19,6 +19,7 @@ mod langue;
 mod logiciels;
 mod machine;
 mod maj;
+mod optimiser;
 #[cfg(unix)]
 mod protection;
 mod rapport;
@@ -41,7 +42,7 @@ use ui::*;
 #[derive(Parser)]
 #[command(
     version,
-    about = "Bilan de sécurité : cette machine + réseau local, avec correctifs. Sans argument : menu."
+    about = "Sécurise et optimise ta machine et ton réseau local : bilan, correctifs, réglages. Sans argument : menu."
 )]
 struct Args {
     #[command(subcommand)]
@@ -320,8 +321,8 @@ async fn menu() {
         let mut lignes: Vec<Ligne> = lignes_cadre(
             &format!("{ACCENT}SENTINEL{RESET} {GRIS}{}{RESET}", env!("CARGO_PKG_VERSION")),
             tr!(
-                "sécurité de ta machine et de ton réseau",
-                "security of your machine and your network"
+                "sécurise et optimise ta machine et ton réseau",
+                "secures and optimizes your machine and network"
             ),
         )
         .into_iter()
@@ -422,11 +423,17 @@ enum Action {
     Courriel,
     Logiciels,
     Gaming,
+    OptimiserRecommandes,
+    OptimiserConfidentialite,
+    #[cfg(not(target_os = "macos"))]
+    OptimiserPerformance,
+    OptimiserConfort,
+    OptimiserAnnuler,
     Sauvegarder,
 }
 
 impl Action {
-    const TOUTES: [Action; 22] = [
+    const TOUTES: &[Action] = &[
         Action::Complet,
         Action::Corriger,
         Action::Rapport,
@@ -448,6 +455,12 @@ impl Action {
         Action::Courriel,
         Action::Logiciels,
         Action::Gaming,
+        Action::OptimiserRecommandes,
+        Action::OptimiserConfidentialite,
+        #[cfg(not(target_os = "macos"))]
+        Action::OptimiserPerformance,
+        Action::OptimiserConfort,
+        Action::OptimiserAnnuler,
         Action::Sauvegarder,
     ];
 
@@ -469,6 +482,17 @@ impl Action {
             Action::Sauvegarder => "d",
             _ => return None,
         })
+    }
+
+    /// L'outil a-t-il quelque chose à proposer sur ce système ? (une catégorie de réglages vide n'est pas montrée)
+    fn disponible(self) -> bool {
+        match self {
+            Action::OptimiserConfidentialite => optimiser::a_des_reglages(optimiser::Categorie::Confidentialite),
+            #[cfg(not(target_os = "macos"))]
+            Action::OptimiserPerformance => optimiser::a_des_reglages(optimiser::Categorie::Performance),
+            Action::OptimiserConfort => optimiser::a_des_reglages(optimiser::Categorie::Confort),
+            _ => true,
+        }
     }
 
     /// Texte de la ligne de menu et sa précision en gris.
@@ -568,6 +592,43 @@ impl Action {
                     tr!("Steam, Vulkan, GameMode, Wine…", "Steam, Vulkan, GameMode, Wine…")
                 },
             ),
+            Action::OptimiserRecommandes => (
+                tr!("Réglages recommandés", "Recommended settings"),
+                tr!("en une fois, tout s'annule", "in one go, all undoable"),
+            ),
+            Action::OptimiserConfidentialite => (
+                tr!("Confidentialité", "Privacy"),
+                if cfg!(windows) {
+                    tr!("télémétrie, publicités, suivi", "telemetry, ads, tracking")
+                } else if cfg!(target_os = "macos") {
+                    tr!("publicités, analyses", "ads, analytics")
+                } else {
+                    tr!("rapports et statistiques", "reports and statistics")
+                },
+            ),
+            #[cfg(not(target_os = "macos"))]
+            Action::OptimiserPerformance => (
+                tr!("Performance et fiabilité", "Performance and reliability"),
+                if cfg!(windows) {
+                    tr!("démarrage rapide, widgets…", "fast startup, widgets…")
+                } else {
+                    tr!("SSD, taille du journal", "SSD, journal size")
+                },
+            ),
+            Action::OptimiserConfort => (
+                tr!("Confort et fichiers", "Comfort and files"),
+                if cfg!(windows) {
+                    tr!("extensions, clés USB, clic droit", "extensions, USB drives, menus")
+                } else if cfg!(target_os = "macos") {
+                    tr!("extensions, .DS_Store, Finder", "extensions, .DS_Store, Finder")
+                } else {
+                    tr!("annonces d'Ubuntu", "Ubuntu announcements")
+                },
+            ),
+            Action::OptimiserAnnuler => (
+                tr!("Tout remettre comme avant", "Put everything back"),
+                tr!("annule ce que Sentinel a changé", "undo what Sentinel changed"),
+            ),
             Action::Sauvegarder => (
                 tr!("Sauvegarder ou restaurer", "Back up or restore"),
                 tr!("base des appareils, réglages", "device database, settings"),
@@ -583,14 +644,16 @@ enum Groupe {
     Reseau,
     Protection,
     Installer,
+    Optimiser,
     Donnees,
 }
 
-const GROUPES: [Groupe; 5] = [
+const GROUPES: [Groupe; 6] = [
     Groupe::Machine,
     Groupe::Reseau,
     Groupe::Protection,
     Groupe::Installer,
+    Groupe::Optimiser,
     Groupe::Donnees,
 ];
 
@@ -601,6 +664,7 @@ impl Groupe {
             Groupe::Reseau => tr!("Réseau et Internet", "Network and Internet"),
             Groupe::Protection => tr!("Antivirus et protection", "Antivirus and protection"),
             Groupe::Installer => tr!("Installer et jouer", "Install and play"),
+            Groupe::Optimiser => tr!("Optimiser", "Optimize"),
             Groupe::Donnees => tr!("Données", "Data"),
         }
     }
@@ -611,6 +675,7 @@ impl Groupe {
             Groupe::Reseau => tr!("appareils, surveillance, débit", "devices, monitoring, speed test"),
             Groupe::Protection => tr!("analyses, clé USB, fuites…", "scans, USB drive, leaks…"),
             Groupe::Installer => tr!("logiciels essentiels, gaming", "essential software, gaming"),
+            Groupe::Optimiser => tr!("confidentialité, confort…", "privacy, comfort…"),
             Groupe::Donnees => tr!("sauvegarder ou restaurer", "back up or restore"),
         }
     }
@@ -640,16 +705,25 @@ impl Groupe {
                 Action::Courriel,
             ],
             Groupe::Installer => &[Action::Logiciels, Action::Gaming],
+            Groupe::Optimiser => &[
+                Action::OptimiserRecommandes,
+                Action::OptimiserConfidentialite,
+                #[cfg(not(target_os = "macos"))]
+                Action::OptimiserPerformance,
+                Action::OptimiserConfort,
+                Action::OptimiserAnnuler,
+            ],
             Groupe::Donnees => &[Action::Sauvegarder],
         }
     }
 }
 
 /// Sous-menu d'un groupe : ses outils numérotés, Entrée pour revenir au menu principal. Un groupe d'un seul outil
-/// (Données) l'ouvre directement.
+/// (Données) l'ouvre directement. Un outil sans rien à proposer sur ce système n'est pas montré.
 async fn sous_menu(s: &mut Session, groupe: Groupe) {
-    if let [seule] = groupe.actions() {
-        executer(s, *seule).await;
+    let actions: Vec<Action> = groupe.actions().iter().copied().filter(|a| a.disponible()).collect();
+    if let [seule] = actions[..] {
+        executer(s, seule).await;
         demander(&trf!(
             "\n{GRIS}Entrée pour revenir au menu…{RESET}",
             "\n{GRIS}Enter to go back to the menu…{RESET}"
@@ -667,7 +741,7 @@ async fn sous_menu(s: &mut Session, groupe: Groupe) {
         .map(Ligne::Texte)
         .collect();
         lignes.push(Ligne::Texte(String::new()));
-        for (i, a) in groupe.actions().iter().enumerate() {
+        for (i, a) in actions.iter().enumerate() {
             let (texte, precision) = a.libelle();
             lignes.push(Ligne::choix(&(i + 1).to_string(), texte, precision));
         }
@@ -694,7 +768,7 @@ async fn sous_menu(s: &mut Session, groupe: Groupe) {
             .parse::<usize>()
             .ok()
             .and_then(|n| n.checked_sub(1))
-            .and_then(|i| groupe.actions().get(i))
+            .and_then(|i| actions.get(i))
         else {
             continue;
         };
@@ -758,6 +832,12 @@ async fn executer(s: &mut Session, action: Action) {
         Action::Courriel => fuites::verifier_courriel(),
         Action::Logiciels => logiciels::menu(),
         Action::Gaming => gaming::menu(),
+        Action::OptimiserRecommandes => optimiser::recommandes(),
+        Action::OptimiserConfidentialite => optimiser::menu(optimiser::Categorie::Confidentialite),
+        #[cfg(not(target_os = "macos"))]
+        Action::OptimiserPerformance => optimiser::menu(optimiser::Categorie::Performance),
+        Action::OptimiserConfort => optimiser::menu(optimiser::Categorie::Confort),
+        Action::OptimiserAnnuler => optimiser::tout_annuler(),
         Action::Sauvegarder => donnees::menu(),
     }
 }
@@ -977,8 +1057,8 @@ mod tests_menu {
         // 1, 2, 3 au menu principal ; tout le reste dans un seul groupe.
         let principal = [Action::Complet, Action::Corriger, Action::Rapport];
         for a in Action::TOUTES {
-            let groupes = GROUPES.iter().filter(|g| g.actions().contains(&a)).count();
-            assert_eq!(groupes + usize::from(principal.contains(&a)), 1);
+            let groupes = GROUPES.iter().filter(|g| g.actions().contains(a)).count();
+            assert_eq!(groupes + usize::from(principal.contains(a)), 1);
         }
         // Raccourcis uniques, et jamais un chiffre (les chiffres ouvrent les groupes).
         let mut lettres: Vec<&str> = Action::TOUTES.iter().filter_map(|a| a.raccourci()).collect();

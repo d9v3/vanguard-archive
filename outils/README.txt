@@ -48,7 +48,12 @@ Menu (↑ ↓ to select, Enter to run, Esc to go back; or the number, then Enter
        Essential software (browser, VLC, 7-Zip, LibreOffice, Bitwarden…: new PC or a friend's)
        Gaming (Windows: Visual C++, DirectX…; Linux: Steam, Vulkan, GameMode, MangoHud, Wine, Lutris…;
        macOS: Steam, Heroic)
-  8  Data: back up or restore (nicknames, network history)
+  8  Optimize ›
+       Recommended settings, in one go · Privacy (telemetry, ads, tracking, Recall…)
+       Performance and reliability (fast startup, SSD…) · Comfort and files (file extensions shown,
+       no autorun from USB drives, full right-click menu…) · Put everything back
+       Each setting shows its state and is undone exactly: the previous value is put back.
+  9  Data: back up or restore (nicknames, network history)
   q  Quit
   Shortcuts from earlier versions, in the main menu: u updates, r repair, o diagnostic, i integrity,
   n name, c connection, a USB drive, b sandbox, p passwords, e email, l software, g gaming, d data.

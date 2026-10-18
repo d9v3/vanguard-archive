@@ -49,7 +49,12 @@ Menu (↑ ↓ pour choisir, Entrée pour lancer, Échap pour revenir ; ou le chi
        Logiciels essentiels (navigateur, VLC, 7-Zip, LibreOffice, Bitwarden… : PC neuf ou celui d'un ami)
        Gaming (Windows : Visual C++, DirectX… ; Linux : Steam, Vulkan, GameMode, MangoHud, Wine, Lutris… ;
        macOS : Steam, Heroic)
-  8  Données : sauvegarder ou restaurer (surnoms, historique des réseaux)
+  8  Optimiser ›
+       Réglages recommandés, en une fois · Confidentialité (télémétrie, publicités, suivi, Recall…)
+       Performance et fiabilité (démarrage rapide, SSD…) · Confort et fichiers (extensions visibles,
+       pas de lancement automatique des clés, menu complet au clic droit…) · Tout remettre comme avant
+       Chaque réglage montre son état et s'annule exactement : la valeur d'avant est remise.
+  9  Données : sauvegarder ou restaurer (surnoms, historique des réseaux)
   q  Quitter
   Raccourcis des anciennes versions, depuis le menu principal : u mises à jour, r réparer, o diagnostic,
   i intégrité, n nommer, c connexion, a clé USB, b bac à sable, p mots de passe, e courriel, l logiciels,

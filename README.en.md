@@ -4,7 +4,7 @@
 
 [Français](README.md) · **English**
 
-**The security check for your computer and your network, on a USB key.**
+**Secures and optimizes your computer and your network, from a USB key.**
 Sentinel checks your machine and every device on your network, explains each problem in plain language, and fixes
 it once you agree. Linux, Windows and macOS, nothing to install, in French or English.
 
@@ -42,6 +42,12 @@ verdict criterion by criterion and advice.
 **Computer diagnostic** — the first step of any troubleshooting: hardware, system, and recent problems (journal
 errors and crashed programs on Linux; blue screens, sudden shutdowns and crashes on Windows; kernel panics and crash
 reports on macOS), with a text copy saved on the key.
+
+**Optimize** — privacy, performance and comfort settings written for Sentinel. On Windows: telemetry kept to a
+minimum, ads and tracking off, Recall without screen snapshots, file extensions shown, no autorun from USB drives,
+fast startup, full right-click menu. On Linux: SSD maintenance, journal size, reports sent by GNOME or Ubuntu. On
+macOS: ads, analytics, no .DS_Store on drives. Each setting shows its state and is undone exactly: the previous value
+is recorded, then put back. None of them weakens security.
 
 **And also**
 - Fixes applied only after confirmation, with a restore point created automatically beforehand (snapper or
@@ -116,6 +122,7 @@ The code, its comments and its internal names are in French; every text shown to
 |---|---|
 | `src/main.rs` | menu and subcommands |
 | `src/ui.rs` | colors, titles, frames, bars |
+| `src/selection.rs` | keyboard menus and checklists (arrows, Enter, Esc) |
 | `src/langue.rs` | language choice and translation macros |
 | `src/machine/mod.rs` | shared types, display, parallel execution of the checks |
 | `src/machine/linux/`, `src/machine/windows/`, `src/machine/macos/` | per-system audit, one file per topic |
@@ -128,6 +135,7 @@ The code, its comments and its internal names are in French; every text shown to
 | `src/surveillance.rs` | systemd timer / Task Scheduler / launchd agent, notifications |
 | `src/rapport.rs`, `src/historique.rs` | HTML report, check history, grade curve |
 | `src/reparer.rs`, `src/maj.rs`, `src/gaming/` | repairs, updates, gaming |
+| `src/optimiser/` | privacy, performance and comfort settings, with exact undo |
 | `src/fuites.rs`, `src/donnees.rs` | leaked passwords, data backup |
 | `assets/oui.tsv` | manufacturers by MAC prefix (IEEE list) |
 | `LICENCES-TIERCES.txt` | license notices of the included libraries (`outils/licences-tierces.py`) |

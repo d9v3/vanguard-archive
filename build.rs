@@ -11,7 +11,7 @@ fn main() {
         res.set_ar_path("x86_64-w64-mingw32-ar");
     }
     res.set("ProductName", "Sentinel")
-        .set("FileDescription", "sentinel - bilan de sécurité personnel (machine, réseau local, antivirus)")
+        .set("FileDescription", "sentinel - sécurise et optimise ta machine et ton réseau (bilan, antivirus, réglages)")
         .set("CompanyName", "Projet personnel Sentinel")
         .set("LegalCopyright", "© 2026 d9v3, licence GPL-3.0-or-later")
         .set("OriginalFilename", "sentinel.exe")

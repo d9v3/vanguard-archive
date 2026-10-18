@@ -4,7 +4,7 @@
 
 **Français** · [English](README.en.md)
 
-**Le bilan de sécurité de ton ordinateur et de ton réseau, sur une clé USB.**
+**Sécurise et optimise ton ordinateur et ton réseau, depuis une clé USB.**
 Sentinel vérifie ta machine et tous les appareils de ton réseau, explique chaque problème en français clair, et le
 corrige après ton accord. Linux, Windows et macOS, sans installation, en français ou en anglais.
 
@@ -45,6 +45,13 @@ verdict critère par critère et des conseils.
 (erreurs du journal et programmes plantés sous Linux ; écrans bleus, arrêts brutaux et plantages sous Windows ;
 paniques du noyau et rapports de plantage sous macOS), avec
 une copie texte enregistrée sur la clé.
+
+**Optimiser** — des réglages de confidentialité, de performance et de confort, écrits pour Sentinel. Sous Windows :
+télémétrie au minimum, publicités et suivi coupés, Recall sans captures d'écran, extensions des fichiers visibles, pas
+de lancement automatique des clés USB, démarrage rapide, menu complet au clic droit. Sous Linux : entretien du SSD,
+taille du journal, rapports envoyés par GNOME ou Ubuntu. Sous macOS : publicités, analyses, pas de .DS_Store sur les
+clés. Chaque réglage montre son état et s'annule exactement : la valeur d'avant est notée, puis remise. Aucun
+n'affaiblit la sécurité.
 
 **Et aussi**
 - Corrections appliquées seulement après confirmation, avec un point de restauration créé automatiquement avant
@@ -115,6 +122,7 @@ commandes ont aussi un nom anglais (`full`, `audit`, `fix`, `network`, `connecti
 |---|---|
 | `src/main.rs` | menu et sous-commandes |
 | `src/ui.rs` | couleurs, titres, cadres, barres |
+| `src/selection.rs` | menus et listes à cocher au clavier (flèches, Entrée, Échap) |
 | `src/langue.rs` | choix de la langue et macros de traduction |
 | `src/machine/mod.rs` | types communs, affichage, exécution parallèle des vérifications |
 | `src/machine/linux/`, `src/machine/windows/`, `src/machine/macos/` | audit propre à chaque système, un fichier par thème |
@@ -127,6 +135,7 @@ commandes ont aussi un nom anglais (`full`, `audit`, `fix`, `network`, `connecti
 | `src/surveillance.rs` | minuterie systemd / Planificateur de tâches / agent launchd, notifications |
 | `src/rapport.rs`, `src/historique.rs` | rapport HTML, historique des bilans, courbe des notes |
 | `src/reparer.rs`, `src/maj.rs`, `src/gaming/` | réparations, mises à jour, gaming |
+| `src/optimiser/` | réglages de confidentialité, de performance et de confort, avec annulation exacte |
 | `src/fuites.rs`, `src/donnees.rs` | mots de passe fuités, sauvegarde des données |
 | `assets/oui.tsv` | fabricants par préfixe MAC (liste IEEE) |
 | `LICENCES-TIERCES.txt` | avis de licence des bibliothèques incluses (`outils/licences-tierces.py`) |

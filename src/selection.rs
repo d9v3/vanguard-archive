@@ -195,6 +195,158 @@ pub fn choisir(lignes: &[Ligne], invite: &str, depart: &str, echap: &str) -> Opt
     }
 }
 
+/// Une ligne de choix d'une liste à cocher.
+pub struct Case {
+    pub texte: String,
+    /// État en gris à droite (« fait », « à faire »…).
+    pub precision: String,
+    /// Explication montrée sous la liste quand la ligne est en surbrillance.
+    pub detail: String,
+    pub cochee: bool,
+    /// Cochée par R (« recommandés »).
+    pub recommandee: bool,
+}
+
+fn rendu_case(n: usize, c: &Case, cochee: bool, colonne: usize, en_cours: bool) -> String {
+    let (marque, gras) = if en_cours {
+        (format!("{ACCENT}►{RESET}"), GRAS)
+    } else {
+        (" ".to_string(), "")
+    };
+    let case = if cochee {
+        format!("{VERT}[x]{RESET}")
+    } else {
+        "[ ]".to_string()
+    };
+    format!(
+        " {marque} {TOUCHE}{n:>2}{RESET} {case} {gras}{}{RESET}{DISCRET}{}{RESET}",
+        ajuster(&c.texte, colonne),
+        c.precision
+    )
+}
+
+/// Liste à cocher, sous un titre : ↑ ↓ pour se déplacer, Espace pour cocher ou décocher, R pour cocher les
+/// recommandés, Entrée pour valider, Échap pour revenir sans rien changer. Retourne l'état final des cases, ou
+/// `None` pour Échap. Sans terminal, les numéros à inverser se tapent sur une ligne (« 1 4 », « r »).
+pub fn cocher(titre: &[String], cases: &[Case]) -> Option<Vec<bool>> {
+    let mut etats: Vec<bool> = cases.iter().map(|c| c.cochee).collect();
+    if cases.is_empty() {
+        return Some(etats);
+    }
+    let colonne = cases
+        .iter()
+        .map(|c| largeur_affichee(&c.texte) + 2)
+        .max()
+        .unwrap_or(0)
+        .clamp(30, 44);
+    let lignes_detail = 3;
+    let hauteur = titre.len() + cases.len() + 1 + lignes_detail + 2;
+    let tient = terminal::size()
+        .is_ok_and(|(largeur, rangees)| usize::from(largeur) > LARGEUR && usize::from(rangees) >= hauteur);
+    let clavier = std::io::stdin().is_terminal() && std::io::stdout().is_terminal() && tient;
+    let Some(_mode) = clavier.then(ModeClavier::activer).flatten() else {
+        for l in titre {
+            println!("{l}");
+        }
+        for (i, c) in cases.iter().enumerate() {
+            println!("{}", rendu_case(i + 1, c, c.cochee, colonne, false));
+        }
+        let reponse = demander(tr!(
+            "\n  Numéros à cocher ou décocher (ex. 1 4), r = recommandés, Entrée = valider, q = revenir : ",
+            "\n  Numbers to check or uncheck (e.g. 1 4), r = recommended, Enter = confirm, q = back: "
+        ));
+        if reponse.eq_ignore_ascii_case("q") {
+            return None;
+        }
+        for mot in reponse
+            .split(|c: char| c == ',' || c.is_whitespace())
+            .filter(|m| !m.is_empty())
+        {
+            if mot.eq_ignore_ascii_case("r") {
+                for (e, c) in etats.iter_mut().zip(cases) {
+                    *e |= c.recommandee;
+                }
+            } else if let Some(e) = mot
+                .parse::<usize>()
+                .ok()
+                .and_then(|n| n.checked_sub(1))
+                .and_then(|i| etats.get_mut(i))
+            {
+                *e = !*e;
+            }
+        }
+        return Some(etats);
+    };
+
+    let aide = trf!(
+        "  {GRIS}↑ ↓ choisir · Espace cocher · R recommandés · Entrée valider · Échap revenir{RESET}",
+        "  {GRIS}↑ ↓ select · Space check · R recommended · Enter confirm · Esc back{RESET}"
+    );
+    let mut en_cours = 0;
+    let mut sortie = std::io::stdout();
+    let _ = sortie.write_all(b"\x1b[2J");
+    loop {
+        let mut ecran = String::from("\x1b[H");
+        for l in titre {
+            ecran += l;
+            ecran += "\x1b[K\r\n";
+        }
+        for (i, c) in cases.iter().enumerate() {
+            ecran += &rendu_case(i + 1, c, etats[i], colonne, i == en_cours);
+            ecran += "\x1b[K\r\n";
+        }
+        ecran += "\x1b[K\r\n";
+        // L'explication de la ligne en cours, toujours sur le même nombre de lignes : l'écran ne saute pas.
+        let mut detail = envelopper(&cases[en_cours].detail, LARGEUR - 4);
+        detail.resize(lignes_detail, String::new());
+        for l in detail.iter().take(lignes_detail) {
+            let _ = write!(ecran, "  {GRIS}{l}{RESET}\x1b[K\r\n");
+        }
+        let _ = write!(ecran, "{aide}\x1b[K\x1b[J");
+        let _ = sortie.write_all(ecran.as_bytes());
+        let _ = sortie.flush();
+
+        let Ok(Event::Key(k)) = event::read() else {
+            continue;
+        };
+        if k.kind == KeyEventKind::Release {
+            continue;
+        }
+        let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
+        let derniere = cases.len() - 1;
+        match k.code {
+            KeyCode::Up | KeyCode::BackTab => en_cours = en_cours.checked_sub(1).unwrap_or(derniere),
+            KeyCode::Down | KeyCode::Tab => en_cours = if en_cours == derniere { 0 } else { en_cours + 1 },
+            KeyCode::Home | KeyCode::PageUp => en_cours = 0,
+            KeyCode::End | KeyCode::PageDown => en_cours = derniere,
+            KeyCode::Char(' ') => etats[en_cours] = !etats[en_cours],
+            KeyCode::Char('r' | 'R') if !ctrl => {
+                for (e, c) in etats.iter_mut().zip(cases) {
+                    *e |= c.recommandee;
+                }
+            }
+            KeyCode::Enter => {
+                let _ = sortie.write_all(b"\r\n");
+                return Some(etats);
+            }
+            KeyCode::Char('j' | 'm') if ctrl => {
+                let _ = sortie.write_all(b"\r\n");
+                return Some(etats);
+            }
+            KeyCode::Esc => {
+                let _ = sortie.write_all(b"\r\n");
+                return None;
+            }
+            KeyCode::Char('c' | 'd') if ctrl => {
+                let _ = terminal::disable_raw_mode();
+                println!();
+                std::process::exit(if k.code == KeyCode::Char('c') { 130 } else { 0 });
+            }
+            _ => {}
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
