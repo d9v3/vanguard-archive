@@ -360,6 +360,28 @@ fn appimage(chemin: &str, montages: &str) -> bool {
         .any(|l| l.split_whitespace().nth(1) == Some(point.as_str()))
 }
 
+/// Un nouveau fichier qu'un programme lancé par la personne n'a pas pu poser : fichier et dossier à root, dossier que
+/// ni le groupe ni les autres n'écrivent (/usr, /opt, /snap, /var/lib/flatpak d'ordinaire). Ailleurs (profil, /tmp),
+/// un programme malveillant qui s'est effacé n'aurait qu'à reposer n'importe quel fichier à sa place.
+#[cfg_attr(not(unix), allow(dead_code))]
+fn hors_de_portee(proprietaire_fichier: u32, proprietaire_dossier: u32, mode_dossier: u32) -> bool {
+    proprietaire_fichier == 0 && proprietaire_dossier == 0 && mode_dossier & 0o022 == 0
+}
+
+#[cfg(unix)]
+fn pose_par_le_systeme(chemin: &std::path::Path) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    let (Ok(fichier), Some(Ok(dossier))) = (std::fs::metadata(chemin), chemin.parent().map(std::fs::metadata)) else {
+        return false;
+    };
+    hors_de_portee(fichier.uid(), dossier.uid(), dossier.mode())
+}
+
+#[cfg(not(unix))]
+fn pose_par_le_systeme(_: &std::path::Path) -> bool {
+    false
+}
+
 /// Le nom à montrer pour un serveur : son domaine (« github.com »), ou l'entreprise derrière un grand hébergeur.
 fn qui(nom: &str) -> String {
     let domaine = crate::protection::lien::domaine_enregistrable(nom);
@@ -379,10 +401,10 @@ fn qui(nom: &str) -> String {
 fn signes(chemin: Option<&str>, connexions: &[(&Connexion, Option<&String>)], montages: &str) -> Vec<(Niveau, String)> {
     let mut signes = Vec::new();
     if let Some(c) = chemin {
-        // Un nouveau fichier à la même place : le programme a été mis à jour pendant qu'il tournait (Firefox après une
-        // mise à jour du système), l'ancienne version reste en mémoire.
+        // Un nouveau fichier à la même place, posé par le système : le programme a été mis à jour pendant qu'il
+        // tournait (Firefox après une mise à jour du système), l'ancienne version reste en mémoire.
         match c.strip_suffix(" (deleted)") {
-            Some(ancien) if std::path::Path::new(ancien).exists() => signes.push((
+            Some(ancien) if pose_par_le_systeme(std::path::Path::new(ancien)) => signes.push((
                 Niveau::Info,
                 tr!(
                     "Mis à jour pendant qu'il tournait : l'ancienne version tourne encore, redémarre-le.",
@@ -848,31 +870,46 @@ mod tests {
     }
 
     // Linux : un programme mis à jour pendant qu'il tourne (Firefox après une mise à jour du système) a son ancien
-    // fichier « (deleted) », mais un nouveau à la même place : pas une ruse, une information. (Le second signe vient
-    // du dossier temporaire où le test le pose.)
+    // fichier « (deleted) », mais un nouveau à la même place, installé par le système : une information. /usr/bin/env
+    // appartient à root, dans un dossier que personne d'autre n'écrit.
+    #[cfg(unix)]
     #[test]
-    fn programme_mis_a_jour_pas_efface() {
-        let dossier = crate::protection::isoler::dossier_jetable().unwrap();
-        let nouveau = dossier.join("firefox");
-        std::fs::write(&nouveau, b"nouvelle version").unwrap();
-        let mis_a_jour = format!("{} (deleted)", nouveau.display());
-        let c = Connexion {
-            chemin: Some(mis_a_jour.clone()),
-            ..Connexion::vers(ip("140.82.112.4"), 443)
-        };
+    fn programme_du_systeme_mis_a_jour() {
+        let c = Connexion::vers(ip("140.82.112.4"), 443);
         let nom = "github.com".to_string();
-        let s = signes(Some(&mis_a_jour), &[(&c, Some(&nom))], "");
+        let s = signes(Some("/usr/bin/env (deleted)"), &[(&c, Some(&nom))], "");
+        assert_eq!(s.iter().map(|(n, _)| *n).collect::<Vec<_>>(), [Niveau::Info]);
+    }
+
+    // Un fichier reposé là où la personne peut écrire (profil, dossier temporaire) ne prouve rien : un programme
+    // malveillant qui s'est effacé n'aurait qu'à en reposer un. Le second signe vient du dossier temporaire du test.
+    #[test]
+    fn fichier_repose_par_la_personne() {
+        let dossier = crate::protection::isoler::dossier_jetable().unwrap();
+        let repose = dossier.join("firefox");
+        std::fs::write(&repose, b"n'importe quoi").unwrap();
+        let efface = format!("{} (deleted)", repose.display());
+        let c = Connexion::vers(ip("140.82.112.4"), 443);
+        let s = signes(Some(&efface), &[(&c, None)], "");
         assert_eq!(
-            s.iter().map(|(n, _)| *n).collect::<Vec<_>>(),
-            [Niveau::Info, Niveau::Eleve]
+            s.iter().map(|(n, _)| *n).take(2).collect::<Vec<_>>(),
+            [Niveau::Eleve, Niveau::Eleve]
         );
         std::fs::remove_dir_all(&dossier).unwrap();
         // Plus rien à sa place : effacé pour de bon.
-        let s = signes(Some(&mis_a_jour), &[(&c, Some(&nom))], "");
-        assert_eq!(
-            s.iter().map(|(n, _)| *n).collect::<Vec<_>>(),
-            [Niveau::Eleve, Niveau::Eleve]
-        );
+        let s = signes(Some(&efface), &[(&c, None)], "");
+        assert_eq!(s[0].0, Niveau::Eleve);
+    }
+
+    // Fichier et dossier à root, dossier fermé au groupe et aux autres : hors de portée. /tmp appartient à root mais
+    // tout le monde y écrit ; un fichier à la personne, ou un dossier qu'elle possède, non plus.
+    #[test]
+    fn portee_de_la_personne() {
+        assert!(hors_de_portee(0, 0, 0o040_755));
+        assert!(!hors_de_portee(0, 0, 0o041_777));
+        assert!(!hors_de_portee(0, 0, 0o040_775));
+        assert!(!hors_de_portee(1000, 0, 0o040_755));
+        assert!(!hors_de_portee(0, 1000, 0o040_755));
     }
 
     // Une AppImage tourne depuis son image montée dans /tmp/.mount_* : pas un programme lancé d'un dossier temporaire.
