@@ -213,34 +213,46 @@ fn libelle(e: Etat, par_gardien: bool) -> &'static str {
     }
 }
 
-/// Montre ce qui va changer, demande l'accord, applique, puis relit l'état de chaque réglage.
-fn confirmer_et_executer(a_faire: &[&Reglage], a_annuler: &[&Reglage]) {
-    let mut h = charger();
+/// Ce qui va changer, montré avant de demander : chaque réglage, ses changements, et son revers coupé pour tenir
+/// dans `LARGEUR` (d'une traite, le terminal le coupait au milieu des mots).
+fn a_changer(a_faire: &[&Reglage], a_annuler: &[&Reglage], h: &Historique) -> Vec<String> {
+    let mut lignes = Vec::new();
     if !a_faire.is_empty() {
-        trp!("\n  {GRAS}À appliquer{RESET}", "\n  {GRAS}To apply{RESET}");
+        lignes.push(trf!("\n  {GRAS}À appliquer{RESET}", "\n  {GRAS}To apply{RESET}"));
         for r in a_faire {
-            println!("    {VERT}+{RESET} {}", r.titre);
+            lignes.push(format!("    {VERT}+{RESET} {}", r.titre));
             for c in &r.changements {
-                println!("        {GRIS}{}{RESET}", c.decrire(c.cible().as_deref()));
+                lignes.push(format!("        {GRIS}{}{RESET}", c.decrire(c.cible().as_deref())));
             }
             if let Some(p) = r.prudence {
-                println!("        ⚠ {p}");
+                let mut morceaux = envelopper(p, LARGEUR - 10).into_iter();
+                lignes.extend(morceaux.next().map(|m| format!("        ⚠ {m}")));
+                lignes.extend(morceaux.map(|m| format!("          {m}")));
             }
         }
     }
     if !a_annuler.is_empty() {
-        trp!("\n  {GRAS}À annuler{RESET}", "\n  {GRAS}To undo{RESET}");
+        lignes.push(trf!("\n  {GRAS}À annuler{RESET}", "\n  {GRAS}To undo{RESET}"));
         for r in a_annuler {
             let note = if h.reglages.contains_key(r.id.as_ref()) {
                 tr!("valeurs d'avant remises", "previous values restored")
             } else {
                 tr!("valeurs d'un système neuf", "values of a fresh system")
             };
-            println!("    − {} {GRIS}({note}){RESET}", r.titre);
-            for (c, v) in r.changements.iter().zip(valeurs_d_avant(r, &h)) {
-                println!("        {GRIS}{}{RESET}", c.decrire(v.as_deref()));
+            lignes.push(format!("    − {} {GRIS}({note}){RESET}", r.titre));
+            for (c, v) in r.changements.iter().zip(valeurs_d_avant(r, h)) {
+                lignes.push(format!("        {GRIS}{}{RESET}", c.decrire(v.as_deref())));
             }
         }
+    }
+    lignes
+}
+
+/// Montre ce qui va changer, demande l'accord, applique, puis relit l'état de chaque réglage.
+fn confirmer_et_executer(a_faire: &[&Reglage], a_annuler: &[&Reglage]) {
+    let mut h = charger();
+    for l in a_changer(a_faire, a_annuler, &h) {
+        println!("{l}");
     }
     if !demander(tr!(
         "\n  Faire ces changements ? [o/N] : ",
@@ -276,6 +288,20 @@ pub fn a_des_reglages(categorie: Categorie) -> bool {
     systeme::catalogue().iter().any(|r| r.categorie == categorie)
 }
 
+/// L'en-tête de la liste à cocher d'une catégorie, sur deux lignes : plus large que `LARGEUR`, il passait sur deux
+/// rangées du terminal et décalait la liste, qui compte une rangée par ligne.
+fn entete(categorie: Categorie) -> Vec<String> {
+    vec![
+        String::new(),
+        ligne_titre(categorie.titre()),
+        trf!(
+            "  {GRIS}Coché = réglage en place. Ce que tu coches s'applique,{RESET}\n  {GRIS}ce que tu décoches s'annule.{RESET}",
+            "  {GRIS}Checked = setting in place. What you check is applied,{RESET}\n  {GRIS}what you uncheck is undone.{RESET}"
+        ),
+        String::new(),
+    ]
+}
+
 /// Une catégorie : liste à cocher. Coché = réglage en place ; cocher applique, décocher annule.
 pub fn menu(categorie: Categorie) {
     let reglages: Vec<Reglage> = systeme::catalogue()
@@ -307,16 +333,7 @@ pub fn menu(categorie: Categorie) {
             fixe: false,
         })
         .collect();
-    let entete = vec![
-        String::new(),
-        ligne_titre(categorie.titre()),
-        trf!(
-            "  {GRIS}Coché = réglage en place. Ce que tu coches s'applique, ce que tu décoches s'annule.{RESET}",
-            "  {GRIS}Checked = setting in place. What you check is applied, what you uncheck is undone.{RESET}"
-        ),
-        String::new(),
-    ];
-    let Some(voulu) = cocher(&entete, &cases) else {
+    let Some(voulu) = cocher(&entete(categorie), &cases) else {
         return;
     };
     let a_faire: Vec<&Reglage> = reglages
@@ -355,10 +372,11 @@ pub fn recommandes() {
         );
         return;
     }
-    trp!(
-        "  Sans revers pour la plupart des gens, et chacun s'annule depuis sa catégorie.",
-        "  No downside for most people, and each one can be undone from its category."
+    let sans_revers = tr!(
+        "Sans revers pour la plupart des gens, et chacun s'annule depuis sa catégorie.",
+        "No downside for most people, and each one can be undone from its category."
     );
+    afficher_aligne("  ", sans_revers, 2, "");
     confirmer_et_executer(&a_faire, &[]);
 }
 
@@ -491,6 +509,74 @@ mod tests {
             assert!(!r.changements.is_empty(), "{} ne change rien", r.id);
             // Le titre tient dans la liste à cocher sans être coupé.
             assert!(largeur_affichee(&r.titre) <= 42, "{} : titre trop long", r.id);
+        }
+    }
+
+    /// Les messages d'Optimiser et des programmes au démarrage tiennent dans `LARGEUR` colonnes, dans les deux
+    /// langues.
+    #[test]
+    fn messages_dans_la_largeur() {
+        let larges: Vec<String> = [include_str!("mod.rs"), include_str!("demarrage.rs")]
+            .into_iter()
+            .flat_map(crate::gaming::tests::textes_trop_larges)
+            .collect();
+        assert_eq!(larges, Vec::<String>::new());
+    }
+
+    /// L'en-tête de chaque catégorie tient dans `LARGEUR` : plus large, il passait sur deux rangées du terminal et
+    /// décalait la liste à cocher, qui compte une rangée par ligne.
+    #[test]
+    fn entete_dans_la_largeur() {
+        for c in [Categorie::Confidentialite, Categorie::Performance, Categorie::Confort] {
+            for l in entete(c).iter().flat_map(|t| t.split('\n')) {
+                assert!(largeur_affichee(l) <= LARGEUR, "{} colonnes : {l}", largeur_affichee(l));
+            }
+        }
+    }
+
+    /// Les lignes d'un revers, dans ce qui va changer.
+    fn revers_trop_larges(lignes: &[String]) -> Vec<String> {
+        let changement = format!("        {GRIS}");
+        lignes
+            .iter()
+            .flat_map(|t| t.split('\n'))
+            .filter(|l| !l.starts_with(&changement) && largeur_affichee(l) > LARGEUR)
+            .map(str::to_string)
+            .collect()
+    }
+
+    /// Avant de demander, ce qui va changer montre le revers de chaque réglage, coupé pour tenir dans `LARGEUR` ;
+    /// les changements eux-mêmes (clé du registre, commande) restent entiers.
+    #[test]
+    fn changements_dans_la_largeur() {
+        let catalogue = systeme::catalogue();
+        let tous: Vec<&Reglage> = catalogue.iter().collect();
+        assert_eq!(
+            revers_trop_larges(&a_changer(&tous, &[], &Historique::default())),
+            Vec::<String>::new()
+        );
+        #[cfg(target_os = "linux")]
+        {
+            let r = Reglage {
+                id: "essai".into(),
+                categorie: Categorie::Confort,
+                titre: "Essai".into(),
+                effet: "Essai",
+                prudence: Some(
+                    "Courrier, Calendrier et les autres applications du Store n'enverront plus de notifications une fois fermées.",
+                ),
+                recommande: false,
+                changements: vec![systeme::Changement::Option {
+                    fichier: "/etc/essai.conf",
+                    cle: "ESSAI",
+                    cible: "0",
+                    defaut: "1",
+                }],
+            };
+            assert_eq!(
+                revers_trop_larges(&a_changer(&[&r], &[], &Historique::default())),
+                Vec::<String>::new()
+            );
         }
     }
 
