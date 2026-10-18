@@ -212,3 +212,43 @@ fn scan_de_cette_machine_en_json() {
     let hotes = scan["hotes"].as_array().expect("pas d'appareils");
     assert!(hotes.iter().all(|h| h["ip"] == "127.0.0.1"), "{hotes:?}");
 }
+
+#[test]
+fn sauvegarde_puis_restauration() {
+    // Hors du dossier personnel jetable : le fichier doit passer d'un lancement à l'autre.
+    let fichier = std::env::temp_dir().join(format!("gardien-sauvegarde-essai-{}.json", std::process::id()));
+    let chemin = fichier.to_str().unwrap();
+    let s = gardien("fr", &["sauvegarder", chemin], "", 60);
+    assert_eq!(s.code, Some(0), "{}", s.erreurs);
+    assert!(sans_couleurs(&s.texte).contains("Sauvegarde écrite"), "{}", s.texte);
+    let texte = std::fs::read_to_string(&fichier).unwrap();
+    assert!(texte.contains("\"format\": \"gardien-sauvegarde\""), "{texte}");
+    let r = gardien("fr", &["restaurer", chemin], "", 60);
+    assert_eq!(r.code, Some(0), "{}", r.erreurs);
+    assert!(
+        sans_couleurs(&r.texte).contains("Ajouté à la base actuelle"),
+        "{}",
+        r.texte
+    );
+    // Un fichier qui n'est pas une sauvegarde : rien n'est restauré.
+    std::fs::write(&fichier, "{\"autre\":1}").unwrap();
+    let refus = gardien("fr", &["restaurer", chemin], "", 60);
+    assert!(
+        sans_couleurs(&refus.texte).contains("Rien de restauré"),
+        "{}",
+        refus.texte
+    );
+    let _ = std::fs::remove_file(&fichier);
+}
+
+#[test]
+fn gaming_quitte_sans_rien_installer() {
+    let s = gardien("fr", &["gaming"], "\n", 120);
+    let t = sans_couleurs(&s.texte);
+    if sous_wine() {
+        assert!(t.contains("PowerShell ne répond pas"), "{t}");
+        return;
+    }
+    assert_eq!(s.code, Some(0), "{}", s.erreurs);
+    assert!(t.contains("Gaming") && !t.contains("Terminé"), "{t}");
+}
