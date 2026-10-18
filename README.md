@@ -261,6 +261,7 @@ Chaque entrée du menu existe aussi en commande.
 | `gardien antivirus [--complet] [dossier]` | analyse antivirus (ordinateur, ou une clé / un dossier) |
 | `gardien yara [--complet] [dossier]` | analyse YARA : 308 règles de familles de logiciels malveillants |
 | `gardien pieges [--retirer]` | fichiers-pièges contre les rançongiciels : les poser, les vérifier, les retirer |
+| `gardien durcir` | blocages de Windows Defender : règles ASR, protection réseau, logiciels indésirables, accès contrôlé aux dossiers ; chacun après accord, annulable (Windows) |
 | `gardien listes-noires` | l'adresse Internet de la maison sur liste noire ? (après accord) |
 | `gardien canaux` | Wi-Fi encombré : les réseaux voisins par canal, et le canal le plus libre |
 | `gardien nat` | type de NAT pour le jeu : ouvert, modéré ou strict |
@@ -287,7 +288,7 @@ Chaque entrée du menu existe aussi en commande.
 
 **Langue** : celle du système (français ou anglais). Pour forcer : `GARDIEN_LANG=fr` ou `GARDIEN_LANG=en`. Les
 commandes ont aussi un nom anglais (`full`, `audit`, `fix`, `network`, `connection`, `apps`, `diag`, `password`,
-`sandbox`, `email`, `integrity`, `update`, `repair`, `monitor`, `name`, `backup`, `restore`, `clean`, `decoys`,
+`sandbox`, `email`, `integrity`, `update`, `repair`, `monitor`, `name`, `backup`, `restore`, `clean`, `decoys`, `harden`,
 `blocklists`, `learned`, `channels`, `fast-dns`, `outbound`, `link`, `check-file`, `maintenance`, `slow`,
 `startup`, `specs`, `copy-files`, `troubleshoot`).
 

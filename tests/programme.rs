@@ -126,6 +126,18 @@ fn aide_dans_les_deux_langues() {
     assert!(en.texte.contains("--liste") && en.texte.contains("deleting nothing"));
 }
 
+// Blocages de Windows Defender : en anglais dans l'aide ; ailleurs que sous Windows, rien à proposer et rien changé.
+#[test]
+fn durcir_hors_de_windows() {
+    let aide = gardien("en", &["harden", "--help"], "", 30);
+    assert!(aide.texte.contains("Windows Defender blocking"), "{}", aide.texte);
+    if !cfg!(windows) {
+        let r = gardien("en", &["harden"], "", 30);
+        assert_eq!(r.code, Some(0));
+        assert!(r.texte.contains("Nothing in this category"), "{}", r.texte);
+    }
+}
+
 #[test]
 fn commande_inconnue_refusee() {
     let s = gardien("fr", &["nimportequoi"], "", 30);

@@ -178,6 +178,10 @@ enum Commande {
         #[arg(long, visible_alias = "remove")]
         retirer: bool,
     },
+    /// Blocages de Windows Defender : règles ASR, protection réseau, logiciels indésirables, accès contrôlé aux
+    /// dossiers. Chacun s'active après accord et s'annule exactement (Windows seulement).
+    #[command(visible_alias = "harden")]
+    Durcir,
     /// Analyse YARA : 308 règles de familles de logiciels malveillants (ReversingLabs), en complément de l'antivirus.
     /// Sans dossier : téléchargements, bureau, démarrage. Lecture seule.
     Yara {
@@ -1112,6 +1116,8 @@ const AIDES_EN: &[(&str, &str)] = &[
                     that protects (NextDNS, encrypted, filtering) is kept"),
     ("pieges", "Decoy files against ransomware: place them (after your consent), see whether they are intact, or \
                 remove them"),
+    ("durcir", "Windows Defender blocking: ASR rules, network protection, unwanted software, controlled folder access. \
+                Each one is turned on after your consent and undoes exactly (Windows only)"),
     ("isoler", "Run an unknown program in a sandbox: no network, home folder hidden"),
     ("courriel", "Email address leaks: the address is sent to the search service, after your consent"),
     ("integrite", "Critical file integrity: BLAKE3 fingerprint reference, then what changed since"),
@@ -1286,6 +1292,7 @@ async fn main() {
         }
         Some(Commande::Isoler { fichier }) => protection::isoler::isoler(&fichier),
         Some(Commande::Pieges { retirer }) => protection::pieges::commande(retirer),
+        Some(Commande::Durcir) => optimiser::protection(),
         Some(Commande::Yara { complet, dossier }) => protection::yara::analyser(&portee(dossier, complet)),
         Some(Commande::ListesNoires) => reseau::listes_noires::verifier(),
         Some(Commande::Canaux) => reseau::canaux::analyser(),

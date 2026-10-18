@@ -247,6 +247,7 @@ Each menu entry is also a command.
 | `gardien antivirus [--complet] [folder]` | antivirus scan (computer, or a key / a folder) |
 | `gardien yara [--complet] [folder]` | YARA scan: 308 rules for malware families |
 | `gardien decoys [--retirer]` | decoy files against ransomware: place them, check them, remove them |
+| `gardien harden` | Windows Defender blocking: ASR rules, network protection, unwanted software, controlled folder access; each after your consent, undoable (Windows) |
 | `gardien blocklists` | the home's Internet address on a blocklist? (after your consent) |
 | `gardien channels` | crowded Wi-Fi: nearby networks by channel, and the freest channel |
 | `gardien nat` | NAT type for gaming: open, moderate or strict |
@@ -274,7 +275,7 @@ Each menu entry is also a command.
 **Language**: the system's (English or French). To force it: `GARDIEN_LANG=en` or `GARDIEN_LANG=fr`. The commands
 also keep their French names (`complet`, `machine`, `corriger`, `reseau`, `connexion`, `logiciels`, `diagnostic`,
 `motdepasse`, `isoler`, `courriel`, `integrite`, `maj`, `reparer`, `surveillance`, `nommer`, `sauvegarder`,
-`restaurer`, `nettoyer`, `pieges`, `listes-noires`, `appris`, `entretien`, `sortantes`, `lien`,
+`restaurer`, `nettoyer`, `pieges`, `durcir`, `listes-noires`, `appris`, `entretien`, `sortantes`, `lien`,
 `verifier-fichier`, `canaux`, `dns-rapide`).
 
 ## Development
