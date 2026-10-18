@@ -1168,6 +1168,16 @@ pub fn menu() {
     else {
         return;
     };
+    lancer(r);
+}
+
+/// La réparation de ce titre, si ce système en a une : un parcours de dépannage la propose directement.
+pub fn par_titre(titre: &str) -> Option<Reparation> {
+    liste().into_iter().find(|r| r.titre == titre)
+}
+
+/// Montre une réparation (pourquoi, durée, commandes), demande l'accord, puis la lance.
+pub fn lancer(r: &Reparation) {
     if let Some(outil) = r.ouvrir {
         outil();
         return;

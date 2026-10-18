@@ -107,6 +107,22 @@ that look like cameras (maker, video stream, ONVIF), without turning anything of
 errors and crashed programs on Linux; blue screens, sudden shutdowns and crashes on Windows; kernel panics and crash
 reports on macOS), with a text copy saved on the key.
 
+**Troubleshoot step by step** — everyday problems, handled the way someone who knows would: no Internet, Wi-Fi
+dropping, slow computer, no sound, printer not working, disk full. Two or three questions, then Gardien checks by
+itself (address, router, Internet, DNS; Wi-Fi signal; sound service and selected output; print queue and printer on
+the network; disk space) and suggests the right repair or the right tool, always with your consent.
+
+**Why is it slow?** — a two-second snapshot: what keeps the processor, memory and disk busy, program by program;
+how long startup takes and what delays it; the programs started at login and their weight. Those that work for a
+while then calm down (antivirus scanning, indexing, updates) are named as such.
+
+**Computer specs** — model, motherboard, BIOS, processor, memory (modules, type, speed), graphics card and driver,
+disks: what you are asked on the phone or to buy a part. Serial numbers are shown on screen only, never written.
+
+**Copy my files** — Documents, Pictures, Desktop, Videos and Music to an external disk, before a risky repair or a
+reinstall: space is checked first, each file is read back and compared with the original (BLAKE3 fingerprint),
+nothing is deleted or overwritten, and an interrupted copy resumes where it stopped.
+
 **Optimize** — privacy, performance and comfort settings written for Gardien. On Windows: telemetry kept to a
 minimum, ads and tracking off, Recall without screen snapshots, file extensions shown, no autorun from USB drives,
 fast startup, full right-click menu. On Linux: SSD maintenance, journal size, reports sent by GNOME or Ubuntu. On
@@ -193,6 +209,10 @@ Each menu entry is also a command:
 | `gardien clean [--list]` | clean up the system; `--list`: the space to gain, deleting nothing |
 | `gardien apps [--list] [--recommended]` | software to install by category; `--list`: their state, installing nothing |
 | `gardien diag` | computer diagnostic: hardware, system, recent crashes and errors |
+| `gardien troubleshoot [subject]` | troubleshoot step by step: `internet`, `wifi`, `slow`, `sound`, `printer`, `disk` |
+| `gardien slow` | why it is slow: processor, memory, disk, startup, programs at login |
+| `gardien specs [--json]` | computer specs; `--json` without the serial numbers |
+| `gardien copy-files [destination]` | copy my files to an external disk, checked copy |
 | `gardien antivirus [--complet] [folder]` | antivirus scan (computer, or a key / a folder) |
 | `gardien yara [--complet] [folder]` | YARA scan: 308 rules for malware families |
 | `gardien decoys [--retirer]` | decoy files against ransomware: place them, check them, remove them |

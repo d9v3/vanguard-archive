@@ -106,7 +106,7 @@ fn dossiers_du_systeme() -> Vec<PathBuf> {
 
 /// Un dossier de user-dirs.dirs. « $HOME » seul (dossier non configuré) n'est pas un dossier personnel.
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
-fn dossier_declare(declares: &str, cle: &str, maison: &Path) -> Option<PathBuf> {
+pub(crate) fn dossier_declare(declares: &str, cle: &str, maison: &Path) -> Option<PathBuf> {
     let valeur = declares
         .lines()
         .find_map(|l| l.trim().strip_prefix(cle)?.strip_prefix('='))?
@@ -153,7 +153,7 @@ fn dossiers_du_systeme() -> Vec<PathBuf> {
 /// « %USERPROFILE%\Documents » → le vrai chemin, d'après les variables d'environnement ; une variable inconnue reste
 /// telle quelle.
 #[cfg_attr(not(windows), allow(dead_code))]
-fn developper(chemin: &str) -> String {
+pub(crate) fn developper(chemin: &str) -> String {
     let mut sortie = String::new();
     let mut reste = chemin;
     while let Some(debut) = reste.find('%') {

@@ -42,6 +42,8 @@ highlighted one, Esc clears it. In the main menu, it also finds each tool of the
        Diagnostic (hardware, recent crashes and errors, text copy on the key)
        Critical file integrity (accounts, sudo, SSH, startup; live: gardien integrite --temps-reel)
        What Gardien has learned: your habits, and the alerts you declared normal ("i" when fixing)
+       Why is it slow? (processor, memory, disk, startup, programs started at login)
+       Computer specs (model, processor, memory, graphics card, disks; serial numbers on screen)
        Monthly check-up: one notification a month (grade, updates, space to free, new problems)
   5  Network and Internet ›
        Scan the network · Deep scan of one device · Name a device ("HP printer")
@@ -74,10 +76,15 @@ highlighted one, Esc clears it. In the main menu, it also finds each tool of the
        no autorun from USB drives, full right-click menu…)
        Fastest DNS (measured here; a DNS that protects you is kept) · Put everything back
        Each setting shows its state and is undone exactly: the previous value is put back.
-  9  Data: back up or restore (nicknames, network history)
+  9  Data ›
+       Back up or restore (nicknames, network history)
+       Copy my files to an external disk (checked copy, nothing deleted, resumes after an interruption)
  10  Command guide › the useful commands of Linux, Windows, macOS and all systems, by program, each one
        explained (⚠: it changes something); nothing runs from there. From the command line:
        gardien guide windows, gardien guide winget, gardien guide dns cache
+ 11  Troubleshoot step by step › no Internet, Wi-Fi dropping, slow computer, no sound, printer, disk full:
+       two or three questions, then Gardien checks and suggests the right repair.
+       From the command line: gardien troubleshoot sound
   q  Quit
   Shortcuts from earlier versions, in the main menu: u updates, r repair, o diagnostic, i integrity,
   n name, c connection, a USB drive, b sandbox, p passwords, e email, l software, g gaming, d data.

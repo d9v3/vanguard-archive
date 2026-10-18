@@ -1,0 +1,409 @@
+//! Parcours « L'imprimante ne marche pas » : le service d'impression tourne-t-il, l'imprimante est-elle installée,
+//! en pause, joignable sur le réseau, des impressions sont-elles bloquées dans la file. Linux et macOS : CUPS
+//! (lpstat) ; Windows : le spouleur et Get-Printer. Vider la file, réactiver l'imprimante ou relancer le service :
+//! montré, puis fait après accord.
+
+use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
+use std::time::Duration;
+
+use super::{Etat, a_savoir, constat, question, verifications};
+use crate::ui::*;
+
+/// Une imprimante installée.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub(super) struct Imprimante {
+    pub nom: String,
+    pub en_pause: bool,
+    /// Adresse réseau de l'imprimante (« 192.168.1.20 », « imprimante.local ») ; vide : USB ou inconnue.
+    pub hote: String,
+    pub en_attente: usize,
+    pub par_defaut: bool,
+}
+
+/// L'hôte d'une adresse d'imprimante : « ipp://192.168.1.20/ipp/print », « socket://imprimante.local:9100 » ; rien
+/// pour l'USB ou une adresse découverte (dnssd://).
+#[cfg_attr(windows, allow(dead_code))]
+fn hote(uri: &str) -> String {
+    let Some((schema, reste)) = uri.split_once("://") else {
+        return String::new();
+    };
+    if !["ipp", "ipps", "http", "https", "socket", "lpd"].contains(&schema) {
+        return String::new();
+    }
+    let hote = reste.split(['/', '?']).next().unwrap_or_default();
+    let hote = hote.rsplit('@').next().unwrap_or(hote);
+    // « [fe80::1]:631 » : IPv6 entre crochets ; sinon « hôte:port ».
+    match hote.strip_prefix('[') {
+        Some(v6) => v6.split(']').next().unwrap_or_default().to_string(),
+        None => hote.split(':').next().unwrap_or_default().to_string(),
+    }
+}
+
+/// `lpstat -p -d -v -o`, en anglais (LC_ALL=C) : imprimantes, état, adresse, impressions en attente.
+#[cfg_attr(windows, allow(dead_code))]
+fn imprimantes_lpstat(texte: &str) -> Vec<Imprimante> {
+    let mut liste: Vec<Imprimante> = Vec::new();
+    let defaut = texte
+        .lines()
+        .find_map(|l| l.strip_prefix("system default destination:"))
+        .map(|d| d.trim().to_string());
+    for l in texte.lines() {
+        if let Some(reste) = l.strip_prefix("printer ") {
+            let nom = reste.split_whitespace().next().unwrap_or_default().to_string();
+            liste.push(Imprimante {
+                en_pause: reste.contains("disabled"),
+                par_defaut: defaut.as_deref() == Some(nom.as_str()),
+                nom,
+                ..Imprimante::default()
+            });
+        } else if let Some(reste) = l.strip_prefix("device for ")
+            && let Some((nom, uri)) = reste.split_once(':')
+            && let Some(i) = liste.iter_mut().find(|i| i.nom == nom.trim())
+        {
+            i.hote = hote(uri.trim());
+        }
+    }
+    // « HP_LaserJet-12 alice 1024 Sat 18 Oct 2026 » : une impression en attente, nommée « imprimante-numéro ».
+    for l in texte.lines() {
+        if let Some(travail) = l.split_whitespace().next()
+            && let Some((nom, numero)) = travail.rsplit_once('-')
+            && numero.chars().all(|c| c.is_ascii_digit())
+            && let Some(i) = liste.iter_mut().find(|i| i.nom == nom)
+        {
+            i.en_attente += 1;
+        }
+    }
+    liste
+}
+
+/// L'imprimante répond-elle sur le réseau (IPP 631, impression directe 9100, page web 80) ?
+fn repond(hote: &str) -> bool {
+    let adresses: Vec<SocketAddr> = [631u16, 9100, 80]
+        .iter()
+        .filter_map(|&p| (hote, p).to_socket_addrs().ok()?.next())
+        .collect();
+    adresses
+        .iter()
+        .any(|a| match TcpStream::connect_timeout(a, Duration::from_millis(1500)) {
+            Ok(_) => true,
+            Err(e) => e.kind() == std::io::ErrorKind::ConnectionRefused,
+        })
+}
+
+fn montrer(imprimantes: &[Imprimante]) {
+    if imprimantes.is_empty() {
+        constat(
+            Etat::Mauvais,
+            tr!(
+                "Aucune imprimante n'est installée sur cet ordinateur.",
+                "No printer is installed on this computer."
+            ),
+        );
+        return;
+    }
+    for i in imprimantes {
+        let defaut = if i.par_defaut {
+            tr!(" (par défaut)", " (default)")
+        } else {
+            ""
+        };
+        if i.en_pause {
+            constat(
+                Etat::Mauvais,
+                &trf!("{}{defaut} : en pause.", "{}{defaut}: paused.", i.nom),
+            );
+        } else {
+            constat(Etat::Bon, &trf!("{}{defaut} : prête.", "{}{defaut}: ready.", i.nom));
+        }
+        if !i.hote.is_empty() {
+            if repond(&i.hote) {
+                constat(
+                    Etat::Bon,
+                    &trf!(
+                        "Elle répond sur le réseau ({}).",
+                        "It answers on the network ({}).",
+                        i.hote
+                    ),
+                );
+            } else {
+                constat(
+                    Etat::Mauvais,
+                    &trf!(
+                        "Elle ne répond pas sur le réseau ({}) : éteinte, sur un autre Wi-Fi, ou son adresse a changé.",
+                        "It does not answer on the network ({}): turned off, on another Wi-Fi, or its address changed.",
+                        i.hote
+                    ),
+                );
+            }
+        }
+        if i.en_attente > 0 {
+            constat(
+                Etat::Mauvais,
+                &trf!(
+                    "{} impression(s) en attente dans sa file.",
+                    "{} print job(s) waiting in its queue.",
+                    i.en_attente
+                ),
+            );
+        }
+    }
+}
+
+pub(super) fn imprimante() {
+    let Some(quoi) = question(
+        tr!("Que se passe-t-il ?", "What happens?"),
+        &[
+            tr!("J'imprime, mais rien ne sort", "I print, but nothing comes out"),
+            tr!("L'imprimante n'apparaît pas", "The printer does not show up"),
+            tr!(
+                "Elle affiche une erreur (papier, encre, bourrage)",
+                "It shows an error (paper, ink, jam)"
+            ),
+        ],
+    ) else {
+        return;
+    };
+    let Some(liaison) = question(
+        tr!("Elle est reliée comment ?", "How is it connected?"),
+        &[
+            tr!("Câble USB", "USB cable"),
+            tr!("Wi-Fi ou câble réseau", "Wi-Fi or network cable"),
+            tr!("Je ne sais pas", "I don't know"),
+        ],
+    ) else {
+        return;
+    };
+    verifications();
+    let installees = systeme::verifier();
+    let mut conseils = Vec::new();
+    if quoi == 2 {
+        conseils.push(tr!(
+            "Erreur sur l'imprimante : son écran ou ses voyants disent laquelle. Bourrage : retire doucement la feuille dans le sens du papier, imprimante éteinte. Puis annule l'impression bloquée et relance-la.",
+            "Error on the printer: its screen or lights say which one. Jam: gently pull the sheet out in the paper's direction, printer off. Then cancel the stuck job and print again."
+        ));
+    }
+    if liaison == 1 {
+        conseils.push(tr!(
+            "En Wi-Fi, l'imprimante doit être sur le même réseau que l'ordinateur. Si la box lui donne une autre adresse à chaque fois, la réserver dans la box (« bail fixe ») évite de la perdre.",
+            "On Wi-Fi, the printer must be on the same network as the computer. If the router gives it a different address every time, reserving one in the router (“static lease”) keeps it from getting lost."
+        ));
+    }
+    // Aucune imprimante installée : rien ne peut sortir, quelle que soit la panne décrite.
+    if quoi == 1 || installees.as_ref().is_some_and(Vec::is_empty) {
+        conseils.push(if cfg!(windows) {
+            tr!(
+                "Ajouter une imprimante : Paramètres › Bluetooth et appareils › Imprimantes et scanners › Ajouter un appareil.",
+                "Add a printer: Settings › Bluetooth & devices › Printers & scanners › Add device."
+            )
+        } else if cfg!(target_os = "macos") {
+            tr!(
+                "Ajouter une imprimante : Réglages Système › Imprimantes et scanners › Ajouter une imprimante.",
+                "Add a printer: System Settings › Printers & Scanners › Add Printer."
+            )
+        } else {
+            tr!(
+                "Ajouter une imprimante : les réglages du bureau (Imprimantes), ou l'interface de CUPS dans le navigateur, http://localhost:631. La plupart des imprimantes récentes marchent sans pilote (IPP Everywhere).",
+                "Add a printer: the desktop settings (Printers), or the CUPS interface in the browser, http://localhost:631. Most recent printers work without a driver (IPP Everywhere)."
+            )
+        });
+    }
+    if liaison == 0 {
+        conseils.push(tr!(
+            "En USB : essaie un autre port et un autre câble, imprimante allumée avant de le brancher.",
+            "On USB: try another port and another cable, with the printer on before plugging it in."
+        ));
+    }
+    a_savoir(&conseils);
+}
+
+#[cfg(unix)]
+mod systeme {
+    use std::process::Command;
+
+    use super::{Etat, Imprimante, constat, imprimantes_lpstat, montrer};
+    use crate::ui::*;
+
+    fn lpstat(args: &[&str]) -> Option<String> {
+        let r = crate::commande::lancer(Command::new("lpstat").args(args).env("LC_ALL", "C"), 15)?;
+        Some(format!("{}{}", r.sortie, r.erreurs))
+    }
+
+    fn proposer(question: &str, commandes: &[String]) -> bool {
+        for c in commandes {
+            println!("    {GRIS}$ {c}{RESET}");
+        }
+        demander(question).oui() && crate::machine::appliquer(commandes)
+    }
+
+    /// Vérifie et propose ; rend les imprimantes installées, si CUPS a pu les dire.
+    pub fn verifier() -> Option<Vec<Imprimante>> {
+        let Some(etat) = lpstat(&["-r"]) else {
+            constat(
+                Etat::Mauvais,
+                tr!(
+                    "CUPS, le service d'impression, n'est pas installé.",
+                    "CUPS, the printing service, is not installed."
+                ),
+            );
+            return None;
+        };
+        if etat.contains("not running") {
+            constat(
+                Etat::Mauvais,
+                tr!(
+                    "Le service d'impression (CUPS) est arrêté.",
+                    "The printing service (CUPS) is stopped."
+                ),
+            );
+            let demarrer = if cfg!(target_os = "macos") {
+                "sudo launchctl kickstart -k system/org.cups.cupsd"
+            } else {
+                "sudo systemctl enable --now cups"
+            };
+            if proposer(
+                tr!(
+                    "\n  Démarrer le service d'impression ? [o/N] : ",
+                    "\n  Start the printing service? [y/N]: "
+                ),
+                &[demarrer.to_string()],
+            ) {
+                trp!("  {VERT}✔{RESET} Service démarré.", "  {VERT}✔{RESET} Service started.");
+            } else {
+                return None;
+            }
+        } else {
+            constat(
+                Etat::Bon,
+                tr!(
+                    "Le service d'impression (CUPS) tourne.",
+                    "The printing service (CUPS) is running."
+                ),
+            );
+        }
+        let imprimantes = imprimantes_lpstat(&lpstat(&["-p", "-d", "-v", "-o"]).unwrap_or_default());
+        montrer(&imprimantes);
+        for i in imprimantes.iter().filter(|i| i.en_pause) {
+            // Le nom vient de CUPS ; entre apostrophes, il reste un seul mot pour le shell.
+            let nom = format!("'{}'", i.nom.replace('\'', r"'\''"));
+            if proposer(
+                &trf!("\n  Réactiver {} ? [o/N] : ", "\n  Re-enable {}? [y/N]: ", i.nom),
+                &[format!("cupsenable {nom} || sudo cupsenable {nom}")],
+            ) {
+                trp!(
+                    "  {VERT}✔{RESET} {} réactivée.",
+                    "  {VERT}✔{RESET} {} re-enabled.",
+                    i.nom
+                );
+            }
+        }
+        if imprimantes.iter().any(|i| i.en_attente > 0)
+            && proposer(
+                tr!(
+                    "\n  Annuler les impressions en attente (à relancer ensuite) ? [o/N] : ",
+                    "\n  Cancel the waiting print jobs (to send again afterwards)? [y/N]: "
+                ),
+                &["cancel -a".to_string()],
+            )
+        {
+            trp!("  {VERT}✔{RESET} File vidée.", "  {VERT}✔{RESET} Queue cleared.");
+        }
+        Some(imprimantes)
+    }
+}
+
+#[cfg(windows)]
+mod systeme {
+    use super::{Etat, Imprimante, constat, montrer};
+    use crate::ui::*;
+
+    /// Vérifie et propose ; rend les imprimantes installées, si Windows a pu les dire.
+    pub fn verifier() -> Option<Vec<Imprimante>> {
+        let Some(json) = crate::machine::windows::ps(
+            "$s = (Get-Service Spooler -ErrorAction SilentlyContinue).Status
+             $defaut = (Get-CimInstance Win32_Printer | Where-Object Default).Name
+             $l = @(try { Get-Printer | ForEach-Object { $p = $_
+               $hote = try { (Get-PrinterPort -Name $p.PortName -ErrorAction Stop).PrinterHostAddress } catch { '' }
+               @{ nom = $p.Name; pause = ($p.PrinterStatus -match 'Paused|Offline'); hote = \"$hote\"
+                  attente = @(try { Get-PrintJob -PrinterName $p.Name -ErrorAction Stop } catch { }).Count; defaut = ($p.Name -eq $defaut) } } } catch { })
+             [pscustomobject]@{ spouleur = \"$s\"; imprimantes = $l } | ConvertTo-Json -Compress -Depth 3",
+        ) else {
+            constat(Etat::Info, tr!("État de l'impression illisible (PowerShell).", "Printing state not readable (PowerShell)."));
+            return None;
+        };
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap_or_default();
+        let spouleur = v["spouleur"].as_str().unwrap_or_default();
+        let imprimantes: Vec<Imprimante> = v["imprimantes"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|i| Imprimante {
+                nom: i["nom"].as_str().unwrap_or_default().to_string(),
+                en_pause: i["pause"].as_bool().unwrap_or(false),
+                hote: i["hote"].as_str().unwrap_or_default().to_string(),
+                en_attente: usize::try_from(i["attente"].as_u64().unwrap_or(0)).unwrap_or(0),
+                par_defaut: i["defaut"].as_bool().unwrap_or(false),
+            })
+            .collect();
+        let marche = spouleur == "Running";
+        constat(
+            if marche { Etat::Bon } else { Etat::Mauvais },
+            if marche {
+                tr!("Le spouleur d'impression tourne.", "The print spooler is running.")
+            } else {
+                tr!("Le spouleur d'impression est arrêté.", "The print spooler is stopped.")
+            },
+        );
+        montrer(&imprimantes);
+        let bloque = imprimantes.iter().any(|i| i.en_attente > 0);
+        if (!marche || bloque)
+            && demander(tr!(
+                "\n  Relancer le spouleur et vider sa file (les impressions en attente sont annulées) ? [o/N] : ",
+                "\n  Restart the spooler and clear its queue (waiting print jobs are cancelled)? [y/N]: "
+            ))
+            .oui()
+            && crate::machine::appliquer(&[
+                "Stop-Service Spooler -Force".to_string(),
+                "Get-ChildItem \"$env:SystemRoot\\System32\\spool\\PRINTERS\" -File | Remove-Item -Force".to_string(),
+                "Start-Service Spooler".to_string(),
+            ])
+        {
+            trp!(
+                "  {VERT}✔{RESET} Spouleur relancé, file vidée.",
+                "  {VERT}✔{RESET} Spooler restarted, queue cleared."
+            );
+        }
+        Some(imprimantes)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn imprimantes_de_cups() {
+        let texte = "printer Salon_Laser is idle.  enabled since Sat 18 Oct 2026 10:00:00\n\
+                     printer Bureau-Jet disabled since Sat 18 Oct 2026 09:00:00 -\n\treason unknown\n\
+                     system default destination: Salon_Laser\n\
+                     device for Salon_Laser: ipp://192.168.1.20/ipp/print\n\
+                     device for Bureau-Jet: usb://HP/DeskJet%202700?serial=ESSAI\n\
+                     Salon_Laser-12           alice          1024   Sat 18 Oct 2026 10:01:00\n\
+                     Salon_Laser-13           alice          2048   Sat 18 Oct 2026 10:02:00\n";
+        let l = imprimantes_lpstat(texte);
+        assert_eq!(l.len(), 2);
+        assert_eq!(
+            l[0],
+            Imprimante {
+                nom: "Salon_Laser".into(),
+                en_pause: false,
+                hote: "192.168.1.20".into(),
+                en_attente: 2,
+                par_defaut: true,
+            }
+        );
+        assert!(l[1].en_pause && l[1].hote.is_empty() && !l[1].par_defaut);
+        assert_eq!(hote("socket://imprimante.local:9100"), "imprimante.local");
+        assert_eq!(hote("ipps://[fe80::1]:631/ipp/print"), "fe80::1");
+        assert_eq!(hote("dnssd://HP%20LaserJet._ipp._tcp.local/"), "");
+    }
+}

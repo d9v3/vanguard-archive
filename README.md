@@ -114,6 +114,25 @@ appareils du réseau qui ressemblent à des caméras (fabricant, flux vidéo, ON
 (erreurs du journal et programmes plantés sous Linux ; écrans bleus, arrêts brutaux et plantages sous Windows ;
 paniques du noyau et rapports de plantage sous macOS), avec une copie texte enregistrée sur la clé.
 
+**Dépanner pas à pas** — les pannes de tous les jours, prises comme le ferait quelqu'un qui s'y connaît : pas
+d'Internet, Wi-Fi qui coupe, ordinateur lent, pas de son, imprimante qui ne marche pas, disque plein. Deux ou trois
+questions, puis Gardien vérifie lui-même (adresse, box, Internet, DNS ; signal Wi-Fi ; service du son et sortie
+choisie ; file d'impression et imprimante sur le réseau ; place des disques) et propose la bonne réparation ou le
+bon outil, toujours après accord.
+
+**Pourquoi c'est lent ?** — un instantané de deux secondes : ce qui occupe le processeur, la mémoire et le disque,
+programme par programme ; la durée du démarrage et ce qui le retarde ; les programmes lancés à l'ouverture de
+session et leur poids. Ceux qui travaillent un moment puis se calment (antivirus qui analyse, indexation, mises à
+jour) sont nommés comme tels.
+
+**Fiche de l'ordinateur** — modèle, carte mère, BIOS, processeur, mémoire (barrettes, type, vitesse), carte graphique
+et pilote, disques : ce qu'on demande au téléphone ou pour acheter une pièce. Les numéros de série s'affichent à
+l'écran seulement, jamais écrits.
+
+**Copier mes fichiers** — Documents, Images, Bureau, Vidéos et Musique vers un disque externe, avant une réparation
+risquée ou une réinstallation : la place est vérifiée avant, chaque fichier relu et comparé à l'original (empreinte
+BLAKE3), rien n'est effacé ni écrasé, et une copie interrompue reprend où elle s'est arrêtée.
+
 **Optimiser** — des réglages de confidentialité, de performance et de confort, écrits pour Gardien. Sous Windows :
 télémétrie au minimum, publicités et suivi coupés, Recall sans captures d'écran, extensions des fichiers visibles, pas
 de lancement automatique des clés USB, démarrage rapide, menu complet au clic droit. Sous Linux : entretien du SSD,
@@ -205,6 +224,10 @@ Chaque entrée du menu existe aussi en commande :
 | `gardien nettoyer [--liste]` | nettoyer le système ; `--liste` : la place à gagner, sans rien effacer |
 | `gardien logiciels [--liste] [--recommandes]` | logiciels à installer par catégorie ; `--liste` : leur état, sans rien installer |
 | `gardien diagnostic` | diagnostic de l'ordinateur : matériel, système, plantages et erreurs récents |
+| `gardien depanner [sujet]` | dépanner pas à pas : `internet`, `wifi`, `lent`, `son`, `imprimante`, `disque` |
+| `gardien lenteur` | pourquoi c'est lent : processeur, mémoire, disque, démarrage, programmes à l'ouverture |
+| `gardien fiche [--json]` | fiche de l'ordinateur ; `--json` sans les numéros de série |
+| `gardien copier-fichiers [destination]` | copier mes fichiers vers un disque externe, copie vérifiée |
 | `gardien antivirus [--complet] [dossier]` | analyse antivirus (ordinateur, ou une clé / un dossier) |
 | `gardien yara [--complet] [dossier]` | analyse YARA : 308 règles de familles de logiciels malveillants |
 | `gardien pieges [--retirer]` | fichiers-pièges contre les rançongiciels : les poser, les vérifier, les retirer |

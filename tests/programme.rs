@@ -242,6 +242,36 @@ fn sauvegarde_puis_restauration() {
 }
 
 #[test]
+fn lenteur_fiche_depanner_et_copie_sans_rien_changer() {
+    // Fiche en JSON : lisible, et sans les numéros de série (ils ne s'affichent qu'à l'écran).
+    let sortie_fiche = gardien("fr", &["fiche", "--json"], "", 120);
+    assert_eq!(sortie_fiche.code, Some(0), "{}", sortie_fiche.erreurs);
+    let fiche: serde_json::Value = serde_json::from_str(&sortie_fiche.texte).expect("fiche --json : JSON illisible");
+    assert!(
+        fiche.get("processeur").is_some() && fiche.get("series").is_none(),
+        "{fiche}"
+    );
+    // Pourquoi c'est lent : la mesure et ses sections, en lecture seule.
+    let lenteur = gardien("fr", &["lenteur"], "", 120);
+    assert_eq!(lenteur.code, Some(0), "{}", lenteur.erreurs);
+    let texte = sans_couleurs(&lenteur.texte);
+    assert!(texte.contains("EN CE MOMENT") && texte.contains("DÉMARRAGE"), "{texte}");
+    // Un sujet de dépannage inconnu : la liste des sujets, dans la langue de l'interface.
+    let depanner = gardien("en", &["troubleshoot", "nimportequoi"], "", 30);
+    assert_eq!(depanner.code, Some(0), "{}", depanner.erreurs);
+    let texte = sans_couleurs(&depanner.texte);
+    assert!(texte.contains("printer") && texte.contains("Disk full"), "{texte}");
+    // Copier vers un dossier qui n'existe pas : rien n'est copié.
+    let copie = gardien("fr", &["copier-fichiers", "/chemin/qui/n-existe/pas"], "", 30);
+    assert_eq!(copie.code, Some(0), "{}", copie.erreurs);
+    let texte = sans_couleurs(&copie.texte);
+    assert!(
+        texte.contains("Aucun dossier personnel") || texte.contains("n-existe"),
+        "{texte}"
+    );
+}
+
+#[test]
 fn gaming_quitte_sans_rien_installer() {
     let s = gardien("fr", &["gaming"], "\n", 120);
     let t = sans_couleurs(&s.texte);

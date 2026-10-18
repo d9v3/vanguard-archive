@@ -45,6 +45,9 @@ turn on once with `/install-github-app`).
 | `src/canaux.rs`, `src/nat.rs` | crowded Wi-Fi (nearby networks by channel); NAT type (home-made STUN client) |
 | `src/dns_rapide.rs` | fastest DNS: measurement, protecting DNS kept, setting undone through `optimiser/` |
 | `src/cameras.rs` | hidden cameras: maker, RTSP stream, ONVIF discovery (WS-Discovery), web page |
+| `src/depanner/` | troubleshoot step by step: the paths (`mod.rs`), network and Wi-Fi (`reseau.rs`), sound (`son.rs`), printer (`imprimante.rs`) |
+| `src/lenteur.rs`, `src/fiche.rs` | why it is slow (two-sample snapshot, startup); computer specs |
+| `src/copier.rs` | copy my files to an external disk: checked copy (BLAKE3), resume, never overwrites |
 | `assets/oui.tsv` | manufacturers by MAC prefix (IEEE list), stored as sorted tables at compile time (`build.rs`) |
 | `assets/yara/` | ReversingLabs YARA rules (MIT license), gathered by `outils/maj-yara.sh` |
 | `assets/icones/`, `assets/gardien.ico` | the logo, computed by `outils/icone.py` |

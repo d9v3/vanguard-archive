@@ -10,11 +10,14 @@ mod cameras;
 mod canaux;
 mod commande;
 mod connexion;
+mod copier;
 mod corriger;
+mod depanner;
 mod diagnostic;
 mod dns_rapide;
 mod donnees;
 mod entretien;
+mod fiche;
 mod fuites;
 mod gaming;
 mod guide;
@@ -23,6 +26,7 @@ mod integrite;
 mod isoler;
 mod journal;
 mod langue;
+mod lenteur;
 mod lien;
 mod listes_noires;
 mod logiciels;
@@ -260,6 +264,31 @@ enum Commande {
         /// Un système (linux, windows, macos, tous), un programme (systemctl, winget…) ou des mots à chercher.
         quoi: Vec<String>,
     },
+    /// Pourquoi c'est lent ? Ce qui occupe le processeur, la mémoire et le disque, le démarrage, les programmes lancés
+    /// à l'ouverture de session. Lecture seule.
+    #[command(visible_alias = "slow")]
+    Lenteur,
+    /// Fiche de l'ordinateur : modèle, carte mère, processeur, mémoire, carte graphique, disques, système. Les numéros
+    /// de série s'affichent à l'écran seulement.
+    #[command(visible_alias = "specs")]
+    Fiche {
+        /// La fiche en JSON, pour un script (sans les numéros de série).
+        #[arg(long)]
+        json: bool,
+    },
+    /// Copier mes fichiers (Documents, Images, Bureau, Vidéos, Musique) vers un disque externe : copie vérifiée, rien
+    /// n'est effacé ni écrasé, une copie interrompue reprend.
+    #[command(name = "copier-fichiers", visible_alias = "copy-files")]
+    CopierFichiers {
+        /// Un dossier d'un disque externe (par défaut : choisi parmi les disques branchés).
+        destination: Option<std::path::PathBuf>,
+    },
+    /// Dépanner pas à pas : pas d'Internet, Wi-Fi qui coupe, ordinateur lent, pas de son, imprimante, disque plein.
+    #[command(visible_alias = "troubleshoot")]
+    Depanner {
+        /// Le sujet : internet, wifi, lent, son, imprimante, disque (ou des mots qui le décrivent).
+        sujet: Vec<String>,
+    },
     /// Scan silencieux + notifications (utilisé par la surveillance).
     #[command(hide = true)]
     Surveiller,
@@ -454,17 +483,22 @@ fn lignes_du_menu(etat: Vec<String>) -> Vec<Ligne> {
         ));
     }
 
-    // « q » suit les groupes sans ligne vide : avec le 7e groupe (le guide), le menu tient encore dans un terminal
-    // de 24 lignes (macOS, beaucoup de Linux), où les flèches marchent.
+    // « q » suit les groupes, et l'aide le suit, sans ligne vide : avec le 8e groupe (dépanner), le menu tient
+    // encore dans un terminal de 24 lignes (macOS, beaucoup de Linux), où les flèches marchent.
     lignes.push(Ligne::choix("q", tr!("Quitter", "Quit"), ""));
-    lignes.push(Ligne::Texte(String::new()));
 
     // Ce que la recherche trouve en plus, sans l'afficher : chaque outil des sous-menus (« 5.2 » : groupe 5, 2e outil,
-    // aussi tapable tel quel) et chaque page du guide.
+    // aussi tapable tel quel), chaque parcours de dépannage et chaque page du guide. Les pages du guide en dernier :
+    // la recherche garde cet ordre, et un outil ou un parcours répond mieux à « son » qu'une commande à taper.
+    let mut pages_du_guide = Vec::new();
     for (i, groupe) in GROUPES.iter().enumerate() {
         let cle = (i + 4).to_string();
         if matches!(groupe, Groupe::Guide) {
-            lignes.extend(guide::lignes_de_recherche(&cle));
+            pages_du_guide = guide::lignes_de_recherche(&cle);
+            continue;
+        }
+        if matches!(groupe, Groupe::Depanner) {
+            lignes.extend(depanner::lignes_de_recherche(&cle));
             continue;
         }
         let chemin = format!("{} ›", groupe.titre());
@@ -473,6 +507,7 @@ fn lignes_du_menu(etat: Vec<String>) -> Vec<Ligne> {
             lignes.push(Ligne::cachee(&format!("{cle}.{}", j + 1), &chemin, texte, precision).avec_mots(a.mots_cles()));
         }
     }
+    lignes.extend(pages_du_guide);
     lignes
 }
 
@@ -494,8 +529,9 @@ fn reglages_disponibles(c: optimiser::Categorie) -> bool {
 fn outil_au_chemin(chemin: &str) -> Option<Action> {
     let (groupe, outil) = chemin.split_once('.')?;
     let groupe = GROUPES.get(groupe.parse::<usize>().ok()?.checked_sub(4)?)?;
-    // Le guide a ses propres chemins : système, puis programme (`guide::chemin`).
-    if matches!(groupe, Groupe::Guide) {
+    // Le guide et le dépannage ont leurs propres chemins : système puis programme, parcours (`guide::chemin`,
+    // `depanner::chemin`).
+    if matches!(groupe, Groupe::Guide | Groupe::Depanner) {
         return None;
     }
     let outil = outil.parse::<usize>().ok()?.checked_sub(1)?;
@@ -521,14 +557,16 @@ async fn menu() {
         println!();
         // Un outil ou une page du guide, trouvés par la recherche (ou leur chemin tapé : « 5.2 », « 10.2.4 »).
         if let Some((groupe, reste)) = choix.split_once('.') {
-            let cle_du_guide = GROUPES
-                .iter()
-                .position(|g| matches!(g, Groupe::Guide))
-                .map(|i| (i + 4).to_string());
-            if cle_du_guide.as_deref() == Some(groupe) {
+            let cle_de = |voulu: fn(&Groupe) -> bool| GROUPES.iter().position(voulu).map(|i| (i + 4).to_string());
+            if cle_de(|g| matches!(g, Groupe::Guide)).as_deref() == Some(groupe) {
                 if let Some((systeme, programme)) = guide::chemin(reste) {
                     dernier = groupe.to_string();
                     guide::ouvrir(systeme, programme);
+                }
+            } else if cle_de(|g| matches!(g, Groupe::Depanner)).as_deref() == Some(groupe) {
+                if let Some(n) = depanner::chemin(reste) {
+                    dernier = groupe.to_string();
+                    depanner::ouvrir(n);
                 }
             } else if let Some(action) = outil_au_chemin(&choix) {
                 dernier = groupe.to_string();
@@ -581,6 +619,8 @@ enum Action {
     Audit,
     Integrite,
     Appris,
+    Lenteur,
+    Fiche,
     Entretien,
     Diagnostic,
     Maj,
@@ -617,7 +657,9 @@ enum Action {
     DnsRapide,
     OptimiserAnnuler,
     Sauvegarder,
+    CopierFichiers,
     Guide,
+    Depanner,
 }
 
 impl Action {
@@ -628,6 +670,8 @@ impl Action {
         Action::Audit,
         Action::Integrite,
         Action::Appris,
+        Action::Lenteur,
+        Action::Fiche,
         Action::Entretien,
         Action::Diagnostic,
         Action::Maj,
@@ -664,7 +708,9 @@ impl Action {
         Action::DnsRapide,
         Action::OptimiserAnnuler,
         Action::Sauvegarder,
+        Action::CopierFichiers,
         Action::Guide,
+        Action::Depanner,
     ];
 
     /// Lettre de l'outil dans les menus d'avant la 0.43 (les chiffres, eux, ont changé de sens).
@@ -699,10 +745,10 @@ impl Action {
         }
     }
 
-    /// Après l'outil, attendre Entrée avant de revenir au menu ? Pas pour celui qui a ses propres écrans et se quitte
-    /// par Échap (le guide) : on y reviendrait deux fois.
+    /// Après l'outil, attendre Entrée avant de revenir au menu ? Pas pour ceux qui ont leurs propres écrans et se
+    /// quittent par Échap (le guide, le dépannage) : on y reviendrait deux fois.
     fn attendre_apres(self) -> bool {
-        self != Action::Guide
+        !matches!(self, Action::Guide | Action::Depanner)
     }
 
     /// Des mots que la recherche du menu principal trouve, en plus du texte affiché : ce que l'outil sait faire, en
@@ -714,6 +760,12 @@ impl Action {
             Action::Integrite => "blake3 empreintes fingerprints fichiers files",
             Action::Appris => "apprentissage learning appris learned choix choices normal oublier forget",
             Action::Entretien => "maintenance mensuel monthly mois month rappel reminder notification",
+            Action::Lenteur => "lent slow lenteur rame processeur cpu mémoire memory ram démarrage startup",
+            Action::Fiche => {
+                "fiche specs matériel hardware modèle model processeur carte graphique gpu mémoire ram série"
+            }
+            Action::CopierFichiers => "copier copy sauvegarde backup photos disque externe external drive fichiers",
+            Action::Depanner => "dépanner troubleshoot panne problème internet son imprimante",
             Action::Diagnostic => "plantages crashes erreurs errors écran bleu bsod journal logs matériel hardware",
             Action::Maj => "update upgrade pilotes drivers firmware bios windows update",
             Action::Reparer => {
@@ -793,6 +845,14 @@ impl Action {
                 } else {
                     tr!("désactivé", "off")
                 },
+            ),
+            Action::Lenteur => (
+                tr!("Pourquoi c'est lent ?", "Why is it slow?"),
+                tr!("processeur, mémoire, démarrage", "processor, memory, startup"),
+            ),
+            Action::Fiche => (
+                tr!("Fiche de l'ordinateur", "Computer specs"),
+                tr!("modèle, processeur, mémoire…", "model, processor, memory…"),
             ),
             Action::Diagnostic => (
                 tr!("Diagnostic", "Diagnostic"),
@@ -963,9 +1023,17 @@ impl Action {
                 tr!("Sauvegarder ou restaurer", "Back up or restore"),
                 tr!("base des appareils, réglages", "device database, settings"),
             ),
+            Action::CopierFichiers => (
+                tr!("Copier mes fichiers", "Copy my files"),
+                tr!("vers un disque externe, vérifié", "to an external disk, checked"),
+            ),
             Action::Guide => (
                 tr!("Guide des commandes", "Command guide"),
                 tr!("Linux, Windows, macOS, tous", "Linux, Windows, macOS, all"),
+            ),
+            Action::Depanner => (
+                tr!("Dépanner pas à pas", "Troubleshoot step by step"),
+                tr!("Internet, son, imprimante…", "Internet, sound, printer…"),
             ),
         }
     }
@@ -981,9 +1049,10 @@ enum Groupe {
     Optimiser,
     Donnees,
     Guide,
+    Depanner,
 }
 
-const GROUPES: [Groupe; 7] = [
+const GROUPES: [Groupe; 8] = [
     Groupe::Machine,
     Groupe::Reseau,
     Groupe::Protection,
@@ -991,6 +1060,7 @@ const GROUPES: [Groupe; 7] = [
     Groupe::Optimiser,
     Groupe::Donnees,
     Groupe::Guide,
+    Groupe::Depanner,
 ];
 
 impl Groupe {
@@ -1003,6 +1073,7 @@ impl Groupe {
             Groupe::Optimiser => tr!("Optimiser", "Optimize"),
             Groupe::Donnees => tr!("Données", "Data"),
             Groupe::Guide => tr!("Guide des commandes", "Command guide"),
+            Groupe::Depanner => tr!("Dépanner pas à pas", "Troubleshoot step by step"),
         }
     }
 
@@ -1013,8 +1084,9 @@ impl Groupe {
             Groupe::Protection => tr!("analyses, clé USB, fuites…", "scans, USB drive, leaks…"),
             Groupe::Installer => tr!("logiciels libres, gaming", "open source software, gaming"),
             Groupe::Optimiser => tr!("nettoyer, confidentialité…", "clean up, privacy…"),
-            Groupe::Donnees => tr!("sauvegarder ou restaurer", "back up or restore"),
+            Groupe::Donnees => tr!("sauvegarder, copier mes fichiers", "back up, copy my files"),
             Groupe::Guide => tr!("Linux, Windows, macOS, tous", "Linux, Windows, macOS, all"),
+            Groupe::Depanner => tr!("Internet, son, imprimante…", "Internet, sound, printer…"),
         }
     }
 
@@ -1027,6 +1099,8 @@ impl Groupe {
                 Action::Diagnostic,
                 Action::Integrite,
                 Action::Appris,
+                Action::Lenteur,
+                Action::Fiche,
                 Action::Entretien,
             ],
             Groupe::Reseau => &[
@@ -1065,8 +1139,9 @@ impl Groupe {
                 Action::DnsRapide,
                 Action::OptimiserAnnuler,
             ],
-            Groupe::Donnees => &[Action::Sauvegarder],
+            Groupe::Donnees => &[Action::Sauvegarder, Action::CopierFichiers],
             Groupe::Guide => &[Action::Guide],
+            Groupe::Depanner => &[Action::Depanner],
         }
     }
 }
@@ -1150,6 +1225,8 @@ async fn executer(s: &mut Session, action: Action) {
         Action::Audit => s.audit = Some(machine::executer(false)),
         Action::Integrite => integrite::verifier(false),
         Action::Appris => apprentissage::menu(),
+        Action::Lenteur => lenteur::menu(),
+        Action::Fiche => fiche::fiche(false),
         Action::Entretien => entretien::activer(!entretien::active()),
         Action::Diagnostic => diagnostic::diagnostic(),
         Action::Maj => maj::executer(),
@@ -1208,7 +1285,9 @@ async fn executer(s: &mut Session, action: Action) {
         Action::DnsRapide => dns_rapide::mesurer_et_proposer(),
         Action::OptimiserAnnuler => optimiser::tout_annuler(),
         Action::Sauvegarder => donnees::menu(),
+        Action::CopierFichiers => copier::menu(),
         Action::Guide => guide::menu(),
+        Action::Depanner => depanner::menu(),
     }
 }
 
@@ -1352,6 +1431,22 @@ fn ligne_de_commande() -> clap::Command {
             "guide",
             "Command guide: the useful commands of Linux, Windows, macOS and all systems, sorted by program",
         ),
+        (
+            "lenteur",
+            "Why is it slow? What keeps the processor, memory and disk busy, startup, the programs started at login. Read only",
+        ),
+        (
+            "fiche",
+            "Computer specs: model, motherboard, processor, memory, graphics card, disks, system. Serial numbers are shown on screen only",
+        ),
+        (
+            "copier-fichiers",
+            "Copy my files (Documents, Pictures, Desktop, Videos, Music) to an external disk: checked copy, nothing deleted or overwritten, an interrupted copy resumes",
+        ),
+        (
+            "depanner",
+            "Troubleshoot step by step: no Internet, Wi-Fi dropping, slow computer, no sound, printer, disk full",
+        ),
     ];
     for &(nom, aide) in aides {
         c = c.mut_subcommand(nom, |s| s.about(aide));
@@ -1440,6 +1535,21 @@ fn ligne_de_commande() -> clap::Command {
     .mut_subcommand("guide", |s| {
         s.mut_arg("quoi", |a| {
             a.help("A system (linux, windows, macos, all), a program (systemctl, winget…) or words to look for")
+        })
+    })
+    .mut_subcommand("fiche", |s| {
+        s.mut_arg("json", |a| {
+            a.help("The specs as JSON, for a script (without the serial numbers)")
+        })
+    })
+    .mut_subcommand("copier-fichiers", |s| {
+        s.mut_arg("destination", |a| {
+            a.help("A folder on an external disk (default: chosen among the plugged-in disks)")
+        })
+    })
+    .mut_subcommand("depanner", |s| {
+        s.mut_arg("sujet", |a| {
+            a.help("The subject: internet, wifi, slow, sound, printer, disk (or words describing it)")
         })
     })
 }
@@ -1555,6 +1665,10 @@ async fn main() {
         Some(Commande::Restaurer { fichier }) => donnees::restaurer(&fichier),
         Some(Commande::Nommer { appareil, surnom }) => nommer(&appareil, &surnom.join(" ")),
         Some(Commande::Guide { quoi }) => guide::executer(&quoi.join(" ")),
+        Some(Commande::Lenteur) => lenteur::commande(),
+        Some(Commande::Fiche { json }) => fiche::fiche(json),
+        Some(Commande::CopierFichiers { destination }) => copier::commande(destination.as_deref()),
+        Some(Commande::Depanner { sujet }) => depanner::executer(&sujet.join(" ")),
     }
 }
 
@@ -1597,7 +1711,7 @@ mod tests_menu {
     #[test]
     fn chaque_outil_trouve_par_la_recherche_s_ouvre() {
         for (i, g) in GROUPES.iter().enumerate() {
-            if matches!(g, Groupe::Guide) {
+            if matches!(g, Groupe::Guide | Groupe::Depanner) {
                 continue;
             }
             for (j, a) in g.actions().iter().filter(|a| a.disponible()).enumerate() {
@@ -1606,5 +1720,11 @@ mod tests_menu {
         }
         assert!(outil_au_chemin("4.99").is_none() && outil_au_chemin("x.1").is_none());
         assert!(outil_au_chemin("10.1").is_none(), "le guide a ses propres chemins");
+        assert!(outil_au_chemin("11.1").is_none(), "le dépannage a ses propres chemins");
+        // Les places annoncées : 4.7, 4.8 et 9.2.
+        assert!(outil_au_chemin("4.7") == Some(Action::Lenteur));
+        assert!(outil_au_chemin("4.8") == Some(Action::Fiche));
+        assert!(outil_au_chemin("9.2") == Some(Action::CopierFichiers));
+        assert!(depanner::chemin("1").is_some());
     }
 }
