@@ -952,9 +952,14 @@ pub fn menu() {
         .filter(|t| !LOGICIELS[t.logiciel].integre || matches!(t.trace, Trace::EnCours { .. }))
         .collect();
     if visibles.is_empty() {
-        trp!(
-            "  {VERT}✔{RESET} Aucun logiciel de prise de contrôle à distance : ni installé, ni au démarrage, ni en cours, ni téléchargé.",
-            "  {VERT}✔{RESET} No remote control tool: neither installed, nor at boot, nor running, nor downloaded."
+        afficher_aligne(
+            &format!("  {VERT}✔{RESET} "),
+            tr!(
+                "Aucun logiciel de prise de contrôle à distance : ni installé, ni au démarrage, ni en cours, ni téléchargé.",
+                "No remote control tool: neither installed, nor at boot, nor running, nor downloaded."
+            ),
+            4,
+            "",
         );
         if cfg!(windows) {
             dire(tr!(
