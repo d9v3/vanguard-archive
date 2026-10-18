@@ -264,7 +264,15 @@ racine() { # disque serie octets dossier macos_mio
     erreur "$disque n'est plus la clé choisie."
   local tmp
   tmp=$(mktemp -d)
-  tar -xzf "$d/ventoy-$VENTOY-linux.tar.gz" -C "$tmp"
+  # Ventoy2Disk.sh va tourner en root : l'archive est recopiée ici, hors d'atteinte du compte, et c'est cette copie
+  # qui est vérifiée puis ouverte. La vérification faite avant la fenêtre pkexec ne suffit pas : le fichier a pu
+  # changer depuis.
+  cp "$d/ventoy-$VENTOY-linux.tar.gz" "$tmp/ventoy.tar.gz"
+  if ! empreinte_ok "$tmp/ventoy.tar.gz" "$VENTOY_SHA256"; then
+    rm -rf "$tmp"
+    erreur "l'archive de Ventoy n'est plus celle vérifiée : abandon, rien n'a été effacé."
+  fi
+  tar -xzf "$tmp/ventoy.tar.gz" -C "$tmp"
   # Ventoy demande deux fois s'il peut tout effacer : la question a déjà été posée, en clair, avant. -L : le nom
   # GARDIEN, que Gardien et deployer.sh cherchent (avec le témoin gardien.cle).
   (cd "$tmp/ventoy-$VENTOY" && printf 'y\ny\n' | sh Ventoy2Disk.sh -I -g -r "$(reserve_mio "$macos")" -L GARDIEN \
@@ -304,13 +312,14 @@ ecrire() { # disque dossier
   lsblk -o NAME,SIZE,FSTYPE,LABEL,MOUNTPOINTS "$disque"
   read -rp "Tout le contenu de $disque va être effacé. Taper EFFACER pour continuer : " reponse
   [[ $reponse == EFFACER ]] || exit 1
-  # Sauvegarde de ce qui est monté (la base donnees/ surtout), puis démontage.
+  # Sauvegarde de ce qui est monté (la base donnees/ surtout), puis démontage. Sans ISO/ : une clé de secours déjà
+  # faite y garde ~15 Go d'images, qui se retéléchargent.
   local sauvegarde
   sauvegarde="${XDG_DATA_HOME:-$HOME/.local/share}/gardien/sauvegarde-cle-$(date +%Y%m%d-%H%M%S)"
   while read -r part point; do
     if [[ -n $point ]]; then
       mkdir -p "$sauvegarde/$part"
-      cp -r "$point/." "$sauvegarde/$part/"
+      find "$point" -mindepth 1 -maxdepth 1 ! -name ISO -exec cp -r {} "$sauvegarde/$part/" \;
     fi
     udisksctl unmount -b "/dev/$part" >/dev/null 2>&1 || true
   done < <(lsblk -lnpo NAME,MOUNTPOINT "$disque" | tail -n +2 | sed 's|^/dev/||')
