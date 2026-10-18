@@ -7,6 +7,9 @@ Réponses à l'utilisateur en français, claires, avec le pourquoi.
 
 ## Commandes
 
+- Tout vérifier en une commande : `outils/verifier.sh` (mise en forme, clippy ×4, tests Linux et Wine, scripts
+  PowerShell, shell et Python, liens internes, textes FR/EN ; les cibles en parallèle, une ligne par étape à la fin).
+  `--rapide` : Linux seulement ; `--sans-wine`. Le détail de chaque étape suit.
 - Tests : `cargo test` (cible par défaut x86_64-unknown-linux-musl, voir `.cargo/config.toml`). Unitaires dans chaque
   module ; `tests/programme.rs` lance le vrai programme (dossier personnel jetable, rien ne change le système).
 - Lint, zéro remarque (clippy pedantic, voir Cargo.toml) sur les quatre cibles :
@@ -65,6 +68,11 @@ Réponses à l'utilisateur en français, claires, avec le pourquoi.
 - Plusieurs sessions travaillent parfois en même temps : travailler dans un `git worktree` (branche à part), ne
   committer que ses propres fichiers (`git add <chemins>`), rebaser sur master puis `merge --ff-only` dans l'arbre
   principal. Ne jamais toucher aux changements non committés d'une autre session.
+- Plusieurs fenêtres Claude : une seule coordonne (elle intègre, livre et dépose dans la VM). L'état de l'équipe est
+  dans `~/.cache/gardien-dev/equipe.md` (qui fait quoi, branches, fichiers réservés, VM) : le lire en arrivant, au
+  lieu de relire les transcripts des autres, qui coûtent cher. Un message seulement pour prendre un lot, le dire
+  vert (branche, preuves en une ligne) ou poser une question qui bloque ; pas de point d'étape. Le coordinateur tient
+  le fichier à jour.
 - Une version par livraison (Cargo.toml) : correctif 0.x.y+1, fonction 0.x+1.0. Relire `grep ^version Cargo.toml`
   après le changement : une autre session a pu avancer la version.
 - Enchaîner édition && vérification && commit, et regarder `git show --stat` avant de dire que c'est fait.

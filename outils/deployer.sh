@@ -34,6 +34,13 @@ fi
 LOCAL=""
 [[ -n $(find "$REPERE_LOCAL" -mmin -120 2>/dev/null) ]] && LOCAL=1
 
+# Durée de chaque étape, dite à la fin : on voit où part le temps d'un déploiement.
+DUREES=""
+duree() { DUREES+="${DUREES:+ · }$1 $((SECONDS - $2)) s"; }
+dire_durees() { [[ -z $DUREES ]] || echo "Durées : $DUREES (en tout $SECONDS s)."; }
+# Copié seulement s'il a changé : une clé USB écrit lentement, et chaque écriture l'use un peu.
+copier() { cmp -s "$1" "$2" 2>/dev/null || cp -f "$1" "$2"; }
+
 compiler() {
   # Liste des fabricants de plus d'un mois : on la rafraîchit avant de compiler (elle est intégrée au programme), et
   # elle part dans son propre commit. Sans Internet, on garde l'ancienne.
@@ -44,9 +51,15 @@ compiler() {
       touch assets/oui.tsv
     fi
   fi
-  cargo build --release --target x86_64-unknown-linux-musl
+  # Les deux programmes en même temps : l'optimisation finale (LTO, une seule unité de code) n'occupe qu'un cœur
+  # chacune, et cargo garde un dossier par cible.
+  local debut=$SECONDS linux
+  cargo build --release --target x86_64-unknown-linux-musl &
+  linux=$!
   cargo build --release --target x86_64-pc-windows-gnu
+  wait "$linux"
   git rev-parse HEAD >"$COMMIT_COMPILE"
+  duree compilation "$debut"
 }
 
 # Un seul déploiement à la fois : le service déclenché par la compilation attend la fin du lancement manuel.
@@ -100,6 +113,7 @@ if [[ -z $MODE ]]; then
     ! timeout 30 gh release view "v$VERSION" >/dev/null 2>&1; then
     A_PUBLIER=1
   fi
+  T_CAPTURES=$SECONDS
   if [[ -n $A_PUBLIER && $(cat assets/captures/VERSION 2>/dev/null) != "$VERSION" ]]; then
     if command -v uv >/dev/null && timeout 900 uv run -q --no-project --with pyte python outils/captures.py "$LINUX"; then
       git add assets/captures assets/partage.png
@@ -110,12 +124,14 @@ if [[ -z $MODE ]]; then
     else
       echo "Captures d'écran non refaites : le README garde celles d'avant."
     fi
+    duree captures "$T_CAPTURES"
   fi
 fi
 install -Dm755 "$LINUX" "$HOME/.cargo/bin/gardien"
 # Sauvegarde hors de la maison : les commits partent vers le dépôt GitHub (sans bloquer s'il n'y a pas d'Internet),
 # seulement si rien de personnel n'y paraît : code, messages, auteur (outils/confidentialite.py), et si aucun lien
 # n'est mort : documentation, programme, scripts, licences (outils/liens.py).
+T_ENVOI=$SECONDS
 if [[ -n $LOCAL ]]; then
   echo "Rien n'est envoyé sur GitHub (déploiement local)."
 elif git remote get-url origin >/dev/null 2>&1; then
@@ -137,6 +153,7 @@ elif git remote get-url origin >/dev/null 2>&1; then
     echo "GitHub injoignable : le code partira au prochain déploiement."
   fi
 fi
+[[ -n $LOCAL ]] || duree "envoi GitHub" "$T_ENVOI"
 # Anciens noms (sentinel jusqu'à 0.50, netscan jusqu'à 0.10.0) : restent des commandes, qui lancent gardien.
 ln -sfn gardien "$HOME/.cargo/bin/sentinel"
 ln -sfn gardien "$HOME/.cargo/bin/netscan"
@@ -220,20 +237,24 @@ fi
 publier_la_version() {
   [[ -n ${PUBLIER:-} ]] || return 0
   echo "Nouvelle version v$VERSION : sa page sur GitHub…"
+  local debut=$SECONDS
   if outils/publier-version.sh; then
     # La description du dépôt montre la dernière version publiée : elle change maintenant.
     python3 outils/github.py || echo "Page du dépôt sur GitHub pas mise à jour (voir ci-dessus)."
   else
     echo "Page de la version pas publiée (voir ci-dessus) : relancer outils/publier-version.sh."
   fi
+  duree "page de la version" "$debut"
 }
 
 CLE=$(find "/run/media/$USER" -maxdepth 2 \( -name gardien.cle -o -name sentinel.cle -o -name netscan.cle \) -printf '%h\n' 2>/dev/null | head -1)
 if [[ -z $CLE ]]; then
   echo "Clé GARDIEN non branchée : elle sera mise à jour au prochain branchement."
   publier_la_version
+  dire_durees
   exit 0
 fi
+T_CLE=$SECONDS
 
 # Partition GARDIENLOG (la seule modifiable sur les autres ordinateurs) : elle se monte en même temps que GARDIEN,
 # parfois une seconde après. Son journal d'erreurs est rapatrié ici puis vidé, pour améliorer Gardien. Étiquette de
@@ -263,8 +284,8 @@ rm -f "$CLE/Lancer Sentinel.bat" "$CLE/Lancer Sentinel.command"
 # Empreinte de cet ordinateur (SHA-1 de /etc/machine-id) : partout ailleurs, Gardien remonte la clé en lecture seule
 # sous Linux (src/protection/cle.rs).
 printf '%s' "$(cat /etc/machine-id)" | sha1sum | cut -d' ' -f1 >"$CLE/gardien.cle"
-cp -f "$LINUX" "$CLE/Linux/gardien"
-[[ -f $WINDOWS ]] && cp -f "$WINDOWS" "$CLE/Windows/gardien.exe"
+copier "$LINUX" "$CLE/Linux/gardien"
+[[ -f $WINDOWS ]] && copier "$WINDOWS" "$CLE/Windows/gardien.exe"
 # Version macOS : compilée sur un Mac de GitHub (.github/workflows/macos.yml, chaque nuit si le code a changé),
 # récupérée ici quand une compilation plus récente a réussi. Sans Internet ou sans gh : on garde la dernière.
 MAC=target/macos
@@ -280,7 +301,7 @@ if [[ -z $LOCAL ]] && command -v gh >/dev/null; then
 fi
 if [[ -f $MAC/gardien ]]; then
   mkdir -p "$CLE/macOS"
-  cp -f "$MAC/gardien" "$CLE/macOS/gardien"
+  copier "$MAC/gardien" "$CLE/macOS/gardien"
   cp -f "outils/cle/Lancer Gardien.command" "$CLE/"
   # Le Mac de GitHub ne compile pas chaque version (la nuit si le code a changé, et pour chaque page publiée) : la
   # version macOS de la clé peut retarder sur les deux autres, et c'est dit.
@@ -316,6 +337,7 @@ cp -f outils/cle/autorun.inf outils/cle/autorun.sh "outils/cle/Lancer Gardien.ba
 # des sessions Claude (.claude/worktrees, avec leurs propres compilations) restent sur l'ordinateur.
 rsync -rt --delete --modify-window=2 --exclude /target/ --exclude /.claude/worktrees/ ./ "$CLE/source/"
 sync
+duree clé "$T_CLE"
 echo "Clé GARDIEN à jour : $CLE ($(./"$LINUX" --version))"
 # Une seule notification par version copiée : le lancement manuel et le service qui le suit copient les mêmes
 # binaires. (Remplacer la notification ne suffit pas : la barre l'oublie dès que la bulle a disparu.)
@@ -326,3 +348,4 @@ if command -v notify-send >/dev/null && [[ $(cat "$EMPREINTE_FICHIER" 2>/dev/nul
   echo "$EMPREINTE" >"$EMPREINTE_FICHIER"
 fi
 publier_la_version
+dire_durees

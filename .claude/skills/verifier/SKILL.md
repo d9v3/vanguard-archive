@@ -3,7 +3,9 @@ name: verifier
 description: Tout vérifier avant un commit de Gardien — mise en forme, tests Linux, clippy sur les quatre cibles, tests Windows sous Wine, scripts générés. À lancer après toute modification du code Rust ou des scripts, avant de committer.
 ---
 
-Lance dans cet ordre ; au premier échec, corrige puis reprends depuis le début :
+Lance `outils/verifier.sh` : il fait tout ce qui suit, les cibles en parallèle, et finit par une ligne par étape
+(`--rapide` : Linux seulement, pour un essai en cours de route ; `--sans-wine`). Une étape en échec : corrige, puis
+relance. Le détail, si une étape demande d'y regarder de près :
 
 1. `cargo fmt --check` (sinon `cargo fmt`).
 2. `cargo test`.
