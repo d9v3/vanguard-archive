@@ -22,3 +22,6 @@ essai https://aur.archlinux.org/rpc/v5/info? https://aur.archlinux.org/rpc/v5/in
 # Intel refuse tous les programmes (403, même pour une page qui n'existe pas) : pages ouvertes à la main le
 # 18 oct. 2026 ; elles ne se verront mortes que si Intel répond un jour « introuvable ».
 protege https://www.intel.com/
+
+# DNS public interrogé par outils/liens.py pour confirmer un nom inconnu : il faut l'en-tête qui demande du JSON.
+serveur https://1.1.1.1/dns-query
