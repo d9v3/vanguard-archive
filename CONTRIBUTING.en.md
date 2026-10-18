@@ -103,9 +103,11 @@ git config user.email "<id>+<account>@users.noreply.github.com"           # comm
 
 What is personal is read on the computer, never written in the repository: `~/.config/gardien-dev/confidentiel.txt`
 (one phrase per line: name, emails, address…), the global Git identity, the home folder, the devices and MAC
-addresses of Gardien's database, the saved Wi-Fi networks. `python3 outils/confidentialite.py --depot` rereads the
-whole repository and its history. In tests, made-up values: MAC addresses keeping the vendor prefix, network
-“Salon”, account “alice”.
+addresses of Gardien's database, the saved Wi-Fi networks. Other people's data (the key visits friends, and their
+error journal comes back here) is recognized by its shape: account of a home folder, email, Windows SID; a journal
+issue is masked before it is sent, MAC and IP addresses included. `python3 outils/confidentialite.py --depot`
+rereads the whole repository and its history. In tests, made-up values: MAC addresses keeping the vendor prefix,
+network “Salon”, accounts “alice”, “bob”, “Zoé”, “Jean Dupont”, emails `@example.com`.
 
 Rust keeps the libraries' path in the programs (`/home/<account>/.cargo/registry/…`): to publish a version, build
 with `rustflags = ["--remap-path-prefix=/home/<account>=~"]` in `~/.cargo/config.toml` (`publier-version.sh` refuses
