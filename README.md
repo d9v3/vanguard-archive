@@ -116,6 +116,11 @@ commandes ont aussi un nom anglais (`full`, `audit`, `fix`, `network`, `connecti
 
 ## Pour les développeurs
 
+Avec Claude Code : `CLAUDE.md` donne les commandes et les règles du projet, `/verifier` et `/livrer`
+(`.claude/skills/`) vérifient tout et livrent une version ; un crochet remet en forme le Rust après chaque
+modification. Sur GitHub, `@claude` dans un ticket ou une demande de fusion le fait répondre, et chaque ticket
+« journal » est analysé tout seul (`.github/workflows/claude*.yml`, à activer une fois avec `/install-github-app`).
+
 ### Structure
 
 | Fichier | Rôle |

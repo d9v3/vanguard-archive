@@ -1,0 +1,24 @@
+---
+paths:
+  - "src/**/windows*"
+  - "src/**/windows/**"
+  - "outils/test-windows/**"
+---
+
+# Windows : pièges déjà rencontrés
+
+- Sentinel lance Windows PowerShell 5.1 (`powershell`), jamais pwsh. `windows::powershell()` retire PSModulePath :
+  lancé depuis pwsh 7, PowerShell 5.1 hériterait de ses modules et `Get-AuthenticodeSignature`, les certificats…
+  ne se chargeraient pas.
+- Un script .ps1 s'écrit avec BOM UTF-8, sinon PowerShell 5.1 le lit en ANSI et casse les accents.
+- `ps()` attend un marqueur de fin : une sortie vide sans marqueur (PowerShell bloqué, absent) n'est pas une réponse.
+- Registre : `New-Item -Force` sur une clé existante l'écrase, valeurs comprises ; la créer seulement si
+  `Test-Path` dit qu'elle manque.
+- HKCU dans la fenêtre administrateur = le compte qui l'ouvre (pas forcément la personne) : le HKCU de la personne
+  s'écrit depuis sentinel (winreg). HKCU\Software\Policies est en lecture seule pour l'utilisateur.
+- La fenêtre administrateur répond par le fichier `.resultats` (une ligne ok/echec par correctif) : c'est un autre
+  processus, son code de retour ne suffit pas.
+- Vérifier un script généré : l'écrire depuis un test temporaire sous Wine (chemin `Z:\…`), puis l'analyser avec
+  pwsh pour Linux (`[System.Management.Automation.Language.Parser]::ParseInput`) ; pwsh se télécharge depuis les
+  versions GitHub de PowerShell (vérifier l'empreinte SHA-256).
+- La machine virtuelle de test est en anglais : chercher les messages de Windows dans les deux langues.

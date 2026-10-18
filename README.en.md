@@ -113,6 +113,11 @@ also keep their French names (`complet`, `machine`, `corriger`, `reseau`, `conne
 
 ## For developers
 
+With Claude Code: `CLAUDE.md` gives the project's commands and rules, `/verifier` and `/livrer` (`.claude/skills/`)
+check everything and ship a version; a hook reformats Rust after each edit. On GitHub, `@claude` in an issue or a
+pull request gets an answer, and each “journal” issue is analyzed by itself (`.github/workflows/claude*.yml`, to
+turn on once with `/install-github-app`).
+
 The code, its comments and its internal names are in French; every text shown to the user exists in both languages
 (`tr!("fr", "en")` in `src/langue.rs`).
 
