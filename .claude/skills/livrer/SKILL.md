@@ -11,12 +11,15 @@ description: Livrer une version de Gardien — numéro de version, commit, inté
    changements non committés d'une autre session sur les mêmes fichiers : arrête-toi et demande.
 4. `outils/deployer.sh` : compile, refait les captures du README (nouvelle version : commit à part), installe,
    pousse sur GitHub, met la clé à jour si elle est branchée. Si les captures n'ont pas pu se faire, le dire.
-5. Mises à jour qui suivent chaque version :
-   - description GitHub (`gh repo edit --description`) si les fonctions ont changé : français puis anglais,
+5. `outils/publier-version.sh` : page de la version sur GitHub (Releases), avec les trois programmes et leurs
+   empreintes SHA-256. S'il manque la version macOS de ce commit, il la fait compiler sur un Mac de GitHub
+   (quelques minutes) ; ensuite, copier `target/macos/gardien` sur la clé (`macOS/`) si elle est branchée.
+6. Mises à jour qui suivent chaque version :
+   - description GitHub (`gh repo edit --description`) si les fonctions ont changé : courte, en anglais,
      350 caractères au plus ; le crochet pre-push met la version à la fin ;
    - lien du dépôt (`--homepage`) : le journal du projet ;
    - journal du projet (document Claude) : ligne d'historique, version en tête, fonctions, pistes ;
    - liste des fonctions : README.md, README.en.md, outils/LISEZMOI.txt, outils/README.txt ; tableau Structure de
      CONTRIBUTING.md et CONTRIBUTING.en.md si un module change.
-6. Compte rendu : la version, ce qui a changé, ce qui est vérifié, ce qui ne l'est pas encore (Windows réel,
+7. Compte rendu : la version, ce qui a changé, ce qui est vérifié, ce qui ne l'est pas encore (Windows réel,
    Mac réel…).

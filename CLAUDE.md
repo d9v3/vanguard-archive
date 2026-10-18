@@ -64,10 +64,10 @@ Réponses à l'utilisateur en français, claires, avec le pourquoi.
   `\\host.lan\Data` dans Windows ; `TESTER-GARDIEN.bat` ouvre le menu). Chaque passe y laisse son dossier dans
   `resultats/`, avec `historique.txt` et `dernier-rapport.html`, lisibles d'ici. Ne jamais lancer un `.exe` d'ici :
   binfmt le confie à Wine, qui crée un `~/.wine`.
-- Après chaque version : description GitHub (le texte ; le crochet `outils/hooks/pre-push` ne change que la
-  version), lien du dépôt (journal du projet), journal du projet, liste des fonctions (README.md, README.en.md,
-  outils/LISEZMOI.txt, outils/README.txt) et tableau Structure (CONTRIBUTING.md, CONTRIBUTING.en.md) si un module
-  change.
+- Après chaque version : page de la version (`outils/publier-version.sh`), description GitHub (le texte ; le crochet
+  `outils/hooks/pre-push` ne change que la version), lien du dépôt (journal du projet), journal du projet, liste des
+  fonctions (README.md, README.en.md, outils/LISEZMOI.txt, outils/README.txt) et tableau Structure (CONTRIBUTING.md,
+  CONTRIBUTING.en.md) si un module change.
 
 ## Erreurs rapportées
 
