@@ -639,11 +639,12 @@ $npAvant = (Get-MpPreference).EnableNetworkProtection
 if (-not $numeroDefender) { Info 'Sautée : outil absent.' }
 elseif ($npAvant -eq 1) { Info 'Sautée : la protection réseau est déjà active dans la VM.' }
 elseif (Question 'Faire ce test (deux fenêtres UAC à accepter) ?') {
-    # Ligne 3 de la liste : la protection réseau. Cochée, validée, acceptée ; puis décochée de la même façon.
-    LancerAvec 'protection-activer' @() "6.$numeroDefender`n3`n`no`n`nq`n"
+    # Ligne 3 de la liste : la protection réseau. Sans terminal, taper son numéro coche et valide ; puis « o » accepte.
+    # Décochée de la même façon pour annuler.
+    LancerAvec 'protection-activer' @() "6.$numeroDefender`n3`no`n`nq`n"
     $np = (Get-MpPreference).EnableNetworkProtection
     if ($np -eq 1) { Ok 'Protection réseau activée par Gardien' } else { Bug "Protection réseau PAS activée ($np)" }
-    LancerAvec 'protection-annuler' @() "6.$numeroDefender`n3`n`no`n`nq`n"
+    LancerAvec 'protection-annuler' @() "6.$numeroDefender`n3`no`n`nq`n"
     $np = (Get-MpPreference).EnableNetworkProtection
     if ($np -eq $npAvant) { Ok 'Protection réseau remise comme avant' } else { Bug "Protection réseau PAS remise ($np au lieu de $npAvant)" }
     if ((Etat-Defender) -eq $defAvant) { Ok 'Defender exactement comme avant' } else { Bug "Defender différent d'avant : $(Etat-Defender)" }
