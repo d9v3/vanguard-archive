@@ -103,13 +103,30 @@ trap 'rm -rf "$DOSSIER"' EXIT
 cp "$LINUX" "$DOSSIER/gardien-linux-x86_64"
 cp "$WINDOWS" "$DOSSIER/gardien-windows-x86_64.exe"
 
-RUN=$(gh run list --workflow macos.yml --commit "$COMMIT" --status success --limit 1 --json databaseId -q '.[0].databaseId // ""')
+# Une compilation macOS de ce commit qui a vraiment produit le programme : une exécution de nuit sautée (code
+# inchangé) réussit aussi, sans rien produire.
+avec_programme() {
+  local id
+  for id in $(gh run list --workflow macos.yml --commit "$COMMIT" --status success --limit 10 --json databaseId \
+    -q '.[].databaseId'); do
+    if [[ -n $(gh api "repos/{owner}/{repo}/actions/runs/$id/artifacts" \
+      -q '.artifacts[] | select(.name == "gardien-macos" and (.expired | not)) | .name') ]]; then
+      echo "$id"
+      return
+    fi
+  done
+}
+RUN=$(avec_programme)
 if [[ -z $RUN ]]; then
   echo "Compilation macOS de ce commit sur un Mac de GitHub (quelques minutes)…"
+  # Les exécutions déjà là pour ce commit (une nuit sautée, par exemple) ne sont pas celle qu'on attend.
+  AVANT=$(gh run list --workflow macos.yml --commit "$COMMIT" --limit 20 --json databaseId -q '.[].databaseId')
   gh workflow run macos.yml --ref master
   for _ in {1..30}; do
-    RUN=$(gh run list --workflow macos.yml --commit "$COMMIT" --limit 1 --json databaseId -q '.[0].databaseId // ""')
-    [[ -n $RUN ]] && break
+    RUN=$(gh run list --workflow macos.yml --commit "$COMMIT" --event workflow_dispatch --limit 1 --json databaseId \
+      -q '.[0].databaseId // ""')
+    [[ -n $RUN ]] && ! grep -qx -- "$RUN" <<<"$AVANT" && break
+    RUN=""
     sleep 5
   done
   [[ -n $RUN ]] || { echo "La compilation macOS n'a pas démarré : rien de publié."; exit 1; }

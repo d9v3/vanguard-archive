@@ -290,8 +290,17 @@ copier "$LINUX" "$CLE/Linux/gardien"
 # récupérée ici quand une compilation plus récente a réussi. Sans Internet ou sans gh : on garde la dernière.
 MAC=target/macos
 if [[ -z $LOCAL ]] && command -v gh >/dev/null; then
-  RUN=$(timeout 20 gh run list --workflow macos.yml --branch "$(git rev-parse --abbrev-ref HEAD)" --status success \
-    --limit 1 --json databaseId,headSha -q '.[0] | "\(.databaseId) \(.headSha)"' 2>/dev/null || true)
+  # La dernière compilation réussie qui a vraiment produit le programme : une exécution de nuit sautée (code
+  # inchangé) réussit aussi, sans rien produire.
+  RUN=""
+  for execution in $(timeout 20 gh run list --workflow macos.yml --branch "$(git rev-parse --abbrev-ref HEAD)" \
+    --status success --limit 10 --json databaseId,headSha -q '.[] | "\(.databaseId):\(.headSha)"' 2>/dev/null || true); do
+    if [[ -n $(timeout 20 gh api "repos/{owner}/{repo}/actions/runs/${execution%%:*}/artifacts" \
+      -q '.artifacts[] | select(.name == "gardien-macos" and (.expired | not)) | .name' 2>/dev/null) ]]; then
+      RUN="${execution%%:*} ${execution#*:}"
+      break
+    fi
+  done
   if [[ -n $RUN && ${RUN#* } != $(cat "$MAC/commit.txt" 2>/dev/null) ]]; then
     rm -rf "$MAC.nouveau"
     if timeout 120 gh run download "${RUN%% *}" -n gardien-macos -D "$MAC.nouveau" >/dev/null 2>&1; then
