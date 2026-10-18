@@ -430,6 +430,7 @@ impl Changement {
                     Racine::Hklm => format!("HKLM:\\{chemin}"),
                     Racine::Hkcu | Racine::HkcuStrategie => crate::reparer::hkcu_de_la_personne(sid, chemin),
                 });
+                let nom = crate::commande::ps_texte(nom);
                 // Clé créée seulement si elle manque : New-Item -Force sur une clé existante l'écraserait, valeurs
                 // comprises.
                 let creer =
@@ -448,6 +449,7 @@ impl Changement {
                 })
             }
             Changement::Service { nom, .. } => {
+                let nom = crate::commande::ps_texte(nom);
                 let n: u32 = v?.strip_prefix("start:")?.parse().ok()?;
                 // Désactivé : arrêté tout de suite ; remis en automatique : relancé, comme avant le changement.
                 let suite = match n {
@@ -1275,6 +1277,18 @@ mod tests {
                 "Set-Service -Name 'DiagTrack' -StartupType Automatic; Start-Service -Name 'DiagTrack' -ErrorAction SilentlyContinue"
             )
         );
+        // Une apostrophe, droite ou typographique, dans un nom ne ferme pas la chaîne PowerShell.
+        let valeur = reg(Racine::Hkcu, r"Software\X", "Nom'Q", Val::Dword(0), None);
+        let retrait = valeur.commande_admin(None, None).unwrap();
+        assert!(retrait.contains("-Name 'Nom''Q' "), "{retrait}");
+        let service = Changement::Service {
+            nom: "Nom’Q",
+            cible: 4,
+            defaut: 2,
+        };
+        let arret = service.commande_admin(Some("start:4"), None).unwrap();
+        assert!(arret.starts_with("Set-Service -Name 'Nom’’Q' "), "{arret}");
+        assert!(arret.contains("Stop-Service -Name 'Nom’’Q' "), "{arret}");
     }
 
     #[test]
