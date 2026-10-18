@@ -106,12 +106,13 @@ pub struct Hote {
 
 impl Hote {
     pub fn titre(&self) -> String {
-        [self.surnom.as_deref(), self.nom.as_deref(), self.fabricant.as_deref()]
-            .into_iter()
-            .flatten()
-            .collect::<Vec<_>>()
-            .join(" · ")
+        titre_de([self.surnom.as_deref(), self.nom.as_deref(), self.fabricant.as_deref()])
     }
+}
+
+/// « surnom · nom · fabricant », avec ce qui est connu.
+fn titre_de(morceaux: [Option<&str>; 3]) -> String {
+    morceaux.into_iter().flatten().collect::<Vec<_>>().join(" · ")
 }
 
 /// Appareil déjà vu sur ce réseau mais absent du scan.
@@ -208,11 +209,7 @@ struct AppareilConnu {
 impl AppareilConnu {
     fn titre(&self) -> String {
         let fabricant = self.fabricant.as_deref().map(scan::fabricant_traduit);
-        [self.surnom.as_deref(), self.nom.as_deref(), fabricant]
-            .into_iter()
-            .flatten()
-            .collect::<Vec<_>>()
-            .join(" · ")
+        titre_de([self.surnom.as_deref(), self.nom.as_deref(), fabricant])
     }
 
     /// Fusion de deux fiches du même appareil (base de la clé + copie locale).
@@ -230,6 +227,16 @@ impl AppareilConnu {
         if autre.dernier_vu > self.dernier_vu {
             self.dernier_vu = autre.dernier_vu;
             self.ip = autre.ip;
+        }
+    }
+}
+
+/// Ajoute les fiches d'un carnet à un autre ; celles d'un même appareil sont fusionnées.
+fn absorber_carnet(carnet: &mut BTreeMap<String, AppareilConnu>, autre: BTreeMap<String, AppareilConnu>) {
+    for (cle, a) in autre {
+        match carnet.get_mut(&cle) {
+            Some(connu) => connu.fusionner(a),
+            None => drop(carnet.insert(cle, a)),
         }
     }
 }
@@ -278,22 +285,12 @@ impl Base {
     }
 
     fn absorber(&mut self, autre: Base) {
-        for (cle, a) in autre.appareils {
-            match self.appareils.get_mut(&cle) {
-                Some(connu) => connu.fusionner(a),
-                None => drop(self.appareils.insert(cle, a)),
-            }
-        }
+        absorber_carnet(&mut self.appareils, autre.appareils);
         for (id, r) in autre.reseaux {
             let mien = self.reseaux.entry(id).or_default();
             mien.nom = mien.nom.take().or(r.nom);
             mien.udp |= r.udp;
-            for (cle, a) in r.appareils {
-                match mien.appareils.get_mut(&cle) {
-                    Some(connu) => connu.fusionner(a),
-                    None => drop(mien.appareils.insert(cle, a)),
-                }
-            }
+            absorber_carnet(&mut mien.appareils, r.appareils);
         }
     }
 
@@ -375,10 +372,6 @@ impl Drop for Verrou {
     }
 }
 
-fn aujourd_hui() -> String {
-    chrono::Local::now().format("%Y-%m-%d").to_string()
-}
-
 /// « 0 appareil », « 1 appareil », « 2 appareils » (en français, 0 et 1 sont au singulier).
 fn accord(n: usize, singulier: &str, pluriel: &str) -> String {
     format!("{n} {}", if n > 1 { pluriel } else { singulier })
@@ -404,17 +397,19 @@ pub struct Contenu {
 }
 
 impl Base {
+    /// Toutes les fiches : celles de chaque réseau, puis celles de l'ancien format.
+    fn fiches(&self) -> impl Iterator<Item = &AppareilConnu> {
+        self.reseaux
+            .values()
+            .flat_map(|r| r.appareils.values())
+            .chain(self.appareils.values())
+    }
+
     fn contenu(&self) -> Contenu {
-        let fiches = || {
-            self.reseaux
-                .values()
-                .flat_map(|r| r.appareils.values())
-                .chain(self.appareils.values())
-        };
         Contenu {
             reseaux: self.reseaux.len(),
-            appareils: fiches().count(),
-            surnoms: fiches().filter(|a| a.surnom.is_some()).count(),
+            appareils: self.fiches().count(),
+            surnoms: self.fiches().filter(|a| a.surnom.is_some()).count(),
         }
     }
 }
@@ -440,9 +435,7 @@ pub fn restaurer_base(sauvegarde: serde_json::Value) -> Result<Contenu, String> 
 /// Donne (ou retire, avec `None`) un surnom à un appareil, désigné par son IP ou son adresse MAC.
 pub fn nommer(qui: &str, surnom: Option<&str>) -> Result<String, String> {
     let (mut base, chemins, _verrou) = Base::charger();
-    let qui_min = qui.to_ascii_lowercase();
-    let mut trouves = 0;
-    let mut decrit = String::new();
+    let mut trouve = None;
     let maintenant = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
     // Par IP, seulement dans le réseau où l'on se trouve (la même IP existe chez chacun) ; par MAC, partout.
     // Même identifiant que le scan : MAC de la box, sinon « plage <réseau local> ». Sans ce repli, un réseau
@@ -457,25 +450,24 @@ pub fn nommer(qui: &str, surnom: Option<&str>) -> Result<String, String> {
         .ok()
         .and_then(|ip| scan::table_arp().get(&ip).cloned());
     for (id, r) in &mut base.reseaux {
+        let dans_ce_reseau = ici.as_deref() == Some(id.as_str());
         for (cle, a) in &mut r.appareils {
-            let par_mac = cle.eq_ignore_ascii_case(&qui_min);
-            let dans_ce_reseau = ici.as_deref() == Some(id.as_str());
+            let par_mac = cle.eq_ignore_ascii_case(qui);
             let par_ip = dans_ce_reseau
                 && (a.ip.to_string() == qui || mac_actuelle.as_deref().is_some_and(|m| cle.eq_ignore_ascii_case(m)));
             if par_mac || par_ip {
                 a.surnom = surnom.map(str::to_string);
                 a.surnom_le = Some(maintenant.clone());
-                trouves += 1;
-                decrit = format!("{} ({cle})", a.ip);
+                trouve = Some(format!("{} ({cle})", a.ip));
             }
         }
     }
-    if trouves == 0 {
+    let Some(decrit) = trouve else {
         return Err(trf!(
             "aucun appareil « {qui} » dans la base : lance d'abord un scan du réseau (gardien reseau)",
             "no device “{qui}” in the database: first run a network scan (gardien network)"
         ));
-    }
+    };
     base.enregistrer(&chemins);
     Ok(decrit)
 }
@@ -560,12 +552,7 @@ fn noms_des_bases(textes: &[String]) -> (Vec<String>, Vec<String>) {
         let Ok(base) = serde_json::from_str::<Base>(texte.trim_start_matches('\u{feff}')) else {
             continue;
         };
-        let fiches = base
-            .reseaux
-            .values()
-            .flat_map(|r| r.appareils.values())
-            .chain(base.appareils.values());
-        for fiche in fiches {
+        for fiche in base.fiches() {
             appareils.extend(fiche.nom.iter().chain(&fiche.surnom).cloned());
         }
         reseaux.extend(base.reseaux.into_values().filter_map(|r| r.nom));
@@ -767,6 +754,13 @@ fn pastille(h: &Hote) -> String {
     }
 }
 
+/// Un message coupé à `largeur` colonnes après `debut` : la marque devant la première ligne, la suite alignée.
+fn afficher_marque(debut: &str, marque: &str, texte: &str, largeur: usize) {
+    for (i, ligne) in envelopper(texte, largeur).iter().enumerate() {
+        println!("{debut}{} {ligne}", if i == 0 { marque } else { " " });
+    }
+}
+
 fn nom_affiche(h: &Hote) -> String {
     let t = h.titre();
     if t.is_empty() {
@@ -829,17 +823,8 @@ fn afficher(r: &Rapport) {
     println!("  {}", resume.join(&format!(" {GRIS}·{RESET} ")));
     if let Some((boite, mac, autre)) = usurpation_arp(r) {
         println!();
-        for (i, l) in envelopper(&message_usurpation(boite, &mac, autre), LARGEUR - 6)
-            .iter()
-            .enumerate()
-        {
-            let marque = if i == 0 {
-                format!("{}✖{RESET}", couleur(Niveau::Critique))
-            } else {
-                " ".to_string()
-            };
-            println!("  {marque} {l}");
-        }
+        let marque = format!("{}✖{RESET}", couleur(Niveau::Critique));
+        afficher_marque("  ", &marque, &message_usurpation(boite, &mac, autre), LARGEUR - 6);
     }
 
     section(&trf!("APPAREILS ({})", "DEVICES ({})", r.hotes.len()));
@@ -917,14 +902,7 @@ fn afficher(r: &Rapport) {
                 );
             }
             for (n, msg) in &h.alertes {
-                for (i, ligne) in envelopper(msg, LARGEUR - 8).iter().enumerate() {
-                    let fleche = if i == 0 {
-                        format!("{}→{RESET}", couleur(*n))
-                    } else {
-                        " ".to_string()
-                    };
-                    println!("    {fleche} {ligne}");
-                }
+                afficher_marque("    ", &format!("{}→{RESET}", couleur(*n)), msg, LARGEUR - 8);
             }
         }
     }
@@ -1069,18 +1047,16 @@ pub async fn executer(o: Options) -> Result<Rapport, String> {
         .and_then(|g| arp.get(&g).cloned())
         .unwrap_or_else(|| trf!("plage {cible}", "range {cible}"));
     let nom_reseau = scan::nom_wifi();
-    if !base.appareils.is_empty() {
-        let anciens = std::mem::take(&mut base.appareils);
-        let carnet = base.reseaux.entry(id_reseau.clone()).or_default();
-        for (cle, a) in anciens {
-            carnet.appareils.entry(cle).or_insert(a);
-        }
-    }
     let histo = base.reseaux.entry(id_reseau.clone()).or_default();
+    for (cle, a) in std::mem::take(&mut base.appareils) {
+        histo.appareils.entry(cle).or_insert(a);
+    }
     let premier_scan = histo.appareils.is_empty();
     let udp_deja_vu = histo.udp;
-    // Seul un scan du réseau entier sur les ports courants se compare aux précédents.
+    // Seul un scan du réseau entier sur les ports courants se compare aux précédents, et rien n'est « nouveau » au
+    // premier scan d'un réseau.
     let scan_comparable = ips.len() > 1 && courants;
+    let nouveautes = scan_comparable && !premier_scan;
     // Un port hors de la liste courante n'a jamais pu être vu par les scans précédents : pas de faux « nouveau ».
     let comparable = |port: u16| PORTS_COURANTS.contains(&port);
     // Une machine est reconnue par sa MAC (l'IP DHCP peut changer), sinon par son IP.
@@ -1129,10 +1105,7 @@ pub async fn executer(o: Options) -> Result<Rapport, String> {
                         port
                     };
                     let i = info_port(type_port);
-                    let nouveau = scan_comparable
-                        && !premier_scan
-                        && comparable(port)
-                        && !connu.is_some_and(|c| c.ports.contains(&port));
+                    let nouveau = nouveautes && comparable(port) && !connu.is_some_and(|c| c.ports.contains(&port));
                     let programme = (Some(ip) == moi || ip.is_loopback())
                         .then(|| programmes.get(&port).cloned())
                         .flatten();
@@ -1152,10 +1125,7 @@ pub async fn executer(o: Options) -> Result<Rapport, String> {
                     PortOuvert::decrit(port, &i, banniere, nouveau, programme, false)
                 })
                 .chain(resultats_udp.remove(&ip).unwrap_or_default().into_iter().map(|(port, banniere)| {
-                    let nouveau = scan_comparable
-                        && !premier_scan
-                        && udp_deja_vu
-                        && !connu.is_some_and(|c| c.ports_udp.contains(&port));
+                    let nouveau = nouveautes && udp_deja_vu && !connu.is_some_and(|c| c.ports_udp.contains(&port));
                     PortOuvert::decrit(port, &info_udp(port), banniere, nouveau, None, true)
                 }))
                 .collect();
@@ -1176,7 +1146,7 @@ pub async fn executer(o: Options) -> Result<Rapport, String> {
                     premier_vu: connu.and_then(|c| c.premier_vu.clone()),
                     mac,
                     role,
-                    nouvelle: scan_comparable && !premier_scan && connu.is_none(),
+                    nouvelle: nouveautes && connu.is_none(),
                     ports,
                     alertes,
                     score,
@@ -1199,7 +1169,7 @@ pub async fn executer(o: Options) -> Result<Rapport, String> {
                 dernier_vu: a.dernier_vu.clone(),
             })
             .collect();
-        let jour = aujourd_hui();
+        let jour = chrono::Local::now().format("%Y-%m-%d").to_string();
         for h in &hotes {
             let a = histo
                 .appareils
