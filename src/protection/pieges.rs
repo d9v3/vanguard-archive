@@ -318,31 +318,38 @@ fn poser_dans(dossiers: &[PathBuf]) -> (Vec<Piege>, Vec<(PathBuf, std::io::Error
     (poses, refus)
 }
 
-fn enregistrer(pieges: &[Piege]) -> std::io::Result<()> {
-    std::fs::create_dir_all(crate::reseau::dossier_local())?;
-    crate::reseau::ecrire_atomique(&fichier(), &serde_json::to_string_pretty(pieges).unwrap_or_default())
+fn enregistrer(pieges: &[Piege], liste: &Path) -> std::io::Result<()> {
+    if let Some(dossier) = liste.parent() {
+        std::fs::create_dir_all(dossier)?;
+    }
+    crate::reseau::ecrire_atomique(liste, &serde_json::to_string_pretty(pieges).unwrap_or_default())
 }
 
 /// Retire exactement les fichiers posés et intacts, puis la liste. Un piège modifié ou renommé reste : c'est la preuve
-/// d'un rançongiciel ; un piège illisible reste aussi (on ne sait pas ce qu'il est devenu). Rend (fichiers qui n'ont
-/// pas pu être retirés, fichiers gardés comme preuve).
-fn retirer_tous(pieges: &[Piege]) -> (Vec<PathBuf>, Vec<PathBuf>) {
+/// d'un rançongiciel ; un piège illisible reste aussi (on ne sait pas ce qu'il est devenu). La liste ne garde alors que
+/// les pièges restés en place : ceux déjà retirés passeraient pour supprimés par un programme. Rend (fichiers qui
+/// n'ont pas pu être retirés, fichiers gardés comme preuve).
+fn retirer_tous(pieges: &[Piege], liste: &Path) -> (Vec<PathBuf>, Vec<PathBuf>) {
     let (mut restes, mut preuves) = (Vec::new(), Vec::new());
+    let mut gardes = Vec::new();
     for p in pieges {
         match etat(p) {
             Etat::Intact => {
                 if std::fs::remove_file(&p.chemin).is_err() {
-                    restes.push(p.chemin.clone());
+                    gardes.push(p.clone());
                 }
             }
             Etat::Modifie => preuves.push(p.chemin.clone()),
             Etat::Renomme(nouveau) => preuves.push(nouveau),
-            Etat::Illisible => restes.push(p.chemin.clone()),
+            Etat::Illisible => gardes.push(p.clone()),
             Etat::Supprime => {}
         }
     }
-    if restes.is_empty() {
-        let _ = std::fs::remove_file(fichier());
+    if gardes.is_empty() {
+        let _ = std::fs::remove_file(liste);
+    } else {
+        let _ = enregistrer(&gardes, liste);
+        restes.extend(gardes.into_iter().map(|p| p.chemin));
     }
     (restes, preuves)
 }
@@ -578,7 +585,7 @@ fn poser() {
         trp!("  Rien n'a été posé.", "  Nothing was placed.");
         return;
     }
-    match enregistrer(&poses) {
+    match enregistrer(&poses, &fichier()) {
         Ok(()) => {
             println!(
                 "  {VERT}✔{RESET} {}",
@@ -593,7 +600,7 @@ fn poser() {
         }
         Err(e) => {
             // Sans la liste, on ne saurait ni les vérifier ni les retirer exactement : on les retire tout de suite.
-            retirer_tous(&poses);
+            retirer_tous(&poses, &fichier());
             dire(&trf!(
                 "✖ Liste des fichiers-pièges impossible à écrire ({e}) : rien n'est posé.",
                 "✖ Could not write the decoy file list ({e}): nothing is placed."
@@ -613,7 +620,7 @@ fn retirer(pieges: &[Piege], force: bool) {
     {
         return;
     }
-    let (restes, preuves) = retirer_tous(pieges);
+    let (restes, preuves) = retirer_tous(pieges, &fichier());
     if restes.is_empty() {
         trp!(
             "  {VERT}✔{RESET} Fichiers-pièges retirés.",
@@ -682,11 +689,34 @@ mod tests {
         // Retrait exact : les pièges intacts partent ; le modifié reste, c'est la preuve ; un fichier de la personne
         // n'est pas touché.
         std::fs::write(d.join("mes notes.txt"), "à garder").unwrap();
-        let (restes, preuves) = retirer_tous(&pieges);
+        let (restes, preuves) = retirer_tous(&pieges, &d.join("pieges.json"));
         assert_eq!(restes, Vec::<PathBuf>::new());
         assert_eq!(preuves, [pieges[0].chemin.clone()]);
         assert!(pieges[0].chemin.exists());
         assert!(d.join("mes notes.txt").exists());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // Retrait en partie refusé : la liste ne garde que les pièges restés en place. Avec les pièges déjà retirés, le
+    // bilan suivant les aurait dits « supprimés » et aurait soupçonné un programme.
+    #[cfg(unix)]
+    #[test]
+    fn retrait_partiel_liste_a_jour() {
+        use std::os::unix::fs::PermissionsExt;
+        let d = dossier_jetable("partiel");
+        let liste = d.join("pieges.json");
+        let (pieges, _) = poser_dans(std::slice::from_ref(&d));
+        enregistrer(&pieges, &liste).unwrap();
+        std::fs::set_permissions(&pieges[0].chemin, std::fs::Permissions::from_mode(0o000)).unwrap();
+        if std::fs::read(&pieges[0].chemin).is_ok() {
+            let _ = std::fs::remove_dir_all(&d);
+            return;
+        }
+        let (restes, _) = retirer_tous(&pieges, &liste);
+        assert_eq!(restes, [pieges[0].chemin.clone()]);
+        assert!(!pieges[1].chemin.exists());
+        let gardes: Vec<Piege> = serde_json::from_str(&std::fs::read_to_string(&liste).unwrap()).unwrap();
+        assert_eq!(gardes, [pieges[0].clone()]);
         let _ = std::fs::remove_dir_all(&d);
     }
 

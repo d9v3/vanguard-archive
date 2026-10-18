@@ -271,6 +271,18 @@ fn nature(nom: &str, debut: &[u8]) -> Vec<(Niveau, String)> {
     signes
 }
 
+/// Windows : `canonicalize` rend un chemin étendu (« \\?\C:\… », « \\?\UNC\serveur\… ») que la personne ne
+/// reconnaît pas à l'écran : remis sous sa forme habituelle, celle qu'elle a tapée ou glissée.
+fn sans_prefixe_etendu(chemin: &str) -> String {
+    if let Some(reseau) = chemin.strip_prefix(r"\\?\UNC\") {
+        return format!(r"\\{reseau}");
+    }
+    match chemin.strip_prefix(r"\\?\") {
+        Some(local) if local.as_bytes().get(1) == Some(&b':') => local.to_string(),
+        _ => chemin.to_string(),
+    }
+}
+
 /// « 3,4 Mo », « 812 o ».
 fn taille(octets: u64) -> String {
     #[allow(clippy::cast_precision_loss)] // un ordre de grandeur, pour l'œil
@@ -311,7 +323,10 @@ pub fn verifier(fichier: Option<&Path>, empreinte: Option<&str>) {
         }
         PathBuf::from(reponse)
     };
-    let Ok(chemin) = chemin.canonicalize() else {
+    let Ok(chemin) = chemin
+        .canonicalize()
+        .map(|c| PathBuf::from(sans_prefixe_etendu(&c.to_string_lossy())))
+    else {
         trp!("  ✖ Introuvable : {}", "  ✖ Not found: {}", chemin.display());
         return;
     };
@@ -382,7 +397,8 @@ pub fn verifier(fichier: Option<&Path>, empreinte: Option<&str>) {
     let mut pire: Option<Niveau> = None;
     let mut incomplet = Vec::new();
     let mut conforme = false;
-    match calculer(&chemin, Algo::Sha256) {
+    let sha256 = calculer(&chemin, Algo::Sha256);
+    match &sha256 {
         Ok(sha256) => println!("  {GRIS}SHA-256{RESET}  {sha256}"),
         Err(e) => {
             ligne(
@@ -403,7 +419,12 @@ pub fn verifier(fichier: Option<&Path>, empreinte: Option<&str>) {
                 "No checksum to compare: look for “SHA-256” on the official download page, then check again with it."
             ),
         ),
-        Some((algo, valeur, source)) => match calculer(&chemin, *algo) {
+        // Une image disque de plusieurs gigaoctets ne se relit pas pour rien.
+        Some((algo, valeur, source)) => match if *algo == Algo::Sha256 {
+            sha256.clone()
+        } else {
+            calculer(&chemin, *algo)
+        } {
             Ok(calculee) if calculee == *valeur => {
                 conforme = !algo.faible();
                 ligne(
@@ -663,6 +684,24 @@ mod tests {
         assert_eq!(niveaux("rapport.pdf", b"%PDF"), []);
         assert_eq!(niveaux("notes.v2.txt", b"Bonj"), []);
         assert_eq!(niveaux("script", b"#!/b"), [Niveau::Info]);
+    }
+
+    #[test]
+    fn chemins_etendus_de_windows() {
+        assert_eq!(
+            sans_prefixe_etendu(r"\\?\C:\Users\alice\outil.zip"),
+            r"C:\Users\alice\outil.zip"
+        );
+        assert_eq!(
+            sans_prefixe_etendu(r"\\?\UNC\nas\partage\a.iso"),
+            r"\\nas\partage\a.iso"
+        );
+        // Un volume sans lettre garde son préfixe ; un chemin ordinaire reste tel quel.
+        assert_eq!(
+            sans_prefixe_etendu(r"\\?\Volume{1234}\a.iso"),
+            r"\\?\Volume{1234}\a.iso"
+        );
+        assert_eq!(sans_prefixe_etendu("/home/alice/a.iso"), "/home/alice/a.iso");
     }
 
     #[test]

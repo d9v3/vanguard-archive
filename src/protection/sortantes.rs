@@ -317,10 +317,10 @@ fn port_suspect(port: u16) -> bool {
 }
 
 /// Un dossier d'où un vrai programme ne se lance pas d'habitude.
-fn dossier_risque(chemin: &str) -> Option<&'static str> {
+fn dossier_risque(chemin: &str, montages: &str) -> Option<&'static str> {
     let c = chemin.to_lowercase().replace('\\', "/");
     // macOS : une app téléchargée lancée sur place tourne depuis un dossier temporaire « AppTranslocation ».
-    if c.contains("/apptranslocation/") {
+    if c.contains("/apptranslocation/") || appimage(chemin, montages) {
         return None;
     }
     // Dossiers temporaires : à la racine sous Linux et macOS, sous le dossier du compte ou de Windows ailleurs.
@@ -348,6 +348,18 @@ fn dossier_risque(chemin: &str) -> Option<&'static str> {
     None
 }
 
+/// Linux : une AppImage tourne depuis son image, montée dans « /tmp/.mount_<nom><code> » le temps qu'elle tourne. Un
+/// simple dossier de ce nom ne suffit pas : il faut qu'il soit monté (`montages` : le contenu de /proc/self/mounts).
+fn appimage(chemin: &str, montages: &str) -> bool {
+    let Some(reste) = chemin.strip_prefix("/tmp/.mount_") else {
+        return false;
+    };
+    let point = format!("/tmp/.mount_{}", reste.split('/').next().unwrap_or_default());
+    montages
+        .lines()
+        .any(|l| l.split_whitespace().nth(1) == Some(point.as_str()))
+}
+
 /// Le nom à montrer pour un serveur : son domaine (« github.com »), ou l'entreprise derrière un grand hébergeur.
 fn qui(nom: &str) -> String {
     let domaine = crate::protection::lien::domaine_enregistrable(nom);
@@ -364,20 +376,31 @@ fn qui(nom: &str) -> String {
 }
 
 /// Ce qui mérite l'attention dans les connexions d'un programme : (gravité, texte).
-fn signes(chemin: Option<&str>, connexions: &[(&Connexion, Option<&String>)]) -> Vec<(Niveau, String)> {
+fn signes(chemin: Option<&str>, connexions: &[(&Connexion, Option<&String>)], montages: &str) -> Vec<(Niveau, String)> {
     let mut signes = Vec::new();
     if let Some(c) = chemin {
-        if c.ends_with(" (deleted)") {
-            signes.push((
+        // Un nouveau fichier à la même place : le programme a été mis à jour pendant qu'il tournait (Firefox après une
+        // mise à jour du système), l'ancienne version reste en mémoire.
+        match c.strip_suffix(" (deleted)") {
+            Some(ancien) if std::path::Path::new(ancien).exists() => signes.push((
+                Niveau::Info,
+                tr!(
+                    "Mis à jour pendant qu'il tournait : l'ancienne version tourne encore, redémarre-le.",
+                    "Updated while running: the old version is still running, restart it."
+                )
+                .to_string(),
+            )),
+            Some(_) => signes.push((
                 Niveau::Eleve,
                 tr!(
                     "Programme effacé après son lancement : une ruse pour ne pas laisser de trace.",
                     "Program deleted after it started: a trick to leave no trace."
                 )
                 .to_string(),
-            ));
+            )),
+            None => {}
         }
-        if let Some(ou) = dossier_risque(c) {
+        if let Some(ou) = dossier_risque(c, montages) {
             signes.push((
                 Niveau::Eleve,
                 trf!(
@@ -539,6 +562,11 @@ pub fn afficher() {
         adresses.len()
     );
     let noms = noms(&adresses);
+    let montages = if cfg!(target_os = "linux") {
+        std::fs::read_to_string("/proc/self/mounts").unwrap_or_default()
+    } else {
+        String::new()
+    };
 
     // Regroupées par programme ; celles des autres comptes à part.
     let mut groupes: Vec<Groupe> = Vec::new();
@@ -564,7 +592,7 @@ pub fn afficher() {
     let mut affiches: Vec<Programme> = groupes
         .iter()
         .map(|g| {
-            let signes = signes(g.chemin.as_deref(), &g.liste);
+            let signes = signes(g.chemin.as_deref(), &g.liste, &montages);
             Programme {
                 pire: signes.iter().map(|(n, _)| *n).filter(|n| *n > Niveau::Info).max(),
                 nom: g.programme.clone().unwrap_or_default(),
@@ -761,24 +789,27 @@ mod tests {
 
     #[test]
     fn jugement() {
-        assert_eq!(dossier_risque("/tmp/.x/miner"), Some("un dossier temporaire"));
+        assert_eq!(dossier_risque("/tmp/.x/miner", ""), Some("un dossier temporaire"));
         assert_eq!(
-            dossier_risque("/home/alice/Téléchargements/outil"),
+            dossier_risque("/home/alice/Téléchargements/outil", ""),
             Some("les Téléchargements")
         );
         assert_eq!(
-            dossier_risque("C:\\Users\\alice\\AppData\\Local\\Temp\\a.exe"),
+            dossier_risque("C:\\Users\\alice\\AppData\\Local\\Temp\\a.exe", ""),
             Some("un dossier temporaire")
         );
         assert_eq!(
-            dossier_risque("C:\\Users\\Public\\svc.exe"),
+            dossier_risque("C:\\Users\\Public\\svc.exe", ""),
             Some("le dossier Public, partagé par tous les comptes")
         );
         assert_eq!(
-            dossier_risque("/private/var/folders/x/AppTranslocation/y/App.app/Contents/MacOS/App"),
+            dossier_risque(
+                "/private/var/folders/x/AppTranslocation/y/App.app/Contents/MacOS/App",
+                ""
+            ),
             None
         );
-        assert_eq!(dossier_risque("/usr/lib/firefox/firefox"), None);
+        assert_eq!(dossier_risque("/usr/lib/firefox/firefox", ""), None);
         assert_eq!(service(443, false), Some("HTTPS"));
         assert!(service(4444, false).is_none() && port_suspect(4444));
         let firefox = Connexion {
@@ -790,13 +821,16 @@ mod tests {
             udp: false,
         };
         let nom = "lb-140-82-112-4-iad.github.com".to_string();
-        assert_eq!(signes(firefox.chemin.as_deref(), &[(&firefox, Some(&nom))]), Vec::new());
+        assert_eq!(
+            signes(firefox.chemin.as_deref(), &[(&firefox, Some(&nom))], ""),
+            Vec::new()
+        );
         let piege = Connexion {
             chemin: Some("/tmp/.cache/x (deleted)".into()),
             port: 4444,
             ..firefox.clone()
         };
-        let s = signes(piege.chemin.as_deref(), &[(&piege, None)]);
+        let s = signes(piege.chemin.as_deref(), &[(&piege, None)], "");
         let niveaux: Vec<Niveau> = s.iter().map(|(n, _)| *n).collect();
         assert_eq!(niveaux, [Niveau::Eleve, Niveau::Eleve, Niveau::Eleve, Niveau::Info]);
         // Un jeu en UDP sur un port quelconque : rien à dire.
@@ -805,9 +839,55 @@ mod tests {
             udp: true,
             ..firefox.clone()
         };
-        assert_eq!(signes(jeu.chemin.as_deref(), &[(&jeu, Some(&nom))]), Vec::new());
+        assert_eq!(signes(jeu.chemin.as_deref(), &[(&jeu, Some(&nom))], ""), Vec::new());
         let tcp = Connexion { port: 61234, ..firefox };
-        assert_eq!(signes(tcp.chemin.as_deref(), &[(&tcp, Some(&nom))])[0].0, Niveau::Moyen);
+        assert_eq!(
+            signes(tcp.chemin.as_deref(), &[(&tcp, Some(&nom))], "")[0].0,
+            Niveau::Moyen
+        );
+    }
+
+    // Linux : un programme mis à jour pendant qu'il tourne (Firefox après une mise à jour du système) a son ancien
+    // fichier « (deleted) », mais un nouveau à la même place : pas une ruse, une information. (Le second signe vient
+    // du dossier temporaire où le test le pose.)
+    #[test]
+    fn programme_mis_a_jour_pas_efface() {
+        let dossier = crate::protection::isoler::dossier_jetable().unwrap();
+        let nouveau = dossier.join("firefox");
+        std::fs::write(&nouveau, b"nouvelle version").unwrap();
+        let mis_a_jour = format!("{} (deleted)", nouveau.display());
+        let c = Connexion {
+            chemin: Some(mis_a_jour.clone()),
+            ..Connexion::vers(ip("140.82.112.4"), 443)
+        };
+        let nom = "github.com".to_string();
+        let s = signes(Some(&mis_a_jour), &[(&c, Some(&nom))], "");
+        assert_eq!(
+            s.iter().map(|(n, _)| *n).collect::<Vec<_>>(),
+            [Niveau::Info, Niveau::Eleve]
+        );
+        std::fs::remove_dir_all(&dossier).unwrap();
+        // Plus rien à sa place : effacé pour de bon.
+        let s = signes(Some(&mis_a_jour), &[(&c, Some(&nom))], "");
+        assert_eq!(
+            s.iter().map(|(n, _)| *n).collect::<Vec<_>>(),
+            [Niveau::Eleve, Niveau::Eleve]
+        );
+    }
+
+    // Une AppImage tourne depuis son image montée dans /tmp/.mount_* : pas un programme lancé d'un dossier temporaire.
+    // Un simple dossier de ce nom, lui, n'est pas une image montée.
+    #[test]
+    fn appimage_montee() {
+        let montages = "/dev/nvme0n1p2 / btrfs rw 0 0\n\
+                        ArtCraft.AppImage /tmp/.mount_ArtCraXk2Pq fuse.ArtCraft.AppImage ro,nosuid,nodev 0 0\n";
+        let appimage = "/tmp/.mount_ArtCraXk2Pq/usr/bin/artcraft";
+        assert_eq!(dossier_risque(appimage, montages), None);
+        assert_eq!(
+            dossier_risque("/tmp/.mount_faux/miner", montages),
+            Some("un dossier temporaire")
+        );
+        assert_eq!(dossier_risque(appimage, ""), Some("un dossier temporaire"));
     }
 
     #[test]
