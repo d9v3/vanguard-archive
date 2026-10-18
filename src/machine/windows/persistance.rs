@@ -1,26 +1,7 @@
 //! Ce qui se lance tout seul sous Windows : tâches planifiées, clés Run et RunOnce, dossiers Démarrage.
 
 use super::*;
-
-/// Programme et arguments d'une ligne de commande Windows (« "C:\Program Files\x.exe" -a », « x.exe -a »,
-/// « C:\Program Files\x.exe -a » sans guillemets).
-fn decouper_commande(ligne: &str) -> (String, String) {
-    let ligne = ligne.trim();
-    if let Some(reste) = ligne.strip_prefix('"')
-        && let Some((exe, args)) = reste.split_once('"')
-    {
-        return (exe.to_string(), args.trim().to_string());
-    }
-    let bas = ligne.to_lowercase();
-    if let Some(i) = bas.find(".exe") {
-        let (exe, args) = ligne.split_at(i + 4);
-        return (exe.to_string(), args.trim().to_string());
-    }
-    match ligne.split_once(' ') {
-        Some((exe, args)) => (exe.to_string(), args.trim().to_string()),
-        None => (ligne.to_string(), String::new()),
-    }
-}
+use crate::commande::decouper_commande;
 
 /// Pourquoi ce programme lancé automatiquement (tâche planifiée, clé Run, dossier Démarrage) ressemble à un
 /// malware, ou `None`. Seules des formes précises sont retenues : les programmes installés normalement n'y tombent pas.

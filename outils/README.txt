@@ -63,6 +63,7 @@ highlighted one, Esc clears it. In the main menu, it also finds each tool of the
        Passwords: have they leaked? (only 5 characters of their fingerprint are sent)
        Email address: has it leaked? (sent to the search service, after your consent)
        Who talks to the Internet? Each program's connections, with the server's name (read-only)
+       Is someone controlling my PC? Remote control tools (tech-support scam), removed after your consent
        Is this link dangerous? Checked without opening it; its age and public lists, after your consent
        Check a downloaded file: checksum compared with the site's, name and content, YARA, antivirus
   7  Install and play ›

@@ -396,6 +396,26 @@ fn sortantes_en_lecture_seule() {
     );
 }
 
+/// Quelqu'un contrôle mon ordi ? : l'arnaque est expliquée, la recherche se fait, et « n » ne retire rien.
+#[test]
+fn distance_sans_rien_retirer() {
+    let s = gardien("fr", &["distance"], "n\nn\n", 120);
+    assert_eq!(s.code, Some(0), "{}", s.erreurs);
+    let t = sans_couleurs(&s.texte);
+    assert!(
+        t.contains("Quelqu'un contrôle mon ordi ?") && t.contains("faux technicien"),
+        "{t}"
+    );
+    // Rien trouvé, quelque chose trouvé mais gardé, ou PowerShell absent (Wine) : jamais un retrait.
+    assert!(
+        t.contains("Aucun logiciel de prise de contrôle")
+            || t.contains("Rien n'a été retiré")
+            || t.contains("Impossible de vérifier"),
+        "{t}"
+    );
+    assert!(!t.contains("retiré."), "{t}");
+}
+
 /// Programmes au démarrage : la liste se montre, et Entrée sans rien décocher ne change rien.
 #[test]
 fn demarrage_sans_rien_changer() {

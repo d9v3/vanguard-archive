@@ -530,7 +530,7 @@ mod systeme {
     }
 
     pub fn volumes(lectures: Option<&str>) -> Vec<Volume> {
-        crate::machine::windows::section(lectures, "VOL")
+        crate::commande::section(lectures, "VOL")
             .unwrap_or_default()
             .iter()
             .filter_map(|l| {
@@ -547,7 +547,7 @@ mod systeme {
 
     /// État donné par Windows (Healthy, Warning, Unhealthy) : le pilote lit SMART lui-même.
     pub fn disques(lectures: Option<&str>) -> Vec<Disque> {
-        crate::machine::windows::section(lectures, "DSK")
+        crate::commande::section(lectures, "DSK")
             .unwrap_or_default()
             .iter()
             .filter_map(|l| {
@@ -563,7 +563,7 @@ mod systeme {
     }
 
     pub fn batterie(lectures: Option<&str>) -> Option<u64> {
-        let l = crate::machine::windows::section(lectures, "BAT")?;
+        let l = crate::commande::section(lectures, "BAT")?;
         let (plein, origine) = l.first()?.trim().split_once('|')?;
         let (plein, origine): (u64, u64) = (plein.parse().ok()?, origine.parse().ok()?);
         (plein * 100).checked_div(origine).map(|s| s.min(100))
@@ -573,7 +573,7 @@ mod systeme {
     /// portable), la plus chaude, et la carte graphique NVIDIA. Une VM n'a pas de zone thermique.
     pub fn temperatures(lectures: Option<&str>) -> Vec<(&'static str, f64, f64)> {
         let mut mesures = Vec::new();
-        let zone = crate::machine::windows::section(lectures, "TZ")
+        let zone = crate::commande::section(lectures, "TZ")
             .unwrap_or_default()
             .iter()
             .filter_map(|l| l.trim().parse::<f64>().ok())

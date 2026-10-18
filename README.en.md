@@ -52,7 +52,7 @@ In the menu, choose **1** (full check), then **2** (fix). Arrows, Enter, and Esc
 | **Connection for gaming** | Ping, jitter, loss, speed and bufferbloat, compared with your habits. |
 | **Troubleshoot** | Computer diagnostic, everyday problems step by step (Internet, Wi-Fi, slowness, sound, printer, full disk), “Why is it slow?”, computer specs, repairs. |
 | **Optimize and clean up** | Privacy and performance settings undone exactly, a cleanup checklist with the space gained measured, startup programs. |
-| **Protection** | Decoy files against ransomware, Windows Defender blocking, 308 YARA rules, antivirus, sandbox, integrity of critical files, leaked passwords, outbound connections, dangerous links, downloaded files. |
+| **Protection** | Decoy files against ransomware, Windows Defender blocking, 308 YARA rules, antivirus, sandbox, integrity of critical files, leaked passwords, outbound connections, tech-support scam (remote control tools), dangerous links, downloaded files. |
 | **Follow-up** | Hourly monitoring, monthly check-up, HTML report with the grade curve, learning on your computer. |
 | **Software and games** | The best software in 8 categories, from its official source; update everything at once; settings for gaming. |
 | **Tools** | Copy my files (checked copy), my computers (tracked by the key), command guide, search in every menu. |
@@ -175,6 +175,11 @@ example), and the guide tells when a program is missing on this computer.
 - Who talks to the Internet?: each program's current connections, with the server's name; a program started from a
   temporary folder or Downloads, a remote access tool's port or a server without a name are flagged. Read-only:
   nothing is cut.
+- Is someone controlling my PC?: the tech-support scam (“your computer is infected”) gets a remote control tool
+  installed. Gardien looks for AnyDesk, TeamViewer, RustDesk, Quick Assist, Splashtop, UltraViewer… installed (and
+  since when), started at boot, running or simply sitting in Downloads; it explains what to do (cut the Internet, tell
+  the bank, change passwords) and removes them after your consent. A running program is never cut without a second,
+  explicit consent: the person helping may be connected through it. In the check too (“Remote access”).
 - Is this link dangerous?: a link you received, checked without ever opening it (disguised letters, misleading
   subdomain, imitated brand, link shortener, raw IP address); after your consent, the domain's age and three public
   lists of dangerous sites (URLhaus, Spamhaus, SURBL). Only the domain name leaves the computer.
@@ -262,6 +267,7 @@ Each menu entry is also a command.
 | `gardien sandbox <file>` | run an unknown program in a sandbox (bubblewrap or firejail, Windows Sandbox) |
 | `gardien email` | email address leaks (XposedOrNot, or Have I Been Pwned with `GARDIEN_HIBP_CLE`) |
 | `gardien outbound` | who talks to the Internet: each program's connections (read-only) |
+| `gardien remote-access` | is someone controlling my PC? remote control tools (tech-support scam), removed after consent |
 | `gardien link <address>` | is this link dangerous? (checked without opening it; online after your consent) |
 | `gardien check-file <file> [checksum]` | check a downloaded file: checksum, name and content, YARA, antivirus |
 | `gardien integrity [--accept] [--live]` | integrity of critical files (BLAKE3 fingerprints), live if wanted |

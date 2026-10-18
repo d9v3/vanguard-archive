@@ -64,6 +64,7 @@ Entrée ouvre celle en surbrillance, Échap efface. Au menu principal, elle trou
        Mots de passe : ont-ils fuité ? (seuls 5 caractères de leur empreinte sont envoyés)
        Courriel : a-t-il fuité ? (l'adresse est envoyée au service de recherche, après ton accord)
        Qui parle à Internet ? Les connexions de chaque programme, avec le nom du serveur (lecture seule)
+       Quelqu'un contrôle mon ordi ? Logiciels de prise de contrôle à distance (faux technicien), retirés après accord
        Ce lien est-il dangereux ? Examiné sans l'ouvrir ; son âge et des listes publiques, après accord
        Vérifier un fichier téléchargé : empreinte comparée à celle du site, nom et contenu, YARA, antivirus
   7  Installer et jouer ›

@@ -4,6 +4,7 @@ use std::fmt::Write;
 use std::process::Command;
 
 use super::{Audit, Constat, alerte, impossible, ok};
+use crate::commande::section;
 use crate::risk::{Niveau, info_port};
 use crate::trw;
 use crate::ui::{resume, tr, trf, trp};
@@ -646,18 +647,6 @@ fn wifi() -> Vec<Constat> {
         constats.extend(super::wifi::jumeau(&visibles));
     }
     constats
-}
-
-/// Lignes d'une section de `lectures_rapides`, sans leur préfixe ; `None` si la section n'a pas pu être lue.
-pub(super) fn section<'a>(sortie: Option<&'a str>, nom: &str) -> Option<Vec<&'a str>> {
-    let sortie = sortie?;
-    let fin = format!("{nom}_FIN");
-    sortie.lines().any(|l| l.trim() == fin).then(|| {
-        sortie
-            .lines()
-            .filter_map(|l| l.trim().strip_prefix(nom)?.strip_prefix('|'))
-            .collect()
-    })
 }
 
 /// Ports UDP ouverts sur le réseau. Windows en ouvre beaucoup lui-même (découverte, heure, VPN) : on ne garde

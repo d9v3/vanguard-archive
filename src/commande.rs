@@ -129,6 +129,41 @@ pub fn ps_chaine(t: &str) -> String {
     format!("'{}'", ps_texte(t))
 }
 
+/// Lignes « NOM|… » d'une section de la sortie d'un script, sans leur préfixe ; `None` sans le marqueur « NOM_FIN » :
+/// la section n'a pas pu être lue jusqu'au bout.
+#[cfg(any(windows, test))]
+pub fn section<'a>(sortie: Option<&'a str>, nom: &str) -> Option<Vec<&'a str>> {
+    let sortie = sortie?;
+    let fin = format!("{nom}_FIN");
+    sortie.lines().any(|l| l.trim() == fin).then(|| {
+        sortie
+            .lines()
+            .filter_map(|l| l.trim().strip_prefix(nom)?.strip_prefix('|'))
+            .collect()
+    })
+}
+
+/// Programme et arguments d'une ligne de commande Windows (« "C:\Program Files\x.exe" -a », « x.exe -a »,
+/// « C:\Program Files\x.exe -a » sans guillemets).
+#[cfg(any(windows, test))]
+pub fn decouper_commande(ligne: &str) -> (String, String) {
+    let ligne = ligne.trim();
+    if let Some(reste) = ligne.strip_prefix('"')
+        && let Some((exe, args)) = reste.split_once('"')
+    {
+        return (exe.to_string(), args.trim().to_string());
+    }
+    let bas = ligne.to_lowercase();
+    if let Some(i) = bas.find(".exe") {
+        let (exe, args) = ligne.split_at(i + 4);
+        return (exe.to_string(), args.trim().to_string());
+    }
+    match ligne.split_once(' ') {
+        Some((exe, args)) => (exe.to_string(), args.trim().to_string()),
+        None => (ligne.to_string(), String::new()),
+    }
+}
+
 #[cfg(test)]
 mod tests_powershell {
     use super::*;

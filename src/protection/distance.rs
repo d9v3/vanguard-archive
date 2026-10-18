@@ -8,6 +8,7 @@
 //! par le bilan, et le parcours redemande un accord exprès, en rappelant que la personne qui aide peut être connectée
 //! par ce programme même. Un programme que la personne utilise elle-même se déclare normal (« i » à la correction).
 
+#[cfg(unix)]
 use std::path::PathBuf;
 
 use chrono::NaiveDate;
@@ -33,7 +34,11 @@ struct Logiciel {
 
 impl Logiciel {
     fn nom(&self) -> &'static str {
-        if crate::langue::anglais() { self.nom[1] } else { self.nom[0] }
+        if crate::langue::anglais() {
+            self.nom[1]
+        } else {
+            self.nom[0]
+        }
     }
 }
 
@@ -180,7 +185,11 @@ fn juger(trouvailles: &[Trouvaille], aujourd_hui: NaiveDate) -> Vec<Constat> {
         let fichier = siens.iter().any(|t| t.trace == Trace::Fichier);
         let installe = siens.iter().any(|t| t.trace == Trace::Installe);
         let demarrage = siens.iter().any(|t| t.trace == Trace::Demarrage);
-        let niveau = if en_cours || recent || fichier { Niveau::Eleve } else { Niveau::Moyen };
+        let niveau = if en_cours || recent || fichier {
+            Niveau::Eleve
+        } else {
+            Niveau::Moyen
+        };
 
         // Jamais de date ni de chiffre qui change dans le message : « déclarer normal » le reconnaît d'un jour à l'autre.
         let mut etats: Vec<&str> = Vec::new();
@@ -344,6 +353,8 @@ fn pids_dans_ss(sortie: &str) -> std::collections::BTreeSet<u32> {
         .collect()
 }
 
+// Même signature que sous Windows, où la lecture PowerShell peut échouer.
+#[allow(clippy::unnecessary_wraps)]
 #[cfg(target_os = "linux")]
 fn relever() -> Option<Vec<Trouvaille>> {
     let maison = PathBuf::from(std::env::var_os("HOME").unwrap_or_default());
@@ -407,7 +418,10 @@ fn paquets(t: &mut Vec<Trouvaille>) {
                 format!("sudo pacman -Rns --noconfirm {}", shell(p)),
             ),
             "dpkg" => (
-                date_dans("/var/lib/dpkg/info", &format!("{}.list", p.split(':').next().unwrap_or(p))),
+                date_dans(
+                    "/var/lib/dpkg/info",
+                    &format!("{}.list", p.split(':').next().unwrap_or(p)),
+                ),
                 format!("sudo apt-get remove -y {}", shell(p)),
             ),
             _ => {
@@ -544,7 +558,10 @@ fn processus(t: &mut Vec<Trouvaille>) {
 /// session).
 #[cfg(target_os = "linux")]
 fn demarrage_linux(t: &mut Vec<Trouvaille>, maison: &std::path::Path) {
-    for (dossier, sudo) in [(maison.join(".config/autostart"), ""), (PathBuf::from("/etc/xdg/autostart"), "sudo ")] {
+    for (dossier, sudo) in [
+        (maison.join(".config/autostart"), ""),
+        (PathBuf::from("/etc/xdg/autostart"), "sudo "),
+    ] {
         for e in std::fs::read_dir(&dossier).into_iter().flatten().flatten() {
             let chemin = e.path();
             if chemin.extension().is_none_or(|x| x != "desktop") {
@@ -570,7 +587,10 @@ fn demarrage_linux(t: &mut Vec<Trouvaille>, maison: &std::path::Path) {
         }
     }
     for (args, prefixe) in [
-        (&["list-unit-files", "--state=enabled", "--no-legend", "--plain"][..], "sudo systemctl"),
+        (
+            &["list-unit-files", "--state=enabled", "--no-legend", "--plain"][..],
+            "sudo systemctl",
+        ),
         (
             &["--user", "list-unit-files", "--state=enabled", "--no-legend", "--plain"][..],
             "systemctl --user",
@@ -597,11 +617,16 @@ fn demarrage_linux(t: &mut Vec<Trouvaille>, maison: &std::path::Path) {
 
 // ───────────────────────────── Relevé : macOS ─────────────────────────────
 
+// Même signature que sous Windows, où la lecture PowerShell peut échouer.
+#[allow(clippy::unnecessary_wraps)]
 #[cfg(target_os = "macos")]
 fn relever() -> Option<Vec<Trouvaille>> {
     let maison = PathBuf::from(std::env::var_os("HOME").unwrap_or_default());
     let mut t = Vec::new();
-    for (dossier, sudo) in [(PathBuf::from("/Applications"), "sudo "), (maison.join("Applications"), "")] {
+    for (dossier, sudo) in [
+        (PathBuf::from("/Applications"), "sudo "),
+        (maison.join("Applications"), ""),
+    ] {
         for e in std::fs::read_dir(&dossier).into_iter().flatten().flatten() {
             let nom = e.file_name().to_string_lossy().into_owned();
             if !nom.to_lowercase().ends_with(".app") {
@@ -672,7 +697,7 @@ fn relever() -> Option<Vec<Trouvaille>> {
             t.push(Trouvaille {
                 logiciel: i,
                 trace: Trace::EnCours {
-                    connecte: pid.parse::<u32>().ok().is_some_and(|p| connectes.contains(&p)),
+                    connecte: pid.parse::<u32>().is_ok_and(|p| connectes.contains(&p)),
                 },
                 ou: affichable(comm),
                 depuis: None,
@@ -723,7 +748,11 @@ fn guid_msi(chaine: &str) -> Option<&str> {
 #[cfg(any(windows, test))]
 fn retrait_windows(desinstallation: &str, silencieuse: &str) -> Vec<String> {
     use crate::commande::{decouper_commande, ps_chaine};
-    let chaine = if silencieuse.trim().is_empty() { desinstallation } else { silencieuse };
+    let chaine = if silencieuse.trim().is_empty() {
+        desinstallation
+    } else {
+        silencieuse
+    };
     if chaine.trim().is_empty() {
         return Vec::new();
     }
@@ -810,7 +839,7 @@ fn lire_windows(sortie: &str) -> Option<Vec<Trouvaille>> {
         t.push(Trouvaille {
             logiciel: i,
             trace: Trace::EnCours {
-                connecte: pid.trim().parse::<u32>().ok().is_some_and(|p| connectes.contains(&p)),
+                connecte: pid.trim().parse::<u32>().is_ok_and(|p| connectes.contains(&p)),
             },
             ou: affichable(if chemin.is_empty() { nom } else { chemin }),
             depuis: None,
@@ -904,10 +933,7 @@ fn decrire(t: &Trouvaille, aujourd_hui: NaiveDate) -> String {
 /// Menu Antivirus et protection › Quelqu'un contrôle mon ordi ? : explique l'arnaque, cherche, conseille, puis retire
 /// après accord ; un programme en cours demande un second accord exprès.
 pub fn menu() {
-    titre(tr!(
-        "Quelqu'un contrôle mon ordi ?",
-        "Is someone controlling my PC?"
-    ));
+    titre(tr!("Quelqu'un contrôle mon ordi ?", "Is someone controlling my PC?"));
     dire(tr!(
         "L'arnaque au faux technicien : un appel (« votre ordinateur est infecté »), une fenêtre qui fait peur ou un courriel urgent, puis on te fait installer un programme de prise de contrôle à distance (AnyDesk, TeamViewer, RustDesk…). La personne voit ton écran, bouge ta souris, et en profite pour voler des mots de passe ou faire payer une réparation inventée. Gardien cherche ces programmes ici : installés, lancés au démarrage, en cours, ou simplement téléchargés.",
         "The tech-support scam: a call (“your computer is infected”), a scary pop-up or an urgent email, then you are made to install a remote control program (AnyDesk, TeamViewer, RustDesk…). The person sees your screen, moves your mouse, and takes the opportunity to steal passwords or charge for a made-up repair. Gardien looks for these programs here: installed, started at boot, running, or simply downloaded."
@@ -1008,7 +1034,7 @@ pub fn menu() {
                 "{nom} est en cours d'exécution : une session à distance est peut-être ouverte. Si tu es toi-même connecté à cet ordinateur par {nom}, réponds non.",
                 "{nom} is running: a remote session may be open. If you are yourself connected to this computer through {nom}, answer no."
             ));
-            if !demander(trf!(
+            if !demander(&trf!(
                 "  Fermer {nom} et le retirer quand même ? [o/N] : ",
                 "  Close {nom} and remove it anyway? [y/N]: "
             ))
@@ -1057,14 +1083,20 @@ mod tests {
     use super::*;
 
     fn indice(nom: &str) -> usize {
-        LOGICIELS.iter().position(|l| l.nom[0] == nom).expect("logiciel du catalogue")
+        LOGICIELS
+            .iter()
+            .position(|l| l.nom[0] == nom)
+            .expect("logiciel du catalogue")
     }
 
     #[test]
     fn reconnu_au_debut_d_un_mot_seulement() {
         assert_eq!(reconnu("AnyDesk.exe"), Some(indice("AnyDesk")));
         assert_eq!(reconnu("com.rustdesk.RustDesk"), Some(indice("RustDesk")));
-        assert_eq!(reconnu("MicrosoftCorporationII.QuickAssist_8wekyb3d8bbwe"), Some(indice("Assistance rapide")));
+        assert_eq!(
+            reconnu("MicrosoftCorporationII.QuickAssist_8wekyb3d8bbwe"),
+            Some(indice("Assistance rapide"))
+        );
         assert_eq!(reconnu("Action1 Agent"), Some(indice("Action1")));
         assert_eq!(reconnu("AteraAgent"), Some(indice("Atera")));
         assert_eq!(reconnu("été anydesk"), Some(indice("AnyDesk")));
@@ -1099,7 +1131,12 @@ mod tests {
         let quick = [trouvaille("Assistance rapide", Trace::Installe, None, &[])];
         assert!(juger(&quick, aujourd_hui)[0].probleme.is_none());
         // Ouvert, il compte : quelqu'un est peut-être à l'autre bout.
-        let ouvert = [trouvaille("Assistance rapide", Trace::EnCours { connecte: true }, None, &[])];
+        let ouvert = [trouvaille(
+            "Assistance rapide",
+            Trace::EnCours { connecte: true },
+            None,
+            &[],
+        )];
         let c = &juger(&ouvert, aujourd_hui)[0];
         assert_eq!(c.probleme, Some(Niveau::Eleve));
         assert!(c.message.contains("Assistance rapide"), "{}", c.message);
@@ -1108,7 +1145,12 @@ mod tests {
     #[test]
     fn recent_eleve_et_retire_ancien_moyen_en_cours_jamais_retire_par_le_bilan() {
         let aujourd_hui = jour("2026-10-18");
-        let recent = [trouvaille("AnyDesk", Trace::Installe, Some(jour("2026-10-03")), &["sudo pacman -Rns --noconfirm 'anydesk'"])];
+        let recent = [trouvaille(
+            "AnyDesk",
+            Trace::Installe,
+            Some(jour("2026-10-03")),
+            &["sudo pacman -Rns --noconfirm 'anydesk'"],
+        )];
         let c = &juger(&recent, aujourd_hui)[0];
         assert_eq!(c.probleme, Some(Niveau::Eleve));
         let k = c.correctif.as_ref().unwrap();
@@ -1117,7 +1159,12 @@ mod tests {
         // Pas de date dans le message : « déclarer normal » doit le reconnaître demain aussi.
         assert!(!c.message.contains("2026"), "{}", c.message);
 
-        let ancien = [trouvaille("TeamViewer", Trace::Installe, Some(jour("2024-01-01")), &["x"])];
+        let ancien = [trouvaille(
+            "TeamViewer",
+            Trace::Installe,
+            Some(jour("2024-01-01")),
+            &["x"],
+        )];
         assert_eq!(juger(&ancien, aujourd_hui)[0].probleme, Some(Niveau::Moyen));
 
         let en_cours = [
@@ -1139,7 +1186,10 @@ mod tests {
             trouvaille("TeamViewer", Trace::Installe, None, &["b"]),
             trouvaille("AnyDesk", Trace::Demarrage, None, &["a"]),
         ];
-        let noms: Vec<String> = juger(&deux, aujourd_hui).iter().map(|c| c.message.split(' ').next().unwrap().to_string()).collect();
+        let noms: Vec<String> = juger(&deux, aujourd_hui)
+            .iter()
+            .map(|c| c.message.split(' ').next().unwrap().to_string())
+            .collect();
         assert_eq!(noms, ["AnyDesk", "TeamViewer"]);
     }
 
@@ -1179,7 +1229,9 @@ mod tests {
         );
         assert_eq!(
             de("TeamViewer", Trace::Installe).retrait,
-            ["Start-Process -Wait -FilePath 'msiexec.exe' -ArgumentList '/x', '{0A1B2C3D-4E5F-6071-8293-A4B5C6D7E8F9}', '/qn', '/norestart'"]
+            [
+                "Start-Process -Wait -FilePath 'msiexec.exe' -ArgumentList '/x', '{0A1B2C3D-4E5F-6071-8293-A4B5C6D7E8F9}', '/qn', '/norestart'"
+            ]
         );
         // La ligne silencieuse d'abord ; les apostrophes typographiques du nom sont doublées, jamais une fin de chaîne.
         let supremo = de("Supremo", Trace::Installe);
@@ -1189,20 +1241,31 @@ mod tests {
             ["Start-Process -Wait -FilePath 'C:\\Users\\alice\\L’’outil\\unins000.exe' -ArgumentList '/SILENT'"]
         );
         // Le service d'un programme installé part avec son désinstalleur ; celui sans désinstalleur est retiré lui-même.
-        assert!(de("AnyDesk", Trace::Demarrage).retrait.is_empty());
+        assert_eq!(de("AnyDesk", Trace::Demarrage).retrait, Vec::<String>::new());
         assert_eq!(
             de("ScreenConnect (ConnectWise)", Trace::Demarrage).retrait,
             ["sc.exe delete 'ScreenConnect Client (abc)'"]
         );
-        assert_eq!(de("AnyDesk", Trace::EnCours { connecte: true }).arret, ["Stop-Process -Name 'AnyDesk' -Force -ErrorAction SilentlyContinue"]);
-        assert!(t.iter().any(|x| x.logiciel == indice("Assistance rapide") && x.trace == Trace::EnCours { connecte: false }));
+        assert_eq!(
+            de("AnyDesk", Trace::EnCours { connecte: true }).arret,
+            ["Stop-Process -Name 'AnyDesk' -Force -ErrorAction SilentlyContinue"]
+        );
+        assert!(
+            t.iter()
+                .any(|x| x.logiciel == indice("Assistance rapide") && x.trace == Trace::EnCours { connecte: false })
+        );
         assert_eq!(
             de("UltraViewer", Trace::Demarrage).retrait,
-            ["Remove-ItemProperty -Path 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run' -Name 'UltraViewer' -ErrorAction SilentlyContinue"]
+            [
+                "Remove-ItemProperty -Path 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run' -Name 'UltraViewer' -ErrorAction SilentlyContinue"
+            ]
         );
         let pose = de("AnyDesk", Trace::Fichier);
         assert_eq!(pose.depuis, Some(jour("2026-10-15")));
-        assert_eq!(pose.retrait, ["Remove-Item -LiteralPath 'C:\\Users\\alice\\Downloads\\AnyDesk.exe' -Force"]);
+        assert_eq!(
+            pose.retrait,
+            ["Remove-Item -LiteralPath 'C:\\Users\\alice\\Downloads\\AnyDesk.exe' -Force"]
+        );
         // Edge, le spouleur, l'explorateur et rapport.exe : rien à voir.
         assert_eq!(t.len(), 9, "{t:#?}");
 
@@ -1224,9 +1287,15 @@ mod tests {
             Some("{0A1B2C3D-4E5F-6071-8293-A4B5C6D7E8F9}")
         );
         assert_eq!(guid_msi("MsiExec.exe /I{court}"), None);
-        assert_eq!(guid_msi("\"C:\\x\\u.exe\" {0A1B2C3D-4E5F-6071-8293-A4B5C6D7E8F9}"), None);
+        assert_eq!(
+            guid_msi("\"C:\\x\\u.exe\" {0A1B2C3D-4E5F-6071-8293-A4B5C6D7E8F9}"),
+            None
+        );
         assert_eq!(retrait_windows("", ""), Vec::<String>::new());
-        assert_eq!(retrait_windows("C:\\x\\u.exe", ""), ["Start-Process -Wait -FilePath 'C:\\x\\u.exe'"]);
+        assert_eq!(
+            retrait_windows("C:\\x\\u.exe", ""),
+            ["Start-Process -Wait -FilePath 'C:\\x\\u.exe'"]
+        );
     }
 
     #[test]
@@ -1244,12 +1313,25 @@ mod tests {
         let aujourd_hui = jour("2026-10-18");
         assert_eq!(quand(jour("2026-10-18"), aujourd_hui), "aujourd'hui");
         assert_eq!(quand(jour("2026-10-17"), aujourd_hui), "hier");
-        assert_eq!(quand(jour("2026-10-03"), aujourd_hui), "le 2026-10-03 (il y a 15 jours)");
+        assert_eq!(
+            quand(jour("2026-10-03"), aujourd_hui),
+            "le 2026-10-03 (il y a 15 jours)"
+        );
         assert_eq!(quand(jour("2026-11-03"), aujourd_hui), "le 2026-11-03");
         let t = trouvaille("AnyDesk", Trace::Fichier, Some(jour("2026-10-15")), &[]);
-        assert_eq!(decrire(&t, aujourd_hui), "fichier déposé le 2026-10-15 (il y a 3 jours) : ici AnyDesk");
-        let deux = sans_doublons(vec![t.clone(), t.clone(), trouvaille("AnyDesk", Trace::Installe, None, &[])]);
+        assert_eq!(
+            decrire(&t, aujourd_hui),
+            "fichier déposé le 2026-10-15 (il y a 3 jours) : ici AnyDesk"
+        );
+        let deux = sans_doublons(vec![
+            t.clone(),
+            t.clone(),
+            trouvaille("AnyDesk", Trace::Installe, None, &[]),
+        ]);
         assert_eq!(deux.len(), 2);
-        assert_eq!(sans_repetition(["a".to_string(), "b".to_string(), "a".to_string()]), ["a", "b"]);
+        assert_eq!(
+            sans_repetition(["a".to_string(), "b".to_string(), "a".to_string()]),
+            ["a", "b"]
+        );
     }
 }

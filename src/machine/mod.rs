@@ -76,7 +76,7 @@ impl Audit {
     }
 }
 
-fn ok(categorie: &'static str, message: impl Into<String>) -> Constat {
+pub(crate) fn ok(categorie: &'static str, message: impl Into<String>) -> Constat {
     Constat {
         categorie,
         probleme: None,
@@ -86,7 +86,7 @@ fn ok(categorie: &'static str, message: impl Into<String>) -> Constat {
     }
 }
 
-fn alerte(categorie: &'static str, niveau: Niveau, message: impl Into<String>) -> Constat {
+pub(crate) fn alerte(categorie: &'static str, niveau: Niveau, message: impl Into<String>) -> Constat {
     Constat {
         categorie,
         probleme: Some(niveau),
@@ -97,7 +97,7 @@ fn alerte(categorie: &'static str, niveau: Niveau, message: impl Into<String>) -
 }
 
 /// Vérification qui n'a pas pu se faire : on le dit, sans jamais conclure « OK ».
-fn impossible(categorie: &'static str, raison: &str) -> Constat {
+pub(crate) fn impossible(categorie: &'static str, raison: &str) -> Constat {
     Constat {
         verifie: false,
         ..alerte(
@@ -109,7 +109,7 @@ fn impossible(categorie: &'static str, raison: &str) -> Constat {
 }
 
 impl Constat {
-    fn corriger(mut self, action: impl Into<String>, commandes: &[impl ToString]) -> Self {
+    pub(crate) fn corriger(mut self, action: impl Into<String>, commandes: &[impl ToString]) -> Self {
         self.correctif = Some(Correctif {
             action: action.into(),
             commandes: commandes.iter().map(ToString::to_string).collect(),
@@ -128,7 +128,7 @@ impl Constat {
         self
     }
 
-    fn manuel(self, action: impl Into<String>, commandes: &[&str]) -> Self {
+    pub(crate) fn manuel(self, action: impl Into<String>, commandes: &[&str]) -> Self {
         let mut c = self.corriger(action, commandes);
         if let Some(k) = &mut c.correctif {
             k.automatique = false;
@@ -187,6 +187,7 @@ fn audit(systeme: &'static str, premier: Constat, mut propres: Vec<Verification<
         verif!(journaux::journaux()),
         verif!([crate::protection::integrite::constat()]),
         verif!(crate::protection::pieges::constat()),
+        verif!(crate::protection::distance::constats()),
     ]);
     let mut constats = vec![premier];
     constats.extend(en_parallele(propres));

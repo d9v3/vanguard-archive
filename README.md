@@ -57,7 +57,7 @@ pour revenir.
 | **Connexion pour le jeu** | Ping, gigue, pertes, débit et bufferbloat, comparés à tes habitudes. |
 | **Dépanner** | Diagnostic de l'ordinateur, pannes de tous les jours pas à pas (Internet, Wi-Fi, lenteur, son, imprimante, disque plein), « Pourquoi c'est lent ? », fiche de l'ordinateur, réparations. |
 | **Optimiser et nettoyer** | Réglages de confidentialité et de performance qui s'annulent exactement, nettoyage à cocher avec la place gagnée mesurée, programmes du démarrage. |
-| **Protection** | Fichiers-pièges contre les rançongiciels, blocages de Windows Defender, 308 règles YARA, antivirus, bac à sable, intégrité des fichiers critiques, mots de passe fuités, connexions sortantes, liens dangereux, fichiers téléchargés. |
+| **Protection** | Fichiers-pièges contre les rançongiciels, blocages de Windows Defender, 308 règles YARA, antivirus, bac à sable, intégrité des fichiers critiques, mots de passe fuités, connexions sortantes, faux technicien (logiciels de prise de contrôle à distance), liens dangereux, fichiers téléchargés. |
 | **Suivi** | Surveillance toutes les heures, entretien du mois, rapport HTML avec la courbe des notes, apprentissage sur ton ordinateur. |
 | **Logiciels et jeux** | Les meilleurs logiciels en 8 catégories, depuis leur source officielle ; mises à jour de tout d'un coup ; réglages pour jouer. |
 | **Outils** | Copier mes fichiers (copie vérifiée), mes ordinateurs (suivis par la clé), guide des commandes, recherche dans tous les menus. |
@@ -189,6 +189,12 @@ depuis Linux, par exemple), et le guide dit si un programme manque sur cet ordin
 - Qui parle à Internet ? : les connexions en cours de chaque programme, avec le nom du serveur ; un programme lancé
   depuis un dossier temporaire ou les Téléchargements, un port de logiciel d'accès à distance ou un serveur sans nom
   sont signalés. Lecture seule : rien n'est coupé.
+- Quelqu'un contrôle mon ordi ? : l'arnaque au faux technicien (« votre ordinateur est infecté ») fait installer un
+  logiciel de prise de contrôle à distance. Gardien cherche AnyDesk, TeamViewer, RustDesk, Assistance rapide,
+  Splashtop, UltraViewer… installés (et depuis quand), lancés au démarrage, en cours d'exécution ou simplement posés
+  dans Téléchargements ; il explique quoi faire (couper Internet, prévenir la banque, changer les mots de passe) et
+  les retire après accord. Un programme en cours n'est jamais coupé sans un second accord exprès : la personne qui
+  aide peut être connectée par lui. Au bilan aussi (« Accès à distance »).
 - Ce lien est-il dangereux ? : un lien reçu examiné sans jamais l'ouvrir (lettres déguisées, sous-domaine trompeur,
   marque imitée, raccourcisseur, adresse IP brute) ; après accord, l'âge du domaine et trois listes publiques de
   sites dangereux (URLhaus, Spamhaus, SURBL). Seul le nom du domaine sort de l'ordinateur.
@@ -277,6 +283,7 @@ Chaque entrée du menu existe aussi en commande.
 | `gardien isoler <fichier>` | lancer un programme inconnu dans un bac à sable (bubblewrap ou firejail, Windows Sandbox) |
 | `gardien courriel` | fuites d'adresse courriel (XposedOrNot, ou Have I Been Pwned avec `GARDIEN_HIBP_CLE`) |
 | `gardien sortantes` | qui parle à Internet : les connexions de chaque programme (lecture seule) |
+| `gardien distance` | quelqu'un contrôle mon ordi ? logiciels de prise de contrôle à distance (faux technicien), retrait après accord |
 | `gardien lien <adresse>` | ce lien est-il dangereux ? (examiné sans l'ouvrir ; en ligne après accord) |
 | `gardien verifier-fichier <fichier> [empreinte]` | vérifier un fichier téléchargé : empreinte, nom et contenu, YARA, antivirus |
 | `gardien integrite [--accepter] [--temps-reel]` | intégrité des fichiers critiques (empreintes BLAKE3), en direct possible |

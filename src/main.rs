@@ -207,6 +207,11 @@ enum Commande {
     /// Qui parle à Internet ? Les connexions en cours de chaque programme, avec le nom du serveur. Lecture seule.
     #[command(visible_alias = "outbound")]
     Sortantes,
+    /// Quelqu'un contrôle mon ordinateur ? Les logiciels de prise de contrôle à distance (AnyDesk, TeamViewer,
+    /// RustDesk…) installés, lancés au démarrage, en cours ou téléchargés : l'outil des faux techniciens. Retrait
+    /// après accord ; un programme en cours demande un second accord.
+    #[command(visible_alias = "remote-access")]
+    Distance,
     /// Ce lien est-il dangereux ? Examiné sans jamais l'ouvrir ; après accord, son âge et des listes publiques.
     #[command(visible_alias = "link")]
     Lien {
@@ -630,6 +635,7 @@ enum Action {
     MotsDePasse,
     Courriel,
     QuiParle,
+    Distance,
     Lien,
     VerifierFichier,
     Logiciels,
@@ -783,6 +789,11 @@ const OUTILS: &[Outil] = &[
         precision: ["connexions de chaque programme", "each program's connections"],
         mots: "connexions connections sortantes outbound espion spyware mouchard télémétrie telemetry serveurs \
                servers" },
+    Outil { action: Action::Distance, groupe: Some(Groupe::Protection), lettre: "",
+        titre: ["Quelqu'un contrôle mon ordi ?", "Is someone controlling my PC?"],
+        precision: ["faux technicien, accès à distance", "tech-support scam, remote access"],
+        mots: "arnaque scam faux technicien fake tech support anydesk teamviewer rustdesk accès distance remote \
+               access contrôle control prise de contrôle" },
     Outil { action: Action::Lien, groupe: Some(Groupe::Protection), lettre: "",
         titre: ["Ce lien est-il dangereux ?", "Is this link dangerous?"],
         precision: ["examiné sans l'ouvrir", "checked without opening it"],
@@ -1076,6 +1087,7 @@ async fn executer(s: &mut Session, action: Action) {
         Action::MotsDePasse => protection::fuites::verifier(),
         Action::Courriel => protection::fuites::verifier_courriel(),
         Action::QuiParle => protection::sortantes::afficher(),
+        Action::Distance => protection::distance::menu(),
         Action::Lien => protection::lien::verifier(None),
         Action::VerifierFichier => protection::telechargement::verifier(None, None),
         Action::Logiciels => logiciels::menu(),
@@ -1301,6 +1313,7 @@ async fn main() {
         Some(Commande::MotDePasse) => protection::fuites::verifier(),
         Some(Commande::Courriel) => protection::fuites::verifier_courriel(),
         Some(Commande::Sortantes) => protection::sortantes::afficher(),
+        Some(Commande::Distance) => protection::distance::menu(),
         Some(Commande::Lien { adresse }) => protection::lien::verifier(Some(&adresse)),
         Some(Commande::VerifierFichier { fichier, empreinte }) => {
             protection::telechargement::verifier(Some(&fichier), empreinte.as_deref());
