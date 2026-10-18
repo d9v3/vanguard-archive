@@ -11,11 +11,12 @@ use std::net::{IpAddr, Ipv4Addr};
 use std::process::Command;
 use std::time::Duration;
 
+use crate::reseau::listes_noires::resoudre;
 use crate::risk::Niveau;
 use crate::ui::*;
 
 /// Un lien découpé. L'hôte est en minuscules, tel qu'écrit (punycode compris).
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Default, PartialEq, Eq)]
 struct Lien {
     /// « https », « http », « javascript »… ; vide si le lien n'en a pas (« exemple.com/page »).
     schema: String,
@@ -204,26 +205,23 @@ fn decouper(adresse: &str) -> Option<Lien> {
         // javascript:, data:, file:… : pas de site, c'est le lien lui-même qui agit.
         return Some(Lien {
             schema,
-            utilisateur: None,
-            hote: String::new(),
-            port: None,
             reste: reste.to_string(),
+            ..Lien::default()
         });
     }
     let reste = reste.strip_prefix("//").unwrap_or(reste);
     let fin = reste.find(['/', '?', '#', '\\']).unwrap_or(reste.len());
     let (autorite, suite) = reste.split_at(fin);
-    let (utilisateur, hote_port) = match autorite.rsplit_once('@') {
-        Some((u, h)) => (Some(u.to_string()), h),
-        None => (None, autorite),
-    };
+    let (utilisateur, hote_port) = autorite
+        .rsplit_once('@')
+        .map_or((None, autorite), |(u, h)| (Some(u.to_string()), h));
     let (hote, port) = if let Some(r) = hote_port.strip_prefix('[') {
         let (h, apres) = r.split_once(']')?;
-        (h.to_string(), apres.strip_prefix(':').and_then(|p| p.parse().ok()))
+        (h, apres.strip_prefix(':').and_then(|p| p.parse().ok()))
     } else {
         match hote_port.rsplit_once(':') {
-            Some((h, p)) if !p.is_empty() && p.chars().all(|c| c.is_ascii_digit()) => (h.to_string(), p.parse().ok()),
-            _ => (hote_port.to_string(), None),
+            Some((h, p)) if !p.is_empty() && p.chars().all(|c| c.is_ascii_digit()) => (h, p.parse().ok()),
+            _ => (hote_port, None),
         }
     };
     let hote = hote.trim_end_matches('.').to_lowercase();
@@ -293,13 +291,7 @@ fn punycode(entree: &str) -> Option<String> {
                 _ => return None,
             });
             rang = rang.checked_add(chiffre.checked_mul(poids)?)?;
-            let seuil = if palier <= biais {
-                TMIN
-            } else if palier >= biais + TMAX {
-                TMAX
-            } else {
-                palier - biais
-            };
+            let seuil = palier.saturating_sub(biais).clamp(TMIN, TMAX);
             if chiffre < seuil {
                 break;
             }
@@ -469,8 +461,7 @@ fn ressemble(mot: &str, cle: &str) -> bool {
 
 /// La marque dont parle une étiquette du nom (« paypal-secure », « appleidlogin », « secure-paypal »).
 fn parle_de(etiquette: &str, cle: &str) -> bool {
-    let morceaux: Vec<&str> = etiquette.split('-').collect();
-    if morceaux.contains(&cle) {
+    if etiquette.split('-').any(|m| m == cle) {
         return true;
     }
     let colle = etiquette.replace('-', "");
@@ -493,30 +484,28 @@ fn officiel(hote: &str, marque: &Marque) -> bool {
 
 /// Tout ce qui se voit dans le lien lui-même, sans rien demander à personne.
 fn examiner(lien: &Lien) -> Vec<Signe> {
-    let mut signes = Vec::new();
     match lien.schema.as_str() {
         "javascript" | "vbscript" | "data" => {
-            signes.push(signe(
+            return vec![signe(
                 Niveau::Critique,
                 tr!(
                     "Ce lien n'ouvre pas un site : il exécute du code ou contient une page cachée.",
                     "This link does not open a site: it runs code or carries a hidden page."
                 ),
-            ));
-            return signes;
+            )];
         }
         "" | "http" | "https" => {}
         autre => {
-            signes.push(signe(
+            return vec![signe(
                 Niveau::Eleve,
                 trf!(
                     "Lien « {autre}: », pas une page web : il ouvre un fichier ou un programme.",
                     "“{autre}:” link, not a web page: it opens a file or a program."
                 ),
-            ));
-            return signes;
+            )];
         }
     }
+    let mut signes = Vec::new();
     let hote = lien.hote.as_str();
     let domaine = domaine_enregistrable(hote);
 
@@ -562,7 +551,8 @@ fn examiner(lien: &Lien) -> Vec<Signe> {
             ),
         ));
     } else {
-        signes.extend(examiner_nom(hote, &domaine));
+        signes.extend(lettres_deguisees(hote));
+        signes.extend(examiner_marques(hote, &domaine));
     }
 
     if lien.schema == "http" {
@@ -605,8 +595,7 @@ fn examiner(lien: &Lien) -> Vec<Signe> {
             ),
         ));
     }
-    let codes = lien.reste.matches('%').count();
-    if lien.reste.len() > 200 || codes > 10 {
+    if lien.reste.len() > 200 || lien.reste.matches('%').count() > 10 {
         signes.push(signe(
             Niveau::Info,
             tr!(
@@ -618,67 +607,63 @@ fn examiner(lien: &Lien) -> Vec<Signe> {
     signes
 }
 
-/// Ce que dit le nom du site : lettres déguisées, marque imitée, sous-domaine trompeur, raccourcisseur, hébergement
-/// gratuit, extension à risque.
-fn examiner_nom(hote: &str, domaine: &str) -> Vec<Signe> {
-    let mut signes = Vec::new();
+/// Lettres d'un autre alphabet : le nom tel qu'on le lit, ramené aux lettres latines qu'il imite.
+fn lettres_deguisees(hote: &str) -> Option<Signe> {
     let lisible = affiche(hote);
-    // Lettres d'un autre alphabet : le nom tel qu'on le lit, ramené aux lettres latines qu'il imite.
-    if lisible != hote || !lisible.is_ascii() {
-        let mut lu = String::new();
-        let mut melange = false;
-        let mut etranger = false;
-        for etiquette in lisible.split('.') {
-            let alphabets: std::collections::BTreeSet<&str> =
-                etiquette.chars().filter(|c| *c != '-').map(alphabet).collect();
-            melange |= alphabets.len() > 1;
-            etranger |= alphabets.iter().any(|a| *a != "latin");
-            if !lu.is_empty() {
-                lu.push('.');
-            }
-            lu.extend(etiquette.chars().map(|c| latine(c).unwrap_or('?')));
-        }
-        let imitee = marques().iter().find(|m| officiel(&lu, m));
-        // Lettres accentuées seules (« québec.ca ») : un nom honnête, sauf s'il imite une marque.
-        if imitee.is_none() && !melange && !etranger {
-            return examiner_marques(hote, domaine, signes);
-        }
-        signes.push(match imitee {
-            Some(m) => signe(
-                Niveau::Critique,
-                trf!(
-                    "Lettres déguisées : s'affiche « {lisible} », se lit comme {} de {}, mais n'en est pas un.",
-                    "Disguised letters: shows as “{lisible}”, reads like {} of {}, but is not.",
-                    domaine_enregistrable(&lu),
-                    m.nom
-                ),
-            ),
-            None if melange => signe(
-                Niveau::Eleve,
-                trf!(
-                    "Lettres de deux alphabets mélangées dans « {lisible} » : la ruse des faux sites qui imitent un vrai nom.",
-                    "Letters from two alphabets mixed in “{lisible}”: the trick of fake sites imitating a real name."
-                ),
-            ),
-            None => signe(
-                Niveau::Info,
-                trf!(
-                    "Nom écrit dans un autre alphabet : « {lisible} ».",
-                    "Name written in another alphabet: “{lisible}”."
-                ),
-            ),
-        });
+    if lisible == hote && lisible.is_ascii() {
+        return None;
     }
-    examiner_marques(hote, domaine, signes)
+    let mut lu = String::new();
+    let mut melange = false;
+    let mut etranger = false;
+    for etiquette in lisible.split('.') {
+        let alphabets: std::collections::BTreeSet<&str> =
+            etiquette.chars().filter(|c| *c != '-').map(alphabet).collect();
+        melange |= alphabets.len() > 1;
+        etranger |= alphabets.iter().any(|a| *a != "latin");
+        if !lu.is_empty() {
+            lu.push('.');
+        }
+        lu.extend(etiquette.chars().map(|c| latine(c).unwrap_or('?')));
+    }
+    Some(match marques().iter().find(|m| officiel(&lu, m)) {
+        Some(m) => signe(
+            Niveau::Critique,
+            trf!(
+                "Lettres déguisées : s'affiche « {lisible} », se lit comme {} de {}, mais n'en est pas un.",
+                "Disguised letters: shows as “{lisible}”, reads like {} of {}, but is not.",
+                domaine_enregistrable(&lu),
+                m.nom
+            ),
+        ),
+        None if melange => signe(
+            Niveau::Eleve,
+            trf!(
+                "Lettres de deux alphabets mélangées dans « {lisible} » : la ruse des faux sites qui imitent un vrai nom.",
+                "Letters from two alphabets mixed in “{lisible}”: the trick of fake sites imitating a real name."
+            ),
+        ),
+        None if etranger => signe(
+            Niveau::Info,
+            trf!(
+                "Nom écrit dans un autre alphabet : « {lisible} ».",
+                "Name written in another alphabet: “{lisible}”."
+            ),
+        ),
+        // Lettres accentuées seules (« québec.ca ») : un nom honnête, sauf s'il imite une marque.
+        None => return None,
+    })
 }
 
 /// Marque imitée, sous-domaine trompeur, raccourcisseur, hébergement gratuit, extension à risque.
-fn examiner_marques(hote: &str, domaine: &str, mut signes: Vec<Signe>) -> Vec<Signe> {
+fn examiner_marques(hote: &str, domaine: &str) -> Vec<Signe> {
+    let mut signes = Vec::new();
     let etiquettes: Vec<&str> = hote.split('.').collect();
     let n_domaine = domaine.split('.').count();
     let sous_domaine = &etiquettes[..etiquettes.len().saturating_sub(n_domaine)];
     let principal = domaine.split('.').next().unwrap_or(domaine);
-    let mut marques_vues = Vec::new();
+    let sous = sous_domaine.join(".");
+    let mut marque_imitee = false;
     for marque in marques() {
         if officiel(hote, marque) {
             signes.push(signe(
@@ -693,7 +678,6 @@ fn examiner_marques(hote: &str, domaine: &str, mut signes: Vec<Signe>) -> Vec<Si
         }
         let vrai = marque.domaines[0];
         // Sous-domaine trompeur : « paypal.com.exemple.xyz » commence par un vrai domaine.
-        let sous = sous_domaine.join(".");
         if marque
             .domaines
             .iter()
@@ -707,7 +691,7 @@ fn examiner_marques(hote: &str, domaine: &str, mut signes: Vec<Signe>) -> Vec<Si
                     marque.nom
                 ),
             ));
-            marques_vues.push(marque.nom);
+            marque_imitee = true;
             continue;
         }
         let mentionnee = etiquettes[..etiquettes.len().saturating_sub(1)]
@@ -731,12 +715,12 @@ fn examiner_marques(hote: &str, domaine: &str, mut signes: Vec<Signe>) -> Vec<Si
                     )
                 },
             ));
-            marques_vues.push(marque.nom);
+            marque_imitee = true;
         }
     }
 
     // Un « .com » ou un « .ca » au milieu : on croit lire la fin du nom.
-    if marques_vues.is_empty()
+    if !marque_imitee
         && sous_domaine
             .iter()
             .any(|e| ["com", "net", "org", "ca", "fr", "gouv", "gov"].contains(e))
@@ -769,7 +753,7 @@ fn examiner_marques(hote: &str, domaine: &str, mut signes: Vec<Signe>) -> Vec<Si
     }
     if let Some(h) = HEBERGEURS.split_whitespace().find(|h| hote.ends_with(&format!(".{h}"))) {
         signes.push(signe(
-            if marques_vues.is_empty() { Niveau::Info } else { Niveau::Eleve },
+            if marque_imitee { Niveau::Eleve } else { Niveau::Info },
             trf!(
                 "Site hébergé gratuitement ({h}) : n'importe qui en crée un en une minute, aucun service sérieux n'y demande ton mot de passe.",
                 "Site on free hosting ({h}): anyone can create one in a minute, no serious service asks for your password there."
@@ -1005,16 +989,11 @@ fn age(domaine: &str) -> Result<(chrono::DateTime<chrono::Utc>, i64), String> {
         return Err(tr!("nom non latin : âge non vérifié", "non-Latin name: age not checked").into());
     }
     let r = crate::commande::lancer(
-        Command::new("curl").args([
-            "-sL",
-            "--max-time",
-            "12",
-            "-H",
-            "Accept: application/rdap+json",
-            "-w",
-            "\n%{http_code}",
-            &format!("https://rdap.org/domain/{domaine}"),
-        ]),
+        Command::new("curl")
+            .args(["-sL", "--max-time", "12"])
+            .args(["-H", "Accept: application/rdap+json"])
+            .args(["-w", "\n%{http_code}"])
+            .arg(format!("https://rdap.org/domain/{domaine}")),
         18,
     )
     .ok_or_else(|| {
@@ -1089,6 +1068,13 @@ fn signe_d_age(date: chrono::DateTime<chrono::Utc>, jours: i64) -> Signe {
 
 // ───────────────────────────── Affichage ─────────────────────────────
 
+/// Un paragraphe coupé à la largeur de l'écran, en retrait de deux colonnes.
+fn paragraphe(texte: &str) {
+    for ligne in envelopper(texte, LARGEUR - 2) {
+        println!("  {ligne}");
+    }
+}
+
 fn afficher_signe(s: &Signe) {
     let marque = match s.niveau {
         Niveau::Info => format!("{GRIS}ℹ{RESET}"),
@@ -1154,18 +1140,13 @@ fn en_ligne(lien: &Lien, adresse: &str) -> Vec<Verification> {
     // Un nom tapé en lettres non latines (« pаypal.com », avec un « а » cyrillique) : les listes et les registres ne
     // connaissent que sa forme « xn-- ». Le demander tel quel ferait répondre « absent » sans l'avoir vraiment cherché.
     if !lien.hote.is_ascii() {
-        let raison = || {
-            Inscription::Impossible(
-                tr!(
-                    "nom en lettres non latines, que les listes ne connaissent que sous sa forme « xn-- »",
-                    "name in non-Latin letters, which the lists only know in its “xn--” form"
-                )
-                .into(),
-            )
-        };
+        let raison = tr!(
+            "nom en lettres non latines, que les listes ne connaissent que sous sa forme « xn-- »",
+            "name in non-Latin letters, which the lists only know in its “xn--” form"
+        );
         return [tr!("Âge", "Age"), "URLhaus", "Spamhaus DBL", "SURBL"]
             .into_iter()
-            .map(|liste| Verification::simple(liste, raison()))
+            .map(|liste| Verification::simple(liste, Inscription::Impossible(raison.into())))
             .collect();
     }
     let domaine = site(lien);
@@ -1193,26 +1174,14 @@ fn en_ligne(lien: &Lien, adresse: &str) -> Vec<Verification> {
         let age = (!ip).then(|| s.spawn(|| age(&domaine)));
         let dbl = (!ip).then(|| {
             s.spawn(|| {
-                chercher_dns(
-                    &domaine,
-                    "dbl.spamhaus.org",
-                    "dbltest.com",
-                    refus_dbl,
-                    crate::reseau::listes_noires::resoudre,
-                )
-                .map_or_else(Inscription::Impossible, |c| sens_dbl(&c))
+                chercher_dns(&domaine, "dbl.spamhaus.org", "dbltest.com", refus_dbl, resoudre)
+                    .map_or_else(Inscription::Impossible, |c| sens_dbl(&c))
             })
         });
         let surbl = (!ip).then(|| {
             s.spawn(|| {
-                chercher_dns(
-                    &domaine,
-                    "multi.surbl.org",
-                    "test.surbl.org",
-                    refus_surbl,
-                    crate::reseau::listes_noires::resoudre,
-                )
-                .map_or_else(Inscription::Impossible, |c| sens_surbl(&c))
+                chercher_dns(&domaine, "multi.surbl.org", "test.surbl.org", refus_surbl, resoudre)
+                    .map_or_else(Inscription::Impossible, |c| sens_surbl(&c))
             })
         });
         let erreur = || Inscription::Impossible(tr!("erreur interne", "internal error").into());
@@ -1290,15 +1259,10 @@ fn verdict(pire: Option<Niveau>, en_ligne: &EnLigne) -> String {
 /// Menu Antivirus et protection › Ce lien est-il dangereux ?, ou `gardien lien <adresse>`.
 pub fn verifier(adresse: Option<&str>) {
     titre(tr!("Ce lien est-il dangereux ?", "Is this link dangerous?"));
-    for ligne in envelopper(
-        tr!(
-            "Gardien examine le lien sans jamais l'ouvrir : le site n'est pas contacté.",
-            "Gardien examines the link without ever opening it: the site is not contacted."
-        ),
-        LARGEUR - 2,
-    ) {
-        println!("  {ligne}");
-    }
+    paragraphe(tr!(
+        "Gardien examine le lien sans jamais l'ouvrir : le site n'est pas contacté.",
+        "Gardien examines the link without ever opening it: the site is not contacted."
+    ));
     let saisie = match adresse {
         Some(a) => a.to_string(),
         None => demander(tr!(
@@ -1345,15 +1309,10 @@ pub fn verifier(adresse: Option<&str>) {
     if !lien.hote.is_empty() {
         let domaine = site(&lien);
         println!();
-        for ligne in envelopper(
-            &trf!(
-                "Vérifier aussi en ligne ? L'âge du domaine (son registre) et trois listes publiques de sites dangereux (URLhaus, Spamhaus, SURBL). Seul le nom {domaine} sortira de l'ordinateur, jamais le lien entier ; le site lui-même n'est pas contacté.",
-                "Also check online? The domain's age (its registry) and three public lists of dangerous sites (URLhaus, Spamhaus, SURBL). Only the name {domaine} will leave the computer, never the whole link; the site itself is not contacted."
-            ),
-            LARGEUR - 2,
-        ) {
-            println!("  {ligne}");
-        }
+        paragraphe(&trf!(
+            "Vérifier aussi en ligne ? L'âge du domaine (son registre) et trois listes publiques de sites dangereux (URLhaus, Spamhaus, SURBL). Seul le nom {domaine} sortira de l'ordinateur, jamais le lien entier ; le site lui-même n'est pas contacté.",
+            "Also check online? The domain's age (its registry) and three public lists of dangerous sites (URLhaus, Spamhaus, SURBL). Only the name {domaine} will leave the computer, never the whole link; the site itself is not contacted."
+        ));
         if demander(tr!("  Continuer ? [o/N] : ", "  Continue? [y/N]: ")).oui() {
             println!();
             let verifications = en_ligne(&lien, &propre);
@@ -1362,9 +1321,7 @@ pub fn verifier(adresse: Option<&str>) {
                 match &v.signe {
                     Some(s) => {
                         afficher_signe(s);
-                        if s.niveau > Niveau::Info {
-                            pire = pire.max(Some(s.niveau));
-                        }
+                        pire = pire.max(Some(s.niveau).filter(|n| *n > Niveau::Info));
                     }
                     None => afficher_reponse(&v.liste, &v.reponse, v.note.as_deref()),
                 }
