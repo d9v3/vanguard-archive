@@ -26,18 +26,25 @@ fn moteur() -> Option<PathBuf> {
     dans_le_path
 }
 
-/// Version du moteur (« 4.5.4 ») : les options -N (ne pas suivre les liens) et -z (sauter les gros fichiers) datent
-/// de la 4.2 ; Ubuntu 22.04 en est encore à la 4.1.
-fn version(moteur: &Path) -> (u32, u32) {
-    let sortie = crate::commande::lancer(Command::new(moteur).arg("--version"), 10)
-        .map(|r| r.sortie)
+/// Les options de prudence que ce moteur connaît, lues dans son aide : -N (liens non suivis : pas de boucle, rien
+/// hors des dossiers choisis) existe déjà dans la 4.1 d'Ubuntu 22.04, -z (fichiers de plus de 256 Mo sautés : images
+/// disque, vidéos) seulement depuis la 4.2. Le numéro de version ne suffisait pas : il retirait -N à la 4.1.
+fn options_de_prudence(moteur: &Path) -> Vec<&'static str> {
+    let aide = crate::commande::lancer(Command::new(moteur).arg("--help"), 10)
+        .map(|r| r.sortie + &r.erreurs)
         .unwrap_or_default();
-    lire_version(&sortie)
+    options_connues(&aide)
 }
 
-fn lire_version(texte: &str) -> (u32, u32) {
-    let mut nombres = texte.trim().split('.').map(|n| n.trim().parse().unwrap_or(0));
-    (nombres.next().unwrap_or(0), nombres.next().unwrap_or(0))
+fn options_connues(aide: &str) -> Vec<&'static str> {
+    let mut options = Vec::new();
+    if aide.contains("--no-follow-symlinks") {
+        options.push("-N");
+    }
+    if aide.contains("--skip-larger") {
+        options.extend(["-z", "268435456"]);
+    }
+    options
 }
 
 /// Propose d'installer le moteur ; `true` s'il est là ensuite.
@@ -166,18 +173,14 @@ fn appliquer(cibles: &[PathBuf]) -> Option<(Vec<Trouve>, Vec<String>)> {
         trp!("  ✖ Règles impossibles à écrire.", "  ✖ Could not write the rules.");
         return None;
     }
-    let recent = version(&moteur) >= (4, 2);
+    let prudence = options_de_prudence(&moteur);
     let mut trouves = Vec::new();
     // Toute sortie en erreur du moteur est dite : ce qu'il n'a pas pu lire n'est jamais compté comme sain.
     let mut erreurs: Vec<String> = Vec::new();
     for cible in cibles {
         trp!("  Analyse de {}…", "  Scanning {}…", cible.display());
         let mut commande = Command::new(&moteur);
-        commande.args(["-r", "-w", "-p", "4", "-a", "30"]);
-        if recent {
-            // Liens non suivis (pas de boucle), fichiers de plus de 256 Mo sautés (images disque, vidéos).
-            commande.args(["-N", "-z", "268435456"]);
-        }
+        commande.args(["-r", "-w", "-p", "4", "-a", "30"]).args(&prudence);
         commande.arg(&regles).arg(cible);
         match crate::commande::lancer(&mut commande, 3600) {
             Some(r) => {
@@ -398,9 +401,15 @@ mod tests {
     }
 
     #[test]
-    fn versions_du_moteur() {
-        assert_eq!(lire_version("4.5.4\n"), (4, 5));
-        assert!(lire_version("4.1.3") < (4, 2));
-        assert_eq!(lire_version("rien"), (0, 0));
+    fn options_lues_dans_l_aide_du_moteur() {
+        // Lignes de l'aide de la 4.1.3 d'Ubuntu 22.04 (-N, pas de -z) et de la 4.5.0 d'Ubuntu 24.04 (les deux).
+        let aide_41 = "  -r,  --recursive                      recursively search directories\n\
+                       -N,  --no-follow-symlinks             do not follow symlinks when scanning\n";
+        let aide_45 = "  -N,  --no-follow-symlinks                do not follow symlinks when scanning\n\
+                       -z,  --skip-larger=NUMBER                skip files larger than the given size\n";
+        assert_eq!(options_connues(aide_41), ["-N"]);
+        assert_eq!(options_connues(aide_45), ["-N", "-z", "268435456"]);
+        // Aide illisible (moteur bloqué, sortie vide) : rien de plus, comme avec un vieux moteur.
+        assert_eq!(options_connues(""), [] as [&str; 0]);
     }
 }
