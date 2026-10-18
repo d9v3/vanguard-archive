@@ -104,6 +104,12 @@ miniupnpc sous Linux). Après accord, l'adresse Internet de la maison est cherch
 **Connexion pour le jeu** — ping, gigue, pertes, débit et bufferbloat (le lag quand quelqu'un télécharge), avec un
 verdict critère par critère et des conseils.
 
+**Wi-Fi, NAT, DNS et caméras** — le Wi-Fi encombré : les réseaux voisins par canal, et le canal le plus libre à
+régler sur la box ; le type de NAT pour le jeu (ouvert, modéré ou strict, comme sur les consoles), double NAT et
+adresse partagée par le fournisseur compris ; le DNS le plus rapide, mesuré ici, proposé seulement s'il ne remplace
+pas un DNS qui protège (NextDNS, chiffré, filtrant) et annulable ; et, dans une location ou chez quelqu'un, les
+appareils du réseau qui ressemblent à des caméras (fabricant, flux vidéo, ONVIF), sans rien couper ni regarder.
+
 **Diagnostic de l'ordinateur** — le premier réflexe d'un dépannage : matériel, système, et les problèmes récents
 (erreurs du journal et programmes plantés sous Linux ; écrans bleus, arrêts brutaux et plantages sous Windows ;
 paniques du noyau et rapports de plantage sous macOS), avec une copie texte enregistrée sur la clé.
@@ -203,6 +209,10 @@ Chaque entrée du menu existe aussi en commande :
 | `gardien yara [--complet] [dossier]` | analyse YARA : 308 règles de familles de logiciels malveillants |
 | `gardien pieges [--retirer]` | fichiers-pièges contre les rançongiciels : les poser, les vérifier, les retirer |
 | `gardien listes-noires` | l'adresse Internet de la maison sur liste noire ? (après accord) |
+| `gardien canaux` | Wi-Fi encombré : les réseaux voisins par canal, et le canal le plus libre |
+| `gardien nat` | type de NAT pour le jeu : ouvert, modéré ou strict |
+| `gardien cameras` | caméras cachées sur le réseau (location, chez quelqu'un) |
+| `gardien dns-rapide` | DNS le plus rapide, mesuré ici et annulable ; un DNS qui protège est gardé |
 | `gardien appris` | ce que Gardien a appris : tes habitudes, tes choix, et les oublier |
 | `gardien motdepasse` | mots de passe fuités |
 | `gardien isoler <fichier>` | lancer un programme inconnu dans un bac à sable (bubblewrap ou firejail, Windows Sandbox) |
@@ -224,7 +234,7 @@ Chaque entrée du menu existe aussi en commande :
 **Langue** : celle du système (français ou anglais). Pour forcer : `GARDIEN_LANG=fr` ou `GARDIEN_LANG=en`. Les
 commandes ont aussi un nom anglais (`full`, `audit`, `fix`, `network`, `connection`, `apps`, `diag`, `password`,
 `sandbox`, `email`, `integrity`, `update`, `repair`, `monitor`, `name`, `backup`, `restore`, `clean`, `decoys`,
-`blocklists`, `learned`).
+`blocklists`, `learned`, `channels`, `fast-dns`).
 
 ## Développer
 

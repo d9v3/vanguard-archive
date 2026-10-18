@@ -49,6 +49,8 @@ Entrée ouvre celle en surbrillance, Échap efface. Au menu principal, elle trou
        Surveillance toutes les heures (appareil inconnu, problème sur cette machine, usurpation de la box)
        Test de connexion pour le jeu (ping, gigue, débit, bufferbloat), comparé à tes habitudes
        Adresse Internet sur liste noire ? (Spamhaus, SpamCop, DroneBL, PSBL, après ton accord)
+       Wi-Fi encombré ? (réseaux voisins par canal, et le canal le plus libre à régler sur la box)
+       Type de NAT pour le jeu (ouvert, modéré ou strict) · Caméras cachées ? (location, chez quelqu'un)
        Alertes sur le téléphone (ntfy, après ton accord : sujet secret, jamais d'adresse IP ni MAC)
   6  Antivirus et protection ›
        Analyse rapide · Analyse complète du dossier personnel
@@ -70,7 +72,8 @@ Entrée ouvre celle en surbrillance, Échap efface. Au menu principal, elle trou
        Nettoyer le système (caches, fichiers temporaires, paquets, corbeille… : la place de chacun, à cocher)
        Réglages recommandés, en une fois · Confidentialité (télémétrie, publicités, suivi, Recall…)
        Performance et fiabilité (démarrage rapide, SSD…) · Confort et fichiers (extensions visibles,
-       pas de lancement automatique des clés, menu complet au clic droit…) · Tout remettre comme avant
+       pas de lancement automatique des clés, menu complet au clic droit…)
+       DNS le plus rapide (mesuré ici ; un DNS qui protège est gardé) · Tout remettre comme avant
        Chaque réglage montre son état et s'annule exactement : la valeur d'avant est remise.
   9  Données : sauvegarder ou restaurer (surnoms, historique des réseaux)
  10  Guide des commandes › les commandes utiles de Linux, Windows, macOS et de tous les systèmes, par programme,

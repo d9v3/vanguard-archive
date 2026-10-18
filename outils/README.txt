@@ -48,6 +48,8 @@ highlighted one, Esc clears it. In the main menu, it also finds each tool of the
        Hourly monitoring (unknown device, problem on this machine, router impersonation)
        Connection test for gaming (ping, jitter, speed, bufferbloat), compared with your habits
        Internet address on blocklists? (Spamhaus, SpamCop, DroneBL, PSBL, after your consent)
+       Crowded Wi-Fi? (nearby networks by channel, and the freest channel to set on the router)
+       NAT type for gaming (open, moderate or strict) · Hidden cameras? (rental, someone else's place)
        Alerts on your phone (ntfy, after your consent: secret topic, never an IP or MAC address)
   6  Antivirus and protection ›
        Quick scan · Full scan of the home folder
@@ -69,7 +71,8 @@ highlighted one, Esc clears it. In the main menu, it also finds each tool of the
        Clean up the system (caches, temporary files, packages, trash…: the space of each, to check)
        Recommended settings, in one go · Privacy (telemetry, ads, tracking, Recall…)
        Performance and reliability (fast startup, SSD…) · Comfort and files (file extensions shown,
-       no autorun from USB drives, full right-click menu…) · Put everything back
+       no autorun from USB drives, full right-click menu…)
+       Fastest DNS (measured here; a DNS that protects you is kept) · Put everything back
        Each setting shows its state and is undone exactly: the previous value is put back.
   9  Data: back up or restore (nicknames, network history)
  10  Command guide › the useful commands of Linux, Windows, macOS and all systems, by program, each one

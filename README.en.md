@@ -97,6 +97,12 @@ listed for spam or attacks, a device is probably infected.
 **Connection for gaming** — ping, jitter, loss, speed and bufferbloat (the lag when someone downloads), with a
 verdict criterion by criterion and advice.
 
+**Wi-Fi, NAT, DNS and cameras** — crowded Wi-Fi: nearby networks by channel, and the freest channel to set on the
+router; the NAT type for gaming (open, moderate or strict, as consoles show it), double NAT and provider-shared
+address included; the fastest DNS, measured here, offered only if it does not replace a DNS that protects you
+(NextDNS, encrypted, filtering), and undoable; and, in a rental or at someone's place, the devices on the network
+that look like cameras (maker, video stream, ONVIF), without turning anything off or watching anything.
+
 **Computer diagnostic** — the first step of any troubleshooting: hardware, system, and recent problems (journal
 errors and crashed programs on Linux; blue screens, sudden shutdowns and crashes on Windows; kernel panics and crash
 reports on macOS), with a text copy saved on the key.
@@ -191,6 +197,10 @@ Each menu entry is also a command:
 | `gardien yara [--complet] [folder]` | YARA scan: 308 rules for malware families |
 | `gardien decoys [--retirer]` | decoy files against ransomware: place them, check them, remove them |
 | `gardien blocklists` | the home's Internet address on a blocklist? (after your consent) |
+| `gardien channels` | crowded Wi-Fi: nearby networks by channel, and the freest channel |
+| `gardien nat` | NAT type for gaming: open, moderate or strict |
+| `gardien cameras` | hidden cameras on the network (rental, someone else's place) |
+| `gardien fast-dns` | fastest DNS, measured here and undoable; a DNS that protects you is kept |
 | `gardien learned` | what Gardien has learned: your habits, your choices, and forgetting them |
 | `gardien password` | leaked passwords |
 | `gardien sandbox <file>` | run an unknown program in a sandbox (bubblewrap or firejail, Windows Sandbox) |
@@ -213,7 +223,7 @@ Each menu entry is also a command:
 also keep their French names (`complet`, `machine`, `corriger`, `reseau`, `connexion`, `logiciels`, `diagnostic`,
 `motdepasse`, `isoler`, `courriel`, `integrite`, `maj`, `reparer`, `surveillance`, `nommer`, `sauvegarder`,
 `restaurer`, `nettoyer`, `pieges`, `listes-noires`, `appris`, `entretien`, `alertes`, `sortantes`, `lien`,
-`verifier-fichier`).
+`verifier-fichier`, `canaux`, `dns-rapide`).
 
 ## Development
 

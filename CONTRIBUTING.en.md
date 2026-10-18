@@ -42,6 +42,9 @@ turn on once with `/install-github-app`).
 | `src/sortantes.rs` | who talks to the Internet: established connections by program (ss, PowerShell, lsof), reverse DNS |
 | `src/lien.rs` | is this link dangerous? local check (punycode, imitated brands…), then RDAP, URLhaus, Spamhaus DBL, SURBL |
 | `src/telechargement.rs` | check a downloaded file: checksum by the system's tool, name and content, YARA and antivirus |
+| `src/canaux.rs`, `src/nat.rs` | crowded Wi-Fi (nearby networks by channel); NAT type (home-made STUN client) |
+| `src/dns_rapide.rs` | fastest DNS: measurement, protecting DNS kept, setting undone through `optimiser/` |
+| `src/cameras.rs` | hidden cameras: maker, RTSP stream, ONVIF discovery (WS-Discovery), web page |
 | `assets/oui.tsv` | manufacturers by MAC prefix (IEEE list), stored as sorted tables at compile time (`build.rs`) |
 | `assets/yara/` | ReversingLabs YARA rules (MIT license), gathered by `outils/maj-yara.sh` |
 | `assets/icones/`, `assets/gardien.ico` | the logo, computed by `outils/icone.py` |

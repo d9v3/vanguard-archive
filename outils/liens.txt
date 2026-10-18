@@ -25,3 +25,8 @@ protege https://www.intel.com/
 
 # DNS public interrogé par outils/liens.py pour confirmer un nom inconnu : il faut l'en-tête qui demande du JSON.
 serveur https://1.1.1.1/dns-query
+
+# Espaces de noms de la recherche ONVIF (src/cameras.rs) : des identifiants SOAP, pas des pages.
+ignorer http://www.w3.org/2003/05/soap-envelope
+ignorer http://schemas.xmlsoap.org/ws/
+ignorer http://www.onvif.org/ver10/
