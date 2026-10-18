@@ -18,6 +18,15 @@ CIBLES = ["x86_64-unknown-linux-musl", "x86_64-pc-windows-gnu", "aarch64-apple-d
 SORTIE = Path("LICENCES-TIERCES.txt")
 FICHIERS_LICENCE = re.compile(r"^(LICEN[CS]E|COPYING|NOTICE|UNLICENSE)", re.IGNORECASE)
 SPDX = Path("/usr/share/licenses/spdx")
+# Données intégrées au programme qui ne sont pas des bibliothèques Rust : (nom, licence, source, texte de la licence).
+DONNEES = [
+    (
+        "Règles YARA de ReversingLabs / ReversingLabs YARA rules (assets/yara/reversinglabs.yara)",
+        "MIT",
+        "https://github.com/reversinglabs/reversinglabs-yara-rules",
+        Path("assets/yara/LICENSE-reversinglabs.txt"),
+    ),
+]
 
 
 def paquets_embarques(cible):
@@ -64,7 +73,8 @@ def main():
     blocs = [
         "Gardien inclut les bibliothèques libres suivantes. Voici leurs avis de droit d'auteur et de licence.\n"
         "Gardien includes the following open source libraries. Their copyright and license notices follow.\n"
-        f"\n{len(embarques)} bibliothèques / libraries."
+        f"\n{len(embarques)} bibliothèques / libraries, et à la fin {len(DONNEES)} jeu(x) de données / then "
+        f"{len(DONNEES)} data set(s)."
     ]
     sans_texte = []
     for (nom, version), p in sorted(embarques.items()):
@@ -76,6 +86,10 @@ def main():
             entete += f"\n{p['repository']}"
         corps = "\n\n".join(f"--- {fichier} ---\n\n{texte}" for fichier, texte in textes)
         blocs.append(f"{'=' * 80}\n{entete}\n{'=' * 80}\n\n{corps}")
+
+    for nom, licence, source, fichier in DONNEES:
+        texte = fichier.read_text(encoding="utf-8").strip()
+        blocs.append(f"{'=' * 80}\n{nom} — {licence}\n{source}\n{'=' * 80}\n\n--- {fichier.name} ---\n\n{texte}")
 
     SORTIE.write_text("\n\n\n".join(blocs) + "\n", encoding="utf-8")
     print(f"{SORTIE} : {len(embarques)} bibliothèques")

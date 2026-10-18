@@ -34,6 +34,7 @@ mod selection;
 mod surveillance;
 mod ui;
 mod upnp;
+mod yara;
 
 use clap::{CommandFactory, FromArgMatches, Parser, Subcommand};
 
@@ -158,6 +159,15 @@ enum Commande {
         /// Retirer les fichiers-pièges posés.
         #[arg(long, visible_alias = "remove")]
         retirer: bool,
+    },
+    /// Analyse YARA : 308 règles de familles de logiciels malveillants (ReversingLabs), en complément de l'antivirus.
+    /// Sans dossier : téléchargements, bureau, démarrage. Lecture seule.
+    Yara {
+        /// Tout le dossier personnel au lieu des endroits à risque.
+        #[arg(long, visible_alias = "full")]
+        complet: bool,
+        /// Une clé USB, un disque externe ou un dossier à analyser en entier.
+        dossier: Option<std::path::PathBuf>,
     },
     /// Lance un programme inconnu dans un bac à sable : pas de réseau, dossier personnel invisible.
     #[command(visible_alias = "sandbox")]
@@ -446,6 +456,7 @@ enum Action {
     AntivirusRapide,
     AntivirusComplet,
     AntivirusDossier,
+    Yara,
     Pieges,
     Bac,
     MotsDePasse,
@@ -481,6 +492,7 @@ impl Action {
         Action::AntivirusRapide,
         Action::AntivirusComplet,
         Action::AntivirusDossier,
+        Action::Yara,
         Action::Pieges,
         Action::Bac,
         Action::MotsDePasse,
@@ -600,6 +612,10 @@ impl Action {
             Action::AntivirusDossier => (
                 tr!("Clé USB ou dossier", "USB drive or folder"),
                 tr!("et pièges de clé", "and drive traps"),
+            ),
+            Action::Yara => (
+                tr!("Analyse YARA", "YARA scan"),
+                tr!("règles de logiciels malveillants", "malware detection rules"),
             ),
             Action::Pieges => (
                 tr!("Fichiers-pièges", "Decoy files"),
@@ -747,6 +763,7 @@ impl Groupe {
                 Action::AntivirusRapide,
                 Action::AntivirusComplet,
                 Action::AntivirusDossier,
+                Action::Yara,
                 Action::Pieges,
                 Action::Bac,
                 Action::MotsDePasse,
@@ -871,6 +888,7 @@ async fn executer(s: &mut Session, action: Action) {
         Action::AntivirusRapide => antivirus::analyser(antivirus::Portee::Rapide),
         Action::AntivirusComplet => antivirus::analyser(antivirus::Portee::Complete),
         Action::AntivirusDossier => antivirus::choisir(),
+        Action::Yara => yara::menu(),
         Action::Pieges => pieges::menu(),
         Action::Bac => {
             let chemin = demander(tr!("  Programme à isoler (chemin) : ", "  Program to isolate (path): "));
@@ -949,6 +967,10 @@ fn ligne_de_commande() -> clap::Command {
         (
             "listes-noires",
             "Is your home's Internet address on a blocklist (Spamhaus, SpamCop, DroneBL, PSBL)? If so, a device is probably infected. After your consent: the lists see the address",
+        ),
+        (
+            "yara",
+            "YARA scan: 308 rules for malware families (ReversingLabs), alongside the antivirus. Without a folder: downloads, desktop, startup. Read-only",
         ),
         (
             "pieges",
@@ -1034,6 +1056,14 @@ fn ligne_de_commande() -> clap::Command {
     })
     .mut_subcommand("pieges", |s| {
         s.mut_arg("retirer", |a| a.help("Remove the decoy files placed"))
+    })
+    .mut_subcommand("yara", |s| {
+        s.mut_arg("complet", |a| {
+            a.help("The whole home folder instead of the risky places")
+        })
+        .mut_arg("dossier", |a| {
+            a.help("A USB drive, external disk or folder to scan entirely")
+        })
     })
     .mut_subcommand("integrite", |s| {
         s.mut_arg("accepter", |a| {
@@ -1132,6 +1162,11 @@ async fn main() {
         Some(Commande::Courriel) => fuites::verifier_courriel(),
         Some(Commande::Isoler { fichier }) => isoler::isoler(&fichier),
         Some(Commande::Pieges { retirer }) => pieges::commande(retirer),
+        Some(Commande::Yara { complet, dossier }) => yara::analyser(&match (dossier, complet) {
+            (Some(d), _) => antivirus::Portee::Dossier(d),
+            (None, true) => antivirus::Portee::Complete,
+            (None, false) => antivirus::Portee::Rapide,
+        }),
         Some(Commande::ListesNoires) => listes_noires::verifier(),
         Some(Commande::Integrite { accepter, temps_reel }) => {
             if temps_reel {

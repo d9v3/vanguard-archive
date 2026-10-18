@@ -12,7 +12,7 @@ use crate::ui::*;
 /// façon exclusive, sous un nom imprévisible et réservé à l'utilisateur : dans un /tmp partagé, un dossier préparé
 /// d'avance par un autre compte (avec un lien piégé au nom du programme) aurait fait écraser un de tes fichiers par
 /// la copie.
-fn dossier_jetable() -> std::io::Result<PathBuf> {
+pub(crate) fn dossier_jetable() -> std::io::Result<PathBuf> {
     static COMPTEUR: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
     let n = COMPTEUR.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let nanos = std::time::SystemTime::now()
