@@ -19,7 +19,8 @@ This USB key holds the program for Linux, Windows and macOS, its database and it
 Protection: the key has two parts. SENTINEL (everything above) is read-only on Windows, and on Linux and macOS
 Sentinel remounts it read-only itself at startup: another computer cannot modify the program. Only its owner's computer
 can write to it. SENTINELLOG, small and writable, only holds journal-erreurs.txt: the errors met
-(version, system, message), without user name, computer name or home folder, to improve Sentinel. Windows
+(version, system, message), without user name, computer name or home folder. Back on the owner's computer, they
+become GitHub issues, to improve Sentinel. Windows
 never starts anything by itself from a USB key (protection against viruses since Windows 7): double-click it.
 
 To start: run Sentinel, choose "1. Full check", then "2. Fix".

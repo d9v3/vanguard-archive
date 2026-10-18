@@ -20,7 +20,8 @@ Protection : la clé a deux parties. SENTINEL (tout ce qui précède) est en lec
 Linux et macOS Sentinel la remonte lui-même en lecture seule au lancement : un autre ordinateur ne peut pas modifier le
 programme. Seul l'ordinateur de son propriétaire peut écrire dessus. SENTINELLOG, petite et modifiable, ne contient que
 journal-erreurs.txt : les erreurs rencontrées (version, système, message), sans nom d'utilisateur, nom de
-machine ni dossier personnel, pour améliorer Sentinel. Windows ne lance rien tout seul depuis une clé USB
+machine ni dossier personnel. De retour sur l'ordinateur du propriétaire, elles deviennent des tickets GitHub,
+pour améliorer Sentinel. Windows ne lance rien tout seul depuis une clé USB
 (protection contre les virus depuis Windows 7) : il faut double-cliquer.
 
 Pour commencer : lancer Sentinel, choisir « 1. Bilan complet », puis « 2. Corriger ».

@@ -1,8 +1,9 @@
 //! Journal des erreurs, pour améliorer sentinel après coup : plantages, scripts PowerShell en échec, vérifications
 //! impossibles, scans ratés. Il est écrit sur la petite partition SENTINELLOG de la clé, la seule modifiable sur les
 //! autres ordinateurs (la partition SENTINEL y est en lecture seule), et rapatrié par outils/deployer.sh au
-//! branchement sur l'ordinateur de développement. Écrit en français : il est destiné au développement, pas à
-//! l'utilisateur.
+//! branchement sur l'ordinateur de développement, qui en fait des tickets GitHub (outils/journal-vers-github.py).
+//! Sans clé branchée, il est écrit dans le dossier de sentinel de cet ordinateur (rapatrié de même sur l'ordinateur
+//! de développement). Écrit en français : il est destiné au développement, pas à l'utilisateur.
 //!
 //! Rien de personnel : dossier personnel, nom d'utilisateur et nom de la machine sont remplacés avant l'écriture.
 
@@ -18,39 +19,51 @@ const TAILLE_MAX: u64 = 4 * 1024 * 1024;
 /// Longueur maximale d'un détail (sortie d'erreur de PowerShell…).
 const DETAIL_MAX: usize = 3000;
 
-/// Partition SENTINELLOG de la clé, si elle est branchée.
+/// Où écrire : la partition SENTINELLOG de la clé si elle est branchée, sinon le dossier de sentinel.
 fn dossier() -> Option<&'static PathBuf> {
     static DOSSIER: OnceLock<Option<PathBuf>> = OnceLock::new();
     DOSSIER
         .get_or_init(|| {
-            // Sous Wine (tests de la version Windows sur Linux), la clé branchée reçoit une lettre de lecteur, et
-            // l'absence de PowerShell remplirait le journal de fausses erreurs : pas de journal.
+            // Pendant les tests automatiques, et sous Wine (tests de la version Windows, sans PowerShell) : pas de
+            // journal, sinon de fausses erreurs partiraient en tickets.
             #[cfg(windows)]
-            {
-                if sous_wine() { None } else { lecteur_windows() }
-            }
+            let essai = cfg!(test) || sous_wine();
             #[cfg(unix)]
-            {
-                #[cfg(target_os = "linux")]
-                let montages: Vec<PathBuf> = std::env::var("USER")
-                    .ok()
-                    .and_then(|u| std::fs::read_dir(format!("/run/media/{u}")).ok())
-                    .into_iter()
-                    .flatten()
-                    .flatten()
-                    .map(|d| d.path())
-                    .collect();
-                #[cfg(target_os = "macos")]
-                let montages: Vec<PathBuf> = std::fs::read_dir("/Volumes")
-                    .into_iter()
-                    .flatten()
-                    .flatten()
-                    .map(|d| d.path())
-                    .collect();
-                montages.into_iter().find(|d| d.join(TEMOIN).is_file())
+            let essai = cfg!(test);
+            if essai {
+                return None;
             }
+            partition_de_la_cle().or_else(|| Some(crate::reseau::dossier_local()))
         })
         .as_ref()
+}
+
+/// Partition SENTINELLOG de la clé, si elle est branchée.
+fn partition_de_la_cle() -> Option<PathBuf> {
+    #[cfg(windows)]
+    {
+        lecteur_windows()
+    }
+    #[cfg(unix)]
+    {
+        #[cfg(target_os = "linux")]
+        let montages: Vec<PathBuf> = std::env::var("USER")
+            .ok()
+            .and_then(|u| std::fs::read_dir(format!("/run/media/{u}")).ok())
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|d| d.path())
+            .collect();
+        #[cfg(target_os = "macos")]
+        let montages: Vec<PathBuf> = std::fs::read_dir("/Volumes")
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|d| d.path())
+            .collect();
+        montages.into_iter().find(|d| d.join(TEMOIN).is_file())
+    }
 }
 
 /// Lecteurs D: à Z: interrogés en même temps, 2 s au plus : un lecteur réseau déconnecté peut mettre de longues

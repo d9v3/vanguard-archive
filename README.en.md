@@ -170,6 +170,11 @@ The key has two partitions: `SENTINEL`, read-only everywhere except on its owner
 by Windows; on Linux and macOS, Sentinel remounts it read-only itself), and `SENTINELLOG`, which only receives the
 error log, anonymized. `outils/preparer-cle.sh` prepares a new key.
 
+Errors and crashes: Sentinel records them with nothing personal (on the key, or in its folder when the key is not
+plugged in). On deployment, `deployer.sh` brings them back and `outils/journal-vers-github.py` turns them into GitHub
+issues (label “journal”) with `gh`: one issue per error, repeats as comments. No GitHub password in the program or on
+the key.
+
 ## License
 
 © 2026 d9v3. Sentinel is free software: you can redistribute it and modify it under the terms of the

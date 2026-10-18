@@ -84,6 +84,31 @@ for png in assets/icones/sentinel-*.png; do
 done
 command -v gtk-update-icon-cache >/dev/null && gtk-update-icon-cache -qtf "$ICONES" || true
 
+# Erreurs du journal de sentinel (plantages, PowerShell en échec…) : celles de cet ordinateur et celles que la clé
+# rapporte des autres sont gardées dans retours/, puis envoyées en tickets GitHub avec gh (un ticket par erreur, les
+# répétitions en commentaire ; outils/journal-vers-github.py). Sans Internet, elles attendent le déploiement suivant.
+RETOURS="${XDG_DATA_HOME:-$HOME/.local/share}/sentinel/retours"
+rapatrier_journal() { # $1 : journal à vider, $2 : d'où il vient
+  [[ -s $1 ]] || return 0
+  mkdir -p "$RETOURS"
+  local nb
+  nb=$(grep -c '^== ' "$1" || true)
+  cat "$1" >>"$RETOURS/journal-erreurs.txt"
+  cat "$1" >>"$RETOURS/a-envoyer-github.txt"
+  : >"$1"
+  echo "Journal $2 : $nb erreur(s) rapatriée(s) dans $RETOURS/journal-erreurs.txt"
+  command -v notify-send >/dev/null &&
+    notify-send -a sentinel -i sentinel "Sentinel : $nb erreur(s) rapportée(s) ($2)" "$RETOURS/journal-erreurs.txt" || true
+}
+envoyer_journal() {
+  [[ -s $RETOURS/a-envoyer-github.txt ]] && command -v gh >/dev/null || return 0
+  timeout 300 python3 outils/journal-vers-github.py "$RETOURS/a-envoyer-github.txt" ||
+    echo "Journal : envoi sur GitHub impossible, il repartira au prochain déploiement."
+}
+# Sans clé branchée, sentinel écrit son journal dans son dossier de cet ordinateur.
+rapatrier_journal "${XDG_DATA_HOME:-$HOME/.local/share}/sentinel/journal-erreurs.txt" "de cet ordinateur"
+envoyer_journal
+
 CLE=$(find "/run/media/$USER" -maxdepth 2 \( -name sentinel.cle -o -name netscan.cle \) -printf '%h\n' 2>/dev/null | head -1)
 if [[ -z $CLE ]]; then
   echo "Clé SENTINEL non branchée : elle sera mise à jour au prochain branchement."
@@ -100,16 +125,8 @@ for _ in {1..10}; do
 done
 if [[ -n $JOURNAL ]]; then
   touch "$JOURNAL/sentinel-journal.cle"
-  if [[ -s $JOURNAL/journal-erreurs.txt ]]; then
-    RETOURS="${XDG_DATA_HOME:-$HOME/.local/share}/sentinel/retours"
-    mkdir -p "$RETOURS"
-    NB=$(grep -c '^== ' "$JOURNAL/journal-erreurs.txt" || true)
-    cat "$JOURNAL/journal-erreurs.txt" >>"$RETOURS/journal-erreurs.txt"
-    : >"$JOURNAL/journal-erreurs.txt"
-    echo "Journal de la clé : $NB erreur(s) rapatriée(s) dans $RETOURS/journal-erreurs.txt"
-    command -v notify-send >/dev/null &&
-      notify-send -a sentinel -i sentinel "Clé SENTINEL : $NB erreur(s) rapportée(s)" "$RETOURS/journal-erreurs.txt" || true
-  fi
+  rapatrier_journal "$JOURNAL/journal-erreurs.txt" "de la clé"
+  envoyer_journal
 fi
 
 mkdir -p "$CLE"/{Linux,Windows,donnees,source}

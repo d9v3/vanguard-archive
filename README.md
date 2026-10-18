@@ -170,6 +170,11 @@ La clé a deux partitions : `SENTINEL`, en lecture seule partout sauf sur l'ordi
 respecté par Windows ; sous Linux et macOS, Sentinel la remonte lui-même en lecture seule), et `SENTINELLOG`, qui ne
 reçoit que le journal des erreurs, anonymisé. `outils/preparer-cle.sh` prépare une nouvelle clé.
 
+Erreurs et plantages : Sentinel les note sans rien de personnel (sur la clé, ou dans son dossier quand la clé n'est pas
+branchée). Au déploiement, `deployer.sh` les rapatrie et `outils/journal-vers-github.py` en fait des tickets GitHub
+(étiquette « journal ») avec `gh` : un ticket par erreur, les répétitions en commentaire. Aucun mot de passe GitHub
+dans le programme ni sur la clé.
+
 ## Licence
 
 © 2026 d9v3. Sentinel est un logiciel libre : tu peux le redistribuer et le modifier selon les termes de la
