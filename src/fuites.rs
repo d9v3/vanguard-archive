@@ -34,7 +34,7 @@ fn interroger(debut: &str) -> Option<String> {
             "-H",
             "Add-Padding: true",
             "-A",
-            "sentinel",
+            "gardien",
             &format!("{SERVICE}{debut}"),
         ]),
         20,
@@ -143,12 +143,20 @@ fn lire_hibp(texte: &str) -> Option<Vec<String>> {
     )
 }
 
-/// Fuites où apparaît l'adresse : par Have I Been Pwned si une clé est fournie (SENTINEL_HIBP_CLE), sinon par
+/// Clé de l'API de Have I Been Pwned, si elle est fournie (GARDIEN_HIBP_CLE ; SENTINEL_HIBP_CLE, l'ancien nom,
+/// marche aussi).
+fn cle_hibp() -> Option<String> {
+    ["GARDIEN_HIBP_CLE", "SENTINEL_HIBP_CLE"]
+        .iter()
+        .find_map(|v| std::env::var(v).ok().filter(|c| !c.is_empty()))
+}
+
+/// Fuites où apparaît l'adresse : par Have I Been Pwned si une clé est fournie (`cle_hibp`), sinon par
 /// XposedOrNot (gratuit, sans clé). `None` : service injoignable.
 fn fuites_courriel(adresse: &str) -> Option<(Vec<String>, &'static str)> {
     let mut curl = std::process::Command::new("curl");
-    curl.args(["-sS", "--max-time", "20", "-A", "sentinel", "-w", "\n%{http_code}"]);
-    let cle = std::env::var("SENTINEL_HIBP_CLE").ok().filter(|c| !c.is_empty());
+    curl.args(["-sS", "--max-time", "20", "-A", "gardien", "-w", "\n%{http_code}"]);
+    let cle = cle_hibp();
     let service = if let Some(cle) = &cle {
         curl.args(["-H", &format!("hibp-api-key: {cle}")]);
         curl.arg(format!(
@@ -174,10 +182,10 @@ fn fuites_courriel(adresse: &str) -> Option<(Vec<String>, &'static str)> {
     }
 }
 
-/// « sentinel courriel » : dans quelles fuites de données une adresse apparaît-elle ?
+/// « gardien courriel » : dans quelles fuites de données une adresse apparaît-elle ?
 pub fn verifier_courriel() {
     titre(tr!("Fuites d'adresse courriel", "Email address leaks"));
-    let service = if std::env::var("SENTINEL_HIBP_CLE").is_ok_and(|c| !c.is_empty()) {
+    let service = if cle_hibp().is_some() {
         "Have I Been Pwned"
     } else {
         "XposedOrNot"

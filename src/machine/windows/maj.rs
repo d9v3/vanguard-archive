@@ -156,7 +156,7 @@ fn constat_windows_update(
     .corriger(action, &installer_windows_update(pilotes))
 }
 
-/// Les quatre petites lectures de `sentinel maj` (redémarrage, signatures, périphériques, cartes graphiques) en un
+/// Les quatre petites lectures de `gardien maj` (redémarrage, signatures, périphériques, cartes graphiques) en un
 /// seul PowerShell : une seconde de démarrage au lieu de quatre. Chaque section a son try et se termine par
 /// « NOM_FIN » : une lecture qui échoue (Defender remplacé par un antivirus tiers…) ne prive pas les autres.
 fn lectures_rapides() -> Option<String> {
@@ -414,7 +414,7 @@ fn cartes_graphiques(lectures: Option<&str>) -> Vec<Constat> {
         .collect()
 }
 
-/// Signatures de Defender : la même règle pour l'audit et pour `sentinel maj`.
+/// Signatures de Defender : la même règle pour l'audit et pour `gardien maj`.
 pub(super) fn signatures(age: u64) -> Constat {
     if age > 3 {
         alerte(

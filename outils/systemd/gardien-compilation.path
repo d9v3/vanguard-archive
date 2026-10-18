@@ -1,0 +1,10 @@
+[Unit]
+Description=Gardien : surveiller les nouvelles compilations
+
+[Path]
+PathChanged=/home/alice/Projects/sentinel/target/x86_64-unknown-linux-musl/release/gardien
+PathChanged=/home/alice/Projects/sentinel/target/x86_64-pc-windows-gnu/release/gardien.exe
+Unit=gardien-copie.service
+
+[Install]
+WantedBy=default.target

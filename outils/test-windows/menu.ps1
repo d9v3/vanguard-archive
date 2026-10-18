@@ -1,5 +1,5 @@
-﻿# Menu des tests de Sentinel dans la machine virtuelle Windows : double-clic sur TESTER-SENTINEL.bat.
-# Le dossier « programme » (sentinel.exe, ce menu, test.ps1, version.txt) est remplacé à chaque déploiement depuis
+﻿# Menu des tests de Gardien dans la machine virtuelle Windows : double-clic sur TESTER-GARDIEN.bat.
+# Le dossier « programme » (gardien.exe, ce menu, test.ps1, version.txt) est remplacé à chaque déploiement depuis
 # Linux (outils/deployer.sh) ; les résultats de chaque passe vont dans « resultats » et y restent.
 # -Surveiller : lancé par la tâche planifiée (choix 6) ; teste en arrière-plan chaque nouvelle version déposée, une
 # seule fois, puis prévient par une notification.
@@ -13,13 +13,13 @@ $programme = $PSScriptRoot
 $racine = Split-Path -Parent $programme
 $resultats = Join-Path $racine 'resultats'
 New-Item -ItemType Directory -Force $resultats | Out-Null
-$tache = 'Sentinel - tester chaque nouvelle version'
+$tache = 'Gardien - tester chaque nouvelle version'
 $fichierVersion = Join-Path $programme 'version.txt'
 $versionTestee = Join-Path $resultats '.version-testee.txt'
 $enCours = Join-Path $resultats '.test-en-cours.txt'
 $historique = Join-Path $resultats 'historique.txt'
 
-# version.txt : « sentinel X.Y.Z » puis l'empreinte du programme (une nouvelle compilation change l'empreinte).
+# version.txt : « gardien X.Y.Z » puis l'empreinte du programme (une nouvelle compilation change l'empreinte).
 function Version-Deposee { if (Test-Path $fichierVersion) { (Get-Content $fichierVersion -Raw).Trim() } else { '' } }
 function Version-Courte { ((Version-Deposee) -split "`r?`n")[0] }
 function Version-Deja-Testee {
@@ -72,7 +72,7 @@ function Derniere-Passe {
 if ($Surveiller) {
     if (-not (Version-Deposee) -or (Version-Deja-Testee) -or (Test-En-Cours)) { exit 0 }
     if (Lancer-Test @('-Auto', '-SansOuvrir')) {
-        Notifier "Sentinel : $(Version-Courte) testée" ((Derniere-Passe) -replace '\s+->.*$', '')
+        Notifier "Gardien : $(Version-Courte) testée" ((Derniere-Passe) -replace '\s+->.*$', '')
     }
     exit 0
 }
@@ -97,7 +97,7 @@ function Basculer-Surveillance {
     $principal = New-ScheduledTaskPrincipal -UserId $moi -LogonType Interactive -RunLevel Limited
     try {
         Register-ScheduledTask -TaskName $tache -Action $action -Trigger $declencheurs -Settings $reglages -Principal $principal `
-            -Description 'Teste en arrière-plan chaque nouvelle version de Sentinel déposée depuis Linux, puis prévient.' -Force -ErrorAction Stop | Out-Null
+            -Description 'Teste en arrière-plan chaque nouvelle version de Gardien déposée depuis Linux, puis prévient.' -Force -ErrorAction Stop | Out-Null
         Write-Host '  Test automatique activé : chaque nouvelle version sera testée seule (dans la minute, puis toutes les 15 minutes),' -ForegroundColor Green
         Write-Host '  sans rien ouvrir à l''écran ; une notification prévient à la fin.' -ForegroundColor Green
     } catch {
@@ -105,17 +105,25 @@ function Basculer-Surveillance {
     }
 }
 
-function Ouvrir-Sentinel {
+function Ouvrir-Gardien {
     # Une copie locale, comme pour le test : un .exe sur un partage réseau déclenche des avertissements.
-    $local = Join-Path $env:LOCALAPPDATA 'sentinel-test'
+    $local = Join-Path $env:LOCALAPPDATA 'gardien-test'
     New-Item -ItemType Directory -Force $local | Out-Null
-    Copy-Item (Join-Path $programme 'sentinel.exe') $local -Force
-    $exe = Join-Path $local 'sentinel.exe'
+    Copy-Item (Join-Path $programme 'gardien.exe') $local -Force
+    $exe = Join-Path $local 'gardien.exe'
     Unblock-File $exe -ErrorAction SilentlyContinue
     Start-Process $exe
 }
 
 function Pause-Menu { Write-Host ''; Read-Host '  Entrée pour revenir au menu' | Out-Null }
+
+# Tâche du test automatique d'avant le renommage en Gardien (0.51.0) : elle lançait ce menu depuis l'ancien dossier
+# SENTINEL-TEST, qui n'existe plus. Remplacée par la nouvelle, qui pointe ici.
+$ancienneTache = 'Sentinel - tester chaque nouvelle version'
+if (Get-ScheduledTask -TaskName $ancienneTache -ErrorAction SilentlyContinue) {
+    Unregister-ScheduledTask -TaskName $ancienneTache -Confirm:$false -ErrorAction SilentlyContinue
+    if (-not (Surveillance-Active)) { Basculer-Surveillance }
+}
 
 while ($true) {
     Clear-Host
@@ -124,13 +132,13 @@ while ($true) {
     $testee = if (Version-Deja-Testee) { 'déjà testée' } else { 'pas encore testée' }
     Write-Host ''
     Write-Host '  ╭──────────────────────────────────────────────────────────────╮' -ForegroundColor Red
-    Write-Host ('  │  ' + 'SENTINEL · TESTS SUR CE WINDOWS'.PadRight(60) + '│') -ForegroundColor Red
+    Write-Host ('  │  ' + 'GARDIEN · TESTS SUR CE WINDOWS'.PadRight(60) + '│') -ForegroundColor Red
     Write-Host ('  │  ' + "Version déposée : $(Version-Courte) ($testee)".PadRight(60) + '│') -ForegroundColor Red
     Write-Host '  ╰──────────────────────────────────────────────────────────────╯' -ForegroundColor Red
     Write-Host ''
     Write-Host '   1  Test complet automatique, sans question    5 à 15 min, conseillé'
     Write-Host '   2  Test complet avec questions                fenêtres UAC, mot de passe, écran'
-    Write-Host '   3  Ouvrir Sentinel                            pour essayer à la main'
+    Write-Host '   3  Ouvrir Gardien                            pour essayer à la main'
     Write-Host '   4  Voir le dernier rapport'
     Write-Host '   5  Ouvrir le dossier des résultats'
     Write-Host "   6  Tester seul chaque nouvelle version        $etatAuto"
@@ -146,7 +154,7 @@ while ($true) {
     switch ((Read-Host '  Choix').Trim().ToLower()) {
         '1' { [void](Lancer-Test @('-Auto')); Pause-Menu }
         '2' { [void](Lancer-Test @()); Pause-Menu }
-        '3' { Ouvrir-Sentinel }
+        '3' { Ouvrir-Gardien }
         '4' {
             $r = Join-Path $resultats 'dernier-rapport.html'
             if (Test-Path $r) { Start-Process $r } else { Write-Host '  Aucun rapport pour l''instant : lance un test (1).' -ForegroundColor Yellow; Pause-Menu }

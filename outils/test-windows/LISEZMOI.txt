@@ -1,11 +1,11 @@
-﻿SENTINEL — TESTS DANS LA MACHINE VIRTUELLE WINDOWS
+﻿GARDIEN — TESTS DANS LA MACHINE VIRTUELLE WINDOWS
 ==================================================
 
-Double-clic sur TESTER-SENTINEL.bat : un menu propose
+Double-clic sur TESTER-GARDIEN.bat : un menu propose
 
   1  Test complet automatique, sans question (5 à 15 min, conseillé)
   2  Test complet avec questions (fenêtres UAC, mot de passe, écran)
-  3  Ouvrir Sentinel, pour essayer à la main
+  3  Ouvrir Gardien, pour essayer à la main
   4  Voir le dernier rapport
   5  Ouvrir le dossier des résultats
   6  Tester seul chaque nouvelle version (activer / désactiver)
@@ -16,8 +16,8 @@ prévient à la fin. Rien à faire de ton côté.
 
 CE QU'IL Y A ICI
 ----------------
-programme\    sentinel.exe et les scripts de test. Remplacé à chaque mise à
-              jour de Sentinel (outils/deployer.sh, côté Linux) : ne rien y
+programme\    gardien.exe et les scripts de test. Remplacé à chaque mise à
+              jour de Gardien (outils/deployer.sh, côté Linux) : ne rien y
               mettre.
 resultats\    une passe par dossier, nommée AAAA-MM-JJ_HH-MM-SS_vX.Y.Z (date et
               version testée), avec son rapport (rapport-test.html) et la

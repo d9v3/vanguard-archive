@@ -1,23 +1,79 @@
-<img src="assets/icones/sentinel-256.png" alt="Sentinel logo: a black hole" width="128" align="right">
+<p align="center">
+  <img src="assets/icones/gardien-256.png" alt="Gardien logo: a shield open on a black hole" width="150">
+</p>
 
-# Sentinel
+<h1 align="center">Gardien</h1>
 
-[Français](README.md) · **English**
+<p align="center"><a href="README.md">Français</a> · <b>English</b></p>
 
-**Secures and optimizes your computer and your network, from a USB key.**
-Sentinel checks your machine and every device on your network, explains each problem in plain language, and fixes
-it once you agree. Linux, Windows and macOS, nothing to install, in French or English.
+<p align="center">
+  <b>Secures and optimizes your computer and your network, from a USB key.</b><br>
+  Gardien (French for “guardian”) checks your machine and every device on your network, explains each problem in
+  plain language,<br>and fixes it once you agree. Linux, Windows and macOS, nothing to install, in English or French.
+</p>
 
-**Supported systems** — Windows 10 and 11; macOS 12 and later (Apple Silicon and Intel, not yet tried on a real Mac
-outside the automated tests); Linux: Arch and derivatives (Omarchy, Manjaro, EndeavourOS, CachyOS), Debian, Ubuntu,
-Mint, Pop!_OS, Fedora (and RHEL, Rocky, Nobara), openSUSE, as well as atomic systems (Bazzite, Silverblue, Kinoite,
-Bluefin, Aeon). Sentinel recognizes the distribution and offers its own commands: `omarchy update` /
-`omarchy pkg add` on Omarchy, `ujust update` on Bazzite, `rpm-ostree` or `transactional-update` on an atomic system,
-otherwise pacman, apt, dnf or zypper.
+![Gardien's security check: a grade from A to F, each problem explained with its fix](assets/captures/bilan-en.png)
 
-![Sentinel menu](assets/captures/menu.png)
+## At a glance
 
-## What Sentinel does
+- **A security check graded from A to F**: firewall, updates, encryption, open ports, backups… Each problem is
+  explained simply, with its fix.
+- **Your whole network**: every device, its manufacturer, its open ports and its risks; newcomers are flagged.
+- **Nothing changes without your consent**: a restore point first, and every setting is undone exactly.
+- **One USB key for all your computers**, and your friends': it write-protects itself anywhere but at home.
+
+## Getting started
+
+**Download** (latest version): [Windows](../../releases/latest/download/gardien-windows-x86_64.exe) ·
+[Linux](../../releases/latest/download/gardien-linux-x86_64) · [macOS](../../releases/latest/download/gardien-macos)
+— or the whole [releases page](../../releases/latest), with the SHA-256 checksums.
+
+- **Windows**: double-click the program. It is not signed: SmartScreen may warn (“More info”, then “Run anyway”).
+- **Linux**: `chmod +x gardien-linux-x86_64`, then `./gardien-linux-x86_64` in a terminal (any distribution, nothing
+  to install).
+- **macOS**: copied from the Internet, the program is blocked the first time: `xattr -d com.apple.quarantine
+  gardien-macos`, then `./gardien-macos` in Terminal.
+- **From the USB key**: `Windows/gardien.exe`, `Linux/gardien`, or `Lancer Gardien.command` on macOS; the key's guide
+  is in `README.txt`.
+
+In the menu, choose **1** (full check), then **2** (fix). Arrows, Enter, and Esc or Backspace to go back.
+
+> Gardien was called Sentinel up to version 0.50: the `sentinel` command still starts Gardien, and its data,
+> monitoring and key are carried over as they are.
+
+## In pictures
+
+<table>
+  <tr>
+    <td width="50%"><img src="assets/captures/menu-en.png" alt="Gardien's menu"><br><sub>The menu: last check,
+    connection, key plugged in.</sub></td>
+    <td width="50%"><img src="assets/captures/rapport-en.png" alt="Gardien's HTML report"><br><sub>The HTML report and
+    the grade history.</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="assets/captures/reseau-en.png" alt="Local network scan"><br><sub>The network: every
+    device, its ports and what deserves a look.</sub></td>
+    <td width="50%"><img src="assets/captures/connexion-en.png" alt="Connection test for gaming"><br><sub>The
+    connection for gaming: ping, jitter, speed, bufferbloat.</sub></td>
+  </tr>
+</table>
+
+<sub>Screenshots retaken at each version, on a copy of the data; the home's addresses and names are masked.</sub>
+
+## Supported systems
+
+| System | Versions |
+|---|---|
+| Windows | 10 and 11 |
+| macOS | 12 and later, Apple Silicon and Intel (tested on GitHub's Macs, not yet on a real Mac) |
+| Linux | Arch and derivatives (Omarchy, Manjaro, EndeavourOS, CachyOS), Debian, Ubuntu, Mint, Pop!_OS, Fedora (and RHEL, Rocky, Nobara), openSUSE |
+| Atomic Linux | Bazzite, Silverblue, Kinoite, Bluefin, Aeon |
+
+Gardien recognizes the distribution and offers its own commands: `omarchy update` / `omarchy pkg add` on Omarchy,
+`ujust update` on Bazzite, `rpm-ostree` or `transactional-update` on an atomic system, otherwise pacman, apt, dnf or
+zypper.
+
+## What Gardien does
 
 **Security check** — a grade from A to F, then each problem with its fix.
 - Firewall, open ports (TCP and UDP), updates and known vulnerabilities, disk encryption, Secure Boot, screen lock,
@@ -33,18 +89,14 @@ otherwise pacman, apt, dnf or zypper.
 and its risks; newcomers flagged, one notebook per network (at home, at each friend's), nicknames ("HP printer");
 the ports that devices opened to the Internet on the router through UPnP (read-only, with miniupnpc on Linux).
 
-![Local network scan](assets/captures/reseau.png)
-
 **Connection for gaming** — ping, jitter, loss, speed and bufferbloat (the lag when someone downloads), with a
 verdict criterion by criterion and advice.
-
-![Connection test](assets/captures/connexion.png)
 
 **Computer diagnostic** — the first step of any troubleshooting: hardware, system, and recent problems (journal
 errors and crashed programs on Linux; blue screens, sudden shutdowns and crashes on Windows; kernel panics and crash
 reports on macOS), with a text copy saved on the key.
 
-**Optimize** — privacy, performance and comfort settings written for Sentinel. On Windows: telemetry kept to a
+**Optimize** — privacy, performance and comfort settings written for Gardien. On Windows: telemetry kept to a
 minimum, ads and tracking off, Recall without screen snapshots, file extensions shown, no autorun from USB drives,
 fast startup, full right-click menu. On Linux: SSD maintenance, journal size, reports sent by GNOME or Ubuntu. On
 macOS: ads, analytics, no .DS_Store on drives. Each setting shows its state and is undone exactly: the previous value
@@ -82,126 +134,47 @@ never; the free space read again afterwards tells what was really gained.
   graphics card, GameMode, MangoHud, Gamescope, Wine, Lutris, Heroic, ProtonUp-Qt, vm.max_map_count, ntsync; on
   macOS, Rosetta 2, Steam, Heroic, Epic Games, GOG Galaxy, Prism Launcher and the Metal frame counter.
 
-Sentinel never cuts a remote connection in use (Remote Desktop, SSH). Only use it on your own network, or a network
+Gardien never cuts a remote connection in use (Remote Desktop, SSH). Only use it on your own network, or a network
 you are allowed to audit.
 
-## Getting started
-
-- **From the key**: `Linux/sentinel` (in a terminal: `./sentinel`), `Windows/sentinel.exe` (double-click) or
-  `Lancer Sentinel.command` on macOS (double-click, Terminal opens).
-  The key's guide is in `README.txt` (English) and `LISEZMOI.txt` (French).
-- **Installed**: running `sentinel` opens the menu. Choose **1** (full check), then **2** (fix).
+## Commands
 
 Each menu entry is also a command:
 
 | Command | Purpose |
 |---|---|
-| `sentinel full [--html] [--text]` | full check: machine + network; `--text` shows it as plain text (emergency mode) |
-| `sentinel fix` | fix the problems found |
-| `sentinel audit [--json]` | audit of this machine |
-| `sentinel network [target] [-p common\|all\|22,80,8000-8100] [--json]` | scan the network or one device |
-| `sentinel connection` | connection test for gaming |
-| `sentinel clean [--list]` | clean up the system; `--list`: the space to gain, deleting nothing |
-| `sentinel apps [--list] [--recommended]` | software to install by category; `--list`: their state, installing nothing |
-| `sentinel diag` | computer diagnostic: hardware, system, recent crashes and errors |
-| `sentinel antivirus [--complet] [folder]` | antivirus scan (computer, or a key / a folder) |
-| `sentinel password` | leaked passwords |
-| `sentinel sandbox <file>` | run an unknown program in a sandbox (bubblewrap or firejail, Windows Sandbox) |
-| `sentinel email` | email address leaks (XposedOrNot, or Have I Been Pwned with `SENTINEL_HIBP_CLE`) |
-| `sentinel integrity [--accept] [--live]` | integrity of critical files (BLAKE3 fingerprints), live if wanted |
-| `sentinel update` | updates |
-| `sentinel repair` | repairs and cleaning |
-| `sentinel monitor on\|off` | hourly monitoring |
-| `sentinel name <ip\|mac> <nickname>` | name a device |
-| `sentinel backup [file]`, `sentinel restore <file>` | data backup |
-| `sentinel gaming` | packages and settings for gaming (Windows and Linux) |
+| `gardien full [--html] [--text]` | full check: machine + network; `--text` shows it as plain text (emergency mode) |
+| `gardien fix` | fix the problems found |
+| `gardien audit [--json]` | audit of this machine |
+| `gardien network [target] [-p common\|all\|22,80,8000-8100] [--json]` | scan the network or one device |
+| `gardien connection` | connection test for gaming |
+| `gardien clean [--list]` | clean up the system; `--list`: the space to gain, deleting nothing |
+| `gardien apps [--list] [--recommended]` | software to install by category; `--list`: their state, installing nothing |
+| `gardien diag` | computer diagnostic: hardware, system, recent crashes and errors |
+| `gardien antivirus [--complet] [folder]` | antivirus scan (computer, or a key / a folder) |
+| `gardien password` | leaked passwords |
+| `gardien sandbox <file>` | run an unknown program in a sandbox (bubblewrap or firejail, Windows Sandbox) |
+| `gardien email` | email address leaks (XposedOrNot, or Have I Been Pwned with `GARDIEN_HIBP_CLE`) |
+| `gardien integrity [--accept] [--live]` | integrity of critical files (BLAKE3 fingerprints), live if wanted |
+| `gardien update` | updates |
+| `gardien repair` | repairs and cleaning |
+| `gardien monitor on\|off` | hourly monitoring |
+| `gardien name <ip\|mac> <nickname>` | name a device |
+| `gardien backup [file]`, `gardien restore <file>` | data backup |
+| `gardien gaming` | packages and settings for gaming (Windows and Linux) |
 
-**Language**: the system's (French or English). To force it: `SENTINEL_LANG=en` or `SENTINEL_LANG=fr`. The commands
+**Language**: the system's (English or French). To force it: `GARDIEN_LANG=en` or `GARDIEN_LANG=fr`. The commands
 also keep their French names (`complet`, `machine`, `corriger`, `reseau`, `connexion`, `logiciels`, `diagnostic`,
 `motdepasse`, `isoler`, `courriel`, `integrite`, `maj`, `reparer`, `surveillance`, `nommer`, `sauvegarder`,
-`restaurer`).
+`restaurer`, `nettoyer`).
 
-## For developers
+## Development
 
-With Claude Code: `CLAUDE.md` gives the project's commands and rules, `/verifier` and `/livrer` (`.claude/skills/`)
-check everything and ship a version; a hook reformats Rust after each edit. On GitHub, `@claude` in an issue or a
-pull request gets an answer, and each “journal” issue is analyzed by itself (`.github/workflows/claude*.yml`, to
-turn on once with `/install-github-app`).
-
-The code, its comments and its internal names are in French; every text shown to the user exists in both languages
-(`tr!("fr", "en")` in `src/langue.rs`).
-
-### Layout
-
-| File | Purpose |
-|---|---|
-| `src/main.rs` | menu and subcommands |
-| `src/ui.rs` | colors, titles, frames, bars |
-| `src/selection.rs` | keyboard menus and checklists (arrows, Enter, Esc) |
-| `src/langue.rs` | language choice and translation macros |
-| `src/machine/mod.rs` | shared types, display, parallel execution of the checks |
-| `src/machine/linux/`, `src/machine/windows/`, `src/machine/macos/` | per-system audit, one file per topic |
-| `src/machine/dns.rs`, `certificats.rs`, `extensions.rs`, `sante.rs` | checks shared by the three systems |
-| `src/corriger.rs` | guided application of fixes |
-| `src/reseau.rs`, `src/scan.rs` | network scan (TCP connect, without root), ARP, network notebooks |
-| `src/risk.rs` | knowledge base of ports and risk levels |
-| `src/connexion.rs` | connection test for gaming |
-| `src/antivirus.rs` | ClamAV / Defender, quarantine |
-| `src/surveillance.rs` | systemd timer / Task Scheduler / launchd agent, notifications |
-| `src/rapport.rs`, `src/historique.rs` | HTML report, check history, grade curve |
-| `src/reparer.rs`, `src/maj.rs`, `src/gaming/` | repairs, updates, gaming |
-| `src/optimiser/` | privacy, performance and comfort settings, with exact undo |
-| `src/nettoyer/` | cleanup: items per system, space measured before and after |
-| `src/logiciels/` | software to install: checked catalog (`catalogue.rs`), state and installation per system |
-| `src/fuites.rs`, `src/donnees.rs` | leaked passwords, data backup |
-| `assets/oui.tsv` | manufacturers by MAC prefix (IEEE list), stored as sorted tables at compile time (`build.rs`) |
-| `LICENCES-TIERCES.txt` | license notices of the included libraries (`outils/licences-tierces.py`) |
-
-### Build and deploy
-
-Requirements: `rustup target add x86_64-unknown-linux-musl x86_64-pc-windows-gnu` and `mingw-w64-gcc`.
-
-```sh
-outils/deployer.sh     # builds Linux (musl, static) + Windows, installs locally, pushes to GitHub, updates the key
-```
-
-Tests: `cargo test` (Linux); Windows tests under Wine (`cargo test --target x86_64-pc-windows-gnu` with a Wine
-runner); `cargo clippy --all-targets` on the four targets (Linux, Windows, `aarch64-apple-darwin`,
-`x86_64-apple-darwin`), in strict mode (pedantic), without any warning; `cargo fmt --check`. Internal functions are
-tested in their module; `tests/programme.rs` runs the real program the way a person would (help in both languages,
-menus left, lists, refusals respected, audit and scan of 127.0.0.1 in JSON), with a throwaway home folder.
-
-macOS: built and tested on a GitHub Mac (`.github/workflows/macos.yml`, universal Apple Silicon + Intel binary),
-every night if the code changed or on demand (`gh workflow run macos.yml`). `deployer.sh` fetches the latest
-successful build for the key.
-
-Continuous integration (`.github/workflows/ci.yml`): on each push to GitHub, formatting, clippy without warnings on
-the four targets and the tests, on Linux; on a real Windows (PowerShell, registry), every night if the code changed,
-on each pull request and on demand (`gh workflow run ci.yml`). Not Windows or Mac on each push: on a private
-repository, their minutes count double and ten times.
-
-### The USB key
-
-The key (exFAT, label `SENTINEL`, marker file `sentinel.cle`) holds `Linux/`, `Windows/`, `macOS/`, `donnees/`
-(device database, portable), `source/` (this repository) and the guide in two languages (`README.txt`,
-`LISEZMOI.txt`, taken from `outils/`). The check history and the quarantine stay on each computer.
-
-On the development PC, it updates itself (systemd units in `outils/systemd/`): after each build
-(`sentinel-copie.service`), and each time it is plugged in, with the latest version from GitHub, built if it is new
-(`sentinel-cle.service`, `deployer.sh --branchement`).
-
-The key has two partitions: `SENTINEL`, read-only everywhere except on its owner's computer (GPT attribute honored
-by Windows; on Linux and macOS, Sentinel remounts it read-only itself), and `SENTINELLOG`, which only receives the
-error log, anonymized. `outils/preparer-cle.sh` prepares a new key.
-
-Errors and crashes: Sentinel records them with nothing personal (on the key, or in its folder when the key is not
-plugged in). On deployment, `deployer.sh` brings them back and `outils/journal-vers-github.py` turns them into GitHub
-issues (label “journal”) with `gh`: one issue per error, repeats as comments. No GitHub password in the program or on
-the key.
+Building, testing, deploying, the USB key, the error journal: see [CONTRIBUTING.en.md](CONTRIBUTING.en.md).
 
 ## License
 
-© 2026 d9v3. Sentinel is free software: you can redistribute it and modify it under the terms of the
+© 2026 d9v3. Gardien is free software: you can redistribute it and modify it under the terms of the
 [GNU General Public License](LICENSE) (GPL), version 3 or any later version. It comes with no warranty. A modified
 version you distribute must stay under this license, with its source code.
 

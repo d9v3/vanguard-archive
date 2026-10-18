@@ -66,9 +66,15 @@ pub fn ajuster(t: &str, n: usize) -> String {
 
 /// Coupe un texte en lignes d'au plus `largeur` caractères, aux espaces.
 pub fn envelopper(t: &str, largeur: usize) -> Vec<String> {
+    envelopper_decale(t, largeur, largeur)
+}
+
+/// Comme `envelopper`, la première ligne d'au plus `premiere` caractères (elle suit un début déjà affiché).
+pub fn envelopper_decale(t: &str, premiere: usize, suivantes: usize) -> Vec<String> {
     let mut lignes = Vec::new();
     let mut ligne = String::new();
     for mot in t.split_whitespace() {
+        let largeur = if lignes.is_empty() { premiere } else { suivantes };
         if !ligne.is_empty() && ligne.chars().count() + 1 + mot.chars().count() > largeur {
             lignes.push(std::mem::take(&mut ligne));
         }
@@ -81,6 +87,19 @@ pub fn envelopper(t: &str, largeur: usize) -> Vec<String> {
         lignes.push(ligne);
     }
     lignes
+}
+
+/// Affiche `debut` (déjà mis en forme) puis `texte` dans la couleur `style`, coupé pour tenir dans `LARGEUR`, la
+/// suite alignée à `retrait` colonnes. Sans cela, le terminal coupe les longues lignes au milieu d'un mot et les
+/// reprend au bord gauche.
+pub fn afficher_aligne(debut: &str, texte: &str, retrait: usize, style: &str) {
+    let premiere = LARGEUR.saturating_sub(largeur_affichee(debut)).max(12);
+    let lignes = envelopper_decale(texte, premiere, LARGEUR.saturating_sub(retrait).max(12));
+    let mut lignes = lignes.iter();
+    println!("{debut}{style}{}{RESET}", lignes.next().map_or("", String::as_str));
+    for l in lignes {
+        println!("{:retrait$}{style}{l}{RESET}", "");
+    }
 }
 
 /// Titre de section : « ━━ Titre ━━━━━━━━… » sur toute la largeur.

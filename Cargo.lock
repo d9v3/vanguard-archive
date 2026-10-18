@@ -374,6 +374,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "gardien"
+version = "0.51.0"
+dependencies = [
+ "blake3",
+ "chrono",
+ "clap",
+ "crossterm",
+ "dns-lookup",
+ "enable-ansi-support",
+ "futures",
+ "if-addrs",
+ "libc",
+ "notify",
+ "rpassword",
+ "serde",
+ "serde_json",
+ "sha1_smol",
+ "tokio",
+ "winreg",
+ "winresource",
+]
+
+[[package]]
 name = "hashbrown"
 version = "0.17.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -701,29 +724,6 @@ name = "scopeguard"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
-
-[[package]]
-name = "sentinel"
-version = "0.50.0"
-dependencies = [
- "blake3",
- "chrono",
- "clap",
- "crossterm",
- "dns-lookup",
- "enable-ansi-support",
- "futures",
- "if-addrs",
- "libc",
- "notify",
- "rpassword",
- "serde",
- "serde_json",
- "sha1_smol",
- "tokio",
- "winreg",
- "winresource",
-]
 
 [[package]]
 name = "serde"

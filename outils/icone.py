@@ -1,17 +1,20 @@
 #!/usr/bin/env python3
-"""Icône de Sentinel : trou noir calculé par lancer de rayons dans la métrique de Schwarzschild.
+"""Icône de Gardien : un bouclier ouvert sur un trou noir, calculé par lancer de rayons dans la métrique de
+Schwarzschild.
 
 Chaque pixel est un rayon de lumière suivi à rebours depuis la caméra, courbé par la gravité.
 Le disque d'accrétion vu « par-dessus » et « par-dessous » l'ombre (effet Interstellar) n'est
-pas dessiné : il sort tout seul du calcul.
+pas dessiné : il sort tout seul du calcul. Ses couleurs aussi : le disque tourne presque à la vitesse de la lumière,
+le côté qui vient vers nous bleuit et brille plus (effet Doppler), celui qui s'éloigne rougit. Cyan du menu d'un
+côté, rouge du thème de l'autre.
 
-Le trou noir est posé sur une plaque noire aux coins arrondis, comme une fenêtre ouverte sur l'espace. Un halo est
-de la lumière : il ne brille que sur du noir. Sans plaque, sur un fond clair (Explorateur de Windows, GitHub), il
-devenait une tache rose-brun ; sur le noir de la barre, la plaque ne se voit pas.
+Le trou noir est posé sur un bouclier noir : un halo est de la lumière, il ne brille que sur du noir (sur un fond
+clair, Explorateur de Windows, GitHub, il devenait une tache rose-brun). Un liseré du rouge au cyan dessine le
+bouclier sur un fond noir aussi (barre, mode sombre de GitHub), où le noir seul ne se voyait pas.
 
 Lancer depuis la racine du dépôt :
     uv run --no-project --with numpy --with pillow python outils/icone.py
-Produit assets/icones/sentinel-<taille>.png (Linux, 16 à 512 px) et assets/sentinel.ico (Windows, 16 à 256 px).
+Produit assets/icones/gardien-<taille>.png (Linux, 16 à 512 px) et assets/gardien.ico (Windows, 16 à 256 px).
 """
 
 from pathlib import Path
@@ -25,9 +28,11 @@ SURECH = 3  # suréchantillonnage : 3 × 3 rayons par pixel final
 DISTANCE = 26.0  # caméra
 ELEVATION = np.radians(9.0)  # au-dessus du plan du disque : presque de profil, comme Gargantua
 INCLINAISON = np.radians(16.0)  # roulis de l'image : le disque monte de gauche à droite
-CHAMP = np.radians(13.6)  # demi-angle de vue : cadrage serré, les pointes du disque frôlent le bord de la plaque
+CHAMP = np.radians(13.6)  # demi-angle de vue : cadrage serré, les pointes du disque touchent le bord du bouclier
 DISQUE_INT, DISQUE_EXT = 2.6, 8.6
-ARRONDI = 0.225  # rayon des coins de la plaque, en fraction du côté
+# Sens de rotation du disque : le côté droit vient vers nous (cyan), le gauche s'éloigne (rouge).
+SENS = 1.0
+REMONTEE = 0.04  # le trou noir monte un peu dans le bouclier, plus large en haut qu'en bas (fraction du côté)
 
 # Une image par taille, réduite depuis le grand rendu : le système n'a jamais à la réduire lui-même.
 # Linux : les dossiers de hicolor (la barre et le lanceur prennent la taille la plus proche).
@@ -35,26 +40,31 @@ TAILLES_LINUX = [16, 22, 24, 32, 48, 64, 128, 256, 512]
 # Windows : ses tailles de base (16, 24, 32, 48, 256) et leurs versions pour les écrans agrandis de 125 à 300 %.
 TAILLES_WINDOWS = [16, 20, 24, 30, 32, 36, 40, 48, 60, 64, 72, 80, 96, 256]
 
-# Palette du thème Rouge OLED, du plus froid au plus chaud.
-PALETTE = np.array(
-    [
-        [0x3a, 0x05, 0x05],
-        [0x7e, 0x0c, 0x0c],
-        [0xd4, 0x20, 0x20],
-        [0xff, 0x5a, 0x4f],
-        [0xff, 0x9a, 0x70],
-        [0xff, 0xf1, 0xe6],
-    ],
+# Palettes, du plus froid au plus chaud : côté qui s'éloigne (rouge du thème Rouge OLED), gaz vu de face (blanc
+# chaud), côté qui approche (cyan des titres du menu, #29b8db dans les captures).
+ROUGE = np.array(
+    [[0x3a, 0x05, 0x05], [0x7e, 0x0c, 0x0c], [0xd4, 0x20, 0x20], [0xff, 0x5a, 0x4f], [0xff, 0x9a, 0x70], [0xff, 0xf1, 0xe6]],
     dtype=np.float64,
 ) / 255.0
+BLANC = np.array(
+    [[0x24, 0x14, 0x12], [0x66, 0x3c, 0x34], [0xc0, 0x7c, 0x6c], [0xf4, 0xbc, 0xa8], [0xff, 0xe4, 0xd8], [0xff, 0xfb, 0xf8]],
+    dtype=np.float64,
+) / 255.0
+BLEU = np.array(
+    [[0x02, 0x18, 0x20], [0x06, 0x3a, 0x4c], [0x0e, 0x78, 0x96], [0x1f, 0xb0, 0xd6], [0x4f, 0xd2, 0xf2], [0xb8, 0xf0, 0xff]],
+    dtype=np.float64,
+) / 255.0
+# Liseré du bouclier : rouge à gauche, cyan à droite, comme le disque.
+LISERE_GAUCHE = np.array([0xd4, 0x20, 0x20]) / 255.0
+LISERE_DROITE = np.array([0x1f, 0xb0, 0xd6]) / 255.0
 
 
-def couleur(t):
-    """Interpole la palette pour t entre 0 et 1."""
-    t = np.clip(t, 0.0, 1.0) * (len(PALETTE) - 1)
-    i = np.minimum(t.astype(int), len(PALETTE) - 2)
+def couleur(palette, t):
+    """Interpole une palette pour t entre 0 et 1."""
+    t = np.clip(t, 0.0, 1.0) * (len(palette) - 1)
+    i = np.minimum(t.astype(int), len(palette) - 2)
     f = (t - i)[:, None]
-    return PALETTE[i] * (1 - f) + PALETTE[i + 1] * f
+    return palette[i] * (1 - f) + palette[i + 1] * f
 
 
 def texture(r, phi):
@@ -72,8 +82,8 @@ def texture(r, phi):
     return np.clip(0.55 + 0.6 * (s - 0.5) + 0.25 * (anneaux - 0.5), 0.15, 1.2)
 
 
-def emission(p):
-    """Couleur et opacité du disque au point p (dans le plan y = 0)."""
+def emission(p, k):
+    """Couleur et opacité du disque au point p (dans le plan y = 0), vu par un photon qui part dans la direction k."""
     r = np.hypot(p[:, 0], p[:, 2])
     phi = np.arctan2(p[:, 2], p[:, 0])
     # Profil de température : maximum juste après le bord intérieur, puis décroissance.
@@ -81,9 +91,21 @@ def emission(p):
     chaleur = (x**1.6) * (1.0 - 0.55 * np.sqrt(x)) * 5.6
     bords = np.clip((r - DISQUE_INT) / 0.4, 0, 1) * np.clip((DISQUE_EXT - r) / 3.5, 0, 1)
     tex = texture(r, phi)
-    intensite = chaleur * tex * bords
+    # Orbite circulaire (M = 0,5 dans ces unités) : vitesse locale sqrt(M / (r - 2M)), plus de la moitié de celle de
+    # la lumière au bord intérieur. Facteur Doppler : > 1 quand le gaz vient vers nous.
+    beta = np.sqrt(0.5 / (r - 1.0))
+    tangente = np.stack([-np.sin(phi), np.zeros_like(phi), np.cos(phi)], axis=1) * SENS
+    gamma = 1 / np.sqrt(1 - beta**2)
+    doppler = 1 / (gamma * (1 - beta * np.sum(tangente * k, axis=1)))
+    # Éclat adouci (la physique dirait puissance 4 : un côté disparaîtrait).
+    intensite = chaleur * tex * bords * np.clip(doppler, 0.5, 1.8) ** 0.9
     alpha = np.clip(intensite * 1.6, 0.0, 0.97)
-    return couleur(intensite**1.05) * np.clip(intensite * 1.2, 0, 1.3)[:, None], alpha
+    # Teinte : blanc chaud de face, vers le cyan ou le rouge selon le décalage.
+    t = np.clip(np.log(doppler) / np.log(1.4), -1, 1)[:, None]
+    ti = intensite**1.05
+    blanc = couleur(BLANC, ti)
+    teinte = np.where(t < 0, blanc * (1 + t) - couleur(ROUGE, ti) * t, blanc * (1 - t) + couleur(BLEU, ti) * t)
+    return teinte * np.clip(intensite * 1.2, 0, 1.3)[:, None], alpha
 
 
 def lancer():
@@ -144,7 +166,9 @@ def lancer():
             dans = (rp > DISQUE_INT) & (rp < DISQUE_EXT)
             if dans.any():
                 j = actifs[i[dans]]
-                col, a = emission(p[dans])
+                # Le photon voyage à l'inverse du rayon suivi.
+                vd = v[i[dans]]
+                col, a = emission(p[dans], -vd / np.linalg.norm(vd, axis=1)[:, None])
                 reste = (1 - opac[j])
                 rgb[j] += (reste * a)[:, None] * col
                 opac[j] += reste * a
@@ -171,15 +195,28 @@ def halo(rgb, opac):
     lueur = np.zeros_like(rgb)
     for rayon, poids in ((n * 0.006, 0.9), (n * 0.02, 0.7), (n * 0.06, 0.55)):
         lueur += np.asarray(img.filter(ImageFilter.GaussianBlur(rayon)), dtype=np.float64) / 255 * poids
-    # La lueur rougit en s'éloignant.
-    lueur *= np.array([1.0, 0.42, 0.34])
+    # Lueur un peu atténuée, de la couleur du gaz qui l'émet.
+    lueur *= np.array([0.85, 0.75, 0.9])
     return rgb + lueur * (1 - opac[..., None] * 0.6)
 
 
-def plaque(n):
-    """Masque de la plaque : carré aux coins arrondis, dessiné en grand pour des bords lisses une fois réduit."""
+def bouclier(n, retrait=0.0):
+    """Masque du bouclier (écu : haut droit aux coins arrondis, flancs droits puis courbes jusqu'à la pointe), en
+    n × n ; `retrait` le rétrécit de ce nombre de pixels (intérieur du liseré)."""
+    g, d, h, b = retrait, n - retrait, retrait, n - retrait
+    r = n * 0.09
+    points = [(g + r + r * np.cos(a), h + r + r * np.sin(a)) for a in np.linspace(np.pi, 1.5 * np.pi, 16)]
+    points += [(d - r + r * np.cos(a), h + r + r * np.sin(a)) for a in np.linspace(1.5 * np.pi, 2 * np.pi, 16)]
+    flanc = n * 0.44
+    # Flanc droit jusqu'à la pointe (Bézier cubique), puis le gauche en miroir.
+    t = np.linspace(0, 1, 60)[:, None]
+    p0, p1 = np.array([d, flanc]), np.array([d, flanc + (b - flanc) * 0.5])
+    p2, p3 = np.array([n / 2 + (d - n / 2) * 0.3, b - (b - flanc) * 0.2]), np.array([n / 2, b])
+    courbe = (1 - t) ** 3 * p0 + 3 * (1 - t) ** 2 * t * p1 + 3 * (1 - t) * t**2 * p2 + t**3 * p3
+    points += [tuple(p) for p in courbe]
+    points += [(n - x, y) for x, y in courbe[::-1][1:]]
     masque = Image.new("L", (n, n), 0)
-    ImageDraw.Draw(masque).rounded_rectangle((0, 0, n - 1, n - 1), radius=round(n * ARRONDI), fill=255)
+    ImageDraw.Draw(masque).polygon(points, fill=255)
     return np.asarray(masque, dtype=np.float64) / 255
 
 
@@ -194,7 +231,7 @@ def ecran(c):
     return np.where(c <= 0.0031308, c * 12.92, 1.055 * c ** (1 / 2.4) - 0.055)
 
 
-def reduire(lumiere, masque, t):
+def reduire(lumiere, t):
     """Image de t px. La moyenne se fait sur la lumière, pas sur les valeurs d'écran : sinon un anneau fin et
     brillant, mêlé au noir qui l'entoure, s'assombrit et disparaît dans les petites tailles."""
 
@@ -205,10 +242,28 @@ def reduire(lumiere, masque, t):
     rgb = np.dstack([plan(lumiere[..., c]) for c in range(3)])
     im = Image.fromarray((ecran(rgb) * 255 + 0.5).astype(np.uint8))
     if t <= 48:
-        # Un peu de netteté en petit, sur la couleur seulement : le bord de la plaque reste tel quel.
+        # Un peu de netteté en petit, sur la couleur seulement : le liseré, posé ensuite, reste tel quel.
         im = im.filter(ImageFilter.UnsharpMask(radius=0.7 if t <= 24 else 1.0, percent=90, threshold=0))
-    im.putalpha(Image.fromarray((np.clip(plan(masque), 0, 1) * 255 + 0.5).astype(np.uint8)))
+    rgb = lineaire(np.asarray(im, dtype=np.float64) / 255)
+    # Bouclier et liseré dessinés à cette taille (4 fois plus grand, puis réduits) : un liseré réduit depuis 512 px
+    # ne ferait plus qu'un demi-pixel flou en 16 px. Au moins un pixel, plus marqué en petit.
+    sur = 4 * t
+    epaisseur = max(4.0, 0.02 * sur)
+    masque = plan_reduit(bouclier(sur), t)
+    interieur = plan_reduit(bouclier(sur, retrait=epaisseur), t)
+    bande = np.clip(masque - interieur, 0, 1)[..., None]
+    x = np.linspace(0, 1, t)[None, :, None]
+    lisere = lineaire(LISERE_GAUCHE) * (1 - x) + lineaire(LISERE_DROITE) * x
+    force = 0.85 if t <= 48 else 0.6
+    rgb = rgb * (1 - bande * force) + lisere * bande * force
+    im = Image.fromarray((ecran(rgb) * 255 + 0.5).astype(np.uint8))
+    im.putalpha(Image.fromarray((np.clip(masque, 0, 1) * 255 + 0.5).astype(np.uint8)))
     return im
+
+
+def plan_reduit(p, t):
+    petit = Image.fromarray(p.astype(np.float32)).resize((t, t), Image.Resampling.BOX)
+    return np.asarray(petit, dtype=np.float64)
 
 
 def main():
@@ -216,17 +271,19 @@ def main():
     rgb = halo(rgb, opac)
     # Tonalité douce : les blancs ne saturent pas brutalement.
     rgb = 1 - np.exp(-1.15 * rgb)
-    # Couleurs prémultipliées : posées sur le noir de la plaque, elles s'affichent telles quelles.
+    # Couleurs prémultipliées : posées sur le noir du bouclier, elles s'affichent telles quelles.
     lumiere = lineaire(np.clip(rgb, 0, 1))
-    masque = plaque(rgb.shape[0])
+    n = lumiere.shape[0]
+    dy = round(n * REMONTEE)
+    lumiere = np.concatenate([lumiere[dy:], np.zeros((dy, n, 3))])
     dossier = Path("assets/icones")
     dossier.mkdir(exist_ok=True)
     for t in TAILLES_LINUX:
-        reduire(lumiere, masque, t).save(dossier / f"sentinel-{t}.png", optimize=True)
-    windows = [reduire(lumiere, masque, t) for t in TAILLES_WINDOWS]
+        reduire(lumiere, t).save(dossier / f"gardien-{t}.png", optimize=True)
+    windows = [reduire(lumiere, t) for t in TAILLES_WINDOWS]
     # Le fichier part de la plus grande ; les autres y sont mises telles quelles au lieu d'être recalculées.
-    windows[-1].save("assets/sentinel.ico", sizes=[im.size for im in windows], append_images=windows[:-1])
-    print("assets/icones/ et assets/sentinel.ico écrits.")
+    windows[-1].save("assets/gardien.ico", sizes=[im.size for im in windows], append_images=windows[:-1])
+    print("assets/icones/ et assets/gardien.ico écrits.")
 
 
 if __name__ == "__main__":

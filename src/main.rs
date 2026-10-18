@@ -1,4 +1,4 @@
-//! sentinel — sécurise et optimise ta machine et ton réseau : bilan, correctifs, réglages.
+//! Gardien — sécurise et optimise ta machine et ton réseau : bilan, correctifs, réglages.
 //!
 //! N'utilise le scan réseau que sur un réseau qui t'appartient ou que tu as le droit d'auditer.
 //! Lancé sans argument, affiche un menu.
@@ -161,7 +161,7 @@ enum Commande {
     /// Sauvegarde la base des appareils et l'état de la surveillance dans un fichier JSON.
     #[command(visible_alias = "backup")]
     Sauvegarder {
-        /// Fichier à écrire (par défaut : sentinel-sauvegarde-AAAA-MM-JJ.json dans le dossier personnel ou Documents).
+        /// Fichier à écrire (par défaut : gardien-sauvegarde-AAAA-MM-JJ.json dans le dossier personnel ou Documents).
         fichier: Option<std::path::PathBuf>,
     },
     /// Ajoute une sauvegarde (ou un appareils.json) à la base actuelle, sans rien effacer.
@@ -228,8 +228,8 @@ impl Session {
         });
         if a_corriger {
             trp!(
-                "\n  🔧 Des corrections sont possibles : choix « 2 » du menu ou « sentinel corriger ».",
-                "\n  🔧 Fixes are available: menu choice “2” or “sentinel fix”."
+                "\n  🔧 Des corrections sont possibles : choix « 2 » du menu ou « gardien corriger ».",
+                "\n  🔧 Fixes are available: menu choice “2” or “gardien fix”."
             );
         }
         let _ = rapport::generer(self.audit.as_ref(), self.reseau.as_ref());
@@ -303,15 +303,12 @@ fn etat_du_menu(surveillance_active: bool) -> Vec<String> {
         format!(
             "{VERT}{}{RESET}",
             tr!(
-                "clé SENTINEL branchée (protégée en écriture)",
-                "SENTINEL key plugged in (write-protected)"
+                "clé GARDIEN branchée (protégée en écriture)",
+                "GARDIEN key plugged in (write-protected)"
             )
         )
     } else if reseau::cle_usb().is_some() {
-        format!(
-            "{VERT}{}{RESET}",
-            tr!("clé SENTINEL branchée", "SENTINEL key plugged in")
-        )
+        format!("{VERT}{}{RESET}", tr!("clé GARDIEN branchée", "GARDIEN key plugged in"))
     } else {
         format!("{GRIS}{}{RESET}", tr!("clé non branchée", "key not plugged in"))
     };
@@ -336,7 +333,7 @@ async fn menu() {
     loop {
         print!("\x1b[2J\x1b[H");
         let mut lignes: Vec<Ligne> = lignes_cadre(
-            &format!("{ACCENT}SENTINEL{RESET} {GRIS}{}{RESET}", env!("CARGO_PKG_VERSION")),
+            &format!("{ACCENT}GARDIEN{RESET} {GRIS}{}{RESET}", env!("CARGO_PKG_VERSION")),
             tr!(
                 "sécurise et optimise ta machine et ton réseau",
                 "secures and optimizes your machine and network"
@@ -651,7 +648,7 @@ impl Action {
             ),
             Action::OptimiserAnnuler => (
                 tr!("Tout remettre comme avant", "Put everything back"),
-                tr!("annule ce que Sentinel a changé", "undo what Sentinel changed"),
+                tr!("annule ce que Gardien a changé", "undo what Gardien changed"),
             ),
             Action::Sauvegarder => (
                 tr!("Sauvegarder ou restaurer", "Back up or restore"),
@@ -759,7 +756,7 @@ async fn sous_menu(s: &mut Session, groupe: Groupe) {
     loop {
         print!("\x1b[2J\x1b[H");
         let mut lignes: Vec<Ligne> = lignes_cadre(
-            &format!("{ACCENT}SENTINEL{RESET} {GRIS}›{RESET} {}", groupe.titre()),
+            &format!("{ACCENT}GARDIEN{RESET} {GRIS}›{RESET} {}", groupe.titre()),
             groupe.resume(),
         )
         .into_iter()
@@ -1005,7 +1002,7 @@ fn ligne_de_commande() -> clap::Command {
     })
     .mut_subcommand("sauvegarder", |s| {
         s.mut_arg("fichier", |a| {
-            a.help("File to write (default: sentinel-sauvegarde-YYYY-MM-DD.json in the home or Documents folder)")
+            a.help("File to write (default: gardien-sauvegarde-YYYY-MM-DD.json in the home or Documents folder)")
         })
     })
     .mut_subcommand("nommer", |s| {

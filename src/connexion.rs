@@ -102,7 +102,7 @@ enum Sens {
 /// en Mbit/s. `None` : aucun transfert n'a abouti (pas de curl, pas d'Internet).
 fn charger(sens: Sens, duree: Duration, arret: &Arc<AtomicBool>) -> Option<f64> {
     let nul = if cfg!(windows) { "NUL" } else { "/dev/null" };
-    let fichier = std::env::temp_dir().join(format!("sentinel-envoi-{}.bin", std::process::id()));
+    let fichier = std::env::temp_dir().join(format!("gardien-envoi-{}.bin", std::process::id()));
     if sens == Sens::Envoi && std::fs::write(&fichier, vec![0u8; 25_000_000]).is_err() {
         return None;
     }
@@ -118,7 +118,7 @@ fn charger(sens: Sens, duree: Duration, arret: &Arc<AtomicBool>) -> Option<f64> 
                 {
                     let reste = duree.saturating_sub(debut.elapsed()).as_secs().max(1).to_string();
                     let mut curl = std::process::Command::new("curl");
-                    curl.args(["-s", "-o", nul, "--max-time", &reste, "-A", "sentinel"]);
+                    curl.args(["-s", "-o", nul, "--max-time", &reste, "-A", "gardien"]);
                     match sens {
                         Sens::Reception => curl.args(["-w", "%{size_download}", TELECHARGEMENT]),
                         Sens::Envoi => curl.args([

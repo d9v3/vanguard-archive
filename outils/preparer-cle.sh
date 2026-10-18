@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Prépare une clé USB SENTINEL : EFFACE la clé, puis la découpe en deux partitions exFAT (table GPT).
-#   SENTINEL      programmes, guides, base, code source. Attribut GPT « lecture seule » (bit 60) : Windows la monte
+# Prépare une clé USB GARDIEN : EFFACE la clé, puis la découpe en deux partitions exFAT (table GPT).
+#   GARDIEN      programmes, guides, base, code source. Attribut GPT « lecture seule » (bit 60) : Windows la monte
 #                 en lecture seule, la clé ne peut pas être modifiée sur l'ordinateur d'un autre. Linux ignore cet
 #                 attribut : sur ce PC, elle reste modifiable et deployer.sh la met à jour comme avant.
-#   SENTINELLOG   64 Mio, modifiable partout : journal-erreurs.txt (voir src/journal.rs), rapatrié par deployer.sh.
+#   GARDIENLOG   64 Mio, modifiable partout : journal-erreurs.txt (voir src/journal.rs), rapatrié par deployer.sh.
 # Sans sudo : udisks autorise l'utilisateur connecté à modifier une clé amovible.
 #   outils/preparer-cle.sh /dev/sdX
-# Le contenu actuel de la clé est d'abord sauvegardé dans ~/.local/share/sentinel/sauvegarde-cle-<date>/,
+# Le contenu actuel de la clé est d'abord sauvegardé dans ~/.local/share/gardien/sauvegarde-cle-<date>/,
 # puis sa base (donnees/) est remise sur la nouvelle partition.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -32,7 +32,7 @@ udisks() { busctl call --timeout=120 org.freedesktop.UDisks2 "$@"; }
 # Sauvegarde de ce qui est monté (la base donnees/ surtout ; le reste se recopie), puis effacement des signatures
 # des anciennes partitions : sinon un système de fichiers resté au même endroit réapparaît dans une nouvelle
 # partition, et udiskie le monte avant qu'on ait pu la formater (« Device or resource busy »).
-SAUVEGARDE="${XDG_DATA_HOME:-$HOME/.local/share}/sentinel/sauvegarde-cle-$(date +%Y%m%d-%H%M%S)"
+SAUVEGARDE="${XDG_DATA_HOME:-$HOME/.local/share}/gardien/sauvegarde-cle-$(date +%Y%m%d-%H%M%S)"
 while read -r part point; do
   if [[ -n $point ]]; then
     mkdir -p "$SAUVEGARDE/$part"
@@ -53,14 +53,14 @@ done < <(lsblk -lnpo NAME,MOUNTPOINT "$DISQUE" | tail -n +2 | sed 's|^/dev/||')
 udisks "$OBJET" org.freedesktop.UDisks2.Block Format 'sa{sv}' gpt 0
 TAILLE=$(busctl get-property org.freedesktop.UDisks2 "$OBJET" org.freedesktop.UDisks2.Block Size | awk '{print $2}')
 # 1 Mio au début (alignement), 1 Mio à la fin (copie de la table GPT), 64 Mio pour le journal.
-TAILLE_SENTINEL=$(((TAILLE - 2 * MIO - JOURNAL_OCTETS) / MIO * MIO))
-# Nom du volume exFAT : 11 caractères au plus (d'où SENTINELLOG).
+TAILLE_GARDIEN=$(((TAILLE - 2 * MIO - JOURNAL_OCTETS) / MIO * MIO))
+# Nom du volume exFAT : 11 caractères au plus (d'où GARDIENLOG).
 creer() { # offset taille nom
   udisks "$OBJET" org.freedesktop.UDisks2.PartitionTable CreatePartitionAndFormat 'ttssa{sv}sa{sv}' \
     "$1" "$2" "$DONNEES_GPT" "$3" 0 exfat 1 label s "$3" | awk -F'"' '{print $2}'
 }
-P1=$(creer "$MIO" "$TAILLE_SENTINEL" SENTINEL)
-P2=$(creer $((MIO + TAILLE_SENTINEL)) 0 SENTINELLOG)
+P1=$(creer "$MIO" "$TAILLE_GARDIEN" GARDIEN)
+P2=$(creer $((MIO + TAILLE_GARDIEN)) 0 GARDIENLOG)
 busctl call org.freedesktop.UDisks2 "$P1" org.freedesktop.UDisks2.Partition SetFlags 'ta{sv}' "$LECTURE_SEULE" 0
 udevadm settle
 
@@ -76,9 +76,9 @@ monter() {
 }
 CLE=$(monter "/dev/$(basename "$P1")")
 JOURNAL=$(monter "/dev/$(basename "$P2")")
-touch "$CLE/sentinel.cle" "$JOURNAL/sentinel-journal.cle"
+touch "$CLE/gardien.cle" "$JOURNAL/gardien-journal.cle"
 # Base la plus récente parmi les sauvegardes (une préparation interrompue puis relancée sauvegarde une clé vide).
-ANCIENNE=$(ls -dt "${XDG_DATA_HOME:-$HOME/.local/share}"/sentinel/sauvegarde-cle-*/*/donnees 2>/dev/null | head -1 || true)
+ANCIENNE=$(ls -dt "${XDG_DATA_HOME:-$HOME/.local/share}"/gardien/sauvegarde-cle-*/*/donnees 2>/dev/null | head -1 || true)
 if [[ -n $ANCIENNE ]]; then
   cp -r "$ANCIENNE" "$CLE/"
   echo "Base remise sur la clé : $ANCIENNE"

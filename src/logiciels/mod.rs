@@ -425,7 +425,7 @@ fn compte<'a>(offres: impl Iterator<Item = &'a Offre>) -> String {
     }
 }
 
-/// « sentinel logiciels » : le pack de départ, puis une liste à cocher par catégorie.
+/// « gardien logiciels » : le pack de départ, puis une liste à cocher par catégorie.
 pub fn menu() {
     let Some(mut etat) = lire_en_parlant() else {
         return;
@@ -498,7 +498,7 @@ pub fn menu() {
     }
 }
 
-/// « sentinel logiciels --liste » : chaque logiciel proposé sur ce système, par catégorie, avec son état et sa
+/// « gardien logiciels --liste » : chaque logiciel proposé sur ce système, par catégorie, avec son état et sa
 /// source. Rien n'est installé.
 pub fn liste() {
     let Some(etat) = lire_en_parlant() else {
@@ -534,7 +534,7 @@ pub fn liste() {
     );
 }
 
-/// « sentinel logiciels --recommandes » : le pack de départ, directement.
+/// « gardien logiciels --recommandes » : le pack de départ, directement.
 pub fn recommandes() {
     if let Some(etat) = lire_en_parlant() {
         pack(&etat);

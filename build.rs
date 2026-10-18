@@ -1,5 +1,5 @@
 //! Préparé à la compilation : la base des fabricants (assets/oui.tsv) rangée en tableaux triés, et, pour Windows, la
-//! fiche d'identité de sentinel.exe (onglet « Détails » des propriétés du fichier), son icône et son manifeste.
+//! fiche d'identité de gardien.exe (onglet « Détails » des propriétés du fichier), son icône et son manifeste.
 
 use std::collections::HashMap;
 use std::fmt::Write as _;
@@ -68,21 +68,21 @@ fn fabricants() {
 }
 
 fn ressources_windows() {
-    println!("cargo:rerun-if-changed=assets/sentinel.ico");
+    println!("cargo:rerun-if-changed=assets/gardien.ico");
     let mut res = winresource::WindowsResource::new();
     // Compilation croisée depuis Linux : outils de MinGW.
     if !cfg!(windows) {
         res.set_windres_path("x86_64-w64-mingw32-windres");
         res.set_ar_path("x86_64-w64-mingw32-ar");
     }
-    res.set("ProductName", "Sentinel")
-        .set("FileDescription", "sentinel - sécurise et optimise ta machine et ton réseau (bilan, antivirus, réglages)")
-        .set("CompanyName", "Projet personnel Sentinel")
+    res.set("ProductName", "Gardien")
+        .set("FileDescription", "Gardien - sécurise et optimise ta machine et ton réseau (bilan, antivirus, réglages)")
+        .set("CompanyName", "Projet personnel Gardien")
         .set("LegalCopyright", "© 2026 d9v3, licence GPL-3.0-or-later")
-        .set("OriginalFilename", "sentinel.exe")
+        .set("OriginalFilename", "gardien.exe")
         // Icône de l'Explorateur et de la barre des tâches (16 à 256 px, voir assets/).
-        .set_icon("assets/sentinel.ico")
-        // asInvoker : sentinel démarre sans droits admin ; seules les corrections les demandent, une à une.
+        .set_icon("assets/gardien.ico")
+        // asInvoker : Gardien démarre sans droits admin ; seules les corrections les demandent, une à une.
         .set_manifest(
             r#"<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
   <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">

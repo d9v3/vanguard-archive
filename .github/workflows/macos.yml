@@ -1,4 +1,4 @@
-# Version macOS de sentinel : compilée et testée sur un vrai Mac de GitHub (Apple Silicon), puisqu'il n'y a pas
+# Version macOS de Gardien : compilée et testée sur un vrai Mac de GitHub (Apple Silicon), puisqu'il n'y a pas
 # de Mac à la maison. Le programme produit est universel (Apple Silicon + Intel) ; outils/deployer.sh le
 # récupère pour la clé USB (dossier macOS/).
 #
@@ -57,19 +57,19 @@ jobs:
         run: |
           cargo build --release --target aarch64-apple-darwin
           cargo build --release --target x86_64-apple-darwin
-          lipo -create -output sentinel \
-            target/aarch64-apple-darwin/release/sentinel target/x86_64-apple-darwin/release/sentinel
-          lipo -info sentinel
-          ./sentinel --version
+          lipo -create -output gardien \
+            target/aarch64-apple-darwin/release/gardien target/x86_64-apple-darwin/release/gardien
+          lipo -info gardien
+          ./gardien --version
           echo "${{ github.sha }}" > commit.txt
       - name: Essai du programme sur ce Mac
         run: |
-          ./sentinel machine --json > audit.json || true
+          ./gardien machine --json > audit.json || true
           head -c 3000 audit.json
-          ./sentinel diagnostic | tail -20 || true
+          ./gardien diagnostic | tail -20 || true
       - name: Essai complet
         if: github.event_name == 'workflow_dispatch' && inputs.essai_complet
-        run: bash outils/test-macos/essai.sh ./sentinel essai
+        run: bash outils/test-macos/essai.sh ./gardien essai
       - uses: actions/upload-artifact@v4
         if: github.event_name == 'workflow_dispatch' && inputs.essai_complet
         with:
@@ -78,9 +78,9 @@ jobs:
           retention-days: 30
       - uses: actions/upload-artifact@v4
         with:
-          name: sentinel-macos
+          name: gardien-macos
           path: |
-            sentinel
+            gardien
             commit.txt
             audit.json
           retention-days: 30

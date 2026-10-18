@@ -1,6 +1,6 @@
 ---
 name: verifier
-description: Tout vérifier avant un commit de Sentinel — mise en forme, tests Linux, clippy sur les quatre cibles, tests Windows sous Wine, scripts générés. À lancer après toute modification du code Rust ou des scripts, avant de committer.
+description: Tout vérifier avant un commit de Gardien — mise en forme, tests Linux, clippy sur les quatre cibles, tests Windows sous Wine, scripts générés. À lancer après toute modification du code Rust ou des scripts, avant de committer.
 ---
 
 Lance dans cet ordre ; au premier échec, corrige puis reprends depuis le début :

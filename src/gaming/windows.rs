@@ -14,7 +14,7 @@ use crate::machine;
 use crate::trw;
 use crate::ui::*;
 
-/// Ce que sentinel lit avant d'afficher le menu : une photo de l'état, lue telle quelle depuis PowerShell.
+/// Ce que Gardien lit avant d'afficher le menu : une photo de l'état, lue telle quelle depuis PowerShell.
 #[allow(clippy::struct_excessive_bools)]
 #[derive(Default, Deserialize)]
 #[serde(default)]

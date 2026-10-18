@@ -1,6 +1,6 @@
 [Unit]
-Description=sentinel : copier la dernière compilation sur la clé USB SENTINEL
-# Déclenché par sentinel-compilation.path après chaque compilation : --sans-compiler, sinon il recompilerait
+Description=Gardien : copier la dernière compilation sur la clé USB GARDIEN
+# Déclenché par gardien-compilation.path après chaque compilation : --sans-compiler, sinon il recompilerait
 # (environnement différent). Le .path part une fois par binaire écrit : deployer.sh attend la fin de cargo et ne
 # notifie qu'une fois par version.
 

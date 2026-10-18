@@ -9,10 +9,11 @@ use crate::risk::Niveau;
 use crate::ui::*;
 
 #[cfg(target_os = "linux")]
-const NOM: &str = "sentinel-surveillance";
-/// Nom d'avant le renommage en sentinel (0.10.0) : minuterie Linux, et tâche Windows de la v0.4 et avant.
+const NOM: &str = "gardien-surveillance";
+/// Noms d'avant : sentinel (0.11 à 0.50) et netscan (jusqu'à 0.10.0). Minuteries Linux ; sous Windows, la tâche
+/// de la v0.4 et avant s'appelait « netscan-surveillance ».
 #[cfg_attr(target_os = "macos", allow(dead_code))]
-const ANCIEN_NOM: &str = "netscan-surveillance";
+const ANCIENS_NOMS: [&str; 2] = ["sentinel-surveillance", "netscan-surveillance"];
 
 fn reussit(cmd: &str, args: &[&str]) -> bool {
     Command::new(cmd).args(args).output().is_ok_and(|o| o.status.success())
@@ -28,7 +29,7 @@ fn executable() -> String {
     #[cfg(windows)]
     let exe = std::env::current_exe().ok();
     let Some(exe) = exe else {
-        return "sentinel".into();
+        return "gardien".into();
     };
     if reseau::cle_usb().is_some_and(|cle| exe.starts_with(&cle)) {
         let dest = reseau::dossier_local()
@@ -55,7 +56,7 @@ fn executable() -> String {
 pub(crate) fn notifier(titre: &str, corps: &str) {
     #[cfg(target_os = "linux")]
     let _ = Command::new("notify-send")
-        .args(["-a", "sentinel", "-i", "sentinel", "-u", "critical", titre, corps])
+        .args(["-a", "Gardien", "-i", "gardien", "-u", "critical", titre, corps])
         .status();
     // macOS : notification du Centre de notifications, par AppleScript (texte entre guillemets échappés).
     #[cfg(target_os = "macos")]
@@ -153,16 +154,16 @@ fn nouveautes_machine(avant: &EtatMachine, apres: &EtatMachine) -> Vec<(String, 
     for a in nouvelles.iter().take(3) {
         let (cat, msg) = a.split_once(" : ").unwrap_or(("", a.as_str()));
         notes.push((
-            trf!("Sentinel : {}", "Sentinel: {}", crate::langue::categorie(cat)),
+            trf!("Gardien : {}", "Gardien: {}", crate::langue::categorie(cat)),
             msg.to_string(),
         ));
     }
     if nouvelles.len() > 3 {
         notes.push((
-            tr!("Sentinel : autres problèmes", "Sentinel: other problems").to_string(),
+            tr!("Gardien : autres problèmes", "Gardien: other problems").to_string(),
             trf!(
-                "{} autre(s) problème(s) nouveau(x) : lance « sentinel machine ».",
-                "{} other new problem(s): run “sentinel machine”.",
+                "{} autre(s) problème(s) nouveau(x) : lance « gardien machine ».",
+                "{} other new problem(s): run “gardien machine”.",
                 nouvelles.len() - 3
             ),
         ));
@@ -171,10 +172,10 @@ fn nouveautes_machine(avant: &EtatMachine, apres: &EtatMachine) -> Vec<(String, 
         && b + 10 <= a
     {
         notes.push((
-            tr!("Sentinel : note en baisse", "Sentinel: grade dropping").to_string(),
+            tr!("Gardien : note en baisse", "Gardien: grade dropping").to_string(),
             trf!(
-                "La note de cette machine passe de {a} à {b} : lance « sentinel machine » pour voir pourquoi.",
-                "This machine's grade drops from {a} to {b}: run “sentinel machine” to see why."
+                "La note de cette machine passe de {a} à {b} : lance « gardien machine » pour voir pourquoi.",
+                "This machine's grade drops from {a} to {b}: run “gardien machine” to see why."
             ),
         ));
     }
@@ -232,7 +233,7 @@ fn mac_changee(avant: &Passerelle, apres: &Passerelle) -> Option<(String, String
 fn veiller_passerelle(r: &reseau::Rapport) {
     if let Some((boite, mac, autre)) = reseau::usurpation_arp(r) {
         notifier(
-            tr!("Sentinel : box usurpée ?", "Sentinel: router impersonated?"),
+            tr!("Gardien : box usurpée ?", "Gardien: router impersonated?"),
             &reseau::message_usurpation(boite, &mac, autre),
         );
         return;
@@ -244,8 +245,8 @@ fn veiller_passerelle(r: &reseau::Rapport) {
     if let Some((ancienne, nouvelle)) = avant.as_ref().and_then(|a| mac_changee(a, &apres)) {
         notifier(
             tr!(
-                "Sentinel : la box a changé d'adresse MAC",
-                "Sentinel: the router's MAC address changed"
+                "Gardien : la box a changé d'adresse MAC",
+                "Gardien: the router's MAC address changed"
             ),
             &trf!(
                 "La box {} répondait avec {ancienne}, elle répond maintenant avec {nouvelle}. Normal si tu viens de changer de box ; sinon, quelqu'un se fait peut-être passer pour elle (usurpation ARP).",
@@ -265,8 +266,8 @@ pub async fn surveiller() {
     if let Some(fichiers) = crate::integrite::changements_a_signaler() {
         notifier(
             tr!(
-                "Sentinel : fichiers critiques modifiés",
-                "Sentinel: critical files changed"
+                "Gardien : fichiers critiques modifiés",
+                "Gardien: critical files changed"
             ),
             &fichiers,
         );
@@ -310,7 +311,7 @@ pub fn active() -> bool {
     #[cfg(target_os = "linux")]
     return reussit("systemctl", &["--user", "is-enabled", &format!("{NOM}.timer")]);
     #[cfg(windows)]
-    return crate::machine::windows::ps(&format!("Get-ScheduledTask -TaskName '{TACHE_WINDOWS}' | Out-Null")).is_some();
+    return tache_existe(&[TACHE_WINDOWS]);
     #[cfg(target_os = "macos")]
     return reussit("launchctl", &["print", &format!("{}/{AGENT_MACOS}", domaine_launchd())]);
 }
@@ -335,12 +336,12 @@ fn installer(exe: &str) -> bool {
     let dossier = std::path::PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".config/systemd/user");
     let _ = std::fs::create_dir_all(&dossier);
     let service = trf!(
-        "[Unit]\nDescription=sentinel : surveillance du réseau local\n\n[Service]\nType=oneshot\nExecStart={exe} surveiller\nNice=10\n",
-        "[Unit]\nDescription=sentinel: local network monitoring\n\n[Service]\nType=oneshot\nExecStart={exe} surveiller\nNice=10\n"
+        "[Unit]\nDescription=Gardien : surveillance du réseau local\n\n[Service]\nType=oneshot\nExecStart={exe} surveiller\nNice=10\n",
+        "[Unit]\nDescription=Gardien: local network monitoring\n\n[Service]\nType=oneshot\nExecStart={exe} surveiller\nNice=10\n"
     );
     let timer = tr!(
-        "[Unit]\nDescription=sentinel : scan du réseau toutes les heures\n\n[Timer]\nOnBootSec=5min\nOnUnitActiveSec=1h\nPersistent=true\n\n[Install]\nWantedBy=timers.target\n",
-        "[Unit]\nDescription=sentinel: network scan every hour\n\n[Timer]\nOnBootSec=5min\nOnUnitActiveSec=1h\nPersistent=true\n\n[Install]\nWantedBy=timers.target\n"
+        "[Unit]\nDescription=Gardien : scan du réseau toutes les heures\n\n[Timer]\nOnBootSec=5min\nOnUnitActiveSec=1h\nPersistent=true\n\n[Install]\nWantedBy=timers.target\n",
+        "[Unit]\nDescription=Gardien: network scan every hour\n\n[Timer]\nOnBootSec=5min\nOnUnitActiveSec=1h\nPersistent=true\n\n[Install]\nWantedBy=timers.target\n"
     );
     let _ = std::fs::write(dossier.join(format!("{NOM}.service")), service);
     let _ = std::fs::write(dossier.join(format!("{NOM}.timer")), timer);
@@ -365,22 +366,34 @@ fn retirer_minuterie(nom: &str) -> bool {
 
 #[cfg(target_os = "linux")]
 fn ancienne_installee() -> bool {
-    reussit("systemctl", &["--user", "is-enabled", &format!("{ANCIEN_NOM}.timer")])
+    ANCIENS_NOMS
+        .iter()
+        .any(|n| reussit("systemctl", &["--user", "is-enabled", &format!("{n}.timer")]))
 }
 
 #[cfg(target_os = "linux")]
 fn retirer_ancienne() {
-    retirer_minuterie(ANCIEN_NOM);
+    for n in ANCIENS_NOMS {
+        retirer_minuterie(n);
+    }
 }
 
 /// Agent launchd de la surveillance sous macOS (~/Library/LaunchAgents/<nom>.plist).
 #[cfg(target_os = "macos")]
-const AGENT_MACOS: &str = "com.sentinel.surveillance";
+const AGENT_MACOS: &str = "com.gardien.surveillance";
+/// Agent d'avant le renommage en Gardien (0.44 à 0.50).
+#[cfg(target_os = "macos")]
+const ANCIEN_AGENT_MACOS: &str = "com.sentinel.surveillance";
+
+#[cfg(target_os = "macos")]
+fn plist_agent_nomme(nom: &str) -> std::path::PathBuf {
+    std::path::PathBuf::from(std::env::var_os("HOME").unwrap_or_default())
+        .join(format!("Library/LaunchAgents/{nom}.plist"))
+}
 
 #[cfg(target_os = "macos")]
 fn plist_agent() -> std::path::PathBuf {
-    std::path::PathBuf::from(std::env::var_os("HOME").unwrap_or_default())
-        .join(format!("Library/LaunchAgents/{AGENT_MACOS}.plist"))
+    plist_agent_nomme(AGENT_MACOS)
 }
 
 /// Domaine launchd de la session graphique de l'utilisateur (« gui/501 »).
@@ -425,52 +438,68 @@ fn installer(exe: &str) -> bool {
 }
 
 #[cfg(target_os = "macos")]
-fn desinstaller() -> bool {
-    let plist = plist_agent();
+fn retirer_agent(plist: &std::path::Path) {
     let _ = reussit(
         "launchctl",
         &["bootout", &domaine_launchd(), &plist.display().to_string()],
     );
-    let _ = std::fs::remove_file(&plist);
+    let _ = std::fs::remove_file(plist);
+}
+
+#[cfg(target_os = "macos")]
+fn desinstaller() -> bool {
+    retirer_ancienne();
+    retirer_agent(&plist_agent());
     true
 }
 
-/// Rien à migrer sous macOS : la surveillance n'y a jamais existé sous l'ancien nom.
 #[cfg(target_os = "macos")]
 fn ancienne_installee() -> bool {
-    false
+    plist_agent_nomme(ANCIEN_AGENT_MACOS).is_file()
 }
 
 #[cfg(target_os = "macos")]
-fn retirer_ancienne() {}
+fn retirer_ancienne() {
+    retirer_agent(&plist_agent_nomme(ANCIEN_AGENT_MACOS));
+}
 
 /// Nom lisible de la tâche dans le Planificateur de tâches Windows.
 #[cfg(windows)]
-const TACHE_WINDOWS: &str = "sentinel - surveillance du reseau";
-/// Tâche des versions 0.5 à 0.10, sous l'ancien nom netscan.
+const TACHE_WINDOWS: &str = "gardien - surveillance du reseau";
+/// Tâches des versions 0.5 à 0.50, sous les anciens noms sentinel et netscan.
 #[cfg(windows)]
-const ANCIENNE_TACHE_WINDOWS: &str = "netscan - surveillance du reseau";
+const ANCIENNES_TACHES_WINDOWS: [&str; 2] = ["sentinel - surveillance du reseau", "netscan - surveillance du reseau"];
+
+/// Une de ces tâches existe-t-elle ? Sans erreur quand aucune n'existe : un échec de PowerShell irait au journal.
+#[cfg(windows)]
+fn tache_existe(noms: &[&str]) -> bool {
+    let liste = noms.iter().map(|n| format!("'{n}'")).collect::<Vec<_>>().join(",");
+    crate::machine::windows::ps(&format!(
+        "if (Get-ScheduledTask -ErrorAction SilentlyContinue | Where-Object {{ $_.TaskName -in @({liste}) }}) {{ 'oui' }}"
+    ))
+    .is_some_and(|s| s.trim() == "oui")
+}
 
 #[cfg(windows)]
 fn ancienne_installee() -> bool {
-    crate::machine::windows::ps(&format!(
-        "Get-ScheduledTask -TaskName '{ANCIENNE_TACHE_WINDOWS}' | Out-Null"
-    ))
-    .is_some()
+    tache_existe(&ANCIENNES_TACHES_WINDOWS)
 }
 
 #[cfg(windows)]
 fn retirer_ancienne() {
-    let _ = reussit("schtasks", &["/Delete", "/F", "/TN", ANCIEN_NOM]);
-    let _ = crate::machine::windows::ps(&format!(
-        "Unregister-ScheduledTask -TaskName '{ANCIENNE_TACHE_WINDOWS}' -Confirm:$false"
-    ));
+    for nom in ANCIENS_NOMS {
+        let _ = reussit("schtasks", &["/Delete", "/F", "/TN", nom]);
+    }
+    for tache in ANCIENNES_TACHES_WINDOWS {
+        let _ = crate::machine::windows::ps(&format!("Unregister-ScheduledTask -TaskName '{tache}' -Confirm:$false"));
+    }
 }
 
 #[cfg(windows)]
 fn installer(exe: &str) -> bool {
     use crate::machine::windows::ps;
-    // Anciennes tâches (v0.4 et avant, puis sous le nom netscan) : retirées au profit de la tâche décrite ci-dessous.
+    // Anciennes tâches (v0.4 et avant, puis sous les noms netscan et sentinel) : retirées au profit de la tâche
+    // décrite ci-dessous.
     retirer_ancienne();
     let exe = exe.replace('\'', "''");
     // Tâche visible et décrite : on voit dans le Planificateur ce qu'elle fait et comment l'arrêter.
@@ -478,11 +507,11 @@ fn installer(exe: &str) -> bool {
         "$a = New-ScheduledTaskAction -Execute '{exe}' -Argument 'surveiller'; \
          $t = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -RepetitionInterval (New-TimeSpan -Hours 1); \
          Register-ScheduledTask -TaskName '{TACHE_WINDOWS}' -Action $a -Trigger $t -Force \
-           -Description 'Scan du réseau local toutes les heures par sentinel, notification si un appareil inconnu apparaît. Pour arrêter : sentinel surveillance off' | Out-Null",
+           -Description 'Scan du réseau local toutes les heures par Gardien, notification si un appareil inconnu apparaît. Pour arrêter : gardien surveillance off' | Out-Null",
         "$a = New-ScheduledTaskAction -Execute '{exe}' -Argument 'surveiller'; \
          $t = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -RepetitionInterval (New-TimeSpan -Hours 1); \
          Register-ScheduledTask -TaskName '{TACHE_WINDOWS}' -Action $a -Trigger $t -Force \
-           -Description 'Hourly local network scan by sentinel, with a notification when an unknown device appears. To stop it: sentinel surveillance off' | Out-Null"
+           -Description 'Hourly local network scan by Gardien, with a notification when an unknown device appears. To stop it: gardien surveillance off' | Out-Null"
     );
     ps(&script).is_some()
 }
@@ -503,10 +532,10 @@ mod tests {
     #[test]
     fn agent_launchd() {
         let p = plist_surveillance(
-            "/Users/a b/Library/Application Support/sentinel/bin/sentinel",
-            "com.sentinel.surveillance",
+            "/Users/a b/Library/Application Support/gardien/bin/gardien",
+            "com.gardien.surveillance",
         );
-        assert!(p.contains("<string>/Users/a b/Library/Application Support/sentinel/bin/sentinel</string>"));
+        assert!(p.contains("<string>/Users/a b/Library/Application Support/gardien/bin/gardien</string>"));
         assert!(p.contains("<key>StartInterval</key>\n\t<integer>3600</integer>"));
         assert!(p.contains("<string>surveiller</string>"));
     }

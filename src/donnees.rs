@@ -1,4 +1,4 @@
-//! Sauvegarde et restauration des données de sentinel dans un seul fichier : base des appareils (surnoms,
+//! Sauvegarde et restauration des données de Gardien dans un seul fichier : base des appareils (surnoms,
 //! historique de chaque réseau) et état de la surveillance. Sert à passer d'un ordinateur à l'autre sans la clé,
 //! ou à garder une copie avant d'effacer la clé.
 //! La quarantaine de l'antivirus n'y va jamais : on ne transporte pas de malware.
@@ -11,15 +11,15 @@ use crate::reseau::{self, Contenu};
 use crate::surveillance;
 use crate::ui::*;
 
-const FORMAT: &str = "sentinel-sauvegarde";
-/// Sauvegardes faites sous l'ancien nom (netscan, jusqu'à 0.10.0) : toujours lisibles.
-const ANCIEN_FORMAT: &str = "netscan-sauvegarde";
+const FORMAT: &str = "gardien-sauvegarde";
+/// Sauvegardes faites sous les anciens noms (sentinel jusqu'à 0.50, netscan jusqu'à 0.10.0) : toujours lisibles.
+const ANCIENS_FORMATS: [&str; 2] = ["sentinel-sauvegarde", "netscan-sauvegarde"];
 
 #[derive(Serialize, Deserialize)]
 struct Sauvegarde {
     format: String,
-    #[serde(default, alias = "version_netscan")]
-    version_sentinel: String,
+    #[serde(default, alias = "version_sentinel", alias = "version_netscan")]
+    version_gardien: String,
     #[serde(default)]
     date: String,
     #[serde(default)]
@@ -41,7 +41,7 @@ fn dossier_par_defaut() -> PathBuf {
 
 fn chemin_par_defaut() -> PathBuf {
     dossier_par_defaut().join(format!(
-        "sentinel-sauvegarde-{}.json",
+        "gardien-sauvegarde-{}.json",
         chrono::Local::now().format("%Y-%m-%d")
     ))
 }
@@ -58,7 +58,7 @@ fn chemin_saisi(texte: &str) -> Option<PathBuf> {
     })
 }
 
-/// Lit une sauvegarde sentinel, ou directement un appareils.json (la base copiée à la main depuis la clé).
+/// Lit une sauvegarde Gardien, ou directement un appareils.json (la base copiée à la main depuis la clé).
 /// Rend la base et l'état de la surveillance s'il est connu.
 fn lire_sauvegarde(texte: &str) -> Result<(serde_json::Value, Option<bool>), String> {
     let valeur: serde_json::Value = serde_json::from_str(texte.trim_start_matches('\u{feff}')).map_err(|e| {
@@ -70,7 +70,7 @@ fn lire_sauvegarde(texte: &str) -> Result<(serde_json::Value, Option<bool>), Str
     if valeur
         .get("format")
         .and_then(|f| f.as_str())
-        .is_some_and(|f| f == FORMAT || f == ANCIEN_FORMAT)
+        .is_some_and(|f| f == FORMAT || ANCIENS_FORMATS.contains(&f))
     {
         let s: Sauvegarde =
             serde_json::from_value(valeur).map_err(|e| trf!("sauvegarde abîmée ({e})", "damaged backup ({e})"))?;
@@ -80,8 +80,8 @@ fn lire_sauvegarde(texte: &str) -> Result<(serde_json::Value, Option<bool>), Str
         return Ok((valeur, None));
     }
     Err(tr!(
-        "ce fichier n'est ni une sauvegarde sentinel ni une base appareils.json",
-        "this file is neither a sentinel backup nor an appareils.json database"
+        "ce fichier n'est ni une sauvegarde Gardien ni une base appareils.json",
+        "this file is neither a Gardien backup nor an appareils.json database"
     )
     .into())
 }
@@ -101,7 +101,7 @@ pub fn sauvegarder(fichier: Option<PathBuf>) {
     let (base, contenu) = reseau::base_pour_sauvegarde();
     let sauvegarde = Sauvegarde {
         format: FORMAT.into(),
-        version_sentinel: env!("CARGO_PKG_VERSION").into(),
+        version_gardien: env!("CARGO_PKG_VERSION").into(),
         date: chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
         surveillance: Some(surveillance::active()),
         base,
@@ -165,7 +165,7 @@ pub fn restaurer(fichier: &Path) {
 }
 
 pub fn menu() {
-    titre(tr!("Données de sentinel", "sentinel data"));
+    titre(tr!("Données de Gardien", "Gardien data"));
     trp!(
         "  Base des appareils (surnoms, historique de chaque réseau) et état de la surveillance.",
         "  Device database (nicknames, history of each network) and monitoring state."
@@ -219,18 +219,18 @@ mod tests {
     #[test]
     fn formats_acceptes() {
         let s = format!(
-            "\u{feff}{{\"format\":\"{FORMAT}\",\"version_sentinel\":\"0.9.13\",\"date\":\"2026-10-17\",\"surveillance\":true,\"base\":{{\"reseaux\":{{}}}}}}"
+            "\u{feff}{{\"format\":\"{FORMAT}\",\"version_gardien\":\"0.9.13\",\"date\":\"2026-10-17\",\"surveillance\":true,\"base\":{{\"reseaux\":{{}}}}}}"
         );
         let (base, surv) = lire_sauvegarde(&s).unwrap();
         assert_eq!((base["reseaux"].is_object(), surv), (true, Some(true)));
         // Une base appareils.json copiée telle quelle.
         let (base, surv) = lire_sauvegarde("{\"reseaux\":{\"box\":{\"nom\":null,\"appareils\":{}}}}").unwrap();
         assert_eq!((base["reseaux"]["box"].is_object(), surv), (true, None));
-        // Sauvegarde faite sous l'ancien nom.
-        let s = format!(
-            "{{\"format\":\"{ANCIEN_FORMAT}\",\"version_netscan\":\"0.10.0\",\"surveillance\":false,\"base\":{{\"reseaux\":{{}}}}}}"
-        );
-        assert_eq!(lire_sauvegarde(&s).unwrap().1, Some(false));
+        // Sauvegardes faites sous les anciens noms.
+        let s = "{\"format\":\"netscan-sauvegarde\",\"version_netscan\":\"0.10.0\",\"surveillance\":false,\"base\":{\"reseaux\":{}}}";
+        assert_eq!(lire_sauvegarde(s).unwrap().1, Some(false));
+        let s = "{\"format\":\"sentinel-sauvegarde\",\"version_sentinel\":\"0.49.0\",\"surveillance\":true,\"base\":{\"reseaux\":{}}}";
+        assert_eq!(lire_sauvegarde(s).unwrap().1, Some(true));
         assert!(lire_sauvegarde("{\"autre\":1}").is_err());
         assert!(lire_sauvegarde("pas du json").is_err());
         assert!(lire_sauvegarde(&format!("{{\"format\":\"{FORMAT}\"}}")).is_err());

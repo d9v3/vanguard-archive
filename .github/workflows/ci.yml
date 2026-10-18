@@ -54,9 +54,9 @@ jobs:
       - name: Le programme démarre et répond
         run: |
           cargo build --release
-          ./target/x86_64-unknown-linux-musl/release/sentinel --version
-          ./target/x86_64-unknown-linux-musl/release/sentinel logiciels --liste
-          ./target/x86_64-unknown-linux-musl/release/sentinel nettoyer --liste
+          ./target/x86_64-unknown-linux-musl/release/gardien --version
+          ./target/x86_64-unknown-linux-musl/release/gardien logiciels --liste
+          ./target/x86_64-unknown-linux-musl/release/gardien nettoyer --liste
 
   # Windows la nuit seulement si le code a changé depuis le dernier passage réussi (comme macos.yml).
   utile:
@@ -100,7 +100,7 @@ jobs:
       - name: Essai du programme (lecture seule)
         run: |
           cargo build --release --target x86_64-pc-windows-msvc
-          $s = ".\target\x86_64-pc-windows-msvc\release\sentinel.exe"
+          $s = ".\target\x86_64-pc-windows-msvc\release\gardien.exe"
           & $s --version
           & $s machine --json > audit.json
           Get-Content audit.json -TotalCount 40

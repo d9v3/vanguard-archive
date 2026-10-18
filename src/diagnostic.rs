@@ -653,7 +653,7 @@ fn en_texte(sections: &[Section]) -> String {
     let date = chrono::Local::now().format("%Y-%m-%d %H:%M");
     let _ = writeln!(
         t,
-        "{} — Sentinel {} — {date}\n",
+        "{} — Gardien {} — {date}\n",
         tr!("Diagnostic de l'ordinateur", "Computer diagnostic"),
         env!("CARGO_PKG_VERSION")
     );
@@ -668,7 +668,7 @@ fn en_texte(sections: &[Section]) -> String {
     t
 }
 
-/// « sentinel diagnostic » : affiche le diagnostic et l'enregistre en texte.
+/// « gardien diagnostic » : affiche le diagnostic et l'enregistre en texte.
 pub fn diagnostic() {
     println!();
     cadre(

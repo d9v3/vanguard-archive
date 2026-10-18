@@ -1,5 +1,5 @@
 //! Lancement des commandes système avec un délai maximal : un outil qui ne répond plus (systemctl, gsettings,
-//! PowerShell, gestionnaire de paquets hors ligne…) ne doit jamais figer sentinel.
+//! PowerShell, gestionnaire de paquets hors ligne…) ne doit jamais figer Gardien.
 
 use std::io::Read;
 use std::process::{Child, Command, Stdio};
@@ -121,7 +121,7 @@ mod tests {
 
     #[test]
     fn le_delai_arrete_aussi_ce_que_le_programme_a_lance() {
-        let fichier = std::env::temp_dir().join(format!("sentinel-test-arbre-{}", std::process::id()));
+        let fichier = std::env::temp_dir().join(format!("gardien-test-arbre-{}", std::process::id()));
         let script = format!("sleep 30 & echo $! > '{}'; wait", fichier.display());
         assert!(lancer(Command::new("sh").args(["-c", &script]), 1).is_none());
         let pid = std::fs::read_to_string(&fichier).unwrap().trim().to_string();

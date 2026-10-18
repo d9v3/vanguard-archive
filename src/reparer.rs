@@ -23,7 +23,7 @@ pub struct Reparation {
     pub inutile: Option<String>,
     /// Modifie le système : on propose un point de restauration avant (snapper, timeshift, Windows).
     pub restauration: bool,
-    /// Un autre outil de sentinel fait la réparation (Disque plein : Nettoyer), à la place des commandes.
+    /// Un autre outil de Gardien fait la réparation (Disque plein : Nettoyer), à la place des commandes.
     pub ouvrir: Option<fn()>,
 }
 
@@ -133,7 +133,7 @@ fn entre_apostrophes(t: &str) -> String {
 /// Outil et commande du point de restauration, s'il y en a un de configuré.
 #[cfg(target_os = "linux")]
 pub(crate) fn point_restauration(titre: &str) -> Option<(&'static str, String)> {
-    let description = entre_apostrophes(&trf!("sentinel : avant « {titre} »", "sentinel: before “{titre}”"));
+    let description = entre_apostrophes(&trf!("Gardien : avant « {titre} »", "Gardien: before “{titre}”"));
     if present("snapper") && std::path::Path::new("/etc/snapper/configs/root").is_file() {
         Some((
             "snapper",
@@ -155,7 +155,7 @@ pub(crate) fn point_restauration(titre: &str) -> Option<(&'static str, String)> 
 #[cfg(windows)]
 #[allow(clippy::unnecessary_wraps)] // même signature que sur Linux, où l'outil peut manquer
 pub(crate) fn point_restauration(titre: &str) -> Option<(&'static str, String)> {
-    let description = entre_apostrophes(&trf!("sentinel : avant « {titre} »", "sentinel: before “{titre}”"));
+    let description = entre_apostrophes(&trf!("Gardien : avant « {titre} »", "Gardien: before “{titre}”"));
     Some((
         "Windows",
         trf!(
@@ -222,9 +222,9 @@ fn navigation() -> Reparation {
             "hosts file: {}",
             resume_redirections(&detournees)
         ));
-        commandes.push("sudo cp -p /etc/hosts /etc/hosts.sentinel-$(date +%Y%m%d-%H%M%S)".to_string());
+        commandes.push("sudo cp -p /etc/hosts /etc/hosts.gardien-$(date +%Y%m%d-%H%M%S)".to_string());
         commandes.push(format!(
-            "sudo sed -i -E 's/^([[:space:]]*({})[[:space:]])/# sentinel : \\1/' /etc/hosts",
+            "sudo sed -i -E 's/^([[:space:]]*({})[[:space:]])/# Gardien : \\1/' /etc/hosts",
             motif_adresses(&detournees)
         ));
     }
@@ -606,10 +606,10 @@ fn navigation_macos() -> Reparation {
             "hosts file: {}",
             resume_redirections(&detournees)
         ));
-        commandes.push("sudo cp -p /etc/hosts /etc/hosts.sentinel-$(date +%Y%m%d-%H%M%S)".to_string());
+        commandes.push("sudo cp -p /etc/hosts /etc/hosts.gardien-$(date +%Y%m%d-%H%M%S)".to_string());
         // sed de macOS : -i demande un suffixe (vide) ; puis vider le cache DNS pour que ça compte tout de suite.
         commandes.push(format!(
-            "sudo sed -i '' -E 's/^([[:space:]]*({})[[:space:]])/# sentinel : \\1/' /etc/hosts",
+            "sudo sed -i '' -E 's/^([[:space:]]*({})[[:space:]])/# Gardien : \\1/' /etc/hosts",
             motif_adresses(&detournees)
         ));
         commandes.push("sudo dscacheutil -flushcache; sudo killall -HUP mDNSResponder".to_string());
@@ -823,13 +823,13 @@ fn navigation(etat: Option<&EtatWindows>) -> Reparation {
             resume_redirections(&detournees)
         ));
         commandes.push(
-            r#"$h = "$env:SystemRoot\System32\drivers\etc\hosts"; Copy-Item $h "$h.sentinel-$(Get-Date -Format yyyyMMdd-HHmmss)""#
+            r#"$h = "$env:SystemRoot\System32\drivers\etc\hosts"; Copy-Item $h "$h.gardien-$(Get-Date -Format yyyyMMdd-HHmmss)""#
                 .to_string(),
         );
         // Réécrit en « Default » (ANSI), comme il a été lu : « ASCII » changerait en « ? » les lettres accentuées
         // des commentaires.
         commandes.push(format!(
-            r#"$h = "$env:SystemRoot\System32\drivers\etc\hosts"; (Get-Content $h) | ForEach-Object {{ if ($_ -match '^\s*({})\s') {{ '# sentinel : ' + $_ }} else {{ $_ }} }} | Set-Content $h -Encoding Default"#,
+            r#"$h = "$env:SystemRoot\System32\drivers\etc\hosts"; (Get-Content $h) | ForEach-Object {{ if ($_ -match '^\s*({})\s') {{ '# Gardien : ' + $_ }} else {{ $_ }} }} | Set-Content $h -Encoding Default"#,
             motif_adresses(&detournees)
         ));
     }

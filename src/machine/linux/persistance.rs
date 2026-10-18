@@ -702,7 +702,7 @@ mod tests {
         assert!(commande_suspecte("~/.cache/.u/agent", true).is_some());
         assert!(commande_suspecte("%h/.mozilla/x", true).is_some());
         assert!(commande_suspecte("~/.local/bin/plein-ecran", true).is_none());
-        assert!(commande_suspecte("%h/.cargo/bin/sentinel surveiller", true).is_none());
+        assert!(commande_suspecte("%h/.cargo/bin/gardien surveiller", true).is_none());
         assert!(commande_suspecte("/usr/bin/xrandr --output DP-1", true).is_none());
         assert!(commande_suspecte("cd /tmp/x", false).is_none());
     }

@@ -1,10 +1,10 @@
-//! Protection de la clé USB sous Linux et macOS. Sous Windows, la partition SENTINEL est en lecture seule grâce à
+//! Protection de la clé USB sous Linux et macOS. Sous Windows, la partition GARDIEN est en lecture seule grâce à
 //! son attribut GPT ; Linux et macOS ignorent cet attribut. Sur tout ordinateur autre que celui du propriétaire,
-//! sentinel remonte donc lui-même la partition en lecture seule (udisks ou diskutil, sans mot de passe) avant de
+//! Gardien remonte donc lui-même la partition en lecture seule (udisks ou diskutil, sans mot de passe) avant de
 //! commencer.
 //!
 //! Le propriétaire est reconnu par l'empreinte SHA-1 de son /etc/machine-id (IOPlatformUUID sous macOS), que
-//! outils/deployer.sh écrit dans le fichier témoin `sentinel.cle`. Témoin vide (clé jamais déployée) : pas de
+//! outils/deployer.sh écrit dans le fichier témoin `gardien.cle`. Témoin vide (clé jamais déployée) : pas de
 //! protection.
 //!
 //! Lancé depuis la clé, le programme s'y lit encore : la partition ne pourrait pas être démontée. Il se recopie
@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 use crate::ui::*;
 
 /// Variable posée par la copie temporaire : chemin du programme d'origine, sur la clé.
-const ORIGINE: &str = "SENTINEL_ORIGINE";
+const ORIGINE: &str = "GARDIEN_ORIGINE";
 /// Dossier du programme sur la clé.
 #[cfg(target_os = "linux")]
 const DOSSIER_PROGRAMME: &str = "Linux";
@@ -71,7 +71,7 @@ fn montage(dossier: &Path) -> Option<(String, bool)> {
 }
 
 /// Périphérique et état du point de montage `dossier`, d'après `mount` :
-/// « /dev/disk4s1 on /Volumes/SENTINEL (exfat, local, nodev, nosuid, read-only, noowners) ».
+/// « /dev/disk4s1 on /Volumes/GARDIEN (exfat, local, nodev, nosuid, read-only, noowners) ».
 #[cfg(target_os = "macos")]
 fn montage(dossier: &Path) -> Option<(String, bool)> {
     let r = crate::commande::lancer(&mut std::process::Command::new("mount"), 10)?;
@@ -171,8 +171,8 @@ pub fn proteger_cle() {
     }
     if let Err(e) = demontage {
         trp!(
-            "  ⚠ Clé SENTINEL non protégée : elle est utilisée (terminal ou fenêtre ouverts dans la clé ?).\n    {GRIS}Ferme-les, puis relance sentinel depuis un autre dossier : {}/{DOSSIER_PROGRAMME}/sentinel{RESET}",
-            "  ⚠ SENTINEL key not protected: it is in use (terminal or window open inside the key?).\n    {GRIS}Close them, then run sentinel from another folder: {}/{DOSSIER_PROGRAMME}/sentinel{RESET}",
+            "  ⚠ Clé GARDIEN non protégée : elle est utilisée (terminal ou fenêtre ouverts dans la clé ?).\n    {GRIS}Ferme-les, puis relance Gardien depuis un autre dossier : {}/{DOSSIER_PROGRAMME}/gardien{RESET}",
+            "  ⚠ GARDIEN key not protected: it is in use (terminal or window open inside the key?).\n    {GRIS}Close them, then run Gardien from another folder: {}/{DOSSIER_PROGRAMME}/gardien{RESET}",
             cle.display()
         );
         crate::journal::erreur("protection de la clé", &format!("démontage impossible : {e}"));
@@ -187,8 +187,8 @@ pub fn proteger_cle() {
         );
     } else {
         trp!(
-            "  {GRIS}Clé SENTINEL remontée en lecture seule : cet ordinateur ne peut rien y écrire jusqu'au débranchement.{RESET}",
-            "  {GRIS}SENTINEL key remounted read-only: this computer cannot write to it until it is unplugged.{RESET}"
+            "  {GRIS}Clé GARDIEN remontée en lecture seule : cet ordinateur ne peut rien y écrire jusqu'au débranchement.{RESET}",
+            "  {GRIS}GARDIEN key remounted read-only: this computer cannot write to it until it is unplugged.{RESET}"
         );
     }
 }
@@ -204,18 +204,18 @@ fn dossiers_temporaires() -> Vec<PathBuf> {
         .collect()
 }
 
-/// `exe` est-il une copie faite par `relancer_depuis_une_copie` (<dossier temporaire>/sentinel-<…>/sentinel) ?
-/// La variable SENTINEL_ORIGINE ne suffit pas : tout programme lancé depuis la copie en hérite, et un sentinel
+/// `exe` est-il une copie faite par `relancer_depuis_une_copie` (<dossier temporaire>/gardien-<…>/gardien) ?
+/// La variable GARDIEN_ORIGINE ne suffit pas : tout programme lancé depuis la copie en hérite, et un Gardien
 /// relancé de là effacerait sinon son propre programme.
 fn est_une_copie(exe: &Path) -> bool {
     let Some(dossier) = exe.parent() else {
         return false;
     };
     let base = dossier.parent().and_then(|b| b.canonicalize().ok());
-    exe.file_name() == Some(std::ffi::OsStr::new("sentinel"))
+    exe.file_name() == Some(std::ffi::OsStr::new("gardien"))
         && dossier
             .file_name()
-            .is_some_and(|n| n.to_string_lossy().starts_with("sentinel-"))
+            .is_some_and(|n| n.to_string_lossy().starts_with("gardien-"))
         && base.is_some_and(|b| {
             dossiers_temporaires()
                 .iter()
@@ -230,7 +230,7 @@ fn relancer_depuis_une_copie(exe: &Path) {
     // Nom imprévisible, dossier réservé à la personne et refusé s'il existe déjà : sinon un autre compte de
     // l'ordinateur pourrait le préparer d'avance et remplacer le programme entre la copie et son lancement.
     let nom = format!(
-        "sentinel-{}-{}",
+        "gardien-{}-{}",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -239,7 +239,7 @@ fn relancer_depuis_une_copie(exe: &Path) {
     let mut erreurs = Vec::new();
     for base in dossiers_temporaires() {
         let dossier = base.join(&nom);
-        let copie = dossier.join("sentinel");
+        let copie = dossier.join("gardien");
         let copiee = std::fs::DirBuilder::new()
             .mode(0o700)
             .create(&dossier)
@@ -285,14 +285,14 @@ mod tests {
     #[test]
     fn seule_la_copie_temporaire_s_efface() {
         let base = dossiers_temporaires().remove(0);
-        let dossier = base.join(format!("sentinel-test-{}", std::process::id()));
+        let dossier = base.join(format!("gardien-test-{}", std::process::id()));
         std::fs::create_dir_all(&dossier).unwrap();
-        let copie = dossier.join("sentinel");
+        let copie = dossier.join("gardien");
         std::fs::write(&copie, "").unwrap();
         assert!(est_une_copie(&copie));
-        // Le programme installé, ou un « sentinel » posé ailleurs : jamais effacés.
-        assert!(!est_une_copie(Path::new("/usr/bin/sentinel")));
-        assert!(!est_une_copie(&base.join("sentinel")));
+        // Le programme installé, ou un « Gardien » posé ailleurs : jamais effacés.
+        assert!(!est_une_copie(Path::new("/usr/bin/gardien")));
+        assert!(!est_une_copie(&base.join("gardien")));
         let _ = std::fs::remove_file(&copie);
         let _ = std::fs::remove_dir(&dossier);
     }

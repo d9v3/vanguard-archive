@@ -10,7 +10,7 @@ use crate::ui::*;
 
 /// Dossier jetable qui reçoit une copie du programme (le bac à sable n'écrit jamais à côté de l'original).
 fn dossier_jetable() -> PathBuf {
-    std::env::temp_dir().join(format!("sentinel-bac-{}", std::process::id()))
+    std::env::temp_dir().join(format!("gardien-bac-{}", std::process::id()))
 }
 
 /// Arguments de bubblewrap. Le dossier de session (/run/user/…) est masqué : son bus de session permettrait de
@@ -85,7 +85,7 @@ fn present(cmd: &str) -> bool {
         .is_ok_and(|o| o.status.success())
 }
 
-/// « sentinel isoler <fichier> » : lance le programme dans un bac à sable.
+/// « gardien isoler <fichier> » : lance le programme dans un bac à sable.
 pub fn isoler(fichier: &Path) {
     titre(tr!("Bac à sable", "Sandbox"));
     let Ok(source) = fichier.canonicalize() else {
@@ -249,7 +249,7 @@ fn lancer(source: &Path) {
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_default();
     let jetable = dossier_jetable();
-    let wsb = jetable.join("sentinel.wsb");
+    let wsb = jetable.join("gardien.wsb");
     if std::fs::create_dir_all(&jetable).is_err() || std::fs::write(&wsb, configuration_wsb(&dossier, &nom)).is_err() {
         trp!(
             "  ✖ Configuration impossible à écrire.",
@@ -272,10 +272,10 @@ mod tests {
 
     #[test]
     fn profil_de_sandbox_exec() {
-        let p = profil_sandbox("/private/var/folders/x/T/sentinel-bac-1", "/Users/a \"b\"");
+        let p = profil_sandbox("/private/var/folders/x/T/gardien-bac-1", "/Users/a \"b\"");
         assert!(p.contains("(deny network*)"));
         assert!(p.contains("(deny file-read* (subpath \"/Users/a \\\"b\\\"\"))"));
-        assert!(p.contains("(allow file-read* file-write* (subpath \"/private/var/folders/x/T/sentinel-bac-1\"))"));
+        assert!(p.contains("(allow file-read* file-write* (subpath \"/private/var/folders/x/T/gardien-bac-1\"))"));
     }
 
     #[test]

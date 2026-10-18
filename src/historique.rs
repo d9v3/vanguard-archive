@@ -237,7 +237,7 @@ pub fn courbe(historique: &[Bilan]) -> Option<String> {
     Some(svg)
 }
 
-/// Date du bilan sans l'heure, prête pour le HTML (les dates écrites par Sentinel ne contiennent rien à échapper).
+/// Date du bilan sans l'heure, prête pour le HTML (les dates écrites par Gardien ne contiennent rien à échapper).
 fn esc_court(date: &str) -> String {
     date.split(' ').next().unwrap_or(date).replace(['<', '>', '&'], "")
 }

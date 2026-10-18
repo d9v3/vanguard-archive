@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fait des tickets GitHub (issues) avec les erreurs du journal de Sentinel : plantages, scripts PowerShell en échec,
+"""Fait des tickets GitHub (issues) avec les erreurs du journal de Gardien : plantages, scripts PowerShell en échec,
 vérifications impossibles, scans ratés. Un ticket par erreur ; quand elle revient, un commentaire s'ajoute au ticket
 ouvert. Lancé par outils/deployer.sh avec gh, déjà connecté sur l'ordinateur de développement : aucun mot de passe
 dans le programme ni sur la clé.
@@ -7,7 +7,7 @@ dans le programme ni sur la clé.
     python3 outils/journal-vers-github.py <fichier des entrées à envoyer>
 
 Les entrées envoyées sont retirées du fichier ; celles qui n'ont pas pu partir (pas d'Internet) y restent pour le
-déploiement suivant. Le journal est anonymisé par Sentinel avant d'être écrit (dossier personnel, nom d'utilisateur
+déploiement suivant. Le journal est anonymisé par Gardien avant d'être écrit (dossier personnel, nom d'utilisateur
 et nom de la machine remplacés).
 """
 
@@ -22,7 +22,7 @@ ETIQUETTE = "journal"
 
 
 def entrees(texte):
-    """Une entrée commence par « == date · sentinel x · système · langue · commande », puis « [contexte] »."""
+    """Une entrée commence par « == date · gardien x · système · langue · commande », puis « [contexte] »."""
     return [b.strip("\n") for b in re.split(r"(?m)^(?=== )", texte) if b.startswith("== ")]
 
 
@@ -46,7 +46,7 @@ def main():
     if not liste:
         return
     gh("label", "create", ETIQUETTE, "--color", "B60205",
-       "--description", "Erreur rapportée par le journal de Sentinel", "--force")
+       "--description", "Erreur rapportée par le journal de Gardien", "--force")
     # Ticket de chaque erreur, noté ici : la recherche de GitHub met quelques minutes à voir un ticket tout neuf, et
     # deux déploiements rapprochés feraient sinon deux tickets.
     notes = os.path.join(os.path.dirname(os.path.abspath(chemin)), "tickets-github.json")
@@ -58,6 +58,7 @@ def main():
     restantes, envoyees = [], 0
     for e in liste:
         contexte, detail, sig = signature(e)
+        # Marque gardée de l'ancien nom : les tickets déjà ouverts la portent.
         marque = f"sentinel-signature-{sig}"
         numero = ouverts.get(sig)
         # Ticket fermé (erreur corrigée) : si elle revient, c'est un nouveau ticket.

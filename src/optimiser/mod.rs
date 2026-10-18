@@ -1,4 +1,4 @@
-//! Optimiser : réglages de confidentialité, de performance et de confort, écrits pour Sentinel. Chaque réglage montre
+//! Optimiser : réglages de confidentialité, de performance et de confort, écrits pour Gardien. Chaque réglage montre
 //! son état réel, explique ce qu'il change et s'applique après accord, avec un point de restauration si le système est
 //! touché. Il s'annule exactement : la valeur d'avant est notée au moment du changement, puis remise telle quelle ;
 //! sans note (réglage fait ailleurs), c'est la valeur d'un système neuf qui revient. Aucun réglage n'affaiblit la
@@ -46,7 +46,7 @@ impl Categorie {
     }
 }
 
-/// Un réglage proposé par Sentinel.
+/// Un réglage proposé par Gardien.
 pub struct Reglage {
     /// Nom stable, noté dans l'historique pour pouvoir annuler.
     pub id: &'static str,
@@ -77,7 +77,7 @@ fn etat(r: &Reglage) -> Etat {
     }
 }
 
-/// Valeurs d'avant de chaque réglage appliqué par Sentinel, dans l'ordre de ses changements.
+/// Valeurs d'avant de chaque réglage appliqué par Gardien, dans l'ordre de ses changements.
 #[derive(serde::Serialize, serde::Deserialize, Default)]
 struct Historique {
     reglages: BTreeMap<String, Avant>,
@@ -161,9 +161,9 @@ fn executer(a_faire: &[&Reglage], a_annuler: &[&Reglage], h: &mut Historique) ->
     (faits.to_vec(), annules.to_vec())
 }
 
-fn libelle(e: Etat, par_sentinel: bool) -> &'static str {
-    match (e, par_sentinel) {
-        (Etat::Fait, true) => tr!("fait par Sentinel", "done by Sentinel"),
+fn libelle(e: Etat, par_gardien: bool) -> &'static str {
+    match (e, par_gardien) {
+        (Etat::Fait, true) => tr!("fait par Gardien", "done by Gardien"),
         (Etat::Fait, false) => tr!("déjà fait", "already done"),
         (Etat::EnPartie, _) => tr!("en partie", "partly"),
         (Etat::AFaire, _) => tr!("à faire", "to do"),
@@ -319,7 +319,7 @@ pub fn recommandes() {
     confirmer_et_executer(&a_faire, &[]);
 }
 
-/// Annule tout ce que Sentinel a changé : les valeurs notées avant chaque changement reviennent.
+/// Annule tout ce que Gardien a changé : les valeurs notées avant chaque changement reviennent.
 pub fn tout_annuler() {
     titre(tr!("Tout remettre comme avant", "Put everything back"));
     let h = charger();
@@ -327,8 +327,8 @@ pub fn tout_annuler() {
     let a_annuler: Vec<&Reglage> = reglages.iter().filter(|r| h.reglages.contains_key(r.id)).collect();
     if a_annuler.is_empty() {
         trp!(
-            "  {GRIS}Sentinel n'a changé aucun réglage sur cette machine.{RESET}",
-            "  {GRIS}Sentinel has not changed any setting on this machine.{RESET}"
+            "  {GRIS}Gardien n'a changé aucun réglage sur cette machine.{RESET}",
+            "  {GRIS}Gardien has not changed any setting on this machine.{RESET}"
         );
         return;
     }

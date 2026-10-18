@@ -1,4 +1,4 @@
-//! Réglages de Linux : services de systemd, fichiers de réglage posés par Sentinel, préférences de GNOME, options des
+//! Réglages de Linux : services de systemd, fichiers de réglage posés par Gardien, préférences de GNOME, options des
 //! distributions (Ubuntu, Debian). Chacun n'est proposé que si cette machine en a l'usage : un SSD pour l'entretien
 //! des SSD, GNOME pour ses préférences, le paquet concerné pour les options des distributions.
 
@@ -15,9 +15,11 @@ pub enum Changement {
         cible: &'static str,
         defaut: &'static str,
     },
-    /// Fichier posé par Sentinel (présent = fait), retiré pour annuler ; `apres`, la commande qui le fait prendre.
+    /// Fichier posé par Gardien (présent = fait), retiré pour annuler ; `apres`, la commande qui le fait prendre.
+    /// `ancien` : le même fichier posé sous un ancien nom (sentinel), lu à sa place et retiré avec lui.
     Fichier {
         chemin: &'static str,
+        ancien: Option<&'static str>,
         contenu: &'static str,
         apres: &'static str,
     },
@@ -52,8 +54,15 @@ impl Changement {
         match self {
             // « is-enabled » répond aussi par son code de retour : seul le texte compte ici.
             Changement::Unite { nom, .. } => sortie("systemctl", &["is-enabled", nom]).filter(|t| !t.is_empty()),
-            Changement::Fichier { chemin, contenu, .. } => {
-                let t = std::fs::read_to_string(chemin).ok()?;
+            Changement::Fichier {
+                chemin,
+                ancien,
+                contenu,
+                ..
+            } => {
+                let t = std::fs::read_to_string(chemin)
+                    .or_else(|e| ancien.map_or(Err(e), std::fs::read_to_string))
+                    .ok()?;
                 Some(if t == *contenu { "present" } else { "autre" }.to_string())
             }
             Changement::Gnome { schema, cle, .. } => sortie("gsettings", &["get", schema, cle]),
@@ -114,18 +123,28 @@ impl Changement {
                 // « static », « indirect » : pas un état qu'on choisit, rien à remettre.
                 _ => return None,
             },
-            Changement::Fichier { chemin, contenu, apres } => match v {
-                Some(_) => {
-                    let dossier = Path::new(chemin).parent()?.display().to_string();
-                    format!(
-                        "sudo mkdir -p {} && printf '%s' {} | sudo tee {} >/dev/null && {apres}",
-                        shell(&dossier),
-                        shell(contenu),
-                        shell(chemin)
-                    )
+            Changement::Fichier {
+                chemin,
+                ancien,
+                contenu,
+                apres,
+            } => {
+                let anciens = ancien
+                    .map(|a| format!("sudo rm -f {} && ", shell(a)))
+                    .unwrap_or_default();
+                match v {
+                    Some(_) => {
+                        let dossier = Path::new(chemin).parent()?.display().to_string();
+                        format!(
+                            "{anciens}sudo mkdir -p {} && printf '%s' {} | sudo tee {} >/dev/null && {apres}",
+                            shell(&dossier),
+                            shell(contenu),
+                            shell(chemin)
+                        )
+                    }
+                    None => format!("{anciens}sudo rm -f {} && {apres}", shell(chemin)),
                 }
-                None => format!("sudo rm -f {} && {apres}", shell(chemin)),
-            },
+            }
             Changement::Gnome { schema, cle, .. } => match v {
                 Some(v) => format!("gsettings set {schema} {cle} {}", shell(v)),
                 None => format!("gsettings reset {schema} {cle}"),
@@ -246,7 +265,8 @@ pub fn catalogue() -> Vec<Reglage> {
             )),
             recommande: false,
             changements: vec![Changement::Fichier {
-                chemin: "/etc/systemd/journald.conf.d/50-sentinel-taille.conf",
+                chemin: "/etc/systemd/journald.conf.d/50-gardien-taille.conf",
+                ancien: Some("/etc/systemd/journald.conf.d/50-sentinel-taille.conf"),
                 contenu: "[Journal]\nSystemMaxUse=500M\n",
                 apres: "sudo systemctl restart systemd-journald",
             }],
@@ -353,7 +373,8 @@ mod tests {
         let c = o.commande(Some("\"no\"")).unwrap();
         assert!(c.contains("s|^PARTICIPATE=.*|PARTICIPATE=\"no\"|"), "{c}");
         let f = Changement::Fichier {
-            chemin: "/etc/systemd/journald.conf.d/50-sentinel-taille.conf",
+            chemin: "/etc/systemd/journald.conf.d/50-gardien-taille.conf",
+            ancien: Some("/etc/systemd/journald.conf.d/50-sentinel-taille.conf"),
             contenu: "[Journal]\nSystemMaxUse=500M\n",
             apres: "sudo systemctl restart systemd-journald",
         };
@@ -385,7 +406,7 @@ mod tests {
 
     #[test]
     fn lit_une_option_d_un_fichier() {
-        let f = std::env::temp_dir().join(format!("sentinel-test-option-{}", std::process::id()));
+        let f = std::env::temp_dir().join(format!("gardien-test-option-{}", std::process::id()));
         std::fs::write(&f, "# commentaire\nENABLED=1\n").unwrap();
         let chemin: &'static str = Box::leak(f.display().to_string().into_boxed_str());
         let o = Changement::Option {

@@ -1,5 +1,5 @@
-//! Langue de l'interface : français ou anglais, choisie d'après le système (variable SENTINEL_LANG pour forcer,
-//! NETSCAN_LANG accepté aussi : ancien nom).
+//! Langue de l'interface : français ou anglais, choisie d'après le système (variable GARDIEN_LANG pour forcer ;
+//! SENTINEL_LANG et NETSCAN_LANG, des anciens noms, acceptées aussi).
 //! Chaque texte est écrit dans les deux langues à l'endroit où il sert : `tr!("Pare-feu actif", "Firewall on")`.
 //! Les noms internes (catégories des constats, clés JSON) restent en français : le code s'en sert pour décider.
 
@@ -41,7 +41,8 @@ fn detecter() -> bool {
     if cfg!(test) {
         return false;
     }
-    let forcee = std::env::var("SENTINEL_LANG")
+    let forcee = std::env::var("GARDIEN_LANG")
+        .or_else(|_| std::env::var("SENTINEL_LANG"))
         .or_else(|_| std::env::var("NETSCAN_LANG"))
         .ok()
         .and_then(|v| code(&v));

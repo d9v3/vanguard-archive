@@ -1,20 +1,20 @@
 #!/bin/bash
-# Essai complet de sentinel sur un vrai Mac (celui de GitHub, voir .github/workflows/macos.yml, option
+# Essai complet de Gardien sur un vrai Mac (celui de GitHub, voir .github/workflows/macos.yml, option
 # « essai_complet »). Chaque commande est lancée sans interaction (réponses fournies), avec un délai maximal ;
 # sorties, codes de retour et vérifications vont dans le dossier de résultats, téléchargé ensuite.
-#   outils/test-macos/essai.sh <programme sentinel> <dossier de résultats>
+#   outils/test-macos/essai.sh <programme gardien> <dossier de résultats>
 # Pas de scan du réseau local : celui de GitHub ne nous appartient pas (seulement 127.0.0.1).
 set -u
-SENTINEL=$(cd "$(dirname "$1")" && pwd)/$(basename "$1")
+GARDIEN=$(cd "$(dirname "$1")" && pwd)/$(basename "$1")
 RES=$2
 mkdir -p "$RES"
 RES=$(cd "$RES" && pwd)
-export SENTINEL_LANG=fr
+export GARDIEN_LANG=fr
 JOURNAL="$RES/journal.txt"
 
 # Le journal garde le détail (relu par le rapport HTML) ; l'écran montre une ligne par commande ou vérification.
 note() { echo "$*" >>"$JOURNAL"; printf '      \033[90m%s\033[0m\n' "$*"; }
-titre() { echo "=== $* ===" >>"$JOURNAL"; printf '\n  \033[1;31mTEST DE SENTINEL\033[0m  \033[90m%s\033[0m\n' "$*"; }
+titre() { echo "=== $* ===" >>"$JOURNAL"; printf '\n  \033[1;31mTEST DE GARDIEN\033[0m  \033[90m%s\033[0m\n' "$*"; }
 bilan() {
   local ok bug
   ok=$(grep -c '^OK' "$JOURNAL")
@@ -28,8 +28,8 @@ section() { echo "--- $*" >>"$JOURNAL"; printf '\n  \033[1;36m▸ %s\033[0m\n' "
 ecran_commande() { # ecran_commande <code> <secondes> <arguments…>
   local code=$1 duree=$2
   shift 2
-  local texte="sentinel $*"
-  [ $# = 0 ] && texte="sentinel (menu)"
+  local texte="gardien $*"
+  [ $# = 0 ] && texte="gardien (menu)"
   texte=$(echo "$texte" | sed -E 's#[^ ]*/([^/ ]+)#\1#g')
   [ ${#texte} -gt 58 ] && texte="${texte:0:57}…"
   if [ "$code" = 0 ]; then
@@ -46,9 +46,9 @@ lancer() {
   local nom=$1 secondes=$2 entree=$3
   shift 3
   local debut=$SECONDS
-  printf '%b' "$entree" | delai "$secondes" "$SENTINEL" "$@" >"$RES/$nom.txt" 2>&1
+  printf '%b' "$entree" | delai "$secondes" "$GARDIEN" "$@" >"$RES/$nom.txt" 2>&1
   local code=$?
-  echo "sentinel $* -> code $code, $((SECONDS - debut)) s$([ $code = 142 ] && echo ' (DÉLAI DÉPASSÉ)') · $nom.txt" >>"$JOURNAL"
+  echo "gardien $* -> code $code, $((SECONDS - debut)) s$([ $code = 142 ] && echo ' (DÉLAI DÉPASSÉ)') · $nom.txt" >>"$JOURNAL"
   ecran_commande "$code" "$((SECONDS - debut))" "$@"
 }
 
@@ -64,7 +64,7 @@ verifier() { # verifier <description> <commande…>
   fi
 }
 
-titre "Essai complet de sentinel sur macOS $(sw_vers -productVersion) ($(uname -m))"
+titre "Essai complet de Gardien sur macOS $(sw_vers -productVersion) ($(uname -m))"
 lancer version 10 '' --version
 lancer aide 10 '' --help
 
@@ -84,7 +84,7 @@ verifier "diagnostic : section MATÉRIEL" grep -q 'MATÉRIEL' "$RES/diagnostic.t
 section "Intégrité (référence, vérification, modification détectée)"
 lancer integrite-reference 60 '' integrite
 lancer integrite-verification 60 '' integrite
-echo "# essai sentinel $(date)" >>~/.zshrc
+echo "# essai Gardien $(date)" >>~/.zshrc
 lancer integrite-modification 60 '' integrite
 verifier "intégrité : ~/.zshrc modifié repéré" grep -q 'zshrc' "$RES/integrite-modification.txt"
 
@@ -100,7 +100,7 @@ lancer menu 60 '4\n\n5\n\n6\n\n7\n\nq\n'
 verifier "menu : sous-menus affichés" grep -q 'Antivirus' "$RES/menu.txt"
 
 section "Mots de passe fuités (pseudo-terminal : saisie sans écho)"
-python3 -I "$(dirname "$0")/../test-commun/mot-de-passe-pty.py" "$SENTINEL" >"$RES/motdepasse.txt" 2>&1
+python3 -I "$(dirname "$0")/../test-commun/mot-de-passe-pty.py" "$GARDIEN" >"$RES/motdepasse.txt" 2>&1
 verifier "mot de passe : « password » trouvé dans des fuites" grep -qE 'Trouvé [0-9 ]+ fois' "$RES/motdepasse.txt"
 verifier "mot de passe : jamais affiché" bash -c "! grep -q 'Mot de passe : password' '$RES/motdepasse.txt'"
 
@@ -126,16 +126,16 @@ lancer courriel 60 'test@example.com\nn\n' courriel
 
 section "Surveillance : agent launchd"
 lancer surveillance-on 60 '' surveillance on
-verifier "agent launchd chargé" launchctl print "gui/$(id -u)/com.sentinel.surveillance"
+verifier "agent launchd chargé" launchctl print "gui/$(id -u)/com.gardien.surveillance"
 lancer surveillance-off 60 '' surveillance off
-verifier "agent launchd retiré" bash -c "! launchctl print gui/$(id -u)/com.sentinel.surveillance"
+verifier "agent launchd retiré" bash -c "! launchctl print gui/$(id -u)/com.gardien.surveillance"
 
 section "Bac à sable (sandbox-exec)"
 ESSAI_BAC="$RES/bac.sh"
 cat >"$ESSAI_BAC" <<'EOF'
 #!/bin/sh
 ls "$HOME" >/dev/null 2>&1 && echo "LECTURE_MAISON_POSSIBLE" || echo "lecture maison refusée"
-echo x >"$HOME/sentinel-bac-intrus" 2>/dev/null && echo "ECRITURE_MAISON_POSSIBLE" || echo "écriture maison refusée"
+echo x >"$HOME/gardien-bac-intrus" 2>/dev/null && echo "ECRITURE_MAISON_POSSIBLE" || echo "écriture maison refusée"
 curl -s -m 5 https://example.com >/dev/null 2>&1 && echo "RESEAU_POSSIBLE" || echo "réseau refusé"
 echo "fin du programme isolé"
 EOF
@@ -146,7 +146,7 @@ verifier "bac : dossier personnel illisible" bash -c "! grep -q LECTURE_MAISON_P
 verifier "bac : écriture refusée" bash -c "! grep -q ECRITURE_MAISON_POSSIBLE '$RES/isoler.txt'"
 verifier "bac : réseau coupé" bash -c "! grep -q RESEAU_POSSIBLE '$RES/isoler.txt'"
 
-section "Antivirus : installation de ClamAV par sentinel, puis analyse d'un dossier avec le fichier test EICAR"
+section "Antivirus : installation de ClamAV par Gardien, puis analyse d'un dossier avec le fichier test EICAR"
 ESSAI_AV="$RES/dossier-antivirus"
 mkdir -p "$ESSAI_AV"
 # Le fichier de test standard des antivirus (inoffensif), écrit en deux morceaux.
@@ -159,29 +159,29 @@ verifier "antivirus : refus de la quarantaine annoncé" grep -q 'Rien n.a été 
 section "Clé USB simulée (images disque exFAT) : protection et journal d'erreurs"
 CLE_IMG="$RES/cle.dmg"
 LOG_IMG="$RES/log.dmg"
-hdiutil create -quiet -size 64m -fs ExFAT -volname SENTINEL "$CLE_IMG"
-hdiutil create -quiet -size 16m -fs ExFAT -volname SENTINELLOG "$LOG_IMG"
+hdiutil create -quiet -size 64m -fs ExFAT -volname GARDIEN "$CLE_IMG"
+hdiutil create -quiet -size 16m -fs ExFAT -volname GARDIENLOG "$LOG_IMG"
 hdiutil attach -quiet "$CLE_IMG"
 hdiutil attach -quiet "$LOG_IMG"
-mkdir -p /Volumes/SENTINEL/macOS /Volumes/SENTINEL/donnees
-cp "$SENTINEL" /Volumes/SENTINEL/macOS/sentinel
+mkdir -p /Volumes/GARDIEN/macOS /Volumes/GARDIEN/donnees
+cp "$GARDIEN" /Volumes/GARDIEN/macOS/gardien
 # Empreinte d'un autre ordinateur : ce Mac n'est pas celui du propriétaire, la clé doit être protégée.
-echo 0000000000000000000000000000000000000000 >/Volumes/SENTINEL/sentinel.cle
-touch /Volumes/SENTINELLOG/sentinel-journal.cle
-note "$(mount | grep SENTINEL)"
-(cd / && printf '' | delai 120 /Volumes/SENTINEL/macOS/sentinel reseau 999.1.1.1 >"$RES/cle-protection.txt" 2>&1)
-note "$(mount | grep SENTINEL)"
-verifier "clé : remontée en lecture seule" bash -c "mount | grep ' on /Volumes/SENTINEL ' | grep -q read-only"
-verifier "clé : écriture refusée" bash -c "! touch /Volumes/SENTINEL/essai-ecriture"
-verifier "clé : SENTINELLOG toujours modifiable" touch /Volumes/SENTINELLOG/essai-ecriture
-verifier "journal : erreur notée" grep -q 'cible invalide' /Volumes/SENTINELLOG/journal-erreurs.txt
-verifier "journal : rien de personnel" bash -c "! grep -q \"$USER\" /Volumes/SENTINELLOG/journal-erreurs.txt"
-cp /Volumes/SENTINELLOG/journal-erreurs.txt "$RES/journal-erreurs-cle.txt" 2>/dev/null
+echo 0000000000000000000000000000000000000000 >/Volumes/GARDIEN/gardien.cle
+touch /Volumes/GARDIENLOG/gardien-journal.cle
+note "$(mount | grep GARDIEN)"
+(cd / && printf '' | delai 120 /Volumes/GARDIEN/macOS/gardien reseau 999.1.1.1 >"$RES/cle-protection.txt" 2>&1)
+note "$(mount | grep GARDIEN)"
+verifier "clé : remontée en lecture seule" bash -c "mount | grep ' on /Volumes/GARDIEN ' | grep -q read-only"
+verifier "clé : écriture refusée" bash -c "! touch /Volumes/GARDIEN/essai-ecriture"
+verifier "clé : GARDIENLOG toujours modifiable" touch /Volumes/GARDIENLOG/essai-ecriture
+verifier "journal : erreur notée" grep -q 'cible invalide' /Volumes/GARDIENLOG/journal-erreurs.txt
+verifier "journal : rien de personnel" bash -c "! grep -q \"$USER\" /Volumes/GARDIENLOG/journal-erreurs.txt"
+cp /Volumes/GARDIENLOG/journal-erreurs.txt "$RES/journal-erreurs-cle.txt" 2>/dev/null
 # Le menu doit dire la clé protégée.
-(cd / && printf 'q\n' | delai 60 /Volumes/SENTINEL/macOS/sentinel >"$RES/cle-menu.txt" 2>&1)
+(cd / && printf 'q\n' | delai 60 /Volumes/GARDIEN/macOS/gardien >"$RES/cle-menu.txt" 2>&1)
 verifier "menu : « protégée en écriture »" grep -q 'protégée en écriture' "$RES/cle-menu.txt"
-hdiutil detach -quiet /Volumes/SENTINEL || hdiutil detach -force -quiet /Volumes/SENTINEL
-hdiutil detach -quiet /Volumes/SENTINELLOG || hdiutil detach -force -quiet /Volumes/SENTINELLOG
+hdiutil detach -quiet /Volumes/GARDIEN || hdiutil detach -force -quiet /Volumes/GARDIEN
+hdiutil detach -quiet /Volumes/GARDIENLOG || hdiutil detach -force -quiet /Volumes/GARDIENLOG
 rm -f "$CLE_IMG" "$LOG_IMG"
 
 bilan

@@ -136,18 +136,33 @@ pub fn afficher(e: &Etat) {
         "PORTS OPEN TO THE INTERNET (UPnP)"
     ));
     match e {
-        Etat::Absent => trp!(
-            "  {VERT}✔{RESET} UPnP coupé ou absent sur la box : aucun appareil ne peut ouvrir de port vers Internet tout seul.",
-            "  {VERT}✔{RESET} UPnP off or absent on the router: no device can open a port to the Internet by itself."
+        Etat::Absent => afficher_aligne(
+            &format!("  {VERT}✔{RESET} "),
+            tr!(
+                "UPnP coupé ou absent sur la box : aucun appareil ne peut ouvrir de port vers Internet tout seul.",
+                "UPnP off or absent on the router: no device can open a port to the Internet by itself."
+            ),
+            4,
+            "",
         ),
-        Etat::OutilAbsent => trp!(
-            "  {DISCRET}Pour voir les ports que tes appareils ont ouverts sur la box : {}{RESET}",
-            "  {DISCRET}To see the ports your devices opened on the router: {}{RESET}",
-            outil_upnp()
+        Etat::OutilAbsent => afficher_aligne(
+            "  ",
+            &trf!(
+                "Pour voir les ports que tes appareils ont ouverts sur la box : {}",
+                "To see the ports your devices opened on the router: {}",
+                outil_upnp()
+            ),
+            2,
+            DISCRET,
         ),
-        Etat::Actif(liste) if liste.is_empty() => trp!(
-            "  {GRIS}UPnP actif sur la box, aucun port ouvert pour l'instant. À couper dans la box si aucun appareil n'en a besoin.{RESET}",
-            "  {GRIS}UPnP on at the router, no port open for now. Turn it off in the router if no device needs it.{RESET}"
+        Etat::Actif(liste) if liste.is_empty() => afficher_aligne(
+            "  ",
+            tr!(
+                "UPnP actif sur la box, aucun port ouvert pour l'instant. À couper dans la box si aucun appareil n'en a besoin.",
+                "UPnP on at the router, no port open for now. Turn it off in the router if no device needs it."
+            ),
+            2,
+            GRIS,
         ),
         Etat::Actif(liste) => {
             for r in liste {
@@ -168,9 +183,14 @@ pub fn afficher(e: &Etat) {
                     n.libelle()
                 );
             }
-            trp!(
-                "  {DISCRET}Chaque ligne rend un appareil joignable depuis Internet. Si tu n'en as pas besoin, coupe UPnP dans la box.{RESET}",
-                "  {DISCRET}Each line makes a device reachable from the Internet. If you do not need it, turn UPnP off in the router.{RESET}"
+            afficher_aligne(
+                "  ",
+                tr!(
+                    "Chaque ligne rend un appareil joignable depuis Internet. Si tu n'en as pas besoin, coupe UPnP dans la box.",
+                    "Each line makes a device reachable from the Internet. If you do not need it, turn UPnP off in the router."
+                ),
+                2,
+                DISCRET,
             );
         }
     }

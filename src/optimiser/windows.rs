@@ -13,7 +13,7 @@ use crate::ui::*;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Racine {
-    /// HKCU : le compte de la personne ; Sentinel y écrit lui-même.
+    /// HKCU : le compte de la personne ; Gardien y écrit lui-même.
     Hkcu,
     /// HKCU\Software\Policies : en lecture seule pour l'utilisateur, écrit par la fenêtre administrateur.
     HkcuStrategie,
@@ -861,7 +861,7 @@ mod tests {
         // Une clé jetable du compte : écrite, relue, puis remise à son état d'avant (absente).
         let c = reg(
             Racine::Hkcu,
-            r"Software\SentinelTest\Optimiser",
+            r"Software\GardienTest\Optimiser",
             "Essai",
             Val::Dword(7),
             None,
@@ -873,14 +873,14 @@ mod tests {
         assert_eq!(c.lire(), None);
         let texte = reg(
             Racine::Hkcu,
-            r"Software\SentinelTest\Optimiser",
+            r"Software\GardienTest\Optimiser",
             "Texte",
             Val::Texte("506"),
             None,
         );
         assert!(texte.ecrire_ici(texte.cible().as_deref()));
         assert_eq!(texte.lire().as_deref(), Some("sz:506"));
-        let _ = RegKey::predef(HKEY_CURRENT_USER).delete_subkey_all(r"Software\SentinelTest");
+        let _ = RegKey::predef(HKEY_CURRENT_USER).delete_subkey_all(r"Software\GardienTest");
     }
 
     #[test]

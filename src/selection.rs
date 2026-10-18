@@ -169,11 +169,12 @@ pub fn choisir(lignes: &[Ligne], invite: &str, depart: &str, echap: &str) -> Opt
                 tape
             });
         } else if ctrl && matches!(k.code, KeyCode::Char('c' | 'd')) {
-            // Ctrl-C arrête sentinel ; Ctrl-D (fin de l'entrée) le quitte, comme avant.
+            // Ctrl-C arrête Gardien ; Ctrl-D (fin de l'entrée) le quitte, comme avant.
             let _ = terminal::disable_raw_mode();
             println!();
             std::process::exit(if k.code == KeyCode::Char('c') { 130 } else { 0 });
-        } else if k.code == KeyCode::Esc {
+        } else if k.code == KeyCode::Esc || (k.code == KeyCode::Backspace && tape.is_empty()) {
+            // Retour arrière sans rien de tapé : revient en arrière, comme Échap.
             if tape.is_empty() {
                 let _ = sortie.write_all(b"\r\n");
                 return None;
@@ -338,7 +339,8 @@ pub fn cocher(titre: &[String], cases: &[Case]) -> Option<Vec<bool>> {
                 let _ = sortie.write_all(b"\r\n");
                 return Some(etats);
             }
-            KeyCode::Esc => {
+            // Rien ne se tape dans une liste à cocher : Retour arrière revient en arrière, comme Échap.
+            KeyCode::Esc | KeyCode::Backspace => {
                 let _ = sortie.write_all(b"\r\n");
                 return None;
             }

@@ -178,8 +178,12 @@ fn volumes_amovibles() -> Vec<(PathBuf, String)> {
 /// Pièges classiques des vers de clé USB, à la racine : raccourci qui imite un dossier (le vrai est caché),
 /// lanceur automatique, scripts. `entrees` = (nom, est un dossier).
 fn signes_de_ver(entrees: &[(String, bool)]) -> Vec<(Niveau, String)> {
-    // La clé Sentinel a son autorun.inf et son lanceur : rien de suspect.
-    if entrees.iter().any(|(n, _)| n.eq_ignore_ascii_case("sentinel.cle")) {
+    // La clé de Gardien (ou préparée sous un ancien nom) a son autorun.inf et son lanceur : rien de suspect.
+    if entrees.iter().any(|(n, _)| {
+        std::iter::once(crate::reseau::TEMOIN_CLE)
+            .chain(crate::reseau::ANCIENS_TEMOINS_CLE)
+            .any(|t| n.eq_ignore_ascii_case(t))
+    }) {
         return Vec::new();
     }
     let mut signes = Vec::new();
@@ -450,7 +454,7 @@ fn clamav(portee: &Portee) {
     // le reste peut peser des gigaoctets (caches de compilation, préfixes Wine) sans rien apprendre.
     let liste_tmp = if matches!(portee, Portee::Rapide) {
         let fichiers = fichiers_recents(std::path::Path::new("/tmp"), 7, 5000);
-        let chemin = std::env::temp_dir().join(format!("sentinel-clamav-{}.txt", std::process::id()));
+        let chemin = std::env::temp_dir().join(format!("gardien-clamav-{}.txt", std::process::id()));
         let texte = fichiers
             .iter()
             .map(|f| f.display().to_string())
@@ -474,19 +478,24 @@ fn clamav(portee: &Portee) {
         "node_modules",
         // Dossiers privés des services systemd (root seul) : illisibles, ils feraient compter des erreurs.
         "systemd-private-[^/]*",
+        // Quarantaine de Gardien, et sous ses anciens noms si le dossier n'a pas pu être renommé.
+        ".local/share/gardien/quarantaine",
         ".local/share/sentinel/quarantaine",
         ".local/share/netscan/quarantaine",
         ".snapshots",
         ".Trash",
-        // macOS : caches et conteneurs d'apps (énormes), quarantaine de sentinel.
+        // macOS : caches et conteneurs d'apps (énormes), quarantaine de Gardien.
         "Library/Caches",
         "Library/Containers",
+        "Library/Application Support/gardien/quarantaine",
         "Library/Application Support/sentinel/quarantaine",
     ];
     let exclusions: &[&str] = if matches!(portee, Portee::Dossier(_)) {
         &[
+            ".local/share/gardien/quarantaine",
             ".local/share/sentinel/quarantaine",
             ".local/share/netscan/quarantaine",
+            "Library/Application Support/gardien/quarantaine",
             "Library/Application Support/sentinel/quarantaine",
         ]
     } else {
@@ -877,9 +886,9 @@ mod tests_cle {
             ])),
             vec![]
         );
-        // Clé Sentinel : son autorun et son lanceur sont attendus.
+        // Clé Gardien : son autorun et son lanceur sont attendus.
         assert_eq!(
-            signes_de_ver(&e(&[("sentinel.cle", false), ("autorun.inf", false)])),
+            signes_de_ver(&e(&[("gardien.cle", false), ("autorun.inf", false)])),
             vec![]
         );
     }
@@ -918,7 +927,7 @@ mod tests {
     #[test]
     fn quarantaine_retire_le_fichier_et_ses_droits() {
         use std::os::unix::fs::PermissionsExt;
-        let base = std::env::temp_dir().join(format!("sentinel-test-{}", std::process::id()));
+        let base = std::env::temp_dir().join(format!("gardien-test-{}", std::process::id()));
         let suspect = base.join("suspect.sh");
         std::fs::create_dir_all(&base).unwrap();
         std::fs::write(&suspect, "#!/bin/sh\necho pirate\n").unwrap();
@@ -931,7 +940,7 @@ mod tests {
 
     #[test]
     fn dossiers_analyses_une_seule_fois() {
-        let base = std::env::temp_dir().join(format!("sentinel-cibles-{}", std::process::id()));
+        let base = std::env::temp_dir().join(format!("gardien-cibles-{}", std::process::id()));
         let bureau = base.join("Bureau");
         std::fs::create_dir_all(bureau.join("sous")).unwrap();
         std::os::unix::fs::symlink(&bureau, base.join("Desktop")).unwrap();

@@ -1,8 +1,8 @@
-//! Journal des erreurs, pour améliorer sentinel après coup : plantages, scripts PowerShell en échec, vérifications
-//! impossibles, scans ratés. Il est écrit sur la petite partition SENTINELLOG de la clé, la seule modifiable sur les
-//! autres ordinateurs (la partition SENTINEL y est en lecture seule), et rapatrié par outils/deployer.sh au
+//! Journal des erreurs, pour améliorer Gardien après coup : plantages, scripts PowerShell en échec, vérifications
+//! impossibles, scans ratés. Il est écrit sur la petite partition GARDIENLOG de la clé, la seule modifiable sur les
+//! autres ordinateurs (la partition GARDIEN y est en lecture seule), et rapatrié par outils/deployer.sh au
 //! branchement sur l'ordinateur de développement, qui en fait des tickets GitHub (outils/journal-vers-github.py).
-//! Sans clé branchée, il est écrit dans le dossier de sentinel de cet ordinateur (rapatrié de même sur l'ordinateur
+//! Sans clé branchée, il est écrit dans le dossier de Gardien de cet ordinateur (rapatrié de même sur l'ordinateur
 //! de développement). Écrit en français : il est destiné au développement, pas à l'utilisateur.
 //!
 //! Rien de personnel : dossier personnel, nom d'utilisateur et nom de la machine sont remplacés avant l'écriture.
@@ -11,15 +11,21 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::sync::OnceLock;
 
-/// Fichier témoin à la racine de la partition SENTINELLOG.
-pub const TEMOIN: &str = "sentinel-journal.cle";
+/// Fichier témoin à la racine de la partition GARDIENLOG.
+pub const TEMOIN: &str = "gardien-journal.cle";
+/// Témoin des clés préparées avant le renommage en Gardien (0.51.0), remplacé au prochain déploiement.
+const ANCIEN_TEMOIN: &str = "sentinel-journal.cle";
+
+fn a_un_temoin(dossier: &std::path::Path) -> bool {
+    dossier.join(TEMOIN).is_file() || dossier.join(ANCIEN_TEMOIN).is_file()
+}
 pub const FICHIER: &str = "journal-erreurs.txt";
 /// Au-delà, plus rien n'est ajouté : une erreur répétée en boucle ne remplit pas la partition.
 const TAILLE_MAX: u64 = 4 * 1024 * 1024;
 /// Longueur maximale d'un détail (sortie d'erreur de PowerShell…).
 const DETAIL_MAX: usize = 3000;
 
-/// Où écrire : la partition SENTINELLOG de la clé si elle est branchée, sinon le dossier de sentinel.
+/// Où écrire : la partition GARDIENLOG de la clé si elle est branchée, sinon le dossier de Gardien.
 fn dossier() -> Option<&'static PathBuf> {
     static DOSSIER: OnceLock<Option<PathBuf>> = OnceLock::new();
     DOSSIER
@@ -38,7 +44,7 @@ fn dossier() -> Option<&'static PathBuf> {
         .as_ref()
 }
 
-/// Partition SENTINELLOG de la clé, si elle est branchée.
+/// Partition GARDIENLOG de la clé, si elle est branchée.
 fn partition_de_la_cle() -> Option<PathBuf> {
     #[cfg(windows)]
     {
@@ -62,7 +68,7 @@ fn partition_de_la_cle() -> Option<PathBuf> {
             .flatten()
             .map(|d| d.path())
             .collect();
-        montages.into_iter().find(|d| d.join(TEMOIN).is_file())
+        montages.into_iter().find(|d| a_un_temoin(d))
     }
 }
 
@@ -76,7 +82,7 @@ fn lecteur_windows() -> Option<PathBuf> {
         let envoi = envoi.clone();
         std::thread::spawn(move || {
             let lecteur = PathBuf::from(format!("{lettre}:\\"));
-            let _ = envoi.send(lecteur.join(TEMOIN).is_file().then_some(lecteur));
+            let _ = envoi.send(a_un_temoin(&lecteur).then_some(lecteur));
         });
     }
     drop(envoi);
@@ -208,7 +214,7 @@ pub fn erreur(contexte: &str, detail: &str) {
         detail.push_str(" […]");
     }
     let entree = format!(
-        "== {} · sentinel {} · {} · {} · {}\n[{contexte}]\n{}\n\n",
+        "== {} · gardien {} · {} · {} · {}\n[{contexte}]\n{}\n\n",
         chrono::Utc::now().format("%Y-%m-%d %H:%M UTC"),
         env!("CARGO_PKG_VERSION"),
         systeme(),

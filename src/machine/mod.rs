@@ -308,7 +308,7 @@ fn base64_decoder(texte: &str) -> Option<Vec<u8>> {
     Some(sortie)
 }
 
-/// Ports que sentinel a bloqués dans le pare-feu de cet ordinateur, un par ligne (« 8080/tcp »).
+/// Ports que Gardien a bloqués dans le pare-feu de cet ordinateur, un par ligne (« 8080/tcp »).
 /// Un port bloqué écoute toujours : sans ce registre, l'alerte et la même correction revenaient à chaque audit.
 /// Sous Linux, les règles ufw ne sont pas lisibles sans root ; Windows, lui, relit ses règles directement.
 fn fichier_blocages() -> std::path::PathBuf {
@@ -467,7 +467,7 @@ pub fn auditer(bavard: bool) -> Audit {
     a
 }
 
-/// Système, programmes, pilotes et firmware : tout ce qui doit être à jour (`sentinel maj`). `seulement` limite
+/// Système, programmes, pilotes et firmware : tout ce qui doit être à jour (`gardien maj`). `seulement` limite
 /// les longues recherches à ces catégories, pour revérifier ce qui vient d'être installé.
 pub fn mises_a_jour_completes(seulement: Option<&[&str]>) -> Vec<Constat> {
     os::mises_a_jour_completes(seulement)
@@ -508,19 +508,21 @@ pub fn afficher_constats(constats: &[Constat]) {
             ),
         };
         let cat = crate::langue::categorie(c.categorie);
-        println!("  {icone} {GRAS}{cat:<16}{RESET}{etiquette} {}", c.message);
+        // Le message commence à la 21e colonne ; sa suite s'y aligne.
+        afficher_aligne(
+            &format!("  {icone} {GRAS}{cat:<16}{RESET}{etiquette} "),
+            &c.message,
+            21,
+            "",
+        );
         if let Some(k) = &c.correctif {
             let marque = if k.automatique {
                 tr!("🔧 correction possible", "🔧 fix available")
             } else {
                 tr!("💡 à faire", "💡 to do")
             };
-            trp!(
-                "  {:18}{GRIS}{marque} : {}{RESET}",
-                "  {:18}{GRIS}{marque}: {}{RESET}",
-                "",
-                k.action
-            );
+            let texte = trf!("{marque} : {}", "{marque}: {}", k.action);
+            afficher_aligne(&format!("  {:18}", ""), &texte, 23, GRIS);
         }
     }
 }
@@ -561,7 +563,7 @@ mod tests {
     #[test]
     fn phrase_de_passe_des_cles_ssh() {
         // Clés générées pour le test, si ssh-keygen est disponible.
-        let dossier = std::env::temp_dir().join(format!("sentinel-cles-{}", std::process::id()));
+        let dossier = std::env::temp_dir().join(format!("gardien-cles-{}", std::process::id()));
         std::fs::create_dir_all(&dossier).unwrap();
         let generer = |nom: &str, phrase: &str| {
             std::process::Command::new("ssh-keygen")
@@ -616,7 +618,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn un_correctif_en_echec_n_arrete_pas_les_autres() {
-        let temoin = std::env::temp_dir().join(format!("sentinel-test-appliquer-{}", std::process::id()));
+        let temoin = std::env::temp_dir().join(format!("gardien-test-appliquer-{}", std::process::id()));
         let toucher = format!("touch '{}'", temoin.display());
         let r = appliquer_chacune(&[vec!["true".into()], vec!["false".into(), toucher], vec!["true".into()]]);
         assert_eq!(r, [true, false, true]);
