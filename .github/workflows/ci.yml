@@ -120,7 +120,17 @@ jobs:
             sha=$(gh api "repos/${{ github.repository }}/actions/workflows/ci.yml/runs?status=success&event=$evenement&branch=${{ github.ref_name }}&per_page=1" -q '.workflow_runs[0] | "\(.created_at) \(.head_sha)"' 2>/dev/null || true)
             if [ -n "$sha" ] && [ "$sha" \> "$dernier" ]; then dernier=$sha; fi
           done
-          if [ "${dernier#* }" = "${{ github.sha }}" ]; then echo "windows=non" >> "$GITHUB_OUTPUT"; else echo "windows=oui" >> "$GITHUB_OUTPUT"; fi
+          dernier=${dernier#* }
+          # Le code a changé : un fichier hors de la documentation, des captures et des outils de développement, que le
+          # programme n'intègre pas (comme macos.yml). Comparaison impossible : on teste.
+          HORS_CODE='^(.*\.md|\.claude/.*|\.relecture/.*|outils/.*|assets/captures/.*|assets/partage\.png|\.github/depot\.json|LICENCES-TIERCES\.txt|\.gitignore)$'
+          windows=oui
+          if [ "$dernier" = "${{ github.sha }}" ]; then
+            windows=non
+          elif [ -n "$dernier" ] && fichiers=$(gh api "repos/${{ github.repository }}/compare/$dernier...${{ github.sha }}" -q '[.files[].filename] | if length < 300 then .[] else "plus de 300 fichiers" end'); then
+            printf '%s\n' "$fichiers" | grep -vE -e '^$' -e "$HORS_CODE" >/dev/null || windows=non
+          fi
+          echo "windows=$windows" >> "$GITHUB_OUTPUT"
 
   windows:
     needs: utile
