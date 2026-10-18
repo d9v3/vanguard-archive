@@ -136,7 +136,8 @@ def liens_md(texte):
 def lire_depot(suivis, web, internes):
     """Les liens web de tous les fichiers suivis par git, et les liens relatifs des pages Markdown."""
     for fichier in sorted(suivis):
-        if fichier in PAS_DES_LIENS or fichier.lower().endswith(BINAIRES):
+        # Les tests du programme (tests/) inventent leurs adresses, comme les modules de tests du code.
+        if fichier in PAS_DES_LIENS or fichier.startswith("tests/") or fichier.lower().endswith(BINAIRES):
             continue
         try:
             brut = Path(fichier).read_bytes()
