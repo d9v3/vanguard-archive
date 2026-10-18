@@ -101,6 +101,7 @@ fn trois_sections(systeme: Vec<Ligne>, materiel: Vec<Ligne>, problemes: Vec<Lign
 #[cfg(target_os = "linux")]
 mod systeme {
     use super::{Ligne, Niveau, Section, alerte, duree, go, ligne, plus_frequentes};
+    use crate::ui::affichable;
     use crate::{tr, trf};
 
     fn lire(chemin: &str) -> Option<String> {
@@ -134,11 +135,13 @@ mod systeme {
             .map(str::to_string)
     }
 
-    /// Valeur d'une colonne d'une ligne de `lsblk -P` (`NAME="sda" SIZE="31004295168" …`).
+    /// Valeur d'une colonne d'une ligne de `lsblk -P` (`NAME="sda" SIZE="31004295168" …`). Le modèle vient du disque
+    /// lui-même (une clé USB dit ce qu'elle veut) : chaque valeur est lue prête à montrer, comme tout ce que ce
+    /// diagnostic lit du système.
     pub(super) fn champ_lsblk(ligne: &str, cle: &str) -> Option<String> {
         let debut = format!("{cle}=\"");
         let reste = &ligne[ligne.find(&debut)? + debut.len()..];
-        Some(reste[..reste.find('"')?].trim().to_string())
+        Some(affichable(reste[..reste.find('"')?].trim()))
     }
 
     /// Le journal du système se lit-il ? Sans être root ni dans les groupes adm, systemd-journal ou wheel,
@@ -154,14 +157,15 @@ mod systeme {
     }
 
     /// Source d'une ligne du journal (« Oct 17 15:29:32 portable NetworkManager[1334]: … » → « NetworkManager »). Une
-    /// ligne en retrait continue l'entrée d'avant (la pile d'un programme planté) : elle n'en est pas une autre.
+    /// ligne en retrait continue l'entrée d'avant (la pile d'un programme planté) : elle n'en est pas une autre. Tout
+    /// programme choisit le nom sous lequel il écrit au journal : lu prêt à montrer.
     pub(super) fn source_journal(l: &str) -> Option<String> {
         if l.starts_with(char::is_whitespace) {
             return None;
         }
         let apres_hote = l.splitn(5, ' ').nth(4)?;
         let source = apres_hote.split(':').next()?;
-        Some(source.split('[').next()?.trim().to_string()).filter(|s| !s.is_empty())
+        Some(affichable(source.split('[').next()?.trim())).filter(|s| !s.is_empty())
     }
 
     /// Cartes graphiques de `lspci -mm` (« 01:00.0 "VGA compatible controller" "NVIDIA Corporation" "GB205 …" … ») :
@@ -175,7 +179,7 @@ mod systeme {
                 let classe = champs.get(1).copied().unwrap_or_default();
                 ["VGA", "3D", "Display"].iter().any(|c| classe.contains(c)).then(|| {
                     let nom = format!("{} {}", champs.get(3).unwrap_or(&""), champs.get(5).unwrap_or(&""));
-                    nom.trim().to_string()
+                    affichable(nom.trim())
                 })
             })
             .collect()
@@ -197,7 +201,7 @@ mod systeme {
                     Some((chemin, _)) if taille_en_fin => chemin.trim_end(),
                     _ => exe,
                 };
-                Some(exe.rsplit('/').next().unwrap_or(exe).to_string())
+                Some(affichable(exe.rsplit('/').next().unwrap_or(exe)))
             })
             .collect()
     }
@@ -207,31 +211,33 @@ mod systeme {
         let os = lire("/etc/os-release")
             .and_then(|t| {
                 t.lines()
-                    .find_map(|l| l.strip_prefix("PRETTY_NAME=").map(|v| v.trim_matches('"').to_string()))
+                    .find_map(|l| l.strip_prefix("PRETTY_NAME=").map(|v| affichable(v.trim_matches('"'))))
             })
             .unwrap_or_else(|| "Linux".into());
+        // Une valeur d'une ligne lue dans /proc ou /sys, prête à montrer.
+        let valeur = |chemin: &str| lire(chemin).map(|v| affichable(&v));
         systeme.push(ligne(
             tr!("Système", "System"),
             trf!(
                 "{os} · noyau {}",
                 "{os} · kernel {}",
-                lire("/proc/sys/kernel/osrelease").unwrap_or_default()
+                valeur("/proc/sys/kernel/osrelease").unwrap_or_default()
             ),
         ));
         systeme.push(ligne(
             tr!("Nom", "Name"),
-            lire("/proc/sys/kernel/hostname").unwrap_or_default(),
+            valeur("/proc/sys/kernel/hostname").unwrap_or_default(),
         ));
         let modele = [
-            lire("/sys/class/dmi/id/sys_vendor"),
-            lire("/sys/class/dmi/id/board_name"),
+            valeur("/sys/class/dmi/id/sys_vendor"),
+            valeur("/sys/class/dmi/id/board_name"),
         ]
         .into_iter()
         .flatten()
         .collect::<Vec<_>>()
         .join(" · ");
         if !modele.is_empty() {
-            let bios = lire("/sys/class/dmi/id/bios_version")
+            let bios = valeur("/sys/class/dmi/id/bios_version")
                 .map(|b| format!(" · BIOS {b}"))
                 .unwrap_or_default();
             systeme.push(ligne(tr!("Modèle", "Model"), format!("{modele}{bios}")));
@@ -250,7 +256,7 @@ mod systeme {
             let fils = std::thread::available_parallelism().map_or(0, std::num::NonZero::get);
             materiel.push(ligne(
                 tr!("Processeur", "Processor"),
-                trf!("{} ({fils} fils)", "{} ({fils} threads)", cpu.1.trim()),
+                trf!("{} ({fils} fils)", "{} ({fils} threads)", affichable(cpu.1.trim())),
             ));
         }
         let meminfo = lire("/proc/meminfo").unwrap_or_default();
@@ -338,7 +344,7 @@ mod systeme {
         let en_echec: Vec<String> = sortie("systemctl", &["--failed", "--no-legend", "--plain"])
             .unwrap_or_default()
             .lines()
-            .filter_map(|l| l.split_whitespace().next().map(str::to_string))
+            .filter_map(|l| l.split_whitespace().next().map(affichable))
             .collect();
         problemes.push(if en_echec.is_empty() {
             ligne(tr!("Services en échec", "Failed services"), tr!("aucun", "none"))
@@ -356,6 +362,7 @@ mod systeme {
 #[cfg(target_os = "macos")]
 mod systeme {
     use super::{Niveau, Section, alerte, duree, go, ligne};
+    use crate::ui::affichable;
     use crate::{tr, trf};
 
     fn sortie(cmd: &str, args: &[&str]) -> Option<String> {
@@ -363,12 +370,13 @@ mod systeme {
         (r.code == Some(0)).then(|| r.sortie.trim().to_string())
     }
 
-    /// Valeur d'une ligne « Clé: valeur » (system_profiler, diskutil info), espaces de tête ignorés.
+    /// Valeur d'une ligne « Clé: valeur » (system_profiler, diskutil info), espaces de tête ignorés, prête à montrer
+    /// (un disque branché dit son nom lui-même), comme tout ce que ce diagnostic lit du système.
     pub(super) fn valeur(texte: &str, cle: &str) -> Option<String> {
         texte
             .lines()
             .find_map(|l| l.trim().strip_prefix(cle)?.trim().strip_prefix(':'))
-            .map(|v| v.trim().to_string())
+            .map(|v| affichable(v.trim()))
             .filter(|v| !v.is_empty())
     }
 
@@ -402,29 +410,31 @@ mod systeme {
             .map(|f| {
                 let nom = f.file_name().to_string_lossy().into_owned();
                 // Le nom s'arrête au premier « -2 » d'une date (« Google Chrome Helper-2024-… »).
-                nom.split_once("-20").map_or(nom.clone(), |(n, _)| n.to_string())
+                affichable(nom.split_once("-20").map_or(nom.as_str(), |(n, _)| n))
             })
             .collect()
     }
 
     pub fn sections() -> Vec<Section> {
         let mut systeme = Vec::new();
+        // Une valeur d'une ligne, prête à montrer.
+        let valeur_seule = |cmd: &str, args: &[&str]| sortie(cmd, args).map(|v| affichable(&v));
         let version = [
-            sortie("sw_vers", &["-productName"]),
-            sortie("sw_vers", &["-productVersion"]),
+            valeur_seule("sw_vers", &["-productName"]),
+            valeur_seule("sw_vers", &["-productVersion"]),
         ]
         .into_iter()
         .flatten()
         .collect::<Vec<_>>()
         .join(" ");
-        let build = sortie("sw_vers", &["-buildVersion"]).unwrap_or_default();
+        let build = valeur_seule("sw_vers", &["-buildVersion"]).unwrap_or_default();
         systeme.push(ligne(
             tr!("Système", "System"),
             format!("{version} ({build}) · {}", crate::machine::macos::architecture()),
         ));
         systeme.push(ligne(
             tr!("Nom", "Name"),
-            sortie("scutil", &["--get", "ComputerName"]).unwrap_or_default(),
+            valeur_seule("scutil", &["--get", "ComputerName"]).unwrap_or_default(),
         ));
         let materiel_txt = sortie("system_profiler", &["SPHardwareDataType"]).unwrap_or_default();
         let modele = [
@@ -449,7 +459,7 @@ mod systeme {
         }
 
         let mut materiel = Vec::new();
-        if let Some(cpu) = sortie("sysctl", &["-n", "machdep.cpu.brand_string"]) {
+        if let Some(cpu) = valeur_seule("sysctl", &["-n", "machdep.cpu.brand_string"]) {
             let fils = std::thread::available_parallelism().map_or(0, std::num::NonZero::get);
             materiel.push(ligne(
                 tr!("Processeur", "Processor"),
@@ -520,6 +530,7 @@ mod systeme {
     use serde::Deserialize;
 
     use super::{Niveau, Section, alerte, duree, go, ligne};
+    use crate::ui::affichable;
     use crate::{tr, trf};
 
     #[derive(Default, Deserialize)]
@@ -579,7 +590,29 @@ mod systeme {
                  plantages = @(Get-WinEvent -FilterHashtable @{ LogName = 'Application'; Id = 1000; StartTime = $semaine } -ErrorAction SilentlyContinue | ForEach-Object { "$($_.Properties[0].Value)" })
                } | ConvertTo-Json -Compress -Depth 3"#,
         )?;
-        serde_json::from_str(&json).ok()
+        let mut e: Etat = serde_json::from_str(&json).ok()?;
+        // Chaque texte prêt à montrer : un programme planté porte le nom de son choix, un disque branché aussi.
+        for t in [
+            &mut e.systeme,
+            &mut e.version,
+            &mut e.nom,
+            &mut e.modele,
+            &mut e.bios,
+            &mut e.processeur,
+            &mut e.dernier_ecran_bleu,
+        ] {
+            *t = affichable(t);
+        }
+        for c in &mut e.cartes {
+            (c.nom, c.pilote) = (affichable(&c.nom), affichable(&c.pilote));
+        }
+        for d in &mut e.disques {
+            d.nom = affichable(&d.nom);
+        }
+        for p in &mut e.plantages {
+            *p = affichable(p);
+        }
+        Some(e)
     }
 
     pub fn sections() -> Vec<Section> {
@@ -840,6 +873,26 @@ mod tests {
         assert_eq!(systeme::champ_lsblk(disque, "TRAN").as_deref(), Some("usb"));
         assert_eq!(systeme::champ_lsblk(disque, "MODEL").as_deref(), Some("USB Flash Disk"));
         assert_eq!(go(2_000_398_934_016), "1.8 To");
+    }
+
+    /// Ce que le diagnostic montre du journal et du système : n'importe quel programme choisit le nom sous lequel il
+    /// écrit au journal, le nom de son fichier, celui de son service ; un appareil, son modèle. Piégés (couleur, OSC 52,
+    /// effacement de ligne, bidi), ils arrivent inoffensifs, « � » à la place de chaque caractère piégé.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn journal_et_systeme_pieges() {
+        assert_eq!(
+            systeme::source_journal("Oct 17 15:29:32 portable \x1b]52;c;eA==\x07\r\u{202e}x[1334]: boum").as_deref(),
+            Some("�]52;c;eA==���x")
+        );
+        let coredumpctl = "TIME                            PID  UID  GID SIG     COREFILE EXE\n\
+                           Sun 2026-09-27 11:30:12 UTC  513823 1000 1000 SIGSEGV missing  /tmp/x\x1b]52;c;eA==\x07\u{202e}\n";
+        assert_eq!(systeme::programmes_coredumpctl(coredumpctl), ["x�]52;c;eA==��"]);
+        let lspci = "01:00.0 \"VGA compatible controller\" \"Faux\x1b[2K\" \"Carte\u{2066}\" -r01\n";
+        assert_eq!(systeme::cartes_lspci(lspci), ["Faux�[2K Carte�"]);
+        let lsblk = "NAME=\"sdb\" SIZE=\"1\" ROTA=\"0\" TYPE=\"disk\" TRAN=\"usb\" MODEL=\"Cle\x1b]0;x\x07\u{200b}\"";
+        assert_eq!(systeme::champ_lsblk(lsblk, "MODEL").as_deref(), Some("Cle�]0;x��"));
+        assert_eq!(systeme::champ_lsblk(lsblk, "TYPE").as_deref(), Some("disk"));
     }
 
     /// Une entrée de plusieurs lignes (la pile d'un programme planté, écrite par systemd-coredump au niveau « crit »)

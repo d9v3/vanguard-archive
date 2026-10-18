@@ -763,7 +763,8 @@ fn ssh_echecs() -> Option<Constat> {
 
 /// Tentatives de connexion SSH ratées dans le journal de sshd : (nombre, adresses d'origine). Une tentative laisse
 /// plusieurs lignes (« Invalid user », puis « Failed password ») qui partagent l'adresse et le port d'origine :
-/// comptée une fois.
+/// comptée une fois. L'adresse est celle du dernier « port » de la ligne : avant lui, le nom d'utilisateur tenté est
+/// écrit tel que l'attaquant l'a choisi, et peut contenir un faux « from … port … ».
 fn echecs_ssh(journal: &str) -> (usize, std::collections::BTreeSet<std::net::IpAddr>) {
     const ECHECS: [&str; 4] = [
         "Failed password",
@@ -774,7 +775,7 @@ fn echecs_ssh(journal: &str) -> (usize, std::collections::BTreeSet<std::net::IpA
     let mut tentatives = std::collections::BTreeSet::new();
     for l in journal.lines().filter(|l| ECHECS.iter().any(|e| l.contains(e))) {
         let mots: Vec<&str> = l.split_whitespace().collect();
-        if let Some(i) = mots.iter().position(|m| *m == "port")
+        if let Some(i) = mots.iter().rposition(|m| *m == "port")
             && i > 0
             && let Ok(ip) = mots[i - 1].parse::<std::net::IpAddr>()
             && let Some(port) = mots
@@ -1421,6 +1422,28 @@ Failed password for alice from 10.0.0.12 port 50001 ssh2";
         assert_eq!(niveau_echecs_ssh(30, true, true), Some(Niveau::Eleve));
         assert_eq!(niveau_echecs_ssh(30, false, true), Some(Niveau::Moyen));
         assert_eq!(niveau_echecs_ssh(30, true, false), Some(Niveau::Info));
+    }
+
+    /// Le nom d'utilisateur tenté vient de l'attaquant, et sshd l'écrit tel quel (espaces compris) avant l'adresse :
+    /// « from 192.168.1.5 port 1 » glissé dans le nom faisait passer une attaque venue d'Internet pour une tentative du
+    /// réseau local, moins grave. L'adresse et le port lus sont ceux que sshd écrit en dernier ; d'un nom piégé, rien
+    /// d'autre n'est gardé que des nombres et des adresses validées.
+    #[test]
+    fn nom_d_utilisateur_piege_dans_le_journal_ssh() {
+        let journal = "Invalid user x from 192.168.1.5 port 1 from 203.0.113.5 port 52314\n\
+                       Failed password for invalid user x from 192.168.1.5 port 1 from 203.0.113.5 port 52314 ssh2\n\
+                       Invalid user \x1b]52;c;eA==\x07\x1b[2K\r\u{202e} from 198.51.100.7 port 41122\n";
+        let (n, adresses) = echecs_ssh(journal);
+        let ip = |t: &str| t.parse::<std::net::IpAddr>().unwrap();
+        assert_eq!(n, 2);
+        assert_eq!(
+            adresses.into_iter().collect::<Vec<_>>(),
+            [ip("198.51.100.7"), ip("203.0.113.5")]
+        );
+        assert_eq!(
+            niveau_echecs_ssh(30, d_internet(&ip("203.0.113.5")), true),
+            Some(Niveau::Eleve)
+        );
     }
 
     #[test]

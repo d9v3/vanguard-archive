@@ -99,13 +99,22 @@ pub fn journaux() -> Vec<Constat> {
     ) else {
         return vec![super::windows::illisible(CAT)];
     };
-    let effacements: Vec<(String, String)> = sortie
+    vec![juger_effacements(
+        &lire_effacements(&sortie),
+        chrono::Local::now().date_naive(),
+    )]
+}
+
+/// Lignes « EFF|date|détail » : le détail (compte qui a effacé, journal) vient de l'événement lui-même, lu prêt à
+/// montrer.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn lire_effacements(sortie: &str) -> Vec<(String, String)> {
+    sortie
         .lines()
         .filter_map(|l| l.trim().strip_prefix("EFF|"))
         .filter_map(|l| l.split_once('|'))
-        .map(|(d, x)| (d.to_string(), x.trim().to_string()))
-        .collect();
-    vec![juger_effacements(&effacements, chrono::Local::now().date_naive())]
+        .map(|(d, x)| (crate::ui::affichable(d), crate::ui::affichable(x.trim())))
+        .collect()
 }
 
 #[cfg(test)]
@@ -123,5 +132,12 @@ mod tests {
         assert_eq!(juger_effacements(&recent, jour).probleme, Some(Niveau::Moyen));
         let ancien = [("2025-01-02".to_string(), "alice System".to_string())];
         assert_eq!(juger_effacements(&ancien, jour).probleme, Some(Niveau::Info));
+        // Le détail de l'événement, piégé, arrive inoffensif dans le message.
+        let lus = lire_effacements("EFF|2026-10-10|alice\x1b]52;c;eA==\x07\x1b[2K\r\u{202e} System\nautre ligne\n");
+        assert_eq!(
+            lus,
+            [("2026-10-10".to_string(), "alice�]52;c;eA==��[2K�� System".to_string())]
+        );
+        assert!(!crate::ui::contient_un_piege(&juger_effacements(&lus, jour).message));
     }
 }
