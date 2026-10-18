@@ -82,10 +82,15 @@ fn chercher_dans_liste(texte: &str, nom: &str) -> Option<(Algo, String)> {
         .map(str::trim)
         .filter(|l| !l.is_empty() && !l.starts_with('#'))
         .collect();
+    // Un nom peut contenir des espaces (« mon outil.zip ») : il est aussi cherché en fin de ligne, en entier.
     let mentionne = |l: &str| {
         l.split_whitespace()
             .map(|j| j.trim_start_matches('*').trim_matches(['(', ')']))
             .any(|j| j == nom || j.ends_with(&format!("/{nom}")))
+            || [" ", "*", "/"]
+                .iter()
+                .any(|avant| l.ends_with(&format!("{avant}{nom}")))
+            || l.contains(&format!("({nom})"))
     };
     if let Some(l) = lignes.iter().find(|l| mentionne(l)) {
         return lire_empreinte(l);
@@ -179,10 +184,12 @@ fn calculer(fichier: &Path, algo: Algo) -> Result<String, String> {
         }
         r.sortie
     };
+    // sha256sum commence la ligne par « \\ » quand le nom du fichier contient « \\ » ou un saut de ligne.
     let empreinte = sortie
         .split_whitespace()
         .next()
         .unwrap_or_default()
+        .trim_start_matches('\\')
         .to_ascii_lowercase();
     if Algo::par_longueur(empreinte.len()) == Some(algo) && empreinte.chars().all(|c| c.is_ascii_hexdigit()) {
         Ok(empreinte)
@@ -206,7 +213,14 @@ fn nature(nom: &str, debut: &[u8]) -> Vec<(Niveau, String)> {
             .to_string(),
         ));
     }
-    let morceaux: Vec<String> = nom.to_lowercase().split('.').map(String::from).collect();
+    // Espaces autour des morceaux retirées : « facture.pdf .exe » reste une double extension (Windows ignore aussi
+    // les espaces et les points en fin de nom).
+    let morceaux: Vec<String> = nom
+        .to_lowercase()
+        .trim_end_matches(['.', ' '])
+        .split('.')
+        .map(|m| m.trim().to_string())
+        .collect();
     let extension = morceaux
         .last()
         .filter(|_| morceaux.len() > 1)
@@ -602,6 +616,11 @@ mod tests {
             chercher_dans_liste(&format!("{SHA}\n"), "gardien.iso").map(|e| e.1),
             Some(SHA.into())
         );
+        // Un nom avec des espaces.
+        assert_eq!(
+            chercher_dans_liste(&format!("{SHA}  mon outil.zip\n"), "mon outil.zip").map(|e| e.1),
+            Some(SHA.into())
+        );
         // L'empreinte d'un autre fichier ne compte pas.
         assert_eq!(chercher_dans_liste(&format!("{SHA}  autre.iso\n"), "gardien.iso"), None);
     }
@@ -619,6 +638,10 @@ mod tests {
         // L'outil du système calcule la même empreinte (« test »).
         if cfg!(unix) {
             assert_eq!(calculer(&fichier, Algo::Sha256).as_deref(), Ok(SHA));
+            // Un nom avec « \\ » : sha256sum échappe sa ligne, l'empreinte reste lue.
+            let bizarre = dossier.join("a\\b.zip");
+            std::fs::write(&bizarre, b"test").unwrap();
+            assert_eq!(calculer(&bizarre, Algo::Sha256).as_deref(), Ok(SHA));
         }
         std::fs::remove_dir_all(&dossier).unwrap();
     }
@@ -633,6 +656,10 @@ mod tests {
             [Niveau::Critique, Niveau::Info]
         );
         assert_eq!(niveaux("installateur.exe", b"MZ\x90\x00"), [Niveau::Info]);
+        assert_eq!(
+            niveaux("facture.pdf   .exe", b"MZ\x90\x00"),
+            [Niveau::Eleve, Niveau::Info]
+        );
         assert_eq!(niveaux("rapport.pdf", b"%PDF"), []);
         assert_eq!(niveaux("notes.v2.txt", b"Bonj"), []);
         assert_eq!(niveaux("script", b"#!/b"), [Niveau::Info]);
