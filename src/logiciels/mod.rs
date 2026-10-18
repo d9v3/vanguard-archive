@@ -292,10 +292,12 @@ fn installer(etat: &Etat, choisis: &[&Offre]) -> Suite {
         .as_ref()
         .filter(|p| !p.pour_flatpak || choisis.iter().any(|o| o.flatpak));
     if let Some(lien) = prealable.and_then(|p| p.lien) {
-        trp!(
-            "\n  ✖ winget manque : il vient avec « Programme d'installation d'application », dans le Microsoft Store. J'ouvre sa page ; reviens ici une fois installé.",
-            "\n  ✖ winget is missing: it comes with “App Installer”, in the Microsoft Store. I am opening its page; come back here once it is installed."
+        let manque = tr!(
+            "winget manque : il vient avec « Programme d'installation d'application », dans le Microsoft Store. J'ouvre sa page ; reviens ici une fois installé.",
+            "winget is missing: it comes with “App Installer”, in the Microsoft Store. I am opening its page; come back here once it is installed."
         );
+        println!();
+        afficher_aligne("  ✖ ", manque, 4, "");
         crate::machine::ouvrir(lien);
         return Suite::Message;
     }
@@ -316,10 +318,11 @@ fn installer(etat: &Etat, choisis: &[&Offre]) -> Suite {
             println!("        {GRIS}{c}{RESET}");
         }
     }
-    trp!(
-        "  {GRIS}La source vérifie chaque téléchargement (empreinte ou signature) avant de l'installer.{RESET}",
-        "  {GRIS}The source checks each download (hash or signature) before installing it.{RESET}"
+    let verifie = tr!(
+        "La source vérifie chaque téléchargement (empreinte ou signature) avant de l'installer.",
+        "The source checks each download (hash or signature) before installing it."
     );
+    afficher_aligne("  ", verifie, 2, GRIS);
     if !demander(tr!("\n  Installer ? [o/N] : ", "\n  Install? [y/N]: ")).oui() {
         trp!("  Annulé.", "  Cancelled.");
         return Suite::Rien;
@@ -339,11 +342,12 @@ fn installer(etat: &Etat, choisis: &[&Offre]) -> Suite {
         if present {
             println!("  {VERT}✔{RESET} {}", o.logiciel.nom);
         } else if reussi {
-            trp!(
-                "  ⚠ {} : l'installation dit avoir réussi, mais je ne le vois pas encore (relance pour vérifier).",
-                "  ⚠ {}: the installer reports success, but I cannot see it yet (run again to check).",
+            let pas_encore = trf!(
+                "{} : l'installation dit avoir réussi, mais je ne le vois pas encore (relance pour vérifier).",
+                "{}: the installer reports success, but I cannot see it yet (run again to check).",
                 o.logiciel.nom
             );
+            afficher_aligne("  ⚠ ", &pas_encore, 4, "");
         } else {
             trp!(
                 "  ✖ {} : pas installé, voir le message ci-dessus.",
@@ -370,10 +374,11 @@ fn pack(etat: &Etat) -> Suite {
         );
         return Suite::Message;
     }
-    trp!(
-        "  Un navigateur, un gestionnaire de mots de passe, la vidéo, la bureautique et les archives : de quoi bien démarrer.",
-        "  A browser, a password manager, video, office and archives: everything to get started."
+    let contenu = tr!(
+        "Un navigateur, un gestionnaire de mots de passe, la vidéo, la bureautique et les archives : de quoi bien démarrer.",
+        "A browser, a password manager, video, office and archives: everything to get started."
     );
+    afficher_aligne("  ", contenu, 2, "");
     installer(etat, &a_faire)
 }
 
@@ -629,6 +634,13 @@ mod tests {
             "Microsoft.WindowsTerminal"
         ));
         assert!(!correspond("VLC", "VLC media player"));
+    }
+
+    /// Les messages de Logiciels tiennent dans `LARGEUR` colonnes, dans les deux langues.
+    #[test]
+    fn messages_dans_la_largeur() {
+        let larges = crate::gaming::tests::textes_trop_larges(include_str!("mod.rs"));
+        assert_eq!(larges, Vec::<String>::new());
     }
 
     #[test]
