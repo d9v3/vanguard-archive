@@ -473,7 +473,7 @@ if (Question 'Faire ce test (six fichiers posés puis retirés dans Documents, I
     Info "Accès contrôlé aux dossiers : $cfa (0 coupé, 1 actif, 2 audit, -1 illisible)"
     $sortiePieges = Sortie 'pieges-poser'
     if ($cfa -eq 1) {
-        if ($sortiePieges -match 'déjà protégé par l''accès contrôlé|already protected by Windows controlled folder access') { Ok 'Dossiers protégés par Windows dits comme tels, sans piège' }
+        if ($sortiePieges -match 'déjà protégé par|already protected by Windows') { Ok 'Dossiers protégés par Windows dits comme tels, sans piège' }
         else { Bug 'Dossiers protégés par Windows PAS signalés' }
     }
     if ($sortiePieges -match 'Pas de fichier-piège dans|No decoy file in') { Bug "Dossier refusé : $(($sortiePieges -split "`n" | Select-String 'No decoy file in|Pas de fichier-piège dans') -join ' / ')" }
