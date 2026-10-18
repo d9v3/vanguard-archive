@@ -159,8 +159,8 @@ fn lire_onvif(xml: &str) -> Option<String> {
         }
     }
     let texte: Vec<String> = [nom, modele].into_iter().flatten().collect();
-    // Les caractères de contrôle sont retirés : une réponse du réseau ne doit pas pouvoir piloter le terminal.
-    Some(texte.join(" · ").chars().filter(|c| !c.is_control()).take(60).collect())
+    // Une réponse du réseau ne doit pas pouvoir piloter le terminal.
+    Some(affichable(&texte.join(" · ")).chars().take(60).collect())
 }
 
 /// Identifiant de message au format d'un UUID, tiré du hasard du système.
@@ -454,6 +454,10 @@ mod tests {
             Some("")
         );
         assert_eq!(sans_pourcent("a%20b%2"), "a b%2");
+        // Nom et modèle choisis par l'appareil, codés en %xx : la couleur, l'OSC et le bidi deviennent « � ».
+        let piege = "<d:Types>dn:NetworkVideoTransmitter</d:Types><d:Scopes>onvif://www.onvif.org/name/Entr%C3%A9e%1B]52;c;eA==%07%1B[2K%0D \
+                     onvif://www.onvif.org/hardware/IPC%E2%80%AE</d:Scopes>";
+        assert_eq!(lire_onvif(piege).as_deref(), Some("Entrée�]52;c;eA==��[2K� · IPC�"));
         let u = uuid();
         assert_eq!((u.len(), u.matches('-').count()), (36, 4));
     }

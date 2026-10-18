@@ -11,6 +11,7 @@ use tokio::net::TcpStream;
 use tokio::time::timeout;
 
 use crate::risk::PORTS_HTTP;
+use crate::ui::affichable;
 use crate::{tr, trf};
 
 /// Résultat d'une tentative de connexion.
@@ -374,9 +375,10 @@ async fn banniere(mut flux: TcpStream, port: u16) -> Option<String> {
             resume_http(&t)
         }
     };
-    // Les caractères de contrôle sont retirés : une bannière ne doit pas pouvoir piloter le terminal.
-    let propre: String = ligne.chars().filter(|c| !c.is_control()).take(80).collect();
-    (!propre.is_empty()).then_some(propre)
+    // Une bannière ne doit pas pouvoir piloter le terminal (`affichable`). Une réponse binaire, faite seulement de
+    // contrôles, ne dit rien : pas de bannière, comme avant.
+    let propre: String = affichable(&ligne).chars().take(80).collect();
+    propre.chars().any(|c| c != '\u{fffd}').then_some(propre)
 }
 
 /// Scanne tous les ports demandés sur toutes les machines. Retourne IP → [(port, bannière)].
@@ -451,13 +453,15 @@ fn requete_udp(port: u16) -> Option<Vec<u8>> {
     })
 }
 
-/// Ce que la réponse apprend : nom NetBIOS, description SNMP, serveur UPnP.
+/// Ce que la réponse apprend : nom NetBIOS, description SNMP, serveur UPnP. Chaque appareil choisit ce qu'il y
+/// écrit : lu prêt à montrer (`affichable`).
 fn resume_udp(port: u16, reponse: &[u8]) -> Option<String> {
     match port {
-        // En-tête (12) + nom (34) + type, classe, durée, longueur (10) = 56 : nombre de noms, puis le premier nom.
+        // En-tête (12) + nom (34) + type, classe, durée, longueur (10) = 56 : nombre de noms, puis le premier nom,
+        // complété par des espaces (des octets nuls chez certains appareils).
         137 => {
             let nom = reponse.get(57..72)?;
-            let nom = String::from_utf8_lossy(nom).trim().to_string();
+            let nom = affichable(String::from_utf8_lossy(nom).trim_matches(|c: char| c.is_whitespace() || c == '\0'));
             (!nom.is_empty()).then(|| trf!("nom : {nom}", "name: {nom}"))
         }
         // La valeur suit l'OID de sysDescr.0 : 0x04 (texte), longueur, texte.
@@ -474,10 +478,7 @@ fn resume_udp(port: u16, reponse: &[u8]) -> Option<String> {
                 _ => return None,
             };
             let texte = String::from_utf8_lossy(texte.get(..longueur.min(texte.len()))?);
-            let texte: String = texte
-                .split_whitespace()
-                .collect::<Vec<_>>()
-                .join(" ")
+            let texte: String = affichable(&texte.split_whitespace().collect::<Vec<_>>().join(" "))
                 .chars()
                 .take(70)
                 .collect();
@@ -485,7 +486,7 @@ fn resume_udp(port: u16, reponse: &[u8]) -> Option<String> {
         }
         1900 => String::from_utf8_lossy(reponse).lines().find_map(|l| {
             let (cle, valeur) = l.split_once(':')?;
-            (cle.trim().eq_ignore_ascii_case("server")).then(|| valeur.trim().chars().take(70).collect())
+            (cle.trim().eq_ignore_ascii_case("server")).then(|| affichable(valeur.trim()).chars().take(70).collect())
         }),
         _ => None,
     }
@@ -538,7 +539,13 @@ pub async fn nom_hote(ip: Ipv4Addr) -> Option<String> {
     // Délai maximal : un DNS qui ne répond pas ne doit pas bloquer tout le scan.
     let recherche = tokio::task::spawn_blocking(move || dns_lookup::lookup_addr(&IpAddr::V4(ip)));
     let nom = timeout(Duration::from_secs(2), recherche).await.ok()?.ok()?.ok()?;
-    (nom != ip.to_string()).then_some(nom)
+    nom_inverse(IpAddr::V4(ip), &nom)
+}
+
+/// Le nom d'une adresse, d'après le système (DNS inverse de la box, mDNS, NetBIOS ou LLMNR selon le système), prêt à
+/// montrer : chaque appareil, chaque serveur choisit le sien. `None` : le système n'a redit que l'adresse.
+pub(crate) fn nom_inverse(ip: IpAddr, nom: &str) -> Option<String> {
+    (nom != ip.to_string()).then(|| affichable(nom))
 }
 
 /// Base des fabricants (préfixe MAC → nom), extraite des registres IEEE (outils/maj-fabricants.sh, relancé par
@@ -616,13 +623,10 @@ pub fn nom_wifi() -> Option<String> {
 }
 
 /// Le réseau connecté dans `nmcli -t -e no -f ACTIVE,SSID dev wifi` (« yes:Salon »). Comme dans les deux lectures
-/// suivantes, le nom, que n'importe qui à portée peut choisir, est lu prêt à montrer (`ui::affichable`).
+/// suivantes, le nom, que n'importe qui à portée peut choisir, est lu prêt à montrer (`affichable`).
 #[cfg(any(target_os = "linux", test))]
 fn nom_wifi_nmcli(sortie: &str) -> Option<String> {
-    sortie
-        .lines()
-        .find_map(|l| l.strip_prefix("yes:"))
-        .map(crate::ui::affichable)
+    sortie.lines().find_map(|l| l.strip_prefix("yes:")).map(affichable)
 }
 
 /// Le réseau connecté dans `netsh wlan show interfaces` (« SSID : Salon »).
@@ -632,7 +636,7 @@ fn nom_wifi_netsh(sortie: &str) -> Option<String> {
         .lines()
         .map(str::trim)
         .find(|l| l.starts_with("SSID") && !l.starts_with("BSSID"))
-        .and_then(|l| Some(crate::ui::affichable(l.split_once(':')?.1.trim())))
+        .and_then(|l| Some(affichable(l.split_once(':')?.1.trim())))
 }
 
 /// Le réseau connecté dans `ipconfig getsummary en0` (« SSID : Salon ») ; un nom masqué (« <redacted> ») ne dit rien.
@@ -643,7 +647,7 @@ fn nom_wifi_ipconfig(sortie: &str) -> Option<String> {
         .map(str::trim)
         .find_map(|l| l.strip_prefix("SSID : "))
         .filter(|n| !n.starts_with('<'))
-        .map(crate::ui::affichable)
+        .map(affichable)
 }
 
 #[cfg(not(target_os = "linux"))]
@@ -755,6 +759,63 @@ mod tests {
         );
         assert_eq!(passerelle_linux(&table), Some(Ipv4Addr::new(10, 0, 0, 1)));
         assert_eq!(passerelle_linux(entete), None);
+    }
+
+    /// Ce que répondent les appareils du réseau, et que chacun choisit : nom NetBIOS, description SNMP, serveur UPnP
+    /// (SSDP). Piégé (couleur, OSC, effacement de ligne, retour chariot, bidi), il arrive inoffensif, « � » à la place
+    /// de chaque caractère piégé.
+    #[test]
+    fn reponses_udp_piegees() {
+        let mut nb = vec![0u8; 57];
+        nb.extend("\x1b[2K\rFAUX-PC\u{202e}".as_bytes());
+        nb.extend([0x00, 0x04, 0x00]);
+        assert_eq!(resume_udp(137, &nb).as_deref(), Some("nom : �[2K�FAUX-PC�"));
+        let description = "HP\x1b]0;titre\x07 LaserJet\u{2066}";
+        let mut snmp = vec![0x30, 0x2a, 0x2b, 0x06, 0x01, 0x02, 0x01, 0x01, 0x01, 0x00, 0x04];
+        snmp.push(u8::try_from(description.len()).unwrap());
+        snmp.extend(description.as_bytes());
+        assert_eq!(resume_udp(161, &snmp).as_deref(), Some("HP�]0;titre� LaserJet�"));
+        let ssdp = "HTTP/1.1 200 OK\r\nSERVER: Linux\x1b]52;c;eA==\x07 UPnP/1.0\u{202e}\r\n\r\n";
+        assert_eq!(
+            resume_udp(1900, ssdp.as_bytes()).as_deref(),
+            Some("Linux�]52;c;eA==� UPnP/1.0�")
+        );
+    }
+
+    /// La bannière d'un service (ici sur cet ordinateur, 127.0.0.1) : la première ligne, rendue inoffensive. Les
+    /// contrôles étaient déjà retirés, pas le retournement bidi ; ils deviennent « � », comme partout.
+    #[tokio::test]
+    async fn banniere_piegee() {
+        let ecoute = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = ecoute.local_addr().unwrap().port();
+        let serveur = std::thread::spawn(move || {
+            use std::io::Write;
+            let (mut c, _) = ecoute.accept().unwrap();
+            c.write_all("SSH-2.0-\x1b]52;c;ZWNobyBQSVJBVEU=\x07\x1b[2K\rFaux\u{202e}\r\n".as_bytes())
+                .unwrap();
+        });
+        let trouves = scanner_ports(&[Ipv4Addr::LOCALHOST], &[port], Duration::from_secs(2), 4).await;
+        serveur.join().unwrap();
+        assert_eq!(
+            trouves[&Ipv4Addr::LOCALHOST],
+            [(port, Some("SSH-2.0-�]52;c;ZWNobyBQSVJBVEU=��[2K�Faux�".to_string()))]
+        );
+    }
+
+    /// Le nom d'un appareil ou d'un serveur (DNS inverse, mDNS, NetBIOS, LLMNR) : gardé tel quel s'il est normal,
+    /// rendu inoffensif s'il est piégé ; l'adresse seule redite n'est pas un nom.
+    #[test]
+    fn noms_inverses() {
+        let ip = IpAddr::V4(Ipv4Addr::new(192, 168, 1, 20));
+        assert_eq!(
+            nom_inverse(ip, "imprimante-salon.local").as_deref(),
+            Some("imprimante-salon.local")
+        );
+        assert_eq!(nom_inverse(ip, "192.168.1.20"), None);
+        assert_eq!(
+            nom_inverse(ip, "tele\x1b]52;c;eA==\x07\x1b[2K\r\u{202e}.local").as_deref(),
+            Some("tele�]52;c;eA==��[2K��.local")
+        );
     }
 
     /// Le nom du réseau connecté, gardé dans la base et montré en tête du scan : lu tel quel s'il est normal, rendu

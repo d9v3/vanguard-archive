@@ -477,14 +477,16 @@ fn signes(chemin: Option<&str>, connexions: &[(&Connexion, Option<&String>)], mo
 }
 
 /// Noms inverses des adresses, demandés en parallèle au DNS du système ; ceux qui tardent plus de 4 secondes sont
-/// laissés sans nom (un DNS lent ne doit pas tout figer).
+/// laissés sans nom (un DNS lent ne doit pas tout figer). Le propriétaire de chaque adresse écrit son nom inverse :
+/// lu prêt à montrer.
 fn noms(adresses: &BTreeSet<IpAddr>) -> HashMap<IpAddr, String> {
     let (envoi, reception) = std::sync::mpsc::channel();
     for &ip in adresses {
         let envoi = envoi.clone();
         std::thread::spawn(move || {
-            if let Ok(nom) = dns_lookup::lookup_addr(&ip)
-                && nom != ip.to_string()
+            if let Some(nom) = dns_lookup::lookup_addr(&ip)
+                .ok()
+                .and_then(|n| crate::reseau::scan::nom_inverse(ip, &n))
             {
                 let _ = envoi.send((ip, nom));
             }
