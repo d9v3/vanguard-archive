@@ -259,8 +259,9 @@ cp -f LICENCES-TIERCES.txt "$CLE/LICENCES-TIERCES.txt"
 cp -f assets/gardien.ico "$CLE/gardien.ico"
 cp -f outils/cle/autorun.inf outils/cle/autorun.sh "outils/cle/Lancer Gardien.bat" "$CLE/"
 # Code source complet (avec l'historique git) pour continuer le développement depuis n'importe quel ordinateur.
-# exFAT ne garde ni droits ni liens : -rt suffit, --modify-window tolère sa précision de 2 s.
-rsync -rt --delete --modify-window=2 --exclude /target/ ./ "$CLE/source/"
+# exFAT ne garde ni droits ni liens : -rt suffit, --modify-window tolère sa précision de 2 s. Les copies de travail
+# des sessions Claude (.claude/worktrees, avec leurs propres compilations) restent sur l'ordinateur.
+rsync -rt --delete --modify-window=2 --exclude /target/ --exclude /.claude/worktrees/ ./ "$CLE/source/"
 sync
 echo "Clé GARDIEN à jour : $CLE ($(./"$LINUX" --version))"
 # Une seule notification par version copiée : le lancement manuel et le service qui le suit copient les mêmes
