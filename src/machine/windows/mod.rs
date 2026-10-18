@@ -112,6 +112,14 @@ fn script_admin(correctifs: &[Vec<String>], resultats: &str) -> String {
          Write-Host 'A long step (update, scan, Windows repair) can take several minutes: its start time is shown.'\n\
          $echecs = 0\n"
     ));
+    // Ce que la fenêtre affiche reste écrit à côté du script (« .log ») : une fenêtre fermée ne laisserait aucune trace
+    // de ce qui a réussi ou échoué.
+    let journal = resultats.strip_suffix(".resultats").unwrap_or(resultats);
+    let _ = writeln!(
+        script,
+        "try {{ Start-Transcript -LiteralPath '{}.log' -ErrorAction Stop | Out-Null }} catch {{ }}",
+        texte(journal)
+    );
     for commandes in correctifs {
         script += "$avant = $echecs\n";
         for c in commandes {
@@ -139,6 +147,7 @@ fn script_admin(correctifs: &[Vec<String>], resultats: &str) -> String {
             texte(resultats)
         );
     }
+    script += "try { Stop-Transcript | Out-Null } catch { }\n";
     script += tr!(
         "if ($echecs) { Write-Host ''; Write-Host \"Terminé, avec $echecs étape(s) en échec.\" -ForegroundColor Red; Read-Host 'Appuie sur Entrée pour fermer'; exit 1 }\n\
                Write-Host ''; Write-Host 'Terminé.' -ForegroundColor Green; Read-Host 'Appuie sur Entrée pour fermer'; exit 0",
@@ -832,5 +841,17 @@ mod tests {
                 .count(),
             2
         );
+    }
+
+    #[test]
+    fn la_fenetre_admin_garde_son_journal() {
+        let s = script_admin(
+            &[vec!["Update-MpSignature".to_string()]],
+            r"C:\Users\Zoé O'Brien\correction-1.resultats",
+        );
+        assert!(s.contains(r"Start-Transcript -LiteralPath 'C:\Users\Zoé O''Brien\correction-1.log'"));
+        let position = |mot: &str| s.find(mot).unwrap();
+        assert!(position("Start-Transcript") < position("Update-MpSignature"));
+        assert!(position("Stop-Transcript") < position("Read-Host"));
     }
 }

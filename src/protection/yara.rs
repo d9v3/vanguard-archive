@@ -11,19 +11,44 @@ use crate::ui::*;
 
 const REGLES: &str = include_str!(concat!(env!("OUT_DIR"), "/reversinglabs.yara"));
 
-/// Le moteur : dans le PATH, ou, sous Windows, là où winget pose ses commandes (juste après l'installation, le PATH
-/// de ce programme ne le connaît pas encore).
+/// Le moteur : dans le PATH, ou, sous Windows, là où winget le pose (juste après l'installation, le PATH de ce
+/// programme ne le connaît pas encore).
 fn moteur() -> Option<PathBuf> {
     let nom = if cfg!(windows) { "yara.exe" } else { "yara" };
     let dans_le_path =
         std::env::var_os("PATH").and_then(|p| std::env::split_paths(&p).map(|d| d.join(nom)).find(|f| f.is_file()));
     #[cfg(windows)]
     let dans_le_path = dans_le_path.or_else(|| {
-        std::env::var_os("LOCALAPPDATA")
-            .map(|d| PathBuf::from(d).join(r"Microsoft\WinGet\Links\yara.exe"))
-            .filter(|f| f.is_file())
+        let racines: Vec<PathBuf> = [("LOCALAPPDATA", r"Microsoft\WinGet"), ("ProgramFiles", "WinGet")]
+            .iter()
+            .filter_map(|(variable, sous)| std::env::var_os(variable).map(|d| PathBuf::from(d).join(sous)))
+            .collect();
+        poses_par_winget(&racines).into_iter().find(|f| f.is_file())
     });
     dans_le_path
+}
+
+/// Où winget pose le moteur, pour le compte (%LOCALAPPDATA%\Microsoft\WinGet) ou pour la machine
+/// (%ProgramFiles%\WinGet, winget lancé en administrateur) : le lien « yara » de Links, puis le programme lui-même
+/// dans Packages, quand winget n'a pas pu créer le lien et a seulement ajouté son dossier au PATH.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn poses_par_winget(racines: &[PathBuf]) -> Vec<PathBuf> {
+    let mut candidats = Vec::new();
+    for racine in racines {
+        candidats.push(racine.join("Links").join("yara.exe"));
+        let mut paquets: Vec<PathBuf> = std::fs::read_dir(racine.join("Packages"))
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter(|p| p.file_name().to_string_lossy().starts_with("VirusTotal.YARA_"))
+            .map(|p| p.path())
+            .collect();
+        paquets.sort();
+        for paquet in paquets {
+            candidats.extend([paquet.join("yara64.exe"), paquet.join("yara.exe")]);
+        }
+    }
+    candidats
 }
 
 /// Les options de prudence que ce moteur connaît, lues dans son aide : -N (liens non suivis : pas de boucle, rien
@@ -80,8 +105,16 @@ fn installer() -> bool {
     let fait = Command::new("winget")
         .args(commande.split_whitespace().skip(1))
         .status();
-    if !fait.is_ok_and(|s| s.success()) || moteur().is_none() {
+    if !fait.is_ok_and(|s| s.success()) {
         trp!("  ✖ Installation impossible.", "  ✖ Installation failed.");
+        return false;
+    }
+    // Installé, mais introuvable d'ici : ce n'est pas un échec, il suffit de relancer Gardien.
+    if moteur().is_none() {
+        trp!(
+            "  ✖ Moteur installé, mais pas encore trouvé : relance Gardien.",
+            "  ✖ Engine installed, but not found yet: restart Gardien."
+        );
         return false;
     }
     true
@@ -398,6 +431,29 @@ mod tests {
         assert_eq!(famille(&trouves[0].regle), "rançongiciel");
         assert_eq!(famille(&trouves[1].regle), "voleur de mots de passe");
         assert_eq!(famille("Linux_Inconnu_X"), "logiciel malveillant");
+    }
+
+    #[test]
+    fn moteur_pose_par_winget() {
+        // Pour le compte puis pour la machine : le lien de Links d'abord, puis le programme dans son paquet.
+        let d = std::env::temp_dir().join(format!("gardien-yara-winget-{}", std::process::id()));
+        let compte = d.join("compte");
+        let paquet = compte
+            .join("Packages")
+            .join("VirusTotal.YARA_Microsoft.Winget.Source_8wekyb3d8bbwe");
+        std::fs::create_dir_all(&paquet).unwrap();
+        std::fs::create_dir_all(compte.join("Packages").join("Autre.Paquet_x")).unwrap();
+        let machine = d.join("machine");
+        assert_eq!(
+            poses_par_winget(&[compte.clone(), machine.clone()]),
+            [
+                compte.join("Links").join("yara.exe"),
+                paquet.join("yara64.exe"),
+                paquet.join("yara.exe"),
+                machine.join("Links").join("yara.exe"),
+            ]
+        );
+        let _ = std::fs::remove_dir_all(&d);
     }
 
     #[test]
