@@ -82,20 +82,24 @@ apt, dnf ou zypper.
 
 **Bilan de sécurité** — une note de A à F, puis chaque problème avec sa correction.
 - Pare-feu, ports ouverts (TCP et UDP), mises à jour et failles connues, chiffrement du disque, Secure Boot,
-  verrouillage de l'écran, comptes, SSH, sudo, durcissement du noyau (sous macOS : volume du système scellé,
+  verrouillage de l'écran, comptes, SSH (et ses tentatives de connexion ratées, venues d'Internet ou de la maison),
+  sudo, groupes qui valent root (docker, lxd, libvirt, disk), durcissement du noyau (sous macOS : volume du système scellé,
   signature du code imposée, validation des bibliothèques, extensions ajoutées), fichiers secrets mal protégés,
   sauvegardes.
 - Ce qui se cache : programmes lancés au démarrage, tâches planifiées, préchargement de bibliothèques, programmes
   privilégiés modifiés.
 - DNS réellement utilisé (et réponses inventées), certificats racine ajoutés (interception du HTTPS), extensions de
   navigateur qui lisent tous les sites.
+- Wi-Fi : protection du réseau (WEP, WPA2, WPA3), et faux point d'accès (« jumeau maléfique ») qui copie son nom
+  sans mot de passe pour attirer les appareils.
 - Santé : espace disque, état SMART des disques (sans root), batterie, températures.
 - Ce qui n'a pas pu être vérifié est dit, jamais compté comme sain.
 
 **Réseau local** — tous les appareils, leur fabricant, leurs ports ouverts (TCP, et UDP : SNMP, NetBIOS, UPnP, DNS,
 mDNS) et leurs risques ; les nouveaux venus signalés, un carnet par réseau (chez toi, chez chaque ami), des surnoms
 (« imprimante HP ») ; les ports que des appareils ont ouverts vers Internet sur la box par UPnP (lecture seule, avec
-miniupnpc sous Linux).
+miniupnpc sous Linux). Après accord, l'adresse Internet de la maison est cherchée dans quatre listes noires
+(Spamhaus, SpamCop, DroneBL, PSBL) : listée pour pourriel ou attaques, un appareil est sans doute infecté.
 
 **Connexion pour le jeu** — ping, gigue, pertes, débit et bufferbloat (le lag quand quelqu'un télécharge), avec un
 verdict critère par critère et des conseils.
@@ -117,6 +121,18 @@ rapports de plantage (Linux) ; fichiers temporaires, cache de Windows Update et 
 anciens composants (Windows) ; vieux caches, Homebrew, Xcode, instantanés locaux (macOS). La place que libère chaque
 élément est mesurée avant, ce qui se refait seul est coché d'office, la corbeille jamais ; la place libre relue après
 dit ce qui a vraiment été gagné.
+
+**Contre les rançongiciels et les logiciels malveillants** — des fichiers-pièges : un texte et un PDF leurres
+dans Documents, Images et Bureau, que personne n'a de raison de toucher. Un rançongiciel qui les chiffre ou les
+renomme déclenche une alerte critique, au bilan et toutes les heures par la surveillance, avec la marche à suivre ;
+posés et retirés après accord. Et une analyse YARA : 308 règles de ReversingLabs qui reconnaissent des familles
+entières (rançongiciels, voleurs de mots de passe, chevaux de Troie, portes dérobées…), en complément de
+l'antivirus.
+
+**Apprentissage** — Gardien apprend sur ton ordinateur, sans rien envoyer. Une alerte que tu déclares normale chez
+toi (« i » à la correction) passe au niveau info pendant 90 jours, ou jusqu'à ce qu'elle s'aggrave ; chaque test de
+connexion se compare à tes habitudes sur le même réseau ; un appareil connu qui paraît soudain tout fermé (en
+veille) est revérifié plus patiemment. « Ce que Gardien a appris » montre tout et permet d'oublier.
 
 **Guide des commandes** — les commandes utiles de Linux, de Windows, de macOS et celles qui s'écrivent pareil
 partout (Gardien, ping, nslookup, ssh, curl, git…), rangées par système puis par programme, chacune expliquée ; ⚠
@@ -172,6 +188,10 @@ Chaque entrée du menu existe aussi en commande :
 | `gardien logiciels [--liste] [--recommandes]` | logiciels à installer par catégorie ; `--liste` : leur état, sans rien installer |
 | `gardien diagnostic` | diagnostic de l'ordinateur : matériel, système, plantages et erreurs récents |
 | `gardien antivirus [--complet] [dossier]` | analyse antivirus (ordinateur, ou une clé / un dossier) |
+| `gardien yara [--complet] [dossier]` | analyse YARA : 308 règles de familles de logiciels malveillants |
+| `gardien pieges [--retirer]` | fichiers-pièges contre les rançongiciels : les poser, les vérifier, les retirer |
+| `gardien listes-noires` | l'adresse Internet de la maison sur liste noire ? (après accord) |
+| `gardien appris` | ce que Gardien a appris : tes habitudes, tes choix, et les oublier |
 | `gardien motdepasse` | mots de passe fuités |
 | `gardien isoler <fichier>` | lancer un programme inconnu dans un bac à sable (bubblewrap ou firejail, Windows Sandbox) |
 | `gardien courriel` | fuites d'adresse courriel (XposedOrNot, ou Have I Been Pwned avec `GARDIEN_HIBP_CLE`) |
@@ -186,7 +206,8 @@ Chaque entrée du menu existe aussi en commande :
 
 **Langue** : celle du système (français ou anglais). Pour forcer : `GARDIEN_LANG=fr` ou `GARDIEN_LANG=en`. Les
 commandes ont aussi un nom anglais (`full`, `audit`, `fix`, `network`, `connection`, `apps`, `diag`, `password`,
-`sandbox`, `email`, `integrity`, `update`, `repair`, `monitor`, `name`, `backup`, `restore`, `clean`).
+`sandbox`, `email`, `integrity`, `update`, `repair`, `monitor`, `name`, `backup`, `restore`, `clean`, `decoys`,
+`blocklists`, `learned`).
 
 ## Développer
 

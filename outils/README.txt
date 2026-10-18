@@ -41,13 +41,17 @@ highlighted one, Esc clears it. In the main menu, it also finds each tool of the
        Repair and clean up (Internet, hijacked browsing, firewall, disk full, stuck updates…)
        Diagnostic (hardware, recent crashes and errors, text copy on the key)
        Critical file integrity (accounts, sudo, SSH, startup; live: gardien integrite --temps-reel)
+       What Gardien has learned: your habits, and the alerts you declared normal ("i" when fixing)
   5  Network and Internet ›
        Scan the network · Deep scan of one device · Name a device ("HP printer")
        Hourly monitoring (unknown device, problem on this machine, router impersonation)
-       Connection test for gaming (ping, jitter, speed, bufferbloat)
+       Connection test for gaming (ping, jitter, speed, bufferbloat), compared with your habits
+       Internet address on blocklists? (Spamhaus, SpamCop, DroneBL, PSBL, after your consent)
   6  Antivirus and protection ›
        Quick scan · Full scan of the home folder
        USB drive or folder, with USB worm traps (fake shortcuts, autorun)
+       YARA scan: 308 rules for malware families (ransomware, password stealers…)
+       Decoy files: decoys in your folders; ransomware touching them triggers the alert
        Sandbox: run an unknown program with no network, away from your files
        Passwords: have they leaked? (only 5 characters of their fingerprint are sent)
        Email address: has it leaked? (sent to the search service, after your consent)
@@ -70,8 +74,9 @@ highlighted one, Esc clears it. In the main menu, it also finds each tool of the
   Shortcuts from earlier versions, in the main menu: u updates, r repair, o diagnostic, i integrity,
   n name, c connection, a USB drive, b sandbox, p passwords, e email, l software, g gaming, d data.
 
-The check covers, among others: firewall, open ports, updates, encryption, accounts, programs started at
-boot, DNS, added root certificates, browser extensions, disk and battery health.
+The check covers, among others: firewall, open ports, updates, encryption, accounts, SSH (and its failed login
+attempts), Wi-Fi (and fake access points copying its name), programs started at boot, DNS, added root
+certificates, browser extensions, disk and battery health.
 
 Language: French or English, following the system. To force English:
   Linux:   GARDIEN_LANG=en ./gardien

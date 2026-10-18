@@ -26,6 +26,7 @@ modification. Sur GitHub, `@claude` dans un ticket ou une demande de fusion le f
 | `src/risk.rs` | base de connaissances des ports et niveaux de risque |
 | `src/connexion.rs` | test de connexion pour le jeu |
 | `src/antivirus.rs` | ClamAV / Defender, quarantaine |
+| `src/yara.rs`, `src/pieges.rs` | analyse YARA (règles intégrées, moteur du système) ; fichiers-pièges contre les rançongiciels |
 | `src/surveillance.rs` | minuterie systemd / Planificateur de tâches / agent launchd, notifications |
 | `src/rapport.rs`, `src/historique.rs` | rapport HTML, historique des bilans, courbe des notes |
 | `src/reparer.rs`, `src/maj.rs`, `src/gaming/` | réparations, mises à jour, gaming |
@@ -34,7 +35,10 @@ modification. Sur GitHub, `@claude` dans un ticket ou une demande de fusion le f
 | `src/logiciels/` | logiciels à installer : catalogue vérifié (`catalogue.rs`), état et installation par système |
 | `src/fuites.rs`, `src/donnees.rs` | mots de passe fuités, sauvegarde des données |
 | `src/guide/` | guide des commandes : un fichier par système (`linux.rs`, `windows.rs`, `macos.rs`, `tous.rs`), menus et recherche (`mod.rs`) |
+| `src/apprentissage.rs` | ce que Gardien apprend ici : alertes déclarées normales (appris.json), habitudes |
+| `src/listes_noires.rs` | adresse Internet de la maison dans les listes noires (DNSBL), après accord |
 | `assets/oui.tsv` | fabricants par préfixe MAC (liste IEEE), rangés en tableaux triés à la compilation (`build.rs`) |
+| `assets/yara/` | règles YARA de ReversingLabs (licence MIT), rassemblées par `outils/maj-yara.sh` |
 | `assets/icones/`, `assets/gardien.ico` | le logo, calculé par `outils/icone.py` |
 | `LICENCES-TIERCES.txt` | avis de licence des bibliothèques incluses (`outils/licences-tierces.py`) |
 

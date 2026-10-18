@@ -77,17 +77,22 @@ zypper.
 
 **Security check** — a grade from A to F, then each problem with its fix.
 - Firewall, open ports (TCP and UDP), updates and known vulnerabilities, disk encryption, Secure Boot, screen lock,
-  accounts, SSH, sudo, kernel hardening (on macOS: sealed system volume, enforced code signing, library
+  accounts, SSH (and its failed login attempts, from the Internet or from home), sudo, groups worth root (docker,
+  lxd, libvirt, disk), kernel hardening (on macOS: sealed system volume, enforced code signing, library
   validation, added extensions), badly protected secret files, backups.
 - What hides: programs started at boot, scheduled tasks, library preloading, modified privileged programs.
 - The DNS actually used (and forged answers), added root certificates (HTTPS interception), browser extensions that
   read every site.
+- Wi-Fi: the network's protection (WEP, WPA2, WPA3), and fake access points ("evil twin") that copy its name without
+  a password to lure devices.
 - Health: disk space, SMART status of the disks (without root), battery, temperatures.
 - What could not be checked is said so, never counted as healthy.
 
 **Local network** — every device, its manufacturer, its open ports (TCP, and UDP: SNMP, NetBIOS, UPnP, DNS, mDNS)
 and its risks; newcomers flagged, one notebook per network (at home, at each friend's), nicknames ("HP printer");
 the ports that devices opened to the Internet on the router through UPnP (read-only, with miniupnpc on Linux).
+After your consent, the home's Internet address is looked up in four blocklists (Spamhaus, SpamCop, DroneBL, PSBL):
+listed for spam or attacks, a device is probably infected.
 
 **Connection for gaming** — ping, jitter, loss, speed and bufferbloat (the lag when someone downloads), with a
 verdict criterion by criterion and advice.
@@ -107,6 +112,17 @@ versions, unused Flatpak runtimes, AUR builds, old caches, thumbnails, old logs,
 files, Windows Update and Delivery Optimization caches, old components (Windows); old caches, Homebrew, Xcode, local
 snapshots (macOS). The space each item frees is measured first, what rebuilds itself is checked by default, the trash
 never; the free space read again afterwards tells what was really gained.
+
+**Against ransomware and malware** — decoy files: a decoy text file and PDF in Documents, Pictures and Desktop,
+which nobody has a reason to touch. Ransomware that encrypts or renames them triggers a critical alert, at each
+check and hourly through monitoring, with what to do; placed and removed after your consent. And a YARA scan: 308
+ReversingLabs rules that recognize whole families (ransomware, password stealers, trojans, backdoors…), alongside
+the antivirus.
+
+**Learning** — Gardien learns on your computer, sending nothing. An alert you declare normal for you ("i" when it is
+offered as a fix) drops to information for 90 days, or until it gets worse; each connection test is compared with
+your habits on the same network; a known device that suddenly seems all closed (asleep) is checked again more
+patiently. "What Gardien has learned" shows everything and lets you forget.
 
 **Command guide** — the useful commands of Linux, Windows, macOS and the ones typed the same way everywhere
 (Gardien, ping, nslookup, ssh, curl, git…), sorted by system, then by program, each one explained; ⚠ marks the
@@ -160,6 +176,10 @@ Each menu entry is also a command:
 | `gardien apps [--list] [--recommended]` | software to install by category; `--list`: their state, installing nothing |
 | `gardien diag` | computer diagnostic: hardware, system, recent crashes and errors |
 | `gardien antivirus [--complet] [folder]` | antivirus scan (computer, or a key / a folder) |
+| `gardien yara [--complet] [folder]` | YARA scan: 308 rules for malware families |
+| `gardien decoys [--retirer]` | decoy files against ransomware: place them, check them, remove them |
+| `gardien blocklists` | the home's Internet address on a blocklist? (after your consent) |
+| `gardien learned` | what Gardien has learned: your habits, your choices, and forgetting them |
 | `gardien password` | leaked passwords |
 | `gardien sandbox <file>` | run an unknown program in a sandbox (bubblewrap or firejail, Windows Sandbox) |
 | `gardien email` | email address leaks (XposedOrNot, or Have I Been Pwned with `GARDIEN_HIBP_CLE`) |
@@ -175,7 +195,7 @@ Each menu entry is also a command:
 **Language**: the system's (English or French). To force it: `GARDIEN_LANG=en` or `GARDIEN_LANG=fr`. The commands
 also keep their French names (`complet`, `machine`, `corriger`, `reseau`, `connexion`, `logiciels`, `diagnostic`,
 `motdepasse`, `isoler`, `courriel`, `integrite`, `maj`, `reparer`, `surveillance`, `nommer`, `sauvegarder`,
-`restaurer`, `nettoyer`).
+`restaurer`, `nettoyer`, `pieges`, `listes-noires`, `appris`).
 
 ## Development
 

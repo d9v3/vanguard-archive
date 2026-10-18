@@ -42,13 +42,17 @@ Entrée ouvre celle en surbrillance, Échap efface. Au menu principal, elle trou
        Réparer et nettoyer (Internet, navigation détournée, pare-feu, disque plein, mises à jour bloquées…)
        Diagnostic (matériel, plantages et erreurs récents, copie texte sur la clé)
        Intégrité des fichiers critiques (comptes, sudo, SSH, démarrage ; en direct : gardien integrite --temps-reel)
+       Ce que Gardien a appris : tes habitudes, et les alertes que tu as déclarées normales (« i » à la correction)
   5  Réseau et Internet ›
        Scanner le réseau · Scan approfondi d'un appareil · Nommer un appareil (« imprimante HP »)
        Surveillance toutes les heures (appareil inconnu, problème sur cette machine, usurpation de la box)
-       Test de connexion pour le jeu (ping, gigue, débit, bufferbloat)
+       Test de connexion pour le jeu (ping, gigue, débit, bufferbloat), comparé à tes habitudes
+       Adresse Internet sur liste noire ? (Spamhaus, SpamCop, DroneBL, PSBL, après ton accord)
   6  Antivirus et protection ›
        Analyse rapide · Analyse complète du dossier personnel
        Clé USB ou dossier, avec les pièges des vers de clé (faux raccourcis, autorun)
+       Analyse YARA : 308 règles de familles de logiciels malveillants (rançongiciels, voleurs de mots de passe…)
+       Fichiers-pièges : des leurres dans tes dossiers ; un rançongiciel qui les touche déclenche l'alerte
        Bac à sable : lancer un programme inconnu sans réseau, à l'écart de tes fichiers
        Mots de passe : ont-ils fuité ? (seuls 5 caractères de leur empreinte sont envoyés)
        Adresse courriel : a-t-elle fuité ? (envoyée au service de recherche, après ton accord)
@@ -72,8 +76,9 @@ Entrée ouvre celle en surbrillance, Échap efface. Au menu principal, elle trou
   i intégrité, n nommer, c connexion, a clé USB, b bac à sable, p mots de passe, e courriel, l logiciels,
   g gaming, d données.
 
-Le bilan vérifie notamment : pare-feu, ports ouverts, mises à jour, chiffrement, comptes, programmes lancés
-au démarrage, DNS, certificats racine ajoutés, extensions de navigateur, santé des disques et de la batterie.
+Le bilan vérifie notamment : pare-feu, ports ouverts, mises à jour, chiffrement, comptes, SSH (et ses tentatives
+de connexion ratées), Wi-Fi (et faux point d'accès qui copie son nom), programmes lancés au démarrage, DNS,
+certificats racine ajoutés, extensions de navigateur, santé des disques et de la batterie.
 
 Langue : français ou anglais selon le système. Pour forcer le français :
   Linux :   GARDIEN_LANG=fr ./gardien

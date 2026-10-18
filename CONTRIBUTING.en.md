@@ -26,6 +26,7 @@ turn on once with `/install-github-app`).
 | `src/risk.rs` | knowledge base of ports and risk levels |
 | `src/connexion.rs` | connection test for gaming |
 | `src/antivirus.rs` | ClamAV / Defender, quarantine |
+| `src/yara.rs`, `src/pieges.rs` | YARA scan (bundled rules, system engine); decoy files against ransomware |
 | `src/surveillance.rs` | systemd timer / Task Scheduler / launchd agent, notifications |
 | `src/rapport.rs`, `src/historique.rs` | HTML report, check history, grade curve |
 | `src/reparer.rs`, `src/maj.rs`, `src/gaming/` | repairs, updates, gaming |
@@ -34,7 +35,10 @@ turn on once with `/install-github-app`).
 | `src/logiciels/` | software to install: checked catalog (`catalogue.rs`), state and installation per system |
 | `src/fuites.rs`, `src/donnees.rs` | leaked passwords, data backup |
 | `src/guide/` | command guide: one file per system (`linux.rs`, `windows.rs`, `macos.rs`, `tous.rs`), menus and search (`mod.rs`) |
+| `src/apprentissage.rs` | what Gardien learns here: alerts declared normal (appris.json), habits |
+| `src/listes_noires.rs` | the home's Internet address in blocklists (DNSBL), after consent |
 | `assets/oui.tsv` | manufacturers by MAC prefix (IEEE list), stored as sorted tables at compile time (`build.rs`) |
+| `assets/yara/` | ReversingLabs YARA rules (MIT license), gathered by `outils/maj-yara.sh` |
 | `assets/icones/`, `assets/gardien.ico` | the logo, computed by `outils/icone.py` |
 | `LICENCES-TIERCES.txt` | license notices of the included libraries (`outils/licences-tierces.py`) |
 
