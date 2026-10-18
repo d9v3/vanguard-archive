@@ -108,12 +108,11 @@ lancer menu 60 '4\n\n5\n\n6\n\n7\n\nq\n'
 for g in 'Cette machine' 'Réseau et Internet' 'Antivirus et protection' 'Installer et jouer'; do
   verifier "menu : groupe « $g »" grep -q "$g" "$RES/menu.txt"
 done
-debut=$SECONDS
 USER=essai timeout 10 "$GARDIEN" </dev/null >"$RES/menu-eof.txt" 2>&1
 verifier "menu : quitte quand l'entrée est fermée" test $? -ne 124
 
 section "Mots de passe fuités (pseudo-terminal : saisie sans écho)"
-python3 -I "$(dirname "$0")/../test-commun/mot-de-passe-pty.py" "$GARDIEN" >"$RES/motdepasse.txt" 2>&1
+USER=essai python3 -I "$(dirname "$0")/../test-commun/mot-de-passe-pty.py" "$GARDIEN" >"$RES/motdepasse.txt" 2>&1
 verifier "mot de passe : « password » trouvé dans des fuites" grep -qE 'Trouvé [0-9 ]+ fois' "$RES/motdepasse.txt"
 verifier "mot de passe : jamais affiché" bash -c "! grep -q 'Mot de passe : password' '$RES/motdepasse.txt'"
 
