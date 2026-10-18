@@ -681,6 +681,31 @@ fn en_texte(sections: &[Section]) -> String {
     t
 }
 
+/// Une ligne du diagnostic à l'écran : marque, libellé sur 22 colonnes, puis la valeur coupée pour tenir dans
+/// `LARGEUR`, la suite alignée sous elle. Sans cela, une longue valeur (carte graphique et son pilote, modèle, sources
+/// des erreurs) était coupée par le terminal au milieu d'un mot et reprise au bord gauche.
+fn a_l_ecran(l: &Ligne) -> Vec<String> {
+    // « ● », le libellé et leurs espaces : la valeur commence à la 28e colonne.
+    const RETRAIT: usize = 27;
+    let (marque, couleur_valeur) = match l.niveau {
+        Some(n) => (format!("{}●{RESET}", couleur(n)), couleur(n)),
+        None => (format!("{VERT}●{RESET}"), ""),
+    };
+    let debut = format!("  {marque} {GRAS}{}{RESET} ", ajuster(&l.libelle, 22));
+    let mut morceaux = envelopper(&l.valeur, LARGEUR - RETRAIT);
+    if morceaux.is_empty() {
+        morceaux.push(String::new());
+    }
+    morceaux
+        .iter()
+        .enumerate()
+        .map(|(i, m)| {
+            let avant = if i == 0 { debut.clone() } else { " ".repeat(RETRAIT) };
+            format!("{avant}{couleur_valeur}{m}{RESET}")
+        })
+        .collect()
+}
+
 /// « gardien diagnostic » : affiche le diagnostic et l'enregistre en texte.
 pub fn diagnostic() {
     println!();
@@ -698,16 +723,8 @@ pub fn diagnostic() {
     let sections = systeme::sections();
     for (nom, lignes) in &sections {
         section(nom);
-        for l in lignes {
-            let (marque, couleur_valeur) = match l.niveau {
-                Some(n) => (format!("{}●{RESET}", couleur(n)), couleur(n)),
-                None => (format!("{VERT}●{RESET}"), ""),
-            };
-            println!(
-                "  {marque} {GRAS}{}{RESET} {couleur_valeur}{}{RESET}",
-                ajuster(&l.libelle, 22),
-                l.valeur
-            );
+        for t in lignes.iter().flat_map(a_l_ecran) {
+            println!("{t}");
         }
     }
     let fichier = crate::reseau::dossier_donnees().join(format!(
@@ -743,6 +760,50 @@ mod tests {
             vec![ligne("Nom", "portable"), alerte("Erreurs", "3", Niveau::Moyen)],
         )]);
         assert!(t.contains("  Nom") && t.contains("! Erreurs") && !t.contains('\x1b'));
+    }
+
+    /// Une longue valeur (modèle de la carte mère, carte graphique et son pilote, sources des erreurs) tient dans
+    /// `LARGEUR` colonnes, la suite alignée sous elle ; une valeur vide garde sa ligne.
+    #[test]
+    fn lignes_du_diagnostic_dans_la_largeur() {
+        let longue = alerte(
+            "Erreurs du journal",
+            "311 depuis le démarrage : kernel (200), NetworkManager (50), bluetoothd (30), \
+             pipewire (20), wireplumber (11)",
+            Niveau::Moyen,
+        );
+        let modele = ligne(
+            "Modèle",
+            "Exemple Informatique Co., Ltd. · CARTE-MERE X670-E WIFI (EX-0001) · BIOS 1.00",
+        );
+        for l in [&longue, &modele] {
+            let lignes = a_l_ecran(l);
+            for t in &lignes {
+                assert!(largeur_affichee(t) <= LARGEUR, "{} colonnes : {t}", largeur_affichee(t));
+            }
+            let mots = |t: &str| t.split_whitespace().map(str::to_string).collect::<Vec<_>>();
+            let affiches: Vec<String> = lignes.iter().flat_map(|t| mots(&sans_couleurs(t))).collect();
+            assert!(affiches.ends_with(&mots(&l.valeur)), "{lignes:?}");
+            assert!(
+                lignes.iter().skip(1).all(|t| t.starts_with(&" ".repeat(27))),
+                "{lignes:?}"
+            );
+        }
+        assert_eq!(a_l_ecran(&ligne("Nom", "")).len(), 1);
+    }
+
+    fn sans_couleurs(t: &str) -> String {
+        let mut propre = String::new();
+        let mut code = false;
+        for c in t.chars() {
+            match (code, c) {
+                (false, '\x1b') => code = true,
+                (true, 'm') => code = false,
+                (false, c) => propre.push(c),
+                (true, _) => {}
+            }
+        }
+        propre
     }
 
     #[cfg(target_os = "macos")]
