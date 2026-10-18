@@ -114,16 +114,36 @@ fn est_adresse(mot: &str) -> bool {
 }
 
 /// Le texte d'une alerte sans adresse IP ni MAC : le téléphone n'en a pas besoin, et le message passe par un serveur
-/// public. Chaque adresse devient « … » ; la ponctuation qui la suit reste.
+/// public. Chaque adresse devient « … » ; ce qui l'entoure reste. L'adresse est cherchée à l'intérieur de chaque
+/// suite de chiffres hexadécimaux et de séparateurs : collée à des lettres (« MAC:3c:22:… », « box-3c:22:… ») ou
+/// suivie d'un port (« 10.0.0.5:8080 »), elle partirait sinon en clair.
 fn masquer(texte: &str) -> String {
     fn vider(mot: &mut String, sortie: &mut String) {
-        let adresse = mot.trim_end_matches(['.', ':', '-']);
-        if est_adresse(adresse) {
-            sortie.push('…');
-            sortie.push_str(&mot[adresse.len()..]);
-        } else {
-            sortie.push_str(mot);
+        // Le mot ne contient que des caractères ASCII : les indices d'octets sont des limites de caractères.
+        let octets = mot.as_bytes();
+        let separateur = |i: usize| matches!(octets[i], b'.' | b':' | b'-');
+        // Chaque adresse possible (début au début du mot ou après un séparateur, la fin la plus longue) ; celles qui
+        // se chevauchent sont masquées ensemble (« AC:3c:22:fb:12:34:56 » en contient deux) : mieux vaut trop
+        // masquer que laisser passer un morceau.
+        let mut zones: Vec<(usize, usize)> = Vec::new();
+        for i in (0..mot.len()).filter(|&i| i == 0 || separateur(i - 1)) {
+            let fin = (i + 1..=mot.len())
+                .rev()
+                .find(|&j| (j == mot.len() || separateur(j)) && est_adresse(&mot[i..j]));
+            if let Some(j) = fin {
+                match zones.last_mut() {
+                    Some((_, f)) if i < *f => *f = (*f).max(j),
+                    _ => zones.push((i, j)),
+                }
+            }
         }
+        let mut copie = 0;
+        for (debut, fin) in zones {
+            sortie.push_str(&mot[copie..debut]);
+            sortie.push('…');
+            copie = fin;
+        }
+        sortie.push_str(&mot[copie..]);
         mot.clear();
     }
     let mut sortie = String::with_capacity(texte.len());
@@ -460,6 +480,11 @@ mod tests {
         let garde = "Port 4444/tcp ouvert le 2026-10-18 à 12:30, réseau « Salon », décodé.";
         assert_eq!(masquer(garde), garde);
         assert_eq!(masquer("Réseau 10.0.0.0/24."), "Réseau …/24.");
+        // Collées à des lettres hexadécimales, à un séparateur, ou suivies d'un port : masquées quand même.
+        assert_eq!(masquer("MAC:3c:22:fb:12:34:56"), "M…");
+        assert_eq!(masquer("box-3c:22:fb:12:34:56, "), "box-…, ");
+        assert_eq!(masquer("caméra 10.0.0.5:8080 ouverte"), "caméra …:8080 ouverte");
+        assert_eq!(masquer("deadbeef.192.168.1.2"), "deadbeef.…");
     }
 
     #[test]
