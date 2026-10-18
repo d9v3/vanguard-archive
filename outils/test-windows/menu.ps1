@@ -30,9 +30,17 @@ function Version-Deja-Testee {
 # Un test à la fois : un autre (manuel ou automatique) peut tourner. Au-delà de 3 h, le témoin est périmé.
 # -Force : le partage de la VM (Samba) marque caché un fichier qui commence par un point ; sans -Force, Get-Item ne
 # le trouve pas et Remove-Item ne l'enlève pas, et le témoin restait pour toujours.
+# Deuxième ligne du témoin : le PowerShell du menu qui a lancé le test. Fermé en route (fenêtre fermée, VM éteinte), il
+# n'a pas pu retirer le témoin, qui bloquerait le menu et le dépôt pendant 3 h : il est retiré ici.
 function Test-En-Cours {
     $temoin = Get-Item -LiteralPath $enCours -Force -ErrorAction SilentlyContinue
-    $temoin -and (((Get-Date) - $temoin.LastWriteTime).TotalHours -lt 3)
+    if (-not $temoin -or ((Get-Date) - $temoin.LastWriteTime).TotalHours -ge 3) { return $false }
+    $lanceur = Get-Content -LiteralPath $enCours -Force -ErrorAction SilentlyContinue | Select-Object -Skip 1 -First 1
+    if ($lanceur -match '^\d+$' -and -not (Get-Process -Id ([int]$lanceur) -ErrorAction SilentlyContinue)) {
+        Remove-Item -LiteralPath $enCours -Force -ErrorAction SilentlyContinue
+        return $false
+    }
+    return $true
 }
 
 # Dans un PowerShell à part : le test garde ses variables pour lui et ne peut pas fermer ce menu. Start-Process lui
@@ -44,7 +52,7 @@ function Lancer-Test([string[]]$options) {
         return $false
     }
     $version = Version-Deposee
-    Set-Content -Path $enCours -Value (Get-Date -Format o)
+    Set-Content -LiteralPath $enCours -Value @((Get-Date -Format o), $PID) -Force
     try {
         $arguments = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$(Join-Path $programme 'test.ps1')`"") + $options
         Start-Process powershell.exe -ArgumentList $arguments -NoNewWindow -Wait

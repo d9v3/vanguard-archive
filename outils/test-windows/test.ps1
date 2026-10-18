@@ -120,8 +120,29 @@ function Constat($texte) {
 }
 
 # Référence : chaque valeur lue directement, pour comparer avec les conclusions de Gardien.
-function Ref($nom, [scriptblock]$bloc) {
-    try { $v = (& $bloc | Out-String).Trim() } catch { $v = "ERREUR : $($_.Exception.Message)" }
+# Dans un espace d'exécution à part, avec un délai : une commande de Windows bloquée (Get-ScheduledTask, CIM…) ne
+# fige plus toute la passe. Bloquée, elle est laissée de côté (l'arrêter pourrait bloquer aussi) et finit avec la passe.
+function Ref($nom, [scriptblock]$bloc, [int]$delai = 30) {
+    $ps = [powershell]::Create()
+    try {
+        # Les variables du test dont un bloc a besoin.
+        foreach ($n in @('tache')) {
+            $valeur = Get-Variable -Name $n -ValueOnly -ErrorAction SilentlyContinue
+            if ($null -ne $valeur) { $ps.Runspace.SessionStateProxy.SetVariable($n, $valeur) }
+        }
+        [void]$ps.AddScript($bloc.ToString()).AddCommand('Out-String')
+        $attente = $ps.BeginInvoke()
+        if ($attente.AsyncWaitHandle.WaitOne($delai * 1000)) {
+            $v = ($ps.EndInvoke($attente) | Out-String).Trim()
+            if (-not $v -and $ps.Streams.Error.Count) { $v = "ERREUR : $($ps.Streams.Error[0])" }
+            $ps.Dispose()
+        } else { $v = "DÉLAI DÉPASSÉ ($delai s) : commande bloquée, laissée de côté" }
+    } catch {
+        # L'erreur du bloc arrive enveloppée par EndInvoke : son message d'origine est le plus lisible.
+        $e = $_.Exception
+        while ($e.InnerException) { $e = $e.InnerException }
+        $v = "ERREUR : $($e.Message)"
+    }
     Add-Content -Path (Join-Path $res 'reference.txt') -Value "### $nom`r`n$v`r`n" -Encoding UTF8
 }
 
