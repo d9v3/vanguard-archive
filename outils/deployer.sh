@@ -174,7 +174,12 @@ envoyer_journal
 # déploiement, le programme et les scripts de test y sont remplacés par les derniers ; les résultats restent. Dans la
 # VM, TESTER-GARDIEN.bat ouvre le menu des tests (son choix 6 teste seul chaque nouvelle version, en arrière-plan).
 VM="$HOME/Windows/GARDIEN-TEST"
-if [[ -d $HOME/Windows && -f $WINDOWS ]]; then
+# Un test qui tourne dans la VM garde son programme : le remplacer en pleine passe mélangerait deux versions. Le témoin
+# est celui du menu des tests, périmé au bout de 3 h comme là-bas.
+EN_COURS="$VM/resultats/.test-en-cours.txt"
+if [[ -n $(find "$EN_COURS" -mmin -180 2>/dev/null) ]]; then
+  echo "VM Windows : un test y tourne (depuis $(date -r "$EN_COURS" +%H:%M)) : rien n'y est déposé cette fois."
+elif [[ -d $HOME/Windows && -f $WINDOWS ]]; then
   # Dossier de l'ancien nom (SENTINEL-TEST, jusqu'à 0.50) : renommé, résultats compris ; le menu des tests y remplace
   # sa tâche automatique.
   [[ -d $HOME/Windows/SENTINEL-TEST && ! -e $VM ]] && mv "$HOME/Windows/SENTINEL-TEST" "$VM"
