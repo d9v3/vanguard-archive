@@ -96,7 +96,8 @@ pub(super) fn groupes_privilegies() -> Option<Constat> {
     let groupes = sortie("id", &["-nG"])?;
     let risques: Vec<&str> = groupes
         .split_whitespace()
-        .filter(|g| matches!(*g, "docker" | "lxd" | "incus-admin"))
+        // « disk » : lecture et écriture directes des disques, donc de /etc/shadow et de tout le système.
+        .filter(|g| matches!(*g, "docker" | "lxd" | "incus-admin" | "disk"))
         .collect();
     Some(if risques.is_empty() {
         ok(

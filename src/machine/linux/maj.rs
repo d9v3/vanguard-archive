@@ -265,17 +265,7 @@ pub(super) fn mises_a_jour() -> Constat {
         };
     }
     let n = liste.len();
-    let sensibles = liste
-        .iter()
-        .filter(|l| {
-            let nom = l.trim_start_matches("v | ").to_ascii_lowercase();
-            [
-                "linux", "openssl", "libssl", "openssh", "glibc", "libc6", "sudo", "firefox", "chromium", "nvidia",
-            ]
-            .iter()
-            .any(|p| nom.starts_with(p))
-        })
-        .count();
+    let sensibles = liste.iter().filter(|l| paquet_sensible(gestion, l)).count();
     let niveau = if n > 50 || sensibles > 0 {
         Niveau::Eleve
     } else {
@@ -298,6 +288,23 @@ pub(super) fn mises_a_jour() -> Constat {
         tr!("Mettre le système à jour", "Update the system"),
         &[gestion.mise_a_jour()],
     )
+}
+
+/// Une ligne de la liste des mises à jour touche-t-elle un paquet sensible (noyau, chiffrement, navigateur…) ?
+/// zypper écrit un tableau « v | dépôt | nom | … » : le nom est dans la 3e colonne. Le noyau s'appelle « linux »
+/// sur Arch et Debian, « kernel » sur Fedora et openSUSE.
+pub(super) fn paquet_sensible(gestion: Paquets, ligne: &str) -> bool {
+    let nom = match gestion {
+        Paquets::Zypper => ligne.split('|').nth(2).unwrap_or(ligne),
+        _ => ligne,
+    }
+    .trim()
+    .to_ascii_lowercase();
+    [
+        "linux", "kernel", "openssl", "libssl", "openssh", "glibc", "libc6", "sudo", "firefox", "chromium", "nvidia",
+    ]
+    .iter()
+    .any(|p| nom.starts_with(p))
 }
 
 /// Paquet installé touché par une faille publiée (CVE, avis de sécurité de la distribution).
@@ -862,6 +869,24 @@ pub(super) fn paquets_aur() -> Option<Constat> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn paquets_sensibles() {
+        assert!(paquet_sensible(Paquets::Pacman, "linux 7.2.5.arch1-1 -> 7.2.6.arch1-1"));
+        assert!(paquet_sensible(Paquets::Dnf, "kernel.x86_64 6.11.4-301.fc41 updates"));
+        assert!(paquet_sensible(
+            Paquets::Zypper,
+            "v | Main Update Repository | kernel-default | 6.11.1-1.1 | 6.11.2-1.1 | x86_64"
+        ));
+        assert!(!paquet_sensible(
+            Paquets::Zypper,
+            "v | Main Update Repository | vim | 9.1.0-1.1 | 9.1.1-1.1 | x86_64"
+        ));
+        assert!(!paquet_sensible(
+            Paquets::Apt,
+            "vim/noble-updates 2:9.1 amd64 [upgradable from: 2:9.0]"
+        ));
+    }
 
     #[test]
     fn modules_dkms_par_noyau() {

@@ -88,7 +88,7 @@ enum Commande {
         #[arg(long)]
         json: bool,
     },
-    /// Recherche de malwares : ClamAV (Linux) ou Microsoft Defender (Windows).
+    /// Recherche de malwares : ClamAV (Linux, macOS) ou Microsoft Defender (Windows).
     Antivirus {
         /// Tout le dossier personnel au lieu des endroits à risque.
         #[arg(long)]
@@ -108,8 +108,8 @@ enum Commande {
     /// Réparations courantes : réseau, navigation détournée, pare-feu, antivirus, fichiers système, disque, place, mises à jour, heure.
     #[command(visible_alias = "repair")]
     Reparer,
-    /// Gaming : composants pour les jeux (Windows : Visual C++, DirectX… ; Linux : Steam, Vulkan, GameMode, Wine…)
-    /// et réglages du système.
+    /// Gaming : composants pour les jeux (Windows : Visual C++, DirectX… ; Linux : Steam, Vulkan, GameMode, Wine… ;
+    /// macOS : Rosetta, Steam, Epic…) et réglages du système.
     Gaming,
     /// Diagnostic de l'ordinateur : matériel, système et problèmes récents (plantages, erreurs). Lecture seule.
     #[command(visible_alias = "diag")]
@@ -872,7 +872,8 @@ fn ligne_de_commande() -> clap::Command {
     if !langue::anglais() {
         return c;
     }
-    let mut c = c.about("Security check: this machine + local network, with fixes. No argument: menu.");
+    let mut c = c
+        .about("Secures and optimizes your machine and your local network: check, fixes, settings. No argument: menu.");
     let aides: &[(&str, &str)] = &[
         ("complet", "Full check: this machine, then the network"),
         (
@@ -886,7 +887,7 @@ fn ligne_de_commande() -> clap::Command {
         ),
         (
             "antivirus",
-            "Malware scan: ClamAV (Linux) or Microsoft Defender (Windows)",
+            "Malware scan: ClamAV (Linux, macOS) or Microsoft Defender (Windows)",
         ),
         (
             "surveillance",
@@ -946,7 +947,7 @@ fn ligne_de_commande() -> clap::Command {
         ),
         (
             "gaming",
-            "Gaming: components for games (Windows: Visual C++, DirectX…; Linux: Steam, Vulkan, GameMode, Wine…) and system settings",
+            "Gaming: components for games (Windows: Visual C++, DirectX…; Linux: Steam, Vulkan, GameMode, Wine…; macOS: Rosetta, Steam, Epic…) and system settings",
         ),
     ];
     for &(nom, aide) in aides {

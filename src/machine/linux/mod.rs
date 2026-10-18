@@ -417,9 +417,11 @@ fn pare_feu() -> Constat {
 /// que depuis cette machine.
 fn adresses_exposees() -> std::collections::HashSet<String> {
     let virtuelle = |nom: &str| {
-        ["lo", "docker", "br-", "virbr", "veth", "podman", "lxc", "vnet"]
-            .iter()
-            .any(|p| nom.starts_with(p))
+        [
+            "lo", "docker", "br-", "virbr", "veth", "podman", "lxc", "lxdbr", "incusbr", "waydroid", "vnet",
+        ]
+        .iter()
+        .any(|p| nom.starts_with(p))
     };
     if_addrs::get_if_addrs()
         .into_iter()
@@ -582,6 +584,49 @@ fn enable_streaming(vdf: &str) -> Option<bool> {
     })
 }
 
+/// Vérifie puis recharge sshd. « try-reload-or-restart » : sur Ubuntu, ssh.socket ne démarre sshd qu'à la première
+/// connexion, et « reload » d'un service arrêté échouait alors que la configuration était écrite.
+const RECHARGER_SSHD: &str = "sudo sshd -t && sudo systemctl try-reload-or-restart sshd";
+
+/// La partie d'un fichier de configuration de sshd qui vaut pour toutes les connexions : un bloc « Match » ne
+/// s'applique qu'à certaines (un utilisateur, une adresse) et va jusqu'à la fin du fichier.
+fn partie_globale_sshd(texte: &str) -> String {
+    texte
+        .lines()
+        .take_while(|l| {
+            !l.split_whitespace()
+                .next()
+                .is_some_and(|m| m.eq_ignore_ascii_case("match"))
+        })
+        .fold(String::new(), |mut t, l| {
+            t.push_str(l);
+            t.push('\n');
+            t
+        })
+}
+
+/// Première valeur d'un réglage de sshd, en minuscules. Le nom et la valeur se séparent par des espaces ou par un
+/// « = » (« PasswordAuthentication=no » est valable).
+fn valeur_sshd(conf: &str, cle: &str) -> Option<String> {
+    conf.lines()
+        .map(str::trim)
+        .filter(|l| !l.starts_with('#'))
+        .find_map(|l| {
+            let (k, v) = l.split_once(|c: char| c.is_whitespace() || c == '=')?;
+            let v = v.trim().trim_start_matches('=').trim().trim_matches('"');
+            k.eq_ignore_ascii_case(cle).then(|| v.to_ascii_lowercase())
+        })
+}
+
+/// sshd accepte-t-il un mot de passe ? Par « PasswordAuthentication » (oui par défaut), ou, avec PAM, par le mode
+/// « clavier interactif » qui demande le même mot de passe (oui par défaut aussi).
+fn mots_de_passe_sshd(conf: &str) -> bool {
+    let valeur = |cle: &str| valeur_sshd(conf, cle);
+    let clavier = valeur("KbdInteractiveAuthentication").or_else(|| valeur("ChallengeResponseAuthentication"));
+    valeur("PasswordAuthentication").as_deref() != Some("no")
+        || (valeur("UsePAM").as_deref() == Some("yes") && clavier.as_deref() != Some("no"))
+}
+
 fn ssh_serveur() -> Constat {
     if !systemd() {
         return impossible("SSH", tr!("systemd absent", "systemd missing"));
@@ -594,25 +639,34 @@ fn ssh_serveur() -> Constat {
     {
         return ok("SSH", tr!("Serveur SSH désactivé.", "SSH server off."));
     }
-    let mut conf = String::new();
     // sshd garde la première valeur trouvée ; sur Arch, les fichiers .d sont inclus avant le reste.
-    if let Ok(dir) = std::fs::read_dir("/etc/ssh/sshd_config.d") {
-        let mut fichiers: Vec<_> = dir.flatten().map(|f| f.path()).collect();
-        fichiers.sort();
-        for f in fichiers {
-            conf += &std::fs::read_to_string(f).unwrap_or_default();
+    let mut fichiers: Vec<std::path::PathBuf> = std::fs::read_dir("/etc/ssh/sshd_config.d")
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|f| f.path())
+        .collect();
+    fichiers.sort();
+    fichiers.push("/etc/ssh/sshd_config".into());
+    let mut conf = String::new();
+    for f in &fichiers {
+        match std::fs::read_to_string(f) {
+            Ok(t) => conf += &partie_globale_sshd(&t),
+            // Fedora et RHEL réservent la configuration à root : un fichier vide passerait pour les valeurs par
+            // défaut (mot de passe permis), une fausse alerte.
+            Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
+                return impossible(
+                    "SSH",
+                    tr!(
+                        "configuration de sshd lisible seulement par root",
+                        "sshd configuration readable by root only"
+                    ),
+                );
+            }
+            Err(_) => {}
         }
     }
-    conf += &std::fs::read_to_string("/etc/ssh/sshd_config").unwrap_or_default();
-    let valeur = |cle: &str| {
-        conf.lines()
-            .map(str::trim)
-            .filter(|l| !l.starts_with('#'))
-            .find_map(|l| {
-                let (k, v) = l.split_once(char::is_whitespace)?;
-                k.eq_ignore_ascii_case(cle).then(|| v.trim().to_ascii_lowercase())
-            })
-    };
+    let valeur = |cle: &str| valeur_sshd(&conf, cle);
     if valeur("PermitRootLogin").as_deref() == Some("yes") {
         return alerte(
             "SSH",
@@ -623,11 +677,11 @@ fn ssh_serveur() -> Constat {
             tr!("Interdire la connexion SSH en root", "Forbid root login over SSH"),
             &[
                 &format!("echo 'PermitRootLogin no' | sudo tee -a {SSHD_GARDIEN} >/dev/null"),
-                "sudo sshd -t && sudo systemctl reload sshd",
+                RECHARGER_SSHD,
             ],
         );
     }
-    if valeur("PasswordAuthentication").as_deref() != Some("no") {
+    if mots_de_passe_sshd(&conf) {
         let a_des_cles = std::fs::metadata(format!("{}/.ssh/authorized_keys", home())).is_ok_and(|m| m.len() > 0);
         let c = alerte(
             "SSH",
@@ -642,7 +696,7 @@ fn ssh_serveur() -> Constat {
                 tr!("N'accepter que les clés SSH (tu as déjà des clés autorisées)", "Accept SSH keys only (you already have authorized keys)"),
                 &[
                     &format!("printf 'PasswordAuthentication no\\nKbdInteractiveAuthentication no\\n' | sudo tee -a {SSHD_GARDIEN} >/dev/null"),
-                    "sudo sshd -t && sudo systemctl reload sshd",
+                    RECHARGER_SSHD,
                 ],
             )
         } else {
@@ -1199,6 +1253,32 @@ pub fn auditer() -> Audit {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn configuration_de_sshd() {
+        let conf = |t: &str| partie_globale_sshd(t);
+        // Valeur explicite, avec « = » ou des guillemets.
+        assert!(!mots_de_passe_sshd(&conf("PasswordAuthentication no\nUsePAM no\n")));
+        assert!(!mots_de_passe_sshd(&conf("PasswordAuthentication=no\n")));
+        assert_eq!(
+            valeur_sshd("PermitRootLogin \"yes\"\n", "permitrootlogin").as_deref(),
+            Some("yes")
+        );
+        // Rien d'écrit : le mot de passe est permis par défaut.
+        assert!(mots_de_passe_sshd(&conf("# PasswordAuthentication no\n")));
+        // Avec PAM, le clavier interactif redemande le mot de passe s'il n'est pas coupé aussi.
+        assert!(mots_de_passe_sshd(&conf("PasswordAuthentication no\nUsePAM yes\n")));
+        assert!(!mots_de_passe_sshd(&conf(
+            "PasswordAuthentication no\nKbdInteractiveAuthentication no\nUsePAM yes\n"
+        )));
+        assert!(!mots_de_passe_sshd(&conf(
+            "PasswordAuthentication no\nChallengeResponseAuthentication no\nUsePAM yes\n"
+        )));
+        // Un bloc Match ne vaut que pour certaines connexions : il ne compte pas comme réglage général.
+        let avec_match = "PasswordAuthentication no\nMatch User invite\n  PermitRootLogin yes\n";
+        assert_eq!(valeur_sshd(&conf(avec_match), "PermitRootLogin"), None);
+        assert!(!mots_de_passe_sshd(&conf(avec_match)));
+    }
 
     #[test]
     fn service_d_une_ligne_ss() {
