@@ -357,11 +357,101 @@ pub fn recommandes() {
     confirmer_et_executer(&a_faire, &[]);
 }
 
+/// Ce que dit un réglage de DNS : les serveurs imposés, ou ceux de la box. `avec_box` : ceux de la box servent encore
+/// après les serveurs listés.
+fn texte_dns(serveurs: &[&str], avec_box: bool) -> String {
+    match (serveurs.is_empty(), avec_box) {
+        (true, _) => tr!("DNS automatique : celui de la box", "automatic DNS: the router's").to_string(),
+        (false, false) => trf!("DNS : {}", "DNS: {}", serveurs.join(", ")),
+        (false, true) => trf!(
+            "DNS : {}, puis celui de la box",
+            "DNS: {}, then the router's",
+            serveurs.join(", ")
+        ),
+    }
+}
+
+/// Le réglage du DNS le plus rapide (outil Réseau et Internet › DNS) : construit à la demande, hors des catégories,
+/// noté et annulé comme les autres.
+const DNS: &str = "dns_rapide";
+
+fn reglage_dns(c: systeme::Changement) -> Reglage {
+    Reglage {
+        id: DNS,
+        // Hors des menus de catégorie (il n'est pas au catalogue) : la catégorie ne sert pas.
+        categorie: Categorie::Confort,
+        titre: tr!("DNS le plus rapide", "Fastest DNS"),
+        effet: tr!(
+            "Les noms de sites sont traduits par le DNS le plus rapide mesuré ici.",
+            "Site names are translated by the fastest DNS measured here."
+        ),
+        prudence: None,
+        recommande: false,
+        changements: vec![c],
+    }
+}
+
+/// Les réglages hors catalogue que Gardien a appliqués et pas encore annulés : ceux dont une note garde la valeur
+/// d'avant.
+fn hors_catalogue(h: &Historique) -> Vec<Reglage> {
+    h.reglages
+        .get(DNS)
+        .and_then(|a| a.valeurs.first().cloned().flatten())
+        .and_then(|v| systeme::Changement::dns_note(&v))
+        .map(reglage_dns)
+        .into_iter()
+        .collect()
+}
+
+/// Le DNS changé par Gardien, s'il l'a fait : (date du changement, réseau concerné : connexion, carte ou service).
+pub fn dns_change() -> Option<(String, String)> {
+    let h = charger();
+    let a = h.reglages.get(DNS)?;
+    let (reseau, _) = a.valeurs.first()?.as_deref()?.split_once('\n')?;
+    Some((a.date.clone(), reseau.to_string()))
+}
+
+/// Règle le DNS de la connexion principale sur ces serveurs, après accord, comme un réglage : la valeur d'avant est
+/// notée, et « Tout remettre comme avant » la remet. Erreur : pourquoi ce n'est pas possible ici.
+pub fn appliquer_dns(serveurs4: &[&str], serveurs6: &[&str]) -> Result<(), String> {
+    let c = systeme::dns_principal(serveurs4, serveurs6)?;
+    // Une seule valeur d'avant se garde : celle d'un autre réseau doit d'abord revenir.
+    if let Some((_, reseau)) = dns_change()
+        && Some(reseau.as_str()) != c.identite_dns()
+    {
+        return Err(tr!(
+            "Gardien a déjà changé le DNS d'une autre connexion : remets-le d'abord (Optimiser › Tout remettre comme avant).",
+            "Gardien already changed the DNS of another connection: put it back first (Optimize › Put everything back)."
+        )
+        .to_string());
+    }
+    let r = reglage_dns(c);
+    if etat(&r) == Etat::Fait {
+        trp!(
+            "  {VERT}✔{RESET} Ce DNS est déjà en place.",
+            "  {VERT}✔{RESET} This DNS is already in place."
+        );
+        return Ok(());
+    }
+    confirmer_et_executer(&[&r], &[]);
+    Ok(())
+}
+
+/// Remet le DNS d'avant le changement de Gardien, après accord.
+pub fn remettre_dns() {
+    let h = charger();
+    let reglages = hors_catalogue(&h);
+    if let Some(r) = reglages.first() {
+        confirmer_et_executer(&[], &[r]);
+    }
+}
+
 /// Annule tout ce que Gardien a changé : les valeurs notées avant chaque changement reviennent.
 pub fn tout_annuler() {
     titre(tr!("Tout remettre comme avant", "Put everything back"));
     let h = charger();
-    let reglages = systeme::catalogue();
+    let mut reglages = systeme::catalogue();
+    reglages.extend(hors_catalogue(&h));
     let a_annuler: Vec<&Reglage> = reglages.iter().filter(|r| h.reglages.contains_key(r.id)).collect();
     if a_annuler.is_empty() {
         trp!(

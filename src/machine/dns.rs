@@ -284,6 +284,29 @@ fn serveurs() -> Option<Serveurs> {
     })
 }
 
+/// Ce que l'outil « DNS le plus rapide » doit savoir des serveurs DNS de cette machine.
+pub(crate) struct Actuel {
+    /// (adresse, réglée à la main).
+    pub serveurs: Vec<(IpAddr, bool)>,
+    /// Requêtes chiffrées, quand on peut le savoir.
+    pub chiffre: Option<bool>,
+    /// Programme qui résout les noms sur cet ordinateur (« NextDNS »…).
+    pub resolveur_local: Option<&'static str>,
+}
+
+pub(crate) fn actuel() -> Option<Actuel> {
+    serveurs().map(|s| Actuel {
+        serveurs: s.liste,
+        chiffre: s.chiffre,
+        resolveur_local: s.resolveur_local,
+    })
+}
+
+/// Le service public d'un serveur DNS, reconnu à son adresse (« Cloudflare », « NextDNS »…).
+pub(crate) fn service_public(ip: IpAddr) -> Option<&'static str> {
+    fournisseur(ip)
+}
+
 fn decrire(ip: IpAddr, s: &Serveurs) -> String {
     match origine(ip) {
         Origine::Local => match s.resolveur_local {

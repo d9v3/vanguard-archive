@@ -6,10 +6,13 @@
 mod alertes;
 mod antivirus;
 mod apprentissage;
+mod cameras;
+mod canaux;
 mod commande;
 mod connexion;
 mod corriger;
 mod diagnostic;
+mod dns_rapide;
 mod donnees;
 mod entretien;
 mod fuites;
@@ -25,6 +28,7 @@ mod listes_noires;
 mod logiciels;
 mod machine;
 mod maj;
+mod nat;
 mod nettoyer;
 mod optimiser;
 mod pieges;
@@ -167,6 +171,18 @@ enum Commande {
     /// appareil est sans doute infecté. Après accord : les listes voient l'adresse.
     #[command(name = "listes-noires", visible_alias = "blocklists")]
     ListesNoires,
+    /// Wi-Fi encombré : les réseaux voisins par canal, et le canal le plus libre à régler sur la box. Lecture seule.
+    #[command(visible_alias = "channels")]
+    Canaux,
+    /// Type de NAT pour le jeu (ouvert, modéré ou strict), d'après deux serveurs publics (STUN). Lecture seule.
+    Nat,
+    /// Caméras cachées : sur le réseau d'une location ou de quelqu'un, les appareils qui ressemblent à des caméras.
+    /// Lecture seule.
+    Cameras,
+    /// DNS le plus rapide : mesure le DNS actuel et des DNS publics, puis propose le plus rapide, annulable. Un DNS
+    /// qui protège (NextDNS, chiffré, filtrant) est gardé.
+    #[command(name = "dns-rapide", visible_alias = "fast-dns")]
+    DnsRapide,
     /// Intégrité des fichiers critiques : référence d'empreintes BLAKE3, puis ce qui a changé depuis.
     #[command(visible_alias = "integrity")]
     Integrite {
@@ -575,6 +591,9 @@ enum Action {
     Surveillance,
     Connexion,
     ListesNoires,
+    WifiCanaux,
+    Nat,
+    Cameras,
     Alertes,
     AntivirusRapide,
     AntivirusComplet,
@@ -595,6 +614,7 @@ enum Action {
     #[cfg(not(target_os = "macos"))]
     OptimiserPerformance,
     OptimiserConfort,
+    DnsRapide,
     OptimiserAnnuler,
     Sauvegarder,
     Guide,
@@ -618,6 +638,9 @@ impl Action {
         Action::Surveillance,
         Action::Connexion,
         Action::ListesNoires,
+        Action::WifiCanaux,
+        Action::Nat,
+        Action::Cameras,
         Action::Alertes,
         Action::AntivirusRapide,
         Action::AntivirusComplet,
@@ -638,6 +661,7 @@ impl Action {
         #[cfg(not(target_os = "macos"))]
         Action::OptimiserPerformance,
         Action::OptimiserConfort,
+        Action::DnsRapide,
         Action::OptimiserAnnuler,
         Action::Sauvegarder,
         Action::Guide,
@@ -700,6 +724,14 @@ impl Action {
             Action::Surveillance => "monitor surveiller notification",
             Action::Connexion => "ping latence latency débit speed jitter gigue bufferbloat jeu",
             Action::ListesNoires => "spamhaus botnet liste noire blocklist blacklist dnsbl",
+            Action::WifiCanaux => {
+                "wifi canal canaux channel encombré crowded interférences interference voisins neighbors signal box router"
+            }
+            Action::Nat => {
+                "nat stun upnp console xbox playstation jeu game multijoueur multiplayer redirection port forwarding \
+                 ouvert open modéré moderate strict"
+            }
+            Action::Cameras => "caméra camera espion spy cachée hidden location rental airbnb rtsp onvif",
             Action::Alertes => "ntfy téléphone phone mobile portable notification push",
             Action::AntivirusRapide | Action::AntivirusComplet => "virus malware clamav defender",
             Action::AntivirusDossier => "virus usb clé autorun",
@@ -723,6 +755,7 @@ impl Action {
             #[cfg(not(target_os = "macos"))]
             Action::OptimiserPerformance => "ssd démarrage startup journal",
             Action::OptimiserConfort => "extensions fichiers cachés hidden files",
+            Action::DnsRapide => "dns rapide fast résolveur resolver cloudflare quad9 google adguard vitesse speed",
             Action::OptimiserAnnuler => "annuler undo restaurer",
             Action::Sauvegarder => "backup restore sauvegarde base",
             Action::Guide => "commandes commands terminal aide help",
@@ -800,6 +833,18 @@ impl Action {
             Action::ListesNoires => (
                 tr!("Adresse sur liste noire ?", "Address on blocklists?"),
                 tr!("si oui, un appareil est infecté", "if so, a device is infected"),
+            ),
+            Action::WifiCanaux => (
+                tr!("Wi-Fi encombré ?", "Crowded Wi-Fi?"),
+                tr!("canaux voisins, le plus libre", "nearby channels, the freest"),
+            ),
+            Action::Nat => (
+                tr!("Type de NAT pour le jeu", "NAT type for gaming"),
+                tr!("ouvert, modéré ou strict", "open, moderate or strict"),
+            ),
+            Action::Cameras => (
+                tr!("Caméras cachées ?", "Hidden cameras?"),
+                tr!("location, chez quelqu'un", "rental, someone else's place"),
             ),
             Action::Alertes => (
                 tr!("Alertes sur le téléphone", "Alerts on your phone"),
@@ -906,6 +951,10 @@ impl Action {
                     tr!("annonces d'Ubuntu", "Ubuntu announcements")
                 },
             ),
+            Action::DnsRapide => (
+                tr!("DNS le plus rapide", "Fastest DNS"),
+                tr!("mesuré ici, annulable", "measured here, undoable"),
+            ),
             Action::OptimiserAnnuler => (
                 tr!("Tout remettre comme avant", "Put everything back"),
                 tr!("annule ce que Gardien a changé", "undo what Gardien changed"),
@@ -987,6 +1036,9 @@ impl Groupe {
                 Action::Surveillance,
                 Action::Connexion,
                 Action::ListesNoires,
+                Action::WifiCanaux,
+                Action::Nat,
+                Action::Cameras,
                 Action::Alertes,
             ],
             Groupe::Protection => &[
@@ -1010,6 +1062,7 @@ impl Groupe {
                 #[cfg(not(target_os = "macos"))]
                 Action::OptimiserPerformance,
                 Action::OptimiserConfort,
+                Action::DnsRapide,
                 Action::OptimiserAnnuler,
             ],
             Groupe::Donnees => &[Action::Sauvegarder],
@@ -1123,6 +1176,9 @@ async fn executer(s: &mut Session, action: Action) {
         Action::Surveillance => surveillance::activer(!surveillance::active()),
         Action::Connexion => connexion::tester().await,
         Action::ListesNoires => listes_noires::verifier(),
+        Action::WifiCanaux => canaux::analyser(),
+        Action::Nat => nat::tester(),
+        Action::Cameras => cameras::chercher_cameras().await,
         Action::Alertes => alertes::menu(),
         Action::AntivirusRapide => antivirus::analyser(antivirus::Portee::Rapide),
         Action::AntivirusComplet => antivirus::analyser(antivirus::Portee::Complete),
@@ -1149,6 +1205,7 @@ async fn executer(s: &mut Session, action: Action) {
         #[cfg(not(target_os = "macos"))]
         Action::OptimiserPerformance => optimiser::menu(optimiser::Categorie::Performance),
         Action::OptimiserConfort => optimiser::menu(optimiser::Categorie::Confort),
+        Action::DnsRapide => dns_rapide::mesurer_et_proposer(),
         Action::OptimiserAnnuler => optimiser::tout_annuler(),
         Action::Sauvegarder => donnees::menu(),
         Action::Guide => guide::menu(),
@@ -1226,6 +1283,22 @@ fn ligne_de_commande() -> clap::Command {
         (
             "yara",
             "YARA scan: 308 rules for malware families (ReversingLabs), alongside the antivirus. Without a folder: downloads, desktop, startup. Read-only",
+        ),
+        (
+            "canaux",
+            "Crowded Wi-Fi: nearby networks by channel, and the freest channel to set on the router. Read-only",
+        ),
+        (
+            "nat",
+            "NAT type for gaming (open, moderate or strict), from two public servers (STUN). Read-only",
+        ),
+        (
+            "cameras",
+            "Hidden cameras: on a rental's or someone's network, the devices that look like cameras. Read-only",
+        ),
+        (
+            "dns-rapide",
+            "Fastest DNS: measures the current DNS and public ones, then offers the fastest, undoable. A DNS that protects (NextDNS, encrypted, filtering) is kept",
         ),
         (
             "pieges",
@@ -1466,6 +1539,10 @@ async fn main() {
             (None, false) => antivirus::Portee::Rapide,
         }),
         Some(Commande::ListesNoires) => listes_noires::verifier(),
+        Some(Commande::Canaux) => canaux::analyser(),
+        Some(Commande::Nat) => nat::tester(),
+        Some(Commande::Cameras) => cameras::chercher_cameras().await,
+        Some(Commande::DnsRapide) => dns_rapide::mesurer_et_proposer(),
         Some(Commande::Appris) => apprentissage::menu(),
         Some(Commande::Integrite { accepter, temps_reel }) => {
             if temps_reel {

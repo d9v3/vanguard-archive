@@ -64,10 +64,38 @@ fn lire_upnpc(sortie: &str) -> Etat {
 
 #[cfg(unix)]
 pub fn etat() -> Etat {
+    etat_et_adresse().0
+}
+
+/// L'état de l'UPnP, et l'adresse que la box dit avoir sur Internet (« ExternalIPAddress = 203.0.113.7 » dans
+/// `upnpc -l`) : une adresse privée ou partagée (100.64.0.0/10) y trahit un double NAT ou le partage d'adresses du
+/// fournisseur (CGNAT).
+#[cfg(unix)]
+pub fn etat_et_adresse() -> (Etat, Option<std::net::Ipv4Addr>) {
     let Some(r) = crate::commande::lancer(std::process::Command::new("upnpc").arg("-l"), 20) else {
-        return Etat::OutilAbsent;
+        return (Etat::OutilAbsent, None);
     };
-    lire_upnpc(&format!("{}\n{}", r.sortie, r.erreurs))
+    let texte = format!("{}\n{}", r.sortie, r.erreurs);
+    (lire_upnpc(&texte), adresse_externe(&texte))
+}
+
+/// L'interface UPnP de Windows ne donne pas l'adresse de la box sur Internet.
+#[cfg(windows)]
+pub fn etat_et_adresse() -> (Etat, Option<std::net::Ipv4Addr>) {
+    (etat(), None)
+}
+
+#[cfg_attr(windows, allow(dead_code))]
+fn adresse_externe(texte: &str) -> Option<std::net::Ipv4Addr> {
+    texte.lines().find_map(|l| {
+        l.trim()
+            .strip_prefix("ExternalIPAddress")?
+            .trim_start()
+            .strip_prefix('=')?
+            .trim()
+            .parse()
+            .ok()
+    })
 }
 
 /// Interface UPnP de Windows (HNetCfg.NATUPnP) : vide quand la box n'a pas d'UPnP ou l'a coupé.
@@ -214,5 +242,13 @@ mod tests {
         );
         assert_eq!(l[0].description, "Xbox SRA");
         assert_eq!(niveau(&l[1]), info_port(80).niveau);
+    }
+
+    #[test]
+    fn adresse_de_la_box_sur_internet() {
+        let sortie = "Found valid IGD : http://10.0.0.1:5000/ctl\nLocal LAN ip address : 10.0.0.20\n\
+                      Connection Type : IP_Routed\nExternalIPAddress = 100.64.12.34\n";
+        assert_eq!(adresse_externe(sortie), Some(std::net::Ipv4Addr::new(100, 64, 12, 34)));
+        assert_eq!(adresse_externe("No IGD UPnP Device found on the network !\n"), None);
     }
 }

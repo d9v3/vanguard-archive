@@ -53,6 +53,75 @@ pub enum Changement {
     },
     /// Type de démarrage d'un service : 2 automatique, 3 manuel, 4 désactivé.
     Service { nom: &'static str, cible: u32, defaut: u32 },
+    /// Serveurs DNS d'une carte réseau (outil « DNS le plus rapide »), tels que Windows les écrit dans le registre.
+    /// Valeur : « {guid}\nipv4,…|ipv6,… », vide pour ceux de la box. `cible` : `None` quand le réglage n'est rebâti
+    /// que pour être annulé.
+    Dns { carte: String, cible: Option<String> },
+}
+
+/// Liste de serveurs normalisée : « 1.1.1.1,1.0.0.1 », quel que soit le séparateur écrit.
+fn liste_dns(t: &str) -> String {
+    t.split([',', ' ', ';'])
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+/// L'identifiant d'une carte réseau (« {xxxxxxxx-…} ») : il entre tel quel dans le registre et dans PowerShell.
+fn guid_valide(t: &str) -> bool {
+    t.len() == 38
+        && t.starts_with('{')
+        && t.ends_with('}')
+        && t[1..37].chars().all(|c| c.is_ascii_hexdigit() || c == '-')
+}
+
+/// Les serveurs d'une valeur de DNS, et ce qu'en dit l'écran.
+fn decrire_dns(v: Option<&str>) -> String {
+    let reste = v.and_then(|v| v.split_once('\n')).map_or("", |(_, r)| r);
+    let serveurs: Vec<&str> = reste.split(['|', ',']).filter(|s| !s.is_empty()).collect();
+    super::texte_dns(&serveurs, false)
+}
+
+/// Le DNS de la carte de la route par défaut, à régler sur ces serveurs ; ceux en IPv6 seulement si la carte s'en
+/// sert. Erreur : pourquoi il faut le faire à la main.
+pub fn dns_principal(v4: &[&str], v6: &[&str]) -> Result<Changement, String> {
+    let a_la_main = tr!(
+        "La carte réseau principale est illisible : le DNS se règle à la main (Paramètres > Réseau, ou dans la box).",
+        "The main network adapter is unreadable: set the DNS by hand (Settings > Network, or in the router)."
+    );
+    let sortie = crate::machine::windows::ps(
+        "$r = Get-NetRoute -DestinationPrefix '0.0.0.0/0' -ErrorAction SilentlyContinue | Sort-Object RouteMetric | \
+         Select-Object -First 1; if ($r) { $a = Get-NetAdapter -InterfaceIndex $r.ifIndex -ErrorAction SilentlyContinue; \
+         $v6 = (Get-NetAdapterBinding -Name $a.Name -ComponentID ms_tcpip6 -ErrorAction SilentlyContinue).Enabled; \
+         \"CARTE|$($a.InterfaceGuid)|$v6\" }",
+    )
+    .ok_or_else(|| a_la_main.to_string())?;
+    let (carte, ipv6) = sortie
+        .lines()
+        .find_map(|l| {
+            let (guid, v6) = l.trim().strip_prefix("CARTE|")?.split_once('|')?;
+            guid_valide(guid).then(|| (guid.to_string(), v6.eq_ignore_ascii_case("true")))
+        })
+        .ok_or_else(|| tr!("Pas de connexion à Internet.", "No Internet connection.").to_string())?;
+    let actuel = Changement::Dns {
+        carte: carte.clone(),
+        cible: None,
+    }
+    .lire()
+    .ok_or_else(|| a_la_main.to_string())?;
+    let v6_actuel = actuel
+        .split_once('\n')
+        .and_then(|(_, r)| r.split_once('|'))
+        .map_or("", |(_, v6)| v6);
+    let v6 = if ipv6 && !v6.is_empty() {
+        v6.join(",")
+    } else {
+        v6_actuel.to_string()
+    };
+    Ok(Changement::Dns {
+        carte,
+        cible: Some(format!("{}|{v6}", v4.join(","))),
+    })
 }
 
 fn lire_valeur(racine: Racine, chemin: &str, nom: &str) -> Valeur {
@@ -110,6 +179,23 @@ impl Changement {
                 "Start",
             )
             .map(|v| v.replace("dword:", "start:")),
+            Changement::Dns { carte, .. } => {
+                let serveurs = |pile: &str| {
+                    let cle = RegKey::predef(HKEY_LOCAL_MACHINE)
+                        .open_subkey_with_flags(
+                            format!(r"SYSTEM\CurrentControlSet\Services\{pile}\Parameters\Interfaces\{carte}"),
+                            KEY_READ,
+                        )
+                        .ok()?;
+                    Some(liste_dns(&cle.get_value::<String, _>("NameServer").unwrap_or_default()))
+                };
+                // Une carte sans IPv6 peut ne pas avoir de clé IPv6 : aucun serveur.
+                Some(format!(
+                    "{carte}\n{}|{}",
+                    serveurs("Tcpip")?,
+                    serveurs("Tcpip6").unwrap_or_default()
+                ))
+            }
         }
     }
 
@@ -120,6 +206,8 @@ impl Changement {
             Changement::Registre { cible, .. } => cible.coder(),
             Changement::Cle { .. } => "cle".to_string(),
             Changement::Service { cible, .. } => format!("start:{cible}"),
+            // Rebâti pour être annulé : une cible qu'aucune lecture ne donne.
+            Changement::Dns { carte, cible } => format!("{carte}\n{}", cible.as_deref().unwrap_or("?")),
         })
     }
 
@@ -128,7 +216,26 @@ impl Changement {
             Changement::Registre { defaut, .. } => defaut.map(Val::coder),
             Changement::Cle { .. } => None,
             Changement::Service { defaut, .. } => Some(format!("start:{defaut}")),
+            // Les DNS donnés par la box.
+            Changement::Dns { carte, .. } => Some(format!("{carte}\n|")),
         }
+    }
+
+    /// La carte réseau d'un réglage de DNS.
+    pub fn identite_dns(&self) -> Option<&str> {
+        match self {
+            Changement::Dns { carte, .. } => Some(carte),
+            _ => None,
+        }
+    }
+
+    /// Le réglage de DNS rebâti d'après sa valeur d'avant notée, pour l'annuler.
+    pub fn dns_note(avant: &str) -> Option<Changement> {
+        let (carte, _) = avant.split_once('\n')?;
+        guid_valide(carte).then(|| Changement::Dns {
+            carte: carte.to_string(),
+            cible: None,
+        })
     }
 
     /// Ce qui est écrit, en clair : « HKCU\…\HideFileExt = 0 », « … : retirée », « service DiagTrack : Disabled ».
@@ -156,6 +263,7 @@ impl Changement {
                     .unwrap_or("?");
                 trf!("service {nom} : {mode}", "service {nom}: {mode}")
             }
+            Changement::Dns { .. } => decrire_dns(v),
         }
     }
 
@@ -195,7 +303,7 @@ impl Changement {
                     .is_ok_and(|(k, _)| k.set_value("", &String::new()).is_ok()),
                 None => hkcu.delete_subkey_all(retirer).is_ok() || hkcu.open_subkey(retirer).is_err(),
             },
-            Changement::Service { .. } => false,
+            Changement::Service { .. } | Changement::Dns { .. } => false,
         }
     }
 
@@ -241,6 +349,34 @@ impl Changement {
                 ))
             }
             Changement::Cle { .. } => None,
+            Changement::Dns { carte, .. } => {
+                let (id, reste) = v?.split_once('\n')?;
+                if id != carte || !guid_valide(carte) {
+                    return None;
+                }
+                // Seules des adresses IP entrent dans la commande.
+                let serveurs: Vec<String> = reste
+                    .split(['|', ','])
+                    .filter(|s| !s.is_empty())
+                    .map(|s| s.parse::<std::net::IpAddr>().map(|ip| format!("'{ip}'")))
+                    .collect::<Result<_, _>>()
+                    .ok()?;
+                // Remis d'abord en automatique, puis réglé : la liste écrite est exactement celle voulue, en IPv4
+                // comme en IPv6.
+                let reglage = if serveurs.is_empty() {
+                    String::new()
+                } else {
+                    format!(
+                        "; Set-DnsClientServerAddress -InterfaceIndex $carteDns.ifIndex -ServerAddresses @({})",
+                        serveurs.join(",")
+                    )
+                };
+                Some(format!(
+                    "$carteDns = Get-NetAdapter -IncludeHidden | Where-Object {{ $_.InterfaceGuid -eq '{carte}' }} | \
+                     Select-Object -First 1; if (-not $carteDns) {{ throw 'network adapter not found' }}; \
+                     Set-DnsClientServerAddress -InterfaceIndex $carteDns.ifIndex -ResetServerAddresses{reglage}"
+                ))
+            }
         }
     }
 }
@@ -950,5 +1086,43 @@ mod tests {
                 "Set-Service -Name 'DiagTrack' -StartupType Automatic; Start-Service -Name 'DiagTrack' -ErrorAction SilentlyContinue"
             )
         );
+    }
+
+    #[test]
+    fn dns_d_une_carte_reseau() {
+        let carte = "{0A1B2C3D-4E5F-6071-8293-A4B5C6D7E8F9}";
+        let c = Changement::Dns {
+            carte: carte.into(),
+            cible: Some("1.1.1.1,1.0.0.1|2606:4700:4700::1111".into()),
+        };
+        let cible = c.cible().unwrap();
+        let commande = c.commande_admin(Some(&cible), None).unwrap();
+        assert!(
+            commande.contains("-ResetServerAddresses; Set-DnsClientServerAddress"),
+            "{commande}"
+        );
+        assert!(
+            commande.contains("@('1.1.1.1','1.0.0.1','2606:4700:4700::1111')"),
+            "{commande}"
+        );
+        let remise = c.commande_admin(c.defaut().as_deref(), None).unwrap();
+        assert!(remise.ends_with("-ResetServerAddresses"), "{remise}");
+        // Une autre carte, ou autre chose qu'une adresse IP : aucune commande.
+        assert_eq!(c.commande_admin(Some("{autre}\n|"), None), None);
+        assert_eq!(
+            c.commande_admin(Some(&format!("{carte}\n1.1.1.1'; Remove-Item x|")), None),
+            None
+        );
+        assert_eq!(
+            Changement::dns_note(&format!("{carte}\n|")).and_then(|r| r.identite_dns().map(str::to_string)),
+            Some(carte.to_string())
+        );
+        assert!(Changement::dns_note("pas une carte\n|").is_none());
+        assert!(!guid_valide("{0A1B2C3D-4E5F-6071-8293-A4B5C6D7E8F9'}"));
+        assert_eq!(
+            decrire_dns(Some(&cible)),
+            super::super::texte_dns(&["1.1.1.1", "1.0.0.1", "2606:4700:4700::1111"], false)
+        );
+        assert_eq!(liste_dns("1.1.1.1 1.0.0.1,"), "1.1.1.1,1.0.0.1");
     }
 }

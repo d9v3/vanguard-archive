@@ -37,6 +37,110 @@ pub enum Changement {
         cible: &'static str,
         defaut: &'static str,
     },
+    /// DNS d'une connexion de NetworkManager (outil « DNS le plus rapide »). Valeur : « uuid\ndns4|ignore4|dns6|ignore6 »,
+    /// les serveurs séparés par des virgules ; « ignore » (yes, no) dit si ceux de la box sont écartés. `cible` :
+    /// `None` quand le réglage n'est rebâti que pour être annulé.
+    Dns { connexion: String, cible: Option<String> },
+}
+
+/// Une propriété d'une connexion de NetworkManager, sans échappement (les « : » des adresses IPv6 restent).
+fn nm_valeur(connexion: &str, propriete: &str) -> Option<String> {
+    let r = crate::commande::lancer(
+        Command::new("nmcli").args(["-t", "-e", "no", "-g", propriete, "connection", "show", connexion]),
+        10,
+    )?;
+    (r.code == Some(0)).then(|| r.sortie.trim().to_string())
+}
+
+/// Liste de serveurs normalisée : « 1.1.1.1,1.0.0.1 », quel que soit le séparateur lu.
+fn liste_dns(t: &str) -> String {
+    t.split([',', ' ', ';'])
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+/// Un identifiant de connexion de NetworkManager (UUID) : il entre tel quel dans les commandes.
+fn uuid_valide(t: &str) -> bool {
+    t.len() == 36 && t.chars().all(|c| c.is_ascii_hexdigit() || c == '-')
+}
+
+/// Ce que dit une valeur de DNS : les serveurs listés, et si ceux de la box servent encore.
+fn decrire_dns(v: Option<&str>) -> String {
+    let reste = v.and_then(|v| v.split_once('\n')).map_or("", |(_, r)| r);
+    let c: Vec<&str> = reste.split('|').collect();
+    let serveurs: Vec<&str> = [0, 2]
+        .iter()
+        .filter_map(|&i| c.get(i))
+        .flat_map(|l| l.split(','))
+        .filter(|s| !s.is_empty())
+        .collect();
+    super::texte_dns(&serveurs, c.get(1) != Some(&"yes"))
+}
+
+/// Carte réseau de la route par défaut dans /proc/net/route (la plus petite métrique, via une passerelle).
+fn carte_par_defaut(table: &str) -> Option<String> {
+    table
+        .lines()
+        .skip(1)
+        .filter_map(|l| {
+            let c: Vec<&str> = l.split_whitespace().collect();
+            let drapeaux = u32::from_str_radix(c.get(3)?, 16).ok()?;
+            // Route vers tout (destination 0), par une passerelle, active (drapeaux UP et GATEWAY).
+            if c.get(1) != Some(&"00000000") || c.get(2) == Some(&"00000000") || drapeaux & 0x3 != 0x3 {
+                return None;
+            }
+            Some((c.get(6)?.parse::<u32>().ok()?, (*c.first()?).to_string()))
+        })
+        .min()
+        .map(|(_, carte)| carte)
+}
+
+/// Le DNS de la connexion principale (celle de la route par défaut), à régler sur ces serveurs ; ceux en IPv6
+/// seulement si la connexion se sert de l'IPv6. Erreur : pourquoi il faut le faire à la main.
+pub fn dns_principal(v4: &[&str], v6: &[&str]) -> Result<Changement, String> {
+    let a_la_main = tr!(
+        "NetworkManager ne gère pas cette connexion : le DNS se règle à la main (paramètres réseau, ou dans la box).",
+        "NetworkManager does not manage this connection: set the DNS by hand (network settings, or in the router)."
+    );
+    let carte = std::fs::read_to_string("/proc/net/route")
+        .ok()
+        .and_then(|t| carte_par_defaut(&t))
+        .ok_or_else(|| tr!("Pas de connexion à Internet.", "No Internet connection.").to_string())?;
+    let connexion = sortie(
+        "nmcli",
+        &["-t", "-e", "no", "-f", "UUID,DEVICE", "connection", "show", "--active"],
+    )
+    .unwrap_or_default()
+    .lines()
+    .find_map(|l| {
+        let (uuid, appareil) = l.split_once(':')?;
+        (appareil == carte && uuid_valide(uuid)).then(|| uuid.to_string())
+    })
+    .ok_or_else(|| a_la_main.to_string())?;
+    let actuel = Changement::Dns {
+        connexion: connexion.clone(),
+        cible: None,
+    }
+    .lire()
+    .ok_or_else(|| a_la_main.to_string())?;
+    let c: Vec<&str> = actuel.split_once('\n').map_or("", |(_, r)| r).split('|').collect();
+    let ipv6 = !matches!(
+        nm_valeur(&connexion, "ipv6.method").as_deref(),
+        None | Some("disabled" | "ignore")
+    );
+    let (dns6, ignore6) = if ipv6 && !v6.is_empty() {
+        (v6.join(","), "yes".to_string())
+    } else {
+        (
+            c.get(2).copied().unwrap_or_default().to_string(),
+            c.get(3).copied().unwrap_or("no").to_string(),
+        )
+    };
+    Ok(Changement::Dns {
+        connexion,
+        cible: Some(format!("{}|yes|{dns6}|{ignore6}", v4.join(","))),
+    })
 }
 
 fn sortie(cmd: &str, args: &[&str]) -> Option<String> {
@@ -72,21 +176,30 @@ impl Changement {
                     .and_then(|r| r.strip_prefix('='))
                     .map(|v| v.trim().to_string())
             }),
+            Changement::Dns { connexion, .. } => {
+                let champ = |p| nm_valeur(connexion, p);
+                Some(format!(
+                    "{connexion}\n{}|{}|{}|{}",
+                    liste_dns(&champ("ipv4.dns")?),
+                    champ("ipv4.ignore-auto-dns")?,
+                    liste_dns(&champ("ipv6.dns")?),
+                    champ("ipv6.ignore-auto-dns")?
+                ))
+            }
         }
     }
 
     // Même forme que `lire`, pour les comparer.
     #[allow(clippy::unnecessary_wraps)]
     pub fn cible(&self) -> Valeur {
-        Some(
-            match self {
-                Changement::Unite { cible, .. }
-                | Changement::Gnome { cible, .. }
-                | Changement::Option { cible, .. } => cible,
-                Changement::Fichier { .. } => "present",
+        Some(match self {
+            Changement::Unite { cible, .. } | Changement::Gnome { cible, .. } | Changement::Option { cible, .. } => {
+                (*cible).to_string()
             }
-            .to_string(),
-        )
+            Changement::Fichier { .. } => "present".to_string(),
+            // Rebâti pour être annulé : une cible qu'aucune lecture ne donne.
+            Changement::Dns { connexion, cible } => format!("{connexion}\n{}", cible.as_deref().unwrap_or("?")),
+        })
     }
 
     pub fn defaut(&self) -> Valeur {
@@ -95,7 +208,26 @@ impl Changement {
                 Some((*defaut).to_string())
             }
             Changement::Fichier { .. } => None,
+            // Les DNS donnés par la box, en IPv4 comme en IPv6.
+            Changement::Dns { connexion, .. } => Some(format!("{connexion}\n|no||no")),
         }
+    }
+
+    /// La connexion d'un réglage de DNS.
+    pub fn identite_dns(&self) -> Option<&str> {
+        match self {
+            Changement::Dns { connexion, .. } => Some(connexion),
+            _ => None,
+        }
+    }
+
+    /// Le réglage de DNS rebâti d'après sa valeur d'avant notée, pour l'annuler.
+    pub fn dns_note(avant: &str) -> Option<Changement> {
+        let (connexion, _) = avant.split_once('\n')?;
+        uuid_valide(connexion).then(|| Changement::Dns {
+            connexion: connexion.to_string(),
+            cible: None,
+        })
     }
 
     pub fn decrire(&self, v: Option<&str>) -> String {
@@ -113,6 +245,7 @@ impl Changement {
                 Some(v) => format!("{fichier} : {cle}={v}"),
                 None => trf!("{fichier} : ligne {cle} retirée", "{fichier}: line {cle} removed"),
             },
+            Changement::Dns { .. } => decrire_dns(v),
         }
     }
 
@@ -168,6 +301,27 @@ impl Changement {
                     // Absente avant le changement : la ligne est retirée.
                     None => format!("sudo sed -i '/^{cle}=/d' {f}"),
                 }
+            }
+            Changement::Dns { connexion, .. } => {
+                let (id, reste) = v?.split_once('\n')?;
+                if id != connexion || !uuid_valide(connexion) {
+                    return None;
+                }
+                let [dns4, ignore4, dns6, ignore6] = reste.split('|').collect::<Vec<_>>()[..] else {
+                    return None;
+                };
+                let oui_non = |t: &str| if t == "yes" { "yes" } else { "no" };
+                // Appliqué tout de suite à la carte active (reapply ne coupe pas la connexion) ; une connexion inactive
+                // le prendra à son prochain branchement.
+                format!(
+                    "sudo nmcli connection modify {connexion} ipv4.dns {} ipv4.ignore-auto-dns {} ipv6.dns {} \
+                     ipv6.ignore-auto-dns {} && carte=$(nmcli -t -f UUID,DEVICE connection show --active | grep -m1 \
+                     '^{connexion}:' | cut -d: -f2) && {{ [ -z \"$carte\" ] || sudo nmcli device reapply \"$carte\"; }}",
+                    shell(&dns4.replace(',', " ")),
+                    oui_non(ignore4),
+                    shell(&dns6.replace(',', " ")),
+                    oui_non(ignore6)
+                )
             }
         })
     }
@@ -443,6 +597,66 @@ mod tests {
             "{texte}"
         );
         let _ = std::fs::remove_file(&f);
+    }
+
+    #[test]
+    fn dns_de_networkmanager() {
+        let connexion = "6b9a0f0e-1c2d-4e5f-8a9b-0c1d2e3f4a5b";
+        let c = Changement::Dns {
+            connexion: connexion.into(),
+            cible: Some("1.1.1.1,1.0.0.1|yes|2606:4700:4700::1111|yes".into()),
+        };
+        let cible = c.cible().unwrap();
+        assert_eq!(
+            cible,
+            format!("{connexion}\n1.1.1.1,1.0.0.1|yes|2606:4700:4700::1111|yes")
+        );
+        let commande = c.commande(Some(&cible)).unwrap();
+        assert!(
+            commande.contains("ipv4.dns '1.1.1.1 1.0.0.1' ipv4.ignore-auto-dns yes"),
+            "{commande}"
+        );
+        let remise = c.commande(c.defaut().as_deref()).unwrap();
+        assert!(
+            remise.contains("ipv4.dns '' ipv4.ignore-auto-dns no ipv6.dns '' ipv6.ignore-auto-dns no"),
+            "{remise}"
+        );
+        for ligne in [&commande, &remise] {
+            assert!(
+                Command::new("bash")
+                    .args(["-n", "-c", ligne])
+                    .status()
+                    .unwrap()
+                    .success(),
+                "{ligne}"
+            );
+        }
+        // Une valeur d'une autre connexion, ou un identifiant qui n'en est pas un : aucune commande.
+        assert_eq!(c.commande(Some("autre\n|no||no")), None);
+        assert!(Changement::dns_note("pas un uuid\n|no||no").is_none());
+        let rebati = Changement::dns_note(&format!("{connexion}\n|no||no")).unwrap();
+        assert_eq!(rebati.identite_dns(), Some(connexion));
+        assert_ne!(
+            rebati.cible(),
+            rebati.defaut(),
+            "une cible inconnue ne doit jamais passer pour atteinte"
+        );
+        assert_eq!(
+            decrire_dns(Some(&cible)),
+            super::super::texte_dns(&["1.1.1.1", "1.0.0.1", "2606:4700:4700::1111"], false)
+        );
+        assert_eq!(decrire_dns(c.defaut().as_deref()), super::super::texte_dns(&[], true));
+        assert_eq!(liste_dns("1.1.1.1 1.0.0.1,"), "1.1.1.1,1.0.0.1");
+    }
+
+    #[test]
+    fn carte_de_la_route_par_defaut() {
+        let table = "Iface\tDestination\tGateway \tFlags\tRefCnt\tUse\tMetric\tMask\t\tMTU\tWindow\tIRTT\n\
+                     tun0\t00000000\t00000000\t0001\t0\t0\t50\t00000000\t0\t0\t0\n\
+                     wlan0\t00000000\t0101A8C0\t0003\t0\t0\t600\t00000000\t0\t0\t0\n\
+                     eth0\t00000000\t0100000A\t0003\t0\t0\t100\t00000000\t0\t0\t0\n";
+        assert_eq!(carte_par_defaut(table).as_deref(), Some("eth0"));
+        assert_eq!(carte_par_defaut("Iface\tDestination\n"), None);
     }
 
     #[test]
