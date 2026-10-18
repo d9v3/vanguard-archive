@@ -182,4 +182,4 @@ Gardien s'est appelé netscan (jusqu'à 0.10) puis Sentinel (jusqu'à 0.50). Il 
 ordinateur : dossier des données (renommé une fois), clé et partition du journal (témoins `sentinel.cle`,
 `sentinel-journal.cle`, étiquettes `SENTINEL` et `SENTINELLOG`), surveillance (minuterie, tâche planifiée, agent
 launchd), règles du pare-feu, fichiers posés dans `/etc`, sauvegardes, variables `SENTINEL_LANG` et
-`SENTINEL_HIBP_CLE`. Les commandes `sentinel` et `netscan` lancent `gardien`.
+`SENTINEL_HIBP_CLE`. Seule la commande `gardien` lance le programme : `sentinel` et `netscan` sont retirées.

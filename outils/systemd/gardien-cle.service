@@ -7,7 +7,7 @@ After=run-media-%u-GARDIEN.mount run-media-%u-SENTINEL.mount run-media-%u-NETSCA
 
 [Service]
 Type=oneshot
-ExecStart=%h/Projects/sentinel/outils/deployer.sh --branchement
+ExecStart=%h/Projects/gardien/outils/deployer.sh --branchement
 # Une compilation complète (Linux + Windows, optimisée) peut prendre quelques minutes.
 TimeoutStartSec=20min
 Nice=10

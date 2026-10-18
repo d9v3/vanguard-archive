@@ -154,9 +154,13 @@ elif git remote get-url origin >/dev/null 2>&1; then
   fi
 fi
 [[ -n $LOCAL ]] || duree "envoi GitHub" "$T_ENVOI"
-# Anciens noms (sentinel jusqu'à 0.50, netscan jusqu'à 0.10.0) : restent des commandes, qui lancent gardien.
-ln -sfn gardien "$HOME/.cargo/bin/sentinel"
-ln -sfn gardien "$HOME/.cargo/bin/netscan"
+# Anciens noms (sentinel jusqu'à 0.50, netscan jusqu'à 0.10.0) : leurs commandes ne sont plus créées, seule
+# « gardien » lance Gardien. Celles qui restent d'avant, des liens vers gardien, sont retirées.
+for ancienne in sentinel netscan; do
+  if [[ -L $HOME/.cargo/bin/$ancienne && $(readlink "$HOME/.cargo/bin/$ancienne") == gardien ]]; then
+    rm -f "$HOME/.cargo/bin/$ancienne"
+  fi
+done
 # Icône du lanceur (Gardien.desktop : Icon=gardien) : le bouclier ouvert sur un trou noir (outils/icone.py), une
 # image par taille de 16 à 512 px, pour que la barre et le lanceur n'aient pas à réduire eux-mêmes la plus grande.
 ICONES="${XDG_DATA_HOME:-$HOME/.local/share}/icons/hicolor"

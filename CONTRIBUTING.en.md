@@ -175,5 +175,5 @@ deployment, `deployer.sh` brings them back and `outils/journal-vers-github.py` t
 Gardien was called netscan (up to 0.10), then Sentinel (up to 0.50). It takes over what those names left on a
 computer: data folder (renamed once), key and journal partition (`sentinel.cle`, `sentinel-journal.cle` markers,
 `SENTINEL` and `SENTINELLOG` labels), monitoring (timer, scheduled task, launchd agent), firewall rules, files placed
-in `/etc`, backups, the `SENTINEL_LANG` and `SENTINEL_HIBP_CLE` variables. The `sentinel` and `netscan` commands start
-`gardien`.
+in `/etc`, backups, the `SENTINEL_LANG` and `SENTINEL_HIBP_CLE` variables. Only the `gardien` command starts the
+program: `sentinel` and `netscan` are gone.

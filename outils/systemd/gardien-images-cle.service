@@ -6,7 +6,7 @@ After=run-media-%u-GARDIEN.mount gardien-cle.service
 
 [Service]
 Type=oneshot
-ExecStart=%h/Projects/sentinel/outils/images-cle.sh --cle
+ExecStart=%h/Projects/gardien/outils/images-cle.sh --cle
 # Une image de 1,5 Go s'écrit en une ou deux minutes sur une clé USB 3 ; bien plus sur une clé lente.
 TimeoutStartSec=60min
 Nice=10

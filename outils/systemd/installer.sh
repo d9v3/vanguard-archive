@@ -8,14 +8,20 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 UNITES="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
-# Les unités lancent %h/Projects/sentinel/outils/deployer.sh (%h : dossier personnel) : le dépôt doit être là.
-if [[ $(cd ../.. && pwd -P) != $(cd "$HOME/Projects/sentinel" 2>/dev/null && pwd -P) ]]; then
-  echo "Attention : les unités lancent ~/Projects/sentinel/outils/deployer.sh, pas celui de $(cd ../.. && pwd)." >&2
+# Les unités lancent %h/Projects/gardien/outils/deployer.sh (%h : dossier personnel) : le dépôt doit être là.
+if [[ $(cd ../.. && pwd -P) != $(cd "$HOME/Projects/gardien" 2>/dev/null && pwd -P) ]]; then
+  echo "Attention : les unités lancent ~/Projects/gardien/outils/deployer.sh, pas celui de $(cd ../.. && pwd)." >&2
 fi
 
 for ancienne in sentinel-compilation.path sentinel-cle.service sentinel-copie.service; do
   systemctl --user disable --now "$ancienne" >/dev/null 2>&1 || true
   rm -f "$UNITES/$ancienne" "$UNITES"/*.wants/"$ancienne"
+done
+# Réinstallation (dépôt déplacé, unités changées) : les liens d'avant sont retirés, puis refaits.
+for unite in gardien-copie.service gardien-cle.service gardien-compilation.path gardien-images.service \
+  gardien-images.timer gardien-images-cle.service; do
+  systemctl --user disable "$unite" >/dev/null 2>&1 || true
+  rm -f "$UNITES/$unite" "$UNITES"/*.wants/"$unite"
 done
 systemctl --user link "$PWD/gardien-copie.service" >/dev/null
 systemctl --user enable "$PWD/gardien-cle.service" >/dev/null

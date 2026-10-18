@@ -6,7 +6,7 @@ After=network-online.target
 
 [Service]
 Type=oneshot
-ExecStart=%h/Projects/sentinel/outils/images-cle.sh --chercher
+ExecStart=%h/Projects/gardien/outils/images-cle.sh --chercher
 # En arrière-plan : quelques gigaoctets au plus, sans gêner le reste de l'ordinateur.
 Nice=19
 IOSchedulingClass=idle
