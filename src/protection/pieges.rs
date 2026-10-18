@@ -254,11 +254,15 @@ fn pdf() -> Vec<u8> {
     sortie.into_bytes()
 }
 
-/// Pose un texte et un PDF dans chaque dossier. Création exclusive : jamais un fichier existant écrasé.
-fn poser_dans(dossiers: &[PathBuf]) -> Vec<Piege> {
+/// Pose un texte et un PDF dans chaque dossier. Création exclusive : jamais un fichier existant écrasé. Rend aussi
+/// les dossiers refusés, avec la première erreur : sans eux, la personne croirait protégé un dossier qui ne l'est pas
+/// (l'accès contrôlé aux dossiers de Defender, par exemple, bloque l'écriture dans Documents).
+fn poser_dans(dossiers: &[PathBuf]) -> (Vec<Piege>, Vec<(PathBuf, std::io::Error)>) {
     let mut poses = Vec::new();
+    let mut refus = Vec::new();
     for (i, dossier) in dossiers.iter().enumerate() {
         let code = code(i);
+        let mut erreur = None;
         for (extension, contenu) in [("txt", texte().into_bytes()), ("pdf", pdf())] {
             let chemin = dossier.join(nom(&code, extension));
             let ecrit = std::fs::OpenOptions::new()
@@ -266,15 +270,21 @@ fn poser_dans(dossiers: &[PathBuf]) -> Vec<Piege> {
                 .create_new(true)
                 .open(&chemin)
                 .and_then(|mut f| std::io::Write::write_all(&mut f, &contenu));
-            if ecrit.is_ok() {
-                poses.push(Piege {
+            match ecrit {
+                Ok(()) => poses.push(Piege {
                     chemin,
                     empreinte: blake3::hash(&contenu).to_hex().to_string(),
-                });
+                }),
+                Err(e) => {
+                    erreur.get_or_insert(e);
+                }
             }
         }
+        if let Some(e) = erreur {
+            refus.push((dossier.clone(), e));
+        }
     }
-    poses
+    (poses, refus)
 }
 
 fn enregistrer(pieges: &[Piege]) -> std::io::Result<()> {
@@ -505,7 +515,32 @@ fn poser() {
         trp!("  Rien n'a été posé.", "  Nothing was placed.");
         return;
     }
-    let poses = poser_dans(&cibles);
+    let (poses, refus) = poser_dans(&cibles);
+    for (dossier, e) in &refus {
+        println!(
+            "  {}✖{RESET} {}",
+            couleur(Niveau::Critique),
+            trf!(
+                "Pas de fichier-piège dans {} ({e}).",
+                "No decoy file in {} ({e}).",
+                dossier.display()
+            )
+        );
+    }
+    if cfg!(windows)
+        && refus
+            .iter()
+            .any(|(_, e)| e.kind() == std::io::ErrorKind::PermissionDenied)
+    {
+        dire(tr!(
+            "Accès refusé : l'accès contrôlé aux dossiers de Defender bloque peut-être Gardien. Pour protéger ces dossiers aussi, autorise Gardien dans Sécurité Windows › Protection contre les virus et menaces › Protection contre les ransomware, puis repose les fichiers-pièges.",
+            "Access denied: Defender's controlled folder access may be blocking Gardien. To protect these folders too, allow Gardien in Windows Security › Virus & threat protection › Ransomware protection, then place the decoy files again."
+        ));
+    }
+    if poses.is_empty() {
+        trp!("  Rien n'a été posé.", "  Nothing was placed.");
+        return;
+    }
     match enregistrer(&poses) {
         Ok(()) => {
             println!(
@@ -592,7 +627,7 @@ mod tests {
     #[test]
     fn pose_verification_retrait() {
         let d = dossier_jetable("pose");
-        let pieges = poser_dans(std::slice::from_ref(&d));
+        let (pieges, _) = poser_dans(std::slice::from_ref(&d));
         assert_eq!(pieges.len(), 2);
         for p in &pieges {
             let nom = p.chemin.file_name().unwrap().to_str().unwrap();
@@ -624,12 +659,25 @@ mod tests {
     fn piege_illisible() {
         use std::os::unix::fs::PermissionsExt;
         let d = dossier_jetable("illisible");
-        let pieges = poser_dans(std::slice::from_ref(&d));
+        let (pieges, _) = poser_dans(std::slice::from_ref(&d));
         std::fs::set_permissions(&pieges[0].chemin, std::fs::Permissions::from_mode(0o000)).unwrap();
         if std::fs::read(&pieges[0].chemin).is_err() {
             assert_eq!(etat(&pieges[0]), Etat::Illisible);
         }
         std::fs::set_permissions(&pieges[0].chemin, std::fs::Permissions::from_mode(0o600)).unwrap();
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // Un dossier refusé est rendu avec son erreur, une seule fois ; les autres dossiers reçoivent quand même leurs pièges.
+    #[test]
+    fn dossier_refuse_signale() {
+        let d = dossier_jetable("refus");
+        let absent = d.join("absent");
+        let (pieges, refus) = poser_dans(&[d.clone(), absent.clone()]);
+        assert_eq!(pieges.len(), 2);
+        assert_eq!(refus.len(), 1);
+        assert_eq!(refus[0].0, absent);
+        assert_eq!(refus[0].1.kind(), std::io::ErrorKind::NotFound);
         let _ = std::fs::remove_dir_all(&d);
     }
 
@@ -645,7 +693,7 @@ mod tests {
     #[test]
     fn jamais_un_fichier_ecrase() {
         let d = dossier_jetable("existant");
-        let premier = poser_dans(std::slice::from_ref(&d));
+        let (premier, _) = poser_dans(std::slice::from_ref(&d));
         // Même nom imposé : la création exclusive refuse, le fichier d'avant est intact.
         std::fs::write(&premier[0].chemin, "contenu de la personne").unwrap();
         let ecrit = std::fs::OpenOptions::new()

@@ -282,7 +282,7 @@ if (Question 'Faire ce test ?' 'o') {
         Set-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name 'gardien-test-suspect' -Value 'C:\Users\Public\gardien-test.exe /q'
         Lancer 'machine-persistance' @('machine')
         $sortie = Sortie 'machine-persistance'
-        if ($sortie -match 'gardien-test-suspect.*base64|base64.*gardien-test-suspect') { Ok 'Tâche suspecte repérée' } else { Bug 'Tâche suspecte NON repérée' }
+        if ($sortie -match '(?s)gardien-test-suspect.*base64|base64.*gardien-test-suspect') { Ok 'Tâche suspecte repérée' } else { Bug 'Tâche suspecte NON repérée' }
         if ($sortie -match 'Public') { Ok 'Entrée de démarrage suspecte repérée' } else { Bug 'Entrée de démarrage suspecte NON repérée' }
     } catch { Bug "Test de persistance impossible : $($_.Exception.Message)" }
     finally {
@@ -338,7 +338,7 @@ if ($Auto) { Info 'Sautée : il faut taper un mot de passe (test avec questions)
 
 Etape 'Réparer (liste), mises à jour (vérification seule), gaming, courriel refusé'
 LancerAvec 'reparer' @('reparer') "`n"
-$n = ([regex]::Matches((Sortie 'reparer'), '(?m)^\s+\d+\. ')).Count
+$n = ([regex]::Matches(((Sortie 'reparer') -replace '\x1b\[[0-9;]*m', ''), '(?m)^\s+\d+\s{2,}\S')).Count
 if ($n -gt 0) { Ok "$n réparation(s) proposée(s)" } else { Bug 'Liste des réparations vide' }
 LancerAvec 'maj' @('maj') "n`nn`nn`nn`nn`n"
 LancerAvec 'gaming' @('gaming') "`n"
@@ -466,6 +466,15 @@ $dossiersPieges = @([Environment]::GetFolderPath('MyDocuments'), [Environment]::
 if (Question 'Faire ce test (six fichiers posés puis retirés dans Documents, Images et Bureau) ?' 'o') {
     LancerAvec 'pieges-poser' @('pieges') "o`n"
     if ((Sortie 'pieges-poser') -match 'fichiers-pièges posés|decoy files placed') { Ok 'Fichiers-pièges posés' } else { Bug 'Fichiers-pièges PAS posés' }
+    foreach ($d in $dossiersPieges) { Info "$d : $(@(Get-ChildItem $d -Filter '!Gardien*' -ErrorAction SilentlyContinue).Count) fichier(s)-piège(s)" }
+    # Un dossier refusé doit être dit par Gardien. Cause habituelle : l'accès contrôlé aux dossiers de Defender
+    # (événement 1123, « écriture bloquée »).
+    if ((Sortie 'pieges-poser') -match 'Pas de fichier-piège dans|No decoy file in') {
+        Ok 'Dossier refusé signalé par Gardien'
+        try { Info "Accès contrôlé aux dossiers : $((Get-MpPreference).EnableControlledFolderAccess) (0 coupé, 1 actif, 2 audit)" } catch { Info 'Accès contrôlé aux dossiers : état illisible' }
+        $blocages = @(Get-WinEvent -FilterHashtable @{ LogName = 'Microsoft-Windows-Windows Defender/Operational'; Id = 1123; StartTime = (Get-Date).AddMinutes(-5) } -ErrorAction SilentlyContinue)
+        Info "Écritures bloquées par Defender ces 5 dernières minutes (événement 1123) : $($blocages.Count)"
+    }
     $piege = Get-ChildItem $dossiersPieges[0] -Filter '!Gardien*.txt' -ErrorAction SilentlyContinue | Select-Object -First 1
     if ($piege) {
         Rename-Item $piege.FullName ($piege.Name + '.locked')
