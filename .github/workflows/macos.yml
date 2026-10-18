@@ -43,7 +43,7 @@ jobs:
     runs-on: macos-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Rust à jour (Apple Silicon et Intel)
         run: |
           rustup update stable
@@ -70,13 +70,13 @@ jobs:
       - name: Essai complet
         if: github.event_name == 'workflow_dispatch' && inputs.essai_complet
         run: bash outils/test-macos/essai.sh ./gardien essai
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: github.event_name == 'workflow_dispatch' && inputs.essai_complet
         with:
           name: essai-macos
           path: essai
           retention-days: 30
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: gardien-macos
           path: |

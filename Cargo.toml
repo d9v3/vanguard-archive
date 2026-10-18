@@ -24,7 +24,7 @@ enable-ansi-support = "0.3.1"
 winreg = "0.56.0"
 
 [target."cfg(unix)".dependencies]
-libc = "0.2.190"
+libc = "0.2.191"
 
 # Surveillance des fichiers en direct (intégrité) : FSEvents sous macOS.
 [target."cfg(target_os = \"macos\")".dependencies]

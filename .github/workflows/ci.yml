@@ -28,7 +28,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # MinGW : build.rs intègre l'icône et le manifeste au .exe avec windres, même pour clippy.
       - name: Rust à jour, cibles et outils de compilation croisée
         run: |
@@ -87,7 +87,7 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Rust à jour
         run: |
           rustup update stable
@@ -106,7 +106,7 @@ jobs:
           Get-Content audit.json -TotalCount 40
           & $s logiciels --liste
           & $s nettoyer --liste
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: essai-windows
