@@ -153,8 +153,12 @@ mod systeme {
         })
     }
 
-    /// Source d'une ligne du journal (« Oct 17 15:29:32 portable NetworkManager[1334]: … » → « NetworkManager »).
+    /// Source d'une ligne du journal (« Oct 17 15:29:32 portable NetworkManager[1334]: … » → « NetworkManager »). Une
+    /// ligne en retrait continue l'entrée d'avant (la pile d'un programme planté) : elle n'en est pas une autre.
     pub(super) fn source_journal(l: &str) -> Option<String> {
+        if l.starts_with(char::is_whitespace) {
+            return None;
+        }
         let apres_hote = l.splitn(5, ' ').nth(4)?;
         let source = apres_hote.split(':').next()?;
         Some(source.split('[').next()?.trim().to_string()).filter(|s| !s.is_empty())
@@ -749,5 +753,20 @@ mod tests {
         assert_eq!(systeme::champ_lsblk(disque, "TRAN").as_deref(), Some("usb"));
         assert_eq!(systeme::champ_lsblk(disque, "MODEL").as_deref(), Some("USB Flash Disk"));
         assert_eq!(go(2_000_398_934_016), "1.8 To");
+    }
+
+    /// Une entrée de plusieurs lignes (la pile d'un programme planté, écrite par systemd-coredump au niveau « crit »)
+    /// se continue en retrait : ce ne sont pas d'autres erreurs, et leur début n'est pas une source.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn suite_d_une_entree_du_journal() {
+        let retrait = " ".repeat(51);
+        for suite in [
+            format!("{retrait}Stack trace of thread 1949948:"),
+            format!("{retrait}#0  0x000071e6e46dc78a save_context (libessai.so.1 + 0x1c78a)"),
+            retrait.clone(),
+        ] {
+            assert_eq!(systeme::source_journal(&suite), None, "« {suite} »");
+        }
     }
 }
