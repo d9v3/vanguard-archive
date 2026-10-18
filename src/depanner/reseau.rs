@@ -6,6 +6,7 @@ use std::net::{Ipv4Addr, SocketAddr, TcpStream, ToSocketAddrs};
 use std::time::{Duration, Instant};
 
 use super::{Etat, conseil, proposer_outil, proposer_reparation, question, verifications};
+use crate::machine::wifi::Bande;
 use crate::ui::*;
 
 pub(super) fn titre_internet() -> &'static str {
@@ -111,6 +112,47 @@ fn noms_resolus() -> bool {
     false
 }
 
+/// La box répond-elle ? Un de ses services, sinon un ping, sinon (Linux) une entrée de voisin confirmée à l'instant.
+/// La table ARP seule ne suffit pas : une entrée périmée y reste plusieurs minutes après la panne de la box, et juste
+/// après une panne le diagnostic disait « la box répond ».
+fn box_repond(box_: Ipv4Addr) -> bool {
+    let ports: Vec<SocketAddr> = [80, 443, 53].iter().map(|&p| SocketAddr::from((box_, p))).collect();
+    if un_seul_suffit(&ports, Duration::from_millis(1500)) {
+        return true;
+    }
+    let ip = box_.to_string();
+    let lancer = |cmd: &str, args: &[&str]| crate::commande::lancer(std::process::Command::new(cmd).args(args), 6);
+    #[cfg(target_os = "linux")]
+    if lancer("ip", &["neigh", "show", &ip]).is_some_and(|r| voisin_confirme(&r.sortie)) {
+        return true;
+    }
+    #[cfg(target_os = "linux")]
+    let essai = ["-c", "1", "-W", "2", &ip];
+    #[cfg(target_os = "macos")]
+    let essai = ["-c", "1", "-t", "2", &ip];
+    #[cfg(windows)]
+    let essai = ["-n", "1", "-w", "2000", &ip];
+    lancer("ping", &essai).is_some_and(|r| ping_repond(r.code, &r.sortie, cfg!(windows)))
+}
+
+/// Linux, `ip neigh show <adresse>` : un voisin confirmé à l'instant (REACHABLE). Une entrée périmée (STALE), en
+/// échec (FAILED), incomplète, ou en cours de vérification (DELAY, PROBE) ne prouve pas que la box est là.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn voisin_confirme(sortie: &str) -> bool {
+    sortie.lines().any(|l| l.split_whitespace().last() == Some("REACHABLE"))
+}
+
+/// Une réponse au ping. Celui de Windows répond 0 même quand c'est cet ordinateur qui dit « hôte inaccessible » : là,
+/// seule une vraie réponse (« TTL= », dans toutes les langues) compte.
+#[cfg_attr(target_os = "linux", allow(dead_code))]
+fn ping_repond(code: Option<i32>, sortie: &str, windows: bool) -> bool {
+    if windows {
+        sortie.contains("TTL=")
+    } else {
+        code == Some(0)
+    }
+}
+
 fn lire_etat() -> EtatReseau {
     let autoattribuee = || {
         if_addrs::get_if_addrs()
@@ -126,10 +168,7 @@ fn lire_etat() -> EtatReseau {
     };
     let relie = matches!(adresse, Adresse::Locale(_));
     let passerelle = crate::reseau::scan::passerelle();
-    let passerelle_repond = passerelle.is_some_and(|box_| {
-        let ports: Vec<SocketAddr> = [80, 443, 53].iter().map(|&p| SocketAddr::from((box_, p))).collect();
-        un_seul_suffit(&ports, Duration::from_millis(1500)) || crate::reseau::scan::table_arp().contains_key(&box_)
-    });
+    let passerelle_repond = passerelle.is_some_and(box_repond);
     let serveurs: Vec<SocketAddr> = [[1, 1, 1, 1], [9, 9, 9, 9], [8, 8, 8, 8]]
         .iter()
         .map(|&ip| SocketAddr::from((Ipv4Addr::from(ip), 443)))
@@ -397,42 +436,48 @@ pub(super) struct Signal {
     /// Qualité du signal, de 0 à 100.
     pub qualite: u8,
     pub canal: Option<u32>,
+    /// D'après la fréquence ou ce que dit le système, pas le seul numéro du canal : le 6 GHz reprend les petits
+    /// numéros du 2,4 GHz.
+    pub bande: Option<Bande>,
     /// Économie d'énergie de la carte Wi-Fi ; `None` : inconnue.
     pub economie: Option<bool>,
 }
 
-/// La bande d'un canal : 2,4 GHz jusqu'au canal 14, 5 GHz (ou 6 GHz) au-delà.
-fn bande(canal: u32) -> &'static str {
-    if canal <= 14 { "2,4 GHz" } else { "5 GHz" }
-}
-
-/// `nmcli -t -f IN-USE,SIGNAL,CHAN dev wifi list --rescan no` : la ligne du réseau en cours commence par « * ».
+/// `nmcli -t -f IN-USE,SIGNAL,FREQ,CHAN dev wifi list --rescan no` : « *:72:5180 MHz:36 », la ligne du réseau en
+/// cours commence par « * ».
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 fn signal_nmcli(texte: &str) -> Option<Signal> {
     let ligne = texte.lines().find(|l| l.starts_with("*:"))?;
     let mut c = ligne.split(':').skip(1);
     let qualite = c.next()?.trim().parse().ok()?;
+    let mhz = c.next().and_then(|f| f.split_whitespace().next()?.parse().ok());
     Some(Signal {
         qualite,
+        bande: mhz.and_then(Bande::de_frequence),
         canal: c.next().and_then(|v| v.trim().parse().ok()),
         economie: None,
     })
 }
 
-/// `netsh wlan show interfaces`, en anglais ou en français : « Signal : 72% », « Channel : 36 » ou « Canal : 36 ».
-/// Sans ligne « Signal », la carte n'est pas connectée.
+/// `netsh wlan show interfaces`, en anglais ou en français : « Signal : 72% », « Channel : 36 » ou « Canal : 36 »,
+/// « Band : 6 GHz » ou « Bande » (Windows 11 ; sans elle, la bande se déduit du canal). Sans ligne « Signal », la carte
+/// n'est pas connectée.
 #[cfg_attr(not(windows), allow(dead_code))]
 fn signal_netsh(texte: &str) -> Option<Signal> {
-    let valeur = |cles: &[&str]| {
+    let brute = |cles: &[&str]| {
         texte.lines().find_map(|l| {
             let (cle, valeur) = l.split_once(':')?;
-            cles.contains(&cle.trim())
-                .then(|| valeur.chars().filter(char::is_ascii_digit).collect::<String>())
+            cles.contains(&cle.trim()).then(|| valeur.trim().to_string())
         })
     };
+    let chiffres = |cles: &[&str]| brute(cles).map(|v| v.chars().filter(char::is_ascii_digit).collect::<String>());
+    let canal: Option<u32> = chiffres(&["Channel", "Canal"]).and_then(|c| c.parse().ok());
     Some(Signal {
-        qualite: valeur(&["Signal"])?.parse().ok()?,
-        canal: valeur(&["Channel", "Canal"]).and_then(|c| c.parse().ok()),
+        qualite: chiffres(&["Signal"])?.parse().ok()?,
+        bande: brute(&["Band", "Bande"])
+            .and_then(|b| Bande::de_texte(&b))
+            .or_else(|| canal.and_then(|c| u16::try_from(c).ok()).and_then(Bande::de_canal)),
+        canal,
         economie: None,
     })
 }
@@ -450,12 +495,14 @@ fn signal_airport(texte: &str) -> Option<Signal> {
         .parse()
         .ok()?;
     let qualite = u8::try_from((2 * (dbm + 100)).clamp(0, 100)).ok()?;
+    // « Channel: 37 (6GHz, 160MHz) » : le numéro, puis la bande entre parenthèses.
+    let canal = en_cours.lines().find_map(|l| l.trim().strip_prefix("Channel:"));
     Some(Signal {
         qualite,
-        canal: en_cours
-            .lines()
-            .find_map(|l| l.trim().strip_prefix("Channel:"))
-            .and_then(|v| v.split_whitespace().next()?.parse().ok()),
+        canal: canal.and_then(|v| v.split_whitespace().next()?.parse().ok()),
+        bande: canal
+            .and_then(|v| v.split_once('('))
+            .and_then(|(_, b)| Bande::de_texte(b)),
         economie: None,
     })
 }
@@ -472,7 +519,7 @@ fn signal() -> Option<Signal> {
         };
         let mut s = signal_nmcli(&sortie(
             "nmcli",
-            &"-t -f IN-USE,SIGNAL,CHAN dev wifi list --rescan no"
+            &"-t -f IN-USE,SIGNAL,FREQ,CHAN dev wifi list --rescan no"
                 .split(' ')
                 .collect::<Vec<_>>(),
         ))?;
@@ -523,18 +570,18 @@ fn afficher_signal(s: &Signal) {
         ),
     };
     etat.dire(&texte);
-    if let Some(c) = s.canal {
-        Etat::Info.dire(&if c <= 14 {
+    if let (Some(c), Some(b)) = (s.canal, s.bande) {
+        Etat::Info.dire(&if b == Bande::G24 {
             trf!(
                 "Bande {}, canal {c} : elle porte loin et traverse les murs, mais elle est plus lente et plus encombrée.",
                 "{} band, channel {c}: it reaches far and goes through walls, but it is slower and more crowded.",
-                bande(c)
+                b.libelle()
             )
         } else {
             trf!(
                 "Bande {}, canal {c} : rapide, mais elle porte moins loin et traverse mal les murs.",
                 "{} band, channel {c}: fast, but it reaches less far and goes poorly through walls.",
-                bande(c)
+                b.libelle()
             )
         });
     }
@@ -684,16 +731,17 @@ mod tests {
 
     #[test]
     fn signal_lu_partout() {
-        let nmcli = "  :45:6\n*:72:36\n  :30:1\n";
+        let nmcli = "  :45:2437 MHz:6\n*:72:5180 MHz:36\n  :30:2412 MHz:1\n";
         assert_eq!(
             signal_nmcli(nmcli),
             Some(Signal {
                 qualite: 72,
                 canal: Some(36),
+                bande: Some(Bande::G5),
                 economie: None
             })
         );
-        assert_eq!(signal_nmcli("  :45:6\n"), None);
+        assert_eq!(signal_nmcli("  :45:2437 MHz:6\n"), None);
         let netsh_fr = "    Nom                    : Wi-Fi\n    État                   : connecté\n    SSID                   : Salon\n    Canal                  : 6\n    Signal                 : 58 %\n";
         assert_eq!(
             signal_netsh(netsh_fr).map(|s| (s.qualite, s.canal)),
@@ -710,7 +758,46 @@ mod tests {
             signal_airport(airport).map(|s| (s.qualite, s.canal)),
             Some((84, Some(36)))
         );
-        assert_eq!(bande(6), "2,4 GHz");
-        assert_eq!(bande(149), "5 GHz");
+        assert_eq!(signal_netsh(netsh_fr).and_then(|s| s.bande), Some(Bande::G24));
+        assert_eq!(signal_netsh(netsh_en).and_then(|s| s.bande), Some(Bande::G5));
+        assert_eq!(signal_airport(airport).and_then(|s| s.bande), Some(Bande::G5));
+    }
+
+    /// En 6 GHz (Wi-Fi 6E et 7), les canaux reprennent les petits numéros : le canal 5 n'est pas du 2,4 GHz. La bande
+    /// vient de la fréquence (Linux), de la ligne « Band » (Windows 11) ou du texte du canal (macOS).
+    #[test]
+    fn six_ghz_pas_pris_pour_du_2_4() {
+        assert_eq!(signal_nmcli("*:80:5975 MHz:5\n").and_then(|s| s.bande), Some(Bande::G6));
+        let netsh =
+            "    Band                   : 6 GHz\n    Channel                : 5\n    Signal                 : 80%\n";
+        assert_eq!(signal_netsh(netsh).and_then(|s| s.bande), Some(Bande::G6));
+        let airport = "      Current Network Information:\n        Salon:\n          Channel: 37 (6GHz, 160MHz)\n          Signal / Noise: -50 dBm / -94 dBm\n";
+        assert_eq!(signal_airport(airport).and_then(|s| s.bande), Some(Bande::G6));
+    }
+
+    /// Une entrée de voisin périmée, en échec ou incomplète ne dit pas que la box répond ; seule REACHABLE compte.
+    #[test]
+    fn voisin_confirme_seulement() {
+        let ligne = |etat: &str| format!("192.168.1.1 dev wlan0 lladdr 02:00:00:aa:bb:01 {etat}\n");
+        assert!(voisin_confirme(&ligne("REACHABLE")));
+        assert!(voisin_confirme(&ligne("router REACHABLE")));
+        for etat in ["STALE", "FAILED", "DELAY", "PROBE"] {
+            assert!(!voisin_confirme(&ligne(etat)), "{etat}");
+        }
+        assert!(!voisin_confirme("192.168.1.1 dev wlan0 INCOMPLETE\n"));
+        assert!(!voisin_confirme(""));
+    }
+
+    /// Le ping de Windows rend 0 quand cet ordinateur répond lui-même « hôte inaccessible » : seule une réponse avec
+    /// « TTL= » compte. Ailleurs, le code de retour suffit.
+    #[test]
+    fn reponse_au_ping() {
+        let inaccessible = "Réponse de 192.168.1.20 : Impossible de joindre l'hôte de destination.\r\n";
+        assert!(!ping_repond(Some(0), inaccessible, true));
+        let reponse = "Reply from 192.168.1.1: bytes=32 time<1ms TTL=64\r\n";
+        assert!(ping_repond(Some(0), reponse, true));
+        assert!(ping_repond(Some(0), "", false));
+        assert!(!ping_repond(Some(1), "", false));
+        assert!(!ping_repond(None, "", false));
     }
 }

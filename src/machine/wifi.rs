@@ -258,7 +258,6 @@ pub(crate) enum Bande {
 
 impl Bande {
     /// D'après la fréquence, en MHz.
-    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     pub(crate) fn de_frequence(mhz: u32) -> Option<Bande> {
         match mhz {
             2400..=2500 => Some(Bande::G24),
@@ -270,7 +269,6 @@ impl Bande {
 
     /// D'après le canal seul, quand le système ne dit pas la bande (Windows 10) : 1 à 14 en 2,4 GHz, au-delà en
     /// 5 GHz. Ces systèmes-là ne connaissent pas le 6 GHz, qui réutilise les petits numéros.
-    #[cfg_attr(not(windows), allow(dead_code))]
     pub(crate) fn de_canal(canal: u16) -> Option<Bande> {
         match canal {
             1..=14 => Some(Bande::G24),
@@ -280,8 +278,7 @@ impl Bande {
     }
 
     /// D'après un texte du système : « 2.4 GHz », « 2,4 GHz », « 5 GHz », « 2GHz » (macOS)…
-    #[cfg_attr(target_os = "linux", allow(dead_code))]
-    fn de_texte(t: &str) -> Option<Bande> {
+    pub(crate) fn de_texte(t: &str) -> Option<Bande> {
         let t: String = t
             .chars()
             .filter(|c| !c.is_whitespace())
