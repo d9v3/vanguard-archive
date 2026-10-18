@@ -1,0 +1,15 @@
+[Unit]
+Description=Gardien : mettre à jour les images Linux de la clé GARDIEN au branchement
+# Copie sur la clé les images neuves du cache (gardien-images.service), seulement pour celles qu'elle a déjà ; après
+# gardien-cle.service, qui met Gardien à jour sur la même clé (les deux prennent le même verrou).
+After=run-media-%u-GARDIEN.mount gardien-cle.service
+
+[Service]
+Type=oneshot
+ExecStart=%h/Projects/sentinel/outils/images-cle.sh --cle
+# Une image de 1,5 Go s'écrit en une ou deux minutes sur une clé USB 3 ; bien plus sur une clé lente.
+TimeoutStartSec=60min
+Nice=10
+
+[Install]
+WantedBy=run-media-%u-GARDIEN.mount

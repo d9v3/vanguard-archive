@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Clé de secours : la clé GARDIEN démarre aussi les ordinateurs, pour réparer ou réinstaller Linux, Windows et macOS.
 #   1 GARDIEN     partition de Ventoy, exFAT : Gardien comme avant (témoin gardien.cle), et ses images dans ISO/ :
-#                 Omarchy (installer), SystemRescue (réparer, sauver des fichiers, tester la mémoire), et Windows 11 en
-#                 secours s'il reste la place. Attribut GPT « lecture seule » (bit 60) : Windows la monte en lecture
-#                 seule.
+#                 Arch Linux (qui installe aussi Omarchy), Debian et Fedora en installateurs par Internet, SystemRescue
+#                 (réparer, sauver des fichiers, tester la mémoire), et Windows 11 en secours s'il reste la place.
+#                 Les images Linux viennent de outils/images-cle.sh, qui les vérifie et les tient à jour au
+#                 branchement. Attribut GPT « lecture seule » (bit 60) : Windows la monte en lecture seule.
 #   2 VTOYEFI     32 Mio, démarrage de Ventoy (UEFI) ; ne jamais y toucher.
 #   3 GARDIENLOG  64 Mio, exFAT, modifiable partout : le journal des erreurs (src/journal.rs).
 #   4 MACOS       HFS+ : la récupération de macOS, téléchargée chez Apple (BaseSystem), pour les Mac Intel.
@@ -27,13 +28,6 @@ cd "$(dirname "$0")/.."
 
 VENTOY=1.1.18
 VENTOY_SHA256=d86ff9de63d94c8b8f1f6b14d23c55af4b88e8207bf2893890892a6a97b1ad54
-SYSRESCUE=13.02
-SYSRESCUE_SHA256=ad4d670b72859d887c7960142a9a9d36a3e50446694a035e254442f65d6e7572
-# Clé de l'auteur de SystemRescue : empreinte de la clé principale, que la signature doit désigner.
-SYSRESCUE_CLE=0FF11AF081E98345594812037091115F8320B897
-OMARCHY=4.0.5
-# Empreinte publiée avec la version sur GitHub (basecamp/omarchy), pas sur le site qui sert l'image.
-OMARCHY_SHA256=73fd4334f1f67b19cd8a5589f9363173fc3aec07c0a59f198833eaddb66877a1
 OPENCORE=1.0.8
 MACRECOVERY_SHA256=3023a9b4ca79a5255d93c00f25ab5df37e6f938b729b797d9ecea56184b17aff
 # Récupération de macOS : Monterey par défaut, la plus récente des Mac Intel sans puce T2 (2015 à 2017), qui
@@ -45,10 +39,11 @@ JOURNAL_MIO=64
 VTOYEFI_MIO=32
 # Taille de la récupération de Monterey (volume HFS+ de 2,68 Gio) arrondie ; mesurée sur l'image quand elle est là.
 MACOS_MIO_ESTIME=2816
-# Taille des images (versions ci-dessus) ; Windows 11 : l'ISO multi-édition, de 7,2 à 7,9 Go selon la langue.
-OMARCHY_MIO=6156
-SYSRESCUE_MIO=1318
+# Images Linux (Arch 1,5 Go, Debian 0,8, Fedora 1,2, SystemRescue 1,3 en 2026) avec de quoi grandir ; mesurées dans
+# le cache de images-cle.sh quand elles y sont. Windows 11 : l'ISO multi-édition, de 7,2 à 7,9 Go selon la langue.
+LINUX_MIO_ESTIME=5632
 WINDOWS_ISO_MIO_ESTIME=7534
+IMAGES_LINUX=${GARDIEN_IMAGES:-${XDG_CACHE_HOME:-$HOME/.cache}/gardien/images-cle}
 # Partition WIN11 sans l'image sous la main : de quoi tenir l'ISO la plus grosse.
 WINDOWS_MIO_ESTIME=8192
 # Morceaux de install.wim : 3800 Mio, sous la limite d'un fichier en FAT32 (4 Gio moins un octet).
@@ -104,17 +99,12 @@ fichiers_iso() { # image
     END { sortir() }'
 }
 
-# Signature de SystemRescue : dans un trousseau jetable, et par la clé attendue (la clé principale du signataire).
-signature_systemrescue() { # dossier
-  local trousseau
-  trousseau=$(mktemp -d)
-  gpg --homedir "$trousseau" --quiet --import "$1/systemrescue-cle.pem" 2>/dev/null
-  local etat
-  etat=$(gpg --homedir "$trousseau" --status-fd 1 --verify "$1/systemrescue-$SYSRESCUE-amd64.iso.asc" \
-    "$1/systemrescue-$SYSRESCUE-amd64.iso" 2>/dev/null || true)
-  rm -rf "$trousseau"
-  # VALIDSIG <empreinte de la sous-clé> … <empreinte de la clé principale>
-  grep -q "^\[GNUPG:\] VALIDSIG .* $SYSRESCUE_CLE\$" <<<"$etat"
+# Place des images Linux : celles prêtes dans le cache (toutes les quatre), sinon l'estimation.
+linux_mio() {
+  local octets n
+  read -r n octets < <(find "$IMAGES_LINUX" -maxdepth 1 -name '*.iso' -exec test -f {}.sha256 \; -printf '%s\n' \
+    2>/dev/null | awk '{s += $1; n++} END {printf "%d %d\n", n, s}')
+  if ((n == 4)); then echo $(((octets + MIO - 1) / MIO + 256)); else echo "$LINUX_MIO_ESTIME"; fi
 }
 
 # Volume HFS+ de la récupération de macOS dans l'image d'Apple : (nom dans l'image, taille en octets).
@@ -193,11 +183,7 @@ verifier() { # dossier [cle : aussi la partition WIN11, si elle est montée]
   echo "Images de $d :"
   if empreinte_ok "$d/ventoy-$VENTOY-linux.tar.gz" "$VENTOY_SHA256"; then echo "  ✔ Ventoy $VENTOY"
   else echo "  ✖ Ventoy $VENTOY absent ou différent"; tout=1; fi
-  if empreinte_ok "$d/systemrescue-$SYSRESCUE-amd64.iso" "$SYSRESCUE_SHA256" && signature_systemrescue "$d"; then
-    echo "  ✔ SystemRescue $SYSRESCUE (empreinte et signature de son auteur)"
-  else echo "  ✖ SystemRescue $SYSRESCUE absent, différent ou mal signé"; tout=1; fi
-  if empreinte_ok "$d/omarchy-$OMARCHY.iso" "$OMARCHY_SHA256"; then echo "  ✔ Omarchy $OMARCHY"
-  else echo "  ✖ Omarchy $OMARCHY absent ou différent"; tout=1; fi
+  outils/images-cle.sh --verifier || tout=1
   local windows attendue
   windows=$(fichier_windows "$d")
   attendue=$([[ -n $windows ]] && empreinte_windows "$windows" || true)
@@ -244,14 +230,8 @@ telecharger() { # dossier
   empreinte_ok "$d/ventoy-$VENTOY-linux.tar.gz" "$VENTOY_SHA256" ||
     "${recuperer[@]}" -o "$d/ventoy-$VENTOY-linux.tar.gz" \
       "https://github.com/ventoy/Ventoy/releases/download/v$VENTOY/ventoy-$VENTOY-linux.tar.gz"
-  local sr="https://fastly-cdn.system-rescue.org/releases/$SYSRESCUE/systemrescue-$SYSRESCUE-amd64.iso"
-  empreinte_ok "$d/systemrescue-$SYSRESCUE-amd64.iso" "$SYSRESCUE_SHA256" ||
-    "${recuperer[@]}" -o "$d/systemrescue-$SYSRESCUE-amd64.iso" "$sr"
-  "${recuperer[@]}" -o "$d/systemrescue-$SYSRESCUE-amd64.iso.asc" "$sr.asc"
-  "${recuperer[@]}" -o "$d/systemrescue-cle.pem" \
-    https://www.system-rescue.org/security/signing-keys/gnupg-pubkey-fdupoux-20210704-v001.pem
-  empreinte_ok "$d/omarchy-$OMARCHY.iso" "$OMARCHY_SHA256" ||
-    "${recuperer[@]}" -o "$d/omarchy-$OMARCHY.iso" "https://iso.omarchy.org/omarchy-$OMARCHY.iso"
+  # Arch, Debian, Fedora et SystemRescue : dans le cache de images-cle.sh, vérifiés par la signature de leur projet.
+  outils/images-cle.sh --chercher || true
   # macrecovery (OpenCorePkg, licence BSD) demande l'image de récupération aux serveurs d'Apple et la vérifie.
   "${recuperer[@]}" -o "$d/macrecovery.py" \
     "https://raw.githubusercontent.com/acidanthera/OpenCorePkg/$OPENCORE/Utilities/macrecovery/macrecovery.py"
@@ -315,12 +295,12 @@ partitions_ajoutees() { # macos_mio windows_mio
   printf 'size=%dMiB, type=%s, name="WIN11"\n' "$2" "$TYPE_DONNEES"
 }
 
-# La place de GARDIEN : d'abord Gardien et sa base (marge), Omarchy et SystemRescue ; Windows en secours ensuite,
-# s'il tient (c'est la première image laissée de côté). Une ligne pour --plan ; code 1 si même Linux ne tient pas.
+# La place de GARDIEN : d'abord Gardien et sa base (marge), les images Linux ; Windows en secours ensuite, s'il tient
+# (c'est la première image laissée de côté). Une ligne pour --plan ; code 1 si même Linux ne tient pas.
 place_gardien() { # gardien_mio iso_windows_mio
-  local libre=$(($1 - MARGE_GARDIEN_MIO - OMARCHY_MIO - SYSRESCUE_MIO))
+  local libre=$(($1 - MARGE_GARDIEN_MIO - $(linux_mio)))
   if ((libre < 0)); then
-    echo "✖ Clé trop petite : il manque $((-libre)) Mio pour Gardien, Omarchy et SystemRescue."
+    echo "✖ Clé trop petite : il manque $((-libre)) Mio pour Gardien et les images Linux."
     return 1
   elif ((libre >= $2)); then
     echo "Windows 11 aussi dans ISO/, en secours ($2 Mio) : il restera ~$(((libre - $2) / 1024)) Gio."
@@ -347,8 +327,8 @@ Clé de $(numfmt --to=iec-i --suffix=o --format='%.1f' "$octets") ($disque), tab
   4 MACOS       $(printf '%6d' "$macos") Mio  HFS+, récupération de macOS (Mac Intel)
   5 WIN11       $(printf '%6d' "$windows") Mio  FAT32, installation de Windows 11 (démarre seule, Secure Boot actif)
 
-Dans GARDIEN : Gardien et sa base ($MARGE_GARDIEN_MIO Mio gardés), Omarchy $OMARCHY $OMARCHY_MIO Mio, SystemRescue
-$SYSRESCUE $SYSRESCUE_MIO Mio.
+Dans GARDIEN : Gardien et sa base ($MARGE_GARDIEN_MIO Mio gardés), les images Linux $(linux_mio) Mio (Arch, Debian,
+Fedora, SystemRescue).
 $(place_gardien "$gardien" "$iso_windows" || true)
 
 Commandes de --ecrire (rien n'est lancé ici) :
@@ -362,29 +342,9 @@ Commandes de --ecrire (rien n'est lancé ici) :
                                     7z e -so -tdmg BaseSystem.dmg <volume>.hfs | dd of=$(partition "$disque" 4)
                                     mkfs.fat -F 32 -n WIN11 $(partition "$disque" 5)
                                     sfdisk --part-attrs $disque 1 GUID:60
-  sans root                       → témoins, ISO/ et ventoy/ventoy.json ; WIN11 : 7z x de l'image sans
+  sans root                       → témoins, ISO/ (images-cle.sh --toutes) et ventoy/ventoy.json ; WIN11 : 7z x de l'image sans
                                     install.wim, ses morceaux .swm, vérification, démontage ; base remise,
                                     deployer.sh --sans-compiler
-EOF
-}
-
-# ventoy.json : Ventoy ne cherche que dans ISO/ (pas dans les dossiers de Gardien), menu en français, noms clairs.
-ventoy_json() { # nom de l'image de Windows dans ISO/ (vide : pas copiée, faute de place)
-  local windows=""
-  if [[ -n ${1:-} ]]; then
-    windows="    { \"image\": \"/ISO/$1\", \"alias\": \"Windows 11 (secours, si le PC ne propose pas WIN11)\" },"$'\n'
-  fi
-  cat <<EOF
-{
-  "control": [
-    { "VTOY_DEFAULT_SEARCH_ROOT": "/ISO" },
-    { "VTOY_MENU_LANGUAGE": "fr_FR" }
-  ],
-  "menu_alias": [
-${windows}    { "image": "/ISO/omarchy-$OMARCHY.iso", "alias": "Omarchy (Linux) : installer" },
-    { "image": "/ISO/systemrescue-$SYSRESCUE-amd64.iso", "alias": "SystemRescue : réparer, sauver des fichiers, tester la mémoire" }
-  ]
-}
 EOF
 }
 
@@ -628,7 +588,7 @@ ecrire() { # disque dossier
   reserve=$(reserve_mio "$macos" "$windows")
   gardien=$((octets / MIO - 1 - VTOYEFI_MIO - reserve))
   place_gardien "$gardien" "$(taille_mio "$(fichier_windows "$d")" "$WINDOWS_ISO_MIO_ESTIME")" >/dev/null ||
-    erreur "clé trop petite pour Gardien, Omarchy et SystemRescue (voir --plan) : rien n'a été effacé."
+    erreur "clé trop petite pour Gardien et les images Linux (voir --plan) : rien n'a été effacé."
   local prep
   prep=$(preparer_windows "$d")
   plan "$disque" "$d"
@@ -666,17 +626,17 @@ ecrire() { # disque dossier
   windows_iso=$(fichier_windows "$d")
   remplir_windows "$win" "$windows_iso" "$prep"
   udisksctl unmount -b "$(partition "$disque" 5)" >/dev/null
-  cp "$d/omarchy-$OMARCHY.iso" "$d/systemrescue-$SYSRESCUE-amd64.iso" "$cle/ISO/"
+  outils/images-cle.sh --toutes "$cle"
   # Windows aussi dans ISO/, en secours pour un PC dont le menu ne propose pas WIN11, s'il reste la place : c'est
   # la première image laissée de côté.
-  local nom_windows="" libre
+  local libre
   libre=$(($(df --output=avail -B1M "$cle" | tail -1)))
   if ((libre - MARGE_GARDIEN_MIO >= $(taille_mio "$windows_iso" "$WINDOWS_ISO_MIO_ESTIME"))); then
-    cp "$windows_iso" "$cle/ISO/" && nom_windows=$(basename "$windows_iso")
+    cp "$windows_iso" "$cle/ISO/"
   else
     echo "Pas la place pour Windows 11 en secours dans ISO/ : il démarre par sa partition WIN11 seulement."
   fi
-  ventoy_json "$nom_windows" >"$cle/ventoy/ventoy.json"
+  outils/images-cle.sh --menu "$cle"
   # La base donnees/ : celle de cette sauvegarde, sinon celle de la plus récente sauvegarde qui en a une. Une passe
   # interrompue après l'effacement laisse une clé vide, dont la sauvegarde suivante n'a plus de base.
   local ancienne
@@ -701,5 +661,5 @@ case ${1:-} in
   --ecrire) ecrire "${2:?disque, par exemple /dev/sdb}" "${3:?dossier des images vérifiées}" ;;
   --windows) completer_windows "${2:?disque, par exemple /dev/sdb}" "${3:?dossier des images vérifiées}" ;;
   --racine) [[ $EUID -eq 0 ]] || erreur "--racine se lance par pkexec, depuis --ecrire."; racine "${@:2}" ;;
-  *) sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
+  *) sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
 esac

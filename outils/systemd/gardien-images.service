@@ -1,0 +1,13 @@
+[Unit]
+Description=Gardien : télécharger et vérifier les nouvelles images Linux de la clé de secours
+# Arch, Debian, Fedora et SystemRescue : la dernière version de chacune, vérifiée par la signature de son projet,
+# dans ~/.cache/gardien/images-cle. Elles vont sur la clé à son prochain branchement (gardien-images-cle.service).
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=%h/Projects/sentinel/outils/images-cle.sh --chercher
+# En arrière-plan : quelques gigaoctets au plus, sans gêner le reste de l'ordinateur.
+Nice=19
+IOSchedulingClass=idle
+TimeoutStartSec=3h

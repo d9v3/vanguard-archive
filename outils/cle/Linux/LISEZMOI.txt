@@ -53,4 +53,16 @@ Le programme : « gardien », dans ce dossier. Toutes les distributions 64 bits 
    - En anglais :  GARDIEN_LANG=en /run/media/$USER/GARDIEN/Linux/gardien
    - Quitter : q dans le menu, ou Ctrl+C.
 
+
+5. INSTALLER LINUX DEPUIS LA CLÉ
+
+   Démarrer l'ordinateur sur la clé (touche du menu de démarrage : F12, F11, F8 ou Échap selon le PC),
+   puis choisir dans le menu de Ventoy. Debian, Fedora et Arch s'installent par Internet (câble ou Wi-Fi).
+   - Omarchy : choisir Arch Linux, se connecter au Wi-Fi (iwctl, puis « station wlan0 connect <réseau> »),
+     lancer archinstall (disque chiffré LUKS, btrfs, chargeur Limine, son pipewire, réseau « copier celui
+     de l'ISO »), redémarrer, ouvrir une session, puis taper :
+       curl -fsSL https://omarchy.org/install | bash
+     Guide officiel : https://learn.omacom.io/2/the-omarchy-manual/96/manual-installation
+   - Les images se mettent à jour toutes seules quand la clé est branchée sur l'ordinateur qui la prépare.
+
 Guide complet (menu, protection de la clé, langue) : LISEZMOI.txt à la racine de la clé.
