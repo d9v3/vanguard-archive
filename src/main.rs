@@ -454,21 +454,15 @@ fn lignes_du_menu(etat: Vec<String>) -> Vec<Ligne> {
     lignes.extend(etat.into_iter().map(Ligne::Texte));
 
     lignes.extend(section_du_menu(tr!("BILAN DE SÉCURITÉ", "SECURITY CHECK")));
-    lignes.push(Ligne::choix(
-        "1",
-        tr!("Bilan complet : machine + réseau", "Full check: machine + network"),
-        tr!("← commencer ici", "← start here"),
-    ));
-    lignes.push(Ligne::choix(
-        "2",
-        tr!("Corriger les problèmes trouvés", "Fix the problems found"),
-        "",
-    ));
-    lignes.push(Ligne::choix(
-        "3",
-        tr!("Rapport détaillé dans le navigateur", "Detailed report in the browser"),
-        "",
-    ));
+    let principal = [Action::Complet, Action::Corriger, Action::Rapport];
+    for (touche, action) in principal.into_iter().enumerate() {
+        let a_droite = if touche == 0 {
+            tr!("← commencer ici", "← start here")
+        } else {
+            ""
+        };
+        lignes.push(Ligne::choix(&(touche + 1).to_string(), action.libelle().0, a_droite));
+    }
 
     lignes.extend(section_du_menu(tr!("OUTILS", "TOOLS")));
     for (touche, groupe) in GROUPES.iter().enumerate() {
@@ -498,9 +492,10 @@ fn lignes_du_menu(etat: Vec<String>) -> Vec<Ligne> {
             continue;
         }
         let chemin = format!("{} ›", groupe.titre());
-        for (j, a) in groupe.actions().iter().filter(|a| a.disponible()).enumerate() {
+        for (j, a) in groupe.actions().into_iter().filter(|a| a.disponible()).enumerate() {
             let (texte, precision) = a.libelle();
-            lignes.push(Ligne::cachee(&format!("{cle}.{}", j + 1), &chemin, texte, precision).avec_mots(a.mots_cles()));
+            lignes
+                .push(Ligne::cachee(&format!("{cle}.{}", j + 1), &chemin, texte, precision).avec_mots(a.outil().mots));
         }
     }
     lignes.extend(pages_du_guide);
@@ -531,7 +526,7 @@ fn outil_au_chemin(chemin: &str) -> Option<Action> {
         return None;
     }
     let outil = outil.parse::<usize>().ok()?.checked_sub(1)?;
-    groupe.actions().iter().copied().filter(|a| a.disponible()).nth(outil)
+    groupe.actions().into_iter().filter(|a| a.disponible()).nth(outil)
 }
 
 async fn menu() {
@@ -567,12 +562,7 @@ async fn menu() {
             } else if let Some(action) = outil_au_chemin(&choix) {
                 dernier = groupe.to_string();
                 executer(&mut s, action).await;
-                if action.attendre_apres() {
-                    demander(&trf!(
-                        "\n{GRIS}Entrée pour revenir au menu…{RESET}",
-                        "\n{GRIS}Enter to go back to the menu…{RESET}"
-                    ));
-                }
+                revenir_au_menu(action);
             }
             continue;
         }
@@ -592,13 +582,20 @@ async fn menu() {
             "3" => Action::Rapport,
             "q" => break,
             // Raccourcis des versions précédentes (une lettre par outil), toujours acceptés.
-            autre => match Action::TOUTES.iter().find(|a| a.raccourci() == Some(autre)) {
-                Some(&a) => a,
+            autre => match OUTILS.iter().find(|o| !o.lettre.is_empty() && o.lettre == autre) {
+                Some(o) => o.action,
                 None => continue,
             },
         };
         dernier = choix;
         executer(&mut s, action).await;
+        revenir_au_menu(action);
+    }
+}
+
+/// Après un outil lancé du menu : Entrée pour y revenir, sauf pour ceux qui ont leurs propres écrans.
+fn revenir_au_menu(action: Action) {
+    if action.attendre_apres() {
         demander(&trf!(
             "\n{GRIS}Entrée pour revenir au menu…{RESET}",
             "\n{GRIS}Enter to go back to the menu…{RESET}"
@@ -606,21 +603,21 @@ async fn menu() {
     }
 }
 
-/// Ce que le menu sait faire. Chaque outil vit dans un groupe ; son ancienne lettre reste un raccourci.
+/// Ce que le menu sait faire, dans l'ordre des sous-menus : la ligne d'un outil dans `OUTILS` est à son numéro.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Action {
     Complet,
     Corriger,
     Rapport,
     Audit,
+    Maj,
+    Reparer,
+    Diagnostic,
     Integrite,
     Appris,
     Lenteur,
     Fiche,
     Entretien,
-    Diagnostic,
-    Maj,
-    Reparer,
     Scanner,
     Appareil,
     Nommer,
@@ -657,75 +654,222 @@ enum Action {
     Depanner,
 }
 
-impl Action {
-    const TOUTES: &[Action] = &[
-        Action::Complet,
-        Action::Corriger,
-        Action::Rapport,
-        Action::Audit,
-        Action::Integrite,
-        Action::Appris,
-        Action::Lenteur,
-        Action::Fiche,
-        Action::Entretien,
-        Action::Diagnostic,
-        Action::Maj,
-        Action::Reparer,
-        Action::Scanner,
-        Action::Appareil,
-        Action::Nommer,
-        Action::Surveillance,
-        Action::Connexion,
-        Action::ListesNoires,
-        Action::WifiCanaux,
-        Action::Nat,
-        Action::Cameras,
-        Action::AntivirusRapide,
-        Action::AntivirusComplet,
-        Action::AntivirusDossier,
-        Action::Yara,
-        Action::Pieges,
-        Action::Bac,
-        Action::MotsDePasse,
-        Action::Courriel,
-        Action::QuiParle,
-        Action::Lien,
-        Action::VerifierFichier,
-        Action::Logiciels,
-        Action::Gaming,
-        Action::Nettoyer,
-        Action::OptimiserRecommandes,
-        Action::OptimiserConfidentialite,
-        #[cfg(not(target_os = "macos"))]
-        Action::OptimiserPerformance,
-        Action::OptimiserConfort,
-        Action::DnsRapide,
-        Action::OptimiserAnnuler,
-        Action::Sauvegarder,
-        Action::CopierFichiers,
-        Action::Guide,
-        Action::Depanner,
-    ];
+/// Un outil du menu : son groupe (aucun pour 1, 2 et 3, au menu principal), sa lettre des menus d'avant la 0.43
+/// (vide : aucune ; les chiffres, eux, ont changé de sens), son titre et sa précision en français puis en anglais, et
+/// les mots que la recherche trouve en plus, jamais affichés.
+struct Outil {
+    action: Action,
+    groupe: Option<Groupe>,
+    lettre: &'static str,
+    titre: [&'static str; 2],
+    precision: [&'static str; 2],
+    mots: &'static str,
+}
 
-    /// Lettre de l'outil dans les menus d'avant la 0.43 (les chiffres, eux, ont changé de sens).
-    fn raccourci(self) -> Option<&'static str> {
-        Some(match self {
-            Action::Integrite => "i",
-            Action::Diagnostic => "o",
-            Action::Maj => "u",
-            Action::Reparer => "r",
-            Action::Nommer => "n",
-            Action::Connexion => "c",
-            Action::AntivirusDossier => "a",
-            Action::Bac => "b",
-            Action::MotsDePasse => "p",
-            Action::Courriel => "e",
-            Action::Logiciels => "l",
-            Action::Gaming => "g",
-            Action::Nettoyer => "v",
-            Action::Sauvegarder => "d",
-            _ => return None,
-        })
+/// Une ligne par outil, dans l'ordre de `Action` et des sous-menus (4.1, 4.2…). La précision des outils à interrupteur
+/// (surveillance, entretien) suit leur état : `Action::libelle`.
+#[rustfmt::skip] // une ligne de données par outil, que rustfmt étalerait sur huit
+const OUTILS: &[Outil] = &[
+    Outil { action: Action::Complet, groupe: None, lettre: "",
+        titre: ["Bilan complet : machine + réseau", "Full check: machine + network"], precision: ["", ""],
+        mots: "" },
+    Outil { action: Action::Corriger, groupe: None, lettre: "",
+        titre: ["Corriger les problèmes trouvés", "Fix the problems found"], precision: ["", ""],
+        mots: "" },
+    Outil { action: Action::Rapport, groupe: None, lettre: "",
+        titre: ["Rapport détaillé dans le navigateur", "Detailed report in the browser"], precision: ["", ""],
+        mots: "" },
+    Outil { action: Action::Audit, groupe: Some(Groupe::Machine), lettre: "",
+        titre: ["Audit de sécurité", "Security audit"],
+        precision: ["pare-feu, comptes, chiffrement…", "firewall, accounts, encryption…"],
+        mots: "sécurité security pare-feu firewall ports ssh chiffrement encryption comptes accounts" },
+    Outil { action: Action::Maj, groupe: Some(Groupe::Machine), lettre: "u",
+        titre: ["Mises à jour", "Updates"], precision: ["système, programmes, pilotes", "system, programs, drivers"],
+        mots: "update upgrade pilotes drivers firmware bios windows update" },
+    Outil { action: Action::Reparer, groupe: Some(Groupe::Machine), lettre: "r",
+        titre: ["Réparer et nettoyer", "Repair and clean up"],
+        precision: ["réseau, disque, système…", "network, disk, system…"],
+        mots: "internet wifi dns proxy hosts pare-feu firewall antivirus disque disk smart heure time sfc dism \
+               winsock" },
+    Outil { action: Action::Diagnostic, groupe: Some(Groupe::Machine), lettre: "o",
+        titre: ["Diagnostic", "Diagnostic"], precision: ["matériel, plantages, erreurs", "hardware, crashes, errors"],
+        mots: "plantages crashes erreurs errors écran bleu bsod journal logs matériel hardware" },
+    Outil { action: Action::Integrite, groupe: Some(Groupe::Machine), lettre: "i",
+        titre: ["Intégrité des fichiers critiques", "Critical file integrity"],
+        precision: ["comptes, sudo, SSH, démarrage…", "accounts, sudo, SSH, startup…"],
+        mots: "blake3 empreintes fingerprints fichiers files" },
+    Outil { action: Action::Appris, groupe: Some(Groupe::Machine), lettre: "",
+        titre: ["Ce que Gardien a appris", "What Gardien has learned"],
+        precision: ["tes choix, tes habitudes", "your choices, your habits"],
+        mots: "apprentissage learning appris learned choix choices normal oublier forget" },
+    Outil { action: Action::Lenteur, groupe: Some(Groupe::Machine), lettre: "",
+        titre: ["Pourquoi c'est lent ?", "Why is it slow?"],
+        precision: ["processeur, mémoire, démarrage", "processor, memory, startup"],
+        mots: "lent slow lenteur rame processeur cpu mémoire memory ram démarrage startup" },
+    Outil { action: Action::Fiche, groupe: Some(Groupe::Machine), lettre: "",
+        titre: ["Fiche de l'ordinateur", "Computer specs"],
+        precision: ["modèle, processeur, mémoire…", "model, processor, memory…"],
+        mots: "fiche specs matériel hardware modèle model processeur carte graphique gpu mémoire ram série" },
+    Outil { action: Action::Entretien, groupe: Some(Groupe::Machine), lettre: "",
+        titre: ["Entretien du mois", "Monthly check-up"], precision: ["", ""],
+        mots: "maintenance mensuel monthly mois month rappel reminder notification" },
+    Outil { action: Action::Scanner, groupe: Some(Groupe::Reseau), lettre: "",
+        titre: ["Scanner le réseau", "Scan the network"],
+        precision: ["appareils, ports, nouveautés", "devices, ports, changes"],
+        mots: "appareils devices ports réseau network lan nmap" },
+    Outil { action: Action::Appareil, groupe: Some(Groupe::Reseau), lettre: "",
+        titre: ["Scan approfondi d'un appareil", "Deep scan of one device"], precision: ["tous les ports", "all ports"],
+        mots: "appareils devices ports réseau network lan nmap" },
+    Outil { action: Action::Nommer, groupe: Some(Groupe::Reseau), lettre: "n",
+        titre: ["Nommer un appareil", "Name a device"], precision: ["« imprimante HP »", "“HP printer”"],
+        mots: "surnom nickname" },
+    Outil { action: Action::Surveillance, groupe: Some(Groupe::Reseau), lettre: "",
+        titre: ["Surveillance toutes les heures", "Hourly monitoring"], precision: ["", ""],
+        mots: "monitor surveiller notification" },
+    Outil { action: Action::Connexion, groupe: Some(Groupe::Reseau), lettre: "c",
+        titre: ["Test de connexion pour le jeu", "Connection test for gaming"],
+        precision: ["ping, gigue, débit, bufferbloat", "ping, jitter, speed, bufferbloat"],
+        mots: "ping latence latency débit speed jitter gigue bufferbloat jeu" },
+    Outil { action: Action::ListesNoires, groupe: Some(Groupe::Reseau), lettre: "",
+        titre: ["Adresse sur liste noire ?", "Address on blocklists?"],
+        precision: ["si oui, un appareil est infecté", "if so, a device is infected"],
+        mots: "spamhaus botnet liste noire blocklist blacklist dnsbl" },
+    Outil { action: Action::WifiCanaux, groupe: Some(Groupe::Reseau), lettre: "",
+        titre: ["Wi-Fi encombré ?", "Crowded Wi-Fi?"],
+        precision: ["canaux voisins, le plus libre", "nearby channels, the freest"],
+        mots: "wifi canal canaux channel encombré crowded interférences interference voisins neighbors signal box \
+               router" },
+    Outil { action: Action::Nat, groupe: Some(Groupe::Reseau), lettre: "",
+        titre: ["Type de NAT pour le jeu", "NAT type for gaming"],
+        precision: ["ouvert, modéré ou strict", "open, moderate or strict"],
+        mots: "nat stun upnp console xbox playstation jeu game multijoueur multiplayer redirection port forwarding \
+               ouvert open modéré moderate strict" },
+    Outil { action: Action::Cameras, groupe: Some(Groupe::Reseau), lettre: "",
+        titre: ["Caméras cachées ?", "Hidden cameras?"],
+        precision: ["location, chez quelqu'un", "rental, someone else's place"],
+        mots: "caméra camera espion spy cachée hidden location rental airbnb rtsp onvif" },
+    Outil { action: Action::AntivirusRapide, groupe: Some(Groupe::Protection), lettre: "",
+        titre: ["Analyse rapide", "Quick scan"], precision: ["téléchargements, bureau…", "downloads, desktop…"],
+        mots: "virus malware clamav defender" },
+    Outil { action: Action::AntivirusComplet, groupe: Some(Groupe::Protection), lettre: "",
+        titre: ["Analyse complète", "Full scan"], precision: ["dossier personnel", "home folder"],
+        mots: "virus malware clamav defender" },
+    Outil { action: Action::AntivirusDossier, groupe: Some(Groupe::Protection), lettre: "a",
+        titre: ["Clé USB ou dossier", "USB drive or folder"], precision: ["et pièges de clé", "and drive traps"],
+        mots: "virus usb clé autorun" },
+    Outil { action: Action::Yara, groupe: Some(Groupe::Protection), lettre: "",
+        titre: ["Analyse YARA", "YARA scan"],
+        precision: ["règles de logiciels malveillants", "malware detection rules"],
+        mots: "yara règles rules malware" },
+    Outil { action: Action::Pieges, groupe: Some(Groupe::Protection), lettre: "",
+        titre: ["Fichiers-pièges", "Decoy files"],
+        precision: ["alerte si un rançongiciel chiffre", "early ransomware warning"],
+        mots: "rançongiciel ransomware leurre decoy piège trap" },
+    // Titres de 34 caractères au plus dans ce groupe : au-delà, la colonne des précisions recule et les plus
+    // longues (YARA, fichiers-pièges) sortent des 76 colonnes.
+    Outil { action: Action::Bac, groupe: Some(Groupe::Protection), lettre: "b",
+        titre: ["Bac à sable : programme inconnu", "Sandbox: run an unknown program"],
+        precision: ["sans réseau, isolé", "no network, isolated"],
+        mots: "sandbox isoler firejail bubblewrap" },
+    Outil { action: Action::MotsDePasse, groupe: Some(Groupe::Protection), lettre: "p",
+        titre: ["Mots de passe : ont-ils fuité ?", "Passwords: have they leaked?"],
+        precision: ["rien n'est envoyé en clair", "nothing sent in clear"],
+        mots: "password hibp pwned fuite leak" },
+    Outil { action: Action::Courriel, groupe: Some(Groupe::Protection), lettre: "e",
+        titre: ["Courriel : a-t-il fuité ?", "Email address: has it leaked?"],
+        precision: ["avec ton accord", "with your consent"],
+        mots: "email mail fuite leak" },
+    Outil { action: Action::QuiParle, groupe: Some(Groupe::Protection), lettre: "",
+        titre: ["Qui parle à Internet ?", "Who talks to the Internet?"],
+        precision: ["connexions de chaque programme", "each program's connections"],
+        mots: "connexions connections sortantes outbound espion spyware mouchard télémétrie telemetry serveurs \
+               servers" },
+    Outil { action: Action::Lien, groupe: Some(Groupe::Protection), lettre: "",
+        titre: ["Ce lien est-il dangereux ?", "Is this link dangerous?"],
+        precision: ["examiné sans l'ouvrir", "checked without opening it"],
+        mots: "url lien link phishing hameçonnage arnaque scam texto sms courriel email domaine domain" },
+    Outil { action: Action::VerifierFichier, groupe: Some(Groupe::Protection), lettre: "",
+        titre: ["Vérifier un fichier téléchargé", "Check a downloaded file"],
+        precision: ["empreinte, YARA, antivirus", "checksum, YARA, antivirus"],
+        mots: "sha256 empreinte checksum hash télécharger download iso installateur installer fichier file" },
+    Outil { action: Action::Logiciels, groupe: Some(Groupe::Installer), lettre: "l",
+        titre: ["Logiciels", "Software"], precision: ["les meilleurs, par catégorie", "the best ones, by category"],
+        mots: "apps programmes programs installer install firefox vlc libreoffice" },
+    Outil { action: Action::Gaming, groupe: Some(Groupe::Installer), lettre: "g",
+        titre: ["Gaming", "Gaming"],
+        precision: if cfg!(windows) { ["composants et réglages de Windows", "components and Windows settings"] }
+            else if cfg!(target_os = "macos") { ["Rosetta, Steam, Epic, GOG…", "Rosetta, Steam, Epic, GOG…"] }
+            else { ["Steam, Vulkan, GameMode, Wine…", "Steam, Vulkan, GameMode, Wine…"] },
+        mots: "jeux games steam directx vulkan" },
+    Outil { action: Action::Nettoyer, groupe: Some(Groupe::Optimiser), lettre: "v",
+        titre: ["Nettoyer le système", "Clean up the system"],
+        precision: ["caches, temporaires, corbeille…", "caches, temp files, trash…"],
+        mots: "place space disque plein disk full cache corbeille trash" },
+    Outil { action: Action::OptimiserRecommandes, groupe: Some(Groupe::Optimiser), lettre: "",
+        titre: ["Réglages recommandés", "Recommended settings"],
+        precision: ["en une fois, tout s'annule", "in one go, all undoable"],
+        mots: "réglages settings" },
+    Outil { action: Action::OptimiserConfidentialite, groupe: Some(Groupe::Optimiser), lettre: "",
+        titre: ["Confidentialité", "Privacy"],
+        precision: if cfg!(windows) { ["télémétrie, publicités, suivi", "telemetry, ads, tracking"] }
+            else if cfg!(target_os = "macos") { ["publicités, analyses", "ads, analytics"] }
+            else { ["rapports et statistiques", "reports and statistics"] },
+        mots: "télémétrie telemetry vie privée privacy publicité ads" },
+    #[cfg(not(target_os = "macos"))]
+    Outil { action: Action::OptimiserPerformance, groupe: Some(Groupe::Optimiser), lettre: "",
+        titre: ["Performance et fiabilité", "Performance and reliability"],
+        precision: if cfg!(windows) { ["démarrage rapide, widgets…", "fast startup, widgets…"] }
+            else { ["SSD, taille du journal", "SSD, journal size"] },
+        mots: "ssd démarrage startup journal" },
+    Outil { action: Action::OptimiserConfort, groupe: Some(Groupe::Optimiser), lettre: "",
+        titre: ["Confort et fichiers", "Comfort and files"],
+        precision: if cfg!(windows) { ["extensions, clés USB, clic droit", "extensions, USB drives, menus"] }
+            else if cfg!(target_os = "macos") { ["extensions, .DS_Store, Finder", "extensions, .DS_Store, Finder"] }
+            else { ["annonces d'Ubuntu", "Ubuntu announcements"] },
+        mots: "extensions fichiers cachés hidden files" },
+    Outil { action: Action::DnsRapide, groupe: Some(Groupe::Optimiser), lettre: "",
+        titre: ["DNS le plus rapide", "Fastest DNS"], precision: ["mesuré ici, annulable", "measured here, undoable"],
+        mots: "dns rapide fast résolveur resolver cloudflare quad9 google adguard vitesse speed" },
+    Outil { action: Action::OptimiserAnnuler, groupe: Some(Groupe::Optimiser), lettre: "",
+        titre: ["Tout remettre comme avant", "Put everything back"],
+        precision: ["annule ce que Gardien a changé", "undo what Gardien changed"],
+        mots: "annuler undo restaurer" },
+    Outil { action: Action::Sauvegarder, groupe: Some(Groupe::Donnees), lettre: "d",
+        titre: ["Sauvegarder ou restaurer", "Back up or restore"],
+        precision: ["base des appareils, réglages", "device database, settings"],
+        mots: "backup restore sauvegarde base" },
+    Outil { action: Action::CopierFichiers, groupe: Some(Groupe::Donnees), lettre: "",
+        titre: ["Copier mes fichiers", "Copy my files"],
+        precision: ["vers un disque externe, vérifié", "to an external disk, checked"],
+        mots: "copier copy sauvegarde backup photos disque externe external drive fichiers" },
+    Outil { action: Action::Guide, groupe: Some(Groupe::Guide), lettre: "",
+        titre: ["Guide des commandes", "Command guide"],
+        precision: ["Linux, Windows, macOS, tous", "Linux, Windows, macOS, all"],
+        mots: "commandes commands terminal aide help" },
+    Outil { action: Action::Depanner, groupe: Some(Groupe::Depanner), lettre: "",
+        titre: ["Dépanner pas à pas", "Troubleshoot step by step"],
+        precision: ["Internet, son, imprimante…", "Internet, sound, printer…"],
+        mots: "dépanner troubleshoot panne problème internet son imprimante" },
+];
+
+// Une action ajoutée sans sa ligne décalerait toutes les suivantes : la compilation s'arrête.
+const _: () = assert!(OUTILS.len() == Action::Depanner as usize + 1);
+
+impl Action {
+    fn outil(self) -> &'static Outil {
+        &OUTILS[self as usize]
+    }
+
+    /// Texte de la ligne de menu et sa précision en gris.
+    fn libelle(self) -> (&'static str, &'static str) {
+        let precision = match self {
+            Action::Entretien if entretien::active() => tr!("activé : une notification", "on: one notification"),
+            Action::Entretien => tr!("désactivé", "off"),
+            Action::Surveillance if surveillance::active() => tr!("activée", "on"),
+            Action::Surveillance => tr!("désactivée", "off"),
+            _ => texte(self.outil().precision),
+        };
+        (texte(self.outil().titre), precision)
     }
 
     /// L'outil a-t-il quelque chose à proposer sur ce système ? (une catégorie de réglages vide n'est pas montrée)
@@ -744,288 +888,15 @@ impl Action {
     fn attendre_apres(self) -> bool {
         !matches!(self, Action::Guide | Action::Depanner)
     }
+}
 
-    /// Des mots que la recherche du menu principal trouve, en plus du texte affiché : ce que l'outil sait faire, en
-    /// français et en anglais (jamais affichés).
-    fn mots_cles(self) -> &'static str {
-        match self {
-            Action::Complet | Action::Corriger | Action::Rapport => "bilan check",
-            Action::Audit => "sécurité security pare-feu firewall ports ssh chiffrement encryption comptes accounts",
-            Action::Integrite => "blake3 empreintes fingerprints fichiers files",
-            Action::Appris => "apprentissage learning appris learned choix choices normal oublier forget",
-            Action::Entretien => "maintenance mensuel monthly mois month rappel reminder notification",
-            Action::Lenteur => "lent slow lenteur rame processeur cpu mémoire memory ram démarrage startup",
-            Action::Fiche => {
-                "fiche specs matériel hardware modèle model processeur carte graphique gpu mémoire ram série"
-            }
-            Action::CopierFichiers => "copier copy sauvegarde backup photos disque externe external drive fichiers",
-            Action::Depanner => "dépanner troubleshoot panne problème internet son imprimante",
-            Action::Diagnostic => "plantages crashes erreurs errors écran bleu bsod journal logs matériel hardware",
-            Action::Maj => "update upgrade pilotes drivers firmware bios windows update",
-            Action::Reparer => {
-                "internet wifi dns proxy hosts pare-feu firewall antivirus disque disk smart heure time sfc dism winsock"
-            }
-            Action::Scanner | Action::Appareil => "appareils devices ports réseau network lan nmap",
-            Action::Nommer => "surnom nickname",
-            Action::Surveillance => "monitor surveiller notification",
-            Action::Connexion => "ping latence latency débit speed jitter gigue bufferbloat jeu",
-            Action::ListesNoires => "spamhaus botnet liste noire blocklist blacklist dnsbl",
-            Action::WifiCanaux => {
-                "wifi canal canaux channel encombré crowded interférences interference voisins neighbors signal box router"
-            }
-            Action::Nat => {
-                "nat stun upnp console xbox playstation jeu game multijoueur multiplayer redirection port forwarding \
-                 ouvert open modéré moderate strict"
-            }
-            Action::Cameras => "caméra camera espion spy cachée hidden location rental airbnb rtsp onvif",
-            Action::AntivirusRapide | Action::AntivirusComplet => "virus malware clamav defender",
-            Action::AntivirusDossier => "virus usb clé autorun",
-            Action::Yara => "yara règles rules malware",
-            Action::Pieges => "rançongiciel ransomware leurre decoy piège trap",
-            Action::Bac => "sandbox isoler firejail bubblewrap",
-            Action::MotsDePasse => "password hibp pwned fuite leak",
-            Action::Courriel => "email mail fuite leak",
-            Action::QuiParle => {
-                "connexions connections sortantes outbound espion spyware mouchard télémétrie telemetry serveurs servers"
-            }
-            Action::Lien => "url lien link phishing hameçonnage arnaque scam texto sms courriel email domaine domain",
-            Action::VerifierFichier => {
-                "sha256 empreinte checksum hash télécharger download iso installateur installer fichier file"
-            }
-            Action::Logiciels => "apps programmes programs installer install firefox vlc libreoffice",
-            Action::Gaming => "jeux games steam directx vulkan",
-            Action::Nettoyer => "place space disque plein disk full cache corbeille trash",
-            Action::OptimiserRecommandes => "réglages settings",
-            Action::OptimiserConfidentialite => "télémétrie telemetry vie privée privacy publicité ads",
-            #[cfg(not(target_os = "macos"))]
-            Action::OptimiserPerformance => "ssd démarrage startup journal",
-            Action::OptimiserConfort => "extensions fichiers cachés hidden files",
-            Action::DnsRapide => "dns rapide fast résolveur resolver cloudflare quad9 google adguard vitesse speed",
-            Action::OptimiserAnnuler => "annuler undo restaurer",
-            Action::Sauvegarder => "backup restore sauvegarde base",
-            Action::Guide => "commandes commands terminal aide help",
-        }
-    }
-
-    /// Texte de la ligne de menu et sa précision en gris.
-    fn libelle(self) -> (&'static str, &'static str) {
-        match self {
-            Action::Complet => (
-                tr!("Bilan complet : machine + réseau", "Full check: machine + network"),
-                "",
-            ),
-            Action::Corriger => (tr!("Corriger les problèmes trouvés", "Fix the problems found"), ""),
-            Action::Rapport => (
-                tr!("Rapport détaillé dans le navigateur", "Detailed report in the browser"),
-                "",
-            ),
-            Action::Audit => (
-                tr!("Audit de sécurité", "Security audit"),
-                tr!("pare-feu, comptes, chiffrement…", "firewall, accounts, encryption…"),
-            ),
-            Action::Integrite => (
-                tr!("Intégrité des fichiers critiques", "Critical file integrity"),
-                tr!("comptes, sudo, SSH, démarrage…", "accounts, sudo, SSH, startup…"),
-            ),
-            Action::Appris => (
-                tr!("Ce que Gardien a appris", "What Gardien has learned"),
-                tr!("tes choix, tes habitudes", "your choices, your habits"),
-            ),
-            Action::Entretien => (
-                tr!("Entretien du mois", "Monthly check-up"),
-                if entretien::active() {
-                    tr!("activé : une notification", "on: one notification")
-                } else {
-                    tr!("désactivé", "off")
-                },
-            ),
-            Action::Lenteur => (
-                tr!("Pourquoi c'est lent ?", "Why is it slow?"),
-                tr!("processeur, mémoire, démarrage", "processor, memory, startup"),
-            ),
-            Action::Fiche => (
-                tr!("Fiche de l'ordinateur", "Computer specs"),
-                tr!("modèle, processeur, mémoire…", "model, processor, memory…"),
-            ),
-            Action::Diagnostic => (
-                tr!("Diagnostic", "Diagnostic"),
-                tr!("matériel, plantages, erreurs", "hardware, crashes, errors"),
-            ),
-            Action::Maj => (
-                tr!("Mises à jour", "Updates"),
-                tr!("système, programmes, pilotes", "system, programs, drivers"),
-            ),
-            Action::Reparer => (
-                tr!("Réparer et nettoyer", "Repair and clean up"),
-                tr!("réseau, disque, système…", "network, disk, system…"),
-            ),
-            Action::Scanner => (
-                tr!("Scanner le réseau", "Scan the network"),
-                tr!("appareils, ports, nouveautés", "devices, ports, changes"),
-            ),
-            Action::Appareil => (
-                tr!("Scan approfondi d'un appareil", "Deep scan of one device"),
-                tr!("tous les ports", "all ports"),
-            ),
-            Action::Nommer => (
-                tr!("Nommer un appareil", "Name a device"),
-                tr!("« imprimante HP »", "“HP printer”"),
-            ),
-            Action::Surveillance => (
-                tr!("Surveillance toutes les heures", "Hourly monitoring"),
-                if surveillance::active() {
-                    tr!("activée", "on")
-                } else {
-                    tr!("désactivée", "off")
-                },
-            ),
-            Action::Connexion => (
-                tr!("Test de connexion pour le jeu", "Connection test for gaming"),
-                tr!("ping, gigue, débit, bufferbloat", "ping, jitter, speed, bufferbloat"),
-            ),
-            Action::ListesNoires => (
-                tr!("Adresse sur liste noire ?", "Address on blocklists?"),
-                tr!("si oui, un appareil est infecté", "if so, a device is infected"),
-            ),
-            Action::WifiCanaux => (
-                tr!("Wi-Fi encombré ?", "Crowded Wi-Fi?"),
-                tr!("canaux voisins, le plus libre", "nearby channels, the freest"),
-            ),
-            Action::Nat => (
-                tr!("Type de NAT pour le jeu", "NAT type for gaming"),
-                tr!("ouvert, modéré ou strict", "open, moderate or strict"),
-            ),
-            Action::Cameras => (
-                tr!("Caméras cachées ?", "Hidden cameras?"),
-                tr!("location, chez quelqu'un", "rental, someone else's place"),
-            ),
-            Action::AntivirusRapide => (
-                tr!("Analyse rapide", "Quick scan"),
-                tr!("téléchargements, bureau…", "downloads, desktop…"),
-            ),
-            Action::AntivirusComplet => (
-                tr!("Analyse complète", "Full scan"),
-                tr!("dossier personnel", "home folder"),
-            ),
-            Action::AntivirusDossier => (
-                tr!("Clé USB ou dossier", "USB drive or folder"),
-                tr!("et pièges de clé", "and drive traps"),
-            ),
-            Action::Yara => (
-                tr!("Analyse YARA", "YARA scan"),
-                tr!("règles de logiciels malveillants", "malware detection rules"),
-            ),
-            Action::Pieges => (
-                tr!("Fichiers-pièges", "Decoy files"),
-                tr!("alerte si un rançongiciel chiffre", "early ransomware warning"),
-            ),
-            // Textes de 34 caractères au plus dans ce groupe : au-delà, la colonne des précisions recule et les plus
-            // longues (YARA, fichiers-pièges) sortent des 76 colonnes.
-            Action::Bac => (
-                tr!("Bac à sable : programme inconnu", "Sandbox: run an unknown program"),
-                tr!("sans réseau, isolé", "no network, isolated"),
-            ),
-            Action::MotsDePasse => (
-                tr!("Mots de passe : ont-ils fuité ?", "Passwords: have they leaked?"),
-                tr!("rien n'est envoyé en clair", "nothing sent in clear"),
-            ),
-            Action::Courriel => (
-                tr!("Courriel : a-t-il fuité ?", "Email address: has it leaked?"),
-                tr!("avec ton accord", "with your consent"),
-            ),
-            Action::QuiParle => (
-                tr!("Qui parle à Internet ?", "Who talks to the Internet?"),
-                tr!("connexions de chaque programme", "each program's connections"),
-            ),
-            Action::Lien => (
-                tr!("Ce lien est-il dangereux ?", "Is this link dangerous?"),
-                tr!("examiné sans l'ouvrir", "checked without opening it"),
-            ),
-            Action::VerifierFichier => (
-                tr!("Vérifier un fichier téléchargé", "Check a downloaded file"),
-                tr!("empreinte, YARA, antivirus", "checksum, YARA, antivirus"),
-            ),
-            Action::Logiciels => (
-                tr!("Logiciels", "Software"),
-                tr!("les meilleurs, par catégorie", "the best ones, by category"),
-            ),
-            Action::Gaming => (
-                tr!("Gaming", "Gaming"),
-                if cfg!(windows) {
-                    tr!("composants et réglages de Windows", "components and Windows settings")
-                } else if cfg!(target_os = "macos") {
-                    tr!("Rosetta, Steam, Epic, GOG…", "Rosetta, Steam, Epic, GOG…")
-                } else {
-                    tr!("Steam, Vulkan, GameMode, Wine…", "Steam, Vulkan, GameMode, Wine…")
-                },
-            ),
-            Action::Nettoyer => (
-                tr!("Nettoyer le système", "Clean up the system"),
-                tr!("caches, temporaires, corbeille…", "caches, temp files, trash…"),
-            ),
-            Action::OptimiserRecommandes => (
-                tr!("Réglages recommandés", "Recommended settings"),
-                tr!("en une fois, tout s'annule", "in one go, all undoable"),
-            ),
-            Action::OptimiserConfidentialite => (
-                tr!("Confidentialité", "Privacy"),
-                if cfg!(windows) {
-                    tr!("télémétrie, publicités, suivi", "telemetry, ads, tracking")
-                } else if cfg!(target_os = "macos") {
-                    tr!("publicités, analyses", "ads, analytics")
-                } else {
-                    tr!("rapports et statistiques", "reports and statistics")
-                },
-            ),
-            #[cfg(not(target_os = "macos"))]
-            Action::OptimiserPerformance => (
-                tr!("Performance et fiabilité", "Performance and reliability"),
-                if cfg!(windows) {
-                    tr!("démarrage rapide, widgets…", "fast startup, widgets…")
-                } else {
-                    tr!("SSD, taille du journal", "SSD, journal size")
-                },
-            ),
-            Action::OptimiserConfort => (
-                tr!("Confort et fichiers", "Comfort and files"),
-                if cfg!(windows) {
-                    tr!("extensions, clés USB, clic droit", "extensions, USB drives, menus")
-                } else if cfg!(target_os = "macos") {
-                    tr!("extensions, .DS_Store, Finder", "extensions, .DS_Store, Finder")
-                } else {
-                    tr!("annonces d'Ubuntu", "Ubuntu announcements")
-                },
-            ),
-            Action::DnsRapide => (
-                tr!("DNS le plus rapide", "Fastest DNS"),
-                tr!("mesuré ici, annulable", "measured here, undoable"),
-            ),
-            Action::OptimiserAnnuler => (
-                tr!("Tout remettre comme avant", "Put everything back"),
-                tr!("annule ce que Gardien a changé", "undo what Gardien changed"),
-            ),
-            Action::Sauvegarder => (
-                tr!("Sauvegarder ou restaurer", "Back up or restore"),
-                tr!("base des appareils, réglages", "device database, settings"),
-            ),
-            Action::CopierFichiers => (
-                tr!("Copier mes fichiers", "Copy my files"),
-                tr!("vers un disque externe, vérifié", "to an external disk, checked"),
-            ),
-            Action::Guide => (
-                tr!("Guide des commandes", "Command guide"),
-                tr!("Linux, Windows, macOS, tous", "Linux, Windows, macOS, all"),
-            ),
-            Action::Depanner => (
-                tr!("Dépanner pas à pas", "Troubleshoot step by step"),
-                tr!("Internet, son, imprimante…", "Internet, sound, printer…"),
-            ),
-        }
-    }
+/// Un texte de la table dans la langue de l'interface.
+fn texte([fr, en]: [&'static str; 2]) -> &'static str {
+    if langue::anglais() { en } else { fr }
 }
 
 /// Un groupe d'outils du menu principal, ouvert en sous-menu.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 enum Groupe {
     Machine,
     Reseau,
@@ -1075,73 +946,23 @@ impl Groupe {
         }
     }
 
-    fn actions(self) -> &'static [Action] {
-        match self {
-            Groupe::Machine => &[
-                Action::Audit,
-                Action::Maj,
-                Action::Reparer,
-                Action::Diagnostic,
-                Action::Integrite,
-                Action::Appris,
-                Action::Lenteur,
-                Action::Fiche,
-                Action::Entretien,
-            ],
-            Groupe::Reseau => &[
-                Action::Scanner,
-                Action::Appareil,
-                Action::Nommer,
-                Action::Surveillance,
-                Action::Connexion,
-                Action::ListesNoires,
-                Action::WifiCanaux,
-                Action::Nat,
-                Action::Cameras,
-            ],
-            Groupe::Protection => &[
-                Action::AntivirusRapide,
-                Action::AntivirusComplet,
-                Action::AntivirusDossier,
-                Action::Yara,
-                Action::Pieges,
-                Action::Bac,
-                Action::MotsDePasse,
-                Action::Courriel,
-                Action::QuiParle,
-                Action::Lien,
-                Action::VerifierFichier,
-            ],
-            Groupe::Installer => &[Action::Logiciels, Action::Gaming],
-            Groupe::Optimiser => &[
-                Action::Nettoyer,
-                Action::OptimiserRecommandes,
-                Action::OptimiserConfidentialite,
-                #[cfg(not(target_os = "macos"))]
-                Action::OptimiserPerformance,
-                Action::OptimiserConfort,
-                Action::DnsRapide,
-                Action::OptimiserAnnuler,
-            ],
-            Groupe::Donnees => &[Action::Sauvegarder, Action::CopierFichiers],
-            Groupe::Guide => &[Action::Guide],
-            Groupe::Depanner => &[Action::Depanner],
-        }
+    /// Ses outils, dans l'ordre du sous-menu.
+    fn actions(self) -> Vec<Action> {
+        OUTILS
+            .iter()
+            .filter(|o| o.groupe == Some(self))
+            .map(|o| o.action)
+            .collect()
     }
 }
 
 /// Sous-menu d'un groupe : ses outils numérotés, Entrée pour revenir au menu principal. Un groupe d'un seul outil
 /// (Données) l'ouvre directement. Un outil sans rien à proposer sur ce système n'est pas montré.
 async fn sous_menu(s: &mut Session, groupe: Groupe) {
-    let actions: Vec<Action> = groupe.actions().iter().copied().filter(|a| a.disponible()).collect();
+    let actions: Vec<Action> = groupe.actions().into_iter().filter(|a| a.disponible()).collect();
     if let [seule] = actions[..] {
         executer(s, seule).await;
-        if seule.attendre_apres() {
-            demander(&trf!(
-                "\n{GRIS}Entrée pour revenir au menu…{RESET}",
-                "\n{GRIS}Enter to go back to the menu…{RESET}"
-            ));
-        }
+        revenir_au_menu(seule);
         return;
     }
     let mut dernier = String::from("1");
@@ -1274,6 +1095,100 @@ async fn executer(s: &mut Session, action: Action) {
     }
 }
 
+/// Aide anglaise des commandes : la française est dans les commentaires de `Commande`.
+#[rustfmt::skip] // une ligne par aide, que rustfmt étalerait sur quatre
+const AIDES_EN: &[(&str, &str)] = &[
+    ("complet", "Full check: this machine, then the network"),
+    ("machine", "Audit this machine (firewall, ports, SSH, updates, encryption…)"),
+    ("corriger", "Audit the machine, then apply the fixes step by step"),
+    ("reseau", "Network scan: devices, open ports, risks, changes since previous scans"),
+    ("antivirus", "Malware scan: ClamAV (Linux, macOS) or Microsoft Defender (Windows)"),
+    ("surveillance", "Turn hourly network monitoring on or off (notification for unknown devices)"),
+    ("entretien", "Monthly check-up: once a month, silently, the grade, waiting updates, space to free and new \
+                   problems, in one notification; nothing is changed. Without argument: what it would say now"),
+    ("maj", "Updates: system, programs, drivers and firmware checked at once, then installed with your consent"),
+    ("reparer", "Common repairs: network, hijacked browsing, firewall, antivirus, system files, disk, space, updates, \
+                 time"),
+    ("logiciels", "Software: the best programs, mostly open source (browsers, passwords, office, video, design, system \
+                   tools…), by category: choose, then install from the system's official source"),
+    ("diagnostic", "Computer diagnostic: hardware, system and recent problems (crashes, errors). Read only"),
+    ("nettoyer", "Clean up the system: caches, temporary files, downloaded packages, old logs, trash… The space each \
+                  item frees is shown first; check, then accept"),
+    ("connexion", "Connection test for gaming: ping, jitter, packet loss, speed and bufferbloat"),
+    ("appris", "What Gardien has learned on this computer: the alerts declared normal, and forgetting them"),
+    ("listes-noires", "Is your home's Internet address on a blocklist (Spamhaus, SpamCop, DroneBL, PSBL)? If so, a \
+                       device is probably infected. After your consent: the lists see the address"),
+    ("yara", "YARA scan: 308 rules for malware families (ReversingLabs), alongside the antivirus. Without a folder: \
+              downloads, desktop, startup. Read-only"),
+    ("canaux", "Crowded Wi-Fi: nearby networks by channel, and the freest channel to set on the router. Read-only"),
+    ("nat", "NAT type for gaming (open, moderate or strict), from two public servers (STUN). Read-only"),
+    ("cameras", "Hidden cameras: on a rental's or someone's network, the devices that look like cameras. Read-only"),
+    ("dns-rapide", "Fastest DNS: measures the current DNS and public ones, then offers the fastest, undoable. A DNS \
+                    that protects (NextDNS, encrypted, filtering) is kept"),
+    ("pieges", "Decoy files against ransomware: place them (after your consent), see whether they are intact, or \
+                remove them"),
+    ("isoler", "Run an unknown program in a sandbox: no network, home folder hidden"),
+    ("courriel", "Email address leaks: the address is sent to the search service, after your consent"),
+    ("integrite", "Critical file integrity: BLAKE3 fingerprint reference, then what changed since"),
+    ("motdepasse", "Check whether passwords have leaked (Have I Been Pwned); only 5 characters of their fingerprint \
+                    are sent"),
+    ("sortantes", "Who talks to the Internet? Each program's current connections, with the server's name. Read-only"),
+    ("lien", "Is this link dangerous? Checked without ever opening it; after your consent, its age and public lists"),
+    ("verifier-fichier", "Check a downloaded file: checksum compared with the site's, name and content, YARA and \
+                          antivirus"),
+    ("sauvegarder", "Back up the device database and the monitoring state to a JSON file"),
+    ("restaurer", "Add a backup (or an appareils.json) to the current database, without erasing anything"),
+    ("nommer", "Give a nickname to a device of the database (“HP printer”), by its IP or MAC"),
+    ("gaming", "Gaming: components for games (Windows: Visual C++, DirectX…; Linux: Steam, Vulkan, GameMode, Wine…; \
+                macOS: Rosetta, Steam, Epic…) and system settings"),
+    ("guide", "Command guide: the useful commands of Linux, Windows, macOS and all systems, sorted by program"),
+    ("lenteur", "Why is it slow? What keeps the processor, memory and disk busy, startup, the programs started at \
+                 login. Read only"),
+    ("demarrage", "Startup programs: those that start at login, to remove or put back after your consent. Each removal \
+                   is undone exactly (Optimize › Put everything back)"),
+    ("fiche", "Computer specs: model, motherboard, processor, memory, graphics card, disks, system. Serial numbers are \
+               shown on screen only"),
+    ("copier-fichiers", "Copy my files (Documents, Pictures, Desktop, Videos, Music) to an external disk: checked \
+                         copy, nothing deleted or overwritten, an interrupted copy resumes"),
+    ("depanner", "Troubleshoot step by step: no Internet, Wi-Fi dropping, slow computer, no sound, printer, disk full"),
+];
+
+/// Aide anglaise des options : (commande, option, aide).
+#[rustfmt::skip]
+const OPTIONS_EN: &[(&str, &str, &str)] = &[
+    ("nettoyer", "liste", "Show what could be cleaned up and the space to gain, deleting nothing"),
+    ("logiciels", "liste", "Show each program offered and its state, without installing anything"),
+    ("logiciels", "recommandes", "Install the starter pack (browser, passwords, video, office, archives), after your \
+                                  consent"),
+    ("complet", "html", "Also open the HTML report in the browser"),
+    ("complet", "texte", "Show the report as plain text (Markdown) in the terminal: no browser or graphical display \
+                          needed"),
+    ("reseau", "cible", "IP, CIDR network (10.0.0.0/24) or range (10.0.0.1-50). Default: your local network"),
+    ("reseau", "ports", "“courants”/“common” (default), “tous”/“all” (1-65535) or a list “22,80,8000-8100”"),
+    ("reseau", "timeout", "Connection timeout per port, in milliseconds"),
+    ("reseau", "parallele", "Number of simultaneous connections"),
+    ("antivirus", "complet", "The whole home folder instead of the risky places"),
+    ("antivirus", "dossier", "A USB drive, external disk or folder to scan entirely"),
+    ("isoler", "fichier", "Program or script to run"),
+    ("pieges", "retirer", "Remove the decoy files placed"),
+    ("yara", "complet", "The whole home folder instead of the risky places"),
+    ("yara", "dossier", "A USB drive, external disk or folder to scan entirely"),
+    ("integrite", "accepter", "Take the current state as the new reference (after a system update)"),
+    ("integrite", "temps_reel", "Watch the critical files live until Ctrl-C"),
+    ("sauvegarder", "fichier", "File to write (default: gardien-sauvegarde-YYYY-MM-DD.json in the home or Documents \
+                                folder)"),
+    ("nommer", "appareil", "IP (on the current network) or MAC address of the device"),
+    ("nommer", "surnom", "The nickname; empty to remove it"),
+    ("lien", "adresse", "The link you received (in quotes if it contains “&” or “?”)"),
+    ("verifier-fichier", "fichier", "The downloaded file"),
+    ("verifier-fichier", "empreinte", "The checksum published by the site (preferably SHA-256). Otherwise: a \
+                                       SHA256SUMS or .sha256 next to it"),
+    ("guide", "quoi", "A system (linux, windows, macos, all), a program (systemctl, winget…) or words to look for"),
+    ("fiche", "json", "The specs as JSON, for a script (without the serial numbers)"),
+    ("copier-fichiers", "destination", "A folder on an external disk (default: chosen among the plugged-in disks)"),
+    ("depanner", "sujet", "The subject: internet, wifi, slow, sound, printer, disk (or words describing it)"),
+];
+
 /// La ligne de commande, avec son aide en anglais si l'interface est en anglais (l'aide écrite plus haut, en
 /// commentaires, est la version française).
 fn ligne_de_commande() -> clap::Command {
@@ -1283,258 +1198,23 @@ fn ligne_de_commande() -> clap::Command {
     }
     let mut c = c
         .about("Secures and optimizes your machine and your local network: check, fixes, settings. No argument: menu.");
-    let aides: &[(&str, &str)] = &[
-        ("complet", "Full check: this machine, then the network"),
-        (
-            "machine",
-            "Audit this machine (firewall, ports, SSH, updates, encryption…)",
-        ),
-        ("corriger", "Audit the machine, then apply the fixes step by step"),
-        (
-            "reseau",
-            "Network scan: devices, open ports, risks, changes since previous scans",
-        ),
-        (
-            "antivirus",
-            "Malware scan: ClamAV (Linux, macOS) or Microsoft Defender (Windows)",
-        ),
-        (
-            "surveillance",
-            "Turn hourly network monitoring on or off (notification for unknown devices)",
-        ),
-        (
-            "entretien",
-            "Monthly check-up: once a month, silently, the grade, waiting updates, space to free and new problems, in one notification; nothing is changed. Without argument: what it would say now",
-        ),
-        (
-            "maj",
-            "Updates: system, programs, drivers and firmware checked at once, then installed with your consent",
-        ),
-        (
-            "reparer",
-            "Common repairs: network, hijacked browsing, firewall, antivirus, system files, disk, space, updates, time",
-        ),
-        (
-            "logiciels",
-            "Software: the best programs, mostly open source (browsers, passwords, office, video, design, system tools…), by category: choose, then install from the system's official source",
-        ),
-        (
-            "diagnostic",
-            "Computer diagnostic: hardware, system and recent problems (crashes, errors). Read only",
-        ),
-        (
-            "nettoyer",
-            "Clean up the system: caches, temporary files, downloaded packages, old logs, trash… The space each item frees is shown first; check, then accept",
-        ),
-        (
-            "connexion",
-            "Connection test for gaming: ping, jitter, packet loss, speed and bufferbloat",
-        ),
-        (
-            "appris",
-            "What Gardien has learned on this computer: the alerts declared normal, and forgetting them",
-        ),
-        (
-            "listes-noires",
-            "Is your home's Internet address on a blocklist (Spamhaus, SpamCop, DroneBL, PSBL)? If so, a device is probably infected. After your consent: the lists see the address",
-        ),
-        (
-            "yara",
-            "YARA scan: 308 rules for malware families (ReversingLabs), alongside the antivirus. Without a folder: downloads, desktop, startup. Read-only",
-        ),
-        (
-            "canaux",
-            "Crowded Wi-Fi: nearby networks by channel, and the freest channel to set on the router. Read-only",
-        ),
-        (
-            "nat",
-            "NAT type for gaming (open, moderate or strict), from two public servers (STUN). Read-only",
-        ),
-        (
-            "cameras",
-            "Hidden cameras: on a rental's or someone's network, the devices that look like cameras. Read-only",
-        ),
-        (
-            "dns-rapide",
-            "Fastest DNS: measures the current DNS and public ones, then offers the fastest, undoable. A DNS that protects (NextDNS, encrypted, filtering) is kept",
-        ),
-        (
-            "pieges",
-            "Decoy files against ransomware: place them (after your consent), see whether they are intact, or remove them",
-        ),
-        (
-            "isoler",
-            "Run an unknown program in a sandbox: no network, home folder hidden",
-        ),
-        (
-            "courriel",
-            "Email address leaks: the address is sent to the search service, after your consent",
-        ),
-        (
-            "integrite",
-            "Critical file integrity: BLAKE3 fingerprint reference, then what changed since",
-        ),
-        (
-            "motdepasse",
-            "Check whether passwords have leaked (Have I Been Pwned); only 5 characters of their fingerprint are sent",
-        ),
-        (
-            "sortantes",
-            "Who talks to the Internet? Each program's current connections, with the server's name. Read-only",
-        ),
-        (
-            "lien",
-            "Is this link dangerous? Checked without ever opening it; after your consent, its age and public lists",
-        ),
-        (
-            "verifier-fichier",
-            "Check a downloaded file: checksum compared with the site's, name and content, YARA and antivirus",
-        ),
-        (
-            "sauvegarder",
-            "Back up the device database and the monitoring state to a JSON file",
-        ),
-        (
-            "restaurer",
-            "Add a backup (or an appareils.json) to the current database, without erasing anything",
-        ),
-        (
-            "nommer",
-            "Give a nickname to a device of the database (“HP printer”), by its IP or MAC",
-        ),
-        (
-            "gaming",
-            "Gaming: components for games (Windows: Visual C++, DirectX…; Linux: Steam, Vulkan, GameMode, Wine…; macOS: Rosetta, Steam, Epic…) and system settings",
-        ),
-        (
-            "guide",
-            "Command guide: the useful commands of Linux, Windows, macOS and all systems, sorted by program",
-        ),
-        (
-            "lenteur",
-            "Why is it slow? What keeps the processor, memory and disk busy, startup, the programs started at login. Read only",
-        ),
-        (
-            "demarrage",
-            "Startup programs: those that start at login, to remove or put back after your consent. Each removal is undone exactly (Optimize › Put everything back)",
-        ),
-        (
-            "fiche",
-            "Computer specs: model, motherboard, processor, memory, graphics card, disks, system. Serial numbers are shown on screen only",
-        ),
-        (
-            "copier-fichiers",
-            "Copy my files (Documents, Pictures, Desktop, Videos, Music) to an external disk: checked copy, nothing deleted or overwritten, an interrupted copy resumes",
-        ),
-        (
-            "depanner",
-            "Troubleshoot step by step: no Internet, Wi-Fi dropping, slow computer, no sound, printer, disk full",
-        ),
-    ];
-    for &(nom, aide) in aides {
+    for &(nom, aide) in AIDES_EN {
         c = c.mut_subcommand(nom, |s| s.about(aide));
     }
-    c.mut_subcommand("nettoyer", |s| {
-        s.mut_arg("liste", |a| {
-            a.help("Show what could be cleaned up and the space to gain, deleting nothing")
-        })
-    })
-    .mut_subcommand("logiciels", |s| {
-        s.mut_arg("liste", |a| {
-            a.help("Show each program offered and its state, without installing anything")
-        })
-        .mut_arg("recommandes", |a| {
-            a.help("Install the starter pack (browser, passwords, video, office, archives), after your consent")
-        })
-    })
-    .mut_subcommand("complet", |s| {
-        s.mut_arg("html", |a| a.help("Also open the HTML report in the browser"))
-            .mut_arg("texte", |a| {
-                a.help(
-                    "Show the report as plain text (Markdown) in the terminal: no browser or graphical display needed",
-                )
-            })
-    })
-    .mut_subcommand("reseau", |s| {
-        s.mut_arg("cible", |a| {
-            a.help("IP, CIDR network (10.0.0.0/24) or range (10.0.0.1-50). Default: your local network")
-        })
-        .mut_arg("ports", |a| {
-            a.help("“courants”/“common” (default), “tous”/“all” (1-65535) or a list “22,80,8000-8100”")
-        })
-        .mut_arg("timeout", |a| a.help("Connection timeout per port, in milliseconds"))
-        .mut_arg("parallele", |a| a.help("Number of simultaneous connections"))
-    })
-    .mut_subcommand("antivirus", |s| {
-        s.mut_arg("complet", |a| {
-            a.help("The whole home folder instead of the risky places")
-        })
-        .mut_arg("dossier", |a| {
-            a.help("A USB drive, external disk or folder to scan entirely")
-        })
-    })
-    .mut_subcommand("isoler", |s| {
-        s.mut_arg("fichier", |a| a.help("Program or script to run"))
-    })
-    .mut_subcommand("pieges", |s| {
-        s.mut_arg("retirer", |a| a.help("Remove the decoy files placed"))
-    })
-    .mut_subcommand("yara", |s| {
-        s.mut_arg("complet", |a| {
-            a.help("The whole home folder instead of the risky places")
-        })
-        .mut_arg("dossier", |a| {
-            a.help("A USB drive, external disk or folder to scan entirely")
-        })
-    })
-    .mut_subcommand("integrite", |s| {
-        s.mut_arg("accepter", |a| {
-            a.help("Take the current state as the new reference (after a system update)")
-        })
-        .mut_arg("temps_reel", |a| a.help("Watch the critical files live until Ctrl-C"))
-    })
-    .mut_subcommand("sauvegarder", |s| {
-        s.mut_arg("fichier", |a| {
-            a.help("File to write (default: gardien-sauvegarde-YYYY-MM-DD.json in the home or Documents folder)")
-        })
-    })
-    .mut_subcommand("nommer", |s| {
-        s.mut_arg("appareil", |a| {
-            a.help("IP (on the current network) or MAC address of the device")
-        })
-        .mut_arg("surnom", |a| a.help("The nickname; empty to remove it"))
-    })
-    .mut_subcommand("lien", |s| {
-        s.mut_arg("adresse", |a| {
-            a.help("The link you received (in quotes if it contains “&” or “?”)")
-        })
-    })
-    .mut_subcommand("verifier-fichier", |s| {
-        s.mut_arg("fichier", |a| a.help("The downloaded file"))
-            .mut_arg("empreinte", |a| {
-                a.help("The checksum published by the site (preferably SHA-256). Otherwise: a SHA256SUMS or .sha256 next to it")
-            })
-    })
-    .mut_subcommand("guide", |s| {
-        s.mut_arg("quoi", |a| {
-            a.help("A system (linux, windows, macos, all), a program (systemctl, winget…) or words to look for")
-        })
-    })
-    .mut_subcommand("fiche", |s| {
-        s.mut_arg("json", |a| {
-            a.help("The specs as JSON, for a script (without the serial numbers)")
-        })
-    })
-    .mut_subcommand("copier-fichiers", |s| {
-        s.mut_arg("destination", |a| {
-            a.help("A folder on an external disk (default: chosen among the plugged-in disks)")
-        })
-    })
-    .mut_subcommand("depanner", |s| {
-        s.mut_arg("sujet", |a| {
-            a.help("The subject: internet, wifi, slow, sound, printer, disk (or words describing it)")
-        })
-    })
+    for &(commande, option, aide) in OPTIONS_EN {
+        c = c.mut_subcommand(commande, |s| s.mut_arg(option, |a| a.help(aide)));
+    }
+    c
+}
+
+/// La portée d'une analyse demandée en ligne de commande : le dossier donné, sinon tout le dossier personnel
+/// (--complet), sinon les endroits à risque.
+fn portee(dossier: Option<std::path::PathBuf>, complet: bool) -> antivirus::Portee {
+    match (dossier, complet) {
+        (Some(d), _) => antivirus::Portee::Dossier(d),
+        (None, true) => antivirus::Portee::Complete,
+        (None, false) => antivirus::Portee::Rapide,
+    }
 }
 
 #[tokio::main]
@@ -1583,11 +1263,7 @@ async fn main() {
                 std::process::exit(1);
             }
         }
-        Some(Commande::Antivirus { complet, dossier }) => antivirus::analyser(match (dossier, complet) {
-            (Some(d), _) => antivirus::Portee::Dossier(d),
-            (None, true) => antivirus::Portee::Complete,
-            (None, false) => antivirus::Portee::Rapide,
-        }),
+        Some(Commande::Antivirus { complet, dossier }) => antivirus::analyser(portee(dossier, complet)),
         Some(Commande::Surveillance { etat }) => surveillance::activer(etat == "on"),
         Some(Commande::Surveiller) => surveillance::surveiller().await,
         Some(Commande::Entretien { etat }) => match etat {
@@ -1625,11 +1301,7 @@ async fn main() {
         }
         Some(Commande::Isoler { fichier }) => isoler::isoler(&fichier),
         Some(Commande::Pieges { retirer }) => pieges::commande(retirer),
-        Some(Commande::Yara { complet, dossier }) => yara::analyser(&match (dossier, complet) {
-            (Some(d), _) => antivirus::Portee::Dossier(d),
-            (None, true) => antivirus::Portee::Complete,
-            (None, false) => antivirus::Portee::Rapide,
-        }),
+        Some(Commande::Yara { complet, dossier }) => yara::analyser(&portee(dossier, complet)),
         Some(Commande::ListesNoires) => listes_noires::verifier(),
         Some(Commande::Canaux) => canaux::analyser(),
         Some(Commande::Nat) => nat::tester(),
@@ -1663,12 +1335,14 @@ mod tests_menu {
     fn chaque_outil_a_sa_place() {
         // 1, 2, 3 au menu principal ; tout le reste dans un seul groupe.
         let principal = [Action::Complet, Action::Corriger, Action::Rapport];
-        for a in Action::TOUTES {
-            let groupes = GROUPES.iter().filter(|g| g.actions().contains(a)).count();
-            assert_eq!(groupes + usize::from(principal.contains(a)), 1);
+        for (i, o) in OUTILS.iter().enumerate() {
+            // La ligne d'un outil est à son numéro : `Action::outil` la trouve sans chercher.
+            assert_eq!(o.action as usize, i);
+            let groupes = GROUPES.iter().filter(|g| g.actions().contains(&o.action)).count();
+            assert_eq!(groupes + usize::from(principal.contains(&o.action)), 1);
         }
         // Raccourcis uniques, et jamais un chiffre (les chiffres ouvrent les groupes).
-        let mut lettres: Vec<&str> = Action::TOUTES.iter().filter_map(|a| a.raccourci()).collect();
+        let mut lettres: Vec<&str> = OUTILS.iter().map(|o| o.lettre).filter(|l| !l.is_empty()).collect();
         assert!(
             lettres
                 .iter()
@@ -1697,8 +1371,8 @@ mod tests_menu {
             if matches!(g, Groupe::Guide | Groupe::Depanner) {
                 continue;
             }
-            for (j, a) in g.actions().iter().filter(|a| a.disponible()).enumerate() {
-                assert!(outil_au_chemin(&format!("{}.{}", i + 4, j + 1)) == Some(*a));
+            for (j, a) in g.actions().into_iter().filter(|a| a.disponible()).enumerate() {
+                assert!(outil_au_chemin(&format!("{}.{}", i + 4, j + 1)) == Some(a));
             }
         }
         assert!(outil_au_chemin("4.99").is_none() && outil_au_chemin("x.1").is_none());
