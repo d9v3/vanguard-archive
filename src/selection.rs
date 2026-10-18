@@ -1,9 +1,11 @@
 //! Menus au clavier : ↑ ↓ pour se déplacer, Entrée pour lancer, Échap pour revenir. Les touches d'avant (un chiffre
 //! ou une lettre, puis Entrée) marchent toujours, et la ligne en surbrillance les suit. Taper un mot cherche : seules
 //! les lignes qui le contiennent restent à l'écran, sans tenir compte des accents ni des majuscules ; au menu
-//! principal, la recherche voit aussi les outils des sous-menus et les pages du guide (lignes « cachées »). Sans vrai
-//! terminal (réponses envoyées par un tube : tests, scripts), ou dans une fenêtre trop petite pour le menu, la réponse
-//! se lit ligne par ligne, comme avant ; un mot qui ne désigne qu'un seul choix le choisit.
+//! principal, la recherche voit aussi les outils des sous-menus et les pages du guide (lignes « cachées »). Un menu
+//! plus haut que la fenêtre défile : l'en-tête reste en place, la liste suit la ligne en surbrillance, et « ↑ » ou
+//! « ↓ » disent combien de lignes sont cachées. Sans vrai terminal (réponses envoyées par un tube : tests, scripts), ou
+//! dans une fenêtre minuscule, la réponse se lit ligne par ligne, comme avant ; un mot qui ne désigne qu'un seul choix
+//! le choisit.
 
 use std::fmt::Write as _;
 use std::io::{IsTerminal, Write};
@@ -305,6 +307,57 @@ fn texte(l: &Ligne, colonne: usize, en_cours: bool) -> Option<String> {
     }
 }
 
+/// Hauteur de fenêtre en dessous de laquelle un menu se lit ligne par ligne : trop peu de place pour défiler.
+const RANGEES_MINIMUM: usize = 10;
+
+/// Ce qui tient dans `place` rangées d'un menu trop haut pour la fenêtre : l'en-tête (`entete` premières rangées :
+/// cadre, titre) reste en place s'il laisse de la place à la liste, puis la partie de la liste qui contient la rangée
+/// `en_cours`, entre deux annonces de ce qui est caché au-dessus et au-dessous. `haut`, la première rangée montrée de
+/// la liste, est gardé d'un affichage à l'autre : la liste ne bouge que si la ligne en cours allait en sortir, et
+/// garde alors une rangée de contexte (le titre d'une section). Rend au plus `place` rangées.
+fn fenetre(rangees: &[String], entete: usize, en_cours: usize, place: usize, haut: &mut usize) -> Vec<String> {
+    if rangees.len() <= place {
+        *haut = 0;
+        return rangees.to_vec();
+    }
+    // Au moins trois rangées de liste sous l'en-tête et les deux annonces ; sinon l'en-tête défile aussi.
+    let entete = if entete + 2 + 3 <= place { entete } else { 0 };
+    let liste = &rangees[entete..];
+    let hauteur = place.saturating_sub(entete + 2).max(1);
+    let ligne = en_cours.saturating_sub(entete).min(liste.len().saturating_sub(1));
+    let marge = usize::from(hauteur >= 5);
+    // Borné d'abord : l'appelant demande la fin de la liste avec `usize::MAX`.
+    let dernier_haut = liste.len().saturating_sub(hauteur);
+    *haut = (*haut).min(dernier_haut);
+    if ligne < *haut + marge {
+        *haut = ligne.saturating_sub(marge);
+    } else if ligne + marge >= *haut + hauteur {
+        *haut = (ligne + marge + 1).saturating_sub(hauteur);
+    }
+    *haut = (*haut).min(dernier_haut);
+    let reste = liste.len().saturating_sub(*haut + hauteur);
+    let annonce = |fleche: char, n: usize, texte: String| {
+        if n == 0 {
+            String::new()
+        } else {
+            format!("  {GRIS}{fleche} {texte}{RESET}")
+        }
+    };
+    let mut ecran: Vec<String> = rangees[..entete].to_vec();
+    ecran.push(annonce(
+        '↑',
+        *haut,
+        trf!("{} ligne(s) plus haut", "{} more line(s) above", *haut),
+    ));
+    ecran.extend(liste.iter().skip(*haut).take(hauteur).cloned());
+    ecran.push(annonce(
+        '↓',
+        reste,
+        trf!("{reste} ligne(s) plus bas", "{reste} more line(s) below"),
+    ));
+    ecran
+}
+
 /// Le mode clavier (touches lues une à une, sans écho), rendu au terminal quoi qu'il arrive : choix fait, plantage.
 struct ModeClavier;
 
@@ -329,14 +382,10 @@ pub fn choisir(lignes: &[Ligne], invite: &str, depart: &str, echap: &str) -> Opt
     // Les flèches ne parcourent que les lignes affichées ; la recherche, elle, voit aussi les lignes cachées.
     let visibles: Vec<&str> = choix.iter().filter(|c| c.visible).map(|c| c.touche).collect();
     let colonne = colonne(lignes);
-    // Le menu est redessiné depuis le haut de la fenêtre : il doit y tenir en entier, sans retour à la ligne.
-    let hauteur: usize = lignes
-        .iter()
-        .filter_map(|l| texte(l, colonne, false))
-        .map(|t| 1 + t.matches('\n').count())
-        .sum();
+    // Le menu est redessiné depuis le haut de la fenêtre, sans retour à la ligne : assez large pour ses lignes ; s'il
+    // est plus haut que la fenêtre, il défile.
     let tient = terminal::size()
-        .is_ok_and(|(largeur, rangees)| usize::from(largeur) > LARGEUR && usize::from(rangees) >= hauteur + 2);
+        .is_ok_and(|(largeur, rangees)| usize::from(largeur) > LARGEUR && usize::from(rangees) >= RANGEES_MINIMUM);
     let clavier = std::io::stdin().is_terminal() && std::io::stdout().is_terminal() && tient && !visibles.is_empty();
     let Some(_mode) = clavier.then(ModeClavier::activer).flatten() else {
         for t in lignes.iter().filter_map(|l| texte(l, colonne, false)) {
@@ -351,6 +400,8 @@ pub fn choisir(lignes: &[Ligne], invite: &str, depart: &str, echap: &str) -> Opt
         .unwrap_or(0);
     // La ligne en surbrillance parmi celles que la recherche a trouvées.
     let mut en_cours_trouve = 0;
+    // Première rangée montrée de la liste, quand le menu défile.
+    let mut haut = 0;
     // Ce qui est tapé au clavier : un raccourci validé par Entrée, comme avant, ou des mots à chercher.
     let mut tape = String::new();
     let aide = trf!(
@@ -389,15 +440,20 @@ pub fn choisir(lignes: &[Ligne], invite: &str, depart: &str, echap: &str) -> Opt
         // En mode clavier, le terminal ne revient plus seul au début de la ligne : d'où les « \r\n ».
         let mut ecran = String::from("\x1b[H");
         if recherche {
-            for t in &entete {
-                ecran += &t.replace('\n', "\x1b[K\r\n");
-                ecran += "\x1b[K\r\n";
+            // L'en-tête reste au-dessus de la recherche s'il laisse au moins trois lignes trouvées à l'écran.
+            let rangees = terminal::size().map_or(24, |(_, r)| usize::from(r));
+            let montre_entete = hauteur_entete + 4 + 3 <= rangees;
+            if montre_entete {
+                for t in &entete {
+                    ecran += &t.replace('\n', "\x1b[K\r\n");
+                    ecran += "\x1b[K\r\n";
+                }
             }
             ecran += &ligne_section(&trf!("RECHERCHE « {} »", "SEARCH “{}”", couper(tape.trim(), 40)));
             ecran += "\x1b[K\r\n";
             // Ce qui tient sous l'en-tête, au-dessus de l'aide et de la saisie ; au-delà, une ligne le dit.
-            let rangees = terminal::size().map_or(24, |(_, r)| usize::from(r));
-            let mut place = rangees.saturating_sub(hauteur_entete + 4).max(1);
+            let au_dessus = if montre_entete { hauteur_entete } else { 0 };
+            let mut place = rangees.saturating_sub(au_dessus + 4).max(1);
             if trouves.len() > place {
                 place = place.saturating_sub(1).max(1);
             }
@@ -429,14 +485,42 @@ pub fn choisir(lignes: &[Ligne], invite: &str, depart: &str, echap: &str) -> Opt
             }
             let _ = write!(ecran, "{aide_recherche}\x1b[K\r\n  {ACCENT}›{RESET} {tape}\x1b[K\x1b[J");
         } else {
-            let mut n = 0;
+            // Les rangées du menu ; l'en-tête est ce qui précède la première ligne de choix.
+            let mut rangees: Vec<String> = Vec::new();
+            let (mut n, mut rangee_en_cours, mut entete_menu) = (0, 0, None);
             for l in lignes {
                 let ligne_de_choix = matches!(l, Ligne::Choix { .. });
+                if ligne_de_choix {
+                    entete_menu.get_or_insert(rangees.len());
+                    if n == en_cours {
+                        rangee_en_cours = rangees.len();
+                    }
+                }
                 if let Some(t) = texte(l, colonne, ligne_de_choix && n == en_cours) {
-                    ecran += &t.replace('\n', "\x1b[K\r\n");
-                    ecran += "\x1b[K\r\n";
+                    rangees.extend(t.split('\n').map(String::from));
                 }
                 n += usize::from(ligne_de_choix);
+            }
+            // L'en-tête fixe s'arrête avant le titre de la première section et sa ligne vide : ils défilent avec la
+            // liste, qu'ils annoncent.
+            let mut entete_menu = entete_menu.unwrap_or(0);
+            while entete_menu > 0 && {
+                let t = simplement_affiche(&rangees[entete_menu - 1]);
+                t.trim().is_empty() || t.trim_start().starts_with("── ")
+            } {
+                entete_menu -= 1;
+            }
+            // Première ou dernière ligne : la liste montre son début ou sa fin, titres compris.
+            if en_cours == 0 {
+                haut = 0;
+            } else if en_cours + 1 == visibles.len() {
+                haut = usize::MAX;
+            }
+            // L'aide et la saisie restent sous le menu.
+            let place = terminal::size().map_or(24, |(_, r)| usize::from(r)).saturating_sub(2);
+            for t in fenetre(&rangees, entete_menu, rangee_en_cours, place, &mut haut) {
+                ecran += &t;
+                ecran += "\x1b[K\r\n";
             }
             let _ = write!(ecran, "{aide}\x1b[K\r\n  {ACCENT}›{RESET} {tape}\x1b[K\x1b[J");
         }
@@ -568,9 +652,12 @@ pub fn cocher(titre: &[String], cases: &[Case]) -> Option<Vec<bool>> {
         .unwrap_or(0)
         .clamp(30, 44);
     let lignes_detail = 3;
-    let hauteur = titre.len() + cases.len() + 1 + lignes_detail + 2;
-    let tient = terminal::size()
-        .is_ok_and(|(largeur, rangees)| usize::from(largeur) > LARGEUR && usize::from(rangees) >= hauteur);
+    // Sous la liste : une ligne vide, l'explication de la ligne en cours, l'aide.
+    let dessous = 1 + lignes_detail + 1;
+    // Une liste plus haute que la fenêtre défile ; une fenêtre minuscule lit la réponse ligne par ligne.
+    let tient = terminal::size().is_ok_and(|(largeur, rangees)| {
+        usize::from(largeur) > LARGEUR && usize::from(rangees) >= RANGEES_MINIMUM + dessous - 2
+    });
     let clavier = std::io::stdin().is_terminal() && std::io::stdout().is_terminal() && tient;
     let Some(_mode) = clavier.then(ModeClavier::activer).flatten() else {
         for l in titre {
@@ -611,16 +698,29 @@ pub fn cocher(titre: &[String], cases: &[Case]) -> Option<Vec<bool>> {
         "  {GRIS}↑ ↓ select · Space check · R recommended · Enter confirm · Esc back{RESET}"
     );
     let mut en_cours = 0;
+    let mut haut = 0;
     let mut sortie = std::io::stdout();
     let _ = sortie.write_all(b"\x1b[2J");
     loop {
         let mut ecran = String::from("\x1b[H");
-        for l in titre {
-            ecran += l;
-            ecran += "\x1b[K\r\n";
+        let mut rangees: Vec<String> = titre.iter().flat_map(|l| l.split('\n').map(String::from)).collect();
+        let entete = rangees.len();
+        rangees.extend(
+            cases
+                .iter()
+                .enumerate()
+                .map(|(i, c)| rendu_case(i + 1, c, etats[i], colonne, i == en_cours)),
+        );
+        if en_cours == 0 {
+            haut = 0;
+        } else if en_cours + 1 == cases.len() {
+            haut = usize::MAX;
         }
-        for (i, c) in cases.iter().enumerate() {
-            ecran += &rendu_case(i + 1, c, etats[i], colonne, i == en_cours);
+        let place = terminal::size()
+            .map_or(24, |(_, r)| usize::from(r))
+            .saturating_sub(dessous);
+        for t in fenetre(&rangees, entete, entete + en_cours, place, &mut haut) {
+            ecran += &t;
             ecran += "\x1b[K\r\n";
         }
         ecran += "\x1b[K\r\n";
@@ -759,5 +859,51 @@ mod tests {
         )];
         let c = choisissables(&long);
         assert!(largeur_affichee(&rendu_trouve(&c[0], 7, true)) <= LARGEUR);
+    }
+
+    #[test]
+    fn un_menu_trop_haut_defile() {
+        let rangees: Vec<String> = (0..40).map(|i| format!("r{i}")).collect();
+        let mut haut = 0;
+        // Il tient : tout, tel quel.
+        assert_eq!(fenetre(&rangees[..10], 2, 5, 20, &mut haut), rangees[..10].to_vec());
+        // 40 rangées dont 3 d'en-tête, dans 20 : l'en-tête reste, la ligne en cours se voit, 20 rangées au plus.
+        for en_cours in 3..40 {
+            let e = fenetre(&rangees, 3, en_cours, 20, &mut haut);
+            assert!(e.len() <= 20, "{e:?}");
+            assert_eq!(e[..3], rangees[..3]);
+            assert!(e.contains(&rangees[en_cours]), "{en_cours} : {e:?}");
+        }
+        // Au bout : l'annonce du dessus dit ce qui est caché, celle du dessous est vide.
+        let e = fenetre(&rangees, 3, 39, 20, &mut haut);
+        assert!(e[3].contains('↑') && e[3].contains("22"), "{e:?}");
+        assert!(e.last().is_some_and(String::is_empty));
+        // Remonter d'une ligne, sans sortir de l'écran, ne fait pas bouger la liste.
+        let avant = haut;
+        let _ = fenetre(&rangees, 3, 37, 20, &mut haut);
+        assert_eq!(haut, avant);
+        // Revenir en haut garde une rangée de contexte au-dessus de la ligne en cours (un titre de section).
+        let e = fenetre(&rangees, 3, 10, 20, &mut haut);
+        assert!(e.contains(&rangees[9]) && e.contains(&rangees[10]), "{e:?}");
+        // La fin demandée par usize::MAX (touche Fin, dernière ligne) : le bas de la liste, sans débordement.
+        let mut tout_en_bas = usize::MAX;
+        let e = fenetre(&rangees, 3, 39, 20, &mut tout_en_bas);
+        assert!(e.contains(&rangees[39]) && e.last().is_some_and(String::is_empty) && tout_en_bas == 22);
+        // Un en-tête trop haut pour la fenêtre défile avec le reste.
+        let e = fenetre(&rangees, 30, 35, 20, &mut haut);
+        assert!(e.len() <= 20 && e.contains(&rangees[35]));
+        // Toutes les tailles de fenêtre : jamais plus de rangées que de place, la ligne en cours toujours là.
+        for place in 5..45 {
+            for en_cours in 0..40 {
+                for depart in [0, 7, usize::MAX] {
+                    let mut h = depart;
+                    let e = fenetre(&rangees, 3, en_cours, place, &mut h);
+                    assert!(
+                        e.len() <= place && e.contains(&rangees[en_cours]),
+                        "{place} {en_cours} : {e:?}"
+                    );
+                }
+            }
+        }
     }
 }
