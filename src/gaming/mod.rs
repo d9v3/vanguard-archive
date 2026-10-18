@@ -95,6 +95,14 @@ fn avec_restauration(commandes: &mut Vec<String>) -> bool {
         .oui()
 }
 
+/// Ce qu'un choix montre avant d'être lancé : son titre, puis son explication coupée pour tenir dans `LARGEUR`
+/// (longue de trois lignes, elle était coupée par le terminal au milieu des mots).
+fn presentation(el: &Element) -> Vec<String> {
+    let mut lignes = vec![String::new(), format!("  {GRAS}{}{RESET}", el.titre)];
+    lignes.extend(envelopper(&el.pourquoi, LARGEUR - 2).iter().map(|l| format!("  {l}")));
+    lignes
+}
+
 /// Liste à cocher (R : tout ce qui reste à faire), puis chaque choix montré, confirmé et lancé. `restauration` : ce
 /// qui change le système, avec un point de restauration d'abord.
 pub(crate) fn proposer(nom: &str, liste: &[Element], restauration: bool) {
@@ -113,8 +121,9 @@ pub(crate) fn proposer(nom: &str, liste: &[Element], restauration: bool) {
     };
     let mut commandes = Vec::new();
     for (el, _) in liste.iter().zip(&voulu).filter(|(el, v)| **v && el.fait != Some(true)) {
-        println!("\n  {GRAS}{}{RESET}", el.titre);
-        println!("  {}", el.pourquoi);
+        for l in presentation(el) {
+            println!("{l}");
+        }
         if let Some(lien) = el.lien {
             trp!(
                 "  Ouverture de la page officielle : {lien}",
@@ -139,10 +148,11 @@ pub(crate) fn proposer(nom: &str, liste: &[Element], restauration: bool) {
         return;
     }
     if machine::appliquer(&commandes) {
-        trp!(
-            "  {VERT}✔ Terminé.{RESET} Certains changements demandent de redémarrer ou de rouvrir la session.",
-            "  {VERT}✔ Done.{RESET} Some changes need a restart or a new sign-in."
+        let fait = trf!(
+            "{VERT}✔ Terminé.{RESET} Certains changements demandent de redémarrer ou de rouvrir la session.",
+            "{VERT}✔ Done.{RESET} Some changes need a restart or a new sign-in."
         );
+        afficher_aligne("  ", &fait, 4, "");
     } else {
         trp!(
             "  ✖ Une étape a échoué : lis le message ci-dessus.",
@@ -190,8 +200,97 @@ pub fn menu() {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
+
+    /// Les textes des `trp!` d'un fichier source (code seul, sans ses tests), dans les deux langues, qui dépassent
+    /// `LARGEUR` colonnes : couleurs retirées, « {…} » compté pour une colonne. Affichés tels quels, le terminal les
+    /// couperait au milieu d'un mot. Partagé par les tests des écrans à cocher (gaming, logiciels, nettoyer,
+    /// optimiser).
+    pub(crate) fn textes_trop_larges(source: &str) -> Vec<String> {
+        const COULEURS: [&str; 7] = ["RESET", "GRAS", "GRIS", "VERT", "ACCENT", "TOUCHE", "DISCRET"];
+        let fin = source
+            .find("mod tests {")
+            .and_then(|i| source[..i].rfind("#[cfg(test)]"));
+        let code = &source[..fin.unwrap_or(source.len())];
+        let mut trop_larges = Vec::new();
+        // Le nom de la macro en deux morceaux : écrit d'un bloc, il passerait pour un texte à traduire auprès des
+        // outils qui relèvent les textes (outils-dp40/textes.py).
+        for appel in code.split(concat!("trp", "!(")).skip(1) {
+            let mut car = appel.chars().peekable();
+            // Les deux premiers littéraux de l'appel : le texte français, puis l'anglais.
+            for _ in 0..2 {
+                if !car.by_ref().any(|c| c == '"') {
+                    break;
+                }
+                let mut texte = String::new();
+                while let Some(c) = car.next() {
+                    match (c, car.peek().copied()) {
+                        ('"', _) => break,
+                        ('\\', Some('n')) => {
+                            car.next();
+                            texte.push('\n');
+                        }
+                        // Ligne continuée (« \ » en fin de ligne) : les espaces qui suivent ne s'affichent pas.
+                        ('\\', Some('\n')) => while car.next_if(|c| c.is_whitespace()).is_some() {},
+                        ('\\', Some(echappe)) => {
+                            car.next();
+                            texte.push(echappe);
+                        }
+                        ('{', Some('{')) => {
+                            car.next();
+                            texte.push('{');
+                        }
+                        ('{', _) => {
+                            let nom: String = car.by_ref().take_while(|&c| c != '}').collect();
+                            if !COULEURS.contains(&nom.as_str()) {
+                                texte.push('X');
+                            }
+                        }
+                        (c, _) => texte.push(c),
+                    }
+                }
+                trop_larges.extend(
+                    texte
+                        .lines()
+                        .filter(|l| largeur_affichee(l) > LARGEUR)
+                        .map(str::to_string),
+                );
+            }
+        }
+        trop_larges
+    }
+
+    /// Les messages de Gaming tiennent dans `LARGEUR` colonnes, dans les deux langues.
+    #[test]
+    fn messages_dans_la_largeur() {
+        let larges: Vec<String> = [
+            include_str!("mod.rs"),
+            include_str!("linux.rs"),
+            include_str!("macos.rs"),
+            include_str!("windows.rs"),
+        ]
+        .into_iter()
+        .flat_map(textes_trop_larges)
+        .collect();
+        assert_eq!(larges, Vec::<String>::new());
+    }
+
+    /// Avant d'être lancé, un choix montre son explication, longue (trois lignes sous la liste à cocher) : elle est
+    /// coupée pour tenir dans `LARGEUR`.
+    #[test]
+    fn explication_dans_la_largeur() {
+        let el = element(
+            "Planification GPU matérielle (HAGS)",
+            "La carte graphique gère sa propre mémoire : un peu moins de latence, et obligatoire pour la génération \
+             d'images DLSS 3/4. Cartes GTX 1000 / RX 5000 et plus récentes. Prend effet au redémarrage.",
+            Some(false),
+            vec!["x".into()],
+        );
+        let lignes = presentation(&el);
+        assert!(lignes.iter().all(|l| largeur_affichee(l) <= LARGEUR), "{lignes:#?}");
+        assert_eq!(lignes.len(), 5, "{lignes:#?}");
+    }
 
     /// Chaque ligne tient dans la liste à cocher : titre sans coupure, état court, explication sur trois lignes.
     pub(super) fn tient_dans_la_liste(l: &[Element]) {

@@ -400,10 +400,11 @@ fn reglages() -> Vec<Element> {
 
 pub(super) fn menu() {
     let Some(gestion) = Paquets::detecter() else {
-        trp!(
-            "  ✖ Gestionnaire de paquets non reconnu (pacman, apt, dnf ou zypper attendu).",
-            "  ✖ Package manager not recognized (pacman, apt, dnf or zypper expected)."
+        let inconnu = tr!(
+            "Gestionnaire de paquets non reconnu (pacman, apt, dnf ou zypper attendu).",
+            "Package manager not recognized (pacman, apt, dnf or zypper expected)."
         );
+        afficher_aligne("  ✖ ", inconnu, 4, "");
         return;
     };
     match super::choisir_liste(
