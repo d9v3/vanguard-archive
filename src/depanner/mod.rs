@@ -363,7 +363,8 @@ fn disque_plein() {
     }
 }
 
-/// Les disques montés et leur place : (où, libre, total).
+/// Les disques montés et leur place : (où, libre, total). « Où » est seulement montré : prêt à montrer, il porte
+/// l'étiquette d'une clé branchée, choisie par qui l'a préparée.
 fn volumes() -> Vec<(String, u64, u64)> {
     #[cfg(target_os = "linux")]
     {
@@ -389,7 +390,7 @@ fn volumes() -> Vec<(String, u64, u64)> {
                     return None;
                 }
                 let (libre, total) = crate::nettoyer::volume(std::path::Path::new(&point))?;
-                Some((point, libre, total))
+                Some((affichable(&point), libre, total))
             })
             .collect()
     }
@@ -411,7 +412,7 @@ fn volumes() -> Vec<(String, u64, u64)> {
             )
             .filter_map(|p| {
                 let (libre, total) = crate::nettoyer::volume(&p)?;
-                Some((p.display().to_string(), libre, total))
+                Some((chemin_affichable(&p), libre, total))
             })
             .fold(Vec::new(), |mut v, x| {
                 // « Macintosh HD » est le même volume que le système : une fois.
@@ -435,7 +436,7 @@ fn volumes() -> Vec<(String, u64, u64)> {
             if crate::copier::est_la_cle(std::path::Path::new(point)) {
                 return None;
             }
-            Some((point.to_string(), libre.parse().ok()?, total.parse().ok()?))
+            Some((affichable(point), libre.parse().ok()?, total.parse().ok()?))
         })
         .collect()
     }
@@ -459,7 +460,7 @@ fn plus_gros_dossiers() -> Vec<(String, u64)> {
         .take_while(|_| std::time::Instant::now() < fin)
         .filter_map(|e| {
             let taille = crate::nettoyer::taille_dossier(&e.path(), crate::nettoyer::Age::Tout, &[])?;
-            Some((e.file_name().to_string_lossy().into_owned(), taille))
+            Some((affichable(&e.file_name().to_string_lossy()), taille))
         })
         .filter(|(_, t)| *t >= 1 << 30)
         .collect();

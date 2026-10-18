@@ -120,6 +120,13 @@ pub fn affichable(texte: &str) -> String {
     texte.chars().map(|c| if piege(c) { '\u{fffd}' } else { c }).collect()
 }
 
+/// Un chemin de fichier ou de dossier prêt à montrer : un nom de fichier vient de n'importe qui (téléchargement, clé
+/// USB, programme). Le chemin lui-même reste tel quel pour agir (analyser, isoler, effacer) : seul ce qui est montré
+/// passe par ici.
+pub fn chemin_affichable(chemin: &std::path::Path) -> String {
+    affichable(&chemin.to_string_lossy())
+}
+
 /// Le texte contient-il encore un caractère piégé ? Pour les tests des lectures.
 #[cfg(test)]
 pub(crate) fn contient_un_piege(texte: &str) -> bool {
@@ -370,6 +377,14 @@ mod tests {
         // Une colonne par « � » : les alignements tiennent.
         assert_eq!(largeur_affichee(&affichable("\x1b[2K\r")), 5);
         assert!(contient_un_piege("a\u{2066}") && !contient_un_piege(&affichable("a\u{2066}\x1b")));
+        assert_eq!(
+            chemin_affichable(std::path::Path::new("/tmp/a\x1b]52;c;eA==\x07b")),
+            "/tmp/a�]52;c;eA==�b"
+        );
+        assert_eq!(
+            chemin_affichable(std::path::Path::new("/home/alice/Téléchargements/été 💡.pdf")),
+            "/home/alice/Téléchargements/été 💡.pdf"
+        );
     }
 
     /// Un texte normal ne change pas, octet pour octet : accents, emojis, autres écritures, espaces (dont l'espace

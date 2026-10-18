@@ -390,15 +390,21 @@ pub fn constat() -> Option<Constat> {
         return None;
     }
     let etats: Vec<(&Piege, Etat)> = pieges.iter().map(|p| (p, etat(p))).collect();
+    Some(juger(&etats))
+}
+
+/// Le constat d'après ce que sont devenus les fichiers-pièges. Les chemins sont montrés rendus inoffensifs : un
+/// rançongiciel choisit le nouveau nom du fichier qu'il renomme, et pourrait sinon effacer l'alerte.
+fn juger(etats: &[(&Piege, Etat)]) -> Constat {
     let touches: Vec<String> = etats
         .iter()
         .filter_map(|(p, e)| match e {
-            Etat::Modifie => Some(trf!("{} (modifié)", "{} (modified)", p.chemin.display())),
+            Etat::Modifie => Some(trf!("{} (modifié)", "{} (modified)", chemin_affichable(&p.chemin))),
             Etat::Renomme(n) => Some(trf!(
                 "{} (renommé en {})",
                 "{} (renamed to {})",
-                p.chemin.display(),
-                n.display()
+                chemin_affichable(&p.chemin),
+                chemin_affichable(n)
             )),
             _ => None,
         })
@@ -406,14 +412,14 @@ pub fn constat() -> Option<Constat> {
     let supprimes: Vec<String> = etats
         .iter()
         .filter(|(_, e)| *e == Etat::Supprime)
-        .map(|(p, _)| p.chemin.display().to_string())
+        .map(|(p, _)| chemin_affichable(&p.chemin))
         .collect();
     let illisibles: Vec<String> = etats
         .iter()
         .filter(|(_, e)| *e == Etat::Illisible)
-        .map(|(p, _)| p.chemin.display().to_string())
+        .map(|(p, _)| chemin_affichable(&p.chemin))
         .collect();
-    Some(if !touches.is_empty() {
+    if !touches.is_empty() {
         constat_de(
             Some(Niveau::Critique),
             trf!(
@@ -463,11 +469,11 @@ pub fn constat() -> Option<Constat> {
             trf!(
                 "{} fichiers-pièges intacts : aucun rançongiciel n'y a touché.",
                 "{} decoy files intact: no ransomware touched them.",
-                pieges.len()
+                etats.len()
             ),
             None,
         )
-    })
+    }
 }
 
 /// Un paragraphe coupé pour tenir dans la largeur de l'écran, en retrait de deux espaces.
@@ -503,7 +509,7 @@ pub fn menu() {
                 ),
                 Etat::Renomme(n) => (
                     format!("{}✖{RESET}", couleur(Niveau::Critique)),
-                    trf!("RENOMMÉ en {}", "RENAMED to {}", n.display()),
+                    trf!("RENOMMÉ en {}", "RENAMED to {}", chemin_affichable(&n)),
                 ),
                 Etat::Supprime => (
                     format!("{}⚠{RESET}", couleur(Niveau::Moyen)),
@@ -511,7 +517,7 @@ pub fn menu() {
                 ),
                 Etat::Illisible => (format!("{GRIS}?{RESET}"), tr!("illisible", "unreadable").to_string()),
             };
-            println!("  {marque} {}  {GRIS}{texte}{RESET}", p.chemin.display());
+            println!("  {marque} {}  {GRIS}{texte}{RESET}", chemin_affichable(&p.chemin));
         }
         if let Some(c) = constat()
             && c.probleme.is_some()
@@ -536,7 +542,7 @@ fn poser() {
             &trf!(
                 "{} : déjà protégé par l'accès contrôlé aux dossiers de Windows, qui bloque les programmes inconnus ; un piège y serait inutile.",
                 "{}: already protected by Windows controlled folder access, which blocks unknown programs; a decoy would be useless there.",
-                d.display()
+                chemin_affichable(d)
             ),
             4,
             "",
@@ -558,7 +564,7 @@ fn poser() {
     ));
     println!();
     for d in &cibles {
-        println!("    {GRIS}{}{RESET}", d.display());
+        println!("    {GRIS}{}{RESET}", chemin_affichable(d));
     }
     if !demander(tr!(
         "\n  Poser les fichiers-pièges dans ces dossiers ? [o/N] : ",
@@ -577,7 +583,7 @@ fn poser() {
             trf!(
                 "Pas de fichier-piège dans {} ({e}).",
                 "No decoy file in {} ({e}).",
-                dossier.display()
+                chemin_affichable(dossier)
             )
         );
     }
@@ -628,14 +634,18 @@ fn retirer(pieges: &[Piege], force: bool) {
         );
     } else {
         for r in &restes {
-            trp!("  ✖ Impossible de retirer {}", "  ✖ Could not remove {}", r.display());
+            trp!(
+                "  ✖ Impossible de retirer {}",
+                "  ✖ Could not remove {}",
+                chemin_affichable(r)
+            );
         }
     }
     for p in &preuves {
         trp!(
             "  ⚠ Gardé, c'est la preuve d'un passage : {}",
             "  ⚠ Kept, it is the evidence of an attack: {}",
-            p.display()
+            chemin_affichable(p)
         );
     }
 }
@@ -695,6 +705,23 @@ mod tests {
         assert!(pieges[0].chemin.exists());
         assert!(d.join("mes notes.txt").exists());
         let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// Un rançongiciel choisit le nouveau nom du fichier qu'il chiffre : un nom piégé (effacement de ligne, retour
+    /// chariot, montée du curseur, bidi) ne doit ni effacer l'alerte ni la réécrire.
+    #[test]
+    fn nom_choisi_par_un_rancongiciel() {
+        let p = Piege {
+            chemin: PathBuf::from("/home/alice/Documents/piege 3f9a.txt"),
+            empreinte: String::new(),
+        };
+        let renomme = PathBuf::from("/home/alice/Documents/piege 3f9a.txt.\x1b[2K\r\x1b[1A\u{202e}locked");
+        let c = juger(&[(&p, Etat::Renomme(renomme))]);
+        assert_eq!(c.probleme, Some(Niveau::Critique));
+        assert!(!crate::ui::contient_un_piege(&c.message), "{}", c.message);
+        assert!(c.message.contains("piege 3f9a.txt.�[2K��[1A�locked"), "{}", c.message);
+        let c = juger(&[(&p, Etat::Intact), (&p, Etat::Intact)]);
+        assert_eq!((c.probleme, c.message.starts_with('2')), (None, true));
     }
 
     // Retrait en partie refusé : la liste ne garde que les pièges restés en place. Avec les pièges déjà retirés, le

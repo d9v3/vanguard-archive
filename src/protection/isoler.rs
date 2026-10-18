@@ -102,11 +102,12 @@ fn present(cmd: &str) -> bool {
 /// « gardien isoler <fichier> » : lance le programme dans un bac à sable.
 pub fn isoler(fichier: &Path) {
     titre(tr!("Bac à sable", "Sandbox"));
+    // Le programme à isoler porte le nom que son auteur a choisi : montré, il est rendu inoffensif.
     let Ok(source) = fichier.canonicalize() else {
         trp!(
             "  ✖ Fichier introuvable : {}",
             "  ✖ File not found: {}",
-            fichier.display()
+            chemin_affichable(fichier)
         );
         return;
     };
@@ -114,7 +115,7 @@ pub fn isoler(fichier: &Path) {
         trp!(
             "  ✖ Ce n'est pas un fichier : {}",
             "  ✖ Not a file: {}",
-            source.display()
+            chemin_affichable(&source)
         );
         return;
     }
@@ -173,7 +174,7 @@ fn lancer(source: &Path) {
     trp!(
         "  {GRIS}Isolé : système en lecture seule, dossier personnel invisible, pas de réseau. Copie jetable : {}{RESET}\n",
         "  {GRIS}Isolated: read-only system, home folder hidden, no network. Disposable copy: {}{RESET}\n",
-        copie.display()
+        chemin_affichable(&copie)
     );
     let statut = if present("bwrap") {
         let session = std::env::var("XDG_RUNTIME_DIR").ok();
@@ -237,7 +238,7 @@ fn lancer(source: &Path) {
     trp!(
         "  {GRIS}Isolé : pas de réseau, dossier personnel illisible, écriture seulement dans la copie jetable : {}{RESET}\n",
         "  {GRIS}Isolated: no network, home folder unreadable, writing only in the disposable copy: {}{RESET}\n",
-        copie.display()
+        chemin_affichable(&copie)
     );
     let statut = std::process::Command::new("sandbox-exec")
         .arg("-p")

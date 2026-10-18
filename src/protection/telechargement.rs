@@ -180,7 +180,8 @@ fn calculer(fichier: &Path, algo: Algo) -> Result<String, String> {
         let r = crate::commande::lancer(&mut commande, 900)
             .ok_or_else(|| tr!("l'outil n'a pas pu aller au bout", "the tool could not finish").to_string())?;
         if r.code != Some(0) {
-            return Err(r.erreurs.lines().next().unwrap_or_default().trim().to_string());
+            // Le message de l'outil cite le fichier, au nom choisi par son auteur.
+            return Err(affichable(r.erreurs.lines().next().unwrap_or_default().trim()));
         }
         r.sortie
     };
@@ -327,11 +328,11 @@ pub fn verifier(fichier: Option<&Path>, empreinte: Option<&str>) {
         .canonicalize()
         .map(|c| PathBuf::from(sans_prefixe_etendu(&c.to_string_lossy())))
     else {
-        trp!("  ✖ Introuvable : {}", "  ✖ Not found: {}", chemin.display());
+        trp!("  ✖ Introuvable : {}", "  ✖ Not found: {}", chemin_affichable(&chemin));
         return;
     };
     let Ok(meta) = std::fs::metadata(&chemin) else {
-        trp!("  ✖ Illisible : {}", "  ✖ Unreadable: {}", chemin.display());
+        trp!("  ✖ Illisible : {}", "  ✖ Unreadable: {}", chemin_affichable(&chemin));
         return;
     };
     if !meta.is_file() {
@@ -341,19 +342,22 @@ pub fn verifier(fichier: Option<&Path>, empreinte: Option<&str>) {
         );
         return;
     }
+    // Le nom tel quel sert à juger (un caractère qui retourne la fin du nom est justement le piège à trouver) ; montré,
+    // il est rendu inoffensif, comme le dossier.
     let nom = chemin
         .file_name()
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_default();
     println!();
     println!(
-        "  {GRIS}{}{RESET} {nom} {GRIS}({}){RESET}",
+        "  {GRIS}{}{RESET} {} {GRIS}({}){RESET}",
         ajuster(tr!("Fichier", "File"), 8),
+        affichable(&nom),
         taille(meta.len())
     );
     afficher_aligne(
         &format!("  {GRIS}{}{RESET} ", ajuster(tr!("Dossier", "Folder"), 8)),
-        &chemin.parent().map(|p| p.display().to_string()).unwrap_or_default(),
+        &chemin.parent().map(chemin_affichable).unwrap_or_default(),
         11,
         "",
     );
@@ -372,10 +376,11 @@ pub fn verifier(fichier: Option<&Path>, empreinte: Option<&str>) {
         Some(s) => {
             let lue = lire_empreinte(s).map(|(a, e)| (a, e, tr!("collée", "pasted").to_string()));
             if lue.is_none() {
+                // Le texte collé vient souvent d'une page web.
                 trp!(
                     "  ⚠ « {} » n'est pas une empreinte reconnue (32, 40, 64 ou 128 chiffres hexadécimaux).",
                     "  ⚠ “{}” is not a recognized checksum (32, 40, 64 or 128 hexadecimal digits).",
-                    s.trim()
+                    affichable(s.trim())
                 );
             }
             lue

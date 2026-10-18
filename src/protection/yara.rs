@@ -155,7 +155,8 @@ struct Trouve {
     fichier: String,
 }
 
-/// Sortie de yara : une ligne « Règle chemin » par correspondance (le chemin peut contenir des espaces).
+/// Sortie de yara : une ligne « Règle chemin » par correspondance (le chemin peut contenir des espaces). Le chemin,
+/// seulement montré, est lu prêt à montrer : son nom est celui qu'a choisi l'auteur du fichier.
 fn lire_sortie(sortie: &str) -> Vec<Trouve> {
     sortie
         .lines()
@@ -163,7 +164,7 @@ fn lire_sortie(sortie: &str) -> Vec<Trouve> {
             let (regle, fichier) = l.split_once(' ')?;
             (!regle.is_empty() && !fichier.is_empty()).then(|| Trouve {
                 regle: regle.to_string(),
-                fichier: fichier.to_string(),
+                fichier: affichable(fichier),
             })
         })
         .collect()
@@ -211,7 +212,7 @@ fn appliquer(cibles: &[PathBuf]) -> Option<(Vec<Trouve>, Vec<String>)> {
     // Toute sortie en erreur du moteur est dite : ce qu'il n'a pas pu lire n'est jamais compté comme sain.
     let mut erreurs: Vec<String> = Vec::new();
     for cible in cibles {
-        trp!("  Analyse de {}…", "  Scanning {}…", cible.display());
+        trp!("  Analyse de {}…", "  Scanning {}…", chemin_affichable(cible));
         let mut commande = Command::new(&moteur);
         commande.args(["-r", "-w", "-p", "4", "-a", "30"]).args(&prudence);
         commande.arg(&regles).arg(cible);
@@ -219,19 +220,20 @@ fn appliquer(cibles: &[PathBuf]) -> Option<(Vec<Trouve>, Vec<String>)> {
             Some(r) => {
                 trouves.extend(lire_sortie(&r.sortie));
                 if r.code != Some(0) {
+                    // Le message du moteur cite souvent le fichier qu'il n'a pas pu lire.
                     let raison = r
                         .erreurs
                         .lines()
                         .map(str::trim)
                         .find(|l| !l.is_empty())
-                        .map_or_else(|| trf!("code {:?}", "code {:?}", r.code), str::to_string);
-                    erreurs.push(format!("{} : {raison}", cible.display()));
+                        .map_or_else(|| trf!("code {:?}", "code {:?}", r.code), affichable);
+                    erreurs.push(format!("{} : {raison}", chemin_affichable(cible)));
                 }
             }
             None => erreurs.push(trf!(
                 "{} : le moteur n'a pas pu aller au bout (lancement impossible, ou plus d'une heure)",
                 "{}: the engine could not finish (could not start, or over an hour)",
-                cible.display()
+                chemin_affichable(cible)
             )),
         }
     }
@@ -431,6 +433,10 @@ mod tests {
         assert_eq!(famille(&trouves[0].regle), "rançongiciel");
         assert_eq!(famille(&trouves[1].regle), "voleur de mots de passe");
         assert_eq!(famille("Linux_Inconnu_X"), "logiciel malveillant");
+        // Le nom du fichier est celui que son auteur a choisi : piégé, il arrive inoffensif.
+        let piege =
+            lire_sortie("Win32_Ransomware_WannaCry /home/alice/fa\x1b]52;c;eA==\x07\x1b[2K\r\u{202e}cture.exe\n");
+        assert_eq!(piege[0].fichier, "/home/alice/fa�]52;c;eA==��[2K��cture.exe");
     }
 
     #[test]

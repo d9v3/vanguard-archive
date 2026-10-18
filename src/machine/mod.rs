@@ -269,11 +269,13 @@ fn cles_ssh() -> Vec<Constat> {
         );
     }
     for f in std::fs::read_dir(&dossier).into_iter().flatten().flatten() {
-        let nom = f.file_name().to_string_lossy().into_owned();
+        let brut = f.file_name().to_string_lossy().into_owned();
         // Toute clé privée, quel que soit son nom (pas seulement id_*).
         let protegee = std::fs::read_to_string(f.path()).ok().and_then(|t| cle_protegee(&t));
-        // Nom entre apostrophes dans les commandes : une clé « ma cle » ne casse pas la commande.
-        let chemin = format!("~/.ssh/'{}'", nom.replace('\'', r"'\''"));
+        // Nom entre apostrophes dans les commandes : une clé « ma cle » ne casse pas la commande. Les commandes visent
+        // le vrai nom ; les messages montrent un nom rendu inoffensif.
+        let chemin = format!("~/.ssh/'{}'", brut.replace('\'', r"'\''"));
+        let nom = affichable(&brut);
         if protegee == Some(false) {
             constats.push(
                 alerte(
@@ -289,8 +291,8 @@ fn cles_ssh() -> Vec<Constat> {
         }
         // Même règle que ci-dessus : une clé « github » ou « serveur » compte autant qu'« id_ed25519 ».
         let privee = protegee.is_some()
-            || (nom.starts_with("id_")
-                && !std::path::Path::new(&nom)
+            || (brut.starts_with("id_")
+                && !std::path::Path::new(&brut)
                     .extension()
                     .is_some_and(|e| e.eq_ignore_ascii_case("pub")));
         if privee

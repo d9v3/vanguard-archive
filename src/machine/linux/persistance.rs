@@ -523,7 +523,7 @@ pub(super) fn fichiers_suspects() -> Vec<Constat> {
         for (paquet, fichiers) in &par_paquet {
             for (f, etat) in fichiers.iter().zip(gestion.modifies(paquet, fichiers)) {
                 match etat {
-                    Some(true) => modifies.push((f.display().to_string(), paquet.clone())),
+                    Some(true) => modifies.push((crate::ui::chemin_affichable(f), paquet.clone())),
                     Some(false) => {}
                     None => non_verifies += 1,
                 }
@@ -554,7 +554,13 @@ pub(super) fn fichiers_suspects() -> Vec<Constat> {
         );
     }
     if !anormaux.is_empty() {
-        let liste: Vec<String> = anormaux.iter().take(10).map(|p| p.display().to_string()).collect();
+        // Dans un dossier temporaire, n'importe qui choisit le nom : montré (message et commandes à taper), il est
+        // rendu inoffensif.
+        let liste: Vec<String> = anormaux
+            .iter()
+            .take(10)
+            .map(|p| crate::ui::chemin_affichable(p))
+            .collect();
         constats.push(
             alerte(
                 "Fichiers suspects",

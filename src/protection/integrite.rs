@@ -194,7 +194,6 @@ fn comparer(reference: &Etat, actuel: &Etat) -> Ecarts {
 
 /// Constat pour le bilan de la machine.
 pub fn constat() -> Constat {
-    const CAT: &str = "Intégrité";
     let Some(reference) = reference() else {
         return Constat {
             categorie: CAT,
@@ -208,7 +207,15 @@ pub fn constat() -> Constat {
             verifie: true,
         };
     };
-    let e = comparer(&reference, &etat_actuel());
+    juger(reference.len(), &comparer(&reference, &etat_actuel()))
+}
+
+/// Catégorie du constat.
+const CAT: &str = "Intégrité";
+
+/// Le constat d'après les écarts avec une référence de `total` fichiers. Les chemins restent tels quels pour comparer ;
+/// montrés, ils sont rendus inoffensifs : un fichier ajouté dans un dossier suivi porte le nom que son auteur a choisi.
+fn juger(total: usize, e: &Ecarts) -> Constat {
     if e.vide() {
         return Constat {
             categorie: CAT,
@@ -216,13 +223,19 @@ pub fn constat() -> Constat {
             message: trf!(
                 "{} fichiers critiques identiques à la référence.",
                 "{} critical files identical to the reference.",
-                reference.len()
+                total
             ),
             correctif: None,
             verifie: true,
         };
     }
-    let exemples: Vec<&String> = e.modifies.iter().chain(&e.ajoutes).chain(&e.supprimes).collect();
+    let exemples: Vec<String> = e
+        .modifies
+        .iter()
+        .chain(&e.ajoutes)
+        .chain(&e.supprimes)
+        .map(|f| affichable(f))
+        .collect();
     Constat {
         categorie: CAT,
         probleme: Some(Niveau::Moyen),
@@ -253,7 +266,11 @@ pub fn changements_a_signaler() -> Option<String> {
         .chain(&e.supprimes)
         .cloned()
         .collect();
-    let nouveaux: Vec<&String> = tous.iter().filter(|f| !signales.contains(f)).collect();
+    let nouveaux: Vec<String> = tous
+        .iter()
+        .filter(|f| !signales.contains(f))
+        .map(|f| affichable(f))
+        .collect();
     if let Ok(t) = serde_json::to_string(&tous) {
         let _ = std::fs::write(&deja, t);
     }
@@ -267,7 +284,7 @@ fn afficher(e: &Ecarts) {
         (&e.supprimes, couleur(Niveau::Moyen), tr!("supprimé", "removed")),
     ] {
         for f in liste {
-            println!("  {marque}{}{RESET} {f}", ajuster(libelle, 10));
+            println!("  {marque}{}{RESET} {}", ajuster(libelle, 10), affichable(f));
         }
     }
 }
@@ -386,14 +403,15 @@ pub fn temps_reel() {
                 (None, None) => continue,
             };
             let heure = chrono::Local::now().format("%H:%M:%S");
+            let montre = affichable(&cle);
             println!(
-                "  {}{heure}  {}{RESET} {cle}",
+                "  {}{heure}  {}{RESET} {montre}",
                 couleur(Niveau::Eleve),
                 ajuster(etat, 10)
             );
             crate::reseau::surveillance::notifier(
                 &trf!("Gardien : fichier critique {etat}", "Gardien: critical file {etat}"),
-                &cle,
+                &montre,
             );
         }
     }
@@ -423,6 +441,17 @@ mod tests {
         assert_eq!(e.ajoutes, ["/etc/sudoers.d/x"]);
         assert_eq!(e.supprimes, ["/etc/shadow"]);
         assert_eq!(e.total(), 3);
+        // Un fichier posé dans un dossier suivi (/etc/cron.d…) au nom piégé : comparé tel quel, montré inoffensif.
+        actuel.insert(
+            "/etc/cron.d/x\x1b]52;c;eA==\x07\x1b[2K\r\u{202e}".into(),
+            "b3:ee".into(),
+        );
+        let e = comparer(&reference, &actuel);
+        assert_eq!(e.ajoutes.len(), 2);
+        let c = juger(reference.len(), &e);
+        assert_eq!(c.probleme, Some(Niveau::Moyen));
+        assert!(!crate::ui::contient_un_piege(&c.message), "{}", c.message);
+        assert_eq!(juger(3, &Ecarts::default()).probleme, None);
     }
 
     #[test]

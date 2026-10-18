@@ -278,8 +278,9 @@ mod systeme {
             }
             #[allow(clippy::useless_conversion)]
             let (bloc, libres, total) = (u64::from(s.f_frsize), u64::from(s.f_bavail), u64::from(s.f_blocks));
+            // Seulement montré : prêt à montrer, comme le modèle des disques plus bas.
             volumes.push(Volume {
-                point,
+                point: crate::ui::affichable(&point),
                 libre: libres * bloc,
                 total: total * bloc,
             });
@@ -315,10 +316,11 @@ mod systeme {
             .filter(|l| l.starts_with("/org/freedesktop/UDisks2/drives/"))
         {
             let propriete = |interface: &str, nom: &str| busctl(&["get-property", UDISKS, chemin, interface, nom]);
+            // Le disque dit son modèle lui-même (une clé USB dit ce qu'elle veut) : lu prêt à montrer.
             let modele = propriete("org.freedesktop.UDisks2.Drive", "Model")
-                .and_then(|v| v.as_str().map(str::to_string))
+                .and_then(|v| v.as_str().map(crate::ui::affichable))
                 .filter(|m| !m.is_empty())
-                .unwrap_or_else(|| chemin.rsplit('/').next().unwrap_or("?").replace('_', " "));
+                .unwrap_or_else(|| crate::ui::affichable(&chemin.rsplit('/').next().unwrap_or("?").replace('_', " ")));
             let nvme = "org.freedesktop.UDisks2.NVMe.Controller";
             if let Some(avertissements) = propriete(nvme, "SmartCriticalWarning") {
                 let attributs = busctl(&["call", UDISKS, chemin, nvme, "SmartGetAttributes", "a{sv}", "0"])
@@ -480,7 +482,7 @@ mod systeme {
                 let plist = sortie("diskutil", &["info", "-plist", &disque]);
                 let etat = valeur_plist(&plist, "SMARTStatus")?;
                 (etat != "Not Supported").then(|| Disque {
-                    modele: valeur_plist(&plist, "MediaName").unwrap_or(disque),
+                    modele: crate::ui::affichable(&valeur_plist(&plist, "MediaName").unwrap_or(disque)),
                     defaillant: etat == "Failing",
                     ..Disque::default()
                 })
@@ -535,7 +537,7 @@ mod systeme {
                 let c: Vec<&str> = l.trim().split('|').collect();
                 let [point, libre, total] = c[..] else { return None };
                 Some(Volume {
-                    point: point.to_string(),
+                    point: crate::ui::affichable(point),
                     libre: libre.parse().ok()?,
                     total: total.parse().ok()?,
                 })
@@ -551,7 +553,7 @@ mod systeme {
             .filter_map(|l| {
                 let (etat, nom) = l.trim().split_once('|')?;
                 Some(Disque {
-                    modele: nom.to_string(),
+                    modele: crate::ui::affichable(nom),
                     defaillant: etat.eq_ignore_ascii_case("Unhealthy"),
                     usure: None,
                     erreurs: u64::from(etat.eq_ignore_ascii_case("Warning")),

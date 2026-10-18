@@ -155,7 +155,8 @@ fn disques() -> Vec<Disque> {
             && sur_le_systeme(&point) == Some(false)
             && let Some((libre, total)) = crate::nettoyer::volume(&point)
         {
-            let nom = point.file_name().unwrap_or_default().to_string_lossy().into_owned();
+            // Le nom d'un disque vient de son étiquette, choisie par qui l'a formaté : lu prêt à montrer.
+            let nom = affichable(&point.file_name().unwrap_or_default().to_string_lossy());
             liste.push(Disque {
                 racine: point,
                 nom,
@@ -184,7 +185,7 @@ fn disques() -> Vec<Disque> {
             let (libre, total) = crate::nettoyer::volume(&racine)?;
             Some(Disque {
                 racine,
-                nom,
+                nom: affichable(&nom),
                 libre,
                 total,
             })
@@ -221,10 +222,10 @@ fn lire_lecteurs(texte: &str, systeme: &str) -> Vec<Disque> {
             }
             Some(Disque {
                 racine: PathBuf::from(racine),
-                nom: match etiquette {
+                nom: affichable(&match etiquette {
                     "" => lettre.to_string(),
                     _ => format!("{etiquette} ({lettre})"),
-                },
+                }),
                 libre: libre.parse().ok()?,
                 total: total.parse().ok()?,
             })
@@ -522,9 +523,9 @@ fn compte_rendu(choisis: &[(Sorte, PathBuf)], b: &Bilan) -> String {
 fn destination_permise(chemin: &Path, sources: &[(Sorte, PathBuf)]) -> Result<PathBuf, String> {
     let chemin = chemin
         .canonicalize()
-        .map_err(|e| trf!("{} : {e}", "{}: {e}", chemin.display()))?;
+        .map_err(|e| trf!("{} : {e}", "{}: {e}", chemin_affichable(chemin)))?;
     if !chemin.is_dir() {
-        let dossier = chemin.display();
+        let dossier = chemin_affichable(&chemin);
         return Err(trf!("{} n'est pas un dossier.", "{} is not a folder.", dossier));
     }
     let refus = if chemin.ancestors().any(est_la_cle) {
@@ -612,7 +613,7 @@ pub fn commande(destination: Option<&Path>) {
         .map(|((s, chemin), &(n, octets))| Case {
             texte: s.nom().to_string(),
             precision: trf!("{} · {n} fichier(s)", "{} · {n} file(s)", taille_lisible(octets)),
-            detail: chemin.display().to_string(),
+            detail: chemin_affichable(chemin),
             cochee: n > 0,
             recommandee: n > 0,
             fixe: false,
@@ -621,7 +622,11 @@ pub fn commande(destination: Option<&Path>) {
     let entete = [
         String::new(),
         ligne_titre(tr!("Quels dossiers copier ?", "Which folders to copy?")),
-        trf!("  {GRIS}Vers : {}{RESET}", "  {GRIS}To: {}{RESET}", racine.display()),
+        trf!(
+            "  {GRIS}Vers : {}{RESET}",
+            "  {GRIS}To: {}{RESET}",
+            chemin_affichable(&racine)
+        ),
         String::new(),
     ];
     let Some(coches) = cocher(&entete, &cases) else { return };
@@ -637,6 +642,8 @@ pub fn commande(destination: Option<&Path>) {
         return;
     }
     let dossier = dossier_de_copie(&racine, |nom| {
+        // Un dossier du disque de destination, qui peut être celui de n'importe qui.
+        let nom = affichable(nom);
         demander(&trf!(
             "\n  Une copie commencée n'est pas finie ({nom}). La reprendre ? [O/n] : ",
             "\n  A started copy is not finished ({nom}). Resume it? [Y/n]: "
@@ -671,7 +678,7 @@ pub fn commande(destination: Option<&Path>) {
         "\n  {} file(s), {} → {}",
         total.0,
         taille_lisible(total.1),
-        dossier.display()
+        chemin_affichable(&dossier)
     );
     if !demander(tr!("  Copier ? [o/N] : ", "  Copy? [y/N]: ")).oui() {
         trp!("  Annulé.", "  Cancelled.");
@@ -701,7 +708,7 @@ fn afficher_bilan(b: &Bilan, dossier: &Path, duree: Duration) {
             b.deja
         );
         for (chemin, erreur) in b.echecs.iter().take(5) {
-            afficher_aligne("    ✖ ", &format!("{} ({erreur})", chemin.display()), 6, GRIS);
+            afficher_aligne("    ✖ ", &format!("{} ({erreur})", chemin_affichable(chemin)), 6, GRIS);
         }
     }
     if !b.renommes.is_empty() {
@@ -718,7 +725,11 @@ fn afficher_bilan(b: &Bilan, dossier: &Path, duree: Duration) {
             b.liens
         );
     }
-    trp!("  {GRIS}Dans : {}{RESET}", "  {GRIS}In: {}{RESET}", dossier.display());
+    trp!(
+        "  {GRIS}Dans : {}{RESET}",
+        "  {GRIS}In: {}{RESET}",
+        chemin_affichable(dossier)
+    );
 }
 
 pub fn menu() {
@@ -873,6 +884,9 @@ mod tests {
         assert_eq!(d[0].nom, "Sauvegarde (E:)");
         assert_eq!(d[1].nom, "F:");
         assert_eq!(d[0].libre, 500);
+        // L'étiquette d'un disque branché, choisie par qui l'a formaté : piégée, elle arrive inoffensive.
+        let d = lire_lecteurs("E:\\|Sauve\x1b]52;c;eA==\x07\x1b[2K\r\u{202e}|500|1000\n", "C:");
+        assert_eq!(d[0].nom, "Sauve�]52;c;eA==��[2K�� (E:)");
     }
 
     #[test]

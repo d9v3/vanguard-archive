@@ -48,7 +48,7 @@ pub fn analyser(portee: Portee) {
     let portee = match portee {
         Portee::Dossier(d) => {
             let Ok(reel) = d.canonicalize() else {
-                trp!("  ✖ Introuvable : {}", "  ✖ Not found: {}", d.display());
+                trp!("  ✖ Introuvable : {}", "  ✖ Not found: {}", chemin_affichable(&d));
                 return;
             };
             Portee::Dossier(reel)
@@ -80,7 +80,7 @@ pub fn choisir() {
         println!(
             "  {TOUCHE}{}{RESET}  {}  {DISCRET}{description}{RESET}",
             i + 1,
-            chemin.display()
+            chemin_affichable(chemin)
         );
     }
     let reponse = demander(tr!(
@@ -109,7 +109,7 @@ fn volumes_amovibles() -> Vec<(PathBuf, String)> {
 }
 
 /// Clés et disques externes montés sous macOS : tout ce qui est dans /Volumes, sauf le disque du système (un
-/// lien vers « / »). Description : nom et taille (df).
+/// lien vers « / »). Description : nom et taille (df), prête à montrer (l'étiquette vient de qui a préparé la clé).
 #[cfg(target_os = "macos")]
 fn volumes_amovibles() -> Vec<(PathBuf, String)> {
     let racine = std::fs::canonicalize("/").unwrap_or_default();
@@ -136,12 +136,14 @@ fn volumes_amovibles() -> Vec<(PathBuf, String)> {
                 .file_name()
                 .map(|n| n.to_string_lossy().into_owned())
                 .unwrap_or_default();
-            (p, format!("{nom} · {taille}"))
+            (p, affichable(&format!("{nom} · {taille}")))
         })
         .collect()
 }
 
-/// Lignes de `lsblk -P` : RM="1" HOTPLUG="1" LABEL="CLE" SIZE="28,9G" MOUNTPOINT="/run/media/alice/CLE".
+/// Lignes de `lsblk -P` : RM="1" HOTPLUG="1" LABEL="CLE" SIZE="28,9G" MOUNTPOINT="/run/media/alice/CLE". La
+/// description est prête à montrer (l'étiquette vient de qui a préparé la clé) ; le point de montage reste tel quel,
+/// pour l'analyse.
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 fn lire_lsblk(texte: &str) -> Vec<(PathBuf, String)> {
     texte
@@ -160,7 +162,7 @@ fn lire_lsblk(texte: &str) -> Vec<(PathBuf, String)> {
                 let taille = champ("SIZE").unwrap_or_default();
                 (
                     PathBuf::from(point),
-                    nom.map_or(taille.clone(), |n| format!("{n} · {taille}")),
+                    affichable(&nom.map_or(taille.clone(), |n| format!("{n} · {taille}"))),
                 )
             })
         })
@@ -180,7 +182,10 @@ fn volumes_amovibles() -> Vec<(PathBuf, String)> {
         let lettre = c.next().filter(|x| !x.is_empty())?;
         let nom = c.next().unwrap_or("");
         let taille = c.next().unwrap_or("");
-        Some((PathBuf::from(format!("{lettre}:\\")), format!("{nom} · {taille} Go")))
+        Some((
+            PathBuf::from(format!("{lettre}:\\")),
+            affichable(&format!("{nom} · {taille} Go")),
+        ))
     })
     .collect()
 }
@@ -230,11 +235,12 @@ fn revue_cle(racine: &std::path::Path) {
         return;
     }
     titre(tr!("Pièges de clé USB", "USB drive traps"));
+    // Les noms, choisis par qui a rempli la clé, sont seulement montrés : lus prêts à montrer.
     let entrees: Vec<(String, bool)> = std::fs::read_dir(racine)
         .into_iter()
         .flatten()
         .flatten()
-        .map(|e| (e.file_name().to_string_lossy().into_owned(), e.path().is_dir()))
+        .map(|e| (affichable(&e.file_name().to_string_lossy()), e.path().is_dir()))
         .collect();
     let signes = signes_de_ver(&entrees);
     if signes.is_empty() {
@@ -277,6 +283,7 @@ fn defender(portee: &Portee) {
                 .unwrap_or_default();
             for l in menaces.lines() {
                 let (nom, fichiers) = l.split_once('|').unwrap_or((l, ""));
+                let (nom, fichiers) = (affichable(nom), affichable(fichiers));
                 println!("  {}✖ {nom}{RESET}  {fichiers}", couleur(Niveau::Critique));
             }
             trp!(
@@ -330,14 +337,15 @@ pub(crate) fn examiner(fichier: &std::path::Path) -> Examen {
     }
 }
 
-/// Noms des menaces dans la sortie de MpCmdRun : « Threat                  : Virus:DOS/EICAR_Test_File ».
+/// Noms des menaces dans la sortie de MpCmdRun : « Threat                  : Virus:DOS/EICAR_Test_File », prêts à
+/// montrer.
 #[cfg(any(windows, test))]
 fn menaces_mpcmdrun(sortie: &str) -> Vec<String> {
     let noms: Vec<String> = sortie
         .lines()
         .filter_map(|l| {
             let (cle, valeur) = l.split_once(':')?;
-            (cle.trim() == "Threat").then(|| valeur.trim().to_string())
+            (cle.trim() == "Threat").then(|| affichable(valeur.trim()))
         })
         .filter(|v| !v.is_empty())
         .collect();
@@ -622,7 +630,7 @@ fn clamav(portee: &Portee) {
     if let Some((chemin, _)) = &liste_tmp {
         cmd.arg(format!("--file-list={}", chemin.display()));
     }
-    let mut decrites: Vec<String> = cibles.iter().map(|p| p.display().to_string()).collect();
+    let mut decrites: Vec<String> = cibles.iter().map(|p| chemin_affichable(p)).collect();
     if let Some((_, n)) = &liste_tmp {
         decrites.push(trf!(
             "/tmp ({n} fichier(s) de moins de 7 jours)",
@@ -654,8 +662,9 @@ fn clamav(portee: &Portee) {
             "  {}✖ The scan failed: the result is not reliable.{RESET}",
             couleur(Niveau::Eleve)
         );
+        // Les erreurs de ClamAV citent souvent un fichier, au nom choisi par n'importe qui.
         for l in erreur.lines().filter(|l| l.contains("ERROR")).take(5) {
-            println!("    {GRIS}{l}{RESET}");
+            println!("    {GRIS}{}{RESET}", affichable(l));
         }
         return;
     };
@@ -685,8 +694,9 @@ fn clamav(portee: &Portee) {
         );
         return;
     }
+    // Le chemin reste tel quel pour la quarantaine ; montré, il est rendu inoffensif.
     for (f, m) in &infectes {
-        println!("  {}✖ {m}{RESET}  {f}", couleur(Niveau::Critique));
+        println!("  {}✖ {m}{RESET}  {}", couleur(Niveau::Critique), affichable(f));
     }
     trp!(
         "\n  {} fichier(s) suspect(s).",
@@ -707,6 +717,7 @@ fn clamav(portee: &Portee) {
             "s" | "d" => std::fs::remove_file(chemin),
             _ => continue,
         };
+        let f = affichable(f);
         match resultat {
             Ok(()) => println!("  {VERT}✔{RESET} {f}"),
             Err(e) => trp!(
@@ -786,11 +797,12 @@ struct Bilan {
 /// appartiennent à root, et ClamAV répond « erreur » (code 2) après avoir analysé tout le reste (vu en réel).
 #[cfg(unix)]
 fn lire_resultat(code: Option<i32>, sortie: &str) -> Option<Bilan> {
+    // Le chemin reste tel quel : c'est lui qu'on isole ou qu'on efface. Le nom de la menace est seulement montré.
     let infectes: Vec<(String, String)> = sortie
         .lines()
         .filter_map(|l| {
             let (fichier, menace) = l.strip_suffix(" FOUND")?.rsplit_once(": ")?;
-            Some((fichier.to_string(), menace.to_string()))
+            Some((fichier.to_string(), affichable(menace)))
         })
         .collect();
     let champ = |nom: &str| {
@@ -828,6 +840,7 @@ fn noter_quarantaine(dossier: &std::path::Path, origine: &str, dest: &std::path:
         .open(dossier.join("journal.txt"))
         .and_then(|mut j| j.write_all(ligne.as_bytes()));
     if let Err(e) = ecrit {
+        let origine = affichable(origine);
         trp!(
             "  Attention : journal de la quarantaine non écrit ({e}). Origine : {origine}",
             "  Warning: quarantine log not written ({e}). Origin: {origine}"
@@ -980,6 +993,9 @@ mod tests_cle {
         assert_eq!(v[0].0, PathBuf::from("/run/media/alice/MA CLE"));
         assert_eq!(v[0].1, "MA CLE · 28,8G");
         assert_eq!(v[1].1, "1T");
+        // L'étiquette d'une clé USB est choisie par qui l'a préparée : piégée, elle arrive inoffensive.
+        let piege = "RM=\"1\" HOTPLUG=\"1\" LABEL=\"CLE\x1b]52;c;eA==\x07\u{202e}\" SIZE=\"8G\" MOUNTPOINT=\"/run/media/alice/CLE\"\n";
+        assert_eq!(lire_lsblk(piege)[0].1, "CLE�]52;c;eA==�� · 8G");
     }
 
     #[test]
@@ -1022,6 +1038,10 @@ mod tests_cle {
         assert_eq!(menaces_mpcmdrun(sortie), ["Virus:DOS/EICAR_Test_File"]);
         // Sortie inattendue : la menace est quand même dite.
         assert_eq!(menaces_mpcmdrun("").len(), 1);
+        assert_eq!(
+            menaces_mpcmdrun("Threat                  : Trojan\x1b[2K\rFaux\u{202e}\n"),
+            ["Trojan�[2K�Faux�"]
+        );
     }
 }
 
