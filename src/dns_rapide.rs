@@ -183,6 +183,21 @@ fn millisecondes(d: Option<Duration>) -> String {
     }
 }
 
+/// Un serveur qu'on sait interroger d'ici. Une adresse IPv6 de lien local (fe80::, ou fec0:: des anciens Windows) a
+/// besoin du nom de sa carte (« %wlan0 »), que la configuration lue n'a pas gardé : elle ne se mesure pas.
+fn mesurable(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(_) => true,
+        IpAddr::V6(v6) => (v6.segments()[0] & 0xffc0) != 0xfe80 && (v6.segments()[0] & 0xffc0) != 0xfec0,
+    }
+}
+
+/// Le DNS actuel ne se mesure pas du tout : aucun de ses serveurs ne s'interroge d'ici. Rien n'est alors conclu,
+/// surtout pas qu'il « ne répond pas ».
+fn actuel_non_mesurable(serveurs: &[IpAddr]) -> bool {
+    !serveurs.is_empty() && serveurs.iter().all(|ip| !mesurable(*ip))
+}
+
 /// Faut-il proposer le plus rapide ? Seulement s'il gagne vraiment : un cinquième du temps, et 5 ms au moins.
 fn vaut_la_peine(actuel: Option<Duration>, meilleur: Option<Duration>) -> bool {
     match (actuel, meilleur) {
@@ -229,7 +244,10 @@ pub fn mesurer_et_proposer() {
     a_mesurer.truncate(2);
     trp!("\n  {GRIS}Mesure en cours…{RESET}", "\n  {GRIS}Measuring…{RESET}");
     let (temps_actuels, temps_publics): (Vec<Option<Duration>>, Vec<Option<Duration>>) = std::thread::scope(|s| {
-        let actuels: Vec<_> = a_mesurer.iter().map(|ip| s.spawn(move || mesurer(*ip))).collect();
+        let actuels: Vec<_> = a_mesurer
+            .iter()
+            .map(|ip| s.spawn(move || mesurable(*ip).then(|| mesurer(*ip)).flatten()))
+            .collect();
         let publics: Vec<_> = PUBLICS
             .iter()
             .map(|p| s.spawn(move || p.v4[0].parse().ok().and_then(mesurer)))
@@ -248,7 +266,12 @@ pub fn mesurer_et_proposer() {
 
     let mut lignes = vec![Ligne::Texte(String::new())];
     for (ip, t) in a_mesurer.iter().zip(&temps_actuels) {
-        let (quoi, ms) = (ajuster(tr!("Actuel", "Current"), 8), millisecondes(*t));
+        let ms = if mesurable(*ip) {
+            millisecondes(*t)
+        } else {
+            tr!("non mesurable (lien local)", "not measurable (link-local)").to_string()
+        };
+        let quoi = ajuster(tr!("Actuel", "Current"), 8);
         let serveur = ajuster(&format!("{} ({ip})", nom_actuel(*ip, &actuel, passerelle)), 44);
         let ligne = format!("  {GRIS}{quoi}{RESET} {serveur} {GRIS}{ms}{RESET}");
         lignes.push(Ligne::Texte(ligne));
@@ -266,7 +289,8 @@ pub fn mesurer_et_proposer() {
         }
     }
     lignes.push(Ligne::Texte(String::new()));
-    let proposer = garde.is_none() && vaut_la_peine(actuel_ms, meilleur.map(|(_, t)| t));
+    let inconnu = actuel_non_mesurable(&a_mesurer);
+    let proposer = garde.is_none() && !inconnu && vaut_la_peine(actuel_ms, meilleur.map(|(_, t)| t));
     // Gardé : les DNS publics sont montrés pour information, sans rien proposer.
     for (i, (p, t)) in PUBLICS.iter().zip(&temps_publics).enumerate() {
         let texte = format!("{} ({})", p.nom, p.v4[0]);
@@ -286,6 +310,10 @@ pub fn mesurer_et_proposer() {
     }
     let conclusion = match meilleur {
         _ if garde.is_some() => "",
+        _ if inconnu => tr!(
+            "Ton DNS actuel a une adresse de lien local, que Gardien ne sait pas mesurer : rien n'est comparé.",
+            "Your current DNS has a link-local address, which Gardien cannot measure: nothing is compared."
+        ),
         None => tr!(
             "Les DNS publics ne répondent pas d'ici (UDP 53 bloqué par le réseau ?) : rien à comparer.",
             "Public DNS servers do not answer from here (UDP 53 blocked by the network?): nothing to compare."
@@ -354,6 +382,18 @@ pub fn mesurer_et_proposer() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Un DNS actuel en IPv6 de lien local ne se mesure pas : jamais « il ne répond pas », et rien n'est proposé
+    // sur cette base. Un serveur de lien local à côté d'un autre mesurable laisse la comparaison se faire.
+    #[test]
+    fn lien_local_non_mesurable() {
+        let ip = |t: &str| t.parse::<IpAddr>().unwrap();
+        assert!(!mesurable(ip("fe80::1")) && !mesurable(ip("fec0:0:0:ffff::1")));
+        assert!(mesurable(ip("192.168.1.1")) && mesurable(ip("2606:4700:4700::1111")) && mesurable(ip("fd00::1")));
+        assert!(actuel_non_mesurable(&[ip("fe80::1")]));
+        assert!(!actuel_non_mesurable(&[ip("fe80::1"), ip("192.168.1.1")]));
+        assert!(!actuel_non_mesurable(&[]));
+    }
 
     #[test]
     fn questions_et_reponses() {
