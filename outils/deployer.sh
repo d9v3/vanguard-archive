@@ -4,6 +4,8 @@
 #   outils/deployer.sh --branchement   au branchement de la clé : récupérer la dernière version de GitHub, la
 #                                      compiler si elle est nouvelle, puis copier
 #   outils/deployer.sh --sans-compiler copier les dernières versions compilées (après chaque compilation)
+#   outils/deployer.sh --local         comme sans option, mais rien ne part sur GitHub (ni le code, ni les tickets
+#                                      du journal) ; le service de copie qui suit la compilation le respecte aussi
 set -euo pipefail
 cd "$(dirname "$0")/.."
 export PATH="$HOME/.cargo/bin:$PATH"
@@ -13,6 +15,17 @@ WINDOWS=target/x86_64-pc-windows-gnu/release/gardien.exe
 # Commit dont viennent les binaires compilés : on ne recompile pas une version déjà compilée.
 COMMIT_COMPILE=target/.commit-compile
 MODE=${1:-}
+# « Seulement sur cet ordinateur » : rien n'est envoyé sur GitHub. Le repère dure 2 h, assez pour le service de copie
+# que la compilation déclenche (--sans-compiler, qui sinon pousserait) ; un déploiement normal l'efface.
+REPERE_LOCAL="${XDG_RUNTIME_DIR:-/tmp}/gardien-deployer-local"
+if [[ $MODE == --local ]]; then
+  MODE=""
+  touch "$REPERE_LOCAL"
+elif [[ -z $MODE ]]; then
+  rm -f "$REPERE_LOCAL"
+fi
+LOCAL=""
+[[ -n $(find "$REPERE_LOCAL" -mmin -120 2>/dev/null) ]] && LOCAL=1
 
 compiler() {
   # Liste des fabricants de plus d'un mois : on la rafraîchit avant de compiler (elle est intégrée au programme), et
@@ -84,7 +97,9 @@ fi
 install -Dm755 "$LINUX" "$HOME/.cargo/bin/gardien"
 # Sauvegarde hors de la maison : les commits partent vers le dépôt GitHub (sans bloquer s'il n'y a pas d'Internet),
 # seulement si rien de personnel n'y paraît : code, messages, auteur (outils/confidentialite.py).
-if git remote get-url origin >/dev/null 2>&1; then
+if [[ -n $LOCAL ]]; then
+  echo "Rien n'est envoyé sur GitHub (déploiement local)."
+elif git remote get-url origin >/dev/null 2>&1; then
   if ! python3 outils/confidentialite.py --envoi; then
     echo "Rien n'est envoyé sur GitHub : un détail personnel paraît dans les commits (voir ci-dessus)."
   elif timeout 30 git push -q origin HEAD 2>/dev/null; then
@@ -136,7 +151,7 @@ rapatrier_journal() { # $1 : journal à vider, $2 : d'où il vient
     notify-send -a Gardien -i gardien "Gardien : $nb erreur(s) rapportée(s) ($2)" "$RETOURS/journal-erreurs.txt" || true
 }
 envoyer_journal() {
-  [[ -s $RETOURS/a-envoyer-github.txt ]] && command -v gh >/dev/null || return 0
+  [[ -z $LOCAL && -s $RETOURS/a-envoyer-github.txt ]] && command -v gh >/dev/null || return 0
   timeout 300 python3 outils/journal-vers-github.py "$RETOURS/a-envoyer-github.txt" ||
     echo "Journal : envoi sur GitHub impossible, il repartira au prochain déploiement."
 }
@@ -205,7 +220,7 @@ cp -f "$LINUX" "$CLE/Linux/gardien"
 # Version macOS : compilée sur un Mac de GitHub (.github/workflows/macos.yml, chaque nuit si le code a changé),
 # récupérée ici quand une compilation plus récente a réussi. Sans Internet ou sans gh : on garde la dernière.
 MAC=target/macos
-if command -v gh >/dev/null; then
+if [[ -z $LOCAL ]] && command -v gh >/dev/null; then
   RUN=$(timeout 20 gh run list --workflow macos.yml --branch "$(git rev-parse --abbrev-ref HEAD)" --status success \
     --limit 1 --json databaseId,headSha -q '.[0] | "\(.databaseId) \(.headSha)"' 2>/dev/null || true)
   if [[ -n $RUN && ${RUN#* } != $(cat "$MAC/commit.txt" 2>/dev/null) ]]; then
