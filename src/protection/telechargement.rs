@@ -75,8 +75,9 @@ fn lire_empreinte(saisie: &str) -> Option<(Algo, String)> {
 }
 
 /// L'empreinte d'un fichier dans une liste d'empreintes : lignes « empreinte  nom », « empreinte *nom »,
-/// « SHA256 (nom) = empreinte », ou une empreinte seule (fichier .sha256 d'un seul fichier).
-fn chercher_dans_liste(texte: &str, nom: &str) -> Option<(Algo, String)> {
+/// « SHA256 (nom) = empreinte », ou une empreinte seule si `seule_permise` (fichier « <nom>.sha256 » d'un seul
+/// fichier ; dans une liste commune, une empreinte sans nom peut être celle de n'importe quel fichier du dossier).
+fn chercher_dans_liste(texte: &str, nom: &str, seule_permise: bool) -> Option<(Algo, String)> {
     let lignes: Vec<&str> = texte
         .lines()
         .map(str::trim)
@@ -96,7 +97,7 @@ fn chercher_dans_liste(texte: &str, nom: &str) -> Option<(Algo, String)> {
         return lire_empreinte(l);
     }
     match lignes[..] {
-        [seule] if !seule.contains(char::is_whitespace) => lire_empreinte(seule),
+        [seule] if seule_permise && !seule.contains(char::is_whitespace) => lire_empreinte(seule),
         _ => None,
     }
 }
@@ -127,7 +128,8 @@ fn empreinte_a_cote(fichier: &Path) -> Option<(Algo, String, PathBuf)> {
             return None;
         }
         let texte = std::fs::read_to_string(&chemin).ok()?;
-        chercher_dans_liste(&texte, &nom).map(|(a, e)| (a, e, chemin))
+        // « outil.zip.sha256 » ne parle que d'outil.zip ; « SHA256SUMS » parle de tout le dossier.
+        chercher_dans_liste(&texte, &nom, c.starts_with(&format!("{nom}."))).map(|(a, e)| (a, e, chemin))
     })
 }
 
@@ -626,29 +628,32 @@ mod tests {
         let autre = "0".repeat(64);
         let liste = format!("{autre}  gardien.iso.sig\n{SHA} *gardien.iso\n");
         assert_eq!(
-            chercher_dans_liste(&liste, "gardien.iso"),
+            chercher_dans_liste(&liste, "gardien.iso", false),
             Some((Algo::Sha256, SHA.into()))
         );
         assert_eq!(
-            chercher_dans_liste(&format!("{SHA}  ./dist/gardien.iso\n"), "gardien.iso").map(|e| e.1),
+            chercher_dans_liste(&format!("{SHA}  ./dist/gardien.iso\n"), "gardien.iso", false).map(|e| e.1),
             Some(SHA.into())
         );
         assert_eq!(
-            chercher_dans_liste(&format!("SHA256 (gardien.iso) = {SHA}\n"), "gardien.iso").map(|e| e.1),
+            chercher_dans_liste(&format!("SHA256 (gardien.iso) = {SHA}\n"), "gardien.iso", false).map(|e| e.1),
             Some(SHA.into())
         );
         // Fichier .sha256 d'un seul fichier : l'empreinte seule.
         assert_eq!(
-            chercher_dans_liste(&format!("{SHA}\n"), "gardien.iso").map(|e| e.1),
+            chercher_dans_liste(&format!("{SHA}\n"), "gardien.iso", true).map(|e| e.1),
             Some(SHA.into())
         );
         // Un nom avec des espaces.
         assert_eq!(
-            chercher_dans_liste(&format!("{SHA}  mon outil.zip\n"), "mon outil.zip").map(|e| e.1),
+            chercher_dans_liste(&format!("{SHA}  mon outil.zip\n"), "mon outil.zip", false).map(|e| e.1),
             Some(SHA.into())
         );
         // L'empreinte d'un autre fichier ne compte pas.
-        assert_eq!(chercher_dans_liste(&format!("{SHA}  autre.iso\n"), "gardien.iso"), None);
+        assert_eq!(
+            chercher_dans_liste(&format!("{SHA}  autre.iso\n"), "gardien.iso", false),
+            None
+        );
     }
 
     #[test]
@@ -669,6 +674,21 @@ mod tests {
             std::fs::write(&bizarre, b"test").unwrap();
             assert_eq!(calculer(&bizarre, Algo::Sha256).as_deref(), Ok(SHA));
         }
+        std::fs::remove_dir_all(&dossier).unwrap();
+    }
+
+    // Une empreinte seule, sans nom, ne vaut que dans le fichier propre à l'image (« outil.zip.sha256 ») : dans une
+    // liste commune (SHA256SUMS), elle peut être celle de n'importe quel fichier du dossier, et la comparer donnait
+    // « abîmé ou remplacé » à tort.
+    #[test]
+    fn empreinte_seule_dans_une_liste_commune() {
+        let dossier = crate::protection::isoler::dossier_jetable().unwrap();
+        let fichier = dossier.join("outil.zip");
+        std::fs::write(&fichier, b"test").unwrap();
+        std::fs::write(dossier.join("SHA256SUMS"), format!("{}\n", "0".repeat(64))).unwrap();
+        assert_eq!(empreinte_a_cote(&fichier), None);
+        std::fs::write(dossier.join("outil.zip.sha256"), format!("{SHA}\n")).unwrap();
+        assert_eq!(empreinte_a_cote(&fichier).map(|e| e.1), Some(SHA.to_string()));
         std::fs::remove_dir_all(&dossier).unwrap();
     }
 
