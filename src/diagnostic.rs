@@ -164,6 +164,27 @@ mod systeme {
         Some(source.split('[').next()?.trim().to_string()).filter(|s| !s.is_empty())
     }
 
+    /// Programmes plantés d'après `coredumpctl list` : le nom du programme, à la fin du chemin de la colonne EXE. Ce
+    /// chemin peut contenir des espaces (« …/common/Hollow Knight/hollow_knight ») : il va du premier mot qui
+    /// commence par « / » jusqu'à la colonne SIZE, la dernière quand l'en-tête l'annonce (systemd 248 et plus).
+    pub(super) fn programmes_coredumpctl(texte: &str) -> Vec<String> {
+        let taille_en_fin = texte
+            .lines()
+            .find(|l| l.split_whitespace().next() == Some("TIME"))
+            .is_some_and(|entete| entete.split_whitespace().any(|c| c == "SIZE"));
+        texte
+            .lines()
+            .filter_map(|l| {
+                let exe = l[l.find(" /")? + 1..].trim_end();
+                let exe = match exe.rsplit_once(char::is_whitespace) {
+                    Some((chemin, _)) if taille_en_fin => chemin.trim_end(),
+                    _ => exe,
+                };
+                Some(exe.rsplit('/').next().unwrap_or(exe).to_string())
+            })
+            .collect()
+    }
+
     pub fn sections() -> Vec<Section> {
         let mut systeme = Vec::new();
         let os = lire("/etc/os-release")
@@ -299,15 +320,9 @@ mod systeme {
                 tr!("journal illisible sans droits", "journal unreadable without rights"),
             )),
         }
-        let plantages: Vec<String> = sortie("coredumpctl", &["list", "--no-pager", "-q", "--since=-7d"])
-            .unwrap_or_default()
-            .lines()
-            .filter_map(|l| {
-                l.split_whitespace()
-                    .find(|m| m.starts_with('/'))
-                    .map(|p| p.rsplit('/').next().unwrap_or(p).to_string())
-            })
-            .collect();
+        let plantages = programmes_coredumpctl(
+            &sortie("coredumpctl", &["list", "--no-pager", "-q", "--since=-7d"]).unwrap_or_default(),
+        );
         problemes.push(super::programmes_plantes(&plantages));
         let en_echec: Vec<String> = sortie("systemctl", &["--failed", "--no-legend", "--plain"])
             .unwrap_or_default()
@@ -768,5 +783,32 @@ mod tests {
         ] {
             assert_eq!(systeme::source_journal(&suite), None, "« {suite} »");
         }
+    }
+
+    /// `coredumpctl list` : le chemin d'un jeu contient souvent des espaces (« …/Hollow Knight/hollow_knight ») ;
+    /// systemd 248 et plus ajoutent la colonne SIZE après lui, les versions d'avant non.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn programmes_plantes_au_chemin_avec_espaces() {
+        let entete = "TIME                            PID  UID  GID SIG     COREFILE EXE";
+        let lignes = [
+            "Sun 2026-09-27 11:30:12 UTC  513823 1000 1000 SIGSEGV missing  /usr/bin/firefox",
+            "Sun 2026-09-27 17:18:43 UTC 1528339 1000 1000 SIGSEGV missing  /srv/jeux/Hollow Knight/hollow_knight",
+            "Mon 2026-09-28 09:02:11 UTC    4242 1000 1000 SIGABRT present  /opt/Jeu Essai/jeu",
+            "Mon 2026-09-28 09:05:00 UTC    4243 1000 1000 SIGSEGV none     n/a",
+        ];
+        // Comme coredumpctl : la colonne EXE à la largeur du plus long chemin, puis SIZE.
+        let taille = ["-", "-", "1.2M", "-"];
+        let mut liste = format!("{entete:<120} SIZE\n");
+        for (l, t) in lignes.iter().zip(taille) {
+            let _ = writeln!(liste, "{l:<120} {t:>4}");
+        }
+        assert_eq!(
+            systeme::programmes_coredumpctl(&liste),
+            ["firefox", "hollow_knight", "jeu"]
+        );
+        let sans_taille = "TIME                            PID   UID   GID SIG COREFILE  EXE\n\
+                           Sat 2021-05-01 10:00:00 UTC    1234  1000  1000  11 present   /opt/Mon Jeu/jeu\n";
+        assert_eq!(systeme::programmes_coredumpctl(sans_taille), ["jeu"]);
     }
 }
