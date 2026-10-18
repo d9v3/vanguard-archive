@@ -28,7 +28,8 @@ pub enum Etat {
     OutilAbsent,
 }
 
-/// Lignes de `upnpc -l` : « 0 UDP  3074->10.0.0.20:3074  'Xbox' '' 0 ».
+/// Lignes de `upnpc -l` : « 0 UDP  3074->10.0.0.20:3074  'Xbox' '' 0 ». N'importe quel appareil du réseau peut
+/// demander une redirection, avec l'adresse et la description de son choix : lues prêtes à montrer (`affichable`).
 #[cfg_attr(windows, allow(dead_code))]
 fn lire_upnpc(sortie: &str) -> Etat {
     if sortie.contains("No IGD UPnP Device") || sortie.contains("No valid UPNP Internet Gateway Device") {
@@ -50,11 +51,11 @@ fn lire_upnpc(sortie: &str) -> Etat {
         let (Ok(public), Ok(port)) = (public.parse(), port.parse()) else {
             continue;
         };
-        let description = l.split('\'').nth(1).unwrap_or("").to_string();
+        let description = affichable(l.split('\'').nth(1).unwrap_or(""));
         liste.push(Redirection {
             protocole: proto.to_string(),
             port_public: public,
-            appareil: ip.to_string(),
+            appareil: affichable(ip),
             port_appareil: port,
             description,
         });
@@ -108,6 +109,13 @@ pub fn etat() -> Etat {
     ) else {
         return Etat::OutilAbsent;
     };
+    lire_upnp_windows(&sortie)
+}
+
+/// Sortie de l'interface UPnP de Windows : « UPNP_ABSENT », ou « UPNP_ACTIF » puis une ligne
+/// « UPNP|protocole|port public|appareil|port|description » par redirection, lue comme celles de upnpc.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn lire_upnp_windows(sortie: &str) -> Etat {
     if sortie.contains("UPNP_ABSENT") {
         return Etat::Absent;
     }
@@ -121,11 +129,11 @@ pub fn etat() -> Etat {
                     return None;
                 };
                 Some(Redirection {
-                    protocole: proto.to_string(),
+                    protocole: affichable(proto),
                     port_public: public.parse().ok()?,
-                    appareil: ip.to_string(),
+                    appareil: affichable(ip),
                     port_appareil: port.parse().ok()?,
-                    description: description.to_string(),
+                    description: affichable(description),
                 })
             })
             .collect(),
@@ -242,6 +250,36 @@ mod tests {
         );
         assert_eq!(l[0].description, "Xbox SRA");
         assert_eq!(niveau(&l[1]), info_port(80).niveau);
+    }
+
+    /// N'importe quel appareil du réseau peut demander une redirection à la box, avec la description de son choix :
+    /// piégée, elle arrive inoffensive, « � » à la place de chaque caractère piégé.
+    #[test]
+    fn description_piegee() {
+        let sortie = " 0 TCP  8080->10.0.0.30:80  'Cam\x1b]52;c;eA==\x07\x1b[2K\rFaux\u{202e}' '' 0\n";
+        let Etat::Actif(l) = lire_upnpc(sortie) else {
+            panic!("UPnP actif attendu")
+        };
+        assert_eq!(l[0].description, "Cam�]52;c;eA==��[2K�Faux�");
+        assert_eq!((l[0].protocole.as_str(), l[0].appareil.as_str()), ("TCP", "10.0.0.30"));
+        // L'interface UPnP de Windows : la même lecture.
+        assert_eq!(lire_upnp_windows("UPNP_ABSENT\n"), Etat::Absent);
+        let windows = "UPNP_ACTIF\nUPNP|TCP|8080|10.0.0.30|80|Cam\x1b]52;c;eA==\x07\x1b[2K\rFaux\u{202e}\nUPNP|UDP|3074|10.0.0.20|3074|Xbox SRA\n";
+        let Etat::Actif(l) = lire_upnp_windows(windows) else {
+            panic!("UPnP actif attendu")
+        };
+        assert_eq!(l.len(), 2);
+        assert_eq!(l[0].description, "Cam�]52;c;eA==��[2K�Faux�");
+        assert_eq!(
+            l[1],
+            Redirection {
+                protocole: "UDP".into(),
+                port_public: 3074,
+                appareil: "10.0.0.20".into(),
+                port_appareil: 3074,
+                description: "Xbox SRA".into(),
+            }
+        );
     }
 
     #[test]
