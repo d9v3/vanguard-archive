@@ -1214,14 +1214,24 @@ fn sens_surbl(codes: &[Ipv4Addr]) -> Inscription {
     }
 }
 
+/// Une liste d'URLhaus téléchargée sert 12 heures sans être retéléchargée.
+const URLHAUS_FRAICHE: Duration = Duration::from_hours(12);
+/// Au-delà d'une semaine sans avoir pu être rafraîchies, les listes ne servent plus : un site piège vit quelques
+/// jours, une vieille liste ne le connaît pas encore.
+const URLHAUS_TROP_VIEILLE: Duration = Duration::from_hours(7 * 24);
+
 /// Une liste d'URLhaus (abuse.ch), gardée 12 heures dans le dossier de Gardien. La télécharger ne dit à personne quel
-/// lien on vérifie. Sans Internet, la copie d'avant sert encore.
-fn liste_urlhaus(adresse: &str, nom: &str) -> Option<String> {
+/// lien on vérifie. Sans Internet, la copie d'avant sert encore : son texte, et son âge.
+fn liste_urlhaus(adresse: &str, nom: &str) -> Option<(String, Duration)> {
     let dossier = crate::reseau::dossier_local().join("urlhaus");
     let fichier = dossier.join(nom);
-    let fraiche = std::fs::metadata(&fichier)
-        .and_then(|m| m.modified())
-        .is_ok_and(|t| t.elapsed().is_ok_and(|d| d < Duration::from_hours(12)));
+    let age = || {
+        std::fs::metadata(&fichier)
+            .and_then(|m| m.modified())
+            .ok()
+            .map(|t| t.elapsed().unwrap_or_default())
+    };
+    let fraiche = age().is_some_and(|d| d < URLHAUS_FRAICHE);
     if !fraiche && std::fs::create_dir_all(&dossier).is_ok() {
         let provisoire = dossier.join(format!("{nom}.nouveau"));
         let telecharge = crate::commande::lancer(
@@ -1238,7 +1248,32 @@ fn liste_urlhaus(adresse: &str, nom: &str) -> Option<String> {
             let _ = std::fs::remove_file(&provisoire);
         }
     }
-    std::fs::read_to_string(&fichier).ok()
+    Some((std::fs::read_to_string(&fichier).ok()?, age()?))
+}
+
+/// Ce que dit l'âge des listes d'URLhaus utilisées : rien quand elles sont fraîches ; leur âge quand elles n'ont pas
+/// pu être rafraîchies (pas d'Internet) ; au-delà d'une semaine, elles ne servent plus (`Err` : la raison).
+fn age_des_listes(age: Duration) -> Result<Option<String>, String> {
+    if age < URLHAUS_FRAICHE {
+        return Ok(None);
+    }
+    let heures = age.as_secs() / 3600;
+    let duree = if heures < 48 {
+        trf!("{heures} heures", "{heures} hours")
+    } else {
+        trf!("{} jours", "{} days", heures / 24)
+    };
+    if age > URLHAUS_TROP_VIEILLE {
+        Err(trf!(
+            "listes vieilles de {duree} : rafraîchissement impossible",
+            "lists {duree} old: could not refresh them"
+        ))
+    } else {
+        Ok(Some(trf!(
+            "listes d'il y a {duree} : rafraîchissement impossible",
+            "lists from {duree} ago: could not refresh them"
+        )))
+    }
 }
 
 /// URLhaus : les noms consacrés aux logiciels malveillants (liste des hôtes), et les liens en service (liste des
@@ -1321,6 +1356,14 @@ fn age(domaine: &str) -> Result<(chrono::DateTime<chrono::Utc>, i64), String> {
     let (corps, code) = sortie.rsplit_once('\n').unwrap_or(("", sortie));
     match code.trim() {
         "200" => {}
+        // curl n'a reçu aucune réponse (pas d'Internet, nom introuvable, délai dépassé).
+        "000" | "" => {
+            return Err(tr!(
+                "pas de réponse du registre (pas d'Internet ?)",
+                "no answer from the registry (no Internet?)"
+            )
+            .into());
+        }
         "404" => {
             return Err(tr!(
                 "inconnu du registre, ou registre sans RDAP",
@@ -1383,8 +1426,8 @@ fn afficher_signe(s: &Signe) {
     afficher_aligne(&format!("  {marque} "), &s.texte, 4, "");
 }
 
-fn afficher_reponse(liste: &str, reponse: &Inscription) {
-    let (marque, texte) = match reponse {
+fn afficher_reponse(liste: &str, reponse: &Inscription, note: Option<&str>) {
+    let (marque, mut texte) = match reponse {
         Inscription::Absent => (format!("{VERT}✔{RESET}"), tr!("pas listé", "not listed").to_string()),
         Inscription::Inscrit(raison, niveau) => (
             format!("{}✖{RESET}", couleur(*niveau)),
@@ -1395,11 +1438,47 @@ fn afficher_reponse(liste: &str, reponse: &Inscription) {
             trf!("impossible à vérifier : {raison}", "could not check: {raison}"),
         ),
     };
+    if let Some(n) = note {
+        texte = format!("{texte} ({n})");
+    }
     afficher_aligne(&format!("  {marque} {} ", ajuster(liste, 13)), &texte, 18, "");
 }
 
+/// Une vérification en ligne : la liste, sa réponse, ce qu'elle dit (âge du domaine) et une précision (âge d'une liste
+/// qu'on n'a pas pu rafraîchir).
+struct Verification {
+    liste: String,
+    reponse: Inscription,
+    signe: Option<Signe>,
+    note: Option<String>,
+}
+
+impl Verification {
+    fn simple(liste: &str, reponse: Inscription) -> Self {
+        Verification {
+            liste: liste.to_string(),
+            reponse,
+            signe: None,
+            note: None,
+        }
+    }
+}
+
+/// Ce qu'ont pu faire les vérifications en ligne, pour le verdict.
+#[derive(Debug, PartialEq)]
+enum EnLigne {
+    /// Toutes faites.
+    Faites,
+    /// Refusées, ou aucune n'a pu se faire : seulement l'examen local.
+    Aucune,
+    /// Certaines n'ont pas pu se faire : leurs noms.
+    Incompletes(Vec<String>),
+    /// Rien à vérifier en ligne (javascript:, data:… : pas de site).
+    SansObjet,
+}
+
 /// Les vérifications en ligne, en parallèle : (âge, URLhaus, Spamhaus DBL, SURBL). Aucune n'ouvre le site.
-fn en_ligne(lien: &Lien, adresse: &str) -> Vec<(String, Inscription, Option<Signe>)> {
+fn en_ligne(lien: &Lien, adresse: &str) -> Vec<Verification> {
     // Un nom tapé en lettres non latines (« pаypal.com », avec un « а » cyrillique) : les listes et les registres ne
     // connaissent que sa forme « xn-- ». Le demander tel quel ferait répondre « absent » sans l'avoir vraiment cherché.
     if !lien.hote.is_ascii() {
@@ -1414,7 +1493,7 @@ fn en_ligne(lien: &Lien, adresse: &str) -> Vec<(String, Inscription, Option<Sign
         };
         return [tr!("Âge", "Age"), "URLhaus", "Spamhaus DBL", "SURBL"]
             .into_iter()
-            .map(|liste| (liste.to_string(), raison(), None))
+            .map(|liste| Verification::simple(liste, raison()))
             .collect();
     }
     let domaine = site(lien);
@@ -1424,7 +1503,20 @@ fn en_ligne(lien: &Lien, adresse: &str) -> Vec<(String, Inscription, Option<Sign
         let urlhaus = s.spawn(|| {
             let hotes = liste_urlhaus("https://urlhaus.abuse.ch/downloads/hostfile/", "hotes.txt");
             let liens = liste_urlhaus("https://urlhaus.abuse.ch/downloads/text_online/", "liens.txt");
-            chercher_urlhaus(lien, adresse, hotes.as_deref(), liens.as_deref())
+            // La plus vieille des deux listes décide.
+            let age = hotes.iter().chain(&liens).map(|(_, a)| *a).max();
+            match age.map(age_des_listes).transpose() {
+                Err(raison) => (Inscription::Impossible(raison), None),
+                Ok(note) => (
+                    chercher_urlhaus(
+                        lien,
+                        adresse,
+                        hotes.as_ref().map(|(t, _)| t.as_str()),
+                        liens.as_ref().map(|(t, _)| t.as_str()),
+                    ),
+                    note.flatten(),
+                ),
+            }
         });
         let age = (!ip).then(|| s.spawn(|| age(&domaine)));
         let dbl = (!ip).then(|| {
@@ -1453,28 +1545,38 @@ fn en_ligne(lien: &Lien, adresse: &str) -> Vec<(String, Inscription, Option<Sign
         });
         let erreur = || Inscription::Impossible(tr!("erreur interne", "internal error").into());
         let mut resultats = Vec::new();
+        let nom_age = tr!("Âge", "Age");
         if let Some(age) = age {
             resultats.push(match age.join() {
-                Ok(Ok((date, jours))) => {
-                    let s = signe_d_age(date, jours);
-                    (tr!("Âge", "Age").to_string(), Inscription::Absent, Some(s))
-                }
-                Ok(Err(raison)) => (tr!("Âge", "Age").to_string(), Inscription::Impossible(raison), None),
-                Err(_) => (tr!("Âge", "Age").to_string(), erreur(), None),
+                Ok(Ok((date, jours))) => Verification {
+                    signe: Some(signe_d_age(date, jours)),
+                    ..Verification::simple(nom_age, Inscription::Absent)
+                },
+                Ok(Err(raison)) => Verification::simple(nom_age, Inscription::Impossible(raison)),
+                Err(_) => Verification::simple(nom_age, erreur()),
             });
         }
-        resultats.push(("URLhaus".to_string(), urlhaus.join().unwrap_or_else(|_| erreur()), None));
+        let (reponse, note) = urlhaus.join().unwrap_or_else(|_| (erreur(), None));
+        resultats.push(Verification {
+            note,
+            ..Verification::simple("URLhaus", reponse)
+        });
         for (nom, fil) in [("Spamhaus DBL", dbl), ("SURBL", surbl)] {
             if let Some(fil) = fil {
-                resultats.push((nom.to_string(), fil.join().unwrap_or_else(|_| erreur()), None));
+                resultats.push(Verification::simple(nom, fil.join().unwrap_or_else(|_| erreur())));
             }
         }
         resultats
     })
 }
 
-/// Le verdict, prudent : jamais « sûr ».
-fn verdict(pire: Option<Niveau>, incomplet: bool) -> String {
+/// Le verdict, prudent : jamais « sûr », et jamais « rien de suspect » tout court quand les vérifications en ligne
+/// n'ont pas (toutes) pu se faire.
+fn verdict(pire: Option<Niveau>, en_ligne: &EnLigne) -> String {
+    let rappel = tr!(
+        "Après un lien reçu, ne tape jamais de mot de passe : va sur le site en tapant son adresse toi-même.",
+        "After a link you received, never type a password: go to the site by typing its address yourself."
+    );
     let mut t = match pire {
         Some(Niveau::Critique | Niveau::Eleve) => tr!(
             "Dangereux : ne l'ouvre pas. Supprime le message. S'il parle d'un service que tu utilises, va sur son site en tapant toi-même son adresse.",
@@ -1486,16 +1588,28 @@ fn verdict(pire: Option<Niveau>, incomplet: bool) -> String {
             "Doubtful: only open it if you know the sender and were expecting this link. Never type a password there."
         )
         .to_string(),
-        _ => tr!(
-            "Rien de suspect trouvé. Ce n'est pas une garantie : un site piège tout neuf n'est encore sur aucune liste. Après un lien reçu, ne tape jamais de mot de passe : va sur le site en tapant son adresse toi-même.",
-            "Nothing suspicious found. That is not a guarantee: a brand-new trap site is on no list yet. After a link you received, never type a password: go to the site by typing its address yourself."
-        )
-        .to_string(),
+        _ => {
+            return match en_ligne {
+                EnLigne::Faites | EnLigne::SansObjet => trf!(
+                    "Rien de suspect trouvé. Ce n'est pas une garantie : un site piège tout neuf n'est encore sur aucune liste. {rappel}",
+                    "Nothing suspicious found. That is not a guarantee: a brand-new trap site is on no list yet. {rappel}"
+                ),
+                EnLigne::Aucune => trf!(
+                    "Seulement l'examen local : listes et âge du domaine non vérifiés. Le lien lui-même ne montre rien de suspect, ce qui ne suffit pas : un site piège a souvent l'air normal. {rappel}",
+                    "Only the local check: lists and domain age not checked. The link itself shows nothing suspicious, which is not enough: a trap site often looks normal. {rappel}"
+                ),
+                EnLigne::Incompletes(manquent) => trf!(
+                    "Rien de suspect trouvé, mais pas tout a pu être vérifié ({}) : rien n'est conclu pour ce qui manque. Ce n'est pas une garantie : un site piège tout neuf n'est encore sur aucune liste. {rappel}",
+                    "Nothing suspicious found, but not everything could be checked ({}): nothing is concluded for what is missing. That is not a guarantee: a brand-new trap site is on no list yet. {rappel}",
+                    resume(manquent, 4, ", ")
+                ),
+            };
+        }
     };
-    if incomplet {
+    if matches!(en_ligne, EnLigne::Aucune | EnLigne::Incompletes(_)) {
         t += tr!(
-            " Certaines vérifications en ligne n'ont pas pu se faire (voir plus haut) : rien n'est conclu pour elles.",
-            " Some online checks could not be done (see above): nothing is concluded for them."
+            " Certaines vérifications en ligne n'ont pas été faites (voir plus haut) : rien n'est conclu pour elles.",
+            " Some online checks were not done (see above): nothing is concluded for them."
         );
     }
     t
@@ -1559,7 +1673,7 @@ pub fn verifier(adresse: Option<&str>) {
         afficher_signe(s);
     }
     let mut pire = signes.iter().map(|s| s.niveau).filter(|n| *n > Niveau::Info).max();
-    let mut incomplet = false;
+    let mut fait_en_ligne = EnLigne::SansObjet;
     if !lien.hote.is_empty() {
         let domaine = site(&lien);
         println!();
@@ -1574,34 +1688,44 @@ pub fn verifier(adresse: Option<&str>) {
         }
         if demander(tr!("  Continuer ? [o/N] : ", "  Continue? [y/N]: ")).oui() {
             println!();
-            for (liste, reponse, signe) in en_ligne(&lien, &propre) {
-                match &signe {
+            let verifications = en_ligne(&lien, &propre);
+            let mut manquent = Vec::new();
+            for v in &verifications {
+                match &v.signe {
                     Some(s) => {
                         afficher_signe(s);
                         if s.niveau > Niveau::Info {
                             pire = pire.max(Some(s.niveau));
                         }
                     }
-                    None => afficher_reponse(&liste, &reponse),
+                    None => afficher_reponse(&v.liste, &v.reponse, v.note.as_deref()),
                 }
-                match reponse {
-                    Inscription::Inscrit(_, n) => pire = pire.max(Some(n)),
-                    Inscription::Impossible(_) => incomplet = true,
+                match &v.reponse {
+                    Inscription::Inscrit(_, n) => pire = pire.max(Some(*n)),
+                    Inscription::Impossible(_) => manquent.push(v.liste.clone()),
                     Inscription::Absent => {}
                 }
             }
+            fait_en_ligne = if manquent.is_empty() {
+                EnLigne::Faites
+            } else if manquent.len() == verifications.len() {
+                EnLigne::Aucune
+            } else {
+                EnLigne::Incompletes(manquent)
+            };
         } else {
             trp!("  Rien n'a été envoyé.", "  Nothing was sent.");
+            fait_en_ligne = EnLigne::Aucune;
         }
     }
     println!();
-    // Pas en vert quand des vérifications n'ont pas pu se faire, comme pour un fichier téléchargé.
-    let couleur_verdict = match pire {
-        Some(n) => couleur(n),
-        None if incomplet => couleur(Niveau::Moyen),
-        None => VERT,
+    // Pas en vert quand des vérifications n'ont pas été faites, comme pour un fichier téléchargé.
+    let couleur_verdict = match (pire, &fait_en_ligne) {
+        (Some(n), _) => couleur(n),
+        (None, EnLigne::Aucune | EnLigne::Incompletes(_)) => couleur(Niveau::Moyen),
+        (None, _) => VERT,
     };
-    for ligne in envelopper(&verdict(pire, incomplet), LARGEUR - 2) {
+    for ligne in envelopper(&verdict(pire, &fait_en_ligne), LARGEUR - 2) {
         println!("  {couleur_verdict}{ligne}{RESET}");
     }
 }
@@ -1830,6 +1954,36 @@ mod tests {
         let lien = decouper("https://pаypal.com/connexion").unwrap();
         let reponses = en_ligne(&lien, "https://pаypal.com/connexion");
         assert_eq!(reponses.len(), 4);
-        assert!(reponses.iter().all(|(_, r, _)| matches!(r, Inscription::Impossible(_))));
+        assert!(reponses.iter().all(|v| matches!(v.reponse, Inscription::Impossible(_))));
+    }
+
+    #[test]
+    fn verdict_sans_verification_en_ligne() {
+        let local = |t: &str| t.contains("Seulement l'examen local") || t.contains("Only the local check");
+        let rien = |t: &str| t.starts_with("Rien de suspect trouvé.") || t.starts_with("Nothing suspicious found.");
+        // Refusée ou impossible : seulement l'examen local, jamais « rien de suspect » tout court.
+        let refuse = verdict(None, &EnLigne::Aucune);
+        assert!(local(&refuse) && !rien(&refuse), "{refuse}");
+        let partiel = verdict(None, &EnLigne::Incompletes(vec!["SURBL".into()]));
+        assert!(partiel.contains("SURBL") && !rien(&partiel), "{partiel}");
+        // Toutes faites, ou rien à vérifier en ligne : le verdict d'avant.
+        assert!(rien(&verdict(None, &EnLigne::Faites)));
+        assert!(rien(&verdict(None, &EnLigne::SansObjet)));
+        // Dangereux reste dangereux.
+        let danger = verdict(Some(Niveau::Critique), &EnLigne::Aucune);
+        assert!(danger.starts_with("Dangereux") || danger.starts_with("Dangerous"));
+    }
+
+    #[test]
+    fn age_des_listes_urlhaus() {
+        let heures = |h: u64| Duration::from_hours(h);
+        assert_eq!(age_des_listes(heures(1)), Ok(None));
+        // Pas rafraîchies : leur âge est dit.
+        let note = age_des_listes(heures(30)).unwrap().unwrap();
+        assert!(note.contains("30"), "{note}");
+        assert!(age_des_listes(heures(5 * 24)).unwrap().unwrap().contains('5'));
+        // Plus d'une semaine : elles ne servent plus.
+        let trop = age_des_listes(heures(8 * 24)).unwrap_err();
+        assert!(trop.contains('8'), "{trop}");
     }
 }
