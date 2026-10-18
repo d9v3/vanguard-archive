@@ -73,8 +73,6 @@ pub enum Changement {
     },
     /// Préférence de Microsoft Defender (voir `defender`). Valeur : « mp:1 » ; `None`, une règle ASR jamais réglée.
     Defender { pref: Pref, cible: u32 },
-    /// Programme autorisé dans l'accès contrôlé aux dossiers. Valeur : « autorise » s'il est dans la liste.
-    DefenderAutorise { chemin: String },
 }
 
 /// Liste de serveurs normalisée : « 1.1.1.1,1.0.0.1 », quel que soit le séparateur écrit.
@@ -233,7 +231,6 @@ impl Changement {
                 Some(valeur.map_or_else(String::new, |v| hex(&v.bytes)))
             }
             Changement::Defender { pref, .. } => defender::etat().valeur(*pref),
-            Changement::DefenderAutorise { chemin } => defender::etat().autorise(chemin),
         }
     }
 
@@ -248,17 +245,14 @@ impl Changement {
             Changement::Dns { carte, cible } => format!("{carte}\n{}", cible.as_deref().unwrap_or("?")),
             Changement::Demarrage { cible, .. } => cible.clone().unwrap_or_else(|| "?".to_string()),
             Changement::Defender { cible, .. } => format!("mp:{cible}"),
-            Changement::DefenderAutorise { .. } => "autorise".to_string(),
         })
     }
 
     pub fn defaut(&self) -> Valeur {
         match self {
             Changement::Registre { defaut, .. } => defaut.map(Val::coder),
-            // Un Windows neuf : pas de clé ; règles ASR jamais réglées, aucun programme autorisé dans Defender.
-            Changement::Cle { .. }
-            | Changement::Defender { pref: Pref::Asr(_), .. }
-            | Changement::DefenderAutorise { .. } => None,
+            // Un Windows neuf : pas de clé ; règles ASR jamais réglées.
+            Changement::Cle { .. } | Changement::Defender { pref: Pref::Asr(_), .. } => None,
             Changement::Service { defaut, .. } => Some(format!("start:{defaut}")),
             // Les DNS donnés par la box.
             Changement::Dns { carte, .. } => Some(format!("{carte}\n|")),
@@ -367,7 +361,6 @@ impl Changement {
                 }
             }
             Changement::Defender { pref, .. } => defender::decrire(*pref, v),
-            Changement::DefenderAutorise { chemin } => defender::decrire_autorise(chemin, v),
         }
     }
 
@@ -435,8 +428,7 @@ impl Changement {
             Changement::Service { .. }
             | Changement::Dns { .. }
             | Changement::Demarrage { machine: true, .. }
-            | Changement::Defender { .. }
-            | Changement::DefenderAutorise { .. } => false,
+            | Changement::Defender { .. } => false,
         }
     }
 
@@ -519,7 +511,6 @@ impl Changement {
                 ..
             } => script_machine(liste, nom, v),
             Changement::Defender { pref, .. } => defender::commande(*pref, v),
-            Changement::DefenderAutorise { chemin } => Some(defender::commande_autorise(chemin, v)),
         }
     }
 }
@@ -650,7 +641,7 @@ pub fn ecrire(lots: &[Vec<(&Changement, Valeur)>]) -> Vec<bool> {
     if lots
         .iter()
         .flatten()
-        .any(|(c, _)| matches!(c, Changement::Defender { .. } | Changement::DefenderAutorise { .. }))
+        .any(|(c, _)| matches!(c, Changement::Defender { .. }))
     {
         defender::oublier();
     }
@@ -1239,7 +1230,7 @@ pub fn defender_actif() -> bool {
 /// qu'à l'affichage, pour ne pas lancer PowerShell à chaque ouverture d'un autre menu.
 fn protection() -> Vec<Reglage> {
     let defender = |pref, cible| Changement::Defender { pref, cible };
-    let mut l = vec![
+    vec![
         Reglage {
             id: "defender_asr_base".into(),
             categorie: Categorie::Protection,
@@ -1303,34 +1294,17 @@ fn protection() -> Vec<Reglage> {
             categorie: Categorie::Protection,
             titre: tr!("Accès contrôlé aux dossiers", "Controlled folder access").into(),
             effet: tr!(
-                "Seuls les programmes reconnus par Microsoft peuvent modifier Documents, Images, Vidéos, Musique, Bureau et Favoris : un rançongiciel ne peut plus les chiffrer.",
-                "Only programs Microsoft recognizes can change Documents, Pictures, Videos, Music, Desktop and Favorites: ransomware can no longer encrypt them."
+                "Seuls les programmes reconnus par Microsoft peuvent modifier Documents, Images, Vidéos, Musique et Favoris : un rançongiciel ne peut plus les chiffrer.",
+                "Only programs Microsoft recognizes can change Documents, Pictures, Videos, Music and Favorites: ransomware can no longer encrypt them."
             ),
             prudence: Some(tr!(
-                "Des jeux sauvegardent dans Documents (My Games…) et des programmes peu connus y écrivent : ils seront bloqués, avec une notification. Pour en autoriser un : Sécurité Windows › Protection contre les virus et menaces › Protection contre les rançongiciels › Autoriser une application. Lancé depuis la clé, Gardien n'y posera plus ses fichiers-pièges.",
-                "Some games save in Documents (My Games…) and lesser-known programs write there: they will be blocked, with a notification. To allow one: Windows Security › Virus & threat protection › Ransomware protection › Allow an app. Run from the USB drive, Gardien will no longer place its decoy files there."
+                "Des jeux sauvegardent dans Documents (My Games…) et des programmes peu connus y écrivent : ils seront bloqués, avec une notification. Pour en autoriser un : Sécurité Windows › Protection contre les virus et menaces › Protection contre les rançongiciels › Autoriser une application. Les fichiers-pièges de Gardien n'y vont plus : ils y seraient inutiles.",
+                "Some games save in Documents (My Games…) and lesser-known programs write there: they will be blocked, with a notification. To allow one: Windows Security › Virus & threat protection › Ransomware protection › Allow an app. Gardien's decoy files no longer go there: they would be useless."
             )),
             recommande: false,
             changements: vec![defender(Pref::DossiersControles, 1)],
         },
-    ];
-    // Gardien autorisé seulement depuis le disque du système (voir `gardien_sur_le_disque_systeme`). L'annulation ne
-    // retire que ce chemin-là, et seulement s'il n'était pas déjà dans la liste.
-    if let Some(chemin) = defender::gardien_sur_le_disque_systeme() {
-        l.push(Reglage {
-            id: "defender_gardien_autorise".into(),
-            categorie: Categorie::Protection,
-            titre: tr!("Gardien autorisé (dossiers contrôlés)", "Gardien allowed (controlled folders)").into(),
-            effet: tr!(
-                "Avec l'accès contrôlé aux dossiers, Gardien peut encore poser ses fichiers-pièges dans les dossiers protégés. L'autorisation vaut pour ce chemin exact, sur le disque du système.",
-                "With controlled folder access, Gardien can still place its decoy files in protected folders. The permission is for this exact path, on the system drive."
-            ),
-            prudence: None,
-            recommande: false,
-            changements: vec![Changement::DefenderAutorise { chemin }],
-        });
-    }
-    l
+    ]
 }
 
 #[cfg(test)]

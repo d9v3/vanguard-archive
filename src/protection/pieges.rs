@@ -254,6 +254,37 @@ fn pdf() -> Vec<u8> {
     sortie.into_bytes()
 }
 
+/// Windows : les dossiers où l'accès contrôlé aux dossiers de Defender bloque déjà les programmes inconnus. Il
+/// protège d'office Documents et Images, même déplacés (OneDrive compris), et ceux qu'on lui a ajoutés ; pas le Bureau.
+/// Un piège y serait inutile, et Windows bloquerait Gardien en affichant une alerte.
+#[cfg(windows)]
+fn proteges_par_windows() -> Vec<PathBuf> {
+    let Some(ajoutes) = crate::optimiser::dossiers_controles() else {
+        return Vec::new();
+    };
+    // `dossiers_du_systeme` : Documents, Images, puis Bureau.
+    let mut l: Vec<PathBuf> = dossiers_du_systeme().into_iter().take(2).collect();
+    l.extend(
+        dossiers()
+            .into_iter()
+            .filter(|d| ajoutes.iter().any(|a| sous_dossier(d, a))),
+    );
+    l
+}
+
+#[cfg(not(windows))]
+fn proteges_par_windows() -> Vec<PathBuf> {
+    Vec::new()
+}
+
+/// `dossier` est-il `parent` ou dedans ? À la façon de Windows : sans tenir compte de la casse.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn sous_dossier(dossier: &Path, parent: &str) -> bool {
+    let d = dossier.to_string_lossy().to_lowercase();
+    let p = parent.trim_end_matches(['\\', '/']).to_lowercase();
+    !p.is_empty() && (d == p || d.strip_prefix(&p).is_some_and(|reste| reste.starts_with(['\\', '/'])))
+}
+
 /// Pose un texte et un PDF dans chaque dossier. Création exclusive : jamais un fichier existant écrasé. Rend aussi
 /// les dossiers refusés, avec la première erreur : sans eux, la personne croirait protégé un dossier qui ne l'est pas
 /// (l'accès contrôlé aux dossiers de Defender, par exemple, bloque l'écriture dans Documents).
@@ -490,7 +521,23 @@ pub fn menu() {
 
 /// Montre où iront les fichiers-pièges, puis les pose après accord.
 fn poser() {
-    let cibles = dossiers();
+    let proteges = proteges_par_windows();
+    let (cibles, deja): (Vec<PathBuf>, Vec<PathBuf>) = dossiers().into_iter().partition(|d| !proteges.contains(d));
+    for d in &deja {
+        afficher_aligne(
+            &format!("  {VERT}✔{RESET} "),
+            &trf!(
+                "{} : déjà protégé par l'accès contrôlé aux dossiers de Windows, qui bloque les programmes inconnus ; un piège y serait inutile.",
+                "{}: already protected by Windows controlled folder access, which blocks unknown programs; a decoy would be useless there.",
+                d.display()
+            ),
+            4,
+            "",
+        );
+    }
+    if cibles.is_empty() && !deja.is_empty() {
+        return;
+    }
     if cibles.is_empty() {
         trp!(
             "  Aucun dossier Documents, Images ou Bureau trouvé.",
@@ -526,15 +573,6 @@ fn poser() {
                 dossier.display()
             )
         );
-    }
-    // L'accès contrôlé aux dossiers ne répond pas toujours « accès refusé » : sous Windows 11, une création bloquée
-    // revient en « fichier introuvable ». Son état, lu dans Defender, dit si c'est lui.
-    #[cfg(windows)]
-    if !refus.is_empty() && crate::optimiser::dossiers_controles_actifs() {
-        dire(tr!(
-            "L'accès contrôlé aux dossiers de Defender est actif : il protège déjà ces dossiers contre les rançongiciels, et il empêche Gardien d'y écrire. Pour y poser aussi les fichiers-pièges, autorise Gardien (menu Blocages de Windows Defender, si Gardien est sur le disque du système ; ou Sécurité Windows › Protection contre les virus et menaces › Protection contre les ransomware › Autoriser une application), puis repose-les.",
-            "Defender's controlled folder access is on: it already protects these folders against ransomware, and it keeps Gardien from writing there. To place the decoy files there too, allow Gardien (Windows Defender blocking menu, if Gardien is on the system drive; or Windows Security › Virus & threat protection › Ransomware protection › Allow an app), then place them again."
-        ));
     }
     if poses.is_empty() {
         trp!("  Rien n'a été posé.", "  Nothing was placed.");
@@ -678,6 +716,16 @@ mod tests {
         assert_eq!(refus[0].0, absent);
         assert_eq!(refus[0].1.kind(), std::io::ErrorKind::NotFound);
         let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn dossiers_ajoutes_a_l_acces_controle() {
+        let d = Path::new("C:\\Users\\alice\\Desktop");
+        assert!(sous_dossier(d, "c:\\users\\alice\\desktop"));
+        assert!(sous_dossier(d, "C:\\Users\\alice\\"));
+        // Un nom qui commence pareil n'est pas un dossier parent.
+        assert!(!sous_dossier(d, "C:\\Users\\alice\\Desk"));
+        assert!(!sous_dossier(d, ""));
     }
 
     #[test]

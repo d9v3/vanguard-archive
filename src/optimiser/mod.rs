@@ -308,11 +308,13 @@ fn entete(categorie: Categorie) -> Vec<String> {
     ]
 }
 
-/// L'accès contrôlé aux dossiers de Defender bloque-t-il les écritures (mode 1) ? Pour expliquer un refus.
+/// Si l'accès contrôlé aux dossiers de Defender bloque (mode 1) : les dossiers qu'on lui a ajoutés, en plus de ceux
+/// qu'il protège d'office. `None` s'il ne bloque pas.
 #[cfg(windows)]
-pub fn dossiers_controles_actifs() -> bool {
+pub fn dossiers_controles() -> Option<Vec<String>> {
     let e = defender::etat();
-    e.actif && e.valeur(defender::Pref::DossiersControles).as_deref() == Some("mp:1")
+    (e.actif && e.valeur(defender::Pref::DossiersControles).as_deref() == Some("mp:1"))
+        .then(|| e.dossiers_ajoutes().to_vec())
 }
 
 /// Les protections de Defender : seulement s'il est l'antivirus actif, puisque sinon ses blocages ne s'appliquent

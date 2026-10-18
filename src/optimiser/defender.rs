@@ -94,9 +94,9 @@ pub struct Etat {
     pub actif: bool,
     /// « cfa », « np », « pua », ou l'identifiant d'une règle ASR → sa valeur.
     valeurs: HashMap<String, u32>,
-    /// Programmes autorisés dans l'accès contrôlé aux dossiers ; `None` : liste illisible (réservée aux
-    /// administrateurs sur certains Windows).
-    autorises: Option<Vec<String>>,
+    /// Dossiers ajoutés à ceux que l'accès contrôlé protège d'office ; illisibles (réservés aux administrateurs sur
+    /// certains Windows) : aucun.
+    ajoutes: Vec<String>,
 }
 
 const SCRIPT: &str = "$s = Get-MpComputerStatus; $p = Get-MpPreference; \
@@ -105,14 +105,11 @@ const SCRIPT: &str = "$s = Get-MpComputerStatus; $p = Get-MpPreference; \
     \"pua|$([int]$p.PUAProtection)\"; \
     $ids = @($p.AttackSurfaceReductionRules_Ids); $act = @($p.AttackSurfaceReductionRules_Actions); \
     for ($i = 0; $i -lt $ids.Count; $i++) { if ($ids[$i]) { \"asr|$($ids[$i])|$([int]$act[$i])\" } }; \
-    foreach ($a in @($p.ControlledFolderAccessAllowedApplications)) { if ($a) { \"autorise|$a\" } }";
+    foreach ($d in @($p.ControlledFolderAccessProtectedFolders)) { if ($d) { \"protege|$d\" } }";
 
 /// La sortie de `SCRIPT`, une valeur par ligne.
 pub fn lire_sortie(texte: &str) -> Etat {
-    let mut e = Etat {
-        autorises: Some(Vec::new()),
-        ..Etat::default()
-    };
+    let mut e = Etat::default();
     let (mut mode, mut antivirus) = (String::new(), false);
     for ligne in texte.lines() {
         let mut champs = ligne.trim().splitn(3, '|');
@@ -130,11 +127,8 @@ pub fn lire_sortie(texte: &str) -> Etat {
                 }
             }
             // « N/A: Must be an administrator to view… » : la liste n'est pas lisible ici.
-            (Some("autorise"), Some(chemin), _) if chemin.starts_with("N/A") => e.autorises = None,
-            (Some("autorise"), Some(chemin), _) => {
-                if let Some(l) = e.autorises.as_mut() {
-                    l.push(chemin.trim().to_string());
-                }
+            (Some("protege"), Some(chemin), _) if !chemin.starts_with("N/A") => {
+                e.ajoutes.push(chemin.trim().to_string());
             }
             _ => {}
         }
@@ -176,13 +170,8 @@ impl Etat {
         self.valeurs.get(cle(pref)).map(|n| format!("mp:{n}"))
     }
 
-    /// « autorise » si ce programme est dans la liste de l'accès contrôlé aux dossiers.
-    pub fn autorise(&self, chemin: &str) -> Option<String> {
-        self.autorises
-            .as_ref()?
-            .iter()
-            .any(|a| a.eq_ignore_ascii_case(chemin))
-            .then(|| "autorise".to_string())
+    pub fn dossiers_ajoutes(&self) -> &[String] {
+        &self.ajoutes
     }
 }
 
@@ -211,15 +200,6 @@ pub fn commande(pref: Pref, v: Option<&str>) -> Option<String> {
     Some(format!("Set-MpPreference -{parametre} {}", nombre(v).unwrap_or(0)))
 }
 
-/// Ajoute ou retire un programme de la liste de l'accès contrôlé aux dossiers.
-pub fn commande_autorise(chemin: &str, v: Option<&str>) -> String {
-    let p = crate::commande::ps_texte(chemin);
-    match v {
-        Some(_) => format!("Add-MpPreference -ControlledFolderAccessAllowedApplications '{p}'"),
-        None => format!("Remove-MpPreference -ControlledFolderAccessAllowedApplications '{p}'"),
-    }
-}
-
 /// Ce qui est écrit, en clair : « Defender, protection réseau : bloque ».
 pub fn decrire(pref: Pref, v: Option<&str>) -> String {
     let quoi = match pref {
@@ -239,31 +219,6 @@ pub fn decrire(pref: Pref, v: Option<&str>) -> String {
     trf!("Defender, {quoi} : {mode}", "Defender, {quoi}: {mode}")
 }
 
-pub fn decrire_autorise(chemin: &str, v: Option<&str>) -> String {
-    match v {
-        Some(_) => trf!(
-            "Defender, accès contrôlé aux dossiers : {chemin} autorisé",
-            "Defender, controlled folder access: {chemin} allowed"
-        ),
-        None => trf!(
-            "Defender, accès contrôlé aux dossiers : {chemin} retiré des programmes autorisés",
-            "Defender, controlled folder access: {chemin} removed from allowed apps"
-        ),
-    }
-}
-
-/// Gardien, s'il tourne depuis le disque du système : jamais depuis la clé USB ni un autre lecteur, puisque
-/// l'autorisation tient au chemin et profiterait à tout programme posé au même endroit sur un support amovible.
-pub fn gardien_sur_le_disque_systeme() -> Option<String> {
-    let exe = std::env::current_exe().ok()?;
-    let systeme = std::env::var("SystemDrive").ok()?;
-    let chemin = exe.to_string_lossy().into_owned();
-    (chemin.len() > systeme.len()
-        && chemin[..systeme.len()].eq_ignore_ascii_case(&systeme)
-        && chemin[systeme.len()..].starts_with('\\'))
-    .then_some(chemin)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -273,7 +228,7 @@ mod tests {
         let e = lire_sortie(
             "mode|Normal\nav|True\ncfa|0\nnp|1\npua|2\n\
              asr|9E6C4E1F-7D60-472F-BA1A-A39EF669E4B2|1\nasr|d4f940ab-401b-4efc-aadc-ad5f3c50688a|2\n\
-             autorise|C:\\Jeux\\jeu.exe\n",
+             protege|D:\\Photos\n",
         );
         assert!(e.actif);
         assert_eq!(e.valeur(Pref::DossiersControles).as_deref(), Some("mp:0"));
@@ -282,8 +237,7 @@ mod tests {
         // Identifiant en majuscules chez Windows, en minuscules chez Gardien.
         assert_eq!(e.valeur(Pref::Asr(ASR_BASE[1])).as_deref(), Some("mp:1"));
         assert_eq!(e.valeur(Pref::Asr(ASR_BASE[0])), None);
-        assert_eq!(e.autorise("c:\\jeux\\JEU.exe").as_deref(), Some("autorise"));
-        assert_eq!(e.autorise("C:\\autre.exe"), None);
+        assert_eq!(e.dossiers_ajoutes(), ["D:\\Photos"]);
     }
 
     #[test]
@@ -293,9 +247,8 @@ mod tests {
         assert!(!lire_sortie("").actif);
         // Windows 10 d'avant 2004 : pas d'AMRunningMode.
         assert!(lire_sortie("mode|\nav|True\n").actif);
-        let e = lire_sortie("mode|Normal\nautorise|N/A: Must be an administrator to view allowed applications\n");
-        assert_eq!(e.autorises, None);
-        assert_eq!(e.autorise("C:\\x.exe"), None);
+        let e = lire_sortie("mode|Normal\nprotege|N/A: Must be an administrator to view protected folders\n");
+        assert_eq!(e.dossiers_ajoutes(), Vec::<String>::new());
     }
 
     #[test]
@@ -316,12 +269,6 @@ mod tests {
             "Set-MpPreference -EnableControlledFolderAccess 1"
         );
         assert_eq!(commande(Pref::Pua, None).unwrap(), "Set-MpPreference -PUAProtection 0");
-        // Une apostrophe dans le chemin ne ferme pas la chaîne PowerShell.
-        assert_eq!(
-            commande_autorise("C:\\Users\\alice\\Outils d'été\\gardien.exe", Some("autorise")),
-            "Add-MpPreference -ControlledFolderAccessAllowedApplications 'C:\\Users\\alice\\Outils d''été\\gardien.exe'"
-        );
-        assert!(commande_autorise("C:\\g.exe", None).starts_with("Remove-MpPreference"));
     }
 
     #[test]

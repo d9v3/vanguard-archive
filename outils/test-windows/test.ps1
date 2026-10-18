@@ -467,21 +467,16 @@ if (Question 'Faire ce test (six fichiers posés puis retirés dans Documents, I
     LancerAvec 'pieges-poser' @('pieges') "o`n"
     if ((Sortie 'pieges-poser') -match 'fichiers-pièges posés|decoy files placed') { Ok 'Fichiers-pièges posés' } else { Bug 'Fichiers-pièges PAS posés' }
     foreach ($d in $dossiersPieges) { Info "$d : $(@(Get-ChildItem $d -Filter '!Gardien*' -ErrorAction SilentlyContinue).Count) fichier(s)-piège(s)" }
-    # Un dossier refusé doit être dit par Gardien. Cause habituelle : l'accès contrôlé aux dossiers de Defender
-    # (événement 1123, « écriture bloquée »).
-    if ((Sortie 'pieges-poser') -match 'Pas de fichier-piège dans|No decoy file in') {
-        Ok 'Dossier refusé signalé par Gardien'
-        try { Info "Accès contrôlé aux dossiers : $((Get-MpPreference).EnableControlledFolderAccess) (0 coupé, 1 actif, 2 audit)" } catch { Info 'Accès contrôlé aux dossiers : état illisible' }
-        # Aucun événement : Get-WinEvent lève NoMatchingEventsFound ; toute autre erreur, c'est le journal qui ne se lit
-        # pas (souvent réservé aux administrateurs).
-        try {
-            $blocages = @(Get-WinEvent -FilterHashtable @{ LogName = 'Microsoft-Windows-Windows Defender/Operational'; Id = 1123; StartTime = (Get-Date).AddMinutes(-5) } -ErrorAction Stop)
-            Info "Écritures bloquées par Defender ces 5 dernières minutes (événement 1123) : $($blocages.Count)"
-        } catch {
-            if ($_.FullyQualifiedErrorId -match 'NoMatchingEventsFound') { Info 'Écritures bloquées par Defender ces 5 dernières minutes (événement 1123) : 0' }
-            else { Info "Journal de Defender illisible sans administrateur : $($_.Exception.Message)" }
-        }
+    # Accès contrôlé aux dossiers actif (1) : Documents et Images sont déjà protégés par Windows ; Gardien doit le dire
+    # et ne pas y écrire (Windows l'aurait bloqué, alerte à l'appui). Le Bureau, lui, n'est pas protégé d'office.
+    $cfa = try { [int](Get-MpPreference).EnableControlledFolderAccess } catch { -1 }
+    Info "Accès contrôlé aux dossiers : $cfa (0 coupé, 1 actif, 2 audit, -1 illisible)"
+    $sortiePieges = Sortie 'pieges-poser'
+    if ($cfa -eq 1) {
+        if ($sortiePieges -match 'déjà protégé par l''accès contrôlé|already protected by Windows controlled folder access') { Ok 'Dossiers protégés par Windows dits comme tels, sans piège' }
+        else { Bug 'Dossiers protégés par Windows PAS signalés' }
     }
+    if ($sortiePieges -match 'Pas de fichier-piège dans|No decoy file in') { Bug "Dossier refusé : $(($sortiePieges -split "`n" | Select-String 'No decoy file in|Pas de fichier-piège dans') -join ' / ')" }
     # Le premier dossier qui a reçu ses pièges : l'accès contrôlé aux dossiers de Defender peut en refuser.
     $piege = Get-ChildItem $dossiersPieges -Filter '!Gardien*.txt' -ErrorAction SilentlyContinue | Select-Object -First 1
     if ($piege) {
