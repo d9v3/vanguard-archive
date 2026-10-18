@@ -16,6 +16,7 @@ mod integrite;
 mod isoler;
 mod journal;
 mod langue;
+mod listes_noires;
 mod logiciels;
 mod machine;
 mod maj;
@@ -137,6 +138,10 @@ enum Commande {
     /// Test de connexion pour le jeu : ping, gigue, pertes, débit et bufferbloat.
     #[command(visible_alias = "connection")]
     Connexion,
+    /// L'adresse Internet de la maison est-elle sur une liste noire (Spamhaus, SpamCop, DroneBL, PSBL) ? Si oui, un
+    /// appareil est sans doute infecté. Après accord : les listes voient l'adresse.
+    #[command(name = "listes-noires", visible_alias = "blocklists")]
+    ListesNoires,
     /// Intégrité des fichiers critiques : référence d'empreintes BLAKE3, puis ce qui a changé depuis.
     #[command(visible_alias = "integrity")]
     Integrite {
@@ -437,6 +442,7 @@ enum Action {
     Nommer,
     Surveillance,
     Connexion,
+    ListesNoires,
     AntivirusRapide,
     AntivirusComplet,
     AntivirusDossier,
@@ -471,6 +477,7 @@ impl Action {
         Action::Nommer,
         Action::Surveillance,
         Action::Connexion,
+        Action::ListesNoires,
         Action::AntivirusRapide,
         Action::AntivirusComplet,
         Action::AntivirusDossier,
@@ -577,6 +584,10 @@ impl Action {
             Action::Connexion => (
                 tr!("Test de connexion pour le jeu", "Connection test for gaming"),
                 tr!("ping, gigue, débit, bufferbloat", "ping, jitter, speed, bufferbloat"),
+            ),
+            Action::ListesNoires => (
+                tr!("Adresse sur liste noire ?", "Address on blocklists?"),
+                tr!("si oui, un appareil est infecté", "if so, a device is infected"),
             ),
             Action::AntivirusRapide => (
                 tr!("Analyse rapide", "Quick scan"),
@@ -730,6 +741,7 @@ impl Groupe {
                 Action::Nommer,
                 Action::Surveillance,
                 Action::Connexion,
+                Action::ListesNoires,
             ],
             Groupe::Protection => &[
                 Action::AntivirusRapide,
@@ -855,6 +867,7 @@ async fn executer(s: &mut Session, action: Action) {
         }
         Action::Surveillance => surveillance::activer(!surveillance::active()),
         Action::Connexion => connexion::tester().await,
+        Action::ListesNoires => listes_noires::verifier(),
         Action::AntivirusRapide => antivirus::analyser(antivirus::Portee::Rapide),
         Action::AntivirusComplet => antivirus::analyser(antivirus::Portee::Complete),
         Action::AntivirusDossier => antivirus::choisir(),
@@ -932,6 +945,10 @@ fn ligne_de_commande() -> clap::Command {
         (
             "connexion",
             "Connection test for gaming: ping, jitter, packet loss, speed and bufferbloat",
+        ),
+        (
+            "listes-noires",
+            "Is your home's Internet address on a blocklist (Spamhaus, SpamCop, DroneBL, PSBL)? If so, a device is probably infected. After your consent: the lists see the address",
         ),
         (
             "pieges",
@@ -1115,6 +1132,7 @@ async fn main() {
         Some(Commande::Courriel) => fuites::verifier_courriel(),
         Some(Commande::Isoler { fichier }) => isoler::isoler(&fichier),
         Some(Commande::Pieges { retirer }) => pieges::commande(retirer),
+        Some(Commande::ListesNoires) => listes_noires::verifier(),
         Some(Commande::Integrite { accepter, temps_reel }) => {
             if temps_reel {
                 integrite::temps_reel();
