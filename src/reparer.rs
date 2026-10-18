@@ -198,6 +198,19 @@ fn taille_dossier(dossier: &std::path::Path, age: Option<u64>, echeance: std::ti
     total
 }
 
+/// La date de dernière lecture est-elle tenue à jour là où se trouve `dossier` ? Monté en `noatime`, elle ne bouge
+/// plus : « non lu depuis 90 jours » ne voudrait rien dire, et des fichiers lus chaque jour seraient effacés.
+#[cfg(target_os = "linux")]
+fn lectures_datees(dossier: &std::path::Path) -> bool {
+    crate::commande::lancer(
+        std::process::Command::new("findmnt")
+            .args(["-no", "OPTIONS", "--target"])
+            .arg(dossier),
+        5,
+    )
+    .is_none_or(|r| !r.sortie.trim().split(',').any(|o| o == "noatime"))
+}
+
 #[cfg(target_os = "linux")]
 fn en_go(octets: u64) -> String {
     #[allow(clippy::cast_precision_loss)]
@@ -246,7 +259,12 @@ fn nettoyage(gestion: Option<machine::linux::Paquets>) -> Reparation {
             total += t;
         }
     }
-    let t = taille_dossier(&maison.join(".cache"), Some(90), echeance);
+    let cache = maison.join(".cache");
+    let t = if lectures_datees(&cache) {
+        taille_dossier(&cache, Some(90), echeance)
+    } else {
+        0
+    };
     if t >= 50 << 20 {
         commandes.push("find ~/.cache -mindepth 1 -type f -atime +90 -delete 2>/dev/null; find ~/.cache -mindepth 1 -type d -empty -delete 2>/dev/null");
         details.push(trf!("vieux fichiers de cache {}", "old cache files {}", en_go(t)));
@@ -564,8 +582,11 @@ pub fn liste() -> Vec<Reparation> {
             tr!("Débloque pacman après un arrêt brutal, renouvelle les clés de signature (erreurs « invalid or corrupted package »), puis met à jour.", "Unlocks pacman after a crash, renews the signing keys (“invalid or corrupted package” errors), then updates."),
             tr!("quelques minutes", "a few minutes"),
             &[
-                tr!("pgrep -x pacman >/dev/null && echo 'pacman tourne déjà : attends la fin' && exit 1; sudo rm -f /var/lib/pacman/db.lck", "pgrep -x pacman >/dev/null && echo 'pacman is already running: wait for it to finish' && exit 1; sudo rm -f /var/lib/pacman/db.lck"),
-                "sudo pacman -Sy --needed --noconfirm archlinux-keyring",
+                // pamac (Manjaro) et PackageKit (Discover) travaillent sur la même base sans lancer pacman : effacer
+                // leur verrou en pleine opération l'abîmerait.
+                tr!("pgrep -x 'pacman|pamac-daemon|packagekitd' >/dev/null && echo 'un gestionnaire de paquets tourne déjà (pacman, pamac ou PackageKit) : attends la fin' && exit 1; sudo rm -f /var/lib/pacman/db.lck", "pgrep -x 'pacman|pamac-daemon|packagekitd' >/dev/null && echo 'a package manager is already running (pacman, pamac or PackageKit): wait for it to finish' && exit 1; sudo rm -f /var/lib/pacman/db.lck"),
+                // Les dérivées signent aussi leurs paquets avec leurs propres clés.
+                "sudo pacman -Sy --needed --noconfirm archlinux-keyring $(pacman -Qq manjaro-keyring endeavouros-keyring cachyos-keyring omarchy-keyring 2>/dev/null)",
                 // Sous Omarchy, sa mise à jour (instantané, migrations) plutôt qu'un pacman -Syu brut.
                 if machine::linux::omarchy() { "omarchy update" } else { "sudo pacman -Syu" },
             ],
@@ -574,13 +595,16 @@ pub fn liste() -> Vec<Reparation> {
             tr!("Mises à jour en erreur (apt)", "Updates failing (apt)"),
             tr!("Termine les installations interrompues et répare les dépendances cassées.", "Finishes interrupted installs and repairs broken dependencies."),
             tr!("quelques minutes", "a few minutes"),
-            &["sudo dpkg --configure -a", "sudo apt-get -f install -y", "sudo apt-get update"],
+            // Une étape en échec n'arrête pas les suivantes : ce sont elles qui réparent. La liste des paquets est
+            // relue avant la réparation, qui sinon chercherait des versions disparues des dépôts.
+            &["sudo dpkg --configure -a || true", "sudo apt-get update || true", "sudo apt-get -f install -y"],
         ).avec_restauration()),
         Some(Paquets::Dnf) => l.push(rep(
             tr!("Mises à jour en erreur (dnf)", "Updates failing (dnf)"),
             tr!("Vérifie la base des paquets et réaligne les paquets sur les versions de la distribution.", "Checks the package database and realigns packages with the distribution's versions."),
             tr!("quelques minutes", "a few minutes"),
-            &["sudo dnf check", "sudo dnf distro-sync -y"],
+            // « dnf check » sort en erreur quand il trouve un problème : c'est distro-sync qui le répare ensuite.
+            &["sudo dnf check || true", "sudo dnf distro-sync -y"],
         ).avec_restauration()),
         Some(Paquets::Zypper) => l.push(rep(
             tr!("Mises à jour en erreur (zypper)", "Updates failing (zypper)"),
@@ -620,12 +644,14 @@ pub fn liste() -> Vec<Reparation> {
     ));
 
     // Place
+    // autoremove sans -y : la liste des paquets retirés s'affiche et se confirme (retirer un métapaquet peut
+    // emporter tout un bureau).
     let mut menage: Vec<&str> = match gestion {
         Some(Paquets::Pacman) if present("paccache") => vec!["sudo paccache -rk2", "sudo paccache -ruk0"],
         Some(Paquets::Pacman) => vec!["sudo pacman -Sc --noconfirm"],
-        Some(Paquets::Apt) => vec!["sudo apt-get autoremove -y", "sudo apt-get clean"],
+        Some(Paquets::Apt) => vec!["sudo apt-get autoremove", "sudo apt-get clean"],
         Some(Paquets::Dnf) if atomique == Some(Atomique::RpmOstree) => vec!["sudo rpm-ostree cleanup -bm"],
-        Some(Paquets::Dnf) => vec!["sudo dnf autoremove -y", "sudo dnf clean all"],
+        Some(Paquets::Dnf) => vec!["sudo dnf autoremove", "sudo dnf clean all"],
         Some(Paquets::Zypper) => vec!["sudo zypper clean --all"],
         None => vec![],
     };
@@ -791,7 +817,9 @@ pub fn liste() -> Vec<Reparation> {
         tr!("quelques secondes", "a few seconds"),
         &[
             "sudo dscacheutil -flushcache; sudo killall -HUP mDNSResponder",
-            "for i in $(ifconfig -lu); do ipconfig getifaddr $i >/dev/null 2>&1 && sudo ipconfig set $i DHCP; done",
+            // Seulement les interfaces déjà en DHCP (getpacket) : une adresse réglée à la main ne doit pas y passer.
+            // « ; true » : la boucle prend le code de la dernière interface, souvent sans DHCP, et arrêterait la suite.
+            "for i in $(ifconfig -lu); do ipconfig getpacket $i >/dev/null 2>&1 && sudo ipconfig set $i DHCP; done; true",
             "W=$(networksetup -listallhardwareports | awk '/Wi-Fi/{getline; print $2}'); \
              [ -n \"$W\" ] && networksetup -setairportpower $W off && sleep 3 && networksetup -setairportpower $W on; true",
         ],
@@ -883,8 +911,9 @@ pub fn liste() -> Vec<Reparation> {
         ],
     ));
     let mut menage = vec![
-        // Caches de plus d'une semaine : les apps en cours gardent les leurs.
-        "find ~/Library/Caches -mindepth 1 -maxdepth 1 -mtime +7 -exec rm -rf {} + 2>/dev/null; true".to_string(),
+        // Fichiers de cache pas modifiés depuis une semaine, puis les dossiers restés vides : la date d'un dossier ne dit
+        // pas si l'app y a écrit récemment plus bas, et l'effacer en entier emporterait ses fichiers du jour.
+        "find ~/Library/Caches -type f -mtime +7 -delete 2>/dev/null; find ~/Library/Caches -mindepth 2 -type d -empty -delete 2>/dev/null; true".to_string(),
         // Instantanés locaux de Time Machine : macOS les garde tant qu'il y a de la place, mais ils comptent.
         "sudo tmutil thinlocalsnapshots / 999999999999 4".to_string(),
     ];
@@ -970,8 +999,10 @@ fn navigation(etat: Option<&EtatWindows>) -> Reparation {
             r#"$h = "$env:SystemRoot\System32\drivers\etc\hosts"; Copy-Item $h "$h.sentinel-$(Get-Date -Format yyyyMMdd-HHmmss)""#
                 .to_string(),
         );
+        // Réécrit en « Default » (ANSI), comme il a été lu : « ASCII » changerait en « ? » les lettres accentuées
+        // des commentaires.
         commandes.push(format!(
-            r#"$h = "$env:SystemRoot\System32\drivers\etc\hosts"; (Get-Content $h) | ForEach-Object {{ if ($_ -match '^\s*({})\s') {{ '# sentinel : ' + $_ }} else {{ $_ }} }} | Set-Content $h -Encoding ASCII"#,
+            r#"$h = "$env:SystemRoot\System32\drivers\etc\hosts"; (Get-Content $h) | ForEach-Object {{ if ($_ -match '^\s*({})\s') {{ '# sentinel : ' + $_ }} else {{ $_ }} }} | Set-Content $h -Encoding Default"#,
             motif_adresses(&detournees)
         ));
     }
@@ -1070,7 +1101,7 @@ pub fn liste() -> Vec<Reparation> {
     let a_distance = machine::windows::session_a_distance();
     let mut reseau = rep(
         tr!("Internet ne marche plus", "Internet no longer works"),
-        tr!("Remet à zéro Winsock et la pile TCP/IP, vide le cache DNS, redemande une adresse. Un redémarrage termine la réparation.", "Resets Winsock and the TCP/IP stack, clears the DNS cache, asks for a new address. A restart finishes the repair."),
+        tr!("Remet à zéro Winsock et la pile TCP/IP, vide le cache DNS, redemande une adresse. Un redémarrage termine la réparation. Une adresse IP fixe réglée à la main sera à remettre.", "Resets Winsock and the TCP/IP stack, clears the DNS cache, asks for a new address. A restart finishes the repair. A static IP address set by hand will have to be entered again."),
         tr!("une minute, puis redémarrer", "one minute, then restart"),
         &[
             "netsh winsock reset",
@@ -1149,7 +1180,12 @@ pub fn liste() -> Vec<Reparation> {
             tr!("Heure fausse", "Wrong time"),
             tr!("Resynchronise l'horloge (une heure fausse casse le HTTPS et Windows Update).", "Resynchronizes the clock (a wrong time breaks HTTPS and Windows Update)."),
             tr!("quelques secondes", "a few seconds"),
-            &["Start-Service w32time", "w32tm /resync /force"],
+            // Service désactivé (par un outil d'« optimisation ») : remis comme à l'origine, sinon il ne démarre pas.
+            &[
+                "if ((Get-Service w32time).StartType -eq 'Disabled') { Set-Service w32time -StartupType Manual }",
+                "Start-Service w32time",
+                "w32tm /resync /force",
+            ],
         ),
     ]
 }
@@ -1264,6 +1300,21 @@ mod tests {
             if r.inutile.is_none() {
                 assert!(!r.pourquoi.is_empty(), "{} n'explique rien", r.titre);
                 assert!(!r.commandes.is_empty(), "{} n'a pas de commande", r.titre);
+            }
+        }
+    }
+
+    /// Une apostrophe ou une parenthèse oubliée ne se verrait qu'au lancement de la réparation, chez quelqu'un.
+    #[cfg(unix)]
+    #[test]
+    fn les_commandes_sont_du_shell_valide() {
+        for r in liste() {
+            for c in &r.commandes {
+                let valide = std::process::Command::new("bash")
+                    .args(["-n", "-c", c])
+                    .status()
+                    .is_ok_and(|s| s.success());
+                assert!(valide, "« {} » : {c}", r.titre);
             }
         }
     }
