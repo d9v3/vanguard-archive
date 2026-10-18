@@ -265,6 +265,6 @@ echo "Clé GARDIEN à jour : $CLE ($(./"$LINUX" --version))"
 EMPREINTE_FICHIER="${XDG_RUNTIME_DIR:-/tmp}/gardien-notification.empreinte"
 EMPREINTE=$({ cat "$LINUX" "$WINDOWS" 2>/dev/null || true; } | sha256sum)
 if command -v notify-send >/dev/null && [[ $(cat "$EMPREINTE_FICHIER" 2>/dev/null) != "$EMPREINTE" ]]; then
-  notify-send -a Gardien -i Gardien "Clé GARDIEN à jour${VENU_DE_GITHUB:+ (depuis GitHub)}" "$(./"$LINUX" --version)" || true
+  notify-send -a Gardien -i gardien "Clé GARDIEN à jour${VENU_DE_GITHUB:+ (depuis GitHub)}" "$(./"$LINUX" --version)" || true
   echo "$EMPREINTE" >"$EMPREINTE_FICHIER"
 fi
