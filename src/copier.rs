@@ -382,9 +382,12 @@ fn empreinte(chemin: &Path) -> std::io::Result<blake3::Hash> {
 /// Copie `source` vers `cible` (qui n'existe pas) en passant par un fichier partiel, puis vérifie.
 fn copier_vers(source: &Path, cible: &Path) -> std::io::Result<()> {
     let nom = cible.file_name().unwrap_or_default().to_string_lossy();
-    let partiel = cible.with_file_name(format!(".{nom}{PARTIEL}"));
-    // Un partiel laissé par une copie interrompue est à nous : on le remplace.
+    // Le partiel porte un nom court tiré du vrai : « .<nom>.gardien-partiel » dépassait 255 octets pour un nom long.
+    let partiel = cible.with_file_name(format!(".{}{PARTIEL}", &blake3::hash(nom.as_bytes()).to_hex()[..16]));
+    // Un partiel laissé par une copie interrompue est à nous : on le remplace, et celui des versions d'avant
+    // (« .<nom>.gardien-partiel ») ne reste pas en plan.
     let _ = std::fs::remove_file(&partiel);
+    let _ = std::fs::remove_file(cible.with_file_name(format!(".{nom}{PARTIEL}")));
     let mut entree = File::open(source)?;
     let mut sortie = OpenOptions::new().write(true).create_new(true).open(&partiel)?;
     // Le partiel se ferme à la fin de l'écriture, réussie ou non : il peut alors être renommé ou retiré.
@@ -424,18 +427,30 @@ fn copier_vers(source: &Path, cible: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
+/// `copie` est-elle `source`, à l'identique (taille, puis empreinte) ?
+fn identiques(copie: &Path, source: &Path) -> bool {
+    let taille = std::fs::metadata(source).map_or(u64::MAX, |s| s.len());
+    std::fs::symlink_metadata(copie).is_ok_and(|m| m.is_file() && m.len() == taille)
+        && matches!((empreinte(copie), empreinte(source)), (Ok(a), Ok(b)) if a == b)
+}
+
 /// Un fichier : déjà là à l'identique (rien à faire), ou copié, sous son nom ou un autre.
 fn copier_fichier(source: &Path, dossier: &Path, bilan: &mut Bilan) {
     let nom = source.file_name().unwrap_or_default().to_string_lossy();
     let mut cible = dossier.join(&*nom);
-    if let Ok(m) = std::fs::symlink_metadata(&cible) {
-        let taille = std::fs::metadata(source).map_or(u64::MAX, |s| s.len());
-        if m.is_file()
-            && m.len() == taille
-            && matches!((empreinte(&cible), empreinte(source)), (Ok(a), Ok(b)) if a == b)
-        {
+    if std::fs::symlink_metadata(&cible).is_ok() {
+        // Sous son nom, ou sous un autre nom pris lors d'une copie interrompue (« photo (2).jpg ») : déjà là.
+        let (base, extension) = match nom.rsplit_once('.') {
+            Some((base, extension)) if !base.is_empty() => (base, format!(".{extension}")),
+            _ => (&*nom, String::new()),
+        };
+        let deja_copie = std::iter::once(cible.clone())
+            .chain((2..=9999).map(|n| dossier.join(format!("{base} ({n}){extension}"))))
+            .take_while(|p| std::fs::symlink_metadata(p).is_ok())
+            .any(|p| identiques(&p, source));
+        if deja_copie {
             bilan.deja += 1;
-            bilan.octets += taille;
+            bilan.octets += std::fs::metadata(source).map_or(0, |m| m.len());
             return;
         }
         cible = nom_libre(dossier, &nom);
@@ -825,6 +840,40 @@ mod tests {
         );
         assert_eq!(sans_echappements(r"/mnt/a\9"), r"/mnt/a\9");
         assert_eq!(sans_echappements("/mnt/été"), "/mnt/été");
+    }
+
+    /// En reprise, une copie déjà faite sous un autre nom (« a (2).txt ») est reconnue : pas de troisième copie.
+    #[test]
+    fn reprise_d_une_copie_renommee() {
+        let d = jetable("reprise-renommee");
+        let (source, cible) = (d.join("source"), d.join("cible"));
+        std::fs::create_dir_all(&source).unwrap();
+        std::fs::create_dir_all(&cible).unwrap();
+        std::fs::write(source.join("a.txt"), "à copier").unwrap();
+        std::fs::write(cible.join("a.txt"), "un autre fichier").unwrap();
+        std::fs::write(cible.join("a (2).txt"), "à copier").unwrap();
+        let mut bilan = Bilan::default();
+        copier_fichier(&source.join("a.txt"), &cible, &mut bilan);
+        assert_eq!((bilan.deja, bilan.copies), (1, 0), "{bilan:?}");
+        assert!(!cible.join("a (3).txt").exists());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// Un nom proche de la limite (255 octets) se copie : le fichier partiel ne doit pas allonger le nom au-delà.
+    #[cfg(unix)]
+    #[test]
+    fn nom_long_copie() {
+        let d = jetable("nom-long");
+        let (source, cible) = (d.join("source"), d.join("cible"));
+        std::fs::create_dir_all(&source).unwrap();
+        std::fs::create_dir_all(&cible).unwrap();
+        let nom = format!("{}.txt", "n".repeat(240));
+        std::fs::write(source.join(&nom), "long").unwrap();
+        let mut bilan = Bilan::default();
+        copier_fichier(&source.join(&nom), &cible, &mut bilan);
+        assert_eq!(bilan.copies, 1, "{bilan:?}");
+        assert_eq!(std::fs::read_to_string(cible.join(&nom)).unwrap(), "long");
+        let _ = std::fs::remove_dir_all(&d);
     }
 
     fn jetable(nom: &str) -> PathBuf {
