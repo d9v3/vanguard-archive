@@ -855,3 +855,22 @@ mod tests {
         assert!(!voisin_present(etat(99)) && !voisin_present(etat(200)));
     }
 }
+
+/// Propriétés des réponses UDP (NetBIOS, SNMP, SSDP) : chaque appareil du réseau choisit ce qu'il y écrit. Quels que
+/// soient les octets reçus, la lecture ne plante pas, et ce qu'elle rend ne pilote pas le terminal.
+#[cfg(test)]
+mod proprietes {
+    use super::*;
+    use proptest::prelude::*;
+
+    proptest! {
+        #![proptest_config(ProptestConfig { cases: 512, failure_persistence: None, ..ProptestConfig::default() })]
+
+        #[test]
+        fn reponses_udp_quelconques(port in prop_oneof![Just(137u16), Just(161), Just(1900), any::<u16>()], octets in prop::collection::vec(any::<u8>(), 0..600)) {
+            if let Some(t) = resume_udp(port, &octets) {
+                prop_assert!(!crate::ui::contient_un_piege(&t), "{t:?}");
+            }
+        }
+    }
+}

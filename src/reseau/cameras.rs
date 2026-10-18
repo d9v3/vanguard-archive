@@ -491,3 +491,25 @@ mod tests {
         assert_eq!(lignes[0].1, Some(Niveau::Eleve));
     }
 }
+
+/// Propriétés de la lecture ONVIF : une réponse à la recherche des caméras vient de n'importe quel appareil. Rien ne
+/// plante, et le nom rendu reste court et inoffensif.
+#[cfg(test)]
+mod proprietes {
+    use super::*;
+    use proptest::prelude::*;
+
+    proptest! {
+        #![proptest_config(ProptestConfig { cases: 512, failure_persistence: None, ..ProptestConfig::default() })]
+
+        #[test]
+        fn reponses_onvif_quelconques(debut in any::<String>(), scopes in prop::collection::vec("(onvif://www.onvif.org/(name|hardware)/)?[ -~%\u{1b}\u{202e}]{0,30}", 0..6), fin in any::<String>()) {
+            let xml = format!("{debut}NetworkVideoTransmitter<d:Scopes>{}</d:Scopes>{fin}", scopes.join(" "));
+            if let Some(nom) = lire_onvif(&xml) {
+                prop_assert!(nom.chars().count() <= 60);
+                prop_assert!(!crate::ui::contient_un_piege(&nom), "{nom:?}");
+            }
+            let _ = lire_flux(&xml);
+        }
+    }
+}

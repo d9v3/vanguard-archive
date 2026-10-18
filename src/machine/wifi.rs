@@ -832,3 +832,99 @@ mod tests {
         assert_eq!(lire_system_profiler(sortie).len(), 3);
     }
 }
+
+/// Propriétés des lectures, sur des sorties tirées au hasard : aucune ne plante, quoi qu'écrive l'outil ou l'appareil
+/// d'en face ; un nom lu ne porte jamais de quoi piloter le terminal ; une sortie bien formée redonne ses valeurs.
+#[cfg(test)]
+mod proprietes {
+    use super::*;
+    use proptest::prelude::*;
+
+    /// Une sortie d'outil quelconque : des lignes de n'importe quels caractères, deux-points, tabulations,
+    /// séquences d'échappement et écritures bidirectionnelles compris.
+    fn sortie() -> impl Strategy<Value = String> {
+        prop::collection::vec(
+            prop_oneof![
+                any::<String>(),
+                "[ -~\\t\u{1b}\u{202e}\u{200b}é:%()\\[\\]]{0,60}",
+                "(SSID|BSSID|Channel|Canal|Band|Signal|Authentication|freq|signal|BSS|Security|Channel) ?[0-9]* ?: ?[ -~]{0,30}",
+            ],
+            0..12,
+        )
+        .prop_map(|l| l.join("\n"))
+    }
+
+    /// Un nom de réseau ordinaire : tout ce que nmcli rend tel quel, deux-points compris, sans caractère de commande.
+    fn nom() -> impl Strategy<Value = String> {
+        "[a-zA-Z0-9 éàçÉ'_.:-]{1,32}".prop_filter("nom non vide après les espaces", |n| !n.trim().is_empty())
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig { cases: 256, failure_persistence: None, ..ProptestConfig::default() })]
+
+        #[test]
+        fn lectures_sans_plantage_ni_piege(t in sortie()) {
+            let visibles: Vec<Visible> =
+                [lire_nmcli(&t), lire_netsh(&t), lire_system_profiler(&t)].into_iter().flatten().collect();
+            let bornes = [bornes_nmcli(&t), bornes_iw(&t), bornes_netsh(&t), bornes_system_profiler(&t)].concat();
+            for v in visibles.iter().chain(connexion_netsh(&t).as_ref()) {
+                prop_assert!(!crate::ui::contient_un_piege(&v.ssid) && !crate::ui::contient_un_piege(&v.securite));
+            }
+            for b in bornes.iter().chain(borne_active_netsh(&t).as_ref()) {
+                prop_assert!(!crate::ui::contient_un_piege(&b.ssid));
+                prop_assert!(b.signal.is_none_or(|s| s <= 100));
+            }
+            let _ = jumeau(&visibles);
+        }
+
+        #[test]
+        fn nmcli_redonne_ses_valeurs(actif in any::<bool>(), securite in "[A-Z0-9 .-]{0,12}", ssid in nom()) {
+            let ligne = format!("{}:{securite}:{ssid}\n", if actif { "yes" } else { "no" });
+            let v = lire_nmcli(&ligne);
+            prop_assert_eq!(v.len(), 1);
+            prop_assert_eq!(&v[0].ssid, &ssid);
+            prop_assert_eq!(&v[0].securite, &securite);
+            prop_assert_eq!(v[0].actif, actif);
+        }
+
+        #[test]
+        fn bornes_nmcli_et_iw_redonnent_leurs_valeurs(canal in 1u16..=13, signal in 0u8..=100, ssid in nom()) {
+            let mhz = 2407 + 5 * u32::from(canal);
+            let b = bornes_nmcli(&format!("yes:{signal}:{mhz} MHz:{canal}:{ssid}\n"));
+            prop_assert_eq!(b.len(), 1);
+            prop_assert_eq!((b[0].canal, b[0].signal, b[0].bande, b[0].actif), (canal, Some(signal), Bande::G24, true));
+            prop_assert_eq!(&b[0].ssid, &ssid);
+            let iw = format!("BSS 02:00:00:aa:bb:01(on wlan0)\n\tfreq: {mhz}\n\tsignal: -61.00 dBm\n\tSSID: {ssid}\n");
+            let b = bornes_iw(&iw);
+            prop_assert_eq!(b.len(), 1);
+            prop_assert_eq!((b[0].canal, b[0].signal), (canal, Some(pourcentage(-61))));
+            prop_assert_eq!(b[0].ssid.as_str(), ssid.trim());
+        }
+
+        #[test]
+        fn netsh_redonne_ses_valeurs(canal in prop_oneof![1u16..=13, 36u16..=165], signal in 0u8..=100, ssid in nom()) {
+            let texte = format!("    SSID                   : {ssid}\n    Channel                : {canal}\n    Signal                 : {signal}%\n");
+            let b = borne_active_netsh(&texte).unwrap();
+            prop_assert_eq!((b.canal, b.signal, b.bande), (canal, Some(signal), Bande::de_canal(canal).unwrap()));
+            prop_assert_eq!(b.ssid.as_str(), ssid.trim());
+        }
+
+        #[test]
+        fn pourcentage_borne_et_croissant(a in any::<i32>(), b in any::<i32>()) {
+            let (pa, pb) = (pourcentage(a), pourcentage(b));
+            prop_assert!(pa <= 100 && pb <= 100);
+            if a <= b {
+                prop_assert!(pa <= pb);
+            }
+        }
+
+        #[test]
+        fn canaux_des_frequences(mhz in any::<u32>()) {
+            // Un canal ne vient que d'une fréquence d'une bande connue ; toute autre fréquence n'en donne aucun, sans
+            // plantage.
+            if canal_de_frequence(mhz).is_some() {
+                prop_assert!(Bande::de_frequence(mhz).is_some());
+            }
+        }
+    }
+}

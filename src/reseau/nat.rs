@@ -356,11 +356,11 @@ pub fn tester() {
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use super::*;
 
     /// Réponse « Binding Success » avec une XOR-MAPPED-ADDRESS (et un attribut inconnu avant, de longueur impaire).
-    fn reponse(id: &[u8; 12], vue: SocketAddr) -> Vec<u8> {
+    pub(super) fn reponse(id: &[u8; 12], vue: SocketAddr) -> Vec<u8> {
         let mut attribut = vec![0x80, 0x22, 0, 3, b'a', b'b', b'c', 0];
         let (famille, octets): (u8, Vec<u8>) = match vue.ip() {
             IpAddr::V4(v4) => (1, v4.octets().to_vec()),
@@ -465,5 +465,31 @@ mod tests {
         assert_eq!(recevoir(&socket, fin, &mut tampon, |_, _| Some(())), None);
         assert!(debut.elapsed() >= Duration::from_millis(150) && debut.elapsed() < Duration::from_secs(3));
         assert_ne!(hasard(), hasard(), "deux tirages identiques");
+    }
+}
+
+/// Propriétés de la lecture STUN : n'importe quel serveur, ou n'importe qui sur le chemin, peut répondre n'importe
+/// quoi. Rien ne plante, et une réponse à une autre requête n'est jamais prise.
+#[cfg(test)]
+mod proprietes {
+    use super::*;
+    use proptest::prelude::*;
+
+    proptest! {
+        #![proptest_config(ProptestConfig { cases: 512, failure_persistence: None, ..ProptestConfig::default() })]
+
+        #[test]
+        fn reponses_quelconques(octets in prop::collection::vec(any::<u8>(), 0..200), id in any::<[u8; 12]>()) {
+            let _ = lire_reponse(&octets, &id);
+        }
+
+        #[test]
+        fn reponse_a_une_autre_requete_ignoree(vue in any::<SocketAddr>(), id in any::<[u8; 12]>(), autre in any::<[u8; 12]>()) {
+            prop_assume!(id != autre);
+            // STUN ne transmet que l'adresse et le port (ni flux ni zone IPv6).
+            let vue = SocketAddr::new(vue.ip(), vue.port());
+            prop_assert_eq!(lire_reponse(&super::tests::reponse(&id, vue), &id), Some(vue));
+            prop_assert_eq!(lire_reponse(&super::tests::reponse(&autre, vue), &id), None);
+        }
     }
 }

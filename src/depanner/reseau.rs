@@ -801,3 +801,52 @@ mod tests {
         assert!(!ping_repond(None, "", false));
     }
 }
+
+/// Propriétés des lectures du dépannage, sur des sorties tirées au hasard : rien ne plante ; seule une entrée
+/// REACHABLE confirme la box ; un signal lu reste entre 0 et 100.
+#[cfg(test)]
+mod proprietes {
+    use super::*;
+    use proptest::prelude::*;
+
+    fn sortie() -> impl Strategy<Value = String> {
+        prop::collection::vec(
+            prop_oneof![
+                any::<String>(),
+                "[ -~\\t\u{1b}:%()*]{0,60}",
+                "\\*?:[0-9]{0,4}:[0-9 MHz]{0,10}:[0-9]{0,4}",
+                " *(Signal|Channel|Canal|Band|Bande|Signal / Noise|Channel) ?: ?[ -~]{0,20}",
+            ],
+            0..10,
+        )
+        .prop_map(|l| l.join("\n"))
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig { cases: 256, failure_persistence: None, ..ProptestConfig::default() })]
+
+        #[test]
+        fn lectures_sans_plantage(t in sortie()) {
+            // nmcli et netsh disent un pourcentage : il est rendu tel quel ; system_profiler, des dBm, ramenés à 0-100.
+            let _ = (signal_nmcli(&t), signal_netsh(&t));
+            if let Some(s) = signal_airport(&t) {
+                prop_assert!(s.qualite <= 100);
+            }
+            let _ = voisin_confirme(&t);
+        }
+
+        #[test]
+        fn seul_reachable_confirme(etat in "(REACHABLE|STALE|FAILED|INCOMPLETE|DELAY|PROBE|PERMANENT|NOARP|router REACHABLE)", mac in "([0-9a-f]{2}:){5}[0-9a-f]{2}") {
+            let ligne = format!("192.168.1.1 dev wlan0 lladdr {mac} {etat}\n");
+            prop_assert_eq!(voisin_confirme(&ligne), etat.ends_with("REACHABLE"));
+        }
+
+        #[test]
+        fn signal_airport_borne(dbm in -200i32..100) {
+            let texte = format!("      Current Network Information:\n        Salon:\n          Channel: 36 (5GHz, 80MHz)\n          Signal / Noise: {dbm} dBm / -94 dBm\n");
+            let s = signal_airport(&texte).unwrap();
+            prop_assert!(s.qualite <= 100);
+            prop_assert_eq!(s.bande, Some(Bande::G5));
+        }
+    }
+}

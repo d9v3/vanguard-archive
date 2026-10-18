@@ -1034,3 +1034,85 @@ mod tests {
         assert!(marque(Some(Niveau::Eleve), false).contains('✖'));
     }
 }
+
+/// Propriétés des lectures des connexions, sur des sorties tirées au hasard : rien ne plante ; une connexion bien
+/// écrite redonne son adresse, son port, son programme ; netstat ne compte jamais deux fois ce que lsof a vu.
+#[cfg(test)]
+mod proprietes {
+    use super::*;
+    use proptest::prelude::*;
+    use std::net::SocketAddr;
+
+    fn sortie() -> impl Strategy<Value = String> {
+        prop::collection::vec(
+            prop_oneof![
+                any::<String>(),
+                "[ -~\\t\u{1b}\u{202e}:%()\\[\\]\"|,=]{0,80}",
+                "(tcp|udp) [0-9]+ [0-9]+ [0-9.:\\[\\]a-f%]{0,30} [0-9.:\\[\\]a-f%]{0,30}( users:\\(\\(\"[ -~]{0,10}\",pid=[0-9]{0,6},fd=[0-9]\\)\\))?",
+                "[pcnf][ -~]{0,40}",
+            ],
+            0..12,
+        )
+        .prop_map(|l| l.join("\n"))
+    }
+
+    fn programme() -> impl Strategy<Value = String> {
+        "[a-zA-Z0-9 ._-]{1,15}".prop_filter("nom non vide", |n| !n.trim().is_empty())
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig { cases: 256, failure_persistence: None, ..ProptestConfig::default() })]
+
+        #[test]
+        fn lectures_sans_plantage(t in sortie()) {
+            let connexions = [lire_ss(&t), lire_windows(&t), lire_lsof(&t)].concat();
+            let _ = invisibles(&t, &connexions);
+            for c in &connexions {
+                prop_assert!(c.programme.as_deref().is_none_or(|p| !crate::ui::contient_un_piege(p)));
+            }
+        }
+
+        #[test]
+        fn adresse_redonnee(a in any::<SocketAddr>()) {
+            // « 1.2.3.4:443 », « [2606:4700::1]:443 » : ce que ss et lsof écrivent.
+            let lue = adresse_et_port(&a.to_string());
+            prop_assert_eq!(lue, Some((a.ip(), a.port())));
+        }
+
+        #[test]
+        fn ss_redonne_ses_valeurs(locale in any::<SocketAddr>(), distante in any::<SocketAddr>(), nom in programme(), pid in 1u32..4_000_000) {
+            let ligne = format!("tcp 0 0 {locale} {distante} users:((\"{nom}\",pid={pid},fd=7))\n");
+            let l = lire_ss(&ligne);
+            prop_assert_eq!(l.len(), 1);
+            prop_assert_eq!((l[0].distante, l[0].port, l[0].pid), (distante.ip(), distante.port(), Some(pid)));
+            prop_assert_eq!(l[0].programme.as_deref(), Some(nom.as_str()));
+            prop_assert!(!l[0].udp);
+        }
+
+        #[test]
+        fn windows_redonne_ses_valeurs(distante in any::<std::net::IpAddr>(), port in any::<u16>(), nom in programme(), pid in any::<u32>()) {
+            let l = lire_windows(&format!("{distante}|{port}|{pid}|{nom}|C:\\Program Files\\x.exe\n"));
+            prop_assert_eq!(l.len(), 1);
+            prop_assert_eq!((l[0].distante, l[0].port, l[0].pid), (distante, port, Some(pid)));
+            prop_assert_eq!(l[0].programme.as_deref(), Some(nom.trim()));
+        }
+
+        #[test]
+        fn netstat_ne_compte_pas_deux_fois_ce_que_lsof_a_vu(
+            vues in prop::collection::vec((any::<std::net::Ipv4Addr>(), any::<u16>()), 0..6),
+            autres in prop::collection::vec((any::<std::net::Ipv4Addr>(), any::<u16>()), 0..6),
+        ) {
+            let lsof = vues.iter().map(|(ip, port)| format!("p1\ncx\nn10.0.0.2:50000->{ip}:{port}\n")).collect::<Vec<_>>().concat();
+            let visibles = lire_lsof(&lsof);
+            prop_assert_eq!(visibles.len(), vues.len());
+            let netstat = vues
+                .iter()
+                .chain(&autres)
+                .map(|(ip, port)| format!("tcp4 0 0 10.0.0.2.50000 {ip}.{port} ESTABLISHED\n"))
+                .collect::<Vec<_>>()
+                .concat();
+            let restantes = invisibles(&netstat, &visibles);
+            prop_assert_eq!(restantes.len(), autres.len());
+        }
+    }
+}

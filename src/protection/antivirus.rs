@@ -1132,3 +1132,34 @@ mod tests {
         assert_eq!(regex_echappe(".steam"), "/\\.steam(/|$)");
     }
 }
+
+/// Propriétés de la lecture de lsblk : rien ne plante, quelle que soit la sortie ; une clé amovible bien décrite
+/// redonne son point de montage et son étiquette, rendue prête à montrer.
+#[cfg(test)]
+mod proprietes {
+    use super::*;
+    use proptest::prelude::*;
+
+    proptest! {
+        #![proptest_config(ProptestConfig { cases: 256, failure_persistence: None, ..ProptestConfig::default() })]
+
+        #[test]
+        fn lsblk_sans_plantage(t in prop::collection::vec(prop_oneof![any::<String>(), "([A-Z]+=\"[ -~\u{1b}é]{0,12}\" ?){0,6}"], 0..8)) {
+            for (point, nom) in lire_lsblk(&t.join("\n")) {
+                prop_assert!(point.is_absolute());
+                prop_assert!(!crate::ui::contient_un_piege(&nom));
+            }
+        }
+
+        #[test]
+        fn lsblk_redonne_ses_valeurs(etiquette in "[A-Za-z0-9_-]{1,11}", taille in "[0-9]{1,3}(,[0-9])?[GM]", amovible in prop_oneof![Just("RM=\"1\" HOTPLUG=\"0\""), Just("RM=\"0\" HOTPLUG=\"1\"")]) {
+            let ligne = format!("{amovible} LABEL=\"{etiquette}\" SIZE=\"{taille}\" MOUNTPOINT=\"/run/media/alice/{etiquette}\"\n");
+            let l = lire_lsblk(&ligne);
+            prop_assert_eq!(l.len(), 1);
+            prop_assert_eq!(&l[0].0, &PathBuf::from(format!("/run/media/alice/{etiquette}")));
+            prop_assert_eq!(&l[0].1, &format!("{etiquette} · {taille}"));
+            // Ni amovible ni branchée à chaud : pas une clé.
+            prop_assert!(lire_lsblk(&ligne.replace("=\"1\"", "=\"0\"")).is_empty());
+        }
+    }
+}
