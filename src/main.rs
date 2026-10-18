@@ -331,10 +331,8 @@ impl Session {
     }
 
     fn corriger(&mut self) {
-        if self.audit.is_none() {
-            self.audit = Some(machine::executer(false));
-        }
-        if let Some(nouveau) = corriger::corriger(self.audit.as_ref().unwrap(), self.reseau.as_ref()) {
+        let audit = self.audit.get_or_insert_with(|| machine::executer(false));
+        if let Some(nouveau) = corriger::corriger(audit, self.reseau.as_ref()) {
             self.audit = Some(nouveau);
         }
     }
@@ -518,25 +516,20 @@ async fn menu() {
     loop {
         print!("\x1b[2J\x1b[H");
         let lignes = lignes_du_menu(etat_du_menu(reseau::surveillance::active()));
-        let Some(choix) = choisir(
-            &lignes,
-            &format!("  {ACCENT}›{RESET} {}", tr!("Choix : ", "Choice: ")),
-            &dernier,
-            tr!("quitter", "quit"),
-        ) else {
+        let Some(choix) = choix_du_menu(&lignes, &dernier, tr!("quitter", "quit")) else {
             break;
         };
         let choix = choix.trim().to_lowercase();
         println!();
         // Un outil ou une page du guide, trouvés par la recherche (ou leur chemin tapé : « 5.2 », « 10.2.4 »).
         if let Some((groupe, reste)) = choix.split_once('.') {
-            let cle_de = |voulu: fn(&Groupe) -> bool| GROUPES.iter().position(voulu).map(|i| (i + 4).to_string());
-            if cle_de(|g| matches!(g, Groupe::Guide)).as_deref() == Some(groupe) {
+            let cle_de = |voulu: Groupe| GROUPES.iter().position(|g| *g == voulu).map(|i| (i + 4).to_string());
+            if cle_de(Groupe::Guide).as_deref() == Some(groupe) {
                 if let Some((systeme, programme)) = guide::chemin(reste) {
                     dernier = groupe.to_string();
                     guide::ouvrir(systeme, programme);
                 }
-            } else if cle_de(|g| matches!(g, Groupe::Depanner)).as_deref() == Some(groupe) {
+            } else if cle_de(Groupe::Depanner).as_deref() == Some(groupe) {
                 if let Some(n) = depanner::chemin(reste) {
                     dernier = groupe.to_string();
                     depanner::ouvrir(n);
@@ -573,6 +566,12 @@ async fn menu() {
         executer(&mut s, action).await;
         revenir_au_menu(action);
     }
+}
+
+/// Le choix fait dans un menu, avec l'invite commune (`None` : Échap, qui fait `echap`).
+fn choix_du_menu(lignes: &[Ligne], dernier: &str, echap: &str) -> Option<String> {
+    let invite = format!("  {ACCENT}›{RESET} {}", tr!("Choix : ", "Choice: "));
+    choisir(lignes, &invite, dernier, echap)
 }
 
 /// Après un outil lancé du menu : Entrée pour y revenir, sauf pour ceux qui ont leurs propres écrans.
@@ -969,12 +968,7 @@ async fn sous_menu(s: &mut Session, groupe: Groupe) {
             "",
         ));
         lignes.push(Ligne::Texte(String::new()));
-        let Some(choix) = choisir(
-            &lignes,
-            &format!("  {ACCENT}›{RESET} {}", tr!("Choix : ", "Choice: ")),
-            &dernier,
-            tr!("revenir", "back"),
-        ) else {
+        let Some(choix) = choix_du_menu(&lignes, &dernier, tr!("revenir", "back")) else {
             return;
         };
         let choix = choix.trim();
