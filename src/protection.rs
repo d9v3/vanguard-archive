@@ -122,6 +122,15 @@ fn monter(peripherique: &str, lecture_seule: bool) -> Result<(), String> {
     }
 }
 
+/// Empreinte de l'ordinateur du propriétaire, écrite dans le témoin de la clé. Une clé préparée sous un ancien nom
+/// la garde dans l'ancien témoin : sans lui, elle passerait pour une clé sans protection, modifiable partout.
+fn empreinte_attendue(cle: &Path) -> String {
+    std::iter::once(crate::reseau::TEMOIN_CLE)
+        .chain(crate::reseau::ANCIENS_TEMOINS_CLE)
+        .find_map(|temoin| std::fs::read_to_string(cle.join(temoin)).ok())
+        .unwrap_or_default()
+}
+
 /// Au démarrage : sur un ordinateur qui n'est pas celui du propriétaire, remonte la clé en lecture seule.
 pub fn proteger_cle() {
     // Copie temporaire relancée : elle supprime son fichier (Linux le garde lisible jusqu'à la fin du programme).
@@ -137,7 +146,7 @@ pub fn proteger_cle() {
     let Some(cle) = crate::reseau::cle_usb() else {
         return;
     };
-    let attendue = std::fs::read_to_string(cle.join(crate::reseau::TEMOIN_CLE)).unwrap_or_default();
+    let attendue = empreinte_attendue(&cle);
     let attendue = attendue.trim();
     if attendue.is_empty() || Some(attendue) == empreinte_machine().as_deref() {
         return;
@@ -280,6 +289,19 @@ mod tests {
         let (_, lecture_seule) = montage(donnees).expect("volume de données monté");
         assert!(!lecture_seule);
         assert!(montage(Path::new("/pas/un/montage")).is_none());
+    }
+
+    #[test]
+    fn empreinte_lue_dans_l_ancien_temoin() {
+        let cle = std::env::temp_dir().join(format!("gardien-temoin-{}", std::process::id()));
+        std::fs::create_dir_all(&cle).unwrap();
+        assert_eq!(empreinte_attendue(&cle), "");
+        std::fs::write(cle.join("sentinel.cle"), "abc").unwrap();
+        assert_eq!(empreinte_attendue(&cle), "abc");
+        // Le témoin du nom actuel l'emporte, même vide (clé volontairement sans protection).
+        std::fs::write(cle.join("gardien.cle"), "").unwrap();
+        assert_eq!(empreinte_attendue(&cle), "");
+        let _ = std::fs::remove_dir_all(&cle);
     }
 
     #[test]

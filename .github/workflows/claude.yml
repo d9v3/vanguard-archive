@@ -1,5 +1,6 @@
 # Claude sur GitHub : écrire @claude dans un ticket, une demande de fusion (PR) ou un commentaire pour lui poser une
-# question ou lui demander une correction ; il suit CLAUDE.md. Seuls les membres du dépôt peuvent le déclencher.
+# question ou lui demander une correction ; il suit CLAUDE.md. Seul le propriétaire du dépôt le déclenche : vérifié
+# ici avant même de démarrer (un dépôt public reçoit des commentaires de n'importe qui), puis par l'action elle-même.
 # Activation, une fois : /install-github-app dans Claude Code (application GitHub + secret CLAUDE_CODE_OAUTH_TOKEN,
 # le jeton de l'abonnement Claude, que donne `claude setup-token`).
 name: Claude
@@ -15,10 +16,14 @@ on:
 jobs:
   claude:
     if: |
-      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
-      (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')) ||
-      (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude')) ||
-      (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')))
+      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')
+        && github.event.comment.author_association == 'OWNER') ||
+      (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')
+        && github.event.comment.author_association == 'OWNER') ||
+      (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude')
+        && github.event.review.author_association == 'OWNER') ||
+      (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude'))
+        && github.event.issue.author_association == 'OWNER')
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:
