@@ -99,6 +99,33 @@ pub fn largeur_car(c: char) -> usize {
     }
 }
 
+/// Un caractère qu'un texte venu de l'extérieur ne doit jamais faire passer au terminal : les contrôles C0 (dont ESC,
+/// qui ouvre les séquences ANSI et OSC, le retour chariot et le saut de ligne), DEL et les contrôles C1 (U+009B ouvre
+/// une séquence comme ESC [), et la mise en forme invisible : sens d'écriture bidi (U+202A à U+202E, U+2066 à U+2069,
+/// U+061C), espace, liaisons et marques de largeur nulle (U+200B à U+200F, U+2060 à U+2064), marque d'ordre des
+/// octets (U+FEFF).
+fn piege(c: char) -> bool {
+    matches!(
+        u32::from(c),
+        0x00..=0x1F | 0x7F..=0x9F | 0x061C | 0x200B..=0x200F | 0x202A..=0x202E | 0x2060..=0x2064 | 0x2066..=0x2069 | 0xFEFF
+    )
+}
+
+/// Un texte venu de l'extérieur (nom d'un réseau ou d'un appareil, réponse du réseau, nom de fichier, sortie d'un
+/// autre programme), prêt à montrer. Sans cela, un nom piégé pilote le terminal : une séquence OSC 52 écrit dans le
+/// presse-papier, ESC [2K et un retour chariot effacent une alerte de Gardien et la réécrivent, un caractère bidi
+/// retourne la fin d'un nom. Chacun de ces caractères devient « � », pour que la manipulation se voie ; le reste ne
+/// change pas (accents, emojis, autres écritures, espaces).
+pub fn affichable(texte: &str) -> String {
+    texte.chars().map(|c| if piege(c) { '\u{fffd}' } else { c }).collect()
+}
+
+/// Le texte contient-il encore un caractère piégé ? Pour les tests des lectures.
+#[cfg(test)]
+pub(crate) fn contient_un_piege(texte: &str) -> bool {
+    texte.chars().any(piege)
+}
+
 /// Largeur affichée d'un texte, en colonnes du terminal (sans les codes de couleur).
 pub fn largeur_affichee(t: &str) -> usize {
     let mut n = 0;
@@ -310,6 +337,60 @@ mod tests {
         assert_eq!(couper("court", 9), "court");
         assert_eq!(ajuster("Lien", 9), "Lien     ");
         assert_eq!(ajuster("Navigation", 6), "Navig…");
+    }
+
+    /// Chaque sorte de caractère piégé devient « � », un par caractère ; la séquence qui suit reste lisible, inerte.
+    #[test]
+    fn textes_pieges_rendus_inoffensifs() {
+        // Couleur ANSI : ESC [ 31 m.
+        assert_eq!(affichable("\x1b[31mrouge"), "�[31mrouge");
+        // OSC 52 : écrit « echo PIRATE » dans le presse-papier, terminé par BEL ou par ESC \.
+        assert_eq!(
+            affichable("Salon\x1b]52;c;ZWNobyBQSVJBVEU=\x07"),
+            "Salon�]52;c;ZWNobyBQSVJBVEU=�"
+        );
+        assert_eq!(affichable("\x1b]0;titre\x1b\\"), "�]0;titre�\\");
+        // Retour chariot et effacement de ligne : l'alerte d'avant serait réécrite.
+        assert_eq!(affichable("x\x1b[2K\rFaux"), "x�[2K�Faux");
+        assert_eq!(affichable("a\nb\tc\0d\x7f"), "a�b�c�d�");
+        // C1 : U+009B est un ESC [ à lui seul ; U+0085 un saut de ligne.
+        assert_eq!(affichable("\u{9b}31mrouge\u{85}"), "�31mrouge�");
+        // Bidi : « facture[U+202E]fdp.exe » s'afficherait « facture exe.pdf ».
+        assert_eq!(affichable("facture\u{202e}fdp.exe"), "facture�fdp.exe");
+        assert_eq!(
+            affichable("\u{202a}\u{202b}\u{202c}\u{202d}\u{2066}\u{2067}\u{2068}\u{2069}\u{61c}"),
+            "���������"
+        );
+        // Invisibles : « Sa[U+200B]lon » ressemble à « Salon ».
+        assert_eq!(affichable("Sa\u{200b}lon"), "Sa�lon");
+        assert_eq!(
+            affichable("\u{200c}\u{200d}\u{200e}\u{200f}\u{2060}\u{2061}\u{2062}\u{2063}\u{2064}\u{feff}"),
+            "����������"
+        );
+        // Une colonne par « � » : les alignements tiennent.
+        assert_eq!(largeur_affichee(&affichable("\x1b[2K\r")), 5);
+        assert!(contient_un_piege("a\u{2066}") && !contient_un_piege(&affichable("a\u{2066}\x1b")));
+    }
+
+    /// Un texte normal ne change pas, octet pour octet : accents, emojis, autres écritures, espaces (dont l'espace
+    /// insécable), ponctuation, « � » déjà là.
+    #[test]
+    fn texte_normal_identique() {
+        for t in [
+            "",
+            "Salon",
+            "Chez Max · 2,4 GHz",
+            "Café d'été « Québec » — 5 GHz",
+            "💡 📶 🔒 ✔ ⚠ ✖ ℹ → ▰▱",
+            "Москва 東京 서울 مرحبا שלום Ελλάδα हिन्दी ไทย",
+            "a\u{a0}b c",
+            "C:\\Users\\alice\\Téléchargements\\facture (2).pdf",
+            "déjà � là",
+        ] {
+            assert_eq!(affichable(t), t);
+            assert_eq!(affichable(t).as_bytes(), t.as_bytes());
+            assert!(!contient_un_piege(t), "{t}");
+        }
     }
 
     #[test]

@@ -631,26 +631,15 @@ fn wifi() -> Vec<Constat> {
     else {
         return Vec::new();
     };
-    let champ = |cle: &str| {
-        texte
-            .lines()
-            .map(str::trim)
-            .find(|l| l.starts_with(cle) && !l.starts_with("BSSID"))
-            .and_then(|l| Some(l.split_once(':')?.1.trim().to_string()))
-    };
-    let (Some(ssid), Some(auth)) = (champ("SSID"), champ("Authenti")) else {
+    let Some(connexion) = super::wifi::connexion_netsh(&texte) else {
         return Vec::new();
     };
-    let mut constats = vec![super::wifi::securite(&ssid, &auth, &[])];
+    let mut constats = vec![super::wifi::securite(&connexion.ssid, &connexion.securite, &[])];
     // Windows 11 24H2 réserve la liste à l'autorisation de localisation : sans elle, netsh ne liste rien, et il n'y a
     // simplement pas de jumeau à chercher.
     if let Some(r) = crate::commande::lancer(Command::new("netsh").args(["wlan", "show", "networks"]), 15) {
         let mut visibles = super::wifi::lire_netsh(&r.sortie);
-        visibles.push(super::wifi::Visible {
-            ssid,
-            securite: auth,
-            actif: true,
-        });
+        visibles.push(connexion);
         constats.extend(super::wifi::jumeau(&visibles));
     }
     constats

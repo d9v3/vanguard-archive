@@ -596,32 +596,54 @@ pub fn fabricant_traduit(note: &str) -> &str {
 pub fn nom_wifi() -> Option<String> {
     // En anglais : nmcli traduit la colonne ACTIVE (« oui: » en français), et le réseau n'était plus reconnu.
     #[cfg(target_os = "linux")]
-    let nom = crate::commande::lancer_en_anglais(
-        std::process::Command::new("nmcli").args(["-t", "-e", "no", "-f", "ACTIVE,SSID", "dev", "wifi"]),
-        10,
-    )
-    .map(|r| r.sortie)
-    .unwrap_or_default()
-    .lines()
-    .find_map(|l| l.strip_prefix("yes:").map(str::to_string));
+    let nom = nom_wifi_nmcli(
+        &crate::commande::lancer_en_anglais(
+            std::process::Command::new("nmcli").args(["-t", "-e", "no", "-f", "ACTIVE,SSID", "dev", "wifi"]),
+            10,
+        )
+        .map(|r| r.sortie)
+        .unwrap_or_default(),
+    );
     #[cfg(windows)]
-    let nom = commande_sortie("netsh", &["wlan", "show", "interfaces"])
-        .lines()
-        .map(str::trim)
-        .find(|l| l.starts_with("SSID") && !l.starts_with("BSSID"))
-        .and_then(|l| Some(l.split_once(':')?.1.trim().to_string()));
+    let nom = nom_wifi_netsh(&commande_sortie("netsh", &["wlan", "show", "interfaces"]));
     // macOS : « SSID : Salon » dans le résumé de l'interface Wi-Fi (en0 en général). Depuis macOS 14, le nom peut
     // être masqué (« <redacted> ») faute d'autorisation de localisation : le réseau est alors reconnu par sa box.
     #[cfg(target_os = "macos")]
-    let nom = ["en0", "en1"].iter().find_map(|i| {
-        commande_sortie("ipconfig", &["getsummary", i])
-            .lines()
-            .map(str::trim)
-            .find_map(|l| l.strip_prefix("SSID : "))
-            .map(str::to_string)
-            .filter(|n| !n.starts_with('<'))
-    });
+    let nom = ["en0", "en1"]
+        .iter()
+        .find_map(|i| nom_wifi_ipconfig(&commande_sortie("ipconfig", &["getsummary", i])));
     nom.filter(|n| !n.is_empty())
+}
+
+/// Le réseau connecté dans `nmcli -t -e no -f ACTIVE,SSID dev wifi` (« yes:Salon »). Comme dans les deux lectures
+/// suivantes, le nom, que n'importe qui à portée peut choisir, est lu prêt à montrer (`ui::affichable`).
+#[cfg(any(target_os = "linux", test))]
+fn nom_wifi_nmcli(sortie: &str) -> Option<String> {
+    sortie
+        .lines()
+        .find_map(|l| l.strip_prefix("yes:"))
+        .map(crate::ui::affichable)
+}
+
+/// Le réseau connecté dans `netsh wlan show interfaces` (« SSID : Salon »).
+#[cfg(any(windows, test))]
+fn nom_wifi_netsh(sortie: &str) -> Option<String> {
+    sortie
+        .lines()
+        .map(str::trim)
+        .find(|l| l.starts_with("SSID") && !l.starts_with("BSSID"))
+        .and_then(|l| Some(crate::ui::affichable(l.split_once(':')?.1.trim())))
+}
+
+/// Le réseau connecté dans `ipconfig getsummary en0` (« SSID : Salon ») ; un nom masqué (« <redacted> ») ne dit rien.
+#[cfg(any(target_os = "macos", test))]
+fn nom_wifi_ipconfig(sortie: &str) -> Option<String> {
+    sortie
+        .lines()
+        .map(str::trim)
+        .find_map(|l| l.strip_prefix("SSID : "))
+        .filter(|n| !n.starts_with('<'))
+        .map(crate::ui::affichable)
 }
 
 #[cfg(not(target_os = "linux"))]
@@ -733,6 +755,26 @@ mod tests {
         );
         assert_eq!(passerelle_linux(&table), Some(Ipv4Addr::new(10, 0, 0, 1)));
         assert_eq!(passerelle_linux(entete), None);
+    }
+
+    /// Le nom du réseau connecté, gardé dans la base et montré en tête du scan : lu tel quel s'il est normal, rendu
+    /// inoffensif s'il est piégé, sur les trois systèmes.
+    #[test]
+    fn nom_du_wifi_connecte() {
+        const PIEGE: &str = "Salon\x1b]52;c;ZWNobyBQSVJBVEU=\x07\x1b[2K\rFaux\u{202e}";
+        const VU: &str = "Salon�]52;c;ZWNobyBQSVJBVEU=��[2K�Faux�";
+        assert_eq!(nom_wifi_nmcli("no:Voisin\nyes:Chez Max\n").as_deref(), Some("Chez Max"));
+        assert_eq!(
+            nom_wifi_nmcli(&format!("no:Voisin\nyes:{PIEGE}\n")).as_deref(),
+            Some(VU)
+        );
+        assert_eq!(nom_wifi_nmcli("no:Voisin\n"), None);
+        let netsh = |ssid: &str| format!("    Name : Wi-Fi\n    SSID : {ssid}\n    BSSID : 02:00:00:aa:bb:01\n");
+        assert_eq!(nom_wifi_netsh(&netsh("Chez Max")).as_deref(), Some("Chez Max"));
+        assert_eq!(nom_wifi_netsh(&netsh(PIEGE)).as_deref(), Some(VU));
+        assert_eq!(nom_wifi_ipconfig("  SSID : Chez Max\n").as_deref(), Some("Chez Max"));
+        assert_eq!(nom_wifi_ipconfig(&format!("  SSID : {PIEGE}\n")).as_deref(), Some(VU));
+        assert_eq!(nom_wifi_ipconfig("  SSID : <redacted>\n"), None);
     }
 
     #[test]
