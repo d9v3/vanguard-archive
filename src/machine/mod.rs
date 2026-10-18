@@ -394,6 +394,30 @@ fn ports_bloques() -> std::collections::HashSet<String> {
 }
 
 /// À appeler après une correction réussie : retient le port qu'elle a bloqué.
+/// Empreinte de cet ordinateur : SHA-1 de son identifiant (/etc/machine-id sous Linux, IOPlatformUUID sous macOS,
+/// MachineGuid sous Windows). La clé s'en sert pour reconnaître l'ordinateur de son propriétaire, et « Mes
+/// ordinateurs » pour retrouver l'entrée d'un ordinateur ; elle ne dit pas qui est la personne.
+pub fn empreinte_machine() -> Option<String> {
+    #[cfg(target_os = "linux")]
+    let id = std::fs::read_to_string("/etc/machine-id").ok()?;
+    // « "IOPlatformUUID" = "564D…" »
+    #[cfg(target_os = "macos")]
+    let id = crate::commande::lancer(Command::new("ioreg").args(["-rd1", "-c", "IOPlatformExpertDevice"]), 10)?
+        .sortie
+        .lines()
+        .find(|l| l.contains("\"IOPlatformUUID\""))?
+        .rsplit('"')
+        .nth(1)?
+        .to_string();
+    #[cfg(windows)]
+    let id: String = winreg::RegKey::predef(winreg::enums::HKEY_LOCAL_MACHINE)
+        .open_subkey(r"SOFTWARE\Microsoft\Cryptography")
+        .and_then(|k| k.get_value("MachineGuid"))
+        .ok()?;
+    let id = id.trim();
+    (!id.is_empty()).then(|| sha1_smol::Sha1::from(id).digest().to_string())
+}
+
 pub fn retenir_blocage(k: &Correctif) {
     let Some(port) = &k.bloque else { return };
     let chemin = fichier_blocages();

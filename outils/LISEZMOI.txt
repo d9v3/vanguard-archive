@@ -81,6 +81,7 @@ Entrée ouvre celle en surbrillance, Échap efface. Au menu principal, elle trou
   9  Données ›
        Sauvegarder ou restaurer (surnoms, historique des réseaux)
        Copier mes fichiers vers un disque externe (copie vérifiée, rien d'effacé, reprise après interruption)
+       Mes ordinateurs : ceux où la clé a fait un bilan, leur note et leurs problèmes restants (gardien ordinateurs)
  10  Guide des commandes › les commandes utiles de Linux, Windows, macOS et de tous les systèmes, par programme,
        chacune expliquée (⚠ : elle change quelque chose) ; rien ne s'y lance, un numéro la copie.
        En ligne de commande : gardien guide windows, gardien guide winget, gardien guide cache dns

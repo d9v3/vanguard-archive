@@ -1,5 +1,6 @@
 //! Historique des bilans complets : ce qui a changé depuis le dernier (notes, problèmes nouveaux ou réglés) et la
-//! courbe des notes dans le rapport HTML. Gardé sur cet ordinateur (une note de machine ne voyage pas avec la clé).
+//! courbe des notes dans le rapport HTML. Gardé sur cet ordinateur : ce détail ne voyage pas avec la clé, seul un
+//! résumé y va (« Mes ordinateurs », `ordinateurs`).
 
 use std::fmt::Write;
 use std::path::PathBuf;

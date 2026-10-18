@@ -119,7 +119,7 @@ impl Fiche {
 
 /// « fabricant modèle », sans répéter le fabricant quand le modèle le contient déjà (« LENOVO » + « LENOVO 21AH »).
 #[cfg_attr(target_os = "macos", allow(dead_code))]
-fn avec_fabricant(fabricant: &str, modele: &str) -> String {
+pub(crate) fn avec_fabricant(fabricant: &str, modele: &str) -> String {
     let (f, m) = (propre(fabricant), propre(modele));
     match (f.is_empty(), m.is_empty()) {
         (_, true) => f,

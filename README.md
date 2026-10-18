@@ -60,7 +60,7 @@ pour revenir.
 | **Protection** | Fichiers-pièges contre les rançongiciels, blocages de Windows Defender, 308 règles YARA, antivirus, bac à sable, intégrité des fichiers critiques, mots de passe fuités, connexions sortantes, liens dangereux, fichiers téléchargés. |
 | **Suivi** | Surveillance toutes les heures, entretien du mois, rapport HTML avec la courbe des notes, apprentissage sur ton ordinateur. |
 | **Logiciels et jeux** | Les meilleurs logiciels en 8 catégories, depuis leur source officielle ; mises à jour de tout d'un coup ; réglages pour jouer. |
-| **Outils** | Copier mes fichiers (copie vérifiée), guide des commandes, recherche dans tous les menus. |
+| **Outils** | Copier mes fichiers (copie vérifiée), mes ordinateurs (suivis par la clé), guide des commandes, recherche dans tous les menus. |
 
 <details>
 <summary><b>Le détail, fonction par fonction</b></summary>
@@ -118,6 +118,11 @@ l'écran seulement, jamais écrits.
 **Copier mes fichiers** — Documents, Images, Bureau, Vidéos et Musique vers un disque externe, avant une réparation
 risquée ou une réinstallation : la place est vérifiée avant, chaque fichier relu et comparé à l'original (empreinte
 BLAKE3), rien n'est effacé ni écrasé, et une copie interrompue reprend où elle s'est arrêtée.
+
+**Mes ordinateurs** — chaque bilan complet fait avec la clé GARDIEN y note l'ordinateur : surnom (« système ·
+modèle », renommable), note, problèmes restants (leur catégorie et leur niveau seulement, les cinq plus graves),
+date du dernier bilan. Le tableau voyage sur la partition GARDIENLOG de la clé, sans nom de machine, compte, adresse
+ni nom de Wi-Fi ; il ne part jamais sur GitHub.
 
 **Optimiser** — des réglages de confidentialité, de performance et de confort, écrits pour Gardien. Sous Windows :
 télémétrie au minimum, publicités et suivi coupés, Recall sans captures d'écran, extensions des fichiers visibles, pas

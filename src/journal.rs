@@ -51,7 +51,7 @@ fn dossier() -> Option<&'static PathBuf> {
 }
 
 /// Partition GARDIENLOG de la clé, si elle est branchée.
-fn partition_de_la_cle() -> Option<PathBuf> {
+pub(crate) fn partition_de_la_cle() -> Option<PathBuf> {
     #[cfg(windows)]
     {
         lecteur_windows()
@@ -216,7 +216,7 @@ pub(crate) fn noms_a_retirer() -> Vec<(String, &'static str)> {
 }
 
 /// Retire ce qui identifie une personne ou une machine.
-fn anonymiser(texte: &str) -> String {
+pub(crate) fn anonymiser(texte: &str) -> String {
     let maisons: Vec<String> = ["HOME", "USERPROFILE"]
         .iter()
         .filter_map(|v| std::env::var(v).ok())

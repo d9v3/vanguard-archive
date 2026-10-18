@@ -24,6 +24,7 @@ mod machine;
 mod maj;
 mod nettoyer;
 mod optimiser;
+mod ordinateurs;
 mod protection;
 mod rapport;
 mod reparer;
@@ -265,6 +266,10 @@ enum Commande {
         /// Un dossier d'un disque externe (par défaut : choisi parmi les disques branchés).
         destination: Option<std::path::PathBuf>,
     },
+    /// Mes ordinateurs : ceux où la clé GARDIEN a fait un bilan, leur note et leurs problèmes restants (sur la
+    /// partition GARDIENLOG de la clé).
+    #[command(visible_alias = "computers")]
+    Ordinateurs,
     /// Dépanner pas à pas : pas d'Internet, Wi-Fi qui coupe, ordinateur lent, pas de son, imprimante, disque plein.
     #[command(visible_alias = "troubleshoot")]
     Depanner {
@@ -317,6 +322,8 @@ impl Session {
             afficher_note(tr!("Global", "Overall"), g);
         }
         let (precedent, nouveau) = historique::enregistrer(self.audit.as_ref(), self.reseau.as_ref());
+        // Sur la clé GARDIEN branchée (partition GARDIENLOG) : la visite de cet ordinateur, pour « Mes ordinateurs ».
+        ordinateurs::noter(self.audit.as_ref(), self.reseau.as_ref());
         if let Some(p) = precedent {
             historique::afficher_changements(&p, &nouveau);
         }
@@ -637,6 +644,7 @@ enum Action {
     OptimiserAnnuler,
     Sauvegarder,
     CopierFichiers,
+    Ordinateurs,
     Guide,
     Depanner,
 }
@@ -833,6 +841,10 @@ const OUTILS: &[Outil] = &[
         titre: ["Copier mes fichiers", "Copy my files"],
         precision: ["vers un disque externe, vérifié", "to an external disk, checked"],
         mots: "copier copy sauvegarde backup photos disque externe external drive fichiers" },
+    Outil { action: Action::Ordinateurs, groupe: Some(Groupe::Donnees), lettre: "",
+        titre: ["Mes ordinateurs", "My computers"],
+        precision: ["suivis par la clé GARDIEN", "tracked by the GARDIEN key"],
+        mots: "ordinateurs computers tableau dashboard suivi parc famille family clé key" },
     Outil { action: Action::Guide, groupe: Some(Groupe::Guide), lettre: "",
         titre: ["Guide des commandes", "Command guide"],
         precision: ["Linux, Windows, macOS, tous", "Linux, Windows, macOS, all"],
@@ -1079,6 +1091,7 @@ async fn executer(s: &mut Session, action: Action) {
         Action::OptimiserAnnuler => optimiser::tout_annuler(),
         Action::Sauvegarder => donnees::menu(),
         Action::CopierFichiers => copier::menu(),
+        Action::Ordinateurs => ordinateurs::menu(),
         Action::Guide => guide::menu(),
         Action::Depanner => depanner::menu(),
     }
@@ -1141,6 +1154,8 @@ const AIDES_EN: &[(&str, &str)] = &[
                shown on screen only"),
     ("copier-fichiers", "Copy my files (Documents, Pictures, Desktop, Videos, Music) to an external disk: checked \
                          copy, nothing deleted or overwritten, an interrupted copy resumes"),
+    ("ordinateurs", "My computers: those where the GARDIEN key ran a check, their grade and remaining problems (on the \
+     key's GARDIENLOG partition)"),
     ("depanner", "Troubleshoot step by step: no Internet, Wi-Fi dropping, slow computer, no sound, printer, disk full"),
 ];
 
@@ -1315,6 +1330,7 @@ async fn main() {
         Some(Commande::Demarrage) => optimiser::programmes_au_demarrage(),
         Some(Commande::Fiche { json }) => fiche::fiche(json),
         Some(Commande::CopierFichiers { destination }) => copier::commande(destination.as_deref()),
+        Some(Commande::Ordinateurs) => ordinateurs::menu(),
         Some(Commande::Depanner { sujet }) => depanner::executer(&sujet.join(" ")),
     }
 }

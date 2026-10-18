@@ -80,6 +80,7 @@ highlighted one, Esc clears it. In the main menu, it also finds each tool of the
   9  Data ›
        Back up or restore (nicknames, network history)
        Copy my files to an external disk (checked copy, nothing deleted, resumes after an interruption)
+       My computers: those where the key ran a check, their grade and remaining problems (gardien ordinateurs)
  10  Command guide › the useful commands of Linux, Windows, macOS and all systems, by program, each one
        explained (⚠: it changes something); nothing runs from there, a number copies it. From the command line:
        gardien guide windows, gardien guide winget, gardien guide dns cache

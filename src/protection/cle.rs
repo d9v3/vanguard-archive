@@ -32,26 +32,6 @@ pub fn exe_d_origine() -> Option<PathBuf> {
         .and_then(|e| e.canonicalize().ok())
 }
 
-/// Empreinte de cet ordinateur, comparée à celle écrite sur la clé.
-pub fn empreinte_machine() -> Option<String> {
-    #[cfg(target_os = "linux")]
-    let id = std::fs::read_to_string("/etc/machine-id").ok()?;
-    // « "IOPlatformUUID" = "564D…" »
-    #[cfg(target_os = "macos")]
-    let id = crate::commande::lancer(
-        std::process::Command::new("ioreg").args(["-rd1", "-c", "IOPlatformExpertDevice"]),
-        10,
-    )?
-    .sortie
-    .lines()
-    .find(|l| l.contains("\"IOPlatformUUID\""))?
-    .rsplit('"')
-    .nth(1)?
-    .to_string();
-    let id = id.trim();
-    (!id.is_empty()).then(|| sha1_smol::Sha1::from(id).digest().to_string())
-}
-
 /// Périphérique et état (lecture seule ou non) du point de montage `dossier`, d'après /proc/self/mountinfo.
 #[cfg(target_os = "linux")]
 fn montage(dossier: &Path) -> Option<(String, bool)> {
@@ -148,7 +128,7 @@ pub fn proteger_cle() {
     };
     let attendue = empreinte_attendue(&cle);
     let attendue = attendue.trim();
-    if attendue.is_empty() || Some(attendue) == empreinte_machine().as_deref() {
+    if attendue.is_empty() || Some(attendue) == crate::machine::empreinte_machine().as_deref() {
         return;
     }
     let Some((peripherique, lecture_seule)) = montage(&cle) else {
