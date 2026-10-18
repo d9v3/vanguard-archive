@@ -3,7 +3,6 @@
 //! N'utilise le scan réseau que sur un réseau qui t'appartient ou que tu as le droit d'auditer.
 //! Lancé sans argument, affiche un menu.
 
-mod alertes;
 mod antivirus;
 mod apprentissage;
 mod cameras;
@@ -125,13 +124,6 @@ enum Commande {
     #[command(visible_alias = "maintenance")]
     Entretien {
         #[arg(value_parser = ["on", "off"])]
-        etat: Option<String>,
-    },
-    /// Alertes sur le téléphone, par ntfy (surveillance, entretien du mois) : les activer après accord, les couper,
-    /// ou envoyer une alerte d'essai. Sans argument : le menu.
-    #[command(visible_alias = "alerts")]
-    Alertes {
-        #[arg(value_parser = ["on", "off", "essai", "test"])]
         etat: Option<String>,
     },
     /// Mises à jour : système, programmes, pilotes et firmware vérifiés d'un coup, puis installés après accord.
@@ -638,7 +630,6 @@ enum Action {
     WifiCanaux,
     Nat,
     Cameras,
-    Alertes,
     AntivirusRapide,
     AntivirusComplet,
     AntivirusDossier,
@@ -689,7 +680,6 @@ impl Action {
         Action::WifiCanaux,
         Action::Nat,
         Action::Cameras,
-        Action::Alertes,
         Action::AntivirusRapide,
         Action::AntivirusComplet,
         Action::AntivirusDossier,
@@ -788,7 +778,6 @@ impl Action {
                  ouvert open modéré moderate strict"
             }
             Action::Cameras => "caméra camera espion spy cachée hidden location rental airbnb rtsp onvif",
-            Action::Alertes => "ntfy téléphone phone mobile portable notification push",
             Action::AntivirusRapide | Action::AntivirusComplet => "virus malware clamav defender",
             Action::AntivirusDossier => "virus usb clé autorun",
             Action::Yara => "yara règles rules malware",
@@ -909,14 +898,6 @@ impl Action {
             Action::Cameras => (
                 tr!("Caméras cachées ?", "Hidden cameras?"),
                 tr!("location, chez quelqu'un", "rental, someone else's place"),
-            ),
-            Action::Alertes => (
-                tr!("Alertes sur le téléphone", "Alerts on your phone"),
-                if alertes::actives() {
-                    tr!("activées (ntfy)", "on (ntfy)")
-                } else {
-                    tr!("désactivées", "off")
-                },
             ),
             Action::AntivirusRapide => (
                 tr!("Analyse rapide", "Quick scan"),
@@ -1117,7 +1098,6 @@ impl Groupe {
                 Action::WifiCanaux,
                 Action::Nat,
                 Action::Cameras,
-                Action::Alertes,
             ],
             Groupe::Protection => &[
                 Action::AntivirusRapide,
@@ -1260,7 +1240,6 @@ async fn executer(s: &mut Session, action: Action) {
         Action::WifiCanaux => canaux::analyser(),
         Action::Nat => nat::tester(),
         Action::Cameras => cameras::chercher_cameras().await,
-        Action::Alertes => alertes::menu(),
         Action::AntivirusRapide => antivirus::analyser(antivirus::Portee::Rapide),
         Action::AntivirusComplet => antivirus::analyser(antivirus::Portee::Complete),
         Action::AntivirusDossier => antivirus::choisir(),
@@ -1326,10 +1305,6 @@ fn ligne_de_commande() -> clap::Command {
         (
             "entretien",
             "Monthly check-up: once a month, silently, the grade, waiting updates, space to free and new problems, in one notification; nothing is changed. Without argument: what it would say now",
-        ),
-        (
-            "alertes",
-            "Alerts on your phone through ntfy (monitoring, monthly check-up): turn them on after your consent, off, or send a test alert. Without argument: the menu",
         ),
         (
             "maj",
@@ -1620,7 +1595,6 @@ async fn main() {
             None => entretien::maintenant(),
         },
         Some(Commande::Entretenir) => entretien::entretenir(),
-        Some(Commande::Alertes { etat }) => alertes::commande(etat.as_deref()),
         Some(Commande::Maj) => maj::executer(),
         Some(Commande::Reparer) => reparer::menu(),
         Some(Commande::Gaming) => gaming::menu(),

@@ -250,7 +250,7 @@ fn anonymiser_avec(texte: &str, maisons: &[String], noms: &[(String, &str)]) -> 
 }
 
 /// Le texte sans ces noms (personne, machine, réseaux et appareils de la base, voir `noms_a_retirer`), en mots
-/// entiers et à la casse près : aussi le second filet des alertes envoyées au téléphone.
+/// entiers et à la casse près.
 pub(crate) fn sans_noms_avec(texte: &str, noms: &[(String, &str)]) -> String {
     let mut t = texte.to_string();
     for (nom, remplacement) in noms {

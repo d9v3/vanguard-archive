@@ -201,8 +201,6 @@ le guide dit si un programme manque sur cet ordinateur.
   la machine baisse, ou si la box semble usurpée (adresse MAC partagée ou changée : usurpation ARP).
 - Entretien du mois : une notification par mois avec la note de la machine, les mises à jour en attente, la place
   que le nettoyage libérerait et les problèmes nouveaux ; rien n'est changé.
-- Alertes sur le téléphone, par ntfy (après accord) : la surveillance et l'entretien préviennent aussi ton
-  téléphone. Le sujet est tiré au hasard, les messages ne contiennent jamais d'adresse IP ni MAC.
 - Rapport HTML avec la courbe des notes, et ce qui a changé depuis le bilan précédent.
 - Gaming : sous Windows, composants pour les jeux et réglages de Windows ; sous Linux, Steam, pilotes Vulkan 32 et
   64 bits selon la carte, GameMode, MangoHud, Gamescope, Wine, Lutris, Heroic, ProtonUp-Qt, vm.max_map_count, ntsync ;
@@ -250,7 +248,6 @@ Chaque entrée du menu existe aussi en commande :
 | `gardien reparer` | réparations et nettoyage |
 | `gardien surveillance on\|off` | surveillance horaire |
 | `gardien entretien [on\|off]` | entretien du mois ; sans argument : ce qu'il dirait maintenant |
-| `gardien alertes [on\|off\|essai]` | alertes sur le téléphone (ntfy) ; sans argument : le menu |
 | `gardien nommer <ip\|mac> <surnom>` | nommer un appareil |
 | `gardien sauvegarder [fichier]`, `gardien restaurer <fichier>` | sauvegarde des données |
 | `gardien gaming` | paquets et réglages pour jouer (Windows et Linux) |
@@ -259,7 +256,7 @@ Chaque entrée du menu existe aussi en commande :
 **Langue** : celle du système (français ou anglais). Pour forcer : `GARDIEN_LANG=fr` ou `GARDIEN_LANG=en`. Les
 commandes ont aussi un nom anglais (`full`, `audit`, `fix`, `network`, `connection`, `apps`, `diag`, `password`,
 `sandbox`, `email`, `integrity`, `update`, `repair`, `monitor`, `name`, `backup`, `restore`, `clean`, `decoys`,
-`blocklists`, `learned`, `channels`, `fast-dns`, `outbound`, `link`, `check-file`, `maintenance`, `alerts`, `slow`,
+`blocklists`, `learned`, `channels`, `fast-dns`, `outbound`, `link`, `check-file`, `maintenance`, `slow`,
 `startup`, `specs`, `copy-files`, `troubleshoot`).
 
 ## Développer

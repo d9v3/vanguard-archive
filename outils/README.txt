@@ -53,7 +53,6 @@ highlighted one, Esc clears it. In the main menu, it also finds each tool of the
        Internet address on blocklists? (Spamhaus, SpamCop, DroneBL, PSBL, after your consent)
        Crowded Wi-Fi? (nearby networks by channel, and the freest channel to set on the router)
        NAT type for gaming (open, moderate or strict) · Hidden cameras? (rental, someone else's place)
-       Alerts on your phone (ntfy, after your consent: secret topic, never an IP or MAC address)
   6  Antivirus and protection ›
        Quick scan · Full scan of the home folder
        USB drive or folder, with USB worm traps (fake shortcuts, autorun)

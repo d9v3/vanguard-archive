@@ -191,8 +191,7 @@ fn lire_etat() -> Option<Etat> {
     serde_json::from_str(&std::fs::read_to_string(fichier_etat()).ok()?).ok()
 }
 
-/// Appelé par le planificateur : examen silencieux, notification (et téléphone, si les alertes sont activées), puis
-/// l'état est gardé pour le mois suivant.
+/// Appelé par le planificateur : examen silencieux, notification, puis l'état est gardé pour le mois suivant.
 pub fn entretenir() {
     let examen = examiner();
     let avant = lire_etat();
@@ -200,7 +199,6 @@ pub fn entretenir() {
     let (titre, lignes) = rediger(&examen, nouvelles.as_deref());
     let texte = lignes.join("\n");
     crate::surveillance::notifier(&titre, &texte);
-    crate::alertes::envoyer(&titre, &texte);
     let etat = Etat {
         date: chrono::Local::now().format("%Y-%m-%d").to_string(),
         score: examen.score,

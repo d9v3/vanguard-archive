@@ -186,8 +186,6 @@ tells when a program is missing on this computer.
   if the router seems spoofed (shared or changed MAC address: ARP spoofing).
 - Monthly check-up: one notification a month with the machine's grade, waiting updates, the space a cleanup would
   free and new problems; nothing is changed.
-- Alerts on your phone, through ntfy (after your consent): monitoring and the check-up also alert your phone. The
-  topic is drawn at random, and messages never contain an IP or MAC address.
 - HTML report with the grade history curve, and what changed since the previous check.
 - Gaming: on Windows, game components and Windows settings; on Linux, Steam, 32- and 64-bit Vulkan drivers for your
   graphics card, GameMode, MangoHud, Gamescope, Wine, Lutris, Heroic, ProtonUp-Qt, vm.max_map_count, ntsync; on
@@ -235,7 +233,6 @@ Each menu entry is also a command:
 | `gardien repair` | repairs and cleaning |
 | `gardien monitor on\|off` | hourly monitoring |
 | `gardien maintenance [on\|off]` | monthly check-up; without argument: what it would say now |
-| `gardien alerts [on\|off\|test]` | alerts on your phone (ntfy); without argument: the menu |
 | `gardien name <ip\|mac> <nickname>` | name a device |
 | `gardien backup [file]`, `gardien restore <file>` | data backup |
 | `gardien gaming` | packages and settings for gaming (Windows and Linux) |
@@ -244,7 +241,7 @@ Each menu entry is also a command:
 **Language**: the system's (English or French). To force it: `GARDIEN_LANG=en` or `GARDIEN_LANG=fr`. The commands
 also keep their French names (`complet`, `machine`, `corriger`, `reseau`, `connexion`, `logiciels`, `diagnostic`,
 `motdepasse`, `isoler`, `courriel`, `integrite`, `maj`, `reparer`, `surveillance`, `nommer`, `sauvegarder`,
-`restaurer`, `nettoyer`, `pieges`, `listes-noires`, `appris`, `entretien`, `alertes`, `sortantes`, `lien`,
+`restaurer`, `nettoyer`, `pieges`, `listes-noires`, `appris`, `entretien`, `sortantes`, `lien`,
 `verifier-fichier`, `canaux`, `dns-rapide`).
 
 ## Development

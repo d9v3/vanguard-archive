@@ -54,7 +54,6 @@ Entrée ouvre celle en surbrillance, Échap efface. Au menu principal, elle trou
        Adresse Internet sur liste noire ? (Spamhaus, SpamCop, DroneBL, PSBL, après ton accord)
        Wi-Fi encombré ? (réseaux voisins par canal, et le canal le plus libre à régler sur la box)
        Type de NAT pour le jeu (ouvert, modéré ou strict) · Caméras cachées ? (location, chez quelqu'un)
-       Alertes sur le téléphone (ntfy, après ton accord : sujet secret, jamais d'adresse IP ni MAC)
   6  Antivirus et protection ›
        Analyse rapide · Analyse complète du dossier personnel
        Clé USB ou dossier, avec les pièges des vers de clé (faux raccourcis, autorun)

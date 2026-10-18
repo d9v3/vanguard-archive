@@ -284,26 +284,6 @@ fn gaming_quitte_sans_rien_installer() {
 }
 
 #[test]
-fn alertes_refusees_sans_rien_envoyer() {
-    // Pas activées : le menu explique, demande l'accord ; refusé, rien n'est écrit ni envoyé.
-    let s = gardien("fr", &["alertes"], "n\n", 60);
-    let t = sans_couleurs(&s.texte);
-    assert_eq!(s.code, Some(0), "{}", s.erreurs);
-    assert!(t.contains("ntfy.sh") && t.contains("Rien n'a été activé"), "{t}");
-    // L'accord dit que le nom de l'ordinateur part aussi vers le serveur ntfy.
-    assert!(
-        t.contains("nom de cet ordinateur") && t.contains("seul nom envoyé"),
-        "{t}"
-    );
-    let essai = gardien("en", &["alerts", "test"], "", 30);
-    assert!(
-        sans_couleurs(&essai.texte).contains("Alerts are not on"),
-        "{}",
-        essai.texte
-    );
-}
-
-#[test]
 fn entretien_du_mois_sans_rien_installer() {
     let coupe = gardien("fr", &["entretien", "off"], "", 60);
     assert_eq!(coupe.code, Some(0), "{}", coupe.erreurs);

@@ -38,7 +38,6 @@ turn on once with `/install-github-app`).
 | `src/apprentissage.rs` | what Gardien learns here: alerts declared normal (appris.json), habits |
 | `src/listes_noires.rs` | the home's Internet address in blocklists (DNSBL), after consent |
 | `src/entretien.rs` | monthly check-up: grade, updates, space, new problems, in one notification |
-| `src/alertes.rs` | alerts on the phone through ntfy: random topic, messages without IP or MAC |
 | `src/sortantes.rs` | who talks to the Internet: established connections by program (ss, PowerShell, lsof), reverse DNS |
 | `src/lien.rs` | is this link dangerous? local check (punycode, imitated brands…), then RDAP, URLhaus, Spamhaus DBL, SURBL |
 | `src/telechargement.rs` | check a downloaded file: checksum by the system's tool, name and content, YARA and antivirus |
