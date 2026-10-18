@@ -1,10 +1,11 @@
 //! Alertes sur le téléphone, par ntfy (logiciel libre, application gratuite pour Android et iPhone) : la surveillance
 //! et l'entretien du mois y envoient aussi leurs alertes. Le serveur public ntfy.sh ne demande aucun compte : qui
 //! connaît le sujet lit les messages, et le serveur lit tout. Le sujet est donc tiré au hasard (120 bits, il sert de
-//! mot de passe) et gardé sur cet ordinateur seulement ; le message reste minimal : ni adresse IP ou MAC, ni nom de
-//! réseau ou d'appareil (le fabricant seulement), les données des autres comptant comme celles de la personne. Un
-//! second filet masque ce qui en passerait (adresses, noms de la base des appareils). Un envoi raté est noté au
-//! journal, sans jamais rien bloquer.
+//! mot de passe) et gardé sur cet ordinateur seulement ; le message reste minimal : en tête, le nom court de cet
+//! ordinateur (choisi à l'activation, le seul nom envoyé), puis ni adresse IP ou MAC, ni nom de réseau ou d'appareil
+//! (le fabricant seulement), les données des autres comptant comme celles de la personne. Un second filet masque ce
+//! qui en passerait (adresses, noms de la base des appareils). Un envoi raté est noté au journal, sans jamais rien
+//! bloquer.
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -22,6 +23,10 @@ struct Reglage {
     sujet: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     jeton: Option<String>,
+    /// Le nom court de cet ordinateur, en tête de chaque alerte (« [Bureau] … ») pour savoir lequel prévient : le
+    /// seul nom qui part vers ntfy. Absent d'un réglage plus ancien : celui de la machine.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    nom: Option<String>,
 }
 
 fn fichier() -> PathBuf {
@@ -52,6 +57,56 @@ fn ecrire_prive(chemin: &Path, contenu: &[u8]) -> bool {
         let _ = std::fs::remove_file(chemin);
     }
     ecrit.is_ok()
+}
+
+/// Le nom d'un ordinateur tel qu'il paraît en tête des alertes : sans caractère de contrôle ni crochet, 20 caractères
+/// au plus.
+fn raccourcir(nom: &str) -> String {
+    let propre: String = nom
+        .chars()
+        .filter(|c| !c.is_control() && !matches!(c, '[' | ']'))
+        .collect();
+    propre
+        .trim()
+        .chars()
+        .take(20)
+        .collect::<String>()
+        .trim_end()
+        .to_string()
+}
+
+/// Le nom de cette machine, raccourci : celui des réglages du Mac (« MacBook Pro »), sinon le nom d'hôte sans son
+/// domaine (« bureau.maison.lan » → « bureau »).
+fn nom_par_defaut() -> String {
+    #[cfg(target_os = "macos")]
+    for cle in ["ComputerName", "LocalHostName"] {
+        if let Some(r) = crate::commande::lancer(std::process::Command::new("scutil").args(["--get", cle]), 5)
+            && r.code == Some(0)
+            && !raccourcir(&r.sortie).is_empty()
+        {
+            return raccourcir(&r.sortie);
+        }
+    }
+    let hote = std::env::var("COMPUTERNAME")
+        .ok()
+        .or_else(|| std::fs::read_to_string("/proc/sys/kernel/hostname").ok())
+        .or_else(|| std::env::var("HOSTNAME").ok())
+        .unwrap_or_default();
+    let nom = raccourcir(hote.trim().split('.').next().unwrap_or_default());
+    if nom.is_empty() {
+        tr!("Ordinateur", "Computer").to_string()
+    } else {
+        nom
+    }
+}
+
+/// Le nom en tête des alertes de ce réglage.
+fn nom_de(r: &Reglage) -> String {
+    r.nom
+        .as_deref()
+        .map(raccourcir)
+        .filter(|n| !n.is_empty())
+        .unwrap_or_else(nom_par_defaut)
 }
 
 fn ecrire(r: &Reglage) -> bool {
@@ -162,11 +217,12 @@ fn masquer(texte: &str) -> String {
     sortie
 }
 
-/// Corps du message pour ntfy, en JSON : le sujet voyage dans le corps, pas dans l'adresse.
+/// Corps du message pour ntfy, en JSON : le sujet voyage dans le corps, pas dans l'adresse. Le titre commence par le
+/// nom de cet ordinateur (« [Bureau] … »), ajouté après le second filet, qui sinon le masquerait.
 fn corps(r: &Reglage, titre: &str, message: &str, essai: bool) -> String {
     serde_json::json!({
         "topic": r.sujet,
-        "title": titre,
+        "title": format!("[{}] {titre}", masquer(&nom_de(r))),
         "message": message,
         "priority": if essai { 3 } else { 4 },
         "tags": [if essai { "white_check_mark" } else { "shield" }],
@@ -256,19 +312,25 @@ fn adresse_serveur(tape: &str) -> Option<String> {
     valide.then(|| format!("{schema}://{reste}"))
 }
 
-fn expliquer() {
+fn expliquer(nom: &str) {
     for paragraphe in [
         tr!(
             "La surveillance et l'entretien du mois peuvent aussi prévenir ton téléphone, par ntfy : une application libre et gratuite (Android : Google Play ou F-Droid ; iPhone : App Store).",
             "Monitoring and the monthly check-up can also alert your phone, through ntfy: a free and open source app (Android: Google Play or F-Droid; iPhone: App Store)."
-        ),
+        )
+        .to_string(),
         tr!(
-            "Le serveur public ntfy.sh ne demande aucun compte, mais qui connaît le sujet lit les messages. Gardien tire donc un sujet au hasard, impossible à deviner, gardé sur cet ordinateur seulement. Les messages restent courts : jamais d'adresse IP ou MAC, ni le nom d'un réseau ou d'un appareil (seulement son fabricant). Tu peux aussi donner l'adresse de ton propre serveur ntfy.",
-            "The public server ntfy.sh needs no account, but whoever knows the topic reads the messages. Gardien therefore draws a random topic, impossible to guess, kept on this computer only. Messages stay short: never an IP or MAC address, nor the name of a network or a device (only its maker). You can also give the address of your own ntfy server."
+            "Le serveur public ntfy.sh ne demande aucun compte, mais qui connaît le sujet lit les messages, et le serveur lit tout. Gardien tire donc un sujet au hasard, impossible à deviner, gardé sur cet ordinateur seulement. Tu peux aussi donner l'adresse de ton propre serveur ntfy.",
+            "The public server ntfy.sh needs no account, but whoever knows the topic reads the messages, and the server reads everything. Gardien therefore draws a random topic, impossible to guess, kept on this computer only. You can also give the address of your own ntfy server."
+        )
+        .to_string(),
+        trf!(
+            "Les messages restent courts. Chacun commence par le nom de cet ordinateur (« {nom} », modifiable juste après), qui part donc aussi vers le serveur ntfy : c'est le seul nom envoyé. Jamais d'adresse IP ou MAC, ni le nom d'un réseau ou d'un appareil (seulement son fabricant).",
+            "Messages stay short. Each one starts with this computer's name (“{nom}”, which you can change right after), so it also goes to the ntfy server: it is the only name sent. Never an IP or MAC address, nor the name of a network or a device (only its maker)."
         ),
     ] {
         println!();
-        for ligne in envelopper(paragraphe, LARGEUR - 2) {
+        for ligne in envelopper(&paragraphe, LARGEUR - 2) {
             println!("  {ligne}");
         }
     }
@@ -283,6 +345,11 @@ fn afficher(r: &Reglage) {
         serveur
     );
     trp!("  Sujet   : {ACCENT}{}{RESET}", "  Topic:  {ACCENT}{}{RESET}", r.sujet);
+    trp!(
+        "  Nom     : {ACCENT}{}{RESET}",
+        "  Name:   {ACCENT}{}{RESET}",
+        nom_de(r)
+    );
     let conseil = if r.serveur == SERVEUR_PUBLIC {
         trf!(
             "Dans l'application ntfy : « + », puis ce sujet. Sans l'application : {}/{} dans un navigateur.",
@@ -339,7 +406,8 @@ fn activer() {
         afficher(&r);
         return;
     }
-    expliquer();
+    let defaut = nom_par_defaut();
+    expliquer(&defaut);
     if !demander(tr!(
         "\n  Activer les alertes sur le téléphone ? [o/N] : ",
         "\n  Turn on alerts on your phone? [y/N]: "
@@ -373,10 +441,16 @@ fn activer() {
         })
         .map(|j| j.trim().to_string())
         .filter(|j| !j.is_empty());
+    let tape = demander(&trf!(
+        "  Nom de cet ordinateur dans les alertes (Entrée : {defaut}) : ",
+        "  This computer's name in the alerts (Enter: {defaut}): "
+    ));
+    let nom = Some(raccourcir(&tape)).filter(|n| !n.is_empty()).unwrap_or(defaut);
     let r = Reglage {
         serveur,
         sujet: nouveau_sujet(),
         jeton,
+        nom: Some(nom),
     };
     if !ecrire(&r) {
         trp!(
@@ -391,6 +465,35 @@ fn activer() {
     );
     afficher(&r);
     essai_avec(&r);
+}
+
+/// Change le nom de cet ordinateur en tête des alertes.
+fn renommer(r: &Reglage) {
+    let actuel = nom_de(r);
+    let nom = raccourcir(&demander(&trf!(
+        "  Nouveau nom (Entrée : garder {actuel}) : ",
+        "  New name (Enter: keep {actuel}): "
+    )));
+    if nom.is_empty() {
+        trp!("  Nom gardé.", "  Name kept.");
+        return;
+    }
+    let nouveau = Reglage {
+        nom: Some(nom.clone()),
+        ..r.clone()
+    };
+    if ecrire(&nouveau) {
+        trp!(
+            "  {VERT}✔{RESET} Les alertes commencent maintenant par « [{}] ».",
+            "  {VERT}✔{RESET} Alerts now start with “[{}]”.",
+            nom
+        );
+    } else {
+        trp!(
+            "  ✖ Réglage impossible à écrire dans le dossier des données de Gardien.",
+            "  ✖ Could not write the setting in Gardien's data folder."
+        );
+    }
 }
 
 fn couper() {
@@ -417,6 +520,11 @@ pub fn menu() {
         Ligne::Texte(String::new()),
         Ligne::choix("1", tr!("Envoyer une alerte d'essai", "Send a test alert"), ""),
         Ligne::choix("2", tr!("Couper les alertes", "Turn alerts off"), ""),
+        Ligne::choix(
+            "3",
+            tr!("Changer le nom de l'ordinateur", "Change the computer's name"),
+            &nom_de(&r),
+        ),
         Ligne::choix("↵", tr!("Revenir", "Back"), ""),
         Ligne::Texte(String::new()),
     ];
@@ -431,6 +539,7 @@ pub fn menu() {
     {
         Some("1") => essai_avec(&r),
         Some("2") => couper(),
+        Some("3") => renommer(&r),
         _ => {}
     }
 }
@@ -513,15 +622,47 @@ mod tests {
     }
 
     #[test]
+    fn le_nom_de_l_ordinateur_seul_en_tete() {
+        let r = Reglage {
+            serveur: SERVEUR_PUBLIC.into(),
+            sujet: nouveau_sujet(),
+            jeton: None,
+            nom: Some("Bureau".into()),
+        };
+        // Le second filet masque les noms de la base et celui de la machine dans le texte ; le nom choisi, ajouté
+        // après, reste en tête. Rien d'autre : ni appareil, ni Wi-Fi, ni adresse.
+        let noms = vec![
+            ("iPhone de Zoé".to_string(), "<appareil>"),
+            ("Chez Max".to_string(), "<réseau>"),
+            ("Bureau".to_string(), "<machine>"),
+        ];
+        let titre = pour_ntfy("Nouvel appareil sur ton réseau", &noms);
+        let message = pour_ntfy("iPhone de Zoé (Apple), réseau « Chez Max », 3c:22:fb:12:34:56", &noms);
+        let c: serde_json::Value = serde_json::from_str(&corps(&r, &titre, &message, false)).unwrap();
+        assert_eq!(c["title"], "[Bureau] Nouvel appareil sur ton réseau");
+        assert_eq!(c["message"], "<appareil> (Apple), réseau « <réseau> », …");
+        // Le nom court : sans domaine par défaut, sans crochets ni contrôle, 20 caractères au plus.
+        assert_eq!(raccourcir("  [Bureau]\n"), "Bureau");
+        assert_eq!(raccourcir("Ordinateur du salon de la maison"), "Ordinateur du salon");
+        assert_eq!(raccourcir("   "), "");
+        assert!(!nom_par_defaut().is_empty() && !nom_par_defaut().contains('.'));
+        assert!(nom_par_defaut().chars().count() <= 20);
+        // Un réglage d'avant le nom se relit : le nom de la machine sert alors.
+        let ancien: Reglage = serde_json::from_str(r#"{"serveur":"https://ntfy.sh","sujet":"gardien-x"}"#).unwrap();
+        assert_eq!(nom_de(&ancien), nom_par_defaut());
+    }
+
+    #[test]
     fn corps_du_message() {
         let r = Reglage {
             serveur: SERVEUR_PUBLIC.into(),
             sujet: "gardien-abcdefghijkmnpqrstuvwxyz".into(),
             jeton: None,
+            nom: Some("Bureau".into()),
         };
         let c: serde_json::Value = serde_json::from_str(&corps(&r, "Titre « é »", "Message", false)).unwrap();
         assert_eq!(c["topic"], "gardien-abcdefghijkmnpqrstuvwxyz");
-        assert_eq!(c["title"], "Titre « é »");
+        assert_eq!(c["title"], "[Bureau] Titre « é »");
         assert_eq!(c["priority"], 4);
         // Le sujet n'est jamais dans l'adresse (ni sur la ligne de commande) : il voyage dans le corps.
         assert!(!r.serveur.contains(&r.sujet));
@@ -549,6 +690,7 @@ mod tests {
             serveur: "https://ntfy.example.com".into(),
             sujet: nouveau_sujet(),
             jeton: Some("tk_essai".into()),
+            nom: Some("Bureau".into()),
         };
         assert!(ecrire(&r));
         assert_eq!(lire(), Some(r));

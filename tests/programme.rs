@@ -290,6 +290,11 @@ fn alertes_refusees_sans_rien_envoyer() {
     let t = sans_couleurs(&s.texte);
     assert_eq!(s.code, Some(0), "{}", s.erreurs);
     assert!(t.contains("ntfy.sh") && t.contains("Rien n'a été activé"), "{t}");
+    // L'accord dit que le nom de l'ordinateur part aussi vers le serveur ntfy.
+    assert!(
+        t.contains("nom de cet ordinateur") && t.contains("seul nom envoyé"),
+        "{t}"
+    );
     let essai = gardien("en", &["alerts", "test"], "", 30);
     assert!(
         sans_couleurs(&essai.texte).contains("Alerts are not on"),
