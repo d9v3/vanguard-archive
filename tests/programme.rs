@@ -48,6 +48,11 @@ fn sentinel(langue: &str, args: &[&str], entree: &str, secondes: u64) -> Sortie 
     let mut enfant = Command::new(env!("CARGO_BIN_EXE_sentinel"))
         .args(args)
         .env("SENTINEL_LANG", langue)
+        // La vraie clé (cherchée dans /run/media/$USER, journal compris) et la vraie session (systemctl --user) restent
+        // hors de portée : sinon le programme essayé écrirait sur la clé et toucherait la surveillance installée.
+        .env("USER", "essai")
+        .env("DBUS_SESSION_BUS_ADDRESS", "unix:path=/nonexistent")
+        .env("XDG_RUNTIME_DIR", maison.join("run"))
         .env("HOME", &maison)
         .env("XDG_DATA_HOME", maison.join("donnees"))
         .env("XDG_CONFIG_HOME", maison.join("config"))
