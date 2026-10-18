@@ -610,6 +610,7 @@ if (Test-Path -LiteralPath $lanceur) {
     $codeLanceur = $LASTEXITCODE
     Set-Content -Path (Join-Path $res 'lanceur.out.txt') -Value $sortieLanceur -Encoding UTF8
     if ($sortieLanceur -match 'Windows could not start Gardien') { Ok 'Refus expliqué' } else { Bug 'Refus PAS expliqué' }
+    if ($sortieLanceur -match 'Checksum unreadable') { Ok 'Empreinte dite illisible, programme absent' } else { Bug 'Empreinte : rien dit pour un programme absent' }
     if ($codeLanceur -eq 1) { Ok 'Code 1 quand Gardien ne démarre pas' } else { Bug "Code $codeLanceur au lieu de 1" }
     if ((Get-MpPreference | Select-Object ExclusionPath, ControlledFolderAccessAllowedApplications | Out-String) -eq $defLanceur) { Ok 'Defender pas touché' } else { Bug 'Defender modifié par le lanceur' }
     Remove-Item -LiteralPath $essai -Recurse -Force -ErrorAction SilentlyContinue

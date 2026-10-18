@@ -19,6 +19,15 @@ echo   Usually Microsoft Defender blocked it: a known false positive, guessed by
 echo   learning (detection ending in "!ml"). Gardien does not get around Defender: you decide
 echo   whether to allow it, in Windows Security.
 echo.
+echo   Avant d'autoriser quoi que ce soit, vérifie que c'est bien le vrai Gardien : cette empreinte
+echo   SHA-256 doit être celle de gardien-windows-x86_64.exe dans SHA256SUMS.txt, sur la page de la
+echo   version de Gardien. Sinon, n'autorise rien.
+echo   Before allowing anything, check this is the real Gardien: this SHA-256 checksum must match
+echo   gardien-windows-x86_64.exe in SHA256SUMS.txt, on Gardien's release page. Otherwise, allow nothing.
+set "EMPREINTE="
+for /f "delims=" %%l in ('certutil -hashfile "%GARDIEN%" SHA256 2^>nul ^| findstr /v ":"') do if not defined EMPREINTE set "EMPREINTE=%%l"
+if defined EMPREINTE (echo   SHA-256 : %EMPREINTE%) else (echo   Empreinte illisible : programme absent ou verrouillé. / Checksum unreadable: program missing or locked.)
+echo.
 choice /c OYN /n /m "  Ouvrir Sécurité Windows ? / Open Windows Security? [O/Y = oui/yes, N = non/no] "
 if errorlevel 3 exit /b 1
 start "" "windowsdefender://threat"
