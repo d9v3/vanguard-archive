@@ -58,6 +58,9 @@ The program: "gardien.exe", in this folder. Windows 10 and 11 (64-bit), nothing 
    - The program is not signed: SmartScreen may warn ("More info" > "Run anyway") and Microsoft
      Defender may flag it, because it scans ports. Started from the key, SmartScreen usually says
      nothing.
+   - If Defender blocks Gardien (false positive): "Lancer Gardien.bat" says so and offers to open
+     Windows Security. You choose "Allow on device" in the protection history; Gardien never
+     changes Defender itself.
    - In French:  $env:GARDIEN_LANG = "fr"  (PowerShell)  or  set GARDIEN_LANG=fr  (cmd), then the
      command.
    - Quit: q in the menu, or Ctrl+C.

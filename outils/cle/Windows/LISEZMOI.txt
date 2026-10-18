@@ -58,6 +58,9 @@ Le programme : « gardien.exe », dans ce dossier. Windows 10 et 11 (64 bits), r
    - Le programme n'est pas signé : SmartScreen peut avertir (« Informations complémentaires » >
      « Exécuter quand même ») et Microsoft Defender peut le signaler, car il scanne des ports. Lancé
      depuis la clé, SmartScreen ne dit en général rien.
+   - Si Defender bloque Gardien (faux positif) : « Lancer Gardien.bat » le dit et propose d'ouvrir
+     Sécurité Windows. C'est toi qui choisis « Autoriser sur l'appareil » dans l'historique de
+     protection ; Gardien ne touche jamais lui-même à Defender.
    - En anglais :  $env:GARDIEN_LANG = "en"  (PowerShell)  ou  set GARDIEN_LANG=en  (cmd), puis la
      commande.
    - Quitter : q dans le menu, ou Ctrl+C.

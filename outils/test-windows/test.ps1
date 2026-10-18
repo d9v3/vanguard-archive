@@ -475,13 +475,14 @@ if (Question 'Faire ce test (six fichiers posés puis retirés dans Documents, I
         $blocages = @(Get-WinEvent -FilterHashtable @{ LogName = 'Microsoft-Windows-Windows Defender/Operational'; Id = 1123; StartTime = (Get-Date).AddMinutes(-5) } -ErrorAction SilentlyContinue)
         Info "Écritures bloquées par Defender ces 5 dernières minutes (événement 1123) : $($blocages.Count)"
     }
-    $piege = Get-ChildItem $dossiersPieges[0] -Filter '!Gardien*.txt' -ErrorAction SilentlyContinue | Select-Object -First 1
+    # Le premier dossier qui a reçu ses pièges : l'accès contrôlé aux dossiers de Defender peut en refuser.
+    $piege = Get-ChildItem $dossiersPieges -Filter '!Gardien*.txt' -ErrorAction SilentlyContinue | Select-Object -First 1
     if ($piege) {
         Rename-Item $piege.FullName ($piege.Name + '.locked')
         LancerAvec 'pieges-etat' @('pieges') "`n"
         if ((Sortie 'pieges-etat') -match 'RENOMMÉ en|RENAMED to') { Ok 'Fichier-piège renommé repéré' } else { Bug 'Fichier-piège renommé PAS repéré' }
         Rename-Item (Join-Path $piege.DirectoryName ($piege.Name + '.locked')) $piege.Name
-    } else { Bug 'Aucun fichier-piège dans Documents' }
+    } else { Bug 'Aucun fichier-piège posé' }
     LancerAvec 'pieges-retirer' @('pieges', '--retirer') "o`n"
     if (Get-ChildItem $dossiersPieges -Filter '!Gardien*' -ErrorAction SilentlyContinue) { Bug 'Fichiers-pièges ENCORE présents' } else { Ok 'Fichiers-pièges retirés' }
 } else { Info 'Sautée.' }
@@ -589,6 +590,23 @@ Etape 'Antivirus (analyse rapide Microsoft Defender)'
 if (Question 'Lancer l''analyse rapide Defender (quelques minutes) ?') {
     Lancer 'antivirus' @('antivirus')
 } else { Info 'Sautée.' }
+
+Etape 'Lanceur de la clé : Gardien introuvable ou bloqué, expliqué sans toucher à Defender'
+$lanceur = Join-Path $ici 'Lancer Gardien.bat'
+if (Test-Path -LiteralPath $lanceur) {
+    # Dans un dossier sans Windows\gardien.exe : le même chemin que quand Defender refuse de le lancer.
+    $essai = Join-Path $env:TEMP 'gardien-lanceur'
+    New-Item -ItemType Directory -Path $essai -Force | Out-Null
+    Copy-Item -LiteralPath $lanceur $essai -Force
+    $defLanceur = (Get-MpPreference | Select-Object ExclusionPath, ControlledFolderAccessAllowedApplications | Out-String)
+    $sortieLanceur = 'N' | cmd /c "`"$(Join-Path $essai 'Lancer Gardien.bat')`"" 2>&1 | Out-String
+    $codeLanceur = $LASTEXITCODE
+    Set-Content -Path (Join-Path $res 'lanceur.out.txt') -Value $sortieLanceur -Encoding UTF8
+    if ($sortieLanceur -match 'Windows could not start Gardien') { Ok 'Refus expliqué' } else { Bug 'Refus PAS expliqué' }
+    if ($codeLanceur -eq 1) { Ok 'Code 1 quand Gardien ne démarre pas' } else { Bug "Code $codeLanceur au lieu de 1" }
+    if ((Get-MpPreference | Select-Object ExclusionPath, ControlledFolderAccessAllowedApplications | Out-String) -eq $defLanceur) { Ok 'Defender pas touché' } else { Bug 'Defender modifié par le lanceur' }
+    Remove-Item -LiteralPath $essai -Recurse -Force -ErrorAction SilentlyContinue
+} else { Info 'Sautée : lanceur absent du dossier du programme.' }
 
 Etape 'Blocages de Windows Defender : liste, rien changé sans accord'
 function Etat-Defender {

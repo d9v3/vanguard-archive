@@ -527,14 +527,13 @@ fn poser() {
             )
         );
     }
-    if cfg!(windows)
-        && refus
-            .iter()
-            .any(|(_, e)| e.kind() == std::io::ErrorKind::PermissionDenied)
-    {
+    // L'accès contrôlé aux dossiers ne répond pas toujours « accès refusé » : sous Windows 11, une création bloquée
+    // revient en « fichier introuvable ». Son état, lu dans Defender, dit si c'est lui.
+    #[cfg(windows)]
+    if !refus.is_empty() && crate::optimiser::dossiers_controles_actifs() {
         dire(tr!(
-            "Accès refusé : l'accès contrôlé aux dossiers de Defender bloque peut-être Gardien. Pour protéger ces dossiers aussi, autorise Gardien dans Sécurité Windows › Protection contre les virus et menaces › Protection contre les ransomware, puis repose les fichiers-pièges.",
-            "Access denied: Defender's controlled folder access may be blocking Gardien. To protect these folders too, allow Gardien in Windows Security › Virus & threat protection › Ransomware protection, then place the decoy files again."
+            "L'accès contrôlé aux dossiers de Defender est actif : il protège déjà ces dossiers contre les rançongiciels, et il empêche Gardien d'y écrire. Pour y poser aussi les fichiers-pièges, autorise Gardien (menu Blocages de Windows Defender, si Gardien est sur le disque du système ; ou Sécurité Windows › Protection contre les virus et menaces › Protection contre les ransomware › Autoriser une application), puis repose-les.",
+            "Defender's controlled folder access is on: it already protects these folders against ransomware, and it keeps Gardien from writing there. To place the decoy files there too, allow Gardien (Windows Defender blocking menu, if Gardien is on the system drive; or Windows Security › Virus & threat protection › Ransomware protection › Allow an app), then place them again."
         ));
     }
     if poses.is_empty() {
