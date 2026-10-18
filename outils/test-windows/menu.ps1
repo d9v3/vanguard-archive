@@ -28,8 +28,11 @@ function Version-Deja-Testee {
 }
 
 # Un test à la fois : un autre (manuel ou automatique) peut tourner. Au-delà de 3 h, le témoin est périmé.
+# -Force : le partage de la VM (Samba) marque caché un fichier qui commence par un point ; sans -Force, Get-Item ne
+# le trouve pas et Remove-Item ne l'enlève pas, et le témoin restait pour toujours.
 function Test-En-Cours {
-    (Test-Path $enCours) -and (((Get-Date) - (Get-Item $enCours).LastWriteTime).TotalHours -lt 3)
+    $temoin = Get-Item -LiteralPath $enCours -Force -ErrorAction SilentlyContinue
+    $temoin -and (((Get-Date) - $temoin.LastWriteTime).TotalHours -lt 3)
 }
 
 # Dans un PowerShell à part : le test garde ses variables pour lui et ne peut pas fermer ce menu. Start-Process lui
@@ -47,7 +50,7 @@ function Lancer-Test([string[]]$options) {
         Start-Process powershell.exe -ArgumentList $arguments -NoNewWindow -Wait
         Set-Content -Path $versionTestee -Value $version -Encoding UTF8
     } finally {
-        Remove-Item $enCours -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $enCours -Force -ErrorAction SilentlyContinue
     }
     return $true
 }
