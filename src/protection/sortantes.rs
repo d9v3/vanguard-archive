@@ -363,6 +363,16 @@ fn appimage(chemin: &str, montages: &str) -> bool {
         .any(|l| l.split_whitespace().nth(1) == Some(point.as_str()))
 }
 
+/// L'image d'où tourne une AppImage, d'après son environnement (/proc/<pid>/environ : « APPIMAGE=…\0 »).
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn image_appimage(environ: &[u8]) -> Option<String> {
+    environ
+        .split(|&o| o == 0)
+        .find_map(|v| v.strip_prefix(b"APPIMAGE="))
+        .map(|chemin| String::from_utf8_lossy(chemin).into_owned())
+        .filter(|chemin| chemin.starts_with('/'))
+}
+
 /// Un nouveau fichier qu'un programme lancé par la personne n'a pas pu poser : fichier et dossier à root, dossier que
 /// ni le groupe ni les autres n'écrivent (/usr, /opt, /snap, /var/lib/flatpak d'ordinaire). Ailleurs (profil, /tmp),
 /// un programme malveillant qui s'est effacé n'aurait qu'à reposer n'importe quel fichier à sa place.
@@ -400,8 +410,14 @@ fn qui(nom: &str) -> String {
         .unwrap_or(domaine)
 }
 
-/// Ce qui mérite l'attention dans les connexions d'un programme : (gravité, texte).
-fn signes(chemin: Option<&str>, connexions: &[(&Connexion, Option<&String>)], montages: &str) -> Vec<(Niveau, String)> {
+/// Ce qui mérite l'attention dans les connexions d'un programme : (gravité, texte). `image` : celle d'une AppImage
+/// (variable APPIMAGE), jugée à la place de son point de montage dans /tmp.
+fn signes(
+    chemin: Option<&str>,
+    connexions: &[(&Connexion, Option<&String>)],
+    montages: &str,
+    image: Option<&str>,
+) -> Vec<(Niveau, String)> {
     let mut signes = Vec::new();
     if let Some(c) = chemin {
         // Un nouveau fichier à la même place, posé par le système : le programme a été mis à jour pendant qu'il
@@ -425,7 +441,8 @@ fn signes(chemin: Option<&str>, connexions: &[(&Connexion, Option<&String>)], mo
             )),
             None => {}
         }
-        if let Some(ou) = dossier_risque(c, montages) {
+        let juge = image.filter(|_| appimage(c, montages)).unwrap_or(c);
+        if let Some(ou) = dossier_risque(juge, montages) {
             signes.push((
                 Niveau::Eleve,
                 trf!(
@@ -619,7 +636,15 @@ pub fn afficher() {
     let mut affiches: Vec<Programme> = groupes
         .iter()
         .map(|g| {
-            let signes = signes(g.chemin.as_deref(), &g.liste, &montages);
+            // Une AppImage : son image, lue dans l'environnement de son processus (le sien, donc lisible).
+            let image = g
+                .chemin
+                .as_deref()
+                .filter(|c| cfg!(target_os = "linux") && appimage(c, &montages))
+                .and_then(|_| g.liste.iter().find_map(|(c, _)| c.pid))
+                .and_then(|pid| std::fs::read(format!("/proc/{pid}/environ")).ok())
+                .and_then(|e| image_appimage(&e));
+            let signes = signes(g.chemin.as_deref(), &g.liste, &montages, image.as_deref());
             Programme {
                 pire: signes.iter().map(|(n, _)| *n).filter(|n| *n > Niveau::Info).max(),
                 nom: g.programme.clone().unwrap_or_default(),
@@ -870,7 +895,7 @@ mod tests {
         };
         let nom = "lb-140-82-112-4-iad.github.com".to_string();
         assert_eq!(
-            signes(firefox.chemin.as_deref(), &[(&firefox, Some(&nom))], ""),
+            signes(firefox.chemin.as_deref(), &[(&firefox, Some(&nom))], "", None),
             Vec::new()
         );
         let piege = Connexion {
@@ -878,7 +903,7 @@ mod tests {
             port: 4444,
             ..firefox.clone()
         };
-        let s = signes(piege.chemin.as_deref(), &[(&piege, None)], "");
+        let s = signes(piege.chemin.as_deref(), &[(&piege, None)], "", None);
         let niveaux: Vec<Niveau> = s.iter().map(|(n, _)| *n).collect();
         assert_eq!(niveaux, [Niveau::Eleve, Niveau::Eleve, Niveau::Eleve, Niveau::Info]);
         // Un jeu en UDP sur un port quelconque : rien à dire.
@@ -887,10 +912,13 @@ mod tests {
             udp: true,
             ..firefox.clone()
         };
-        assert_eq!(signes(jeu.chemin.as_deref(), &[(&jeu, Some(&nom))], ""), Vec::new());
+        assert_eq!(
+            signes(jeu.chemin.as_deref(), &[(&jeu, Some(&nom))], "", None),
+            Vec::new()
+        );
         let tcp = Connexion { port: 61234, ..firefox };
         assert_eq!(
-            signes(tcp.chemin.as_deref(), &[(&tcp, Some(&nom))], "")[0].0,
+            signes(tcp.chemin.as_deref(), &[(&tcp, Some(&nom))], "", None)[0].0,
             Niveau::Moyen
         );
     }
@@ -903,7 +931,7 @@ mod tests {
     fn programme_du_systeme_mis_a_jour() {
         let c = Connexion::vers(ip("140.82.112.4"), 443);
         let nom = "github.com".to_string();
-        let s = signes(Some("/usr/bin/env (deleted)"), &[(&c, Some(&nom))], "");
+        let s = signes(Some("/usr/bin/env (deleted)"), &[(&c, Some(&nom))], "", None);
         assert_eq!(s.iter().map(|(n, _)| *n).collect::<Vec<_>>(), [Niveau::Info]);
     }
 
@@ -916,14 +944,14 @@ mod tests {
         std::fs::write(&repose, b"n'importe quoi").unwrap();
         let efface = format!("{} (deleted)", repose.display());
         let c = Connexion::vers(ip("140.82.112.4"), 443);
-        let s = signes(Some(&efface), &[(&c, None)], "");
+        let s = signes(Some(&efface), &[(&c, None)], "", None);
         assert_eq!(
             s.iter().map(|(n, _)| *n).take(2).collect::<Vec<_>>(),
             [Niveau::Eleve, Niveau::Eleve]
         );
         std::fs::remove_dir_all(&dossier).unwrap();
         // Plus rien à sa place : effacé pour de bon.
-        let s = signes(Some(&efface), &[(&c, None)], "");
+        let s = signes(Some(&efface), &[(&c, None)], "", None);
         assert_eq!(s[0].0, Niveau::Eleve);
     }
 
@@ -940,6 +968,29 @@ mod tests {
 
     // Une AppImage tourne depuis son image montée dans /tmp/.mount_* : pas un programme lancé d'un dossier temporaire.
     // Un simple dossier de ce nom, lui, n'est pas une image montée.
+    /// Une AppImage montée se juge d'après son image (variable APPIMAGE de son environnement) : lancée depuis les
+    /// Téléchargements, elle le dit ; rangée dans ~/Applications, rien à dire.
+    #[test]
+    fn appimage_jugee_d_apres_son_image() {
+        let montages = "ArtCraft.AppImage /tmp/.mount_ArtCraXk2Pq fuse.ArtCraft.AppImage ro,nosuid,nodev 0 0\n";
+        let monte = "/tmp/.mount_ArtCraXk2Pq/usr/bin/artcraft";
+        let c = Connexion::vers(ip("140.82.112.4"), 443);
+        let nom = "github.com".to_string();
+        let telechargee = "/home/alice/Downloads/ArtCraft.AppImage";
+        let niveaux = |image| {
+            signes(Some(monte), &[(&c, Some(&nom))], montages, image)
+                .iter()
+                .map(|(n, _)| *n)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(niveaux(Some(telechargee)), [Niveau::Eleve]);
+        assert_eq!(niveaux(Some("/home/alice/Applications/ArtCraft.AppImage")), []);
+        assert_eq!(niveaux(None), []);
+        let environ = b"HOME=/home/alice\0APPIMAGE=/home/alice/Downloads/ArtCraft.AppImage\0APPDIR=/tmp/.mount_x\0";
+        assert_eq!(image_appimage(environ).as_deref(), Some(telechargee));
+        assert_eq!(image_appimage(b"HOME=/home/alice\0"), None);
+    }
+
     #[test]
     fn appimage_montee() {
         let montages = "/dev/nvme0n1p2 / btrfs rw 0 0\n\
