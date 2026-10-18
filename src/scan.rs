@@ -579,6 +579,19 @@ pub fn fabricant(mac: &str) -> Option<String> {
     [9, 7, 6].iter().find_map(|&n| nom_du_bloc(&hex, n)).map(str::to_string)
 }
 
+/// Fabricant noté dans la base des appareils, redit dans la langue de l'interface : celui d'une adresse MAC
+/// aléatoire est écrit dans la langue du scan qui l'a noté (« random MAC » au milieu d'un écran en français).
+pub fn fabricant_traduit(note: &str) -> &str {
+    if matches!(
+        note,
+        "MAC aléatoire (téléphone/tablette ?)" | "random MAC (phone/tablet?)"
+    ) {
+        tr!("MAC aléatoire (téléphone/tablette ?)", "random MAC (phone/tablet?)")
+    } else {
+        note
+    }
+}
+
 /// Nom du Wi-Fi auquel on est connecté, pour reconnaître le réseau dans la base (« Salon », « Chez Max »…).
 pub fn nom_wifi() -> Option<String> {
     #[cfg(target_os = "linux")]

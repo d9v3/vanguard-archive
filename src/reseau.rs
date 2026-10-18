@@ -150,7 +150,8 @@ struct AppareilConnu {
 
 impl AppareilConnu {
     fn titre(&self) -> String {
-        [self.surnom.as_deref(), self.nom.as_deref(), self.fabricant.as_deref()]
+        let fabricant = self.fabricant.as_deref().map(scan::fabricant_traduit);
+        [self.surnom.as_deref(), self.nom.as_deref(), fabricant]
             .into_iter()
             .flatten()
             .collect::<Vec<_>>()
@@ -1216,6 +1217,15 @@ mod tests {
         assert!(parse_ports("80,abc").is_err());
         assert!(parse_ports("0").is_err());
         assert!(parse_ports("100-10").is_err());
+    }
+
+    #[test]
+    fn absent_dans_la_langue_du_jour() {
+        // Noté par un scan en anglais, montré dans un écran en français.
+        let note = r#"{"ip":"10.0.0.4","nom":null,"fabricant":"random MAC (phone/tablet?)","ports":[]}"#;
+        let a: AppareilConnu = serde_json::from_str(note).unwrap();
+        assert_eq!(a.titre(), "MAC aléatoire (téléphone/tablette ?)");
+        assert_eq!(scan::fabricant_traduit("Intel Corporate"), "Intel Corporate");
     }
 
     #[test]
