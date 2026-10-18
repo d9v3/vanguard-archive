@@ -137,13 +137,15 @@ pub fn dns_principal(v4: &[&str], v6: &[&str]) -> Result<Changement, String> {
     })
 }
 
+/// La ruche de toute la machine (HKLM) ou celle du compte (HKCU).
+fn ruche(machine: bool) -> RegKey {
+    RegKey::predef(if machine { HKEY_LOCAL_MACHINE } else { HKEY_CURRENT_USER })
+}
+
 fn lire_valeur(racine: Racine, chemin: &str, nom: &str) -> Valeur {
-    let predef = if racine == Racine::Hklm {
-        HKEY_LOCAL_MACHINE
-    } else {
-        HKEY_CURRENT_USER
-    };
-    let cle = RegKey::predef(predef).open_subkey_with_flags(chemin, KEY_READ).ok()?;
+    let cle = ruche(racine == Racine::Hklm)
+        .open_subkey_with_flags(chemin, KEY_READ)
+        .ok()?;
     if let Ok(d) = cle.get_value::<u32, _>(nom) {
         return Some(format!("dword:{d}"));
     }
@@ -170,6 +172,12 @@ fn demarrage(n: u32) -> Option<&'static str> {
         4 => Some("Disabled"),
         _ => None,
     }
+}
+
+/// Retire une valeur du compte. Déjà absente : rien à faire, c'est réussi.
+fn retirer_valeur(hkcu: &RegKey, chemin: &str, nom: &str) -> bool {
+    hkcu.open_subkey_with_flags(chemin, KEY_SET_VALUE | KEY_QUERY_VALUE)
+        .map_or(true, |k| k.delete_value(nom).is_ok() || k.get_raw_value(nom).is_err())
 }
 
 fn chemin_lisible(racine: Racine, chemin: &str) -> String {
@@ -212,13 +220,8 @@ impl Changement {
             Changement::Demarrage {
                 machine, liste, nom, ..
             } => {
-                let predef = if *machine {
-                    HKEY_LOCAL_MACHINE
-                } else {
-                    HKEY_CURRENT_USER
-                };
                 // Clé ou valeur absente : le programme est activé, comme Windows le compte.
-                let valeur = RegKey::predef(predef)
+                let valeur = ruche(*machine)
                     .open_subkey_with_flags(format!(r"{APPROUVES}\{liste}"), KEY_READ)
                     .ok()
                     .and_then(|k| k.get_raw_value(nom).ok());
@@ -369,10 +372,7 @@ impl Changement {
         let hkcu = RegKey::predef(HKEY_CURRENT_USER);
         match self {
             Changement::Registre { chemin, nom, .. } => match v.and_then(decoder) {
-                // Déjà absente : rien à faire, c'est réussi.
-                None => hkcu
-                    .open_subkey_with_flags(chemin, KEY_SET_VALUE | KEY_QUERY_VALUE)
-                    .map_or(true, |k| k.delete_value(nom).is_ok() || k.get_raw_value(nom).is_err()),
+                None => retirer_valeur(&hkcu, chemin, nom),
                 Some(lue) => {
                     let Ok((k, _)) = hkcu.create_subkey(chemin) else {
                         return false;
@@ -398,9 +398,7 @@ impl Changement {
             } => {
                 let chemin = format!(r"{APPROUVES}\{liste}");
                 match v.filter(|h| !h.is_empty()) {
-                    None => hkcu
-                        .open_subkey_with_flags(&chemin, KEY_SET_VALUE | KEY_QUERY_VALUE)
-                        .map_or(true, |k| k.delete_value(nom).is_ok() || k.get_raw_value(nom).is_err()),
+                    None => retirer_valeur(&hkcu, &chemin, nom),
                     Some(h) => {
                         let Some(o) = octets(h) else {
                             return false;
@@ -510,10 +508,9 @@ pub fn au_demarrage() -> Vec<Programme> {
     const RUN32: &str = r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Run";
     // Une seule heure pour tout l'écran : la valeur écrite pour désactiver, comme le Gestionnaire des tâches.
     let desactivee = valeur_desactivee(std::time::SystemTime::now());
-    let racine = |machine: bool| RegKey::predef(if machine { HKEY_LOCAL_MACHINE } else { HKEY_CURRENT_USER });
     // Les états notés par Windows, nom en minuscules (le registre ne distingue pas la casse) → octets.
     let etats = |machine: bool, liste: &str| -> std::collections::HashMap<String, String> {
-        racine(machine)
+        ruche(machine)
             .open_subkey_with_flags(format!(r"{APPROUVES}\{liste}"), KEY_READ)
             .map(|k| {
                 k.enum_values()
@@ -525,7 +522,7 @@ pub fn au_demarrage() -> Vec<Programme> {
     };
     let mut l = Vec::new();
     for (machine, chemin, liste) in [(false, RUN, "Run"), (true, RUN, "Run"), (true, RUN32, "Run32")] {
-        let Ok(cle) = racine(machine).open_subkey_with_flags(chemin, KEY_READ) else {
+        let Ok(cle) = ruche(machine).open_subkey_with_flags(chemin, KEY_READ) else {
             continue;
         };
         let notes = etats(machine, liste);
@@ -583,20 +580,13 @@ pub fn au_demarrage() -> Vec<Programme> {
 /// Applique des lots de changements (un lot par réglage) et dit lesquels ont réussi. La fenêtre administrateur passe
 /// d'abord, point de restauration en tête : refusée, rien n'est changé, pas même dans le compte de la personne.
 pub fn ecrire(lots: &[Vec<(&Changement, Valeur)>]) -> Vec<bool> {
-    let strategie_du_compte = lots.iter().flatten().any(|(c, _)| {
-        matches!(
-            c,
-            Changement::Registre {
-                racine: Racine::HkcuStrategie,
-                ..
-            }
-        )
-    });
-    let sid = if strategie_du_compte {
-        crate::reparer::sid_de_la_personne()
-    } else {
-        None
-    };
+    // Le SID de la personne ne sert (et n'est lu) que pour une stratégie de son compte.
+    let sid = lots
+        .iter()
+        .flatten()
+        .any(|(c, _)| matches!(c, Changement::Registre { racine, .. } if *racine == Racine::HkcuStrategie))
+        .then(crate::reparer::sid_de_la_personne)
+        .flatten();
     let admin: Vec<(usize, Vec<String>)> = lots
         .iter()
         .enumerate()

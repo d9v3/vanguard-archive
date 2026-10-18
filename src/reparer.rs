@@ -3,13 +3,9 @@
 //! Chaque réparation est montrée (pourquoi, durée, commandes) puis confirmée avant d'être lancée ; celles qui
 //! modifient le système proposent d'abord un point de restauration.
 
-#[cfg(windows)]
-use std::fmt::Write;
 use std::net::IpAddr;
 
 use crate::machine;
-#[cfg(windows)]
-use crate::trw;
 use crate::ui::*;
 
 pub struct Reparation {
@@ -227,21 +223,30 @@ fn constat_hosts(detournees: &[(String, String)]) -> String {
     trf!("fichier hosts : {}", "hosts file: {}", resume_redirections(detournees))
 }
 
-/// La fin de « Navigation détournée » sous Linux et macOS : un point de restauration si le fichier hosts change,
-/// « rien à faire » sans commande.
-#[cfg(unix)]
-fn finir_navigation(mut r: Reparation, commandes: Vec<String>, hosts: bool) -> Reparation {
-    r.restauration = hosts;
-    if commandes.is_empty() {
-        r.inutile = Some(
-            tr!(
-                "ni redirection dans le fichier hosts, ni proxy imposé",
-                "no redirection in the hosts file, no forced proxy"
-            )
-            .into(),
-        );
+/// « Navigation détournée », sur chaque système : `pourquoi` dit ce qu'elle fait et ce qui a été trouvé.
+fn navigation_detournee(pourquoi: String, commandes: Vec<String>) -> Reparation {
+    let titre = tr!(
+        "Navigation détournée (proxy, fichier hosts)",
+        "Hijacked browsing (proxy, hosts file)"
+    );
+    Reparation {
+        commandes,
+        ..rep(titre, pourquoi, tr!("quelques secondes", "a few seconds"), &[])
     }
-    r.commandes = commandes;
+}
+
+/// « Navigation détournée » sous Linux et macOS : un point de restauration si le fichier hosts change, « rien à
+/// faire » sans commande.
+#[cfg(unix)]
+fn finir_navigation(pourquoi: String, commandes: Vec<String>, hosts: bool) -> Reparation {
+    let mut r = navigation_detournee(pourquoi, commandes);
+    r.restauration = hosts;
+    if r.commandes.is_empty() {
+        r.inutile = Some(String::from(tr!(
+            "ni redirection dans le fichier hosts, ni proxy imposé",
+            "no redirection in the hosts file, no forced proxy"
+        )));
+    }
     r
 }
 
@@ -307,20 +312,15 @@ fn navigation() -> Reparation {
             format!("{TROUVER_PROXY} /etc/environment /etc/profile /etc/profile.d/* ~/.profile ~/.bashrc ~/.bash_profile ~/.zshrc ~/.config/environment.d/*; true"),
         );
     }
-    let r = rep(
-        tr!(
-            "Navigation détournée (proxy, fichier hosts)",
-            "Hijacked browsing (proxy, hosts file)"
-        ),
+    finir_navigation(
         trf!(
             "Met en commentaire les lignes du fichier hosts qui envoient un site vers une adresse d'Internet (une copie est gardée) et coupe le proxy imposé. Les listes de blocage (0.0.0.0) et les appareils du réseau local ne sont pas touchés. Trouvé : {}.",
             "Comments out the hosts file lines that send a site to an Internet address (a copy is kept) and turns off the forced proxy. Block lists (0.0.0.0) and local network devices are left alone. Found: {}.",
             constats.join(" ; ")
         ),
-        tr!("quelques secondes", "a few seconds"),
-        &[],
-    );
-    finir_navigation(r, commandes, !detournees.is_empty())
+        commandes,
+        !detournees.is_empty(),
+    )
 }
 
 /// ClamAV absent : où le menu propose de l'installer (Antivirus et protection › analyse rapide ou complète).
@@ -477,13 +477,10 @@ fn pare_feu(e: &EtatPareFeu) -> Reparation {
         return r;
     }
     if matches!(e.ufw, Ufw::Protege) {
-        r.inutile = Some(
-            tr!(
-                "ufw est actif et refuse les connexions entrantes",
-                "ufw is running and refuses incoming connections"
-            )
-            .into(),
-        );
+        r.inutile = Some(String::from(tr!(
+            "ufw est actif et refuse les connexions entrantes",
+            "ufw is running and refuses incoming connections"
+        )));
         return r;
     }
     if matches!(e.ufw, Ufw::Absent) {
@@ -505,13 +502,10 @@ fn pare_feu(e: &EtatPareFeu) -> Reparation {
             return r;
         }
         let Some(g) = e.gestion else {
-            r.inutile = Some(
-                tr!(
-                    "aucun pare-feu, et gestionnaire de paquets non reconnu : installe ufw avec ta distribution",
-                    "no firewall, and package manager not recognized: install ufw with your distribution"
-                )
-                .into(),
-            );
+            r.inutile = Some(String::from(tr!(
+                "aucun pare-feu, et gestionnaire de paquets non reconnu : installe ufw avec ta distribution",
+                "no firewall, and package manager not recognized: install ufw with your distribution"
+            )));
             return r;
         };
         r.commandes.push(g.installer("ufw"));
@@ -602,7 +596,6 @@ pub fn liste() -> Vec<Reparation> {
     let systemd = std::path::Path::new("/run/systemd/system").is_dir();
     let mut l = Vec::new();
 
-    // Réseau
     let mut reseau = if service_actif("NetworkManager") {
         vec!["sudo systemctl restart NetworkManager"]
     } else if service_actif("systemd-networkd") {
@@ -629,12 +622,10 @@ pub fn liste() -> Vec<Reparation> {
     l.push(navigation());
     l.push(antivirus(systemd));
 
-    // Paquets cassés
     if let Some(g) = gestion {
         l.push(paquets_casses(g, atomique, machine::linux::omarchy()));
     }
 
-    // Santé des disques
     let installer_smart = gestion.map(|g| g.installer("smartmontools")).unwrap_or_default();
     let mut disque = vec![];
     if !present("smartctl") && !installer_smart.is_empty() {
@@ -660,13 +651,11 @@ pub fn liste() -> Vec<Reparation> {
         &disque,
     ));
 
-    // Place
     l.push(disque_plein());
 
     if !systemd {
         return l;
     }
-    // Services
     l.push(rep(
         tr!("Services en échec", "Failed services"),
         tr!("Montre les services qui ont planté, avec leurs dernières erreurs, puis remet leur compteur à zéro.", "Shows the services that crashed, with their latest errors, then resets their counter."),
@@ -680,7 +669,6 @@ pub fn liste() -> Vec<Reparation> {
 
     l.push(pare_feu(&EtatPareFeu::lire(gestion)));
 
-    // Heure
     l.push(rep(
         tr!("Heure fausse", "Wrong time"),
         tr!(
@@ -759,20 +747,15 @@ fn navigation_macos() -> Reparation {
             ));
         }
     }
-    let r = rep(
-        tr!(
-            "Navigation détournée (proxy, fichier hosts)",
-            "Hijacked browsing (proxy, hosts file)"
-        ),
+    finir_navigation(
         trf!(
             "Met en commentaire les lignes du fichier hosts qui envoient un site vers une adresse d'Internet (une copie est gardée) et coupe les proxys réglés dans le réseau. Les listes de blocage (0.0.0.0) et les appareils du réseau local ne sont pas touchés. Trouvé : {}.",
             "Comments out the hosts file lines that send a site to an Internet address (a copy is kept) and turns off the proxies set in the network settings. Block lists (0.0.0.0) and local network devices are left alone. Found: {}.",
             constats.join(" ; ")
         ),
-        tr!("quelques secondes", "a few seconds"),
-        &[],
-    );
-    finir_navigation(r, commandes, !detournees.is_empty())
+        commandes,
+        !detournees.is_empty(),
+    )
 }
 
 #[cfg(target_os = "macos")]
@@ -801,7 +784,6 @@ pub fn liste() -> Vec<Reparation> {
     l.push(r);
     l.push(navigation_macos());
 
-    // Pare-feu
     let actif = crate::commande::lancer(std::process::Command::new(PARE_FEU).arg("--getglobalstate"), 5)
         .is_some_and(|r| r.sortie.contains("enabled"));
     let mut feu = rep(
@@ -841,18 +823,14 @@ pub fn liste() -> Vec<Reparation> {
             )];
         }
         None => {
-            av.inutile = Some(
-                tr!(
-                    "ClamAV n'est pas installé : l'analyse antivirus propose de l'installer",
-                    "ClamAV is not installed: the antivirus scan offers to install it"
-                )
-                .into(),
-            );
+            av.inutile = Some(String::from(tr!(
+                "ClamAV n'est pas installé : l'analyse antivirus propose de l'installer",
+                "ClamAV is not installed: the antivirus scan offers to install it"
+            )));
         }
     }
     l.push(av);
 
-    // Homebrew en erreur
     if let Some(brew) = machine::macos::homebrew() {
         l.push(rep(
             tr!("Homebrew en erreur", "Homebrew failing"),
@@ -869,7 +847,6 @@ pub fn liste() -> Vec<Reparation> {
         ));
     }
 
-    // Disque
     l.push(rep(
         tr!("Disque : santé et erreurs", "Disk: health and errors"),
         tr!(
@@ -884,7 +861,6 @@ pub fn liste() -> Vec<Reparation> {
     ));
     l.push(disque_plein());
 
-    // Heure
     l.push(rep(
         tr!("Heure fausse", "Wrong time"),
         tr!(
@@ -977,38 +953,30 @@ fn navigation(etat: Option<&EtatWindows>) -> Reparation {
             commandes.push("netsh winhttp reset proxy".into());
         }
     }
-    let mut r = rep(
-        tr!(
-            "Navigation détournée (proxy, fichier hosts)",
-            "Hijacked browsing (proxy, hosts file)"
-        ),
+    let mut r = navigation_detournee(
         trf!(
             "Met en commentaire les lignes du fichier hosts qui envoient un site vers une adresse d'Internet (une copie est gardée) et coupe le proxy imposé. Les listes de blocage (0.0.0.0) et les appareils du réseau local ne sont pas touchés. En entreprise, le proxy peut être voulu. Trouvé : {}.",
             "Comments out the hosts file lines that send a site to an Internet address (a copy is kept) and turns off the forced proxy. Block lists (0.0.0.0) and local network devices are left alone. In a company, the proxy may be intended. Found: {}.",
             constats.join(" ; ")
         ),
-        tr!("quelques secondes", "a few seconds"),
-        &[],
+        commandes,
     );
-    if commandes.is_empty() {
-        r.inutile = Some(if etat.is_some() {
+    if r.commandes.is_empty() {
+        r.inutile = Some(String::from(if etat.is_some() {
             tr!(
                 "ni redirection dans le fichier hosts, ni proxy imposé",
                 "no redirection in the hosts file, no forced proxy"
             )
-            .into()
         } else {
             tr!(
                 "aucune redirection dans le fichier hosts (réglages du proxy non lus)",
                 "no redirection in the hosts file (proxy settings not read)"
             )
-            .into()
-        });
+        }));
     } else {
-        commandes.push("ipconfig /flushdns".into());
+        r.commandes.push("ipconfig /flushdns".into());
         r.restauration = true;
     }
-    r.commandes = commandes;
     r
 }
 
@@ -1028,17 +996,13 @@ fn pare_feu(etat: Option<&EtatWindows>) -> Reparation {
     );
     match etat {
         Some(e) if e.profils > 0 && e.parefeu_coupe.is_empty() => {
-            r.inutile = Some(
-                tr!(
-                    "le pare-feu Windows est actif sur tous les profils",
-                    "the Windows firewall is on for every profile"
-                )
-                .into(),
-            );
+            r.inutile = Some(String::from(tr!(
+                "le pare-feu Windows est actif sur tous les profils",
+                "the Windows firewall is on for every profile"
+            )));
         }
         Some(e) if e.profils > 0 => {
-            let _ = trw!(
-                r.pourquoi,
+            r.pourquoi += &trf!(
                 " Coupé pour : {}. Si un pare-feu tiers le remplace, ne rien faire.",
                 " Off for: {}. If a third-party firewall replaces it, do nothing.",
                 e.parefeu_coupe

@@ -343,17 +343,13 @@ impl Changement {
     /// L'identité stable d'un réglage de démarrage (« autostart|chemin », « systemd|service »), notée dans
     /// l'historique.
     pub fn identite_demarrage(&self) -> Option<String> {
-        match self {
-            Changement::Demarrage {
-                entree: Entree::Autostart(p),
-                ..
-            } => Some(format!("autostart|{}", p.display())),
-            Changement::Demarrage {
-                entree: Entree::Service(u),
-                ..
-            } => Some(format!("systemd|{u}")),
-            _ => None,
-        }
+        let Changement::Demarrage { entree, .. } = self else {
+            return None;
+        };
+        Some(match entree {
+            Entree::Autostart(p) => format!("autostart|{}", p.display()),
+            Entree::Service(u) => format!("systemd|{u}"),
+        })
     }
 
     /// Le réglage de démarrage rebâti d'après son identité notée, pour l'annuler. La note ne doit viser qu'un fichier
@@ -449,36 +445,32 @@ impl Changement {
                 None => trf!("{fichier} : ligne {cle} retirée", "{fichier}: line {cle} removed"),
             },
             Changement::Dns { .. } => decrire_dns(v),
-            Changement::Demarrage {
-                entree: Entree::Autostart(p),
-                ..
-            } => {
-                let f = court(p);
-                match v.and_then(|v| v.strip_prefix('+')) {
-                    Some(t) if champ(t, "Hidden").is_some_and(|h| h.eq_ignore_ascii_case("true")) => {
-                        trf!(
-                            "{f} : Hidden=true, ne se lance plus",
-                            "{f}: Hidden=true, no longer starts"
-                        )
+            Changement::Demarrage { entree, .. } => match entree {
+                Entree::Autostart(p) => {
+                    let f = court(p);
+                    match v.and_then(|v| v.strip_prefix('+')) {
+                        Some(t) if champ(t, "Hidden").is_some_and(|h| h.eq_ignore_ascii_case("true")) => {
+                            trf!(
+                                "{f} : Hidden=true, ne se lance plus",
+                                "{f}: Hidden=true, no longer starts"
+                            )
+                        }
+                        Some(_) => trf!("{f} : remis comme avant", "{f}: put back as before"),
+                        None => trf!(
+                            "{f} : retiré, l'entrée du système revient",
+                            "{f}: removed, the system entry comes back"
+                        ),
                     }
-                    Some(_) => trf!("{f} : remis comme avant", "{f}: put back as before"),
-                    None => trf!(
-                        "{f} : retiré, l'entrée du système revient",
-                        "{f}: removed, the system entry comes back"
-                    ),
                 }
-            }
-            Changement::Demarrage {
-                entree: Entree::Service(u),
-                ..
-            } => format!(
-                "systemctl --user {} {u}",
-                match v {
-                    Some("disabled") => "disable",
-                    Some("enabled") => "enable",
-                    _ => "?",
-                }
-            ),
+                Entree::Service(u) => format!(
+                    "systemctl --user {} {u}",
+                    match v {
+                        Some("disabled") => "disable",
+                        Some("enabled") => "enable",
+                        _ => "?",
+                    }
+                ),
+            },
         }
     }
 
@@ -486,9 +478,7 @@ impl Changement {
     fn commande(&self, v: Option<&str>) -> Option<String> {
         Some(match self {
             Changement::Unite { nom, .. } => match v? {
-                "enabled" => format!("sudo systemctl enable --now {nom}"),
-                "disabled" => format!("sudo systemctl disable --now {nom}"),
-                "masked" => format!("sudo systemctl mask --now {nom}"),
+                e @ ("enabled" | "disabled" | "masked") => format!("sudo systemctl {} --now {nom}", etat_unite(e)),
                 // « static », « indirect » : pas un état qu'on choisit, rien à remettre.
                 _ => return None,
             },
@@ -556,25 +546,16 @@ impl Changement {
                     oui_non(ignore6)
                 )
             }
-            // Écrit par Gardien lui-même (`ecrire_ici`).
-            Changement::Demarrage {
-                entree: Entree::Autostart(_),
-                ..
-            } => return None,
-            // Sans « --now » : le service tourne jusqu'à la fin de la session, il ne repart simplement plus.
-            Changement::Demarrage {
-                entree: Entree::Service(u),
-                ..
-            } => {
-                if !unite_valide(u) {
-                    return None;
-                }
-                match v? {
-                    "enabled" => format!("systemctl --user enable {}", shell(u)),
-                    "disabled" => format!("systemctl --user disable {}", shell(u)),
+            Changement::Demarrage { entree, .. } => match entree {
+                // Écrit par Gardien lui-même (`ecrire_ici`).
+                Entree::Autostart(_) => return None,
+                // Sans « --now » : le service tourne jusqu'à la fin de la session, il ne repart simplement plus.
+                Entree::Service(u) => match v? {
+                    "enabled" if unite_valide(u) => format!("systemctl --user enable {}", shell(u)),
+                    "disabled" if unite_valide(u) => format!("systemctl --user disable {}", shell(u)),
                     _ => return None,
-                }
-            }
+                },
+            },
         })
     }
 

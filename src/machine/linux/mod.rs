@@ -33,15 +33,13 @@ pub fn omarchy() -> bool {
 
 /// Commande pour installer un outil manquant sur cette distribution (texte d'aide).
 pub fn commande_installation(paquet: &str) -> String {
-    Paquets::detecter().map_or_else(
-        || {
-            trf!(
-                "installe « {paquet} » avec ta distribution",
-                "install “{paquet}” with your distribution"
-            )
-        },
-        |g| g.installer(paquet),
-    )
+    match Paquets::detecter() {
+        Some(g) => g.installer(paquet),
+        None => trf!(
+            "installe « {paquet} » avec ta distribution",
+            "install “{paquet}” with your distribution"
+        ),
+    }
 }
 
 /// Ubuntu ou une dérivée (Mint, Pop!_OS, Zorin…) : quelques paquets n'y ont pas le nom de Debian.
@@ -150,20 +148,18 @@ impl Paquets {
     /// Commande d'installation non interactive. Sous Omarchy, son propre outil (il vérifie ensuite que chaque paquet
     /// est bien là) ; sur un Arch pur, pacman. Sur un système atomique, l'ajout se fait à l'image suivante.
     pub fn installer(self, paquets: &str) -> String {
-        match (self, atomique()) {
-            (Paquets::Dnf, Some(Atomique::RpmOstree)) => {
-                return format!(
-                    "sudo rpm-ostree install --idempotent {paquets} && echo \"{}\"",
-                    tr!("Redémarre pour l'utiliser.", "Reboot to use it.")
-                );
-            }
+        let image = match (self, atomique()) {
+            (Paquets::Dnf, Some(Atomique::RpmOstree)) => Some("sudo rpm-ostree install --idempotent"),
             (Paquets::Zypper, Some(Atomique::Transactionnel)) => {
-                return format!(
-                    "sudo transactional-update --non-interactive pkg install {paquets} && echo \"{}\"",
-                    tr!("Redémarre pour l'utiliser.", "Reboot to use it.")
-                );
+                Some("sudo transactional-update --non-interactive pkg install")
             }
-            _ => {}
+            _ => None,
+        };
+        if let Some(outil) = image {
+            return format!(
+                "{outil} {paquets} && echo \"{}\"",
+                tr!("Redémarre pour l'utiliser.", "Reboot to use it.")
+            );
         }
         match self {
             Paquets::Pacman if omarchy() => format!("omarchy pkg add {paquets}"),
@@ -217,18 +213,12 @@ impl Paquets {
             }
             Paquets::Apt | Paquets::Dnf | Paquets::Zypper => {
                 // dpkg --verify et rpm -V répondent 1 quand ils trouvent une différence : c'est une réponse, pas une erreur.
-                let mut cmd = if self == Paquets::Apt {
-                    Command::new("dpkg")
+                let (outil, option) = if self == Paquets::Apt {
+                    ("dpkg", "--verify")
                 } else {
-                    Command::new("rpm")
+                    ("rpm", "-V")
                 };
-                cmd.args(if self == Paquets::Apt {
-                    ["--verify", paquet]
-                } else {
-                    ["-V", paquet]
-                })
-                .env("LC_ALL", "C");
-                let verif = crate::commande::lancer(&mut cmd, 60)
+                let verif = crate::commande::lancer(Command::new(outil).args([option, paquet]).env("LC_ALL", "C"), 60)
                     .filter(|r| matches!(r.code, Some(0 | 1)))
                     .map(|r| r.sortie);
                 fichiers
@@ -304,17 +294,6 @@ pub(crate) fn ufw_actif() -> bool {
 }
 
 fn pare_feu() -> Constat {
-    let installer_ufw = format!(
-        "command -v ufw >/dev/null || {}",
-        Paquets::detecter().map_or(
-            tr!(
-                "echo 'Installe ufw avec ta distribution'",
-                "echo 'Install ufw with your distribution'"
-            )
-            .to_string(),
-            |g| g.installer("ufw")
-        )
-    );
     if !systemd() {
         return impossible("Pare-feu", tr!("systemd absent", "systemd missing"));
     }
@@ -387,6 +366,13 @@ fn pare_feu() -> Constat {
             ),
         )
     } else {
+        let installer_ufw = match Paquets::detecter() {
+            Some(g) => g.installer("ufw"),
+            None => String::from(tr!(
+                "echo 'Installe ufw avec ta distribution'",
+                "echo 'Install ufw with your distribution'"
+            )),
+        };
         alerte(
             "Pare-feu",
             Niveau::Eleve,
@@ -401,7 +387,7 @@ fn pare_feu() -> Constat {
                 "Turn ufw on: block incoming connections, allow outgoing ones"
             ),
             &[
-                &installer_ufw,
+                &format!("command -v ufw >/dev/null || {installer_ufw}"),
                 "sudo ufw default deny incoming",
                 "sudo ufw default allow outgoing",
                 "sudo ufw --force enable",
@@ -411,7 +397,6 @@ fn pare_feu() -> Constat {
     }
 }
 
-/// Services qui écoutent sur le réseau (pas seulement en local), en TCP et en UDP.
 /// Adresses joignables depuis un autre appareil : celles des vraies interfaces (Wi-Fi, Ethernet, VPN),
 /// au format de `ss` (IPv6 entre crochets). Les ponts virtuels (Docker, libvirt…) ne sont joignables
 /// que depuis cette machine.
@@ -443,12 +428,13 @@ pub(crate) fn service_du_cgroup(ligne: &str) -> Option<String> {
     (!nom.is_empty()).then(|| nom.to_string())
 }
 
+/// Services qui écoutent sur le réseau (pas seulement en local), en TCP et en UDP.
 /// `ufw` : le pare-feu actif est ufw. Avec firewalld ou nftables, « ufw deny » ne bloquerait rien
 /// (ou s'ajouterait à un ufw arrêté) tout en s'affichant « fait » : on ne le propose pas.
 fn ports_ecoute(pare_feu_actif: bool, ufw: bool) -> Vec<Constat> {
     let adresses = adresses_exposees();
     let mut constats = Vec::new();
-    let mut vus = Vec::new();
+    let mut vus = std::collections::HashSet::new();
     let mut deja_conseille = std::collections::HashSet::new();
     let bloques = super::ports_bloques();
     // « e » : le groupe de contrôle (« cgroup:/system.slice/passim.service ») nomme le service même quand le programme,
@@ -479,10 +465,9 @@ fn ports_ecoute(pare_feu_actif: bool, ufw: bool) -> Vec<Constat> {
             let i = info_port(port);
             // UDP : client DHCP (68) et ports éphémères anonymes (sockets clientes), ce ne sont pas des services.
             let bruit = proto == "udp" && (port == 68 || (port >= 32768 && i.service == crate::risk::inconnu()));
-            if !expose || bruit || vus.contains(&(proto, port)) {
+            if !expose || bruit || !vus.insert((proto, port)) {
                 continue;
             }
-            vus.push((proto, port));
             let service = service_du_cgroup(ligne);
             let programme = c
                 .get(5)
@@ -490,7 +475,6 @@ fn ports_ecoute(pare_feu_actif: bool, ufw: bool) -> Vec<Constat> {
                 .or(service.as_deref())
                 .unwrap_or(tr!("programme inconnu (root ?)", "unknown program (root?)"));
             let (niveau, constat) = super::port_expose(port, proto, &i, programme, pare_feu_actif);
-            let deny = format!("sudo ufw deny {port}/{proto}");
             let cle = format!("{port}/{proto}");
             if ufw && bloques.contains(&cle) {
                 constats.push(alerte(
@@ -532,7 +516,7 @@ fn ports_ecoute(pare_feu_actif: bool, ufw: bool) -> Vec<Constat> {
                 },
                 _ if niveau >= Niveau::Moyen && ufw => {
                     constat
-                        .corriger(trf!("Bloquer le port {port}/{proto} dans le pare-feu", "Block port {port}/{proto} in the firewall"), &[&deny])
+                        .corriger(trf!("Bloquer le port {port}/{proto} dans le pare-feu", "Block port {port}/{proto} in the firewall"), &[&format!("sudo ufw deny {cle}")])
                         .bloquant(cle)
                 }
                 _ => constat,
@@ -582,11 +566,8 @@ fn partie_globale_sshd(texte: &str) -> String {
                 .next()
                 .is_some_and(|m| m.eq_ignore_ascii_case("match"))
         })
-        .fold(String::new(), |mut t, l| {
-            t.push_str(l);
-            t.push('\n');
-            t
-        })
+        .flat_map(|l| [l, "\n"])
+        .collect()
 }
 
 /// Première valeur d'un réglage de sshd, en minuscules. Le nom et la valeur se séparent par des espaces ou par un
@@ -659,8 +640,7 @@ fn ssh_serveur() -> Constat {
             ),
         );
     };
-    let valeur = |cle: &str| valeur_sshd(&conf, cle);
-    if valeur("PermitRootLogin").as_deref() == Some("yes") {
+    if valeur_sshd(&conf, "PermitRootLogin").as_deref() == Some("yes") {
         return alerte(
             "SSH",
             Niveau::Eleve,
@@ -962,7 +942,7 @@ fn verrouillage_ecran() -> Option<Constat> {
         .filter_map(|p| std::fs::read_to_string(p).ok())
         .filter_map(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
         .find_map(|v| v["idle"]["lock"].as_u64())
-    } else if bureau.contains("gnome") || bureau.contains("cinnamon") || bureau.contains("x-cinnamon") {
+    } else if bureau.contains("gnome") || bureau.contains("cinnamon") {
         let racine = if bureau.contains("cinnamon") {
             "org.cinnamon.desktop"
         } else {
@@ -1105,7 +1085,6 @@ fn sauvegardes() -> Constat {
     let maintenant = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| u64::try_from(d.as_micros()).unwrap_or(u64::MAX));
-    let jours = |dernier: u64| (maintenant.saturating_sub(dernier)) / 86_400_000_000;
     let toutes = minuteries();
     let vraies: Vec<_> = toutes.iter().filter(|t| type_sauvegarde(&t.0) == Some(true)).collect();
     let instantanes = toutes.iter().any(|t| type_sauvegarde(&t.0) == Some(false));
@@ -1140,7 +1119,7 @@ fn sauvegardes() -> Constat {
         args.insert(0, "--user");
     }
     let resultat = sortie("systemctl", &args).map(|r| r.trim().to_string());
-    let age = jours(*dernier);
+    let age = maintenant.saturating_sub(*dernier) / 86_400_000_000;
     let quand = if age == 0 {
         tr!("aujourd'hui", "today").to_string()
     } else {
@@ -1222,18 +1201,6 @@ fn processeur() -> Constat {
             ),
         );
     }
-    // Le microcode du fabricant corrige la plupart de ces failles ; le paquet change selon la distribution.
-    let amd = std::fs::read_to_string("/proc/cpuinfo").is_ok_and(|c| c.contains("AuthenticAMD"));
-    let paquet = match (Paquets::detecter(), amd) {
-        (Some(Paquets::Pacman), true) => Some("amd-ucode"),
-        (Some(Paquets::Pacman), false) => Some("intel-ucode"),
-        (Some(Paquets::Apt), true) => Some("amd64-microcode"),
-        (Some(Paquets::Apt), false) => Some("intel-microcode"),
-        (Some(Paquets::Dnf), _) => Some("microcode_ctl linux-firmware"),
-        (Some(Paquets::Zypper), true) => Some("ucode-amd"),
-        (Some(Paquets::Zypper), false) => Some("ucode-intel"),
-        (None, _) => None,
-    };
     let constat = alerte(
         "Processeur",
         Niveau::Moyen,
@@ -1243,22 +1210,33 @@ fn processeur() -> Constat {
             failles.join(", ")
         ),
     );
-    match (paquet, Paquets::detecter()) {
-        (Some(p), Some(g)) => constat.corriger(
-            tr!(
-                "Installer le microcode du fabricant (effectif après mise à jour du système et redémarrage)",
-                "Install the manufacturer's microcode (effective after a system update and a restart)"
-            ),
-            &[&g.installer(p)],
-        ),
-        _ => constat.manuel(
+    let Some(g) = Paquets::detecter() else {
+        return constat.manuel(
             tr!(
                 "Installer le microcode du fabricant et mettre le noyau à jour, puis redémarrer",
                 "Install the manufacturer's microcode and update the kernel, then restart"
             ),
             &[],
+        );
+    };
+    // Le microcode du fabricant corrige la plupart de ces failles ; le paquet change selon la distribution.
+    let amd = std::fs::read_to_string("/proc/cpuinfo").is_ok_and(|c| c.contains("AuthenticAMD"));
+    let paquet = match (g, amd) {
+        (Paquets::Pacman, true) => "amd-ucode",
+        (Paquets::Pacman, false) => "intel-ucode",
+        (Paquets::Apt, true) => "amd64-microcode",
+        (Paquets::Apt, false) => "intel-microcode",
+        (Paquets::Dnf, _) => "microcode_ctl linux-firmware",
+        (Paquets::Zypper, true) => "ucode-amd",
+        (Paquets::Zypper, false) => "ucode-intel",
+    };
+    constat.corriger(
+        tr!(
+            "Installer le microcode du fabricant (effectif après mise à jour du système et redémarrage)",
+            "Install the manufacturer's microcode (effective after a system update and a restart)"
         ),
-    }
+        &[&g.installer(paquet)],
+    )
 }
 
 fn services_en_echec() -> Constat {
