@@ -25,7 +25,7 @@ fn lanceur(nom: &str, pourquoi: &str, app: &str, cask: &str) -> Element {
     element(nom, pourquoi, Some(app_installee(app)), installer_cask(cask))
 }
 
-pub fn menu() {
+fn elements() -> Vec<Element> {
     let mut elements = Vec::new();
     if cfg!(target_arch = "aarch64") {
         elements.push(element(
@@ -95,9 +95,21 @@ pub fn menu() {
         compteur_metal(),
         vec!["defaults write -g MetalForceHudEnabled -bool YES".into()],
     ));
+    elements
+}
+
+pub fn menu() {
     trp!(
         "  {GRIS}Le Mode Jeu de macOS s'active tout seul quand un jeu passe en plein écran.{RESET}",
         "  {GRIS}macOS Game Mode turns on by itself when a game goes full screen.{RESET}"
     );
-    proposer(tr!("Gaming (macOS)", "Gaming (macOS)"), &elements);
+    proposer(tr!("Gaming (macOS)", "Gaming (macOS)"), &elements(), false);
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn liste_du_mac() {
+        super::super::tests::tient_dans_la_liste(&super::elements());
+    }
 }

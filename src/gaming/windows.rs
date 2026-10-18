@@ -7,8 +7,6 @@ use std::fmt::Write;
 
 use serde::Deserialize;
 
-#[cfg(test)]
-use super::lire_choix;
 use super::{Element, element, proposer};
 use crate::machine;
 use crate::trw;
@@ -131,8 +129,8 @@ fn composants(e: &Etat) -> Vec<Element> {
         },
         element(
             tr!(
-                "DirectX 9 à 11 : anciennes bibliothèques (juin 2010)",
-                "DirectX 9 to 11: old libraries (June 2010)"
+                "DirectX 9 à 11 (bibliothèques de 2010)",
+                "DirectX 9 to 11 (2010 libraries)"
             ),
             tr!(
                 "d3dx9, d3dx10, d3dx11, XAudio2 et XInput anciens : Windows ne les fournit pas, beaucoup de jeux d'avant 2016 en ont besoin.",
@@ -219,9 +217,13 @@ fn composants(e: &Etat) -> Vec<Element> {
     l
 }
 
-fn reglages(e: &Etat) -> Vec<Element> {
+/// Réglages de Windows pour jouer. Ceux du compte (`sid` : celui de la personne) s'écrivent dans sa ruche : la
+/// fenêtre administrateur qui les applique peut s'ouvrir sous un autre compte.
+fn reglages(e: &Etat, sid: Option<&str>) -> Vec<Element> {
     const PERF: &str = "8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c";
-    let preferences = r"HKCU:\Software\Microsoft\DirectX\UserGpuPreferences";
+    let compte = |chemin: &str| crate::reparer::hkcu_de_la_personne(sid, chemin);
+    let preferences = compte(r"Software\Microsoft\DirectX\UserGpuPreferences");
+    let souris = compte(r"Control Panel\Mouse");
     let mut l = vec![
         element(
             tr!("Mode Jeu activé", "Game Mode on"),
@@ -230,11 +232,11 @@ fn reglages(e: &Etat) -> Vec<Element> {
                 "Windows gives priority to the game and holds back updates and notifications while you play."
             ),
             Some(e.mode_jeu != Some(0)),
-            vec![dword(r"HKCU:\Software\Microsoft\GameBar", "AutoGameModeEnabled", 1)],
+            vec![dword(&compte(r"Software\Microsoft\GameBar"), "AutoGameModeEnabled", 1)],
         ),
         element(
             tr!(
-                "Planification GPU à accélération matérielle",
+                "Planification GPU matérielle (HAGS)",
                 "Hardware-accelerated GPU scheduling"
             ),
             tr!(
@@ -249,19 +251,16 @@ fn reglages(e: &Etat) -> Vec<Element> {
             )],
         ),
         element(
-            tr!(
-                "Enregistrement Xbox en arrière-plan coupé",
-                "Xbox background recording off"
-            ),
+            tr!("Capture Xbox en arrière-plan coupée", "Xbox background recording off"),
             tr!(
                 "La capture de jeu de la Xbox Game Bar consomme un peu de carte graphique et de disque. La Game Bar (Win+G) reste disponible.",
                 "Xbox Game Bar game capture uses a bit of graphics card and disk. The Game Bar (Win+G) stays available."
             ),
             Some(e.dvr == Some(0) && e.capture != Some(1)),
             vec![
-                dword(r"HKCU:\System\GameConfigStore", "GameDVR_Enabled", 0),
+                dword(&compte(r"System\GameConfigStore"), "GameDVR_Enabled", 0),
                 dword(
-                    r"HKCU:\Software\Microsoft\Windows\CurrentVersion\GameDVR",
+                    &compte(r"Software\Microsoft\Windows\CurrentVersion\GameDVR"),
                     "AppCaptureEnabled",
                     0,
                 ),
@@ -274,11 +273,9 @@ fn reglages(e: &Etat) -> Vec<Element> {
                 "“Enhance pointer precision” changes the distance traveled depending on how fast you move: aiming becomes unpredictable. Takes effect at the next sign-in."
             ),
             (!e.souris.is_empty()).then(|| e.souris == "0"),
-            vec![
-                r"Set-ItemProperty 'HKCU:\Control Panel\Mouse' -Name MouseSpeed -Value '0'".into(),
-                r"Set-ItemProperty 'HKCU:\Control Panel\Mouse' -Name MouseThreshold1 -Value '0'".into(),
-                r"Set-ItemProperty 'HKCU:\Control Panel\Mouse' -Name MouseThreshold2 -Value '0'".into(),
-            ],
+            ["MouseSpeed", "MouseThreshold1", "MouseThreshold2"]
+                .map(|nom| format!("Set-ItemProperty '{souris}' -Name {nom} -Value '0'"))
+                .into(),
         ),
     ];
     if e.windows11 {
@@ -296,10 +293,7 @@ fn reglages(e: &Etat) -> Vec<Element> {
         ));
     }
     let mut alimentation = element(
-        tr!(
-            "Mode d'alimentation « Performances élevées »",
-            "“High performance” power plan"
-        ),
+        tr!("Alimentation « Performances élevées »", "“High performance” power plan"),
         tr!(
             "Le processeur reste à pleine fréquence : moins de saccades quand le jeu varie beaucoup. Consomme plus au repos.",
             "The processor stays at full speed: fewer stutters when the game load changes a lot. Uses more power at idle."
@@ -329,30 +323,35 @@ pub(super) fn menu() {
         );
         return;
     };
-    titre("Gaming");
-    trp!(
-        "  1. Composants pour les jeux (Visual C++, DirectX, .NET, pilote graphique…)",
-        "  1. Components for games (Visual C++, DirectX, .NET, graphics driver…)"
-    );
-    trp!(
-        "  2. Réglages de Windows pour jouer",
-        "  2. Windows settings for gaming"
-    );
-    if !etat.winget {
-        trp!(
-            "\n  {GRIS}winget manque : le choix 1 ouvre le Microsoft Store (« Programme d'installation d'application »).{RESET}",
-            "\n  {GRIS}winget is missing: choice 1 opens the Microsoft Store (“App Installer”).{RESET}"
-        );
-    }
-    match demander(tr!("\nChoix (Entrée pour revenir) : ", "\nChoice (Enter to go back): ")).as_str() {
-        "1" if !etat.winget => machine::ouvrir("ms-windows-store://pdp/?ProductId=9NBLGGH4NNS1"),
-        "1" => proposer(
+    let note = (!etat.winget).then(|| {
+        trf!(
+            "  {GRIS}winget manque : le choix 1 ouvre sa page dans le Microsoft Store.{RESET}",
+            "  {GRIS}winget is missing: choice 1 opens its page in the Microsoft Store.{RESET}"
+        )
+    });
+    match super::choisir_liste(
+        (
+            tr!("Composants pour les jeux", "Components for games"),
+            tr!("Visual C++, DirectX, .NET…", "Visual C++, DirectX, .NET…"),
+        ),
+        (
+            tr!("Réglages de Windows pour jouer", "Windows settings for gaming"),
+            tr!("Mode Jeu, carte graphique, souris…", "Game Mode, graphics card, mouse…"),
+        ),
+        note,
+    )
+    .as_deref()
+    {
+        Some("1") if !etat.winget => machine::ouvrir("ms-windows-store://pdp/?ProductId=9NBLGGH4NNS1"),
+        Some("1") => proposer(
             tr!("Composants pour les jeux", "Components for games"),
             &composants(&etat),
+            false,
         ),
-        "2" => proposer(
+        Some("2") => proposer(
             tr!("Réglages de Windows pour jouer", "Windows settings for gaming"),
-            &reglages(&etat),
+            &reglages(&etat, crate::reparer::sid_de_la_personne().as_deref()),
+            true,
         ),
         _ => {}
     }
@@ -389,19 +388,31 @@ mod tests {
     }
 
     #[test]
-    fn reglages_et_choix() {
+    fn reglages_du_compte_dans_sa_ruche() {
         let e = etat_vide();
-        let l = reglages(&e);
+        let l = reglages(&e, Some("S-1-5-21-1-2-3-1001"));
         // Mode Jeu absent du registre = activé par défaut.
         assert_eq!(l[0].fait, Some(true));
         assert_eq!(l[3].fait, Some(false));
-        let alim = l.last().unwrap();
-        assert!(alim.deconseille.is_some());
-        // « tout » : ni ce qui est fait, ni le déconseillé.
-        let tout = lire_choix("tout", &l);
-        assert!(!tout.contains(&0) && !tout.contains(&(l.len() - 1)) && tout.contains(&3));
-        assert_eq!(lire_choix("1, 3 3 99 x", &l), vec![0, 2]);
-        assert_eq!(lire_choix("", &l), Vec::<usize>::new());
+        assert!(l.last().unwrap().deconseille.is_some());
+        // Ce qui est au compte de la personne va sous HKEY_USERS\<SID>, même par la fenêtre d'un autre administrateur ;
+        // ce qui est à la machine reste dans HKLM.
+        for el in &l[..4] {
+            for c in el
+                .commandes
+                .iter()
+                .filter(|c| c.contains("Registry::") || c.contains("HKCU:"))
+            {
+                assert!(
+                    c.contains(r"Registry::HKEY_USERS\S-1-5-21-1-2-3-1001\") && !c.contains("HKCU:"),
+                    "{c}"
+                );
+            }
+        }
+        assert!(l[1].commandes[0].contains(r"HKLM:\SYSTEM\CurrentControlSet\Control\GraphicsDrivers"));
+        assert!(reglages(&e, None)[0].commandes[0].contains(r"'HKCU:\Software\Microsoft\GameBar'"));
+        super::super::tests::tient_dans_la_liste(&l);
+        super::super::tests::tient_dans_la_liste(&composants(&e));
     }
 
     #[test]

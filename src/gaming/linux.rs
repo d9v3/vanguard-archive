@@ -46,9 +46,16 @@ pub(crate) fn present(cmd: &str) -> bool {
 pub(crate) fn installes(gestion: Paquets, paquets: &[&str]) -> bool {
     paquets.iter().all(|p| match gestion {
         Paquets::Pacman => reussit("pacman", &["-Q", p]),
-        Paquets::Apt => reussit("dpkg", &["-s", p]),
+        Paquets::Apt => crate::commande::lancer(Command::new("dpkg-query").args(["-W", "-f=${Status}", p]), 20)
+            .is_some_and(|r| r.code == Some(0) && installe_selon_dpkg(&r.sortie)),
         Paquets::Dnf | Paquets::Zypper => reussit("rpm", &["-q", p]),
     })
+}
+
+/// État d'un paquet selon dpkg (« install ok installed »). Un paquet retiré dont la configuration reste
+/// (« deinstall ok config-files ») est connu de dpkg, qui répond sans erreur à « dpkg -s » : il n'est pas installé.
+fn installe_selon_dpkg(statut: &str) -> bool {
+    statut.trim().ends_with(" installed")
 }
 
 /// Application Flatpak installée (pour l'utilisateur ou pour le système) ?
@@ -103,15 +110,17 @@ fn composants(gestion: Paquets) -> Vec<Element> {
                 "multilib repository (32-bit packages)"
             ),
             tr!(
-                "Steam et la plupart des jeux Windows ont besoin des bibliothèques 32 bits.",
-                "Steam and most Windows games need the 32-bit libraries."
+                "Steam et la plupart des jeux Windows ont besoin des bibliothèques 32 bits. Le système se met à jour en même temps, comme Arch le demande.",
+                "Steam and most Windows games need the 32-bit libraries. The system is updated at the same time, as Arch requires."
             ),
             Some(multilib_actif(
                 &std::fs::read_to_string("/etc/pacman.conf").unwrap_or_default(),
             )),
             vec![
                 r"sudo sed -i '/^#\[multilib\]/,/^#Include/ s/^#//' /etc/pacman.conf".into(),
-                "sudo pacman -Sy".into(),
+                // « pacman -Sy » seul, suivi des installations, ferait une mise à jour partielle : des paquets neufs sur
+                // des bibliothèques anciennes, ce qu'Arch interdit. La base relue s'accompagne de la mise à jour.
+                if crate::machine::linux::omarchy() { "omarchy update" } else { "sudo pacman -Syu" }.into(),
             ],
         )),
         Paquets::Apt => l.push(element(
@@ -374,10 +383,7 @@ fn reglages() -> Vec<Element> {
     let module_present = reussit("modinfo", &["ntsync"]);
     if module_present || Path::new("/dev/ntsync").exists() {
         l.push(element(
-            tr!(
-                "Module ntsync (Wine et Proton plus rapides)",
-                "ntsync module (faster Wine and Proton)"
-            ),
+            tr!("Module ntsync (Wine plus rapide)", "ntsync module (faster Wine)"),
             tr!(
                 "Le noyau gère la synchronisation de Wine et Proton récents : moins de saccades dans certains jeux.",
                 "The kernel handles synchronization for recent Wine and Proton: less stutter in some games."
@@ -400,26 +406,35 @@ pub(super) fn menu() {
         );
         return;
     };
-    titre("Gaming");
-    trp!(
-        "  1. Paquets de base pour jouer (Steam, pilotes Vulkan, GameMode, MangoHud, Wine, Lutris…)",
-        "  1. Base packages for gaming (Steam, Vulkan drivers, GameMode, MangoHud, Wine, Lutris…)"
-    );
-    trp!("  2. Réglages du système pour jouer", "  2. System settings for gaming");
-    match demander(tr!("\nChoix (Entrée pour revenir) : ", "\nChoice (Enter to go back): ")).as_str() {
-        "1" => {
+    match super::choisir_liste(
+        (
+            tr!("Paquets de base pour jouer", "Base packages for gaming"),
+            tr!("Steam, Vulkan, GameMode, Wine…", "Steam, Vulkan, GameMode, Wine…"),
+        ),
+        (
+            tr!("Réglages du système pour jouer", "System settings for gaming"),
+            "vm.max_map_count, ntsync",
+        ),
+        None,
+    )
+    .as_deref()
+    {
+        Some("1") => {
             trp!(
                 "  {GRIS}Lecture des paquets installés…{RESET}",
                 "  {GRIS}Reading installed packages…{RESET}"
             );
+            // Dépôt ajouté, mise à jour complète, architecture i386 : un point de restauration d'abord.
             proposer(
                 tr!("Paquets de base pour jouer", "Base packages for gaming"),
                 &composants(gestion),
+                true,
             );
         }
-        "2" => proposer(
+        Some("2") => proposer(
             tr!("Réglages du système pour jouer", "System settings for gaming"),
             &reglages(),
+            true,
         ),
         _ => {}
     }
@@ -428,6 +443,37 @@ pub(super) fn menu() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn paquet_retire_pas_compte_installe() {
+        assert!(installe_selon_dpkg("install ok installed"));
+        assert!(installe_selon_dpkg("hold ok installed\n"));
+        assert!(!installe_selon_dpkg("deinstall ok config-files"));
+        assert!(!installe_selon_dpkg("install ok half-installed"));
+        assert!(!installe_selon_dpkg(""));
+    }
+
+    /// Chaque ligne tient dans la liste à cocher, et chaque commande est du shell valide.
+    #[test]
+    fn listes_de_cette_machine() {
+        let mut l = reglages();
+        if let Some(g) = Paquets::detecter() {
+            l.extend(composants(g));
+        }
+        super::super::tests::tient_dans_la_liste(&l);
+        for c in l.iter().flat_map(|el| &el.commandes) {
+            assert!(
+                Command::new("bash").args(["-n", "-c", c]).status().unwrap().success(),
+                "{c}"
+            );
+        }
+        // La mise à jour partielle d'Arch (« pacman -Sy » sans « u ») n'est jamais proposée.
+        assert!(
+            !l.iter()
+                .flat_map(|el| &el.commandes)
+                .any(|c| c.contains("pacman -Sy") && !c.contains("-Syu"))
+        );
+    }
 
     #[test]
     fn depot_multilib() {
