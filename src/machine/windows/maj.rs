@@ -11,7 +11,8 @@ struct MiseAJour {
     titre: String,
 }
 
-/// Lignes « type|gravité|titre » écrites par la recherche Windows Update (type 2 = pilote).
+/// Lignes « type|gravité|titre » écrites par la recherche Windows Update (type 2 = pilote). Le titre d'un pilote est
+/// écrit par son fabricant : prêt à montrer, comme les noms de programmes et de périphériques de ce fichier.
 fn lire_windows_update(sortie: &str) -> Vec<MiseAJour> {
     sortie
         .lines()
@@ -21,7 +22,7 @@ fn lire_windows_update(sortie: &str) -> Vec<MiseAJour> {
             (!titre.is_empty()).then(|| MiseAJour {
                 pilote: genre == "2",
                 importante: matches!(gravite, "Critical" | "Important"),
-                titre: titre.to_string(),
+                titre: crate::ui::affichable(titre),
             })
         })
         .collect()
@@ -223,7 +224,8 @@ fn lire_winget(sortie: &str) -> Option<Vec<(String, String)>> {
         if id.is_empty() || id.contains(' ') || source.is_empty() || source.contains(' ') {
             break;
         }
-        noms.push((champ(l, 0), id));
+        // Le nom, choisi par l'éditeur du programme, est seulement montré ; l'identifiant sert à la mise à jour.
+        noms.push((crate::ui::affichable(&champ(l, 0)), id));
     }
     Some(noms)
 }
@@ -318,10 +320,11 @@ fn peripheriques(lectures: Option<&str>) -> Constat {
         // Le périphérique fw_cfg des VM QEMU n'a jamais de pilote, et n'en a pas besoin (vu dans la VM de test).
         .filter(|(_, nom)| !nom.contains("QEMU0002"))
         .map(|(code, nom)| {
+            // Le nom vient du pilote, ou de l'appareil branché lui-même : montré rendu inoffensif.
             let nom = if nom.trim().is_empty() {
-                tr!("Périphérique inconnu", "Unknown device")
+                tr!("Périphérique inconnu", "Unknown device").to_string()
             } else {
-                nom.trim()
+                crate::ui::affichable(nom.trim())
             };
             match code {
                 "28" | "1" => trf!("{nom} (pas de pilote)", "{nom} (no driver)"),
@@ -399,6 +402,7 @@ fn cartes_graphiques(lectures: Option<&str>) -> Vec<Constat> {
             let mut c = l.splitn(3, '|');
             let (nom, version, jours) = (c.next()?.trim(), c.next()?.trim(), c.next()?.trim().parse::<u32>().ok());
             let (outil, lien) = pilote_fabricant(nom)?;
+            let (nom, version) = (crate::ui::affichable(nom), crate::ui::affichable(version));
             let manuel = trf!("Mettre le pilote à jour avec {outil}", "Update the driver with {outil}");
             let ouvrir = format!("Start-Process {lien}");
             Some(match jours {
@@ -535,6 +539,15 @@ Windows Terminal Microsoft.WindowsTerminal 1.24.12741.0  1.25.2733.0   winget\r\
             "Mise à jour de la plateforme Microsoft Defender | KB4052623"
         );
         assert!(l[2].pilote && !l[2].importante);
+        // Le titre d'un pilote, écrit par son fabricant, et le nom d'un programme : rendus inoffensifs.
+        let l = lire_windows_update("2||Pilote\x1b]52;c;eA==\x07\x1b[2K\u{202e}\n");
+        assert_eq!(l[0].titre, "Pilote�]52;c;eA==��[2K�");
+        let tableau = "Name             Id         Version Available Source\r\n\
+                       -----------------------------------------------------\r\n\
+                       Outil\x1b[8m\u{2066}       Essai.Outil 1.0     1.1       winget\r\n";
+        let p = lire_winget(tableau).unwrap();
+        assert_eq!(p[0].1, "Essai.Outil");
+        assert!(!crate::ui::contient_un_piege(&p[0].0), "{}", p[0].0);
     }
 
     #[test]
@@ -546,5 +559,21 @@ Windows Terminal Microsoft.WindowsTerminal 1.24.12741.0  1.25.2733.0   winget\r\
         assert_eq!(section(Some(l), "PNP"), Some(vec!["28|PCI\\VEN_1AF4&DEV_1045"]));
         assert_eq!(section(Some(l), "GPU"), Some(vec![]));
         assert_eq!(section(None, "REB"), None);
+    }
+
+    /// Le nom d'un périphérique (donné par l'appareil branché ou par son pilote) et ceux d'une carte graphique :
+    /// piégés, ils arrivent inoffensifs dans les constats.
+    #[test]
+    fn noms_de_materiel_pieges() {
+        let l = "PNP|28|Clavier\x1b]0;x\x07\u{202e}\r\nPNP_FIN\r\n\
+                 GPU|NVIDIA GeForce\x1b[8m|32.0\x1b[2K|400\r\nGPU_FIN\r\n";
+        let p = peripheriques(Some(l));
+        assert!(p.message.contains("Clavier�]0;x��"), "{}", p.message);
+        let g = cartes_graphiques(Some(l));
+        assert_eq!(g.len(), 1);
+        assert!(g[0].message.starts_with("NVIDIA GeForce�[8m"), "{}", g[0].message);
+        for c in std::iter::once(&p).chain(&g) {
+            assert!(!crate::ui::contient_un_piege(&c.message), "{}", c.message);
+        }
     }
 }

@@ -96,39 +96,63 @@ fn montrer(imprimantes: &[Imprimante]) {
         return;
     }
     for i in imprimantes {
-        let defaut = if i.par_defaut {
-            tr!(" (par défaut)", " (default)")
-        } else {
-            ""
-        };
-        if i.en_pause {
-            Etat::Mauvais.dire(&trf!("{}{defaut} : en pause.", "{}{defaut}: paused.", i.nom));
-        } else {
-            Etat::Bon.dire(&trf!("{}{defaut} : prête.", "{}{defaut}: ready.", i.nom));
+        for (etat, texte) in etat_de(i, repond) {
+            etat.dire(&texte);
         }
-        if !i.hote.is_empty() {
-            if repond(&i.hote) {
-                Etat::Bon.dire(&trf!(
+    }
+}
+
+/// Ce qui est dit d'une imprimante. Son nom et son adresse viennent de qui l'a installée, ou de l'imprimante elle-même
+/// quand elle s'annonce sur le réseau : montrés rendus inoffensifs ; ils restent tels quels pour l'essai `repond` et
+/// pour les commandes.
+fn etat_de(i: &Imprimante, repond: impl Fn(&str) -> bool) -> Vec<(Etat, String)> {
+    let mut lignes = Vec::new();
+    let defaut = if i.par_defaut {
+        tr!(" (par défaut)", " (default)")
+    } else {
+        ""
+    };
+    let (nom, hote) = (affichable(&i.nom), affichable(&i.hote));
+    if i.en_pause {
+        lignes.push((
+            Etat::Mauvais,
+            trf!("{}{defaut} : en pause.", "{}{defaut}: paused.", nom),
+        ));
+    } else {
+        lignes.push((Etat::Bon, trf!("{}{defaut} : prête.", "{}{defaut}: ready.", nom)));
+    }
+    if !i.hote.is_empty() {
+        if repond(&i.hote) {
+            lignes.push((
+                Etat::Bon,
+                trf!(
                     "Elle répond sur le réseau ({}).",
                     "It answers on the network ({}).",
-                    i.hote
-                ));
-            } else {
-                Etat::Mauvais.dire(&trf!(
+                    hote
+                ),
+            ));
+        } else {
+            lignes.push((
+                Etat::Mauvais,
+                trf!(
                     "Elle ne répond pas sur le réseau ({}) : éteinte, sur un autre Wi-Fi, ou son adresse a changé.",
                     "It does not answer on the network ({}): turned off, on another Wi-Fi, or its address changed.",
-                    i.hote
-                ));
-            }
-        }
-        if i.en_attente > 0 {
-            Etat::Mauvais.dire(&trf!(
-                "{} impression(s) en attente dans sa file.",
-                "{} print job(s) waiting in its queue.",
-                i.en_attente
+                    hote
+                ),
             ));
         }
     }
+    if i.en_attente > 0 {
+        lignes.push((
+            Etat::Mauvais,
+            trf!(
+                "{} impression(s) en attente dans sa file.",
+                "{} print job(s) waiting in its queue.",
+                i.en_attente
+            ),
+        ));
+    }
+    lignes
 }
 
 pub(super) fn imprimante() {
@@ -250,13 +274,15 @@ mod systeme {
         let imprimantes = imprimantes_lpstat(&lpstat(&["-p", "-d", "-v", "-o"]).unwrap_or_default());
         montrer(&imprimantes);
         for i in imprimantes.iter().filter(|i| i.en_pause) {
-            // Le nom vient de CUPS ; entre apostrophes, il reste un seul mot pour le shell.
+            // Le nom vient de CUPS ; entre apostrophes, il reste un seul mot pour le shell. Montré, il est rendu
+            // inoffensif.
             let nom = format!("'{}'", i.nom.replace('\'', r"'\''"));
+            let montre = affichable(&i.nom);
             if proposer(
-                &trf!("\n  Réactiver {} ? [o/N] : ", "\n  Re-enable {}? [y/N]: ", i.nom),
+                &trf!("\n  Réactiver {} ? [o/N] : ", "\n  Re-enable {}? [y/N]: ", montre),
                 &[format!("cupsenable {nom} || sudo cupsenable {nom}")],
             ) {
-                fait(&trf!("{} réactivée.", "{} re-enabled.", i.nom));
+                fait(&trf!("{} réactivée.", "{} re-enabled.", montre));
             }
         }
         if imprimantes.iter().any(|i| i.en_attente > 0)
@@ -365,5 +391,27 @@ mod tests {
         assert_eq!(hote("socket://imprimante.local:9100"), "imprimante.local");
         assert_eq!(hote("ipps://[fe80::1]:631/ipp/print"), "fe80::1");
         assert_eq!(hote("dnssd://HP%20LaserJet._ipp._tcp.local/"), "");
+    }
+
+    /// Une imprimante du réseau s'annonce avec le nom de son choix : piégé, il arrive inoffensif dans ce qui est dit
+    /// d'elle ; le nom tel quel reste pour la commande qui la réactive.
+    #[test]
+    fn nom_d_imprimante_piege() {
+        let i = Imprimante {
+            nom: "Salon\x1b]52;c;eA==\x07\x1b[2K\r\u{202e}".into(),
+            en_pause: true,
+            hote: "imprimante\x1b[8m.local".into(),
+            par_defaut: true,
+            ..Imprimante::default()
+        };
+        for repond in [true, false] {
+            let lignes = etat_de(&i, |_| repond);
+            assert_eq!(lignes.len(), 2);
+            for (_, texte) in &lignes {
+                assert!(!crate::ui::contient_un_piege(texte), "{texte}");
+            }
+            assert!(lignes[0].1.starts_with("Salon�]52;c;eA==��[2K��"), "{}", lignes[0].1);
+            assert_eq!(lignes[0].0, Etat::Mauvais);
+        }
     }
 }

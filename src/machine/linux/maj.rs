@@ -167,13 +167,7 @@ pub(super) fn autres_mises_a_jour() -> Vec<Constat> {
                     ),
                 ),
                 Some(v) => {
-                    let appareils: Vec<String> = v["Devices"]
-                        .as_array()
-                        .into_iter()
-                        .flatten()
-                        .filter(|d| d["Releases"].as_array().is_some_and(|r| !r.is_empty()))
-                        .filter_map(|d| d["Name"].as_str().map(str::to_string))
-                        .collect();
+                    let appareils = firmwares_proposes(&v);
                     if appareils.is_empty() {
                         ok(
                             "Firmware",
@@ -205,6 +199,18 @@ pub(super) fn autres_mises_a_jour() -> Vec<Constat> {
         }
     });
     constats
+}
+
+/// Appareils à qui fwupd propose un nouveau firmware (`fwupdmgr get-updates --json`). Le nom vient souvent de
+/// l'appareil lui-même (la chaîne que le fabricant d'une clé USB ou d'une souris y a gravée) : prêt à montrer.
+fn firmwares_proposes(v: &serde_json::Value) -> Vec<String> {
+    v["Devices"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|d| d["Releases"].as_array().is_some_and(|r| !r.is_empty()))
+        .filter_map(|d| d["Name"].as_str().map(crate::ui::affichable))
+        .collect()
 }
 
 /// Âge en jours de la liste des paquets d'apt, `None` si elle n'a jamais été téléchargée.
@@ -906,6 +912,16 @@ mod tests {
                 ("ancien".to_string(), vec!["7.3.0-arch1".to_string()]),
             ]
         );
+    }
+
+    /// Un appareil branché choisit le nom que fwupd rapporte : piégé, il arrive inoffensif dans le constat.
+    #[test]
+    fn firmware_d_un_appareil_piege() {
+        let v = serde_json::json!({"Devices": [
+            {"Name": "Souris\u{1b}]52;c;eA==\u{7}\u{1b}[2K\r\u{202e}", "Releases": [{"Version": "1.2"}]},
+            {"Name": "Disque", "Releases": []}
+        ]});
+        assert_eq!(firmwares_proposes(&v), ["Souris�]52;c;eA==��[2K��"]);
     }
 
     #[test]

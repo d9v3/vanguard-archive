@@ -27,7 +27,8 @@ fn genre(nom: &str) -> usize {
     }
 }
 
-/// `pactl list sinks` : les sorties (nom et description), lues en anglais (LC_ALL=C).
+/// `pactl list sinks` : les sorties (nom et description), lues en anglais (LC_ALL=C). La description vient souvent de
+/// l'appareil (le nom d'un casque Bluetooth) : prête à montrer. Le nom, qui sert à choisir la sortie, reste tel quel.
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 fn sorties_pactl(texte: &str) -> Vec<Sortie> {
     texte
@@ -40,9 +41,11 @@ fn sorties_pactl(texte: &str) -> Vec<Sortie> {
             };
             let nom = champ("Name:")?;
             Some(Sortie {
-                description: champ("Description:")
-                    .filter(|d| !d.is_empty())
-                    .unwrap_or_else(|| nom.clone()),
+                description: affichable(
+                    &champ("Description:")
+                        .filter(|d| !d.is_empty())
+                        .unwrap_or_else(|| nom.clone()),
+                ),
                 nom,
             })
         })
@@ -152,10 +155,11 @@ mod systeme {
             }
             return;
         };
-        let serveur = info
-            .lines()
-            .find_map(|l| l.strip_prefix("Server Name:"))
-            .map_or("PulseAudio", str::trim);
+        let serveur = affichable(
+            info.lines()
+                .find_map(|l| l.strip_prefix("Server Name:"))
+                .map_or("PulseAudio", str::trim),
+        );
         Etat::Bon.dire(&trf!("Service du son : {serveur}.", "Sound service: {serveur}."));
         let sorties = sorties_pactl(&pactl(&["list", "sinks"]).unwrap_or_default());
         let defaut = pactl(&["get-default-sink"]).unwrap_or_default().trim().to_string();
@@ -322,14 +326,18 @@ mod systeme {
         for l in etat.lines() {
             let c: Vec<&str> = l.trim().split('|').collect();
             match c[..] {
-                ["carte", nom, statut] => Etat::selon(statut == "OK").dire(&if statut == "OK" {
-                    trf!("Carte son : {nom}.", "Sound card: {nom}.")
-                } else {
-                    trf!(
-                        "Carte son en erreur : {nom} ({statut}).",
-                        "Sound card in error: {nom} ({statut})."
-                    )
-                }),
+                // Le nom d'une carte son vient de son pilote ou de l'appareil branché : montré rendu inoffensif.
+                ["carte", nom, statut] => {
+                    let (marche, nom, statut) = (statut == "OK", affichable(nom), affichable(statut));
+                    Etat::selon(marche).dire(&if marche {
+                        trf!("Carte son : {nom}.", "Sound card: {nom}.")
+                    } else {
+                        trf!(
+                            "Carte son en erreur : {nom} ({statut}).",
+                            "Sound card in error: {nom} ({statut})."
+                        )
+                    });
+                }
                 [service, statut] => {
                     let marche = statut == "Running";
                     arrete |= !marche;
@@ -401,5 +409,11 @@ mod tests {
             Some(50)
         );
         assert_eq!(volume_pactl("rien"), None);
+        // La description d'un casque Bluetooth vient de son nom, choisi par l'appareil : piégée, elle arrive
+        // inoffensive ; le nom de la sortie, qui sert à la choisir, reste tel quel.
+        let piege = "Sink #7\n\tName: bluez_output.00_1B_66_00_00_01.1\n\tDescription: Casque\x1b]52;c;eA==\x07\x1b[2K\r\u{202e}\n";
+        let s = sorties_pactl(piege);
+        assert_eq!(s[0].description, "Casque�]52;c;eA==��[2K��");
+        assert_eq!(s[0].nom, "bluez_output.00_1B_66_00_00_01.1");
     }
 }

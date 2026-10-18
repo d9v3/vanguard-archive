@@ -83,6 +83,38 @@ impl Fiche {
             self.series.push((quoi.to_string(), numero.trim().to_string()));
         }
     }
+
+    /// La fiche prête à montrer (écran et JSON) : chaque texte vient du système ou du matériel lui-même (un disque
+    /// branché dit son modèle, une barrette sa référence), rendu `affichable`. Appelé au bout de chaque lecture.
+    fn prete_a_montrer(mut self) -> Self {
+        let textes = [
+            &mut self.systeme,
+            &mut self.modele,
+            &mut self.carte_mere,
+            &mut self.bios,
+            &mut self.processeur,
+        ];
+        for t in textes {
+            *t = affichable(t);
+        }
+        for b in &mut self.barrettes {
+            for t in [&mut b.sorte, &mut b.fabricant, &mut b.reference, &mut b.emplacement] {
+                *t = affichable(t);
+            }
+        }
+        for g in &mut self.graphique {
+            (g.nom, g.pilote) = (affichable(&g.nom), affichable(&g.pilote));
+        }
+        for d in &mut self.disques {
+            for t in [&mut d.nom, &mut d.modele, &mut d.sorte] {
+                *t = affichable(t);
+            }
+        }
+        for (quoi, numero) in &mut self.series {
+            (*quoi, *numero) = (affichable(quoi), affichable(numero));
+        }
+        self
+    }
 }
 
 /// « fabricant modèle », sans répéter le fabricant quand le modèle le contient déjà (« LENOVO » + « LENOVO 21AH »).
@@ -319,7 +351,7 @@ fn lire() -> Fiche {
             nom,
         });
     }
-    f
+    f.prete_a_montrer()
 }
 
 /// Ce que lit le script PowerShell (Windows) : un objet JSON, aux champs du même nom que dans le script.
@@ -392,7 +424,7 @@ fn fiche_windows(l: LectureWindows) -> Fiche {
             nom,
         });
     }
-    f
+    f.prete_a_montrer()
 }
 
 #[cfg(windows)]
@@ -557,7 +589,7 @@ fn lire() -> Fiche {
             nom: disque,
         });
     }
-    f
+    f.prete_a_montrer()
 }
 
 fn taille(octets: u64) -> String {
@@ -850,6 +882,32 @@ mod tests {
                 ("Barrette DIMM 1".to_string(), "ABCD".to_string()),
                 ("Disque 2".to_string(), "WD-ESSAI".to_string())
             ]
+        );
+    }
+
+    /// Un disque branché dit son modèle, une barrette sa référence, le micrologiciel son fabricant : piégés, ils
+    /// arrivent inoffensifs à l'écran comme dans le JSON.
+    #[test]
+    fn fiche_aux_textes_pieges() {
+        let lecture: LectureWindows = serde_json::from_str(
+            r#"{"modele":"Essai\u001b]52;c;eA==\u0007","processeur":"CPU\u001b[2K\r",
+                "barrettes":[{"taille":1,"reference":"REF\u001b[8m","emplacement":"DIMM\u001b]0;t\u0007","serie":"X\u001b[1A"}],
+                "graphique":[{"nom":"Carte\u001b[2K","pilote":"1.2\u0007"}],
+                "disques":[{"nom":"1","modele":"Cle\u001b]52;c;eA==\u0007","taille":1,"bus":"USB","serie":"S\u001b[2K"}]}"#,
+        )
+        .unwrap();
+        let f = fiche_windows(lecture);
+        let json = serde_json::to_string(&f).unwrap();
+        assert!(
+            !json.contains("\\u001b") && !json.contains("\\u0007") && !json.contains("\\r"),
+            "{json}"
+        );
+        assert_eq!(f.modele, "Essai�]52;c;eA==�");
+        assert_eq!(f.disques[0].modele, "Cle�]52;c;eA==�");
+        assert!(
+            f.series
+                .iter()
+                .all(|(q, n)| !crate::ui::contient_un_piege(q) && !crate::ui::contient_un_piege(n))
         );
     }
 
