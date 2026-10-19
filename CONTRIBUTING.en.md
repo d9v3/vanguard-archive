@@ -71,6 +71,9 @@ Requirements: `rustup target add x86_64-unknown-linux-musl x86_64-pc-windows-gnu
 outils/deployer.sh     # builds Linux (musl, static) + Windows, installs locally, pushes to GitHub, updates the key
 ```
 
+Slow check? `GARDIEN_CHRONO=1 gardien machine --json >/dev/null` gives each check's time (they run at the same time:
+the slowest one makes the duration).
+
 Tests: `cargo test` (Linux, in a throwaway data folder: never the computer's real data); Windows tests under Wine
 (`cargo test --target x86_64-pc-windows-gnu` with a Wine runner); `cargo clippy --all-targets` on the four targets
 (Linux, Windows, `aarch64-apple-darwin`, `x86_64-apple-darwin`), in strict mode (pedantic), without any warning;

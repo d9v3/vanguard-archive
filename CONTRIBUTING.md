@@ -71,6 +71,9 @@ Prérequis : `rustup target add x86_64-unknown-linux-musl x86_64-pc-windows-gnu`
 outils/deployer.sh     # compile Linux (musl, statique) + Windows, installe en local, pousse sur GitHub, met à jour la clé
 ```
 
+Bilan lent ? `GARDIEN_CHRONO=1 gardien machine --json >/dev/null` donne le temps de chaque vérification (elles
+tournent en même temps : la plus lente fait la durée).
+
 Tests : `cargo test` (Linux, dans un dossier de données jetable : jamais les vraies données de l'ordinateur) ; tests
 Windows sous Wine (`cargo test --target x86_64-pc-windows-gnu` avec un lanceur Wine) ; `cargo clippy --all-targets`
 sur les quatre cibles (Linux, Windows, `aarch64-apple-darwin`, `x86_64-apple-darwin`), en mode strict (pedantic),

@@ -163,12 +163,33 @@ pub(crate) type Verification<'a> = Box<dyn FnOnce() -> Vec<Constat> + Send + 'a>
 /// Lance les vérifications en même temps (chacune attend surtout des commandes du système) et rend leurs constats
 /// dans l'ordre de la liste. Une vérification qui plante le dit, sans emporter les autres.
 fn en_parallele(verifications: Vec<Verification<'_>>) -> Vec<Constat> {
+    // GARDIEN_CHRONO : chaque vérification dit son temps sur la sortie d'erreur, pour trouver ce qui ralentit le bilan.
+    let chrono = std::env::var_os("GARDIEN_CHRONO").is_some();
     std::thread::scope(|s| {
-        let fils: Vec<_> = verifications.into_iter().map(|v| s.spawn(v)).collect();
+        let fils: Vec<_> = verifications
+            .into_iter()
+            .map(|v| {
+                s.spawn(move || {
+                    let debut = std::time::Instant::now();
+                    let constats = v();
+                    (constats, debut.elapsed())
+                })
+            })
+            .collect();
         fils.into_iter()
-            .flat_map(|f| {
-                f.join()
-                    .unwrap_or_else(|_| vec![impossible("Audit", tr!("erreur interne", "internal error"))])
+            .enumerate()
+            .flat_map(|(i, f)| {
+                let (constats, duree) = f.join().unwrap_or_else(|_| {
+                    (
+                        vec![impossible("Audit", tr!("erreur interne", "internal error"))],
+                        std::time::Duration::ZERO,
+                    )
+                });
+                if chrono {
+                    let quoi = constats.first().map_or("(rien)", |c| c.categorie);
+                    eprintln!("chrono {i:>2} {:>6} ms  {quoi}", duree.as_millis());
+                }
+                constats
             })
             .collect()
     })
