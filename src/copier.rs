@@ -920,6 +920,227 @@ pub fn menu() {
     commande(None);
 }
 
+// ───────────────────────────── Vérifier une copie (test de restauration) ─────────────────────────────
+
+/// Combien de fichiers relire : assez pour voir un disque qui perd des données, sans relire des heures de vidéos.
+const ECHANTILLON: usize = 40;
+
+/// Le résultat d'une relecture.
+#[derive(Debug, Default, PartialEq, Eq)]
+struct Relecture {
+    identiques: usize,
+    /// L'original a changé depuis la copie (normal pour un document qu'on continue d'écrire).
+    modifies_depuis: usize,
+    /// Plus d'original à comparer (supprimé ou déplacé depuis) : la copie, elle, s'est relue.
+    sans_original: usize,
+    /// La copie diffère de l'original sans qu'il ait changé, ou ne se relit pas : le disque perd des données.
+    abimes: Vec<(PathBuf, String)>,
+}
+
+/// Les dossiers copiés, d'après le compte rendu : (nom du sous-dossier dans la copie, dossier d'origine).
+fn sources_du_compte_rendu(texte: &str) -> Vec<(String, PathBuf)> {
+    texte
+        .lines()
+        .skip(2)
+        .take_while(|l| !l.trim().is_empty())
+        .filter_map(|l| {
+            let (_, chemin) = l.split_once(" : ")?;
+            let chemin = PathBuf::from(chemin.trim());
+            let nom = nom_permis(&chemin.file_name()?.to_string_lossy());
+            Some((nom, chemin))
+        })
+        .collect()
+}
+
+/// Les fichiers d'une copie (sans le compte rendu, le témoin ni un fichier partiel), relatifs à son dossier.
+fn fichiers_de_la_copie(dossier: &Path) -> Vec<PathBuf> {
+    let mut trouves = Vec::new();
+    let mut a_voir = vec![PathBuf::new()];
+    while let Some(relatif) = a_voir.pop() {
+        for e in std::fs::read_dir(dossier.join(&relatif))
+            .into_iter()
+            .flatten()
+            .flatten()
+        {
+            let nom = e.file_name().to_string_lossy().into_owned();
+            let chemin = relatif.join(&nom);
+            let Ok(meta) = std::fs::symlink_metadata(e.path()) else {
+                continue;
+            };
+            if meta.is_dir() {
+                a_voir.push(chemin);
+            } else if meta.is_file()
+                && !(relatif.as_os_str().is_empty() && (nom == COMPTE_RENDU || nom == TEMOIN))
+                && !nom.ends_with(PARTIEL)
+            {
+                trouves.push(chemin);
+            }
+            if trouves.len() >= 200_000 {
+                return trouves;
+            }
+        }
+    }
+    trouves.sort();
+    trouves
+}
+
+/// Au plus `n` fichiers répartis sur toute la copie (le premier, le dernier, et à intervalles réguliers entre).
+fn echantillon(fichiers: &[PathBuf], n: usize) -> Vec<&PathBuf> {
+    if fichiers.len() <= n {
+        return fichiers.iter().collect();
+    }
+    (0..n).map(|i| &fichiers[i * (fichiers.len() - 1) / (n - 1)]).collect()
+}
+
+/// Relit les fichiers choisis de la copie, en contournant le cache, et compare chacun à son original.
+fn relire(
+    dossier: &Path,
+    choisis: &[&PathBuf],
+    sources: &[(String, PathBuf)],
+    copie_le: std::time::SystemTime,
+) -> Relecture {
+    let mut r = Relecture::default();
+    for relatif in choisis {
+        let copie = dossier.join(relatif);
+        let relue = match empreinte_relue(&copie) {
+            Ok(h) => h,
+            Err(e) => {
+                r.abimes.push(((*relatif).clone(), e.to_string()));
+                continue;
+            }
+        };
+        let mut morceaux = relatif.components();
+        let premier = morceaux.next().map(|c| c.as_os_str().to_string_lossy().into_owned());
+        let original = premier
+            .and_then(|p| sources.iter().find(|(nom, _)| *nom == p))
+            .map(|(_, source)| source.join(morceaux.as_path()));
+        let Some(original) = original.filter(|o| o.is_file()) else {
+            r.sans_original += 1;
+            continue;
+        };
+        match empreinte(&original) {
+            Ok(h) if h == relue => r.identiques += 1,
+            Ok(_)
+                if std::fs::metadata(&original)
+                    .and_then(|m| m.modified())
+                    .is_ok_and(|m| m > copie_le) =>
+            {
+                r.modifies_depuis += 1;
+            }
+            Ok(_) => r.abimes.push((
+                (*relatif).clone(),
+                tr!(
+                    "différent de l'original, qui n'a pas changé",
+                    "different from the original, which has not changed"
+                )
+                .to_string(),
+            )),
+            Err(_) => r.sans_original += 1,
+        }
+    }
+    r
+}
+
+/// La copie à vérifier : `chemin` s'il en est une, sinon la plus récente qu'il contient.
+fn copie_a_verifier(chemin: &Path) -> Option<PathBuf> {
+    let est_une_copie = |p: &Path| {
+        let nom = p.file_name().unwrap_or_default().to_string_lossy();
+        PREFIXES.iter().any(|pre| nom.starts_with(pre)) && p.join(COMPTE_RENDU).is_file()
+    };
+    if est_une_copie(chemin) {
+        return Some(chemin.to_path_buf());
+    }
+    std::fs::read_dir(chemin)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| est_une_copie(p))
+        .max()
+}
+
+/// « Vérifier une copie » (menu Données, `gardien verifier-copie [dossier]`) : un test de restauration. Des fichiers
+/// répartis sur toute la copie sont relus sur le disque, cache contourné, et comparés à leur original. Rien n'est
+/// écrit ni effacé.
+pub fn verifier_copie(destination: Option<&Path>) {
+    println!();
+    cadre(
+        &format!("{ACCENT}{}{RESET}", tr!("VÉRIFIER UNE COPIE", "CHECK A COPY")),
+        &format!("{GRIS}{}{RESET}", tr!("relue et comparée", "read back and compared")),
+    );
+    let racine = match destination {
+        Some(d) => Some(d.to_path_buf()),
+        None => choisir_disque(),
+    };
+    let Some(racine) = racine else { return };
+    let Some(dossier) = copie_a_verifier(&racine) else {
+        trp!(
+            "  ✖ Aucune copie de Gardien ici ({}) : « Copier mes fichiers » en fait une.",
+            "  ✖ No Gardien copy here ({}): “Copy my files” makes one.",
+            chemin_affichable(&racine)
+        );
+        return;
+    };
+    let compte_rendu = dossier.join(COMPTE_RENDU);
+    let sources = sources_du_compte_rendu(&std::fs::read_to_string(&compte_rendu).unwrap_or_default());
+    let copie_le = std::fs::metadata(&compte_rendu)
+        .and_then(|m| m.modified())
+        .unwrap_or(std::time::UNIX_EPOCH);
+    let fichiers = fichiers_de_la_copie(&dossier);
+    let choisis = echantillon(&fichiers, ECHANTILLON);
+    trp!(
+        "  Copie : {}
+  {} fichier(s) relu(s) sur {}, répartis sur toute la copie…",
+        "  Copy: {}
+  {} file(s) read back out of {}, spread over the whole copy…",
+        chemin_affichable(&dossier),
+        choisis.len(),
+        fichiers.len()
+    );
+    if dossier.join(TEMOIN).is_file() {
+        trp!(
+            "  {}⚠{RESET} Cette copie n'est pas finie : relance « Copier mes fichiers » vers ce disque pour la reprendre.",
+            "  {}⚠{RESET} This copy is not finished: run “Copy my files” to this disk again to resume it.",
+            couleur(crate::risk::Niveau::Moyen)
+        );
+    }
+    let r = relire(&dossier, &choisis, &sources, copie_le);
+    println!();
+    for (relatif, raison) in &r.abimes {
+        println!(
+            "  {}✖{RESET} {} : {}",
+            couleur(crate::risk::Niveau::Eleve),
+            chemin_affichable(relatif),
+            affichable(raison)
+        );
+    }
+    trp!(
+        "  {} identique(s) à l'original, {} original(aux) modifié(s) depuis la copie, {} sans original à comparer.",
+        "  {} identical to the original, {} original(s) changed since the copy, {} without an original to compare.",
+        r.identiques,
+        r.modifies_depuis,
+        r.sans_original
+    );
+    if choisis.is_empty() {
+        trp!("  ✖ La copie est vide.", "  ✖ The copy is empty.");
+    } else if r.abimes.is_empty() {
+        trp!(
+            "  {VERT}✔{RESET} La copie se relit : tes fichiers se récupéreraient.",
+            "  {VERT}✔{RESET} The copy reads back: your files could be recovered."
+        );
+    } else {
+        for l in envelopper(
+            tr!(
+                "Des fichiers de la copie ne se relisent pas tels qu'ils ont été copiés : ce disque perd des données. Refais la copie sur un autre disque, et fais vérifier celui-ci (Diagnostic, état SMART).",
+                "Some files of the copy do not read back as they were copied: this disk loses data. Make the copy again on another disk, and have this one checked (Diagnostic, SMART status)."
+            ),
+            LARGEUR - 4,
+        ) {
+            println!("  {l}");
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1151,6 +1372,56 @@ mod tests {
         );
         assert_eq!(mesurer(&source), (1, 3));
         let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn copie_relue_et_comparee() {
+        let base = jetable("relecture");
+        let source = base.join("Documents");
+        std::fs::create_dir_all(source.join("sous")).unwrap();
+        for i in 0..5 {
+            std::fs::write(source.join(format!("f{i}.txt")), format!("contenu {i}")).unwrap();
+        }
+        std::fs::write(source.join("sous/a.txt"), b"a").unwrap();
+        let disque = base.join("disque");
+        let dossier = disque.join("Gardien-copie-2026-10-18");
+        let b = copier(&[(Sorte::Documents, source.clone())], &dossier, (6, 0));
+        assert_eq!(b.copies, 6);
+        assert_eq!(copie_a_verifier(&disque), Some(dossier.clone()));
+        let sources = sources_du_compte_rendu(&std::fs::read_to_string(dossier.join(COMPTE_RENDU)).unwrap());
+        assert_eq!(sources, [("Documents".to_string(), source.clone())]);
+        let fichiers = fichiers_de_la_copie(&dossier);
+        assert_eq!(fichiers.len(), 6, "{fichiers:?}");
+        let copie_le = std::fs::metadata(dossier.join(COMPTE_RENDU))
+            .unwrap()
+            .modified()
+            .unwrap();
+        let tous: Vec<&PathBuf> = fichiers.iter().collect();
+        assert_eq!(
+            relire(&dossier, &tous, &sources, copie_le),
+            Relecture {
+                identiques: 6,
+                ..Relecture::default()
+            }
+        );
+        // La copie abîmée (même date d'original) se voit ; un original disparu ne compte pas contre la copie.
+        std::fs::write(dossier.join("Documents/f1.txt"), b"abime").unwrap();
+        std::fs::remove_file(source.join("f2.txt")).unwrap();
+        let r = relire(&dossier, &tous, &sources, std::time::SystemTime::now());
+        assert_eq!((r.identiques, r.sans_original, r.abimes.len()), (4, 1, 1), "{r:?}");
+        // Un original modifié après la copie : normal, pas une copie abîmée.
+        let r = relire(&dossier, &tous, &sources, std::time::UNIX_EPOCH);
+        assert_eq!((r.modifies_depuis, r.abimes.len()), (1, 0), "{r:?}");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn echantillon_reparti() {
+        let f: Vec<PathBuf> = (0..100).map(|i| PathBuf::from(format!("{i:03}"))).collect();
+        let e = echantillon(&f, 5);
+        assert_eq!(e.len(), 5);
+        assert_eq!((e[0], e[4]), (&f[0], &f[99]));
+        assert_eq!(echantillon(&f[..3], 5).len(), 3);
     }
 
     #[test]

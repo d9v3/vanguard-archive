@@ -280,6 +280,13 @@ enum Commande {
         /// Un dossier d'un disque externe (par défaut : choisi parmi les disques branchés).
         destination: Option<std::path::PathBuf>,
     },
+    /// Vérifier une copie faite par « Copier mes fichiers » (test de restauration) : des fichiers répartis sur toute
+    /// la copie, relus sur le disque et comparés à leur original. Rien n'est écrit ni effacé.
+    #[command(name = "verifier-copie", visible_alias = "check-copy")]
+    VerifierCopie {
+        /// Le disque ou le dossier de la copie (par défaut : choisi parmi les disques branchés).
+        dossier: Option<std::path::PathBuf>,
+    },
     /// Mes ordinateurs : ceux où la clé GARDIEN a fait un bilan, leur note et leurs problèmes restants (sur la
     /// partition GARDIENLOG de la clé).
     #[command(visible_alias = "computers")]
@@ -708,6 +715,7 @@ enum Action {
     OptimiserAnnuler,
     Sauvegarder,
     CopierFichiers,
+    VerifierCopie,
     Ordinateurs,
     ProtegerDonnees,
     Guide,
@@ -919,6 +927,10 @@ const OUTILS: &[Outil] = &[
         titre: ["Copier mes fichiers", "Copy my files"],
         precision: ["vers un disque externe, vérifié", "to an external disk, checked"],
         mots: "copier copy sauvegarde backup photos disque externe external drive fichiers" },
+    Outil { action: Action::VerifierCopie, groupe: Some(Groupe::Donnees), lettre: "",
+        titre: ["Vérifier une copie", "Check a copy"],
+        precision: ["relue, comparée aux originaux", "read back, compared"],
+        mots: "restauration restore test vérifier verify copie copy sauvegarde backup relire" },
     Outil { action: Action::Ordinateurs, groupe: Some(Groupe::Donnees), lettre: "",
         titre: ["Mes ordinateurs", "My computers"],
         precision: ["suivis par la clé GARDIEN", "tracked by the GARDIEN key"],
@@ -1177,6 +1189,7 @@ async fn executer(s: &mut Session, action: Action) {
         Action::OptimiserAnnuler => optimiser::tout_annuler(),
         Action::Sauvegarder => donnees::menu(),
         Action::CopierFichiers => copier::menu(),
+        Action::VerifierCopie => copier::verifier_copie(None),
         Action::Ordinateurs => ordinateurs::menu(),
         Action::ProtegerDonnees => chiffrement::menu(),
         Action::Guide => guide::menu(),
@@ -1245,6 +1258,8 @@ const AIDES_EN: &[(&str, &str)] = &[
                shown on screen only"),
     ("copier-fichiers", "Copy my files (Documents, Pictures, Desktop, Videos, Music) to an external disk: checked \
                          copy, nothing deleted or overwritten, an interrupted copy resumes"),
+    ("verifier-copie", "Check a copy made by “Copy my files” (restore test): files spread over the whole copy, read \
+                        back from the disk and compared with their original. Nothing is written or deleted"),
     ("ordinateurs", "My computers: those where the GARDIEN key ran a check, their grade and remaining problems (on the \
      key's GARDIENLOG partition)"),
     ("depanner", "Troubleshoot step by step: no Internet, Wi-Fi dropping, slow computer, no sound, printer, disk full; \
@@ -1284,6 +1299,7 @@ const OPTIONS_EN: &[(&str, &str, &str)] = &[
     ("guide", "quoi", "A system (linux, windows, macos, all), a program (systemctl, winget…) or words to look for"),
     ("fiche", "json", "The specs as JSON, for a script (without the serial numbers)"),
     ("copier-fichiers", "destination", "A folder on an external disk (default: chosen among the plugged-in disks)"),
+    ("verifier-copie", "dossier", "The disk or the folder of the copy (default: chosen among the plugged-in disks)"),
     ("depanner", "sujet", "The subject: internet, wifi, slow, sound, printer, disk, infection, new, leaving (or words \
                              describing it)"),
 ];
@@ -1430,6 +1446,7 @@ async fn main() {
         Some(Commande::Demarrage) => optimiser::programmes_au_demarrage(),
         Some(Commande::Fiche { json }) => fiche::fiche(json),
         Some(Commande::CopierFichiers { destination }) => copier::commande(destination.as_deref()),
+        Some(Commande::VerifierCopie { dossier }) => copier::verifier_copie(dossier.as_deref()),
         Some(Commande::Ordinateurs) => ordinateurs::menu(),
         Some(Commande::Depanner { sujet }) => depanner::executer(&sujet.join(" ")),
     }
