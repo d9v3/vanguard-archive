@@ -21,7 +21,7 @@ chaque version garde son étiquette dans le dépôt (`git checkout v0.62.0`, par
   partage à distance du Mac qui accepte root ou les comptes sans mot de passe.
 - **Plus justes.** Fichiers inclus de la configuration SSH lus, réseaux Wi-Fi ouverts mieux reconnus, DNS sur cet ordinateur mesuré aussi
   sur un site nouveau (sa mémoire répondait en moins d'une milliseconde), dnf-automatic
-  qui ne fait que télécharger, réglages d'APT lus dans leur ordre, interface anglaise complète.
+  qui ne fait que télécharger, réglages d'APT lus dans leur ordre, interface anglaise complète, nombres à virgule écrits à la française.
 - **Une seule publication par jour.** Ce journal regroupe les versions par jour ; seule la dernière garde sa page de
   téléchargement, et le Mac de GitHub ne compile plus qu'une fois par publication.
 

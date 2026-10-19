@@ -20,7 +20,7 @@ repository (`git checkout v0.62.0`, for example), to be rebuilt if needed.
   or accounts without a password.
 - **More accurate.** Included SSH configuration files read, open Wi-Fi networks better recognized, a DNS on this computer also measured
   on a new site (its memory answered in under a millisecond), dnf-automatic that
-  only downloads, APT settings read in their order, complete English interface.
+  only downloads, APT settings read in their order, complete English interface, decimal numbers written the French way in French.
 - **A single release a day.** This history groups versions by day; only the latest keeps its download page, and
   GitHub's Mac now compiles once per release.
 
