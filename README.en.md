@@ -77,7 +77,7 @@ In the menu, choose **1** (full check), then **2** (fix). Arrows, Enter, and Esc
   accounts (active but unused for six months); new administrators.
 - Windows: WDigest (passwords in clear text in memory), Local Security Authority protection, PowerShell 2.0, Remote
   Assistance, automatic sign-in (and password in clear text in the registry), SmartScreen off, account control off
-  for remote connections, memory integrity, paused updates, LM or NTLMv1 network authentication, share signing;
+  for remote connections, memory integrity, paused updates, LM or NTLMv1 network authentication, share signing, PowerShell running any script;
   Linux: automatic security updates.
 - Hijacked browsing (forced proxy, sites redirected by the hosts file).
 - Passwords saved in the browser without protection, sensitive files lying around (passwords or keys in clear text),

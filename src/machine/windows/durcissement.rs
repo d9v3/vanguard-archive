@@ -322,6 +322,61 @@ pub(super) fn juger_signature_smb(client_exige: Option<u32>) -> Option<Constat> 
     })
 }
 
+/// La stratégie d'exécution de PowerShell qui s'applique : celle des stratégies de groupe (machine puis compte),
+/// sinon celle du compte, sinon celle de l'ordinateur. `(valeur, imposée par une stratégie)`.
+pub(super) fn strategie_effective(
+    strategie_machine: Option<&str>,
+    strategie_compte: Option<&str>,
+    compte: Option<&str>,
+    machine: Option<&str>,
+) -> Option<(String, bool)> {
+    fn defini(v: Option<&str>) -> Option<&str> {
+        v.map(str::trim)
+            .filter(|v| !v.is_empty() && !v.eq_ignore_ascii_case("Undefined"))
+    }
+    if let Some(v) = defini(strategie_machine).or(defini(strategie_compte)) {
+        return Some((v.to_string(), true));
+    }
+    defini(compte).or(defini(machine)).map(|v| (v.to_string(), false))
+}
+
+/// PowerShell en « Unrestricted » ou « Bypass » : un script téléchargé se lance sans avertissement. Remis à
+/// « RemoteSigned » pour ce compte (un script écrit ici se lance toujours, un script téléchargé doit être signé) ;
+/// imposé par une stratégie de groupe, c'est à l'organisation de le changer.
+pub(super) fn juger_strategie_ps(effective: Option<(String, bool)>, cle_du_compte: &str) -> Option<Constat> {
+    let (valeur, imposee) = effective?;
+    if !(valeur.eq_ignore_ascii_case("Unrestricted") || valeur.eq_ignore_ascii_case("Bypass")) {
+        return None;
+    }
+    let constat = alerte(
+        DURCI,
+        Niveau::Moyen,
+        trf!(
+            "PowerShell lance n'importe quel script sans avertissement (stratégie « {valeur} ») : un script téléchargé ou reçu par courriel s'exécute d'un double-clic.",
+            "PowerShell runs any script without warning (“{valeur}” policy): a script downloaded or received by email runs with a double-click."
+        ),
+    );
+    Some(if imposee {
+        constat.manuel(
+            tr!(
+                "Réglé par une stratégie de groupe : à changer par qui gère l'ordinateur (entreprise, école)",
+                "Set by a group policy: to be changed by whoever manages the computer (company, school)"
+            ),
+            &[],
+        )
+    } else {
+        constat.corriger(
+            tr!(
+                "Revenir à « RemoteSigned » pour ce compte : un script écrit ici se lance toujours, un script téléchargé doit être signé",
+                "Go back to “RemoteSigned” for this account: a script written here still runs, a downloaded script must be signed"
+            ),
+            &[&format!(
+                "Set-ItemProperty -LiteralPath '{cle_du_compte}' -Name ExecutionPolicy -Value RemoteSigned"
+            )],
+        )
+    })
+}
+
 pub(super) fn durcissement() -> Vec<Constat> {
     let mut c = vec![
         juger_wdigest(lire_dword(WDIGEST, "UseLogonCredential")),
@@ -370,6 +425,26 @@ pub(super) fn durcissement() -> Vec<Constat> {
         r"SYSTEM\CurrentControlSet\Services\LanmanWorkstation\Parameters",
         "RequireSecuritySignature",
     )));
+    let shell_ids = r"SOFTWARE\Microsoft\PowerShell\1\ShellIds\Microsoft.PowerShell";
+    let strategies = r"SOFTWARE\Policies\Microsoft\Windows\PowerShell";
+    let du_compte = |cle: &str| {
+        winreg::RegKey::predef(winreg::enums::HKEY_CURRENT_USER)
+            .open_subkey(cle)
+            .ok()?
+            .get_value::<String, _>("ExecutionPolicy")
+            .ok()
+    };
+    let effective = strategie_effective(
+        lire_texte(strategies, "ExecutionPolicy").as_deref(),
+        du_compte(strategies).as_deref(),
+        du_compte(shell_ids).as_deref(),
+        lire_texte(shell_ids, "ExecutionPolicy").as_deref(),
+    );
+    let sid = crate::reparer::sid_de_la_personne();
+    c.extend(juger_strategie_ps(
+        effective,
+        &crate::reparer::hkcu_de_la_personne(sid.as_deref(), shell_ids),
+    ));
     let aujourd_hui = chrono::Local::now().format("%Y-%m-%d").to_string();
     c.extend(juger_pause(
         lire_texte(
@@ -424,6 +499,23 @@ mod tests {
         assert_eq!(juger_integrite_memoire(None).probleme, Some(Niveau::Info));
         let p = juger_pause(Some("2026-11-02T09:00:00Z"), "2026-10-19").unwrap();
         assert!(p.message.contains("2026-11-02"));
+        let effective = strategie_effective(None, None, Some("Unrestricted"), Some("RemoteSigned"));
+        assert_eq!(effective, Some(("Unrestricted".to_string(), false)));
+        assert_eq!(
+            strategie_effective(Some("Bypass"), None, Some("Restricted"), None),
+            Some(("Bypass".to_string(), true))
+        );
+        assert_eq!(strategie_effective(None, None, Some("Undefined"), None), None);
+        let corrigee = juger_strategie_ps(
+            effective,
+            r"HKCU:\SOFTWARE\Microsoft\PowerShell\1\ShellIds\Microsoft.PowerShell",
+        )
+        .unwrap();
+        assert!(corrigee.correctif.as_ref().unwrap().automatique);
+        assert!(corrigee.correctif.as_ref().unwrap().commandes[0].contains("RemoteSigned"));
+        let imposee = juger_strategie_ps(Some(("Bypass".into(), true)), "x").unwrap();
+        assert!(!imposee.correctif.as_ref().unwrap().automatique);
+        assert!(juger_strategie_ps(Some(("RemoteSigned".into(), false)), "x").is_none());
         assert_eq!(juger_ntlm(Some(1)).unwrap().probleme, Some(Niveau::Eleve));
         assert!(juger_ntlm(Some(1)).unwrap().correctif.unwrap().commandes[0].contains("-Value 3"));
         assert!(juger_ntlm(Some(3)).is_none() && juger_ntlm(Some(5)).is_none() && juger_ntlm(None).is_none());
