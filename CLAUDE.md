@@ -19,14 +19,19 @@ Réponses à l'utilisateur en français, claires, avec le pourquoi.
 - Mise en forme : `cargo fmt`, toujours avant un commit.
 - Tests Windows sous Wine (pas de PowerShell sous Wine ; le registre, lui, marche) :
   `WINEPREFIX=<dossier jetable> WINEDEBUG=-all CARGO_TARGET_X86_64_PC_WINDOWS_GNU_RUNNER=~/.local/share/Steam/compatibilitytools.d/GE-Proton11-9-x86_64/files/bin/wine cargo test --target x86_64-pc-windows-gnu`
-- macOS : compilé et testé sur un Mac de GitHub (`gh workflow run macos.yml --ref master`) ; ici, clippy seulement.
-- CI (`.github/workflows/ci.yml`) : Linux à chaque envoi (fmt, clippy -D warnings ×4, tests) ; vrai Windows la nuit
-  si le code a changé, ou `gh workflow run ci.yml --ref master` (résultat : `gh run list --workflow ci.yml`).
-- Déployer (binaire local, clé USB, VM, code sur GitHub) : `outils/deployer.sh`, à chaque version. Une page de
-  version (Releases) seulement pour une 0.x.0, ou une 0.x.y importante avec `--publier` (correctif de sécurité,
-  défaut qui gêne) ; elle reprend toutes les versions d'avant sans page. Pour chaque page, il refait aussi les
-  captures du README (`outils/captures.py`, sur une copie des données, ce qui identifierait la maison masqué) et les
-  commite à part.
+- macOS : compilé et testé sur un Mac de GitHub (`.github/workflows/macos.yml`), à chaque publication et la nuit si
+  le code a changé ; ici, clippy seulement.
+- CI (`.github/workflows/ci.yml`) : Linux à chaque envoi sur master (fmt, clippy -D warnings ×4, tests) ; la nuit,
+  si le code a changé, vrai Windows et compilation reproductible ; chaque nuit, `cargo audit`. GitHub lance la nuit
+  avec souvent des heures de retard : `gh run list --workflow ci.yml --event schedule` avant de la croire absente. À
+  la demande (des minutes facturées) : `gh workflow run ci.yml --ref master`.
+- Publication du jour : `outils/livrer-branche.sh <branche> <worktree>` (commit de version en tête : garde-fou, Mac
+  de GitHub, vérification complète pendant qu'il compile, fusion rapide, puis `outils/deployer.sh`). Entre deux
+  publications, sans rien envoyer : `outils/deployer.sh --local` (binaire local, clé USB ; avec
+  `GARDIEN_INTERMEDIAIRE=1`, rien dans la VM). `deployer.sh` publie la page de la version (Releases) pour une 0.x.0,
+  ou une 0.x.y importante avec `--publier` (correctif de sécurité, défaut qui gêne) ; elle reprend les versions
+  d'avant sans page. Pour chaque page, il refait aussi les captures du README (`outils/captures.py`, sur une copie
+  des données, ce qui identifierait la maison masqué) et les commite à part.
 - Liens : `outils/liens.py` les vérifie tous (`--hors-ligne` : les internes seulement), tout seul avant chaque envoi
   et chaque version. Un lien qu'on ne peut pas ouvrir tel quel (API, espace de noms, site qui refuse les programmes)
   se décrit dans `outils/liens.txt`.
