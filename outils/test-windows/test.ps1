@@ -606,6 +606,12 @@ if ($copiee -and $copiee.Trim() -eq 'winget upgrade --all') { Ok 'Commande copi�
 elseif ((Sortie 'guide-copie') -match 'Presse-papier inaccessible|Clipboard unavailable') { Info 'Presse-papier inaccessible ici (test en arrière-plan ?) : Vanguard l''a dit et a remontré la commande' }
 else { Bug "Commande PAS copiée (presse-papier : « $copiee »)" }
 if ($presseAvant) { Set-Clipboard -Value $presseAvant }
+# « Lancer ici » : « 10.6.11.1 » ouvre ipconfig /all (Windows 11, 11e programme : ipconfig), « 2 » la lance dans
+# PowerShell, Entrée revient de sa sortie puis de sa page, « q » quitte. Sa sortie doit arriver en entier, et sa fin dite.
+LancerAvec 'guide-lancer' @() "10.6.11.1`n2`n`n`nq`n"
+$lancee = Sortie 'guide-lancer'
+if ($lancee -match 'IPv4' -and $lancee -match 'Done in|Terminée en') { Ok 'Commande du guide lancée ici, sortie montrée' }
+else { Bug 'Lancer ici : sortie ou fin ABSENTE' }
 
 Etape 'Surveillance : activation puis désactivation (Planificateur de tâches)'
 Lancer 'surveillance-on' @('surveillance', 'on')
