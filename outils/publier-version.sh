@@ -18,8 +18,9 @@ COMMIT=$(git rev-parse HEAD)
 LINUX=target/x86_64-unknown-linux-musl/release/gardien
 WINDOWS=target/x86_64-pc-windows-gnu/release/gardien.exe
 
-# Les commits « … (vX.Y.Z) » depuis la dernière page publiée, le plus récent en tête ; sans page d'avant (ou si elle
-# manque ici), celui de cette version seulement.
+# Les commits « … (vX.Y.Z) » depuis la dernière page publiée, le plus récent en tête, un seul par version (le plus
+# récent : un commit de version ajouté après coup remplace le titre d'avant) ; sans page d'avant (ou si elle manque
+# ici), celui de cette version seulement.
 versions() {
   local precedente
   precedente=$(gh release view --json tagName -q .tagName 2>/dev/null || true)
@@ -27,7 +28,7 @@ versions() {
     git log --format='%H %s' "$precedente..HEAD"
   else
     git log --format='%H %s' --grep="(v$VERSION)" -1
-  fi | grep -E ' \(v[0-9]+\.[0-9]+\.[0-9]+\)$' || true
+  fi | grep -E ' \(v[0-9]+\.[0-9]+\.[0-9]+\)$' | awk '{ v = $NF } !vu[v]++' || true
 }
 
 # Ce qui change, version par version : le titre de son commit, ses puces dessous (sans les lignes de co-auteur). Une
