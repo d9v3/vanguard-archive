@@ -1187,6 +1187,15 @@ fn connexions_wifi_auto(sortie: &str) -> Vec<(String, String)> {
         .collect()
 }
 
+/// Une connexion Wi-Fi ouverte, d'après `nmcli -t connection show` : sans gestion de clé (section absente, ou
+/// valeur vide). « none » est du WEP, « owe » du Wi-Fi ouvert chiffré : pas ouverts.
+fn wifi_ouvert(details: &str) -> bool {
+    details
+        .lines()
+        .find_map(|l| l.strip_prefix("802-11-wireless-security.key-mgmt:"))
+        .is_none_or(|v| v.trim().is_empty() || v.trim() == "--")
+}
+
 /// Réseaux ouverts enregistrés (sans gestion de clé) qui se reconnectent seuls ; 40 connexions regardées au plus.
 fn wifi_ouverts_automatiques() -> Option<Constat> {
     let liste = crate::commande::lancer_en_anglais(
@@ -1204,11 +1213,11 @@ fn wifi_ouverts_automatiques() -> Option<Constat> {
     .filter(|r| r.code == Some(0))?;
     let (mut noms, mut commandes) = (Vec::new(), Vec::new());
     for (uuid, nom) in connexions_wifi_auto(&liste.sortie).into_iter().take(40) {
-        let ouvert = crate::commande::lancer_en_anglais(
-            Command::new("nmcli").args(["-g", "802-11-wireless-security.key-mgmt", "connection", "show", &uuid]),
-            10,
-        )
-        .is_some_and(|r| r.code == Some(0) && r.sortie.trim().is_empty());
+        // Toute la connexion (les secrets restent cachés sans --show-secrets) : un réseau ouvert n'a pas de section
+        // de sécurité, et demander un de ses champs pourrait faire répondre nmcli par une erreur.
+        let ouvert =
+            crate::commande::lancer_en_anglais(Command::new("nmcli").args(["-t", "connection", "show", &uuid]), 10)
+                .is_some_and(|r| r.code == Some(0) && wifi_ouvert(&r.sortie));
         if ouvert {
             commandes.push(format!("nmcli connection modify {uuid} connection.autoconnect no"));
             noms.push(nom);
@@ -1760,6 +1769,19 @@ mod tests {
             "PasswordAuthentication no\nKbdInteractiveAuthentication no\nPermitEmptyPasswords yes\n"
         ));
         assert!(!mots_de_passe_vides_sshd(""));
+    }
+
+    #[test]
+    fn reseau_ouvert_ou_protege() {
+        let ouvert = "connection.id:Gare\nconnection.type:802-11-wireless\n802-11-wireless.ssid:Gare\n";
+        assert!(wifi_ouvert(ouvert));
+        assert!(wifi_ouvert("802-11-wireless-security.key-mgmt:\n"));
+        assert!(wifi_ouvert("802-11-wireless-security.key-mgmt:--\n"));
+        assert!(!wifi_ouvert(
+            "802-11-wireless-security.key-mgmt:wpa-psk\n802-11-wireless-security.psk:<hidden>\n"
+        ));
+        assert!(!wifi_ouvert("802-11-wireless-security.key-mgmt:owe\n"));
+        assert!(!wifi_ouvert("802-11-wireless-security.key-mgmt:none\n"));
     }
 
     #[test]
