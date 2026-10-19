@@ -877,6 +877,19 @@ mod tests {
     use super::*;
 
     #[test]
+    fn dnf_automatic_qui_installe() {
+        let telecharge = "[commands]\nupgrade_type = security\napply_updates = no\n";
+        let installe = "[commands]\napply_updates = yes\n";
+        assert!(!juger_dnf_auto(false, true, telecharge));
+        assert!(!juger_dnf_auto(false, true, ""));
+        assert!(juger_dnf_auto(false, true, installe));
+        assert!(juger_dnf_auto(true, false, ""));
+        assert!(!juger_dnf_auto(false, false, installe));
+        // Une autre section ne compte pas.
+        assert!(!juger_dnf_auto(false, true, "[emitters]\napply_updates = yes\n"));
+    }
+
+    #[test]
     fn paquets_sensibles() {
         assert!(paquet_sensible(Paquets::Pacman, "linux 7.2.5.arch1-1 -> 7.2.6.arch1-1"));
         assert!(paquet_sensible(Paquets::Dnf, "kernel.x86_64 6.11.4-301.fc41 updates"));
@@ -1023,6 +1036,16 @@ mod tests {
 /// Les mises à jour de sécurité installées toutes seules : unattended-upgrades sous Debian et Ubuntu, dnf-automatic
 /// sous Fedora. Ailleurs (Arch, openSUSE, systèmes atomiques), rien à dire : la mise à jour se fait autrement, ou
 /// l'outil met déjà le système entier à jour. Une information, avec la commande pour l'activer.
+/// dnf-automatic installe-t-il vraiment ? Le minuteur « -install » toujours ; le minuteur ordinaire seulement si
+/// automatic.conf dit « apply_updates = yes » dans [commands] (sinon il télécharge, sans rien installer : le réglage
+/// livré par Fedora).
+pub(super) fn juger_dnf_auto(minuteur_install: bool, minuteur: bool, conf: &str) -> bool {
+    minuteur_install
+        || (minuteur
+            && super::valeur_ini(conf, |s| s == "commands", "apply_updates")
+                .is_some_and(|v| matches!(v.to_ascii_lowercase().as_str(), "yes" | "true" | "1" | "on")))
+}
+
 pub(super) fn maj_automatiques() -> Option<Constat> {
     if atomique().is_some() {
         return None;
@@ -1039,13 +1062,17 @@ pub(super) fn maj_automatiques() -> Option<Constat> {
             .join("\n");
         juger_apt_auto(&conf, std::path::Path::new("/usr/bin/unattended-upgrade").exists())
     } else if dnf {
-        [
-            "dnf-automatic.timer",
-            "dnf5-automatic.timer",
-            "dnf-automatic-install.timer",
-        ]
-        .iter()
-        .any(|t| sortie("systemctl", &["is-enabled", t]).is_some_and(|s| s.trim() == "enabled"))
+        let actif = |t: &str| sortie("systemctl", &["is-enabled", t]).is_some_and(|s| s.trim() == "enabled");
+        let conf = ["/etc/dnf/automatic.conf", "/etc/dnf/dnf5-plugins/automatic.conf"]
+            .iter()
+            .filter_map(|c| std::fs::read_to_string(c).ok())
+            .collect::<Vec<_>>()
+            .join("\n");
+        juger_dnf_auto(
+            actif("dnf-automatic-install.timer"),
+            actif("dnf-automatic.timer") || actif("dnf5-automatic.timer"),
+            &conf,
+        )
     } else {
         return None;
     };
@@ -1084,10 +1111,10 @@ pub(super) fn maj_automatiques() -> Option<Constat> {
         )
         .manuel(
             tr!(
-                "Activer dnf-automatic (mises à jour installées chaque jour)",
-                "Turn on dnf-automatic (updates installed every day)"
+                "Activer dnf-automatic en mode installation (le minuteur ordinaire ne fait que télécharger) : la commande ci-dessous jusqu'à Fedora 40 ; à partir de Fedora 41 (dnf5), « apply_updates = yes » dans la section [commands] de /etc/dnf/automatic.conf, puis sudo systemctl enable --now dnf5-automatic.timer",
+                "Turn on dnf-automatic in install mode (the plain timer only downloads): the command below up to Fedora 40; from Fedora 41 (dnf5), “apply_updates = yes” in the [commands] section of /etc/dnf/automatic.conf, then sudo systemctl enable --now dnf5-automatic.timer"
             ),
-            &["sudo dnf install dnf-automatic && sudo systemctl enable --now dnf-automatic.timer"],
+            &["sudo dnf install dnf-automatic && sudo systemctl enable --now dnf-automatic-install.timer"],
         )
     })
 }
