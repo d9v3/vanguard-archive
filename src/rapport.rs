@@ -231,6 +231,10 @@ fn html(audit: Option<&Audit>, reseau: Option<&Rapport>) -> String {
         );
     }
 
+    if let Some(etat) = crate::historique::etat_chaine() {
+        let _ = write!(h, "<p class=meta>{}</p>", esc(&etat));
+    }
+
     h += &connexions(&crate::reseau::connexion::historique());
 
     if let Some(a) = audit {

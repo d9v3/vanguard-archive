@@ -383,6 +383,36 @@ fn nommer(appareil: &str, surnom: &str) {
     }
 }
 
+/// Lancé en root (sudo) : Gardien n'en a pas besoin, et une sortie piégée aurait tous les droits. Dit, jamais imposé :
+/// sans session graphique ni agent polkit, pkexec ne peut rien demander, et « sudo gardien » est alors la seule façon
+/// de corriger. Sous Windows, une console administrateur est l'habitude de certains : rien d'alarmant.
+#[cfg(unix)]
+fn avertir_si_root() {
+    // SAFETY : geteuid ne prend aucun argument et ne touche aucune mémoire ; il rend l'identifiant effectif du processus.
+    if unsafe { libc::geteuid() } != 0 {
+        return;
+    }
+    for (i, ligne) in envelopper(
+        tr!(
+            "Gardien tourne en root (sudo) : il n'en a pas besoin, chaque correction demande le mot de passe au moment voulu, et une sortie piégée aurait ici tous les droits. Relance-le sans sudo, sauf si aucune fenêtre ne peut demander le mot de passe sur cet ordinateur (pas de session graphique) : alors continue.",
+            "Gardien is running as root (sudo): it does not need it, each fix asks for the password when needed, and a booby-trapped output would have every right here. Start it again without sudo, unless no window can ask for the password on this computer (no graphical session): then carry on."
+        ),
+        LARGEUR - 4,
+    )
+    .into_iter()
+    .enumerate()
+    {
+        if i == 0 {
+            eprintln!("  {}⚠{RESET} {ligne}", couleur(risk::Niveau::Moyen));
+        } else {
+            eprintln!("    {ligne}");
+        }
+    }
+}
+
+#[cfg(windows)]
+fn avertir_si_root() {}
+
 /// État affiché en tête du menu : dernier bilan, dernier test de connexion, clé, surveillance.
 fn etat_du_menu(surveillance_active: bool) -> Vec<String> {
     let mut lignes = Vec::new();
@@ -1265,6 +1295,8 @@ async fn main() {
     journal::installer();
     #[cfg(unix)]
     protection::cle::proteger_cle();
+    protection::environnement::afficher();
+    avertir_si_root();
     let args = Args::from_arg_matches(&ligne_de_commande().get_matches()).unwrap_or_else(|e| e.exit());
     match args.commande {
         None => menu().await,

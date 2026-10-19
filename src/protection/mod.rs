@@ -7,6 +7,7 @@ pub mod antivirus;
 #[cfg(unix)]
 pub mod cle;
 pub mod distance;
+pub mod environnement;
 pub mod fuites;
 pub mod integrite;
 pub mod isoler;

@@ -161,6 +161,7 @@ pub fn categorie(nom: &str) -> &str {
         "Fichiers suspects" => "Suspicious files",
         "Gestion à distance" => "Remote management",
         "Groupes" => "Groups",
+        "Historique" => "History",
         "Intégrité" => "Integrity",
         "Journaux" => "Logs",
         "Navigateur" => "Browser",
@@ -181,6 +182,7 @@ pub fn categorie(nom: &str) -> &str {
         "Redémarrage" => "Restart",
         "Santé" => "Health",
         "Sauvegardes" => "Backups",
+        "Surveillance" => "Monitoring",
         "Verrouillage" => "Screen lock",
         _ => nom,
     }

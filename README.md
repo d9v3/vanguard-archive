@@ -211,6 +211,12 @@ depuis Linux, par exemple), et le guide dit si un programme manque sur cet ordin
   clé est gardée sur ton ordinateur ; au retour de chez quelqu'un, le bilan nomme ce qui a été ajouté, remplacé ou
   retiré (un autorun planté, un programme remplacé). Les données, les images ISO et le menu Ventoy, qui changent
   normalement, ne sont pas comparés.
+- Gardien se méfie aussi de lui-même : au démarrage, il dit si une bibliothèque est injectée dans tous les
+  programmes de la session (LD_PRELOAD, DYLD_INSERT_LIBRARIES, AppInit_DLLs : celle d'un paquet du système, comme
+  GameMode, est une simple information) et s'il tourne en root sans raison, car ses résultats passent par là. Au
+  bilan : la surveillance horaire que tu avais activée et qui a disparu (un logiciel malveillant coupe d'abord ce
+  qui le surveille), et l'historique des bilans réécrit après coup (chaque bilan porte l'empreinte du précédent).
+  Chaque nuit, la CI recompile Gardien deux fois et vérifie que le programme est identique à l'octet près.
 - Vérifier un fichier téléchargé : son empreinte comparée à celle que publie le site (collée, ou un SHA256SUMS posé
   à côté), son nom et son contenu (double extension, programme déguisé en document), puis YARA et l'antivirus.
 - Surveillance toutes les heures : notification si un appareil inconnu arrive, si un port s'ouvre, si la note de

@@ -196,6 +196,12 @@ example), and the guide tells when a program is missing on this computer.
   says so in the menu. And the key manifest: at deployment, the checksum of every file on the key is kept on your
   computer; back from someone's place, the check names what was added, replaced or removed (a planted autorun, a
   replaced program). Data, ISO images and the Ventoy menu, which change normally, are not compared.
+- Gardien also distrusts itself: at startup, it says whether a library is injected into every program of the
+  session (LD_PRELOAD, DYLD_INSERT_LIBRARIES, AppInit_DLLs: one from a system package, like GameMode, is a mere
+  information) and whether it runs as root for no reason, since its results go through there. In the check: the
+  hourly monitoring you had turned on and that disappeared (malware first cuts what watches it), and the check
+  history rewritten afterwards (each check carries the previous one's checksum). Every night, CI builds Gardien
+  twice and checks that the program is identical to the byte.
 - Check a downloaded file: its checksum compared with the one the site publishes (pasted, or a SHA256SUMS next to
   it), its name and content (double extension, program disguised as a document), then YARA and the antivirus.
 - Hourly monitoring: a notification if an unknown device shows up, if a port opens, if the machine's grade drops, or

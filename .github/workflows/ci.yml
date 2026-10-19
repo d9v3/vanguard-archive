@@ -151,6 +151,40 @@ jobs:
           fi
           echo "windows=$windows" >> "$GITHUB_OUTPUT"
 
+  # Compilation reproductible : le même code, compilé deux fois de suite, doit donner exactement le même programme
+  # (Linux et Windows). C'est la preuve d'intégrité d'un programme non signé : n'importe qui peut recompiler et comparer
+  # l'empreinte à celle de la page de la version. La nuit et à la demande seulement, et seulement si le code a changé
+  # (même règle que Windows) : deux compilations en release coûtent six minutes.
+  reproductible:
+    needs: utile
+    if: needs.utile.outputs.windows == 'oui' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - name: Rust à jour, cibles et outils de compilation croisée
+        run: |
+          rustup update stable
+          rustup default stable
+          rustup target add x86_64-unknown-linux-musl x86_64-pc-windows-gnu
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq musl-tools binutils-mingw-w64-x86-64
+      - uses: Swatinem/rust-cache@v2
+      - name: Deux compilations, un seul programme
+        run: |
+          for c in x86_64-unknown-linux-musl x86_64-pc-windows-gnu; do cargo build --release --target "$c"; done
+          mkdir premiere
+          cp target/x86_64-unknown-linux-musl/release/gardien premiere/gardien
+          cp target/x86_64-pc-windows-gnu/release/gardien.exe premiere/gardien.exe
+          # Seul le programme est recompilé (les dépendances restent) : c'est lui que l'on compare.
+          cargo clean -p gardien --release --target x86_64-unknown-linux-musl
+          cargo clean -p gardien --release --target x86_64-pc-windows-gnu
+          for c in x86_64-unknown-linux-musl x86_64-pc-windows-gnu; do cargo build --release --target "$c"; done
+          sha256sum premiere/gardien target/x86_64-unknown-linux-musl/release/gardien
+          sha256sum premiere/gardien.exe target/x86_64-pc-windows-gnu/release/gardien.exe
+          cmp premiere/gardien target/x86_64-unknown-linux-musl/release/gardien
+          cmp premiere/gardien.exe target/x86_64-pc-windows-gnu/release/gardien.exe
+
   windows:
     needs: utile
     if: needs.utile.outputs.windows == 'oui'

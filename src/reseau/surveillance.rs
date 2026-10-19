@@ -302,7 +302,34 @@ pub async fn surveiller() {
     }
 }
 
+/// Le choix de la personne, noté quand la surveillance est activée (ou vue active) : si la minuterie ou la tâche
+/// disparaît ensuite sans qu'elle l'ait coupée, le bilan le dit.
+fn fichier_voulue() -> std::path::PathBuf {
+    reseau::dossier_local().join("surveillance-voulue")
+}
+
+fn noter_voulue(oui: bool) {
+    let fichier = fichier_voulue();
+    if oui {
+        if let Some(parent) = fichier.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let _ = std::fs::write(fichier, b"");
+    } else {
+        let _ = std::fs::remove_file(fichier);
+    }
+}
+
 pub fn active() -> bool {
+    let active = installee();
+    if active {
+        noter_voulue(true);
+    }
+    active
+}
+
+/// La minuterie, la tâche planifiée (non désactivée) ou l'agent existent-ils ?
+fn installee() -> bool {
     // Surveillance installée sous l'ancien nom : remplacée par la nouvelle (le programme a changé de nom aussi).
     if ancienne_installee() {
         retirer_ancienne();
@@ -311,13 +338,43 @@ pub fn active() -> bool {
     #[cfg(target_os = "linux")]
     return reussit("systemctl", &["--user", "is-enabled", &format!("{NOM}.timer")]);
     #[cfg(windows)]
-    return tache_existe(&[TACHE_WINDOWS]);
+    return tache_active(TACHE_WINDOWS);
     #[cfg(target_os = "macos")]
     return reussit("launchctl", &["print", &format!("{}/{AGENT_MACOS}", domaine_launchd())]);
 }
 
+/// Au bilan : la surveillance voulue a disparu (minuterie ou tâche retirée, ou désactivée). Constat et proposition,
+/// rien de plus : Gardien ne s'accroche pas.
+pub fn constat() -> Option<crate::machine::Constat> {
+    let voulue = fichier_voulue().is_file();
+    juger_disparition(voulue, voulue && installee())
+}
+
+fn juger_disparition(voulue: bool, installee: bool) -> Option<crate::machine::Constat> {
+    (voulue && !installee).then(|| {
+        crate::machine::alerte(
+            "Surveillance",
+            Niveau::Eleve,
+            tr!(
+                "La surveillance horaire que tu avais activée n'existe plus : sa minuterie ou sa tâche planifiée a été retirée ou désactivée. Une mise à jour du système peut l'avoir fait ; un logiciel malveillant aussi, qui coupe d'abord ce qui le surveille.",
+                "The hourly monitoring you had turned on no longer exists: its timer or scheduled task was removed or disabled. A system update may have done it; so may malware, which first cuts what watches it."
+            ),
+        )
+        .manuel(
+            tr!(
+                "La remettre : menu « Réseau et Internet » › Surveillance, ou « gardien surveillance on » ; si c'est toi qui l'as coupée, « gardien surveillance off » pour que Gardien l'oublie",
+                "Turn it back on: menu “Network and Internet” › Monitoring, or “gardien surveillance on”; if you turned it off yourself, “gardien surveillance off” so Gardien forgets it"
+            ),
+            &[],
+        )
+    })
+}
+
 pub fn activer(oui: bool) {
     let reussi = if oui { installer(&executable()) } else { desinstaller() };
+    if !oui || reussi {
+        noter_voulue(oui);
+    }
     match (oui, reussi) {
         (true, true) => trp!(
             "  {VERT}✔{RESET} Surveillance activée : scan toutes les heures, notification si un appareil inconnu arrive.",
@@ -473,6 +530,16 @@ const TACHE_WINDOWS: &str = "gardien - surveillance du reseau";
 #[cfg(windows)]
 const ANCIENNES_TACHES_WINDOWS: [&str; 2] = ["sentinel - surveillance du reseau", "netscan - surveillance du reseau"];
 
+/// La tâche existe et n'est pas désactivée : une tâche désactivée ne surveille plus rien.
+#[cfg(windows)]
+fn tache_active(nom: &str) -> bool {
+    crate::machine::windows::ps(&format!(
+        "if (Get-ScheduledTask -ErrorAction SilentlyContinue | Where-Object {{ $_.TaskName -eq '{}' -and $_.State -ne 'Disabled' }}) {{ 'oui' }}",
+        crate::commande::ps_texte(nom)
+    ))
+    .is_some_and(|s| s.trim() == "oui")
+}
+
 /// Une de ces tâches existe-t-elle ? Sans erreur quand aucune n'existe : un échec de PowerShell irait au journal.
 #[cfg(windows)]
 pub(crate) fn tache_existe(noms: &[&str]) -> bool {
@@ -594,5 +661,13 @@ mod tests {
         assert_eq!(n.len(), 2);
         assert!(n[0].1.contains("4444"));
         assert!(n[1].1.contains("90") && n[1].1.contains("75"));
+    }
+    #[test]
+    fn surveillance_voulue_mais_disparue() {
+        assert!(juger_disparition(false, false).is_none());
+        assert!(juger_disparition(true, true).is_none());
+        let c = juger_disparition(true, false).expect("constat");
+        assert_eq!(c.probleme, Some(Niveau::Eleve));
+        assert!(!c.correctif.as_ref().unwrap().automatique);
     }
 }

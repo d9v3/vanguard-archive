@@ -1,6 +1,12 @@
 //! Historique des bilans complets : ce qui a changé depuis le dernier (notes, problèmes nouveaux ou réglés) et la
 //! courbe des notes dans le rapport HTML. Gardé sur cet ordinateur : ce détail ne voyage pas avec la clé, seul un
 //! résumé y va (« Mes ordinateurs », `ordinateurs`).
+//!
+//! Chaque bilan porte son empreinte BLAKE3 et celle du précédent : une chaîne. Un historique réécrit après coup (un
+//! problème effacé, une note gonflée, un bilan retiré du milieu) ne colle plus, et le bilan le dit. La chaîne commence
+//! au premier bilan qui a une empreinte (les anciens n'en ont pas) ; le premier bilan gardé peut pointer vers un bilan
+//! que la rotation a retiré, ce n'est pas une falsification. Barrière, pas coffre : qui réécrit tout le fichier peut
+//! aussi retirer toutes les empreintes.
 
 use std::fmt::Write;
 use std::path::PathBuf;
@@ -28,6 +34,105 @@ pub struct Bilan {
     /// Problèmes moyens ou plus graves, « catégorie : message ».
     #[serde(default)]
     pub problemes: Vec<String>,
+    /// Empreinte BLAKE3 de ce bilan (`empreinte_de`), et celle du bilan précédent : la chaîne.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub empreinte: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub precedent: Option<String>,
+}
+
+/// L'empreinte d'un bilan : ses champs dans un ordre fixe, y compris l'empreinte du précédent.
+fn empreinte_de(b: &Bilan) -> String {
+    let canon = serde_json::to_string(&(&b.date, b.machine, b.reseau, &b.nom_reseau, &b.problemes, &b.precedent))
+        .unwrap_or_default();
+    blake3::hash(canon.as_bytes()).to_hex().to_string()
+}
+
+/// L'état de la chaîne des bilans.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Chaine {
+    /// `chaines` bilans se suivent sans trou (0 : aucun bilan n'a encore d'empreinte).
+    Intacte { chaines: usize },
+    /// Le bilan `indice` ne colle pas : son contenu ne correspond plus à son empreinte, ou il ne suit plus le précédent.
+    Rompue { indice: usize, date: String, contenu: bool },
+}
+
+pub fn verifier_chaine(tous: &[Bilan]) -> Chaine {
+    let mut chaines = 0;
+    let mut precedent: Option<&Bilan> = None;
+    for (indice, b) in tous.iter().enumerate() {
+        let rompue = |contenu| Chaine::Rompue {
+            indice,
+            date: b.date.clone(),
+            contenu,
+        };
+        match &b.empreinte {
+            Some(e) => {
+                if *e != empreinte_de(b) {
+                    return rompue(true);
+                }
+                // Un maillon suit le précédent quand celui-ci est chaîné ; le premier bilan gardé peut pointer vers un
+                // bilan retiré par la rotation.
+                if let Some(pe) = precedent.and_then(|p| p.empreinte.as_deref())
+                    && b.precedent.as_deref() != Some(pe)
+                {
+                    return rompue(false);
+                }
+                chaines += 1;
+            }
+            // Un bilan sans empreinte après des bilans chaînés : ajouté à la main.
+            None if precedent.is_some_and(|p| p.empreinte.is_some()) => return rompue(true),
+            None => {}
+        }
+        precedent = Some(b);
+    }
+    Chaine::Intacte { chaines }
+}
+
+/// Au bilan : rien tant que la chaîne tient.
+pub fn constat() -> Option<crate::machine::Constat> {
+    match verifier_chaine(&charger()) {
+        Chaine::Intacte { .. } => None,
+        Chaine::Rompue { date, contenu, .. } => Some(
+            crate::machine::alerte(
+                "Historique",
+                Niveau::Eleve,
+                if contenu {
+                    trf!(
+                        "L'historique des bilans a été modifié après coup : le bilan du {date} ne correspond plus à son empreinte. Quelqu'un, ou un programme, a réécrit historique.json dans le dossier de Gardien.",
+                        "The check history was modified afterwards: the check of {date} no longer matches its checksum. Someone, or a program, rewrote historique.json in Gardien's folder."
+                    )
+                } else {
+                    trf!(
+                        "L'historique des bilans a été modifié après coup : le bilan du {date} ne suit plus le précédent (un bilan a été retiré ou inséré au milieu).",
+                        "The check history was modified afterwards: the check of {date} no longer follows the previous one (a check was removed or inserted in the middle)."
+                    )
+                },
+            )
+            .manuel(
+                tr!(
+                    "Regarde ce qui a accès au dossier de Gardien (menu Protection › Intégrité, Qui parle à Internet ?) ; la chaîne repart au prochain bilan",
+                    "Look at what has access to Gardien's folder (Protection menu › Integrity, Who talks to the Internet?); the chain restarts at the next check"
+                ),
+                &[],
+            ),
+        ),
+    }
+}
+
+/// Une ligne pour le rapport : la chaîne et sa longueur, ou la rupture.
+pub fn etat_chaine() -> Option<String> {
+    match verifier_chaine(&charger()) {
+        Chaine::Intacte { chaines: 0 } => None,
+        Chaine::Intacte { chaines } => Some(trf!(
+            "Historique intact : {chaines} bilans chaînés par leur empreinte.",
+            "History intact: {chaines} checks chained by their checksum."
+        )),
+        Chaine::Rompue { date, .. } => Some(trf!(
+            "⚠ Historique modifié après coup : le bilan du {date} ne colle plus à la chaîne.",
+            "⚠ History modified afterwards: the check of {date} no longer fits the chain."
+        )),
+    }
 }
 
 fn fichier() -> PathBuf {
@@ -68,6 +173,8 @@ fn bilan(audit: Option<&Audit>, reseau: Option<&Rapport>) -> Bilan {
                     .collect()
             })
             .unwrap_or_default(),
+        empreinte: None,
+        precedent: None,
     }
 }
 
@@ -76,7 +183,7 @@ pub fn enregistrer(audit: Option<&Audit>, reseau: Option<&Rapport>) -> (Option<B
     enregistrer_dans(&fichier(), bilan(audit, reseau))
 }
 
-fn enregistrer_dans(chemin: &std::path::Path, nouveau: Bilan) -> (Option<Bilan>, Bilan) {
+fn enregistrer_dans(chemin: &std::path::Path, mut nouveau: Bilan) -> (Option<Bilan>, Bilan) {
     let mut tous = match lire_de(chemin) {
         Ok(tous) => tous,
         Err(e) => {
@@ -95,6 +202,8 @@ fn enregistrer_dans(chemin: &std::path::Path, nouveau: Bilan) -> (Option<Bilan>,
         }
     };
     let precedent = tous.last().cloned();
+    nouveau.precedent = precedent.as_ref().and_then(|p| p.empreinte.clone());
+    nouveau.empreinte = Some(empreinte_de(&nouveau));
     tous.push(nouveau.clone());
     let surplus = tous.len().saturating_sub(GARDES);
     tous.drain(..surplus);
@@ -290,6 +399,8 @@ mod tests {
             reseau: Some(80),
             nom_reseau: Some("10.0.0.0/24".into()),
             problemes: problemes.iter().map(ToString::to_string).collect(),
+            empreinte: None,
+            precedent: None,
         }
     }
 
@@ -335,5 +446,75 @@ mod tests {
         let svg = courbe(&[b(70, &[]), b(85, &[]), b(95, &[])]).unwrap();
         assert!(svg.starts_with("<svg") && svg.ends_with("</svg>"));
         assert_eq!(svg.matches("<polyline").count(), 2);
+    }
+    #[test]
+    fn chaine_des_bilans() {
+        let dossier = std::env::temp_dir().join(format!("gardien-chaine-{}", std::process::id()));
+        std::fs::create_dir_all(&dossier).unwrap();
+        let chemin = dossier.join("historique.json");
+        // Deux anciens bilans, sans empreinte, déjà là.
+        let ancien = |date: &str| Bilan {
+            date: date.into(),
+            machine: Some(80),
+            problemes: vec!["Pare-feu : coupé".into()],
+            ..Bilan::default()
+        };
+        std::fs::write(
+            &chemin,
+            serde_json::to_string(&[ancien("2026-01-01 10:00"), ancien("2026-02-01 10:00")]).unwrap(),
+        )
+        .unwrap();
+        for (i, date) in ["2026-03-01 10:00", "2026-04-01 10:00", "2026-05-01 10:00"]
+            .iter()
+            .enumerate()
+        {
+            let mut b = ancien(date);
+            b.machine = Some(80 + u32::try_from(i).unwrap());
+            enregistrer_dans(&chemin, b);
+        }
+        let tous = lire_de(&chemin).unwrap();
+        assert_eq!(tous.len(), 5);
+        assert!(tous[1].empreinte.is_none() && tous[2].empreinte.is_some() && tous[2].precedent.is_none());
+        assert_eq!(tous[3].precedent, tous[2].empreinte);
+        assert_eq!(verifier_chaine(&tous), Chaine::Intacte { chaines: 3 });
+        // Un problème effacé après coup.
+        let mut falsifie = tous.clone();
+        falsifie[3].problemes.clear();
+        assert_eq!(
+            verifier_chaine(&falsifie),
+            Chaine::Rompue {
+                indice: 3,
+                date: "2026-04-01 10:00".into(),
+                contenu: true
+            }
+        );
+        // Un bilan retiré du milieu.
+        let mut troue = tous.clone();
+        troue.remove(3);
+        assert_eq!(
+            verifier_chaine(&troue),
+            Chaine::Rompue {
+                indice: 3,
+                date: "2026-05-01 10:00".into(),
+                contenu: false
+            }
+        );
+        // Un bilan sans empreinte glissé après la chaîne.
+        let mut glisse = tous.clone();
+        glisse.push(ancien("2026-06-01 10:00"));
+        assert!(matches!(
+            verifier_chaine(&glisse),
+            Chaine::Rompue {
+                indice: 5,
+                contenu: true,
+                ..
+            }
+        ));
+        // La rotation retire les premiers bilans : le premier gardé pointe vers un bilan absent, ce n'est pas une
+        // falsification.
+        let roule: Vec<Bilan> = tous[3..].to_vec();
+        assert_eq!(verifier_chaine(&roule), Chaine::Intacte { chaines: 2 });
+        assert_eq!(verifier_chaine(&tous[..2]), Chaine::Intacte { chaines: 0 });
+        let _ = std::fs::remove_dir_all(&dossier);
     }
 }
