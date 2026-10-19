@@ -27,6 +27,7 @@ mod nettoyer;
 mod optimiser;
 mod ordinateurs;
 mod protection;
+mod raccourci;
 mod rapport;
 mod reparer;
 mod reseau;
@@ -294,6 +295,13 @@ enum Commande {
     VerifierCle {
         /// Un dossier de la clé ou du disque (par défaut : choisi parmi les disques branchés).
         dossier: Option<std::path::PathBuf>,
+    },
+    /// Raccourci sur cet ordinateur : Gardien copié ici et lancé d'un clic (menu des applications sous Linux, Bureau
+    /// sous Windows et macOS). Sans argument : l'état, puis la proposition.
+    #[command(visible_alias = "shortcut")]
+    Raccourci {
+        #[arg(value_parser = ["on", "off"])]
+        etat: Option<String>,
     },
     /// Mes ordinateurs : ceux où la clé GARDIEN a fait un bilan, leur note et leurs problèmes restants (sur la
     /// partition GARDIENLOG de la clé).
@@ -725,6 +733,7 @@ enum Action {
     CopierFichiers,
     VerifierCopie,
     VerifierCle,
+    Raccourci,
     Ordinateurs,
     ProtegerDonnees,
     Guide,
@@ -945,6 +954,10 @@ const OUTILS: &[Outil] = &[
         precision: ["vraie capacité, vitesse, erreurs", "real capacity, speed, errors"],
         mots: "clé key usb fausse fake capacité capacity vitesse speed débit secteurs sectors erreurs errors f3 h2testw \
                disque externe external drive" },
+    Outil { action: Action::Raccourci, groupe: Some(Groupe::Donnees), lettre: "",
+        titre: ["Raccourci sur cet ordinateur", "Shortcut on this computer"],
+        precision: ["lancer Gardien d'un clic", "start Gardien with one click"],
+        mots: "raccourci shortcut bureau desktop installer install menu lancer launch icône icon" },
     Outil { action: Action::Ordinateurs, groupe: Some(Groupe::Donnees), lettre: "",
         titre: ["Mes ordinateurs", "My computers"],
         precision: ["suivis par la clé GARDIEN", "tracked by the GARDIEN key"],
@@ -1205,6 +1218,7 @@ async fn executer(s: &mut Session, action: Action) {
         Action::CopierFichiers => copier::menu(),
         Action::VerifierCopie => copier::verifier_copie(None),
         Action::VerifierCle => verifier_cle::menu(),
+        Action::Raccourci => raccourci::commande(None),
         Action::Ordinateurs => ordinateurs::menu(),
         Action::ProtegerDonnees => chiffrement::menu(),
         Action::Guide => guide::menu(),
@@ -1278,6 +1292,8 @@ const AIDES_EN: &[(&str, &str)] = &[
     ("verifier-cle", "Check my drive: real capacity (fake drives), speeds and bad blocks of a USB stick or an \
                       external disk. Writes into the free space after your consent, reads back, then erases; your \
                       files are not touched"),
+    ("raccourci", "Shortcut on this computer: Gardien copied here and started with one click (applications menu on \
+                   Linux, Desktop on Windows and macOS). Without argument: the state, then the offer"),
     ("ordinateurs", "My computers: those where the GARDIEN key ran a check, their grade and remaining problems (on the \
      key's GARDIENLOG partition)"),
     ("depanner", "Troubleshoot step by step: no Internet, Wi-Fi dropping, slow computer, no sound, printer, disk full; \
@@ -1467,6 +1483,7 @@ async fn main() {
         Some(Commande::CopierFichiers { destination }) => copier::commande(destination.as_deref()),
         Some(Commande::VerifierCopie { dossier }) => copier::verifier_copie(dossier.as_deref()),
         Some(Commande::VerifierCle { dossier }) => verifier_cle::commande(dossier.as_deref()),
+        Some(Commande::Raccourci { etat }) => raccourci::commande(etat.map(|e| e == "on")),
         Some(Commande::Ordinateurs) => ordinateurs::menu(),
         Some(Commande::Depanner { sujet }) => depanner::executer(&sujet.join(" ")),
     }
