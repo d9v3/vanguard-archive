@@ -227,6 +227,10 @@ enum Commande {
         /// L'empreinte publiée par le site (SHA-256 de préférence). Sinon : un SHA256SUMS ou .sha256 à côté.
         empreinte: Option<String>,
     },
+    /// Caméra et micro : qui s'en sert ? Sous Windows, chaque programme et la dernière fois ; sous Linux, ce qui les
+    /// tient en ce moment. Lecture seule.
+    #[command(name = "camera-micro", visible_alias = "camera-mic")]
+    CameraMicro,
     /// Quarantaine : les fichiers isolés par l'antivirus ou YARA, à remettre à leur place (faux positif) ou à
     /// supprimer pour de bon.
     #[command(visible_alias = "quarantine")]
@@ -687,6 +691,7 @@ enum Action {
     MotsDePasse,
     Courriel,
     QuiParle,
+    CameraMicro,
     Distance,
     Lien,
     VerifierFichier,
@@ -843,6 +848,10 @@ const OUTILS: &[Outil] = &[
         precision: ["connexions de chaque programme", "each program's connections"],
         mots: "connexions connections sortantes outbound espion spyware mouchard télémétrie telemetry serveurs \
                servers" },
+    Outil { action: Action::CameraMicro, groupe: Some(Groupe::Protection), lettre: "",
+        titre: ["Caméra et micro : qui s'en sert ?", "Camera and mic: who uses them?"],
+        precision: ["programmes et dernière fois", "programs and last time"],
+        mots: "caméra camera webcam micro microphone espion spy écoute voyant light enregistre record" },
     Outil { action: Action::Distance, groupe: Some(Groupe::Protection), lettre: "",
         titre: ["Quelqu'un contrôle mon ordi ?", "Is someone controlling my PC?"],
         precision: ["faux technicien, accès à distance", "tech-support scam, remote access"],
@@ -1150,6 +1159,7 @@ async fn executer(s: &mut Session, action: Action) {
         Action::MotsDePasse => protection::fuites::verifier(),
         Action::Courriel => protection::fuites::verifier_courriel(),
         Action::QuiParle => protection::sortantes::afficher(),
+        Action::CameraMicro => protection::camera::afficher_tout(),
         Action::Distance => protection::distance::menu(),
         Action::Lien => protection::lien::verifier(None),
         Action::VerifierFichier => protection::telechargement::verifier(None, None),
@@ -1217,6 +1227,8 @@ const AIDES_EN: &[(&str, &str)] = &[
     ("lien", "Is this link dangerous? Checked without ever opening it; after your consent, its age and public lists"),
     ("verifier-fichier", "Check a downloaded file: checksum compared with the site's, name and content, YARA and \
                           antivirus"),
+    ("camera-micro", "Camera and microphone: who uses them? On Windows, each program and the last time; on Linux, \
+                      what holds them right now. Read-only"),
     ("quarantaine", "Quarantine: the files isolated by the antivirus or YARA, to put back in their place (false \
                      positive) or to delete for good"),
     ("sauvegarder", "Back up the device database and the monitoring state to a JSON file"),
@@ -1391,6 +1403,7 @@ async fn main() {
         Some(Commande::VerifierFichier { fichier, empreinte }) => {
             protection::telechargement::verifier(Some(&fichier), empreinte.as_deref());
         }
+        Some(Commande::CameraMicro) => protection::camera::afficher_tout(),
         Some(Commande::Quarantaine) => protection::quarantaine::menu(),
         Some(Commande::Isoler { fichier }) => protection::isoler::isoler(&fichier),
         Some(Commande::Pieges { retirer }) => protection::pieges::commande(retirer),

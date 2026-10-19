@@ -4,6 +4,7 @@
 //! sous Linux et macOS, la protection de la clé USB (`cle`).
 
 pub mod antivirus;
+pub mod camera;
 #[cfg(unix)]
 pub mod cle;
 pub mod distance;
