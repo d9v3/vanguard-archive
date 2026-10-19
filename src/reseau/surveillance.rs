@@ -104,6 +104,7 @@ const CATEGORIES_SURVEILLEES: &[&str] = &[
     "Fichiers suspects",
     "Clés SSH",
     "Extensions",
+    "Bluetooth",
 ];
 
 /// État de la machine au dernier passage de la surveillance.

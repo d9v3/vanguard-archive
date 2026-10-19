@@ -8,6 +8,7 @@ use serde::Serialize;
 use crate::risk::Niveau;
 use crate::ui::*;
 
+mod bluetooth;
 mod certificats;
 pub(crate) mod dns;
 mod extensions;
@@ -186,6 +187,7 @@ fn audit(systeme: &'static str, premier: Constat, mut propres: Vec<Verification<
         verif!(navigateur::navigateurs()),
         verif!(sante::sante()),
         verif!(partages::partages()),
+        verif!(bluetooth::constats()),
         verif!(journaux::journaux()),
         verif!([crate::protection::integrite::constat()]),
         verif!(crate::protection::pieges::constat()),
