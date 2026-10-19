@@ -127,6 +127,155 @@ pub(super) fn juger_assistance(valeur: Option<u32>) -> Option<Constat> {
     })
 }
 
+fn lire_texte(cle: &str, valeur: &str) -> Option<String> {
+    winreg::RegKey::predef(winreg::enums::HKEY_LOCAL_MACHINE)
+        .open_subkey(cle)
+        .ok()?
+        .get_value(valeur)
+        .ok()
+}
+
+const WINLOGON: &str = r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon";
+
+/// Ouverture de session automatique : avec `DefaultPassword`, le mot de passe est écrit en clair dans le registre,
+/// lisible par tout programme qui tourne sur l'ordinateur. Sans lui (réglage par netplwiz, gardé chiffré), une
+/// information : quiconque allume l'ordinateur entre dans la session.
+pub(super) fn juger_ouverture_auto(auto: Option<&str>, mot_de_passe: bool) -> Option<Constat> {
+    if auto.map(str::trim) != Some("1") {
+        return None;
+    }
+    Some(if mot_de_passe {
+        alerte(
+            "Comptes",
+            Niveau::Eleve,
+            tr!(
+                "Ouverture de session automatique avec le mot de passe écrit en clair dans le registre : tout programme qui tourne ici peut le lire.",
+                "Automatic sign-in with the password written in clear text in the registry: any program running here can read it."
+            ),
+        )
+        .manuel(
+            tr!(
+                "Touche Windows + R, « netplwiz », cocher « Les utilisateurs doivent entrer un nom et un mot de passe » ; puis retirer DefaultPassword (commande ci-dessous, en administrateur)",
+                "Windows key + R, “netplwiz”, tick “Users must enter a user name and password”; then remove DefaultPassword (command below, as administrator)"
+            ),
+            &[r"Remove-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon' -Name DefaultPassword"],
+        )
+    } else {
+        alerte(
+            "Comptes",
+            Niveau::Info,
+            tr!(
+                "Ouverture de session automatique : quiconque allume l'ordinateur entre dans la session, sans mot de passe.",
+                "Automatic sign-in: anyone who turns the computer on gets into the session, without a password."
+            ),
+        )
+        .manuel(
+            tr!(
+                "Si l'ordinateur sort de la maison : touche Windows + R, « netplwiz », cocher « Les utilisateurs doivent entrer un nom et un mot de passe »",
+                "If the computer leaves the house: Windows key + R, “netplwiz”, tick “Users must enter a user name and password”"
+            ),
+            &[],
+        )
+    })
+}
+
+/// SmartScreen coupé (réglage de l'Explorateur à « Off », ou stratégie EnableSmartScreen à 0) : un programme téléchargé
+/// inconnu se lance sans avertissement.
+pub(super) fn juger_smartscreen(explorateur: Option<&str>, strategie: Option<u32>) -> Option<Constat> {
+    let coupe = explorateur.is_some_and(|v| v.eq_ignore_ascii_case("off")) || strategie == Some(0);
+    coupe.then(|| {
+        alerte(
+            DURCI,
+            Niveau::Moyen,
+            tr!(
+                "SmartScreen est coupé : un programme téléchargé inconnu se lance sans le moindre avertissement.",
+                "SmartScreen is off: an unknown downloaded program starts without any warning."
+            ),
+        )
+        .manuel(
+            tr!(
+                "Sécurité Windows › Contrôle des applications et du navigateur › Protection fondée sur la réputation : tout activer",
+                "Windows Security › App & browser control › Reputation-based protection: turn everything on"
+            ),
+            &["Start-Process windowsdefender://appbrowser"],
+        )
+    })
+}
+
+/// `LocalAccountTokenFilterPolicy` à 1 : un compte local administrateur garde tous ses droits quand il se connecte à
+/// distance, ce que les attaques par « pass-the-hash » utilisent pour passer d'un ordinateur à l'autre.
+pub(super) fn juger_jeton_distant(valeur: Option<u32>) -> Option<Constat> {
+    (valeur == Some(1)).then(|| {
+        alerte(
+            DURCI,
+            Niveau::Moyen,
+            tr!(
+                "Le contrôle de compte est désactivé pour les connexions à distance des comptes locaux : un mot de passe d'administrateur volé ouvre cet ordinateur depuis le réseau.",
+                "Account control is off for remote connections of local accounts: a stolen administrator password opens this computer from the network."
+            ),
+        )
+        .corriger(
+            tr!(
+                "Remettre le contrôle de compte pour les connexions à distance (un outil d'administration à distance peut en avoir besoin : il le dira)",
+                "Put account control back for remote connections (a remote administration tool may need it off: it will say so)"
+            ),
+            &[r"Remove-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' -Name LocalAccountTokenFilterPolicy"],
+        )
+    })
+}
+
+/// Intégrité de la mémoire (HVCI) : bloque les pilotes modifiés ou vulnérables. Une information : quelques vieux
+/// pilotes (et anti-triches) la refusent, Windows le dit alors.
+pub(super) fn juger_integrite_memoire(active: Option<u32>) -> Constat {
+    if active == Some(1) {
+        ok(
+            DURCI,
+            tr!(
+                "Intégrité de la mémoire active : les pilotes modifiés ou vulnérables sont bloqués.",
+                "Memory integrity on: modified or vulnerable drivers are blocked."
+            ),
+        )
+    } else {
+        alerte(
+            DURCI,
+            Niveau::Info,
+            tr!(
+                "Intégrité de la mémoire inactive : un pilote vulnérable peut servir à désarmer l'antivirus.",
+                "Memory integrity off: a vulnerable driver can be used to disarm the antivirus."
+            ),
+        )
+        .manuel(
+            tr!(
+                "Sécurité Windows › Sécurité de l'appareil › Isolation du noyau › Intégrité de la mémoire, puis redémarrer",
+                "Windows Security › Device security › Core isolation › Memory integrity, then restart"
+            ),
+            &["Start-Process windowsdefender://coreisolation"],
+        )
+    }
+}
+
+/// Mises à jour en pause : la date de fin (« 2026-11-02T… ») dans le futur.
+pub(super) fn juger_pause(fin: Option<&str>, aujourd_hui: &str) -> Option<Constat> {
+    let date = fin?.get(..10)?;
+    (date > aujourd_hui).then(|| {
+        alerte(
+            "Mises à jour",
+            Niveau::Info,
+            trf!(
+                "Les mises à jour de Windows sont en pause jusqu'au {date} : les corrections de sécurité attendent aussi.",
+                "Windows updates are paused until {date}: security fixes wait too."
+            ),
+        )
+        .manuel(
+            tr!(
+                "Paramètres › Windows Update › Reprendre les mises à jour",
+                "Settings › Windows Update › Resume updates"
+            ),
+            &["Start-Process ms-settings:windowsupdate"],
+        )
+    })
+}
+
 pub(super) fn durcissement() -> Vec<Constat> {
     let mut c = vec![
         juger_wdigest(lire_dword(WDIGEST, "UseLogonCredential")),
@@ -147,6 +296,35 @@ pub(super) fn durcissement() -> Vec<Constat> {
         r"SYSTEM\CurrentControlSet\Control\Remote Assistance",
         "fAllowToGetHelp",
     )));
+    c.extend(juger_ouverture_auto(
+        lire_texte(WINLOGON, "AutoAdminLogon").as_deref(),
+        lire_texte(WINLOGON, "DefaultPassword").is_some_and(|m| !m.is_empty()),
+    ));
+    c.extend(juger_smartscreen(
+        lire_texte(
+            r"SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer",
+            "SmartScreenEnabled",
+        )
+        .as_deref(),
+        lire_dword(r"SOFTWARE\Policies\Microsoft\Windows\System", "EnableSmartScreen"),
+    ));
+    c.extend(juger_jeton_distant(lire_dword(
+        r"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System",
+        "LocalAccountTokenFilterPolicy",
+    )));
+    c.push(juger_integrite_memoire(lire_dword(
+        r"SYSTEM\CurrentControlSet\Control\DeviceGuard\Scenarios\HypervisorEnforcedCodeIntegrity",
+        "Enabled",
+    )));
+    let aujourd_hui = chrono::Local::now().format("%Y-%m-%d").to_string();
+    c.extend(juger_pause(
+        lire_texte(
+            r"SOFTWARE\Microsoft\WindowsUpdate\UX\Settings",
+            "PauseUpdatesExpiryTime",
+        )
+        .as_deref(),
+        &aujourd_hui,
+    ));
     c
 }
 
@@ -168,5 +346,33 @@ mod tests {
         let a = juger_assistance(Some(1)).unwrap();
         assert!(!a.correctif.as_ref().unwrap().automatique);
         assert!(juger_assistance(Some(0)).is_none() && juger_assistance(None).is_none());
+        assert_eq!(
+            juger_ouverture_auto(Some("1"), true).unwrap().probleme,
+            Some(Niveau::Eleve)
+        );
+        assert_eq!(
+            juger_ouverture_auto(Some("1"), false).unwrap().probleme,
+            Some(Niveau::Info)
+        );
+        assert!(juger_ouverture_auto(Some("0"), true).is_none() && juger_ouverture_auto(None, false).is_none());
+        assert!(juger_smartscreen(Some("Off"), None).is_some() && juger_smartscreen(None, Some(0)).is_some());
+        assert!(juger_smartscreen(Some("Warn"), None).is_none() && juger_smartscreen(None, Some(1)).is_none());
+        assert!(
+            juger_jeton_distant(Some(1))
+                .unwrap()
+                .correctif
+                .as_ref()
+                .unwrap()
+                .automatique
+        );
+        assert!(juger_jeton_distant(Some(0)).is_none());
+        assert!(juger_integrite_memoire(Some(1)).probleme.is_none());
+        assert_eq!(juger_integrite_memoire(None).probleme, Some(Niveau::Info));
+        let p = juger_pause(Some("2026-11-02T09:00:00Z"), "2026-10-19").unwrap();
+        assert!(p.message.contains("2026-11-02"));
+        assert!(
+            juger_pause(Some("2026-10-01T09:00:00Z"), "2026-10-19").is_none()
+                && juger_pause(None, "2026-10-19").is_none()
+        );
     }
 }

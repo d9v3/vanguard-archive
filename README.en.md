@@ -76,7 +76,8 @@ In the menu, choose **1** (full check), then **2** (fix). Arrows, Enter, and Esc
   programs abandoned by their publisher (Flash, Java 7, Office 2016…), browsers that no longer update; forgotten
   accounts (active but unused for six months).
 - Windows: WDigest (passwords in clear text in memory), Local Security Authority protection, PowerShell 2.0, Remote
-  Assistance; Linux: automatic security updates.
+  Assistance, automatic sign-in (and password in clear text in the registry), SmartScreen off, account control off
+  for remote connections, memory integrity, paused updates; Linux: automatic security updates.
 - Passwords saved in the browser without protection, sensitive files lying around (passwords or keys in clear text),
   missing backup with its set-up offered.
 - Health: disk space, SMART status of the disks (without root), battery, temperatures.
