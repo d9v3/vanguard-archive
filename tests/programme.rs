@@ -506,3 +506,94 @@ fn sans_internet_chaque_outil_le_dit() {
         s.erreurs
     );
 }
+
+/// Les outils de la 0.61 et de la 0.62, en lecture seule ou refusés : ils s'ouvrent, disent ce qu'ils voient et ne
+/// changent rien. (Le rapport à laisser n'est pas lancé ici : il ouvre le navigateur.)
+#[test]
+fn outils_recents_sans_rien_changer() {
+    let camera = gardien("fr", &["camera-micro"], "", 60);
+    assert_eq!(camera.code, Some(0), "{}", camera.erreurs);
+    assert!(
+        sans_couleurs(&camera.texte).contains("Caméra et micro : qui s'en sert ?"),
+        "{}",
+        camera.texte
+    );
+    let quarantaine = gardien("fr", &["quarantaine"], "", 30);
+    assert_eq!(quarantaine.code, Some(0), "{}", quarantaine.erreurs);
+    assert!(
+        sans_couleurs(&quarantaine.texte).contains("La quarantaine est vide."),
+        "{}",
+        quarantaine.texte
+    );
+    let copie = gardien("fr", &["verifier-copie", "/chemin/qui/n-existe/pas"], "", 30);
+    assert_eq!(copie.code, Some(0), "{}", copie.erreurs);
+    assert!(
+        sans_couleurs(&copie.texte).contains("Aucune copie de Gardien ici"),
+        "{}",
+        copie.texte
+    );
+    // Parcours « Mon compte a été piraté », quitté à la première question.
+    let compte = gardien("en", &["troubleshoot", "account"], "", 30);
+    assert_eq!(compte.code, Some(0), "{}", compte.erreurs);
+    assert!(
+        sans_couleurs(&compte.texte).contains("My account was hacked"),
+        "{}",
+        compte.texte
+    );
+    let aide = gardien("en", &["--help"], "", 30);
+    for commande in [
+        "camera-micro",
+        "quarantaine",
+        "verifier-copie",
+        "verifier-cle",
+        "sauvegarde-auto",
+        "raccourci",
+        "a-laisser",
+    ] {
+        assert!(aide.texte.contains(commande), "aide sans « {commande} »");
+    }
+}
+
+/// Raccourci sur cet ordinateur, dans un dossier personnel jetable : refusé, rien n'est posé ; posé puis retiré, il
+/// apparaît puis disparaît. Linux seulement : sous Windows et macOS, il va sur le Bureau.
+#[test]
+fn raccourci_pose_puis_retire() {
+    if !cfg!(target_os = "linux") {
+        return;
+    }
+    let refus = gardien("fr", &["raccourci"], "n\n", 30);
+    assert_eq!(refus.code, Some(0), "{}", refus.erreurs);
+    assert!(
+        !sans_couleurs(&refus.texte).contains("Raccourci posé"),
+        "{}",
+        refus.texte
+    );
+    // Une même maison pour les deux lancements : le dossier personnel jetable est refait à chaque fois, donc chacun
+    // se vérifie seul.
+    let pose = gardien("fr", &["raccourci", "on"], "", 30);
+    assert_eq!(pose.code, Some(0), "{}", pose.erreurs);
+    assert!(sans_couleurs(&pose.texte).contains("Raccourci posé"), "{}", pose.texte);
+    let retire = gardien("fr", &["raccourci", "off"], "", 30);
+    assert_eq!(retire.code, Some(0), "{}", retire.erreurs);
+}
+
+/// Les outils qui écrivent sur un disque s'ouvrent et rendent la main quand on revient sans rien choisir (Entrée) ;
+/// la clé GARDIEN, et chacune de ses partitions, n'est jamais proposée.
+#[test]
+fn outils_de_disque_quittes_sans_rien_ecrire() {
+    if !cfg!(target_os = "linux") {
+        return;
+    }
+    let cle = gardien("fr", &["verifier-cle"], "\n", 30);
+    assert_eq!(cle.code, Some(0), "{}", cle.erreurs);
+    let t = sans_couleurs(&cle.texte);
+    assert!(t.contains("VÉRIFIER MA CLÉ"), "{t}");
+    for partition in ["GARDIEN ", "GARDIENLOG", "VTOYEFI", "WIN11"] {
+        assert!(!t.contains(&format!("  {partition}")), "{partition} proposée : {t}");
+    }
+    assert!(!t.contains("Commencer ?"), "{t}");
+    let sauvegarde = gardien("fr", &["sauvegarde-auto"], "\n\n", 60);
+    assert_eq!(sauvegarde.code, Some(0), "{}", sauvegarde.erreurs);
+    let t = sans_couleurs(&sauvegarde.texte);
+    assert!(t.contains("SAUVEGARDE AUTOMATIQUE"), "{t}");
+}
