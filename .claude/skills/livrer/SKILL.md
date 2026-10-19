@@ -21,11 +21,11 @@ sans rien envoyer : `VANGUARD_INTERMEDIAIRE=1 outils/deployer.sh --local`.
    fichiers : arrête-toi et demande. Si les captures n'ont pas pu se faire, le dire. Rien n'est poussé si un détail
    personnel paraît ou si un lien est mort (`outils/liens.py`) : corriger, puis relancer `outils/deployer.sh`.
    Un lien douteux montré : l'ouvrir (WebFetch) ; bon mais refusé aux programmes, l'ajouter à `outils/liens.txt`.
-4. Page de la version (Releases) : `deployer.sh` la publie tout seul pour une 0.x.0 (`outils/publier-version.sh` :
-   trois programmes, empreintes, notes tirées des commits de version depuis la page précédente, aperçu par
-   `--notes` ; version macOS reprise du passage de la branche sur le Mac, puis copiée sur la clé ; notification ;
-   seule la dernière version garde sa page). Une 0.x.y importante (sécurité, défaut qui gêne) : lancer ensuite
-   `outils/publier-version.sh`. Sans page : la ligne « sans page sur GitHub » le dit, et la suivante la reprendra.
+4. Page de la version (Releases) : `deployer.sh` la publie tout seul pour chaque publication, 0.x.0 comme 0.x.y
+   (`outils/publier-version.sh` : trois programmes, empreintes, notes tirées des commits de version depuis la page
+   précédente, aperçu par `--notes` ; version macOS reprise du passage de la branche sur le Mac, puis copiée sur la
+   clé ; notification ; seule la dernière version garde sa page). Une version intermédiaire
+   (`VANGUARD_INTERMEDIAIRE=1`) n'en a pas : la ligne « sans page sur GitHub » le dit, et la suivante la reprendra.
    S'il l'a ratée, il dit pourquoi : corriger, puis relancer `outils/publier-version.sh`.
 5. Mises à jour qui suivent chaque version :
    - page du dépôt : toute seule après chaque envoi (`outils/github.py` applique `.github/depot.json` : description

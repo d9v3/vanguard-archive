@@ -28,10 +28,10 @@ Réponses à l'utilisateur en français, claires, avec le pourquoi.
 - Publication du jour : `outils/livrer-branche.sh <branche> <worktree>` (commit de version en tête : garde-fou, Mac
   de GitHub, vérification complète pendant qu'il compile, fusion rapide, puis `outils/deployer.sh`). Entre deux
   publications, sans rien envoyer : `outils/deployer.sh --local` (binaire local, clé USB ; avec
-  `VANGUARD_INTERMEDIAIRE=1`, rien dans la VM). `deployer.sh` publie la page de la version (Releases) pour une 0.x.0,
-  ou une 0.x.y importante avec `--publier` (correctif de sécurité, défaut qui gêne) ; elle reprend les versions
-  d'avant sans page. Pour chaque page, il refait aussi les captures du README (`outils/captures.py`, sur une copie
-  des données, ce qui identifierait la maison masqué) et les commite à part.
+  `VANGUARD_INTERMEDIAIRE=1`, rien dans la VM). `deployer.sh` publie la page de chaque publication (Releases), 0.x.0
+  comme 0.x.y ; elle reprend les versions intermédiaires d'avant, qui n'ont pas la leur. Pour chaque page, il refait
+  aussi les captures du README (`outils/captures.py`, sur une copie des données, ce qui identifierait la maison
+  masqué) et les commite à part.
 - Liens : `outils/liens.py` les vérifie tous (`--hors-ligne` : les internes seulement), tout seul avant chaque envoi
   et chaque version. Un lien qu'on ne peut pas ouvrir tel quel (API, espace de noms, site qui refuse les programmes)
   se décrit dans `outils/liens.txt`.

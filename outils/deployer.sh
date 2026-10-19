@@ -6,8 +6,8 @@
 #   outils/deployer.sh --sans-compiler copier les dernières versions compilées (après chaque compilation)
 #   outils/deployer.sh --local         comme sans option, mais rien ne part sur GitHub (ni le code, ni les tickets
 #                                      du journal) ; le service de copie qui suit la compilation le respecte aussi
-#   outils/deployer.sh --publier       comme sans option, et publie la page de la version (Releases) même pour une
-#                                      0.x.y : sans l'option, seule une 0.x.0 a la sienne
+#   outils/deployer.sh --publier       comme sans option (gardée pour les anciens appels : chaque publication a
+#                                      désormais sa page)
 # VANGUARD_INTERMEDIAIRE=1 : une version d'une série livrée d'affilée. Pas de page (la dernière de la série reprend
 # leurs notes) ni de dépôt dans la VM Windows (son test automatique passerait sur chacune) : le Mac de GitHub et la VM
 # ne voient que la dernière.
@@ -20,10 +20,8 @@ WINDOWS=target/x86_64-pc-windows-gnu/release/vanguard.exe
 # Commit dont viennent les binaires compilés : on ne recompile pas une version déjà compilée.
 COMMIT_COMPILE=target/.commit-compile
 MODE=${1:-}
-FORCER_PUBLICATION=""
 if [[ $MODE == --publier ]]; then
   MODE=""
-  FORCER_PUBLICATION=1
 fi
 # « Seulement sur cet ordinateur » : rien n'est envoyé sur GitHub. Le repère dure 2 h, assez pour le service de copie
 # que la compilation déclenche (--sans-compiler, qui sinon pousserait) ; un déploiement normal l'efface.
@@ -106,10 +104,10 @@ if [[ $MODE == --branchement ]]; then
 elif [[ $MODE != --sans-compiler ]]; then
   compiler
 fi
-# Page de la version sur GitHub (Releases) : une 0.x.0 a la sienne, une 0.x.y seulement avec --publier. Les autres
-# vont quand même sur la clé, dans la VM et sur GitHub (le code), et la page suivante les reprend toutes
-# (outils/publier-version.sh). Moins de pages : moins de minutes de Mac sur GitHub, et moins de programmes neufs, que
-# Defender et SmartScreen ne connaissent pas encore.
+# Page de la version sur GitHub (Releases) : chaque publication a la sienne, 0.x.0 comme 0.x.y. Il n'y en a qu'une par
+# jour : le lien « dernière version » du README mène toujours à celle du jour, et le Mac de GitHub ne compile qu'une
+# fois par jour. Une version intermédiaire (VANGUARD_INTERMEDIAIRE) va sur la clé et sur GitHub (le code) sans page :
+# la suivante la reprend (outils/publier-version.sh).
 # Captures d'écran du README (assets/captures/) : refaites pour chaque page publiée, puisque le menu montre le numéro
 # de la version téléchargée. Vanguard y tourne sur une copie des données, sans rien toucher de vrai, et ce qui
 # identifierait la maison est masqué (outils/captures.py). Elles partent dans leur propre commit, comme la liste des
@@ -117,7 +115,7 @@ fi
 A_PUBLIER=""
 if [[ -z $MODE ]]; then
   VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
-  if [[ -z $LOCAL && -z ${VANGUARD_INTERMEDIAIRE:-} && ( $VERSION =~ ^[0-9]+\.[0-9]+\.0$ || -n $FORCER_PUBLICATION ) ]] &&
+  if [[ -z $LOCAL && -z ${VANGUARD_INTERMEDIAIRE:-} ]] &&
     ! timeout 30 gh release view "v$VERSION" >/dev/null 2>&1; then
     A_PUBLIER=1
   fi
@@ -155,7 +153,7 @@ elif git remote get-url origin >/dev/null 2>&1; then
     if [[ -n $A_PUBLIER ]]; then
       PUBLIER=1
     elif [[ -z $MODE ]] && ! timeout 30 gh release view "v$VERSION" >/dev/null 2>&1; then
-      echo "Version v$VERSION sans page sur GitHub (une 0.x.y n'en a qu'avec --publier) : la prochaine page la reprendra."
+      echo "Version v$VERSION sans page sur GitHub (version intermédiaire) : la prochaine page la reprendra."
     fi
   else
     echo "GitHub injoignable : le code partira au prochain déploiement."

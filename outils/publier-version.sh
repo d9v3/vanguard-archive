@@ -3,7 +3,7 @@
 # README relie (…/releases/latest/download/<nom>), et leurs empreintes SHA-256. À lancer après outils/deployer.sh,
 # quand la version est compilée et poussée. La version macOS vient d'un Mac de GitHub (.github/workflows/macos.yml) :
 # compilée pour ce commit si elle manque, en quelques minutes. Les notes reprennent toutes les versions déployées depuis
-# la page précédente : outils/deployer.sh ne publie pas chaque 0.x.y.
+# la page précédente : une version intermédiaire (VANGUARD_INTERMEDIAIRE) n'a pas la sienne.
 #   outils/publier-version.sh           publier la version de Cargo.toml
 #   outils/publier-version.sh --notes   montrer les notes qu'elle aurait, sans rien publier
 set -euo pipefail

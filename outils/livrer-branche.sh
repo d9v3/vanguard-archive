@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Livre la publication du jour, une branche déjà commitée (commit de version « … (vX.Y.Z) » en tête) : rebase sur
 # master, passage sur le Mac de GitHub, vérification complète pendant qu'il compile, fusion rapide dans master,
-# déploiement (outils/deployer.sh : binaire, clé, VM, GitHub, page pour une 0.x.0), puis ménage de la branche et du
+# déploiement (outils/deployer.sh : binaire, clé, VM, GitHub, page de la version), puis ménage de la branche et du
 # worktree. S'arrête à la première étape en échec, sans rien fusionner.
 #   outils/livrer-branche.sh <branche> <worktree>
 # VANGUARD_INTERMEDIAIRE=1 : version intermédiaire d'une série, sans passage sur le Mac (seule la dernière y passe).
