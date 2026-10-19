@@ -90,6 +90,24 @@ fn ps_delai(script: &str, secondes: u64) -> Option<String> {
 }
 
 /// Constat quand une vérification n'a pas pu se faire : on le dit, on ne conclut jamais « OK ».
+/// Une valeur du registre, lue directement (winreg) : sans lancer PowerShell, dont chaque démarrage coûte près
+/// d'une demi-seconde et charge .NET (une vingtaine à la fois au bilan se gênaient).
+pub(super) fn registre<T: winreg::types::FromRegValue>(racine: winreg::HKEY, cle: &str, valeur: &str) -> Option<T> {
+    winreg::RegKey::predef(racine)
+        .open_subkey(cle)
+        .ok()?
+        .get_value(valeur)
+        .ok()
+}
+
+/// Un réglage lu dans le registre qui manque ou ne se lit pas (sans PowerShell : ce n'est pas lui qui est en cause).
+pub(super) fn registre_illisible(categorie: &'static str) -> Constat {
+    impossible(
+        categorie,
+        tr!("réglage du registre illisible", "registry setting unreadable"),
+    )
+}
+
 pub(super) fn illisible(categorie: &'static str) -> Constat {
     impossible(
         categorie,
@@ -238,16 +256,36 @@ pub fn powershell_admin_chacune(correctifs: &[Vec<String>]) -> Vec<bool> {
     etats
 }
 
+/// État de chaque profil du pare-feu, lu dans le registre (les valeurs que rend Get-NetFirewallProfile, sans
+/// lancer PowerShell : le pare-feu passe avant toutes les autres vérifications, son attente retardait tout le bilan).
+/// Une stratégie de groupe passe avant le réglage local, comme pour Windows. Un profil illisible n'est pas listé.
+fn profils_pare_feu() -> Vec<(&'static str, bool)> {
+    use winreg::enums::HKEY_LOCAL_MACHINE;
+    [
+        ("Domain", "DomainProfile"),
+        ("Private", "StandardProfile"),
+        ("Public", "PublicProfile"),
+    ]
+    .into_iter()
+    .filter_map(|(nom, cle)| {
+        let strategie = registre::<u32>(
+            HKEY_LOCAL_MACHINE,
+            &format!(r"SOFTWARE\Policies\Microsoft\WindowsFirewall\{cle}"),
+            "EnableFirewall",
+        );
+        let local = registre::<u32>(
+            HKEY_LOCAL_MACHINE,
+            &format!(r"SYSTEM\CurrentControlSet\Services\SharedAccess\Parameters\FirewallPolicy\{cle}"),
+            "EnableFirewall",
+        );
+        strategie.or(local).map(|v| (nom, v != 0))
+    })
+    .collect()
+}
+
 fn pare_feu() -> Constat {
-    let Some(etat) = ps("Get-NetFirewallProfile | ForEach-Object { \"$($_.Name)=$($_.Enabled)\" }") else {
-        return illisible("Pare-feu");
-    };
-    let profils: Vec<(&str, &str)> = etat.lines().filter_map(|l| l.trim().split_once('=')).collect();
-    let off: Vec<&str> = profils
-        .iter()
-        .filter(|(_, v)| !v.eq_ignore_ascii_case("true"))
-        .map(|(n, _)| *n)
-        .collect();
+    let profils = profils_pare_feu();
+    let off: Vec<&str> = profils.iter().filter(|(_, actif)| !actif).map(|(n, _)| *n).collect();
     match (profils.is_empty(), off.join(", ")) {
         (true, _) => alerte(
             "Pare-feu",
@@ -405,10 +443,11 @@ fn smb1() -> Option<Constat> {
 
 fn bureau_distance() -> Constat {
     let cle = r"HKLM:\System\CurrentControlSet\Control\Terminal Server";
-    let actif = match ps(&format!("(Get-ItemProperty '{cle}').fDenyTSConnections")).as_deref() {
-        Some("0") => true,
-        Some("1") => false,
-        _ => return illisible("Bureau à distance"),
+    let terminal = r"System\CurrentControlSet\Control\Terminal Server";
+    let actif = match registre::<u32>(winreg::enums::HKEY_LOCAL_MACHINE, terminal, "fDenyTSConnections") {
+        Some(0) => true,
+        Some(1) => false,
+        _ => return registre_illisible("Bureau à distance"),
     };
     if !actif {
         return ok(
@@ -416,10 +455,11 @@ fn bureau_distance() -> Constat {
             tr!("Bureau à distance (RDP) désactivé.", "Remote Desktop (RDP) off."),
         );
     }
-    let nla = ps(&format!(
-        r"(Get-ItemProperty '{cle}\WinStations\RDP-Tcp').UserAuthentication"
-    ))
-    .is_some_and(|v| v == "1");
+    let nla = registre::<u32>(
+        winreg::enums::HKEY_LOCAL_MACHINE,
+        &format!(r"{terminal}\WinStations\RDP-Tcp"),
+        "UserAuthentication",
+    ) == Some(1);
     let couper = format!("Set-ItemProperty '{cle}' -Name fDenyTSConnections -Value 1");
     // Session ouverte PAR le Bureau à distance (SESSIONNAME = RDP-Tcp#…) : le couper couperait l'utilisateur
     // lui-même. Jamais en correction automatique dans ce cas.
@@ -480,11 +520,13 @@ pub fn session_a_distance() -> bool {
 const CLE_UAC: &str = r"HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System";
 
 fn uac() -> Constat {
-    let p = ps(&format!(
-        "$p = Get-ItemProperty '{CLE_UAC}'; \"$($p.EnableLUA)|$($p.ConsentPromptBehaviorAdmin)\""
-    ));
-    let (lua, consentement) = p.as_deref().and_then(|p| p.split_once('|')).unzip();
-    juger_uac(lua, consentement).unwrap_or_else(|| illisible("UAC"))
+    let cle = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System";
+    let lire = |v: &str| registre::<u32>(winreg::enums::HKEY_LOCAL_MACHINE, cle, v).map(|n| n.to_string());
+    juger_uac(
+        lire("EnableLUA").as_deref(),
+        lire("ConsentPromptBehaviorAdmin").as_deref(),
+    )
+    .unwrap_or_else(|| registre_illisible("UAC"))
 }
 
 /// L'UAC, d'après EnableLUA et ConsentPromptBehaviorAdmin (vide quand absent : 5, la valeur de Windows). `None` si

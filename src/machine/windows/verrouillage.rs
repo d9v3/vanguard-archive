@@ -2,23 +2,52 @@
 //! machine (stratégie InactivityTimeoutSecs), l'écran de veille avec mot de passe, et la mise en veille quand Windows
 //! redemande la connexion au réveil. La plus courte compte ; aucune, l'écran ne se verrouille jamais.
 
-use super::super::Constat;
-use super::{illisible, ps};
+use super::super::{Constat, impossible};
+use super::registre;
 use crate::ui::tr;
 
 pub(super) fn verrouillage() -> Constat {
-    let script = r"
-$d = Get-ItemProperty 'HKCU:\Control Panel\Desktop' -ErrorAction SilentlyContinue
-$p = Get-ItemProperty 'HKCU:\Software\Policies\Microsoft\Windows\Control Panel\Desktop' -ErrorAction SilentlyContinue
-$s = Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' -ErrorAction SilentlyContinue
-'INACTIF|' + $s.InactivityTimeoutSecs
-'ECRAN|' + $d.ScreenSaveActive + '|' + $d.ScreenSaverIsSecure + '|' + $d.ScreenSaveTimeOut
-'ECRAN_STRATEGIE|' + $p.ScreenSaveActive + '|' + $p.ScreenSaverIsSecure + '|' + $p.ScreenSaveTimeOut
-'VEILLE|' + ((powercfg /q SCHEME_CURRENT SUB_SLEEP STANDBYIDLE) -join ' ')
-'CONNEXION|' + ((powercfg /q SCHEME_CURRENT SUB_NONE CONSOLELOCK) -join ' ')";
-    let Some(sortie) = ps(script) else {
-        return illisible("Verrouillage");
+    use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE};
+    // Lu sans PowerShell : le registre directement, et powercfg, un programme ordinaire.
+    let texte = |racine, cle: &str, valeur: &str| registre::<String>(racine, cle, valeur).unwrap_or_default();
+    let ecran = |racine, cle: &str| {
+        ["ScreenSaveActive", "ScreenSaverIsSecure", "ScreenSaveTimeOut"]
+            .map(|v| texte(racine, cle, v))
+            .join("|")
     };
+    let powercfg = |sous_groupe: &str, reglage: &str| {
+        crate::commande::lancer(
+            std::process::Command::new("powercfg").args(["/q", "SCHEME_CURRENT", sous_groupe, reglage]),
+            15,
+        )
+        .filter(|r| r.code == Some(0))
+        .map(|r| r.sortie.split_whitespace().collect::<Vec<_>>().join(" "))
+    };
+    let (Some(veille), Some(connexion)) = (
+        powercfg("SUB_SLEEP", "STANDBYIDLE"),
+        powercfg("SUB_NONE", "CONSOLELOCK"),
+    ) else {
+        // Sans powercfg, on ne sait rien de la veille : ne pas conclure « jamais verrouillé ».
+        return impossible(
+            "Verrouillage",
+            tr!("powercfg ne répond pas", "powercfg does not answer"),
+        );
+    };
+    let inactif = registre::<u32>(
+        HKEY_LOCAL_MACHINE,
+        r"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System",
+        "InactivityTimeoutSecs",
+    )
+    .map(|s| s.to_string())
+    .unwrap_or_default();
+    let sortie = format!(
+        "INACTIF|{inactif}\nECRAN|{}\nECRAN_STRATEGIE|{}\nVEILLE|{veille}\nCONNEXION|{connexion}\n",
+        ecran(HKEY_CURRENT_USER, r"Control Panel\Desktop"),
+        ecran(
+            HKEY_CURRENT_USER,
+            r"Software\Policies\Microsoft\Windows\Control Panel\Desktop"
+        ),
+    );
     super::super::verrouillage_selon_delai(
         delai(&sortie),
         tr!(
