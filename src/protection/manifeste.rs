@@ -34,6 +34,7 @@ const EXCLUS: &[&str] = &[
     ".Trashes",
     ".Spotlight-V100",
     ".fseventsd",
+    ".TemporaryItems",
 ];
 /// Au-delà, le fichier n'est pas lu : sa taille seulement (une image disque se lit en une minute).
 const GROS: u64 = 64 << 20;
@@ -79,11 +80,12 @@ fn reference() -> PathBuf {
     crate::reseau::dossier_local().join("manifeste-cle.json")
 }
 
-/// Un chemin de la clé qui ne compte pas : dossier exclu, fichiers que macOS pose sur une clé (« ._x », .DS_Store).
+/// Un chemin de la clé qui ne compte pas : dossier exclu, corbeille d'un gestionnaire de fichiers (« .Trash-1000 »,
+/// créée dès qu'on supprime quelque chose sur la clé), fichiers que macOS pose sur une clé (« ._x », .DS_Store).
 fn exclu(relatif: &str) -> bool {
     let premier = relatif.split('/').next().unwrap_or_default();
     let nom = relatif.rsplit('/').next().unwrap_or_default();
-    EXCLUS.contains(&premier) || nom.starts_with("._") || nom == ".DS_Store"
+    EXCLUS.contains(&premier) || premier.starts_with(".Trash-") || nom.starts_with("._") || nom == ".DS_Store"
 }
 
 /// Les fichiers de la clé (chemin relatif, taille), sans les liens ni les dossiers exclus, triés.
@@ -439,6 +441,8 @@ mod tests {
         assert!(exclu("ventoy/ventoy.json"));
         assert!(exclu("Linux/._gardien"));
         assert!(exclu(".DS_Store"));
+        assert!(exclu(".Trash-1000/files/vieux.txt"));
+        assert!(exclu(".TemporaryItems/x"));
         assert!(!exclu("Linux/gardien"));
         assert!(!exclu("autorun.inf"));
         assert!(!exclu("source/outils/images-cle.sh"));
