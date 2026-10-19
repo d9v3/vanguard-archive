@@ -1,8 +1,4 @@
-<p align="center">
-  <img src="assets/icones/vanguard-256.png" alt="Vanguard logo: a V-shaped shield with a padlock in the middle" width="150">
-</p>
-
-<h1 align="center">Vanguard</h1>
+<h1 align="center"><img src="assets/banniere.png" alt="Vanguard" width="600"></h1>
 
 <p align="center"><a href="README.md">Français</a> · <b>English</b></p>
 

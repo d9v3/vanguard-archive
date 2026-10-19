@@ -1,8 +1,4 @@
-<p align="center">
-  <img src="assets/icones/vanguard-256.png" alt="Logo de Vanguard : un V en bouclier, un cadenas au centre" width="150">
-</p>
-
-<h1 align="center">Vanguard</h1>
+<h1 align="center"><img src="assets/banniere.png" alt="Vanguard" width="600"></h1>
 
 <p align="center"><b>Français</b> · <a href="README.en.md">English</a></p>
 

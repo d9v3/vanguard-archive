@@ -63,7 +63,7 @@ turn on once with `/install-github-app`).
 | `src/chiffrement.rs` | protected key data: encrypted record (XChaCha20-Poly1305), data key kept by the owner and wrapped by the passphrase (Argon2id) |
 | `assets/oui.tsv` | manufacturers by MAC prefix (IEEE list), stored as sorted tables at compile time (`build.rs`) |
 | `assets/yara/` | ReversingLabs YARA rules (MIT license), gathered by `outils/maj-yara.sh` |
-| `assets/logo-source.jpg`, `assets/icones/`, `assets/vanguard.ico` | the logo: the source image and the icons `outils/icone.py` derives from it |
+| `assets/banniere.png`, `assets/icones/`, `assets/vanguard.ico` | the banner and the icon (the V), drawn cell by cell in the terminal banner's lettering by `outils/icone.py` |
 | `LICENCES-TIERCES.txt` | license notices of the included libraries (`outils/licences-tierces.py`) |
 
 ## Build, test, deploy
