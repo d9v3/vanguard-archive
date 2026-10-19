@@ -84,7 +84,7 @@ const REFERENCES: &str = "manifestes-cle";
 /// le périphérique monté et /dev/disk/by-uuid. Sous Windows et macOS, aucun : le déploiement, qui écrit les
 /// références, se fait sous Linux ; l'ancienne référence unique y sert encore.
 #[cfg(target_os = "linux")]
-fn identifiant_volume(racine: &Path) -> Option<String> {
+pub(crate) fn identifiant_volume(racine: &Path) -> Option<String> {
     let (source, _) = crate::protection::cle::montage(racine)?;
     let peripherique = std::fs::canonicalize(&source).ok()?;
     let id = std::fs::read_dir("/dev/disk/by-uuid")
@@ -96,7 +96,7 @@ fn identifiant_volume(racine: &Path) -> Option<String> {
 }
 
 #[cfg(not(target_os = "linux"))]
-fn identifiant_volume(_racine: &Path) -> Option<String> {
+pub(crate) fn identifiant_volume(_racine: &Path) -> Option<String> {
     None
 }
 

@@ -160,21 +160,57 @@ fn chemin_systemd(p: &Path) -> Option<String> {
     (!t.chars().any(char::is_control)).then(|| t.replace('%', "%%"))
 }
 
+/// Pourquoi les unités ne s'écrivent pas.
+#[derive(Debug, PartialEq, Eq)]
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+pub(crate) enum Refus {
+    /// Un chemin contient un caractère de contrôle.
+    Controle,
+    /// L'identité du disque (UUID de son système de fichiers, findmnt pour la vérifier) ne se lit pas.
+    Identite,
+}
+
+/// L'UUID tel qu'il peut entrer dans une ligne d'unité : lettres, chiffres et tirets seulement.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn uuid_valide(uuid: &str) -> bool {
+    !uuid.is_empty() && uuid.len() <= 64 && uuid.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+}
+
+/// La ligne qui fait vérifier le disque à chaque passage. Le chemin de montage vient de l'étiquette du disque, que
+/// choisit qui l'a formaté : sans elle, tout disque de même nom recevrait chaque jour la copie des dossiers.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+const VERIFICATION: &str = "ExecCondition=";
+
+/// L'unité posée vérifie-t-elle l'identité du disque ? Celles d'avant la 0.78 ne regardaient que son chemin.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn verifie_le_disque(service: &str) -> bool {
+    service
+        .lines()
+        .any(|l| l.starts_with(VERIFICATION) && l.contains(" --source UUID="))
+}
+
 /// Les deux fichiers d'unité : (timer, service). `racine` : le disque, dont le montage conditionne le passage ;
 /// `destination` : le dossier de cet ordinateur dessus ; `sources` : les dossiers personnels copiés tels quels.
+/// `findmnt` et `uuid` : chaque passage vérifie que le système de fichiers monté à `racine` est bien celui choisi ;
+/// un autre disque au même endroit, et le passage est sauté sans erreur (code 1 de findmnt, `ExecCondition`).
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 pub(crate) fn unites(
     rsync: &Path,
+    findmnt: Option<&Path>,
+    uuid: Option<&str>,
     racine: &Path,
     destination: &Path,
     sources: &[PathBuf],
     fat: bool,
-) -> Option<(String, String)> {
-    let tous = [rsync, racine, destination]
+) -> Result<(String, String), Refus> {
+    let (Some(findmnt), Some(uuid)) = (findmnt, uuid.filter(|u| uuid_valide(u))) else {
+        return Err(Refus::Identite);
+    };
+    let tous = [rsync, findmnt, racine, destination]
         .into_iter()
         .chain(sources.iter().map(PathBuf::as_path));
     for p in tous {
-        chemin_systemd(p)?;
+        chemin_systemd(p).ok_or(Refus::Controle)?;
     }
     let timer = format!(
         "[Unit]\nDescription=Sauvegarde Vanguard, chaque jour\n\n[Timer]\nOnCalendar=*-*-* {HEURE}\nPersistent=true\nRandomizedDelaySec=10min\n\n[Install]\nWantedBy=timers.target\n"
@@ -196,13 +232,18 @@ pub(crate) fn unites(
     ]);
     commande.extend(sources.iter().map(|s| citer_systemd(&s.display().to_string())));
     commande.push(citer_systemd(&format!("{}/", destination.display())));
+    let verification = format!(
+        "{VERIFICATION}{} --source UUID={uuid} --mountpoint {}",
+        citer_systemd(&findmnt.display().to_string()),
+        citer_systemd(&racine.display().to_string())
+    );
     let service = format!(
-        "[Unit]\nDescription=Sauvegarde Vanguard vers {}\n# Disque débranché : rien ne se passe, sans erreur.\nConditionPathIsMountPoint={}\n\n[Service]\nType=oneshot\nNice=10\nIOSchedulingClass=idle\n# 24 : un fichier a disparu pendant la copie, normal pour un dossier en usage.\nSuccessExitStatus=24\nExecStart={}\n",
-        chemin_systemd(destination)?,
-        chemin_systemd(racine)?,
+        "[Unit]\nDescription=Sauvegarde Vanguard vers {}\n# Disque débranché : rien ne se passe, sans erreur.\nConditionPathIsMountPoint={}\n\n[Service]\nType=oneshot\nNice=10\nIOSchedulingClass=idle\n# Un autre disque monté au même endroit (même nom) : passage sauté.\n{verification}\n# 24 : un fichier a disparu pendant la copie, normal pour un dossier en usage.\nSuccessExitStatus=24\nExecStart={}\n",
+        chemin_systemd(destination).ok_or(Refus::Controle)?,
+        chemin_systemd(racine).ok_or(Refus::Controle)?,
         commande.join(" ")
     );
-    Some((timer, service))
+    Ok((timer, service))
 }
 
 /// Le système de fichiers monté à `racine` (« vfat », « ext4 »…), d'après /proc/mounts.
@@ -577,12 +618,32 @@ fn mettre_en_place() -> Option<MiseEnPlace> {
     }
     let rsync = rsync?;
     let fat = systeme_de_fichiers(&disque.racine).is_some_and(|s| sans_liens(&s));
-    let Some((timer, service)) = unites(&rsync, &disque.racine, &destination, &sources, fat) else {
-        mauvais(tr!(
-            "Le nom de ce disque ou d'un dossier contient un caractère de contrôle : rien n'est posé. Renomme le disque, puis recommence.",
-            "The name of this disk or of a folder contains a control character: nothing is set up. Rename the disk, then start again."
-        ));
-        return None;
+    let uuid = crate::protection::manifeste::identifiant_volume(&disque.racine);
+    let findmnt = dans_le_path("findmnt");
+    let (timer, service) = match unites(
+        &rsync,
+        findmnt.as_deref(),
+        uuid.as_deref(),
+        &disque.racine,
+        &destination,
+        &sources,
+        fat,
+    ) {
+        Ok(unites) => unites,
+        Err(Refus::Controle) => {
+            mauvais(tr!(
+                "Le nom de ce disque ou d'un dossier contient un caractère de contrôle : rien n'est posé. Renomme le disque, puis recommence.",
+                "The name of this disk or of a folder contains a control character: nothing is set up. Rename the disk, then start again."
+            ));
+            return None;
+        }
+        Err(Refus::Identite) => {
+            mauvais(tr!(
+                "L'identité de ce disque (UUID de son système de fichiers) ne se lit pas : rien n'est posé. Sans elle, n'importe quel disque du même nom recevrait la copie de tes dossiers.",
+                "This disk's identity (its file system UUID) cannot be read: nothing is set up. Without it, any disk with the same name would receive the copy of your folders."
+            ));
+            return None;
+        }
     };
     let dossier = dossier_unites();
     afficher_aligne(
@@ -902,7 +963,18 @@ pub fn menu() {
     let notes = charger_de(&chemin);
     println!();
     match &notes.mise_en_place {
-        Some(m) => info(&decrire(m)),
+        Some(m) => {
+            info(&decrire(m));
+            #[cfg(target_os = "linux")]
+            if matches!(m, MiseEnPlace::Systemd { .. })
+                && std::fs::read_to_string(dossier_unites().join(SERVICE)).is_ok_and(|s| !verifie_le_disque(&s))
+            {
+                mauvais(tr!(
+                    "Cette sauvegarde reconnaît son disque à son seul nom : un autre disque du même nom recevrait la copie de tes dossiers. Annule-la, puis remets-la en place : Vanguard vérifie maintenant l'identité du disque à chaque passage.",
+                    "This backup recognizes its disk by name only: another disk with the same name would receive the copy of your folders. Undo it, then set it up again: Vanguard now checks the disk's identity at every run."
+                ));
+            }
+        }
         None => info(tr!(
             "Vanguard n'a rien mis en place ici. Le bilan (catégorie Sauvegardes) dit si une sauvegarde existe déjà par ailleurs.",
             "Vanguard set nothing up here. The check (Backups category) says whether a backup already exists otherwise."
@@ -955,6 +1027,11 @@ pub fn menu() {
 mod tests {
     use super::*;
 
+    fn findmnt() -> &'static Path {
+        Path::new("/usr/bin/findmnt")
+    }
+    const UUID: Option<&str> = Some("1A2B-3C4D");
+
     #[test]
     fn sauvegarde_vers_une_cle_fat() {
         let montages = "/dev/sda1 /run/media/alice/EMTEC\\040D280C vfat rw,nosuid 0 0\n/dev/sdb1 /run/media/alice/Externe ext4 rw 0 0\n";
@@ -970,6 +1047,8 @@ mod tests {
         let regle = |fat| {
             unites(
                 Path::new("/usr/bin/rsync"),
+                Some(findmnt()),
+                UUID,
                 Path::new("/run/media/alice/Cle"),
                 Path::new("/run/media/alice/Cle/Sauvegarde-Vanguard/pc"),
                 &[PathBuf::from("/home/alice/Documents")],
@@ -989,6 +1068,8 @@ mod tests {
     fn unites_systemd_bien_formees() {
         let (timer, service) = unites(
             Path::new("/usr/bin/rsync"),
+            Some(findmnt()),
+            UUID,
             Path::new("/run/media/alice/Externe"),
             Path::new("/run/media/alice/Externe/Sauvegarde-Vanguard/pc-alice"),
             &[
@@ -999,18 +1080,22 @@ mod tests {
         )
         .unwrap();
         // Un nom de disque piégé (saut de ligne) : rien n'est écrit. Un « % » est doublé pour systemd.
-        assert!(
+        assert_eq!(
             unites(
                 Path::new("/usr/bin/rsync"),
+                Some(findmnt()),
+                UUID,
                 Path::new("/run/media/alice/X\nExecStartPre=/bin/touch /tmp/pirate"),
                 Path::new("/run/media/alice/X\nExecStartPre=/bin/touch /tmp/pirate/Sauvegarde-Vanguard/pc"),
                 &[PathBuf::from("/home/alice/Documents")],
                 false,
-            )
-            .is_none()
+            ),
+            Err(Refus::Controle)
         );
         let (_, cent) = unites(
             Path::new("/usr/bin/rsync"),
+            Some(findmnt()),
+            UUID,
             Path::new("/run/media/alice/100%"),
             Path::new("/run/media/alice/100%/Sauvegarde-Vanguard/pc"),
             &[PathBuf::from("/home/alice/Documents")],
@@ -1029,6 +1114,69 @@ mod tests {
         assert!(exec.ends_with("\"/run/media/alice/Externe/Sauvegarde-Vanguard/pc-alice/\""));
         assert!(!exec.contains("--delete"));
         assert_eq!(citer_systemd(r"a\b"), "\"a\\\\b\"");
+    }
+
+    /// Le disque est reconnu à l'UUID de son système de fichiers, pas à son nom : un autre disque du même nom, monté
+    /// au même endroit, fait sauter le passage. Sans identité lisible, rien n'est posé.
+    #[test]
+    fn le_disque_est_reconnu_a_son_uuid() {
+        let poser = |findmnt: Option<&Path>, uuid: Option<&str>| {
+            unites(
+                Path::new("/usr/bin/rsync"),
+                findmnt,
+                uuid,
+                Path::new("/run/media/alice/Mon disque"),
+                Path::new("/run/media/alice/Mon disque/Sauvegarde-Vanguard/pc"),
+                &[PathBuf::from("/home/alice/Documents")],
+                false,
+            )
+        };
+        let (_, service) = poser(Some(findmnt()), Some("0123abcd-4567-89ef-0123-456789abcdef")).unwrap();
+        let verification = service.lines().find(|l| l.starts_with(VERIFICATION)).unwrap();
+        assert_eq!(
+            verification,
+            "ExecCondition=\"/usr/bin/findmnt\" --source UUID=0123abcd-4567-89ef-0123-456789abcdef --mountpoint \"/run/media/alice/Mon disque\""
+        );
+        // La vérification passe avant la copie.
+        assert!(service.find(VERIFICATION) < service.find("ExecStart="));
+        assert!(verifie_le_disque(&service));
+        // UUID illisible, absent ou qui sortirait de sa ligne ; findmnt introuvable : la mise en place est refusée.
+        for uuid in [
+            None,
+            Some(""),
+            Some("1A2B 3C4D"),
+            Some("x\nExecStartPre=/bin/true"),
+            Some("../../etc"),
+        ] {
+            assert_eq!(poser(Some(findmnt()), uuid), Err(Refus::Identite), "{uuid:?}");
+        }
+        assert_eq!(poser(None, UUID), Err(Refus::Identite));
+        // Une unité posée avant la 0.78 (chemin seulement) est reconnue comme telle, pour le dire au menu.
+        let ancienne = "[Unit]\nDescription=Sauvegarde Vanguard vers /run/media/alice/Externe/Sauvegarde-Vanguard/pc\nConditionPathIsMountPoint=/run/media/alice/Externe\n\n[Service]\nType=oneshot\nSuccessExitStatus=24\nExecStart=\"/usr/bin/rsync\" -a \"/home/alice/Documents\" \"/run/media/alice/Externe/Sauvegarde-Vanguard/pc/\"\n";
+        assert!(!verifie_le_disque(ancienne));
+    }
+
+    /// La vérification de l'unité, faite pour de vrai par findmnt sur la racine de cet ordinateur : le bon UUID passe,
+    /// un autre UUID ou un autre point de montage fait sauter le passage (code 1).
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn findmnt_tranche_comme_l_unite_l_attend() {
+        let Some(findmnt) = dans_le_path("findmnt") else {
+            return;
+        };
+        let Some(uuid) = crate::protection::manifeste::identifiant_volume(Path::new("/")) else {
+            return;
+        };
+        let code = |uuid: &str, point: &str| {
+            std::process::Command::new(&findmnt)
+                .args(["--source", &format!("UUID={uuid}"), "--mountpoint", point])
+                .output()
+                .ok()
+                .and_then(|s| s.status.code())
+        };
+        assert_eq!(code(&uuid, "/"), Some(0));
+        assert_eq!(code("0000-0000", "/"), Some(1));
+        assert_eq!(code(&uuid, "/nexiste/pas"), Some(1));
     }
 
     #[test]
