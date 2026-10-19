@@ -72,6 +72,22 @@ fn charger_de(chemin: &Path) -> Notes {
         .unwrap_or_default()
 }
 
+/// Note ce qui vient d'être mis en place, pour pouvoir l'annuler ; dit si la note n'a pas pu s'écrire.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn noter(m: &MiseEnPlace) {
+    if let Err(e) = ecrire_dans(
+        &fichier_notes(),
+        &Notes {
+            mise_en_place: Some(m.clone()),
+        },
+    ) {
+        mauvais(&trf!(
+            "La note de ce qui a été mis en place n'a pas pu être écrite ({e}) : l'annulation devra se faire à la main.",
+            "The note of what was set up could not be written ({e}): undoing will have to be done by hand."
+        ));
+    }
+}
+
 fn ecrire_dans(chemin: &Path, notes: &Notes) -> std::io::Result<()> {
     if let Some(parent) = chemin.parent() {
         std::fs::create_dir_all(parent)?;
@@ -559,10 +575,20 @@ fn mettre_en_place() -> Option<MiseEnPlace> {
         ));
         return None;
     }
-    if crate::machine::appliquer(&[
+    let active = crate::machine::appliquer(&[
         "systemctl --user daemon-reload".to_string(),
         format!("systemctl --user enable --now {TIMER}"),
-    ]) {
+    ]);
+    let mise_en_place = MiseEnPlace::Systemd {
+        date: aujourd_hui(),
+        destination: destination.display().to_string(),
+        empreinte_timer: empreinte(&timer),
+        empreinte_service: empreinte(&service),
+    };
+    // Noté tout de suite, avant toute autre question : une entrée fermée (Ctrl-D, terminal fermé) arrête Gardien à
+    // la question suivante, et la minuterie tournait alors chaque jour sans note, impossible à annuler par Gardien.
+    noter(&mise_en_place);
+    if active {
         bon(&trf!(
             "Sauvegarde automatique active : chaque jour à {}, vers {}.",
             "Automatic backup on: every day at {}, to {}.",
@@ -590,12 +616,7 @@ fn mettre_en_place() -> Option<MiseEnPlace> {
             "The timer could not be enabled; the files are in place, “Undo” removes them."
         ));
     }
-    Some(MiseEnPlace::Systemd {
-        date: aujourd_hui(),
-        destination: destination.display().to_string(),
-        empreinte_timer: empreinte(&timer),
-        empreinte_service: empreinte(&service),
-    })
+    Some(mise_en_place)
 }
 
 /// macOS : ajoute le disque choisi aux destinations de Time Machine et l'active.
