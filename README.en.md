@@ -60,7 +60,7 @@ In the menu, choose **1** (full check), then **2** (fix). Arrows, Enter, and Esc
 
 **Security check** — a grade from A to F, then each problem with its fix.
 - Firewall, open ports (TCP and UDP), updates and known vulnerabilities, disk encryption, Secure Boot, screen lock,
-  accounts, SSH (and its failed login attempts, from the Internet or from home), sudo, groups worth root (docker,
+  accounts, SSH (and its failed login attempts, from the Internet or from home, and a client that does not check servers), sudo, groups worth root (docker,
   lxd, libvirt, disk), kernel hardening (on macOS: sealed system volume, enforced code signing, library
   validation, added extensions), badly protected secret files, backups, file shares open to everyone (Samba, NFS,
   Windows shares, macOS File Sharing: the password-less access is closed after your consent, named accounts keep
@@ -69,7 +69,7 @@ In the menu, choose **1** (full check), then **2** (fix). Arrows, Enter, and Esc
 - The DNS actually used (and forged answers), added root certificates (HTTPS interception), browser extensions that
   read every site.
 - Wi-Fi: the network's protection (WEP, WPA2, WPA3), and fake access points ("evil twin") that copy its name without
-  a password to lure devices.
+  a password to lure devices; on Linux, saved open networks that reconnect by themselves.
 - Bluetooth: computer visible all the time, and devices paired less than a week ago (a keyboard paired by someone
   else types whatever it wants).
 - Clock set automatically; end of support: Windows 10 and the Windows 11 or macOS versions that no longer get fixes,
@@ -77,7 +77,7 @@ In the menu, choose **1** (full check), then **2** (fix). Arrows, Enter, and Esc
   accounts (active but unused for six months); new administrators.
 - Windows: WDigest (passwords in clear text in memory), Local Security Authority protection, PowerShell 2.0, Remote
   Assistance, automatic sign-in (and password in clear text in the registry), SmartScreen off, account control off
-  for remote connections, memory integrity, paused updates, LM or NTLMv1 network authentication, share signing, PowerShell running any script, UAC that asks nothing, guest access to shares, accounts listed without a password, Secure Boot;
+  for remote connections, memory integrity, paused updates, LM or NTLMv1 network authentication, share signing, PowerShell running any script, UAC that asks nothing, guest access to shares, accounts listed without a password, Secure Boot, overly broad Defender exclusions, Office macros all allowed, passwords kept as LM hashes, Remote Registry, SMBv1 client;
   Linux: automatic security updates.
 - Hijacked browsing (forced proxy, sites redirected by the hosts file).
 - Passwords saved in the browser without protection, sensitive files lying around (passwords or keys in clear text),

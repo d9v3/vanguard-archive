@@ -11,8 +11,10 @@ use crate::ui::{resume, tr, trf, trp};
 
 mod comptes;
 mod durcissement;
+mod exclusions;
 mod maj;
 mod persistance;
+mod verrouillage;
 
 use comptes::comptes;
 use maj::signatures;
@@ -790,11 +792,13 @@ pub fn auditer() -> Audit {
         feu,
         vec![
             verif!(antivirus()),
+            verif!(exclusions::exclusions()),
             verif!(ports_ecoute(feu_actif, lan)),
             verif!(ports_udp(feu_actif, lan)),
             verif!(smb1()),
             verif!([bureau_distance()]),
             verif!([uac()]),
+            verif!([verrouillage::verrouillage()]),
             verif!([mises_a_jour()]),
             verif!([chiffrement()]),
             verif!(durcissement::demarrage_securise()),

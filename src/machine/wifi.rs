@@ -89,6 +89,36 @@ pub(super) fn securite(ssid: &str, libelle: &str, admin: &[&str]) -> Constat {
     }
 }
 
+/// Réseaux ouverts enregistrés qui se reconnectent tout seuls : n'importe qui peut créer un faux réseau du même nom
+/// (« Wi-Fi gratuit », celui d'un hôtel) et l'ordinateur s'y joint sans rien demander. `noms` à montrer, une commande
+/// par réseau pour couper la reconnexion.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+pub(super) fn ouverts_automatiques(noms: &[String], commandes: &[String]) -> Option<Constat> {
+    if noms.is_empty() {
+        return None;
+    }
+    let montres: Vec<String> = noms.iter().map(|n| format!("« {} »", affichable(n))).collect();
+    let liste = crate::ui::resume(&montres, 3, ", ");
+    let commandes: Vec<&str> = commandes.iter().map(String::as_str).collect();
+    Some(
+        alerte(
+            "Wi-Fi",
+            Niveau::Moyen,
+            trf!(
+                "Réseaux ouverts qui se reconnectent tout seuls : {liste}. N'importe qui peut créer un faux réseau du même nom, et l'ordinateur s'y joint sans rien demander.",
+                "Open networks that reconnect by themselves: {liste}. Anyone can set up a fake network with the same name, and the computer joins it without asking."
+            ),
+        )
+        .corriger(
+            tr!(
+                "Ne plus s'y reconnecter tout seul (ils restent enregistrés, à choisir soi-même)",
+                "Stop reconnecting to them automatically (they stay saved, to pick by hand)"
+            ),
+            &commandes,
+        ),
+    )
+}
+
 /// Un réseau qui porte le nom de celui où l'on est connecté, ouvert ou à la protection cassable, alors que le vrai
 /// est en WPA2 ou mieux : la signature d'un jumeau maléfique.
 pub(super) fn jumeau(visibles: &[Visible]) -> Option<Constat> {
@@ -545,6 +575,17 @@ pub(crate) fn bornes_system_profiler(sortie: &str) -> Vec<Borne> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ouverts_qui_se_reconnectent() {
+        assert!(ouverts_automatiques(&[], &[]).is_none());
+        let noms = ["Hôtel".to_string(), "Gare\x1b[2K".to_string()];
+        let c = ouverts_automatiques(&noms, &["a".into(), "b".into()]).unwrap();
+        assert_eq!(c.probleme, Some(Niveau::Moyen));
+        assert!(c.message.contains("« Hôtel »") && !c.message.contains('\x1b'));
+        let k = c.correctif.unwrap();
+        assert!(k.automatique && k.commandes == ["a", "b"]);
+    }
 
     fn visible(ssid: &str, securite: &str, actif: bool) -> Visible {
         Visible {

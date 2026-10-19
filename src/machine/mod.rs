@@ -270,6 +270,46 @@ fn port_expose(
     (niveau, constat)
 }
 
+/// Le verrouillage de l'écran d'après son délai en secondes (0 = jamais), avec où l'activer quand il manque.
+#[cfg_attr(target_os = "macos", allow(dead_code))]
+fn verrouillage_selon_delai(secondes: u64, ou_l_activer: &str) -> Constat {
+    match secondes {
+        0 => alerte(
+            "Verrouillage",
+            Niveau::Moyen,
+            tr!(
+                "L'écran ne se verrouille jamais tout seul : un ordinateur laissé ouvert est accessible à tous.",
+                "The screen never locks by itself: a computer left open is accessible to anyone."
+            ),
+        )
+        .manuel(ou_l_activer, &[]),
+        s if s > 15 * 60 => alerte(
+            "Verrouillage",
+            Niveau::Info,
+            trf!(
+                "L'écran se verrouille après {} minutes : 5 à 10 minutes serait plus sûr.",
+                "The screen locks after {} minutes: 5 to 10 minutes would be safer.",
+                s / 60
+            ),
+        ),
+        s if s >= 60 => ok(
+            "Verrouillage",
+            trf!(
+                "L'écran se verrouille après {} minute(s) d'inactivité.",
+                "The screen locks after {} minute(s) of inactivity.",
+                s / 60
+            ),
+        ),
+        _ => ok(
+            "Verrouillage",
+            tr!(
+                "L'écran se verrouille après inactivité.",
+                "The screen locks after inactivity."
+            ),
+        ),
+    }
+}
+
 /// Aucun service exposé au réseau, sous Linux et macOS.
 #[cfg(unix)]
 fn aucun_port_expose() -> Constat {
@@ -360,6 +400,9 @@ fn cles_ssh() -> Vec<Constat> {
             );
         }
     }
+    if let Ok(config) = std::fs::read_to_string(dossier.join("config")) {
+        constats.extend(constats_config_ssh(&config));
+    }
     if constats.is_empty() {
         constats.push(ok(
             "Clés SSH",
@@ -367,6 +410,68 @@ fn cles_ssh() -> Vec<Constat> {
         ));
     }
     constats
+}
+
+/// Réglages risqués de ~/.ssh/config qui valent pour tous les serveurs (avant le premier « Host », sous « Host * »
+/// ou « Match all ») : (numéro de ligne, réglage en minuscules). Un réglage sous un « Host » précis reste : un
+/// serveur de test qu'on recrée souvent peut s'en passer.
+#[cfg(unix)]
+fn reglages_ssh_risques(config: &str) -> Vec<(usize, &'static str)> {
+    let mut global = true;
+    let mut trouves = Vec::new();
+    for (i, ligne) in config.lines().enumerate() {
+        let ligne = ligne.split('#').next().unwrap_or_default().trim();
+        let (cle, valeur) = ligne
+            .split_once(|c: char| c.is_whitespace() || c == '=')
+            .map_or((ligne, ""), |(c, v)| {
+                (c, v.trim_start_matches(|c: char| c.is_whitespace() || c == '='))
+            });
+        let cle = cle.to_ascii_lowercase();
+        let valeur = valeur.trim().trim_matches('"').to_ascii_lowercase();
+        match cle.as_str() {
+            "host" => global = valeur.split_whitespace().all(|motif| motif == "*"),
+            "match" => global = valeur == "all",
+            "stricthostkeychecking" if global && matches!(valeur.as_str(), "no" | "off") => {
+                trouves.push((i + 1, "stricthostkeychecking"));
+            }
+            "forwardagent" if global && valeur == "yes" => trouves.push((i + 1, "forwardagent")),
+            _ => {}
+        }
+    }
+    trouves
+}
+
+#[cfg(unix)]
+fn constats_config_ssh(config: &str) -> Vec<Constat> {
+    reglages_ssh_risques(config)
+        .into_iter()
+        .map(|(ligne, reglage)| {
+            let (message, conseil) = if reglage == "stricthostkeychecking" {
+                (
+                    trf!(
+                        "~/.ssh/config, ligne {ligne} : SSH se connecte à n'importe quel serveur sans vérifier qu'il est le bon ; un appareil au milieu peut se faire passer pour lui et lire le mot de passe.",
+                        "~/.ssh/config, line {ligne}: SSH connects to any server without checking it is the right one; a device in the middle can pose as it and read the password."
+                    ),
+                    tr!(
+                        "Retirer cette ligne, ou la réserver aux serveurs de test sous leur propre « Host » ; « accept-new » accepte un nouveau serveur mais refuse un serveur qui change",
+                        "Remove this line, or keep it for test servers under their own “Host”; “accept-new” accepts a new server but refuses one that changes"
+                    ),
+                )
+            } else {
+                (
+                    trf!(
+                        "~/.ssh/config, ligne {ligne} : ton agent SSH est prêté à tous les serveurs ; un serveur piraté peut s'en servir pour se connecter ailleurs avec tes clés.",
+                        "~/.ssh/config, line {ligne}: your SSH agent is lent to every server; a hacked server can use it to log in elsewhere with your keys."
+                    ),
+                    tr!(
+                        "Retirer cette ligne, ou la réserver aux serveurs de confiance sous leur propre « Host » ; « ssh -J » remplace le plus souvent ce prêt",
+                        "Remove this line, or keep it for trusted servers under their own “Host”; “ssh -J” usually replaces this lending"
+                    ),
+                )
+            };
+            alerte("Clés SSH", Niveau::Moyen, message).manuel(conseil, &[])
+        })
+        .collect()
 }
 
 /// Une clé privée SSH est-elle protégée par une phrase de passe ? `None` si ce n'est pas une clé privée.
@@ -725,6 +830,40 @@ mod tests {
             score: score(&constats),
             constats,
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn config_ssh_risquee() {
+        let config = "\
+# commun
+ForwardAgent yes
+Host labo labo2
+    StrictHostKeyChecking no
+Host *
+    StrictHostKeyChecking=off # pour aller vite
+    ForwardAgent no
+Host serveur
+    ForwardAgent yes
+Match all
+  stricthostkeychecking \"no\"
+Match host x
+  StrictHostKeyChecking no
+Host *
+  StrictHostKeyChecking accept-new
+";
+        assert_eq!(
+            reglages_ssh_risques(config),
+            [
+                (2, "forwardagent"),
+                (6, "stricthostkeychecking"),
+                (11, "stricthostkeychecking")
+            ]
+        );
+        assert_eq!(reglages_ssh_risques("Host *\n  User moi\n"), []);
+        let c = constats_config_ssh("StrictHostKeyChecking no\n");
+        assert!(c.len() == 1 && c[0].probleme == Some(Niveau::Moyen));
+        assert!(c[0].message.contains("ligne 1") || c[0].message.contains("line 1"));
     }
 
     #[cfg(unix)]

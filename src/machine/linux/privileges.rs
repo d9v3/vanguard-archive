@@ -53,7 +53,7 @@ fn groupes_a_risque(groupes: &str) -> Vec<&str> {
         .collect()
 }
 
-pub(super) fn sudo_sans_mot_de_passe() -> Option<Constat> {
+pub(super) fn sudo_sans_mot_de_passe() -> Vec<Constat> {
     super::super::unix::sudo_sans_mot_de_passe(tr!(
         "sudo sans mot de passe pour TOUTES les commandes : n'importe quel programme lancé par toi peut devenir root.",
         "sudo without a password for ALL commands: any program you run can become root."
@@ -87,5 +87,30 @@ mod tests {
         assert_eq!(regles_nopasswd(omarchy), (vec![], 1));
         let tout = "    (ALL : ALL) NOPASSWD: ALL\n";
         assert_eq!(regles_nopasswd(tout).0.len(), 1);
+    }
+
+    #[test]
+    fn reglages_par_defaut_de_sudo() {
+        use crate::machine::unix::defauts_sudo;
+        let liste = |defauts: &str| {
+            format!(
+                "Matching Defaults entries for alice on portable:\n    {defauts}\n\nRunas and Command-specific defaults for alice:\n    Defaults!/usr/bin/visudo env_keep+=\"SUDO_EDITOR EDITOR\"\n\nUser alice may run the following commands on portable:\n    (ALL) ALL\n"
+            )
+        };
+        assert_eq!(
+            defauts_sudo(&liste("secure_path=/usr/bin, passwd_tries=10")),
+            (false, None)
+        );
+        assert_eq!(
+            defauts_sudo(&liste("!authenticate, secure_path=/usr/bin")),
+            (true, None)
+        );
+        assert_eq!(defauts_sudo(&liste("!authenticate, authenticate")), (false, None));
+        assert_eq!(defauts_sudo(&liste("timestamp_timeout=-1")), (false, Some(-1.0)));
+        assert_eq!(
+            defauts_sudo(&liste("env_reset, timestamp_timeout=120")),
+            (false, Some(120.0))
+        );
+        assert_eq!(defauts_sudo("    (ALL) ALL\n"), (false, None));
     }
 }

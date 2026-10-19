@@ -300,6 +300,82 @@ pub(super) fn juger_ntlm(niveau: Option<u32>) -> Option<Constat> {
     )
 }
 
+/// Versions d'Office qui gardent leurs réglages dans le registre (2010, 2013, 2016 à 365) et programmes à macros.
+const OFFICE_VERSIONS: [&str; 3] = ["16.0", "15.0", "14.0"];
+const OFFICE_PROGRAMMES: [(&str, &str); 6] = [
+    ("word", "Word"),
+    ("excel", "Excel"),
+    ("powerpoint", "PowerPoint"),
+    ("access", "Access"),
+    ("publisher", "Publisher"),
+    ("visio", "Visio"),
+];
+
+/// Les programmes d'Office qui lancent toutes les macros sans demander (VBAWarnings à 1 ; la stratégie de groupe
+/// passe avant le réglage) : (clé du programme, nom, version, imposé par une stratégie). `lire` donne VBAWarnings
+/// d'une clé du compte.
+pub(super) fn macros_ouvertes(
+    lire: impl Fn(&str) -> Option<u32>,
+) -> Vec<(&'static str, &'static str, &'static str, bool)> {
+    let mut ouvertes = Vec::new();
+    for version in OFFICE_VERSIONS {
+        for (cle, nom) in OFFICE_PROGRAMMES {
+            let strategie = lire(&format!(r"Software\Policies\Microsoft\Office\{version}\{cle}\Security"));
+            let reglage = lire(&format!(r"Software\Microsoft\Office\{version}\{cle}\Security"));
+            if strategie.or(reglage) == Some(1) {
+                ouvertes.push((cle, nom, version, strategie.is_some()));
+            }
+        }
+    }
+    ouvertes
+}
+
+/// Macros toutes permises : un document reçu par courriel installe un programme malveillant dès son ouverture.
+/// Remises à « désactivées avec notification » (2, le réglage d'Office) pour ce compte ; imposées par une stratégie
+/// de groupe, c'est à l'organisation de les changer.
+pub(super) fn juger_macros(ouvertes: &[(&str, &str, &str, bool)], sid: Option<&str>) -> Option<Constat> {
+    if ouvertes.is_empty() {
+        return None;
+    }
+    let mut noms: Vec<&str> = ouvertes.iter().map(|o| o.1).collect();
+    noms.dedup();
+    let constat = alerte(
+        DURCI,
+        Niveau::Eleve,
+        trf!(
+            "Office lance toutes les macros sans demander ({}) : un document reçu par courriel peut installer un programme malveillant dès son ouverture.",
+            "Office runs every macro without asking ({}): a document received by email can install malware as soon as it is opened.",
+            noms.join(", ")
+        ),
+    );
+    if ouvertes.iter().any(|o| o.3) {
+        return Some(constat.manuel(
+            tr!(
+                "Réglé par une stratégie de groupe : à changer par qui gère l'ordinateur (entreprise, école)",
+                "Set by a group policy: to be changed by whoever manages the computer (company, school)"
+            ),
+            &[],
+        ));
+    }
+    let commandes: Vec<String> = ouvertes
+        .iter()
+        .map(|(cle, _, version, _)| {
+            let chemin = crate::reparer::hkcu_de_la_personne(
+                sid,
+                &format!(r"Software\Microsoft\Office\{version}\{cle}\Security"),
+            );
+            format!("Set-ItemProperty -LiteralPath '{chemin}' -Name VBAWarnings -Value 2 -Type DWord")
+        })
+        .collect();
+    Some(constat.corriger(
+        tr!(
+            "Revenir au réglage d'Office : macros désactivées, avec une barre pour les activer dans un document de confiance",
+            "Go back to Office's setting: macros off, with a bar to turn them on in a trusted document"
+        ),
+        &commandes,
+    ))
+}
+
 /// Démarrage sécurisé, lu dans le registre (Confirm-SecureBootUEFI demande les droits admin). Clé absente : un
 /// ancien BIOS sans UEFI, rien à conclure.
 pub(super) fn demarrage_securise() -> Option<Constat> {
@@ -371,6 +447,76 @@ pub(super) fn juger_anonyme(restreint_sam: Option<u32>, tous_inclut_anonyme: Opt
         ),
         &commandes,
     ))
+}
+
+/// Empreintes LM : NoLMHash à 0 garde, au prochain changement de mot de passe, une empreinte LM (mot de passe en
+/// majuscules, coupé en deux moitiés de 7 caractères) qui se casse en secondes. Windows met 1 depuis Vista.
+pub(super) fn juger_empreinte_lm(sans_lm: Option<u32>) -> Option<Constat> {
+    (sans_lm == Some(0)).then(|| {
+        alerte(
+            DURCI,
+            Niveau::Eleve,
+            tr!(
+                "Windows garde les mots de passe sous une vieille forme (LM) qui se casse en quelques secondes si quelqu'un copie la base des comptes.",
+                "Windows keeps passwords in an old form (LM) that is cracked in seconds if someone copies the account database."
+            ),
+        )
+        .corriger(
+            tr!(
+                "Ne plus garder cette forme (réglage de Windows) ; changer ensuite son mot de passe efface l'ancienne",
+                "Stop keeping this form (Windows' setting); changing your password afterwards erases the old one"
+            ),
+            &[r"Set-ItemProperty -LiteralPath 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa' -Name NoLMHash -Value 1 -Type DWord"],
+        )
+    })
+}
+
+/// Registre à distance : démarré avec Windows (Start à 2), il laisse un compte du réseau lire et changer le registre
+/// de cet ordinateur. Coupé d'office sur un Windows de bureau (Start à 4) ; seul un ordinateur géré en a besoin.
+pub(super) fn juger_registre_distant(demarrage: Option<u32>) -> Option<Constat> {
+    (demarrage == Some(2)).then(|| {
+        alerte(
+            DURCI,
+            Niveau::Moyen,
+            tr!(
+                "Le Registre à distance démarre avec Windows : un compte du réseau peut lire et changer les réglages de cet ordinateur.",
+                "Remote Registry starts with Windows: an account on the network can read and change this computer's settings."
+            ),
+        )
+        .corriger(
+            tr!(
+                "Arrêter le Registre à distance et le désactiver, comme Windows le livre",
+                "Stop Remote Registry and turn it off, as Windows ships it"
+            ),
+            &[
+                "Stop-Service RemoteRegistry -Force",
+                "Set-Service RemoteRegistry -StartupType Disabled",
+            ],
+        )
+    })
+}
+
+/// Client SMBv1 (pilote mrxsmb10) : installé et pas désactivé, Windows peut encore parler SMBv1 à un partage du
+/// réseau, un protocole sans protection contre l'interception. Absent sur Windows 11 ; le serveur SMBv1 est jugé à
+/// part (`smb1`).
+pub(super) fn juger_client_smb1(demarrage: Option<u32>) -> Option<Constat> {
+    demarrage.filter(|&d| d != 4).map(|_| {
+        alerte(
+            "SMBv1",
+            Niveau::Moyen,
+            tr!(
+                "Le client SMBv1 est encore installé : Windows peut ouvrir un partage avec ce vieux protocole, que n'importe quel appareil du réseau peut intercepter.",
+                "The SMBv1 client is still installed: Windows can open a share with this old protocol, which any device on the network can intercept."
+            ),
+        )
+        .corriger(
+            tr!(
+                "Retirer le client SMBv1 (effectif après redémarrage ; un très vieux NAS peut ne plus s'ouvrir)",
+                "Remove the SMBv1 client (effective after a restart; a very old NAS may no longer open)"
+            ),
+            &["Disable-WindowsOptionalFeature -Online -FeatureName SMB1Protocol-Client -NoRestart"],
+        )
+    })
 }
 
 /// Signature SMB : le client qui ne l'exige pas peut se faire relayer vers un faux partage. Une information, à
@@ -532,6 +678,18 @@ pub(super) fn durcissement() -> Vec<Constat> {
         lire_dword(r"SYSTEM\CurrentControlSet\Control\Lsa", "RestrictAnonymousSAM"),
         lire_dword(r"SYSTEM\CurrentControlSet\Control\Lsa", "EveryoneIncludesAnonymous"),
     ));
+    c.extend(juger_empreinte_lm(lire_dword(
+        r"SYSTEM\CurrentControlSet\Control\Lsa",
+        "NoLMHash",
+    )));
+    c.extend(juger_registre_distant(lire_dword(
+        r"SYSTEM\CurrentControlSet\Services\RemoteRegistry",
+        "Start",
+    )));
+    c.extend(juger_client_smb1(lire_dword(
+        r"SYSTEM\CurrentControlSet\Services\mrxsmb10",
+        "Start",
+    )));
     c.extend(juger_signature_smb(lire_dword(
         r"SYSTEM\CurrentControlSet\Services\LanmanWorkstation\Parameters",
         "RequireSecuritySignature",
@@ -566,6 +724,14 @@ pub(super) fn durcissement() -> Vec<Constat> {
         effective,
         &crate::reparer::hkcu_de_la_personne(sid.as_deref(), shell_ids),
     ));
+    let vba = |cle: &str| {
+        winreg::RegKey::predef(winreg::enums::HKEY_CURRENT_USER)
+            .open_subkey(cle)
+            .ok()?
+            .get_value::<u32, _>("VBAWarnings")
+            .ok()
+    };
+    c.extend(juger_macros(&macros_ouvertes(vba), sid.as_deref()));
     let aujourd_hui = chrono::Local::now().format("%Y-%m-%d").to_string();
     c.extend(juger_pause(
         lire_texte(
@@ -642,6 +808,50 @@ mod tests {
         assert!(juger_ntlm(Some(3)).is_none() && juger_ntlm(Some(5)).is_none() && juger_ntlm(None).is_none());
         assert_eq!(juger_signature_smb(Some(0)).unwrap().probleme, Some(Niveau::Info));
         assert!(juger_signature_smb(Some(1)).is_none() && juger_signature_smb(None).is_none());
+        // Macros d'Office : la stratégie passe avant le réglage ; une commande par programme ouvert.
+        let lu = |cle: &str| match cle {
+            r"Software\Microsoft\Office\16.0\word\Security"
+            | r"Software\Microsoft\Office\16.0\excel\Security"
+            | r"Software\Microsoft\Office\15.0\word\Security" => Some(1),
+            r"Software\Policies\Microsoft\Office\16.0\excel\Security" => Some(2),
+            r"Software\Microsoft\Office\16.0\powerpoint\Security" => Some(3),
+            _ => None,
+        };
+        let ouvertes = macros_ouvertes(lu);
+        assert_eq!(
+            ouvertes,
+            [("word", "Word", "16.0", false), ("word", "Word", "15.0", false)]
+        );
+        let macros = juger_macros(&ouvertes, Some("S-1-5-21-1-2-3-1001")).unwrap();
+        assert!(macros.probleme == Some(Niveau::Eleve) && macros.message.contains("(Word)"));
+        let remise = macros.correctif.unwrap();
+        assert!(remise.automatique && remise.commandes.len() == 2);
+        assert_eq!(
+            remise.commandes[1],
+            r"Set-ItemProperty -LiteralPath 'Registry::HKEY_USERS\S-1-5-21-1-2-3-1001\Software\Microsoft\Office\15.0\word\Security' -Name VBAWarnings -Value 2 -Type DWord"
+        );
+        assert!(juger_macros(&[], None).is_none());
+        let imposees = juger_macros(&[("excel", "Excel", "16.0", true)], None)
+            .unwrap()
+            .correctif
+            .unwrap();
+        assert!(!imposees.automatique && imposees.commandes.is_empty());
+        // Empreintes LM : seulement NoLMHash à 0 ; absent ou 1, rien.
+        assert!(juger_empreinte_lm(None).is_none() && juger_empreinte_lm(Some(1)).is_none());
+        let lm = juger_empreinte_lm(Some(0)).unwrap();
+        assert!(lm.probleme == Some(Niveau::Eleve) && lm.correctif.unwrap().commandes[0].contains("NoLMHash -Value 1"));
+        // Registre à distance : seulement démarré avec Windows (2) ; manuel (3) ou désactivé (4), rien.
+        assert!(
+            [None, Some(3), Some(4)]
+                .into_iter()
+                .all(|d| juger_registre_distant(d).is_none())
+        );
+        let distant = juger_registre_distant(Some(2)).unwrap();
+        assert!(distant.probleme == Some(Niveau::Moyen) && distant.correctif.unwrap().commandes.len() == 2);
+        // Client SMBv1 : pilote absent ou désactivé (4), rien ; sinon une correction.
+        assert!(juger_client_smb1(None).is_none() && juger_client_smb1(Some(4)).is_none());
+        let client = juger_client_smb1(Some(2)).unwrap();
+        assert!(client.probleme == Some(Niveau::Moyen) && client.categorie == "SMBv1");
         // Secure Boot : clé absente (ancien BIOS), rien ; 0 coupé, une information à régler soi-même.
         assert!(juger_demarrage_securise(None).is_none());
         assert_eq!(juger_demarrage_securise(Some(1)).unwrap().probleme, None);

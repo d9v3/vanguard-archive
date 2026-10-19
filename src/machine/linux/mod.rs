@@ -465,6 +465,27 @@ pub(crate) fn service_du_cgroup(ligne: &str) -> Option<String> {
     (!nom.is_empty()).then(|| crate::ui::affichable(nom))
 }
 
+/// cups-browsed qui écoute 631/udp : la faille de 2024 (CVE-2024-47176 et suivantes) laissait n'importe qui sur le
+/// réseau, ou depuis Internet sans pare-feu, ajouter une fausse imprimante qui lance une commande à la première
+/// impression. Il ne sert qu'à trouver de vieilles imprimantes partagées : CUPS trouve les récentes sans lui.
+fn cups_browsed_expose() -> Constat {
+    alerte(
+        "Ports en écoute",
+        Niveau::Eleve,
+        tr!(
+            "631/udp ouvert par cups-browsed : une faille de 2024 lui faisait ajouter une fausse imprimante, envoyée par n'importe qui sur le réseau, qui lance une commande à la première impression.",
+            "631/udp opened by cups-browsed: a 2024 flaw made it add a fake printer, sent by anyone on the network, that runs a command at the first print."
+        ),
+    )
+    .corriger(
+        tr!(
+            "Arrêter et désactiver cups-browsed (les imprimantes récentes restent trouvées par CUPS)",
+            "Stop and disable cups-browsed (recent printers are still found by CUPS)"
+        ),
+        &["sudo systemctl disable --now cups-browsed"],
+    )
+}
+
 /// Services qui écoutent sur le réseau (pas seulement en local), en TCP et en UDP.
 /// `ufw` : le pare-feu actif est ufw. Avec firewalld ou nftables, « ufw deny » ne bloquerait rien
 /// (ou s'ajouterait à un ufw arrêté) tout en s'affichant « fait » : on ne le propose pas.
@@ -528,6 +549,7 @@ fn ports_ecoute(pare_feu_actif: bool, ufw: bool) -> Vec<Constat> {
                 continue;
             }
             constats.push(match programme {
+                p if proto == "udp" && port == 631 && p.starts_with("cups-browsed") => cups_browsed_expose(),
                 "ollama" => constat.corriger(
                     tr!("Faire écouter Ollama uniquement en local (127.0.0.1)", "Make Ollama listen locally only (127.0.0.1)"),
                     &[
@@ -632,6 +654,11 @@ fn mots_de_passe_sshd(conf: &str) -> bool {
         || (valeur("UsePAM").as_deref() == Some("yes") && clavier.as_deref() != Some("no"))
 }
 
+/// sshd ouvre-t-il un compte sans mot de passe ? « PermitEmptyPasswords yes », quand les mots de passe sont permis.
+fn mots_de_passe_vides_sshd(conf: &str) -> bool {
+    valeur_sshd(conf, "PermitEmptyPasswords").as_deref() == Some("yes") && mots_de_passe_sshd(conf)
+}
+
 /// Le serveur SSH tourne-t-il ? « sshd » sur Arch et Fedora, « ssh » sur Debian, Ubuntu et Mint. Ubuntu (22.10+) le
 /// lance à la demande par ssh.socket : le service paraît arrêté alors que le port 22 accepte les connexions.
 fn sshd_actif() -> bool {
@@ -680,6 +707,26 @@ fn ssh_serveur() -> Constat {
             ),
         );
     };
+    if mots_de_passe_vides_sshd(&conf) {
+        return alerte(
+            "SSH",
+            Niveau::Critique,
+            tr!(
+                "SSH accepte les comptes sans mot de passe : un compte sans mot de passe s'ouvre depuis le réseau sans rien taper.",
+                "SSH accepts accounts without a password: an account without a password opens from the network without typing anything."
+            ),
+        )
+        .corriger(
+            tr!(
+                "Refuser les mots de passe vides en SSH (le réglage de sshd)",
+                "Refuse empty passwords over SSH (sshd's setting)"
+            ),
+            &[
+                &format!("echo 'PermitEmptyPasswords no' | sudo tee -a {SSHD_GARDIEN} >/dev/null"),
+                RECHARGER_SSHD,
+            ],
+        );
+    }
     if valeur_sshd(&conf, "PermitRootLogin").as_deref() == Some("yes") {
         return alerte(
             "SSH",
@@ -962,7 +1009,118 @@ fn wifi(passerelle: Option<String>) -> Vec<Constat> {
     );
     let mut constats = vec![super::wifi::securite(&actif.ssid, &actif.securite, &[&admin])];
     constats.extend(super::wifi::jumeau(&visibles));
+    constats.extend(wifi_ouverts_automatiques());
     constats
+}
+
+/// Connexions Wi-Fi de NetworkManager qui se reconnectent toutes seules : (UUID, nom). Le nom vient en dernier, sans
+/// échappement : un « : » dans le nom reste intact. Un UUID qui n'a pas sa forme est écarté (il entre dans une
+/// commande).
+fn connexions_wifi_auto(sortie: &str) -> Vec<(String, String)> {
+    sortie
+        .lines()
+        .filter_map(|l| {
+            let mut champs = l.splitn(4, ':');
+            let (uuid, genre, auto, nom) = (champs.next()?, champs.next()?, champs.next()?, champs.next()?);
+            let uuid_valide = uuid.len() == 36 && uuid.chars().all(|c| c.is_ascii_hexdigit() || c == '-');
+            (uuid_valide && genre == "802-11-wireless" && auto == "yes").then(|| (uuid.to_string(), nom.to_string()))
+        })
+        .collect()
+}
+
+/// Réseaux ouverts enregistrés (sans gestion de clé) qui se reconnectent seuls ; 40 connexions regardées au plus.
+fn wifi_ouverts_automatiques() -> Option<Constat> {
+    let liste = crate::commande::lancer_en_anglais(
+        Command::new("nmcli").args([
+            "-t",
+            "-e",
+            "no",
+            "-f",
+            "UUID,TYPE,AUTOCONNECT,NAME",
+            "connection",
+            "show",
+        ]),
+        15,
+    )
+    .filter(|r| r.code == Some(0))?;
+    let (mut noms, mut commandes) = (Vec::new(), Vec::new());
+    for (uuid, nom) in connexions_wifi_auto(&liste.sortie).into_iter().take(40) {
+        let ouvert = crate::commande::lancer_en_anglais(
+            Command::new("nmcli").args(["-g", "802-11-wireless-security.key-mgmt", "connection", "show", &uuid]),
+            10,
+        )
+        .is_some_and(|r| r.code == Some(0) && r.sortie.trim().is_empty());
+        if ouvert {
+            commandes.push(format!("nmcli connection modify {uuid} connection.autoconnect no"));
+            noms.push(nom);
+        }
+    }
+    super::wifi::ouverts_automatiques(&noms, &commandes)
+}
+
+/// Contrôle d'accès de l'affichage X11 (`xhost`) : coupé (« xhost + »), n'importe quel programme, même d'un autre
+/// ordinateur, peut ouvrir des fenêtres, lire le clavier et copier l'écran. Sans X11 ni xhost, rien à dire.
+fn acces_x11() -> Option<Constat> {
+    std::env::var_os("DISPLAY")?;
+    juger_xhost(&sortie("xhost", &[])?)
+}
+
+/// La sortie de `xhost` : la première ligne dit si le contrôle est actif, les suivantes qui est permis. Les comptes
+/// locaux (« SI:localuser: ») sont normaux ; une adresse ou un nom d'ordinateur ne l'est pas.
+fn juger_xhost(sortie: &str) -> Option<Constat> {
+    let mut lignes = sortie.lines();
+    if lignes.next()?.contains("access control disabled") {
+        return Some(
+            alerte(
+                "Affichage X11",
+                Niveau::Eleve,
+                tr!(
+                    "L'affichage accepte tout le monde (« xhost + ») : n'importe quel programme, même d'un autre ordinateur, peut lire ton clavier et copier ton écran.",
+                    "The display accepts everyone (“xhost +”): any program, even from another computer, can read your keyboard and copy your screen."
+                ),
+            )
+            .corriger(
+                tr!(
+                    "Remettre le contrôle d'accès (puis retirer « xhost + » de ~/.xprofile ou ~/.xinitrc, sinon il revient à la prochaine session)",
+                    "Turn access control back on (then remove “xhost +” from ~/.xprofile or ~/.xinitrc, or it comes back next session)"
+                ),
+                &["xhost -"],
+            ),
+        );
+    }
+    let permis: Vec<&str> = lignes
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && !l.starts_with("SI:") && !l.starts_with("LOCAL:"))
+        .collect();
+    if permis.is_empty() {
+        return None;
+    }
+    let montres: Vec<String> = permis.iter().map(|p| crate::ui::affichable(p)).collect();
+    // Une entrée n'entre dans une commande que si elle n'a que des caractères d'adresse ou de nom d'ordinateur.
+    let commandes: Vec<String> = permis
+        .iter()
+        .filter(|p| p.chars().all(|c| c.is_ascii_alphanumeric() || ".:-_[]".contains(c)))
+        .map(|p| format!("xhost -{p}"))
+        .collect();
+    let commandes: Vec<&str> = commandes.iter().map(String::as_str).collect();
+    Some(
+        alerte(
+            "Affichage X11",
+            Niveau::Moyen,
+            trf!(
+                "D'autres ordinateurs peuvent se servir de ton affichage (lire le clavier, copier l'écran) : {}.",
+                "Other computers can use your display (read the keyboard, copy the screen): {}.",
+                crate::ui::resume(&montres, 4, ", ")
+            ),
+        )
+        .manuel(
+            tr!(
+                "Les retirer si tu ne les reconnais pas (et de ~/.xprofile ou ~/.xinitrc s'ils y sont ajoutés)",
+                "Remove them if you do not recognize them (and from ~/.xprofile or ~/.xinitrc if they are added there)"
+            ),
+            &commandes,
+        ),
+    )
 }
 
 /// Verrouillage automatique de l'écran après inactivité, selon l'environnement de bureau.
@@ -1030,43 +1188,11 @@ fn verrouillage_ecran() -> Option<Constat> {
                 "desktop environment not recognized"
             ),
         ),
-        Some(0) => alerte(
-            "Verrouillage",
-            Niveau::Moyen,
-            tr!(
-                "L'écran ne se verrouille jamais tout seul : un ordinateur laissé ouvert est accessible à tous.",
-                "The screen never locks by itself: a computer left open is accessible to anyone."
-            ),
-        )
-        .manuel(
+        Some(s) => super::verrouillage_selon_delai(
+            s,
             tr!(
                 "Activer le verrouillage automatique (5 minutes, c'est bien) dans les réglages d'écran du bureau",
                 "Turn on automatic locking (5 minutes is good) in the desktop's display settings"
-            ),
-            &[],
-        ),
-        Some(s) if s > 15 * 60 => alerte(
-            "Verrouillage",
-            Niveau::Info,
-            trf!(
-                "L'écran se verrouille après {} minutes : 5 à 10 minutes serait plus sûr.",
-                "The screen locks after {} minutes: 5 to 10 minutes would be safer.",
-                s / 60
-            ),
-        ),
-        Some(s) if s >= 60 => ok(
-            "Verrouillage",
-            trf!(
-                "L'écran se verrouille après {} minute(s) d'inactivité.",
-                "The screen locks after {} minute(s) of inactivity.",
-                s / 60
-            ),
-        ),
-        Some(_) => ok(
-            "Verrouillage",
-            tr!(
-                "L'écran se verrouille après inactivité.",
-                "The screen locks after inactivity."
             ),
         ),
     })
@@ -1328,6 +1454,7 @@ pub fn auditer() -> Audit {
             verif!([redemarrage()]),
             verif!([chiffrement_disque()]),
             verif!(verrouillage_ecran()),
+            verif!(acces_x11()),
             verif!([durcissement_noyau()]),
             verif!([module_securite()]),
             verif!([sauvegardes()]),
@@ -1350,6 +1477,78 @@ pub fn auditer() -> Audit {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn affichage_x11_ouvert() {
+        // Contrôle actif, seul le compte local : rien.
+        assert!(
+            juger_xhost("access control enabled, only authorized clients can connect\nSI:localuser:alice\n").is_none()
+        );
+        assert!(juger_xhost("").is_none());
+        // « xhost + » : tout le monde.
+        let ouvert =
+            juger_xhost("access control disabled, clients can connect from any host\nSI:localuser:alice\n").unwrap();
+        assert_eq!(ouvert.probleme, Some(Niveau::Eleve));
+        assert_eq!(ouvert.correctif.unwrap().commandes, ["xhost -"]);
+        // Des ordinateurs permis : chacun sa commande, sauf un nom piégé (montré inoffensif, pas dans une commande).
+        let hotes = juger_xhost(
+            "access control enabled, only authorized clients can connect\nINET:192.168.1.20\nportable\nINET:x;rm -rf ~\nSI:localuser:alice\n",
+        )
+        .unwrap();
+        assert_eq!(hotes.probleme, Some(Niveau::Moyen));
+        assert_eq!(
+            hotes.correctif.unwrap().commandes,
+            ["xhost -INET:192.168.1.20", "xhost -portable"]
+        );
+    }
+
+    #[test]
+    fn cups_browsed_au_reseau() {
+        let c = cups_browsed_expose();
+        assert_eq!(c.probleme, Some(Niveau::Eleve));
+        assert_eq!(
+            c.correctif.unwrap().commandes,
+            ["sudo systemctl disable --now cups-browsed"]
+        );
+        // Nommé par son groupe de contrôle quand le programme est invisible sans droits.
+        assert_eq!(
+            service_du_cgroup("UNCONN 0 0 0.0.0.0:631 0.0.0.0:* cgroup:/system.slice/cups-browsed.service").as_deref(),
+            Some("cups-browsed")
+        );
+    }
+
+    #[test]
+    fn ssh_sans_mot_de_passe() {
+        assert!(mots_de_passe_vides_sshd("PermitEmptyPasswords yes\n"));
+        assert!(mots_de_passe_vides_sshd(
+            "permitemptypasswords=yes\nPermitEmptyPasswords no\n"
+        ));
+        // La première valeur compte ; mots de passe coupés, la ligne ne sert à rien.
+        assert!(!mots_de_passe_vides_sshd(
+            "PermitEmptyPasswords no\nPermitEmptyPasswords yes\n"
+        ));
+        assert!(!mots_de_passe_vides_sshd(
+            "PasswordAuthentication no\nKbdInteractiveAuthentication no\nPermitEmptyPasswords yes\n"
+        ));
+        assert!(!mots_de_passe_vides_sshd(""));
+    }
+
+    #[test]
+    fn connexions_wifi_qui_se_reconnectent() {
+        let sortie = "\
+0b6f1a2c-3d4e-4f50-8a9b-0c1d2e3f4a5b:802-11-wireless:yes:Hôtel : accueil
+1b6f1a2c-3d4e-4f50-8a9b-0c1d2e3f4a5b:802-11-wireless:no:Maison
+2b6f1a2c-3d4e-4f50-8a9b-0c1d2e3f4a5b:802-3-ethernet:yes:Filaire
+pas-un-uuid;rm -rf ~:802-11-wireless:yes:Piège
+";
+        assert_eq!(
+            connexions_wifi_auto(sortie),
+            [(
+                "0b6f1a2c-3d4e-4f50-8a9b-0c1d2e3f4a5b".to_string(),
+                "Hôtel : accueil".to_string()
+            )]
+        );
+    }
 
     #[test]
     fn retrait_selon_la_distribution() {

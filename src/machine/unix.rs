@@ -106,33 +106,105 @@ pub(super) fn regles_nopasswd(liste: &str) -> (Vec<String>, usize) {
 
 /// sudo sans mot de passe. `tout_permis` : le texte de l'alerte quand une règle donne toutes les commandes (il dit ce
 /// que risque ce système).
-pub(super) fn sudo_sans_mot_de_passe(tout_permis: &str) -> Option<Constat> {
+/// Réglages par défaut de sudo qui valent pour ce compte (« Matching Defaults entries », première section de
+/// `sudo -l`) : (sudo ne demande jamais le mot de passe, délai de mémorisation en minutes s'il est donné).
+pub(super) fn defauts_sudo(liste: &str) -> (bool, Option<f64>) {
+    let mut sans_mot_de_passe = false;
+    let mut delai = None;
+    let mut lignes = liste
+        .lines()
+        .skip_while(|l| !l.starts_with("Matching Defaults entries"));
+    lignes.next();
+    for ligne in lignes.take_while(|l| !l.trim().is_empty()) {
+        for reglage in ligne.split(", ").map(str::trim) {
+            if reglage == "!authenticate" {
+                sans_mot_de_passe = true;
+            } else if reglage == "authenticate" {
+                sans_mot_de_passe = false;
+            } else if let Some(v) = reglage.strip_prefix("timestamp_timeout=") {
+                delai = v.trim_matches('"').parse::<f64>().ok().or(delai);
+            }
+        }
+    }
+    (sans_mot_de_passe, delai)
+}
+
+pub(super) fn sudo_sans_mot_de_passe(tout_permis: &str) -> Vec<Constat> {
     // -n : jamais de demande de mot de passe. Sans règle NOPASSWD (ni sudo récent), la liste est refusée : rien à dire.
-    let liste = sortie("sudo", &["-n", "-l"])?;
+    let Some(liste) = sortie("sudo", &["-n", "-l"]) else {
+        return Vec::new();
+    };
     let (totales, limitees) = regles_nopasswd(&liste);
-    Some(if !totales.is_empty() {
-        alerte("Sudo", Niveau::Eleve, tout_permis).manuel(
+    let (jamais_demande, delai) = defauts_sudo(&liste);
+    let mut constats = Vec::new();
+    if jamais_demande {
+        constats.push(
+            alerte(
+                "Sudo",
+                Niveau::Eleve,
+                tr!(
+                    "sudo ne demande jamais le mot de passe (« Defaults !authenticate ») : n'importe quel programme lancé par toi peut devenir root.",
+                    "sudo never asks for the password (“Defaults !authenticate”): any program you run can become root."
+                ),
+            )
+            .manuel(
+                tr!(
+                    "Retirer « !authenticate » des Defaults dans /etc/sudoers ou /etc/sudoers.d (toujours avec sudo visudo)",
+                    "Remove “!authenticate” from the Defaults in /etc/sudoers or /etc/sudoers.d (always with sudo visudo)"
+                ),
+                &["sudo visudo"],
+            ),
+        );
+    } else if let Some(minutes) = delai.filter(|&m| m < 0.0 || m > 60.0) {
+        let message = if minutes < 0.0 {
+            tr!(
+                "sudo ne redemande jamais le mot de passe une fois tapé (« timestamp_timeout » négatif) : tout programme lancé ensuite dans ce terminal peut devenir root sans rien demander.",
+                "sudo never asks for the password again once typed (negative “timestamp_timeout”): any program started later in that terminal can become root without asking."
+            )
+            .to_string()
+        } else {
+            trf!(
+                "sudo garde le mot de passe {} minutes (« timestamp_timeout ») : un programme lancé pendant ce temps devient root sans rien demander.",
+                "sudo keeps the password for {} minutes (“timestamp_timeout”): a program started during that time becomes root without asking.",
+                minutes.round()
+            )
+        };
+        constats.push(
+            alerte("Sudo", if minutes < 0.0 { Niveau::Moyen } else { Niveau::Info }, message).manuel(
+                tr!(
+                    "Remettre le délai de sudo à 5 minutes, ou retirer « timestamp_timeout » (toujours avec sudo visudo)",
+                    "Set sudo's delay back to 5 minutes, or remove “timestamp_timeout” (always with sudo visudo)"
+                ),
+                &["sudo visudo"],
+            ),
+        );
+    }
+    if !totales.is_empty() {
+        constats.push(alerte("Sudo", Niveau::Eleve, tout_permis).manuel(
             tr!(
                 "Retirer « NOPASSWD: » de cette règle dans /etc/sudoers.d (toujours avec sudo visudo, jamais à la main)",
                 "Remove “NOPASSWD:” from this rule in /etc/sudoers.d (always with sudo visudo, never by hand)"
             ),
             &["sudo visudo"],
-        )
+        ));
+    } else if jamais_demande {
+        // Déjà dit plus haut : pas de « demande toujours le mot de passe ».
     } else if limitees > 0 {
-        ok(
+        constats.push(ok(
             "Sudo",
             trf!(
                 "{limitees} règle(s) sudo sans mot de passe, limitée(s) à des commandes précises.",
                 "{limitees} passwordless sudo rule(s), limited to specific commands."
             ),
-        )
+        ));
     } else {
-        ok(
+        constats.push(ok(
             "Sudo",
             tr!(
                 "sudo demande toujours le mot de passe.",
                 "sudo always asks for the password."
             ),
-        )
-    })
+        ));
+    }
+    constats
 }

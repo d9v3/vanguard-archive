@@ -168,6 +168,7 @@ fn partage(port: u16) -> Option<&'static str> {
         445 | 139 | 548 => tr!("Partage de fichiers", "File Sharing"),
         5900 => tr!("Partage d'écran", "Screen Sharing"),
         3283 => tr!("Gestion à distance", "Remote Management"),
+        3031 => tr!("Événements Apple à distance", "Remote Apple Events"),
         5000 | 7000 => tr!("Récepteur AirPlay", "AirPlay Receiver"),
         3689 => tr!("Partage de médias", "Media Sharing"),
         631 => tr!("Partage d'imprimantes", "Printer Sharing"),

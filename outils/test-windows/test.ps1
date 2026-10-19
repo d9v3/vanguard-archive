@@ -764,6 +764,63 @@ $k = Sortie 'verifier-cle'
 if ($k -match '(?m)^\s+\d+\s+(GARDIEN|WIN11|VTOYEFI|MACOS)\b') { Bug 'Vérifier ma clé propose une partition de la clé GARDIEN' } else { Ok 'Aucune partition de la clé proposée' }
 if ($k -match 'Start\?|Commencer \?') { Bug 'Vérifier ma clé est allé jusqu''à la question d''écriture' }
 
+Etape 'Réglages Windows de la 0.68 à la 0.77 : Gardien voit-il ce que Windows dit ?'
+# Chaque réglage est relu ici, sans Gardien ; Gardien doit le signaler s'il est risqué, et seulement dans ce cas.
+try {
+    $audit = Sortie 'machine-json' | ConvertFrom-Json
+    function Signale($motif) { [bool]@($audit.constats | Where-Object { $_.probleme -and $_.message -match $motif }).Count }
+    function Accord($nom, [bool]$risque, $motif) {
+        $vu = Signale $motif
+        if ($vu -eq $risque) { Ok "$nom : $(if ($risque) { 'risqué, signalé' } else { 'sûr, rien signalé' })" }
+        elseif ($risque) { Bug "$nom : risqué selon Windows, NON signalé par Gardien" }
+        else { Bug "$nom : sûr selon Windows, mais signalé par Gardien" }
+    }
+    $lsa = Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa' -ErrorAction SilentlyContinue
+    $uac = Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' -ErrorAction SilentlyContinue
+    $poste = Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Services\LanmanWorkstation\Parameters' -ErrorAction SilentlyContinue
+    $posteGpo = Get-ItemProperty 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\LanmanWorkstation' -ErrorAction SilentlyContinue
+    Accord 'NTLMv1' ($null -ne $lsa.LmCompatibilityLevel -and $lsa.LmCompatibilityLevel -lt 3) 'NTLMv1'
+    Accord 'Empreintes LM' ($lsa.NoLMHash -eq 0) 'vieille forme \(LM\)|old form \(LM\)'
+    Accord 'Registre à distance' ((Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Services\RemoteRegistry' -ErrorAction SilentlyContinue).Start -eq 2) 'Registre à distance démarre|Remote Registry starts'
+    $smb1c = (Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Services\mrxsmb10' -ErrorAction SilentlyContinue).Start
+    Accord 'Client SMBv1' ($null -ne $smb1c -and $smb1c -ne 4) 'client SMBv1|SMBv1 client'
+    Accord 'UAC sans demande' ($uac.EnableLUA -eq 1 -and $uac.ConsentPromptBehaviorAdmin -eq 0) 'ne demande plus rien|no longer asks'
+    Accord 'Accès anonyme' ($lsa.RestrictAnonymousSAM -eq 0 -or $lsa.EveryoneIncludesAnonymous -eq 1) 'lister les comptes|list the computer|connexion anonyme|anonymous network connection'
+    $invite = if ($null -ne $posteGpo.AllowInsecureGuestAuth) { $posteGpo.AllowInsecureGuestAuth } else { $poste.AllowInsecureGuestAuth }
+    Accord 'Partages en invité' ($invite -eq 1) 'partages réseau acceptent|Network shares accept'
+    # La stratégie de PowerShell hors celle de ce processus (le test peut tourner en Bypass) : celle que Gardien lit.
+    $strategie = foreach ($portee in 'MachinePolicy', 'UserPolicy', 'CurrentUser', 'LocalMachine') {
+        $s = [string](Get-ExecutionPolicy -Scope $portee)
+        if ($s -and $s -ne 'Undefined') { $s; break }
+    }
+    Info "Stratégie de PowerShell (hors processus) : $(if ($strategie) { $strategie } else { 'non définie' })"
+    Accord 'PowerShell sans avertissement' ($strategie -in 'Unrestricted', 'Bypass') 'PowerShell lance n''importe quel script|PowerShell runs any script'
+    $sb = (Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\SecureBoot\State' -ErrorAction SilentlyContinue).UEFISecureBootEnabled
+    if ($null -eq $sb) { Info 'Secure Boot : clé absente (ancien BIOS), Gardien ne dit rien' }
+    else {
+        if (@($audit.constats | Where-Object { $_.categorie -eq 'Secure Boot' }).Count) { Ok "Secure Boot au bilan (Windows : $sb)" } else { Bug 'Secure Boot ABSENT du bilan' }
+        Accord 'Secure Boot coupé' ($sb -eq 0) 'Secure Boot désactivé|Secure Boot off'
+    }
+    # Macros d'Office : VBAWarnings à 1 dans une version et un programme, la stratégie passant avant le réglage.
+    $macros = $false
+    foreach ($v in '16.0', '15.0', '14.0') {
+        foreach ($p in 'word', 'excel', 'powerpoint', 'access', 'publisher', 'visio') {
+            $gpo = (Get-ItemProperty "HKCU:\Software\Policies\Microsoft\Office\$v\$p\Security" -ErrorAction SilentlyContinue).VBAWarnings
+            $reg = (Get-ItemProperty "HKCU:\Software\Microsoft\Office\$v\$p\Security" -ErrorAction SilentlyContinue).VBAWarnings
+            if ($(if ($null -ne $gpo) { $gpo } else { $reg }) -eq 1) { $macros = $true }
+        }
+    }
+    Accord 'Macros d''Office' $macros 'toutes les macros|every macro'
+    # Verrouillage de l'écran : présent au bilan, avec le délai trouvé (à comparer à ce que montrent les Paramètres).
+    $verrou = @($audit.constats | Where-Object { $_.categorie -eq 'Verrouillage' })
+    if ($verrou.Count) { Ok "Verrouillage au bilan : $($verrou[0].message)" } else { Bug 'Verrouillage ABSENT du bilan' }
+    Info "powercfg, veille sur secteur : $(((powercfg /q SCHEME_CURRENT SUB_SLEEP STANDBYIDLE) -join ' ') -replace '.*Index: (0x[0-9a-f]+).*Index: (0x[0-9a-f]+).*', '$1 (secteur), $2 (batterie)')"
+    # Exclusions de Defender : lisibles seulement en administrateur ; sinon Gardien ne conclut rien.
+    $exclusions = @((Get-MpPreference -ErrorAction SilentlyContinue).ExclusionPath)
+    if ($exclusions | Where-Object { $_ -like 'N/A*' }) { Info 'Exclusions de Defender cachées sans droits administrateur' }
+    else { Info "Exclusions de Defender : $(@($exclusions | Where-Object { $_ }).Count) dossier(s)" }
+} catch { Bug "Comparaison impossible : $($_.Exception.Message)" }
+
 Etape 'Couleurs et accents dans la console'
 if ($Auto) { Info 'Sautée : il faut regarder l''écran (test avec questions).' } else {
     Vider-Clavier

@@ -344,6 +344,22 @@ pub fn info_port(port: u16) -> InfoPort {
                 "Development or admin web service: make sure it should be reachable."
             ),
         ),
+        3031 => (
+            crate::tr!("Événements Apple à distance", "Remote Apple Events"),
+            Eleve,
+            crate::tr!(
+                "Un autre ordinateur pilote les apps de ce Mac par AppleScript, avec un mot de passe du Mac. À couper si inutile.",
+                "Another computer drives this Mac's apps through AppleScript, with a Mac password. Turn it off if unused."
+            ),
+        ),
+        3283 => (
+            crate::tr!("Gestion à distance Apple", "Apple Remote Management"),
+            Moyen,
+            crate::tr!(
+                "Prise en main du Mac à distance (Apple Remote Desktop). À couper si personne ne gère ce Mac.",
+                "Remote control of the Mac (Apple Remote Desktop). Turn it off if nobody manages this Mac."
+            ),
+        ),
         3306 => (
             "MySQL",
             Eleve,
@@ -722,6 +738,13 @@ mod tests {
         assert_eq!(identifier("-NOAUTH Authentication required."), Some(6379));
         assert_eq!(identifier("RFB 003.008"), Some(5900));
         assert_eq!(identifier("bonjour"), None);
+    }
+
+    #[test]
+    fn partages_du_mac_reconnus() {
+        assert_eq!(info_port(3031).niveau, Niveau::Eleve);
+        assert_eq!(info_port(3283).niveau, Niveau::Moyen);
+        assert_ne!(info_port(3031).service, inconnu());
     }
 
     #[test]

@@ -64,7 +64,7 @@ pour revenir.
 
 **Bilan de sécurité** — une note de A à F, puis chaque problème avec sa correction.
 - Pare-feu, ports ouverts (TCP et UDP), mises à jour et failles connues, chiffrement du disque, Secure Boot,
-  verrouillage de l'écran, comptes, SSH (et ses tentatives de connexion ratées, venues d'Internet ou de la maison),
+  verrouillage de l'écran, comptes, SSH (et ses tentatives de connexion ratées, venues d'Internet ou de la maison, et le client qui ne vérifie pas les serveurs),
   sudo, groupes qui valent root (docker, lxd, libvirt, disk), durcissement du noyau (sous macOS : volume du système scellé,
   signature du code imposée, validation des bibliothèques, extensions ajoutées), fichiers secrets mal protégés,
   sauvegardes, partages de fichiers ouverts à tout le monde (Samba, NFS, partages Windows, Partage de fichiers de
@@ -74,7 +74,7 @@ pour revenir.
 - DNS réellement utilisé (et réponses inventées), certificats racine ajoutés (interception du HTTPS), extensions de
   navigateur qui lisent tous les sites.
 - Wi-Fi : protection du réseau (WEP, WPA2, WPA3), et faux point d'accès (« jumeau maléfique ») qui copie son nom
-  sans mot de passe pour attirer les appareils.
+  sans mot de passe pour attirer les appareils ; sous Linux, réseaux ouverts enregistrés qui se reconnectent tout seuls.
 - Bluetooth : ordinateur visible en permanence, et appareils appairés depuis moins d'une semaine (un clavier
   appairé par quelqu'un d'autre tape ce qu'il veut).
 - Heure réglée automatiquement ; fin de support : Windows 10 et les versions de Windows 11 ou de macOS qui ne
@@ -83,7 +83,7 @@ pour revenir.
 - Windows : WDigest (mots de passe en clair dans la mémoire), protection de l'autorité de sécurité locale,
   PowerShell 2.0, Assistance à distance, ouverture de session automatique (et mot de passe en clair dans le
   registre), SmartScreen coupé, contrôle de compte coupé pour les connexions à distance, intégrité de la mémoire,
-  mises à jour en pause, authentification réseau LM ou NTLMv1, signature des partages, PowerShell qui lance tout script, UAC qui ne demande rien, partages ouverts en invité, comptes listés sans mot de passe, Secure Boot ; Linux : mises à jour de
+  mises à jour en pause, authentification réseau LM ou NTLMv1, signature des partages, PowerShell qui lance tout script, UAC qui ne demande rien, partages ouverts en invité, comptes listés sans mot de passe, Secure Boot, exclusions de Defender trop larges, macros d'Office toutes permises, mots de passe gardés sous forme LM, Registre à distance, client SMBv1 ; Linux : mises à jour de
   sécurité automatiques.
 - Navigation détournée (proxy imposé, sites redirigés par le fichier hosts).
 - Mots de passe enregistrés dans le navigateur sans protection, fichiers sensibles qui traînent (mots de passe ou
