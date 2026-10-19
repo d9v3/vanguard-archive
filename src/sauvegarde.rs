@@ -108,16 +108,35 @@ fn nom_machine() -> String {
 
 // ───────────────────────────── Linux : systemd + rsync ─────────────────────────────
 
-/// Un argument cité pour ExecStart= de systemd : entre guillemets, « \ » et « " » protégés.
+/// Un argument cité pour ExecStart= de systemd : entre guillemets, « \ » et « " » protégés, « % » doublé (systemd y
+/// lit ses propres codes).
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 pub(crate) fn citer_systemd(t: &str) -> String {
-    format!("\"{}\"", t.replace('\\', "\\\\").replace('"', "\\\""))
+    format!(
+        "\"{}\"",
+        t.replace('\\', "\\\\").replace('"', "\\\"").replace('%', "%%")
+    )
+}
+
+/// Un chemin prêt pour une ligne d'unité systemd, `None` s'il contient un caractère de contrôle. Le chemin vient en
+/// partie du nom du disque, que choisit qui l'a formaté : un saut de ligne y ajouterait à l'unité une ligne de son
+/// choix (ExecStartPre=…), lancée chaque jour sous ce compte.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn chemin_systemd(p: &Path) -> Option<String> {
+    let t = p.display().to_string();
+    (!t.chars().any(char::is_control)).then(|| t.replace('%', "%%"))
 }
 
 /// Les deux fichiers d'unité : (timer, service). `racine` : le disque, dont le montage conditionne le passage ;
 /// `destination` : le dossier de cet ordinateur dessus ; `sources` : les dossiers personnels copiés tels quels.
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
-pub(crate) fn unites(rsync: &Path, racine: &Path, destination: &Path, sources: &[PathBuf]) -> (String, String) {
+pub(crate) fn unites(rsync: &Path, racine: &Path, destination: &Path, sources: &[PathBuf]) -> Option<(String, String)> {
+    let tous = [rsync, racine, destination]
+        .into_iter()
+        .chain(sources.iter().map(PathBuf::as_path));
+    for p in tous {
+        chemin_systemd(p)?;
+    }
     let timer = format!(
         "[Unit]\nDescription=Sauvegarde Gardien, chaque jour\n\n[Timer]\nOnCalendar=*-*-* {HEURE}\nPersistent=true\nRandomizedDelaySec=10min\n\n[Install]\nWantedBy=timers.target\n"
     );
@@ -134,11 +153,11 @@ pub(crate) fn unites(rsync: &Path, racine: &Path, destination: &Path, sources: &
     commande.push(citer_systemd(&format!("{}/", destination.display())));
     let service = format!(
         "[Unit]\nDescription=Sauvegarde Gardien vers {}\n# Disque débranché : rien ne se passe, sans erreur.\nConditionPathIsMountPoint={}\n\n[Service]\nType=oneshot\nNice=10\nIOSchedulingClass=idle\nExecStart={}\n",
-        destination.display(),
-        racine.display(),
+        chemin_systemd(destination)?,
+        chemin_systemd(racine)?,
         commande.join(" ")
     );
-    (timer, service)
+    Some((timer, service))
 }
 
 #[cfg(target_os = "linux")]
@@ -487,7 +506,13 @@ fn mettre_en_place() -> Option<MiseEnPlace> {
         });
     }
     let rsync = rsync?;
-    let (timer, service) = unites(&rsync, &disque.racine, &destination, &sources);
+    let Some((timer, service)) = unites(&rsync, &disque.racine, &destination, &sources) else {
+        mauvais(tr!(
+            "Le nom de ce disque ou d'un dossier contient un caractère de contrôle : rien n'est posé. Renomme le disque, puis recommence.",
+            "The name of this disk or of a folder contains a control character: nothing is set up. Rename the disk, then start again."
+        ));
+        return None;
+    };
     let dossier = dossier_unites();
     afficher_aligne(
         "  ",
@@ -859,7 +884,27 @@ mod tests {
                 PathBuf::from("/home/alice/Documents"),
                 PathBuf::from("/home/alice/Mes \"images\""),
             ],
+        )
+        .unwrap();
+        // Un nom de disque piégé (saut de ligne) : rien n'est écrit. Un « % » est doublé pour systemd.
+        assert!(
+            unites(
+                Path::new("/usr/bin/rsync"),
+                Path::new("/run/media/alice/X\nExecStartPre=/bin/touch /tmp/pirate"),
+                Path::new("/run/media/alice/X\nExecStartPre=/bin/touch /tmp/pirate/Sauvegarde-Gardien/pc"),
+                &[PathBuf::from("/home/alice/Documents")],
+            )
+            .is_none()
         );
+        let (_, cent) = unites(
+            Path::new("/usr/bin/rsync"),
+            Path::new("/run/media/alice/100%"),
+            Path::new("/run/media/alice/100%/Sauvegarde-Gardien/pc"),
+            &[PathBuf::from("/home/alice/Documents")],
+        )
+        .unwrap();
+        assert!(cent.contains("ConditionPathIsMountPoint=/run/media/alice/100%%\n"));
+        assert!(cent.contains("\"/run/media/alice/100%%/Sauvegarde-Gardien/pc/\""));
         assert!(timer.contains("OnCalendar=*-*-* 12:00:00") && timer.contains("Persistent=true"));
         assert!(timer.contains("WantedBy=timers.target"));
         assert!(service.contains("ConditionPathIsMountPoint=/run/media/alice/Externe"));
