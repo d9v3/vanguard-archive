@@ -79,7 +79,7 @@ pour revenir.
   appairé par quelqu'un d'autre tape ce qu'il veut).
 - Heure réglée automatiquement ; fin de support : Windows 10 et les versions de Windows 11 ou de macOS qui ne
   reçoivent plus de corrections, programmes abandonnés par leur éditeur (Flash, Java 7, Office 2016…), navigateurs qui
-  ne se mettent plus à jour ; comptes oubliés (actifs mais inutilisés depuis six mois).
+  ne se mettent plus à jour ; comptes oubliés (actifs mais inutilisés depuis six mois) ; nouveaux administrateurs.
 - Windows : WDigest (mots de passe en clair dans la mémoire), protection de l'autorité de sécurité locale,
   PowerShell 2.0, Assistance à distance, ouverture de session automatique (et mot de passe en clair dans le
   registre), SmartScreen coupé, contrôle de compte coupé pour les connexions à distance, intégrité de la mémoire,

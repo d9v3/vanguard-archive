@@ -74,7 +74,7 @@ In the menu, choose **1** (full check), then **2** (fix). Arrows, Enter, and Esc
   else types whatever it wants).
 - Clock set automatically; end of support: Windows 10 and the Windows 11 or macOS versions that no longer get fixes,
   programs abandoned by their publisher (Flash, Java 7, Office 2016…), browsers that no longer update; forgotten
-  accounts (active but unused for six months).
+  accounts (active but unused for six months); new administrators.
 - Windows: WDigest (passwords in clear text in memory), Local Security Authority protection, PowerShell 2.0, Remote
   Assistance, automatic sign-in (and password in clear text in the registry), SmartScreen off, account control off
   for remote connections, memory integrity, paused updates, LM or NTLMv1 network authentication, share signing;

@@ -8,6 +8,7 @@ use serde::Serialize;
 use crate::risk::Niveau;
 use crate::ui::*;
 
+mod administrateurs;
 mod bluetooth;
 mod certificats;
 mod comptes_oublies;
@@ -216,6 +217,7 @@ fn audit(systeme: &'static str, premier: Constat, mut propres: Vec<Verification<
         verif!(sante::sante()),
         verif!(partages::partages()),
         verif!(bluetooth::constats()),
+        verif!(administrateurs::constat()),
         verif!(journaux::journaux()),
         verif!(heure::constat()),
         verif!(fin_de_support::constats()),
