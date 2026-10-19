@@ -18,9 +18,11 @@ mod heure;
 mod journaux;
 #[cfg(target_os = "linux")]
 pub mod linux;
+mod mots_de_passe;
 mod navigateur;
 mod partages;
 mod sante;
+mod sensibles;
 pub(crate) mod wifi;
 #[cfg(target_os = "linux")]
 use linux as os;
@@ -188,6 +190,8 @@ fn audit(systeme: &'static str, premier: Constat, mut propres: Vec<Verification<
         verif!(certificats::certificats()),
         verif!(extensions::extensions()),
         verif!(navigateur::navigateurs()),
+        verif!(mots_de_passe::constats()),
+        verif!(sensibles::constats()),
         verif!(sante::sante()),
         verif!(partages::partages()),
         verif!(bluetooth::constats()),
@@ -202,6 +206,7 @@ fn audit(systeme: &'static str, premier: Constat, mut propres: Vec<Verification<
         verif!(crate::historique::constat()),
         verif!(crate::reseau::surveillance::constat()),
         verif!(crate::chiffrement::constat()),
+        verif!(crate::sauvegarde::constats()),
     ]);
     let mut constats = vec![premier];
     constats.extend(en_parallele(propres));
@@ -254,7 +259,7 @@ fn aucun_port_expose() -> Constat {
 
 /// Sortie standard d'une commande, ou `None` si elle est absente ou échoue.
 #[cfg(unix)]
-fn sortie(cmd: &str, args: &[&str]) -> Option<String> {
+pub(crate) fn sortie(cmd: &str, args: &[&str]) -> Option<String> {
     let r = crate::commande::lancer(Command::new(cmd).args(args), 30)?;
     (r.code == Some(0)).then_some(r.sortie)
 }

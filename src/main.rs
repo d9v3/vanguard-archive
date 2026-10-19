@@ -32,6 +32,7 @@ mod rapport;
 mod reparer;
 mod reseau;
 mod risk;
+mod sauvegarde;
 mod selection;
 mod ui;
 mod verifier_cle;

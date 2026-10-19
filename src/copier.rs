@@ -43,7 +43,7 @@ const DOSSIERS: [(Sorte, &str, &[&str], [&str; 3]); 5] = [
 ];
 
 impl Sorte {
-    fn nom(self) -> &'static str {
+    pub(crate) fn nom(self) -> &'static str {
         match self {
             Sorte::Documents => tr!("Documents", "Documents"),
             Sorte::Images => tr!("Images", "Pictures"),
@@ -55,7 +55,7 @@ impl Sorte {
 }
 
 /// Les dossiers personnels qui existent, chacun avec son chemin dans la langue du système.
-fn sources() -> Vec<(Sorte, PathBuf)> {
+pub(crate) fn sources() -> Vec<(Sorte, PathBuf)> {
     let mut liste: Vec<(Sorte, PathBuf)> = Vec::new();
     for (sorte, ..) in DOSSIERS {
         // Deux sortes au même endroit (Bureau non configuré = dossier personnel) : une seule fois.
