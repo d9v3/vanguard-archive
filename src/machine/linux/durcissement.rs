@@ -49,6 +49,19 @@ pub(super) const DURCISSEMENT: &[(&str, i64, (&str, &str))] = &[
         1,
         ("résistance aux inondations SYN", "SYN flood resistance"),
     ),
+    (
+        "fs/protected_fifos",
+        1,
+        ("protection des tubes nommés dans /tmp", "named pipe protection in /tmp"),
+    ),
+    (
+        "fs/protected_regular",
+        1,
+        (
+            "protection des fichiers ordinaires dans /tmp",
+            "regular file protection in /tmp",
+        ),
+    ),
 ];
 
 /// Réglages trop faibles parmi les valeurs lues : (chemin, valeur lue, valeur sûre, rôle).
@@ -218,6 +231,18 @@ mod tests {
         let faibles = reglages_faibles(lu);
         assert_eq!(faibles.len(), 1);
         assert_eq!(faibles[0].0, "kernel/kptr_restrict");
+        // Les protections de /tmp à 0 (noyau sans systemd pour les régler) : signalées.
+        let tmp = reglages_faibles(|c| {
+            Some(
+                if c.starts_with("fs/protected_") && c != "fs/protected_symlinks" && c != "fs/protected_hardlinks" {
+                    0
+                } else {
+                    2
+                },
+            )
+        });
+        let noms: Vec<&str> = tmp.iter().map(|f| f.0).collect();
+        assert_eq!(noms, ["fs/protected_fifos", "fs/protected_regular"]);
         // Réglage absent (noyau sans Yama…) : ni faible ni fort, on ne conclut pas.
         assert_eq!(reglages_faibles(|_| None), [] as [(&str, i64, i64, &str); 0]);
     }
