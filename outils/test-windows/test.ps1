@@ -801,6 +801,9 @@ try {
     if ($mit) { Accord 'Protection contre les exploits' ('OFF' -in @("$($mit.DEP.Enable)", "$($mit.ASLR.BottomUp)", "$($mit.CFG.Enable)", "$($mit.SEHOP.Enable)")) 'Protection contre les exploits|Exploit protection' }
     # Pare-feu, lu par Gardien dans le registre : doit dire la même chose que Get-NetFirewallProfile.
     Accord 'Pare-feu coupé' ([bool]@(Get-NetFirewallProfile | Where-Object { -not $_.Enabled }).Count) 'Pare-feu désactivé pour|Firewall off for'
+    $wu = (Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Services\wuauserv' -ErrorAction SilentlyContinue).Start
+    $uso = (Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Services\UsoSvc' -ErrorAction SilentlyContinue).Start
+    Accord 'Service Windows Update' ($wu -eq 4 -or $uso -eq 4) 'service Windows Update est désactivé|Windows Update service is disabled'
     Accord 'UAC sans demande' ($uac.EnableLUA -eq 1 -and $uac.ConsentPromptBehaviorAdmin -eq 0) 'ne demande plus rien|no longer asks'
     Accord 'Accès anonyme' ($lsa.RestrictAnonymousSAM -eq 0 -or $lsa.EveryoneIncludesAnonymous -eq 1) 'lister les comptes|list the computer|connexion anonyme|anonymous network connection'
     $invite = if ($null -ne $posteGpo.AllowInsecureGuestAuth) { $posteGpo.AllowInsecureGuestAuth } else { $poste.AllowInsecureGuestAuth }

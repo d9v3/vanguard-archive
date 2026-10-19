@@ -13,8 +13,9 @@ chaque version garde son étiquette dans le dépôt (`git checkout v0.62.0`, par
   Windows, huit lancements de PowerShell de moins : pare-feu, UAC, Bureau à distance et verrouillage lus
   directement dans le registre.
 - **Windows.** Installation de paquets MSI avec les droits du système, protection dans le cloud de Defender coupée,
-  protection contre les exploits coupée (DEP, ASLR, CFG, SEHOP), services au chemin sans guillemets dans un dossier
-  modifiable par tous ; BitLocker suspendu ou en attente ne compte plus comme chiffré.
+  protection contre les exploits coupée (DEP, ASLR, CFG, SEHOP), Windows Update coupé (service ou stratégie),
+  services au chemin sans guillemets dans un dossier modifiable par tous ; BitLocker suspendu ou en attente ne compte
+  plus comme chiffré.
 - **Linux et macOS.** Session qui s'ouvre toute seule sans disque chiffré (GDM, SDDM, LightDM), mémoire des
   programmes root lisible après un plantage, touches magiques du noyau ; sauvegarde Time Machine non chiffrée,
   partage à distance du Mac qui accepte root ou les comptes sans mot de passe.

@@ -582,6 +582,60 @@ pub(super) fn juger_protection_exploits(valeurs: Option<&str>) -> Option<Constat
     )
 }
 
+/// Windows Update coupé, souvent par un outil « d'allègement » : service wuauserv ou orchestrateur UsoSvc désactivés
+/// (Start à 4), ou stratégie NoAutoUpdate à 1. Plus aucune faille ne se corrige toute seule. Les services sont remis
+/// comme Windows les livre (wuauserv manuel, UsoSvc automatique) ; la stratégie peut venir de qui gère l'ordinateur :
+/// à retirer soi-même.
+pub(super) fn juger_windows_update(
+    service: Option<u32>,
+    orchestrateur: Option<u32>,
+    sans_maj_auto: Option<u32>,
+) -> Option<Constat> {
+    let mut commandes = Vec::new();
+    if service == Some(4) {
+        commandes.push("Set-Service wuauserv -StartupType Manual");
+    }
+    if orchestrateur == Some(4) {
+        commandes.push("Set-Service UsoSvc -StartupType Automatic");
+    }
+    if !commandes.is_empty() {
+        return Some(
+            alerte(
+                "Mises à jour",
+                Niveau::Eleve,
+                tr!(
+                    "Le service Windows Update est désactivé : plus aucune mise à jour de sécurité ne s'installe, ni toute seule ni à la main.",
+                    "The Windows Update service is disabled: no security update installs anymore, neither by itself nor by hand."
+                ),
+            )
+            .corriger(
+                tr!(
+                    "Remettre les services de Windows Update comme Windows les livre",
+                    "Put the Windows Update services back as Windows ships them"
+                ),
+                &commandes,
+            ),
+        );
+    }
+    (sans_maj_auto == Some(1)).then(|| {
+        alerte(
+            "Mises à jour",
+            Niveau::Moyen,
+            tr!(
+                "Une stratégie empêche Windows Update de s'installer tout seul : les failles corrigées restent ouvertes tant que personne ne lance les mises à jour.",
+                "A policy stops Windows Update from installing by itself: fixed flaws stay open until someone runs the updates."
+            ),
+        )
+        .manuel(
+            tr!(
+                "Si personne ne gère cet ordinateur (entreprise, école) : retirer la stratégie (commande ci-dessous, en administrateur)",
+                "If nobody manages this computer (company, school): remove the policy (command below, as administrator)"
+            ),
+            &[r"Remove-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU' -Name NoAutoUpdate"],
+        )
+    })
+}
+
 /// Signature SMB : le client qui ne l'exige pas peut se faire relayer vers un faux partage. Une information, à
 /// activer soi-même (un vieux NAS sans signature ne répondrait plus) ; Windows 11 24H2 l'exige déjà.
 pub(super) fn juger_signature_smb(client_exige: Option<u32>) -> Option<Constat> {
@@ -759,6 +813,11 @@ pub(super) fn durcissement() -> Vec<Constat> {
         r"SYSTEM\CurrentControlSet\Services\mrxsmb10",
         "Start",
     )));
+    c.extend(juger_windows_update(
+        lire_dword(r"SYSTEM\CurrentControlSet\Services\wuauserv", "Start"),
+        lire_dword(r"SYSTEM\CurrentControlSet\Services\UsoSvc", "Start"),
+        lire_dword(r"SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU", "NoAutoUpdate"),
+    ));
     c.extend(juger_signature_smb(lire_dword(
         r"SYSTEM\CurrentControlSet\Services\LanmanWorkstation\Parameters",
         "RequireSecuritySignature",
@@ -958,6 +1017,18 @@ mod tests {
             exploits.correctif.unwrap().commandes,
             ["Set-ProcessMitigation -System -Enable DEP,CFG"]
         );
+        // Windows Update : services désactivés (élevé, corrigé) avant la stratégie (moyen, à la main).
+        assert!(juger_windows_update(Some(3), Some(2), None).is_none());
+        let service = juger_windows_update(Some(4), Some(2), Some(1)).unwrap();
+        assert_eq!(service.probleme, Some(Niveau::Eleve));
+        assert_eq!(
+            service.correctif.unwrap().commandes,
+            ["Set-Service wuauserv -StartupType Manual"]
+        );
+        let les_deux = juger_windows_update(Some(4), Some(4), None).unwrap().correctif.unwrap();
+        assert_eq!(les_deux.commandes.len(), 2);
+        let strategie = juger_windows_update(Some(3), Some(2), Some(1)).unwrap();
+        assert!(strategie.probleme == Some(Niveau::Moyen) && !strategie.correctif.unwrap().automatique);
         // Secure Boot : clé absente (ancien BIOS), rien ; 0 coupé, une information à régler soi-même.
         assert!(juger_demarrage_securise(None).is_none());
         assert_eq!(juger_demarrage_securise(Some(1)).unwrap().probleme, None);

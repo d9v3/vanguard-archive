@@ -11,9 +11,9 @@ repository (`git checkout v0.62.0`, for example), to be rebuilt if needed.
 - **A much faster check.** On Linux, from 7 seconds to under one: commands are no longer awaited in fixed 50 ms
   pauses, packages are verified in parallel, Wi-Fi no longer waits for a new scan. On Windows, eight fewer PowerShell
   launches: firewall, UAC, Remote Desktop and screen lock read straight from the registry.
-- **Windows.** MSI packages installed with system rights, Defender cloud protection off, exploit protection off
-  (DEP, ASLR, CFG, SEHOP), services with unquoted paths in a folder anyone can change; a suspended or pending
-  BitLocker no longer counts as encrypted.
+- **Windows.** MSI packages installed with system rights, Defender cloud protection off, exploit protection off (DEP,
+  ASLR, CFG, SEHOP), Windows Update turned off (service or policy), services with unquoted paths in a folder anyone
+  can change; a suspended or pending BitLocker no longer counts as encrypted.
 - **Linux and macOS.** Session that opens by itself without an encrypted disk (GDM, SDDM, LightDM), root programs'
   memory readable after a crash, kernel magic keys; unencrypted Time Machine backup, Mac Remote Login accepting root
   or accounts without a password.

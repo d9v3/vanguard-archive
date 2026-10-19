@@ -88,8 +88,9 @@ pour revenir.
   ne demande rien, partages ouverts en invité, comptes listés sans mot de passe, Secure Boot, BitLocker suspendu,
   protection dans le cloud de Defender coupée, exclusions de Defender trop larges, macros d'Office toutes permises,
   mots de passe gardés sous forme LM, Registre à distance, client SMBv1, installation MSI avec les droits du système,
-  services au chemin sans guillemets, protection contre les exploits coupée ; Linux : mises à jour de sécurité
-  automatiques, session qui s'ouvre toute seule sans disque chiffré ; macOS : sauvegarde Time Machine non chiffrée.
+  services au chemin sans guillemets, protection contre les exploits coupée, Windows Update coupé ; Linux : mises à
+  jour de sécurité automatiques, session qui s'ouvre toute seule sans disque chiffré ; macOS : sauvegarde Time
+  Machine non chiffrée.
 - Navigation détournée (proxy imposé, sites redirigés par le fichier hosts).
 - Mots de passe enregistrés dans le navigateur sans protection, fichiers sensibles qui traînent (mots de passe ou
   clés en clair), sauvegarde absente avec la mise en place proposée.
