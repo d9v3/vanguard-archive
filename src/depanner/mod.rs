@@ -5,6 +5,7 @@
 
 mod compte;
 mod depart;
+mod depuis_maj;
 mod imprimante;
 mod infection;
 mod nouveau;
@@ -329,6 +330,9 @@ fn lent() {
         ));
     }
     a_savoir(&conseils);
+    if depuis == 1 {
+        depuis_maj::apres_mise_a_jour();
+    }
     crate::lenteur::menu();
 }
 
