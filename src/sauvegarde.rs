@@ -206,7 +206,11 @@ pub(crate) fn identifiants_time_machine(texte: &str) -> Vec<String> {
         .lines()
         .filter_map(|l| {
             let (cle, valeur) = l.split_once(':')?;
-            (cle.trim() == "ID").then(|| valeur.trim().to_string())
+            let id = valeur.trim();
+            // Un identifiant de destination : des chiffres hexadécimaux et des tirets. Il repart plus tard dans une
+            // commande lancée avec sudo : rien d'autre n'y passe.
+            (cle.trim() == "ID" && !id.is_empty() && id.chars().all(|c| c.is_ascii_hexdigit() || c == '-'))
+                .then(|| id.to_string())
         })
         .collect()
 }
@@ -753,7 +757,12 @@ fn annuler_mise_en_place(m: &MiseEnPlace) -> bool {
             ..
         } => {
             let mut commandes = Vec::new();
-            if let Some(id) = identifiant {
+            // L'identifiant a été lu dans les notes, que n'importe quel programme du compte peut réécrire : vérifié de
+            // nouveau avant de partir dans une commande lancée avec sudo.
+            if let Some(id) = identifiant
+                .as_deref()
+                .filter(|id| !id.is_empty() && id.chars().all(|c| c.is_ascii_hexdigit() || c == '-'))
+            {
                 commandes.push(format!("sudo tmutil removedestination {id}"));
             }
             if !deja_actif {
@@ -970,6 +979,10 @@ mod tests {
         );
         assert_eq!(nouvel_identifiant(&["a".into()], &["a".into()]), None);
         assert_eq!(identifiants_time_machine("tmutil: No destinations configured").len(), 0);
+        assert_eq!(
+            identifiants_time_machine("ID : 1A2B-3C4D\nID : x; rm -rf ~\nID : \n"),
+            ["1A2B-3C4D"]
+        );
     }
 
     #[test]
