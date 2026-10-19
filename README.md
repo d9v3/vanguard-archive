@@ -48,16 +48,16 @@ pour revenir.
 
 | Domaine | Ce que fait Gardien |
 |---|---|
-| **Bilan de sécurité** | Une note de A à F : pare-feu, mises à jour et failles, chiffrement, ports ouverts, comptes, SSH, ce qui se lance en cachette, partages ouverts à tous, Wi-Fi, santé des disques… Chaque problème est expliqué, avec sa correction. |
+| **Bilan de sécurité** | Une note de A à F : pare-feu, mises à jour et failles, chiffrement, ports ouverts, comptes, SSH, ce qui se lance en cachette, partages ouverts à tous, Wi-Fi, Bluetooth, heure, fin de support, comptes oubliés, mots de passe du navigateur, fichiers sensibles qui traînent, santé des disques… Chaque problème est expliqué, avec sa correction. |
 | **Réseau local** | Chaque appareil, son fabricant, ses ports ouverts et ses risques ; les nouveaux venus signalés, les ports ouverts sur la box, l'adresse de la maison sur liste noire. |
 | **Wi-Fi, NAT, DNS, caméras** | Le canal Wi-Fi le plus libre, le type de NAT pour le jeu, le DNS le plus rapide (sans retirer un DNS qui protège), les caméras cachées. |
 | **Connexion pour le jeu** | Ping, gigue, pertes, débit et bufferbloat, comparés à tes habitudes. |
-| **Dépanner** | Diagnostic de l'ordinateur, pannes de tous les jours pas à pas (Internet, Wi-Fi, lenteur, son, imprimante, disque plein), après une infection, nouvel ordinateur, ordinateur qui part, « Pourquoi c'est lent ? », fiche de l'ordinateur, réparations. |
+| **Dépanner** | Diagnostic de l'ordinateur, pannes de tous les jours pas à pas (Internet, Wi-Fi, lenteur, son, imprimante, disque plein), après une infection, nouvel ordinateur, ordinateur qui part, compte piraté, « Pourquoi c'est lent ? », fiche de l'ordinateur, rapport à laisser, réparations. |
 | **Optimiser et nettoyer** | Réglages de confidentialité et de performance qui s'annulent exactement, nettoyage à cocher avec la place gagnée mesurée, programmes du démarrage. |
 | **Protection** | Fichiers-pièges contre les rançongiciels, blocages de Windows Defender, 308 règles YARA, antivirus, bac à sable, intégrité des fichiers critiques, mots de passe fuités, connexions sortantes, faux technicien (logiciels de prise de contrôle à distance), caméra et micro, liens dangereux, fichiers téléchargés, quarantaine réversible. |
 | **Suivi** | Surveillance toutes les heures, entretien du mois, rapport HTML avec la courbe des notes, apprentissage sur ton ordinateur. |
 | **Logiciels et jeux** | Les meilleurs logiciels en 8 catégories, depuis leur source officielle ; mises à jour de tout d'un coup ; réglages pour jouer. |
-| **Outils** | Copier mes fichiers (copie vérifiée) et vérifier une copie, vérifier ma clé (fausses clés, vitesse), mes ordinateurs (suivis par la clé), données de la clé protégées par une phrase, guide des commandes, recherche dans tous les menus. |
+| **Outils** | Sauvegarde automatique, copier mes fichiers (copie vérifiée) et vérifier une copie, vérifier ma clé (fausses clés, vitesse), mes ordinateurs (suivis par la clé), données de la clé protégées par une phrase, raccourci sur cet ordinateur, guide des commandes, recherche dans tous les menus. |
 
 <details>
 <summary><b>Le détail, fonction par fonction</b></summary>
@@ -77,6 +77,11 @@ pour revenir.
   sans mot de passe pour attirer les appareils.
 - Bluetooth : ordinateur visible en permanence, et appareils appairés depuis moins d'une semaine (un clavier
   appairé par quelqu'un d'autre tape ce qu'il veut).
+- Heure réglée automatiquement ; fin de support : Windows 10 et les versions de Windows 11 ou de macOS qui ne
+  reçoivent plus de corrections, programmes abandonnés par leur éditeur (Flash, Java 7, Office 2016…), navigateurs qui
+  ne se mettent plus à jour ; comptes oubliés (actifs mais inutilisés depuis six mois).
+- Mots de passe enregistrés dans le navigateur sans protection, fichiers sensibles qui traînent (mots de passe ou
+  clés en clair), sauvegarde absente avec la mise en place proposée.
 - Santé : espace disque, état SMART des disques (sans root), batterie, températures.
 - Ce qui n'a pas pu être vérifié est dit, jamais compté comme sain.
 
@@ -108,7 +113,16 @@ selon le signe, le bilan de ce qui a pu s'installer, les analyses dans l'ordre, 
 le courriel en premier) ; **nouvel ordinateur** (mises à jour, chiffrement, sauvegardes, pack de départ,
 confidentialité, dans l'ordre) ; **ordinateur qui part**, vendu ou donné (copie vérifiée d'abord, comptes
 déconnectés, clé BitLocker ou FileVault mise de côté, effacement sûr par l'outil du système, puce TPM remise à
-zéro). Gardien n'efface rien lui-même.
+zéro). Gardien n'efface rien lui-même. Et **mon compte a été piraté** : reprendre la main par la page officielle,
+puis mot de passe, validation en deux étapes, sessions fermées, et la vérification que cet ordinateur n'a pas livré
+le mot de passe. Lent **depuis une mise à jour** : les dernières mises à jour, datées, et comment revenir en arrière.
+
+**Rapport à laisser** — une page simple pour la personne qu'on vient de dépanner : sa note, ce qu'il lui reste à
+faire du plus grave au moins grave, ce qui va bien et trois habitudes ; posée sur son Bureau, à lire ou imprimer.
+
+**Sauvegarde automatique** — mise en place avec l'outil du système (Déjà Dup ou une copie rsync chaque jour sous
+Linux, Time Machine, Historique des fichiers sous Windows), vers un disque externe, après accord et annulable.
+**Raccourci sur cet ordinateur** : Gardien copié ici et lancé d'un clic.
 
 **Pourquoi c'est lent ?** — un instantané de deux secondes : ce qui occupe le processeur, la mémoire et le disque,
 programme par programme ; la durée du démarrage et ce qui le retarde ; les programmes lancés à l'ouverture de
@@ -303,9 +317,12 @@ Chaque entrée du menu existe aussi en commande.
 | `gardien nettoyer [--liste]` | nettoyer le système ; `--liste` : la place à gagner, sans rien effacer |
 | `gardien logiciels [--liste] [--recommandes]` | logiciels à installer par catégorie ; `--liste` : leur état, sans rien installer |
 | `gardien diagnostic` | diagnostic de l'ordinateur : matériel, système, plantages et erreurs récents |
-| `gardien depanner [sujet]` | dépanner pas à pas : `internet`, `wifi`, `lent`, `son`, `imprimante`, `disque`, `infection`, `nouveau`, `depart` |
+| `gardien depanner [sujet]` | dépanner pas à pas : `internet`, `wifi`, `lent`, `son`, `imprimante`, `disque`, `infection`, `nouveau`, `depart`, `compte` |
 | `gardien lenteur` | pourquoi c'est lent : processeur, mémoire, disque, démarrage, programmes à l'ouverture |
 | `gardien demarrage` | programmes au démarrage : les retirer ou les remettre, après accord ; chaque retrait s'annule |
+| `gardien a-laisser` | rapport à laisser : une page simple pour la personne dépannée |
+| `gardien sauvegarde-auto [--annuler]` | sauvegarde automatique vers un disque externe, avec l'outil du système |
+| `gardien raccourci [on\|off]` | raccourci sur cet ordinateur |
 | `gardien fiche [--json]` | fiche de l'ordinateur ; `--json` sans les numéros de série |
 | `gardien copier-fichiers [destination]` | copier mes fichiers vers un disque externe, copie vérifiée |
 | `gardien verifier-cle [dossier]` | vérifier ma clé : capacité réelle, vitesses, blocs en erreur (écrit dans le libre après accord, puis efface) |

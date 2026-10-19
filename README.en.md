@@ -44,16 +44,16 @@ In the menu, choose **1** (full check), then **2** (fix). Arrows, Enter, and Esc
 
 | Area | What Gardien does |
 |---|---|
-| **Security check** | A grade from A to F: firewall, updates and vulnerabilities, encryption, open ports, accounts, SSH, what starts in secret, shares open to everyone, Wi-Fi, disk health… Each problem is explained, with its fix. |
+| **Security check** | A grade from A to F: firewall, updates and vulnerabilities, encryption, open ports, accounts, SSH, what starts in secret, shares open to everyone, Wi-Fi, Bluetooth, clock, end of support, forgotten accounts, browser passwords, sensitive files lying around, disk health… Each problem is explained, with its fix. |
 | **Local network** | Every device, its manufacturer, its open ports and its risks; newcomers flagged, ports opened on the router, the home's address on a blocklist. |
 | **Wi-Fi, NAT, DNS, cameras** | The freest Wi-Fi channel, the NAT type for gaming, the fastest DNS (without removing a DNS that protects you), hidden cameras. |
 | **Connection for gaming** | Ping, jitter, loss, speed and bufferbloat, compared with your habits. |
-| **Troubleshoot** | Computer diagnostic, everyday problems step by step (Internet, Wi-Fi, slowness, sound, printer, full disk), after an infection, new computer, computer leaving, “Why is it slow?”, computer specs, repairs. |
+| **Troubleshoot** | Computer diagnostic, everyday problems step by step (Internet, Wi-Fi, slowness, sound, printer, full disk), after an infection, new computer, computer leaving, hacked account, “Why is it slow?”, computer specs, report to leave, repairs. |
 | **Optimize and clean up** | Privacy and performance settings undone exactly, a cleanup checklist with the space gained measured, startup programs. |
 | **Protection** | Decoy files against ransomware, Windows Defender blocking, 308 YARA rules, antivirus, sandbox, integrity of critical files, leaked passwords, outbound connections, tech-support scam (remote control tools), camera and microphone, dangerous links, downloaded files, reversible quarantine. |
 | **Follow-up** | Hourly monitoring, monthly check-up, HTML report with the grade curve, learning on your computer. |
 | **Software and games** | The best software in 8 categories, from its official source; update everything at once; settings for gaming. |
-| **Tools** | Copy my files (checked copy) and check a copy, check my drive (fake drives, speed), my computers (tracked by the key), key data protected by a passphrase, command guide, search in every menu. |
+| **Tools** | Automatic backup, copy my files (checked copy) and check a copy, check my drive (fake drives, speed), my computers (tracked by the key), key data protected by a passphrase, shortcut on this computer, command guide, search in every menu. |
 
 <details>
 <summary><b>The details, feature by feature</b></summary>
@@ -72,6 +72,11 @@ In the menu, choose **1** (full check), then **2** (fix). Arrows, Enter, and Esc
   a password to lure devices.
 - Bluetooth: computer visible all the time, and devices paired less than a week ago (a keyboard paired by someone
   else types whatever it wants).
+- Clock set automatically; end of support: Windows 10 and the Windows 11 or macOS versions that no longer get fixes,
+  programs abandoned by their publisher (Flash, Java 7, Office 2016…), browsers that no longer update; forgotten
+  accounts (active but unused for six months).
+- Passwords saved in the browser without protection, sensitive files lying around (passwords or keys in clear text),
+  missing backup with its set-up offered.
 - Health: disk space, SMART status of the disks (without root), battery, temperatures.
 - What could not be checked is said so, never counted as healthy.
 
@@ -102,7 +107,16 @@ journeys for the big moments: **after an infection** (what is urgent depending o
 have been installed, the scans in order, then the passwords to change, email first); **new computer** (updates,
 encryption, backups, starter pack, privacy, in order); **computer leaving**, sold or given (verified copy first,
 accounts signed out, BitLocker or FileVault key set aside, secure wipe by the system's tool, TPM chip cleared).
-Gardien never wipes anything itself.
+Gardien never wipes anything itself. And **my account was hacked**: take back control through the
+official page, then password, two-step verification, sessions signed out, and a check that this computer did not
+give the password away. Slow **since an update**: the latest updates, dated, and how to go back.
+
+**Report to leave** — a simple page for the person you just helped: their grade, what is left to do from the most
+to the least serious, what is fine and three habits; put on their Desktop, to read or print.
+
+**Automatic backup** — set up with the system's tool (Déjà Dup or a daily rsync copy on Linux, Time Machine, File
+History on Windows), to an external disk, after your consent and undoable. **Shortcut on this computer**: Gardien
+copied here and started with one click.
 
 **Why is it slow?** — a two-second snapshot: what keeps the processor, memory and disk busy, program by program;
 how long startup takes and what delays it; the programs started at login and their weight. Those that work for a
@@ -288,9 +302,12 @@ Each menu entry is also a command.
 | `gardien clean [--list]` | clean up the system; `--list`: the space to gain, deleting nothing |
 | `gardien apps [--list] [--recommended]` | software to install by category; `--list`: their state, installing nothing |
 | `gardien diag` | computer diagnostic: hardware, system, recent crashes and errors |
-| `gardien troubleshoot [subject]` | troubleshoot step by step: `internet`, `wifi`, `slow`, `sound`, `printer`, `disk`, `infection`, `new`, `leaving` |
+| `gardien troubleshoot [subject]` | troubleshoot step by step: `internet`, `wifi`, `slow`, `sound`, `printer`, `disk`, `infection`, `new`, `leaving`, `account` |
 | `gardien slow` | why it is slow: processor, memory, disk, startup, programs at login |
 | `gardien startup` | startup programs: remove or put them back, after your consent; each removal is undone exactly |
+| `gardien handout` | report to leave: a simple page for the person you helped |
+| `gardien auto-backup [--annuler]` | automatic backup to an external disk, with the system's tool |
+| `gardien shortcut [on\|off]` | shortcut on this computer |
 | `gardien specs [--json]` | computer specs; `--json` without the serial numbers |
 | `gardien copy-files [destination]` | copy my files to an external disk, checked copy |
 | `gardien check-drive [folder]` | check my drive: real capacity, speeds, bad blocks (writes into the free space after your consent, then erases) |

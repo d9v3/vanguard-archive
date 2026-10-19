@@ -22,6 +22,8 @@ modification. Sur GitHub, `@claude` dans un ticket ou une demande de fusion le f
 | `src/machine/linux/`, `src/machine/windows/`, `src/machine/macos/` | audit propre à chaque système, un fichier par thème |
 | `src/machine/dns.rs`, `certificats.rs`, `extensions.rs`, `partages.rs`, `sante.rs`, `wifi.rs`, `bluetooth.rs` | vérifications communes aux trois systèmes (partages.rs : partages de fichiers ouverts à tout le monde ; bluetooth.rs : ordinateur visible, appareils appairés depuis peu) |
 | `src/machine/unix.rs` | vérifications communes à Linux et macOS : fichiers secrets, sudo |
+| `src/machine/heure.rs`, `fin_de_support.rs`, `comptes_oublies.rs`, `mots_de_passe.rs`, `sensibles.rs` | heure réglée automatiquement ; système, programmes abandonnés et navigateurs sans mise à jour ; comptes inutilisés ; mots de passe du navigateur sans protection ; fichiers sensibles qui traînent |
+| `src/sauvegarde.rs`, `src/raccourci.rs`, `src/a_laisser.rs` | sauvegarde automatique guidée (Déjà Dup ou rsync, Time Machine, Historique des fichiers) ; raccourci sur cet ordinateur ; rapport à laisser à la personne dépannée |
 | `src/corriger.rs` | application guidée des correctifs |
 | `src/reseau/mod.rs`, `src/reseau/scan.rs` | scan réseau (TCP connect, sans root), ARP, carnets des réseaux |
 | `src/risk.rs` | base de connaissances des ports et niveaux de risque |
@@ -50,7 +52,7 @@ modification. Sur GitHub, `@claude` dans un ticket ou une demande de fusion le f
 | `src/reseau/canaux.rs`, `src/reseau/nat.rs` | Wi-Fi encombré (réseaux voisins par canal) ; type de NAT (client STUN maison) |
 | `src/dns_rapide.rs` | DNS le plus rapide : mesure, DNS qui protège gardé, réglage annulable par `optimiser/` |
 | `src/reseau/cameras.rs` | caméras cachées : fabricant, flux RTSP, recherche ONVIF (WS-Discovery), page web |
-| `src/depanner/` | dépanner pas à pas : les parcours (`mod.rs`), réseau et Wi-Fi (`reseau.rs`), son (`son.rs`), imprimante (`imprimante.rs`), après une infection (`infection.rs`), nouvel ordinateur (`nouveau.rs`), ordinateur qui part (`depart.rs`) |
+| `src/depanner/` | dépanner pas à pas : les parcours (`mod.rs`), réseau et Wi-Fi (`reseau.rs`), son (`son.rs`), imprimante (`imprimante.rs`), après une infection (`infection.rs`), nouvel ordinateur (`nouveau.rs`), ordinateur qui part (`depart.rs`), compte piraté (`compte.rs`), lent depuis une mise à jour (`depuis_maj.rs`) |
 | `src/lenteur.rs`, `src/fiche.rs` | pourquoi c'est lent (instantané en deux mesures, démarrage) ; fiche de l'ordinateur |
 | `src/copier.rs` | copier mes fichiers vers un disque externe : copie vérifiée (BLAKE3), reprise, jamais d'écrasement ; vérifier une copie (test de restauration) |
 | `src/verifier_cle.rs` | vérifier ma clé : capacité réelle, vitesses et blocs en erreur, écrits dans le libre et relus sans cache, puis effacés |

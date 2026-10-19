@@ -48,6 +48,7 @@ highlighted one, Esc clears it. In the main menu, it also finds each tool of the
        Why is it slow? (processor, memory, disk, startup, programs started at login; remove them from
        startup or put them back, after your consent: gardien startup)
        Computer specs (model, processor, memory, graphics card, disks; serial numbers on screen)
+       Report to leave: a simple page for the person you helped, put on their Desktop
        Monthly check-up: one notification a month (grade, updates, space to free, new problems)
   5  Network and Internet ›
        Scan the network · Deep scan of one device · Name a device ("HP printer")
@@ -87,8 +88,10 @@ highlighted one, Esc clears it. In the main menu, it also finds each tool of the
   9  Data ›
        Back up or restore (nicknames, network history)
        Copy my files to an external disk (checked copy, nothing deleted, resumes after an interruption)
+       Automatic backup to an external disk, with the system's tool (undoable)
        Check a copy: read back from the disk and compared with the originals (restore test)
        Check my drive: real capacity (fake drives), speeds, bad blocks; writes into the free space, then erases
+       Shortcut on this computer: Gardien copied here and started with one click
        My computers: those where the key ran a check, their grade and remaining problems (gardien ordinateurs)
        Protect the key's data: device record encrypted by a passphrase, asked only elsewhere
  10  Command guide › the useful commands of Linux, Windows, macOS and all systems, by program, each one
@@ -96,7 +99,7 @@ highlighted one, Esc clears it. In the main menu, it also finds each tool of the
        gardien guide windows, gardien guide winget, gardien guide dns cache
  11  Troubleshoot step by step › no Internet, Wi-Fi dropping, slow computer, no sound, printer, disk full:
        two or three questions, then Gardien checks and suggests the right repair.
-       And: after an infection, new computer, computer leaving (sale, gift).
+       And: after an infection, new computer, computer leaving (sale, gift), hacked account.
        From the command line: gardien troubleshoot sound
   q  Quit
   Shortcuts from earlier versions, in the main menu: u updates, r repair, o diagnostic, i integrity,
@@ -104,7 +107,8 @@ highlighted one, Esc clears it. In the main menu, it also finds each tool of the
 
 The check covers, among others: firewall, open ports, updates, encryption, accounts, SSH (and its failed login
 attempts), Wi-Fi (and fake access points copying its name), programs started at boot, DNS, added root
-certificates, browser extensions, Bluetooth, disk and battery health.
+certificates, browser extensions, Bluetooth, clock, end of support, forgotten accounts, browser passwords,
+sensitive files, backups, disk and battery health.
 
 Language: French or English, following the system. To force English:
   Linux:   GARDIEN_LANG=en ./gardien

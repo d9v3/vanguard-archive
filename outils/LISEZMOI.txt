@@ -49,6 +49,7 @@ Entrée ouvre celle en surbrillance, Échap efface. Au menu principal, elle trou
        Pourquoi c'est lent ? (processeur, mémoire, disque, démarrage, programmes à l'ouverture de session ;
        les retirer du démarrage ou les remettre, après accord : gardien demarrage)
        Fiche de l'ordinateur (modèle, processeur, mémoire, carte graphique, disques ; numéros de série à l'écran)
+       Rapport à laisser : une page simple pour la personne dépannée, posée sur son Bureau
        Entretien du mois : une notification par mois (note, mises à jour, place à libérer, problèmes nouveaux)
   5  Réseau et Internet ›
        Scanner le réseau · Scan approfondi d'un appareil · Nommer un appareil (« imprimante HP »)
@@ -88,8 +89,10 @@ Entrée ouvre celle en surbrillance, Échap efface. Au menu principal, elle trou
   9  Données ›
        Sauvegarder ou restaurer (surnoms, historique des réseaux)
        Copier mes fichiers vers un disque externe (copie vérifiée, rien d'effacé, reprise après interruption)
+       Sauvegarde automatique vers un disque externe, avec l'outil du système (annulable)
        Vérifier une copie : relue sur le disque et comparée aux originaux (test de restauration)
        Vérifier ma clé : vraie capacité (fausses clés), vitesses, blocs en erreur ; écrit dans le libre, puis efface
+       Raccourci sur cet ordinateur : Gardien copié ici et lancé d'un clic
        Mes ordinateurs : ceux où la clé a fait un bilan, leur note et leurs problèmes restants (gardien ordinateurs)
        Protéger les données de la clé : carnet des appareils chiffré par une phrase, demandée ailleurs seulement
  10  Guide des commandes › les commandes utiles de Linux, Windows, macOS et de tous les systèmes, par programme,
@@ -97,7 +100,7 @@ Entrée ouvre celle en surbrillance, Échap efface. Au menu principal, elle trou
        En ligne de commande : gardien guide windows, gardien guide winget, gardien guide cache dns
  11  Dépanner pas à pas › pas d'Internet, Wi-Fi qui coupe, ordinateur lent, pas de son, imprimante,
        disque plein : deux ou trois questions, puis Gardien vérifie et propose la bonne réparation.
-       Et : après une infection, nouvel ordinateur, ordinateur qui part (vente, don).
+       Et : après une infection, nouvel ordinateur, ordinateur qui part (vente, don), compte piraté.
        En ligne de commande : gardien depanner son
   q  Quitter
   Raccourcis des anciennes versions, depuis le menu principal : u mises à jour, r réparer, o diagnostic,
@@ -106,7 +109,8 @@ Entrée ouvre celle en surbrillance, Échap efface. Au menu principal, elle trou
 
 Le bilan vérifie notamment : pare-feu, ports ouverts, mises à jour, chiffrement, comptes, SSH (et ses tentatives
 de connexion ratées), Wi-Fi (et faux point d'accès qui copie son nom), programmes lancés au démarrage, DNS,
-certificats racine ajoutés, extensions de navigateur, Bluetooth, santé des disques et de la batterie.
+certificats racine ajoutés, extensions de navigateur, Bluetooth, heure, fin de support, comptes oubliés,
+mots de passe du navigateur, fichiers sensibles, sauvegardes, santé des disques et de la batterie.
 
 Langue : français ou anglais selon le système. Pour forcer le français :
   Linux :   GARDIEN_LANG=fr ./gardien
