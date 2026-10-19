@@ -34,7 +34,7 @@ pub fn exe_d_origine() -> Option<PathBuf> {
 
 /// Périphérique et état (lecture seule ou non) du point de montage `dossier`, d'après /proc/self/mountinfo.
 #[cfg(target_os = "linux")]
-fn montage(dossier: &Path) -> Option<(String, bool)> {
+pub(crate) fn montage(dossier: &Path) -> Option<(String, bool)> {
     let infos = std::fs::read_to_string("/proc/self/mountinfo").ok()?;
     // Les espaces des chemins y sont écrits \040.
     let cible = dossier.to_string_lossy().replace(' ', "\\040");

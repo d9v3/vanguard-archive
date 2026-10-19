@@ -75,9 +75,73 @@ impl Ecart {
     }
 }
 
-/// La référence, sur l'ordinateur du propriétaire.
-fn reference() -> PathBuf {
-    crate::reseau::dossier_local().join("manifeste-cle.json")
+/// L'unique référence des 0.59 : une seule clé connue, et une deuxième clé GARDIEN paraissait tout entière changée.
+const ANCIENNE_REFERENCE: &str = "manifeste-cle.json";
+/// Une référence par clé depuis la 0.60, nommée par l'identifiant du volume.
+const REFERENCES: &str = "manifestes-cle";
+
+/// L'identifiant du système de fichiers de la clé (UUID que le formatage lui donne, « 1A2B-3C4D » en exFAT), d'après
+/// le périphérique monté et /dev/disk/by-uuid. Sous Windows et macOS, aucun : le déploiement, qui écrit les
+/// références, se fait sous Linux ; l'ancienne référence unique y sert encore.
+#[cfg(target_os = "linux")]
+fn identifiant_volume(racine: &Path) -> Option<String> {
+    let (source, _) = crate::protection::cle::montage(racine)?;
+    let peripherique = std::fs::canonicalize(&source).ok()?;
+    let id = std::fs::read_dir("/dev/disk/by-uuid")
+        .ok()?
+        .flatten()
+        .find(|e| std::fs::canonicalize(e.path()).ok().as_ref() == Some(&peripherique))?
+        .file_name();
+    nom_de_reference(&id.to_string_lossy())
+}
+
+#[cfg(not(target_os = "linux"))]
+fn identifiant_volume(_racine: &Path) -> Option<String> {
+    None
+}
+
+/// L'identifiant gardé tel quel s'il ne contient que des lettres, des chiffres et des tirets : il devient un nom de
+/// fichier, et une étiquette choisie par n'importe qui ne doit pas sortir du dossier des références.
+fn nom_de_reference(id: &str) -> Option<String> {
+    let id = id.trim();
+    (!id.is_empty() && id.len() <= 64 && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'))
+        .then(|| id.to_string())
+}
+
+/// Les références de clé déjà écrites dans `base` (le dossier de Gardien).
+fn references_par_cle(base: &Path) -> usize {
+    std::fs::read_dir(base.join(REFERENCES))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|e| e.path().extension().is_some_and(|x| x == "json"))
+        .count()
+}
+
+/// La référence de la clé `id` : la sienne ; sinon l'ancienne référence unique, tant qu'aucune clé n'a la sienne
+/// (avant le premier déploiement en 0.60). `None` : cette clé n'a pas de référence ici.
+fn reference_lue(base: &Path, id: Option<&str>) -> Option<PathBuf> {
+    if let Some(id) = id {
+        let propre = base.join(REFERENCES).join(format!("{id}.json"));
+        if propre.is_file() {
+            return Some(propre);
+        }
+    }
+    let ancienne = base.join(ANCIENNE_REFERENCE);
+    (ancienne.is_file() && (id.is_none() || references_par_cle(base) == 0)).then_some(ancienne)
+}
+
+/// Où écrire la référence de la clé `id`.
+fn reference_ecrite(base: &Path, id: Option<&str>) -> PathBuf {
+    match id {
+        Some(id) => base.join(REFERENCES).join(format!("{id}.json")),
+        None => base.join(ANCIENNE_REFERENCE),
+    }
+}
+
+/// La référence de la clé branchée à `racine`, sur l'ordinateur du propriétaire.
+fn reference(racine: &Path) -> Option<PathBuf> {
+    reference_lue(&crate::reseau::dossier_local(), identifiant_volume(racine).as_deref())
 }
 
 /// Un chemin de la clé qui ne compte pas : dossier exclu, corbeille d'un gestionnaire de fichiers (« .Trash-1000 »,
@@ -155,9 +219,18 @@ fn ecrire_dans(racine: &Path, reference: &Path, gros: u64) -> Result<usize, Stri
     Ok(manifeste.fichiers.len())
 }
 
-/// Écrit le manifeste de la clé `racine` dans la référence de cet ordinateur ; rend le nombre de fichiers.
-pub fn ecrire(racine: &Path) -> Result<usize, String> {
-    ecrire_dans(racine, &reference(), GROS)
+/// Écrit le manifeste de la clé `racine` dans sa référence sur cet ordinateur ; rend le nombre de fichiers et la
+/// référence. L'ancienne référence unique part dès qu'une clé a la sienne : elle décrivait la clé déployée jusque-là,
+/// et gardée, elle servirait de référence à une autre.
+pub fn ecrire(racine: &Path) -> Result<(usize, PathBuf), String> {
+    let base = crate::reseau::dossier_local();
+    let id = identifiant_volume(racine);
+    let chemin = reference_ecrite(&base, id.as_deref());
+    let n = ecrire_dans(racine, &chemin, GROS)?;
+    if id.is_some() {
+        let _ = std::fs::remove_file(base.join(ANCIENNE_REFERENCE));
+    }
+    Ok((n, chemin))
 }
 
 fn lire(reference: &Path) -> Result<Manifeste, String> {
@@ -197,9 +270,11 @@ fn comparer_avec(racine: &Path, manifeste: &Manifeste, gros: u64) -> Ecart {
     ecart
 }
 
-/// Compare la clé `racine` à la référence de cet ordinateur.
+/// Compare la clé `racine` à sa référence sur cet ordinateur.
 pub fn comparer(racine: &Path) -> Result<Ecart, String> {
-    Ok(comparer_avec(racine, &lire(&reference())?, GROS))
+    let reference = reference(racine)
+        .ok_or_else(|| tr!("aucune référence pour cette clé", "no reference for this key").to_string())?;
+    Ok(comparer_avec(racine, &lire(&reference)?, GROS))
 }
 
 /// Les changements, en une liste courte : « autorun.inf (nouveau), Windows/gardien.exe (modifié)… ».
@@ -222,8 +297,28 @@ fn resume_ecart(ecart: &Ecart) -> String {
 /// Au bilan, chez le propriétaire (la référence existe) avec la clé branchée.
 pub fn constat() -> Option<Constat> {
     let cle = crate::reseau::cle_usb()?;
-    if !reference().is_file() {
-        return None;
+    let base = crate::reseau::dossier_local();
+    if reference(&cle).is_none() {
+        // Chez le propriétaire (d'autres clés y ont leur référence), une clé GARDIEN sans la sienne : une deuxième
+        // clé, ou une clé reformatée. Rien n'a pu être comparé, et c'est dit.
+        return (references_par_cle(&base) > 0 || base.join(ANCIENNE_REFERENCE).is_file()).then(|| Constat {
+            verifie: false,
+            ..alerte(
+                CAT,
+                Niveau::Info,
+                tr!(
+                    "Cette clé GARDIEN n'a pas de manifeste sur cet ordinateur (une autre clé que celles déployées ici, ou une clé reformatée) : son contenu n'a pas pu être comparé.",
+                    "This GARDIEN key has no manifest on this computer (another key than those deployed here, or a reformatted key): its content could not be compared."
+                ),
+            )
+            .manuel(
+                tr!(
+                    "outils/deployer.sh écrit son manifeste en la mettant à jour",
+                    "outils/deployer.sh writes its manifest when it updates the key"
+                ),
+                &[],
+            )
+        });
     }
     Some(match comparer(&cle) {
         Err(e) => impossible(CAT, &trf!("manifeste de la clé illisible : {e}", "key manifest unreadable: {e}")),
@@ -338,8 +433,8 @@ pub fn verifier_moi() {
         && let Ok(relatif) = exe.strip_prefix(&cle)
     {
         let relatif = relatif.to_string_lossy().replace('\\', "/");
-        match lire(&reference()) {
-            Err(_) => trp!(
+        match reference(&cle).ok_or(()).and_then(|r| lire(&r).map_err(|_| ())) {
+            Err(()) => trp!(
                 "  {GRIS}Lancé depuis la clé, hors de l'ordinateur du propriétaire : pas de manifeste à comparer.{RESET}",
                 "  {GRIS}Started from the key, away from the owner's computer: no manifest to compare.{RESET}"
             ),
@@ -377,10 +472,10 @@ pub fn verifier_moi() {
 pub fn commande(ecrire_dossier: Option<&Path>) {
     if let Some(racine) = ecrire_dossier {
         match ecrire(racine) {
-            Ok(n) => trp!(
+            Ok((n, reference)) => trp!(
                 "Manifeste de la clé écrit : {n} fichiers, référence {}",
                 "Key manifest written: {n} files, reference {}",
-                chemin_affichable(&reference())
+                chemin_affichable(&reference)
             ),
             Err(e) => {
                 trp!("✖ Manifeste non écrit : {e}", "✖ Manifest not written: {e}");
@@ -511,6 +606,39 @@ mod tests {
         assert!(lire(&reference).is_err());
         let _ = std::fs::remove_dir_all(&racine);
         let _ = std::fs::remove_dir_all(reference.parent().unwrap());
+    }
+
+    #[test]
+    fn une_reference_par_cle() {
+        let base = dossier_jetable("refs");
+        // Rien d'écrit : aucune référence, pour aucune clé.
+        assert_eq!(reference_lue(&base, Some("1A2B-3C4D")), None);
+        assert_eq!(reference_lue(&base, None), None);
+        // L'ancienne référence unique (0.59) sert encore, tant qu'aucune clé n'a la sienne.
+        std::fs::write(base.join(ANCIENNE_REFERENCE), b"{}").unwrap();
+        assert_eq!(
+            reference_lue(&base, Some("1A2B-3C4D")),
+            Some(base.join(ANCIENNE_REFERENCE))
+        );
+        // La clé A a la sienne : la clé B n'emprunte plus l'ancienne, qui décrivait peut-être A.
+        let a = reference_ecrite(&base, Some("1A2B-3C4D"));
+        assert_eq!(a, base.join(REFERENCES).join("1A2B-3C4D.json"));
+        std::fs::create_dir_all(a.parent().unwrap()).unwrap();
+        std::fs::write(&a, b"{}").unwrap();
+        assert_eq!(reference_lue(&base, Some("1A2B-3C4D")), Some(a));
+        assert_eq!(reference_lue(&base, Some("5E6F-7A8B")), None);
+        // Sans identifiant (Windows, macOS) : l'ancienne.
+        assert_eq!(reference_lue(&base, None), Some(base.join(ANCIENNE_REFERENCE)));
+        assert_eq!(reference_ecrite(&base, None), base.join(ANCIENNE_REFERENCE));
+        // L'identifiant devient un nom de fichier : rien qui sorte du dossier.
+        assert_eq!(nom_de_reference(" 1A2B-3C4D\n").as_deref(), Some("1A2B-3C4D"));
+        assert_eq!(
+            nom_de_reference("0f1e2d3c-aaaa-bbbb-cccc-0123456789ab").as_deref(),
+            Some("0f1e2d3c-aaaa-bbbb-cccc-0123456789ab")
+        );
+        assert_eq!(nom_de_reference("../../x"), None);
+        assert_eq!(nom_de_reference(""), None);
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]
