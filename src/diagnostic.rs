@@ -505,12 +505,12 @@ mod systeme {
         let paniques = rapports(&dossiers, &["panic"], 30);
         problemes.push(if paniques.is_empty() {
             ligne(
-                tr!("Redémarrages brutaux", "Kernel panics"),
+                tr!("Redémarrages brutaux", "Sudden restarts"),
                 tr!("aucun en 30 jours", "none in 30 days"),
             )
         } else {
             alerte(
-                tr!("Redémarrages brutaux", "Kernel panics"),
+                tr!("Redémarrages brutaux", "Sudden restarts"),
                 trf!(
                     "{} en 30 jours (panique du noyau : matériel, pilote ou extension)",
                     "{} in 30 days (kernel panic: hardware, driver or extension)",

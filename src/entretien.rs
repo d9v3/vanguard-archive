@@ -195,7 +195,7 @@ pub fn maintenant() {
     } else {
         trp!(
             "  Entretien coupé : « vanguard entretien on » pour une notification par mois.",
-            "  Check-up off: “vanguard entretien on” for one notification a month."
+            "  Check-up off: “vanguard maintenance on” for one notification a month."
         );
     }
 }
@@ -230,7 +230,7 @@ pub fn activer(oui: bool) {
     match (oui, reussi) {
         (true, true) => trp!(
             "  {VERT}✔{RESET} Entretien du mois activé : une notification par mois (note, mises à jour, place, problèmes nouveaux), rien n'est changé.\n  {GRIS}Ce qu'il dirait aujourd'hui : « vanguard entretien ».{RESET}",
-            "  {VERT}✔{RESET} Monthly check-up on: one notification a month (grade, updates, space, new problems), nothing is changed.\n  {GRIS}What it would say today: “vanguard entretien”.{RESET}"
+            "  {VERT}✔{RESET} Monthly check-up on: one notification a month (grade, updates, space, new problems), nothing is changed.\n  {GRIS}What it would say today: “vanguard maintenance”.{RESET}"
         ),
         (true, false) => trp!(
             "  ✖ Impossible d'activer l'entretien du mois.",
@@ -342,7 +342,7 @@ fn script_tache(exe: &str, nom: &str) -> String {
          $t = New-ScheduledTaskTrigger -Weekly -WeeksInterval 4 -DaysOfWeek Saturday -At '12:00'; \
          $s = New-ScheduledTaskSettingsSet -StartWhenAvailable; \
          Register-ScheduledTask -TaskName '{nom}' -Action $a -Trigger $t -Settings $s -Force \
-           -Description 'Vanguard check-up every four weeks: one notification (grade, updates, space, new problems), nothing is changed. To stop it: vanguard entretien off' | Out-Null"
+           -Description 'Vanguard check-up every four weeks: one notification (grade, updates, space, new problems), nothing is changed. To stop it: vanguard maintenance off' | Out-Null"
     )
 }
 

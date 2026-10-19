@@ -43,12 +43,12 @@ highlighted one, Esc clears it. In the main menu, it also finds each tool of the
        Security audit · Updates (system, programs, drivers, firmware)
        Repair and clean up (Internet, hijacked browsing, firewall, disk full, stuck updates…)
        Diagnostic (hardware, recent crashes and errors, text copy on the key)
-       Critical file integrity (accounts, sudo, SSH, startup; live: vanguard integrite --temps-reel)
+       Critical file integrity (accounts, sudo, SSH, startup; live: vanguard integrity --live)
        What Vanguard has learned: your habits, and the alerts you declared normal ("i" when fixing)
        Why is it slow? (processor, memory, disk, startup, programs started at login; remove them from
        startup or put them back, after your consent: vanguard startup)
        Computer specs (model, processor, memory, graphics card, disks; serial numbers on screen)
-       Report to leave: a simple page for the person you helped, put on their Desktop
+       Report to leave behind: a simple page for the person you helped, put on their Desktop
        What Vanguard changed: each fix run here, dated, successful or not
        Monthly check-up: one notification a month (grade, updates, space to free, new problems)
   5  Network and Internet ›
@@ -93,7 +93,7 @@ highlighted one, Esc clears it. In the main menu, it also finds each tool of the
        Check a copy: read back from the disk and compared with the originals (restore test)
        Check my drive: real capacity (fake drives), speeds, bad blocks; writes into the free space, then erases
        Shortcut on this computer: Vanguard copied here and started with one click
-       My computers: those where the key ran a check, their grade and remaining problems (vanguard ordinateurs)
+       My computers: those where the key ran a check, their grade and remaining problems (vanguard computers)
        Protect the key's data: device record encrypted by a passphrase, asked only elsewhere
  10  Command guide › the useful commands of Omarchy, Arch, Fedora, Debian, Windows 11, macOS and all systems, by
        program, each one explained (⚠: it changes something). Type what you are looking for: commands show up as

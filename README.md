@@ -261,7 +261,8 @@ ordinateur.
   GameMode, est une simple information) et s'il tourne en root sans raison, car ses résultats passent par là. Au
   bilan : la surveillance horaire que tu avais activée et qui a disparu (un logiciel malveillant coupe d'abord ce
   qui le surveille), et l'historique des bilans réécrit après coup (chaque bilan porte l'empreinte du précédent).
-  Chaque nuit, la CI recompile Vanguard deux fois et vérifie que le programme est identique à l'octet près.
+  Chaque nuit où le code a changé, la CI recompile Vanguard deux fois et vérifie que le programme est identique à
+  l'octet près.
 - Vérifier un fichier téléchargé : son empreinte comparée à celle que publie le site (collée, ou un SHA256SUMS posé
   à côté), son nom et son contenu (double extension, programme déguisé en document), puis YARA et l'antivirus.
 - Surveillance toutes les heures : notification si un appareil inconnu arrive, si un port s'ouvre, si la note de

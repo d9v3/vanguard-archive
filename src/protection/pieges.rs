@@ -213,7 +213,7 @@ fn texte() -> String {
          Pour le retirer : Vanguard, menu Antivirus et protection › Fichiers-pièges, ou « vanguard pieges --retirer ».\n\n\
          Vanguard decoy file: do not modify, move or delete it.\n\
          It is there to catch ransomware: if it changes, Vanguard warns you.\n\
-         To remove it: Vanguard, Antivirus and protection menu › Decoy files, or “vanguard pieges --retirer”.\n\n",
+         To remove it: Vanguard, Antivirus and protection menu › Decoy files, or “vanguard decoys --remove”.\n\n",
     );
     for i in 1..=250 {
         let _ = writeln!(t, "{i:03}  rien d'important ici / nothing important here");

@@ -120,7 +120,7 @@ pub(super) fn juger_assistance(valeur: Option<u32>) -> Option<Constat> {
         .manuel(
             tr!(
                 "Si personne ne t'aide ainsi : Panneau de configuration › Système › Paramètres d'utilisation à distance, décocher « Autoriser les connexions d'assistance à distance »",
-                "If nobody helps you this way: Control Panel › System › Remote settings, untick “Allow Remote Assistance connections”"
+                "If nobody helps you this way: Control Panel › System › Remote settings, uncheck “Allow Remote Assistance connections”"
             ),
             &["Start-Process SystemPropertiesRemote.exe"],
         )
@@ -156,7 +156,7 @@ pub(super) fn juger_ouverture_auto(auto: Option<&str>, mot_de_passe: bool) -> Op
         .manuel(
             tr!(
                 "Touche Windows + R, « netplwiz », cocher « Les utilisateurs doivent entrer un nom et un mot de passe » ; puis retirer DefaultPassword (commande ci-dessous, en administrateur)",
-                "Windows key + R, “netplwiz”, tick “Users must enter a user name and password”; then remove DefaultPassword (command below, as administrator)"
+                "Windows key + R, “netplwiz”, check “Users must enter a user name and password”; then remove DefaultPassword (command below, as administrator)"
             ),
             &[r"Remove-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon' -Name DefaultPassword"],
         )
@@ -172,7 +172,7 @@ pub(super) fn juger_ouverture_auto(auto: Option<&str>, mot_de_passe: bool) -> Op
         .manuel(
             tr!(
                 "Si l'ordinateur sort de la maison : touche Windows + R, « netplwiz », cocher « Les utilisateurs doivent entrer un nom et un mot de passe »",
-                "If the computer leaves the house: Windows key + R, “netplwiz”, tick “Users must enter a user name and password”"
+                "If the computer leaves the house: Windows key + R, “netplwiz”, check “Users must enter a user name and password”"
             ),
             &[],
         )

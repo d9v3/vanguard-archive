@@ -893,7 +893,7 @@ pub fn menu() {
         "  ",
         tr!(
             "Un disque qui lâche, un vol ou un rançongiciel emportent tout ce qui n'existe qu'ici. Vanguard met en place la sauvegarde avec l'outil du système, vers un disque externe, et peut la retirer exactement.",
-            "A failing disk, a theft or ransomware take everything that exists only here. Vanguard sets up the backup with the system's tool, to an external disk, and can remove it exactly."
+            "A failing disk, a theft or ransomware takes everything that exists only here. Vanguard sets up the backup with the system's tool, to an external disk, and can remove it exactly."
         ),
         2,
         GRIS,

@@ -200,7 +200,7 @@ pub fn constat() -> Constat {
             probleme: Some(Niveau::Info),
             message: tr!(
                 "Pas encore de référence pour les fichiers critiques : « vanguard integrite » la crée.",
-                "No reference yet for critical files: “vanguard integrite” creates it."
+                "No reference yet for critical files: “vanguard integrity” creates it."
             )
             .into(),
             correctif: None,
@@ -241,7 +241,7 @@ fn juger(total: usize, e: &Ecarts) -> Constat {
         probleme: Some(Niveau::Moyen),
         message: trf!(
             "{} fichier(s) critique(s) changé(s) depuis la référence : {}. Normal après une mise à jour ; sinon, à examiner (« vanguard integrite »).",
-            "{} critical file(s) changed since the reference: {}. Normal after an update; otherwise, worth a look (“vanguard integrite”).",
+            "{} critical file(s) changed since the reference: {}. Normal after an update; otherwise, worth a look (“vanguard integrity”).",
             e.total(),
             resume(&exemples, 3, ", ")
         ),
@@ -306,7 +306,7 @@ pub fn verifier(accepter: bool) {
                 afficher(&e);
                 trp!(
                     "\n  {DISCRET}Après une mise à jour du système, c'est normal : « vanguard integrite --accepter » prend cet état comme nouvelle référence.{RESET}",
-                    "\n  {DISCRET}After a system update, this is normal: “vanguard integrite --accepter” takes this state as the new reference.{RESET}"
+                    "\n  {DISCRET}After a system update, this is normal: “vanguard integrity --accept” takes this state as the new reference.{RESET}"
                 );
             }
         }
@@ -341,7 +341,7 @@ pub fn temps_reel() {
     let Some(reference) = reference() else {
         trp!(
             "  Pas encore de référence : lance d'abord « vanguard integrite ».",
-            "  No reference yet: run “vanguard integrite” first."
+            "  No reference yet: run “vanguard integrity” first."
         );
         return;
     };

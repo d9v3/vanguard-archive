@@ -165,7 +165,7 @@ fn nouveautes_machine(avant: &EtatMachine, apres: &EtatMachine) -> Vec<(String, 
             tr!("Vanguard : autres problèmes", "Vanguard: other problems").to_string(),
             trf!(
                 "{} autre(s) problème(s) nouveau(x) : lance « vanguard machine ».",
-                "{} other new problem(s): run “vanguard machine”.",
+                "{} other new problem(s): run “vanguard audit”.",
                 nouvelles.len() - 3
             ),
         ));
@@ -177,7 +177,7 @@ fn nouveautes_machine(avant: &EtatMachine, apres: &EtatMachine) -> Vec<(String, 
             tr!("Vanguard : note en baisse", "Vanguard: grade dropping").to_string(),
             trf!(
                 "La note de cette machine passe de {a} à {b} : lance « vanguard machine » pour voir pourquoi.",
-                "This machine's grade drops from {a} to {b}: run “vanguard machine” to see why."
+                "This machine's grade drops from {a} to {b}: run “vanguard audit” to see why."
             ),
         ));
     }
@@ -363,7 +363,7 @@ fn juger_disparition(voulue: bool, installee: bool) -> Option<crate::machine::Co
         .manuel(
             tr!(
                 "La remettre : menu « Réseau et Internet » › Surveillance, ou « vanguard surveillance on » ; si c'est toi qui l'as coupée, « vanguard surveillance off » pour que Vanguard l'oublie",
-                "Turn it back on: menu “Network and Internet” › Monitoring, or “vanguard surveillance on”; if you turned it off yourself, “vanguard surveillance off” so Vanguard forgets it"
+                "Turn it back on: menu “Network and Internet” › Monitoring, or “vanguard monitor on”; if you turned it off yourself, “vanguard monitor off” so Vanguard forgets it"
             ),
             &[],
         )
@@ -540,7 +540,7 @@ fn installer(exe: &str) -> bool {
         "$a = New-ScheduledTaskAction -Execute '{exe}' -Argument 'surveiller'; \
          $t = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -RepetitionInterval (New-TimeSpan -Hours 1); \
          Register-ScheduledTask -TaskName '{TACHE_WINDOWS}' -Action $a -Trigger $t -Force \
-           -Description 'Hourly local network scan by Vanguard, with a notification when an unknown device appears. To stop it: vanguard surveillance off' | Out-Null"
+           -Description 'Hourly local network scan by Vanguard, with a notification when an unknown device appears. To stop it: vanguard monitor off' | Out-Null"
     );
     ps(&script).is_some()
 }

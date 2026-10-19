@@ -369,7 +369,7 @@ pub(super) fn juger(profils: &[Result<Profil, (String, String)>]) -> Vec<Constat
     if chromium {
         protection.push(trf!(
             "Chrome et cousins : {}",
-            "Chrome and cousins: {}",
+            "Chrome and similar browsers: {}",
             protection_chromium()
         ));
     }

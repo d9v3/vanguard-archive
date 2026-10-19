@@ -70,7 +70,7 @@ pub fn verifier() {
     titre(tr!("Mots de passe fuités", "Leaked passwords"));
     trp!(
         "  Tape un mot de passe : il ne s'affiche pas et ne quitte jamais cet ordinateur. Seuls 5 caractères de son\n  empreinte sont envoyés à Have I Been Pwned, et la comparaison se fait ici. Entrée seule pour terminer.\n",
-        "  Type a password: it is not shown and never leaves this computer. Only 5 characters of its fingerprint\n  are sent to Have I Been Pwned, and the comparison happens here. Enter alone to finish.\n"
+        "  Type a password: it is not shown and never leaves this computer. Only 5 characters of its hash\n  are sent to Have I Been Pwned, and the comparison happens here. Enter alone to finish.\n"
     );
     while let Ok(mot_de_passe) = rpassword::prompt_password(tr!("  Mot de passe : ", "  Password: ")) {
         if mot_de_passe.is_empty() {

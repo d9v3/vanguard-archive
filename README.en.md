@@ -4,7 +4,7 @@
 
 <p align="center">
   <b>Secures and optimizes your computer and your network, from a USB key.</b><br>
-  Vanguard (French for “guardian”) checks your machine and every device on your network, explains each problem in
+  Vanguard checks your machine and every device on your network, explains each problem in
   plain language,<br>and fixes it once you agree. Linux, Windows and macOS, nothing to install, in English or French.
 </p>
 
@@ -45,7 +45,7 @@ In the menu, choose **1** (full check), then **2** (fix). Arrows, Enter, and Esc
 | **Local network** | Every device, its manufacturer, its open ports and its risks; newcomers flagged, ports opened on the router, the home's address on a blocklist. |
 | **Wi-Fi, NAT, DNS, cameras** | The freest Wi-Fi channel, the NAT type for gaming, the fastest DNS (without removing a DNS that protects you), hidden cameras. |
 | **Connection for gaming** | Ping, jitter, loss, speed and bufferbloat, compared with your habits. |
-| **Troubleshoot** | Computer diagnostic, everyday problems step by step (Internet, Wi-Fi, slowness, sound, printer, full disk), after an infection, new computer, computer leaving, hacked account, “Why is it slow?”, computer specs, report to leave, repairs. |
+| **Troubleshoot** | Computer diagnostic, everyday problems step by step (Internet, Wi-Fi, slowness, sound, printer, full disk), after an infection, new computer, computer leaving, hacked account, “Why is it slow?”, computer specs, report to leave behind, repairs. |
 | **Optimize and clean up** | Privacy and performance settings undone exactly, a cleanup checklist with the space gained measured, startup programs. |
 | **Protection** | Decoy files against ransomware, Windows Defender blocking, 308 YARA rules, antivirus, sandbox, integrity of critical files, leaked passwords, outbound connections, tech-support scam (remote control tools), camera and microphone, dangerous links, downloaded files, reversible quarantine. |
 | **Follow-up** | Hourly monitoring, monthly check-up, HTML report with the grade curve, learning on your computer, what Vanguard changed (each fix, dated). |
@@ -117,7 +117,7 @@ Vanguard never wipes anything itself. And **my account was hacked**: take back c
 official page, then password, two-step verification, sessions signed out, and a check that this computer did not
 give the password away. Slow **since an update**: the latest updates, dated, and how to go back.
 
-**Report to leave** — a simple page for the person you just helped: their grade, what is left to do from the most
+**Report to leave behind** — a simple page for the person you just helped: their grade, what is left to do from the most
 to the least serious, what is fine and three habits; put on their Desktop, to read or print.
 
 **Automatic backup** — set up with the system's tool (Déjà Dup or a daily rsync copy on Linux, Time Machine, File
@@ -242,8 +242,8 @@ for example), and the guide tells when a program is missing on this computer.
   session (LD_PRELOAD, DYLD_INSERT_LIBRARIES, AppInit_DLLs: one from a system package, like GameMode, is a mere
   information) and whether it runs as root for no reason, since its results go through there. In the check: the
   hourly monitoring you had turned on and that disappeared (malware first cuts what watches it), and the check
-  history rewritten afterwards (each check carries the previous one's checksum). Every night, CI builds Vanguard
-  twice and checks that the program is identical to the byte.
+  history rewritten afterwards (each check carries the previous one's checksum). Each night the code has changed, CI
+  builds Vanguard twice and checks that the program is identical to the byte.
 - Check a downloaded file: its checksum compared with the one the site publishes (pasted, or a SHA256SUMS next to
   it), its name and content (double extension, program disguised as a document), then YARA and the antivirus.
 - Hourly monitoring: a notification if an unknown device shows up, if a port opens, if the machine's grade drops, if
@@ -314,16 +314,16 @@ Each menu entry is also a command.
 | `vanguard slow` | why it is slow: processor, memory, disk, startup, programs at login |
 | `vanguard startup` | startup programs: remove or put them back, after your consent; each removal is undone exactly |
 | `vanguard changes` | what Vanguard changed: each fix run here, its date and its result |
-| `vanguard handout` | report to leave: a simple page for the person you helped |
-| `vanguard auto-backup [--annuler]` | automatic backup to an external disk, with the system's tool |
+| `vanguard handout` | report to leave behind: a simple page for the person you helped |
+| `vanguard auto-backup [--undo]` | automatic backup to an external disk, with the system's tool |
 | `vanguard shortcut [on\|off]` | shortcut on this computer |
 | `vanguard specs [--json]` | computer specs; `--json` without the serial numbers |
 | `vanguard copy-files [destination]` | copy my files to an external disk, checked copy |
 | `vanguard check-drive [folder]` | check my drive: real capacity, speeds, bad blocks (writes into the free space after your consent, then erases) |
 | `vanguard check-copy [folder]` | check a copy: read back from the disk and compared with the originals (restore test) |
-| `vanguard antivirus [--complet] [folder]` | antivirus scan (computer, or a key / a folder) |
-| `vanguard yara [--complet] [folder]` | YARA scan: 308 rules for malware families |
-| `vanguard decoys [--retirer]` | decoy files against ransomware: place them, check them, remove them |
+| `vanguard antivirus [--full] [folder]` | antivirus scan (computer, or a key / a folder) |
+| `vanguard yara [--full] [folder]` | YARA scan: 308 rules for malware families |
+| `vanguard decoys [--remove]` | decoy files against ransomware: place them, check them, remove them |
 | `vanguard harden` | Windows Defender blocking: ASR rules, network protection, unwanted software, controlled folder access; each after your consent, undoable (Windows) |
 | `vanguard blocklists` | the home's Internet address on a blocklist? (after your consent) |
 | `vanguard channels` | crowded Wi-Fi: nearby networks by channel, and the freest channel |

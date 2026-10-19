@@ -91,7 +91,7 @@ fn connexions(tests: &[crate::reseau::connexion::Resultat]) -> String {
     }
     h += tr!(
         "</table><div class=meta>Menu c ou « vanguard connexion » pour un nouveau test.</div></div>",
-        "</table><div class=meta>Menu c or “vanguard connexion” for a new test.</div></div>"
+        "</table><div class=meta>Menu c or “vanguard connection” for a new test.</div></div>"
     );
     h
 }

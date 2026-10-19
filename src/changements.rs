@@ -116,7 +116,7 @@ pub fn afficher() {
         "  ",
         tr!(
             "Les réglages d'Optimiser s'annulent exactement par « Tout remettre comme avant » ; une correction se défait à la main, avec la commande inverse.",
-            "Optimize settings undo exactly through “Put everything back”; a fix is undone by hand, with the opposite command."
+            "Optimize settings are undone exactly with “Put everything back”; a fix is undone by hand, with the opposite command."
         ),
         2,
         GRIS,

@@ -1121,7 +1121,7 @@ pub async fn executer(o: Options) -> Result<Rapport, String> {
         if ips.iter().all(std::net::Ipv4Addr::is_loopback) {
             tre!(
                 "{GRIS}Note : 127.0.0.1 montre aussi les services réservés à cette machine. Pour ce qui est vraiment exposé au réseau : vanguard machine.{RESET}",
-                "{GRIS}Note: 127.0.0.1 also shows services reserved to this machine. For what is really exposed to the network: vanguard machine.{RESET}"
+                "{GRIS}Note: 127.0.0.1 also shows services reserved for this machine. For what is really exposed to the network: vanguard audit.{RESET}"
             );
         }
     }

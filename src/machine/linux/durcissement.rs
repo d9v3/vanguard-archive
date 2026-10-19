@@ -21,7 +21,7 @@ pub(super) const DURCISSEMENT: &[(&str, i64, (&str, &str))] = &[
     (
         "kernel/dmesg_restrict",
         1,
-        ("journal du noyau réservé à root", "kernel log reserved to root"),
+        ("journal du noyau réservé à root", "kernel log reserved for root"),
     ),
     (
         "kernel/yama/ptrace_scope",

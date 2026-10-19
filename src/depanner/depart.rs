@@ -88,7 +88,7 @@ fn effacement() -> &'static str {
     } else {
         tr!(
             "Démarre sur la clé VANGUARD (SystemRescue) : un SSD s'efface en entier avec « blkdiscard » (ou « nvme format » pour un NVMe), un disque dur avec « shred -n 1 » ; puis réinstalle le système pour le prochain. Un disque chiffré LUKS devient illisible dès que son en-tête est effacé (« cryptsetup erase »).",
-            "Boot the VANGUARD key (SystemRescue): an SSD is wiped whole with “blkdiscard” (or “nvme format” for an NVMe), a hard disk with “shred -n 1”; then reinstall the system for the next person. A LUKS-encrypted disk becomes unreadable as soon as its header is erased (“cryptsetup erase”)."
+            "Boot from the VANGUARD key (SystemRescue): an SSD is wiped whole with “blkdiscard” (or “nvme format” for an NVMe), a hard disk with “shred -n 1”; then reinstall the system for the next person. A LUKS-encrypted disk becomes unreadable as soon as its header is erased (“cryptsetup erase”)."
         )
     }
 }
@@ -209,7 +209,7 @@ pub(super) fn etapes(
             outil: None,
         }),
         Devenir::Recycle => e.push(Etape {
-            titre: tr!("Recyclage : le disque à part", "Recycling: the disk apart"),
+            titre: tr!("Recyclage : le disque à part", "Recycling: keep the disk separate"),
             detail: tr!(
                 "Si l'ordinateur ne démarre plus, le disque, lui, se lit sur un autre : retire-le (SSD, NVMe ou disque dur) et garde-le, ou détruis-le (perceuse à travers un disque dur ; un SSD se casse). Le reste va au point de collecte. S'il démarre encore, l'effacement ci-dessous suffit.",
                 "If the computer no longer boots, the disk itself is readable on another one: remove it (SSD, NVMe or hard disk) and keep it, or destroy it (drill through a hard disk; an SSD snaps). The rest goes to the collection point. If it still boots, the wipe below is enough."
@@ -240,7 +240,7 @@ pub(super) fn etapes(
         titre: tr!("Les données de Vanguard", "Vanguard's data"),
         detail: trf!(
             "La base des appareils, les surnoms et l'historique de tes réseaux sont dans {} : exporte-les si tu veux les retrouver sur le prochain ordinateur (ils partent avec l'effacement). La clé VANGUARD, elle, te suit.",
-            "The device database, the nicknames and the history of your networks are in {}: export them if you want them back on the next computer (they go with the wipe). The VANGUARD key itself goes with you.",
+            "The device database, the nicknames and the history of your networks are in {}: export them if you want them back on the next computer (the wipe erases them). The VANGUARD key itself goes with you.",
             chemin_affichable(&crate::reseau::dossier_local())
         ),
         outil: Some((

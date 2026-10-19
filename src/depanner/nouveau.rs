@@ -103,12 +103,12 @@ pub(super) fn etapes(origine: Origine, fichiers_a_ramener: bool, chiffre: Option
         pourquoi: if fichiers_a_ramener {
             tr!(
                 "Ramène tes fichiers depuis le disque de l'ancien ordinateur ou la copie faite avec Copier mes fichiers, dans Documents, Images, Vidéos… Puis une sauvegarde automatique vers un autre disque ou en ligne : un disque qui lâche, un vol ou un rançongiciel emportent tout ce qui n'existe qu'ici.",
-                "Bring your files back from the old computer's disk or the copy made with Copy my files, into Documents, Pictures, Videos… Then an automatic backup to another disk or online: a failing disk, a theft or a ransomware take everything that exists only here."
+                "Bring your files back from the old computer's disk or the copy made with Copy my files, into Documents, Pictures, Videos… Then an automatic backup to another disk or online: a failing disk, a theft or ransomware takes everything that exists only here."
             )
         } else {
             tr!(
                 "Dès le début, une sauvegarde automatique vers un autre disque ou en ligne : un disque qui lâche, un vol ou un rançongiciel emportent tout ce qui n'existe qu'ici. L'état actuel est dans le bilan ci-dessus.",
-                "From the start, an automatic backup to another disk or online: a failing disk, a theft or a ransomware take everything that exists only here. The current state is in the check above."
+                "From the start, an automatic backup to another disk or online: a failing disk, a theft or ransomware takes everything that exists only here. The current state is in the check above."
             )
         },
         outil: fichiers_a_ramener.then_some((

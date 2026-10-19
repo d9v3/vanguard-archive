@@ -551,7 +551,7 @@ fn mesurer() -> Vec<Conseil> {
     if c.is_empty() {
         let rien = tr!(
             "Rien ne force en ce moment : si c'est lent par moments, relance la mesure à ce moment-là.",
-            "Nothing is straining right now: if it is slow at times, run the measure again at that moment."
+            "Nothing is straining right now: if it is slow at times, run the measurement again at that moment."
         );
         afficher_aligne(&format!("  {VERT}✔{RESET} "), rien, 4, "");
     }
@@ -925,7 +925,11 @@ fn instantane_windows(l: LectureWindows) -> Instantane {
             "duration readable only with administrator rights"
         )
         .into()),
-        (None, false) => Err(tr!("pas de mesure du dernier démarrage", "no measure of the last startup").into()),
+        (None, false) => Err(tr!(
+            "pas de mesure du dernier démarrage",
+            "no measurement of the last startup"
+        )
+        .into()),
     };
     Instantane {
         processeur: l.processeur.map(|p| p.clamp(0.0, 100.0)),

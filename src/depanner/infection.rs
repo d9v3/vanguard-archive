@@ -51,7 +51,7 @@ pub(super) fn urgences(signe: Signe, internet: bool) -> Vec<&'static str> {
         if internet {
             u.push(tr!(
                 "Coupe Internet tout de suite (câble débranché, Wi-Fi éteint) : un rançongiciel en cours chiffre aussi les disques partagés, le stockage en ligne et les sauvegardes branchées.",
-                "Cut the Internet right now (cable unplugged, Wi-Fi off): a ransomware at work also encrypts shared disks, online storage and plugged-in backups."
+                "Cut the Internet right now (cable unplugged, Wi-Fi off): ransomware at work also encrypts shared disks, online storage and plugged-in backups."
             ));
         }
         u.push(tr!(
@@ -91,7 +91,7 @@ pub(super) fn mots_de_passe(signe: Signe) -> Vec<&'static str> {
     let mut m = vec![
         tr!(
             "Le courriel, en premier : il permet de réinitialiser tous les autres mots de passe.",
-            "Email, first: it resets all the other passwords."
+            "Email first: it can reset every other password."
         ),
         tr!(
             "La banque et les paiements (carte enregistrée, PayPal, boutiques en ligne).",
@@ -123,7 +123,7 @@ pub(super) fn infection() {
     let Some(signe) = question(
         tr!(
             "Qu'est-ce qui te fait penser à une infection ?",
-            "What makes you think of an infection?"
+            "What makes you think there is an infection?"
         ),
         &[
             tr!(

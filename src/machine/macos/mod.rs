@@ -164,7 +164,7 @@ fn lire_netstat(sortie: &str, tcp: bool) -> Vec<(String, u16)> {
 /// Service de partage de macOS derrière un port, et où le couper.
 fn partage(port: u16) -> Option<&'static str> {
     Some(match port {
-        22 => tr!("Partage à distance (Remote Login, SSH)", "Remote Login (SSH)"),
+        22 => tr!("Session à distance (Remote Login, SSH)", "Remote Login (SSH)"),
         445 | 139 | 548 => tr!("Partage de fichiers", "File Sharing"),
         5900 => tr!("Partage d'écran", "Screen Sharing"),
         3283 => tr!("Gestion à distance", "Remote Management"),

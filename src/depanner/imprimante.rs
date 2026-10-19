@@ -157,7 +157,7 @@ fn etat_de(i: &Imprimante, repond: impl Fn(&str) -> bool) -> Vec<(Etat, String)>
 
 pub(super) fn imprimante() {
     let Some(quoi) = question(
-        tr!("Que se passe-t-il ?", "What happens?"),
+        tr!("Que se passe-t-il ?", "What is happening?"),
         &[
             tr!("J'imprime, mais rien ne sort", "I print, but nothing comes out"),
             tr!("L'imprimante n'apparaît pas", "The printer does not show up"),

@@ -187,7 +187,7 @@ fn bureau() -> Option<PathBuf> {
 
 /// Menu Cette machine › Rapport à laisser (`vanguard a-laisser`) : d'après le dernier bilan de la session, ou un neuf.
 pub fn laisser(audit: &Audit) {
-    titre(tr!("Rapport à laisser", "Report to leave"));
+    titre(tr!("Rapport à laisser", "Report to leave behind"));
     let aujourd_hui = chrono::Local::now().format("%Y-%m-%d").to_string();
     let date = chrono::Local::now()
         .format(tr!("%d/%m/%Y à %H:%M", "%Y-%m-%d at %H:%M"))

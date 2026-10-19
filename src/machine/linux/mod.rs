@@ -753,7 +753,7 @@ fn ssh_echecs() -> Option<Constat> {
             "SSH",
             tr!(
                 "journal du système réservé aux groupes adm, wheel et systemd-journal",
-                "system journal reserved to the adm, wheel and systemd-journal groups"
+                "system journal reserved for the adm, wheel and systemd-journal groups"
             ),
         ));
     }

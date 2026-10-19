@@ -308,7 +308,7 @@ fn lent() {
     if depuis == 2 {
         conseils.push(tr!(
             "Par moments : lance la mesure (outil « Pourquoi c'est lent ? », menu Cette machine) au moment où c'est lent, elle dira qui travaille à ce moment-là.",
-            "At times: run the measure (“Why is it slow?” tool, This machine menu) when it is slow, it will say what is working at that moment."
+            "At times: run the measurement (“Why is it slow?” tool, This machine menu) when it is slow: it will say what is working at that moment."
         ));
     }
     if depuis == 1 {
@@ -320,13 +320,13 @@ fn lent() {
     if quoi == 2 {
         conseils.push(tr!(
             "Un programme : le mettre à jour, et regarder s'il est en tête de la mesure ci-dessous. Un navigateur lent vient souvent d'une extension ou d'onglets trop nombreux.",
-            "One program: update it, and see if it tops the measure below. A slow browser often comes from an extension or too many tabs."
+            "One program: update it, and see if it tops the measurement below. A slow browser often comes from an extension or too many tabs."
         ));
     }
     if quoi == 3 {
         conseils.push(tr!(
             "Le démarrage : regarde la ligne « Retardé par » et les programmes lancés à l'ouverture ; chacun en moins fait gagner quelques secondes.",
-            "Startup: look at the “Delayed by” line and the programs started at login; each one less saves a few seconds."
+            "Startup: look at the “Delayed by” line and the programs started at login; each one removed saves a few seconds."
         ));
     }
     a_savoir(&conseils);
@@ -399,7 +399,7 @@ fn disque_plein() {
     if a_garder == 0 {
         conseil(tr!(
             "D'abord une copie vérifiée sur un disque externe (Copier mes fichiers). Ensuite seulement, supprime toi-même les originaux dont tu n'as plus besoin ici : Vanguard ne supprime jamais tes fichiers.",
-            "First a checked copy on an external disk (Copy my files). Only then, delete yourself the originals you no longer need here: Vanguard never deletes your files."
+            "First a checked copy on an external disk (Copy my files). Only then, delete the originals you no longer need here yourself: Vanguard never deletes your files."
         ));
         proposer_outil(
             tr!(

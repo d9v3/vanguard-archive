@@ -99,7 +99,7 @@ enum Commande {
     /// Recherche de malwares : ClamAV (Linux, macOS) ou Microsoft Defender (Windows).
     Antivirus {
         /// Tout le dossier personnel au lieu des endroits à risque.
-        #[arg(long)]
+        #[arg(long, visible_alias = "full")]
         complet: bool,
         /// Une clé USB, un disque externe ou un dossier à analyser en entier.
         dossier: Option<std::path::PathBuf>,
@@ -826,7 +826,7 @@ const OUTILS: &[Outil] = &[
         precision: ["modèle, processeur, mémoire…", "model, processor, memory…"],
         mots: "fiche specs matériel hardware modèle model processeur carte graphique gpu mémoire ram série" },
     Outil { action: Action::ALaisser, groupe: Some(Groupe::Machine), lettre: "",
-        titre: ["Rapport à laisser", "Report to leave"],
+        titre: ["Rapport à laisser", "Report to leave behind"],
         precision: ["une page simple, à imprimer", "a simple page, to print"],
         mots: "rapport report imprimer print dépannage help famille family laisser leave page résumé summary" },
     Outil { action: Action::Changements, groupe: Some(Groupe::Machine), lettre: "",
@@ -1344,8 +1344,8 @@ const AIDES_EN: &[(&str, &str)] = &[
                       external disk. Writes into the free space after your consent, reads back, then erases; your \
                       files are not touched"),
     ("changements", "What Vanguard changed: each fix run on this computer, its date and its result"),
-    ("a-laisser", "Report to leave: a simple page for the person you just helped (grade, what is left to do, what is \
-                   fine), put on their Desktop after consent and opened in the browser"),
+    ("a-laisser", "Report to leave behind: a simple page for the person you just helped (grade, what is left to do, \
+                   what is fine), put on their Desktop after consent and opened in the browser"),
     ("sauvegarde-auto", "Automatic backup: set up with the system's tool (Déjà Dup or rsync every day, Time Machine, \
                          File History) to an external disk, after your consent, exactly undoable"),
     ("raccourci", "Shortcut on this computer: Vanguard copied here and started with one click (applications menu on \

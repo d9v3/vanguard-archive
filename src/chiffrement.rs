@@ -407,7 +407,7 @@ fn nouvelle_phrase_dans(donnees: &Path, cle: &Cle, phrase: &str, parametres: (u3
 fn demander_phrase() -> Option<String> {
     let phrase = rpassword::prompt_password(crate::tr!(
         "  Phrase (10 caractères au moins, plusieurs mots c'est mieux) : ",
-        "  Passphrase (10 characters at least, several words is better): "
+        "  Passphrase (at least 10 characters; several words are better): "
     ))
     .ok()?;
     if phrase.chars().count() < 10 {

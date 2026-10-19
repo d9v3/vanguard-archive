@@ -280,7 +280,7 @@ pub(super) fn configuration_sshd() -> Option<String> {
 #[cfg_attr(target_os = "linux", allow(dead_code))]
 pub(super) fn juger_sshd_mac(conf: &str) -> Option<Constat> {
     let ou = tr!(
-        "dans /etc/ssh/sshd_config, puis couper et rallumer « Partage à distance » (Réglages Système > Général > Partage)",
+        "dans /etc/ssh/sshd_config, puis couper et rallumer « Session à distance » (Réglages Système > Général > Partage)",
         "in /etc/ssh/sshd_config, then turn “Remote Login” off and on again (System Settings > General > Sharing)"
     );
     if mots_de_passe_vides_sshd(conf) {
@@ -289,7 +289,7 @@ pub(super) fn juger_sshd_mac(conf: &str) -> Option<Constat> {
                 "SSH",
                 Niveau::Critique,
                 tr!(
-                    "Le partage à distance accepte les comptes sans mot de passe : un tel compte s'ouvre depuis le réseau sans rien taper.",
+                    "La session à distance accepte les comptes sans mot de passe : un tel compte s'ouvre depuis le réseau sans rien taper.",
                     "Remote Login accepts accounts without a password: such an account opens from the network without typing anything."
                 ),
             )
@@ -301,7 +301,7 @@ pub(super) fn juger_sshd_mac(conf: &str) -> Option<Constat> {
             "SSH",
             Niveau::Eleve,
             tr!(
-                "Le partage à distance accepte une connexion en root : le compte qui a tous les droits s'ouvre depuis le réseau.",
+                "La session à distance accepte une connexion en root : le compte qui a tous les droits s'ouvre depuis le réseau.",
                 "Remote Login accepts root logins: the account with every right opens from the network."
             ),
         )
@@ -315,7 +315,7 @@ mod tests_sshd {
 
     #[test]
     fn serveur_ssh_du_mac() {
-        // Mots de passe permis : l'usage normal du partage à distance, rien à dire.
+        // Mots de passe permis : l'usage normal de la session à distance, rien à dire.
         assert!(juger_sshd_mac("").is_none());
         assert!(juger_sshd_mac("PermitRootLogin prohibit-password\n").is_none());
         assert_eq!(
