@@ -146,19 +146,19 @@ fn montage<'a>(montages: &'a str, chemin: &Path) -> Option<(&'a str, &'a str)> {
 
 /// Un système de fichiers qui ne garde pas un fichier de 4 Go ou plus : FAT32 (« vfat » sous Linux, « msdos » sous
 /// macOS, « FAT32 » sous Windows).
-fn limite_4_go(genre: &str) -> bool {
+pub(crate) fn limite_4_go(genre: &str) -> bool {
     matches!(genre.to_ascii_lowercase().as_str(), "vfat" | "msdos" | "fat32" | "fat")
 }
 
 /// Le type du système de fichiers de `p` ; `None` s'il ne se lit pas.
 #[cfg(target_os = "linux")]
-fn genre_du_volume(p: &Path) -> Option<String> {
+pub(crate) fn genre_du_volume(p: &Path) -> Option<String> {
     let montages = std::fs::read_to_string("/proc/self/mountinfo").ok()?;
     montage(&montages, &p.canonicalize().ok()?).map(|(_, genre)| genre.to_string())
 }
 
 #[cfg(target_os = "macos")]
-fn genre_du_volume(p: &Path) -> Option<String> {
+pub(crate) fn genre_du_volume(p: &Path) -> Option<String> {
     use std::os::unix::ffi::OsStrExt;
     let c = std::ffi::CString::new(p.as_os_str().as_bytes()).ok()?;
     // SAFETY : `statfs` est une structure C de nombres et de tableaux de caractères, valide à zéro.
@@ -173,7 +173,7 @@ fn genre_du_volume(p: &Path) -> Option<String> {
 }
 
 #[cfg(windows)]
-fn genre_du_volume(p: &Path) -> Option<String> {
+pub(crate) fn genre_du_volume(p: &Path) -> Option<String> {
     let lecteur: String = p
         .to_string_lossy()
         .trim_start_matches(r"\\?\")
@@ -255,7 +255,7 @@ fn sur_le_systeme(p: &Path) -> Option<bool> {
 /// Linux : les systèmes de fichiers montés pour l'utilisateur (/run/media, /media, /mnt), modifiables, hors du disque
 /// du système et du dossier personnel, et pas la clé.
 #[cfg(target_os = "linux")]
-fn disques() -> Vec<Disque> {
+pub(crate) fn disques() -> Vec<Disque> {
     const SYSTEMES: &[&str] = &[
         "vfat", "exfat", "ntfs", "ntfs3", "fuseblk", "ext2", "ext3", "ext4", "btrfs", "xfs", "f2fs", "hfsplus", "udf",
     ];
@@ -290,7 +290,7 @@ fn disques() -> Vec<Disque> {
 }
 
 #[cfg(target_os = "macos")]
-fn disques() -> Vec<Disque> {
+pub(crate) fn disques() -> Vec<Disque> {
     use std::os::unix::fs::MetadataExt;
     let systeme = std::fs::metadata("/").ok().map(|m| m.dev());
     std::fs::read_dir("/Volumes")
@@ -316,7 +316,7 @@ fn disques() -> Vec<Disque> {
 
 /// Windows : les lecteurs prêts, amovibles ou fixes, sauf celui du système et la clé.
 #[cfg(windows)]
-fn disques() -> Vec<Disque> {
+pub(crate) fn disques() -> Vec<Disque> {
     let lecteurs = crate::machine::windows::ps(
         "[IO.DriveInfo]::GetDrives() | Where-Object { $_.IsReady -and ($_.DriveType -eq 'Removable' -or $_.DriveType -eq 'Fixed') } | \
          ForEach-Object { \"$($_.Name)|$($_.VolumeLabel)|$($_.AvailableFreeSpace)|$($_.TotalSize)\" }",
@@ -455,7 +455,7 @@ fn empreinte_relue(chemin: &Path) -> std::io::Result<blake3::Hash> {
 }
 
 #[cfg(target_os = "linux")]
-fn sans_cache(f: &File) {
+pub(crate) fn sans_cache(f: &File) {
     use std::os::fd::AsRawFd;
     // SAFETY : un descripteur ouvert, gardé par `f` pendant l'appel ; posix_fadvise ne fait que conseiller le noyau
     // (retirer du cache les pages propres du fichier) et n'écrit dans aucune mémoire de ce programme.
@@ -465,7 +465,7 @@ fn sans_cache(f: &File) {
 }
 
 #[cfg(target_os = "macos")]
-fn sans_cache(f: &File) {
+pub(crate) fn sans_cache(f: &File) {
     use std::os::fd::AsRawFd;
     // SAFETY : un descripteur ouvert, gardé par `f` pendant l'appel ; F_NOCACHE change seulement la façon dont le
     // système lit ce fichier, sans toucher à la mémoire de ce programme.
@@ -475,7 +475,7 @@ fn sans_cache(f: &File) {
 }
 
 #[cfg(windows)]
-fn sans_cache(_: &File) {}
+pub(crate) fn sans_cache(_: &File) {}
 
 /// Copie `source` vers `cible` (qui n'existe pas) en passant par un fichier partiel, puis vérifie.
 fn copier_vers(source: &Path, cible: &Path) -> std::io::Result<()> {

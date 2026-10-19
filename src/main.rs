@@ -33,6 +33,7 @@ mod reseau;
 mod risk;
 mod selection;
 mod ui;
+mod verifier_cle;
 
 use clap::{CommandFactory, FromArgMatches, Parser, Subcommand};
 
