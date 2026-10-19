@@ -89,7 +89,9 @@ pub(crate) fn au_lancement() {
     let surveillance = retirer_minuterie(&ancien("vanguard-surveillance"));
     let entretien = retirer_minuterie(&ancien("vanguard-entretien"));
     #[cfg(target_os = "linux")]
-    reprendre_sauvegarde();
+    let sauvegarde = reprendre_sauvegarde();
+    #[cfg(not(target_os = "linux"))]
+    let sauvegarde = false;
     let raccourci = retirer_raccourci();
     // Le programme copié par la version d'avant pour ses minuteries (lancée depuis la clé) : remplacé ci-dessous.
     let _ = std::fs::remove_file(nouveau.join("bin").join(format!(
@@ -104,6 +106,9 @@ pub(crate) fn au_lancement() {
     }
     if entretien && crate::entretien::reprendre(&exe) {
         repris.push(crate::tr!("entretien du mois", "monthly check-up"));
+    }
+    if sauvegarde {
+        repris.push(crate::tr!("sauvegarde automatique", "automatic backup"));
     }
     if let Some(ou) = raccourci
         && crate::raccourci::reprendre(&exe, &ou)
@@ -210,9 +215,9 @@ fn dossier_systemd() -> PathBuf {
 
 /// Sauvegarde automatique de Linux (minuterie rsync) : ses deux unités prennent le nouveau nom, avec le même contenu
 /// (le même disque, le même dossier dessus : pas de nouvelle copie complète à côté de l'ancienne), et la note qui sert
-/// à l'annuler suit.
+/// à l'annuler suit. Dit si elle a été reprise.
 #[cfg(target_os = "linux")]
-fn reprendre_sauvegarde() {
+fn reprendre_sauvegarde() -> bool {
     let dossier = dossier_systemd();
     let [timer, service] = ["vanguard-sauvegarde.timer", "vanguard-sauvegarde.service"];
     let (vieux_timer, vieux_service) = (dossier.join(ancien(timer)), dossier.join(ancien(service)));
@@ -220,12 +225,12 @@ fn reprendre_sauvegarde() {
         std::fs::read_to_string(&vieux_timer),
         std::fs::read_to_string(&vieux_service),
     ) else {
-        return;
+        return false;
     };
     let actif = crate::reseau::surveillance::reussit("systemctl", &["--user", "is-enabled", &ancien(timer)]);
     let (t, s) = (unite_sauvegarde(&t), unite_sauvegarde(&s));
     if std::fs::write(dossier.join(timer), &t).is_err() || std::fs::write(dossier.join(service), &s).is_err() {
-        return;
+        return false;
     }
     crate::reseau::surveillance::reussit("systemctl", &["--user", "disable", "--now", &ancien(timer)]);
     let _ = std::fs::remove_file(&vieux_timer);
@@ -235,17 +240,19 @@ fn reprendre_sauvegarde() {
         crate::reseau::surveillance::reussit("systemctl", &["--user", "enable", "--now", timer]);
     }
     crate::sauvegarde::reprendre_note(&t, &s);
+    true
 }
 
-/// Une unité de la sauvegarde d'avant, au nouveau nom : la description et le témoin des copies en cours exclu de la
-/// sauvegarde. Le chemin du dossier sur le disque reste le même.
+/// Une unité de la sauvegarde d'avant, au nouveau nom : le nom du programme dans la description (le premier : la
+/// suite est le chemin du disque) et le témoin des copies en cours exclu de la sauvegarde. Le dossier sur le disque
+/// reste le même, la description continue de le dire tel qu'il est.
 #[cfg(any(target_os = "linux", test))]
 fn unite_sauvegarde(texte: &str) -> String {
     texte
         .lines()
         .map(|l| {
             if l.starts_with("Description=") {
-                l.replace(&ancien("Vanguard"), "Vanguard")
+                l.replacen(&ancien("Vanguard"), "Vanguard", 1)
             } else if l.starts_with("ExecStart=") {
                 let temoin = ".vanguard-copie-en-cours";
                 l.replace(&format!("--exclude={}", ancien(temoin)), &format!("--exclude={temoin}"))
@@ -320,9 +327,7 @@ mod tests {
                        ConditionPathIsMountPoint=/run/media/alice/Externe\n\n[Service]\nType=oneshot\n\
                        ExecStart=\"/usr/bin/rsync\" -a --exclude=.cache --exclude=.gardien-copie-en-cours \"/home/alice/Documents\" \"/run/media/alice/Externe/Sauvegarde-Gardien/pc/\"\n";
         let repris = unite_sauvegarde(service);
-        assert!(
-            repris.contains("Description=Sauvegarde Vanguard vers /run/media/alice/Externe/Sauvegarde-Vanguard/pc")
-        );
+        assert!(repris.contains("Description=Sauvegarde Vanguard vers /run/media/alice/Externe/Sauvegarde-Gardien/pc"));
         // Le dossier sur le disque ne bouge pas, seul le témoin exclu suit.
         assert!(repris.contains("--exclude=.vanguard-copie-en-cours \"/home/alice/Documents\" \"/run/media/alice/Externe/Sauvegarde-Gardien/pc/\""));
     }
