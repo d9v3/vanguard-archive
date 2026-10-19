@@ -234,6 +234,14 @@ fn html(audit: Option<&Audit>, reseau: Option<&Rapport>) -> String {
     if let Some(etat) = crate::historique::etat_chaine() {
         let _ = write!(h, "<p class=meta>{}</p>", esc(&etat));
     }
+    if let Some((n, reussies, derniere)) = crate::changements::resume() {
+        let _ = trw!(
+            h,
+            "<p class=meta>Ce que Gardien a changé : {n} correction(s) lancée(s) sur cet ordinateur, {reussies} réussie(s), la dernière le {}. Le détail : « gardien changements ».</p>",
+            "<p class=meta>What Gardien changed: {n} fix(es) run on this computer, {reussies} successful, the last on {}. Details: “gardien changes”.</p>",
+            esc(&derniere)
+        );
+    }
 
     h += &connexions(&crate::reseau::connexion::historique());
 

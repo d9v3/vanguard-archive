@@ -61,6 +61,18 @@ fn lire_texte(texte: &str) -> Vec<Changement> {
     texte.lines().filter_map(|l| serde_json::from_str(l).ok()).collect()
 }
 
+/// Pour le rapport HTML : (corrections notées, réussies, date de la dernière). Les commandes n'y vont pas : le rapport
+/// voyage sur la clé et sert aux captures d'écran, et une commande peut citer un nom de fichier ou de compte.
+pub fn resume() -> Option<(usize, usize, String)> {
+    resume_de(&fichier())
+}
+
+fn resume_de(chemin: &std::path::Path) -> Option<(usize, usize, String)> {
+    let tous = lire_de(chemin);
+    let derniere = tous.last()?.date.clone();
+    Some((tous.len(), tous.iter().filter(|c| c.reussi).count(), derniere))
+}
+
 /// `gardien changements` et le menu Cette machine.
 pub fn afficher() {
     titre(tr!("Ce que Gardien a changé", "What Gardien changed"));
@@ -138,6 +150,8 @@ mod tests {
         let tous = lire_de(&f);
         assert_eq!(tous.len(), GARDES);
         assert_eq!(tous.last().unwrap().commandes[0], format!("echo {}", GARDES + 4));
+        assert_eq!(resume_de(&f).map(|(n, r, _)| (n, r)), Some((GARDES, GARDES)));
         let _ = std::fs::remove_file(&f);
+        assert_eq!(resume_de(&f), None);
     }
 }
