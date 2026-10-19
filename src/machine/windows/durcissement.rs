@@ -322,6 +322,40 @@ pub(super) fn juger_signature_smb(client_exige: Option<u32>) -> Option<Constat> 
     })
 }
 
+/// Connexion « invité » aux partages sans mot de passe (AllowInsecureGuestAuth à 1, la stratégie de groupe passant
+/// avant le réglage) : un faux partage du réseau peut se faire passer pour le NAS et servir des fichiers piégés, sans
+/// signature possible. Laissée à la main : un vieux NAS ou une box peut en dépendre.
+pub(super) fn juger_invite_smb(strategie: Option<u32>, reglage: Option<u32>) -> Option<Constat> {
+    let impose = strategie.is_some();
+    (strategie.or(reglage) == Some(1)).then(|| {
+        let constat = alerte(
+            DURCI,
+            Niveau::Moyen,
+            tr!(
+                "Les partages réseau acceptent une connexion « invité » sans mot de passe : un faux partage peut se faire passer pour ton NAS et te donner des fichiers piégés.",
+                "Network shares accept a password-less “guest” connection: a fake share can pose as your NAS and hand you booby-trapped files."
+            ),
+        );
+        if impose {
+            constat.manuel(
+                tr!(
+                    "Réglé par une stratégie de groupe : à changer par qui gère l'ordinateur (Station de travail Lanman, « Activer les ouvertures de session invité non sécurisées »)",
+                    "Set by a group policy: to be changed by whoever manages the computer (Lanman Workstation, “Enable insecure guest logons”)"
+                ),
+                &[],
+            )
+        } else {
+            constat.manuel(
+                tr!(
+                    "Si aucun vieux NAS ne s'ouvre sans mot de passe : couper la connexion invité (commande ci-dessous, en administrateur)",
+                    "If no old NAS opens without a password: turn guest connections off (command below, as administrator)"
+                ),
+                &[r"Set-ItemProperty -LiteralPath 'HKLM:\SYSTEM\CurrentControlSet\Services\LanmanWorkstation\Parameters' -Name AllowInsecureGuestAuth -Value 0"],
+            )
+        }
+    })
+}
+
 /// La stratégie d'exécution de PowerShell qui s'applique : celle des stratégies de groupe (machine puis compte),
 /// sinon celle du compte, sinon celle de l'ordinateur. `(valeur, imposée par une stratégie)`.
 pub(super) fn strategie_effective(
@@ -425,6 +459,16 @@ pub(super) fn durcissement() -> Vec<Constat> {
         r"SYSTEM\CurrentControlSet\Services\LanmanWorkstation\Parameters",
         "RequireSecuritySignature",
     )));
+    c.extend(juger_invite_smb(
+        lire_dword(
+            r"SOFTWARE\Policies\Microsoft\Windows\LanmanWorkstation",
+            "AllowInsecureGuestAuth",
+        ),
+        lire_dword(
+            r"SYSTEM\CurrentControlSet\Services\LanmanWorkstation\Parameters",
+            "AllowInsecureGuestAuth",
+        ),
+    ));
     let shell_ids = r"SOFTWARE\Microsoft\PowerShell\1\ShellIds\Microsoft.PowerShell";
     let strategies = r"SOFTWARE\Policies\Microsoft\Windows\PowerShell";
     let du_compte = |cle: &str| {
@@ -521,6 +565,14 @@ mod tests {
         assert!(juger_ntlm(Some(3)).is_none() && juger_ntlm(Some(5)).is_none() && juger_ntlm(None).is_none());
         assert_eq!(juger_signature_smb(Some(0)).unwrap().probleme, Some(Niveau::Info));
         assert!(juger_signature_smb(Some(1)).is_none() && juger_signature_smb(None).is_none());
+        // Connexion invité : la stratégie passe avant le réglage ; imposée, rien à lancer d'ici.
+        assert!(juger_invite_smb(None, None).is_none() && juger_invite_smb(None, Some(0)).is_none());
+        assert!(juger_invite_smb(Some(0), Some(1)).is_none());
+        let c = juger_invite_smb(None, Some(1)).unwrap();
+        assert_eq!(c.probleme, Some(Niveau::Moyen));
+        assert!(c.correctif.unwrap().commandes[0].ends_with("-Name AllowInsecureGuestAuth -Value 0"));
+        let impose = juger_invite_smb(Some(1), Some(0)).unwrap().correctif.unwrap();
+        assert_eq!(impose.commandes.len(), 0);
         assert!(
             juger_pause(Some("2026-10-01T09:00:00Z"), "2026-10-19").is_none()
                 && juger_pause(None, "2026-10-19").is_none()
