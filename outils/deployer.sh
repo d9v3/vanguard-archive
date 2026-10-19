@@ -244,6 +244,14 @@ if [[ -z $CLE ]]; then
 fi
 T_CLE=$SECONDS
 
+# Jeton d'identité de la clé (src/protection/cles_connues.rs) : 32 caractères hexadécimaux tirés une fois et gardés
+# ensuite ; cet ordinateur le note (vanguard manifeste --ecrire, plus bas) et, depuis sa copie locale, ne reconnaît
+# plus un volume au seul témoin vanguard.cle. La partition des journaux reçoit le même jeton.
+if ! grep -qxE '[0-9a-fA-F]{32}' "$CLE/vanguard.jeton" 2>/dev/null; then
+  head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n' >"$CLE/vanguard.jeton"
+  echo >>"$CLE/vanguard.jeton"
+fi
+
 # Partition VANGUARDLOG (la seule modifiable sur les autres ordinateurs) : elle se monte en même temps que VANGUARD,
 # parfois une seconde après. Son journal d'erreurs est rapatrié ici puis vidé, pour améliorer Vanguard.
 JOURNAL=""
@@ -254,6 +262,7 @@ for _ in {1..10}; do
 done
 if [[ -n $JOURNAL ]]; then
   touch "$JOURNAL/vanguard-journal.cle"
+  cp -f "$CLE/vanguard.jeton" "$JOURNAL/vanguard.jeton"
   rapatrier_journal "$JOURNAL/journal-erreurs.txt" "de la clé"
   envoyer_journal
 fi
@@ -334,9 +343,10 @@ rsync -rt --delete --modify-window=2 --exclude /target/ --exclude /.claude/workt
 # un ordinateur sans Internet. Une fois par jour au plus ; sans Internet, la clé garde les siens. Avant le manifeste :
 # une archive remplacée sur la clé par quelqu'un d'autre se verra au retour.
 outils/tldr-cle.sh "$CLE/tldr" || echo "Exemples de tldr-pages non mis à jour sur la clé."
-# Manifeste de la clé (src/protection/manifeste.rs) : l'empreinte de chaque fichier, gardée sur cet ordinateur et
-# jamais sur la clé ; le bilan la compare quand la clé revient de chez quelqu'un. Un programme d'avant la 0.59 n'a
-# pas cette commande : la clé est à jour quand même.
+# Manifeste de la clé (src/protection/manifeste.rs) : l'empreinte de chaque fichier (vanguard.jeton compris), gardée
+# sur cet ordinateur et jamais sur la clé ; le bilan la compare quand la clé revient de chez quelqu'un. La même
+# commande note la clé parmi celles que cet ordinateur connaît, avec l'état de son carnet. Un programme d'avant la
+# 0.59 n'a pas cette commande : la clé est à jour quand même.
 ./"$LINUX" manifeste --ecrire "$CLE" || echo "Manifeste de la clé non écrit : le bilan ne pourra pas la comparer."
 sync
 duree clé "$T_CLE"

@@ -20,8 +20,10 @@ use std::sync::OnceLock;
 /// Fichier témoin à la racine de la partition VANGUARDLOG.
 pub const TEMOIN: &str = "vanguard-journal.cle";
 
-fn a_un_temoin(dossier: &std::path::Path) -> bool {
-    dossier.join(TEMOIN).is_file()
+/// La partition des journaux porte le témoin et le jeton d'une clé connue de cet ordinateur (deployer.sh y recopie
+/// celui de la clé) : un volume étranger au seul témoin ne reçoit ni le journal ni « Mes ordinateurs ».
+fn est_la_partition(dossier: &std::path::Path, connues: &std::collections::BTreeSet<String>) -> bool {
+    dossier.join(TEMOIN).is_file() && crate::protection::cles_connues::connue(dossier, connues)
 }
 pub const FICHIER: &str = "journal-erreurs.txt";
 /// Au-delà, plus rien n'est ajouté : une erreur répétée en boucle ne remplit pas la partition.
@@ -50,36 +52,36 @@ fn dossier() -> Option<&'static PathBuf> {
 
 /// Partition VANGUARDLOG de la clé, si elle est branchée.
 pub(crate) fn partition_de_la_cle() -> Option<PathBuf> {
+    let connues = crate::protection::cles_connues::jetons();
     #[cfg(windows)]
     {
-        lecteur_windows()
+        lecteur_windows(&connues)
     }
     #[cfg(unix)]
     {
-        #[cfg(target_os = "linux")]
-        let montages = crate::reseau::cles_montees();
-        #[cfg(target_os = "macos")]
-        let montages: Vec<PathBuf> = std::fs::read_dir("/Volumes")
-            .into_iter()
-            .flatten()
-            .flatten()
-            .map(|d| d.path())
-            .collect();
-        montages.into_iter().find(|d| a_un_temoin(d))
+        partition_parmi(crate::reseau::volumes_montes(), &connues)
     }
+}
+
+/// Parmi `montages`, la partition des journaux d'une clé connue ; deux : la première dans l'ordre des chemins.
+#[cfg(any(unix, test))]
+fn partition_parmi(mut montages: Vec<PathBuf>, connues: &std::collections::BTreeSet<String>) -> Option<PathBuf> {
+    montages.sort();
+    montages.into_iter().find(|d| est_la_partition(d, connues))
 }
 
 /// Lecteurs D: à Z: interrogés en même temps, 2 s au plus : un lecteur réseau déconnecté peut mettre de longues
 /// secondes à répondre, et le journal ne doit jamais faire attendre le programme.
 #[cfg(windows)]
-fn lecteur_windows() -> Option<PathBuf> {
+fn lecteur_windows(connues: &std::collections::BTreeSet<String>) -> Option<PathBuf> {
     use std::time::{Duration, Instant};
     let (envoi, reception) = std::sync::mpsc::channel();
     for lettre in 'D'..='Z' {
         let envoi = envoi.clone();
+        let connues = connues.clone();
         std::thread::spawn(move || {
             let lecteur = PathBuf::from(format!("{lettre}:\\"));
-            let _ = envoi.send(a_un_temoin(&lecteur).then_some(lecteur));
+            let _ = envoi.send(est_la_partition(&lecteur, &connues).then_some(lecteur));
         });
     }
     drop(envoi);
@@ -876,6 +878,33 @@ pub fn installer() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// La partition des journaux n'est prise qu'avec le jeton d'une clé connue : témoin seul, ou jeton inconnu,
+    /// rien n'y va.
+    #[test]
+    fn partition_des_journaux_au_jeton_connu() {
+        let d = std::env::temp_dir().join(format!("vanguard-journal-partition-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        let (temoin_seul, inconnue, connue) = (d.join("a"), d.join("b"), d.join("c"));
+        for p in [&temoin_seul, &inconnue, &connue] {
+            std::fs::create_dir_all(p).unwrap();
+            std::fs::write(p.join(TEMOIN), "").unwrap();
+        }
+        let jeton = "0123456789abcdef0123456789abcdef";
+        std::fs::write(
+            inconnue.join(crate::protection::cles_connues::JETON),
+            "ffffffffffffffffffffffffffffffff",
+        )
+        .unwrap();
+        std::fs::write(connue.join(crate::protection::cles_connues::JETON), jeton).unwrap();
+        let connues: std::collections::BTreeSet<String> = [jeton.to_string()].into();
+        let volumes = vec![inconnue.clone(), connue.clone(), temoin_seul.clone()];
+        assert_eq!(partition_parmi(volumes.clone(), &connues), Some(connue.clone()));
+        assert_eq!(partition_parmi(volumes, &std::collections::BTreeSet::new()), None);
+        // Sans jeton du tout : un journal d'avant n'est pas écrit sur un volume quelconque.
+        assert_eq!(partition_parmi(vec![temoin_seul], &connues), None);
+        let _ = std::fs::remove_dir_all(&d);
+    }
 
     #[test]
     fn rien_de_personnel() {

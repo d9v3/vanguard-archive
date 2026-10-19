@@ -203,6 +203,9 @@ section "Clé USB simulée (espace de noms) : lecture seule respectée, journal 
 mkdir -p "$BAC/cle/Linux" "$BAC/cle/donnees" "$BAC/log"
 cp "$VANGUARD" "$BAC/cle/Linux/vanguard"
 touch "$BAC/cle/vanguard.cle" "$BAC/log/vanguard-journal.cle"
+# Le jeton d'une clé déployée, le même sur la partition des journaux : sans lui, le journal resterait local.
+head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n' >"$BAC/cle/vanguard.jeton"
+cp "$BAC/cle/vanguard.jeton" "$BAC/log/vanguard.jeton"
 unshare -rm bash -c "
   mount -t tmpfs none /run/media/$(id -un) 2>/dev/null || exit 3
   mkdir /run/media/$(id -un)/VANGUARD /run/media/$(id -un)/VANGUARDLOG

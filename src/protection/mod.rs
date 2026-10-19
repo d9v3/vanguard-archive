@@ -7,6 +7,7 @@ pub mod antivirus;
 pub mod camera;
 #[cfg(unix)]
 pub mod cle;
+pub mod cles_connues;
 pub mod distance;
 pub mod environnement;
 pub mod fuites;

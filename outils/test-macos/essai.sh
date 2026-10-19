@@ -168,6 +168,9 @@ cp "$VANGUARD" /Volumes/VANGUARD/macOS/vanguard
 # Empreinte d'un autre ordinateur : ce Mac n'est pas celui du propriétaire, la clé doit être protégée.
 echo 0000000000000000000000000000000000000000 >/Volumes/VANGUARD/vanguard.cle
 touch /Volumes/VANGUARDLOG/vanguard-journal.cle
+# Le jeton d'une clé déployée, le même sur la partition des journaux : sans lui, le journal resterait local.
+head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n' >/Volumes/VANGUARD/vanguard.jeton
+cp /Volumes/VANGUARD/vanguard.jeton /Volumes/VANGUARDLOG/vanguard.jeton
 note "$(mount | grep VANGUARD)"
 (cd / && printf '' | delai 120 /Volumes/VANGUARD/macOS/vanguard reseau 999.1.1.1 >"$RES/cle-protection.txt" 2>&1)
 note "$(mount | grep VANGUARD)"

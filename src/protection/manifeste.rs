@@ -231,6 +231,8 @@ pub fn ecrire(racine: &Path) -> Result<(usize, PathBuf), String> {
     if id.is_some() {
         let _ = std::fs::remove_file(base.join(ANCIENNE_REFERENCE));
     }
+    // Déployée ici, la clé est reconnue de cet ordinateur, et son carnet tel qu'il est devient la référence.
+    crate::protection::cles_connues::noter(racine);
     Ok((n, chemin))
 }
 
@@ -474,7 +476,11 @@ pub fn verifier_moi() {
 }
 
 /// « vanguard manifeste [--ecrire DOSSIER] » : écrit la référence (déploiement), ou compare la clé branchée.
-pub fn commande(ecrire_dossier: Option<&Path>) {
+pub fn commande(ecrire_dossier: Option<&Path>, accepter: bool) {
+    if accepter {
+        crate::protection::cles_connues::accepter();
+        return;
+    }
     if let Some(racine) = ecrire_dossier {
         match ecrire(racine) {
             Ok((n, reference)) => trp!(

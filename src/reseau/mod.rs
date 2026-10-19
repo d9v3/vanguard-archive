@@ -313,11 +313,39 @@ impl Base {
     /// ne doivent pas lire et réécrire la base en même temps (l'une effacerait les ajouts de l'autre).
     fn charger() -> (Base, [PathBuf; 2], Option<Verrou>) {
         let verrou = Verrou::prendre(&dossier_local());
-        let local = dossier_local().join("appareils.json");
-        let donnees = donnees_de_la_cle().unwrap_or_else(dossier_local);
+        let cle = cle_usb().map(|c| {
+            let modifiable = modifiable(&c);
+            (c, modifiable)
+        });
+        let (base, chemins) = Base::charger_depuis(cle, &dossier_local());
+        (base, chemins, verrou)
+    }
+
+    /// `cle` : la clé reconnue et si elle est modifiable ici ; `local` : le dossier de cet ordinateur. Le carnet de
+    /// la clé n'est pris que si rien ne dit qu'il a changé hors de Vanguard (`cles_connues`) : un carnet préparé
+    /// déciderait sinon de « Nouvel appareil ».
+    fn charger_depuis(cle: Option<(PathBuf, bool)>, local: &std::path::Path) -> (Base, [PathBuf; 2]) {
+        let local = local.join("appareils.json");
+        let cle = cle.filter(|(racine, modifiable)| {
+            match crate::protection::cles_connues::verdict(racine, *modifiable) {
+                Ok(()) => true,
+                Err(refus) => {
+                    tre!(
+                        "Attention : {} : il n'est ni lu ni réécrit (vanguard manifeste --accepter si c'est voulu).",
+                        "Warning: {}: it is neither read nor rewritten (vanguard manifeste --accepter if intended).",
+                        refus.texte()
+                    );
+                    false
+                }
+            }
+        });
+        let donnees = match &cle {
+            Some((racine, true)) => racine.join("donnees"),
+            _ => local.parent().map(PathBuf::from).unwrap_or_default(),
+        };
         let carnet = Base::ouvrir_carnet(&donnees);
         // Carnet chiffré pas ouvert : il n'est pas réécrit, tout reste sur cet ordinateur.
-        let cle = if carnet.is_some() {
+        let chemin_cle = if carnet.is_some() {
             donnees.join("appareils.json")
         } else {
             local.clone()
@@ -325,15 +353,15 @@ impl Base {
         let ouvert = carnet.is_some();
         let mut base = carnet.unwrap_or_default();
         // Clé protégée en écriture (autre ordinateur) : sa base sert quand même, les ajouts restent ici.
-        if let Some(protegee) = cle_protegee()
+        if let Some((protegee, false)) = &cle
             && let Some(sienne) = Base::ouvrir_carnet(&protegee.join("donnees"))
         {
             base.absorber(sienne);
         }
-        if local != cle || !ouvert {
+        if local != chemin_cle || !ouvert {
             base.absorber(Base::lire(&local));
         }
-        (base, [cle, local], verrou)
+        (base, [chemin_cle, local])
     }
 
     /// La base voyage sur la clé : branchée sur un autre ordinateur, copiée ou restaurée à la main, elle a pu être
@@ -364,18 +392,27 @@ impl Base {
     /// On écrit la base sur la clé ET en local : la copie locale sert quand la clé est absente.
     fn enregistrer(&self, chemins: &[PathBuf; 2]) {
         let json = serde_json::to_string_pretty(self).unwrap_or_default();
+        let [cle, local] = chemins;
         for p in chemins {
             // Le carnet d'une clé protégée s'écrit chiffré ; jamais en clair à côté.
             let ecrit = match p.parent().filter(|d| crate::chiffrement::protegee(d)) {
                 Some(donnees) => crate::chiffrement::ecrire_carnet(donnees, &json),
                 None => ecrire_atomique(p, &json),
             };
-            if let Err(e) = ecrit {
-                tre!(
+            match ecrit {
+                Err(e) => tre!(
                     "Attention : base des appareils non enregistrée dans {} ({e}).",
                     "Warning: device database not saved to {} ({e}).",
                     p.display()
-                );
+                ),
+                // Le carnet que Vanguard vient d'écrire sur la clé devient sa référence : à la prochaine lecture, un
+                // carnet différent aura été changé par autre chose.
+                Ok(()) if p == cle && p != local => {
+                    if let Some(racine) = p.parent().and_then(std::path::Path::parent) {
+                        crate::protection::cles_connues::noter(racine);
+                    }
+                }
+                Ok(()) => {}
             }
         }
     }
@@ -562,20 +599,68 @@ pub fn cles_montees() -> Vec<PathBuf> {
         .collect()
 }
 
-/// Clé USB de Vanguard branchée, si elle est trouvée (dossier racine contenant son témoin).
-pub fn cle_usb() -> Option<PathBuf> {
+/// Les volumes où une clé peut être montée : ceux de l'utilisateur sous Linux, /Volumes sous macOS, les lecteurs
+/// D: à Z: sous Windows.
+pub(crate) fn volumes_montes() -> Vec<PathBuf> {
     #[cfg(target_os = "linux")]
-    let montages = cles_montees();
+    {
+        cles_montees()
+    }
     #[cfg(target_os = "macos")]
-    let montages: Vec<PathBuf> = std::fs::read_dir("/Volumes")
-        .into_iter()
-        .flatten()
-        .flatten()
-        .map(|d| d.path())
-        .collect();
+    {
+        std::fs::read_dir("/Volumes")
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|d| d.path())
+            .collect()
+    }
     #[cfg(windows)]
-    let montages: Vec<PathBuf> = ('D'..='Z').map(|l| PathBuf::from(format!("{l}:\\"))).collect();
-    cle_du_programme().or_else(|| montages.into_iter().find(|d| est_une_cle(d)))
+    {
+        ('D'..='Z').map(|l| PathBuf::from(format!("{l}:\\"))).collect()
+    }
+}
+
+/// Clé USB de Vanguard branchée : celle d'où tourne le programme ; sinon, parmi les volumes montés, une clé dont le
+/// jeton est connu de cet ordinateur (`protection::cles_connues`). Un volume qui porte le témoin sans jeton connu
+/// n'est pas la clé : rien n'y est lu ni écrit, pas même l'essai d'écriture de `modifiable`.
+pub fn cle_usb() -> Option<PathBuf> {
+    cle_du_programme().or_else(|| {
+        let connues = crate::protection::cles_connues::jetons();
+        cle_parmi(volumes_montes(), &connues)
+    })
+}
+
+/// La clé connue parmi `volumes`. Deux clés connues branchées : la première dans l'ordre des chemins (« /run/media/
+/// alice/VANGUARD » avant « …/VANGUARD1 »), le même à chaque lancement ; l'autre n'est pas regardée.
+fn cle_parmi(mut volumes: Vec<PathBuf>, connues: &std::collections::BTreeSet<String>) -> Option<PathBuf> {
+    volumes.sort();
+    volumes
+        .into_iter()
+        .find(|d| est_une_cle(d) && crate::protection::cles_connues::connue(d, connues))
+}
+
+/// Un volume branché porte le témoin sans être une clé reconnue ici.
+pub(crate) fn volume_inconnu() -> bool {
+    cle_usb().is_none() && volumes_montes().iter().any(|d| est_une_cle(d))
+}
+
+/// Ce que la ligne d'état du menu dit de la clé.
+pub enum EtatCle {
+    Aucune,
+    Branchee,
+    ProtegeeEnEcriture,
+    /// Un volume au témoin sans jeton connu : ignoré.
+    Inconnue,
+}
+
+pub fn etat_de_la_cle() -> EtatCle {
+    match cle_usb() {
+        Some(c) if modifiable(&c) => EtatCle::Branchee,
+        Some(_) => EtatCle::ProtegeeEnEcriture,
+        None if volume_inconnu() => EtatCle::Inconnue,
+        None => EtatCle::Aucune,
+    }
 }
 
 /// La clé d'où tourne le programme (exe dans <clé>/Linux/, <clé>/Windows/…), trouvée par son seul chemin, sans
@@ -641,17 +726,12 @@ fn noms_des_bases(textes: &[String]) -> (Vec<String>, Vec<String>) {
 }
 
 /// La partition VANGUARD est en lecture seule sur les autres ordinateurs (attribut GPT respecté par Windows) :
-/// on essaie d'y écrire plutôt que de deviner.
-fn modifiable(dossier: &std::path::Path) -> bool {
+/// on essaie d'y écrire plutôt que de deviner. Seulement sur une clé reconnue (`cle_usb`) : c'est une écriture.
+pub(crate) fn modifiable(dossier: &std::path::Path) -> bool {
     let essai = dossier.join(format!(".vanguard-ecriture-{}", std::process::id()));
     let ok = std::fs::write(&essai, b"").is_ok();
     let _ = std::fs::remove_file(&essai);
     ok
-}
-
-/// Clé branchée mais protégée en écriture : on lit sa base, sans rien y écrire.
-pub fn cle_protegee() -> Option<PathBuf> {
-    cle_usb().filter(|c| !modifiable(c))
 }
 
 /// Le dossier `donnees` de la clé USB, quand elle est branchée et modifiable (ordinateur du propriétaire).
@@ -661,10 +741,15 @@ pub fn donnees_de_la_cle() -> Option<PathBuf> {
 
 /// Données (rapport, diagnostic) : sur la clé USB quand elle est branchée et modifiable, pour qu'elles voyagent avec
 /// le programme ; sinon, ou quand les données de la clé sont protégées par une phrase (une clé perdue ne doit rien
-/// livrer en clair), dans le dossier local de l'ordinateur.
+/// livrer en clair), ou quand son carnet a changé hors de Vanguard (une clé qui a voyagé sans lui ne reçoit pas le
+/// bilan de la maison), dans le dossier local de l'ordinateur.
 pub fn dossier_donnees() -> PathBuf {
     donnees_de_la_cle()
         .filter(|d| !crate::chiffrement::protegee(d))
+        .filter(|d| {
+            d.parent()
+                .is_some_and(|racine| crate::protection::cles_connues::verdict(racine, true).is_ok())
+        })
         .unwrap_or_else(dossier_local)
 }
 
@@ -1634,6 +1719,111 @@ mod tests {
         drop(v);
         assert!(!chemin.exists());
         std::fs::remove_dir_all(&dossier).unwrap();
+    }
+
+    fn fausse_cle(nom: &str, jeton: Option<&str>) -> PathBuf {
+        let cle = std::env::temp_dir().join(format!("vanguard-fausse-cle-{nom}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&cle);
+        std::fs::create_dir_all(cle.join("donnees")).unwrap();
+        std::fs::write(cle.join(TEMOIN_CLE), "").unwrap();
+        if let Some(j) = jeton {
+            std::fs::write(cle.join(crate::protection::cles_connues::JETON), j).unwrap();
+        }
+        cle
+    }
+
+    /// Parmi les volumes montés, seule une clé au jeton connu d'ici est la clé : témoin seul ou jeton inconnu,
+    /// rien ; deux connues, toujours la première dans l'ordre des chemins.
+    #[test]
+    fn cle_reconnue_au_jeton_connu() {
+        let (a, b) = ("0123456789abcdef0123456789abcdef", "fedcba9876543210fedcba9876543210");
+        let sans = fausse_cle("sans-jeton", None);
+        let inconnue = fausse_cle("inconnue", Some("ffffffffffffffffffffffffffffffff"));
+        let connue_b = fausse_cle("connue-b", Some(b));
+        let connue_a = fausse_cle("connue-a", Some(a));
+        let pas_une_cle = fausse_cle("pas-une-cle", Some(a));
+        std::fs::remove_file(pas_une_cle.join(TEMOIN_CLE)).unwrap();
+        let connues: std::collections::BTreeSet<String> = [a.to_string(), b.to_string()].into();
+        let volumes = vec![
+            pas_une_cle.clone(),
+            sans.clone(),
+            inconnue.clone(),
+            connue_b.clone(),
+            connue_a.clone(),
+        ];
+        assert_eq!(cle_parmi(volumes.clone(), &connues), Some(connue_a.clone()));
+        let seule_b: std::collections::BTreeSet<String> = [b.to_string()].into();
+        assert_eq!(cle_parmi(volumes.clone(), &seule_b), Some(connue_b.clone()));
+        assert_eq!(cle_parmi(volumes, &std::collections::BTreeSet::new()), None);
+        assert_eq!(cle_parmi(vec![sans.clone(), inconnue.clone()], &connues), None);
+        for d in [sans, inconnue, connue_b, connue_a, pas_une_cle] {
+            let _ = std::fs::remove_dir_all(d);
+        }
+    }
+
+    /// Le carnet d'une clé connue est fusionné et réécrit tant qu'il est celui que Vanguard a écrit en dernier ;
+    /// changé hors de Vanguard, il n'est ni lu ni réécrit, jusqu'à ce qu'il soit accepté.
+    #[test]
+    fn carnet_de_la_cle_modifie_ni_lu_ni_reecrit() {
+        let cle = fausse_cle("carnet-modifie", Some("0123456789abcdef0123456789abcdef"));
+        let local = std::env::temp_dir().join(format!("vanguard-local-carnet-modifie-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&local);
+        std::fs::create_dir_all(&local).unwrap();
+        let carnet_cle = cle.join("donnees").join("appareils.json");
+        let salon = r#"{"reseaux":{"3c:22:fb:00:00:01":{"nom":"Salon","appareils":{}}}}"#;
+        std::fs::write(&carnet_cle, salon).unwrap();
+        assert!(crate::protection::cles_connues::noter(&cle));
+        // Clé lancée ou connue, intacte : son carnet est pris, et réécrit sur la clé.
+        let (base, chemins) = Base::charger_depuis(Some((cle.clone(), true)), &local);
+        assert!(base.reseaux.contains_key("3c:22:fb:00:00:01"));
+        assert_eq!(chemins[0], carnet_cle);
+        base.enregistrer(&chemins);
+        // Modifié hors de Vanguard : un appareil « connu » y est ajouté. Ni lu ni réécrit.
+        let piege = r#"{"reseaux":{"3c:22:fb:00:00:01":{"nom":"Salon","appareils":{"3c:22:fb:00:00:99":{"ip":"10.0.0.99","nom":null,"fabricant":null,"ports":[],"surnom":"imprimante"}}}}}"#;
+        std::fs::write(&carnet_cle, piege).unwrap();
+        let (base, chemins) = Base::charger_depuis(Some((cle.clone(), true)), &local);
+        assert!(base.fiches().all(|a| a.surnom.as_deref() != Some("imprimante")));
+        assert_eq!(chemins[0], local.join("appareils.json"));
+        base.enregistrer(&chemins);
+        assert_eq!(std::fs::read_to_string(&carnet_cle).unwrap(), piege);
+        // Sur un ordinateur où la clé est en lecture seule, l'empreinte ne compte pas : le carnet sert.
+        let (base, chemins) = Base::charger_depuis(Some((cle.clone(), false)), &local);
+        assert!(base.fiches().any(|a| a.surnom.as_deref() == Some("imprimante")));
+        assert_eq!(chemins[0], local.join("appareils.json"));
+        // Accepté (copie restaurée) : lu de nouveau.
+        assert!(crate::protection::cles_connues::noter(&cle));
+        let (_, chemins) = Base::charger_depuis(Some((cle.clone(), true)), &local);
+        assert_eq!(chemins[0], carnet_cle);
+        let _ = std::fs::remove_dir_all(&cle);
+        let _ = std::fs::remove_dir_all(&local);
+    }
+
+    /// Une clé connue dont le carnet était chiffré revient sans enveloppe, avec un carnet en clair : il n'est ni
+    /// lu ni réécrit, même en lecture seule.
+    #[test]
+    fn enveloppe_retiree_carnet_en_clair_refuse() {
+        let cle = fausse_cle("enveloppe-retiree", Some("fedcba9876543210fedcba9876543210"));
+        let donnees = cle.join("donnees");
+        let local = std::env::temp_dir().join(format!("vanguard-local-enveloppe-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&local);
+        std::fs::create_dir_all(&local).unwrap();
+        std::fs::write(donnees.join("appareils.json"), r#"{"reseaux":{}}"#).unwrap();
+        let cle_locale = dossier_local().join("cle-donnees-enveloppe-retiree");
+        crate::chiffrement::proteger_dans(&donnees, &cle_locale, &local, "phrase de test assez longue", (64, 1, 1))
+            .unwrap();
+        assert!(crate::protection::cles_connues::noter(&cle));
+        std::fs::remove_file(donnees.join(crate::chiffrement::ENVELOPPE)).unwrap();
+        let clair = r#"{"reseaux":{"3c:22:fb:00:00:01":{"nom":"Salon","appareils":{}}}}"#;
+        std::fs::write(donnees.join("appareils.json"), clair).unwrap();
+        for modifiable in [true, false] {
+            let (base, chemins) = Base::charger_depuis(Some((cle.clone(), modifiable)), &local);
+            assert!(base.reseaux.is_empty());
+            assert_eq!(chemins[0], local.join("appareils.json"));
+        }
+        assert_eq!(std::fs::read_to_string(donnees.join("appareils.json")).unwrap(), clair);
+        let _ = std::fs::remove_file(&cle_locale);
+        let _ = std::fs::remove_dir_all(&cle);
+        let _ = std::fs::remove_dir_all(&local);
     }
 
     #[test]

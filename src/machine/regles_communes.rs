@@ -203,6 +203,18 @@ regle!(
 );
 
 regle!(
+    "COM-CLE-003",
+    Os::Tous,
+    711,
+    (
+        "identité de la clé VANGUARD et son carnet",
+        "VANGUARD key identity and its record"
+    ),
+    &[],
+    crate::protection::cles_connues::constats
+);
+
+regle!(
     "COM-SAV-001",
     Os::Tous,
     720,

@@ -36,6 +36,12 @@ chaque version garde son étiquette dans le dépôt (`git checkout v0.62.0`, par
 - **Plus de 30 000 commandes en plus** : les exemples de tldr-pages (licence CC BY 4.0), téléchargés tout seuls chaque
   semaine et déjà sur la clé (même sans Internet, le guide les a dès le premier lancement), en français quand ils
   sont traduits ; à copier seulement. Dans toutes les recherches, ce qui commence par le mot tapé passe devant.
+- **Plus sûr : la clé reconnue à son jeton.** Un volume qui porte le témoin d'une clé VANGUARD n'est plus la clé
+  pour autant : depuis sa copie locale (surveillance, entretien, raccourci), Vanguard ne lit et n'écrit que sur une
+  clé lancée depuis elle ou connue de cet ordinateur (jeton `vanguard.jeton` posé au déploiement, partition des
+  journaux comprise) ; un volume inconnu est dit tel au menu et ignoré. Le carnet de la clé a sa référence ici :
+  modifié hors de Vanguard, ou revenu sans sa protection, il n'est ni lu ni réécrit et le bilan le dit
+  (`vanguard manifeste --accepter` quand c'est voulu).
 - **Prédiction des mots dans tous les menus** et les listes à cocher : la fin du mot le plus probable s'affiche en
   gris, Tab la complète.
 - **Bilan plus profond.** Sécurité de la plateforme d'après fwupd (niveau HSI : TPM, protection du BIOS, IOMMU),

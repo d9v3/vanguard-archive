@@ -356,6 +356,9 @@ enum Commande {
         /// Écrire le manifeste de ce dossier (la racine de la clé) dans la référence de cet ordinateur.
         #[arg(long)]
         ecrire: Option<std::path::PathBuf>,
+        /// Accepter le carnet de la clé branchée tel qu'il est (copie restaurée, protection retirée ailleurs).
+        #[arg(long)]
+        accepter: bool,
     },
     /// Scan silencieux + notifications (utilisé par la surveillance).
     #[command(hide = true)]
@@ -515,21 +518,25 @@ fn etat_du_menu(surveillance_active: bool) -> Vec<String> {
             debit(c.montant)
         )
     });
-    let cle = if reseau::cle_protegee().is_some() {
-        format!(
+    let cle = match reseau::etat_de_la_cle() {
+        reseau::EtatCle::ProtegeeEnEcriture => format!(
             "{VERT}{}{RESET}",
             tr!(
                 "clé VANGUARD branchée (protégée en écriture)",
                 "VANGUARD key plugged in (write-protected)"
             )
-        )
-    } else if reseau::cle_usb().is_some() {
-        format!(
+        ),
+        reseau::EtatCle::Branchee => format!(
             "{VERT}{}{RESET}",
             tr!("clé VANGUARD branchée", "VANGUARD key plugged in")
-        )
-    } else {
-        format!("{GRIS}{}{RESET}", tr!("clé non branchée", "key not plugged in"))
+        ),
+        // Un volume au témoin sans jeton connu d'ici : dit, pour que personne ne croie sa clé reconnue.
+        reseau::EtatCle::Inconnue => format!(
+            "{}{}{RESET}",
+            couleur(risk::Niveau::Moyen),
+            tr!("clé VANGUARD inconnue, ignorée", "unknown VANGUARD key, ignored")
+        ),
+        reseau::EtatCle::Aucune => format!("{GRIS}{}{RESET}", tr!("clé non branchée", "key not plugged in")),
     };
     let surveillance = if surveillance_active {
         format!("{VERT}{}{RESET}", tr!("surveillance active", "monitoring on"))
@@ -1485,6 +1492,7 @@ async fn main() {
     // Après le passage, qui a pu déplacer l'ancien dossier avec ses droits d'avant.
     #[cfg(unix)]
     reseau::proteger_dossier_local();
+    protection::cles_connues::reconnaitre_la_cle_du_programme();
     let args = Args::from_arg_matches(&ligne_de_commande().get_matches()).unwrap_or_else(|e| e.exit());
     match args.commande {
         None => menu().await,
@@ -1557,7 +1565,9 @@ async fn main() {
         Some(Commande::Sortantes) => protection::sortantes::afficher(),
         Some(Commande::Distance) => protection::distance::menu(),
         Some(Commande::VerifierMoi) => protection::manifeste::verifier_moi(),
-        Some(Commande::Manifeste { ecrire }) => protection::manifeste::commande(ecrire.as_deref()),
+        Some(Commande::Manifeste { ecrire, accepter }) => {
+            protection::manifeste::commande(ecrire.as_deref(), accepter);
+        }
         Some(Commande::Lien { adresse }) => protection::lien::verifier(Some(&adresse)),
         Some(Commande::VerifierFichier { fichier, empreinte }) => {
             protection::telechargement::verifier(Some(&fichier), empreinte.as_deref());

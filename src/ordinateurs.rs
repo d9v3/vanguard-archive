@@ -514,12 +514,16 @@ mod tests {
     }
 
     /// VANGUARDLOG se lit en clair et voyage : outils/deployer.sh ne doit en rapatrier que journal-erreurs.txt (et
-    /// toucher ses témoins), jamais toute la partition ni ordinateurs.json, sans quoi le tableau pourrait partir
-    /// avec le journal sur GitHub.
+    /// toucher ses témoins, dont le jeton de la clé qu'il y recopie), jamais toute la partition ni
+    /// ordinateurs.json, sans quoi le tableau pourrait partir avec le journal sur GitHub.
     #[test]
     fn seul_le_journal_quitte_vanguardlog() {
         let deployer = include_str!("../outils/deployer.sh");
-        let permis = ["\"$JOURNAL/journal-erreurs.txt\"", "\"$JOURNAL/vanguard-journal.cle\""];
+        let permis = [
+            "\"$JOURNAL/journal-erreurs.txt\"",
+            "\"$JOURNAL/vanguard-journal.cle\"",
+            "\"$JOURNAL/vanguard.jeton\"",
+        ];
         for l in deployer.lines().filter(|l| l.contains("$JOURNAL")) {
             let sans_permis = permis.iter().fold(l.to_string(), |t, p| t.replace(p, ""));
             assert!(

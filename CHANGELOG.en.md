@@ -34,6 +34,12 @@ repository (`git checkout v0.62.0`, for example), to be rebuilt if needed.
 - **Over 30,000 more commands**: the tldr-pages examples (CC BY 4.0 license), downloaded automatically every week and
   already on the key (even without Internet, the guide has them from the first launch); to copy only. In every
   search, what starts with the typed word comes first.
+- **Safer: the key recognized by its token.** A volume carrying a VANGUARD key marker is no longer the key for
+  that: from its local copy (monitoring, maintenance, shortcut), Vanguard reads and writes only a key it was started
+  from or one this computer knows (`vanguard.jeton` token written at deployment, log partition included); an unknown
+  volume is said so in the menu and ignored. The key's record has its reference here: changed outside Vanguard, or
+  back without its protection, it is neither read nor rewritten and the check says so (`vanguard manifeste
+  --accepter` when intended).
 - **Word prediction in every menu** and checklist: the end of the most likely word shows in grey, Tab completes it.
 - **Deeper check.** Platform security according to fwupd (HSI level: TPM, BIOS protection, IOMMU), kernel lockdown and
   module signing, BPF, auditd; on Windows, PowerShell script logging, Credential Guard (Enterprise, Education),

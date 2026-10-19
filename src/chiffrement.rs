@@ -486,10 +486,13 @@ pub fn menu() {
             .oui() =>
             {
                 match retirer_dans(&donnees, &cle, &chemin_local()) {
-                    Ok(()) => trp!(
-                        "  {VERT}✔{RESET} Protection retirée : le carnet est en clair.",
-                        "  {VERT}✔{RESET} Protection removed: the record is in clear."
-                    ),
+                    Ok(()) => {
+                        noter_la_cle(&donnees);
+                        trp!(
+                            "  {VERT}✔{RESET} Protection retirée : le carnet est en clair.",
+                            "  {VERT}✔{RESET} Protection removed: the record is in clear."
+                        );
+                    }
                     Err(e) => trp!(
                         "  ✖ Impossible ({e}) : la protection reste.",
                         "  ✖ Not possible ({e}): protection stays."
@@ -531,15 +534,18 @@ pub fn menu() {
     let Some(phrase) = demander_phrase() else { return };
     trp!("  {GRIS}Chiffrement…{RESET}", "  {GRIS}Encrypting…{RESET}");
     match proteger_dans(&donnees, &chemin_local(), &local, &phrase, PARAMETRES) {
-        Ok(()) => afficher_aligne(
-            &format!("  {VERT}✔{RESET} "),
-            tr!(
-                "Carnet chiffré. Retiens bien la phrase : sans elle, ailleurs, Vanguard continue sans le carnet.",
-                "Record encrypted. Remember the passphrase: without it, elsewhere, Vanguard goes on without the record."
-            ),
-            4,
-            "",
-        ),
+        Ok(()) => {
+            noter_la_cle(&donnees);
+            afficher_aligne(
+                &format!("  {VERT}✔{RESET} "),
+                tr!(
+                    "Carnet chiffré. Retiens bien la phrase : sans elle, ailleurs, Vanguard continue sans le carnet.",
+                    "Record encrypted. Remember the passphrase: without it, elsewhere, Vanguard goes on without the record."
+                ),
+                4,
+                "",
+            );
+        }
         Err(e) => {
             // L'enveloppe d'un essai raté ne doit pas faire croire la clé protégée : le carnet en clair est resté.
             let _ = std::fs::remove_file(donnees.join(ENVELOPPE));
@@ -549,6 +555,14 @@ pub fn menu() {
                 "  ✖ Not possible ({e}): the record stays in clear."
             );
         }
+    }
+}
+
+/// La protection vient d'être posée ou retirée ici, par la personne : l'état de la clé est de nouveau sa référence
+/// (sinon le retrait passerait pour fait hors de Vanguard, et le carnet ne serait plus jamais lu).
+fn noter_la_cle(donnees: &Path) {
+    if let Some(racine) = donnees.parent() {
+        crate::protection::cles_connues::noter(racine);
     }
 }
 
