@@ -280,12 +280,17 @@ fn pare_feu() -> Constat {
 }
 
 fn antivirus() -> Vec<Constat> {
-    if ps("1").is_none() {
-        return vec![illisible("Antivirus")];
-    }
+    // Un seul PowerShell dans le cas courant (chaque lancement coûte près d'une demi-seconde) : l'état de Defender et
+    // sa protection dans le cloud ensemble. Get-MpPreference peut manquer sans que l'état soit faux.
     let Some(json) = ps(
-        "Get-MpComputerStatus | Select-Object AntivirusEnabled,RealTimeProtectionEnabled,AntivirusSignatureAge,IsTamperProtected | ConvertTo-Json",
+        "$s = Get-MpComputerStatus | Select-Object AntivirusEnabled,RealTimeProtectionEnabled,AntivirusSignatureAge,IsTamperProtected; \
+         $s | Add-Member -NotePropertyName MAPSReporting -NotePropertyValue $(try { [int](Get-MpPreference).MAPSReporting } catch { $null }); \
+         $s | ConvertTo-Json",
     ) else {
+        // Defender ne répond pas : PowerShell lui-même répond-il ? Demandé seulement maintenant.
+        if ps("1").is_none() {
+            return vec![illisible("Antivirus")];
+        }
         let tiers =
             ps("(Get-CimInstance -Namespace root/SecurityCenter2 -ClassName AntivirusProduct).displayName -join ', '")
                 .unwrap_or_default();
@@ -342,7 +347,9 @@ fn antivirus() -> Vec<Constat> {
         ));
     }
     c.push(signatures(v["AntivirusSignatureAge"].as_u64().unwrap_or(0)));
-    c.extend(juger_cloud(ps("(Get-MpPreference).MAPSReporting").as_deref()));
+    c.extend(juger_cloud(
+        v["MAPSReporting"].as_u64().map(|n| n.to_string()).as_deref(),
+    ));
     if v["IsTamperProtected"] == false {
         c.push(alerte("Antivirus", Niveau::Moyen, tr!("Protection contre les falsifications désactivée : un malware peut couper Defender.", "Tamper protection is off: malware can turn Defender off."))
             .manuel(tr!("Sécurité Windows > Protection contre les virus > Gérer les paramètres > Protection contre les falsifications", "Windows Security > Virus protection > Manage settings > Tamper protection"), &["Start-Process windowsdefender://threatsettings"]));

@@ -698,8 +698,11 @@ pub(super) fn durcissement() -> Vec<Constat> {
         juger_wdigest(lire_dword(WDIGEST, "UseLogonCredential")),
         juger_lsa(lire_dword(r"SYSTEM\CurrentControlSet\Control\Lsa", "RunAsPPL")),
     ];
+    // Un seul PowerShell pour les deux lectures (chaque lancement coûte près d'une demi-seconde) ; chacune a sa
+    // section, et l'échec de l'une laisse l'autre.
     let ps2 = ps(
-        "try { 'PS2|' + (Get-CimInstance Win32_OptionalFeature -Filter \"Name='MicrosoftWindowsPowerShellV2Root'\").InstallState; 'PS2_FIN' } catch {}",
+        "try { 'PS2|' + (Get-CimInstance Win32_OptionalFeature -Filter \"Name='MicrosoftWindowsPowerShellV2Root'\").InstallState; 'PS2_FIN' } catch {}; \
+         try { $m = Get-ProcessMitigation -System; 'MIT|' + $m.DEP.Enable + '|' + $m.ASLR.BottomUp + '|' + $m.CFG.Enable + '|' + $m.SEHOP.Enable; 'MIT_FIN' } catch {}",
     );
     let installe = section(ps2.as_deref(), "PS2")
         .and_then(|l| l.first().map(|v| v.trim().to_string()))
@@ -709,11 +712,8 @@ pub(super) fn durcissement() -> Vec<Constat> {
             _ => None,
         });
     c.extend(juger_powershell2(installe));
-    let protections = ps(
-        "try { $m = Get-ProcessMitigation -System; 'MIT|' + $m.DEP.Enable + '|' + $m.ASLR.BottomUp + '|' + $m.CFG.Enable + '|' + $m.SEHOP.Enable; 'MIT_FIN' } catch {}",
-    );
     c.extend(juger_protection_exploits(
-        section(protections.as_deref(), "MIT").and_then(|l| l.first().copied()),
+        section(ps2.as_deref(), "MIT").and_then(|l| l.first().copied()),
     ));
     c.extend(juger_assistance(lire_dword(
         r"SYSTEM\CurrentControlSet\Control\Remote Assistance",
