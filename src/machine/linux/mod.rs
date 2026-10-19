@@ -906,6 +906,123 @@ fn sortie_delai(cmd: &str, args: &[&str], secondes: u64, codes_ok: &[i32]) -> Op
     r.code.is_some_and(|c| codes_ok.contains(&c)).then_some(r.sortie)
 }
 
+/// Dernière valeur de `cle` dans les sections d'un fichier INI que `section` accepte (noms sans crochets). Les
+/// commentaires (« # », « ; ») sont ignorés ; la clé ne tient pas compte de la casse.
+fn valeur_ini(texte: &str, section: impl Fn(&str) -> bool, cle: &str) -> Option<String> {
+    let mut dedans = false;
+    let mut trouvee = None;
+    for ligne in texte.lines().map(str::trim) {
+        if ligne.starts_with('#') || ligne.starts_with(';') {
+            continue;
+        }
+        if let Some(nom) = ligne.strip_prefix('[').and_then(|l| l.strip_suffix(']')) {
+            dedans = section(nom);
+        } else if dedans
+            && let Some((k, v)) = ligne.split_once('=')
+            && k.trim().eq_ignore_ascii_case(cle)
+        {
+            trouvee = Some(v.trim().to_string());
+        }
+    }
+    trouvee
+}
+
+/// Le compte dont la session s'ouvre toute seule, et le fichier qui le dit, d'après les fichiers de GDM, SDDM et
+/// LightDM donnés dans l'ordre où ils s'appliquent (le dernier l'emporte). `None` : personne.
+fn ouverture_automatique_de(fichiers: &[(String, String)]) -> Option<(String, String)> {
+    let mut trouve: Option<(String, String)> = None;
+    for (chemin, texte) in fichiers {
+        let compte = if chemin.contains("/gdm") {
+            let daemon = |cle: &str| valeur_ini(texte, |s| s.eq_ignore_ascii_case("daemon"), cle);
+            let oui = |cle: &str| daemon(cle).is_some_and(|v| v.eq_ignore_ascii_case("true") || v == "1");
+            let auto = oui("AutomaticLoginEnable").then(|| daemon("AutomaticLogin")).flatten();
+            let minute = oui("TimedLoginEnable").then(|| daemon("TimedLogin")).flatten();
+            Some(auto.or(minute).unwrap_or_default())
+        } else if chemin.contains("/sddm") {
+            valeur_ini(texte, |s| s == "Autologin", "User")
+        } else if chemin.contains("/lightdm") {
+            valeur_ini(
+                texte,
+                |s| s.starts_with("Seat") || s == "SeatDefaults",
+                "autologin-user",
+            )
+        } else {
+            None
+        };
+        match compte {
+            Some(c) if !c.is_empty() => trouve = Some((c, chemin.clone())),
+            Some(_) => trouve = None,
+            None => {}
+        }
+    }
+    trouve
+}
+
+/// Fichiers des gestionnaires de connexion, dans l'ordre où ils s'appliquent.
+fn fichiers_de_connexion() -> Vec<(String, String)> {
+    let mut chemins: Vec<std::path::PathBuf> = ["/etc/gdm/custom.conf", "/etc/gdm3/custom.conf"]
+        .iter()
+        .map(std::path::PathBuf::from)
+        .collect();
+    for dossier in ["/etc/sddm.conf.d", "/etc/lightdm/lightdm.conf.d"] {
+        let mut dedans: Vec<std::path::PathBuf> = std::fs::read_dir(dossier)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|e| e == "conf"))
+            .collect();
+        dedans.sort();
+        // SDDM lit /etc/sddm.conf après son dossier ; LightDM lit lightdm.conf avant le sien.
+        if dossier.contains("lightdm") {
+            chemins.push("/etc/lightdm/lightdm.conf".into());
+            chemins.extend(dedans);
+        } else {
+            chemins.extend(dedans);
+            chemins.push("/etc/sddm.conf".into());
+        }
+    }
+    chemins
+        .into_iter()
+        .filter_map(|p| Some((p.to_string_lossy().into_owned(), std::fs::read_to_string(&p).ok()?)))
+        .collect()
+}
+
+/// Session qui s'ouvre toute seule : sans disque chiffré, un ordinateur volé s'allume directement sur les fichiers.
+/// Avec un disque chiffré (Omarchy), le mot de passe du disque protège : c'est dit, sans alerte.
+fn ouverture_automatique() -> Option<Constat> {
+    let (compte, fichier) = ouverture_automatique_de(&fichiers_de_connexion())?;
+    Some(juger_ouverture_automatique(&compte, &fichier, racine_chiffree()))
+}
+
+fn juger_ouverture_automatique(compte: &str, fichier: &str, chiffree: Option<bool>) -> Constat {
+    let compte = crate::ui::affichable(compte);
+    if chiffree == Some(true) {
+        return ok(
+            "Comptes",
+            trf!(
+                "La session de « {compte} » s'ouvre toute seule, derrière le mot de passe du disque chiffré.",
+                "“{compte}”'s session opens by itself, behind the encrypted disk's password."
+            ),
+        );
+    }
+    alerte(
+        "Comptes",
+        Niveau::Moyen,
+        trf!(
+            "La session de « {compte} » s'ouvre toute seule au démarrage, sans disque chiffré : un ordinateur volé s'allume directement sur tes fichiers.",
+            "“{compte}”'s session opens by itself at startup, without an encrypted disk: a stolen computer boots straight into your files."
+        ),
+    )
+    .manuel(
+        trf!(
+            "Couper l'ouverture automatique : réglages des utilisateurs du bureau (GNOME : Paramètres > Utilisateurs ; KDE : Écran de connexion), ou la ligne du compte dans {fichier}",
+            "Turn off automatic login: the desktop's user settings (GNOME: Settings > Users; KDE: Login Screen), or the account's line in {fichier}"
+        ),
+        &[],
+    )
+}
+
 /// Le système de fichiers racine repose-t-il sur un volume chiffré (LUKS, éventuellement sous LVM) ?
 /// `None` si on ne peut pas remonter la chaîne des périphériques.
 fn racine_chiffree() -> Option<bool> {
@@ -1453,6 +1570,7 @@ pub fn auditer() -> Audit {
             verif!(autres_mises_a_jour()),
             verif!([redemarrage()]),
             verif!([chiffrement_disque()]),
+            verif!(ouverture_automatique()),
             verif!(verrouillage_ecran()),
             verif!(acces_x11()),
             verif!([durcissement_noyau()]),
@@ -1477,6 +1595,50 @@ pub fn auditer() -> Audit {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ouverture_de_session_automatique() {
+        let f = |c: &str, t: &str| (c.to_string(), t.to_string());
+        // SDDM d'Omarchy ; un fichier lu après qui vide le compte l'annule.
+        let omarchy = f(
+            "/etc/sddm.conf.d/autologin.conf",
+            "[Autologin]\nUser=alice\nSession=omarchy.desktop\n",
+        );
+        assert_eq!(
+            ouverture_automatique_de(std::slice::from_ref(&omarchy)),
+            Some(("alice".into(), "/etc/sddm.conf.d/autologin.conf".into()))
+        );
+        assert_eq!(
+            ouverture_automatique_de(&[omarchy, f("/etc/sddm.conf", "[Autologin]\nUser=\n")]),
+            None
+        );
+        // GDM : seulement si activée ; commentaire ignoré.
+        let gdm = "[daemon]\n# AutomaticLoginEnable=true\nAutomaticLoginEnable=True\nAutomaticLogin=bob\n";
+        assert_eq!(
+            ouverture_automatique_de(&[f("/etc/gdm3/custom.conf", gdm)]).unwrap().0,
+            "bob"
+        );
+        let coupee = "[daemon]\nAutomaticLoginEnable=false\nAutomaticLogin=bob\n";
+        assert_eq!(ouverture_automatique_de(&[f("/etc/gdm3/custom.conf", coupee)]), None);
+        // LightDM, section des sièges.
+        let lightdm = "[Seat:*]\nautologin-user=alice\n[Autre]\nautologin-user=bob\n";
+        assert_eq!(
+            ouverture_automatique_de(&[f("/etc/lightdm/lightdm.conf", lightdm)])
+                .unwrap()
+                .0,
+            "alice"
+        );
+        // Jugement : disque chiffré, sans alerte ; sinon moyen.
+        assert!(juger_ouverture_automatique("alice", "x", Some(true)).probleme.is_none());
+        assert_eq!(
+            juger_ouverture_automatique("alice", "x", Some(false)).probleme,
+            Some(Niveau::Moyen)
+        );
+        assert_eq!(
+            juger_ouverture_automatique("alice", "x", None).probleme,
+            Some(Niveau::Moyen)
+        );
+    }
 
     #[test]
     fn affichage_x11_ouvert() {
