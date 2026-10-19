@@ -519,6 +519,35 @@ pub(super) fn juger_client_smb1(demarrage: Option<u32>) -> Option<Constat> {
     })
 }
 
+/// AlwaysInstallElevated à 1 pour l'ordinateur ET pour le compte : n'importe quel compte installe un paquet MSI avec
+/// les droits du système, un moyen connu de devenir administrateur. Un seul des deux ne suffit pas à Windows.
+pub(super) fn juger_installation_elevee(
+    machine: Option<u32>,
+    compte: Option<u32>,
+    cle_du_compte: &str,
+) -> Option<Constat> {
+    (machine == Some(1) && compte == Some(1)).then(|| {
+        alerte(
+            DURCI,
+            Niveau::Eleve,
+            tr!(
+                "Windows installe n'importe quel paquet MSI avec les droits du système (AlwaysInstallElevated) : un programme lancé sans droits peut devenir administrateur.",
+                "Windows installs any MSI package with system rights (AlwaysInstallElevated): a program run without rights can become administrator."
+            ),
+        )
+        .corriger(
+            tr!(
+                "Couper l'installation avec les droits du système (le réglage de Windows)",
+                "Turn off installing with system rights (Windows' setting)"
+            ),
+            &[
+                r"Set-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\Installer' -Name AlwaysInstallElevated -Value 0 -Type DWord".to_string(),
+                format!("Set-ItemProperty -LiteralPath '{cle_du_compte}' -Name AlwaysInstallElevated -Value 0 -Type DWord"),
+            ],
+        )
+    })
+}
+
 /// Signature SMB : le client qui ne l'exige pas peut se faire relayer vers un faux partage. Une information, à
 /// activer soi-même (un vieux NAS sans signature ne répondrait plus) ; Windows 11 24H2 l'exige déjà.
 pub(super) fn juger_signature_smb(client_exige: Option<u32>) -> Option<Constat> {
@@ -720,6 +749,16 @@ pub(super) fn durcissement() -> Vec<Constat> {
         lire_texte(shell_ids, "ExecutionPolicy").as_deref(),
     );
     let sid = crate::reparer::sid_de_la_personne();
+    let installeur = r"SOFTWARE\Policies\Microsoft\Windows\Installer";
+    let installeur_du_compte = winreg::RegKey::predef(winreg::enums::HKEY_CURRENT_USER)
+        .open_subkey(installeur)
+        .ok()
+        .and_then(|k| k.get_value::<u32, _>("AlwaysInstallElevated").ok());
+    c.extend(juger_installation_elevee(
+        lire_dword(installeur, "AlwaysInstallElevated"),
+        installeur_du_compte,
+        &crate::reparer::hkcu_de_la_personne(sid.as_deref(), installeur),
+    ));
     c.extend(juger_strategie_ps(
         effective,
         &crate::reparer::hkcu_de_la_personne(sid.as_deref(), shell_ids),
@@ -852,6 +891,24 @@ mod tests {
         assert!(juger_client_smb1(None).is_none() && juger_client_smb1(Some(4)).is_none());
         let client = juger_client_smb1(Some(2)).unwrap();
         assert!(client.probleme == Some(Niveau::Moyen) && client.categorie == "SMBv1");
+        // Installation avec les droits du système : seulement si l'ordinateur ET le compte le permettent.
+        assert!(juger_installation_elevee(Some(1), None, "HKCU:\\x").is_none());
+        assert!(
+            juger_installation_elevee(Some(1), Some(0), "HKCU:\\x").is_none()
+                && juger_installation_elevee(None, Some(1), "HKCU:\\x").is_none()
+        );
+        let msi = juger_installation_elevee(
+            Some(1),
+            Some(1),
+            r"Registry::HKEY_USERS\S-1-5-21-1-2-3-1001\SOFTWARE\Policies\Microsoft\Windows\Installer",
+        )
+        .unwrap();
+        let remise = msi.correctif.unwrap();
+        assert!(msi.probleme == Some(Niveau::Eleve) && remise.commandes.len() == 2);
+        assert!(
+            remise.commandes[1]
+                .starts_with(r"Set-ItemProperty -LiteralPath 'Registry::HKEY_USERS\S-1-5-21-1-2-3-1001\SOFTWARE")
+        );
         // Secure Boot : clé absente (ancien BIOS), rien ; 0 coupé, une information à régler soi-même.
         assert!(juger_demarrage_securise(None).is_none());
         assert_eq!(juger_demarrage_securise(Some(1)).unwrap().probleme, None);

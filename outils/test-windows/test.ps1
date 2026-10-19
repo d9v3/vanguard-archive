@@ -764,7 +764,7 @@ $k = Sortie 'verifier-cle'
 if ($k -match '(?m)^\s+\d+\s+(GARDIEN|WIN11|VTOYEFI|MACOS)\b') { Bug 'Vérifier ma clé propose une partition de la clé GARDIEN' } else { Ok 'Aucune partition de la clé proposée' }
 if ($k -match 'Start\?|Commencer \?') { Bug 'Vérifier ma clé est allé jusqu''à la question d''écriture' }
 
-Etape 'Réglages Windows de la 0.68 à la 0.77 : Gardien voit-il ce que Windows dit ?'
+Etape 'Réglages Windows de la 0.68 à la 0.78 : Gardien voit-il ce que Windows dit ?'
 # Chaque réglage est relu ici, sans Gardien ; Gardien doit le signaler s'il est risqué, et seulement dans ce cas.
 try {
     $audit = Sortie 'machine-json' | ConvertFrom-Json
@@ -784,6 +784,9 @@ try {
     Accord 'Registre à distance' ((Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Services\RemoteRegistry' -ErrorAction SilentlyContinue).Start -eq 2) 'Registre à distance démarre|Remote Registry starts'
     $smb1c = (Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Services\mrxsmb10' -ErrorAction SilentlyContinue).Start
     Accord 'Client SMBv1' ($null -ne $smb1c -and $smb1c -ne 4) 'client SMBv1|SMBv1 client'
+    $msiM = (Get-ItemProperty 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\Installer' -ErrorAction SilentlyContinue).AlwaysInstallElevated
+    $msiC = (Get-ItemProperty 'HKCU:\SOFTWARE\Policies\Microsoft\Windows\Installer' -ErrorAction SilentlyContinue).AlwaysInstallElevated
+    Accord 'Installation MSI élevée' ($msiM -eq 1 -and $msiC -eq 1) 'AlwaysInstallElevated'
     Accord 'UAC sans demande' ($uac.EnableLUA -eq 1 -and $uac.ConsentPromptBehaviorAdmin -eq 0) 'ne demande plus rien|no longer asks'
     Accord 'Accès anonyme' ($lsa.RestrictAnonymousSAM -eq 0 -or $lsa.EveryoneIncludesAnonymous -eq 1) 'lister les comptes|list the computer|connexion anonyme|anonymous network connection'
     $invite = if ($null -ne $posteGpo.AllowInsecureGuestAuth) { $posteGpo.AllowInsecureGuestAuth } else { $poste.AllowInsecureGuestAuth }

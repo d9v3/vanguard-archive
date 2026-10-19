@@ -84,7 +84,7 @@ pour revenir.
 - Windows : WDigest (mots de passe en clair dans la mémoire), protection de l'autorité de sécurité locale,
   PowerShell 2.0, Assistance à distance, ouverture de session automatique (et mot de passe en clair dans le
   registre), SmartScreen coupé, contrôle de compte coupé pour les connexions à distance, intégrité de la mémoire,
-  mises à jour en pause, authentification réseau LM ou NTLMv1, signature des partages, PowerShell qui lance tout script, UAC qui ne demande rien, partages ouverts en invité, comptes listés sans mot de passe, Secure Boot, exclusions de Defender trop larges, macros d'Office toutes permises, mots de passe gardés sous forme LM, Registre à distance, client SMBv1 ; Linux : mises à jour de
+  mises à jour en pause, authentification réseau LM ou NTLMv1, signature des partages, PowerShell qui lance tout script, UAC qui ne demande rien, partages ouverts en invité, comptes listés sans mot de passe, Secure Boot, exclusions de Defender trop larges, macros d'Office toutes permises, mots de passe gardés sous forme LM, Registre à distance, client SMBv1, installation MSI avec les droits du système ; Linux : mises à jour de
   sécurité automatiques.
 - Navigation détournée (proxy imposé, sites redirigés par le fichier hosts).
 - Mots de passe enregistrés dans le navigateur sans protection, fichiers sensibles qui traînent (mots de passe ou
