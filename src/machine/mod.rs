@@ -23,6 +23,7 @@ mod mots_de_passe;
 mod navigateur;
 mod navigation_detournee;
 mod partages;
+pub(crate) mod regles;
 mod sante;
 mod sensibles;
 pub(crate) mod wifi;
@@ -62,6 +63,9 @@ pub struct Constat {
     /// `false` = la vérification n'a pas pu se faire. C'est ce champ, et non le texte du message,
     /// qui décide de la note : reformuler un message ne doit pas désactiver ce garde-fou.
     pub verifie: bool,
+    /// L'identifiant de la règle qui l'a produit (« LNX-PLT-001 »), pour les règles du registre (`regles`) ; vide sinon.
+    #[serde(skip_serializing_if = "str::is_empty")]
+    pub regle: &'static str,
 }
 
 #[derive(Serialize)]
@@ -92,6 +96,7 @@ pub(crate) fn ok(categorie: &'static str, message: impl Into<String>) -> Constat
         message: message.into(),
         correctif: None,
         verifie: true,
+        regle: "",
     }
 }
 
@@ -102,6 +107,7 @@ pub(crate) fn alerte(categorie: &'static str, niveau: Niveau, message: impl Into
         message: message.into(),
         correctif: None,
         verifie: true,
+        regle: "",
     }
 }
 
@@ -233,6 +239,8 @@ fn audit(systeme: &'static str, premier: Constat, mut propres: Vec<Verification<
         verif!(crate::chiffrement::constat()),
         verif!(crate::sauvegarde::constats()),
     ]);
+    // Et les règles du registre, déclarées chacune là où elle est écrite.
+    propres.extend(regles::verifications());
     let mut constats = vec![premier];
     constats.extend(en_parallele(propres));
     Audit {
@@ -932,6 +940,7 @@ mod tests {
                 probleme: *n,
                 message: m.to_string(),
                 correctif: None,
+                regle: "",
             })
             .collect();
         Audit {

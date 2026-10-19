@@ -751,6 +751,34 @@ pub(super) fn juger_strategie_ps(effective: Option<(String, bool)>, cle_du_compt
 /// après coup. La clé de stratégie n'est créée que si elle manque (New-Item -Force écraserait ses autres valeurs).
 const JOURNAL_PS: &str = r"SOFTWARE\Policies\Microsoft\Windows\PowerShell\ScriptBlockLogging";
 
+inventory::submit! {
+    crate::machine::regles::Regle {
+        id: "WIN-JRN-001",
+        systeme: crate::machine::regles::Os::Windows,
+        sujet: ("journalisation des scripts PowerShell", "PowerShell script logging"),
+        references: &["Microsoft : about_Logging_Windows"],
+        verifier: || vec![juger_journal_powershell(lire_dword(JOURNAL_PS, "EnableScriptBlockLogging"))],
+    }
+}
+
+inventory::submit! {
+    crate::machine::regles::Regle {
+        id: "WIN-JRN-002",
+        systeme: crate::machine::regles::Os::Windows,
+        sujet: ("Sysmon, quand il est installé", "Sysmon, when installed"),
+        references: &["Microsoft Sysinternals : Sysmon"],
+        verifier: || {
+            juger_sysmon(["Sysmon64", "Sysmon"].iter().any(|s| {
+                winreg::RegKey::predef(winreg::enums::HKEY_LOCAL_MACHINE)
+                    .open_subkey(format!(r"SYSTEM\CurrentControlSet\Services\{s}"))
+                    .is_ok()
+            }))
+            .into_iter()
+            .collect()
+        },
+    }
+}
+
 pub(super) fn juger_journal_powershell(valeur: Option<u32>) -> Constat {
     if valeur == Some(1) {
         return ok(
@@ -857,15 +885,6 @@ pub(super) fn durcissement() -> Vec<Constat> {
         lire_texte(r"SOFTWARE\Microsoft\Windows NT\CurrentVersion", "EditionID").as_deref(),
         section(ps2.as_deref(), "CG").and_then(|l| l.first().copied()),
     ));
-    c.push(juger_journal_powershell(lire_dword(
-        JOURNAL_PS,
-        "EnableScriptBlockLogging",
-    )));
-    c.extend(juger_sysmon(["Sysmon64", "Sysmon"].iter().any(|s| {
-        winreg::RegKey::predef(winreg::enums::HKEY_LOCAL_MACHINE)
-            .open_subkey(format!(r"SYSTEM\CurrentControlSet\Services\{s}"))
-            .is_ok()
-    })));
     c.extend(juger_assistance(lire_dword(
         r"SYSTEM\CurrentControlSet\Control\Remote Assistance",
         "fAllowToGetHelp",

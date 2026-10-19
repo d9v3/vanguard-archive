@@ -310,6 +310,7 @@ Each menu entry is also a command.
 | `vanguard full [--html] [--text]` | full check: machine + network; `--text` shows it as plain text (emergency mode) |
 | `vanguard fix` | fix the problems found |
 | `vanguard audit [--json]` | audit of this machine |
+| `vanguard rules` | the check rules declared for this system: identifier, subject, references |
 | `vanguard network [target] [-p common\|all\|22,80,8000-8100] [--json]` | scan the network or one device |
 | `vanguard connection` | connection test for gaming |
 | `vanguard clean [--list]` | clean up the system; `--list`: the space to gain, deleting nothing |

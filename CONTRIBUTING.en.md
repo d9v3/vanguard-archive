@@ -20,6 +20,8 @@ turn on once with `/install-github-app`).
 | `src/prediction.rs` | prediction of the word being typed, the same in every menu: its end in grey, Tab completes it |
 | `src/langue.rs` | language choice and translation macros |
 | `src/machine/mod.rs` | shared types, display, parallel execution of the checks |
+| `src/machine/regles.rs` | registry of check rules: each one is declared where it is written (`inventory::submit!`), with a stable identifier (“LNX-PLT-001”); `vanguard rules` lists them |
+| `src/machine/linux/plateforme.rs` | platform security according to fwupd (HSI), kernel lockdown, BPF, auditd: the first rules of the registry |
 | `src/machine/linux/`, `src/machine/windows/`, `src/machine/macos/` | per-system audit, one file per topic |
 | `src/machine/dns.rs`, `certificats.rs`, `extensions.rs`, `partages.rs`, `sante.rs`, `wifi.rs`, `bluetooth.rs` | checks shared by the three systems (partages.rs: file shares open to everyone; bluetooth.rs: visible computer, recently paired devices) |
 | `src/machine/unix.rs` | checks shared by Linux and macOS: secret files, sudo |
@@ -28,6 +30,7 @@ turn on once with `/install-github-app`).
 | `src/sauvegarde.rs`, `src/raccourci.rs`, `src/a_laisser.rs` | guided automatic backup (Déjà Dup or rsync, Time Machine, File History); shortcut on this computer; report to leave to the person you helped |
 | `src/corriger.rs` | guided application of fixes |
 | `src/reseau/mod.rs`, `src/reseau/scan.rs` | network scan (TCP connect, without root), ARP, network notebooks |
+| `src/reseau/nmap.rs` | service versions with nmap -sV, when installed: deep scan of a local network device, on the ports already found open |
 | `src/risk.rs` | knowledge base of ports and risk levels |
 | `src/reseau/connexion.rs` | connection test for gaming |
 | `src/protection/antivirus.rs` | ClamAV / Defender, quarantine |
@@ -65,6 +68,25 @@ turn on once with `/install-github-app`).
 | `assets/yara/` | ReversingLabs YARA rules (MIT license), gathered by `outils/maj-yara.sh` |
 | `assets/banniere.png`, `assets/icones/`, `assets/vanguard.ico` | the banner and the icon (the V), drawn cell by cell in the terminal banner's lettering by `outils/icone.py` |
 | `LICENCES-TIERCES.txt` | license notices of the included libraries (`outils/licences-tierces.py`) |
+
+### Adding a check rule
+
+A rule is written in its topic's file and declared there, with no central list:
+
+```rust
+inventory::submit! {
+    crate::machine::regles::Regle {
+        id: "LNX-NOY-002",                 // system, area, number: stable, never reused
+        systeme: crate::machine::regles::Os::Linux,
+        sujet: ("BPF réservé à root", "BPF reserved to root"),
+        references: &["kernel.org : unprivileged_bpf_disabled"],
+        verifier: || bpf().into_iter().collect(),
+    }
+}
+```
+
+The check runs it in parallel with the others, and each of its findings carries its identifier up to the JSON report.
+The judgment is written apart (`juger_…`, reading nothing from the system), to be tested on made-up data.
 
 ## Build, test, deploy
 

@@ -330,6 +330,7 @@ Chaque entrée du menu existe aussi en commande.
 | `vanguard complet [--html] [--texte]` | bilan complet : machine + réseau ; `--texte` l'affiche en texte simple (mode urgence) |
 | `vanguard corriger` | corriger les problèmes trouvés |
 | `vanguard machine [--json]` | audit de cette machine |
+| `vanguard regles` | les règles du bilan déclarées pour ce système : identifiant, sujet, références |
 | `vanguard reseau [cible] [-p courants\|tous\|22,80,8000-8100] [--json]` | scan du réseau ou d'un appareil |
 | `vanguard connexion` | test de connexion pour le jeu |
 | `vanguard nettoyer [--liste]` | nettoyer le système ; `--liste` : la place à gagner, sans rien effacer |

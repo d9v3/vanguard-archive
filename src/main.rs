@@ -330,6 +330,9 @@ enum Commande {
     /// partition VANGUARDLOG de la clé).
     #[command(visible_alias = "computers")]
     Ordinateurs,
+    /// Les règles du bilan déclarées pour ce système : identifiant stable, sujet, références de durcissement.
+    #[command(visible_alias = "rules")]
+    Regles,
     /// Dépanner pas à pas : pas d'Internet, Wi-Fi qui coupe, ordinateur lent, pas de son, imprimante, disque plein ;
     /// après une infection, nouvel ordinateur, ordinateur qui part (vente, don).
     #[command(visible_alias = "troubleshoot")]
@@ -1352,6 +1355,7 @@ const AIDES_EN: &[(&str, &str)] = &[
                          File History) to an external disk, after your consent, exactly undoable"),
     ("raccourci", "Shortcut on this computer: Vanguard copied here and started with one click (applications menu on \
                    Linux, Desktop on Windows and macOS). Without argument: the state, then the offer"),
+    ("regles", "The check rules declared for this system: stable identifier, subject, hardening references"),
     ("ordinateurs", "My computers: those where the VANGUARD key ran a check, their grade and remaining problems (on the \
      key's VANGUARDLOG partition)"),
     ("depanner", "Troubleshoot step by step: no Internet, Wi-Fi dropping, slow computer, no sound, printer, disk full; \
@@ -1558,6 +1562,7 @@ async fn main() {
         }
         Some(Commande::Raccourci { etat }) => raccourci::commande(etat.map(|e| e == "on")),
         Some(Commande::Ordinateurs) => ordinateurs::menu(),
+        Some(Commande::Regles) => machine::regles::afficher(),
         Some(Commande::Depanner { sujet }) => depanner::executer(&sujet.join(" ")),
     }
 }

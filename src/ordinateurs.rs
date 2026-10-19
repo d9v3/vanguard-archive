@@ -391,6 +391,7 @@ mod tests {
             message: message.into(),
             correctif: None,
             verifie: true,
+            regle: "",
         }
     }
 

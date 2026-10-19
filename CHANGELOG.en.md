@@ -33,6 +33,10 @@ repository (`git checkout v0.62.0`, for example), to be rebuilt if needed.
 - **Over 30,000 more commands**: the tldr-pages examples (CC BY 4.0 license), downloaded by themselves every week; to
   copy only. In every search, what starts with the typed word comes first.
 - **Word prediction in every menu** and checklist: the end of the most likely word shows in grey, Tab completes it.
+- **Deeper check.** Platform security according to fwupd (HSI level: TPM, BIOS protection, IOMMU), kernel lockdown and
+  module signing, BPF, auditd; on Windows, PowerShell script logging, Credential Guard (Enterprise, Education),
+  Sysmon. Deep scan of a device: service versions with nmap when installed. The new rules have a stable identifier
+  (“vanguard rules”).
 - **Safer.** The sandbox no longer reaches the system bus or Docker; on Windows, the fix script is checked just before
   it runs as administrator (a script changed in the meantime does not run); Vanguard's data is reserved to your
   account.

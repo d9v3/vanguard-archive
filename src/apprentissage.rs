@@ -295,6 +295,7 @@ mod tests {
                 bloque: None,
             }),
             verifie: true,
+            regle: "",
         }
     }
 

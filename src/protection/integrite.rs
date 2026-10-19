@@ -205,6 +205,7 @@ pub fn constat() -> Constat {
             .into(),
             correctif: None,
             verifie: true,
+            regle: "",
         };
     };
     juger(reference.len(), &comparer(&reference, &etat_actuel()))
@@ -227,6 +228,7 @@ fn juger(total: usize, e: &Ecarts) -> Constat {
             ),
             correctif: None,
             verifie: true,
+            regle: "",
         };
     }
     let exemples: Vec<String> = e
@@ -247,6 +249,7 @@ fn juger(total: usize, e: &Ecarts) -> Constat {
         ),
         correctif: None,
         verifie: true,
+        regle: "",
     }
 }
 

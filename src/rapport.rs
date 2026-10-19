@@ -419,6 +419,7 @@ mod tests {
                     message: "ufw actif.".into(),
                     correctif: None,
                     verifie: true,
+                    regle: "",
                 },
                 Constat {
                     categorie: "Ports en écoute",
@@ -426,6 +427,7 @@ mod tests {
                     message: "445/tcp ouvert.".into(),
                     correctif: None,
                     verifie: true,
+                    regle: "",
                 },
             ],
         };

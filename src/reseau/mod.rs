@@ -6,6 +6,7 @@ pub mod canaux;
 pub mod connexion;
 pub mod listes_noires;
 pub mod nat;
+pub mod nmap;
 pub mod scan;
 pub mod surveillance;
 pub mod upnp;
@@ -1206,6 +1207,24 @@ pub async fn executer(o: Options) -> Result<Rapport, String> {
         }
     }
 
+    // Scan approfondi d'un seul appareil : les versions de ses services par nmap, s'il est installé, sur les ports
+    // déjà trouvés ouverts (rien d'autre n'est sondé).
+    let mut versions: BTreeMap<Ipv4Addr, BTreeMap<u16, String>> = BTreeMap::new();
+    if ips.len() == 1 && tous && nmap::disponible() {
+        for (ip, ouverts) in &resultats {
+            let ports: Vec<u16> = ouverts.iter().map(|(p, _)| *p).collect();
+            if !ports.is_empty() && nmap::locale(*ip) {
+                if bavard {
+                    tre!(
+                        "{GRIS}Versions des services de {ip} par nmap -sV ({} port(s))…{RESET}",
+                        "{GRIS}Service versions of {ip} with nmap -sV ({} port(s))…{RESET}",
+                        ports.len()
+                    );
+                }
+                versions.insert(*ip, nmap::versions(*ip, &ports));
+            }
+        }
+    }
     let mut hotes: Vec<Hote> =
         resultats
             .into_iter()
@@ -1216,6 +1235,8 @@ pub async fn executer(o: Options) -> Result<Rapport, String> {
                 let ports: Vec<PortOuvert> = ouverts
                 .into_iter()
                 .map(|(port, banniere)| {
+                    // La version donnée par nmap passe devant ce que Vanguard a lu, plus court.
+                    let banniere = versions.get(&ip).and_then(|v| v.get(&port)).cloned().or(banniere);
                     // Port non répertorié : on se fie à ce que le service annonce (SSH sur 2222, web sur 9999…).
                     let type_port = if info_port(port).service == crate::risk::inconnu() {
                         banniere.as_deref().and_then(identifier).unwrap_or(port)

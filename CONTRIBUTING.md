@@ -20,6 +20,8 @@ modification. Sur GitHub, `@claude` dans un ticket ou une demande de fusion le f
 | `src/prediction.rs` | prédiction du mot en cours de frappe, la même dans tous les menus : sa fin en gris, Tab la complète |
 | `src/langue.rs` | choix de la langue et macros de traduction |
 | `src/machine/mod.rs` | types communs, affichage, exécution parallèle des vérifications |
+| `src/machine/regles.rs` | registre des règles du bilan : chacune se déclare où elle est écrite (`inventory::submit!`), avec un identifiant stable (« LNX-PLT-001 ») ; `vanguard regles` les liste |
+| `src/machine/linux/plateforme.rs` | sécurité de la plateforme d'après fwupd (HSI), verrouillage du noyau, BPF, auditd : les premières règles du registre |
 | `src/machine/linux/`, `src/machine/windows/`, `src/machine/macos/` | audit propre à chaque système, un fichier par thème |
 | `src/machine/dns.rs`, `certificats.rs`, `extensions.rs`, `partages.rs`, `sante.rs`, `wifi.rs`, `bluetooth.rs` | vérifications communes aux trois systèmes (partages.rs : partages de fichiers ouverts à tout le monde ; bluetooth.rs : ordinateur visible, appareils appairés depuis peu) |
 | `src/machine/unix.rs` | vérifications communes à Linux et macOS : fichiers secrets, sudo |
@@ -28,6 +30,7 @@ modification. Sur GitHub, `@claude` dans un ticket ou une demande de fusion le f
 | `src/sauvegarde.rs`, `src/raccourci.rs`, `src/a_laisser.rs` | sauvegarde automatique guidée (Déjà Dup ou rsync, Time Machine, Historique des fichiers) ; raccourci sur cet ordinateur ; rapport à laisser à la personne dépannée |
 | `src/corriger.rs` | application guidée des correctifs |
 | `src/reseau/mod.rs`, `src/reseau/scan.rs` | scan réseau (TCP connect, sans root), ARP, carnets des réseaux |
+| `src/reseau/nmap.rs` | versions des services par nmap -sV, s'il est installé : scan approfondi d'un appareil du réseau local, sur ses ports déjà trouvés ouverts |
 | `src/risk.rs` | base de connaissances des ports et niveaux de risque |
 | `src/reseau/connexion.rs` | test de connexion pour le jeu |
 | `src/protection/antivirus.rs` | ClamAV / Defender, quarantaine |
@@ -65,6 +68,25 @@ modification. Sur GitHub, `@claude` dans un ticket ou une demande de fusion le f
 | `assets/yara/` | règles YARA de ReversingLabs (licence MIT), rassemblées par `outils/maj-yara.sh` |
 | `assets/banniere.png`, `assets/icones/`, `assets/vanguard.ico` | la bannière et l'icône (le V), dessinées case par case dans l'écriture de la bannière du terminal par `outils/icone.py` |
 | `LICENCES-TIERCES.txt` | avis de licence des bibliothèques incluses (`outils/licences-tierces.py`) |
+
+### Ajouter une règle au bilan
+
+Une règle s'écrit dans le fichier de son thème et s'y déclare, sans liste centrale :
+
+```rust
+inventory::submit! {
+    crate::machine::regles::Regle {
+        id: "LNX-NOY-002",                 // système, domaine, numéro : stable, jamais réutilisé
+        systeme: crate::machine::regles::Os::Linux,
+        sujet: ("BPF réservé à root", "BPF reserved to root"),
+        references: &["kernel.org : unprivileged_bpf_disabled"],
+        verifier: || bpf().into_iter().collect(),
+    }
+}
+```
+
+Le bilan la lance en parallèle avec les autres, et chacun de ses constats porte son identifiant jusqu'au rapport JSON.
+Le jugement s'écrit à part (`juger_…`, sans rien lire du système), pour se tester sur des données inventées.
 
 ## Compiler, tester, déployer
 

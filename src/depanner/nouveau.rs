@@ -231,6 +231,7 @@ mod tests {
             message: String::new(),
             correctif: None,
             verifie,
+            regle: "",
         }
     }
 

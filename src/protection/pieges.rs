@@ -367,6 +367,7 @@ fn constat_de(probleme: Option<Niveau>, message: String, conseil: Option<&str>) 
             bloque: None,
         }),
         verifie: true,
+        regle: "",
     }
 }
 

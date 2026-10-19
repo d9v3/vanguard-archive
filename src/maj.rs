@@ -86,6 +86,7 @@ mod tests {
                 bloque: None,
             }),
             verifie,
+            regle: "",
         }
     }
 
