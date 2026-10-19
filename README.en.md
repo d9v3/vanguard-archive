@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/icones/gardien-256.png" alt="Gardien logo: a shield open on a black hole" width="150">
+  <img src="assets/icones/gardien-256.png" alt="Gardien logo: a bird of prey on a steel shield, circled by orbits" width="150">
 </p>
 
 <h1 align="center">Gardien</h1>

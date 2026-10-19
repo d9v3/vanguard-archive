@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/icones/gardien-256.png" alt="Logo de Gardien : un bouclier ouvert sur un trou noir" width="150">
+  <img src="assets/icones/gardien-256.png" alt="Logo de Gardien : un rapace sur un bouclier d'acier, entouré d'orbites" width="150">
 </p>
 
 <h1 align="center">Gardien</h1>
