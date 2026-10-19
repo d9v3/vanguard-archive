@@ -62,6 +62,14 @@ pub(super) const DURCISSEMENT: &[(&str, i64, (&str, &str))] = &[
             "regular file protection in /tmp",
         ),
     ),
+    (
+        "kernel/perf_event_paranoid",
+        2,
+        (
+            "les compteurs du processeur ne servent pas à espionner les autres programmes",
+            "processor counters cannot be used to spy on other programs",
+        ),
+    ),
 ];
 
 /// Réglages trop faibles parmi les valeurs lues : (chemin, valeur lue, valeur sûre, rôle).
@@ -243,6 +251,11 @@ mod tests {
         });
         let noms: Vec<&str> = tmp.iter().map(|f| f.0).collect();
         assert_eq!(noms, ["fs/protected_fifos", "fs/protected_regular"]);
+        // Compteurs du processeur : 2 (noyau d'origine) et 3 (Debian) suffisent, 1 ou moins non.
+        let compteurs = |v: i64| reglages_faibles(|c| Some(if c == "kernel/perf_event_paranoid" { v } else { 2 }));
+        assert!(compteurs(2).is_empty() && compteurs(3).is_empty());
+        assert_eq!(compteurs(1)[0].0, "kernel/perf_event_paranoid");
+        assert_eq!(compteurs(-1)[0].2, 2);
         // Réglage absent (noyau sans Yama…) : ni faible ni fort, on ne conclut pas.
         assert_eq!(reglages_faibles(|_| None), [] as [(&str, i64, i64, &str); 0]);
     }
