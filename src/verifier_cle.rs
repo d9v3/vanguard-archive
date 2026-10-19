@@ -338,12 +338,26 @@ fn lire_exactement(f: &mut File, t: &mut [u8]) -> std::io::Result<bool> {
     Ok(true)
 }
 
-/// Efface le dossier de l'essai, fichier par fichier puis le dossier ; dit ce qui n'a pas pu l'être.
+/// Un fichier d'essai de Gardien : « verif-0001.bin ».
+fn fichier_d_essai(nom: &str) -> bool {
+    nom.strip_prefix("verif-")
+        .and_then(|r| r.strip_suffix(".bin"))
+        .is_some_and(|n| !n.is_empty() && n.bytes().all(|o| o.is_ascii_digit()))
+}
+
+/// Efface le dossier de l'essai : ses fichiers d'essai seulement, puis le dossier s'il est vide. Quelqu'un a pu ranger
+/// autre chose dans un dossier au nom de l'essai : cela reste, et l'effacement du dossier le dit (« pas vide »).
 fn nettoyer(dossier: &Path) -> std::io::Result<()> {
-    if dossier.is_dir() {
-        std::fs::remove_dir_all(dossier)?;
+    if !dossier.is_dir() {
+        return Ok(());
     }
-    Ok(())
+    for e in std::fs::read_dir(dossier)?.flatten() {
+        let nom = e.file_name().to_string_lossy().into_owned();
+        if fichier_d_essai(&nom) && e.file_type().is_ok_and(|t| t.is_file()) {
+            std::fs::remove_file(e.path())?;
+        }
+    }
+    std::fs::remove_dir(dossier)
 }
 
 /// Les dossiers d'essais interrompus à la racine de ce disque.
@@ -970,6 +984,25 @@ mod tests {
 
     fn sans_arret(_: Phase, _: u64, _: u64) -> bool {
         false
+    }
+
+    #[test]
+    fn le_menage_n_efface_que_les_fichiers_d_essai() {
+        let d = std::env::temp_dir().join(format!("gardien-verif-menage-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        std::fs::write(d.join("verif-0001.bin"), b"x").unwrap();
+        std::fs::write(d.join("verif-0002.bin"), b"x").unwrap();
+        std::fs::write(d.join("photos.zip"), b"a moi").unwrap();
+        // Un fichier à garder : le dossier reste, avec lui, et c'est une erreur dite.
+        assert!(nettoyer(&d).is_err());
+        assert!(d.join("photos.zip").is_file() && !d.join("verif-0001.bin").exists());
+        std::fs::remove_file(d.join("photos.zip")).unwrap();
+        nettoyer(&d).unwrap();
+        assert!(!d.exists());
+        assert!(
+            fichier_d_essai("verif-0042.bin") && !fichier_d_essai("verif-.bin") && !fichier_d_essai("verif-1.bin.txt")
+        );
     }
 
     #[test]
