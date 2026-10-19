@@ -139,7 +139,12 @@ pub fn categorie(nom: &str) -> &str {
     if !anglais() {
         return nom;
     }
-    match nom {
+    categorie_en(nom).unwrap_or(nom)
+}
+
+/// Le nom anglais d'une catégorie, s'il diffère du français.
+fn categorie_en(nom: &str) -> Option<&'static str> {
+    Some(match nom {
         "Pare-feu" => "Firewall",
         "Accès à distance" => "Remote access",
         "Bureau à distance" => "Remote Desktop",
@@ -182,13 +187,86 @@ pub fn categorie(nom: &str) -> &str {
         "Sauvegardes" => "Backups",
         "Surveillance" => "Monitoring",
         "Verrouillage" => "Screen lock",
-        _ => nom,
-    }
+        "Affichage X11" => "X11 display",
+        "Erreurs" => "Errors",
+        "Erreurs du journal" => "Log errors",
+        _ => return None,
+    })
 }
+
+/// Catégories qui s'écrivent pareil dans les deux langues (pour le test qui relit le code, hors Windows).
+#[cfg(all(test, unix))]
+const MEMES_EN: &[&str] = &[
+    "AUR",
+    "AirDrop",
+    "Antivirus",
+    "AppArmor/SELinux",
+    "Audit",
+    "Bluetooth",
+    "DNS",
+    "Docker",
+    "Firmware",
+    "Flatpak",
+    "Homebrew",
+    "SMBv1",
+    "SSH",
+    "Secure Boot",
+    "Services",
+    "Signatures",
+    "Snap",
+    "Sudo",
+    "UAC",
+    "Wi-Fi",
+    "Windows Update",
+];
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Chaque catégorie écrite dans le code (alerte, ok, impossible…) a son nom anglais, ou s'écrit pareil : sans
+    /// cela, l'interface anglaise montrait « Affichage X11 ». Le code est relu sur le disque (pas sous Wine).
+    #[cfg(unix)]
+    #[test]
+    fn chaque_categorie_a_son_nom_anglais() {
+        fn fichiers(dossier: &std::path::Path, tous: &mut Vec<std::path::PathBuf>) {
+            for e in std::fs::read_dir(dossier).unwrap().flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    fichiers(&p, tous);
+                } else if p.extension().is_some_and(|x| x == "rs") {
+                    tous.push(p);
+                }
+            }
+        }
+        let mut tous = Vec::new();
+        fichiers(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src"), &mut tous);
+        let mut manquantes = std::collections::BTreeSet::new();
+        for f in tous {
+            let texte = std::fs::read_to_string(&f).unwrap();
+            for appel in ["alerte(", "ok(", "impossible(", "illisible(", "registre_illisible("] {
+                for (i, _) in texte.match_indices(appel) {
+                    // Un appel de fonction, pas la fin d'un autre nom (« pas_ok(… »).
+                    let avant = texte[..i].chars().last();
+                    // Ni dans une chaîne (« "ok(" », la liste de ce test).
+                    if avant.is_some_and(|c| c.is_alphanumeric() || c == '_' || c == '"') {
+                        continue;
+                    }
+                    let reste = texte[i + appel.len()..].trim_start();
+                    let Some(dedans) = reste.strip_prefix('"') else {
+                        continue;
+                    };
+                    let Some((nom, _)) = dedans.split_once('"') else {
+                        continue;
+                    };
+                    if categorie_en(nom).is_none() && !MEMES_EN.contains(&nom) {
+                        manquantes.insert(nom.to_string());
+                    }
+                }
+            }
+        }
+        assert_eq!(manquantes, std::collections::BTreeSet::new());
+    }
 
     #[test]
     fn codes_de_langue() {
