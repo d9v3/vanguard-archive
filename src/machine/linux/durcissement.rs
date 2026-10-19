@@ -72,16 +72,41 @@ pub(super) const DURCISSEMENT: &[(&str, i64, (&str, &str))] = &[
     ),
 ];
 
+/// Réglages dont une valeur précise est risquée, sans que « plus haut » veuille dire « plus sûr » : (réglage, valeur
+/// risquée, valeur sûre écrite à sa place, rôle).
+pub(super) const INTERDITS: &[(&str, i64, i64, (&str, &str))] = &[
+    (
+        "fs/suid_dumpable",
+        1,
+        0,
+        (
+            "un programme root qui plante ne laisse pas sa mémoire lisible par tous",
+            "a crashing root program does not leave its memory readable by all",
+        ),
+    ),
+    (
+        "kernel/sysrq",
+        1,
+        176,
+        (
+            "les touches magiques du noyau ne tuent ni ne vident la mémoire",
+            "the kernel's magic keys neither kill programs nor dump memory",
+        ),
+    ),
+];
+
 /// Réglages trop faibles parmi les valeurs lues : (chemin, valeur lue, valeur sûre, rôle).
 pub(super) fn reglages_faibles(lire: impl Fn(&str) -> Option<i64>) -> Vec<(&'static str, i64, i64, &'static str)> {
-    DURCISSEMENT
-        .iter()
-        .filter_map(|&(cle, min, (fr, en))| {
-            let v = lire(cle)?;
-            let role = if crate::langue::anglais() { en } else { fr };
-            (v < min).then_some((cle, v, min, role))
-        })
-        .collect()
+    let langue = |(fr, en): (&'static str, &'static str)| if crate::langue::anglais() { en } else { fr };
+    let trop_bas = DURCISSEMENT.iter().filter_map(|&(cle, min, role)| {
+        let v = lire(cle)?;
+        (v < min).then(|| (cle, v, min, langue(role)))
+    });
+    let interdits = INTERDITS.iter().filter_map(|&(cle, risquee, sure, role)| {
+        let v = lire(cle)?;
+        (v == risquee).then(|| (cle, v, sure, langue(role)))
+    });
+    trop_bas.chain(interdits).collect()
 }
 
 pub(super) fn durcissement_noyau() -> Constat {
@@ -256,6 +281,20 @@ mod tests {
         assert!(compteurs(2).is_empty() && compteurs(3).is_empty());
         assert_eq!(compteurs(1)[0].0, "kernel/perf_event_paranoid");
         assert_eq!(compteurs(-1)[0].2, 2);
+        // Valeurs interdites : seulement la valeur risquée, remplacée par la valeur sûre.
+        let lu = |suid: i64, sysrq: i64| {
+            move |c: &str| {
+                Some(match c {
+                    "fs/suid_dumpable" => suid,
+                    "kernel/sysrq" => sysrq,
+                    _ => 2,
+                })
+            }
+        };
+        assert!(reglages_faibles(lu(0, 16)).is_empty() && reglages_faibles(lu(2, 176)).is_empty());
+        let faibles = reglages_faibles(lu(1, 1));
+        let noms: Vec<(&str, i64)> = faibles.iter().map(|f| (f.0, f.2)).collect();
+        assert_eq!(noms, [("fs/suid_dumpable", 0), ("kernel/sysrq", 176)]);
         // Réglage absent (noyau sans Yama…) : ni faible ni fort, on ne conclut pas.
         assert_eq!(reglages_faibles(|_| None), [] as [(&str, i64, i64, &str); 0]);
     }
