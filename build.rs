@@ -367,4 +367,10 @@ fn ressources_windows() {
     if let Err(e) = res.compile() {
         println!("cargo:warning=ressources Windows non intégrées : {e}");
     }
+    // L'éditeur de liens de MinGW écrit l'heure de la compilation dans l'en-tête PE : sans elle, un même code donne le
+    // même .exe (travail « reproductible » de la CI). Ici et non dans les rustflags de la cible, qui remplaceraient
+    // ceux de [build] (--remap-path-prefix).
+    if std::env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("gnu") {
+        println!("cargo:rustc-link-arg=-Wl,--no-insert-timestamp");
+    }
 }
