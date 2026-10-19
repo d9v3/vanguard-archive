@@ -1306,6 +1306,8 @@ const AIDES_EN: &[(&str, &str)] = &[
     ("motdepasse", "Check whether passwords have leaked (Have I Been Pwned); only 5 characters of their fingerprint \
                     are sent"),
     ("sortantes", "Who talks to the Internet? Each program's current connections, with the server's name. Read-only"),
+    ("verifier-moi", "Check Gardien itself: version, build date, SHA-256 fingerprint of the program (to compare with the release page) and, on the owner's key, the key manifest"),
+    ("distance", "Is someone controlling my computer? Remote control software (AnyDesk, TeamViewer, RustDesk…) installed, started at boot, running or downloaded: the fake technicians' tool. Removed after your consent; a running program asks for a second consent"),
     ("lien", "Is this link dangerous? Checked without ever opening it; after your consent, its age and public lists"),
     ("verifier-fichier", "Check a downloaded file: checksum compared with the site's, name and content, YARA and \
                           antivirus"),
@@ -1547,6 +1549,35 @@ async fn main() {
 #[cfg(test)]
 mod tests_menu {
     use super::*;
+
+    #[test]
+    fn chaque_commande_a_son_aide_en_anglais() {
+        // Une commande oubliée gardait son aide française dans l'interface anglaise (« distance »).
+        let traduites: Vec<&str> = AIDES_EN.iter().map(|(nom, _)| *nom).collect();
+        let manquantes: Vec<String> = Args::command()
+            .get_subcommands()
+            // Les commandes cachées (surveillance, planificateur) n'apparaissent pas dans l'aide.
+            .filter(|s| !s.is_hide_set())
+            .map(|s| s.get_name().to_string())
+            .filter(|nom| nom != "help" && !traduites.contains(&nom.as_str()))
+            .collect();
+        assert_eq!(manquantes, Vec::<String>::new());
+    }
+
+    #[test]
+    fn chaque_option_a_son_aide_en_anglais() {
+        let traduites: Vec<(&str, &str)> = OPTIONS_EN.iter().map(|(c, o, _)| (*c, *o)).collect();
+        let mut manquantes = Vec::new();
+        for s in Args::command().get_subcommands().filter(|s| !s.is_hide_set()) {
+            for a in s.get_arguments().filter(|a| !a.is_hide_set() && a.get_help().is_some()) {
+                let (c, o) = (s.get_name(), a.get_id().as_str());
+                if !traduites.contains(&(c, o)) {
+                    manquantes.push(format!("{c} {o}"));
+                }
+            }
+        }
+        assert_eq!(manquantes, Vec::<String>::new());
+    }
 
     #[test]
     fn chaque_outil_a_sa_place() {
