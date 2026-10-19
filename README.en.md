@@ -79,6 +79,7 @@ In the menu, choose **1** (full check), then **2** (fix). Arrows, Enter, and Esc
   Assistance, automatic sign-in (and password in clear text in the registry), SmartScreen off, account control off
   for remote connections, memory integrity, paused updates, LM or NTLMv1 network authentication, share signing;
   Linux: automatic security updates.
+- Hijacked browsing (forced proxy, sites redirected by the hosts file).
 - Passwords saved in the browser without protection, sensitive files lying around (passwords or keys in clear text),
   missing backup with its set-up offered.
 - Health: disk space, SMART status of the disks (without root), battery, temperatures.

@@ -1154,6 +1154,23 @@ pub fn menu() {
 }
 
 /// La réparation de ce titre, si ce système en a une : un parcours de dépannage la propose directement.
+/// Seulement « Navigation détournée », pour le bilan : sans construire les autres réparations, dont certaines lancent
+/// des commandes.
+pub(crate) fn navigation_ici() -> Reparation {
+    #[cfg(target_os = "linux")]
+    {
+        navigation()
+    }
+    #[cfg(target_os = "macos")]
+    {
+        navigation_macos()
+    }
+    #[cfg(windows)]
+    {
+        navigation(etat_windows().as_ref())
+    }
+}
+
 pub fn par_titre(titre: &str) -> Option<Reparation> {
     liste().into_iter().find(|r| r.titre == titre)
 }

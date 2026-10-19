@@ -21,6 +21,7 @@ mod journaux;
 pub mod linux;
 mod mots_de_passe;
 mod navigateur;
+mod navigation_detournee;
 mod partages;
 mod sante;
 mod sensibles;
@@ -212,6 +213,7 @@ fn audit(systeme: &'static str, premier: Constat, mut propres: Vec<Verification<
         verif!(certificats::certificats()),
         verif!(extensions::extensions()),
         verif!(navigateur::navigateurs()),
+        verif!([navigation_detournee::constat()]),
         verif!(mots_de_passe::constats()),
         verif!(sensibles::constats()),
         verif!(sante::sante()),

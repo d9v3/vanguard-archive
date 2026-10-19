@@ -85,6 +85,7 @@ pour revenir.
   registre), SmartScreen coupé, contrôle de compte coupé pour les connexions à distance, intégrité de la mémoire,
   mises à jour en pause, authentification réseau LM ou NTLMv1, signature des partages ; Linux : mises à jour de
   sécurité automatiques.
+- Navigation détournée (proxy imposé, sites redirigés par le fichier hosts).
 - Mots de passe enregistrés dans le navigateur sans protection, fichiers sensibles qui traînent (mots de passe ou
   clés en clair), sauvegarde absente avec la mise en place proposée.
 - Santé : espace disque, état SMART des disques (sans root), batterie, températures.
