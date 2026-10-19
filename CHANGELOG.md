@@ -1,0 +1,61 @@
+# Historique des versions
+
+*[English](CHANGELOG.en.md)*
+
+Ce que chaque journée a apporté à Gardien, la plus récente en haut. Depuis le 19 octobre 2026, Gardien a une seule
+publication par jour, qui regroupe le travail de la journée. Seule la dernière version a sa page de téléchargement ;
+chaque version garde son étiquette dans le dépôt (`git checkout v0.62.0`, par exemple), pour être recompilée au besoin.
+
+## 19 octobre 2026 : versions 0.62 à 0.77
+
+- **Bilan bien plus complet sous Windows.** Authentification réseau LM ou NTLMv1, empreintes LM, signature et accès
+  invité des partages, comptes listés anonymement, client SMBv1, Registre à distance, UAC qui ne demande plus rien,
+  stratégie de PowerShell, macros d'Office toutes permises, exclusions de Defender trop larges, Secure Boot,
+  WDigest, protection de LSA, PowerShell 2, SmartScreen, intégrité de la mémoire, mises à jour en pause, et le
+  verrouillage de l'écran.
+- **Linux et macOS.** Mises à jour de sécurité automatiques, réglages du noyau (tubes et fichiers dans /tmp,
+  compteurs du processeur), client SSH qui ne vérifie pas les serveurs, serveur SSH qui accepte les comptes sans
+  mot de passe, sudo qui ne redemande jamais le mot de passe, cups-browsed ouvert au réseau, affichage X11 ouvert à
+  tous, réseaux Wi-Fi ouverts qui se reconnectent tout seuls.
+- **Partout.** Nouveaux administrateurs et navigation détournée (proxy imposé, fichier hosts) signalés ; heure
+  de l'ordinateur, fin de support du système, comptes oubliés, mots de passe gardés par le navigateur, fichiers
+  sensibles qui traînent.
+- **Nouveaux outils.** Sauvegarde automatique, compte piraté, rapport à laisser sur place, raccourci sur le Bureau,
+  et « Ce que Gardien a changé » : chaque correction est notée et datée, et le rapport HTML la résume.
+- **Prudence.** Les partitions de la clé ne sont plus proposées comme disque ; Vérifier ma clé et Time Machine plus
+  prudents ; noms de disque piégés refusés dans les sauvegardes automatiques.
+
+## 18 octobre 2026 : versions 0.52 à 0.61
+
+- **Dépannage pas à pas** (réseau, sécurité, entretien, après une infection, nouvel ordinateur ou départ), guide
+  des commandes et apprentissage.
+- **Nouvelles défenses.** Faux technicien et prise de contrôle à distance, partages ouverts à tous, blocages de
+  Windows Defender, fichiers-pièges contre les rançongiciels, Bluetooth, Téléchargements surveillés, quarantaine
+  réversible, caméra et micro.
+- **Gardien se vérifie lui-même** : manifeste de la clé, failles des dépendances chaque nuit, vérifier une copie,
+  vérifier ma clé, données de la clé chiffrées, « Mes ordinateurs ».
+- **Confort.** Programmes au démarrage, menus qui défilent, recherche dans les listes à cocher, copie d'une commande
+  du guide, émojis bien alignés, noms piégés rendus inoffensifs à l'écran.
+- **Code allégé et rangé comme le menu**, au même comportement ; moins de fausses alertes.
+
+## 17 octobre 2026 : versions 0.9.5 à 0.51
+
+- **Gardien prend son nom**, avec son logo bouclier et une présentation refaite.
+- **Bilan élargi.** DNS et certificats racine, extensions et réglages de sécurité des navigateurs, santé de
+  l'ordinateur, mots de passe et adresses courriel fuités, persistance cachée, failles connues des paquets, journaux
+  effacés, intégrité des fichiers critiques, usurpation ARP de la box, ports ouverts vers Internet par UPnP.
+- **Outils.** Mises à jour de tout le système, pilotes compris ; Réparer et nettoyage approfondi ; Optimiser, avec
+  des réglages qui s'annulent exactement ; jeu sous Windows et sous Linux ; diagnostic de l'ordinateur ; logiciels
+  essentiels ; bac à sable pour programmes inconnus ; test de connexion pour le jeu.
+- **Suivi.** Changements depuis le dernier bilan et courbe des notes, surveillance de cette machine, rapport texte
+  d'urgence, point de restauration automatique avant chaque correction.
+- **Clé USB** protégée en écriture, journal des erreurs, antivirus d'une clé ; français et anglais partout ; menus au
+  clavier (flèches, Entrée, Échap) ; audit en parallèle, trois fois plus rapide ; macOS au niveau de Linux et Windows.
+
+## 16 octobre 2026 : versions 0.2 à 0.9.4
+
+- **Premières versions.** Scan du réseau local et base des appareils, audit de Linux (Docker, pare-feu, UDP, clés
+  SSH, verrouillage, noyau durci, AppArmor ou SELinux, sauvegardes, sudo) et de Windows.
+- **Menu Réparer** pour Linux, Windows et macOS.
+- **Fiabilité.** Plus aucune commande en échec prise pour « tout va bien », délais sur les commandes, base des
+  appareils sûre ; le Bureau à distance en cours n'est jamais coupé.

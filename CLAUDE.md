@@ -73,8 +73,11 @@ Réponses à l'utilisateur en français, claires, avec le pourquoi.
   lieu de relire les transcripts des autres, qui coûtent cher. Un message seulement pour prendre un lot, le dire
   vert (branche, preuves en une ligne) ou poser une question qui bloque ; pas de point d'étape. Le coordinateur tient
   le fichier à jour.
-- Une version par livraison (Cargo.toml) : correctif 0.x.y+1, fonction 0.x+1.0. Relire `grep ^version Cargo.toml`
-  après le changement : une autre session a pu avancer la version.
+- Une seule publication par jour sur GitHub, qui regroupe le travail de la journée en une version (Cargo.toml :
+  fonction 0.x+1.0, correctif seul 0.x.y+1). Entre deux publications, le travail s'accumule sur une branche, sans
+  numéro de version ni envoi ; le Mac de GitHub et la VM ne voient que la version publiée (leurs minutes coûtent).
+  CHANGELOG.md et CHANGELOG.en.md gagnent un paragraphe par jour publié ; seule la dernière version garde sa page.
+  Relire `grep ^version Cargo.toml` après le changement : une autre session a pu avancer la version.
 - Enchaîner édition && vérification && commit, et regarder `git show --stat` avant de dire que c'est fait.
 - Tester pour de vrai ce qui peut l'être : menus dans un pseudo-terminal (pty + pyte), scripts PowerShell générés
   analysés par pwsh, commandes shell par `bash -n`, clé USB réelle.

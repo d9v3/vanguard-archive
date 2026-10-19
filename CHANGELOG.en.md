@@ -1,0 +1,58 @@
+# Version history
+
+*[Français](CHANGELOG.md)*
+
+What each day brought to Gardien, most recent first. Since October 19, 2026, Gardien has a single release a day,
+gathering the day's work. Only the latest version has its download page; every version keeps its tag in the
+repository (`git checkout v0.62.0`, for example), to be rebuilt if needed.
+
+## October 19, 2026: versions 0.62 to 0.77
+
+- **A much fuller check on Windows.** LM or NTLMv1 network authentication, LM hashes, share signing and guest
+  access, accounts listed anonymously, SMBv1 client, Remote Registry, UAC that no longer asks, PowerShell execution
+  policy, Office macros all allowed, overly broad Defender exclusions, Secure Boot, WDigest, LSA protection,
+  PowerShell 2, SmartScreen, memory integrity, paused updates, and screen lock.
+- **Linux and macOS.** Automatic security updates, kernel settings (pipes and files in /tmp, processor counters),
+  SSH client that does not check servers, SSH server that accepts accounts without a password, sudo that never asks
+  for the password again, cups-browsed open to the network, X11 display open to everyone, open Wi-Fi networks that
+  reconnect by themselves.
+- **Everywhere.** New administrators and hijacked browsing (forced proxy, hosts file) reported; computer clock, end
+  of support of the system, forgotten accounts, passwords kept by the browser, sensitive files lying around.
+- **New tools.** Automatic backup, hacked account, report to leave behind, desktop shortcut, and "What Gardien
+  changed": every fix is logged and dated, and the HTML report sums it up.
+- **Caution.** The key's partitions are no longer offered as a disk; Check my key and Time Machine more careful;
+  booby-trapped disk names refused in automatic backups.
+
+## October 18, 2026: versions 0.52 to 0.61
+
+- **Step-by-step troubleshooting** (network, security, upkeep, after an infection, new or departing computer),
+  command guide and learning.
+- **New defenses.** Fake technician and remote takeover, shares open to everyone, Windows Defender blocks,
+  ransomware decoy files, Bluetooth, watched Downloads folder, reversible quarantine, camera and microphone.
+- **Gardien checks itself**: key manifest, dependency flaws every night, check a copy, check my key, encrypted key
+  data, "My computers".
+- **Comfort.** Startup programs, scrolling menus, search in checklists, copy a command from the guide, aligned
+  emojis, booby-trapped names made harmless on screen.
+- **Lighter code, arranged like the menu**, with the same behavior; fewer false alarms.
+
+## October 17, 2026: versions 0.9.5 to 0.51
+
+- **Gardien gets its name**, with its shield logo and a redone presentation.
+- **Wider check.** DNS and root certificates, browser extensions and security settings, computer health, leaked
+  passwords and email addresses, hidden persistence, known package flaws, erased logs, integrity of critical files,
+  ARP spoofing of the router, ports opened to the Internet through UPnP.
+- **Tools.** Updates for the whole system, drivers included; Repair and deep cleanup; Optimize, with settings that
+  undo exactly; gaming on Windows and Linux; computer diagnosis; essential software; sandbox for unknown programs;
+  connection test for gaming.
+- **Follow-up.** Changes since the last check and grade curve, monitoring of this machine, emergency text report,
+  automatic restore point before every fix.
+- **USB key** write-protected, error log, antivirus for a key; French and English everywhere; keyboard menus
+  (arrows, Enter, Esc); parallel check, three times faster; macOS on par with Linux and Windows.
+
+## October 16, 2026: versions 0.2 to 0.9.4
+
+- **First versions.** Local network scan and device database, check of Linux (Docker, firewall, UDP, SSH keys, screen
+  lock, hardened kernel, AppArmor or SELinux, backups, sudo) and Windows.
+- **Repair menu** for Linux, Windows and macOS.
+- **Reliability.** No failed command taken for "all is well" anymore, timeouts on commands, safe device database; a
+  Remote Desktop session in use is never cut.

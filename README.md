@@ -28,7 +28,8 @@
 
 **Télécharger** (dernière version) : [Windows](../../releases/latest/download/gardien-windows-x86_64.exe) ·
 [Linux](../../releases/latest/download/gardien-linux-x86_64) · [macOS](../../releases/latest/download/gardien-macos)
-— ou toute la [page des versions](../../releases/latest), avec les empreintes SHA-256.
+— ou toute la [page des versions](../../releases/latest), avec les empreintes SHA-256. Ce qu'a apporté chaque
+version : [historique](CHANGELOG.md).
 
 - **Windows** : double-clic sur le programme. Il n'est pas signé : SmartScreen peut avertir (« Informations
   complémentaires » puis « Exécuter quand même »). Microsoft Defender le prend parfois à tort pour un virus

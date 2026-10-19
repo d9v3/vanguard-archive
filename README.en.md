@@ -26,7 +26,8 @@
 
 **Download** (latest version): [Windows](../../releases/latest/download/gardien-windows-x86_64.exe) ·
 [Linux](../../releases/latest/download/gardien-linux-x86_64) · [macOS](../../releases/latest/download/gardien-macos)
-— or the whole [releases page](../../releases/latest), with the SHA-256 checksums.
+— or the whole [releases page](../../releases/latest), with the SHA-256 checksums. What each version brought:
+[history](CHANGELOG.en.md).
 
 - **Windows**: double-click the program. It is not signed: SmartScreen may warn (“More info”, then “Run anyway”).
   Microsoft Defender sometimes mistakes it for a virus (“Trojan:Win32/Bearfoos.A!ml”, an automatic detection of

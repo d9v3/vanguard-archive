@@ -62,12 +62,14 @@ TELECHARGER="Télécharge le programme de ton système :
 
 Empreintes SHA-256 : \`SHA256SUMS.txt\` (\`sha256sum -c SHA256SUMS.txt\`).
 
+Ce qu'ont apporté les versions d'avant : \`CHANGELOG.md\` dans le dépôt.
+
 ---
 
 Download the program for your system: \`gardien-windows-x86_64.exe\` (Windows, unsigned: SmartScreen may warn, “More
 info” then “Run anyway”), \`gardien-linux-x86_64\` (any distribution: \`chmod +x\`, then run it in a terminal),
 \`gardien-macos\` (Apple Silicon and Intel: \`xattr -d com.apple.quarantine gardien-macos\`, then run it in Terminal).
-SHA-256 checksums: \`SHA256SUMS.txt\`."
+SHA-256 checksums: \`SHA256SUMS.txt\`. What earlier versions brought: \`CHANGELOG.en.md\` in the repository."
 
 if [[ ${1:-} == --notes ]]; then
   git fetch -q --tags origin 2>/dev/null || true
