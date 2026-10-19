@@ -350,8 +350,10 @@ mod tests {
         );
         let vendu = etapes(Devenir::VenduOuDonne, true, false, Some(false), Some(true));
         let t = titres(&vendu);
+        // Un Mac n'a pas de puce TPM (sa puce de sécurité s'efface avec le reste) : pas d'étape pour elle.
         assert!(
-            t.iter().any(|x| x.contains("effacement")) && t.iter().any(|x| x.contains("TPM")),
+            t.iter().any(|x| x.contains("effacement"))
+                && t.iter().any(|x| x.contains("TPM")) != cfg!(target_os = "macos"),
             "{t:?}"
         );
         // Les données de Gardien ferment la liste, dans tous les cas.
