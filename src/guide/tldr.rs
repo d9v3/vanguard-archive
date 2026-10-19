@@ -52,15 +52,14 @@ fn date_des_archives() -> Option<SystemTime> {
         .max()
 }
 
-/// Une archive manque, ou a plus d'une semaine.
-fn a_renouveler() -> bool {
-    LANGUES.iter().any(|l| {
-        std::fs::metadata(archive(l))
-            .and_then(|m| m.modified())
-            .ok()
-            .and_then(|date| date.elapsed().ok())
-            .is_none_or(|age| age > UNE_SEMAINE)
-    })
+/// Une langue dont l'archive manque, ou a plus d'une semaine : à retélécharger. Une langue dont l'archive est fraîche
+/// n'est pas reprise parce qu'une autre a échoué (le français, partiel, peut manquer sans que l'anglais le soit).
+fn a_renouveler(langue: &str) -> bool {
+    std::fs::metadata(archive(langue))
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|date| date.elapsed().ok())
+        .is_none_or(|age| age > UNE_SEMAINE)
 }
 
 /// Le téléchargement d'arrière-plan tourne déjà.
@@ -71,10 +70,11 @@ static EN_COURS: AtomicBool = AtomicBool::new(false);
 /// échoue vite et rien ne change.
 pub(super) fn renouveler_en_fond() {
     use std::io::IsTerminal;
-    if !std::io::stdin().is_terminal() || !a_renouveler() || EN_COURS.swap(true, Ordering::SeqCst) {
+    let a_faire: Vec<&str> = LANGUES.into_iter().filter(|l| a_renouveler(l)).collect();
+    if !std::io::stdin().is_terminal() || a_faire.is_empty() || EN_COURS.swap(true, Ordering::SeqCst) {
         return;
     }
-    std::thread::spawn(|| {
+    std::thread::spawn(move || {
         // Les restes d'un téléchargement interrompu (Vanguard quitté avant la fin) partent d'abord.
         if let Ok(fichiers) = std::fs::read_dir(dossier()) {
             for f in fichiers.flatten() {
@@ -83,7 +83,7 @@ pub(super) fn renouveler_en_fond() {
                 }
             }
         }
-        for langue in LANGUES {
+        for langue in a_faire {
             telecharger(langue);
         }
         EN_COURS.store(false, Ordering::SeqCst);

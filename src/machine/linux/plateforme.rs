@@ -363,6 +363,10 @@ pub(super) fn juger_journal_audit(installe: bool, actif: bool) -> Option<Constat
 }
 
 pub(super) fn journal_audit() -> Option<Constat> {
+    // Sans systemd (Alpine, Void, Gentoo openrc), « systemctl enable auditd » ne marcherait pas : rien à dire.
+    if !super::systemd() {
+        return None;
+    }
     let installe = ["/usr/bin/auditd", "/usr/sbin/auditd", "/sbin/auditd"]
         .iter()
         .any(|p| Path::new(p).exists());

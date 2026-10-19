@@ -1,7 +1,7 @@
 //! Guide : Omarchy, c'est-à-dire Arch Linux avec le bureau Hyprland tout réglé : ses commandes, puis pacman, yay et
 //! ufw, partagés avec Arch.
 
-use super::{Programme, changer, voir};
+use super::{Obstacle, Programme, changer, voir};
 
 pub const PROGRAMMES: &[Programme] = &[
     OMARCHY_CLI,
@@ -55,7 +55,8 @@ pub const PAS_A_PAS: &[Programme] = &[
                 "omarchy debug --print --no-sudo",
                 "Les informations utiles pour demander de l'aide (matériel, versions, journaux).",
                 "The useful information to ask for help (hardware, versions, logs).",
-            ),
+            )
+            .sauf(Obstacle::Fichier),
             changer(
                 "omarchy restart wifi",
                 "Le Wi-Fi ne marche plus : le débloque et le relance.",
@@ -155,7 +156,8 @@ const OMARCHY_CLI: Programme = Programme {
             "omarchy debug --print --no-sudo",
             "Les informations de dépannage, à joindre à une demande d'aide (relis-les avant).",
             "Troubleshooting information, to attach to a help request (read it first).",
-        ),
+        )
+        .sauf(Obstacle::Fichier),
         voir(
             "omarchy commands",
             "Toutes les commandes d'Omarchy.",
