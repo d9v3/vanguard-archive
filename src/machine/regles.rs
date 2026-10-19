@@ -104,22 +104,29 @@ pub fn afficher() {
     }
 }
 
-/// Les vérifications du bilan pour ce système, une par règle : chaque constat porte l'identifiant de sa règle.
+/// Les vérifications du bilan pour ce système, une par règle, dans l'ordre des rangs.
 pub(super) fn verifications<'a>() -> Vec<Verification<'a>> {
-    regles(Os::actuel())
-        .into_iter()
-        .map(|r| {
-            Box::new(move || {
-                (r.verifier)()
-                    .into_iter()
-                    .map(|mut c| {
-                        c.regle = r.id;
-                        c
-                    })
-                    .collect::<Vec<Constat>>()
-            }) as Verification<'a>
-        })
-        .collect()
+    regles(Os::actuel()).into_iter().map(verification).collect()
+}
+
+/// La vérification d'une règle : chaque constat porte son identifiant, même celui d'une règle qui plante (« erreur
+/// interne » non vérifiée, qui dit laquelle et que `Audit::fiable` voit).
+pub(super) fn verification<'a>(r: &'static Regle) -> Verification<'a> {
+    Box::new(move || {
+        std::panic::catch_unwind(r.verifier)
+            .unwrap_or_else(|_| {
+                vec![super::impossible(
+                    "Audit",
+                    &crate::trf!("erreur interne, règle {}", "internal error, rule {}", r.id),
+                )]
+            })
+            .into_iter()
+            .map(|mut c| {
+                c.regle = r.id;
+                c
+            })
+            .collect::<Vec<Constat>>()
+    })
 }
 
 #[cfg(test)]

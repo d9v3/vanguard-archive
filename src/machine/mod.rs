@@ -83,10 +83,14 @@ impl Audit {
     }
 
     /// Une note n'a de sens que si le pare-feu a été vérifié et qu'au plus un tiers des vérifications a échoué :
-    /// sinon une machine peu vérifiée obtiendrait un « A » rassurant (vu en test sur Fedora en conteneur).
+    /// sinon une machine peu vérifiée obtiendrait un « A » rassurant (vu en test sur Fedora en conteneur). Il faut un
+    /// constat du pare-feu vérifié, pas seulement l'absence d'un non vérifié : une règle du pare-feu qui plante rend
+    /// une « erreur interne » d'une autre catégorie, reconnue à son identifiant (« LNX-PFE-001 »).
     pub fn fiable(&self) -> bool {
-        let pare_feu_inconnu = self.constats.iter().any(|c| c.categorie == "Pare-feu" && !c.verifie);
-        !pare_feu_inconnu && self.impossibles() * 3 < self.constats.len()
+        let pare_feu = |c: &&Constat| c.categorie == "Pare-feu" || c.regle.contains("-PFE-");
+        let mut constats_pare_feu = self.constats.iter().filter(pare_feu);
+        let pare_feu_verifie = constats_pare_feu.clone().any(|c| c.verifie) && constats_pare_feu.all(|c| c.verifie);
+        pare_feu_verifie && self.impossibles() * 3 < self.constats.len()
     }
 }
 
@@ -195,7 +199,9 @@ fn en_parallele(verifications: Vec<Verification<'_>>) -> Vec<Constat> {
                     )
                 });
                 if chrono {
-                    let quoi = constats.first().map_or("(rien)", |c| c.categorie);
+                    let quoi = constats
+                        .first()
+                        .map_or("(rien)", |c| if c.regle.is_empty() { c.categorie } else { c.regle });
                     eprintln!("chrono {i:>2} {:>6} ms  {quoi}", duree.as_millis());
                 }
                 constats
@@ -1044,6 +1050,47 @@ Host *
             ("Comptes", None, "Seul root a l'UID 0."),
         ]);
         assert!(complet.fiable());
+        // Aucun constat du pare-feu (sa règle n'a rien rendu) : pas de note.
+        let sans_constat = audit(&[
+            ("SSH", None, "Serveur SSH désactivé."),
+            ("Mises à jour", None, "Système à jour."),
+            ("Comptes", None, "Seul root a l'UID 0."),
+        ]);
+        assert!(!sans_constat.fiable());
+        // La règle du pare-feu a planté (« erreur interne » de catégorie Audit), mais le mode furtif de macOS, de
+        // catégorie Pare-feu, a répondu : toujours pas de note.
+        let mut plante = audit(&[
+            ("Pare-feu", None, "Mode furtif actif."),
+            (
+                "Audit",
+                Some(Niveau::Info),
+                "Impossible de vérifier (erreur interne, règle MAC-PFE-001).",
+            ),
+            ("SSH", None, "Serveur SSH désactivé."),
+            ("Mises à jour", None, "Système à jour."),
+            ("Comptes", None, "Seul root a l'UID 0."),
+        ]);
+        plante.constats[1].regle = "MAC-PFE-001";
+        assert!(!plante.fiable());
+    }
+
+    /// Une règle qui plante ne fait pas tomber le bilan : son constat « erreur interne » n'est pas vérifié et garde
+    /// l'identifiant de la règle.
+    #[test]
+    fn regle_qui_plante_garde_son_identifiant() {
+        let regle: &'static regles::Regle = Box::leak(Box::new(regles::Regle {
+            id: "LNX-TST-001",
+            systeme: regles::Os::actuel(),
+            rang: 1,
+            sujet: ("essai", "test"),
+            references: &[],
+            verifier: || panic!("règle d'essai"),
+        }));
+        let constats = en_parallele(vec![regles::verification(regle)]);
+        assert_eq!(constats.len(), 1);
+        assert!(!constats[0].verifie);
+        assert_eq!(constats[0].regle, "LNX-TST-001");
+        assert!(constats[0].message.contains("LNX-TST-001"));
     }
 
     #[cfg(unix)]
