@@ -17,7 +17,9 @@ on:
     branches: [macos]
     paths: ["src/**", "Cargo.toml", "Cargo.lock", "build.rs", ".github/workflows/macos.yml"]
   schedule:
-    - cron: "17 7 * * *" # 3 h 17, heure de Montréal
+    # 3 h 17, heure de Montréal. GitHub la lance souvent bien plus tard (4 h 45 de retard le 18 oct. 2026, 7 h 20 le
+    # 19) : regarder `gh run list --workflow macos.yml --event schedule` avant de la croire absente.
+    - cron: "17 7 * * *"
 
 # Le jeton par défaut du dépôt ne lit que le code : la vérification de nuit lit aussi les exécutions passées
 # (gh api …/actions/workflows/…/runs), sinon GitHub répond 403.
@@ -75,10 +77,12 @@ jobs:
       # .cargo/config.toml vise Linux par défaut : la cible est toujours donnée.
       - name: Tests
         run: cargo test --target aarch64-apple-darwin
+      # Les deux Mac d'un seul cargo : l'optimisation finale (LTO, une seule unité de code) n'occupe qu'un cœur par
+      # programme, et cargo les mène de front. L'un après l'autre, elles prenaient 140 s, soit plus de la moitié du
+      # passage, et chaque minute de Mac en compte dix.
       - name: Compilation
         run: |
-          cargo build --release --target aarch64-apple-darwin
-          cargo build --release --target x86_64-apple-darwin
+          cargo build --release --target aarch64-apple-darwin --target x86_64-apple-darwin
           lipo -create -output gardien \
             target/aarch64-apple-darwin/release/gardien target/x86_64-apple-darwin/release/gardien
           lipo -info gardien

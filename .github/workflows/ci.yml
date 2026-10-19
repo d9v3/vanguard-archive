@@ -1,23 +1,28 @@
-# Intégration continue : à chaque envoi, sur Linux, la mise en forme, clippy sans aucune remarque sur les quatre
-# cibles (Linux, Windows, les deux Mac) et les tests ; et le garde-fou de confidentialité sur les commits envoyés. Sur un vrai Windows de GitHub (PowerShell, registre, winget) :
-# chaque nuit si le code a changé, à chaque demande de fusion, et à la demande (gh workflow run ci.yml). macOS a son
-# propre workflow (macos.yml), qui teste et compile le programme universel pour la clé.
+# Intégration continue. À chaque envoi sur master (la publication du jour), sur Linux : la mise en forme, clippy sans
+# aucune remarque sur les quatre cibles (Linux, Windows, les deux Mac) et les tests ; et le garde-fou de
+# confidentialité sur les commits envoyés. Sur un vrai Windows de GitHub (PowerShell, registre, winget) : chaque nuit
+# si le code a changé, à chaque demande de fusion, et à la demande (gh workflow run ci.yml) ; la compilation
+# reproductible aussi, sauf pour une demande de fusion. Chaque nuit, même sans changement : les failles connues des
+# dépendances. macOS a son propre workflow (macos.yml), qui teste et compile le programme universel pour la clé.
 #
 # Pourquoi pas Windows à chaque envoi : sur un dépôt privé, une minute de Windows en compte deux (une de Mac, dix),
-# sur 2000 minutes gratuites par mois. Une dizaine d'envois par jour les épuiserait en quelques jours. Pour tester
-# Windows à chaque envoi malgré tout : ajouter « push » à la condition du travail « utile » plus bas.
+# sur 2000 minutes gratuites par mois. Pour tester Windows à chaque envoi malgré tout : ajouter « push » à la
+# condition du travail « utile » plus bas.
 name: CI
 
 on:
   # master seulement : l'étiquette vX.Y.Z que crée outils/publier-version.sh vise un commit déjà testé, et une
-  # branche n'est poussée que pour son passage sur le Mac (livrer-branche.sh), après la vérification complète d'ici.
+  # branche n'est poussée que pour son passage sur le Mac (outils/livrer-branche.sh), avant la fusion.
   # La CI tournait deux fois sur le même commit à chaque publication (la branche, puis master après la fusion).
   push:
     branches: [master]
   pull_request:
   workflow_dispatch:
   schedule:
-    - cron: "43 7 * * *" # 3 h 43, heure de Montréal (après macos.yml)
+    # 3 h 43, heure de Montréal (après macos.yml). GitHub la lance souvent bien plus tard (4 h 30 de retard le
+    # 18 oct. 2026, 7 h 15 le 19) : regarder `gh run list --workflow ci.yml --event schedule` avant de la croire
+    # absente.
+    - cron: "43 7 * * *"
 
 # Le jeton par défaut du dépôt ne lit que le code : la vérification de nuit lit aussi les exécutions passées
 # (gh api …/actions/workflows/…/runs), sinon GitHub répond 403.
@@ -39,7 +44,9 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
-      # MinGW : build.rs intègre l'icône et le manifeste au .exe avec windres, même pour clippy.
+      # binutils de MinGW seulement : sans gcc-mingw-w64, son préprocesseur, windres ne compile pas l'icône et le
+      # manifeste, et build.rs le dit d'un avertissement (« ressources Windows non intégrées »), sans effet sur
+      # clippy. Le travail « reproductible », qui compile le vrai .exe, installe gcc-mingw-w64.
       - name: Rust à jour, cibles et outils de compilation croisée
         run: |
           rustup update stable
@@ -61,12 +68,14 @@ jobs:
       # .cargo/config.toml vise la cible musl : « cargo test » teste la version qui part sur la clé.
       - name: Tests
         run: cargo test
+      # Le programme de mise au point, que les tests viennent de compiler (tests/programme.rs le lance) : la version
+      # optimisée est compilée sur l'ordinateur de développement avant chaque envoi (outils/deployer.sh), et la nuit
+      # par le travail « reproductible ». La recompiler ici prenait une minute et demie à chaque envoi.
       - name: Le programme démarre et répond
         run: |
-          cargo build --release
-          ./target/x86_64-unknown-linux-musl/release/gardien --version
-          ./target/x86_64-unknown-linux-musl/release/gardien logiciels --liste
-          ./target/x86_64-unknown-linux-musl/release/gardien nettoyer --liste
+          ./target/x86_64-unknown-linux-musl/debug/gardien --version
+          ./target/x86_64-unknown-linux-musl/debug/gardien logiciels --liste
+          ./target/x86_64-unknown-linux-musl/debug/gardien nettoyer --liste
       # Les règles YARA intégrées au programme, compilées par le moteur de VirusTotal (libyara dans yara-python) : une
       # règle cassée par une mise à jour (outils/maj-yara.sh) se voit ici, pas chez quelqu'un.
       - name: Règles YARA
@@ -110,15 +119,13 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
-      - name: Rust à jour
-        run: |
-          rustup update stable
-          rustup default stable
-      - uses: Swatinem/rust-cache@v2
+      # cargo-audit tel que RustSec le publie (ses versions sur GitHub), posé en quelques secondes : le compiler ici
+      # (cargo install) prenait trois minutes et demie chaque nuit. Rien d'autre à compiler : seul Cargo.lock est lu.
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
       - name: cargo audit
-        run: |
-          cargo install cargo-audit --locked
-          cargo audit
+        run: cargo audit
 
   # Windows la nuit seulement si le code a changé depuis le dernier passage réussi (comme macos.yml).
   utile:
@@ -154,9 +161,10 @@ jobs:
           echo "windows=$windows" >> "$GITHUB_OUTPUT"
 
   # Compilation reproductible : le même code, compilé deux fois de suite, doit donner exactement le même programme
-  # (Linux et Windows). C'est la preuve d'intégrité d'un programme non signé : n'importe qui peut recompiler et comparer
-  # l'empreinte à celle de la page de la version. La nuit et à la demande seulement, et seulement si le code a changé
-  # (même règle que Windows) : deux compilations en release coûtent six minutes.
+  # (Linux et Windows). C'est la condition de la preuve d'intégrité d'un programme non signé : avec les mêmes outils
+  # (version de rustc, MinGW, --remap-path-prefix de ~/.cargo/config.toml), n'importe qui retrouve l'empreinte de la
+  # page de la version. La nuit et à la demande seulement, et seulement si le code a changé (même règle que Windows) :
+  # deux compilations en release coûtent plusieurs minutes.
   reproductible:
     needs: utile
     if: needs.utile.outputs.windows == 'oui' && github.event_name != 'pull_request'
@@ -164,24 +172,29 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
+      # gcc-mingw-w64 : l'éditeur de liens du .exe, et le préprocesseur de windres (icône et manifeste intégrés comme
+      # dans le .exe livré). Avec les binutils seuls, la première nuit a échoué : « linker x86_64-w64-mingw32-gcc not
+      # found ».
       - name: Rust à jour, cibles et outils de compilation croisée
         run: |
           rustup update stable
           rustup default stable
           rustup target add x86_64-unknown-linux-musl x86_64-pc-windows-gnu
           sudo apt-get update -qq
-          sudo apt-get install -y -qq musl-tools binutils-mingw-w64-x86-64
+          sudo apt-get install -y -qq musl-tools gcc-mingw-w64-x86-64
       - uses: Swatinem/rust-cache@v2
+      # Les deux cibles d'un seul cargo : l'optimisation finale (LTO, une seule unité de code) n'occupe qu'un cœur par
+      # programme, et cargo les mène de front ; deux cargo lancés ensemble s'attendraient (verrou du dossier).
       - name: Deux compilations, un seul programme
         run: |
-          for c in x86_64-unknown-linux-musl x86_64-pc-windows-gnu; do cargo build --release --target "$c"; done
+          cargo build --release --target x86_64-unknown-linux-musl --target x86_64-pc-windows-gnu
           mkdir premiere
           cp target/x86_64-unknown-linux-musl/release/gardien premiere/gardien
           cp target/x86_64-pc-windows-gnu/release/gardien.exe premiere/gardien.exe
           # Seul le programme est recompilé (les dépendances restent) : c'est lui que l'on compare.
           cargo clean -p gardien --release --target x86_64-unknown-linux-musl
           cargo clean -p gardien --release --target x86_64-pc-windows-gnu
-          for c in x86_64-unknown-linux-musl x86_64-pc-windows-gnu; do cargo build --release --target "$c"; done
+          cargo build --release --target x86_64-unknown-linux-musl --target x86_64-pc-windows-gnu
           sha256sum premiere/gardien target/x86_64-unknown-linux-musl/release/gardien
           sha256sum premiere/gardien.exe target/x86_64-pc-windows-gnu/release/gardien.exe
           cmp premiere/gardien target/x86_64-unknown-linux-musl/release/gardien
@@ -203,10 +216,12 @@ jobs:
       # sous Wine) : les tests lisent le vrai registre et le vrai système.
       - name: Tests sur un vrai Windows
         run: cargo test --target x86_64-pc-windows-msvc
+      # Le programme de mise au point, que les tests viennent de compiler : le .exe livré est celui de MinGW, compilé
+      # sur l'ordinateur de développement (et la nuit par le travail « reproductible »). Une version optimisée pour
+      # MSVC, jamais livrée, prenait ici près de quatre minutes, comptées deux fois.
       - name: Essai du programme (lecture seule)
         run: |
-          cargo build --release --target x86_64-pc-windows-msvc
-          $s = ".\target\x86_64-pc-windows-msvc\release\gardien.exe"
+          $s = ".\target\x86_64-pc-windows-msvc\debug\gardien.exe"
           & $s --version
           & $s machine --json > audit.json
           Get-Content audit.json -TotalCount 40
