@@ -820,6 +820,10 @@ try {
     $verrou = @($audit.constats | Where-Object { $_.categorie -eq 'Verrouillage' })
     if ($verrou.Count) { Ok "Verrouillage au bilan : $($verrou[0].message)" } else { Bug 'Verrouillage ABSENT du bilan' }
     Info "powercfg, veille sur secteur : $(((powercfg /q SCHEME_CURRENT SUB_SLEEP STANDBYIDLE) -join ' ') -replace '.*Index: (0x[0-9a-f]+).*Index: (0x[0-9a-f]+).*', '$1 (secteur), $2 (batterie)')"
+    # BitLocker : valeur brute de Windows (1 actif, 2 coupé, 3 en cours, 5 suspendu, 8 en attente) et ce qu'en dit Gardien.
+    $bl = (New-Object -ComObject Shell.Application).NameSpace('C:').Self.ExtendedProperty('System.Volume.BitLockerProtection')
+    $chiffre = @($audit.constats | Where-Object { $_.categorie -eq 'Chiffrement' })
+    Info "BitLocker de C: : valeur $bl ; Gardien : $(if ($chiffre.Count) { $chiffre[0].message } else { 'rien' })"
     # Exclusions de Defender : lisibles seulement en administrateur ; sinon Gardien ne conclut rien.
     $exclusions = @((Get-MpPreference -ErrorAction SilentlyContinue).ExclusionPath)
     if ($exclusions | Where-Object { $_ -like 'N/A*' }) { Info 'Exclusions de Defender cachées sans droits administrateur' }

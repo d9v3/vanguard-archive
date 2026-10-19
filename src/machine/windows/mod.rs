@@ -569,14 +569,54 @@ fn mises_a_jour() -> Constat {
 }
 
 fn chiffrement() -> Constat {
-    // Lisible sans droits admin, contrairement à Get-BitLockerVolume. 1, 3 et 5 = protégé.
-    let etat = ps(
-        "(New-Object -ComObject Shell.Application).NameSpace('C:').Self.ExtendedProperty('System.Volume.BitLockerProtection')",
-    );
-    match etat.as_deref() {
-        Some("1" | "3" | "5") => ok(
+    // Lisible sans droits admin, contrairement à Get-BitLockerVolume.
+    juger_bitlocker(
+        ps(
+            "(New-Object -ComObject Shell.Application).NameSpace('C:').Self.ExtendedProperty('System.Volume.BitLockerProtection')",
+        )
+        .as_deref(),
+    )
+}
+
+/// État BitLocker du disque C: (System.Volume.BitLockerProtection) : 1 actif, 3 chiffrement en cours, 6 actif et
+/// verrouillé ; 5 suspendu (la clé est posée en clair sur le disque : un voleur lit tout) ; 8 en attente d'activation
+/// (chiffrement de l'appareil pas fini : la clé reste en clair tant que sa clé de récupération n'est pas sauvegardée) ;
+/// le reste, pas chiffré.
+fn juger_bitlocker(etat: Option<&str>) -> Constat {
+    match etat.map(str::trim) {
+        Some("1" | "3" | "6") => ok(
             "Chiffrement",
             tr!("Disque C: chiffré (BitLocker).", "Disk C: encrypted (BitLocker)."),
+        ),
+        Some("5") => alerte(
+            "Chiffrement",
+            Niveau::Moyen,
+            tr!(
+                "BitLocker est suspendu sur C: : la clé est posée en clair sur le disque, un voleur lit tout.",
+                "BitLocker is suspended on C: the key sits in clear on the disk, a thief reads everything."
+            ),
+        )
+        .corriger(
+            tr!(
+                "Reprendre BitLocker (une mise à jour du BIOS l'a souvent suspendu et ne l'a pas repris)",
+                "Resume BitLocker (a BIOS update often suspended it and did not resume it)"
+            ),
+            &["Resume-BitLocker -MountPoint 'C:'"],
+        ),
+        Some("8") => alerte(
+            "Chiffrement",
+            Niveau::Moyen,
+            tr!(
+                "Le chiffrement de C: attend d'être activé : tant que la clé de récupération n'est pas sauvegardée, la clé reste en clair sur le disque.",
+                "Encryption of C: is waiting to be turned on: until the recovery key is backed up, the key stays in clear on the disk."
+            ),
+        )
+        .manuel(
+            tr!(
+                "Paramètres > Confidentialité et sécurité > Chiffrement de l'appareil : finir l'activation (la clé de récupération va dans le compte Microsoft, ou s'imprime)",
+                "Settings > Privacy & security > Device encryption: finish turning it on (the recovery key goes to the Microsoft account, or gets printed)"
+            ),
+            &["Start-Process ms-settings:deviceencryption"],
         ),
         Some(_) => alerte(
             "Chiffrement",
@@ -849,6 +889,20 @@ mod tests {
         assert!(juger_uac(None, None).is_none() && juger_uac(Some(""), Some("5")).is_none());
         let c = juger_uac(Some("1"), Some("0")).unwrap();
         assert!(c.correctif.unwrap().commandes[0].ends_with("-Name ConsentPromptBehaviorAdmin -Value 5"));
+    }
+
+    #[test]
+    fn etats_de_bitlocker() {
+        let probleme = |e: &str| juger_bitlocker(Some(e)).probleme;
+        assert!(["1", "3", "6", "1\r\n"].iter().all(|e| probleme(e).is_none()));
+        assert!(
+            ["0", "2", "4", "5", "8"]
+                .iter()
+                .all(|e| probleme(e) == Some(Niveau::Moyen))
+        );
+        assert!(juger_bitlocker(Some("5")).correctif.unwrap().automatique);
+        assert!(!juger_bitlocker(Some("8")).correctif.unwrap().automatique);
+        assert_ne!(juger_bitlocker(None).probleme, Some(Niveau::Moyen));
     }
 
     #[test]
