@@ -824,6 +824,10 @@ try {
     $bl = (New-Object -ComObject Shell.Application).NameSpace('C:').Self.ExtendedProperty('System.Volume.BitLockerProtection')
     $chiffre = @($audit.constats | Where-Object { $_.categorie -eq 'Chiffrement' })
     Info "BitLocker de C: : valeur $bl ; Gardien : $(if ($chiffre.Count) { $chiffre[0].message } else { 'rien' })"
+    # Services au chemin sans guillemets : ceux que Windows a, et ce qu'en dit Gardien (signalés seulement si un dossier est modifiable par tous).
+    $sansGuillemets = @(Get-CimInstance Win32_Service | Where-Object { $_.PathName -and -not $_.PathName.StartsWith('"') -and $_.PathName -match '^[^"]+ [^"]*\.exe' })
+    $vu = @($audit.constats | Where-Object { $_.message -match 'sans guillemets|unquoted path' })
+    Info "Services au chemin sans guillemets avec espace : $($sansGuillemets.Count) ; Gardien : $(if ($vu.Count) { $vu[0].message } else { 'rien (aucun dossier modifiable par tous)' })"
     # Exclusions de Defender : lisibles seulement en administrateur ; sinon Gardien ne conclut rien.
     $exclusions = @((Get-MpPreference -ErrorAction SilentlyContinue).ExclusionPath)
     if ($exclusions | Where-Object { $_ -like 'N/A*' }) { Info 'Exclusions de Defender cachées sans droits administrateur' }

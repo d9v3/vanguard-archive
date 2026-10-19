@@ -14,6 +14,7 @@ mod durcissement;
 mod exclusions;
 mod maj;
 mod persistance;
+mod services;
 mod verrouillage;
 
 use comptes::comptes;
@@ -868,6 +869,7 @@ pub fn auditer() -> Audit {
             verif!(durcissement::demarrage_securise()),
             verif!(comptes()),
             verif!(persistance()),
+            verif!(services::services_sans_guillemets()),
             verif!(wifi()),
             verif!(durcissement::durcissement()),
         ],
