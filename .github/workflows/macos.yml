@@ -40,16 +40,23 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           if [ "${{ github.event_name }}" != "schedule" ]; then echo "compiler=oui" >> "$GITHUB_OUTPUT"; exit 0; fi
-          dernier=$(gh api "repos/${{ github.repository }}/actions/workflows/macos.yml/runs?status=success&branch=${{ github.ref_name }}&per_page=1" -q '.workflow_runs[0].head_sha // ""')
           # Le code a changé : un fichier hors de la documentation, des captures et des outils de développement, que le
           # programme n'intègre pas. Comparaison impossible (commit disparu, plus de 300 fichiers) : on compile.
           HORS_CODE='^(.*\.md|\.claude/.*|\.relecture/.*|outils/.*|assets/captures/.*|assets/partage\.png|\.github/depot\.json|LICENCES-TIERCES\.txt|\.gitignore)$'
+          depot="${{ github.repository }}"
+          ici="${{ github.sha }}"
           compiler=oui
-          if [ "$dernier" = "${{ github.sha }}" ]; then
-            compiler=non
-          elif [ -n "$dernier" ] && fichiers=$(gh api "repos/${{ github.repository }}/compare/$dernier...${{ github.sha }}" -q '[.files[].filename] | if length < 300 then .[] else "plus de 300 fichiers" end'); then
-            printf '%s\n' "$fichiers" | grep -vE -e '^$' -e "$HORS_CODE" >/dev/null || compiler=non
-          fi
+          # Les dernières compilations réussies de toutes les branches : celle d'une branche fusionnée depuis (son
+          # passage sur le Mac avant la publication) vaut pour ce commit s'il en descend et que le programme n'a pas
+          # changé. Sans cela, la nuit recompilait ce que la publication du jour venait de compiler.
+          for dernier in $(gh api "repos/$depot/actions/workflows/macos.yml/runs?status=success&per_page=20" -q '[.workflow_runs[].head_sha] | unique | .[]'); do
+            if [ "$dernier" = "$ici" ]; then compiler=non; break; fi
+            # « ahead » ou « identical » : ce commit descend de celui de la compilation.
+            etat=$(gh api "repos/$depot/compare/$dernier...$ici" -q '.status') || continue
+            case "$etat" in ahead|identical) ;; *) continue ;; esac
+            fichiers=$(gh api "repos/$depot/compare/$dernier...$ici" -q '[.files[].filename] | if length < 300 then .[] else "plus de 300 fichiers" end') || continue
+            if ! printf '%s\n' "$fichiers" | grep -vE -e '^$' -e "$HORS_CODE" >/dev/null; then compiler=non; break; fi
+          done
           echo "compiler=$compiler" >> "$GITHUB_OUTPUT"
 
   mac:

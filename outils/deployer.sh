@@ -76,6 +76,13 @@ if [[ $MODE == --sans-compiler ]]; then
   done
 fi
 flock 9
+# Le dossier de compilation est partagé avec les worktrees : une compilation faite dans une branche en cours
+# déclenche aussi ce service. Elle ne part ni sur la clé, ni sur cet ordinateur, ni sur GitHub ; le fichier de
+# dépendances que cargo écrit à côté du programme dit d'où elle vient (.git/worktrees/<nom>/HEAD).
+if [[ $MODE == --sans-compiler ]] && grep -qs "/\.git/worktrees/" "$LINUX.d" "${WINDOWS%.exe}.d"; then
+  echo "Compilation venue d'une branche en cours (worktree) : rien n'est copié ni envoyé."
+  exit 0
+fi
 
 VENU_DE_GITHUB=""
 if [[ $MODE == --branchement ]]; then
@@ -266,17 +273,24 @@ copier "$LINUX" "$CLE/Linux/gardien"
 MAC=target/macos
 if [[ -z $LOCAL ]] && command -v gh >/dev/null; then
   # La dernière compilation réussie qui a vraiment produit le programme : une exécution de nuit sautée (code
-  # inchangé) réussit aussi, sans rien produire.
+  # inchangé) réussit aussi, sans rien produire. Toutes branches confondues (le passage d'une branche sur le Mac,
+  # avant sa fusion, est souvent la dernière), mais seulement un commit déjà dans celui-ci : jamais celui d'une
+  # branche pas encore fusionnée.
   RUN=""
-  for execution in $(timeout 20 gh run list --workflow macos.yml --branch "$(git rev-parse --abbrev-ref HEAD)" \
-    --status success --limit 10 --json databaseId,headSha -q '.[] | "\(.databaseId):\(.headSha)"' 2>/dev/null || true); do
+  for execution in $(timeout 20 gh run list --workflow macos.yml --status success --limit 20 \
+    --json databaseId,headSha -q '.[] | "\(.databaseId):\(.headSha)"' 2>/dev/null || true); do
+    git merge-base --is-ancestor "${execution#*:}" HEAD 2>/dev/null || continue
     if [[ -n $(timeout 20 gh api "repos/{owner}/{repo}/actions/runs/${execution%%:*}/artifacts" \
       -q '.artifacts[] | select(.name == "gardien-macos" and (.expired | not)) | .name' 2>/dev/null) ]]; then
       RUN="${execution%%:*} ${execution#*:}"
       break
     fi
   done
-  if [[ -n $RUN && ${RUN#* } != $(cat "$MAC/commit.txt" 2>/dev/null) ]]; then
+  # Jamais une compilation plus ancienne que celle déjà là (celle de la dernière page, copiée par
+  # publier-version.sh).
+  ACTUEL=$(cat "$MAC/commit.txt" 2>/dev/null || true)
+  if [[ -n $RUN && ${RUN#* } != "$ACTUEL" ]] &&
+    ! { [[ -n $ACTUEL ]] && git merge-base --is-ancestor "${RUN#* }" "$ACTUEL" 2>/dev/null; }; then
     rm -rf "$MAC.nouveau"
     if timeout 120 gh run download "${RUN%% *}" -n gardien-macos -D "$MAC.nouveau" >/dev/null 2>&1; then
       rm -rf "$MAC" && mv "$MAC.nouveau" "$MAC" && echo "Version macOS récupérée de GitHub (commit ${RUN#* })."

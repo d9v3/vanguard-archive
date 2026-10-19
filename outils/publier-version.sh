@@ -106,18 +106,29 @@ trap 'rm -rf "$DOSSIER"' EXIT
 cp "$LINUX" "$DOSSIER/gardien-linux-x86_64"
 cp "$WINDOWS" "$DOSSIER/gardien-windows-x86_64.exe"
 
-# Une compilation macOS de ce commit qui a vraiment produit le programme : une exécution de nuit sautée (code
-# inchangé) réussit aussi, sans rien produire.
+# Une compilation macOS qui a vraiment produit le programme de ce code : celle de ce commit, ou celle d'un commit
+# d'avant dont le programme est le même (seuls des captures, la documentation ou les outils ont changé depuis :
+# HORS_CODE de .github/workflows/macos.yml). Le passage de la branche sur le Mac de GitHub, juste avant la fusion,
+# sert ainsi à la page : une seule compilation de Mac par publication (comptée 10 fois sur un dépôt privé). Une
+# exécution de nuit sautée (code inchangé) réussit aussi, sans rien produire : son artefact manque, elle est passée.
+HORS_CODE=$(sed -n "s/^ *HORS_CODE='\(.*\)'$/\1/p" .github/workflows/macos.yml)
 avec_programme() {
-  local id
-  for id in $(gh run list --workflow macos.yml --commit "$COMMIT" --status success --limit 10 --json databaseId \
-    -q '.[].databaseId'); do
+  local id sha
+  while read -r id sha; do
+    [[ -n $id ]] || continue
+    if [[ $sha != "$COMMIT" ]]; then
+      git merge-base --is-ancestor "$sha" "$COMMIT" 2>/dev/null || continue
+      # Un fichier du programme a changé depuis : cette compilation-là ne vaut pas pour ce commit.
+      [[ -n $HORS_CODE ]] || continue
+      git diff --name-only "$sha" "$COMMIT" | grep -vqE "$HORS_CODE" && continue
+    fi
     if [[ -n $(gh api "repos/{owner}/{repo}/actions/runs/$id/artifacts" \
       -q '.artifacts[] | select(.name == "gardien-macos" and (.expired | not)) | .name') ]]; then
       echo "$id"
       return
     fi
-  done
+  done < <(gh run list --workflow macos.yml --status success --limit 20 --json databaseId,headSha \
+    -q '.[] | "\(.databaseId) \(.headSha)"')
 }
 RUN=$(avec_programme)
 if [[ -z $RUN ]]; then
