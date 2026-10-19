@@ -8,6 +8,8 @@ repository (`git checkout v0.62.0`, for example), to be rebuilt if needed.
 
 ## October 20, 2026: version 0.78
 
+- **New name: Vanguard**, with its logo, a V as a shield and a padlock. On a computer where it already ran,
+  nothing is lost: data, automatic backup, shortcut and settings follow the new name by themselves.
 - **A much faster check.** On Linux, from 7 seconds to under one: commands are no longer awaited in fixed 50 ms
   pauses, packages are verified in parallel, Wi-Fi no longer waits for a new scan. On Windows, about ten fewer PowerShell
   launches: firewall, UAC, Remote Desktop and screen lock read straight from the registry, listening ports
@@ -26,7 +28,6 @@ repository (`git checkout v0.62.0`, for example), to be rebuilt if needed.
   commands show up as you type; each one has its page, to copy it, or run it here when it only reads (its output
   scrolls in Vanguard, Esc stops it).
 - **Word prediction in every menu** and checklist: the end of the most likely word shows in grey, Tab completes it.
-  And a new logo.
 - **A single release a day.** This history groups versions by day; only the latest keeps its download page, and
   GitHub's Mac now compiles once per release.
 

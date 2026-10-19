@@ -8,6 +8,8 @@ chaque version garde son étiquette dans le dépôt (`git checkout v0.62.0`, par
 
 ## 20 octobre 2026 : version 0.78
 
+- **Nouveau nom : Vanguard**, avec son logo, un V en bouclier et un cadenas. Sur un ordinateur où il a déjà
+  tourné, rien ne se perd : données, sauvegarde automatique, raccourci et réglages suivent le nouveau nom tout seuls.
 - **Bilan bien plus rapide.** Sous Linux, de 7 secondes à moins d'une : les commandes ne sont plus attendues par
   pauses fixes de 50 ms, les paquets se vérifient en parallèle, le Wi-Fi n'attend plus un nouveau balayage. Sous
   Windows, une dizaine de lancements de PowerShell de moins : pare-feu, UAC, Bureau à distance et verrouillage lus
@@ -27,7 +29,7 @@ chaque version garde son étiquette dans le dépôt (`git checkout v0.62.0`, par
   et les commandes paraissent au fil de la frappe ; chacune a sa page, pour la copier, ou la lancer ici quand elle ne
   fait que lire (sa sortie défile dans Vanguard, Échap l'arrête).
 - **Prédiction des mots dans tous les menus** et les listes à cocher : la fin du mot le plus probable s'affiche en
-  gris, Tab la complète. Et un nouveau logo.
+  gris, Tab la complète.
 - **Une seule publication par jour.** Ce journal regroupe les versions par jour ; seule la dernière garde sa page de
   téléchargement, et le Mac de GitHub ne compile plus qu'une fois par publication.
 
