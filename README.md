@@ -78,6 +78,8 @@ pour revenir.
   navigateur qui lisent tous les sites.
 - Wi-Fi : protection du réseau (WEP, WPA2, WPA3), et faux point d'accès (« jumeau maléfique ») qui copie son nom
   sans mot de passe pour attirer les appareils.
+- Bluetooth : ordinateur visible en permanence, et appareils appairés depuis moins d'une semaine (un clavier
+  appairé par quelqu'un d'autre tape ce qu'il veut).
 - Santé : espace disque, état SMART des disques (sans root), batterie, températures.
 - Ce qui n'a pas pu être vérifié est dit, jamais compté comme sain.
 
@@ -210,7 +212,8 @@ depuis Linux, par exemple), et le guide dit si un programme manque sur cet ordin
   plus de six mois le dit au menu. Et le manifeste de la clé : au déploiement, l'empreinte de chaque fichier de la
   clé est gardée sur ton ordinateur ; au retour de chez quelqu'un, le bilan nomme ce qui a été ajouté, remplacé ou
   retiré (un autorun planté, un programme remplacé). Les données, les images ISO et le menu Ventoy, qui changent
-  normalement, ne sont pas comparés.
+  normalement, ne sont pas comparés. Chaque clé a sa référence (reconnue par l'identifiant de son volume) : une
+  deuxième clé GARDIEN ne passe pas pour une clé modifiée.
 - Gardien se méfie aussi de lui-même : au démarrage, il dit si une bibliothèque est injectée dans tous les
   programmes de la session (LD_PRELOAD, DYLD_INSERT_LIBRARIES, AppInit_DLLs : celle d'un paquet du système, comme
   GameMode, est une simple information) et s'il tourne en root sans raison, car ses résultats passent par là. Au
@@ -220,7 +223,8 @@ depuis Linux, par exemple), et le guide dit si un programme manque sur cet ordin
 - Vérifier un fichier téléchargé : son empreinte comparée à celle que publie le site (collée, ou un SHA256SUMS posé
   à côté), son nom et son contenu (double extension, programme déguisé en document), puis YARA et l'antivirus.
 - Surveillance toutes les heures : notification si un appareil inconnu arrive, si un port s'ouvre, si la note de
-  la machine baisse, ou si la box semble usurpée (adresse MAC partagée ou changée : usurpation ARP).
+  la machine baisse, si la box semble usurpée (adresse MAC partagée ou changée : usurpation ARP), ou si un
+  programme ou un fichier déguisé arrive dans Téléchargements (à vérifier avant de l'ouvrir ; rien n'est bloqué).
 - Entretien du mois : une notification par mois avec la note de la machine, les mises à jour en attente, la place
   que le nettoyage libérerait et les problèmes nouveaux ; rien n'est changé.
 - Rapport HTML avec la courbe des notes, et ce qui a changé depuis le bilan précédent.
@@ -323,6 +327,10 @@ commandes ont aussi un nom anglais (`full`, `audit`, `fix`, `network`, `connecti
 `sandbox`, `email`, `integrity`, `update`, `repair`, `monitor`, `name`, `backup`, `restore`, `clean`, `decoys`, `harden`,
 `blocklists`, `learned`, `channels`, `fast-dns`, `outbound`, `link`, `check-file`, `maintenance`, `slow`,
 `startup`, `specs`, `copy-files`, `troubleshoot`).
+
+**Emojis** : dans l'ancienne console de Windows (invite de commandes ou PowerShell hors du Terminal Windows, courant
+sous Windows 10), qui les dessine mal et décale les menus, 💡 et 🔧 deviennent → et +. `GARDIEN_EMOJI=0` les retire
+partout, `GARDIEN_EMOJI=1` les garde partout.
 
 ## Développer
 

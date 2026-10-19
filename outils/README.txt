@@ -51,7 +51,8 @@ highlighted one, Esc clears it. In the main menu, it also finds each tool of the
        Monthly check-up: one notification a month (grade, updates, space to free, new problems)
   5  Network and Internet ›
        Scan the network · Deep scan of one device · Name a device ("HP printer")
-       Hourly monitoring (unknown device, problem on this machine, router impersonation)
+       Hourly monitoring (unknown device, problem on this machine, router impersonation,
+         program landing in Downloads)
        Connection test for gaming (ping, jitter, speed, bufferbloat), compared with your habits
        Internet address on blocklists? (Spamhaus, SpamCop, DroneBL, PSBL, after your consent)
        Crowded Wi-Fi? (nearby networks by channel, and the freest channel to set on the router)
@@ -98,12 +99,14 @@ highlighted one, Esc clears it. In the main menu, it also finds each tool of the
 
 The check covers, among others: firewall, open ports, updates, encryption, accounts, SSH (and its failed login
 attempts), Wi-Fi (and fake access points copying its name), programs started at boot, DNS, added root
-certificates, browser extensions, disk and battery health.
+certificates, browser extensions, Bluetooth, disk and battery health.
 
 Language: French or English, following the system. To force English:
   Linux:   GARDIEN_LANG=en ./gardien
   Windows: in the command prompt, set GARDIEN_LANG=en then gardien.exe
   macOS:   GARDIEN_LANG=en <key>/macOS/gardien
+Menus shifted in the old Windows command prompt: set GARDIEN_EMOJI=0 (done by default outside Windows
+Terminal).
 
 Good to know
   - Fixes are never applied without your consent. On Windows, each one is first written to a readable

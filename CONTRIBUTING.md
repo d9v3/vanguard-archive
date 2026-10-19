@@ -20,7 +20,7 @@ modification. Sur GitHub, `@claude` dans un ticket ou une demande de fusion le f
 | `src/langue.rs` | choix de la langue et macros de traduction |
 | `src/machine/mod.rs` | types communs, affichage, exécution parallèle des vérifications |
 | `src/machine/linux/`, `src/machine/windows/`, `src/machine/macos/` | audit propre à chaque système, un fichier par thème |
-| `src/machine/dns.rs`, `certificats.rs`, `extensions.rs`, `partages.rs`, `sante.rs`, `wifi.rs` | vérifications communes aux trois systèmes (partages.rs : partages de fichiers ouverts à tout le monde) |
+| `src/machine/dns.rs`, `certificats.rs`, `extensions.rs`, `partages.rs`, `sante.rs`, `wifi.rs`, `bluetooth.rs` | vérifications communes aux trois systèmes (partages.rs : partages de fichiers ouverts à tout le monde ; bluetooth.rs : ordinateur visible, appareils appairés depuis peu) |
 | `src/machine/unix.rs` | vérifications communes à Linux et macOS : fichiers secrets, sudo |
 | `src/corriger.rs` | application guidée des correctifs |
 | `src/reseau/mod.rs`, `src/reseau/scan.rs` | scan réseau (TCP connect, sans root), ARP, carnets des réseaux |
@@ -42,10 +42,10 @@ modification. Sur GitHub, `@claude` dans un ticket ou une demande de fusion le f
 | `src/entretien.rs` | entretien du mois : note, mises à jour, place, problèmes nouveaux, en une notification |
 | `src/protection/sortantes.rs` | qui parle à Internet : connexions établies par programme (ss, PowerShell, lsof), DNS inverse |
 | `src/protection/environnement.rs` | au démarrage : bibliothèque injectée dans la session (LD_PRELOAD, DYLD, AppInit_DLLs), jugée comme le préchargement |
-| `src/protection/manifeste.rs` | vérifier Gardien lui-même (version, date du commit, SHA-256) et manifeste de la clé (empreintes BLAKE3 gardées chez le propriétaire, comparées au bilan) |
+| `src/protection/manifeste.rs` | vérifier Gardien lui-même (version, date du commit, SHA-256) et manifeste de la clé (empreintes BLAKE3 gardées chez le propriétaire, une référence par clé, comparées au bilan) |
 | `src/protection/distance.rs` | quelqu'un contrôle mon ordi ? logiciels de prise de contrôle à distance (installés, au démarrage, en cours, téléchargés), au bilan et en parcours guidé |
 | `src/protection/lien.rs` | ce lien est-il dangereux ? examen local (punycode, marques imitées…), puis RDAP, URLhaus, Spamhaus DBL, SURBL |
-| `src/protection/telechargement.rs` | vérifier un fichier téléchargé : empreinte par l'outil du système, nom et contenu, YARA et antivirus |
+| `src/protection/telechargement.rs` | vérifier un fichier téléchargé : empreinte par l'outil du système, nom et contenu, YARA et antivirus ; programmes arrivés dans Téléchargements, pour la surveillance |
 | `src/reseau/canaux.rs`, `src/reseau/nat.rs` | Wi-Fi encombré (réseaux voisins par canal) ; type de NAT (client STUN maison) |
 | `src/dns_rapide.rs` | DNS le plus rapide : mesure, DNS qui protège gardé, réglage annulable par `optimiser/` |
 | `src/reseau/cameras.rs` | caméras cachées : fabricant, flux RTSP, recherche ONVIF (WS-Discovery), page web |

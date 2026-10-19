@@ -72,6 +72,8 @@ In the menu, choose **1** (full check), then **2** (fix). Arrows, Enter, and Esc
   read every site.
 - Wi-Fi: the network's protection (WEP, WPA2, WPA3), and fake access points ("evil twin") that copy its name without
   a password to lure devices.
+- Bluetooth: computer visible all the time, and devices paired less than a week ago (a keyboard paired by someone
+  else types whatever it wants).
 - Health: disk space, SMART status of the disks (without root), battery, temperatures.
 - What could not be checked is said so, never counted as healthy.
 
@@ -195,7 +197,8 @@ example), and the guide tells when a program is missing on this computer.
   release page (Gardien is not signed: this comparison is what proves it is genuine). A copy older than six months
   says so in the menu. And the key manifest: at deployment, the checksum of every file on the key is kept on your
   computer; back from someone's place, the check names what was added, replaced or removed (a planted autorun, a
-  replaced program). Data, ISO images and the Ventoy menu, which change normally, are not compared.
+  replaced program). Data, ISO images and the Ventoy menu, which change normally, are not compared. Each key has
+  its own reference (recognized by its volume identifier): a second GARDIEN key does not pass for a modified one.
 - Gardien also distrusts itself: at startup, it says whether a library is injected into every program of the
   session (LD_PRELOAD, DYLD_INSERT_LIBRARIES, AppInit_DLLs: one from a system package, like GameMode, is a mere
   information) and whether it runs as root for no reason, since its results go through there. In the check: the
@@ -204,8 +207,9 @@ example), and the guide tells when a program is missing on this computer.
   twice and checks that the program is identical to the byte.
 - Check a downloaded file: its checksum compared with the one the site publishes (pasted, or a SHA256SUMS next to
   it), its name and content (double extension, program disguised as a document), then YARA and the antivirus.
-- Hourly monitoring: a notification if an unknown device shows up, if a port opens, if the machine's grade drops, or
-  if the router seems spoofed (shared or changed MAC address: ARP spoofing).
+- Hourly monitoring: a notification if an unknown device shows up, if a port opens, if the machine's grade drops, if
+  the router seems spoofed (shared or changed MAC address: ARP spoofing), or if a program or a disguised file lands
+  in Downloads (to check before opening it; nothing is blocked).
 - Monthly check-up: one notification a month with the machine's grade, waiting updates, the space a cleanup would
   free and new problems; nothing is changed.
 - HTML report with the grade history curve, and what changed since the previous check.
@@ -307,6 +311,10 @@ also keep their French names (`complet`, `machine`, `corriger`, `reseau`, `conne
 `motdepasse`, `isoler`, `courriel`, `integrite`, `maj`, `reparer`, `surveillance`, `nommer`, `sauvegarder`,
 `restaurer`, `nettoyer`, `pieges`, `durcir`, `listes-noires`, `appris`, `entretien`, `sortantes`, `lien`,
 `verifier-fichier`, `canaux`, `dns-rapide`).
+
+**Emojis**: in the old Windows console (command prompt or PowerShell outside Windows Terminal, common on Windows 10),
+which draws them badly and shifts the menus, 💡 and 🔧 become → and +. `GARDIEN_EMOJI=0` removes them everywhere,
+`GARDIEN_EMOJI=1` keeps them everywhere.
 
 ## Development
 

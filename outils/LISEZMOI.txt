@@ -52,7 +52,8 @@ Entrée ouvre celle en surbrillance, Échap efface. Au menu principal, elle trou
        Entretien du mois : une notification par mois (note, mises à jour, place à libérer, problèmes nouveaux)
   5  Réseau et Internet ›
        Scanner le réseau · Scan approfondi d'un appareil · Nommer un appareil (« imprimante HP »)
-       Surveillance toutes les heures (appareil inconnu, problème sur cette machine, usurpation de la box)
+       Surveillance toutes les heures (appareil inconnu, problème sur cette machine, usurpation de la box,
+         programme arrivé dans Téléchargements)
        Test de connexion pour le jeu (ping, gigue, débit, bufferbloat), comparé à tes habitudes
        Adresse Internet sur liste noire ? (Spamhaus, SpamCop, DroneBL, PSBL, après ton accord)
        Wi-Fi encombré ? (réseaux voisins par canal, et le canal le plus libre à régler sur la box)
@@ -100,12 +101,14 @@ Entrée ouvre celle en surbrillance, Échap efface. Au menu principal, elle trou
 
 Le bilan vérifie notamment : pare-feu, ports ouverts, mises à jour, chiffrement, comptes, SSH (et ses tentatives
 de connexion ratées), Wi-Fi (et faux point d'accès qui copie son nom), programmes lancés au démarrage, DNS,
-certificats racine ajoutés, extensions de navigateur, santé des disques et de la batterie.
+certificats racine ajoutés, extensions de navigateur, Bluetooth, santé des disques et de la batterie.
 
 Langue : français ou anglais selon le système. Pour forcer le français :
   Linux :   GARDIEN_LANG=fr ./gardien
   Windows : dans l'invite de commandes, set GARDIEN_LANG=fr puis gardien.exe
   macOS :   GARDIEN_LANG=fr <clé>/macOS/gardien
+Menus décalés dans l'ancienne invite de commandes de Windows : set GARDIEN_EMOJI=0 (fait d'office sans le
+Terminal Windows).
 
 Bon à savoir
   - Les corrections ne sont jamais appliquées sans ta confirmation. Sous Windows, chacune est d'abord écrite

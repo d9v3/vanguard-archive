@@ -20,7 +20,7 @@ turn on once with `/install-github-app`).
 | `src/langue.rs` | language choice and translation macros |
 | `src/machine/mod.rs` | shared types, display, parallel execution of the checks |
 | `src/machine/linux/`, `src/machine/windows/`, `src/machine/macos/` | per-system audit, one file per topic |
-| `src/machine/dns.rs`, `certificats.rs`, `extensions.rs`, `partages.rs`, `sante.rs`, `wifi.rs` | checks shared by the three systems (partages.rs: file shares open to everyone) |
+| `src/machine/dns.rs`, `certificats.rs`, `extensions.rs`, `partages.rs`, `sante.rs`, `wifi.rs`, `bluetooth.rs` | checks shared by the three systems (partages.rs: file shares open to everyone; bluetooth.rs: visible computer, recently paired devices) |
 | `src/machine/unix.rs` | checks shared by Linux and macOS: secret files, sudo |
 | `src/corriger.rs` | guided application of fixes |
 | `src/reseau/mod.rs`, `src/reseau/scan.rs` | network scan (TCP connect, without root), ARP, network notebooks |
@@ -42,10 +42,10 @@ turn on once with `/install-github-app`).
 | `src/entretien.rs` | monthly check-up: grade, updates, space, new problems, in one notification |
 | `src/protection/sortantes.rs` | who talks to the Internet: established connections by program (ss, PowerShell, lsof), reverse DNS |
 | `src/protection/environnement.rs` | at startup: library injected into the session (LD_PRELOAD, DYLD, AppInit_DLLs), judged like preloading |
-| `src/protection/manifeste.rs` | check Gardien itself (version, commit date, SHA-256) and key manifest (BLAKE3 checksums kept on the owner's computer, compared in the check) |
+| `src/protection/manifeste.rs` | check Gardien itself (version, commit date, SHA-256) and key manifest (BLAKE3 checksums kept on the owner's computer, one reference per key, compared in the check) |
 | `src/protection/distance.rs` | is someone controlling my PC? remote control tools (installed, at boot, running, downloaded), in the check and as a guided walkthrough |
 | `src/protection/lien.rs` | is this link dangerous? local check (punycode, imitated brands…), then RDAP, URLhaus, Spamhaus DBL, SURBL |
-| `src/protection/telechargement.rs` | check a downloaded file: checksum by the system's tool, name and content, YARA and antivirus |
+| `src/protection/telechargement.rs` | check a downloaded file: checksum by the system's tool, name and content, YARA and antivirus; programs landing in Downloads, for monitoring |
 | `src/reseau/canaux.rs`, `src/reseau/nat.rs` | crowded Wi-Fi (nearby networks by channel); NAT type (home-made STUN client) |
 | `src/dns_rapide.rs` | fastest DNS: measurement, protecting DNS kept, setting undone through `optimiser/` |
 | `src/reseau/cameras.rs` | hidden cameras: maker, RTSP stream, ONVIF discovery (WS-Discovery), web page |
