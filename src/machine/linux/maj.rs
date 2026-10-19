@@ -1053,11 +1053,18 @@ pub(super) fn maj_automatiques() -> Option<Constat> {
     let apt = std::path::Path::new("/usr/bin/apt-get").exists();
     let dnf = std::path::Path::new("/usr/bin/dnf").exists();
     let actives = if apt {
-        let conf = std::fs::read_dir("/etc/apt/apt.conf.d")
+        // L'ordre d'APT : apt.conf.d trié, puis apt.conf ; la dernière valeur l'emporte.
+        let mut fichiers: Vec<std::path::PathBuf> = std::fs::read_dir("/etc/apt/apt.conf.d")
             .into_iter()
             .flatten()
             .flatten()
-            .filter_map(|e| std::fs::read_to_string(e.path()).ok())
+            .map(|e| e.path())
+            .collect();
+        fichiers.sort();
+        fichiers.push("/etc/apt/apt.conf".into());
+        let conf = fichiers
+            .iter()
+            .filter_map(|p| std::fs::read_to_string(p).ok())
             .collect::<Vec<_>>()
             .join("\n");
         juger_apt_auto(&conf, std::path::Path::new("/usr/bin/unattended-upgrade").exists())
@@ -1121,13 +1128,15 @@ pub(super) fn maj_automatiques() -> Option<Constat> {
 
 /// apt : `APT::Periodic::Unattended-Upgrade "1";` dans la configuration, et l'outil installé.
 fn juger_apt_auto(conf: &str, outil: bool) -> bool {
+    // La dernière valeur l'emporte : un « 0 » dans un fichier lu après annule un « 1 » d'avant.
     outil
-        && conf.lines().any(|l| {
-            let l = l.trim();
-            !l.starts_with("//")
-                && l.starts_with("APT::Periodic::Unattended-Upgrade")
-                && l.split('"').nth(1).is_some_and(|v| v.trim() != "0")
-        })
+        && conf
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.starts_with("//") && l.starts_with("APT::Periodic::Unattended-Upgrade"))
+            .filter_map(|l| l.split('"').nth(1))
+            .next_back()
+            .is_some_and(|v| v.trim() != "0")
 }
 
 #[cfg(test)]
@@ -1142,5 +1151,14 @@ mod tests_maj_automatiques {
         assert!(!juger_apt_auto("APT::Periodic::Unattended-Upgrade \"0\";\n", true));
         assert!(!juger_apt_auto("// APT::Periodic::Unattended-Upgrade \"1\";\n", true));
         assert!(!juger_apt_auto("", true));
+        // Annulé par un fichier lu après ; réactivé encore après.
+        assert!(!juger_apt_auto(
+            "APT::Periodic::Unattended-Upgrade \"1\";\nAPT::Periodic::Unattended-Upgrade \"0\";\n",
+            true
+        ));
+        assert!(juger_apt_auto(
+            "APT::Periodic::Unattended-Upgrade \"0\";\nAPT::Periodic::Unattended-Upgrade \"1\";\n",
+            true
+        ));
     }
 }
