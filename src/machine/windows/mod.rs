@@ -797,6 +797,7 @@ pub fn auditer() -> Audit {
             verif!([uac()]),
             verif!([mises_a_jour()]),
             verif!([chiffrement()]),
+            verif!(durcissement::demarrage_securise()),
             verif!(comptes()),
             verif!(persistance()),
             verif!(wifi()),

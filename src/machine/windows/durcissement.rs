@@ -300,6 +300,38 @@ pub(super) fn juger_ntlm(niveau: Option<u32>) -> Option<Constat> {
     )
 }
 
+/// Démarrage sécurisé, lu dans le registre (Confirm-SecureBootUEFI demande les droits admin). Clé absente : un
+/// ancien BIOS sans UEFI, rien à conclure.
+pub(super) fn demarrage_securise() -> Option<Constat> {
+    juger_demarrage_securise(lire_dword(
+        r"SYSTEM\CurrentControlSet\Control\SecureBoot\State",
+        "UEFISecureBootEnabled",
+    ))
+}
+
+pub(super) fn juger_demarrage_securise(actif: Option<u32>) -> Option<Constat> {
+    match actif? {
+        0 => Some(
+            alerte(
+                "Secure Boot",
+                Niveau::Info,
+                tr!(
+                    "Secure Boot désactivé : un programme malveillant peut se loger avant Windows, hors de portée de l'antivirus.",
+                    "Secure Boot off: malware can hide before Windows starts, out of the antivirus's reach."
+                ),
+            )
+            .manuel(
+                tr!(
+                    "À activer dans les réglages UEFI de l'ordinateur (Paramètres > Système > Récupération > Démarrage avancé > Paramètres du microprogramme UEFI). Un Linux installé à côté doit avoir un chargeur signé",
+                    "Turn it on in the computer's UEFI settings (Settings > System > Recovery > Advanced startup > UEFI Firmware Settings). A Linux installed alongside needs a signed boot loader"
+                ),
+                &[],
+            ),
+        ),
+        _ => Some(ok("Secure Boot", tr!("Démarrage sécurisé actif.", "Secure Boot on."))),
+    }
+}
+
 /// Accès anonyme : RestrictAnonymousSAM à 0 laisse n'importe qui sur le réseau lister les comptes de l'ordinateur
 /// sans mot de passe ; EveryoneIncludesAnonymous à 1 donne aux connexions anonymes les droits de « Tout le monde ».
 /// Les deux valeurs de Windows sont remises (1 et 0) : aucun usage courant n'en dépend.
@@ -610,6 +642,11 @@ mod tests {
         assert!(juger_ntlm(Some(3)).is_none() && juger_ntlm(Some(5)).is_none() && juger_ntlm(None).is_none());
         assert_eq!(juger_signature_smb(Some(0)).unwrap().probleme, Some(Niveau::Info));
         assert!(juger_signature_smb(Some(1)).is_none() && juger_signature_smb(None).is_none());
+        // Secure Boot : clé absente (ancien BIOS), rien ; 0 coupé, une information à régler soi-même.
+        assert!(juger_demarrage_securise(None).is_none());
+        assert_eq!(juger_demarrage_securise(Some(1)).unwrap().probleme, None);
+        let coupe = juger_demarrage_securise(Some(0)).unwrap();
+        assert!(coupe.probleme == Some(Niveau::Info) && !coupe.correctif.unwrap().automatique);
         // Accès anonyme : seules les valeurs ouvertes sont remises, chacune par sa commande.
         assert!(juger_anonyme(Some(1), Some(0)).is_none() && juger_anonyme(None, None).is_none());
         let sam = juger_anonyme(Some(0), Some(0)).unwrap();
