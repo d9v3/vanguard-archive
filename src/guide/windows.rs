@@ -479,12 +479,14 @@ pub const PROGRAMMES: &[Programme] = &[
                 "manage-bde -status",
                 "Le chiffrement BitLocker de chaque lecteur (administrateur).",
                 "BitLocker encryption of each drive (administrator).",
-            ),
+            )
+            .sauf(Obstacle::Administrateur),
             voir(
                 "manage-bde -protectors -get C:",
                 "La clé de récupération de C: (administrateur) : à garder ailleurs que sur ce PC.",
                 "C:'s recovery key (administrator): keep it somewhere other than this PC.",
-            ),
+            )
+            .sauf(Obstacle::Administrateur),
         ],
     },
     Programme {
