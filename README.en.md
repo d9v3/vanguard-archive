@@ -82,8 +82,8 @@ In the menu, choose **1** (full check), then **2** (fix). Arrows, Enter, and Esc
   PowerShell running any script, UAC that asks nothing, guest access to shares, accounts listed without a password,
   Secure Boot, suspended BitLocker, Defender cloud protection off, overly broad Defender exclusions, Office macros
   all allowed, passwords kept as LM hashes, Remote Registry, SMBv1 client, MSI installs with system rights, services
-  with unquoted paths; Linux: automatic security updates, session that opens by itself without an encrypted disk;
-  macOS: unencrypted Time Machine backup.
+  with unquoted paths, exploit protection off; Linux: automatic security updates, session that opens by itself
+  without an encrypted disk; macOS: unencrypted Time Machine backup.
 - Hijacked browsing (forced proxy, sites redirected by the hosts file).
 - Passwords saved in the browser without protection, sensitive files lying around (passwords or keys in clear text),
   missing backup with its set-up offered.

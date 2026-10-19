@@ -548,6 +548,40 @@ pub(super) fn juger_installation_elevee(
     })
 }
 
+/// Protection contre les exploits pour tout le système (Get-ProcessMitigation -System) : « DEP|BottomUp|CFG|SEHOP »,
+/// chacune ON, OFF ou NOTSET (le réglage de Windows, actif). Seul OFF compte : un « optimiseur » pour le jeu les
+/// coupe parfois, et une faille de n'importe quel programme devient bien plus facile à exploiter.
+pub(super) fn juger_protection_exploits(valeurs: Option<&str>) -> Option<Constat> {
+    let noms = ["DEP", "BottomUp", "CFG", "SEHOP"];
+    let coupees: Vec<&str> = valeurs?
+        .split('|')
+        .zip(noms)
+        .filter(|(v, _)| v.trim().eq_ignore_ascii_case("OFF"))
+        .map(|(_, n)| n)
+        .collect();
+    if coupees.is_empty() {
+        return None;
+    }
+    let liste = coupees.join(", ");
+    Some(
+        alerte(
+            DURCI,
+            Niveau::Eleve,
+            trf!(
+                "Protection contre les exploits coupée pour tout le système ({liste}) : une faille de n'importe quel programme devient bien plus facile à exploiter.",
+                "Exploit protection turned off system-wide ({liste}): a flaw in any program becomes much easier to exploit."
+            ),
+        )
+        .corriger(
+            tr!(
+                "Rallumer ces protections (le réglage de Windows ; effectif après redémarrage)",
+                "Turn these protections back on (Windows' setting; effective after a restart)"
+            ),
+            &[&format!("Set-ProcessMitigation -System -Enable {}", coupees.join(","))],
+        ),
+    )
+}
+
 /// Signature SMB : le client qui ne l'exige pas peut se faire relayer vers un faux partage. Une information, à
 /// activer soi-même (un vieux NAS sans signature ne répondrait plus) ; Windows 11 24H2 l'exige déjà.
 pub(super) fn juger_signature_smb(client_exige: Option<u32>) -> Option<Constat> {
@@ -675,6 +709,12 @@ pub(super) fn durcissement() -> Vec<Constat> {
             _ => None,
         });
     c.extend(juger_powershell2(installe));
+    let protections = ps(
+        "try { $m = Get-ProcessMitigation -System; 'MIT|' + $m.DEP.Enable + '|' + $m.ASLR.BottomUp + '|' + $m.CFG.Enable + '|' + $m.SEHOP.Enable; 'MIT_FIN' } catch {}",
+    );
+    c.extend(juger_protection_exploits(
+        section(protections.as_deref(), "MIT").and_then(|l| l.first().copied()),
+    ));
     c.extend(juger_assistance(lire_dword(
         r"SYSTEM\CurrentControlSet\Control\Remote Assistance",
         "fAllowToGetHelp",
@@ -908,6 +948,15 @@ mod tests {
         assert!(
             remise.commandes[1]
                 .starts_with(r"Set-ItemProperty -LiteralPath 'Registry::HKEY_USERS\S-1-5-21-1-2-3-1001\SOFTWARE")
+        );
+        // Protection contre les exploits : seul OFF compte, NOTSET étant le réglage de Windows.
+        assert!(juger_protection_exploits(None).is_none());
+        assert!(juger_protection_exploits(Some("NOTSET|NOTSET|ON|NOTSET")).is_none());
+        let exploits = juger_protection_exploits(Some("OFF|NOTSET|OFF|ON")).unwrap();
+        assert!(exploits.probleme == Some(Niveau::Eleve) && exploits.message.contains("(DEP, CFG)"));
+        assert_eq!(
+            exploits.correctif.unwrap().commandes,
+            ["Set-ProcessMitigation -System -Enable DEP,CFG"]
         );
         // Secure Boot : clé absente (ancien BIOS), rien ; 0 coupé, une information à régler soi-même.
         assert!(juger_demarrage_securise(None).is_none());
