@@ -685,6 +685,26 @@ pub fn dossier_local() -> PathBuf {
     base.unwrap_or_default().join("vanguard")
 }
 
+/// Le dossier local réservé à son compte (0700) : il garde les bilans (donc les failles trouvées sur cet ordinateur),
+/// les appareils du réseau, la quarantaine et la référence des fichiers critiques. Créé avec les droits par défaut
+/// (0755), il se lisait par les autres comptes de la machine dès que le dossier personnel leur était ouvert. Un dossier
+/// déjà là n'est resserré que s'il est vraiment un dossier à soi : jamais un lien, ni le dossier d'un autre compte.
+#[cfg(unix)]
+pub fn proteger_dossier_local() {
+    use std::os::unix::fs::{DirBuilderExt, MetadataExt, PermissionsExt};
+    let dossier = dossier_local();
+    let _ = std::fs::DirBuilder::new().recursive(true).mode(0o700).create(&dossier);
+    // SAFETY : getuid lit le compte du processus, sans argument ni échec possible.
+    let moi = unsafe { libc::getuid() };
+    if let Ok(m) = std::fs::symlink_metadata(&dossier)
+        && m.is_dir()
+        && m.uid() == moi
+        && m.mode() & 0o077 != 0
+    {
+        let _ = std::fs::set_permissions(&dossier, std::fs::Permissions::from_mode(0o700));
+    }
+}
+
 /// Le dossier jetable des tests de ce processus (un par `cargo test`, nommé par son numéro de processus), retiré
 /// quand le processus se termine : chaque lancement en laissait un dans le dossier temporaire. Le crochet de sortie
 /// est posé une fois, au premier appel ; les tests tournent tous avant que le processus ne sorte.
@@ -1558,6 +1578,17 @@ mod tests {
         let (reseaux, appareils) = noms_des_bases(&[base]);
         assert_eq!(reseaux, [piege, vu]);
         assert_eq!(appareils, [piege, piege, piege, vu]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn dossier_local_reserve_au_compte() {
+        use std::os::unix::fs::PermissionsExt;
+        let dossier = dossier_local();
+        std::fs::create_dir_all(&dossier).unwrap();
+        std::fs::set_permissions(&dossier, std::fs::Permissions::from_mode(0o755)).unwrap();
+        proteger_dossier_local();
+        assert_eq!(std::fs::metadata(&dossier).unwrap().permissions().mode() & 0o777, 0o700);
     }
 
     #[test]

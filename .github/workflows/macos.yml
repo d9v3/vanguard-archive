@@ -73,7 +73,10 @@ jobs:
           rustup update stable
           rustup default stable
           rustup target add aarch64-apple-darwin x86_64-apple-darwin
-      - uses: Swatinem/rust-cache@v2
+      # Actions venues d'autres que GitHub : épinglées par leur commit. Une étiquette (v2) se déplace ; si leur dépôt était
+      # piraté, une version piégée toucherait ce que compile ce travail. À mettre à jour à la main (le commentaire dit la
+      # version).
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       # .cargo/config.toml vise Linux par défaut : la cible est toujours donnée.
       - name: Tests
         run: cargo test --target aarch64-apple-darwin

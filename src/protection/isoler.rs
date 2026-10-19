@@ -27,10 +27,21 @@ pub(crate) fn dossier_jetable() -> std::io::Result<PathBuf> {
     Ok(dossier)
 }
 
-/// Arguments de bubblewrap. Le dossier de session (/run/user/…) est masqué : son bus de session permettrait de
-/// demander à systemd, hors du bac, de lancer un programme. Seul l'affichage Wayland est rendu visible.
+/// Arguments de bubblewrap. /run est masqué en entier : un système en lecture seule laisse quand même se connecter
+/// aux sockets qu'il contient, et le réseau coupé ne touche pas aux sockets à chemin. Le bus du système s'y trouvait
+/// (NetworkManager, logind, polkit : changer le réseau de l'ordinateur, ouvrir une vraie fenêtre de mot de passe),
+/// comme les sockets de Docker, libvirt ou podman (root pour qui est dans leur groupe) et les disques montés sous
+/// /run/media. Dans la session (/run/user/…), le bus de session permettrait de demander à systemd, hors du bac, de
+/// lancer un programme : seul l'affichage Wayland en est rendu visible. `var_run` : /var/run est un vrai dossier
+/// (vieux systèmes ; ailleurs, c'est un lien vers /run, masqué avec lui).
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
-fn arguments_bwrap(jetable: &Path, programme: &Path, session: Option<&str>, wayland: Option<&str>) -> Vec<String> {
+fn arguments_bwrap(
+    jetable: &Path,
+    programme: &Path,
+    session: Option<&str>,
+    wayland: Option<&str>,
+    var_run: bool,
+) -> Vec<String> {
     let mut a: Vec<String> = [
         "--ro-bind",
         "/",
@@ -45,6 +56,8 @@ fn arguments_bwrap(jetable: &Path, programme: &Path, session: Option<&str>, wayl
         "/tmp",
         "--tmpfs",
         "/root",
+        "--tmpfs",
+        "/run",
         "--unshare-all",
         "--die-with-parent",
         "--new-session",
@@ -54,6 +67,9 @@ fn arguments_bwrap(jetable: &Path, programme: &Path, session: Option<&str>, wayl
     .iter()
     .map(ToString::to_string)
     .collect();
+    if var_run {
+        a.extend(["--tmpfs".into(), "/var/run".into()]);
+    }
     if let Some(s) = session {
         a.extend(["--tmpfs".into(), s.into()]);
         if let Some(w) = wayland {
@@ -179,12 +195,15 @@ fn lancer(source: &Path) {
     let statut = if present("bwrap") {
         let session = std::env::var("XDG_RUNTIME_DIR").ok();
         let wayland = std::env::var("WAYLAND_DISPLAY").ok();
+        // Un lien (le cas courant) n'est pas un dossier pour symlink_metadata : il suit /run, déjà masqué.
+        let var_run = std::fs::symlink_metadata("/var/run").is_ok_and(|m| m.is_dir());
         std::process::Command::new("bwrap")
             .args(arguments_bwrap(
                 &jetable,
                 &copie,
                 session.as_deref(),
                 wayland.as_deref(),
+                var_run,
             ))
             .status()
     } else if present("firejail") {
@@ -324,12 +343,22 @@ mod tests {
             Path::new("/tmp/j/p"),
             Some("/run/user/1000"),
             Some("wayland-1"),
+            false,
         );
         let texte = a.join(" ");
         assert!(texte.contains("--unshare-all") && texte.contains("--new-session") && texte.contains("--cap-drop ALL"));
-        // Session masquée, seul l'affichage Wayland repasse.
+        // /run masqué (bus du système, socket de Docker), avant que l'affichage Wayland ne repasse : bubblewrap monte
+        // dans l'ordre, un /run masqué après coup cacherait aussi l'affichage.
+        let run = texte.find("--tmpfs /run ").expect("/run masqué");
+        let session = texte
+            .find("--tmpfs /run/user/1000 --ro-bind-try /run/user/1000/wayland-1 /run/user/1000/wayland-1")
+            .expect("session masquée, seul l'affichage Wayland repasse");
+        assert!(run < session);
+        assert!(!texte.contains("/var/run"));
         assert!(
-            texte.contains("--tmpfs /run/user/1000 --ro-bind-try /run/user/1000/wayland-1 /run/user/1000/wayland-1")
+            arguments_bwrap(Path::new("/tmp/j"), Path::new("/tmp/j/p"), None, None, true)
+                .join(" ")
+                .contains("--tmpfs /run --unshare-all --die-with-parent --new-session --cap-drop ALL --tmpfs /var/run")
         );
         assert_eq!(a.last().map(String::as_str), Some("/tmp/j/p"));
         let wsb = configuration_wsb(r"C:\Users\x\Downloads", "setup.exe");

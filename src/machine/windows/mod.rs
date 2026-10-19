@@ -148,7 +148,7 @@ pub(super) fn illisible(categorie: &'static str) -> Constat {
 /// Le script exécuté dans la fenêtre administrateur : chaque commande est annoncée, puis « OK » ou l'erreur.
 /// Une fenêtre muette ne se distingue pas d'une fenêtre figée. Chaque étape a son try/catch : une erreur PowerShell
 /// compte, comme un programme externe en échec, pour une étape ratée, et la fenêtre passe à la suivante. Après chaque
-/// correctif, une ligne « ok » ou « echec » s'ajoute au fichier `resultats`, que Vanguard lit à la fermeture.
+/// correctif, une ligne « ok » ou « echec » s'écrit dans le fichier `resultats`, que Vanguard lit à la fermeture.
 fn script_admin(correctifs: &[Vec<String>], resultats: &str) -> String {
     let texte = crate::commande::ps_texte;
     let mut script = String::from(tr!(
@@ -166,12 +166,17 @@ fn script_admin(correctifs: &[Vec<String>], resultats: &str) -> String {
          $echecs = 0\n"
     ));
     // Ce que la fenêtre affiche reste écrit à côté du script (« .log ») : une fenêtre fermée ne laisserait aucune trace
-    // de ce qui a réussi ou échoué.
+    // de ce qui a réussi ou échoué. Ce dossier, tout programme du compte peut le modifier, et la fenêtre écrit avec les
+    // droits d'administrateur : sous un nom connu d'avance, un lien posé là lui ferait écrire ailleurs (un fichier du
+    // système). Le journal finit donc par un nombre qu'elle tire elle-même, sans rien écraser (-NoClobber), et le
+    // fichier des résultats ne s'ouvre que s'il n'existe pas encore (CreateNew : ni fichier ni lien posé avant).
     let journal = resultats.strip_suffix(".resultats").unwrap_or(resultats);
     let _ = writeln!(
         script,
-        "try {{ Start-Transcript -LiteralPath '{}.log' -ErrorAction Stop | Out-Null }} catch {{ }}",
-        texte(journal)
+        "try {{ Start-Transcript -LiteralPath ('{}-' + [guid]::NewGuid().ToString('N') + '.log') -NoClobber -ErrorAction Stop | Out-Null }} catch {{ }}\n\
+         try {{ $resultats = [IO.StreamWriter]::new([IO.File]::Open('{}', 'CreateNew', 'Write', 'Read')); $resultats.AutoFlush = $true }} catch {{ $resultats = $null }}",
+        texte(journal),
+        texte(resultats)
     );
     for commandes in correctifs {
         script += "$avant = $echecs\n";
@@ -195,13 +200,9 @@ fn script_admin(correctifs: &[Vec<String>], resultats: &str) -> String {
                 texte(&crate::ui::commande_affichable(c))
             );
         }
-        let _ = writeln!(
-            script,
-            "try {{ Add-Content -LiteralPath '{}' -Value $(if ($echecs -gt $avant) {{ 'echec' }} else {{ 'ok' }}) }} catch {{ }}",
-            texte(resultats)
-        );
+        script += "if ($resultats) { $resultats.WriteLine($(if ($echecs -gt $avant) { 'echec' } else { 'ok' })) }\n";
     }
-    script += "try { Stop-Transcript | Out-Null } catch { }\n";
+    script += "if ($resultats) { $resultats.Dispose() }\ntry { Stop-Transcript | Out-Null } catch { }\n";
     script += tr!(
         "if ($echecs) { Write-Host ''; Write-Host \"Terminé, avec $echecs étape(s) en échec.\" -ForegroundColor Red; Read-Host 'Appuie sur Entrée pour fermer'; exit 1 }\n\
                Write-Host ''; Write-Host 'Terminé.' -ForegroundColor Green; Read-Host 'Appuie sur Entrée pour fermer'; exit 0",
@@ -209,6 +210,49 @@ fn script_admin(correctifs: &[Vec<String>], resultats: &str) -> String {
                Write-Host ''; Write-Host 'Finished.' -ForegroundColor Green; Read-Host 'Press Enter to close'; exit 0"
     );
     script
+}
+
+/// Code de sortie de la fenêtre administrateur quand le script n'est plus celui que Vanguard a écrit.
+const SCRIPT_MODIFIE: i32 = 6;
+/// Code de sortie quand PowerShell est en mode restreint (stratégie WDAC ou AppLocker) : sans .NET, l'empreinte ne se
+/// vérifie pas, et un script modifié serait annoncé à tort.
+const LANGAGE_RESTREINT: i32 = 7;
+
+/// L'empreinte SHA-256, en hexadécimal majuscule, comme la calcule PowerShell.
+fn sha256_hex(octets: &[u8]) -> String {
+    use sha2::Digest;
+    sha2::Sha256::digest(octets)
+        .iter()
+        .fold(String::with_capacity(64), |mut s, o| {
+            let _ = write!(s, "{o:02X}");
+            s
+        })
+}
+
+/// Ce que lance la demande d'administrateur, à la place du script lui-même : relire le script une seule fois, en
+/// mémoire, vérifier son empreinte, puis exécuter ces octets-là. Le script est dans un dossier que tout programme de ce
+/// compte peut modifier, et la demande d'administrateur reste ouverte le temps qu'on la lise : lancé par son chemin
+/// (-File), un script remplacé entre-temps tournait avec les droits d'administrateur, derrière une demande qui ne
+/// montre que « Windows PowerShell ». L'empreinte voyage dans la ligne de commande, fixée quand la demande est faite.
+/// Une seule ligne, en clair et sans guillemet double : la demande d'administrateur la montre (« Plus de détails »),
+/// elle passe telle quelle entre guillemets, et reste loin des quelque 2 048 caractères au-delà desquels ShellExecute
+/// a été vu tronquer ses paramètres (encodée, elle en faisait 2 750).
+fn amorce_admin(chemin: &str, empreinte: &str) -> String {
+    let chemin = crate::commande::ps_texte(chemin);
+    trf!(
+        "if ($ExecutionContext.SessionState.LanguageMode -ne 'FullLanguage') {{ Write-Host 'PowerShell en mode restreint : script non vérifiable, rien n''est lancé.' -ForegroundColor Red; Read-Host 'Appuie sur Entrée pour fermer'; exit {LANGAGE_RESTREINT} }}; \
+         $o = $null; try {{ $o = [IO.File]::ReadAllBytes('{chemin}') }} catch {{ }}; \
+         $h = if ($null -ne $o) {{ [BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash($o)).Replace('-', '') }} else {{ '' }}; \
+         if ($h -ne '{empreinte}') {{ Write-Host 'Script modifié ou supprimé depuis son écriture : rien n''est lancé.' -ForegroundColor Red; Read-Host 'Appuie sur Entrée pour fermer'; exit {SCRIPT_MODIFIE} }}; \
+         $t = [Text.Encoding]::UTF8.GetString($o); if ($t.Length -and $t[0] -eq [char]0xFEFF) {{ $t = $t.Substring(1) }}; \
+         & ([ScriptBlock]::Create($t))",
+        "if ($ExecutionContext.SessionState.LanguageMode -ne 'FullLanguage') {{ Write-Host 'PowerShell in restricted mode: script cannot be verified, nothing is run.' -ForegroundColor Red; Read-Host 'Press Enter to close'; exit {LANGAGE_RESTREINT} }}; \
+         $o = $null; try {{ $o = [IO.File]::ReadAllBytes('{chemin}') }} catch {{ }}; \
+         $h = if ($null -ne $o) {{ [BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash($o)).Replace('-', '') }} else {{ '' }}; \
+         if ($h -ne '{empreinte}') {{ Write-Host 'Script modified or deleted since it was written: nothing is run.' -ForegroundColor Red; Read-Host 'Press Enter to close'; exit {SCRIPT_MODIFIE} }}; \
+         $t = [Text.Encoding]::UTF8.GetString($o); if ($t.Length -and $t[0] -eq [char]0xFEFF) {{ $t = $t.Substring(1) }}; \
+         & ([ScriptBlock]::Create($t))"
+    )
 }
 
 /// Lance des commandes dans une fenêtre PowerShell administrateur (une demande UAC). Retourne `true` si tout a réussi.
@@ -235,8 +279,9 @@ pub fn powershell_admin_chacune(correctifs: &[Vec<String>]) -> Vec<bool> {
     // BOM : sans lui, Windows PowerShell 5.1 lit le fichier en ANSI et casse les accents.
     let script = script_admin(correctifs, &resultats.display().to_string());
     let contenu = format!("\u{feff}{entete}{}\r\n", script.replace('\n', "\r\n"));
+    let empreinte = sha256_hex(contenu.as_bytes());
     if std::fs::create_dir_all(&dossier)
-        .and_then(|()| std::fs::write(&chemin, contenu))
+        .and_then(|()| std::fs::write(&chemin, &contenu))
         .is_err()
     {
         trp!(
@@ -252,26 +297,41 @@ pub fn powershell_admin_chacune(correctifs: &[Vec<String>]) -> Vec<bool> {
         "    Fix script (readable): {}",
         chemin.display()
     );
-    let fichier = crate::commande::ps_texte(&chemin.display().to_string());
+    let amorce = crate::commande::ps_texte(&amorce_admin(&chemin.display().to_string(), &empreinte));
     // Demande d'administrateur refusée : Start-Process échoue et $p reste vide. Sans ce test, l'appel de méthode
     // sur $null était sauté et « exit $p.ExitCode » devenait « exit 0 » : la correction s'affichait « fait ».
     // Attente sans limite : la fenêtre est visible et attend Entrée, un délai compterait aussi le temps de lecture.
     let lanceur = trf!(
-        "$p = Start-Process powershell -Verb RunAs -PassThru -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','\"{fichier}\"'; \
+        "$q = [char]34; \
+         $p = Start-Process powershell -Verb RunAs -PassThru -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-Command',($q + '{amorce}' + $q); \
          if (-not $p) {{ Write-Host 'Demande d''administrateur refusée : rien n''a été modifié.'; exit 3 }}; \
          $p.WaitForExit(); \
          if ($null -eq $p.ExitCode) {{ exit 4 }}; exit $p.ExitCode",
-        "$p = Start-Process powershell -Verb RunAs -PassThru -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','\"{fichier}\"'; \
+        "$q = [char]34; \
+         $p = Start-Process powershell -Verb RunAs -PassThru -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-Command',($q + '{amorce}' + $q); \
          if (-not $p) {{ Write-Host 'Administrator prompt refused: nothing was changed.'; exit 3 }}; \
          $p.WaitForExit(); \
          if ($null -eq $p.ExitCode) {{ exit 4 }}; exit $p.ExitCode"
     );
     let statut = powershell().args(["-NoProfile", "-Command", &lanceur]).status();
     let reussi = statut.as_ref().is_ok_and(std::process::ExitStatus::success);
-    if statut.is_ok_and(|s| s.code() == Some(crate::reparer::SANS_POINT_ARRETE)) {
+    let code = statut.as_ref().ok().and_then(std::process::ExitStatus::code);
+    if code == Some(crate::reparer::SANS_POINT_ARRETE) {
         trp!(
             "    Pas de point de restauration : arrêté à ta demande, rien n'a changé.",
             "    No restore point: stopped as you asked, nothing was changed."
+        );
+    }
+    if code == Some(SCRIPT_MODIFIE) {
+        trp!(
+            "    ✖ Le script de correction a été modifié ou supprimé après son écriture : rien n'a été lancé avec les droits d'administrateur. Un autre programme y a touché : lance une analyse antivirus.",
+            "    ✖ The fix script was modified or deleted after being written: nothing was run with administrator rights. Another program touched it: run an antivirus scan."
+        );
+    }
+    if code == Some(LANGAGE_RESTREINT) {
+        trp!(
+            "    PowerShell est en mode restreint sur ce PC (stratégie de sécurité) : Vanguard ne peut pas y vérifier son script, rien n'a été lancé.",
+            "    PowerShell is in restricted mode on this PC (security policy): Vanguard cannot verify its script there, nothing was run."
         );
     }
     let lus = std::fs::read_to_string(&resultats).unwrap_or_default();
@@ -1124,11 +1184,9 @@ mod tests {
         assert_eq!(s.matches("} catch { $echecs++").count(), 2);
         // Une ligne de résultat par correctif, pour savoir lesquels ont réussi.
         assert_eq!(s.matches("$avant = $echecs").count(), 2);
-        assert_eq!(
-            s.matches(r"Add-Content -LiteralPath 'C:\Users\Zoé O''Brien\correction.resultats'")
-                .count(),
-            2
-        );
+        assert_eq!(s.matches("$resultats.WriteLine(").count(), 2);
+        // Ouvert seulement s'il n'existe pas encore : un lien posé d'avance à ce nom ne détourne pas l'écriture.
+        assert!(s.contains(r"[IO.File]::Open('C:\Users\Zoé O''Brien\correction.resultats', 'CreateNew'"));
     }
 
     /// Une commande qui reprend un nom piégé : la fenêtre administrateur l'annonce filtrée, rien ne s'efface à l'écran,
@@ -1150,9 +1208,45 @@ mod tests {
             &[vec!["Update-MpSignature".to_string()]],
             r"C:\Users\Zoé O'Brien\correction-1.resultats",
         );
-        assert!(s.contains(r"Start-Transcript -LiteralPath 'C:\Users\Zoé O''Brien\correction-1.log'"));
+        // Un nom que la fenêtre tire elle-même, sans rien écraser : pas de lien à poser d'avance sous ce nom.
+        assert!(s.contains(
+            r"Start-Transcript -LiteralPath ('C:\Users\Zoé O''Brien\correction-1-' + [guid]::NewGuid().ToString('N') + '.log') -NoClobber"
+        ));
         let position = |mot: &str| s.find(mot).unwrap();
         assert!(position("Start-Transcript") < position("Update-MpSignature"));
         assert!(position("Stop-Transcript") < position("Read-Host"));
+    }
+
+    #[test]
+    fn empreinte_sha256_de_reference() {
+        // Les valeurs de la norme (FIPS 180-2), en majuscules comme les rend PowerShell.
+        assert_eq!(
+            sha256_hex(b"abc"),
+            "BA7816BF8F01CFEA414140DE5DAE2223B00361A396177A9CB410FF61F20015AD"
+        );
+        assert_eq!(
+            sha256_hex(b""),
+            "E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855"
+        );
+    }
+
+    /// La fenêtre administrateur lit le script une seule fois et n'exécute que ces octets-là, après avoir vérifié leur
+    /// empreinte.
+    #[test]
+    fn l_amorce_verifie_le_script_avant_de_le_lancer() {
+        let a = amorce_admin(r"C:\Users\Zoé O'Brien\correction-1.ps1", "ABC123");
+        assert_eq!(a.matches("ReadAllBytes(").count(), 1, "{a}");
+        assert!(
+            a.contains(r"ReadAllBytes('C:\Users\Zoé O''Brien\correction-1.ps1')"),
+            "{a}"
+        );
+        assert!(a.contains("if ($h -ne 'ABC123')"), "{a}");
+        let position = |mot: &str| a.find(mot).unwrap();
+        assert!(position(&format!("exit {LANGAGE_RESTREINT} ")) < position("ReadAllBytes"));
+        assert!(position(&format!("exit {SCRIPT_MODIFIE} ")) < position("[ScriptBlock]::Create"));
+        assert!(!a.contains("-File"));
+        // Une seule ligne sans guillemet double : elle passe entre guillemets dans la ligne de commande.
+        assert!(!a.contains('\n') && !a.contains('"'), "{a}");
+        assert!(a.len() < 1000, "{}", a.len());
     }
 }

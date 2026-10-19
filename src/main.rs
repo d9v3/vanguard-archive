@@ -1438,6 +1438,9 @@ async fn main() {
     protection::environnement::afficher();
     avertir_si_root();
     passage::au_lancement();
+    // Après le passage, qui a pu déplacer l'ancien dossier avec ses droits d'avant.
+    #[cfg(unix)]
+    reseau::proteger_dossier_local();
     let args = Args::from_arg_matches(&ligne_de_commande().get_matches()).unwrap_or_else(|e| e.exit());
     match args.commande {
         None => menu().await,

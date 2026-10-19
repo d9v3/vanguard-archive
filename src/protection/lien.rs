@@ -991,7 +991,17 @@ fn age(domaine: &str) -> Result<(chrono::DateTime<chrono::Utc>, i64), String> {
     }
     let r = crate::commande::lancer(
         Command::new("curl")
-            .args(["-sL", "--max-time", "12"])
+            // rdap.org renvoie vers le registre du domaine : la redirection reste en HTTPS, sinon quelqu'un sur le
+            // chemin pourrait répondre à sa place et rajeunir ou vieillir le domaine.
+            .args([
+                "-sL",
+                "--proto",
+                "=https",
+                "--proto-redir",
+                "=https",
+                "--max-time",
+                "12",
+            ])
             .args(["-H", "Accept: application/rdap+json"])
             .args(["-w", "\n%{http_code}"])
             .arg(format!("https://rdap.org/domain/{domaine}")),

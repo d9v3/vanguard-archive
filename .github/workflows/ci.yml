@@ -55,7 +55,10 @@ jobs:
           rustup target add x86_64-unknown-linux-musl x86_64-pc-windows-gnu aarch64-apple-darwin x86_64-apple-darwin
           sudo apt-get update -qq
           sudo apt-get install -y -qq musl-tools binutils-mingw-w64-x86-64
-      - uses: Swatinem/rust-cache@v2
+      # Actions venues d'autres que GitHub : épinglées par leur commit. Une étiquette (v2) se déplace ; si leur dépôt était
+      # piraté, une version piégée toucherait ce que compile ce travail. À mettre à jour à la main (le commentaire dit la
+      # version).
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - name: Mise en forme
         run: cargo fmt --check
       - name: Clippy, zéro remarque, sur les quatre cibles
@@ -121,7 +124,7 @@ jobs:
       - uses: actions/checkout@v7
       # cargo-audit tel que RustSec le publie (ses versions sur GitHub), posé en quelques secondes : le compiler ici
       # (cargo install) prenait trois minutes et demie chaque nuit. Rien d'autre à compiler : seul Cargo.lock est lu.
-      - uses: taiki-e/install-action@v2
+      - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
         with:
           tool: cargo-audit
       - name: cargo audit
@@ -182,7 +185,7 @@ jobs:
           rustup target add x86_64-unknown-linux-musl x86_64-pc-windows-gnu
           sudo apt-get update -qq
           sudo apt-get install -y -qq musl-tools gcc-mingw-w64-x86-64
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       # Les deux cibles d'un seul cargo : l'optimisation finale (LTO, une seule unité de code) n'occupe qu'un cœur par
       # programme, et cargo les mène de front ; deux cargo lancés ensemble s'attendraient (verrou du dossier).
       - name: Deux compilations, un seul programme
@@ -211,7 +214,7 @@ jobs:
         run: |
           rustup update stable
           rustup default stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       # La cible est donnée : .cargo/config.toml vise Linux par défaut. Ici, PowerShell existe vraiment (pas comme
       # sous Wine) : les tests lisent le vrai registre et le vrai système.
       - name: Tests sur un vrai Windows
