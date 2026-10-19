@@ -553,6 +553,9 @@ if (Question 'Faire une vraie copie de tes dossiers vers le dossier partagé (da
     elseif ($copie -and (Get-FileHash $copie.FullName).Hash -eq (Get-FileHash $temoin).Hash) { Ok 'Fichier témoin copié à l''identique' }
     else { Bug 'Fichier témoin PAS copié à l''identique' }
     if ((Sortie 'copier') -match 'Copie terminée et vérifiée|Copy finished and checked') { Ok 'Copie vérifiée par Gardien' } else { Bug 'Copie PAS vérifiée' }
+    # Le test de restauration sur cette copie : relue sur le disque et comparée aux originaux.
+    LancerAvec 'verifier-copie' @('verifier-copie', $vers) "`n"
+    if ((Sortie 'verifier-copie') -match 'The copy reads back|La copie se relit') { Ok 'Copie relue et comparée (test de restauration)' } else { Bug 'Test de restauration de la copie en échec' }
     Remove-Item $temoin -Force -ErrorAction SilentlyContinue
     Remove-Item $vers -Recurse -Force -ErrorAction SilentlyContinue
 } else { Info 'Vraie copie sautée.' }
@@ -731,6 +734,35 @@ if (Question 'Faire ce test ?') {
         Start-Process powershell -Verb RunAs -Wait -ArgumentList '-NoProfile', '-Command', "Remove-NetFirewallRule -DisplayName 'Gardien : bloquer *'"
     }
 } else { Info 'Sautée (il faut répondre aux fenêtres UAC).' }
+
+Etape 'Outils récents : bilan durci, caméra et micro, quarantaine, raccourci, vérifier ma clé'
+# Les vérifications ajoutées de la 0.60 à la 0.64 : elles se lisent dans l'audit JSON déjà fait plus haut.
+try {
+    $audit = Sortie 'machine-json' | ConvertFrom-Json
+    foreach ($cat in 'Durcissement', 'Heure') {
+        $n = @($audit.constats | Where-Object { $_.categorie -eq $cat }).Count
+        if ($n) { Ok "Catégorie « $cat » au bilan ($n constat(s))" } else { Bug "Catégorie « $cat » ABSENTE du bilan" }
+    }
+    @($audit.constats | Where-Object { $_.categorie -in 'Durcissement', 'Fin de support', 'Comptes', 'Navigateur', 'Fichiers secrets', 'Sauvegardes', 'Bluetooth' -and $_.probleme }) |
+        ForEach-Object { Info "$($_.categorie) : $($_.message)" }
+} catch { Bug "machine --json illisible : $($_.Exception.Message)" }
+Lancer 'camera-micro' @('camera-micro')
+$c = Sortie 'camera-micro'
+if ($c -match 'Camera and microphone|Caméra et micro') { Ok 'Caméra et micro : historique lu' } else { Bug 'Caméra et micro : écran absent' }
+if ($c -match 'PowerShell is not responding|PowerShell ne répond pas') { Bug 'Caméra et micro : lecture en échec' }
+LancerAvec 'quarantaine' @('quarantaine') "`n"
+if ((Sortie 'quarantaine') -match 'Quarantine|Quarantaine') { Ok 'Quarantaine ouverte' } else { Bug 'Quarantaine : écran absent' }
+# Raccourci sur le Bureau : posé, présent, puis retiré.
+$bureau = [Environment]::GetFolderPath('Desktop')
+Lancer 'raccourci-on' @('raccourci', 'on')
+if (Test-Path (Join-Path $bureau 'Gardien.lnk')) { Ok 'Raccourci posé sur le Bureau' } else { Bug 'Raccourci NON posé sur le Bureau' }
+Lancer 'raccourci-off' @('raccourci', 'off')
+if (-not (Test-Path (Join-Path $bureau 'Gardien.lnk'))) { Ok 'Raccourci retiré' } else { Bug 'Raccourci ENCORE sur le Bureau' }
+# Vérifier ma clé : la liste des disques, quittée sans rien écrire ; aucune partition de la clé n'y est proposée.
+LancerAvec 'verifier-cle' @('verifier-cle') "`n"
+$k = Sortie 'verifier-cle'
+if ($k -match '(?m)^\s+\d+\s+(GARDIEN|WIN11|VTOYEFI|MACOS)\b') { Bug 'Vérifier ma clé propose une partition de la clé GARDIEN' } else { Ok 'Aucune partition de la clé proposée' }
+if ($k -match 'Start\?|Commencer \?') { Bug 'Vérifier ma clé est allé jusqu''à la question d''écriture' }
 
 Etape 'Couleurs et accents dans la console'
 if ($Auto) { Info 'Sautée : il faut regarder l''écran (test avec questions).' } else {
