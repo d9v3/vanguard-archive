@@ -703,11 +703,12 @@ fn relever() -> Option<Vec<Trouvaille>> {
 
 #[cfg(windows)]
 fn relever() -> Option<Vec<Trouvaille>> {
-    // Une seule lecture PowerShell, en sections : programmes installés (date d'installation, ou celle de leur clé),
+    // Une seule lecture PowerShell, en sections : programmes installés (date d'installation, ou celle de leur clé,
+    // lue seulement quand la première manque : un Get-Item par programme installé, des centaines, ralentissait tout),
     // services, processus, connexions établies, clés Run, fichiers posés dans Téléchargements, Bureau, temporaires.
     let sortie = crate::machine::windows::ps(
         "try { foreach ($k in 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*', 'HKLM:\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*', 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*') { \
-         Get-ItemProperty $k -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName } | ForEach-Object { $d = ''; try { $d = (Get-Item $_.PSPath).LastWriteTime.ToString('yyyy-MM-dd') } catch {}; \
+         Get-ItemProperty $k -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName } | ForEach-Object { $d = ''; if ($_.InstallDate -notmatch '^\\d{8}$') { try { $d = (Get-Item $_.PSPath).LastWriteTime.ToString('yyyy-MM-dd') } catch {} }; \
          \"INS|$($_.DisplayName)|$($_.InstallDate)|$d|$($_.UninstallString)|$($_.QuietUninstallString)\" } }; 'INS_FIN' } catch {}; \
          try { Get-CimInstance Win32_Service | ForEach-Object { \"SVC|$($_.Name)|$($_.DisplayName)|$($_.State)|$($_.PathName)\" }; 'SVC_FIN' } catch {}; \
          try { Get-Process | ForEach-Object { $c = ''; try { $c = $_.Path } catch {}; \"PRC|$($_.Id)|$($_.ProcessName)|$c\" }; 'PRC_FIN' } catch {}; \
