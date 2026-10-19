@@ -93,6 +93,7 @@ Entrée ouvre celle en surbrillance, Échap efface. Au menu principal, elle trou
        En ligne de commande : gardien guide windows, gardien guide winget, gardien guide cache dns
  11  Dépanner pas à pas › pas d'Internet, Wi-Fi qui coupe, ordinateur lent, pas de son, imprimante,
        disque plein : deux ou trois questions, puis Gardien vérifie et propose la bonne réparation.
+       Et : après une infection, nouvel ordinateur, ordinateur qui part (vente, don).
        En ligne de commande : gardien depanner son
   q  Quitter
   Raccourcis des anciennes versions, depuis le menu principal : u mises à jour, r réparer, o diagnostic,

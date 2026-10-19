@@ -273,6 +273,18 @@ fn lenteur_fiche_depanner_et_copie_sans_rien_changer() {
     assert_eq!(depanner.code, Some(0), "{}", depanner.erreurs);
     let texte = sans_couleurs(&depanner.texte);
     assert!(texte.contains("printer") && texte.contains("Disk full"), "{texte}");
+    assert!(
+        texte.contains("leaving") && texte.contains("After an infection"),
+        "{texte}"
+    );
+    // Ordinateur qui part, quitté à la première question : rien n'est effacé ni lancé.
+    let depart = gardien("en", &["troubleshoot", "leaving"], "", 30);
+    assert_eq!(depart.code, Some(0), "{}", depart.erreurs);
+    assert!(
+        sans_couleurs(&depart.texte).contains("Computer leaving"),
+        "{}",
+        depart.texte
+    );
     // Copier vers un dossier qui n'existe pas : rien n'est copié.
     let copie = gardien("fr", &["copier-fichiers", "/chemin/qui/n-existe/pas"], "", 30);
     assert_eq!(copie.code, Some(0), "{}", copie.erreurs);

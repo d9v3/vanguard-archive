@@ -55,7 +55,7 @@ pour revenir.
 | **Réseau local** | Chaque appareil, son fabricant, ses ports ouverts et ses risques ; les nouveaux venus signalés, les ports ouverts sur la box, l'adresse de la maison sur liste noire. |
 | **Wi-Fi, NAT, DNS, caméras** | Le canal Wi-Fi le plus libre, le type de NAT pour le jeu, le DNS le plus rapide (sans retirer un DNS qui protège), les caméras cachées. |
 | **Connexion pour le jeu** | Ping, gigue, pertes, débit et bufferbloat, comparés à tes habitudes. |
-| **Dépanner** | Diagnostic de l'ordinateur, pannes de tous les jours pas à pas (Internet, Wi-Fi, lenteur, son, imprimante, disque plein), « Pourquoi c'est lent ? », fiche de l'ordinateur, réparations. |
+| **Dépanner** | Diagnostic de l'ordinateur, pannes de tous les jours pas à pas (Internet, Wi-Fi, lenteur, son, imprimante, disque plein), après une infection, nouvel ordinateur, ordinateur qui part, « Pourquoi c'est lent ? », fiche de l'ordinateur, réparations. |
 | **Optimiser et nettoyer** | Réglages de confidentialité et de performance qui s'annulent exactement, nettoyage à cocher avec la place gagnée mesurée, programmes du démarrage. |
 | **Protection** | Fichiers-pièges contre les rançongiciels, blocages de Windows Defender, 308 règles YARA, antivirus, bac à sable, intégrité des fichiers critiques, mots de passe fuités, connexions sortantes, faux technicien (logiciels de prise de contrôle à distance), liens dangereux, fichiers téléchargés. |
 | **Suivi** | Surveillance toutes les heures, entretien du mois, rapport HTML avec la courbe des notes, apprentissage sur ton ordinateur. |
@@ -106,7 +106,12 @@ paniques du noyau et rapports de plantage sous macOS), avec une copie texte enre
 d'Internet, Wi-Fi qui coupe, ordinateur lent, pas de son, imprimante qui ne marche pas, disque plein. Deux ou trois
 questions, puis Gardien vérifie lui-même (adresse, box, Internet, DNS ; signal Wi-Fi ; service du son et sortie
 choisie ; file d'impression et imprimante sur le réseau ; place des disques) et propose la bonne réparation ou le
-bon outil, toujours après accord.
+bon outil, toujours après accord. Et trois parcours pour les grands moments : **après une infection** (ce qui presse
+selon le signe, le bilan de ce qui a pu s'installer, les analyses dans l'ordre, puis les mots de passe à changer,
+le courriel en premier) ; **nouvel ordinateur** (mises à jour, chiffrement, sauvegardes, pack de départ,
+confidentialité, dans l'ordre) ; **ordinateur qui part**, vendu ou donné (copie vérifiée d'abord, comptes
+déconnectés, clé BitLocker ou FileVault mise de côté, effacement sûr par l'outil du système, puce TPM remise à
+zéro). Gardien n'efface rien lui-même.
 
 **Pourquoi c'est lent ?** — un instantané de deux secondes : ce qui occupe le processeur, la mémoire et le disque,
 programme par programme ; la durée du démarrage et ce qui le retarde ; les programmes lancés à l'ouverture de
@@ -287,7 +292,7 @@ Chaque entrée du menu existe aussi en commande.
 | `gardien nettoyer [--liste]` | nettoyer le système ; `--liste` : la place à gagner, sans rien effacer |
 | `gardien logiciels [--liste] [--recommandes]` | logiciels à installer par catégorie ; `--liste` : leur état, sans rien installer |
 | `gardien diagnostic` | diagnostic de l'ordinateur : matériel, système, plantages et erreurs récents |
-| `gardien depanner [sujet]` | dépanner pas à pas : `internet`, `wifi`, `lent`, `son`, `imprimante`, `disque` |
+| `gardien depanner [sujet]` | dépanner pas à pas : `internet`, `wifi`, `lent`, `son`, `imprimante`, `disque`, `infection`, `nouveau`, `depart` |
 | `gardien lenteur` | pourquoi c'est lent : processeur, mémoire, disque, démarrage, programmes à l'ouverture |
 | `gardien demarrage` | programmes au démarrage : les retirer ou les remettre, après accord ; chaque retrait s'annule |
 | `gardien fiche [--json]` | fiche de l'ordinateur ; `--json` sans les numéros de série |

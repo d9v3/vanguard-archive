@@ -92,6 +92,7 @@ highlighted one, Esc clears it. In the main menu, it also finds each tool of the
        gardien guide windows, gardien guide winget, gardien guide dns cache
  11  Troubleshoot step by step › no Internet, Wi-Fi dropping, slow computer, no sound, printer, disk full:
        two or three questions, then Gardien checks and suggests the right repair.
+       And: after an infection, new computer, computer leaving (sale, gift).
        From the command line: gardien troubleshoot sound
   q  Quit
   Shortcuts from earlier versions, in the main menu: u updates, r repair, o diagnostic, i integrity,

@@ -276,10 +276,12 @@ enum Commande {
     /// partition GARDIENLOG de la clé).
     #[command(visible_alias = "computers")]
     Ordinateurs,
-    /// Dépanner pas à pas : pas d'Internet, Wi-Fi qui coupe, ordinateur lent, pas de son, imprimante, disque plein.
+    /// Dépanner pas à pas : pas d'Internet, Wi-Fi qui coupe, ordinateur lent, pas de son, imprimante, disque plein ;
+    /// après une infection, nouvel ordinateur, ordinateur qui part (vente, don).
     #[command(visible_alias = "troubleshoot")]
     Depanner {
-        /// Le sujet : internet, wifi, lent, son, imprimante, disque (ou des mots qui le décrivent).
+        /// Le sujet : internet, wifi, lent, son, imprimante, disque, infection, nouveau, depart (ou des mots qui le
+        /// décrivent).
         sujet: Vec<String>,
     },
     /// Vérifier Gardien lui-même : version, date de compilation, empreinte SHA-256 du programme (à comparer à la
@@ -1221,7 +1223,8 @@ const AIDES_EN: &[(&str, &str)] = &[
                          copy, nothing deleted or overwritten, an interrupted copy resumes"),
     ("ordinateurs", "My computers: those where the GARDIEN key ran a check, their grade and remaining problems (on the \
      key's GARDIENLOG partition)"),
-    ("depanner", "Troubleshoot step by step: no Internet, Wi-Fi dropping, slow computer, no sound, printer, disk full"),
+    ("depanner", "Troubleshoot step by step: no Internet, Wi-Fi dropping, slow computer, no sound, printer, disk full; \
+                  after an infection, new computer, computer leaving (sale, gift)"),
 ];
 
 /// Aide anglaise des options : (commande, option, aide).
@@ -1257,7 +1260,8 @@ const OPTIONS_EN: &[(&str, &str, &str)] = &[
     ("guide", "quoi", "A system (linux, windows, macos, all), a program (systemctl, winget…) or words to look for"),
     ("fiche", "json", "The specs as JSON, for a script (without the serial numbers)"),
     ("copier-fichiers", "destination", "A folder on an external disk (default: chosen among the plugged-in disks)"),
-    ("depanner", "sujet", "The subject: internet, wifi, slow, sound, printer, disk (or words describing it)"),
+    ("depanner", "sujet", "The subject: internet, wifi, slow, sound, printer, disk, infection, new, leaving (or words \
+                             describing it)"),
 ];
 
 /// La ligne de commande, avec son aide en anglais si l'interface est en anglais (l'aide écrite plus haut, en

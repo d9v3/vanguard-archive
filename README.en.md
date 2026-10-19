@@ -50,7 +50,7 @@ In the menu, choose **1** (full check), then **2** (fix). Arrows, Enter, and Esc
 | **Local network** | Every device, its manufacturer, its open ports and its risks; newcomers flagged, ports opened on the router, the home's address on a blocklist. |
 | **Wi-Fi, NAT, DNS, cameras** | The freest Wi-Fi channel, the NAT type for gaming, the fastest DNS (without removing a DNS that protects you), hidden cameras. |
 | **Connection for gaming** | Ping, jitter, loss, speed and bufferbloat, compared with your habits. |
-| **Troubleshoot** | Computer diagnostic, everyday problems step by step (Internet, Wi-Fi, slowness, sound, printer, full disk), “Why is it slow?”, computer specs, repairs. |
+| **Troubleshoot** | Computer diagnostic, everyday problems step by step (Internet, Wi-Fi, slowness, sound, printer, full disk), after an infection, new computer, computer leaving, “Why is it slow?”, computer specs, repairs. |
 | **Optimize and clean up** | Privacy and performance settings undone exactly, a cleanup checklist with the space gained measured, startup programs. |
 | **Protection** | Decoy files against ransomware, Windows Defender blocking, 308 YARA rules, antivirus, sandbox, integrity of critical files, leaked passwords, outbound connections, tech-support scam (remote control tools), dangerous links, downloaded files. |
 | **Follow-up** | Hourly monitoring, monthly check-up, HTML report with the grade curve, learning on your computer. |
@@ -99,7 +99,12 @@ reports on macOS), with a text copy saved on the key.
 **Troubleshoot step by step** — everyday problems, handled the way someone who knows would: no Internet, Wi-Fi
 dropping, slow computer, no sound, printer not working, disk full. Two or three questions, then Gardien checks by
 itself (address, router, Internet, DNS; Wi-Fi signal; sound service and selected output; print queue and printer on
-the network; disk space) and suggests the right repair or the right tool, always with your consent.
+the network; disk space) and suggests the right repair or the right tool, always with your consent. And three
+journeys for the big moments: **after an infection** (what is urgent depending on the sign, the check of what may
+have been installed, the scans in order, then the passwords to change, email first); **new computer** (updates,
+encryption, backups, starter pack, privacy, in order); **computer leaving**, sold or given (verified copy first,
+accounts signed out, BitLocker or FileVault key set aside, secure wipe by the system's tool, TPM chip cleared).
+Gardien never wipes anything itself.
 
 **Why is it slow?** — a two-second snapshot: what keeps the processor, memory and disk busy, program by program;
 how long startup takes and what delays it; the programs started at login and their weight. Those that work for a
@@ -271,7 +276,7 @@ Each menu entry is also a command.
 | `gardien clean [--list]` | clean up the system; `--list`: the space to gain, deleting nothing |
 | `gardien apps [--list] [--recommended]` | software to install by category; `--list`: their state, installing nothing |
 | `gardien diag` | computer diagnostic: hardware, system, recent crashes and errors |
-| `gardien troubleshoot [subject]` | troubleshoot step by step: `internet`, `wifi`, `slow`, `sound`, `printer`, `disk` |
+| `gardien troubleshoot [subject]` | troubleshoot step by step: `internet`, `wifi`, `slow`, `sound`, `printer`, `disk`, `infection`, `new`, `leaving` |
 | `gardien slow` | why it is slow: processor, memory, disk, startup, programs at login |
 | `gardien startup` | startup programs: remove or put them back, after your consent; each removal is undone exactly |
 | `gardien specs [--json]` | computer specs; `--json` without the serial numbers |
