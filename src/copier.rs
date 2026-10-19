@@ -258,12 +258,28 @@ pub(crate) fn disques() -> Vec<Disque> {
     const SYSTEMES: &[&str] = &[
         "vfat", "exfat", "ntfs", "ntfs3", "fuseblk", "ext2", "ext3", "ext4", "btrfs", "xfs", "f2fs", "hfsplus", "udf",
     ];
+    let montages = std::fs::read_to_string("/proc/mounts").unwrap_or_default();
+    // Les autres partitions de la clé GARDIEN (VTOYEFI, WIN11, MACOS…) n'ont pas son témoin, mais sont sur le même
+    // support : elles ne sont pas un disque où copier ou écrire des essais.
+    let de_la_cle: Vec<String> = montages
+        .lines()
+        .filter_map(|l| {
+            let c: Vec<&str> = l.split_whitespace().collect();
+            let (source, point) = (*c.first()?, *c.get(1)?);
+            est_la_cle(Path::new(&sans_echappements(point)))
+                .then(|| disque_de_la_partition(source))
+                .flatten()
+        })
+        .collect();
     let mut liste = Vec::new();
-    for l in std::fs::read_to_string("/proc/mounts").unwrap_or_default().lines() {
+    for l in montages.lines() {
         let c: Vec<&str> = l.split_whitespace().collect();
-        let [_, point, genre, options, ..] = c[..] else {
+        let [source, point, genre, options, ..] = c[..] else {
             continue;
         };
+        if disque_de_la_partition(source).is_some_and(|d| de_la_cle.contains(&d)) {
+            continue;
+        }
         let point = PathBuf::from(sans_echappements(point));
         let monte_pour_l_utilisateur = ["/run/media/", "/media/", "/mnt/"]
             .iter()
@@ -288,10 +304,67 @@ pub(crate) fn disques() -> Vec<Disque> {
     liste
 }
 
+/// Linux : le disque qui porte une partition (« /dev/sda5 » → « sda », « /dev/nvme0n1p1 » → « nvme0n1 »), d'après
+/// /sys/class/block ; un périphérique sans partition est son propre disque.
+#[cfg(target_os = "linux")]
+fn disque_de_la_partition(source: &str) -> Option<String> {
+    let nom = Path::new(source)
+        .canonicalize()
+        .ok()?
+        .file_name()?
+        .to_string_lossy()
+        .into_owned();
+    let sys = Path::new("/sys/class/block").join(&nom);
+    if sys.join("partition").exists() {
+        let parent = std::fs::canonicalize(&sys)
+            .ok()?
+            .parent()?
+            .file_name()?
+            .to_string_lossy()
+            .into_owned();
+        Some(parent)
+    } else {
+        sys.exists().then_some(nom)
+    }
+}
+
+/// macOS : « /dev/disk4s1 on /Volumes/GARDIEN (…) » (sortie de mount) → (point de montage, « disk4 »).
+#[cfg(any(target_os = "macos", test))]
+fn disques_de_mount(sortie: &str) -> Vec<(PathBuf, String)> {
+    sortie
+        .lines()
+        .filter_map(|l| {
+            let (source, reste) = l.split_once(" on ")?;
+            let point = reste.rsplit_once(" (")?.0;
+            let nom = source.strip_prefix("/dev/")?;
+            // « disk4s1 » → « disk4 » : le dernier « s » suivi de chiffres est la partition.
+            let disque = match nom.rfind('s') {
+                Some(i) if i > 4 && nom[i + 1..].chars().all(|c| c.is_ascii_digit()) && i + 1 < nom.len() => &nom[..i],
+                _ => nom,
+            };
+            Some((PathBuf::from(point), disque.to_string()))
+        })
+        .collect()
+}
+
 #[cfg(target_os = "macos")]
 pub(crate) fn disques() -> Vec<Disque> {
     use std::os::unix::fs::MetadataExt;
     let systeme = std::fs::metadata("/").ok().map(|m| m.dev());
+    // Les autres partitions de la clé GARDIEN (MACOS…), sur le même support qu'elle : exclues aussi.
+    let montages = crate::commande::lancer(&mut std::process::Command::new("mount"), 10)
+        .map(|r| disques_de_mount(&r.sortie))
+        .unwrap_or_default();
+    let de_la_cle: Vec<&String> = montages
+        .iter()
+        .filter(|(point, _)| est_la_cle(point))
+        .map(|(_, d)| d)
+        .collect();
+    let sur_la_cle = |racine: &Path| {
+        montages
+            .iter()
+            .any(|(point, d)| point == racine && de_la_cle.contains(&d))
+    };
     std::fs::read_dir("/Volumes")
         .into_iter()
         .flatten()
@@ -299,7 +372,7 @@ pub(crate) fn disques() -> Vec<Disque> {
         .filter_map(|e| {
             let (racine, nom) = (e.path(), e.file_name().to_string_lossy().into_owned());
             let dev = std::fs::metadata(&racine).ok()?.dev();
-            if Some(dev) == systeme || nom.starts_with("com.apple.") || est_la_cle(&racine) {
+            if Some(dev) == systeme || nom.starts_with("com.apple.") || est_la_cle(&racine) || sur_la_cle(&racine) {
                 return None;
             }
             let (libre, total) = crate::nettoyer::volume(&racine)?;
@@ -318,12 +391,35 @@ pub(crate) fn disques() -> Vec<Disque> {
 pub(crate) fn disques() -> Vec<Disque> {
     let lecteurs = crate::machine::windows::ps(
         "[IO.DriveInfo]::GetDrives() | Where-Object { $_.IsReady -and ($_.DriveType -eq 'Removable' -or $_.DriveType -eq 'Fixed') } | \
-         ForEach-Object { \"$($_.Name)|$($_.VolumeLabel)|$($_.AvailableFreeSpace)|$($_.TotalSize)\" }",
+         ForEach-Object { $n = (Get-Partition -DriveLetter $_.Name[0] -ErrorAction SilentlyContinue).DiskNumber; \
+         \"$($_.Name)|$($_.VolumeLabel)|$($_.AvailableFreeSpace)|$($_.TotalSize)|$n\" }",
     );
+    let texte = lecteurs.unwrap_or_default();
     let systeme = std::env::var("SystemDrive").map_or("C:".into(), |s| s.to_uppercase());
-    let mut liste = lire_lecteurs(&lecteurs.unwrap_or_default(), &systeme);
-    liste.retain(|d| !est_la_cle(&d.racine));
+    let mut liste = lire_lecteurs(&texte, &systeme);
+    // Les autres partitions de la clé GARDIEN (WIN11…) sont sur le même disque qu'elle : exclues aussi.
+    let numeros = disques_des_lecteurs(&texte);
+    let numero = |d: &Disque| numeros.iter().find(|(r, _)| *r == d.racine).map(|(_, n)| n.clone());
+    let de_la_cle: Vec<String> = liste
+        .iter()
+        .filter(|d| est_la_cle(&d.racine))
+        .filter_map(numero)
+        .collect();
+    liste.retain(|d| !est_la_cle(&d.racine) && !numero(d).is_some_and(|n| de_la_cle.contains(&n)));
     liste
+}
+
+/// Windows : (lecteur, numéro de son disque) d'après le 5e champ des lignes de `disques`.
+#[cfg(any(windows, test))]
+fn disques_des_lecteurs(texte: &str) -> Vec<(PathBuf, String)> {
+    texte
+        .lines()
+        .filter_map(|l| {
+            let c: Vec<&str> = l.trim().split('|').collect();
+            let numero = c.get(4)?.trim();
+            (!numero.is_empty()).then(|| (PathBuf::from(c[0]), numero.to_string()))
+        })
+        .collect()
 }
 
 /// « E:\|Sauvegarde|1000|2000 » par ligne, sans le lecteur du système (« C: »).
@@ -333,7 +429,7 @@ fn lire_lecteurs(texte: &str, systeme: &str) -> Vec<Disque> {
         .lines()
         .filter_map(|l| {
             let c: Vec<&str> = l.trim().split('|').collect();
-            let [racine, etiquette, libre, total] = c[..] else {
+            let [racine, etiquette, libre, total, ..] = c[..] else {
                 return None;
             };
             let lettre = racine.trim_end_matches('\\');
@@ -1371,6 +1467,23 @@ mod tests {
         );
         assert_eq!(mesurer(&source), (1, 3));
         let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn partitions_de_la_cle_reconnues_par_leur_disque() {
+        let mount = "/dev/disk1s1 on / (apfs, local, read-only)\n\
+                     /dev/disk4s1 on /Volumes/GARDIEN (exfat, local, nodev, nosuid, read-only)\n\
+                     /dev/disk4s5 on /Volumes/WIN11 (msdos, local)\n\
+                     /dev/disk5s1 on /Volumes/Mon disque (hfs, local)\n";
+        let d = disques_de_mount(mount);
+        assert_eq!(d[1], (PathBuf::from("/Volumes/GARDIEN"), "disk4".to_string()));
+        assert_eq!(d[2].1, "disk4");
+        assert_eq!(d[3], (PathBuf::from("/Volumes/Mon disque"), "disk5".to_string()));
+        let w = disques_des_lecteurs("E:\\|GARDIEN|1|2|1\nF:\\|WIN11|3|4|1\nG:\\|Sauvegarde|5|6|2\nH:\\|Réseau|7|8|\n");
+        assert_eq!(w.len(), 3);
+        assert_eq!(w[1], (PathBuf::from("F:\\"), "1".to_string()));
+        // Le 5e champ ne gêne pas la lecture des lecteurs.
+        assert_eq!(lire_lecteurs("E:\\|GARDIEN|1|2|1\n", "C:").len(), 1);
     }
 
     #[test]
