@@ -108,6 +108,35 @@ pub(super) fn registre_illisible(categorie: &'static str) -> Constat {
     )
 }
 
+/// Comptes locaux, groupe des administrateurs et dernière connexion, lus en un seul lancement de PowerShell pour les
+/// trois vérifications qui en ont besoin (comptes, comptes oubliés, nouveaux administrateurs). Sections : USR, MOI,
+/// LBP (comptes), CPT (comptes oubliés), ADM (administrateurs, par le SID du groupe, dont le nom change avec la
+/// langue).
+const SCRIPT_COMPTES: &str = "try { Get-LocalUser | ForEach-Object { \"USR|$($_.Enabled)|$($_.PasswordRequired)|$($_.SID.Value)|$($_.Name)\" }; 'USR_FIN' } catch {}; \
+     try { 'MOI|' + [Security.Principal.WindowsIdentity]::GetCurrent().User.Value; 'MOI_FIN' } catch {}; \
+     try { 'LBP|' + (Get-ItemProperty 'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Lsa').LimitBlankPasswordUse; 'LBP_FIN' } catch {}; \
+     try { $moi = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value; \
+       Get-LocalUser | Where-Object { $_.Enabled -and $_.SID.Value -ne $moi -and $_.SID.Value -notmatch '-(500|501|503|504)$' } | \
+       ForEach-Object { \"CPT|$(if ($_.LastLogon) { $_.LastLogon.ToString('yyyy-MM-dd') })|$($_.Name)\" }; 'CPT_FIN' } catch {}; \
+     try { Get-LocalGroupMember -SID 'S-1-5-32-544' | ForEach-Object { 'ADM|' + $_.Name }; 'ADM_FIN' } catch {}";
+
+/// La dernière lecture des comptes et son heure. Vidée au début de chaque bilan ; plus d'une minute, relue.
+static COMPTES: std::sync::Mutex<Option<(std::time::Instant, Option<String>)>> = std::sync::Mutex::new(None);
+
+/// La sortie du script des comptes : la première vérification qui la demande la lit, les autres attendent et la
+/// reprennent (chaque lancement de PowerShell coûte près d'une demi-seconde).
+pub(crate) fn comptes_locaux() -> Option<String> {
+    let mut garde = COMPTES.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some((quand, sortie)) = garde.as_ref()
+        && quand.elapsed() < std::time::Duration::from_secs(60)
+    {
+        return sortie.clone();
+    }
+    let sortie = ps(SCRIPT_COMPTES);
+    *garde = Some((std::time::Instant::now(), sortie.clone()));
+    sortie
+}
+
 pub(super) fn illisible(categorie: &'static str) -> Constat {
     impossible(
         categorie,
@@ -897,6 +926,8 @@ fn lire_ports_udp(liste: &str, pare_feu_actif: bool, ip_lan: Option<&str>) -> Ve
 
 pub fn auditer() -> Audit {
     use super::verif;
+    // Un nouveau bilan relit les comptes : une correction a pu en désactiver un depuis le précédent.
+    *COMPTES.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
     let feu = pare_feu();
     let feu_actif = feu.probleme.is_none();
     let ip_lan = crate::reseau::scan::reseau_local().map(|l| l.1.to_string());

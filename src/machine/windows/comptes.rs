@@ -3,13 +3,10 @@
 use super::*;
 
 /// Comptes locaux : invité, administrateur intégré, comptes sans mot de passe exigé, et la règle qui empêche
-/// d'utiliser un compte sans mot de passe depuis le réseau. Une seule lecture PowerShell, en sections.
+/// d'utiliser un compte sans mot de passe depuis le réseau. Lus avec les autres vérifications des comptes
+/// (`comptes_locaux`), en sections.
 pub(super) fn comptes() -> Vec<Constat> {
-    let sortie = ps(
-        "try { Get-LocalUser | ForEach-Object { \"USR|$($_.Enabled)|$($_.PasswordRequired)|$($_.SID.Value)|$($_.Name)\" }; 'USR_FIN' } catch {}; \
-         try { 'MOI|' + [Security.Principal.WindowsIdentity]::GetCurrent().User.Value; 'MOI_FIN' } catch {}; \
-         try { 'LBP|' + (Get-ItemProperty 'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Lsa').LimitBlankPasswordUse; 'LBP_FIN' } catch {}",
-    );
+    let sortie = super::comptes_locaux();
     let Some(utilisateurs) = section(sortie.as_deref(), "USR") else {
         return vec![illisible("Comptes")];
     };

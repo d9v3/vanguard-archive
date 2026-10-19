@@ -147,11 +147,8 @@ pub fn constats() -> Vec<Constat> {
 /// DefaultAccount, WDAGUtilityAccount : déjà jugés à part ou sans session) et le compte en cours.
 #[cfg(windows)]
 pub fn constats() -> Vec<Constat> {
-    let sortie = super::windows::ps(
-        "$moi = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value; \
-         Get-LocalUser | Where-Object { $_.Enabled -and $_.SID.Value -ne $moi -and $_.SID.Value -notmatch '-(500|501|503|504)$' } | \
-         ForEach-Object { \"CPT|$(if ($_.LastLogon) { $_.LastLogon.ToString('yyyy-MM-dd') })|$($_.Name)\" }; 'CPT_FIN'",
-    );
+    // Lu avec les autres vérifications des comptes, en un seul lancement de PowerShell.
+    let sortie = super::windows::comptes_locaux();
     let Some(lignes) = crate::commande::section(sortie.as_deref(), "CPT") else {
         return Vec::new();
     };

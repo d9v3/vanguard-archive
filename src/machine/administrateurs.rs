@@ -78,10 +78,9 @@ fn lire() -> Option<Vec<String>> {
     }
     #[cfg(windows)]
     {
-        // Le groupe par son identifiant (S-1-5-32-544) : son nom change avec la langue de Windows.
-        let sortie = super::windows::ps(
-            "try { Get-LocalGroupMember -SID 'S-1-5-32-544' | ForEach-Object { 'ADM|' + $_.Name }; 'ADM_FIN' } catch {}",
-        );
+        // Le groupe par son identifiant (S-1-5-32-544, son nom change avec la langue de Windows), lu avec les autres
+        // vérifications des comptes en un seul lancement de PowerShell.
+        let sortie = super::windows::comptes_locaux();
         crate::commande::section(sortie.as_deref(), "ADM").map(|l| {
             l.iter()
                 .map(|n| n.trim().to_string())
