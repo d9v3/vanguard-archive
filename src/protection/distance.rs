@@ -703,14 +703,14 @@ fn relever() -> Option<Vec<Trouvaille>> {
 
 #[cfg(windows)]
 fn relever() -> Option<Vec<Trouvaille>> {
-    // Une seule lecture PowerShell, en sections : programmes installés (date d'installation, ou celle de leur clé,
-    // lue seulement quand la première manque : un Get-Item par programme installé, des centaines, ralentissait tout),
-    // services, processus, connexions établies, clés Run, fichiers posés dans Téléchargements, Bureau, temporaires.
+    // Une seule lecture PowerShell, en sections : programmes installés (date d'installation, ou celle de leur clé, lue
+    // seulement quand la première manque : un Get-Item par programme installé, des centaines, ralentissait tout),
+    // processus, connexions établies, clés Run, fichiers posés dans Téléchargements, Bureau, temporaires. Les
+    // services viennent du registre, plus bas.
     let sortie = crate::machine::windows::ps(
         "try { foreach ($k in 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*', 'HKLM:\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*', 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*') { \
          Get-ItemProperty $k -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName } | ForEach-Object { $d = ''; if ($_.InstallDate -notmatch '^\\d{8}$') { try { $d = (Get-Item $_.PSPath).LastWriteTime.ToString('yyyy-MM-dd') } catch {} }; \
          \"INS|$($_.DisplayName)|$($_.InstallDate)|$d|$($_.UninstallString)|$($_.QuietUninstallString)\" } }; 'INS_FIN' } catch {}; \
-         try { Get-CimInstance Win32_Service | ForEach-Object { \"SVC|$($_.Name)|$($_.DisplayName)|$($_.State)|$($_.PathName)\" }; 'SVC_FIN' } catch {}; \
          try { Get-Process | ForEach-Object { $c = ''; try { $c = $_.Path } catch {}; \"PRC|$($_.Id)|$($_.ProcessName)|$c\" }; 'PRC_FIN' } catch {}; \
          try { Get-NetTCPConnection -State Established -ErrorAction SilentlyContinue | Where-Object { $_.RemoteAddress -ne '127.0.0.1' -and $_.RemoteAddress -ne '::1' } | ForEach-Object { \"CNX|$($_.OwningProcess)\" }; 'CNX_FIN' } catch {}; \
          try { foreach ($c in 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run', 'HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run', 'HKLM:\\Software\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Run') { \
@@ -718,7 +718,41 @@ fn relever() -> Option<Vec<Trouvaille>> {
          try { $u = [Environment]::GetFolderPath('UserProfile'); foreach ($d in (Join-Path $u 'Downloads'), [Environment]::GetFolderPath('Desktop'), $env:TEMP, (Join-Path $env:LOCALAPPDATA 'Programs')) { \
          if ($d -and (Test-Path $d)) { Get-ChildItem $d -File -Depth 1 -ErrorAction SilentlyContinue | Where-Object { $_.Extension -in '.exe', '.msi', '.zip' } | ForEach-Object { \"FIC|$($_.FullName)|$($_.LastWriteTime.ToString('yyyy-MM-dd'))\" } } }; 'FIC_FIN' } catch {}",
     )?;
+    // Les services viennent du registre, lus directement : la requête WMI (Win32_Service) était la plus lente du
+    // script, pour trois valeurs qui y sont (nom, nom affiché, chemin du programme).
+    let mut sortie = sortie;
+    sortie.push_str(&services_du_registre());
     lire_windows(&sortie).map(sans_doublons)
+}
+
+/// Les services, lus dans le registre, au format de la section SVC : « SVC|nom|nom affiché||chemin », puis SVC_FIN.
+/// Clé illisible : section vide (sans SVC_FIN), comme quand la requête WMI échouait.
+#[cfg(windows)]
+fn services_du_registre() -> String {
+    use std::fmt::Write;
+    let Ok(services) =
+        winreg::RegKey::predef(winreg::enums::HKEY_LOCAL_MACHINE).open_subkey(r"SYSTEM\CurrentControlSet\Services")
+    else {
+        return String::new();
+    };
+    let mut lignes = String::from("\n");
+    for nom in services.enum_keys().flatten() {
+        let Ok(service) = services.open_subkey(&nom) else {
+            continue;
+        };
+        let texte = |valeur: &str| service.get_value::<String, _>(valeur).unwrap_or_default();
+        // Une barre verticale dans une valeur décalerait les champs de la ligne : remplacée.
+        let propre = |v: String| v.replace(['|', '\n', '\r'], " ");
+        let _ = writeln!(
+            lignes,
+            "SVC|{}|{}||{}",
+            propre(nom.clone()),
+            propre(texte("DisplayName")),
+            propre(texte("ImagePath"))
+        );
+    }
+    lignes.push_str("SVC_FIN\n");
+    lignes
 }
 
 /// Le code produit MSI d'une ligne de désinstallation « MsiExec.exe /X{GUID} », pour une désinstallation silencieuse.
