@@ -10,6 +10,7 @@ use crate::ui::*;
 
 mod bluetooth;
 mod certificats;
+mod comptes_oublies;
 pub(crate) mod dns;
 mod extensions;
 mod fin_de_support;
@@ -193,6 +194,7 @@ fn audit(systeme: &'static str, premier: Constat, mut propres: Vec<Verification<
         verif!(journaux::journaux()),
         verif!(heure::constat()),
         verif!(fin_de_support::constats()),
+        verif!(comptes_oublies::constats()),
         verif!([crate::protection::integrite::constat()]),
         verif!(crate::protection::pieges::constat()),
         verif!(crate::protection::distance::constats()),
