@@ -580,7 +580,7 @@ pub fn cle_usb() -> Option<PathBuf> {
 
 /// La clé d'où tourne le programme (exe dans <clé>/Linux/, <clé>/Windows/…), trouvée par son seul chemin, sans
 /// parcourir les lecteurs : un lecteur réseau déconnecté ferait attendre.
-fn cle_du_programme() -> Option<PathBuf> {
+pub(crate) fn cle_du_programme() -> Option<PathBuf> {
     // Sous Linux et macOS, le programme peut tourner depuis une copie temporaire (protection de la clé) : on part
     // du programme d'origine.
     #[cfg(unix)]

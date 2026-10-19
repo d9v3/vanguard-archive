@@ -3,12 +3,13 @@
 //! français) au plus une fois par semaine, en arrière-plan quand le guide s'ouvre, et les lit sans rien exécuter : ces
 //! commandes se copient, elles ne se lancent jamais d'ici, Vanguard ne les ayant pas vérifiées
 //! (`Obstacle::NonVerifiee`). Tout texte de l'archive passe par `ui::affichable` : une page piégée ne pilote pas le
-//! terminal.
+//! terminal. Le déploiement en met aussi une copie sur la clé (`outils/tldr-cle.sh`) : lancé depuis la clé, Vanguard
+//! les a dès le premier lancement, même sur un ordinateur sans Internet. Des deux copies, la plus récente sert.
 
 use std::collections::BTreeMap;
-use std::path::PathBuf;
-use std::sync::Mutex;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, SystemTime};
 
 use super::{Commande, Obstacle, Programme, Systeme};
@@ -40,25 +41,75 @@ fn dossier() -> PathBuf {
     crate::reseau::dossier_local().join("tldr")
 }
 
+fn nom_d_archive(langue: &str) -> String {
+    format!("tldr-pages.{langue}.zip")
+}
+
+/// L'archive de cet ordinateur, que le guide télécharge.
 fn archive(langue: &str) -> PathBuf {
-    dossier().join(format!("tldr-pages.{langue}.zip"))
+    dossier().join(nom_d_archive(langue))
+}
+
+/// Le dossier `tldr` de la clé d'où tourne Vanguard, cherché une fois : la clé ne change pas en cours de route, et le
+/// guide demande ses pages à chaque écran. Jamais pendant les tests : la vraie clé peut être branchée.
+fn dossier_de_la_cle() -> Option<&'static Path> {
+    static DOSSIER: OnceLock<Option<PathBuf>> = OnceLock::new();
+    if cfg!(test) {
+        return None;
+    }
+    DOSSIER
+        .get_or_init(|| crate::reseau::cle_du_programme().map(|c| c.join("tldr")))
+        .as_deref()
+}
+
+/// Les dossiers où chercher les archives : celui de cet ordinateur, puis celui de la clé.
+fn dossiers() -> Vec<PathBuf> {
+    std::iter::once(dossier())
+        .chain(dossier_de_la_cle().map(Path::to_path_buf))
+        .collect()
+}
+
+/// Les archives d'une langue dans `dossiers`, avec leur date, la plus récente d'abord. La suivante sert quand la
+/// première ne se lit pas (copie interrompue par une clé retirée trop tôt).
+fn archives(langue: &str, dossiers: &[PathBuf]) -> Vec<(PathBuf, SystemTime)> {
+    let mut archives: Vec<(PathBuf, SystemTime)> = dossiers
+        .iter()
+        .map(|d| d.join(nom_d_archive(langue)))
+        .filter_map(|chemin| {
+            let date = std::fs::metadata(&chemin).and_then(|m| m.modified()).ok()?;
+            Some((chemin, date))
+        })
+        .collect();
+    archives.sort_by_key(|(_, date)| std::cmp::Reverse(*date));
+    archives
+}
+
+/// Les fichiers de la plus récente archive lisible d'une langue ; vide s'il n'y en a aucune.
+fn fichiers_de(langue: &str, dossiers: &[PathBuf]) -> Vec<(String, Vec<u8>)> {
+    archives(langue, dossiers)
+        .into_iter()
+        .filter_map(|(chemin, _)| std::fs::read(chemin).ok())
+        .map(|octets| lire_zip(&octets))
+        .find(|fichiers| !fichiers.is_empty())
+        .unwrap_or_default()
 }
 
 /// La date de l'archive la plus récente ; `None` : aucune encore.
 fn date_des_archives() -> Option<SystemTime> {
+    let dossiers = dossiers();
     LANGUES
         .iter()
-        .filter_map(|l| std::fs::metadata(archive(l)).and_then(|m| m.modified()).ok())
+        .filter_map(|l| archives(l, &dossiers).first().map(|(_, date)| *date))
         .max()
 }
 
-/// Une langue dont l'archive manque, ou a plus d'une semaine : à retélécharger. Une langue dont l'archive est fraîche
-/// n'est pas reprise parce qu'une autre a échoué (le français, partiel, peut manquer sans que l'anglais le soit).
-fn a_renouveler(langue: &str) -> bool {
-    std::fs::metadata(archive(langue))
-        .and_then(|m| m.modified())
-        .ok()
-        .and_then(|date| date.elapsed().ok())
+/// Une langue sans archive, ou dont la plus récente a plus d'une semaine : à retélécharger. Une langue dont l'archive
+/// est fraîche n'est pas reprise parce qu'une autre a échoué (le français, partiel, peut manquer sans que l'anglais le
+/// soit), ni quand la clé en a apporté une fraîche.
+fn a_renouveler(langue: &str, dossiers: &[PathBuf]) -> bool {
+    archives(langue, dossiers)
+        .first()
+        .and_then(|(_, date)| date.elapsed().ok())
         .is_none_or(|age| age > UNE_SEMAINE)
 }
 
@@ -70,15 +121,23 @@ static EN_COURS: AtomicBool = AtomicBool::new(false);
 /// échoue vite et rien ne change.
 pub(super) fn renouveler_en_fond() {
     use std::io::IsTerminal;
-    let a_faire: Vec<&str> = LANGUES.into_iter().filter(|l| a_renouveler(l)).collect();
+    let dossiers = dossiers();
+    let a_faire: Vec<&str> = LANGUES.into_iter().filter(|l| a_renouveler(l, &dossiers)).collect();
     if !std::io::stdin().is_terminal() || a_faire.is_empty() || EN_COURS.swap(true, Ordering::SeqCst) {
         return;
     }
     std::thread::spawn(move || {
-        // Les restes d'un téléchargement interrompu (Vanguard quitté avant la fin) partent d'abord.
+        // Les restes d'un téléchargement interrompu (Vanguard quitté avant la fin) partent d'abord. Seulement ceux qui
+        // n'avancent plus : celui d'un autre Vanguard ouvert en même temps grossit encore (curl abandonne après 2 min).
         if let Ok(fichiers) = std::fs::read_dir(dossier()) {
             for f in fichiers.flatten() {
-                if f.file_name().to_string_lossy().contains(".zip.") {
+                let immobile = f
+                    .metadata()
+                    .and_then(|m| m.modified())
+                    .ok()
+                    .and_then(|date| date.elapsed().ok())
+                    .is_some_and(|age| age > Duration::from_mins(10));
+                if immobile && f.file_name().to_string_lossy().contains(".zip.") {
                     let _ = std::fs::remove_file(f.path());
                 }
             }
@@ -313,12 +372,10 @@ fn charger() -> &'static [PageTldr] {
         "osx" => 3,
         _ => 4,
     };
+    let dossiers = dossiers();
     let langues: &[&str] = if crate::langue::anglais() { &["en"] } else { &LANGUES };
     for langue in langues {
-        let Ok(octets) = std::fs::read(archive(langue)) else {
-            continue;
-        };
-        for (nom, contenu) in lire_zip(&octets) {
+        for (nom, contenu) in fichiers_de(langue, &dossiers) {
             let Some((plateforme, fichier)) = nom.split_once('/') else {
                 continue;
             };
@@ -516,6 +573,49 @@ mod tests {
         assert_eq!(systeme_de("windows").0, Systeme::Windows);
         assert_eq!(systeme_de("common").0, Systeme::Tous);
         assert_eq!(systeme_de("android").0, Systeme::Tldr);
+    }
+
+    /// Des deux copies (cet ordinateur, la clé), la plus récente sert ; abîmée, l'autre prend le relais ; une copie de
+    /// moins d'une semaine n'est pas retéléchargée.
+    #[test]
+    fn la_plus_recente_des_deux_copies() {
+        let racine = crate::reseau::dossier_local().join("essai-copies-tldr");
+        let (ordinateur, cle) = (racine.join("ordinateur"), racine.join("cle"));
+        std::fs::create_dir_all(&ordinateur).unwrap();
+        std::fs::create_dir_all(&cle).unwrap();
+        let dossiers = [ordinateur.clone(), cle.clone()];
+        let ecrire = |dossier: &Path, octets: &[u8], age: Duration| {
+            let chemin = dossier.join(nom_d_archive("fr"));
+            std::fs::write(&chemin, octets).unwrap();
+            std::fs::File::options()
+                .write(true)
+                .open(&chemin)
+                .unwrap()
+                .set_modified(SystemTime::now() - age)
+                .unwrap();
+        };
+        let contenu = |dossiers: &[PathBuf]| fichiers_de("fr", dossiers).first().map(|f| f.1.clone());
+        // Aucune copie : à télécharger, rien à lire.
+        assert!(a_renouveler("fr", &dossiers) && contenu(&dossiers).is_none());
+        // Une copie de dix jours : lue en attendant, mais à retélécharger.
+        ecrire(
+            &ordinateur,
+            &zip(&[("linux/a.md", "# ancienne\n", false)]),
+            Duration::from_hours(240),
+        );
+        assert!(a_renouveler("fr", &dossiers));
+        assert_eq!(contenu(&dossiers).as_deref(), Some(&b"# ancienne\n"[..]));
+        // La clé en apporte une fraîche : elle sert, et rien ne se télécharge.
+        let recente = zip(&[("linux/a.md", "# recente\n", false)]);
+        ecrire(&cle, &recente, Duration::from_hours(1));
+        assert!(!a_renouveler("fr", &dossiers));
+        assert_eq!(contenu(&dossiers).as_deref(), Some(&b"# recente\n"[..]));
+        // Abîmée (clé retirée pendant la copie), la plus récente laisse la place à l'autre.
+        ecrire(&cle, &recente[..recente.len() / 2], Duration::from_hours(1));
+        assert_eq!(contenu(&dossiers).as_deref(), Some(&b"# ancienne\n"[..]));
+        // L'anglais, absent des deux, reste à télécharger : chaque langue a son compte.
+        assert!(a_renouveler("en", &dossiers));
+        let _ = std::fs::remove_dir_all(&racine);
     }
 
     /// Sans archive (le dossier des tests est jetable), le guide n'a aucune page de tldr-pages.

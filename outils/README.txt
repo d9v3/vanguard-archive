@@ -98,8 +98,8 @@ highlighted one, Esc clears it. In the main menu, it also finds each tool of the
  10  Command guide › the useful commands of Omarchy, Arch, Fedora, Debian, Windows 11, macOS and all systems, by
        program, each one explained (⚠: it changes something), with step-by-step guides (update, repair, network,
        free up space…). Type what you are looking for: commands show up as
-       you type; each one can be copied, or run here if it only reads. And the tldr-pages examples, downloaded
-       every week: to copy only. From the command line:
+       you type; each one can be copied, or run here if it only reads. And the tldr-pages examples, already on
+       the key and updated every week: to copy only. From the command line:
        vanguard guide fedora, vanguard guide winget, vanguard guide dns cache
  11  Troubleshoot step by step › no Internet, Wi-Fi dropping, slow computer, no sound, printer, disk full:
        two or three questions, then Vanguard checks and suggests the right repair.

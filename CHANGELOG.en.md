@@ -30,8 +30,9 @@ repository (`git checkout v0.62.0`, for example), to be rebuilt if needed.
   programs common to Linux (time, kernel, Wi-Fi, network diagnosis, accounts, sound, printers, UEFI boot…), openSUSE
   and Docker; 942 commands. You type what you are looking for and commands show up as you type; each one has its
   page, to copy it, or run it here when it only reads (its output scrolls in Vanguard, Esc stops it).
-- **Over 30,000 more commands**: the tldr-pages examples (CC BY 4.0 license), downloaded by themselves every week; to
-  copy only. In every search, what starts with the typed word comes first.
+- **Over 30,000 more commands**: the tldr-pages examples (CC BY 4.0 license), downloaded by themselves every week and
+  already on the key (even without Internet, the guide has them from the first launch); to copy only. In every
+  search, what starts with the typed word comes first.
 - **Word prediction in every menu** and checklist: the end of the most likely word shows in grey, Tab completes it.
 - **Deeper check.** Platform security according to fwupd (HSI level: TPM, BIOS protection, IOMMU), kernel lockdown and
   module signing, BPF, auditd; on Windows, PowerShell script logging, Credential Guard (Enterprise, Education),
