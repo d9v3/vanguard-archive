@@ -5,7 +5,8 @@
 //! plus haut que la fenêtre défile : l'en-tête reste en place, la liste suit la ligne en surbrillance, et « ↑ » ou
 //! « ↓ » disent combien de lignes sont cachées. Sans vrai terminal (réponses envoyées par un tube : tests, scripts), ou
 //! dans une fenêtre minuscule, la réponse se lit ligne par ligne, comme avant ; un mot qui ne désigne qu'un seul choix
-//! le choisit.
+//! le choisit. Pendant une recherche, la fin du mot le plus probable s'affiche en gris (`prediction`), et Tab ou →
+//! la complète : la même prédiction dans tous les menus et les listes à cocher.
 
 use std::fmt::Write as _;
 use std::io::{IsTerminal, Write};
@@ -13,6 +14,7 @@ use std::io::{IsTerminal, Write};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use crossterm::terminal;
 
+use crate::prediction::Vocabulaire;
 use crate::ui::*;
 
 /// Une ligne d'un menu.
@@ -172,7 +174,11 @@ fn choisissables(lignes: &[Ligne]) -> Vec<Choisissable<'_>> {
                 mots,
             } => Some(Choisissable {
                 touche,
-                texte: simplement_affiche(&format!("{chemin} {texte}")),
+                texte: simplement_affiche(&if chemin.is_empty() {
+                    texte.clone()
+                } else {
+                    format!("{chemin} {texte}")
+                }),
                 precision,
                 cherche: simplifier(&format!("{chemin} {texte} {precision} {mots}")),
                 visible: false,
@@ -194,6 +200,31 @@ fn simplement_affiche(t: &str) -> String {
         }
     }
     sortie
+}
+
+/// La suite prédite du mot en cours, en gris après ce qui est tapé, et le code qui ramène le curseur devant elle :
+/// on tape par-dessus, ou Tab la prend.
+fn fantome(suite: Option<&str>) -> (String, String) {
+    match suite {
+        Some(s) if !s.is_empty() => (format!("{DISCRET}{s}{RESET}"), format!("\x1b[{}D", largeur_affichee(s))),
+        _ => (String::new(), String::new()),
+    }
+}
+
+/// Ce que la prédiction lit d'un menu : le texte, la précision et les mots cachés de chaque ligne, sans couleurs.
+fn textes_du_menu(lignes: &[Ligne]) -> Vec<String> {
+    lignes
+        .iter()
+        .filter_map(|l| match l {
+            Ligne::Texte(_) => None,
+            Ligne::Choix {
+                texte, precision, mots, ..
+            }
+            | Ligne::Cachee {
+                texte, precision, mots, ..
+            } => Some(simplement_affiche(&format!("{texte} {precision} {mots}"))),
+        })
+        .collect()
 }
 
 /// Une ligne trouvée par la recherche : la touche, le texte, puis la précision s'il reste de la place. Toujours dans
@@ -349,10 +380,10 @@ fn fenetre(rangees: &[String], entete: usize, en_cours: usize, place: usize, hau
 }
 
 /// Le mode clavier (touches lues une à une, sans écho), rendu au terminal quoi qu'il arrive : choix fait, plantage.
-struct ModeClavier;
+pub(crate) struct ModeClavier;
 
 impl ModeClavier {
-    fn activer() -> Option<Self> {
+    pub(crate) fn activer() -> Option<Self> {
         terminal::enable_raw_mode().ok().map(|()| ModeClavier)
     }
 }
@@ -402,6 +433,12 @@ pub fn choisir(lignes: &[Ligne], invite: &str, depart: &str, echap: &str) -> Opt
         "  {GRIS}↑ ↓ choisir · Entrée lancer · Échap effacer la recherche{RESET}",
         "  {GRIS}↑ ↓ select · Enter run · Esc clear the search{RESET}"
     );
+    let aide_prediction = trf!(
+        "  {GRIS}↑ ↓ choisir · Tab compléter · Entrée lancer · Échap effacer la recherche{RESET}",
+        "  {GRIS}↑ ↓ select · Tab complete · Enter run · Esc clear the search{RESET}"
+    );
+    // Les mots du menu, lus à la première recherche seulement.
+    let mut vocabulaire: Option<Vocabulaire> = None;
     // L'en-tête (cadre, titre, état) reste en place pendant la recherche, sans le sous-titre ni la ligne vide qui
     // annonçaient la première section (« BILAN DE SÉCURITÉ ») : les lignes trouvées viennent de partout.
     let mut entete: Vec<String> = lignes
@@ -427,6 +464,13 @@ pub fn choisir(lignes: &[Ligne], invite: &str, depart: &str, echap: &str) -> Opt
             Vec::new()
         };
         en_cours_trouve = en_cours_trouve.min(trouves.len().saturating_sub(1));
+        let suite = if recherche {
+            vocabulaire
+                .get_or_insert_with(|| Vocabulaire::nouveau(&textes_du_menu(lignes)))
+                .suite(&tape, |q| choix.iter().filter(|c| correspond(q, &c.cherche)).count())
+        } else {
+            None
+        };
         // En mode clavier, le terminal ne revient plus seul au début de la ligne : d'où les « \r\n ».
         let mut ecran = String::from("\x1b[H");
         if recherche {
@@ -473,7 +517,16 @@ pub fn choisir(lignes: &[Ligne], invite: &str, depart: &str, echap: &str) -> Opt
                     )
                 );
             }
-            let _ = write!(ecran, "{aide_recherche}\x1b[K\r\n  {ACCENT}›{RESET} {tape}\x1b[K\x1b[J");
+            let aide = if suite.is_some() {
+                &aide_prediction
+            } else {
+                &aide_recherche
+            };
+            let (gris, recul) = fantome(suite.as_deref());
+            let _ = write!(
+                ecran,
+                "{aide}\x1b[K\r\n  {ACCENT}›{RESET} {tape}{gris}\x1b[K\x1b[J{recul}"
+            );
         } else {
             // Les rangées du menu ; l'en-tête est ce qui précède la première ligne de choix.
             let mut rangees: Vec<String> = Vec::new();
@@ -525,6 +578,15 @@ pub fn choisir(lignes: &[Ligne], invite: &str, depart: &str, echap: &str) -> Opt
             continue;
         }
         let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
+        // Tab ou → prennent la prédiction : le mot se complète, suivi d'une espace pour taper le suivant.
+        if let Some(s) = &suite
+            && matches!(k.code, KeyCode::Tab | KeyCode::Right)
+        {
+            tape.push_str(s);
+            tape.push(' ');
+            en_cours_trouve = 0;
+            continue;
+        }
         // Les flèches parcourent les lignes trouvées pendant une recherche, celles du menu sinon.
         let nombre = if recherche { trouves.len() } else { visibles.len() };
         let actuelle = if recherche { en_cours_trouve } else { en_cours };
@@ -718,6 +780,12 @@ pub fn cocher(titre: &[String], cases: &[Case]) -> Option<Vec<bool>> {
         "  {GRIS}↑ ↓ choisir · Espace cocher · Entrée ou Échap : fin de la recherche{RESET}",
         "  {GRIS}↑ ↓ select · Space check · Enter or Esc: end the search{RESET}"
     );
+    let aide_prediction = trf!(
+        "  {GRIS}↑ ↓ choisir · Tab compléter · Espace cocher · Entrée ou Échap : fin{RESET}",
+        "  {GRIS}↑ ↓ select · Tab complete · Space check · Enter or Esc: done{RESET}"
+    );
+    // Les mots de la liste, lus à la première recherche seulement.
+    let mut vocabulaire: Option<Vocabulaire> = None;
     let mut en_cours = 0;
     let mut haut = 0;
     // Pendant une recherche, ce qui est tapé : seules les lignes qui le contiennent restent à l'écran.
@@ -733,6 +801,17 @@ pub fn cocher(titre: &[String], cases: &[Case]) -> Option<Vec<bool>> {
             en_cours = i;
         }
         let rang = montrees.iter().position(|&i| i == en_cours);
+        let suite = recherche.as_deref().and_then(|t| {
+            vocabulaire
+                .get_or_insert_with(|| {
+                    let textes: Vec<String> = cases
+                        .iter()
+                        .map(|c| simplement_affiche(&format!("{} {} {}", c.texte, c.precision, c.detail)))
+                        .collect();
+                    Vocabulaire::nouveau(&textes)
+                })
+                .suite(t, |q| lignes_trouvees(q, &cherche).len())
+        });
         let mut ecran = String::from("\x1b[H");
         let mut rangees: Vec<String> = titre.iter().flat_map(|l| l.split('\n').map(String::from)).collect();
         let entete = rangees.len();
@@ -774,7 +853,16 @@ pub fn cocher(titre: &[String], cases: &[Case]) -> Option<Vec<bool>> {
         }
         match &recherche {
             Some(t) => {
-                let _ = write!(ecran, "{aide_recherche}\x1b[K\r\n  {ACCENT}›{RESET} /{t}\x1b[K\x1b[J");
+                let aide = if suite.is_some() {
+                    &aide_prediction
+                } else {
+                    &aide_recherche
+                };
+                let (gris, recul) = fantome(suite.as_deref());
+                let _ = write!(
+                    ecran,
+                    "{aide}\x1b[K\r\n  {ACCENT}›{RESET} /{t}{gris}\x1b[K\x1b[J{recul}"
+                );
             }
             None => {
                 let _ = write!(ecran, "{aide}\x1b[K\x1b[J");
@@ -790,6 +878,13 @@ pub fn cocher(titre: &[String], cases: &[Case]) -> Option<Vec<bool>> {
             continue;
         }
         let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
+        // Tab ou → prennent la prédiction ; pas d'espace après : Espace coche.
+        if let (Some(t), Some(s)) = (&mut recherche, &suite)
+            && matches!(k.code, KeyCode::Tab | KeyCode::Right)
+        {
+            t.push_str(s);
+            continue;
+        }
         // Les flèches parcourent les lignes montrées : toute la liste, ou celles que la recherche a trouvées.
         let derniere = montrees.len().saturating_sub(1);
         let deplacement = match k.code {

@@ -28,6 +28,7 @@ mod maj;
 mod nettoyer;
 mod optimiser;
 mod ordinateurs;
+mod prediction;
 mod protection;
 mod raccourci;
 mod rapport;
