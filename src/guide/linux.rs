@@ -573,6 +573,562 @@ pub const COMMUNS: &[Programme] = &[
             ),
         ],
     },
+    Programme {
+        nom: "timedatectl, loginctl",
+        role: ("heure, langue, sessions", "time, language, sessions"),
+        executable: "timedatectl",
+        commandes: &[
+            voir(
+                "timedatectl",
+                "L'heure, le fuseau, et la synchronisation par le réseau (NTP).",
+                "The time, the time zone, and network synchronization (NTP).",
+            ),
+            changer(
+                "sudo timedatectl set-timezone <nom>",
+                "Change le fuseau horaire (America/Toronto, Europe/Paris…).",
+                "Changes the time zone (America/Toronto, Europe/Paris…).",
+            ),
+            changer(
+                "sudo timedatectl set-ntp true",
+                "Remet l'heure à jour toute seule, par le réseau.",
+                "Keeps the time up to date by itself, through the network.",
+            ),
+            voir(
+                "localectl",
+                "La langue et le clavier du système.",
+                "The system's language and keyboard.",
+            ),
+            voir(
+                "loginctl list-sessions",
+                "Les sessions ouvertes, sur l'écran ou à distance.",
+                "Open sessions, on screen or remote.",
+            ),
+            changer(
+                "loginctl terminate-session <id>",
+                "Ferme une session.",
+                "Ends a session.",
+            ),
+        ],
+    },
+    Programme {
+        nom: "dmesg, lsmod, modprobe",
+        role: ("noyau et pilotes", "kernel and drivers"),
+        executable: "dmesg",
+        commandes: &[
+            voir(
+                "sudo dmesg --level=err,warn | tail -30",
+                "Les erreurs et avertissements du noyau depuis le démarrage (matériel, pilotes).",
+                "Kernel errors and warnings since boot (hardware, drivers).",
+            ),
+            voir(
+                "lsmod | head -30",
+                "Les modules (pilotes) chargés dans le noyau.",
+                "The modules (drivers) loaded in the kernel.",
+            ),
+            voir(
+                "modinfo <module>",
+                "Le détail d'un module : version, options, matériel pris en charge.",
+                "A module's details: version, options, supported hardware.",
+            ),
+            changer(
+                "sudo modprobe -r <module> && sudo modprobe <module>",
+                "Recharge un pilote qui ne répond plus (Wi-Fi, son).",
+                "Reloads a driver that no longer answers (Wi-Fi, sound).",
+            ),
+            voir(
+                "cat /proc/cmdline",
+                "Les options données au noyau au démarrage.",
+                "The options given to the kernel at boot.",
+            ),
+            voir(
+                "uname -a",
+                "Le noyau, sa version, l'architecture.",
+                "The kernel, its version, the architecture.",
+            ),
+        ],
+    },
+    Programme {
+        nom: "rfkill, iw, bluetoothctl",
+        role: ("Wi-Fi et Bluetooth bloqués ?", "blocked Wi-Fi and Bluetooth?"),
+        executable: "rfkill",
+        commandes: &[
+            voir(
+                "rfkill list",
+                "Ce qui est bloqué : Wi-Fi, Bluetooth (bouton, mode avion).",
+                "What is blocked: Wi-Fi, Bluetooth (switch, airplane mode).",
+            ),
+            changer("sudo rfkill unblock all", "Débloque tout.", "Unblocks everything."),
+            voir(
+                "iw dev",
+                "Les cartes Wi-Fi et leur état.",
+                "Wi-Fi cards and their state.",
+            ),
+            voir(
+                "iw dev <interface> link",
+                "La connexion Wi-Fi d'une carte (wlan0…) : réseau, signal, débit.",
+                "A card's Wi-Fi connection (wlan0…): network, signal, rate.",
+            ),
+            voir(
+                "bluetoothctl devices",
+                "Les appareils Bluetooth connus.",
+                "Known Bluetooth devices.",
+            ),
+            changer(
+                "bluetoothctl connect <adresse>",
+                "Se connecte à un appareil Bluetooth.",
+                "Connects to a Bluetooth device.",
+            ),
+            changer(
+                "bluetoothctl remove <adresse>",
+                "L'oublie, pour l'appairer à nouveau.",
+                "Forgets it, to pair it again.",
+            ),
+        ],
+    },
+    Programme {
+        nom: "dig, tracepath, mtr",
+        role: ("DNS et chemin vers un site", "DNS and path to a site"),
+        executable: "dig",
+        commandes: &[
+            voir(
+                "dig <site>",
+                "La réponse du DNS pour un nom, en détail.",
+                "The DNS answer for a name, in detail.",
+            ),
+            voir(
+                "dig @1.1.1.1 <site>",
+                "La même chose avec un autre serveur DNS (Cloudflare) : le tien répond-il mal ?",
+                "The same with another DNS server (Cloudflare): does yours answer badly?",
+            ),
+            voir(
+                "tracepath <site>",
+                "Le chemin jusqu'à un site, routeur après routeur.",
+                "The path to a site, router after router.",
+            ),
+            voir(
+                "mtr -rwc 10 <site>",
+                "Le chemin et les pertes à chaque étape, sur 10 essais.",
+                "The path and the losses at each step, over 10 tries.",
+            ),
+            voir(
+                "ss -s",
+                "Le résumé des connexions ouvertes.",
+                "A summary of open connections.",
+            ),
+        ],
+    },
+    Programme {
+        nom: "findmnt, blkid, mount",
+        role: ("partitions montées", "mounted partitions"),
+        executable: "findmnt",
+        commandes: &[
+            voir(
+                "findmnt -D",
+                "Les systèmes de fichiers montés, avec leur place.",
+                "Mounted file systems, with their space.",
+            ),
+            voir(
+                "sudo blkid",
+                "L'identifiant (UUID) et le type de chaque partition.",
+                "Each partition's identifier (UUID) and type.",
+            ),
+            voir(
+                "cat /etc/fstab",
+                "Ce qui se monte au démarrage.",
+                "What mounts at boot.",
+            ),
+            changer(
+                "sudo mount /dev/<partition> /mnt",
+                "Monte une partition dans /mnt.",
+                "Mounts a partition on /mnt.",
+            ),
+            changer("sudo umount /mnt", "La démonte.", "Unmounts it."),
+        ],
+    },
+    Programme {
+        nom: "nvme, hdparm",
+        role: ("santé et vitesse des SSD", "SSD health and speed"),
+        executable: "nvme",
+        commandes: &[
+            voir(
+                "sudo nvme smart-log /dev/nvme0",
+                "La santé d'un SSD NVMe : usure, température, erreurs.",
+                "An NVMe SSD's health: wear, temperature, errors.",
+            ),
+            voir(
+                "sudo hdparm -t /dev/<disque>",
+                "La vitesse de lecture d'un disque.",
+                "A disk's read speed.",
+            ),
+        ],
+    },
+    Programme {
+        nom: "uptime, vmstat, swapon",
+        role: ("charge, mémoire, échange", "load, memory, swap"),
+        executable: "vmstat",
+        commandes: &[
+            voir(
+                "uptime",
+                "Depuis quand l'ordinateur tourne, et sa charge.",
+                "How long the computer has been running, and its load.",
+            ),
+            voir(
+                "vmstat 1 5",
+                "La mémoire, le processeur et les échanges, cinq secondes de suite.",
+                "Memory, processor and swapping, five seconds in a row.",
+            ),
+            voir(
+                "swapon --show",
+                "L'espace d'échange (swap) et ce qui en est utilisé.",
+                "The swap space and how much is used.",
+            ),
+            voir(
+                "cat /proc/pressure/memory",
+                "La pression sur la mémoire : le système attend-il après elle ?",
+                "Memory pressure: is the system waiting on it?",
+            ),
+        ],
+    },
+    Programme {
+        nom: "last, w",
+        role: ("qui s'est connecté, et quand", "who logged in, and when"),
+        executable: "last",
+        commandes: &[
+            voir(
+                "last -n 20",
+                "Les dernières connexions et redémarrages.",
+                "The latest logins and restarts.",
+            ),
+            voir(
+                "sudo lastb -n 20",
+                "Les connexions refusées (mots de passe faux) : des essais à la chaîne sont une attaque.",
+                "Refused logins (wrong passwords): a run of tries is an attack.",
+            ),
+            voir(
+                "w",
+                "Qui est connecté maintenant, et ce qu'il fait.",
+                "Who is logged in now, and what they are doing.",
+            ),
+        ],
+    },
+    Programme {
+        nom: "useradd, usermod, chage",
+        role: ("comptes et groupes", "accounts and groups"),
+        executable: "useradd",
+        commandes: &[
+            voir("groups", "Tes groupes.", "Your groups."),
+            voir(
+                "getent group sudo wheel",
+                "Qui peut utiliser sudo (groupes sudo ou wheel).",
+                "Who can use sudo (sudo or wheel groups).",
+            ),
+            changer(
+                "sudo useradd -m <utilisateur>",
+                "Crée un compte, avec son dossier personnel.",
+                "Creates an account, with its home folder.",
+            ),
+            changer(
+                "sudo passwd <utilisateur>",
+                "Lui donne un mot de passe.",
+                "Gives it a password.",
+            ),
+            changer(
+                "sudo usermod -aG <groupe> <utilisateur>",
+                "Ajoute un compte à un groupe (wheel, docker…).",
+                "Adds an account to a group (wheel, docker…).",
+            ),
+            changer(
+                "sudo passwd -l <utilisateur>",
+                "Verrouille un compte.",
+                "Locks an account.",
+            ),
+            voir(
+                "sudo chage -l <utilisateur>",
+                "Quand son mot de passe expire.",
+                "When its password expires.",
+            ),
+        ],
+    },
+    Programme {
+        nom: "crontab",
+        role: ("tâches planifiées (cron)", "scheduled tasks (cron)"),
+        executable: "crontab",
+        commandes: &[
+            voir("crontab -l", "Tes tâches planifiées.", "Your scheduled tasks."),
+            changer("crontab -e", "Les modifie.", "Edits them."),
+            voir(
+                "ls /etc/cron.d /etc/cron.daily",
+                "Les tâches planifiées du système.",
+                "The system's scheduled tasks.",
+            ),
+        ],
+    },
+    Programme {
+        nom: "sysctl",
+        role: ("réglages du noyau", "kernel settings"),
+        executable: "sysctl",
+        commandes: &[
+            voir(
+                "sysctl <nom>",
+                "La valeur d'un réglage du noyau (net.ipv4.ip_forward…).",
+                "A kernel setting's value (net.ipv4.ip_forward…).",
+            ),
+            voir(
+                "sysctl -a 2>/dev/null | grep <mot>",
+                "Les réglages dont le nom contient ce mot.",
+                "The settings whose name contains this word.",
+            ),
+            changer(
+                "sudo sysctl -w <nom>=<valeur>",
+                "Le change jusqu'au redémarrage.",
+                "Changes it until restart.",
+            ),
+        ],
+    },
+    Programme {
+        nom: "stat, file, sha256sum",
+        role: ("fichiers : type, empreinte", "files: type, hash"),
+        executable: "file",
+        commandes: &[
+            voir(
+                "file <fichier>",
+                "Le vrai type d'un fichier, quel que soit son nom.",
+                "A file's real type, whatever its name.",
+            ),
+            voir(
+                "stat <fichier>",
+                "Taille, droits, dates de modification et d'accès.",
+                "Size, permissions, change and access dates.",
+            ),
+            voir(
+                "sha256sum <fichier>",
+                "Son empreinte SHA-256, à comparer avec celle que donne l'éditeur.",
+                "Its SHA-256 hash, to compare with the one the publisher gives.",
+            ),
+            voir(
+                "lsattr <fichier>",
+                "Ses attributs spéciaux (i : immuable, même pour root).",
+                "Its special attributes (i: immutable, even for root).",
+            ),
+        ],
+    },
+    Programme {
+        nom: "zip, unzip",
+        role: ("archives .zip", ".zip archives"),
+        executable: "unzip",
+        commandes: &[
+            voir(
+                "unzip -l <archive>.zip",
+                "Le contenu d'une archive, sans l'extraire.",
+                "An archive's content, without extracting it.",
+            ),
+            changer(
+                "unzip <archive>.zip -d <dossier>",
+                "L'extrait dans un dossier.",
+                "Extracts it into a folder.",
+            ),
+            changer(
+                "zip -r <archive>.zip <dossier>",
+                "Met un dossier dans une archive.",
+                "Puts a folder into an archive.",
+            ),
+        ],
+    },
+    Programme {
+        nom: "nft, iptables",
+        role: ("règles du pare-feu du noyau", "kernel firewall rules"),
+        executable: "nft",
+        commandes: &[
+            voir(
+                "sudo nft list ruleset",
+                "Toutes les règles du pare-feu du noyau (nftables), sous ufw ou firewalld.",
+                "All kernel firewall rules (nftables), beneath ufw or firewalld.",
+            ),
+            voir(
+                "sudo iptables -L -n -v",
+                "Les règles iptables, sur les systèmes plus anciens.",
+                "The iptables rules, on older systems.",
+            ),
+        ],
+    },
+    Programme {
+        nom: "fail2ban-client",
+        role: ("bannir les attaques répétées", "ban repeated attacks"),
+        executable: "fail2ban-client",
+        commandes: &[
+            voir(
+                "sudo fail2ban-client status",
+                "Les surveillances actives (sshd…).",
+                "Active watches (sshd…).",
+            ),
+            voir(
+                "sudo fail2ban-client status sshd",
+                "Les adresses bannies pour trop d'essais SSH.",
+                "Addresses banned for too many SSH tries.",
+            ),
+            changer(
+                "sudo fail2ban-client set sshd unbanip <adresse>",
+                "Débannit une adresse (la tienne, par erreur).",
+                "Unbans an address (yours, by mistake).",
+            ),
+        ],
+    },
+    Programme {
+        nom: "cryptsetup",
+        role: ("disques chiffrés (LUKS)", "encrypted disks (LUKS)"),
+        executable: "cryptsetup",
+        commandes: &[
+            voir(
+                "lsblk -o NAME,TYPE,FSTYPE | grep -i crypt",
+                "Les volumes chiffrés ouverts.",
+                "Open encrypted volumes.",
+            ),
+            voir(
+                "sudo cryptsetup luksDump /dev/<partition>",
+                "Les emplacements de clé d'une partition chiffrée.",
+                "An encrypted partition's key slots.",
+            ),
+            changer(
+                "sudo cryptsetup luksAddKey /dev/<partition>",
+                "Ajoute une phrase de secours, gardée à part.",
+                "Adds a backup passphrase, kept apart.",
+            ),
+        ],
+    },
+    Programme {
+        nom: "wpctl, pactl",
+        role: ("son (PipeWire)", "sound (PipeWire)"),
+        executable: "wpctl",
+        commandes: &[
+            voir(
+                "wpctl status",
+                "Cartes son, sorties et entrées, et celles par défaut (*).",
+                "Sound cards, outputs and inputs, and the default ones (*).",
+            ),
+            changer(
+                "wpctl set-default <id>",
+                "Choisit la sortie ou l'entrée par défaut (numéro de wpctl status).",
+                "Picks the default output or input (number from wpctl status).",
+            ),
+            voir("pactl list short sinks", "Les sorties son.", "Sound outputs."),
+            changer(
+                "systemctl --user restart pipewire wireplumber",
+                "Relance le son.",
+                "Restarts sound.",
+            ),
+        ],
+    },
+    Programme {
+        nom: "lpstat, cancel",
+        role: ("imprimantes et file d'attente", "printers and queue"),
+        executable: "lpstat",
+        commandes: &[
+            voir(
+                "lpstat -p -d",
+                "Les imprimantes, et celle par défaut.",
+                "Printers, and the default one.",
+            ),
+            voir(
+                "lpstat -o",
+                "Les documents en attente d'impression.",
+                "Documents waiting to print.",
+            ),
+            changer(
+                "cancel -a",
+                "Annule toutes les impressions en attente.",
+                "Cancels all waiting print jobs.",
+            ),
+            changer(
+                "sudo systemctl restart cups",
+                "Relance le service d'impression.",
+                "Restarts the print service.",
+            ),
+        ],
+    },
+    Programme {
+        nom: "powerprofilesctl, tlp-stat",
+        role: ("profils d'énergie, batterie", "power profiles, battery"),
+        executable: "powerprofilesctl",
+        commandes: &[
+            voir(
+                "powerprofilesctl",
+                "Le profil d'énergie actuel, et les autres.",
+                "The current power profile, and the others.",
+            ),
+            changer(
+                "powerprofilesctl set performance",
+                "Passe en performance (power-saver : économie).",
+                "Switches to performance (power-saver: saving).",
+            ),
+            voir(
+                "sudo tlp-stat -b",
+                "La batterie vue par TLP : usure, cycles.",
+                "The battery as TLP sees it: wear, cycles.",
+            ),
+        ],
+    },
+    Programme {
+        nom: "efibootmgr, mokutil, bootctl",
+        role: ("démarrage UEFI, Secure Boot", "UEFI boot, Secure Boot"),
+        executable: "efibootmgr",
+        commandes: &[
+            voir(
+                "efibootmgr -v",
+                "Les entrées de démarrage UEFI, et leur ordre.",
+                "UEFI boot entries, and their order.",
+            ),
+            voir("mokutil --sb-state", "Secure Boot est-il actif ?", "Is Secure Boot on?"),
+            voir(
+                "bootctl status",
+                "Le chargeur de démarrage et l'état du micrologiciel.",
+                "The boot loader and the firmware's state.",
+            ),
+        ],
+    },
+    Programme {
+        nom: "nvidia-smi, vulkaninfo",
+        role: ("carte graphique et pilotes", "graphics card and drivers"),
+        executable: "lspci",
+        commandes: &[
+            voir(
+                "lspci -k | grep -A3 -iE 'vga|3d'",
+                "La carte graphique, et le pilote qu'elle utilise.",
+                "The graphics card, and the driver it uses.",
+            ),
+            voir(
+                "nvidia-smi",
+                "Une carte NVIDIA : pilote, mémoire, température, programmes.",
+                "An NVIDIA card: driver, memory, temperature, programs.",
+            ),
+            voir(
+                "glxinfo -B",
+                "La carte qui affiche, et son pilote OpenGL.",
+                "The card that displays, and its OpenGL driver.",
+            ),
+            voir(
+                "vulkaninfo --summary",
+                "Vulkan, pour les jeux : cartes et pilotes.",
+                "Vulkan, for games: cards and drivers.",
+            ),
+        ],
+    },
+    Programme {
+        nom: "dkms",
+        role: ("pilotes construits par noyau", "drivers built per kernel"),
+        executable: "dkms",
+        commandes: &[
+            voir(
+                "dkms status",
+                "Les pilotes construits pour chaque noyau (NVIDIA, VirtualBox…).",
+                "Drivers built for each kernel (NVIDIA, VirtualBox…).",
+            ),
+            changer(
+                "sudo dkms autoinstall",
+                "Les reconstruit pour le noyau actuel.",
+                "Rebuilds them for the current kernel.",
+            ),
+        ],
+    },
 ];
 
 /// openSUSE, et ce que le guide ne range pas à part : les programmes communs y suffisent.
@@ -614,6 +1170,42 @@ const ZYPPER: Programme = Programme {
             "zypper list-patches --category security",
             "Les correctifs de sécurité qui manquent.",
             "Missing security patches.",
+        ),
+        voir(
+            "zypper info <paquet>",
+            "Ce que contient un paquet : version, taille, dépôt.",
+            "What a package holds: version, size, repository.",
+        ),
+        voir(
+            "zypper search -i <mot>",
+            "Les paquets installés dont le nom contient ce mot.",
+            "Installed packages whose name contains this word.",
+        ),
+        voir(
+            "zypper repos -d",
+            "Les dépôts, avec leur adresse et leur priorité.",
+            "Repositories, with their address and priority.",
+        ),
+        voir(
+            "sudo zypper ps -s",
+            "Les programmes qui tournent encore avec des fichiers remplacés par la mise à jour : à redémarrer.",
+            "Programs still running with files replaced by the update: to restart.",
+        ),
+        changer(
+            "sudo zypper patch",
+            "N'installe que les correctifs (Leap).",
+            "Installs the patches only (Leap).",
+        ),
+        changer(
+            "sudo zypper addlock <paquet>",
+            "Bloque un paquet à sa version.",
+            "Locks a package at its version.",
+        ),
+        voir("zypper locks", "Les paquets bloqués.", "Locked packages."),
+        changer(
+            "sudo transactional-update dup",
+            "Met à jour une édition atomique (MicroOS, Aeon), prise en compte au redémarrage.",
+            "Updates an atomic edition (MicroOS, Aeon), applied at the next restart.",
         ),
     ],
 };
@@ -746,3 +1338,55 @@ pub(super) const FIREWALLD: Programme = Programme {
         ),
     ],
 };
+
+/// Les marches à suivre d'openSUSE : chaque étape est une commande expliquée, dans l'ordre.
+pub const PAS_A_PAS: &[Programme] = &[
+    Programme {
+        nom: "Pas à pas : mettre à jour",
+        role: ("zypper : Leap ou Tumbleweed", "zypper: Leap or Tumbleweed"),
+        executable: "zypper",
+        commandes: &[
+            changer("sudo zypper refresh", "Relit les dépôts.", "Rereads the repositories."),
+            voir("zypper list-updates", "Ce qui va changer.", "What will change."),
+            changer("sudo zypper update", "Leap : met à jour.", "Leap: updates."),
+            changer(
+                "sudo zypper dup",
+                "Tumbleweed : passe à l'état suivant de la distribution ; toujours dup, jamais update.",
+                "Tumbleweed: moves to the distribution's next state; always dup, never update.",
+            ),
+            voir(
+                "sudo zypper ps -s",
+                "Les programmes à redémarrer.",
+                "Programs to restart.",
+            ),
+            changer(
+                "systemctl reboot",
+                "Redémarre si le noyau a changé.",
+                "Restarts if the kernel changed.",
+            ),
+        ],
+    },
+    Programme {
+        nom: "Pas à pas : revenir en arrière",
+        role: ("snapper, avant une mise à jour", "snapper, before an update"),
+        executable: "snapper",
+        commandes: &[
+            voir(
+                "sudo snapper list",
+                "Les instantanés : zypper en prend un avant et un après chaque opération.",
+                "Snapshots: zypper takes one before and one after each operation.",
+            ),
+            voir(
+                "sudo snapper status <numéro>..<numéro>",
+                "Ce qui a changé entre deux instantanés.",
+                "What changed between two snapshots.",
+            ),
+            changer("sudo snapper undochange <numéro>..<numéro>", "L'annule.", "Undoes it."),
+            changer(
+                "sudo snapper rollback <numéro>",
+                "Revient au système d'un instantané, puis redémarre ; GRUB propose aussi les instantanés.",
+                "Goes back to a snapshot's system, then restart; GRUB also offers the snapshots.",
+            ),
+        ],
+    },
+];

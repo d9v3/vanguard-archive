@@ -200,6 +200,21 @@ pub const PROGRAMMES: &[Programme] = &[
                 "Oublie l'empreinte d'un serveur, seulement s'il a été réinstallé : sinon, quelqu'un se fait peut-être passer pour lui.",
                 "Forgets a server's fingerprint, only if it was reinstalled: otherwise, someone may be impersonating it.",
             ),
+            voir(
+                "ssh -G <adresse>",
+                "Les réglages qu'ssh utiliserait pour ce serveur.",
+                "The settings ssh would use for this server.",
+            ),
+            voir(
+                "ssh-keygen -F <adresse>",
+                "Ce serveur est-il déjà connu (known_hosts) ?",
+                "Is this server already known (known_hosts)?",
+            ),
+            changer(
+                "ssh -L 8080:localhost:80 <utilisateur>@<adresse>",
+                "Un tunnel : le port 80 du serveur, ouvert ici sur le 8080.",
+                "A tunnel: the server's port 80, opened here on 8080.",
+            ),
         ],
     },
     Programme {
@@ -221,6 +236,11 @@ pub const PROGRAMMES: &[Programme] = &[
                 "curl -LO https://<site>/<fichier>",
                 "Télécharge un fichier ici.",
                 "Downloads a file here.",
+            ),
+            voir(
+                "curl -v https://<site>",
+                "Toute la conversation : chiffrement, en-têtes, redirections.",
+                "The whole conversation: encryption, headers, redirects.",
             ),
         ],
     },
@@ -291,6 +311,44 @@ pub const PROGRAMMES: &[Programme] = &[
                 "Crée une branche et s'y place.",
                 "Creates a branch and switches to it.",
             ),
+            voir(
+                "git log --graph --oneline --all -20",
+                "L'historique de toutes les branches, en dessin.",
+                "The history of all branches, as a drawing.",
+            ),
+            voir(
+                "git branch -a",
+                "Les branches, locales et distantes.",
+                "Branches, local and remote.",
+            ),
+            voir(
+                "git remote -v",
+                "D'où vient le projet, et où il s'envoie.",
+                "Where the project comes from, and where it is sent.",
+            ),
+            changer("git push", "Envoie tes enregistrements.", "Sends your commits."),
+            changer(
+                "git stash",
+                "Met de côté les changements en cours…",
+                "Puts the current changes aside…",
+            ),
+            changer("git stash pop", "…et les reprend.", "…and takes them back."),
+            changer(
+                "git restore <fichier>",
+                "Annule les changements d'un fichier : ils sont perdus.",
+                "Undoes a file's changes: they are lost.",
+            ),
+            voir("git show <id>", "Le détail d'un enregistrement.", "A commit's details."),
+            voir(
+                "git blame <fichier>",
+                "Qui a écrit chaque ligne d'un fichier, et quand.",
+                "Who wrote each line of a file, and when.",
+            ),
+            changer(
+                "git config --global user.name \"<nom>\"",
+                "Ton nom dans les enregistrements.",
+                "Your name in commits.",
+            ),
         ],
     },
     Programme {
@@ -304,6 +362,113 @@ pub const PROGRAMMES: &[Programme] = &[
                 "The account you are working with.",
             ),
             voir("hostname", "Le nom de cet ordinateur.", "This computer's name."),
+        ],
+    },
+    Programme {
+        nom: "docker",
+        role: ("conteneurs (Docker)", "containers (Docker)"),
+        executable: "docker",
+        commandes: &[
+            voir("docker ps", "Les conteneurs qui tournent.", "Running containers."),
+            voir(
+                "docker ps -a",
+                "Tous les conteneurs, arrêtés compris.",
+                "All containers, stopped ones included.",
+            ),
+            voir("docker images", "Les images téléchargées.", "Downloaded images."),
+            voir(
+                "docker logs --tail 50 <nom>",
+                "Les dernières lignes du journal d'un conteneur.",
+                "The latest log lines of a container.",
+            ),
+            voir(
+                "docker stats --no-stream",
+                "Le processeur et la mémoire de chaque conteneur.",
+                "Each container's processor and memory.",
+            ),
+            voir(
+                "docker system df",
+                "La place prise par Docker.",
+                "Space taken by Docker.",
+            ),
+            changer(
+                "docker compose up -d",
+                "Lance les services du projet (compose.yaml), en arrière-plan.",
+                "Starts the project's services (compose.yaml), in the background.",
+            ),
+            changer("docker compose down", "Les arrête.", "Stops them."),
+            changer(
+                "docker exec -it <nom> sh",
+                "Ouvre un terminal dans un conteneur.",
+                "Opens a terminal inside a container.",
+            ),
+            changer(
+                "docker system prune",
+                "Retire conteneurs arrêtés, réseaux et images inutiles.",
+                "Removes stopped containers, networks and unused images.",
+            ),
+        ],
+    },
+];
+
+/// Les marches à suivre de tous les systèmes : chaque étape est une commande expliquée, dans l'ordre.
+pub const PAS_A_PAS: &[Programme] = &[
+    Programme {
+        nom: "Pas à pas : clé SSH",
+        role: ("se connecter sans mot de passe", "connect without a password"),
+        executable: "ssh",
+        commandes: &[
+            changer(
+                "ssh-keygen -t ed25519",
+                "Crée ta paire de clés ; protège-la par une phrase de passe.",
+                "Creates your key pair; protect it with a passphrase.",
+            ),
+            voir(
+                "cat $HOME/.ssh/id_ed25519.pub",
+                "Ta clé publique, la seule à donner : une ligne qui commence par ssh-ed25519.",
+                "Your public key, the only one to give out: a line starting with ssh-ed25519.",
+            ),
+            changer(
+                "scp $HOME/.ssh/id_ed25519.pub <utilisateur>@<adresse>:",
+                "La copie sur le serveur…",
+                "Copies it to the server…",
+            ),
+            changer(
+                "ssh <utilisateur>@<adresse> \"cat id_ed25519.pub >> .ssh/authorized_keys\"",
+                "…et l'y ajoute aux clés autorisées.",
+                "…and adds it there to the authorized keys.",
+            ),
+            voir(
+                "ssh <utilisateur>@<adresse>",
+                "Connecte-toi : plus de mot de passe du serveur, seulement ta phrase de passe.",
+                "Connect: no more server password, only your passphrase.",
+            ),
+        ],
+    },
+    Programme {
+        nom: "Pas à pas : git",
+        role: ("récupérer, modifier, envoyer", "get, change, send"),
+        executable: "git",
+        commandes: &[
+            changer("git clone <adresse>", "Récupère un projet.", "Gets a project."),
+            changer(
+                "git switch -c <nom>",
+                "Une branche pour ton travail.",
+                "A branch for your work.",
+            ),
+            voir("git status", "Ce que tu as changé.", "What you changed."),
+            changer("git add <fichier>", "Prépare tes changements…", "Stages your changes…"),
+            changer(
+                "git commit -m \"<texte>\"",
+                "…et les enregistre, avec un message.",
+                "…and commits them, with a message.",
+            ),
+            changer(
+                "git pull --rebase",
+                "Reprend les nouveautés des autres par-dessus.",
+                "Takes the others' changes underneath yours.",
+            ),
+            changer("git push -u origin <nom>", "Envoie ta branche.", "Sends your branch."),
         ],
     },
 ];

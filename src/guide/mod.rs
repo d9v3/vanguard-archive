@@ -160,6 +160,8 @@ impl Systeme {
             Systeme::Debian => debian::PAS_A_PAS,
             Systeme::Windows => windows::PAS_A_PAS,
             Systeme::MacOs => macos::PAS_A_PAS,
+            Systeme::AutresLinux => linux::PAS_A_PAS,
+            Systeme::Tous => tous::PAS_A_PAS,
             _ => &[],
         }
     }
@@ -397,8 +399,11 @@ const A_REMPLACER: &[(&str, &str)] = &[
     ("<disque>", "<disk>"),
     ("<dossier>", "<folder>"),
     ("<fichier>", "<file>"),
+    ("<groupe>", "<group>"),
     ("<id>", "<id>"),
+    ("<interface>", "<interface>"),
     ("<ip>", "<ip>"),
+    ("<module>", "<module>"),
     ("<mot>", "<word>"),
     ("<nom>", "<name>"),
     ("<numéro>", "<number>"),
@@ -412,6 +417,7 @@ const A_REMPLACER: &[(&str, &str)] = &[
     ("<source>", "<source>"),
     ("<texte>", "<text>"),
     ("<utilisateur>", "<user>"),
+    ("<valeur>", "<value>"),
     ("<version>", "<version>"),
     ("<étiquette>", "<label>"),
 ];
@@ -440,6 +446,9 @@ const NOMS_EN: &[(&str, &str)] = &[
     ("Pas à pas : lenteur", "Step by step: slowness"),
     ("Pas à pas : réparer le disque", "Step by step: repair the disk"),
     ("Pas à pas : Time Machine", "Step by step: Time Machine"),
+    ("Pas à pas : revenir en arrière", "Step by step: roll back"),
+    ("Pas à pas : clé SSH", "Step by step: SSH key"),
+    ("Pas à pas : git", "Step by step: git"),
 ];
 
 /// Ses noms dans les deux langues, pour la recherche.
@@ -1716,6 +1725,22 @@ mod tests {
             if ["top", "htop", "btop", "less", "more", "nano", "vi", "vim"].contains(&premier.as_str()) {
                 assert_eq!(c.obstacle, Obstacle::PleinEcran, "{} › {}", s.nom(), c.ligne);
             }
+        }
+    }
+
+    /// Le test de la VM Windows (outils/test-windows/test.ps1) ouvre le guide par des chemins tapés : ils doivent mener
+    /// aux commandes qu'il attend. Une marche à suivre ajoutée décale les numéros, et la passe de la VM ne le dirait
+    /// que le jour de la publication.
+    #[cfg(unix)]
+    #[test]
+    fn les_chemins_du_test_de_la_vm_menent_aux_bonnes_commandes() {
+        let script =
+            std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/outils/test-windows/test.ps1")).unwrap();
+        for (tape, attendue) in [("10.6.7.2", "winget upgrade --all"), ("10.6.11.1", "ipconfig /all")] {
+            assert!(script.contains(&format!("\"{tape}`n")), "test.ps1 n'ouvre plus {tape}");
+            let (s, p, c) = chemin(tape.strip_prefix("10.").unwrap()).unwrap();
+            let (_, programme) = SYSTEMES[s - 1].programmes()[p.unwrap() - 1];
+            assert_eq!(programme.commandes[c.unwrap() - 1].ligne, attendue, "{tape}");
         }
     }
 
