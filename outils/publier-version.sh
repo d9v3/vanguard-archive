@@ -156,4 +156,7 @@ rm -rf target/macos && mkdir -p target/macos && cp "$DOSSIER/mac/"* target/macos
 CLE=$(find "/run/media/$USER" -maxdepth 2 \( -name gardien.cle -o -name sentinel.cle -o -name netscan.cle \) -printf '%h\n' 2>/dev/null | head -1)
 if [[ -n $CLE && -d $CLE/macOS ]] && cp -f target/macos/gardien "$CLE/macOS/gardien" && sync; then
   echo "Version macOS $VERSION copiée sur la clé."
+  # Le manifeste de la clé, écrit par deployer.sh avant cette copie, la reprend : sinon le bilan suivant dirait le
+  # programme macOS remplacé.
+  ./"$LINUX" manifeste --ecrire "$CLE" || echo "Manifeste de la clé non réécrit : relancer outils/deployer.sh."
 fi
