@@ -685,8 +685,11 @@ mod tests {
         // La clé en apporte une fraîche : elle sert, et rien ne se télécharge.
         let recente = zip(&[("linux/a.md", "# recente\n", false)]);
         ecrire(cle, &recente, Duration::from_hours(1));
-        assert!(!a_renouveler("fr", &dossiers));
+        assert!(!a_renouveler("fr", &dossiers) && a_verifier("fr", &dossiers));
         assert_eq!(contenu(&dossiers).as_deref(), Some(&b"# recente\n"[..]));
+        // Lue pour l'affichage (guide::menu charge les pages avant de lancer le fil), elle n'est plus à vérifier : le
+        // fil d'arrière-plan ne la relit pas.
+        assert!(!a_verifier("fr", &dossiers));
         // Abîmée (clé retirée pendant la copie), la plus récente laisse la place à l'autre.
         ecrire(cle, &recente[..recente.len() / 2], Duration::from_hours(1));
         assert_eq!(contenu(&dossiers).as_deref(), Some(&b"# ancienne\n"[..]));

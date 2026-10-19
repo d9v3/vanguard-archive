@@ -1219,6 +1219,10 @@ fn afficher_resultats(recherche: &str, trouvees: &[Trouvee]) {
 
 /// Le guide au menu : taper ce qu'on cherche, ou choisir un système.
 pub fn menu() {
+    // Les pages de tldr-pages avant leur téléchargement : le menu les affiche de toute façon, et en les chargeant, tldr
+    // retient quelles archives se lisent ; le fil d'arrière-plan ne relit que celles qui restent inconnues. Dans
+    // l'autre ordre, les deux fils lisaient les mêmes archives en même temps, le double sur une clé lente.
+    tldr::pages();
     tldr::renouveler_en_fond();
     let total: usize = pages().iter().map(|page| page.programme.commandes.len()).sum();
     let mut dernier = String::from("1");
