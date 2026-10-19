@@ -467,6 +467,26 @@ pub(super) fn fichiers_suspects() -> Vec<Constat> {
         p.symlink_metadata()
             .is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o6000 != 0)
     };
+    // Capacités (setcap) : droits root partiels, invisibles dans « ls -l ». Poser une capacité demande root.
+    // Lancé tout de suite, en même temps que les parcours : getcap relit tout /usr/lib (0,6 s).
+    let capacites = std::thread::spawn(|| {
+        sortie(
+            "getcap",
+            &[
+                "-r",
+                "/usr/bin",
+                "/usr/sbin",
+                "/usr/local",
+                "/usr/lib",
+                "/usr/libexec",
+                "/opt",
+                "/tmp",
+                "/var/tmp",
+                "/dev/shm",
+            ],
+        )
+        .map(|s| fichiers_capacites(&s))
+    });
     let mut anormaux = Vec::new();
     for (d, prof) in [("/tmp", 3), ("/var/tmp", 3), ("/dev/shm", 3), (&home() as &str, 2)] {
         parcourir(Path::new(d), prof, &mut anormaux, &dangereux_hors_systeme);
@@ -484,23 +504,7 @@ pub(super) fn fichiers_suspects() -> Vec<Constat> {
     ] {
         parcourir(Path::new(d), prof, &mut systeme, &privilegie);
     }
-    // Capacités (setcap) : droits root partiels, invisibles dans « ls -l ». Poser une capacité demande root.
-    let capacites = sortie(
-        "getcap",
-        &[
-            "-r",
-            "/usr/bin",
-            "/usr/sbin",
-            "/usr/local",
-            "/usr/lib",
-            "/usr/libexec",
-            "/opt",
-            "/tmp",
-            "/var/tmp",
-            "/dev/shm",
-        ],
-    )
-    .map(|s| fichiers_capacites(&s));
+    let capacites = capacites.join().ok().flatten();
     for p in capacites.iter().flatten() {
         if ["/tmp/", "/var/tmp/", "/dev/shm/"].iter().any(|d| p.starts_with(d)) {
             anormaux.push(p.clone());
@@ -518,8 +522,8 @@ pub(super) fn fichiers_suspects() -> Vec<Constat> {
     let gestion = Paquets::detecter();
     let mut par_paquet: std::collections::BTreeMap<String, Vec<std::path::PathBuf>> = std::collections::BTreeMap::new();
     if let Some(gestion) = gestion {
-        for p in &systeme {
-            match gestion.proprietaire(p) {
+        for (p, proprietaire) in systeme.iter().zip(gestion.proprietaires(&systeme)) {
+            match proprietaire {
                 Some(paquet) => par_paquet.entry(paquet).or_default().push(p.clone()),
                 None => anormaux.push(p.clone()),
             }

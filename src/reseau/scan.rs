@@ -606,7 +606,18 @@ pub fn nom_wifi() -> Option<String> {
     #[cfg(target_os = "linux")]
     let nom = nom_wifi_nmcli(
         &crate::commande::lancer_en_anglais(
-            std::process::Command::new("nmcli").args(["-t", "-e", "no", "-f", "ACTIVE,SSID", "dev", "wifi"]),
+            std::process::Command::new("nmcli").args([
+                "-t",
+                "-e",
+                "no",
+                "-f",
+                "ACTIVE,SSID",
+                "dev",
+                "wifi",
+                "list",
+                "--rescan",
+                "no",
+            ]),
             10,
         )
         .map(|r| r.sortie)

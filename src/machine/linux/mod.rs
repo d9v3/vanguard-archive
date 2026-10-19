@@ -197,6 +197,21 @@ impl Paquets {
 
     /// Ces fichiers du paquet ont-ils changé depuis son installation ? Contenu comparé à l'empreinte enregistrée
     /// par le gestionnaire de paquets. `None` pour un fichier qu'on ne peut pas vérifier (illisible, sans empreinte).
+    /// Le paquet de chaque fichier, dans l'ordre. pacman répond pour tous en un appel (un par fichier coûtait une
+    /// seconde pour les programmes privilégiés) ; les autres gestionnaires, un fichier à la fois.
+    pub fn proprietaires(self, fichiers: &[std::path::PathBuf]) -> Vec<Option<String>> {
+        if self == Paquets::Pacman && !fichiers.is_empty() {
+            // Code 1 dès qu'un fichier n'a pas de paquet : la sortie vaut quand même pour les autres.
+            if let Some(r) = crate::commande::lancer_en_anglais(Command::new("pacman").arg("-Qo").args(fichiers), 60) {
+                let trouves = proprietaires_pacman(&r.sortie);
+                return fichiers
+                    .iter()
+                    .map(|f| trouves.get(f.to_string_lossy().as_ref()).cloned())
+                    .collect();
+            }
+        }
+        fichiers.iter().map(|f| self.proprietaire(f)).collect()
+    }
     pub fn modifies(self, paquet: &str, fichiers: &[std::path::PathBuf]) -> Vec<Option<bool>> {
         match self {
             Paquets::Pacman => {
@@ -1023,6 +1038,17 @@ fn juger_ouverture_automatique(compte: &str, fichier: &str, chiffree: Option<boo
     )
 }
 
+/// `pacman -Qo` en anglais : « /usr/bin/su is owned by util-linux 2.42.4-1 », une ligne par fichier qui a un paquet.
+fn proprietaires_pacman(sortie: &str) -> std::collections::HashMap<String, String> {
+    sortie
+        .lines()
+        .filter_map(|l| {
+            let (fichier, paquet) = l.rsplit_once(" is owned by ")?;
+            Some((fichier.to_string(), paquet.split_whitespace().next()?.to_string()))
+        })
+        .collect()
+}
+
 /// Le système de fichiers racine repose-t-il sur un volume chiffré (LUKS, éventuellement sous LVM) ?
 /// `None` si on ne peut pas remonter la chaîne des périphériques.
 fn racine_chiffree() -> Option<bool> {
@@ -1106,10 +1132,23 @@ fn comptes() -> Constat {
 
 /// Wi-Fi : protection du réseau connecté, et un éventuel jumeau maléfique parmi les réseaux visibles.
 fn wifi(passerelle: Option<String>) -> Vec<Constat> {
+    // « --rescan no » : la liste que NetworkManager tient à jour de lui-même. Sans cela, une liste de plus de 30 s
+    // faisait attendre un nouveau balayage, 7 s sur les 8 du bilan.
     // SSID en dernier et sans échappement : un nom de réseau contenant « : » reste intact. En anglais : nmcli
     // traduit la colonne ACTIVE (« oui » en français), et le réseau connecté n'était plus trouvé.
     let Some(s) = crate::commande::lancer_en_anglais(
-        Command::new("nmcli").args(["-t", "-e", "no", "-f", "ACTIVE,SECURITY,SSID", "dev", "wifi"]),
+        Command::new("nmcli").args([
+            "-t",
+            "-e",
+            "no",
+            "-f",
+            "ACTIVE,SECURITY,SSID",
+            "dev",
+            "wifi",
+            "list",
+            "--rescan",
+            "no",
+        ]),
         30,
     )
     .filter(|r| r.code == Some(0))
@@ -1595,6 +1634,15 @@ pub fn auditer() -> Audit {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn paquets_de_plusieurs_fichiers() {
+        let sortie = "/usr/bin/sudo is owned by sudo 1.9.17.p2-6\n/opt/mon outil/x is owned by mon-outil 1.0-1\n";
+        let trouves = proprietaires_pacman(sortie);
+        assert_eq!(trouves.get("/usr/bin/sudo").map(String::as_str), Some("sudo"));
+        assert_eq!(trouves.get("/opt/mon outil/x").map(String::as_str), Some("mon-outil"));
+        assert_eq!(trouves.len(), 2);
+    }
 
     #[test]
     fn ouverture_de_session_automatique() {

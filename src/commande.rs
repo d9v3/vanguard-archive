@@ -41,10 +41,16 @@ pub fn lancer(commande: &mut Command, secondes: u64) -> Option<Resultat> {
     let sortie = lire_en_fond(enfant.stdout.take()?);
     let erreurs = lire_en_fond(enfant.stderr.take()?);
     let limite = Instant::now() + Duration::from_secs(secondes);
+    // Attente qui double de 1 à 50 ms : la plupart des commandes finissent en quelques millisecondes, et une pause
+    // fixe de 50 ms coûtait 50 ms à chacune (5 s pour la centaine de petites commandes des fichiers suspects).
+    let mut pause = Duration::from_millis(1);
     let statut = loop {
         match enfant.try_wait() {
             Ok(Some(statut)) => break statut,
-            Ok(None) if Instant::now() < limite => std::thread::sleep(Duration::from_millis(50)),
+            Ok(None) if Instant::now() < limite => {
+                std::thread::sleep(pause);
+                pause = (pause * 2).min(Duration::from_millis(50));
+            }
             _ => {
                 arreter(&mut enfant);
                 return None;
