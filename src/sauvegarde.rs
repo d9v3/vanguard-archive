@@ -146,7 +146,13 @@ fn chemin_systemd(p: &Path) -> Option<String> {
 /// Les deux fichiers d'unité : (timer, service). `racine` : le disque, dont le montage conditionne le passage ;
 /// `destination` : le dossier de cet ordinateur dessus ; `sources` : les dossiers personnels copiés tels quels.
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
-pub(crate) fn unites(rsync: &Path, racine: &Path, destination: &Path, sources: &[PathBuf]) -> Option<(String, String)> {
+pub(crate) fn unites(
+    rsync: &Path,
+    racine: &Path,
+    destination: &Path,
+    sources: &[PathBuf],
+    fat: bool,
+) -> Option<(String, String)> {
     let tous = [rsync, racine, destination]
         .into_iter()
         .chain(sources.iter().map(PathBuf::as_path));
@@ -156,24 +162,51 @@ pub(crate) fn unites(rsync: &Path, racine: &Path, destination: &Path, sources: &
     let timer = format!(
         "[Unit]\nDescription=Sauvegarde Gardien, chaque jour\n\n[Timer]\nOnCalendar=*-*-* {HEURE}\nPersistent=true\nRandomizedDelaySec=10min\n\n[Install]\nWantedBy=timers.target\n"
     );
-    let mut commande = vec![
-        citer_systemd(&rsync.display().to_string()),
-        "-a".into(),
-        "--no-specials".into(),
-        "--no-devices".into(),
-        "--exclude=.cache".into(),
-        "--exclude=node_modules".into(),
-        "--exclude=.gardien-copie-en-cours".into(),
-    ];
+    // FAT et exFAT (presque toutes les clés USB) : ni liens symboliques, ni droits, ni propriétaires, et une heure à
+    // 2 s près. « -a » y échouait sur chaque lien (rsync sort en erreur, chaque jour) et, sans tolérance sur l'heure,
+    // tout serait recopié à chaque passage : fichiers et heures seulement, les liens laissés de côté.
+    let options: &[&str] = if fat {
+        &["-rt", "--modify-window=2"]
+    } else {
+        &["-a", "--no-specials", "--no-devices"]
+    };
+    let mut commande = vec![citer_systemd(&rsync.display().to_string())];
+    commande.extend(options.iter().map(|o| (*o).to_string()));
+    commande.extend([
+        "--exclude=.cache".to_string(),
+        "--exclude=node_modules".to_string(),
+        "--exclude=.gardien-copie-en-cours".to_string(),
+    ]);
     commande.extend(sources.iter().map(|s| citer_systemd(&s.display().to_string())));
     commande.push(citer_systemd(&format!("{}/", destination.display())));
     let service = format!(
-        "[Unit]\nDescription=Sauvegarde Gardien vers {}\n# Disque débranché : rien ne se passe, sans erreur.\nConditionPathIsMountPoint={}\n\n[Service]\nType=oneshot\nNice=10\nIOSchedulingClass=idle\nExecStart={}\n",
+        "[Unit]\nDescription=Sauvegarde Gardien vers {}\n# Disque débranché : rien ne se passe, sans erreur.\nConditionPathIsMountPoint={}\n\n[Service]\nType=oneshot\nNice=10\nIOSchedulingClass=idle\n# 24 : un fichier a disparu pendant la copie, normal pour un dossier en usage.\nSuccessExitStatus=24\nExecStart={}\n",
         chemin_systemd(destination)?,
         chemin_systemd(racine)?,
         commande.join(" ")
     );
     Some((timer, service))
+}
+
+/// Le système de fichiers monté à `racine` (« vfat », « ext4 »…), d'après /proc/mounts.
+#[cfg(target_os = "linux")]
+fn systeme_de_fichiers(racine: &Path) -> Option<String> {
+    systeme_de_fichiers_selon(&std::fs::read_to_string("/proc/mounts").ok()?, racine)
+}
+
+#[cfg(any(target_os = "linux", test))]
+fn systeme_de_fichiers_selon(montages: &str, racine: &Path) -> Option<String> {
+    montages.lines().find_map(|l| {
+        let mut champs = l.split_whitespace();
+        let (_, point, systeme) = (champs.next()?, champs.next()?, champs.next()?);
+        (Path::new(&crate::copier::sans_echappements(point)) == racine).then(|| systeme.to_string())
+    })
+}
+
+/// Un système de fichiers sans liens symboliques ni droits Unix, à l'heure près de 2 s : la famille FAT.
+#[cfg(any(target_os = "linux", test))]
+fn sans_liens(systeme: &str) -> bool {
+    matches!(systeme, "vfat" | "msdos" | "exfat" | "fat" | "umsdos")
 }
 
 #[cfg(target_os = "linux")]
@@ -526,7 +559,8 @@ fn mettre_en_place() -> Option<MiseEnPlace> {
         });
     }
     let rsync = rsync?;
-    let Some((timer, service)) = unites(&rsync, &disque.racine, &destination, &sources) else {
+    let fat = systeme_de_fichiers(&disque.racine).is_some_and(|s| sans_liens(&s));
+    let Some((timer, service)) = unites(&rsync, &disque.racine, &destination, &sources, fat) else {
         mauvais(tr!(
             "Le nom de ce disque ou d'un dossier contient un caractère de contrôle : rien n'est posé. Renomme le disque, puis recommence.",
             "The name of this disk or of a folder contains a control character: nothing is set up. Rename the disk, then start again."
@@ -905,6 +939,36 @@ mod tests {
     use super::*;
 
     #[test]
+    fn sauvegarde_vers_une_cle_fat() {
+        let montages = "/dev/sda1 /run/media/alice/EMTEC\\040D280C vfat rw,nosuid 0 0\n/dev/sdb1 /run/media/alice/Externe ext4 rw 0 0\n";
+        assert_eq!(
+            systeme_de_fichiers_selon(montages, Path::new("/run/media/alice/EMTEC D280C")).as_deref(),
+            Some("vfat")
+        );
+        assert_eq!(
+            systeme_de_fichiers_selon(montages, Path::new("/run/media/alice/Externe")).as_deref(),
+            Some("ext4")
+        );
+        assert!(sans_liens("vfat") && sans_liens("exfat") && !sans_liens("ext4") && !sans_liens("ntfs3"));
+        let regle = |fat| {
+            unites(
+                Path::new("/usr/bin/rsync"),
+                Path::new("/run/media/alice/Cle"),
+                Path::new("/run/media/alice/Cle/Sauvegarde-Gardien/pc"),
+                &[PathBuf::from("/home/alice/Documents")],
+                fat,
+            )
+            .unwrap()
+            .1
+        };
+        // FAT : fichiers et heures (à 2 s près), sans liens ni droits ; sinon la copie complète.
+        assert!(regle(true).contains("\"/usr/bin/rsync\" -rt --modify-window=2 --exclude=.cache"));
+        assert!(regle(false).contains("\"/usr/bin/rsync\" -a --no-specials --no-devices --exclude=.cache"));
+        // Un fichier disparu pendant la copie n'est pas un échec.
+        assert!(regle(true).contains("SuccessExitStatus=24\n") && regle(false).contains("SuccessExitStatus=24\n"));
+    }
+
+    #[test]
     fn unites_systemd_bien_formees() {
         let (timer, service) = unites(
             Path::new("/usr/bin/rsync"),
@@ -914,6 +978,7 @@ mod tests {
                 PathBuf::from("/home/alice/Documents"),
                 PathBuf::from("/home/alice/Mes \"images\""),
             ],
+            false,
         )
         .unwrap();
         // Un nom de disque piégé (saut de ligne) : rien n'est écrit. Un « % » est doublé pour systemd.
@@ -923,6 +988,7 @@ mod tests {
                 Path::new("/run/media/alice/X\nExecStartPre=/bin/touch /tmp/pirate"),
                 Path::new("/run/media/alice/X\nExecStartPre=/bin/touch /tmp/pirate/Sauvegarde-Gardien/pc"),
                 &[PathBuf::from("/home/alice/Documents")],
+                false,
             )
             .is_none()
         );
@@ -931,6 +997,7 @@ mod tests {
             Path::new("/run/media/alice/100%"),
             Path::new("/run/media/alice/100%/Sauvegarde-Gardien/pc"),
             &[PathBuf::from("/home/alice/Documents")],
+            false,
         )
         .unwrap();
         assert!(cent.contains("ConditionPathIsMountPoint=/run/media/alice/100%%\n"));
