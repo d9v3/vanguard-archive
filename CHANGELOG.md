@@ -6,6 +6,22 @@ Ce que chaque journée a apporté à Gardien, la plus récente en haut. Depuis l
 publication par jour, qui regroupe le travail de la journée. Seule la dernière version a sa page de téléchargement ;
 chaque version garde son étiquette dans le dépôt (`git checkout v0.62.0`, par exemple), pour être recompilée au besoin.
 
+## 20 octobre 2026 : version 0.78
+
+- **Bilan bien plus rapide.** Sous Linux, de 7 secondes à moins d'une : les commandes ne sont plus attendues par
+  pauses fixes de 50 ms, les paquets se vérifient en parallèle, le Wi-Fi n'attend plus un nouveau balayage. Sous
+  Windows, huit lancements de PowerShell de moins : pare-feu, UAC, Bureau à distance et verrouillage lus
+  directement dans le registre.
+- **Windows.** Installation de paquets MSI avec les droits du système, protection dans le cloud de Defender coupée,
+  protection contre les exploits coupée (DEP, ASLR, CFG, SEHOP), services au chemin sans guillemets dans un dossier
+  modifiable par tous ; BitLocker suspendu ou en attente ne compte plus comme chiffré.
+- **Linux et macOS.** Session qui s'ouvre toute seule sans disque chiffré (GDM, SDDM, LightDM), mémoire des
+  programmes root lisible après un plantage, touches magiques du noyau ; sauvegarde Time Machine non chiffrée.
+- **Plus justes.** Fichiers inclus de la configuration SSH lus, réseaux Wi-Fi ouverts mieux reconnus, dnf-automatic
+  qui ne fait que télécharger, réglages d'APT lus dans leur ordre, interface anglaise complète.
+- **Une seule publication par jour.** Ce journal regroupe les versions par jour ; seule la dernière garde sa page de
+  téléchargement, et le Mac de GitHub ne compile plus qu'une fois par publication.
+
 ## 19 octobre 2026 : versions 0.62 à 0.77
 
 - **Bilan bien plus complet sous Windows.** Authentification réseau LM ou NTLMv1, empreintes LM, signature et accès

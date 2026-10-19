@@ -6,6 +6,21 @@ What each day brought to Gardien, most recent first. Since October 19, 2026, Gar
 gathering the day's work. Only the latest version has its download page; every version keeps its tag in the
 repository (`git checkout v0.62.0`, for example), to be rebuilt if needed.
 
+## October 20, 2026: version 0.78
+
+- **A much faster check.** On Linux, from 7 seconds to under one: commands are no longer awaited in fixed 50 ms
+  pauses, packages are verified in parallel, Wi-Fi no longer waits for a new scan. On Windows, eight fewer PowerShell
+  launches: firewall, UAC, Remote Desktop and screen lock read straight from the registry.
+- **Windows.** MSI packages installed with system rights, Defender cloud protection off, exploit protection off
+  (DEP, ASLR, CFG, SEHOP), services with unquoted paths in a folder anyone can change; a suspended or pending
+  BitLocker no longer counts as encrypted.
+- **Linux and macOS.** Session that opens by itself without an encrypted disk (GDM, SDDM, LightDM), root programs'
+  memory readable after a crash, kernel magic keys; unencrypted Time Machine backup.
+- **More accurate.** Included SSH configuration files read, open Wi-Fi networks better recognized, dnf-automatic that
+  only downloads, APT settings read in their order, complete English interface.
+- **A single release a day.** This history groups versions by day; only the latest keeps its download page, and
+  GitHub's Mac now compiles once per release.
+
 ## October 19, 2026: versions 0.62 to 0.77
 
 - **A much fuller check on Windows.** LM or NTLMv1 network authentication, LM hashes, share signing and guest
