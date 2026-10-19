@@ -1728,6 +1728,28 @@ mod tests {
         }
     }
 
+    /// Une commande dont le texte dit qu'elle demande l'administrateur ne se lance pas d'ici, même ajoutée plus tard :
+    /// sous Windows, rien ne le voit tout seul (seul sudo est reconnu). Elle change quelque chose, ou elle est marquée
+    /// (Longue : plusieurs minutes, administrateur compris).
+    #[test]
+    fn les_commandes_administrateur_sont_marquees() {
+        for (s, _, c) in toutes() {
+            let administrateur = [c.texte.0, c.texte.1].iter().any(|t| {
+                t.contains("(administrat")
+                    || t.contains("terminal administrateur")
+                    || t.contains("administrator terminal")
+            });
+            if administrateur {
+                assert!(
+                    c.modifie || matches!(c.obstacle, Obstacle::Administrateur | Obstacle::Longue),
+                    "{} › {} : administrateur dans son texte, sans .sauf(Obstacle::Administrateur)",
+                    s.nom(),
+                    c.ligne
+                );
+            }
+        }
+    }
+
     /// Le test de la VM Windows (outils/test-windows/test.ps1) ouvre le guide par des chemins tapés : ils doivent mener
     /// aux commandes qu'il attend. Une marche à suivre ajoutée décale les numéros, et la passe de la VM ne le dirait
     /// que le jour de la publication.

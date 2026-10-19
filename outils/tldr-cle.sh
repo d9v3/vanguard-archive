@@ -13,7 +13,9 @@ ADRESSE=https://github.com/tldr-pages/tldr/releases/latest/download
 LOCAL="${XDG_DATA_HOME:-$HOME/.local/share}/vanguard/tldr"
 mkdir -p "$DOSSIER"
 TEMP=$(mktemp -d)
-trap 'rm -rf "$TEMP"' EXIT
+# Une copie interrompue (clé pleine, script arrêté) ne laisse pas de .nouveau tronqué qui occupe la clé : le
+# manifeste de deployer.sh l'enregistrerait.
+trap 'rm -rf "$TEMP"; rm -f "$DOSSIER"/tldr-pages.*.zip.nouveau' EXIT
 
 # Garde-fou : une archive zip intacte, avec au moins $2 pages (l'anglais en a environ 7 600, le français 1 100).
 lisible() {
@@ -30,6 +32,7 @@ sys.exit(0 if pages >= int(sys.argv[2]) else 1)
 FIN
 }
 
+echec=0
 for langue in en fr; do
   nom="tldr-pages.$langue.zip"
   fin="$DOSSIER/$nom"
@@ -47,8 +50,16 @@ for langue in en fr; do
     echo "tldr-pages ($langue) : rien de neuf à copier, la clé garde son archive." >&2
     continue
   fi
-  # Copie à côté, puis renommage : une clé retirée pendant la copie ne laisse pas une archive à moitié écrite.
-  cp -p "$source" "$fin.nouveau"
+  # Copie à côté, puis renommage : une clé retirée pendant la copie ne laisse pas une archive à moitié écrite. Une copie
+  # qui échoue (clé pleine) laisse la clé avec son archive, et l'autre langue est quand même essayée ; le code de
+  # sortie le dit à deployer.sh.
+  if ! cp -p "$source" "$fin.nouveau"; then
+    rm -f "$fin.nouveau"
+    echo "tldr-pages ($langue) : la copie a échoué, la clé garde son archive." >&2
+    echec=1
+    continue
+  fi
   mv -f "$fin.nouveau" "$fin"
   echo "tldr-pages ($langue) : archive de la clé à jour."
 done
+exit "$echec"

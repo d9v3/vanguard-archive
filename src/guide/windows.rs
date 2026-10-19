@@ -191,13 +191,14 @@ pub const PROGRAMMES: &[Programme] = &[
                 "netsh wlan show profile name=\"<nom>\" key=clear",
                 "Le mot de passe d'un Wi-Fi enregistré (administrateur).",
                 "A saved Wi-Fi network's password (administrator).",
-            ),
+            )
+            .sauf(Obstacle::Administrateur),
             voir(
                 "netsh wlan show wlanreport",
                 "Rapport des connexions Wi-Fi des derniers jours, en HTML (administrateur).",
                 "Report of the last days' Wi-Fi connections, in HTML (administrator).",
             )
-            .sauf(Obstacle::Fichier),
+            .sauf(Obstacle::Administrateur),
             voir(
                 "netsh advfirewall show allprofiles",
                 "L'état du pare-feu pour chaque profil.",
@@ -412,7 +413,8 @@ pub const PROGRAMMES: &[Programme] = &[
                 "powercfg /requests",
                 "Ce qui empêche la mise en veille (administrateur).",
                 "What prevents sleep (administrator).",
-            ),
+            )
+            .sauf(Obstacle::Administrateur),
             voir(
                 "powercfg /lastwake",
                 "Ce qui a réveillé l'ordinateur la dernière fois.",
@@ -423,7 +425,7 @@ pub const PROGRAMMES: &[Programme] = &[
                 "Diagnostic de l'énergie en HTML, après une minute d'observation (administrateur).",
                 "Power diagnostics in HTML, after a minute of watching (administrator).",
             )
-            .sauf(Obstacle::Fichier),
+            .sauf(Obstacle::Administrateur),
             changer(
                 "powercfg /hibernate off",
                 "Coupe la veille prolongée et rend la place de hiberfil.sys ; coupe aussi le démarrage rapide.",
@@ -445,7 +447,8 @@ pub const PROGRAMMES: &[Programme] = &[
                 "Get-PhysicalDisk | Get-StorageReliabilityCounter",
                 "Usure, température et erreurs de chaque disque (administrateur).",
                 "Each disk's wear, temperature and errors (administrator).",
-            ),
+            )
+            .sauf(Obstacle::Administrateur),
             voir(
                 "Get-Volume",
                 "La place libre de chaque lecteur.",
@@ -532,7 +535,8 @@ pub const PROGRAMMES: &[Programme] = &[
                 "Get-ComputerRestorePoint",
                 "Les points de restauration (administrateur).",
                 "Restore points (administrator).",
-            ),
+            )
+            .sauf(Obstacle::Administrateur),
             changer(
                 "Checkpoint-Computer -Description \"<texte>\"",
                 "Crée un point de restauration (administrateur ; un toutes les 24 heures au plus).",

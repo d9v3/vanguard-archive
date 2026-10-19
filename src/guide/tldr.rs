@@ -24,7 +24,8 @@ const LANGUES: [&str; 2] = ["en", "fr"];
 /// Âge au-delà duquel une archive se télécharge à nouveau.
 const UNE_SEMAINE: Duration = Duration::from_hours(7 * 24);
 
-/// Limites contre une archive démesurée ou piégée : taille téléchargée, taille d'une page, taille et nombre de pages.
+/// Limites contre une archive démesurée ou piégée : taille téléchargée ou lue, taille d'une page, taille et nombre de
+/// pages.
 const TAILLE_ARCHIVE: u64 = 40 << 20;
 const TAILLE_PAGE: usize = 256 << 10;
 const TAILLE_TOTALE: usize = 64 << 20;
@@ -69,27 +70,69 @@ fn dossiers() -> Vec<PathBuf> {
         .collect()
 }
 
-/// Les archives d'une langue dans `dossiers`, avec leur date, la plus récente d'abord. La suivante sert quand la
-/// première ne se lit pas (copie interrompue par une clé retirée trop tôt).
-fn archives(langue: &str, dossiers: &[PathBuf]) -> Vec<(PathBuf, SystemTime)> {
-    let mut archives: Vec<(PathBuf, SystemTime)> = dossiers
+/// Une archive trouvée : où, de quand, de quelle taille. Une autre date ou une autre taille, c'est une autre archive.
+#[derive(Clone, PartialEq)]
+struct Archive {
+    chemin: PathBuf,
+    date: SystemTime,
+    taille: u64,
+}
+
+/// Les archives déjà lues, et si elles se lisaient : chacune n'est lue qu'une fois par session. Le guide demande la
+/// date des archives à chaque écran ; une archive abîmée connue n'y compte plus, sans être relue.
+static CONNUES: Mutex<Vec<(Archive, bool)>> = Mutex::new(Vec::new());
+
+fn connue(archive: &Archive) -> Option<bool> {
+    CONNUES
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .iter()
+        .find(|(a, _)| a == archive)
+        .map(|(_, lisible)| *lisible)
+}
+
+/// Les archives d'une langue dans `dossiers`, la plus récente d'abord. La suivante sert quand la première ne se lit
+/// pas (copie interrompue par une clé retirée trop tôt). Seulement les métadonnées : une archive démesurée (système
+/// de fichiers abîmé, fichier remplacé) ou déjà lue sans succès est laissée de côté sans être ouverte.
+fn archives(langue: &str, dossiers: &[PathBuf]) -> Vec<Archive> {
+    let mut archives: Vec<Archive> = dossiers
         .iter()
         .map(|d| d.join(nom_d_archive(langue)))
         .filter_map(|chemin| {
-            let date = std::fs::metadata(&chemin).and_then(|m| m.modified()).ok()?;
-            Some((chemin, date))
+            let meta = std::fs::metadata(&chemin).ok()?;
+            let archive = Archive {
+                date: meta.modified().ok()?,
+                taille: meta.len(),
+                chemin,
+            };
+            (archive.taille <= TAILLE_ARCHIVE && connue(&archive) != Some(false)).then_some(archive)
         })
         .collect();
-    archives.sort_by_key(|(_, date)| std::cmp::Reverse(*date));
+    archives.sort_by_key(|a| std::cmp::Reverse(a.date));
     archives
+}
+
+/// Les fichiers d'une archive ; vide si elle ne se lit pas, ce qui est retenu. Jamais plus de `TAILLE_ARCHIVE` lus,
+/// même si le fichier a grossi depuis `archives` : un fichier démesuré ne remplit pas la mémoire.
+fn lire(archive: &Archive) -> Vec<(String, Vec<u8>)> {
+    use std::io::Read;
+    let mut octets = Vec::new();
+    let entiere = std::fs::File::open(&archive.chemin)
+        .and_then(|f| f.take(TAILLE_ARCHIVE + 1).read_to_end(&mut octets))
+        .is_ok_and(|n| u64::try_from(n).is_ok_and(|n| n <= TAILLE_ARCHIVE));
+    let fichiers = if entiere { lire_zip(&octets) } else { Vec::new() };
+    let mut connues = CONNUES.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    if !connues.iter().any(|(a, _)| a == archive) {
+        connues.push((archive.clone(), !fichiers.is_empty()));
+    }
+    fichiers
 }
 
 /// Les fichiers de la plus récente archive lisible d'une langue ; vide s'il n'y en a aucune.
 fn fichiers_de(langue: &str, dossiers: &[PathBuf]) -> Vec<(String, Vec<u8>)> {
     archives(langue, dossiers)
-        .into_iter()
-        .filter_map(|(chemin, _)| std::fs::read(chemin).ok())
-        .map(|octets| lire_zip(&octets))
+        .iter()
+        .map(lire)
         .find(|fichiers| !fichiers.is_empty())
         .unwrap_or_default()
 }
@@ -99,18 +142,36 @@ fn date_des_archives() -> Option<SystemTime> {
     let dossiers = dossiers();
     LANGUES
         .iter()
-        .filter_map(|l| archives(l, &dossiers).first().map(|(_, date)| *date))
+        .filter_map(|l| archives(l, &dossiers).first().map(|a| a.date))
         .max()
 }
 
 /// Une langue sans archive, ou dont la plus récente a plus d'une semaine : à retélécharger. Une langue dont l'archive
 /// est fraîche n'est pas reprise parce qu'une autre a échoué (le français, partiel, peut manquer sans que l'anglais le
-/// soit), ni quand la clé en a apporté une fraîche.
+/// soit), ni quand la clé en a apporté une fraîche. Rien n'est lu : seulement les dates, et ce que `a_telecharger` a
+/// déjà appris des archives.
 fn a_renouveler(langue: &str, dossiers: &[PathBuf]) -> bool {
     archives(langue, dossiers)
         .first()
-        .and_then(|(_, date)| date.elapsed().ok())
+        .and_then(|a| a.date.elapsed().ok())
         .is_none_or(|age| age > UNE_SEMAINE)
+}
+
+/// La plus récente archive d'une langue n'a pas encore été lue : fraîche, elle peut être abîmée.
+fn a_verifier(langue: &str, dossiers: &[PathBuf]) -> bool {
+    archives(langue, dossiers).first().is_some_and(|a| connue(a).is_none())
+}
+
+/// La décision du fil d'arrière-plan : les archives lues de la plus récente à la première qui se lit, puis
+/// `a_renouveler`. Une archive fraîche mais abîmée ne bloque donc pas le téléchargement pendant une semaine. Lent (une
+/// archive fait plusieurs Mo) : jamais sur le fil principal.
+fn a_telecharger(langue: &str, dossiers: &[PathBuf]) -> bool {
+    for archive in archives(langue, dossiers) {
+        if connue(&archive).unwrap_or_else(|| !lire(&archive).is_empty()) {
+            break;
+        }
+    }
+    a_renouveler(langue, dossiers)
 }
 
 /// Le téléchargement d'arrière-plan tourne déjà.
@@ -118,12 +179,16 @@ static EN_COURS: AtomicBool = AtomicBool::new(false);
 
 /// Renouvelle les archives qui en ont besoin, en arrière-plan : le guide s'ouvre sans les attendre, et les lit à son
 /// prochain affichage. Seulement dans un vrai terminal (pas pour un script ni pour les tests) ; sans Internet, curl
-/// échoue vite et rien ne change.
+/// échoue vite et rien ne change. Le fil principal ne regarde que les dates ; une archive pas encore lue l'est dans le
+/// fil, qui décide alors.
 pub(super) fn renouveler_en_fond() {
     use std::io::IsTerminal;
     let dossiers = dossiers();
-    let a_faire: Vec<&str> = LANGUES.into_iter().filter(|l| a_renouveler(l, &dossiers)).collect();
-    if !std::io::stdin().is_terminal() || a_faire.is_empty() || EN_COURS.swap(true, Ordering::SeqCst) {
+    let a_voir: Vec<&str> = LANGUES
+        .into_iter()
+        .filter(|l| a_renouveler(l, &dossiers) || a_verifier(l, &dossiers))
+        .collect();
+    if !std::io::stdin().is_terminal() || a_voir.is_empty() || EN_COURS.swap(true, Ordering::SeqCst) {
         return;
     }
     std::thread::spawn(move || {
@@ -142,8 +207,10 @@ pub(super) fn renouveler_en_fond() {
                 }
             }
         }
-        for langue in a_faire {
-            telecharger(langue);
+        for langue in a_voir {
+            if a_telecharger(langue, &dossiers) {
+                telecharger(langue);
+            }
         }
         EN_COURS.store(false, Ordering::SeqCst);
     });
@@ -575,31 +642,41 @@ mod tests {
         assert_eq!(systeme_de("android").0, Systeme::Tldr);
     }
 
+    /// Deux dossiers d'essai, l'un pour cet ordinateur, l'autre pour la clé.
+    fn deux_copies(nom: &str) -> (PathBuf, [PathBuf; 2]) {
+        let racine = crate::reseau::dossier_local().join(nom);
+        let dossiers = [racine.join("ordinateur"), racine.join("cle")];
+        for d in &dossiers {
+            std::fs::create_dir_all(d).unwrap();
+        }
+        (racine, dossiers)
+    }
+
+    /// Écrit l'archive d'une langue dans un dossier, datée d'il y a `age`.
+    fn ecrire(dossier: &Path, langue: &str, octets: &[u8], age: Duration) {
+        let chemin = dossier.join(nom_d_archive(langue));
+        std::fs::write(&chemin, octets).unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(&chemin)
+            .unwrap()
+            .set_modified(SystemTime::now() - age)
+            .unwrap();
+    }
+
     /// Des deux copies (cet ordinateur, la clé), la plus récente sert ; abîmée, l'autre prend le relais ; une copie de
     /// moins d'une semaine n'est pas retéléchargée.
     #[test]
     fn la_plus_recente_des_deux_copies() {
-        let racine = crate::reseau::dossier_local().join("essai-copies-tldr");
-        let (ordinateur, cle) = (racine.join("ordinateur"), racine.join("cle"));
-        std::fs::create_dir_all(&ordinateur).unwrap();
-        std::fs::create_dir_all(&cle).unwrap();
-        let dossiers = [ordinateur.clone(), cle.clone()];
-        let ecrire = |dossier: &Path, octets: &[u8], age: Duration| {
-            let chemin = dossier.join(nom_d_archive("fr"));
-            std::fs::write(&chemin, octets).unwrap();
-            std::fs::File::options()
-                .write(true)
-                .open(&chemin)
-                .unwrap()
-                .set_modified(SystemTime::now() - age)
-                .unwrap();
-        };
+        let (racine, dossiers) = deux_copies("essai-copies-tldr");
+        let [ordinateur, cle] = &dossiers;
+        let ecrire = |dossier: &Path, octets: &[u8], age: Duration| ecrire(dossier, "fr", octets, age);
         let contenu = |dossiers: &[PathBuf]| fichiers_de("fr", dossiers).first().map(|f| f.1.clone());
         // Aucune copie : à télécharger, rien à lire.
         assert!(a_renouveler("fr", &dossiers) && contenu(&dossiers).is_none());
         // Une copie de dix jours : lue en attendant, mais à retélécharger.
         ecrire(
-            &ordinateur,
+            ordinateur,
             &zip(&[("linux/a.md", "# ancienne\n", false)]),
             Duration::from_hours(240),
         );
@@ -607,14 +684,71 @@ mod tests {
         assert_eq!(contenu(&dossiers).as_deref(), Some(&b"# ancienne\n"[..]));
         // La clé en apporte une fraîche : elle sert, et rien ne se télécharge.
         let recente = zip(&[("linux/a.md", "# recente\n", false)]);
-        ecrire(&cle, &recente, Duration::from_hours(1));
+        ecrire(cle, &recente, Duration::from_hours(1));
         assert!(!a_renouveler("fr", &dossiers));
         assert_eq!(contenu(&dossiers).as_deref(), Some(&b"# recente\n"[..]));
         // Abîmée (clé retirée pendant la copie), la plus récente laisse la place à l'autre.
-        ecrire(&cle, &recente[..recente.len() / 2], Duration::from_hours(1));
+        ecrire(cle, &recente[..recente.len() / 2], Duration::from_hours(1));
         assert_eq!(contenu(&dossiers).as_deref(), Some(&b"# ancienne\n"[..]));
         // L'anglais, absent des deux, reste à télécharger : chaque langue a son compte.
         assert!(a_renouveler("en", &dossiers));
+        let _ = std::fs::remove_dir_all(&racine);
+    }
+
+    /// Une archive fraîche mais abîmée (clé retirée pendant la copie) ne retient pas le téléchargement une semaine. Le
+    /// fil principal ne la lit pas : il voit seulement qu'elle reste à vérifier, et le fil d'arrière-plan décide.
+    #[test]
+    fn une_archive_fraiche_mais_abimee_se_retelecharge() {
+        let (racine, dossiers) = deux_copies("essai-tldr-abimee");
+        let [ordinateur, cle] = &dossiers;
+        let bonne = zip(&[("linux/a.md", "# a\n", false)]);
+        // Chez quelqu'un d'autre : rien sur l'ordinateur, la clé en apporte une tronquée, datée de l'heure.
+        ecrire(cle, "en", &bonne[..bonne.len() / 2], Duration::from_hours(1));
+        assert!(!a_renouveler("en", &dossiers) && a_verifier("en", &dossiers));
+        assert!(a_telecharger("en", &dossiers));
+        // Ensuite, elle ne compte plus, sans être relue : ni pour la date du guide, ni pour la décision.
+        assert!(archives("en", &dossiers).is_empty());
+        assert!(a_renouveler("en", &dossiers) && !a_verifier("en", &dossiers));
+        // Une copie de dix jours sur l'ordinateur sert en attendant, et se renouvelle.
+        ecrire(ordinateur, "en", &bonne, Duration::from_hours(240));
+        assert!(a_verifier("en", &dossiers) && a_telecharger("en", &dossiers));
+        assert_eq!(fichiers_de("en", &dossiers).len(), 1);
+        // Une archive saine et fraîche, elle, ne se retélécharge pas.
+        ecrire(cle, "en", &bonne, Duration::from_hours(2));
+        assert!(!a_telecharger("en", &dossiers) && !a_verifier("en", &dossiers));
+        let _ = std::fs::remove_dir_all(&racine);
+    }
+
+    /// Une archive démesurée sur la clé n'est jamais ouverte : sa taille suffit à l'écarter, et une archive qui grossit
+    /// après coup n'est pas lue au-delà de la limite.
+    #[test]
+    fn une_archive_demesuree_n_est_pas_lue() {
+        let (racine, dossiers) = deux_copies("essai-tldr-demesuree");
+        let [ordinateur, cle] = &dossiers;
+        ecrire(
+            ordinateur,
+            "fr",
+            &zip(&[("linux/a.md", "# a\n", false)]),
+            Duration::from_hours(240),
+        );
+        // Un fichier creux : sa taille dépasse la limite sans rien occuper sur le disque.
+        let demesuree = cle.join(nom_d_archive("fr"));
+        std::fs::File::create(&demesuree)
+            .unwrap()
+            .set_len(TAILLE_ARCHIVE + 1)
+            .unwrap();
+        let trouvees = archives("fr", &dossiers);
+        assert_eq!(trouvees.len(), 1);
+        assert_eq!(trouvees[0].chemin, ordinateur.join(nom_d_archive("fr")));
+        assert_eq!(fichiers_de("fr", &dossiers).len(), 1);
+        // Vue plus petite qu'elle n'est (elle a grossi depuis) : la lecture s'arrête à la limite et la rejette.
+        let grossie = Archive {
+            chemin: demesuree,
+            date: SystemTime::now(),
+            taille: 0,
+        };
+        assert_eq!(lire(&grossie), []);
+        assert_eq!(connue(&grossie), Some(false));
         let _ = std::fs::remove_dir_all(&racine);
     }
 
