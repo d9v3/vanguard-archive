@@ -11,6 +11,7 @@ use crate::ui::{resume, tr, trf, trp};
 
 mod comptes;
 mod durcissement;
+mod ecoute;
 mod exclusions;
 mod maj;
 mod persistance;
@@ -719,12 +720,40 @@ fn juger_bitlocker(etat: Option<&str>) -> Constat {
     }
 }
 
-fn ports_ecoute(pare_feu_actif: bool, ip_lan: Option<&str>) -> Vec<Constat> {
-    // Un seul PowerShell (le plus lent du bilan Windows, 4,5 s, dans la VM) : les noms des programmes lus une fois
-    // (un Get-Process par port, avant), les ports en écoute, puis les ports déjà bloqués en entrée par une règle de
-    // Gardien active. Le port écoute toujours, mais n'est plus joignable : sans cette lecture, l'alerte et la même
-    // correction (une règle de plus à chaque fois) revenaient à chaque audit. Les règles ont leur section : leur
-    // échec ne fait pas perdre les ports.
+/// Ports TCP en écoute (« adresse|port|programme », une ligne chacun) et ports bloqués par une règle de Gardien, lus
+/// sans PowerShell (netstat, tasklist, registre). `None` si netstat ne répond pas.
+fn ports_tcp_directs(pare_feu_actif: bool) -> Option<(String, Vec<u16>)> {
+    let ecoutes = ecoute::ecoutes()?;
+    let liste = ecoutes
+        .iter()
+        .filter(|e| e.tcp)
+        .map(|e| format!("{}|{}|{}", e.adresse, e.port, e.nom))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let bloques = if pare_feu_actif {
+        ecoute::ports_bloques().unwrap_or_else(ports_bloques_powershell)
+    } else {
+        Vec::new()
+    };
+    Some((liste, bloques))
+}
+
+/// Ports bloqués par une règle active de Gardien, demandés à PowerShell quand le registre ne se lit pas.
+fn ports_bloques_powershell() -> Vec<u16> {
+    ps(
+        "@(Get-NetFirewallRule -DisplayName 'Gardien : bloquer *' -ErrorAction SilentlyContinue | \
+        Where-Object { $_.Enabled -eq 'True' -and $_.Action -eq 'Block' -and $_.Direction -eq 'Inbound' } | \
+        Get-NetFirewallPortFilter | ForEach-Object { $_.LocalPort }) -join ','",
+    )
+    .unwrap_or_default()
+    .split(',')
+    .filter_map(|p| p.trim().parse().ok())
+    .collect()
+}
+
+/// Les mêmes, par PowerShell, quand netstat ne répond pas : les noms des programmes lus une fois, puis les ports en
+/// écoute, puis les règles de blocage dans leur section (leur échec ne fait pas perdre les ports).
+fn ports_tcp_powershell(pare_feu_actif: bool) -> Option<(String, Vec<u16>)> {
     let regles = if pare_feu_actif {
         "; try { 'BLQ|' + (@(Get-NetFirewallRule -DisplayName 'Gardien : bloquer *' -ErrorAction SilentlyContinue | \
          Where-Object { $_.Enabled -eq 'True' -and $_.Action -eq 'Block' -and $_.Direction -eq 'Inbound' } | \
@@ -736,16 +765,37 @@ fn ports_ecoute(pare_feu_actif: bool, ip_lan: Option<&str>) -> Vec<Constat> {
         "$noms = @{{}}; Get-Process | ForEach-Object {{ $noms[$_.Id] = $_.ProcessName }}; \
          Get-NetTCPConnection -State Listen | ForEach-Object {{ \"ECO|$($_.LocalAddress)|$($_.LocalPort)|$($noms[[int]$_.OwningProcess])\" }}; 'ECO_FIN'{regles}"
     ));
-    let Some(lignes) = section(sortie.as_deref(), "ECO") else {
-        return vec![illisible("Ports en écoute")];
-    };
-    let liste = lignes.join("\n");
-    let bloques: Vec<u16> = section(sortie.as_deref(), "BLQ")
+    let liste = section(sortie.as_deref(), "ECO")?.join("\n");
+    let bloques = section(sortie.as_deref(), "BLQ")
         .and_then(|l| l.first().copied())
         .unwrap_or_default()
         .split(',')
         .filter_map(|p| p.trim().parse().ok())
         .collect();
+    Some((liste, bloques))
+}
+
+/// Les ports TCP en écoute et le nom de leur programme, pour nommer les services au scan du réseau ; `None` si netstat
+/// ne répond pas.
+pub(super) fn ports_tcp_et_noms() -> Option<Vec<(u16, String)>> {
+    Some(
+        ecoute::ecoutes()?
+            .into_iter()
+            .filter(|e| e.tcp)
+            .map(|e| (e.port, e.nom))
+            .collect(),
+    )
+}
+
+fn ports_ecoute(pare_feu_actif: bool, ip_lan: Option<&str>) -> Vec<Constat> {
+    // Le plus lent du bilan Windows par PowerShell (4 à 6 s dans la VM, une vingtaine de PowerShell démarrant
+    // ensemble) : netstat et tasklist d'abord, PowerShell seulement s'ils ne répondent pas. Les ports bloqués par une
+    // règle de Gardien écoutent toujours mais ne sont plus joignables : sans cette lecture, l'alerte et la même
+    // correction (une règle de plus à chaque fois) revenaient à chaque audit.
+    let Some((liste, bloques)) = ports_tcp_directs(pare_feu_actif).or_else(|| ports_tcp_powershell(pare_feu_actif))
+    else {
+        return vec![illisible("Ports en écoute")];
+    };
     // Ports RPC dynamiques ouverts par Windows lui-même : normaux et filtrés par le pare-feu.
     let systeme = ["svchost", "lsass", "wininit", "services", "spoolsv", "System", "Idle"];
     let mut vus = Vec::new();
@@ -836,6 +886,21 @@ fn wifi() -> Vec<Constat> {
 /// Ports UDP ouverts sur le réseau. Windows en ouvre beaucoup lui-même (découverte, heure, VPN) : on ne garde
 /// que les services à risque et ceux des programmes installés, hors ports éphémères (réponses de clients).
 fn ports_udp(pare_feu_actif: bool, ip_lan: Option<&str>) -> Vec<Constat> {
+    // Sans PowerShell d'abord : le réglage LLMNR dans le registre, les ports par netstat et tasklist.
+    if let Some(ecoutes) = ecoute::ecoutes() {
+        let llmnr = registre::<u32>(
+            winreg::enums::HKEY_LOCAL_MACHINE,
+            r"SOFTWARE\Policies\Microsoft\Windows NT\DNSClient",
+            "EnableMulticast",
+        )
+        .map(|v| v.to_string())
+        .unwrap_or_default();
+        let mut liste = format!("LLMNR|{llmnr}\n");
+        for e in ecoutes.iter().filter(|e| !e.tcp) {
+            let _ = writeln!(liste, "{}|{}|{}", e.adresse, e.port, e.nom);
+        }
+        return lire_ports_udp(&liste, pare_feu_actif, ip_lan);
+    }
     let Some(liste) = ps(
         // Première ligne : le réglage LLMNR (0 = coupé, effectif au prochain redémarrage seulement).
         "'LLMNR|' + (Get-ItemProperty 'HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows NT\\DNSClient' -ErrorAction SilentlyContinue).EnableMulticast; \

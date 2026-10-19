@@ -767,16 +767,21 @@ pub fn programmes_en_ecoute() -> std::collections::HashMap<u16, String> {
             map.insert(port, affichable(&nom.replace("\\x20", " ")));
         }
     }
+    // netstat et tasklist, sans PowerShell ; PowerShell seulement s'ils ne répondent pas.
     #[cfg(windows)]
-    // Les noms des programmes lus une fois, pas un Get-Process par port.
-    for l in windows::ps("$noms = @{}; Get-Process | ForEach-Object { $noms[$_.Id] = $_.ProcessName }; Get-NetTCPConnection -State Listen | ForEach-Object { \"$($_.LocalPort)|$($noms[[int]$_.OwningProcess])\" }")
-        .unwrap_or_default()
-        .lines()
-    {
-        if let Some((p, nom)) = l.split_once('|')
-            && let Ok(port) = p.trim().parse::<u16>()
-            && !nom.trim().is_empty()
-        {
+    let paires = windows::ports_tcp_et_noms().unwrap_or_else(|| {
+        windows::ps("$noms = @{}; Get-Process | ForEach-Object { $noms[$_.Id] = $_.ProcessName }; Get-NetTCPConnection -State Listen | ForEach-Object { \"$($_.LocalPort)|$($noms[[int]$_.OwningProcess])\" }")
+            .unwrap_or_default()
+            .lines()
+            .filter_map(|l| {
+                let (p, nom) = l.split_once('|')?;
+                Some((p.trim().parse::<u16>().ok()?, nom.to_string()))
+            })
+            .collect()
+    });
+    #[cfg(windows)]
+    for (port, nom) in paires {
+        if !nom.trim().is_empty() {
             map.insert(port, affichable(nom.trim()));
         }
     }

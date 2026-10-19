@@ -10,7 +10,8 @@ repository (`git checkout v0.62.0`, for example), to be rebuilt if needed.
 
 - **A much faster check.** On Linux, from 7 seconds to under one: commands are no longer awaited in fixed 50 ms
   pauses, packages are verified in parallel, Wi-Fi no longer waits for a new scan. On Windows, about ten fewer PowerShell
-  launches: firewall, UAC, Remote Desktop and screen lock read straight from the registry.
+  launches: firewall, UAC, Remote Desktop and screen lock read straight from the registry, listening ports
+  read with netstat and tasklist.
 - **Windows.** MSI packages installed with system rights, Defender cloud protection off, exploit protection off (DEP,
   ASLR, CFG, SEHOP), Windows Update turned off (service or policy), services with unquoted paths in a folder anyone
   can change; a suspended or pending BitLocker no longer counts as encrypted.

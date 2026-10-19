@@ -858,6 +858,14 @@ try {
     $sansGuillemets = @(Get-CimInstance Win32_Service | Where-Object { $_.PathName -and -not $_.PathName.StartsWith('"') -and $_.PathName -match '^[^"]+ [^"]*\.exe' })
     $vu = @($audit.constats | Where-Object { $_.message -match 'sans guillemets|unquoted path' })
     Info "Services au chemin sans guillemets avec espace : $($sansGuillemets.Count) ; Gardien : $(if ($vu.Count) { $vu[0].message } else { 'rien (aucun dossier modifiable par tous)' })"
+    # Ports en écoute lus par netstat (adresse distante 0.0.0.0:0 ou [::]:0, quelle que soit la langue) : les mêmes que
+    # Get-NetTCPConnection, et le bilan ne les dit jamais « impossibles ».
+    $parNetstat = @(netstat -ano | ForEach-Object { $c = -split $_; if ($c.Count -eq 5 -and $c[0] -eq 'TCP' -and $c[2] -in '0.0.0.0:0', '[::]:0') { [int]($c[1] -replace '.*:', '') } }) | Sort-Object -Unique
+    $parCmdlet = @(Get-NetTCPConnection -State Listen | ForEach-Object { [int]$_.LocalPort }) | Sort-Object -Unique
+    if (-not (Compare-Object $parNetstat $parCmdlet)) { Ok "Ports en écoute : netstat et Get-NetTCPConnection d'accord ($($parNetstat.Count) ports)" }
+    else { Bug "Ports en écoute : netstat ($($parNetstat -join ',')) et Get-NetTCPConnection ($($parCmdlet -join ',')) diffèrent" }
+    if (@($audit.constats | Where-Object { $_.categorie -eq 'Ports en écoute' -and -not $_.verifie }).Count) { Bug 'Ports en écoute : impossibles à vérifier au bilan' }
+    else { Ok 'Ports en écoute vérifiés au bilan' }
     # Exclusions de Defender : lisibles seulement en administrateur ; sinon Gardien ne conclut rien.
     $exclusions = @((Get-MpPreference -ErrorAction SilentlyContinue).ExclusionPath)
     if ($exclusions | Where-Object { $_ -like 'N/A*' }) { Info 'Exclusions de Defender cachées sans droits administrateur' }
