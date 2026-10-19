@@ -587,6 +587,191 @@ pub fn verifier(fichier: Option<&Path>, empreinte: Option<&str>) {
     }
 }
 
+// ───────────────────────────── Surveillance des Téléchargements ─────────────────────────────
+
+/// Le dossier des téléchargements : celui que déclare le bureau (user-dirs.dirs sous Linux, le registre sous Windows,
+/// déplacé dans OneDrive le cas échéant), sinon le nom usuel.
+#[cfg_attr(target_os = "macos", allow(clippy::unnecessary_wraps))] // même signature que sous Linux et Windows
+pub(crate) fn dossier_telechargements() -> Option<PathBuf> {
+    #[cfg(target_os = "linux")]
+    {
+        let maison = crate::nettoyer::maison();
+        let config = std::env::var_os("XDG_CONFIG_HOME").map_or_else(|| maison.join(".config"), PathBuf::from);
+        let declares = std::fs::read_to_string(config.join("user-dirs.dirs")).unwrap_or_default();
+        crate::protection::pieges::dossier_declare(&declares, "XDG_DOWNLOAD_DIR", &maison).or_else(|| {
+            ["Téléchargements", "Downloads"]
+                .iter()
+                .map(|n| maison.join(n))
+                .find(|d| d.is_dir())
+        })
+    }
+    #[cfg(windows)]
+    {
+        // Le dossier Téléchargements n'a pas de nom lisible dans le registre, seulement son identifiant connu.
+        winreg::RegKey::predef(winreg::enums::HKEY_CURRENT_USER)
+            .open_subkey(r"Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders")
+            .ok()
+            .and_then(|k| k.get_value::<String, _>("{374DE290-123F-4565-9164-39C4925E467B}").ok())
+            .map(|c| PathBuf::from(crate::protection::pieges::developper(&c)))
+            .or_else(|| std::env::var_os("USERPROFILE").map(|p| PathBuf::from(p).join("Downloads")))
+    }
+    #[cfg(target_os = "macos")]
+    {
+        Some(crate::nettoyer::maison().join("Downloads"))
+    }
+}
+
+/// Un fichier en cours de téléchargement : il sera renommé à la fin, et vu alors.
+fn en_cours(nom: &str) -> bool {
+    let bas = nom.to_lowercase();
+    [".part", ".crdownload", ".download", ".partial", ".tmp", ".opdownload"]
+        .iter()
+        .any(|e| bas.ends_with(e))
+}
+
+/// Instant d'arrivée d'un fichier, en secondes depuis 1970 : sa dernière modification, ou son arrivée dans le dossier
+/// si elle est plus récente (un navigateur renomme « x.exe.part » en « x.exe » à la fin, ce qui ne change pas la date
+/// de modification : sous Linux et macOS, le changement d'état le note ; sous Windows, la création).
+fn arrivee(meta: &std::fs::Metadata) -> u64 {
+    let secondes = |t: std::io::Result<std::time::SystemTime>| {
+        t.ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map_or(0, |d| d.as_secs())
+    };
+    #[cfg(unix)]
+    let changement = u64::try_from(std::os::unix::fs::MetadataExt::ctime(meta)).unwrap_or(0);
+    #[cfg(windows)]
+    let changement = secondes(meta.created());
+    secondes(meta.modified()).max(changement)
+}
+
+/// Ce qu'un fichier arrivé dit de lui-même (nom et premiers octets) : un programme, ou un fichier déguisé. Rien pour un
+/// document ordinaire. Rend (titre, texte) de la notification.
+fn signalement(nom: &str, debut: &[u8]) -> Option<(String, String)> {
+    let signes = nature(nom, debut);
+    // Un installateur sans signature d'en-tête connue (.msi, .dmg, .pkg, .apk…) reste un programme, d'après son nom.
+    let extension = nom
+        .rsplit_once('.')
+        .map(|(_, e)| e.trim().to_lowercase())
+        .unwrap_or_default();
+    let pire = signes
+        .iter()
+        .map(|(n, _)| *n)
+        .max()
+        .or_else(|| PROGRAMMES.contains(&extension.as_str()).then_some(Niveau::Info))?;
+    let nom = affichable(nom);
+    let verifier = tr!(
+        "vérifie-le avant de l'ouvrir : menu Antivirus et protection › Vérifier un fichier téléchargé, ou « gardien verifier-fichier ».",
+        "check it before opening it: menu Antivirus and protection › Check a downloaded file, or “gardien check-file”."
+    );
+    Some(if pire >= Niveau::Eleve {
+        let raisons: Vec<&str> = signes
+            .iter()
+            .filter(|(n, _)| *n >= Niveau::Eleve)
+            .map(|(_, t)| t.as_str())
+            .collect();
+        (
+            tr!(
+                "Gardien : fichier déguisé téléchargé",
+                "Gardien: disguised file downloaded"
+            )
+            .to_string(),
+            trf!(
+                "« {nom} » : {} Ne l'ouvre pas ; {verifier}",
+                "“{nom}”: {} Do not open it; {verifier}",
+                raisons.join(" ")
+            ),
+        )
+    } else {
+        (
+            tr!("Gardien : programme téléchargé", "Gardien: program downloaded").to_string(),
+            trf!(
+                "« {nom} » est un programme : {verifier}",
+                "“{nom}” is a program: {verifier}"
+            ),
+        )
+    })
+}
+
+/// Les fichiers arrivés après `depuis` parmi `fichiers` (nom, arrivée, premiers octets), à signaler : trois au plus,
+/// puis une ligne pour le reste.
+fn a_signaler(fichiers: &[(String, u64, Vec<u8>)], depuis: u64) -> Vec<(String, String)> {
+    let trouves: Vec<(String, String)> = fichiers
+        .iter()
+        .filter(|(nom, arrivee, _)| *arrivee > depuis && !nom.starts_with('.') && !en_cours(nom))
+        .filter_map(|(nom, _, debut)| signalement(nom, debut))
+        .collect();
+    let mut notes: Vec<(String, String)> = trouves.iter().take(3).cloned().collect();
+    if trouves.len() > 3 {
+        notes.push((
+            tr!(
+                "Gardien : autres programmes téléchargés",
+                "Gardien: other programs downloaded"
+            )
+            .to_string(),
+            trf!(
+                "{} autre(s) programme(s) arrivé(s) dans Téléchargements : vérifie-les avant de les ouvrir.",
+                "{} other program(s) arrived in Downloads: check them before opening them.",
+                trouves.len() - 3
+            ),
+        ));
+    }
+    notes
+}
+
+fn fichier_surveillance() -> PathBuf {
+    crate::reseau::dossier_local().join("surveillance-telechargements.json")
+}
+
+/// Pour la surveillance horaire : les programmes et fichiers déguisés arrivés dans Téléchargements depuis le passage
+/// précédent, à notifier. Rien n'est bloqué, déplacé ni ouvert ; le premier passage note seulement l'heure.
+pub fn nouveaux_a_signaler() -> Vec<(String, String)> {
+    #[derive(serde::Serialize, serde::Deserialize)]
+    struct Etat {
+        depuis: u64,
+    }
+    let Some(dossier) = dossier_telechargements().filter(|d| d.is_dir()) else {
+        return Vec::new();
+    };
+    let maintenant = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs());
+    let avant: Option<Etat> = std::fs::read_to_string(fichier_surveillance())
+        .ok()
+        .and_then(|t| serde_json::from_str(&t).ok());
+    let notes = avant.map_or_else(Vec::new, |avant| {
+        let fichiers: Vec<(String, u64, Vec<u8>)> = std::fs::read_dir(&dossier)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter_map(|e| {
+                let meta = std::fs::symlink_metadata(e.path())
+                    .ok()
+                    .filter(std::fs::Metadata::is_file)?;
+                let arrivee = arrivee(&meta);
+                if arrivee <= avant.depuis {
+                    return Some((e.file_name().to_string_lossy().into_owned(), arrivee, Vec::new()));
+                }
+                let mut debut = [0u8; 4];
+                let lus = std::fs::File::open(e.path())
+                    .and_then(|mut f| std::io::Read::read(&mut f, &mut debut))
+                    .unwrap_or(0);
+                Some((
+                    e.file_name().to_string_lossy().into_owned(),
+                    arrivee,
+                    debut[..lus].to_vec(),
+                ))
+            })
+            .collect();
+        a_signaler(&fichiers, avant.depuis)
+    });
+    if let Ok(texte) = serde_json::to_string(&Etat { depuis: maintenant }) {
+        let _ = std::fs::create_dir_all(crate::reseau::dossier_local());
+        let _ = std::fs::write(fichier_surveillance(), texte);
+    }
+    notes
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -734,5 +919,35 @@ mod tests {
         assert_eq!(taille(812), "812 o");
         assert_eq!(taille(3_400_000), "3.4 Mo");
         assert_eq!(taille(4_700_000_000), "4.7 Go");
+    }
+
+    #[test]
+    fn telechargements_signales_a_la_surveillance() {
+        let f = |nom: &str, arrivee: u64, debut: &[u8]| (nom.to_string(), arrivee, debut.to_vec());
+        let fichiers = [
+            // Arrivés avant le passage précédent : déjà vus.
+            f("vieux.exe", 100, b"MZ\x90\0"),
+            // Un document ordinaire : rien à dire.
+            f("facture.pdf", 200, b"%PDF"),
+            // Un programme, un fichier déguisé, un nom piégé.
+            f("setup.exe", 200, b"MZ\x90\0"),
+            f("facture.pdf.exe", 200, b"MZ\x90\0"),
+            f("photo\u{202e}gpj.scr", 200, b"MZ\x90\0"),
+            // En cours de téléchargement, ou caché : pas encore.
+            f("jeu.exe.part", 200, b"MZ\x90\0"),
+            f(".cache.exe", 200, b"MZ\x90\0"),
+        ];
+        let notes = a_signaler(&fichiers, 150);
+        assert_eq!(notes.len(), 3, "{notes:?}");
+        assert!(notes[0].0.contains("programme téléchargé") && notes[0].1.contains("setup.exe"));
+        assert!(notes[1].0.contains("déguisé") && notes[1].1.contains("Double extension"));
+        assert!(notes[2].0.contains("déguisé") && notes[2].1.contains("photo�gpj.scr"));
+        assert!(notes.iter().all(|(_, t)| !t.contains('\u{202e}')));
+        // Quatre de plus : trois notifications, puis une pour le reste.
+        let beaucoup: Vec<_> = (0..5).map(|i| f(&format!("outil{i}.msi"), 300, b"\xd0\xcf")).collect();
+        let notes = a_signaler(&beaucoup, 150);
+        assert_eq!(notes.len(), 4);
+        assert!(notes[3].1.starts_with("2 autre(s)"));
+        assert_eq!(a_signaler(&beaucoup, 300), Vec::<(String, String)>::new());
     }
 }

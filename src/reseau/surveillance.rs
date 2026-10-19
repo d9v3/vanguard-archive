@@ -1,4 +1,5 @@
-//! Surveillance automatique : scan du réseau toutes les heures, notification si un appareil inconnu apparaît.
+//! Surveillance automatique : scan du réseau toutes les heures, notification si un appareil inconnu apparaît ; et les
+//! programmes arrivés dans Téléchargements, à vérifier avant de les ouvrir (rien n'est bloqué).
 //! Planificateur natif de chaque système : timer systemd (Linux), Planificateur de tâches (Windows), agent launchd
 //! (macOS).
 
@@ -272,6 +273,9 @@ pub async fn surveiller() {
             ),
             &fichiers,
         );
+    }
+    for (titre, texte) in crate::protection::telechargement::nouveaux_a_signaler() {
+        notifier(&titre, &texte);
     }
     let Ok(r) = reseau::executer(Options {
         silencieux: true,
