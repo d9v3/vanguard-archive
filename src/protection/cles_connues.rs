@@ -76,7 +76,21 @@ impl Refus {
 /// Le jeton d'un volume, en minuscules ; rien s'il manque ou s'il n'a pas la forme attendue : il devient une clé du
 /// fichier des clés connues, et un fichier posé par n'importe qui ne doit pas y mettre n'importe quoi.
 pub(crate) fn jeton_de(racine: &Path) -> Option<String> {
-    jeton_valide(&std::fs::read_to_string(racine.join(JETON)).ok()?)
+    // Lu sur un volume qui n'est peut-être pas une clé : seulement un fichier ordinaire, et 64 octets au plus (un
+    // fichier spécial bloquerait le menu à chaque affichage, un fichier démesuré remplirait la mémoire).
+    use std::io::Read;
+    let chemin = racine.join(JETON);
+    let meta = std::fs::metadata(&chemin).ok()?;
+    if !meta.is_file() || meta.len() > 64 {
+        return None;
+    }
+    let mut texte = String::new();
+    std::fs::File::open(&chemin)
+        .ok()?
+        .take(64)
+        .read_to_string(&mut texte)
+        .ok()?;
+    jeton_valide(&texte)
 }
 
 fn jeton_valide(texte: &str) -> Option<String> {
@@ -314,6 +328,31 @@ mod tests {
         assert!(jeton_valide("0123456789abcdef0123456789abcde").is_none());
         assert!(jeton_valide("0123456789abcdef0123456789abcdeg").is_none());
         assert!(jeton_valide("../../x").is_none());
+    }
+
+    /// Sur un volume quelconque, le jeton n'est lu que dans un petit fichier ordinaire : un dossier, un fichier
+    /// démesuré ou (sous Unix) une file nommée ne bloquent ni ne remplissent rien.
+    #[test]
+    fn jeton_lu_seulement_dans_un_petit_fichier() {
+        let racine = crate::reseau::dossier_local().join("essai-jeton-borne");
+        let _ = std::fs::remove_dir_all(&racine);
+        std::fs::create_dir_all(&racine).unwrap();
+        std::fs::write(racine.join(JETON), format!("{JETON_A}\n")).unwrap();
+        assert_eq!(jeton_de(&racine).as_deref(), Some(JETON_A));
+        std::fs::write(racine.join(JETON), format!("{JETON_A}{}", " ".repeat(10_000))).unwrap();
+        assert!(jeton_de(&racine).is_none(), "au-delà de 64 octets, rien n'est pris");
+        std::fs::remove_file(racine.join(JETON)).unwrap();
+        std::fs::create_dir(racine.join(JETON)).unwrap();
+        assert!(jeton_de(&racine).is_none());
+        std::fs::remove_dir(racine.join(JETON)).unwrap();
+        #[cfg(unix)]
+        {
+            let fifo = std::ffi::CString::new(racine.join(JETON).to_string_lossy().as_bytes()).unwrap();
+            // SAFETY : mkfifo lit un chemin C valide, terminé par un zéro, le temps de l'appel.
+            assert_eq!(unsafe { libc::mkfifo(fifo.as_ptr(), 0o600) }, 0);
+            assert!(jeton_de(&racine).is_none(), "une file nommée ne bloque pas");
+        }
+        let _ = std::fs::remove_dir_all(&racine);
     }
 
     #[test]
