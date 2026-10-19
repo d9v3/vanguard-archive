@@ -278,7 +278,15 @@ Lancer 'aide' @('--help')
 
 Etape 'Audit de la machine (texte et JSON)'
 Lancer 'machine' @('machine')
+# GARDIEN_CHRONO : le temps de chaque vérification part sur la sortie d'erreur, gardée avec les résultats (le bilan
+# Windows prend plusieurs secondes : on voit lesquelles, sans pouvoir mesurer depuis Linux).
+$env:GARDIEN_CHRONO = '1'
 Lancer 'machine-json' @('machine', '--json')
+Remove-Item Env:GARDIEN_CHRONO
+$lentes = @(Get-Content (Join-Path $res 'machine-json.err.txt') -ErrorAction SilentlyContinue |
+    Where-Object { $_ -match '^chrono\s+\d+\s+(\d+) ms\s+(.*)$' } |
+    ForEach-Object { [pscustomobject]@{ Ms = [int]$Matches[1]; Quoi = $Matches[2] } } | Sort-Object Ms -Descending | Select-Object -First 6)
+if ($lentes) { Info ("Vérifications les plus lentes : " + (($lentes | ForEach-Object { "$($_.Quoi) $($_.Ms) ms" }) -join ', ')) }
 # Vérifications qui n'ont pas pu se faire : un script PowerShell de Gardien a échoué (à corriger côté Gardien).
 try {
     $audit = Sortie 'machine-json' | ConvertFrom-Json
