@@ -350,9 +350,10 @@ impl Session {
                 .any(|c| c.correctif.as_ref().is_some_and(|k| k.automatique))
         });
         if a_corriger {
+            let cle = cle_a_molette();
             trp!(
-                "\n  🔧 Des corrections sont possibles : choix « 2 » du menu ou « gardien corriger ».",
-                "\n  🔧 Fixes are available: menu choice “2” or “gardien fix”."
+                "\n  {cle} Des corrections sont possibles : choix « 2 » du menu ou « gardien corriger ».",
+                "\n  {cle} Fixes are available: menu choice “2” or “gardien fix”."
             );
         }
         let _ = rapport::generer(self.audit.as_ref(), self.reseau.as_ref());

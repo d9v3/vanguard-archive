@@ -370,7 +370,7 @@ pub async fn chercher_cameras() {
         )
     };
     println!();
-    afficher_aligne("  💡 ", conseil, 5, "");
+    afficher_aligne(&format!("  {} ", ampoule()), conseil, 5, "");
 }
 
 #[cfg(test)]

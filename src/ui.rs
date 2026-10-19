@@ -34,11 +34,21 @@ pub fn cle_a_molette() -> &'static str {
 
 fn emojis() -> bool {
     static EMOJIS: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *EMOJIS.get_or_init(|| match std::env::var("GARDIEN_EMOJI").ok().as_deref().map(str::trim) {
+    *EMOJIS.get_or_init(|| {
+        emojis_voulus(
+            std::env::var("GARDIEN_EMOJI").ok().as_deref(),
+            ancienne_console_windows(),
+        )
+    })
+}
+
+/// Le choix d'après GARDIEN_EMOJI, sinon d'après la console.
+fn emojis_voulus(variable: Option<&str>, ancienne_console: bool) -> bool {
+    match variable.map(|v| v.trim().to_lowercase()).as_deref() {
         Some("0" | "non" | "no" | "off") => false,
         Some("1" | "oui" | "yes" | "on") => true,
-        _ => !ancienne_console_windows(),
-    })
+        _ => !ancienne_console,
+    }
 }
 
 /// La console d'avant le Terminal Windows (conhost). Rien ne l'annonce ; mais le Terminal Windows pose WT_SESSION,
@@ -504,6 +514,18 @@ mod tests {
         ] {
             assert_eq!(commande_affichable(c).as_bytes(), c.as_bytes());
         }
+    }
+
+    #[test]
+    fn emojis_selon_la_console_et_la_variable() {
+        assert!(emojis_voulus(None, false));
+        assert!(!emojis_voulus(None, true));
+        assert!(!emojis_voulus(Some("0"), false) && !emojis_voulus(Some(" Off "), false));
+        assert!(emojis_voulus(Some("1"), true) && emojis_voulus(Some("oui"), true));
+        // Une valeur inconnue ne force rien.
+        assert!(!emojis_voulus(Some("peut-être"), true));
+        // Les remplaçants tiennent sur une colonne, comme ce que l'ancienne console dessine.
+        assert_eq!(largeur_affichee("→ +"), 3);
     }
 
     #[test]

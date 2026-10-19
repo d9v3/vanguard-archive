@@ -557,7 +557,8 @@ fn mesurer() -> Vec<Conseil> {
     }
     let attention = format!("  {}⚠{RESET} ", couleur(Niveau::Moyen));
     for k in &c {
-        afficher_aligne(if k.grave { &attention } else { "  💡 " }, &k.texte, 5, "");
+        let conseil = format!("  {} ", ampoule());
+        afficher_aligne(if k.grave { &attention } else { &conseil }, &k.texte, 5, "");
     }
     c
 }

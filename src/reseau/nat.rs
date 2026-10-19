@@ -352,7 +352,7 @@ pub fn tester() {
             "Port forwarding to this device (fixed address first) or the router's UPnP often get around symmetric NAT. Otherwise, look in the router for a “NAT” or “gaming” option (“endpoint-independent”), or use IPv6."
         ),
     };
-    afficher_aligne("  💡 ", conseil, 5, "");
+    afficher_aligne(&format!("  {} ", ampoule()), conseil, 5, "");
 }
 
 #[cfg(test)]

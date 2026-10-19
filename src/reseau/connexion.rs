@@ -589,7 +589,7 @@ pub async fn tester() {
     }
     for c in conseils {
         for (i, l) in envelopper(&c, LARGEUR - 6).iter().enumerate() {
-            println!("  {} {l}", if i == 0 { "💡" } else { "  " });
+            println!("  {} {l}", if i == 0 { ampoule() } else { "  " });
         }
     }
 }

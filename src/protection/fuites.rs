@@ -264,8 +264,9 @@ pub fn verifier_courriel() {
                 resume(&liste, 12, ", ")
             );
             trp!(
-                "\n  💡 Change le mot de passe de ces sites (et partout où tu utilisais le même), active la double\n     authentification, et méfie-toi des courriels qui citent ces sites : ils servent à l'hameçonnage.",
-                "\n  💡 Change the password of these sites (and anywhere you used the same one), turn on two-factor\n     authentication, and beware of emails mentioning these sites: they are used for phishing."
+                "\n  {} Change le mot de passe de ces sites (et partout où tu utilisais le même), active la double\n     authentification, et méfie-toi des courriels qui citent ces sites : ils servent à l'hameçonnage.",
+                "\n  {} Change the password of these sites (and anywhere you used the same one), turn on two-factor\n     authentication, and beware of emails mentioning these sites: they are used for phishing.",
+                ampoule()
             );
         }
     }

@@ -349,7 +349,7 @@ fn afficher(lecture: &Lecture) {
             "Ta box émet aussi en 5 GHz sous le même nom : près d'elle, c'est plus rapide et moins encombré. Si l'appareil reste en 2,4 GHz, donne un nom différent à chaque bande dans la box.",
             "Your router also broadcasts in 5 GHz under the same name: near it, that is faster and less crowded. If the device stays on 2.4 GHz, give each band a different name in the router."
         );
-        afficher_aligne("  💡 ", astuce, 5, "");
+        afficher_aligne(&format!("  {} ", ampoule()), astuce, 5, "");
     }
 }
 

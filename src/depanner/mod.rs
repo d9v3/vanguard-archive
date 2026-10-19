@@ -152,7 +152,7 @@ fn proposer(question: &str, commandes: &[String]) -> bool {
 
 /// Un conseil à suivre soi-même.
 fn conseil(texte: &str) {
-    afficher_aligne("  💡 ", texte, 5, "");
+    afficher_aligne(&format!("  {} ", ampoule()), texte, 5, "");
 }
 
 /// Un écran neuf sous le cadre du parcours.

@@ -627,9 +627,9 @@ pub fn afficher_constats(constats: &[Constat]) {
         );
         if let Some(k) = &c.correctif {
             let marque = if k.automatique {
-                tr!("🔧 correction possible", "🔧 fix available")
+                trf!("{} correction possible", "{} fix available", cle_a_molette())
             } else {
-                tr!("💡 à faire", "💡 to do")
+                trf!("{} à faire", "{} to do", ampoule())
             };
             let texte = trf!("{marque} : {}", "{marque}: {}", k.action);
             afficher_aligne(&format!("  {:18}", ""), &texte, 23, GRIS);
