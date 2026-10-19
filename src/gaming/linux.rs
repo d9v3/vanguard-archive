@@ -388,6 +388,14 @@ pub(super) fn valeurs(id: &str) -> Vec<Valeur> {
     }
 }
 
+/// Un fichier que Vanguard pose dans /etc, noté sous son nom d'aujourd'hui ou sous l'ancien (note écrite avant le
+/// changement de nom, `passage`) : c'est le fichier noté qui se retire ou se remet.
+fn fichier_de_vanguard(nom: &str) -> bool {
+    [SYSCTL_JEUX, NTSYNC_CONF]
+        .iter()
+        .any(|f| crate::passage::les_deux(f).iter().any(|n| n == nom))
+}
+
 /// Texte entre apostrophes pour le shell, tel quel.
 fn shell(t: &str) -> String {
     format!("'{}'", t.replace('\'', r"'\''"))
@@ -401,8 +409,8 @@ pub(super) fn remettre_commandes(_id: &str, avant: &[Valeur]) -> Vec<String> {
     let mut reste = Vec::new();
     for (nom, v) in avant {
         match (nom.as_str(), v) {
-            (SYSCTL_JEUX | NTSYNC_CONF, None) => fichiers.push(format!("sudo rm -f {nom}")),
-            (SYSCTL_JEUX | NTSYNC_CONF, Some(contenu)) => {
+            (n, None) if fichier_de_vanguard(n) => fichiers.push(format!("sudo rm -f {nom}")),
+            (n, Some(contenu)) if fichier_de_vanguard(n) => {
                 fichiers.push(format!("printf '%s' {} | sudo tee {nom} >/dev/null", shell(contenu)));
             }
             ("vm.max_map_count", Some(n)) if !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()) => {

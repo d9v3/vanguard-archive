@@ -236,7 +236,11 @@ pub fn ecrire(racine: &Path) -> Result<(usize, PathBuf), String> {
 
 fn lire(reference: &Path) -> Result<Manifeste, String> {
     let texte = std::fs::read_to_string(reference).map_err(|e| e.to_string())?;
-    let m: Manifeste = serde_json::from_str(texte.trim_start_matches('\u{feff}')).map_err(|e| e.to_string())?;
+    let mut valeur: serde_json::Value =
+        serde_json::from_str(texte.trim_start_matches('\u{feff}')).map_err(|e| e.to_string())?;
+    // Manifeste écrit avant le changement de nom (`passage`).
+    crate::passage::reprendre_format(&mut valeur, FORMAT);
+    let m: Manifeste = serde_json::from_value(valeur).map_err(|e| e.to_string())?;
     if m.format != FORMAT {
         return Err(tr!("ce n'est pas un manifeste Vanguard", "this is not a Vanguard manifest").to_string());
     }

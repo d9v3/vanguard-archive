@@ -59,12 +59,14 @@ fn chemin_saisi(texte: &str) -> Option<PathBuf> {
 /// Lit une sauvegarde Vanguard, ou directement un appareils.json (la base copiée à la main depuis la clé).
 /// Rend la base et l'état de la surveillance s'il est connu.
 fn lire_sauvegarde(texte: &str) -> Result<(serde_json::Value, Option<bool>), String> {
-    let valeur: serde_json::Value = serde_json::from_str(texte.trim_start_matches('\u{feff}')).map_err(|e| {
+    let mut valeur: serde_json::Value = serde_json::from_str(texte.trim_start_matches('\u{feff}')).map_err(|e| {
         trf!(
             "ce n'est pas un fichier JSON lisible ({e})",
             "this is not a readable JSON file ({e})"
         )
     })?;
+    // Sauvegarde faite avant le changement de nom (`passage`).
+    crate::passage::reprendre_format(&mut valeur, FORMAT);
     if valeur
         .get("format")
         .and_then(|f| f.as_str())

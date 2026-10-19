@@ -23,6 +23,14 @@ const COMPTE_RENDU: &str = "vanguard-copie.txt";
 /// Début du nom des dossiers datés, en français puis en anglais (une copie se reprend dans les deux langues).
 const PREFIXES: [&str; 2] = ["Vanguard-copie-", "Vanguard-copy-"];
 
+/// Un dossier de copie, y compris d'une version d'avant le changement de nom (`passage`).
+fn de_copie(nom: &str) -> bool {
+    PREFIXES
+        .iter()
+        .flat_map(|p| crate::passage::les_deux(p))
+        .any(|p| nom.starts_with(&p))
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Sorte {
     Documents,
@@ -706,11 +714,13 @@ fn dossier_de_copie(racine: &Path, reprendre: impl Fn(&str) -> bool) -> PathBuf 
         .map(|e| e.path())
         .filter(|p| {
             let nom = p.file_name().unwrap_or_default().to_string_lossy();
-            PREFIXES.iter().any(|pre| nom.starts_with(pre)) && p.join(TEMOIN).is_file()
+            de_copie(&nom) && crate::passage::les_deux(TEMOIN).iter().any(|t| p.join(t).is_file())
         })
         .max()
         .filter(|d| reprendre(&d.file_name().unwrap_or_default().to_string_lossy()));
     if let Some(d) = interrompue {
+        // Interrompue sous l'ancien nom (`passage`) : son témoin prend le nouveau, que la fin de la copie retire.
+        let _ = std::fs::rename(d.join(crate::passage::ancien(TEMOIN)), d.join(TEMOIN));
         return d;
     }
     let date = chrono::Local::now().format("%Y-%m-%d");
@@ -1065,8 +1075,13 @@ fn fichiers_de_la_copie(dossier: &Path) -> Vec<PathBuf> {
             if meta.is_dir() {
                 a_voir.push(chemin);
             } else if meta.is_file()
-                && !(relatif.as_os_str().is_empty() && (nom == COMPTE_RENDU || nom == TEMOIN))
-                && !nom.ends_with(PARTIEL)
+                && !(relatif.as_os_str().is_empty()
+                    && [COMPTE_RENDU, TEMOIN]
+                        .iter()
+                        .any(|f| crate::passage::les_deux(f).contains(&nom)))
+                && !crate::passage::les_deux(PARTIEL)
+                    .iter()
+                    .any(|p| nom.ends_with(p.as_str()))
             {
                 trouves.push(chemin);
             }
@@ -1140,7 +1155,10 @@ fn relire(
 fn copie_a_verifier(chemin: &Path) -> Option<PathBuf> {
     let est_une_copie = |p: &Path| {
         let nom = p.file_name().unwrap_or_default().to_string_lossy();
-        PREFIXES.iter().any(|pre| nom.starts_with(pre)) && p.join(COMPTE_RENDU).is_file()
+        de_copie(&nom)
+            && crate::passage::les_deux(COMPTE_RENDU)
+                .iter()
+                .any(|f| p.join(f).is_file())
     };
     if est_une_copie(chemin) {
         return Some(chemin.to_path_buf());
@@ -1176,7 +1194,12 @@ pub fn verifier_copie(destination: Option<&Path>) {
         );
         return;
     };
-    let compte_rendu = dossier.join(COMPTE_RENDU);
+    // Une copie faite avant le changement de nom a son compte rendu sous l'ancien nom (`passage`).
+    let compte_rendu = crate::passage::les_deux(COMPTE_RENDU)
+        .iter()
+        .map(|f| dossier.join(f))
+        .find(|f| f.is_file())
+        .unwrap_or_else(|| dossier.join(COMPTE_RENDU));
     let sources = sources_du_compte_rendu(&std::fs::read_to_string(&compte_rendu).unwrap_or_default());
     let copie_le = std::fs::metadata(&compte_rendu)
         .and_then(|m| m.modified())
@@ -1192,7 +1215,10 @@ pub fn verifier_copie(destination: Option<&Path>) {
         choisis.len(),
         fichiers.len()
     );
-    if dossier.join(TEMOIN).is_file() {
+    if crate::passage::les_deux(TEMOIN)
+        .iter()
+        .any(|t| dossier.join(t).is_file())
+    {
         trp!(
             "  {}⚠{RESET} Cette copie n'est pas finie : relance « Copier mes fichiers » vers ce disque pour la reprendre.",
             "  {}⚠{RESET} This copy is not finished: run “Copy my files” to this disk again to resume it.",

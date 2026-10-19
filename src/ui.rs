@@ -36,7 +36,7 @@ fn emojis() -> bool {
     static EMOJIS: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *EMOJIS.get_or_init(|| {
         emojis_voulus(
-            std::env::var("VANGUARD_EMOJI").ok().as_deref(),
+            crate::passage::variable("VANGUARD_EMOJI").as_deref(),
             ancienne_console_windows(),
         )
     })

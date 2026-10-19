@@ -49,7 +49,8 @@ Réponses à l'utilisateur en français, claires, avec le pourquoi.
 - Nouvelle dépendance : licence compatible GPL-3.0 (MIT, Apache, BSD…), puis `python3 outils/licences-tierces.py`
   et committer LICENCES-TIERCES.txt.
 - `unsafe` seulement avec un commentaire `// SAFETY :`.
-- Le programme s'appelle Vanguard, point : aucun ancien nom dans le code, les textes, les commits ni sur GitHub.
+- Le programme s'appelle Vanguard, point : aucun ancien nom dans le code, les textes, les commits ni sur GitHub. Seule
+  exception : `src/passage.rs`, qui reprend ce qu'une version d'avant a posé sur un ordinateur (à retirer à la 1.0).
 - Les tests ne touchent jamais les vraies données de l'ordinateur : sous `cfg(test)`, `reseau::dossier_local()` est un
   dossier jetable. Une migration ou une écriture ne doit pas pouvoir partir d'un test.
 

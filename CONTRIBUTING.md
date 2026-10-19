@@ -58,6 +58,7 @@ modification. Sur GitHub, `@claude` dans un ticket ou une demande de fusion le f
 | `src/lenteur.rs`, `src/fiche.rs` | pourquoi c'est lent (instantané en deux mesures, démarrage) ; fiche de l'ordinateur |
 | `src/copier.rs` | copier mes fichiers vers un disque externe : copie vérifiée (BLAKE3), reprise, jamais d'écrasement ; vérifier une copie (test de restauration) |
 | `src/verifier_cle.rs` | vérifier ma clé : capacité réelle, vitesses et blocs en erreur, écrits dans le libre et relus sans cache, puis effacés |
+| `src/passage.rs` | reprise de ce qu'une version d'avant le changement de nom a posé (données, minuteries, raccourci, règles du pare-feu) ; à retirer à la 1.0 |
 | `src/ordinateurs.rs` | mes ordinateurs : la visite de chaque ordinateur notée sur VANGUARDLOG (catégories et niveaux seulement) |
 | `src/chiffrement.rs` | données de la clé protégées : carnet chiffré (XChaCha20-Poly1305), clé de données gardée chez le propriétaire et enveloppée par la phrase (Argon2id) |
 | `assets/oui.tsv` | fabricants par préfixe MAC (liste IEEE), rangés en tableaux triés à la compilation (`build.rs`) |

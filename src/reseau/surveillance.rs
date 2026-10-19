@@ -370,6 +370,15 @@ fn juger_disparition(voulue: bool, installee: bool) -> Option<crate::machine::Co
     })
 }
 
+/// Reprise d'une surveillance active sous l'ancien nom (`passage`) : la minuterie recréée, le choix noté.
+pub(crate) fn reprendre(exe: &str) -> bool {
+    let ok = installer(exe);
+    if ok {
+        noter_voulue(true);
+    }
+    ok
+}
+
 pub fn activer(oui: bool) {
     let reussi = if oui { installer(&executable()) } else { desinstaller() };
     if !oui || reussi {

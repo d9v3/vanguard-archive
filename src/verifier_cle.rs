@@ -369,8 +369,13 @@ fn restes(racine: &Path) -> Vec<PathBuf> {
         .map(|e| e.path())
         .filter(|p| {
             p.is_dir()
-                && p.file_name()
-                    .is_some_and(|n| n.to_string_lossy().starts_with(PREFIXE_DOSSIER))
+                && p.file_name().is_some_and(|n| {
+                    // Restes d'une vérification d'avant le changement de nom aussi (`passage`).
+                    let n = n.to_string_lossy();
+                    crate::passage::les_deux(PREFIXE_DOSSIER)
+                        .iter()
+                        .any(|p| n.starts_with(p.as_str()))
+                })
         })
         .collect();
     r.sort();

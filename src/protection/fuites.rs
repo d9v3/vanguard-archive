@@ -145,7 +145,7 @@ fn lire_hibp(texte: &str) -> Option<Vec<String>> {
 
 /// Clé de l'API de Have I Been Pwned, si elle est fournie (VANGUARD_HIBP_CLE).
 fn cle_hibp() -> Option<String> {
-    std::env::var("VANGUARD_HIBP_CLE").ok().filter(|c| !c.is_empty())
+    crate::passage::variable("VANGUARD_HIBP_CLE").filter(|c| !c.is_empty())
 }
 
 /// Fuites où apparaît l'adresse : par Have I Been Pwned si une clé est fournie (`cle_hibp`), sinon par

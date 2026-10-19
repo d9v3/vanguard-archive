@@ -217,6 +217,13 @@ pub fn active() -> bool {
     ETAT.load(Ordering::Relaxed) == 2
 }
 
+/// Reprise d'un entretien actif sous l'ancien nom (`passage`).
+pub(crate) fn reprendre(exe: &str) -> bool {
+    let ok = installer(exe);
+    ETAT.store(0, Ordering::Relaxed);
+    ok
+}
+
 pub fn activer(oui: bool) {
     let reussi = if oui { installer(&executable()) } else { desinstaller() };
     ETAT.store(0, Ordering::Relaxed);

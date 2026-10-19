@@ -9,13 +9,13 @@ use std::path::PathBuf;
 use crate::ui::*;
 
 /// Ce qui marque un raccourci posé par Vanguard (Linux : une clé du fichier .desktop ; macOS : un commentaire).
-const MARQUE: &str = "X-Vanguard-Raccourci=1";
+pub(crate) const MARQUE: &str = "X-Vanguard-Raccourci=1";
 #[cfg(target_os = "linux")]
 const ICONE: &[u8] = include_bytes!("../assets/icones/vanguard-128.png");
 
 /// Où va le raccourci sur ce système.
 #[cfg_attr(target_os = "macos", allow(clippy::unnecessary_wraps))] // même signature que sous Linux et Windows
-fn chemin() -> Option<PathBuf> {
+pub(crate) fn chemin() -> Option<PathBuf> {
     #[cfg(target_os = "linux")]
     {
         let donnees = std::env::var_os("XDG_DATA_HOME")
@@ -71,6 +71,11 @@ fn etat() -> Option<(PathBuf, bool)> {
     // Windows : un raccourci .lnk ne se lit pas comme du texte ; celui-là s'appelle Vanguard.lnk, posé par Vanguard.
     let a_nous = cfg!(windows) || std::fs::read_to_string(&p).is_ok_and(|t| t.contains(MARQUE));
     Some((p, a_nous))
+}
+
+/// Reprise d'un raccourci posé sous l'ancien nom (`passage`) : le même, au nouveau nom.
+pub(crate) fn reprendre(exe: &str, ou: &std::path::Path) -> bool {
+    poser(exe, ou).is_ok()
 }
 
 fn poser(exe: &str, ou: &std::path::Path) -> Result<(), String> {

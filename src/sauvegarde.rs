@@ -88,6 +88,23 @@ fn noter(m: &MiseEnPlace) {
     }
 }
 
+/// Les unités reprises sous le nouveau nom (`passage`) : leurs empreintes changent, la note suit pour que
+/// « Annuler » les retire encore.
+#[cfg(target_os = "linux")]
+pub(crate) fn reprendre_note(timer: &str, service: &str) {
+    let mut notes = charger_de(&fichier_notes());
+    if let Some(MiseEnPlace::Systemd {
+        empreinte_timer,
+        empreinte_service,
+        ..
+    }) = notes.mise_en_place.as_mut()
+    {
+        *empreinte_timer = empreinte(timer);
+        *empreinte_service = empreinte(service);
+        let _ = ecrire_dans(&fichier_notes(), &notes);
+    }
+}
+
 fn ecrire_dans(chemin: &Path, notes: &Notes) -> std::io::Result<()> {
     if let Some(parent) = chemin.parent() {
         std::fs::create_dir_all(parent)?;

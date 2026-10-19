@@ -114,7 +114,11 @@ pub(crate) fn ports_bloques() -> Option<Vec<u16>> {
 /// « v2.32|Action=Block|Active=TRUE|Dir=In|Protocol=6|LPort=8080|Name=Vanguard : bloquer 8080| ».
 pub(crate) fn port_bloque(regle: &str) -> Option<u16> {
     let champ = |cle: &str| regle.split('|').find_map(|c| c.strip_prefix(cle)?.strip_prefix('='));
-    (champ("Name")?.starts_with("Vanguard : bloquer")
+    let nom = champ("Name")?;
+    // Les règles posées sous l'ancien nom bloquent encore (`passage`).
+    (crate::passage::les_deux("Vanguard : bloquer")
+        .iter()
+        .any(|p| nom.starts_with(p.as_str()))
         && champ("Active")?.eq_ignore_ascii_case("true")
         && champ("Action")?.eq_ignore_ascii_case("block")
         && champ("Dir")?.eq_ignore_ascii_case("in"))
@@ -174,6 +178,9 @@ Active Connections\r
         assert_eq!(port_bloque(&regle.replace("Dir=In", "Dir=Out")), None);
         assert_eq!(port_bloque(&regle.replace("Action=Block", "Action=Allow")), None);
         assert_eq!(port_bloque(&regle.replace("Name=Vanguard", "Name=Autre")), None);
+        // Une règle d'avant le changement de nom bloque toujours.
+        let ancienne = regle.replace("Vanguard", &crate::passage::ancien("Vanguard"));
+        assert_eq!(port_bloque(&ancienne), Some(8080));
         assert_eq!(
             port_bloque("v2.32|Action=Block|Active=TRUE|Dir=In|Name=Vanguard : bloquer 8080|"),
             None

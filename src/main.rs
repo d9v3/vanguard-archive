@@ -28,6 +28,7 @@ mod maj;
 mod nettoyer;
 mod optimiser;
 mod ordinateurs;
+mod passage;
 mod prediction;
 mod protection;
 mod raccourci;
@@ -1434,6 +1435,7 @@ async fn main() {
     protection::cle::proteger_cle();
     protection::environnement::afficher();
     avertir_si_root();
+    passage::au_lancement();
     let args = Args::from_arg_matches(&ligne_de_commande().get_matches()).unwrap_or_else(|e| e.exit());
     match args.commande {
         None => menu().await,

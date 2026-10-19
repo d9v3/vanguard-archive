@@ -740,11 +740,13 @@ fn ports_tcp_directs(pare_feu_actif: bool) -> Option<(String, Vec<u16>)> {
 
 /// Ports bloqués par une règle active de Vanguard, demandés à PowerShell quand le registre ne se lit pas.
 fn ports_bloques_powershell() -> Vec<u16> {
-    ps(
-        "@(Get-NetFirewallRule -DisplayName 'Vanguard : bloquer *' -ErrorAction SilentlyContinue | \
-        Where-Object { $_.Enabled -eq 'True' -and $_.Action -eq 'Block' -and $_.Direction -eq 'Inbound' } | \
-        Get-NetFirewallPortFilter | ForEach-Object { $_.LocalPort }) -join ','",
-    )
+    // Les règles posées sous l'ancien nom bloquent encore : elles comptent aussi (`passage`).
+    ps(&format!(
+        "@(Get-NetFirewallRule -DisplayName {} -ErrorAction SilentlyContinue | \
+        Where-Object {{ $_.Enabled -eq 'True' -and $_.Action -eq 'Block' -and $_.Direction -eq 'Inbound' }} | \
+        Get-NetFirewallPortFilter | ForEach-Object {{ $_.LocalPort }}) -join ','",
+        crate::passage::liste_ps("Vanguard : bloquer *")
+    ))
     .unwrap_or_default()
     .split(',')
     .filter_map(|p| p.trim().parse().ok())
@@ -755,11 +757,14 @@ fn ports_bloques_powershell() -> Vec<u16> {
 /// écoute, puis les règles de blocage dans leur section (leur échec ne fait pas perdre les ports).
 fn ports_tcp_powershell(pare_feu_actif: bool) -> Option<(String, Vec<u16>)> {
     let regles = if pare_feu_actif {
-        "; try { 'BLQ|' + (@(Get-NetFirewallRule -DisplayName 'Vanguard : bloquer *' -ErrorAction SilentlyContinue | \
-         Where-Object { $_.Enabled -eq 'True' -and $_.Action -eq 'Block' -and $_.Direction -eq 'Inbound' } | \
-         Get-NetFirewallPortFilter | ForEach-Object { $_.LocalPort }) -join ','); 'BLQ_FIN' } catch {}"
+        format!(
+            "; try {{ 'BLQ|' + (@(Get-NetFirewallRule -DisplayName {} -ErrorAction SilentlyContinue | \
+             Where-Object {{ $_.Enabled -eq 'True' -and $_.Action -eq 'Block' -and $_.Direction -eq 'Inbound' }} | \
+             Get-NetFirewallPortFilter | ForEach-Object {{ $_.LocalPort }}) -join ','); 'BLQ_FIN' }} catch {{}}",
+            crate::passage::liste_ps("Vanguard : bloquer *")
+        )
     } else {
-        ""
+        String::new()
     };
     let sortie = ps(&format!(
         "$noms = @{{}}; Get-Process | ForEach-Object {{ $noms[$_.Id] = $_.ProcessName }}; \

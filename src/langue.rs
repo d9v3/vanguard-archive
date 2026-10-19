@@ -40,7 +40,7 @@ fn detecter() -> bool {
     if cfg!(test) {
         return false;
     }
-    let forcee = std::env::var("VANGUARD_LANG").ok().and_then(|v| code(&v));
+    let forcee = crate::passage::variable("VANGUARD_LANG").and_then(|v| code(&v));
     forcee.or_else(langue_systeme).is_none_or(|c| c != "fr")
 }
 
