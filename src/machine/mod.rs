@@ -1083,3 +1083,50 @@ Host *
         assert!(!temoin.exists());
     }
 }
+
+/// Configuration SSH du client et réglages de sudo, sur des entrées au hasard : jamais de plantage ; les jokers des
+/// inclusions se comportent comme ceux de SSH.
+#[cfg(all(test, unix))]
+mod tests_au_hasard {
+    use super::*;
+    use proptest::prelude::*;
+
+    fn texte() -> impl Strategy<Value = String> {
+        prop::collection::vec(
+            prop_oneof![
+                any::<String>(),
+                "[ -~\\t\u{1b}é=\"#]{0,60}",
+                "(Host|Match|Include|StrictHostKeyChecking|ForwardAgent|PermitRootLogin|PasswordAuthentication)[ =]+[ -~]{0,20}",
+                "(Matching Defaults entries for alice:|    [ -~]{0,40}|)",
+            ],
+            0..12,
+        )
+        .prop_map(|l| l.join("\n"))
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig { cases: 256, failure_persistence: None, ..ProptestConfig::default() })]
+
+        #[test]
+        fn lecteurs_sans_plantage(t in texte()) {
+            let _ = reglages_ssh_risques(&t);
+            let lire = |_: &str| vec![("~/.ssh/inclus".to_string(), t.clone())];
+            let mut lignes = Vec::new();
+            deplier_config_ssh("~/.ssh/config", &t, &lire, 3, &mut lignes);
+            let _ = constats_config_ssh(&lignes);
+            let _ = unix::defauts_sudo(&t);
+            let _ = unix::regles_nopasswd(&t);
+            let _ = unix::juger_sshd_mac(&t);
+        }
+
+        #[test]
+        fn jokers(nom in "[a-z.]{0,12}") {
+            prop_assert!(joker("*", &nom));
+            prop_assert!(joker(&nom, &nom));
+            let ajout = format!("{nom}x");
+            prop_assert!(!joker(&nom, &ajout));
+            let interrogations = "?".repeat(nom.chars().count());
+            prop_assert!(joker(&interrogations, &nom));
+        }
+    }
+}

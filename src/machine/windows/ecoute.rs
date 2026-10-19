@@ -180,3 +180,38 @@ Active Connections\r
         );
     }
 }
+
+/// Sorties de netstat et tasklist, et règles du registre, au hasard : jamais de plantage, adresses sans crochets.
+#[cfg(test)]
+mod tests_au_hasard {
+    use super::*;
+    use proptest::prelude::*;
+
+    fn texte() -> impl Strategy<Value = String> {
+        prop::collection::vec(
+            prop_oneof![
+                any::<String>(),
+                "[ -~\\t\u{1b}é:|=\"\\[\\]]{0,60}",
+                "  (TCP|UDP|tcp)  +[0-9.:\\[\\]a-f%]{1,30}  +[0-9.:\\[\\]*]{1,20}  +[A-ZÉ_]{0,12}  +[0-9]{0,8}",
+                "\"[ -~]{0,20}\",\"[0-9]{0,8}\",\"[ -~]{0,10}\"",
+            ],
+            0..12,
+        )
+        .prop_map(|l| l.join("\r\n"))
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig { cases: 256, failure_persistence: None, ..ProptestConfig::default() })]
+
+        #[test]
+        fn lecteurs_sans_plantage(t in texte()) {
+            for (adresse, _, _, _) in lire_netstat(&t) {
+                prop_assert!(!adresse.starts_with('[') && !adresse.ends_with(']'));
+            }
+            let _ = lire_tasklist(&t);
+            for ligne in t.lines() {
+                let _ = port_bloque(ligne);
+            }
+        }
+    }
+}

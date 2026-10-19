@@ -1938,3 +1938,57 @@ Failed password for alice from 10.0.0.12 port 50001 ssh2";
         assert_eq!(sortie_delai("sh", &["-c", "exit 1"], 5, &[0, 1]).as_deref(), Some(""));
     }
 }
+
+/// Les lecteurs de fichiers et de sorties ajoutés au bilan Linux, sur des entrées au hasard (pièges compris) : jamais
+/// de plantage, et rien de dangereux n'entre dans une commande.
+#[cfg(test)]
+mod tests_au_hasard {
+    use super::*;
+    use proptest::prelude::*;
+
+    fn texte() -> impl Strategy<Value = String> {
+        prop::collection::vec(
+            prop_oneof![
+                any::<String>(),
+                "[ -~\\t\u{1b}\u{202e}é:=\\[\\]#;|\"]{0,60}",
+                "(\\[(daemon|Autologin|Seat:\\*|commands)\\]|(User|AutomaticLogin|AutomaticLoginEnable|autologin-user|apply_updates) ?= ?[ -~]{0,20})",
+            ],
+            0..12,
+        )
+        .prop_map(|l| l.join("\n"))
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig { cases: 256, failure_persistence: None, ..ProptestConfig::default() })]
+
+        #[test]
+        fn lecteurs_sans_plantage(t in texte(), chemin in "(/etc/gdm3/custom.conf|/etc/sddm.conf|/etc/lightdm/lightdm.conf|/x)") {
+            let _ = valeur_ini(&t, |_| true, "User");
+            let _ = ouverture_automatique_de(&[(chemin, t.clone())]);
+            let _ = proprietaires_pacman(&t);
+            let _ = wifi_ouvert(&t);
+            let _ = maj::juger_dnf_auto(false, true, &t);
+        }
+
+        #[test]
+        fn uuid_sur_dans_la_commande(t in texte()) {
+            // L'UUID entre tel quel dans « nmcli connection modify … » : toujours sa forme exacte.
+            for (uuid, _) in connexions_wifi_auto(&t) {
+                prop_assert_eq!(uuid.len(), 36);
+                prop_assert!(uuid.chars().all(|c| c.is_ascii_hexdigit() || c == '-'));
+            }
+        }
+
+        #[test]
+        fn commandes_xhost_sures(t in texte()) {
+            if let Some(c) = juger_xhost(&t)
+                && let Some(k) = c.correctif
+            {
+                for commande in &k.commandes {
+                    let reste = commande.strip_prefix("xhost -").unwrap_or_default();
+                    prop_assert!(reste.chars().all(|c| c.is_ascii_alphanumeric() || ".:-_[]".contains(c)));
+                }
+            }
+        }
+    }
+}
