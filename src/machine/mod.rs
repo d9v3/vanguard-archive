@@ -371,7 +371,7 @@ fn cles_ssh() -> Vec<Constat> {
         let protegee = std::fs::read_to_string(f.path()).ok().and_then(|t| cle_protegee(&t));
         // Nom entre apostrophes dans les commandes : une clé « ma cle » ne casse pas la commande. Les commandes visent
         // le vrai nom ; les messages montrent un nom rendu inoffensif.
-        let chemin = format!("~/.ssh/'{}'", brut.replace('\'', r"'\''"));
+        let chemin = format!("~/.ssh/{}", crate::commande::sh_chaine(&brut));
         let nom = affichable(&brut);
         if protegee == Some(false) {
             constats.push(

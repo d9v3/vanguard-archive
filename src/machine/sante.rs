@@ -55,13 +55,13 @@ fn juger_volume(v: &Volume) -> Option<Constat> {
         )
     } else if cfg!(target_os = "macos") {
         format!(
-            "du -xh -d 2 '{}' 2>/dev/null | sort -h | tail -15",
-            v.point.replace('\'', r"'\''")
+            "du -xh -d 2 {} 2>/dev/null | sort -h | tail -15",
+            crate::commande::sh_chaine(&v.point)
         )
     } else {
         format!(
-            "du -xh --max-depth=2 '{}' 2>/dev/null | sort -h | tail -15",
-            v.point.replace('\'', r"'\''")
+            "du -xh --max-depth=2 {} 2>/dev/null | sort -h | tail -15",
+            crate::commande::sh_chaine(&v.point)
         )
     };
     Some(

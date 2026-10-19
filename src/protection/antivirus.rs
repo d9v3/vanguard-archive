@@ -433,8 +433,8 @@ fn base_presente() -> bool {
 #[cfg(target_os = "macos")]
 pub(crate) fn commande_freshclam(freshclam: &str) -> String {
     format!(
-        "set -o pipefail; '{}' 2>&1 | {{ grep -v 'NULL X509 store' || true; }}",
-        freshclam.replace('\'', r"'\''")
+        "set -o pipefail; {} 2>&1 | {{ grep -v 'NULL X509 store' || true; }}",
+        crate::commande::sh_chaine(freshclam)
     )
 }
 

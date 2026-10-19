@@ -276,7 +276,7 @@ mod systeme {
         for i in imprimantes.iter().filter(|i| i.en_pause) {
             // Le nom vient de CUPS ; entre apostrophes, il reste un seul mot pour le shell. Montré, il est rendu
             // inoffensif.
-            let nom = format!("'{}'", i.nom.replace('\'', r"'\''"));
+            let nom = crate::commande::sh_chaine(&i.nom);
             let montre = affichable(&i.nom);
             if proposer(
                 &trf!("\n  Réactiver {} ? [o/N] : ", "\n  Re-enable {}? [y/N]: ", montre),

@@ -183,9 +183,7 @@ fn effacer_caches(dossier: &str, caches: &[(String, u64)]) -> String {
         {
             commande.push_str(nom);
         } else {
-            commande.push('\'');
-            commande.push_str(&nom.replace('\'', r"'\''"));
-            commande.push('\'');
+            commande.push_str(&crate::commande::sh_chaine(nom));
         }
     }
     commande

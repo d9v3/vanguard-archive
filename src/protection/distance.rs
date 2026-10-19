@@ -13,6 +13,8 @@ use std::path::PathBuf;
 
 use chrono::NaiveDate;
 
+#[cfg(unix)]
+use crate::commande::sh_chaine;
 use crate::machine::{Constat, alerte, impossible, ok};
 use crate::risk::Niveau;
 use crate::ui::*;
@@ -287,12 +289,6 @@ pub fn constats() -> Vec<Constat> {
 
 // ───────────────────────────── Relevé : Linux ─────────────────────────────
 
-/// Le texte entre apostrophes, pour bash : « '…' ».
-#[cfg(unix)]
-fn shell(t: &str) -> String {
-    format!("'{}'", t.replace('\'', "'\\''"))
-}
-
 #[cfg(unix)]
 fn sortie_de(cmd: &str, args: &[&str], secondes: u64) -> Option<String> {
     let mut c = std::process::Command::new(cmd);
@@ -330,7 +326,7 @@ fn fichiers_poses(t: &mut Vec<Trouvaille>, dossiers: &[PathBuf]) {
                 retrait: vec![format!(
                     "rm -{} {}",
                     if application { "rf" } else { "f" },
-                    shell(&chemin.to_string_lossy())
+                    sh_chaine(&chemin.to_string_lossy())
                 )],
                 arret: Vec::new(),
             });
@@ -432,7 +428,7 @@ fn paquets(t: &mut Vec<Trouvaille>) {
             trace: Trace::Installe,
             ou: trf!("paquet {p}", "package {p}"),
             depuis,
-            retrait: vec![gestionnaire.retirer(&shell(p))],
+            retrait: vec![gestionnaire.retirer(&sh_chaine(p))],
             arret: Vec::new(),
         });
     }
@@ -458,7 +454,7 @@ fn flatpaks(t: &mut Vec<Trouvaille>, maison: &std::path::Path) {
             trace: Trace::Installe,
             ou: format!("Flatpak {id}"),
             depuis,
-            retrait: vec![format!("flatpak uninstall -y --noninteractive {}", shell(id))],
+            retrait: vec![format!("flatpak uninstall -y --noninteractive {}", sh_chaine(id))],
             arret: Vec::new(),
         });
     }
@@ -478,7 +474,7 @@ fn snaps(t: &mut Vec<Trouvaille>) {
             trace: Trace::Installe,
             ou: format!("Snap {nom}"),
             depuis: None,
-            retrait: vec![format!("sudo snap remove {}", shell(nom))],
+            retrait: vec![format!("sudo snap remove {}", sh_chaine(nom))],
             arret: Vec::new(),
         });
     }
@@ -501,7 +497,7 @@ fn dossiers_opt(t: &mut Vec<Trouvaille>) {
             trace: Trace::Installe,
             ou: chemin_affichable(&chemin),
             depuis: date_de(e.metadata().and_then(|m| m.modified())),
-            retrait: vec![format!("sudo rm -rf {}", shell(&chemin.to_string_lossy()))],
+            retrait: vec![format!("sudo rm -rf {}", sh_chaine(&chemin.to_string_lossy()))],
             arret: Vec::new(),
         });
     }
@@ -538,7 +534,7 @@ fn processus(t: &mut Vec<Trouvaille>) {
             ou: exe.as_deref().map_or_else(|| affichable(&comm), chemin_affichable),
             depuis: None,
             retrait: Vec::new(),
-            arret: vec![format!("pkill -x {} || true", shell(&comm))],
+            arret: vec![format!("pkill -x {} || true", sh_chaine(&comm))],
         });
     }
 }
@@ -570,7 +566,7 @@ fn demarrage_linux(t: &mut Vec<Trouvaille>, maison: &std::path::Path) {
                 trace: Trace::Demarrage,
                 ou: chemin_affichable(&chemin),
                 depuis: None,
-                retrait: vec![format!("{sudo}rm -f {}", shell(&chemin.to_string_lossy()))],
+                retrait: vec![format!("{sudo}rm -f {}", sh_chaine(&chemin.to_string_lossy()))],
                 arret: Vec::new(),
             });
         }
@@ -597,8 +593,8 @@ fn demarrage_linux(t: &mut Vec<Trouvaille>, maison: &std::path::Path) {
                 trace: Trace::Demarrage,
                 ou: trf!("service {unite}", "service {unite}"),
                 depuis: None,
-                retrait: vec![format!("{prefixe} disable {}", shell(unite))],
-                arret: vec![format!("{prefixe} stop {}", shell(unite))],
+                retrait: vec![format!("{prefixe} disable {}", sh_chaine(unite))],
+                arret: vec![format!("{prefixe} stop {}", sh_chaine(unite))],
             });
         }
     }
@@ -630,7 +626,7 @@ fn relever() -> Option<Vec<Trouvaille>> {
                 trace: Trace::Installe,
                 ou: chemin_affichable(&chemin),
                 depuis: date_de(e.metadata().and_then(|m| m.created())),
-                retrait: vec![format!("{sudo}rm -rf {}", shell(&chemin.to_string_lossy()))],
+                retrait: vec![format!("{sudo}rm -rf {}", sh_chaine(&chemin.to_string_lossy()))],
                 arret: Vec::new(),
             });
         }
@@ -645,7 +641,7 @@ fn relever() -> Option<Vec<Trouvaille>> {
             let Some(i) = reconnu(&nom) else {
                 continue;
             };
-            let chemin = shell(&e.path().to_string_lossy());
+            let chemin = sh_chaine(&e.path().to_string_lossy());
             t.push(Trouvaille {
                 logiciel: i,
                 trace: Trace::Demarrage,
@@ -691,7 +687,7 @@ fn relever() -> Option<Vec<Trouvaille>> {
                 ou: affichable(comm),
                 depuis: None,
                 retrait: Vec::new(),
-                arret: vec![format!("pkill -x {} || true", shell(court))],
+                arret: vec![format!("pkill -x {} || true", sh_chaine(court))],
             });
         }
     }

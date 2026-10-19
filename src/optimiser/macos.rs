@@ -6,6 +6,7 @@ use std::process::Command;
 
 use super::demarrage::{Programme, agent_actif, agent_au_demarrage, etats_launchd, label_valide};
 use super::{Categorie, Reglage, Valeur};
+use crate::commande::sh_chaine;
 use crate::ui::*;
 
 pub enum Changement {
@@ -44,10 +45,6 @@ fn agents_etats() -> Option<std::collections::HashMap<String, bool>> {
 
 fn bool_texte(b: bool) -> String {
     if b { "1" } else { "0" }.to_string()
-}
-
-fn shell(t: &str) -> String {
-    format!("'{}'", t.replace('\'', r"'\''"))
 }
 
 /// `networksetup -getdnsservers` : une adresse par ligne, ou une phrase quand il n'y en a pas (ceux de la box).
@@ -140,11 +137,11 @@ impl Changement {
                 Some(match v {
                     Some(v) => format!(
                         "{sudo}defaults write {} {cle} -bool {}",
-                        shell(domaine),
+                        sh_chaine(domaine),
                         if v == "1" { "true" } else { "false" }
                     ),
                     // Déjà absente : `defaults delete` répond par une erreur, qui n'en est pas une ici.
-                    None => format!("{sudo}defaults delete {} {cle} 2>/dev/null; true", shell(domaine)),
+                    None => format!("{sudo}defaults delete {} {cle} 2>/dev/null; true", sh_chaine(domaine)),
                 })
             }
             Changement::Dns { service, .. } => {
@@ -166,7 +163,7 @@ impl Changement {
                 };
                 Some(format!(
                     "sudo networksetup -setdnsservers {} {serveurs}",
-                    shell(service)
+                    sh_chaine(service)
                 ))
             }
             // Pour le compte, sans sudo ; l'agent qui tourne finit la session, il ne repart simplement plus.

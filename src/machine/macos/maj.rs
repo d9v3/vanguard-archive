@@ -69,7 +69,7 @@ pub fn mises_a_jour() -> Vec<Constat> {
         let commande = format!(
             "sudo softwareupdate --install {}",
             noms.iter()
-                .map(|n| format!("'{}'", n.replace('\'', r"'\''")))
+                .map(|n| crate::commande::sh_chaine(n))
                 .collect::<Vec<_>>()
                 .join(" ")
         );

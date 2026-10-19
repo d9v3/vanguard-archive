@@ -739,7 +739,7 @@ fn mettre_en_place() -> Option<MiseEnPlace> {
     let deja_actif = avant.contains("Name");
     let chemin = disque.racine.display().to_string();
     let commandes = vec![
-        format!("sudo tmutil setdestination -a '{}'", chemin.replace('\'', "'\\''")),
+        format!("sudo tmutil setdestination -a {}", crate::commande::sh_chaine(&chemin)),
         "sudo tmutil enable".to_string(),
     ];
     section(tr!("CE QUE VANGUARD VA FAIRE", "WHAT VANGUARD WILL DO"));

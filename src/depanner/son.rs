@@ -229,7 +229,7 @@ mod systeme {
                 .and_then(|i| candidates.get(i))
             {
                 // Le nom vient de pactl ; entre apostrophes, il reste un seul mot pour le shell.
-                let commande = format!("pactl set-default-sink '{}'", s.nom.replace('\'', r"'\''"));
+                let commande = format!("pactl set-default-sink {}", crate::commande::sh_chaine(&s.nom));
                 if crate::machine::appliquer(&[commande]) {
                     fait(tr!("Sortie changée.", "Output changed."));
                 }

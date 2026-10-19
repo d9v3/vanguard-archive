@@ -125,7 +125,7 @@ fn resume_redirections(lignes: &[(String, String)]) -> String {
 /// Texte entre apostrophes pour bash ('…') ou PowerShell ('…').
 #[cfg(unix)]
 fn entre_apostrophes(t: &str) -> String {
-    format!("'{}'", t.replace('\'', r"'\''"))
+    crate::commande::sh_chaine(t)
 }
 #[cfg(windows)]
 fn entre_apostrophes(t: &str) -> String {

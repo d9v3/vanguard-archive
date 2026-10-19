@@ -8,6 +8,7 @@ use std::process::Command;
 
 use super::annulation::Valeur;
 use super::{Element, element, proposer};
+use crate::commande::sh_chaine;
 use crate::machine::linux::Paquets;
 use crate::ui::*;
 
@@ -396,11 +397,6 @@ fn fichier_de_vanguard(nom: &str) -> bool {
         .any(|f| crate::passage::les_deux(f).iter().any(|n| n == nom))
 }
 
-/// Texte entre apostrophes pour le shell, tel quel.
-fn shell(t: &str) -> String {
-    format!("'{}'", t.replace('\'', r"'\''"))
-}
-
 /// Les commandes qui remettent les valeurs notées : les fichiers de Vanguard d'abord (retirés, ou rendus à leur
 /// contenu d'avant), puis la valeur du noyau, puis le module s'il n'était pas chargé (refusé tant qu'un jeu
 /// l'utilise : la note reste alors pour réessayer).
@@ -411,7 +407,10 @@ pub(super) fn remettre_commandes(_id: &str, avant: &[Valeur]) -> Vec<String> {
         match (nom.as_str(), v) {
             (n, None) if fichier_de_vanguard(n) => fichiers.push(format!("sudo rm -f {nom}")),
             (n, Some(contenu)) if fichier_de_vanguard(n) => {
-                fichiers.push(format!("printf '%s' {} | sudo tee {nom} >/dev/null", shell(contenu)));
+                fichiers.push(format!(
+                    "printf '%s' {} | sudo tee {nom} >/dev/null",
+                    sh_chaine(contenu)
+                ));
             }
             ("vm.max_map_count", Some(n)) if !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()) => {
                 reste.push(format!("sudo sysctl -w vm.max_map_count={n} >/dev/null"));

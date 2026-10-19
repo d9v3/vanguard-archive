@@ -7,6 +7,7 @@ use std::process::Command;
 
 use super::demarrage::Programme;
 use super::{Categorie, Reglage, Valeur};
+use crate::commande::sh_chaine;
 use crate::ui::*;
 
 /// Ce que retire un réglage de démarrage.
@@ -254,11 +255,6 @@ fn sortie(cmd: &str, args: &[&str]) -> Option<String> {
     Some(r.sortie.trim().to_string())
 }
 
-/// Entre apostrophes, pour bash.
-fn shell(t: &str) -> String {
-    format!("'{}'", t.replace('\'', r"'\''"))
-}
-
 impl Changement {
     pub fn lire(&self) -> Valeur {
         match self {
@@ -478,29 +474,31 @@ impl Changement {
                     let dossier = Path::new(chemin).parent()?.display().to_string();
                     format!(
                         "sudo mkdir -p {} && printf '%s' {} | sudo tee {} >/dev/null && {apres}",
-                        shell(&dossier),
-                        shell(contenu),
-                        shell(chemin)
+                        sh_chaine(&dossier),
+                        sh_chaine(contenu),
+                        sh_chaine(chemin)
                     )
                 }
-                None => format!("sudo rm -f {} && {apres}", shell(chemin)),
+                None => format!("sudo rm -f {} && {apres}", sh_chaine(chemin)),
             },
             Changement::Gnome { schema, cle, .. } => match v {
-                Some(v) => format!("gsettings set {schema} {cle} {}", shell(v)),
+                Some(v) => format!("gsettings set {schema} {cle} {}", sh_chaine(v)),
                 None => format!("gsettings reset {schema} {cle}"),
             },
             Changement::Option { fichier, cle, .. } => {
-                let f = shell(fichier);
+                let f = sh_chaine(fichier);
                 match v {
                     // La ligne est remplacée si elle existe, ajoutée sinon. Dans le remplacement de sed, « \ », « | »
                     // et « & » sont protégés : une valeur d'avant remise doit l'être telle quelle.
+                    // Ce remplacement est déjà entre apostrophes dans le script de sed : sh_chaine ne s'y applique
+                    // pas, l'apostrophe y est échappée à la main.
                     Some(v) => format!(
                         "if grep -q '^{cle}=' {f}; then sudo sed -i 's|^{cle}=.*|{cle}={}|' {f}; else echo {} | sudo tee -a {f} >/dev/null; fi",
                         v.replace('\\', r"\\")
                             .replace('|', r"\|")
                             .replace('&', r"\&")
                             .replace('\'', r"'\''"),
-                        shell(&format!("{cle}={v}")),
+                        sh_chaine(&format!("{cle}={v}")),
                     ),
                     // Absente avant le changement : la ligne est retirée.
                     None => format!("sudo sed -i '/^{cle}=/d' {f}"),
@@ -521,9 +519,9 @@ impl Changement {
                     "sudo nmcli connection modify {connexion} ipv4.dns {} ipv4.ignore-auto-dns {} ipv6.dns {} \
                      ipv6.ignore-auto-dns {} && carte=$(nmcli -t -f UUID,DEVICE connection show --active | grep -m1 \
                      '^{connexion}:' | cut -d: -f2) && {{ [ -z \"$carte\" ] || sudo nmcli device reapply \"$carte\"; }}",
-                    shell(&dns4.replace(',', " ")),
+                    sh_chaine(&dns4.replace(',', " ")),
                     oui_non(ignore4),
-                    shell(&dns6.replace(',', " ")),
+                    sh_chaine(&dns6.replace(',', " ")),
                     oui_non(ignore6)
                 )
             }
@@ -532,8 +530,8 @@ impl Changement {
                 Entree::Autostart(_) => return None,
                 // Sans « --now » : le service tourne jusqu'à la fin de la session, il ne repart simplement plus.
                 Entree::Service(u) => match v? {
-                    "enabled" if unite_valide(u) => format!("systemctl --user enable {}", shell(u)),
-                    "disabled" if unite_valide(u) => format!("systemctl --user disable {}", shell(u)),
+                    "enabled" if unite_valide(u) => format!("systemctl --user enable {}", sh_chaine(u)),
+                    "disabled" if unite_valide(u) => format!("systemctl --user disable {}", sh_chaine(u)),
                     _ => return None,
                 },
             },

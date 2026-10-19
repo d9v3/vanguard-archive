@@ -220,8 +220,8 @@ fn serveurs() -> Option<Serveurs> {
             .lines()
             .filter_map(|l| adresse(l.trim()))
         {
-            let echappe = service.replace('\'', r"'\''");
-            manuels.push((ip, format!("sudo networksetup -setdnsservers '{echappe}' empty")));
+            let cite = crate::commande::sh_chaine(service);
+            manuels.push((ip, format!("sudo networksetup -setdnsservers {cite} empty")));
         }
     }
     let mut resolveur_local = None;

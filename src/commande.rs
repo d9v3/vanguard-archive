@@ -129,8 +129,9 @@ pub fn ps_texte(t: &str) -> String {
     s
 }
 
-/// Le texte entre apostrophes, pour bash : « '…' » ; une apostrophe du texte ferme, s'échappe et rouvre.
-#[cfg(any(unix, test))]
+/// Le texte entre apostrophes, pour bash : « '…' » ; une apostrophe du texte ferme, s'échappe et rouvre. La seule
+/// façon de mettre un texte venu d'ailleurs (nom d'appareil, de fichier, de certificat…) dans une commande shell : le
+/// test `textes_dans_sudo_et_rm_mis_entre_apostrophes` le garde.
 pub fn sh_chaine(t: &str) -> String {
     format!("'{}'", t.replace('\'', "'\\''"))
 }
@@ -319,5 +320,314 @@ mod tests {
             std::thread::sleep(Duration::from_millis(100));
         }
         assert!(!vivant(), "le sous-processus {pid} tourne encore");
+    }
+}
+
+/// Le garde de `sh_chaine` : tout texte qui entre dans une commande `sudo` ou `rm` est une constante, un texte passé par
+/// `sh_chaine`, ou une exception relue (`RELUES`). Lu dans les fichiers du code, comme un relecteur le ferait.
+#[cfg(all(test, unix))]
+mod tests_sh_chaine {
+    use std::path::Path;
+
+    /// Les arguments relus un par un : (fichier, expression, pourquoi elle ne peut rien injecter).
+    const RELUES: &[(&str, &str, &str)] = &[
+        (
+            "gaming/linux.rs",
+            "nom",
+            "fichier_de_vanguard : liste blanche de chemins écrits par Vanguard",
+        ),
+        ("gaming/linux.rs", "n", "chiffres seulement, vérifié juste avant"),
+        (
+            "machine/linux/durcissement.rs",
+            "lignes",
+            "réglages sysctl du code et fichier de Vanguard, à root",
+        ),
+        (
+            "machine/linux/maj.rs",
+            "k",
+            "versions de noyau lues dans dkms status et /lib/modules, à root",
+        ),
+        (
+            "machine/linux/mod.rs",
+            "paquets",
+            "noms de paquets choisis par le code ou lus dans la base des paquets",
+        ),
+        (
+            "machine/linux/mod.rs",
+            "paquet",
+            "nom de paquet choisi par le code ou lu dans la base des paquets",
+        ),
+        (
+            "machine/linux/mod.rs",
+            "cle",
+            "« port/protocole », fait de nombres par le code",
+        ),
+        (
+            "machine/linux/privileges.rs",
+            "risques.first().copied().unwrap_or(\"docker\")",
+            "noms de groupes du code",
+        ),
+        (
+            "machine/macos/maj.rs",
+            "noms.iter() .map(|n| crate::commande::sh_chaine(n)) .collect::<Vec<_>>() .join(\" \")",
+            "chaque étiquette passe par sh_chaine",
+        ),
+        ("machine/macos/mod.rs", "cle", "clés de defaults du code"),
+        ("optimiser/linux.rs", "nom", "noms d'unités du code"),
+        ("optimiser/linux.rs", "etat_unite(e)", "enable, disable ou mask"),
+        (
+            "optimiser/linux.rs",
+            "apres",
+            "commande constante du code (&'static str)",
+        ),
+        ("optimiser/linux.rs", "cle", "clés de fichiers de configuration du code"),
+        (
+            "optimiser/linux.rs",
+            "v.replace('\\\\', r\"\\\\\") .replace('|', r\"\\|\") .replace('&', r\"\\&\") .replace('\\'', r\"'\\''\")",
+            "remplacement de sed, déjà entre apostrophes : protégé pour sed puis pour le shell",
+        ),
+        ("optimiser/linux.rs", "connexion", "UUID vérifié par uuid_valide"),
+        ("optimiser/linux.rs", "oui_non(ignore4)", "yes ou no"),
+        ("optimiser/linux.rs", "oui_non(ignore6)", "yes ou no"),
+        (
+            "optimiser/macos.rs",
+            "serveurs",
+            "adresses IP relues par IpAddr, ou « empty »",
+        ),
+        (
+            "protection/distance.rs",
+            "if application { \"rf\" } else { \"f\" }",
+            "deux constantes",
+        ),
+        (
+            "reparer.rs",
+            "description",
+            "entre_apostrophes, qui passe par sh_chaine sous Unix",
+        ),
+        (
+            "reparer.rs",
+            "s",
+            "entre_apostrophes, qui passe par sh_chaine sous Unix",
+        ),
+        (
+            "reparer.rs",
+            "motif_adresses(&detournees)",
+            "adresses IP validées, points protégés pour sed",
+        ),
+        (
+            "sauvegarde.rs",
+            "id",
+            "chiffres hexadécimaux et tirets, vérifié juste avant",
+        ),
+    ];
+
+    fn sources(dossier: &Path, base: &Path, sortie: &mut Vec<(String, String)>) {
+        for e in std::fs::read_dir(dossier).unwrap().flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                sources(&p, base, sortie);
+            } else if p.extension().is_some_and(|x| x == "rs") {
+                let nom = p.strip_prefix(base).unwrap().to_string_lossy().into_owned();
+                sortie.push((nom, std::fs::read_to_string(&p).unwrap()));
+            }
+        }
+    }
+
+    /// Un littéral de chaîne qui commence à `i` (« "…" », « r"…" », « r#"…"# ») : son texte tel qu'écrit, et la
+    /// position qui le suit.
+    fn litteral(src: &str, i: usize) -> Option<(&str, usize)> {
+        let reste = &src[i..];
+        if let Some(apres) = reste.strip_prefix('r') {
+            let dieses = apres.len() - apres.trim_start_matches('#').len();
+            if !apres[dieses..].starts_with('"') {
+                return None;
+            }
+            let fermeture = format!("\"{}", "#".repeat(dieses));
+            let debut = i + 2 + dieses;
+            let fin = debut + src[debut..].find(&fermeture)?;
+            return Some((&src[debut..fin], fin + fermeture.len()));
+        }
+        if !reste.starts_with('"') {
+            return None;
+        }
+        let octets = src.as_bytes();
+        let mut j = i + 1;
+        while octets[j] != b'"' {
+            j += if octets[j] == b'\\' { 2 } else { 1 };
+        }
+        Some((&src[i + 1..j], j + 1))
+    }
+
+    /// Les arguments qui suivent le texte d'un format!, jusqu'à sa parenthèse fermante.
+    fn arguments(src: &str, mut i: usize) -> Vec<String> {
+        let octets = src.as_bytes();
+        let (mut profondeur, mut debut, mut args) = (0, i, Vec::new());
+        loop {
+            let c = octets[i];
+            let precede_d_un_mot = i > 0 && (octets[i - 1].is_ascii_alphanumeric() || octets[i - 1] == b'_');
+            if (c == b'"' || (c == b'r' && !precede_d_un_mot && matches!(octets[i + 1], b'"' | b'#')))
+                && let Some((_, fin)) = litteral(src, i)
+            {
+                i = fin;
+                continue;
+            }
+            if c == b'\'' {
+                // Un caractère (',' ou ')' n'ouvrent ni ne ferment rien) ; sinon une durée de vie.
+                let longueur = if octets[i + 1] == b'\\' {
+                    2
+                } else {
+                    src[i + 1..].chars().next().map_or(1, char::len_utf8)
+                };
+                if octets.get(i + 1 + longueur) == Some(&b'\'') {
+                    i += longueur + 2;
+                    continue;
+                }
+            }
+            match c {
+                b'(' | b'[' | b'{' => profondeur += 1,
+                b')' | b']' | b'}' if profondeur == 0 => break,
+                b')' | b']' | b'}' => profondeur -= 1,
+                b',' if profondeur == 0 => {
+                    args.push(src[debut..i].split_whitespace().collect::<Vec<_>>().join(" "));
+                    debut = i + 1;
+                }
+                _ => {}
+            }
+            i += 1;
+        }
+        args.push(src[debut..i].split_whitespace().collect::<Vec<_>>().join(" "));
+        args.into_iter().filter(|a| !a.is_empty()).collect()
+    }
+
+    /// Le texte lance-t-il sudo ou rm (en début de commande, après un séparateur ou un espace) ?
+    fn lance_sudo_ou_rm(texte: &str) -> bool {
+        ["sudo", "rm"].iter().any(|mot| {
+            texte.match_indices(mot).any(|(k, _)| {
+                let suivi = texte[k + mot.len()..].starts_with(char::is_whitespace);
+                let avant = texte[..k].trim_end();
+                let precede = k == 0
+                    || texte[..k].ends_with(char::is_whitespace)
+                    || avant.is_empty()
+                    || avant.ends_with([';', '&', '|', '(']);
+                suivi && precede
+            })
+        })
+    }
+
+    fn par_sh_chaine(expr: &str) -> bool {
+        ["sh_chaine(", "commande::sh_chaine(", "crate::commande::sh_chaine("]
+            .iter()
+            .any(|f| expr.starts_with(f))
+    }
+
+    /// Une constante, un texte passé par sh_chaine, ou une variable qui en reçoit un (« let nom = sh_chaine(…) »).
+    fn sur(expr: &str, avant: &str) -> bool {
+        let expr = expr.trim_start_matches('&').trim();
+        let constante = expr.starts_with(['"', 'r']) && litteral(expr, 0).is_some()
+            || expr.chars().all(|c| c.is_ascii_digit())
+            || expr.starts_with(|c: char| c.is_ascii_uppercase())
+                && expr
+                    .chars()
+                    .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_');
+        let variable = expr.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+            && avant.rfind(&format!("let {expr} = ")).is_some_and(|k| {
+                let valeur = &avant[k + expr.len() + 7..];
+                par_sh_chaine(valeur.trim_start())
+            });
+        constante || par_sh_chaine(expr) || variable
+    }
+
+    /// Les arguments d'un format! qui lance sudo ou rm et qui ne sont pas sûrs : (expression, ligne).
+    fn douteux(src: &str) -> Vec<(String, usize)> {
+        let mut trouves = Vec::new();
+        for (k, _) in src.match_indices("format!(") {
+            let i = k + "format!(".len();
+            let i = i + src[i..].len() - src[i..].trim_start().len();
+            let Some((texte, fin)) = litteral(src, i) else { continue };
+            if !lance_sudo_ou_rm(texte) {
+                continue;
+            }
+            let args = arguments(src, fin);
+            let (nommes, positionnels): (Vec<&String>, Vec<&String>) = args.iter().partition(|a| {
+                a.split_once('=').is_some_and(|(nom, reste)| {
+                    !reste.starts_with('=') && nom.trim().chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+                })
+            });
+            let mut rang = 0;
+            let mut reste = texte;
+            while let Some(d) = reste.find('{') {
+                if reste[d + 1..].starts_with('{') {
+                    reste = &reste[d + 2..];
+                    continue;
+                }
+                let Some(f) = reste[d..].find('}') else { break };
+                let nom = reste[d + 1..d + f].split(':').next().unwrap_or("").trim();
+                reste = &reste[d + f + 1..];
+                let expr = if nom.is_empty() {
+                    rang += 1;
+                    positionnels.get(rang - 1).map(|s| (*s).clone())
+                } else if let Ok(n) = nom.parse::<usize>() {
+                    positionnels.get(n).map(|s| (*s).clone())
+                } else {
+                    let nomme = nommes.iter().find_map(|a| {
+                        a.split_once('=')
+                            .filter(|(n, _)| n.trim() == nom)
+                            .map(|(_, v)| v.trim().to_string())
+                    });
+                    Some(nomme.unwrap_or_else(|| nom.to_string()))
+                };
+                let expr = expr.unwrap_or_default();
+                if !sur(&expr, &src[..k]) {
+                    trouves.push((expr, src[..k].lines().count()));
+                }
+            }
+        }
+        trouves
+    }
+
+    #[test]
+    fn textes_dans_sudo_et_rm_mis_entre_apostrophes() {
+        let base = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/src"));
+        let mut fichiers = Vec::new();
+        sources(base, base, &mut fichiers);
+        let mut nouveaux = Vec::new();
+        let mut servies = vec![false; RELUES.len()];
+        for (nom, src) in &fichiers {
+            // Les tests des modules lancent leurs propres commandes, sur des dossiers jetables.
+            let code = src.find("#[cfg(test)]\nmod ").map_or(src.as_str(), |t| &src[..t]);
+            for (expr, ligne) in douteux(code) {
+                match RELUES.iter().position(|(f, e, _)| f == nom && *e == expr) {
+                    Some(i) => servies[i] = true,
+                    None => nouveaux.push(format!("{nom}:{ligne} : {expr}")),
+                }
+            }
+        }
+        assert!(
+            nouveaux.is_empty(),
+            "texte non protégé dans une commande sudo ou rm : passe-le par commande::sh_chaine (ou, s'il est sûr \
+             par construction, ajoute-le à RELUES avec la raison) :\n{}",
+            nouveaux.join("\n")
+        );
+        let perimees: Vec<_> = RELUES
+            .iter()
+            .zip(&servies)
+            .filter(|(_, s)| !**s)
+            .map(|(r, _)| r)
+            .collect();
+        assert!(perimees.is_empty(), "exceptions qui ne servent plus : {perimees:#?}");
+    }
+
+    /// Le garde lui-même : il voit un nom glissé tel quel, et laisse passer sh_chaine et les constantes.
+    #[test]
+    fn le_garde_voit_un_nom_glisse_tel_quel() {
+        let piege = "fn f(nom: &str) { let c = format!(\"sudo rm -f {nom}\"); }";
+        assert_eq!(douteux(piege), [("nom".to_string(), 1)]);
+        let positionnel = "let c = format!(\"echo ok; sudo cupsenable {}\", i.nom);";
+        assert_eq!(douteux(positionnel), [("i.nom".to_string(), 1)]);
+        let protege = "let cite = sh_chaine(nom);\nlet c = format!(\"sudo rm -f {cite} {} {DOSSIER}\", crate::commande::sh_chaine(&x));";
+        assert_eq!(douteux(protege), []);
+        let sans_sudo = "let c = format!(\"ls {nom}\");";
+        assert_eq!(douteux(sans_sudo), []);
+        assert!(!lance_sudo_ou_rm("format ce disque") && lance_sudo_ou_rm("a && rm -rf x"));
     }
 }

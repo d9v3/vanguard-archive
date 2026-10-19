@@ -254,9 +254,8 @@ pub fn certificats() -> Vec<Constat> {
     for f in trouves {
         let Ok(octets) = std::fs::read(&f) else { continue };
         let chemin = f.display().to_string();
-        let entre_apostrophes = format!("'{}'", chemin.replace('\'', r"'\''"));
         let retirer = vec![
-            format!("sudo rm -f {entre_apostrophes}"),
+            format!("sudo rm -f {}", crate::commande::sh_chaine(&chemin)),
             "if command -v update-ca-trust >/dev/null; then sudo update-ca-trust; else sudo update-ca-certificates --fresh; fi"
                 .to_string(),
         ];
@@ -313,13 +312,13 @@ pub fn certificats() -> Vec<Constat> {
             .map(|r| r.sortie)
             .unwrap_or_default();
         for nom in lire_reglages_confiance(&sortie) {
-            let echappe = nom.replace('\'', r"'\''");
+            let nom_cite = crate::commande::sh_chaine(&nom);
             let retirer = if admin {
                 vec![format!(
-                    "sudo security delete-certificate -c '{echappe}' /Library/Keychains/System.keychain"
+                    "sudo security delete-certificate -c {nom_cite} /Library/Keychains/System.keychain"
                 )]
             } else {
-                vec![format!("security delete-certificate -c '{echappe}'")]
+                vec![format!("security delete-certificate -c {nom_cite}")]
             };
             constats.push(juger(&nom, ou, false, &retirer));
         }

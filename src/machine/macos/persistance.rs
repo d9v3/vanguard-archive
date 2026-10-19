@@ -115,7 +115,7 @@ pub fn persistance() -> Vec<Constat> {
             tiers.push(nom.clone());
             let Some(raison) = soupcon(&prog, &args) else { continue };
             let prog = crate::ui::affichable(&prog);
-            let plist = format!("'{}'", chemin.display().to_string().replace('\'', r"'\''"));
+            let plist = crate::commande::sh_chaine(&chemin.display().to_string());
             let (arret, retrait) = if systeme {
                 (
                     format!("sudo launchctl bootout system {plist}"),
