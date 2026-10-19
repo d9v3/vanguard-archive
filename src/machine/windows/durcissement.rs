@@ -276,6 +276,52 @@ pub(super) fn juger_pause(fin: Option<&str>, aujourd_hui: &str) -> Option<Consta
     })
 }
 
+/// Authentification réseau : `LmCompatibilityLevel` sous 3 laisse partir des réponses LM ou NTLMv1, qu'un mot de
+/// passe intercepté sur le réseau (faux partage, relais) fait casser en quelques minutes. Absente : 3 par défaut
+/// depuis Vista, rien à dire.
+pub(super) fn juger_ntlm(niveau: Option<u32>) -> Option<Constat> {
+    let n = niveau.filter(|&n| n < 3)?;
+    Some(
+        alerte(
+            DURCI,
+            Niveau::Eleve,
+            trf!(
+                "L'authentification réseau accepte encore LM ou NTLMv1 (niveau {n}) : un mot de passe intercepté sur le réseau se casse en quelques minutes.",
+                "Network authentication still allows LM or NTLMv1 (level {n}): a password intercepted on the network is cracked in minutes."
+            ),
+        )
+        .corriger(
+            tr!(
+                "Revenir au réglage par défaut de Windows : NTLMv2 seulement (un très vieux NAS peut ne plus répondre : il faudra le mettre à jour)",
+                "Go back to Windows' default: NTLMv2 only (a very old NAS may stop answering: it will need an update)"
+            ),
+            &[r"Set-ItemProperty -LiteralPath 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa' -Name LmCompatibilityLevel -Value 3 -Type DWord"],
+        ),
+    )
+}
+
+/// Signature SMB : le client qui ne l'exige pas peut se faire relayer vers un faux partage. Une information, à
+/// activer soi-même (un vieux NAS sans signature ne répondrait plus) ; Windows 11 24H2 l'exige déjà.
+pub(super) fn juger_signature_smb(client_exige: Option<u32>) -> Option<Constat> {
+    (client_exige == Some(0)).then(|| {
+        alerte(
+            DURCI,
+            Niveau::Info,
+            tr!(
+                "Les partages de fichiers n'exigent pas de signature : un appareil du réseau peut se placer au milieu et relayer la connexion.",
+                "File shares do not require signing: a device on the network can get in the middle and relay the connection."
+            ),
+        )
+        .manuel(
+            tr!(
+                "Si aucun vieux NAS n'est utilisé : exiger la signature (commande ci-dessous, en administrateur), puis redémarrer",
+                "If no old NAS is in use: require signing (command below, as administrator), then restart"
+            ),
+            &["Set-SmbClientConfiguration -RequireSecuritySignature $true -Force"],
+        )
+    })
+}
+
 pub(super) fn durcissement() -> Vec<Constat> {
     let mut c = vec![
         juger_wdigest(lire_dword(WDIGEST, "UseLogonCredential")),
@@ -315,6 +361,14 @@ pub(super) fn durcissement() -> Vec<Constat> {
     c.push(juger_integrite_memoire(lire_dword(
         r"SYSTEM\CurrentControlSet\Control\DeviceGuard\Scenarios\HypervisorEnforcedCodeIntegrity",
         "Enabled",
+    )));
+    c.extend(juger_ntlm(lire_dword(
+        r"SYSTEM\CurrentControlSet\Control\Lsa",
+        "LmCompatibilityLevel",
+    )));
+    c.extend(juger_signature_smb(lire_dword(
+        r"SYSTEM\CurrentControlSet\Services\LanmanWorkstation\Parameters",
+        "RequireSecuritySignature",
     )));
     let aujourd_hui = chrono::Local::now().format("%Y-%m-%d").to_string();
     c.extend(juger_pause(
@@ -370,6 +424,11 @@ mod tests {
         assert_eq!(juger_integrite_memoire(None).probleme, Some(Niveau::Info));
         let p = juger_pause(Some("2026-11-02T09:00:00Z"), "2026-10-19").unwrap();
         assert!(p.message.contains("2026-11-02"));
+        assert_eq!(juger_ntlm(Some(1)).unwrap().probleme, Some(Niveau::Eleve));
+        assert!(juger_ntlm(Some(1)).unwrap().correctif.unwrap().commandes[0].contains("-Value 3"));
+        assert!(juger_ntlm(Some(3)).is_none() && juger_ntlm(Some(5)).is_none() && juger_ntlm(None).is_none());
+        assert_eq!(juger_signature_smb(Some(0)).unwrap().probleme, Some(Niveau::Info));
+        assert!(juger_signature_smb(Some(1)).is_none() && juger_signature_smb(None).is_none());
         assert!(
             juger_pause(Some("2026-10-01T09:00:00Z"), "2026-10-19").is_none()
                 && juger_pause(None, "2026-10-19").is_none()
