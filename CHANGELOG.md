@@ -25,6 +25,9 @@ chaque version garde son étiquette dans le dépôt (`git checkout v0.62.0`, par
   sur un site nouveau (sa mémoire répondait en moins d'une milliseconde), dnf-automatic
   qui ne fait que télécharger, réglages d'APT lus dans leur ordre, interface anglaise complète, nombres à virgule écrits à la française,
   longs messages coupés entre deux mots, jamais au milieu d'un mot.
+- **Scan du réseau deux fois plus rapide** (de 20 à 8-10 secondes sur un réseau de onze appareils) : la box est
+  interrogée sur l'UPnP dès le début, en fond (elle met jusqu'à 8 secondes à répondre), et les ports TCP, UDP et les
+  noms des appareils sont cherchés en même temps. Mêmes sondes, rien de retiré.
 - **Guide des commandes refait.** Une entrée par système : Omarchy, Arch, Fedora, Debian et Ubuntu, autres Linux,
   Windows 11, macOS ; chaque distribution a sa présentation, ses marches à suivre « Pas à pas » (mettre à jour,
   installer, faire de la place, réparer, pare-feu, NVIDIA, nouvelle version…) et ses programmes, puis ceux communs à

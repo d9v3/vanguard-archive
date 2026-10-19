@@ -24,6 +24,9 @@ repository (`git checkout v0.62.0`, for example), to be rebuilt if needed.
   on a new site (its memory answered in under a millisecond), dnf-automatic that
   only downloads, APT settings read in their order, complete English interface, decimal numbers written the French way in French,
   long messages broken between two words, never in the middle of one.
+- **Network scan twice as fast** (from 20 to 8-10 seconds on a network of eleven devices): the router is asked
+  about UPnP from the start, in the background (it takes up to 8 seconds to answer), and TCP ports, UDP ports and
+  device names are looked up at the same time. Same probes, nothing removed.
 - **Command guide redone.** One entry per system: Omarchy, Arch, Fedora, Debian and Ubuntu, other Linux, Windows 11,
   macOS; each distribution has its introduction, its “Step by step” guides (update, install, free up space, repair,
   firewall, NVIDIA, new release…) and its programs, then those common to Linux; Windows 11 and macOS have theirs too

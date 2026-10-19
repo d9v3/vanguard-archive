@@ -1194,6 +1194,9 @@ pub async fn executer(o: Options) -> Result<Rapport, String> {
     let delai = Duration::from_millis(o.timeout);
     let gw = scan::passerelle();
     let parallele = scan::limite_connexions(o.parallele);
+    // L'état de l'UPnP : upnpc attend les réponses de la box jusqu'à 8 s. Demandé dès maintenant, à côté, il est prêt à
+    // la fin du scan au lieu de l'allonger d'autant. Après les lectures qui peuvent échouer : rien ne tourne pour rien.
+    let upnp = reseau_local.then(|| tokio::task::spawn_blocking(crate::reseau::upnp::etat));
 
     if bavard {
         tre!(
@@ -1231,18 +1234,25 @@ pub async fn executer(o: Options) -> Result<Rapport, String> {
             );
         }
     }
-    let mut resultats = scan::scanner_ports(&vivantes, &ports, delai, parallele).await;
     // Listes nommées, en français ou en anglais (comme parse_ports).
     let courants = matches!(o.ports.as_str(), "courants" | "common");
     let tous = matches!(o.ports.as_str(), "tous" | "all");
     // UDP : quelques services qui se taisent en TCP (SNMP, NetBIOS, UPnP…), avec les listes de ports par défaut.
     let avec_udp = courants || tous;
-    let mut resultats_udp = if avec_udp {
-        scan::scanner_udp(&vivantes, PORTS_UDP, Duration::from_millis(o.timeout.clamp(800, 1500))).await
-    } else {
-        BTreeMap::new()
+    // Ports TCP, ports UDP et noms des appareils en même temps : chacun attend ses propres réponses (délais fixes),
+    // aucun ne dépend des autres. Mêmes sondes qu'une à une, le temps de la plus lente seulement.
+    let udp = async {
+        if avec_udp {
+            scan::scanner_udp(&vivantes, PORTS_UDP, Duration::from_millis(o.timeout.clamp(800, 1500))).await
+        } else {
+            BTreeMap::new()
+        }
     };
-    let noms = join_all(vivantes.iter().map(|&ip| scan::nom_hote(ip))).await;
+    let (mut resultats, mut resultats_udp, noms) = tokio::join!(
+        scan::scanner_ports(&vivantes, &ports, delai, parallele),
+        udp,
+        join_all(vivantes.iter().map(|&ip| scan::nom_hote(ip)))
+    );
     let arp = scan::table_arp();
 
     let (mut base, chemins, _verrou) = Base::charger();
@@ -1433,7 +1443,10 @@ pub async fn executer(o: Options) -> Result<Rapport, String> {
         score_global,
         note: note(score_global),
         hotes,
-        upnp: reseau_local.then(crate::reseau::upnp::etat),
+        upnp: match upnp {
+            Some(tache) => tache.await.ok(),
+            None => None,
+        },
     };
 
     if o.json {
