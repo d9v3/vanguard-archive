@@ -204,8 +204,8 @@ impl Systeme {
                 "The programs common to every Linux distribution."
             ),
             Systeme::Tldr => tr!(
-                "Les exemples de tldr-pages (tldr.sh), des milliers de commandes écrites et tenues à jour par une communauté, sous licence CC BY 4.0. Vanguard les télécharge chaque semaine ; il ne les a pas vérifiées : elles se copient, mais ne se lancent pas d'ici.",
-                "The examples of tldr-pages (tldr.sh), thousands of commands written and kept up to date by a community, under the CC BY 4.0 license. Vanguard downloads them every week; it has not checked them: they can be copied, but do not run from here."
+                "Les exemples de tldr-pages (tldr.sh), des milliers de commandes écrites et tenues à jour par une communauté, sous licence CC BY 4.0 (creativecommons.org/licenses/by/4.0) ; Vanguard en adapte la mise en forme. Il les télécharge chaque semaine, mais ne les a pas vérifiées : elles se copient, et ne se lancent pas d'ici.",
+                "The examples of tldr-pages (tldr.sh), thousands of commands written and kept up to date by a community, under the CC BY 4.0 license (creativecommons.org/licenses/by/4.0); Vanguard adapts their layout. It downloads them every week, but has not checked them: they can be copied, and do not run from here."
             ),
         }
     }

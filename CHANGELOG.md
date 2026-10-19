@@ -35,6 +35,9 @@ chaque version garde son étiquette dans le dépôt (`git checkout v0.62.0`, par
   le mot tapé passe devant.
 - **Prédiction des mots dans tous les menus** et les listes à cocher : la fin du mot le plus probable s'affiche en
   gris, Tab la complète.
+- **Plus sûr.** Le bac à sable n'atteint plus le bus du système ni Docker ; sous Windows, le script de correction est
+  vérifié juste avant de tourner en administrateur (un script modifié entre-temps ne part pas) ; les données de
+  Vanguard sont réservées à ton compte.
 - **Une seule publication par jour.** Ce journal regroupe les versions par jour ; seule la dernière garde sa page de
   téléchargement, et le Mac de GitHub ne compile plus qu'une fois par publication.
 
