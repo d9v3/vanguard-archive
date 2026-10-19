@@ -3,6 +3,7 @@
 //! qu'il a trouvé, et propose la bonne réparation (celles de Réparer) ou le bon outil (Nettoyer, Copier mes
 //! fichiers…). Rien n'est changé sans être montré et accepté.
 
+mod compte;
 mod depart;
 mod imprimante;
 mod infection;
@@ -25,7 +26,7 @@ pub struct Parcours {
     lancer: fn(),
 }
 
-static PARCOURS: [Parcours; 9] = [
+static PARCOURS: [Parcours; 10] = [
     Parcours {
         cles: ("internet", "internet"),
         titre: ("Pas d'Internet", "No Internet"),
@@ -88,6 +89,14 @@ static PARCOURS: [Parcours; 9] = [
         apercu: ("comptes, clé, effacement sûr", "accounts, key, secure wipe"),
         mots: "vendre vente sell sale donner don give gift rendre return recycler recycle effacer wipe erase bitlocker filevault tpm",
         lancer: depart::depart,
+    },
+    Parcours {
+        cles: ("compte", "account"),
+        titre: ("Mon compte a été piraté", "My account was hacked"),
+        apercu: ("courriel, réseau social, banque", "email, social network, bank"),
+        mots: "piraté hacked compte account courriel email facebook instagram banque bank mot de passe password \
+               volé stolen connexion login",
+        lancer: compte::compte,
     },
 ];
 
@@ -670,7 +679,7 @@ mod tests {
         assert!(trouver("printer").is_some_and(|p| p.cles.0 == "imprimante"));
         assert!(trouver("zzz").is_none());
         assert_eq!(chemin("3"), Some(3));
-        assert_eq!(chemin("10"), None);
+        assert_eq!(chemin("11"), None);
         assert_eq!(lignes_de_recherche("11").len(), PARCOURS.len());
     }
 
