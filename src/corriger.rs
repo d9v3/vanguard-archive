@@ -36,7 +36,7 @@ pub fn proposer(constats: &[Constat], contexte: &str) -> Vec<&'static str> {
                 crate::langue::categorie(c.categorie),
                 c.message
             );
-            println!("  🔧 {}", k.action);
+            println!("  {} {}", cle_a_molette(), k.action);
             for cmd in &k.commandes {
                 println!("    {GRIS}{cmd}{RESET}");
             }
@@ -140,7 +140,12 @@ pub fn proposer(constats: &[Constat], contexte: &str) -> Vec<&'static str> {
         titre(tr!("À faire toi-même", "To do yourself"));
         for (c, k) in &manuels {
             let cat = crate::langue::categorie(c.categorie);
-            trp!("  💡 {GRAS}{cat}{RESET} : {}", "  💡 {GRAS}{cat}{RESET}: {}", k.action);
+            let ampoule = ampoule();
+            trp!(
+                "  {ampoule} {GRAS}{cat}{RESET} : {}",
+                "  {ampoule} {GRAS}{cat}{RESET}: {}",
+                k.action
+            );
             for cmd in &k.commandes {
                 println!("     {GRIS}{cmd}{RESET}");
             }

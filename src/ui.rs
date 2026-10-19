@@ -19,6 +19,37 @@ pub const DISCRET: &str = "\x1b[38;5;245m";
 /// Largeur des titres et des cadres (tient dans un terminal de 80 colonnes).
 pub const LARGEUR: usize = 76;
 
+/// Les deux emojis des messages : « 💡 » devant un conseil à suivre soi-même, « 🔧 » devant une correction que Gardien
+/// sait appliquer. Partout ailleurs ils prennent deux colonnes ; l'ancienne console de Windows (cmd.exe et PowerShell
+/// hors du Terminal Windows, l'habitude sous Windows 10) n'en dessine qu'une case : les précisions se décalent et les
+/// menus se cassent. Là, deux signes d'une colonne, que toute police de console dessine, les remplacent.
+/// GARDIEN_EMOJI=0 les retire partout (un terminal qui les dessine mal), GARDIEN_EMOJI=1 les garde partout.
+pub fn ampoule() -> &'static str {
+    if emojis() { "💡" } else { "→" }
+}
+
+pub fn cle_a_molette() -> &'static str {
+    if emojis() { "🔧" } else { "+" }
+}
+
+fn emojis() -> bool {
+    static EMOJIS: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *EMOJIS.get_or_init(|| match std::env::var("GARDIEN_EMOJI").ok().as_deref().map(str::trim) {
+        Some("0" | "non" | "no" | "off") => false,
+        Some("1" | "oui" | "yes" | "on") => true,
+        _ => !ancienne_console_windows(),
+    })
+}
+
+/// La console d'avant le Terminal Windows (conhost). Rien ne l'annonce ; mais le Terminal Windows pose WT_SESSION,
+/// VS Code TERM_PROGRAM, ConEmu et Cmder ConEmuANSI : sous Windows, sans aucune de ces variables, c'est elle.
+fn ancienne_console_windows() -> bool {
+    cfg!(windows)
+        && ["WT_SESSION", "TERM_PROGRAM", "ConEmuANSI"]
+            .iter()
+            .all(|v| std::env::var_os(v).is_none())
+}
+
 pub fn couleur(niveau: Niveau) -> &'static str {
     match niveau {
         Niveau::Info => "\x1b[96m",

@@ -677,7 +677,7 @@ pub fn dossier_local() -> PathBuf {
     // Tests automatiques : un dossier jetable. Ils tournent sur l'ordinateur de développement : ses vraies données ne
     // doivent être ni lues, ni écrites, ni renommées (le renommage des anciens noms, plus bas, l'avait fait).
     if cfg!(test) {
-        return std::env::temp_dir().join(format!("gardien-tests-{}", std::process::id()));
+        return dossier_des_tests();
     }
     #[cfg(windows)]
     let base = std::env::var_os("LOCALAPPDATA").map(PathBuf::from);
@@ -698,6 +698,30 @@ pub fn dossier_local() -> PathBuf {
             .find(|a| a.is_dir())
     {
         let _ = std::fs::rename(&ancien, &dossier);
+    }
+    dossier
+}
+
+/// Le dossier jetable des tests de ce processus (un par `cargo test`, nommé par son numéro de processus), retiré
+/// quand le processus se termine : chaque lancement en laissait un dans le dossier temporaire. Le crochet de sortie
+/// est posé une fois, au premier appel ; les tests tournent tous avant que le processus ne sorte.
+fn dossier_des_tests() -> PathBuf {
+    let dossier = std::env::temp_dir().join(format!("gardien-tests-{}", std::process::id()));
+    #[cfg(test)]
+    {
+        static CROCHET: std::sync::Once = std::sync::Once::new();
+        CROCHET.call_once(|| {
+            unsafe extern "C" {
+                fn atexit(f: extern "C" fn()) -> i32;
+            }
+            extern "C" fn retirer() {
+                let _ =
+                    std::fs::remove_dir_all(std::env::temp_dir().join(format!("gardien-tests-{}", std::process::id())));
+            }
+            // SAFETY : atexit de la bibliothèque C, présent sous Linux, Windows (msvcrt) et macOS ; il reçoit une
+            // fonction sans argument qui vit tout le programme, appelée une fois à la sortie normale du processus.
+            unsafe { atexit(retirer) };
+        });
     }
     dossier
 }
