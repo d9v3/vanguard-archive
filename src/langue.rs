@@ -153,6 +153,7 @@ pub fn categorie(nom: &str) -> &str {
         "Extensions" => "Browser extensions",
         "Failles connues" => "Known flaws",
         "Fichiers secrets" => "Secret files",
+        "Fin de support" => "End of support",
         "Fichiers suspects" => "Suspicious files",
         "Gestion à distance" => "Remote management",
         "Groupes" => "Groups",

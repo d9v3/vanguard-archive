@@ -104,6 +104,7 @@ const CATEGORIES_SURVEILLEES: &[&str] = &[
     "Clés SSH",
     "Extensions",
     "Bluetooth",
+    "Fin de support",
 ];
 
 /// État de la machine au dernier passage de la surveillance.

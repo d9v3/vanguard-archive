@@ -12,6 +12,7 @@ mod bluetooth;
 mod certificats;
 pub(crate) mod dns;
 mod extensions;
+mod fin_de_support;
 mod heure;
 mod journaux;
 #[cfg(target_os = "linux")]
@@ -191,6 +192,7 @@ fn audit(systeme: &'static str, premier: Constat, mut propres: Vec<Verification<
         verif!(bluetooth::constats()),
         verif!(journaux::journaux()),
         verif!(heure::constat()),
+        verif!(fin_de_support::constats()),
         verif!([crate::protection::integrite::constat()]),
         verif!(crate::protection::pieges::constat()),
         verif!(crate::protection::distance::constats()),
