@@ -953,9 +953,9 @@ fn ouverture_automatique_de(fichiers: &[(String, String)]) -> Option<(String, St
             let auto = oui("AutomaticLoginEnable").then(|| daemon("AutomaticLogin")).flatten();
             let minute = oui("TimedLoginEnable").then(|| daemon("TimedLogin")).flatten();
             Some(auto.or(minute).unwrap_or_default())
-        } else if chemin.contains("/sddm") {
+        } else if chemin.contains("sddm") {
             valeur_ini(texte, |s| s == "Autologin", "User")
-        } else if chemin.contains("/lightdm") {
+        } else if chemin.contains("lightdm") {
             valeur_ini(
                 texte,
                 |s| s.starts_with("Seat") || s == "SeatDefaults",
@@ -973,14 +973,13 @@ fn ouverture_automatique_de(fichiers: &[(String, String)]) -> Option<(String, St
     trouve
 }
 
-/// Fichiers des gestionnaires de connexion, dans l'ordre où ils s'appliquent.
+/// Fichiers des gestionnaires de connexion, dans l'ordre où ils s'appliquent (le dernier l'emporte) : GDM
+/// (custom.conf sur Ubuntu et Fedora, daemon.conf sur Debian) ; SDDM (réglages de la distribution sous /usr/lib, puis
+/// /etc/sddm.conf.d, puis /etc/sddm.conf) ; LightDM (sous /usr/share, puis /etc/lightdm/lightdm.conf.d, puis
+/// /etc/lightdm/lightdm.conf).
 fn fichiers_de_connexion() -> Vec<(String, String)> {
-    let mut chemins: Vec<std::path::PathBuf> = ["/etc/gdm/custom.conf", "/etc/gdm3/custom.conf"]
-        .iter()
-        .map(std::path::PathBuf::from)
-        .collect();
-    for dossier in ["/etc/sddm.conf.d", "/etc/lightdm/lightdm.conf.d"] {
-        let mut dedans: Vec<std::path::PathBuf> = std::fs::read_dir(dossier)
+    fn dossier(chemin: &str) -> Vec<std::path::PathBuf> {
+        let mut dedans: Vec<std::path::PathBuf> = std::fs::read_dir(chemin)
             .into_iter()
             .flatten()
             .flatten()
@@ -988,15 +987,19 @@ fn fichiers_de_connexion() -> Vec<(String, String)> {
             .filter(|p| p.extension().is_some_and(|e| e == "conf"))
             .collect();
         dedans.sort();
-        // SDDM lit /etc/sddm.conf après son dossier ; LightDM lit lightdm.conf avant le sien.
-        if dossier.contains("lightdm") {
-            chemins.push("/etc/lightdm/lightdm.conf".into());
-            chemins.extend(dedans);
-        } else {
-            chemins.extend(dedans);
-            chemins.push("/etc/sddm.conf".into());
-        }
+        dedans
     }
+    let mut chemins: Vec<std::path::PathBuf> =
+        ["/etc/gdm/custom.conf", "/etc/gdm3/custom.conf", "/etc/gdm3/daemon.conf"]
+            .iter()
+            .map(std::path::PathBuf::from)
+            .collect();
+    chemins.extend(dossier("/usr/lib/sddm/sddm.conf.d"));
+    chemins.extend(dossier("/etc/sddm.conf.d"));
+    chemins.push("/etc/sddm.conf".into());
+    chemins.extend(dossier("/usr/share/lightdm/lightdm.conf.d"));
+    chemins.extend(dossier("/etc/lightdm/lightdm.conf.d"));
+    chemins.push("/etc/lightdm/lightdm.conf".into());
     chemins
         .into_iter()
         .filter_map(|p| Some((p.to_string_lossy().into_owned(), std::fs::read_to_string(&p).ok()?)))
@@ -1668,6 +1671,22 @@ mod tests {
         );
         let coupee = "[daemon]\nAutomaticLoginEnable=false\nAutomaticLogin=bob\n";
         assert_eq!(ouverture_automatique_de(&[f("/etc/gdm3/custom.conf", coupee)]), None);
+        // Debian : GDM dans daemon.conf.
+        let debian = "[daemon]\nAutomaticLoginEnable = true\nAutomaticLogin = alice\n";
+        assert_eq!(
+            ouverture_automatique_de(&[f("/etc/gdm3/daemon.conf", debian)])
+                .unwrap()
+                .0,
+            "alice"
+        );
+        // Réglage de la distribution annulé par /etc (lu après) : personne.
+        let defaut = f(
+            "/usr/share/lightdm/lightdm.conf.d/50-auto.conf",
+            "[Seat:*]\nautologin-user=alice\n",
+        );
+        let annule = f("/etc/lightdm/lightdm.conf", "[Seat:*]\nautologin-user=\n");
+        assert_eq!(ouverture_automatique_de(&[defaut.clone(), annule]), None);
+        assert!(ouverture_automatique_de(&[defaut]).is_some());
         // LightDM, section des sièges.
         let lightdm = "[Seat:*]\nautologin-user=alice\n[Autre]\nautologin-user=bob\n";
         assert_eq!(
