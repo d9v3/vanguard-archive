@@ -3,6 +3,7 @@
 //! N'utilise le scan réseau que sur un réseau qui t'appartient ou que tu as le droit d'auditer.
 //! Lancé sans argument, affiche un menu.
 
+mod a_laisser;
 mod apprentissage;
 mod chiffrement;
 mod commande;
@@ -297,6 +298,10 @@ enum Commande {
         /// Un dossier de la clé ou du disque (par défaut : choisi parmi les disques branchés).
         dossier: Option<std::path::PathBuf>,
     },
+    /// Rapport à laisser : une page simple pour la personne qu'on vient de dépanner (note, ce qu'il lui reste à faire,
+    /// ce qui va bien), posée sur son Bureau après accord et ouverte dans le navigateur.
+    #[command(name = "a-laisser", visible_alias = "handout")]
+    ALaisser,
     /// Sauvegarde automatique : mise en place avec l'outil du système (Déjà Dup ou rsync chaque jour, Time Machine,
     /// Historique des fichiers) vers un disque externe, après accord, annulable exactement.
     #[command(name = "sauvegarde-auto", visible_alias = "auto-backup")]
@@ -703,6 +708,7 @@ enum Action {
     Appris,
     Lenteur,
     Fiche,
+    ALaisser,
     Entretien,
     Scanner,
     Appareil,
@@ -806,6 +812,10 @@ const OUTILS: &[Outil] = &[
         titre: ["Fiche de l'ordinateur", "Computer specs"],
         precision: ["modèle, processeur, mémoire…", "model, processor, memory…"],
         mots: "fiche specs matériel hardware modèle model processeur carte graphique gpu mémoire ram série" },
+    Outil { action: Action::ALaisser, groupe: Some(Groupe::Machine), lettre: "",
+        titre: ["Rapport à laisser", "Report to leave"],
+        precision: ["une page simple, à imprimer", "a simple page, to print"],
+        mots: "rapport report imprimer print dépannage help famille family laisser leave page résumé summary" },
     Outil { action: Action::Entretien, groupe: Some(Groupe::Machine), lettre: "",
         titre: ["Entretien du mois", "Monthly check-up"], precision: ["", ""],
         mots: "maintenance mensuel monthly mois month rappel reminder notification" },
@@ -1169,6 +1179,10 @@ async fn executer(s: &mut Session, action: Action) {
         Action::Appris => apprentissage::menu(),
         Action::Lenteur => lenteur::menu(),
         Action::Fiche => fiche::fiche(false),
+        Action::ALaisser => {
+            let audit = s.audit.get_or_insert_with(|| machine::executer(false));
+            a_laisser::laisser(audit);
+        }
         Action::Entretien => entretien::activer(!entretien::active()),
         Action::Diagnostic => diagnostic::diagnostic(),
         Action::Maj => maj::executer(),
@@ -1308,6 +1322,8 @@ const AIDES_EN: &[(&str, &str)] = &[
     ("verifier-cle", "Check my drive: real capacity (fake drives), speeds and bad blocks of a USB stick or an \
                       external disk. Writes into the free space after your consent, reads back, then erases; your \
                       files are not touched"),
+    ("a-laisser", "Report to leave: a simple page for the person you just helped (grade, what is left to do, what is \
+                   fine), put on their Desktop after consent and opened in the browser"),
     ("sauvegarde-auto", "Automatic backup: set up with the system's tool (Déjà Dup or rsync every day, Time Machine, \
                          File History) to an external disk, after your consent, exactly undoable"),
     ("raccourci", "Shortcut on this computer: Gardien copied here and started with one click (applications menu on \
@@ -1502,6 +1518,7 @@ async fn main() {
         Some(Commande::CopierFichiers { destination }) => copier::commande(destination.as_deref()),
         Some(Commande::VerifierCopie { dossier }) => copier::verifier_copie(dossier.as_deref()),
         Some(Commande::VerifierCle { dossier }) => verifier_cle::commande(dossier.as_deref()),
+        Some(Commande::ALaisser) => a_laisser::laisser(&machine::executer(false)),
         Some(Commande::SauvegardeAuto { annuler }) => {
             if annuler {
                 sauvegarde::annuler();
