@@ -526,12 +526,27 @@ if (Question 'Faire ce test (six fichiers posés puis retirés dans Documents, I
 
 Etape 'YARA : moteur installé par winget, puis analyse d''un dossier'
 $yaraLien = Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Links\yara.exe'
+# Le moteur, là où Gardien le cherche : le PATH, puis ce que winget pose pour le compte ou la machine (le lien de
+# Links, ou le programme dans Packages quand winget n'a pas pu créer le lien).
+function Moteur-Yara {
+    $dans = Get-Command yara.exe, yara64.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($dans) { return $dans.Source }
+    foreach ($racine in (Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet'), (Join-Path $env:ProgramFiles 'WinGet')) {
+        $lien = Join-Path $racine 'Links\yara.exe'
+        if (Test-Path $lien) { return $lien }
+        $p = Get-ChildItem (Join-Path $racine 'Packages') -Directory -Filter 'VirusTotal.YARA*' -ErrorAction SilentlyContinue |
+            ForEach-Object { Get-ChildItem $_.FullName -Recurse -Include yara64.exe, yara.exe -ErrorAction SilentlyContinue } | Select-Object -First 1
+        if ($p) { return $p.FullName }
+    }
+    return $null
+}
 $dossierYara = Join-Path $env:TEMP 'gardien-dossier-yara'
 New-Item -ItemType Directory -Force $dossierYara | Out-Null
 Set-Content -Path (Join-Path $dossierYara 'note.txt') -Value 'fichier sans danger' -Encoding UTF8
-if ((Test-Path $yaraLien) -or (Question 'Installer le moteur YARA par winget (VirusTotal.YARA), puis analyser un dossier ?')) {
+if ((Moteur-Yara) -or (Question 'Installer le moteur YARA par winget (VirusTotal.YARA), puis analyser un dossier ?')) {
     LancerAvec 'yara' @('yara', $dossierYara) "o`n"
-    if (Test-Path $yaraLien) { Ok 'Moteur trouvé dans WinGet\Links' } else { Bug 'yara.exe ABSENT de WinGet\Links' }
+    $moteur = Moteur-Yara
+    if ($moteur) { Ok "Moteur trouvé : $moteur" } else { Bug 'Moteur YARA introuvable (PATH, WinGet Links ou Packages)' }
     $y = Sortie 'yara'
     if ($y -match 'Analyse de|Scanning') { Ok 'Analyse lancée' } else { Bug 'Analyse PAS lancée' }
     if ($y -match "n'a pas pu aller au bout|could not finish") { Bug 'Le moteur n''est pas allé au bout' }
