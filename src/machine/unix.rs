@@ -116,7 +116,8 @@ pub(super) fn defauts_sudo(liste: &str) -> (bool, Option<f64>) {
         .skip_while(|l| !l.starts_with("Matching Defaults entries"));
     lignes.next();
     for ligne in lignes.take_while(|l| !l.trim().is_empty()) {
-        for reglage in ligne.split(", ").map(str::trim) {
+        // Une longue liste peut être coupée en fin de ligne après une virgule : elle est retirée.
+        for reglage in ligne.split(", ").map(|r| r.trim().trim_end_matches(',')) {
             if reglage == "!authenticate" {
                 sans_mot_de_passe = true;
             } else if reglage == "authenticate" {

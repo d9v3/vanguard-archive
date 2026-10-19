@@ -112,5 +112,8 @@ mod tests {
             (false, Some(120.0))
         );
         assert_eq!(defauts_sudo("    (ALL) ALL\n"), (false, None));
+        // Liste coupée en fin de ligne après une virgule.
+        let coupee = "Matching Defaults entries for alice on portable:\n    env_reset, timestamp_timeout=-1,\n    !authenticate\n\n";
+        assert_eq!(defauts_sudo(coupee), (true, Some(-1.0)));
     }
 }
