@@ -122,7 +122,7 @@ impl<'a> Sqlite<'a> {
     /// La page n (à partir de 1).
     fn page(&self, n: u32) -> Option<&'a [u8]> {
         let debut = usize::try_from(n).ok()?.checked_sub(1)?.checked_mul(self.page)?;
-        self.octets.get(debut..debut + self.page)
+        self.octets.get(debut..debut.checked_add(self.page)?)
     }
 
     /// Les cellules d'une page d'arbre : (type de page, positions des cellules, enfant de droite).
@@ -142,9 +142,11 @@ impl<'a> Sqlite<'a> {
         Some((genre, positions, droite))
     }
 
-    /// Nombre de lignes de l'arbre d'une table, à partir de sa page racine.
-    fn compter(&self, racine: u32, profondeur: usize) -> Option<usize> {
-        if profondeur > 20 {
+    /// Nombre de lignes de l'arbre d'une table, à partir de sa page racine. Une page déjà vue est refusée : dans un
+    /// vrai arbre, chaque page n'a qu'un parent ; un fichier abîmé dont une page renvoie à elle-même (ou plusieurs
+    /// fois à la même) ferait sinon des milliards de chemins et figerait le bilan, malgré la limite de profondeur.
+    fn compter(&self, racine: u32, profondeur: usize, vues: &mut std::collections::HashSet<u32>) -> Option<usize> {
+        if profondeur > 20 || !vues.insert(racine) {
             return None;
         }
         let (genre, positions, droite) = self.cellules(racine)?;
@@ -154,17 +156,23 @@ impl<'a> Sqlite<'a> {
                 let p = self.page(racine)?;
                 let mut total = 0;
                 for pos in positions {
-                    total += self.compter(u32be(p, pos)?, profondeur + 1)?;
+                    total += self.compter(u32be(p, pos)?, profondeur + 1, vues)?;
                 }
-                Some(total + self.compter(droite?, profondeur + 1)?)
+                Some(total + self.compter(droite?, profondeur + 1, vues)?)
             }
             _ => None,
         }
     }
 
     /// La page racine de la table `nom`, lue dans sqlite_master (page 1 : type, name, tbl_name, rootpage, sql).
-    fn racine_de(&self, nom: &str, page: u32, profondeur: usize) -> Option<u32> {
-        if profondeur > 20 {
+    fn racine_de(
+        &self,
+        nom: &str,
+        page: u32,
+        profondeur: usize,
+        vues: &mut std::collections::HashSet<u32>,
+    ) -> Option<u32> {
+        if profondeur > 20 || !vues.insert(page) {
             return None;
         }
         let (genre, positions, droite) = self.cellules(page)?;
@@ -182,7 +190,7 @@ impl<'a> Sqlite<'a> {
                 .into_iter()
                 .filter_map(|pos| u32be(p, pos))
                 .chain(droite)
-                .find_map(|enfant| self.racine_de(nom, enfant, profondeur + 1)),
+                .find_map(|enfant| self.racine_de(nom, enfant, profondeur + 1, vues)),
             _ => None,
         }
     }
@@ -208,7 +216,7 @@ impl<'a> Sqlite<'a> {
         let mut i = taille_entete;
         let champ = |i: &mut usize, t: u64| -> Option<&[u8]> {
             let n = taille_colonne(t)?;
-            let c = enregistrement.get(*i..*i + n)?;
+            let c = enregistrement.get(*i..i.checked_add(n)?)?;
             *i += n;
             Some(c)
         };
@@ -230,8 +238,8 @@ pub(super) fn compter_lignes(octets: &[u8], table: &str) -> Option<usize> {
     if db.reserve >= db.page {
         return None;
     }
-    let racine = db.racine_de(table, 1, 0)?;
-    db.compter(racine, 0)
+    let racine = db.racine_de(table, 1, 0, &mut std::collections::HashSet::new())?;
+    db.compter(racine, 0, &mut std::collections::HashSet::new())
 }
 
 // ───────────────────────────── Les profils ─────────────────────────────
@@ -425,6 +433,22 @@ mod tests {
         assert_eq!(compter_lignes(trois, "inexistante"), None);
         assert_eq!(compter_lignes(b"pas une base", "logins"), None);
         assert_eq!(compter_lignes(&trois[..3000], "logins"), None);
+        // Un fichier abîmé : chaque cellule de la page racine (intérieure) renvoie à cette même page. Avant, des
+        // milliards de chemins ; maintenant, refusé tout de suite.
+        let db = Sqlite::ouvrir(trois_cents).unwrap();
+        let racine = db
+            .racine_de("logins", 1, 0, &mut std::collections::HashSet::new())
+            .unwrap();
+        let (genre, positions, _) = db.cellules(racine).unwrap();
+        assert_eq!(genre, 0x05, "la racine doit être une page intérieure pour cet essai");
+        let mut piege = trois_cents.to_vec();
+        let debut = (racine as usize - 1) * db.page;
+        for pos in positions {
+            piege[debut + pos..debut + pos + 4].copy_from_slice(&racine.to_be_bytes());
+        }
+        let avant = std::time::Instant::now();
+        assert_eq!(compter_lignes(&piege, "logins"), None);
+        assert!(avant.elapsed() < std::time::Duration::from_secs(1));
         // Les entiers variables de SQLite.
         assert_eq!(varint(&[0x05]), Some((5, 1)));
         assert_eq!(varint(&[0x81, 0x00]), Some((128, 2)));
