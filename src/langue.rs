@@ -177,6 +177,8 @@ fn categorie_en(nom: &str) -> Option<&'static str> {
         "Mises à jour" => "Updates",
         "Noyau" => "Kernel",
         "Noyau durci" => "Kernel hardening",
+        "Plateforme" => "Platform",
+        "Journal d'audit" => "Audit log",
         "Paquets AUR" => "AUR packages",
         "Partages de fichiers" => "File shares",
         "Persistance" => "Persistence",

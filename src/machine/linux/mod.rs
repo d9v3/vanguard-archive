@@ -13,6 +13,7 @@ mod docker;
 mod durcissement;
 mod maj;
 mod persistance;
+mod plateforme;
 mod privileges;
 
 use docker::*;
@@ -20,6 +21,7 @@ use durcissement::*;
 pub use maj::mises_a_jour_completes;
 use maj::*;
 use persistance::*;
+use plateforme::*;
 use privileges::*;
 
 /// Ajouts de Vanguard à la configuration de sshd (lu en premier : sshd garde la première valeur trouvée).
@@ -1561,6 +1563,10 @@ pub fn auditer() -> Audit {
             verif!(verrouillage_ecran()),
             verif!(acces_x11()),
             verif!([durcissement_noyau()]),
+            verif!(verrouillage_noyau()),
+            verif!(bpf()),
+            verif!([securite_plateforme()]),
+            verif!(journal_audit()),
             verif!([module_securite()]),
             verif!([sauvegardes()]),
             verif!(fichiers_suspects()),

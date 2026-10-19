@@ -216,7 +216,7 @@ fn lire() -> Option<Etat> {
 
 /// `/proc/self/uid_map` sans remappage : une seule plage « 0 0 4294967295 », le compte vu tel qu'il est.
 #[cfg(any(target_os = "linux", test))]
-fn identite(uid_map: &str) -> bool {
+pub(crate) fn identite(uid_map: &str) -> bool {
     let plages: Vec<Vec<&str>> = uid_map.lines().map(|l| l.split_whitespace().collect()).collect();
     plages == [vec!["0", "0", "4294967295"]]
 }

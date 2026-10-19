@@ -747,6 +747,89 @@ pub(super) fn juger_strategie_ps(effective: Option<(String, bool)>, cle_du_compt
     })
 }
 
+/// Journalisation des scripts PowerShell (événement 4104) : ce que lance une attaque par PowerShell reste lisible
+/// après coup. La clé de stratégie n'est créée que si elle manque (New-Item -Force écraserait ses autres valeurs).
+const JOURNAL_PS: &str = r"SOFTWARE\Policies\Microsoft\Windows\PowerShell\ScriptBlockLogging";
+
+pub(super) fn juger_journal_powershell(valeur: Option<u32>) -> Constat {
+    if valeur == Some(1) {
+        return ok(
+            DURCI,
+            tr!(
+                "Les scripts PowerShell sont journalisés : une attaque par PowerShell laisse une trace lisible.",
+                "PowerShell scripts are logged: an attack through PowerShell leaves a readable trace."
+            ),
+        );
+    }
+    alerte(
+        DURCI,
+        Niveau::Info,
+        tr!(
+            "Les scripts PowerShell ne sont pas journalisés : après une attaque, rien ne dit ce qu'elle a lancé.",
+            "PowerShell scripts are not logged: after an attack, nothing tells what it ran."
+        ),
+    )
+    .corriger(
+        tr!(
+            "Journaliser les scripts PowerShell (journal Microsoft-Windows-PowerShell/Operational)",
+            "Log PowerShell scripts (Microsoft-Windows-PowerShell/Operational log)"
+        ),
+        &[
+            &format!("if (-not (Test-Path 'HKLM:\\{JOURNAL_PS}')) {{ New-Item -Path 'HKLM:\\{JOURNAL_PS}' -Force | Out-Null }}"),
+            &format!("Set-ItemProperty -LiteralPath 'HKLM:\\{JOURNAL_PS}' -Name EnableScriptBlockLogging -Value 1 -Type DWord"),
+        ],
+    )
+}
+
+/// Credential Guard (`SecurityServicesRunning` de Win32_DeviceGuard contient 1) : seulement sur les éditions
+/// Entreprise et Éducation, les seules qui l'ont ; ailleurs, rien à dire.
+pub(super) fn juger_credential_guard(edition: Option<&str>, services: Option<&str>) -> Option<Constat> {
+    let edition = edition?;
+    if !(edition.starts_with("Enterprise") || edition.starts_with("Education")) {
+        return None;
+    }
+    let actif = services?.split([',', ' ']).any(|s| s.trim() == "1");
+    Some(if actif {
+        ok(
+            DURCI,
+            tr!(
+                "Credential Guard isole les secrets de connexion du reste du système.",
+                "Credential Guard isolates sign-in secrets from the rest of the system."
+            ),
+        )
+    } else {
+        alerte(
+            DURCI,
+            Niveau::Info,
+            tr!(
+                "Credential Guard est coupé : les secrets de connexion restent dans la mémoire de LSASS, où un voleur de mots de passe les cherche.",
+                "Credential Guard is off: sign-in secrets stay in LSASS memory, where a password stealer looks for them."
+            ),
+        )
+        .manuel(
+            tr!(
+                "Stratégie de groupe : Configuration ordinateur › Modèles d'administration › Système › Device Guard › Activer la sécurité basée sur la virtualisation, puis redémarrer",
+                "Group Policy: Computer Configuration › Administrative Templates › System › Device Guard › Turn On Virtualization Based Security, then restart"
+            ),
+            &[],
+        )
+    })
+}
+
+/// Sysmon, quand il est là : il journalise processus et connexions en détail. Son absence n'est pas un défaut sur un
+/// ordinateur personnel.
+pub(super) fn juger_sysmon(present: bool) -> Option<Constat> {
+    present.then(|| {
+        ok(
+            DURCI,
+            tr!(
+                "Sysmon journalise l'activité du système (programmes lancés, connexions).",
+                "Sysmon logs system activity (programs started, connections)."
+            ),
+        )
+    })
+}
+
 pub(super) fn durcissement() -> Vec<Constat> {
     let mut c = vec![
         juger_wdigest(lire_dword(WDIGEST, "UseLogonCredential")),
@@ -756,7 +839,8 @@ pub(super) fn durcissement() -> Vec<Constat> {
     // section, et l'échec de l'une laisse l'autre.
     let ps2 = ps(
         "try { 'PS2|' + (Get-CimInstance Win32_OptionalFeature -Filter \"Name='MicrosoftWindowsPowerShellV2Root'\").InstallState; 'PS2_FIN' } catch {}; \
-         try { $m = Get-ProcessMitigation -System; 'MIT|' + $m.DEP.Enable + '|' + $m.ASLR.BottomUp + '|' + $m.CFG.Enable + '|' + $m.SEHOP.Enable; 'MIT_FIN' } catch {}",
+         try { $m = Get-ProcessMitigation -System; 'MIT|' + $m.DEP.Enable + '|' + $m.ASLR.BottomUp + '|' + $m.CFG.Enable + '|' + $m.SEHOP.Enable; 'MIT_FIN' } catch {}; \
+         try { 'CG|' + ((Get-CimInstance -Namespace root\\Microsoft\\Windows\\DeviceGuard -ClassName Win32_DeviceGuard).SecurityServicesRunning -join ','); 'CG_FIN' } catch {}",
     );
     let installe = section(ps2.as_deref(), "PS2")
         .and_then(|l| l.first().map(|v| v.trim().to_string()))
@@ -769,6 +853,19 @@ pub(super) fn durcissement() -> Vec<Constat> {
     c.extend(juger_protection_exploits(
         section(ps2.as_deref(), "MIT").and_then(|l| l.first().copied()),
     ));
+    c.extend(juger_credential_guard(
+        lire_texte(r"SOFTWARE\Microsoft\Windows NT\CurrentVersion", "EditionID").as_deref(),
+        section(ps2.as_deref(), "CG").and_then(|l| l.first().copied()),
+    ));
+    c.push(juger_journal_powershell(lire_dword(
+        JOURNAL_PS,
+        "EnableScriptBlockLogging",
+    )));
+    c.extend(juger_sysmon(["Sysmon64", "Sysmon"].iter().any(|s| {
+        winreg::RegKey::predef(winreg::enums::HKEY_LOCAL_MACHINE)
+            .open_subkey(format!(r"SYSTEM\CurrentControlSet\Services\{s}"))
+            .is_ok()
+    })));
     c.extend(juger_assistance(lire_dword(
         r"SYSTEM\CurrentControlSet\Control\Remote Assistance",
         "fAllowToGetHelp",
@@ -885,6 +982,29 @@ pub(super) fn durcissement() -> Vec<Constat> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn journalisation_credential_guard_et_sysmon() {
+        assert_eq!(juger_journal_powershell(Some(1)).probleme, None);
+        let coupe = juger_journal_powershell(None);
+        assert_eq!(coupe.probleme, Some(Niveau::Info));
+        // La clé n'est créée que si elle manque, puis la valeur est posée.
+        let commandes = &coupe.correctif.as_ref().unwrap().commandes;
+        assert!(commandes[0].starts_with("if (-not (Test-Path") && commandes[1].contains("EnableScriptBlockLogging"));
+        // Credential Guard : seulement en Entreprise ou Éducation.
+        assert!(juger_credential_guard(Some("Core"), Some("")).is_none());
+        assert!(juger_credential_guard(Some("Professional"), Some("")).is_none());
+        assert_eq!(
+            juger_credential_guard(Some("Enterprise"), Some("1,2")).map(|c| c.probleme),
+            Some(None)
+        );
+        assert_eq!(
+            juger_credential_guard(Some("Education"), Some("2")).map(|c| c.probleme),
+            Some(Some(Niveau::Info))
+        );
+        assert!(juger_credential_guard(Some("Enterprise"), None).is_none());
+        assert!(juger_sysmon(false).is_none() && juger_sysmon(true).is_some_and(|c| c.probleme.is_none()));
+    }
 
     #[test]
     fn durcissement_juge() {
