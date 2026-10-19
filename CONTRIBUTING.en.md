@@ -85,7 +85,10 @@ inventory::submit! {
 }
 ```
 
-The check runs it in parallel with the others, and each of its findings carries its identifier up to the JSON report.
+The check runs it in parallel with the others, in rank order (`rang`: 10 for the firewall, 100 and up for the system,
+500 and up for the common rules), and each of its findings carries its identifier up to the JSON report. The checks
+from before the registry are declared in their system's `regles.rs` and in `src/machine/regles_communes.rs`; a new one
+is better declared next to its check, with the `regle!` macro.
 The judgment is written apart (`juger_…`, reading nothing from the system), to be tested on made-up data.
 
 ## Build, test, deploy

@@ -9,6 +9,7 @@ inventory::submit! {
     Regle {
         id: "LNX-PLT-001",
         systeme: Os::Linux,
+        rang: 233,
         sujet: ("sécurité de la plateforme d'après fwupd (HSI)", "platform security according to fwupd (HSI)"),
         references: &["fwupd : Host Security ID"],
         verifier: || vec![securite_plateforme()],
@@ -19,6 +20,7 @@ inventory::submit! {
     Regle {
         id: "LNX-NOY-001",
         systeme: Os::Linux,
+        rang: 231,
         sujet: ("verrouillage du noyau et signature des modules", "kernel lockdown and module signing"),
         references: &["kernel.org : kernel_lockdown(7)"],
         verifier: || verrouillage_noyau().into_iter().collect(),
@@ -29,6 +31,7 @@ inventory::submit! {
     Regle {
         id: "LNX-NOY-002",
         systeme: Os::Linux,
+        rang: 232,
         sujet: ("BPF réservé à root", "BPF reserved to root"),
         references: &["kernel.org : unprivileged_bpf_disabled"],
         verifier: || bpf().into_iter().collect(),
@@ -39,6 +42,7 @@ inventory::submit! {
     Regle {
         id: "LNX-JRN-001",
         systeme: Os::Linux,
+        rang: 234,
         sujet: ("journal d'audit du noyau (auditd)", "kernel audit log (auditd)"),
         references: &["CIS : auditd"],
         verifier: || journal_audit().into_iter().collect(),

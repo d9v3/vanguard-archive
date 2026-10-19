@@ -24,6 +24,7 @@ mod navigateur;
 mod navigation_detournee;
 mod partages;
 pub(crate) mod regles;
+mod regles_communes;
 mod sante;
 mod sensibles;
 pub(crate) mod wifi;
@@ -203,46 +204,10 @@ fn en_parallele(verifications: Vec<Verification<'_>>) -> Vec<Constat> {
     })
 }
 
-/// `verif!(f())` : une vérification qui rend un constat, une liste ou une option, mise en boîte pour `en_parallele`.
-macro_rules! verif {
-    ($e:expr) => {
-        Box::new(move || $e.into_iter().collect::<Vec<$crate::machine::Constat>>()) as $crate::machine::Verification<'_>
-    };
-}
-pub(crate) use verif;
-
-/// L'audit d'un système : `premier` (le pare-feu, dont d'autres vérifications dépendent), puis ses vérifications et
-/// celles communes aux trois systèmes, lancées en même temps et rendues dans l'ordre de la liste.
-fn audit(systeme: &'static str, premier: Constat, mut propres: Vec<Verification<'_>>) -> Audit {
-    propres.extend([
-        verif!(dns::dns()),
-        verif!(certificats::certificats()),
-        verif!(extensions::extensions()),
-        verif!(navigateur::navigateurs()),
-        verif!([navigation_detournee::constat()]),
-        verif!(mots_de_passe::constats()),
-        verif!(sensibles::constats()),
-        verif!(sante::sante()),
-        verif!(partages::partages()),
-        verif!(bluetooth::constats()),
-        verif!(administrateurs::constat()),
-        verif!(journaux::journaux()),
-        verif!(heure::constat()),
-        verif!(fin_de_support::constats()),
-        verif!(comptes_oublies::constats()),
-        verif!([crate::protection::integrite::constat()]),
-        verif!(crate::protection::pieges::constat()),
-        verif!(crate::protection::distance::constats()),
-        verif!(crate::protection::manifeste::constat()),
-        verif!(crate::historique::constat()),
-        verif!(crate::reseau::surveillance::constat()),
-        verif!(crate::chiffrement::constat()),
-        verif!(crate::sauvegarde::constats()),
-    ]);
-    // Et les règles du registre, déclarées chacune là où elle est écrite.
-    propres.extend(regles::verifications());
-    let mut constats = vec![premier];
-    constats.extend(en_parallele(propres));
+/// L'audit d'un système : les règles du registre, celles du système (le pare-feu en tête) puis les communes
+/// (regles_communes.rs), lancées en même temps et rendues dans l'ordre de leurs rangs.
+fn audit(systeme: &'static str) -> Audit {
+    let constats = en_parallele(regles::verifications());
     Audit {
         systeme,
         score: score(&constats),

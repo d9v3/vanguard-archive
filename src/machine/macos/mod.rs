@@ -14,6 +14,7 @@ mod durcissement;
 mod maj;
 mod persistance;
 mod privileges;
+mod regles;
 
 pub use maj::mises_a_jour_completes;
 use persistance::persistance;
@@ -663,38 +664,8 @@ fn wifi() -> Vec<Constat> {
 }
 
 pub fn auditer() -> Audit {
-    use super::verif;
-    let feu = pare_feu();
-    let feu_actif = feu.probleme.is_none();
-    super::audit(
-        NOM,
-        feu,
-        vec![
-            verif!(mode_furtif()),
-            verif!(wifi()),
-            verif!(ports_ecoute(feu_actif)),
-            verif!([chiffrement_disque()]),
-            verif!(protection_systeme()),
-            verif!(durcissement::systeme_signe()),
-            verif!([durcissement::extensions_tierces()]),
-            verif!(durcissement::airdrop()),
-            verif!(verrouillage_ecran()),
-            verif!(ouverture_de_session()),
-            verif!([comptes()]),
-            verif!(privileges::compte_root()),
-            verif!(privileges::sudo_sans_mot_de_passe()),
-            verif!(privileges::fichiers_secrets()),
-            verif!(gestion_a_distance()),
-            verif!([mises_a_jour_automatiques()]),
-            verif!(maj::mises_a_jour()),
-            verif!(maj::homebrew_a_jour()),
-            verif!([sauvegardes()]),
-            verif!(sauvegarde_chiffree()),
-            verif!(persistance()),
-            verif!(cles_ssh()),
-            verif!(ssh_serveur()),
-        ],
-    )
+    // Les vérifications sont les règles du registre (regles.rs), le pare-feu en tête.
+    super::audit(NOM)
 }
 
 #[cfg(test)]

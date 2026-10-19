@@ -755,6 +755,7 @@ inventory::submit! {
     crate::machine::regles::Regle {
         id: "WIN-JRN-001",
         systeme: crate::machine::regles::Os::Windows,
+        rang: 251,
         sujet: ("journalisation des scripts PowerShell", "PowerShell script logging"),
         references: &["Microsoft : about_Logging_Windows"],
         verifier: || vec![juger_journal_powershell(lire_dword(JOURNAL_PS, "EnableScriptBlockLogging"))],
@@ -765,6 +766,7 @@ inventory::submit! {
     crate::machine::regles::Regle {
         id: "WIN-JRN-002",
         systeme: crate::machine::regles::Os::Windows,
+        rang: 252,
         sujet: ("Sysmon, quand il est installé", "Sysmon, when installed"),
         references: &["Microsoft Sysinternals : Sysmon"],
         verifier: || {

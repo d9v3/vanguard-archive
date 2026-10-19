@@ -15,6 +15,7 @@ mod ecoute;
 mod exclusions;
 mod maj;
 mod persistance;
+mod regles;
 mod services;
 mod verrouillage;
 
@@ -1060,35 +1061,10 @@ fn lire_ports_udp(liste: &str, pare_feu_actif: bool, ip_lan: Option<&str>) -> Ve
 }
 
 pub fn auditer() -> Audit {
-    use super::verif;
     // Un nouveau bilan relit les comptes : une correction a pu en désactiver un depuis le précédent.
     *COMPTES.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
-    let feu = pare_feu();
-    let feu_actif = feu.probleme.is_none();
-    let ip_lan = crate::reseau::scan::reseau_local().map(|l| l.1.to_string());
-    let lan = ip_lan.as_deref();
-    super::audit(
-        NOM,
-        feu,
-        vec![
-            verif!(antivirus()),
-            verif!(exclusions::exclusions()),
-            verif!(ports_ecoute(feu_actif, lan)),
-            verif!(ports_udp(feu_actif, lan)),
-            verif!(smb1()),
-            verif!([bureau_distance()]),
-            verif!([uac()]),
-            verif!([verrouillage::verrouillage()]),
-            verif!([mises_a_jour()]),
-            verif!([chiffrement()]),
-            verif!(durcissement::demarrage_securise()),
-            verif!(comptes()),
-            verif!(persistance()),
-            verif!(services::services_sans_guillemets()),
-            verif!(wifi()),
-            verif!(durcissement::durcissement()),
-        ],
-    )
+    // Les vérifications sont les règles du registre (regles.rs, durcissement.rs), le pare-feu en tête.
+    super::audit(NOM)
 }
 
 #[cfg(test)]

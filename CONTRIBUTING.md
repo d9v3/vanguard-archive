@@ -85,7 +85,10 @@ inventory::submit! {
 }
 ```
 
-Le bilan la lance en parallèle avec les autres, et chacun de ses constats porte son identifiant jusqu'au rapport JSON.
+Le bilan la lance en parallèle avec les autres, dans l'ordre des rangs (`rang` : 10 pour le pare-feu, 100 et plus pour
+le système, 500 et plus pour les règles communes), et chacun de ses constats porte son identifiant jusqu'au rapport
+JSON. Les vérifications d'avant le registre sont déclarées dans `regles.rs` de leur système et dans
+`src/machine/regles_communes.rs` ; une nouvelle se déclare plutôt à côté de sa vérification, avec la macro `regle!`.
 Le jugement s'écrit à part (`juger_…`, sans rien lire du système), pour se tester sur des données inventées.
 
 ## Compiler, tester, déployer

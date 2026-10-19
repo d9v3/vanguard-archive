@@ -15,6 +15,7 @@ mod maj;
 mod persistance;
 mod plateforme;
 mod privileges;
+mod regles;
 
 use docker::*;
 use durcissement::*;
@@ -1541,43 +1542,8 @@ fn services_en_echec() -> Constat {
 }
 
 pub fn auditer() -> Audit {
-    use super::verif;
-    let feu = pare_feu();
-    let feu_actif = feu.probleme.is_none();
-    super::audit(
-        NOM,
-        feu,
-        vec![
-            verif!(ports_ecoute(feu_actif, feu_actif && ufw_actif())),
-            verif!(docker()),
-            verif!([ssh_serveur()]),
-            verif!(ssh_echecs()),
-            verif!([mises_a_jour()]),
-            verif!(maj_automatiques()),
-            verif!([failles_connues()]),
-            verif!(autres_mises_a_jour()),
-            verif!([redemarrage()]),
-            verif!([chiffrement_disque()]),
-            verif!(ouverture_automatique()),
-            verif!(verrouillage_ecran()),
-            verif!(acces_x11()),
-            verif!([durcissement_noyau()]),
-            verif!([module_securite()]),
-            verif!([sauvegardes()]),
-            verif!(fichiers_suspects()),
-            verif!(persistance()),
-            verif!([demarrage_securise()]),
-            verif!(cles_ssh()),
-            verif!(fichiers_secrets()),
-            verif!([processeur()]),
-            verif!(groupes_privilegies()),
-            verif!(sudo_sans_mot_de_passe()),
-            verif!(paquets_aur()),
-            verif!([comptes()]),
-            verif!(wifi(crate::reseau::scan::passerelle().map(|g| g.to_string()))),
-            verif!([services_en_echec()]),
-        ],
-    )
+    // Les vérifications sont les règles du registre (regles.rs, plateforme.rs), le pare-feu en tête.
+    super::audit(NOM)
 }
 
 #[cfg(test)]

@@ -13,6 +13,8 @@ pub enum Os {
     Linux,
     Windows,
     MacOs,
+    /// Les trois : les vérifications communes, montrées après celles du système.
+    Tous,
 }
 
 impl Os {
@@ -34,6 +36,7 @@ impl Os {
             Os::Linux => "LNX",
             Os::Windows => "WIN",
             Os::MacOs => "MAC",
+            Os::Tous => "COM",
         }
     }
 }
@@ -43,6 +46,9 @@ pub struct Regle {
     /// Stable et jamais réutilisé : système, domaine, numéro (« LNX-PLT-001 »).
     pub id: &'static str,
     pub systeme: Os,
+    /// Sa place dans le bilan : les règles s'y montrent par rang croissant (100 et plus pour celles du système, 500
+    /// et plus pour les communes), comme les listes d'avant.
+    pub rang: u16,
     /// Ce qu'elle vérifie, en français et en anglais.
     pub sujet: (&'static str, &'static str),
     /// Références de durcissement (CIS, ANSSI, documentation de l'éditeur), quand il y en a.
@@ -52,13 +58,30 @@ pub struct Regle {
 
 inventory::collect!(Regle);
 
-/// Les règles déclarées pour un système, rangées par identifiant.
+/// Déclare une règle au registre : identifiant, système, rang, sujet (français, anglais), références, vérification.
+macro_rules! regle {
+    ($id:literal, $os:expr, $rang:literal, $sujet:expr, $refs:expr, $verifier:expr $(,)?) => {
+        inventory::submit! {
+            $crate::machine::regles::Regle {
+                id: $id,
+                systeme: $os,
+                rang: $rang,
+                sujet: $sujet,
+                references: $refs,
+                verifier: $verifier,
+            }
+        }
+    };
+}
+pub(crate) use regle;
+
+/// Les règles d'un système, communes comprises, dans l'ordre du bilan (rang, puis identifiant).
 pub fn regles(os: Os) -> Vec<&'static Regle> {
     let mut regles: Vec<&'static Regle> = inventory::iter::<Regle>
         .into_iter()
-        .filter(|r| r.systeme == os)
+        .filter(|r| r.systeme == os || r.systeme == Os::Tous)
         .collect();
-    regles.sort_by_key(|r| r.id);
+    regles.sort_by_key(|r| (r.rang, r.id));
     regles
 }
 
@@ -125,10 +148,14 @@ mod tests {
         }
     }
 
-    /// Le bilan de ce système lance une vérification par règle déclarée pour lui.
+    /// Le bilan de ce système lance une vérification par règle, dans l'ordre des rangs ; toutes sont bien
+    /// enregistrées (une déclaration perdue à l'édition des liens ferait tomber le compte).
     #[test]
     fn une_verification_par_regle() {
-        assert_eq!(verifications().len(), regles(Os::actuel()).len());
-        assert!(regles(Os::actuel()).windows(2).all(|r| r[0].id < r[1].id));
+        let regles = regles(Os::actuel());
+        assert_eq!(verifications().len(), regles.len());
+        assert!(regles.windows(2).all(|r| (r[0].rang, r[0].id) < (r[1].rang, r[1].id)));
+        assert!(regles.len() >= 35, "{} règles seulement", regles.len());
+        assert!(regles.iter().filter(|r| r.systeme == Os::Tous).count() >= 20);
     }
 }
