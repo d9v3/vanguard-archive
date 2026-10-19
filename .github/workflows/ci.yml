@@ -9,9 +9,11 @@
 name: CI
 
 on:
-  # Les branches seulement : l'étiquette vX.Y.Z que crée outils/publier-version.sh vise un commit déjà testé.
+  # master seulement : l'étiquette vX.Y.Z que crée outils/publier-version.sh vise un commit déjà testé, et une
+  # branche n'est poussée que pour son passage sur le Mac (livrer-branche.sh), après la vérification complète d'ici.
+  # La CI tournait deux fois sur le même commit à chaque publication (la branche, puis master après la fusion).
   push:
-    branches: ["**"]
+    branches: [master]
   pull_request:
   workflow_dispatch:
   schedule:
