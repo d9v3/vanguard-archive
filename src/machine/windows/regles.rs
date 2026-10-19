@@ -2,10 +2,20 @@
 //! vérifications restent dans leurs fichiers ; une nouvelle règle se déclare plutôt à côté de la sienne.
 
 use super::*;
+use crate::machine::ParBilan;
 use crate::machine::regles::{Os, regle};
 
+/// Lus une fois par bilan, et deux lectures pourraient se contredire : le pare-feu (sa règle et celles des ports TCP
+/// et UDP le demandent en même temps) et l'adresse de ce PC sur le réseau local (les deux règles des ports).
+static PARE_FEU: ParBilan<Constat> = ParBilan::new();
+static ADRESSE: ParBilan<Option<String>> = ParBilan::new();
+
+fn adresse_locale() -> Option<String> {
+    crate::reseau::scan::reseau_local().map(|l| l.1.to_string())
+}
+
 regle!("WIN-PFE-001", Os::Windows, 10, ("pare-feu", "firewall"), &[], || vec![
-    pare_feu()
+    PARE_FEU.lire(pare_feu)
 ]);
 
 regle!("WIN-ANV-001", Os::Windows, 100, ("antivirus", "antivirus"), &[], || {
@@ -28,8 +38,8 @@ regle!(
     ("services TCP ouverts sur le réseau", "TCP services open to the network"),
     &[],
     || {
-        let actif = pare_feu().probleme.is_none();
-        let ip = crate::reseau::scan::reseau_local().map(|l| l.1.to_string());
+        let actif = PARE_FEU.lire(pare_feu).probleme.is_none();
+        let ip = ADRESSE.lire(adresse_locale);
         ports_ecoute(actif, ip.as_deref())
     }
 );
@@ -41,8 +51,8 @@ regle!(
     ("services UDP ouverts sur le réseau", "UDP services open to the network"),
     &[],
     || {
-        let actif = pare_feu().probleme.is_none();
-        let ip = crate::reseau::scan::reseau_local().map(|l| l.1.to_string());
+        let actif = PARE_FEU.lire(pare_feu).probleme.is_none();
+        let ip = ADRESSE.lire(adresse_locale);
         ports_udp(actif, ip.as_deref())
     }
 );

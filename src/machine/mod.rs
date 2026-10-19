@@ -54,7 +54,7 @@ pub struct Correctif {
     pub bloque: Option<String>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 pub struct Constat {
     pub categorie: &'static str,
     /// `None` = tout va bien.
@@ -213,11 +213,44 @@ fn en_parallele(verifications: Vec<Verification<'_>>) -> Vec<Constat> {
 /// L'audit d'un système : les règles du registre, celles du système (le pare-feu en tête) puis les communes
 /// (regles_communes.rs), lancées en même temps et rendues dans l'ordre de leurs rangs.
 fn audit(systeme: &'static str) -> Audit {
+    // Un nouveau bilan relit ce que ses règles partagent (`ParBilan`) : une correction a pu le changer.
+    BILAN.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let constats = en_parallele(regles::verifications());
     Audit {
         systeme,
         score: score(&constats),
         constats,
+    }
+}
+
+/// Le numéro du bilan en cours : ce que `ParBilan` a gardé d'un bilan précédent est périmé.
+static BILAN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Ce que plusieurs règles d'un bilan demandent en même temps (le pare-feu, l'adresse sur le réseau local) : la
+/// première le lit, les autres l'attendent et le reprennent. Deux lectures pourraient se contredire si l'état change
+/// pendant le bilan. Le bilan suivant le relit.
+pub(crate) struct ParBilan<T>(std::sync::Mutex<Option<(u64, T)>>);
+
+impl<T: Clone> ParBilan<T> {
+    pub(crate) const fn new() -> Self {
+        Self(std::sync::Mutex::new(None))
+    }
+
+    /// La valeur de ce bilan, lue par `lecture` si aucune règle ne l'a encore fait.
+    pub(crate) fn lire(&self, lecture: impl FnOnce() -> T) -> T {
+        self.lire_au(BILAN.load(std::sync::atomic::Ordering::Relaxed), lecture)
+    }
+
+    fn lire_au(&self, bilan: u64, lecture: impl FnOnce() -> T) -> T {
+        let mut garde = self.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some((n, valeur)) = garde.as_ref()
+            && *n == bilan
+        {
+            return valeur.clone();
+        }
+        let valeur = lecture();
+        *garde = Some((bilan, valeur.clone()));
+        valeur
     }
 }
 
@@ -1102,6 +1135,25 @@ Host *
         assert_eq!(r, [true, false, true]);
         // Dans un même correctif, rien ne part après une commande en échec.
         assert!(!temoin.exists());
+    }
+
+    /// Ce que plusieurs règles demandent en même temps se lit une fois par bilan ; le bilan suivant le relit.
+    #[test]
+    fn lu_une_fois_par_bilan() {
+        let pare_feu = ParBilan::new();
+        let lectures = std::sync::atomic::AtomicU32::new(0);
+        let lire = |bilan| {
+            pare_feu.lire_au(bilan, || {
+                lectures.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1
+            })
+        };
+        let lues: Vec<u32> = std::thread::scope(|s| {
+            let fils: Vec<_> = (0..8).map(|_| s.spawn(|| lire(7))).collect();
+            fils.into_iter().map(|f| f.join().unwrap()).collect()
+        });
+        assert_eq!(lues, [1; 8]);
+        assert_eq!(lire(8), 2);
+        assert_eq!(lire(8), 2);
     }
 }
 

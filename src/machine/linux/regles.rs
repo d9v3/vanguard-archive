@@ -3,10 +3,15 @@
 //! (`plateforme.rs`).
 
 use super::*;
+use crate::machine::ParBilan;
 use crate::machine::regles::{Os, regle};
 
+/// Le pare-feu, lu une fois par bilan : sa règle et celle des ports le demandent en même temps, et deux lectures
+/// pourraient se contredire.
+static PARE_FEU: ParBilan<Constat> = ParBilan::new();
+
 regle!("LNX-PFE-001", Os::Linux, 10, ("pare-feu", "firewall"), &[], || vec![
-    pare_feu()
+    PARE_FEU.lire(pare_feu)
 ]);
 
 regle!(
@@ -16,7 +21,7 @@ regle!(
     ("services ouverts sur le réseau", "services open to the network"),
     &[],
     || {
-        let actif = pare_feu().probleme.is_none();
+        let actif = PARE_FEU.lire(pare_feu).probleme.is_none();
         ports_ecoute(actif, actif && ufw_actif())
     }
 );

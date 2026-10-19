@@ -2,10 +2,15 @@
 //! vérifications restent dans leurs fichiers ; une nouvelle règle se déclare plutôt à côté de la sienne.
 
 use super::*;
+use crate::machine::ParBilan;
 use crate::machine::regles::{Os, regle};
 
+/// Le pare-feu, lu une fois par bilan : sa règle et celle des ports le demandent en même temps, et deux lectures
+/// pourraient se contredire.
+static PARE_FEU: ParBilan<Constat> = ParBilan::new();
+
 regle!("MAC-PFE-001", Os::MacOs, 10, ("pare-feu", "firewall"), &[], || vec![
-    pare_feu()
+    PARE_FEU.lire(pare_feu)
 ]);
 
 regle!(
@@ -32,7 +37,7 @@ regle!(
     120,
     ("services ouverts sur le réseau", "services open to the network"),
     &[],
-    || ports_ecoute(pare_feu().probleme.is_none())
+    || ports_ecoute(PARE_FEU.lire(pare_feu).probleme.is_none())
 );
 
 regle!("MAC-CHF-001", Os::MacOs, 130, ("FileVault", "FileVault"), &[], || vec![
