@@ -19,7 +19,7 @@ Intel Macs, nothing to install.
 
      /Volumes/VANGUARD/macOS/vanguard
 
-   Tips: type "/Volumes/GA" then the Tab key to complete; or drag the "vanguard" file from the Finder
+   Tips: type "/Volumes/VA" then the Tab key to complete; or drag the "vanguard" file from the Finder
    into the Terminal window, then Enter.
 
 

@@ -19,7 +19,7 @@ M2…) et Intel, rien à installer.
 
      /Volumes/VANGUARD/macOS/vanguard
 
-   Astuces : taper « /Volumes/GA » puis la touche Tab pour compléter ; ou glisser le fichier « vanguard »
+   Astuces : taper « /Volumes/VA » puis la touche Tab pour compléter ; ou glisser le fichier « vanguard »
    depuis le Finder dans la fenêtre du Terminal, puis Entrée.
 
 
