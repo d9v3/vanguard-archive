@@ -428,4 +428,329 @@ pub const PROGRAMMES: &[Programme] = &[
             ),
         ],
     },
+    Programme {
+        nom: "xattr",
+        role: ("quarantaine des téléchargements", "download quarantine"),
+        executable: "xattr",
+        commandes: &[
+            voir(
+                "xattr -l <fichier>",
+                "Les attributs d'un fichier, dont la quarantaine d'un téléchargement.",
+                "A file's attributes, including a download's quarantine.",
+            ),
+            changer(
+                "xattr -d com.apple.quarantine <fichier>",
+                "Retire la quarantaine : seulement pour un programme sûr.",
+                "Removes the quarantine: only for a safe program.",
+            ),
+        ],
+    },
+    Programme {
+        nom: "defaults",
+        role: ("réglages cachés de macOS", "hidden macOS settings"),
+        executable: "defaults",
+        commandes: &[
+            voir(
+                "defaults read com.apple.finder AppleShowAllFiles",
+                "Le Finder montre-t-il les fichiers cachés ?",
+                "Does Finder show hidden files?",
+            ),
+            changer(
+                "defaults write com.apple.finder AppleShowAllFiles -bool true",
+                "Les montre (puis killall Finder).",
+                "Shows them (then killall Finder).",
+            ),
+            voir(
+                "defaults read /Library/Preferences/com.apple.loginwindow",
+                "Les réglages de la fenêtre de connexion (ouverture automatique…).",
+                "The login window's settings (automatic login…).",
+            ),
+        ],
+    },
+    Programme {
+        nom: "caffeinate, pmset",
+        role: ("veille et énergie", "sleep and power"),
+        executable: "caffeinate",
+        commandes: &[
+            voir("pmset -g", "Les réglages d'énergie.", "Power settings."),
+            voir(
+                "pmset -g log | grep -i -E 'wake|sleep' | tail -20",
+                "Les dernières mises en veille et sorties de veille.",
+                "The latest sleeps and wakes.",
+            ),
+            changer(
+                "caffeinate -d",
+                "Garde l'écran allumé tant qu'elle tourne (Ctrl-C pour arrêter).",
+                "Keeps the screen on while it runs (Ctrl-C to stop).",
+            ),
+        ],
+    },
+    Programme {
+        nom: "dscl, id",
+        role: ("comptes du Mac", "Mac accounts"),
+        executable: "dscl",
+        commandes: &[
+            voir(
+                "dscl . list /Users | grep -v '^_'",
+                "Les comptes, sans ceux du système.",
+                "Accounts, without the system ones.",
+            ),
+            voir("id", "Ton compte et ses groupes.", "Your account and its groups."),
+            changer(
+                "sudo dscl . -delete /Groups/admin GroupMembership <utilisateur>",
+                "Retire un compte des administrateurs.",
+                "Removes an account from the administrators.",
+            ),
+        ],
+    },
+    Programme {
+        nom: "profiles, systemextensionsctl",
+        role: ("profils, extensions système", "profiles, system extensions"),
+        executable: "profiles",
+        commandes: &[
+            voir(
+                "sudo profiles list",
+                "Les profils de configuration installés : d'une entreprise, ou d'un logiciel malveillant.",
+                "Installed configuration profiles: from a company, or from malware.",
+            ),
+            voir(
+                "systemextensionsctl list",
+                "Les extensions système (antivirus, VPN…).",
+                "System extensions (antivirus, VPN…).",
+            ),
+            voir(
+                "kmutil showloaded | grep -v com.apple",
+                "Les extensions du noyau de tiers.",
+                "Third-party kernel extensions.",
+            ),
+        ],
+    },
+    Programme {
+        nom: "sysctl, vm_stat",
+        role: ("processeur, mémoire", "processor, memory"),
+        executable: "sysctl",
+        commandes: &[
+            voir("sysctl -n machdep.cpu.brand_string", "Le processeur.", "The processor."),
+            voir(
+                "sysctl -n hw.memsize",
+                "La mémoire vive, en octets.",
+                "Memory, in bytes.",
+            ),
+            voir("vm_stat", "L'usage de la mémoire, par pages.", "Memory use, by pages."),
+            voir(
+                "uptime",
+                "Depuis quand le Mac tourne, et sa charge.",
+                "How long the Mac has been running, and its load.",
+            ),
+        ],
+    },
+];
+
+/// Les marches à suivre : chaque étape est une commande expliquée, dans l'ordre.
+pub const PAS_A_PAS: &[Programme] = &[
+    Programme {
+        nom: "Pas à pas : mettre à jour",
+        role: ("macOS, Homebrew, App Store", "macOS, Homebrew, App Store"),
+        executable: "softwareupdate",
+        commandes: &[
+            voir(
+                "softwareupdate --list",
+                "Les mises à jour de macOS disponibles.",
+                "Available macOS updates.",
+            ),
+            changer(
+                "sudo softwareupdate --install --all --restart",
+                "Les installe, puis redémarre.",
+                "Installs them, then restarts.",
+            ),
+            voir(
+                "brew outdated",
+                "Les logiciels de Homebrew à mettre à jour.",
+                "Homebrew software to update.",
+            ),
+            changer("brew update && brew upgrade", "Les met à jour.", "Updates them."),
+            changer(
+                "brew cleanup",
+                "Retire les anciennes versions.",
+                "Removes old versions.",
+            ),
+            voir(
+                "open -a \"App Store\"",
+                "Les applications de l'App Store se mettent à jour dans l'App Store.",
+                "App Store apps update in the App Store.",
+            )
+            .sauf(Obstacle::Fenetre),
+        ],
+    },
+    Programme {
+        nom: "Pas à pas : réparer le disque",
+        role: ("vérifier, réparer, récupérer", "check, repair, recover"),
+        executable: "diskutil",
+        commandes: &[
+            voir(
+                "diskutil list",
+                "Les disques et leurs volumes.",
+                "Disks and their volumes.",
+            ),
+            voir(
+                "diskutil verifyVolume /",
+                "Vérifie le disque du système (le Mac ralentit quelques minutes).",
+                "Checks the system disk (the Mac slows down for a few minutes).",
+            )
+            .sauf(Obstacle::Longue),
+            changer(
+                "diskutil repairVolume <disque>",
+                "Répare un disque externe.",
+                "Repairs an external disk.",
+            ),
+            changer(
+                "sudo shutdown -r now",
+                "Le disque du système se répare depuis la récupération : redémarre en tenant Cmd+R (Apple : le bouton).",
+                "The system disk is repaired from recovery: restart holding Cmd+R (Apple chip: the button).",
+            ),
+        ],
+    },
+    Programme {
+        nom: "Pas à pas : réseau",
+        role: ("Wi-Fi, DNS, adresse", "Wi-Fi, DNS, address"),
+        executable: "networksetup",
+        commandes: &[
+            voir(
+                "networksetup -listallhardwareports",
+                "Les cartes réseau et leurs noms (en0…).",
+                "Network cards and their names (en0…).",
+            ),
+            voir(
+                "ipconfig getifaddr en0",
+                "L'adresse de la carte Wi-Fi ; rien : pas connecté.",
+                "The Wi-Fi card's address; nothing: not connected.",
+            ),
+            voir(
+                "scutil --dns | head -20",
+                "Les serveurs DNS utilisés.",
+                "The DNS servers in use.",
+            ),
+            changer(
+                "sudo dscacheutil -flushcache; sudo killall -HUP mDNSResponder",
+                "Vide le cache DNS.",
+                "Empties the DNS cache.",
+            ),
+            changer(
+                "sudo ipconfig set en0 DHCP",
+                "Redemande une adresse à la box.",
+                "Asks the router for a new address.",
+            ),
+            changer(
+                "networksetup -setairportpower en0 off",
+                "Éteint le Wi-Fi…",
+                "Turns Wi-Fi off…",
+            ),
+            changer(
+                "networksetup -setairportpower en0 on",
+                "…et le rallume.",
+                "…and back on.",
+            ),
+            voir(
+                "networkQuality",
+                "Mesure le débit et la réactivité de la connexion.",
+                "Measures the connection's speed and responsiveness.",
+            ),
+        ],
+    },
+    Programme {
+        nom: "Pas à pas : faire de la place",
+        role: ("disque plein", "full disk"),
+        executable: "tmutil",
+        commandes: &[
+            voir("df -h /", "La place libre.", "Free space."),
+            voir(
+                "du -sh ~/Library/Caches",
+                "Le cache des applications.",
+                "The apps' cache.",
+            ),
+            voir("du -sh ~/Downloads", "Les Téléchargements.", "Downloads."),
+            voir(
+                "tmutil listlocalsnapshots /",
+                "Les instantanés locaux de Time Machine, qui prennent de la place.",
+                "Local Time Machine snapshots, which take space.",
+            ),
+            changer(
+                "sudo tmutil thinlocalsnapshots / 20000000000 4",
+                "Libère jusqu'à 20 Go de ces instantanés.",
+                "Frees up to 20 GB of those snapshots.",
+            ),
+            changer(
+                "brew cleanup -s",
+                "Vide le cache de Homebrew.",
+                "Empties Homebrew's cache.",
+            ),
+        ],
+    },
+    Programme {
+        nom: "Pas à pas : sécurité",
+        role: ("FileVault, pare-feu, Gatekeeper", "FileVault, firewall, Gatekeeper"),
+        executable: "spctl",
+        commandes: &[
+            voir(
+                "fdesetup status",
+                "FileVault chiffre-t-il le disque ?",
+                "Does FileVault encrypt the disk?",
+            ),
+            voir(
+                "/usr/libexec/ApplicationFirewall/socketfilterfw --getglobalstate",
+                "Le pare-feu est-il actif ?",
+                "Is the firewall on?",
+            ),
+            changer(
+                "sudo /usr/libexec/ApplicationFirewall/socketfilterfw --setglobalstate on",
+                "L'active.",
+                "Turns it on.",
+            ),
+            voir(
+                "spctl --status",
+                "Gatekeeper vérifie-t-il les applications ?",
+                "Does Gatekeeper check apps?",
+            ),
+            voir(
+                "csrutil status",
+                "La protection de l'intégrité du système (SIP) est-elle active ?",
+                "Is System Integrity Protection (SIP) on?",
+            ),
+            voir(
+                "dscl . -read /Groups/admin GroupMembership",
+                "Qui est administrateur.",
+                "Who is an administrator.",
+            ),
+            voir(
+                "profiles status -type enrollment",
+                "Ce Mac est-il géré par une organisation (MDM) ?",
+                "Is this Mac managed by an organization (MDM)?",
+            ),
+        ],
+    },
+    Programme {
+        nom: "Pas à pas : Time Machine",
+        role: ("sauvegarder et vérifier", "back up and check"),
+        executable: "tmutil",
+        commandes: &[
+            voir(
+                "tmutil destinationinfo",
+                "Où vont les sauvegardes.",
+                "Where backups go.",
+            ),
+            voir(
+                "tmutil status",
+                "Une sauvegarde est-elle en cours ?",
+                "Is a backup running?",
+            ),
+            voir("tmutil latestbackup", "La dernière sauvegarde.", "The latest backup."),
+            changer("tmutil startbackup", "En lance une maintenant.", "Starts one now."),
+            voir("tmutil listbackups", "Toutes les sauvegardes.", "All backups."),
+            changer(
+                "sudo tmutil enable",
+                "Réactive les sauvegardes automatiques.",
+                "Turns automatic backups back on.",
+            ),
+        ],
+    },
 ];

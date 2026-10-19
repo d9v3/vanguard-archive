@@ -158,6 +158,8 @@ impl Systeme {
             Systeme::Arch => arch::PAS_A_PAS,
             Systeme::Fedora => fedora::PAS_A_PAS,
             Systeme::Debian => debian::PAS_A_PAS,
+            Systeme::Windows => windows::PAS_A_PAS,
+            Systeme::MacOs => macos::PAS_A_PAS,
             _ => &[],
         }
     }
@@ -390,6 +392,7 @@ const A_REMPLACER: &[(&str, &str)] = &[
     ("<app>", "<app>"),
     ("<archive>", "<archive>"),
     ("<box>", "<router>"),
+    ("<clé>", "<key>"),
     ("<destination>", "<destination>"),
     ("<disque>", "<disk>"),
     ("<dossier>", "<folder>"),
@@ -431,6 +434,12 @@ const NOMS_EN: &[(&str, &str)] = &[
     ("Pas à pas : SELinux", "Step by step: SELinux"),
     ("Pas à pas : mises à jour auto", "Step by step: auto updates"),
     ("Pas à pas : dépanner", "Step by step: troubleshoot"),
+    ("Pas à pas : réparer Windows", "Step by step: repair Windows"),
+    ("Pas à pas : réseau", "Step by step: network"),
+    ("Pas à pas : sécurité", "Step by step: security"),
+    ("Pas à pas : lenteur", "Step by step: slowness"),
+    ("Pas à pas : réparer le disque", "Step by step: repair the disk"),
+    ("Pas à pas : Time Machine", "Step by step: Time Machine"),
 ];
 
 /// Ses noms dans les deux langues, pour la recherche.
@@ -1050,10 +1059,14 @@ fn menu_systeme(s: Systeme) {
         }
         // La place qui reste pour la précision, après la touche et le nom (tldr-pages en a des milliers).
         let largeur_touche = programmes.len().to_string().len().max(2);
-        let marque_absent = if s == Systeme::Tldr { 0 } else { 9 };
+        // Comme `selection::colonne` : le nom le plus long tel qu'affiché, « (absent) » compris là où il paraît.
+        let marque_absent = largeur_affichee(tr!(" (absent)", " (missing)"));
         let plus_long = programmes
             .iter()
-            .map(|(_, p)| largeur_affichee(nom(p)) + marque_absent)
+            .map(|&(proprietaire, p)| {
+                let absent = s != Systeme::Tldr && absent(proprietaire, p);
+                largeur_affichee(nom(p)) + if absent { marque_absent } else { 0 }
+            })
             .max()
             .unwrap_or(0);
         let colonne = (plus_long + 2).clamp(36, 48);

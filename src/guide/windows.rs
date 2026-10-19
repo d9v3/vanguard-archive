@@ -640,4 +640,481 @@ pub const PROGRAMMES: &[Programme] = &[
             .sauf(Obstacle::Fenetre),
         ],
     },
+    Programme {
+        nom: "wsl",
+        role: ("Linux dans Windows (WSL)", "Linux inside Windows (WSL)"),
+        executable: "wsl",
+        commandes: &[
+            voir(
+                "wsl --status",
+                "WSL est-il installé, et en quelle version ?",
+                "Is WSL installed, and which version?",
+            ),
+            voir(
+                "wsl --list --verbose",
+                "Les distributions Linux installées, et leur état.",
+                "Installed Linux distributions, and their state.",
+            ),
+            voir(
+                "wsl --list --online",
+                "Les distributions qu'on peut installer.",
+                "Distributions available to install.",
+            ),
+            changer(
+                "wsl --install",
+                "Installe WSL et Ubuntu (puis redémarrage).",
+                "Installs WSL and Ubuntu (then restart).",
+            ),
+            changer(
+                "wsl --install -d <nom>",
+                "Installe une autre distribution (Debian, openSUSE…).",
+                "Installs another distribution (Debian, openSUSE…).",
+            ),
+            changer("wsl --update", "Met à jour WSL.", "Updates WSL."),
+            changer(
+                "wsl --shutdown",
+                "Arrête toutes les distributions : libère leur mémoire.",
+                "Stops all distributions: frees their memory.",
+            ),
+        ],
+    },
+    Programme {
+        nom: "Get-DnsClient, arp, netstat",
+        role: ("DNS, voisins, connexions", "DNS, neighbors, connections"),
+        executable: "",
+        commandes: &[
+            voir(
+                "Get-DnsClientServerAddress -AddressFamily IPv4",
+                "Les serveurs DNS de chaque carte.",
+                "Each card's DNS servers.",
+            ),
+            changer(
+                "Clear-DnsClientCache",
+                "Vide le cache DNS (comme ipconfig /flushdns).",
+                "Empties the DNS cache (like ipconfig /flushdns).",
+            ),
+            voir(
+                "Get-NetRoute -DestinationPrefix 0.0.0.0/0",
+                "La passerelle par défaut : l'adresse de la box.",
+                "The default gateway: the router's address.",
+            ),
+            voir(
+                "arp -a",
+                "Les appareils vus récemment sur le réseau local.",
+                "Devices seen recently on the local network.",
+            ),
+            voir(
+                "netstat -ano | findstr LISTENING",
+                "Les ports en écoute, et le numéro du programme (PID).",
+                "Listening ports, and the program's number (PID).",
+            ),
+            voir(
+                "Get-NetTCPConnection -State Established",
+                "Les connexions ouvertes en ce moment.",
+                "Connections open right now.",
+            ),
+            voir(
+                "getmac /v",
+                "L'adresse MAC de chaque carte.",
+                "Each card's MAC address.",
+            ),
+        ],
+    },
+    Programme {
+        nom: "Get-PnpDevice, pnputil",
+        role: ("pilotes et périphériques", "drivers and devices"),
+        executable: "pnputil",
+        commandes: &[
+            voir(
+                "Get-PnpDevice -Status ERROR",
+                "Les périphériques en erreur : pilote manquant ou en panne.",
+                "Devices in error: missing or broken driver.",
+            ),
+            voir(
+                "Get-PnpDevice -Class Display",
+                "La carte graphique et son état.",
+                "The graphics card and its state.",
+            ),
+            voir("driverquery", "Les pilotes installés.", "Installed drivers."),
+            voir(
+                "pnputil /enum-drivers",
+                "Les paquets de pilotes ajoutés (oemNN.inf).",
+                "Added driver packages (oemNN.inf).",
+            )
+            .sauf(Obstacle::Administrateur),
+            changer(
+                "pnputil /delete-driver <nom> /uninstall",
+                "Retire un paquet de pilote (oemNN.inf).",
+                "Removes a driver package (oemNN.inf).",
+            ),
+            voir("devmgmt.msc", "Le Gestionnaire de périphériques.", "Device Manager.").sauf(Obstacle::Fenetre),
+        ],
+    },
+    Programme {
+        nom: "sc.exe, schtasks",
+        role: ("services et tâches planifiées", "services and scheduled tasks"),
+        executable: "schtasks",
+        commandes: &[
+            voir(
+                "sc.exe query <service>",
+                "L'état d'un service (sc.exe : dans PowerShell, sc seul est autre chose).",
+                "A service's state (sc.exe: in PowerShell, sc alone is something else).",
+            ),
+            voir(
+                "sc.exe qc <service>",
+                "Comment il démarre, et son programme.",
+                "How it starts, and its program.",
+            ),
+            changer(
+                "sc.exe config <service> start= disabled",
+                "Empêche un service de démarrer.",
+                "Prevents a service from starting.",
+            ),
+            voir(
+                "schtasks /query /fo TABLE",
+                "Les tâches planifiées.",
+                "Scheduled tasks.",
+            ),
+            changer(
+                "schtasks /change /tn \"<nom>\" /disable",
+                "Désactive une tâche planifiée.",
+                "Disables a scheduled task.",
+            ),
+        ],
+    },
+    Programme {
+        nom: "gpresult, bcdedit, reagentc",
+        role: ("stratégies et démarrage", "policies and boot"),
+        executable: "gpresult",
+        commandes: &[
+            voir(
+                "gpresult /r",
+                "Les stratégies appliquées à l'ordinateur et à ton compte.",
+                "Policies applied to the computer and your account.",
+            ),
+            changer(
+                "gpupdate /force",
+                "Réapplique les stratégies.",
+                "Reapplies the policies.",
+            ),
+            voir("bcdedit /enum", "Les entrées de démarrage.", "Boot entries.").sauf(Obstacle::Administrateur),
+            voir(
+                "reagentc /info",
+                "L'environnement de récupération est-il prêt ?",
+                "Is the recovery environment ready?",
+            )
+            .sauf(Obstacle::Administrateur),
+            changer("reagentc /enable", "Le réactive.", "Turns it back on."),
+        ],
+    },
+    Programme {
+        nom: "Get-FileHash, icacls",
+        role: ("empreintes, droits des fichiers", "hashes, file permissions"),
+        executable: "",
+        commandes: &[
+            voir(
+                "Get-FileHash <fichier>",
+                "L'empreinte SHA-256 d'un fichier, à comparer avec celle que donne l'éditeur.",
+                "A file's SHA-256 hash, to compare with the one the publisher gives.",
+            ),
+            voir(
+                "icacls <fichier>",
+                "Qui peut lire ou modifier un fichier.",
+                "Who can read or change a file.",
+            ),
+            changer(
+                "takeown /f <fichier>",
+                "Se rend propriétaire d'un fichier (terminal administrateur).",
+                "Takes ownership of a file (administrator terminal).",
+            ),
+            voir(
+                "Get-Item <fichier> -Stream *",
+                "Les flux d'un fichier, dont la marque « téléchargé d'Internet » (Zone.Identifier).",
+                "A file's streams, including the “downloaded from the Internet” mark (Zone.Identifier).",
+            ),
+            changer(
+                "Unblock-File <fichier>",
+                "Retire cette marque : seulement pour un fichier sûr.",
+                "Removes that mark: only for a safe file.",
+            ),
+        ],
+    },
+    Programme {
+        nom: "Get-AppxPackage, wsreset",
+        role: ("applications du Microsoft Store", "Microsoft Store apps"),
+        executable: "",
+        commandes: &[
+            voir(
+                "Get-AppxPackage | Select Name, Version",
+                "Les applications du Store installées pour ton compte.",
+                "Store apps installed for your account.",
+            ),
+            voir(
+                "Get-AppxPackage *<nom>*",
+                "Une application du Store, par son nom.",
+                "A Store app, by its name.",
+            ),
+            changer(
+                "Get-AppxPackage *<nom>* | Remove-AppxPackage",
+                "La désinstalle.",
+                "Uninstalls it.",
+            ),
+            changer(
+                "wsreset",
+                "Remet à zéro le Microsoft Store qui ne s'ouvre plus.",
+                "Resets a Microsoft Store that no longer opens.",
+            ),
+        ],
+    },
+    Programme {
+        nom: "reg",
+        role: ("le registre", "the registry"),
+        executable: "reg",
+        commandes: &[
+            voir(
+                "reg query <clé>",
+                "Les valeurs d'une clé du registre (HKCU\\Software\\…).",
+                "A registry key's values (HKCU\\Software\\…).",
+            ),
+            changer(
+                "reg export <clé> <fichier>.reg",
+                "Sauvegarde une clé avant de la modifier.",
+                "Backs up a key before changing it.",
+            ),
+            changer(
+                "reg import <fichier>.reg",
+                "La remet comme avant.",
+                "Puts it back as before.",
+            ),
+        ],
+    },
+];
+
+/// Les marches à suivre : chaque étape est une commande expliquée, dans l'ordre.
+pub const PAS_A_PAS: &[Programme] = &[
+    Programme {
+        nom: "Pas à pas : mettre à jour",
+        role: ("Windows Update, winget, Defender", "Windows Update, winget, Defender"),
+        executable: "",
+        commandes: &[
+            voir(
+                "start ms-settings:windowsupdate",
+                "Windows Update : rechercher, installer, redémarrer quand il le demande.",
+                "Windows Update: check, install, restart when it asks.",
+            )
+            .sauf(Obstacle::Fenetre),
+            voir(
+                "winget upgrade",
+                "Les logiciels qui ont une mise à jour.",
+                "Software that has an update.",
+            ),
+            changer("winget upgrade --all", "Les met tous à jour.", "Updates them all."),
+            changer(
+                "Update-MpSignature",
+                "Les définitions de Microsoft Defender (terminal administrateur).",
+                "Microsoft Defender's definitions (administrator terminal).",
+            ),
+            voir(
+                "Get-HotFix | Sort-Object InstalledOn -Desc | Select -First 5",
+                "Les dernières mises à jour de Windows installées, avec leur date.",
+                "The latest Windows updates installed, with their date.",
+            ),
+            changer(
+                "shutdown /r /t 0",
+                "Redémarre pour finir les installations.",
+                "Restarts to finish the installations.",
+            ),
+        ],
+    },
+    Programme {
+        nom: "Pas à pas : réparer Windows",
+        role: ("DISM, sfc, disque, démarrage", "DISM, sfc, disk, boot"),
+        executable: "",
+        commandes: &[
+            changer(
+                "DISM /Online /Cleanup-Image /RestoreHealth",
+                "D'abord, répare l'image de Windows depuis Windows Update (terminal administrateur, 10 à 30 min).",
+                "First, repairs the Windows image from Windows Update (administrator terminal, 10 to 30 min).",
+            ),
+            changer(
+                "sfc /scannow",
+                "Puis vérifie et répare les fichiers de Windows.",
+                "Then checks and repairs Windows files.",
+            ),
+            voir(
+                "Select-String $env:windir\\Logs\\CBS\\CBS.log '\\[SR\\]' | Select -Last 20",
+                "Ce que sfc a trouvé et réparé, d'après son journal.",
+                "What sfc found and repaired, according to its log.",
+            )
+            .sauf(Obstacle::Administrateur),
+            changer(
+                "chkdsk C: /f",
+                "Le disque : accepte la vérification au prochain redémarrage (O).",
+                "The disk: accept the check at the next restart (Y).",
+            ),
+            changer(
+                "shutdown /r /o /t 0",
+                "Ne démarre plus bien ? Redémarre vers les options de dépannage (réparation du démarrage, restauration).",
+                "Won't boot properly? Restarts into the troubleshooting options (startup repair, restore).",
+            ),
+            changer(
+                "rstrui",
+                "Ou revient à un point de restauration d'avant la panne.",
+                "Or goes back to a restore point from before the problem.",
+            ),
+        ],
+    },
+    Programme {
+        nom: "Pas à pas : réseau",
+        role: ("Wi-Fi, DNS, pile réseau", "Wi-Fi, DNS, network stack"),
+        executable: "",
+        commandes: &[
+            voir(
+                "ipconfig /all",
+                "L'état des cartes : adresse (169.254… : la box ne répond pas), passerelle, DNS.",
+                "The cards' state: address (169.254…: the router does not answer), gateway, DNS.",
+            ),
+            voir(
+                "Test-NetConnection 1.1.1.1",
+                "Internet répond-il, sans passer par le DNS ?",
+                "Does the Internet answer, without going through DNS?",
+            ),
+            voir("Resolve-DnsName example.com", "Le DNS répond-il ?", "Does DNS answer?"),
+            changer("ipconfig /flushdns", "Vide le cache DNS.", "Empties the DNS cache."),
+            changer(
+                "ipconfig /release; ipconfig /renew",
+                "Redemande une adresse à la box.",
+                "Asks the router for a new address.",
+            ),
+            changer(
+                "netsh winsock reset",
+                "Toujours rien : remet à zéro la pile réseau (terminal administrateur)…",
+                "Still nothing: resets the network stack (administrator terminal)…",
+            ),
+            changer("netsh int ip reset", "…et TCP/IP…", "…and TCP/IP…"),
+            changer("shutdown /r /t 0", "…puis redémarre.", "…then restart."),
+        ],
+    },
+    Programme {
+        nom: "Pas à pas : faire de la place",
+        role: ("disque C: plein", "C: drive full"),
+        executable: "",
+        commandes: &[
+            voir(
+                "Get-PSDrive C",
+                "La place utilisée et libre sur C:.",
+                "Used and free space on C:.",
+            ),
+            voir(
+                "(gci ~\\Downloads -Recurse | measure Length -Sum).Sum / 1GB",
+                "La taille des Téléchargements, en Go.",
+                "The size of Downloads, in GB.",
+            ),
+            voir(
+                "start ms-settings:storagesense",
+                "Le stockage : fichiers temporaires, Assistant stockage.",
+                "Storage: temporary files, Storage Sense.",
+            )
+            .sauf(Obstacle::Fenetre),
+            changer(
+                "Remove-Item $env:TEMP\\* -Recurse -Force -ErrorAction SilentlyContinue",
+                "Vide ton dossier temporaire (ce qui sert encore reste).",
+                "Empties your temporary folder (what is still in use stays).",
+            ),
+            changer(
+                "DISM /Online /Cleanup-Image /StartComponentCleanup",
+                "Retire les anciennes versions des composants de Windows (terminal administrateur).",
+                "Removes old versions of Windows components (administrator terminal).",
+            ),
+            changer(
+                "powercfg /hibernate off",
+                "Supprime le fichier de veille prolongée (plusieurs Go) ; la veille prolongée disparaît.",
+                "Deletes the hibernation file (several GB); hibernation goes away.",
+            ),
+        ],
+    },
+    Programme {
+        nom: "Pas à pas : sécurité",
+        role: ("Defender, pare-feu, comptes", "Defender, firewall, accounts"),
+        executable: "",
+        commandes: &[
+            voir(
+                "Get-MpComputerStatus | Select *Enabled",
+                "Defender : chaque protection est-elle active (True) ?",
+                "Defender: is each protection on (True)?",
+            ),
+            changer(
+                "Update-MpSignature",
+                "Met ses définitions à jour.",
+                "Updates its definitions.",
+            ),
+            changer(
+                "Start-MpScan -ScanType QuickScan",
+                "Une analyse rapide.",
+                "A quick scan.",
+            ),
+            voir("Get-MpThreatDetection", "Ce qu'il a trouvé.", "What it found."),
+            voir(
+                "Get-NetFirewallProfile | Select Name, Enabled",
+                "Le pare-feu est-il actif pour chaque profil ?",
+                "Is the firewall on for each profile?",
+            ),
+            voir(
+                "Get-LocalGroupMember -SID S-1-5-32-544",
+                "Qui est administrateur : un compte inconnu là est une alerte.",
+                "Who is an administrator: an unknown account there is a warning.",
+            ),
+            voir(
+                "Confirm-SecureBootUEFI",
+                "Secure Boot est-il actif ?",
+                "Is Secure Boot on?",
+            )
+            .sauf(Obstacle::Administrateur),
+            voir(
+                "Get-BitLockerVolume",
+                "Le chiffrement BitLocker de chaque disque.",
+                "Each disk's BitLocker encryption.",
+            )
+            .sauf(Obstacle::Administrateur),
+        ],
+    },
+    Programme {
+        nom: "Pas à pas : lenteur",
+        role: ("processeur, mémoire, démarrage", "processor, memory, startup"),
+        executable: "",
+        commandes: &[
+            voir(
+                "Get-Process | Sort-Object CPU -Descending | Select-Object -First 10",
+                "Ce qui use le plus le processeur.",
+                "What uses the processor the most.",
+            ),
+            voir(
+                "Get-Process | Sort-Object WS -Descending | Select-Object -First 10",
+                "Ce qui prend le plus de mémoire.",
+                "What takes the most memory.",
+            ),
+            voir(
+                "start ms-settings:startupapps",
+                "Les applications au démarrage : coupe celles dont tu n'as pas besoin.",
+                "Startup apps: turn off those you do not need.",
+            )
+            .sauf(Obstacle::Fenetre),
+            voir(
+                "Get-PhysicalDisk | Format-Table FriendlyName, MediaType, HealthStatus",
+                "Le disque est-il sain, et est-ce un SSD ?",
+                "Is the disk healthy, and is it an SSD?",
+            ),
+            voir(
+                "Get-WinEvent -FilterHashtable @{LogName='System';Level=2} -MaxEvents 20",
+                "Les dernières erreurs du système.",
+                "The latest system errors.",
+            ),
+            voir(
+                "powercfg /requests",
+                "Ce qui empêche la mise en veille.",
+                "What prevents sleep.",
+            )
+            .sauf(Obstacle::Administrateur),
+        ],
+    },
 ];
