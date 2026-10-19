@@ -34,7 +34,7 @@ fn interroger(debut: &str) -> Option<String> {
             "-H",
             "Add-Padding: true",
             "-A",
-            "gardien",
+            "vanguard",
             &format!("{SERVICE}{debut}"),
         ]),
         20,
@@ -143,9 +143,9 @@ fn lire_hibp(texte: &str) -> Option<Vec<String>> {
     )
 }
 
-/// Clé de l'API de Have I Been Pwned, si elle est fournie (GARDIEN_HIBP_CLE).
+/// Clé de l'API de Have I Been Pwned, si elle est fournie (VANGUARD_HIBP_CLE).
 fn cle_hibp() -> Option<String> {
-    std::env::var("GARDIEN_HIBP_CLE").ok().filter(|c| !c.is_empty())
+    std::env::var("VANGUARD_HIBP_CLE").ok().filter(|c| !c.is_empty())
 }
 
 /// Fuites où apparaît l'adresse : par Have I Been Pwned si une clé est fournie (`cle_hibp`), sinon par
@@ -174,7 +174,7 @@ fn fichier_entete(cle: &str) -> Option<std::path::PathBuf> {
 
 fn fuites_courriel(adresse: &str) -> Option<(Vec<String>, &'static str)> {
     let mut curl = std::process::Command::new("curl");
-    curl.args(["-sS", "--max-time", "20", "-A", "gardien", "-w", "\n%{http_code}"]);
+    curl.args(["-sS", "--max-time", "20", "-A", "vanguard", "-w", "\n%{http_code}"]);
     let cle = cle_hibp();
     let mut entete = None;
     let service = if let Some(cle) = &cle {
@@ -208,7 +208,7 @@ fn fuites_courriel(adresse: &str) -> Option<(Vec<String>, &'static str)> {
     }
 }
 
-/// « gardien courriel » : dans quelles fuites de données une adresse apparaît-elle ?
+/// « vanguard courriel » : dans quelles fuites de données une adresse apparaît-elle ?
 pub fn verifier_courriel() {
     titre(tr!("Fuites d'adresse courriel", "Email address leaks"));
     let service = if cle_hibp().is_some() {

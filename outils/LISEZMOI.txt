@@ -1,36 +1,36 @@
-GARDIEN — bilan de sécurité portable (machine + réseau + antivirus + corrections)
+VANGUARD — bilan de sécurité portable (machine + réseau + antivirus + corrections)
 ================================================================================
 English version: README.txt
 
 Cette clé contient le programme pour Linux, Windows et macOS, sa base de données et son code source.
 
-  Linux/gardien        Linux (toutes distributions, aucune installation)
-                        Double-cliquer autorun.sh, ou dans un terminal (hors de la clé) :  <clé>/Linux/gardien
-  Windows/gardien.exe  Windows 10/11 : double-cliquer (ou « Lancer Gardien.bat » à la racine).
-  macOS/gardien        macOS 12 et plus récents (Apple Silicon et Intel) : double-cliquer « Lancer Gardien.command »
+  Linux/vanguard        Linux (toutes distributions, aucune installation)
+                        Double-cliquer autorun.sh, ou dans un terminal (hors de la clé) :  <clé>/Linux/vanguard
+  Windows/vanguard.exe  Windows 10/11 : double-cliquer (ou « Lancer Vanguard.bat » à la racine).
+  macOS/vanguard        macOS 12 et plus récents (Apple Silicon et Intel) : double-cliquer « Lancer Vanguard.command »
                         à la racine (le Terminal s'ouvre).
   autorun.sh            Linux : GNOME propose de le lancer au branchement ; sinon, double-clic ou ./autorun.sh
   donnees/              Base des appareils (un carnet par réseau : chez toi, chez chaque ami) et dernier
-                        rapport (rapport.html, et rapport.md en texte simple, lisible sans navigateur). Elle voyage avec la clé : tout Gardien qui voit la clé branchée l'utilise. Sur un autre
+                        rapport (rapport.html, et rapport.md en texte simple, lisible sans navigateur). Elle voyage avec la clé : tout Vanguard qui voit la clé branchée l'utilise. Sur un autre
                         ordinateur, la clé est protégée : la base y est lue, et ce qui est ajouté reste sur cet ordinateur.
   source/               Code source complet (Rust) avec son historique git.
-  gardien.cle          Fichier témoin qui fait reconnaître la clé : ne pas le supprimer.
+  vanguard.cle          Fichier témoin qui fait reconnaître la clé : ne pas le supprimer.
 
 Mode d'emploi de chaque version, ligne de commande comprise (Terminal, PowerShell, invite de commandes) :
 LISEZMOI.txt dans les dossiers Linux, Windows et macOS.
 
-Protection : la clé a deux parties. GARDIEN (tout ce qui précède) est en lecture seule sous Windows, et sous
-Linux et macOS Gardien la remonte lui-même en lecture seule au lancement : un autre ordinateur ne peut pas modifier le
-programme. Seul l'ordinateur de son propriétaire peut écrire dessus. GARDIENLOG, petite et modifiable, contient
+Protection : la clé a deux parties. VANGUARD (tout ce qui précède) est en lecture seule sous Windows, et sous
+Linux et macOS Vanguard la remonte lui-même en lecture seule au lancement : un autre ordinateur ne peut pas modifier le
+programme. Seul l'ordinateur de son propriétaire peut écrire dessus. VANGUARDLOG, petite et modifiable, contient
 journal-erreurs.txt : les erreurs rencontrées (version, système, message), sans nom d'utilisateur, nom de
 machine ni dossier personnel. De retour sur l'ordinateur du propriétaire, elles deviennent des tickets GitHub,
-pour améliorer Gardien. Elle contient aussi ordinateurs.json (Mes ordinateurs : note et catégories des problèmes de
+pour améliorer Vanguard. Elle contient aussi ordinateurs.json (Mes ordinateurs : note et catégories des problèmes de
 chaque ordinateur, sans nom), qui ne part jamais sur GitHub.
-Données protégées : si le propriétaire a protégé les données de la clé (menu Données), Gardien demande sa phrase sur
+Données protégées : si le propriétaire a protégé les données de la clé (menu Données), Vanguard demande sa phrase sur
 un autre ordinateur pour lire le carnet des appareils ; Entrée sans rien, il continue sans le carnet. Windows ne lance rien tout seul depuis une clé USB
 (protection contre les virus depuis Windows 7) : il faut double-cliquer.
 
-Pour commencer : lancer Gardien, choisir « 1. Bilan complet », puis « 2. Corriger ».
+Pour commencer : lancer Vanguard, choisir « 1. Bilan complet », puis « 2. Corriger ».
 
 Menu (↑ ↓ pour choisir, Entrée pour lancer, Échap ou Retour arrière pour revenir ; ou le chiffre, puis Entrée)
 Recherche : dans tout menu, tape un mot (wifi, disque, dns…) : seules les lignes qui le contiennent restent,
@@ -44,13 +44,13 @@ Entrée ouvre celle en surbrillance, Échap efface. Au menu principal, elle trou
        Audit de sécurité · Mises à jour (système, programmes, pilotes, firmware)
        Réparer et nettoyer (Internet, navigation détournée, pare-feu, disque plein, mises à jour bloquées…)
        Diagnostic (matériel, plantages et erreurs récents, copie texte sur la clé)
-       Intégrité des fichiers critiques (comptes, sudo, SSH, démarrage ; en direct : gardien integrite --temps-reel)
-       Ce que Gardien a appris : tes habitudes, et les alertes que tu as déclarées normales (« i » à la correction)
+       Intégrité des fichiers critiques (comptes, sudo, SSH, démarrage ; en direct : vanguard integrite --temps-reel)
+       Ce que Vanguard a appris : tes habitudes, et les alertes que tu as déclarées normales (« i » à la correction)
        Pourquoi c'est lent ? (processeur, mémoire, disque, démarrage, programmes à l'ouverture de session ;
-       les retirer du démarrage ou les remettre, après accord : gardien demarrage)
+       les retirer du démarrage ou les remettre, après accord : vanguard demarrage)
        Fiche de l'ordinateur (modèle, processeur, mémoire, carte graphique, disques ; numéros de série à l'écran)
        Rapport à laisser : une page simple pour la personne dépannée, posée sur son Bureau
-       Ce que Gardien a changé : chaque correction lancée ici, datée, réussie ou non
+       Ce que Vanguard a changé : chaque correction lancée ici, datée, réussie ou non
        Entretien du mois : une notification par mois (note, mises à jour, place à libérer, problèmes nouveaux)
   5  Réseau et Internet ›
        Scanner le réseau · Scan approfondi d'un appareil · Nommer un appareil (« imprimante HP »)
@@ -93,17 +93,17 @@ Entrée ouvre celle en surbrillance, Échap efface. Au menu principal, elle trou
        Sauvegarde automatique vers un disque externe, avec l'outil du système (annulable)
        Vérifier une copie : relue sur le disque et comparée aux originaux (test de restauration)
        Vérifier ma clé : vraie capacité (fausses clés), vitesses, blocs en erreur ; écrit dans le libre, puis efface
-       Raccourci sur cet ordinateur : Gardien copié ici et lancé d'un clic
-       Mes ordinateurs : ceux où la clé a fait un bilan, leur note et leurs problèmes restants (gardien ordinateurs)
+       Raccourci sur cet ordinateur : Vanguard copié ici et lancé d'un clic
+       Mes ordinateurs : ceux où la clé a fait un bilan, leur note et leurs problèmes restants (vanguard ordinateurs)
        Protéger les données de la clé : carnet des appareils chiffré par une phrase, demandée ailleurs seulement
  10  Guide des commandes › les commandes utiles d'Omarchy, Arch, Fedora, Debian, Windows 11, macOS et de tous les
        systèmes, par programme, chacune expliquée (⚠ : elle change quelque chose). Tape ce que tu cherches : les
        commandes paraissent au fil de la frappe ; chacune se copie, ou se lance ici si elle ne fait que lire.
-       En ligne de commande : gardien guide fedora, gardien guide winget, gardien guide cache dns
+       En ligne de commande : vanguard guide fedora, vanguard guide winget, vanguard guide cache dns
  11  Dépanner pas à pas › pas d'Internet, Wi-Fi qui coupe, ordinateur lent, pas de son, imprimante,
-       disque plein : deux ou trois questions, puis Gardien vérifie et propose la bonne réparation.
+       disque plein : deux ou trois questions, puis Vanguard vérifie et propose la bonne réparation.
        Et : après une infection, nouvel ordinateur, ordinateur qui part (vente, don), compte piraté.
-       En ligne de commande : gardien depanner son
+       En ligne de commande : vanguard depanner son
   q  Quitter
   Raccourcis des anciennes versions, depuis le menu principal : u mises à jour, r réparer, o diagnostic,
   i intégrité, n nommer, c connexion, a clé USB, b bac à sable, p mots de passe, e courriel, l logiciels,
@@ -115,10 +115,10 @@ certificats racine ajoutés, extensions de navigateur, Bluetooth, heure, fin de 
 mots de passe du navigateur, fichiers sensibles, sauvegardes, santé des disques et de la batterie.
 
 Langue : français ou anglais selon le système. Pour forcer le français :
-  Linux :   GARDIEN_LANG=fr ./gardien
-  Windows : dans l'invite de commandes, set GARDIEN_LANG=fr puis gardien.exe
-  macOS :   GARDIEN_LANG=fr <clé>/macOS/gardien
-Menus décalés dans l'ancienne invite de commandes de Windows : set GARDIEN_EMOJI=0 (fait d'office sans le
+  Linux :   VANGUARD_LANG=fr ./vanguard
+  Windows : dans l'invite de commandes, set VANGUARD_LANG=fr puis vanguard.exe
+  macOS :   VANGUARD_LANG=fr <clé>/macOS/vanguard
+Menus décalés dans l'ancienne invite de commandes de Windows : set VANGUARD_EMOJI=0 (fait d'office sans le
 Terminal Windows).
 
 Bon à savoir
@@ -127,16 +127,16 @@ Bon à savoir
   - Avant la première correction, mise à jour ou réparation qui modifie le système, un point de restauration est
     créé automatiquement (snapper ou timeshift sous Linux, point de restauration sous Windows, instantané local
     de Time Machine sous macOS).
-  - Si tu aides quelqu'un connecté à distance (Bureau à distance, SSH), Gardien ne coupe jamais cet accès.
+  - Si tu aides quelqu'un connecté à distance (Bureau à distance, SSH), Vanguard ne coupe jamais cet accès.
   - Le programme n'est pas signé : SmartScreen peut avertir (« Informations complémentaires » > « Exécuter
     quand même ») et Microsoft Defender peut le signaler, car il scanne des ports. Le code source est sur la clé.
-  - macOS : lancé depuis la clé, Gardien s'ouvre sans avertissement. Copié depuis Internet ou AirDrop, macOS le
+  - macOS : lancé depuis la clé, Vanguard s'ouvre sans avertissement. Copié depuis Internet ou AirDrop, macOS le
     bloque (« développeur non identifié ») : clic droit > Ouvrir, ou Réglages Système > Confidentialité et
     sécurité > « Ouvrir quand même ». Antivirus, logiciels et gaming passent par Homebrew (proposé s'il manque).
   - Restent sur chaque ordinateur, jamais sur la clé : l'historique des bilans et la quarantaine de
     l'antivirus (pour ne jamais transporter de malware).
 
-Gardien est un logiciel libre (licence GNU GPL v3 ou ultérieure, voir LICENSE.txt), fourni sans garantie.
+Vanguard est un logiciel libre (licence GNU GPL v3 ou ultérieure, voir LICENSE.txt), fourni sans garantie.
 Les bibliothèques qu'il inclut sont listées dans LICENCES-TIERCES.txt.
 
 À n'utiliser que sur ton propre réseau, ou un réseau que tu as le droit d'auditer.

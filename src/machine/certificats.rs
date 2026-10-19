@@ -402,17 +402,18 @@ mod tests {
         );
     }
 
-    /// Certificat autosigné « CN=Gardien Test CA, O=Gardien » (openssl req -x509, clé EC P-256).
+    /// Certificat autosigné « CN=Vanguard Test CA, O=Vanguard » (openssl req -x509, clé EC P-256).
     const PEM: &str = "-----BEGIN CERTIFICATE-----
-MIIBrDCCAVOgAwIBAgIUE6vFJgTu55IDfk1mhrWtHrzmC7wwCgYIKoZIzj0EAwIw
-LDEYMBYGA1UEAwwPR2FyZGllbiBUZXN0IENBMRAwDgYDVQQKDAdHYXJkaWVuMB4X
-DTI2MTAxOTAzNTEwMFoXDTM2MTAxNjAzNTEwMFowLDEYMBYGA1UEAwwPR2FyZGll
-biBUZXN0IENBMRAwDgYDVQQKDAdHYXJkaWVuMFkwEwYHKoZIzj0CAQYIKoZIzj0D
-AQcDQgAE2XsnwU6IPIiqyp8Yi/zbuIzpH+iFQeDkbk6Rlb3vRim7c74eiQKCTcsa
-7rO7PZGoQ9PVJQ2ze1D753QEJ8eio6NTMFEwHQYDVR0OBBYEFMJzznjCPBQrhpfV
-Ff+Vy7Bc+Lb3MB8GA1UdIwQYMBaAFMJzznjCPBQrhpfVFf+Vy7Bc+Lb3MA8GA1Ud
-EwEB/wQFMAMBAf8wCgYIKoZIzj0EAwIDRwAwRAIgWHQHZgPwAiK8dtiEzuPuRlbm
-eJiWfAkCDg7AFzVnXZYCICV6CVs52O5FG9jA8GScDACNK5SGr8zL3tlTsqzb6d+i
+MIIBsTCCAVegAwIBAgIUNk+0eAFwLwngOVYPiSUQLdrH6QAwCgYIKoZIzj0EAwIw
+LjEZMBcGA1UEAwwQVmFuZ3VhcmQgVGVzdCBDQTERMA8GA1UECgwIVmFuZ3VhcmQw
+HhcNMjYxMDE5MTUzMjQ5WhcNMzYxMDE2MTUzMjQ5WjAuMRkwFwYDVQQDDBBWYW5n
+dWFyZCBUZXN0IENBMREwDwYDVQQKDAhWYW5ndWFyZDBZMBMGByqGSM49AgEGCCqG
+SM49AwEHA0IABO6li7wNBvG58cVvUAO8x8MbwLw6+sJSlHQQEF3QihB7tNaTrLHI
+1Kjunu34Azac9PL2Vl0qSCQxM6BKoZOLuvajUzBRMB0GA1UdDgQWBBQLNRnjyYUO
+MUE4FCSskJprIu4RAzAfBgNVHSMEGDAWgBQLNRnjyYUOMUE4FCSskJprIu4RAzAP
+BgNVHRMBAf8EBTADAQH/MAoGCCqGSM49BAMCA0gAMEUCIAw1C4ASo9mBvyoQbkIv
+zFjhVZCJTZyJMc8UUk87nyaCAiEAwoEfebCe1+tJZhE4ypL4i0uaG6GD06Nd39my
+xo1zjuQ=
 -----END CERTIFICATE-----
 ";
 
@@ -428,10 +429,10 @@ eJiWfAkCDg7AFzVnXZYCICV6CVs52O5FG9jA8GScDACNK5SGr8zL3tlTsqzb6d+i
     #[test]
     fn sujet_d_un_certificat() {
         let noms = noms_du_fichier(PEM.as_bytes());
-        assert_eq!(noms, ["Gardien Test CA"]);
+        assert_eq!(noms, ["Vanguard Test CA"]);
         // Le même certificat en DER brut (.der, .cer).
         let corps: String = PEM.lines().filter(|l| !l.starts_with("-----")).collect();
-        assert_eq!(noms_du_fichier(&base64(&corps).unwrap()), ["Gardien Test CA"]);
+        assert_eq!(noms_du_fichier(&base64(&corps).unwrap()), ["Vanguard Test CA"]);
         // Fichier qui n'est pas un certificat : rien, sans planter.
         let rien: Vec<String> = Vec::new();
         assert_eq!(noms_du_fichier(b"pas un certificat"), rien);

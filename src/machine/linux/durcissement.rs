@@ -2,8 +2,8 @@
 
 use super::*;
 
-/// Réglages du noyau posés par Gardien, gardés au redémarrage.
-pub(super) const SYSCTL_GARDIEN: &str = "/etc/sysctl.d/99-gardien.conf";
+/// Réglages du noyau posés par Vanguard, gardés au redémarrage.
+pub(super) const SYSCTL_VANGUARD: &str = "/etc/sysctl.d/99-vanguard.conf";
 
 /// Réglages de durcissement du noyau (lisibles sans droits) : (réglage, valeur sûre minimale, rôle en français
 /// et en anglais ; une constante ne peut pas choisir la langue, `reglages_faibles` le fait).
@@ -138,7 +138,7 @@ pub(super) fn durcissement_noyau() -> Constat {
     // Le fichier est réécrit en entier : on garde les réglages qu'une correction précédente y avait mis,
     // sinon ils sauteraient au prochain redémarrage.
     let lignes = fusion_sysctl(
-        &std::fs::read_to_string(SYSCTL_GARDIEN).unwrap_or_default(),
+        &std::fs::read_to_string(SYSCTL_VANGUARD).unwrap_or_default(),
         &faibles
             .iter()
             .map(|(c, _, m, _)| (c.replace('/', "."), *m))
@@ -152,17 +152,17 @@ pub(super) fn durcissement_noyau() -> Constat {
     )
     .corriger(
         tr!(
-            "Appliquer les valeurs sûres (fichier /etc/sysctl.d/99-gardien.conf, gardé au redémarrage)",
-            "Apply the safe values (file /etc/sysctl.d/99-gardien.conf, kept after restart)"
+            "Appliquer les valeurs sûres (fichier /etc/sysctl.d/99-vanguard.conf, gardé au redémarrage)",
+            "Apply the safe values (file /etc/sysctl.d/99-vanguard.conf, kept after restart)"
         ),
         &[
-            &format!("printf '{lignes}' | sudo tee {SYSCTL_GARDIEN} >/dev/null"),
+            &format!("printf '{lignes}' | sudo tee {SYSCTL_VANGUARD} >/dev/null"),
             "sudo sysctl --system >/dev/null",
         ],
     )
 }
 
-/// Contenu de 99-gardien.conf : les réglages déjà présents, mis à jour ou complétés par les nouveaux.
+/// Contenu de 99-vanguard.conf : les réglages déjà présents, mis à jour ou complétés par les nouveaux.
 pub(super) fn fusion_sysctl(existant: &str, nouveaux: &[(String, i64)]) -> String {
     let mut reglages: Vec<(String, String)> = existant
         .lines()
@@ -301,7 +301,7 @@ mod tests {
 
     #[test]
     fn sysctl_garde_les_reglages_precedents() {
-        let existant = "# gardien\nkernel.kptr_restrict = 1\nkernel.dmesg_restrict=0\nmauvais = $(rm -rf ~)\n";
+        let existant = "# vanguard\nkernel.kptr_restrict = 1\nkernel.dmesg_restrict=0\nmauvais = $(rm -rf ~)\n";
         let nouveaux = [
             ("kernel.dmesg_restrict".to_string(), 1),
             ("fs.protected_symlinks".to_string(), 1),

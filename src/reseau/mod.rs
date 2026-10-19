@@ -336,8 +336,8 @@ impl Base {
     }
 
     /// La base voyage sur la clé : branchée sur un autre ordinateur, copiée ou restaurée à la main, elle a pu être
-    /// écrite par autre chose que Gardien. Ses textes montrés (noms, surnoms, fabricants, dates) sont rendus
-    /// inoffensifs dès la lecture : à l'écran, dans le JSON et dans ce que Gardien y réécrit.
+    /// écrite par autre chose que Vanguard. Ses textes montrés (noms, surnoms, fabricants, dates) sont rendus
+    /// inoffensifs dès la lecture : à l'écran, dans le JSON et dans ce que Vanguard y réécrit.
     fn rendre_affichable(&mut self) {
         for r in self.reseaux.values_mut() {
             if let Some(nom) = &mut r.nom {
@@ -401,11 +401,11 @@ pub(crate) fn ecrire_atomique(chemin: &std::path::Path, contenu: impl AsRef<[u8]
     resultat
 }
 
-/// Verrou entre processus Gardien (fichier créé de façon exclusive, retiré à la fin).
+/// Verrou entre processus Vanguard (fichier créé de façon exclusive, retiré à la fin).
 struct Verrou(PathBuf);
 
 impl Verrou {
-    /// Attend au plus 10 s. Un verrou de plus de 2 minutes vient d'un Gardien interrompu : on le reprend.
+    /// Attend au plus 10 s. Un verrou de plus de 2 minutes vient d'un Vanguard interrompu : on le reprend.
     fn prendre(dossier: &std::path::Path) -> Option<Verrou> {
         let _ = std::fs::create_dir_all(dossier);
         let chemin = dossier.join("appareils.verrou");
@@ -423,8 +423,8 @@ impl Verrou {
                         let _ = std::fs::remove_file(&chemin);
                     } else if std::time::Instant::now() > fin {
                         tre!(
-                            "Attention : base des appareils occupée par un autre Gardien, enregistrement sans verrou.",
-                            "Warning: device database locked by another Gardien, saving without a lock."
+                            "Attention : base des appareils occupée par un autre Vanguard, enregistrement sans verrou.",
+                            "Warning: device database locked by another Vanguard, saving without a lock."
                         );
                         return None;
                     } else {
@@ -535,16 +535,16 @@ pub fn nommer(qui: &str, surnom: Option<&str>) -> Result<String, String> {
     }
     let Some(decrit) = trouve else {
         return Err(trf!(
-            "aucun appareil « {qui} » dans la base : lance d'abord un scan du réseau (gardien reseau)",
-            "no device “{qui}” in the database: first run a network scan (gardien network)"
+            "aucun appareil « {qui} » dans la base : lance d'abord un scan du réseau (vanguard reseau)",
+            "no device “{qui}” in the database: first run a network scan (vanguard network)"
         ));
     };
     base.enregistrer(&chemins);
     Ok(decrit)
 }
 
-/// Fichier témoin à la racine de la clé USB de Gardien.
-pub const TEMOIN_CLE: &str = "gardien.cle";
+/// Fichier témoin à la racine de la clé USB de Vanguard.
+pub const TEMOIN_CLE: &str = "vanguard.cle";
 
 /// Volumes montés pour l'utilisateur, un sous-dossier par clé : /run/media/<utilisateur> (Arch, Fedora, openSUSE…)
 /// et /media/<utilisateur> (Debian, Ubuntu, Mint), où udisks range les clés selon la distribution.
@@ -561,7 +561,7 @@ pub fn cles_montees() -> Vec<PathBuf> {
         .collect()
 }
 
-/// Clé USB de Gardien branchée, si elle est trouvée (dossier racine contenant son témoin).
+/// Clé USB de Vanguard branchée, si elle est trouvée (dossier racine contenant son témoin).
 pub fn cle_usb() -> Option<PathBuf> {
     #[cfg(target_os = "linux")]
     let montages = cles_montees();
@@ -639,10 +639,10 @@ fn noms_des_bases(textes: &[String]) -> (Vec<String>, Vec<String>) {
     (reseaux, appareils)
 }
 
-/// La partition GARDIEN est en lecture seule sur les autres ordinateurs (attribut GPT respecté par Windows) :
+/// La partition VANGUARD est en lecture seule sur les autres ordinateurs (attribut GPT respecté par Windows) :
 /// on essaie d'y écrire plutôt que de deviner.
 fn modifiable(dossier: &std::path::Path) -> bool {
-    let essai = dossier.join(format!(".gardien-ecriture-{}", std::process::id()));
+    let essai = dossier.join(format!(".vanguard-ecriture-{}", std::process::id()));
     let ok = std::fs::write(&essai, b"").is_ok();
     let _ = std::fs::remove_file(&essai);
     ok
@@ -682,14 +682,14 @@ pub fn dossier_local() -> PathBuf {
     let base = std::env::var_os("XDG_DATA_HOME")
         .map(PathBuf::from)
         .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share")));
-    base.unwrap_or_default().join("gardien")
+    base.unwrap_or_default().join("vanguard")
 }
 
 /// Le dossier jetable des tests de ce processus (un par `cargo test`, nommé par son numéro de processus), retiré
 /// quand le processus se termine : chaque lancement en laissait un dans le dossier temporaire. Le crochet de sortie
 /// est posé une fois, au premier appel ; les tests tournent tous avant que le processus ne sorte.
 fn dossier_des_tests() -> PathBuf {
-    let dossier = std::env::temp_dir().join(format!("gardien-tests-{}", std::process::id()));
+    let dossier = std::env::temp_dir().join(format!("vanguard-tests-{}", std::process::id()));
     #[cfg(test)]
     {
         static CROCHET: std::sync::Once = std::sync::Once::new();
@@ -698,8 +698,9 @@ fn dossier_des_tests() -> PathBuf {
                 fn atexit(f: extern "C" fn()) -> i32;
             }
             extern "C" fn retirer() {
-                let _ =
-                    std::fs::remove_dir_all(std::env::temp_dir().join(format!("gardien-tests-{}", std::process::id())));
+                let _ = std::fs::remove_dir_all(
+                    std::env::temp_dir().join(format!("vanguard-tests-{}", std::process::id())),
+                );
             }
             // SAFETY : atexit de la bibliothèque C, présent sous Linux, Windows (msvcrt) et macOS ; il reçoit une
             // fonction sans argument qui vit tout le programme, appelée une fois à la sortie normale du processus.
@@ -1056,8 +1057,8 @@ fn afficher(r: &Rapport) {
     afficher_aligne(
         "  ",
         tr!(
-            "Astuce : menu 5 › 3 pour nommer un appareil (gardien nommer <ip> <surnom>), 5 › 2 pour scanner tous ses ports (gardien reseau <ip> -p tous).",
-            "Tip: menu 5 › 3 to name a device (gardien name <ip> <nickname>), 5 › 2 to scan all its ports (gardien network <ip> -p all)."
+            "Astuce : menu 5 › 3 pour nommer un appareil (vanguard nommer <ip> <surnom>), 5 › 2 pour scanner tous ses ports (vanguard reseau <ip> -p tous).",
+            "Tip: menu 5 › 3 to name a device (vanguard name <ip> <nickname>), 5 › 2 to scan all its ports (vanguard network <ip> -p all)."
         ),
         2,
         DISCRET,
@@ -1119,8 +1120,8 @@ pub async fn executer(o: Options) -> Result<Rapport, String> {
         );
         if ips.iter().all(std::net::Ipv4Addr::is_loopback) {
             tre!(
-                "{GRIS}Note : 127.0.0.1 montre aussi les services réservés à cette machine. Pour ce qui est vraiment exposé au réseau : gardien machine.{RESET}",
-                "{GRIS}Note: 127.0.0.1 also shows services reserved to this machine. For what is really exposed to the network: gardien machine.{RESET}"
+                "{GRIS}Note : 127.0.0.1 montre aussi les services réservés à cette machine. Pour ce qui est vraiment exposé au réseau : vanguard machine.{RESET}",
+                "{GRIS}Note: 127.0.0.1 also shows services reserved to this machine. For what is really exposed to the network: vanguard machine.{RESET}"
             );
         }
     }
@@ -1160,7 +1161,7 @@ pub async fn executer(o: Options) -> Result<Rapport, String> {
     let cle = |ip: Ipv4Addr, mac: &Option<String>| mac.clone().unwrap_or_else(|| ip.to_string());
     // Pour cette machine (ou 127.0.0.1), on sait quel programme tient chaque port.
     let programmes = crate::machine::programmes_en_ecoute();
-    // Ce que Gardien a appris des scans d'avant : un appareil connu qui paraît soudain tout fermé est souvent en
+    // Ce que Vanguard a appris des scans d'avant : un appareil connu qui paraît soudain tout fermé est souvent en
     // veille, lent à répondre. Ses ports déjà vus sont revérifiés avec plus de patience : quelques essais ajoutés,
     // aucun retiré.
     if scan_comparable {
@@ -1464,7 +1465,7 @@ mod tests {
 
     #[test]
     fn base_avec_bom_ou_abimee() {
-        let dossier = std::env::temp_dir().join(format!("gardien-base-{}", std::process::id()));
+        let dossier = std::env::temp_dir().join(format!("vanguard-base-{}", std::process::id()));
         std::fs::create_dir_all(&dossier).unwrap();
         let p = dossier.join("appareils.json");
         std::fs::write(
@@ -1504,7 +1505,7 @@ mod tests {
     /// s'enregistre chiffré sur la clé et en clair sur cet ordinateur, et jamais en clair sur la clé.
     #[test]
     fn carnet_chiffre_lu_et_enregistre() {
-        let d = std::env::temp_dir().join(format!("gardien-carnet-chiffre-{}", std::process::id()));
+        let d = std::env::temp_dir().join(format!("vanguard-carnet-chiffre-{}", std::process::id()));
         let donnees = d.join("donnees");
         std::fs::create_dir_all(&donnees).unwrap();
         let carnet = r#"{"reseaux":{"3c:22:fb:00:00:01":{"nom":"Salon","appareils":{}}}}"#;
@@ -1531,7 +1532,7 @@ mod tests {
     /// à la lecture. Le journal des erreurs, lui, reconnaît les noms sous leurs deux formes.
     #[test]
     fn base_piegee_lue_inoffensive() {
-        let dossier = std::env::temp_dir().join(format!("gardien-base-piegee-{}", std::process::id()));
+        let dossier = std::env::temp_dir().join(format!("vanguard-base-piegee-{}", std::process::id()));
         let fichier = dossier.join("appareils.json");
         let piege = "Salon\u{1b}]52;c;eA==\u{7}\u{1b}[2K\r\u{202e}";
         let vu = "Salon�]52;c;eA==��[2K��";
@@ -1561,7 +1562,7 @@ mod tests {
 
     #[test]
     fn ecriture_atomique_et_verrou() {
-        let dossier = std::env::temp_dir().join(format!("gardien-atomique-{}", std::process::id()));
+        let dossier = std::env::temp_dir().join(format!("vanguard-atomique-{}", std::process::id()));
         let fichier = dossier.join("appareils.json");
         ecrire_atomique(&fichier, "{\"reseaux\":{}}").unwrap();
         ecrire_atomique(&fichier, "{\"reseaux\":{\"box\":{\"nom\":null,\"appareils\":{}}}}").unwrap();

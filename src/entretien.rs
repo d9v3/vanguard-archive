@@ -1,4 +1,4 @@
-//! Entretien du mois : une fois par mois, en silence, Gardien regarde cet ordinateur et le dit en une notification :
+//! Entretien du mois : une fois par mois, en silence, Vanguard regarde cet ordinateur et le dit en une notification :
 //! la note de la machine, les mises à jour en attente, la place que le nettoyage libérerait et les problèmes apparus
 //! depuis le mois d'avant. Rien n'est changé : c'est un rappel, les outils restent à lancer soi-même. Planifié comme
 //! la surveillance : minuterie systemd (Linux), Planificateur de tâches (Windows), agent launchd (macOS).
@@ -14,11 +14,11 @@ use crate::risk::Niveau;
 use crate::ui::*;
 
 #[cfg(target_os = "linux")]
-const NOM: &str = "gardien-entretien";
+const NOM: &str = "vanguard-entretien";
 #[cfg(target_os = "macos")]
-const AGENT_MACOS: &str = "com.gardien.entretien";
+const AGENT_MACOS: &str = "com.vanguard.entretien";
 #[cfg(windows)]
-const TACHE_WINDOWS: &str = "gardien - entretien du mois";
+const TACHE_WINDOWS: &str = "vanguard - entretien du mois";
 
 /// Catégories de l'audit qui disent « des mises à jour attendent ».
 #[rustfmt::skip] // une ligne, que rustfmt étalerait sur huit
@@ -114,11 +114,14 @@ fn rediger(e: &Examen, nouvelles: Option<&[String]>) -> (&'static str, Vec<Strin
     });
     if !e.maj.is_empty() || place.is_some() || nouvelles.is_some_and(|n| !n.is_empty()) {
         lignes.push(String::from(tr!(
-            "Ouvre Gardien pour t'en occuper : rien n'a été changé.",
-            "Open Gardien to deal with it: nothing was changed."
+            "Ouvre Vanguard pour t'en occuper : rien n'a été changé.",
+            "Open Vanguard to deal with it: nothing was changed."
         )));
     }
-    (tr!("Gardien : entretien du mois", "Gardien: monthly check-up"), lignes)
+    (
+        tr!("Vanguard : entretien du mois", "Vanguard: monthly check-up"),
+        lignes,
+    )
 }
 
 /// « a, b, c » : les catégories (noms internes, ou alertes « catégorie : message ») traduites, sans doublon, 3 au plus.
@@ -155,7 +158,7 @@ pub fn entretenir() {
     }
 }
 
-/// « gardien entretien » sans argument : ce que dirait l'entretien maintenant, dans le terminal. Rien n'est gardé :
+/// « vanguard entretien » sans argument : ce que dirait l'entretien maintenant, dans le terminal. Rien n'est gardé :
 /// le mois prochain comparera toujours avec le dernier vrai passage.
 pub fn maintenant() {
     titre(tr!("Entretien du mois", "Monthly check-up"));
@@ -191,8 +194,8 @@ pub fn maintenant() {
         );
     } else {
         trp!(
-            "  Entretien coupé : « gardien entretien on » pour une notification par mois.",
-            "  Check-up off: “gardien entretien on” for one notification a month."
+            "  Entretien coupé : « vanguard entretien on » pour une notification par mois.",
+            "  Check-up off: “vanguard entretien on” for one notification a month."
         );
     }
 }
@@ -219,8 +222,8 @@ pub fn activer(oui: bool) {
     ETAT.store(0, Ordering::Relaxed);
     match (oui, reussi) {
         (true, true) => trp!(
-            "  {VERT}✔{RESET} Entretien du mois activé : une notification par mois (note, mises à jour, place, problèmes nouveaux), rien n'est changé.\n  {GRIS}Ce qu'il dirait aujourd'hui : « gardien entretien ».{RESET}",
-            "  {VERT}✔{RESET} Monthly check-up on: one notification a month (grade, updates, space, new problems), nothing is changed.\n  {GRIS}What it would say today: “gardien entretien”.{RESET}"
+            "  {VERT}✔{RESET} Entretien du mois activé : une notification par mois (note, mises à jour, place, problèmes nouveaux), rien n'est changé.\n  {GRIS}Ce qu'il dirait aujourd'hui : « vanguard entretien ».{RESET}",
+            "  {VERT}✔{RESET} Monthly check-up on: one notification a month (grade, updates, space, new problems), nothing is changed.\n  {GRIS}What it would say today: “vanguard entretien”.{RESET}"
         ),
         (true, false) => trp!(
             "  ✖ Impossible d'activer l'entretien du mois.",
@@ -237,12 +240,12 @@ fn unites_systemd(exe: &str) -> (String, &'static str) {
     let exe = format!("\"{}\"", exe.replace('%', "%%").replace('"', "\\\""));
     (
         trf!(
-            "[Unit]\nDescription=Gardien : entretien du mois\n\n[Service]\nType=oneshot\nExecStart={exe} entretenir\nNice=10\n",
-            "[Unit]\nDescription=Gardien: monthly check-up\n\n[Service]\nType=oneshot\nExecStart={exe} entretenir\nNice=10\n"
+            "[Unit]\nDescription=Vanguard : entretien du mois\n\n[Service]\nType=oneshot\nExecStart={exe} entretenir\nNice=10\n",
+            "[Unit]\nDescription=Vanguard: monthly check-up\n\n[Service]\nType=oneshot\nExecStart={exe} entretenir\nNice=10\n"
         ),
         tr!(
-            "[Unit]\nDescription=Gardien : entretien une fois par mois\n\n[Timer]\nOnCalendar=*-*-01 12:00\nRandomizedDelaySec=15min\nPersistent=true\n\n[Install]\nWantedBy=timers.target\n",
-            "[Unit]\nDescription=Gardien: check-up once a month\n\n[Timer]\nOnCalendar=*-*-01 12:00\nRandomizedDelaySec=15min\nPersistent=true\n\n[Install]\nWantedBy=timers.target\n"
+            "[Unit]\nDescription=Vanguard : entretien une fois par mois\n\n[Timer]\nOnCalendar=*-*-01 12:00\nRandomizedDelaySec=15min\nPersistent=true\n\n[Install]\nWantedBy=timers.target\n",
+            "[Unit]\nDescription=Vanguard: check-up once a month\n\n[Timer]\nOnCalendar=*-*-01 12:00\nRandomizedDelaySec=15min\nPersistent=true\n\n[Install]\nWantedBy=timers.target\n"
         ),
     )
 }
@@ -327,12 +330,12 @@ fn script_tache(exe: &str, nom: &str) -> String {
          $t = New-ScheduledTaskTrigger -Weekly -WeeksInterval 4 -DaysOfWeek Saturday -At '12:00'; \
          $s = New-ScheduledTaskSettingsSet -StartWhenAvailable; \
          Register-ScheduledTask -TaskName '{nom}' -Action $a -Trigger $t -Settings $s -Force \
-           -Description 'Entretien de Gardien toutes les quatre semaines : une notification (note, mises à jour, place, problèmes nouveaux), rien n''est changé. Pour arrêter : gardien entretien off' | Out-Null",
+           -Description 'Entretien de Vanguard toutes les quatre semaines : une notification (note, mises à jour, place, problèmes nouveaux), rien n''est changé. Pour arrêter : vanguard entretien off' | Out-Null",
         "$a = New-ScheduledTaskAction -Execute '{exe}' -Argument 'entretenir'; \
          $t = New-ScheduledTaskTrigger -Weekly -WeeksInterval 4 -DaysOfWeek Saturday -At '12:00'; \
          $s = New-ScheduledTaskSettingsSet -StartWhenAvailable; \
          Register-ScheduledTask -TaskName '{nom}' -Action $a -Trigger $t -Settings $s -Force \
-           -Description 'Gardien check-up every four weeks: one notification (grade, updates, space, new problems), nothing is changed. To stop it: gardien entretien off' | Out-Null"
+           -Description 'Vanguard check-up every four weeks: one notification (grade, updates, space, new problems), nothing is changed. To stop it: vanguard entretien off' | Out-Null"
     )
 }
 
@@ -383,7 +386,7 @@ mod tests {
     #[test]
     fn texte_de_l_entretien() {
         let (titre, lignes) = rediger(&examen(Some(82), &["Mises à jour", "Flatpak"], 3 << 30), Some(&[]));
-        assert!(titre.contains("Gardien"));
+        assert!(titre.contains("Vanguard"));
         assert_eq!(lignes.len(), 5, "{lignes:?}");
         assert!(lignes[0].contains("82/100") && lignes[0].contains('B'));
         assert!(lignes[2].contains("3.0") || lignes[2].contains("3,0"));
@@ -424,18 +427,21 @@ mod tests {
 
     #[test]
     fn planificateurs() {
-        let (service, minuterie) = unites_systemd("/home/alice/.local/share/gardien/bin/gardien");
-        assert!(service.contains("ExecStart=\"/home/alice/.local/share/gardien/bin/gardien\" entretenir"));
+        let (service, minuterie) = unites_systemd("/home/alice/.local/share/vanguard/bin/vanguard");
+        assert!(service.contains("ExecStart=\"/home/alice/.local/share/vanguard/bin/vanguard\" entretenir"));
         assert!(minuterie.contains("OnCalendar=*-*-01 12:00") && minuterie.contains("Persistent=true"));
-        let p = plist_entretien("/Users/alice/Gardien & co/gardien", "com.gardien.entretien");
-        assert!(p.contains("<string>/Users/alice/Gardien &amp; co/gardien</string>"));
+        let p = plist_entretien("/Users/alice/Vanguard & co/vanguard", "com.vanguard.entretien");
+        assert!(p.contains("<string>/Users/alice/Vanguard &amp; co/vanguard</string>"));
         assert!(p.contains("<key>Day</key>\n\t\t<integer>1</integer>"));
         assert!(p.contains("<string>entretenir</string>"));
-        let s = script_tache("C:\\Program Files\\L'outil\\gardien.exe", "gardien - entretien du mois");
-        assert!(s.contains("-Execute 'C:\\Program Files\\L''outil\\gardien.exe'"));
+        let s = script_tache(
+            "C:\\Program Files\\L'outil\\vanguard.exe",
+            "vanguard - entretien du mois",
+        );
+        assert!(s.contains("-Execute 'C:\\Program Files\\L''outil\\vanguard.exe'"));
         // L'apostrophe typographique ferme aussi une chaîne PowerShell : doublée de même.
-        let s2 = script_tache("C:\\Users\\Zoé\\L’outil\\gardien.exe", "gardien - entretien du mois");
-        assert!(s2.contains("-Execute 'C:\\Users\\Zoé\\L’’outil\\gardien.exe'"));
+        let s2 = script_tache("C:\\Users\\Zoé\\L’outil\\vanguard.exe", "vanguard - entretien du mois");
+        assert!(s2.contains("-Execute 'C:\\Users\\Zoé\\L’’outil\\vanguard.exe'"));
         assert!(s.contains("-WeeksInterval 4") && s.contains("-StartWhenAvailable"));
         assert!(s.contains("'entretenir'"));
     }

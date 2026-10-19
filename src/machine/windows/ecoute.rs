@@ -1,7 +1,7 @@
 //! Ports en écoute de Windows lus sans PowerShell : `netstat -ano` (les sockets et le numéro de leur programme) et
 //! `tasklist` (le nom de chaque programme), deux programmes ordinaires qui répondent en quelques millisecondes. Les
 //! lectures par PowerShell (Get-NetTCPConnection, Get-NetUDPEndpoint) prenaient chacune 2 à 5 s au bilan, une
-//! vingtaine de PowerShell démarrant ensemble. Les règles de blocage de Gardien se lisent dans le registre.
+//! vingtaine de PowerShell démarrant ensemble. Les règles de blocage de Vanguard se lisent dans le registre.
 
 use std::collections::HashMap;
 use std::process::Command;
@@ -92,7 +92,7 @@ pub(crate) fn lire_tasklist(sortie: &str) -> HashMap<u32, String> {
         .collect()
 }
 
-/// Les ports TCP bloqués en entrée par une règle active de Gardien, lus dans les règles du pare-feu du registre (celles
+/// Les ports TCP bloqués en entrée par une règle active de Vanguard, lus dans les règles du pare-feu du registre (celles
 /// que New-NetFirewallRule écrit). `None` si la clé ne se lit pas : l'appelant demande alors à PowerShell.
 pub(crate) fn ports_bloques() -> Option<Vec<u16>> {
     use winreg::enums::HKEY_LOCAL_MACHINE;
@@ -110,11 +110,11 @@ pub(crate) fn ports_bloques() -> Option<Vec<u16>> {
     )
 }
 
-/// Le port d'une règle du registre si c'est un blocage actif de Gardien en entrée :
-/// « v2.32|Action=Block|Active=TRUE|Dir=In|Protocol=6|LPort=8080|Name=Gardien : bloquer 8080| ».
+/// Le port d'une règle du registre si c'est un blocage actif de Vanguard en entrée :
+/// « v2.32|Action=Block|Active=TRUE|Dir=In|Protocol=6|LPort=8080|Name=Vanguard : bloquer 8080| ».
 pub(crate) fn port_bloque(regle: &str) -> Option<u16> {
     let champ = |cle: &str| regle.split('|').find_map(|c| c.strip_prefix(cle)?.strip_prefix('='));
-    (champ("Name")?.starts_with("Gardien : bloquer")
+    (champ("Name")?.starts_with("Vanguard : bloquer")
         && champ("Active")?.eq_ignore_ascii_case("true")
         && champ("Action")?.eq_ignore_ascii_case("block")
         && champ("Dir")?.eq_ignore_ascii_case("in"))
@@ -168,14 +168,14 @@ Active Connections\r
 
     #[test]
     fn regles_de_blocage() {
-        let regle = "v2.32|Action=Block|Active=TRUE|Dir=In|Protocol=6|LPort=8080|Name=Gardien : bloquer 8080|";
+        let regle = "v2.32|Action=Block|Active=TRUE|Dir=In|Protocol=6|LPort=8080|Name=Vanguard : bloquer 8080|";
         assert_eq!(port_bloque(regle), Some(8080));
         assert_eq!(port_bloque(&regle.replace("Active=TRUE", "Active=FALSE")), None);
         assert_eq!(port_bloque(&regle.replace("Dir=In", "Dir=Out")), None);
         assert_eq!(port_bloque(&regle.replace("Action=Block", "Action=Allow")), None);
-        assert_eq!(port_bloque(&regle.replace("Name=Gardien", "Name=Autre")), None);
+        assert_eq!(port_bloque(&regle.replace("Name=Vanguard", "Name=Autre")), None);
         assert_eq!(
-            port_bloque("v2.32|Action=Block|Active=TRUE|Dir=In|Name=Gardien : bloquer 8080|"),
+            port_bloque("v2.32|Action=Block|Active=TRUE|Dir=In|Name=Vanguard : bloquer 8080|"),
             None
         );
     }

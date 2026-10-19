@@ -8,9 +8,9 @@ Lancé tout seul : à chaque commit (crochets outils/hooks/pre-commit et commit-
 captures du README (outils/captures.py).
 
 Ce qui est personnel est lu sur cet ordinateur, jamais écrit dans le dépôt, qui le publierait lui-même :
-- ~/.config/gardien-dev/confidentiel.txt : une expression par ligne (nom, courriels, adresse…), « # » en commentaire ;
+- ~/.config/vanguard-dev/confidentiel.txt : une expression par ligne (nom, courriels, adresse…), « # » en commentaire ;
 - le courriel et le nom de l'identité Git de l'ordinateur, le nom complet du compte, ses dossiers (/home/<compte>…) ;
-- les appareils de la base de Gardien (noms, adresses MAC), les réseaux Wi-Fi enregistrés et leurs bornes, le nom de
+- les appareils de la base de Vanguard (noms, adresses MAC), les réseaux Wi-Fi enregistrés et leurs bornes, le nom de
   l'ordinateur.
 S'y ajoute, reconnu à sa forme, ce qui pourrait être la donnée de quelqu'un d'autre (les gens chez qui la clé passe) :
 compte d'un dossier personnel (« C:\\Users\\<nom> »), courriel, SID de Windows. Les valeurs inventées des tests sont
@@ -50,7 +50,7 @@ try:
 except ImportError:  # Windows
     pwd = None
 
-PRIVE = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "gardien-dev/confidentiel.txt"
+PRIVE = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "vanguard-dev/confidentiel.txt"
 MAC = re.compile(r"\b[0-9a-fA-F]{2}(?::[0-9a-fA-F]{2}){5}\b")
 # Adresse que GitHub donne à chaque compte pour signer ses commits sans montrer son courriel.
 ANONYME = "@users.noreply.github.com"
@@ -101,15 +101,15 @@ def compte() -> str:
     return os.environ.get("USER") or getpass.getuser()
 
 
-def dossiers_gardien():
+def dossiers_vanguard():
     """Dossier des données de cet ordinateur, et celui de la clé branchée : la base des appareils vit sur les deux."""
     base = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local/share")
-    local = base / "gardien" if (base / "gardien").is_dir() else None
+    local = base / "vanguard" if (base / "vanguard").is_dir() else None
     cle = None
     for media in (Path("/run/media") / compte(), Path("/media") / compte()):
         try:
             for d in media.iterdir():
-                if (d / "gardien.cle").is_file():
+                if (d / "vanguard.cle").is_file():
                     cle = d / "donnees"
         except OSError:
             continue
@@ -184,7 +184,7 @@ def termes():
     ajouter(f"{compte()}@{hote}", "compte et nom de l'ordinateur")
     if len(hote) >= 4 and hote.lower() not in DISTRIBUTIONS and not generique(hote):
         ajouter(hote, "nom de l'ordinateur")
-    noms, macs = appareils(*(d / "appareils.json" for d in dossiers_gardien() if d))
+    noms, macs = appareils(*(d / "appareils.json" for d in dossiers_vanguard() if d))
     reseaux, bornes = reseaux_enregistres()
     for nom in sorted(noms | {n for n in reseaux if not generique(n)}):
         if len(nom) >= 4:
@@ -464,7 +464,7 @@ def donnees_d_autrui(texte, courriels=True):
 def masquer_autrui(texte, masque):
     """Masque ce qui pourrait nommer quelqu'un dans un texte qui part sur GitHub (ticket du journal) : comptes des
     dossiers personnels, courriels, SID, numéros de série, noms du réseau local et du Wi-Fi ; adresses MAC et IP par
-    `masque` (préfixe du fabricant gardé, réseau inventé). Second filet : Gardien anonymise déjà le journal en
+    `masque` (préfixe du fabricant gardé, réseau inventé). Second filet : Vanguard anonymise déjà le journal en
     l'écrivant (src/journal.rs)."""
     morceaux, fin = [], 0
     for debut, fin_du_nom, nom in sorted(comptes(texte)):

@@ -109,11 +109,11 @@ fn installer() -> bool {
         trp!("  ✖ Installation impossible.", "  ✖ Installation failed.");
         return false;
     }
-    // Installé, mais introuvable d'ici : ce n'est pas un échec, il suffit de relancer Gardien.
+    // Installé, mais introuvable d'ici : ce n'est pas un échec, il suffit de relancer Vanguard.
     if moteur().is_none() {
         trp!(
-            "  ✖ Moteur installé, mais pas encore trouvé : relance Gardien.",
-            "  ✖ Engine installed, but not found yet: restart Gardien."
+            "  ✖ Moteur installé, mais pas encore trouvé : relance Vanguard.",
+            "  ✖ Engine installed, but not found yet: restart Vanguard."
         );
         return false;
     }
@@ -453,7 +453,7 @@ mod tests {
     #[test]
     fn moteur_pose_par_winget() {
         // Pour le compte puis pour la machine : le lien de Links d'abord, puis le programme dans son paquet.
-        let d = std::env::temp_dir().join(format!("gardien-yara-winget-{}", std::process::id()));
+        let d = std::env::temp_dir().join(format!("vanguard-yara-winget-{}", std::process::id()));
         let compte = d.join("compte");
         let paquet = compte
             .join("Packages")

@@ -18,7 +18,7 @@ pub(crate) fn dossier_jetable() -> std::io::Result<PathBuf> {
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.subsec_nanos());
-    let dossier = std::env::temp_dir().join(format!("gardien-bac-{}-{nanos}-{n}", std::process::id()));
+    let dossier = std::env::temp_dir().join(format!("vanguard-bac-{}-{nanos}-{n}", std::process::id()));
     #[cfg_attr(windows, allow(unused_mut))]
     let mut createur = std::fs::DirBuilder::new();
     #[cfg(unix)]
@@ -99,7 +99,7 @@ fn present(cmd: &str) -> bool {
         .is_ok_and(|o| o.status.success())
 }
 
-/// « gardien isoler <fichier> » : lance le programme dans un bac à sable.
+/// « vanguard isoler <fichier> » : lance le programme dans un bac à sable.
 pub fn isoler(fichier: &Path) {
     titre(tr!("Bac à sable", "Sandbox"));
     // Le programme à isoler porte le nom que son auteur a choisi : montré, il est rendu inoffensif.
@@ -273,7 +273,7 @@ fn lancer(source: &Path) {
         );
         return;
     };
-    let wsb = jetable.join("gardien.wsb");
+    let wsb = jetable.join("vanguard.wsb");
     if std::fs::write(&wsb, configuration_wsb(&dossier, &nom)).is_err() {
         trp!(
             "  ✖ Configuration impossible à écrire.",
@@ -296,10 +296,10 @@ mod tests {
 
     #[test]
     fn profil_de_sandbox_exec() {
-        let p = profil_sandbox("/private/var/folders/x/T/gardien-bac-1", "/Users/a \"b\"");
+        let p = profil_sandbox("/private/var/folders/x/T/vanguard-bac-1", "/Users/a \"b\"");
         assert!(p.contains("(deny network*)"));
         assert!(p.contains("(deny file-read* (subpath \"/Users/a \\\"b\\\"\"))"));
-        assert!(p.contains("(allow file-read* file-write* (subpath \"/private/var/folders/x/T/gardien-bac-1\"))"));
+        assert!(p.contains("(allow file-read* file-write* (subpath \"/private/var/folders/x/T/vanguard-bac-1\"))"));
     }
 
     #[test]

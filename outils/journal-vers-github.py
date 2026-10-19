@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fait des tickets GitHub (issues) avec les erreurs du journal de Gardien : plantages, scripts PowerShell en échec,
+"""Fait des tickets GitHub (issues) avec les erreurs du journal de Vanguard : plantages, scripts PowerShell en échec,
 vérifications impossibles, scans ratés. Un ticket par erreur ; quand elle revient, un commentaire s'ajoute au ticket
 ouvert. Lancé par outils/deployer.sh avec gh, déjà connecté sur l'ordinateur de développement : aucun mot de passe
 dans le programme ni sur la clé.
@@ -7,7 +7,7 @@ dans le programme ni sur la clé.
     python3 outils/journal-vers-github.py <fichier des entrées à envoyer>
 
 Les entrées envoyées sont retirées du fichier ; celles qui n'ont pas pu partir (pas d'Internet) y restent pour le
-déploiement suivant. Le journal vient aussi des ordinateurs des autres (la clé l'écrit partout où elle passe) : Gardien
+déploiement suivant. Le journal vient aussi des ordinateurs des autres (la clé l'écrit partout où elle passe) : Vanguard
 l'anonymise en l'écrivant (src/journal.rs), puis, avant l'envoi, deux filets (outils/confidentialite.py) : ce qu'il
 aurait laissé passer de cet ordinateur-ci, et ce qui pourrait nommer n'importe qui (comptes, courriels, SID, numéros
 de série, noms d'appareils et du Wi-Fi ; adresses MAC et IP remplacées, préfixe du fabricant gardé).
@@ -28,7 +28,7 @@ MASQUE = "‹masqué›"
 
 
 def entrees(texte):
-    """Une entrée commence par « == date · gardien x · système · langue · commande », puis « [contexte] »."""
+    """Une entrée commence par « == date · vanguard x · système · langue · commande », puis « [contexte] »."""
     return [b.strip("\n") for b in re.split(r"(?m)^(?=== )", texte) if b.startswith("== ")]
 
 
@@ -71,7 +71,7 @@ def main():
     if not liste:
         return
     gh("label", "create", ETIQUETTE, "--color", "B60205",
-       "--description", "Erreur rapportée par le journal de Gardien", "--force")
+       "--description", "Erreur rapportée par le journal de Vanguard", "--force")
     # Ticket de chaque erreur, noté ici : la recherche de GitHub met quelques minutes à voir un ticket tout neuf, et
     # deux déploiements rapprochés feraient sinon deux tickets.
     notes = os.path.join(os.path.dirname(os.path.abspath(chemin)), "tickets-github.json")
@@ -94,7 +94,7 @@ def main():
         # La signature d'abord, sur le texte tel quel : une erreur déjà envoyée retrouve son ticket.
         contexte, detail, sig = signature(e)
         e, contexte, detail = sans_arobase(e), sans_arobase(contexte), sans_arobase(detail)
-        marque = f"gardien-signature-{sig}"
+        marque = f"vanguard-signature-{sig}"
         numero = ouverts.get(sig)
         # Ticket fermé (erreur corrigée) : si elle revient, c'est un nouveau ticket.
         if numero and gh("issue", "view", numero, "--json", "state", "-q", ".state").stdout.strip() != "OPEN":

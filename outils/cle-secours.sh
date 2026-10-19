@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Clé de secours : la clé GARDIEN démarre aussi les ordinateurs, pour réparer ou réinstaller Linux, Windows et macOS.
-#   1 GARDIEN     partition de Ventoy, exFAT : Gardien comme avant (témoin gardien.cle), et ses images dans ISO/ :
+# Clé de secours : la clé VANGUARD démarre aussi les ordinateurs, pour réparer ou réinstaller Linux, Windows et macOS.
+#   1 VANGUARD     partition de Ventoy, exFAT : Vanguard comme avant (témoin vanguard.cle), et ses images dans ISO/ :
 #                 Arch Linux (qui installe aussi Omarchy), Debian et Fedora en installateurs par Internet, SystemRescue
 #                 (réparer, sauver des fichiers, tester la mémoire), et Windows 11 en secours s'il reste la place.
 #                 Les images Linux viennent de outils/images-cle.sh, qui les vérifie et les tient à jour au
 #                 branchement. Attribut GPT « lecture seule » (bit 60) : Windows la monte en lecture seule.
 #   2 VTOYEFI     32 Mio, démarrage de Ventoy (UEFI) ; ne jamais y toucher.
-#   3 GARDIENLOG  64 Mio, exFAT, modifiable partout : le journal des erreurs (src/journal.rs).
+#   3 VANGUARDLOG  64 Mio, exFAT, modifiable partout : le journal des erreurs (src/journal.rs).
 #   4 MACOS       HFS+ : la récupération de macOS, téléchargée chez Apple (BaseSystem), pour les Mac Intel.
 #   5 WIN11       FAT32 : l'installation de Windows 11, qui démarre d'elle-même (menu de démarrage du PC), Secure Boot
 #                 actif, sans ajouter de clé (MOK) au PC comme Ventoy le demande. install.wim y est découpé en morceaux
@@ -32,8 +32,8 @@ OPENCORE=1.0.8
 MACRECOVERY_SHA256=3023a9b4ca79a5255d93c00f25ab5df37e6f938b729b797d9ecea56184b17aff
 # Récupération de macOS : Monterey par défaut, la plus récente des Mac Intel sans puce T2 (2015 à 2017), qui
 # démarrent sur une clé sans réglage ; les Mac T2 (2018 à 2020) le refusent tant qu'on ne l'a pas permis dans
-# Utilitaire Sécurité au démarrage. Autre version : GARDIEN_MACOS_CARTE (identifiants de macrecovery).
-MACOS_CARTE=${GARDIEN_MACOS_CARTE:-Mac-E43C1C25D4880AD6}
+# Utilitaire Sécurité au démarrage. Autre version : VANGUARD_MACOS_CARTE (identifiants de macrecovery).
+MACOS_CARTE=${VANGUARD_MACOS_CARTE:-Mac-E43C1C25D4880AD6}
 MIO=$((1024 * 1024))
 JOURNAL_MIO=64
 VTOYEFI_MIO=32
@@ -43,14 +43,14 @@ MACOS_MIO_ESTIME=2816
 # le cache de images-cle.sh quand elles y sont. Windows 11 : l'ISO multi-édition, de 7,2 à 7,9 Go selon la langue.
 LINUX_MIO_ESTIME=5632
 WINDOWS_ISO_MIO_ESTIME=7534
-IMAGES_LINUX=${GARDIEN_IMAGES:-${XDG_CACHE_HOME:-$HOME/.cache}/gardien/images-cle}
+IMAGES_LINUX=${VANGUARD_IMAGES:-${XDG_CACHE_HOME:-$HOME/.cache}/vanguard/images-cle}
 # Partition WIN11 sans l'image sous la main : de quoi tenir l'ISO la plus grosse.
 WINDOWS_MIO_ESTIME=8192
 # Morceaux de install.wim : 3800 Mio, sous la limite d'un fichier en FAT32 (4 Gio moins un octet).
 MORCEAU_MIO=3800
 FAT32_MAX=4294967295
-# Place gardée dans GARDIEN pour Gardien lui-même, sa base et ses rapports, avant d'y mettre Windows en secours.
-MARGE_GARDIEN_MIO=512
+# Place gardée dans VANGUARD pour Vanguard lui-même, sa base et ses rapports, avant d'y mettre Windows en secours.
+MARGE_VANGUARD_MIO=512
 TYPE_DONNEES=EBD0A0A2-B9E5-4433-87C0-68B6B72699C7
 TYPE_EFI=C12A7328-F81F-11D2-BA4B-00A0C93EC93B
 TYPE_HFS=48465300-0000-11AA-AA11-00306543ECAC
@@ -76,10 +76,10 @@ empreinte_ok() { # fichier empreinte_attendue
   [[ $(sha256sum "$1" | cut -d' ' -f1) == "$2" ]]
 }
 
-# Empreinte attendue de l'image de Windows, celle que Microsoft publie pour cette langue : GARDIEN_WINDOWS_SHA256,
+# Empreinte attendue de l'image de Windows, celle que Microsoft publie pour cette langue : VANGUARD_WINDOWS_SHA256,
 # sinon le fichier <image>.sha256 posé à côté (sa première ligne). Vide si aucune des deux, ou si ce n'en est pas une.
 empreinte_windows() { # image
-  local e=${GARDIEN_WINDOWS_SHA256:-}
+  local e=${VANGUARD_WINDOWS_SHA256:-}
   if [[ -z $e && -f $1.sha256 ]]; then e=$(awk 'NR == 1 {print $1}' "$1.sha256"); fi
   e=${e,,}
   if [[ $e =~ ^[0-9a-f]{64}$ ]]; then echo "$e"; fi
@@ -191,7 +191,7 @@ verifier() { # dossier [cle : aussi la partition WIN11, si elle est montée]
     echo "  ✖ Windows 11 absent (voir --telecharger)"; tout=1
   elif [[ -z $attendue ]]; then
     echo "  ✖ Windows 11 pas vérifié : il faut l'empreinte publiée par Microsoft pour cette langue, dans"
-    echo "    GARDIEN_WINDOWS_SHA256=<empreinte> ou dans le fichier $(basename "$windows").sha256 à côté de l'image"
+    echo "    VANGUARD_WINDOWS_SHA256=<empreinte> ou dans le fichier $(basename "$windows").sha256 à côté de l'image"
     tout=1
   elif empreinte_ok "$windows" "$attendue"; then echo "  ✔ Windows 11 ($(basename "$windows"))"
   else echo "  ✖ Windows 11 différent de l'empreinte de Microsoft"; tout=1; fi
@@ -246,7 +246,7 @@ Windows 11 se télécharge à la main (Microsoft ne donne qu'un lien valable 24 
   2. La langue : « Français canadien » par défaut (ou celle des ordinateurs à réinstaller), puis le lien
      64 bits : enregistrer l'image (Windows11_….iso ou Win11_….iso) dans $d.
   3. L'empreinte SHA256 de cette langue, dans le tableau « Vérifier votre téléchargement » de la même page :
-     dans un fichier <image>.sha256 à côté de l'image (une ligne), ou GARDIEN_WINDOWS_SHA256=<empreinte>
+     dans un fichier <image>.sha256 à côté de l'image (une ligne), ou VANGUARD_WINDOWS_SHA256=<empreinte>
      devant la commande. Puis : $0 --verifier $d
   4. wimlib, qui découpe install.wim pour la partition FAT32 : sudo pacman -S wimlib (ou le paquet wimlib de
      la distribution).
@@ -290,17 +290,17 @@ windows_mio() { # dossier (facultatif)
 
 # Partitions 3, 4 et 5, ajoutées dans la place réservée, pour sfdisk --append.
 partitions_ajoutees() { # macos_mio windows_mio
-  printf 'size=%dMiB, type=%s, name="GARDIENLOG"\n' "$JOURNAL_MIO" "$TYPE_DONNEES"
+  printf 'size=%dMiB, type=%s, name="VANGUARDLOG"\n' "$JOURNAL_MIO" "$TYPE_DONNEES"
   printf 'size=%dMiB, type=%s, name="MACOS"\n' "$1" "$TYPE_HFS"
   printf 'size=%dMiB, type=%s, name="WIN11"\n' "$2" "$TYPE_DONNEES"
 }
 
-# La place de GARDIEN : d'abord Gardien et sa base (marge), les images Linux ; Windows en secours ensuite, s'il tient
+# La place de VANGUARD : d'abord Vanguard et sa base (marge), les images Linux ; Windows en secours ensuite, s'il tient
 # (c'est la première image laissée de côté). Une ligne pour --plan ; code 1 si même Linux ne tient pas.
-place_gardien() { # gardien_mio iso_windows_mio
-  local libre=$(($1 - MARGE_GARDIEN_MIO - $(linux_mio)))
+place_vanguard() { # vanguard_mio iso_windows_mio
+  local libre=$(($1 - MARGE_VANGUARD_MIO - $(linux_mio)))
   if ((libre < 0)); then
-    echo "✖ Clé trop petite : il manque $((-libre)) Mio pour Gardien et les images Linux."
+    echo "✖ Clé trop petite : il manque $((-libre)) Mio pour Vanguard et les images Linux."
     return 1
   elif ((libre >= $2)); then
     echo "Windows 11 aussi dans ISO/, en secours ($2 Mio) : il restera ~$(((libre - $2) / 1024)) Gio."
@@ -316,29 +316,29 @@ plan() { # disque (facultatif), dossier (facultatif)
   macos=$(macos_mio "$d")
   windows=$(windows_mio "$d")
   iso_windows=$(taille_mio "$([[ -n $d && -d $d ]] && fichier_windows "$d" || true)" "$WINDOWS_ISO_MIO_ESTIME")
-  local reserve gardien
+  local reserve vanguard
   reserve=$(reserve_mio "$macos" "$windows")
-  gardien=$((octets / MIO - 1 - VTOYEFI_MIO - reserve))
+  vanguard=$((octets / MIO - 1 - VTOYEFI_MIO - reserve))
   cat <<EOF
 Clé de $(numfmt --to=iec-i --suffix=o --format='%.1f' "$octets") ($disque), table GPT :
-  1 GARDIEN     $(printf '%6d' "$gardien") Mio  exFAT, Ventoy + Gardien + ISO/ (lecture seule sous Windows)
+  1 VANGUARD     $(printf '%6d' "$vanguard") Mio  exFAT, Ventoy + Vanguard + ISO/ (lecture seule sous Windows)
   2 VTOYEFI     $(printf '%6d' "$VTOYEFI_MIO") Mio  FAT, démarrage de Ventoy
-  3 GARDIENLOG  $(printf '%6d' "$JOURNAL_MIO") Mio  exFAT, journal des erreurs
+  3 VANGUARDLOG  $(printf '%6d' "$JOURNAL_MIO") Mio  exFAT, journal des erreurs
   4 MACOS       $(printf '%6d' "$macos") Mio  HFS+, récupération de macOS (Mac Intel)
   5 WIN11       $(printf '%6d' "$windows") Mio  FAT32, installation de Windows 11 (démarre seule, Secure Boot actif)
 
-Dans GARDIEN : Gardien et sa base ($MARGE_GARDIEN_MIO Mio gardés), les images Linux $(linux_mio) Mio (Arch, Debian,
+Dans VANGUARD : Vanguard et sa base ($MARGE_VANGUARD_MIO Mio gardés), les images Linux $(linux_mio) Mio (Arch, Debian,
 Fedora, SystemRescue).
-$(place_gardien "$gardien" "$iso_windows" || true)
+$(place_vanguard "$vanguard" "$iso_windows" || true)
 
 Commandes de --ecrire (rien n'est lancé ici) :
   avant d'effacer                 → images vérifiées ; install.wim découpé en morceaux de $MORCEAU_MIO Mio
                                     (wimlib-imagex split), à côté des images, et relu (wimlib-imagex verify)
-  sauvegarde de la clé montée     → ${XDG_DATA_HOME:-$HOME/.local/share}/gardien/sauvegarde-cle-<date>/
+  sauvegarde de la clé montée     → ${XDG_DATA_HOME:-$HOME/.local/share}/vanguard/sauvegarde-cle-<date>/
                                     (sans ISO/, ni les partitions MACOS et WIN11 : elles se refont)
-  pkexec (une fenêtre)            → sh Ventoy2Disk.sh -I -g -r $reserve -L GARDIEN $disque
-                                    sfdisk --append $disque   (GARDIENLOG, MACOS, WIN11)
-                                    mkfs.exfat -L GARDIENLOG $(partition "$disque" 3)
+  pkexec (une fenêtre)            → sh Ventoy2Disk.sh -I -g -r $reserve -L VANGUARD $disque
+                                    sfdisk --append $disque   (VANGUARDLOG, MACOS, WIN11)
+                                    mkfs.exfat -L VANGUARDLOG $(partition "$disque" 3)
                                     7z e -so -tdmg BaseSystem.dmg <volume>.hfs | dd of=$(partition "$disque" 4)
                                     mkfs.fat -F 32 -n WIN11 $(partition "$disque" 5)
                                     sfdisk --part-attrs $disque 1 GUID:60
@@ -410,18 +410,18 @@ essai() { # dossier d'images (facultatif : la récupération de macOS y est écr
   local images=${1:-} dossier image octets=31037849600
   # Dans le cache, pas dans /tmp : /tmp est souvent en mémoire, avec un quota trop petit pour une clé de 29 Gio
   # (l'image est creuse, mais la récupération de macOS y est écrite pour de vrai).
-  mkdir -p "${XDG_CACHE_HOME:-$HOME/.cache}/gardien-dev"
-  dossier=$(mktemp -d "${XDG_CACHE_HOME:-$HOME/.cache}/gardien-dev/cle-secours-essai.XXXX")
+  mkdir -p "${XDG_CACHE_HOME:-$HOME/.cache}/vanguard-dev"
+  dossier=$(mktemp -d "${XDG_CACHE_HOME:-$HOME/.cache}/vanguard-dev/cle-secours-essai.XXXX")
   image=$dossier/cle.img
   truncate -s "$octets" "$image"
-  local macos windows reserve gardien
+  local macos windows reserve vanguard
   macos=$(macos_mio "$images")
   windows=$(windows_mio "$images")
   reserve=$(reserve_mio "$macos" "$windows")
-  gardien=$((octets / MIO - 1 - VTOYEFI_MIO - reserve))
+  vanguard=$((octets / MIO - 1 - VTOYEFI_MIO - reserve))
   # Ce que fait Ventoy2Disk.sh -g -r : partition 1 au premier Mio, VTOYEFI juste après, la place réservée au bout.
   sfdisk --quiet --label gpt "$image" <<EOF
-start=2048, size=${gardien}MiB, type=$TYPE_DONNEES, name="Ventoy"
+start=2048, size=${vanguard}MiB, type=$TYPE_DONNEES, name="Ventoy"
 size=${VTOYEFI_MIO}MiB, type=$TYPE_EFI, name="VTOYEFI"
 EOF
   # Puis ce que fait --ecrire : les partitions 3, 4 et 5 dans la place réservée, la lecture seule de la 1.
@@ -432,7 +432,7 @@ EOF
   read -r debut4 taille4 < <(debut_taille "$image" 4)
   read -r debut5 taille5 < <(debut_taille "$image" 5)
   truncate -s "${JOURNAL_MIO}M" "$dossier/journal.img"
-  mkfs.exfat -L GARDIENLOG "$dossier/journal.img" >/dev/null
+  mkfs.exfat -L VANGUARDLOG "$dossier/journal.img" >/dev/null
   dd if="$dossier/journal.img" of="$image" bs=1M seek="$((debut3 * 512))" oflag=seek_bytes conv=notrunc,sparse status=none
   if [[ -n $images && -f $(fichier_macos "$images") ]]; then
     local volume
@@ -455,11 +455,11 @@ EOF
       tr '\n' ' ')"
   done
   echo
-  plan "" "$images" | sed -n '/^Dans GARDIEN/,/^$/p' | sed '/^$/d'
+  plan "" "$images" | sed -n '/^Dans VANGUARD/,/^$/p' | sed '/^$/d'
   # La copie dans la FAT32 : avec mtools (mcopy écrit dans l'image sans la monter), sinon elle n'est pas essayée.
   if command -v mcopy >/dev/null; then
     echo "WIN11 : fichier d'essai copié par mcopy dans la FAT32 de l'image, puis relu :"
-    echo "gardien" >"$dossier/essai.txt"
+    echo "vanguard" >"$dossier/essai.txt"
     mcopy -i "$image@@$((debut5 * 512))" "$dossier/essai.txt" ::/
     mdir -i "$image@@$((debut5 * 512))" ::/ | sed 's/^/  /'
   else
@@ -501,11 +501,11 @@ racine() { # disque serie octets dossier macos_mio windows_mio
   fi
   tar -xzf "$tmp/ventoy.tar.gz" -C "$tmp"
   # Ventoy demande deux fois s'il peut tout effacer : la question a déjà été posée, en clair, avant. -L : le nom
-  # GARDIEN, que Gardien et deployer.sh cherchent (avec le témoin gardien.cle).
+  # VANGUARD, que Vanguard et deployer.sh cherchent (avec le témoin vanguard.cle).
   (cd "$tmp/ventoy-$VENTOY" && printf 'y\ny\n' | sh Ventoy2Disk.sh -I -g -r "$(reserve_mio "$macos" "$windows")" \
-    -L GARDIEN "$disque")
+    -L VANGUARD "$disque")
   udevadm settle
-  # Le bureau monte tout seul les partitions neuves de Ventoy (VTOYEFI, GARDIEN) : sfdisk refuse alors un disque
+  # Le bureau monte tout seul les partitions neuves de Ventoy (VTOYEFI, VANGUARD) : sfdisk refuse alors un disque
   # « utilisé ». On démonte, on ajoute les partitions sans relire tout le disque (--no-reread), et le noyau les prend
   # par partx, ce qu'il accepte même si le bureau remonte une partition entre-temps.
   demonter_partitions "$disque"
@@ -514,7 +514,7 @@ racine() { # disque serie octets dossier macos_mio windows_mio
   udevadm settle
   local n
   for n in 3 4 5; do liberer "$(partition "$disque" "$n")"; done
-  mkfs.exfat -L GARDIENLOG "$(partition "$disque" 3)"
+  mkfs.exfat -L VANGUARDLOG "$(partition "$disque" 3)"
   local volume
   volume=$(volume_macos "$(fichier_macos "$d")")
   7z e -so -tdmg "$(fichier_macos "$d")" "${volume% *}" | dd of="$(partition "$disque" 4)" bs=4M conv=fsync status=progress
@@ -581,14 +581,14 @@ ecrire() { # disque dossier
     erreur "il manque wimlib-imagex, qui découpe install.wim pour la partition FAT32 : sudo pacman -S wimlib."
   verifier "$d" || erreur "toutes les images doivent être vérifiées avant d'effacer la clé."
   # Tout ce qui peut échouer se fait avant d'effacer : la place, puis le découpage de install.wim.
-  local octets macos windows reserve gardien
+  local octets macos windows reserve vanguard
   octets=$(lsblk -bdno SIZE "$disque")
   macos=$(macos_mio "$d")
   windows=$(windows_mio "$d")
   reserve=$(reserve_mio "$macos" "$windows")
-  gardien=$((octets / MIO - 1 - VTOYEFI_MIO - reserve))
-  place_gardien "$gardien" "$(taille_mio "$(fichier_windows "$d")" "$WINDOWS_ISO_MIO_ESTIME")" >/dev/null ||
-    erreur "clé trop petite pour Gardien et les images Linux (voir --plan) : rien n'a été effacé."
+  vanguard=$((octets / MIO - 1 - VTOYEFI_MIO - reserve))
+  place_vanguard "$vanguard" "$(taille_mio "$(fichier_windows "$d")" "$WINDOWS_ISO_MIO_ESTIME")" >/dev/null ||
+    erreur "clé trop petite pour Vanguard et les images Linux (voir --plan) : rien n'a été effacé."
   local prep
   prep=$(preparer_windows "$d")
   plan "$disque" "$d"
@@ -598,7 +598,7 @@ ecrire() { # disque dossier
   # Sauvegarde de ce qui est monté (la base donnees/ surtout), puis démontage. Sans ISO/ (une clé de secours déjà
   # faite y garde ~15 Go d'images, qui se retéléchargent), ni les partitions MACOS et WIN11, qui se refont.
   local sauvegarde part point
-  sauvegarde="${XDG_DATA_HOME:-$HOME/.local/share}/gardien/sauvegarde-cle-$(date +%Y%m%d-%H%M%S)"
+  sauvegarde="${XDG_DATA_HOME:-$HOME/.local/share}/vanguard/sauvegarde-cle-$(date +%Y%m%d-%H%M%S)"
   while read -r part; do
     point=$(findmnt -no TARGET -S "$part" | head -1 || true)
     case $(lsblk -no PARTLABEL "$part") in
@@ -617,10 +617,10 @@ ecrire() { # disque dossier
     "$octets" "$(realpath "$d")" "$macos" "$windows"
   udevadm settle
   local cle journal win
-  cle=$(monter "$(partition "$disque" 1)") || erreur "partition GARDIEN impossible à monter."
-  journal=$(monter "$(partition "$disque" 3)") || erreur "partition GARDIENLOG impossible à monter."
+  cle=$(monter "$(partition "$disque" 1)") || erreur "partition VANGUARD impossible à monter."
+  journal=$(monter "$(partition "$disque" 3)") || erreur "partition VANGUARDLOG impossible à monter."
   win=$(monter "$(partition "$disque" 5)") || erreur "partition WIN11 impossible à monter."
-  touch "$cle/gardien.cle" "$journal/gardien-journal.cle"
+  touch "$cle/vanguard.cle" "$journal/vanguard-journal.cle"
   mkdir -p "$cle/ISO" "$cle/ventoy"
   local windows_iso
   windows_iso=$(fichier_windows "$d")
@@ -631,7 +631,7 @@ ecrire() { # disque dossier
   # la première image laissée de côté.
   local libre
   libre=$(($(df --output=avail -B1M "$cle" | tail -1)))
-  if ((libre - MARGE_GARDIEN_MIO >= $(taille_mio "$windows_iso" "$WINDOWS_ISO_MIO_ESTIME"))); then
+  if ((libre - MARGE_VANGUARD_MIO >= $(taille_mio "$windows_iso" "$WINDOWS_ISO_MIO_ESTIME"))); then
     cp "$windows_iso" "$cle/ISO/"
   else
     echo "Pas la place pour Windows 11 en secours dans ISO/ : il démarre par sa partition WIN11 seulement."

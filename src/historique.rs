@@ -99,8 +99,8 @@ pub fn constat() -> Option<crate::machine::Constat> {
                 Niveau::Eleve,
                 if contenu {
                     trf!(
-                        "L'historique des bilans a été modifié après coup : le bilan du {date} ne correspond plus à son empreinte. Quelqu'un, ou un programme, a réécrit historique.json dans le dossier de Gardien.",
-                        "The check history was modified afterwards: the check of {date} no longer matches its checksum. Someone, or a program, rewrote historique.json in Gardien's folder."
+                        "L'historique des bilans a été modifié après coup : le bilan du {date} ne correspond plus à son empreinte. Quelqu'un, ou un programme, a réécrit historique.json dans le dossier de Vanguard.",
+                        "The check history was modified afterwards: the check of {date} no longer matches its checksum. Someone, or a program, rewrote historique.json in Vanguard's folder."
                     )
                 } else {
                     trf!(
@@ -111,8 +111,8 @@ pub fn constat() -> Option<crate::machine::Constat> {
             )
             .manuel(
                 tr!(
-                    "Regarde ce qui a accès au dossier de Gardien (menu Protection › Intégrité, Qui parle à Internet ?) ; la chaîne repart au prochain bilan",
-                    "Look at what has access to Gardien's folder (Protection menu › Integrity, Who talks to the Internet?); the chain restarts at the next check"
+                    "Regarde ce qui a accès au dossier de Vanguard (menu Protection › Intégrité, Qui parle à Internet ?) ; la chaîne repart au prochain bilan",
+                    "Look at what has access to Vanguard's folder (Protection menu › Integrity, Who talks to the Internet?); the chain restarts at the next check"
                 ),
                 &[],
             ),
@@ -383,7 +383,7 @@ pub fn courbe(historique: &[Bilan]) -> Option<String> {
     Some(svg)
 }
 
-/// Date du bilan sans l'heure, prête pour le HTML (les dates écrites par Gardien ne contiennent rien à échapper).
+/// Date du bilan sans l'heure, prête pour le HTML (les dates écrites par Vanguard ne contiennent rien à échapper).
 fn esc_court(date: &str) -> String {
     date.split(' ').next().unwrap_or(date).replace(['<', '>', '&'], "")
 }
@@ -422,7 +422,7 @@ mod tests {
     /// Un historique tronqué n'est pas remplacé en silence par le seul nouveau bilan : il est mis de côté.
     #[test]
     fn historique_illisible_mis_de_cote() {
-        let dossier = std::env::temp_dir().join(format!("gardien-historique-illisible-{}", std::process::id()));
+        let dossier = std::env::temp_dir().join(format!("vanguard-historique-illisible-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dossier);
         std::fs::create_dir_all(&dossier).unwrap();
         let chemin = dossier.join("historique.json");
@@ -449,7 +449,7 @@ mod tests {
     }
     #[test]
     fn chaine_des_bilans() {
-        let dossier = std::env::temp_dir().join(format!("gardien-chaine-{}", std::process::id()));
+        let dossier = std::env::temp_dir().join(format!("vanguard-chaine-{}", std::process::id()));
         std::fs::create_dir_all(&dossier).unwrap();
         let chemin = dossier.join("historique.json");
         // Deux anciens bilans, sans empreinte, déjà là.

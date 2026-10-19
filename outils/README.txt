@@ -1,35 +1,35 @@
-GARDIEN — portable security check (machine + network + antivirus + fixes)
+VANGUARD — portable security check (machine + network + antivirus + fixes)
 ==========================================================================
 Version française : LISEZMOI.txt
 
 This USB key holds the program for Linux, Windows and macOS, its database and its source code.
 
-  Linux/gardien        Linux (any distribution, nothing to install)
-                        Double-click autorun.sh, or in a terminal (outside the key):  <key>/Linux/gardien
-  Windows/gardien.exe  Windows 10/11: double-click (or "Lancer Gardien.bat" at the root).
-  macOS/gardien        macOS 12 and later (Apple Silicon and Intel): double-click "Lancer Gardien.command" at the
+  Linux/vanguard        Linux (any distribution, nothing to install)
+                        Double-click autorun.sh, or in a terminal (outside the key):  <key>/Linux/vanguard
+  Windows/vanguard.exe  Windows 10/11: double-click (or "Lancer Vanguard.bat" at the root).
+  macOS/vanguard        macOS 12 and later (Apple Silicon and Intel): double-click "Lancer Vanguard.command" at the
                         root (Terminal opens).
   autorun.sh            Linux: GNOME offers to run it when the key is plugged in; otherwise double-click or ./autorun.sh
   donnees/              Device database (one notebook per network: yours, each friend's) and the latest
-                        report (rapport.html, and rapport.md as plain text, readable without a browser). It travels with the key: any Gardien that sees the key plugged in uses it. On another
+                        report (rapport.html, and rapport.md as plain text, readable without a browser). It travels with the key: any Vanguard that sees the key plugged in uses it. On another
                         computer the key is protected: the database is read there, and what is added stays on that computer.
   source/               Full source code (Rust) with its git history.
-  gardien.cle          Marker file that makes the key recognized: do not delete it.
+  vanguard.cle          Marker file that makes the key recognized: do not delete it.
 
 How to run each version, command line included (Terminal, PowerShell, Command Prompt): README.txt in the
 Linux, Windows and macOS folders.
 
-Protection: the key has two parts. GARDIEN (everything above) is read-only on Windows, and on Linux and macOS
-Gardien remounts it read-only itself at startup: another computer cannot modify the program. Only its owner's computer
-can write to it. GARDIENLOG, small and writable, holds journal-erreurs.txt: the errors met
+Protection: the key has two parts. VANGUARD (everything above) is read-only on Windows, and on Linux and macOS
+Vanguard remounts it read-only itself at startup: another computer cannot modify the program. Only its owner's computer
+can write to it. VANGUARDLOG, small and writable, holds journal-erreurs.txt: the errors met
 (version, system, message), without user name, computer name or home folder. Back on the owner's computer, they
-become GitHub issues, to improve Gardien. It also holds ordinateurs.json (My computers: grade and problem categories
+become GitHub issues, to improve Vanguard. It also holds ordinateurs.json (My computers: grade and problem categories
 of each computer, without names), which never goes to GitHub.
-Protected data: if the owner protected the key's data (Data menu), Gardien asks for the passphrase on another
+Protected data: if the owner protected the key's data (Data menu), Vanguard asks for the passphrase on another
 computer to read the device record; Enter with nothing, it goes on without the record. Windows
 never starts anything by itself from a USB key (protection against viruses since Windows 7): double-click it.
 
-To start: run Gardien, choose "1. Full check", then "2. Fix".
+To start: run Vanguard, choose "1. Full check", then "2. Fix".
 
 Menu (↑ ↓ to select, Enter to run, Esc or Backspace to go back; or the number, then Enter)
 Search: in any menu, type a word (wifi, disk, dns…): only the lines containing it stay, Enter opens the
@@ -43,13 +43,13 @@ highlighted one, Esc clears it. In the main menu, it also finds each tool of the
        Security audit · Updates (system, programs, drivers, firmware)
        Repair and clean up (Internet, hijacked browsing, firewall, disk full, stuck updates…)
        Diagnostic (hardware, recent crashes and errors, text copy on the key)
-       Critical file integrity (accounts, sudo, SSH, startup; live: gardien integrite --temps-reel)
-       What Gardien has learned: your habits, and the alerts you declared normal ("i" when fixing)
+       Critical file integrity (accounts, sudo, SSH, startup; live: vanguard integrite --temps-reel)
+       What Vanguard has learned: your habits, and the alerts you declared normal ("i" when fixing)
        Why is it slow? (processor, memory, disk, startup, programs started at login; remove them from
-       startup or put them back, after your consent: gardien startup)
+       startup or put them back, after your consent: vanguard startup)
        Computer specs (model, processor, memory, graphics card, disks; serial numbers on screen)
        Report to leave: a simple page for the person you helped, put on their Desktop
-       What Gardien changed: each fix run here, dated, successful or not
+       What Vanguard changed: each fix run here, dated, successful or not
        Monthly check-up: one notification a month (grade, updates, space to free, new problems)
   5  Network and Internet ›
        Scan the network · Deep scan of one device · Name a device ("HP printer")
@@ -92,17 +92,17 @@ highlighted one, Esc clears it. In the main menu, it also finds each tool of the
        Automatic backup to an external disk, with the system's tool (undoable)
        Check a copy: read back from the disk and compared with the originals (restore test)
        Check my drive: real capacity (fake drives), speeds, bad blocks; writes into the free space, then erases
-       Shortcut on this computer: Gardien copied here and started with one click
-       My computers: those where the key ran a check, their grade and remaining problems (gardien ordinateurs)
+       Shortcut on this computer: Vanguard copied here and started with one click
+       My computers: those where the key ran a check, their grade and remaining problems (vanguard ordinateurs)
        Protect the key's data: device record encrypted by a passphrase, asked only elsewhere
  10  Command guide › the useful commands of Omarchy, Arch, Fedora, Debian, Windows 11, macOS and all systems, by
        program, each one explained (⚠: it changes something). Type what you are looking for: commands show up as
        you type; each one can be copied, or run here if it only reads. From the command line:
-       gardien guide fedora, gardien guide winget, gardien guide dns cache
+       vanguard guide fedora, vanguard guide winget, vanguard guide dns cache
  11  Troubleshoot step by step › no Internet, Wi-Fi dropping, slow computer, no sound, printer, disk full:
-       two or three questions, then Gardien checks and suggests the right repair.
+       two or three questions, then Vanguard checks and suggests the right repair.
        And: after an infection, new computer, computer leaving (sale, gift), hacked account.
-       From the command line: gardien troubleshoot sound
+       From the command line: vanguard troubleshoot sound
   q  Quit
   Shortcuts from earlier versions, in the main menu: u updates, r repair, o diagnostic, i integrity,
   n name, c connection, a USB drive, b sandbox, p passwords, e email, l software, g gaming, d data.
@@ -113,10 +113,10 @@ certificates, browser extensions, Bluetooth, clock, end of support, forgotten ac
 sensitive files, backups, disk and battery health.
 
 Language: French or English, following the system. To force English:
-  Linux:   GARDIEN_LANG=en ./gardien
-  Windows: in the command prompt, set GARDIEN_LANG=en then gardien.exe
-  macOS:   GARDIEN_LANG=en <key>/macOS/gardien
-Menus shifted in the old Windows command prompt: set GARDIEN_EMOJI=0 (done by default outside Windows
+  Linux:   VANGUARD_LANG=en ./vanguard
+  Windows: in the command prompt, set VANGUARD_LANG=en then vanguard.exe
+  macOS:   VANGUARD_LANG=en <key>/macOS/vanguard
+Menus shifted in the old Windows command prompt: set VANGUARD_EMOJI=0 (done by default outside Windows
 Terminal).
 
 Good to know
@@ -124,16 +124,16 @@ Good to know
     script (its path is shown) and asks for administrator approval.
   - Before the first fix, update or repair that changes the system, a restore point is created automatically
     (snapper or timeshift on Linux, a restore point on Windows, a local Time Machine snapshot on macOS).
-  - If you help someone connected remotely (Remote Desktop, SSH), Gardien never cuts that access.
+  - If you help someone connected remotely (Remote Desktop, SSH), Vanguard never cuts that access.
   - The program is not signed: SmartScreen may warn ("More info" > "Run anyway") and Microsoft Defender may
     flag it, because it scans ports. The source code is on the key.
-  - macOS: run from the key, Gardien opens without a warning. Copied from the Internet or AirDrop, macOS blocks it
+  - macOS: run from the key, Vanguard opens without a warning. Copied from the Internet or AirDrop, macOS blocks it
     ("unidentified developer"): right-click > Open, or System Settings > Privacy & Security > "Open Anyway".
     Antivirus, software and gaming go through Homebrew (offered if missing).
   - Kept on each computer, never on the key: the check history and the antivirus quarantine (so malware
     never travels on the key).
 
-Gardien is free software (GNU GPL v3 or later, see LICENSE.txt), provided without warranty.
+Vanguard is free software (GNU GPL v3 or later, see LICENSE.txt), provided without warranty.
 The libraries it includes are listed in LICENCES-TIERCES.txt.
 
 Use it only on your own network, or one you are allowed to audit.

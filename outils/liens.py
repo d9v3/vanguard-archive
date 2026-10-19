@@ -17,7 +17,7 @@ Un lien mort (page introuvable, nom de domaine inconnu, fichier, titre ou télé
 lien douteux (refusé aux programmes, serveur lent ou en panne, certificat refusé) est montré sans rien arrêter : il
 faut l'ouvrir soi-même dans un navigateur. Ne sont pas ouverts : les exemples (example.com, adresses privées, « x »),
 les adresses construites à l'exécution, et les cas à part de outils/liens.txt (espaces de noms, points d'accès d'API).
-Une page trouvée bonne n'est pas redemandée pendant un jour (~/.cache/gardien-dev/liens.json).
+Une page trouvée bonne n'est pas redemandée pendant un jour (~/.cache/vanguard-dev/liens.json).
 
 Depuis la racine du dépôt :
     python3 outils/liens.py                      tous les liens du dépôt
@@ -49,7 +49,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 REGLES = Path(__file__).with_name("liens.txt")
-CACHE = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "gardien-dev/liens.json"
+CACHE = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "vanguard-dev/liens.json"
 # Une page trouvée bonne le reste un jour : les déploiements se suivent de près, inutile de tout redemander.
 VALIDITE = 24 * 3600
 DELAI = 15

@@ -189,7 +189,7 @@ pub(crate) fn proposer(nom: &str, liste: &[Element], restauration: bool) {
 }
 
 /// Le menu de Linux et de Windows : deux listes (composants, réglages), « 3 » pour remettre les réglages appliqués
-/// par Gardien, et ce qu'il faut savoir dessous. Rend la touche choisie ; `None` pour revenir. (macOS n'a qu'une
+/// par Vanguard, et ce qu'il faut savoir dessous. Rend la touche choisie ; `None` pour revenir. (macOS n'a qu'une
 /// liste, ouverte directement.)
 #[cfg(not(target_os = "macos"))]
 pub(crate) fn choisir_liste(composants: (&str, &str), reglages: (&str, &str), note: Option<String>) -> Option<String> {
@@ -205,7 +205,7 @@ pub(crate) fn choisir_liste(composants: (&str, &str), reglages: (&str, &str), no
         lignes.push(Ligne::choix(
             "3",
             tr!("Remettre les réglages comme avant", "Put the settings back as before"),
-            &trf!("{notes} réglage(s) de Gardien", "{notes} setting(s) by Gardien"),
+            &trf!("{notes} réglage(s) de Vanguard", "{notes} setting(s) by Vanguard"),
         ));
     }
     if let Some(n) = note {
@@ -226,7 +226,7 @@ pub(crate) fn choisir_liste(composants: (&str, &str), reglages: (&str, &str), no
     Some(choix.trim().to_string()).filter(|c| c == "1" || c == "2" || (c == "3" && notes > 0))
 }
 
-/// Remet comme avant les réglages pour jouer appliqués par Gardien : ceux cochés reprennent leurs valeurs notées
+/// Remet comme avant les réglages pour jouer appliqués par Vanguard : ceux cochés reprennent leurs valeurs notées
 /// (`commandes`), puis ne perdent leur note que si `relire` les retrouve en place.
 #[cfg(not(target_os = "macos"))]
 pub(crate) fn remettre(
@@ -241,8 +241,8 @@ pub(crate) fn remettre(
             "Put the settings back as before"
         )),
         trf!(
-            "  {GRIS}Les valeurs notées avant que Gardien les change.{RESET}",
-            "  {GRIS}The values noted before Gardien changed them.{RESET}"
+            "  {GRIS}Les valeurs notées avant que Vanguard les change.{RESET}",
+            "  {GRIS}The values noted before Vanguard changed them.{RESET}"
         ),
         String::new(),
     ];

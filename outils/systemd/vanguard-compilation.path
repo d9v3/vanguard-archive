@@ -1,0 +1,10 @@
+[Unit]
+Description=Vanguard : surveiller les nouvelles compilations
+
+[Path]
+PathChanged=%h/Projects/vanguard/target/x86_64-unknown-linux-musl/release/vanguard
+PathChanged=%h/Projects/vanguard/target/x86_64-pc-windows-gnu/release/vanguard.exe
+Unit=vanguard-copie.service
+
+[Install]
+WantedBy=default.target

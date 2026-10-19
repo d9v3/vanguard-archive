@@ -1,4 +1,4 @@
-//! Langue de l'interface : français ou anglais, choisie d'après le système (variable GARDIEN_LANG pour forcer).
+//! Langue de l'interface : français ou anglais, choisie d'après le système (variable VANGUARD_LANG pour forcer).
 //! Chaque texte est écrit dans les deux langues à l'endroit où il sert : `tr!("Pare-feu actif", "Firewall on")`.
 //! Les noms internes (catégories des constats, clés JSON) restent en français : le code s'en sert pour décider.
 
@@ -40,7 +40,7 @@ fn detecter() -> bool {
     if cfg!(test) {
         return false;
     }
-    let forcee = std::env::var("GARDIEN_LANG").ok().and_then(|v| code(&v));
+    let forcee = std::env::var("VANGUARD_LANG").ok().and_then(|v| code(&v));
     forcee.or_else(langue_systeme).is_none_or(|c| c != "fr")
 }
 
@@ -156,7 +156,7 @@ fn categorie_en(nom: &str) -> Option<&'static str> {
         "Bureau à distance" => "Remote Desktop",
         "Carte graphique" => "Graphics card",
         "Certificats" => "Certificates",
-        "Clé GARDIEN" => "GARDIEN key",
+        "Clé VANGUARD" => "VANGUARD key",
         "Chiffrement" => "Encryption",
         "Clé USB" => "USB key",
         "Clés SSH" => "SSH keys",

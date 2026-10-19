@@ -2,7 +2,7 @@
 
 *[English](CHANGELOG.en.md)*
 
-Ce que chaque journée a apporté à Gardien, la plus récente en haut. Depuis le 19 octobre 2026, Gardien a une seule
+Ce que chaque journée a apporté à Vanguard, la plus récente en haut. Depuis le 19 octobre 2026, Vanguard a une seule
 publication par jour, qui regroupe le travail de la journée. Seule la dernière version a sa page de téléchargement ;
 chaque version garde son étiquette dans le dépôt (`git checkout v0.62.0`, par exemple), pour être recompilée au besoin.
 
@@ -25,7 +25,7 @@ chaque version garde son étiquette dans le dépôt (`git checkout v0.62.0`, par
 - **Guide des commandes refait.** Une entrée par système : Omarchy, Arch, Fedora, Debian et Ubuntu, autres Linux,
   Windows 11, macOS ; chaque distribution montre ses programmes, puis ceux communs à Linux. On tape ce qu'on cherche
   et les commandes paraissent au fil de la frappe ; chacune a sa page, pour la copier, ou la lancer ici quand elle ne
-  fait que lire (sa sortie défile dans Gardien, Échap l'arrête).
+  fait que lire (sa sortie défile dans Vanguard, Échap l'arrête).
 - **Prédiction des mots dans tous les menus** et les listes à cocher : la fin du mot le plus probable s'affiche en
   gris, Tab la complète. Et un nouveau logo.
 - **Une seule publication par jour.** Ce journal regroupe les versions par jour ; seule la dernière garde sa page de
@@ -46,7 +46,7 @@ chaque version garde son étiquette dans le dépôt (`git checkout v0.62.0`, par
   de l'ordinateur, fin de support du système, comptes oubliés, mots de passe gardés par le navigateur, fichiers
   sensibles qui traînent.
 - **Nouveaux outils.** Sauvegarde automatique, compte piraté, rapport à laisser sur place, raccourci sur le Bureau,
-  et « Ce que Gardien a changé » : chaque correction est notée et datée, et le rapport HTML la résume.
+  et « Ce que Vanguard a changé » : chaque correction est notée et datée, et le rapport HTML la résume.
 - **Prudence.** Les partitions de la clé ne sont plus proposées comme disque ; Vérifier ma clé et Time Machine plus
   prudents ; noms de disque piégés refusés dans les sauvegardes automatiques.
 
@@ -57,7 +57,7 @@ chaque version garde son étiquette dans le dépôt (`git checkout v0.62.0`, par
 - **Nouvelles défenses.** Faux technicien et prise de contrôle à distance, partages ouverts à tous, blocages de
   Windows Defender, fichiers-pièges contre les rançongiciels, Bluetooth, Téléchargements surveillés, quarantaine
   réversible, caméra et micro.
-- **Gardien se vérifie lui-même** : manifeste de la clé, failles des dépendances chaque nuit, vérifier une copie,
+- **Vanguard se vérifie lui-même** : manifeste de la clé, failles des dépendances chaque nuit, vérifier une copie,
   vérifier ma clé, données de la clé chiffrées, « Mes ordinateurs ».
 - **Confort.** Programmes au démarrage, menus qui défilent, recherche dans les listes à cocher, copie d'une commande
   du guide, émojis bien alignés, noms piégés rendus inoffensifs à l'écran.
@@ -65,7 +65,7 @@ chaque version garde son étiquette dans le dépôt (`git checkout v0.62.0`, par
 
 ## 17 octobre 2026 : versions 0.9.5 à 0.51
 
-- **Gardien prend son nom**, avec son logo bouclier et une présentation refaite.
+- **Vanguard prend son nom**, avec son logo bouclier et une présentation refaite.
 - **Bilan élargi.** DNS et certificats racine, extensions et réglages de sécurité des navigateurs, santé de
   l'ordinateur, mots de passe et adresses courriel fuités, persistance cachée, failles connues des paquets, journaux
   effacés, intégrité des fichiers critiques, usurpation ARP de la box, ports ouverts vers Internet par UPnP.

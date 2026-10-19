@@ -210,8 +210,8 @@ pub fn verifier() {
     ));
     for ligne in envelopper(
         tr!(
-            "Si l'adresse Internet de ta maison est sur une liste noire pour pourriel ou attaques, un de tes appareils est sans doute infecté. Gardien demande ton adresse à Cloudflare, puis la cherche dans quatre listes publiques (Spamhaus, SpamCop, DroneBL, PSBL) : elles verront ton adresse.",
-            "If your home's Internet address is on a blocklist for spam or attacks, one of your devices is probably infected. Gardien asks Cloudflare for your address, then looks it up in four public lists (Spamhaus, SpamCop, DroneBL, PSBL): they will see your address."
+            "Si l'adresse Internet de ta maison est sur une liste noire pour pourriel ou attaques, un de tes appareils est sans doute infecté. Vanguard demande ton adresse à Cloudflare, puis la cherche dans quatre listes publiques (Spamhaus, SpamCop, DroneBL, PSBL) : elles verront ton adresse.",
+            "If your home's Internet address is on a blocklist for spam or attacks, one of your devices is probably infected. Vanguard asks Cloudflare for your address, then looks it up in four public lists (Spamhaus, SpamCop, DroneBL, PSBL): they will see your address."
         ),
         LARGEUR - 2,
     ) {
@@ -266,8 +266,8 @@ pub fn verifier() {
     println!();
     let conclusion = match (pire, verifiees) {
         (Some(_), _) => tr!(
-            "Analyse chaque ordinateur de la maison (antivirus de Gardien), mets à jour les téléphones, les objets connectés et la box, change le mot de passe de la box et coupe UPnP si tu n'en as pas besoin. Si ton fournisseur partage ton adresse avec d'autres abonnés, la liste peut viser un voisin : la question vaut alors la peine d'être posée au fournisseur.",
-            "Scan every computer in the house (Gardien's antivirus), update phones, connected devices and the router, change the router's password and turn UPnP off if you do not need it. If your provider shares your address with other customers, the listing may target a neighbor: worth asking the provider."
+            "Analyse chaque ordinateur de la maison (antivirus de Vanguard), mets à jour les téléphones, les objets connectés et la box, change le mot de passe de la box et coupe UPnP si tu n'en as pas besoin. Si ton fournisseur partage ton adresse avec d'autres abonnés, la liste peut viser un voisin : la question vaut alors la peine d'être posée au fournisseur.",
+            "Scan every computer in the house (Vanguard's antivirus), update phones, connected devices and the router, change the router's password and turn UPnP off if you do not need it. If your provider shares your address with other customers, the listing may target a neighbor: worth asking the provider."
         ),
         (None, 0) => tr!(
             "Aucune liste n'a pu être interrogée : rien n'est conclu.",

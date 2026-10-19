@@ -1,4 +1,4 @@
-//! Quarantaine réversible : un fichier jugé dangereux (antivirus, YARA) est déplacé dans le dossier de Gardien sur cet
+//! Quarantaine réversible : un fichier jugé dangereux (antivirus, YARA) est déplacé dans le dossier de Vanguard sur cet
 //! ordinateur (jamais sur la clé : on ne transporte pas de logiciel malveillant), rendu inutilisable (aucune
 //! permission sous Linux et macOS ; sous Windows, une extension qui empêche de le lancer d'un double-clic, et lecture
 //! seule), et noté : d'où il vient, ses permissions, la détection, la date. Une détection peut se tromper : « Remettre »
@@ -11,8 +11,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::ui::*;
 
-/// Ajouté au nom sous Windows : un fichier en « .exe.gardien-quarantaine » ne se lance plus d'un double-clic.
-const SUFFIXE_WINDOWS: &str = ".gardien-quarantaine";
+/// Ajouté au nom sous Windows : un fichier en « .exe.vanguard-quarantaine » ne se lance plus d'un double-clic.
+const SUFFIXE_WINDOWS: &str = ".vanguard-quarantaine";
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 struct Entree {
@@ -246,7 +246,7 @@ pub fn proposer(trouves: &[(PathBuf, String)]) {
     }
 }
 
-/// Menu Antivirus et protection › Quarantaine (`gardien quarantaine`) : ce qui est isolé, à remettre ou à supprimer.
+/// Menu Antivirus et protection › Quarantaine (`vanguard quarantaine`) : ce qui est isolé, à remettre ou à supprimer.
 pub fn menu() {
     titre(tr!("Quarantaine", "Quarantine"));
     let dossier = dossier();
@@ -301,7 +301,7 @@ mod tests {
     use super::*;
 
     fn jetable(nom: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("gardien-quarantaine-{nom}-{}", std::process::id()));
+        let d = std::env::temp_dir().join(format!("vanguard-quarantaine-{nom}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         d

@@ -105,7 +105,7 @@ fn charger(sens: Sens, duree: Duration, arret: &Arc<AtomicBool>) -> Option<f64> 
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.subsec_nanos());
-    let fichier = std::env::temp_dir().join(format!("gardien-envoi-{}-{nanos}.bin", std::process::id()));
+    let fichier = std::env::temp_dir().join(format!("vanguard-envoi-{}-{nanos}.bin", std::process::id()));
     // Création exclusive : jamais un fichier ou un lien posé d'avance par un autre compte dans un /tmp partagé (le
     // contenu, 25 Mo de zéros, l'aurait écrasé).
     if sens == Sens::Envoi
@@ -130,7 +130,7 @@ fn charger(sens: Sens, duree: Duration, arret: &Arc<AtomicBool>) -> Option<f64> 
                 {
                     let reste = duree.saturating_sub(debut.elapsed()).as_secs().max(1).to_string();
                     let mut curl = std::process::Command::new("curl");
-                    curl.args(["-s", "-o", nul, "--max-time", &reste, "-A", "gardien"]);
+                    curl.args(["-s", "-o", nul, "--max-time", &reste, "-A", "vanguard"]);
                     match sens {
                         Sens::Reception => curl.args(["-w", "%{size_download}", TELECHARGEMENT]),
                         Sens::Envoi => curl.args([
@@ -202,7 +202,7 @@ fn reseau_actuel() -> Option<String> {
     crate::reseau::scan::table_arp().get(&box_).cloned()
 }
 
-/// Habitudes du réseau où l'on est (pour « Ce que Gardien a appris »).
+/// Habitudes du réseau où l'on est (pour « Ce que Vanguard a appris »).
 pub fn habitudes_ici() -> Option<Habitudes> {
     habitudes(&historique(), reseau_actuel().as_deref())
 }

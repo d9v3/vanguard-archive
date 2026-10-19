@@ -1,5 +1,5 @@
 //! Parcours « Après une infection » : ce qui presse (couper Internet, ne pas payer, ne pas rappeler le numéro
-//! affiché), puis ce que Gardien vérifie lui-même (persistance, accès à distance, comptes, intégrité, fichiers
+//! affiché), puis ce que Vanguard vérifie lui-même (persistance, accès à distance, comptes, intégrité, fichiers
 //! suspects, navigation détournée), les analyses qu'il propose (YARA, antivirus et démarrage, intégrité en détail,
 //! connexions sortantes, prise de contrôle à distance), et enfin la liste des mots de passe à changer, dans l'ordre,
 //! depuis un autre appareil. Rien n'est changé sans accord : chaque outil redemande le sien.
@@ -166,7 +166,7 @@ pub(super) fn infection() {
             conseil(u);
         }
     }
-    section(tr!("CE QUE GARDIEN VÉRIFIE", "WHAT GARDIEN CHECKS"));
+    section(tr!("CE QUE VANGUARD VÉRIFIE", "WHAT VANGUARD CHECKS"));
     bilan(CATEGORIES);
     analyses(signe, internet);
     section(tr!("MOTS DE PASSE À CHANGER", "PASSWORDS TO CHANGE"));
@@ -198,8 +198,8 @@ pub(super) fn infection() {
     let mut conseils = Vec::new();
     if matches!(signe, Signe::Rancon | Signe::PriseDeControle) {
         conseils.push(tr!(
-            "Quand le doute reste (rançongiciel, prise de contrôle confirmée), la seule certitude est la réinstallation complète : d'abord une copie vérifiée de tes fichiers (Copier mes fichiers), puis le système réinstallé depuis la clé GARDIEN ou l'outil de récupération.",
-            "When doubt remains (ransomware, confirmed remote control), the only certainty is a full reinstall: first a checked copy of your files (Copy my files), then the system reinstalled from the GARDIEN key or the recovery tool."
+            "Quand le doute reste (rançongiciel, prise de contrôle confirmée), la seule certitude est la réinstallation complète : d'abord une copie vérifiée de tes fichiers (Copier mes fichiers), puis le système réinstallé depuis la clé VANGUARD ou l'outil de récupération.",
+            "When doubt remains (ransomware, confirmed remote control), the only certainty is a full reinstall: first a checked copy of your files (Copy my files), then the system reinstalled from the VANGUARD key or the recovery tool."
         ));
     }
     conseils.push(tr!(
@@ -267,8 +267,8 @@ fn liste_des_analyses(signe: Signe, internet: bool) -> Vec<Analyse> {
             texte: tr!("Fichiers critiques modifiés", "Modified critical files"),
             precision: tr!("intégrité", "integrity"),
             detail: tr!(
-                "Comptes, sudo, SSH, démarrage automatique, hosts : ce qui a été modifié, ajouté ou supprimé depuis la référence de Gardien.",
-                "Accounts, sudo, SSH, autostart, hosts: what was modified, added or removed since Gardien's reference."
+                "Comptes, sudo, SSH, démarrage automatique, hosts : ce qui a été modifié, ajouté ou supprimé depuis la référence de Vanguard.",
+                "Accounts, sudo, SSH, autostart, hosts: what was modified, added or removed since Vanguard's reference."
             ),
             cochee: true,
             lancer: integrite,

@@ -1,5 +1,5 @@
 //! DNS le plus rapide : chaque visite de site commence par une question au DNS (« quelle adresse pour ce nom ? »).
-//! Gardien mesure ici le temps de réponse du DNS actuel et de quatre DNS publics (Cloudflare, Quad9, Google,
+//! Vanguard mesure ici le temps de réponse du DNS actuel et de quatre DNS publics (Cloudflare, Quad9, Google,
 //! AdGuard DNS), en douze questions chacun, et retient la médiane. Un DNS qui protège (résolveur sur cet ordinateur
 //! comme NextDNS, requêtes chiffrées, DNS filtrant, Pi-hole du réseau) est gardé, même plus lent : le remplacer
 //! affaiblirait la protection. Sinon, le plus rapide est proposé ; appliqué après accord, il s'annule exactement
@@ -84,7 +84,7 @@ fn mesurer(serveur: IpAddr) -> Option<Duration> {
 fn noms_nouveaux() -> Vec<String> {
     let graine = hasard();
     (0..NOMS.len() * TOURS)
-        .map(|i| format!("gardien-{graine:x}-{i}.example"))
+        .map(|i| format!("vanguard-{graine:x}-{i}.example"))
         .collect()
 }
 
@@ -236,12 +236,12 @@ fn precision(p: &Public, temps: Option<Duration>, plus_rapide: bool) -> String {
     }
 }
 
-/// Menu Optimiser › DNS le plus rapide, ou `gardien dns-rapide`.
+/// Menu Optimiser › DNS le plus rapide, ou `vanguard dns-rapide`.
 pub fn mesurer_et_proposer() {
     titre(tr!("DNS le plus rapide", "Fastest DNS"));
     let intro = tr!(
-        "Chaque visite de site commence par une question au DNS. Gardien mesure ici le DNS actuel et quatre DNS publics, en douze questions chacun. Un DNS qui te protège est gardé, même plus lent.",
-        "Every site visit starts with a question to the DNS. Gardien measures the current DNS and four public ones here, twelve questions each. A DNS that protects you is kept, even if slower."
+        "Chaque visite de site commence par une question au DNS. Vanguard mesure ici le DNS actuel et quatre DNS publics, en douze questions chacun. Un DNS qui te protège est gardé, même plus lent.",
+        "Every site visit starts with a question to the DNS. Vanguard measures the current DNS and four public ones here, twelve questions each. A DNS that protects you is kept, even if slower."
     );
     for ligne in envelopper(intro, LARGEUR - 2) {
         println!("  {ligne}");
@@ -351,15 +351,18 @@ pub fn mesurer_et_proposer() {
     lignes.push(Ligne::Texte(String::new()));
     let change = crate::optimiser::dns_change();
     if let Some((date, _)) = &change {
-        let remettre = tr!("Remettre le DNS d'avant Gardien", "Restore the DNS from before Gardien");
+        let remettre = tr!(
+            "Remettre le DNS d'avant Vanguard",
+            "Restore the DNS from before Vanguard"
+        );
         let quand = trf!("changé le {date}", "changed on {date}");
         lignes.push(Ligne::choix("r", remettre, &quand));
     }
     let conclusion = match meilleur {
         _ if garde.is_some() => "",
         _ if inconnu => tr!(
-            "Ton DNS actuel a une adresse de lien local, que Gardien ne sait pas mesurer : rien n'est comparé.",
-            "Your current DNS has a link-local address, which Gardien cannot measure: nothing is compared."
+            "Ton DNS actuel a une adresse de lien local, que Vanguard ne sait pas mesurer : rien n'est comparé.",
+            "Your current DNS has a link-local address, which Vanguard cannot measure: nothing is compared."
         ),
         None => tr!(
             "Les DNS publics ne répondent pas d'ici (UDP 53 bloqué par le réseau ?) : rien à comparer.",

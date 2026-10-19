@@ -1,4 +1,4 @@
-//! Gardien — sécurise et optimise ta machine et ton réseau : bilan, correctifs, réglages.
+//! Vanguard — sécurise et optimise ta machine et ton réseau : bilan, correctifs, réglages.
 //!
 //! N'utilise le scan réseau que sur un réseau qui t'appartient ou que tu as le droit d'auditer.
 //! Lancé sans argument, affiche un menu.
@@ -147,7 +147,7 @@ enum Commande {
         #[arg(long, visible_alias = "list")]
         liste: bool,
     },
-    /// Ce que Gardien a appris sur cet ordinateur : les alertes déclarées normales, et les oublier.
+    /// Ce que Vanguard a appris sur cet ordinateur : les alertes déclarées normales, et les oublier.
     #[command(visible_alias = "learned")]
     Appris,
     /// Test de connexion pour le jeu : ping, gigue, pertes, débit et bufferbloat.
@@ -244,7 +244,7 @@ enum Commande {
     /// Sauvegarde la base des appareils et l'état de la surveillance dans un fichier JSON.
     #[command(visible_alias = "backup")]
     Sauvegarder {
-        /// Fichier à écrire (par défaut : gardien-sauvegarde-AAAA-MM-JJ.json dans le dossier personnel ou Documents).
+        /// Fichier à écrire (par défaut : vanguard-sauvegarde-AAAA-MM-JJ.json dans le dossier personnel ou Documents).
         fichier: Option<std::path::PathBuf>,
     },
     /// Ajoute une sauvegarde (ou un appareils.json) à la base actuelle, sans rien effacer.
@@ -306,26 +306,26 @@ enum Commande {
     /// ce qui va bien), posée sur son Bureau après accord et ouverte dans le navigateur.
     #[command(name = "a-laisser", visible_alias = "handout")]
     ALaisser,
-    /// Ce que Gardien a changé : chaque correction lancée sur cet ordinateur, sa date et son résultat.
+    /// Ce que Vanguard a changé : chaque correction lancée sur cet ordinateur, sa date et son résultat.
     #[command(visible_alias = "changes")]
     Changements,
     /// Sauvegarde automatique : mise en place avec l'outil du système (Déjà Dup ou rsync chaque jour, Time Machine,
     /// Historique des fichiers) vers un disque externe, après accord, annulable exactement.
     #[command(name = "sauvegarde-auto", visible_alias = "auto-backup")]
     SauvegardeAuto {
-        /// Retirer la sauvegarde automatique mise en place par Gardien (les fichiers sauvegardés restent).
+        /// Retirer la sauvegarde automatique mise en place par Vanguard (les fichiers sauvegardés restent).
         #[arg(long, visible_alias = "undo")]
         annuler: bool,
     },
-    /// Raccourci sur cet ordinateur : Gardien copié ici et lancé d'un clic (menu des applications sous Linux, Bureau
+    /// Raccourci sur cet ordinateur : Vanguard copié ici et lancé d'un clic (menu des applications sous Linux, Bureau
     /// sous Windows et macOS). Sans argument : l'état, puis la proposition.
     #[command(visible_alias = "shortcut")]
     Raccourci {
         #[arg(value_parser = ["on", "off"])]
         etat: Option<String>,
     },
-    /// Mes ordinateurs : ceux où la clé GARDIEN a fait un bilan, leur note et leurs problèmes restants (sur la
-    /// partition GARDIENLOG de la clé).
+    /// Mes ordinateurs : ceux où la clé VANGUARD a fait un bilan, leur note et leurs problèmes restants (sur la
+    /// partition VANGUARDLOG de la clé).
     #[command(visible_alias = "computers")]
     Ordinateurs,
     /// Dépanner pas à pas : pas d'Internet, Wi-Fi qui coupe, ordinateur lent, pas de son, imprimante, disque plein ;
@@ -336,11 +336,11 @@ enum Commande {
         /// décrivent).
         sujet: Vec<String>,
     },
-    /// Vérifier Gardien lui-même : version, date de compilation, empreinte SHA-256 du programme (à comparer à la
+    /// Vérifier Vanguard lui-même : version, date de compilation, empreinte SHA-256 du programme (à comparer à la
     /// page de la version) et, sur la clé du propriétaire, le manifeste de la clé.
     #[command(name = "verifier-moi", visible_alias = "self-check")]
     VerifierMoi,
-    /// Manifeste de la clé GARDIEN : écrit au déploiement (outils/deployer.sh), comparé à la clé branchée.
+    /// Manifeste de la clé VANGUARD : écrit au déploiement (outils/deployer.sh), comparé à la clé branchée.
     #[command(hide = true)]
     Manifeste {
         /// Écrire le manifeste de ce dossier (la racine de la clé) dans la référence de cet ordinateur.
@@ -393,7 +393,7 @@ impl Session {
             afficher_note(tr!("Global", "Overall"), g);
         }
         let (precedent, nouveau) = historique::enregistrer(self.audit.as_ref(), self.reseau.as_ref());
-        // Sur la clé GARDIEN branchée (partition GARDIENLOG) : la visite de cet ordinateur, pour « Mes ordinateurs ».
+        // Sur la clé VANGUARD branchée (partition VANGUARDLOG) : la visite de cet ordinateur, pour « Mes ordinateurs ».
         ordinateurs::noter(self.audit.as_ref(), self.reseau.as_ref());
         if let Some(p) = precedent {
             historique::afficher_changements(&p, &nouveau);
@@ -406,8 +406,8 @@ impl Session {
         if a_corriger {
             let cle = cle_a_molette();
             trp!(
-                "\n  {cle} Des corrections sont possibles : choix « 2 » du menu ou « gardien corriger ».",
-                "\n  {cle} Fixes are available: menu choice “2” or “gardien fix”."
+                "\n  {cle} Des corrections sont possibles : choix « 2 » du menu ou « vanguard corriger ».",
+                "\n  {cle} Fixes are available: menu choice “2” or “vanguard fix”."
             );
         }
         let _ = rapport::generer(self.audit.as_ref(), self.reseau.as_ref());
@@ -438,8 +438,8 @@ fn nommer(appareil: &str, surnom: &str) {
     }
 }
 
-/// Lancé en root (sudo) : Gardien n'en a pas besoin, et une sortie piégée aurait tous les droits. Dit, jamais imposé :
-/// sans session graphique ni agent polkit, pkexec ne peut rien demander, et « sudo gardien » est alors la seule façon
+/// Lancé en root (sudo) : Vanguard n'en a pas besoin, et une sortie piégée aurait tous les droits. Dit, jamais imposé :
+/// sans session graphique ni agent polkit, pkexec ne peut rien demander, et « sudo vanguard » est alors la seule façon
 /// de corriger. Sous Windows, une console administrateur est l'habitude de certains : rien d'alarmant.
 #[cfg(unix)]
 fn avertir_si_root() {
@@ -449,8 +449,8 @@ fn avertir_si_root() {
     }
     for (i, ligne) in envelopper(
         tr!(
-            "Gardien tourne en root (sudo) : il n'en a pas besoin, chaque correction demande le mot de passe au moment voulu, et une sortie piégée aurait ici tous les droits. Relance-le sans sudo, sauf si aucune fenêtre ne peut demander le mot de passe sur cet ordinateur (pas de session graphique) : alors continue.",
-            "Gardien is running as root (sudo): it does not need it, each fix asks for the password when needed, and a booby-trapped output would have every right here. Start it again without sudo, unless no window can ask for the password on this computer (no graphical session): then carry on."
+            "Vanguard tourne en root (sudo) : il n'en a pas besoin, chaque correction demande le mot de passe au moment voulu, et une sortie piégée aurait ici tous les droits. Relance-le sans sudo, sauf si aucune fenêtre ne peut demander le mot de passe sur cet ordinateur (pas de session graphique) : alors continue.",
+            "Vanguard is running as root (sudo): it does not need it, each fix asks for the password when needed, and a booby-trapped output would have every right here. Start it again without sudo, unless no window can ask for the password on this computer (no graphical session): then carry on."
         ),
         LARGEUR - 4,
     )
@@ -509,12 +509,15 @@ fn etat_du_menu(surveillance_active: bool) -> Vec<String> {
         format!(
             "{VERT}{}{RESET}",
             tr!(
-                "clé GARDIEN branchée (protégée en écriture)",
-                "GARDIEN key plugged in (write-protected)"
+                "clé VANGUARD branchée (protégée en écriture)",
+                "VANGUARD key plugged in (write-protected)"
             )
         )
     } else if reseau::cle_usb().is_some() {
-        format!("{VERT}{}{RESET}", tr!("clé GARDIEN branchée", "GARDIEN key plugged in"))
+        format!(
+            "{VERT}{}{RESET}",
+            tr!("clé VANGUARD branchée", "VANGUARD key plugged in")
+        )
     } else {
         format!("{GRIS}{}{RESET}", tr!("clé non branchée", "key not plugged in"))
     };
@@ -538,7 +541,7 @@ fn section_du_menu(t: &str) -> [Ligne; 2] {
 /// Les lignes du menu principal, sous l'état (dernier bilan, clé, surveillance).
 fn lignes_du_menu(etat: Vec<String>) -> Vec<Ligne> {
     let mut lignes: Vec<Ligne> = lignes_cadre(
-        &format!("{ACCENT}GARDIEN{RESET} {GRIS}{}{RESET}", env!("CARGO_PKG_VERSION")),
+        &format!("{ACCENT}VANGUARD{RESET} {GRIS}{}{RESET}", env!("CARGO_PKG_VERSION")),
         tr!(
             "sécurise et optimise ta machine et ton réseau",
             "secures and optimizes your machine and network"
@@ -810,7 +813,7 @@ const OUTILS: &[Outil] = &[
         precision: ["comptes, sudo, SSH, démarrage…", "accounts, sudo, SSH, startup…"],
         mots: "blake3 empreintes fingerprints fichiers files" },
     Outil { action: Action::Appris, groupe: Some(Groupe::Machine), lettre: "",
-        titre: ["Ce que Gardien a appris", "What Gardien has learned"],
+        titre: ["Ce que Vanguard a appris", "What Vanguard has learned"],
         precision: ["tes choix, tes habitudes", "your choices, your habits"],
         mots: "apprentissage learning appris learned choix choices normal oublier forget" },
     Outil { action: Action::Lenteur, groupe: Some(Groupe::Machine), lettre: "",
@@ -826,7 +829,7 @@ const OUTILS: &[Outil] = &[
         precision: ["une page simple, à imprimer", "a simple page, to print"],
         mots: "rapport report imprimer print dépannage help famille family laisser leave page résumé summary" },
     Outil { action: Action::Changements, groupe: Some(Groupe::Machine), lettre: "",
-        titre: ["Ce que Gardien a changé", "What Gardien changed"],
+        titre: ["Ce que Vanguard a changé", "What Vanguard changed"],
         precision: ["chaque correction, datée", "each fix, dated"],
         mots: "changements changes historique history corrections fixes journal log annuler undo" },
     Outil { action: Action::Entretien, groupe: Some(Groupe::Machine), lettre: "",
@@ -968,7 +971,7 @@ const OUTILS: &[Outil] = &[
         mots: "dns rapide fast résolveur resolver cloudflare quad9 google adguard vitesse speed" },
     Outil { action: Action::OptimiserAnnuler, groupe: Some(Groupe::Optimiser), lettre: "",
         titre: ["Tout remettre comme avant", "Put everything back"],
-        precision: ["annule ce que Gardien a changé", "undo what Gardien changed"],
+        precision: ["annule ce que Vanguard a changé", "undo what Vanguard changed"],
         mots: "annuler undo restaurer" },
     Outil { action: Action::Sauvegarder, groupe: Some(Groupe::Donnees), lettre: "d",
         titre: ["Sauvegarder ou restaurer", "Back up or restore"],
@@ -994,11 +997,11 @@ const OUTILS: &[Outil] = &[
                disque externe external drive" },
     Outil { action: Action::Raccourci, groupe: Some(Groupe::Donnees), lettre: "",
         titre: ["Raccourci sur cet ordinateur", "Shortcut on this computer"],
-        precision: ["lancer Gardien d'un clic", "start Gardien with one click"],
+        precision: ["lancer Vanguard d'un clic", "start Vanguard with one click"],
         mots: "raccourci shortcut bureau desktop installer install menu lancer launch icône icon" },
     Outil { action: Action::Ordinateurs, groupe: Some(Groupe::Donnees), lettre: "",
         titre: ["Mes ordinateurs", "My computers"],
-        precision: ["suivis par la clé GARDIEN", "tracked by the GARDIEN key"],
+        precision: ["suivis par la clé VANGUARD", "tracked by the VANGUARD key"],
         mots: "ordinateurs computers tableau dashboard suivi parc famille family clé key" },
     Outil { action: Action::ProtegerDonnees, groupe: Some(Groupe::Donnees), lettre: "",
         titre: ["Protéger les données de la clé", "Protect the key's data"],
@@ -1134,7 +1137,7 @@ async fn sous_menu(s: &mut Session, groupe: Groupe) {
     loop {
         print!("\x1b[2J\x1b[H");
         let mut lignes: Vec<Ligne> = lignes_cadre(
-            &format!("{ACCENT}GARDIEN{RESET} {GRIS}›{RESET} {}", groupe.titre()),
+            &format!("{ACCENT}VANGUARD{RESET} {GRIS}›{RESET} {}", groupe.titre()),
             groupe.resume(),
         )
         .into_iter()
@@ -1290,7 +1293,7 @@ const AIDES_EN: &[(&str, &str)] = &[
     ("nettoyer", "Clean up the system: caches, temporary files, downloaded packages, old logs, trash… The space each \
                   item frees is shown first; check, then accept"),
     ("connexion", "Connection test for gaming: ping, jitter, packet loss, speed and bufferbloat"),
-    ("appris", "What Gardien has learned on this computer: the alerts declared normal, and forgetting them"),
+    ("appris", "What Vanguard has learned on this computer: the alerts declared normal, and forgetting them"),
     ("listes-noires", "Is your home's Internet address on a blocklist (Spamhaus, SpamCop, DroneBL, PSBL)? If so, a \
                        device is probably infected. After your consent: the lists see the address"),
     ("yara", "YARA scan: 308 rules for malware families (ReversingLabs), alongside the antivirus. Without a folder: \
@@ -1310,7 +1313,7 @@ const AIDES_EN: &[(&str, &str)] = &[
     ("motdepasse", "Check whether passwords have leaked (Have I Been Pwned); only 5 characters of their fingerprint \
                     are sent"),
     ("sortantes", "Who talks to the Internet? Each program's current connections, with the server's name. Read-only"),
-    ("verifier-moi", "Check Gardien itself: version, build date, SHA-256 fingerprint of the program (to compare with the release page) and, on the owner's key, the key manifest"),
+    ("verifier-moi", "Check Vanguard itself: version, build date, SHA-256 fingerprint of the program (to compare with the release page) and, on the owner's key, the key manifest"),
     ("distance", "Is someone controlling my computer? Remote control software (AnyDesk, TeamViewer, RustDesk…) installed, started at boot, running or downloaded: the fake technicians' tool. Removed after your consent; a running program asks for a second consent"),
     ("lien", "Is this link dangerous? Checked without ever opening it; after your consent, its age and public lists"),
     ("verifier-fichier", "Check a downloaded file: checksum compared with the site's, name and content, YARA and \
@@ -1339,15 +1342,15 @@ const AIDES_EN: &[(&str, &str)] = &[
     ("verifier-cle", "Check my drive: real capacity (fake drives), speeds and bad blocks of a USB stick or an \
                       external disk. Writes into the free space after your consent, reads back, then erases; your \
                       files are not touched"),
-    ("changements", "What Gardien changed: each fix run on this computer, its date and its result"),
+    ("changements", "What Vanguard changed: each fix run on this computer, its date and its result"),
     ("a-laisser", "Report to leave: a simple page for the person you just helped (grade, what is left to do, what is \
                    fine), put on their Desktop after consent and opened in the browser"),
     ("sauvegarde-auto", "Automatic backup: set up with the system's tool (Déjà Dup or rsync every day, Time Machine, \
                          File History) to an external disk, after your consent, exactly undoable"),
-    ("raccourci", "Shortcut on this computer: Gardien copied here and started with one click (applications menu on \
+    ("raccourci", "Shortcut on this computer: Vanguard copied here and started with one click (applications menu on \
                    Linux, Desktop on Windows and macOS). Without argument: the state, then the offer"),
-    ("ordinateurs", "My computers: those where the GARDIEN key ran a check, their grade and remaining problems (on the \
-     key's GARDIENLOG partition)"),
+    ("ordinateurs", "My computers: those where the VANGUARD key ran a check, their grade and remaining problems (on the \
+     key's VANGUARDLOG partition)"),
     ("depanner", "Troubleshoot step by step: no Internet, Wi-Fi dropping, slow computer, no sound, printer, disk full; \
                   after an infection, new computer, computer leaving (sale, gift)"),
 ];
@@ -1374,7 +1377,7 @@ const OPTIONS_EN: &[(&str, &str, &str)] = &[
     ("yara", "dossier", "A USB drive, external disk or folder to scan entirely"),
     ("integrite", "accepter", "Take the current state as the new reference (after a system update)"),
     ("integrite", "temps_reel", "Watch the critical files live until Ctrl-C"),
-    ("sauvegarder", "fichier", "File to write (default: gardien-sauvegarde-YYYY-MM-DD.json in the home or Documents \
+    ("sauvegarder", "fichier", "File to write (default: vanguard-sauvegarde-YYYY-MM-DD.json in the home or Documents \
                                 folder)"),
     ("nommer", "appareil", "IP (on the current network) or MAC address of the device"),
     ("nommer", "surnom", "The nickname; empty to remove it"),
@@ -1388,7 +1391,7 @@ const OPTIONS_EN: &[(&str, &str, &str)] = &[
     ("copier-fichiers", "destination", "A folder on an external disk (default: chosen among the plugged-in disks)"),
     ("verifier-copie", "dossier", "The disk or the folder of the copy (default: chosen among the plugged-in disks)"),
     ("verifier-cle", "dossier", "A folder of the drive or disk (default: chosen among the plugged-in disks)"),
-    ("sauvegarde-auto", "annuler", "Remove the automatic backup set up by Gardien (the backed-up files stay)"),
+    ("sauvegarde-auto", "annuler", "Remove the automatic backup set up by Vanguard (the backed-up files stay)"),
     ("depanner", "sujet", "The subject: internet, wifi, slow, sound, printer, disk, infection, new, leaving (or words \
                              describing it)"),
 ];

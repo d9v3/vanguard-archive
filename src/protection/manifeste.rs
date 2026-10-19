@@ -1,5 +1,5 @@
-//! Manifeste de la clé GARDIEN : l'empreinte BLAKE3 de chaque fichier de la partition GARDIEN, écrite au déploiement
-//! (outils/deployer.sh lance `gardien manifeste --ecrire`) et gardée sur l'ordinateur du propriétaire, pas sur la clé
+//! Manifeste de la clé VANGUARD : l'empreinte BLAKE3 de chaque fichier de la partition VANGUARD, écrite au déploiement
+//! (outils/deployer.sh lance `vanguard manifeste --ecrire`) et gardée sur l'ordinateur du propriétaire, pas sur la clé
 //! (qui change la clé changerait aussi un manifeste qui y vivrait ; sa présence dit aussi « on est chez le
 //! propriétaire »). Au bilan chez lui, la clé revenue de chez quelqu'un est comparée : fichiers ajoutés (un
 //! autorun.inf planté), modifiés (un programme remplacé), disparus. La lecture seule arrête Windows, pas un Linux
@@ -7,7 +7,7 @@
 //! et le menu ventoy/, réécrits par outils/images-cle.sh et à chaque branchement. Une image de secours remplacée passe
 //! donc inaperçue ici : images-cle.sh vérifie leur signature à la mise à jour, et pourra plus tard noter leur empreinte.
 //!
-//! Et « Vérifier Gardien lui-même » : version, date de compilation (celle du dernier commit, jamais l'horloge : un
+//! Et « Vérifier Vanguard lui-même » : version, date de compilation (celle du dernier commit, jamais l'horloge : un
 //! même code donne le même programme), empreinte SHA-256 du programme par l'outil du système, comme pour un fichier
 //! téléchargé, à comparer à la page de la version ; sur la clé du propriétaire, au manifeste. Une barrière, pas un
 //! coffre : qui remplace le programme peut mentir sur tout cela ; c'est pourquoi la référence reste chez le
@@ -23,7 +23,7 @@ use crate::risk::Niveau;
 use crate::ui::*;
 
 const CAT: &str = "Clé USB";
-const FORMAT: &str = "gardien-manifeste";
+const FORMAT: &str = "vanguard-manifeste";
 /// Dossiers de la clé qui changent sans que personne n'y touche, et ceux que les systèmes y posent eux-mêmes.
 const EXCLUS: &[&str] = &[
     "donnees",
@@ -38,7 +38,7 @@ const EXCLUS: &[&str] = &[
 ];
 /// Au-delà, le fichier n'est pas lu : sa taille seulement (une image disque se lit en une minute).
 const GROS: u64 = 64 << 20;
-/// Une copie de Gardien plus vieille que ça mérite une mise à jour.
+/// Une copie de Vanguard plus vieille que ça mérite une mise à jour.
 const PERIME_JOURS: i64 = 180;
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
@@ -54,7 +54,7 @@ struct Entree {
 #[derive(Serialize, Deserialize)]
 struct Manifeste {
     format: String,
-    version_gardien: String,
+    version_vanguard: String,
     /// « AAAA-MM-JJ HH:MM » de l'écriture.
     date: String,
     fichiers: Vec<Entree>,
@@ -75,7 +75,7 @@ impl Ecart {
     }
 }
 
-/// L'unique référence des 0.59 : une seule clé connue, et une deuxième clé GARDIEN paraissait tout entière changée.
+/// L'unique référence des 0.59 : une seule clé connue, et une deuxième clé VANGUARD paraissait tout entière changée.
 const ANCIENNE_REFERENCE: &str = "manifeste-cle.json";
 /// Une référence par clé depuis la 0.60, nommée par l'identifiant du volume.
 const REFERENCES: &str = "manifestes-cle";
@@ -109,7 +109,7 @@ fn nom_de_reference(id: &str) -> Option<String> {
         .then(|| id.to_string())
 }
 
-/// Les références de clé déjà écrites dans `base` (le dossier de Gardien).
+/// Les références de clé déjà écrites dans `base` (le dossier de Vanguard).
 fn references_par_cle(base: &Path) -> usize {
     std::fs::read_dir(base.join(REFERENCES))
         .into_iter()
@@ -208,7 +208,7 @@ fn ecrire_dans(racine: &Path, reference: &Path, gros: u64) -> Result<usize, Stri
     let fichiers = relever(racine, gros);
     let manifeste = Manifeste {
         format: FORMAT.to_string(),
-        version_gardien: env!("CARGO_PKG_VERSION").to_string(),
+        version_vanguard: env!("CARGO_PKG_VERSION").to_string(),
         date: chrono::Local::now().format("%Y-%m-%d %H:%M").to_string(),
         fichiers,
     };
@@ -238,7 +238,7 @@ fn lire(reference: &Path) -> Result<Manifeste, String> {
     let texte = std::fs::read_to_string(reference).map_err(|e| e.to_string())?;
     let m: Manifeste = serde_json::from_str(texte.trim_start_matches('\u{feff}')).map_err(|e| e.to_string())?;
     if m.format != FORMAT {
-        return Err(tr!("ce n'est pas un manifeste Gardien", "this is not a Gardien manifest").to_string());
+        return Err(tr!("ce n'est pas un manifeste Vanguard", "this is not a Vanguard manifest").to_string());
     }
     Ok(m)
 }
@@ -278,7 +278,7 @@ pub fn comparer(racine: &Path) -> Result<Ecart, String> {
     Ok(comparer_avec(racine, &lire(&reference)?, GROS))
 }
 
-/// Les changements, en une liste courte : « autorun.inf (nouveau), Windows/gardien.exe (modifié)… ».
+/// Les changements, en une liste courte : « autorun.inf (nouveau), Windows/vanguard.exe (modifié)… ».
 fn resume_ecart(ecart: &Ecart) -> String {
     let (n, m, d) = (
         tr!("nouveau", "new"),
@@ -300,7 +300,7 @@ pub fn constat() -> Option<Constat> {
     let cle = crate::reseau::cle_usb()?;
     let base = crate::reseau::dossier_local();
     if reference(&cle).is_none() {
-        // Chez le propriétaire (d'autres clés y ont leur référence), une clé GARDIEN sans la sienne : une deuxième
+        // Chez le propriétaire (d'autres clés y ont leur référence), une clé VANGUARD sans la sienne : une deuxième
         // clé, ou une clé reformatée. Rien n'a pu être comparé, et c'est dit.
         return (references_par_cle(&base) > 0 || base.join(ANCIENNE_REFERENCE).is_file()).then(|| Constat {
             verifie: false,
@@ -308,8 +308,8 @@ pub fn constat() -> Option<Constat> {
                 CAT,
                 Niveau::Info,
                 tr!(
-                    "Cette clé GARDIEN n'a pas de manifeste sur cet ordinateur (une autre clé que celles déployées ici, ou une clé reformatée) : son contenu n'a pas pu être comparé.",
-                    "This GARDIEN key has no manifest on this computer (another key than those deployed here, or a reformatted key): its content could not be compared."
+                    "Cette clé VANGUARD n'a pas de manifeste sur cet ordinateur (une autre clé que celles déployées ici, ou une clé reformatée) : son contenu n'a pas pu être comparé.",
+                    "This VANGUARD key has no manifest on this computer (another key than those deployed here, or a reformatted key): its content could not be compared."
                 ),
             )
             .manuel(
@@ -326,8 +326,8 @@ pub fn constat() -> Option<Constat> {
         Ok(ecart) if ecart.vide() => ok(
             CAT,
             trf!(
-                "La clé GARDIEN n'a pas changé depuis son écriture ({} fichiers vérifiés ; données, images ISO et menu Ventoy mis à part).",
-                "The GARDIEN key has not changed since it was written ({} files checked; data, ISO images and Ventoy menu aside).",
+                "La clé VANGUARD n'a pas changé depuis son écriture ({} fichiers vérifiés ; données, images ISO et menu Ventoy mis à part).",
+                "The VANGUARD key has not changed since it was written ({} files checked; data, ISO images and Ventoy menu aside).",
                 ecart.verifies
             ),
         ),
@@ -335,26 +335,26 @@ pub fn constat() -> Option<Constat> {
             CAT,
             Niveau::Eleve,
             trf!(
-                "La clé GARDIEN a changé depuis son écriture : {}. Un fichier ajouté ou remplacé sur une clé qui a voyagé peut être un piège (autorun, programme remplacé).",
-                "The GARDIEN key has changed since it was written: {}. A file added or replaced on a key that travelled may be a trap (autorun, replaced program).",
+                "La clé VANGUARD a changé depuis son écriture : {}. Un fichier ajouté ou remplacé sur une clé qui a voyagé peut être un piège (autorun, programme remplacé).",
+                "The VANGUARD key has changed since it was written: {}. A file added or replaced on a key that travelled may be a trap (autorun, replaced program).",
                 resume_ecart(&ecart)
             ),
         )
         .manuel(
             tr!(
-                "Ne lance plus Gardien depuis cette clé avant de l'avoir réécrite : chez toi, outils/deployer.sh la remet à neuf",
-                "Do not run Gardien from this key until it is rewritten: at home, outils/deployer.sh restores it"
+                "Ne lance plus Vanguard depuis cette clé avant de l'avoir réécrite : chez toi, outils/deployer.sh la remet à neuf",
+                "Do not run Vanguard from this key until it is rewritten: at home, outils/deployer.sh restores it"
             ),
             &[],
         ),
     })
 }
 
-// ───────────────────────────── Vérifier Gardien lui-même ─────────────────────────────
+// ───────────────────────────── Vérifier Vanguard lui-même ─────────────────────────────
 
 /// Date du dernier commit compilé (build.rs), `None` hors d'un dépôt git.
 pub fn date_compilation() -> Option<NaiveDate> {
-    NaiveDate::parse_from_str(env!("GARDIEN_COMPILE"), "%Y-%m-%d").ok()
+    NaiveDate::parse_from_str(env!("VANGUARD_COMPILE"), "%Y-%m-%d").ok()
 }
 
 fn age_jours(aujourd_hui: NaiveDate) -> Option<i64> {
@@ -370,8 +370,8 @@ fn avertissement(jours: i64) -> Option<String> {
     (jours >= PERIME_JOURS).then(|| {
         let mois = jours / 30;
         trf!(
-            "Cette copie de Gardien a {mois} mois : remets la clé à jour chez toi.",
-            "This copy of Gardien is {mois} months old: update the key at home."
+            "Cette copie de Vanguard a {mois} mois : remets la clé à jour chez toi.",
+            "This copy of Vanguard is {mois} months old: update the key at home."
         )
     })
 }
@@ -388,9 +388,9 @@ fn programme() -> Option<PathBuf> {
     }
 }
 
-/// « gardien verifier-moi » : version, date, empreinte SHA-256, et le manifeste sur la clé du propriétaire.
+/// « vanguard verifier-moi » : version, date, empreinte SHA-256, et le manifeste sur la clé du propriétaire.
 pub fn verifier_moi() {
-    titre(tr!("Vérifier Gardien lui-même", "Check Gardien itself"));
+    titre(tr!("Vérifier Vanguard lui-même", "Check Vanguard itself"));
     println!(
         "  {GRIS}{}{RESET}  {}",
         tr!("Version   ", "Version   "),
@@ -460,8 +460,8 @@ pub fn verifier_moi() {
     println!();
     for ligne in envelopper(
         tr!(
-            "Compare l'empreinte SHA-256 à celle de la page de la version de Gardien, ou à celle que t'a donnée la personne qui t'a remis le programme. Si elles diffèrent, ne l'utilise pas.",
-            "Compare the SHA-256 checksum with the one on Gardien's release page, or the one given by the person who handed you the program. If they differ, do not use it."
+            "Compare l'empreinte SHA-256 à celle de la page de la version de Vanguard, ou à celle que t'a donnée la personne qui t'a remis le programme. Si elles diffèrent, ne l'utilise pas.",
+            "Compare the SHA-256 checksum with the one on Vanguard's release page, or the one given by the person who handed you the program. If they differ, do not use it."
         ),
         LARGEUR - 2,
     ) {
@@ -469,7 +469,7 @@ pub fn verifier_moi() {
     }
 }
 
-/// « gardien manifeste [--ecrire DOSSIER] » : écrit la référence (déploiement), ou compare la clé branchée.
+/// « vanguard manifeste [--ecrire DOSSIER] » : écrit la référence (déploiement), ou compare la clé branchée.
 pub fn commande(ecrire_dossier: Option<&Path>) {
     if let Some(racine) = ecrire_dossier {
         match ecrire(racine) {
@@ -487,7 +487,7 @@ pub fn commande(ecrire_dossier: Option<&Path>) {
     }
     titre(tr!("Manifeste de la clé", "Key manifest"));
     let Some(cle) = crate::reseau::cle_usb() else {
-        trp!("  Clé GARDIEN non branchée.", "  GARDIEN key not plugged in.");
+        trp!("  Clé VANGUARD non branchée.", "  VANGUARD key not plugged in.");
         return;
     };
     match comparer(&cle) {
@@ -524,7 +524,7 @@ mod tests {
     use super::*;
 
     fn dossier_jetable(nom: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("gardien-manifeste-{nom}-{}", std::process::id()));
+        let d = std::env::temp_dir().join(format!("vanguard-manifeste-{nom}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         d
@@ -535,11 +535,11 @@ mod tests {
         assert!(exclu("donnees/appareils.json"));
         assert!(exclu("ISO/omarchy.iso"));
         assert!(exclu("ventoy/ventoy.json"));
-        assert!(exclu("Linux/._gardien"));
+        assert!(exclu("Linux/._vanguard"));
         assert!(exclu(".DS_Store"));
         assert!(exclu(".Trash-1000/files/vieux.txt"));
         assert!(exclu(".TemporaryItems/x"));
-        assert!(!exclu("Linux/gardien"));
+        assert!(!exclu("Linux/vanguard"));
         assert!(!exclu("autorun.inf"));
         assert!(!exclu("source/outils/images-cle.sh"));
     }
@@ -551,7 +551,7 @@ mod tests {
         std::fs::create_dir_all(racine.join("Linux")).unwrap();
         std::fs::create_dir_all(racine.join("donnees")).unwrap();
         std::fs::create_dir_all(racine.join("ISO")).unwrap();
-        std::fs::write(racine.join("Linux/gardien"), b"programme").unwrap();
+        std::fs::write(racine.join("Linux/vanguard"), b"programme").unwrap();
         std::fs::write(racine.join("LISEZMOI.txt"), b"lis-moi").unwrap();
         std::fs::write(racine.join("gros.img"), b"0123456789abcdef").unwrap();
         std::fs::write(racine.join("donnees/appareils.json"), b"{}").unwrap();
@@ -565,7 +565,7 @@ mod tests {
         assert!(
             m.fichiers
                 .iter()
-                .find(|e| e.chemin == "Linux/gardien")
+                .find(|e| e.chemin == "Linux/vanguard")
                 .unwrap()
                 .blake3
                 .is_some()
@@ -577,18 +577,18 @@ mod tests {
         // La clé revient : un autorun planté, le programme remplacé (même taille), le guide disparu, les données et
         // une image changées (normal), le gros fichier changé à taille égale (pas vu : dit dans la doc).
         std::fs::write(racine.join("autorun.inf"), b"[autorun]").unwrap();
-        std::fs::write(racine.join("Linux/gardien"), b"PROGRAMME").unwrap();
+        std::fs::write(racine.join("Linux/vanguard"), b"PROGRAMME").unwrap();
         std::fs::remove_file(racine.join("LISEZMOI.txt")).unwrap();
         std::fs::write(racine.join("donnees/appareils.json"), b"{\"x\":1}").unwrap();
         std::fs::write(racine.join("ISO/y.iso"), b"iso2").unwrap();
         std::fs::write(racine.join("gros.img"), b"fedcba9876543210").unwrap();
         let ecart = comparer_avec(&racine, &m, 10);
         assert_eq!(ecart.nouveaux, ["autorun.inf"]);
-        assert_eq!(ecart.modifies, ["Linux/gardien"]);
+        assert_eq!(ecart.modifies, ["Linux/vanguard"]);
         assert_eq!(ecart.disparus, ["LISEZMOI.txt"]);
         assert_eq!(ecart.verifies, 1);
         assert!(
-            resume_ecart(&ecart).starts_with("autorun.inf (nouveau), Linux/gardien (modifié), LISEZMOI.txt (disparu)")
+            resume_ecart(&ecart).starts_with("autorun.inf (nouveau), Linux/vanguard (modifié), LISEZMOI.txt (disparu)")
         );
         // Le gros fichier qui change de taille, lui, se voit.
         std::fs::write(racine.join("gros.img"), b"court").unwrap();
@@ -601,7 +601,7 @@ mod tests {
         // Une référence qui n'est pas un manifeste est refusée.
         std::fs::write(
             &reference,
-            b"{\"format\":\"autre\",\"version_gardien\":\"\",\"date\":\"\",\"fichiers\":[]}",
+            b"{\"format\":\"autre\",\"version_vanguard\":\"\",\"date\":\"\",\"fichiers\":[]}",
         )
         .unwrap();
         assert!(lire(&reference).is_err());
@@ -645,13 +645,13 @@ mod tests {
     #[test]
     fn date_de_compilation_et_copie_perimee() {
         // Compilé depuis le dépôt : la date du dernier commit est là.
-        let d = date_compilation().expect("GARDIEN_COMPILE posée par build.rs");
+        let d = date_compilation().expect("VANGUARD_COMPILE posée par build.rs");
         assert!(d.format("%Y").to_string().starts_with("20"));
         assert_eq!(avertissement(10), None);
         assert_eq!(avertissement(179), None);
         assert_eq!(
             avertissement(210).as_deref(),
-            Some("Cette copie de Gardien a 7 mois : remets la clé à jour chez toi.")
+            Some("Cette copie de Vanguard a 7 mois : remets la clé à jour chez toi.")
         );
     }
 }

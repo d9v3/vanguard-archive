@@ -4,7 +4,7 @@
 //! comparée à celle de l'original. Rien n'est jamais effacé ni écrasé : un fichier différent déjà sur le disque garde
 //! sa place, la copie prend un autre nom (« photo (2).jpg »). Une copie interrompue (disque débranché, Ctrl-C)
 //! reprend là où elle s'est arrêtée : ce qui est déjà copié, à l'identique, n'est pas recopié. Jamais vers la clé
-//! GARDIEN ni vers le disque du système.
+//! VANGUARD ni vers le disque du système.
 
 use std::fs::{File, OpenOptions};
 use std::io::{ErrorKind, IsTerminal, Read, Write};
@@ -16,12 +16,12 @@ use crate::selection::{Case, Ligne, choisir, cocher};
 use crate::ui::*;
 
 /// Témoin d'une copie pas finie, dans son dossier daté : sa présence propose la reprise.
-const TEMOIN: &str = ".gardien-copie-en-cours";
+const TEMOIN: &str = ".vanguard-copie-en-cours";
 /// Fichier en cours d'écriture : renommé seulement une fois complet, il n'est jamais pris pour une vraie copie.
-const PARTIEL: &str = ".gardien-partiel";
-const COMPTE_RENDU: &str = "gardien-copie.txt";
+const PARTIEL: &str = ".vanguard-partiel";
+const COMPTE_RENDU: &str = "vanguard-copie.txt";
 /// Début du nom des dossiers datés, en français puis en anglais (une copie se reprend dans les deux langues).
-const PREFIXES: [&str; 2] = ["Gardien-copie-", "Gardien-copy-"];
+const PREFIXES: [&str; 2] = ["Vanguard-copie-", "Vanguard-copy-"];
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Sorte {
@@ -101,7 +101,7 @@ pub struct Disque {
     pub total: u64,
 }
 
-/// La clé GARDIEN (ou sa partition des journaux), reconnue à ses témoins.
+/// La clé VANGUARD (ou sa partition des journaux), reconnue à ses témoins.
 pub(crate) fn est_la_cle(racine: &Path) -> bool {
     [crate::reseau::TEMOIN_CLE, crate::journal::TEMOIN]
         .iter()
@@ -259,7 +259,7 @@ pub(crate) fn disques() -> Vec<Disque> {
         "vfat", "exfat", "ntfs", "ntfs3", "fuseblk", "ext2", "ext3", "ext4", "btrfs", "xfs", "f2fs", "hfsplus", "udf",
     ];
     let montages = std::fs::read_to_string("/proc/mounts").unwrap_or_default();
-    // Les autres partitions de la clé GARDIEN (VTOYEFI, WIN11, MACOS…) n'ont pas son témoin, mais sont sur le même
+    // Les autres partitions de la clé VANGUARD (VTOYEFI, WIN11, MACOS…) n'ont pas son témoin, mais sont sur le même
     // support : elles ne sont pas un disque où copier ou écrire des essais.
     let de_la_cle: Vec<String> = montages
         .lines()
@@ -328,7 +328,7 @@ fn disque_de_la_partition(source: &str) -> Option<String> {
     }
 }
 
-/// macOS : « /dev/disk4s1 on /Volumes/GARDIEN (…) » (sortie de mount) → (point de montage, « disk4 »).
+/// macOS : « /dev/disk4s1 on /Volumes/VANGUARD (…) » (sortie de mount) → (point de montage, « disk4 »).
 #[cfg(any(target_os = "macos", test))]
 fn disques_de_mount(sortie: &str) -> Vec<(PathBuf, String)> {
     sortie
@@ -351,7 +351,7 @@ fn disques_de_mount(sortie: &str) -> Vec<(PathBuf, String)> {
 pub(crate) fn disques() -> Vec<Disque> {
     use std::os::unix::fs::MetadataExt;
     let systeme = std::fs::metadata("/").ok().map(|m| m.dev());
-    // Les autres partitions de la clé GARDIEN (MACOS…), sur le même support qu'elle : exclues aussi.
+    // Les autres partitions de la clé VANGUARD (MACOS…), sur le même support qu'elle : exclues aussi.
     let montages = crate::commande::lancer(&mut std::process::Command::new("mount"), 10)
         .map(|r| disques_de_mount(&r.sortie))
         .unwrap_or_default();
@@ -397,7 +397,7 @@ pub(crate) fn disques() -> Vec<Disque> {
     let texte = lecteurs.unwrap_or_default();
     let systeme = std::env::var("SystemDrive").map_or("C:".into(), |s| s.to_uppercase());
     let mut liste = lire_lecteurs(&texte, &systeme);
-    // Les autres partitions de la clé GARDIEN (WIN11…) sont sur le même disque qu'elle : exclues aussi.
+    // Les autres partitions de la clé VANGUARD (WIN11…) sont sur le même disque qu'elle : exclues aussi.
     let numeros = disques_des_lecteurs(&texte);
     let numero = |d: &Disque| numeros.iter().find(|(r, _)| *r == d.racine).map(|(_, n)| n.clone());
     let de_la_cle: Vec<String> = liste
@@ -575,10 +575,10 @@ pub(crate) fn sans_cache(_: &File) {}
 /// Copie `source` vers `cible` (qui n'existe pas) en passant par un fichier partiel, puis vérifie.
 fn copier_vers(source: &Path, cible: &Path) -> std::io::Result<()> {
     let nom = cible.file_name().unwrap_or_default().to_string_lossy();
-    // Le partiel porte un nom court tiré du vrai : « .<nom>.gardien-partiel » dépassait 255 octets pour un nom long.
+    // Le partiel porte un nom court tiré du vrai : « .<nom>.vanguard-partiel » dépassait 255 octets pour un nom long.
     let partiel = cible.with_file_name(format!(".{}{PARTIEL}", &blake3::hash(nom.as_bytes()).to_hex()[..16]));
     // Un partiel laissé par une copie interrompue est à nous : on le remplace, et celui des versions d'avant
-    // (« .<nom>.gardien-partiel ») ne reste pas en plan.
+    // (« .<nom>.vanguard-partiel ») ne reste pas en plan.
     let _ = std::fs::remove_file(&partiel);
     let _ = std::fs::remove_file(cible.with_file_name(format!(".{nom}{PARTIEL}")));
     let mut entree = File::open(source)?;
@@ -714,7 +714,7 @@ fn dossier_de_copie(racine: &Path, reprendre: impl Fn(&str) -> bool) -> PathBuf 
         return d;
     }
     let date = chrono::Local::now().format("%Y-%m-%d");
-    let base = trf!("Gardien-copie-{}", "Gardien-copy-{}", date);
+    let base = trf!("Vanguard-copie-{}", "Vanguard-copy-{}", date);
     std::iter::once(racine.join(&base))
         .chain((2..=999).map(|n| racine.join(format!("{base}-{n}"))))
         .find(|d| std::fs::symlink_metadata(d).is_err())
@@ -754,7 +754,7 @@ fn copier(choisis: &[(Sorte, PathBuf)], dossier: &Path, total: (u64, u64)) -> Bi
 fn compte_rendu(choisis: &[(Sorte, PathBuf)], b: &Bilan) -> String {
     use std::fmt::Write as _;
     let mut t = format!(
-        "{} — Gardien {} — {}\n\n",
+        "{} — Vanguard {} — {}\n\n",
         tr!("Copie de fichiers", "File copy"),
         env!("CARGO_PKG_VERSION"),
         chrono::Local::now().format("%Y-%m-%d %H:%M")
@@ -793,8 +793,8 @@ fn destination_permise(chemin: &Path, sources: &[(Sorte, PathBuf)]) -> Result<Pa
     }
     let refus = if chemin.ancestors().any(est_la_cle) {
         tr!(
-            "La clé GARDIEN n'est pas un disque de copie.",
-            "The GARDIEN key is not a copy disk."
+            "La clé VANGUARD n'est pas un disque de copie.",
+            "The VANGUARD key is not a copy disk."
         )
     } else if sources
         .iter()
@@ -819,8 +819,8 @@ fn choisir_disque() -> Option<PathBuf> {
     let liste = disques();
     if liste.is_empty() {
         let aucun = tr!(
-            "Aucun disque externe branché (la clé GARDIEN et le disque du système ne comptent pas). Branche un disque ou une clé assez grande, attends qu'il apparaisse, puis recommence.",
-            "No external disk plugged in (the GARDIEN key and the system disk do not count). Plug in a large enough disk or USB stick, wait for it to appear, then start again."
+            "Aucun disque externe branché (la clé VANGUARD et le disque du système ne comptent pas). Branche un disque ou une clé assez grande, attends qu'il apparaisse, puis recommence.",
+            "No external disk plugged in (the VANGUARD key and the system disk do not count). Plug in a large enough disk or USB stick, wait for it to appear, then start again."
         );
         afficher_aligne("  ✖ ", aucun, 4, "");
         return None;
@@ -845,7 +845,7 @@ fn choisir_disque() -> Option<PathBuf> {
     liste.into_iter().nth(i).map(|d| d.racine)
 }
 
-/// « gardien copier-fichiers [destination] » ; sans destination, le disque se choisit parmi ceux qui sont branchés.
+/// « vanguard copier-fichiers [destination] » ; sans destination, le disque se choisit parmi ceux qui sont branchés.
 pub fn commande(destination: Option<&Path>) {
     println!();
     cadre(
@@ -1154,7 +1154,7 @@ fn copie_a_verifier(chemin: &Path) -> Option<PathBuf> {
         .max()
 }
 
-/// « Vérifier une copie » (menu Données, `gardien verifier-copie [dossier]`) : un test de restauration. Des fichiers
+/// « Vérifier une copie » (menu Données, `vanguard verifier-copie [dossier]`) : un test de restauration. Des fichiers
 /// répartis sur toute la copie sont relus sur le disque, cache contourné, et comparés à leur original. Rien n'est
 /// écrit ni effacé.
 pub fn verifier_copie(destination: Option<&Path>) {
@@ -1170,8 +1170,8 @@ pub fn verifier_copie(destination: Option<&Path>) {
     let Some(racine) = racine else { return };
     let Some(dossier) = copie_a_verifier(&racine) else {
         trp!(
-            "  ✖ Aucune copie de Gardien ici ({}) : « Copier mes fichiers » en fait une.",
-            "  ✖ No Gardien copy here ({}): “Copy my files” makes one.",
+            "  ✖ Aucune copie de Vanguard ici ({}) : « Copier mes fichiers » en fait une.",
+            "  ✖ No Vanguard copy here ({}): “Copy my files” makes one.",
             chemin_affichable(&racine)
         );
         return;
@@ -1347,7 +1347,7 @@ mod tests {
     }
 
     fn jetable(nom: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("gardien-copie-{nom}-{}", std::process::id()));
+        let d = std::env::temp_dir().join(format!("vanguard-copie-{nom}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         d
@@ -1374,7 +1374,7 @@ mod tests {
         std::fs::write(source.join("factures/2026/janvier.pdf"), vec![7u8; 3 << 20]).unwrap();
         #[cfg(unix)]
         std::os::unix::fs::symlink("/etc/hostname", source.join("raccourci")).unwrap();
-        let cible = base.join("disque/Gardien-copie-2026-10-18/Documents");
+        let cible = base.join("disque/Vanguard-copie-2026-10-18/Documents");
         let mut b = Bilan::default();
         copier_arbre(&source, &cible, &mut b, &mut avancement());
         assert_eq!((b.copies, b.deja, b.echecs.len()), (2, 0, 0), "{b:?}");
@@ -1432,7 +1432,7 @@ mod tests {
         assert_eq!(nom_libre(&base, "photo.jpg"), base.join("photo (3).jpg"));
         assert_eq!(nom_libre(&base, "LISEZMOI"), base.join("LISEZMOI (2)"));
         // Une copie interrompue se propose ; refusée, un nouveau dossier daté.
-        let interrompue = base.join("Gardien-copie-2026-10-01");
+        let interrompue = base.join("Vanguard-copie-2026-10-01");
         std::fs::create_dir_all(&interrompue).unwrap();
         std::fs::write(interrompue.join(TEMOIN), "").unwrap();
         assert_eq!(dossier_de_copie(&base, |_| true), interrompue);
@@ -1442,7 +1442,7 @@ mod tests {
                 .file_name()
                 .unwrap()
                 .to_string_lossy()
-                .starts_with("Gardien-copie-")
+                .starts_with("Vanguard-copie-")
         );
         assert_ne!(nouveau, interrompue);
         let _ = std::fs::remove_dir_all(&base);
@@ -1454,7 +1454,7 @@ mod tests {
         let source = base.join("Images");
         std::fs::create_dir_all(&source).unwrap();
         std::fs::write(source.join("vacances.png"), b"png").unwrap();
-        let dossier = base.join("disque/Gardien-copie-2026-10-18");
+        let dossier = base.join("disque/Vanguard-copie-2026-10-18");
         let b = copier(&[(Sorte::Images, source.clone())], &dossier, (1, 3));
         assert_eq!(b.copies, 1);
         assert!(dossier.join("Images/vacances.png").is_file());
@@ -1472,18 +1472,19 @@ mod tests {
     #[test]
     fn partitions_de_la_cle_reconnues_par_leur_disque() {
         let mount = "/dev/disk1s1 on / (apfs, local, read-only)\n\
-                     /dev/disk4s1 on /Volumes/GARDIEN (exfat, local, nodev, nosuid, read-only)\n\
+                     /dev/disk4s1 on /Volumes/VANGUARD (exfat, local, nodev, nosuid, read-only)\n\
                      /dev/disk4s5 on /Volumes/WIN11 (msdos, local)\n\
                      /dev/disk5s1 on /Volumes/Mon disque (hfs, local)\n";
         let d = disques_de_mount(mount);
-        assert_eq!(d[1], (PathBuf::from("/Volumes/GARDIEN"), "disk4".to_string()));
+        assert_eq!(d[1], (PathBuf::from("/Volumes/VANGUARD"), "disk4".to_string()));
         assert_eq!(d[2].1, "disk4");
         assert_eq!(d[3], (PathBuf::from("/Volumes/Mon disque"), "disk5".to_string()));
-        let w = disques_des_lecteurs("E:\\|GARDIEN|1|2|1\nF:\\|WIN11|3|4|1\nG:\\|Sauvegarde|5|6|2\nH:\\|Réseau|7|8|\n");
+        let w =
+            disques_des_lecteurs("E:\\|VANGUARD|1|2|1\nF:\\|WIN11|3|4|1\nG:\\|Sauvegarde|5|6|2\nH:\\|Réseau|7|8|\n");
         assert_eq!(w.len(), 3);
         assert_eq!(w[1], (PathBuf::from("F:\\"), "1".to_string()));
         // Le 5e champ ne gêne pas la lecture des lecteurs.
-        assert_eq!(lire_lecteurs("E:\\|GARDIEN|1|2|1\n", "C:").len(), 1);
+        assert_eq!(lire_lecteurs("E:\\|VANGUARD|1|2|1\n", "C:").len(), 1);
     }
 
     #[test]
@@ -1496,7 +1497,7 @@ mod tests {
         }
         std::fs::write(source.join("sous/a.txt"), b"a").unwrap();
         let disque = base.join("disque");
-        let dossier = disque.join("Gardien-copie-2026-10-18");
+        let dossier = disque.join("Vanguard-copie-2026-10-18");
         let b = copier(&[(Sorte::Documents, source.clone())], &dossier, (6, 0));
         assert_eq!(b.copies, 6);
         assert_eq!(copie_a_verifier(&disque), Some(dossier.clone()));
@@ -1572,25 +1573,25 @@ mod tests {
         assert_eq!(nom_permis(". ."), "_");
         // La plus récente des copies interrompues, quelle que soit la langue ; un dossier sans témoin n'en est pas une.
         for nom in [
-            "Gardien-copie-2026-10-01",
-            "Gardien-copy-2026-10-02",
-            "Gardien-copy-2026-10-03",
+            "Vanguard-copie-2026-10-01",
+            "Vanguard-copy-2026-10-02",
+            "Vanguard-copy-2026-10-03",
         ] {
             std::fs::create_dir_all(base.join(nom)).unwrap();
         }
-        std::fs::write(base.join("Gardien-copie-2026-10-01").join(TEMOIN), "").unwrap();
-        std::fs::write(base.join("Gardien-copy-2026-10-02").join(TEMOIN), "").unwrap();
+        std::fs::write(base.join("Vanguard-copie-2026-10-01").join(TEMOIN), "").unwrap();
+        std::fs::write(base.join("Vanguard-copy-2026-10-02").join(TEMOIN), "").unwrap();
         let proposee = std::cell::RefCell::new(String::new());
         let reprise = dossier_de_copie(&base, |nom| {
             *proposee.borrow_mut() = nom.to_string();
             true
         });
-        assert_eq!(reprise, base.join("Gardien-copy-2026-10-02"));
-        assert_eq!(*proposee.borrow(), "Gardien-copy-2026-10-02");
+        assert_eq!(reprise, base.join("Vanguard-copy-2026-10-02"));
+        assert_eq!(*proposee.borrow(), "Vanguard-copy-2026-10-02");
         // Le lecteur du système est écarté, en minuscules comme avec sa barre.
         let d = lire_lecteurs("c:\\|Windows|1|2\nD:\\|Données|3|4\n", "C:\\");
         assert_eq!((d.len(), d[0].nom.as_str(), d[0].total), (1, "Données (D:)", 4));
-        // Refus : un fichier, la clé GARDIEN et ses sous-dossiers.
+        // Refus : un fichier, la clé VANGUARD et ses sous-dossiers.
         let cle = base.join("cle");
         std::fs::create_dir_all(cle.join("sous")).unwrap();
         std::fs::write(cle.join(crate::reseau::TEMOIN_CLE), "").unwrap();
@@ -1599,7 +1600,7 @@ mod tests {
         assert!(refus.ends_with("note.txt n'est pas un dossier."), "{refus}");
         assert_eq!(
             destination_permise(&cle.join("sous"), &[]).unwrap_err(),
-            "La clé GARDIEN n'est pas un disque de copie."
+            "La clé VANGUARD n'est pas un disque de copie."
         );
         let _ = std::fs::remove_dir_all(&base);
     }

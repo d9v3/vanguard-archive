@@ -1,5 +1,5 @@
-Gardien inclut les bibliothèques libres suivantes. Voici leurs avis de droit d'auteur et de licence.
-Gardien includes the following open source libraries. Their copyright and license notices follow.
+Vanguard inclut les bibliothèques libres suivantes. Voici leurs avis de droit d'auteur et de licence.
+Vanguard includes the following open source libraries. Their copyright and license notices follow.
 
 112 bibliothèques / libraries, et à la fin 1 jeu(x) de données / then 1 data set(s).
 

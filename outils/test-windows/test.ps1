@@ -1,10 +1,10 @@
-﻿# Test complet de Gardien sur un vrai Windows.
-# 1) relève l'état réel du système (référence), 2) lance Gardien, 3) vérifie ses réponses.
+﻿# Test complet de Vanguard sur un vrai Windows.
+# 1) relève l'état réel du système (référence), 2) lance Vanguard, 3) vérifie ses réponses.
 # Pendant le test : une ligne par commande et par vérification, sans les sorties brutes. À la fin : un rapport HTML
 # (rapport-test.html, ouvert dans le navigateur), avec la sortie de chaque commande à déplier.
-# Rangement du dossier partagé : ce script et gardien.exe dans « programme » (remplacés à chaque déploiement),
+# Rangement du dossier partagé : ce script et vanguard.exe dans « programme » (remplacés à chaque déploiement),
 # chaque passe dans « resultats\AAAA-MM-JJ_HH-MM-SS_vX.Y.Z », une ligne par passe dans « resultats\historique.txt »
-# et le dernier rapport dans « resultats\dernier-rapport.html ». Lancé par le menu (TESTER-GARDIEN.bat).
+# et le dernier rapport dans « resultats\dernier-rapport.html ». Lancé par le menu (TESTER-VANGUARD.bat).
 
 # -Auto : aucune question ; les étapes qui demandent de taper ou une fenêtre UAC sont sautées.
 # -SansOuvrir : rien ne s'ouvre à l'écran (test lancé en arrière-plan par la tâche planifiée du menu).
@@ -19,10 +19,10 @@ $racine = if ((Split-Path -Leaf $ici) -eq 'programme') { Split-Path -Parent $ici
 $resultats = Join-Path $racine 'resultats'
 
 # On lance une copie locale : un .exe sur un partage réseau déclenche des avertissements de sécurité.
-$local = Join-Path $env:LOCALAPPDATA 'gardien-test'
+$local = Join-Path $env:LOCALAPPDATA 'vanguard-test'
 New-Item -ItemType Directory -Force $local | Out-Null
-Copy-Item (Join-Path $ici 'gardien.exe') $local -Force
-$exe = Join-Path $local 'gardien.exe'
+Copy-Item (Join-Path $ici 'vanguard.exe') $local -Force
+$exe = Join-Path $local 'vanguard.exe'
 Unblock-File $exe -ErrorAction SilentlyContinue
 $version = (& $exe --version 2>$null | Out-String).Trim()
 $numero = if ($version -match '\d+\.\d+\.\d+') { $Matches[0] } else { 'inconnue' }
@@ -65,15 +65,15 @@ function Court([string[]]$arguments) {
 
 function Noter-Commande($fichier, [string[]]$arguments, $code, $duree, $entree) {
     [void]$script:etape.Commandes.Add([pscustomobject]@{ Fichier = $fichier; Arguments = ($arguments -join ' '); Code = $code; Duree = $duree; Entree = $entree })
-    Journal ("gardien {0} -> code {1}, {2:N1} s" -f ($arguments -join ' '), $code, $duree)
-    $texte = if ($arguments) { 'gardien ' + (Court $arguments) } else { 'gardien (menu)' }
+    Journal ("vanguard {0} -> code {1}, {2:N1} s" -f ($arguments -join ' '), $code, $duree)
+    $texte = if ($arguments) { 'vanguard ' + (Court $arguments) } else { 'vanguard (menu)' }
     if ($texte.Length -gt 58) { $texte = $texte.Substring(0, 57) + '…' }
     Write-Host ('      ' + $texte.PadRight(60)) -NoNewline
     if ($code -eq 0) { Write-Host '✔' -ForegroundColor Green -NoNewline } else { Write-Host "✖ code $code" -ForegroundColor Red -NoNewline }
     Write-Host (' {0,6:N1} s' -f $duree) -ForegroundColor DarkGray
 }
 
-# Lance Gardien sans interaction ; garde sortie, erreurs, code de retour et durée.
+# Lance Vanguard sans interaction ; garde sortie, erreurs, code de retour et durée.
 function Lancer($fichier, [string[]]$arguments) {
     $debut = Get-Date
     $p = Start-Process -FilePath $exe -ArgumentList $arguments -NoNewWindow -Wait -PassThru `
@@ -119,7 +119,7 @@ function Constat($texte) {
     if (Question $texte) { Ok $texte } else { Bug $texte }
 }
 
-# Référence : chaque valeur lue directement, pour comparer avec les conclusions de Gardien.
+# Référence : chaque valeur lue directement, pour comparer avec les conclusions de Vanguard.
 # Dans un espace d'exécution à part, avec un délai : une commande de Windows bloquée (Get-ScheduledTask, CIM…) ne
 # fige plus toute la passe. Bloquée, elle est laissée de côté (l'arrêter pourrait bloquer aussi) et finit avec la passe.
 function Ref($nom, [scriptblock]$bloc, [int]$delai = 30) {
@@ -162,7 +162,7 @@ function Rapport {
     $sb = New-Object System.Text.StringBuilder
     [void]$sb.Append(@"
 <!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Test de Gardien</title><style>
+<title>Test de Vanguard</title><style>
 :root{--fond:#0b0808;--carte:#160f10;--trait:#2e2224;--texte:#eee3db;--gris:#a8968c;--rouge:#ff5a4f;--vert:#5fd38d;--jaune:#f2c14e}
 *{box-sizing:border-box}body{margin:0;background:var(--fond);color:var(--texte);font:15px/1.5 system-ui,'Segoe UI',sans-serif}
 main{max-width:980px;margin:0 auto;padding:28px 16px 60px}h1{margin:0 0 4px;font-size:26px}h1 b{color:var(--rouge)}
@@ -179,7 +179,7 @@ summary code{color:var(--texte);font-variant-ligatures:none}summary .d{color:var
 .verdict{border-radius:12px;padding:16px 20px;font-size:20px;font-weight:600;margin-bottom:14px}
 .verdict.vert{background:#0f2a1a;border:1px solid #1f6b3e;color:var(--vert)}.verdict.rouge{background:#2c0d0d;border:1px solid #7e1c1c;color:var(--rouge)}
 </style></head><body><main>
-<h1>Test de <b>Gardien</b></h1>
+<h1>Test de <b>Vanguard</b></h1>
 <div class="sous">$(& $h $version) · $(& $h $windows) · $(Get-Date -Format 'yyyy-MM-dd HH:mm') · $duree min$(if ($Auto) { ' · sans questions' })</div>
 <div class="verdict $(if ($reussi) { 'vert' } else { 'rouge' })">$(& $h $verdict)</div>
 <div class="bilan"><div class="case"><b class="ok">$nbOk</b><span>vérifications réussies</span></div>
@@ -208,8 +208,8 @@ summary code{color:var(--texte);font-variant-ligatures:none}summary .d{color:var
             }
             $etat = if ($c.Code -eq 0) { '<span class="ok">✓</span>' } else { "<span class=""bug"">✗ code $($c.Code)</span>" }
             $entree = if ($c.Entree) { "<div class=""entree"">réponses tapées : $(& $h $c.Entree)</div>" } else { '' }
-            $complete = if ($c.Arguments) { "gardien $($c.Arguments)" } else { 'gardien (menu)' }
-            $commande = if ($c.Arguments) { 'gardien ' + (Court ($c.Arguments -split ' ')) } else { 'gardien (menu)' }
+            $complete = if ($c.Arguments) { "vanguard $($c.Arguments)" } else { 'vanguard (menu)' }
+            $commande = if ($c.Arguments) { 'vanguard ' + (Court ($c.Arguments -split ' ')) } else { 'vanguard (menu)' }
             [void]$sb.Append("<details><summary><code title=""$(& $h $complete)"">$(& $h $commande)</code><span class=""d"">$etat $('{0:N1}' -f $c.Duree) s</span></summary>$entree<pre>$(& $h $sortie)</pre></details>")
         }
         [void]$sb.Append('</section>')
@@ -223,7 +223,7 @@ summary code{color:var(--texte);font-variant-ligatures:none}summary .d{color:var
 Clear-Host
 Write-Host ''
 Write-Host '  ╭──────────────────────────────────────────────────────────╮' -ForegroundColor Red
-Write-Host ('  │  ' + "TEST DE GARDIEN · $version".PadRight(56) + '│') -ForegroundColor Red
+Write-Host ('  │  ' + "TEST DE VANGUARD · $version".PadRight(56) + '│') -ForegroundColor Red
 Write-Host '  ╰──────────────────────────────────────────────────────────╯' -ForegroundColor Red
 if ($SansOuvrir) { Write-Host '  En arrière-plan : rien ne s''ouvre, le rapport ira dans resultats.' -ForegroundColor DarkGray }
 elseif ($Auto) { Write-Host '  Sans aucune question : 5 à 15 minutes. Le rapport s''ouvrira à la fin.' -ForegroundColor DarkGray }
@@ -248,7 +248,7 @@ Ref 'Wi-Fi' { netsh wlan show interfaces }
 Ref 'Réseau (IP)' { Get-NetIPAddress -AddressFamily IPv4 | Select-Object InterfaceAlias, IPAddress, PrefixLength | Format-Table -AutoSize }
 Ref 'Passerelle (route print)' { route print -4 0.0.0.0 }
 Ref 'Table ARP' { arp -a }
-# Vérifications ajoutées de la 0.12 à la 0.19 : de quoi comparer avec ce que Gardien en conclut.
+# Vérifications ajoutées de la 0.12 à la 0.19 : de quoi comparer avec ce que Vanguard en conclut.
 Ref 'DNS par carte (0.12)' { Get-DnsClientServerAddress | Where-Object ServerAddresses | Select-Object InterfaceAlias, InterfaceIndex, AddressFamily, ServerAddresses | Format-Table -AutoSize }
 Ref 'Certificats racine avec clé privée (0.12)' { Get-ChildItem Cert:\LocalMachine\Root, Cert:\CurrentUser\Root | Where-Object HasPrivateKey | Select-Object PSParentPath, Subject, Thumbprint | Format-List }
 Ref 'Nombre de certificats racine (0.12)' { @(Get-ChildItem Cert:\LocalMachine\Root, Cert:\CurrentUser\Root | Select-Object -Unique Thumbprint).Count }
@@ -278,16 +278,16 @@ Lancer 'aide' @('--help')
 
 Etape 'Audit de la machine (texte et JSON)'
 Lancer 'machine' @('machine')
-# GARDIEN_CHRONO : le temps de chaque vérification part sur la sortie d'erreur, gardée avec les résultats (le bilan
+# VANGUARD_CHRONO : le temps de chaque vérification part sur la sortie d'erreur, gardée avec les résultats (le bilan
 # Windows prend plusieurs secondes : on voit lesquelles, sans pouvoir mesurer depuis Linux).
-$env:GARDIEN_CHRONO = '1'
+$env:VANGUARD_CHRONO = '1'
 Lancer 'machine-json' @('machine', '--json')
-Remove-Item Env:GARDIEN_CHRONO
+Remove-Item Env:VANGUARD_CHRONO
 $lentes = @(Get-Content (Join-Path $res 'machine-json.err.txt') -ErrorAction SilentlyContinue |
     Where-Object { $_ -match '^chrono\s+\d+\s+(\d+) ms\s+(.*)$' } |
     ForEach-Object { [pscustomobject]@{ Ms = [int]$Matches[1]; Quoi = $Matches[2] } } | Sort-Object Ms -Descending | Select-Object -First 6)
 if ($lentes) { Info ("Vérifications les plus lentes : " + (($lentes | ForEach-Object { "$($_.Quoi) $($_.Ms) ms" }) -join ', ')) }
-# Vérifications qui n'ont pas pu se faire : un script PowerShell de Gardien a échoué (à corriger côté Gardien).
+# Vérifications qui n'ont pas pu se faire : un script PowerShell de Vanguard a échoué (à corriger côté Vanguard).
 try {
     $audit = Sortie 'machine-json' | ConvertFrom-Json
     $impossibles = @($audit.constats | Where-Object { -not $_.verifie })
@@ -310,18 +310,18 @@ Etape 'Persistance suspecte : fausse tâche planifiée et fausse entrée de dém
 Info 'Une tâche « PowerShell caché en base64 » et un programme dans C:\Users\Public, inoffensifs, retirés juste après.'
 if (Question 'Faire ce test ?' 'o') {
     try {
-        Register-ScheduledTask -TaskName 'gardien-test-suspect' -Force `
+        Register-ScheduledTask -TaskName 'vanguard-test-suspect' -Force `
             -Action (New-ScheduledTaskAction -Execute 'powershell.exe' -Argument '-NoProfile -enc VwByAGkAdABlAC0ASABvAHMAdAAgAHQAZQBzAHQA') `
             -Trigger (New-ScheduledTaskTrigger -Once -At (Get-Date).AddYears(5)) | Out-Null
-        Set-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name 'gardien-test-suspect' -Value 'C:\Users\Public\gardien-test.exe /q'
+        Set-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name 'vanguard-test-suspect' -Value 'C:\Users\Public\vanguard-test.exe /q'
         Lancer 'machine-persistance' @('machine')
         $sortie = Sortie 'machine-persistance'
-        if ($sortie -match '(?s)gardien-test-suspect.*base64|base64.*gardien-test-suspect') { Ok 'Tâche suspecte repérée' } else { Bug 'Tâche suspecte NON repérée' }
+        if ($sortie -match '(?s)vanguard-test-suspect.*base64|base64.*vanguard-test-suspect') { Ok 'Tâche suspecte repérée' } else { Bug 'Tâche suspecte NON repérée' }
         if ($sortie -match 'Public') { Ok 'Entrée de démarrage suspecte repérée' } else { Bug 'Entrée de démarrage suspecte NON repérée' }
     } catch { Bug "Test de persistance impossible : $($_.Exception.Message)" }
     finally {
-        Unregister-ScheduledTask -TaskName 'gardien-test-suspect' -Confirm:$false -ErrorAction SilentlyContinue
-        Remove-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name 'gardien-test-suspect' -ErrorAction SilentlyContinue
+        Unregister-ScheduledTask -TaskName 'vanguard-test-suspect' -Confirm:$false -ErrorAction SilentlyContinue
+        Remove-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name 'vanguard-test-suspect' -ErrorAction SilentlyContinue
         Info 'Fausse tâche et fausse entrée retirées.'
     }
 }
@@ -397,7 +397,7 @@ try {
 } catch { Bug "Scan illisible ($($_.Exception.Message))" }
 
 Etape 'Antivirus d''un dossier propre (Defender, analyse ciblée)'
-$propre = Join-Path $env:TEMP 'gardien-dossier-propre'
+$propre = Join-Path $env:TEMP 'vanguard-dossier-propre'
 New-Item -ItemType Directory -Force $propre | Out-Null
 Set-Content -Path (Join-Path $propre 'note.txt') -Value 'fichier sans danger' -Encoding UTF8
 LancerAvec 'antivirus-dossier' @('antivirus', $propre) "n`nn`n"
@@ -421,7 +421,7 @@ $sousMenus = [ordered]@{
 foreach ($g in $sousMenus.Keys) {
     if ($m -cmatch $sousMenus[$g]) { Ok "Sous-menu « $g » ouvert" } else { Bug "Sous-menu « $g » PAS ouvert" }
 }
-# Entrée fermée (comme Ctrl-D) : Gardien doit quitter, pas tourner en boucle (bug corrigé en 0.9.7).
+# Entrée fermée (comme Ctrl-D) : Vanguard doit quitter, pas tourner en boucle (bug corrigé en 0.9.7).
 $vide = Join-Path $res 'vide.txt'
 Set-Content -Path $vide -Value '' -NoNewline
 $p = Start-Process -FilePath $exe -RedirectStandardInput $vide -RedirectStandardOutput (Join-Path $res 'menu-eof.out.txt') -NoNewWindow -PassThru
@@ -450,11 +450,11 @@ if ((Sortie 'demarrage') -match 'Programmes au démarrage|Startup programs') { O
 $runApres = Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -ErrorAction SilentlyContinue | Out-String
 if ($runAvant -eq $runApres) { Ok 'Rien retiré sans accord' } else { Bug 'Démarrage modifié sans accord' }
 
-Etape 'Entretien du mois, et ce que Gardien a appris'
+Etape 'Entretien du mois, et ce que Vanguard a appris'
 Lancer 'entretien' @('entretien')
 if ((Sortie 'entretien') -match 'Entretien du mois|Monthly check-up') { Ok 'Résumé du mois affiché' } else { Bug 'Résumé du mois ABSENT' }
 LancerAvec 'appris' @('appris') "`n"
-if ((Sortie 'appris') -match 'Ce que Gardien a appris|What Gardien has learned') { Ok 'Page « appris » affichée' } else { Bug 'Page « appris » ABSENTE' }
+if ((Sortie 'appris') -match 'Ce que Vanguard a appris|What Vanguard has learned') { Ok 'Page « appris » affichée' } else { Bug 'Page « appris » ABSENTE' }
 
 Etape 'Réseau : Wi-Fi encombré, type de NAT, caméras, listes noires refusées'
 Lancer 'canaux' @('canaux')
@@ -486,7 +486,7 @@ if ($l -match 'Sous-domaine trompeur|Misleading subdomain') { Ok 'Sous-domaine t
 if ($l -match "Rien n'a été envoyé|Nothing was sent") { Ok 'Rien envoyé sans accord' } else { Bug 'Refus de l''examen en ligne PAS respecté' }
 
 Etape 'Vérifier un fichier téléchargé : bonne, puis mauvaise empreinte'
-$fichier = Join-Path $env:TEMP 'gardien-telechargement-test.txt'
+$fichier = Join-Path $env:TEMP 'vanguard-telechargement-test.txt'
 Set-Content -Path $fichier -Value 'contenu de test' -Encoding UTF8
 $empreinte = (Get-FileHash $fichier -Algorithm SHA256).Hash.ToLower()
 LancerAvec 'verifier-bon' @('verifier-fichier', $fichier, $empreinte) "n`nn`nn`n"
@@ -501,8 +501,8 @@ $dossiersPieges = @([Environment]::GetFolderPath('MyDocuments'), [Environment]::
 if (Question 'Faire ce test (six fichiers posés puis retirés dans Documents, Images et Bureau) ?' 'o') {
     LancerAvec 'pieges-poser' @('pieges') "o`n"
     if ((Sortie 'pieges-poser') -match 'fichiers-pièges posés|decoy files placed') { Ok 'Fichiers-pièges posés' } else { Bug 'Fichiers-pièges PAS posés' }
-    foreach ($d in $dossiersPieges) { Info "$d : $(@(Get-ChildItem $d -Filter '!Gardien*' -ErrorAction SilentlyContinue).Count) fichier(s)-piège(s)" }
-    # Accès contrôlé aux dossiers actif (1) : Documents et Images sont déjà protégés par Windows ; Gardien doit le dire
+    foreach ($d in $dossiersPieges) { Info "$d : $(@(Get-ChildItem $d -Filter '!Vanguard*' -ErrorAction SilentlyContinue).Count) fichier(s)-piège(s)" }
+    # Accès contrôlé aux dossiers actif (1) : Documents et Images sont déjà protégés par Windows ; Vanguard doit le dire
     # et ne pas y écrire (Windows l'aurait bloqué, alerte à l'appui). Le Bureau, lui, n'est pas protégé d'office.
     $cfa = try { [int](Get-MpPreference).EnableControlledFolderAccess } catch { -1 }
     Info "Accès contrôlé aux dossiers : $cfa (0 coupé, 1 actif, 2 audit, -1 illisible)"
@@ -513,7 +513,7 @@ if (Question 'Faire ce test (six fichiers posés puis retirés dans Documents, I
     }
     if ($sortiePieges -match 'Pas de fichier-piège dans|No decoy file in') { Bug "Dossier refusé : $(($sortiePieges -split "`n" | Select-String 'No decoy file in|Pas de fichier-piège dans') -join ' / ')" }
     # Le premier dossier qui a reçu ses pièges : l'accès contrôlé aux dossiers de Defender peut en refuser.
-    $piege = Get-ChildItem $dossiersPieges -Filter '!Gardien*.txt' -ErrorAction SilentlyContinue | Select-Object -First 1
+    $piege = Get-ChildItem $dossiersPieges -Filter '!Vanguard*.txt' -ErrorAction SilentlyContinue | Select-Object -First 1
     if ($piege) {
         Rename-Item $piege.FullName ($piege.Name + '.locked')
         LancerAvec 'pieges-etat' @('pieges') "`n"
@@ -521,12 +521,12 @@ if (Question 'Faire ce test (six fichiers posés puis retirés dans Documents, I
         Rename-Item (Join-Path $piege.DirectoryName ($piege.Name + '.locked')) $piege.Name
     } else { Bug 'Aucun fichier-piège posé' }
     LancerAvec 'pieges-retirer' @('pieges', '--retirer') "o`n"
-    if (Get-ChildItem $dossiersPieges -Filter '!Gardien*' -ErrorAction SilentlyContinue) { Bug 'Fichiers-pièges ENCORE présents' } else { Ok 'Fichiers-pièges retirés' }
+    if (Get-ChildItem $dossiersPieges -Filter '!Vanguard*' -ErrorAction SilentlyContinue) { Bug 'Fichiers-pièges ENCORE présents' } else { Ok 'Fichiers-pièges retirés' }
 } else { Info 'Sautée.' }
 
 Etape 'YARA : moteur installé par winget, puis analyse d''un dossier'
 $yaraLien = Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Links\yara.exe'
-# Le moteur, là où Gardien le cherche : le PATH, puis ce que winget pose pour le compte ou la machine (le lien de
+# Le moteur, là où Vanguard le cherche : le PATH, puis ce que winget pose pour le compte ou la machine (le lien de
 # Links, ou le programme dans Packages quand winget n'a pas pu créer le lien).
 function Moteur-Yara {
     $dans = Get-Command yara.exe, yara64.exe -ErrorAction SilentlyContinue | Select-Object -First 1
@@ -540,7 +540,7 @@ function Moteur-Yara {
     }
     return $null
 }
-$dossierYara = Join-Path $env:TEMP 'gardien-dossier-yara'
+$dossierYara = Join-Path $env:TEMP 'vanguard-dossier-yara'
 New-Item -ItemType Directory -Force $dossierYara | Out-Null
 Set-Content -Path (Join-Path $dossierYara 'note.txt') -Value 'fichier sans danger' -Encoding UTF8
 if ((Moteur-Yara) -or (Question 'Installer le moteur YARA par winget (VirusTotal.YARA), puis analyser un dossier ?')) {
@@ -557,7 +557,7 @@ if ((Moteur-Yara) -or (Question 'Installer le moteur YARA par winget (VirusTotal
 Remove-Item $dossierYara -Recurse -Force -ErrorAction SilentlyContinue
 
 Etape 'Copier mes fichiers : disque du système refusé, puis vraie copie vers le dossier partagé'
-$refuse = Join-Path $env:TEMP 'gardien-copie-test'
+$refuse = Join-Path $env:TEMP 'vanguard-copie-test'
 New-Item -ItemType Directory -Force $refuse | Out-Null
 LancerAvec 'copier-refus' @('copier-fichiers', $refuse) "`nn`n"
 if ((Sortie 'copier-refus') -match 'disque du système|system disk') { Ok 'Copie sur le disque du système refusée' } else { Bug 'Copie sur le disque du système PAS refusée' }
@@ -565,17 +565,17 @@ Remove-Item $refuse -Recurse -Force -ErrorAction SilentlyContinue
 if (Question 'Faire une vraie copie de tes dossiers vers le dossier partagé (dans les résultats, effacée après) ?') {
     # Sur le Bureau : l'accès contrôlé aux dossiers de Defender, s'il est actif, empêche PowerShell d'écrire dans
     # Documents, et le témoin n'existerait pas. Le Bureau n'est pas protégé d'office.
-    $temoin = Join-Path ([Environment]::GetFolderPath('Desktop')) 'gardien-test-copie.txt'
+    $temoin = Join-Path ([Environment]::GetFolderPath('Desktop')) 'vanguard-test-copie.txt'
     Set-Content -Path $temoin -Value "copie de test $(Get-Date -Format o)" -Encoding UTF8 -ErrorAction SilentlyContinue
     if (-not (Test-Path -LiteralPath $temoin)) { Info "Fichier témoin impossible à poser : $temoin" }
     $vers = Join-Path $res 'copie'
     New-Item -ItemType Directory -Force $vers | Out-Null
     LancerAvec 'copier' @('copier-fichiers', $vers) "`no`n"
-    $copie = Get-ChildItem $vers -Recurse -Filter 'gardien-test-copie.txt' -ErrorAction SilentlyContinue | Select-Object -First 1
+    $copie = Get-ChildItem $vers -Recurse -Filter 'vanguard-test-copie.txt' -ErrorAction SilentlyContinue | Select-Object -First 1
     if (-not (Test-Path -LiteralPath $temoin)) { Info 'Témoin absent : copie à l''identique non vérifiée.' }
     elseif ($copie -and (Get-FileHash $copie.FullName).Hash -eq (Get-FileHash $temoin).Hash) { Ok 'Fichier témoin copié à l''identique' }
     else { Bug 'Fichier témoin PAS copié à l''identique' }
-    if ((Sortie 'copier') -match 'Copie terminée et vérifiée|Copy finished and checked') { Ok 'Copie vérifiée par Gardien' } else { Bug 'Copie PAS vérifiée' }
+    if ((Sortie 'copier') -match 'Copie terminée et vérifiée|Copy finished and checked') { Ok 'Copie vérifiée par Vanguard' } else { Bug 'Copie PAS vérifiée' }
     # Le test de restauration sur cette copie : relue sur le disque et comparée aux originaux.
     LancerAvec 'verifier-copie' @('verifier-copie', $vers) "`n"
     if ((Sortie 'verifier-copie') -match 'The copy reads back|La copie se relit') { Ok 'Copie relue et comparée (test de restauration)' } else { Bug 'Test de restauration de la copie en échec' }
@@ -583,8 +583,8 @@ if (Question 'Faire une vraie copie de tes dossiers vers le dossier partagé (da
     Remove-Item $vers -Recurse -Force -ErrorAction SilentlyContinue
 } else { Info 'Vraie copie sautée.' }
 
-Etape 'Dépanner : pas de son, et les réglages du son ouverts par Gardien'
-# Un lien ouvert par Gardien (ms-settings:sound), sauf en arrière-plan : rien ne doit surgir à l'écran.
+Etape 'Dépanner : pas de son, et les réglages du son ouverts par Vanguard'
+# Un lien ouvert par Vanguard (ms-settings:sound), sauf en arrière-plan : rien ne doit surgir à l'écran.
 $ouvrirReglages = if ($SansOuvrir -or $Auto) { 'n' } else { 'o' }
 LancerAvec 'depanner-son' @('depanner', 'son') "1`n1`n$ouvrirReglages`nn`n`n"
 $d = Sortie 'depanner-son'
@@ -602,20 +602,20 @@ $presseAvant = Get-Clipboard -Raw -ErrorAction SilentlyContinue
 LancerAvec 'guide-copie' @() "10.2.1`n2`n`nq`n"
 $copiee = Get-Clipboard -Raw -ErrorAction SilentlyContinue
 if ($copiee -and $copiee.Trim() -eq 'winget upgrade --all') { Ok 'Commande copiée dans le presse-papier (Set-Clipboard)' }
-elseif ((Sortie 'guide-copie') -match 'Presse-papier inaccessible|Clipboard unavailable') { Info 'Presse-papier inaccessible ici (test en arrière-plan ?) : Gardien l''a dit et a remontré la commande' }
+elseif ((Sortie 'guide-copie') -match 'Presse-papier inaccessible|Clipboard unavailable') { Info 'Presse-papier inaccessible ici (test en arrière-plan ?) : Vanguard l''a dit et a remontré la commande' }
 else { Bug "Commande PAS copiée (presse-papier : « $copiee »)" }
 if ($presseAvant) { Set-Clipboard -Value $presseAvant }
 
 Etape 'Surveillance : activation puis désactivation (Planificateur de tâches)'
 Lancer 'surveillance-on' @('surveillance', 'on')
-$tache = 'gardien - surveillance du reseau'
+$tache = 'vanguard - surveillance du reseau'
 if (Get-ScheduledTask -TaskName $tache -ErrorAction SilentlyContinue) { Ok 'Tâche planifiée créée' } else { Bug 'Tâche planifiée NON créée' }
 Ref 'Tâche planifiée après activation' { Get-ScheduledTask -TaskName $tache | Select-Object TaskName, State, Description | Format-List; (Get-ScheduledTask -TaskName $tache).Actions | Format-List Execute, Arguments }
 Lancer 'surveillance-off' @('surveillance', 'off')
 if (Get-ScheduledTask -TaskName $tache -ErrorAction SilentlyContinue) { Bug 'Tâche planifiée ENCORE PRÉSENTE' } else { Ok 'Tâche planifiée retirée' }
 
 Etape 'Notification « nouvel appareil »'
-$base = Join-Path $env:LOCALAPPDATA 'gardien\appareils.json'
+$base = Join-Path $env:LOCALAPPDATA 'vanguard\appareils.json'
 if (Test-Path $base) {
     # On retire un appareil de la base de test : au scan suivant, il doit être signalé comme nouveau.
     $json = Get-Content $base -Raw -Encoding UTF8 | ConvertFrom-Json
@@ -634,7 +634,7 @@ if (Test-Path $base) {
     Info 'Pas de base créée par le scan : test de notification sauté.'
 }
 
-Etape 'Rapport HTML de Gardien'
+Etape 'Rapport HTML de Vanguard'
 if ($SansOuvrir) {
     # En arrière-plan, le navigateur ne doit pas surgir : le bilan complet, en texte.
     Lancer 'complet' @('complet', '--texte')
@@ -650,20 +650,20 @@ if (Question 'Lancer l''analyse rapide Defender (quelques minutes) ?') {
     Lancer 'antivirus' @('antivirus')
 } else { Info 'Sautée.' }
 
-Etape 'Lanceur de la clé : Gardien introuvable ou bloqué, expliqué sans toucher à Defender'
-$lanceur = Join-Path $ici 'Lancer Gardien.bat'
+Etape 'Lanceur de la clé : Vanguard introuvable ou bloqué, expliqué sans toucher à Defender'
+$lanceur = Join-Path $ici 'Lancer Vanguard.bat'
 if (Test-Path -LiteralPath $lanceur) {
-    # Dans un dossier sans Windows\gardien.exe : le même chemin que quand Defender refuse de le lancer.
-    $essai = Join-Path $env:TEMP 'gardien-lanceur'
+    # Dans un dossier sans Windows\vanguard.exe : le même chemin que quand Defender refuse de le lancer.
+    $essai = Join-Path $env:TEMP 'vanguard-lanceur'
     New-Item -ItemType Directory -Path $essai -Force | Out-Null
     Copy-Item -LiteralPath $lanceur $essai -Force
     $defLanceur = (Get-MpPreference | Select-Object ExclusionPath, ControlledFolderAccessAllowedApplications | Out-String)
-    $sortieLanceur = 'N' | cmd /c "`"$(Join-Path $essai 'Lancer Gardien.bat')`"" 2>&1 | Out-String
+    $sortieLanceur = 'N' | cmd /c "`"$(Join-Path $essai 'Lancer Vanguard.bat')`"" 2>&1 | Out-String
     $codeLanceur = $LASTEXITCODE
     Set-Content -Path (Join-Path $res 'lanceur.out.txt') -Value $sortieLanceur -Encoding UTF8
-    if ($sortieLanceur -match 'Windows could not start Gardien') { Ok 'Refus expliqué' } else { Bug 'Refus PAS expliqué' }
+    if ($sortieLanceur -match 'Windows could not start Vanguard') { Ok 'Refus expliqué' } else { Bug 'Refus PAS expliqué' }
     if ($sortieLanceur -match 'Checksum unreadable') { Ok 'Empreinte dite illisible, programme absent' } else { Bug 'Empreinte : rien dit pour un programme absent' }
-    if ($codeLanceur -eq 1) { Ok 'Code 1 quand Gardien ne démarre pas' } else { Bug "Code $codeLanceur au lieu de 1" }
+    if ($codeLanceur -eq 1) { Ok 'Code 1 quand Vanguard ne démarre pas' } else { Bug "Code $codeLanceur au lieu de 1" }
     if ((Get-MpPreference | Select-Object ExclusionPath, ControlledFolderAccessAllowedApplications | Out-String) -eq $defLanceur) { Ok 'Defender pas touché' } else { Bug 'Defender modifié par le lanceur' }
     Remove-Item -LiteralPath $essai -Recurse -Force -ErrorAction SilentlyContinue
 } else { Info 'Sautée : lanceur absent du dossier du programme.' }
@@ -713,10 +713,10 @@ elseif (Question 'Faire ce test (deux fenêtres UAC à accepter) ?') {
     # « o » accepte.
     LancerAvec 'protection-changer' @() "6.$numeroDefender`n3`no`n`nq`n"
     $np = Protection-Reseau-Attendue $npAutre
-    if ($np -eq $npAutre) { Ok "Protection réseau passée de $npAvant à $npAutre par Gardien" }
+    if ($np -eq $npAutre) { Ok "Protection réseau passée de $npAvant à $npAutre par Vanguard" }
     elseif ((Sortie 'protection-changer') -match "Administrator prompt refused|Demande d'administrateur refusée") { Bug 'Fenêtre UAC refusée : rien changé (le test demande OUI)' }
     else { Bug "Protection réseau PAS changée ($np)" }
-    if ((Sortie 'protection-changer') -match 'not changed|pas changé') { Bug 'Gardien dit « pas changé » alors que Defender a changé' }
+    if ((Sortie 'protection-changer') -match 'not changed|pas changé') { Bug 'Vanguard dit « pas changé » alors que Defender a changé' }
     LancerAvec 'protection-remettre' @() "6.$numeroDefender`n3`no`n`nq`n"
     $np = Protection-Reseau-Attendue $npAvant
     if ($np -eq $npAvant) { Ok 'Protection réseau remise comme avant' } else { Bug "Protection réseau PAS remise ($np au lieu de $npAvant)" }
@@ -724,7 +724,7 @@ elseif (Question 'Faire ce test (deux fenêtres UAC à accepter) ?') {
 } else { Info 'Sautée (il faut accepter les fenêtres UAC).' }
 
 Etape 'Corrections avec UAC (refus, puis acceptation, puis port bloqué)'
-Info 'Coupe le pare-feu du profil « Privé » de la VM, puis Gardien doit le réparer. Le port 3389 et le Bureau à distance ne sont jamais touchés.'
+Info 'Coupe le pare-feu du profil « Privé » de la VM, puis Vanguard doit le réparer. Le port 3389 et le Bureau à distance ne sont jamais touchés.'
 if (Question 'Faire ce test ?') {
     Start-Process powershell -Verb RunAs -Wait -ArgumentList '-NoProfile', '-Command', 'Set-NetFirewallProfile -Profile Private -Enabled False'
     Ref 'Pare-feu après coupure volontaire' { Get-NetFirewallProfile | Select-Object Name, Enabled | Format-Table -AutoSize }
@@ -733,28 +733,28 @@ if (Question 'Faire ce test ?') {
     Write-Host '      Réponds « o » pour le pare-feu, puis clique NON dans la fenêtre UAC. Réponds « n » à tout le reste.' -ForegroundColor Yellow
     Vider-Clavier
     & $exe corriger
-    Constat 'Gardien a-t-il dit « Demande d''administrateur refusée : rien n''a été modifié » et PAS « ✔ fait » ?'
+    Constat 'Vanguard a-t-il dit « Demande d''administrateur refusée : rien n''a été modifié » et PAS « ✔ fait » ?'
     if ((Get-NetFirewallProfile -Profile Private).Enabled) { Bug 'Pare-feu Privé réactivé malgré le refus' } else { Ok 'Refus respecté : pare-feu Privé toujours coupé' }
 
     Write-Host ''
     Write-Host '      Réponds « o » pour le pare-feu et accepte l''UAC. Pour les ports, « o » au port 135 seulement, « n » au reste.' -ForegroundColor Yellow
     Vider-Clavier
     & $exe corriger
-    if ((Get-NetFirewallProfile -Profile Private).Enabled) { Ok 'Pare-feu Privé réactivé par Gardien' }
+    if ((Get-NetFirewallProfile -Profile Private).Enabled) { Ok 'Pare-feu Privé réactivé par Vanguard' }
     else {
         Bug 'Pare-feu Privé toujours coupé après la correction : remis en marche par le script'
         Start-Process powershell -Verb RunAs -Wait -ArgumentList '-NoProfile', '-Command', 'Set-NetFirewallProfile -Profile Private -Enabled True'
     }
-    Ref 'Règles Gardien créées' { Get-NetFirewallRule -DisplayName 'Gardien : bloquer *' -ErrorAction SilentlyContinue | Select-Object DisplayName, Enabled, Action | Format-Table -AutoSize }
+    Ref 'Règles Vanguard créées' { Get-NetFirewallRule -DisplayName 'Vanguard : bloquer *' -ErrorAction SilentlyContinue | Select-Object DisplayName, Enabled, Action | Format-Table -AutoSize }
     Constat 'La correction s''est-elle bien passée (affichage clair, une fenêtre UAC par correction, « OK » à chaque étape) ?'
 
-    # Un port bloqué par Gardien ne doit plus être signalé comme à corriger (0.9.6).
+    # Un port bloqué par Vanguard ne doit plus être signalé comme à corriger (0.9.6).
     Lancer 'machine-apres-blocage' @('machine')
     if ((Sortie 'machine-apres-blocage') -match 'bloqué en entrée par la règle|blocked inbound by the') { Ok 'Port bloqué reconnu à l''audit suivant' }
     else { Info 'Aucun port reconnu comme bloqué (normal si aucun port n''a été bloqué)' }
 
-    if (Question 'Retirer maintenant les règles « Gardien : bloquer » créées pendant le test ?') {
-        Start-Process powershell -Verb RunAs -Wait -ArgumentList '-NoProfile', '-Command', "Remove-NetFirewallRule -DisplayName 'Gardien : bloquer *'"
+    if (Question 'Retirer maintenant les règles « Vanguard : bloquer » créées pendant le test ?') {
+        Start-Process powershell -Verb RunAs -Wait -ArgumentList '-NoProfile', '-Command', "Remove-NetFirewallRule -DisplayName 'Vanguard : bloquer *'"
     }
 } else { Info 'Sautée (il faut répondre aux fenêtres UAC).' }
 
@@ -778,25 +778,25 @@ if ((Sortie 'quarantaine') -match 'Quarantine|Quarantaine') { Ok 'Quarantaine ou
 # Raccourci sur le Bureau : posé, présent, puis retiré.
 $bureau = [Environment]::GetFolderPath('Desktop')
 Lancer 'raccourci-on' @('raccourci', 'on')
-if (Test-Path (Join-Path $bureau 'Gardien.lnk')) { Ok 'Raccourci posé sur le Bureau' } else { Bug 'Raccourci NON posé sur le Bureau' }
+if (Test-Path (Join-Path $bureau 'Vanguard.lnk')) { Ok 'Raccourci posé sur le Bureau' } else { Bug 'Raccourci NON posé sur le Bureau' }
 Lancer 'raccourci-off' @('raccourci', 'off')
-if (-not (Test-Path (Join-Path $bureau 'Gardien.lnk'))) { Ok 'Raccourci retiré' } else { Bug 'Raccourci ENCORE sur le Bureau' }
+if (-not (Test-Path (Join-Path $bureau 'Vanguard.lnk'))) { Ok 'Raccourci retiré' } else { Bug 'Raccourci ENCORE sur le Bureau' }
 # Vérifier ma clé : la liste des disques, quittée sans rien écrire ; aucune partition de la clé n'y est proposée.
 LancerAvec 'verifier-cle' @('verifier-cle') "`n"
 $k = Sortie 'verifier-cle'
-if ($k -match '(?m)^\s+\d+\s+(GARDIEN|WIN11|VTOYEFI|MACOS)\b') { Bug 'Vérifier ma clé propose une partition de la clé GARDIEN' } else { Ok 'Aucune partition de la clé proposée' }
+if ($k -match '(?m)^\s+\d+\s+(VANGUARD|WIN11|VTOYEFI|MACOS)\b') { Bug 'Vérifier ma clé propose une partition de la clé VANGUARD' } else { Ok 'Aucune partition de la clé proposée' }
 if ($k -match 'Start\?|Commencer \?') { Bug 'Vérifier ma clé est allé jusqu''à la question d''écriture' }
 
-Etape 'Réglages Windows de la 0.68 à la 0.78 : Gardien voit-il ce que Windows dit ?'
-# Chaque réglage est relu ici, sans Gardien ; Gardien doit le signaler s'il est risqué, et seulement dans ce cas.
+Etape 'Réglages Windows de la 0.68 à la 0.78 : Vanguard voit-il ce que Windows dit ?'
+# Chaque réglage est relu ici, sans Vanguard ; Vanguard doit le signaler s'il est risqué, et seulement dans ce cas.
 try {
     $audit = Sortie 'machine-json' | ConvertFrom-Json
     function Signale($motif) { [bool]@($audit.constats | Where-Object { $_.probleme -and $_.message -match $motif }).Count }
     function Accord($nom, [bool]$risque, $motif) {
         $vu = Signale $motif
         if ($vu -eq $risque) { Ok "$nom : $(if ($risque) { 'risqué, signalé' } else { 'sûr, rien signalé' })" }
-        elseif ($risque) { Bug "$nom : risqué selon Windows, NON signalé par Gardien" }
-        else { Bug "$nom : sûr selon Windows, mais signalé par Gardien" }
+        elseif ($risque) { Bug "$nom : risqué selon Windows, NON signalé par Vanguard" }
+        else { Bug "$nom : sûr selon Windows, mais signalé par Vanguard" }
     }
     $lsa = Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa' -ErrorAction SilentlyContinue
     $uac = Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' -ErrorAction SilentlyContinue
@@ -814,7 +814,7 @@ try {
     if ($null -ne $maps) { Accord 'Protection dans le cloud' ($maps -eq 0) 'protection dans le cloud de Defender|cloud protection is off' }
     $mit = try { Get-ProcessMitigation -System } catch { $null }
     if ($mit) { Accord 'Protection contre les exploits' ('OFF' -in @("$($mit.DEP.Enable)", "$($mit.ASLR.BottomUp)", "$($mit.CFG.Enable)", "$($mit.SEHOP.Enable)")) 'Protection contre les exploits|Exploit protection' }
-    # Pare-feu, lu par Gardien dans le registre : doit dire la même chose que Get-NetFirewallProfile.
+    # Pare-feu, lu par Vanguard dans le registre : doit dire la même chose que Get-NetFirewallProfile.
     Accord 'Pare-feu coupé' ([bool]@(Get-NetFirewallProfile | Where-Object { -not $_.Enabled }).Count) 'Pare-feu désactivé pour|Firewall off for'
     $wu = (Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Services\wuauserv' -ErrorAction SilentlyContinue).Start
     $uso = (Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Services\UsoSvc' -ErrorAction SilentlyContinue).Start
@@ -823,7 +823,7 @@ try {
     Accord 'Accès anonyme' ($lsa.RestrictAnonymousSAM -eq 0 -or $lsa.EveryoneIncludesAnonymous -eq 1) 'lister les comptes|list the computer|connexion anonyme|anonymous network connection'
     $invite = if ($null -ne $posteGpo.AllowInsecureGuestAuth) { $posteGpo.AllowInsecureGuestAuth } else { $poste.AllowInsecureGuestAuth }
     Accord 'Partages en invité' ($invite -eq 1) 'partages réseau acceptent|Network shares accept'
-    # La stratégie de PowerShell hors celle de ce processus (le test peut tourner en Bypass) : celle que Gardien lit.
+    # La stratégie de PowerShell hors celle de ce processus (le test peut tourner en Bypass) : celle que Vanguard lit.
     $strategie = foreach ($portee in 'MachinePolicy', 'UserPolicy', 'CurrentUser', 'LocalMachine') {
         $s = [string](Get-ExecutionPolicy -Scope $portee)
         if ($s -and $s -ne 'Undefined') { $s; break }
@@ -831,7 +831,7 @@ try {
     Info "Stratégie de PowerShell (hors processus) : $(if ($strategie) { $strategie } else { 'non définie' })"
     Accord 'PowerShell sans avertissement' ($strategie -in 'Unrestricted', 'Bypass') 'PowerShell lance n''importe quel script|PowerShell runs any script'
     $sb = (Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\SecureBoot\State' -ErrorAction SilentlyContinue).UEFISecureBootEnabled
-    if ($null -eq $sb) { Info 'Secure Boot : clé absente (ancien BIOS), Gardien ne dit rien' }
+    if ($null -eq $sb) { Info 'Secure Boot : clé absente (ancien BIOS), Vanguard ne dit rien' }
     else {
         if (@($audit.constats | Where-Object { $_.categorie -eq 'Secure Boot' }).Count) { Ok "Secure Boot au bilan (Windows : $sb)" } else { Bug 'Secure Boot ABSENT du bilan' }
         Accord 'Secure Boot coupé' ($sb -eq 0) 'Secure Boot désactivé|Secure Boot off'
@@ -850,14 +850,14 @@ try {
     $verrou = @($audit.constats | Where-Object { $_.categorie -eq 'Verrouillage' })
     if ($verrou.Count) { Ok "Verrouillage au bilan : $($verrou[0].message)" } else { Bug 'Verrouillage ABSENT du bilan' }
     Info "powercfg, veille sur secteur : $(((powercfg /q SCHEME_CURRENT SUB_SLEEP STANDBYIDLE) -join ' ') -replace '.*Index: (0x[0-9a-f]+).*Index: (0x[0-9a-f]+).*', '$1 (secteur), $2 (batterie)')"
-    # BitLocker : valeur brute de Windows (1 actif, 2 coupé, 3 en cours, 5 suspendu, 8 en attente) et ce qu'en dit Gardien.
+    # BitLocker : valeur brute de Windows (1 actif, 2 coupé, 3 en cours, 5 suspendu, 8 en attente) et ce qu'en dit Vanguard.
     $bl = (New-Object -ComObject Shell.Application).NameSpace('C:').Self.ExtendedProperty('System.Volume.BitLockerProtection')
     $chiffre = @($audit.constats | Where-Object { $_.categorie -eq 'Chiffrement' })
-    Info "BitLocker de C: : valeur $bl ; Gardien : $(if ($chiffre.Count) { $chiffre[0].message } else { 'rien' })"
-    # Services au chemin sans guillemets : ceux que Windows a, et ce qu'en dit Gardien (signalés seulement si un dossier est modifiable par tous).
+    Info "BitLocker de C: : valeur $bl ; Vanguard : $(if ($chiffre.Count) { $chiffre[0].message } else { 'rien' })"
+    # Services au chemin sans guillemets : ceux que Windows a, et ce qu'en dit Vanguard (signalés seulement si un dossier est modifiable par tous).
     $sansGuillemets = @(Get-CimInstance Win32_Service | Where-Object { $_.PathName -and -not $_.PathName.StartsWith('"') -and $_.PathName -match '^[^"]+ [^"]*\.exe' })
     $vu = @($audit.constats | Where-Object { $_.message -match 'sans guillemets|unquoted path' })
-    Info "Services au chemin sans guillemets avec espace : $($sansGuillemets.Count) ; Gardien : $(if ($vu.Count) { $vu[0].message } else { 'rien (aucun dossier modifiable par tous)' })"
+    Info "Services au chemin sans guillemets avec espace : $($sansGuillemets.Count) ; Vanguard : $(if ($vu.Count) { $vu[0].message } else { 'rien (aucun dossier modifiable par tous)' })"
     # Ports en écoute lus par netstat (adresse distante 0.0.0.0:0 ou [::]:0, quelle que soit la langue) : les mêmes que
     # Get-NetTCPConnection, et le bilan ne les dit jamais « impossibles ».
     $parNetstat = @(netstat -ano | ForEach-Object { $c = -split $_; if ($c.Count -eq 5 -and $c[0] -eq 'TCP' -and $c[2] -in '0.0.0.0:0', '[::]:0') { [int]($c[1] -replace '.*:', '') } }) | Sort-Object -Unique
@@ -866,7 +866,7 @@ try {
     else { Bug "Ports en écoute : netstat ($($parNetstat -join ',')) et Get-NetTCPConnection ($($parCmdlet -join ',')) diffèrent" }
     if (@($audit.constats | Where-Object { $_.categorie -eq 'Ports en écoute' -and -not $_.verifie }).Count) { Bug 'Ports en écoute : impossibles à vérifier au bilan' }
     else { Ok 'Ports en écoute vérifiés au bilan' }
-    # Exclusions de Defender : lisibles seulement en administrateur ; sinon Gardien ne conclut rien.
+    # Exclusions de Defender : lisibles seulement en administrateur ; sinon Vanguard ne conclut rien.
     $exclusions = @((Get-MpPreference -ErrorAction SilentlyContinue).ExclusionPath)
     if ($exclusions | Where-Object { $_ -like 'N/A*' }) { Info 'Exclusions de Defender cachées sans droits administrateur' }
     else { Info "Exclusions de Defender : $(@($exclusions | Where-Object { $_ }).Count) dossier(s)" }
@@ -882,9 +882,9 @@ if ($Auto) { Info 'Sautée : il faut regarder l''écran (test avec questions).' 
 Journal "FIN $(Get-Date -Format 'HH:mm:ss')"
 $rapport = Rapport
 $toutes = @($script:etapes | ForEach-Object { $_.Verifs })
-# Les journaux des fenêtres administrateur de cette passe (outils de Gardien, %LOCALAPPDATA%\gardien\corrections) :
+# Les journaux des fenêtres administrateur de cette passe (outils de Vanguard, %LOCALAPPDATA%\vanguard\corrections) :
 # ce qui s'est vraiment exécuté après chaque UAC, lisible depuis Linux.
-$corrections = Join-Path $env:LOCALAPPDATA 'gardien\corrections'
+$corrections = Join-Path $env:LOCALAPPDATA 'vanguard\corrections'
 $journauxAdmin = @(Get-ChildItem -LiteralPath $corrections -Filter '*.log' -ErrorAction SilentlyContinue | Where-Object LastWriteTime -ge $debutTest)
 if ($journauxAdmin) {
     $versJournaux = Join-Path $res 'corrections'

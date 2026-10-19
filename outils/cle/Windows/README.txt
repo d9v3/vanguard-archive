@@ -1,13 +1,13 @@
-GARDIEN for Windows — how to run it
+VANGUARD for Windows — how to run it
 ===================================
 Français : LISEZMOI.txt
 
-The program: "gardien.exe", in this folder. Windows 10 and 11 (64-bit), nothing to install.
+The program: "vanguard.exe", in this folder. Windows 10 and 11 (64-bit), nothing to install.
 
 
 1. THE EASIEST WAY
 
-   Double-click "gardien.exe" (here), or "Lancer Gardien.bat" at the root of the key.
+   Double-click "vanguard.exe" (here), or "Lancer Vanguard.bat" at the root of the key.
    Windows runs nothing by itself from a USB key (protection against viruses): you have to
    double-click.
 
@@ -15,40 +15,40 @@ The program: "gardien.exe", in this folder. Windows 10 and 11 (64-bit), nothing 
 2. IN POWERSHELL OR WINDOWS TERMINAL
 
    Right-click the Start button > "Terminal" (Windows 11) or "Windows PowerShell" (Windows 10).
-   This command finds the key whatever its letter (D:, E:…) and starts Gardien:
+   This command finds the key whatever its letter (D:, E:…) and starts Vanguard:
 
-     & "$((Get-Volume -FileSystemLabel GARDIEN).DriveLetter):\Windows\gardien.exe"
+     & "$((Get-Volume -FileSystemLabel VANGUARD).DriveLetter):\Windows\vanguard.exe"
 
    If you know the letter of the key (here E:, see File Explorer > This PC):
 
-     & "E:\Windows\gardien.exe"
-     & "E:\Windows\gardien.exe" full
+     & "E:\Windows\vanguard.exe"
+     & "E:\Windows\vanguard.exe" full
 
 
 3. IN THE COMMAND PROMPT (cmd)
 
    Windows key, type "cmd", Enter. Then (replace E: with the letter of the key):
 
-     E:\Windows\gardien.exe
-     E:\Windows\gardien.exe full
+     E:\Windows\vanguard.exe
+     E:\Windows\vanguard.exe full
 
 
 4. USEFUL COMMANDS
 
-   Nothing after "gardien.exe": the menu. Otherwise:
+   Nothing after "vanguard.exe": the menu. Otherwise:
 
-     gardien.exe full                 full check: this machine, then the network
-     gardien.exe full --text          same check, report as plain text
-     gardien.exe fix                  check, then each fix shown and confirmed
-     gardien.exe audit                audit of this machine only
-     gardien.exe network              local network scan
-     gardien.exe update               updates: Windows, programs (winget), drivers…
-     gardien.exe repair               repairs: Internet, stuck Windows Update, full disk…
-     gardien.exe clean --list         space to gain, deleting nothing
-     gardien.exe connection           connection test: ping, speed, bufferbloat
-     gardien.exe antivirus <folder>   scan a key, a disk or a folder (Defender)
-     gardien.exe --help               every command (gardien.exe <command> --help: the details)
-     gardien.exe --version            the version
+     vanguard.exe full                 full check: this machine, then the network
+     vanguard.exe full --text          same check, report as plain text
+     vanguard.exe fix                  check, then each fix shown and confirmed
+     vanguard.exe audit                audit of this machine only
+     vanguard.exe network              local network scan
+     vanguard.exe update               updates: Windows, programs (winget), drivers…
+     vanguard.exe repair               repairs: Internet, stuck Windows Update, full disk…
+     vanguard.exe clean --list         space to gain, deleting nothing
+     vanguard.exe connection           connection test: ping, speed, bufferbloat
+     vanguard.exe antivirus <folder>   scan a key, a disk or a folder (Defender)
+     vanguard.exe --help               every command (vanguard.exe <command> --help: the details)
+     vanguard.exe --version            the version
 
 
 5. GOOD TO KNOW
@@ -58,10 +58,10 @@ The program: "gardien.exe", in this folder. Windows 10 and 11 (64-bit), nothing 
    - The program is not signed: SmartScreen may warn ("More info" > "Run anyway") and Microsoft
      Defender may flag it, because it scans ports. Started from the key, SmartScreen usually says
      nothing.
-   - If Defender blocks Gardien (false positive): "Lancer Gardien.bat" says so and offers to open
-     Windows Security. You choose "Allow on device" in the protection history; Gardien never
+   - If Defender blocks Vanguard (false positive): "Lancer Vanguard.bat" says so and offers to open
+     Windows Security. You choose "Allow on device" in the protection history; Vanguard never
      changes Defender itself.
-   - In French:  $env:GARDIEN_LANG = "fr"  (PowerShell)  or  set GARDIEN_LANG=fr  (cmd), then the
+   - In French:  $env:VANGUARD_LANG = "fr"  (PowerShell)  or  set VANGUARD_LANG=fr  (cmd), then the
      command.
    - Quit: q in the menu, or Ctrl+C.
 

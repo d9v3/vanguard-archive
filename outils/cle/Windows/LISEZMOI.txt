@@ -1,13 +1,13 @@
-GARDIEN pour Windows — comment le lancer
+VANGUARD pour Windows — comment le lancer
 ========================================
 English: README.txt
 
-Le programme : « gardien.exe », dans ce dossier. Windows 10 et 11 (64 bits), rien à installer.
+Le programme : « vanguard.exe », dans ce dossier. Windows 10 et 11 (64 bits), rien à installer.
 
 
 1. LE PLUS SIMPLE
 
-   Double-cliquer « gardien.exe » (ici), ou « Lancer Gardien.bat » à la racine de la clé.
+   Double-cliquer « vanguard.exe » (ici), ou « Lancer Vanguard.bat » à la racine de la clé.
    Windows ne lance rien tout seul depuis une clé USB (protection contre les virus) : il faut
    double-cliquer.
 
@@ -15,40 +15,40 @@ Le programme : « gardien.exe », dans ce dossier. Windows 10 et 11 (64 bits), r
 2. DANS POWERSHELL OU LE TERMINAL WINDOWS
 
    Clic droit sur le bouton Démarrer > « Terminal » (Windows 11) ou « Windows PowerShell » (Windows 10).
-   Cette commande trouve la clé quelle que soit sa lettre (D:, E:…) et lance Gardien :
+   Cette commande trouve la clé quelle que soit sa lettre (D:, E:…) et lance Vanguard :
 
-     & "$((Get-Volume -FileSystemLabel GARDIEN).DriveLetter):\Windows\gardien.exe"
+     & "$((Get-Volume -FileSystemLabel VANGUARD).DriveLetter):\Windows\vanguard.exe"
 
    Si tu connais la lettre de la clé (ici E:, voir l'Explorateur de fichiers > Ce PC) :
 
-     & "E:\Windows\gardien.exe"
-     & "E:\Windows\gardien.exe" complet
+     & "E:\Windows\vanguard.exe"
+     & "E:\Windows\vanguard.exe" complet
 
 
 3. DANS L'INVITE DE COMMANDES (cmd)
 
    Touche Windows, taper « cmd », Entrée. Puis (remplacer E: par la lettre de la clé) :
 
-     E:\Windows\gardien.exe
-     E:\Windows\gardien.exe complet
+     E:\Windows\vanguard.exe
+     E:\Windows\vanguard.exe complet
 
 
 4. COMMANDES UTILES
 
-   Sans rien après « gardien.exe » : le menu. Sinon :
+   Sans rien après « vanguard.exe » : le menu. Sinon :
 
-     gardien.exe complet              bilan complet : cette machine, puis le réseau
-     gardien.exe complet --texte      même bilan, rapport en texte simple
-     gardien.exe corriger             bilan, puis chaque correction montrée et confirmée
-     gardien.exe machine              audit de cette machine seulement
-     gardien.exe reseau               scan du réseau local
-     gardien.exe maj                  mises à jour : Windows, programmes (winget), pilotes…
-     gardien.exe reparer              réparations : Internet, Windows Update bloqué, disque plein…
-     gardien.exe nettoyer --liste     place à gagner, sans rien effacer
-     gardien.exe connexion            test de connexion : ping, débit, bufferbloat
-     gardien.exe antivirus <dossier>  analyser une clé, un disque ou un dossier (Defender)
-     gardien.exe --help               toutes les commandes (gardien.exe <commande> --help : le détail)
-     gardien.exe --version            la version
+     vanguard.exe complet              bilan complet : cette machine, puis le réseau
+     vanguard.exe complet --texte      même bilan, rapport en texte simple
+     vanguard.exe corriger             bilan, puis chaque correction montrée et confirmée
+     vanguard.exe machine              audit de cette machine seulement
+     vanguard.exe reseau               scan du réseau local
+     vanguard.exe maj                  mises à jour : Windows, programmes (winget), pilotes…
+     vanguard.exe reparer              réparations : Internet, Windows Update bloqué, disque plein…
+     vanguard.exe nettoyer --liste     place à gagner, sans rien effacer
+     vanguard.exe connexion            test de connexion : ping, débit, bufferbloat
+     vanguard.exe antivirus <dossier>  analyser une clé, un disque ou un dossier (Defender)
+     vanguard.exe --help               toutes les commandes (vanguard.exe <commande> --help : le détail)
+     vanguard.exe --version            la version
 
 
 5. BON À SAVOIR
@@ -58,10 +58,10 @@ Le programme : « gardien.exe », dans ce dossier. Windows 10 et 11 (64 bits), r
    - Le programme n'est pas signé : SmartScreen peut avertir (« Informations complémentaires » >
      « Exécuter quand même ») et Microsoft Defender peut le signaler, car il scanne des ports. Lancé
      depuis la clé, SmartScreen ne dit en général rien.
-   - Si Defender bloque Gardien (faux positif) : « Lancer Gardien.bat » le dit et propose d'ouvrir
+   - Si Defender bloque Vanguard (faux positif) : « Lancer Vanguard.bat » le dit et propose d'ouvrir
      Sécurité Windows. C'est toi qui choisis « Autoriser sur l'appareil » dans l'historique de
-     protection ; Gardien ne touche jamais lui-même à Defender.
-   - En anglais :  $env:GARDIEN_LANG = "en"  (PowerShell)  ou  set GARDIEN_LANG=en  (cmd), puis la
+     protection ; Vanguard ne touche jamais lui-même à Defender.
+   - En anglais :  $env:VANGUARD_LANG = "en"  (PowerShell)  ou  set VANGUARD_LANG=en  (cmd), puis la
      commande.
    - Quitter : q dans le menu, ou Ctrl+C.
 

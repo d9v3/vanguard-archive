@@ -1,4 +1,4 @@
-# Développer Gardien
+# Développer Vanguard
 
 **Français** · [English](CONTRIBUTING.en.md)
 
@@ -24,7 +24,7 @@ modification. Sur GitHub, `@claude` dans un ticket ou une demande de fusion le f
 | `src/machine/dns.rs`, `certificats.rs`, `extensions.rs`, `partages.rs`, `sante.rs`, `wifi.rs`, `bluetooth.rs` | vérifications communes aux trois systèmes (partages.rs : partages de fichiers ouverts à tout le monde ; bluetooth.rs : ordinateur visible, appareils appairés depuis peu) |
 | `src/machine/unix.rs` | vérifications communes à Linux et macOS : fichiers secrets, sudo |
 | `src/machine/heure.rs`, `fin_de_support.rs`, `comptes_oublies.rs`, `mots_de_passe.rs`, `sensibles.rs` | heure réglée automatiquement ; système, programmes abandonnés et navigateurs sans mise à jour ; comptes inutilisés ; mots de passe du navigateur sans protection ; fichiers sensibles qui traînent |
-| `src/changements.rs` | ce que Gardien a changé : chaque correction lancée par `machine::appliquer_chacune`, notée sur l'ordinateur |
+| `src/changements.rs` | ce que Vanguard a changé : chaque correction lancée par `machine::appliquer_chacune`, notée sur l'ordinateur |
 | `src/sauvegarde.rs`, `src/raccourci.rs`, `src/a_laisser.rs` | sauvegarde automatique guidée (Déjà Dup ou rsync, Time Machine, Historique des fichiers) ; raccourci sur cet ordinateur ; rapport à laisser à la personne dépannée |
 | `src/corriger.rs` | application guidée des correctifs |
 | `src/reseau/mod.rs`, `src/reseau/scan.rs` | scan réseau (TCP connect, sans root), ARP, carnets des réseaux |
@@ -41,12 +41,12 @@ modification. Sur GitHub, `@claude` dans un ticket ou une demande de fusion le f
 | `src/protection/fuites.rs`, `src/donnees.rs` | mots de passe fuités, sauvegarde des données |
 | `src/protection/cle.rs` | protection de la clé USB sous Linux et macOS : partition remontée en lecture seule hors de l'ordinateur du propriétaire |
 | `src/guide/` | guide des commandes : un fichier par système (`linux.rs` : programmes communs et propres à chaque distribution, `windows.rs`, `macos.rs`, `tous.rs`), menus et recherche (`mod.rs`), commandes lancées ici (`lancement.rs`) |
-| `src/apprentissage.rs` | ce que Gardien apprend ici : alertes déclarées normales (appris.json), habitudes |
+| `src/apprentissage.rs` | ce que Vanguard apprend ici : alertes déclarées normales (appris.json), habitudes |
 | `src/reseau/listes_noires.rs` | adresse Internet de la maison dans les listes noires (DNSBL), après accord |
 | `src/entretien.rs` | entretien du mois : note, mises à jour, place, problèmes nouveaux, en une notification |
 | `src/protection/sortantes.rs` | qui parle à Internet : connexions établies par programme (ss, PowerShell, lsof), DNS inverse |
 | `src/protection/environnement.rs` | au démarrage : bibliothèque injectée dans la session (LD_PRELOAD, DYLD, AppInit_DLLs), jugée comme le préchargement |
-| `src/protection/manifeste.rs` | vérifier Gardien lui-même (version, date du commit, SHA-256) et manifeste de la clé (empreintes BLAKE3 gardées chez le propriétaire, une référence par clé, comparées au bilan) |
+| `src/protection/manifeste.rs` | vérifier Vanguard lui-même (version, date du commit, SHA-256) et manifeste de la clé (empreintes BLAKE3 gardées chez le propriétaire, une référence par clé, comparées au bilan) |
 | `src/protection/distance.rs` | quelqu'un contrôle mon ordi ? logiciels de prise de contrôle à distance (installés, au démarrage, en cours, téléchargés), au bilan et en parcours guidé |
 | `src/protection/lien.rs` | ce lien est-il dangereux ? examen local (punycode, marques imitées…), puis RDAP, URLhaus, Spamhaus DBL, SURBL |
 | `src/protection/telechargement.rs` | vérifier un fichier téléchargé : empreinte par l'outil du système, nom et contenu, YARA et antivirus ; programmes arrivés dans Téléchargements, pour la surveillance |
@@ -58,11 +58,11 @@ modification. Sur GitHub, `@claude` dans un ticket ou une demande de fusion le f
 | `src/lenteur.rs`, `src/fiche.rs` | pourquoi c'est lent (instantané en deux mesures, démarrage) ; fiche de l'ordinateur |
 | `src/copier.rs` | copier mes fichiers vers un disque externe : copie vérifiée (BLAKE3), reprise, jamais d'écrasement ; vérifier une copie (test de restauration) |
 | `src/verifier_cle.rs` | vérifier ma clé : capacité réelle, vitesses et blocs en erreur, écrits dans le libre et relus sans cache, puis effacés |
-| `src/ordinateurs.rs` | mes ordinateurs : la visite de chaque ordinateur notée sur GARDIENLOG (catégories et niveaux seulement) |
+| `src/ordinateurs.rs` | mes ordinateurs : la visite de chaque ordinateur notée sur VANGUARDLOG (catégories et niveaux seulement) |
 | `src/chiffrement.rs` | données de la clé protégées : carnet chiffré (XChaCha20-Poly1305), clé de données gardée chez le propriétaire et enveloppée par la phrase (Argon2id) |
 | `assets/oui.tsv` | fabricants par préfixe MAC (liste IEEE), rangés en tableaux triés à la compilation (`build.rs`) |
 | `assets/yara/` | règles YARA de ReversingLabs (licence MIT), rassemblées par `outils/maj-yara.sh` |
-| `assets/logo-source.jpg`, `assets/icones/`, `assets/gardien.ico` | le logo : l'image source et les icônes que `outils/icone.py` en tire |
+| `assets/logo-source.jpg`, `assets/icones/`, `assets/vanguard.ico` | le logo : l'image source et les icônes que `outils/icone.py` en tire |
 | `LICENCES-TIERCES.txt` | avis de licence des bibliothèques incluses (`outils/licences-tierces.py`) |
 
 ## Compiler, tester, déployer
@@ -73,7 +73,7 @@ Prérequis : `rustup target add x86_64-unknown-linux-musl x86_64-pc-windows-gnu`
 outils/deployer.sh     # compile Linux (musl, statique) + Windows, installe en local, pousse sur GitHub, met à jour la clé
 ```
 
-Bilan lent ? `GARDIEN_CHRONO=1 gardien machine --json >/dev/null` donne le temps de chaque vérification (elles
+Bilan lent ? `VANGUARD_CHRONO=1 vanguard machine --json >/dev/null` donne le temps de chaque vérification (elles
 tournent en même temps : la plus lente fait la durée).
 
 Tests : `cargo test` (Linux, dans un dossier de données jetable : jamais les vraies données de l'ordinateur) ; tests
@@ -83,7 +83,7 @@ sans remarque ; `cargo fmt --check`. Les fonctions internes sont testées dans l
 le vrai programme comme le ferait quelqu'un (aide dans les deux langues, menus quittés, listes, refus respectés, audit
 et scan de 127.0.0.1 en JSON), avec un dossier personnel jetable, sans la clé ni la session de l'utilisateur. Essais
 complets : `outils/test-linux/essai.sh`, `outils/test-macos/essai.sh` (sur
-un Mac de GitHub) et, dans la machine virtuelle Windows, `TESTER-GARDIEN.bat` (déposé par `deployer.sh`).
+un Mac de GitHub) et, dans la machine virtuelle Windows, `TESTER-VANGUARD.bat` (déposé par `deployer.sh`).
 
 macOS : compilé et testé sur un Mac de GitHub (`.github/workflows/macos.yml`, programme universel Apple Silicon +
 Intel), chaque nuit si le code a changé ou à la demande (`gh workflow run macos.yml`). `deployer.sh` récupère la
@@ -107,7 +107,7 @@ d'une API, espace de noms) se décrivent dans `outils/liens.txt`.
 partage du dépôt (`assets/partage.png`). `deployer.sh` le lance pour chaque version publiée, puisque le menu montre
 son numéro, et commite les images à part.
 
-Gardien y tourne pour de vrai, dans un pseudo-terminal de 80 colonnes, depuis une fausse clé et sur une copie des
+Vanguard y tourne pour de vrai, dans un pseudo-terminal de 80 colonnes, depuis une fausse clé et sur une copie des
 données : rien de vrai n'est touché. Le nom du réseau devient « Salon » ; adresses MAC (préfixe du fabricant gardé),
 adresses IP (un réseau inventé, longueurs et ordre gardés), noms d'appareils et dossiers du compte sont remplacés, au
 hasard à chaque passe ; du bilan de la machine, seul un extrait sans rien de personnel est montré. Puis le garde-fou
@@ -129,9 +129,9 @@ git config core.hooksPath outils/hooks                                     # cro
 git config user.email "<id>+<compte>@users.noreply.github.com"            # commits sans ton courriel
 ```
 
-Ce qui est personnel est lu sur l'ordinateur, jamais écrit dans le dépôt : `~/.config/gardien-dev/confidentiel.txt`
+Ce qui est personnel est lu sur l'ordinateur, jamais écrit dans le dépôt : `~/.config/vanguard-dev/confidentiel.txt`
 (une expression par ligne : nom, courriels, adresse…), l'identité Git globale, le dossier personnel, les appareils et
-adresses MAC de la base de Gardien, les réseaux Wi-Fi enregistrés. Les données des autres (la clé passe chez des
+adresses MAC de la base de Vanguard, les réseaux Wi-Fi enregistrés. Les données des autres (la clé passe chez des
 amis, et leur journal d'erreurs revient ici) sont reconnues à leur forme : compte d'un dossier personnel, courriel,
 SID de Windows ; un ticket du journal est masqué avant l'envoi, adresses MAC et IP comprises. Sur GitHub, la CI le
 repasse sur les commits de chaque envoi et de chaque demande de fusion (`--generique --plage`) : seulement les données
@@ -147,7 +147,7 @@ version, compiler avec `rustflags = ["--remap-path-prefix=/home/<compte>=~"]` da
 ## Publier une version
 
 `outils/publier-version.sh` crée la page de la version sur GitHub (Releases) avec les trois programmes
-(`gardien-windows-x86_64.exe`, `gardien-linux-x86_64`, `gardien-macos`), leurs empreintes SHA-256 et, en notes, le
+(`vanguard-windows-x86_64.exe`, `vanguard-linux-x86_64`, `vanguard-macos`), leurs empreintes SHA-256 et, en notes, le
 commit de chaque version depuis la page précédente (titre et puces), la plus récente en tête ; les liens de
 téléchargement du README pointent toujours vers la dernière. `--notes` montre ces notes sans rien publier.
 
@@ -162,16 +162,16 @@ description en anglais suivie de la dernière version publiée, lien, sujets et 
 
 ## La clé USB
 
-La clé (exFAT, étiquette `GARDIEN`, fichier témoin `gardien.cle`) contient `Linux/`, `Windows/`, `macOS/`, `donnees/`
+La clé (exFAT, étiquette `VANGUARD`, fichier témoin `vanguard.cle`) contient `Linux/`, `Windows/`, `macOS/`, `donnees/`
 (base des appareils, portable), `source/` (ce dépôt) et le guide en deux langues (`LISEZMOI.txt`, `README.txt`, tirés
 de `outils/`). L'historique des bilans et la quarantaine restent sur chaque ordinateur.
 
 Sur le PC de développement, elle se met à jour toute seule (unités systemd dans `outils/systemd/`, installées par
-`outils/systemd/installer.sh`) : après chaque compilation (`gardien-copie.service`), et à chaque branchement avec la
-dernière version de GitHub, compilée si elle est nouvelle (`gardien-cle.service`, `deployer.sh --branchement`).
+`outils/systemd/installer.sh`) : après chaque compilation (`vanguard-copie.service`), et à chaque branchement avec la
+dernière version de GitHub, compilée si elle est nouvelle (`vanguard-cle.service`, `deployer.sh --branchement`).
 
-La clé a deux partitions : `GARDIEN`, en lecture seule partout sauf sur l'ordinateur du propriétaire (attribut GPT
-respecté par Windows ; sous Linux et macOS, Gardien la remonte lui-même en lecture seule), et `GARDIENLOG`, qui ne
+La clé a deux partitions : `VANGUARD`, en lecture seule partout sauf sur l'ordinateur du propriétaire (attribut GPT
+respecté par Windows ; sous Linux et macOS, Vanguard la remonte lui-même en lecture seule), et `VANGUARDLOG`, qui ne
 reçoit que le journal des erreurs, anonymisé. `outils/preparer-cle.sh` prépare une nouvelle clé.
 
 En préparation, une clé de secours qui démarre aussi les ordinateurs : `outils/cle-secours.sh`. Ventoy démarre Arch
@@ -179,12 +179,12 @@ En préparation, une clé de secours qui démarre aussi les ordinateurs : `outil
 secours), tenus à jour par `outils/images-cle.sh` (signature de chaque projet vérifiée, minuterie hebdomadaire, copie
 au branchement) ; une partition FAT32 `WIN11` installe Windows 11 avec Secure Boot actif,
 sans ajouter de clé au PC (`install.wim` découpé par wimlib sous la limite de 4 Go) ; une partition HFS+ porte la
-récupération de macOS des Mac Intel ; `GARDIEN` et `GARDIENLOG` comme avant. `--plan` et `--essai` (sur une image de
+récupération de macOS des Mac Intel ; `VANGUARD` et `VANGUARDLOG` comme avant. `--plan` et `--essai` (sur une image de
 disque) ne touchent à aucun disque ; seul `--ecrire` efface la clé.
 
 ## Erreurs et plantages
 
-Gardien les note sans rien de personnel (sur la clé, ou dans son dossier quand la clé n'est pas branchée). Au
+Vanguard les note sans rien de personnel (sur la clé, ou dans son dossier quand la clé n'est pas branchée). Au
 déploiement, `deployer.sh` les rapatrie et `outils/journal-vers-github.py` en fait des tickets GitHub (étiquette
 « journal ») avec `gh` : un ticket par erreur, les répétitions en commentaire. Aucun mot de passe GitHub dans le
 programme ni sur la clé.

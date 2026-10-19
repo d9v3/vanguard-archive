@@ -1,6 +1,6 @@
 //! L'heure réglée automatiquement : une horloge qui dérive de quelques minutes fait échouer les sites sécurisés
 //! (certificats « pas encore valides » ou « expirés »), Windows Update et les codes de double authentification.
-//! Gardien regarde si le système règle l'heure tout seul (NTP) ; il ne mesure pas l'écart lui-même, ce qui
+//! Vanguard regarde si le système règle l'heure tout seul (NTP) ; il ne mesure pas l'écart lui-même, ce qui
 //! demanderait d'interroger un serveur. Sous macOS, le réglage ne se lit pas sans droits administrateur : rien n'est dit.
 
 use super::{Constat, alerte, ok};

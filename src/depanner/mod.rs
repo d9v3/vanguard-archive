@@ -1,5 +1,5 @@
 //! Dépanner pas à pas : les pannes de tous les jours (« Pas d'Internet », « L'ordinateur est lent »…), prises comme le
-//! ferait quelqu'un qui s'y connaît. Deux ou trois questions, puis Gardien vérifie lui-même ce qu'il peut, dit ce
+//! ferait quelqu'un qui s'y connaît. Deux ou trois questions, puis Vanguard vérifie lui-même ce qu'il peut, dit ce
 //! qu'il a trouvé, et propose la bonne réparation (celles de Réparer) ou le bon outil (Nettoyer, Copier mes
 //! fichiers…). Rien n'est changé sans être montré et accepté.
 
@@ -17,7 +17,7 @@ use crate::ui::*;
 
 /// Un parcours de dépannage.
 pub struct Parcours {
-    /// Le mot de la ligne de commande (« gardien depanner internet »), en français puis en anglais.
+    /// Le mot de la ligne de commande (« vanguard depanner internet »), en français puis en anglais.
     cles: (&'static str, &'static str),
     titre: (&'static str, &'static str),
     /// Précision de sa ligne au menu (33 caractères au plus).
@@ -112,7 +112,7 @@ fn entete() -> Vec<String> {
     let titre = *EN_COURS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     lignes_cadre(
         &format!(
-            "{ACCENT}GARDIEN{RESET} {GRIS}›{RESET} {} {GRIS}›{RESET} {titre}",
+            "{ACCENT}VANGUARD{RESET} {GRIS}›{RESET} {} {GRIS}›{RESET} {titre}",
             tr!("Dépanner", "Troubleshoot")
         ),
         tr!("pas à pas", "step by step"),
@@ -145,7 +145,7 @@ fn question(texte: &str, reponses: &[&str]) -> Option<usize> {
         .filter(|&i| i < reponses.len())
 }
 
-/// Ce que Gardien a vérifié : bon, mauvais, ou à savoir.
+/// Ce que Vanguard a vérifié : bon, mauvais, ou à savoir.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Etat {
     Bon,
@@ -200,7 +200,7 @@ fn ecran() {
 /// Le début de l'écran des vérifications, après les questions.
 fn verifications() {
     ecran();
-    section(tr!("CE QUE GARDIEN VÉRIFIE", "WHAT GARDIEN CHECKS"));
+    section(tr!("CE QUE VANGUARD VÉRIFIE", "WHAT VANGUARD CHECKS"));
 }
 
 /// La réparation de ce titre (menu Réparer), si ce système en a une : montrée, puis lancée après accord.
@@ -235,7 +235,7 @@ fn taille(octets: u64) -> String {
     }
 }
 
-/// Ouvre un outil de Gardien si on le veut.
+/// Ouvre un outil de Vanguard si on le veut.
 fn proposer_outil(question: &str, outil: fn()) {
     if demander(question).oui() {
         outil();
@@ -398,8 +398,8 @@ fn disque_plein() {
     }
     if a_garder == 0 {
         conseil(tr!(
-            "D'abord une copie vérifiée sur un disque externe (Copier mes fichiers). Ensuite seulement, supprime toi-même les originaux dont tu n'as plus besoin ici : Gardien ne supprime jamais tes fichiers.",
-            "First a checked copy on an external disk (Copy my files). Only then, delete yourself the originals you no longer need here: Gardien never deletes your files."
+            "D'abord une copie vérifiée sur un disque externe (Copier mes fichiers). Ensuite seulement, supprime toi-même les originaux dont tu n'as plus besoin ici : Vanguard ne supprime jamais tes fichiers.",
+            "First a checked copy on an external disk (Copy my files). Only then, delete yourself the originals you no longer need here: Vanguard never deletes your files."
         ));
         proposer_outil(
             tr!(
@@ -447,7 +447,7 @@ fn volumes() -> Vec<(String, u64, u64)> {
                 vus.push(peripherique);
                 // Espaces, tabulations… écrits en octal (« \\040 ») : décodés en entier, comme pour Copier.
                 let point = crate::copier::sans_echappements(point);
-                // La clé GARDIEN n'est pas un disque à libérer : elle est faite pour rester telle quelle.
+                // La clé VANGUARD n'est pas un disque à libérer : elle est faite pour rester telle quelle.
                 if crate::copier::est_la_cle(std::path::Path::new(&point)) {
                     return None;
                 }
@@ -576,7 +576,7 @@ pub fn menu() {
         print!("\x1b[2J\x1b[H");
         let mut lignes: Vec<Ligne> = lignes_cadre(
             &format!(
-                "{ACCENT}GARDIEN{RESET} {GRIS}›{RESET} {}",
+                "{ACCENT}VANGUARD{RESET} {GRIS}›{RESET} {}",
                 tr!("Dépanner pas à pas", "Troubleshoot step by step")
             ),
             tr!("une panne, des questions", "a problem, a few questions"),
@@ -587,8 +587,8 @@ pub fn menu() {
         lignes.extend(
             envelopper(
                 tr!(
-                    "Choisis ce qui ne va pas : deux ou trois questions, puis Gardien vérifie lui-même et propose la bonne réparation. Rien n'est changé sans ton accord.",
-                    "Choose what is wrong: two or three questions, then Gardien checks by itself and suggests the right repair. Nothing changes without your consent."
+                    "Choisis ce qui ne va pas : deux ou trois questions, puis Vanguard vérifie lui-même et propose la bonne réparation. Rien n'est changé sans ton accord.",
+                    "Choose what is wrong: two or three questions, then Vanguard checks by itself and suggests the right repair. Nothing changes without your consent."
                 ),
                 LARGEUR - 2,
             )
@@ -638,7 +638,7 @@ fn trouver(sujet: &str) -> Option<&'static Parcours> {
     })
 }
 
-/// « gardien depanner [sujet] » : sans sujet, le menu ; sinon le parcours désigné.
+/// « vanguard depanner [sujet] » : sans sujet, le menu ; sinon le parcours désigné.
 pub fn executer(sujet: &str) {
     if sujet.trim().is_empty() {
         menu();

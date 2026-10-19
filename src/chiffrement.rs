@@ -1,13 +1,13 @@
-//! Protection des données de la clé GARDIEN par une phrase de passe (menu Données). Contre une clé perdue ou
+//! Protection des données de la clé VANGUARD par une phrase de passe (menu Données). Contre une clé perdue ou
 //! prêtée : le carnet des appareils (`donnees/appareils.json`) y est chiffré, et le rapport et le diagnostic ne s'y
-//! écrivent plus. Pas contre l'ordinateur où Gardien tourne, qui doit lire les données pour travailler.
+//! écrivent plus. Pas contre l'ordinateur où Vanguard tourne, qui doit lire les données pour travailler.
 //!
 //! Une clé de données de 32 octets, tirée au hasard, chiffre le carnet (XChaCha20-Poly1305 : un fichier modifié est
 //! refusé, pas lu de travers). Elle est gardée deux fois :
 //! - en clair dans le dossier local du propriétaire (`cle-donnees`, lisible par lui seul) : chez lui, rien ne change,
 //!   pas de phrase, et la surveillance horaire continue de lire et d'écrire le carnet ;
 //! - enveloppée par la phrase sur la clé (`donnees/cle.enveloppe`, dérivation Argon2id) : sur un autre ordinateur,
-//!   Gardien demande la phrase ; Entrée sans rien, il continue sans le carnet.
+//!   Vanguard demande la phrase ; Entrée sans rien, il continue sans le carnet.
 //!
 //! Phrase oubliée : tant que l'ordinateur du propriétaire existe, il en pose une nouvelle (il a la clé en clair).
 //! Ordinateur et phrase perdus : le carnet de la clé est perdu, c'est voulu ; une sauvegarde est proposée avant
@@ -20,9 +20,9 @@ use chacha20poly1305::aead::{Aead, Payload};
 use chacha20poly1305::{KeyInit, XChaCha20Poly1305, XNonce};
 
 /// En-tête d'un fichier chiffré : le format, pour qu'un autre fichier ne soit jamais pris pour lui.
-const MAGIQUE: &[u8; 8] = b"GARDIEN1";
+const MAGIQUE: &[u8; 8] = b"VANGDAT1";
 /// En-tête de l'enveloppe de la clé de données.
-const MAGIQUE_ENVELOPPE: &[u8; 8] = b"GARDENV1";
+const MAGIQUE_ENVELOPPE: &[u8; 8] = b"VANGENV1";
 const TAILLE_NONCE: usize = 24;
 const TAILLE_SEL: usize = 16;
 /// Argon2id : 64 Mio de mémoire, 3 passes, un fil : environ une demi-seconde, et chaque essai d'une force brute coûte
@@ -42,7 +42,7 @@ impl std::fmt::Debug for Cle {
 /// Pourquoi des données n'ont pas pu être ouvertes.
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum Refus {
-    /// Ce n'est pas un fichier de Gardien, ou il est tronqué.
+    /// Ce n'est pas un fichier de Vanguard, ou il est tronqué.
     Format,
     /// Mauvaise phrase (enveloppe), ou fichier modifié, ou chiffré avec une autre clé : l'authentification a échoué.
     Authentification,
@@ -183,7 +183,7 @@ pub(crate) fn ouvrir(enveloppe: &[u8], phrase: &str) -> Result<Cle, Refus> {
 
 pub(crate) const ENVELOPPE: &str = "cle.enveloppe";
 /// Le carnet chiffré, à côté de l'ancien nom en clair.
-pub(crate) const CARNET_CHIFFRE: &str = "appareils.json.gardien";
+pub(crate) const CARNET_CHIFFRE: &str = "appareils.json.vanguard";
 
 /// La clé de données gardée chez le propriétaire.
 fn chemin_local() -> PathBuf {
@@ -237,8 +237,8 @@ fn obtenir(donnees: &Path) -> Option<Cle> {
     }
     for _ in 0..3 {
         let phrase = rpassword::prompt_password(crate::tr!(
-            "  Phrase des données de la clé GARDIEN (Entrée : continuer sans le carnet) : ",
-            "  GARDIEN key data passphrase (Enter: go on without the record): "
+            "  Phrase des données de la clé VANGUARD (Entrée : continuer sans le carnet) : ",
+            "  VANGUARD key data passphrase (Enter: go on without the record): "
         ))
         .ok()?;
         if phrase.is_empty() {
@@ -434,8 +434,8 @@ pub fn menu() {
         afficher_aligne(
             "  ",
             tr!(
-                "Branche la clé GARDIEN sur ton ordinateur (celui où elle est modifiable) : la protection se règle seulement là.",
-                "Plug the GARDIEN key into your own computer (where it can be written): protection is set only there."
+                "Branche la clé VANGUARD sur ton ordinateur (celui où elle est modifiable) : la protection se règle seulement là.",
+                "Plug the VANGUARD key into your own computer (where it can be written): protection is set only there."
             ),
             2,
             "",
@@ -447,8 +447,8 @@ pub fn menu() {
         afficher_aligne(
             &format!("  {VERT}✔{RESET} "),
             tr!(
-                "Le carnet des appareils de la clé est chiffré. Sur un autre ordinateur, Gardien demande la phrase ; le rapport et le diagnostic ne s'écrivent plus sur la clé.",
-                "The key's device record is encrypted. On another computer, Gardien asks for the passphrase; the report and the diagnostic are no longer written to the key."
+                "Le carnet des appareils de la clé est chiffré. Sur un autre ordinateur, Vanguard demande la phrase ; le rapport et le diagnostic ne s'écrivent plus sur la clé.",
+                "The key's device record is encrypted. On another computer, Vanguard asks for the passphrase; the report and the diagnostic are no longer written to the key."
             ),
             4,
             "",
@@ -502,8 +502,8 @@ pub fn menu() {
     }
     for l in envelopper(
         tr!(
-            "Le carnet des appareils de la clé (noms, adresses MAC, surnoms de chez toi et de chez tes amis) est en clair : qui ramasse la clé le lit. Protégé, il est chiffré par une phrase. Ici, rien ne change ; sur un autre ordinateur, Gardien demande la phrase. Le rapport et le diagnostic ne s'écrivent plus sur la clé. Phrase oubliée : cet ordinateur en pose une nouvelle. Cet ordinateur et la phrase perdus : le carnet est perdu.",
-            "The key's device record (names, MAC addresses, nicknames from your home and your friends') is in clear: whoever picks up the key reads it. Protected, it is encrypted by a passphrase. Here, nothing changes; on another computer, Gardien asks for the passphrase. The report and the diagnostic are no longer written to the key. Forgotten passphrase: this computer sets a new one. This computer and the passphrase lost: the record is lost."
+            "Le carnet des appareils de la clé (noms, adresses MAC, surnoms de chez toi et de chez tes amis) est en clair : qui ramasse la clé le lit. Protégé, il est chiffré par une phrase. Ici, rien ne change ; sur un autre ordinateur, Vanguard demande la phrase. Le rapport et le diagnostic ne s'écrivent plus sur la clé. Phrase oubliée : cet ordinateur en pose une nouvelle. Cet ordinateur et la phrase perdus : le carnet est perdu.",
+            "The key's device record (names, MAC addresses, nicknames from your home and your friends') is in clear: whoever picks up the key reads it. Protected, it is encrypted by a passphrase. Here, nothing changes; on another computer, Vanguard asks for the passphrase. The report and the diagnostic are no longer written to the key. Forgotten passphrase: this computer sets a new one. This computer and the passphrase lost: the record is lost."
         ),
         LARGEUR - 2,
     ) {
@@ -534,8 +534,8 @@ pub fn menu() {
         Ok(()) => afficher_aligne(
             &format!("  {VERT}✔{RESET} "),
             tr!(
-                "Carnet chiffré. Retiens bien la phrase : sans elle, ailleurs, Gardien continue sans le carnet.",
-                "Record encrypted. Remember the passphrase: without it, elsewhere, Gardien goes on without the record."
+                "Carnet chiffré. Retiens bien la phrase : sans elle, ailleurs, Vanguard continue sans le carnet.",
+                "Record encrypted. Remember the passphrase: without it, elsewhere, Vanguard goes on without the record."
             ),
             4,
             "",
@@ -566,7 +566,7 @@ fn constat_de(donnees: &Path) -> Option<crate::machine::Constat> {
         return None;
     }
     Some(crate::machine::Constat {
-        categorie: "Clé GARDIEN",
+        categorie: "Clé VANGUARD",
         probleme: Some(crate::risk::Niveau::Info),
         message: crate::tr!(
             "Le carnet des appareils de la clé est en clair : qui la ramasse le lit.",
@@ -615,7 +615,7 @@ mod tests {
             dechiffrer(&Cle::nouvelle().unwrap(), "appareils.json", &chiffre),
             Err(Refus::Authentification)
         );
-        // Pas un fichier de Gardien, ou tronqué.
+        // Pas un fichier de Vanguard, ou tronqué.
         assert_eq!(dechiffrer(&cle, "appareils.json", clair), Err(Refus::Format));
         assert_eq!(dechiffrer(&cle, "appareils.json", &chiffre[..10]), Err(Refus::Format));
         // Deux chiffrements du même texte ne se ressemblent pas (nonce tiré au hasard).
@@ -646,7 +646,7 @@ mod tests {
 
     #[test]
     fn cle_locale_au_compte_seul() {
-        let d = std::env::temp_dir().join(format!("gardien-cle-locale-{}", std::process::id()));
+        let d = std::env::temp_dir().join(format!("vanguard-cle-locale-{}", std::process::id()));
         let chemin = d.join("cle-donnees");
         let cle = Cle::nouvelle().unwrap();
         ecrire_cle_locale(&cle, &chemin).unwrap();
@@ -662,7 +662,7 @@ mod tests {
     }
 
     fn dossier(nom: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("gardien-chiffrement-{nom}-{}", std::process::id()));
+        let d = std::env::temp_dir().join(format!("vanguard-chiffrement-{nom}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(d.join("donnees")).unwrap();
         d

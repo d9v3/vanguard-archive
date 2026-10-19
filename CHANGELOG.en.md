@@ -2,7 +2,7 @@
 
 *[Français](CHANGELOG.md)*
 
-What each day brought to Gardien, most recent first. Since October 19, 2026, Gardien has a single release a day,
+What each day brought to Vanguard, most recent first. Since October 19, 2026, Vanguard has a single release a day,
 gathering the day's work. Only the latest version has its download page; every version keeps its tag in the
 repository (`git checkout v0.62.0`, for example), to be rebuilt if needed.
 
@@ -24,7 +24,7 @@ repository (`git checkout v0.62.0`, for example), to be rebuilt if needed.
 - **Command guide redone.** One entry per system: Omarchy, Arch, Fedora, Debian and Ubuntu, other Linux, Windows 11,
   macOS; each distribution shows its own programs, then those common to Linux. You type what you are looking for and
   commands show up as you type; each one has its page, to copy it, or run it here when it only reads (its output
-  scrolls in Gardien, Esc stops it).
+  scrolls in Vanguard, Esc stops it).
 - **Word prediction in every menu** and checklist: the end of the most likely word shows in grey, Tab completes it.
   And a new logo.
 - **A single release a day.** This history groups versions by day; only the latest keeps its download page, and
@@ -42,7 +42,7 @@ repository (`git checkout v0.62.0`, for example), to be rebuilt if needed.
   reconnect by themselves.
 - **Everywhere.** New administrators and hijacked browsing (forced proxy, hosts file) reported; computer clock, end
   of support of the system, forgotten accounts, passwords kept by the browser, sensitive files lying around.
-- **New tools.** Automatic backup, hacked account, report to leave behind, desktop shortcut, and "What Gardien
+- **New tools.** Automatic backup, hacked account, report to leave behind, desktop shortcut, and "What Vanguard
   changed": every fix is logged and dated, and the HTML report sums it up.
 - **Caution.** The key's partitions are no longer offered as a disk; Check my key and Time Machine more careful;
   booby-trapped disk names refused in automatic backups.
@@ -53,7 +53,7 @@ repository (`git checkout v0.62.0`, for example), to be rebuilt if needed.
   command guide and learning.
 - **New defenses.** Fake technician and remote takeover, shares open to everyone, Windows Defender blocks,
   ransomware decoy files, Bluetooth, watched Downloads folder, reversible quarantine, camera and microphone.
-- **Gardien checks itself**: key manifest, dependency flaws every night, check a copy, check my key, encrypted key
+- **Vanguard checks itself**: key manifest, dependency flaws every night, check a copy, check my key, encrypted key
   data, "My computers".
 - **Comfort.** Startup programs, scrolling menus, search in checklists, copy a command from the guide, aligned
   emojis, booby-trapped names made harmless on screen.
@@ -61,7 +61,7 @@ repository (`git checkout v0.62.0`, for example), to be rebuilt if needed.
 
 ## October 17, 2026: versions 0.9.5 to 0.51
 
-- **Gardien gets its name**, with its shield logo and a redone presentation.
+- **Vanguard gets its name**, with its shield logo and a redone presentation.
 - **Wider check.** DNS and root certificates, browser extensions and security settings, computer health, leaked
   passwords and email addresses, hidden persistence, known package flaws, erased logs, integrity of critical files,
   ARP spoofing of the router, ports opened to the Internet through UPnP.

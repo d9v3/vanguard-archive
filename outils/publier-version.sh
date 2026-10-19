@@ -10,13 +10,13 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
-# Le nom du programme, avec sa majuscule (« Gardien ») : titre de la page de la version.
+# Le nom du programme, avec sa majuscule (« Vanguard ») : titre de la page de la version.
 NOM=$(sed -n 's/^name = "\(.*\)"/\1/p' Cargo.toml | head -1)
 NOM=${NOM^}
 TAG="v$VERSION"
 COMMIT=$(git rev-parse HEAD)
-LINUX=target/x86_64-unknown-linux-musl/release/gardien
-WINDOWS=target/x86_64-pc-windows-gnu/release/gardien.exe
+LINUX=target/x86_64-unknown-linux-musl/release/vanguard
+WINDOWS=target/x86_64-pc-windows-gnu/release/vanguard.exe
 
 # Les commits « … (vX.Y.Z) » depuis la dernière page publiée, le plus récent en tête, un seul par version (le plus
 # récent : un commit de version ajouté après coup remplace le titre d'avant) ; sans page d'avant (ou si elle manque
@@ -54,10 +54,10 @@ notes() {
 }
 
 TELECHARGER="Télécharge le programme de ton système :
-- **Windows** : \`gardien-windows-x86_64.exe\`, double-clic. Il n'est pas signé : SmartScreen peut avertir
+- **Windows** : \`vanguard-windows-x86_64.exe\`, double-clic. Il n'est pas signé : SmartScreen peut avertir
   (« Informations complémentaires » puis « Exécuter quand même »).
-- **Linux** : \`gardien-linux-x86_64\` (toutes les distributions), \`chmod +x\` puis lancer dans un terminal.
-- **macOS** (Apple Silicon et Intel) : \`gardien-macos\`, puis \`xattr -d com.apple.quarantine gardien-macos\` et
+- **Linux** : \`vanguard-linux-x86_64\` (toutes les distributions), \`chmod +x\` puis lancer dans un terminal.
+- **macOS** (Apple Silicon et Intel) : \`vanguard-macos\`, puis \`xattr -d com.apple.quarantine vanguard-macos\` et
   lancer dans le Terminal.
 
 Empreintes SHA-256 : \`SHA256SUMS.txt\` (\`sha256sum -c SHA256SUMS.txt\`).
@@ -66,9 +66,9 @@ Ce qu'ont apporté les versions d'avant : \`CHANGELOG.md\` dans le dépôt.
 
 ---
 
-Download the program for your system: \`gardien-windows-x86_64.exe\` (Windows, unsigned: SmartScreen may warn, “More
-info” then “Run anyway”), \`gardien-linux-x86_64\` (any distribution: \`chmod +x\`, then run it in a terminal),
-\`gardien-macos\` (Apple Silicon and Intel: \`xattr -d com.apple.quarantine gardien-macos\`, then run it in Terminal).
+Download the program for your system: \`vanguard-windows-x86_64.exe\` (Windows, unsigned: SmartScreen may warn, “More
+info” then “Run anyway”), \`vanguard-linux-x86_64\` (any distribution: \`chmod +x\`, then run it in a terminal),
+\`vanguard-macos\` (Apple Silicon and Intel: \`xattr -d com.apple.quarantine vanguard-macos\`, then run it in Terminal).
 SHA-256 checksums: \`SHA256SUMS.txt\`. What earlier versions brought: \`CHANGELOG.en.md\` in the repository."
 
 if [[ ${1:-} == --notes ]]; then
@@ -98,13 +98,13 @@ if gh release view "$TAG" >/dev/null 2>&1; then
 fi
 # Aucun lien mort, avant d'attendre le Mac : les téléchargements du README (…/releases/latest/download/<nom>) visent
 # les fichiers de cette version, qui sera la dernière (outils/liens.py).
-python3 outils/liens.py --version gardien-windows-x86_64.exe gardien-linux-x86_64 gardien-macos SHA256SUMS.txt ||
+python3 outils/liens.py --version vanguard-windows-x86_64.exe vanguard-linux-x86_64 vanguard-macos SHA256SUMS.txt ||
   { echo "Liens : rien de publié."; exit 1; }
 
 DOSSIER=$(mktemp -d)
 trap 'rm -rf "$DOSSIER"' EXIT
-cp "$LINUX" "$DOSSIER/gardien-linux-x86_64"
-cp "$WINDOWS" "$DOSSIER/gardien-windows-x86_64.exe"
+cp "$LINUX" "$DOSSIER/vanguard-linux-x86_64"
+cp "$WINDOWS" "$DOSSIER/vanguard-windows-x86_64.exe"
 
 # Une compilation macOS qui a vraiment produit le programme de ce code : celle de ce commit, ou celle d'un commit
 # d'avant dont le programme est le même (seuls des captures, la documentation ou les outils ont changé depuis :
@@ -123,7 +123,7 @@ avec_programme() {
       git diff --name-only "$sha" "$COMMIT" | grep -vqE "$HORS_CODE" && continue
     fi
     if [[ -n $(gh api "repos/{owner}/{repo}/actions/runs/$id/artifacts" \
-      -q '.artifacts[] | select(.name == "gardien-macos" and (.expired | not)) | .name') ]]; then
+      -q '.artifacts[] | select(.name == "vanguard-macos" and (.expired | not)) | .name') ]]; then
       echo "$id"
       return
     fi
@@ -146,9 +146,9 @@ if [[ -z $RUN ]]; then
   [[ -n $RUN ]] || { echo "La compilation macOS n'a pas démarré : rien de publié."; exit 1; }
   gh run watch "$RUN" --exit-status >/dev/null || { echo "La compilation macOS a échoué : rien de publié."; exit 1; }
 fi
-gh run download "$RUN" -n gardien-macos -D "$DOSSIER/mac" >/dev/null
-cp "$DOSSIER/mac/gardien" "$DOSSIER/gardien-macos"
-(cd "$DOSSIER" && sha256sum gardien-windows-x86_64.exe gardien-linux-x86_64 gardien-macos >SHA256SUMS.txt)
+gh run download "$RUN" -n vanguard-macos -D "$DOSSIER/mac" >/dev/null
+cp "$DOSSIER/mac/vanguard" "$DOSSIER/vanguard-macos"
+(cd "$DOSSIER" && sha256sum vanguard-windows-x86_64.exe vanguard-linux-x86_64 vanguard-macos >SHA256SUMS.txt)
 
 NOTES=$(notes)
 
@@ -156,10 +156,10 @@ NOTES=$(notes)
 # métadonnées du .exe… (outils/confidentialite.py).
 printf '%s\n' "$NOTES" | python3 outils/confidentialite.py --texte || { echo "Notes de la version : rien de publié."; exit 1; }
 printf '%s\n' "$NOTES" | python3 outils/liens.py --texte || { echo "Liens des notes : rien de publié."; exit 1; }
-python3 outils/confidentialite.py --binaire "$DOSSIER/gardien-windows-x86_64.exe" "$DOSSIER/gardien-linux-x86_64" \
-  "$DOSSIER/gardien-macos" || { echo "Programmes : rien de publié."; exit 1; }
+python3 outils/confidentialite.py --binaire "$DOSSIER/vanguard-windows-x86_64.exe" "$DOSSIER/vanguard-linux-x86_64" \
+  "$DOSSIER/vanguard-macos" || { echo "Programmes : rien de publié."; exit 1; }
 gh release create "$TAG" --target "$COMMIT" --title "$NOM $VERSION" --notes "$NOTES" \
-  "$DOSSIER/gardien-windows-x86_64.exe" "$DOSSIER/gardien-linux-x86_64" "$DOSSIER/gardien-macos" "$DOSSIER/SHA256SUMS.txt"
+  "$DOSSIER/vanguard-windows-x86_64.exe" "$DOSSIER/vanguard-linux-x86_64" "$DOSSIER/vanguard-macos" "$DOSSIER/SHA256SUMS.txt"
 echo "Version $TAG publiée : $(gh release view "$TAG" --json url -q .url)"
 # Seule la dernière version a sa page : CHANGELOG.md garde ce que chacune a apporté. Les pages d'avant sont retirées,
 # leurs étiquettes restent dans le dépôt (sans --cleanup-tag), pour recompiler une ancienne version au besoin.
@@ -167,13 +167,13 @@ for ancienne in $(gh release list --limit 500 --json tagName -q '.[].tagName' | 
   gh release delete "$ancienne" --yes >/dev/null && echo "Page de $ancienne retirée (son étiquette reste)."
 done
 command -v notify-send >/dev/null &&
-  notify-send -a Gardien -i gardien "$NOM $VERSION publiée sur GitHub" "Page de la version : les trois programmes et leurs empreintes." || true
+  notify-send -a Vanguard -i vanguard "$NOM $VERSION publiée sur GitHub" "Page de la version : les trois programmes et leurs empreintes." || true
 
 # La version macOS publiée est gardée comme une compilation récupérée (outils/deployer.sh ne la redemande pas) et
 # copiée sur la clé si elle est branchée : sinon la clé garderait celle d'avant jusqu'au déploiement suivant.
 rm -rf target/macos && mkdir -p target/macos && cp "$DOSSIER/mac/"* target/macos/
-CLE=$(find "/run/media/$USER" -maxdepth 2 -name gardien.cle -printf '%h\n' 2>/dev/null | head -1)
-if [[ -n $CLE && -d $CLE/macOS ]] && cp -f target/macos/gardien "$CLE/macOS/gardien" && sync; then
+CLE=$(find "/run/media/$USER" -maxdepth 2 -name vanguard.cle -printf '%h\n' 2>/dev/null | head -1)
+if [[ -n $CLE && -d $CLE/macOS ]] && cp -f target/macos/vanguard "$CLE/macOS/vanguard" && sync; then
   echo "Version macOS $VERSION copiée sur la clé."
   # Le manifeste de la clé, écrit par deployer.sh avant cette copie, la reprend : sinon le bilan suivant dirait le
   # programme macOS remplacé.

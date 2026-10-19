@@ -3,26 +3,26 @@
 # commande officielle après archinstall), Debian et Fedora en installateurs par Internet, et SystemRescue (réparer,
 # sauver des fichiers, tester la mémoire).
 #   outils/images-cle.sh --chercher     dernières versions téléchargées dans le cache et vérifiées (minuterie
-#                                       hebdomadaire gardien-images.timer) ; une image mal signée est effacée
+#                                       hebdomadaire vanguard-images.timer) ; une image mal signée est effacée
 #   outils/images-cle.sh --verifier     revérifie signature et empreinte des images du cache
-#   outils/images-cle.sh --cle [POINT]  met à jour sur la clé GARDIEN les images qu'elle a déjà : la nouvelle version
-#                                       copiée, puis l'ancienne retirée (au branchement : gardien-images-cle.service)
+#   outils/images-cle.sh --cle [POINT]  met à jour sur la clé VANGUARD les images qu'elle a déjà : la nouvelle version
+#                                       copiée, puis l'ancienne retirée (au branchement : vanguard-images-cle.service)
 #   outils/images-cle.sh --toutes POINT pose aussi celles qui manquent (nouvelle clé : cle-secours.sh --ecrire)
 #   outils/images-cle.sh --menu POINT   réécrit ventoy/ventoy.json d'après les images de ISO/
 #   outils/images-cle.sh --etat         ce qui est dans le cache et sur la clé
 # Chaque image est vérifiée par la signature de son projet, avec une clé fixée ici (outils/cles-images/ et les
 # empreintes ci-dessous) : jamais une clé lue sur le serveur qui sert l'image, qu'un serveur piégé fournirait avec
-# son image. Une nouvelle clé (Fedora en change à chaque version) arrive avec une mise à jour de Gardien ; d'ici là,
+# son image. Une nouvelle clé (Fedora en change à chaque version) arrive avec une mise à jour de Vanguard ; d'ici là,
 # l'image est refusée et la notification le dit. Windows 11 et la récupération de macOS restent à part
 # (cle-secours.sh) : Microsoft ne donne qu'un lien de 24 heures, et la récupération de macOS télécharge macOS
 # elle-même.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-CACHE=${GARDIEN_IMAGES:-${XDG_CACHE_HOME:-$HOME/.cache}/gardien/images-cle}
+CACHE=${VANGUARD_IMAGES:-${XDG_CACHE_HOME:-$HOME/.cache}/vanguard/images-cle}
 CLES=$PWD/outils/cles-images
 MIO=$((1024 * 1024))
-# Place gardée sur la clé pour Gardien, sa base et ses rapports.
+# Place gardée sur la clé pour Vanguard, sa base et ses rapports.
 MARGE_MIO=512
 # Ordre de copie quand la place manque : la plus utile d'abord.
 SORTES=(systemrescue arch debian fedora)
@@ -50,7 +50,7 @@ declare -A NOMS=([arch]="Arch Linux" [debian]=Debian [fedora]=Fedora [systemresc
 erreur() { echo "✖ $*" >&2; exit 1; }
 lire() { curl -fsSL --retry 3 --connect-timeout 20 --max-time 120 "$1"; }
 avertir() { # titre texte
-  command -v notify-send >/dev/null && notify-send -a Gardien -i gardien "$1" "$2" || true
+  command -v notify-send >/dev/null && notify-send -a Vanguard -i vanguard "$1" "$2" || true
 }
 
 # --- Dernières versions ----------------------------------------------------------------------------------------------
@@ -156,7 +156,7 @@ verifier_image() { # sorte dossier nom
   rm -rf "$trousseau"
   if ! signe_par "$sorte" "$statut"; then
     if grep -q '^\[GNUPG:\] \(NO_PUBKEY\|ERRSIG\)' <<<"$statut"; then
-      echo "signée par une clé que Gardien ne connaît pas encore (une mise à jour de Gardien l'apportera)" >&2
+      echo "signée par une clé que Vanguard ne connaît pas encore (une mise à jour de Vanguard l'apportera)" >&2
     else
       echo "signature absente ou fausse" >&2
     fi
@@ -231,12 +231,12 @@ chercher() {
     rm -rf "$neuf"
   done
   if ((${#neuves[@]})); then
-    avertir "Clé GARDIEN : nouvelles images prêtes" \
+    avertir "Clé VANGUARD : nouvelles images prêtes" \
       "$(printf '%s\n' "${neuves[@]}")
 Elles iront sur la clé à son prochain branchement."
   fi
   if ((${#echecs[@]})); then
-    avertir "Clé GARDIEN : image refusée" "$(printf '%s\n' "${echecs[@]}")"
+    avertir "Clé VANGUARD : image refusée" "$(printf '%s\n' "${echecs[@]}")"
     return 1
   fi
   ((joignables > 0)) || echo "Rien de vérifié : nouvel essai à la prochaine minuterie."
@@ -271,9 +271,9 @@ verifier_cache() {
 
 # --- Clé ------------------------------------------------------------------------------------------------------------
 
-# La clé GARDIEN montée (témoin gardien.cle), comme deployer.sh la cherche.
+# La clé VANGUARD montée (témoin vanguard.cle), comme deployer.sh la cherche.
 point_cle() {
-  find "/run/media/$USER" -maxdepth 2 -name gardien.cle \
+  find "/run/media/$USER" -maxdepth 2 -name vanguard.cle \
     -printf '%h\n' 2>/dev/null | head -1
 }
 
@@ -292,8 +292,8 @@ taille_mio() { echo $((($(stat -c %s "$1") + MIO - 1) / MIO)); }
 copier_sur_cle() { # point (facultatif), toutes (facultatif : aussi les sortes absentes de la clé)
   local point=${1:-} toutes=${2:-}
   [[ -n $point ]] || point=$(point_cle)
-  [[ -n $point && -d $point ]] || { echo "Clé GARDIEN non branchée : rien à copier."; return 0; }
-  exec 9>"${XDG_RUNTIME_DIR:-/tmp}/gardien-deployer.lock"
+  [[ -n $point && -d $point ]] || { echo "Clé VANGUARD non branchée : rien à copier."; return 0; }
+  exec 9>"${XDG_RUNTIME_DIR:-/tmp}/vanguard-deployer.lock"
   flock 9
   local iso=$point/ISO sorte image nom copiees=() manque=() echecs=()
   mkdir -p "$iso"
@@ -324,7 +324,7 @@ copier_sur_cle() { # point (facultatif), toutes (facultatif : aussi les sortes a
       anciennes=()
     fi
     echo "→ ${NOMS[$sorte]} : $nom sur la clé…"
-    avertir "Clé GARDIEN : copie de ${NOMS[$sorte]}" "Ne retire pas la clé avant la fin (une ou deux minutes)."
+    avertir "Clé VANGUARD : copie de ${NOMS[$sorte]}" "Ne retire pas la clé avant la fin (une ou deux minutes)."
     local part=$iso/.$nom.part
     if ! cp "$image" "$part" || ! sync "$part" || [[ $(empreinte_sur_cle "$part") != "$(cat "$image.sha256")" ]]; then
       rm -f "$part"
@@ -338,18 +338,18 @@ copier_sur_cle() { # point (facultatif), toutes (facultatif : aussi les sortes a
   menu "$point"
   sync -f "$point/ventoy/ventoy.json"
   if ((${#copiees[@]})); then
-    avertir "Clé GARDIEN : images à jour" "$(printf '%s\n' "${copiees[@]}")"
+    avertir "Clé VANGUARD : images à jour" "$(printf '%s\n' "${copiees[@]}")"
   fi
   if ((${#manque[@]})); then
-    avertir "Clé GARDIEN : pas la place" "$(printf '%s\n' "${manque[@]}")"
+    avertir "Clé VANGUARD : pas la place" "$(printf '%s\n' "${manque[@]}")"
   fi
   if ((${#echecs[@]})); then
-    avertir "Clé GARDIEN : copie ratée" "$(printf '%s\n' "${echecs[@]}")"
+    avertir "Clé VANGUARD : copie ratée" "$(printf '%s\n' "${echecs[@]}")"
     return 1
   fi
 }
 
-# ventoy.json : Ventoy ne cherche que dans ISO/ (pas dans les dossiers de Gardien), menu en français, un nom clair pour
+# ventoy.json : Ventoy ne cherche que dans ISO/ (pas dans les dossiers de Vanguard), menu en français, un nom clair pour
 # chaque image présente. Écrit à côté puis renommé : une clé retirée en route garde l'ancien menu.
 menu() { # point
   local point=$1
@@ -385,7 +385,7 @@ etat() {
   done
   point=$(point_cle)
   if [[ -z $point ]]; then
-    echo "Clé GARDIEN : pas branchée."
+    echo "Clé VANGUARD : pas branchée."
     return
   fi
   echo "Clé ($point/ISO, $(libre_mio "$point") Mio libres) :"

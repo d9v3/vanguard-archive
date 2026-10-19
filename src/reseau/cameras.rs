@@ -1,7 +1,7 @@
 //! Caméras cachées : sur le réseau d'une location, ou chez quelqu'un, les appareils qui ressemblent à des caméras.
 //! Quatre indices : le fabricant (adresse MAC), un flux vidéo (RTSP) ou un port d'enregistreur ouvert, la réponse à
 //! la recherche ONVIF (WS-Discovery, la norme des caméras de surveillance), et ce qu'annonce la page web de
-//! l'appareil. D'un flux trouvé, Gardien demande seulement la description, pour savoir s'il exige un mot de passe :
+//! l'appareil. D'un flux trouvé, Vanguard demande seulement la description, pour savoir s'il exige un mot de passe :
 //! aucune image n'est lue. Rien n'est coupé ni changé. Une caméra en 4G, ou qui n'enregistre que sur sa carte
 //! mémoire, n'apparaît sur aucun réseau : l'œil reste le meilleur outil.
 
@@ -112,7 +112,7 @@ fn lire_flux(reponse: &str) -> Flux {
 /// Demande la description du flux (sans mot de passe) et lit la première ligne de la réponse.
 async fn flux(ip: Ipv4Addr, port: u16) -> Flux {
     let demande = format!(
-        "DESCRIBE rtsp://{ip}:{port}/ RTSP/1.0\r\nCSeq: 1\r\nAccept: application/sdp\r\nUser-Agent: Gardien\r\n\r\n"
+        "DESCRIBE rtsp://{ip}:{port}/ RTSP/1.0\r\nCSeq: 1\r\nAccept: application/sdp\r\nUser-Agent: Vanguard\r\n\r\n"
     );
     let essai = async {
         let mut c = TcpStream::connect((ip, port)).await.ok()?;
@@ -313,12 +313,12 @@ fn lignes_indices(i: &Indices) -> Vec<(String, Option<Niveau>)> {
     l
 }
 
-/// Menu Réseau et Internet › Caméras cachées, ou `gardien cameras`.
+/// Menu Réseau et Internet › Caméras cachées, ou `vanguard cameras`.
 pub async fn chercher_cameras() {
     titre(tr!("Caméras cachées ?", "Hidden cameras?"));
     let intro = tr!(
-        "Dans une location ou chez quelqu'un, Gardien cherche sur le réseau les appareils qui ressemblent à des caméras : fabricant, flux vidéo, recherche ONVIF, page web. Rien n'est coupé ni changé, et aucune image n'est lue.",
-        "In a rental or at someone's place, Gardien looks on the network for devices that look like cameras: maker, video stream, ONVIF discovery, web page. Nothing is turned off or changed, and no image is read."
+        "Dans une location ou chez quelqu'un, Vanguard cherche sur le réseau les appareils qui ressemblent à des caméras : fabricant, flux vidéo, recherche ONVIF, page web. Rien n'est coupé ni changé, et aucune image n'est lue.",
+        "In a rental or at someone's place, Vanguard looks on the network for devices that look like cameras: maker, video stream, ONVIF discovery, web page. Nothing is turned off or changed, and no image is read."
     );
     for ligne in envelopper(intro, LARGEUR - 2) {
         println!("  {ligne}");

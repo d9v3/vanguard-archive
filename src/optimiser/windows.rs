@@ -17,7 +17,7 @@ use crate::ui::*;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Racine {
-    /// HKCU : le compte de la personne ; Gardien y écrit lui-même.
+    /// HKCU : le compte de la personne ; Vanguard y écrit lui-même.
     Hkcu,
     /// HKCU\Software\Policies : en lecture seule pour l'utilisateur, écrit par la fenêtre administrateur dans la ruche
     /// de la personne (HKEY_USERS\<SID>), même si la fenêtre s'ouvre sous un autre compte.
@@ -474,7 +474,7 @@ impl Changement {
                     demarrage(n)?
                 ))
             }
-            // Écrits dans le compte de la personne par Gardien lui-même (`ecrire_ici`).
+            // Écrits dans le compte de la personne par Vanguard lui-même (`ecrire_ici`).
             Changement::Cle { .. } | Changement::Demarrage { machine: false, .. } => None,
             Changement::Dns { carte, .. } => {
                 let (id, reste) = v?.split_once('\n')?;
@@ -1298,8 +1298,8 @@ fn protection() -> Vec<Reglage> {
                 "Only programs Microsoft recognizes can change Documents, Pictures, Videos, Music and Favorites: ransomware can no longer encrypt them."
             ),
             prudence: Some(tr!(
-                "Des jeux sauvegardent dans Documents (My Games…) et des programmes peu connus y écrivent : ils seront bloqués, avec une notification. Pour en autoriser un : Sécurité Windows › Protection contre les virus et menaces › Protection contre les rançongiciels › Autoriser une application. Les fichiers-pièges de Gardien n'y vont plus : ils y seraient inutiles.",
-                "Some games save in Documents (My Games…) and lesser-known programs write there: they will be blocked, with a notification. To allow one: Windows Security › Virus & threat protection › Ransomware protection › Allow an app. Gardien's decoy files no longer go there: they would be useless."
+                "Des jeux sauvegardent dans Documents (My Games…) et des programmes peu connus y écrivent : ils seront bloqués, avec une notification. Pour en autoriser un : Sécurité Windows › Protection contre les virus et menaces › Protection contre les rançongiciels › Autoriser une application. Les fichiers-pièges de Vanguard n'y vont plus : ils y seraient inutiles.",
+                "Some games save in Documents (My Games…) and lesser-known programs write there: they will be blocked, with a notification. To allow one: Windows Security › Virus & threat protection › Ransomware protection › Allow an app. Vanguard's decoy files no longer go there: they would be useless."
             )),
             recommande: false,
             changements: vec![defender(Pref::DossiersControles, 1)],
@@ -1316,7 +1316,7 @@ mod tests {
         // Une clé jetable du compte : écrite, relue, puis remise à son état d'avant (absente).
         let c = reg(
             Racine::Hkcu,
-            r"Software\GardienTest\Optimiser",
+            r"Software\VanguardTest\Optimiser",
             "Essai",
             Val::Dword(7),
             None,
@@ -1328,14 +1328,14 @@ mod tests {
         assert_eq!(c.lire(), None);
         let texte = reg(
             Racine::Hkcu,
-            r"Software\GardienTest\Optimiser",
+            r"Software\VanguardTest\Optimiser",
             "Texte",
             Val::Texte("506"),
             None,
         );
         assert!(texte.ecrire_ici(texte.cible().as_deref()));
         assert_eq!(texte.lire().as_deref(), Some("sz:506"));
-        let _ = RegKey::predef(HKEY_CURRENT_USER).delete_subkey_all(r"Software\GardienTest");
+        let _ = RegKey::predef(HKEY_CURRENT_USER).delete_subkey_all(r"Software\VanguardTest");
     }
 
     #[test]

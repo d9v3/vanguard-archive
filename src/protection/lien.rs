@@ -877,7 +877,7 @@ const URLHAUS_FRAICHE: Duration = Duration::from_hours(12);
 /// jours, une vieille liste ne le connaît pas encore.
 const URLHAUS_TROP_VIEILLE: Duration = Duration::from_hours(7 * 24);
 
-/// Une liste d'URLhaus (abuse.ch), gardée 12 heures dans le dossier de Gardien. La télécharger ne dit à personne quel
+/// Une liste d'URLhaus (abuse.ch), gardée 12 heures dans le dossier de Vanguard. La télécharger ne dit à personne quel
 /// lien on vérifie. Sans Internet, la copie d'avant sert encore : son texte, et son âge.
 fn liste_urlhaus(adresse: &str, nom: &str) -> Option<(String, Duration)> {
     let dossier = crate::reseau::dossier_local().join("urlhaus");
@@ -1257,12 +1257,12 @@ fn verdict(pire: Option<Niveau>, en_ligne: &EnLigne) -> String {
     t
 }
 
-/// Menu Antivirus et protection › Ce lien est-il dangereux ?, ou `gardien lien <adresse>`.
+/// Menu Antivirus et protection › Ce lien est-il dangereux ?, ou `vanguard lien <adresse>`.
 pub fn verifier(adresse: Option<&str>) {
     titre(tr!("Ce lien est-il dangereux ?", "Is this link dangerous?"));
     paragraphe(tr!(
-        "Gardien examine le lien sans jamais l'ouvrir : le site n'est pas contacté.",
-        "Gardien examines the link without ever opening it: the site is not contacted."
+        "Vanguard examine le lien sans jamais l'ouvrir : le site n'est pas contacté.",
+        "Vanguard examines the link without ever opening it: the site is not contacted."
     ));
     let saisie = match adresse {
         Some(a) => a.to_string(),

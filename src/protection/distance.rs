@@ -4,7 +4,7 @@
 //! peur, puis on fait installer le programme ; l'arnaqueur voit l'écran, bouge la souris, vole des mots de passe ou
 //! fait payer une réparation inventée. Au bilan (catégorie « Accès à distance ») et en parcours guidé.
 //!
-//! Gardien ne coupe jamais une connexion à distance en cours : un programme en cours d'exécution n'est jamais retiré
+//! Vanguard ne coupe jamais une connexion à distance en cours : un programme en cours d'exécution n'est jamais retiré
 //! par le bilan, et le parcours redemande un accord exprès, en rappelant que la personne qui aide peut être connectée
 //! par ce programme même. Un programme que la personne utilise elle-même se déclare normal (« i » à la correction).
 
@@ -235,8 +235,8 @@ fn juger(trouvailles: &[Trouvaille], aujourd_hui: NaiveDate) -> Vec<Constat> {
         constats.push(if en_cours {
             constat.manuel(
                 tr!(
-                    "Gardien ne coupe pas une connexion à distance en cours. Si tu n'as rien demandé : débranche Internet (câble, Wi-Fi), puis menu « Antivirus et protection » › « Quelqu'un contrôle mon ordi ? » pour le fermer et le retirer",
-                    "Gardien does not cut a remote connection in progress. If you did not ask for anything: unplug the Internet (cable, Wi-Fi), then menu “Antivirus and protection” › “Is someone controlling my PC?” to close and remove it"
+                    "Vanguard ne coupe pas une connexion à distance en cours. Si tu n'as rien demandé : débranche Internet (câble, Wi-Fi), puis menu « Antivirus et protection » › « Quelqu'un contrôle mon ordi ? » pour le fermer et le retirer",
+                    "Vanguard does not cut a remote connection in progress. If you did not ask for anything: unplug the Internet (cable, Wi-Fi), then menu “Antivirus and protection” › “Is someone controlling my PC?” to close and remove it"
                 ),
                 &[],
             )
@@ -959,8 +959,8 @@ fn decrire(t: &Trouvaille, aujourd_hui: NaiveDate) -> String {
 pub fn menu() {
     titre(tr!("Quelqu'un contrôle mon ordi ?", "Is someone controlling my PC?"));
     dire(tr!(
-        "L'arnaque au faux technicien : un appel (« votre ordinateur est infecté »), une fenêtre qui fait peur ou un courriel urgent, puis on te fait installer un programme de prise de contrôle à distance (AnyDesk, TeamViewer, RustDesk…). La personne voit ton écran, bouge ta souris, et en profite pour voler des mots de passe ou faire payer une réparation inventée. Gardien cherche ces programmes ici : installés, lancés au démarrage, en cours, ou simplement téléchargés.",
-        "The tech-support scam: a call (“your computer is infected”), a scary pop-up or an urgent email, then you are made to install a remote control program (AnyDesk, TeamViewer, RustDesk…). The person sees your screen, moves your mouse, and takes the opportunity to steal passwords or charge for a made-up repair. Gardien looks for these programs here: installed, started at boot, running, or simply downloaded."
+        "L'arnaque au faux technicien : un appel (« votre ordinateur est infecté »), une fenêtre qui fait peur ou un courriel urgent, puis on te fait installer un programme de prise de contrôle à distance (AnyDesk, TeamViewer, RustDesk…). La personne voit ton écran, bouge ta souris, et en profite pour voler des mots de passe ou faire payer une réparation inventée. Vanguard cherche ces programmes ici : installés, lancés au démarrage, en cours, ou simplement téléchargés.",
+        "The tech-support scam: a call (“your computer is infected”), a scary pop-up or an urgent email, then you are made to install a remote control program (AnyDesk, TeamViewer, RustDesk…). The person sees your screen, moves your mouse, and takes the opportunity to steal passwords or charge for a made-up repair. Vanguard looks for these programs here: installed, started at boot, running, or simply downloaded."
     ));
     println!();
     let Some(trouvailles) = relever() else {
@@ -1133,7 +1133,7 @@ mod tests {
         assert_eq!(reconnu("lateral thinking"), None);
         assert_eq!(reconnu("transaction1.log"), None);
         assert_eq!(reconnu("Microsoft Edge"), None);
-        assert_eq!(reconnu("gardien"), None);
+        assert_eq!(reconnu("vanguard"), None);
     }
 
     fn trouvaille(nom: &str, trace: Trace, depuis: Option<NaiveDate>, retrait: &[&str]) -> Trouvaille {

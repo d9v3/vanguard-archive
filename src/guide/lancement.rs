@@ -1,4 +1,4 @@
-//! Lancer ici une commande du guide qui ne fait que lire : sa sortie défile dans Gardien comme dans un terminal, et
+//! Lancer ici une commande du guide qui ne fait que lire : sa sortie défile dans Vanguard comme dans un terminal, et
 //! Échap l'arrête. Jamais une commande marquée ⚠, ni une qui ouvre une fenêtre, occupe tout le terminal, écrit un
 //! fichier ou demande les droits d'administrateur : celles-là se tapent dans un terminal (`pourquoi_pas`).
 
@@ -16,13 +16,13 @@ use crate::selection::ModeClavier;
 use crate::ui::*;
 
 /// Au-delà, la commande est arrêtée : une commande qui suit un journal (journalctl -f) ou qui ne finit pas d'elle-même
-/// (ping sous Linux et macOS) ne tourne pas sans fin si on oublie Gardien.
+/// (ping sous Linux et macOS) ne tourne pas sans fin si on oublie Vanguard.
 const DELAI: Duration = Duration::from_secs(120);
 
 /// Au-delà, les lignes sont comptées sans être montrées : l'écran ne se noie pas sous un journal entier.
 const LIGNES_MONTREES: usize = 1000;
 
-/// Pourquoi Gardien ne lance cette commande sur aucun ordinateur ; `None` : rien ne l'en empêche.
+/// Pourquoi Vanguard ne lance cette commande sur aucun ordinateur ; `None` : rien ne l'en empêche.
 pub(super) fn obstacle(c: &Commande) -> Option<&'static str> {
     if c.modifie {
         return Some(tr!(
@@ -36,10 +36,10 @@ pub(super) fn obstacle(c: &Commande) -> Option<&'static str> {
             "It has words to replace (<…>): copy it, then complete it in a terminal."
         ));
     }
-    if c.ligne.starts_with("gardien") {
+    if c.ligne.starts_with("vanguard") {
         return Some(tr!(
-            "C'est Gardien lui-même : son menu fait la même chose.",
-            "It is Gardien itself: its menu does the same."
+            "C'est Vanguard lui-même : son menu fait la même chose.",
+            "It is Vanguard itself: its menu does the same."
         ));
     }
     let obstacle = if c.ligne.split_whitespace().any(|m| m == "sudo") {
@@ -72,7 +72,7 @@ pub(super) fn obstacle(c: &Commande) -> Option<&'static str> {
     }
 }
 
-/// Pourquoi Gardien ne lance pas cette commande sur cet ordinateur ; `None` : il le peut, au choix « Lancer ici ».
+/// Pourquoi Vanguard ne lance pas cette commande sur cet ordinateur ; `None` : il le peut, au choix « Lancer ici ».
 pub(super) fn pourquoi_pas(s: Systeme, p: &Programme, c: &Commande) -> Option<String> {
     if let Some(raison) = obstacle(c) {
         return Some(raison.to_string());
@@ -95,7 +95,7 @@ pub(super) fn pourquoi_pas(s: Systeme, p: &Programme, c: &Commande) -> Option<St
 
 /// Le programme qui lance la ligne : sh sous Linux et macOS ; sous Windows, Windows PowerShell, où se tapent les
 /// commandes du guide pour Windows, sa sortie en UTF-8 et sans barre de progression (elle s'écrirait par-dessus
-/// l'écran de Gardien).
+/// l'écran de Vanguard).
 fn processus(ligne: &str) -> Command {
     #[cfg(windows)]
     {
@@ -114,7 +114,7 @@ fn processus(ligne: &str) -> Command {
     {
         let mut c = Command::new("sh");
         c.args(["-c", ligne]);
-        // Jamais de pager (la sortie va à Gardien), et la largeur de la fenêtre pour ps, systemctl…
+        // Jamais de pager (la sortie va à Vanguard), et la largeur de la fenêtre pour ps, systemctl…
         c.env("PAGER", "cat")
             .env("GIT_PAGER", "cat")
             .env("SYSTEMD_PAGER", "cat");
@@ -435,7 +435,7 @@ mod tests {
     #[test]
     fn un_programme_absent_ne_demarre_pas_ou_echoue() {
         let fin = derouler(
-            "gardien-programme-qui-n-existe-pas",
+            "vanguard-programme-qui-n-existe-pas",
             Duration::from_secs(20),
             false,
             |_| {},

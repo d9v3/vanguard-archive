@@ -1,11 +1,11 @@
-//! Journal des erreurs, pour améliorer Gardien après coup : plantages, scripts PowerShell en échec, vérifications
-//! impossibles, scans ratés. Il est écrit sur la petite partition GARDIENLOG de la clé, la seule modifiable sur les
-//! autres ordinateurs (la partition GARDIEN y est en lecture seule), et rapatrié par outils/deployer.sh au
+//! Journal des erreurs, pour améliorer Vanguard après coup : plantages, scripts PowerShell en échec, vérifications
+//! impossibles, scans ratés. Il est écrit sur la petite partition VANGUARDLOG de la clé, la seule modifiable sur les
+//! autres ordinateurs (la partition VANGUARD y est en lecture seule), et rapatrié par outils/deployer.sh au
 //! branchement sur l'ordinateur de développement, qui en fait des tickets GitHub (outils/journal-vers-github.py).
-//! Sans clé branchée, il est écrit dans le dossier de Gardien de cet ordinateur (rapatrié de même sur l'ordinateur
+//! Sans clé branchée, il est écrit dans le dossier de Vanguard de cet ordinateur (rapatrié de même sur l'ordinateur
 //! de développement). Écrit en français : il est destiné au développement, pas à l'utilisateur.
 //!
-//! Rien de personnel, ni sur la personne ni sur les gens que Gardien a croisés : le journal finit en tickets sur
+//! Rien de personnel, ni sur la personne ni sur les gens que Vanguard a croisés : le journal finit en tickets sur
 //! GitHub. Avant l'écriture, le dossier personnel devient « ~ » ; le nom du compte, celui de la machine et ce que la
 //! base des appareils garde (réseaux, appareils, surnoms) deviennent « <utilisateur> », « <machine> », « <réseau> »,
 //! « <appareil> » ; les dossiers des autres comptes, les courriels, les numéros de série, les SID de Windows, les noms
@@ -17,8 +17,8 @@ use std::net::{Ipv4Addr, Ipv6Addr};
 use std::path::PathBuf;
 use std::sync::OnceLock;
 
-/// Fichier témoin à la racine de la partition GARDIENLOG.
-pub const TEMOIN: &str = "gardien-journal.cle";
+/// Fichier témoin à la racine de la partition VANGUARDLOG.
+pub const TEMOIN: &str = "vanguard-journal.cle";
 
 fn a_un_temoin(dossier: &std::path::Path) -> bool {
     dossier.join(TEMOIN).is_file()
@@ -29,7 +29,7 @@ const TAILLE_MAX: u64 = 4 * 1024 * 1024;
 /// Longueur maximale d'un détail (sortie d'erreur de PowerShell…).
 const DETAIL_MAX: usize = 3000;
 
-/// Où écrire : la partition GARDIENLOG de la clé si elle est branchée, sinon le dossier de Gardien.
+/// Où écrire : la partition VANGUARDLOG de la clé si elle est branchée, sinon le dossier de Vanguard.
 fn dossier() -> Option<&'static PathBuf> {
     static DOSSIER: OnceLock<Option<PathBuf>> = OnceLock::new();
     DOSSIER
@@ -48,7 +48,7 @@ fn dossier() -> Option<&'static PathBuf> {
         .as_ref()
 }
 
-/// Partition GARDIENLOG de la clé, si elle est branchée.
+/// Partition VANGUARDLOG de la clé, si elle est branchée.
 pub(crate) fn partition_de_la_cle() -> Option<PathBuf> {
     #[cfg(windows)]
     {
@@ -811,7 +811,7 @@ fn ipv4_commune(ip: Ipv4Addr) -> bool {
         || resolveur
 }
 
-/// La commande lancée, pour le journal : le surnom donné par « gardien nommer » nomme souvent quelqu'un
+/// La commande lancée, pour le journal : le surnom donné par « vanguard nommer » nomme souvent quelqu'un
 /// (« tablette de Zoé ») ; il ne reste que « <surnom> ».
 fn commande_anonyme(args: &[String]) -> String {
     let mut args = args.to_vec();
@@ -845,7 +845,7 @@ pub fn erreur(contexte: &str, detail: &str) {
         detail.push_str(" […]");
     }
     let entree = format!(
-        "== {} · gardien {} · {} · {} · {}\n[{contexte}]\n{}\n\n",
+        "== {} · vanguard {} · {} · {} · {}\n[{contexte}]\n{}\n\n",
         chrono::Utc::now().format("%Y-%m-%d %H:%M UTC"),
         env!("CARGO_PKG_VERSION"),
         systeme(),
@@ -934,11 +934,11 @@ mod tests {
     #[test]
     fn dossiers_des_autres_comptes() {
         let t = anonyme(
-            r"C:\Users\Jean Dupont\Documents\x.ps1 | C:\Users\Public\Desktop | /home/bob/.config | /run/media/bob/GARDIEN | /Users/Shared/a | %USERPROFILE%\x | C:\Users\Zoé est introuvable",
+            r"C:\Users\Jean Dupont\Documents\x.ps1 | C:\Users\Public\Desktop | /home/bob/.config | /run/media/bob/VANGUARD | /Users/Shared/a | %USERPROFILE%\x | C:\Users\Zoé est introuvable",
         );
         assert_eq!(
             t,
-            r"C:\Users\<compte>\Documents\x.ps1 | C:\Users\Public\Desktop | /home/<compte>/.config | /run/media/<compte>/GARDIEN | /Users/Shared/a | %USERPROFILE%\x | C:\Users\<compte> est introuvable"
+            r"C:\Users\<compte>\Documents\x.ps1 | C:\Users\Public\Desktop | /home/<compte>/.config | /run/media/<compte>/VANGUARD | /Users/Shared/a | %USERPROFILE%\x | C:\Users\<compte> est introuvable"
         );
         // Une apostrophe dans le nom, ou qui ferme la chaîne d'un script.
         assert_eq!(

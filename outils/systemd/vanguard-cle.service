@@ -1,0 +1,15 @@
+[Unit]
+Description=Vanguard : mettre à jour la clé USB VANGUARD avec la dernière version de GitHub
+# Au montage de la clé : récupère la dernière version de GitHub (si c'est sans risque), la compile si elle est
+# nouvelle, puis copie tout sur la clé. Après une compilation faite ici, c'est vanguard-copie.service qui copie.
+After=run-media-%u-VANGUARD.mount network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=%h/Projects/vanguard/outils/deployer.sh --branchement
+# Une compilation complète (Linux + Windows, optimisée) peut prendre quelques minutes.
+TimeoutStartSec=20min
+Nice=10
+
+[Install]
+WantedBy=run-media-%u-VANGUARD.mount

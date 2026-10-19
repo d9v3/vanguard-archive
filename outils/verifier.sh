@@ -13,10 +13,10 @@ cd "$(dirname "$0")/.."
 export PATH="$HOME/.cargo/bin:$PATH"
 
 MODE=${1:-}
-WINE=${GARDIEN_WINE:-$HOME/.local/share/Steam/compatibilitytools.d/GE-Proton11-9-x86_64/files/bin/wine}
-PWSH=${GARDIEN_PWSH:-$HOME/.cache/gardien-dev/pwsh/pwsh}
+WINE=${VANGUARD_WINE:-$HOME/.local/share/Steam/compatibilitytools.d/GE-Proton11-9-x86_64/files/bin/wine}
+PWSH=${VANGUARD_PWSH:-$HOME/.cache/vanguard-dev/pwsh/pwsh}
 # Journaux et préfixe Wine hors de /tmp, dont le quota est partagé par les sessions ; retirés à la fin.
-TRAVAIL=$(mktemp -d "$HOME/.cache/gardien-dev/verifier.XXXX")
+TRAVAIL=$(mktemp -d "$HOME/.cache/vanguard-dev/verifier.XXXX")
 trap 'rm -rf "$TRAVAIL"' EXIT
 DEBUT=$SECONDS
 
@@ -57,11 +57,11 @@ scripts_powershell() {
 }
 
 # Toute la suite Linux refaite sans Internet : dans un espace réseau vide (unshare -rn, sans root ; la boucle locale
-# seule, remontée), GARDIEN_HORS_LIGNE posé pour les essais qui le demandent. Chaque outil doit s'y arrêter de
+# seule, remontée), VANGUARD_HORS_LIGNE posé pour les essais qui le demandent. Chaque outil doit s'y arrêter de
 # lui-même et dire pourquoi. Sans espaces de noms d'utilisateur (noyau qui les refuse), l'étape n'est pas lancée.
 hors_ligne() {
   unshare -rn true 2>/dev/null || { echo "espaces de noms d'utilisateur indisponibles"; return 2; }
-  unshare -rn sh -c 'ip link set lo up && GARDIEN_HORS_LIGNE=1 exec cargo test -q --offline'
+  unshare -rn sh -c 'ip link set lo up && VANGUARD_HORS_LIGNE=1 exec cargo test -q --offline'
 }
 
 scripts_shell() { find outils -name '*.sh' -print0 | xargs -0 -n1 bash -n; }
@@ -76,7 +76,7 @@ scripts_python() {
 # comparer.
 textes() {
   [[ $(git rev-parse HEAD) == $(git rev-parse master 2>/dev/null) ]] && { echo "sur master"; return 0; }
-  python3 "$HOME/.cache/gardien-dev/outils-dp40/textes.py"
+  python3 "$HOME/.cache/vanguard-dev/outils-dp40/textes.py"
 }
 
 if ! etape mise-en-forme cargo fmt --check; then
@@ -107,7 +107,7 @@ wait
 
 # Les tests laissent chacun un dossier jetable (reseau::dossier_local sous cfg(test)) : ceux dont le processus est fini
 # partent.
-for d in /tmp/gardien-tests-*; do
+for d in /tmp/vanguard-tests-*; do
   [[ -d $d ]] && ! kill -0 "${d##*-}" 2>/dev/null && rm -rf "$d"
 done
 

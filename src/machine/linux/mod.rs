@@ -22,8 +22,8 @@ use maj::*;
 use persistance::*;
 use privileges::*;
 
-/// Ajouts de Gardien à la configuration de sshd (lu en premier : sshd garde la première valeur trouvée).
-const SSHD_GARDIEN: &str = "/etc/ssh/sshd_config.d/00-gardien.conf";
+/// Ajouts de Vanguard à la configuration de sshd (lu en premier : sshd garde la première valeur trouvée).
+const SSHD_VANGUARD: &str = "/etc/ssh/sshd_config.d/00-vanguard.conf";
 pub const NOM: &str = "Linux";
 
 /// Omarchy installé : ses outils de mise à jour et d'installation passent avant pacman (instantané, migrations,
@@ -558,7 +558,7 @@ fn ports_ecoute(pare_feu_actif: bool, ufw: bool) -> Vec<Constat> {
                     "Ports en écoute",
                     Niveau::Info,
                     trf!(
-                        "{cle} ({}) ouvert par « {programme} », bloqué en entrée par la règle ufw que Gardien a ajoutée (vérifier : sudo ufw status).", "{cle} ({}) opened by “{programme}”, blocked inbound by the ufw rule Gardien added (check: sudo ufw status).",
+                        "{cle} ({}) ouvert par « {programme} », bloqué en entrée par la règle ufw que Vanguard a ajoutée (vérifier : sudo ufw status).", "{cle} ({}) opened by “{programme}”, blocked inbound by the ufw rule Vanguard added (check: sudo ufw status).",
                         i.service
                     ),
                 ));
@@ -570,7 +570,7 @@ fn ports_ecoute(pare_feu_actif: bool, ufw: bool) -> Vec<Constat> {
                     tr!("Faire écouter Ollama uniquement en local (127.0.0.1)", "Make Ollama listen locally only (127.0.0.1)"),
                     &[
                         "sudo mkdir -p /etc/systemd/system/ollama.service.d",
-                        "printf '[Service]\\nEnvironment=OLLAMA_HOST=127.0.0.1\\n' | sudo tee /etc/systemd/system/ollama.service.d/gardien.conf >/dev/null",
+                        "printf '[Service]\\nEnvironment=OLLAMA_HOST=127.0.0.1\\n' | sudo tee /etc/systemd/system/ollama.service.d/vanguard.conf >/dev/null",
                         "sudo systemctl daemon-reload",
                         "sudo systemctl restart ollama",
                     ],
@@ -673,7 +673,7 @@ fn ssh_serveur() -> Constat {
                 "Refuse empty passwords over SSH (sshd's setting)"
             ),
             &[
-                &format!("echo 'PermitEmptyPasswords no' | sudo tee -a {SSHD_GARDIEN} >/dev/null"),
+                &format!("echo 'PermitEmptyPasswords no' | sudo tee -a {SSHD_VANGUARD} >/dev/null"),
                 RECHARGER_SSHD,
             ],
         );
@@ -687,7 +687,7 @@ fn ssh_serveur() -> Constat {
         .corriger(
             tr!("Interdire la connexion SSH en root", "Forbid root login over SSH"),
             &[
-                &format!("echo 'PermitRootLogin no' | sudo tee -a {SSHD_GARDIEN} >/dev/null"),
+                &format!("echo 'PermitRootLogin no' | sudo tee -a {SSHD_VANGUARD} >/dev/null"),
                 RECHARGER_SSHD,
             ],
         );
@@ -706,7 +706,7 @@ fn ssh_serveur() -> Constat {
             c.corriger(
                 tr!("N'accepter que les clés SSH (tu as déjà des clés autorisées)", "Accept SSH keys only (you already have authorized keys)"),
                 &[
-                    &format!("printf 'PasswordAuthentication no\\nKbdInteractiveAuthentication no\\n' | sudo tee -a {SSHD_GARDIEN} >/dev/null"),
+                    &format!("printf 'PasswordAuthentication no\\nKbdInteractiveAuthentication no\\n' | sudo tee -a {SSHD_VANGUARD} >/dev/null"),
                     RECHARGER_SSHD,
                 ],
             )

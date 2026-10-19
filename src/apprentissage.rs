@@ -1,7 +1,7 @@
-//! Ce que Gardien apprend sur cet ordinateur, gardé ici seulement (appris.json) : les alertes que tu as déclarées
+//! Ce que Vanguard apprend sur cet ordinateur, gardé ici seulement (appris.json) : les alertes que tu as déclarées
 //! normales chez toi. Une alerte acceptée reste visible, au niveau info, avec la date de ton choix ; elle n'est plus
 //! proposée à la correction ni notifiée par la surveillance. Elle revient au bout de 90 jours, ou tout de suite si
-//! elle devient plus grave qu'au moment de ton choix. « Ce que Gardien a appris » (menu Cette machine) montre tout et
+//! elle devient plus grave qu'au moment de ton choix. « Ce que Vanguard a appris » (menu Cette machine) montre tout et
 //! permet d'oublier.
 
 use std::collections::BTreeMap;
@@ -13,7 +13,7 @@ use crate::machine::Constat;
 use crate::risk::Niveau;
 use crate::ui::*;
 
-/// Durée d'un choix : au-delà, Gardien repose la question (la situation a pu changer).
+/// Durée d'un choix : au-delà, Vanguard repose la question (la situation a pu changer).
 const DUREE_JOURS: i64 = 90;
 
 #[derive(Serialize, Deserialize, Default)]
@@ -201,9 +201,9 @@ fn habitudes() {
     );
 }
 
-/// Menu Cette machine › Ce que Gardien a appris : tes habitudes, tes choix, et les oublier.
+/// Menu Cette machine › Ce que Vanguard a appris : tes habitudes, tes choix, et les oublier.
 pub fn menu() {
-    titre(tr!("Ce que Gardien a appris", "What Gardien has learned"));
+    titre(tr!("Ce que Vanguard a appris", "What Vanguard has learned"));
     habitudes();
     section(tr!("TES CHOIX", "YOUR CHOICES"));
     let Ok(mut appris) = charger() else {
@@ -218,8 +218,8 @@ pub fn menu() {
     if appris.acceptees.is_empty() {
         for ligne in envelopper(
             tr!(
-                "Rien pour l'instant. Quand une alerte est normale chez toi, réponds « i » au moment de la corriger : Gardien s'en souviendra pendant 90 jours, et te la montrera seulement pour info.",
-                "Nothing yet. When an alert is normal for you, answer “i” when it is offered as a fix: Gardien will remember it for 90 days, and only show it for information."
+                "Rien pour l'instant. Quand une alerte est normale chez toi, réponds « i » au moment de la corriger : Vanguard s'en souviendra pendant 90 jours, et te la montrera seulement pour info.",
+                "Nothing yet. When an alert is normal for you, answer “i” when it is offered as a fix: Vanguard will remember it for 90 days, and only show it for information."
             ),
             LARGEUR - 2,
         ) {

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Compile Gardien (Linux statique + Windows), l'installe localement et met à jour la clé USB GARDIEN si elle est branchée.
+# Compile Vanguard (Linux statique + Windows), l'installe localement et met à jour la clé USB VANGUARD si elle est branchée.
 #   outils/deployer.sh                 compiler puis déployer
 #   outils/deployer.sh --branchement   au branchement de la clé : récupérer la dernière version de GitHub, la
 #                                      compiler si elle est nouvelle, puis copier
@@ -8,15 +8,15 @@
 #                                      du journal) ; le service de copie qui suit la compilation le respecte aussi
 #   outils/deployer.sh --publier       comme sans option, et publie la page de la version (Releases) même pour une
 #                                      0.x.y : sans l'option, seule une 0.x.0 a la sienne
-# GARDIEN_INTERMEDIAIRE=1 : une version d'une série livrée d'affilée. Pas de page (la dernière de la série reprend
+# VANGUARD_INTERMEDIAIRE=1 : une version d'une série livrée d'affilée. Pas de page (la dernière de la série reprend
 # leurs notes) ni de dépôt dans la VM Windows (son test automatique passerait sur chacune) : le Mac de GitHub et la VM
 # ne voient que la dernière.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 export PATH="$HOME/.cargo/bin:$PATH"
 
-LINUX=target/x86_64-unknown-linux-musl/release/gardien
-WINDOWS=target/x86_64-pc-windows-gnu/release/gardien.exe
+LINUX=target/x86_64-unknown-linux-musl/release/vanguard
+WINDOWS=target/x86_64-pc-windows-gnu/release/vanguard.exe
 # Commit dont viennent les binaires compilés : on ne recompile pas une version déjà compilée.
 COMMIT_COMPILE=target/.commit-compile
 MODE=${1:-}
@@ -27,7 +27,7 @@ if [[ $MODE == --publier ]]; then
 fi
 # « Seulement sur cet ordinateur » : rien n'est envoyé sur GitHub. Le repère dure 2 h, assez pour le service de copie
 # que la compilation déclenche (--sans-compiler, qui sinon pousserait) ; un déploiement normal l'efface.
-REPERE_LOCAL="${XDG_RUNTIME_DIR:-/tmp}/gardien-deployer-local"
+REPERE_LOCAL="${XDG_RUNTIME_DIR:-/tmp}/vanguard-deployer-local"
 if [[ $MODE == --local ]]; then
   MODE=""
   touch "$REPERE_LOCAL"
@@ -64,7 +64,7 @@ compiler() {
 }
 
 # Un seul déploiement à la fois : le service déclenché par la compilation attend la fin du lancement manuel.
-exec 9>"${XDG_RUNTIME_DIR:-/tmp}/gardien-deployer.lock"
+exec 9>"${XDG_RUNTIME_DIR:-/tmp}/vanguard-deployer.lock"
 if [[ $MODE == --sans-compiler ]]; then
   # Le service part dès que le binaire Linux est écrit, alors que Windows compile encore :
   # attendre que cargo ait fini (3 s sans cargo, 15 min au plus) pour ne copier qu'une fois.
@@ -111,13 +111,13 @@ fi
 # (outils/publier-version.sh). Moins de pages : moins de minutes de Mac sur GitHub, et moins de programmes neufs, que
 # Defender et SmartScreen ne connaissent pas encore.
 # Captures d'écran du README (assets/captures/) : refaites pour chaque page publiée, puisque le menu montre le numéro
-# de la version téléchargée. Gardien y tourne sur une copie des données, sans rien toucher de vrai, et ce qui
+# de la version téléchargée. Vanguard y tourne sur une copie des données, sans rien toucher de vrai, et ce qui
 # identifierait la maison est masqué (outils/captures.py). Elles partent dans leur propre commit, comme la liste des
 # fabricants. En cas d'échec, le README garde celles d'avant.
 A_PUBLIER=""
 if [[ -z $MODE ]]; then
   VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
-  if [[ -z $LOCAL && -z ${GARDIEN_INTERMEDIAIRE:-} && ( $VERSION =~ ^[0-9]+\.[0-9]+\.0$ || -n $FORCER_PUBLICATION ) ]] &&
+  if [[ -z $LOCAL && -z ${VANGUARD_INTERMEDIAIRE:-} && ( $VERSION =~ ^[0-9]+\.[0-9]+\.0$ || -n $FORCER_PUBLICATION ) ]] &&
     ! timeout 30 gh release view "v$VERSION" >/dev/null 2>&1; then
     A_PUBLIER=1
   fi
@@ -135,7 +135,7 @@ if [[ -z $MODE ]]; then
     duree captures "$T_CAPTURES"
   fi
 fi
-install -Dm755 "$LINUX" "$HOME/.cargo/bin/gardien"
+install -Dm755 "$LINUX" "$HOME/.cargo/bin/vanguard"
 # Sauvegarde hors de la maison : les commits partent vers le dépôt GitHub (sans bloquer s'il n'y a pas d'Internet),
 # seulement si rien de personnel n'y paraît : code, messages, auteur (outils/confidentialite.py), et si aucun lien
 # n'est mort : documentation, programme, scripts, licences (outils/liens.py).
@@ -162,20 +162,20 @@ elif git remote get-url origin >/dev/null 2>&1; then
   fi
 fi
 [[ -n $LOCAL ]] || duree "envoi GitHub" "$T_ENVOI"
-# Icône du lanceur (Gardien.desktop : Icon=gardien) : le bouclier ouvert sur un trou noir (outils/icone.py), une
+# Icône du lanceur (Vanguard.desktop : Icon=vanguard) : le bouclier ouvert sur un trou noir (outils/icone.py), une
 # image par taille de 16 à 512 px, pour que la barre et le lanceur n'aient pas à réduire eux-mêmes la plus grande.
 ICONES="${XDG_DATA_HOME:-$HOME/.local/share}/icons/hicolor"
-for png in assets/icones/gardien-*.png; do
+for png in assets/icones/vanguard-*.png; do
   t=${png##*-}
   t=${t%.png}
-  install -Dm644 "$png" "$ICONES/${t}x$t/apps/gardien.png"
+  install -Dm644 "$png" "$ICONES/${t}x$t/apps/vanguard.png"
 done
 command -v gtk-update-icon-cache >/dev/null && gtk-update-icon-cache -qtf "$ICONES" || true
 
-# Erreurs du journal de Gardien (plantages, PowerShell en échec…) : celles de cet ordinateur et celles que la clé
+# Erreurs du journal de Vanguard (plantages, PowerShell en échec…) : celles de cet ordinateur et celles que la clé
 # rapporte des autres sont gardées dans retours/, puis envoyées en tickets GitHub avec gh (un ticket par erreur, les
 # répétitions en commentaire ; outils/journal-vers-github.py). Sans Internet, elles attendent le déploiement suivant.
-RETOURS="${XDG_DATA_HOME:-$HOME/.local/share}/gardien/retours"
+RETOURS="${XDG_DATA_HOME:-$HOME/.local/share}/vanguard/retours"
 rapatrier_journal() { # $1 : journal à vider, $2 : d'où il vient
   [[ -s $1 ]] || return 0
   mkdir -p "$RETOURS"
@@ -186,33 +186,33 @@ rapatrier_journal() { # $1 : journal à vider, $2 : d'où il vient
   : >"$1"
   echo "Journal $2 : $nb erreur(s) rapatriée(s) dans $RETOURS/journal-erreurs.txt"
   command -v notify-send >/dev/null &&
-    notify-send -a Gardien -i gardien "Gardien : $nb erreur(s) rapportée(s) ($2)" "$RETOURS/journal-erreurs.txt" || true
+    notify-send -a Vanguard -i vanguard "Vanguard : $nb erreur(s) rapportée(s) ($2)" "$RETOURS/journal-erreurs.txt" || true
 }
 envoyer_journal() {
   [[ -z $LOCAL && -s $RETOURS/a-envoyer-github.txt ]] && command -v gh >/dev/null || return 0
   timeout 300 python3 outils/journal-vers-github.py "$RETOURS/a-envoyer-github.txt" ||
     echo "Journal : envoi sur GitHub impossible, il repartira au prochain déploiement."
 }
-# Sans clé branchée, Gardien écrit son journal dans son dossier de cet ordinateur.
-rapatrier_journal "${XDG_DATA_HOME:-$HOME/.local/share}/gardien/journal-erreurs.txt" "de cet ordinateur"
+# Sans clé branchée, Vanguard écrit son journal dans son dossier de cet ordinateur.
+rapatrier_journal "${XDG_DATA_HOME:-$HOME/.local/share}/vanguard/journal-erreurs.txt" "de cet ordinateur"
 envoyer_journal
 
-# Dossier partagé avec la machine virtuelle Windows (\\host.lan\Data\GARDIEN-TEST dans Windows) : à chaque
+# Dossier partagé avec la machine virtuelle Windows (\\host.lan\Data\VANGUARD-TEST dans Windows) : à chaque
 # déploiement, le programme et les scripts de test y sont remplacés par les derniers ; les résultats restent. Dans la
-# VM, TESTER-GARDIEN.bat ouvre le menu des tests (son choix 6 teste seul chaque nouvelle version, en arrière-plan).
-VM="$HOME/Windows/GARDIEN-TEST"
+# VM, TESTER-VANGUARD.bat ouvre le menu des tests (son choix 6 teste seul chaque nouvelle version, en arrière-plan).
+VM="$HOME/Windows/VANGUARD-TEST"
 # Un test qui tourne dans la VM garde son programme : le remplacer en pleine passe mélangerait deux versions. Le témoin
 # est celui du menu des tests, périmé au bout de 3 h comme là-bas.
 EN_COURS="$VM/resultats/.test-en-cours.txt"
-if [[ -n ${GARDIEN_INTERMEDIAIRE:-} ]]; then
+if [[ -n ${VANGUARD_INTERMEDIAIRE:-} ]]; then
   echo "VM Windows : version intermédiaire d'une série, rien n'y est déposé (la dernière le sera)."
 elif [[ -n $(find "$EN_COURS" -mmin -180 2>/dev/null) ]]; then
   echo "VM Windows : un test y tourne (depuis $(date -r "$EN_COURS" +%H:%M)) : rien n'y est déposé cette fois."
 elif [[ -d $HOME/Windows && -f $WINDOWS ]]; then
   mkdir -p "$VM/programme" "$VM/resultats"
-  cp -f "$WINDOWS" "$VM/programme/gardien.exe"
+  cp -f "$WINDOWS" "$VM/programme/vanguard.exe"
   cp -f outils/test-windows/test.ps1 outils/test-windows/menu.ps1 "$VM/programme/"
-  cp -f outils/test-windows/TESTER-GARDIEN.bat outils/test-windows/LISEZMOI.txt "$VM/"
+  cp -f outils/test-windows/TESTER-VANGUARD.bat outils/test-windows/LISEZMOI.txt "$VM/"
   # La version déposée et l'empreinte du programme : le menu les montre, le test automatique part quand elles changent.
   printf '%s\r\n%s\r\n' "$(./"$LINUX" --version)" "$(sha256sum "$WINDOWS" | cut -c1-16)" >"$VM/programme/version.txt"
   if [[ -s $VM/resultats/historique.txt ]]; then
@@ -237,35 +237,35 @@ publier_la_version() {
   duree "page de la version" "$debut"
 }
 
-CLE=$(find "/run/media/$USER" -maxdepth 2 -name gardien.cle -printf '%h\n' 2>/dev/null | head -1)
+CLE=$(find "/run/media/$USER" -maxdepth 2 -name vanguard.cle -printf '%h\n' 2>/dev/null | head -1)
 if [[ -z $CLE ]]; then
-  echo "Clé GARDIEN non branchée : elle sera mise à jour au prochain branchement."
+  echo "Clé VANGUARD non branchée : elle sera mise à jour au prochain branchement."
   publier_la_version
   dire_durees
   exit 0
 fi
 T_CLE=$SECONDS
 
-# Partition GARDIENLOG (la seule modifiable sur les autres ordinateurs) : elle se monte en même temps que GARDIEN,
-# parfois une seconde après. Son journal d'erreurs est rapatrié ici puis vidé, pour améliorer Gardien.
+# Partition VANGUARDLOG (la seule modifiable sur les autres ordinateurs) : elle se monte en même temps que VANGUARD,
+# parfois une seconde après. Son journal d'erreurs est rapatrié ici puis vidé, pour améliorer Vanguard.
 JOURNAL=""
 for _ in {1..10}; do
-  JOURNAL=$(findmnt -nro TARGET -S LABEL=GARDIENLOG 2>/dev/null | head -1 || true)
+  JOURNAL=$(findmnt -nro TARGET -S LABEL=VANGUARDLOG 2>/dev/null | head -1 || true)
   [[ -n $JOURNAL ]] && break
   sleep 1
 done
 if [[ -n $JOURNAL ]]; then
-  touch "$JOURNAL/gardien-journal.cle"
+  touch "$JOURNAL/vanguard-journal.cle"
   rapatrier_journal "$JOURNAL/journal-erreurs.txt" "de la clé"
   envoyer_journal
 fi
 
 mkdir -p "$CLE"/{Linux,Windows,donnees,source}
-# Empreinte de cet ordinateur (SHA-1 de /etc/machine-id) : partout ailleurs, Gardien remonte la clé en lecture seule
+# Empreinte de cet ordinateur (SHA-1 de /etc/machine-id) : partout ailleurs, Vanguard remonte la clé en lecture seule
 # sous Linux (src/protection/cle.rs).
-printf '%s' "$(cat /etc/machine-id)" | sha1sum | cut -d' ' -f1 >"$CLE/gardien.cle"
-copier "$LINUX" "$CLE/Linux/gardien"
-[[ -f $WINDOWS ]] && copier "$WINDOWS" "$CLE/Windows/gardien.exe"
+printf '%s' "$(cat /etc/machine-id)" | sha1sum | cut -d' ' -f1 >"$CLE/vanguard.cle"
+copier "$LINUX" "$CLE/Linux/vanguard"
+[[ -f $WINDOWS ]] && copier "$WINDOWS" "$CLE/Windows/vanguard.exe"
 # Version macOS : compilée sur un Mac de GitHub (.github/workflows/macos.yml, chaque nuit si le code a changé),
 # récupérée ici quand une compilation plus récente a réussi. Sans Internet ou sans gh : on garde la dernière.
 MAC=target/macos
@@ -279,7 +279,7 @@ if [[ -z $LOCAL ]] && command -v gh >/dev/null; then
     --json databaseId,headSha -q '.[] | "\(.databaseId):\(.headSha)"' 2>/dev/null || true); do
     git merge-base --is-ancestor "${execution#*:}" HEAD 2>/dev/null || continue
     if [[ -n $(timeout 20 gh api "repos/{owner}/{repo}/actions/runs/${execution%%:*}/artifacts" \
-      -q '.artifacts[] | select(.name == "gardien-macos" and (.expired | not)) | .name' 2>/dev/null) ]]; then
+      -q '.artifacts[] | select(.name == "vanguard-macos" and (.expired | not)) | .name' 2>/dev/null) ]]; then
       RUN="${execution%%:*} ${execution#*:}"
       break
     fi
@@ -290,15 +290,15 @@ if [[ -z $LOCAL ]] && command -v gh >/dev/null; then
   if [[ -n $RUN && ${RUN#* } != "$ACTUEL" ]] &&
     ! { [[ -n $ACTUEL ]] && git merge-base --is-ancestor "${RUN#* }" "$ACTUEL" 2>/dev/null; }; then
     rm -rf "$MAC.nouveau"
-    if timeout 120 gh run download "${RUN%% *}" -n gardien-macos -D "$MAC.nouveau" >/dev/null 2>&1; then
+    if timeout 120 gh run download "${RUN%% *}" -n vanguard-macos -D "$MAC.nouveau" >/dev/null 2>&1; then
       rm -rf "$MAC" && mv "$MAC.nouveau" "$MAC" && echo "Version macOS récupérée de GitHub (commit ${RUN#* })."
     fi
   fi
 fi
-if [[ -f $MAC/gardien ]]; then
+if [[ -f $MAC/vanguard ]]; then
   mkdir -p "$CLE/macOS"
-  copier "$MAC/gardien" "$CLE/macOS/gardien"
-  cp -f "outils/cle/Lancer Gardien.command" "$CLE/"
+  copier "$MAC/vanguard" "$CLE/macOS/vanguard"
+  cp -f "outils/cle/Lancer Vanguard.command" "$CLE/"
   # Le Mac de GitHub ne compile pas chaque version (la nuit si le code a changé, et pour chaque page publiée) : la
   # version macOS de la clé peut retarder sur les deux autres, et c'est dit.
   VERSION_MAC=$(git show "$(cat "$MAC/commit.txt" 2>/dev/null):Cargo.toml" 2>/dev/null |
@@ -309,7 +309,7 @@ if [[ -f $MAC/gardien ]]; then
   fi
 fi
 # macOS écrit dès le branchement (index Spotlight, journal des changements, corbeille) : ces témoins l'en
-# dispensent, la clé reste propre même avant que Gardien la protège.
+# dispensent, la clé reste propre même avant que Vanguard la protège.
 touch "$CLE/.metadata_never_index" "$CLE/.Trashes"
 mkdir -p "$CLE/.fseventsd" && touch "$CLE/.fseventsd/no_log"
 cp -f outils/LISEZMOI.txt "$CLE/LISEZMOI.txt"
@@ -326,8 +326,8 @@ cp -f LICENSE "$CLE/LICENSE.txt"
 cp -f LICENCES-TIERCES.txt "$CLE/LICENCES-TIERCES.txt"
 # Icône et nom du lecteur dans l'Explorateur, lanceurs à la racine. (Windows ne lance plus rien tout seul depuis une
 # clé USB, depuis Windows 7 ; GNOME, lui, propose de lancer autorun.sh.)
-cp -f assets/gardien.ico "$CLE/gardien.ico"
-cp -f outils/cle/autorun.inf outils/cle/autorun.sh "outils/cle/Lancer Gardien.bat" "$CLE/"
+cp -f assets/vanguard.ico "$CLE/vanguard.ico"
+cp -f outils/cle/autorun.inf outils/cle/autorun.sh "outils/cle/Lancer Vanguard.bat" "$CLE/"
 # Code source complet (avec l'historique git) pour continuer le développement depuis n'importe quel ordinateur.
 # exFAT ne garde ni droits ni liens : -rt suffit, --modify-window tolère sa précision de 2 s. Les copies de travail
 # des sessions Claude (.claude/worktrees, avec leurs propres compilations) restent sur l'ordinateur.
@@ -338,13 +338,13 @@ rsync -rt --delete --modify-window=2 --exclude /target/ --exclude /.claude/workt
 ./"$LINUX" manifeste --ecrire "$CLE" || echo "Manifeste de la clé non écrit : le bilan ne pourra pas la comparer."
 sync
 duree clé "$T_CLE"
-echo "Clé GARDIEN à jour : $CLE ($(./"$LINUX" --version))"
+echo "Clé VANGUARD à jour : $CLE ($(./"$LINUX" --version))"
 # Une seule notification par version copiée : le lancement manuel et le service qui le suit copient les mêmes
 # binaires. (Remplacer la notification ne suffit pas : la barre l'oublie dès que la bulle a disparu.)
-EMPREINTE_FICHIER="${XDG_RUNTIME_DIR:-/tmp}/gardien-notification.empreinte"
+EMPREINTE_FICHIER="${XDG_RUNTIME_DIR:-/tmp}/vanguard-notification.empreinte"
 EMPREINTE=$({ cat "$LINUX" "$WINDOWS" 2>/dev/null || true; } | sha256sum)
 if command -v notify-send >/dev/null && [[ $(cat "$EMPREINTE_FICHIER" 2>/dev/null) != "$EMPREINTE" ]]; then
-  notify-send -a Gardien -i gardien "Clé GARDIEN à jour${VENU_DE_GITHUB:+ (depuis GitHub)}" "$(./"$LINUX" --version)" || true
+  notify-send -a Vanguard -i vanguard "Clé VANGUARD à jour${VENU_DE_GITHUB:+ (depuis GitHub)}" "$(./"$LINUX" --version)" || true
   echo "$EMPREINTE" >"$EMPREINTE_FICHIER"
 fi
 publier_la_version

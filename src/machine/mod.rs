@@ -165,8 +165,8 @@ pub(crate) type Verification<'a> = Box<dyn FnOnce() -> Vec<Constat> + Send + 'a>
 /// Lance les vérifications en même temps (chacune attend surtout des commandes du système) et rend leurs constats
 /// dans l'ordre de la liste. Une vérification qui plante le dit, sans emporter les autres.
 fn en_parallele(verifications: Vec<Verification<'_>>) -> Vec<Constat> {
-    // GARDIEN_CHRONO : chaque vérification dit son temps sur la sortie d'erreur, pour trouver ce qui ralentit le bilan.
-    let chrono = std::env::var_os("GARDIEN_CHRONO").is_some();
+    // VANGUARD_CHRONO : chaque vérification dit son temps sur la sortie d'erreur, pour trouver ce qui ralentit le bilan.
+    let chrono = std::env::var_os("VANGUARD_CHRONO").is_some();
     std::thread::scope(|s| {
         let fils: Vec<_> = verifications
             .into_iter()
@@ -625,7 +625,7 @@ fn base64_decoder(texte: &str) -> Option<Vec<u8>> {
     Some(sortie)
 }
 
-/// Ports que Gardien a bloqués dans le pare-feu de cet ordinateur, un par ligne (« 8080/tcp »).
+/// Ports que Vanguard a bloqués dans le pare-feu de cet ordinateur, un par ligne (« 8080/tcp »).
 /// Un port bloqué écoute toujours : sans ce registre, l'alerte et la même correction revenaient à chaque audit.
 /// Sous Linux, les règles ufw ne sont pas lisibles sans root ; Windows, lui, relit ses règles directement.
 fn fichier_blocages() -> std::path::PathBuf {
@@ -693,7 +693,7 @@ pub fn appliquer(commandes: &[String]) -> bool {
 /// première en échec ; sous Windows, une seule fenêtre UAC pour tous.
 pub fn appliquer_chacune(correctifs: &[Vec<String>]) -> Vec<bool> {
     let resultats = lancer_chacune(correctifs);
-    // Gardé sur cet ordinateur : « Ce que Gardien a changé » (changements.rs).
+    // Gardé sur cet ordinateur : « Ce que Vanguard a changé » (changements.rs).
     crate::changements::noter(correctifs, &resultats);
     resultats
 }
@@ -836,7 +836,7 @@ pub fn auditer(bavard: bool) -> Audit {
     a
 }
 
-/// Système, programmes, pilotes et firmware : tout ce qui doit être à jour (`gardien maj`). `seulement` limite
+/// Système, programmes, pilotes et firmware : tout ce qui doit être à jour (`vanguard maj`). `seulement` limite
 /// les longues recherches à ces catégories, pour revérifier ce qui vient d'être installé.
 pub fn mises_a_jour_completes(seulement: Option<&[&str]>) -> Vec<Constat> {
     os::mises_a_jour_completes(seulement)
@@ -913,8 +913,8 @@ mod tests {
     #[test]
     fn lien_ouvert_d_un_seul_morceau() {
         assert_eq!(
-            ligne_ouvrir(r"C:\Users\A&B\AppData\Local\gardien\rapport.html"),
-            r#"/C start "" "C:\Users\A&B\AppData\Local\gardien\rapport.html""#
+            ligne_ouvrir(r"C:\Users\A&B\AppData\Local\vanguard\rapport.html"),
+            r#"/C start "" "C:\Users\A&B\AppData\Local\vanguard\rapport.html""#
         );
         assert_eq!(
             ligne_ouvrir("https://exemple.org/page?a=1&b=2|c"),
@@ -1020,7 +1020,7 @@ Host *
     #[test]
     fn phrase_de_passe_des_cles_ssh() {
         // Clés générées pour le test, si ssh-keygen est disponible.
-        let dossier = std::env::temp_dir().join(format!("gardien-cles-{}", std::process::id()));
+        let dossier = std::env::temp_dir().join(format!("vanguard-cles-{}", std::process::id()));
         std::fs::create_dir_all(&dossier).unwrap();
         let generer = |nom: &str, phrase: &str| {
             std::process::Command::new("ssh-keygen")
@@ -1075,7 +1075,7 @@ Host *
     #[cfg(unix)]
     #[test]
     fn un_correctif_en_echec_n_arrete_pas_les_autres() {
-        let temoin = std::env::temp_dir().join(format!("gardien-test-appliquer-{}", std::process::id()));
+        let temoin = std::env::temp_dir().join(format!("vanguard-test-appliquer-{}", std::process::id()));
         let toucher = format!("touch '{}'", temoin.display());
         let r = appliquer_chacune(&[vec!["true".into()], vec!["false".into(), toucher], vec!["true".into()]]);
         assert_eq!(r, [true, false, true]);

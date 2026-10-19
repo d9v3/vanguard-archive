@@ -1,10 +1,10 @@
 //! Vérifier ma clé : une clé USB ou un disque externe tient-il ce qu'il annonce ? Les fausses clés (une puce de 16 Go
 //! vendue « 1 To ») acceptent tout ce qu'on leur écrit et rendent n'importe quoi au-delà de leur vraie taille ; une
-//! clé qui meurt rend des blocs faux ou illisibles. Gardien écrit dans l'espace libre, dans un dossier à lui, un
+//! clé qui meurt rend des blocs faux ou illisibles. Vanguard écrit dans l'espace libre, dans un dossier à lui, un
 //! contenu déterministe (chaque bloc porte l'essai, son fichier et son numéro), relit tout en contournant le cache du
 //! système (sinon on relirait la mémoire de l'ordinateur et une fausse clé passerait pour bonne : fsync puis
 //! `posix_fadvise DONTNEED` sous Linux, `F_NOCACHE` sous macOS, `FILE_FLAG_NO_BUFFERING` sous Windows), mesure les
-//! vitesses d'écriture et de lecture, puis efface tout. Une marge est laissée libre ; jamais sur la clé GARDIEN ni sur
+//! vitesses d'écriture et de lecture, puis efface tout. Une marge est laissée libre ; jamais sur la clé VANGUARD ni sur
 //! le disque du système ; rien n'est écrit sans être montré et accepté ; Échap ou Ctrl-C arrêtent et nettoient. Mode
 //! rapide (un quart de l'espace libre : repère les fausses clés courantes, dont la vraie capacité est bien moindre
 //! que l'annoncée, et mesure la vitesse) ou complet (tout l'espace libre : la seule preuve).
@@ -21,7 +21,7 @@ use crate::ui::*;
 const MIO: u64 = 1 << 20;
 const GIO: u64 = 1 << 30;
 /// Le dossier de l'essai, à la racine du disque ; ce qui reste d'un essai interrompu se reconnaît à ce préfixe.
-const PREFIXE_DOSSIER: &str = "Gardien-verification-";
+const PREFIXE_DOSSIER: &str = "Vanguard-verification-";
 /// Ce qu'on laisse libre : au moins ça, ou 1 % du libre.
 const MARGE_MIN: u64 = 64 * MIO;
 /// En dessous, pas de place pour un essai qui veuille dire quelque chose.
@@ -338,7 +338,7 @@ fn lire_exactement(f: &mut File, t: &mut [u8]) -> std::io::Result<bool> {
     Ok(true)
 }
 
-/// Un fichier d'essai de Gardien : « verif-0001.bin ».
+/// Un fichier d'essai de Vanguard : « verif-0001.bin ».
 fn fichier_d_essai(nom: &str) -> bool {
     nom.strip_prefix("verif-")
         .and_then(|r| r.strip_suffix(".bin"))
@@ -617,14 +617,14 @@ fn info(texte: &str) {
     );
 }
 
-/// Le disque à vérifier, parmi ceux qui sont branchés (jamais la clé GARDIEN ni le disque du système : la liste de
+/// Le disque à vérifier, parmi ceux qui sont branchés (jamais la clé VANGUARD ni le disque du système : la liste de
 /// Copier mes fichiers les exclut déjà).
 fn choisir_disque() -> Option<crate::copier::Disque> {
     let liste = crate::copier::disques();
     if liste.is_empty() {
         mauvais(tr!(
-            "Aucune clé ni disque externe à vérifier (la clé GARDIEN et le disque du système ne comptent pas). Branche la clé, attends qu'elle apparaisse, puis recommence.",
-            "No USB stick or external disk to check (the GARDIEN key and the system disk do not count). Plug in the stick, wait for it to appear, then start again."
+            "Aucune clé ni disque externe à vérifier (la clé VANGUARD et le disque du système ne comptent pas). Branche la clé, attends qu'elle apparaisse, puis recommence.",
+            "No USB stick or external disk to check (the VANGUARD key and the system disk do not count). Plug in the stick, wait for it to appear, then start again."
         ));
         return None;
     }
@@ -669,8 +669,8 @@ fn disque_de(chemin: &Path) -> Result<crate::copier::Disque, String> {
         .find(|d| reel.starts_with(&d.racine))
         .ok_or_else(|| {
             trf!(
-                "{} n'est pas sur une clé ou un disque externe branché (la clé GARDIEN et le disque du système sont exclus).",
-                "{} is not on a plugged-in USB stick or external disk (the GARDIEN key and the system disk are excluded).",
+                "{} n'est pas sur une clé ou un disque externe branché (la clé VANGUARD et le disque du système sont exclus).",
+                "{} is not on a plugged-in USB stick or external disk (the VANGUARD key and the system disk are excluded).",
                 chemin_affichable(chemin)
             )
         })
@@ -739,7 +739,7 @@ fn identifiant_d_essai() -> u64 {
     u64::from_le_bytes(octets)
 }
 
-/// « gardien verifier-cle [dossier] » : sans dossier, la clé se choisit parmi celles qui sont branchées.
+/// « vanguard verifier-cle [dossier] » : sans dossier, la clé se choisit parmi celles qui sont branchées.
 pub fn commande(dossier: Option<&Path>) {
     println!();
     cadre(
@@ -755,8 +755,8 @@ pub fn commande(dossier: Option<&Path>) {
     afficher_aligne(
         "  ",
         tr!(
-            "Une fausse clé annonce 1 To et n'en a que 16 Go : elle accepte tout et rend n'importe quoi au-delà. Gardien écrit dans l'espace libre un contenu qu'il saura reconnaître, relit tout en contournant la mémoire de l'ordinateur, mesure les vitesses, puis efface tout. Tes fichiers ne sont pas touchés.",
-            "A fake drive claims 1 TB and has only 16 GB: it accepts everything and returns garbage beyond that. Gardien writes recognizable content into the free space, reads it all back bypassing the computer's memory, measures the speeds, then erases everything. Your files are not touched."
+            "Une fausse clé annonce 1 To et n'en a que 16 Go : elle accepte tout et rend n'importe quoi au-delà. Vanguard écrit dans l'espace libre un contenu qu'il saura reconnaître, relit tout en contournant la mémoire de l'ordinateur, mesure les vitesses, puis efface tout. Tes fichiers ne sont pas touchés.",
+            "A fake drive claims 1 TB and has only 16 GB: it accepts everything and returns garbage beyond that. Vanguard writes recognizable content into the free space, reads it all back bypassing the computer's memory, measures the speeds, then erases everything. Your files are not touched."
         ),
         2,
         GRIS,
@@ -806,7 +806,7 @@ pub fn commande(dossier: Option<&Path>) {
     };
     let p = Parametres::REELS;
     let Some(plan) = plan(libre, mode, &p) else { return };
-    section(tr!("CE QUE GARDIEN VA FAIRE", "WHAT GARDIEN WILL DO"));
+    section(tr!("CE QUE VANGUARD VA FAIRE", "WHAT VANGUARD WILL DO"));
     let genre = crate::copier::genre_du_volume(&racine).unwrap_or_default();
     afficher_aligne(
         "  ",
@@ -951,8 +951,8 @@ pub fn commande(dossier: Option<&Path>) {
     }
     match menage {
         Ok(()) => bon(tr!(
-            "Tout ce que Gardien a écrit est effacé ; la clé est comme avant.",
-            "Everything Gardien wrote is erased; the drive is as before."
+            "Tout ce que Vanguard a écrit est effacé ; la clé est comme avant.",
+            "Everything Vanguard wrote is erased; the drive is as before."
         )),
         Err(e) => mauvais(&trf!(
             "Le dossier de l'essai n'a pas pu être effacé ({e}) : supprime {} toi-même.",
@@ -976,7 +976,7 @@ mod tests {
     };
 
     fn jetable(nom: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("gardien-verif-{nom}-{}", std::process::id()));
+        let d = std::env::temp_dir().join(format!("vanguard-verif-{nom}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         d
@@ -988,7 +988,7 @@ mod tests {
 
     #[test]
     fn le_menage_n_efface_que_les_fichiers_d_essai() {
-        let d = std::env::temp_dir().join(format!("gardien-verif-menage-{}", std::process::id()));
+        let d = std::env::temp_dir().join(format!("vanguard-verif-menage-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         std::fs::write(d.join("verif-0001.bin"), b"x").unwrap();

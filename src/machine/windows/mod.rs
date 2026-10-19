@@ -25,7 +25,7 @@ use persistance::persistance;
 
 pub const NOM: &str = "Windows";
 
-const FIN: &str = "__GARDIEN_FIN__";
+const FIN: &str = "__VANGUARD_FIN__";
 
 /// winget sort ces codes quand le paquet est déjà là (« aucune mise à jour applicable », « déjà installé ») :
 /// ce n'est pas un échec.
@@ -148,20 +148,20 @@ pub(super) fn illisible(categorie: &'static str) -> Constat {
 /// Le script exécuté dans la fenêtre administrateur : chaque commande est annoncée, puis « OK » ou l'erreur.
 /// Une fenêtre muette ne se distingue pas d'une fenêtre figée. Chaque étape a son try/catch : une erreur PowerShell
 /// compte, comme un programme externe en échec, pour une étape ratée, et la fenêtre passe à la suivante. Après chaque
-/// correctif, une ligne « ok » ou « echec » s'ajoute au fichier `resultats`, que Gardien lit à la fermeture.
+/// correctif, une ligne « ok » ou « echec » s'ajoute au fichier `resultats`, que Vanguard lit à la fermeture.
 fn script_admin(correctifs: &[Vec<String>], resultats: &str) -> String {
     let texte = crate::commande::ps_texte;
     let mut script = String::from(tr!(
-        "$Host.UI.RawUI.WindowTitle = 'Gardien : correction en cours'\n\
+        "$Host.UI.RawUI.WindowTitle = 'Vanguard : correction en cours'\n\
          [Console]::OutputEncoding = [Text.Encoding]::UTF8\n\
          $ErrorActionPreference = 'Stop'\n\
-         Write-Host 'Gardien applique une correction.' -ForegroundColor Cyan\n\
+         Write-Host 'Vanguard applique une correction.' -ForegroundColor Cyan\n\
          Write-Host 'Une étape longue (mise à jour, analyse, réparation de Windows) peut durer plusieurs minutes : son heure de début est affichée.'\n\
          $echecs = 0\n",
-        "$Host.UI.RawUI.WindowTitle = 'Gardien: applying a fix'\n\
+        "$Host.UI.RawUI.WindowTitle = 'Vanguard: applying a fix'\n\
          [Console]::OutputEncoding = [Text.Encoding]::UTF8\n\
          $ErrorActionPreference = 'Stop'\n\
-         Write-Host 'Gardien is applying a fix.' -ForegroundColor Cyan\n\
+         Write-Host 'Vanguard is applying a fix.' -ForegroundColor Cyan\n\
          Write-Host 'A long step (update, scan, Windows repair) can take several minutes: its start time is shown.'\n\
          $echecs = 0\n"
     ));
@@ -227,8 +227,8 @@ pub fn powershell_admin_chacune(correctifs: &[Vec<String>]) -> Vec<bool> {
     // La fenêtre administrateur est un autre processus : elle répond par ce fichier, une ligne par correctif.
     let resultats = dossier.join(format!("{nom}.resultats"));
     let entete = trf!(
-        "# Correction proposée par Gardien {} le {}.\r\n# Ce script n'est lancé qu'après ton accord (demande d'administrateur).\r\n\r\n",
-        "# Fix proposed by Gardien {} on {}.\r\n# This script only runs after your consent (administrator prompt).\r\n\r\n",
+        "# Correction proposée par Vanguard {} le {}.\r\n# Ce script n'est lancé qu'après ton accord (demande d'administrateur).\r\n\r\n",
+        "# Fix proposed by Vanguard {} on {}.\r\n# This script only runs after your consent (administrator prompt).\r\n\r\n",
         env!("CARGO_PKG_VERSION"),
         chrono::Local::now().format(tr!("%d/%m/%Y à %H:%M", "%Y-%m-%d %H:%M"))
     );
@@ -720,7 +720,7 @@ fn juger_bitlocker(etat: Option<&str>) -> Constat {
     }
 }
 
-/// Ports TCP en écoute (« adresse|port|programme », une ligne chacun) et ports bloqués par une règle de Gardien, lus
+/// Ports TCP en écoute (« adresse|port|programme », une ligne chacun) et ports bloqués par une règle de Vanguard, lus
 /// sans PowerShell (netstat, tasklist, registre). `None` si netstat ne répond pas.
 fn ports_tcp_directs(pare_feu_actif: bool) -> Option<(String, Vec<u16>)> {
     let ecoutes = ecoute::ecoutes()?;
@@ -738,10 +738,10 @@ fn ports_tcp_directs(pare_feu_actif: bool) -> Option<(String, Vec<u16>)> {
     Some((liste, bloques))
 }
 
-/// Ports bloqués par une règle active de Gardien, demandés à PowerShell quand le registre ne se lit pas.
+/// Ports bloqués par une règle active de Vanguard, demandés à PowerShell quand le registre ne se lit pas.
 fn ports_bloques_powershell() -> Vec<u16> {
     ps(
-        "@(Get-NetFirewallRule -DisplayName 'Gardien : bloquer *' -ErrorAction SilentlyContinue | \
+        "@(Get-NetFirewallRule -DisplayName 'Vanguard : bloquer *' -ErrorAction SilentlyContinue | \
         Where-Object { $_.Enabled -eq 'True' -and $_.Action -eq 'Block' -and $_.Direction -eq 'Inbound' } | \
         Get-NetFirewallPortFilter | ForEach-Object { $_.LocalPort }) -join ','",
     )
@@ -755,7 +755,7 @@ fn ports_bloques_powershell() -> Vec<u16> {
 /// écoute, puis les règles de blocage dans leur section (leur échec ne fait pas perdre les ports).
 fn ports_tcp_powershell(pare_feu_actif: bool) -> Option<(String, Vec<u16>)> {
     let regles = if pare_feu_actif {
-        "; try { 'BLQ|' + (@(Get-NetFirewallRule -DisplayName 'Gardien : bloquer *' -ErrorAction SilentlyContinue | \
+        "; try { 'BLQ|' + (@(Get-NetFirewallRule -DisplayName 'Vanguard : bloquer *' -ErrorAction SilentlyContinue | \
          Where-Object { $_.Enabled -eq 'True' -and $_.Action -eq 'Block' -and $_.Direction -eq 'Inbound' } | \
          Get-NetFirewallPortFilter | ForEach-Object { $_.LocalPort }) -join ','); 'BLQ_FIN' } catch {}"
     } else {
@@ -790,7 +790,7 @@ pub(super) fn ports_tcp_et_noms() -> Option<Vec<(u16, String)>> {
 fn ports_ecoute(pare_feu_actif: bool, ip_lan: Option<&str>) -> Vec<Constat> {
     // Le plus lent du bilan Windows par PowerShell (4 à 6 s dans la VM, une vingtaine de PowerShell démarrant
     // ensemble) : netstat et tasklist d'abord, PowerShell seulement s'ils ne répondent pas. Les ports bloqués par une
-    // règle de Gardien écoutent toujours mais ne sont plus joignables : sans cette lecture, l'alerte et la même
+    // règle de Vanguard écoutent toujours mais ne sont plus joignables : sans cette lecture, l'alerte et la même
     // correction (une règle de plus à chaque fois) revenaient à chaque audit.
     let Some((liste, bloques)) = ports_tcp_directs(pare_feu_actif).or_else(|| ports_tcp_powershell(pare_feu_actif))
     else {
@@ -820,7 +820,7 @@ fn ports_ecoute(pare_feu_actif: bool, ip_lan: Option<&str>) -> Vec<Constat> {
                 "Ports en écoute",
                 Niveau::Info,
                 trf!(
-                    "{port}/tcp ({}) ouvert par « {programme} », bloqué en entrée par la règle « Gardien : bloquer {port} » du pare-feu Windows.", "{port}/tcp ({}) opened by “{programme}”, blocked inbound by the “Gardien : bloquer {port}” Windows firewall rule.",
+                    "{port}/tcp ({}) ouvert par « {programme} », bloqué en entrée par la règle « Vanguard : bloquer {port} » du pare-feu Windows.", "{port}/tcp ({}) opened by “{programme}”, blocked inbound by the “Vanguard : bloquer {port}” Windows firewall rule.",
                     i.service
                 ),
             ));
@@ -843,7 +843,7 @@ fn ports_ecoute(pare_feu_actif: bool, ip_lan: Option<&str>) -> Vec<Constat> {
             constat.corriger(
                 trf!("Bloquer le port {port} en entrée dans le pare-feu Windows", "Block inbound port {port} in the Windows firewall"),
                 // Sans effet si la règle existe déjà (pare-feu coupé pendant l'audit : les règles n'y étaient pas comptées).
-                &[&format!("if (-not (Get-NetFirewallRule -DisplayName 'Gardien : bloquer {port}' -ErrorAction SilentlyContinue)) {{ New-NetFirewallRule -DisplayName 'Gardien : bloquer {port}' -Direction Inbound -Protocol TCP -LocalPort {port} -Action Block | Out-Null }}")],
+                &[&format!("if (-not (Get-NetFirewallRule -DisplayName 'Vanguard : bloquer {port}' -ErrorAction SilentlyContinue)) {{ New-NetFirewallRule -DisplayName 'Vanguard : bloquer {port}' -Direction Inbound -Protocol TCP -LocalPort {port} -Action Block | Out-Null }}")],
             )
             .bloquant(format!("{port}/tcp"))
         } else {

@@ -358,10 +358,10 @@ fn composants(gestion: Paquets) -> Vec<Element> {
     l
 }
 
-/// Les fichiers de Gardien, à son nom : jamais 80-gamer.conf ou ntsync.conf, que la personne ou sa distribution ont pu
+/// Les fichiers de Vanguard, à son nom : jamais 80-gamer.conf ou ntsync.conf, que la personne ou sa distribution ont pu
 /// écrire avant lui et qu'il écraserait sans pouvoir les rendre.
-const SYSCTL_JEUX: &str = "/etc/sysctl.d/80-gardien-jeux.conf";
-const NTSYNC_CONF: &str = "/etc/modules-load.d/gardien-ntsync.conf";
+const SYSCTL_JEUX: &str = "/etc/sysctl.d/80-vanguard-jeux.conf";
+const NTSYNC_CONF: &str = "/etc/modules-load.d/vanguard-ntsync.conf";
 
 /// Les valeurs d'un réglage telles qu'elles sont maintenant : notées avant de l'appliquer, relues après l'avoir remis.
 pub(super) fn valeurs(id: &str) -> Vec<Valeur> {
@@ -393,7 +393,7 @@ fn shell(t: &str) -> String {
     format!("'{}'", t.replace('\'', r"'\''"))
 }
 
-/// Les commandes qui remettent les valeurs notées : les fichiers de Gardien d'abord (retirés, ou rendus à leur
+/// Les commandes qui remettent les valeurs notées : les fichiers de Vanguard d'abord (retirés, ou rendus à leur
 /// contenu d'avant), puis la valeur du noyau, puis le module s'il n'était pas chargé (refusé tant qu'un jeu
 /// l'utilise : la note reste alors pour réessayer).
 pub(super) fn remettre_commandes(_id: &str, avant: &[Valeur]) -> Vec<String> {
@@ -540,7 +540,7 @@ mod tests {
         );
     }
 
-    // Gardien n'écrit que dans ses propres fichiers : un 80-gamer.conf ou un ntsync.conf posé par la personne ou sa
+    // Vanguard n'écrit que dans ses propres fichiers : un 80-gamer.conf ou un ntsync.conf posé par la personne ou sa
     // distribution n'est jamais écrasé.
     #[test]
     fn fichiers_existants_gardes() {
@@ -550,7 +550,7 @@ mod tests {
                 "{c}"
             );
         }
-        assert!(SYSCTL_JEUX.contains("gardien") && NTSYNC_CONF.contains("gardien"));
+        assert!(SYSCTL_JEUX.contains("vanguard") && NTSYNC_CONF.contains("vanguard"));
     }
 
     // Fichier absent avant : retiré ; valeur du noyau remise telle quelle ; module qui n'était pas chargé : retiré.
@@ -580,13 +580,13 @@ mod tests {
         assert_eq!(remettre_commandes("max_map_count", &piege), Vec::<String>::new());
     }
 
-    // Fichier de Gardien déjà là avant (posé à la main, ou par une autre version) : rendu octet pour octet, apostrophes
+    // Fichier de Vanguard déjà là avant (posé à la main, ou par une autre version) : rendu octet pour octet, apostrophes
     // et sauts de ligne compris. La commande est jouée pour de vrai, sur une copie dans un dossier jetable.
     #[test]
     fn fichier_existant_rendu_tel_quel() {
-        let d = std::env::temp_dir().join(format!("gardien-jeux-linux-{}", std::process::id()));
+        let d = std::env::temp_dir().join(format!("vanguard-jeux-linux-{}", std::process::id()));
         std::fs::create_dir_all(&d).unwrap();
-        let copie = d.join("80-gardien-jeux.conf");
+        let copie = d.join("80-vanguard-jeux.conf");
         let contenu = "# réglé à la main, l'été\nvm.max_map_count = 262144\n";
         let avant = [(SYSCTL_JEUX.to_string(), Some(contenu.to_string()))];
         let commandes = remettre_commandes("max_map_count", &avant);

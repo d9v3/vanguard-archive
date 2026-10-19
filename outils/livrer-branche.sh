@@ -4,14 +4,14 @@
 # déploiement (outils/deployer.sh : binaire, clé, VM, GitHub, page pour une 0.x.0), puis ménage de la branche et du
 # worktree. S'arrête à la première étape en échec, sans rien fusionner.
 #   outils/livrer-branche.sh <branche> <worktree>
-# GARDIEN_INTERMEDIAIRE=1 : version intermédiaire d'une série, sans passage sur le Mac (seule la dernière y passe).
+# VANGUARD_INTERMEDIAIRE=1 : version intermédiaire d'une série, sans passage sur le Mac (seule la dernière y passe).
 set -euo pipefail
 BRANCHE=$1
 ARBRE=$2
 # L'arbre principal (master), où se font la fusion et le déploiement : celui qui porte le .git commun.
 DEPOT=$(dirname "$(git -C "$ARBRE" rev-parse --path-format=absolute --git-common-dir)")
 export CARGO_TARGET_DIR=$DEPOT/target
-JOURNAUX=$HOME/.cache/gardien-dev
+JOURNAUX=$HOME/.cache/vanguard-dev
 
 cd "$ARBRE"
 [[ -z $(git status --porcelain) ]] || { echo "✖ $ARBRE a des changements non commités"; exit 1; }
@@ -20,7 +20,7 @@ COMMIT=$(git rev-parse HEAD)
 # Le Mac de GitHub d'abord, la vérification d'ici pendant qu'il compile (3 min 30 d'attente sinon perdues) ; une
 # vérification en échec annule la compilation.
 ID=""
-if [[ -z ${GARDIEN_INTERMEDIAIRE:-} ]]; then
+if [[ -z ${VANGUARD_INTERMEDIAIRE:-} ]]; then
   # Rien de personnel ne part sur GitHub, même sur une branche de passage.
   python3 outils/confidentialite.py --plage origin/master "$BRANCHE" || { echo "✖ détail personnel : rien n'est envoyé"; exit 1; }
   echo "· Mac de GitHub lancé"
@@ -57,4 +57,4 @@ git worktree remove "$ARBRE"
 # Fusionnée à l'instant (fusion rapide) : -D, car -d refuse une branche qui suit origin/master pas encore à jour.
 git merge-base --is-ancestor "$BRANCHE" master && git branch -q -D "$BRANCHE"
 outils/deployer.sh >"$JOURNAUX/deploiement-$BRANCHE.log" 2>&1 || { tail -30 "$JOURNAUX/deploiement-$BRANCHE.log"; exit 1; }
-grep -E "Clé GARDIEN|publiée|sans page|Durées" "$JOURNAUX/deploiement-$BRANCHE.log" | tail -4
+grep -E "Clé VANGUARD|publiée|sans page|Durées" "$JOURNAUX/deploiement-$BRANCHE.log" | tail -4

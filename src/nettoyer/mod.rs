@@ -337,7 +337,7 @@ fn a_nettoyer(choisis: &[&Element]) -> Vec<String> {
     lignes
 }
 
-/// « gardien nettoyer » : liste à cocher, puis nettoyage après accord et bilan de la place gagnée.
+/// « vanguard nettoyer » : liste à cocher, puis nettoyage après accord et bilan de la place gagnée.
 pub fn menu() {
     let elements = mesurer();
     let avant = place();
@@ -418,7 +418,7 @@ pub fn menu() {
     }
 }
 
-/// « gardien nettoyer --liste » : ce qui pourrait être nettoyé et la place à gagner, sans rien effacer.
+/// « vanguard nettoyer --liste » : ce qui pourrait être nettoyé et la place à gagner, sans rien effacer.
 pub fn liste() {
     let elements = mesurer();
     titre(tr!("Nettoyer le système", "Clean up the system"));
@@ -468,7 +468,7 @@ mod tests {
 
     #[test]
     fn taille_d_un_dossier_avec_exclusions() {
-        let racine = std::env::temp_dir().join(format!("gardien-nettoyer-{}", std::process::id()));
+        let racine = std::env::temp_dir().join(format!("vanguard-nettoyer-{}", std::process::id()));
         let garde = racine.join("garde");
         std::fs::create_dir_all(&garde).unwrap();
         std::fs::create_dir_all(racine.join("sous")).unwrap();
@@ -491,7 +491,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn un_cache_part_en_entier_ou_pas_du_tout() {
-        let racine = std::env::temp_dir().join(format!("gardien-caches-{}", std::process::id()));
+        let racine = std::env::temp_dir().join(format!("vanguard-caches-{}", std::process::id()));
         let cache = racine.join("cache");
         let ecrire = |f: &str, jours: u64| {
             let chemin = cache.join(f);

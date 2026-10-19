@@ -1,9 +1,9 @@
 //! Comptes oubliés : un compte de l'ordinateur encore actif mais que personne n'utilise plus (l'ancien employé, le
 //! compte créé pour un dépannage, celui d'un enfant parti). C'est une porte de plus, souvent avec un vieux mot de
-//! passe. Gardien cherche la dernière trace d'utilisation : la dernière connexion notée par le système (Windows,
+//! passe. Vanguard cherche la dernière trace d'utilisation : la dernière connexion notée par le système (Windows,
 //! lastlog2 ou lastlog sous Linux), et la date du dossier personnel (Linux, macOS : une connexion graphique n'est pas
 //! toujours notée). Rien depuis six mois : une information, avec la façon de le désactiver. Le compte qui lance
-//! Gardien n'est jamais compté.
+//! Vanguard n'est jamais compté.
 
 use super::{Constat, alerte};
 use crate::risk::Niveau;
@@ -69,7 +69,7 @@ fn date_de(chemin: &std::path::Path) -> Option<chrono::NaiveDate> {
     Some(chrono::DateTime::<chrono::Local>::from(m).date_naive())
 }
 
-/// Le compte qui lance Gardien (sous sudo : celui qui l'a lancé).
+/// Le compte qui lance Vanguard (sous sudo : celui qui l'a lancé).
 #[cfg(unix)]
 fn moi() -> String {
     std::env::var("SUDO_USER")

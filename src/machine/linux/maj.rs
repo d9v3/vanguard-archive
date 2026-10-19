@@ -322,7 +322,7 @@ pub(super) struct Faille {
     corrigee: bool,
 }
 
-/// Gravité écrite par les distributions (anglais), en niveau de Gardien. Inconnue : on ne minimise pas.
+/// Gravité écrite par les distributions (anglais), en niveau de Vanguard. Inconnue : on ne minimise pas.
 pub(super) fn gravite(texte: &str) -> Niveau {
     match texte.trim().to_ascii_lowercase().as_str() {
         "critical" => Niveau::Critique,

@@ -1,6 +1,6 @@
-//! L'environnement dans lequel Gardien démarre. Une bibliothèque injectée dans tous les programmes de la session
+//! L'environnement dans lequel Vanguard démarre. Une bibliothèque injectée dans tous les programmes de la session
 //! (LD_PRELOAD, LD_AUDIT, /etc/ld.so.preload sous Linux ; DYLD_INSERT_LIBRARIES sous macOS ; AppInit_DLLs sous
-//! Windows) tourne aussi dans Gardien et peut lui mentir : ce qu'il lit du système passe par elle. On le dit avant
+//! Windows) tourne aussi dans Vanguard et peut lui mentir : ce qu'il lit du système passe par elle. On le dit avant
 //! tout bilan, sur la sortie d'erreur (une sortie JSON reste propre). LD_PRELOAD a des usages légitimes (GameMode,
 //! l'overlay Steam, libgtk3-nocsd, fakeroot) : une bibliothèque d'un paquet du système, hors d'un dossier que
 //! l'utilisateur peut écrire, est une information ; le reste, une alerte. Même jugement que la persistance pour
@@ -77,13 +77,13 @@ fn avis_variable(source: &str, valeur: &str, niveau: Niveau) -> Avis {
     let valeur = affichable(valeur);
     let texte = if niveau == Niveau::Info {
         trf!(
-            "{source} = {valeur} : une bibliothèque du système est chargée dans tous les programmes de cette session (GameMode, overlay Steam…). Rien d'anormal, mais Gardien tourne avec elle.",
-            "{source} = {valeur}: a system library is loaded into every program of this session (GameMode, Steam overlay…). Nothing abnormal, but Gardien runs with it."
+            "{source} = {valeur} : une bibliothèque du système est chargée dans tous les programmes de cette session (GameMode, overlay Steam…). Rien d'anormal, mais Vanguard tourne avec elle.",
+            "{source} = {valeur}: a system library is loaded into every program of this session (GameMode, Steam overlay…). Nothing abnormal, but Vanguard runs with it."
         )
     } else {
         trf!(
-            "{source} = {valeur} : une bibliothèque qui ne vient pas d'un paquet du système est injectée dans tous les programmes de cette session, Gardien compris. Mes résultats peuvent être faussés. Cherche qui pose cela (.bashrc, .profile, /etc/environment, /etc/ld.so.preload), ou relance depuis une session propre.",
-            "{source} = {valeur}: a library that does not come from a system package is injected into every program of this session, Gardien included. My results may be tampered with. Find what sets it (.bashrc, .profile, /etc/environment, /etc/ld.so.preload), or restart from a clean session."
+            "{source} = {valeur} : une bibliothèque qui ne vient pas d'un paquet du système est injectée dans tous les programmes de cette session, Vanguard compris. Mes résultats peuvent être faussés. Cherche qui pose cela (.bashrc, .profile, /etc/environment, /etc/ld.so.preload), ou relance depuis une session propre.",
+            "{source} = {valeur}: a library that does not come from a system package is injected into every program of this session, Vanguard included. My results may be tampered with. Find what sets it (.bashrc, .profile, /etc/environment, /etc/ld.so.preload), or restart from a clean session."
         )
     };
     Avis { niveau, texte }
@@ -131,7 +131,7 @@ fn avis() -> Vec<Avis> {
         .collect()
 }
 
-/// Windows : AppInit_DLLs, chargées par le système dans chaque programme qui affiche une fenêtre (Gardien, lancé dans
+/// Windows : AppInit_DLLs, chargées par le système dans chaque programme qui affiche une fenêtre (Vanguard, lancé dans
 /// une console, en est). Vide sur un Windows normal ; les antivirus sérieux n'en ont plus besoin.
 #[cfg(windows)]
 fn avis() -> Vec<Avis> {
@@ -151,8 +151,8 @@ fn avis() -> Vec<Avis> {
             liste.push(Avis {
                 niveau: Niveau::Eleve,
                 texte: trf!(
-                    "AppInit_DLLs = {} : Windows charge ces DLL dans chaque programme, Gardien compris. Mes résultats peuvent être faussés. Un Windows sain n'en a aucune : regarde quel programme les a posées (clé {cle}).",
-                    "AppInit_DLLs = {}: Windows loads these DLLs into every program, Gardien included. My results may be tampered with. A healthy Windows has none: look at which program set them (key {cle}).",
+                    "AppInit_DLLs = {} : Windows charge ces DLL dans chaque programme, Vanguard compris. Mes résultats peuvent être faussés. Un Windows sain n'en a aucune : regarde quel programme les a posées (clé {cle}).",
+                    "AppInit_DLLs = {}: Windows loads these DLLs into every program, Vanguard included. My results may be tampered with. A healthy Windows has none: look at which program set them (key {cle}).",
                     affichable(dlls.trim())
                 ),
             });

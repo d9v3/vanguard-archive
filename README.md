@@ -1,18 +1,18 @@
 <p align="center">
-  <img src="assets/icones/gardien-256.png" alt="Logo de Gardien : un rapace sur un bouclier d'acier, entouré d'orbites" width="150">
+  <img src="assets/icones/vanguard-256.png" alt="Logo de Vanguard : un rapace sur un bouclier d'acier, entouré d'orbites" width="150">
 </p>
 
-<h1 align="center">Gardien</h1>
+<h1 align="center">Vanguard</h1>
 
 <p align="center"><b>Français</b> · <a href="README.en.md">English</a></p>
 
 <p align="center">
   <b>Sécurise et optimise ton ordinateur et ton réseau, depuis une clé USB.</b><br>
-  Gardien vérifie ta machine et tous les appareils de ton réseau, explique chaque problème en français clair,<br>
+  Vanguard vérifie ta machine et tous les appareils de ton réseau, explique chaque problème en français clair,<br>
   et le corrige après ton accord. Linux, Windows et macOS, sans installation, en français ou en anglais.
 </p>
 
-![Bilan de sécurité de Gardien : une note de A à F, chaque problème expliqué avec sa correction](assets/captures/bilan.png)
+![Bilan de sécurité de Vanguard : une note de A à F, chaque problème expliqué avec sa correction](assets/captures/bilan.png)
 
 ## En bref
 
@@ -26,8 +26,8 @@
 
 ## Démarrer
 
-**Télécharger** (dernière version) : [Windows](../../releases/latest/download/gardien-windows-x86_64.exe) ·
-[Linux](../../releases/latest/download/gardien-linux-x86_64) · [macOS](../../releases/latest/download/gardien-macos)
+**Télécharger** (dernière version) : [Windows](../../releases/latest/download/vanguard-windows-x86_64.exe) ·
+[Linux](../../releases/latest/download/vanguard-linux-x86_64) · [macOS](../../releases/latest/download/vanguard-macos)
 — ou toute la [page des versions](../../releases/latest), avec les empreintes SHA-256. Ce qu'a apporté chaque
 version : [historique](CHANGELOG.md).
 
@@ -35,19 +35,19 @@ version : [historique](CHANGELOG.md).
   complémentaires » puis « Exécuter quand même »). Microsoft Defender le prend parfois à tort pour un virus
   (« Trojan:Win32/Bearfoos.A!ml », une détection automatique sur un programme neuf) : c'est un faux positif ;
   vérifie l'empreinte SHA-256 sur la page de la version.
-- **Linux** : `chmod +x gardien-linux-x86_64`, puis `./gardien-linux-x86_64` dans un terminal (toutes les
+- **Linux** : `chmod +x vanguard-linux-x86_64`, puis `./vanguard-linux-x86_64` dans un terminal (toutes les
   distributions, rien à installer).
 - **macOS** : copié depuis Internet, le programme est bloqué la première fois : `xattr -d com.apple.quarantine
-  gardien-macos`, puis `./gardien-macos` dans le Terminal.
-- **Depuis la clé USB** : `Windows/gardien.exe`, `Linux/gardien`, ou `Lancer Gardien.command` sous macOS ; le guide
+  vanguard-macos`, puis `./vanguard-macos` dans le Terminal.
+- **Depuis la clé USB** : `Windows/vanguard.exe`, `Linux/vanguard`, ou `Lancer Vanguard.command` sous macOS ; le guide
   de la clé est dans `LISEZMOI.txt`.
 
 Dans le menu, choisis **1** (bilan complet), puis **2** (corriger). Les flèches, Entrée, et Échap ou Retour arrière
 pour revenir.
 
-## Ce que fait Gardien
+## Ce que fait Vanguard
 
-| Domaine | Ce que fait Gardien |
+| Domaine | Ce que fait Vanguard |
 |---|---|
 | **Bilan de sécurité** | Une note de A à F : pare-feu, mises à jour et failles, chiffrement, ports ouverts, comptes, SSH, ce qui se lance en cachette, partages ouverts à tous, Wi-Fi, Bluetooth, heure, fin de support, comptes oubliés, mots de passe du navigateur, fichiers sensibles qui traînent, santé des disques… Chaque problème est expliqué, avec sa correction. |
 | **Réseau local** | Chaque appareil, son fabricant, ses ports ouverts et ses risques ; les nouveaux venus signalés, les ports ouverts sur la box, l'adresse de la maison sur liste noire. |
@@ -56,7 +56,7 @@ pour revenir.
 | **Dépanner** | Diagnostic de l'ordinateur, pannes de tous les jours pas à pas (Internet, Wi-Fi, lenteur, son, imprimante, disque plein), après une infection, nouvel ordinateur, ordinateur qui part, compte piraté, « Pourquoi c'est lent ? », fiche de l'ordinateur, rapport à laisser, réparations. |
 | **Optimiser et nettoyer** | Réglages de confidentialité et de performance qui s'annulent exactement, nettoyage à cocher avec la place gagnée mesurée, programmes du démarrage. |
 | **Protection** | Fichiers-pièges contre les rançongiciels, blocages de Windows Defender, 308 règles YARA, antivirus, bac à sable, intégrité des fichiers critiques, mots de passe fuités, connexions sortantes, faux technicien (logiciels de prise de contrôle à distance), caméra et micro, liens dangereux, fichiers téléchargés, quarantaine réversible. |
-| **Suivi** | Surveillance toutes les heures, entretien du mois, rapport HTML avec la courbe des notes, apprentissage sur ton ordinateur, ce que Gardien a changé (chaque correction, datée). |
+| **Suivi** | Surveillance toutes les heures, entretien du mois, rapport HTML avec la courbe des notes, apprentissage sur ton ordinateur, ce que Vanguard a changé (chaque correction, datée). |
 | **Logiciels et jeux** | Les meilleurs logiciels en 8 catégories, depuis leur source officielle ; mises à jour de tout d'un coup ; réglages pour jouer. |
 | **Outils** | Sauvegarde automatique, copier mes fichiers (copie vérifiée) et vérifier une copie, vérifier ma clé (fausses clés, vitesse), mes ordinateurs (suivis par la clé), données de la clé protégées par une phrase, raccourci sur cet ordinateur, guide des commandes, recherche dans tous les menus. |
 
@@ -118,14 +118,14 @@ paniques du noyau et rapports de plantage sous macOS), avec une copie texte enre
 
 **Dépanner pas à pas** — les pannes de tous les jours, prises comme le ferait quelqu'un qui s'y connaît : pas
 d'Internet, Wi-Fi qui coupe, ordinateur lent, pas de son, imprimante qui ne marche pas, disque plein. Deux ou trois
-questions, puis Gardien vérifie lui-même (adresse, box, Internet, DNS ; signal Wi-Fi ; service du son et sortie
+questions, puis Vanguard vérifie lui-même (adresse, box, Internet, DNS ; signal Wi-Fi ; service du son et sortie
 choisie ; file d'impression et imprimante sur le réseau ; place des disques) et propose la bonne réparation ou le
 bon outil, toujours après accord. Et trois parcours pour les grands moments : **après une infection** (ce qui presse
 selon le signe, le bilan de ce qui a pu s'installer, les analyses dans l'ordre, puis les mots de passe à changer,
 le courriel en premier) ; **nouvel ordinateur** (mises à jour, chiffrement, sauvegardes, pack de départ,
 confidentialité, dans l'ordre) ; **ordinateur qui part**, vendu ou donné (copie vérifiée d'abord, comptes
 déconnectés, clé BitLocker ou FileVault mise de côté, effacement sûr par l'outil du système, puce TPM remise à
-zéro). Gardien n'efface rien lui-même. Et **mon compte a été piraté** : reprendre la main par la page officielle,
+zéro). Vanguard n'efface rien lui-même. Et **mon compte a été piraté** : reprendre la main par la page officielle,
 puis mot de passe, validation en deux étapes, sessions fermées, et la vérification que cet ordinateur n'a pas livré
 le mot de passe. Lent **depuis une mise à jour** : les dernières mises à jour, datées, et comment revenir en arrière.
 
@@ -134,13 +134,13 @@ faire du plus grave au moins grave, ce qui va bien et trois habitudes ; posée s
 
 **Sauvegarde automatique** — mise en place avec l'outil du système (Déjà Dup ou une copie rsync chaque jour sous
 Linux, Time Machine, Historique des fichiers sous Windows), vers un disque externe, après accord et annulable.
-**Raccourci sur cet ordinateur** : Gardien copié ici et lancé d'un clic.
+**Raccourci sur cet ordinateur** : Vanguard copié ici et lancé d'un clic.
 
 **Pourquoi c'est lent ?** — un instantané de deux secondes : ce qui occupe le processeur, la mémoire et le disque,
 programme par programme ; la durée du démarrage et ce qui le retarde ; les programmes lancés à l'ouverture de
 session et leur poids. Ceux qui travaillent un moment puis se calment (antivirus qui analyse, indexation, mises à
 jour) sont nommés comme tels. Les programmes du démarrage se retirent de là, après accord : ils restent installés,
-et chaque retrait s'annule exactement (`gardien demarrage`).
+et chaque retrait s'annule exactement (`vanguard demarrage`).
 
 **Fiche de l'ordinateur** — modèle, carte mère, BIOS, processeur, mémoire (barrettes, type, vitesse), carte graphique
 et pilote, disques : ce qu'on demande au téléphone ou pour acheter une pièce. Les numéros de série s'affichent à
@@ -153,24 +153,24 @@ copie**, plus tard, fait le test de restauration : des fichiers répartis sur to
 et comparés à leur original ; un disque qui perd des données se voit avant le jour où on en a besoin.
 
 **Vérifier ma clé** — une clé USB ou un disque externe tient-il ce qu'il annonce ? Les fausses clés (une puce de
-16 Go vendue « 1 To ») acceptent tout et rendent n'importe quoi au-delà de leur vraie taille. Après accord, Gardien
+16 Go vendue « 1 To ») acceptent tout et rendent n'importe quoi au-delà de leur vraie taille. Après accord, Vanguard
 écrit dans l'espace libre un contenu qu'il sait reconnaître, relit tout en contournant la mémoire de l'ordinateur,
 mesure les vitesses d'écriture et de lecture, puis efface tout ; les fichiers déjà sur la clé ne sont pas touchés.
-Rapide (un quart du libre) ou complet (tout le libre, la seule preuve) ; jamais sur la clé GARDIEN ni sur le disque
+Rapide (un quart du libre) ou complet (tout le libre, la seule preuve) ; jamais sur la clé VANGUARD ni sur le disque
 du système.
 
-**Mes ordinateurs** — chaque bilan complet fait avec la clé GARDIEN y note l'ordinateur : surnom (« système ·
+**Mes ordinateurs** — chaque bilan complet fait avec la clé VANGUARD y note l'ordinateur : surnom (« système ·
 modèle », renommable), note, problèmes restants (leur catégorie et leur niveau seulement, les cinq plus graves),
-date du dernier bilan. Le tableau voyage sur la partition GARDIENLOG de la clé, sans nom de machine, compte, adresse
+date du dernier bilan. Le tableau voyage sur la partition VANGUARDLOG de la clé, sans nom de machine, compte, adresse
 ni nom de Wi-Fi ; il ne part jamais sur GitHub.
 
 **Protéger les données de la clé** — le carnet des appareils de la clé (noms, adresses MAC, surnoms) chiffré par une
 phrase (XChaCha20-Poly1305, phrase dérivée par Argon2id), contre une clé perdue ou prêtée. Chez soi, rien ne change :
-la clé de données est gardée sur l'ordinateur du propriétaire. Ailleurs, Gardien demande la phrase, ou continue sans
+la clé de données est gardée sur l'ordinateur du propriétaire. Ailleurs, Vanguard demande la phrase, ou continue sans
 le carnet. Le rapport et le diagnostic ne s'écrivent plus sur la clé. Sur demande, réversible, avec une sauvegarde
 proposée avant ; le bilan signale un carnet resté en clair.
 
-**Optimiser** — des réglages de confidentialité, de performance et de confort, écrits pour Gardien. Sous Windows :
+**Optimiser** — des réglages de confidentialité, de performance et de confort, écrits pour Vanguard. Sous Windows :
 télémétrie au minimum, publicités et suivi coupés, Recall sans captures d'écran, extensions des fichiers visibles, pas
 de lancement automatique des clés USB, démarrage rapide, menu complet au clic droit. Sous Linux : entretien du SSD,
 taille du journal, rapports envoyés par GNOME ou Ubuntu. Sous macOS : publicités, analyses, pas de .DS_Store sur les
@@ -196,24 +196,24 @@ inutilisable et noté, puis remis exactement à sa place si c'était un faux pos
 dernière fois (un programme lancé depuis un dossier temporaire ou Téléchargements est signalé) ; sous Linux, ce qui
 les tient en ce moment. En lecture seule.
 
-**Blocages de Windows Defender** — Gardien ne bloque rien lui-même : il active, après accord, ce que Windows bloque
+**Blocages de Windows Defender** — Vanguard ne bloque rien lui-même : il active, après accord, ce que Windows bloque
 depuis son noyau et protège contre la désactivation. Règles de réduction de la surface d'attaque (vol des mots de
 passe en mémoire, pilotes vulnérables, documents Office et pièces jointes piégés), protection réseau contre les
 sites dangereux, logiciels indésirables, accès contrôlé aux dossiers contre les rançongiciels. Chaque règle est
-nommée avant l'accord et s'annule exactement ; celles qui bloqueraient Gardien sur sa clé ou le dépannage ne sont
+nommée avant l'accord et s'annule exactement ; celles qui bloqueraient Vanguard sur sa clé ou le dépannage ne sont
 jamais activées, et rien n'est proposé si un autre antivirus remplace Defender.
 
-**Apprentissage** — Gardien apprend sur ton ordinateur, sans rien envoyer. Une alerte que tu déclares normale chez
+**Apprentissage** — Vanguard apprend sur ton ordinateur, sans rien envoyer. Une alerte que tu déclares normale chez
 toi (« i » à la correction) passe au niveau info pendant 90 jours, ou jusqu'à ce qu'elle s'aggrave ; chaque test de
 connexion se compare à tes habitudes sur le même réseau ; un appareil connu qui paraît soudain tout fermé (en
-veille) est revérifié plus patiemment. « Ce que Gardien a appris » montre tout et permet d'oublier.
+veille) est revérifié plus patiemment. « Ce que Vanguard a appris » montre tout et permet d'oublier.
 
 **Guide des commandes** — les commandes utiles d'Omarchy, d'Arch, de Fedora, de Debian et Ubuntu (et des autres
-Linux), de Windows 11, de macOS, et celles qui s'écrivent pareil partout (Gardien, ping, nslookup, ssh, curl, git…),
+Linux), de Windows 11, de macOS, et celles qui s'écrivent pareil partout (Vanguard, ping, nslookup, ssh, curl, git…),
 chacune expliquée ; ⚠ marque celles qui changent quelque chose. Chaque distribution montre ses programmes (pacman,
 dnf, apt…), puis ceux communs à Linux. On tape ce qu'on cherche : les commandes paraissent au fil de la frappe, et Tab
 complète le mot. Chaque commande a sa page : la copier, pour la taper ici ou chez la personne qu'on aide, ou la
-lancer ici quand elle ne fait que lire ; sa sortie défile dans Gardien, et Échap l'arrête. Tous les systèmes sont
+lancer ici quand elle ne fait que lire ; sa sortie défile dans Vanguard, et Échap l'arrête. Tous les systèmes sont
 lisibles partout (les commandes de Windows depuis Linux, par exemple), et le guide dit si un programme manque sur cet
 ordinateur.
 
@@ -245,7 +245,7 @@ ordinateur.
   depuis un dossier temporaire ou les Téléchargements, un port de logiciel d'accès à distance ou un serveur sans nom
   sont signalés. Lecture seule : rien n'est coupé.
 - Quelqu'un contrôle mon ordi ? : l'arnaque au faux technicien (« votre ordinateur est infecté ») fait installer un
-  logiciel de prise de contrôle à distance. Gardien cherche AnyDesk, TeamViewer, RustDesk, Assistance rapide,
+  logiciel de prise de contrôle à distance. Vanguard cherche AnyDesk, TeamViewer, RustDesk, Assistance rapide,
   Splashtop, UltraViewer… installés (et depuis quand), lancés au démarrage, en cours d'exécution ou simplement posés
   dans Téléchargements ; il explique quoi faire (couper Internet, prévenir la banque, changer les mots de passe) et
   les retire après accord. Un programme en cours n'est jamais coupé sans un second accord exprès : la personne qui
@@ -253,19 +253,19 @@ ordinateur.
 - Ce lien est-il dangereux ? : un lien reçu examiné sans jamais l'ouvrir (lettres déguisées, sous-domaine trompeur,
   marque imitée, raccourcisseur, adresse IP brute) ; après accord, l'âge du domaine et trois listes publiques de
   sites dangereux (URLhaus, Spamhaus, SURBL). Seul le nom du domaine sort de l'ordinateur.
-- Vérifier Gardien lui-même : sa version, la date de son dernier commit et son empreinte SHA-256, à comparer à la
-  page de la version (Gardien n'est pas signé : c'est cette comparaison qui prouve qu'il est bien lui). Une copie de
+- Vérifier Vanguard lui-même : sa version, la date de son dernier commit et son empreinte SHA-256, à comparer à la
+  page de la version (Vanguard n'est pas signé : c'est cette comparaison qui prouve qu'il est bien lui). Une copie de
   plus de six mois le dit au menu. Et le manifeste de la clé : au déploiement, l'empreinte de chaque fichier de la
   clé est gardée sur ton ordinateur ; au retour de chez quelqu'un, le bilan nomme ce qui a été ajouté, remplacé ou
   retiré (un autorun planté, un programme remplacé). Les données, les images ISO et le menu Ventoy, qui changent
   normalement, ne sont pas comparés. Chaque clé a sa référence (reconnue par l'identifiant de son volume) : une
-  deuxième clé GARDIEN ne passe pas pour une clé modifiée.
-- Gardien se méfie aussi de lui-même : au démarrage, il dit si une bibliothèque est injectée dans tous les
+  deuxième clé VANGUARD ne passe pas pour une clé modifiée.
+- Vanguard se méfie aussi de lui-même : au démarrage, il dit si une bibliothèque est injectée dans tous les
   programmes de la session (LD_PRELOAD, DYLD_INSERT_LIBRARIES, AppInit_DLLs : celle d'un paquet du système, comme
   GameMode, est une simple information) et s'il tourne en root sans raison, car ses résultats passent par là. Au
   bilan : la surveillance horaire que tu avais activée et qui a disparu (un logiciel malveillant coupe d'abord ce
   qui le surveille), et l'historique des bilans réécrit après coup (chaque bilan porte l'empreinte du précédent).
-  Chaque nuit, la CI recompile Gardien deux fois et vérifie que le programme est identique à l'octet près.
+  Chaque nuit, la CI recompile Vanguard deux fois et vérifie que le programme est identique à l'octet près.
 - Vérifier un fichier téléchargé : son empreinte comparée à celle que publie le site (collée, ou un SHA256SUMS posé
   à côté), son nom et son contenu (double extension, programme déguisé en document), puis YARA et l'antivirus.
 - Surveillance toutes les heures : notification si un appareil inconnu arrive, si un port s'ouvre, si la note de
@@ -280,16 +280,16 @@ ordinateur.
 
 </details>
 
-Gardien ne coupe jamais une connexion à distance en cours (Bureau à distance, SSH). À n'utiliser que sur ton propre
+Vanguard ne coupe jamais une connexion à distance en cours (Bureau à distance, SSH). À n'utiliser que sur ton propre
 réseau, ou un réseau que tu as le droit d'auditer.
 
 ## En images
 
 <table>
   <tr>
-    <td width="50%"><img src="assets/captures/menu.png" alt="Menu de Gardien"><br><sub>Le menu : dernier bilan,
+    <td width="50%"><img src="assets/captures/menu.png" alt="Menu de Vanguard"><br><sub>Le menu : dernier bilan,
     connexion, clé branchée.</sub></td>
-    <td width="50%"><img src="assets/captures/rapport.png" alt="Rapport HTML de Gardien"><br><sub>Le rapport HTML et
+    <td width="50%"><img src="assets/captures/rapport.png" alt="Rapport HTML de Vanguard"><br><sub>Le rapport HTML et
     l'évolution des notes.</sub></td>
   </tr>
   <tr>
@@ -312,7 +312,7 @@ masqués.</sub>
 | Linux | Arch et dérivées (Omarchy, Manjaro, EndeavourOS, CachyOS), Debian, Ubuntu, Mint, Pop!_OS, Fedora (et RHEL, Rocky, Nobara), openSUSE |
 | Linux atomique | Bazzite, Silverblue, Kinoite, Bluefin, Aeon |
 
-Gardien reconnaît la distribution et propose ses propres commandes : `omarchy update` / `omarchy pkg add` sous
+Vanguard reconnaît la distribution et propose ses propres commandes : `omarchy update` / `omarchy pkg add` sous
 Omarchy, `ujust update` sur Bazzite, `rpm-ostree` ou `transactional-update` sur un système atomique, sinon pacman,
 apt, dnf ou zypper.
 
@@ -325,75 +325,75 @@ Chaque entrée du menu existe aussi en commande.
 
 | Commande | Rôle |
 |---|---|
-| `gardien complet [--html] [--texte]` | bilan complet : machine + réseau ; `--texte` l'affiche en texte simple (mode urgence) |
-| `gardien corriger` | corriger les problèmes trouvés |
-| `gardien machine [--json]` | audit de cette machine |
-| `gardien reseau [cible] [-p courants\|tous\|22,80,8000-8100] [--json]` | scan du réseau ou d'un appareil |
-| `gardien connexion` | test de connexion pour le jeu |
-| `gardien nettoyer [--liste]` | nettoyer le système ; `--liste` : la place à gagner, sans rien effacer |
-| `gardien logiciels [--liste] [--recommandes]` | logiciels à installer par catégorie ; `--liste` : leur état, sans rien installer |
-| `gardien diagnostic` | diagnostic de l'ordinateur : matériel, système, plantages et erreurs récents |
-| `gardien depanner [sujet]` | dépanner pas à pas : `internet`, `wifi`, `lent`, `son`, `imprimante`, `disque`, `infection`, `nouveau`, `depart`, `compte` |
-| `gardien lenteur` | pourquoi c'est lent : processeur, mémoire, disque, démarrage, programmes à l'ouverture |
-| `gardien demarrage` | programmes au démarrage : les retirer ou les remettre, après accord ; chaque retrait s'annule |
-| `gardien changements` | ce que Gardien a changé : chaque correction lancée ici, sa date et son résultat |
-| `gardien a-laisser` | rapport à laisser : une page simple pour la personne dépannée |
-| `gardien sauvegarde-auto [--annuler]` | sauvegarde automatique vers un disque externe, avec l'outil du système |
-| `gardien raccourci [on\|off]` | raccourci sur cet ordinateur |
-| `gardien fiche [--json]` | fiche de l'ordinateur ; `--json` sans les numéros de série |
-| `gardien copier-fichiers [destination]` | copier mes fichiers vers un disque externe, copie vérifiée |
-| `gardien verifier-cle [dossier]` | vérifier ma clé : capacité réelle, vitesses, blocs en erreur (écrit dans le libre après accord, puis efface) |
-| `gardien verifier-copie [dossier]` | vérifier une copie : relue sur le disque et comparée aux originaux (test de restauration) |
-| `gardien antivirus [--complet] [dossier]` | analyse antivirus (ordinateur, ou une clé / un dossier) |
-| `gardien yara [--complet] [dossier]` | analyse YARA : 308 règles de familles de logiciels malveillants |
-| `gardien pieges [--retirer]` | fichiers-pièges contre les rançongiciels : les poser, les vérifier, les retirer |
-| `gardien durcir` | blocages de Windows Defender : règles ASR, protection réseau, logiciels indésirables, accès contrôlé aux dossiers ; chacun après accord, annulable (Windows) |
-| `gardien listes-noires` | l'adresse Internet de la maison sur liste noire ? (après accord) |
-| `gardien canaux` | Wi-Fi encombré : les réseaux voisins par canal, et le canal le plus libre |
-| `gardien nat` | type de NAT pour le jeu : ouvert, modéré ou strict |
-| `gardien cameras` | caméras cachées sur le réseau (location, chez quelqu'un) |
-| `gardien dns-rapide` | DNS le plus rapide, mesuré ici et annulable ; un DNS qui protège est gardé |
-| `gardien appris` | ce que Gardien a appris : tes habitudes, tes choix, et les oublier |
-| `gardien motdepasse` | mots de passe fuités |
-| `gardien isoler <fichier>` | lancer un programme inconnu dans un bac à sable (bubblewrap ou firejail, Windows Sandbox) |
-| `gardien courriel` | fuites d'adresse courriel (XposedOrNot, ou Have I Been Pwned avec `GARDIEN_HIBP_CLE`) |
-| `gardien sortantes` | qui parle à Internet : les connexions de chaque programme (lecture seule) |
-| `gardien verifier-moi` | vérifier Gardien lui-même : version, date de compilation, empreinte SHA-256 à comparer à la page de la version ; sur la clé du propriétaire, le manifeste de la clé |
-| `gardien camera-micro` | caméra et micro : qui s'en sert ? (lecture seule) |
-| `gardien quarantaine` | les fichiers isolés, à remettre à leur place ou à supprimer |
-| `gardien distance` | quelqu'un contrôle mon ordi ? logiciels de prise de contrôle à distance (faux technicien), retrait après accord |
-| `gardien lien <adresse>` | ce lien est-il dangereux ? (examiné sans l'ouvrir ; en ligne après accord) |
-| `gardien verifier-fichier <fichier> [empreinte]` | vérifier un fichier téléchargé : empreinte, nom et contenu, YARA, antivirus |
-| `gardien integrite [--accepter] [--temps-reel]` | intégrité des fichiers critiques (empreintes BLAKE3), en direct possible |
-| `gardien maj` | mises à jour |
-| `gardien reparer` | réparations et nettoyage |
-| `gardien surveillance on\|off` | surveillance horaire |
-| `gardien entretien [on\|off]` | entretien du mois ; sans argument : ce qu'il dirait maintenant |
-| `gardien nommer <ip\|mac> <surnom>` | nommer un appareil |
-| `gardien sauvegarder [fichier]`, `gardien restaurer <fichier>` | sauvegarde des données |
-| `gardien gaming` | paquets et réglages pour jouer (Windows et Linux) |
-| `gardien guide [système\|programme\|mots]` | guide des commandes : un système (`omarchy`, `arch`, `fedora`, `debian`, `windows`, `macos`, `tous`, ou `linux` pour les programmes communs), un programme (`winget`, `systemctl`…) ou des mots à chercher (`cache dns`) |
+| `vanguard complet [--html] [--texte]` | bilan complet : machine + réseau ; `--texte` l'affiche en texte simple (mode urgence) |
+| `vanguard corriger` | corriger les problèmes trouvés |
+| `vanguard machine [--json]` | audit de cette machine |
+| `vanguard reseau [cible] [-p courants\|tous\|22,80,8000-8100] [--json]` | scan du réseau ou d'un appareil |
+| `vanguard connexion` | test de connexion pour le jeu |
+| `vanguard nettoyer [--liste]` | nettoyer le système ; `--liste` : la place à gagner, sans rien effacer |
+| `vanguard logiciels [--liste] [--recommandes]` | logiciels à installer par catégorie ; `--liste` : leur état, sans rien installer |
+| `vanguard diagnostic` | diagnostic de l'ordinateur : matériel, système, plantages et erreurs récents |
+| `vanguard depanner [sujet]` | dépanner pas à pas : `internet`, `wifi`, `lent`, `son`, `imprimante`, `disque`, `infection`, `nouveau`, `depart`, `compte` |
+| `vanguard lenteur` | pourquoi c'est lent : processeur, mémoire, disque, démarrage, programmes à l'ouverture |
+| `vanguard demarrage` | programmes au démarrage : les retirer ou les remettre, après accord ; chaque retrait s'annule |
+| `vanguard changements` | ce que Vanguard a changé : chaque correction lancée ici, sa date et son résultat |
+| `vanguard a-laisser` | rapport à laisser : une page simple pour la personne dépannée |
+| `vanguard sauvegarde-auto [--annuler]` | sauvegarde automatique vers un disque externe, avec l'outil du système |
+| `vanguard raccourci [on\|off]` | raccourci sur cet ordinateur |
+| `vanguard fiche [--json]` | fiche de l'ordinateur ; `--json` sans les numéros de série |
+| `vanguard copier-fichiers [destination]` | copier mes fichiers vers un disque externe, copie vérifiée |
+| `vanguard verifier-cle [dossier]` | vérifier ma clé : capacité réelle, vitesses, blocs en erreur (écrit dans le libre après accord, puis efface) |
+| `vanguard verifier-copie [dossier]` | vérifier une copie : relue sur le disque et comparée aux originaux (test de restauration) |
+| `vanguard antivirus [--complet] [dossier]` | analyse antivirus (ordinateur, ou une clé / un dossier) |
+| `vanguard yara [--complet] [dossier]` | analyse YARA : 308 règles de familles de logiciels malveillants |
+| `vanguard pieges [--retirer]` | fichiers-pièges contre les rançongiciels : les poser, les vérifier, les retirer |
+| `vanguard durcir` | blocages de Windows Defender : règles ASR, protection réseau, logiciels indésirables, accès contrôlé aux dossiers ; chacun après accord, annulable (Windows) |
+| `vanguard listes-noires` | l'adresse Internet de la maison sur liste noire ? (après accord) |
+| `vanguard canaux` | Wi-Fi encombré : les réseaux voisins par canal, et le canal le plus libre |
+| `vanguard nat` | type de NAT pour le jeu : ouvert, modéré ou strict |
+| `vanguard cameras` | caméras cachées sur le réseau (location, chez quelqu'un) |
+| `vanguard dns-rapide` | DNS le plus rapide, mesuré ici et annulable ; un DNS qui protège est gardé |
+| `vanguard appris` | ce que Vanguard a appris : tes habitudes, tes choix, et les oublier |
+| `vanguard motdepasse` | mots de passe fuités |
+| `vanguard isoler <fichier>` | lancer un programme inconnu dans un bac à sable (bubblewrap ou firejail, Windows Sandbox) |
+| `vanguard courriel` | fuites d'adresse courriel (XposedOrNot, ou Have I Been Pwned avec `VANGUARD_HIBP_CLE`) |
+| `vanguard sortantes` | qui parle à Internet : les connexions de chaque programme (lecture seule) |
+| `vanguard verifier-moi` | vérifier Vanguard lui-même : version, date de compilation, empreinte SHA-256 à comparer à la page de la version ; sur la clé du propriétaire, le manifeste de la clé |
+| `vanguard camera-micro` | caméra et micro : qui s'en sert ? (lecture seule) |
+| `vanguard quarantaine` | les fichiers isolés, à remettre à leur place ou à supprimer |
+| `vanguard distance` | quelqu'un contrôle mon ordi ? logiciels de prise de contrôle à distance (faux technicien), retrait après accord |
+| `vanguard lien <adresse>` | ce lien est-il dangereux ? (examiné sans l'ouvrir ; en ligne après accord) |
+| `vanguard verifier-fichier <fichier> [empreinte]` | vérifier un fichier téléchargé : empreinte, nom et contenu, YARA, antivirus |
+| `vanguard integrite [--accepter] [--temps-reel]` | intégrité des fichiers critiques (empreintes BLAKE3), en direct possible |
+| `vanguard maj` | mises à jour |
+| `vanguard reparer` | réparations et nettoyage |
+| `vanguard surveillance on\|off` | surveillance horaire |
+| `vanguard entretien [on\|off]` | entretien du mois ; sans argument : ce qu'il dirait maintenant |
+| `vanguard nommer <ip\|mac> <surnom>` | nommer un appareil |
+| `vanguard sauvegarder [fichier]`, `vanguard restaurer <fichier>` | sauvegarde des données |
+| `vanguard gaming` | paquets et réglages pour jouer (Windows et Linux) |
+| `vanguard guide [système\|programme\|mots]` | guide des commandes : un système (`omarchy`, `arch`, `fedora`, `debian`, `windows`, `macos`, `tous`, ou `linux` pour les programmes communs), un programme (`winget`, `systemctl`…) ou des mots à chercher (`cache dns`) |
 
 </details>
 
-**Langue** : celle du système (français ou anglais). Pour forcer : `GARDIEN_LANG=fr` ou `GARDIEN_LANG=en`. Les
+**Langue** : celle du système (français ou anglais). Pour forcer : `VANGUARD_LANG=fr` ou `VANGUARD_LANG=en`. Les
 commandes ont aussi un nom anglais (`full`, `audit`, `fix`, `network`, `connection`, `apps`, `diag`, `password`,
 `sandbox`, `email`, `integrity`, `update`, `repair`, `monitor`, `name`, `backup`, `restore`, `clean`, `decoys`, `harden`,
 `blocklists`, `learned`, `channels`, `fast-dns`, `outbound`, `link`, `check-file`, `maintenance`, `slow`,
 `startup`, `specs`, `copy-files`, `troubleshoot`).
 
 **Emojis** : dans l'ancienne console de Windows (invite de commandes ou PowerShell hors du Terminal Windows, courant
-sous Windows 10), qui les dessine mal et décale les menus, 💡 et 🔧 deviennent → et +. `GARDIEN_EMOJI=0` les retire
-partout, `GARDIEN_EMOJI=1` les garde partout.
+sous Windows 10), qui les dessine mal et décale les menus, 💡 et 🔧 deviennent → et +. `VANGUARD_EMOJI=0` les retire
+partout, `VANGUARD_EMOJI=1` les garde partout.
 
 ## Développer
 
 Compiler, tester, déployer, la clé USB, le journal des erreurs : voir [CONTRIBUTING.md](CONTRIBUTING.md).
-Une faille de sécurité dans Gardien ? Signale-la en privé : voir [SECURITY.md](SECURITY.md).
+Une faille de sécurité dans Vanguard ? Signale-la en privé : voir [SECURITY.md](SECURITY.md).
 
 ## Licence
 
-© 2026 d9v3. Gardien est un logiciel libre : tu peux le redistribuer et le modifier selon les termes de la
+© 2026 d9v3. Vanguard est un logiciel libre : tu peux le redistribuer et le modifier selon les termes de la
 [licence publique générale GNU](LICENSE) (GPL), version 3 ou toute version ultérieure. Il est fourni sans aucune
 garantie. Une version modifiée que tu distribues doit rester sous cette licence, avec son code source.
 

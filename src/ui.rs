@@ -19,11 +19,11 @@ pub const DISCRET: &str = "\x1b[38;5;245m";
 /// Largeur des titres et des cadres (tient dans un terminal de 80 colonnes).
 pub const LARGEUR: usize = 76;
 
-/// Les deux emojis des messages : « 💡 » devant un conseil à suivre soi-même, « 🔧 » devant une correction que Gardien
+/// Les deux emojis des messages : « 💡 » devant un conseil à suivre soi-même, « 🔧 » devant une correction que Vanguard
 /// sait appliquer. Partout ailleurs ils prennent deux colonnes ; l'ancienne console de Windows (cmd.exe et PowerShell
 /// hors du Terminal Windows, l'habitude sous Windows 10) n'en dessine qu'une case : les précisions se décalent et les
 /// menus se cassent. Là, deux signes d'une colonne, que toute police de console dessine, les remplacent.
-/// GARDIEN_EMOJI=0 les retire partout (un terminal qui les dessine mal), GARDIEN_EMOJI=1 les garde partout.
+/// VANGUARD_EMOJI=0 les retire partout (un terminal qui les dessine mal), VANGUARD_EMOJI=1 les garde partout.
 pub fn ampoule() -> &'static str {
     if emojis() { "💡" } else { "→" }
 }
@@ -36,13 +36,13 @@ fn emojis() -> bool {
     static EMOJIS: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *EMOJIS.get_or_init(|| {
         emojis_voulus(
-            std::env::var("GARDIEN_EMOJI").ok().as_deref(),
+            std::env::var("VANGUARD_EMOJI").ok().as_deref(),
             ancienne_console_windows(),
         )
     })
 }
 
-/// Le choix d'après GARDIEN_EMOJI, sinon d'après la console.
+/// Le choix d'après VANGUARD_EMOJI, sinon d'après la console.
 fn emojis_voulus(variable: Option<&str>, ancienne_console: bool) -> bool {
     match variable.map(|v| v.trim().to_lowercase()).as_deref() {
         Some("0" | "non" | "no" | "off") => false,
@@ -167,7 +167,7 @@ fn piege(c: char) -> bool {
 
 /// Un texte venu de l'extérieur (nom d'un réseau ou d'un appareil, réponse du réseau, nom de fichier, sortie d'un
 /// autre programme), prêt à montrer. Sans cela, un nom piégé pilote le terminal : une séquence OSC 52 écrit dans le
-/// presse-papier, ESC [2K et un retour chariot effacent une alerte de Gardien et la réécrivent, un caractère bidi
+/// presse-papier, ESC [2K et un retour chariot effacent une alerte de Vanguard et la réécrivent, un caractère bidi
 /// retourne la fin d'un nom. Chacun de ces caractères devient « � », pour que la manipulation se voie ; le reste ne
 /// change pas (accents, emojis, autres écritures, espaces).
 pub fn affichable(texte: &str) -> String {
@@ -499,7 +499,7 @@ mod tests {
             "Unregister-ScheduledTask -TaskName 'Maj�exe.txt' -Confirm:$false"
         );
         assert_eq!(commande_affichable("\u{9b}2K\x1b]52;c;eA==\x07"), "�2K�]52;c;eA==�");
-        // Un saut de ligne, de Gardien ou d'un nom de fichier, reste sur la ligne de la commande : pas de fausse ligne.
+        // Un saut de ligne, de Vanguard ou d'un nom de fichier, reste sur la ligne de la commande : pas de fausse ligne.
         assert_eq!(
             commande_affichable("rm -- ~/.cache/'x\n  ✔ Tout est propre'"),
             "rm -- ~/.cache/'x ⏎   ✔ Tout est propre'"

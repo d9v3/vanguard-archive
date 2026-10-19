@@ -1,10 +1,10 @@
-//! « Mes ordinateurs » : le tableau de bord de la clé GARDIEN. À la fin de chaque bilan complet, l'ordinateur où la
-//! clé est branchée y note sa visite : surnom, système, modèle, notes, version de Gardien, et ses problèmes restants
-//! (catégorie et niveau seulement, les cinq plus graves). Le tableau vit sur GARDIENLOG (`ordinateurs.json`), la
+//! « Mes ordinateurs » : le tableau de bord de la clé VANGUARD. À la fin de chaque bilan complet, l'ordinateur où la
+//! clé est branchée y note sa visite : surnom, système, modèle, notes, version de Vanguard, et ses problèmes restants
+//! (catégorie et niveau seulement, les cinq plus graves). Le tableau vit sur VANGUARDLOG (`ordinateurs.json`), la
 //! seule partition modifiable partout ; il voyage donc avec la clé, au contraire de l'historique des bilans, gardé
-//! sur chaque ordinateur. GARDIENLOG se lit en clair : jamais de nom de machine, de compte, d'adresse IP ou MAC, de
+//! sur chaque ordinateur. VANGUARDLOG se lit en clair : jamais de nom de machine, de compte, d'adresse IP ou MAC, de
 //! nom de Wi-Fi, de numéro de série ni de chemin. outils/deployer.sh n'en rapatrie que journal-erreurs.txt : ce
-//! tableau ne part jamais sur GitHub (test `seul_le_journal_quitte_gardienlog`).
+//! tableau ne part jamais sur GitHub (test `seul_le_journal_quitte_vanguardlog`).
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -51,7 +51,7 @@ struct Tableau {
     ordinateurs: BTreeMap<String, Ordinateur>,
 }
 
-/// Le tableau de la partition GARDIENLOG branchée, s'il y en a une.
+/// Le tableau de la partition VANGUARDLOG branchée, s'il y en a une.
 fn fichier() -> Option<PathBuf> {
     crate::journal::partition_de_la_cle().map(|p| p.join(FICHIER))
 }
@@ -133,7 +133,7 @@ fn surnom_propose(systeme: &str, modele: &str) -> String {
     }
 }
 
-/// À la fin d'un bilan complet : note cet ordinateur dans le tableau de la clé, si elle est branchée avec GARDIENLOG.
+/// À la fin d'un bilan complet : note cet ordinateur dans le tableau de la clé, si elle est branchée avec VANGUARDLOG.
 pub fn noter(audit: Option<&Audit>, reseau: Option<&Rapport>) {
     if cfg!(test) {
         return;
@@ -267,8 +267,8 @@ fn detail(o: &Ordinateur) -> Vec<String> {
             note(o.note_reseau)
         ),
         trf!(
-            "Dernier bilan : {} (Gardien {})",
-            "Last check: {} (Gardien {})",
+            "Dernier bilan : {} (Vanguard {})",
+            "Last check: {} (Vanguard {})",
             o.vu_le,
             o.version
         ),
@@ -288,15 +288,15 @@ fn detail(o: &Ordinateur) -> Vec<String> {
     l
 }
 
-/// Menu Données › Mes ordinateurs, ou `gardien ordinateurs`.
+/// Menu Données › Mes ordinateurs, ou `vanguard ordinateurs`.
 pub fn menu() {
     titre(tr!("Mes ordinateurs", "My computers"));
     let Some(chemin) = fichier() else {
         afficher_aligne(
             "  ",
             tr!(
-                "Branche la clé GARDIEN : le tableau est gardé sur sa partition GARDIENLOG. Une clé qui n'en a pas se refait avec outils/preparer-cle.sh.",
-                "Plug in the GARDIEN key: the table is kept on its GARDIENLOG partition. A key without it is rebuilt with outils/preparer-cle.sh."
+                "Branche la clé VANGUARD : le tableau est gardé sur sa partition VANGUARDLOG. Une clé qui n'en a pas se refait avec outils/preparer-cle.sh.",
+                "Plug in the VANGUARD key: the table is kept on its VANGUARDLOG partition. A key without it is rebuilt with outils/preparer-cle.sh."
             ),
             2,
             "",
@@ -413,7 +413,7 @@ mod tests {
     }
 
     fn dossier(nom: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("gardien-ordinateurs-{nom}-{}", std::process::id()));
+        let d = std::env::temp_dir().join(format!("vanguard-ordinateurs-{nom}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         d
@@ -512,18 +512,18 @@ mod tests {
         assert_eq!(nom_windows("Windows 10 Pro", "", ""), "Windows 10 Pro");
     }
 
-    /// GARDIENLOG se lit en clair et voyage : outils/deployer.sh ne doit en rapatrier que journal-erreurs.txt (et
+    /// VANGUARDLOG se lit en clair et voyage : outils/deployer.sh ne doit en rapatrier que journal-erreurs.txt (et
     /// toucher ses témoins), jamais toute la partition ni ordinateurs.json, sans quoi le tableau pourrait partir
     /// avec le journal sur GitHub.
     #[test]
-    fn seul_le_journal_quitte_gardienlog() {
+    fn seul_le_journal_quitte_vanguardlog() {
         let deployer = include_str!("../outils/deployer.sh");
-        let permis = ["\"$JOURNAL/journal-erreurs.txt\"", "\"$JOURNAL/gardien-journal.cle\""];
+        let permis = ["\"$JOURNAL/journal-erreurs.txt\"", "\"$JOURNAL/vanguard-journal.cle\""];
         for l in deployer.lines().filter(|l| l.contains("$JOURNAL")) {
             let sans_permis = permis.iter().fold(l.to_string(), |t, p| t.replace(p, ""));
             assert!(
                 !sans_permis.contains("$JOURNAL/") && !sans_permis.contains("\"$JOURNAL\" "),
-                "deployer.sh lit GARDIENLOG au-delà du journal : {l}"
+                "deployer.sh lit VANGUARDLOG au-delà du journal : {l}"
             );
         }
         assert!(deployer.contains("rapatrier_journal \"$JOURNAL/journal-erreurs.txt\""));

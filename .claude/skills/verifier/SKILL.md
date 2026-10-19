@@ -1,6 +1,6 @@
 ---
 name: verifier
-description: Tout vérifier avant un commit de Gardien — mise en forme, tests Linux, clippy sur les quatre cibles, tests Windows sous Wine, scripts générés. À lancer après toute modification du code Rust ou des scripts, avant de committer.
+description: Tout vérifier avant un commit de Vanguard — mise en forme, tests Linux, clippy sur les quatre cibles, tests Windows sous Wine, scripts générés. À lancer après toute modification du code Rust ou des scripts, avant de committer.
 ---
 
 Lance `outils/verifier.sh` : il fait tout ce qui suit, les cibles en parallèle, et finit par une ligne par étape

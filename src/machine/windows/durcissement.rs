@@ -106,7 +106,7 @@ pub(super) fn juger_powershell2(installe: Option<bool>) -> Option<Constat> {
 }
 
 /// Assistance à distance (`fAllowToGetHelp`) : une information, à couper soi-même (couper ici pourrait interrompre
-/// une assistance en cours, et Gardien ne coupe jamais une connexion à distance).
+/// une assistance en cours, et Vanguard ne coupe jamais une connexion à distance).
 pub(super) fn juger_assistance(valeur: Option<u32>) -> Option<Constat> {
     (valeur == Some(1)).then(|| {
         alerte(

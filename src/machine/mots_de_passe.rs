@@ -1,8 +1,8 @@
 //! Mots de passe enregistrés dans les navigateurs : combien, et par quoi ils sont protégés. Firefox (et ses cousins)
 //! les garde dans logins.json, chiffrés avec key4.db ; sans mot de passe principal, la clé est sur le disque à côté et
-//! qui ouvre ta session (ou un programme malveillant) les lit tous ; Gardien ne peut pas voir si ce mot de passe
+//! qui ouvre ta session (ou un programme malveillant) les lit tous ; Vanguard ne peut pas voir si ce mot de passe
 //! principal est défini, et le dit. Chrome, Edge, Brave, Vivaldi et Chromium les gardent dans la base « Login Data »,
-//! protégés seulement par la session (DPAPI sous Windows, trousseau sous macOS, porte-clés ou rien sous Linux). Gardien
+//! protégés seulement par la session (DPAPI sous Windows, trousseau sous macOS, porte-clés ou rien sous Linux). Vanguard
 //! compte les entrées sans en lire une seule : logins.json est compté dans sa structure, la base SQLite est parcourue
 //! page par page pour compter les lignes de la table « logins », sans décoder leur contenu ni dépendre de SQLite.
 
@@ -362,8 +362,8 @@ pub(super) fn juger(profils: &[Result<Profil, (String, String)>]) -> Vec<Constat
     let mut protection = Vec::new();
     if firefox {
         protection.push(tr!(
-            "Firefox : Gardien ne peut pas voir si un mot de passe principal les protège ; sans lui, qui ouvre ta session les lit tous",
-            "Firefox: Gardien cannot see whether a primary password protects them; without one, whoever opens your session reads them all"
+            "Firefox : Vanguard ne peut pas voir si un mot de passe principal les protège ; sans lui, qui ouvre ta session les lit tous",
+            "Firefox: Vanguard cannot see whether a primary password protects them; without one, whoever opens your session reads them all"
         ).to_string());
     }
     if chromium {

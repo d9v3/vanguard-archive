@@ -1,4 +1,4 @@
-//! Optimiser : réglages de confidentialité, de performance et de confort, écrits pour Gardien. Chaque réglage montre
+//! Optimiser : réglages de confidentialité, de performance et de confort, écrits pour Vanguard. Chaque réglage montre
 //! son état réel, explique ce qu'il change et s'applique après accord, avec un point de restauration si le système est
 //! touché. Il s'annule exactement : la valeur d'avant est notée au moment du changement, puis remise telle quelle ;
 //! sans note (réglage fait ailleurs), c'est la valeur d'un système neuf qui revient. Aucun réglage n'affaiblit la
@@ -56,7 +56,7 @@ impl Categorie {
     }
 }
 
-/// Un réglage proposé par Gardien.
+/// Un réglage proposé par Vanguard.
 pub struct Reglage {
     /// Nom stable, noté dans l'historique pour pouvoir annuler. Construit à la demande pour un programme au
     /// démarrage (« demarrage:… »), fixe pour le catalogue.
@@ -88,7 +88,7 @@ fn etat(r: &Reglage) -> Etat {
     }
 }
 
-/// Valeurs d'avant de chaque réglage appliqué par Gardien, dans l'ordre de ses changements.
+/// Valeurs d'avant de chaque réglage appliqué par Vanguard, dans l'ordre de ses changements.
 #[derive(serde::Serialize, serde::Deserialize, Default)]
 struct Historique {
     reglages: BTreeMap<String, Avant>,
@@ -219,9 +219,9 @@ fn executer(a_faire: &[&Reglage], a_annuler: &[&Reglage], h: &mut Historique) ->
     (faits.to_vec(), remis)
 }
 
-fn libelle(e: Etat, par_gardien: bool) -> &'static str {
-    match (e, par_gardien) {
-        (Etat::Fait, true) => tr!("fait par Gardien", "done by Gardien"),
+fn libelle(e: Etat, par_vanguard: bool) -> &'static str {
+    match (e, par_vanguard) {
+        (Etat::Fait, true) => tr!("fait par Vanguard", "done by Vanguard"),
         (Etat::Fait, false) => tr!("déjà fait", "already done"),
         (Etat::EnPartie, _) => tr!("en partie", "partly"),
         (Etat::AFaire, _) => tr!("à faire", "to do"),
@@ -465,7 +465,7 @@ fn reglage_dns(c: systeme::Changement) -> Reglage {
     }
 }
 
-/// Les réglages hors catalogue que Gardien a appliqués et pas encore annulés : ceux dont une note garde la valeur
+/// Les réglages hors catalogue que Vanguard a appliqués et pas encore annulés : ceux dont une note garde la valeur
 /// d'avant (le DNS, les programmes retirés du démarrage).
 fn hors_catalogue(h: &Historique) -> Vec<Reglage> {
     let mut l: Vec<Reglage> = h
@@ -480,7 +480,7 @@ fn hors_catalogue(h: &Historique) -> Vec<Reglage> {
     l
 }
 
-/// Le DNS changé par Gardien, s'il l'a fait : (date du changement, réseau concerné : connexion, carte ou service).
+/// Le DNS changé par Vanguard, s'il l'a fait : (date du changement, réseau concerné : connexion, carte ou service).
 pub fn dns_change() -> Option<(String, String)> {
     let h = charger();
     let a = h.reglages.get(DNS)?;
@@ -497,8 +497,8 @@ pub fn appliquer_dns(serveurs4: &[&str], serveurs6: &[&str]) -> Result<(), Strin
         && Some(reseau.as_str()) != c.identite_dns()
     {
         return Err(tr!(
-            "Gardien a déjà changé le DNS d'une autre connexion : remets-le d'abord (Optimiser › Tout remettre comme avant).",
-            "Gardien already changed the DNS of another connection: put it back first (Optimize › Put everything back)."
+            "Vanguard a déjà changé le DNS d'une autre connexion : remets-le d'abord (Optimiser › Tout remettre comme avant).",
+            "Vanguard already changed the DNS of another connection: put it back first (Optimize › Put everything back)."
         )
         .to_string());
     }
@@ -514,7 +514,7 @@ pub fn appliquer_dns(serveurs4: &[&str], serveurs6: &[&str]) -> Result<(), Strin
     Ok(())
 }
 
-/// Remet le DNS d'avant le changement de Gardien, après accord.
+/// Remet le DNS d'avant le changement de Vanguard, après accord.
 pub fn remettre_dns() {
     let h = charger();
     let reglages = hors_catalogue(&h);
@@ -523,7 +523,7 @@ pub fn remettre_dns() {
     }
 }
 
-/// Annule tout ce que Gardien a changé : les valeurs notées avant chaque changement reviennent.
+/// Annule tout ce que Vanguard a changé : les valeurs notées avant chaque changement reviennent.
 pub fn tout_annuler() {
     titre(tr!("Tout remettre comme avant", "Put everything back"));
     let h = charger();
@@ -535,8 +535,8 @@ pub fn tout_annuler() {
         .collect();
     if a_annuler.is_empty() {
         trp!(
-            "  {GRIS}Gardien n'a changé aucun réglage sur cette machine.{RESET}",
-            "  {GRIS}Gardien has not changed any setting on this machine.{RESET}"
+            "  {GRIS}Vanguard n'a changé aucun réglage sur cette machine.{RESET}",
+            "  {GRIS}Vanguard has not changed any setting on this machine.{RESET}"
         );
         return;
     }
@@ -653,7 +653,7 @@ mod tests {
     /// Un historique tronqué (coupure pendant l'écriture) n'est pas pris pour vide puis écrasé : il est mis de côté.
     #[test]
     fn historique_illisible_mis_de_cote() {
-        let dossier = std::env::temp_dir().join(format!("gardien-reglages-illisible-{}", std::process::id()));
+        let dossier = std::env::temp_dir().join(format!("vanguard-reglages-illisible-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dossier);
         std::fs::create_dir_all(&dossier).unwrap();
         let chemin = dossier.join("reglages.json");
@@ -682,7 +682,7 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[test]
     fn annulation_jugee_sur_les_valeurs_relues() {
-        let f = std::env::temp_dir().join(format!("gardien-test-annuler-{}", std::process::id()));
+        let f = std::env::temp_dir().join(format!("vanguard-test-annuler-{}", std::process::id()));
         std::fs::write(&f, "ENABLED=0\n").unwrap();
         let chemin: &'static str = Box::leak(f.display().to_string().into_boxed_str());
         let r = Reglage {
@@ -707,7 +707,7 @@ mod tests {
                 valeurs: vec![None],
             },
         );
-        assert!(!remis_en_place(&r, &h), "la ligne posée par Gardien est encore là");
+        assert!(!remis_en_place(&r, &h), "la ligne posée par Vanguard est encore là");
         std::fs::write(&f, "# ligne retirée\n").unwrap();
         assert!(remis_en_place(&r, &h));
         // Sans note, c'est la valeur d'un système neuf qui doit revenir.

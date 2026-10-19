@@ -3,7 +3,7 @@
 (assets/partage.png). outils/deployer.sh les refait à chaque nouvelle version : le menu montre le numéro de version,
 une image d'une version passée se verrait.
 
-Gardien tourne pour de vrai : dans un pseudo-terminal de 80 colonnes (pyte relit l'écran comme un terminal), depuis
+Vanguard tourne pour de vrai : dans un pseudo-terminal de 80 colonnes (pyte relit l'écran comme un terminal), depuis
 une fausse clé USB, sur une copie des données. Rien de vrai n'est touché : autre USER (la vraie clé et sa partition
 du journal sont cherchées dans /run/media/$USER), XDG_DATA_HOME jetable, pas de bus de session (systemctl --user et
 les notifications échouent sans rien faire), faux xdg-open (le rapport ne s'ouvre pas).
@@ -16,7 +16,7 @@ pas le Wi-Fi, les extensions, les services ajoutés à la main…), les coupures
 dépôt (outils/confidentialite.py) relit chaque image : si un détail personnel reste visible, aucune n'est écrite.
 
 Depuis la racine du dépôt :
-    uv run --no-project --with pyte python outils/captures.py [programme gardien] [--connexion]
+    uv run --no-project --with pyte python outils/captures.py [programme vanguard] [--connexion]
 --connexion refait aussi le test de connexion (quelques centaines de Mo) ; sans lui, seulement si l'image manque ou si
 src/reseau/connexion.rs, src/ui.rs, src/langue.rs ou ce script ont changé depuis. --sans-connexion ne le refait jamais.
 """
@@ -81,20 +81,20 @@ REMPLACABLES = {"liste privée", "identité Git de l'ordinateur", "nom complet d
 def preparer_bac(programme: Path, bac: Path):
     """Fausse clé (programme dans Linux/, témoin vide : jamais protégée) et données copiées. Le réseau prend un nom
     passe-partout ; les surnoms qui pourraient nommer quelqu'un sont retirés."""
-    local, cle = conf.dossiers_gardien()
+    local, cle = conf.dossiers_vanguard()
     (bac / "cle/Linux").mkdir(parents=True)
     (bac / "cle/donnees").mkdir()
-    (bac / "donnees/gardien").mkdir(parents=True)
+    (bac / "donnees/vanguard").mkdir(parents=True)
     (bac / "run").mkdir()
     (bac / "bin").mkdir()
-    shutil.copy(programme, bac / "cle/Linux/gardien")
-    (bac / "cle/gardien.cle").write_text("")
+    shutil.copy(programme, bac / "cle/Linux/vanguard")
+    (bac / "cle/vanguard.cle").write_text("")
     if local:
         for f in local.glob("*.json"):
-            shutil.copy(f, bac / "donnees/gardien" / f.name)
-    # Gardien lit la base de la clé et celle de l'ordinateur : les deux copies sont rendues passe-partout.
+            shutil.copy(f, bac / "donnees/vanguard" / f.name)
+    # Vanguard lit la base de la clé et celle de l'ordinateur : les deux copies sont rendues passe-partout.
     source = next((d / "appareils.json" for d in (cle, local) if d and (d / "appareils.json").is_file()), None)
-    for copie in (bac / "cle/donnees/appareils.json", bac / "donnees/gardien/appareils.json"):
+    for copie in (bac / "cle/donnees/appareils.json", bac / "donnees/vanguard/appareils.json"):
         depart = copie if copie.is_file() else source
         if not depart:
             continue
@@ -136,14 +136,14 @@ def reseaux_wifi():
 
 
 def environnement(bac: Path, langue: str):
-    env = {k: v for k, v in os.environ.items() if not k.startswith("GARDIEN_")}
+    env = {k: v for k, v in os.environ.items() if not k.startswith("VANGUARD_")}
     env.update(
         USER="capture",
         XDG_DATA_HOME=str(bac / "donnees"),
         XDG_RUNTIME_DIR=str(bac / "run"),
         DBUS_SESSION_BUS_ADDRESS="unix:path=/nonexistent",
         PATH=f"{bac / 'bin'}:{os.environ['PATH']}",
-        GARDIEN_LANG=langue,
+        VANGUARD_LANG=langue,
         TERM="xterm-256color",
         COLUMNS=str(COLONNES),
         LINES=str(RANGEES),
@@ -152,7 +152,7 @@ def environnement(bac: Path, langue: str):
 
 
 def lancer(exe: Path, args, env, attendre=None, touches=b"", delai=240):
-    """Lance gardien dans un pseudo-terminal et rend l'écran. `attendre` : texte qui doit paraître avant de taper
+    """Lance vanguard dans un pseudo-terminal et rend l'écran. `attendre` : texte qui doit paraître avant de taper
     `touches` (l'écran est pris juste avant) ; sinon on attend la fin du programme."""
     pid, fd = pty.fork()
     if pid == 0:
@@ -193,7 +193,7 @@ def lancer(exe: Path, args, env, attendre=None, touches=b"", delai=240):
         pass
     os.close(fd)
     if attendre and photo is None:
-        raise SystemExit(f"captures : « {attendre} » n'a jamais paru (gardien {' '.join(args)})")
+        raise SystemExit(f"captures : « {attendre} » n'a jamais paru (vanguard {' '.join(args)})")
     return photo if photo is not None else cellules(ecran)
 
 
@@ -395,7 +395,7 @@ def capture_terminal(rangees, sortie: Path, bac: Path):
 
 def capture_partage(bac: Path):
     """Image de partage du dépôt (aperçu des liens) : 1280 × 640."""
-    logo = Path("assets/icones/gardien-512.png").resolve().as_uri()
+    logo = Path("assets/icones/vanguard-512.png").resolve().as_uri()
     page = f"""<!doctype html><meta charset="utf-8"><style>
 html,body{{margin:0;width:1280px;height:640px;overflow:hidden}}
 body{{background:radial-gradient(ellipse at 22% 40%,#1a0606 0%,#000 55%),#000;color:#f2ece6;
@@ -406,7 +406,7 @@ h1{{font-size:112px;line-height:1;margin:0 0 22px;letter-spacing:-2px;font-weigh
 p{{margin:0;font-size:34px;line-height:1.3;color:#d8d0ca}}
 p.en{{margin-top:10px;font-size:26px;color:#8a8a8a}}
 .os{{margin-top:34px;font-size:24px;letter-spacing:1px;color:#29b8db}}
-</style><img src="{logo}" alt=""><div><h1>Gardien</h1>
+</style><img src="{logo}" alt=""><div><h1>Vanguard</h1>
 <p>Sécurise et optimise ton ordinateur et ton réseau, depuis une clé USB.</p>
 <p class="en">Secures and optimizes your computer and network, from a USB key.</p>
 <div class="os">Linux · Windows · macOS</div></div>"""
@@ -430,16 +430,16 @@ def connexion_a_refaire(force: bool) -> bool:
 
 def main():
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
-    programme = Path(args[0] if args else "target/x86_64-unknown-linux-musl/release/gardien").resolve()
+    programme = Path(args[0] if args else "target/x86_64-unknown-linux-musl/release/vanguard").resolve()
     if not programme.is_file():
         raise SystemExit(f"captures : {programme} introuvable (compiler d'abord)")
     connexion = connexion_a_refaire("--connexion" in sys.argv)
     version = subprocess.run([str(programme), "--version"], capture_output=True, text=True).stdout.split()[-1]
     DOSSIER.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix="gardien-captures-") as t:
+    with tempfile.TemporaryDirectory(prefix="vanguard-captures-") as t:
         bac = Path(t)
         preparer_bac(programme, bac)
-        exe = bac / "cle/Linux/gardien"
+        exe = bac / "cle/Linux/vanguard"
         # Tout est pris avant d'être masqué : un même réseau inventé pour toutes les images, dans les deux langues.
         ecrans, rapports = {}, {}
         for langue in ("fr", "en"):

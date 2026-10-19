@@ -1,5 +1,5 @@
 [Unit]
-Description=Gardien : chercher chaque semaine les nouvelles images Linux de la clé de secours
+Description=Vanguard : chercher chaque semaine les nouvelles images Linux de la clé de secours
 
 [Timer]
 OnCalendar=weekly

@@ -1,7 +1,7 @@
 //! Programmes au démarrage : ceux qui se lancent à l'ouverture de session, retirés ou remis après accord. Chacun est
 //! un réglage hors catalogue (« demarrage:<identité> ») : la valeur d'avant est notée, il s'annule exactement, un par
 //! un dans cette liste ou tous par « Tout remettre comme avant ». Le programme reste installé et se lance à la main.
-//! Ce qui protège ou fait marcher l'ordinateur (Gardien, antivirus, pare-feu, pilotes, accessibilité, composants du
+//! Ce qui protège ou fait marcher l'ordinateur (Vanguard, antivirus, pare-feu, pilotes, accessibilité, composants du
 //! bureau) est montré sans être proposé.
 
 use std::borrow::Cow;
@@ -48,7 +48,7 @@ fn reglage(nom: &str, changement: systeme::Changement) -> Option<Reglage> {
     })
 }
 
-/// Les programmes que Gardien a retirés du démarrage, rebâtis d'après leurs notes : pour les remettre (« Tout remettre
+/// Les programmes que Vanguard a retirés du démarrage, rebâtis d'après leurs notes : pour les remettre (« Tout remettre
 /// comme avant », ou cette liste), même s'ils ne se lancent plus et n'apparaissent donc plus ailleurs.
 pub(super) fn notes(h: &Historique) -> Vec<Reglage> {
     h.reglages
@@ -64,7 +64,7 @@ pub(super) fn notes(h: &Historique) -> Vec<Reglage> {
 /// Pourquoi un programme reste au démarrage, s'il le doit : il protège ou fait marcher l'ordinateur. Comparé en
 /// minuscules au nom et à la commande ; un motif court est un mot entier (« avg » ne doit pas trouver « savgame »).
 pub(super) fn a_garder(nom: &str, commande: &str, bureau: bool) -> Option<&'static str> {
-    const GARDIEN: &[&str] = &["gardien"];
+    const VANGUARD: &[&str] = &["vanguard"];
     // Des listes de motifs, que rustfmt étalerait sur une ligne chacun.
     #[rustfmt::skip]
     const SECURITE: &[&str] = &[
@@ -110,7 +110,7 @@ pub(super) fn a_garder(nom: &str, commande: &str, bureau: bool) -> Option<&'stat
     #[rustfmt::skip] // une ligne par raison, que rustfmt étalerait
     let raisons = [
         (trouve(SECURITE), tr!("à garder : sécurité", "keep: security")),
-        (trouve(GARDIEN), tr!("à garder : Gardien", "keep: Gardien")),
+        (trouve(VANGUARD), tr!("à garder : Vanguard", "keep: Vanguard")),
         (trouve(PILOTES), tr!("à garder : pilote", "keep: driver")),
         (trouve(ACCESSIBILITE), tr!("à garder : accessibilité", "keep: accessibility")),
         (bureau || trouve(BUREAU), tr!("à garder : le bureau", "keep: desktop")),
@@ -118,7 +118,7 @@ pub(super) fn a_garder(nom: &str, commande: &str, bureau: bool) -> Option<&'stat
     raisons.into_iter().find_map(|(oui, raison)| oui.then_some(raison))
 }
 
-/// Ce que Gardien ne retire pas d'ici, et où le faire.
+/// Ce que Vanguard ne retire pas d'ici, et où le faire.
 fn ailleurs() -> &'static str {
     if cfg!(windows) {
         tr!(
@@ -144,7 +144,7 @@ fn ailleurs() -> &'static str {
 /// Run32 ou StartupFolder.
 pub(super) const APPROUVES: &str = r"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved";
 
-/// Les listes de StartupApproved que Gardien touche (une note ne doit pas en viser une autre).
+/// Les listes de StartupApproved que Vanguard touche (une note ne doit pas en viser une autre).
 pub(super) fn liste_approuvee(l: &str) -> Option<&'static str> {
     ["Run", "Run32", "StartupFolder"].into_iter().find(|x| *x == l)
 }
@@ -271,11 +271,11 @@ struct Ligne {
     actif: bool,
     machine: bool,
     garder: Option<&'static str>,
-    par_gardien: bool,
+    par_vanguard: bool,
     reglage: Reglage,
 }
 
-/// Ce qui se montre : les programmes qui se lancent, et ceux que Gardien a retirés (pour pouvoir les remettre). Un
+/// Ce qui se montre : les programmes qui se lancent, et ceux que Vanguard a retirés (pour pouvoir les remettre). Un
 /// programme retiré ailleurs (Gestionnaire des tâches, Réglages) reste comme il est, sans être montré.
 fn lignes(programmes: Vec<Programme>, h: &Historique) -> Vec<Ligne> {
     let mut l: Vec<Ligne> = Vec::new();
@@ -283,20 +283,20 @@ fn lignes(programmes: Vec<Programme>, h: &Historique) -> Vec<Ligne> {
         let Some(r) = reglage(&p.nom, p.changement) else {
             continue;
         };
-        let par_gardien = h.reglages.contains_key(r.id.as_ref());
-        if p.actif || par_gardien {
+        let par_vanguard = h.reglages.contains_key(r.id.as_ref());
+        if p.actif || par_vanguard {
             l.push(Ligne {
                 garder: a_garder(&p.nom, &p.commande, p.bureau),
                 nom: affichable(&p.nom),
                 commande: affichable(&p.commande),
                 actif: p.actif,
                 machine: p.machine,
-                par_gardien,
+                par_vanguard,
                 reglage: r,
             });
         }
     }
-    // Retirés par Gardien mais introuvables ici (un service désactivé ne se liste plus) : rebâtis d'après la note.
+    // Retirés par Vanguard mais introuvables ici (un service désactivé ne se liste plus) : rebâtis d'après la note.
     for r in notes(h) {
         if !l.iter().any(|x| x.reglage.id == r.id) {
             let identite = r.id.strip_prefix(PREFIXE).unwrap_or_default();
@@ -306,7 +306,7 @@ fn lignes(programmes: Vec<Programme>, h: &Historique) -> Vec<Ligne> {
                 actif: false,
                 machine: false,
                 garder: None,
-                par_gardien: true,
+                par_vanguard: true,
                 reglage: r,
             });
         }
@@ -316,7 +316,7 @@ fn lignes(programmes: Vec<Programme>, h: &Historique) -> Vec<Ligne> {
 }
 
 /// La liste à cocher : coché = se lance à l'ouverture de session. Décocher retire, recocher remet exactement comme
-/// avant ce que Gardien avait retiré.
+/// avant ce que Vanguard avait retiré.
 pub fn menu() {
     let h = charger();
     let l = lignes(systeme::au_demarrage(), &h);
@@ -335,7 +335,7 @@ pub fn menu() {
             let precision = match (x.garder, x.actif) {
                 (Some(raison), _) => raison,
                 (None, true) => tr!("se lance", "starts"),
-                (None, false) => tr!("retiré par Gardien", "removed by Gardien"),
+                (None, false) => tr!("retiré par Vanguard", "removed by Vanguard"),
             };
             let mut detail = x.commande.chars().take(200).collect::<String>();
             if x.machine {
@@ -379,7 +379,7 @@ pub fn menu() {
             .collect()
     };
     let a_retirer = choisis(|x, v| x.actif && !v && x.garder.is_none());
-    let a_remettre = choisis(|x, v| !x.actif && v && x.par_gardien);
+    let a_remettre = choisis(|x, v| !x.actif && v && x.par_vanguard);
     if a_retirer.is_empty() && a_remettre.is_empty() {
         trp!("  {GRIS}Rien à changer.{RESET}", "  {GRIS}Nothing to change.{RESET}");
     } else {
@@ -408,7 +408,7 @@ mod tests {
         assert_eq!(a_garder("Savgame Sync", "savgame.exe", false), None);
         assert!(a_garder("RtkAudUService", r"C:\Windows\System32\RtkAudUService64.exe", false).is_some());
         assert!(a_garder("Clavier visuel", "osk.exe", false).is_some());
-        assert!(a_garder("gardien-surveillance", "gardien surveiller", false).is_some());
+        assert!(a_garder("vanguard-surveillance", "vanguard surveiller", false).is_some());
         assert!(a_garder("PipeWire", "/usr/bin/pipewire", false).is_some());
         assert!(a_garder("Panneau", "panneau", true).is_some());
         assert_eq!(
@@ -507,7 +507,7 @@ mod tests {
         }
     }
 
-    /// Montrés : ceux qui se lancent, et ceux que Gardien a retirés, même introuvables (un service désactivé ne se
+    /// Montrés : ceux qui se lancent, et ceux que Vanguard a retirés, même introuvables (un service désactivé ne se
     /// liste plus) ; pas ceux retirés ailleurs.
     #[cfg(target_os = "linux")]
     #[test]
@@ -537,20 +537,20 @@ mod tests {
             vec![
                 service("syncthing", true),
                 service("ailleurs", false),
-                service("gardien-essai", true),
+                service("vanguard-essai", true),
             ],
             &h,
         );
         let vus: Vec<(&str, bool, bool, bool)> = l
             .iter()
-            .map(|x| (x.nom.as_str(), x.actif, x.par_gardien, x.garder.is_some()))
+            .map(|x| (x.nom.as_str(), x.actif, x.par_vanguard, x.garder.is_some()))
             .collect();
         assert_eq!(
             vus,
             [
-                ("gardien-essai", true, false, true),
                 ("retire", false, true, false),
-                ("syncthing", true, false, false)
+                ("syncthing", true, false, false),
+                ("vanguard-essai", true, false, true)
             ]
         );
         // « Tout remettre comme avant » le retrouve aussi.

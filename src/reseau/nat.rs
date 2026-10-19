@@ -273,7 +273,7 @@ fn afficher_ipv6() {
     }
 }
 
-/// Menu Réseau et Internet › Type de NAT, ou `gardien nat`.
+/// Menu Réseau et Internet › Type de NAT, ou `vanguard nat`.
 pub fn tester() {
     titre(tr!("Type de NAT pour le jeu", "NAT type for gaming"));
     let intro = tr!(

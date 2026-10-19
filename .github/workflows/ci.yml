@@ -73,9 +73,9 @@ jobs:
       # par le travail « reproductible ». La recompiler ici prenait une minute et demie à chaque envoi.
       - name: Le programme démarre et répond
         run: |
-          ./target/x86_64-unknown-linux-musl/debug/gardien --version
-          ./target/x86_64-unknown-linux-musl/debug/gardien logiciels --liste
-          ./target/x86_64-unknown-linux-musl/debug/gardien nettoyer --liste
+          ./target/x86_64-unknown-linux-musl/debug/vanguard --version
+          ./target/x86_64-unknown-linux-musl/debug/vanguard logiciels --liste
+          ./target/x86_64-unknown-linux-musl/debug/vanguard nettoyer --liste
       # Les règles YARA intégrées au programme, compilées par le moteur de VirusTotal (libyara dans yara-python) : une
       # règle cassée par une mise à jour (outils/maj-yara.sh) se voit ici, pas chez quelqu'un.
       - name: Règles YARA
@@ -189,16 +189,16 @@ jobs:
         run: |
           cargo build --release --target x86_64-unknown-linux-musl --target x86_64-pc-windows-gnu
           mkdir premiere
-          cp target/x86_64-unknown-linux-musl/release/gardien premiere/gardien
-          cp target/x86_64-pc-windows-gnu/release/gardien.exe premiere/gardien.exe
+          cp target/x86_64-unknown-linux-musl/release/vanguard premiere/vanguard
+          cp target/x86_64-pc-windows-gnu/release/vanguard.exe premiere/vanguard.exe
           # Seul le programme est recompilé (les dépendances restent) : c'est lui que l'on compare.
-          cargo clean -p gardien --release --target x86_64-unknown-linux-musl
-          cargo clean -p gardien --release --target x86_64-pc-windows-gnu
+          cargo clean -p vanguard --release --target x86_64-unknown-linux-musl
+          cargo clean -p vanguard --release --target x86_64-pc-windows-gnu
           cargo build --release --target x86_64-unknown-linux-musl --target x86_64-pc-windows-gnu
-          sha256sum premiere/gardien target/x86_64-unknown-linux-musl/release/gardien
-          sha256sum premiere/gardien.exe target/x86_64-pc-windows-gnu/release/gardien.exe
-          cmp premiere/gardien target/x86_64-unknown-linux-musl/release/gardien
-          cmp premiere/gardien.exe target/x86_64-pc-windows-gnu/release/gardien.exe
+          sha256sum premiere/vanguard target/x86_64-unknown-linux-musl/release/vanguard
+          sha256sum premiere/vanguard.exe target/x86_64-pc-windows-gnu/release/vanguard.exe
+          cmp premiere/vanguard target/x86_64-unknown-linux-musl/release/vanguard
+          cmp premiere/vanguard.exe target/x86_64-pc-windows-gnu/release/vanguard.exe
 
   windows:
     needs: utile
@@ -221,7 +221,7 @@ jobs:
       # MSVC, jamais livrée, prenait ici près de quatre minutes, comptées deux fois.
       - name: Essai du programme (lecture seule)
         run: |
-          $s = ".\target\x86_64-pc-windows-msvc\debug\gardien.exe"
+          $s = ".\target\x86_64-pc-windows-msvc\debug\vanguard.exe"
           & $s --version
           & $s machine --json > audit.json
           Get-Content audit.json -TotalCount 40

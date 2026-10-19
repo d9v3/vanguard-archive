@@ -1,7 +1,7 @@
 //! Parcours « Ordinateur qui part » (vente, don, retour à l'employeur, recyclage) : ce qu'il faut faire, dans
 //! l'ordre, pour qu'il parte sans tes fichiers ni tes comptes : une copie vérifiée d'abord, les comptes déconnectés
 //! (et le verrou d'activation levé), la clé BitLocker ou FileVault mise de côté, l'effacement sûr par l'outil du
-//! système, la puce TPM remise à zéro. Gardien vérifie et explique ; il n'efface rien lui-même : l'outil du système
+//! système, la puce TPM remise à zéro. Vanguard vérifie et explique ; il n'efface rien lui-même : l'outil du système
 //! sait traiter chaque disque (SSD, puce de sécurité), et c'est à toi d'appuyer.
 
 use super::{Etat, a_savoir, bilan, conseil, proposer_outil, question, verifications};
@@ -87,8 +87,8 @@ fn effacement() -> &'static str {
         )
     } else {
         tr!(
-            "Démarre sur la clé GARDIEN (SystemRescue) : un SSD s'efface en entier avec « blkdiscard » (ou « nvme format » pour un NVMe), un disque dur avec « shred -n 1 » ; puis réinstalle le système pour le prochain. Un disque chiffré LUKS devient illisible dès que son en-tête est effacé (« cryptsetup erase »).",
-            "Boot the GARDIEN key (SystemRescue): an SSD is wiped whole with “blkdiscard” (or “nvme format” for an NVMe), a hard disk with “shred -n 1”; then reinstall the system for the next person. A LUKS-encrypted disk becomes unreadable as soon as its header is erased (“cryptsetup erase”)."
+            "Démarre sur la clé VANGUARD (SystemRescue) : un SSD s'efface en entier avec « blkdiscard » (ou « nvme format » pour un NVMe), un disque dur avec « shred -n 1 » ; puis réinstalle le système pour le prochain. Un disque chiffré LUKS devient illisible dès que son en-tête est effacé (« cryptsetup erase »).",
+            "Boot the VANGUARD key (SystemRescue): an SSD is wiped whole with “blkdiscard” (or “nvme format” for an NVMe), a hard disk with “shred -n 1”; then reinstall the system for the next person. A LUKS-encrypted disk becomes unreadable as soon as its header is erased (“cryptsetup erase”)."
         )
     }
 }
@@ -133,8 +133,8 @@ fn cle_de_recuperation(chiffre: Option<bool>) -> &'static str {
             "The disk is not encrypted: everything “normally” deleted for years is still recoverable on it. The wipe below must clean the whole drive, not just delete files."
         ),
         None => tr!(
-            "Gardien n'a pas pu lire l'état du chiffrement : s'il est chiffré, mets la clé de récupération de côté jusqu'à la fin de l'effacement ; sinon, l'effacement doit nettoyer le lecteur en entier.",
-            "Gardien could not read the encryption state: if encrypted, set the recovery key aside until the wipe is done; otherwise, the wipe must clean the whole drive."
+            "Vanguard n'a pas pu lire l'état du chiffrement : s'il est chiffré, mets la clé de récupération de côté jusqu'à la fin de l'effacement ; sinon, l'effacement doit nettoyer le lecteur en entier.",
+            "Vanguard could not read the encryption state: if encrypted, set the recovery key aside until the wipe is done; otherwise, the wipe must clean the whole drive."
         ),
     }
 }
@@ -237,16 +237,16 @@ pub(super) fn etapes(
         }
     }
     e.push(Etape {
-        titre: tr!("Les données de Gardien", "Gardien's data"),
+        titre: tr!("Les données de Vanguard", "Vanguard's data"),
         detail: trf!(
-            "La base des appareils, les surnoms et l'historique de tes réseaux sont dans {} : exporte-les si tu veux les retrouver sur le prochain ordinateur (ils partent avec l'effacement). La clé GARDIEN, elle, te suit.",
-            "The device database, the nicknames and the history of your networks are in {}: export them if you want them back on the next computer (they go with the wipe). The GARDIEN key itself goes with you.",
+            "La base des appareils, les surnoms et l'historique de tes réseaux sont dans {} : exporte-les si tu veux les retrouver sur le prochain ordinateur (ils partent avec l'effacement). La clé VANGUARD, elle, te suit.",
+            "The device database, the nicknames and the history of your networks are in {}: export them if you want them back on the next computer (they go with the wipe). The VANGUARD key itself goes with you.",
             chemin_affichable(&crate::reseau::dossier_local())
         ),
         outil: Some((
             tr!(
-                "\n  Ouvrir « Données de Gardien » (sauvegarder) ? [o/N] : ",
-                "\n  Open “Gardien data” (back up)? [y/N]: "
+                "\n  Ouvrir « Données de Vanguard » (sauvegarder) ? [o/N] : ",
+                "\n  Open “Vanguard data” (back up)? [y/N]: "
             ),
             crate::donnees::menu,
         )),
@@ -308,8 +308,8 @@ pub(super) fn depart() {
         println!();
     }
     a_savoir(&[tr!(
-        "Gardien n'efface rien lui-même : l'outil du système sait traiter chaque disque (SSD, puce de sécurité, verrou d'activation), et c'est toi qui appuies. Ce parcours vérifie et explique, c'est tout.",
-        "Gardien wipes nothing itself: the system's tool knows how to handle each disk (SSD, security chip, activation lock), and you are the one who presses. This path checks and explains, that is all."
+        "Vanguard n'efface rien lui-même : l'outil du système sait traiter chaque disque (SSD, puce de sécurité, verrou d'activation), et c'est toi qui appuies. Ce parcours vérifie et explique, c'est tout.",
+        "Vanguard wipes nothing itself: the system's tool knows how to handle each disk (SSD, security chip, activation lock), and you are the one who presses. This path checks and explains, that is all."
     )]);
     if devenir == Devenir::VenduOuDonne {
         conseil(tr!(
@@ -356,8 +356,8 @@ mod tests {
                 && t.iter().any(|x| x.contains("TPM")) != cfg!(target_os = "macos"),
             "{t:?}"
         );
-        // Les données de Gardien ferment la liste, dans tous les cas.
-        assert!(rendu.last().unwrap().titre.contains("Gardien") && vendu.last().unwrap().titre.contains("Gardien"));
+        // Les données de Vanguard ferment la liste, dans tous les cas.
+        assert!(rendu.last().unwrap().titre.contains("Vanguard") && vendu.last().unwrap().titre.contains("Vanguard"));
     }
 
     #[test]
@@ -387,7 +387,7 @@ mod tests {
         assert_eq!(tpm_de_ps("  false "), Some(false));
         assert_eq!(tpm_de_ps(""), None);
         assert_eq!(tpm_de_ps("Get-Tpm : access denied"), None);
-        let dossier = std::env::temp_dir().join(format!("gardien-tpm-essai-{}", std::process::id()));
+        let dossier = std::env::temp_dir().join(format!("vanguard-tpm-essai-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dossier);
         assert_eq!(tpm_dans(&dossier), None);
         std::fs::create_dir_all(&dossier).unwrap();

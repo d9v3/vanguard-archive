@@ -1,6 +1,6 @@
 //! Bluetooth : un ordinateur visible en permanence (tout appareil à portée le voit et peut demander à s'appairer), et
 //! les appareils appairés depuis peu. Un appareil appairé (clavier, casque) peut parler à l'ordinateur sans rien
-//! demander : un clavier Bluetooth appairé par quelqu'un d'autre tape ce qu'il veut. Gardien note ici la date où il voit
+//! demander : un clavier Bluetooth appairé par quelqu'un d'autre tape ce qu'il veut. Vanguard note ici la date où il voit
 //! chaque appareil pour la première fois (bluetooth.json, jamais sur la clé) et signale ceux de la dernière semaine ;
 //! ceux qui étaient là au premier passage sont connus d'avant. Sans adaptateur Bluetooth, rien n'est dit.
 

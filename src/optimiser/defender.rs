@@ -1,11 +1,11 @@
 //! Protections de Microsoft Defender qui bloquent elles-mêmes les attaques : règles de réduction de la surface
 //! d'attaque (ASR), protection réseau, applications potentiellement indésirables, accès contrôlé aux dossiers.
-//! Gardien ne bloque rien lui-même : il active, après accord, ce que Windows applique depuis son noyau et protège
+//! Vanguard ne bloque rien lui-même : il active, après accord, ce que Windows applique depuis son noyau et protège
 //! contre la désactivation. Chaque préférence s'annule exactement, comme tout réglage (valeur d'avant notée).
 //!
-//! Écartées, parce qu'elles bloqueraient Gardien ou l'administration de la machine : processus non signés lancés
-//! depuis une clé USB (Gardien sur la clé), exécutables sans réputation suffisante et protection avancée contre les
-//! rançongiciels (un programme neuf et non signé comme Gardien), PsExec et WMI, outils système copiés (heuristique),
+//! Écartées, parce qu'elles bloqueraient Vanguard ou l'administration de la machine : processus non signés lancés
+//! depuis une clé USB (Vanguard sur la clé), exécutables sans réputation suffisante et protection avancée contre les
+//! rançongiciels (un programme neuf et non signé comme Vanguard), PsExec et WMI, outils système copiés (heuristique),
 //! scripts brouillés, redémarrage en mode sans échec (dépannage), et celle des serveurs Exchange.
 //!
 //! Lues par Get-MpPreference, la seule source qui dit ce que Defender applique : son registre n'est pas lisible par
@@ -16,7 +16,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::ui::*;
 
-/// Une préférence de Defender réglée par Gardien.
+/// Une préférence de Defender réglée par Vanguard.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Pref {
     DossiersControles,
@@ -234,7 +234,7 @@ mod tests {
         assert_eq!(e.valeur(Pref::DossiersControles).as_deref(), Some("mp:0"));
         assert_eq!(e.valeur(Pref::ProtectionReseau).as_deref(), Some("mp:1"));
         assert_eq!(e.valeur(Pref::Pua).as_deref(), Some("mp:2"));
-        // Identifiant en majuscules chez Windows, en minuscules chez Gardien.
+        // Identifiant en majuscules chez Windows, en minuscules chez Vanguard.
         assert_eq!(e.valeur(Pref::Asr(ASR_BASE[1])).as_deref(), Some("mp:1"));
         assert_eq!(e.valeur(Pref::Asr(ASR_BASE[0])), None);
         assert_eq!(e.dossiers_ajoutes(), ["D:\\Photos"]);
@@ -272,7 +272,7 @@ mod tests {
     }
 
     #[test]
-    fn regles_connues_et_sans_celles_qui_bloqueraient_gardien() {
+    fn regles_connues_et_sans_celles_qui_bloqueraient_vanguard() {
         for id in ASR_BASE.iter().chain(&ASR_BUREAUTIQUE) {
             assert_ne!(nom_asr(id), "?", "{id}");
             assert_eq!(*id, id.to_lowercase());

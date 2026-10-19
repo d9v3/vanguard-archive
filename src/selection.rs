@@ -623,7 +623,7 @@ pub fn choisir(lignes: &[Ligne], invite: &str, depart: &str, echap: &str) -> Opt
                 tape
             });
         } else if ctrl && matches!(k.code, KeyCode::Char('c' | 'd')) {
-            // Ctrl-C arrête Gardien ; Ctrl-D (fin de l'entrée) le quitte, comme avant.
+            // Ctrl-C arrête Vanguard ; Ctrl-D (fin de l'entrée) le quitte, comme avant.
             let _ = terminal::disable_raw_mode();
             println!();
             std::process::exit(if k.code == KeyCode::Char('c') { 130 } else { 0 });

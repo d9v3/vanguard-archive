@@ -1,20 +1,20 @@
 #!/bin/bash
-# Essai complet de Gardien sur ce PC Linux, sans rien modifier de durable : données dans un dossier jetable
+# Essai complet de Vanguard sur ce PC Linux, sans rien modifier de durable : données dans un dossier jetable
 # (XDG_DATA_HOME), clé USB cachée (USER fictif), aucune correction ni installation acceptée. Le réseau scanné est
 # celui de la maison. Sorties, codes de retour et vérifications vont dans le dossier de résultats.
-#   outils/test-linux/essai.sh [programme gardien] [dossier de résultats]
+#   outils/test-linux/essai.sh [programme vanguard] [dossier de résultats]
 set -u
-GARDIEN=${1:-$HOME/.cargo/bin/gardien}
-RES=${2:-$(mktemp -d /tmp/gardien-essai-XXXX)}
+VANGUARD=${1:-$HOME/.cargo/bin/vanguard}
+RES=${2:-$(mktemp -d /tmp/vanguard-essai-XXXX)}
 mkdir -p "$RES"
 RES=$(cd "$RES" && pwd)
-BAC=$(mktemp -d /tmp/gardien-bac-XXXX)
-export GARDIEN_LANG=fr XDG_DATA_HOME="$BAC/donnees"
+BAC=$(mktemp -d /tmp/vanguard-bac-XXXX)
+export VANGUARD_LANG=fr XDG_DATA_HOME="$BAC/donnees"
 JOURNAL="$RES/journal.txt"
 
 # Le journal garde le détail (relu par le rapport HTML) ; l'écran montre une ligne par commande ou vérification.
 note() { echo "$*" >>"$JOURNAL"; printf '      \033[90m%s\033[0m\n' "$*"; }
-titre() { echo "=== $* ===" >>"$JOURNAL"; printf '\n  \033[1;31mTEST DE GARDIEN\033[0m  \033[90m%s\033[0m\n' "$*"; }
+titre() { echo "=== $* ===" >>"$JOURNAL"; printf '\n  \033[1;31mTEST DE VANGUARD\033[0m  \033[90m%s\033[0m\n' "$*"; }
 bilan() {
   local ok bug
   ok=$(grep -c '^OK' "$JOURNAL")
@@ -28,8 +28,8 @@ section() { echo "--- $*" >>"$JOURNAL"; printf '\n  \033[1;36m▸ %s\033[0m\n' "
 ecran_commande() { # ecran_commande <code> <secondes> <arguments…>
   local code=$1 duree=$2
   shift 2
-  local texte="gardien $*"
-  [ $# = 0 ] && texte="gardien (menu)"
+  local texte="vanguard $*"
+  [ $# = 0 ] && texte="vanguard (menu)"
   texte=$(echo "$texte" | sed -E 's#[^ ]*/([^/ ]+)#\1#g')
   [ ${#texte} -gt 58 ] && texte="${texte:0:57}…"
   if [ "$code" = 0 ]; then
@@ -44,9 +44,9 @@ lancer() {
   local nom=$1 secondes=$2 entree=$3
   shift 3
   local debut=$SECONDS
-  printf '%b' "$entree" | USER=essai timeout "$secondes" "$GARDIEN" "$@" >"$RES/$nom.txt" 2>&1
+  printf '%b' "$entree" | USER=essai timeout "$secondes" "$VANGUARD" "$@" >"$RES/$nom.txt" 2>&1
   local code=$?
-  echo "gardien $* -> code $code, $((SECONDS - debut)) s$([ $code = 124 ] && echo ' (DÉLAI DÉPASSÉ)') · $nom.txt" >>"$JOURNAL"
+  echo "vanguard $* -> code $code, $((SECONDS - debut)) s$([ $code = 124 ] && echo ' (DÉLAI DÉPASSÉ)') · $nom.txt" >>"$JOURNAL"
   ecran_commande "$code" "$((SECONDS - debut))" "$@"
 }
 
@@ -62,7 +62,7 @@ verifier() {
   fi
 }
 
-titre "Essai complet de Gardien ($("$GARDIEN" --version)) sur $(. /etc/os-release && echo "$PRETTY_NAME")"
+titre "Essai complet de Vanguard ($("$VANGUARD" --version)) sur $(. /etc/os-release && echo "$PRETTY_NAME")"
 lancer version 10 '' --version
 lancer aide 10 '' --help
 
@@ -78,7 +78,7 @@ print('\n'.join(bad)); sys.exit(1 if bad else 0)"
 section "Diagnostic"
 lancer diagnostic 120 '' diagnostic
 verifier "diagnostic : section MATÉRIEL" grep -q 'MATÉRIEL' "$RES/diagnostic.txt"
-verifier "diagnostic : copie texte enregistrée" bash -c "ls '$XDG_DATA_HOME'/gardien/diagnostic-*.txt"
+verifier "diagnostic : copie texte enregistrée" bash -c "ls '$XDG_DATA_HOME'/vanguard/diagnostic-*.txt"
 
 section "Intégrité (référence, vérification)"
 lancer integrite-reference 120 '' integrite
@@ -108,11 +108,11 @@ lancer menu 60 '4\n\n5\n\n6\n\n7\n\nq\n'
 for g in 'Cette machine' 'Réseau et Internet' 'Antivirus et protection' 'Installer et jouer'; do
   verifier "menu : groupe « $g »" grep -q "$g" "$RES/menu.txt"
 done
-USER=essai timeout 10 "$GARDIEN" </dev/null >"$RES/menu-eof.txt" 2>&1
+USER=essai timeout 10 "$VANGUARD" </dev/null >"$RES/menu-eof.txt" 2>&1
 verifier "menu : quitte quand l'entrée est fermée" test $? -ne 124
 
 section "Mots de passe fuités (pseudo-terminal : saisie sans écho)"
-USER=essai python3 -I "$(dirname "$0")/../test-commun/mot-de-passe-pty.py" "$GARDIEN" >"$RES/motdepasse.txt" 2>&1
+USER=essai python3 -I "$(dirname "$0")/../test-commun/mot-de-passe-pty.py" "$VANGUARD" >"$RES/motdepasse.txt" 2>&1
 verifier "mot de passe : « password » trouvé dans des fuites" grep -qE 'Trouvé [0-9 ]+ fois' "$RES/motdepasse.txt"
 verifier "mot de passe : jamais affiché" bash -c "! grep -q 'Mot de passe : password' '$RES/motdepasse.txt'"
 
@@ -135,15 +135,15 @@ verifier "sauvegarde écrite" test -s "$RES/sauvegarde.json"
 
 section "Surveillance : minuterie systemd activée puis retirée"
 lancer surveillance-on 60 '' surveillance on
-verifier "minuterie activée" systemctl --user is-enabled gardien-surveillance.timer
+verifier "minuterie activée" systemctl --user is-enabled vanguard-surveillance.timer
 lancer surveillance-off 60 '' surveillance off
-verifier "minuterie retirée" bash -c '! systemctl --user is-enabled gardien-surveillance.timer'
+verifier "minuterie retirée" bash -c '! systemctl --user is-enabled vanguard-surveillance.timer'
 
 section "Bac à sable (bubblewrap)"
 cat >"$RES/bac.sh" <<'EOF'
 #!/bin/sh
 ls /home >/dev/null 2>&1 && [ -n "$(ls -A /home 2>/dev/null)" ] && echo "LECTURE_MAISON_POSSIBLE" || echo "dossier personnel invisible"
-echo x >/etc/gardien-intrus 2>/dev/null && echo "ECRITURE_SYSTEME_POSSIBLE" || echo "système en lecture seule"
+echo x >/etc/vanguard-intrus 2>/dev/null && echo "ECRITURE_SYSTEME_POSSIBLE" || echo "système en lecture seule"
 (exec 3<>/dev/tcp/1.1.1.1/443) 2>/dev/null && echo "RESEAU_POSSIBLE" || echo "réseau coupé"
 echo "fin du programme isolé"
 EOF
@@ -162,21 +162,21 @@ lancer antivirus 600 'n\nn\nn\n' antivirus "$BAC/av"
 verifier "antivirus : EICAR détecté" grep -qi 'eicar' "$RES/antivirus.txt"
 verifier "antivirus : fichier laissé en place (quarantaine refusée)" test -f "$BAC/av/eicar.com"
 
-section "Fichiers-pièges, listes noires, YARA, ce que Gardien a appris (dossier personnel jetable)"
+section "Fichiers-pièges, listes noires, YARA, ce que Vanguard a appris (dossier personnel jetable)"
 # Les pièges vont dans Documents et Images : jamais ceux de la maison.
 MAISON="$BAC/maison"
 mkdir -p "$MAISON/Documents" "$MAISON/Images" "$BAC/yara/moteur" "$BAC/yara/dossier"
 lancer_maison() { HOME="$MAISON" XDG_CONFIG_HOME="$MAISON/.config" XDG_DATA_HOME="$MAISON/.local/share" lancer "$@"; }
 lancer_maison pieges-pose 60 'o\n' pieges
-verifier "pièges : 4 posés (Documents, Images)" test "$(find "$MAISON" -name '!Gardien*' | wc -l)" = 4
-LEURRE=$(find "$MAISON/Documents" -name '!Gardien*.txt' | head -1)
+verifier "pièges : 4 posés (Documents, Images)" test "$(find "$MAISON" -name '!Vanguard*' | wc -l)" = 4
+LEURRE=$(find "$MAISON/Documents" -name '!Vanguard*.txt' | head -1)
 echo "modifié par l'essai" >>"$LEURRE"
 lancer_maison pieges-alerte 300 '' machine --json
 verifier "pièges : leurre modifié → alerte critique « Rançongiciels »" python3 -c "
 import json,sys; a=json.load(open('$RES/pieges-alerte.txt'))
 sys.exit(not any(c['categorie']=='Rançongiciels' and c['probleme']=='Critique' for c in a['constats']))"
 lancer_maison pieges-retrait 60 '' pieges --retirer
-verifier "pièges : tous retirés" test "$(find "$MAISON" -name '!Gardien*' | wc -l)" = 0
+verifier "pièges : tous retirés" test "$(find "$MAISON" -name '!Vanguard*' | wc -l)" = 0
 
 lancer_maison listes-noires 60 'n\n' listes-noires
 verifier "listes noires : refus respecté, rien envoyé" bash -c "grep -q \"Rien n'a été envoyé\" '$RES/listes-noires.txt' && ! grep -q 'Adresse publique' '$RES/listes-noires.txt'"
@@ -201,15 +201,15 @@ verifier "appris : aucun choix enregistré" grep -q "Rien pour l'instant" "$RES/
 
 section "Clé USB simulée (espace de noms) : lecture seule respectée, journal d'erreurs"
 mkdir -p "$BAC/cle/Linux" "$BAC/cle/donnees" "$BAC/log"
-cp "$GARDIEN" "$BAC/cle/Linux/gardien"
-touch "$BAC/cle/gardien.cle" "$BAC/log/gardien-journal.cle"
+cp "$VANGUARD" "$BAC/cle/Linux/vanguard"
+touch "$BAC/cle/vanguard.cle" "$BAC/log/vanguard-journal.cle"
 unshare -rm bash -c "
   mount -t tmpfs none /run/media/$(id -un) 2>/dev/null || exit 3
-  mkdir /run/media/$(id -un)/GARDIEN /run/media/$(id -un)/GARDIENLOG
-  mount --bind '$BAC/cle' /run/media/$(id -un)/GARDIEN && mount -o remount,bind,ro /run/media/$(id -un)/GARDIEN
-  mount --bind '$BAC/log' /run/media/$(id -un)/GARDIENLOG
-  cd / && /run/media/$(id -un)/GARDIEN/Linux/gardien reseau 999.1.1.1
-  printf 'q\n' | /run/media/$(id -un)/GARDIEN/Linux/gardien
+  mkdir /run/media/$(id -un)/VANGUARD /run/media/$(id -un)/VANGUARDLOG
+  mount --bind '$BAC/cle' /run/media/$(id -un)/VANGUARD && mount -o remount,bind,ro /run/media/$(id -un)/VANGUARD
+  mount --bind '$BAC/log' /run/media/$(id -un)/VANGUARDLOG
+  cd / && /run/media/$(id -un)/VANGUARD/Linux/vanguard reseau 999.1.1.1
+  printf 'q\n' | /run/media/$(id -un)/VANGUARD/Linux/vanguard
 " >"$RES/cle.txt" 2>&1
 verifier "clé protégée : rien écrit dessus" bash -c "[ -z \"\$(ls -A '$BAC/cle/donnees')\" ]"
 verifier "clé protégée : menu « protégée en écriture »" grep -q 'protégée en écriture' "$RES/cle.txt"
@@ -221,6 +221,6 @@ bilan
 # Rapport HTML au même style que celui du test Windows, ouvert dans le navigateur s'il y a un écran.
 RAPPORT=$(python3 -I "$(dirname "$0")/../test-commun/rapport.py" "$RES")
 echo "Rapport : $RAPPORT"
-if [ -n "${WAYLAND_DISPLAY:-}${DISPLAY:-}" ] && [ -z "${GARDIEN_ESSAI_SANS_NAVIGATEUR:-}" ]; then
+if [ -n "${WAYLAND_DISPLAY:-}${DISPLAY:-}" ] && [ -z "${VANGUARD_ESSAI_SANS_NAVIGATEUR:-}" ]; then
   xdg-open "$RAPPORT" >/dev/null 2>&1 &
 fi

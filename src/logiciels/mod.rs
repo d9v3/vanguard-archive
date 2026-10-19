@@ -430,7 +430,7 @@ fn compte<'a>(offres: impl Iterator<Item = &'a Offre>) -> String {
     }
 }
 
-/// « gardien logiciels » : le pack de départ, puis une liste à cocher par catégorie.
+/// « vanguard logiciels » : le pack de départ, puis une liste à cocher par catégorie.
 pub fn menu() {
     let Some(mut etat) = lire_en_parlant() else {
         return;
@@ -503,7 +503,7 @@ pub fn menu() {
     }
 }
 
-/// « gardien logiciels --liste » : chaque logiciel proposé sur ce système, par catégorie, avec son état et sa
+/// « vanguard logiciels --liste » : chaque logiciel proposé sur ce système, par catégorie, avec son état et sa
 /// source. Rien n'est installé.
 pub fn liste() {
     let Some(etat) = lire_en_parlant() else {
@@ -539,7 +539,7 @@ pub fn liste() {
     );
 }
 
-/// « gardien logiciels --recommandes » : le pack de départ, directement.
+/// « vanguard logiciels --recommandes » : le pack de départ, directement.
 pub fn recommandes() {
     if let Some(etat) = lire_en_parlant() {
         pack(&etat);

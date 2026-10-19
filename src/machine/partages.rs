@@ -203,7 +203,7 @@ fn fermeture_samba(nom: &str, fichier: &str) -> Vec<String> {
         pour_sed(nom)
     );
     vec![
-        format!("test -e {f}.avant-gardien || sudo cp -p {f} {f}.avant-gardien"),
+        format!("test -e {f}.avant-vanguard || sudo cp -p {f} {f}.avant-vanguard"),
         format!("sudo sed -i {} {f}", sh_chaine(&expression)),
         "sudo smbcontrol all reload-config 2>/dev/null || sudo systemctl reload smb smbd 2>/dev/null || true"
             .to_string(),
@@ -296,10 +296,10 @@ fn nfs(exports: &str, fichier: &str, nuance: Nuance) -> Vec<Partage> {
                 ecriture: Some(ecriture),
                 nuance,
                 fermeture: vec![
-                    format!("test -e {f}.avant-gardien || sudo cp -p {f} {f}.avant-gardien"),
+                    format!("test -e {f}.avant-vanguard || sudo cp -p {f} {f}.avant-vanguard"),
                     format!(
                         "sudo sed -i {} {f}",
-                        sh_chaine(&format!("s/^{}$/# Gardien : &/", pour_sed(ligne)))
+                        sh_chaine(&format!("s/^{}$/# Vanguard : &/", pour_sed(ligne)))
                     ),
                     "sudo exportfs -ra".to_string(),
                 ],
@@ -601,7 +601,7 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[test]
     fn fermeture_samba_ne_change_que_la_section() {
-        let dossier = std::env::temp_dir().join(format!("gardien-smb-{}", std::process::id()));
+        let dossier = std::env::temp_dir().join(format!("vanguard-smb-{}", std::process::id()));
         std::fs::create_dir_all(&dossier).unwrap();
         let fichier = dossier.join("smb.conf");
         let config = "[global]\n   workgroup = X\n[a.b]\n   path = /a\n   guest ok = yes\n   public = Yes\n[b]\n   path = /b\n   Guest OK = yes\n";
@@ -622,7 +622,7 @@ mod tests {
             "[global]\n   workgroup = X\n[a.b]\n   path = /a\n   guest ok = no\n   public = no\n[b]\n   path = /b\n   Guest OK = yes\n"
         );
         assert_eq!(
-            std::fs::read_to_string(dossier.join("smb.conf.avant-gardien")).unwrap(),
+            std::fs::read_to_string(dossier.join("smb.conf.avant-vanguard")).unwrap(),
             config
         );
         // Relancée, la copie d'avant n'est pas écrasée.
@@ -633,7 +633,7 @@ mod tests {
             .unwrap();
         assert!(statut.success());
         assert_eq!(
-            std::fs::read_to_string(dossier.join("smb.conf.avant-gardien")).unwrap(),
+            std::fs::read_to_string(dossier.join("smb.conf.avant-vanguard")).unwrap(),
             config
         );
         let _ = std::fs::remove_dir_all(&dossier);
@@ -655,7 +655,7 @@ mod tests {
         );
         assert_eq!(
             p[0].fermeture[1],
-            "sudo sed -i 's/^\\/srv\\/films \\*(ro,sync)$/# Gardien : &/' '/etc/exports'"
+            "sudo sed -i 's/^\\/srv\\/films \\*(ro,sync)$/# Vanguard : &/' '/etc/exports'"
         );
         assert_eq!(p[0].fermeture[2], "sudo exportfs -ra");
     }

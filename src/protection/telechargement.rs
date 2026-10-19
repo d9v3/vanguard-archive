@@ -1,7 +1,7 @@
 //! Vérifier un fichier téléchargé : son empreinte, calculée par l'outil du système, comparée à celle que publie le
 //! site (collée, ou lue dans un fichier SHA256SUMS ou .sha256 posé à côté) ; son nom et sa nature (double extension,
 //! programme déguisé en document) ; puis l'analyse YARA et l'antivirus. Un moteur absent ou en échec est dit, jamais
-//! compté comme sain. Gardien ne déplace ni ne supprime rien (Defender, lui, met en quarantaine ce qu'il reconnaît).
+//! compté comme sain. Vanguard ne déplace ni ne supprime rien (Defender, lui, met en quarantaine ce qu'il reconnaît).
 
 use std::path::{Path, PathBuf};
 
@@ -57,7 +57,7 @@ const DOCUMENTS: &[&str] = &[
 ];
 
 /// Une empreinte collée : la première suite de chiffres hexadécimaux d'une longueur connue, en ignorant un préfixe
-/// (« sha256: ») ou un nom de fichier (« 3a5f…  gardien.iso »), ou une empreinte coupée en groupes.
+/// (« sha256: ») ou un nom de fichier (« 3a5f…  vanguard.iso »), ou une empreinte coupée en groupes.
 fn lire_empreinte(saisie: &str) -> Option<(Algo, String)> {
     let trouvee = saisie
         .split(|c: char| c.is_whitespace() || matches!(c, ':' | '=' | '*' | '(' | ')' | ',' | ';'))
@@ -309,7 +309,7 @@ fn ligne(niveau: Option<Niveau>, texte: &str) {
 }
 
 /// Menu Antivirus et protection › Vérifier un fichier téléchargé (tout est demandé), ou
-/// `gardien verifier-fichier <fichier> [empreinte]`.
+/// `vanguard verifier-fichier <fichier> [empreinte]`.
 pub fn verifier(fichier: Option<&Path>, empreinte: Option<&str>) {
     titre(tr!("Vérifier un fichier téléchargé", "Check a downloaded file"));
     let interactif = fichier.is_none();
@@ -661,8 +661,8 @@ fn signalement(nom: &str, debut: &[u8]) -> Option<(String, String)> {
         .or_else(|| PROGRAMMES.contains(&extension.as_str()).then_some(Niveau::Info))?;
     let nom = affichable(nom);
     let verifier = tr!(
-        "vérifie-le avant de l'ouvrir : menu Antivirus et protection › Vérifier un fichier téléchargé, ou « gardien verifier-fichier ».",
-        "check it before opening it: menu Antivirus and protection › Check a downloaded file, or “gardien check-file”."
+        "vérifie-le avant de l'ouvrir : menu Antivirus et protection › Vérifier un fichier téléchargé, ou « vanguard verifier-fichier ».",
+        "check it before opening it: menu Antivirus and protection › Check a downloaded file, or “vanguard check-file”."
     );
     Some(if pire >= Niveau::Eleve {
         let raisons: Vec<&str> = signes
@@ -672,8 +672,8 @@ fn signalement(nom: &str, debut: &[u8]) -> Option<(String, String)> {
             .collect();
         (
             tr!(
-                "Gardien : fichier déguisé téléchargé",
-                "Gardien: disguised file downloaded"
+                "Vanguard : fichier déguisé téléchargé",
+                "Vanguard: disguised file downloaded"
             )
             .to_string(),
             trf!(
@@ -684,7 +684,7 @@ fn signalement(nom: &str, debut: &[u8]) -> Option<(String, String)> {
         )
     } else {
         (
-            tr!("Gardien : programme téléchargé", "Gardien: program downloaded").to_string(),
+            tr!("Vanguard : programme téléchargé", "Vanguard: program downloaded").to_string(),
             trf!(
                 "« {nom} » est un programme : {verifier}",
                 "“{nom}” is a program: {verifier}"
@@ -705,8 +705,8 @@ fn a_signaler(fichiers: &[(String, u64, Vec<u8>)], depuis: u64) -> Vec<(String, 
     if trouves.len() > 3 {
         notes.push((
             tr!(
-                "Gardien : autres programmes téléchargés",
-                "Gardien: other programs downloaded"
+                "Vanguard : autres programmes téléchargés",
+                "Vanguard: other programs downloaded"
             )
             .to_string(),
             trf!(
@@ -786,11 +786,11 @@ mod tests {
             Some((Algo::Sha256, SHA.into()))
         );
         assert_eq!(
-            lire_empreinte(&format!("{SHA}  gardien.iso")),
+            lire_empreinte(&format!("{SHA}  vanguard.iso")),
             Some((Algo::Sha256, SHA.into()))
         );
         assert_eq!(
-            lire_empreinte(&format!("SHA256 (gardien.iso) = {SHA}")),
+            lire_empreinte(&format!("SHA256 (vanguard.iso) = {SHA}")),
             Some((Algo::Sha256, SHA.into()))
         );
         // Coupée en groupes, comme certaines pages l'affichent.
@@ -811,22 +811,22 @@ mod tests {
     #[test]
     fn listes_d_empreintes() {
         let autre = "0".repeat(64);
-        let liste = format!("{autre}  gardien.iso.sig\n{SHA} *gardien.iso\n");
+        let liste = format!("{autre}  vanguard.iso.sig\n{SHA} *vanguard.iso\n");
         assert_eq!(
-            chercher_dans_liste(&liste, "gardien.iso", false),
+            chercher_dans_liste(&liste, "vanguard.iso", false),
             Some((Algo::Sha256, SHA.into()))
         );
         assert_eq!(
-            chercher_dans_liste(&format!("{SHA}  ./dist/gardien.iso\n"), "gardien.iso", false).map(|e| e.1),
+            chercher_dans_liste(&format!("{SHA}  ./dist/vanguard.iso\n"), "vanguard.iso", false).map(|e| e.1),
             Some(SHA.into())
         );
         assert_eq!(
-            chercher_dans_liste(&format!("SHA256 (gardien.iso) = {SHA}\n"), "gardien.iso", false).map(|e| e.1),
+            chercher_dans_liste(&format!("SHA256 (vanguard.iso) = {SHA}\n"), "vanguard.iso", false).map(|e| e.1),
             Some(SHA.into())
         );
         // Fichier .sha256 d'un seul fichier : l'empreinte seule.
         assert_eq!(
-            chercher_dans_liste(&format!("{SHA}\n"), "gardien.iso", true).map(|e| e.1),
+            chercher_dans_liste(&format!("{SHA}\n"), "vanguard.iso", true).map(|e| e.1),
             Some(SHA.into())
         );
         // Un nom avec des espaces.
@@ -836,7 +836,7 @@ mod tests {
         );
         // L'empreinte d'un autre fichier ne compte pas.
         assert_eq!(
-            chercher_dans_liste(&format!("{SHA}  autre.iso\n"), "gardien.iso", false),
+            chercher_dans_liste(&format!("{SHA}  autre.iso\n"), "vanguard.iso", false),
             None
         );
     }

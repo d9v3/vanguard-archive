@@ -193,7 +193,7 @@ fn volumes_amovibles() -> Vec<(PathBuf, String)> {
 /// Pièges classiques des vers de clé USB, à la racine : raccourci qui imite un dossier (le vrai est caché),
 /// lanceur automatique, scripts. `entrees` = (nom, est un dossier).
 fn signes_de_ver(entrees: &[(String, bool)]) -> Vec<(Niveau, String)> {
-    // La clé de Gardien a son autorun.inf et son lanceur : rien de suspect.
+    // La clé de Vanguard a son autorun.inf et son lanceur : rien de suspect.
     if entrees
         .iter()
         .any(|(n, _)| n.eq_ignore_ascii_case(crate::reseau::TEMOIN_CLE))
@@ -564,7 +564,7 @@ fn clamav(portee: &Portee) {
         let nanos = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |d| d.subsec_nanos());
-        let chemin = std::env::temp_dir().join(format!("gardien-clamav-{}-{nanos}.txt", std::process::id()));
+        let chemin = std::env::temp_dir().join(format!("vanguard-clamav-{}-{nanos}.txt", std::process::id()));
         let texte = fichiers
             .iter()
             .map(|f| f.display().to_string())
@@ -596,19 +596,19 @@ fn clamav(portee: &Portee) {
         "node_modules",
         // Dossiers privés des services systemd (root seul) : illisibles, ils feraient compter des erreurs.
         "systemd-private-[^/]*",
-        // Quarantaine de Gardien.
-        ".local/share/gardien/quarantaine",
+        // Quarantaine de Vanguard.
+        ".local/share/vanguard/quarantaine",
         ".snapshots",
         ".Trash",
-        // macOS : caches et conteneurs d'apps (énormes), quarantaine de Gardien.
+        // macOS : caches et conteneurs d'apps (énormes), quarantaine de Vanguard.
         "Library/Caches",
         "Library/Containers",
-        "Library/Application Support/gardien/quarantaine",
+        "Library/Application Support/vanguard/quarantaine",
     ];
     let exclusions: &[&str] = if matches!(portee, Portee::Dossier(_)) {
         &[
-            ".local/share/gardien/quarantaine",
-            "Library/Application Support/gardien/quarantaine",
+            ".local/share/vanguard/quarantaine",
+            "Library/Application Support/vanguard/quarantaine",
         ]
     } else {
         &tout
@@ -914,8 +914,8 @@ fn demarrage() {
     afficher_aligne(
         "  ",
         tr!(
-            "Pour qu'un programme ne se lance plus à l'ouverture de session, sans le désinstaller et de façon annulable : gardien demarrage (ou Cette machine › Pourquoi c'est lent ?).",
-            "To stop a program from starting at login, without uninstalling it and in an undoable way: gardien startup (or This machine › Why is it slow?)."
+            "Pour qu'un programme ne se lance plus à l'ouverture de session, sans le désinstaller et de façon annulable : vanguard demarrage (ou Cette machine › Pourquoi c'est lent ?).",
+            "To stop a program from starting at login, without uninstalling it and in an undoable way: vanguard startup (or This machine › Why is it slow?)."
         ),
         2,
         GRIS,
@@ -966,9 +966,9 @@ mod tests_cle {
             ])),
             vec![]
         );
-        // Clé Gardien : son autorun et son lanceur sont attendus.
+        // Clé Vanguard : son autorun et son lanceur sont attendus.
         assert_eq!(
-            signes_de_ver(&e(&[("gardien.cle", false), ("autorun.inf", false)])),
+            signes_de_ver(&e(&[("vanguard.cle", false), ("autorun.inf", false)])),
             vec![]
         );
     }
@@ -1021,7 +1021,7 @@ mod tests {
 
     #[test]
     fn dossiers_analyses_une_seule_fois() {
-        let base = std::env::temp_dir().join(format!("gardien-cibles-{}", std::process::id()));
+        let base = std::env::temp_dir().join(format!("vanguard-cibles-{}", std::process::id()));
         let bureau = base.join("Bureau");
         std::fs::create_dir_all(bureau.join("sous")).unwrap();
         std::os::unix::fs::symlink(&bureau, base.join("Desktop")).unwrap();

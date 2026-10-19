@@ -11,7 +11,7 @@ use crate::risk::Niveau;
 use crate::ui::*;
 
 #[cfg(target_os = "linux")]
-const NOM: &str = "gardien-surveillance";
+const NOM: &str = "vanguard-surveillance";
 
 #[cfg(unix)]
 pub(crate) fn reussit(cmd: &str, args: &[&str]) -> bool {
@@ -28,7 +28,7 @@ pub(crate) fn executable() -> String {
     #[cfg(windows)]
     let exe = std::env::current_exe().ok();
     let Some(exe) = exe else {
-        return "gardien".into();
+        return "vanguard".into();
     };
     if reseau::cle_usb().is_some_and(|cle| exe.starts_with(&cle)) {
         let dest = reseau::dossier_local()
@@ -55,7 +55,7 @@ pub(crate) fn executable() -> String {
 pub(crate) fn notifier(titre: &str, corps: &str) {
     #[cfg(target_os = "linux")]
     let _ = Command::new("notify-send")
-        .args(["-a", "Gardien", "-i", "gardien", "-u", "critical", titre, corps])
+        .args(["-a", "Vanguard", "-i", "vanguard", "-u", "critical", titre, corps])
         .status();
     // macOS : notification du Centre de notifications, par AppleScript (texte entre guillemets échappés).
     #[cfg(target_os = "macos")]
@@ -156,16 +156,16 @@ fn nouveautes_machine(avant: &EtatMachine, apres: &EtatMachine) -> Vec<(String, 
     for a in nouvelles.iter().take(3) {
         let (cat, msg) = a.split_once(" : ").unwrap_or(("", a.as_str()));
         notes.push((
-            trf!("Gardien : {}", "Gardien: {}", crate::langue::categorie(cat)),
+            trf!("Vanguard : {}", "Vanguard: {}", crate::langue::categorie(cat)),
             msg.to_string(),
         ));
     }
     if nouvelles.len() > 3 {
         notes.push((
-            tr!("Gardien : autres problèmes", "Gardien: other problems").to_string(),
+            tr!("Vanguard : autres problèmes", "Vanguard: other problems").to_string(),
             trf!(
-                "{} autre(s) problème(s) nouveau(x) : lance « gardien machine ».",
-                "{} other new problem(s): run “gardien machine”.",
+                "{} autre(s) problème(s) nouveau(x) : lance « vanguard machine ».",
+                "{} other new problem(s): run “vanguard machine”.",
                 nouvelles.len() - 3
             ),
         ));
@@ -174,10 +174,10 @@ fn nouveautes_machine(avant: &EtatMachine, apres: &EtatMachine) -> Vec<(String, 
         && b + 10 <= a
     {
         notes.push((
-            tr!("Gardien : note en baisse", "Gardien: grade dropping").to_string(),
+            tr!("Vanguard : note en baisse", "Vanguard: grade dropping").to_string(),
             trf!(
-                "La note de cette machine passe de {a} à {b} : lance « gardien machine » pour voir pourquoi.",
-                "This machine's grade drops from {a} to {b}: run “gardien machine” to see why."
+                "La note de cette machine passe de {a} à {b} : lance « vanguard machine » pour voir pourquoi.",
+                "This machine's grade drops from {a} to {b}: run “vanguard machine” to see why."
             ),
         ));
     }
@@ -235,7 +235,7 @@ fn mac_changee(avant: &Passerelle, apres: &Passerelle) -> Option<(String, String
 fn veiller_passerelle(r: &reseau::Rapport) {
     if let Some((boite, mac, autre)) = reseau::usurpation_arp(r) {
         notifier(
-            tr!("Gardien : box usurpée ?", "Gardien: router impersonated?"),
+            tr!("Vanguard : box usurpée ?", "Vanguard: router impersonated?"),
             &reseau::message_usurpation(boite, &mac, autre),
         );
         return;
@@ -247,8 +247,8 @@ fn veiller_passerelle(r: &reseau::Rapport) {
     if let Some((ancienne, nouvelle)) = avant.as_ref().and_then(|a| mac_changee(a, &apres)) {
         notifier(
             tr!(
-                "Gardien : la box a changé d'adresse MAC",
-                "Gardien: the router's MAC address changed"
+                "Vanguard : la box a changé d'adresse MAC",
+                "Vanguard: the router's MAC address changed"
             ),
             &trf!(
                 "La box {} répondait avec {ancienne}, elle répond maintenant avec {nouvelle}. Normal si tu viens de changer de box ; sinon, quelqu'un se fait peut-être passer pour elle (usurpation ARP).",
@@ -268,8 +268,8 @@ pub async fn surveiller() {
     if let Some(fichiers) = crate::protection::integrite::changements_a_signaler() {
         notifier(
             tr!(
-                "Gardien : fichiers critiques modifiés",
-                "Gardien: critical files changed"
+                "Vanguard : fichiers critiques modifiés",
+                "Vanguard: critical files changed"
             ),
             &fichiers,
         );
@@ -344,7 +344,7 @@ fn installee() -> bool {
 }
 
 /// Au bilan : la surveillance voulue a disparu (minuterie ou tâche retirée, ou désactivée). Constat et proposition,
-/// rien de plus : Gardien ne s'accroche pas.
+/// rien de plus : Vanguard ne s'accroche pas.
 pub fn constat() -> Option<crate::machine::Constat> {
     let voulue = fichier_voulue().is_file();
     juger_disparition(voulue, voulue && installee())
@@ -362,8 +362,8 @@ fn juger_disparition(voulue: bool, installee: bool) -> Option<crate::machine::Co
         )
         .manuel(
             tr!(
-                "La remettre : menu « Réseau et Internet » › Surveillance, ou « gardien surveillance on » ; si c'est toi qui l'as coupée, « gardien surveillance off » pour que Gardien l'oublie",
-                "Turn it back on: menu “Network and Internet” › Monitoring, or “gardien surveillance on”; if you turned it off yourself, “gardien surveillance off” so Gardien forgets it"
+                "La remettre : menu « Réseau et Internet » › Surveillance, ou « vanguard surveillance on » ; si c'est toi qui l'as coupée, « vanguard surveillance off » pour que Vanguard l'oublie",
+                "Turn it back on: menu “Network and Internet” › Monitoring, or “vanguard surveillance on”; if you turned it off yourself, “vanguard surveillance off” so Vanguard forgets it"
             ),
             &[],
         )
@@ -396,12 +396,12 @@ fn installer(exe: &str) -> bool {
     // systemd).
     let exe = format!("\"{}\"", exe.replace('%', "%%").replace('"', "\\\""));
     let service = trf!(
-        "[Unit]\nDescription=Gardien : surveillance du réseau local\n\n[Service]\nType=oneshot\nExecStart={exe} surveiller\nNice=10\n",
-        "[Unit]\nDescription=Gardien: local network monitoring\n\n[Service]\nType=oneshot\nExecStart={exe} surveiller\nNice=10\n"
+        "[Unit]\nDescription=Vanguard : surveillance du réseau local\n\n[Service]\nType=oneshot\nExecStart={exe} surveiller\nNice=10\n",
+        "[Unit]\nDescription=Vanguard: local network monitoring\n\n[Service]\nType=oneshot\nExecStart={exe} surveiller\nNice=10\n"
     );
     let timer = tr!(
-        "[Unit]\nDescription=Gardien : scan du réseau toutes les heures\n\n[Timer]\nOnBootSec=5min\nOnUnitActiveSec=1h\nPersistent=true\n\n[Install]\nWantedBy=timers.target\n",
-        "[Unit]\nDescription=Gardien: network scan every hour\n\n[Timer]\nOnBootSec=5min\nOnUnitActiveSec=1h\nPersistent=true\n\n[Install]\nWantedBy=timers.target\n"
+        "[Unit]\nDescription=Vanguard : scan du réseau toutes les heures\n\n[Timer]\nOnBootSec=5min\nOnUnitActiveSec=1h\nPersistent=true\n\n[Install]\nWantedBy=timers.target\n",
+        "[Unit]\nDescription=Vanguard: network scan every hour\n\n[Timer]\nOnBootSec=5min\nOnUnitActiveSec=1h\nPersistent=true\n\n[Install]\nWantedBy=timers.target\n"
     );
     let _ = std::fs::write(dossier.join(format!("{NOM}.service")), service);
     let _ = std::fs::write(dossier.join(format!("{NOM}.timer")), timer);
@@ -425,7 +425,7 @@ fn retirer_minuterie(nom: &str) -> bool {
 
 /// Agent launchd de la surveillance sous macOS (~/Library/LaunchAgents/<nom>.plist).
 #[cfg(target_os = "macos")]
-const AGENT_MACOS: &str = "com.gardien.surveillance";
+const AGENT_MACOS: &str = "com.vanguard.surveillance";
 
 #[cfg(target_os = "macos")]
 fn plist_agent_nomme(nom: &str) -> std::path::PathBuf {
@@ -496,7 +496,7 @@ fn desinstaller() -> bool {
 
 /// Nom lisible de la tâche dans le Planificateur de tâches Windows.
 #[cfg(windows)]
-const TACHE_WINDOWS: &str = "gardien - surveillance du reseau";
+const TACHE_WINDOWS: &str = "vanguard - surveillance du reseau";
 
 /// La tâche existe et n'est pas désactivée : une tâche désactivée ne surveille plus rien.
 #[cfg(windows)]
@@ -527,11 +527,11 @@ fn installer(exe: &str) -> bool {
         "$a = New-ScheduledTaskAction -Execute '{exe}' -Argument 'surveiller'; \
          $t = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -RepetitionInterval (New-TimeSpan -Hours 1); \
          Register-ScheduledTask -TaskName '{TACHE_WINDOWS}' -Action $a -Trigger $t -Force \
-           -Description 'Scan du réseau local toutes les heures par Gardien, notification si un appareil inconnu apparaît. Pour arrêter : gardien surveillance off' | Out-Null",
+           -Description 'Scan du réseau local toutes les heures par Vanguard, notification si un appareil inconnu apparaît. Pour arrêter : vanguard surveillance off' | Out-Null",
         "$a = New-ScheduledTaskAction -Execute '{exe}' -Argument 'surveiller'; \
          $t = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -RepetitionInterval (New-TimeSpan -Hours 1); \
          Register-ScheduledTask -TaskName '{TACHE_WINDOWS}' -Action $a -Trigger $t -Force \
-           -Description 'Hourly local network scan by Gardien, with a notification when an unknown device appears. To stop it: gardien surveillance off' | Out-Null"
+           -Description 'Hourly local network scan by Vanguard, with a notification when an unknown device appears. To stop it: vanguard surveillance off' | Out-Null"
     );
     ps(&script).is_some()
 }
@@ -551,10 +551,10 @@ mod tests {
     #[test]
     fn agent_launchd() {
         let p = plist_surveillance(
-            "/Users/a b/Library/Application Support/gardien/bin/gardien",
-            "com.gardien.surveillance",
+            "/Users/a b/Library/Application Support/vanguard/bin/vanguard",
+            "com.vanguard.surveillance",
         );
-        assert!(p.contains("<string>/Users/a b/Library/Application Support/gardien/bin/gardien</string>"));
+        assert!(p.contains("<string>/Users/a b/Library/Application Support/vanguard/bin/vanguard</string>"));
         assert!(p.contains("<key>StartInterval</key>\n\t<integer>3600</integer>"));
         assert!(p.contains("<string>surveiller</string>"));
     }

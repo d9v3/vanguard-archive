@@ -1,7 +1,7 @@
 //! « Pourquoi c'est lent ? » : un instantané en deux mesures, à deux secondes d'écart. Ce qui occupe le processeur,
 //! la mémoire et le disque, programme par programme ; le démarrage (sa durée, ce qui le retarde) ; les programmes
 //! lancés à l'ouverture de session et leur poids. La mesure est en lecture seule : les conseils disent quel outil de
-//! Gardien règle quoi (Nettoyer, Optimiser, Mises à jour, programmes au démarrage à retirer ou remettre, après accord
+//! Vanguard règle quoi (Nettoyer, Optimiser, Mises à jour, programmes au démarrage à retirer ou remettre, après accord
 //! et de façon annulable), et l'écran les ouvre.
 
 use std::collections::HashMap;
@@ -563,7 +563,7 @@ fn mesurer() -> Vec<Conseil> {
     c
 }
 
-/// « gardien lenteur » : l'instantané et ses conseils.
+/// « vanguard lenteur » : l'instantané et ses conseils.
 pub fn commande() {
     mesurer();
 }
@@ -1150,7 +1150,7 @@ mod tests {
             "[Install]\nWantedBy = graphical-session.target other.target\n"
         ));
         assert!(!lance_a_l_ouverture(
-            "[Service]\nType=oneshot\n[Install]\nWantedBy=run-media-alice-GARDIEN.mount\n"
+            "[Service]\nType=oneshot\n[Install]\nWantedBy=run-media-alice-VANGUARD.mount\n"
         ));
         assert!(!lance_a_l_ouverture("[Install]\nWantedBy=timers.target\n"));
         // Ailleurs que dans [Install], la même ligne ne compte pas.
@@ -1241,8 +1241,8 @@ mod tests {
             "firefox"
         );
         assert_eq!(
-            nom_de_processus(Some("/usr/bin/python3.13"), "gardien-outil"),
-            "gardien-outil"
+            nom_de_processus(Some("/usr/bin/python3.13"), "vanguard-outil"),
+            "vanguard-outil"
         );
         assert_eq!(nom_de_processus(None, "kworker/u32:2"), "kworker");
     }

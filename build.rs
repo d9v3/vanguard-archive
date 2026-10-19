@@ -1,5 +1,5 @@
 //! Préparé à la compilation : la base des fabricants (assets/oui.tsv) rangée en tableaux triés, les règles YARA
-//! allégées, et, pour Windows, la fiche d'identité de gardien.exe (onglet « Détails » des propriétés du fichier), son
+//! allégées, et, pour Windows, la fiche d'identité de vanguard.exe (onglet « Détails » des propriétés du fichier), son
 //! icône et son manifeste.
 
 use std::collections::HashMap;
@@ -32,7 +32,7 @@ fn date_compilation() {
         .and_then(|s| s.trim().parse::<i64>().ok())
         .or_else(|| git(&["log", "-1", "--format=%ct"]).and_then(|s| s.parse().ok()));
     let date = secondes.map(date_civile).unwrap_or_default();
-    println!("cargo:rustc-env=GARDIEN_COMPILE={date}");
+    println!("cargo:rustc-env=VANGUARD_COMPILE={date}");
 }
 
 /// La sortie de git, `None` s'il manque ou échoue (archive du code sans dépôt).
@@ -116,7 +116,7 @@ fn fabricants() {
 }
 
 /// Les règles YARA (assets/yara, 2,7 Mo de texte), allégées pour le programme sans en changer le sens : sans les blocs
-/// « meta: » (auteur, description… que Gardien n'affiche pas), sans indentation, un import de module une seule fois,
+/// « meta: » (auteur, description… que Vanguard n'affiche pas), sans indentation, un import de module une seule fois,
 /// les octets des chaînes hexadécimales collés (« 4D5A ») et chaque suite de « ?? » écrite en saut (« [6] » vaut six
 /// « ?? », documentation de YARA). Le moteur du système les lit comme les règles d'origine ; l'en-tête (source et
 /// licence) reste.
@@ -339,21 +339,21 @@ fn alleger_yara(texte: &str) -> String {
 }
 
 fn ressources_windows() {
-    println!("cargo:rerun-if-changed=assets/gardien.ico");
+    println!("cargo:rerun-if-changed=assets/vanguard.ico");
     let mut res = winresource::WindowsResource::new();
     // Compilation croisée depuis Linux : outils de MinGW.
     if !cfg!(windows) {
         res.set_windres_path("x86_64-w64-mingw32-windres");
         res.set_ar_path("x86_64-w64-mingw32-ar");
     }
-    res.set("ProductName", "Gardien")
-        .set("FileDescription", "Gardien - sécurise et optimise ta machine et ton réseau (bilan, antivirus, réglages)")
-        .set("CompanyName", "Projet personnel Gardien")
+    res.set("ProductName", "Vanguard")
+        .set("FileDescription", "Vanguard - sécurise et optimise ta machine et ton réseau (bilan, antivirus, réglages)")
+        .set("CompanyName", "Projet personnel Vanguard")
         .set("LegalCopyright", "© 2026 d9v3, licence GPL-3.0-or-later")
-        .set("OriginalFilename", "gardien.exe")
+        .set("OriginalFilename", "vanguard.exe")
         // Icône de l'Explorateur et de la barre des tâches (16 à 256 px, voir assets/).
-        .set_icon("assets/gardien.ico")
-        // asInvoker : Gardien démarre sans droits admin ; seules les corrections les demandent, une à une.
+        .set_icon("assets/vanguard.ico")
+        // asInvoker : Vanguard démarre sans droits admin ; seules les corrections les demandent, une à une.
         .set_manifest(
             r#"<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
   <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">

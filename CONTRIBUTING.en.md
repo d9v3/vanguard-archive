@@ -1,4 +1,4 @@
-# Developing Gardien
+# Developing Vanguard
 
 [Français](CONTRIBUTING.md) · **English**
 
@@ -24,7 +24,7 @@ turn on once with `/install-github-app`).
 | `src/machine/dns.rs`, `certificats.rs`, `extensions.rs`, `partages.rs`, `sante.rs`, `wifi.rs`, `bluetooth.rs` | checks shared by the three systems (partages.rs: file shares open to everyone; bluetooth.rs: visible computer, recently paired devices) |
 | `src/machine/unix.rs` | checks shared by Linux and macOS: secret files, sudo |
 | `src/machine/heure.rs`, `fin_de_support.rs`, `comptes_oublies.rs`, `mots_de_passe.rs`, `sensibles.rs` | clock set automatically; system, abandoned programs and browsers without updates; unused accounts; unprotected browser passwords; sensitive files lying around |
-| `src/changements.rs` | what Gardien changed: each fix run by `machine::appliquer_chacune`, noted on the computer |
+| `src/changements.rs` | what Vanguard changed: each fix run by `machine::appliquer_chacune`, noted on the computer |
 | `src/sauvegarde.rs`, `src/raccourci.rs`, `src/a_laisser.rs` | guided automatic backup (Déjà Dup or rsync, Time Machine, File History); shortcut on this computer; report to leave to the person you helped |
 | `src/corriger.rs` | guided application of fixes |
 | `src/reseau/mod.rs`, `src/reseau/scan.rs` | network scan (TCP connect, without root), ARP, network notebooks |
@@ -41,12 +41,12 @@ turn on once with `/install-github-app`).
 | `src/protection/fuites.rs`, `src/donnees.rs` | leaked passwords, data backup |
 | `src/protection/cle.rs` | USB drive protection on Linux and macOS: partition remounted read-only away from the owner's computer |
 | `src/guide/` | command guide: one file per system (`linux.rs`: programs common to all distributions and specific to each, `windows.rs`, `macos.rs`, `tous.rs`), menus and search (`mod.rs`), commands run here (`lancement.rs`) |
-| `src/apprentissage.rs` | what Gardien learns here: alerts declared normal (appris.json), habits |
+| `src/apprentissage.rs` | what Vanguard learns here: alerts declared normal (appris.json), habits |
 | `src/reseau/listes_noires.rs` | the home's Internet address in blocklists (DNSBL), after consent |
 | `src/entretien.rs` | monthly check-up: grade, updates, space, new problems, in one notification |
 | `src/protection/sortantes.rs` | who talks to the Internet: established connections by program (ss, PowerShell, lsof), reverse DNS |
 | `src/protection/environnement.rs` | at startup: library injected into the session (LD_PRELOAD, DYLD, AppInit_DLLs), judged like preloading |
-| `src/protection/manifeste.rs` | check Gardien itself (version, commit date, SHA-256) and key manifest (BLAKE3 checksums kept on the owner's computer, one reference per key, compared in the check) |
+| `src/protection/manifeste.rs` | check Vanguard itself (version, commit date, SHA-256) and key manifest (BLAKE3 checksums kept on the owner's computer, one reference per key, compared in the check) |
 | `src/protection/distance.rs` | is someone controlling my PC? remote control tools (installed, at boot, running, downloaded), in the check and as a guided walkthrough |
 | `src/protection/lien.rs` | is this link dangerous? local check (punycode, imitated brands…), then RDAP, URLhaus, Spamhaus DBL, SURBL |
 | `src/protection/telechargement.rs` | check a downloaded file: checksum by the system's tool, name and content, YARA and antivirus; programs landing in Downloads, for monitoring |
@@ -58,11 +58,11 @@ turn on once with `/install-github-app`).
 | `src/lenteur.rs`, `src/fiche.rs` | why it is slow (two-sample snapshot, startup); computer specs |
 | `src/copier.rs` | copy my files to an external disk: checked copy (BLAKE3), resume, never overwrites; check a copy (restore test) |
 | `src/verifier_cle.rs` | check my drive: real capacity, speeds and bad blocks, written into the free space and read back without cache, then erased |
-| `src/ordinateurs.rs` | my computers: each computer's visit noted on GARDIENLOG (categories and levels only) |
+| `src/ordinateurs.rs` | my computers: each computer's visit noted on VANGUARDLOG (categories and levels only) |
 | `src/chiffrement.rs` | protected key data: encrypted record (XChaCha20-Poly1305), data key kept by the owner and wrapped by the passphrase (Argon2id) |
 | `assets/oui.tsv` | manufacturers by MAC prefix (IEEE list), stored as sorted tables at compile time (`build.rs`) |
 | `assets/yara/` | ReversingLabs YARA rules (MIT license), gathered by `outils/maj-yara.sh` |
-| `assets/logo-source.jpg`, `assets/icones/`, `assets/gardien.ico` | the logo: the source image and the icons `outils/icone.py` derives from it |
+| `assets/logo-source.jpg`, `assets/icones/`, `assets/vanguard.ico` | the logo: the source image and the icons `outils/icone.py` derives from it |
 | `LICENCES-TIERCES.txt` | license notices of the included libraries (`outils/licences-tierces.py`) |
 
 ## Build, test, deploy
@@ -73,7 +73,7 @@ Requirements: `rustup target add x86_64-unknown-linux-musl x86_64-pc-windows-gnu
 outils/deployer.sh     # builds Linux (musl, static) + Windows, installs locally, pushes to GitHub, updates the key
 ```
 
-Slow check? `GARDIEN_CHRONO=1 gardien machine --json >/dev/null` gives each check's time (they run at the same time:
+Slow check? `VANGUARD_CHRONO=1 vanguard machine --json >/dev/null` gives each check's time (they run at the same time:
 the slowest one makes the duration).
 
 Tests: `cargo test` (Linux, in a throwaway data folder: never the computer's real data); Windows tests under Wine
@@ -82,7 +82,7 @@ Tests: `cargo test` (Linux, in a throwaway data folder: never the computer's rea
 `cargo fmt --check`. Internal functions are tested in their module; `tests/programme.rs` runs the real program the
 way a person would (help in both languages, menus left, lists, refusals respected, audit and scan of 127.0.0.1 in
 JSON), with a throwaway home folder, without the user's key or session. Full runs: `outils/test-linux/essai.sh`, `outils/test-macos/essai.sh` (on a GitHub Mac) and, in
-the Windows virtual machine, `TESTER-GARDIEN.bat` (dropped there by `deployer.sh`).
+the Windows virtual machine, `TESTER-VANGUARD.bat` (dropped there by `deployer.sh`).
 
 macOS: built and tested on a GitHub Mac (`.github/workflows/macos.yml`, universal Apple Silicon + Intel binary),
 every night if the code changed or on demand (`gh workflow run macos.yml`). `deployer.sh` fetches the latest
@@ -106,7 +106,7 @@ down) is only shown. Links that cannot be opened as they are (an API endpoint, a
 social preview (`assets/partage.png`). `deployer.sh` runs it for each published version, since the menu shows its
 number, and commits the images separately.
 
-Gardien really runs there, in an 80-column pseudo-terminal, from a fake key and on a copy of the data: nothing real is
+Vanguard really runs there, in an 80-column pseudo-terminal, from a fake key and on a copy of the data: nothing real is
 touched. The network becomes “Salon”; MAC addresses (vendor prefix kept), IP addresses (a made-up network, lengths and
 order kept), device names and the account's folders are replaced, at random on each run; only an excerpt of the
 machine check with nothing personal in it is shown. Then the privacy guard rereads each image: if a detail of the
@@ -127,9 +127,9 @@ git config core.hooksPath outils/hooks                                     # pre
 git config user.email "<id>+<account>@users.noreply.github.com"           # commits without your email
 ```
 
-What is personal is read on the computer, never written in the repository: `~/.config/gardien-dev/confidentiel.txt`
+What is personal is read on the computer, never written in the repository: `~/.config/vanguard-dev/confidentiel.txt`
 (one phrase per line: name, emails, address…), the global Git identity, the home folder, the devices and MAC
-addresses of Gardien's database, the saved Wi-Fi networks. Other people's data (the key visits friends, and their
+addresses of Vanguard's database, the saved Wi-Fi networks. Other people's data (the key visits friends, and their
 error journal comes back here) is recognized by its shape: account of a home folder, email, Windows SID; a journal
 issue is masked before it is sent, MAC and IP addresses included. On GitHub, the CI runs it again on the commits of
 each push and each pull request (`--generique --plage`): only data recognized by its shape, without the identity of the
@@ -144,7 +144,7 @@ a program that still contains the home folder).
 ## Publishing a version
 
 `outils/publier-version.sh` creates the version's GitHub release with the three programs
-(`gardien-windows-x86_64.exe`, `gardien-linux-x86_64`, `gardien-macos`), their SHA-256 checksums and, as notes, the
+(`vanguard-windows-x86_64.exe`, `vanguard-linux-x86_64`, `vanguard-macos`), their SHA-256 checksums and, as notes, the
 commit of each version since the previous release (title and bullets), the newest first; the README's download
 links always point to the latest one. `--notes` shows these notes without publishing anything.
 
@@ -158,27 +158,27 @@ version, link, topics and options, written in `.github/depot.json`. Only the soc
 
 ## The USB key
 
-The key (exFAT, label `GARDIEN`, marker file `gardien.cle`) holds `Linux/`, `Windows/`, `macOS/`, `donnees/` (device
+The key (exFAT, label `VANGUARD`, marker file `vanguard.cle`) holds `Linux/`, `Windows/`, `macOS/`, `donnees/` (device
 database, portable), `source/` (this repository) and the guide in two languages (`README.txt`, `LISEZMOI.txt`, taken
 from `outils/`). The check history and the quarantine stay on each computer.
 
 On the development PC, it updates itself (systemd units in `outils/systemd/`, installed by
-`outils/systemd/installer.sh`): after each build (`gardien-copie.service`), and each time it is plugged in, with the
-latest version from GitHub, built if it is new (`gardien-cle.service`, `deployer.sh --branchement`).
+`outils/systemd/installer.sh`): after each build (`vanguard-copie.service`), and each time it is plugged in, with the
+latest version from GitHub, built if it is new (`vanguard-cle.service`, `deployer.sh --branchement`).
 
-The key has two partitions: `GARDIEN`, read-only everywhere except on its owner's computer (GPT attribute honored by
-Windows; on Linux and macOS, Gardien remounts it read-only itself), and `GARDIENLOG`, which only receives the error
+The key has two partitions: `VANGUARD`, read-only everywhere except on its owner's computer (GPT attribute honored by
+Windows; on Linux and macOS, Vanguard remounts it read-only itself), and `VANGUARDLOG`, which only receives the error
 log, anonymized. `outils/preparer-cle.sh` prepares a new key.
 
 In preparation, a rescue key that also boots computers: `outils/cle-secours.sh`. Ventoy boots Arch (which
 also installs Omarchy), Debian and Fedora as network installers, SystemRescue (and Windows 11 as a fallback), kept up
 to date by `outils/images-cle.sh` (each project's signature checked, weekly timer, copy on plug-in); a FAT32 `WIN11` partition installs Windows 11 with Secure Boot on,
 without adding a key to the PC (`install.wim` split by wimlib under the 4 GB limit); an HFS+ partition holds the macOS
-recovery of Intel Macs; `GARDIEN` and `GARDIENLOG` as before. `--plan` and `--essai` (on a disk image) touch no disk;
+recovery of Intel Macs; `VANGUARD` and `VANGUARDLOG` as before. `--plan` and `--essai` (on a disk image) touch no disk;
 only `--ecrire` erases the key.
 
 ## Errors and crashes
 
-Gardien records them with nothing personal (on the key, or in its folder when the key is not plugged in). On
+Vanguard records them with nothing personal (on the key, or in its folder when the key is not plugged in). On
 deployment, `deployer.sh` brings them back and `outils/journal-vers-github.py` turns them into GitHub issues (label
 “journal”) with `gh`: one issue per error, repeats as comments. No GitHub password in the program or on the key.

@@ -3,7 +3,7 @@
 //! l'ordre alphabétique : leur nom commence par « ! » pour passer parmi les premiers, et finit par un code tiré au
 //! hasard pour ne jamais être le même d'un ordinateur à l'autre. Chaque bilan, et la surveillance toutes les heures,
 //! compare leur empreinte à celle de leur pose : modifié, ou renommé avec une extension en plus (« .locked »), c'est
-//! l'alerte. Gardien n'arrête aucun programme lui-même : il prévient et dit quoi faire.
+//! l'alerte. Vanguard n'arrête aucun programme lui-même : il prévient et dit quoi faire.
 //!
 //! Posés et retirés seulement après accord ; la liste exacte est gardée dans pieges.json, le retrait n'enlève qu'elle.
 
@@ -62,7 +62,7 @@ fn etat(piege: &Piege) -> Etat {
     }
 }
 
-/// Le fichier-piège renommé avec une extension en plus : « !Gardien … 3f9a.txt.locked ».
+/// Le fichier-piège renommé avec une extension en plus : « !Vanguard … 3f9a.txt.locked ».
 fn renomme(chemin: &Path) -> Option<PathBuf> {
     let nom = chemin.file_name()?.to_str()?;
     std::fs::read_dir(chemin.parent()?)
@@ -199,8 +199,8 @@ fn code(graine: usize) -> String {
 
 fn nom(code: &str, extension: &str) -> String {
     trf!(
-        "!Gardien - fichier-piège {code}.{extension}",
-        "!Gardien - decoy file {code}.{extension}"
+        "!Vanguard - fichier-piège {code}.{extension}",
+        "!Vanguard - decoy file {code}.{extension}"
     )
 }
 
@@ -208,12 +208,12 @@ fn nom(code: &str, extension: &str) -> String {
 /// de lignes pour qu'il ne passe pas pour un fichier vide, que certains rançongiciels sautent.
 fn texte() -> String {
     let mut t = String::from(
-        "Fichier-piège de Gardien : ne le modifie pas, ne le déplace pas, ne le supprime pas.\n\
-         Il sert à repérer un rançongiciel : s'il change, Gardien t'alerte.\n\
-         Pour le retirer : Gardien, menu Antivirus et protection › Fichiers-pièges, ou « gardien pieges --retirer ».\n\n\
-         Gardien decoy file: do not modify, move or delete it.\n\
-         It is there to catch ransomware: if it changes, Gardien warns you.\n\
-         To remove it: Gardien, Antivirus and protection menu › Decoy files, or “gardien pieges --retirer”.\n\n",
+        "Fichier-piège de Vanguard : ne le modifie pas, ne le déplace pas, ne le supprime pas.\n\
+         Il sert à repérer un rançongiciel : s'il change, Vanguard t'alerte.\n\
+         Pour le retirer : Vanguard, menu Antivirus et protection › Fichiers-pièges, ou « vanguard pieges --retirer ».\n\n\
+         Vanguard decoy file: do not modify, move or delete it.\n\
+         It is there to catch ransomware: if it changes, Vanguard warns you.\n\
+         To remove it: Vanguard, Antivirus and protection menu › Decoy files, or “vanguard pieges --retirer”.\n\n",
     );
     for i in 1..=250 {
         let _ = writeln!(t, "{i:03}  rien d'important ici / nothing important here");
@@ -223,8 +223,8 @@ fn texte() -> String {
 
 /// Un PDF d'une page qui dit ce qu'il est, lisible par tout lecteur de PDF (les rançongiciels visent les PDF).
 fn pdf() -> Vec<u8> {
-    let page = "BT /F1 14 Tf 50 780 Td (Fichier-piege de Gardien : ne pas modifier, deplacer ni supprimer.) Tj \
-                0 -24 Td (Gardien decoy file: do not modify, move or delete it.) Tj ET";
+    let page = "BT /F1 14 Tf 50 780 Td (Fichier-piege de Vanguard : ne pas modifier, deplacer ni supprimer.) Tj \
+                0 -24 Td (Vanguard decoy file: do not modify, move or delete it.) Tj ET";
     let objets = [
         "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
         "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string(),
@@ -235,7 +235,7 @@ fn pdf() -> Vec<u8> {
         "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".to_string(),
     ];
     // Commentaire de remplissage (permis après l'en-tête) : un PDF de quelques centaines d'octets serait sauté.
-    let mut sortie = format!("%PDF-1.4\n%{}\n", "Gardien ".repeat(2000));
+    let mut sortie = format!("%PDF-1.4\n%{}\n", "Vanguard ".repeat(2000));
     let mut positions = Vec::new();
     for (i, objet) in objets.iter().enumerate() {
         positions.push(sortie.len());
@@ -256,7 +256,7 @@ fn pdf() -> Vec<u8> {
 
 /// Windows : les dossiers où l'accès contrôlé aux dossiers de Defender bloque déjà les programmes inconnus. Il
 /// protège d'office Documents et Images, même déplacés (OneDrive compris), et ceux qu'on lui a ajoutés ; pas le Bureau.
-/// Un piège y serait inutile, et Windows bloquerait Gardien en affichant une alerte.
+/// Un piège y serait inutile, et Windows bloquerait Vanguard en affichant une alerte.
 #[cfg(windows)]
 fn proteges_par_windows() -> Vec<PathBuf> {
     let Some(ajoutes) = crate::optimiser::dossiers_controles() else {
@@ -428,8 +428,8 @@ fn juger(etats: &[(&Piege, Etat)]) -> Constat {
                 touches.join(", ")
             ),
             Some(tr!(
-                "Débranche tout de suite Internet (câble, Wi-Fi) et tes disques de sauvegarde, puis éteins l'ordinateur pour arrêter le chiffrement. Ensuite, analyse-le avec l'antivirus de Gardien depuis la clé, avant de le rebrancher. Si c'est toi qui as ouvert et modifié ce fichier, repose les fichiers-pièges",
-                "Unplug the Internet (cable, Wi-Fi) and your backup drives right now, then shut the computer down to stop the encryption. Then scan it with Gardien's antivirus from the key before plugging it back in. If you opened and changed that file yourself, set the decoy files again"
+                "Débranche tout de suite Internet (câble, Wi-Fi) et tes disques de sauvegarde, puis éteins l'ordinateur pour arrêter le chiffrement. Ensuite, analyse-le avec l'antivirus de Vanguard depuis la clé, avant de le rebrancher. Si c'est toi qui as ouvert et modifié ce fichier, repose les fichiers-pièges",
+                "Unplug the Internet (cable, Wi-Fi) and your backup drives right now, then shut the computer down to stop the encryption. Then scan it with Vanguard's antivirus from the key before plugging it back in. If you opened and changed that file yourself, set the decoy files again"
             )),
         )
     } else if !supprimes.is_empty() {
@@ -559,8 +559,8 @@ fn poser() {
         return;
     }
     dire(tr!(
-        "Gardien peut poser un texte et un PDF leurres dans tes dossiers. Personne n'a de raison d'y toucher ; un rançongiciel, lui, les chiffre avec le reste : chaque bilan, et la surveillance toutes les heures, le voient et t'alertent. Leur nom commence par « !Gardien » ; ils s'enlèvent d'ici, en une fois.",
-        "Gardien can place a decoy text file and PDF in your folders. Nobody has a reason to touch them; ransomware encrypts them along with everything else: each check, and hourly monitoring, see it and warn you. Their name starts with “!Gardien”; they are removed from here, in one go."
+        "Vanguard peut poser un texte et un PDF leurres dans tes dossiers. Personne n'a de raison d'y toucher ; un rançongiciel, lui, les chiffre avec le reste : chaque bilan, et la surveillance toutes les heures, le voient et t'alertent. Leur nom commence par « !Vanguard » ; ils s'enlèvent d'ici, en une fois.",
+        "Vanguard can place a decoy text file and PDF in your folders. Nobody has a reason to touch them; ransomware encrypts them along with everything else: each check, and hourly monitoring, see it and warn you. Their name starts with “!Vanguard”; they are removed from here, in one go."
     ));
     println!();
     for d in &cibles {
@@ -650,7 +650,7 @@ fn retirer(pieges: &[Piege], force: bool) {
     }
 }
 
-/// « gardien pieges » : comme le menu ; « --retirer » : retire sans question.
+/// « vanguard pieges » : comme le menu ; « --retirer » : retire sans question.
 pub fn commande(retirer_seulement: bool) {
     if !retirer_seulement {
         menu();
@@ -672,7 +672,7 @@ mod tests {
     use super::*;
 
     fn dossier_jetable(nom: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("gardien-pieges-{nom}-{}", std::process::id()));
+        let d = std::env::temp_dir().join(format!("vanguard-pieges-{nom}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         d
@@ -685,7 +685,7 @@ mod tests {
         assert_eq!(pieges.len(), 2);
         for p in &pieges {
             let nom = p.chemin.file_name().unwrap().to_str().unwrap();
-            assert!(nom.starts_with("!Gardien - "), "{nom}");
+            assert!(nom.starts_with("!Vanguard - "), "{nom}");
             assert_eq!(etat(p), Etat::Intact);
         }
         // Un rançongiciel chiffre le texte, et renomme le PDF avec son extension.
@@ -789,7 +789,7 @@ mod tests {
     fn variables_developpees() {
         let path = std::env::var("PATH").unwrap_or_default();
         assert_eq!(developper("%PATH%\\x"), format!("{path}\\x"));
-        assert_eq!(developper("%GARDIEN_INCONNUE%\\y"), "%GARDIEN_INCONNUE%\\y");
+        assert_eq!(developper("%VANGUARD_INCONNUE%\\y"), "%VANGUARD_INCONNUE%\\y");
         assert_eq!(developper("50% de 10"), "50% de 10");
         assert_eq!(developper("sans"), "sans");
     }

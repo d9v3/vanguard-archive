@@ -205,12 +205,12 @@ fn lire() -> Result<Lecture, &'static str> {
     }
 }
 
-/// Menu Réseau et Internet › Wi-Fi encombré, ou `gardien canaux`.
+/// Menu Réseau et Internet › Wi-Fi encombré, ou `vanguard canaux`.
 pub fn analyser() {
     titre(tr!("Wi-Fi encombré ?", "Crowded Wi-Fi?"));
     let intro = tr!(
-        "Les réseaux des voisins qui émettent sur le même canal que ta box se partagent l'antenne avec elle : le Wi-Fi ralentit et coupe. Gardien regarde qui émet où, sans rien changer.",
-        "Neighbors' networks on the same channel as your router share the air with it: the Wi-Fi slows down and drops. Gardien looks at who transmits where, without changing anything."
+        "Les réseaux des voisins qui émettent sur le même canal que ta box se partagent l'antenne avec elle : le Wi-Fi ralentit et coupe. Vanguard regarde qui émet où, sans rien changer.",
+        "Neighbors' networks on the same channel as your router share the air with it: the Wi-Fi slows down and drops. Vanguard looks at who transmits where, without changing anything."
     );
     for ligne in envelopper(intro, LARGEUR - 2) {
         println!("  {ligne}");

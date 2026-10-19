@@ -1,7 +1,7 @@
 //! Parcours « Mon compte a été piraté » : courriel, réseau social, banque ou jeu. D'abord reprendre la main par la
 //! page officielle du service (jamais par un lien reçu), puis, dans l'ordre : mot de passe neuf, validation en deux
 //! étapes, sessions et applications déconnectées, ce que l'intrus laisse derrière lui (transfert du courriel,
-//! bénéficiaires, messages aux contacts). Gardien vérifie ensuite que cet ordinateur n'est pas la cause (voleur de mots
+//! bénéficiaires, messages aux contacts). Vanguard vérifie ensuite que cet ordinateur n'est pas la cause (voleur de mots
 //! de passe, extension, prise de contrôle) et propose les recherches de fuites. Rien n'est changé sans accord.
 
 use super::{a_savoir, bilan, conseil, ecran, proposer_outil, question};

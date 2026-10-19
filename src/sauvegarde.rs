@@ -2,9 +2,9 @@
 //! place avec l'outil du système, vers un disque externe, après accord, et annulable exactement. Linux : Déjà Dup s'il
 //! est là (ses réglages gsettings, valeurs d'avant notées), sinon une minuterie systemd de l'utilisateur qui lance rsync
 //! chaque jour vers le disque (et se tait quand il n'est pas branché) ; macOS : Time Machine (`tmutil`) ; Windows :
-//! l'Historique des fichiers, que Gardien vérifie au bilan et guide pas à pas (il se règle dans le Panneau de
-//! configuration, rien ne se fait à sa place). Ce que Gardien a posé est noté (sauvegarde.json) pour ne retirer que ça.
-//! Jamais vers la clé GARDIEN ni le disque du système : la liste des disques de Copier mes fichiers les exclut.
+//! l'Historique des fichiers, que Vanguard vérifie au bilan et guide pas à pas (il se règle dans le Panneau de
+//! configuration, rien ne se fait à sa place). Ce que Vanguard a posé est noté (sauvegarde.json) pour ne retirer que ça.
+//! Jamais vers la clé VANGUARD ni le disque du système : la liste des disques de Copier mes fichiers les exclut.
 
 use std::path::{Path, PathBuf};
 
@@ -18,18 +18,18 @@ use crate::ui::*;
 
 /// Le dossier posé sur le disque externe, un sous-dossier par ordinateur.
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
-const DOSSIER: &str = "Sauvegarde-Gardien";
-/// Les unités systemd posées par Gardien (le nom contient « sauvegarde » : le bilan les reconnaît comme une vraie
+const DOSSIER: &str = "Sauvegarde-Vanguard";
+/// Les unités systemd posées par Vanguard (le nom contient « sauvegarde » : le bilan les reconnaît comme une vraie
 /// sauvegarde).
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
-const TIMER: &str = "gardien-sauvegarde.timer";
+const TIMER: &str = "vanguard-sauvegarde.timer";
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
-const SERVICE: &str = "gardien-sauvegarde.service";
+const SERVICE: &str = "vanguard-sauvegarde.service";
 /// L'heure du passage quotidien ; l'ordinateur éteint à cette heure-là, le passage se fait au prochain démarrage.
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 const HEURE: &str = "12:00:00";
 
-/// Ce que Gardien a mis en place, pour l'annuler exactement.
+/// Ce que Vanguard a mis en place, pour l'annuler exactement.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub enum MiseEnPlace {
     /// Linux : minuterie et service de systemd --user, avec l'empreinte de chaque fichier posé (un fichier modifié
@@ -160,7 +160,7 @@ pub(crate) fn unites(
         chemin_systemd(p)?;
     }
     let timer = format!(
-        "[Unit]\nDescription=Sauvegarde Gardien, chaque jour\n\n[Timer]\nOnCalendar=*-*-* {HEURE}\nPersistent=true\nRandomizedDelaySec=10min\n\n[Install]\nWantedBy=timers.target\n"
+        "[Unit]\nDescription=Sauvegarde Vanguard, chaque jour\n\n[Timer]\nOnCalendar=*-*-* {HEURE}\nPersistent=true\nRandomizedDelaySec=10min\n\n[Install]\nWantedBy=timers.target\n"
     );
     // FAT et exFAT (presque toutes les clés USB) : ni liens symboliques, ni droits, ni propriétaires, et une heure à
     // 2 s près. « -a » y échouait sur chaque lien (rsync sort en erreur, chaque jour) et, sans tolérance sur l'heure,
@@ -175,12 +175,12 @@ pub(crate) fn unites(
     commande.extend([
         "--exclude=.cache".to_string(),
         "--exclude=node_modules".to_string(),
-        "--exclude=.gardien-copie-en-cours".to_string(),
+        "--exclude=.vanguard-copie-en-cours".to_string(),
     ]);
     commande.extend(sources.iter().map(|s| citer_systemd(&s.display().to_string())));
     commande.push(citer_systemd(&format!("{}/", destination.display())));
     let service = format!(
-        "[Unit]\nDescription=Sauvegarde Gardien vers {}\n# Disque débranché : rien ne se passe, sans erreur.\nConditionPathIsMountPoint={}\n\n[Service]\nType=oneshot\nNice=10\nIOSchedulingClass=idle\n# 24 : un fichier a disparu pendant la copie, normal pour un dossier en usage.\nSuccessExitStatus=24\nExecStart={}\n",
+        "[Unit]\nDescription=Sauvegarde Vanguard vers {}\n# Disque débranché : rien ne se passe, sans erreur.\nConditionPathIsMountPoint={}\n\n[Service]\nType=oneshot\nNice=10\nIOSchedulingClass=idle\n# 24 : un fichier a disparu pendant la copie, normal pour un dossier en usage.\nSuccessExitStatus=24\nExecStart={}\n",
         chemin_systemd(destination)?,
         chemin_systemd(racine)?,
         commande.join(" ")
@@ -224,7 +224,7 @@ fn dans_le_path(commande: &str) -> Option<PathBuf> {
         .find(|f| f.is_file())
 }
 
-/// Les clés de Déjà Dup que Gardien règle : (schéma, clé, valeur voulue) ; la destination se construit à part.
+/// Les clés de Déjà Dup que Vanguard règle : (schéma, clé, valeur voulue) ; la destination se construit à part.
 #[cfg(target_os = "linux")]
 fn cles_deja_dup(destination: &Path) -> Vec<(&'static str, &'static str, String)> {
     vec![
@@ -387,20 +387,20 @@ fn info(texte: &str) {
     );
 }
 
-/// Ce que Gardien a mis en place, en une phrase.
+/// Ce que Vanguard a mis en place, en une phrase.
 fn decrire(m: &MiseEnPlace) -> String {
     match m {
         MiseEnPlace::Systemd { date, destination, .. } => trf!(
-            "Mise en place par Gardien le {date} : rsync chaque jour vers {destination} (minuterie {TIMER}).",
-            "Set up by Gardien on {date}: rsync every day to {destination} (timer {TIMER})."
+            "Mise en place par Vanguard le {date} : rsync chaque jour vers {destination} (minuterie {TIMER}).",
+            "Set up by Vanguard on {date}: rsync every day to {destination} (timer {TIMER})."
         ),
         MiseEnPlace::DejaDup { date, destination, .. } => trf!(
-            "Mise en place par Gardien le {date} : Déjà Dup, chaque jour, vers {destination}.",
-            "Set up by Gardien on {date}: Déjà Dup, every day, to {destination}."
+            "Mise en place par Vanguard le {date} : Déjà Dup, chaque jour, vers {destination}.",
+            "Set up by Vanguard on {date}: Déjà Dup, every day, to {destination}."
         ),
         MiseEnPlace::TimeMachine { date, destination, .. } => trf!(
-            "Mise en place par Gardien le {date} : Time Machine vers {destination}.",
-            "Set up by Gardien on {date}: Time Machine to {destination}."
+            "Mise en place par Vanguard le {date} : Time Machine vers {destination}.",
+            "Set up by Vanguard on {date}: Time Machine to {destination}."
         ),
     }
 }
@@ -411,8 +411,8 @@ fn choisir_disque() -> Option<crate::copier::Disque> {
     let liste = crate::copier::disques();
     if liste.is_empty() {
         mauvais(tr!(
-            "Aucun disque externe branché (la clé GARDIEN et le disque du système ne comptent pas). Branche un disque assez grand pour tes fichiers, attends qu'il apparaisse, puis recommence.",
-            "No external disk plugged in (the GARDIEN key and the system disk do not count). Plug in a disk large enough for your files, wait for it to appear, then start again."
+            "Aucun disque externe branché (la clé VANGUARD et le disque du système ne comptent pas). Branche un disque assez grand pour tes fichiers, attends qu'il apparaisse, puis recommence.",
+            "No external disk plugged in (the VANGUARD key and the system disk do not count). Plug in a disk large enough for your files, wait for it to appear, then start again."
         ));
         return None;
     }
@@ -499,7 +499,7 @@ fn mettre_en_place() -> Option<MiseEnPlace> {
             }
         }
     };
-    section(tr!("CE QUE GARDIEN VA FAIRE", "WHAT GARDIEN WILL DO"));
+    section(tr!("CE QUE VANGUARD VA FAIRE", "WHAT VANGUARD WILL DO"));
     afficher_aligne(
         "  ",
         &trf!(
@@ -619,8 +619,8 @@ fn mettre_en_place() -> Option<MiseEnPlace> {
         empreinte_timer: empreinte(&timer),
         empreinte_service: empreinte(&service),
     };
-    // Noté tout de suite, avant toute autre question : une entrée fermée (Ctrl-D, terminal fermé) arrête Gardien à
-    // la question suivante, et la minuterie tournait alors chaque jour sans note, impossible à annuler par Gardien.
+    // Noté tout de suite, avant toute autre question : une entrée fermée (Ctrl-D, terminal fermé) arrête Vanguard à
+    // la question suivante, et la minuterie tournait alors chaque jour sans note, impossible à annuler par Vanguard.
     noter(&mise_en_place);
     if active {
         bon(&trf!(
@@ -664,7 +664,7 @@ fn mettre_en_place() -> Option<MiseEnPlace> {
         format!("sudo tmutil setdestination -a '{}'", chemin.replace('\'', "'\\''")),
         "sudo tmutil enable".to_string(),
     ];
-    section(tr!("CE QUE GARDIEN VA FAIRE", "WHAT GARDIEN WILL DO"));
+    section(tr!("CE QUE VANGUARD VA FAIRE", "WHAT VANGUARD WILL DO"));
     afficher_aligne(
         "  ",
         &trf!(
@@ -704,7 +704,7 @@ fn mettre_en_place() -> Option<MiseEnPlace> {
     })
 }
 
-/// Windows : l'Historique des fichiers se règle dans le Panneau de configuration ; Gardien guide et l'ouvre.
+/// Windows : l'Historique des fichiers se règle dans le Panneau de configuration ; Vanguard guide et l'ouvre.
 #[cfg(windows)]
 fn mettre_en_place() -> Option<MiseEnPlace> {
     section(tr!("PAS À PAS", "STEP BY STEP"));
@@ -722,8 +722,8 @@ fn mettre_en_place() -> Option<MiseEnPlace> {
             "Click “Turn on”. In “Advanced settings”, keep “Every hour” and “Keep saved versions: forever”."
         ),
         tr!(
-            "Le bilan de Gardien (catégorie Sauvegardes) dira ensuite la date de la dernière sauvegarde.",
-            "Gardien's check (Backups category) will then show the date of the last backup."
+            "Le bilan de Vanguard (catégorie Sauvegardes) dira ensuite la date de la dernière sauvegarde.",
+            "Vanguard's check (Backups category) will then show the date of the last backup."
         ),
     ]
     .iter()
@@ -746,7 +746,7 @@ fn mettre_en_place() -> Option<MiseEnPlace> {
     None
 }
 
-/// Retire exactement ce que Gardien a mis en place.
+/// Retire exactement ce que Vanguard a mis en place.
 fn annuler_mise_en_place(m: &MiseEnPlace) -> bool {
     match m {
         MiseEnPlace::Systemd {
@@ -828,14 +828,14 @@ fn annuler_mise_en_place(m: &MiseEnPlace) -> bool {
     }
 }
 
-/// « gardien sauvegarde-auto --annuler » : retire ce que Gardien a mis en place, après accord.
+/// « vanguard sauvegarde-auto --annuler » : retire ce que Vanguard a mis en place, après accord.
 pub fn annuler() {
     let chemin = fichier_notes();
     let notes = charger_de(&chemin);
     let Some(m) = &notes.mise_en_place else {
         info(tr!(
-            "Gardien n'a rien mis en place à annuler.",
-            "Gardien set nothing up to undo."
+            "Vanguard n'a rien mis en place à annuler.",
+            "Vanguard set nothing up to undo."
         ));
         return;
     };
@@ -875,8 +875,8 @@ pub fn menu() {
     afficher_aligne(
         "  ",
         tr!(
-            "Un disque qui lâche, un vol ou un rançongiciel emportent tout ce qui n'existe qu'ici. Gardien met en place la sauvegarde avec l'outil du système, vers un disque externe, et peut la retirer exactement.",
-            "A failing disk, a theft or ransomware take everything that exists only here. Gardien sets up the backup with the system's tool, to an external disk, and can remove it exactly."
+            "Un disque qui lâche, un vol ou un rançongiciel emportent tout ce qui n'existe qu'ici. Vanguard met en place la sauvegarde avec l'outil du système, vers un disque externe, et peut la retirer exactement.",
+            "A failing disk, a theft or ransomware take everything that exists only here. Vanguard sets up the backup with the system's tool, to an external disk, and can remove it exactly."
         ),
         2,
         GRIS,
@@ -887,8 +887,8 @@ pub fn menu() {
     match &notes.mise_en_place {
         Some(m) => info(&decrire(m)),
         None => info(tr!(
-            "Gardien n'a rien mis en place ici. Le bilan (catégorie Sauvegardes) dit si une sauvegarde existe déjà par ailleurs.",
-            "Gardien set nothing up here. The check (Backups category) says whether a backup already exists otherwise."
+            "Vanguard n'a rien mis en place ici. Le bilan (catégorie Sauvegardes) dit si une sauvegarde existe déjà par ailleurs.",
+            "Vanguard set nothing up here. The check (Backups category) says whether a backup already exists otherwise."
         )),
     }
     let mut lignes = vec![Ligne::Texte(String::new())];
@@ -904,7 +904,7 @@ pub fn menu() {
     } else {
         lignes.push(Ligne::choix(
             "2",
-            tr!("Annuler ce que Gardien a mis en place", "Undo what Gardien set up"),
+            tr!("Annuler ce que Vanguard a mis en place", "Undo what Vanguard set up"),
             tr!("les fichiers sauvegardés restent", "the backed-up files stay"),
         ));
     }
@@ -954,7 +954,7 @@ mod tests {
             unites(
                 Path::new("/usr/bin/rsync"),
                 Path::new("/run/media/alice/Cle"),
-                Path::new("/run/media/alice/Cle/Sauvegarde-Gardien/pc"),
+                Path::new("/run/media/alice/Cle/Sauvegarde-Vanguard/pc"),
                 &[PathBuf::from("/home/alice/Documents")],
                 fat,
             )
@@ -973,7 +973,7 @@ mod tests {
         let (timer, service) = unites(
             Path::new("/usr/bin/rsync"),
             Path::new("/run/media/alice/Externe"),
-            Path::new("/run/media/alice/Externe/Sauvegarde-Gardien/pc-alice"),
+            Path::new("/run/media/alice/Externe/Sauvegarde-Vanguard/pc-alice"),
             &[
                 PathBuf::from("/home/alice/Documents"),
                 PathBuf::from("/home/alice/Mes \"images\""),
@@ -986,7 +986,7 @@ mod tests {
             unites(
                 Path::new("/usr/bin/rsync"),
                 Path::new("/run/media/alice/X\nExecStartPre=/bin/touch /tmp/pirate"),
-                Path::new("/run/media/alice/X\nExecStartPre=/bin/touch /tmp/pirate/Sauvegarde-Gardien/pc"),
+                Path::new("/run/media/alice/X\nExecStartPre=/bin/touch /tmp/pirate/Sauvegarde-Vanguard/pc"),
                 &[PathBuf::from("/home/alice/Documents")],
                 false,
             )
@@ -995,13 +995,13 @@ mod tests {
         let (_, cent) = unites(
             Path::new("/usr/bin/rsync"),
             Path::new("/run/media/alice/100%"),
-            Path::new("/run/media/alice/100%/Sauvegarde-Gardien/pc"),
+            Path::new("/run/media/alice/100%/Sauvegarde-Vanguard/pc"),
             &[PathBuf::from("/home/alice/Documents")],
             false,
         )
         .unwrap();
         assert!(cent.contains("ConditionPathIsMountPoint=/run/media/alice/100%%\n"));
-        assert!(cent.contains("\"/run/media/alice/100%%/Sauvegarde-Gardien/pc/\""));
+        assert!(cent.contains("\"/run/media/alice/100%%/Sauvegarde-Vanguard/pc/\""));
         assert!(timer.contains("OnCalendar=*-*-* 12:00:00") && timer.contains("Persistent=true"));
         assert!(timer.contains("WantedBy=timers.target"));
         assert!(service.contains("ConditionPathIsMountPoint=/run/media/alice/Externe"));
@@ -1009,19 +1009,19 @@ mod tests {
         let exec = service.lines().find(|l| l.starts_with("ExecStart=")).unwrap();
         assert!(exec.starts_with("ExecStart=\"/usr/bin/rsync\" -a --no-specials"));
         assert!(exec.contains("\"/home/alice/Documents\" \"/home/alice/Mes \\\"images\\\"\" "));
-        assert!(exec.ends_with("\"/run/media/alice/Externe/Sauvegarde-Gardien/pc-alice/\""));
+        assert!(exec.ends_with("\"/run/media/alice/Externe/Sauvegarde-Vanguard/pc-alice/\""));
         assert!(!exec.contains("--delete"));
         assert_eq!(citer_systemd(r"a\b"), "\"a\\\\b\"");
     }
 
     #[test]
     fn notes_ecrites_et_relues() {
-        let f = std::env::temp_dir().join(format!("gardien-sauvegarde-{}.json", std::process::id()));
+        let f = std::env::temp_dir().join(format!("vanguard-sauvegarde-{}.json", std::process::id()));
         let _ = std::fs::remove_file(&f);
         assert_eq!(charger_de(&f), Notes::default());
         let m = MiseEnPlace::Systemd {
             date: "2026-10-18".into(),
-            destination: "/run/media/alice/Externe/Sauvegarde-Gardien/pc".into(),
+            destination: "/run/media/alice/Externe/Sauvegarde-Vanguard/pc".into(),
             empreinte_timer: empreinte("a"),
             empreinte_service: empreinte("b"),
         };

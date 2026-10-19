@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Avis de licence des bibliothèques compilées dans Gardien (Linux, Windows et macOS).
+"""Avis de licence des bibliothèques compilées dans Vanguard (Linux, Windows et macOS).
 
 Les licences MIT, Apache-2.0, BSD et ISC des dépendances demandent de joindre leur texte à l'exécutable distribué :
 ce script rassemble ces textes dans LICENCES-TIERCES.txt, copié sur la clé par deployer.sh.
@@ -30,7 +30,7 @@ DONNEES = [
 
 
 def paquets_embarques(cible):
-    """Paquets atteignables depuis Gardien par des dépendances normales, pour une cible donnée."""
+    """Paquets atteignables depuis Vanguard par des dépendances normales, pour une cible donnée."""
     meta = json.loads(
         subprocess.check_output(
             ["cargo", "metadata", "--format-version", "1", "--locked", "--filter-platform", cible]
@@ -71,8 +71,8 @@ def main():
             embarques[(p["name"], p["version"])] = p
 
     blocs = [
-        "Gardien inclut les bibliothèques libres suivantes. Voici leurs avis de droit d'auteur et de licence.\n"
-        "Gardien includes the following open source libraries. Their copyright and license notices follow.\n"
+        "Vanguard inclut les bibliothèques libres suivantes. Voici leurs avis de droit d'auteur et de licence.\n"
+        "Vanguard includes the following open source libraries. Their copyright and license notices follow.\n"
         f"\n{len(embarques)} bibliothèques / libraries, et à la fin {len(DONNEES)} jeu(x) de données / then "
         f"{len(DONNEES)} data set(s)."
     ]

@@ -404,7 +404,7 @@ fn nom_inexistant() -> String {
             d.as_secs().wrapping_mul(1_000_000_007) ^ u64::from(d.subsec_nanos())
         })
         ^ u64::from(std::process::id());
-    format!("gardien-{graine:016x}.com")
+    format!("vanguard-{graine:016x}.com")
 }
 
 /// Le DNS invente-t-il des réponses ? Il en donne une pour un site qui n'existe pas : fournisseur qui redirige les
@@ -520,6 +520,6 @@ mod tests {
         );
         // Un service connu réglé à la main : un choix, pas un problème.
         assert_eq!(constat_serveurs(&s(vec![(ip("1.1.1.1"), true)])).probleme, None);
-        assert!(nom_inexistant().starts_with("gardien-"));
+        assert!(nom_inexistant().starts_with("vanguard-"));
     }
 }

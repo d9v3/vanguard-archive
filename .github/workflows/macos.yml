@@ -1,4 +1,4 @@
-# Version macOS de Gardien : compilée et testée sur un vrai Mac de GitHub (Apple Silicon), puisqu'il n'y a pas
+# Version macOS de Vanguard : compilée et testée sur un vrai Mac de GitHub (Apple Silicon), puisqu'il n'y a pas
 # de Mac à la maison. Le programme produit est universel (Apple Silicon + Intel) ; outils/deployer.sh le
 # récupère pour la clé USB (dossier macOS/).
 #
@@ -83,19 +83,19 @@ jobs:
       - name: Compilation
         run: |
           cargo build --release --target aarch64-apple-darwin --target x86_64-apple-darwin
-          lipo -create -output gardien \
-            target/aarch64-apple-darwin/release/gardien target/x86_64-apple-darwin/release/gardien
-          lipo -info gardien
-          ./gardien --version
+          lipo -create -output vanguard \
+            target/aarch64-apple-darwin/release/vanguard target/x86_64-apple-darwin/release/vanguard
+          lipo -info vanguard
+          ./vanguard --version
           echo "${{ github.sha }}" > commit.txt
       - name: Essai du programme sur ce Mac
         run: |
-          ./gardien machine --json > audit.json || true
+          ./vanguard machine --json > audit.json || true
           head -c 3000 audit.json
-          ./gardien diagnostic | tail -20 || true
+          ./vanguard diagnostic | tail -20 || true
       - name: Essai complet
         if: github.event_name == 'workflow_dispatch' && inputs.essai_complet
-        run: bash outils/test-macos/essai.sh ./gardien essai
+        run: bash outils/test-macos/essai.sh ./vanguard essai
       - uses: actions/upload-artifact@v7
         if: github.event_name == 'workflow_dispatch' && inputs.essai_complet
         with:
@@ -104,9 +104,9 @@ jobs:
           retention-days: 30
       - uses: actions/upload-artifact@v7
         with:
-          name: gardien-macos
+          name: vanguard-macos
           path: |
-            gardien
+            vanguard
             commit.txt
             audit.json
           retention-days: 30

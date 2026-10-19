@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 
 ANSI = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
-COMMANDE = re.compile(r"^gardien (?P<args>.*) -> code (?P<code>\d+), (?P<duree>\d+) s(?P<delai> \(DÉLAI DÉPASSÉ\))? · (?P<fichier>\S+)$")
+COMMANDE = re.compile(r"^vanguard (?P<args>.*) -> code (?P<code>\d+), (?P<duree>\d+) s(?P<delai> \(DÉLAI DÉPASSÉ\))? · (?P<fichier>\S+)$")
 
 STYLE = """
 :root{--fond:#0b0808;--carte:#160f10;--trait:#2e2224;--texte:#eee3db;--gris:#a8968c;--rouge:#ff5a4f;--vert:#5fd38d;--jaune:#f2c14e}
@@ -74,8 +74,8 @@ def main() -> None:
     h = html.escape
     morceaux = [
         f'<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
-        f"<title>Test de Gardien</title><style>{STYLE}</style></head><body><main>",
-        f'<h1>Test de <b>Gardien</b></h1><div class="sous">{h(titre)}</div>',
+        f"<title>Test de Vanguard</title><style>{STYLE}</style></head><body><main>",
+        f'<h1>Test de <b>Vanguard</b></h1><div class="sous">{h(titre)}</div>',
         f'<div class="verdict {"vert" if reussi else "rouge"}">{h(verdict)}</div>',
         f'<div class="bilan"><div class="case"><b class="ok">{nb_ok}</b><span>vérifications réussies</span></div>'
         f'<div class="case"><b class="{"bug" if nb_bug else "info"}">{nb_bug}</b><span>problèmes</span></div>'
@@ -100,7 +100,7 @@ def main() -> None:
             else:
                 etat = f'<span class="bug">✗ code {c["code"]}</span>'
             morceaux.append(
-                f'<details><summary><code title="{h("gardien " + c["args"])}">gardien {h(court(c["args"]))}</code>'
+                f'<details><summary><code title="{h("vanguard " + c["args"])}">vanguard {h(court(c["args"]))}</code>'
                 f'<span class="d">{etat} {c["duree"]} s</span></summary><pre>{h(sortie)}</pre></details>'
             )
         morceaux.append("</section>")

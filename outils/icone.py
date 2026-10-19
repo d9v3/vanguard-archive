@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Icône de Gardien : un rapace sur un bouclier d'acier, des circuits rouges, des orbites cyan, sur une plaque noire
+"""Icône de Vanguard : un rapace sur un bouclier d'acier, des circuits rouges, des orbites cyan, sur une plaque noire
 arrondie.
 
 Le dessin vient d'une image générée par l'auteur (assets/logo-source.jpg, l'emblème découpé au carré, couleurs
@@ -11,7 +11,7 @@ d'origine). Ce script en tire toutes les tailles :
 
 Lancer depuis n'importe où (les images vont toujours dans le dépôt) :
     uv run --no-project --with numpy --with pillow python outils/icone.py
-Produit assets/icones/gardien-<taille>.png (Linux, 16 à 512 px) et assets/gardien.ico (Windows, 16 à 256 px).
+Produit assets/icones/vanguard-<taille>.png (Linux, 16 à 512 px) et assets/vanguard.ico (Windows, 16 à 256 px).
 """
 
 from pathlib import Path
@@ -90,11 +90,11 @@ def main():
     dossier = ASSETS / "icones"
     dossier.mkdir(exist_ok=True)
     for t in TAILLES_LINUX:
-        icone(image, t).save(dossier / f"gardien-{t}.png", optimize=True)
+        icone(image, t).save(dossier / f"vanguard-{t}.png", optimize=True)
     windows = [icone(image, t) for t in TAILLES_WINDOWS]
     # Le fichier part de la plus grande ; les autres y sont mises telles quelles au lieu d'être recalculées.
-    windows[-1].save(ASSETS / "gardien.ico", sizes=[im.size for im in windows], append_images=windows[:-1])
-    print(f"{dossier}/ et {ASSETS / 'gardien.ico'} écrits.")
+    windows[-1].save(ASSETS / "vanguard.ico", sizes=[im.size for im in windows], append_images=windows[:-1])
+    print(f"{dossier}/ et {ASSETS / 'vanguard.ico'} écrits.")
 
 
 if __name__ == "__main__":

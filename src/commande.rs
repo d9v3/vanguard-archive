@@ -1,5 +1,5 @@
 //! Lancement des commandes système avec un délai maximal : un outil qui ne répond plus (systemctl, gsettings,
-//! PowerShell, gestionnaire de paquets hors ligne…) ne doit jamais figer Gardien.
+//! PowerShell, gestionnaire de paquets hors ligne…) ne doit jamais figer Vanguard.
 
 use std::io::Read;
 use std::process::{Child, Command, Stdio};
@@ -64,7 +64,7 @@ pub fn lancer(commande: &mut Command, secondes: u64) -> Option<Resultat> {
     })
 }
 
-/// Comme `lancer`, l'outil répondant en anglais, avec les nombres et les dates du « C » : pour une sortie que Gardien
+/// Comme `lancer`, l'outil répondant en anglais, avec les nombres et les dates du « C » : pour une sortie que Vanguard
 /// analyse et que l'outil traduit (nmcli écrit « oui » pour « yes », lscpu « Nom de modèle » pour « Model name »).
 /// En UTF-8, un nom de réseau accentué reste intact ; sans C.UTF-8, le système se replie sur le « C ». LANGUAGE est
 /// retirée : selon la bibliothèque C, elle l'emporterait sur C.UTF-8. Une sortie montrée telle quelle à la personne
@@ -303,7 +303,7 @@ mod tests {
 
     #[test]
     fn le_delai_arrete_aussi_ce_que_le_programme_a_lance() {
-        let fichier = std::env::temp_dir().join(format!("gardien-test-arbre-{}", std::process::id()));
+        let fichier = std::env::temp_dir().join(format!("vanguard-test-arbre-{}", std::process::id()));
         let script = format!("sleep 30 & echo $! > '{}'; wait", fichier.display());
         assert!(lancer(Command::new("sh").args(["-c", &script]), 1).is_none());
         let pid = std::fs::read_to_string(&fichier).unwrap().trim().to_string();

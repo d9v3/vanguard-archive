@@ -1,9 +1,9 @@
 //! Caméra et micro : qui s'en sert ? En lecture seule. Sous Windows, le système note pour chaque programme la
-//! dernière fois qu'il a utilisé la caméra ou le micro (et s'il s'en sert en ce moment) : Gardien le lit et le date,
+//! dernière fois qu'il a utilisé la caméra ou le micro (et s'il s'en sert en ce moment) : Vanguard le lit et le date,
 //! en signalant un programme lancé depuis un dossier temporaire ou Téléchargements. Sous Linux, aucun historique
-//! n'existe : Gardien dit ce qui tient la caméra (/dev/video*) et ce qui enregistre le micro (flux de PipeWire ou
+//! n'existe : Vanguard dit ce qui tient la caméra (/dev/video*) et ce qui enregistre le micro (flux de PipeWire ou
 //! PulseAudio) en ce moment, pour les programmes de ce compte. Sous macOS, la liste est protégée par le système :
-//! Gardien dit où la voir.
+//! Vanguard dit où la voir.
 
 // macOS n'a ni historique ni liste lisible : seule l'explication sert.
 #![cfg_attr(target_os = "macos", allow(dead_code))]
@@ -69,7 +69,7 @@ fn afficher(titre_appareil: &str, usages: &[Usage]) {
     }
 }
 
-/// `gardien camera-micro` et le menu Antivirus et protection.
+/// `vanguard camera-micro` et le menu Antivirus et protection.
 pub fn afficher_tout() {
     titre(tr!(
         "Caméra et micro : qui s'en sert ?",

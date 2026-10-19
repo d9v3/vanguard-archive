@@ -55,7 +55,7 @@ pub const SYSTEMES: [Systeme; 8] = [
 static DISTRIBUTION: OnceLock<Systeme> = OnceLock::new();
 
 impl Systeme {
-    /// Celui sur lequel tourne Gardien : sa distribution, sous Linux.
+    /// Celui sur lequel tourne Vanguard : sa distribution, sous Linux.
     fn actuel() -> Systeme {
         if cfg!(windows) {
             Systeme::Windows
@@ -109,7 +109,7 @@ impl Systeme {
         }
     }
 
-    /// Ce qui le désigne dans « gardien guide <système> », sans accents ni majuscules.
+    /// Ce qui le désigne dans « vanguard guide <système> », sans accents ni majuscules.
     fn mots(self) -> &'static [&'static str] {
         match self {
             Systeme::Omarchy => &["omarchy"],
@@ -182,7 +182,7 @@ impl Systeme {
             Systeme::AutresLinux => tr!("openSUSE : zypper, firewalld…", "openSUSE: zypper, firewalld…"),
             Systeme::Windows => "winget, sfc, DISM, PowerShell…",
             Systeme::MacOs => "brew, diskutil, Time Machine…",
-            Systeme::Tous => "Gardien, ping, ssh, git, curl…",
+            Systeme::Tous => "Vanguard, ping, ssh, git, curl…",
             Systeme::Linux => "systemctl, journalctl, ip, nmcli…",
         }
     }
@@ -220,7 +220,7 @@ pub struct Programme {
     /// À quoi il sert, en français et en anglais : la précision de sa ligne au menu (33 caractères au plus).
     pub role: (&'static str, &'static str),
     /// Le fichier qui dit s'il est installé ici (nom cherché dans le PATH, ou chemin complet) ; vide : toujours là
-    /// (commandes de PowerShell, Gardien lui-même).
+    /// (commandes de PowerShell, Vanguard lui-même).
     pub executable: &'static str,
     pub commandes: &'static [Commande],
 }
@@ -228,17 +228,17 @@ pub struct Programme {
 pub struct Commande {
     /// Telle qu'on la tape ; « <…> » : à remplacer (traduit à l'affichage en anglais, voir `A_REMPLACER`).
     pub ligne: &'static str,
-    /// Telle qu'on la tape en anglais quand elle change (sous-commandes de Gardien) ; vide sinon.
+    /// Telle qu'on la tape en anglais quand elle change (sous-commandes de Vanguard) ; vide sinon.
     pub ligne_en: &'static str,
     /// Ce qu'elle fait, en français et en anglais.
     pub texte: (&'static str, &'static str),
     /// Elle change quelque chose (réglage, fichier, paquet, service) : marquée ⚠.
     pub modifie: bool,
-    /// Ce qui empêche Gardien de la lancer ici, même si elle ne change rien.
+    /// Ce qui empêche Vanguard de la lancer ici, même si elle ne change rien.
     pub obstacle: Obstacle,
 }
 
-/// Ce qui empêche Gardien de lancer lui-même une commande qui ne change rien : elle se tape alors dans un terminal
+/// Ce qui empêche Vanguard de lancer lui-même une commande qui ne change rien : elle se tape alors dans un terminal
 /// (`lancement::obstacle`). Une commande précédée de sudo demande les droits d'administrateur sans qu'on le dise.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Obstacle {
@@ -256,7 +256,7 @@ pub enum Obstacle {
 }
 
 impl Commande {
-    /// La même commande, que Gardien ne lance pas ici pour cette raison.
+    /// La même commande, que Vanguard ne lance pas ici pour cette raison.
     pub const fn sauf(self, obstacle: Obstacle) -> Commande {
         Commande { obstacle, ..self }
     }
@@ -284,7 +284,7 @@ pub const fn changer(ligne: &'static str, fr: &'static str, en: &'static str) ->
     }
 }
 
-/// Une commande qui ne s'écrit pas pareil en anglais (sous-commandes de Gardien).
+/// Une commande qui ne s'écrit pas pareil en anglais (sous-commandes de Vanguard).
 pub const fn traduite(
     ligne: &'static str,
     ligne_en: &'static str,
@@ -434,7 +434,7 @@ fn marque(c: &Commande) -> String {
     }
 }
 
-/// Une commande et son explication, pour `gardien guide` en ligne de commande.
+/// Une commande et son explication, pour `vanguard guide` en ligne de commande.
 fn afficher_commande(c: &Commande) {
     println!("  {} {GRAS}{}{RESET}", marque(c), ligne(c));
     for l in envelopper(dans_la_langue(c.texte), LARGEUR - 6) {
@@ -490,7 +490,7 @@ fn copier(texte: &str) -> bool {
     }
 }
 
-/// Un programme et toutes ses commandes, pour `gardien guide` en ligne de commande.
+/// Un programme et toutes ses commandes, pour `vanguard guide` en ligne de commande.
 fn afficher_programme(s: Systeme, p: &Programme) {
     titre(&format!("{} › {}", s.nom(), nom(p)));
     let installe = if absent(s, p) {
@@ -520,12 +520,22 @@ fn legende(s: Systeme) -> Vec<String> {
         .collect()
 }
 
-/// Le cadre en tête d'un écran du guide : « GARDIEN › Guide › Fedora › dnf », et `droite` à droite.
+/// Le cadre en tête d'un écran du guide : « VANGUARD › Guide › Fedora › dnf », et `droite` à droite.
 fn entete(chemin: &[&str], droite: &str) -> Vec<Ligne> {
-    let gauche = chemin.iter().fold(format!("{ACCENT}GARDIEN{RESET}"), |g, morceau| {
-        format!("{g} {GRIS}›{RESET} {morceau}")
-    });
-    lignes_cadre(&gauche, droite).into_iter().map(Ligne::Texte).collect()
+    let fil = |depart: String, reste: &[&str]| {
+        reste
+            .iter()
+            .fold(depart, |g, morceau| format!("{g} {GRIS}›{RESET} {morceau}"))
+    };
+    let complet = lignes_cadre(&fil(format!("{ACCENT}VANGUARD{RESET}"), chemin), droite);
+    // Au plus long chemin, le nom du programme en tête cède sa place : le reste du fil se lit en entier.
+    let lignes = match chemin.split_first() {
+        Some((premier, reste)) if complet.iter().any(|l| largeur_affichee(l) > LARGEUR) => {
+            lignes_cadre(&fil((*premier).to_string(), reste), droite)
+        }
+        _ => complet,
+    };
+    lignes.into_iter().map(Ligne::Texte).collect()
 }
 
 /// La commande sur une ligne de menu, ⚠ devant si elle change quelque chose (une espace sinon : les commandes d'un
@@ -784,7 +794,7 @@ fn montrer_commande(s: Systeme, p: &Programme, c: &Commande) {
                 message = None;
                 print!("\x1b[2J\x1b[H");
                 for l in lignes_cadre(
-                    &chemin.iter().fold(format!("{ACCENT}GARDIEN{RESET}"), |g, morceau| {
+                    &chemin.iter().fold(format!("{ACCENT}VANGUARD{RESET}"), |g, morceau| {
                         format!("{g} {GRIS}›{RESET} {morceau}")
                     }),
                     &droite,
@@ -1068,7 +1078,7 @@ fn programmes_nommes(tape: &str) -> Vec<(Systeme, &'static Programme)> {
         .collect()
 }
 
-/// « gardien guide [quoi] » : sans rien, le menu ; un système, toutes ses commandes ; un programme, les siennes ;
+/// « vanguard guide [quoi] » : sans rien, le menu ; un système, toutes ses commandes ; un programme, les siennes ;
 /// sinon, la recherche de ces mots.
 pub fn executer(quoi: &str) {
     let quoi = quoi.trim();
@@ -1284,7 +1294,7 @@ mod tests {
             commandes: &[],
         };
         assert!(installe(&p("")));
-        assert!(!installe(&p("gardien-programme-qui-n-existe-pas")));
+        assert!(!installe(&p("vanguard-programme-qui-n-existe-pas")));
         #[cfg(unix)]
         {
             assert!(installe(&p("sh")));
@@ -1377,7 +1387,7 @@ mod tests {
     }
 
     #[test]
-    fn ce_que_gardien_lance_ici() {
+    fn ce_que_vanguard_lance_ici() {
         let trouve = |l: &str| toutes().find(|(_, _, c)| c.ligne == l).unwrap().2;
         for l in [
             "ip -br a",
@@ -1402,7 +1412,7 @@ mod tests {
         }
         // Une commande qui change quelque chose, ou à compléter, ne se lance jamais d'ici.
         for (_, _, c) in toutes() {
-            if c.modifie || c.ligne.contains('<') || c.ligne.starts_with("gardien") {
+            if c.modifie || c.ligne.contains('<') || c.ligne.starts_with("vanguard") {
                 assert!(lancement::obstacle(c).is_some(), "{}", c.ligne);
             }
         }

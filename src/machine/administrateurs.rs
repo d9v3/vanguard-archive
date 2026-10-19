@@ -1,6 +1,6 @@
 //! Nouveaux administrateurs : un compte ajouté au groupe des administrateurs (wheel, sudo ou admin sous Linux, admin
 //! sous macOS, Administrateurs sous Windows) a tous les droits. Un intrus qui s'installe se les donne souvent ainsi.
-//! Gardien note la première fois qu'il voit chaque administrateur (administrateurs.json, sur cet ordinateur) et
+//! Vanguard note la première fois qu'il voit chaque administrateur (administrateurs.json, sur cet ordinateur) et
 //! signale ceux de la dernière semaine ; ceux du premier passage sont connus d'avant. La surveillance horaire suit la
 //! catégorie « Comptes » : un nouvel administrateur y fait une notification.
 

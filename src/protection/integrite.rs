@@ -199,8 +199,8 @@ pub fn constat() -> Constat {
             categorie: CAT,
             probleme: Some(Niveau::Info),
             message: tr!(
-                "Pas encore de référence pour les fichiers critiques : « gardien integrite » la crée.",
-                "No reference yet for critical files: “gardien integrite” creates it."
+                "Pas encore de référence pour les fichiers critiques : « vanguard integrite » la crée.",
+                "No reference yet for critical files: “vanguard integrite” creates it."
             )
             .into(),
             correctif: None,
@@ -240,8 +240,8 @@ fn juger(total: usize, e: &Ecarts) -> Constat {
         categorie: CAT,
         probleme: Some(Niveau::Moyen),
         message: trf!(
-            "{} fichier(s) critique(s) changé(s) depuis la référence : {}. Normal après une mise à jour ; sinon, à examiner (« gardien integrite »).",
-            "{} critical file(s) changed since the reference: {}. Normal after an update; otherwise, worth a look (“gardien integrite”).",
+            "{} fichier(s) critique(s) changé(s) depuis la référence : {}. Normal après une mise à jour ; sinon, à examiner (« vanguard integrite »).",
+            "{} critical file(s) changed since the reference: {}. Normal after an update; otherwise, worth a look (“vanguard integrite”).",
             e.total(),
             resume(&exemples, 3, ", ")
         ),
@@ -289,7 +289,7 @@ fn afficher(e: &Ecarts) {
     }
 }
 
-/// « gardien integrite » : crée la référence au premier passage, puis compare.
+/// « vanguard integrite » : crée la référence au premier passage, puis compare.
 pub fn verifier(accepter: bool) {
     titre(tr!("Intégrité des fichiers critiques", "Critical file integrity"));
     let actuel = etat_actuel();
@@ -305,8 +305,8 @@ pub fn verifier(accepter: bool) {
             } else {
                 afficher(&e);
                 trp!(
-                    "\n  {DISCRET}Après une mise à jour du système, c'est normal : « gardien integrite --accepter » prend cet état comme nouvelle référence.{RESET}",
-                    "\n  {DISCRET}After a system update, this is normal: “gardien integrite --accepter” takes this state as the new reference.{RESET}"
+                    "\n  {DISCRET}Après une mise à jour du système, c'est normal : « vanguard integrite --accepter » prend cet état comme nouvelle référence.{RESET}",
+                    "\n  {DISCRET}After a system update, this is normal: “vanguard integrite --accepter” takes this state as the new reference.{RESET}"
                 );
             }
         }
@@ -334,14 +334,14 @@ pub fn verifier(accepter: bool) {
     }
 }
 
-/// « gardien integrite --temps-reel » : surveille les fichiers critiques en direct jusqu'à Ctrl-C.
+/// « vanguard integrite --temps-reel » : surveille les fichiers critiques en direct jusqu'à Ctrl-C.
 pub fn temps_reel() {
     use notify::{RecursiveMode, Watcher};
     titre(tr!("Intégrité en temps réel", "Real-time integrity"));
     let Some(reference) = reference() else {
         trp!(
-            "  Pas encore de référence : lance d'abord « gardien integrite ».",
-            "  No reference yet: run “gardien integrite” first."
+            "  Pas encore de référence : lance d'abord « vanguard integrite ».",
+            "  No reference yet: run “vanguard integrite” first."
         );
         return;
     };
@@ -410,7 +410,7 @@ pub fn temps_reel() {
                 ajuster(etat, 10)
             );
             crate::reseau::surveillance::notifier(
-                &trf!("Gardien : fichier critique {etat}", "Gardien: critical file {etat}"),
+                &trf!("Vanguard : fichier critique {etat}", "Vanguard: critical file {etat}"),
                 &montre,
             );
         }
@@ -456,7 +456,7 @@ mod tests {
 
     #[test]
     fn empreinte_lisible() {
-        let f = std::env::temp_dir().join(format!("gardien-integrite-{}", std::process::id()));
+        let f = std::env::temp_dir().join(format!("vanguard-integrite-{}", std::process::id()));
         std::fs::write(&f, b"abc").unwrap();
         let h = empreinte(&f).unwrap();
         // BLAKE3 de « abc ».

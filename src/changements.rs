@@ -1,6 +1,6 @@
-//! Ce que Gardien a changé : chaque correction lancée après accord (commandes, date, réussie ou non) est notée sur cet
+//! Ce que Vanguard a changé : chaque correction lancée après accord (commandes, date, réussie ou non) est notée sur cet
 //! ordinateur seulement (changements.jsonl, jamais sur la clé ni ailleurs), et se relit au menu Cette machine ou par
-//! `gardien changements`. Les réglages d'Optimiser gardent en plus leur valeur d'avant, pour s'annuler exactement.
+//! `vanguard changements`. Les réglages d'Optimiser gardent en plus leur valeur d'avant, pour s'annuler exactement.
 
 use serde::{Deserialize, Serialize};
 
@@ -73,9 +73,9 @@ fn resume_de(chemin: &std::path::Path) -> Option<(usize, usize, String)> {
     Some((tous.len(), tous.iter().filter(|c| c.reussi).count(), derniere))
 }
 
-/// `gardien changements` et le menu Cette machine.
+/// `vanguard changements` et le menu Cette machine.
 pub fn afficher() {
-    titre(tr!("Ce que Gardien a changé", "What Gardien changed"));
+    titre(tr!("Ce que Vanguard a changé", "What Vanguard changed"));
     let tous = lire();
     if tous.is_empty() {
         trp!(
@@ -130,7 +130,7 @@ mod tests {
     #[test]
     fn notes_ecrites_relues_et_limitees() {
         // Un fichier à ce test : d'autres tests lancent des corrections, notées dans le fichier habituel.
-        let f = std::env::temp_dir().join(format!("gardien-changements-{}.jsonl", std::process::id()));
+        let f = std::env::temp_dir().join(format!("vanguard-changements-{}.jsonl", std::process::id()));
         let _ = std::fs::remove_file(&f);
         noter_dans(
             &f,

@@ -1,4 +1,4 @@
-//! Sauvegarde et restauration des données de Gardien dans un seul fichier : base des appareils (surnoms,
+//! Sauvegarde et restauration des données de Vanguard dans un seul fichier : base des appareils (surnoms,
 //! historique de chaque réseau) et état de la surveillance. Sert à passer d'un ordinateur à l'autre sans la clé,
 //! ou à garder une copie avant d'effacer la clé.
 //! La quarantaine de l'antivirus n'y va jamais : on ne transporte pas de malware.
@@ -11,13 +11,13 @@ use crate::reseau::surveillance;
 use crate::reseau::{self, Contenu};
 use crate::ui::*;
 
-const FORMAT: &str = "gardien-sauvegarde";
+const FORMAT: &str = "vanguard-sauvegarde";
 
 #[derive(Serialize, Deserialize)]
 struct Sauvegarde {
     format: String,
     #[serde(default)]
-    version_gardien: String,
+    version_vanguard: String,
     #[serde(default)]
     date: String,
     #[serde(default)]
@@ -39,7 +39,7 @@ fn dossier_par_defaut() -> PathBuf {
 
 fn chemin_par_defaut() -> PathBuf {
     dossier_par_defaut().join(format!(
-        "gardien-sauvegarde-{}.json",
+        "vanguard-sauvegarde-{}.json",
         chrono::Local::now().format("%Y-%m-%d")
     ))
 }
@@ -56,7 +56,7 @@ fn chemin_saisi(texte: &str) -> Option<PathBuf> {
     })
 }
 
-/// Lit une sauvegarde Gardien, ou directement un appareils.json (la base copiée à la main depuis la clé).
+/// Lit une sauvegarde Vanguard, ou directement un appareils.json (la base copiée à la main depuis la clé).
 /// Rend la base et l'état de la surveillance s'il est connu.
 fn lire_sauvegarde(texte: &str) -> Result<(serde_json::Value, Option<bool>), String> {
     let valeur: serde_json::Value = serde_json::from_str(texte.trim_start_matches('\u{feff}')).map_err(|e| {
@@ -78,8 +78,8 @@ fn lire_sauvegarde(texte: &str) -> Result<(serde_json::Value, Option<bool>), Str
         return Ok((valeur, None));
     }
     Err(tr!(
-        "ce fichier n'est ni une sauvegarde Gardien ni une base appareils.json",
-        "this file is neither a Gardien backup nor an appareils.json database"
+        "ce fichier n'est ni une sauvegarde Vanguard ni une base appareils.json",
+        "this file is neither a Vanguard backup nor an appareils.json database"
     )
     .into())
 }
@@ -99,7 +99,7 @@ pub fn sauvegarder(fichier: Option<PathBuf>) {
     let (base, contenu) = reseau::base_pour_sauvegarde();
     let sauvegarde = Sauvegarde {
         format: FORMAT.into(),
-        version_gardien: env!("CARGO_PKG_VERSION").into(),
+        version_vanguard: env!("CARGO_PKG_VERSION").into(),
         date: chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
         surveillance: Some(surveillance::active()),
         base,
@@ -163,7 +163,7 @@ pub fn restaurer(fichier: &Path) {
 }
 
 pub fn menu() {
-    titre(tr!("Données de Gardien", "Gardien data"));
+    titre(tr!("Données de Vanguard", "Vanguard data"));
     trp!(
         "  Base des appareils (surnoms, historique de chaque réseau) et état de la surveillance.",
         "  Device database (nicknames, history of each network) and monitoring state."
@@ -217,7 +217,7 @@ mod tests {
     #[test]
     fn formats_acceptes() {
         let s = format!(
-            "\u{feff}{{\"format\":\"{FORMAT}\",\"version_gardien\":\"0.9.13\",\"date\":\"2026-10-17\",\"surveillance\":true,\"base\":{{\"reseaux\":{{}}}}}}"
+            "\u{feff}{{\"format\":\"{FORMAT}\",\"version_vanguard\":\"0.9.13\",\"date\":\"2026-10-17\",\"surveillance\":true,\"base\":{{\"reseaux\":{{}}}}}}"
         );
         let (base, surv) = lire_sauvegarde(&s).unwrap();
         assert_eq!((base["reseaux"].is_object(), surv), (true, Some(true)));

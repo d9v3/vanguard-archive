@@ -112,7 +112,7 @@ pub fn proposer(constats: &[Constat], contexte: &str) -> Vec<&'static str> {
                     appliquees.push(c.categorie);
                 }
                 let cat = crate::langue::categorie(c.categorie);
-                // Sans ces lignes, un échec (UAC refusée, commande en erreur) passait sans un mot de Gardien.
+                // Sans ces lignes, un échec (UAC refusée, commande en erreur) passait sans un mot de Vanguard.
                 match (lot.len() > 1, reussi) {
                     (false, true) => trp!("    {VERT}✔ fait{RESET}", "    {VERT}✔ done{RESET}"),
                     (false, false) => trp!(

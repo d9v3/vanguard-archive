@@ -1,5 +1,5 @@
 //! Parcours « Nouvel ordinateur » : neuf, d'occasion ou réinstallé, les premières choses à faire dans le bon ordre :
-//! mises à jour, chiffrement du disque, sauvegardes, pack de départ, confidentialité, protection (Windows). Gardien
+//! mises à jour, chiffrement du disque, sauvegardes, pack de départ, confidentialité, protection (Windows). Vanguard
 //! vérifie d'abord où il en est (le bilan, catégories utiles), puis propose chaque outil ; chacun redemande son accord.
 
 use super::{a_savoir, bilan, conseil, proposer_outil, question, verifications};
@@ -42,7 +42,7 @@ pub(super) fn categories(origine: Origine) -> Vec<&'static str> {
     c
 }
 
-/// Une étape du départ, dans l'ordre, avec l'outil de Gardien qui la fait quand il y en a un.
+/// Une étape du départ, dans l'ordre, avec l'outil de Vanguard qui la fait quand il y en a un.
 pub(super) struct Etape {
     pub titre: &'static str,
     pub pourquoi: &'static str,
@@ -63,8 +63,8 @@ pub(super) fn etapes(origine: Origine, fichiers_a_ramener: bool, chiffre: Option
         e.push(Etape {
             titre: tr!("Réinstaller le système", "Reinstall the system"),
             pourquoi: tr!(
-                "Un ordinateur d'occasion a eu une autre vie : programmes, comptes, réglages, parfois un mouchard. La seule certitude est le système remis à neuf : Windows « Réinitialiser ce PC » (Supprimer tout), macOS « Effacer contenu et réglages », ou Linux installé depuis la clé GARDIEN. Les vérifications ci-dessus disent ce que Gardien a trouvé en attendant.",
-                "A used computer had another life: programs, accounts, settings, sometimes a spy. The only certainty is a fresh system: Windows “Reset this PC” (Remove everything), macOS “Erase All Content and Settings”, or Linux installed from the GARDIEN key. The checks above say what Gardien found meanwhile."
+                "Un ordinateur d'occasion a eu une autre vie : programmes, comptes, réglages, parfois un mouchard. La seule certitude est le système remis à neuf : Windows « Réinitialiser ce PC » (Supprimer tout), macOS « Effacer contenu et réglages », ou Linux installé depuis la clé VANGUARD. Les vérifications ci-dessus disent ce que Vanguard a trouvé en attendant.",
+                "A used computer had another life: programs, accounts, settings, sometimes a spy. The only certainty is a fresh system: Windows “Reset this PC” (Remove everything), macOS “Erase All Content and Settings”, or Linux installed from the VANGUARD key. The checks above say what Vanguard found meanwhile."
             ),
             outil: None,
         });
@@ -92,8 +92,8 @@ pub(super) fn etapes(origine: Origine, fichiers_a_ramener: bool, chiffre: Option
                 "Not encrypted: a lost or stolen computer hands over all its files to whoever plugs it elsewhere. Turn it on now, while there is almost nothing on it (it is quick): the steps are in the check above."
             ),
             None => tr!(
-                "Gardien n'a pas pu lire l'état du chiffrement : vérifie-le toi-même (BitLocker, FileVault ou LUKS). Un ordinateur perdu ou volé non chiffré livre tous ses fichiers.",
-                "Gardien could not read the encryption state: check it yourself (BitLocker, FileVault or LUKS). A lost or stolen unencrypted computer hands over all its files."
+                "Vanguard n'a pas pu lire l'état du chiffrement : vérifie-le toi-même (BitLocker, FileVault ou LUKS). Un ordinateur perdu ou volé non chiffré livre tous ses fichiers.",
+                "Vanguard could not read the encryption state: check it yourself (BitLocker, FileVault or LUKS). A lost or stolen unencrypted computer hands over all its files."
             ),
         },
         outil: None,
@@ -208,8 +208,8 @@ pub(super) fn nouveau() {
             "To finish, the full check (main menu) grades the machine, and the network monitoring (Network menu) warns when an unknown device shows up."
         ),
         tr!(
-            "Garde la clé GARDIEN dans un tiroir : elle redémarre l'ordinateur quand le système ne veut plus, et porte une copie de Gardien pour les trois systèmes.",
-            "Keep the GARDIEN key in a drawer: it boots the computer when the system no longer will, and carries a copy of Gardien for the three systems."
+            "Garde la clé VANGUARD dans un tiroir : elle redémarre l'ordinateur quand le système ne veut plus, et porte une copie de Vanguard pour les trois systèmes.",
+            "Keep the VANGUARD key in a drawer: it boots the computer when the system no longer will, and carries a copy of Vanguard for the three systems."
         ),
     ]);
     if origine == Origine::Occasion {

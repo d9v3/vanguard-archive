@@ -146,8 +146,8 @@ pub(crate) fn page(a: &Audit, arrivee: Option<u32>, date: &str) -> String {
         h,
         "<footer>{}</footer></body></html>",
         trf!(
-            "Fait avec Gardien {}",
-            "Made with Gardien {}",
+            "Fait avec Vanguard {}",
+            "Made with Vanguard {}",
             env!("CARGO_PKG_VERSION")
         )
     );
@@ -185,7 +185,7 @@ fn bureau() -> Option<PathBuf> {
     }
 }
 
-/// Menu Cette machine › Rapport à laisser (`gardien a-laisser`) : d'après le dernier bilan de la session, ou un neuf.
+/// Menu Cette machine › Rapport à laisser (`vanguard a-laisser`) : d'après le dernier bilan de la session, ou un neuf.
 pub fn laisser(audit: &Audit) {
     titre(tr!("Rapport à laisser", "Report to leave"));
     let aujourd_hui = chrono::Local::now().format("%Y-%m-%d").to_string();
@@ -198,8 +198,8 @@ pub fn laisser(audit: &Audit) {
         &date,
     );
     let nom = trf!(
-        "Gardien - bilan du {aujourd_hui}.html",
-        "Gardien - check-up {aujourd_hui}.html"
+        "Vanguard - bilan du {aujourd_hui}.html",
+        "Vanguard - check-up {aujourd_hui}.html"
     );
     let sur_le_bureau = bureau().filter(|_| {
         demander(&trf!(

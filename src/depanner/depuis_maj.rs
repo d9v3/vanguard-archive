@@ -1,6 +1,6 @@
 //! Lent depuis une mise à jour : les dernières mises à jour installées, datées, et comment revenir en arrière avec
 //! l'outil du système (point de restauration ou désinstallation d'une mise à jour sous Windows, instantané btrfs
-//! sous Linux avec snapper ou Timeshift, Time Machine sous macOS). Gardien ne revient en arrière sur rien lui-même :
+//! sous Linux avec snapper ou Timeshift, Time Machine sous macOS). Vanguard ne revient en arrière sur rien lui-même :
 //! il montre, puis ouvre l'outil si on le veut.
 
 use super::{Etat, conseil};
@@ -113,8 +113,8 @@ fn recentes() -> Vec<Maj> {
 fn retour_arriere() -> &'static str {
     if cfg!(windows) {
         tr!(
-            "Revenir en arrière : Paramètres › Windows Update › Historique › Désinstaller des mises à jour (la plus récente d'abord), ou un point de restauration d'avant la mise à jour (Gardien peut ouvrir l'outil).",
-            "Go back: Settings › Windows Update › History › Uninstall updates (the latest first), or a restore point from before the update (Gardien can open the tool)."
+            "Revenir en arrière : Paramètres › Windows Update › Historique › Désinstaller des mises à jour (la plus récente d'abord), ou un point de restauration d'avant la mise à jour (Vanguard peut ouvrir l'outil).",
+            "Go back: Settings › Windows Update › History › Uninstall updates (the latest first), or a restore point from before the update (Vanguard can open the tool)."
         )
     } else if cfg!(target_os = "macos") {
         tr!(

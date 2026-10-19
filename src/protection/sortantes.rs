@@ -571,7 +571,7 @@ fn serveurs(connexions: &[(&Connexion, Option<&String>)]) -> String {
     resume(&liste, 6, ", ")
 }
 
-/// Menu Antivirus et protection › Qui parle à Internet ?, ou `gardien sortantes`.
+/// Menu Antivirus et protection › Qui parle à Internet ?, ou `vanguard sortantes`.
 pub fn afficher() {
     titre(tr!("Qui parle à Internet ?", "Who talks to the Internet?"));
     for ligne in envelopper(
@@ -728,8 +728,8 @@ pub fn afficher() {
         let liste = resume(&a_regarder, 4, ", ");
         for ligne in envelopper(
             &trf!(
-                "À regarder de près : {liste}. Si tu ne connais pas un programme signalé, analyse-le (antivirus, YARA, même menu), puis désinstalle-le. Gardien ne coupe rien.",
-                "Worth a close look: {liste}. If you do not know a flagged program, scan it (antivirus, YARA, same menu), then uninstall it. Gardien cuts nothing."
+                "À regarder de près : {liste}. Si tu ne connais pas un programme signalé, analyse-le (antivirus, YARA, même menu), puis désinstalle-le. Vanguard ne coupe rien.",
+                "Worth a close look: {liste}. If you do not know a flagged program, scan it (antivirus, YARA, same menu), then uninstall it. Vanguard cuts nothing."
             ),
             LARGEUR - 2,
         ) {
@@ -739,11 +739,11 @@ pub fn afficher() {
     if !cachees.is_empty() || chemins_invisibles > 0 {
         let comment = if cfg!(windows) {
             tr!(
-                "lance Gardien en administrateur (clic droit, « Exécuter en tant qu'administrateur »)",
-                "run Gardien as administrator (right-click, “Run as administrator”)"
+                "lance Vanguard en administrateur (clic droit, « Exécuter en tant qu'administrateur »)",
+                "run Vanguard as administrator (right-click, “Run as administrator”)"
             )
         } else {
-            tr!("sudo gardien sortantes", "sudo gardien outbound")
+            tr!("sudo vanguard sortantes", "sudo vanguard outbound")
         };
         trp!(
             "  {GRIS}Pour tout voir : {comment}.{RESET}",

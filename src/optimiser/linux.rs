@@ -1,4 +1,4 @@
-//! Réglages de Linux : services de systemd, fichiers de réglage posés par Gardien, préférences de GNOME, options des
+//! Réglages de Linux : services de systemd, fichiers de réglage posés par Vanguard, préférences de GNOME, options des
 //! distributions (Ubuntu, Debian). Chacun n'est proposé que si cette machine en a l'usage : un SSD pour l'entretien
 //! des SSD, GNOME pour ses préférences, le paquet concerné pour les options des distributions.
 
@@ -25,7 +25,7 @@ pub enum Changement {
         cible: &'static str,
         defaut: &'static str,
     },
-    /// Fichier posé par Gardien (présent = fait), retiré pour annuler ; `apres`, la commande qui le fait prendre.
+    /// Fichier posé par Vanguard (présent = fait), retiré pour annuler ; `apres`, la commande qui le fait prendre.
     Fichier {
         chemin: &'static str,
         contenu: &'static str,
@@ -528,7 +528,7 @@ impl Changement {
                 )
             }
             Changement::Demarrage { entree, .. } => match entree {
-                // Écrit par Gardien lui-même (`ecrire_ici`).
+                // Écrit par Vanguard lui-même (`ecrire_ici`).
                 Entree::Autostart(_) => return None,
                 // Sans « --now » : le service tourne jusqu'à la fin de la session, il ne repart simplement plus.
                 Entree::Service(u) => match v? {
@@ -639,7 +639,7 @@ pub fn au_demarrage() -> Vec<Programme> {
 /// Un vrai fichier, pas un lien. Une entrée d'autostart ou une unité de systemd du compte qui est un lien vient d'un
 /// gestionnaire de configuration (dotfiles, stow, home-manager) : l'écrire remplacerait le lien par un fichier, et
 /// `systemctl disable` retire aussi le lien d'une unité ajoutée par `systemctl link`. Rien ne s'annulerait exactement :
-/// Gardien n'y touche pas.
+/// Vanguard n'y touche pas.
 fn fichier_ordinaire(p: &Path) -> bool {
     std::fs::symlink_metadata(p).is_ok_and(|m| m.file_type().is_file())
 }
@@ -764,7 +764,7 @@ pub fn catalogue() -> Vec<Reglage> {
             )),
             recommande: false,
             changements: vec![Changement::Fichier {
-                chemin: "/etc/systemd/journald.conf.d/50-gardien-taille.conf",
+                chemin: "/etc/systemd/journald.conf.d/50-vanguard-taille.conf",
                 contenu: "[Journal]\nSystemMaxUse=500M\n",
                 apres: "sudo systemctl restart systemd-journald",
             }],
@@ -871,7 +871,7 @@ mod tests {
         let c = o.commande(Some("\"no\"")).unwrap();
         assert!(c.contains("s|^PARTICIPATE=.*|PARTICIPATE=\"no\"|"), "{c}");
         let f = Changement::Fichier {
-            chemin: "/etc/systemd/journald.conf.d/50-gardien-taille.conf",
+            chemin: "/etc/systemd/journald.conf.d/50-vanguard-taille.conf",
             contenu: "[Journal]\nSystemMaxUse=500M\n",
             apres: "sudo systemctl restart systemd-journald",
         };
@@ -905,7 +905,7 @@ mod tests {
     /// spéciaux revient telle quelle, et « absente » retire la ligne.
     #[test]
     fn option_posee_remise_puis_retiree() {
-        let f = std::env::temp_dir().join(format!("gardien-test-option-sed-{}", std::process::id()));
+        let f = std::env::temp_dir().join(format!("vanguard-test-option-sed-{}", std::process::id()));
         std::fs::write(&f, "# réglage\nPARTICIPATE=\"yes\"\nAUTRE=1\n").unwrap();
         let chemin: &'static str = Box::leak(f.display().to_string().into_boxed_str());
         let o = Changement::Option {
@@ -1002,7 +1002,7 @@ mod tests {
 
     #[test]
     fn lit_une_option_d_un_fichier() {
-        let f = std::env::temp_dir().join(format!("gardien-test-option-{}", std::process::id()));
+        let f = std::env::temp_dir().join(format!("vanguard-test-option-{}", std::process::id()));
         std::fs::write(&f, "# commentaire\nENABLED=1\n").unwrap();
         let chemin: &'static str = Box::leak(f.display().to_string().into_boxed_str());
         let o = Changement::Option {
@@ -1017,7 +1017,7 @@ mod tests {
 
     /// Un dossier jetable par essai : les essais tournent en même temps.
     fn dossier_jetable(nom: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("gardien-test-demarrage-{nom}-{}", std::process::id()));
+        let d = std::env::temp_dir().join(format!("vanguard-test-demarrage-{nom}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         d
@@ -1134,11 +1134,11 @@ mod tests {
     #[test]
     fn identite_des_reglages_de_demarrage() {
         let c = Changement::Demarrage {
-            entree: Entree::Autostart(PathBuf::from("/home/alice/.config/autostart/essai-gardien-x.desktop")),
+            entree: Entree::Autostart(PathBuf::from("/home/alice/.config/autostart/essai-vanguard-x.desktop")),
             cible: None,
         };
         let id = c.identite_demarrage().unwrap();
-        assert_eq!(id, "autostart|/home/alice/.config/autostart/essai-gardien-x.desktop");
+        assert_eq!(id, "autostart|/home/alice/.config/autostart/essai-vanguard-x.desktop");
         assert!(matches!(
             Changement::demarrage_depuis(&id),
             Some(Changement::Demarrage {
@@ -1146,7 +1146,7 @@ mod tests {
                 cible: None
             })
         ));
-        assert_eq!(Changement::nom_demarrage(&id), "essai-gardien-x");
+        assert_eq!(Changement::nom_demarrage(&id), "essai-vanguard-x");
         // Une note qui viserait autre chose qu'un .desktop d'un dossier autostart, ou un service douteux : refusée.
         for mauvaise in [
             "autostart|/etc/passwd",
