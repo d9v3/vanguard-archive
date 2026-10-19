@@ -84,7 +84,7 @@ In the menu, choose **1** (full check), then **2** (fix). Arrows, Enter, and Esc
 - Passwords saved in the browser without protection, sensitive files lying around (passwords or keys in clear text),
   missing backup with its set-up offered.
 - Health: disk space, SMART status of the disks (without root), battery, temperatures.
-- What could not be checked is said so, never counted as healthy.
+- What could not be checked is said, never counted as healthy.
 
 **Local network** — every device, its manufacturer, its open ports (TCP, and UDP: SNMP, NetBIOS, UPnP, DNS, mDNS)
 and its risks; newcomers flagged, one notebook per network (at home, at each friend's), nicknames ("HP printer");
@@ -182,7 +182,7 @@ Read-only.
 **Windows Defender blocking** — Vanguard blocks nothing itself: after your consent, it turns on what Windows blocks
 from its kernel and protects against being turned off. Attack surface reduction rules (password theft from memory,
 vulnerable drivers, booby-trapped Office documents and attachments), network protection against dangerous sites,
-unwanted software, controlled folder access against ransomware. Each rule is named before you agree and undoes
+unwanted software, controlled folder access against ransomware. Each rule is named before you agree and is undone
 exactly; those that would block Vanguard on its USB drive or troubleshooting are never turned on, and nothing is
 offered when another antivirus replaces Defender.
 
@@ -245,11 +245,11 @@ since Vanguard has not checked them.
   replaced program). Data, ISO images and the Ventoy menu, which change normally, are not compared. Each key has
   its own reference (recognized by its volume identifier): a second VANGUARD key does not pass for a modified one.
 - Vanguard also distrusts itself: at startup, it says whether a library is injected into every program of the
-  session (LD_PRELOAD, DYLD_INSERT_LIBRARIES, AppInit_DLLs: one from a system package, like GameMode, is a mere
+  session (LD_PRELOAD, DYLD_INSERT_LIBRARIES, AppInit_DLLs: one from a system package, like GameMode, is mere
   information) and whether it runs as root for no reason, since its results go through there. In the check: the
   hourly monitoring you had turned on and that disappeared (malware first cuts what watches it), and the check
   history rewritten afterwards (each check carries the previous one's checksum). Each night the code has changed, CI
-  builds Vanguard twice and checks that the program is identical to the byte.
+  builds Vanguard twice and checks that the program is identical down to the byte.
 - Check a downloaded file: its checksum compared with the one the site publishes (pasted, or a SHA256SUMS next to
   it), its name and content (double extension, program disguised as a document), then YARA and the antivirus.
 - Hourly monitoring: a notification if an unknown device shows up, if a port opens, if the machine's grade drops, if
@@ -353,7 +353,7 @@ Each menu entry is also a command.
 | `vanguard update` | updates |
 | `vanguard repair` | repairs and cleaning |
 | `vanguard monitor on\|off` | hourly monitoring |
-| `vanguard maintenance [on\|off]` | monthly check-up; without argument: what it would say now |
+| `vanguard maintenance [on\|off]` | monthly check-up; without an argument: what it would say now |
 | `vanguard name <ip\|mac> <nickname>` | name a device |
 | `vanguard backup [file]`, `vanguard restore <file>` | data backup |
 | `vanguard gaming` | packages and settings for gaming (Windows and Linux) |

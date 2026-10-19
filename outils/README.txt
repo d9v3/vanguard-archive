@@ -21,7 +21,7 @@ Linux, Windows and macOS folders.
 
 Protection: the key has two parts. VANGUARD (everything above) is read-only on Windows, and on Linux and macOS
 Vanguard remounts it read-only itself at startup: another computer cannot modify the program. Only its owner's computer
-can write to it. VANGUARDLOG, small and writable, holds journal-erreurs.txt: the errors met
+can write to it. VANGUARDLOG, small and writable, holds journal-erreurs.txt: the errors encountered
 (version, system, message), without user name, computer name or home folder. Back on the owner's computer, they
 become GitHub issues, to improve Vanguard. It also holds ordinateurs.json (My computers: grade and problem categories
 of each computer, without names), which never goes to GitHub.

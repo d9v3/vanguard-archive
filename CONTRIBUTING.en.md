@@ -7,7 +7,7 @@ The code, its comments and its internal names are in French; every text shown to
 
 With Claude Code: `CLAUDE.md` gives the project's commands and rules, `/verifier` and `/livrer` (`.claude/skills/`)
 check everything and ship a version; a hook reformats Rust after each edit. On GitHub, `@claude` in an issue or a
-pull request gets an answer, and each “journal” issue is analyzed by itself (`.github/workflows/claude*.yml`, to
+pull request gets an answer, and each “journal” issue is analyzed automatically (`.github/workflows/claude*.yml`, to
 turn on once with `/install-github-app`).
 
 ## Layout
@@ -27,7 +27,7 @@ turn on once with `/install-github-app`).
 | `src/machine/unix.rs` | checks shared by Linux and macOS: secret files, sudo |
 | `src/machine/heure.rs`, `fin_de_support.rs`, `comptes_oublies.rs`, `mots_de_passe.rs`, `sensibles.rs` | clock set automatically; system, abandoned programs and browsers without updates; unused accounts; unprotected browser passwords; sensitive files lying around |
 | `src/changements.rs` | what Vanguard changed: each fix run by `machine::appliquer_chacune`, noted on the computer |
-| `src/sauvegarde.rs`, `src/raccourci.rs`, `src/mise_a_jour.rs`, `src/a_laisser.rs` | guided automatic backup (Déjà Dup or rsync, Time Machine, File History); shortcut on this computer; updating its copy from the key (version engraved in the program, read without running it); report to leave to the person you helped |
+| `src/sauvegarde.rs`, `src/raccourci.rs`, `src/mise_a_jour.rs`, `src/a_laisser.rs` | guided automatic backup (Déjà Dup or rsync, Time Machine, File History); shortcut on this computer; updating its copy from the key (version engraved in the program, read without running it); report to leave with the person you helped |
 | `src/corriger.rs` | guided application of fixes |
 | `src/reseau/mod.rs`, `src/reseau/scan.rs` | network scan (TCP connect, without root), ARP, network notebooks |
 | `src/reseau/nmap.rs` | service versions with nmap -sV, when installed: deep scan of a local network device, on the ports already found open |
@@ -89,7 +89,7 @@ The check runs it in parallel with the others, in rank order (`rang`: 10 for the
 500 and up for the common rules), and each of its findings carries its identifier up to the JSON report. The checks
 from before the registry are declared in their system's `regles.rs` and in `src/machine/regles_communes.rs`; a new one
 is better declared next to its check, with the `regle!` macro.
-The judgment is written apart (`juger_…`, reading nothing from the system), to be tested on made-up data.
+The judgment is written separately (`juger_…`, reading nothing from the system), to be tested on made-up data.
 
 ## Build, test, deploy
 
@@ -100,7 +100,7 @@ outils/deployer.sh     # builds Linux (musl, static) + Windows, installs locally
 ```
 
 Slow check? `VANGUARD_CHRONO=1 vanguard audit --json >/dev/null` gives each check's time (they run at the same time:
-the slowest one makes the duration).
+the slowest one sets the duration).
 
 Tests: `cargo test` (Linux, in a throwaway data folder: never the computer's real data); Windows tests under Wine
 (`cargo test --target x86_64-pc-windows-gnu` with a Wine runner); `cargo clippy --all-targets` on the four targets
@@ -117,10 +117,10 @@ successful build for the key.
 Continuous integration (`.github/workflows/ci.yml`): on each push to GitHub, formatting, clippy without warnings on
 the four targets and the tests, on Linux; on a real Windows (PowerShell, registry), every night if the code changed,
 on each pull request and on demand (`gh workflow run ci.yml`). Not Windows or Mac on each push: on a private
-repository, their minutes count double and ten times.
+repository, their minutes count double and tenfold.
 
 Dead links: `outils/liens.py` opens every link of the repository (documentation, the program's code except tests,
-scripts, licences) and checks the internal links of the Markdown pages: target file, heading of an anchor, downloads
+scripts, licenses) and checks the internal links of the Markdown pages: target file, heading of an anchor, downloads
 of the latest release. It runs by itself before each push by `deployer.sh` and before each release page; CI checks
 the internal links (`--hors-ligne`). A dead link stops the push, a doubtful one (a site refusing programs, a server
 down) is only shown. Links that cannot be opened as they are (an API endpoint, a namespace) are described in
@@ -136,7 +136,7 @@ Vanguard really runs there, in an 80-column pseudo-terminal, from a fake key and
 touched. The network becomes “Salon”; MAC addresses (vendor prefix kept), IP addresses (a made-up network, lengths and
 order kept), device names and the account's folders are replaced, at random on each run; only an excerpt of the
 machine check with nothing personal in it is shown. Then the privacy guard rereads each image: if a detail of the
-home were still visible, none is written.
+home is still visible, none is written.
 
 ```sh
 uv run --no-project --with pyte python outils/captures.py [program] [--connexion | --sans-connexion]

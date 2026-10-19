@@ -30,7 +30,7 @@ repository (`git checkout v0.62.0`, for example), to be rebuilt if needed.
   programs common to Linux (time, kernel, Wi-Fi, network diagnosis, accounts, sound, printers, UEFI boot…), openSUSE
   and Docker; 942 commands. You type what you are looking for and commands show up as you type; each one has its
   page, to copy it, or run it here when it only reads (its output scrolls in Vanguard, Esc stops it).
-- **Over 30,000 more commands**: the tldr-pages examples (CC BY 4.0 license), downloaded by themselves every week and
+- **Over 30,000 more commands**: the tldr-pages examples (CC BY 4.0 license), downloaded automatically every week and
   already on the key (even without Internet, the guide has them from the first launch); to copy only. In every
   search, what starts with the typed word comes first.
 - **Word prediction in every menu** and checklist: the end of the most likely word shows in grey, Tab completes it.
@@ -39,7 +39,7 @@ repository (`git checkout v0.62.0`, for example), to be rebuilt if needed.
   Sysmon. Deep scan of a device: service versions with nmap when installed. The new rules have a stable identifier
   (“vanguard rules”).
 - **Safer.** The sandbox no longer reaches the system bus or Docker; on Windows, the fix script is checked just before
-  it runs as administrator (a script changed in the meantime does not run); Vanguard's data is reserved to your
+  it runs as administrator (a script changed in the meantime does not run); Vanguard's data is reserved for your
   account.
 - **Vanguard updates itself from the key.** The copy placed on a computer (monitoring, maintenance, shortcut) did not
   follow the key: when the key is newer, the menu says so, and the update happens after your consent (9.9 or
