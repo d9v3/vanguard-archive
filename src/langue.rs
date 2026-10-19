@@ -156,6 +156,7 @@ pub fn categorie(nom: &str) -> &str {
         "Fichiers suspects" => "Suspicious files",
         "Gestion à distance" => "Remote management",
         "Groupes" => "Groups",
+        "Heure" => "Time",
         "Historique" => "History",
         "Intégrité" => "Integrity",
         "Journaux" => "Logs",
