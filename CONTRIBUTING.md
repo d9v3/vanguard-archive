@@ -78,7 +78,7 @@ inventory::submit! {
     crate::machine::regles::Regle {
         id: "LNX-NOY-002",                 // système, domaine, numéro : stable, jamais réutilisé
         systeme: crate::machine::regles::Os::Linux,
-        sujet: ("BPF réservé à root", "BPF reserved to root"),
+        sujet: ("BPF réservé à root", "BPF reserved for root"),
         references: &["kernel.org : unprivileged_bpf_disabled"],
         verifier: || bpf().into_iter().collect(),
     }

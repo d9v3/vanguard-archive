@@ -32,7 +32,7 @@ inventory::submit! {
         id: "LNX-NOY-002",
         systeme: Os::Linux,
         rang: 232,
-        sujet: ("BPF réservé à root", "BPF reserved to root"),
+        sujet: ("BPF réservé à root", "BPF reserved for root"),
         references: &["kernel.org : unprivileged_bpf_disabled"],
         verifier: || bpf().into_iter().collect(),
     }
@@ -318,7 +318,7 @@ pub(super) fn juger_bpf(valeur: Option<i64>) -> Option<Constat> {
             ),
         )
         .manuel(
-            tr!("Le réserver à root jusqu'au redémarrage", "Reserve it to root until restart"),
+            tr!("Le réserver à root jusqu'au redémarrage", "Reserve it for root until restart"),
             &["sudo sysctl -w kernel.unprivileged_bpf_disabled=2"],
         )
     })
