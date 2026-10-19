@@ -598,8 +598,9 @@ Etape 'Guide des commandes : une page, et la copie d''une commande'
 Lancer 'guide-winget' @('guide', 'winget')
 if ((Sortie 'guide-winget') -match 'winget upgrade --all') { Ok 'Page de winget affichée' } else { Bug 'Page de winget ABSENTE' }
 $presseAvant = Get-Clipboard -Raw -ErrorAction SilentlyContinue
-# « 10.2.1 » : guide, Windows, winget ; « 2 » copie sa 2e commande.
-LancerAvec 'guide-copie' @() "10.2.1`n2`n`nq`n"
+# « 10.6.7.2 » : guide, Windows 11 (6e système), winget (7e programme, après les six marches à suivre), sa 2e
+# commande, dont la page s'ouvre ; « 1 » la copie, Entrée revient, « q » quitte.
+LancerAvec 'guide-copie' @() "10.6.7.2`n1`n`nq`n"
 $copiee = Get-Clipboard -Raw -ErrorAction SilentlyContinue
 if ($copiee -and $copiee.Trim() -eq 'winget upgrade --all') { Ok 'Commande copiée dans le presse-papier (Set-Clipboard)' }
 elseif ((Sortie 'guide-copie') -match 'Presse-papier inaccessible|Clipboard unavailable') { Info 'Presse-papier inaccessible ici (test en arrière-plan ?) : Vanguard l''a dit et a remontré la commande' }

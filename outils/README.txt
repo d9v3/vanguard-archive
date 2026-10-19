@@ -96,7 +96,8 @@ highlighted one, Esc clears it. In the main menu, it also finds each tool of the
        My computers: those where the key ran a check, their grade and remaining problems (vanguard computers)
        Protect the key's data: device record encrypted by a passphrase, asked only elsewhere
  10  Command guide › the useful commands of Omarchy, Arch, Fedora, Debian, Windows 11, macOS and all systems, by
-       program, each one explained (⚠: it changes something). Type what you are looking for: commands show up as
+       program, each one explained (⚠: it changes something), with step-by-step guides (update, repair, network,
+       free up space…). Type what you are looking for: commands show up as
        you type; each one can be copied, or run here if it only reads. And the tldr-pages examples, downloaded
        every week: to copy only. From the command line:
        vanguard guide fedora, vanguard guide winget, vanguard guide dns cache

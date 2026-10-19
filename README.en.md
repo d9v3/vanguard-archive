@@ -195,7 +195,8 @@ patiently. "What Vanguard has learned" shows everything and lets you forget.
 macOS, and the ones typed the same way everywhere (Vanguard, ping, nslookup, ssh, curl, git…), each one explained; ⚠
 marks the ones that change something. Each distribution has its introduction, its “Step by step” guides (update,
 install, free up space, repair, firewall, NVIDIA drivers, new release…), its programs (pacman, dnf, apt, SELinux,
-AppArmor…), then those common to Linux. You type what you are looking for: commands show up as you type, and Tab completes the word. Each command
+AppArmor…), then those common to Linux; Windows 11 and macOS have their step-by-step guides too (repair Windows,
+network, security, slowness, Time Machine…). You type what you are looking for: commands show up as you type, and Tab completes the word. Each command
 has its page: copy it, to type it here or on the computer of the person you help, or run it here when it only reads;
 its output scrolls in Vanguard, and Esc stops it. Every system can be read everywhere (Windows commands from Linux,
 for example), and the guide tells when a program is missing on this computer. On top of that, the examples of
@@ -353,7 +354,7 @@ Each menu entry is also a command.
 | `vanguard name <ip\|mac> <nickname>` | name a device |
 | `vanguard backup [file]`, `vanguard restore <file>` | data backup |
 | `vanguard gaming` | packages and settings for gaming (Windows and Linux) |
-| `vanguard guide [system\|program\|words]` | command guide: a system (`omarchy`, `arch`, `fedora`, `debian`, `windows`, `macos`, `all`, or `linux` for the common programs), a program (`winget`, `systemctl`…) or words to look for (`dns cache`) |
+| `vanguard guide [system\|program\|words]` | command guide: a system (`omarchy`, `arch`, `fedora`, `debian`, `windows`, `macos`, `all`, or `linux` for the common programs, or `tldr`), a program (`winget`, `systemctl`…) or words to look for (`dns cache`) |
 
 </details>
 

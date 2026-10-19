@@ -208,7 +208,8 @@ veille) est revérifié plus patiemment. « Ce que Vanguard a appris » montre t
 Linux), de Windows 11, de macOS, et celles qui s'écrivent pareil partout (Vanguard, ping, nslookup, ssh, curl, git…),
 chacune expliquée ; ⚠ marque celles qui changent quelque chose. Chaque distribution a sa présentation, ses marches à
 suivre « Pas à pas » (mettre à jour, installer, faire de la place, réparer, pare-feu, pilotes NVIDIA, nouvelle
-version…), ses programmes (pacman, dnf, apt, SELinux, AppArmor…), puis ceux communs à Linux. On tape ce qu'on cherche : les commandes paraissent au fil de la frappe, et Tab
+version…), ses programmes (pacman, dnf, apt, SELinux, AppArmor…), puis ceux communs à Linux ; Windows 11 et macOS
+ont aussi leurs marches à suivre (réparer Windows, réseau, sécurité, lenteur, Time Machine…). On tape ce qu'on cherche : les commandes paraissent au fil de la frappe, et Tab
 complète le mot. Chaque commande a sa page : la copier, pour la taper ici ou chez la personne qu'on aide, ou la
 lancer ici quand elle ne fait que lire ; sa sortie défile dans Vanguard, et Échap l'arrête. Tous les systèmes sont
 lisibles partout (les commandes de Windows depuis Linux, par exemple), et le guide dit si un programme manque sur cet
@@ -373,7 +374,7 @@ Chaque entrée du menu existe aussi en commande.
 | `vanguard nommer <ip\|mac> <surnom>` | nommer un appareil |
 | `vanguard sauvegarder [fichier]`, `vanguard restaurer <fichier>` | sauvegarde des données |
 | `vanguard gaming` | paquets et réglages pour jouer (Windows et Linux) |
-| `vanguard guide [système\|programme\|mots]` | guide des commandes : un système (`omarchy`, `arch`, `fedora`, `debian`, `windows`, `macos`, `tous`, ou `linux` pour les programmes communs), un programme (`winget`, `systemctl`…) ou des mots à chercher (`cache dns`) |
+| `vanguard guide [système\|programme\|mots]` | guide des commandes : un système (`omarchy`, `arch`, `fedora`, `debian`, `windows`, `macos`, `tous`, ou `linux` pour les programmes communs, ou `tldr`), un programme (`winget`, `systemctl`…) ou des mots à chercher (`cache dns`) |
 
 </details>
 

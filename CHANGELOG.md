@@ -27,9 +27,9 @@ chaque version garde son étiquette dans le dépôt (`git checkout v0.62.0`, par
 - **Guide des commandes refait.** Une entrée par système : Omarchy, Arch, Fedora, Debian et Ubuntu, autres Linux,
   Windows 11, macOS ; chaque distribution a sa présentation, ses marches à suivre « Pas à pas » (mettre à jour,
   installer, faire de la place, réparer, pare-feu, NVIDIA, nouvelle version…) et ses programmes, puis ceux communs à
-  Linux ; 650 commandes. On tape ce qu'on cherche et les commandes paraissent au fil de la frappe ; chacune a sa
-  page, pour la copier, ou la lancer ici quand elle ne fait que lire (sa sortie défile dans Vanguard, Échap
-  l'arrête).
+  Linux ; Windows 11 et macOS ont aussi les leurs (réparer Windows, réseau, sécurité, lenteur, Time Machine…) ; 787
+  commandes. On tape ce qu'on cherche et les commandes paraissent au fil de la frappe ; chacune a sa page, pour la
+  copier, ou la lancer ici quand elle ne fait que lire (sa sortie défile dans Vanguard, Échap l'arrête).
 - **Plus de 30 000 commandes en plus** : les exemples de tldr-pages (licence CC BY 4.0), téléchargés tout seuls chaque
   semaine, en français quand ils sont traduits ; à copier seulement. Dans toutes les recherches, ce qui commence par
   le mot tapé passe devant.

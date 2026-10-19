@@ -97,7 +97,8 @@ Entrée ouvre celle en surbrillance, Échap efface. Au menu principal, elle trou
        Mes ordinateurs : ceux où la clé a fait un bilan, leur note et leurs problèmes restants (vanguard ordinateurs)
        Protéger les données de la clé : carnet des appareils chiffré par une phrase, demandée ailleurs seulement
  10  Guide des commandes › les commandes utiles d'Omarchy, Arch, Fedora, Debian, Windows 11, macOS et de tous les
-       systèmes, par programme, chacune expliquée (⚠ : elle change quelque chose). Tape ce que tu cherches : les
+       systèmes, par programme, chacune expliquée (⚠ : elle change quelque chose), avec des marches à suivre pas à
+       pas (mettre à jour, réparer, réseau, faire de la place…). Tape ce que tu cherches : les
        commandes paraissent au fil de la frappe ; chacune se copie, ou se lance ici si elle ne fait que lire.
        Et les exemples de tldr-pages, téléchargés chaque semaine : à copier seulement.
        En ligne de commande : vanguard guide fedora, vanguard guide winget, vanguard guide cache dns

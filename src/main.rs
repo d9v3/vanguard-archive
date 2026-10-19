@@ -260,10 +260,11 @@ enum Commande {
         surnom: Vec<String>,
     },
     /// Guide des commandes : celles d'Omarchy, d'Arch, de Fedora, de Debian, des autres Linux, de Windows, de macOS et
-    /// de tous les systèmes, rangées par programme.
+    /// de tous les systèmes, rangées par programme, avec des marches à suivre ; et les exemples de tldr-pages,
+    /// téléchargés chaque semaine.
     Guide {
-        /// Un système (omarchy, arch, fedora, debian, windows, macos, tous ; linux : les programmes communs), un
-        /// programme (systemctl, winget…) ou des mots à chercher.
+        /// Un système (omarchy, arch, fedora, debian, windows, macos, tous ; linux : les programmes communs ; tldr), un
+        /// programme (systemctl, winget, tar…) ou des mots à chercher.
         quoi: Vec<String>,
     },
     /// Pourquoi c'est lent ? Ce qui occupe le processeur, la mémoire et le disque, le démarrage, les programmes lancés
@@ -1110,7 +1111,7 @@ impl Groupe {
             Groupe::Installer => tr!("logiciels libres, gaming", "open source software, gaming"),
             Groupe::Optimiser => tr!("nettoyer, confidentialité…", "clean up, privacy…"),
             Groupe::Donnees => tr!("sauvegarder, copier mes fichiers", "back up, copy my files"),
-            Groupe::Guide => tr!("Linux, Windows, macOS, tous", "Linux, Windows, macOS, all"),
+            Groupe::Guide => tr!("Linux, Windows, macOS, pas à pas", "Linux, Windows, macOS, how-tos"),
             Groupe::Depanner => tr!("Internet, son, imprimante…", "Internet, sound, printer…"),
         }
     }
@@ -1329,7 +1330,8 @@ const AIDES_EN: &[(&str, &str)] = &[
     ("gaming", "Gaming: components for games (Windows: Visual C++, DirectX…; Linux: Steam, Vulkan, GameMode, Wine…; \
                 macOS: Rosetta, Steam, Epic…) and system settings"),
     ("guide", "Command guide: the useful commands of Omarchy, Arch, Fedora, Debian, other Linux, Windows, macOS and \
-               all systems, sorted by program"),
+               all systems, sorted by program, with step-by-step guides; plus the tldr-pages examples, downloaded \
+               every week"),
     ("lenteur", "Why is it slow? What keeps the processor, memory and disk busy, startup, the programs started at \
                  login. Read only"),
     ("demarrage", "Startup programs: those that start at login, to remove or put back after your consent. Each removal \
@@ -1386,8 +1388,8 @@ const OPTIONS_EN: &[(&str, &str, &str)] = &[
     ("verifier-fichier", "fichier", "The downloaded file"),
     ("verifier-fichier", "empreinte", "The checksum published by the site (preferably SHA-256). Otherwise: a \
                                        SHA256SUMS or .sha256 next to it"),
-    ("guide", "quoi", "A system (omarchy, arch, fedora, debian, windows, macos, all; linux: the common programs), a \
-                       program (systemctl, winget…) or words to look for"),
+    ("guide", "quoi", "A system (omarchy, arch, fedora, debian, windows, macos, all; linux: the common programs; tldr), \
+                       a program (systemctl, winget, tar…) or words to look for"),
     ("fiche", "json", "The specs as JSON, for a script (without the serial numbers)"),
     ("copier-fichiers", "destination", "A folder on an external disk (default: chosen among the plugged-in disks)"),
     ("verifier-copie", "dossier", "The disk or the folder of the copy (default: chosen among the plugged-in disks)"),

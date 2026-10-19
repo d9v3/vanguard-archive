@@ -25,9 +25,10 @@ repository (`git checkout v0.62.0`, for example), to be rebuilt if needed.
   only downloads, APT settings read in their order, complete English interface, decimal numbers written the French way in French.
 - **Command guide redone.** One entry per system: Omarchy, Arch, Fedora, Debian and Ubuntu, other Linux, Windows 11,
   macOS; each distribution has its introduction, its “Step by step” guides (update, install, free up space, repair,
-  firewall, NVIDIA, new release…) and its programs, then those common to Linux; 650 commands. You type what you are
-  looking for and commands show up as you type; each one has its page, to copy it, or run it here when it only reads
-  (its output scrolls in Vanguard, Esc stops it).
+  firewall, NVIDIA, new release…) and its programs, then those common to Linux; Windows 11 and macOS have theirs too
+  (repair Windows, network, security, slowness, Time Machine…); 787 commands. You type what you are looking for and
+  commands show up as you type; each one has its page, to copy it, or run it here when it only reads (its output
+  scrolls in Vanguard, Esc stops it).
 - **Over 30,000 more commands**: the tldr-pages examples (CC BY 4.0 license), downloaded by themselves every week; to
   copy only. In every search, what starts with the typed word comes first.
 - **Word prediction in every menu** and checklist: the end of the most likely word shows in grey, Tab completes it.
