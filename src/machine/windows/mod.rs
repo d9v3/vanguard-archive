@@ -720,27 +720,32 @@ fn juger_bitlocker(etat: Option<&str>) -> Constat {
 }
 
 fn ports_ecoute(pare_feu_actif: bool, ip_lan: Option<&str>) -> Vec<Constat> {
-    let Some(liste) = ps(
-        "Get-NetTCPConnection -State Listen | ForEach-Object { \"$($_.LocalAddress)|$($_.LocalPort)|$((Get-Process -Id $_.OwningProcess -ErrorAction SilentlyContinue).ProcessName)\" }",
-    ) else {
+    // Un seul PowerShell (le plus lent du bilan Windows, 4,5 s, dans la VM) : les noms des programmes lus une fois
+    // (un Get-Process par port, avant), les ports en écoute, puis les ports déjà bloqués en entrée par une règle de
+    // Gardien active. Le port écoute toujours, mais n'est plus joignable : sans cette lecture, l'alerte et la même
+    // correction (une règle de plus à chaque fois) revenaient à chaque audit. Les règles ont leur section : leur
+    // échec ne fait pas perdre les ports.
+    let regles = if pare_feu_actif {
+        "; try { 'BLQ|' + (@(Get-NetFirewallRule -DisplayName 'Gardien : bloquer *' -ErrorAction SilentlyContinue | \
+         Where-Object { $_.Enabled -eq 'True' -and $_.Action -eq 'Block' -and $_.Direction -eq 'Inbound' } | \
+         Get-NetFirewallPortFilter | ForEach-Object { $_.LocalPort }) -join ','); 'BLQ_FIN' } catch {}"
+    } else {
+        ""
+    };
+    let sortie = ps(&format!(
+        "$noms = @{{}}; Get-Process | ForEach-Object {{ $noms[$_.Id] = $_.ProcessName }}; \
+         Get-NetTCPConnection -State Listen | ForEach-Object {{ \"ECO|$($_.LocalAddress)|$($_.LocalPort)|$($noms[[int]$_.OwningProcess])\" }}; 'ECO_FIN'{regles}"
+    ));
+    let Some(lignes) = section(sortie.as_deref(), "ECO") else {
         return vec![illisible("Ports en écoute")];
     };
-    // Ports déjà bloqués en entrée par une règle de Gardien active : le
-    // port écoute toujours, mais n'est plus joignable.
-    // Sans cette lecture, l'alerte et la même correction (une règle de plus à chaque fois) revenaient à chaque audit.
-    let bloques: Vec<u16> = if pare_feu_actif {
-        ps(
-            "@(Get-NetFirewallRule -DisplayName 'Gardien : bloquer *' -ErrorAction SilentlyContinue | \
-            Where-Object { $_.Enabled -eq 'True' -and $_.Action -eq 'Block' -and $_.Direction -eq 'Inbound' } | \
-            Get-NetFirewallPortFilter | ForEach-Object { $_.LocalPort }) -join ','",
-        )
+    let liste = lignes.join("\n");
+    let bloques: Vec<u16> = section(sortie.as_deref(), "BLQ")
+        .and_then(|l| l.first().copied())
         .unwrap_or_default()
         .split(',')
         .filter_map(|p| p.trim().parse().ok())
-        .collect()
-    } else {
-        Vec::new()
-    };
+        .collect();
     // Ports RPC dynamiques ouverts par Windows lui-même : normaux et filtrés par le pare-feu.
     let systeme = ["svchost", "lsass", "wininit", "services", "spoolsv", "System", "Idle"];
     let mut vus = Vec::new();

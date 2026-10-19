@@ -10,7 +10,7 @@ chaque version garde son étiquette dans le dépôt (`git checkout v0.62.0`, par
 
 - **Bilan bien plus rapide.** Sous Linux, de 7 secondes à moins d'une : les commandes ne sont plus attendues par
   pauses fixes de 50 ms, les paquets se vérifient en parallèle, le Wi-Fi n'attend plus un nouveau balayage. Sous
-  Windows, huit lancements de PowerShell de moins : pare-feu, UAC, Bureau à distance et verrouillage lus
+  Windows, une dizaine de lancements de PowerShell de moins : pare-feu, UAC, Bureau à distance et verrouillage lus
   directement dans le registre.
 - **Windows.** Installation de paquets MSI avec les droits du système, protection dans le cloud de Defender coupée,
   protection contre les exploits coupée (DEP, ASLR, CFG, SEHOP), Windows Update coupé (service ou stratégie),

@@ -768,7 +768,8 @@ pub fn programmes_en_ecoute() -> std::collections::HashMap<u16, String> {
         }
     }
     #[cfg(windows)]
-    for l in windows::ps("Get-NetTCPConnection -State Listen | ForEach-Object { \"$($_.LocalPort)|$((Get-Process -Id $_.OwningProcess -ErrorAction SilentlyContinue).ProcessName)\" }")
+    // Les noms des programmes lus une fois, pas un Get-Process par port.
+    for l in windows::ps("$noms = @{}; Get-Process | ForEach-Object { $noms[$_.Id] = $_.ProcessName }; Get-NetTCPConnection -State Listen | ForEach-Object { \"$($_.LocalPort)|$($noms[[int]$_.OwningProcess])\" }")
         .unwrap_or_default()
         .lines()
     {

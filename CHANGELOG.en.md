@@ -9,7 +9,7 @@ repository (`git checkout v0.62.0`, for example), to be rebuilt if needed.
 ## October 20, 2026: version 0.78
 
 - **A much faster check.** On Linux, from 7 seconds to under one: commands are no longer awaited in fixed 50 ms
-  pauses, packages are verified in parallel, Wi-Fi no longer waits for a new scan. On Windows, eight fewer PowerShell
+  pauses, packages are verified in parallel, Wi-Fi no longer waits for a new scan. On Windows, about ten fewer PowerShell
   launches: firewall, UAC, Remote Desktop and screen lock read straight from the registry.
 - **Windows.** MSI packages installed with system rights, Defender cloud protection off, exploit protection off (DEP,
   ASLR, CFG, SEHOP), Windows Update turned off (service or policy), services with unquoted paths in a folder anyone
