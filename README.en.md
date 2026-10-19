@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/icones/vanguard-256.png" alt="Vanguard logo: a bird of prey on a steel shield, circled by orbits" width="150">
+  <img src="assets/icones/vanguard-256.png" alt="Vanguard logo: a V-shaped shield with a padlock in the middle" width="150">
 </p>
 
 <h1 align="center">Vanguard</h1>

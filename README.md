@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/icones/vanguard-256.png" alt="Logo de Vanguard : un rapace sur un bouclier d'acier, entouré d'orbites" width="150">
+  <img src="assets/icones/vanguard-256.png" alt="Logo de Vanguard : un V en bouclier, un cadenas au centre" width="150">
 </p>
 
 <h1 align="center">Vanguard</h1>
