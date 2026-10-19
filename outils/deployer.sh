@@ -8,6 +8,9 @@
 #                                      du journal) ; le service de copie qui suit la compilation le respecte aussi
 #   outils/deployer.sh --publier       comme sans option, et publie la page de la version (Releases) même pour une
 #                                      0.x.y : sans l'option, seule une 0.x.0 a la sienne
+# GARDIEN_INTERMEDIAIRE=1 : une version d'une série livrée d'affilée. Pas de page (la dernière de la série reprend
+# leurs notes) ni de dépôt dans la VM Windows (son test automatique passerait sur chacune) : le Mac de GitHub et la VM
+# ne voient que la dernière.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 export PATH="$HOME/.cargo/bin:$PATH"
@@ -109,7 +112,7 @@ fi
 A_PUBLIER=""
 if [[ -z $MODE ]]; then
   VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
-  if [[ -z $LOCAL && ( $VERSION =~ ^[0-9]+\.[0-9]+\.0$ || -n $FORCER_PUBLICATION ) ]] &&
+  if [[ -z $LOCAL && -z ${GARDIEN_INTERMEDIAIRE:-} && ( $VERSION =~ ^[0-9]+\.[0-9]+\.0$ || -n $FORCER_PUBLICATION ) ]] &&
     ! timeout 30 gh release view "v$VERSION" >/dev/null 2>&1; then
     A_PUBLIER=1
   fi
@@ -196,7 +199,9 @@ VM="$HOME/Windows/GARDIEN-TEST"
 # Un test qui tourne dans la VM garde son programme : le remplacer en pleine passe mélangerait deux versions. Le témoin
 # est celui du menu des tests, périmé au bout de 3 h comme là-bas.
 EN_COURS="$VM/resultats/.test-en-cours.txt"
-if [[ -n $(find "$EN_COURS" -mmin -180 2>/dev/null) ]]; then
+if [[ -n ${GARDIEN_INTERMEDIAIRE:-} ]]; then
+  echo "VM Windows : version intermédiaire d'une série, rien n'y est déposé (la dernière le sera)."
+elif [[ -n $(find "$EN_COURS" -mmin -180 2>/dev/null) ]]; then
   echo "VM Windows : un test y tourne (depuis $(date -r "$EN_COURS" +%H:%M)) : rien n'y est déposé cette fois."
 elif [[ -d $HOME/Windows && -f $WINDOWS ]]; then
   mkdir -p "$VM/programme" "$VM/resultats"
