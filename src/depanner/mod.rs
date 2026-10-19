@@ -3,7 +3,10 @@
 //! qu'il a trouvé, et propose la bonne réparation (celles de Réparer) ou le bon outil (Nettoyer, Copier mes
 //! fichiers…). Rien n'est changé sans être montré et accepté.
 
+mod depart;
 mod imprimante;
+mod infection;
+mod nouveau;
 mod reseau;
 mod son;
 
@@ -22,7 +25,7 @@ pub struct Parcours {
     lancer: fn(),
 }
 
-static PARCOURS: [Parcours; 6] = [
+static PARCOURS: [Parcours; 9] = [
     Parcours {
         cles: ("internet", "internet"),
         titre: ("Pas d'Internet", "No Internet"),
@@ -64,6 +67,27 @@ static PARCOURS: [Parcours; 6] = [
         apercu: ("place, gros dossiers, copie", "space, big folders, copy"),
         mots: "place space disque disk plein full stockage storage",
         lancer: disque_plein,
+    },
+    Parcours {
+        cles: ("infection", "infection"),
+        titre: ("Après une infection", "After an infection"),
+        apercu: ("virus, rançon, faux technicien", "virus, ransom, fake technician"),
+        mots: "virus malware infecté infected rançongiciel ransomware piraté hacked arnaque scam pirate hacker",
+        lancer: infection::infection,
+    },
+    Parcours {
+        cles: ("nouveau", "new"),
+        titre: ("Nouvel ordinateur", "New computer"),
+        apercu: ("premiers réglages, dans l'ordre", "first settings, in order"),
+        mots: "nouveau new neuf achat acheté bought occasion reconditionné refurbished réinstallé reinstalled premier first",
+        lancer: nouveau::nouveau,
+    },
+    Parcours {
+        cles: ("depart", "leaving"),
+        titre: ("Ordinateur qui part (vente, don)", "Computer leaving (sale, gift)"),
+        apercu: ("comptes, clé, effacement sûr", "accounts, key, secure wipe"),
+        mots: "vendre vente sell sale donner don give gift rendre return recycler recycle effacer wipe erase bitlocker filevault tpm",
+        lancer: depart::depart,
     },
 ];
 
@@ -206,6 +230,30 @@ fn proposer_outil(question: &str, outil: fn()) {
     if demander(question).oui() {
         outil();
     }
+}
+
+/// Le bilan de cette machine, réduit aux catégories qui comptent pour ce parcours, affiché puis rendu (pour en tirer
+/// une conclusion, l'état du chiffrement par exemple). Les vérifications impossibles restent dites, jamais comptées
+/// comme saines.
+fn bilan(categories: &[&str]) -> Vec<crate::machine::Constat> {
+    trp!(
+        "  {GRIS}Bilan en cours (quelques secondes ; jusqu'à une minute sous Windows)…{RESET}",
+        "  {GRIS}Checking (a few seconds; up to a minute on Windows)…{RESET}"
+    );
+    let mut constats = crate::machine::auditer(false).constats;
+    constats.retain(|c| categories.contains(&c.categorie));
+    // Dans l'ordre demandé par le parcours, pas celui du bilan.
+    constats.sort_by_key(|c| categories.iter().position(|k| *k == c.categorie));
+    print!("\x1b[1A\x1b[2K");
+    if constats.is_empty() {
+        Etat::Info.dire(tr!(
+            "Rien de ces catégories n'a pu être vérifié ici.",
+            "None of these categories could be checked here."
+        ));
+    } else {
+        crate::machine::afficher_constats(&constats);
+    }
+    constats
 }
 
 /// Lance un parcours.
@@ -622,7 +670,7 @@ mod tests {
         assert!(trouver("printer").is_some_and(|p| p.cles.0 == "imprimante"));
         assert!(trouver("zzz").is_none());
         assert_eq!(chemin("3"), Some(3));
-        assert_eq!(chemin("7"), None);
+        assert_eq!(chemin("10"), None);
         assert_eq!(lignes_de_recherche("11").len(), PARCOURS.len());
     }
 
