@@ -3,6 +3,7 @@
 //! Planificateur natif de chaque système : timer systemd (Linux), Planificateur de tâches (Windows), agent launchd
 //! (macOS).
 
+#[cfg(unix)]
 use std::process::Command;
 
 use crate::reseau::{self, Options};
@@ -11,11 +12,8 @@ use crate::ui::*;
 
 #[cfg(target_os = "linux")]
 const NOM: &str = "gardien-surveillance";
-/// Noms d'avant : sentinel (0.11 à 0.50) et netscan (jusqu'à 0.10.0). Minuteries Linux ; sous Windows, la tâche
-/// de la v0.4 et avant s'appelait « netscan-surveillance ».
-#[cfg_attr(target_os = "macos", allow(dead_code))]
-const ANCIENS_NOMS: [&str; 2] = ["sentinel-surveillance", "netscan-surveillance"];
 
+#[cfg(unix)]
 pub(crate) fn reussit(cmd: &str, args: &[&str]) -> bool {
     Command::new(cmd).args(args).output().is_ok_and(|o| o.status.success())
 }
@@ -335,11 +333,6 @@ pub fn active() -> bool {
 
 /// La minuterie, la tâche planifiée (non désactivée) ou l'agent existent-ils ?
 fn installee() -> bool {
-    // Surveillance installée sous l'ancien nom : remplacée par la nouvelle (le programme a changé de nom aussi).
-    if ancienne_installee() {
-        retirer_ancienne();
-        return installer(&executable());
-    }
     #[cfg(target_os = "linux")]
     return reussit("systemctl", &["--user", "is-enabled", &format!("{NOM}.timer")]);
     #[cfg(windows)]
@@ -416,7 +409,6 @@ fn installer(exe: &str) -> bool {
 
 #[cfg(target_os = "linux")]
 fn desinstaller() -> bool {
-    retirer_ancienne();
     retirer_minuterie(NOM)
 }
 
@@ -429,26 +421,9 @@ fn retirer_minuterie(nom: &str) -> bool {
     reussit("systemctl", &["--user", "daemon-reload"])
 }
 
-#[cfg(target_os = "linux")]
-fn ancienne_installee() -> bool {
-    ANCIENS_NOMS
-        .iter()
-        .any(|n| reussit("systemctl", &["--user", "is-enabled", &format!("{n}.timer")]))
-}
-
-#[cfg(target_os = "linux")]
-fn retirer_ancienne() {
-    for n in ANCIENS_NOMS {
-        retirer_minuterie(n);
-    }
-}
-
 /// Agent launchd de la surveillance sous macOS (~/Library/LaunchAgents/<nom>.plist).
 #[cfg(target_os = "macos")]
 const AGENT_MACOS: &str = "com.gardien.surveillance";
-/// Agent d'avant le renommage en Gardien (0.44 à 0.50).
-#[cfg(target_os = "macos")]
-const ANCIEN_AGENT_MACOS: &str = "com.sentinel.surveillance";
 
 #[cfg(target_os = "macos")]
 fn plist_agent_nomme(nom: &str) -> std::path::PathBuf {
@@ -513,27 +488,13 @@ fn retirer_agent(plist: &std::path::Path) {
 
 #[cfg(target_os = "macos")]
 fn desinstaller() -> bool {
-    retirer_ancienne();
     retirer_agent(&plist_agent());
     true
-}
-
-#[cfg(target_os = "macos")]
-fn ancienne_installee() -> bool {
-    plist_agent_nomme(ANCIEN_AGENT_MACOS).is_file()
-}
-
-#[cfg(target_os = "macos")]
-fn retirer_ancienne() {
-    retirer_agent(&plist_agent_nomme(ANCIEN_AGENT_MACOS));
 }
 
 /// Nom lisible de la tâche dans le Planificateur de tâches Windows.
 #[cfg(windows)]
 const TACHE_WINDOWS: &str = "gardien - surveillance du reseau";
-/// Tâches des versions 0.5 à 0.50, sous les anciens noms sentinel et netscan.
-#[cfg(windows)]
-const ANCIENNES_TACHES_WINDOWS: [&str; 2] = ["sentinel - surveillance du reseau", "netscan - surveillance du reseau"];
 
 /// La tâche existe et n'est pas désactivée : une tâche désactivée ne surveille plus rien.
 #[cfg(windows)]
@@ -556,26 +517,8 @@ pub(crate) fn tache_existe(noms: &[&str]) -> bool {
 }
 
 #[cfg(windows)]
-fn ancienne_installee() -> bool {
-    tache_existe(&ANCIENNES_TACHES_WINDOWS)
-}
-
-#[cfg(windows)]
-fn retirer_ancienne() {
-    for nom in ANCIENS_NOMS {
-        let _ = reussit("schtasks", &["/Delete", "/F", "/TN", nom]);
-    }
-    for tache in ANCIENNES_TACHES_WINDOWS {
-        let _ = crate::machine::windows::ps(&format!("Unregister-ScheduledTask -TaskName '{tache}' -Confirm:$false"));
-    }
-}
-
-#[cfg(windows)]
 fn installer(exe: &str) -> bool {
     use crate::machine::windows::ps;
-    // Anciennes tâches (v0.4 et avant, puis sous les noms netscan et sentinel) : retirées au profit de la tâche
-    // décrite ci-dessous.
-    retirer_ancienne();
     let exe = crate::commande::ps_texte(exe);
     // Tâche visible et décrite : on voit dans le Planificateur ce qu'elle fait et comment l'arrêter.
     let script = trf!(
@@ -593,7 +536,6 @@ fn installer(exe: &str) -> bool {
 
 #[cfg(windows)]
 fn desinstaller() -> bool {
-    retirer_ancienne();
     crate::machine::windows::ps(&format!(
         "Unregister-ScheduledTask -TaskName '{TACHE_WINDOWS}' -Confirm:$false"
     ))

@@ -12,13 +12,11 @@ use crate::reseau::{self, Contenu};
 use crate::ui::*;
 
 const FORMAT: &str = "gardien-sauvegarde";
-/// Sauvegardes faites sous les anciens noms (sentinel jusqu'à 0.50, netscan jusqu'à 0.10.0) : toujours lisibles.
-const ANCIENS_FORMATS: [&str; 2] = ["sentinel-sauvegarde", "netscan-sauvegarde"];
 
 #[derive(Serialize, Deserialize)]
 struct Sauvegarde {
     format: String,
-    #[serde(default, alias = "version_sentinel", alias = "version_netscan")]
+    #[serde(default)]
     version_gardien: String,
     #[serde(default)]
     date: String,
@@ -70,7 +68,7 @@ fn lire_sauvegarde(texte: &str) -> Result<(serde_json::Value, Option<bool>), Str
     if valeur
         .get("format")
         .and_then(|f| f.as_str())
-        .is_some_and(|f| f == FORMAT || ANCIENS_FORMATS.contains(&f))
+        .is_some_and(|f| f == FORMAT)
     {
         let s: Sauvegarde =
             serde_json::from_value(valeur).map_err(|e| trf!("sauvegarde abîmée ({e})", "damaged backup ({e})"))?;
@@ -226,11 +224,6 @@ mod tests {
         // Une base appareils.json copiée telle quelle.
         let (base, surv) = lire_sauvegarde("{\"reseaux\":{\"box\":{\"nom\":null,\"appareils\":{}}}}").unwrap();
         assert_eq!((base["reseaux"]["box"].is_object(), surv), (true, None));
-        // Sauvegardes faites sous les anciens noms.
-        let s = "{\"format\":\"netscan-sauvegarde\",\"version_netscan\":\"0.10.0\",\"surveillance\":false,\"base\":{\"reseaux\":{}}}";
-        assert_eq!(lire_sauvegarde(s).unwrap().1, Some(false));
-        let s = "{\"format\":\"sentinel-sauvegarde\",\"version_sentinel\":\"0.49.0\",\"surveillance\":true,\"base\":{\"reseaux\":{}}}";
-        assert_eq!(lire_sauvegarde(s).unwrap().1, Some(true));
         assert!(lire_sauvegarde("{\"autre\":1}").is_err());
         assert!(lire_sauvegarde("pas du json").is_err());
         assert!(lire_sauvegarde(&format!("{{\"format\":\"{FORMAT}\"}}")).is_err());

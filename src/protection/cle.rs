@@ -102,9 +102,7 @@ fn monter(peripherique: &str, lecture_seule: bool) -> Result<(), String> {
     }
 }
 
-/// Empreinte de l'ordinateur du propriétaire, écrite dans le témoin de la clé. Une clé préparée sous un ancien nom
-/// la garde dans l'ancien témoin : sans lui, elle passerait pour une clé sans protection, modifiable partout.
-/// Cet ordinateur est-il celui du propriétaire de la clé (empreinte écrite par deployer.sh) ?
+/// Cet ordinateur est-il celui du propriétaire de la clé (empreinte écrite par deployer.sh dans le témoin) ?
 pub fn chez_le_proprietaire(cle: &Path) -> bool {
     let attendue = empreinte_attendue(cle);
     let attendue = attendue.trim();
@@ -112,10 +110,7 @@ pub fn chez_le_proprietaire(cle: &Path) -> bool {
 }
 
 fn empreinte_attendue(cle: &Path) -> String {
-    std::iter::once(crate::reseau::TEMOIN_CLE)
-        .chain(crate::reseau::ANCIENS_TEMOINS_CLE)
-        .find_map(|temoin| std::fs::read_to_string(cle.join(temoin)).ok())
-        .unwrap_or_default()
+    std::fs::read_to_string(cle.join(crate::reseau::TEMOIN_CLE)).unwrap_or_default()
 }
 
 /// Au démarrage : sur un ordinateur qui n'est pas celui du propriétaire, remonte la clé en lecture seule.
@@ -279,15 +274,12 @@ mod tests {
     }
 
     #[test]
-    fn empreinte_lue_dans_l_ancien_temoin() {
+    fn empreinte_lue_dans_le_temoin() {
         let cle = std::env::temp_dir().join(format!("gardien-temoin-{}", std::process::id()));
         std::fs::create_dir_all(&cle).unwrap();
         assert_eq!(empreinte_attendue(&cle), "");
-        std::fs::write(cle.join("sentinel.cle"), "abc").unwrap();
+        std::fs::write(cle.join("gardien.cle"), "abc").unwrap();
         assert_eq!(empreinte_attendue(&cle), "abc");
-        // Le témoin du nom actuel l'emporte, même vide (clé volontairement sans protection).
-        std::fs::write(cle.join("gardien.cle"), "").unwrap();
-        assert_eq!(empreinte_attendue(&cle), "");
         let _ = std::fs::remove_dir_all(&cle);
     }
 

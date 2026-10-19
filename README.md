@@ -44,9 +44,6 @@
 Dans le menu, choisis **1** (bilan complet), puis **2** (corriger). Les flèches, Entrée, et Échap ou Retour arrière
 pour revenir.
 
-> Gardien s'appelait Sentinel jusqu'à la version 0.50 : ses données, sa surveillance et sa clé sont reprises telles
-> quelles.
-
 ## Ce que fait Gardien
 
 | Domaine | Ce que fait Gardien |

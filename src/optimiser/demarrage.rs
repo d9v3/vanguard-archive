@@ -64,7 +64,7 @@ pub(super) fn notes(h: &Historique) -> Vec<Reglage> {
 /// Pourquoi un programme reste au démarrage, s'il le doit : il protège ou fait marcher l'ordinateur. Comparé en
 /// minuscules au nom et à la commande ; un motif court est un mot entier (« avg » ne doit pas trouver « savgame »).
 pub(super) fn a_garder(nom: &str, commande: &str, bureau: bool) -> Option<&'static str> {
-    const GARDIEN: &[&str] = &["gardien", "sentinel", "netscan"];
+    const GARDIEN: &[&str] = &["gardien"];
     // Des listes de motifs, que rustfmt étalerait sur une ligne chacun.
     #[rustfmt::skip]
     const SECURITE: &[&str] = &[
@@ -106,7 +106,7 @@ pub(super) fn a_garder(nom: &str, commande: &str, bureau: bool) -> Option<&'stat
     let entier = |m: &str| m.len() < 6 && !m.contains([' ', '-']);
     let cherche = |m: &&str| if entier(m) { mots.contains(m) } else { texte.contains(m) };
     let trouve = |motifs: &[&str]| motifs.iter().any(cherche);
-    // La sécurité d'abord : « sentinelone » contient « sentinel », l'ancien nom de Gardien.
+    // La sécurité d'abord : un antivirus reste « sécurité », quel que soit son nom.
     #[rustfmt::skip] // une ligne par raison, que rustfmt étalerait
     let raisons = [
         (trouve(SECURITE), tr!("à garder : sécurité", "keep: security")),

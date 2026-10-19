@@ -104,12 +104,12 @@ def compte() -> str:
 def dossiers_gardien():
     """Dossier des données de cet ordinateur, et celui de la clé branchée : la base des appareils vit sur les deux."""
     base = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local/share")
-    local = next((base / n for n in ("gardien", "sentinel") if (base / n).is_dir()), None)
+    local = base / "gardien" if (base / "gardien").is_dir() else None
     cle = None
     for media in (Path("/run/media") / compte(), Path("/media") / compte()):
         try:
             for d in media.iterdir():
-                if any((d / t).is_file() for t in ("gardien.cle", "sentinel.cle", "netscan.cle")):
+                if (d / "gardien.cle").is_file():
                     cle = d / "donnees"
         except OSError:
             continue

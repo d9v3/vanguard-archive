@@ -2,8 +2,7 @@
 Description=Gardien : mettre à jour la clé USB GARDIEN avec la dernière version de GitHub
 # Au montage de la clé : récupère la dernière version de GitHub (si c'est sans risque), la compile si elle est
 # nouvelle, puis copie tout sur la clé. Après une compilation faite ici, c'est gardien-copie.service qui copie.
-# NETSCAN : étiquette des clés préparées sous l'ancien nom.
-After=run-media-%u-GARDIEN.mount run-media-%u-SENTINEL.mount run-media-%u-NETSCAN.mount network-online.target
+After=run-media-%u-GARDIEN.mount network-online.target
 
 [Service]
 Type=oneshot
@@ -13,4 +12,4 @@ TimeoutStartSec=20min
 Nice=10
 
 [Install]
-WantedBy=run-media-%u-GARDIEN.mount run-media-%u-SENTINEL.mount run-media-%u-NETSCAN.mount
+WantedBy=run-media-%u-GARDIEN.mount

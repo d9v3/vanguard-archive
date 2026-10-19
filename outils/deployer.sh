@@ -154,35 +154,15 @@ elif git remote get-url origin >/dev/null 2>&1; then
   fi
 fi
 [[ -n $LOCAL ]] || duree "envoi GitHub" "$T_ENVOI"
-# Anciens noms (sentinel jusqu'à 0.50, netscan jusqu'à 0.10.0) : leurs commandes ne sont plus créées, seule
-# « gardien » lance Gardien. Celles qui restent d'avant, des liens vers gardien, sont retirées.
-for ancienne in sentinel netscan; do
-  if [[ -L $HOME/.cargo/bin/$ancienne && $(readlink "$HOME/.cargo/bin/$ancienne") == gardien ]]; then
-    rm -f "$HOME/.cargo/bin/$ancienne"
-  fi
-done
 # Icône du lanceur (Gardien.desktop : Icon=gardien) : le bouclier ouvert sur un trou noir (outils/icone.py), une
 # image par taille de 16 à 512 px, pour que la barre et le lanceur n'aient pas à réduire eux-mêmes la plus grande.
 ICONES="${XDG_DATA_HOME:-$HOME/.local/share}/icons/hicolor"
-# Icônes de l'ancien nom (et anciennes SVG, qui passeraient avant le PNG) : retirées.
-rm -f "$ICONES"/*/apps/sentinel.png "$ICONES"/*/apps/sentinel.svg
-# Lanceur créé sous l'ancien nom : repris sous le nouveau (nom, commande, icône).
-APPLIS="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
-if [[ -f $APPLIS/Sentinel.desktop && ! -f $APPLIS/Gardien.desktop ]]; then
-  sed -e 's/^Name=Sentinel$/Name=Gardien/' -e 's#/\.cargo/bin/sentinel$#/.cargo/bin/gardien#' -e 's/^Icon=sentinel$/Icon=gardien/' \
-    "$APPLIS/Sentinel.desktop" >"$APPLIS/Gardien.desktop" && rm -f "$APPLIS/Sentinel.desktop"
-fi
 for png in assets/icones/gardien-*.png; do
   t=${png##*-}
   t=${t%.png}
   install -Dm644 "$png" "$ICONES/${t}x$t/apps/gardien.png"
 done
 command -v gtk-update-icon-cache >/dev/null && gtk-update-icon-cache -qtf "$ICONES" || true
-
-# Dossier des données sous l'ancien nom (sentinel, jusqu'à 0.50) : renommé ici aussi, si ce déploiement passe avant le
-# premier lancement de gardien (qui le renomme de même).
-DONNEES="${XDG_DATA_HOME:-$HOME/.local/share}"
-[[ -d $DONNEES/sentinel && ! -e $DONNEES/gardien ]] && mv "$DONNEES/sentinel" "$DONNEES/gardien"
 
 # Erreurs du journal de Gardien (plantages, PowerShell en échec…) : celles de cet ordinateur et celles que la clé
 # rapporte des autres sont gardées dans retours/, puis envoyées en tickets GitHub avec gh (un ticket par erreur, les
@@ -219,10 +199,6 @@ EN_COURS="$VM/resultats/.test-en-cours.txt"
 if [[ -n $(find "$EN_COURS" -mmin -180 2>/dev/null) ]]; then
   echo "VM Windows : un test y tourne (depuis $(date -r "$EN_COURS" +%H:%M)) : rien n'y est déposé cette fois."
 elif [[ -d $HOME/Windows && -f $WINDOWS ]]; then
-  # Dossier de l'ancien nom (SENTINEL-TEST, jusqu'à 0.50) : renommé, résultats compris ; le menu des tests y remplace
-  # sa tâche automatique.
-  [[ -d $HOME/Windows/SENTINEL-TEST && ! -e $VM ]] && mv "$HOME/Windows/SENTINEL-TEST" "$VM"
-  rm -f "$VM/programme/sentinel.exe" "$VM/TESTER-SENTINEL.bat"
   mkdir -p "$VM/programme" "$VM/resultats"
   cp -f "$WINDOWS" "$VM/programme/gardien.exe"
   cp -f outils/test-windows/test.ps1 outils/test-windows/menu.ps1 "$VM/programme/"
@@ -251,7 +227,7 @@ publier_la_version() {
   duree "page de la version" "$debut"
 }
 
-CLE=$(find "/run/media/$USER" -maxdepth 2 \( -name gardien.cle -o -name sentinel.cle -o -name netscan.cle \) -printf '%h\n' 2>/dev/null | head -1)
+CLE=$(find "/run/media/$USER" -maxdepth 2 -name gardien.cle -printf '%h\n' 2>/dev/null | head -1)
 if [[ -z $CLE ]]; then
   echo "Clé GARDIEN non branchée : elle sera mise à jour au prochain branchement."
   publier_la_version
@@ -261,30 +237,20 @@ fi
 T_CLE=$SECONDS
 
 # Partition GARDIENLOG (la seule modifiable sur les autres ordinateurs) : elle se monte en même temps que GARDIEN,
-# parfois une seconde après. Son journal d'erreurs est rapatrié ici puis vidé, pour améliorer Gardien. Étiquette de
-# l'ancien nom (SENTINELLOG) acceptée tant que la clé n'a pas été renommée.
+# parfois une seconde après. Son journal d'erreurs est rapatrié ici puis vidé, pour améliorer Gardien.
 JOURNAL=""
 for _ in {1..10}; do
   JOURNAL=$(findmnt -nro TARGET -S LABEL=GARDIENLOG 2>/dev/null | head -1 || true)
-  [[ -n $JOURNAL ]] || JOURNAL=$(findmnt -nro TARGET -S LABEL=SENTINELLOG 2>/dev/null | head -1 || true)
   [[ -n $JOURNAL ]] && break
   sleep 1
 done
 if [[ -n $JOURNAL ]]; then
   touch "$JOURNAL/gardien-journal.cle"
-  rm -f "$JOURNAL/sentinel-journal.cle"
   rapatrier_journal "$JOURNAL/journal-erreurs.txt" "de la clé"
   envoyer_journal
 fi
 
 mkdir -p "$CLE"/{Linux,Windows,donnees,source}
-# Clé préparée sous un ancien nom (sentinel jusqu'à 0.50, netscan jusqu'à 0.10.0) : témoin repris, anciens programmes,
-# lanceurs et icône retirés. L'étiquette du volume se change à part (udisks), elle ne sert pas à reconnaître la clé.
-for ancien in sentinel netscan; do
-  [[ -f $CLE/$ancien.cle ]] && mv -f "$CLE/$ancien.cle" "$CLE/gardien.cle"
-  rm -f "$CLE/Linux/$ancien" "$CLE/Windows/$ancien.exe" "$CLE/macOS/$ancien" "$CLE/$ancien.ico"
-done
-rm -f "$CLE/Lancer Sentinel.bat" "$CLE/Lancer Sentinel.command"
 # Empreinte de cet ordinateur (SHA-1 de /etc/machine-id) : partout ailleurs, Gardien remonte la clé en lecture seule
 # sous Linux (src/protection/cle.rs).
 printf '%s' "$(cat /etc/machine-id)" | sha1sum | cut -d' ' -f1 >"$CLE/gardien.cle"

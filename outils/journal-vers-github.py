@@ -84,8 +84,7 @@ def main():
                       "les a laissés passer.", file=sys.stderr)
         e = confidentialite.masquer_autrui(e, masque)
         contexte, detail, sig = signature(e)
-        # Marque gardée de l'ancien nom : les tickets déjà ouverts la portent.
-        marque = f"sentinel-signature-{sig}"
+        marque = f"gardien-signature-{sig}"
         numero = ouverts.get(sig)
         # Ticket fermé (erreur corrigée) : si elle revient, c'est un nouveau ticket.
         if numero and gh("issue", "view", numero, "--json", "state", "-q", ".state").stdout.strip() != "OPEN":

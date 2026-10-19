@@ -154,7 +154,7 @@ command -v notify-send >/dev/null &&
 # La version macOS publiée est gardée comme une compilation récupérée (outils/deployer.sh ne la redemande pas) et
 # copiée sur la clé si elle est branchée : sinon la clé garderait celle d'avant jusqu'au déploiement suivant.
 rm -rf target/macos && mkdir -p target/macos && cp "$DOSSIER/mac/"* target/macos/
-CLE=$(find "/run/media/$USER" -maxdepth 2 \( -name gardien.cle -o -name sentinel.cle -o -name netscan.cle \) -printf '%h\n' 2>/dev/null | head -1)
+CLE=$(find "/run/media/$USER" -maxdepth 2 -name gardien.cle -printf '%h\n' 2>/dev/null | head -1)
 if [[ -n $CLE && -d $CLE/macOS ]] && cp -f target/macos/gardien "$CLE/macOS/gardien" && sync; then
   echo "Version macOS $VERSION copiée sur la clé."
   # Le manifeste de la clé, écrit par deployer.sh avant cette copie, la reprend : sinon le bilan suivant dirait le

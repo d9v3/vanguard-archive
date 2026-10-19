@@ -103,9 +103,8 @@ pub struct Disque {
 
 /// La clé GARDIEN (ou sa partition des journaux), reconnue à ses témoins.
 pub(crate) fn est_la_cle(racine: &Path) -> bool {
-    std::iter::once(crate::reseau::TEMOIN_CLE)
-        .chain(crate::reseau::ANCIENS_TEMOINS_CLE)
-        .chain([crate::journal::TEMOIN, "sentinel-journal.cle"])
+    [crate::reseau::TEMOIN_CLE, crate::journal::TEMOIN]
+        .iter()
         .any(|t| racine.join(t).is_file())
 }
 

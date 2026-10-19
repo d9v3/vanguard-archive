@@ -193,12 +193,11 @@ fn volumes_amovibles() -> Vec<(PathBuf, String)> {
 /// Pièges classiques des vers de clé USB, à la racine : raccourci qui imite un dossier (le vrai est caché),
 /// lanceur automatique, scripts. `entrees` = (nom, est un dossier).
 fn signes_de_ver(entrees: &[(String, bool)]) -> Vec<(Niveau, String)> {
-    // La clé de Gardien (ou préparée sous un ancien nom) a son autorun.inf et son lanceur : rien de suspect.
-    if entrees.iter().any(|(n, _)| {
-        std::iter::once(crate::reseau::TEMOIN_CLE)
-            .chain(crate::reseau::ANCIENS_TEMOINS_CLE)
-            .any(|t| n.eq_ignore_ascii_case(t))
-    }) {
+    // La clé de Gardien a son autorun.inf et son lanceur : rien de suspect.
+    if entrees
+        .iter()
+        .any(|(n, _)| n.eq_ignore_ascii_case(crate::reseau::TEMOIN_CLE))
+    {
         return Vec::new();
     }
     let mut signes = Vec::new();
@@ -597,25 +596,19 @@ fn clamav(portee: &Portee) {
         "node_modules",
         // Dossiers privés des services systemd (root seul) : illisibles, ils feraient compter des erreurs.
         "systemd-private-[^/]*",
-        // Quarantaine de Gardien, et sous ses anciens noms si le dossier n'a pas pu être renommé.
+        // Quarantaine de Gardien.
         ".local/share/gardien/quarantaine",
-        ".local/share/sentinel/quarantaine",
-        ".local/share/netscan/quarantaine",
         ".snapshots",
         ".Trash",
         // macOS : caches et conteneurs d'apps (énormes), quarantaine de Gardien.
         "Library/Caches",
         "Library/Containers",
         "Library/Application Support/gardien/quarantaine",
-        "Library/Application Support/sentinel/quarantaine",
     ];
     let exclusions: &[&str] = if matches!(portee, Portee::Dossier(_)) {
         &[
             ".local/share/gardien/quarantaine",
-            ".local/share/sentinel/quarantaine",
-            ".local/share/netscan/quarantaine",
             "Library/Application Support/gardien/quarantaine",
-            "Library/Application Support/sentinel/quarantaine",
         ]
     } else {
         &tout

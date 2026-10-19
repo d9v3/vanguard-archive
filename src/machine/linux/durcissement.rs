@@ -4,9 +4,6 @@ use super::*;
 
 /// Réglages du noyau posés par Gardien, gardés au redémarrage.
 pub(super) const SYSCTL_GARDIEN: &str = "/etc/sysctl.d/99-gardien.conf";
-/// Même fichier sous les anciens noms (sentinel jusqu'à 0.50, netscan jusqu'à 0.10.0) : repris puis remplacé à la
-/// prochaine correction.
-pub(super) const SYSCTL_ANCIENS: [&str; 2] = ["/etc/sysctl.d/99-sentinel.conf", "/etc/sysctl.d/99-netscan.conf"];
 
 /// Réglages de durcissement du noyau (lisibles sans droits) : (réglage, valeur sûre minimale, rôle en français
 /// et en anglais ; une constante ne peut pas choisir la langue, `reglages_faibles` le fait).
@@ -95,10 +92,7 @@ pub(super) fn durcissement_noyau() -> Constat {
     // Le fichier est réécrit en entier : on garde les réglages qu'une correction précédente y avait mis,
     // sinon ils sauteraient au prochain redémarrage.
     let lignes = fusion_sysctl(
-        &std::iter::once(SYSCTL_GARDIEN)
-            .chain(SYSCTL_ANCIENS)
-            .find_map(|f| std::fs::read_to_string(f).ok())
-            .unwrap_or_default(),
+        &std::fs::read_to_string(SYSCTL_GARDIEN).unwrap_or_default(),
         &faibles
             .iter()
             .map(|(c, _, m, _)| (c.replace('/', "."), *m))
@@ -117,7 +111,6 @@ pub(super) fn durcissement_noyau() -> Constat {
         ),
         &[
             &format!("printf '{lignes}' | sudo tee {SYSCTL_GARDIEN} >/dev/null"),
-            &format!("sudo rm -f {}", SYSCTL_ANCIENS.join(" ")),
             "sudo sysctl --system >/dev/null",
         ],
     )

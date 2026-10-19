@@ -545,9 +545,6 @@ pub fn nommer(qui: &str, surnom: Option<&str>) -> Result<String, String> {
 
 /// Fichier témoin à la racine de la clé USB de Gardien.
 pub const TEMOIN_CLE: &str = "gardien.cle";
-/// Témoins des clés préparées sous les anciens noms (sentinel jusqu'à 0.50, netscan jusqu'à 0.10.0), renommés au
-/// prochain déploiement.
-pub const ANCIENS_TEMOINS_CLE: [&str; 2] = ["sentinel.cle", "netscan.cle"];
 
 /// Volumes montés pour l'utilisateur, un sous-dossier par clé : /run/media/<utilisateur> (Arch, Fedora, openSUSE…)
 /// et /media/<utilisateur> (Debian, Ubuntu, Mint), où udisks range les clés selon la distribution.
@@ -564,7 +561,7 @@ pub fn cles_montees() -> Vec<PathBuf> {
         .collect()
 }
 
-/// Clé USB de Gardien branchée, si elle est trouvée (dossier racine contenant son témoin, ou celui d'un ancien nom).
+/// Clé USB de Gardien branchée, si elle est trouvée (dossier racine contenant son témoin).
 pub fn cle_usb() -> Option<PathBuf> {
     #[cfg(target_os = "linux")]
     let montages = cles_montees();
@@ -595,9 +592,7 @@ fn cle_du_programme() -> Option<PathBuf> {
 }
 
 fn est_une_cle(dossier: &std::path::Path) -> bool {
-    std::iter::once(TEMOIN_CLE)
-        .chain(ANCIENS_TEMOINS_CLE)
-        .any(|t| dossier.join(t).is_file())
+    dossier.join(TEMOIN_CLE).is_file()
 }
 
 /// Ce que la base garde sur les gens : (noms des réseaux, souvent celui du Wi-Fi ; noms et surnoms des appareils),
@@ -675,7 +670,7 @@ pub fn dossier_donnees() -> PathBuf {
 /// Données propres à cet ordinateur (quarantaine antivirus : on ne transporte pas de malware sur une clé).
 pub fn dossier_local() -> PathBuf {
     // Tests automatiques : un dossier jetable. Ils tournent sur l'ordinateur de développement : ses vraies données ne
-    // doivent être ni lues, ni écrites, ni renommées (le renommage des anciens noms, plus bas, l'avait fait).
+    // doivent être ni lues ni écrites.
     if cfg!(test) {
         return dossier_des_tests();
     }
@@ -687,19 +682,7 @@ pub fn dossier_local() -> PathBuf {
     let base = std::env::var_os("XDG_DATA_HOME")
         .map(PathBuf::from)
         .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share")));
-    let base = base.unwrap_or_default();
-    let dossier = base.join("gardien");
-    // Anciens noms (sentinel jusqu'à 0.50, netscan jusqu'à 0.10.0) : le dossier est renommé une fois, base,
-    // historique et quarantaine compris.
-    if !dossier.exists()
-        && let Some(ancien) = ["sentinel", "netscan"]
-            .iter()
-            .map(|n| base.join(n))
-            .find(|a| a.is_dir())
-    {
-        let _ = std::fs::rename(&ancien, &dossier);
-    }
-    dossier
+    base.unwrap_or_default().join("gardien")
 }
 
 /// Le dossier jetable des tests de ce processus (un par `cargo test`, nommé par son numéro de processus), retiré

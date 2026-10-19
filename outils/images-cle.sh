@@ -271,9 +271,9 @@ verifier_cache() {
 
 # --- Clé ------------------------------------------------------------------------------------------------------------
 
-# La clé GARDIEN montée (témoin gardien.cle, ou ceux des anciens noms), comme deployer.sh la cherche.
+# La clé GARDIEN montée (témoin gardien.cle), comme deployer.sh la cherche.
 point_cle() {
-  find "/run/media/$USER" -maxdepth 2 \( -name gardien.cle -o -name sentinel.cle -o -name netscan.cle \) \
+  find "/run/media/$USER" -maxdepth 2 -name gardien.cle \
     -printf '%h\n' 2>/dev/null | head -1
 }
 

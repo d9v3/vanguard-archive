@@ -135,14 +135,6 @@ function Ouvrir-Gardien {
 
 function Pause-Menu { Write-Host ''; Read-Host '  Entrée pour revenir au menu' | Out-Null }
 
-# Tâche du test automatique d'avant le renommage en Gardien (0.51.0) : elle lançait ce menu depuis l'ancien dossier
-# SENTINEL-TEST, qui n'existe plus. Remplacée par la nouvelle, qui pointe ici.
-$ancienneTache = 'Sentinel - tester chaque nouvelle version'
-if (Get-ScheduledTask -TaskName $ancienneTache -ErrorAction SilentlyContinue) {
-    Unregister-ScheduledTask -TaskName $ancienneTache -Confirm:$false -ErrorAction SilentlyContinue
-    if (-not (Surveillance-Active)) { Basculer-Surveillance }
-}
-
 while ($true) {
     Clear-Host
     $auto = Surveillance-Active

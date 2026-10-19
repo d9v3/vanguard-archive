@@ -136,7 +136,7 @@ def reseaux_wifi():
 
 
 def environnement(bac: Path, langue: str):
-    env = {k: v for k, v in os.environ.items() if not k.startswith(("GARDIEN_", "SENTINEL_", "NETSCAN_"))}
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GARDIEN_")}
     env.update(
         USER="capture",
         XDG_DATA_HOME=str(bac / "donnees"),

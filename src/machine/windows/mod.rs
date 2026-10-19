@@ -546,12 +546,12 @@ fn ports_ecoute(pare_feu_actif: bool, ip_lan: Option<&str>) -> Vec<Constat> {
     ) else {
         return vec![illisible("Ports en écoute")];
     };
-    // Ports déjà bloqués en entrée par une règle de Gardien (ou de sentinel, de netscan, ses anciens noms) active : le
+    // Ports déjà bloqués en entrée par une règle de Gardien active : le
     // port écoute toujours, mais n'est plus joignable.
     // Sans cette lecture, l'alerte et la même correction (une règle de plus à chaque fois) revenaient à chaque audit.
     let bloques: Vec<u16> = if pare_feu_actif {
         ps(
-            "@(Get-NetFirewallRule -DisplayName 'Gardien : bloquer *','sentinel : bloquer *','netscan : bloquer *' -ErrorAction SilentlyContinue | \
+            "@(Get-NetFirewallRule -DisplayName 'Gardien : bloquer *' -ErrorAction SilentlyContinue | \
             Where-Object { $_.Enabled -eq 'True' -and $_.Action -eq 'Block' -and $_.Direction -eq 'Inbound' } | \
             Get-NetFirewallPortFilter | ForEach-Object { $_.LocalPort }) -join ','",
         )

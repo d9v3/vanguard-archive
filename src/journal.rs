@@ -19,11 +19,9 @@ use std::sync::OnceLock;
 
 /// Fichier témoin à la racine de la partition GARDIENLOG.
 pub const TEMOIN: &str = "gardien-journal.cle";
-/// Témoin des clés préparées avant le renommage en Gardien (0.51.0), remplacé au prochain déploiement.
-const ANCIEN_TEMOIN: &str = "sentinel-journal.cle";
 
 fn a_un_temoin(dossier: &std::path::Path) -> bool {
-    dossier.join(TEMOIN).is_file() || dossier.join(ANCIEN_TEMOIN).is_file()
+    dossier.join(TEMOIN).is_file()
 }
 pub const FICHIER: &str = "journal-erreurs.txt";
 /// Au-delà, plus rien n'est ajouté : une erreur répétée en boucle ne remplit pas la partition.

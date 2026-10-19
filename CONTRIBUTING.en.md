@@ -175,11 +175,3 @@ only `--ecrire` erases the key.
 Gardien records them with nothing personal (on the key, or in its folder when the key is not plugged in). On
 deployment, `deployer.sh` brings them back and `outils/journal-vers-github.py` turns them into GitHub issues (label
 “journal”) with `gh`: one issue per error, repeats as comments. No GitHub password in the program or on the key.
-
-## Former names
-
-Gardien was called netscan (up to 0.10), then Sentinel (up to 0.50). It takes over what those names left on a
-computer: data folder (renamed once), key and journal partition (`sentinel.cle`, `sentinel-journal.cle` markers,
-`SENTINEL` and `SENTINELLOG` labels), monitoring (timer, scheduled task, launchd agent), firewall rules, files placed
-in `/etc`, backups, the `SENTINEL_LANG` and `SENTINEL_HIBP_CLE` variables. Only the `gardien` command starts the
-program: `sentinel` and `netscan` are gone.

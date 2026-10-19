@@ -139,8 +139,7 @@ def main():
         print("GitHub : changerait " + ", ".join(changements) + ".")
         return
     if renommage:
-        # Renommé comme le programme (Sentinel → Gardien) : GitHub redirige les anciennes adresses ; l'origine
-        # locale suit tout de suite.
+        # Renommé comme le programme : GitHub redirige les anciennes adresses ; l'origine locale suit tout de suite.
         lancer("gh", "repo", "rename", nom, "--repo", f"{proprietaire}/{depot}", "--yes")
         depot = nom
         lancer("git", "remote", "set-url", "origin", re.sub(r"[\w.-]+?(\.git)?/?$", rf"{nom}\1", origine, count=1))

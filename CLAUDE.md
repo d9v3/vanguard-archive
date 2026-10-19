@@ -44,9 +44,7 @@ Réponses à l'utilisateur en français, claires, avec le pourquoi.
 - Nouvelle dépendance : licence compatible GPL-3.0 (MIT, Apache, BSD…), puis `python3 outils/licences-tierces.py`
   et committer LICENCES-TIERCES.txt.
 - `unsafe` seulement avec un commentaire `// SAFETY :`.
-- Anciens noms (Sentinel jusqu'à 0.50, netscan jusqu'à 0.10) : leurs traces sur un ordinateur restent reconnues
-  (dossier des données, témoins et étiquettes de la clé, surveillance, règles du pare-feu, fichiers dans `/etc`,
-  sauvegardes, variables `SENTINEL_*`), voir les `ANCIEN*` du code. Ne pas les retirer.
+- Le programme s'appelle Gardien, point : aucun ancien nom dans le code, les textes, les commits ni sur GitHub.
 - Les tests ne touchent jamais les vraies données de l'ordinateur : sous `cfg(test)`, `reseau::dossier_local()` est un
   dossier jetable. Une migration ou une écriture ne doit pas pouvoir partir d'un test.
 

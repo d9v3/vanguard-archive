@@ -518,11 +518,7 @@ mod tests {
     #[test]
     fn seul_le_journal_quitte_gardienlog() {
         let deployer = include_str!("../outils/deployer.sh");
-        let permis = [
-            "\"$JOURNAL/journal-erreurs.txt\"",
-            "\"$JOURNAL/gardien-journal.cle\"",
-            "\"$JOURNAL/sentinel-journal.cle\"",
-        ];
+        let permis = ["\"$JOURNAL/journal-erreurs.txt\"", "\"$JOURNAL/gardien-journal.cle\""];
         for l in deployer.lines().filter(|l| l.contains("$JOURNAL")) {
             let sans_permis = permis.iter().fold(l.to_string(), |t, p| t.replace(p, ""));
             assert!(

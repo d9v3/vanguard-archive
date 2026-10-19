@@ -40,8 +40,6 @@
 
 In the menu, choose **1** (full check), then **2** (fix). Arrows, Enter, and Esc or Backspace to go back.
 
-> Gardien was called Sentinel up to version 0.50: its data, monitoring and key are carried over as they are.
-
 ## What Gardien does
 
 | Area | What Gardien does |
