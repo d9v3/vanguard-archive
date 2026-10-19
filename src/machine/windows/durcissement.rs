@@ -300,6 +300,47 @@ pub(super) fn juger_ntlm(niveau: Option<u32>) -> Option<Constat> {
     )
 }
 
+/// Accès anonyme : RestrictAnonymousSAM à 0 laisse n'importe qui sur le réseau lister les comptes de l'ordinateur
+/// sans mot de passe ; EveryoneIncludesAnonymous à 1 donne aux connexions anonymes les droits de « Tout le monde ».
+/// Les deux valeurs de Windows sont remises (1 et 0) : aucun usage courant n'en dépend.
+pub(super) fn juger_anonyme(restreint_sam: Option<u32>, tous_inclut_anonyme: Option<u32>) -> Option<Constat> {
+    let sam_ouvert = restreint_sam == Some(0);
+    let anonyme_dans_tous = tous_inclut_anonyme == Some(1);
+    if !sam_ouvert && !anonyme_dans_tous {
+        return None;
+    }
+    let lsa = r"HKLM:\SYSTEM\CurrentControlSet\Control\Lsa";
+    let mut commandes = Vec::new();
+    if sam_ouvert {
+        commandes.push(format!(
+            "Set-ItemProperty -LiteralPath '{lsa}' -Name RestrictAnonymousSAM -Value 1 -Type DWord"
+        ));
+    }
+    if anonyme_dans_tous {
+        commandes.push(format!(
+            "Set-ItemProperty -LiteralPath '{lsa}' -Name EveryoneIncludesAnonymous -Value 0 -Type DWord"
+        ));
+    }
+    let message = if sam_ouvert {
+        tr!(
+            "N'importe qui sur le réseau peut lister les comptes de l'ordinateur sans mot de passe : il ne reste plus qu'à deviner les mots de passe.",
+            "Anyone on the network can list the computer's accounts without a password: only the passwords are left to guess."
+        )
+    } else {
+        tr!(
+            "Une connexion anonyme du réseau a les droits de « Tout le monde » sur l'ordinateur.",
+            "An anonymous network connection gets “Everyone” rights on the computer."
+        )
+    };
+    Some(alerte(DURCI, Niveau::Moyen, message).corriger(
+        tr!(
+            "Remettre les réglages de Windows pour les connexions anonymes",
+            "Restore Windows' settings for anonymous connections"
+        ),
+        &commandes,
+    ))
+}
+
 /// Signature SMB : le client qui ne l'exige pas peut se faire relayer vers un faux partage. Une information, à
 /// activer soi-même (un vieux NAS sans signature ne répondrait plus) ; Windows 11 24H2 l'exige déjà.
 pub(super) fn juger_signature_smb(client_exige: Option<u32>) -> Option<Constat> {
@@ -455,6 +496,10 @@ pub(super) fn durcissement() -> Vec<Constat> {
         r"SYSTEM\CurrentControlSet\Control\Lsa",
         "LmCompatibilityLevel",
     )));
+    c.extend(juger_anonyme(
+        lire_dword(r"SYSTEM\CurrentControlSet\Control\Lsa", "RestrictAnonymousSAM"),
+        lire_dword(r"SYSTEM\CurrentControlSet\Control\Lsa", "EveryoneIncludesAnonymous"),
+    ));
     c.extend(juger_signature_smb(lire_dword(
         r"SYSTEM\CurrentControlSet\Services\LanmanWorkstation\Parameters",
         "RequireSecuritySignature",
@@ -565,6 +610,19 @@ mod tests {
         assert!(juger_ntlm(Some(3)).is_none() && juger_ntlm(Some(5)).is_none() && juger_ntlm(None).is_none());
         assert_eq!(juger_signature_smb(Some(0)).unwrap().probleme, Some(Niveau::Info));
         assert!(juger_signature_smb(Some(1)).is_none() && juger_signature_smb(None).is_none());
+        // Accès anonyme : seules les valeurs ouvertes sont remises, chacune par sa commande.
+        assert!(juger_anonyme(Some(1), Some(0)).is_none() && juger_anonyme(None, None).is_none());
+        let sam = juger_anonyme(Some(0), Some(0)).unwrap();
+        assert_eq!(sam.probleme, Some(Niveau::Moyen));
+        let remise = sam.correctif.unwrap();
+        assert!(
+            remise.automatique
+                && remise.commandes.len() == 1
+                && remise.commandes[0].contains("RestrictAnonymousSAM -Value 1")
+        );
+        let les_deux = juger_anonyme(Some(0), Some(1)).unwrap().correctif.unwrap();
+        assert!(les_deux.commandes.len() == 2 && les_deux.commandes[1].contains("EveryoneIncludesAnonymous -Value 0"));
+        assert!(les_deux.commandes[0].contains(r"'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa'"));
         // Connexion invité : la stratégie passe avant le réglage ; imposée, rien à lancer d'ici.
         assert!(juger_invite_smb(None, None).is_none() && juger_invite_smb(None, Some(0)).is_none());
         assert!(juger_invite_smb(Some(0), Some(1)).is_none());
