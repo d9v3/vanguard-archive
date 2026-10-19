@@ -55,7 +55,7 @@ In the menu, choose **1** (full check), then **2** (fix). Arrows, Enter, and Esc
 | **Protection** | Decoy files against ransomware, Windows Defender blocking, 308 YARA rules, antivirus, sandbox, integrity of critical files, leaked passwords, outbound connections, tech-support scam (remote control tools), camera and microphone, dangerous links, downloaded files, reversible quarantine. |
 | **Follow-up** | Hourly monitoring, monthly check-up, HTML report with the grade curve, learning on your computer. |
 | **Software and games** | The best software in 8 categories, from its official source; update everything at once; settings for gaming. |
-| **Tools** | Copy my files (checked copy) and check a copy, my computers (tracked by the key), key data protected by a passphrase, command guide, search in every menu. |
+| **Tools** | Copy my files (checked copy) and check a copy, check my drive (fake drives, speed), my computers (tracked by the key), key data protected by a passphrase, command guide, search in every menu. |
 
 <details>
 <summary><b>The details, feature by feature</b></summary>
@@ -119,6 +119,12 @@ reinstall: space is checked first, each file is read back and compared with the 
 nothing is deleted or overwritten, and an interrupted copy resumes where it stopped. **Check a copy**, later, is the
 restore test: files spread over the whole copy are read back from the disk and compared with their original; a disk
 that loses data shows up before the day you need it.
+
+**Check my drive** — does a USB stick or an external disk hold what it claims? Fake drives (a 16 GB chip sold as
+“1 TB”) accept everything and return garbage beyond their real size. After your consent, Gardien writes recognizable
+content into the free space, reads it all back bypassing the computer's memory, measures the write and read speeds,
+then erases everything; the files already on the drive are not touched. Quick (a quarter of the free space) or full
+(all of it, the only proof); never on the GARDIEN key or the system disk.
 
 **My computers** — each full check run with the GARDIEN key notes the computer there: nickname (“system · model”,
 renamable), grade, remaining problems (their category and level only, the five worst), date of the last check. The
@@ -289,6 +295,7 @@ Each menu entry is also a command.
 | `gardien startup` | startup programs: remove or put them back, after your consent; each removal is undone exactly |
 | `gardien specs [--json]` | computer specs; `--json` without the serial numbers |
 | `gardien copy-files [destination]` | copy my files to an external disk, checked copy |
+| `gardien check-drive [folder]` | check my drive: real capacity, speeds, bad blocks (writes into the free space after your consent, then erases) |
 | `gardien check-copy [folder]` | check a copy: read back from the disk and compared with the originals (restore test) |
 | `gardien antivirus [--complet] [folder]` | antivirus scan (computer, or a key / a folder) |
 | `gardien yara [--complet] [folder]` | YARA scan: 308 rules for malware families |

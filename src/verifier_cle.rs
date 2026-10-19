@@ -726,8 +726,6 @@ fn identifiant_d_essai() -> u64 {
 }
 
 /// « gardien verifier-cle [dossier] » : sans dossier, la clé se choisit parmi celles qui sont branchées.
-// Tant que main.rs n'appelle pas encore ce module (menu et sous-commande à brancher), tout serait compté mort.
-#[allow(dead_code)]
 pub fn commande(dossier: Option<&Path>) {
     println!();
     cadre(
@@ -950,7 +948,6 @@ pub fn commande(dossier: Option<&Path>) {
     }
 }
 
-#[allow(dead_code)]
 pub fn menu() {
     commande(None);
 }

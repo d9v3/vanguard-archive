@@ -89,6 +89,7 @@ Entrée ouvre celle en surbrillance, Échap efface. Au menu principal, elle trou
        Sauvegarder ou restaurer (surnoms, historique des réseaux)
        Copier mes fichiers vers un disque externe (copie vérifiée, rien d'effacé, reprise après interruption)
        Vérifier une copie : relue sur le disque et comparée aux originaux (test de restauration)
+       Vérifier ma clé : vraie capacité (fausses clés), vitesses, blocs en erreur ; écrit dans le libre, puis efface
        Mes ordinateurs : ceux où la clé a fait un bilan, leur note et leurs problèmes restants (gardien ordinateurs)
        Protéger les données de la clé : carnet des appareils chiffré par une phrase, demandée ailleurs seulement
  10  Guide des commandes › les commandes utiles de Linux, Windows, macOS et de tous les systèmes, par programme,

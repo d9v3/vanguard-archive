@@ -60,7 +60,7 @@ pour revenir.
 | **Protection** | Fichiers-pièges contre les rançongiciels, blocages de Windows Defender, 308 règles YARA, antivirus, bac à sable, intégrité des fichiers critiques, mots de passe fuités, connexions sortantes, faux technicien (logiciels de prise de contrôle à distance), caméra et micro, liens dangereux, fichiers téléchargés, quarantaine réversible. |
 | **Suivi** | Surveillance toutes les heures, entretien du mois, rapport HTML avec la courbe des notes, apprentissage sur ton ordinateur. |
 | **Logiciels et jeux** | Les meilleurs logiciels en 8 catégories, depuis leur source officielle ; mises à jour de tout d'un coup ; réglages pour jouer. |
-| **Outils** | Copier mes fichiers (copie vérifiée) et vérifier une copie, mes ordinateurs (suivis par la clé), données de la clé protégées par une phrase, guide des commandes, recherche dans tous les menus. |
+| **Outils** | Copier mes fichiers (copie vérifiée) et vérifier une copie, vérifier ma clé (fausses clés, vitesse), mes ordinateurs (suivis par la clé), données de la clé protégées par une phrase, guide des commandes, recherche dans tous les menus. |
 
 <details>
 <summary><b>Le détail, fonction par fonction</b></summary>
@@ -128,6 +128,13 @@ risquée ou une réinstallation : la place est vérifiée avant, chaque fichier 
 BLAKE3), rien n'est effacé ni écrasé, et une copie interrompue reprend où elle s'est arrêtée. **Vérifier une
 copie**, plus tard, fait le test de restauration : des fichiers répartis sur toute la copie sont relus sur le disque
 et comparés à leur original ; un disque qui perd des données se voit avant le jour où on en a besoin.
+
+**Vérifier ma clé** — une clé USB ou un disque externe tient-il ce qu'il annonce ? Les fausses clés (une puce de
+16 Go vendue « 1 To ») acceptent tout et rendent n'importe quoi au-delà de leur vraie taille. Après accord, Gardien
+écrit dans l'espace libre un contenu qu'il sait reconnaître, relit tout en contournant la mémoire de l'ordinateur,
+mesure les vitesses d'écriture et de lecture, puis efface tout ; les fichiers déjà sur la clé ne sont pas touchés.
+Rapide (un quart du libre) ou complet (tout le libre, la seule preuve) ; jamais sur la clé GARDIEN ni sur le disque
+du système.
 
 **Mes ordinateurs** — chaque bilan complet fait avec la clé GARDIEN y note l'ordinateur : surnom (« système ·
 modèle », renommable), note, problèmes restants (leur catégorie et leur niveau seulement, les cinq plus graves),
@@ -304,6 +311,7 @@ Chaque entrée du menu existe aussi en commande.
 | `gardien demarrage` | programmes au démarrage : les retirer ou les remettre, après accord ; chaque retrait s'annule |
 | `gardien fiche [--json]` | fiche de l'ordinateur ; `--json` sans les numéros de série |
 | `gardien copier-fichiers [destination]` | copier mes fichiers vers un disque externe, copie vérifiée |
+| `gardien verifier-cle [dossier]` | vérifier ma clé : capacité réelle, vitesses, blocs en erreur (écrit dans le libre après accord, puis efface) |
 | `gardien verifier-copie [dossier]` | vérifier une copie : relue sur le disque et comparée aux originaux (test de restauration) |
 | `gardien antivirus [--complet] [dossier]` | analyse antivirus (ordinateur, ou une clé / un dossier) |
 | `gardien yara [--complet] [dossier]` | analyse YARA : 308 règles de familles de logiciels malveillants |

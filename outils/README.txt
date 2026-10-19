@@ -88,6 +88,7 @@ highlighted one, Esc clears it. In the main menu, it also finds each tool of the
        Back up or restore (nicknames, network history)
        Copy my files to an external disk (checked copy, nothing deleted, resumes after an interruption)
        Check a copy: read back from the disk and compared with the originals (restore test)
+       Check my drive: real capacity (fake drives), speeds, bad blocks; writes into the free space, then erases
        My computers: those where the key ran a check, their grade and remaining problems (gardien ordinateurs)
        Protect the key's data: device record encrypted by a passphrase, asked only elsewhere
  10  Command guide › the useful commands of Linux, Windows, macOS and all systems, by program, each one
