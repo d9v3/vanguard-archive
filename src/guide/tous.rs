@@ -90,7 +90,7 @@ pub const PROGRAMMES: &[Programme] = &[
                 "vanguard motdepasse",
                 "vanguard password",
                 "Tes mots de passe ont-ils fuité ? Seuls 5 caractères de leur empreinte partent.",
-                "Have your passwords leaked? Only 5 characters of their fingerprint are sent.",
+                "Have your passwords leaked? Only 5 characters of their hash are sent.",
                 false,
             ),
             traduite(
@@ -173,7 +173,7 @@ pub const PROGRAMMES: &[Programme] = &[
             voir(
                 "ssh -v <utilisateur>@<adresse>",
                 "Raconte la connexion en détail, pour voir où elle échoue.",
-                "Tells the connection in detail, to see where it fails.",
+                "Shows each step of the connection, to see where it fails.",
             ),
             changer(
                 "scp <fichier> <utilisateur>@<adresse>:<dossier>",
@@ -284,7 +284,7 @@ pub const PROGRAMMES: &[Programme] = &[
             changer(
                 "git pull",
                 "Récupère les nouveautés du projet.",
-                "Gets the project's news.",
+                "Gets the project's latest changes.",
             ),
             changer(
                 "git switch -c <nom>",

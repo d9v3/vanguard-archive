@@ -6,9 +6,13 @@
 //! fait que lire (`lancement`). Tous les systèmes se lisent partout : sous Linux, on peut lire les commandes de
 //! Windows.
 
+mod arch;
+mod debian;
+mod fedora;
 mod lancement;
 mod linux;
 mod macos;
+mod omarchy;
 mod tous;
 mod windows;
 
@@ -127,10 +131,10 @@ impl Systeme {
     /// Ses programmes à lui : ceux d'une distribution, sans les communs.
     fn propres(self) -> &'static [Programme] {
         match self {
-            Systeme::Omarchy => linux::OMARCHY,
-            Systeme::Arch => linux::ARCH,
-            Systeme::Fedora => linux::FEDORA,
-            Systeme::Debian => linux::DEBIAN,
+            Systeme::Omarchy => omarchy::PROGRAMMES,
+            Systeme::Arch => arch::PROGRAMMES,
+            Systeme::Fedora => fedora::PROGRAMMES,
+            Systeme::Debian => debian::PROGRAMMES,
             Systeme::AutresLinux => linux::AUTRES,
             Systeme::Windows => windows::PROGRAMMES,
             Systeme::MacOs => macos::PROGRAMMES,
@@ -139,10 +143,68 @@ impl Systeme {
         }
     }
 
-    /// Les programmes de son menu, chacun avec le système sous lequel il s'affiche : ceux d'une distribution, puis
-    /// les communs à toutes, sous « Linux ».
+    /// Ses marches à suivre : des programmes dont chaque commande est une étape, dans l'ordre.
+    fn pas_a_pas(self) -> &'static [Programme] {
+        match self {
+            Systeme::Omarchy => omarchy::PAS_A_PAS,
+            Systeme::Arch => arch::PAS_A_PAS,
+            Systeme::Fedora => fedora::PAS_A_PAS,
+            Systeme::Debian => debian::PAS_A_PAS,
+            _ => &[],
+        }
+    }
+
+    /// Ce qu'il faut savoir de lui avant ses commandes : ses outils, ses habitudes, ses pièges.
+    fn presentation(self) -> &'static str {
+        match self {
+            Systeme::Omarchy => tr!(
+                "Omarchy, c'est Arch Linux avec le bureau Hyprland tout réglé. Tout se met à jour par omarchy update, qui prend un instantané avant ; le menu Omarchy (Super+Alt+Espace) règle et dépanne le reste. Ce qui vaut pour Arch vaut aussi ici.",
+                "Omarchy is Arch Linux with the Hyprland desktop fully set up. Everything updates through omarchy update, which takes a snapshot first; the Omarchy menu (Super+Alt+Space) sets up and troubleshoots the rest. What holds for Arch holds here too."
+            ),
+            Systeme::Arch => tr!(
+                "Arch est « en continu » : toujours à jour, sans grande mise à niveau. Les paquets viennent des dépôts officiels (pacman) et de l'AUR, écrits par la communauté (yay : à lire avant d'installer). Règle d'or : tout mettre à jour d'un coup, jamais à moitié, et lire les nouvelles d'Arch avant.",
+                "Arch is rolling: always up to date, with no big release upgrade. Packages come from the official repositories (pacman) and from the AUR, written by the community (yay: read them before installing). Golden rule: update everything at once, never halfway, and read the Arch news first."
+            ),
+            Systeme::Fedora => tr!(
+                "Fedora sort une version tous les six mois. Paquets RPM par dnf ; pilotes NVIDIA et codecs par le dépôt RPM Fusion ; applications aussi en Flatpak. SELinux protège les services : une « permission refusée » inexpliquée vient souvent de lui. Pare-feu : firewalld, par zones.",
+                "Fedora releases every six months. RPM packages through dnf; NVIDIA drivers and codecs through the RPM Fusion repository; apps also as Flatpak. SELinux protects services: an unexplained “permission denied” often comes from it. Firewall: firewalld, by zones."
+            ),
+            Systeme::Debian => tr!(
+                "Debian et Ubuntu (Mint, Pop!_OS…) : paquets .deb par apt, stables et testés ; toujours apt update avant d'installer. Ubuntu ajoute les snaps et les PPA, des dépôts de tiers (prudence). Le pare-feu ufw est coupé après l'installation ; AppArmor confine les programmes.",
+                "Debian and Ubuntu (Mint, Pop!_OS…): .deb packages through apt, stable and tested; always apt update before installing. Ubuntu adds snaps and PPAs, third-party repositories (be careful). The ufw firewall is off after installation; AppArmor confines programs."
+            ),
+            Systeme::AutresLinux => tr!(
+                "openSUSE et les autres distributions : paquets par zypper (openSUSE), pare-feu firewalld, instantanés snapper. Les programmes communs à Linux, plus bas, valent partout.",
+                "openSUSE and the other distributions: packages through zypper (openSUSE), firewalld firewall, snapper snapshots. The programs common to Linux, below, work everywhere."
+            ),
+            Systeme::Windows => tr!(
+                "Windows 11 (et 10) : logiciels par winget ou le Microsoft Store, mises à jour par Windows Update, sécurité par Microsoft Defender. Les commandes se tapent dans le Terminal (PowerShell).",
+                "Windows 11 (and 10): software through winget or the Microsoft Store, updates through Windows Update, security through Microsoft Defender. Commands are typed in the Terminal (PowerShell)."
+            ),
+            Systeme::MacOs => tr!(
+                "macOS : logiciels par l'App Store ou Homebrew (brew), mises à jour par softwareupdate, sauvegardes par Time Machine. sudo demande le mot de passe de ta session.",
+                "macOS: software through the App Store or Homebrew (brew), updates through softwareupdate, backups through Time Machine. sudo asks for your session password."
+            ),
+            Systeme::Tous => tr!(
+                "Les commandes qui s'écrivent pareil sous Linux, Windows et macOS : réseau, connexions à distance, projets git, et Vanguard lui-même en ligne de commande.",
+                "The commands typed the same way on Linux, Windows and macOS: network, remote connections, git projects, and Vanguard itself from the command line."
+            ),
+            Systeme::Linux => tr!(
+                "Les programmes communs à toutes les distributions de Linux.",
+                "The programs common to every Linux distribution."
+            ),
+        }
+    }
+
+    /// Les programmes de son menu, chacun avec le système sous lequel il s'affiche : ses marches à suivre, ses
+    /// programmes, puis, pour une distribution, les communs à toutes (sous « Linux »).
     fn programmes(self) -> Vec<(Systeme, &'static Programme)> {
-        let mut programmes: Vec<_> = self.propres().iter().map(|p| (self, p)).collect();
+        let mut programmes: Vec<_> = self
+            .pas_a_pas()
+            .iter()
+            .chain(self.propres())
+            .map(|p| (self, p))
+            .collect();
         if self.linux() && self != Systeme::Linux {
             programmes.extend(linux::COMMUNS.iter().map(|p| (Systeme::Linux, p)));
         }
@@ -326,6 +388,7 @@ const A_REMPLACER: &[(&str, &str)] = &[
     ("<source>", "<source>"),
     ("<texte>", "<text>"),
     ("<utilisateur>", "<user>"),
+    ("<version>", "<version>"),
     ("<étiquette>", "<label>"),
 ];
 
@@ -335,6 +398,18 @@ const NOMS_EN: &[(&str, &str)] = &[
     ("PowerShell : Defender", "PowerShell: Defender"),
     ("PowerShell : services", "PowerShell: services"),
     ("PowerShell : disques", "PowerShell: disks"),
+    ("Pas à pas : mettre à jour", "Step by step: update"),
+    ("Pas à pas : installer", "Step by step: install"),
+    ("Pas à pas : faire de la place", "Step by step: free up space"),
+    ("Pas à pas : réparer", "Step by step: repair"),
+    ("Pas à pas : réparer apt", "Step by step: repair apt"),
+    ("Pas à pas : pare-feu", "Step by step: firewall"),
+    ("Pas à pas : NVIDIA", "Step by step: NVIDIA"),
+    ("Pas à pas : NVIDIA et codecs", "Step by step: NVIDIA and codecs"),
+    ("Pas à pas : nouvelle version", "Step by step: new release"),
+    ("Pas à pas : SELinux", "Step by step: SELinux"),
+    ("Pas à pas : mises à jour auto", "Step by step: auto updates"),
+    ("Pas à pas : dépanner", "Step by step: troubleshoot"),
 ];
 
 /// Ses noms dans les deux langues, pour la recherche.
@@ -601,7 +676,8 @@ fn ordre_de_recherche() -> Vec<Systeme> {
 }
 
 /// Chaque programme du guide une seule fois, dans l'ordre de la recherche : un programme que plusieurs
-/// distributions montrent (pacman, ufw, les communs) se range sous la première.
+/// distributions montrent (pacman, ufw, les communs) se range sous la première. Il se reconnaît à son nom et à son
+/// rôle : les marches à suivre de chaque distribution portent le même nom (« Pas à pas : mettre à jour »).
 fn pages() -> Vec<Page> {
     let mut vus = HashSet::new();
     let mut pages = Vec::new();
@@ -610,7 +686,7 @@ fn pages() -> Vec<Page> {
             continue;
         };
         for (rang_programme, (systeme, programme)) in s.programmes().into_iter().enumerate() {
-            if vus.insert(programme.nom) {
+            if vus.insert((programme.nom, programme.role.0)) {
                 pages.push(Page {
                     systeme,
                     rang_systeme,
@@ -810,16 +886,26 @@ fn montrer_commande(s: Systeme, p: &Programme, c: &Commande) {
     }
 }
 
+/// Une marche à suivre (« Pas à pas : … ») plutôt qu'un programme : ses commandes sont des étapes.
+fn est_un_pas_a_pas(p: &Programme) -> bool {
+    SYSTEMES
+        .iter()
+        .any(|s| s.pas_a_pas().iter().any(|g| std::ptr::eq(g, p)))
+}
+
 /// Un programme à l'écran : chaque commande, son explication dessous. ↑ ↓ et Entrée (ou son numéro) ouvrent sa page ;
 /// taper un mot cherche parmi elles.
 fn montrer_programme(s: Systeme, p: &Programme) {
     let mut dernier = String::from("1");
     loop {
         print!("\x1b[2J\x1b[H");
-        let mut lignes = entete(
-            &[tr!("Guide", "Guide"), s.nom(), nom(p)],
-            &trf!("{} commandes", "{} commands", p.commandes.len()),
-        );
+        let n = p.commandes.len();
+        let droite = if est_un_pas_a_pas(p) {
+            trf!("{n} étapes", "{n} steps")
+        } else {
+            trf!("{n} commandes", "{n} commands")
+        };
+        let mut lignes = entete(&[tr!("Guide", "Guide"), s.nom(), nom(p)], &droite);
         let installe = if absent(s, p) {
             tr!(" (pas installé ici)", " (not installed here)")
         } else {
@@ -877,21 +963,26 @@ fn menu_systeme(s: Systeme) {
             &[tr!("Guide", "Guide"), s.nom()],
             &trf!("{} programmes", "{} programs", programmes.len()),
         );
+        lignes.extend(lignes_grises(s.presentation(), 2));
         lignes.extend(legende(s).into_iter().map(Ligne::Texte));
-        if !s.linux() {
+        // Des sections quand il y en a plusieurs : marches à suivre, programmes du système, communs à Linux.
+        let sections = s.linux() || !s.pas_a_pas().is_empty();
+        if !sections {
             lignes.push(Ligne::Texte(String::new()));
         }
         let mut section = None;
         for (j, &(proprietaire, p)) in programmes.iter().enumerate() {
-            if s.linux() && section != Some(proprietaire) {
-                section = Some(proprietaire);
-                let titre = if proprietaire == Systeme::Linux {
-                    tr!("COMMUNS À LINUX", "COMMON TO LINUX").to_string()
-                } else {
-                    s.nom().to_uppercase()
-                };
+            let titre = if est_un_pas_a_pas(p) {
+                tr!("PAS À PAS", "STEP BY STEP").to_string()
+            } else if proprietaire == Systeme::Linux {
+                tr!("COMMUNS À LINUX", "COMMON TO LINUX").to_string()
+            } else {
+                s.nom().to_uppercase()
+            };
+            if sections && section.as_ref() != Some(&titre) {
                 lignes.push(Ligne::Texte(String::new()));
                 lignes.push(Ligne::Texte(ligne_section(&titre)));
+                section = Some(titre);
             }
             let nom = if absent(proprietaire, p) {
                 format!("{} {DISCRET}{}{RESET}", nom(p), tr!("(absent)", "(missing)"))
@@ -1088,6 +1179,7 @@ pub fn executer(quoi: &str) {
     }
     if let Some(s) = systeme(quoi) {
         titre(&trf!("Guide des commandes › {}", "Command guide › {}", s.nom()));
+        afficher_aligne("  ", s.presentation(), 2, GRIS);
         for l in legende(s) {
             println!("{l}");
         }
@@ -1345,18 +1437,19 @@ mod tests {
     /// ne le compte qu'une fois : deux programmes du même nom sont le même.
     #[test]
     fn les_programmes_partages_sont_les_memes() {
-        let mut vus: std::collections::HashMap<&str, Vec<&str>> = std::collections::HashMap::new();
+        let mut vus: std::collections::HashMap<(&str, &str), Vec<&str>> = std::collections::HashMap::new();
         for s in tous_les_systemes() {
-            for p in s.propres() {
+            for p in s.propres().iter().chain(s.pas_a_pas()) {
                 let lignes: Vec<&str> = p.commandes.iter().map(|c| c.ligne).collect();
-                if let Some(deja) = vus.insert(p.nom, lignes.clone()) {
+                if let Some(deja) = vus.insert((p.nom, p.role.0), lignes.clone()) {
                     assert_eq!(deja, lignes, "deux programmes « {} » différents", p.nom);
                 }
             }
         }
         // Une distribution : les siens d'abord, puis les communs, sous « Linux ».
         let fedora = Systeme::Fedora.programmes();
-        assert_eq!(fedora[0].1.nom, "dnf, rpm-ostree");
+        assert_eq!(fedora[0].1.nom, "Pas à pas : mettre à jour");
+        assert!(fedora.iter().any(|(_, p)| p.nom == "dnf"));
         assert_eq!(fedora.last().unwrap().0, Systeme::Linux);
         assert!(
             Systeme::Windows

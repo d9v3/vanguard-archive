@@ -25,9 +25,11 @@ chaque version garde son étiquette dans le dépôt (`git checkout v0.62.0`, par
   sur un site nouveau (sa mémoire répondait en moins d'une milliseconde), dnf-automatic
   qui ne fait que télécharger, réglages d'APT lus dans leur ordre, interface anglaise complète, nombres à virgule écrits à la française.
 - **Guide des commandes refait.** Une entrée par système : Omarchy, Arch, Fedora, Debian et Ubuntu, autres Linux,
-  Windows 11, macOS ; chaque distribution montre ses programmes, puis ceux communs à Linux. On tape ce qu'on cherche
-  et les commandes paraissent au fil de la frappe ; chacune a sa page, pour la copier, ou la lancer ici quand elle ne
-  fait que lire (sa sortie défile dans Vanguard, Échap l'arrête).
+  Windows 11, macOS ; chaque distribution a sa présentation, ses marches à suivre « Pas à pas » (mettre à jour,
+  installer, faire de la place, réparer, pare-feu, NVIDIA, nouvelle version…) et ses programmes, puis ceux communs à
+  Linux ; 650 commandes. On tape ce qu'on cherche et les commandes paraissent au fil de la frappe ; chacune a sa
+  page, pour la copier, ou la lancer ici quand elle ne fait que lire (sa sortie défile dans Vanguard, Échap
+  l'arrête).
 - **Prédiction des mots dans tous les menus** et les listes à cocher : la fin du mot le plus probable s'affiche en
   gris, Tab la complète.
 - **Une seule publication par jour.** Ce journal regroupe les versions par jour ; seule la dernière garde sa page de

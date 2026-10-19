@@ -1,5 +1,6 @@
-//! Guide : les commandes de Linux, par programme. Les gestionnaires de paquets des grandes distributions y sont
-//! tous : on aide parfois quelqu'un qui n'a pas la même.
+//! Guide : les commandes communes à toutes les distributions de Linux, puis ce que plusieurs partagent (ufw,
+//! firewalld) et openSUSE, rangé dans « Autres Linux ». Chaque distribution a son fichier (arch, omarchy, fedora,
+//! debian).
 
 use super::{Obstacle, Programme, changer, voir};
 
@@ -574,300 +575,8 @@ pub const COMMUNS: &[Programme] = &[
     },
 ];
 
-pub const OMARCHY: &[Programme] = &[OMARCHY_CLI, PACMAN, YAY, UFW];
-pub const ARCH: &[Programme] = &[PACMAN, YAY, UFW];
-pub const FEDORA: &[Programme] = &[DNF, FIREWALLD];
-pub const DEBIAN: &[Programme] = &[APT, SNAP, UFW];
 /// openSUSE, et ce que le guide ne range pas à part : les programmes communs y suffisent.
 pub const AUTRES: &[Programme] = &[ZYPPER, FIREWALLD];
-
-/// Omarchy, ses outils en ligne de commande.
-const OMARCHY_CLI: Programme = Programme {
-    nom: "omarchy",
-    role: ("Omarchy : mises à jour, réglages", "Omarchy: updates, settings"),
-    executable: "omarchy",
-    commandes: &[
-        changer(
-            "omarchy update",
-            "Met à jour Omarchy et le système, instantané et migrations compris.",
-            "Updates Omarchy and the system, snapshot and migrations included.",
-        ),
-        voir(
-            "omarchy update available",
-            "Une nouvelle version d'Omarchy est-elle sortie ?",
-            "Is a new Omarchy version out?",
-        ),
-        voir(
-            "omarchy update analyze logs",
-            "Cherche les pannes connues dans le journal de la dernière mise à jour.",
-            "Looks for known failures in the last update's log.",
-        ),
-        changer(
-            "omarchy pkg add <paquet>",
-            "Installe un paquet s'il manque.",
-            "Installs a package if it is missing.",
-        ),
-        changer(
-            "omarchy pkg drop <paquet>",
-            "Désinstalle un paquet.",
-            "Removes a package.",
-        ),
-        changer(
-            "omarchy snapshot create",
-            "Crée un instantané du système (snapper).",
-            "Creates a system snapshot (snapper).",
-        ),
-        changer(
-            "omarchy snapshot restore",
-            "Revient à un instantané.",
-            "Goes back to a snapshot.",
-        ),
-        changer(
-            "omarchy restart wifi",
-            "Débloque et relance le Wi-Fi.",
-            "Unblocks and restarts Wi-Fi.",
-        ),
-        changer(
-            "omarchy restart audio",
-            "Relance le son, et les cartes son USB bloquées.",
-            "Restarts audio, and stuck USB sound cards.",
-        ),
-        changer(
-            "omarchy restart bluetooth",
-            "Débloque et relance le Bluetooth.",
-            "Unblocks and restarts Bluetooth.",
-        ),
-        changer(
-            "omarchy restart shell",
-            "Relance la barre d'Omarchy.",
-            "Restarts the Omarchy bar.",
-        ),
-        voir(
-            "omarchy debug --print --no-sudo",
-            "Les informations de dépannage, à joindre à une demande d'aide (relis-les avant).",
-            "Troubleshooting information, to attach to a help request (read it first).",
-        ),
-        voir(
-            "omarchy commands",
-            "Toutes les commandes d'Omarchy.",
-            "Every Omarchy command.",
-        ),
-    ],
-};
-
-/// Les paquets d'Arch et de ses dérivées (Omarchy, Manjaro).
-const PACMAN: Programme = Programme {
-    nom: "pacman",
-    role: ("paquets : Arch, Manjaro, Omarchy", "packages: Arch, Manjaro, Omarchy"),
-    executable: "pacman",
-    commandes: &[
-        changer(
-            "sudo pacman -Syu",
-            "Met tout le système à jour (sous Omarchy : omarchy update).",
-            "Updates the whole system (on Omarchy: omarchy update).",
-        ),
-        changer("sudo pacman -S <paquet>", "Installe un paquet.", "Installs a package."),
-        changer(
-            "sudo pacman -Rns <paquet>",
-            "Désinstalle un paquet et ses dépendances devenues inutiles.",
-            "Removes a package and the dependencies it no longer needs.",
-        ),
-        voir(
-            "pacman -Ss <mot>",
-            "Cherche un paquet dans les dépôts.",
-            "Searches the repositories for a package.",
-        ),
-        voir(
-            "pacman -Qi <paquet>",
-            "Un paquet installé : version, taille, dépendances.",
-            "An installed package: version, size, dependencies.",
-        ),
-        voir(
-            "pacman -Qo <fichier>",
-            "Le paquet qui a installé ce fichier.",
-            "The package that installed this file.",
-        ),
-        voir(
-            "pacman -Qdtq",
-            "Les paquets orphelins : installés pour un autre, plus utilisés.",
-            "Orphan packages: installed for another one, no longer used.",
-        ),
-        voir(
-            "pacman -Qm",
-            "Les paquets installés hors des dépôts (AUR, à la main).",
-            "Packages installed outside the repositories (AUR, by hand).",
-        ),
-        voir(
-            "checkupdates",
-            "Les mises à jour disponibles, sans rien installer (pacman-contrib).",
-            "Available updates, installing nothing (pacman-contrib).",
-        ),
-        changer(
-            "sudo paccache -rk2",
-            "Garde les deux dernières versions des paquets téléchargés, efface les autres.",
-            "Keeps the last two versions of downloaded packages, deletes the others.",
-        ),
-        changer(
-            "sudo rm /var/lib/pacman/db.lck",
-            "Débloque pacman après un arrêt brutal, seulement si aucun pacman ne tourne.",
-            "Unlocks pacman after a crash, only if no pacman is running.",
-        ),
-    ],
-};
-
-/// Les paquets de l'AUR (Arch, Omarchy).
-const YAY: Programme = Programme {
-    nom: "yay",
-    role: ("paquets de l'AUR (Arch)", "AUR packages (Arch)"),
-    executable: "yay",
-    commandes: &[
-        changer(
-            "yay",
-            "Met à jour le système et les paquets de l'AUR.",
-            "Updates the system and the AUR packages.",
-        ),
-        changer(
-            "yay -S <paquet>",
-            "Installe depuis l'AUR : lis le PKGBUILD avant, personne ne l'a vérifié pour toi.",
-            "Installs from the AUR: read the PKGBUILD first, nobody checked it for you.",
-        ),
-        voir(
-            "yay -Ss <mot>",
-            "Cherche dans les dépôts et dans l'AUR.",
-            "Searches the repositories and the AUR.",
-        ),
-        changer(
-            "yay -Yc",
-            "Retire les dépendances devenues inutiles.",
-            "Removes dependencies no longer needed.",
-        ),
-    ],
-};
-
-/// Les paquets de Debian et de ses dérivées (Ubuntu, Mint).
-const APT: Programme = Programme {
-    nom: "apt, dpkg",
-    role: ("paquets : Debian, Ubuntu, Mint", "packages: Debian, Ubuntu, Mint"),
-    executable: "apt",
-    commandes: &[
-        changer(
-            "sudo apt update && sudo apt upgrade",
-            "Relit la liste des paquets, puis met tout à jour.",
-            "Refreshes the package list, then updates everything.",
-        ),
-        changer(
-            "sudo apt install <paquet>",
-            "Installe un paquet.",
-            "Installs a package.",
-        ),
-        changer(
-            "sudo apt remove <paquet>",
-            "Désinstalle un paquet ; sa configuration reste.",
-            "Removes a package; its configuration stays.",
-        ),
-        changer(
-            "sudo apt purge <paquet>",
-            "Désinstalle un paquet et sa configuration.",
-            "Removes a package and its configuration.",
-        ),
-        changer(
-            "sudo apt autoremove",
-            "Retire les paquets devenus inutiles (la liste est montrée avant).",
-            "Removes packages no longer needed (the list is shown first).",
-        ),
-        voir("apt search <mot>", "Cherche un paquet.", "Searches for a package."),
-        voir(
-            "apt show <paquet>",
-            "Ce qu'on sait d'un paquet.",
-            "What is known about a package.",
-        ),
-        voir(
-            "apt list --upgradable",
-            "Les mises à jour disponibles (après apt update).",
-            "Available updates (after apt update).",
-        ),
-        voir(
-            "dpkg -S <fichier>",
-            "Le paquet qui a installé ce fichier.",
-            "The package that installed this file.",
-        ),
-        changer(
-            "sudo dpkg --configure -a",
-            "Termine une installation interrompue.",
-            "Finishes an interrupted installation.",
-        ),
-        changer(
-            "sudo apt --fix-broken install",
-            "Répare les dépendances cassées.",
-            "Repairs broken dependencies.",
-        ),
-    ],
-};
-
-/// Les paquets de Fedora et de RHEL.
-const DNF: Programme = Programme {
-    nom: "dnf, rpm-ostree",
-    role: ("paquets : Fedora, RHEL", "packages: Fedora, RHEL"),
-    executable: "dnf",
-    commandes: &[
-        changer(
-            "sudo dnf upgrade --refresh",
-            "Met tout le système à jour.",
-            "Updates the whole system.",
-        ),
-        changer(
-            "sudo dnf install <paquet>",
-            "Installe un paquet.",
-            "Installs a package.",
-        ),
-        changer(
-            "sudo dnf remove <paquet>",
-            "Désinstalle un paquet.",
-            "Removes a package.",
-        ),
-        voir("dnf search <mot>", "Cherche un paquet.", "Searches for a package."),
-        voir(
-            "dnf provides <fichier>",
-            "Le paquet qui fournit ce fichier.",
-            "The package that provides this file.",
-        ),
-        voir(
-            "dnf check-upgrade",
-            "Les mises à jour disponibles.",
-            "Available updates.",
-        ),
-        voir(
-            "dnf history list",
-            "L'historique des installations et des mises à jour.",
-            "History of installs and updates.",
-        ),
-        changer(
-            "sudo dnf history undo <numéro>",
-            "Annule une opération de cet historique.",
-            "Undoes an operation from that history.",
-        ),
-        changer(
-            "sudo dnf autoremove",
-            "Retire les paquets devenus inutiles.",
-            "Removes packages no longer needed.",
-        ),
-        voir(
-            "rpm-ostree status",
-            "Systèmes atomiques (Silverblue, Kinoite) : l'image en service et la précédente.",
-            "Atomic systems (Silverblue, Kinoite): the image in use and the previous one.",
-        ),
-        changer(
-            "sudo rpm-ostree upgrade",
-            "Prépare l'image suivante, active au prochain démarrage.",
-            "Prepares the next image, active at the next boot.",
-        ),
-        changer(
-            "sudo rpm-ostree rollback",
-            "Revient à l'image précédente au prochain démarrage.",
-            "Goes back to the previous image at the next boot.",
-        ),
-    ],
-};
 
 /// Les paquets d'openSUSE.
 const ZYPPER: Programme = Programme {
@@ -909,22 +618,8 @@ const ZYPPER: Programme = Programme {
     ],
 };
 
-/// Les applications Snap (Ubuntu).
-const SNAP: Programme = Programme {
-    nom: "snap",
-    role: ("applications Snap (Ubuntu)", "Snap apps (Ubuntu)"),
-    executable: "snap",
-    commandes: &[
-        voir("snap list", "Les Snap installés.", "Installed snaps."),
-        changer("sudo snap refresh", "Les met à jour.", "Updates them."),
-        voir("snap find <mot>", "Cherche un Snap.", "Searches for a snap."),
-        changer("sudo snap install <paquet>", "Installe un Snap.", "Installs a snap."),
-        changer("sudo snap remove <paquet>", "Désinstalle un Snap.", "Removes a snap."),
-    ],
-};
-
 /// Le pare-feu d'Ubuntu, de Mint et d'Omarchy.
-const UFW: Programme = Programme {
+pub(super) const UFW: Programme = Programme {
     nom: "ufw",
     role: ("pare-feu (Ubuntu, Mint, Omarchy)", "firewall (Ubuntu, Mint, Omarchy)"),
     executable: "ufw",
@@ -954,11 +649,42 @@ const UFW: Programme = Programme {
             "Retire la règle qui ouvrait ce port.",
             "Removes the rule that opened this port.",
         ),
+        voir(
+            "sudo ufw status numbered",
+            "Les règles, numérotées.",
+            "The rules, numbered.",
+        ),
+        changer(
+            "sudo ufw delete <numéro>",
+            "Retire la règle de ce numéro.",
+            "Removes the rule with this number.",
+        ),
+        changer(
+            "sudo ufw default deny incoming",
+            "Refuse par défaut tout ce qui entre.",
+            "Refuses everything coming in by default.",
+        ),
+        changer("sudo ufw allow ssh", "Ouvre SSH (port 22).", "Opens SSH (port 22)."),
+        changer(
+            "sudo ufw limit ssh",
+            "Ouvre SSH en freinant les essais de mot de passe à la chaîne.",
+            "Opens SSH while slowing down repeated password attempts.",
+        ),
+        changer(
+            "sudo ufw allow from <adresse>",
+            "Laisse entrer ce qui vient d'une adresse ou d'un réseau (192.168.1.0/24).",
+            "Lets in what comes from an address or a network (192.168.1.0/24).",
+        ),
+        changer(
+            "sudo ufw logging on",
+            "Note les connexions bloquées dans le journal.",
+            "Logs the blocked connections.",
+        ),
     ],
 };
 
 /// Le pare-feu de Fedora et d'openSUSE.
-const FIREWALLD: Programme = Programme {
+pub(super) const FIREWALLD: Programme = Programme {
     nom: "firewall-cmd",
     role: ("pare-feu firewalld (Fedora, SUSE)", "firewalld firewall (Fedora, SUSE)"),
     executable: "firewall-cmd",
@@ -987,6 +713,36 @@ const FIREWALLD: Programme = Programme {
             "sudo systemctl enable --now firewalld",
             "Rallume firewalld s'il a été arrêté.",
             "Turns firewalld back on if it was stopped.",
+        ),
+        voir(
+            "firewall-cmd --get-active-zones",
+            "Les zones actives, et les cartes réseau de chacune.",
+            "The active zones, and the network cards of each.",
+        ),
+        voir(
+            "firewall-cmd --get-default-zone",
+            "La zone par défaut (souvent public, ou FedoraWorkstation).",
+            "The default zone (often public, or FedoraWorkstation).",
+        ),
+        voir(
+            "firewall-cmd --list-services",
+            "Les services ouverts dans la zone par défaut.",
+            "The services open in the default zone.",
+        ),
+        voir(
+            "firewall-cmd --get-services",
+            "Les noms de services connus (ssh, http, samba…).",
+            "The known service names (ssh, http, samba…).",
+        ),
+        changer(
+            "sudo firewall-cmd --permanent --add-service=<service>",
+            "Ouvre un service pour de bon (puis --reload).",
+            "Opens a service for good (then --reload).",
+        ),
+        changer(
+            "sudo firewall-cmd --permanent --remove-service=<service>",
+            "Referme un service (puis --reload).",
+            "Closes a service again (then --reload).",
         ),
     ],
 };

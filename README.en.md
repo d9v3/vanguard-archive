@@ -193,8 +193,9 @@ patiently. "What Vanguard has learned" shows everything and lets you forget.
 
 **Command guide** — the useful commands of Omarchy, Arch, Fedora, Debian and Ubuntu (and other Linux), Windows 11,
 macOS, and the ones typed the same way everywhere (Vanguard, ping, nslookup, ssh, curl, git…), each one explained; ⚠
-marks the ones that change something. Each distribution shows its own programs (pacman, dnf, apt…), then those common
-to Linux. You type what you are looking for: commands show up as you type, and Tab completes the word. Each command
+marks the ones that change something. Each distribution has its introduction, its “Step by step” guides (update,
+install, free up space, repair, firewall, NVIDIA drivers, new release…), its programs (pacman, dnf, apt, SELinux,
+AppArmor…), then those common to Linux. You type what you are looking for: commands show up as you type, and Tab completes the word. Each command
 has its page: copy it, to type it here or on the computer of the person you help, or run it here when it only reads;
 its output scrolls in Vanguard, and Esc stops it. Every system can be read everywhere (Windows commands from Linux,
 for example), and the guide tells when a program is missing on this computer.

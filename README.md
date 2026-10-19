@@ -206,8 +206,9 @@ veille) est revérifié plus patiemment. « Ce que Vanguard a appris » montre t
 
 **Guide des commandes** — les commandes utiles d'Omarchy, d'Arch, de Fedora, de Debian et Ubuntu (et des autres
 Linux), de Windows 11, de macOS, et celles qui s'écrivent pareil partout (Vanguard, ping, nslookup, ssh, curl, git…),
-chacune expliquée ; ⚠ marque celles qui changent quelque chose. Chaque distribution montre ses programmes (pacman,
-dnf, apt…), puis ceux communs à Linux. On tape ce qu'on cherche : les commandes paraissent au fil de la frappe, et Tab
+chacune expliquée ; ⚠ marque celles qui changent quelque chose. Chaque distribution a sa présentation, ses marches à
+suivre « Pas à pas » (mettre à jour, installer, faire de la place, réparer, pare-feu, pilotes NVIDIA, nouvelle
+version…), ses programmes (pacman, dnf, apt, SELinux, AppArmor…), puis ceux communs à Linux. On tape ce qu'on cherche : les commandes paraissent au fil de la frappe, et Tab
 complète le mot. Chaque commande a sa page : la copier, pour la taper ici ou chez la personne qu'on aide, ou la
 lancer ici quand elle ne fait que lire ; sa sortie défile dans Vanguard, et Échap l'arrête. Tous les systèmes sont
 lisibles partout (les commandes de Windows depuis Linux, par exemple), et le guide dit si un programme manque sur cet
