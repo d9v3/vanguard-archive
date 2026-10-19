@@ -331,8 +331,8 @@ enum Commande {
     /// partition VANGUARDLOG de la clé).
     #[command(visible_alias = "computers")]
     Ordinateurs,
-    /// Mettre Vanguard à jour sur cet ordinateur : la copie qu'y lancent la surveillance, l'entretien et le raccourci,
-    /// remplacée sur accord par celle de la clé VANGUARD quand la clé est plus récente (jamais l'inverse).
+    /// Mettre Vanguard à jour sur cet ordinateur : lancé depuis une clé VANGUARD plus récente, la copie qu'y lancent la
+    /// surveillance, l'entretien et le raccourci est remplacée sur accord par ce programme (jamais l'inverse).
     #[command(name = "se-mettre-a-jour", visible_alias = "self-update")]
     SeMettreAJour,
     /// Les règles du bilan déclarées pour ce système : identifiant stable, sujet, références de durcissement.
@@ -478,11 +478,11 @@ fn avertir_si_root() {
 #[cfg(windows)]
 fn avertir_si_root() {}
 
-/// État affiché en tête du menu : dernier bilan, dernier test de connexion, clé, surveillance.
+/// État affiché en tête du menu : dernier bilan, dernier test de connexion, clé, surveillance, et un avis s'il y en
+/// a un (copie périmée, nouvelle version sur la clé).
 fn etat_du_menu(surveillance_active: bool) -> Vec<String> {
-    let mut lignes = Vec::new();
     let historique = historique::charger();
-    lignes.push(match historique.last() {
+    let bilan = match historique.last() {
         Some(b) => {
             let note = |s: Option<u32>| s.map_or_else(|| "—".to_string(), etiquette_note);
             trf!(
@@ -497,8 +497,8 @@ fn etat_du_menu(surveillance_active: bool) -> Vec<String> {
             "  {GRIS}Aucun bilan encore : commence par 1.{RESET}",
             "  {GRIS}No check yet: start with 1.{RESET}"
         ),
-    });
-    if let Some(c) = reseau::connexion::historique().last() {
+    };
+    let connexion = reseau::connexion::historique().last().map(|c| {
         let debit = |d: Option<f64>| d.map_or_else(|| "?".to_string(), |d| format!("{d:.0}"));
         let bufferbloat = c
             .hausse_ms
@@ -507,14 +507,14 @@ fn etat_du_menu(surveillance_active: bool) -> Vec<String> {
                 format!("{}{n}{RESET}", couleur(niveau))
             })
             .unwrap_or_default();
-        lignes.push(trf!(
+        trf!(
             "  {GRIS}Connexion{RESET}      {:.0} ms · ↓ {} ↑ {} Mbit/s · bufferbloat {bufferbloat}",
             "  {GRIS}Connection{RESET}     {:.0} ms · ↓ {} ↑ {} Mbit/s · bufferbloat {bufferbloat}",
             c.internet_ms,
             debit(c.descendant),
             debit(c.montant)
-        ));
-    }
+        )
+    });
     let cle = if reseau::cle_protegee().is_some() {
         format!(
             "{VERT}{}{RESET}",
@@ -536,14 +536,25 @@ fn etat_du_menu(surveillance_active: bool) -> Vec<String> {
     } else {
         format!("{GRIS}{}{RESET}", tr!("surveillance coupée", "monitoring off"))
     };
-    lignes.push(format!("  {cle} {GRIS}·{RESET} {surveillance}"));
-    if let Some(a) = protection::manifeste::avertissement_perime() {
-        lignes.push(format!("  {}⚠{RESET} {a}", couleur(risk::Niveau::Moyen)));
+    let cle = format!("  {cle} {GRIS}·{RESET} {surveillance}");
+    // La copie périmée d'abord : remettre la clé à jour passe avant d'en recopier le programme.
+    let avis = protection::manifeste::avertissement_perime()
+        .map(|a| format!("  {}⚠{RESET} {a}", couleur(risk::Niveau::Moyen)))
+        .or_else(|| {
+            touche_de(Action::MettreAJour)
+                .and_then(|t| mise_a_jour::avertissement(&t))
+                .map(|a| format!("  {ACCENT}↑{RESET} {a}"))
+        });
+    lignes_d_etat(bilan, connexion, cle, avis)
+}
+
+/// Les lignes d'état, trois au plus : avec plus, le menu ne tiendrait plus dans un terminal de 24 lignes (test). Un
+/// avis prend la place de la connexion, la ligne la moins utile ici.
+fn lignes_d_etat(bilan: String, connexion: Option<String>, cle: String, avis: Option<String>) -> Vec<String> {
+    match avis {
+        Some(avis) => vec![bilan, cle, avis],
+        None => [Some(bilan), connexion, Some(cle)].into_iter().flatten().collect(),
     }
-    if let Some(a) = touche_de(Action::MettreAJour).and_then(|t| mise_a_jour::avertissement(&t)) {
-        lignes.push(format!("  {ACCENT}↑{RESET} {a}"));
-    }
-    lignes
 }
 
 /// La touche d'un outil au menu principal (« 9.9 » : groupe 9, 9e outil proposé ici), comme la recherche la tape.
@@ -1382,9 +1393,9 @@ const AIDES_EN: &[(&str, &str)] = &[
     ("raccourci", "Shortcut on this computer: Vanguard copied here and started with one click (applications menu on \
                    Linux, Desktop on Windows and macOS). Without argument: the state, then the offer"),
     ("regles", "The check rules declared for this system: stable identifier, subject, hardening references"),
-    ("se-mettre-a-jour", "Update Vanguard on this computer: the copy that monitoring, maintenance and the shortcut \
-                          start there, replaced after your consent by the VANGUARD key's when the key is newer (never \
-                          the other way)"),
+    ("se-mettre-a-jour", "Update Vanguard on this computer: started from a newer VANGUARD key, the copy that \
+                          monitoring, maintenance and the shortcut start there is replaced by this program after your \
+                          consent (never the other way)"),
     ("ordinateurs", "My computers: those where the VANGUARD key ran a check, their grade and remaining problems (on the \
      key's VANGUARDLOG partition)"),
     ("depanner", "Troubleshoot step by step: no Internet, Wi-Fi dropping, slow computer, no sound, printer, disk full; \
@@ -1655,8 +1666,21 @@ mod tests_menu {
 
     #[test]
     fn le_menu_principal_tient_dans_24_lignes() {
-        // Trois lignes d'état (dernier bilan, connexion, clé) : le menu le plus haut. Avec l'aide et la saisie, il doit
-        // tenir dans un terminal de 24 lignes, sinon les flèches ne marchent plus.
+        // Trois lignes d'état au plus (dernier bilan, connexion ou avis, clé) : le menu le plus haut. Avec l'aide et
+        // la saisie, il doit tenir dans un terminal de 24 lignes, sinon les flèches ne marchent plus.
+        let s = |t: &str| t.to_string();
+        for (connexion, avis) in [
+            (None, None),
+            (Some(s("c")), None),
+            (None, Some(s("a"))),
+            (Some(s("c")), Some(s("a"))),
+        ] {
+            assert!(lignes_d_etat(s("b"), connexion, s("k"), avis).len() <= 3);
+        }
+        assert_eq!(
+            lignes_d_etat(s("b"), Some(s("c")), s("k"), Some(s("a"))),
+            [s("b"), s("k"), s("a")]
+        );
         let lignes = lignes_du_menu(vec![String::new(); 3]);
         let affichees = lignes.iter().filter(|l| !matches!(l, Ligne::Cachee { .. })).count();
         assert!(affichees + 2 <= 24, "{affichees} lignes affichées");
@@ -1677,6 +1701,8 @@ mod tests_menu {
         assert!(outil_au_chemin("4.99").is_none() && outil_au_chemin("x.1").is_none());
         assert!(outil_au_chemin("10.1").is_none(), "le guide a ses propres chemins");
         assert!(outil_au_chemin("11.1").is_none(), "le dépannage a ses propres chemins");
+        // La place annoncée au menu, dans l'aide et l'historique des versions.
+        assert_eq!(touche_de(Action::MettreAJour).as_deref(), Some("9.9"));
         // Les places annoncées : 4.7, 4.8 et 9.2.
         assert!(outil_au_chemin("4.7") == Some(Action::Lenteur));
         assert!(outil_au_chemin("4.8") == Some(Action::Fiche));

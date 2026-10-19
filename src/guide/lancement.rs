@@ -346,8 +346,8 @@ pub(super) fn lancer_ici(c: &Commande) {
             "\n  {VERT}✔{RESET} Done in {duree} s."
         ),
         Fin::Code(Some(code)) => trp!(
-            "\n  {orange}●{RESET} Terminée en {duree} s, avec le code {code} : une erreur, ou rien de trouvé, selon la commande.",
-            "\n  {orange}●{RESET} Done in {duree} s, with code {code}: an error, or nothing found, depending on the command."
+            "\n  {orange}●{RESET} Terminée en {duree} s, avec le code {code} : une erreur, ou rien de trouvé,\n    selon la commande.",
+            "\n  {orange}●{RESET} Done in {duree} s, with code {code}: an error, or nothing found,\n    depending on the command."
         ),
         Fin::Code(None) => trp!(
             "\n  {orange}●{RESET} Arrêtée par le système après {duree} s.",
@@ -358,7 +358,7 @@ pub(super) fn lancer_ici(c: &Commande) {
             "\n  {GRIS}■{RESET} Stopped after {duree} s, as you asked."
         ),
         Fin::TropLongue => trp!(
-            "\n  {orange}●{RESET} Arrêtée au bout de deux minutes : pour la laisser tourner, tape-la dans un terminal.",
+            "\n  {orange}●{RESET} Arrêtée au bout de deux minutes : pour la laisser tourner, tape-la dans\n    un terminal.",
             "\n  {orange}●{RESET} Stopped after two minutes: to let it run, type it in a terminal."
         ),
         Fin::PasDemarree(erreur) => trp!(

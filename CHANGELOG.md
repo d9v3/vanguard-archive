@@ -45,9 +45,9 @@ chaque version garde son étiquette dans le dépôt (`git checkout v0.62.0`, par
   vérifié juste avant de tourner en administrateur (un script modifié entre-temps ne part pas) ; les données de
   Vanguard sont réservées à ton compte.
 - **Vanguard se met à jour depuis la clé.** La copie posée sur un ordinateur (surveillance, entretien, raccourci) ne
-  suivait pas la clé : quand la clé est plus récente, le menu le dit, et la mise à jour se fait sur accord (9.9 ou
-  `vanguard se-mettre-a-jour`), relue et comparée avant de remplacer l'ancienne ; jamais vers une version plus
-  ancienne.
+  suivait pas la clé : lancé depuis une clé plus récente, Vanguard le dit au menu, et la mise à jour se fait sur
+  accord (9.9 ou `vanguard se-mettre-a-jour`), relue et comparée avant de remplacer l'ancienne ; jamais vers une
+  version plus ancienne, et jamais depuis une clé seulement branchée.
 - **Une seule publication par jour.** Ce journal regroupe les versions par jour ; seule la dernière garde sa page de
   téléchargement, et le Mac de GitHub ne compile plus qu'une fois par publication.
 
