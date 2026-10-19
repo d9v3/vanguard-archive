@@ -443,34 +443,67 @@ pub fn session_a_distance() -> bool {
     distante || std::env::var("SESSIONNAME").is_ok_and(|s| s.to_ascii_uppercase().starts_with("RDP-"))
 }
 
+const CLE_UAC: &str = r"HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System";
+
 fn uac() -> Constat {
-    let cle = r"HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System";
-    let valeur = ps(&format!("(Get-ItemProperty '{cle}').EnableLUA"));
-    if !matches!(valeur.as_deref(), Some("0" | "1")) {
-        return illisible("UAC");
-    }
-    if valeur.as_deref() == Some("0") {
-        alerte(
-            "UAC",
-            Niveau::Eleve,
-            tr!(
-                "Contrôle de compte d'utilisateur (UAC) désactivé : tout programme a les droits admin.",
-                "User Account Control (UAC) is off: every program has admin rights."
+    let p = ps(&format!(
+        "$p = Get-ItemProperty '{CLE_UAC}'; \"$($p.EnableLUA)|$($p.ConsentPromptBehaviorAdmin)\""
+    ));
+    let (lua, consentement) = p.as_deref().and_then(|p| p.split_once('|')).unzip();
+    juger_uac(lua, consentement).unwrap_or_else(|| illisible("UAC"))
+}
+
+/// L'UAC, d'après EnableLUA et ConsentPromptBehaviorAdmin (vide quand absent : 5, la valeur de Windows). `None` si
+/// EnableLUA ne se lit pas. À 0, ConsentPromptBehaviorAdmin élève sans rien demander : un programme lancé par un
+/// administrateur prend les droits admin en silence, comme sans UAC.
+fn juger_uac(lua: Option<&str>, consentement: Option<&str>) -> Option<Constat> {
+    let lua = lua.map(str::trim).filter(|v| matches!(*v, "0" | "1"))?;
+    if lua == "0" {
+        return Some(
+            alerte(
+                "UAC",
+                Niveau::Eleve,
+                tr!(
+                    "Contrôle de compte d'utilisateur (UAC) désactivé : tout programme a les droits admin.",
+                    "User Account Control (UAC) is off: every program has admin rights."
+                ),
+            )
+            .corriger(
+                tr!(
+                    "Réactiver l'UAC (effectif après redémarrage)",
+                    "Turn UAC back on (effective after a restart)"
+                ),
+                &[&format!("Set-ItemProperty '{CLE_UAC}' -Name EnableLUA -Value 1")],
             ),
-        )
-        .corriger(
-            tr!(
-                "Réactiver l'UAC (effectif après redémarrage)",
-                "Turn UAC back on (effective after a restart)"
-            ),
-            &[&format!("Set-ItemProperty '{cle}' -Name EnableLUA -Value 1")],
-        )
-    } else {
-        ok(
-            "UAC",
-            tr!("Contrôle de compte d'utilisateur actif.", "User Account Control on."),
-        )
+        );
     }
+    if consentement.map(str::trim) == Some("0") {
+        return Some(
+            alerte(
+                "UAC",
+                Niveau::Eleve,
+                tr!(
+                    "L'UAC ne demande plus rien aux administrateurs : un programme lancé depuis ton compte prend \
+                     les droits admin en silence.",
+                    "UAC no longer asks administrators anything: a program started from your account silently \
+                     gets admin rights."
+                ),
+            )
+            .corriger(
+                tr!(
+                    "Remettre la demande de l'UAC (le réglage de Windows)",
+                    "Bring back the UAC prompt (the Windows setting)"
+                ),
+                &[&format!(
+                    "Set-ItemProperty '{CLE_UAC}' -Name ConsentPromptBehaviorAdmin -Value 5"
+                )],
+            ),
+        );
+    }
+    Some(ok(
+        "UAC",
+        tr!("Contrôle de compte d'utilisateur actif.", "User Account Control on."),
+    ))
 }
 
 fn mises_a_jour() -> Constat {
@@ -775,6 +808,19 @@ pub fn auditer() -> Audit {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn uac_qui_ne_demande_rien() {
+        let probleme = |l, c| juger_uac(l, c).and_then(|c| c.probleme);
+        assert_eq!(probleme(Some("1"), Some("5")), None);
+        assert_eq!(probleme(Some("1"), Some("")), None); // absent : la valeur de Windows
+        assert_eq!(probleme(Some("1"), Some("2")), None); // demande toujours, sur le bureau sécurisé
+        assert_eq!(probleme(Some("1"), Some("0")), Some(Niveau::Eleve));
+        assert_eq!(probleme(Some("0"), Some("5")), Some(Niveau::Eleve));
+        assert!(juger_uac(None, None).is_none() && juger_uac(Some(""), Some("5")).is_none());
+        let c = juger_uac(Some("1"), Some("0")).unwrap();
+        assert!(c.correctif.unwrap().commandes[0].ends_with("-Name ConsentPromptBehaviorAdmin -Value 5"));
+    }
 
     #[test]
     fn ports_udp_retenus() {
