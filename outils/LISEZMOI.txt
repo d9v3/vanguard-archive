@@ -99,6 +99,7 @@ Entrée ouvre celle en surbrillance, Échap efface. Au menu principal, elle trou
  10  Guide des commandes › les commandes utiles d'Omarchy, Arch, Fedora, Debian, Windows 11, macOS et de tous les
        systèmes, par programme, chacune expliquée (⚠ : elle change quelque chose). Tape ce que tu cherches : les
        commandes paraissent au fil de la frappe ; chacune se copie, ou se lance ici si elle ne fait que lire.
+       Et les exemples de tldr-pages, téléchargés chaque semaine : à copier seulement.
        En ligne de commande : vanguard guide fedora, vanguard guide winget, vanguard guide cache dns
  11  Dépanner pas à pas › pas d'Internet, Wi-Fi qui coupe, ordinateur lent, pas de son, imprimante,
        disque plein : deux ou trois questions, puis Vanguard vérifie et propose la bonne réparation.

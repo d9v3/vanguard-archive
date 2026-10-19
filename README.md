@@ -212,7 +212,10 @@ version…), ses programmes (pacman, dnf, apt, SELinux, AppArmor…), puis ceux 
 complète le mot. Chaque commande a sa page : la copier, pour la taper ici ou chez la personne qu'on aide, ou la
 lancer ici quand elle ne fait que lire ; sa sortie défile dans Vanguard, et Échap l'arrête. Tous les systèmes sont
 lisibles partout (les commandes de Windows depuis Linux, par exemple), et le guide dit si un programme manque sur cet
-ordinateur.
+ordinateur. En plus, les exemples de [tldr-pages](https://tldr.sh) (licence CC BY 4.0) : plus de 30 000 commandes de
+la communauté, pour Linux, Windows, macOS et d'autres, en français quand elles sont traduites. Le guide les
+télécharge tout seul, au plus une fois par semaine ; elles se cherchent et se copient, mais ne se lancent jamais
+d'ici, Vanguard ne les ayant pas vérifiées.
 
 **Et aussi**
 - Recherche dans tous les menus et les listes à cocher : tape un mot (wifi, disque, dns, mise à jour…), seules les

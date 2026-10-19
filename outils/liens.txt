@@ -30,3 +30,6 @@ serveur https://1.1.1.1/dns-query
 ignorer http://www.w3.org/2003/05/soap-envelope
 ignorer http://schemas.xmlsoap.org/ws/
 ignorer http://www.onvif.org/ver10/
+
+# Exemples de tldr-pages : le guide ajoute le nom de l'archive de chaque langue.
+essai https://github.com/tldr-pages/tldr/releases/latest/download/ https://github.com/tldr-pages/tldr/releases/latest/download/tldr-pages.fr.zip

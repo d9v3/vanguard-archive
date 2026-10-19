@@ -24,6 +24,12 @@ const LIGNES_MONTREES: usize = 1000;
 
 /// Pourquoi Vanguard ne lance cette commande sur aucun ordinateur ; `None` : rien ne l'en empêche.
 pub(super) fn obstacle(c: &Commande) -> Option<&'static str> {
+    if c.obstacle == Obstacle::NonVerifiee {
+        return Some(tr!(
+            "Elle vient de tldr-pages, que Vanguard n'a pas vérifié : copie-la, et lis-la avant de la taper.",
+            "It comes from tldr-pages, which Vanguard has not checked: copy it, and read it before typing it."
+        ));
+    }
     if c.modifie {
         return Some(tr!(
             "Elle change quelque chose : à taper toi-même dans un terminal, en sachant ce qu'elle fait.",
@@ -48,7 +54,7 @@ pub(super) fn obstacle(c: &Commande) -> Option<&'static str> {
         c.obstacle
     };
     match obstacle {
-        Obstacle::Aucun => None,
+        Obstacle::Aucun | Obstacle::NonVerifiee => None,
         Obstacle::Administrateur => Some(tr!(
             "Elle demande les droits d'administrateur : à taper dans un terminal.",
             "It needs administrator rights: type it in a terminal."

@@ -13,6 +13,7 @@ mod lancement;
 mod linux;
 mod macos;
 mod omarchy;
+mod tldr;
 mod tous;
 mod windows;
 
@@ -41,10 +42,12 @@ pub enum Systeme {
     Tous,
     /// Les programmes communs à toutes les distributions.
     Linux,
+    /// Les pages de tldr-pages, téléchargées chaque semaine : à copier seulement.
+    Tldr,
 }
 
 /// Les systèmes du menu, dans l'ordre : leur rang fait leur touche (« 3 » : Fedora).
-pub const SYSTEMES: [Systeme; 8] = [
+pub const SYSTEMES: [Systeme; 9] = [
     Systeme::Omarchy,
     Systeme::Arch,
     Systeme::Fedora,
@@ -53,6 +56,7 @@ pub const SYSTEMES: [Systeme; 8] = [
     Systeme::Windows,
     Systeme::MacOs,
     Systeme::Tous,
+    Systeme::Tldr,
 ];
 
 /// La distribution de cet ordinateur, lue une fois.
@@ -110,6 +114,7 @@ impl Systeme {
             Systeme::MacOs => "macOS",
             Systeme::Tous => tr!("Tous les systèmes", "All systems"),
             Systeme::Linux => "Linux",
+            Systeme::Tldr => "tldr-pages",
         }
     }
 
@@ -125,6 +130,7 @@ impl Systeme {
             Systeme::MacOs => &["macos", "mac", "osx"],
             Systeme::Tous => &["tous", "all", "general"],
             Systeme::Linux => &["linux"],
+            Systeme::Tldr => &["tldr"],
         }
     }
 
@@ -140,6 +146,8 @@ impl Systeme {
             Systeme::MacOs => macos::PROGRAMMES,
             Systeme::Tous => tous::PROGRAMMES,
             Systeme::Linux => linux::COMMUNS,
+            // Ses pages se téléchargent : `programmes` les prend dans `tldr`.
+            Systeme::Tldr => &[],
         }
     }
 
@@ -193,12 +201,22 @@ impl Systeme {
                 "Les programmes communs à toutes les distributions de Linux.",
                 "The programs common to every Linux distribution."
             ),
+            Systeme::Tldr => tr!(
+                "Les exemples de tldr-pages (tldr.sh), des milliers de commandes écrites et tenues à jour par une communauté, sous licence CC BY 4.0. Vanguard les télécharge chaque semaine ; il ne les a pas vérifiées : elles se copient, mais ne se lancent pas d'ici.",
+                "The examples of tldr-pages (tldr.sh), thousands of commands written and kept up to date by a community, under the CC BY 4.0 license. Vanguard downloads them every week; it has not checked them: they can be copied, but do not run from here."
+            ),
         }
     }
 
     /// Les programmes de son menu, chacun avec le système sous lequel il s'affiche : ses marches à suivre, ses
     /// programmes, puis, pour une distribution, les communs à toutes (sous « Linux »).
     fn programmes(self) -> Vec<(Systeme, &'static Programme)> {
+        if self == Systeme::Tldr {
+            return tldr::pages()
+                .iter()
+                .map(|page| (page.systeme, &page.programme))
+                .collect();
+        }
         let mut programmes: Vec<_> = self
             .pas_a_pas()
             .iter()
@@ -227,7 +245,7 @@ impl Systeme {
                 "Terminal : Cmd+Espace, taper « Terminal », puis Entrée.",
                 "Terminal: Cmd+Space, type “Terminal”, then Enter."
             ),
-            Systeme::Tous => tr!(
+            Systeme::Tous | Systeme::Tldr => tr!(
                 "Dans tout terminal : Tab complète un nom, ↑ rappelle la commande d'avant, Ctrl-C arrête celle en cours.",
                 "In any terminal: Tab completes a name, ↑ brings back the previous command, Ctrl-C stops the running one."
             ),
@@ -246,6 +264,7 @@ impl Systeme {
             Systeme::MacOs => "brew, diskutil, Time Machine…",
             Systeme::Tous => "Vanguard, ping, ssh, git, curl…",
             Systeme::Linux => "systemctl, journalctl, ip, nmcli…",
+            Systeme::Tldr => tr!("des milliers d'exemples, à copier", "thousands of examples, to copy"),
         }
     }
 }
@@ -315,6 +334,8 @@ pub enum Obstacle {
     Administrateur,
     /// Elle prend plusieurs minutes, avec les droits d'administrateur (DISM, chkdsk).
     Longue,
+    /// Elle vient de tldr-pages : Vanguard ne l'a pas vérifiée.
+    NonVerifiee,
 }
 
 impl Commande {
@@ -763,6 +784,36 @@ pub fn ouvrir(systeme: usize, programme: Option<usize>, commande: Option<usize>)
     }
 }
 
+/// Le chemin d'un programme en tête de ses écrans : « Guide › Fedora › dnf », ou « tldr-pages › linux › tar ».
+fn chemin_affiche(s: Systeme, p: &Programme) -> [&'static str; 3] {
+    match tldr::plateforme(p) {
+        Some(plateforme) => ["tldr-pages", plateforme, nom(p)],
+        None => [tr!("Guide", "Guide"), s.nom(), nom(p)],
+    }
+}
+
+/// Une commande sur des lignes de `largeur` colonnes au plus : celles de tldr-pages sont parfois longues, et un mot
+/// trop long (une adresse) est coupé lui aussi, pour que l'écran ne déborde jamais.
+fn lignes_de_commande(commande: &str, largeur: usize) -> Vec<String> {
+    let mut lignes = Vec::new();
+    for l in envelopper(commande, largeur) {
+        let mut reste: Vec<char> = l.chars().collect();
+        while largeur_affichee(&reste.iter().collect::<String>()) > largeur {
+            let mut morceau = String::new();
+            while let Some(&c) = reste.first() {
+                if largeur_affichee(&morceau) + largeur_car(c) > largeur {
+                    break;
+                }
+                morceau.push(c);
+                reste.remove(0);
+            }
+            lignes.push(morceau);
+        }
+        lignes.push(reste.into_iter().collect());
+    }
+    lignes
+}
+
 /// Une réponse qui revient en arrière : rien, « ↵ » ou « q ».
 fn revenir(choix: &str) -> bool {
     choix.is_empty() || choix == "↵" || choix.eq_ignore_ascii_case("q")
@@ -772,7 +823,7 @@ fn revenir(choix: &str) -> bool {
 fn montrer_commande(s: Systeme, p: &Programme, c: &Commande) {
     let raison = lancement::pourquoi_pas(s, p, c);
     let rang = p.commandes.iter().position(|x| std::ptr::eq(x, c)).map_or(0, |i| i + 1);
-    let chemin = [tr!("Guide", "Guide"), s.nom(), nom(p)];
+    let chemin = chemin_affiche(s, p);
     let droite = trf!("{rang} sur {}", "{rang} of {}", p.commandes.len());
     let commande = ligne(c);
     let mut dernier = String::from(if raison.is_none() { "2" } else { "1" });
@@ -785,7 +836,10 @@ fn montrer_commande(s: Systeme, p: &Programme, c: &Commande) {
         } else {
             String::new()
         };
-        lignes.push(Ligne::Texte(format!("  {avertissement}{GRAS}{commande}{RESET}")));
+        for (i, l) in lignes_de_commande(&commande, LARGEUR - 4).iter().enumerate() {
+            let debut = if i == 0 { avertissement.as_str() } else { "" };
+            lignes.push(Ligne::Texte(format!("  {debut}{GRAS}{l}{RESET}")));
+        }
         lignes.push(Ligne::Texte(String::new()));
         lignes.extend(
             envelopper(dans_la_langue(c.texte), LARGEUR - 4)
@@ -793,7 +847,16 @@ fn montrer_commande(s: Systeme, p: &Programme, c: &Commande) {
                 .map(|l| Ligne::Texte(format!("  {l}"))),
         );
         lignes.push(Ligne::Texte(String::new()));
-        lignes.push(Ligne::Texte(if c.modifie {
+        lignes.push(Ligne::Texte(if c.obstacle == Obstacle::NonVerifiee {
+            format!(
+                "  {}●{RESET} {}",
+                couleur(Niveau::Moyen),
+                tr!(
+                    "Exemple de tldr-pages : Vanguard ne sait pas ce qu'il change.",
+                    "A tldr-pages example: Vanguard does not know what it changes."
+                )
+            )
+        } else if c.modifie {
             format!(
                 "  {}⚠{RESET} {}",
                 couleur(Niveau::Moyen),
@@ -905,16 +968,14 @@ fn montrer_programme(s: Systeme, p: &Programme) {
         } else {
             trf!("{n} commandes", "{n} commands")
         };
-        let mut lignes = entete(&[tr!("Guide", "Guide"), s.nom(), nom(p)], &droite);
+        let mut lignes = entete(&chemin_affiche(s, p), &droite);
         let installe = if absent(s, p) {
             tr!(" (pas installé ici)", " (not installed here)")
         } else {
             ""
         };
-        lignes.push(Ligne::Texte(format!(
-            "  {GRIS}{}{installe}{RESET}",
-            dans_la_langue(p.role)
-        )));
+        // Le rôle d'une page de tldr-pages est sa description entière : sur plusieurs lignes au besoin.
+        lignes.extend(lignes_grises(&format!("{}{installe}", dans_la_langue(p.role)), 2));
         lignes.extend(legende(s).into_iter().map(Ligne::Texte));
         lignes.push(Ligne::Texte(String::new()));
         for (i, c) in p.commandes.iter().enumerate() {
@@ -966,13 +1027,44 @@ fn menu_systeme(s: Systeme) {
         lignes.extend(lignes_grises(s.presentation(), 2));
         lignes.extend(legende(s).into_iter().map(Ligne::Texte));
         // Des sections quand il y en a plusieurs : marches à suivre, programmes du système, communs à Linux.
-        let sections = s.linux() || !s.pas_a_pas().is_empty();
+        let sections = s.linux() || !s.pas_a_pas().is_empty() || s == Systeme::Tldr;
         if !sections {
             lignes.push(Ligne::Texte(String::new()));
         }
+        if s == Systeme::Tldr && programmes.is_empty() {
+            lignes.push(Ligne::Texte(String::new()));
+            lignes.extend(lignes_grises(
+                if tldr::en_cours() {
+                    tr!(
+                        "Téléchargement en cours : reviens dans un instant.",
+                        "Downloading: come back in a moment."
+                    )
+                } else {
+                    tr!(
+                        "Pas encore téléchargées : elles arrivent toutes seules quand Internet répond, à l'ouverture du guide.",
+                        "Not downloaded yet: they come by themselves when the Internet answers, when the guide opens."
+                    )
+                },
+                2,
+            ));
+        }
+        // La place qui reste pour la précision, après la touche et le nom (tldr-pages en a des milliers).
+        let largeur_touche = programmes.len().to_string().len().max(2);
+        let marque_absent = if s == Systeme::Tldr { 0 } else { 9 };
+        let plus_long = programmes
+            .iter()
+            .map(|(_, p)| largeur_affichee(nom(p)) + marque_absent)
+            .max()
+            .unwrap_or(0);
+        let colonne = (plus_long + 2).clamp(36, 48);
+        let place = LARGEUR.saturating_sub(5 + largeur_touche + colonne).max(10);
+        let tldr = s == Systeme::Tldr;
+        let pages_tldr = if tldr { tldr::pages() } else { &[] };
         let mut section = None;
         for (j, &(proprietaire, p)) in programmes.iter().enumerate() {
-            let titre = if est_un_pas_a_pas(p) {
+            let titre = if tldr {
+                pages_tldr.get(j).map_or("", |page| page.plateforme).to_uppercase()
+            } else if est_un_pas_a_pas(p) {
                 tr!("PAS À PAS", "STEP BY STEP").to_string()
             } else if proprietaire == Systeme::Linux {
                 tr!("COMMUNS À LINUX", "COMMON TO LINUX").to_string()
@@ -984,21 +1076,35 @@ fn menu_systeme(s: Systeme) {
                 lignes.push(Ligne::Texte(ligne_section(&titre)));
                 section = Some(titre);
             }
-            let nom = if absent(proprietaire, p) {
+            // Sauf pour tldr-pages : des milliers de pages, la plupart pour des programmes qu'on n'a pas.
+            let nom = if !tldr && absent(proprietaire, p) {
                 format!("{} {DISCRET}{}{RESET}", nom(p), tr!("(absent)", "(missing)"))
             } else {
                 nom(p).to_string()
             };
+            let mots = if tldr {
+                // Une page de tldr-pages se trouve aussi par ses exemples : leurs commandes ne sont pas des lignes à
+                // part (des dizaines de milliers).
+                p.commandes
+                    .iter()
+                    .map(|c| format!("{} {}", c.texte.0, c.ligne))
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            } else {
+                noms_du_programme(p)
+            };
             lignes.push(
-                Ligne::choix(&(j + 1).to_string(), &nom, dans_la_langue(p.role)).avec_mots(&noms_du_programme(p)),
+                Ligne::choix(&(j + 1).to_string(), &nom, &couper(dans_la_langue(p.role), place)).avec_mots(&mots),
             );
         }
         lignes.push(Ligne::Texte(String::new()));
         lignes.push(Ligne::choix("↵", tr!("Revenir", "Back"), ""));
         lignes.push(Ligne::Texte(String::new()));
         // Taper un mot trouve aussi chaque commande de ce système.
-        for (j, (_, p)) in programmes.iter().enumerate() {
-            lignes.extend(lignes_des_commandes(&format!("{}.", j + 1), "", p));
+        if !tldr {
+            for (j, (_, p)) in programmes.iter().enumerate() {
+                lignes.extend(lignes_des_commandes(&format!("{}.", j + 1), "", p));
+            }
         }
         let Some(choix) = choisir(
             &lignes,
@@ -1091,6 +1197,7 @@ fn afficher_resultats(recherche: &str, trouvees: &[Trouvee]) {
 
 /// Le guide au menu : taper ce qu'on cherche, ou choisir un système.
 pub fn menu() {
+    tldr::renouveler_en_fond();
     let total: usize = pages().iter().map(|page| page.programme.commandes.len()).sum();
     let mut dernier = String::from("1");
     loop {
@@ -1113,12 +1220,18 @@ pub fn menu() {
             } else {
                 s.nom().to_string()
             };
-            lignes.push(Ligne::choix(&(i + 1).to_string(), &nom, s.apercu()).avec_mots(&s.mots().join(" ")));
+            let apercu = if *s == Systeme::Tldr {
+                apercu_tldr()
+            } else {
+                s.apercu().to_string()
+            };
+            lignes.push(Ligne::choix(&(i + 1).to_string(), &nom, &apercu).avec_mots(&s.mots().join(" ")));
         }
         lignes.push(Ligne::Texte(String::new()));
         lignes.push(Ligne::choix("↵", tr!("Revenir", "Back"), ""));
         lignes.push(Ligne::Texte(String::new()));
         lignes.extend(lignes_de_recherche(""));
+        lignes.extend(lignes_de_tldr());
         let Some(choix) = choisir(
             &lignes,
             tr!(
@@ -1143,6 +1256,42 @@ pub fn menu() {
             None => {}
         }
     }
+}
+
+/// La ligne de tldr-pages au menu du guide : combien de commandes, de quand ; ou où en est leur téléchargement.
+fn apercu_tldr() -> String {
+    let pages = tldr::pages();
+    match tldr::date_en_clair() {
+        Some(date) if !pages.is_empty() => {
+            let n: usize = pages.iter().map(|page| page.programme.commandes.len()).sum();
+            trf!("{n} exemples, du {date}", "{n} examples, from {date}")
+        }
+        _ if tldr::en_cours() => tr!("téléchargement en cours…", "downloading…").to_string(),
+        _ => tr!("à télécharger (Internet)", "to download (Internet)").to_string(),
+    }
+}
+
+/// Les pages de tldr-pages pour la recherche du menu du guide : une ligne par page (« 9.1234 »), trouvée aussi par
+/// les explications de ses exemples.
+fn lignes_de_tldr() -> Vec<Ligne> {
+    let Some(rang) = SYSTEMES.iter().position(|s| *s == Systeme::Tldr) else {
+        return Vec::new();
+    };
+    tldr::pages()
+        .iter()
+        .enumerate()
+        .map(|(j, page)| {
+            let p = &page.programme;
+            let explications: Vec<&str> = p.commandes.iter().map(|c| c.texte.0).collect();
+            Ligne::cachee(
+                &format!("{}.{}", rang + 1, j + 1),
+                &format!("tldr › {} ›", page.plateforme),
+                p.nom,
+                p.role.0,
+            )
+            .avec_mots(&explications.join(" "))
+        })
+        .collect()
 }
 
 /// Le système désigné par un mot (« mac », « Fedora », « tous », « linux » pour les programmes communs).
@@ -1178,6 +1327,12 @@ pub fn executer(quoi: &str) {
         return;
     }
     if let Some(s) = systeme(quoi) {
+        if s == Systeme::Tldr {
+            titre("tldr-pages");
+            afficher_aligne("  ", s.presentation(), 2, GRIS);
+            afficher_aligne("  ", &apercu_tldr(), 2, "");
+            return;
+        }
         titre(&trf!("Guide des commandes › {}", "Command guide › {}", s.nom()));
         afficher_aligne("  ", s.presentation(), 2, GRIS);
         for l in legende(s) {
@@ -1195,6 +1350,24 @@ pub fn executer(quoi: &str) {
     } else {
         for (s, p) in nommes {
             afficher_programme(s, p);
+        }
+    }
+    // Et les pages de tldr-pages de ce nom (« tar » : celle de tous les systèmes, celle de Linux…).
+    let voulu = simplifier(quoi);
+    for page in tldr::pages()
+        .iter()
+        .filter(|page| simplifier(page.programme.nom) == voulu)
+    {
+        titre(&format!("tldr-pages › {} › {}", page.plateforme, page.programme.nom));
+        afficher_aligne("  ", page.programme.role.0, 2, GRIS);
+        println!();
+        for c in page.programme.commandes {
+            for l in envelopper(c.ligne, LARGEUR - 4) {
+                println!("    {GRAS}{l}{RESET}");
+            }
+            for l in envelopper(c.texte.0, LARGEUR - 6) {
+                println!("      {GRIS}{l}{RESET}");
+            }
         }
     }
 }

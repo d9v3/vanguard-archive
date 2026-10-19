@@ -40,7 +40,7 @@ turn on once with `/install-github-app`).
 | `src/logiciels/` | software to install: checked catalog (`catalogue.rs`), state and installation per system |
 | `src/protection/fuites.rs`, `src/donnees.rs` | leaked passwords, data backup |
 | `src/protection/cle.rs` | USB drive protection on Linux and macOS: partition remounted read-only away from the owner's computer |
-| `src/guide/` | command guide: one file per system (`arch.rs`, `omarchy.rs`, `fedora.rs`, `debian.rs`: each distribution's programs and step-by-step guides; `linux.rs`: programs common to all, and openSUSE; `windows.rs`, `macos.rs`, `tous.rs`), menus and search (`mod.rs`), commands run here (`lancement.rs`) |
+| `src/guide/` | command guide: one file per system (`arch.rs`, `omarchy.rs`, `fedora.rs`, `debian.rs`: each distribution's programs and step-by-step guides; `linux.rs`: programs common to all, and openSUSE; `windows.rs`, `macos.rs`, `tous.rs`), menus and search (`mod.rs`), commands run here (`lancement.rs`), tldr-pages examples downloaded every week (`tldr.rs`) |
 | `src/apprentissage.rs` | what Vanguard learns here: alerts declared normal (appris.json), habits |
 | `src/reseau/listes_noires.rs` | the home's Internet address in blocklists (DNSBL), after consent |
 | `src/entretien.rs` | monthly check-up: grade, updates, space, new problems, in one notification |

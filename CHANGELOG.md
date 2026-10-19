@@ -30,6 +30,9 @@ chaque version garde son étiquette dans le dépôt (`git checkout v0.62.0`, par
   Linux ; 650 commandes. On tape ce qu'on cherche et les commandes paraissent au fil de la frappe ; chacune a sa
   page, pour la copier, ou la lancer ici quand elle ne fait que lire (sa sortie défile dans Vanguard, Échap
   l'arrête).
+- **Plus de 30 000 commandes en plus** : les exemples de tldr-pages (licence CC BY 4.0), téléchargés tout seuls chaque
+  semaine, en français quand ils sont traduits ; à copier seulement. Dans toutes les recherches, ce qui commence par
+  le mot tapé passe devant.
 - **Prédiction des mots dans tous les menus** et les listes à cocher : la fin du mot le plus probable s'affiche en
   gris, Tab la complète.
 - **Une seule publication par jour.** Ce journal regroupe les versions par jour ; seule la dernière garde sa page de
