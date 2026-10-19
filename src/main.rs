@@ -25,6 +25,7 @@ mod lenteur;
 mod logiciels;
 mod machine;
 mod maj;
+mod mise_a_jour;
 mod nettoyer;
 mod optimiser;
 mod ordinateurs;
@@ -330,6 +331,10 @@ enum Commande {
     /// partition VANGUARDLOG de la clé).
     #[command(visible_alias = "computers")]
     Ordinateurs,
+    /// Mettre Vanguard à jour sur cet ordinateur : la copie qu'y lancent la surveillance, l'entretien et le raccourci,
+    /// remplacée sur accord par celle de la clé VANGUARD quand la clé est plus récente (jamais l'inverse).
+    #[command(name = "se-mettre-a-jour", visible_alias = "self-update")]
+    SeMettreAJour,
     /// Les règles du bilan déclarées pour ce système : identifiant stable, sujet, références de durcissement.
     #[command(visible_alias = "rules")]
     Regles,
@@ -535,7 +540,22 @@ fn etat_du_menu(surveillance_active: bool) -> Vec<String> {
     if let Some(a) = protection::manifeste::avertissement_perime() {
         lignes.push(format!("  {}⚠{RESET} {a}", couleur(risk::Niveau::Moyen)));
     }
+    if let Some(a) = touche_de(Action::MettreAJour).and_then(|t| mise_a_jour::avertissement(&t)) {
+        lignes.push(format!("  {ACCENT}↑{RESET} {a}"));
+    }
     lignes
+}
+
+/// La touche d'un outil au menu principal (« 9.9 » : groupe 9, 9e outil proposé ici), comme la recherche la tape.
+fn touche_de(action: Action) -> Option<String> {
+    let groupe = OUTILS.iter().find(|o| o.action == action)?.groupe?;
+    let i = GROUPES.iter().position(|g| *g == groupe)?;
+    let j = groupe
+        .actions()
+        .into_iter()
+        .filter(|a| a.disponible())
+        .position(|a| a == action)?;
+    Some(format!("{}.{}", i + 4, j + 1))
 }
 
 /// Lignes vides et sous-titre « ── NOM ──── » d'un menu.
@@ -769,6 +789,7 @@ enum Action {
     Raccourci,
     Ordinateurs,
     ProtegerDonnees,
+    MettreAJour,
     Guide,
     Depanner,
 }
@@ -1013,6 +1034,10 @@ const OUTILS: &[Outil] = &[
         precision: ["carnet chiffré par une phrase", "record encrypted by a passphrase"],
         mots: "chiffrer encrypt chiffrement encryption phrase passphrase mot de passe password protéger protect \
                perdue lost" },
+    Outil { action: Action::MettreAJour, groupe: Some(Groupe::Donnees), lettre: "",
+        titre: ["Mettre Vanguard à jour", "Update Vanguard"],
+        precision: ["sur cet ordinateur, depuis la clé", "on this computer, from the key"],
+        mots: "mise à jour mettre update upgrade vanguard version nouvelle new copie copy installer install" },
     Outil { action: Action::Guide, groupe: Some(Groupe::Guide), lettre: "",
         titre: ["Guide des commandes", "Command guide"],
         precision: ["Linux, Windows, macOS, tous", "Linux, Windows, macOS, all"],
@@ -1273,6 +1298,7 @@ async fn executer(s: &mut Session, action: Action) {
         Action::Raccourci => raccourci::commande(None),
         Action::Ordinateurs => ordinateurs::menu(),
         Action::ProtegerDonnees => chiffrement::menu(),
+        Action::MettreAJour => mise_a_jour::commande(),
         Action::Guide => guide::menu(),
         Action::Depanner => depanner::menu(),
     }
@@ -1356,6 +1382,9 @@ const AIDES_EN: &[(&str, &str)] = &[
     ("raccourci", "Shortcut on this computer: Vanguard copied here and started with one click (applications menu on \
                    Linux, Desktop on Windows and macOS). Without argument: the state, then the offer"),
     ("regles", "The check rules declared for this system: stable identifier, subject, hardening references"),
+    ("se-mettre-a-jour", "Update Vanguard on this computer: the copy that monitoring, maintenance and the shortcut \
+                          start there, replaced after your consent by the VANGUARD key's when the key is newer (never \
+                          the other way)"),
     ("ordinateurs", "My computers: those where the VANGUARD key ran a check, their grade and remaining problems (on the \
      key's VANGUARDLOG partition)"),
     ("depanner", "Troubleshoot step by step: no Internet, Wi-Fi dropping, slow computer, no sound, printer, disk full; \
@@ -1562,6 +1591,7 @@ async fn main() {
         }
         Some(Commande::Raccourci { etat }) => raccourci::commande(etat.map(|e| e == "on")),
         Some(Commande::Ordinateurs) => ordinateurs::menu(),
+        Some(Commande::SeMettreAJour) => mise_a_jour::commande(),
         Some(Commande::Regles) => machine::regles::afficher(),
         Some(Commande::Depanner { sujet }) => depanner::executer(&sujet.join(" ")),
     }

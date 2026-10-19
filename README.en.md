@@ -50,7 +50,7 @@ In the menu, choose **1** (full check), then **2** (fix). Arrows, Enter, and Esc
 | **Protection** | Decoy files against ransomware, Windows Defender blocking, 308 YARA rules, antivirus, sandbox, integrity of critical files, leaked passwords, outbound connections, tech-support scam (remote control tools), camera and microphone, dangerous links, downloaded files, reversible quarantine. |
 | **Follow-up** | Hourly monitoring, monthly check-up, HTML report with the grade curve, learning on your computer, what Vanguard changed (each fix, dated). |
 | **Software and games** | The best software in 8 categories, from its official source; update everything at once; settings for gaming. |
-| **Tools** | Automatic backup, copy my files (checked copy) and check a copy, check my drive (fake drives, speed), my computers (tracked by the key), key data protected by a passphrase, shortcut on this computer, command guide, search in every menu. |
+| **Tools** | Automatic backup, copy my files (checked copy) and check a copy, check my drive (fake drives, speed), my computers (tracked by the key), key data protected by a passphrase, shortcut on this computer, Vanguard updated from the key, command guide, search in every menu. |
 
 <details>
 <summary><b>The details, feature by feature</b></summary>
@@ -324,6 +324,7 @@ Each menu entry is also a command.
 | `vanguard handout` | report to leave behind: a simple page for the person you helped |
 | `vanguard auto-backup [--undo]` | automatic backup to an external disk, with the system's tool |
 | `vanguard shortcut [on\|off]` | shortcut on this computer |
+| `vanguard self-update` | update Vanguard on this computer, from the key when it is newer |
 | `vanguard specs [--json]` | computer specs; `--json` without the serial numbers |
 | `vanguard copy-files [destination]` | copy my files to an external disk, checked copy |
 | `vanguard check-drive [folder]` | check my drive: real capacity, speeds, bad blocks (writes into the free space after your consent, then erases) |

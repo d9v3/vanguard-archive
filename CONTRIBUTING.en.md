@@ -27,7 +27,7 @@ turn on once with `/install-github-app`).
 | `src/machine/unix.rs` | checks shared by Linux and macOS: secret files, sudo |
 | `src/machine/heure.rs`, `fin_de_support.rs`, `comptes_oublies.rs`, `mots_de_passe.rs`, `sensibles.rs` | clock set automatically; system, abandoned programs and browsers without updates; unused accounts; unprotected browser passwords; sensitive files lying around |
 | `src/changements.rs` | what Vanguard changed: each fix run by `machine::appliquer_chacune`, noted on the computer |
-| `src/sauvegarde.rs`, `src/raccourci.rs`, `src/a_laisser.rs` | guided automatic backup (Déjà Dup or rsync, Time Machine, File History); shortcut on this computer; report to leave to the person you helped |
+| `src/sauvegarde.rs`, `src/raccourci.rs`, `src/mise_a_jour.rs`, `src/a_laisser.rs` | guided automatic backup (Déjà Dup or rsync, Time Machine, File History); shortcut on this computer; updating its copy from the key (version engraved in the program, read without running it); report to leave to the person you helped |
 | `src/corriger.rs` | guided application of fixes |
 | `src/reseau/mod.rs`, `src/reseau/scan.rs` | network scan (TCP connect, without root), ARP, network notebooks |
 | `src/reseau/nmap.rs` | service versions with nmap -sV, when installed: deep scan of a local network device, on the ports already found open |

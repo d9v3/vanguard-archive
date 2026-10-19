@@ -27,7 +27,7 @@ modification. Sur GitHub, `@claude` dans un ticket ou une demande de fusion le f
 | `src/machine/unix.rs` | vérifications communes à Linux et macOS : fichiers secrets, sudo |
 | `src/machine/heure.rs`, `fin_de_support.rs`, `comptes_oublies.rs`, `mots_de_passe.rs`, `sensibles.rs` | heure réglée automatiquement ; système, programmes abandonnés et navigateurs sans mise à jour ; comptes inutilisés ; mots de passe du navigateur sans protection ; fichiers sensibles qui traînent |
 | `src/changements.rs` | ce que Vanguard a changé : chaque correction lancée par `machine::appliquer_chacune`, notée sur l'ordinateur |
-| `src/sauvegarde.rs`, `src/raccourci.rs`, `src/a_laisser.rs` | sauvegarde automatique guidée (Déjà Dup ou rsync, Time Machine, Historique des fichiers) ; raccourci sur cet ordinateur ; rapport à laisser à la personne dépannée |
+| `src/sauvegarde.rs`, `src/raccourci.rs`, `src/mise_a_jour.rs`, `src/a_laisser.rs` | sauvegarde automatique guidée (Déjà Dup ou rsync, Time Machine, Historique des fichiers) ; raccourci sur cet ordinateur ; mise à jour de sa copie depuis la clé (version gravée dans le programme, lue sans le lancer) ; rapport à laisser à la personne dépannée |
 | `src/corriger.rs` | application guidée des correctifs |
 | `src/reseau/mod.rs`, `src/reseau/scan.rs` | scan réseau (TCP connect, sans root), ARP, carnets des réseaux |
 | `src/reseau/nmap.rs` | versions des services par nmap -sV, s'il est installé : scan approfondi d'un appareil du réseau local, sur ses ports déjà trouvés ouverts |
