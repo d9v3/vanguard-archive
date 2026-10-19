@@ -297,6 +297,14 @@ enum Commande {
         /// Un dossier de la clé ou du disque (par défaut : choisi parmi les disques branchés).
         dossier: Option<std::path::PathBuf>,
     },
+    /// Sauvegarde automatique : mise en place avec l'outil du système (Déjà Dup ou rsync chaque jour, Time Machine,
+    /// Historique des fichiers) vers un disque externe, après accord, annulable exactement.
+    #[command(name = "sauvegarde-auto", visible_alias = "auto-backup")]
+    SauvegardeAuto {
+        /// Retirer la sauvegarde automatique mise en place par Gardien (les fichiers sauvegardés restent).
+        #[arg(long, visible_alias = "undo")]
+        annuler: bool,
+    },
     /// Raccourci sur cet ordinateur : Gardien copié ici et lancé d'un clic (menu des applications sous Linux, Bureau
     /// sous Windows et macOS). Sans argument : l'état, puis la proposition.
     #[command(visible_alias = "shortcut")]
@@ -732,6 +740,7 @@ enum Action {
     OptimiserAnnuler,
     Sauvegarder,
     CopierFichiers,
+    SauvegardeAuto,
     VerifierCopie,
     VerifierCle,
     Raccourci,
@@ -946,6 +955,11 @@ const OUTILS: &[Outil] = &[
         titre: ["Copier mes fichiers", "Copy my files"],
         precision: ["vers un disque externe, vérifié", "to an external disk, checked"],
         mots: "copier copy sauvegarde backup photos disque externe external drive fichiers" },
+    Outil { action: Action::SauvegardeAuto, groupe: Some(Groupe::Donnees), lettre: "",
+        titre: ["Sauvegarde automatique", "Automatic backup"],
+        precision: ["chaque jour, sur un autre disque", "every day, to an external disk"],
+        mots: "sauvegarde backup automatique automatic time machine historique des fichiers file history deja dup \
+               rsync disque externe external drive" },
     Outil { action: Action::VerifierCopie, groupe: Some(Groupe::Donnees), lettre: "",
         titre: ["Vérifier une copie", "Check a copy"],
         precision: ["relue, comparée aux originaux", "read back, compared"],
@@ -1217,6 +1231,7 @@ async fn executer(s: &mut Session, action: Action) {
         Action::OptimiserAnnuler => optimiser::tout_annuler(),
         Action::Sauvegarder => donnees::menu(),
         Action::CopierFichiers => copier::menu(),
+        Action::SauvegardeAuto => sauvegarde::menu(),
         Action::VerifierCopie => copier::verifier_copie(None),
         Action::VerifierCle => verifier_cle::menu(),
         Action::Raccourci => raccourci::commande(None),
@@ -1293,6 +1308,8 @@ const AIDES_EN: &[(&str, &str)] = &[
     ("verifier-cle", "Check my drive: real capacity (fake drives), speeds and bad blocks of a USB stick or an \
                       external disk. Writes into the free space after your consent, reads back, then erases; your \
                       files are not touched"),
+    ("sauvegarde-auto", "Automatic backup: set up with the system's tool (Déjà Dup or rsync every day, Time Machine, \
+                         File History) to an external disk, after your consent, exactly undoable"),
     ("raccourci", "Shortcut on this computer: Gardien copied here and started with one click (applications menu on \
                    Linux, Desktop on Windows and macOS). Without argument: the state, then the offer"),
     ("ordinateurs", "My computers: those where the GARDIEN key ran a check, their grade and remaining problems (on the \
@@ -1336,6 +1353,7 @@ const OPTIONS_EN: &[(&str, &str, &str)] = &[
     ("copier-fichiers", "destination", "A folder on an external disk (default: chosen among the plugged-in disks)"),
     ("verifier-copie", "dossier", "The disk or the folder of the copy (default: chosen among the plugged-in disks)"),
     ("verifier-cle", "dossier", "A folder of the drive or disk (default: chosen among the plugged-in disks)"),
+    ("sauvegarde-auto", "annuler", "Remove the automatic backup set up by Gardien (the backed-up files stay)"),
     ("depanner", "sujet", "The subject: internet, wifi, slow, sound, printer, disk, infection, new, leaving (or words \
                              describing it)"),
 ];
@@ -1484,6 +1502,13 @@ async fn main() {
         Some(Commande::CopierFichiers { destination }) => copier::commande(destination.as_deref()),
         Some(Commande::VerifierCopie { dossier }) => copier::verifier_copie(dossier.as_deref()),
         Some(Commande::VerifierCle { dossier }) => verifier_cle::commande(dossier.as_deref()),
+        Some(Commande::SauvegardeAuto { annuler }) => {
+            if annuler {
+                sauvegarde::annuler();
+            } else {
+                sauvegarde::menu();
+            }
+        }
         Some(Commande::Raccourci { etat }) => raccourci::commande(etat.map(|e| e == "on")),
         Some(Commande::Ordinateurs) => ordinateurs::menu(),
         Some(Commande::Depanner { sujet }) => depanner::executer(&sujet.join(" ")),

@@ -740,8 +740,6 @@ fn annuler_mise_en_place(m: &MiseEnPlace) -> bool {
 }
 
 /// « gardien sauvegarde-auto --annuler » : retire ce que Gardien a mis en place, après accord.
-// Tant que main.rs n'appelle pas encore ce module (menu et sous-commande à brancher), tout serait compté mort.
-#[allow(dead_code)]
 pub fn annuler() {
     let chemin = fichier_notes();
     let notes = charger_de(&chemin);
@@ -776,7 +774,6 @@ pub fn annuler() {
 }
 
 /// Menu Données › Sauvegarde automatique.
-#[allow(dead_code)]
 pub fn menu() {
     println!();
     cadre(
