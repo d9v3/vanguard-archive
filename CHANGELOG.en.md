@@ -17,7 +17,8 @@ repository (`git checkout v0.62.0`, for example), to be rebuilt if needed.
 - **Linux and macOS.** Session that opens by itself without an encrypted disk (GDM, SDDM, LightDM), root programs'
   memory readable after a crash, kernel magic keys; unencrypted Time Machine backup, Mac Remote Login accepting root
   or accounts without a password.
-- **More accurate.** Included SSH configuration files read, open Wi-Fi networks better recognized, dnf-automatic that
+- **More accurate.** Included SSH configuration files read, open Wi-Fi networks better recognized, a DNS on this computer also measured
+  on a new site (its memory answered in under a millisecond), dnf-automatic that
   only downloads, APT settings read in their order, complete English interface.
 - **A single release a day.** This history groups versions by day; only the latest keeps its download page, and
   GitHub's Mac now compiles once per release.

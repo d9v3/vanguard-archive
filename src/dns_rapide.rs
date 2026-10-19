@@ -71,14 +71,31 @@ fn mediane(mut temps: Vec<Duration>) -> Option<Duration> {
     temps.get(temps.len() / 2).copied()
 }
 
-/// Temps de réponse médian d'un serveur ; `None` s'il ne répond pas.
+/// Temps de réponse médian d'un serveur sur les sites très visités ; `None` s'il ne répond pas.
 fn mesurer(serveur: IpAddr) -> Option<Duration> {
+    let noms: Vec<String> = NOMS.iter().map(ToString::to_string).collect();
+    mesurer_noms(serveur, &noms)
+}
+
+/// Des noms jamais demandés, inventés à chaque mesure, sous « .example » (réservé, il n'existe pas) : aucun cache ne
+/// les a. Un résolveur sur cet ordinateur (NextDNS, systemd-resolved, dnsmasq) répond de sa mémoire en moins d'une
+/// milliseconde pour un site déjà visité ; pour une question nouvelle, il interroge son serveur par Internet, comme
+/// les DNS publics : c'est ce temps-là qui se compare.
+fn noms_nouveaux() -> Vec<String> {
+    let graine = hasard();
+    (0..NOMS.len() * TOURS)
+        .map(|i| format!("gardien-{graine:x}-{i}.example"))
+        .collect()
+}
+
+/// Temps de réponse médian d'un serveur sur ces noms ; `None` s'il ne répond pas.
+fn mesurer_noms(serveur: IpAddr, noms: &[String]) -> Option<Duration> {
     let socket = UdpSocket::bind(if serveur.is_ipv4() { "0.0.0.0:0" } else { "[::]:0" }).ok()?;
     socket.connect(SocketAddr::new(serveur, 53)).ok()?;
     let graine = u16::try_from(hasard() & 0xffff).unwrap_or(0);
     let (mut temps, mut perdues) = (Vec::new(), 0);
     let mut tampon = [0u8; 1500];
-    for (i, nom) in NOMS.iter().cycle().take(NOMS.len() * TOURS).enumerate() {
+    for (i, nom) in noms.iter().cycle().take(NOMS.len() * TOURS).enumerate() {
         let id = graine.wrapping_add(u16::try_from(i).unwrap_or(0));
         let debut = Instant::now();
         // Une réponse tardive à une question d'avant ne compte pas : on attend la nôtre.
@@ -243,21 +260,37 @@ pub fn mesurer_et_proposer() {
     a_mesurer.dedup();
     a_mesurer.truncate(2);
     trp!("\n  {GRIS}Mesure en cours…{RESET}", "\n  {GRIS}Measuring…{RESET}");
-    let (temps_actuels, temps_publics): (Vec<Option<Duration>>, Vec<Option<Duration>>) = std::thread::scope(|s| {
-        let actuels: Vec<_> = a_mesurer
-            .iter()
-            .map(|ip| s.spawn(move || mesurable(*ip).then(|| mesurer(*ip)).flatten()))
-            .collect();
-        let publics: Vec<_> = PUBLICS
-            .iter()
-            .map(|p| s.spawn(move || p.v4[0].parse().ok().and_then(mesurer)))
-            .collect();
-        (
-            actuels.into_iter().map(|f| f.join().ok().flatten()).collect(),
-            publics.into_iter().map(|f| f.join().ok().flatten()).collect(),
-        )
-    });
-    let actuel_ms = temps_actuels.iter().flatten().min().copied();
+    #[allow(clippy::type_complexity)]
+    let (temps_actuels, temps_publics): (Vec<(Option<Duration>, Option<Duration>)>, Vec<Option<Duration>>) =
+        std::thread::scope(|s| {
+            let actuels: Vec<_> = a_mesurer
+                .iter()
+                .map(|ip| {
+                    s.spawn(move || {
+                        if !mesurable(*ip) {
+                            return (None, None);
+                        }
+                        // Sur cet ordinateur : aussi une question nouvelle, que son cache ne peut pas avoir.
+                        let nouveau = ip.is_loopback().then(|| mesurer_noms(*ip, &noms_nouveaux())).flatten();
+                        (mesurer(*ip), nouveau)
+                    })
+                })
+                .collect();
+            let publics: Vec<_> = PUBLICS
+                .iter()
+                .map(|p| s.spawn(move || p.v4[0].parse().ok().and_then(mesurer)))
+                .collect();
+            (
+                actuels.into_iter().map(|f| f.join().unwrap_or((None, None))).collect(),
+                publics.into_iter().map(|f| f.join().ok().flatten()).collect(),
+            )
+        });
+    // Comparé aux DNS publics : la question nouvelle pour un résolveur sur cet ordinateur (sa mémoire répond toujours
+    // plus vite qu'Internet, ce n'est pas une mesure de son serveur).
+    let actuel_ms = temps_actuels
+        .iter()
+        .filter_map(|(memoire, nouveau)| nouveau.or(*memoire))
+        .min();
     let meilleur = temps_publics
         .iter()
         .enumerate()
@@ -265,7 +298,7 @@ pub fn mesurer_et_proposer() {
         .min_by_key(|(_, t)| *t);
 
     let mut lignes = vec![Ligne::Texte(String::new())];
-    for (ip, t) in a_mesurer.iter().zip(&temps_actuels) {
+    for (ip, (t, nouveau)) in a_mesurer.iter().zip(&temps_actuels) {
         let ms = if mesurable(*ip) {
             millisecondes(*t)
         } else {
@@ -275,6 +308,20 @@ pub fn mesurer_et_proposer() {
         let serveur = ajuster(&format!("{} ({ip})", nom_actuel(*ip, &actuel, passerelle)), 44);
         let ligne = format!("  {GRIS}{quoi}{RESET} {serveur} {GRIS}{ms}{RESET}");
         lignes.push(Ligne::Texte(ligne));
+        if ip.is_loopback() && mesurable(*ip) {
+            let memoire = trf!(
+                "site déjà visité : {ms} (sa mémoire, sur cet ordinateur)",
+                "site already visited: {ms} (its memory, on this computer)"
+            );
+            let nouveau = trf!(
+                "site nouveau : {} (envoyé par Internet, comme les autres)",
+                "new site: {} (sent over the Internet, like the others)",
+                millisecondes(*nouveau)
+            );
+            for l in [memoire, nouveau] {
+                lignes.push(Ligne::Texte(format!("           {GRIS}{l}{RESET}")));
+            }
+        }
     }
     if a_mesurer.is_empty() {
         let aucun = tr!("Aucun serveur DNS configuré.", "No DNS server configured.");
@@ -393,6 +440,19 @@ mod tests {
         assert!(actuel_non_mesurable(&[ip("fe80::1")]));
         assert!(!actuel_non_mesurable(&[ip("fe80::1"), ip("192.168.1.1")]));
         assert!(!actuel_non_mesurable(&[]));
+    }
+
+    #[test]
+    fn noms_jamais_demandes() {
+        // Uniques d'une mesure à l'autre et dans une même mesure, sous « .example », qui n'existe pas : aucun cache ne
+        // peut les avoir.
+        let (a, b) = (noms_nouveaux(), noms_nouveaux());
+        assert_eq!(a.len(), NOMS.len() * TOURS);
+        assert!(a.iter().all(|n| n.ends_with(".example") && !b.contains(n)));
+        let uniques: std::collections::HashSet<_> = a.iter().collect();
+        assert_eq!(uniques.len(), a.len());
+        // Chaque étiquette tient dans une question DNS (63 octets au plus).
+        assert!(a.iter().all(|n| n.split('.').all(|e| e.len() <= 63)));
     }
 
     #[test]
