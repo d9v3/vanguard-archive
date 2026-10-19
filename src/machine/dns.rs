@@ -427,6 +427,9 @@ fn reponse_inventee() -> Option<IpAddr> {
 }
 
 pub fn dns() -> Vec<Constat> {
+    // Le nom inventé se demande pendant la lecture des serveurs (un PowerShell sous Windows) : l'un n'attend plus
+    // l'autre.
+    let inventee = std::thread::spawn(reponse_inventee);
     let mut constats = Vec::new();
     match serveurs() {
         Some(s) => constats.push(constat_serveurs(&s)),
@@ -436,7 +439,7 @@ pub fn dns() -> Vec<Constat> {
         )),
     }
     // Réponse pour un nom inexistant, sauf si le résolveur bloque en renvoyant 0.0.0.0 (listes de blocage).
-    if let Some(ip) = reponse_inventee()
+    if let Some(ip) = inventee.join().ok().flatten()
         && !ip.is_unspecified()
     {
         constats.push(alerte(
