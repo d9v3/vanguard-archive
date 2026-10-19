@@ -293,8 +293,8 @@ fn taille(octets: u64) -> String {
     match octets {
         0..1_000 => trf!("{octets} o", "{octets} B"),
         1_000..1_000_000 => trf!("{:.0} Ko", "{:.0} KB", o / 1e3),
-        1_000_000..1_000_000_000 => trf!("{:.1} Mo", "{:.1} MB", o / 1e6),
-        _ => trf!("{:.1} Go", "{:.1} GB", o / 1e9),
+        1_000_000..1_000_000_000 => trf!("{} Mo", "{} MB", crate::langue::decimal(o / 1e6, 1)),
+        _ => trf!("{} Go", "{} GB", crate::langue::decimal(o / 1e9, 1)),
     }
 }
 
@@ -917,8 +917,8 @@ mod tests {
     #[test]
     fn tailles() {
         assert_eq!(taille(812), "812 o");
-        assert_eq!(taille(3_400_000), "3.4 Mo");
-        assert_eq!(taille(4_700_000_000), "4.7 Go");
+        assert_eq!(taille(3_400_000), "3,4 Mo");
+        assert_eq!(taille(4_700_000_000), "4,7 Go");
     }
 
     #[test]

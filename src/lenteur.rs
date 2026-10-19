@@ -174,7 +174,7 @@ fn secondes_lisibles(s: f64) -> String {
         let s = s.round() as u64;
         return format!("{} min {:02} s", s / 60, s % 60);
     }
-    format!("{s:.1} s").replace('.', if crate::langue::anglais() { "." } else { "," })
+    format!("{} s", crate::langue::decimal(s, 1))
 }
 
 /// Un service de l'utilisateur lancé à l'ouverture de session : voulu par default.target (ou la session graphique). Un
@@ -396,7 +396,7 @@ fn taille(octets: u64) -> String {
     #[allow(clippy::cast_precision_loss)]
     let f = octets as f64;
     if octets >= 1 << 30 {
-        trf!("{:.1} Go", "{:.1} GB", f / f64::from(1u32 << 30))
+        trf!("{} Go", "{} GB", crate::langue::decimal(f / f64::from(1u32 << 30), 1))
     } else if octets >= 1 << 20 {
         trf!("{:.0} Mo", "{:.0} MB", f / f64::from(1u32 << 20))
     } else {

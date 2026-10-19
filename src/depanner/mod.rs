@@ -229,7 +229,7 @@ fn taille(octets: u64) -> String {
     if octets >= 1 << 40 {
         #[allow(clippy::cast_precision_loss)]
         let to = octets as f64 / f64::from(1u32 << 20) / f64::from(1u32 << 20);
-        trf!("{to:.1} To", "{to:.1} TB")
+        trf!("{} To", "{} TB", crate::langue::decimal(to, 1))
     } else {
         crate::nettoyer::taille_lisible(octets)
     }

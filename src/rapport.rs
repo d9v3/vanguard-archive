@@ -79,10 +79,10 @@ fn connexions(tests: &[crate::reseau::connexion::Resultat]) -> String {
         );
         let _ = write!(
             h,
-            "<tr><td>{}</td><td>{:.0} ms</td><td>{:.1} ms</td><td>{:.0} %</td><td>{}</td><td>{}</td><td>{}</td></tr>",
+            "<tr><td>{}</td><td>{:.0} ms</td><td>{} ms</td><td>{:.0} %</td><td>{}</td><td>{}</td><td>{}</td></tr>",
             esc(&t.date),
             t.internet_ms,
-            t.gigue_ms,
+            crate::langue::decimal(t.gigue_ms, 1),
             t.pertes,
             debit(t.descendant),
             debit(t.montant),

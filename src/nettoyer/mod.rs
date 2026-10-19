@@ -56,7 +56,7 @@ pub fn taille_lisible(octets: u64) -> String {
     #[allow(clippy::cast_precision_loss)] // une taille affichée à un chiffre après la virgule
     let f = octets as f64;
     if octets >= 1 << 30 {
-        trf!("{:.1} Go", "{:.1} GB", f / f64::from(1u32 << 30))
+        trf!("{} Go", "{} GB", crate::langue::decimal(f / f64::from(1u32 << 30), 1))
     } else if octets >= PRESQUE_RIEN {
         trf!("{:.0} Mo", "{:.0} MB", f / f64::from(1u32 << 20))
     } else {
@@ -463,7 +463,7 @@ mod tests {
     fn tailles_lisibles() {
         assert!(taille_lisible(0).contains('1'));
         assert_eq!(taille_lisible(340 << 20), trf!("340 Mo", "340 MB"));
-        assert_eq!(taille_lisible((3 << 30) / 2), trf!("1.5 Go", "1.5 GB"));
+        assert_eq!(taille_lisible((3 << 30) / 2), trf!("1,5 Go", "1.5 GB"));
     }
 
     #[test]

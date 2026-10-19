@@ -14,11 +14,11 @@ fn taille(octets: u64) -> String {
     #[allow(clippy::cast_precision_loss)]
     let go = octets as f64 / GIO as f64;
     if go >= 1000.0 {
-        trf!("{:.1} To", "{:.1} TB", go / 1024.0)
+        trf!("{} To", "{} TB", crate::langue::decimal(go / 1024.0, 1))
     } else if go >= 10.0 {
         trf!("{go:.0} Go", "{go:.0} GB")
     } else {
-        trf!("{go:.1} Go", "{go:.1} GB")
+        trf!("{} Go", "{} GB", crate::langue::decimal(go, 1))
     }
 }
 

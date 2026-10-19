@@ -439,7 +439,7 @@ fn debit(octets: u64, duree: Duration) -> String {
     if par_seconde >= GIO {
         #[allow(clippy::cast_precision_loss)]
         let go = par_seconde as f64 / GIO as f64;
-        trf!("{go:.1} Go/s", "{go:.1} GB/s")
+        trf!("{} Go/s", "{} GB/s", crate::langue::decimal(go, 1))
     } else {
         trf!("{} Mo/s", "{} MB/s", par_seconde / MIO)
     }
@@ -477,7 +477,7 @@ fn duree_estimee(octets: u64, debit: u64) -> String {
     } else {
         #[allow(clippy::cast_precision_loss)]
         let heures = secondes as f64 / 3600.0;
-        trf!("environ {heures:.1} h", "about {heures:.1} h")
+        trf!("environ {} h", "about {} h", crate::langue::decimal(heures, 1))
     }
 }
 
@@ -1226,10 +1226,10 @@ mod tests {
     #[test]
     fn debits_durees_et_qualites() {
         assert_eq!(debit(100 * MIO, Duration::from_secs(4)), "25 Mo/s");
-        assert_eq!(debit(3 * GIO, Duration::from_secs(1)), "3.0 Go/s");
+        assert_eq!(debit(3 * GIO, Duration::from_secs(1)), "3,0 Go/s");
         assert_eq!(duree_estimee(600 * MIO, 20 * MIO), "environ 60 s");
         assert_eq!(duree_estimee(10 * GIO, 20 * MIO), "environ 18 min");
-        assert_eq!(duree_estimee(500 * GIO, 20 * MIO), "environ 14.2 h");
+        assert_eq!(duree_estimee(500 * GIO, 20 * MIO), "environ 14,2 h");
         assert_eq!(minutes(45), "45 s");
         assert_eq!(minutes(130), "3 min");
         assert_eq!(minutes(4000), "1 h 06");

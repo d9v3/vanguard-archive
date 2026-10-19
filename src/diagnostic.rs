@@ -44,9 +44,9 @@ fn go(octets: u64) -> String {
     #[allow(clippy::cast_precision_loss)]
     let g = octets as f64 / f64::from(1u32 << 30);
     if g >= 1000.0 {
-        trf!("{:.1} To", "{:.1} TB", g / 1024.0)
+        trf!("{} To", "{} TB", crate::langue::decimal(g / 1024.0, 1))
     } else {
-        trf!("{g:.1} Go", "{g:.1} GB")
+        trf!("{} Go", "{} GB", crate::langue::decimal(g, 1))
     }
 }
 
@@ -872,7 +872,7 @@ mod tests {
         let disque = r#"NAME="sda" SIZE="31004295168" ROTA="1" TYPE="disk" TRAN="usb" MODEL="USB Flash Disk""#;
         assert_eq!(systeme::champ_lsblk(disque, "TRAN").as_deref(), Some("usb"));
         assert_eq!(systeme::champ_lsblk(disque, "MODEL").as_deref(), Some("USB Flash Disk"));
-        assert_eq!(go(2_000_398_934_016), "1.8 To");
+        assert_eq!(go(2_000_398_934_016), "1,8 To");
     }
 
     /// Ce que le diagnostic montre du journal et du système : n'importe quel programme choisit le nom sous lequel il

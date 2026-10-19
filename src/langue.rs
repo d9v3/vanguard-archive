@@ -134,6 +134,12 @@ pub fn role(nom: &str) -> &str {
     }
 }
 
+/// Un nombre à virgule, avec `chiffres` décimales, écrit à la française (« 14,5 ») ou à l'anglaise (« 14.5 »).
+pub fn decimal(x: f64, chiffres: usize) -> String {
+    let texte = format!("{x:.chiffres$}");
+    if anglais() { texte } else { texte.replace('.', ",") }
+}
+
 /// Nom affiché d'une catégorie de constat (son nom interne est français).
 pub fn categorie(nom: &str) -> &str {
     if !anglais() {
@@ -223,6 +229,15 @@ const MEMES_EN: &[&str] = &[
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn nombres_a_virgule() {
+        // Le texte anglais garde le point ; le format ne dépend que de la langue de l'interface.
+        let attendu = if anglais() { "14.5" } else { "14,5" };
+        assert_eq!(decimal(14.49, 1), attendu);
+        assert_eq!(decimal(3.0, 0), "3");
+        assert_eq!(decimal(1234.5678, 2), if anglais() { "1234.57" } else { "1234,57" });
+    }
 
     /// Chaque catégorie écrite dans le code (alerte, ok, impossible…) a son nom anglais, ou s'écrit pareil : sans
     /// cela, l'interface anglaise montrait « Affichage X11 ». Le code est relu sur le disque (pas sous Wine).

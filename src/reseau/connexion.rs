@@ -532,7 +532,7 @@ pub async fn tester() {
     verdict(
         gigue < 10.0,
         tr!("Gigue", "Jitter"),
-        &format!("{gigue:.1} ms"),
+        &format!("{} ms", crate::langue::decimal(gigue, 1)),
         if gigue < 10.0 {
             tr!("stable", "stable")
         } else {
