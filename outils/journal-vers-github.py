@@ -52,6 +52,14 @@ def bloc(texte):
     return f"{'`' * longueur}\n{texte}\n{'`' * longueur}"
 
 
+def sans_arobase(texte):
+    """« @ » devient « ＠ » (pleine chasse, qui se lit pareil). Ces tickets partent du compte du propriétaire du dépôt,
+    et .github/workflows/claude.yml lance Claude, droits d'écriture compris, dès qu'un ticket ou un commentaire du
+    propriétaire contient « @claude » : il cherche le texte tel quel, bloc de code ou non. Un nom de réseau ou de
+    fichier venu d'un autre ordinateur ne doit pas pouvoir lui donner une consigne."""
+    return texte.replace("@", "＠")
+
+
 def gh(*args):
     return subprocess.run(["gh", *args], capture_output=True, text=True, timeout=60)
 
@@ -83,7 +91,9 @@ def main():
                 print(f"Journal : {n} détail(s) personnel(s) masqué(s) avant l'envoi : l'anonymisation de journal.rs "
                       "les a laissés passer.", file=sys.stderr)
         e = confidentialite.masquer_autrui(e, masque)
+        # La signature d'abord, sur le texte tel quel : une erreur déjà envoyée retrouve son ticket.
         contexte, detail, sig = signature(e)
+        e, contexte, detail = sans_arobase(e), sans_arobase(contexte), sans_arobase(detail)
         marque = f"gardien-signature-{sig}"
         numero = ouverts.get(sig)
         # Ticket fermé (erreur corrigée) : si elle revient, c'est un nouveau ticket.
