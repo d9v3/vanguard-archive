@@ -8,7 +8,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 DOSSIER=${1:?"usage : outils/tldr-cle.sh <dossier>"}
-ADRESSE=https://github.com/tldr-pages/tldr/releases/latest/download
+ADRESSE=https://github.com/tldr-pages/tldr/releases/latest/download/
 # La copie que le guide télécharge sur cet ordinateur (reseau::dossier_local).
 LOCAL="${XDG_DATA_HOME:-$HOME/.local/share}/vanguard/tldr"
 mkdir -p "$DOSSIER"
@@ -40,7 +40,7 @@ for langue in en fr; do
   if [[ -n $(find "$fin" -mmin -1440 2>/dev/null) ]]; then
     continue
   fi
-  if curl -fsL --max-time 120 --max-filesize $((40 << 20)) -o "$TEMP/$nom" "$ADRESSE/$nom" &&
+  if curl -fsL --max-time 120 --max-filesize $((40 << 20)) -o "$TEMP/$nom" "$ADRESSE$nom" &&
     lisible "$TEMP/$nom" "$minimum"; then
     source="$TEMP/$nom"
   elif [[ -f $LOCAL/$nom && $LOCAL/$nom -nt $fin ]] && lisible "$LOCAL/$nom" "$minimum"; then
