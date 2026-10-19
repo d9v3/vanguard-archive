@@ -97,9 +97,10 @@ impl Vocabulaire {
 
     /// La suite du dernier mot de `tape`, à montrer en gris après le curseur : celle du mot le plus courant du menu
     /// qui commence ainsi et, une fois complété, trouve encore au moins une ligne avec les autres mots tapés.
-    /// `trouvees` compte les lignes du menu que trouve une recherche. `None` : rien à prédire (mot de moins de deux
-    /// lettres, espace à la fin, touche comme « 4.2 », aucun mot qui mène à une ligne).
-    pub fn suite(&self, tape: &str, trouvees: impl Fn(&str) -> usize) -> Option<String> {
+    /// `trouve` dit si une recherche trouve au moins une ligne du menu (la première suffit : des milliers de lignes
+    /// se parcourent à chaque touche). `None` : rien à prédire (mot de moins de deux lettres, espace à la fin, touche
+    /// comme « 4.2 », aucun mot qui mène à une ligne).
+    pub fn suite(&self, tape: &str, trouve: impl Fn(&str) -> bool) -> Option<String> {
         if tape.ends_with(char::is_whitespace) {
             return None;
         }
@@ -109,14 +110,15 @@ impl Vocabulaire {
             return None;
         }
         let debut = self.mots.partition_point(|m| m.simple < voulu);
-        // Un mot déjà entier (« disque ») ne se fait pas proposer son pluriel ou une terminaison : seulement un mot
-        // nettement plus long.
-        let entier = self.mots.get(debut).is_some_and(|m| m.simple == voulu);
-        let marge = if entier { 3 } else { 1 };
+        // Un mot déjà entier (« disque », « tar ») ne se fait rien proposer : on a sans doute tapé ce qu'on voulait,
+        // pas « disques » ni « target ».
+        if self.mots.get(debut).is_some_and(|m| m.simple == voulu) {
+            return None;
+        }
         let mut candidats: Vec<&Mot> = self.mots[debut..]
             .iter()
             .take_while(|m| m.simple.starts_with(voulu.as_str()))
-            .filter(|m| m.simple.len() >= voulu.len() + marge)
+            .filter(|m| m.simple.len() > voulu.len())
             .collect();
         // Le plus courant dans les textes du menu (pas dans les chemins : « Windows 11 › » sur chaque ligne d'un
         // système ne doit pas faire prédire « windows » à qui tape « wi » pour « wifi »), puis le plus court.
@@ -128,7 +130,7 @@ impl Vocabulaire {
         });
         candidats.into_iter().take(20).find_map(|m| {
             let suite = suite_de(&m.montre, &voulu)?;
-            (trouvees(&format!("{tape}{suite}")) > 0).then_some(suite)
+            trouve(&format!("{tape}{suite}")).then_some(suite)
         })
     }
 }
@@ -141,7 +143,7 @@ mod tests {
     /// La prédiction sur ces lignes, avec la vraie recherche des menus.
     fn predire(lignes: &[&str], tape: &str) -> Option<String> {
         let cherche: Vec<String> = lignes.iter().map(|l| simplifier(l)).collect();
-        Vocabulaire::nouveau(lignes).suite(tape, |q| cherche.iter().filter(|c| correspond(q, c)).count())
+        Vocabulaire::nouveau(lignes).suite(tape, |q| cherche.iter().any(|c| correspond(q, c)))
     }
 
     #[test]
@@ -204,11 +206,11 @@ mod tests_au_hasard {
             tape in "[a-zéœ\\- .4]{0,12}|\\PC{0,8}",
         ) {
             let cherche: Vec<String> = lignes.iter().map(|l| simplifier(l)).collect();
-            let trouvees = |q: &str| cherche.iter().filter(|c| correspond(q, c)).count();
-            if let Some(suite) = Vocabulaire::nouveau(&lignes).suite(&tape, trouvees) {
+            let trouve = |q: &str| cherche.iter().any(|c| correspond(q, c));
+            if let Some(suite) = Vocabulaire::nouveau(&lignes).suite(&tape, trouve) {
                 prop_assert!(!suite.is_empty());
                 let complet = format!("{tape}{suite}");
-                prop_assert!(trouvees(&complet) > 0);
+                prop_assert!(trouve(&complet));
             }
         }
     }

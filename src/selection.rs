@@ -131,6 +131,21 @@ pub fn correspond(recherche: &str, texte: &str) -> bool {
         })
 }
 
+/// Le rang d'une ligne trouvée par `recherche` : 0 si son texte commence par le premier mot tapé (« tar » : la page
+/// tar), 1 s'il contient tous les mots, 2 si seuls ses mots cachés ou sa précision les ont. Les lignes se rangent
+/// par rang, et à rang égal gardent l'ordre du menu : les outils restent devant les commandes du guide.
+fn rang(recherche: &str, nom: &str) -> u8 {
+    let nom = nom.trim_start_matches(|c: char| !c.is_alphanumeric());
+    let premier = recherche.split_whitespace().next().map(simplifier).unwrap_or_default();
+    if !premier.is_empty() && nom.starts_with(premier.as_str()) {
+        0
+    } else if correspond(recherche, nom) {
+        1
+    } else {
+        2
+    }
+}
+
 /// Ce qui est tapé est-il une recherche ? Pas une touche du menu ni le début d'une touche (« 1 » de « 10 », « 4. » de
 /// « 4.2 »), et au moins deux lettres : une lettre seule reste un raccourci des anciennes versions (u, r, o…).
 fn est_une_recherche(tape: &str, touches: &[&str]) -> bool {
@@ -146,6 +161,9 @@ struct Choisissable<'a> {
     precision: &'a str,
     /// Tout ce que lit la recherche, simplifié une fois pour toutes.
     cherche: String,
+    /// Le texte seul (sans chemin, précision ni mots cachés), simplifié : ce qui le commence ou le contient passe
+    /// devant (`rang`).
+    nom: String,
     visible: bool,
 }
 
@@ -164,6 +182,7 @@ fn choisissables(lignes: &[Ligne]) -> Vec<Choisissable<'_>> {
                 texte: simplement_affiche(texte),
                 precision,
                 cherche: simplifier(&format!("{texte} {precision} {mots}")),
+                nom: simplifier(texte),
                 visible: true,
             }),
             Ligne::Cachee {
@@ -181,6 +200,7 @@ fn choisissables(lignes: &[Ligne]) -> Vec<Choisissable<'_>> {
                 }),
                 precision,
                 cherche: simplifier(&format!("{chemin} {texte} {precision} {mots}")),
+                nom: simplifier(texte),
                 visible: false,
             }),
         })
@@ -262,7 +282,8 @@ fn par_ligne(choix: &[Choisissable<'_>], touches: &[&str], invite: &str) -> Stri
         if !est_une_recherche(&reponse, touches) {
             return reponse;
         }
-        let trouves: Vec<&Choisissable> = choix.iter().filter(|c| correspond(&reponse, &c.cherche)).collect();
+        let mut trouves: Vec<&Choisissable> = choix.iter().filter(|c| correspond(&reponse, &c.cherche)).collect();
+        trouves.sort_by_key(|c| rang(&reponse, &c.nom));
         match trouves.as_slice() {
             [seul] => return seul.touche.to_string(),
             [] => trp!(
@@ -459,7 +480,9 @@ pub fn choisir(lignes: &[Ligne], invite: &str, depart: &str, echap: &str) -> Opt
     loop {
         let recherche = est_une_recherche(&tape, &touches);
         let trouves: Vec<&Choisissable> = if recherche {
-            choix.iter().filter(|c| correspond(&tape, &c.cherche)).collect()
+            let mut trouves: Vec<&Choisissable> = choix.iter().filter(|c| correspond(&tape, &c.cherche)).collect();
+            trouves.sort_by_key(|c| rang(&tape, &c.nom));
+            trouves
         } else {
             Vec::new()
         };
@@ -467,7 +490,7 @@ pub fn choisir(lignes: &[Ligne], invite: &str, depart: &str, echap: &str) -> Opt
         let suite = if recherche {
             vocabulaire
                 .get_or_insert_with(|| Vocabulaire::nouveau(&textes_du_menu(lignes)))
-                .suite(&tape, |q| choix.iter().filter(|c| correspond(q, &c.cherche)).count())
+                .suite(&tape, |q| choix.iter().any(|c| correspond(q, &c.cherche)))
         } else {
             None
         };
@@ -810,7 +833,7 @@ pub fn cocher(titre: &[String], cases: &[Case]) -> Option<Vec<bool>> {
                         .collect();
                     Vocabulaire::nouveau(&textes)
                 })
-                .suite(t, |q| lignes_trouvees(q, &cherche).len())
+                .suite(t, |q| cherche.iter().any(|c| correspond(q, c)))
         });
         let mut ecran = String::from("\x1b[H");
         let mut rangees: Vec<String> = titre.iter().flat_map(|l| l.split('\n').map(String::from)).collect();
@@ -993,6 +1016,15 @@ mod tests {
         assert!(correspond("vider dns", &vide) && correspond("réparer", &vide) && correspond("disque", &vide));
         assert!(!correspond("réseau", &simplifier("Resets the TCP/IP settings")));
         assert_eq!(simplifier("\x1b[1;96mCœur\x1b[0m"), "coeur");
+    }
+
+    #[test]
+    fn ce_qui_commence_par_le_mot_passe_devant() {
+        assert_eq!(rang("tar", &simplifier("tar")), 0);
+        assert_eq!(rang("tar", &simplifier("⚠ tar -czf <archive>")), 0);
+        assert_eq!(rang("archive tar", &simplifier("tar -tzf archive.tar.gz")), 1);
+        assert_eq!(rang("tar", &simplifier("akmods")), 2);
+        assert_eq!(rang("Réseau", &simplifier("Réseau et Internet")), 0);
     }
 
     #[test]
