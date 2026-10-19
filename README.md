@@ -80,6 +80,8 @@ pour revenir.
 - Heure réglée automatiquement ; fin de support : Windows 10 et les versions de Windows 11 ou de macOS qui ne
   reçoivent plus de corrections, programmes abandonnés par leur éditeur (Flash, Java 7, Office 2016…), navigateurs qui
   ne se mettent plus à jour ; comptes oubliés (actifs mais inutilisés depuis six mois).
+- Windows : WDigest (mots de passe en clair dans la mémoire), protection de l'autorité de sécurité locale,
+  PowerShell 2.0, Assistance à distance ; Linux : mises à jour de sécurité automatiques.
 - Mots de passe enregistrés dans le navigateur sans protection, fichiers sensibles qui traînent (mots de passe ou
   clés en clair), sauvegarde absente avec la mise en place proposée.
 - Santé : espace disque, état SMART des disques (sans root), batterie, températures.

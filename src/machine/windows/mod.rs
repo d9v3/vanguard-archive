@@ -10,6 +10,7 @@ use crate::trw;
 use crate::ui::{resume, tr, trf, trp};
 
 mod comptes;
+mod durcissement;
 mod maj;
 mod persistance;
 
@@ -766,6 +767,7 @@ pub fn auditer() -> Audit {
             verif!(comptes()),
             verif!(persistance()),
             verif!(wifi()),
+            verif!(durcissement::durcissement()),
         ],
     )
 }

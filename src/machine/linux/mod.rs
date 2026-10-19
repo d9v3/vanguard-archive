@@ -1322,6 +1322,7 @@ pub fn auditer() -> Audit {
             verif!([ssh_serveur()]),
             verif!(ssh_echecs()),
             verif!([mises_a_jour()]),
+            verif!(maj_automatiques()),
             verif!([failles_connues()]),
             verif!(autres_mises_a_jour()),
             verif!([redemarrage()]),

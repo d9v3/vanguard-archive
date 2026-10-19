@@ -149,6 +149,7 @@ pub fn categorie(nom: &str) -> &str {
         "Chiffrement" => "Encryption",
         "Clé USB" => "USB key",
         "Clés SSH" => "SSH keys",
+        "Durcissement" => "Hardening",
         "Comptes" => "Accounts",
         "Extensions" => "Browser extensions",
         "Failles connues" => "Known flaws",

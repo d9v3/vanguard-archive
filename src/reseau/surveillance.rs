@@ -105,6 +105,7 @@ const CATEGORIES_SURVEILLEES: &[&str] = &[
     "Extensions",
     "Bluetooth",
     "Fin de support",
+    "Durcissement",
 ];
 
 /// État de la machine au dernier passage de la surveillance.

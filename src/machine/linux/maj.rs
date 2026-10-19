@@ -1019,3 +1019,101 @@ mod tests {
         );
     }
 }
+
+/// Les mises à jour de sécurité installées toutes seules : unattended-upgrades sous Debian et Ubuntu, dnf-automatic
+/// sous Fedora. Ailleurs (Arch, openSUSE, systèmes atomiques), rien à dire : la mise à jour se fait autrement, ou
+/// l'outil met déjà le système entier à jour. Une information, avec la commande pour l'activer.
+pub(super) fn maj_automatiques() -> Option<Constat> {
+    if atomique().is_some() {
+        return None;
+    }
+    let apt = std::path::Path::new("/usr/bin/apt-get").exists();
+    let dnf = std::path::Path::new("/usr/bin/dnf").exists();
+    let actives = if apt {
+        let conf = std::fs::read_dir("/etc/apt/apt.conf.d")
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter_map(|e| std::fs::read_to_string(e.path()).ok())
+            .collect::<Vec<_>>()
+            .join("\n");
+        juger_apt_auto(&conf, std::path::Path::new("/usr/bin/unattended-upgrade").exists())
+    } else if dnf {
+        [
+            "dnf-automatic.timer",
+            "dnf5-automatic.timer",
+            "dnf-automatic-install.timer",
+        ]
+        .iter()
+        .any(|t| sortie("systemctl", &["is-enabled", t]).is_some_and(|s| s.trim() == "enabled"))
+    } else {
+        return None;
+    };
+    Some(if actives {
+        ok(
+            "Mises à jour",
+            tr!(
+                "Les mises à jour de sécurité s'installent toutes seules.",
+                "Security updates install by themselves."
+            ),
+        )
+    } else if apt {
+        alerte(
+            "Mises à jour",
+            Niveau::Info,
+            tr!(
+                "Les mises à jour de sécurité ne s'installent pas toutes seules : une faille corrigée reste ouverte ici jusqu'à la prochaine mise à jour faite à la main.",
+                "Security updates do not install by themselves: a fixed flaw stays open here until the next update done by hand."
+            ),
+        )
+        .manuel(
+            tr!(
+                "Activer les mises à jour de sécurité automatiques (unattended-upgrades)",
+                "Turn on automatic security updates (unattended-upgrades)"
+            ),
+            &["sudo apt install unattended-upgrades && sudo dpkg-reconfigure -plow unattended-upgrades"],
+        )
+    } else {
+        alerte(
+            "Mises à jour",
+            Niveau::Info,
+            tr!(
+                "Les mises à jour de sécurité ne s'installent pas toutes seules : une faille corrigée reste ouverte ici jusqu'à la prochaine mise à jour faite à la main.",
+                "Security updates do not install by themselves: a fixed flaw stays open here until the next update done by hand."
+            ),
+        )
+        .manuel(
+            tr!(
+                "Activer dnf-automatic (mises à jour installées chaque jour)",
+                "Turn on dnf-automatic (updates installed every day)"
+            ),
+            &["sudo dnf install dnf-automatic && sudo systemctl enable --now dnf-automatic.timer"],
+        )
+    })
+}
+
+/// apt : `APT::Periodic::Unattended-Upgrade "1";` dans la configuration, et l'outil installé.
+fn juger_apt_auto(conf: &str, outil: bool) -> bool {
+    outil
+        && conf.lines().any(|l| {
+            let l = l.trim();
+            !l.starts_with("//")
+                && l.starts_with("APT::Periodic::Unattended-Upgrade")
+                && l.split('"').nth(1).is_some_and(|v| v.trim() != "0")
+        })
+}
+
+#[cfg(test)]
+mod tests_maj_automatiques {
+    use super::*;
+
+    #[test]
+    fn configuration_d_apt() {
+        let actif = "APT::Periodic::Update-Package-Lists \"1\";\nAPT::Periodic::Unattended-Upgrade \"1\";\n";
+        assert!(juger_apt_auto(actif, true));
+        assert!(!juger_apt_auto(actif, false));
+        assert!(!juger_apt_auto("APT::Periodic::Unattended-Upgrade \"0\";\n", true));
+        assert!(!juger_apt_auto("// APT::Periodic::Unattended-Upgrade \"1\";\n", true));
+        assert!(!juger_apt_auto("", true));
+    }
+}
