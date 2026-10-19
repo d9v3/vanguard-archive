@@ -49,6 +49,7 @@ highlighted one, Esc clears it. In the main menu, it also finds each tool of the
        startup or put them back, after your consent: gardien startup)
        Computer specs (model, processor, memory, graphics card, disks; serial numbers on screen)
        Report to leave: a simple page for the person you helped, put on their Desktop
+       What Gardien changed: each fix run here, dated, successful or not
        Monthly check-up: one notification a month (grade, updates, space to free, new problems)
   5  Network and Internet ›
        Scan the network · Deep scan of one device · Name a device ("HP printer")

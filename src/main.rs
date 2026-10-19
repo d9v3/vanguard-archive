@@ -5,6 +5,7 @@
 
 mod a_laisser;
 mod apprentissage;
+mod changements;
 mod chiffrement;
 mod commande;
 mod copier;
@@ -302,6 +303,9 @@ enum Commande {
     /// ce qui va bien), posée sur son Bureau après accord et ouverte dans le navigateur.
     #[command(name = "a-laisser", visible_alias = "handout")]
     ALaisser,
+    /// Ce que Gardien a changé : chaque correction lancée sur cet ordinateur, sa date et son résultat.
+    #[command(visible_alias = "changes")]
+    Changements,
     /// Sauvegarde automatique : mise en place avec l'outil du système (Déjà Dup ou rsync chaque jour, Time Machine,
     /// Historique des fichiers) vers un disque externe, après accord, annulable exactement.
     #[command(name = "sauvegarde-auto", visible_alias = "auto-backup")]
@@ -709,6 +713,7 @@ enum Action {
     Lenteur,
     Fiche,
     ALaisser,
+    Changements,
     Entretien,
     Scanner,
     Appareil,
@@ -816,6 +821,10 @@ const OUTILS: &[Outil] = &[
         titre: ["Rapport à laisser", "Report to leave"],
         precision: ["une page simple, à imprimer", "a simple page, to print"],
         mots: "rapport report imprimer print dépannage help famille family laisser leave page résumé summary" },
+    Outil { action: Action::Changements, groupe: Some(Groupe::Machine), lettre: "",
+        titre: ["Ce que Gardien a changé", "What Gardien changed"],
+        precision: ["chaque correction, datée", "each fix, dated"],
+        mots: "changements changes historique history corrections fixes journal log annuler undo" },
     Outil { action: Action::Entretien, groupe: Some(Groupe::Machine), lettre: "",
         titre: ["Entretien du mois", "Monthly check-up"], precision: ["", ""],
         mots: "maintenance mensuel monthly mois month rappel reminder notification" },
@@ -1177,6 +1186,7 @@ async fn executer(s: &mut Session, action: Action) {
         Action::Audit => s.audit = Some(machine::executer(false)),
         Action::Integrite => protection::integrite::verifier(false),
         Action::Appris => apprentissage::menu(),
+        Action::Changements => changements::afficher(),
         Action::Lenteur => lenteur::menu(),
         Action::Fiche => fiche::fiche(false),
         Action::ALaisser => {
@@ -1322,6 +1332,7 @@ const AIDES_EN: &[(&str, &str)] = &[
     ("verifier-cle", "Check my drive: real capacity (fake drives), speeds and bad blocks of a USB stick or an \
                       external disk. Writes into the free space after your consent, reads back, then erases; your \
                       files are not touched"),
+    ("changements", "What Gardien changed: each fix run on this computer, its date and its result"),
     ("a-laisser", "Report to leave: a simple page for the person you just helped (grade, what is left to do, what is \
                    fine), put on their Desktop after consent and opened in the browser"),
     ("sauvegarde-auto", "Automatic backup: set up with the system's tool (Déjà Dup or rsync every day, Time Machine, \
@@ -1518,6 +1529,7 @@ async fn main() {
         Some(Commande::CopierFichiers { destination }) => copier::commande(destination.as_deref()),
         Some(Commande::VerifierCopie { dossier }) => copier::verifier_copie(dossier.as_deref()),
         Some(Commande::VerifierCle { dossier }) => verifier_cle::commande(dossier.as_deref()),
+        Some(Commande::Changements) => changements::afficher(),
         Some(Commande::ALaisser) => a_laisser::laisser(&machine::executer(false)),
         Some(Commande::SauvegardeAuto { annuler }) => {
             if annuler {

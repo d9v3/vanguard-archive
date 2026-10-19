@@ -50,6 +50,7 @@ Entrée ouvre celle en surbrillance, Échap efface. Au menu principal, elle trou
        les retirer du démarrage ou les remettre, après accord : gardien demarrage)
        Fiche de l'ordinateur (modèle, processeur, mémoire, carte graphique, disques ; numéros de série à l'écran)
        Rapport à laisser : une page simple pour la personne dépannée, posée sur son Bureau
+       Ce que Gardien a changé : chaque correction lancée ici, datée, réussie ou non
        Entretien du mois : une notification par mois (note, mises à jour, place à libérer, problèmes nouveaux)
   5  Réseau et Internet ›
        Scanner le réseau · Scan approfondi d'un appareil · Nommer un appareil (« imprimante HP »)

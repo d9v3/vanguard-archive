@@ -51,7 +51,7 @@ In the menu, choose **1** (full check), then **2** (fix). Arrows, Enter, and Esc
 | **Troubleshoot** | Computer diagnostic, everyday problems step by step (Internet, Wi-Fi, slowness, sound, printer, full disk), after an infection, new computer, computer leaving, hacked account, “Why is it slow?”, computer specs, report to leave, repairs. |
 | **Optimize and clean up** | Privacy and performance settings undone exactly, a cleanup checklist with the space gained measured, startup programs. |
 | **Protection** | Decoy files against ransomware, Windows Defender blocking, 308 YARA rules, antivirus, sandbox, integrity of critical files, leaked passwords, outbound connections, tech-support scam (remote control tools), camera and microphone, dangerous links, downloaded files, reversible quarantine. |
-| **Follow-up** | Hourly monitoring, monthly check-up, HTML report with the grade curve, learning on your computer. |
+| **Follow-up** | Hourly monitoring, monthly check-up, HTML report with the grade curve, learning on your computer, what Gardien changed (each fix, dated). |
 | **Software and games** | The best software in 8 categories, from its official source; update everything at once; settings for gaming. |
 | **Tools** | Automatic backup, copy my files (checked copy) and check a copy, check my drive (fake drives, speed), my computers (tracked by the key), key data protected by a passphrase, shortcut on this computer, command guide, search in every menu. |
 
@@ -308,6 +308,7 @@ Each menu entry is also a command.
 | `gardien troubleshoot [subject]` | troubleshoot step by step: `internet`, `wifi`, `slow`, `sound`, `printer`, `disk`, `infection`, `new`, `leaving`, `account` |
 | `gardien slow` | why it is slow: processor, memory, disk, startup, programs at login |
 | `gardien startup` | startup programs: remove or put them back, after your consent; each removal is undone exactly |
+| `gardien changes` | what Gardien changed: each fix run here, its date and its result |
 | `gardien handout` | report to leave: a simple page for the person you helped |
 | `gardien auto-backup [--annuler]` | automatic backup to an external disk, with the system's tool |
 | `gardien shortcut [on\|off]` | shortcut on this computer |

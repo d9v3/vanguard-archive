@@ -480,6 +480,13 @@ pub fn appliquer(commandes: &[String]) -> bool {
 /// correctif en échec n'empêche pas les suivants. Sous Linux et macOS, les commandes d'un correctif s'arrêtent à la
 /// première en échec ; sous Windows, une seule fenêtre UAC pour tous.
 pub fn appliquer_chacune(correctifs: &[Vec<String>]) -> Vec<bool> {
+    let resultats = lancer_chacune(correctifs);
+    // Gardé sur cet ordinateur : « Ce que Gardien a changé » (changements.rs).
+    crate::changements::noter(correctifs, &resultats);
+    resultats
+}
+
+fn lancer_chacune(correctifs: &[Vec<String>]) -> Vec<bool> {
     #[cfg(windows)]
     {
         for c in correctifs.iter().flatten() {

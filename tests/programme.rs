@@ -518,6 +518,13 @@ fn outils_recents_sans_rien_changer() {
         "{}",
         camera.texte
     );
+    let changements = gardien("fr", &["changements"], "", 30);
+    assert_eq!(changements.code, Some(0), "{}", changements.erreurs);
+    assert!(
+        sans_couleurs(&changements.texte).contains("aucune correction n'a été lancée"),
+        "{}",
+        changements.texte
+    );
     let quarantaine = gardien("fr", &["quarantaine"], "", 30);
     assert_eq!(quarantaine.code, Some(0), "{}", quarantaine.erreurs);
     assert!(
