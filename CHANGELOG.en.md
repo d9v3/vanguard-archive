@@ -21,6 +21,12 @@ repository (`git checkout v0.62.0`, for example), to be rebuilt if needed.
 - **More accurate.** Included SSH configuration files read, open Wi-Fi networks better recognized, a DNS on this computer also measured
   on a new site (its memory answered in under a millisecond), dnf-automatic that
   only downloads, APT settings read in their order, complete English interface, decimal numbers written the French way in French.
+- **Command guide redone.** One entry per system: Omarchy, Arch, Fedora, Debian and Ubuntu, other Linux, Windows 11,
+  macOS; each distribution shows its own programs, then those common to Linux. You type what you are looking for and
+  commands show up as you type; each one has its page, to copy it, or run it here when it only reads (its output
+  scrolls in Gardien, Esc stops it).
+- **Word prediction in every menu** and checklist: the end of the most likely word shows in grey, Tab completes it.
+  And a new logo.
 - **A single release a day.** This history groups versions by day; only the latest keeps its download page, and
   GitHub's Mac now compiles once per release.
 

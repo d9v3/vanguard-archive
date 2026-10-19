@@ -95,9 +95,10 @@ highlighted one, Esc clears it. In the main menu, it also finds each tool of the
        Shortcut on this computer: Gardien copied here and started with one click
        My computers: those where the key ran a check, their grade and remaining problems (gardien ordinateurs)
        Protect the key's data: device record encrypted by a passphrase, asked only elsewhere
- 10  Command guide › the useful commands of Linux, Windows, macOS and all systems, by program, each one
-       explained (⚠: it changes something); nothing runs from there, a number copies it. From the command line:
-       gardien guide windows, gardien guide winget, gardien guide dns cache
+ 10  Command guide › the useful commands of Omarchy, Arch, Fedora, Debian, Windows 11, macOS and all systems, by
+       program, each one explained (⚠: it changes something). Type what you are looking for: commands show up as
+       you type; each one can be copied, or run here if it only reads. From the command line:
+       gardien guide fedora, gardien guide winget, gardien guide dns cache
  11  Troubleshoot step by step › no Internet, Wi-Fi dropping, slow computer, no sound, printer, disk full:
        two or three questions, then Gardien checks and suggests the right repair.
        And: after an infection, new computer, computer leaving (sale, gift), hacked account.

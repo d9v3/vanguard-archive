@@ -258,9 +258,11 @@ enum Commande {
         /// Le surnom ; vide pour le retirer.
         surnom: Vec<String>,
     },
-    /// Guide des commandes : celles de Linux, de Windows, de macOS et de tous les systèmes, rangées par programme.
+    /// Guide des commandes : celles d'Omarchy, d'Arch, de Fedora, de Debian, des autres Linux, de Windows, de macOS et
+    /// de tous les systèmes, rangées par programme.
     Guide {
-        /// Un système (linux, windows, macos, tous), un programme (systemctl, winget…) ou des mots à chercher.
+        /// Un système (omarchy, arch, fedora, debian, windows, macos, tous ; linux : les programmes communs), un
+        /// programme (systemctl, winget…) ou des mots à chercher.
         quoi: Vec<String>,
     },
     /// Pourquoi c'est lent ? Ce qui occupe le processeur, la mémoire et le disque, le démarrage, les programmes lancés
@@ -636,13 +638,14 @@ async fn menu() {
         };
         let choix = choix.trim().to_lowercase();
         println!();
-        // Un outil ou une page du guide, trouvés par la recherche (ou leur chemin tapé : « 5.2 », « 10.2.4 »).
+        // Un outil, une page ou une commande du guide, trouvés par la recherche (ou leur chemin tapé : « 5.2 »,
+        // « 10.3.1 », « 10.3.1.2 »).
         if let Some((groupe, reste)) = choix.split_once('.') {
             let cle_de = |voulu: Groupe| GROUPES.iter().position(|g| *g == voulu).map(|i| (i + 4).to_string());
             if cle_de(Groupe::Guide).as_deref() == Some(groupe) {
-                if let Some((systeme, programme)) = guide::chemin(reste) {
+                if let Some((systeme, programme, commande)) = guide::chemin(reste) {
                     dernier = groupe.to_string();
-                    guide::ouvrir(systeme, programme);
+                    guide::ouvrir(systeme, programme, commande);
                 }
             } else if cle_de(Groupe::Depanner).as_deref() == Some(groupe) {
                 if let Some(n) = depanner::chemin(reste) {
@@ -1321,7 +1324,8 @@ const AIDES_EN: &[(&str, &str)] = &[
     ("nommer", "Give a nickname to a device of the database (“HP printer”), by its IP or MAC"),
     ("gaming", "Gaming: components for games (Windows: Visual C++, DirectX…; Linux: Steam, Vulkan, GameMode, Wine…; \
                 macOS: Rosetta, Steam, Epic…) and system settings"),
-    ("guide", "Command guide: the useful commands of Linux, Windows, macOS and all systems, sorted by program"),
+    ("guide", "Command guide: the useful commands of Omarchy, Arch, Fedora, Debian, other Linux, Windows, macOS and \
+               all systems, sorted by program"),
     ("lenteur", "Why is it slow? What keeps the processor, memory and disk busy, startup, the programs started at \
                  login. Read only"),
     ("demarrage", "Startup programs: those that start at login, to remove or put back after your consent. Each removal \
@@ -1378,7 +1382,8 @@ const OPTIONS_EN: &[(&str, &str, &str)] = &[
     ("verifier-fichier", "fichier", "The downloaded file"),
     ("verifier-fichier", "empreinte", "The checksum published by the site (preferably SHA-256). Otherwise: a \
                                        SHA256SUMS or .sha256 next to it"),
-    ("guide", "quoi", "A system (linux, windows, macos, all), a program (systemctl, winget…) or words to look for"),
+    ("guide", "quoi", "A system (omarchy, arch, fedora, debian, windows, macos, all; linux: the common programs), a \
+                       program (systemctl, winget…) or words to look for"),
     ("fiche", "json", "The specs as JSON, for a script (without the serial numbers)"),
     ("copier-fichiers", "destination", "A folder on an external disk (default: chosen among the plugged-in disks)"),
     ("verifier-copie", "dossier", "The disk or the folder of the copy (default: chosen among the plugged-in disks)"),

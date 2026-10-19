@@ -1,7 +1,7 @@
 //! Guide : les commandes de Windows 10 et 11, par programme. Toutes se tapent dans PowerShell (le terminal par
 //! défaut) ; les programmes classiques (ipconfig, sfc, netsh…) marchent aussi dans l'invite de commandes.
 
-use super::{Programme, changer, voir};
+use super::{Obstacle, Programme, changer, voir};
 
 pub const PROGRAMMES: &[Programme] = &[
     Programme {
@@ -35,7 +35,8 @@ pub const PROGRAMMES: &[Programme] = &[
                 "winget export -o apps.json",
                 "La liste des programmes installés, pour les réinstaller ailleurs.",
                 "The list of installed programs, to reinstall them elsewhere.",
-            ),
+            )
+            .sauf(Obstacle::Fichier),
             changer(
                 "winget import -i apps.json",
                 "Réinstalle les programmes de cette liste.",
@@ -52,37 +53,44 @@ pub const PROGRAMMES: &[Programme] = &[
                 "start ms-settings:windowsupdate",
                 "Ouvre Windows Update.",
                 "Opens Windows Update.",
-            ),
+            )
+            .sauf(Obstacle::Fenetre),
             voir(
                 "start ms-settings:network-status",
                 "Ouvre l'état du réseau, avec la réinitialisation du réseau.",
                 "Opens network status, with network reset.",
-            ),
+            )
+            .sauf(Obstacle::Fenetre),
             voir(
                 "start ms-settings:windowsdefender",
                 "Ouvre Sécurité Windows.",
                 "Opens Windows Security.",
-            ),
+            )
+            .sauf(Obstacle::Fenetre),
             voir(
                 "start ms-settings:storagesense",
                 "Ouvre le stockage : ce qui prend la place.",
                 "Opens storage: what takes up the space.",
-            ),
+            )
+            .sauf(Obstacle::Fenetre),
             voir(
                 "start ms-settings:appsfeatures",
                 "Ouvre la liste des applications installées.",
                 "Opens the list of installed apps.",
-            ),
+            )
+            .sauf(Obstacle::Fenetre),
             voir(
                 "start ms-settings:startupapps",
                 "Ouvre les applications lancées au démarrage.",
                 "Opens startup apps.",
-            ),
+            )
+            .sauf(Obstacle::Fenetre),
             voir(
                 "start ms-settings:troubleshoot",
                 "Ouvre les utilitaires de résolution des problèmes.",
                 "Opens the troubleshooters.",
-            ),
+            )
+            .sauf(Obstacle::Fenetre),
         ],
     },
     Programme {
@@ -99,7 +107,8 @@ pub const PROGRAMMES: &[Programme] = &[
                 "DISM /Online /Cleanup-Image /ScanHealth",
                 "Vérifie l'image de Windows, sans rien réparer.",
                 "Checks the Windows image, repairing nothing.",
-            ),
+            )
+            .sauf(Obstacle::Longue),
             changer(
                 "DISM /Online /Cleanup-Image /RestoreHealth",
                 "Répare l'image de Windows : à lancer avant sfc quand sfc n'y arrive pas.",
@@ -121,7 +130,8 @@ pub const PROGRAMMES: &[Programme] = &[
                 "chkdsk C:",
                 "Cherche les erreurs du disque C:, sans rien réparer.",
                 "Looks for errors on disk C:, repairing nothing.",
-            ),
+            )
+            .sauf(Obstacle::Longue),
             changer(
                 "chkdsk C: /f",
                 "Répare les erreurs ; pour C:, au prochain redémarrage.",
@@ -186,7 +196,8 @@ pub const PROGRAMMES: &[Programme] = &[
                 "netsh wlan show wlanreport",
                 "Rapport des connexions Wi-Fi des derniers jours, en HTML (administrateur).",
                 "Report of the last days' Wi-Fi connections, in HTML (administrator).",
-            ),
+            )
+            .sauf(Obstacle::Fichier),
             voir(
                 "netsh advfirewall show allprofiles",
                 "L'état du pare-feu pour chaque profil.",
@@ -365,17 +376,20 @@ pub const PROGRAMMES: &[Programme] = &[
                 "winver",
                 "La version exacte de Windows, dans une fenêtre.",
                 "The exact Windows version, in a window.",
-            ),
+            )
+            .sauf(Obstacle::Fenetre),
             voir(
                 "msinfo32",
                 "Informations système : matériel, pilotes, démarrage sécurisé.",
                 "System Information: hardware, drivers, Secure Boot.",
-            ),
+            )
+            .sauf(Obstacle::Fenetre),
             voir(
                 "dxdiag",
                 "Carte graphique, DirectX, son : à joindre à une demande d'aide pour un jeu.",
                 "Graphics card, DirectX, sound: attach it to a help request for a game.",
-            ),
+            )
+            .sauf(Obstacle::Fenetre),
             voir(
                 "Get-CimInstance Win32_BIOS",
                 "La version du BIOS et le numéro de série.",
@@ -392,7 +406,8 @@ pub const PROGRAMMES: &[Programme] = &[
                 "powercfg /batteryreport",
                 "Rapport de la batterie en HTML (usure, autonomie), écrit dans le dossier courant.",
                 "Battery report in HTML (wear, runtime), written to the current folder.",
-            ),
+            )
+            .sauf(Obstacle::Fichier),
             voir(
                 "powercfg /requests",
                 "Ce qui empêche la mise en veille (administrateur).",
@@ -407,7 +422,8 @@ pub const PROGRAMMES: &[Programme] = &[
                 "powercfg /energy",
                 "Diagnostic de l'énergie en HTML, après une minute d'observation (administrateur).",
                 "Power diagnostics in HTML, after a minute of watching (administrator).",
-            ),
+            )
+            .sauf(Obstacle::Fichier),
             changer(
                 "powercfg /hibernate off",
                 "Coupe la veille prolongée et rend la place de hiberfil.sys ; coupe aussi le démarrage rapide.",
@@ -439,7 +455,8 @@ pub const PROGRAMMES: &[Programme] = &[
                 "Repair-Volume -DriveLetter C -Scan",
                 "Cherche les erreurs du disque C: sans le bloquer (administrateur).",
                 "Looks for errors on C: without locking it (administrator).",
-            ),
+            )
+            .sauf(Obstacle::Longue),
             voir(
                 "Optimize-Volume -DriveLetter C -Analyze -Verbose",
                 "Le disque a-t-il besoin d'être optimisé (TRIM, défragmentation) ?",
@@ -449,7 +466,8 @@ pub const PROGRAMMES: &[Programme] = &[
                 "diskmgmt.msc",
                 "La gestion des disques, dans une fenêtre.",
                 "Disk Management, in a window.",
-            ),
+            )
+            .sauf(Obstacle::Fenetre),
         ],
     },
     Programme {
@@ -488,12 +506,14 @@ pub const PROGRAMMES: &[Programme] = &[
                 "perfmon /rel",
                 "Le moniteur de fiabilité : plantages et erreurs, jour par jour.",
                 "Reliability Monitor: crashes and errors, day by day.",
-            ),
+            )
+            .sauf(Obstacle::Fenetre),
             voir(
                 "eventvwr",
                 "L'Observateur d'événements, dans une fenêtre.",
                 "Event Viewer, in a window.",
-            ),
+            )
+            .sauf(Obstacle::Fenetre),
         ],
     },
     Programme {
@@ -582,12 +602,14 @@ pub const PROGRAMMES: &[Programme] = &[
                 "taskmgr",
                 "Le Gestionnaire des tâches (Ctrl+Maj+Échap), avec la page du démarrage.",
                 "Task Manager (Ctrl+Shift+Esc), with its startup page.",
-            ),
+            )
+            .sauf(Obstacle::Fenetre),
             voir(
                 "msconfig",
                 "Configuration du système : démarrage sélectif, mode sans échec (fenêtre).",
                 "System Configuration: selective startup, safe mode (window).",
-            ),
+            )
+            .sauf(Obstacle::Fenetre),
         ],
     },
     Programme {
@@ -614,7 +636,8 @@ pub const PROGRAMMES: &[Programme] = &[
                 "explorer .",
                 "Ouvre le dossier courant dans l'Explorateur.",
                 "Opens the current folder in File Explorer.",
-            ),
+            )
+            .sauf(Obstacle::Fenetre),
         ],
     },
 ];

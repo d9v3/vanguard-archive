@@ -17,6 +17,7 @@ modification. Sur GitHub, `@claude` dans un ticket ou une demande de fusion le f
 | `src/main.rs` | menu et sous-commandes |
 | `src/ui.rs` | couleurs, titres, cadres, barres, lignes coupées et alignées dans 76 colonnes |
 | `src/selection.rs` | menus et listes à cocher au clavier (flèches, Entrée, Échap ou Retour arrière), recherche par mot dans les menus |
+| `src/prediction.rs` | prédiction du mot en cours de frappe, la même dans tous les menus : sa fin en gris, Tab la complète |
 | `src/langue.rs` | choix de la langue et macros de traduction |
 | `src/machine/mod.rs` | types communs, affichage, exécution parallèle des vérifications |
 | `src/machine/linux/`, `src/machine/windows/`, `src/machine/macos/` | audit propre à chaque système, un fichier par thème |
@@ -39,7 +40,7 @@ modification. Sur GitHub, `@claude` dans un ticket ou une demande de fusion le f
 | `src/logiciels/` | logiciels à installer : catalogue vérifié (`catalogue.rs`), état et installation par système |
 | `src/protection/fuites.rs`, `src/donnees.rs` | mots de passe fuités, sauvegarde des données |
 | `src/protection/cle.rs` | protection de la clé USB sous Linux et macOS : partition remontée en lecture seule hors de l'ordinateur du propriétaire |
-| `src/guide/` | guide des commandes : un fichier par système (`linux.rs`, `windows.rs`, `macos.rs`, `tous.rs`), menus et recherche (`mod.rs`) |
+| `src/guide/` | guide des commandes : un fichier par système (`linux.rs` : programmes communs et propres à chaque distribution, `windows.rs`, `macos.rs`, `tous.rs`), menus et recherche (`mod.rs`), commandes lancées ici (`lancement.rs`) |
 | `src/apprentissage.rs` | ce que Gardien apprend ici : alertes déclarées normales (appris.json), habitudes |
 | `src/reseau/listes_noires.rs` | adresse Internet de la maison dans les listes noires (DNSBL), après accord |
 | `src/entretien.rs` | entretien du mois : note, mises à jour, place, problèmes nouveaux, en une notification |

@@ -1,7 +1,7 @@
 //! Guide : les commandes de macOS, par programme. « en0 » est en général le Wi-Fi d'un portable (la liste :
 //! networksetup -listallhardwareports).
 
-use super::{Programme, changer, voir};
+use super::{Obstacle, Programme, changer, voir};
 
 pub const PROGRAMMES: &[Programme] = &[
     Programme {
@@ -80,7 +80,8 @@ pub const PROGRAMMES: &[Programme] = &[
                 "diskutil verifyVolume /",
                 "Vérifie le volume du système sans le démonter.",
                 "Checks the system volume without unmounting it.",
-            ),
+            )
+            .sauf(Obstacle::Longue),
             changer(
                 "diskutil repairVolume <disque>",
                 "Répare un volume ; celui du Mac, depuis le mode de récupération.",
@@ -361,7 +362,8 @@ pub const PROGRAMMES: &[Programme] = &[
                 "open -a Console",
                 "La Console : journaux et rapports, dans une fenêtre.",
                 "Console: logs and reports, in a window.",
-            ),
+            )
+            .sauf(Obstacle::Fenetre),
         ],
     },
     Programme {
@@ -373,7 +375,8 @@ pub const PROGRAMMES: &[Programme] = &[
                 "top -o cpu",
                 "Les programmes en direct, triés par processeur (q pour quitter).",
                 "Programs, live, sorted by CPU (q to quit).",
-            ),
+            )
+            .sauf(Obstacle::PleinEcran),
             voir(
                 "ps aux | sort -nrk 4 | head",
                 "Ceux qui prennent le plus de mémoire.",
@@ -383,7 +386,8 @@ pub const PROGRAMMES: &[Programme] = &[
                 "open -a \"Activity Monitor\"",
                 "Le Moniteur d'activité.",
                 "Activity Monitor.",
-            ),
+            )
+            .sauf(Obstacle::Fenetre),
             changer(
                 "killall <programme>",
                 "Ferme un programme par son nom.",

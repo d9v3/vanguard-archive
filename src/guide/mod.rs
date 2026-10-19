@@ -1,75 +1,159 @@
-//! Guide des commandes : les commandes utiles de Linux, de Windows, de macOS et celles qui s'écrivent pareil partout,
-//! rangées par système puis par programme. Rien ne s'y lance : le guide montre et explique, on tape la commande
-//! soi-même, ici ou chez la personne qu'on aide (au téléphone, sur un autre ordinateur). D'où tous les systèmes
-//! partout : sous Linux, on peut lire les commandes de Windows.
+//! Guide des commandes : les commandes utiles de chaque système, rangées par système puis par programme, chacune
+//! expliquée. Linux se lit par distribution (Omarchy, Arch, Fedora, Debian et Ubuntu, les autres) : chacune montre ses
+//! programmes à elle, puis ceux communs à toutes. On trouve une commande en tapant ce qu'on cherche (« wifi »,
+//! « disque ») : la recherche des menus la propose au fil de la frappe, et la prédiction complète le mot. Chaque
+//! commande a sa page : la copier, pour la taper ici ou chez la personne qu'on aide, ou la lancer ici quand elle ne
+//! fait que lire (`lancement`). Tous les systèmes se lisent partout : sous Linux, on peut lire les commandes de
+//! Windows.
 
+mod lancement;
 mod linux;
 mod macos;
 mod tous;
 mod windows;
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 use crate::risk::Niveau;
 use crate::selection::{Ligne, choisir, correspond, simplifier};
 use crate::ui::*;
 
-/// Un système du guide.
+/// Un système du guide. Linux se lit par distribution ; `Linux` lui-même ne paraît pas au menu : c'est le système des
+/// programmes communs à toutes, montrés avec chacune.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Systeme {
-    Linux,
+    Omarchy,
+    Arch,
+    Fedora,
+    /// Debian, Ubuntu, Mint.
+    Debian,
+    /// openSUSE, et les distributions que le guide ne range pas à part.
+    AutresLinux,
     Windows,
     MacOs,
     /// Les commandes qui s'écrivent pareil sous les trois.
     Tous,
+    /// Les programmes communs à toutes les distributions.
+    Linux,
 }
 
-pub const SYSTEMES: [Systeme; 4] = [Systeme::Linux, Systeme::Windows, Systeme::MacOs, Systeme::Tous];
+/// Les systèmes du menu, dans l'ordre : leur rang fait leur touche (« 3 » : Fedora).
+pub const SYSTEMES: [Systeme; 8] = [
+    Systeme::Omarchy,
+    Systeme::Arch,
+    Systeme::Fedora,
+    Systeme::Debian,
+    Systeme::AutresLinux,
+    Systeme::Windows,
+    Systeme::MacOs,
+    Systeme::Tous,
+];
+
+/// La distribution de cet ordinateur, lue une fois.
+static DISTRIBUTION: OnceLock<Systeme> = OnceLock::new();
 
 impl Systeme {
-    /// Celui sur lequel tourne Gardien.
+    /// Celui sur lequel tourne Gardien : sa distribution, sous Linux.
     fn actuel() -> Systeme {
         if cfg!(windows) {
             Systeme::Windows
         } else if cfg!(target_os = "macos") {
             Systeme::MacOs
         } else {
-            Systeme::Linux
+            *DISTRIBUTION.get_or_init(|| {
+                let os_release = std::fs::read_to_string("/etc/os-release")
+                    .or_else(|_| std::fs::read_to_string("/usr/lib/os-release"))
+                    .unwrap_or_default();
+                // Une Omarchy qui se dit Arch se reconnaît à son outil.
+                match distribution(&os_release) {
+                    Systeme::Arch if installe_ici("omarchy") => Systeme::Omarchy,
+                    d => d,
+                }
+            })
         }
+    }
+
+    /// Une distribution de Linux, ou les programmes communs à toutes.
+    fn linux(self) -> bool {
+        matches!(
+            self,
+            Systeme::Omarchy
+                | Systeme::Arch
+                | Systeme::Fedora
+                | Systeme::Debian
+                | Systeme::AutresLinux
+                | Systeme::Linux
+        )
+    }
+
+    /// Ses commandes sont-elles faites pour cet ordinateur ? Celles d'une distribution valent pour toutes (le guide
+    /// dit si le programme manque), celles de tous les systèmes aussi.
+    fn d_ici(self) -> bool {
+        let ici = Systeme::actuel();
+        self == Systeme::Tous || self == ici || (self.linux() && ici.linux())
     }
 
     fn nom(self) -> &'static str {
         match self {
-            Systeme::Linux => "Linux",
-            Systeme::Windows => "Windows",
+            Systeme::Omarchy => "Omarchy",
+            Systeme::Arch => "Arch",
+            Systeme::Fedora => "Fedora",
+            Systeme::Debian => "Debian, Ubuntu",
+            Systeme::AutresLinux => tr!("Autres Linux", "Other Linux"),
+            Systeme::Windows => "Windows 11",
             Systeme::MacOs => "macOS",
             Systeme::Tous => tr!("Tous les systèmes", "All systems"),
+            Systeme::Linux => "Linux",
         }
     }
 
     /// Ce qui le désigne dans « gardien guide <système> », sans accents ni majuscules.
     fn mots(self) -> &'static [&'static str] {
         match self {
-            Systeme::Linux => &["linux"],
-            Systeme::Windows => &["windows", "win"],
+            Systeme::Omarchy => &["omarchy"],
+            Systeme::Arch => &["arch", "manjaro", "endeavouros", "cachyos"],
+            Systeme::Fedora => &["fedora", "rhel", "centos"],
+            Systeme::Debian => &["debian", "ubuntu", "mint"],
+            Systeme::AutresLinux => &["opensuse", "suse", "autres", "other"],
+            Systeme::Windows => &["windows", "win", "windows11"],
             Systeme::MacOs => &["macos", "mac", "osx"],
             Systeme::Tous => &["tous", "all", "general"],
+            Systeme::Linux => &["linux"],
         }
     }
 
-    fn programmes(self) -> &'static [Programme] {
+    /// Ses programmes à lui : ceux d'une distribution, sans les communs.
+    fn propres(self) -> &'static [Programme] {
         match self {
-            Systeme::Linux => linux::PROGRAMMES,
+            Systeme::Omarchy => linux::OMARCHY,
+            Systeme::Arch => linux::ARCH,
+            Systeme::Fedora => linux::FEDORA,
+            Systeme::Debian => linux::DEBIAN,
+            Systeme::AutresLinux => linux::AUTRES,
             Systeme::Windows => windows::PROGRAMMES,
             Systeme::MacOs => macos::PROGRAMMES,
             Systeme::Tous => tous::PROGRAMMES,
+            Systeme::Linux => linux::COMMUNS,
         }
+    }
+
+    /// Les programmes de son menu, chacun avec le système sous lequel il s'affiche : ceux d'une distribution, puis
+    /// les communs à toutes, sous « Linux ».
+    fn programmes(self) -> Vec<(Systeme, &'static Programme)> {
+        let mut programmes: Vec<_> = self.propres().iter().map(|p| (self, p)).collect();
+        if self.linux() && self != Systeme::Linux {
+            programmes.extend(linux::COMMUNS.iter().map(|p| (Systeme::Linux, p)));
+        }
+        programmes
     }
 
     /// Où taper les commandes de ce système.
     fn terminal(self) -> &'static str {
         match self {
-            Systeme::Linux => tr!(
+            Systeme::Omarchy => tr!("Terminal : Super+Entrée.", "Terminal: Super+Enter."),
+            Systeme::Arch | Systeme::Fedora | Systeme::Debian | Systeme::AutresLinux | Systeme::Linux => tr!(
                 "Terminal : Ctrl+Alt+T sur la plupart des bureaux, Super+Entrée sous Omarchy.",
                 "Terminal: Ctrl+Alt+T on most desktops, Super+Enter on Omarchy."
             ),
@@ -91,12 +175,42 @@ impl Systeme {
     /// Précision de sa ligne au menu (33 caractères au plus).
     fn apercu(self) -> &'static str {
         match self {
-            Systeme::Linux => tr!("systemctl, journalctl, paquets…", "systemctl, journalctl, packages…"),
+            Systeme::Omarchy => "omarchy, pacman, yay, ufw…",
+            Systeme::Arch => "pacman, yay (AUR), Manjaro…",
+            Systeme::Fedora => "dnf, rpm-ostree, firewalld…",
+            Systeme::Debian => "apt, dpkg, snap, ufw, Mint…",
+            Systeme::AutresLinux => tr!("openSUSE : zypper, firewalld…", "openSUSE: zypper, firewalld…"),
             Systeme::Windows => "winget, sfc, DISM, PowerShell…",
             Systeme::MacOs => "brew, diskutil, Time Machine…",
             Systeme::Tous => "Gardien, ping, ssh, git, curl…",
+            Systeme::Linux => "systemctl, journalctl, ip, nmcli…",
         }
     }
+}
+
+/// La distribution d'après /etc/os-release : son ID, puis ceux dont elle dérive (ID_LIKE). Une distribution que le
+/// guide ne range pas à part va dans « Autres Linux ».
+fn distribution(os_release: &str) -> Systeme {
+    let valeur = |cle: &str| {
+        os_release
+            .lines()
+            .find_map(|l| l.trim().strip_prefix(cle)?.strip_prefix('='))
+            .map(|v| v.trim().trim_matches(['"', '\'']).to_lowercase())
+            .unwrap_or_default()
+    };
+    let (id, semblables) = (valeur("ID"), valeur("ID_LIKE"));
+    std::iter::once(id.as_str())
+        .chain(semblables.split_whitespace())
+        .find_map(|nom| match nom {
+            "omarchy" => Some(Systeme::Omarchy),
+            "arch" | "manjaro" | "endeavouros" | "cachyos" | "garuda" | "artix" => Some(Systeme::Arch),
+            "fedora" | "rhel" | "centos" | "rocky" | "almalinux" | "nobara" => Some(Systeme::Fedora),
+            "debian" | "ubuntu" | "linuxmint" | "pop" | "elementary" | "zorin" | "kali" | "raspbian" => {
+                Some(Systeme::Debian)
+            }
+            _ => None,
+        })
+        .unwrap_or(Systeme::AutresLinux)
 }
 
 /// Un programme et ses commandes.
@@ -120,6 +234,32 @@ pub struct Commande {
     pub texte: (&'static str, &'static str),
     /// Elle change quelque chose (réglage, fichier, paquet, service) : marquée ⚠.
     pub modifie: bool,
+    /// Ce qui empêche Gardien de la lancer ici, même si elle ne change rien.
+    pub obstacle: Obstacle,
+}
+
+/// Ce qui empêche Gardien de lancer lui-même une commande qui ne change rien : elle se tape alors dans un terminal
+/// (`lancement::obstacle`). Une commande précédée de sudo demande les droits d'administrateur sans qu'on le dise.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Obstacle {
+    Aucun,
+    /// Elle ouvre une fenêtre (Paramètres, msinfo32, Moniteur d'activité) et n'écrit rien ici.
+    Fenetre,
+    /// Elle occupe tout le terminal (top).
+    PleinEcran,
+    /// Elle écrit un fichier de rapport dans le dossier courant.
+    Fichier,
+    /// Elle demande les droits d'administrateur (fenêtre de mot de passe).
+    Administrateur,
+    /// Elle prend plusieurs minutes, avec les droits d'administrateur (DISM, chkdsk).
+    Longue,
+}
+
+impl Commande {
+    /// La même commande, que Gardien ne lance pas ici pour cette raison.
+    pub const fn sauf(self, obstacle: Obstacle) -> Commande {
+        Commande { obstacle, ..self }
+    }
 }
 
 /// Une commande qui lit ou montre, sans rien changer.
@@ -129,6 +269,7 @@ pub const fn voir(ligne: &'static str, fr: &'static str, en: &'static str) -> Co
         ligne_en: "",
         texte: (fr, en),
         modifie: false,
+        obstacle: Obstacle::Aucun,
     }
 }
 
@@ -139,6 +280,7 @@ pub const fn changer(ligne: &'static str, fr: &'static str, en: &'static str) ->
         ligne_en: "",
         texte: (fr, en),
         modifie: true,
+        obstacle: Obstacle::Aucun,
     }
 }
 
@@ -155,6 +297,7 @@ pub const fn traduite(
         ligne_en,
         texte: (fr, en),
         modifie,
+        obstacle: Obstacle::Aucun,
     }
 }
 
@@ -231,17 +374,24 @@ fn en_anglais(ligne: &str) -> String {
         .fold(ligne.to_string(), |l, (fr, en)| l.replace(fr, en))
 }
 
-/// Le programme est-il installé ici ? Cherché dans le PATH, et dans les dossiers des outils d'administration que le
-/// PATH d'un compte ordinaire omet parfois (Debian), ou de Homebrew (macOS).
+/// Ce que la recherche trouve dans une commande sans l'afficher : l'autre langue, et son explication dans les deux.
+fn mots_de_la_commande(c: &Commande) -> String {
+    format!("{} {} {} {}", c.ligne_en, en_anglais(c.ligne), c.texte.0, c.texte.1)
+}
+
+/// Le programme est-il installé ici ?
 fn installe(p: &Programme) -> bool {
-    if p.executable.is_empty() {
-        return true;
-    }
+    p.executable.is_empty() || installe_ici(p.executable)
+}
+
+/// Ce fichier est-il là ? Cherché dans le PATH, et dans les dossiers des outils d'administration que le PATH d'un
+/// compte ordinaire omet parfois (Debian), ou de Homebrew (macOS) ; un chemin complet, tel quel.
+fn installe_ici(executable: &str) -> bool {
     // Un lien vers un programme compte : les alias d'applications de Windows (winget) en sont, illisibles comme
     // fichiers ordinaires.
     let existe = |chemin: &Path| std::fs::symlink_metadata(chemin).is_ok_and(|m| !m.is_dir());
-    if p.executable.starts_with('/') {
-        return existe(Path::new(p.executable));
+    if executable.starts_with('/') {
+        return existe(Path::new(executable));
     }
     let mut dossiers: Vec<PathBuf> = std::env::var_os("PATH")
         .map(|chemins| std::env::split_paths(&chemins).collect())
@@ -261,76 +411,34 @@ fn installe(p: &Programme) -> bool {
     let noms: Vec<String> = if cfg!(windows) {
         [".exe", ".com", ".cmd", ".bat"]
             .iter()
-            .map(|e| format!("{}{e}", p.executable))
+            .map(|e| format!("{executable}{e}"))
             .collect()
     } else {
-        vec![p.executable.to_string()]
+        vec![executable.to_string()]
     };
     dossiers.iter().any(|d| noms.iter().any(|n| existe(&d.join(n))))
 }
 
-/// Absent de cet ordinateur : seulement dit pour son propre système et pour les commandes de tous les systèmes (sur
-/// Linux, on ne sait rien d'un Windows).
+/// Absent de cet ordinateur : seulement dit pour les commandes faites pour lui (sur Linux, on ne sait rien d'un
+/// Windows).
 fn absent(s: Systeme, p: &Programme) -> bool {
-    (s == Systeme::actuel() || s == Systeme::Tous) && !installe(p)
+    s.d_ici() && !installe(p)
 }
 
-/// Une commande et son explication. `numero` : celui qui la copie, à la place des deux espaces de la marge (la
-/// plus longue commande remplit déjà la ligne).
-fn afficher_commande(c: &Commande, numero: Option<usize>) {
-    let marque = if c.modifie {
+/// ⚠ en couleur si la commande change quelque chose, une espace sinon : les commandes restent alignées.
+fn marque(c: &Commande) -> String {
+    if c.modifie {
         format!("{}⚠{RESET}", couleur(Niveau::Moyen))
     } else {
         " ".to_string()
-    };
-    let marge = numero.map_or_else(|| "  ".to_string(), |n| format!("{TOUCHE}{n:>2}{RESET}"));
-    println!("{marge}{marque} {GRAS}{}{RESET}", ligne(c));
-    for l in envelopper(dans_la_langue(c.texte), LARGEUR - 6) {
-        println!("      {GRIS}{l}{RESET}");
     }
 }
 
-/// Un programme seul à l'écran, ses commandes numérotées : un numéro copie la sienne, Entrée revient.
-fn montrer_programme(s: Systeme, p: &Programme) {
-    print!("\x1b[2J\x1b[H");
-    afficher_programme(s, p, true);
-    loop {
-        let reponse = demander(&trf!(
-            "\n  {GRIS}Numéro d'une commande à copier, ou Entrée pour revenir :{RESET} ",
-            "\n  {GRIS}Number of a command to copy, or Enter to go back:{RESET} "
-        ));
-        if reponse.is_empty() {
-            return;
-        }
-        let Some(c) = reponse
-            .parse::<usize>()
-            .ok()
-            .and_then(|n| n.checked_sub(1))
-            .and_then(|i| p.commandes.get(i))
-        else {
-            trp!(
-                "  Pas de commande n° « {reponse} » ici.",
-                "  No command number “{reponse}” here."
-            );
-            continue;
-        };
-        let commande = ligne(c);
-        if copier(&commande) {
-            trp!(
-                "  {VERT}✔{RESET} Copiée : {GRAS}{commande}{RESET}",
-                "  {VERT}✔{RESET} Copied: {GRAS}{commande}{RESET}"
-            );
-        } else {
-            // Sans presse-papier (pas de bureau, outil absent), la commande reste à sélectionner à la souris.
-            println!(
-                "  {}✖{RESET} {}\n    {GRAS}{commande}{RESET}",
-                couleur(Niveau::Moyen),
-                tr!(
-                    "Presse-papier inaccessible ici : sélectionne la commande à la souris.",
-                    "Clipboard unavailable here: select the command with the mouse."
-                )
-            );
-        }
+/// Une commande et son explication, pour `gardien guide` en ligne de commande.
+fn afficher_commande(c: &Commande) {
+    println!("  {} {GRAS}{}{RESET}", marque(c), ligne(c));
+    for l in envelopper(dans_la_langue(c.texte), LARGEUR - 6) {
+        println!("      {GRIS}{l}{RESET}");
     }
 }
 
@@ -382,8 +490,8 @@ fn copier(texte: &str) -> bool {
     }
 }
 
-/// Un programme et toutes ses commandes ; `numeros` : numérotées, pour les copier.
-fn afficher_programme(s: Systeme, p: &Programme, numeros: bool) {
+/// Un programme et toutes ses commandes, pour `gardien guide` en ligne de commande.
+fn afficher_programme(s: Systeme, p: &Programme) {
     titre(&format!("{} › {}", s.nom(), nom(p)));
     let installe = if absent(s, p) {
         tr!(" (pas installé ici)", " (not installed here)")
@@ -391,8 +499,8 @@ fn afficher_programme(s: Systeme, p: &Programme, numeros: bool) {
         ""
     };
     println!("  {GRIS}{}{installe}{RESET}\n", dans_la_langue(p.role));
-    for (i, c) in p.commandes.iter().enumerate() {
-        afficher_commande(c, numeros.then_some(i + 1));
+    for c in p.commandes {
+        afficher_commande(c);
     }
 }
 
@@ -412,34 +520,310 @@ fn legende(s: Systeme) -> Vec<String> {
         .collect()
 }
 
-/// Les programmes d'un système, au menu : choisir, lire, revenir.
-fn menu_systeme(s: Systeme) {
+/// Le cadre en tête d'un écran du guide : « GARDIEN › Guide › Fedora › dnf », et `droite` à droite.
+fn entete(chemin: &[&str], droite: &str) -> Vec<Ligne> {
+    let gauche = chemin.iter().fold(format!("{ACCENT}GARDIEN{RESET}"), |g, morceau| {
+        format!("{g} {GRIS}›{RESET} {morceau}")
+    });
+    lignes_cadre(&gauche, droite).into_iter().map(Ligne::Texte).collect()
+}
+
+/// La commande sur une ligne de menu, ⚠ devant si elle change quelque chose (une espace sinon : les commandes d'un
+/// programme commencent à la même colonne), coupée pour tenir après la touche.
+fn ligne_de_menu(c: &Commande) -> String {
+    format!("{} {}", marque(c), couper(&ligne(c), LARGEUR - 9))
+}
+
+/// Un texte en gris sur des lignes de menu, décalé de `retrait` espaces.
+fn lignes_grises(texte: &str, retrait: usize) -> Vec<Ligne> {
+    envelopper(texte, LARGEUR - retrait)
+        .into_iter()
+        .map(|l| Ligne::Texte(format!("{}{GRIS}{l}{RESET}", " ".repeat(retrait))))
+        .collect()
+}
+
+/// Les commandes d'un programme comme lignes que seule la recherche montre : `avant` précède leur numéro (« 2.4. » :
+/// « 2.4.1 »), `chemin` dit où elles sont (vide dans le menu de leur système).
+fn lignes_des_commandes(avant: &str, chemin: &str, p: &Programme) -> Vec<Ligne> {
+    p.commandes
+        .iter()
+        .enumerate()
+        .map(|(k, c)| {
+            let texte = format!("{}{}", if c.modifie { "⚠ " } else { "" }, ligne(c));
+            Ligne::cachee(&format!("{avant}{}", k + 1), chemin, &texte, dans_la_langue(c.texte)).avec_mots(&format!(
+                "{} {}",
+                mots_de_la_commande(c),
+                noms_du_programme(p)
+            ))
+        })
+        .collect()
+}
+
+/// Une page de programme du guide : le système sous lequel elle s'affiche (Linux pour un programme commun), et son
+/// chemin au menu (rang du système, rang du programme dans le menu du système, à partir de 0).
+#[derive(Clone, Copy)]
+struct Page {
+    systeme: Systeme,
+    rang_systeme: usize,
+    rang_programme: usize,
+    programme: &'static Programme,
+}
+
+/// Les systèmes dans l'ordre de la recherche : celui de cet ordinateur, les commandes de tous les systèmes, puis les
+/// autres. Arch passe avant Omarchy : ailleurs que sous Omarchy, ce qu'elles partagent (pacman, yay) se range sous
+/// Arch.
+fn ordre_de_recherche() -> Vec<Systeme> {
+    let mut ordre = vec![Systeme::actuel(), Systeme::Tous];
+    for s in [
+        Systeme::Arch,
+        Systeme::Fedora,
+        Systeme::Debian,
+        Systeme::AutresLinux,
+        Systeme::Omarchy,
+        Systeme::Windows,
+        Systeme::MacOs,
+    ] {
+        if !ordre.contains(&s) {
+            ordre.push(s);
+        }
+    }
+    ordre
+}
+
+/// Chaque programme du guide une seule fois, dans l'ordre de la recherche : un programme que plusieurs
+/// distributions montrent (pacman, ufw, les communs) se range sous la première.
+fn pages() -> Vec<Page> {
+    let mut vus = HashSet::new();
+    let mut pages = Vec::new();
+    for s in ordre_de_recherche() {
+        let Some(rang_systeme) = SYSTEMES.iter().position(|x| *x == s) else {
+            continue;
+        };
+        for (rang_programme, (systeme, programme)) in s.programmes().into_iter().enumerate() {
+            if vus.insert(programme.nom) {
+                pages.push(Page {
+                    systeme,
+                    rang_systeme,
+                    rang_programme,
+                    programme,
+                });
+            }
+        }
+    }
+    pages
+}
+
+/// Ce que la recherche d'un menu trouve dans le guide : chaque système (« <cle>.3 »), chaque programme
+/// (« <cle>.3.1 » : Fedora, 1er programme) et chaque commande (« <cle>.3.1.2 »), ceux de cet ordinateur d'abord.
+/// `cle` : la touche du guide dans ce menu, vide dans le menu du guide lui-même (« 3.1.2 »).
+pub fn lignes_de_recherche(cle: &str) -> Vec<Ligne> {
+    let guide = tr!("Guide", "Guide");
+    let (avant, racine) = if cle.is_empty() {
+        (String::new(), String::new())
+    } else {
+        (format!("{cle}."), format!("{guide} › "))
+    };
+    let mut lignes = Vec::new();
+    if !cle.is_empty() {
+        for (i, s) in SYSTEMES.iter().enumerate() {
+            lignes.push(
+                Ligne::cachee(&format!("{avant}{}", i + 1), &format!("{guide} ›"), s.nom(), s.apercu())
+                    .avec_mots(&s.mots().join(" ")),
+            );
+        }
+    }
+    for page in pages() {
+        let p = page.programme;
+        let cle_programme = format!("{avant}{}.{}", page.rang_systeme + 1, page.rang_programme + 1);
+        let chemin = format!("{racine}{} ›", page.systeme.nom());
+        lignes.push(
+            Ligne::cachee(&cle_programme, &chemin, nom(p), dans_la_langue(p.role)).avec_mots(&noms_du_programme(p)),
+        );
+        lignes.extend(lignes_des_commandes(&format!("{cle_programme}."), &chemin, p));
+    }
+    lignes
+}
+
+/// « 3.1.2 » → (3, Some(1), Some(2)) ; « 3.1 » → (3, Some(1), None) ; « 3 » → (3, None, None) : un chemin dans le
+/// guide, tapé ou trouvé par la recherche.
+pub fn chemin(texte: &str) -> Option<(usize, Option<usize>, Option<usize>)> {
+    let mut parties = texte.trim().split('.').map(|n| n.parse::<usize>().ok());
+    let systeme = parties.next()??;
+    let programme = match parties.next() {
+        Some(p) => Some(p?),
+        None => None,
+    };
+    let commande = match parties.next() {
+        Some(c) => Some(c?),
+        None => None,
+    };
+    parties.next().is_none().then_some((systeme, programme, commande))
+}
+
+/// Ouvre une page du guide trouvée par la recherche : un système (1 à 8), l'un de ses programmes, ou l'une de ses
+/// commandes.
+pub fn ouvrir(systeme: usize, programme: Option<usize>, commande: Option<usize>) {
+    let Some(&s) = systeme.checked_sub(1).and_then(|i| SYSTEMES.get(i)) else {
+        return;
+    };
     let programmes = s.programmes();
+    let Some(&(proprietaire, p)) = programme.and_then(|j| j.checked_sub(1)).and_then(|j| programmes.get(j)) else {
+        menu_systeme(s);
+        return;
+    };
+    match commande.and_then(|k| k.checked_sub(1)).and_then(|k| p.commandes.get(k)) {
+        Some(c) => montrer_commande(proprietaire, p, c),
+        None => montrer_programme(proprietaire, p),
+    }
+}
+
+/// Une réponse qui revient en arrière : rien, « ↵ » ou « q ».
+fn revenir(choix: &str) -> bool {
+    choix.is_empty() || choix == "↵" || choix.eq_ignore_ascii_case("q")
+}
+
+/// Une commande seule : ce qu'elle fait, puis la copier, ou la lancer ici quand elle ne fait que lire.
+fn montrer_commande(s: Systeme, p: &Programme, c: &Commande) {
+    let raison = lancement::pourquoi_pas(s, p, c);
+    let rang = p.commandes.iter().position(|x| std::ptr::eq(x, c)).map_or(0, |i| i + 1);
+    let chemin = [tr!("Guide", "Guide"), s.nom(), nom(p)];
+    let droite = trf!("{rang} sur {}", "{rang} of {}", p.commandes.len());
+    let commande = ligne(c);
+    let mut dernier = String::from(if raison.is_none() { "2" } else { "1" });
+    let mut message: Option<String> = None;
+    loop {
+        print!("\x1b[2J\x1b[H");
+        let mut lignes = entete(&chemin, &droite);
+        let avertissement = if c.modifie {
+            format!("{}⚠{RESET} ", couleur(Niveau::Moyen))
+        } else {
+            String::new()
+        };
+        lignes.push(Ligne::Texte(format!("  {avertissement}{GRAS}{commande}{RESET}")));
+        lignes.push(Ligne::Texte(String::new()));
+        lignes.extend(
+            envelopper(dans_la_langue(c.texte), LARGEUR - 4)
+                .into_iter()
+                .map(|l| Ligne::Texte(format!("  {l}"))),
+        );
+        lignes.push(Ligne::Texte(String::new()));
+        lignes.push(Ligne::Texte(if c.modifie {
+            format!(
+                "  {}⚠{RESET} {}",
+                couleur(Niveau::Moyen),
+                tr!(
+                    "Elle change quelque chose, souvent avec les droits d'administrateur.",
+                    "It changes something, often with administrator rights."
+                )
+            )
+        } else {
+            format!(
+                "  {VERT}✔{RESET} {}",
+                tr!(
+                    "Elle ne fait que lire : rien ne change.",
+                    "It only reads: nothing changes."
+                )
+            )
+        }));
+        lignes.extend(lignes_grises(s.terminal(), 2));
+        if let Some(r) = &raison {
+            lignes.extend(lignes_grises(
+                &trf!("Pas lancée d'ici. {r}", "Not run from here. {r}"),
+                2,
+            ));
+        }
+        lignes.push(Ligne::Texte(String::new()));
+        lignes.push(Ligne::choix(
+            "1",
+            tr!("Copier", "Copy"),
+            tr!("pour la coller dans un terminal", "to paste it in a terminal"),
+        ));
+        if raison.is_none() {
+            lignes.push(Ligne::choix(
+                "2",
+                tr!("Lancer ici", "Run here"),
+                tr!("sa sortie s'affiche ici", "its output shows here"),
+            ));
+        }
+        lignes.push(Ligne::choix("↵", tr!("Revenir", "Back"), ""));
+        if let Some(m) = &message {
+            lignes.push(Ligne::Texte(String::new()));
+            lignes.push(Ligne::Texte(m.clone()));
+        }
+        lignes.push(Ligne::Texte(String::new()));
+        let Some(choix) = choisir(
+            &lignes,
+            tr!("  Choix (Entrée pour revenir) : ", "  Choice (Enter to go back): "),
+            &dernier,
+            tr!("revenir", "back"),
+        ) else {
+            return;
+        };
+        match choix.trim() {
+            "1" => {
+                dernier = "1".to_string();
+                message = Some(if copier(&commande) {
+                    trf!(
+                        "  {VERT}✔{RESET} Copiée : {GRAS}{commande}{RESET}",
+                        "  {VERT}✔{RESET} Copied: {GRAS}{commande}{RESET}"
+                    )
+                } else {
+                    // Sans presse-papier (pas de bureau, outil absent), la commande reste à sélectionner à la souris.
+                    format!(
+                        "  {}✖{RESET} {}",
+                        couleur(Niveau::Moyen),
+                        tr!(
+                            "Presse-papier inaccessible ici : sélectionne la commande à la souris.",
+                            "Clipboard unavailable here: select the command with the mouse."
+                        )
+                    )
+                });
+            }
+            "2" if raison.is_none() => {
+                dernier = "2".to_string();
+                message = None;
+                print!("\x1b[2J\x1b[H");
+                for l in lignes_cadre(
+                    &chemin.iter().fold(format!("{ACCENT}GARDIEN{RESET}"), |g, morceau| {
+                        format!("{g} {GRIS}›{RESET} {morceau}")
+                    }),
+                    &droite,
+                ) {
+                    println!("{l}");
+                }
+                println!();
+                lancement::lancer_ici(c);
+            }
+            choix if revenir(choix) => return,
+            _ => {}
+        }
+    }
+}
+
+/// Un programme à l'écran : chaque commande, son explication dessous. ↑ ↓ et Entrée (ou son numéro) ouvrent sa page ;
+/// taper un mot cherche parmi elles.
+fn montrer_programme(s: Systeme, p: &Programme) {
     let mut dernier = String::from("1");
     loop {
         print!("\x1b[2J\x1b[H");
-        let mut lignes: Vec<Ligne> = lignes_cadre(
-            &format!(
-                "{ACCENT}GARDIEN{RESET} {GRIS}›{RESET} {} {GRIS}›{RESET} {}",
-                tr!("Guide", "Guide"),
-                s.nom()
-            ),
-            &trf!("{} programmes", "{} programs", programmes.len()),
-        )
-        .into_iter()
-        .map(Ligne::Texte)
-        .collect();
+        let mut lignes = entete(
+            &[tr!("Guide", "Guide"), s.nom(), nom(p)],
+            &trf!("{} commandes", "{} commands", p.commandes.len()),
+        );
+        let installe = if absent(s, p) {
+            tr!(" (pas installé ici)", " (not installed here)")
+        } else {
+            ""
+        };
+        lignes.push(Ligne::Texte(format!(
+            "  {GRIS}{}{installe}{RESET}",
+            dans_la_langue(p.role)
+        )));
         lignes.extend(legende(s).into_iter().map(Ligne::Texte));
         lignes.push(Ligne::Texte(String::new()));
-        for (i, p) in programmes.iter().enumerate() {
-            let nom = if absent(s, p) {
-                format!("{} {DISCRET}{}{RESET}", nom(p), tr!("(absent)", "(missing)"))
-            } else {
-                nom(p).to_string()
-            };
-            lignes.push(
-                Ligne::choix(&(i + 1).to_string(), &nom, dans_la_langue(p.role)).avec_mots(&mots_du_programme(p)),
-            );
+        for (i, c) in p.commandes.iter().enumerate() {
+            lignes.push(Ligne::choix(&(i + 1).to_string(), &ligne_de_menu(c), "").avec_mots(&mots_de_la_commande(c)));
+            lignes.extend(lignes_grises(dans_la_langue(c.texte), 9));
         }
         lignes.push(Ligne::Texte(String::new()));
         lignes.push(Ligne::choix("↵", tr!("Revenir", "Back"), ""));
@@ -447,8 +831,8 @@ fn menu_systeme(s: Systeme) {
         let Some(choix) = choisir(
             &lignes,
             tr!(
-                "  Numéro du programme (Entrée pour revenir) : ",
-                "  Program number (Enter to go back): "
+                "  Numéro de la commande (Entrée pour revenir) : ",
+                "  Command number (Enter to go back): "
             ),
             &dernier,
             tr!("revenir", "back"),
@@ -456,19 +840,92 @@ fn menu_systeme(s: Systeme) {
             return;
         };
         let choix = choix.trim();
-        let Some(p) = choix
+        match choix
             .parse::<usize>()
             .ok()
             .and_then(|n| n.checked_sub(1))
-            .and_then(|i| programmes.get(i))
-        else {
-            if choix.is_empty() || choix == "↵" || choix.eq_ignore_ascii_case("q") {
-                return;
+            .and_then(|i| p.commandes.get(i))
+        {
+            Some(c) => {
+                dernier = choix.to_string();
+                montrer_commande(s, p, c);
             }
-            continue;
+            None if revenir(choix) => return,
+            None => {}
+        }
+    }
+}
+
+/// Les programmes d'un système : en choisir un, ou taper un mot pour trouver une commande parmi toutes les siennes
+/// (« 4.2 » : 4e programme, 2e commande). Une distribution montre les siens, puis ceux communs à Linux.
+fn menu_systeme(s: Systeme) {
+    let programmes = s.programmes();
+    let mut dernier = String::from("1");
+    loop {
+        print!("\x1b[2J\x1b[H");
+        let mut lignes = entete(
+            &[tr!("Guide", "Guide"), s.nom()],
+            &trf!("{} programmes", "{} programs", programmes.len()),
+        );
+        lignes.extend(legende(s).into_iter().map(Ligne::Texte));
+        if !s.linux() {
+            lignes.push(Ligne::Texte(String::new()));
+        }
+        let mut section = None;
+        for (j, &(proprietaire, p)) in programmes.iter().enumerate() {
+            if s.linux() && section != Some(proprietaire) {
+                section = Some(proprietaire);
+                let titre = if proprietaire == Systeme::Linux {
+                    tr!("COMMUNS À LINUX", "COMMON TO LINUX").to_string()
+                } else {
+                    s.nom().to_uppercase()
+                };
+                lignes.push(Ligne::Texte(String::new()));
+                lignes.push(Ligne::Texte(ligne_section(&titre)));
+            }
+            let nom = if absent(proprietaire, p) {
+                format!("{} {DISCRET}{}{RESET}", nom(p), tr!("(absent)", "(missing)"))
+            } else {
+                nom(p).to_string()
+            };
+            lignes.push(
+                Ligne::choix(&(j + 1).to_string(), &nom, dans_la_langue(p.role)).avec_mots(&noms_du_programme(p)),
+            );
+        }
+        lignes.push(Ligne::Texte(String::new()));
+        lignes.push(Ligne::choix("↵", tr!("Revenir", "Back"), ""));
+        lignes.push(Ligne::Texte(String::new()));
+        // Taper un mot trouve aussi chaque commande de ce système.
+        for (j, (_, p)) in programmes.iter().enumerate() {
+            lignes.extend(lignes_des_commandes(&format!("{}.", j + 1), "", p));
+        }
+        let Some(choix) = choisir(
+            &lignes,
+            tr!(
+                "  Numéro du programme, ou un mot à chercher (Entrée pour revenir) : ",
+                "  Program number, or a word to look for (Enter to go back): "
+            ),
+            &dernier,
+            tr!("revenir", "back"),
+        ) else {
+            return;
         };
-        dernier = choix.to_string();
-        montrer_programme(s, p);
+        let choix = choix.trim();
+        let mut parties = choix.split('.').map(|n| n.parse::<usize>().ok()?.checked_sub(1));
+        let programme = parties.next().flatten().and_then(|j| programmes.get(j));
+        match (programme, parties.next(), parties.next()) {
+            (Some(&(proprietaire, p)), None, None) => {
+                dernier = choix.to_string();
+                montrer_programme(proprietaire, p);
+            }
+            (Some(&(proprietaire, p)), Some(k), None) => {
+                if let Some(c) = k.and_then(|k| p.commandes.get(k)) {
+                    montrer_commande(proprietaire, p, c);
+                }
+            }
+            _ if revenir(choix) => return,
+            _ => {}
+        }
     }
 }
 
@@ -478,12 +935,13 @@ type Trouvee = (Systeme, &'static Programme, &'static Commande);
 /// Les commandes où paraissent tous les mots de `recherche` : dans la commande, son explication (en français comme en
 /// anglais), le nom ou le rôle de son programme. Même règle que la recherche des menus (`selection::correspond`).
 fn trouver(recherche: &str) -> Vec<Trouvee> {
-    SYSTEMES
-        .iter()
-        .flat_map(|&s| {
-            s.programmes()
+    pages()
+        .into_iter()
+        .flat_map(|page| {
+            page.programme
+                .commandes
                 .iter()
-                .flat_map(move |p| p.commandes.iter().map(move |c| (s, p, c)))
+                .map(move |c| (page.systeme, page.programme, c))
         })
         .filter(|(_, p, c)| {
             let texte = [
@@ -500,79 +958,6 @@ fn trouver(recherche: &str) -> Vec<Trouvee> {
             correspond(recherche, &simplifier(&texte))
         })
         .collect()
-}
-
-/// Ce que la recherche des menus trouve dans un programme sans l'afficher : ses commandes et leurs explications, dans
-/// les deux langues.
-fn mots_du_programme(p: &Programme) -> String {
-    std::iter::once(noms_du_programme(p))
-        .chain(
-            p.commandes
-                .iter()
-                .map(|c| format!("{} {} {} {}", c.ligne, c.ligne_en, c.texte.0, c.texte.1)),
-        )
-        .collect::<Vec<_>>()
-        .join(" ")
-}
-
-/// Les pages du guide, pour la recherche d'un menu : chaque système (« <cle>.2 ») et chaque programme
-/// (« <cle>.2.4 » : Windows, 4e programme), avec ses commandes comme mots à trouver. `cle` : la touche du guide dans
-/// ce menu, vide dans le menu du guide lui-même (« 2.4 »).
-pub fn lignes_de_recherche(cle: &str) -> Vec<Ligne> {
-    let avant = if cle.is_empty() {
-        String::new()
-    } else {
-        format!("{cle}.")
-    };
-    let guide = tr!("Guide", "Guide");
-    let mut lignes = Vec::new();
-    for (i, s) in SYSTEMES.iter().enumerate() {
-        if !cle.is_empty() {
-            lignes.push(Ligne::cachee(
-                &format!("{avant}{}", i + 1),
-                &format!("{guide} ›"),
-                s.nom(),
-                s.apercu(),
-            ));
-        }
-        for (j, p) in s.programmes().iter().enumerate() {
-            lignes.push(
-                Ligne::cachee(
-                    &format!("{avant}{}.{}", i + 1, j + 1),
-                    &format!("{guide} › {} ›", s.nom()),
-                    nom(p),
-                    dans_la_langue(p.role),
-                )
-                .avec_mots(&mots_du_programme(p)),
-            );
-        }
-    }
-    lignes
-}
-
-/// Ouvre une page du guide trouvée par la recherche : un système (1 à 4), ou l'un de ses programmes.
-pub fn ouvrir(systeme: usize, programme: Option<usize>) {
-    let Some(&s) = systeme.checked_sub(1).and_then(|i| SYSTEMES.get(i)) else {
-        return;
-    };
-    match programme
-        .and_then(|p| p.checked_sub(1))
-        .and_then(|p| s.programmes().get(p))
-    {
-        Some(p) => montrer_programme(s, p),
-        None => menu_systeme(s),
-    }
-}
-
-/// « 2.4 » → (2, Some(4)) ; « 2 » → (2, None) : un chemin dans le guide, tapé ou trouvé par la recherche.
-pub fn chemin(texte: &str) -> Option<(usize, Option<usize>)> {
-    let mut parties = texte.trim().split('.');
-    let systeme = parties.next()?.parse().ok()?;
-    let programme = match parties.next() {
-        Some(p) => Some(p.parse().ok()?),
-        None => None,
-    };
-    parties.next().is_none().then_some((systeme, programme))
 }
 
 fn afficher_resultats(recherche: &str, trouvees: &[Trouvee]) {
@@ -599,48 +984,27 @@ fn afficher_resultats(recherche: &str, trouvees: &[Trouvee]) {
             println!("\n  {ACCENT}{} › {}{RESET}", s.nom(), nom(p));
             programme_en_cours = Some((s, p.nom));
         }
-        afficher_commande(c, None);
+        afficher_commande(c);
     }
 }
 
-/// Recherche au clavier, mot après mot, jusqu'à une réponse vide.
-fn chercher() {
-    loop {
-        let recherche = demander(tr!(
-            "\n  Mot à chercher (ex. disque, wifi, dns ; Entrée pour revenir) : ",
-            "\n  Word to look for (e.g. disk, wifi, dns; Enter to go back): "
-        ));
-        if recherche.is_empty() {
-            return;
-        }
-        afficher_resultats(&recherche, &trouver(&recherche));
-    }
-}
-
-/// Le guide au menu : un système, ou la recherche.
+/// Le guide au menu : taper ce qu'on cherche, ou choisir un système.
 pub fn menu() {
+    let total: usize = pages().iter().map(|page| page.programme.commandes.len()).sum();
     let mut dernier = String::from("1");
     loop {
         print!("\x1b[2J\x1b[H");
-        let mut lignes: Vec<Ligne> = lignes_cadre(
-            &format!(
-                "{ACCENT}GARDIEN{RESET} {GRIS}›{RESET} {}",
-                tr!("Guide des commandes", "Command guide")
+        let mut lignes = entete(
+            &[tr!("Guide des commandes", "Command guide")],
+            &trf!("{total} commandes", "{total} commands"),
+        );
+        lignes.extend(lignes_grises(
+            tr!(
+                "Tape ce que tu cherches (wifi, disque, mise à jour…) : les commandes paraissent au fil de la frappe, et Tab complète le mot. Entrée ouvre la commande : ce qu'elle fait, la copier, ou la lancer ici si elle ne fait que lire.",
+                "Type what you are looking for (wifi, disk, update…): commands show up as you type, and Tab completes the word. Enter opens the command: what it does, copy it, or run it here if it only reads."
             ),
-            tr!("par système, puis par programme", "by system, then by program"),
-        )
-        .into_iter()
-        .map(Ligne::Texte)
-        .collect();
-        let introduction = tr!(
-            "Les commandes utiles de chaque système, expliquées. Rien ne se lance ici : tu lis, puis tu tapes la commande dans un terminal, ici ou chez la personne que tu aides.",
-            "Each system's useful commands, explained. Nothing runs from here: you read, then type the command in a terminal, here or on the computer of the person you help."
-        );
-        lignes.extend(
-            envelopper(introduction, LARGEUR - 2)
-                .into_iter()
-                .map(|l| Ligne::Texte(format!("  {GRIS}{l}{RESET}"))),
-        );
+            2,
+        ));
         lignes.push(Ligne::Texte(String::new()));
         for (i, s) in SYSTEMES.iter().enumerate() {
             let nom = if *s == Systeme::actuel() {
@@ -648,68 +1012,59 @@ pub fn menu() {
             } else {
                 s.nom().to_string()
             };
-            lignes.push(Ligne::choix(&(i + 1).to_string(), &nom, s.apercu()));
+            lignes.push(Ligne::choix(&(i + 1).to_string(), &nom, s.apercu()).avec_mots(&s.mots().join(" ")));
         }
-        let chercher_ici = (SYSTEMES.len() + 1).to_string();
-        lignes.push(Ligne::choix(
-            &chercher_ici,
-            tr!("Chercher une commande", "Look for a command"),
-            tr!("un mot : disque, wifi, dns…", "a word: disk, wifi, dns…"),
-        ));
         lignes.push(Ligne::Texte(String::new()));
         lignes.push(Ligne::choix("↵", tr!("Revenir", "Back"), ""));
         lignes.push(Ligne::Texte(String::new()));
-        // Taper un mot ici trouve aussi chaque programme, par son nom ou ses commandes (« 2.4 » : Windows, 4e).
         lignes.extend(lignes_de_recherche(""));
         let Some(choix) = choisir(
             &lignes,
-            tr!("  Choix (Entrée pour revenir) : ", "  Choice (Enter to go back): "),
+            tr!(
+                "  Choix, ou un mot à chercher (Entrée pour revenir) : ",
+                "  Choice, or a word to look for (Enter to go back): "
+            ),
             &dernier,
             tr!("revenir", "back"),
         ) else {
             return;
         };
         let choix = choix.trim().to_string();
-        if choix == chercher_ici {
-            dernier = choix;
-            chercher();
-            continue;
-        }
-        if choix.contains('.') {
-            if let Some((s, p)) = chemin(&choix) {
-                ouvrir(s, p);
+        match chemin(&choix) {
+            Some((s, None, None)) => {
+                if (1..=SYSTEMES.len()).contains(&s) {
+                    dernier.clone_from(&choix);
+                }
+                ouvrir(s, None, None);
             }
-            continue;
-        }
-        match choix
-            .parse::<usize>()
-            .ok()
-            .and_then(|n| n.checked_sub(1))
-            .and_then(|i| SYSTEMES.get(i))
-        {
-            Some(&s) => {
-                dernier = choix;
-                menu_systeme(s);
-            }
-            None if choix.is_empty() || choix == "↵" || choix.eq_ignore_ascii_case("q") => return,
+            Some((s, p, c)) => ouvrir(s, p, c),
+            None if revenir(&choix) => return,
             None => {}
         }
     }
 }
 
-/// Le système désigné par un mot (« mac », « Windows », « tous »).
+/// Le système désigné par un mot (« mac », « Fedora », « tous », « linux » pour les programmes communs).
 fn systeme(mot: &str) -> Option<Systeme> {
     let m = simplifier(mot);
-    SYSTEMES.into_iter().find(|s| s.mots().contains(&m.as_str()))
+    SYSTEMES
+        .into_iter()
+        .chain([Systeme::Linux])
+        .find(|s| s.mots().contains(&m.as_str()))
 }
 
 /// Les programmes qui portent ce nom (« winget », ou l'un de ceux réunis : « du » dans « lsblk, df, du »).
 fn programmes_nommes(tape: &str) -> Vec<(Systeme, &'static Programme)> {
     let n = simplifier(tape);
-    SYSTEMES
-        .iter()
-        .flat_map(|&s| s.programmes().iter().map(move |p| (s, p)))
-        .filter(|(_, p)| p.nom.split(',').any(|morceau| simplifier(morceau.trim()) == n))
+    pages()
+        .into_iter()
+        .filter(|page| {
+            page.programme
+                .nom
+                .split(',')
+                .any(|morceau| simplifier(morceau.trim()) == n)
+        })
+        .map(|page| (page.systeme, page.programme))
         .collect()
 }
 
@@ -726,8 +1081,8 @@ pub fn executer(quoi: &str) {
         for l in legende(s) {
             println!("{l}");
         }
-        for p in s.programmes() {
-            afficher_programme(s, p, false);
+        for (proprietaire, p) in s.programmes() {
+            afficher_programme(proprietaire, p);
         }
         return;
     }
@@ -737,7 +1092,7 @@ pub fn executer(quoi: &str) {
         afficher_resultats(quoi, &trouver(quoi));
     } else {
         for (s, p) in nommes {
-            afficher_programme(s, p, false);
+            afficher_programme(s, p);
         }
     }
 }
@@ -746,12 +1101,19 @@ pub fn executer(quoi: &str) {
 mod tests {
     use super::*;
 
+    /// Chaque commande du guide une fois, avec le système sous lequel elle s'affiche.
     fn toutes() -> impl Iterator<Item = Trouvee> {
-        SYSTEMES.into_iter().flat_map(|s| {
-            s.programmes()
+        pages().into_iter().flat_map(|page| {
+            page.programme
+                .commandes
                 .iter()
-                .flat_map(move |p| p.commandes.iter().map(move |c| (s, p, c)))
+                .map(move |c| (page.systeme, page.programme, c))
         })
+    }
+
+    /// Les systèmes du menu, et celui des programmes communs à Linux.
+    fn tous_les_systemes() -> impl Iterator<Item = Systeme> {
+        SYSTEMES.into_iter().chain([Systeme::Linux])
     }
 
     /// Les « <…> » d'une commande.
@@ -764,10 +1126,10 @@ mod tests {
 
     #[test]
     fn chaque_programme_tient_dans_son_menu() {
-        for s in SYSTEMES {
+        for s in tous_les_systemes() {
             assert!(largeur_affichee(s.apercu()) <= 33, "{}", s.apercu());
             let mut noms = std::collections::HashSet::new();
-            for p in s.programmes() {
+            for (_, p) in s.programmes() {
                 assert!(noms.insert(p.nom), "{} : deux fois dans {}", p.nom, s.nom());
                 assert!(!p.commandes.is_empty(), "{} n'a pas de commande", p.nom);
                 assert!(largeur_affichee(p.nom) <= 30, "{} : nom trop long", p.nom);
@@ -927,6 +1289,166 @@ mod tests {
         {
             assert!(installe(&p("sh")));
             assert!(installe(&p("/bin/sh")));
+        }
+    }
+
+    #[test]
+    fn chemins_du_guide() {
+        assert_eq!(chemin("3"), Some((3, None, None)));
+        assert_eq!(chemin(" 3.1 "), Some((3, Some(1), None)));
+        assert_eq!(chemin("3.1.2"), Some((3, Some(1), Some(2))));
+        for faux in ["", "x", "3.", "3.x", "3.1.", "3.1.2.4", ".1"] {
+            assert_eq!(chemin(faux), None, "{faux}");
+        }
+    }
+
+    /// Chaque commande a sa ligne de recherche, une seule, et sa touche mène à elle.
+    #[test]
+    fn chaque_commande_se_trouve_et_s_ouvre_par_son_chemin() {
+        let lignes = lignes_de_recherche("10");
+        let mut touches = HashSet::new();
+        let mut commandes = 0;
+        for l in &lignes {
+            let Ligne::Cachee { touche, texte, .. } = l else {
+                panic!("le guide n'ajoute que des lignes cachées");
+            };
+            assert!(touches.insert(touche.clone()), "{touche} deux fois");
+            let (s, p, c) = chemin(touche.strip_prefix("10.").unwrap()).unwrap();
+            let systeme = SYSTEMES[s - 1];
+            let Some(p) = p else { continue };
+            let (_, programme) = systeme.programmes()[p - 1];
+            let Some(c) = c else {
+                assert_eq!(texte, nom(programme));
+                continue;
+            };
+            let commande = &programme.commandes[c - 1];
+            assert_eq!(texte.trim_start_matches("⚠ "), ligne(commande));
+            commandes += 1;
+        }
+        assert_eq!(commandes, toutes().count());
+        // Dans le menu du guide, les mêmes lignes, sans les systèmes, ni « 10. ».
+        let du_guide = lignes_de_recherche("");
+        assert_eq!(du_guide.len(), lignes.len() - SYSTEMES.len());
+    }
+
+    /// Ce que plusieurs distributions montrent (pacman sous Omarchy et Arch) ne s'écrit qu'une fois, et la recherche
+    /// ne le compte qu'une fois : deux programmes du même nom sont le même.
+    #[test]
+    fn les_programmes_partages_sont_les_memes() {
+        let mut vus: std::collections::HashMap<&str, Vec<&str>> = std::collections::HashMap::new();
+        for s in tous_les_systemes() {
+            for p in s.propres() {
+                let lignes: Vec<&str> = p.commandes.iter().map(|c| c.ligne).collect();
+                if let Some(deja) = vus.insert(p.nom, lignes.clone()) {
+                    assert_eq!(deja, lignes, "deux programmes « {} » différents", p.nom);
+                }
+            }
+        }
+        // Une distribution : les siens d'abord, puis les communs, sous « Linux ».
+        let fedora = Systeme::Fedora.programmes();
+        assert_eq!(fedora[0].1.nom, "dnf, rpm-ostree");
+        assert_eq!(fedora.last().unwrap().0, Systeme::Linux);
+        assert!(
+            Systeme::Windows
+                .programmes()
+                .iter()
+                .all(|(s, _)| *s == Systeme::Windows)
+        );
+    }
+
+    #[test]
+    fn distribution_d_apres_os_release() {
+        let os = |texte: &str| distribution(texte);
+        assert_eq!(os("NAME=\"Omarchy\"\nID=omarchy\nID_LIKE=arch\n"), Systeme::Omarchy);
+        assert_eq!(os("ID=arch\n"), Systeme::Arch);
+        assert_eq!(os("ID=endeavouros\nID_LIKE=arch\n"), Systeme::Arch);
+        assert_eq!(os("ID=fedora\nVERSION_ID=43\n"), Systeme::Fedora);
+        assert_eq!(os("ID=\"rocky\"\nID_LIKE=\"rhel centos fedora\"\n"), Systeme::Fedora);
+        assert_eq!(os("ID=debian\n"), Systeme::Debian);
+        assert_eq!(os("ID=linuxmint\nID_LIKE=\"ubuntu debian\"\n"), Systeme::Debian);
+        assert_eq!(
+            os("ID=\"opensuse-tumbleweed\"\nID_LIKE=\"opensuse suse\"\n"),
+            Systeme::AutresLinux
+        );
+        assert_eq!(os("ID=nixos\n"), Systeme::AutresLinux);
+        assert_eq!(os(""), Systeme::AutresLinux);
+        // VERSION_ID ou ID_LIKE ne passent pas pour ID.
+        assert_eq!(os("VERSION_ID=arch\nID_LIKE=debian\nID=pop\n"), Systeme::Debian);
+    }
+
+    #[test]
+    fn ce_que_gardien_lance_ici() {
+        let trouve = |l: &str| toutes().find(|(_, _, c)| c.ligne == l).unwrap().2;
+        for l in [
+            "ip -br a",
+            "journalctl -f",
+            "Get-NetAdapter",
+            "ping 1.1.1.1",
+            "tmutil status",
+        ] {
+            assert_eq!(lancement::obstacle(trouve(l)), None, "{l}");
+        }
+        for l in [
+            "top",
+            "sudo ufw status verbose",
+            "fwupdmgr refresh",
+            "msinfo32",
+            "start ms-settings:windowsupdate",
+            "powercfg /batteryreport",
+            "chkdsk C:",
+            "open -a Console",
+        ] {
+            assert!(lancement::obstacle(trouve(l)).is_some(), "{l}");
+        }
+        // Une commande qui change quelque chose, ou à compléter, ne se lance jamais d'ici.
+        for (_, _, c) in toutes() {
+            if c.modifie || c.ligne.contains('<') || c.ligne.starts_with("gardien") {
+                assert!(lancement::obstacle(c).is_some(), "{}", c.ligne);
+            }
+        }
+    }
+
+    /// Une commande qui ouvre une fenêtre ou prend tout le terminal le dit, même ajoutée plus tard.
+    #[test]
+    fn les_fenetres_et_le_plein_ecran_sont_marques() {
+        for (s, _, c) in toutes() {
+            let premier = c.ligne.split_whitespace().next().unwrap_or("").to_lowercase();
+            let fenetre = [
+                "start", "open", "explorer", "msinfo32", "dxdiag", "perfmon", "eventvwr", "taskmgr", "msconfig",
+                "winver", "control", "mmc", "rstrui",
+            ]
+            .contains(&premier.as_str())
+                || Path::new(&premier)
+                    .extension()
+                    .is_some_and(|e| e.eq_ignore_ascii_case("msc"));
+            if fenetre && !c.modifie && !c.ligne.contains('<') {
+                assert_eq!(c.obstacle, Obstacle::Fenetre, "{} › {}", s.nom(), c.ligne);
+            }
+            if ["top", "htop", "btop", "less", "more", "nano", "vi", "vim"].contains(&premier.as_str()) {
+                assert_eq!(c.obstacle, Obstacle::PleinEcran, "{} › {}", s.nom(), c.ligne);
+            }
+        }
+    }
+
+    /// Le cadre d'une page de programme ou de commande tient dans 76 colonnes, même au plus long chemin.
+    #[test]
+    fn chaque_en_tete_tient_dans_76_colonnes() {
+        for page in pages() {
+            let p = page.programme;
+            for droite in [
+                format!("{} commandes", p.commandes.len()),
+                format!("{0} sur {0}", p.commandes.len()),
+            ] {
+                for l in entete(&["Guide", page.systeme.nom(), nom(p)], &droite) {
+                    let Ligne::Texte(l) = l else { unreachable!() };
+                    assert!(
+                        largeur_affichee(&l) <= LARGEUR,
+                        "{} › {} : {l}",
+                        page.systeme.nom(),
+                        p.nom
+                    );
+                }
+            }
         }
     }
 }

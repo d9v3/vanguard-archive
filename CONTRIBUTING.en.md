@@ -17,6 +17,7 @@ turn on once with `/install-github-app`).
 | `src/main.rs` | menu and subcommands |
 | `src/ui.rs` | colors, titles, frames, bars, lines wrapped and aligned within 76 columns |
 | `src/selection.rs` | keyboard menus and checklists (arrows, Enter, Esc or Backspace), word search in menus |
+| `src/prediction.rs` | prediction of the word being typed, the same in every menu: its end in grey, Tab completes it |
 | `src/langue.rs` | language choice and translation macros |
 | `src/machine/mod.rs` | shared types, display, parallel execution of the checks |
 | `src/machine/linux/`, `src/machine/windows/`, `src/machine/macos/` | per-system audit, one file per topic |
@@ -39,7 +40,7 @@ turn on once with `/install-github-app`).
 | `src/logiciels/` | software to install: checked catalog (`catalogue.rs`), state and installation per system |
 | `src/protection/fuites.rs`, `src/donnees.rs` | leaked passwords, data backup |
 | `src/protection/cle.rs` | USB drive protection on Linux and macOS: partition remounted read-only away from the owner's computer |
-| `src/guide/` | command guide: one file per system (`linux.rs`, `windows.rs`, `macos.rs`, `tous.rs`), menus and search (`mod.rs`) |
+| `src/guide/` | command guide: one file per system (`linux.rs`: programs common to all distributions and specific to each, `windows.rs`, `macos.rs`, `tous.rs`), menus and search (`mod.rs`), commands run here (`lancement.rs`) |
 | `src/apprentissage.rs` | what Gardien learns here: alerts declared normal (appris.json), habits |
 | `src/reseau/listes_noires.rs` | the home's Internet address in blocklists (DNSBL), after consent |
 | `src/entretien.rs` | monthly check-up: grade, updates, space, new problems, in one notification |

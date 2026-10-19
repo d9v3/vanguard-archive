@@ -195,16 +195,18 @@ offered as a fix) drops to information for 90 days, or until it gets worse; each
 your habits on the same network; a known device that suddenly seems all closed (asleep) is checked again more
 patiently. "What Gardien has learned" shows everything and lets you forget.
 
-**Command guide** — the useful commands of Linux, Windows, macOS and the ones typed the same way everywhere
-(Gardien, ping, nslookup, ssh, curl, git…), sorted by system, then by program, each one explained; ⚠ marks the
-ones that change something. Nothing runs from there: you read, then type the command, or copy it by its number,
-here or on the computer of the person you help. Every system can be read everywhere (Windows commands from Linux, for
-example), and the guide tells when a program is missing on this computer.
+**Command guide** — the useful commands of Omarchy, Arch, Fedora, Debian and Ubuntu (and other Linux), Windows 11,
+macOS, and the ones typed the same way everywhere (Gardien, ping, nslookup, ssh, curl, git…), each one explained; ⚠
+marks the ones that change something. Each distribution shows its own programs (pacman, dnf, apt…), then those common
+to Linux. You type what you are looking for: commands show up as you type, and Tab completes the word. Each command
+has its page: copy it, to type it here or on the computer of the person you help, or run it here when it only reads;
+its output scrolls in Gardien, and Esc stops it. Every system can be read everywhere (Windows commands from Linux,
+for example), and the guide tells when a program is missing on this computer.
 
 **And also**
 - Search in every menu and checklist: type a word (wifi, disk, dns, update…), only the lines containing it stay,
-  whatever the accents or capitals; in the main menu, it also finds each tool of the submenus and each page of the
-  guide.
+  whatever the accents or capitals; the end of the most likely word shows in grey, and Tab completes it. In the main
+  menu, it also finds each tool of the submenus, and each page and each command of the guide.
 - Fixes applied only after confirmation, with a restore point created automatically beforehand (snapper or
   timeshift on Linux, Windows restore point, Time Machine snapshot on macOS); on Windows, each one is a readable
   script.
@@ -351,7 +353,7 @@ Each menu entry is also a command.
 | `gardien name <ip\|mac> <nickname>` | name a device |
 | `gardien backup [file]`, `gardien restore <file>` | data backup |
 | `gardien gaming` | packages and settings for gaming (Windows and Linux) |
-| `gardien guide [system\|program\|words]` | command guide: a system (`linux`, `windows`, `macos`, `all`), a program (`winget`, `systemctl`…) or words to look for (`dns cache`) |
+| `gardien guide [system\|program\|words]` | command guide: a system (`omarchy`, `arch`, `fedora`, `debian`, `windows`, `macos`, `all`, or `linux` for the common programs), a program (`winget`, `systemctl`…) or words to look for (`dns cache`) |
 
 </details>
 

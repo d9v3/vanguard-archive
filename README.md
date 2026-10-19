@@ -208,16 +208,20 @@ toi (« i » à la correction) passe au niveau info pendant 90 jours, ou jusqu'�
 connexion se compare à tes habitudes sur le même réseau ; un appareil connu qui paraît soudain tout fermé (en
 veille) est revérifié plus patiemment. « Ce que Gardien a appris » montre tout et permet d'oublier.
 
-**Guide des commandes** — les commandes utiles de Linux, de Windows, de macOS et celles qui s'écrivent pareil
-partout (Gardien, ping, nslookup, ssh, curl, git…), rangées par système puis par programme, chacune expliquée ; ⚠
-marque celles qui changent quelque chose. Rien ne s'y lance : on lit, puis on tape la commande, ou on la copie par
-son numéro, ici ou chez la personne qu'on aide. Tous les systèmes sont lisibles partout (les commandes de Windows
-depuis Linux, par exemple), et le guide dit si un programme manque sur cet ordinateur.
+**Guide des commandes** — les commandes utiles d'Omarchy, d'Arch, de Fedora, de Debian et Ubuntu (et des autres
+Linux), de Windows 11, de macOS, et celles qui s'écrivent pareil partout (Gardien, ping, nslookup, ssh, curl, git…),
+chacune expliquée ; ⚠ marque celles qui changent quelque chose. Chaque distribution montre ses programmes (pacman,
+dnf, apt…), puis ceux communs à Linux. On tape ce qu'on cherche : les commandes paraissent au fil de la frappe, et Tab
+complète le mot. Chaque commande a sa page : la copier, pour la taper ici ou chez la personne qu'on aide, ou la
+lancer ici quand elle ne fait que lire ; sa sortie défile dans Gardien, et Échap l'arrête. Tous les systèmes sont
+lisibles partout (les commandes de Windows depuis Linux, par exemple), et le guide dit si un programme manque sur cet
+ordinateur.
 
 **Et aussi**
 - Recherche dans tous les menus et les listes à cocher : tape un mot (wifi, disque, dns, mise à jour…), seules les
-  lignes qui le contiennent restent, sans souci d'accents ni de majuscules ; au menu principal, elle trouve aussi
-  chaque outil des sous-menus et chaque page du guide.
+  lignes qui le contiennent restent, sans souci d'accents ni de majuscules ; la fin du mot le plus probable
+  s'affiche en gris, et Tab la complète. Au menu principal, elle trouve aussi chaque outil des sous-menus, et chaque
+  page et chaque commande du guide.
 - Corrections appliquées seulement après confirmation, avec un point de restauration créé automatiquement avant
   (snapper ou timeshift sous Linux, point de restauration Windows, instantané Time Machine sous macOS) ; sous
   Windows, chacune est un script lisible.
@@ -368,7 +372,7 @@ Chaque entrée du menu existe aussi en commande.
 | `gardien nommer <ip\|mac> <surnom>` | nommer un appareil |
 | `gardien sauvegarder [fichier]`, `gardien restaurer <fichier>` | sauvegarde des données |
 | `gardien gaming` | paquets et réglages pour jouer (Windows et Linux) |
-| `gardien guide [système\|programme\|mots]` | guide des commandes : un système (`linux`, `windows`, `macos`, `tous`), un programme (`winget`, `systemctl`…) ou des mots à chercher (`cache dns`) |
+| `gardien guide [système\|programme\|mots]` | guide des commandes : un système (`omarchy`, `arch`, `fedora`, `debian`, `windows`, `macos`, `tous`, ou `linux` pour les programmes communs), un programme (`winget`, `systemctl`…) ou des mots à chercher (`cache dns`) |
 
 </details>
 

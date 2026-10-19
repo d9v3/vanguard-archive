@@ -76,7 +76,7 @@ pub fn lancer_en_anglais(commande: &mut Command, secondes: u64) -> Option<Result
 
 /// Arrête le programme et tout ce qu'il a lancé : sinon un sous-processus (winget sous PowerShell, un outil sous un
 /// script) continuerait en arrière-plan, avec ses verrous.
-fn arreter(enfant: &mut Child) {
+pub fn arreter(enfant: &mut Child) {
     // Windows : taskkill suit lui-même l'arbre des processus.
     #[cfg(windows)]
     let _ = Command::new("taskkill")
