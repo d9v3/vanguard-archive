@@ -341,11 +341,35 @@ fn antivirus() -> Vec<Constat> {
         ));
     }
     c.push(signatures(v["AntivirusSignatureAge"].as_u64().unwrap_or(0)));
+    c.extend(juger_cloud(ps("(Get-MpPreference).MAPSReporting").as_deref()));
     if v["IsTamperProtected"] == false {
         c.push(alerte("Antivirus", Niveau::Moyen, tr!("Protection contre les falsifications désactivée : un malware peut couper Defender.", "Tamper protection is off: malware can turn Defender off."))
             .manuel(tr!("Sécurité Windows > Protection contre les virus > Gérer les paramètres > Protection contre les falsifications", "Windows Security > Virus protection > Manage settings > Tamper protection"), &["Start-Process windowsdefender://threatsettings"]));
     }
     c
+}
+
+/// Protection dans le cloud de Defender (MAPSReporting : 0 coupée, 1 ou 2 active). Coupée, Defender ne reconnaît
+/// que les menaces de ses signatures : un programme malveillant tout neuf passe, alors que le cloud le juge en
+/// quelques secondes. Rien à dire si la valeur ne se lit pas.
+fn juger_cloud(valeur: Option<&str>) -> Option<Constat> {
+    (valeur.map(str::trim) == Some("0")).then(|| {
+        alerte(
+            "Antivirus",
+            Niveau::Moyen,
+            tr!(
+                "La protection dans le cloud de Defender est coupée : un programme malveillant tout neuf, pas encore dans ses signatures, passe sans être reconnu.",
+                "Defender's cloud protection is off: brand-new malware, not yet in its signatures, goes through unrecognized."
+            ),
+        )
+        .corriger(
+            tr!(
+                "Rallumer la protection dans le cloud (le réglage de Windows)",
+                "Turn cloud protection back on (Windows' setting)"
+            ),
+            &["Set-MpPreference -MAPSReporting Advanced"],
+        )
+    })
 }
 
 fn smb1() -> Option<Constat> {
@@ -825,6 +849,17 @@ mod tests {
         assert!(juger_uac(None, None).is_none() && juger_uac(Some(""), Some("5")).is_none());
         let c = juger_uac(Some("1"), Some("0")).unwrap();
         assert!(c.correctif.unwrap().commandes[0].ends_with("-Name ConsentPromptBehaviorAdmin -Value 5"));
+    }
+
+    #[test]
+    fn protection_dans_le_cloud() {
+        assert!(juger_cloud(None).is_none() && juger_cloud(Some("2")).is_none() && juger_cloud(Some("1")).is_none());
+        let coupee = juger_cloud(Some("0\r\n")).unwrap();
+        assert_eq!(coupee.probleme, Some(Niveau::Moyen));
+        assert_eq!(
+            coupee.correctif.unwrap().commandes,
+            ["Set-MpPreference -MAPSReporting Advanced"]
+        );
     }
 
     #[test]

@@ -787,6 +787,8 @@ try {
     $msiM = (Get-ItemProperty 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\Installer' -ErrorAction SilentlyContinue).AlwaysInstallElevated
     $msiC = (Get-ItemProperty 'HKCU:\SOFTWARE\Policies\Microsoft\Windows\Installer' -ErrorAction SilentlyContinue).AlwaysInstallElevated
     Accord 'Installation MSI élevée' ($msiM -eq 1 -and $msiC -eq 1) 'AlwaysInstallElevated'
+    $maps = (Get-MpPreference -ErrorAction SilentlyContinue).MAPSReporting
+    if ($null -ne $maps) { Accord 'Protection dans le cloud' ($maps -eq 0) 'protection dans le cloud de Defender|cloud protection is off' }
     Accord 'UAC sans demande' ($uac.EnableLUA -eq 1 -and $uac.ConsentPromptBehaviorAdmin -eq 0) 'ne demande plus rien|no longer asks'
     Accord 'Accès anonyme' ($lsa.RestrictAnonymousSAM -eq 0 -or $lsa.EveryoneIncludesAnonymous -eq 1) 'lister les comptes|list the computer|connexion anonyme|anonymous network connection'
     $invite = if ($null -ne $posteGpo.AllowInsecureGuestAuth) { $posteGpo.AllowInsecureGuestAuth } else { $poste.AllowInsecureGuestAuth }
