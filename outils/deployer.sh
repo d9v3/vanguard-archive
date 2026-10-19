@@ -54,13 +54,11 @@ compiler() {
       touch assets/oui.tsv
     fi
   fi
-  # Les deux programmes en même temps : l'optimisation finale (LTO, une seule unité de code) n'occupe qu'un cœur
-  # chacune, et cargo garde un dossier par cible.
-  local debut=$SECONDS linux
-  cargo build --release --target x86_64-unknown-linux-musl &
-  linux=$!
-  cargo build --release --target x86_64-pc-windows-gnu
-  wait "$linux"
+  # Les deux programmes d'un seul cargo, qui les mène de front : l'optimisation finale (LTO, une seule unité de code)
+  # n'occupe qu'un cœur chacune. Deux cargo lancés ensemble, eux, s'attendaient l'un l'autre (« Blocking waiting for
+  # file lock on build directory ») : 97 s au lieu de 52 (mesuré le 19 oct. 2026).
+  local debut=$SECONDS
+  cargo build --release --target x86_64-unknown-linux-musl --target x86_64-pc-windows-gnu
   git rev-parse HEAD >"$COMMIT_COMPILE"
   duree compilation "$debut"
 }
