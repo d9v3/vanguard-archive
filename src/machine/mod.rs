@@ -401,7 +401,15 @@ fn cles_ssh() -> Vec<Constat> {
         }
     }
     if let Ok(config) = std::fs::read_to_string(dossier.join("config")) {
-        constats.extend(constats_config_ssh(&config));
+        let mut lignes = Vec::new();
+        deplier_config_ssh(
+            "~/.ssh/config",
+            &config,
+            &|motif| fichiers_inclus_ssh(&dossier, motif),
+            8,
+            &mut lignes,
+        );
+        constats.extend(constats_config_ssh(&lignes));
     }
     if constats.is_empty() {
         constats.push(ok(
@@ -410,6 +418,95 @@ fn cles_ssh() -> Vec<Constat> {
         ));
     }
     constats
+}
+
+/// La configuration de SSH avec ses fichiers inclus (« Include ») dépliés à leur place, comme SSH les lit : (fichier
+/// à montrer, numéro de ligne, ligne). `lire` rend les fichiers d'un motif d'inclusion ; `profondeur` arrête une
+/// inclusion en boucle.
+#[cfg(unix)]
+fn deplier_config_ssh(
+    nom: &str,
+    texte: &str,
+    lire: &dyn Fn(&str) -> Vec<(String, String)>,
+    profondeur: u32,
+    sortie: &mut Vec<(String, usize, String)>,
+) {
+    for (i, ligne) in texte.lines().enumerate() {
+        let propre = ligne.split('#').next().unwrap_or_default().trim();
+        let (cle, motifs) = propre
+            .split_once(|c: char| c.is_whitespace() || c == '=')
+            .unwrap_or((propre, ""));
+        if cle.eq_ignore_ascii_case("include") && profondeur > 0 {
+            for motif in motifs
+                .trim_start_matches(|c: char| c.is_whitespace() || c == '=')
+                .split_whitespace()
+            {
+                for (inclus, contenu) in lire(motif.trim_matches('"')) {
+                    deplier_config_ssh(&inclus, &contenu, lire, profondeur - 1, sortie);
+                }
+            }
+        } else {
+            sortie.push((nom.to_string(), i + 1, ligne.to_string()));
+        }
+    }
+}
+
+/// Les fichiers d'un motif d'inclusion de ~/.ssh/config, triés : relatif à ~/.ssh, ou commençant par « ~/ » ; les
+/// jokers « * » et « ? » valent dans le dernier élément du chemin.
+#[cfg(unix)]
+fn fichiers_inclus_ssh(dossier_ssh: &std::path::Path, motif: &str) -> Vec<(String, String)> {
+    let maison = dossier_ssh.parent().unwrap_or(dossier_ssh);
+    let chemin = match motif.strip_prefix("~/") {
+        Some(reste) => maison.join(reste),
+        None => dossier_ssh.join(motif),
+    };
+    let montrer = |p: &std::path::Path| match p.strip_prefix(maison) {
+        Ok(r) => format!("~/{}", r.display()),
+        Err(_) => p.display().to_string(),
+    };
+    let nom = chemin
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let mut trouves: Vec<std::path::PathBuf> = if nom.contains(['*', '?']) {
+        let parent = chemin.parent().unwrap_or(dossier_ssh);
+        std::fs::read_dir(parent)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter(|e| joker(&nom, &e.file_name().to_string_lossy()))
+            .map(|e| e.path())
+            .collect()
+    } else {
+        vec![chemin]
+    };
+    trouves.sort();
+    trouves
+        .into_iter()
+        .filter(|p| p.is_file())
+        .filter_map(|p| Some((montrer(&p), std::fs::read_to_string(&p).ok()?)))
+        .collect()
+}
+
+/// Un nom correspond-il à un motif à jokers (« * » : n'importe quelle suite, « ? » : un caractère) ?
+#[cfg(unix)]
+fn joker(motif: &str, nom: &str) -> bool {
+    let (m, n): (Vec<char>, Vec<char>) = (motif.chars().collect(), nom.chars().collect());
+    // Programmation dynamique : possible[j] = le début du motif correspond aux j premiers caractères du nom.
+    let mut possible = vec![false; n.len() + 1];
+    possible[0] = true;
+    for c in m {
+        let mut suivant = vec![false; n.len() + 1];
+        for j in 0..=n.len() {
+            suivant[j] = match c {
+                '*' => possible[j] || (j > 0 && suivant[j - 1]),
+                '?' => j > 0 && possible[j - 1],
+                _ => j > 0 && possible[j - 1] && n[j - 1] == c,
+            };
+        }
+        possible = suivant;
+    }
+    possible[n.len()]
 }
 
 /// Réglages risqués de ~/.ssh/config qui valent pour tous les serveurs (avant le premier « Host », sous « Host * »
@@ -442,15 +539,21 @@ fn reglages_ssh_risques(config: &str) -> Vec<(usize, &'static str)> {
 }
 
 #[cfg(unix)]
-fn constats_config_ssh(config: &str) -> Vec<Constat> {
-    reglages_ssh_risques(config)
+fn constats_config_ssh(lignes: &[(String, usize, String)]) -> Vec<Constat> {
+    let texte = lignes.iter().map(|(_, _, l)| l.as_str()).collect::<Vec<_>>().join("\n");
+    reglages_ssh_risques(&texte)
         .into_iter()
-        .map(|(ligne, reglage)| {
+        .filter_map(|(n, reglage)| {
+            let (fichier, ligne, _) = lignes.get(n - 1)?;
+            let fichier = affichable(fichier);
+            Some((fichier, *ligne, reglage))
+        })
+        .map(|(fichier, ligne, reglage)| {
             let (message, conseil) = if reglage == "stricthostkeychecking" {
                 (
                     trf!(
-                        "~/.ssh/config, ligne {ligne} : SSH se connecte à n'importe quel serveur sans vérifier qu'il est le bon ; un appareil au milieu peut se faire passer pour lui et lire le mot de passe.",
-                        "~/.ssh/config, line {ligne}: SSH connects to any server without checking it is the right one; a device in the middle can pose as it and read the password."
+                        "{fichier}, ligne {ligne} : SSH se connecte à n'importe quel serveur sans vérifier qu'il est le bon ; un appareil au milieu peut se faire passer pour lui et lire le mot de passe.",
+                        "{fichier}, line {ligne}: SSH connects to any server without checking it is the right one; a device in the middle can pose as it and read the password."
                     ),
                     tr!(
                         "Retirer cette ligne, ou la réserver aux serveurs de test sous leur propre « Host » ; « accept-new » accepte un nouveau serveur mais refuse un serveur qui change",
@@ -460,8 +563,8 @@ fn constats_config_ssh(config: &str) -> Vec<Constat> {
             } else {
                 (
                     trf!(
-                        "~/.ssh/config, ligne {ligne} : ton agent SSH est prêté à tous les serveurs ; un serveur piraté peut s'en servir pour se connecter ailleurs avec tes clés.",
-                        "~/.ssh/config, line {ligne}: your SSH agent is lent to every server; a hacked server can use it to log in elsewhere with your keys."
+                        "{fichier}, ligne {ligne} : ton agent SSH est prêté à tous les serveurs ; un serveur piraté peut s'en servir pour se connecter ailleurs avec tes clés.",
+                        "{fichier}, line {ligne}: your SSH agent is lent to every server; a hacked server can use it to log in elsewhere with your keys."
                     ),
                     tr!(
                         "Retirer cette ligne, ou la réserver aux serveurs de confiance sous leur propre « Host » ; « ssh -J » remplace le plus souvent ce prêt",
@@ -834,6 +937,47 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn config_ssh_avec_inclusions() {
+        assert!(joker("*.conf", "travail.conf") && joker("c?nfig", "config") && joker("*", ""));
+        assert!(!joker("*.conf", "travail.conf.bak") && !joker("c?nfig", "cnfig"));
+        // Un Include déplié à sa place ; l'alerte nomme le fichier inclus et sa ligne. Une boucle s'arrête.
+        let lire = |motif: &str| -> Vec<(String, String)> {
+            match motif {
+                "config.d/*" => vec![("~/.ssh/config.d/labo".into(), "# labo\nForwardAgent yes\n".into())],
+                "boucle" => vec![("~/.ssh/boucle".into(), "Include boucle\n".into())],
+                _ => Vec::new(),
+            }
+        };
+        let mut lignes = Vec::new();
+        deplier_config_ssh(
+            "~/.ssh/config",
+            "Include config.d/*\nInclude boucle\nHost x\n",
+            &lire,
+            8,
+            &mut lignes,
+        );
+        // Les deux lignes du fichier inclus, « Host x », et l'Include de trop au bout de la boucle (laissé tel quel).
+        assert_eq!(lignes.len(), 4);
+        let c = constats_config_ssh(&lignes);
+        assert!(
+            c.len() == 1
+                && (c[0].message.contains("~/.ssh/config.d/labo, ligne 2")
+                    || c[0].message.contains("~/.ssh/config.d/labo, line 2"))
+        );
+        // Inclus sous un Host précis : le réglage ne vaut que pour lui.
+        let mut lignes = Vec::new();
+        deplier_config_ssh(
+            "~/.ssh/config",
+            "Host labo\n  Include config.d/*\n",
+            &lire,
+            8,
+            &mut lignes,
+        );
+        assert!(constats_config_ssh(&lignes).is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn config_ssh_risquee() {
         let config = "\
 # commun
@@ -861,7 +1005,7 @@ Host *
             ]
         );
         assert_eq!(reglages_ssh_risques("Host *\n  User moi\n"), []);
-        let c = constats_config_ssh("StrictHostKeyChecking no\n");
+        let c = constats_config_ssh(&[("~/.ssh/config".into(), 1, "StrictHostKeyChecking no".into())]);
         assert!(c.len() == 1 && c[0].probleme == Some(Niveau::Moyen));
         assert!(c[0].message.contains("ligne 1") || c[0].message.contains("line 1"));
     }
