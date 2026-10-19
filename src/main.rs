@@ -227,6 +227,10 @@ enum Commande {
         /// L'empreinte publiée par le site (SHA-256 de préférence). Sinon : un SHA256SUMS ou .sha256 à côté.
         empreinte: Option<String>,
     },
+    /// Quarantaine : les fichiers isolés par l'antivirus ou YARA, à remettre à leur place (faux positif) ou à
+    /// supprimer pour de bon.
+    #[command(visible_alias = "quarantine")]
+    Quarantaine,
     /// Sauvegarde la base des appareils et l'état de la surveillance dans un fichier JSON.
     #[command(visible_alias = "backup")]
     Sauvegarder {
@@ -686,6 +690,7 @@ enum Action {
     Distance,
     Lien,
     VerifierFichier,
+    Quarantaine,
     Logiciels,
     Gaming,
     Nettoyer,
@@ -851,6 +856,10 @@ const OUTILS: &[Outil] = &[
         titre: ["Vérifier un fichier téléchargé", "Check a downloaded file"],
         precision: ["empreinte, YARA, antivirus", "checksum, YARA, antivirus"],
         mots: "sha256 empreinte checksum hash télécharger download iso installateur installer fichier file" },
+    Outil { action: Action::Quarantaine, groupe: Some(Groupe::Protection), lettre: "",
+        titre: ["Quarantaine : remettre un fichier", "Quarantine: restore a file"],
+        precision: ["isolés, remis à l'identique", "isolated, put back exactly"],
+        mots: "quarantaine quarantine isolé isolated faux positif false positive remettre restore restaurer" },
     Outil { action: Action::Logiciels, groupe: Some(Groupe::Installer), lettre: "l",
         titre: ["Logiciels", "Software"], precision: ["les meilleurs, par catégorie", "the best ones, by category"],
         mots: "apps programmes programs installer install firefox vlc libreoffice" },
@@ -1144,6 +1153,7 @@ async fn executer(s: &mut Session, action: Action) {
         Action::Distance => protection::distance::menu(),
         Action::Lien => protection::lien::verifier(None),
         Action::VerifierFichier => protection::telechargement::verifier(None, None),
+        Action::Quarantaine => protection::quarantaine::menu(),
         Action::Logiciels => logiciels::menu(),
         Action::Gaming => gaming::menu(),
         Action::Nettoyer => nettoyer::menu(),
@@ -1207,6 +1217,8 @@ const AIDES_EN: &[(&str, &str)] = &[
     ("lien", "Is this link dangerous? Checked without ever opening it; after your consent, its age and public lists"),
     ("verifier-fichier", "Check a downloaded file: checksum compared with the site's, name and content, YARA and \
                           antivirus"),
+    ("quarantaine", "Quarantine: the files isolated by the antivirus or YARA, to put back in their place (false \
+                     positive) or to delete for good"),
     ("sauvegarder", "Back up the device database and the monitoring state to a JSON file"),
     ("restaurer", "Add a backup (or an appareils.json) to the current database, without erasing anything"),
     ("nommer", "Give a nickname to a device of the database (“HP printer”), by its IP or MAC"),
@@ -1379,6 +1391,7 @@ async fn main() {
         Some(Commande::VerifierFichier { fichier, empreinte }) => {
             protection::telechargement::verifier(Some(&fichier), empreinte.as_deref());
         }
+        Some(Commande::Quarantaine) => protection::quarantaine::menu(),
         Some(Commande::Isoler { fichier }) => protection::isoler::isoler(&fichier),
         Some(Commande::Pieges { retirer }) => protection::pieges::commande(retirer),
         Some(Commande::Durcir) => optimiser::protection(),

@@ -152,7 +152,10 @@ fn endroits_a_risque() -> Vec<PathBuf> {
 #[derive(Debug, PartialEq)]
 struct Trouve {
     regle: String,
+    /// Prêt à montrer.
     fichier: String,
+    /// Tel quel, pour l'isoler.
+    chemin: PathBuf,
 }
 
 /// Sortie de yara : une ligne « Règle chemin » par correspondance (le chemin peut contenir des espaces). Le chemin,
@@ -165,6 +168,7 @@ fn lire_sortie(sortie: &str) -> Vec<Trouve> {
             (!regle.is_empty() && !fichier.is_empty()).then(|| Trouve {
                 regle: regle.to_string(),
                 fichier: affichable(fichier),
+                chemin: PathBuf::from(fichier),
             })
         })
         .collect()
@@ -290,13 +294,20 @@ pub fn analyser(portee: &Portee) {
     println!();
     for ligne in envelopper(
         tr!(
-            "Ne les ouvre pas. Fais-les aussi analyser par l'antivirus (même menu) ; si tu ne sais pas d'où vient un fichier, supprime-le. Une règle peut se tromper sur un fichier légitime : en cas de doute, envoie-le à VirusTotal.",
-            "Do not open them. Have the antivirus scan them too (same menu); if you do not know where a file comes from, delete it. A rule can be wrong about a legitimate file: when in doubt, upload it to VirusTotal."
+            "Ne les ouvre pas. Fais-les aussi analyser par l'antivirus (même menu). Une règle peut se tromper sur un fichier légitime : la quarantaine se défait, et en cas de doute, envoie-le à VirusTotal.",
+            "Do not open them. Have the antivirus scan them too (same menu). A rule can be wrong about a legitimate file: the quarantine can be undone, and when in doubt, upload it to VirusTotal."
         ),
         LARGEUR - 2,
     ) {
         println!("  {ligne}");
     }
+    let mut a_isoler: Vec<(PathBuf, String)> = Vec::new();
+    for t in &trouves {
+        if t.chemin.is_file() && !a_isoler.iter().any(|(c, _)| *c == t.chemin) {
+            a_isoler.push((t.chemin.clone(), format!("YARA {}", t.regle)));
+        }
+    }
+    crate::protection::quarantaine::proposer(&a_isoler);
 }
 
 /// Un seul fichier, pour « Vérifier un fichier téléchargé » : le résultat, que l'appelant affiche.

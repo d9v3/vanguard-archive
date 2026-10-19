@@ -14,6 +14,7 @@ pub mod isoler;
 pub mod lien;
 pub mod manifeste;
 pub mod pieges;
+pub mod quarantaine;
 pub mod sortantes;
 pub mod telechargement;
 pub mod yara;

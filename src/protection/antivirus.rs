@@ -708,12 +708,10 @@ fn clamav(portee: &Portee) {
         "  [q]uarantine (recommended, reversible) / [d]elete / [n]othing: "
     ))
     .to_lowercase();
-    let dossier = crate::reseau::dossier_local().join("quarantaine");
-    let _ = std::fs::create_dir_all(&dossier);
     for (f, detection) in &infectes {
         let chemin = std::path::Path::new(f);
         let resultat = match rep.as_str() {
-            "q" => isoler(chemin, &dossier).map(|dest| noter_quarantaine(&dossier, f, &dest, detection)),
+            "q" => crate::protection::quarantaine::isoler(chemin, detection).map(|_| ()),
             "s" | "d" => std::fs::remove_file(chemin),
             _ => continue,
         };
@@ -734,9 +732,9 @@ fn clamav(portee: &Portee) {
     }
     if rep == "q" {
         trp!(
-            "  {GRIS}Quarantaine : {} (emplacement d'origine de chaque fichier noté dans journal.txt){RESET}",
-            "  {GRIS}Quarantine: {} (original location of each file noted in journal.txt){RESET}",
-            dossier.display()
+            "  {GRIS}Quarantaine : {} ; un fichier se remet à sa place par le menu Antivirus et protection › Quarantaine.{RESET}",
+            "  {GRIS}Quarantine: {}; a file goes back to its place through the menu Antivirus and protection › Quarantine.{RESET}",
+            crate::protection::quarantaine::dossier().display()
         );
     }
 }
@@ -822,59 +820,6 @@ fn lire_resultat(code: Option<i32>, sortie: &str) -> Option<Bilan> {
         analyses,
         illisibles,
     })
-}
-
-/// Note d'où vient chaque fichier mis en quarantaine : sans cela, un faux positif ne pouvait pas être remis à
-/// sa place (son nom en quarantaine ne garde pas le dossier d'origine). Vu en test.
-#[cfg(unix)]
-fn noter_quarantaine(dossier: &std::path::Path, origine: &str, dest: &std::path::Path, detection: &str) {
-    use std::io::Write;
-    // Lu par une personne (cat, éditeur) : un nom piégé n'y pilote pas le terminal, et une tabulation ou un saut de
-    // ligne dans un nom ne casse pas les colonnes.
-    let ligne = format!(
-        "{}\t{}\t{}\t{}\n",
-        chrono::Local::now().format("%Y-%m-%d %H:%M:%S"),
-        affichable(detection),
-        affichable(origine),
-        affichable(&dest.file_name().unwrap_or_default().to_string_lossy())
-    );
-    let ecrit = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(dossier.join("journal.txt"))
-        .and_then(|mut j| j.write_all(ligne.as_bytes()));
-    if let Err(e) = ecrit {
-        let origine = affichable(origine);
-        trp!(
-            "  Attention : journal de la quarantaine non écrit ({e}). Origine : {origine}",
-            "  Warning: quarantine log not written ({e}). Origin: {origine}"
-        );
-    }
-}
-
-/// Déplace un fichier en quarantaine et lui retire toute permission : il ne peut plus être lancé ni ouvert.
-#[cfg(unix)]
-fn isoler(chemin: &std::path::Path, dossier: &std::path::Path) -> std::io::Result<PathBuf> {
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::create_dir_all(dossier)?;
-    let nom = chemin
-        .file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_default();
-    let horodatage = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |d| d.as_nanos());
-    let dest = dossier.join(format!("{horodatage}.{nom}"));
-    // rename échoue d'un disque à l'autre (clé USB → disque) : on copie puis on supprime.
-    std::fs::rename(chemin, &dest).or_else(|_| {
-        std::fs::copy(chemin, &dest)?;
-        // Original impossible à supprimer : on ne laisse pas une seconde copie, encore exécutable, en quarantaine.
-        std::fs::remove_file(chemin).inspect_err(|_| {
-            let _ = std::fs::remove_file(&dest);
-        })
-    })?;
-    std::fs::set_permissions(&dest, std::fs::Permissions::from_mode(0o000))?;
-    Ok(dest)
 }
 
 /// --exclude-dir attend une expression régulière : on échappe les points.
@@ -1055,23 +1000,6 @@ mod tests_cle {
 mod tests {
     use super::*;
 
-    /// Le journal de la quarantaine se lit avec cat : un nom piégé n'y pilote pas le terminal, et ses tabulations ou
-    /// sauts de ligne ne cassent pas les quatre colonnes.
-    #[cfg(unix)]
-    #[test]
-    fn journal_de_quarantaine_sans_piege() {
-        let d = std::env::temp_dir().join(format!("gardien-journal-quarantaine-{}", std::process::id()));
-        std::fs::create_dir_all(&d).unwrap();
-        noter_quarantaine(&d, "/home/alice/a\tb\x1b[2K\nc", &d.join("x.q"), "Eicar\x07");
-        let journal = std::fs::read_to_string(d.join("journal.txt")).unwrap();
-        assert_eq!(journal.lines().count(), 1, "{journal:?}");
-        let champs: Vec<&str> = journal.trim_end().split('\t').collect();
-        assert_eq!(champs.len(), 4, "{journal:?}");
-        assert_eq!(champs[1], "Eicar\u{fffd}");
-        assert_eq!(champs[2], "/home/alice/a\u{fffd}b\u{fffd}[2K\u{fffd}c");
-        let _ = std::fs::remove_dir_all(&d);
-    }
-
     #[test]
     fn resultat_clamscan() {
         let bilan = |infectes: u64, erreurs: u64| {
@@ -1096,20 +1024,6 @@ mod tests {
         assert!(lire_resultat(None, &bilan(0, 0)).is_none());
         // Infectés annoncés mais lignes illisibles : pas fiable.
         assert!(lire_resultat(Some(1), &bilan(1, 0)).is_none());
-    }
-
-    #[test]
-    fn quarantaine_retire_le_fichier_et_ses_droits() {
-        use std::os::unix::fs::PermissionsExt;
-        let base = std::env::temp_dir().join(format!("gardien-test-{}", std::process::id()));
-        let suspect = base.join("suspect.sh");
-        std::fs::create_dir_all(&base).unwrap();
-        std::fs::write(&suspect, "#!/bin/sh\necho pirate\n").unwrap();
-        let dest = isoler(&suspect, &base.join("quarantaine")).unwrap();
-        assert!(!suspect.exists());
-        assert_eq!(std::fs::metadata(&dest).unwrap().permissions().mode() & 0o777, 0);
-        std::fs::set_permissions(&dest, std::fs::Permissions::from_mode(0o600)).unwrap();
-        std::fs::remove_dir_all(&base).unwrap();
     }
 
     #[test]
