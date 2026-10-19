@@ -150,6 +150,11 @@ python3 outils/confidentialite.py --binaire "$DOSSIER/gardien-windows-x86_64.exe
 gh release create "$TAG" --target "$COMMIT" --title "$NOM $VERSION" --notes "$NOTES" \
   "$DOSSIER/gardien-windows-x86_64.exe" "$DOSSIER/gardien-linux-x86_64" "$DOSSIER/gardien-macos" "$DOSSIER/SHA256SUMS.txt"
 echo "Version $TAG publiée : $(gh release view "$TAG" --json url -q .url)"
+# Seule la dernière version a sa page : CHANGELOG.md garde ce que chacune a apporté. Les pages d'avant sont retirées,
+# leurs étiquettes restent dans le dépôt (sans --cleanup-tag), pour recompiler une ancienne version au besoin.
+for ancienne in $(gh release list --limit 500 --json tagName -q '.[].tagName' | grep -vxF "$TAG"); do
+  gh release delete "$ancienne" --yes >/dev/null && echo "Page de $ancienne retirée (son étiquette reste)."
+done
 command -v notify-send >/dev/null &&
   notify-send -a Gardien -i gardien "$NOM $VERSION publiée sur GitHub" "Page de la version : les trois programmes et leurs empreintes." || true
 
