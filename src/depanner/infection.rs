@@ -68,7 +68,7 @@ pub(super) fn urgences(signe: Signe, internet: bool) -> Vec<&'static str> {
         }
         u.push(tr!(
             "Ne rappelle jamais le numéro affiché ni celui de l'appel : un vrai soutien technique n'appelle pas sans qu'on l'ait demandé. Si tu as payé, appelle ta banque pour contester.",
-            "Never call back the number shown or the caller's: a real technical support does not call unasked. If you paid, call your bank to dispute it."
+            "Never call back the number shown or the caller's: real technical support does not call unasked. If you paid, call your bank to dispute it."
         ));
     }
     if signe == Signe::FichierOuvert {

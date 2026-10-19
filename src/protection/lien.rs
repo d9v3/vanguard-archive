@@ -757,7 +757,7 @@ fn examiner_marques(hote: &str, domaine: &str) -> Vec<Signe> {
             if marque_imitee { Niveau::Eleve } else { Niveau::Info },
             trf!(
                 "Site hébergé gratuitement ({h}) : n'importe qui en crée un en une minute, aucun service sérieux n'y demande ton mot de passe.",
-                "Site on free hosting ({h}): anyone can create one in a minute, no serious service asks for your password there."
+                "Site on free hosting ({h}): anyone can create one in a minute; no serious service asks for your password there."
             ),
         ));
     }

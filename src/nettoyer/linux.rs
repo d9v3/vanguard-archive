@@ -140,7 +140,7 @@ fn paquets_inutiles(gestion: Paquets) -> Option<Element> {
                 taille,
                 tr!(
                     "orphelins=$(pacman -Qdtq); if [ -n \"$orphelins\" ]; then sudo pacman -Rns $orphelins; else echo 'Aucun paquet orphelin.'; fi",
-                    "orphelins=$(pacman -Qdtq); if [ -n \"$orphelins\" ]; then sudo pacman -Rns $orphelins; else echo 'No orphan package.'; fi"
+                    "orphelins=$(pacman -Qdtq); if [ -n \"$orphelins\" ]; then sudo pacman -Rns $orphelins; else echo 'No orphan packages.'; fi"
                 ),
             )
         }

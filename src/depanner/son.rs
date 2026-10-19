@@ -358,7 +358,7 @@ mod systeme {
         }
         Etat::Info.dire(tr!(
             "Le volume et la sortie se règlent en cliquant sur le haut-parleur, près de l'horloge (flèche à droite du curseur : choisir la sortie).",
-            "Volume and output are set by clicking the speaker, near the clock (arrow right of the slider: choose the output)."
+            "Volume and output are set by clicking the speaker, near the clock (arrow to the right of the slider: choose the output)."
         ));
         if demander(tr!(
             "\n  Ouvrir les réglages du son ? [o/N] : ",

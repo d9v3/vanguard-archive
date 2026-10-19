@@ -439,7 +439,7 @@ pub fn verifier(fichier: Option<&Path>, empreinte: Option<&str>) {
                     &if algo.faible() {
                         trf!(
                             "L'empreinte {} ({source}) correspond : le fichier n'est pas abîmé. {} se falsifie, il ne prouve pas que personne ne l'a remplacé.",
-                            "The {} checksum ({source}) matches: the file is not damaged. {} can be forged, it does not prove nobody replaced it.",
+                            "The {} checksum ({source}) matches: the file is not damaged. {} can be forged; it does not prove nobody replaced it.",
                             algo.nom(),
                             algo.nom()
                         )

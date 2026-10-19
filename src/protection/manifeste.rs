@@ -313,7 +313,7 @@ pub fn constat() -> Option<Constat> {
                 Niveau::Info,
                 tr!(
                     "Cette clé VANGUARD n'a pas de manifeste sur cet ordinateur (une autre clé que celles déployées ici, ou une clé reformatée) : son contenu n'a pas pu être comparé.",
-                    "This VANGUARD key has no manifest on this computer (another key than those deployed here, or a reformatted key): its content could not be compared."
+                    "This VANGUARD key has no manifest on this computer (a key other than those deployed here, or a reformatted key): its content could not be compared."
                 ),
             )
             .manuel(
@@ -340,7 +340,7 @@ pub fn constat() -> Option<Constat> {
             Niveau::Eleve,
             trf!(
                 "La clé VANGUARD a changé depuis son écriture : {}. Un fichier ajouté ou remplacé sur une clé qui a voyagé peut être un piège (autorun, programme remplacé).",
-                "The VANGUARD key has changed since it was written: {}. A file added or replaced on a key that travelled may be a trap (autorun, replaced program).",
+                "The VANGUARD key has changed since it was written: {}. A file added or replaced on a key that traveled may be a trap (autorun, replaced program).",
                 resume_ecart(&ecart)
             ),
         )

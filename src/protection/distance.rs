@@ -222,7 +222,7 @@ fn juger(trouvailles: &[Trouvaille], aujourd_hui: NaiveDate) -> Vec<Constat> {
         let message = if logiciel.integre {
             trf!(
                 "{nom} (fourni avec Windows) est ouvert en ce moment : la personne à l'autre bout peut voir cet écran et commander cet ordinateur. Ne l'ouvre que si c'est toi qui as appelé un soutien technique de confiance ; un faux technicien demande justement de l'ouvrir.",
-                "{nom} (built into Windows) is open right now: the person at the other end can see this screen and operate this computer. Open it only if you called a trusted technical support yourself; a fake technician asks precisely to open it."
+                "{nom} (built into Windows) is open right now: the person at the other end can see this screen and operate this computer. Open it only if you called trusted technical support yourself; a fake technician asks precisely to open it."
             )
         } else {
             trf!(
@@ -988,7 +988,7 @@ pub fn menu() {
         if cfg!(windows) {
             dire(tr!(
                 "Assistance rapide fait partie de Windows : n'accepte de l'ouvrir que si c'est toi qui as appelé un soutien technique de confiance.",
-                "Quick Assist is part of Windows: agree to open it only if you called a trusted technical support yourself."
+                "Quick Assist is part of Windows: agree to open it only if you called trusted technical support yourself."
             ));
         }
         return;
