@@ -209,3 +209,125 @@ pub(super) fn sudo_sans_mot_de_passe(tout_permis: &str) -> Vec<Constat> {
     }
     constats
 }
+
+/// La partie d'un fichier de configuration de sshd qui vaut pour toutes les connexions : un bloc « Match » ne
+/// s'applique qu'à certaines (un utilisateur, une adresse) et va jusqu'à la fin du fichier.
+pub(super) fn partie_globale_sshd(texte: &str) -> String {
+    texte
+        .lines()
+        .take_while(|l| {
+            !l.split_whitespace()
+                .next()
+                .is_some_and(|m| m.eq_ignore_ascii_case("match"))
+        })
+        .flat_map(|l| [l, "\n"])
+        .collect()
+}
+
+/// Première valeur d'un réglage de sshd, en minuscules. Le nom et la valeur se séparent par des espaces ou par un
+/// « = » (« PasswordAuthentication=no » est valable).
+pub(super) fn valeur_sshd(conf: &str, cle: &str) -> Option<String> {
+    conf.lines()
+        .map(str::trim)
+        .filter(|l| !l.starts_with('#'))
+        .find_map(|l| {
+            let (k, v) = l.split_once(|c: char| c.is_whitespace() || c == '=')?;
+            let v = v.trim().trim_start_matches('=').trim().trim_matches('"');
+            k.eq_ignore_ascii_case(cle).then(|| v.to_ascii_lowercase())
+        })
+}
+
+/// sshd accepte-t-il un mot de passe ? Par « PasswordAuthentication » (oui par défaut), ou, avec PAM, par le mode
+/// « clavier interactif » qui demande le même mot de passe (oui par défaut aussi).
+pub(super) fn mots_de_passe_sshd(conf: &str) -> bool {
+    let valeur = |cle: &str| valeur_sshd(conf, cle);
+    let clavier = valeur("KbdInteractiveAuthentication").or_else(|| valeur("ChallengeResponseAuthentication"));
+    valeur("PasswordAuthentication").as_deref() != Some("no")
+        || (valeur("UsePAM").as_deref() == Some("yes") && clavier.as_deref() != Some("no"))
+}
+
+/// sshd ouvre-t-il un compte sans mot de passe ? « PermitEmptyPasswords yes », quand les mots de passe sont permis.
+pub(super) fn mots_de_passe_vides_sshd(conf: &str) -> bool {
+    valeur_sshd(conf, "PermitEmptyPasswords").as_deref() == Some("yes") && mots_de_passe_sshd(conf)
+}
+
+/// Configuration de sshd qui vaut pour toutes les connexions ; `None` si elle est réservée à root.
+pub(super) fn configuration_sshd() -> Option<String> {
+    // sshd garde la première valeur trouvée ; sur Arch, les fichiers .d sont inclus avant le reste.
+    let mut fichiers: Vec<std::path::PathBuf> = std::fs::read_dir("/etc/ssh/sshd_config.d")
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|f| f.path())
+        .collect();
+    fichiers.sort();
+    fichiers.push("/etc/ssh/sshd_config".into());
+    let mut conf = String::new();
+    for f in &fichiers {
+        match std::fs::read_to_string(f) {
+            Ok(t) => conf += &partie_globale_sshd(&t),
+            // Fedora et RHEL réservent la configuration à root : un fichier vide passerait pour les valeurs par
+            // défaut (mot de passe permis), une fausse alerte.
+            Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => return None,
+            Err(_) => {}
+        }
+    }
+    Some(conf)
+}
+
+/// Serveur SSH du Mac (Remote Login) : ses mots de passe sont l'usage normal, pas une alerte. Seuls comptent un
+/// compte sans mot de passe accepté et la connexion root. `None` : rien à dire.
+#[cfg_attr(target_os = "linux", allow(dead_code))]
+pub(super) fn juger_sshd_mac(conf: &str) -> Option<Constat> {
+    let ou = tr!(
+        "dans /etc/ssh/sshd_config, puis couper et rallumer « Partage à distance » (Réglages Système > Général > Partage)",
+        "in /etc/ssh/sshd_config, then turn “Remote Login” off and on again (System Settings > General > Sharing)"
+    );
+    if mots_de_passe_vides_sshd(conf) {
+        return Some(
+            alerte(
+                "SSH",
+                Niveau::Critique,
+                tr!(
+                    "Le partage à distance accepte les comptes sans mot de passe : un tel compte s'ouvre depuis le réseau sans rien taper.",
+                    "Remote Login accepts accounts without a password: such an account opens from the network without typing anything."
+                ),
+            )
+            .manuel(trf!("Mettre « PermitEmptyPasswords no » {ou}", "Set “PermitEmptyPasswords no” {ou}"), &[]),
+        );
+    }
+    (valeur_sshd(conf, "PermitRootLogin").as_deref() == Some("yes")).then(|| {
+        alerte(
+            "SSH",
+            Niveau::Eleve,
+            tr!(
+                "Le partage à distance accepte une connexion en root : le compte qui a tous les droits s'ouvre depuis le réseau.",
+                "Remote Login accepts root logins: the account with every right opens from the network."
+            ),
+        )
+        .manuel(trf!("Mettre « PermitRootLogin no » {ou}", "Set “PermitRootLogin no” {ou}"), &[])
+    })
+}
+
+#[cfg(test)]
+mod tests_sshd {
+    use super::*;
+
+    #[test]
+    fn serveur_ssh_du_mac() {
+        // Mots de passe permis : l'usage normal du partage à distance, rien à dire.
+        assert!(juger_sshd_mac("").is_none());
+        assert!(juger_sshd_mac("PermitRootLogin prohibit-password\n").is_none());
+        assert_eq!(
+            juger_sshd_mac("PermitRootLogin yes\n").unwrap().probleme,
+            Some(Niveau::Eleve)
+        );
+        assert_eq!(
+            juger_sshd_mac("PermitEmptyPasswords yes\n").unwrap().probleme,
+            Some(Niveau::Critique)
+        );
+        // Mots de passe coupés : un mot de passe vide ne sert à rien.
+        let cles = "PasswordAuthentication no\nKbdInteractiveAuthentication no\nPermitEmptyPasswords yes\n";
+        assert!(juger_sshd_mac(cles).is_none());
+    }
+}

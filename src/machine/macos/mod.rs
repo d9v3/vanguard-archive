@@ -176,6 +176,18 @@ fn partage(port: u16) -> Option<&'static str> {
     })
 }
 
+/// Serveur SSH (Remote Login) : jugé seulement s'il écoute le réseau sur le port 22.
+fn ssh_serveur() -> Option<Constat> {
+    let netstat = sortie("netstat", &["-an", "-p", "tcp"])?;
+    let ecoute = lire_netstat(&netstat, true)
+        .iter()
+        .any(|(adresse, port)| *port == 22 && !(adresse.starts_with("127.") || adresse == "::1"));
+    if !ecoute {
+        return None;
+    }
+    super::unix::juger_sshd_mac(&super::unix::configuration_sshd()?)
+}
+
 fn ports_ecoute(pare_feu_actif: bool) -> Vec<Constat> {
     let programmes = super::programmes_en_ecoute();
     let mut constats = Vec::new();
@@ -680,6 +692,7 @@ pub fn auditer() -> Audit {
             verif!(sauvegarde_chiffree()),
             verif!(persistance()),
             verif!(cles_ssh()),
+            verif!(ssh_serveur()),
         ],
     )
 }

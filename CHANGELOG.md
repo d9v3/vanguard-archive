@@ -16,7 +16,8 @@ chaque version garde son étiquette dans le dépôt (`git checkout v0.62.0`, par
   protection contre les exploits coupée (DEP, ASLR, CFG, SEHOP), services au chemin sans guillemets dans un dossier
   modifiable par tous ; BitLocker suspendu ou en attente ne compte plus comme chiffré.
 - **Linux et macOS.** Session qui s'ouvre toute seule sans disque chiffré (GDM, SDDM, LightDM), mémoire des
-  programmes root lisible après un plantage, touches magiques du noyau ; sauvegarde Time Machine non chiffrée.
+  programmes root lisible après un plantage, touches magiques du noyau ; sauvegarde Time Machine non chiffrée,
+  partage à distance du Mac qui accepte root ou les comptes sans mot de passe.
 - **Plus justes.** Fichiers inclus de la configuration SSH lus, réseaux Wi-Fi ouverts mieux reconnus, dnf-automatic
   qui ne fait que télécharger, réglages d'APT lus dans leur ordre, interface anglaise complète.
 - **Une seule publication par jour.** Ce journal regroupe les versions par jour ; seule la dernière garde sa page de

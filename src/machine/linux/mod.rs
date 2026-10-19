@@ -4,6 +4,7 @@ use std::fmt::Write;
 use std::path::Path;
 use std::process::Command;
 
+use super::unix::{configuration_sshd, mots_de_passe_sshd, mots_de_passe_vides_sshd, valeur_sshd};
 use super::{Audit, Constat, alerte, cles_ssh, impossible, ok, sortie};
 use crate::risk::{Niveau, info_port};
 use crate::{tr, trf, trw};
@@ -633,77 +634,12 @@ fn enable_streaming(vdf: &str) -> Option<bool> {
 /// connexion, et « reload » d'un service arrêté échouait alors que la configuration était écrite.
 const RECHARGER_SSHD: &str = "sudo sshd -t && sudo systemctl try-reload-or-restart sshd";
 
-/// La partie d'un fichier de configuration de sshd qui vaut pour toutes les connexions : un bloc « Match » ne
-/// s'applique qu'à certaines (un utilisateur, une adresse) et va jusqu'à la fin du fichier.
-fn partie_globale_sshd(texte: &str) -> String {
-    texte
-        .lines()
-        .take_while(|l| {
-            !l.split_whitespace()
-                .next()
-                .is_some_and(|m| m.eq_ignore_ascii_case("match"))
-        })
-        .flat_map(|l| [l, "\n"])
-        .collect()
-}
-
-/// Première valeur d'un réglage de sshd, en minuscules. Le nom et la valeur se séparent par des espaces ou par un
-/// « = » (« PasswordAuthentication=no » est valable).
-fn valeur_sshd(conf: &str, cle: &str) -> Option<String> {
-    conf.lines()
-        .map(str::trim)
-        .filter(|l| !l.starts_with('#'))
-        .find_map(|l| {
-            let (k, v) = l.split_once(|c: char| c.is_whitespace() || c == '=')?;
-            let v = v.trim().trim_start_matches('=').trim().trim_matches('"');
-            k.eq_ignore_ascii_case(cle).then(|| v.to_ascii_lowercase())
-        })
-}
-
-/// sshd accepte-t-il un mot de passe ? Par « PasswordAuthentication » (oui par défaut), ou, avec PAM, par le mode
-/// « clavier interactif » qui demande le même mot de passe (oui par défaut aussi).
-fn mots_de_passe_sshd(conf: &str) -> bool {
-    let valeur = |cle: &str| valeur_sshd(conf, cle);
-    let clavier = valeur("KbdInteractiveAuthentication").or_else(|| valeur("ChallengeResponseAuthentication"));
-    valeur("PasswordAuthentication").as_deref() != Some("no")
-        || (valeur("UsePAM").as_deref() == Some("yes") && clavier.as_deref() != Some("no"))
-}
-
-/// sshd ouvre-t-il un compte sans mot de passe ? « PermitEmptyPasswords yes », quand les mots de passe sont permis.
-fn mots_de_passe_vides_sshd(conf: &str) -> bool {
-    valeur_sshd(conf, "PermitEmptyPasswords").as_deref() == Some("yes") && mots_de_passe_sshd(conf)
-}
-
 /// Le serveur SSH tourne-t-il ? « sshd » sur Arch et Fedora, « ssh » sur Debian, Ubuntu et Mint. Ubuntu (22.10+) le
 /// lance à la demande par ssh.socket : le service paraît arrêté alors que le port 22 accepte les connexions.
 fn sshd_actif() -> bool {
     ["sshd", "ssh", "sshd.socket", "ssh.socket"]
         .iter()
         .any(|s| service_actif(s))
-}
-
-/// Configuration de sshd qui vaut pour toutes les connexions ; `None` si elle est réservée à root.
-fn configuration_sshd() -> Option<String> {
-    // sshd garde la première valeur trouvée ; sur Arch, les fichiers .d sont inclus avant le reste.
-    let mut fichiers: Vec<std::path::PathBuf> = std::fs::read_dir("/etc/ssh/sshd_config.d")
-        .into_iter()
-        .flatten()
-        .flatten()
-        .map(|f| f.path())
-        .collect();
-    fichiers.sort();
-    fichiers.push("/etc/ssh/sshd_config".into());
-    let mut conf = String::new();
-    for f in &fichiers {
-        match std::fs::read_to_string(f) {
-            Ok(t) => conf += &partie_globale_sshd(&t),
-            // Fedora et RHEL réservent la configuration à root : un fichier vide passerait pour les valeurs par
-            // défaut (mot de passe permis), une fausse alerte.
-            Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => return None,
-            Err(_) => {}
-        }
-    }
-    Some(conf)
 }
 
 fn ssh_serveur() -> Constat {
@@ -1835,7 +1771,7 @@ pas-un-uuid;rm -rf ~:802-11-wireless:yes:Piège
 
     #[test]
     fn configuration_de_sshd() {
-        let conf = |t: &str| partie_globale_sshd(t);
+        let conf = |t: &str| super::super::unix::partie_globale_sshd(t);
         // Valeur explicite, avec « = » ou des guillemets.
         assert!(!mots_de_passe_sshd(&conf("PasswordAuthentication no\nUsePAM no\n")));
         assert!(!mots_de_passe_sshd(&conf("PasswordAuthentication=no\n")));
