@@ -349,6 +349,10 @@ cp -f outils/cle/autorun.inf outils/cle/autorun.sh "outils/cle/Lancer Gardien.ba
 # exFAT ne garde ni droits ni liens : -rt suffit, --modify-window tolère sa précision de 2 s. Les copies de travail
 # des sessions Claude (.claude/worktrees, avec leurs propres compilations) restent sur l'ordinateur.
 rsync -rt --delete --modify-window=2 --exclude /target/ --exclude /.claude/worktrees/ ./ "$CLE/source/"
+# Manifeste de la clé (src/protection/manifeste.rs) : l'empreinte de chaque fichier, gardée sur cet ordinateur et
+# jamais sur la clé ; le bilan la compare quand la clé revient de chez quelqu'un. Un programme d'avant la 0.59 n'a
+# pas cette commande : la clé est à jour quand même.
+./"$LINUX" manifeste --ecrire "$CLE" || echo "Manifeste de la clé non écrit : le bilan ne pourra pas la comparer."
 sync
 duree clé "$T_CLE"
 echo "Clé GARDIEN à jour : $CLE ($(./"$LINUX" --version))"
