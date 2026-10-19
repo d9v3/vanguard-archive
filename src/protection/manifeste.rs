@@ -102,6 +102,7 @@ fn identifiant_volume(_racine: &Path) -> Option<String> {
 
 /// L'identifiant gardé tel quel s'il ne contient que des lettres, des chiffres et des tirets : il devient un nom de
 /// fichier, et une étiquette choisie par n'importe qui ne doit pas sortir du dossier des références.
+#[cfg(any(target_os = "linux", test))]
 fn nom_de_reference(id: &str) -> Option<String> {
     let id = id.trim();
     (!id.is_empty() && id.len() <= 64 && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'))
