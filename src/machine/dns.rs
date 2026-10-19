@@ -409,7 +409,8 @@ fn nom_inexistant() -> String {
 
 /// Le DNS invente-t-il des réponses ? Il en donne une pour un site qui n'existe pas : fournisseur qui redirige les
 /// erreurs vers ses pages de publicité, portail de Wi-Fi public, ou détournement. `None` : nom refusé, comme il
-/// se doit, ou pas de réponse en 5 s.
+/// se doit, ou pas de réponse en 3 s (une vraie réponse « inconnu » vient presque toujours en moins d'une seconde ;
+/// 5 s, avant, retenaient tout le bilan quand le réseau est cassé, un Wi-Fi connecté sans Internet par exemple).
 fn reponse_inventee() -> Option<IpAddr> {
     use std::net::ToSocketAddrs;
     let nom = nom_inexistant();
@@ -422,7 +423,7 @@ fn reponse_inventee() -> Option<IpAddr> {
             .map(|a| a.ip());
         let _ = envoi.send(reponse);
     });
-    reception.recv_timeout(Duration::from_secs(5)).ok().flatten()
+    reception.recv_timeout(Duration::from_secs(3)).ok().flatten()
 }
 
 pub fn dns() -> Vec<Constat> {
