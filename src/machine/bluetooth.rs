@@ -193,6 +193,13 @@ fn lire() -> Option<Etat> {
     if !adaptateur {
         return None;
     }
+    // Compte remappé dans un espace de noms d'utilisateur (`unshare -r`, conteneur sans droits) : le bus système y
+    // refuse l'authentification, et bluetoothctl 5.87 ne vérifie pas sa connexion et s'arrête net (SIGABRT, un
+    // vidage mémoire à chaque fois : plus de cent en une journée, venus de l'étape sans Internet des tests). Rien à
+    // lire de toute façon.
+    if std::fs::read_to_string("/proc/self/uid_map").is_ok_and(|m| !identite(&m)) {
+        return None;
+    }
     let lancer = |args: &[&str]| {
         crate::commande::lancer_en_anglais(std::process::Command::new("bluetoothctl").args(args), 5).map(|r| r.sortie)
     };
@@ -205,6 +212,13 @@ fn lire() -> Option<Etat> {
         .unwrap_or_default();
     etat.appareils = lire_appareils(&appareils);
     Some(etat)
+}
+
+/// `/proc/self/uid_map` sans remappage : une seule plage « 0 0 4294967295 », le compte vu tel qu'il est.
+#[cfg(any(target_os = "linux", test))]
+fn identite(uid_map: &str) -> bool {
+    let plages: Vec<Vec<&str>> = uid_map.lines().map(|l| l.split_whitespace().collect()).collect();
+    plages == [vec!["0", "0", "4294967295"]]
 }
 
 /// « bluetoothctl show » : Powered, Discoverable et DiscoverableTimeout (« 0x00000000 (0) » : sans limite).
@@ -350,6 +364,15 @@ mod tests {
         assert_eq!(adresse("a4:c1:38"), None);
         assert_eq!(adresse("zz:c1:38:0b:1e:22"), None);
         assert_eq!(adresse("../../a4c1380b1e22"), None);
+    }
+
+    #[test]
+    fn compte_remappe_reconnu() {
+        assert!(identite("         0          0 4294967295\n"));
+        // unshare -r : root mappé sur le compte 1000 ; conteneur sans droits : une plage décalée.
+        assert!(!identite("         0       1000          1\n"));
+        assert!(!identite("0 100000 65536\n"));
+        assert!(!identite(""));
     }
 
     #[test]
