@@ -560,7 +560,7 @@ dependencies = [
 
 [[package]]
 name = "gardien"
-version = "0.62.0"
+version = "0.62.1"
 dependencies = [
  "argon2",
  "blake3",
