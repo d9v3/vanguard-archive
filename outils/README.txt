@@ -67,9 +67,11 @@ highlighted one, Esc clears it. In the main menu, it also finds each tool of the
        Passwords: have they leaked? (only 5 characters of their fingerprint are sent)
        Email address: has it leaked? (sent to the search service, after your consent)
        Who talks to the Internet? Each program's connections, with the server's name (read-only)
+       Camera and microphone: who uses them? (Windows: each program and the last time; read-only)
        Is someone controlling my PC? Remote control tools (tech-support scam), removed after your consent
        Is this link dangerous? Checked without opening it; its age and public lists, after your consent
        Check a downloaded file: checksum compared with the site's, name and content, YARA, antivirus
+       Quarantine: the files isolated by the antivirus or YARA, put back in their place (false positive) or deleted
   7  Install and play ›
        Software: the best ones, mostly open source, by category (browsers, passwords, office, video,
        design, system tools…) plus a starter pack, from the official source
@@ -85,6 +87,7 @@ highlighted one, Esc clears it. In the main menu, it also finds each tool of the
   9  Data ›
        Back up or restore (nicknames, network history)
        Copy my files to an external disk (checked copy, nothing deleted, resumes after an interruption)
+       Check a copy: read back from the disk and compared with the originals (restore test)
        My computers: those where the key ran a check, their grade and remaining problems (gardien ordinateurs)
        Protect the key's data: device record encrypted by a passphrase, asked only elsewhere
  10  Command guide › the useful commands of Linux, Windows, macOS and all systems, by program, each one

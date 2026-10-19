@@ -46,12 +46,13 @@ turn on once with `/install-github-app`).
 | `src/protection/distance.rs` | is someone controlling my PC? remote control tools (installed, at boot, running, downloaded), in the check and as a guided walkthrough |
 | `src/protection/lien.rs` | is this link dangerous? local check (punycode, imitated brands…), then RDAP, URLhaus, Spamhaus DBL, SURBL |
 | `src/protection/telechargement.rs` | check a downloaded file: checksum by the system's tool, name and content, YARA and antivirus; programs landing in Downloads, for monitoring |
+| `src/protection/quarantaine.rs`, `src/protection/camera.rs` | reversible quarantine (antivirus, YARA): isolate, put back exactly, delete; camera and microphone: who uses them (registry on Windows, /dev/video and pactl on Linux) |
 | `src/reseau/canaux.rs`, `src/reseau/nat.rs` | crowded Wi-Fi (nearby networks by channel); NAT type (home-made STUN client) |
 | `src/dns_rapide.rs` | fastest DNS: measurement, protecting DNS kept, setting undone through `optimiser/` |
 | `src/reseau/cameras.rs` | hidden cameras: maker, RTSP stream, ONVIF discovery (WS-Discovery), web page |
 | `src/depanner/` | troubleshoot step by step: the paths (`mod.rs`), network and Wi-Fi (`reseau.rs`), sound (`son.rs`), printer (`imprimante.rs`), after an infection (`infection.rs`), new computer (`nouveau.rs`), computer leaving (`depart.rs`) |
 | `src/lenteur.rs`, `src/fiche.rs` | why it is slow (two-sample snapshot, startup); computer specs |
-| `src/copier.rs` | copy my files to an external disk: checked copy (BLAKE3), resume, never overwrites |
+| `src/copier.rs` | copy my files to an external disk: checked copy (BLAKE3), resume, never overwrites; check a copy (restore test) |
 | `src/ordinateurs.rs` | my computers: each computer's visit noted on GARDIENLOG (categories and levels only) |
 | `src/chiffrement.rs` | protected key data: encrypted record (XChaCha20-Poly1305), data key kept by the owner and wrapped by the passphrase (Argon2id) |
 | `assets/oui.tsv` | manufacturers by MAC prefix (IEEE list), stored as sorted tables at compile time (`build.rs`) |

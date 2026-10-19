@@ -68,9 +68,11 @@ Entrée ouvre celle en surbrillance, Échap efface. Au menu principal, elle trou
        Mots de passe : ont-ils fuité ? (seuls 5 caractères de leur empreinte sont envoyés)
        Courriel : a-t-il fuité ? (l'adresse est envoyée au service de recherche, après ton accord)
        Qui parle à Internet ? Les connexions de chaque programme, avec le nom du serveur (lecture seule)
+       Caméra et micro : qui s'en sert ? (Windows : chaque programme et la dernière fois ; lecture seule)
        Quelqu'un contrôle mon ordi ? Logiciels de prise de contrôle à distance (faux technicien), retirés après accord
        Ce lien est-il dangereux ? Examiné sans l'ouvrir ; son âge et des listes publiques, après accord
        Vérifier un fichier téléchargé : empreinte comparée à celle du site, nom et contenu, YARA, antivirus
+       Quarantaine : les fichiers isolés par l'antivirus ou YARA, remis à leur place (faux positif) ou supprimés
   7  Installer et jouer ›
        Logiciels : les meilleurs, libres pour la plupart, par catégorie (navigateurs, mots de passe,
        bureautique, vidéo, création, outils système…) et un pack de départ, depuis la source officielle
@@ -86,6 +88,7 @@ Entrée ouvre celle en surbrillance, Échap efface. Au menu principal, elle trou
   9  Données ›
        Sauvegarder ou restaurer (surnoms, historique des réseaux)
        Copier mes fichiers vers un disque externe (copie vérifiée, rien d'effacé, reprise après interruption)
+       Vérifier une copie : relue sur le disque et comparée aux originaux (test de restauration)
        Mes ordinateurs : ceux où la clé a fait un bilan, leur note et leurs problèmes restants (gardien ordinateurs)
        Protéger les données de la clé : carnet des appareils chiffré par une phrase, demandée ailleurs seulement
  10  Guide des commandes › les commandes utiles de Linux, Windows, macOS et de tous les systèmes, par programme,

@@ -57,10 +57,10 @@ pour revenir.
 | **Connexion pour le jeu** | Ping, gigue, pertes, débit et bufferbloat, comparés à tes habitudes. |
 | **Dépanner** | Diagnostic de l'ordinateur, pannes de tous les jours pas à pas (Internet, Wi-Fi, lenteur, son, imprimante, disque plein), après une infection, nouvel ordinateur, ordinateur qui part, « Pourquoi c'est lent ? », fiche de l'ordinateur, réparations. |
 | **Optimiser et nettoyer** | Réglages de confidentialité et de performance qui s'annulent exactement, nettoyage à cocher avec la place gagnée mesurée, programmes du démarrage. |
-| **Protection** | Fichiers-pièges contre les rançongiciels, blocages de Windows Defender, 308 règles YARA, antivirus, bac à sable, intégrité des fichiers critiques, mots de passe fuités, connexions sortantes, faux technicien (logiciels de prise de contrôle à distance), liens dangereux, fichiers téléchargés. |
+| **Protection** | Fichiers-pièges contre les rançongiciels, blocages de Windows Defender, 308 règles YARA, antivirus, bac à sable, intégrité des fichiers critiques, mots de passe fuités, connexions sortantes, faux technicien (logiciels de prise de contrôle à distance), caméra et micro, liens dangereux, fichiers téléchargés, quarantaine réversible. |
 | **Suivi** | Surveillance toutes les heures, entretien du mois, rapport HTML avec la courbe des notes, apprentissage sur ton ordinateur. |
 | **Logiciels et jeux** | Les meilleurs logiciels en 8 catégories, depuis leur source officielle ; mises à jour de tout d'un coup ; réglages pour jouer. |
-| **Outils** | Copier mes fichiers (copie vérifiée), mes ordinateurs (suivis par la clé), données de la clé protégées par une phrase, guide des commandes, recherche dans tous les menus. |
+| **Outils** | Copier mes fichiers (copie vérifiée) et vérifier une copie, mes ordinateurs (suivis par la clé), données de la clé protégées par une phrase, guide des commandes, recherche dans tous les menus. |
 
 <details>
 <summary><b>Le détail, fonction par fonction</b></summary>
@@ -125,7 +125,9 @@ l'écran seulement, jamais écrits.
 
 **Copier mes fichiers** — Documents, Images, Bureau, Vidéos et Musique vers un disque externe, avant une réparation
 risquée ou une réinstallation : la place est vérifiée avant, chaque fichier relu et comparé à l'original (empreinte
-BLAKE3), rien n'est effacé ni écrasé, et une copie interrompue reprend où elle s'est arrêtée.
+BLAKE3), rien n'est effacé ni écrasé, et une copie interrompue reprend où elle s'est arrêtée. **Vérifier une
+copie**, plus tard, fait le test de restauration : des fichiers répartis sur toute la copie sont relus sur le disque
+et comparés à leur original ; un disque qui perd des données se voit avant le jour où on en a besoin.
 
 **Mes ordinateurs** — chaque bilan complet fait avec la clé GARDIEN y note l'ordinateur : surnom (« système ·
 modèle », renommable), note, problèmes restants (leur catégorie et leur niveau seulement, les cinq plus graves),
@@ -157,7 +159,12 @@ dans Documents, Images et Bureau, que personne n'a de raison de toucher. Un ran�
 renomme déclenche une alerte critique, au bilan et toutes les heures par la surveillance, avec la marche à suivre ;
 posés et retirés après accord. Et une analyse YARA : 308 règles de ReversingLabs qui reconnaissent des familles
 entières (rançongiciels, voleurs de mots de passe, chevaux de Troie, portes dérobées…), en complément de
-l'antivirus.
+l'antivirus. Ce que l'antivirus ou YARA trouve peut aller en quarantaine, réversible : le fichier est rendu
+inutilisable et noté, puis remis exactement à sa place si c'était un faux positif.
+
+**Caméra et micro : qui s'en sert ?** — sous Windows, chaque programme qui a utilisé la caméra ou le micro, et la
+dernière fois (un programme lancé depuis un dossier temporaire ou Téléchargements est signalé) ; sous Linux, ce qui
+les tient en ce moment. En lecture seule.
 
 **Blocages de Windows Defender** — Gardien ne bloque rien lui-même : il active, après accord, ce que Windows bloque
 depuis son noyau et protège contre la désactivation. Règles de réduction de la surface d'attaque (vol des mots de
@@ -297,6 +304,7 @@ Chaque entrée du menu existe aussi en commande.
 | `gardien demarrage` | programmes au démarrage : les retirer ou les remettre, après accord ; chaque retrait s'annule |
 | `gardien fiche [--json]` | fiche de l'ordinateur ; `--json` sans les numéros de série |
 | `gardien copier-fichiers [destination]` | copier mes fichiers vers un disque externe, copie vérifiée |
+| `gardien verifier-copie [dossier]` | vérifier une copie : relue sur le disque et comparée aux originaux (test de restauration) |
 | `gardien antivirus [--complet] [dossier]` | analyse antivirus (ordinateur, ou une clé / un dossier) |
 | `gardien yara [--complet] [dossier]` | analyse YARA : 308 règles de familles de logiciels malveillants |
 | `gardien pieges [--retirer]` | fichiers-pièges contre les rançongiciels : les poser, les vérifier, les retirer |
@@ -312,6 +320,8 @@ Chaque entrée du menu existe aussi en commande.
 | `gardien courriel` | fuites d'adresse courriel (XposedOrNot, ou Have I Been Pwned avec `GARDIEN_HIBP_CLE`) |
 | `gardien sortantes` | qui parle à Internet : les connexions de chaque programme (lecture seule) |
 | `gardien verifier-moi` | vérifier Gardien lui-même : version, date de compilation, empreinte SHA-256 à comparer à la page de la version ; sur la clé du propriétaire, le manifeste de la clé |
+| `gardien camera-micro` | caméra et micro : qui s'en sert ? (lecture seule) |
+| `gardien quarantaine` | les fichiers isolés, à remettre à leur place ou à supprimer |
 | `gardien distance` | quelqu'un contrôle mon ordi ? logiciels de prise de contrôle à distance (faux technicien), retrait après accord |
 | `gardien lien <adresse>` | ce lien est-il dangereux ? (examiné sans l'ouvrir ; en ligne après accord) |
 | `gardien verifier-fichier <fichier> [empreinte]` | vérifier un fichier téléchargé : empreinte, nom et contenu, YARA, antivirus |

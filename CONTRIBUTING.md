@@ -46,12 +46,13 @@ modification. Sur GitHub, `@claude` dans un ticket ou une demande de fusion le f
 | `src/protection/distance.rs` | quelqu'un contrôle mon ordi ? logiciels de prise de contrôle à distance (installés, au démarrage, en cours, téléchargés), au bilan et en parcours guidé |
 | `src/protection/lien.rs` | ce lien est-il dangereux ? examen local (punycode, marques imitées…), puis RDAP, URLhaus, Spamhaus DBL, SURBL |
 | `src/protection/telechargement.rs` | vérifier un fichier téléchargé : empreinte par l'outil du système, nom et contenu, YARA et antivirus ; programmes arrivés dans Téléchargements, pour la surveillance |
+| `src/protection/quarantaine.rs`, `src/protection/camera.rs` | quarantaine réversible (antivirus, YARA) : isoler, remettre exactement, supprimer ; caméra et micro : qui s'en sert (registre sous Windows, /dev/video et pactl sous Linux) |
 | `src/reseau/canaux.rs`, `src/reseau/nat.rs` | Wi-Fi encombré (réseaux voisins par canal) ; type de NAT (client STUN maison) |
 | `src/dns_rapide.rs` | DNS le plus rapide : mesure, DNS qui protège gardé, réglage annulable par `optimiser/` |
 | `src/reseau/cameras.rs` | caméras cachées : fabricant, flux RTSP, recherche ONVIF (WS-Discovery), page web |
 | `src/depanner/` | dépanner pas à pas : les parcours (`mod.rs`), réseau et Wi-Fi (`reseau.rs`), son (`son.rs`), imprimante (`imprimante.rs`), après une infection (`infection.rs`), nouvel ordinateur (`nouveau.rs`), ordinateur qui part (`depart.rs`) |
 | `src/lenteur.rs`, `src/fiche.rs` | pourquoi c'est lent (instantané en deux mesures, démarrage) ; fiche de l'ordinateur |
-| `src/copier.rs` | copier mes fichiers vers un disque externe : copie vérifiée (BLAKE3), reprise, jamais d'écrasement |
+| `src/copier.rs` | copier mes fichiers vers un disque externe : copie vérifiée (BLAKE3), reprise, jamais d'écrasement ; vérifier une copie (test de restauration) |
 | `src/ordinateurs.rs` | mes ordinateurs : la visite de chaque ordinateur notée sur GARDIENLOG (catégories et niveaux seulement) |
 | `src/chiffrement.rs` | données de la clé protégées : carnet chiffré (XChaCha20-Poly1305), clé de données gardée chez le propriétaire et enveloppée par la phrase (Argon2id) |
 | `assets/oui.tsv` | fabricants par préfixe MAC (liste IEEE), rangés en tableaux triés à la compilation (`build.rs`) |

@@ -52,10 +52,10 @@ In the menu, choose **1** (full check), then **2** (fix). Arrows, Enter, and Esc
 | **Connection for gaming** | Ping, jitter, loss, speed and bufferbloat, compared with your habits. |
 | **Troubleshoot** | Computer diagnostic, everyday problems step by step (Internet, Wi-Fi, slowness, sound, printer, full disk), after an infection, new computer, computer leaving, “Why is it slow?”, computer specs, repairs. |
 | **Optimize and clean up** | Privacy and performance settings undone exactly, a cleanup checklist with the space gained measured, startup programs. |
-| **Protection** | Decoy files against ransomware, Windows Defender blocking, 308 YARA rules, antivirus, sandbox, integrity of critical files, leaked passwords, outbound connections, tech-support scam (remote control tools), dangerous links, downloaded files. |
+| **Protection** | Decoy files against ransomware, Windows Defender blocking, 308 YARA rules, antivirus, sandbox, integrity of critical files, leaked passwords, outbound connections, tech-support scam (remote control tools), camera and microphone, dangerous links, downloaded files, reversible quarantine. |
 | **Follow-up** | Hourly monitoring, monthly check-up, HTML report with the grade curve, learning on your computer. |
 | **Software and games** | The best software in 8 categories, from its official source; update everything at once; settings for gaming. |
-| **Tools** | Copy my files (checked copy), my computers (tracked by the key), key data protected by a passphrase, command guide, search in every menu. |
+| **Tools** | Copy my files (checked copy) and check a copy, my computers (tracked by the key), key data protected by a passphrase, command guide, search in every menu. |
 
 <details>
 <summary><b>The details, feature by feature</b></summary>
@@ -116,7 +116,9 @@ disks: what you are asked on the phone or to buy a part. Serial numbers are show
 
 **Copy my files** — Documents, Pictures, Desktop, Videos and Music to an external disk, before a risky repair or a
 reinstall: space is checked first, each file is read back and compared with the original (BLAKE3 fingerprint),
-nothing is deleted or overwritten, and an interrupted copy resumes where it stopped.
+nothing is deleted or overwritten, and an interrupted copy resumes where it stopped. **Check a copy**, later, is the
+restore test: files spread over the whole copy are read back from the disk and compared with their original; a disk
+that loses data shows up before the day you need it.
 
 **My computers** — each full check run with the GARDIEN key notes the computer there: nickname (“system · model”,
 renamable), grade, remaining problems (their category and level only, the five worst), date of the last check. The
@@ -145,7 +147,13 @@ never; the free space read again afterwards tells what was really gained.
 which nobody has a reason to touch. Ransomware that encrypts or renames them triggers a critical alert, at each
 check and hourly through monitoring, with what to do; placed and removed after your consent. And a YARA scan: 308
 ReversingLabs rules that recognize whole families (ransomware, password stealers, trojans, backdoors…), alongside
-the antivirus.
+the antivirus. What the antivirus or YARA finds can go into a
+reversible quarantine: the file is made unusable and noted, then put back exactly in its place if it was a false
+positive.
+
+**Camera and microphone: who uses them?** — on Windows, each program that used the camera or the microphone, and the
+last time (a program started from a temporary folder or Downloads is flagged); on Linux, what holds them right now.
+Read-only.
 
 **Windows Defender blocking** — Gardien blocks nothing itself: after your consent, it turns on what Windows blocks
 from its kernel and protects against being turned off. Attack surface reduction rules (password theft from memory,
@@ -281,6 +289,7 @@ Each menu entry is also a command.
 | `gardien startup` | startup programs: remove or put them back, after your consent; each removal is undone exactly |
 | `gardien specs [--json]` | computer specs; `--json` without the serial numbers |
 | `gardien copy-files [destination]` | copy my files to an external disk, checked copy |
+| `gardien check-copy [folder]` | check a copy: read back from the disk and compared with the originals (restore test) |
 | `gardien antivirus [--complet] [folder]` | antivirus scan (computer, or a key / a folder) |
 | `gardien yara [--complet] [folder]` | YARA scan: 308 rules for malware families |
 | `gardien decoys [--retirer]` | decoy files against ransomware: place them, check them, remove them |
@@ -296,6 +305,8 @@ Each menu entry is also a command.
 | `gardien email` | email address leaks (XposedOrNot, or Have I Been Pwned with `GARDIEN_HIBP_CLE`) |
 | `gardien outbound` | who talks to the Internet: each program's connections (read-only) |
 | `gardien self-check` | check Gardien itself: version, build date, SHA-256 checksum to compare with the release page; on the owner's key, the key manifest |
+| `gardien camera-mic` | camera and microphone: who uses them? (read-only) |
+| `gardien quarantine` | the isolated files, to put back in their place or to delete |
 | `gardien remote-access` | is someone controlling my PC? remote control tools (tech-support scam), removed after consent |
 | `gardien link <address>` | is this link dangerous? (checked without opening it; online after your consent) |
 | `gardien check-file <file> [checksum]` | check a downloaded file: checksum, name and content, YARA, antivirus |
