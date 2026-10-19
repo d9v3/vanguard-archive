@@ -6,7 +6,7 @@ Ce que chaque journée a apporté à Vanguard, la plus récente en haut. Depuis 
 publication par jour, qui regroupe le travail de la journée. Seule la dernière version a sa page de téléchargement ;
 chaque version garde son étiquette dans le dépôt (`git checkout v0.62.0`, par exemple), pour être recompilée au besoin.
 
-## 20 octobre 2026 : version 0.78
+## 19 octobre 2026, au soir : version 0.78
 
 - **Nouveau nom : Vanguard**, avec son logo, un V en bouclier et un cadenas. Sur un ordinateur où il a déjà
   tourné, rien ne se perd : données, sauvegarde automatique, raccourci et réglages suivent le nouveau nom tout seuls.
@@ -24,7 +24,9 @@ chaque version garde son étiquette dans le dépôt (`git checkout v0.62.0`, par
 - **Plus justes.** Fichiers inclus de la configuration SSH lus, réseaux Wi-Fi ouverts mieux reconnus, DNS sur cet ordinateur mesuré aussi
   sur un site nouveau (sa mémoire répondait en moins d'une milliseconde), dnf-automatic
   qui ne fait que télécharger, réglages d'APT lus dans leur ordre, interface anglaise complète, nombres à virgule écrits à la française,
-  longs messages coupés entre deux mots, jamais au milieu d'un mot.
+  longs messages coupés entre deux mots, jamais au milieu d'un mot ; sous Windows, un pare-feu dont aucun profil ne
+  se lit n'est plus compté comme vérifié (pas de note), et un Bureau à distance imposé par une stratégie de groupe est
+  reconnu ; une interface de VPN n'est plus prise pour le réseau local.
 - **Scan du réseau deux fois plus rapide** (de 20 à 8-10 secondes sur un réseau de onze appareils) : la box est
   interrogée sur l'UPnP dès le début, en fond (elle met jusqu'à 8 secondes à répondre), et les ports TCP, UDP et les
   noms des appareils sont cherchés en même temps. Mêmes sondes, rien de retiré.

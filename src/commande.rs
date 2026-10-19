@@ -166,9 +166,15 @@ pub fn decouper_commande(ligne: &str) -> (String, String) {
     {
         return (exe.to_string(), args.trim().to_string());
     }
-    let bas = ligne.to_lowercase();
-    if let Some(i) = bas.find(".exe") {
-        let (exe, args) = ligne.split_at(i + 4);
+    // Minuscules ASCII seulement : la position trouvée vaut dans la ligne d'origine (« İ » change de longueur en
+    // minuscules Unicode). « .exe » doit finir un mot : « node.exec\run.exe » n'est pas coupé à « node.exe ».
+    let bas = ligne.to_ascii_lowercase();
+    let fin = bas
+        .match_indices(".exe")
+        .map(|(i, _)| i + 4)
+        .find(|&f| bas[f..].chars().next().is_none_or(|c| c.is_whitespace() || c == '"'));
+    if let Some(f) = fin {
+        let (exe, args) = ligne.split_at(f);
         return (exe.to_string(), args.trim().to_string());
     }
     match ligne.split_once(' ') {
@@ -180,6 +186,25 @@ pub fn decouper_commande(ligne: &str) -> (String, String) {
 #[cfg(test)]
 mod tests_powershell {
     use super::*;
+
+    /// La commande d'un programme : « .exe » qui finit un mot, cherché sans changer la longueur de la ligne.
+    #[test]
+    fn exe_trouve_a_la_bonne_place() {
+        let d = |l: &str| decouper_commande(l);
+        assert_eq!(
+            d(r"C:\Users\alice\İnstall\app.exe -a"),
+            (r"C:\Users\alice\İnstall\app.exe".into(), "-a".into())
+        );
+        assert_eq!(
+            d(r"C:\Tools\node.exec\run.exe /q"),
+            (r"C:\Tools\node.exec\run.exe".into(), "/q".into())
+        );
+        assert_eq!(
+            d(r"C:\Program Files\App\APP.EXE"),
+            (r"C:\Program Files\App\APP.EXE".into(), String::new())
+        );
+        assert_eq!(d(r#""C:\A B\x.exe" /s"#), (r"C:\A B\x.exe".into(), "/s".into()));
+    }
 
     /// Un nom piégé : chaque sorte d'apostrophe tente de fermer la chaîne pour lancer une commande.
     const PIEGE: &str = "a'; Write-Output INJECTE; 'b ‘; Write-Output INJECTE; ‘ ’; Write-Output INJECTE; ’ \

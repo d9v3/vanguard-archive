@@ -378,12 +378,13 @@ fn pare_feu() -> Constat {
     let profils = profils_pare_feu();
     let off: Vec<&str> = profils.iter().filter(|(_, actif)| !actif).map(|(n, _)| *n).collect();
     match (profils.is_empty(), off.join(", ")) {
-        (true, _) => alerte(
+        // Rien de lu n'est rien de vérifié : sans constat vérifié du pare-feu, le bilan ne donne pas de note
+        // (`Audit::fiable`), comme sous Linux et macOS.
+        (true, _) => impossible(
             "Pare-feu",
-            Niveau::Info,
             tr!(
-                "Aucun profil de pare-feu lu (pare-feu tiers ?).",
-                "No firewall profile read (third-party firewall?)."
+                "aucun profil de pare-feu lu (pare-feu tiers ?)",
+                "no firewall profile read (third-party firewall?)"
             ),
         ),
         (false, off) if off.is_empty() => ok(
@@ -535,7 +536,16 @@ fn smb1() -> Option<Constat> {
 fn bureau_distance() -> Constat {
     let cle = r"HKLM:\System\CurrentControlSet\Control\Terminal Server";
     let terminal = r"System\CurrentControlSet\Control\Terminal Server";
-    let actif = match registre::<u32>(winreg::enums::HKEY_LOCAL_MACHINE, terminal, "fDenyTSConnections") {
+    // La stratégie de groupe l'emporte sur le réglage local, comme pour le pare-feu : imposée, elle décide, et une
+    // correction du réglage local ne servirait à rien.
+    let strategie = registre::<u32>(
+        winreg::enums::HKEY_LOCAL_MACHINE,
+        r"SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services",
+        "fDenyTSConnections",
+    );
+    let impose = strategie == Some(0);
+    let local = registre::<u32>(winreg::enums::HKEY_LOCAL_MACHINE, terminal, "fDenyTSConnections");
+    let actif = match strategie.or(local) {
         Some(0) => true,
         Some(1) => false,
         _ => return registre_illisible("Bureau à distance"),
@@ -557,6 +567,22 @@ fn bureau_distance() -> Constat {
     if session_a_distance() {
         alerte("Bureau à distance", Niveau::Moyen, tr!("RDP activé ; tu es connecté par lui en ce moment.", "RDP on; you are connected through it right now.")).manuel(
             tr!("Ne pas le couper d'ici (tu perdrais la connexion). S'il n'est pas utile, le désactiver depuis l'écran de l'ordinateur : Paramètres > Système > Bureau à distance", "Do not turn it off from here (you would lose the connection). If it is not needed, turn it off from the computer's own screen: Settings > System > Remote Desktop"),
+            &[],
+        )
+    } else if impose {
+        alerte(
+            "Bureau à distance",
+            if nla { Niveau::Moyen } else { Niveau::Eleve },
+            tr!(
+                "RDP activé par une stratégie de groupe. Très attaqué s'il est exposé.",
+                "RDP turned on by a group policy. Heavily attacked if exposed."
+            ),
+        )
+        .manuel(
+            tr!(
+                "S'il n'est pas utile : gpedit.msc › Configuration ordinateur › Modèles d'administration › Composants Windows › Services Bureau à distance › Hôte de la session Bureau à distance › Connexions › « Autoriser les utilisateurs à se connecter à distance » (ou l'administrateur du domaine)",
+                "If it is not needed: gpedit.msc › Computer Configuration › Administrative Templates › Windows Components › Remote Desktop Services › Remote Desktop Session Host › Connections › “Allow users to connect remotely” (or the domain administrator)"
+            ),
             &[],
         )
     } else if nla {

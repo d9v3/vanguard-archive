@@ -6,7 +6,7 @@ What each day brought to Vanguard, most recent first. Since October 19, 2026, Va
 gathering the day's work. Only the latest version has its download page; every version keeps its tag in the
 repository (`git checkout v0.62.0`, for example), to be rebuilt if needed.
 
-## October 20, 2026: version 0.78
+## October 19, 2026, evening: version 0.78
 
 - **New name: Vanguard**, with its logo, a V as a shield and a padlock. On a computer where it already ran,
   nothing is lost: data, automatic backup, shortcut and settings follow the new name by themselves.
@@ -23,7 +23,9 @@ repository (`git checkout v0.62.0`, for example), to be rebuilt if needed.
 - **More accurate.** Included SSH configuration files read, open Wi-Fi networks better recognized, a DNS on this computer also measured
   on a new site (its memory answered in under a millisecond), dnf-automatic that
   only downloads, APT settings read in their order, complete English interface, decimal numbers written the French way in French,
-  long messages broken between two words, never in the middle of one.
+  long messages broken between two words, never in the middle of one; on Windows, a firewall with no readable profile
+  no longer counts as checked (no grade), and Remote Desktop turned on by a group policy is recognized; a VPN
+  interface is no longer taken for the local network.
 - **Network scan twice as fast** (from 20 to 8-10 seconds on a network of eleven devices): the router is asked
   about UPnP from the start, in the background (it takes up to 8 seconds to answer), and TCP ports, UDP ports and
   device names are looked up at the same time. Same probes, nothing removed.

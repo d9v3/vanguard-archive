@@ -111,16 +111,28 @@ pub fn reseau_local() -> Option<(String, Ipv4Addr)> {
             _ => None,
         })
         .collect();
-    let masque = |v4: &if_addrs::Ifv4Addr| u32::from(v4.netmask);
-    let choisi = candidats
+    let candidats: Vec<(Ipv4Addr, Ipv4Addr)> = candidats.iter().map(|v4| (v4.ip, v4.netmask)).collect();
+    choisir_reseau(&candidats, gw)
+}
+
+/// Le réseau à scanner parmi les interfaces (adresse, masque) : celle de la passerelle, sinon la première. Une
+/// interface en /31 ou /32 (VPN, WireGuard, lien point à point) n'est pas un réseau local : elle est laissée, sinon
+/// le calcul du réseau débordait (`u32::MAX >> 32`) et le scan visait 0.0.0.0/32.
+fn choisir_reseau(candidats: &[(Ipv4Addr, Ipv4Addr)], gw: Option<u32>) -> Option<(String, Ipv4Addr)> {
+    let candidats: Vec<(Ipv4Addr, u32)> = candidats
         .iter()
-        .find(|v4| gw.is_some_and(|g| g & masque(v4) == u32::from(v4.ip) & masque(v4)))
+        .map(|&(ip, masque)| (ip, u32::from(masque)))
+        .filter(|(_, masque)| masque.count_ones() <= 30)
+        .collect();
+    let &(ip, masque) = candidats
+        .iter()
+        .find(|(ip, masque)| gw.is_some_and(|g| g & masque == u32::from(*ip) & masque))
         .or(candidats.first())?;
     // Réseau plus grand qu'un /16 (10.0.0.0/8…) : on scanne le /16 qui contient cette machine. Le calculer
     // avec le masque d'origine donnait 10.0.0.0/16 même pour l'IP 10.5.3.2, donc le mauvais morceau.
-    let pref = masque(choisi).count_ones().max(16);
-    let reseau = Ipv4Addr::from(u32::from(choisi.ip) & !(u32::MAX >> pref));
-    Some((format!("{reseau}/{pref}"), choisi.ip))
+    let pref = masque.count_ones().max(16);
+    let reseau = Ipv4Addr::from(u32::from(ip) & !(u32::MAX >> pref));
+    Some((format!("{reseau}/{pref}"), ip))
 }
 
 #[cfg(not(target_os = "linux"))]
@@ -672,6 +684,29 @@ fn commande_sortie(cmd: &str, args: &[&str]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Une interface de VPN en /32 n'est jamais prise pour le réseau local, même quand la route par défaut passe
+    /// par elle ; le réseau du Wi-Fi l'est.
+    #[test]
+    fn un_vpn_en_32_n_est_pas_le_reseau_local() {
+        let ip = |s: &str| s.parse::<Ipv4Addr>().unwrap();
+        let vpn = (ip("10.66.0.2"), ip("255.255.255.255"));
+        let wifi = (ip("192.168.1.20"), ip("255.255.255.0"));
+        assert_eq!(choisir_reseau(&[vpn], Some(u32::from(ip("10.66.0.2")))), None);
+        assert_eq!(
+            choisir_reseau(&[vpn, wifi], Some(u32::from(ip("192.168.1.1")))),
+            Some(("192.168.1.0/24".to_string(), ip("192.168.1.20")))
+        );
+        assert_eq!(
+            choisir_reseau(&[vpn, wifi], Some(u32::from(ip("10.66.0.1")))),
+            Some(("192.168.1.0/24".to_string(), ip("192.168.1.20")))
+        );
+        // Un grand réseau : le /16 qui contient cette machine.
+        assert_eq!(
+            choisir_reseau(&[(ip("10.5.3.2"), ip("255.0.0.0"))], None),
+            Some(("10.5.0.0/16".to_string(), ip("10.5.3.2")))
+        );
+    }
 
     #[test]
     fn cible_cidr_exclut_reseau_et_diffusion() {

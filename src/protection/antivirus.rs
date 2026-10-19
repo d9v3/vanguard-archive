@@ -101,11 +101,12 @@ pub fn choisir() {
 /// Clés et disques externes montés : (point de montage, description).
 #[cfg(target_os = "linux")]
 fn volumes_amovibles() -> Vec<(PathBuf, String)> {
-    Command::new("lsblk")
-        .args(["-Pno", "RM,HOTPLUG,LABEL,SIZE,MOUNTPOINT"])
-        .output()
-        .map(|o| lire_lsblk(&String::from_utf8_lossy(&o.stdout)))
-        .unwrap_or_default()
+    crate::commande::lancer(
+        Command::new("lsblk").args(["-Pno", "RM,HOTPLUG,LABEL,SIZE,MOUNTPOINT"]),
+        10,
+    )
+    .map(|o| lire_lsblk(&o.sortie))
+    .unwrap_or_default()
 }
 
 /// Clés et disques externes montés sous macOS : tout ce qui est dans /Volumes, sauf le disque du système (un
@@ -842,11 +843,8 @@ fn demarrage() {
                 }
             }
         }
-        if let Ok(o) = Command::new("crontab").arg("-l").output() {
-            for l in String::from_utf8_lossy(&o.stdout)
-                .lines()
-                .filter(|l| !l.trim().is_empty() && !l.starts_with('#'))
-            {
+        if let Some(o) = crate::commande::lancer(Command::new("crontab").arg("-l"), 10) {
+            for l in o.sortie.lines().filter(|l| !l.trim().is_empty() && !l.starts_with('#')) {
                 let l = affichable(l);
                 entrees.push(trf!("crontab : {l}", "crontab: {l}"));
             }

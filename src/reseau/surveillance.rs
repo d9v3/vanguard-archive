@@ -13,9 +13,11 @@ use crate::ui::*;
 #[cfg(target_os = "linux")]
 const NOM: &str = "vanguard-surveillance";
 
+/// La commande réussit-elle ? Avec un délai : le menu demande l'état de la surveillance à chaque affichage, et un
+/// bus de session muet (systemctl --user) le figerait.
 #[cfg(unix)]
 pub(crate) fn reussit(cmd: &str, args: &[&str]) -> bool {
-    Command::new(cmd).args(args).output().is_ok_and(|o| o.status.success())
+    crate::commande::lancer(Command::new(cmd).args(args), 30).is_some_and(|r| r.code == Some(0))
 }
 
 /// Programme à planifier. Lancé depuis la clé USB, on en installe d'abord une copie locale :
