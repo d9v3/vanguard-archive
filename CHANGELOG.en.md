@@ -52,7 +52,9 @@ repository (`git checkout v0.62.0`, for example), to be rebuilt if needed.
   (“vanguard rules”).
 - **Safer.** The sandbox no longer reaches the system bus or Docker; on Windows, the fix script is checked just before
   it runs as administrator (a script changed in the meantime does not run); Vanguard's data is reserved for your
-  account.
+  account. Automatic backup recognizes its disk by its identifier (UUID), no longer by its name: another disk with
+  the same name no longer receives your files. Any text from elsewhere (device, file or printer name) goes through a
+  single protection before entering a command, and a test checks it across the whole code.
 - **Vanguard updates itself from the key.** The copy placed on a computer (monitoring, maintenance, shortcut) did not
   follow the key: started from a newer key, Vanguard says so in the menu, and the update happens after your consent
   (9.9 or `vanguard self-update`), read back and compared before replacing the old one; never to an older version,

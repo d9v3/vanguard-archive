@@ -55,7 +55,10 @@ chaque version garde son étiquette dans le dépôt (`git checkout v0.62.0`, par
   s'il est installé. Les nouvelles règles ont un identifiant stable (« vanguard regles »).
 - **Plus sûr.** Le bac à sable n'atteint plus le bus du système ni Docker ; sous Windows, le script de correction est
   vérifié juste avant de tourner en administrateur (un script modifié entre-temps ne part pas) ; les données de
-  Vanguard sont réservées à ton compte.
+  Vanguard sont réservées à ton compte. La sauvegarde automatique reconnaît son disque à son identifiant (UUID),
+  plus à son nom : un autre disque au même nom ne reçoit plus tes fichiers. Tout texte venu d'ailleurs (nom
+  d'appareil, de fichier, d'imprimante) passe par une seule protection avant d'entrer dans une commande, et un test
+  le vérifie dans tout le code.
 - **Vanguard se met à jour depuis la clé.** La copie posée sur un ordinateur (surveillance, entretien, raccourci) ne
   suivait pas la clé : lancé depuis une clé plus récente, Vanguard le dit au menu, et la mise à jour se fait sur
   accord (9.9 ou `vanguard se-mettre-a-jour`), relue et comparée avant de remplacer l'ancienne ; jamais vers une
