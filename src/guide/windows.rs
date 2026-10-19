@@ -462,9 +462,10 @@ pub const PROGRAMMES: &[Programme] = &[
             .sauf(Obstacle::Longue),
             voir(
                 "Optimize-Volume -DriveLetter C -Analyze -Verbose",
-                "Le disque a-t-il besoin d'être optimisé (TRIM, défragmentation) ?",
-                "Does the drive need optimizing (TRIM, defragmentation)?",
-            ),
+                "Le disque a-t-il besoin d'être optimisé (TRIM, défragmentation) ? (administrateur)",
+                "Does the drive need optimizing (TRIM, defragmentation)? (administrator)",
+            )
+            .sauf(Obstacle::Administrateur),
             voir(
                 "diskmgmt.msc",
                 "La gestion des disques, dans une fenêtre.",

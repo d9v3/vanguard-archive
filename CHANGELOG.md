@@ -23,7 +23,8 @@ chaque version garde son étiquette dans le dépôt (`git checkout v0.62.0`, par
   partage à distance du Mac qui accepte root ou les comptes sans mot de passe.
 - **Plus justes.** Fichiers inclus de la configuration SSH lus, réseaux Wi-Fi ouverts mieux reconnus, DNS sur cet ordinateur mesuré aussi
   sur un site nouveau (sa mémoire répondait en moins d'une milliseconde), dnf-automatic
-  qui ne fait que télécharger, réglages d'APT lus dans leur ordre, interface anglaise complète, nombres à virgule écrits à la française.
+  qui ne fait que télécharger, réglages d'APT lus dans leur ordre, interface anglaise complète, nombres à virgule écrits à la française,
+  longs messages coupés entre deux mots, jamais au milieu d'un mot.
 - **Guide des commandes refait.** Une entrée par système : Omarchy, Arch, Fedora, Debian et Ubuntu, autres Linux,
   Windows 11, macOS ; chaque distribution a sa présentation, ses marches à suivre « Pas à pas » (mettre à jour,
   installer, faire de la place, réparer, pare-feu, NVIDIA, nouvelle version…) et ses programmes, puis ceux communs à

@@ -64,11 +64,11 @@ macro_rules! trf {
     };
 }
 
-/// `println!` dans la langue de l'interface.
+/// `println!` dans la langue de l'interface, chaque ligne trop longue coupée entre deux mots (`ui::mettre_en_lignes`).
 #[macro_export]
 macro_rules! trp {
     ($fr:literal, $en:literal $(, $arg:expr)* $(,)?) => {
-        if $crate::langue::anglais() { println!($en $(, $arg)*) } else { println!($fr $(, $arg)*) }
+        $crate::ui::imprimer(&if $crate::langue::anglais() { format!($en $(, $arg)*) } else { format!($fr $(, $arg)*) })
     };
 }
 

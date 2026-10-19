@@ -22,7 +22,8 @@ repository (`git checkout v0.62.0`, for example), to be rebuilt if needed.
   or accounts without a password.
 - **More accurate.** Included SSH configuration files read, open Wi-Fi networks better recognized, a DNS on this computer also measured
   on a new site (its memory answered in under a millisecond), dnf-automatic that
-  only downloads, APT settings read in their order, complete English interface, decimal numbers written the French way in French.
+  only downloads, APT settings read in their order, complete English interface, decimal numbers written the French way in French,
+  long messages broken between two words, never in the middle of one.
 - **Command guide redone.** One entry per system: Omarchy, Arch, Fedora, Debian and Ubuntu, other Linux, Windows 11,
   macOS; each distribution has its introduction, its “Step by step” guides (update, install, free up space, repair,
   firewall, NVIDIA, new release…) and its programs, then those common to Linux; Windows 11 and macOS have theirs too

@@ -85,8 +85,8 @@ pub fn regles(os: Os) -> Vec<&'static Regle> {
     regles
 }
 
-/// « vanguard regles » : les règles déclarées pour ce système, avec leur sujet et leurs références. Les autres
-/// vérifications du bilan, plus anciennes, viendront au registre peu à peu.
+/// « vanguard regles » : les règles du bilan pour ce système (toutes ses vérifications), avec leur sujet et leurs
+/// références.
 pub fn afficher() {
     use crate::ui::*;
     let regles = regles(Os::actuel());

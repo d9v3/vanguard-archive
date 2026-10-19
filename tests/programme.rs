@@ -45,7 +45,21 @@ fn lire_en_fond(mut flux: impl Read + Send + 'static) -> std::thread::JoinHandle
 /// qui ne rend pas la main est un défaut).
 fn vanguard(langue: &str, args: &[&str], entree: &str, secondes: u64) -> Sortie {
     let maison = maison_jetable();
-    let mut enfant = Command::new(env!("CARGO_BIN_EXE_vanguard"))
+    let sortie = vanguard_dans(
+        Path::new(env!("CARGO_BIN_EXE_vanguard")),
+        &maison,
+        langue,
+        args,
+        entree,
+        secondes,
+    );
+    let _ = std::fs::remove_dir_all(&maison);
+    sortie
+}
+
+/// Comme `vanguard`, avec un programme et un dossier personnel donnés (gardé après le lancement).
+fn vanguard_dans(programme: &Path, maison: &Path, langue: &str, args: &[&str], entree: &str, secondes: u64) -> Sortie {
+    let mut enfant = Command::new(programme)
         .args(args)
         .env("VANGUARD_LANG", langue)
         // La vraie clé (cherchée dans /run/media/$USER, journal compris) et la vraie session (systemctl --user) restent
@@ -54,7 +68,7 @@ fn vanguard(langue: &str, args: &[&str], entree: &str, secondes: u64) -> Sortie 
         .env("USER", "essai")
         .env("DBUS_SESSION_BUS_ADDRESS", "unix:path=/nonexistent")
         .env("XDG_RUNTIME_DIR", maison.join("run"))
-        .env("HOME", &maison)
+        .env("HOME", maison)
         .env("XDG_DATA_HOME", maison.join("donnees"))
         .env("XDG_CONFIG_HOME", maison.join("config"))
         .env("XDG_CACHE_HOME", maison.join("cache"))
@@ -83,13 +97,11 @@ fn vanguard(langue: &str, args: &[&str], entree: &str, secondes: u64) -> Sortie 
         }
         std::thread::sleep(Duration::from_millis(50));
     };
-    let sortie = Sortie {
+    Sortie {
         code,
         texte: texte.join().unwrap_or_default(),
         erreurs: erreurs.join().unwrap_or_default(),
-    };
-    let _ = std::fs::remove_dir_all(&maison);
-    sortie
+    }
 }
 
 /// Le texte sans les codes de couleur.
@@ -603,4 +615,56 @@ fn outils_de_disque_quittes_sans_rien_ecrire() {
     assert_eq!(sauvegarde.code, Some(0), "{}", sauvegarde.erreurs);
     let t = sans_couleurs(&sauvegarde.texte);
     assert!(t.contains("SAUVEGARDE AUTOMATIQUE"), "{t}");
+}
+
+/// Lancé depuis une clé (le programme copié dans <clé>/Linux, témoin vide : jamais la protection de la clé), Vanguard
+/// remplace sur accord la copie plus ancienne de cet ordinateur par lui-même ; lancé depuis cette copie, il renvoie
+/// vers la clé. Dans le dossier temporaire de cargo, pas dans /tmp : deux programmes de debug y pèsent 250 Mo.
+#[cfg(target_os = "linux")]
+#[test]
+fn mise_a_jour_depuis_la_cle() {
+    let racine = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!("mise-a-jour-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&racine);
+    let (cle, maison) = (racine.join("cle"), racine.join("maison"));
+    std::fs::create_dir_all(cle.join("Linux")).unwrap();
+    std::fs::write(cle.join("vanguard.cle"), "").unwrap();
+    let sur_la_cle = cle.join("Linux").join("vanguard");
+    std::fs::copy(env!("CARGO_BIN_EXE_vanguard"), &sur_la_cle).unwrap();
+    let copie = maison.join("donnees").join("vanguard").join("bin").join("vanguard");
+    std::fs::create_dir_all(copie.parent().unwrap()).unwrap();
+    std::fs::write(&copie, "vieille copie, sans version gravée").unwrap();
+
+    // Refusée (Entrée) : rien ne change.
+    let refus = vanguard_dans(&sur_la_cle, &maison, "fr", &["se-mettre-a-jour"], "\n", 60);
+    assert_eq!(refus.code, Some(0), "{}", refus.erreurs);
+    let t = sans_couleurs(&refus.texte);
+    assert!(t.contains("d'avant la 0.78") && t.contains("La remplacer"), "{t}");
+    assert_eq!(
+        std::fs::read(&copie).unwrap(),
+        b"vieille copie, sans version grav\xc3\xa9e"
+    );
+    // Acceptée : la copie devient le programme de la clé, octet pour octet.
+    let accord = vanguard_dans(&sur_la_cle, &maison, "fr", &["se-mettre-a-jour"], "o\n", 60);
+    assert!(
+        sans_couleurs(&accord.texte).contains("Copie de cet ordinateur mise à jour"),
+        "{}",
+        accord.texte
+    );
+    // Comparés sans assert_eq! : en cas d'échec, il imprimerait deux programmes de 113 Mo.
+    let identique = std::fs::read(&copie).unwrap() == std::fs::read(&sur_la_cle).unwrap();
+    assert!(identique, "la copie n'est pas le programme de la clé");
+    // Ensuite : à jour depuis la clé ; depuis la copie, renvoi vers la clé (jamais une clé seulement branchée).
+    let ensuite = vanguard_dans(&sur_la_cle, &maison, "fr", &["se-mettre-a-jour"], "", 60);
+    assert!(
+        sans_couleurs(&ensuite.texte).contains("est à jour"),
+        "{}",
+        ensuite.texte
+    );
+    let depuis_la_copie = vanguard_dans(&copie, &maison, "en", &["se-mettre-a-jour"], "", 60);
+    assert!(
+        sans_couleurs(&depuis_la_copie.texte).contains("start Vanguard from the key"),
+        "{}",
+        depuis_la_copie.texte
+    );
+    let _ = std::fs::remove_dir_all(&racine);
 }

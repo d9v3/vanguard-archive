@@ -33,6 +33,9 @@ fn date_compilation() {
         .or_else(|| git(&["log", "-1", "--format=%ct"]).and_then(|s| s.parse().ok()));
     let date = secondes.map(date_civile).unwrap_or_default();
     println!("cargo:rustc-env=VANGUARD_COMPILE={date}");
+    // Le même instant, en secondes, gravé dans le programme avec sa version (src/mise_a_jour.rs) : deux compilations
+    // d'une même version, entre deux publications, se départagent par lui. 0 sans git.
+    println!("cargo:rustc-env=VANGUARD_COMMIT_SECONDES={}", secondes.unwrap_or(0));
 }
 
 /// La sortie de git, `None` s'il manque ou échoue (archive du code sans dépôt).

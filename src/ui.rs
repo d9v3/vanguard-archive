@@ -276,6 +276,81 @@ pub fn envelopper_decale(t: &str, premiere: usize, suivantes: usize) -> Vec<Stri
     lignes
 }
 
+/// Un texte de plusieurs lignes prêt à afficher : chaque ligne plus large que `LARGEUR` est coupée aux espaces. Sans
+/// cela, un terminal de 80 colonnes coupe au milieu d'un mot et reprend au bord gauche, et la largeur d'un message
+/// dépend de ce qu'on y met (un chemin, un nombre) : seul l'affichage la connaît. Une ligne qui tient reste telle
+/// quelle, espaces d'alignement compris. La suite d'une phrase coupée à la main pour un terminal plus large (même
+/// retrait, minuscule en tête) est recoupée avec elle ; la suite s'aligne après le signe qui ouvre la ligne (« ✖ »,
+/// « 2. »), sinon sous son début.
+pub fn mettre_en_lignes(texte: &str) -> String {
+    let lignes: Vec<&str> = texte.split('\n').collect();
+    let mut sortie: Vec<String> = Vec::with_capacity(lignes.len());
+    let mut i = 0;
+    while let Some(&ligne) = lignes.get(i) {
+        i += 1;
+        if largeur_affichee(ligne) <= LARGEUR {
+            sortie.push(ligne.to_string());
+            continue;
+        }
+        let corps = ligne.trim_start_matches(' ');
+        let retrait = ligne.len() - corps.len();
+        let mut paragraphe = corps.to_string();
+        while let Some(&suivante) = lignes.get(i) {
+            let suite = suivante.trim_start_matches(' ');
+            if suivante.len() - suite.len() != retrait || !sans_codes(suite).starts_with(char::is_lowercase) {
+                break;
+            }
+            paragraphe.push(' ');
+            paragraphe.push_str(suite);
+            i += 1;
+        }
+        let suite = retrait + largeur_de_la_marque(&paragraphe);
+        let morceaux = envelopper_decale(
+            &paragraphe,
+            LARGEUR.saturating_sub(retrait).max(12),
+            LARGEUR.saturating_sub(suite).max(12),
+        );
+        for (j, morceau) in morceaux.iter().enumerate() {
+            sortie.push(format!("{}{morceau}", " ".repeat(if j == 0 { retrait } else { suite })));
+        }
+    }
+    sortie.join("\n")
+}
+
+/// Un texte sans ses codes de couleur.
+fn sans_codes(t: &str) -> String {
+    let mut propre = String::with_capacity(t.len());
+    let mut code = false;
+    for c in t.chars() {
+        match (code, c) {
+            (false, '\x1b') => code = true,
+            (true, c) if c.is_ascii_alphabetic() => code = false,
+            (true, _) => {}
+            (false, c) => propre.push(c),
+        }
+    }
+    propre
+}
+
+/// La largeur du signe qui ouvre un texte (« ✖ », « ⚠ », « 2. », « - »), espace comprise ; 0 sans signe.
+fn largeur_de_la_marque(texte: &str) -> usize {
+    let premier = sans_codes(texte.split_whitespace().next().unwrap_or(""));
+    let chiffre_point = premier
+        .strip_suffix('.')
+        .is_some_and(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()));
+    let signe = !premier.is_empty() && premier.chars().all(|c| !c.is_alphanumeric());
+    if (signe || chiffre_point) && largeur_affichee(&premier) <= 3 {
+        largeur_affichee(&premier) + 1
+    } else {
+        0
+    }
+}
+
+/// `println!` d'un texte mis en lignes (`mettre_en_lignes`) : ce que fait `trp!`.
+pub fn imprimer(texte: &str) {
+    println!("{}", mettre_en_lignes(texte));
+}
+
 /// Affiche `debut` (déjà mis en forme) puis `texte` dans la couleur `style`, coupé pour tenir dans `LARGEUR`, la
 /// suite alignée à `retrait` colonnes. Sans cela, le terminal coupe les longues lignes au milieu d'un mot et les
 /// reprend au bord gauche.
@@ -392,6 +467,53 @@ pub fn demander(question: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn une_ligne_trop_longue_est_coupee_entre_les_mots() {
+        // Une ligne qui tient ne bouge pas, espaces d'alignement compris.
+        let court = "  Copie de cet ordinateur : 0.78.0\n  Clé VANGUARD           : 0.79.0";
+        assert_eq!(mettre_en_lignes(court), court);
+        // Trop longue : coupée aux espaces, la suite sous le texte du « ✖ », chaque ligne dans 76 colonnes, aucun mot
+        // perdu ni coupé.
+        let long = format!(
+            "  {GRIS}✖ Pas assez de place : il faut 12,4 Go, le disque n'a que 3,1 Go de libre. Décoche des dossiers, ou \
+             choisis un autre disque.{RESET}"
+        );
+        let lignes = mettre_en_lignes(&long);
+        assert!(lignes.lines().count() >= 2, "{lignes}");
+        for (i, l) in lignes.lines().enumerate() {
+            assert!(largeur_affichee(l) <= LARGEUR, "{l}");
+            assert!(l.starts_with(if i == 0 { "  " } else { "    " }), "{l}");
+        }
+        assert_eq!(
+            lignes.split_whitespace().collect::<Vec<_>>(),
+            long.split_whitespace().collect::<Vec<_>>()
+        );
+        // Un mot plus long que la ligne (un chemin) a sa ligne à lui, entier.
+        let chemin = format!("  Depuis {}", "/tres/long".repeat(12));
+        assert!(
+            mettre_en_lignes(&chemin)
+                .lines()
+                .any(|l| l.trim() == "/tres/long".repeat(12))
+        );
+        // Une phrase coupée à la main pour un terminal plus large est recoupée d'un seul tenant ; une nouvelle phrase
+        // (majuscule) garde sa ligne ; sans signe en tête, la suite s'aligne sous le début.
+        let a_la_main = "  Tape un mot de passe : il ne s'affiche pas et ne quitte jamais cet ordinateur. Seuls 5 caractères \
+                         de son\n  empreinte sont envoyés à Have I Been Pwned, et la comparaison se fait ici.\n  Entrée seule \
+                         pour terminer.";
+        let lignes = mettre_en_lignes(a_la_main);
+        for l in lignes.lines() {
+            assert!(
+                largeur_affichee(l) <= LARGEUR && l.starts_with("  ") && !l.starts_with("   "),
+                "{lignes}"
+            );
+        }
+        assert_eq!(lignes.lines().last(), Some("  Entrée seule pour terminer."));
+        assert!(lignes.contains("de son empreinte"), "{lignes}");
+        assert_eq!(largeur_de_la_marque("2. Restaurer"), 3);
+        assert_eq!(largeur_de_la_marque(&format!("{GRIS}✖{RESET} Copie")), 2);
+        assert_eq!(largeur_de_la_marque("Tape un mot"), 0);
+    }
 
     #[test]
     fn un_emoji_ou_une_lettre_pleine_largeur_prend_deux_colonnes() {

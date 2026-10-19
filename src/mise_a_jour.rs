@@ -13,9 +13,16 @@ use std::time::SystemTime;
 
 use crate::ui::*;
 
-/// La version de ce programme, gravée dans son fichier pour qu'une autre copie la lise sans le lancer. `courante` la
-/// lit là : sans lecture, l'éditeur de liens retirerait ce texte du programme publié.
-static VERSION_GRAVEE: &str = concat!("VANGUARD-VERSION:", env!("CARGO_PKG_VERSION"), ";");
+/// La version de ce programme et la date de son commit, gravées dans son fichier pour qu'une autre copie les lise sans
+/// le lancer (« VANGUARD-VERSION:0.78.0+1760900000; »). `courante` la lit là : sans lecture, l'éditeur de liens
+/// retirerait ce texte du programme publié.
+static VERSION_GRAVEE: &str = concat!(
+    "VANGUARD-VERSION:",
+    env!("CARGO_PKG_VERSION"),
+    "+",
+    env!("VANGUARD_COMMIT_SECONDES"),
+    ";"
+);
 
 /// Ce qui précède la version gravée, écrit décalé d'un cran (« W » pour « V ») : en clair, ce texte paraîtrait une
 /// seconde fois dans le programme, suivi de ce que l'éditeur de liens met après lui (« 0.78.0 » d'un autre texte,
@@ -34,17 +41,50 @@ const TAILLE_MAX: u64 = 256 << 20;
 
 const NOM: &str = if cfg!(windows) { "vanguard.exe" } else { "vanguard" };
 
-/// Une version : majeure, mineure, correctif.
-type Version = (u32, u32, u32);
+/// Une version : majeure, mineure, correctif, puis la date de son commit en secondes (0 : inconnue). Entre deux
+/// publications, les compilations intermédiaires gardent le même numéro : la date les départage, et l'ordre des
+/// tuples fait le reste.
+type Version = (u32, u32, u32, u64);
 
+/// « 0.78.0 » ou « 0.78.0+1760900000 ».
 fn lire_version(texte: &str) -> Option<Version> {
-    let mut morceaux = texte.split('.').map(|m| m.parse::<u32>().ok());
-    let version = (morceaux.next()??, morceaux.next()??, morceaux.next()??);
+    let (numero, date) = match texte.split_once('+') {
+        Some((n, d)) => (n, d.parse::<u64>().ok()?),
+        None => (texte, 0),
+    };
+    let mut morceaux = numero.split('.').map(|m| m.parse::<u32>().ok());
+    let version = (morceaux.next()??, morceaux.next()??, morceaux.next()??, date);
     morceaux.next().is_none().then_some(version)
 }
 
 fn ecrire(v: Version) -> String {
     format!("{}.{}.{}", v.0, v.1, v.2)
+}
+
+/// Deux versions à montrer côte à côte : le numéro seul, et la date du commit quand le numéro ne suffit pas à les
+/// distinguer (deux compilations entre deux publications).
+fn cote_a_cote(a: Version, b: Version) -> (String, String) {
+    if (a.0, a.1, a.2) != (b.0, b.1, b.2) || a.3 == b.3 {
+        return (ecrire(a), ecrire(b));
+    }
+    let date = |v: Version| {
+        i64::try_from(v.3)
+            .ok()
+            .and_then(|s| chrono::DateTime::from_timestamp(s, 0))
+            .filter(|_| v.3 > 0)
+            .map_or_else(
+                || tr!("sans date", "undated").to_string(),
+                |d| {
+                    d.with_timezone(&chrono::Local)
+                        .format(tr!("%d/%m/%Y %H:%M", "%Y-%m-%d %H:%M"))
+                        .to_string()
+                },
+            )
+    };
+    (
+        format!("{} ({})", ecrire(a), date(a)),
+        format!("{} ({})", ecrire(b), date(b)),
+    )
 }
 
 /// La version de ce programme, lue dans sa version gravée (`black_box` : le compilateur ne la remplace pas par sa
@@ -219,6 +259,8 @@ fn etat() -> Etat {
     }
     let copie = copie_de_cet_ordinateur();
     ETAT.lire(empreinte(&copie), || {
+        // Le reste d'une mise à jour faite pendant que la copie tournait (Windows), s'il ne tourne plus.
+        let _ = std::fs::remove_file(copie.with_file_name(format!("{NOM}.ancien")));
         programme().map_or(Etat::Rien, |exe| {
             etat_de(
                 &exe,
@@ -291,7 +333,13 @@ fn mettre_en_place(provisoire: &Path, cible: &Path) -> std::io::Result<()> {
         return Err(erreur);
     }
     let ancien = cible.with_file_name(format!("{NOM}.ancien"));
-    let _ = std::fs::remove_file(&ancien);
+    // Celui d'une mise à jour précédente tourne peut-être encore : rien ne se remplace, et c'est dit clairement.
+    if std::fs::symlink_metadata(&ancien).is_ok() && std::fs::remove_file(&ancien).is_err() {
+        return Err(std::io::Error::other(tr!(
+            "l'ancienne copie tourne encore (surveillance) : réessaie dans une minute",
+            "the old copy is still running (monitoring): try again in a minute"
+        )));
+    }
     std::fs::rename(cible, &ancien)?;
     std::fs::rename(provisoire, cible).inspect_err(|_| {
         let _ = std::fs::rename(&ancien, cible);
@@ -328,23 +376,26 @@ pub fn commande() {
             "  {VERT}✔{RESET} The copy on this computer is up to date ({}).",
             ecrire(v)
         ),
-        Etat::ClePlusAncienne { copie, cle } => trp!(
-            "  La copie d'ici ({}) est plus récente que la clé ({}).\n  Remets la clé à jour chez toi : Vanguard ne revient jamais en arrière.",
-            "  The copy on this computer ({}) is newer than the key ({}).\n  Update the key at home: Vanguard never goes back to an older version.",
-            ecrire(copie),
-            ecrire(cle)
-        ),
+        Etat::ClePlusAncienne { copie, cle } => {
+            let (copie, cle) = cote_a_cote(copie, cle);
+            trp!(
+                "  La copie d'ici ({copie}) est plus récente que la clé ({cle}).\n  Remets la clé à jour chez toi : Vanguard ne revient jamais en arrière.",
+                "  The copy on this computer ({copie}) is newer than the key ({cle}).\n  Update the key at home: Vanguard never goes back to an older version."
+            );
+        }
         Etat::AMettreAJour { source, copie, cle } => proposer(&source, &cible, copie, cle),
     }
 }
 
 /// Montre les deux versions et d'où vient la nouvelle, puis remplace la copie après un « o ».
 fn proposer(source: &Path, cible: &Path, copie: Option<Version>, cle: Version) {
+    let (ici, sur_la_cle) = match copie {
+        Some(c) => cote_a_cote(c, cle),
+        None => (version_affichee(None), ecrire(cle)),
+    };
     trp!(
-        "  Copie de cet ordinateur : {}\n  Clé VANGUARD           : {}\n  {GRIS}Depuis {}{RESET}\n",
-        "  Copy on this computer: {}\n  VANGUARD key         : {}\n  {GRIS}From {}{RESET}\n",
-        version_affichee(copie),
-        ecrire(cle),
+        "  Copie de cet ordinateur : {ici}\n  Clé VANGUARD           : {sur_la_cle}\n  {GRIS}Depuis {}{RESET}\n",
+        "  Copy on this computer: {ici}\n  VANGUARD key         : {sur_la_cle}\n  {GRIS}From {}{RESET}\n",
         affichable(&source.display().to_string())
     );
     if !demander(tr!(
@@ -375,15 +426,37 @@ mod tests {
 
     #[test]
     fn versions_lues_et_comparees() {
-        assert_eq!(lire_version("0.78.0"), Some((0, 78, 0)));
+        assert_eq!(lire_version("0.78.0"), Some((0, 78, 0, 0)));
+        assert_eq!(lire_version("0.78.0+1760900000"), Some((0, 78, 0, 1_760_900_000)));
+        assert_eq!(lire_version("0.78.0+x"), None);
         assert_eq!(lire_version("1.2"), None);
         assert_eq!(lire_version("1.2.3.4"), None);
         assert_eq!(lire_version("1.x.3"), None);
-        // Comparées comme des nombres : 0.100 vient après 0.99.
-        assert!((0, 100, 0) > (0, 99, 9));
-        // La version gravée est bien celle du paquet : sans quoi rien ne serait jamais proposé.
-        assert_eq!(courante(), lire_version(env!("CARGO_PKG_VERSION")));
-        assert!(courante().is_some());
+        // Comparées comme des nombres : 0.100 vient après 0.99 ; à numéro égal, le commit le plus récent l'emporte, et
+        // le numéro passe toujours avant la date.
+        assert!((0, 100, 0, 0) > (0, 99, 9, 0));
+        assert!((0, 78, 0, 2) > (0, 78, 0, 1));
+        assert!((0, 79, 0, 1) > (0, 78, 0, 9));
+        // La version gravée est bien celle du paquet, avec la date de son commit : sans quoi rien ne serait proposé.
+        let numero = |v: Option<Version>| v.map(|v| (v.0, v.1, v.2));
+        assert_eq!(numero(courante()), numero(lire_version(env!("CARGO_PKG_VERSION"))));
+        assert_eq!(
+            courante().map(|v| v.3.to_string()).as_deref(),
+            Some(env!("VANGUARD_COMMIT_SECONDES"))
+        );
+    }
+
+    #[test]
+    fn deux_compilations_d_un_meme_numero_se_distinguent_par_la_date() {
+        let (a, b) = cote_a_cote((0, 78, 0, 0), (0, 79, 0, 5));
+        assert_eq!((a.as_str(), b.as_str()), ("0.78.0", "0.79.0"));
+        let (a, b) = cote_a_cote((0, 78, 0, 5), (0, 78, 0, 5));
+        assert_eq!((a.as_str(), b.as_str()), ("0.78.0", "0.78.0"));
+        let (a, b) = cote_a_cote((0, 78, 0, 1_760_000_000), (0, 78, 0, 1_760_900_000));
+        assert!(
+            a.starts_with("0.78.0 (") && b.starts_with("0.78.0 (") && a != b,
+            "{a} / {b}"
+        );
     }
 
     /// Un contenu de programme avec l'en-tête de la version gravée : construit au lancement, jamais écrit tel quel
@@ -397,8 +470,10 @@ mod tests {
         // L'en-tête seul, suivi d'autre chose, ne compte pas ; la vraie version, oui.
         let mut octets = avec_entete("\x00\x7fELF...", "\x00abc...");
         octets.extend(avec_entete("", ""));
-        octets.extend(avec_entete("", "0.81.2;..."));
-        assert_eq!(version_gravee(&octets), Some((0, 81, 2)));
+        octets.extend(avec_entete("", "0.81.2+x;..."));
+        octets.extend(avec_entete("", "0.81.2+1760900000;..."));
+        assert_eq!(version_gravee(&octets), Some((0, 81, 2, 1_760_900_000)));
+        assert_eq!(version_gravee(&avec_entete("", "0.81.2;")), Some((0, 81, 2, 0)));
         // Une copie d'avant la 0.78 : pas de version.
         assert_eq!(version_gravee(b"\x7fELF un vieux programme"), None);
         // Tronquée, ou sans « ; » : rien.
@@ -432,7 +507,7 @@ mod tests {
         let cle = racine.join("cle");
         let sur_la_cle = cle.join("Linux").join(NOM);
         let copie = racine.join("ordinateur").join("bin").join(NOM);
-        let v = (0, 78, 0);
+        let v = (0, 78, 0, 0);
         let etat =
             |exe: &Path, cle_du_programme: Option<&Path>| etat_de(exe, cle_du_programme, &copie, Some(v), TAILLE_MAX);
         faux_programme(&sur_la_cle, Some("0.78.0"));
@@ -456,10 +531,24 @@ mod tests {
         assert_eq!(
             etat(&sur_la_cle, Some(&cle)),
             Etat::ClePlusAncienne {
-                copie: (0, 79, 0),
+                copie: (0, 79, 0, 0),
                 cle: v
             }
         );
+        // Même numéro : le commit le plus récent l'emporte (compilations entre deux publications).
+        faux_programme(&copie, Some("0.78.0+5"));
+        let plus_tard = (0, 78, 0, 9);
+        assert!(matches!(
+            etat_de(&sur_la_cle, Some(&cle), &copie, Some(plus_tard), TAILLE_MAX),
+            Etat::AMettreAJour {
+                copie: Some((0, 78, 0, 5)),
+                ..
+            }
+        ));
+        assert!(matches!(
+            etat_de(&sur_la_cle, Some(&cle), &copie, Some((0, 78, 0, 1)), TAILLE_MAX),
+            Etat::ClePlusAncienne { .. }
+        ));
         // Lancé depuis la copie, ou d'ailleurs : la mise à jour se fait depuis la clé, jamais depuis un volume
         // seulement branché.
         assert_eq!(etat(&copie, None), Etat::PasDepuisLaCle);
@@ -485,10 +574,13 @@ mod tests {
         let memoire = Memoire::new();
         let premiere = Some((10, SystemTime::UNIX_EPOCH));
         assert_eq!(
-            memoire.lire(premiere, || Etat::AJour((0, 1, 0))),
-            Etat::AJour((0, 1, 0))
+            memoire.lire(premiere, || Etat::AJour((0, 1, 0, 0))),
+            Etat::AJour((0, 1, 0, 0))
         );
-        assert_eq!(memoire.lire(premiere, || unreachable!("gardé")), Etat::AJour((0, 1, 0)));
+        assert_eq!(
+            memoire.lire(premiere, || unreachable!("gardé")),
+            Etat::AJour((0, 1, 0, 0))
+        );
         assert_eq!(
             memoire.lire(Some((11, SystemTime::UNIX_EPOCH)), || Etat::Rien),
             Etat::Rien
@@ -504,7 +596,7 @@ mod tests {
         let cible = racine.join("bin").join(NOM);
         faux_programme(&source, Some("0.80.0"));
         faux_programme(&cible, None);
-        remplacer(&source, &cible, (0, 80, 0), TAILLE_MAX).unwrap();
+        remplacer(&source, &cible, (0, 80, 0, 0), TAILLE_MAX).unwrap();
         assert_eq!(std::fs::read(&cible).unwrap(), std::fs::read(&source).unwrap());
         assert!(!cible.with_file_name(format!("{NOM}.nouveau")).exists());
         #[cfg(unix)]
@@ -515,13 +607,13 @@ mod tests {
         // La clé a changé depuis l'affichage (une autre version) : rien n'est remplacé.
         faux_programme(&cible, Some("0.70.0"));
         faux_programme(&source, Some("0.69.0"));
-        assert!(remplacer(&source, &cible, (0, 80, 0), TAILLE_MAX).is_err());
-        assert_eq!(lire_programme(&cible, TAILLE_MAX), Lu::Version((0, 70, 0)));
+        assert!(remplacer(&source, &cible, (0, 80, 0, 0), TAILLE_MAX).is_err());
+        assert_eq!(lire_programme(&cible, TAILLE_MAX), Lu::Version((0, 70, 0, 0)));
         // Une source absente ou démesurée : l'ancienne copie reste, rien ne traîne à côté.
-        assert!(remplacer(&racine.join("absente"), &cible, (0, 80, 0), TAILLE_MAX).is_err());
+        assert!(remplacer(&racine.join("absente"), &cible, (0, 80, 0, 0), TAILLE_MAX).is_err());
         faux_programme(&source, Some("0.80.0"));
-        assert!(remplacer(&source, &cible, (0, 80, 0), 4).is_err());
-        assert_eq!(lire_programme(&cible, TAILLE_MAX), Lu::Version((0, 70, 0)));
+        assert!(remplacer(&source, &cible, (0, 80, 0, 0), 4).is_err());
+        assert_eq!(lire_programme(&cible, TAILLE_MAX), Lu::Version((0, 70, 0, 0)));
         assert!(!cible.with_file_name(format!("{NOM}.nouveau")).exists());
         let _ = std::fs::remove_dir_all(&racine);
     }
