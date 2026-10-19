@@ -527,6 +527,53 @@ fn date_sauvegarde(chemin: &str) -> Option<chrono::NaiveDate> {
     chrono::NaiveDate::parse_from_str(nom.get(..10)?, "%Y-%m-%d").ok()
 }
 
+/// Destinations Time Machine dont la sauvegarde n'est pas chiffrée, d'après les réglages de Time Machine
+/// (« LastKnownEncryptionState = NotEncrypted; », une fois par destination).
+fn destinations_non_chiffrees(reglages: &str) -> usize {
+    reglages
+        .lines()
+        .filter(|l| {
+            l.split_once('=').is_some_and(|(k, v)| {
+                k.trim() == "LastKnownEncryptionState" && v.trim().trim_end_matches(';').trim() == "NotEncrypted"
+            })
+        })
+        .count()
+}
+
+/// Sauvegarde Time Machine non chiffrée : le disque de sauvegarde volé donne tous les fichiers, même avec FileVault.
+fn sauvegarde_chiffree() -> Option<Constat> {
+    let reglages = sortie(
+        "defaults",
+        &["read", "/Library/Preferences/com.apple.TimeMachine", "Destinations"],
+    )?;
+    let n = destinations_non_chiffrees(&reglages);
+    (n > 0).then(|| {
+        alerte(
+            "Sauvegardes",
+            Niveau::Moyen,
+            if n == 1 {
+                tr!(
+                    "La sauvegarde Time Machine n'est pas chiffrée : le disque de sauvegarde volé donne tous tes fichiers, même avec FileVault.",
+                    "The Time Machine backup is not encrypted: a stolen backup disk gives away all your files, even with FileVault."
+                )
+                .to_string()
+            } else {
+                trf!(
+                    "{n} sauvegardes Time Machine ne sont pas chiffrées : un disque de sauvegarde volé donne tous tes fichiers, même avec FileVault.",
+                    "{n} Time Machine backups are not encrypted: a stolen backup disk gives away all your files, even with FileVault."
+                )
+            },
+        )
+        .manuel(
+            tr!(
+                "Réglages Système > Général > Time Machine : retirer le disque puis l'ajouter de nouveau en cochant « Chiffrer la sauvegarde » (une nouvelle sauvegarde complète repart)",
+                "System Settings > General > Time Machine: remove the disk, then add it again with “Encrypt Backup” checked (a new full backup starts)"
+            ),
+            &[],
+        )
+    })
+}
+
 fn sauvegardes() -> Constat {
     let Some(destinations) = sortie("tmutil", &["destinationinfo"]) else {
         return impossible("Sauvegardes", tr!("tmutil illisible", "tmutil unreadable"));
@@ -630,6 +677,7 @@ pub fn auditer() -> Audit {
             verif!(maj::mises_a_jour()),
             verif!(maj::homebrew_a_jour()),
             verif!([sauvegardes()]),
+            verif!(sauvegarde_chiffree()),
             verif!(persistance()),
             verif!(cles_ssh()),
         ],
@@ -679,6 +727,14 @@ mod tests {
         );
         assert_eq!(lire_verrouillage("screenLock is off"), Some(Verrouillage::Coupe));
         assert_eq!(lire_verrouillage("autre chose"), None);
+    }
+
+    #[test]
+    fn time_machine_non_chiffree() {
+        let reglages = "(\n        {\n        DestinationID = \"1\";\n        LastKnownEncryptionState = NotEncrypted;\n    },\n        {\n        LastKnownEncryptionState = Encrypted;\n    }\n)\n";
+        assert_eq!(destinations_non_chiffrees(reglages), 1);
+        assert_eq!(destinations_non_chiffrees("LastKnownEncryptionState = Encrypted;"), 0);
+        assert_eq!(destinations_non_chiffrees(""), 0);
     }
 
     #[test]
