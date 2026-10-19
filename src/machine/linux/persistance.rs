@@ -531,8 +531,23 @@ pub(super) fn fichiers_suspects() -> Vec<Constat> {
     }
     let (mut modifies, mut non_verifies) = (Vec::new(), 0);
     if let Some(gestion) = gestion {
-        for (paquet, fichiers) in &par_paquet {
-            for (f, etat) in fichiers.iter().zip(gestion.modifies(paquet, fichiers)) {
+        // Chaque paquet se vérifie à part (pacman, zcat et sha256sum, ou dpkg --verify, en lecture seule) : 16 à la
+        // fois plutôt qu'un par un, une vingtaine de paquets attendaient l'un après l'autre.
+        let paquets: Vec<(&String, &Vec<std::path::PathBuf>)> = par_paquet.iter().collect();
+        let mut etats = Vec::new();
+        for groupe in paquets.chunks(16) {
+            std::thread::scope(|s| {
+                let fils: Vec<_> = groupe
+                    .iter()
+                    .map(|(paquet, fichiers)| s.spawn(move || gestion.modifies(paquet, fichiers)))
+                    .collect();
+                etats.extend(fils.into_iter().map(|f| f.join().unwrap_or_default()));
+            });
+        }
+        for ((paquet, fichiers), etats) in paquets.into_iter().zip(etats) {
+            // Un fil qui a planté rend une liste vide : ses fichiers comptent comme non vérifiés.
+            let etats = etats.into_iter().chain(std::iter::repeat(None));
+            for (f, etat) in fichiers.iter().zip(etats) {
                 match etat {
                     Some(true) => modifies.push((crate::ui::chemin_affichable(f), paquet.clone())),
                     Some(false) => {}
