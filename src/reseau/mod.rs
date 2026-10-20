@@ -8,6 +8,7 @@ pub mod empoisonnement;
 pub mod listes_noires;
 pub mod nat;
 pub mod nmap;
+pub mod objets;
 pub mod scan;
 pub mod surveillance;
 pub mod tableau;
@@ -111,6 +112,21 @@ impl Hote {
     pub fn titre(&self) -> String {
         titre_de([self.surnom.as_deref(), self.nom.as_deref(), self.fabricant.as_deref()])
     }
+
+    /// L'appareil tel que le voit la section « Box et objets connectés ».
+    fn objet(&self) -> objets::Appareil {
+        let tcp = self.ports.iter().filter(|p| !p.udp).map(|p| p.port).collect();
+        objets::Appareil {
+            ip: self.ip,
+            titre: self.titre(),
+            boite: self.role == Some("passerelle"),
+            fabricant: self.fabricant.clone(),
+            nom: self.nom.clone(),
+            tcp,
+            annonces: objets::annonces(&self.ports),
+            dernier_vu: None,
+        }
+    }
 }
 
 /// « surnom · nom · fabricant », avec ce qui est connu.
@@ -210,6 +226,10 @@ struct AppareilConnu {
     premier_vu: Option<String>,
     #[serde(default)]
     dernier_vu: Option<String>,
+    /// Ce que l'appareil dit de lui-même (SNMP, UPnP, page web) : le modèle d'une box, le type d'un objet, pour
+    /// `objets` sans refaire de scan.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    annonce: Option<String>,
 }
 
 impl AppareilConnu {
@@ -227,6 +247,7 @@ impl AppareilConnu {
             &mut self.surnom_le,
             &mut self.premier_vu,
             &mut self.dernier_vu,
+            &mut self.annonce,
         ];
         for t in textes.into_iter().flatten() {
             *t = affichable(t);
@@ -248,6 +269,9 @@ impl AppareilConnu {
         if autre.dernier_vu > self.dernier_vu {
             self.dernier_vu = autre.dernier_vu;
             self.ip = autre.ip;
+            self.annonce = autre.annonce.or(self.annonce.take());
+        } else {
+            self.annonce = self.annonce.take().or(autre.annonce);
         }
     }
 }
@@ -421,6 +445,36 @@ impl Base {
             }
         }
     }
+}
+
+/// Les appareils du carnet de ce réseau (son dernier scan gardé) et le nom du réseau, pour `objets` : rien n'est
+/// sondé, seule la box est reconnue à son adresse MAC (celle qui désigne le carnet). `None` : aucun scan gardé.
+pub(crate) fn carnet_du_reseau() -> Option<(Option<String>, Vec<objets::Appareil>)> {
+    let local = scan::reseau_local();
+    let gw = scan::passerelle();
+    // Même clé que le scan : la MAC de la box, sinon la plage d'adresses.
+    let id = gw
+        .and_then(|g| scan::table_arp().get(&g).cloned())
+        .or_else(|| local.as_ref().map(|(cible, _)| trf!("plage {cible}", "range {cible}")))?;
+    let moi = local.map(|(_, ip)| ip);
+    let (base, _, _verrou) = Base::charger();
+    let reseau = base.reseaux.get(&id).filter(|r| !r.appareils.is_empty())?;
+    let appareils = reseau
+        .appareils
+        .iter()
+        .filter(|(_, a)| Some(a.ip) != moi)
+        .map(|(cle, a)| objets::Appareil {
+            ip: a.ip,
+            titre: a.titre(),
+            boite: *cle == id,
+            fabricant: a.fabricant.clone(),
+            nom: a.nom.clone(),
+            tcp: a.ports.iter().copied().collect(),
+            annonces: a.annonce.iter().cloned().collect(),
+            dernier_vu: a.dernier_vu.clone(),
+        })
+        .collect();
+    Some((reseau.nom.clone(), appareils))
 }
 
 /// Écrit d'abord un fichier temporaire, le force sur le disque, puis le renomme à la place de l'ancien :
@@ -1217,6 +1271,14 @@ fn afficher(r: &Rapport) {
         }
     }
 
+    let objets: Vec<objets::Appareil> = r
+        .hotes
+        .iter()
+        .filter(|h| h.role != Some("cette machine"))
+        .map(Hote::objet)
+        .collect();
+    objets::afficher(&objets, false);
+
     if let Some(e) = &r.upnp {
         crate::reseau::upnp::afficher(e);
     }
@@ -1507,6 +1569,7 @@ pub async fn executer(o: Options) -> Result<Rapport, String> {
                     surnom_le: None,
                     premier_vu: Some(jour.clone()),
                     dernier_vu: None,
+                    annonce: None,
                 });
             a.ip = h.ip;
             a.nom = h.nom.clone().or(a.nom.take());
@@ -1515,6 +1578,9 @@ pub async fn executer(o: Options) -> Result<Rapport, String> {
             a.ports_udp.extend(h.ports.iter().filter(|p| p.udp).map(|p| p.port));
             a.premier_vu.get_or_insert_with(|| jour.clone());
             a.dernier_vu = Some(jour.clone());
+            if let Some(annonce) = objets::annonces(&h.ports).into_iter().next() {
+                a.annonce = Some(annonce);
+            }
         }
         if nom_reseau.is_some() {
             histo.nom.clone_from(&nom_reseau);
@@ -1644,6 +1710,7 @@ mod tests {
             surnom_le: None,
             premier_vu: None,
             dernier_vu: None,
+            annonce: None,
         };
         let resultats = BTreeMap::from([
             (ip(2), vec![]),           // connu, ports déjà vus, muet : à revoir
@@ -1947,6 +2014,7 @@ mod tests {
             surnom_le: None,
             premier_vu: Some(premier.into()),
             dernier_vu: Some(dernier.into()),
+            annonce: None,
         };
         let mut cle = fiche(
             &[80],

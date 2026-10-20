@@ -177,6 +177,10 @@ enum Commande {
     /// Caméras cachées : sur le réseau d'une location ou de quelqu'un, les appareils qui ressemblent à des caméras.
     /// Lecture seule.
     Cameras,
+    /// Box et objets connectés d'après le dernier scan gardé : ce que la box annonce (modèle, logiciel), son
+    /// administration en HTTP seul, les caméras, imprimantes, NAS… et leur mot de passe d'origine. Rien n'est sondé.
+    #[command(visible_alias = "iot")]
+    Objets,
     /// DNS le plus rapide : mesure le DNS actuel et des DNS publics, puis propose le plus rapide, annulable. Un DNS
     /// qui protège (NextDNS, chiffré, filtrant) est gardé.
     #[command(name = "dns-rapide", visible_alias = "fast-dns")]
@@ -809,6 +813,7 @@ enum Action {
     WifiCanaux,
     Nat,
     Cameras,
+    Objets,
     AntivirusRapide,
     AntivirusComplet,
     AntivirusDossier,
@@ -958,6 +963,11 @@ const OUTILS: &[Outil] = &[
         titre: ["Caméras cachées ?", "Hidden cameras?"],
         precision: ["location, chez quelqu'un", "rental, someone else's place"],
         mots: "caméra camera espion spy cachée hidden location rental airbnb rtsp onvif" },
+    Outil { action: Action::Objets, groupe: Some(Groupe::Reseau), lettre: "",
+        titre: ["Box et objets connectés", "Router and connected devices"],
+        precision: ["modèle, mots de passe d'origine", "model, default passwords"],
+        mots: "box routeur router modem objets connectés iot smart caméra camera imprimante printer nas télé tv \
+               domotique smart home mot de passe d'origine default password firmware upnp" },
     Outil { action: Action::AntivirusRapide, groupe: Some(Groupe::Protection), lettre: "",
         titre: ["Analyse rapide", "Quick scan"], precision: ["téléchargements, bureau…", "downloads, desktop…"],
         mots: "virus malware clamav defender" },
@@ -1340,6 +1350,7 @@ async fn executer(s: &mut Session, action: Action) {
         Action::WifiCanaux => reseau::canaux::analyser(),
         Action::Nat => reseau::nat::tester(),
         Action::Cameras => reseau::cameras::chercher_cameras().await,
+        Action::Objets => reseau::objets::montrer(),
         Action::AntivirusRapide => protection::antivirus::analyser(protection::antivirus::Portee::Rapide),
         Action::AntivirusComplet => protection::antivirus::analyser(protection::antivirus::Portee::Complete),
         Action::AntivirusDossier => protection::antivirus::choisir(),
@@ -1422,6 +1433,8 @@ const AIDES_EN: &[(&str, &str)] = &[
     ("canaux", "Crowded Wi-Fi: nearby networks by channel, and the freest channel to set on the router. Read-only"),
     ("nat", "NAT type for gaming (open, moderate or strict), from two public servers (STUN). Read-only"),
     ("cameras", "Hidden cameras: on a rental's or someone's network, the devices that look like cameras. Read-only"),
+    ("objets", "Router and connected devices from the last kept scan: what the router announces (model, software), \
+                its HTTP-only admin page, the cameras, printers, NAS… and their default password. Nothing is probed"),
     ("dns-rapide", "Fastest DNS: measures the current DNS and public ones, then offers the fastest, undoable. A DNS \
                     that protects (NextDNS, encrypted, filtering) is kept"),
     ("pieges", "Decoy files against ransomware: place them (after your consent), see whether they are intact, or \
@@ -1669,6 +1682,7 @@ async fn main() {
         Some(Commande::Canaux) => reseau::canaux::analyser(),
         Some(Commande::Nat) => reseau::nat::tester(),
         Some(Commande::Cameras) => reseau::cameras::chercher_cameras().await,
+        Some(Commande::Objets) => reseau::objets::montrer(),
         Some(Commande::DnsRapide) => dns_rapide::mesurer_et_proposer(),
         Some(Commande::Appris) => apprentissage::menu(),
         Some(Commande::Integrite { accepter, temps_reel }) => {

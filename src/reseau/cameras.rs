@@ -31,9 +31,9 @@ const FABRICANTS: &[(&str, &str)] = &[
 ];
 
 /// Ports d'un flux vidéo (RTSP).
-const RTSP: [u16; 3] = [554, 8554, 10554];
+pub(super) const RTSP: [u16; 3] = [554, 8554, 10554];
 /// Ports propres aux enregistreurs et caméras bon marché : Dahua (37777), XMEye (34567).
-const PORTS_CAMERA: [u16; 2] = [34567, 37777];
+pub(super) const PORTS_CAMERA: [u16; 2] = [34567, 37777];
 /// Ports que les caméras ouvrent souvent, d'autres appareils aussi : ONVIF (2020, 8899), flux RTMP (1935).
 const PORTS_POSSIBLES: [u16; 3] = [1935, 2020, 8899];
 /// Pages web, dont l'en-tête trahit souvent une caméra ou un enregistreur.
@@ -86,7 +86,7 @@ impl Indices {
 }
 
 /// Fabricant de caméras, d'après le nom du registre.
-fn fabricant_camera(nom: &str) -> Option<&'static str> {
+pub(super) fn fabricant_camera(nom: &str) -> Option<&'static str> {
     let nom = nom.to_lowercase();
     FABRICANTS
         .iter()
@@ -94,7 +94,7 @@ fn fabricant_camera(nom: &str) -> Option<&'static str> {
 }
 
 /// L'en-tête d'une page web qui parle de caméra ou d'enregistreur.
-fn web_camera(banniere: &str) -> bool {
+pub(super) fn web_camera(banniere: &str) -> bool {
     let b = banniere.to_lowercase();
     MOTS_WEB.iter().any(|m| b.contains(m))
 }
