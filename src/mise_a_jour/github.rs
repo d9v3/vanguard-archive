@@ -7,14 +7,13 @@
 //! ne pourrait donc pas faire installer autre chose que ce que l'auteur a signé.
 
 use std::io::IsTerminal;
-use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::path::PathBuf;
 use std::sync::{Mutex, Once, PoisonError};
 use std::time::Duration;
 
 use sha2::{Digest, Sha256};
 
-use super::{TAILLE_MAX, Version, lire_octets, lire_version};
+use super::{TAILLE_MAX, Version, lire_version};
 use crate::ui::*;
 
 /// Les fichiers de la dernière version publiée : le lien « latest » de GitHub suit toujours la plus récente.
@@ -138,21 +137,7 @@ fn dossier() -> PathBuf {
     crate::reseau::dossier_local().join("versions")
 }
 
-/// curl : sous Windows, celui de System32, jamais un curl.exe posé à côté de Vanguard (Windows cherche d'abord dans
-/// le dossier du programme lancé, qui peut être en administrateur).
-fn curl() -> Command {
-    #[cfg(windows)]
-    {
-        let racine = std::env::var_os("SystemRoot").unwrap_or_else(|| "C:\\Windows".into());
-        Command::new(PathBuf::from(racine).join("System32").join("curl.exe"))
-    }
-    #[cfg(not(windows))]
-    {
-        Command::new("curl")
-    }
-}
-
-/// Le dossier de Vanguard est-il sûr pour y télécharger et écrire ? Lancé en root avec le dossier d'un autre compte
+/// Le dossier de Vanguard est-il sûr pour y écrire (le mémo de l'annonce, le programme provisoire à côté des cibles) ? Lancé en root avec le dossier d'un autre compte
 /// (sudo qui garde HOME), ce compte pourrait y poser des liens et faire écrire root ailleurs : rien n'y est fait.
 pub(super) fn dossier_sur() -> bool {
     #[cfg(unix)]
@@ -170,25 +155,20 @@ pub(super) fn dossier_sur() -> bool {
     }
 }
 
-/// Télécharge un fichier de la dernière version, en HTTPS seulement (redirections comprises), `max` octets au plus.
-fn telecharger(nom: &str, destination: &Path, max: u64, secondes: u64) -> bool {
-    let _ = std::fs::remove_file(destination);
-    let reussi = crate::commande::lancer(
-        curl()
-            .args(["-sfL", "--proto", "=https", "--proto-redir", "=https", "--max-time"])
-            .arg(secondes.to_string())
-            .arg("--max-filesize")
-            .arg(max.to_string())
-            .arg("-o")
-            .arg(destination)
-            .arg(format!("{ADRESSE}{nom}")),
-        secondes + 10,
-    )
-    .is_some_and(|r| r.code == Some(0));
-    if !reussi {
-        let _ = std::fs::remove_file(destination);
-    }
-    reussi
+/// Un fichier de la dernière version, reçu en mémoire par le client HTTPS de Vanguard (`http`) : en HTTPS seulement,
+/// redirections comprises ; le transfert est coupé au-delà de `max` octets ou de `secondes`. Rien ne passe par le
+/// disque ni par un autre programme : ce qui est vérifié est ce qui s'installe. `None` : pas de réponse 200.
+fn recevoir(nom: &str, max: u64, secondes: u64) -> Option<Vec<u8>> {
+    let adresse = format!("{ADRESSE}{nom}");
+    crate::http::envoyer(crate::http::Demande {
+        adresse: &adresse,
+        entetes: Vec::new(),
+        corps: None,
+        delai: Duration::from_secs(secondes),
+        taille_max: max,
+    })
+    .filter(|r| r.code == 200)
+    .map(|r| r.corps)
 }
 
 /// La dernière version publiée pour ce système, manifeste téléchargé et vérifié ; `Err` : pourquoi on ne sait pas.
@@ -200,45 +180,35 @@ pub(super) fn derniere() -> Result<Publiee, String> {
         )
         .to_string()
     })?;
-    let d = dossier();
-    std::fs::create_dir_all(&d).map_err(|e| e.to_string())?;
-    let (manifeste, signature) = (d.join("derniere.txt"), d.join("derniere.txt.sig"));
-    if std::env::var_os("VANGUARD_HORS_LIGNE").is_some()
-        || !telecharger("derniere.txt", &manifeste, MANIFESTE_MAX, 20)
-        || !telecharger("derniere.txt.sig", &signature, 64, 20)
-    {
-        return Err(tr!(
-            "pas de réponse (pas d'Internet, ou curl absent)",
-            "no answer (no Internet, or curl missing)"
+    let pas_de_reponse = || {
+        tr!(
+            "pas de réponse (pas d'Internet, ou aucune version publiée pour tous)",
+            "no answer (no Internet, or no version published for everyone)"
         )
-        .into());
+        .to_string()
+    };
+    if std::env::var_os("VANGUARD_HORS_LIGNE").is_some() {
+        return Err(pas_de_reponse());
     }
-    juger(
-        &lire_octets(&manifeste, MANIFESTE_MAX)?,
-        &lire_octets(&signature, 64)?,
-        systeme,
-        fichier,
-    )
+    let manifeste = recevoir("derniere.txt", MANIFESTE_MAX, 20).ok_or_else(pas_de_reponse)?;
+    let signature = recevoir("derniere.txt.sig", 64, 20).ok_or_else(pas_de_reponse)?;
+    juger(&manifeste, &signature, systeme, fichier)
 }
 
 /// Télécharge le programme de `p` et rend ses octets, seulement si leur taille et leur empreinte sont celles signées.
-/// Ce sont ces octets-là qui s'installent (`installer`, qui vérifie encore la version gravée) : le fichier
-/// téléchargé, effacé aussitôt lu, ne peut pas être changé entre la vérification et l'installation.
+/// Ce sont ces octets-là, gardés en mémoire, qui s'installent (`installer`, qui vérifie encore la version gravée).
 pub(super) fn programme_verifie(p: &Publiee) -> Result<Vec<u8>, String> {
-    let chemin = dossier().join(format!("{}.nouveau", p.fichier));
-    if !telecharger(p.fichier, &chemin, p.taille, 900) {
+    let Some(recus) = recevoir(p.fichier, p.taille, 900) else {
         return Err(tr!("téléchargement interrompu", "download interrupted").into());
+    };
+    if u64::try_from(recus.len()).ok() == Some(p.taille) && Sha256::digest(&recus)[..] == p.sha256 {
+        return Ok(recus);
     }
-    let lus = lire_octets(&chemin, p.taille);
-    let _ = std::fs::remove_file(&chemin);
-    match lus {
-        Ok(o) if u64::try_from(o.len()).ok() == Some(p.taille) && Sha256::digest(&o)[..] == p.sha256 => Ok(o),
-        _ => Err(tr!(
-            "le programme téléchargé n'est pas celui que l'auteur a signé : rien n'est remplacé",
-            "the downloaded program is not the one the author signed: nothing is replaced"
-        )
-        .into()),
-    }
+    Err(tr!(
+        "le programme téléchargé n'est pas celui que l'auteur a signé : rien n'est remplacé",
+        "the downloaded program is not the one the author signed: nothing is replaced"
+    )
+    .into())
 }
 
 static ANNONCE: Mutex<Option<Version>> = Mutex::new(None);
@@ -274,6 +244,7 @@ fn derniere_vue() -> Option<Version> {
         return Some(v);
     }
     let v = derniere().ok()?.version;
+    let _ = std::fs::create_dir_all(dossier());
     let _ = std::fs::write(&memoire, format!("{}.{}.{}+{}", v.0, v.1, v.2, v.3));
     Some(v)
 }
