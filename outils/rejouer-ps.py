@@ -30,7 +30,8 @@ APPLET = re.compile(r"\b(Get|Set|New|Remove|Start|Stop|Test|Add|Clear|Invoke|Sel
                     r"Register|Unregister|Enable|Disable|Restart|Write|Measure|Sort|Join|Split|Resolve)-[A-Z][A-Za-z]+")
 TROU = re.compile(r"\{[A-Za-z_][A-Za-z0-9_.]*(:[^{}]*)?\}|\{\}|\{:[^{}]*\}")
 FORMAT = re.compile(r"\b(format|write|writeln)!\((\s*[\w.&]+\s*,)?$")
-MESSAGE = re.compile(r"\b(e?println|e?print|tr|trf|trp|tre|trw|panic|assert\w*)!\($")
+# Les textes affichés : macros, et les titres bilingues ou de section du dossier de traces (traces/).
+MESSAGE = re.compile(r"(\b(e?println|e?print|tr|trf|trp|tre|trw|bi|panic|assert\w*)!|\bBi::new|\.section)\($")
 TEMOINS = ["temoin-dossier-courant.exe", "temoin.lnk", "temoin-dossier/dedans.txt"]
 
 
@@ -130,10 +131,10 @@ def scripts():
             yield f"{nom}:{ligne}", texte, bool(FORMAT.search(avant))
 
 
-def rempli(texte: str) -> str:
+def rempli(texte: str, valeur: str = "'x'") -> str:
     """Un modèle de format! rendu analysable : {{ }} doublés, chaque trou remplacé par une valeur."""
     protege = texte.replace("{{", "\x00").replace("}}", "\x01")
-    return TROU.sub("'x'", protege).replace("\x00", "{").replace("\x01", "}")
+    return TROU.sub(valeur, protege).replace("\x00", "{").replace("\x01", "}")
 
 
 def analyser(pwsh: Path, texte: str) -> str:
@@ -159,7 +160,10 @@ def rejouer(pwsh: Path, texte: str, dossier: Path) -> str:
     maison = dossier / "maison"
     maison.mkdir()
     (dossier / "script.ps1").write_text(PRELUDE + texte, encoding="utf-8-sig")
-    commande = ["bwrap", "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "--tmpfs", "/tmp",
+    # /run vide : sans lui, le D-Bus système restait joignable (un socket Unix passe outre --unshare-all). Sous Linux,
+    # pwsh traduit Restart-Computer par « shutdown » sans argument, et logind éteignait la machine une minute plus
+    # tard : trois arrêts les 19 et 20 octobre, en rejouant le texte « Restart-Computer » de machine/windows/maj.rs.
+    commande = ["bwrap", "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "--tmpfs", "/tmp", "--tmpfs", "/run",
                 "--bind", str(maison), str(Path.home()), "--ro-bind", str(pwsh.parent), str(pwsh.parent),
                 "--bind", str(courant), str(courant), "--ro-bind", str(dossier / "script.ps1"), "/tmp/script.ps1",
                 "--chdir", str(courant), "--unshare-all", "--die-with-parent", "--new-session",
@@ -197,8 +201,12 @@ def main():
     def un(element):
         ou, texte, modele = element
         erreurs = analyser(args.pwsh, texte)
-        if erreurs and modele:
-            erreurs = analyser(args.pwsh, rempli(texte))
+        # Un trou peut tenir une valeur ('x') ou un bout de commande (« {espace} __EventFilter », portes.rs) :
+        # 'x' en tête de ligne n'est pas du PowerShell, x nu l'est ; le modèle passe si l'un des deux s'analyse.
+        for valeur in ("'x'", "x") if modele else ():
+            if not erreurs:
+                break
+            erreurs = analyser(args.pwsh, rempli(texte, valeur))
         if erreurs:
             return ou, f"syntaxe : {erreurs.splitlines()[0]}"
         if modele:
