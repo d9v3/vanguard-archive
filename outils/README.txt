@@ -74,7 +74,7 @@ highlighted one, Esc clears it. In the main menu, it also finds each tool of the
        Is this link dangerous? Checked without opening it; its age and public lists, after your consent
        Check a downloaded file: checksum compared with the site's, name and content, YARA, antivirus
        Quarantine: the files isolated by the antivirus or YARA, put back in their place (false positive) or deleted
-       Secrets in git projects: passwords and keys forgotten in the history (gitleaks, if present)
+       Secrets in git projects: passwords and keys forgotten in the history (and gitleaks, if present)
        Flaws in Docker images: known serious or critical flaws (trivy, if present)
   7  Install and play ›
        Software: the best ones, mostly open source, by category (browsers, passwords, office, video,

@@ -27,10 +27,12 @@ travail resté sur l'ordinateur (branche `0.79`), décrit seulement d'après le 
   effacement de l'espace libre, test de la mémoire ; sous macOS, ce qui se lance tout seul, accès à la caméra, au
   micro et à l'écran, empreinte d'un fichier, trafic par programme. Les exemples de tldr-pages se renouvellent aussi
   pendant la surveillance et l'entretien du mois, sans ouvrir le guide.
-- **Outils libres reconnus, s'ils sont installés.** « Secrets dans les projets git » : gitleaks relit l'historique
-  des projets du dossier personnel, où un mot de passe ou une clé d'API écrit un jour reste, même effacé ensuite
-  (secrets masqués, ni affichés ni gardés). « Failles des images Docker » : trivy dit les failles connues, graves ou
-  critiques, des images Docker ou Podman. Absents, Vanguard propose de les installer par l'outil du système. Après
+- **Secrets dans les projets git.** Vanguard relit l'historique des projets du dossier personnel, où un mot de passe,
+  une clé d'API ou un jeton écrit un jour reste, même effacé ensuite : clés reconnues à leur forme (AWS, GitHub,
+  GitLab, Google, Stripe, Slack…), clés privées, mots de passe dans une adresse ou dans le code ; gitleaks, s'il est
+  installé, ajoute ses règles. Aucun secret n'est affiché ni gardé.
+- **Outils libres reconnus, s'ils sont installés.** « Failles des images Docker » : trivy dit les failles connues,
+  graves ou critiques, des images Docker ou Podman ; absent, Vanguard propose de l'installer par l'outil du système. Après
   des connexions SSH ratées, le bilan dit si fail2ban, sshguard ou CrowdSec bloque déjà les adresses qui insistent.
 - **« Qui parle à Internet ? »** reconnaît le dossier temporaire du compte où qu'il soit (un TEMP déplacé laissait
   passer un programme lancé de là).
@@ -66,10 +68,12 @@ travail resté sur l'ordinateur (branche `0.79`), décrit seulement d'après le 
   free space, memory test; on macOS, what starts by itself, camera, microphone and screen access, a file's
   fingerprint, traffic per program. The tldr-pages examples are also renewed by the monitoring and the monthly
   check-up, without opening the guide.
-- **Recognized open source tools, when installed.** “Secrets in git projects”: gitleaks reads the history of the
-  home folder's projects, where a password or API key written once stays, even when deleted later (secrets masked,
-  neither shown nor kept). “Flaws in Docker images”: trivy tells the known serious or critical flaws in Docker or
-  Podman images. When missing, Vanguard offers to install them with the system's tool. After failed SSH logins, the
+- **Secrets in git projects.** Vanguard reads the history of the home folder's projects, where a password, API key
+  or token written once stays, even when deleted later: keys recognized by their shape (AWS, GitHub, GitLab, Google,
+  Stripe, Slack…), private keys, passwords in an address or in the code; gitleaks, when installed, adds its rules. No
+  secret is shown or kept.
+- **Recognized open source tools, when installed.** “Flaws in Docker images”: trivy tells the known serious or
+  critical flaws in Docker or Podman images; when missing, Vanguard offers to install it with the system's tool. After failed SSH logins, the
   check tells whether fail2ban, sshguard or CrowdSec already blocks the addresses that keep trying.
 - **“Who talks to the Internet?”** recognizes the account's temporary folder wherever it is (a moved TEMP let a
   program started from there go unnoticed).

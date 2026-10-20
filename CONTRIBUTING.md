@@ -35,7 +35,7 @@ modification. Sur GitHub, `@claude` dans un ticket ou une demande de fusion le f
 | `src/reseau/connexion.rs` | test de connexion pour le jeu |
 | `src/protection/antivirus.rs` | ClamAV / Defender, quarantaine |
 | `src/protection/yara.rs`, `src/protection/pieges.rs` | analyse YARA (règles intégrées, moteur du système) ; fichiers-pièges contre les rançongiciels |
-| `src/protection/outil.rs`, `src/protection/secrets_git.rs`, `src/protection/conteneurs.rs` | outils libres lancés s'ils sont installés, installation proposée sinon ; gitleaks sur l'historique des projets git, trivy sur les images Docker ou Podman |
+| `src/protection/outil.rs`, `src/protection/secrets_git.rs`, `src/protection/conteneurs.rs` | secrets dans l'historique des projets git (règles de Vanguard, gitleaks en plus s'il est là) ; outils libres lancés s'ils sont installés, installation proposée sinon (trivy sur les images Docker ou Podman) |
 | `src/reseau/surveillance.rs` | minuterie systemd / Planificateur de tâches / agent launchd, notifications |
 | `src/rapport.rs`, `src/historique.rs` | rapport HTML, historique des bilans, courbe des notes |
 | `src/reparer.rs`, `src/maj.rs`, `src/gaming/` | réparations, mises à jour, gaming |
