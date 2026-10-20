@@ -9,7 +9,8 @@ Réponses à l'utilisateur en français, claires, avec le pourquoi.
 
 - Tout vérifier en une commande : `outils/verifier.sh` (mise en forme, clippy ×4, tests Linux et Wine, la suite Linux
   refaite sans Internet, scripts PowerShell, shell et Python, liens internes, textes FR/EN ; les cibles en parallèle,
-  une ligne par étape à la fin). `--rapide` : Linux seulement, avec Internet ; `--sans-wine`. Le détail suit.
+  une ligne par étape à la fin). Les scripts PowerShell du programme y sont analysés et rejoués sous Linux dans un
+  bac à sable, depuis un dossier courant à témoins (`outils/rejouer-ps.py`) : un chemin vide qui le lirait se voit. `--rapide` : Linux seulement, avec Internet ; `--sans-wine`. Le détail suit.
 - Sans Internet : `unshare -rn` (sans root, la boucle locale seule) et `VANGUARD_HORS_LIGNE=1` ; chaque outil qui
   dépend d'Internet doit s'y arrêter de lui-même, en moins d'une minute, et dire pourquoi il ne conclut pas.
 - Tests : `cargo test` (cible par défaut x86_64-unknown-linux-musl, voir `.cargo/config.toml`). Unitaires dans chaque

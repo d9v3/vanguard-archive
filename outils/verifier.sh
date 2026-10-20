@@ -8,6 +8,7 @@
 #   outils/verifier.sh               tout
 #   outils/verifier.sh --rapide      mise en forme, clippy et tests Linux seulement
 #   outils/verifier.sh --sans-wine   tout, sauf les tests Windows
+# Les scripts PowerShell du programme sont aussi analysés et rejoués dans un bac à sable (outils/rejouer-ps.py).
 set -uo pipefail
 cd "$(dirname "$0")/.."
 export PATH="$HOME/.cargo/bin:$PATH"
@@ -98,6 +99,7 @@ if [[ $MODE != --rapide ]]; then
   etape clippy-macos-arm clippy aarch64-apple-darwin &
   etape clippy-macos-intel clippy x86_64-apple-darwin &
   etape powershell scripts_powershell &
+  etape rejeu-powershell python3 outils/rejouer-ps.py --pwsh "$PWSH" &
   etape shell scripts_shell &
   etape python scripts_python &
   etape liens python3 outils/liens.py --hors-ligne &
@@ -139,6 +141,7 @@ if [[ $MODE != --rapide ]]; then
   ligne clippy-macos-arm "clippy macOS Apple Silicon"
   ligne clippy-macos-intel "clippy macOS Intel"
   ligne powershell "scripts PowerShell"
+  ligne rejeu-powershell "PowerShell du programme rejoué"
   ligne shell "scripts shell"
   ligne python "scripts Python"
   ligne liens "liens internes"
