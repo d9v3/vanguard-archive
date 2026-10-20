@@ -368,6 +368,11 @@ mod tests_sh_chaine {
             "réglages sysctl du code et fichier de Vanguard, à root",
         ),
         (
+            "machine/linux/mod.rs",
+            "lignes",
+            "réglages de sshd écrits par le code (X11Forwarding, MaxAuthTries), sans rien de lu",
+        ),
+        (
             "machine/linux/maj.rs",
             "k",
             "versions de noyau lues dans dkms status et /lib/modules, à root",

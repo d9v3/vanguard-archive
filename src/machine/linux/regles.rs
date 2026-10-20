@@ -57,6 +57,15 @@ regle!(
 );
 
 regle!(
+    "LNX-SSH-005",
+    Os::Linux,
+    126,
+    ("réglages secondaires de sshd", "secondary sshd settings"),
+    &[],
+    || ssh_secondaire().into_iter().collect()
+);
+
+regle!(
     "LNX-SSH-002",
     Os::Linux,
     130,
@@ -252,6 +261,18 @@ regle!(
     ("sudo sans mot de passe", "passwordless sudo"),
     &[],
     || sudo_sans_mot_de_passe().into_iter().collect()
+);
+
+regle!(
+    "LNX-PRV-004",
+    Os::Linux,
+    335,
+    (
+        "dossiers de commandes modifiables par d'autres",
+        "command folders writable by others"
+    ),
+    &[],
+    || dossiers_de_commandes().into_iter().collect()
 );
 
 regle!(

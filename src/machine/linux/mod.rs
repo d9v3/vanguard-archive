@@ -757,6 +757,59 @@ fn juger_ports_ssh(conf: &str) -> Option<Constat> {
     })
 }
 
+/// Réglages secondaires de sshd, une information : l'affichage X11 renvoyé (« X11Forwarding yes », que Debian et
+/// Ubuntu posent) ouvre à chaque client un passage de plus vers cet ordinateur ; plus de 6 essais de mot de passe par
+/// connexion (« MaxAuthTries », 6 par défaut) laissent deviner plus vite. Seulement des valeurs écrites : celles par
+/// défaut d'OpenSSH sont sûres. Couper X11 gêne qui lance ici des fenêtres par « ssh -X » : la correction se montre
+/// avant.
+fn juger_ssh_secondaire(conf: &str) -> Option<Constat> {
+    let x11 = valeur_sshd(conf, "X11Forwarding").as_deref() == Some("yes");
+    let essais = valeur_sshd(conf, "MaxAuthTries")
+        .and_then(|v| v.parse::<u32>().ok())
+        .filter(|n| *n > 6);
+    if !x11 && essais.is_none() {
+        return None;
+    }
+    let mut constats = Vec::new();
+    let mut lignes = String::new();
+    if x11 {
+        constats.push(tr!("affichage X11 renvoyé", "X11 display forwarded").to_string());
+        lignes.push_str("X11Forwarding no\\n");
+    }
+    if let Some(n) = essais {
+        constats.push(trf!(
+            "{n} essais de mot de passe par connexion",
+            "{n} password attempts per connection"
+        ));
+        lignes.push_str("MaxAuthTries 4\\n");
+    }
+    Some(
+        alerte(
+            "SSH",
+            Niveau::Info,
+            trf!(
+                "Réglages de sshd à resserrer : {}.",
+                "sshd settings to tighten: {}.",
+                constats.join(", ")
+            ),
+        )
+        .corriger(
+            tr!("Les resserrer (le réglage de sshd)", "Tighten them (sshd's setting)"),
+            &[
+                &format!("printf '{lignes}' | sudo tee -a {SSHD_VANGUARD} >/dev/null"),
+                RECHARGER_SSHD,
+            ],
+        ),
+    )
+}
+
+fn ssh_secondaire() -> Option<Constat> {
+    if !systemd() || !sshd_actif() {
+        return None;
+    }
+    juger_ssh_secondaire(&configuration_sshd()?)
+}
+
 fn ports_ssh() -> Option<Constat> {
     // Configuration illisible : la règle du serveur SSH le dit déjà.
     if !systemd() || !sshd_actif() {
@@ -1769,6 +1822,18 @@ pas-un-uuid;rm -rf ~:802-11-wireless:yes:Piège
         assert_eq!(
             Paquets::Zypper.commande_retrait(false, None, "x"),
             "sudo zypper --non-interactive remove x"
+        );
+    }
+
+    #[test]
+    fn reglages_secondaires_de_sshd() {
+        assert!(juger_ssh_secondaire("").is_none());
+        assert!(juger_ssh_secondaire("X11Forwarding no\nMaxAuthTries 6\n").is_none());
+        let c = juger_ssh_secondaire("X11Forwarding yes\nMaxAuthTries 10\n").unwrap();
+        assert_eq!(c.probleme, Some(Niveau::Info));
+        assert!(
+            c.correctif.unwrap().commandes[0]
+                .starts_with("printf 'X11Forwarding no\\nMaxAuthTries 4\\n' | sudo tee -a")
         );
     }
 
