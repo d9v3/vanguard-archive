@@ -243,8 +243,8 @@ enum Commande {
     /// supprimer pour de bon.
     #[command(visible_alias = "quarantine")]
     Quarantaine,
-    /// Secrets dans les projets git du dossier personnel (mots de passe, clés d'API), par gitleaks s'il est installé ;
-    /// les secrets restent masqués. Lecture seule.
+    /// Secrets dans l'historique des projets git du dossier personnel (mots de passe, clés d'API, jetons), cherchés par
+    /// Vanguard, et aussi par gitleaks s'il est installé. Aucun secret n'est affiché. Lecture seule.
     Secrets,
     /// Failles connues des images Docker ou Podman de cet ordinateur, par trivy s'il est installé. Lecture seule.
     #[command(visible_alias = "containers")]
@@ -985,7 +985,7 @@ const OUTILS: &[Outil] = &[
         mots: "quarantaine quarantine isolé isolated faux positif false positive remettre restore restaurer" },
     Outil { action: Action::SecretsGit, groupe: Some(Groupe::Protection), lettre: "",
         titre: ["Secrets dans les projets git", "Secrets in git projects"],
-        precision: ["mots de passe oubliés (gitleaks)", "forgotten passwords (gitleaks)"],
+        precision: ["mots de passe et clés oubliés", "forgotten passwords and keys"],
         mots: "secrets git gitleaks clé key api jeton token mot de passe password historique history dépôt \
                repository fuite leak" },
     Outil { action: Action::Conteneurs, groupe: Some(Groupe::Protection), lettre: "",
@@ -1366,8 +1366,8 @@ const AIDES_EN: &[(&str, &str)] = &[
                        device is probably infected. After your consent: the lists see the address"),
     ("yara", "YARA scan: 308 rules for malware families (ReversingLabs), alongside the antivirus. Without a folder: \
               downloads, desktop, startup. Read-only"),
-    ("secrets", "Secrets in the home folder's git projects (passwords, API keys), by gitleaks if installed; secrets \
-                 stay masked. Read-only"),
+    ("secrets", "Secrets in the history of the home folder's git projects (passwords, API keys, tokens), searched by \
+                 Vanguard, and also by gitleaks if installed. No secret is shown. Read-only"),
     ("conteneurs", "Known flaws in this computer's Docker or Podman images, by trivy if installed. Read-only"),
     ("canaux", "Crowded Wi-Fi: nearby networks by channel, and the freest channel to set on the router. Read-only"),
     ("nat", "NAT type for gaming (open, moderate or strict), from two public servers (STUN). Read-only"),

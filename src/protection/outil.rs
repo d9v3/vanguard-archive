@@ -1,4 +1,4 @@
-//! Outils externes que Vanguard lance quand ils sont installés (gitleaks, trivy) : trouvés dans le PATH, ou là où
+//! Outils externes que Vanguard lance quand ils sont installés (trivy ; gitleaks en complément) : trouvés dans le PATH, ou là où
 //! winget les pose sous Windows, et proposés à l'installation après accord, par l'outil du système. Vanguard ne
 //! télécharge jamais un programme lui-même : la distribution, Homebrew ou winget en répondent.
 
@@ -11,8 +11,6 @@ use crate::ui::*;
 /// Où un outil se trouve dans les dépôts des distributions Linux.
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 pub(crate) enum Linux {
-    /// Dans les dépôts de toutes les grandes distributions, sous ce nom.
-    Partout,
     /// Seulement dans ceux d'Arch : ailleurs, il faut le dépôt de son auteur, que Vanguard n'ajoute pas tout seul.
     Arch,
 }
@@ -60,7 +58,7 @@ fn commande_d_installation(e: &Externe) -> Option<String> {
         use crate::machine::linux::Paquets;
         let gestionnaire = Paquets::detecter()?;
         match (&e.linux, gestionnaire) {
-            (Linux::Partout, g) | (Linux::Arch, g @ Paquets::Pacman) => Some(g.installer(e.nom)),
+            (Linux::Arch, g @ Paquets::Pacman) => Some(g.installer(e.nom)),
             (Linux::Arch, _) => None,
         }
     }
