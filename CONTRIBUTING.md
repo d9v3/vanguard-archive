@@ -67,7 +67,7 @@ modification. Sur GitHub, `@claude` dans un ticket ou une demande de fusion le f
 | `src/chiffrement.rs` | données de la clé protégées : carnet chiffré (XChaCha20-Poly1305), clé de données gardée chez le propriétaire et enveloppée par la phrase (Argon2id) |
 | `assets/oui.tsv` | fabricants par préfixe MAC (liste IEEE), rangés en tableaux triés à la compilation (`build.rs`) |
 | `assets/yara/` | règles YARA de ReversingLabs (licence MIT), rassemblées par `outils/maj-yara.sh` |
-| `assets/banniere.png`, `assets/icones/`, `assets/vanguard.ico` | la bannière et l'icône (le V), dessinées case par case dans l'écriture de la bannière du terminal par `outils/icone.py` |
+| `assets/banniere-blanche.png`, `assets/banniere-noire.png`, `assets/icones/`, `assets/vanguard.ico` | la bannière (sans fond, une par thème de GitHub) et l'icône (le V), dessinées case par case dans l'écriture de la bannière du terminal par `outils/icone.py` |
 | `LICENCES-TIERCES.txt` | avis de licence des bibliothèques incluses (`outils/licences-tierces.py`) |
 
 ### Ajouter une règle au bilan

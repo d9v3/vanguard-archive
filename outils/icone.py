@@ -3,13 +3,14 @@
 leur ombre en traits doubles (╔ ╗ ╚ ╝ ═ ║). L'icône est le V seul ; la bannière, le nom entier (tête du README).
 
 Chaque caractère est une case dessinée en formes géométriques, pas une police : le rendu ne dépend d'aucune police
-installée et reste net à toutes les tailles. En blanc sur une plaque noire arrondie, comme la bannière dans un
-terminal.
+installée et reste net à toutes les tailles. L'icône : en blanc sur une plaque noire arrondie, comme la bannière
+dans un terminal. La bannière : sans fond, en deux couleurs, blanche pour le thème sombre de GitHub et noire pour le
+clair (le README choisit avec <picture>).
 
 Lancer depuis n'importe où (les images vont toujours dans le dépôt) :
     uv run --no-project --with pillow python outils/icone.py
 Produit assets/icones/vanguard-<taille>.png (Linux, 16 à 512 px), assets/vanguard.ico (Windows, 16 à 256 px) et
-assets/banniere.png.
+assets/banniere-{blanche,noire}.png.
 """
 
 from pathlib import Path
@@ -45,17 +46,17 @@ TAILLES_WINDOWS = [16, 20, 24, 30, 32, 36, 40, 48, 60, 64, 72, 80, 96, 256]
 COINS = {"╗": (-1, 1), "╔": (1, 1), "╝": (-1, -1), "╚": (1, -1)}
 
 
-def case(d, c, x, y, l, h, ombre):
+def case(d, c, x, y, l, h, couleur):
     """Dessine le caractère `c` dans la case (x, y, l × h). Un terminal fait des cases deux fois plus hautes que
     larges ; les deux traits d'une ligne double sont écartés d'un quart de la largeur."""
     if c == "█":
-        d.rectangle([x, y, x + l, y + h], fill=BLANC)
+        d.rectangle([x, y, x + l, y + h], fill=couleur)
         return
     cx, cy = x + l / 2, y + h / 2
     ecart, trait = l * 0.22, max(1.0, l * 0.13)
 
     def ligne(x0, y0, x1, y1):
-        d.rectangle([min(x0, x1) - trait / 2, min(y0, y1) - trait / 2, max(x0, x1) + trait / 2, max(y0, y1) + trait / 2], fill=ombre)
+        d.rectangle([min(x0, x1) - trait / 2, min(y0, y1) - trait / 2, max(x0, x1) + trait / 2, max(y0, y1) + trait / 2], fill=couleur)
 
     if c == "═":
         for s in (-1, 1):
@@ -75,7 +76,7 @@ def case(d, c, x, y, l, h, ombre):
             ligne(xv, yh, xv, bord_v)
 
 
-def dessin(texte, cellule):
+def dessin(texte, cellule, couleur=BLANC):
     """Le texte en cases de `cellule` × 2·`cellule` px, fond transparent."""
     lignes = texte.splitlines()
     colonnes = max(len(l) for l in lignes)
@@ -85,7 +86,7 @@ def dessin(texte, cellule):
     for j, ligne in enumerate(lignes):
         for i, c in enumerate(ligne):
             if c != " ":
-                case(d, c, i * l, j * h, l, h, BLANC)
+                case(d, c, i * l, j * h, l, h, couleur)
     return im
 
 
@@ -106,13 +107,14 @@ def icone(t):
     return grand.resize((t, t), Image.Resampling.LANCZOS)
 
 
-def banniere():
-    """Le nom entier, 1200 px de large, sur une plaque noire arrondie (lisible sur le fond clair de GitHub)."""
-    motif = dessin(BANNIERE, 12 * SURECH)
-    largeur = 1200 * SURECH
-    hauteur = round(largeur * (motif.height / motif.width) + 2 * 48 * SURECH)
-    grand = sur_plaque(motif, largeur, hauteur, 48 * SURECH)
-    return grand.resize((1200, round(hauteur / SURECH)), Image.Resampling.LANCZOS)
+def banniere(couleur):
+    """Le nom entier en `couleur`, 1200 px de large, sans fond : une plaque noire faisait un rectangle sur la page.
+    Une seule couleur ne se lit pas sur les deux thèmes de GitHub, d'où une image par thème."""
+    motif = dessin(BANNIERE, 12 * SURECH, couleur)
+    marge = 8 * SURECH  # de quoi lisser les bords sans couper le dernier trait
+    fond = Image.new("RGBA", (motif.width + 2 * marge, motif.height + 2 * marge), (0, 0, 0, 0))
+    fond.alpha_composite(motif, (marge, marge))
+    return fond.resize((1200, round(1200 * fond.height / fond.width)), Image.Resampling.LANCZOS)
 
 
 def main():
@@ -123,8 +125,9 @@ def main():
     windows = [icone(t) for t in TAILLES_WINDOWS]
     # Le fichier part de la plus grande ; les autres y sont mises telles quelles au lieu d'être recalculées.
     windows[-1].save(ASSETS / "vanguard.ico", sizes=[im.size for im in windows], append_images=windows[:-1])
-    banniere().save(ASSETS / "banniere.png", optimize=True)
-    print(f"{dossier}/, {ASSETS / 'vanguard.ico'} et {ASSETS / 'banniere.png'} écrits.")
+    for nom, couleur in (("blanche", BLANC), ("noire", NOIR)):
+        banniere(couleur).save(ASSETS / f"banniere-{nom}.png", optimize=True)
+    print(f"{dossier}/, {ASSETS / 'vanguard.ico'} et {ASSETS}/banniere-{{blanche,noire}}.png écrits.")
 
 
 if __name__ == "__main__":

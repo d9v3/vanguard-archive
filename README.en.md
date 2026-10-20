@@ -1,4 +1,4 @@
-<h1 align="center"><img src="assets/banniere.png" alt="Vanguard" width="600"></h1>
+<h1 align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/banniere-blanche.png"><img src="assets/banniere-noire.png" alt="Vanguard" width="600"></picture></h1>
 
 <p align="center"><a href="README.md">Français</a> · <b>English</b></p>
 
