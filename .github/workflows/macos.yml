@@ -2,8 +2,8 @@
 # de Mac à la maison. Le programme produit est universel (Apple Silicon + Intel) ; outils/deployer.sh le
 # récupère pour la clé USB (dossier macOS/).
 #
-# Minutes de Mac comptées 10 fois sur un dépôt privé (2000 minutes gratuites par mois, soit environ 200 de Mac) :
-# la compilation de nuit ne part que si le code a changé depuis la dernière réussie.
+# Le dépôt est public depuis le 20 octobre 2026 : les minutes de Mac ne sont plus comptées. La compilation de nuit ne
+# part quand même que si le code a changé depuis la dernière réussie.
 name: macOS
 
 on:
