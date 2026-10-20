@@ -148,23 +148,29 @@ fn lire() -> Result<Etat, String> {
     Ok(Etat { offres, prealable })
 }
 
+#[cfg(windows)]
+#[derive(serde::Deserialize, Default)]
+#[serde(default)]
+struct Lu {
+    winget: bool,
+    noms: Vec<String>,
+}
+
 /// Windows : winget, et les noms du panneau « Applications installées » plus ceux des applications du Store, lus
-/// d'un seul appel PowerShell.
+/// dans le registre ; PowerShell seulement si la clé des programmes de la machine ne s'ouvre pas.
 #[cfg(windows)]
 fn lire() -> Result<Etat, String> {
-    #[derive(serde::Deserialize, Default)]
-    #[serde(default)]
-    struct Lu {
-        winget: bool,
-        noms: Vec<String>,
-    }
-    let json = crate::machine::windows::ps(
-        r"$noms = @(Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*', 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*', 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*' -ErrorAction SilentlyContinue | ForEach-Object { [string]$_.DisplayName } | Where-Object { $_ })
-          $appx = @(Get-AppxPackage -ErrorAction SilentlyContinue | ForEach-Object { [string]$_.Name })
-          [pscustomobject]@{ winget = [bool](Get-Command winget -ErrorAction SilentlyContinue); noms = @($noms + $appx) } | ConvertTo-Json -Compress",
-    )
-    .ok_or_else(|| tr!("PowerShell ne répond pas", "PowerShell is not responding").to_string())?;
-    let lu: Lu = serde_json::from_str(&json).map_err(|e| e.to_string())?;
+    use crate::machine::windows::installes;
+    let lu = match installes::noms() {
+        Some(mut noms) => {
+            noms.extend(installes::paquets_store());
+            Lu {
+                winget: installes::winget_present(),
+                noms,
+            }
+        }
+        None => lire_par_powershell()?,
+    };
     let offres = CATALOGUE
         .iter()
         .filter_map(|l| {
@@ -186,6 +192,17 @@ fn lire() -> Result<Etat, String> {
         pour_flatpak: false,
     });
     Ok(Etat { offres, prealable })
+}
+
+#[cfg(windows)]
+fn lire_par_powershell() -> Result<Lu, String> {
+    let json = crate::machine::windows::ps(
+        r"$noms = @(Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*', 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*', 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*' -ErrorAction SilentlyContinue | ForEach-Object { [string]$_.DisplayName } | Where-Object { $_ })
+          $appx = @(Get-AppxPackage -ErrorAction SilentlyContinue | ForEach-Object { [string]$_.Name })
+          [pscustomobject]@{ winget = [bool](Get-Command winget -ErrorAction SilentlyContinue); noms = @($noms + $appx) } | ConvertTo-Json -Compress",
+    )
+    .ok_or_else(|| tr!("PowerShell ne répond pas", "PowerShell is not responding").to_string())?;
+    serde_json::from_str(&json).map_err(|e| e.to_string())
 }
 
 /// Noms des applications de /Applications et ~/Applications, sans « .app ».

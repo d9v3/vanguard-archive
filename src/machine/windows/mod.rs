@@ -14,6 +14,7 @@ mod durcissement;
 mod ecoute;
 mod evenements;
 mod exclusions;
+pub(crate) mod installes;
 mod maj;
 mod persistance;
 mod portes;
