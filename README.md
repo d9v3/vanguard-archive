@@ -51,7 +51,7 @@ pour revenir.
 | **Connexion pour le jeu** | Ping, gigue, pertes, débit et bufferbloat, comparés à tes habitudes. |
 | **Dépanner** | Diagnostic de l'ordinateur, pannes de tous les jours pas à pas (Internet, Wi-Fi, lenteur, son, imprimante, disque plein), après une infection, nouvel ordinateur, ordinateur qui part, compte piraté, « Pourquoi c'est lent ? », fiche de l'ordinateur, rapport à laisser, réparations. |
 | **Optimiser et nettoyer** | Réglages de confidentialité et de performance qui s'annulent exactement, nettoyage à cocher avec la place gagnée mesurée, programmes du démarrage. |
-| **Protection** | Fichiers-pièges contre les rançongiciels, blocages de Windows Defender, 308 règles YARA, antivirus, bac à sable, intégrité des fichiers critiques, mots de passe fuités, connexions sortantes, faux technicien (logiciels de prise de contrôle à distance), caméra et micro, liens dangereux, fichiers téléchargés, quarantaine réversible. |
+| **Protection** | Fichiers-pièges contre les rançongiciels, blocages de Windows Defender, 308 règles YARA, antivirus, bac à sable, intégrité des fichiers critiques, mots de passe fuités, connexions sortantes, faux technicien (logiciels de prise de contrôle à distance), caméra et micro, liens dangereux, fichiers téléchargés, quarantaine réversible ; secrets oubliés dans les projets git (gitleaks) et failles des images Docker (trivy), s'ils sont installés. |
 | **Suivi** | Surveillance toutes les heures, entretien du mois, rapport HTML avec la courbe des notes, apprentissage sur ton ordinateur, ce que Vanguard a changé (chaque correction, datée). |
 | **Logiciels et jeux** | Les meilleurs logiciels en 8 catégories, depuis leur source officielle ; mises à jour de tout d'un coup ; réglages pour jouer. |
 | **Outils** | Sauvegarde automatique, copier mes fichiers (copie vérifiée) et vérifier une copie, vérifier ma clé (fausses clés, vitesse), mes ordinateurs (suivis par la clé), données de la clé protégées par une phrase, raccourci sur cet ordinateur, Vanguard mis à jour depuis la clé, guide des commandes, recherche dans tous les menus. |
@@ -189,6 +189,13 @@ posés et retirés après accord. Et une analyse YARA : 308 règles de Reversing
 entières (rançongiciels, voleurs de mots de passe, chevaux de Troie, portes dérobées…), en complément de
 l'antivirus. Ce que l'antivirus ou YARA trouve peut aller en quarantaine, réversible : le fichier est rendu
 inutilisable et noté, puis remis exactement à sa place si c'était un faux positif.
+
+**Outils libres reconnus, s'ils sont installés** — Vanguard les lance et explique ce qu'ils trouvent, sans rien
+modifier ; absents, il propose de les installer par l'outil du système. gitleaks relit l'historique des projets git
+du dossier personnel : un mot de passe ou une clé d'API écrit un jour y reste, même effacé ensuite (les secrets
+restent masqués, ni affichés ni gardés). trivy dit les failles connues, graves ou critiques, des images Docker ou
+Podman : une image ne se met pas à jour toute seule. Et quand quelqu'un rate des connexions SSH, le bilan dit si
+fail2ban, sshguard ou CrowdSec bloque déjà les adresses qui insistent.
 
 **Caméra et micro : qui s'en sert ?** — sous Windows, chaque programme qui a utilisé la caméra ou le micro, et la
 dernière fois (un programme lancé depuis un dossier temporaire ou Téléchargements est signalé) ; sous Linux, ce qui
@@ -369,6 +376,8 @@ Chaque entrée du menu existe aussi en commande.
 | `vanguard verifier-moi` | vérifier Vanguard lui-même : version, date de compilation, empreinte SHA-256 à comparer à la page de la version ; sur la clé du propriétaire, le manifeste de la clé |
 | `vanguard camera-micro` | caméra et micro : qui s'en sert ? (lecture seule) |
 | `vanguard quarantaine` | les fichiers isolés, à remettre à leur place ou à supprimer |
+| `vanguard secrets` | secrets oubliés dans l'historique des projets git (gitleaks, s'il est installé ; lecture seule) |
+| `vanguard conteneurs` | failles connues des images Docker ou Podman (trivy, s'il est installé ; lecture seule) |
 | `vanguard distance` | quelqu'un contrôle mon ordi ? logiciels de prise de contrôle à distance (faux technicien), retrait après accord |
 | `vanguard lien <adresse>` | ce lien est-il dangereux ? (examiné sans l'ouvrir ; en ligne après accord) |
 | `vanguard verifier-fichier <fichier> [empreinte]` | vérifier un fichier téléchargé : empreinte, nom et contenu, YARA, antivirus |

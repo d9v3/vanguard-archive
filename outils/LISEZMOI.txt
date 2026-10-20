@@ -75,6 +75,8 @@ Entrée ouvre celle en surbrillance, Échap efface. Au menu principal, elle trou
        Ce lien est-il dangereux ? Examiné sans l'ouvrir ; son âge et des listes publiques, après accord
        Vérifier un fichier téléchargé : empreinte comparée à celle du site, nom et contenu, YARA, antivirus
        Quarantaine : les fichiers isolés par l'antivirus ou YARA, remis à leur place (faux positif) ou supprimés
+       Secrets dans les projets git : mots de passe et clés oubliés dans l'historique (gitleaks, s'il est là)
+       Failles des images Docker : failles connues, graves ou critiques (trivy, s'il est là)
   7  Installer et jouer ›
        Logiciels : les meilleurs, libres pour la plupart, par catégorie (navigateurs, mots de passe,
        bureautique, vidéo, création, outils système…) et un pack de départ, depuis la source officielle

@@ -35,6 +35,7 @@ turn on once with `/install-github-app`).
 | `src/reseau/connexion.rs` | connection test for gaming |
 | `src/protection/antivirus.rs` | ClamAV / Defender, quarantine |
 | `src/protection/yara.rs`, `src/protection/pieges.rs` | YARA scan (bundled rules, system engine); decoy files against ransomware |
+| `src/protection/outil.rs`, `src/protection/secrets_git.rs`, `src/protection/conteneurs.rs` | open source tools run when installed, installation offered otherwise; gitleaks on git project history, trivy on Docker or Podman images |
 | `src/reseau/surveillance.rs` | systemd timer / Task Scheduler / launchd agent, notifications |
 | `src/rapport.rs`, `src/historique.rs` | HTML report, check history, grade curve |
 | `src/reparer.rs`, `src/maj.rs`, `src/gaming/` | repairs, updates, gaming |

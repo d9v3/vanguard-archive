@@ -47,7 +47,7 @@ In the menu, choose **1** (full check), then **2** (fix). Arrows, Enter, and Esc
 | **Connection for gaming** | Ping, jitter, loss, speed and bufferbloat, compared with your habits. |
 | **Troubleshoot** | Computer diagnostic, everyday problems step by step (Internet, Wi-Fi, slowness, sound, printer, full disk), after an infection, new computer, computer leaving, hacked account, “Why is it slow?”, computer specs, report to leave behind, repairs. |
 | **Optimize and clean up** | Privacy and performance settings undone exactly, a cleanup checklist with the space gained measured, startup programs. |
-| **Protection** | Decoy files against ransomware, Windows Defender blocking, 308 YARA rules, antivirus, sandbox, integrity of critical files, leaked passwords, outbound connections, tech-support scam (remote control tools), camera and microphone, dangerous links, downloaded files, reversible quarantine. |
+| **Protection** | Decoy files against ransomware, Windows Defender blocking, 308 YARA rules, antivirus, sandbox, integrity of critical files, leaked passwords, outbound connections, tech-support scam (remote control tools), camera and microphone, dangerous links, downloaded files, reversible quarantine; secrets forgotten in git projects (gitleaks) and flaws in Docker images (trivy), when installed. |
 | **Follow-up** | Hourly monitoring, monthly check-up, HTML report with the grade curve, learning on your computer, what Vanguard changed (each fix, dated). |
 | **Software and games** | The best software in 8 categories, from its official source; update everything at once; settings for gaming. |
 | **Tools** | Automatic backup, copy my files (checked copy) and check a copy, check my drive (fake drives, speed), my computers (tracked by the key), key data protected by a passphrase, shortcut on this computer, Vanguard updated from the key, command guide, search in every menu. |
@@ -177,6 +177,13 @@ ReversingLabs rules that recognize whole families (ransomware, password stealers
 the antivirus. What the antivirus or YARA finds can go into a
 reversible quarantine: the file is made unusable and noted, then put back exactly in its place if it was a false
 positive.
+
+**Recognized open source tools, when installed** — Vanguard runs them and explains what they find, without
+changing anything; when missing, it offers to install them with the system's tool. gitleaks reads the history of
+the git projects in the home folder: a password or API key written once stays there, even when deleted later
+(secrets stay masked, neither shown nor kept). trivy tells the known serious or critical flaws in Docker or Podman
+images: an image does not update by itself. And when someone fails SSH logins, the check tells whether fail2ban,
+sshguard or CrowdSec already blocks the addresses that keep trying.
 
 **Camera and microphone: who uses them?** — on Windows, each program that used the camera or the microphone, and the
 last time (a program started from a temporary folder or Downloads is flagged); on Linux, what holds them right now.
@@ -350,6 +357,8 @@ Each menu entry is also a command.
 | `vanguard self-check` | check Vanguard itself: version, build date, SHA-256 checksum to compare with the release page; on the owner's key, the key manifest |
 | `vanguard camera-mic` | camera and microphone: who uses them? (read-only) |
 | `vanguard quarantine` | the isolated files, to put back in their place or to delete |
+| `vanguard secrets` | secrets forgotten in the history of git projects (gitleaks, if installed; read-only) |
+| `vanguard containers` | known flaws in Docker or Podman images (trivy, if installed; read-only) |
 | `vanguard remote-access` | is someone controlling my PC? remote control tools (tech-support scam), removed after consent |
 | `vanguard link <address>` | is this link dangerous? (checked without opening it; online after your consent) |
 | `vanguard check-file <file> [checksum]` | check a downloaded file: checksum, name and content, YARA, antivirus |
