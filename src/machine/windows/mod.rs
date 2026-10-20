@@ -431,21 +431,64 @@ fn pare_feu() -> Constat {
     }
 }
 
+/// L'état de Defender par WMI (les classes que lisent Get-MpComputerStatus et Get-MpPreference), dans le JSON que
+/// rendait le script : `None` si Defender ne répond pas par WMI (absent, remplacé par un antivirus tiers, Wine).
+fn defender_par_wmi() -> Option<serde_json::Value> {
+    const DEFENDER: &str = r"root\Microsoft\Windows\Defender";
+    let champs = [
+        "AntivirusEnabled",
+        "RealTimeProtectionEnabled",
+        "AntivirusSignatureAge",
+        "IsTamperProtected",
+    ];
+    let lignes = wmi::requete(DEFENDER, "MSFT_MpComputerStatus", "", &champs)?;
+    let etat = lignes.first()?;
+    let mut v = serde_json::Map::new();
+    for champ in champs {
+        v.insert(champ.to_string(), etat[champ].json());
+    }
+    // Comme le `try { … } catch { $null }` du script : la préférence peut manquer sans que l'état soit faux.
+    let cloud = wmi::requete(DEFENDER, "MSFT_MpPreference", "", &["MAPSReporting"])
+        .and_then(|l| l.first().and_then(|p| p["MAPSReporting"].entier()));
+    v.insert("MAPSReporting".into(), cloud.into());
+    Some(v.into())
+}
+
+/// Les antivirus inscrits au Centre de sécurité, par WMI : `None` sans Centre de sécurité (Windows Server, Wine).
+fn antivirus_inscrits() -> Option<String> {
+    let lignes = wmi::requete(r"root\SecurityCenter2", "AntivirusProduct", "", &["displayName"])?;
+    Some(
+        lignes
+            .iter()
+            .filter_map(|l| l["displayName"].texte())
+            .collect::<Vec<_>>()
+            .join(", "),
+    )
+}
+
 fn antivirus() -> Vec<Constat> {
-    // Un seul PowerShell dans le cas courant (chaque lancement coûte près d'une demi-seconde) : l'état de Defender et
-    // sa protection dans le cloud ensemble. Get-MpPreference peut manquer sans que l'état soit faux.
-    let Some(json) = ps(
-        "$s = Get-MpComputerStatus | Select-Object AntivirusEnabled,RealTimeProtectionEnabled,AntivirusSignatureAge,IsTamperProtected; \
-         $s | Add-Member -NotePropertyName MAPSReporting -NotePropertyValue $(try { [int](Get-MpPreference).MAPSReporting } catch { $null }); \
-         $s | ConvertTo-Json",
-    ) else {
-        // Defender ne répond pas : PowerShell lui-même répond-il ? Demandé seulement maintenant.
-        if ps("1").is_none() {
-            return vec![illisible("Antivirus")];
-        }
-        let tiers =
+    // WMI d'abord (quelques millisecondes) ; sinon un seul PowerShell (près d'une demi-seconde par lancement) pour
+    // l'état de Defender et sa protection dans le cloud ensemble. Get-MpPreference peut manquer sans que l'état
+    // soit faux.
+    let json = defender_par_wmi().map(|v| v.to_string()).or_else(|| {
+        ps(
+            "$s = Get-MpComputerStatus | Select-Object AntivirusEnabled,RealTimeProtectionEnabled,AntivirusSignatureAge,IsTamperProtected; \
+             $s | Add-Member -NotePropertyName MAPSReporting -NotePropertyValue $(try { [int](Get-MpPreference).MAPSReporting } catch { $null }); \
+             $s | ConvertTo-Json",
+        )
+    });
+    let Some(json) = json else {
+        // Defender ne répond pas : le Centre de sécurité connaît-il un autre antivirus ? Sinon, PowerShell
+        // lui-même répond-il ? Demandé seulement maintenant.
+        let tiers = if let Some(tiers) = antivirus_inscrits() {
+            tiers
+        } else {
+            if ps("1").is_none() {
+                return vec![illisible("Antivirus")];
+            }
             ps("(Get-CimInstance -Namespace root/SecurityCenter2 -ClassName AntivirusProduct).displayName -join ', '")
-                .unwrap_or_default();
+                .unwrap_or_default()
+        };
         return vec![if tiers.is_empty() {
             alerte(
                 "Antivirus",
@@ -1134,6 +1177,17 @@ pub fn auditer() -> Audit {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Sous Wine, ni Defender ni le Centre de sécurité ni PowerShell : « illisible », jamais « aucun antivirus » (une
+    /// alerte critique fausse) ni « Defender actif ».
+    #[test]
+    fn antivirus_illisible_sous_wine() {
+        if std::path::Path::new(r"C:\windows\system32\wineboot.exe").is_file() {
+            assert!(defender_par_wmi().is_none() && antivirus_inscrits().is_none());
+            let c = antivirus();
+            assert!(c.len() == 1 && !c[0].verifie, "{}", c[0].message);
+        }
+    }
 
     #[test]
     fn uac_qui_ne_demande_rien() {

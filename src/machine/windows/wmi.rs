@@ -53,6 +53,25 @@ impl Valeur {
         }
     }
 
+    pub(crate) fn texte(&self) -> Option<&str> {
+        match self {
+            Valeur::Texte(t) => Some(t),
+            _ => None,
+        }
+    }
+
+    /// La valeur en JSON, comme ConvertTo-Json la rendrait : pour garder les lectures qui jugeaient le JSON de
+    /// PowerShell.
+    pub(crate) fn json(&self) -> serde_json::Value {
+        match self {
+            Valeur::Nul => serde_json::Value::Null,
+            Valeur::Booleen(b) => (*b).into(),
+            Valeur::Entier(n) => (*n).into(),
+            Valeur::Texte(t) => t.as_str().into(),
+            Valeur::Liste(l) => l.iter().map(Valeur::json).collect(),
+        }
+    }
+
     pub(crate) fn liste(&self) -> &[Valeur] {
         match self {
             Valeur::Liste(l) => l,
@@ -310,6 +329,12 @@ mod tests {
         assert_eq!(Valeur::Texte(" 18446744 ".into()).entier(), Some(18_446_744));
         assert_eq!(Valeur::Entier(3).entier(), Some(3));
         assert_eq!(Valeur::Nul.entier(), None);
+        assert_eq!(Valeur::Texte("a".into()).texte(), Some("a"));
+        assert_eq!(Valeur::Nul.json(), serde_json::Value::Null);
+        assert_eq!(
+            Valeur::Liste(vec![Valeur::Entier(1), Valeur::Booleen(false)]).json(),
+            serde_json::json!([1, false])
+        );
         assert_eq!(Valeur::Nul.liste(), []);
         assert_eq!(Valeur::Liste(vec![Valeur::Entier(2)]).liste(), &[Valeur::Entier(2)]);
     }
