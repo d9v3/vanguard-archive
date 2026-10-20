@@ -2,7 +2,7 @@
 //! WDigest qui garde les mots de passe en clair dans la mémoire (ce qu'un voleur de mots de passe lit), la protection
 //! de l'autorité de sécurité locale (LSA) qui protège ces secrets, PowerShell 2.0 qui échappe à l'antivirus et aux
 //! journaux, et l'Assistance à distance, la porte des faux techniciens. Le registre se lit sans droits
-//! administrateur ; PowerShell 2.0, par WMI.
+//! administrateur ; PowerShell 2.0 et Credential Guard, par WMI (PowerShell seulement si WMI ne répond pas).
 
 use super::*;
 
@@ -855,8 +855,7 @@ pub(super) fn juger_journal_powershell(valeur: Option<u32>) -> Constat {
 /// Credential Guard (`SecurityServicesRunning` de Win32_DeviceGuard contient 1) : seulement sur les éditions
 /// Entreprise et Éducation, les seules qui l'ont ; ailleurs, rien à dire.
 pub(super) fn juger_credential_guard(edition: Option<&str>, services: Option<&str>) -> Option<Constat> {
-    let edition = edition?;
-    if !(edition.starts_with("Enterprise") || edition.starts_with("Education")) {
+    if !edition.is_some_and(credential_guard_possible) {
         return None;
     }
     let actif = services?.split([',', ' ']).any(|s| s.trim() == "1");
@@ -887,6 +886,40 @@ pub(super) fn juger_credential_guard(edition: Option<&str>, services: Option<&st
     })
 }
 
+fn credential_guard_possible(edition: &str) -> bool {
+    edition.starts_with("Enterprise") || edition.starts_with("Education")
+}
+
+/// La protection contre les exploits de tout le système, telle que Set-ProcessMitigation -System l'écrit
+/// (`MitigationOptions`, un champ par demi-octet : 0 réglage de Windows, 1 forcée, 2 coupée). Sans la valeur, ou
+/// sans aucun champ autre que 0 ou 1, rien n'est coupé : Get-ProcessMitigation n'a pas à être lancé. Sinon, lui
+/// seul nomme sans erreur les protections coupées (la place de chacune dans la valeur n'est pas documentée).
+pub(super) fn exploits_a_demander(options: Option<&[u8]>) -> bool {
+    options.is_some_and(|o| o.iter().any(|octet| octet & 0x0F > 1 || octet >> 4 > 1))
+}
+
+/// Les sections PS2, MIT et CG de l'ancien script, chacune seulement quand WMI ou le registre n'y ont pas répondu.
+fn script_de_secours(ps2: bool, exploits: bool, credential_guard: bool) -> Option<String> {
+    let parties: Vec<&str> = [
+        (ps2, "try { 'PS2|' + (Get-CimInstance Win32_OptionalFeature -Filter \"Name='MicrosoftWindowsPowerShellV2Root'\").InstallState; 'PS2_FIN' } catch {}"),
+        (exploits, "try { $m = Get-ProcessMitigation -System; 'MIT|' + $m.DEP.Enable + '|' + $m.ASLR.BottomUp + '|' + $m.CFG.Enable + '|' + $m.SEHOP.Enable; 'MIT_FIN' } catch {}"),
+        (credential_guard, "try { 'CG|' + ((Get-CimInstance -Namespace root\\Microsoft\\Windows\\DeviceGuard -ClassName Win32_DeviceGuard).SecurityServicesRunning -join ','); 'CG_FIN' } catch {}"),
+    ]
+    .into_iter()
+    .filter_map(|(utile, partie)| utile.then_some(partie))
+    .collect();
+    (!parties.is_empty()).then(|| parties.join("; "))
+}
+
+/// État de PowerShell 2.0 (`InstallState`) : 1 installé ; 2 retiré, 3 absent ; le reste, inconnu.
+fn powershell2_installe(etat: Option<i64>) -> Option<bool> {
+    match etat? {
+        1 => Some(true),
+        2 | 3 => Some(false),
+        _ => None,
+    }
+}
+
 /// Sysmon, quand il est là : il journalise processus et connexions en détail. Son absence n'est pas un défaut sur un
 /// ordinateur personnel.
 pub(super) fn juger_sysmon(present: bool) -> Option<Constat> {
@@ -906,27 +939,63 @@ pub(super) fn durcissement() -> Vec<Constat> {
         juger_wdigest(lire_dword(WDIGEST, "UseLogonCredential")),
         juger_lsa(lire_dword(r"SYSTEM\CurrentControlSet\Control\Lsa", "RunAsPPL")),
     ];
-    // Un seul PowerShell pour les deux lectures (chaque lancement coûte près d'une demi-seconde) ; chacune a sa
-    // section, et l'échec de l'une laisse l'autre.
-    let ps2 = ps(
-        "try { 'PS2|' + (Get-CimInstance Win32_OptionalFeature -Filter \"Name='MicrosoftWindowsPowerShellV2Root'\").InstallState; 'PS2_FIN' } catch {}; \
-         try { $m = Get-ProcessMitigation -System; 'MIT|' + $m.DEP.Enable + '|' + $m.ASLR.BottomUp + '|' + $m.CFG.Enable + '|' + $m.SEHOP.Enable; 'MIT_FIN' } catch {}; \
-         try { 'CG|' + ((Get-CimInstance -Namespace root\\Microsoft\\Windows\\DeviceGuard -ClassName Win32_DeviceGuard).SecurityServicesRunning -join ','); 'CG_FIN' } catch {}",
+    // WMI et le registre d'abord : quelques millisecondes, là où chaque PowerShell coûte près d'une demi-seconde.
+    // Un seul PowerShell, et seulement pour ce qu'ils n'ont pas pu dire ; chaque lecture garde sa section, et
+    // l'échec de l'une laisse les autres.
+    let edition = lire_texte(r"SOFTWARE\Microsoft\Windows NT\CurrentVersion", "EditionID");
+    let credential_guard = edition.as_deref().is_some_and(credential_guard_possible);
+    let ps2_wmi = wmi::requete(
+        r"root\cimv2",
+        "Win32_OptionalFeature",
+        "Name='MicrosoftWindowsPowerShellV2Root'",
+        &["InstallState"],
     );
-    let installe = section(ps2.as_deref(), "PS2")
-        .and_then(|l| l.first().map(|v| v.trim().to_string()))
-        .and_then(|v| match v.as_str() {
-            "1" => Some(true),
-            "2" | "3" => Some(false),
-            _ => None,
+    let exploits = exploits_a_demander(
+        winreg::RegKey::predef(winreg::enums::HKEY_LOCAL_MACHINE)
+            .open_subkey(r"SYSTEM\CurrentControlSet\Control\Session Manager\kernel")
+            .and_then(|k| k.get_raw_value("MitigationOptions"))
+            .ok()
+            .map(|v| v.bytes)
+            .as_deref(),
+    );
+    let cg_wmi = credential_guard
+        .then(|| {
+            wmi::requete(
+                r"root\Microsoft\Windows\DeviceGuard",
+                "Win32_DeviceGuard",
+                "",
+                &["SecurityServicesRunning"],
+            )
+        })
+        .flatten()
+        .map(|lignes| {
+            // Comme le `-join ','` du script : aucune instance, une liste vide.
+            lignes.first().map_or_else(String::new, |l| {
+                l["SecurityServicesRunning"]
+                    .liste()
+                    .iter()
+                    .filter_map(|v| v.entier().map(|n| n.to_string()))
+                    .collect::<Vec<_>>()
+                    .join(",")
+            })
         });
+    let secours = script_de_secours(ps2_wmi.is_none(), exploits, credential_guard && cg_wmi.is_none())
+        .and_then(|script| ps(&script));
+    let installe = match &ps2_wmi {
+        Some(lignes) => powershell2_installe(lignes.first().and_then(|l| l["InstallState"].entier())),
+        None => powershell2_installe(
+            section(secours.as_deref(), "PS2").and_then(|l| l.first().and_then(|v| v.trim().parse().ok())),
+        ),
+    };
     c.extend(juger_powershell2(installe));
     c.extend(juger_protection_exploits(
-        section(ps2.as_deref(), "MIT").and_then(|l| l.first().copied()),
+        section(secours.as_deref(), "MIT").and_then(|l| l.first().copied()),
     ));
     c.extend(juger_credential_guard(
-        lire_texte(r"SOFTWARE\Microsoft\Windows NT\CurrentVersion", "EditionID").as_deref(),
-        section(ps2.as_deref(), "CG").and_then(|l| l.first().copied()),
+        edition.as_deref(),
+        cg_wmi
+            .as_deref()
+            .or_else(|| section(secours.as_deref(), "CG").and_then(|l| l.first().copied())),
     ));
     c.extend(juger_assistance(lire_dword(
         r"SYSTEM\CurrentControlSet\Control\Remote Assistance",
@@ -1067,6 +1136,50 @@ mod tests {
         );
         assert!(juger_credential_guard(Some("Enterprise"), None).is_none());
         assert!(juger_sysmon(false).is_none() && juger_sysmon(true).is_some_and(|c| c.probleme.is_none()));
+    }
+
+    #[test]
+    fn exploits_par_le_registre() {
+        // Valeur absente, ou rien que des réglages de Windows (0) et des protections forcées (1) : rien de coupé.
+        assert!(!exploits_a_demander(None));
+        assert!(!exploits_a_demander(Some(&[0; 24])));
+        // DEP et BottomUp forcés (01, 00, 01 : l'exemple de Set-ProcessMitigation -System -Enable DEP,BottomUp).
+        assert!(!exploits_a_demander(Some(&[0x01, 0x00, 0x01, 0x00])));
+        // DEP coupé (02) ; un « optimiseur » qui coupe tout (22…) ; un champ coupé dans le demi-octet haut.
+        assert!(exploits_a_demander(Some(&[0x02, 0x00, 0x01, 0x00])));
+        assert!(exploits_a_demander(Some(&[0x22; 16])));
+        assert!(exploits_a_demander(Some(&[0x00, 0x00, 0x20])));
+        // Un champ inconnu (3) n'est pas deviné : Get-ProcessMitigation le nommera.
+        assert!(exploits_a_demander(Some(&[0x03])));
+    }
+
+    #[test]
+    fn secours_par_powershell() {
+        assert_eq!(script_de_secours(false, false, false), None);
+        let tout = script_de_secours(true, true, true).unwrap();
+        for (nom, cmdlet) in [
+            ("PS2", "Win32_OptionalFeature"),
+            ("MIT", "Get-ProcessMitigation"),
+            ("CG", "Win32_DeviceGuard"),
+        ] {
+            assert!(tout.contains(&format!("'{nom}_FIN'")) && tout.contains(cmdlet), "{nom}");
+        }
+        let seul = script_de_secours(false, true, false).unwrap();
+        assert!(seul.contains("MIT_FIN") && !seul.contains("PS2") && !seul.contains("CG|"));
+        assert_eq!(powershell2_installe(Some(1)), Some(true));
+        assert_eq!(powershell2_installe(Some(2)), Some(false));
+        assert_eq!(powershell2_installe(Some(3)), Some(false));
+        assert_eq!(powershell2_installe(Some(0)), None);
+        assert_eq!(powershell2_installe(None), None);
+    }
+
+    /// Sous Wine, sans PowerShell ni Win32_OptionalFeature : PowerShell 2.0 et Credential Guard restent sans constat
+    /// (jamais « sain »), et le reste de l'audit se fait quand même.
+    #[test]
+    fn durcissement_sans_powershell() {
+        let c = durcissement();
+        assert!(!c.is_empty());
+        assert!(!c.iter().any(|x| x.message.contains("PowerShell 2.0")));
     }
 
     #[test]

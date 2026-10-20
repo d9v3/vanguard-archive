@@ -32,6 +32,7 @@ mod regles;
 pub(crate) mod securite;
 mod services;
 mod verrouillage;
+pub(crate) mod wmi;
 
 use comptes::{comptes, politique};
 use maj::signatures;
