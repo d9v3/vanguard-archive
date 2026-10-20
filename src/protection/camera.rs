@@ -21,7 +21,7 @@ struct Usage {
 }
 
 /// Un programme qui n'a rien à faire avec la caméra ou le micro, d'après l'endroit d'où il se lance.
-fn lieu_suspect(programme: &str) -> bool {
+pub(crate) fn lieu_suspect(programme: &str) -> bool {
     let bas = programme.to_lowercase().replace('/', "\\");
     [
         "\\appdata\\local\\temp\\",
@@ -157,7 +157,7 @@ fn conclure<'a>(usages: impl Iterator<Item = &'a Usage>) {
 
 /// « 2026-10-18 21:04 » d'un FILETIME de Windows (centaines de nanosecondes depuis 1601), en heure locale.
 #[cfg(any(windows, test))]
-fn date_filetime(ft: u64) -> Option<String> {
+pub(crate) fn date_filetime(ft: u64) -> Option<String> {
     if ft == 0 {
         return None;
     }
@@ -174,11 +174,7 @@ fn juger_windows(entrees: &[(String, u64, u64)]) -> Vec<Usage> {
         .iter()
         .filter(|(_, debut, _)| *debut != 0)
         .map(|(nom, debut, fin)| {
-            let programme = if nom.contains('#') {
-                nom.replace('#', "\\")
-            } else {
-                nom.clone()
-            };
+            let programme = nom_programme(nom);
             let en_cours = *fin == 0;
             (
                 (*debut).max(*fin),
@@ -194,35 +190,92 @@ fn juger_windows(entrees: &[(String, u64, u64)]) -> Vec<Usage> {
     usages.into_iter().map(|(_, u)| u).collect()
 }
 
-#[cfg(windows)]
-mod windows {
-    use winreg::RegKey;
-    use winreg::enums::HKEY_CURRENT_USER;
+/// Le nom montré d'une sous-clé du registre : un programme hors du Store a pour nom son chemin, « \ » écrit « # ».
+#[cfg(any(windows, test))]
+pub(crate) fn nom_programme(nom: &str) -> String {
+    if nom.contains('#') {
+        nom.replace('#', "\\")
+    } else {
+        nom.to_string()
+    }
+}
 
-    /// `webcam` ou `microphone` : les applications du Store, puis les autres (« NonPackaged »).
-    pub(super) fn lire(appareil: &str) -> Vec<super::Usage> {
-        let Ok(racine) = RegKey::predef(HKEY_CURRENT_USER).open_subkey(format!(
-            r"Software\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\{appareil}"
-        )) else {
-            return Vec::new();
+/// Ce que le registre (ConsentStore de CapabilityAccessManager) dit d'une capacité : `webcam`, `microphone`,
+/// `location` ou `contacts`. Partagé avec le bilan de confidentialité (`acces`), qui lit aussi l'autorisation.
+#[cfg(any(windows, test))]
+#[derive(Debug, Default, Clone)]
+pub(crate) struct Consentement {
+    /// « Allow » ou « Deny » de la clé de la capacité : l'interrupteur de tout le compte (HKCU) ou de l'appareil
+    /// (HKLM).
+    pub(crate) global: Option<String>,
+    /// La même chose pour les programmes classiques (sous-clé « NonPackaged »).
+    pub(crate) hors_store: Option<String>,
+    pub(crate) entrees: Vec<Entree>,
+}
+
+/// Une application notée sous la capacité.
+#[cfg(any(windows, test))]
+#[derive(Debug, Clone)]
+pub(crate) struct Entree {
+    /// Nom de la sous-clé : famille du paquet (Store) ou chemin, « \ » écrit « # » (programme classique).
+    pub(crate) nom: String,
+    /// « Allow » ou « Deny » ; les programmes classiques n'en ont souvent pas.
+    pub(crate) valeur: Option<String>,
+    /// FILETIME du dernier début et de la dernière fin d'usage (0 : jamais).
+    pub(crate) debut: u64,
+    pub(crate) fin: u64,
+    pub(crate) hors_store: bool,
+}
+
+#[cfg(windows)]
+pub(crate) mod windows {
+    use super::{Consentement, Entree};
+    use winreg::RegKey;
+    use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE};
+
+    /// La capacité dans le registre de ce compte (`machine` faux) ou de tout l'ordinateur ; `None` : clé absente ou
+    /// illisible. Les applications du Store, puis les autres (« NonPackaged »).
+    pub(crate) fn consentement(machine: bool, capacite: &str) -> Option<Consentement> {
+        let ruche = RegKey::predef(if machine { HKEY_LOCAL_MACHINE } else { HKEY_CURRENT_USER });
+        let racine = ruche
+            .open_subkey(format!(
+                r"Software\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\{capacite}"
+            ))
+            .ok()?;
+        let mut c = Consentement {
+            global: racine.get_value("Value").ok(),
+            ..Consentement::default()
         };
-        let mut entrees = Vec::new();
-        let mut lire_cle = |cle: &RegKey| {
+        let mut lire_cle = |cle: &RegKey, hors_store: bool| {
             for nom in cle.enum_keys().flatten() {
                 if nom == "NonPackaged" {
                     continue;
                 }
                 if let Ok(k) = cle.open_subkey(&nom) {
-                    let debut: u64 = k.get_value("LastUsedTimeStart").unwrap_or(0);
-                    let fin: u64 = k.get_value("LastUsedTimeStop").unwrap_or(0);
-                    entrees.push((nom, debut, fin));
+                    c.entrees.push(Entree {
+                        valeur: k.get_value("Value").ok(),
+                        debut: k.get_value("LastUsedTimeStart").unwrap_or(0),
+                        fin: k.get_value("LastUsedTimeStop").unwrap_or(0),
+                        nom,
+                        hors_store,
+                    });
                 }
             }
         };
-        lire_cle(&racine);
-        if let Ok(hors_store) = racine.open_subkey("NonPackaged") {
-            lire_cle(&hors_store);
+        lire_cle(&racine, false);
+        let hors_store = racine.open_subkey("NonPackaged").ok();
+        if let Some(h) = &hors_store {
+            lire_cle(h, true);
         }
+        c.hors_store = hors_store.and_then(|h| h.get_value("Value").ok());
+        Some(c)
+    }
+
+    /// `webcam` ou `microphone`, pour ce compte.
+    pub(super) fn lire(appareil: &str) -> Vec<super::Usage> {
+        let entrees: Vec<(String, u64, u64)> = consentement(false, appareil)
+            .map(|c| c.entrees.into_iter().map(|e| (e.nom, e.debut, e.fin)).collect())
+            .unwrap_or_default();
         super::juger_windows(&entrees)
     }
 }

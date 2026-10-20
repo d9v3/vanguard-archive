@@ -189,6 +189,8 @@ verifier "lien : faux sous-domaine de PayPal repéré" grep -q 'le vrai : paypal
 lancer verifier-fichier 300 '\n' verifier-fichier "$ESSAI_AV/eicar.com"
 verifier "verifier-fichier : EICAR signalé" grep -qiE 'eicar|danger|malveillant' "$RES/verifier-fichier.txt"
 lancer camera-micro 60 '' camera-micro
+lancer acces 60 '' acces
+verifier "acces : bilan de confidentialité affiché" grep -qE 'Bilan de confidentialité|Privacy check' "$RES/acces.txt"
 lancer quarantaine 60 '' quarantaine
 
 section "Collecter les traces : dossier daté, manifeste vérifié par shasum"

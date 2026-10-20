@@ -811,6 +811,10 @@ Lancer 'camera-micro' @('camera-micro')
 $c = Sortie 'camera-micro'
 if ($c -match 'Camera and microphone|Caméra et micro') { Ok 'Caméra et micro : historique lu' } else { Bug 'Caméra et micro : écran absent' }
 if ($c -match 'PowerShell is not responding|PowerShell ne répond pas') { Bug 'Caméra et micro : lecture en échec' }
+Lancer 'acces' @('acces')
+$c = Sortie 'acces'
+if ($c -match 'Privacy check|Bilan de confidentialit') { Ok 'Bilan de confidentialité : écran lu' } else { Bug 'Bilan de confidentialité : écran absent' }
+if ($c -match 'settings cannot be read from the registry|illisibles dans le registre') { Bug 'Bilan de confidentialité : registre illisible' }
 LancerAvec 'quarantaine' @('quarantaine') "`n"
 if ((Sortie 'quarantaine') -match 'Quarantine|Quarantaine') { Ok 'Quarantaine ouverte' } else { Bug 'Quarantaine : écran absent' }
 # Raccourci sur le Bureau : posé, présent, puis retiré.

@@ -241,6 +241,10 @@ enum Commande {
     /// tient en ce moment. Lecture seule.
     #[command(name = "camera-micro", visible_alias = "camera-mic")]
     CameraMicro,
+    /// Bilan de confidentialité : les applications qui ont accès à la position, aux contacts, à la caméra et au micro,
+    /// et leur dernier usage quand il est noté. Lecture seule.
+    #[command(visible_alias = "permissions")]
+    Acces,
     /// Quarantaine : les fichiers isolés par l'antivirus ou YARA, à remettre à leur place (faux positif) ou à
     /// supprimer pour de bon.
     #[command(visible_alias = "quarantine")]
@@ -802,6 +806,7 @@ enum Action {
     Courriel,
     QuiParle,
     CameraMicro,
+    Acces,
     Distance,
     Lien,
     VerifierFichier,
@@ -977,6 +982,11 @@ const OUTILS: &[Outil] = &[
         titre: ["Caméra et micro : qui s'en sert ?", "Camera and mic: who uses them?"],
         precision: ["programmes et dernière fois", "programs and last time"],
         mots: "caméra camera webcam micro microphone espion spy écoute voyant light enregistre record" },
+    Outil { action: Action::Acces, groupe: Some(Groupe::Protection), lettre: "",
+        titre: ["Bilan de confidentialité", "Privacy check"],
+        precision: ["position, contacts, caméra, micro", "location, contacts, camera, mic"],
+        mots: "confidentialité privacy permissions autorisations accès access position location localisation gps \
+               contacts carnet address book caméra camera micro microphone flatpak snap tcc applications apps" },
     Outil { action: Action::Distance, groupe: Some(Groupe::Protection), lettre: "",
         titre: ["Quelqu'un contrôle mon ordi ?", "Is someone controlling my PC?"],
         precision: ["faux technicien, accès à distance", "tech-support scam, remote access"],
@@ -1321,6 +1331,7 @@ async fn executer(s: &mut Session, action: Action) {
         Action::Courriel => protection::fuites::verifier_courriel(),
         Action::QuiParle => protection::sortantes::menu(),
         Action::CameraMicro => protection::camera::afficher_tout(),
+        Action::Acces => protection::acces::afficher_tout(),
         Action::Distance => protection::distance::menu(),
         Action::Lien => protection::lien::verifier(None),
         Action::VerifierFichier => protection::telechargement::verifier(None, None),
@@ -1402,6 +1413,8 @@ const AIDES_EN: &[(&str, &str)] = &[
                           antivirus"),
     ("camera-micro", "Camera and microphone: who uses them? On Windows, each program and the last time; on Linux, \
                       what holds them right now. Read-only"),
+    ("acces", "Privacy check: the apps that have access to the location, contacts, camera and microphone, and their \
+               last use when it is recorded. Read-only"),
     ("quarantaine", "Quarantine: the files isolated by the antivirus or YARA, to put back in their place (false \
                      positive) or to delete for good"),
     ("sauvegarder", "Back up the device database and the monitoring state to a JSON file"),
@@ -1611,6 +1624,7 @@ async fn main() {
             protection::telechargement::verifier(Some(&fichier), empreinte.as_deref());
         }
         Some(Commande::CameraMicro) => protection::camera::afficher_tout(),
+        Some(Commande::Acces) => protection::acces::afficher_tout(),
         Some(Commande::Quarantaine) => protection::quarantaine::menu(),
         Some(Commande::Secrets) => protection::secrets_git::analyser(),
         Some(Commande::Conteneurs) => protection::conteneurs::analyser(),

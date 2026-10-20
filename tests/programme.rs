@@ -599,6 +599,41 @@ fn outils_recents_sans_rien_changer() {
     }
 }
 
+/// Bilan de confidentialité, sans terminal et dans les deux langues : il s'ouvre, passe les quatre permissions, ne
+/// change rien et tient dans 76 colonnes. Sans D-Bus (les essais le coupent) ou sous Wine, une lecture échoue : elle
+/// doit se dire « non vérifiée », jamais disparaître.
+#[test]
+fn bilan_de_confidentialite_en_lecture_seule() {
+    for (langue, titre, permissions, fin) in [
+        (
+            "fr",
+            "Bilan de confidentialité",
+            ["POSITION", "CONTACTS", "CAMÉRA", "MICRO"],
+            "Rien n'a été changé.",
+        ),
+        (
+            "en",
+            "Privacy check",
+            ["LOCATION", "CONTACTS", "CAMERA", "MICROPHONE"],
+            "Nothing was changed.",
+        ),
+    ] {
+        let s = vanguard(langue, &["acces"], "", 120);
+        assert_eq!(s.code, Some(0), "{}", s.erreurs);
+        let t = sans_couleurs(&s.texte);
+        assert!(t.contains(titre), "{t}");
+        for p in permissions {
+            assert!(t.contains(&format!("── {p}")), "{p} absent : {t}");
+        }
+        assert!(t.contains(fin), "{t}");
+        let longues: Vec<&str> = t.lines().filter(|l| l.chars().count() > 76).collect();
+        assert_eq!(longues, Vec::<&str>::new(), "lignes trop longues");
+    }
+    // L'alias anglais mène au même écran.
+    let alias = vanguard("en", &["permissions"], "", 120);
+    assert!(sans_couleurs(&alias.texte).contains("Privacy check"));
+}
+
 /// Raccourci sur cet ordinateur, dans un dossier personnel jetable : refusé, rien n'est posé ; posé puis retiré, il
 /// apparaît puis disparaît. Linux seulement : sous Windows et macOS, il va sur le Bureau.
 #[test]
