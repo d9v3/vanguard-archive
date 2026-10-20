@@ -45,13 +45,13 @@ pour revenir.
 
 | Domaine | Ce que fait Vanguard |
 |---|---|
-| **Bilan de sécurité** | Une note de A à F : pare-feu, mises à jour et failles, chiffrement, ports ouverts, comptes, SSH, ce qui se lance en cachette, partages ouverts à tous, Wi-Fi, Bluetooth, heure, fin de support, comptes oubliés, mots de passe du navigateur, fichiers sensibles qui traînent, santé des disques… Chaque problème est expliqué, avec sa correction. |
-| **Réseau local** | Chaque appareil, son fabricant, ses ports ouverts et ses risques ; les nouveaux venus signalés, les ports ouverts sur la box, l'adresse de la maison sur liste noire. |
+| **Bilan de sécurité** | Une note de A à F : pare-feu, mises à jour et failles, chiffrement, ports ouverts, comptes, SSH, ce qui se lance en cachette, portes dérobées et signes de rootkit, journaux d'événements suspects, partages ouverts à tous, Wi-Fi, Bluetooth, heure, fin de support, comptes oubliés, mots de passe du navigateur, fichiers sensibles qui traînent, santé des disques… Chaque problème est expliqué, avec sa correction. |
+| **Réseau local** | Chaque appareil, son fabricant, ses ports ouverts et ses risques ; les nouveaux venus signalés, les ports ouverts sur la box, l'adresse de la maison sur liste noire, un voleur de mots de passe comme Responder démasqué. |
 | **Wi-Fi, NAT, DNS, caméras** | Le canal Wi-Fi le plus libre, le type de NAT pour le jeu, le DNS le plus rapide (sans retirer un DNS qui protège), les caméras cachées. |
 | **Connexion pour le jeu** | Ping, gigue, pertes, débit et bufferbloat, comparés à tes habitudes. |
-| **Dépanner** | Diagnostic de l'ordinateur, pannes de tous les jours pas à pas (Internet, Wi-Fi, lenteur, son, imprimante, disque plein), après une infection, nouvel ordinateur, ordinateur qui part, compte piraté, « Pourquoi c'est lent ? », fiche de l'ordinateur, rapport à laisser, réparations. |
+| **Dépanner** | Diagnostic de l'ordinateur, pannes de tous les jours pas à pas (Internet, Wi-Fi, lenteur, son, imprimante, disque plein), après une infection, collecter les traces (avant de nettoyer), nouvel ordinateur, ordinateur qui part, compte piraté, « Pourquoi c'est lent ? », fiche de l'ordinateur, rapport à laisser, réparations. |
 | **Optimiser et nettoyer** | Réglages de confidentialité et de performance qui s'annulent exactement, nettoyage à cocher avec la place gagnée mesurée, programmes du démarrage. |
-| **Protection** | Fichiers-pièges contre les rançongiciels, blocages de Windows Defender, 308 règles YARA, antivirus, bac à sable, intégrité des fichiers critiques, mots de passe fuités, connexions sortantes, faux technicien (logiciels de prise de contrôle à distance), caméra et micro, liens dangereux, fichiers téléchargés, quarantaine réversible ; secrets oubliés dans l'historique des projets git ; failles des images Docker (trivy, s'il est installé). |
+| **Protection** | Fichiers-pièges contre les rançongiciels, blocages de Windows Defender, 308 règles YARA, antivirus, bac à sable, intégrité des fichiers critiques, mots de passe fuités, connexions sortantes (serveurs de botnets connus), faux technicien (logiciels de prise de contrôle à distance), caméra et micro, liens dangereux, fichiers téléchargés, quarantaine réversible ; secrets oubliés dans l'historique des projets git ; failles des images Docker (trivy, s'il est installé). |
 | **Suivi** | Surveillance toutes les heures, entretien du mois, rapport HTML avec la courbe des notes, apprentissage sur ton ordinateur, ce que Vanguard a changé (chaque correction, datée). |
 | **Logiciels et jeux** | Les meilleurs logiciels en 8 catégories, depuis leur source officielle ; mises à jour de tout d'un coup ; réglages pour jouer. |
 | **Outils** | Sauvegarde automatique, copier mes fichiers (copie vérifiée) et vérifier une copie, vérifier ma clé (fausses clés, vitesse), mes ordinateurs (suivis par la clé), données de la clé protégées par une phrase, raccourci sur cet ordinateur, Vanguard mis à jour depuis la clé, guide des commandes, recherche dans tous les menus. |
@@ -62,14 +62,27 @@ pour revenir.
 **Bilan de sécurité** — une note de A à F, puis chaque problème avec sa correction.
 - Pare-feu, ports ouverts (TCP et UDP), mises à jour et failles connues, chiffrement du disque, Secure Boot,
   verrouillage de l'écran, comptes (et leur blocage après des mots de passe faux, longueur minimale : Linux, Windows),
-  recherche automatique du proxy (WPAD : Windows, macOS), SSH (et ses tentatives de connexion ratées, venues d'Internet ou de la maison, et le client qui ne vérifie pas les serveurs ; les ports renvoyés ouverts au réseau, l'affichage X11 renvoyé, trop d'essais de mot de passe),
-  sudo, groupes qui valent root (docker, lxd, libvirt, disk), dossiers de commandes que d'autres comptes peuvent modifier, durcissement du noyau (sous Linux : redirections ICMP en IPv4 et IPv6,
-  adresses d'origine impossibles, espaces de noms ouverts à tous ; sous macOS : volume du système scellé,
-  signature du code imposée, validation des bibliothèques, extensions ajoutées), fichiers secrets mal protégés,
-  sauvegardes, partages de fichiers ouverts à tout le monde (Samba, NFS, partages Windows, Partage de fichiers de
-  macOS : l'accès sans mot de passe est fermé après accord, les comptes nommés gardent le leur).
+  recherche automatique du proxy (WPAD : Windows, macOS), SSH (et ses tentatives de connexion ratées, venues
+  d'Internet ou de la maison, et le client qui ne vérifie pas les serveurs ; les ports renvoyés ouverts au réseau,
+  l'affichage X11 renvoyé, trop d'essais de mot de passe ; les algorithmes cassés, SHA-1, CBC, 3DES, MD5 ou DSA,
+  rouverts dans sshd, retirés après `sshd -t` sans couper aucune connexion), sudo, groupes qui valent root (docker,
+  lxd, libvirt, disk), dossiers de commandes que d'autres comptes peuvent modifier, durcissement du noyau (sous
+  Linux : redirections ICMP en IPv4 et IPv6, adresses d'origine impossibles, espaces de noms ouverts à tous ; sous
+  macOS : volume du système scellé, signature du code imposée, validation des bibliothèques, extensions ajoutées),
+  fichiers secrets mal protégés, sauvegardes, partages de fichiers ouverts à tout le monde (Samba, NFS, partages
+  Windows, Partage de fichiers de macOS : l'accès sans mot de passe est fermé après accord, les comptes nommés gardent
+  le leur).
 - Ce qui se cache : programmes lancés au démarrage, tâches planifiées, préchargement de bibliothèques, programmes
-  privilégiés modifiés.
+  privilégiés modifiés. Sous Windows, les portes dérobées classiques : un débogueur posé sur un programme
+  d'accessibilité de l'écran de connexion (IFEO, SilentProcessExit), sethc ou utilman (touches rémanentes, options
+  d'ergonomie) remplacés par cmd, Shell ou Userinit de Winlogon détournés, AppInit_DLLs, abonnements WMI qui lancent
+  une commande ; suivies par la surveillance, corrigées quand l'état d'origine est connu exactement. Sous Linux, les
+  signes d'un rootkit : processus cachés, programmes qui tournent sans fichier (memfd, effacés, lancés depuis /tmp),
+  module du noyau qui se cache ou modules non signés inconnus, carte réseau en mode promiscuité (elle écoute tout le
+  réseau).
+- Journaux d'événements de Windows, sur les 7 derniers jours : rafales de mots de passe faux venues du réseau (Bureau
+  à distance, partages), journal de sécurité effacé, comptes créés, services installés depuis un dossier temporaire
+  ou qui lancent un interpréteur. Le journal de sécurité ne se lit qu'en administrateur : sans ce droit, c'est dit.
 - DNS réellement utilisé (et réponses inventées), certificats racine ajoutés (interception du HTTPS), extensions de
   navigateur qui lisent tous les sites.
 - Wi-Fi : protection du réseau (WEP, WPA2, WPA3), et faux point d'accès (« jumeau maléfique ») qui copie son nom
@@ -100,6 +113,9 @@ mDNS) et leurs risques ; les nouveaux venus signalés, un carnet par réseau (ch
 (« imprimante HP ») ; les ports que des appareils ont ouverts vers Internet sur la box par UPnP (lecture seule, avec
 miniupnpc sous Linux). Après accord, l'adresse Internet de la maison est cherchée dans quatre listes noires
 (Spamhaus, SpamCop, DroneBL, PSBL) : listée pour pourriel ou attaques, un appareil est sans doute infecté.
+Pendant le scan, Vanguard demande aussi un nom qui n'existe pas (LLMNR, NetBIOS, mDNS) : personne de légitime n'y
+répond, et l'appareil qui le fait est un empoisonneur comme Responder, qui vole les mots de passe Windows du réseau ;
+la surveillance horaire le signale aussi.
 
 **Connexion pour le jeu** — ping, gigue, pertes, débit et bufferbloat (le lag quand quelqu'un télécharge), avec un
 verdict critère par critère et des conseils.
@@ -117,15 +133,25 @@ paniques du noyau et rapports de plantage sous macOS), avec une copie texte enre
 **Dépanner pas à pas** — les pannes de tous les jours, prises comme le ferait quelqu'un qui s'y connaît : pas
 d'Internet, Wi-Fi qui coupe, ordinateur lent, pas de son, imprimante qui ne marche pas, disque plein. Deux ou trois
 questions, puis Vanguard vérifie lui-même (adresse, box, Internet, DNS ; signal Wi-Fi ; service du son et sortie
-choisie ; file d'impression et imprimante sur le réseau ; place des disques) et propose la bonne réparation ou le
-bon outil, toujours après accord. Et trois parcours pour les grands moments : **après une infection** (ce qui presse
-selon le signe, le bilan de ce qui a pu s'installer, les analyses dans l'ordre, puis les mots de passe à changer,
-le courriel en premier) ; **nouvel ordinateur** (mises à jour, chiffrement, sauvegardes, pack de départ,
-confidentialité, dans l'ordre) ; **ordinateur qui part**, vendu ou donné (copie vérifiée d'abord, comptes
-déconnectés, clé BitLocker ou FileVault mise de côté, effacement sûr par l'outil du système, puce TPM remise à
-zéro). Vanguard n'efface rien lui-même. Et **mon compte a été piraté** : reprendre la main par la page officielle,
+choisie ; file d'impression et imprimante sur le réseau ; place des disques) et propose la bonne réparation ou le bon
+outil, toujours après accord. Et trois parcours pour les grands moments : **après une infection** (les traces gardées
+d'abord, puis ce qui presse selon le signe, le bilan de ce qui a pu s'installer, les analyses dans l'ordre, puis les
+mots de passe à changer, le courriel en premier) ; **nouvel ordinateur** (mises à jour, chiffrement, sauvegardes,
+pack de départ, confidentialité, dans l'ordre) ; **ordinateur qui part**, vendu ou donné (copie vérifiée d'abord,
+comptes déconnectés, clé BitLocker ou FileVault mise de côté, effacement sûr par l'outil du système, puce TPM remise
+à zéro). Vanguard n'efface rien lui-même. Et **mon compte a été piraté** : reprendre la main par la page officielle,
 puis mot de passe, validation en deux étapes, sessions fermées, et la vérification que cet ordinateur n'a pas livré
 le mot de passe. Lent **depuis une mise à jour** : les dernières mises à jour, datées, et comment revenir en arrière.
+
+**Collecter les traces** — après une infection, avant de nettoyer ou de réinstaller : ce qu'un spécialiste voudra
+voir, gardé dans un dossier daté sur la clé VANGUARD (ou dans le dossier de Vanguard de l'ordinateur), dans l'ordre
+où cela disparaît. Processus (avec l'empreinte SHA-256 de leur programme), connexions en cours, ce qui se lance tout
+seul, bilan en JSON, comptes, journaux des 7 derniers jours (en .evtx sous Windows), fichiers récents des endroits à
+risque (décrits, pas copiés) ; LISEZMOI.txt, en français et en anglais, dit ce que contient chaque fichier et ce qui
+n'a pas pu être lu, MANIFESTE.txt donne leurs empreintes (`sha256sum -c MANIFESTE.txt`). Lecture seule : rien n'est
+arrêté, déplacé ni envoyé. Le dossier contient des données personnelles, à ne confier qu'à quelqu'un de confiance.
+C'est aussi la première étape d'« Après une infection », cochée d'office : couper le réseau ou nettoyer efface ces
+traces.
 
 **Rapport à laisser** — une page simple pour la personne qu'on vient de dépanner : sa note, ce qu'il lui reste à
 faire du plus grave au moins grave, ce qui va bien et trois habitudes ; posée sur son Bureau, à lire ou imprimer.
@@ -257,8 +283,9 @@ ne les ayant pas vérifiées.
 - Mots de passe fuités : vérifiés par Have I Been Pwned sans jamais envoyer le mot de passe (5 caractères de son
   empreinte seulement) ; fuites d'adresse courriel, après ton accord (l'adresse est envoyée au service).
 - Qui parle à Internet ? : les connexions en cours de chaque programme, avec le nom du serveur ; un programme lancé
-  depuis un dossier temporaire ou les Téléchargements, un port de logiciel d'accès à distance ou un serveur sans nom
-  sont signalés. Lecture seule : rien n'est coupé.
+  depuis un dossier temporaire ou les Téléchargements, un port de logiciel d'accès à distance, un serveur sans nom ou
+  un serveur de commande de botnet connu (liste de Feodo Tracker, abuse.ch) sont signalés. Lecture seule : rien n'est
+  coupé.
 - Quelqu'un contrôle mon ordi ? : l'arnaque au faux technicien (« votre ordinateur est infecté ») fait installer un
   logiciel de prise de contrôle à distance. Vanguard cherche AnyDesk, TeamViewer, RustDesk, Assistance rapide,
   Splashtop, UltraViewer… installés (et depuis quand), lancés au démarrage, en cours d'exécution ou simplement posés
@@ -350,7 +377,8 @@ Chaque entrée du menu existe aussi en commande.
 | `vanguard nettoyer [--liste]` | nettoyer le système ; `--liste` : la place à gagner, sans rien effacer |
 | `vanguard logiciels [--liste] [--recommandes]` | logiciels à installer par catégorie ; `--liste` : leur état, sans rien installer |
 | `vanguard diagnostic` | diagnostic de l'ordinateur : matériel, système, plantages et erreurs récents |
-| `vanguard depanner [sujet]` | dépanner pas à pas : `internet`, `wifi`, `lent`, `son`, `imprimante`, `disque`, `infection`, `nouveau`, `depart`, `compte` |
+| `vanguard depanner [sujet]` | dépanner pas à pas : `internet`, `wifi`, `lent`, `son`, `imprimante`, `disque`, `infection`, `nouveau`, `depart`, `compte`, `traces` |
+| `vanguard traces [dossier]` | collecter les traces après une infection, avant de nettoyer : processus, connexions, démarrage, comptes, journaux, fichiers récents, dans un dossier daté avec leurs empreintes SHA-256 (lecture seule) |
 | `vanguard lenteur` | pourquoi c'est lent : processeur, mémoire, disque, démarrage, programmes à l'ouverture |
 | `vanguard demarrage` | programmes au démarrage : les retirer ou les remettre, après accord ; chaque retrait s'annule |
 | `vanguard changements` | ce que Vanguard a changé : chaque correction lancée ici, sa date et son résultat |
@@ -398,9 +426,9 @@ Chaque entrée du menu existe aussi en commande.
 
 **Langue** : celle du système (français ou anglais). Pour forcer : `VANGUARD_LANG=fr` ou `VANGUARD_LANG=en`. Les
 commandes ont aussi un nom anglais (`full`, `audit`, `fix`, `network`, `connection`, `apps`, `diag`, `password`,
-`sandbox`, `email`, `integrity`, `update`, `repair`, `monitor`, `name`, `backup`, `restore`, `clean`, `decoys`, `harden`,
-`blocklists`, `learned`, `channels`, `fast-dns`, `outbound`, `link`, `check-file`, `maintenance`, `slow`,
-`startup`, `specs`, `copy-files`, `troubleshoot`).
+`sandbox`, `email`, `integrity`, `update`, `repair`, `monitor`, `name`, `backup`, `restore`, `clean`, `decoys`,
+`harden`, `blocklists`, `learned`, `channels`, `fast-dns`, `outbound`, `link`, `check-file`, `maintenance`, `slow`,
+`startup`, `specs`, `copy-files`, `troubleshoot`, `evidence`).
 
 **Emojis** : dans l'ancienne console de Windows (invite de commandes ou PowerShell hors du Terminal Windows, courant
 sous Windows 10), qui les dessine mal et décale les menus, 💡 et 🔧 deviennent → et +. `VANGUARD_EMOJI=0` les retire

@@ -23,6 +23,8 @@ modification. Sur GitHub, `@claude` dans un ticket ou une demande de fusion le f
 | `src/machine/regles.rs` | registre des règles du bilan : chacune se déclare où elle est écrite (`inventory::submit!`), avec un identifiant stable (« LNX-PLT-001 ») ; `vanguard regles` les liste |
 | `src/machine/linux/plateforme.rs` | sécurité de la plateforme d'après fwupd (HSI), verrouillage du noyau, BPF, espaces de noms, auditd : les premières règles du registre |
 | `src/machine/linux/`, `src/machine/windows/`, `src/machine/macos/` | audit propre à chaque système, un fichier par thème |
+| `src/machine/windows/portes.rs`, `evenements.rs` | portes dérobées classiques (débogueur sur un programme d'accessibilité de l'écran de connexion par IFEO ou SilentProcessExit, sethc et utilman remplacés, Shell et Userinit de Winlogon, AppInit_DLLs, abonnements WMI), corrigées quand l'état d'origine est connu ; journaux d'événements des 7 derniers jours (mots de passe faux en rafale par le réseau, journal de sécurité effacé, comptes créés, services suspects) |
+| `src/machine/linux/dissimulation.rs`, `algorithmes_ssh.rs` | signes de rootkit lus dans /proc et /sys : processus cachés, programmes sans fichier (memfd, effacés, /tmp), module du noyau qui se cache, modules non signés inconnus, carte en mode promiscuité ; algorithmes cassés de sshd (configuration lue dans l'ordre des Include), retirés par `00-vanguard.conf` après `sshd -t` |
 | `src/machine/dns.rs`, `certificats.rs`, `extensions.rs`, `partages.rs`, `sante.rs`, `wifi.rs`, `bluetooth.rs` | vérifications communes aux trois systèmes (partages.rs : partages de fichiers ouverts à tout le monde ; bluetooth.rs : ordinateur visible, appareils appairés depuis peu) |
 | `src/machine/unix.rs` | vérifications communes à Linux et macOS : fichiers secrets, sudo |
 | `src/machine/heure.rs`, `fin_de_support.rs`, `comptes_oublies.rs`, `mots_de_passe.rs`, `sensibles.rs` | heure réglée automatiquement ; système, programmes abandonnés et navigateurs sans mise à jour ; comptes inutilisés ; mots de passe du navigateur sans protection ; fichiers sensibles qui traînent |
@@ -31,6 +33,7 @@ modification. Sur GitHub, `@claude` dans un ticket ou une demande de fusion le f
 | `src/corriger.rs` | application guidée des correctifs |
 | `src/reseau/mod.rs`, `src/reseau/scan.rs` | scan réseau (TCP connect, sans root), ARP, carnets des réseaux |
 | `src/reseau/nmap.rs` | versions des services par nmap -sV, s'il est installé : scan approfondi d'un appareil du réseau local, sur ses ports déjà trouvés ouverts |
+| `src/reseau/empoisonnement.rs` | empoisonneur de noms (Responder) : un nom tiré au hasard, qui n'existe pas, demandé en LLMNR, NetBIOS et mDNS pendant le scan ; l'appareil qui répond aux deux essais est signalé (paquets écrits et lus en Rust) |
 | `src/risk.rs` | base de connaissances des ports et niveaux de risque |
 | `src/reseau/connexion.rs` | test de connexion pour le jeu |
 | `src/protection/antivirus.rs` | ClamAV / Defender, quarantaine |
@@ -48,7 +51,7 @@ modification. Sur GitHub, `@claude` dans un ticket ou une demande de fusion le f
 | `src/apprentissage.rs` | ce que Vanguard apprend ici : alertes déclarées normales (appris.json), habitudes |
 | `src/reseau/listes_noires.rs` | adresse Internet de la maison dans les listes noires (DNSBL), après accord |
 | `src/entretien.rs` | entretien du mois : note, mises à jour, place, problèmes nouveaux, en une notification |
-| `src/protection/sortantes.rs` | qui parle à Internet : connexions établies par programme (ss, PowerShell, lsof), DNS inverse |
+| `src/protection/sortantes.rs` | qui parle à Internet : connexions établies par programme (ss, PowerShell, lsof), DNS inverse ; serveurs de commande de botnets (Feodo Tracker, liste gardée comme celle d'URLhaus) |
 | `src/protection/environnement.rs` | au démarrage : bibliothèque injectée dans la session (LD_PRELOAD, DYLD, AppInit_DLLs), jugée comme le préchargement |
 | `src/protection/manifeste.rs` | vérifier Vanguard lui-même (version, date du commit, SHA-256) et manifeste de la clé (empreintes BLAKE3 gardées chez le propriétaire, une référence par clé, comparées au bilan) |
 | `src/protection/cles_connues.rs` | clés VANGUARD connues de cet ordinateur (jeton `vanguard.jeton` posé au déploiement, `cles-connues.json`) ; par clé, l'empreinte du carnet tel que Vanguard l'a écrit et sa protection : un carnet changé hors de Vanguard n'est ni lu ni réécrit |
@@ -60,6 +63,7 @@ modification. Sur GitHub, `@claude` dans un ticket ou une demande de fusion le f
 | `src/dns_rapide.rs` | DNS le plus rapide : mesure, DNS qui protège gardé, réglage annulable par `optimiser/` |
 | `src/reseau/cameras.rs` | caméras cachées : fabricant, flux RTSP, recherche ONVIF (WS-Discovery), page web |
 | `src/depanner/` | dépanner pas à pas : les parcours (`mod.rs`), réseau et Wi-Fi (`reseau.rs`), son (`son.rs`), imprimante (`imprimante.rs`), après une infection (`infection.rs`), nouvel ordinateur (`nouveau.rs`), ordinateur qui part (`depart.rs`), compte piraté (`compte.rs`), lent depuis une mise à jour (`depuis_maj.rs`) |
+| `src/traces/` | collecter les traces : processus avec leur SHA-256, réseau, démarrage, bilan JSON, comptes, journaux des 7 jours, fichiers récents, puis LISEZMOI et MANIFESTE (format de `sha256sum -c`), dans un dossier daté ; partie commune (`mod.rs`), par système (`linux.rs`, `windows.rs`, `macos.rs`, `unix.rs`) ; lecture seule |
 | `src/lenteur.rs`, `src/fiche.rs` | pourquoi c'est lent (instantané en deux mesures, démarrage) ; fiche de l'ordinateur |
 | `src/copier.rs` | copier mes fichiers vers un disque externe : copie vérifiée (BLAKE3), reprise, jamais d'écrasement ; vérifier une copie (test de restauration) |
 | `src/verifier_cle.rs` | vérifier ma clé : capacité réelle, vitesses et blocs en erreur, écrits dans le libre et relus sans cache, puis effacés |

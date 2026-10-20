@@ -13,6 +13,9 @@ This USB key holds the program for Linux, Windows and macOS, its database and it
   donnees/              Device database (one notebook per network: yours, each friend's) and the latest
                         report (rapport.html, and rapport.md as plain text, readable without a browser). It travels with the key: any Vanguard that sees the key plugged in uses it. On another
                         computer the key is protected: the database is read there, and what is added stays on that computer.
+  traces/               Traces collected after an infection (vanguard evidence), one dated folder per collection;
+                        in clear text, with personal data. Away from the owner's computer, the key is protected:
+                        they stay on that computer.
   source/               Full source code (Rust) with its git history.
   vanguard.cle          Marker file that makes the key recognized: do not delete it.
 
@@ -52,9 +55,10 @@ highlighted one, Esc clears it. In the main menu, it also finds each tool of the
        What Vanguard changed: each fix run here, dated, successful or not
        Monthly check-up: one notification a month (grade, updates, space to free, new problems)
   5  Network and Internet ›
-       Scan the network · Deep scan of one device · Name a device ("HP printer")
+       Scan the network (and unmask a password thief like Responder)
+       Deep scan of one device · Name a device ("HP printer")
        Hourly monitoring (unknown device, problem on this machine, router impersonation,
-         program landing in Downloads)
+         name poisoner, program landing in Downloads)
        Connection test for gaming (ping, jitter, speed, bufferbloat), compared with your habits
        Internet address on blocklists? (Spamhaus, SpamCop, DroneBL, PSBL, after your consent)
        Crowded Wi-Fi? (nearby networks by channel, and the freest channel to set on the router)
@@ -68,7 +72,8 @@ highlighted one, Esc clears it. In the main menu, it also finds each tool of the
        Sandbox: run an unknown program with no network, away from your files
        Passwords: have they leaked? (only 5 characters of their fingerprint are sent)
        Email address: has it leaked? (sent to the search service, after your consent)
-       Who talks to the Internet? Each program's connections, with the server's name (read-only)
+       Who talks to the Internet? Each program's connections, with the server's name, and known botnet
+         servers (Feodo Tracker); read-only
        Camera and microphone: who uses them? (Windows: each program and the last time; read-only)
        Is someone controlling my PC? Remote control tools (tech-support scam), removed after your consent
        Is this link dangerous? Checked without opening it; its age and public lists, after your consent
@@ -107,15 +112,18 @@ highlighted one, Esc clears it. In the main menu, it also finds each tool of the
  11  Troubleshoot step by step › no Internet, Wi-Fi dropping, slow computer, no sound, printer, disk full:
        two or three questions, then Vanguard checks and suggests the right repair.
        And: after an infection, new computer, computer leaving (sale, gift), hacked account.
+       Collect the traces before cleaning up: processes, connections, startup, logs, recent files, in a
+       dated folder with their fingerprints (read-only, nothing is sent; vanguard evidence).
        From the command line: vanguard troubleshoot sound
   q  Quit
   Shortcuts from earlier versions, in the main menu: u updates, r repair, o diagnostic, i integrity,
   n name, c connection, a USB drive, b sandbox, p passwords, e email, l software, g gaming, d data.
 
-The check covers, among others: firewall, open ports, updates, encryption, accounts, SSH (and its failed login
-attempts), Wi-Fi (and fake access points copying its name), programs started at boot, DNS, added root
-certificates, browser extensions, Bluetooth, clock, end of support, forgotten accounts, browser passwords,
-sensitive files, backups, disk and battery health.
+The check covers, among others: firewall, open ports, updates, encryption, accounts, SSH (its failed login
+attempts, its broken algorithms), Wi-Fi (and fake access points copying its name), programs started at boot,
+Windows backdoors and rootkit signs on Linux, Windows event logs, DNS, added root certificates, browser
+extensions, Bluetooth, clock, end of support, forgotten accounts, browser passwords, sensitive files, backups,
+disk and battery health.
 
 Language: French or English, following the system. To force English:
   Linux:   VANGUARD_LANG=en ./vanguard
