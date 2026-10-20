@@ -21,6 +21,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 RACINE = Path(__file__).resolve().parent.parent
@@ -143,11 +144,13 @@ def analyser(pwsh: Path, texte: str) -> str:
             "[Console]::In.ReadToEnd(), [ref]$t, [ref]$e); $e | ForEach-Object { $_.Message }")
     # pwsh plante parfois lui-même sous la charge (« An error has occurred that was not properly handled ») : son
     # code de retour le dit, et l'analyse est refaite ; une vraie erreur de syntaxe, elle, sort avec le code 0.
-    for _ in range(3):
+    for essai in range(3):
         r = subprocess.run([str(pwsh), "-NoProfile", "-NonInteractive", "-Command", code], input=texte,
                            capture_output=True, text=True, timeout=60)
         if r.returncode == 0:
             return r.stdout.strip()
+        # Une pause qui grandit : refait aussitôt, il replantait dans la même pointe de charge (13 échecs, 20 octobre).
+        time.sleep(1 + 2 * essai)
     return f"pwsh a échoué trois fois (code {r.returncode}) : {(r.stdout + r.stderr).strip()[:200]}"
 
 

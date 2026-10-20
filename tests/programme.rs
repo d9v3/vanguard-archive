@@ -59,7 +59,8 @@ fn vanguard(langue: &str, args: &[&str], entree: &str, secondes: u64) -> Sortie 
 
 /// Comme `vanguard`, avec un programme et un dossier personnel donnés (gardé après le lancement).
 fn vanguard_dans(programme: &Path, maison: &Path, langue: &str, args: &[&str], entree: &str, secondes: u64) -> Sortie {
-    let mut enfant = Command::new(programme)
+    let mut commande = Command::new(programme);
+    commande
         .args(args)
         .env("VANGUARD_LANG", langue)
         // La vraie clé (cherchée dans /run/media/$USER, journal compris) et la vraie session (systemctl --user) restent
@@ -76,9 +77,20 @@ fn vanguard_dans(programme: &Path, maison: &Path, langue: &str, args: &[&str], e
         .env("APPDATA", maison.join("roaming"))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("vanguard ne démarre pas");
+        .stderr(Stdio::piped());
+    // Un programme copié à l'instant (mise_a_jour_depuis_la_cle) peut être refusé « Text file busy » : un autre test
+    // qui lance un processus au même moment a hérité, le temps de son exec, du fichier encore ouvert en écriture.
+    // Quelques essais espacés suffisent ; toute autre erreur arrête le test.
+    let mut essais = 0;
+    let mut enfant = loop {
+        match commande.spawn() {
+            Err(e) if e.kind() == std::io::ErrorKind::ExecutableFileBusy && essais < 20 => {
+                essais += 1;
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            r => break r.expect("vanguard ne démarre pas"),
+        }
+    };
     // Les sorties sont lues pendant que le programme tourne : un tube plein le bloquerait.
     let texte = lire_en_fond(enfant.stdout.take().unwrap());
     let erreurs = lire_en_fond(enfant.stderr.take().unwrap());
