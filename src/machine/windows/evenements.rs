@@ -21,21 +21,320 @@ const RAFALE: usize = 20;
 /// milliers par jour.
 const MAX_ECHECS: usize = 2000;
 
-/// Sections : ADM (droits administrateur), ECH (4625, échecs de connexion : date, type de connexion, adresse
-/// d'origine, compte visé), SEC (1102 journal de sécurité effacé : date, compte ; 4720 compte créé : date, auteur,
-/// nouveau compte), SRV (7045 service installé : date, nom, chemin). Les deux premières lectures demandent les droits
-/// administrateur (journal Security) ; « aucun événement » n'est pas une erreur, un refus en est une (section sans
-/// fin). Dates en culture invariante : le séparateur des heures change avec la langue.
-const SCRIPT: &str = "function N($v) { (\"$v\" -replace '[\\r\\n|]+', ' ').Trim() }; \
-     function D($e) { $e.TimeCreated.ToString('yyyy-MM-dd HH:mm', [Globalization.CultureInfo]::InvariantCulture) }; \
-     function Lire($filtre, $max, $nom, $ligne) { try { try { Get-WinEvent -FilterHashtable $filtre -MaxEvents $max -ErrorAction Stop | ForEach-Object { \"$nom|\" + (& $ligne $_) } } \
-       catch { if ($_.FullyQualifiedErrorId -notlike 'NoMatchingEventsFound*') { throw } }; \"$($nom)_FIN\" } catch {} }; \
-     $depuis = (Get-Date).AddDays(-7); \
-     try { 'ADM|' + ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator); 'ADM_FIN' } catch {}; \
-     Lire @{ LogName = 'Security'; Id = 4625; StartTime = $depuis } 2000 'ECH' { param($e) $p = $e.Properties; (D $e) + '|' + (N $p[10].Value) + '|' + (N $p[19].Value) + '|' + (N $p[5].Value) }; \
-     Lire @{ LogName = 'Security'; Id = 1102, 4720; StartTime = $depuis } 100 'SEC' { param($e) $p = $e.Properties; \
-       if ($e.Id -eq 1102) { '1102|' + (D $e) + '|' + (N $p[1].Value) } else { '4720|' + (D $e) + '|' + (N $p[4].Value) + '|' + (N $p[0].Value) } }; \
-     Lire @{ LogName = 'System'; Id = 7045; StartTime = $depuis } 200 'SRV' { param($e) $p = $e.Properties; (D $e) + '|' + (N $p[0].Value) + '|' + (N $p[1].Value) }";
+/// Une lecture d'un journal : sa section (ECH, SEC, SRV), le journal, les événements voulus, combien au plus.
+struct Lecture {
+    section: &'static str,
+    journal: &'static str,
+    evenements: &'static str,
+    max: usize,
+}
+
+/// ECH (4625, échecs de connexion), SEC (1102 journal de sécurité effacé ; 4720 compte créé) : journal Security, lisible
+/// seulement en administrateur. SRV (7045 service installé) : journal System.
+const LECTURES: [Lecture; 3] = [
+    Lecture {
+        section: "ECH",
+        journal: "Security",
+        evenements: "EventID=4625",
+        max: MAX_ECHECS,
+    },
+    Lecture {
+        section: "SEC",
+        journal: "Security",
+        evenements: "EventID=1102 or EventID=4720",
+        max: 100,
+    },
+    Lecture {
+        section: "SRV",
+        journal: "System",
+        evenements: "EventID=7045",
+        max: 200,
+    },
+];
+
+/// Un événement lu dans son XML (celui que montre l'Observateur d'événements) : son numéro, sa date (UTC, ISO 8601) et
+/// ses valeurs dans l'ordre (EventData/Data, ou les champs sous UserData pour le 1102) : les « Properties » que
+/// Get-WinEvent donnait. `None` : XML illisible.
+fn lire_xml(xml: &str) -> Option<(u32, String, Vec<String>)> {
+    use quick_xml::events::Event;
+    let mut lecteur = quick_xml::Reader::from_str(xml);
+    let mut chemin: Vec<Vec<u8>> = Vec::new();
+    let (mut id, mut date, mut valeurs) = (String::new(), String::new(), Vec::new());
+    // La valeur en cours de lecture, et la profondeur de son élément.
+    let mut valeur: Option<(usize, String)> = None;
+    loop {
+        let evenement = lecteur.read_event().ok()?;
+        let (ouvert, vide) = match &evenement {
+            Event::Start(e) => (Some(e), false),
+            Event::Empty(e) => (Some(e), true),
+            _ => (None, false),
+        };
+        if let Some(e) = ouvert {
+            let nom = e.local_name().as_ref().as_bytes().to_vec();
+            if nom == b"TimeCreated"
+                && let Some(a) = e.try_get_attribute("SystemTime").ok().flatten()
+            {
+                date = a
+                    .normalized_value(quick_xml::XmlVersion::Implicit1_0)
+                    .ok()?
+                    .into_owned();
+            }
+            let dans = |n: &[u8]| chemin.last().is_some_and(|p| p == n);
+            // Une valeur : un Data sous EventData, ou un champ sous l'élément unique de UserData.
+            let est_valeur =
+                (dans(b"EventData") && nom == b"Data") || chemin.len() >= 2 && chemin[chemin.len() - 2] == b"UserData";
+            if est_valeur && valeur.is_none() {
+                if vide {
+                    valeurs.push(String::new());
+                } else {
+                    valeur = Some((chemin.len(), String::new()));
+                }
+            }
+            if !vide {
+                chemin.push(nom);
+            }
+            continue;
+        }
+        match evenement {
+            Event::Text(t) => {
+                let texte = t.xml10_content();
+                if let Some((_, v)) = &mut valeur {
+                    v.push_str(&texte);
+                } else if chemin.last().is_some_and(|n| n == b"EventID") {
+                    id.push_str(&texte);
+                }
+            }
+            Event::GeneralRef(r) => {
+                let c = match r.as_ref() {
+                    "amp" => Some('&'),
+                    "lt" => Some('<'),
+                    "gt" => Some('>'),
+                    "quot" => Some('"'),
+                    "apos" => Some('\''),
+                    _ => r.resolve_char_ref().ok().flatten(),
+                };
+                if let (Some((_, v)), Some(c)) = (&mut valeur, c) {
+                    v.push(c);
+                }
+            }
+            Event::End(_) => {
+                chemin.pop();
+                if valeur
+                    .as_ref()
+                    .is_some_and(|(profondeur, _)| *profondeur == chemin.len())
+                {
+                    valeurs.extend(valeur.take().map(|(_, v)| v));
+                }
+            }
+            Event::Eof => break,
+            _ => {}
+        }
+    }
+    Some((id.trim().parse().ok()?, date, valeurs))
+}
+
+/// Une valeur sur une ligne, sans le séparateur des champs.
+fn champ(v: Option<&String>) -> String {
+    let v = v.map_or("", String::as_str);
+    v.split(['\r', '\n', '|'])
+        .filter(|m| !m.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
+        .trim()
+        .to_string()
+}
+
+/// La ligne d'une section pour un événement, telle que les jugements la lisent. `date` : déjà à l'heure locale.
+fn ligne(section: &str, id: u32, date: &str, p: &[String]) -> Option<String> {
+    Some(match (section, id) {
+        // Type de connexion, adresse d'origine, compte visé.
+        ("ECH", 4625) => format!("{date}|{}|{}|{}", champ(p.get(10)), champ(p.get(19)), champ(p.get(5))),
+        ("SEC", 1102) => format!("1102|{date}|{}", champ(p.get(1))),
+        // Auteur, nouveau compte.
+        ("SEC", 4720) => format!("4720|{date}|{}|{}", champ(p.get(4)), champ(p.first())),
+        // Nom et programme du service.
+        ("SRV", 7045) => format!("{date}|{}|{}", champ(p.first()), champ(p.get(1))),
+        _ => return None,
+    })
+}
+
+/// « 2026-10-20T13:46:40.1234567Z » → « 2026-10-20 09:46 » à l'heure de l'ordinateur, comme l'Observateur
+/// d'événements la montre.
+fn date_locale(systeme: &str) -> Option<String> {
+    let utc = chrono::DateTime::parse_from_rfc3339(systeme).ok()?;
+    Some(utc.with_timezone(&chrono::Local).format("%Y-%m-%d %H:%M").to_string())
+}
+
+#[link(name = "wevtapi")]
+unsafe extern "system" {
+    fn EvtQuery(session: *mut c_void, chemin: *const u16, requete: *const u16, drapeaux: u32) -> *mut c_void;
+    fn EvtNext(
+        resultats: *mut c_void,
+        taille: u32,
+        evenements: *mut *mut c_void,
+        delai: u32,
+        drapeaux: u32,
+        rendus: *mut u32,
+    ) -> i32;
+    fn EvtRender(
+        contexte: *mut c_void,
+        fragment: *mut c_void,
+        drapeaux: u32,
+        taille: u32,
+        tampon: *mut c_void,
+        utilise: *mut u32,
+        proprietes: *mut u32,
+    ) -> i32;
+    fn EvtClose(objet: *mut c_void) -> i32;
+}
+
+#[link(name = "advapi32")]
+unsafe extern "system" {
+    fn OpenProcessToken(processus: *mut c_void, acces: u32, jeton: *mut *mut c_void) -> i32;
+    fn GetTokenInformation(
+        jeton: *mut c_void,
+        classe: u32,
+        information: *mut c_void,
+        taille: u32,
+        rendue: *mut u32,
+    ) -> i32;
+}
+
+#[link(name = "kernel32")]
+unsafe extern "system" {
+    fn GetCurrentProcess() -> *mut c_void;
+    fn CloseHandle(objet: *mut c_void) -> i32;
+}
+
+use std::ffi::c_void;
+
+/// Lancé en administrateur (jeton élevé) ? Un compte administrateur sans élévation (UAC) ne lit pas Security non plus.
+fn administrateur() -> bool {
+    const LECTURE: u32 = 0x0008;
+    const ELEVATION: u32 = 20;
+    let mut jeton = std::ptr::null_mut();
+    let mut eleve = 0u32;
+    let mut taille = 0u32;
+    // SAFETY : GetCurrentProcess rend une pseudo-poignée, sans rien à fermer. Le jeton ouvert (vérifié) est fermé une
+    // seule fois ; TokenElevation écrit un seul DWORD dans `eleve`, de la taille donnée.
+    unsafe {
+        if OpenProcessToken(GetCurrentProcess(), LECTURE, &raw mut jeton) == 0 {
+            return false;
+        }
+        let lu = GetTokenInformation(jeton, ELEVATION, (&raw mut eleve).cast(), 4, &raw mut taille) != 0;
+        CloseHandle(jeton);
+        lu && eleve != 0
+    }
+}
+
+/// Le XML d'un événement ; `None` s'il ne se rend pas.
+fn rendre(evenement: *mut c_void) -> Option<String> {
+    const XML: u32 = 1;
+    let mut utilise = 0u32;
+    let mut proprietes = 0u32;
+    // SAFETY : un premier appel sans tampon donne la taille en octets (refus attendu) ; le second écrit au plus
+    // `taille` octets dans `tampon`, qui les a, alignés pour des caractères UTF-16.
+    unsafe {
+        EvtRender(
+            std::ptr::null_mut(),
+            evenement,
+            XML,
+            0,
+            std::ptr::null_mut(),
+            &raw mut utilise,
+            &raw mut proprietes,
+        );
+        let mut tampon = vec![0u16; usize::try_from(utilise.div_ceil(2)).ok()?];
+        let taille = u32::try_from(tampon.len() * 2).ok()?;
+        if EvtRender(
+            std::ptr::null_mut(),
+            evenement,
+            XML,
+            taille,
+            tampon.as_mut_ptr().cast(),
+            &raw mut utilise,
+            &raw mut proprietes,
+        ) == 0
+        {
+            return None;
+        }
+        let fin = tampon.iter().position(|&c| c == 0).unwrap_or(tampon.len());
+        Some(String::from_utf16_lossy(&tampon[..fin]))
+    }
+}
+
+/// Les lignes d'une lecture, les plus récentes d'abord, ou `None` si le journal refuse (droits, journal absent, délai
+/// dépassé). Aucun événement : une liste vide, pas une erreur.
+fn lire(lecture: &Lecture, fin: std::time::Instant) -> Option<Vec<String>> {
+    const CHEMIN_DU_JOURNAL: u32 = 0x1;
+    const PLUS_RECENTS_D_ABORD: u32 = 0x200;
+    const PLUS_RIEN: i32 = 259;
+    let large = |t: &str| t.encode_utf16().chain([0]).collect::<Vec<u16>>();
+    let journal = large(lecture.journal);
+    let requete = large(&format!(
+        "*[System[({}) and TimeCreated[timediff(@SystemTime) <= {}]]]",
+        lecture.evenements,
+        u64::from(JOURS) * 86_400_000
+    ));
+    let mut lignes = Vec::new();
+    // SAFETY : les chaînes sont terminées par un zéro et vivent pendant l'appel ; la requête (nulle : refus, vérifié) et
+    // chaque événement rendu par EvtNext sont fermés une seule fois, ici. EvtNext écrit au plus `lot.len()` poignées.
+    unsafe {
+        let resultats = EvtQuery(
+            std::ptr::null_mut(),
+            journal.as_ptr(),
+            requete.as_ptr(),
+            CHEMIN_DU_JOURNAL | PLUS_RECENTS_D_ABORD,
+        );
+        if resultats.is_null() {
+            return None;
+        }
+        let mut lot = [std::ptr::null_mut::<c_void>(); 64];
+        let mut complet = true;
+        while lignes.len() < lecture.max {
+            let reste = fin.saturating_duration_since(std::time::Instant::now());
+            if reste.is_zero() {
+                complet = false;
+                break;
+            }
+            let mut rendus = 0u32;
+            let delai = u32::try_from(reste.as_millis()).unwrap_or(u32::MAX);
+            if EvtNext(resultats, 64, lot.as_mut_ptr(), delai, 0, &raw mut rendus) == 0 {
+                complet = std::io::Error::last_os_error().raw_os_error() == Some(PLUS_RIEN);
+                break;
+            }
+            for &evenement in lot.iter().take(usize::try_from(rendus).unwrap_or(0)) {
+                if lignes.len() < lecture.max
+                    && let Some((id, date, valeurs)) = rendre(evenement).as_deref().and_then(lire_xml)
+                    && let Some(l) = ligne(lecture.section, id, &date_locale(&date).unwrap_or_default(), &valeurs)
+                {
+                    lignes.push(l);
+                }
+                EvtClose(evenement);
+            }
+        }
+        EvtClose(resultats);
+        complet.then_some(lignes)
+    }
+}
+
+/// Les journaux lus par les fonctions de Windows (wevtapi), sans PowerShell, dans la forme que `juger_evenements` lit :
+/// une section par lecture (« NOM|… », puis « NOM_FIN ») ; une section sans fin quand le journal a refusé. Bornée à
+/// 30 s en tout : au-delà, le service des journaux est bloqué.
+fn lire_journaux() -> String {
+    use std::fmt::Write as _;
+    let fin = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    let mut texte = format!("ADM|{}\nADM_FIN\n", if administrateur() { "True" } else { "False" });
+    for lecture in &LECTURES {
+        if let Some(lignes) = lire(lecture, fin) {
+            for l in lignes {
+                let _ = writeln!(texte, "{}|{l}", lecture.section);
+            }
+            let _ = writeln!(texte, "{}_FIN", lecture.section);
+        }
+    }
+    texte
+}
 
 /// Un échec de connexion (4625).
 struct Echec {
@@ -339,7 +638,7 @@ regle!(
         "MITRE ATT&CK T1543.003",
     ],
     // 30 s : la lecture est bornée ; au-delà, PowerShell ou le service des journaux est bloqué.
-    || juger_evenements(ps_delai(SCRIPT, 30).as_deref())
+    || juger_evenements(Some(&lire_journaux()))
 );
 
 #[cfg(test)]
@@ -436,6 +735,51 @@ mod tests {
         assert!(!c[0].correctif.as_ref().unwrap().automatique);
         assert_eq!(c[1].probleme, Some(Niveau::Info));
         assert_eq!(c[1].message.matches("Mozilla").count(), 1, "{}", c[1].message);
+    }
+
+    #[test]
+    fn evenements_lus_dans_leur_xml() {
+        // XML inventé, à la forme de celui de Windows : 4625 (EventData), 1102 (UserData), entités et valeur vide.
+        let echec = "<Event xmlns='http://schemas.microsoft.com/win/2004/08/events/event'><System>\
+             <Provider Name='Microsoft-Windows-Security-Auditing'/><EventID>4625</EventID>\
+             <TimeCreated SystemTime='2026-10-18T14:05:09.1234567Z'/></System><EventData>\
+             <Data Name='SubjectUserSid'>S-1-0-0</Data><Data Name='SubjectUserName'>-</Data>\
+             <Data Name='SubjectDomainName'>-</Data><Data Name='SubjectLogonId'>0x0</Data>\
+             <Data Name='TargetUserSid'>S-1-0-0</Data><Data Name='TargetUserName'>alice&amp;bob</Data>\
+             <Data Name='TargetDomainName'/><Data Name='Status'>0xc000006d</Data><Data Name='FailureReason'>%%2313</Data>\
+             <Data Name='SubStatus'>0xc000006a</Data><Data Name='LogonType'>3</Data><Data Name='LogonProcessName'>NtLmSsp</Data>\
+             <Data Name='AuthenticationPackageName'>NTLM</Data><Data Name='WorkstationName'>SALON</Data>\
+             <Data Name='TransmittedServices'>-</Data><Data Name='LmPackageName'>-</Data><Data Name='KeyLength'>0</Data>\
+             <Data Name='ProcessId'>0x0</Data><Data Name='ProcessName'>-</Data><Data Name='IpAddress'>192.0.2.10</Data>\
+             <Data Name='IpPort'>0</Data></EventData></Event>";
+        let (id, date, valeurs) = lire_xml(echec).unwrap();
+        assert_eq!((id, date.as_str()), (4625, "2026-10-18T14:05:09.1234567Z"));
+        assert_eq!(valeurs.len(), 21);
+        assert_eq!(
+            ligne("ECH", id, "2026-10-18 10:05", &valeurs).as_deref(),
+            Some("2026-10-18 10:05|3|192.0.2.10|alice&bob")
+        );
+        let efface = "<Event><System><EventID>1102</EventID><TimeCreated SystemTime='2026-10-18T14:05:09Z'/></System>\
+             <UserData><LogFileCleared xmlns='http://manifests.microsoft.com/win/2004/08/windows/eventlog'>\
+             <SubjectUserSid>S-1-5-21-1</SubjectUserSid><SubjectUserName>bob</SubjectUserName>\
+             <SubjectDomainName>SALON</SubjectDomainName><SubjectLogonId>0x1</SubjectLogonId></LogFileCleared></UserData></Event>";
+        let (id, _, valeurs) = lire_xml(efface).unwrap();
+        assert_eq!(ligne("SEC", id, "d", &valeurs).as_deref(), Some("1102|d|bob"));
+        // Un nom piégé ne casse pas la ligne : le séparateur et les retours deviennent des espaces.
+        let p = vec!["a|b\r\nc".to_string(), "C:\\x.exe".to_string()];
+        assert_eq!(ligne("SRV", 7045, "d", &p).as_deref(), Some("d|a b c|C:\\x.exe"));
+        assert_eq!(ligne("SRV", 4625, "d", &p), None);
+        assert!(lire_xml("<Event><System><EventID>x</EventID></System></Event>").is_none());
+        assert!(lire_xml("pas du xml <").is_none());
+        assert_eq!(date_locale("pas une date"), None);
+    }
+
+    /// Les vraies fonctions de Windows (Wine ici, la VM ensuite) : rien ne plante, et chaque section lue est complète.
+    #[test]
+    fn journaux_lus_par_windows() {
+        let texte = lire_journaux();
+        assert!(texte.starts_with("ADM|"), "{texte}");
+        let _ = juger_evenements(Some(&texte));
     }
 
     #[test]
