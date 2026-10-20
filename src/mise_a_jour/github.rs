@@ -1,5 +1,5 @@
-//! Les versions publiées de Vanguard sur GitHub, pour se mettre à jour sans la clé. Le dépôt du code est privé : les
-//! programmes sont publiés à part, dans un dépôt public qui ne contient qu'eux. Rien n'y est cru sur parole : la
+//! Les versions publiées de Vanguard sur GitHub, pour se mettre à jour sans la clé. Les programmes signés sont
+//! publiés à part du code (d9v3/vanguard-officiel), dans un dépôt qui ne contient qu'eux. Rien n'y est cru sur parole : la
 //! dernière version est décrite par un manifeste (`derniere.txt` : la version, puis l'empreinte SHA-256 et la taille
 //! du programme de chaque système), signé en Ed25519 sur l'ordinateur de l'auteur (`outils/signer-versions.sh`), dont
 //! la clé publique est gravée ici. Un manifeste mal signé, une version qui n'est pas plus récente, un programme dont
