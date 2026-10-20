@@ -74,6 +74,12 @@ pub(super) const DURCISSEMENT: &[(&str, i64, (&str, &str))] = &[
 
 /// Réglages dont une valeur précise est risquée, sans que « plus haut » veuille dire « plus sûr » : (réglage, valeur
 /// risquée, valeur sûre écrite à sa place, rôle).
+///
+/// Réseau IPv4 : une interface prend la valeur de `default` tant que personne ne l'a réglée elle-même, y compris
+/// quand `default` change après sa création (carte réseau montée avant que les réglages ne soient lus au
+/// démarrage). Hors routage, une redirection est acceptée si `all` ou l'interface le permet : il faut les deux à 0.
+/// Le filtre des adresses d'origine prend le plus fort de `all` et de l'interface : `default` à 2 (souple, ce que
+/// systemd pose) suffit, et `all` à 2 relâcherait une interface réglée exprès en strict (1).
 pub(super) const INTERDITS: &[(&str, i64, i64, (&str, &str))] = &[
     (
         "fs/suid_dumpable",
@@ -91,6 +97,33 @@ pub(super) const INTERDITS: &[(&str, i64, i64, (&str, &str))] = &[
         (
             "les touches magiques du noyau ne tuent ni ne vident la mémoire",
             "the kernel's magic keys neither kill programs nor dump memory",
+        ),
+    ),
+    (
+        "net/ipv4/conf/all/accept_redirects",
+        1,
+        0,
+        (
+            "le réseau ne peut pas détourner le trafic par des redirections ICMP",
+            "the network cannot divert traffic with ICMP redirects",
+        ),
+    ),
+    (
+        "net/ipv4/conf/default/accept_redirects",
+        1,
+        0,
+        (
+            "pareil pour chaque interface réseau",
+            "the same for each network interface",
+        ),
+    ),
+    (
+        "net/ipv4/conf/default/rp_filter",
+        0,
+        2,
+        (
+            "les paquets à l'adresse d'origine impossible sont écartés",
+            "packets with an impossible source address are dropped",
         ),
     ),
 ];
@@ -121,8 +154,8 @@ pub(super) fn durcissement_noyau() -> Constat {
         return ok(
             "Noyau durci",
             tr!(
-                "Réglages de sécurité du noyau corrects (ASLR, ptrace, dmesg, liens…).",
-                "Kernel security settings are correct (ASLR, ptrace, dmesg, links…)."
+                "Réglages de sécurité du noyau corrects (ASLR, ptrace, dmesg, liens, réseau…).",
+                "Kernel security settings are correct (ASLR, ptrace, dmesg, links, network…)."
             ),
         );
     }
@@ -295,6 +328,27 @@ mod tests {
         let faibles = reglages_faibles(lu(1, 1));
         let noms: Vec<(&str, i64)> = faibles.iter().map(|f| (f.0, f.2)).collect();
         assert_eq!(noms, [("fs/suid_dumpable", 0), ("kernel/sysrq", 176)]);
+        // Réseau : valeurs d'origine du noyau (redirections acceptées, filtre coupé) contre celles d'un système durci ;
+        // le filtre strict (1) n'est jamais relâché.
+        let reseau = |redirections: i64, filtre: i64| {
+            reglages_faibles(move |c| {
+                Some(match c {
+                    "net/ipv4/conf/all/accept_redirects" | "net/ipv4/conf/default/accept_redirects" => redirections,
+                    "net/ipv4/conf/default/rp_filter" => filtre,
+                    _ => 2,
+                })
+            })
+        };
+        assert!(reseau(0, 2).is_empty() && reseau(0, 1).is_empty());
+        let noms: Vec<(&str, i64)> = reseau(1, 0).iter().map(|f| (f.0, f.2)).collect();
+        assert_eq!(
+            noms,
+            [
+                ("net/ipv4/conf/all/accept_redirects", 0),
+                ("net/ipv4/conf/default/accept_redirects", 0),
+                ("net/ipv4/conf/default/rp_filter", 2)
+            ]
+        );
         // Réglage absent (noyau sans Yama…) : ni faible ni fort, on ne conclut pas.
         assert_eq!(reglages_faibles(|_| None), [] as [(&str, i64, i64, &str); 0]);
     }
