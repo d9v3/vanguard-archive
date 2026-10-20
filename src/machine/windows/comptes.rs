@@ -76,9 +76,14 @@ fn juger_comptes(utilisateurs: &[&str], moi: Option<&str>, lbp: Option<u32>) -> 
                         "The “{nom}” account does not require a password: it may open without typing anything."
                     ),
                 )
-                .manuel(
-                    trf!("Donner un mot de passe à « {nom} »", "Give “{nom}” a password"),
-                    &["Start-Process ms-settings:signinoptions"],
+                // Le mot de passe actuel ne change pas (personne n'est enfermé dehors) : Windows refusera seulement
+                // qu'on lui en mette un vide ensuite.
+                .corriger(
+                    trf!(
+                        "Exiger un mot de passe pour « {nom} »",
+                        "Require a password for “{nom}”"
+                    ),
+                    &[&format!("Set-LocalUser -Name '{nom_ps}' -PasswordRequired $true")],
                 ),
             );
         }
@@ -145,5 +150,8 @@ mod tests {
         );
         // Administrateur intégré utilisé en ce moment : conseil, pas de désactivation automatique.
         assert!(c[2].correctif.as_ref().is_some_and(|k| !k.automatique));
+        // Compte sans mot de passe exigé : corrigé par Vanguard, le nom protégé dans la commande.
+        let k = c[0].correctif.as_ref().unwrap();
+        assert!(k.automatique && k.commandes == ["Set-LocalUser -Name 'enfant' -PasswordRequired $true"]);
     }
 }
