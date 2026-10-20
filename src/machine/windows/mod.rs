@@ -13,7 +13,7 @@ pub(crate) mod cartes;
 mod comptes;
 mod durcissement;
 mod ecoute;
-mod evenements;
+pub(crate) mod evenements;
 mod exclusions;
 pub(crate) mod gestionnaire;
 pub(crate) mod hachage;

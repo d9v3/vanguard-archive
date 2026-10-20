@@ -160,7 +160,7 @@ fn ligne(section: &str, id: u32, date: &str, p: &[String]) -> Option<String> {
 
 /// « 2026-10-20T13:46:40.1234567Z » → « 2026-10-20 09:46 » à l'heure de l'ordinateur, comme l'Observateur
 /// d'événements la montre.
-fn date_locale(systeme: &str) -> Option<String> {
+pub(crate) fn date_locale(systeme: &str) -> Option<String> {
     let utc = chrono::DateTime::parse_from_rfc3339(systeme).ok()?;
     Some(utc.with_timezone(&chrono::Local).format("%Y-%m-%d %H:%M").to_string())
 }
@@ -229,16 +229,31 @@ fn rendre(evenement: *mut c_void) -> Option<String> {
 /// Les lignes d'une lecture, les plus récentes d'abord, ou `None` si le journal refuse (droits, journal absent, délai
 /// dépassé). Aucun événement : une liste vide, pas une erreur.
 fn lire(lecture: &Lecture, fin: std::time::Instant) -> Option<Vec<String>> {
+    let requete = format!(
+        "*[System[({}) and TimeCreated[timediff(@SystemTime) <= {}]]]",
+        lecture.evenements,
+        u64::from(JOURS) * 86_400_000
+    );
+    parcourir(lecture.journal, &requete, lecture.max, fin, |id, date, valeurs| {
+        ligne(lecture.section, id, &date_locale(date).unwrap_or_default(), valeurs)
+    })
+}
+
+/// Les événements d'un journal qui répondent à une requête XPath, les plus récents d'abord : chacun rendu en XML, lu,
+/// puis changé en ligne par `faire` (rien : passé), `max` lignes au plus. `None` si le journal refuse (droits,
+/// journal absent) ou que le délai `fin` est dépassé ; aucun événement : une liste vide, pas une erreur.
+pub(crate) fn parcourir(
+    journal: &str,
+    requete: &str,
+    max: usize,
+    fin: std::time::Instant,
+    mut faire: impl FnMut(u32, &str, &[String]) -> Option<String>,
+) -> Option<Vec<String>> {
     const CHEMIN_DU_JOURNAL: u32 = 0x1;
     const PLUS_RECENTS_D_ABORD: u32 = 0x200;
     const PLUS_RIEN: i32 = 259;
     let large = |t: &str| t.encode_utf16().chain([0]).collect::<Vec<u16>>();
-    let journal = large(lecture.journal);
-    let requete = large(&format!(
-        "*[System[({}) and TimeCreated[timediff(@SystemTime) <= {}]]]",
-        lecture.evenements,
-        u64::from(JOURS) * 86_400_000
-    ));
+    let (journal, requete) = (large(journal), large(requete));
     let mut lignes = Vec::new();
     // SAFETY : les chaînes sont terminées par un zéro et vivent pendant l'appel ; la requête (nulle : refus, vérifié) et
     // chaque événement rendu par EvtNext sont fermés une seule fois, ici. EvtNext écrit au plus `lot.len()` poignées.
@@ -254,7 +269,7 @@ fn lire(lecture: &Lecture, fin: std::time::Instant) -> Option<Vec<String>> {
         }
         let mut lot = [std::ptr::null_mut::<c_void>(); 64];
         let mut complet = true;
-        while lignes.len() < lecture.max {
+        while lignes.len() < max {
             let reste = fin.saturating_duration_since(std::time::Instant::now());
             if reste.is_zero() {
                 complet = false;
@@ -267,9 +282,9 @@ fn lire(lecture: &Lecture, fin: std::time::Instant) -> Option<Vec<String>> {
                 break;
             }
             for &evenement in lot.iter().take(usize::try_from(rendus).unwrap_or(0)) {
-                if lignes.len() < lecture.max
+                if lignes.len() < max
                     && let Some((id, date, valeurs)) = rendre(evenement).as_deref().and_then(lire_xml)
-                    && let Some(l) = ligne(lecture.section, id, &date_locale(&date).unwrap_or_default(), &valeurs)
+                    && let Some(l) = faire(id, &date, &valeurs)
                 {
                     lignes.push(l);
                 }

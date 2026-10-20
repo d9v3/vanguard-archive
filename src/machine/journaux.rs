@@ -92,11 +92,22 @@ pub fn journaux() -> Vec<Constat> {
 
 #[cfg(windows)]
 pub fn journaux() -> Vec<Constat> {
-    // Événement 104 du journal Système : « le journal … a été effacé », lisible sans droits administrateur.
-    let Some(sortie) = super::windows::ps(
+    // Événement 104 du journal Système : « le journal … a été effacé », lisible sans droits administrateur. Lu par
+    // wevtapi, les valeurs de l'événement dans leur ordre (comme Properties) ; PowerShell si le journal refuse.
+    let fin = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    let natif = super::windows::evenements::parcourir("System", "*[System[(EventID=104)]]", 5, fin, |_, date, v| {
+        let jour: String = super::windows::evenements::date_locale(date)?
+            .chars()
+            .take(10)
+            .collect();
+        Some(format!("EFF|{jour}|{}", v.join(" ")))
+    });
+    let Some(sortie) = natif.map(|l| l.join("\n")).or_else(|| {
+        super::windows::ps(
         "Get-WinEvent -FilterHashtable @{ LogName = 'System'; Id = 104 } -MaxEvents 5 -ErrorAction SilentlyContinue | \
          ForEach-Object { \"EFF|$($_.TimeCreated.ToString('yyyy-MM-dd'))|$(($_.Properties | ForEach-Object { $_.Value }) -join ' ')\" }",
-    ) else {
+        )
+    }) else {
         return vec![super::windows::illisible(CAT)];
     };
     vec![juger_effacements(
@@ -120,6 +131,14 @@ fn lire_effacements(sortie: &str) -> Vec<(String, String)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Les vraies fonctions de Windows (Wine ici, où wevtapi refuse : la VM dit le reste) : un seul constat, sans
+    /// planter.
+    #[cfg(windows)]
+    #[test]
+    fn effacements_lus_par_windows() {
+        assert_eq!(journaux().len(), 1);
+    }
 
     #[test]
     fn etat_des_journaux() {
