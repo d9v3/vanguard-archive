@@ -14,7 +14,7 @@ use crate::commande::section;
 /// tabulation, jamais ce caractère (retiré par N).
 const SEP: char = '\u{1f}';
 
-/// Une commande de la console, lancée en UTF-8 : sans « chcp 65001 », ipconfig, schtasks ou reg écrivent dans
+/// Une commande de la console, lancée en UTF-8 : sans « chcp 65001 », ipconfig, schtasks ou netstat écrivent dans
 /// l'ancienne page de code de la console, et les accents d'un Windows français deviennent illisibles.
 fn console(ligne: &str) -> Command {
     let mut c = Command::new("cmd");
@@ -260,18 +260,90 @@ const CLES_DEMARRAGE: [&str; 13] = [
     r"HKLM\System\CurrentControlSet\Control\Session Manager",
 ];
 
+/// Le texte d'une valeur du registre, écrit comme « reg query » l'écrit : nombres en 0x…, chaînes multiples séparées
+/// par « \\0 », le reste en hexadécimal. `genre` : son type (« REG_SZ »).
+fn texte_registre(genre: &str, octets: &[u8]) -> String {
+    let utf16 = |o: &[u8]| -> String {
+        let mots: Vec<u16> = o.as_chunks::<2>().0.iter().map(|&m| u16::from_le_bytes(m)).collect();
+        let fin = mots.len() - mots.iter().rev().take_while(|&&m| m == 0).count();
+        String::from_utf16_lossy(&mots[..fin])
+    };
+    match genre {
+        "REG_SZ" | "REG_EXPAND_SZ" | "REG_LINK" => utf16(octets),
+        "REG_MULTI_SZ" => utf16(octets).replace('\0', "\\0"),
+        "REG_DWORD" if octets.len() == 4 => format!(
+            "0x{:x}",
+            u32::from_le_bytes([octets[0], octets[1], octets[2], octets[3]])
+        ),
+        "REG_QWORD" if octets.len() == 8 => {
+            format!("0x{:x}", u64::from_le_bytes(octets.try_into().unwrap_or_default()))
+        }
+        _ => octets.iter().fold(String::new(), |mut t, o| {
+            let _ = write!(t, "{o:02X}");
+            t
+        }),
+    }
+}
+
+/// Une clé du registre lue directement, comme « reg query » la montrerait : ses valeurs (ou la seule demandée), puis
+/// ses sous-clés. Sans cmd ni ligne de commande à échapper : un nom à espaces (« Windows NT », « Command Processor »)
+/// se lit comme les autres. `Err` : la note à sa place (clé absente ou refusée).
+fn cle_registre(chemin: &str, seule: Option<&str>) -> Result<String, String> {
+    use winreg::RegKey;
+    use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE};
+    let (racine, reste) = match chemin.split_once('\\') {
+        Some(("HKCU", reste)) => (RegKey::predef(HKEY_CURRENT_USER), reste),
+        Some(("HKLM", reste)) => (RegKey::predef(HKEY_LOCAL_MACHINE), reste),
+        _ => return Err(format!("(clé inconnue / unknown key : {chemin})")),
+    };
+    let cle = racine.open_subkey(reste).map_err(|e| match e.kind() {
+        std::io::ErrorKind::NotFound => "(clé absente / key not found)".to_string(),
+        std::io::ErrorKind::PermissionDenied => Raison::Droits.note(),
+        _ => format!("(illisible / unreadable : {e})"),
+    })?;
+    let mut texte = String::new();
+    let valeurs: Vec<(String, winreg::RegValue)> = match seule {
+        Some(nom) => cle
+            .get_raw_value(nom)
+            .map(|v| vec![(nom.to_string(), v)])
+            .unwrap_or_default(),
+        None => cle.enum_values().flatten().collect(),
+    };
+    for (nom, valeur) in valeurs {
+        let genre = format!("{:?}", valeur.vtype);
+        let nom = if nom.is_empty() { "(Default)".to_string() } else { nom };
+        let _ = writeln!(
+            texte,
+            "    {nom}    {genre}    {}",
+            texte_registre(&genre, &valeur.bytes)
+        );
+    }
+    if seule.is_none() {
+        for sous_cle in cle.enum_keys().flatten() {
+            let _ = writeln!(texte, "{chemin}\\{sous_cle}");
+        }
+    }
+    if texte.is_empty() {
+        texte.push_str("(vide / empty)\n");
+    }
+    Ok(texte)
+}
+
 pub(super) fn demarrage(dossier: &Path) -> Partie {
     let mut p = Partie::new(Bi::new("Ce qui se lance tout seul", "What starts by itself"));
     let mut f = Feuille::new(&p.titre);
     f.commande(&mut console("schtasks /query /fo LIST /v"), 90, true);
     for cle in CLES_DEMARRAGE {
         // Session Manager : seulement BootExecute, le reste est long et sans rapport.
-        let ligne = if cle.ends_with("Session Manager") {
-            format!("reg query \"{cle}\" /v BootExecute")
-        } else {
-            format!("reg query \"{cle}\"")
-        };
-        f.commande(&mut console(&ligne), 15, false);
+        let seule = cle.ends_with("Session Manager").then_some("BootExecute");
+        f.section(cle);
+        match cle_registre(cle, seule) {
+            Ok(texte) => {
+                f.lues += 1;
+                f.ajouter(&texte);
+            }
+            Err(note) => f.ajouter(&note),
+        }
     }
     for dossier_demarrage in [
         std::env::var_os("APPDATA").map(|a| PathBuf::from(a).join(r"Microsoft\Windows\Start Menu\Programs\Startup")),
@@ -543,6 +615,40 @@ pub(super) fn endroits_temporaires() -> Vec<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn valeurs_du_registre() {
+        let utf16 = |t: &str| t.encode_utf16().flat_map(u16::to_le_bytes).collect::<Vec<u8>>();
+        assert_eq!(
+            texte_registre("REG_SZ", &utf16("C:\\Windows\\explorer.exe\0")),
+            "C:\\Windows\\explorer.exe"
+        );
+        assert_eq!(
+            texte_registre("REG_MULTI_SZ", &utf16("autocheck autochk *\0autre\0\0")),
+            "autocheck autochk *\\0autre"
+        );
+        assert_eq!(texte_registre("REG_DWORD", &1u32.to_le_bytes()), "0x1");
+        assert_eq!(
+            texte_registre("REG_QWORD", &0x1_0000_0000u64.to_le_bytes()),
+            "0x100000000"
+        );
+        assert_eq!(texte_registre("REG_BINARY", &[0x01, 0xAB]), "01AB");
+        // Une valeur mal formée ne plante pas : montrée en hexadécimal.
+        assert_eq!(texte_registre("REG_DWORD", &[1, 2]), "0102");
+        assert_eq!(texte_registre("REG_SZ", &[0x41]), "");
+    }
+
+    /// Le vrai registre (celui de Wine ici, puis de la VM) : une clé à espaces se lit, une clé absente le dit.
+    #[test]
+    fn cles_du_registre_lues() {
+        let texte = cle_registre(r"HKLM\Software\Microsoft\Windows NT\CurrentVersion", None).unwrap();
+        assert!(texte.contains("REG_SZ"), "{texte}");
+        assert_eq!(
+            cle_registre(r"HKLM\Software\Vanguard\Cle qui n existe pas", None),
+            Err("(clé absente / key not found)".to_string())
+        );
+        assert!(cle_registre(r"HKXX\Software", None).is_err());
+    }
 
     #[test]
     fn lignes_des_scripts() {
