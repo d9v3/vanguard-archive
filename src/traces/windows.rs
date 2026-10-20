@@ -510,6 +510,11 @@ pub(super) fn journaux(dossier: &Path) -> Partie {
     p
 }
 
+/// Pas de montage à écarter sous Windows : un autre système de fichiers y est un autre lecteur.
+pub(super) fn points_de_montage() -> Vec<PathBuf> {
+    Vec::new()
+}
+
 /// La place que peuvent prendre les journaux : leur taille entière, au plus (l'export ne garde que 7 jours).
 pub(super) fn place_des_journaux() -> u64 {
     JOURNAUX

@@ -413,6 +413,20 @@ pub(super) fn endroits_temporaires() -> Vec<PathBuf> {
     ["/tmp", "/var/tmp", "/dev/shm"].iter().map(PathBuf::from).collect()
 }
 
+/// Les points de montage de cet ordinateur, que le parcours des fichiers récents ne traverse pas.
+pub(super) fn points_de_montage() -> Vec<PathBuf> {
+    montages_selon(&std::fs::read_to_string("/proc/self/mountinfo").unwrap_or_default())
+}
+
+/// Le point de montage est le cinquième champ de chaque ligne de mountinfo, ses espaces écrits en octal.
+fn montages_selon(mountinfo: &str) -> Vec<PathBuf> {
+    mountinfo
+        .lines()
+        .filter_map(|l| l.split(' ').nth(4))
+        .map(|c| PathBuf::from(crate::copier::sans_echappements(c)))
+        .collect()
+}
+
 /// La place que peuvent prendre les journaux.
 pub(super) fn place_des_journaux() -> u64 {
     super::BORNE_JOURNAL
@@ -421,6 +435,22 @@ pub(super) fn place_des_journaux() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn points_de_montage_lus() {
+        let mountinfo = "22 1 0:21 / /tmp rw,nosuid shared:5 - tmpfs tmpfs rw\n\
+            98 22 0:52 / /tmp/com.freerdp.client.cliprdr.108479 rw - fuse /dev/fuse rw\n\
+            99 22 0:53 / /tmp/mon\\040dossier ro - fuse.essai essai ro\n";
+        assert_eq!(
+            montages_selon(mountinfo),
+            [
+                PathBuf::from("/tmp"),
+                PathBuf::from("/tmp/com.freerdp.client.cliprdr.108479"),
+                PathBuf::from("/tmp/mon dossier")
+            ]
+        );
+        assert!(points_de_montage().contains(&PathBuf::from("/")));
+    }
 
     #[test]
     fn comptes_et_status() {

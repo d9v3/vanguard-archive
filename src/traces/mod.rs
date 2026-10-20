@@ -721,8 +721,11 @@ struct Parcours {
 }
 
 /// Les fichiers récents de `racines`, sous-dossiers compris (8 niveaux), sans suivre les liens ni entrer dans
-/// `exclu` (le dossier des traces lui-même) ; 200 000 fichiers et 20 secondes au plus.
-fn parcourir(racines: &[PathBuf], exclu: &Path, depuis: SystemTime) -> Parcours {
+/// `exclu` (le dossier des traces lui-même) ; 200 000 fichiers et 20 secondes au plus. Jamais dans un autre système de
+/// fichiers : un montage FUSE de /tmp (presse-papiers de xfreerdp, AppImage) peut ne jamais répondre, et une seule
+/// lecture bloquée figeait la collecte au-delà de toute limite (vu le 20 octobre, la VM Windows ouverte). Les points
+/// de `montages` sont écartés sans être interrogés ; ailleurs (macOS), un dossier d'un autre appareil que sa racine.
+fn parcourir(racines: &[PathBuf], exclu: &Path, depuis: SystemTime, montages: &[PathBuf]) -> Parcours {
     let fin = Instant::now() + Duration::from_secs(20);
     let mut p = Parcours {
         entrees: Vec::new(),
@@ -730,8 +733,11 @@ fn parcourir(racines: &[PathBuf], exclu: &Path, depuis: SystemTime) -> Parcours 
         illisibles: Vec::new(),
         interrompu: false,
     };
-    let mut a_voir: Vec<(PathBuf, usize)> = racines.iter().map(|r| (r.clone(), 0)).collect();
-    while let Some((dossier, profondeur)) = a_voir.pop() {
+    let mut a_voir: Vec<(PathBuf, usize, Option<u64>)> = racines
+        .iter()
+        .map(|r| (r.clone(), 0, std::fs::metadata(r).ok().map(|m| appareil(&m))))
+        .collect();
+    while let Some((dossier, profondeur, racine)) = a_voir.pop() {
         if Instant::now() > fin || p.vus > 200_000 {
             p.interrompu = true;
             break;
@@ -748,15 +754,15 @@ fn parcourir(racines: &[PathBuf], exclu: &Path, depuis: SystemTime) -> Parcours 
         for e in entrees.flatten() {
             p.vus += 1;
             let chemin = e.path();
-            if chemin.starts_with(exclu) {
+            if chemin.starts_with(exclu) || montages.contains(&chemin) {
                 continue;
             }
             let Ok(m) = std::fs::symlink_metadata(&chemin) else {
                 continue;
             };
             if m.is_dir() {
-                if profondeur < 8 {
-                    a_voir.push((chemin, profondeur + 1));
+                if profondeur < 8 && racine.is_none_or(|r| r == appareil(&m)) {
+                    a_voir.push((chemin, profondeur + 1, racine));
                 }
                 continue;
             }
@@ -767,6 +773,19 @@ fn parcourir(racines: &[PathBuf], exclu: &Path, depuis: SystemTime) -> Parcours 
         }
     }
     p
+}
+
+/// L'appareil (système de fichiers) qui porte ce fichier ; sous Windows, un seul (les montages y sont des lecteurs).
+fn appareil(m: &std::fs::Metadata) -> u64 {
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::MetadataExt::dev(m)
+    }
+    #[cfg(windows)]
+    {
+        let _ = m;
+        0
+    }
 }
 
 /// Un fichier décrit (sans son empreinte) d'après ses métadonnées.
@@ -826,7 +845,7 @@ fn fichiers_recents(dossier: &Path) -> Partie {
     let mut p = Partie::new(Bi::new("Fichiers récents", "Recent files"));
     let racines = endroits();
     let depuis = SystemTime::now() - Duration::from_secs(JOURS_RECENTS * 86_400);
-    let mut parcours = parcourir(&racines, dossier, depuis);
+    let mut parcours = parcourir(&racines, dossier, depuis, &os::points_de_montage());
     let mut empreintes = 0;
     let fin = Instant::now() + DELAI_EMPREINTES;
     let mut en_retard = 0;

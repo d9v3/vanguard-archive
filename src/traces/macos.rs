@@ -242,6 +242,11 @@ pub(super) fn endroits_temporaires() -> Vec<PathBuf> {
     v
 }
 
+/// Pas de liste des montages ici : le parcours s'arrête aux dossiers d'un autre appareil que leur racine.
+pub(super) fn points_de_montage() -> Vec<PathBuf> {
+    Vec::new()
+}
+
 /// La place que peuvent prendre les journaux : le journal unifié borné et la fin du journal des installations.
 pub(super) fn place_des_journaux() -> u64 {
     super::BORNE_JOURNAL + (10 << 20)
