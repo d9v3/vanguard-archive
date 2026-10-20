@@ -4,6 +4,7 @@
 pub mod cameras;
 pub mod canaux;
 pub mod connexion;
+pub mod empoisonnement;
 pub mod listes_noires;
 pub mod nat;
 pub mod nmap;
@@ -137,6 +138,9 @@ pub struct Rapport {
     /// Redirections UPnP de la box (scan du réseau local seulement).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub upnp: Option<crate::reseau::upnp::Etat>,
+    /// Empoisonneurs de noms du réseau local (Responder…), scan du réseau local seulement.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub empoisonnement: Option<crate::reseau::empoisonnement::Rapport>,
 }
 
 /// Délai par port de la revérification d'un appareil en veille (ms) : trois fois celui d'un scan.
@@ -1143,6 +1147,10 @@ fn afficher(r: &Rapport) {
         crate::reseau::upnp::afficher(e);
     }
 
+    if let Some(e) = &r.empoisonnement {
+        crate::reseau::empoisonnement::afficher(e, &r.hotes);
+    }
+
     if !r.absents.is_empty() {
         section(&trf!("ABSENTS AUJOURD'HUI ({})", "ABSENT TODAY ({})", r.absents.len()));
         for a in &r.absents {
@@ -1197,6 +1205,13 @@ pub async fn executer(o: Options) -> Result<Rapport, String> {
     // L'état de l'UPnP : upnpc attend les réponses de la box jusqu'à 8 s. Demandé dès maintenant, à côté, il est prêt à
     // la fin du scan au lieu de l'allonger d'autant. Après les lectures qui peuvent échouer : rien ne tourne pour rien.
     let upnp = reseau_local.then(|| tokio::task::spawn_blocking(crate::reseau::upnp::etat));
+    // Les faux noms sur le réseau local, demandés à côté du scan : la sonde (deux essais d'environ 1,5 s) finit avant
+    // le scan (8-10 s) et ne le ralentit pas. Seulement sur le réseau local (pas de cible précise ni de VPN seul) ;
+    // rien d'Internet, donc VANGUARD_HORS_LIGNE ne l'empêche pas.
+    let empoisonnement = moi.filter(|_| reseau_local).map(|ip| {
+        let cidr = cible.clone();
+        tokio::spawn(async move { crate::reseau::empoisonnement::sonder(ip, &cidr).await })
+    });
 
     if bavard {
         tre!(
@@ -1447,6 +1462,12 @@ pub async fn executer(o: Options) -> Result<Rapport, String> {
             Some(tache) => tache.await.ok(),
             None => None,
         },
+        empoisonnement: match empoisonnement {
+            Some(tache) => tache.await.ok(),
+            // Réseau local scanné mais sonde non lancée (IP locale inconnue) : rien n'a pu être testé.
+            None if reseau_local => Some(crate::reseau::empoisonnement::Rapport::SansReseauLocal),
+            None => None,
+        },
     };
 
     if o.json {
@@ -1487,6 +1508,7 @@ mod tests {
             note: "A",
             hotes,
             upnp: None,
+            empoisonnement: None,
         }
     }
 

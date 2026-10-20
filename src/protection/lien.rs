@@ -871,16 +871,24 @@ fn sens_surbl(codes: &[Ipv4Addr]) -> Inscription {
     }
 }
 
-/// Une liste d'URLhaus téléchargée sert 12 heures sans être retéléchargée.
-const URLHAUS_FRAICHE: Duration = Duration::from_hours(12);
+/// Une liste d'abuse.ch téléchargée sert 12 heures sans être retéléchargée.
+pub(crate) const URLHAUS_FRAICHE: Duration = Duration::from_hours(12);
 /// Au-delà d'une semaine sans avoir pu être rafraîchies, les listes ne servent plus : un site piège vit quelques
 /// jours, une vieille liste ne le connaît pas encore.
-const URLHAUS_TROP_VIEILLE: Duration = Duration::from_hours(7 * 24);
+pub(crate) const URLHAUS_TROP_VIEILLE: Duration = Duration::from_hours(7 * 24);
 
 /// Une liste d'URLhaus (abuse.ch), gardée 12 heures dans le dossier de Vanguard. La télécharger ne dit à personne quel
 /// lien on vérifie. Sans Internet, la copie d'avant sert encore : son texte, et son âge.
 fn liste_urlhaus(adresse: &str, nom: &str) -> Option<(String, Duration)> {
-    let dossier = crate::reseau::dossier_local().join("urlhaus");
+    liste_abuse_ch("urlhaus", adresse, nom)
+}
+
+/// Une liste publique d'abuse.ch, gardée dans `sous_dossier` du dossier de Vanguard : 12 heures fraîche, retéléchargée
+/// ensuite, et sa copie d'avant garde sa valeur jusqu'à une semaine (voir `age_des_listes`). La télécharger ne dit à
+/// personne ce qu'on cherche (on prend la liste entière). Sans Internet, curl échoue et la copie d'avant sert encore :
+/// son texte, et son âge. Partagé entre URLhaus (liens) et Feodo Tracker (serveurs de botnets).
+pub(crate) fn liste_abuse_ch(sous_dossier: &str, adresse: &str, nom: &str) -> Option<(String, Duration)> {
+    let dossier = crate::reseau::dossier_local().join(sous_dossier);
     let fichier = dossier.join(nom);
     let age = || {
         std::fs::metadata(&fichier)

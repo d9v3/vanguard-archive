@@ -295,6 +295,29 @@ async fn passe() {
         return;
     };
     veiller_passerelle(&r);
+    // Empoisonneur de noms (Responder…) : la sonde est déjà faite pendant le scan du réseau local, elle ne coûte
+    // rien de plus ici. Sans réseau local (VPN seul), le scan n'aurait pas tourné : rien à signaler.
+    if let Some(reseau::empoisonnement::Rapport::Teste(empoisonneurs)) = &r.empoisonnement {
+        for e in empoisonneurs {
+            let titre = r
+                .hotes
+                .iter()
+                .find(|h| h.ip == e.ip)
+                .map(reseau::Hote::titre)
+                .filter(|t| !t.is_empty());
+            notifier(
+                tr!(
+                    "Vanguard : empoisonneur de noms sur le réseau",
+                    "Vanguard: name poisoner on the network"
+                ),
+                &trf!(
+                    "{} répond à des noms qui n'existent pas : un outil comme Responder vole les mots de passe Windows. Débranche-le.",
+                    "{} answers names that do not exist: a tool like Responder steals Windows passwords. Unplug it.",
+                    titre.map_or_else(|| e.ip.to_string(), |t| format!("{} ({t})", e.ip))
+                ),
+            );
+        }
+    }
     for h in r.hotes.iter().filter(|h| h.nouvelle) {
         let qui = if h.titre().is_empty() {
             tr!("appareil inconnu", "unknown device").into()
