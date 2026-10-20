@@ -604,7 +604,7 @@ fn membres_admin() -> Option<Vec<String>> {
         // la borne du nombre de membres arrête un tableau sans fin.
         unsafe {
             let mut p = groupe.gr_mem;
-            while !(*p).is_null() && membres.len() < 10_000 {
+            while membres.len() < 10_000 && !(*p).is_null() {
                 membres.push(std::ffi::CStr::from_ptr(*p).to_string_lossy().into_owned());
                 p = p.add(1);
             }
