@@ -642,6 +642,96 @@ mod tests_sh_chaine {
         assert!(perimees.is_empty(), "exceptions qui ne servent plus : {perimees:#?}");
     }
 
+    /// Chemins pris dans une variable et passés tels quels à Get-ChildItem ou Remove-Item, relus : sûrs ici.
+    const PS_RELUES: &[(&str, &str, &str)] = &[
+        (
+            "guide/windows.rs",
+            "$env:TEMP",
+            "texte du guide, tapé par la personne, jamais lancé par Vanguard",
+        ),
+        (
+            "machine/sante.rs",
+            "$_.FullName",
+            "le chemin d'un dossier que Get-ChildItem vient de lister",
+        ),
+        (
+            "protection/distance.rs",
+            "$d",
+            "vérifié juste avant : $d -and (Test-Path $d)",
+        ),
+    ];
+
+    /// Les variables passées comme chemin à Get-ChildItem ou Remove-Item sans -LiteralPath, avec leur ligne.
+    fn ps_douteux(code: &str) -> Vec<(String, usize)> {
+        let mut trouves = Vec::new();
+        for applet in ["Get-ChildItem ", "Remove-Item "] {
+            for (i, _) in code.match_indices(applet) {
+                let apres = code[i + applet.len()..].trim_start();
+                // Dans le source Rust, le guillemet d'un chemin s'écrit « \" ».
+                let apres = apres
+                    .strip_prefix("\\\"")
+                    .or_else(|| apres.strip_prefix(['"', '\'']))
+                    .unwrap_or(apres);
+                if let Some(nom) = apres.strip_prefix('$') {
+                    let fin = nom
+                        .find(|c: char| !(c.is_alphanumeric() || "_:.".contains(c)))
+                        .unwrap_or(nom.len());
+                    let ligne = code[..i].matches('\n').count() + 1;
+                    trouves.push((format!("${}", &nom[..fin]), ligne));
+                }
+            }
+        }
+        trouves
+    }
+
+    /// Une variable vide passée comme chemin fait lire le dossier courant à Get-ChildItem (« Get-ChildItem '' »), et
+    /// Remove-Item -Recurse le viderait ; « $env:SystemRoot\x » vide devient la racine du disque. Vu le 19 octobre : un
+    /// dossier Démarrage absent faisait prendre le dossier courant pour des démarrages suspects.
+    #[test]
+    fn chemins_powershell_jamais_une_variable_nue() {
+        let base = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/src"));
+        let mut fichiers = Vec::new();
+        sources(base, base, &mut fichiers);
+        let mut nouveaux = Vec::new();
+        let mut servies = vec![false; PS_RELUES.len()];
+        for (nom, src) in &fichiers {
+            let code = src.find("#[cfg(test)]\nmod ").map_or(src.as_str(), |t| &src[..t]);
+            for (variable, ligne) in ps_douteux(code) {
+                match PS_RELUES.iter().position(|(f, v, _)| f == nom && *v == variable) {
+                    Some(i) => servies[i] = true,
+                    None => nouveaux.push(format!("{nom}:{ligne} : {variable}")),
+                }
+            }
+        }
+        assert!(
+            nouveaux.is_empty(),
+            "chemin PowerShell pris dans une variable, sans -LiteralPath : écris le chemin (ps_chaine) après l'avoir \
+             vérifié, ou ajoute-le à PS_RELUES avec la raison :\n{}",
+            nouveaux.join("\n")
+        );
+        let perimees: Vec<_> = PS_RELUES
+            .iter()
+            .zip(&servies)
+            .filter(|(_, s)| !**s)
+            .map(|(r, _)| r)
+            .collect();
+        assert!(perimees.is_empty(), "exceptions qui ne servent plus : {perimees:#?}");
+    }
+
+    #[test]
+    fn le_garde_powershell_voit_une_variable_nue() {
+        assert_eq!(
+            ps_douteux("\"Get-ChildItem $env:TEMP -Force\""),
+            [("$env:TEMP".to_string(), 1)]
+        );
+        assert_eq!(
+            ps_douteux("x\n\"Remove-Item \\\"$env:SystemRoot\\\\Minidump\\\\*\\\" -Force\""),
+            [("$env:SystemRoot".to_string(), 2)]
+        );
+        assert_eq!(ps_douteux("\"Get-ChildItem -LiteralPath $d -File\""), []);
+        assert_eq!(ps_douteux("\"Get-ChildItem 'C:\\\\Windows' -File\""), []);
+    }
+
     /// Le garde lui-même : il voit un nom glissé tel quel, et laisse passer sh_chaine et les constantes.
     #[test]
     fn le_garde_voit_un_nom_glisse_tel_quel() {

@@ -306,6 +306,16 @@ mod systeme {
     use crate::ui::*;
 
     /// Vérifie et propose ; rend les imprimantes installées, si Windows a pu les dire.
+    /// La file du spouleur, écrite en toutes lettres : « $env:SystemRoot » vide en ferait la racine du disque.
+    /// SystemRoot absent ou relatif : le dossier de Windows par défaut.
+    pub(super) fn vider_la_file(racine: Option<std::path::PathBuf>) -> String {
+        let windows = racine
+            .filter(|p| p.is_absolute())
+            .unwrap_or_else(|| std::path::PathBuf::from(r"C:\Windows"));
+        let file = crate::commande::ps_chaine(&windows.join(r"System32\spool\PRINTERS").to_string_lossy());
+        format!("Get-ChildItem -LiteralPath {file} -File | Remove-Item -Force")
+    }
+
     pub fn verifier() -> Option<Vec<Imprimante>> {
         let Some(json) = crate::machine::windows::ps(
             "$s = (Get-Service Spooler -ErrorAction SilentlyContinue).Status
@@ -349,7 +359,7 @@ mod systeme {
             .oui()
             && crate::machine::appliquer(&[
                 "Stop-Service Spooler -Force".to_string(),
-                "Get-ChildItem \"$env:SystemRoot\\System32\\spool\\PRINTERS\" -File | Remove-Item -Force".to_string(),
+                vider_la_file(std::env::var_os("SystemRoot").map(std::path::PathBuf::from)),
                 "Start-Service Spooler".to_string(),
             ])
         {
@@ -365,6 +375,19 @@ mod systeme {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// La file du spouleur vidée par son chemin écrit, même sans SystemRoot (jamais la racine du disque).
+    #[cfg(windows)]
+    #[test]
+    fn file_du_spouleur_ecrite_en_toutes_lettres() {
+        assert_eq!(
+            systeme::vider_la_file(Some(r"D:\Windows".into())),
+            r"Get-ChildItem -LiteralPath 'D:\Windows\System32\spool\PRINTERS' -File | Remove-Item -Force"
+        );
+        for absent in [None, Some(std::path::PathBuf::new()), Some(r"\Windows".into())] {
+            assert!(systeme::vider_la_file(absent).contains(r"-LiteralPath 'C:\Windows\System32\spool\PRINTERS'"));
+        }
+    }
 
     #[test]
     fn imprimantes_de_cups() {
