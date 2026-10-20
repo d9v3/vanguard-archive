@@ -51,12 +51,15 @@ function Verif($etat, $texte) {
     switch ($etat) {
         'ok' { Write-Host '      ✔ ' -ForegroundColor Green -NoNewline; Write-Host $texte }
         'bug' { Write-Host '      ✖ ' -ForegroundColor Red -NoNewline; Write-Host $texte -ForegroundColor Red }
+        'saute' { Write-Host '      ↷ ' -ForegroundColor Yellow -NoNewline; Write-Host $texte -ForegroundColor DarkGray }
         default { Write-Host "      · $texte" -ForegroundColor DarkGray }
     }
 }
 function Ok($texte) { Verif 'ok' $texte }
 function Bug($texte) { Verif 'bug' $texte }
 function Info($texte) { Verif 'info' $texte }
+# Une étape (ou une partie) pas faite : comptée à part, pour qu'une vérification qui disparaît se voie au bilan.
+function Sautee($texte) { Verif 'saute' $texte }
 
 # Texte court d'une commande pour l'écran : les longs chemins sont réduits à leur nom de fichier.
 function Court([string[]]$arguments) {
@@ -153,6 +156,7 @@ function Rapport {
     $toutes = @($script:etapes | ForEach-Object { $_.Verifs })
     $nbOk = @($toutes | Where-Object Etat -eq 'ok').Count
     $nbBug = @($toutes | Where-Object Etat -eq 'bug').Count
+    $nbSaute = @($toutes | Where-Object Etat -eq 'saute').Count
     $nbCmd = @($script:etapes | ForEach-Object { $_.Commandes }).Count
     $nbEchec = @($script:etapes | ForEach-Object { $_.Commandes } | Where-Object Code -ne 0).Count
     $duree = [math]::Round(((Get-Date) - $debutTest).TotalMinutes, 1)
@@ -172,7 +176,7 @@ main{max-width:980px;margin:0 auto;padding:28px 16px 60px}h1{margin:0 0 4px;font
 .etape{background:var(--carte);border:1px solid var(--trait);border-radius:10px;margin:0 0 12px;padding:14px 16px}
 .etape h2{margin:0 0 8px;font-size:16px;display:flex;gap:8px;align-items:center}.pastille{width:10px;height:10px;border-radius:50%;background:var(--vert);flex:none}
 .etape.rouge .pastille{background:var(--rouge)}.etape.grise .pastille{background:var(--gris)}
-ul{margin:4px 0 8px;padding-left:4px;list-style:none}li{margin:2px 0}.ok{color:var(--vert)}.bug{color:var(--rouge)}.info{color:var(--gris)}
+ul{margin:4px 0 8px;padding-left:4px;list-style:none}li{margin:2px 0}.ok{color:var(--vert)}.bug{color:var(--rouge)}.info{color:var(--gris)}.saute{color:#c9a227}
 details{border-top:1px solid var(--trait);padding:6px 0}summary{cursor:pointer;display:flex;justify-content:space-between;gap:10px}
 summary code{color:var(--texte);font-variant-ligatures:none}summary .d{color:var(--gris);white-space:nowrap}pre{background:#000;border-radius:8px;padding:10px;overflow:auto;max-height:420px;font:12.5px/1.45 Consolas,monospace;color:#ddd}
 .entree{color:var(--jaune);font-size:12.5px}
@@ -184,7 +188,8 @@ summary code{color:var(--texte);font-variant-ligatures:none}summary .d{color:var
 <div class="verdict $(if ($reussi) { 'vert' } else { 'rouge' })">$(& $h $verdict)</div>
 <div class="bilan"><div class="case"><b class="ok">$nbOk</b><span>vérifications réussies</span></div>
 <div class="case"><b class="$(if ($nbBug) { 'bug' } else { 'info' })">$nbBug</b><span>problèmes</span></div>
-<div class="case"><b>$nbCmd</b><span>commandes ($nbEchec en échec)</span></div></div>
+<div class="case"><b>$nbCmd</b><span>commandes ($nbEchec en échec)</span></div>
+<div class="case"><b class="$(if ($nbSaute) { 'saute' } else { 'info' })">$nbSaute</b><span>sautées</span></div></div>
 "@)
     foreach ($e in $script:etapes) {
         $rouge = @($e.Verifs | Where-Object Etat -eq 'bug').Count + @($e.Commandes | Where-Object Code -ne 0).Count
@@ -193,7 +198,7 @@ summary code{color:var(--texte);font-variant-ligatures:none}summary .d{color:var
         if ($e.Verifs.Count) {
             [void]$sb.Append('<ul>')
             foreach ($v in $e.Verifs) {
-                $signe = switch ($v.Etat) { 'ok' { '✓' } 'bug' { '✗' } default { '·' } }
+                $signe = switch ($v.Etat) { 'ok' { '✓' } 'bug' { '✗' } 'saute' { '↷' } default { '·' } }
                 [void]$sb.Append("<li class=""$($v.Etat)"">$signe $(& $h $v.Texte)</li>")
             }
             [void]$sb.Append('</ul>')
@@ -364,7 +369,7 @@ Lancer 'connexion' @('connexion')
 if ((Sortie 'connexion') -match 'Mbit/s') { Ok 'Débit mesuré' } else { Bug 'Débit non mesuré' }
 
 Etape 'Mots de passe fuités'
-if ($Auto) { Info 'Sautée : il faut taper un mot de passe (test avec questions).' } else {
+if ($Auto) { Sautee 'Sautée : il faut taper un mot de passe (test avec questions).' } else {
     Write-Host '      Tape « password » (il doit être trouvé des millions de fois), puis Entrée seule pour terminer.' -ForegroundColor Yellow
     Vider-Clavier
     & $exe motdepasse
@@ -393,7 +398,7 @@ try {
         Lancer 'nommer' @('nommer', $box, 'box', 'de', 'test')
         if ((Sortie 'nommer') -match 'box de test') { Ok "Surnom donné à la box ($box)" } else { Bug "Surnom NON donné à la box ($box)" }
         Lancer 'nommer-retrait' @('nommer', $box)
-    } else { Info 'Pas de box dans le scan : étape sautée.' }
+    } else { Sautee 'Pas de box dans le scan : étape sautée.' }
 } catch { Bug "Scan illisible ($($_.Exception.Message))" }
 
 Etape 'Antivirus d''un dossier propre (Defender, analyse ciblée)'
@@ -522,7 +527,7 @@ if (Question 'Faire ce test (six fichiers posés puis retirés dans Documents, I
     } else { Bug 'Aucun fichier-piège posé' }
     LancerAvec 'pieges-retirer' @('pieges', '--retirer') "o`n"
     if (Get-ChildItem $dossiersPieges -Filter '!Vanguard*' -ErrorAction SilentlyContinue) { Bug 'Fichiers-pièges ENCORE présents' } else { Ok 'Fichiers-pièges retirés' }
-} else { Info 'Sautée.' }
+} else { Sautee 'Sautée.' }
 
 Etape 'YARA : moteur installé par winget, puis analyse d''un dossier'
 $yaraLien = Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Links\yara.exe'
@@ -581,7 +586,7 @@ if (Question 'Faire une vraie copie de tes dossiers vers le dossier partagé (da
     if ((Sortie 'verifier-copie') -match 'The copy reads back|La copie se relit') { Ok 'Copie relue et comparée (test de restauration)' } else { Bug 'Test de restauration de la copie en échec' }
     Remove-Item $temoin -Force -ErrorAction SilentlyContinue
     Remove-Item $vers -Recurse -Force -ErrorAction SilentlyContinue
-} else { Info 'Vraie copie sautée.' }
+} else { Sautee 'Vraie copie sautée.' }
 
 Etape 'Dépanner : pas de son, et les réglages du son ouverts par Vanguard'
 # Un lien ouvert par Vanguard (ms-settings:sound), sauf en arrière-plan : rien ne doit surgir à l'écran.
@@ -638,7 +643,7 @@ if (Test-Path $base) {
     Start-Sleep -Seconds 3
     Constat 'As-tu vu la notification « Nouvel appareil sur ton réseau » ?'
 } else {
-    Info 'Pas de base créée par le scan : test de notification sauté.'
+    Sautee 'Pas de base créée par le scan : test de notification sauté.'
 }
 
 Etape 'Rapport HTML de Vanguard'
@@ -655,7 +660,7 @@ if ($SansOuvrir) {
 Etape 'Antivirus (analyse rapide Microsoft Defender)'
 if (Question 'Lancer l''analyse rapide Defender (quelques minutes) ?') {
     Lancer 'antivirus' @('antivirus')
-} else { Info 'Sautée.' }
+} else { Sautee 'Sautée.' }
 
 Etape 'Lanceur de la clé : Vanguard introuvable ou bloqué, expliqué sans toucher à Defender'
 $lanceur = Join-Path $ici 'Lancer Vanguard.bat'
@@ -715,7 +720,7 @@ function Protection-Reseau-Attendue([int]$voulue) {
 $npAvant = [int](Get-MpPreference).EnableNetworkProtection
 # Déjà active (une passe d'avant l'a laissée ainsi) : annulée d'abord, puis remise ; sinon activée, puis annulée.
 $npAutre = if ($npAvant -eq 1) { 0 } else { 1 }
-if (-not $numeroDefender) { Info 'Sautée : outil absent.' }
+if (-not $numeroDefender) { Sautee 'Sautée : outil absent.' }
 elseif (Question 'Faire ce test (deux fenêtres UAC à accepter) ?') {
     Write-Host '      Clique OUI dans les deux fenêtres UAC. Un refus ne change rien et fait échouer le test.' -ForegroundColor Yellow
     Write-Host '      Si la fenêtre administrateur demande « Continue without a restore point? », réponds y (la VM n''a pas de' -ForegroundColor Yellow
@@ -732,7 +737,7 @@ elseif (Question 'Faire ce test (deux fenêtres UAC à accepter) ?') {
     $np = Protection-Reseau-Attendue $npAvant
     if ($np -eq $npAvant) { Ok 'Protection réseau remise comme avant' } else { Bug "Protection réseau PAS remise ($np au lieu de $npAvant)" }
     if ((Etat-Defender) -eq $defAvant) { Ok 'Defender exactement comme avant' } else { Bug "Defender différent d'avant : $(Etat-Defender)" }
-} else { Info 'Sautée (il faut accepter les fenêtres UAC).' }
+} else { Sautee 'Sautée (il faut accepter les fenêtres UAC).' }
 
 Etape 'Corrections avec UAC (refus, puis acceptation, puis port bloqué)'
 Info 'Coupe le pare-feu du profil « Privé » de la VM, puis Vanguard doit le réparer. Le port 3389 et le Bureau à distance ne sont jamais touchés.'
@@ -767,7 +772,7 @@ if (Question 'Faire ce test ?') {
     if (Question 'Retirer maintenant les règles « Vanguard : bloquer » créées pendant le test ?') {
         Start-Process powershell -Verb RunAs -Wait -ArgumentList '-NoProfile', '-Command', "Remove-NetFirewallRule -DisplayName 'Vanguard : bloquer *'"
     }
-} else { Info 'Sautée (il faut répondre aux fenêtres UAC).' }
+} else { Sautee 'Sautée (il faut répondre aux fenêtres UAC).' }
 
 Etape 'Outils récents : bilan durci, caméra et micro, quarantaine, raccourci, vérifier ma clé'
 # Les vérifications ajoutées de la 0.60 à la 0.64 : elles se lisent dans l'audit JSON déjà fait plus haut.
@@ -884,7 +889,7 @@ try {
 } catch { Bug "Comparaison impossible : $($_.Exception.Message)" }
 
 Etape 'Couleurs et accents dans la console'
-if ($Auto) { Info 'Sautée : il faut regarder l''écran (test avec questions).' } else {
+if ($Auto) { Sautee 'Sautée : il faut regarder l''écran (test avec questions).' } else {
     Vider-Clavier
     & $exe machine
     Constat 'Dans l''audit ci-dessus, les couleurs et les accents (é, è, ✔, ✖) s''affichent-ils correctement ?'
@@ -904,6 +909,7 @@ if ($journauxAdmin) {
 }
 $nbOk = @($toutes | Where-Object Etat -eq 'ok').Count
 $nbBug = @($toutes | Where-Object Etat -eq 'bug').Count
+$nbSaute = @($toutes | Where-Object Etat -eq 'saute').Count
 $nbEchec = @($script:etapes | ForEach-Object { $_.Commandes } | Where-Object Code -ne 0).Count
 Write-Host ''
 Write-Host '  ──────────────────────────────────────────────────────────' -ForegroundColor DarkGray
@@ -911,8 +917,23 @@ if ($nbBug -eq 0 -and $nbEchec -eq 0) { Write-Host "  ✔ Tout est passé : $nbO
 else { Write-Host "  ✖ $nbBug problème(s), $nbEchec commande(s) en échec ; $nbOk vérification(s) réussie(s)." -ForegroundColor Red }
 # Le dernier rapport toujours au même endroit, et une ligne par passe dans l'historique.
 Copy-Item $rapport (Join-Path $resultats 'dernier-rapport.html') -Force
-$bilan = if ($nbBug -eq 0 -and $nbEchec -eq 0) { "OK, tout est passé ($nbOk vérifications)" } else { "$nbBug problème(s), $nbEchec commande(s) en échec, $nbOk réussies" }
 $mode = if ($SansOuvrir) { 'automatique' } elseif ($Auto) { 'sans questions' } else { 'avec questions' }
+# La passe précédente du même genre (sans questions et automatique font les mêmes étapes) : moins de vérifications
+# réussies, c'est peut-être une étape qui a disparu en silence (le lanceur de la clé, le 19 octobre).
+$genre = if ($Auto) { 'automatique|sans questions' } else { 'avec questions' }
+$avant = $null
+if (Test-Path (Join-Path $resultats 'historique.txt')) {
+    $ligne = Get-Content (Join-Path $resultats 'historique.txt') -Encoding UTF8 | Where-Object { $_ -match "\(([0-9.,]+ min, )?($genre)\)" } | Select-Object -Last 1
+    if ($ligne -match '\((\d+) vérifications|(\d+) réussies') { $avant = [int]("$($Matches[1])$($Matches[2])") }
+}
+$details = @()
+if ($nbSaute) { $details += "$nbSaute sautée(s)" }
+if ($avant -and $nbOk -lt $avant) {
+    $details += "ATTENTION : $($avant - $nbOk) de moins que la passe précédente ($avant)"
+    Write-Host "  ⚠ $($avant - $nbOk) vérification(s) réussie(s) de moins que la passe précédente du même genre ($avant) : une étape a-t-elle disparu ?" -ForegroundColor Yellow
+}
+$suite = if ($details) { ' ; ' + ($details -join ' ; ') } else { '' }
+$bilan = if ($nbBug -eq 0 -and $nbEchec -eq 0) { "OK, tout est passé ($nbOk vérifications$suite)" } else { "$nbBug problème(s), $nbEchec commande(s) en échec, $nbOk réussies$suite" }
 Add-Content -Path (Join-Path $resultats 'historique.txt') -Encoding UTF8 -Value ('{0}  v{1,-8} {2}  ({3:N1} min, {4})  -> {5}' -f `
     (Get-Date -Format 'yyyy-MM-dd HH:mm'), $numero, $bilan, ((Get-Date) - $debutTest).TotalMinutes, $mode, (Split-Path -Leaf $res))
 Write-Host "  Rapport : $rapport" -ForegroundColor DarkGray
