@@ -446,10 +446,10 @@ pubkeyacceptedalgorithms ssh-ed25519-cert-v01@openssh.com,ecdsa-sha2-nistp256-ce
 
     #[test]
     fn openssh_9_par_defaut_ne_dit_rien() {
-        assert!(trouver(&segments(&[("sshd -T", SSHD_T_DEFAUT)])).is_empty());
-        assert!(trouver(&debian(&[], "PermitRootLogin no\n")).is_empty());
+        assert_eq!(trouver(&segments(&[("sshd -T", SSHD_T_DEFAUT)])), []);
+        assert_eq!(trouver(&debian(&[], "PermitRootLogin no\n")), []);
         // « - » retire des valeurs par défaut : rien d'ouvert.
-        assert!(trouver(&debian(&[], "Ciphers -aes128-cbc,3des-cbc\n")).is_empty());
+        assert_eq!(trouver(&debian(&[], "Ciphers -aes128-cbc,3des-cbc\n")), []);
     }
 
     #[test]
@@ -635,7 +635,7 @@ pubkeyacceptedalgorithms ssh-ed25519-cert-v01@openssh.com,ecdsa-sha2-nistp256-ce
             [SSHD_PRINCIPAL, "/etc/ssh/sshd_config.d/50-x.conf", SSHD_PRINCIPAL]
         );
         // Le bloc Match ne vaut que pour certaines connexions.
-        assert!(trouver(&s).is_empty());
+        assert_eq!(trouver(&s), []);
         // Un fichier réservé à root : rien à conclure.
         assert!(ordonner("Include /etc/ssh/sshd_config.d/*.conf\n", |_| None).is_none());
     }

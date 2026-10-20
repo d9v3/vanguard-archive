@@ -404,7 +404,7 @@ mod tests {
                 _ => 2,
             })
         });
-        assert!(all_strict.is_empty());
+        assert_eq!(all_strict, []);
         let noms: Vec<(&str, i64)> = reseau(1, 0).iter().map(|f| (f.0, f.2)).collect();
         assert_eq!(
             noms,

@@ -122,7 +122,7 @@ fn decoder_netbios(code: &[u8]) -> Option<[u8; 16]> {
         return None;
     }
     let mut brut = [0u8; 16];
-    for (i, paire) in code.chunks_exact(2).enumerate() {
+    for (i, paire) in code.as_chunks::<2>().0.iter().enumerate() {
         let haut = paire[0].checked_sub(b'A')?;
         let bas = paire[1].checked_sub(b'A')?;
         if haut > 0x0f || bas > 0x0f {

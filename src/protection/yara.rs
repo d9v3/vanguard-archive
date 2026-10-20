@@ -443,16 +443,16 @@ mod tests {
             illisibles.len() == 1 && illisibles[0].ends_with("image.iso"),
             "{illisibles:?}"
         );
-        assert!(echecs.is_empty());
+        assert_eq!(echecs, Vec::<PathBuf>::new());
         assert_eq!(trouves.len(), 1);
         assert_eq!(trouves[0].regle, "Win32_Trojan_Essai");
         assert!(trouves[0].chemin.ends_with("sous/facture.exe"));
         assert_eq!(famille(&trouves[0].regle), "cheval de Troie");
         // Les vraies règles, sur le même dossier : rien.
-        assert!(analyser_fichiers(regles().unwrap(), &liste).0.is_empty());
+        assert_eq!(analyser_fichiers(regles().unwrap(), &liste).0, []);
         // Une cible qui n'existe pas : dite, pas comptée comme saine.
         let mut absents = Vec::new();
-        assert!(fichiers(&dossier.join("absent"), &mut absents).is_empty());
+        assert_eq!(fichiers(&dossier.join("absent"), &mut absents), Vec::<PathBuf>::new());
         assert!(illisible(&dossier, &absents).is_some());
         let _ = std::fs::remove_dir_all(&dossier);
     }

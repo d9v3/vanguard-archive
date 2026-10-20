@@ -1005,7 +1005,10 @@ v4l2loopback 49152 0 - Live 0x0000000000000000 (OE)
         assert_eq!(modules_caches(&sysfs, &charges), vec!["diamant".to_string()]);
         // NVIDIA et v4l2loopback sont connus ; un module posé par DKMS aussi.
         assert_eq!(hors_arbre_inconnus(&charges, |_| false), vec!["mondriver".to_string()]);
-        assert!(hors_arbre_inconnus(&charges, |n| n == "mondriver").is_empty());
+        assert_eq!(
+            hors_arbre_inconnus(&charges, |n| n == "mondriver"),
+            Vec::<String>::new()
+        );
 
         let c = juger_modules(&["diamant".into()], &[], &charges, Some(12288), &["sudo chkrootkit"]);
         assert_eq!(c[0].probleme, Some(Niveau::Eleve));
@@ -1030,7 +1033,7 @@ v4l2loopback 49152 0 - Live 0x0000000000000000 (OE)
         assert_eq!(c[0].probleme, Some(Niveau::Info));
         // Nom piégé : montré inoffensif, jamais dans une commande.
         let c = juger_modules(&[], &["a;rm -rf ~".into()], &charges, Some(0), &[]);
-        assert!(c[0].correctif.as_ref().unwrap().commandes.is_empty());
+        assert_eq!(c[0].correctif.as_ref().unwrap().commandes, Vec::<String>::new());
     }
 
     #[test]
