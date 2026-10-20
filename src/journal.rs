@@ -866,10 +866,23 @@ pub fn erreur(contexte: &str, detail: &str) {
         .and_then(|mut f| f.write_all(entree.as_bytes()));
 }
 
-/// Les plantages (panic) sont aussi notés, avant le message habituel.
+/// Une sortie coupée par celui qui la lit (`vanguard regles | head`) : println! panique sur le tube fermé. Ce n'est pas
+/// un plantage, juste la fin de la lecture (Linux, macOS : EPIPE ; Windows : « le canal de communication est fermé »).
+fn sortie_coupee(message: &str) -> bool {
+    message.contains("failed printing to std")
+        && ["os error 32)", "os error 232)", "Broken pipe"]
+            .iter()
+            .any(|m| message.contains(m))
+}
+
+/// Les plantages (panic) sont aussi notés, avant le message habituel. Une sortie coupée par le lecteur finit sans bruit,
+/// comme les autres commandes (code 141, celui d'un tube fermé).
 pub fn installer() {
     let defaut = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
+        if sortie_coupee(&info.to_string()) {
+            std::process::exit(141);
+        }
         erreur("plantage", &info.to_string());
         defaut(info);
     }));
@@ -878,6 +891,20 @@ pub fn installer() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sortie_coupee_pas_un_plantage() {
+        assert!(sortie_coupee(
+            "panicked at library/std/src/io/stdio.rs:1168:9:\nfailed printing to stdout: Broken pipe (os error 32)"
+        ));
+        assert!(sortie_coupee(
+            "failed printing to stdout: Le canal de communication est sur le point d'être fermé. (os error 232)"
+        ));
+        assert!(!sortie_coupee("called `Option::unwrap()` on a `None` value"));
+        assert!(!sortie_coupee(
+            "failed printing to stdout: Disk quota exceeded (os error 122)"
+        ));
+    }
 
     /// La partition des journaux n'est prise qu'avec le jeton d'une clé connue : témoin seul, ou jeton inconnu,
     /// rien n'y va.
