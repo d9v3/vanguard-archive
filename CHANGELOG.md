@@ -6,6 +6,76 @@ Ce que chaque journée a apporté à Vanguard, la plus récente en haut. Depuis 
 publication par jour, qui regroupe le travail de la journée. Seule la dernière version a sa page de téléchargement ;
 chaque version garde son étiquette dans le dépôt (`git checkout v0.62.0`, par exemple), pour être recompilée au besoin.
 
+## 20 octobre 2026 : version 0.79
+
+- **Linux, le bilan voit plus loin.** Redirections ICMP acceptées (IPv4 et IPv6) et filtre des adresses d'origine
+  coupé, corrigés dans `99-vanguard.conf` sans jamais relâcher une interface réglée en strict ; espaces de noms
+  ouverts à tous les programmes (une information : Flatpak, Chrome et Steam en ont besoin) ; dossiers de commandes
+  (PATH, celui de sudo) que d'autres comptes peuvent modifier, où une fausse commande prendrait la place de la vraie ;
+  pas de blocage après des mots de passe faux, mots de passe de moins de 8 caractères (PAM).
+- **SSH.** Ports renvoyés ouverts à tout le réseau (`GatewayPorts`), affichage X11 renvoyé, trop d'essais de mot de
+  passe par connexion ; corrigés par un rechargement de sshd, qui ne coupe aucune connexion en cours. Algorithmes
+  cassés (SHA-1 pour l'échange de clés, CBC, 3DES, arcfour, MD5, DSA) rouverts dans la configuration, lue dans
+  l'ordre exact des Include : retirés par une ligne de `00-vanguard.conf`, vérifiée par `sshd -t` avant le
+  rechargement.
+- **Windows.** Recherche automatique du proxy (WPAD), par laquelle un appareil d'un Wi-Fi public peut détourner la
+  navigation ; aucun blocage des comptes après des mots de passe faux (corrigé comme Windows 11 : 10 essais,
+  10 minutes) ; longueur minimale des mots de passe. Un compte sans mot de passe exigé est décrit tel qu'il est
+  (« accepte un mot de passe vide ») et se corrige depuis Vanguard : un mot de passe devient exigé, l'actuel ne
+  change pas.
+- **macOS.** Découverte automatique du proxy allumée ; dossiers de commandes ouverts à tous.
+- **Guide des commandes : 980 commandes** (38 de plus), surtout pour la sécurité et le dépannage : lynis, programmes
+  SUID, comptes bloqués, ClamAV, signatures gpg, WireGuard, certificats, exposition des services, needrestart, sbctl,
+  dnf needs-restarting ; sous Windows, réseau public ou privé, dossiers partagés, puce TPM, signature d'un programme,
+  effacement de l'espace libre, test de la mémoire ; sous macOS, ce qui se lance tout seul, accès à la caméra, au
+  micro et à l'écran, empreinte d'un fichier, trafic par programme. Les exemples de tldr-pages se renouvellent aussi
+  pendant la surveillance et l'entretien du mois, sans ouvrir le guide.
+- **Secrets dans les projets git.** Vanguard relit l'historique des projets du dossier personnel, où un mot de passe,
+  une clé d'API ou un jeton écrit un jour reste, même effacé ensuite : clés reconnues à leur forme (AWS, GitHub,
+  GitLab, Google, Stripe, Slack…), clés privées, mots de passe dans une adresse ou dans le code ; gitleaks, s'il est
+  installé, ajoute ses règles. Aucun secret n'est affiché ni gardé.
+- **YARA sans rien installer.** Les 308 règles sont appliquées par YARA-X (le moteur YARA en Rust de VirusTotal,
+  licence BSD), compilé dans Vanguard sous Linux, Windows et macOS : plus de moteur à installer ni à proposer, et
+  quatre fichiers lus à la fois. Un fichier de plus de 256 Mo ou plus long que 30 s à analyser est dit, jamais compté
+  comme sain. Le programme passe d'environ 10 à 25 Mo.
+- **Outils libres reconnus, s'ils sont installés.** « Failles des images Docker » : trivy dit les failles connues,
+  graves ou critiques, des images Docker ou Podman ; absent, Vanguard propose de l'installer par l'outil du système. Après
+  des connexions SSH ratées, le bilan dit si fail2ban, sshguard ou CrowdSec bloque déjà les adresses qui insistent.
+- **Windows, les portes dérobées classiques.** Débogueur posé sur un programme d'accessibilité de l'écran de
+  connexion (IFEO, SilentProcessExit), sethc ou utilman remplacés par cmd, Shell ou Userinit de Winlogon détournés,
+  AppInit_DLLs, abonnements WMI qui lancent une commande : au bilan, suivis par la surveillance, corrigés quand
+  l'état d'origine est connu exactement, sinon la marche à suivre. Et les journaux d'événements des 7 derniers
+  jours : rafales de mots de passe faux par le réseau, journal de sécurité effacé, comptes créés, services installés
+  suspects ; sans droits administrateur, le journal de sécurité est dit illisible, jamais sain.
+- **Linux, les signes d'un rootkit.** Processus cachés, programmes qui tournent sans fichier (memfd, effacés, lancés
+  depuis /tmp ou /dev/shm), module du noyau qui se cache ou modules non signés inconnus, carte réseau en mode
+  promiscuité ; lus dans /proc et /sys en quelques millisecondes. Pas de correction automatique : la marche à suivre,
+  avec rkhunter et chkrootkit en deuxième avis.
+- **Empoisonneur de noms démasqué.** Pendant le scan du réseau, sans le ralentir, Vanguard demande en LLMNR, NetBIOS
+  et mDNS un nom tiré au hasard, qui n'existe pas : l'appareil qui y répond est un outil comme Responder, qui vole
+  les mots de passe Windows du réseau. Alerte élevée, et notification de la surveillance horaire.
+- **Collecter les traces** (Dépanner, `vanguard traces`, et première étape d'« Après une infection », cochée
+  d'office). Avant de nettoyer, ce qu'un spécialiste voudra voir, dans un dossier daté sur la clé ou dans le dossier
+  de Vanguard : processus avec l'empreinte SHA-256 de leur programme, connexions, ce qui se lance tout seul, bilan en
+  JSON, comptes, journaux des 7 derniers jours, fichiers récents ; un LISEZMOI et un MANIFESTE que `sha256sum -c`
+  vérifie. Lecture seule, rien n'est envoyé ; Vanguard prévient que le dossier contient des données personnelles.
+- **« Qui parle à Internet ? »** reconnaît les serveurs de commande de botnets (liste de Feodo Tracker, abuse.ch ;
+  indisponible ou trop vieille, c'est dit, jamais comptée comme vide), et le dossier temporaire du compte où qu'il
+  soit (un TEMP déplacé laissait passer un programme lancé de là).
+- **Nettoyage de Windows** : chemins écrits en entier, jamais le dossier courant quand une variable comme TEMP est
+  vide ; la file d'impression se vide sans risque.
+- **Plus justes et plus sûrs.** Sous Windows, un compte sans dossier Démarrage ne fait plus prendre chaque fichier
+  du dossier courant pour un « raccourci suspect » (alerte élevée à tort, surtout lancé depuis la clé) ; les
+  dernières commandes rapides (notifications, df sur un volume réseau mort…) ont un délai et ne figent plus la
+  surveillance ; la liste des clés connues ne perd plus une note quand deux s'écrivent en même temps.
+- **Pour les tests** : scripts PowerShell du programme analysés et rejoués avec pwsh à chaque vérification, dans
+  un bac à sable fermé au système ; test de la machine virtuelle Windows qui compte les étapes sautées, compare chaque passe à la
+  précédente et vérifie les réglages de la 0.79 ; scripts déposés depuis Linux et lancés par la VM
+  sur son accord.
+- **Relecture indépendante avant la publication** : un compte au mot de passe vide qu'une correction aurait fait
+  passer pour sain, une limite d'essais SSH trop stricte qui pouvait fermer la porte, un `chmod` qui aurait cassé
+  `/tmp` mis dans le PATH ; corrigés.
+
 ## 19 octobre 2026, au soir : version 0.78
 
 - **Nouveau nom : Vanguard**, avec son logo, un V en bouclier et un cadenas. Sur un ordinateur où il a déjà
