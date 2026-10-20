@@ -57,7 +57,8 @@ In the menu, choose **1** (full check), then **2** (fix). Arrows, Enter, and Esc
 
 **Security check** — a grade from A to F, then each problem with its fix.
 - Firewall, open ports (TCP and UDP), updates and known vulnerabilities, disk encryption, Secure Boot, screen lock,
-  accounts, SSH (and its failed login attempts, from the Internet or from home, and a client that does not check servers; forwarded ports open to the network, forwarded X11 display, too many password
+  accounts (and their lockout after wrong passwords, minimum length: Linux, Windows), automatic proxy discovery
+  (WPAD: Windows, macOS), SSH (and its failed login attempts, from the Internet or from home, and a client that does not check servers; forwarded ports open to the network, forwarded X11 display, too many password
   attempts), sudo, groups worth root (docker, lxd, libvirt, disk), command folders other accounts can change, kernel
   hardening (on Linux: ICMP redirects in IPv4 and IPv6, impossible source addresses, user namespaces open
   to all; on macOS: sealed system volume, enforced code signing, library
@@ -75,7 +76,7 @@ In the menu, choose **1** (full check), then **2** (fix). Arrows, Enter, and Esc
   programs abandoned by their publisher (Flash, Java 7, Office 2016…), browsers that no longer update; forgotten
   accounts (active but unused for six months); new administrators.
 - Windows: WDigest (passwords in clear text in memory), Local Security Authority protection, PowerShell 2.0, Remote
-  Assistance, automatic proxy discovery (WPAD), account lockout after wrong passwords and minimum length, automatic sign-in (and password in clear text in the registry), SmartScreen off, account control off
+  Assistance, automatic sign-in (and password in clear text in the registry), SmartScreen off, account control off
   for remote connections, memory integrity, paused updates, LM or NTLMv1 network authentication, share signing,
   PowerShell running any script, UAC that asks nothing, guest access to shares, accounts listed without a password,
   Secure Boot, suspended BitLocker, Defender cloud protection off, overly broad Defender exclusions, Office macros

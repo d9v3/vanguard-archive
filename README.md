@@ -61,7 +61,8 @@ pour revenir.
 
 **Bilan de sécurité** — une note de A à F, puis chaque problème avec sa correction.
 - Pare-feu, ports ouverts (TCP et UDP), mises à jour et failles connues, chiffrement du disque, Secure Boot,
-  verrouillage de l'écran, comptes, SSH (et ses tentatives de connexion ratées, venues d'Internet ou de la maison, et le client qui ne vérifie pas les serveurs ; les ports renvoyés ouverts au réseau, l'affichage X11 renvoyé, trop d'essais de mot de passe),
+  verrouillage de l'écran, comptes (et leur blocage après des mots de passe faux, longueur minimale : Linux, Windows),
+  recherche automatique du proxy (WPAD : Windows, macOS), SSH (et ses tentatives de connexion ratées, venues d'Internet ou de la maison, et le client qui ne vérifie pas les serveurs ; les ports renvoyés ouverts au réseau, l'affichage X11 renvoyé, trop d'essais de mot de passe),
   sudo, groupes qui valent root (docker, lxd, libvirt, disk), dossiers de commandes que d'autres comptes peuvent modifier, durcissement du noyau (sous Linux : redirections ICMP en IPv4 et IPv6,
   adresses d'origine impossibles, espaces de noms ouverts à tous ; sous macOS : volume du système scellé,
   signature du code imposée, validation des bibliothèques, extensions ajoutées), fichiers secrets mal protégés,
@@ -79,8 +80,7 @@ pour revenir.
   reçoivent plus de corrections, programmes abandonnés par leur éditeur (Flash, Java 7, Office 2016…), navigateurs qui
   ne se mettent plus à jour ; comptes oubliés (actifs mais inutilisés depuis six mois) ; nouveaux administrateurs.
 - Windows : WDigest (mots de passe en clair dans la mémoire), protection de l'autorité de sécurité locale, PowerShell
-  2.0, Assistance à distance, recherche automatique du proxy (WPAD), blocage des comptes après des mots de passe faux et
-  longueur minimale, ouverture de session automatique (et mot de passe en clair dans le registre),
+  2.0, Assistance à distance, ouverture de session automatique (et mot de passe en clair dans le registre),
   SmartScreen coupé, contrôle de compte coupé pour les connexions à distance, intégrité de la mémoire, mises à jour
   en pause, authentification réseau LM ou NTLMv1, signature des partages, PowerShell qui lance tout script, UAC qui
   ne demande rien, partages ouverts en invité, comptes listés sans mot de passe, Secure Boot, BitLocker suspendu,
