@@ -176,11 +176,12 @@ fn developper(texte: &str, variable: impl Fn(&str) -> Option<String>) -> String 
 fn valeur_texte(valeur: &winreg::RegValue) -> String {
     use winreg::enums::RegType::{REG_DWORD, REG_EXPAND_SZ, REG_MULTI_SZ, REG_QWORD, REG_SZ};
     use winreg::types::FromRegValue;
+    // Une chaîne que winreg refuse (UTF-16 mal formé) est lue avec pertes plutôt que rendue vide : une valeur Run
+    // vide passerait pour saine.
+    let texte = || String::from_reg_value(valeur).unwrap_or_else(|_| utf16_zero(&valeur.bytes));
     match valeur.vtype {
-        REG_SZ | REG_MULTI_SZ => String::from_reg_value(valeur).unwrap_or_default().replace('\n', " "),
-        REG_EXPAND_SZ => developper(&String::from_reg_value(valeur).unwrap_or_default(), |n| {
-            std::env::var(n).ok()
-        }),
+        REG_SZ | REG_MULTI_SZ => texte().replace('\n', " "),
+        REG_EXPAND_SZ => developper(&texte(), |n| std::env::var(n).ok()),
         REG_DWORD => u32::from_reg_value(valeur).map(|n| n.to_string()).unwrap_or_default(),
         REG_QWORD => u64::from_reg_value(valeur).map(|n| n.to_string()).unwrap_or_default(),
         _ => String::new(),
@@ -191,7 +192,7 @@ fn valeur_texte(valeur: &winreg::RegValue) -> String {
 /// propriétés ajoutées par PowerShell (PSPath…), mais cachait aussi une valeur nommée « PSUpdate ».
 fn lignes_run() -> Vec<String> {
     use winreg::RegKey;
-    use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE};
+    use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_READ, KEY_WOW64_64KEY};
     let mut lignes = Vec::new();
     for nom_cle in CLES_RUN {
         let Some((ruche, chemin)) = nom_cle.split_once(r":\") else {
@@ -202,7 +203,9 @@ fn lignes_run() -> Vec<String> {
         } else {
             HKEY_LOCAL_MACHINE
         });
-        let Ok(cle) = racine.open_subkey(chemin) else {
+        // La vue 64 bits, même si Vanguard était un jour compilé en 32 bits : sinon la clé serait redirigée vers
+        // WOW6432Node et les programmes 64 bits manqueraient au bilan.
+        let Ok(cle) = racine.open_subkey_with_flags(chemin, KEY_READ | KEY_WOW64_64KEY) else {
             continue;
         };
         for (nom, valeur) in cle.enum_values().flatten() {
@@ -278,14 +281,19 @@ fn octets_u16(octets: &[u8], p: usize) -> Option<u16> {
 }
 
 /// La cible et les arguments d'un raccourci (.lnk), lus dans le fichier (format MS-SHLLINK) sans COM. `None` quand
-/// la cible ne s'y lit pas (raccourci réduit à une liste d'éléments du shell) : l'appelant reprend alors PowerShell,
-/// pour qu'aucun raccourci ne compte comme sain sans avoir été lu.
+/// la cible ne s'y lit pas, ou quand le fichier se contredit : l'appelant reprend alors PowerShell, pour qu'aucun
+/// raccourci ne compte comme sain sans avoir été lu. Ce que Windows lance, c'est la liste d'éléments du shell
+/// (LinkTargetIDList) ; LinkInfo et le bloc des variables ne font que la décrire, et un raccourci forgé peut y
+/// afficher un programme sain devant une liste qui en lance un autre, au même nom dans un autre dossier : le chemin
+/// complet de la liste doit être celui de la cible retenue.
 fn cible_raccourci(octets: &[u8]) -> Option<(String, String)> {
     // L'identifiant de classe des raccourcis, 00021401-0000-0000-C000-000000000046, tel qu'il est écrit dans le fichier.
     const CLASSE: [u8; 16] = [1, 0x14, 2, 0, 0, 0, 0, 0, 0xC0, 0, 0, 0, 0, 0, 0, 0x46];
     const LISTE: u32 = 0x1;
     const INFOS: u32 = 0x2;
     const UNICODE: u32 = 0x80;
+    /// HasExpString : sans ce drapeau, Windows ignore le bloc des variables d'environnement.
+    const VARIABLES_LUES: u32 = 0x200;
     const VARIABLES: u32 = 0xA000_0001;
     let tranche = |p: usize, n: usize| octets.get(p..p.checked_add(n)?);
     if octets_u32(octets, 0)? != 0x4C || tranche(4, 16)? != CLASSE {
@@ -293,8 +301,11 @@ fn cible_raccourci(octets: &[u8]) -> Option<(String, String)> {
     }
     let drapeaux = octets_u32(octets, 0x14)?;
     let mut p = 0x4C;
+    let mut cible_liste = None;
     if drapeaux & LISTE != 0 {
-        p += 2 + usize::from(octets_u16(octets, p)?);
+        let taille = usize::from(octets_u16(octets, p)?);
+        cible_liste = Some(chemin_liste(tranche(p + 2, taille)?)?);
+        p += 2 + taille;
     }
     let mut cible_infos = None;
     if drapeaux & INFOS != 0 {
@@ -320,13 +331,14 @@ fn cible_raccourci(octets: &[u8]) -> Option<(String, String)> {
         }
         p += 2 + taille;
     }
-    // Les blocs de la fin : celui des variables d'environnement donne la cible que Windows développe et préfère.
+    // Les blocs de la fin : celui des variables d'environnement donne la cible que Windows développe et préfère,
+    // mais seulement quand le drapeau HasExpString le valide.
     let mut cible_variables = None;
     while let Some(taille) = octets_u32(octets, p).and_then(|n| usize::try_from(n).ok())
         && taille >= 8
     {
         let bloc = tranche(p, taille)?;
-        if octets_u32(bloc, 4) == Some(VARIABLES) && bloc.len() >= 8 + 260 + 520 {
+        if drapeaux & VARIABLES_LUES != 0 && octets_u32(bloc, 4) == Some(VARIABLES) && bloc.len() >= 8 + 260 + 520 {
             let texte = match utf16_zero(&bloc[268..788]) {
                 t if t.is_empty() => ansi_zero(&bloc[8..268]),
                 t => t,
@@ -337,7 +349,82 @@ fn cible_raccourci(octets: &[u8]) -> Option<(String, String)> {
         }
         p += taille;
     }
-    Some((cible_variables.or(cible_infos)?, arguments))
+    let cible = cible_variables.or(cible_infos).or_else(|| cible_liste.clone())?;
+    if let Some(liste) = cible_liste
+        && !memes_chemins(&cible, &liste)
+    {
+        return None;
+    }
+    Some((cible, arguments))
+}
+
+/// Deux chemins Windows désignent-ils le même fichier : mêmes lettres sans tenir compte de la casse ni du sens des
+/// barres, ni d'une barre finale.
+fn memes_chemins(a: &str, b: &str) -> bool {
+    let propre = |c: &str| c.replace('/', "\\").trim_end_matches('\\').to_string();
+    propre(a).eq_ignore_ascii_case(&propre(b))
+}
+
+/// Le chemin complet d'une liste d'éléments du shell, ce que Windows lance : l'élément racine (Poste de travail,
+/// 0x1F) est sauté, l'élément du lecteur (0x2F) donne « C:\ », chaque élément de fichier ou de dossier (0x30 à 0x3F)
+/// ajoute son nom. `None` pour tout autre genre d'élément (réseau, panneau de configuration, dossier spécial) ou sans
+/// lecteur : la cible ne se vérifie pas ici, PowerShell la résoudra.
+fn chemin_liste(liste: &[u8]) -> Option<String> {
+    let mut chemin = String::new();
+    let mut p = 0;
+    loop {
+        let taille = usize::from(octets_u16(liste, p)?);
+        if taille == 0 {
+            break;
+        }
+        let element = liste.get(p + 2..p.checked_add(taille)?)?;
+        p += taille;
+        match *element.first()? {
+            0x1F => {}
+            0x2F => chemin = ansi_zero(element.get(1..)?),
+            0x30..=0x3F => {
+                let nom = nom_element(element)?;
+                if !chemin.ends_with('\\') {
+                    chemin.push('\\');
+                }
+                chemin.push_str(&nom);
+            }
+            _ => return None,
+        }
+    }
+    (chemin.len() > 3 && chemin.get(1..3) == Some(":\\")).then_some(chemin)
+}
+
+/// Le nom d'un élément de fichier ou de dossier (types 0x30 à 0x3F) d'une liste d'éléments du shell : son nom long
+/// UTF-16 dans l'extension BEEF0004 quand elle existe, sinon son nom court.
+fn nom_element(element: &[u8]) -> Option<String> {
+    let genre = *element.first()?;
+    // En-tête d'un élément de fichier : type, octet inconnu, taille (4), date (4), attributs (2), puis le nom court,
+    // en UTF-16 quand le type en porte le drapeau.
+    let apres = element.get(12..)?;
+    let nom_court = if genre & 0x04 != 0 {
+        utf16_zero(apres)
+    } else {
+        ansi_zero(apres)
+    };
+    // L'extension BEEF0004 porte le nom long ; sa place dépend de la version du bloc (XP 3, Vista 7, Windows 7 8,
+    // Windows 8 et suivants 9).
+    let nom_long = apres
+        .windows(4)
+        .position(|w| w == [0x04, 0x00, 0xEF, 0xBE])
+        .and_then(|signature| {
+            let bloc = apres.get(signature.checked_sub(4)?..)?;
+            let nom = match octets_u16(bloc, 2)? {
+                3 => 20,
+                7 => 38,
+                8 => 42,
+                9 => 46,
+                _ => return None,
+            };
+            Some(utf16_zero(bloc.get(nom..)?))
+        })
+        .filter(|n| !n.is_empty());
+    nom_long.or_else(|| (!nom_court.is_empty()).then_some(nom_court))
 }
 
 /// Les dossiers Démarrage de la personne puis de tous, comme [Environment]::GetFolderPath les donne. Un chemin vide
@@ -566,13 +653,17 @@ mod tests {
         assert!(!DEMARRAGE.contains("Get-ChildItem $d"));
     }
 
-    /// Un raccourci fabriqué octet par octet comme Windows l'écrit : en-tête, LinkInfo (chemin local ANSI), arguments
-    /// en UTF-16, bloc de fin.
-    fn raccourci(drapeaux: u32, infos: bool, fin: &[u8]) -> Vec<u8> {
+    /// Un raccourci fabriqué octet par octet comme Windows l'écrit : en-tête, liste d'éléments du shell, LinkInfo
+    /// (chemin local ANSI), arguments en UTF-16, bloc de fin.
+    fn raccourci(drapeaux: u32, liste: &[u8], infos: bool, fin: &[u8]) -> Vec<u8> {
         let mut o = vec![0u8; 0x4C];
         o[..4].copy_from_slice(&0x4Cu32.to_le_bytes());
         o[4..20].copy_from_slice(&[1, 0x14, 2, 0, 0, 0, 0, 0, 0xC0, 0, 0, 0, 0, 0, 0, 0x46]);
         o[0x14..0x18].copy_from_slice(&drapeaux.to_le_bytes());
+        if !liste.is_empty() {
+            o.extend_from_slice(&u16::try_from(liste.len()).unwrap().to_le_bytes());
+            o.extend_from_slice(liste);
+        }
         if infos {
             let base = b"C:\\Users\\Public\\c.exe\0";
             let mut bloc = Vec::new();
@@ -596,7 +687,7 @@ mod tests {
 
     #[test]
     fn raccourcis_lus_sans_com() {
-        let o = raccourci(0x2 | 0x20 | 0x80, true, &[]);
+        let o = raccourci(0x2 | 0x20 | 0x80, &[], true, &[]);
         assert_eq!(
             cible_raccourci(&o),
             Some((r"C:\Users\Public\c.exe".to_string(), "-x".to_string()))
@@ -608,12 +699,12 @@ mod tests {
         for (i, m) in r"C:\Users\alice\AppData\Roaming\b.vbs".encode_utf16().enumerate() {
             bloc[268 + 2 * i..270 + 2 * i].copy_from_slice(&m.to_le_bytes());
         }
-        let o = raccourci(0x2 | 0x20 | 0x80 | 0x200, true, &bloc);
+        let o = raccourci(0x2 | 0x20 | 0x80 | 0x200, &[], true, &bloc);
         assert_eq!(cible_raccourci(&o).unwrap().0, r"C:\Users\alice\AppData\Roaming\b.vbs");
         // Sans LinkInfo ni variables (liste d'éléments du shell seule), tronqué ou pas un raccourci : rien, jamais
         // une cible inventée.
-        assert_eq!(cible_raccourci(&raccourci(0x20 | 0x80, false, &[])), None);
-        let o = raccourci(0x2 | 0x20 | 0x80, true, &[]);
+        assert_eq!(cible_raccourci(&raccourci(0x20 | 0x80, &[], false, &[])), None);
+        let o = raccourci(0x2 | 0x20 | 0x80, &[], true, &[]);
         for n in [0, 10, 0x4C, 0x60, o.len() - 6] {
             assert_eq!(cible_raccourci(&o[..n]), None, "{n}");
         }
@@ -624,6 +715,103 @@ mod tests {
         let mut geant = o;
         geant[0x4C..0x50].copy_from_slice(&u32::MAX.to_le_bytes());
         assert_eq!(cible_raccourci(&geant), None);
+    }
+
+    /// Un élément de fichier (0x32) ou de dossier (0x31) d'une liste d'éléments du shell, nom court ANSI, suivi de
+    /// son extension BEEF0004 version 9 avec le nom long, comme Windows 10 l'écrit ; `nom_long` vide = sans nom long.
+    fn element_fichier(genre: u8, nom_court: &str, nom_long: &str) -> Vec<u8> {
+        let mut e = vec![genre, 0];
+        e.extend_from_slice(&[0; 10]);
+        e.extend_from_slice(nom_court.as_bytes());
+        e.push(0);
+        if e.len() % 2 != 0 {
+            e.push(0);
+        }
+        let mut ext = vec![0u8; 46];
+        ext[2..4].copy_from_slice(&9u16.to_le_bytes());
+        ext[4..8].copy_from_slice(&[0x04, 0x00, 0xEF, 0xBE]);
+        ext.extend(nom_long.encode_utf16().chain([0]).flat_map(u16::to_le_bytes));
+        ext.extend_from_slice(&[0, 0]);
+        let taille = u16::try_from(ext.len()).unwrap();
+        ext[..2].copy_from_slice(&taille.to_le_bytes());
+        e.extend_from_slice(&ext);
+        let mut element = u16::try_from(e.len() + 2).unwrap().to_le_bytes().to_vec();
+        element.extend_from_slice(&e);
+        element
+    }
+
+    /// Les éléments qui précèdent les dossiers : la racine Poste de travail (0x1F) et le lecteur (0x2F, « C:\ »).
+    fn elements_racine() -> Vec<Vec<u8>> {
+        let mut racine = vec![20, 0, 0x1F, 0x50];
+        racine.extend_from_slice(&[0; 16]);
+        let mut lecteur = vec![25, 0, 0x2F];
+        lecteur.extend_from_slice(b"C:\\\0");
+        lecteur.resize(25, 0);
+        vec![racine, lecteur]
+    }
+
+    /// Une liste d'éléments du shell complète, terminée par ses deux octets nuls.
+    fn liste(elements: &[Vec<u8>]) -> Vec<u8> {
+        let mut l: Vec<u8> = elements.concat();
+        l.extend_from_slice(&[0, 0]);
+        l
+    }
+
+    /// La liste de C:\Users\Public\<fichier>, comme Windows l'écrit pour un raccourci du dossier Démarrage.
+    fn liste_public(nom_court: &str, nom_long: &str) -> Vec<u8> {
+        let mut elements = elements_racine();
+        elements.push(element_fichier(0x31, "USERS", "Users"));
+        elements.push(element_fichier(0x31, "PUBLIC", "Public"));
+        elements.push(element_fichier(0x32, nom_court, nom_long));
+        liste(&elements)
+    }
+
+    #[test]
+    fn raccourci_forge_rendu_a_powershell() {
+        let public = r"C:\Users\Public\c.exe";
+        // La liste lance m.exe, LinkInfo affiche c.exe (technique publiée de raccourci forgé) : rien, PowerShell
+        // résoudra la vraie cible.
+        let o = raccourci(0x1 | 0x2 | 0x20 | 0x80, &liste_public("M.EXE", "m.exe"), true, &[]);
+        assert_eq!(cible_raccourci(&o), None);
+        // Le même nom de fichier dans un autre dossier (C:\Windows\System32\c.exe) : rien non plus.
+        let mut elements = elements_racine();
+        elements.push(element_fichier(0x31, "WINDOWS", "Windows"));
+        elements.push(element_fichier(0x31, "SYSTEM32", "System32"));
+        elements.push(element_fichier(0x32, "C.EXE", "c.exe"));
+        let o = raccourci(0x1 | 0x2 | 0x20 | 0x80, &liste(&elements), true, &[]);
+        assert_eq!(cible_raccourci(&o), None);
+        // Liste et LinkInfo d'accord (la casse ne compte pas sous Windows) : lu.
+        let o = raccourci(0x1 | 0x2 | 0x20 | 0x80, &liste_public("C.EXE", "C.exe"), true, &[]);
+        assert_eq!(cible_raccourci(&o).unwrap().0, public);
+        // Sans nom long, le nom court fait foi.
+        let o = raccourci(0x1 | 0x2 | 0x80, &liste_public("c.exe", ""), true, &[]);
+        assert!(cible_raccourci(&o).is_some());
+        // La liste seule, sans LinkInfo : c'est elle que Windows lance, elle suffit.
+        let o = raccourci(0x1 | 0x80, &liste_public("C.EXE", "c.exe"), false, &[]);
+        assert_eq!(cible_raccourci(&o).unwrap().0, public);
+        // Un élément qui n'est pas un fichier (partage réseau), ou une liste sans lecteur : rien.
+        let mut reseau = liste_public("c.exe", "c.exe");
+        reseau[20 + 25 + 2] = 0x41;
+        assert_eq!(cible_raccourci(&raccourci(0x1 | 0x2 | 0x80, &reseau, true, &[])), None);
+        let sans_lecteur = liste(&[
+            element_fichier(0x31, "PUBLIC", "Public"),
+            element_fichier(0x32, "C.EXE", "c.exe"),
+        ]);
+        assert_eq!(
+            cible_raccourci(&raccourci(0x1 | 0x2 | 0x80, &sans_lecteur, true, &[])),
+            None
+        );
+        // Un bloc de variables sans le drapeau HasExpString est ignoré, comme Windows l'ignore.
+        let mut bloc = vec![0u8; 0x314];
+        bloc[..4].copy_from_slice(&0x314u32.to_le_bytes());
+        bloc[4..8].copy_from_slice(&0xA000_0001u32.to_le_bytes());
+        for (i, m) in r"C:\Windows\explorer.exe".encode_utf16().enumerate() {
+            bloc[268 + 2 * i..270 + 2 * i].copy_from_slice(&m.to_le_bytes());
+        }
+        let o = raccourci(0x2 | 0x80, &[], true, &bloc);
+        assert_eq!(cible_raccourci(&o).unwrap().0, public);
+        assert!(memes_chemins(r"C:\A\b.exe", "c:/a/B.EXE/") && !memes_chemins(r"C:\A\b.exe", r"C:\B\b.exe"));
+        assert_eq!(chemin_liste(&liste_public("C.EXE", "c.exe")).as_deref(), Some(public));
     }
 
     #[test]

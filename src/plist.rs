@@ -71,7 +71,7 @@ impl Valeur {
 /// Un plist binaire que le lecteur refuse pour ses bornes (trop d'objets, trop profond, références qui bouclent ou
 /// qui multiplient les copies) : fabriqué pour gêner l'analyse, pas un format inconnu. À ne jamais confier à
 /// `plutil`, qui développerait les références sans limite.
-pub fn hostile(octets: &[u8]) -> bool {
+fn hostile(octets: &[u8]) -> bool {
     octets.starts_with(b"bplist00") && binaire::lire(octets).is_none()
 }
 
@@ -84,9 +84,35 @@ pub fn lire(octets: &[u8]) -> Option<Valeur> {
     xml::lire(texte.strip_prefix('\u{feff}').unwrap_or(texte))
 }
 
+/// Ce qu'un fichier plist a donné. Tout vient d'une seule lecture bornée : le fichier n'est jamais rouvert pour en
+/// savoir plus (un fichier creux de 100 Go, ou un tube nommé posé à sa place entre deux ouvertures, ferait tomber ou
+/// bloquer Vanguard).
+#[derive(Debug, PartialEq)]
+pub enum Lu {
+    Plist(Valeur),
+    /// Plus de 8 Mo : aucun fichier de réglages ne fait cette taille ; fabriqué pour gêner l'analyse.
+    TropGros,
+    /// Plist binaire refusé par les bornes (références qui bouclent ou qui multiplient les copies) : fabriqué pour
+    /// gêner l'analyse. À ne jamais confier à `plutil`, qui développerait les références sans limite.
+    Hostile,
+    /// Format inconnu ou fichier abîmé : `plutil` peut encore essayer en secours.
+    Inconnu,
+}
+
+impl Lu {
+    /// Le plist lu, ou rien. Les lectures de réglages ne se font que sous macOS.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    pub fn valeur(self) -> Option<Valeur> {
+        match self {
+            Lu::Plist(v) => Some(v),
+            _ => None,
+        }
+    }
+}
+
 /// Le plist d'un fichier. `Err` : fichier absent, interdit, ou qui n'est pas un fichier ordinaire (un tube nommé
-/// bloquerait la lecture) ; `Ok(None)` : contenu illisible ou trop gros.
-pub fn lire_fichier(chemin: &Path) -> std::io::Result<Option<Valeur>> {
+/// bloquerait la lecture) ; sinon ce qu'il contient, dit en une seule lecture.
+pub fn lire_fichier(chemin: &Path) -> std::io::Result<Lu> {
     let mut options = std::fs::OpenOptions::new();
     options.read(true);
     #[cfg(unix)]
@@ -98,9 +124,13 @@ pub fn lire_fichier(chemin: &Path) -> std::io::Result<Option<Valeur>> {
     let mut octets = Vec::new();
     fichier.take(TAILLE_MAX + 1).read_to_end(&mut octets)?;
     Ok(if octets.len() as u64 > TAILLE_MAX {
-        None
+        Lu::TropGros
+    } else if let Some(v) = lire(&octets) {
+        Lu::Plist(v)
+    } else if hostile(&octets) {
+        Lu::Hostile
     } else {
-        lire(&octets)
+        Lu::Inconnu
     })
 }
 
@@ -711,7 +741,17 @@ mod tests {
         std::fs::create_dir_all(&dossier).unwrap();
         let f = dossier.join("a.plist");
         std::fs::write(&f, XML).unwrap();
-        assert!(lire_fichier(&f).unwrap().is_some());
+        assert!(matches!(lire_fichier(&f).unwrap(), Lu::Plist(_)));
+        // Un fichier démesuré (creux : aucune place prise sur le disque) et un plist binaire piégé sont reconnus en
+        // une seule lecture, jamais relus en entier.
+        let gros = dossier.join("gros.plist");
+        std::fs::File::create(&gros).unwrap().set_len(TAILLE_MAX + 1).unwrap();
+        assert_eq!(lire_fichier(&gros).unwrap(), Lu::TropGros);
+        let piege = dossier.join("piege.plist");
+        std::fs::write(&piege, b"bplist00\xff\xff").unwrap();
+        assert_eq!(lire_fichier(&piege).unwrap(), Lu::Hostile);
+        std::fs::write(&piege, b"pas un plist").unwrap();
+        assert_eq!(lire_fichier(&piege).unwrap(), Lu::Inconnu);
         assert_eq!(
             lire_fichier(&dossier.join("absent.plist")).unwrap_err().kind(),
             std::io::ErrorKind::NotFound

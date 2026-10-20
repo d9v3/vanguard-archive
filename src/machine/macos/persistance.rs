@@ -13,8 +13,8 @@ const CAT: &str = "Persistance";
 /// Ce qu'un .plist de launchd lance.
 enum Lancement {
     Programme(String, String),
-    /// Fichier fabriqué pour gêner l'analyse (références qui multiplient les copies, bornes dépassées) : jamais
-    /// confié à plutil, qui développerait tout sans limite ; montré tel quel.
+    /// Fichier fabriqué pour gêner l'analyse (références qui multiplient les copies, bornes dépassées, taille
+    /// démesurée) : jamais relu ni confié à plutil, qui développerait tout sans limite ; montré tel quel.
     Hostile,
     /// Absent, interdit, pas un fichier ordinaire (tube nommé), ou sans programme : sauté.
     Rien,
@@ -26,23 +26,22 @@ fn programme(plist: &Path) -> Lancement {
     let Ok(lu) = crate::plist::lire_fichier(plist) else {
         return Lancement::Rien;
     };
-    let reglages = if let Some(r) = lu {
-        r
-    } else {
-        if std::fs::read(plist).is_ok_and(|o| crate::plist::hostile(&o)) {
-            return Lancement::Hostile;
+    let reglages = match lu {
+        crate::plist::Lu::Plist(r) => r,
+        crate::plist::Lu::TropGros | crate::plist::Lu::Hostile => return Lancement::Hostile,
+        crate::plist::Lu::Inconnu => {
+            let secours = crate::commande::lancer(
+                std::process::Command::new("plutil")
+                    .args(["-convert", "xml1", "-o", "-"])
+                    .arg(plist),
+                10,
+            )
+            .and_then(|r| crate::plist::lire(r.sortie.as_bytes()));
+            let Some(r) = secours else {
+                return Lancement::Rien;
+            };
+            r
         }
-        let secours = crate::commande::lancer(
-            std::process::Command::new("plutil")
-                .args(["-convert", "xml1", "-o", "-"])
-                .arg(plist),
-            10,
-        )
-        .and_then(|r| crate::plist::lire(r.sortie.as_bytes()));
-        let Some(r) = secours else {
-            return Lancement::Rien;
-        };
-        r
     };
     match lire_programme(&reglages) {
         Some((p, a)) => Lancement::Programme(p, a),
@@ -147,8 +146,8 @@ pub fn persistance() -> Vec<Constat> {
                             CAT,
                             Niveau::Eleve,
                             trf!(
-                                "L'agent « {nom} » est un fichier fabriqué pour gêner l'analyse (références en boucle ou qui multiplient les copies) : aucun programme légitime n'écrit ça.",
-                                "Agent “{nom}” is a file built to hinder analysis (looping references or ones that multiply copies): no legitimate program writes that."
+                                "L'agent « {nom} » est un fichier fabriqué pour gêner l'analyse (références en boucle, copies multipliées ou taille démesurée) : aucun programme légitime n'écrit ça.",
+                                "Agent “{nom}” is a file built to hinder analysis (looping references, multiplied copies or an outsized file): no legitimate program writes that."
                             ),
                         )
                         .manuel(

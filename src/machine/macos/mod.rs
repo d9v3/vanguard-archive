@@ -109,7 +109,7 @@ fn fichier_preferences(domaine: &str) -> PathBuf {
 
 fn reglages(domaine: &str) -> Reglages {
     match crate::plist::lire_fichier(&fichier_preferences(domaine)) {
-        Ok(Some(r @ Valeur::Dico(_))) => Reglages::Lus(r),
+        Ok(crate::plist::Lu::Plist(r @ Valeur::Dico(_))) => Reglages::Lus(r),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Reglages::Absents,
         _ => Reglages::Illisibles,
     }
@@ -133,7 +133,7 @@ pub(crate) fn preference(domaine: &str, cle: &str) -> Option<String> {
 pub fn version_systeme(cle: &str) -> Option<String> {
     let lue = crate::plist::lire_fichier(std::path::Path::new("/System/Library/CoreServices/SystemVersion.plist"))
         .ok()
-        .flatten()
+        .and_then(crate::plist::Lu::valeur)
         .and_then(|v| v.cle(cle)?.texte().map(str::to_string));
     if lue.is_some() {
         return lue;
@@ -547,7 +547,7 @@ pub fn nom_machine(cle: &str) -> Option<String> {
         "/Library/Preferences/SystemConfiguration/preferences.plist",
     ))
     .ok()
-    .flatten();
+    .and_then(crate::plist::Lu::valeur);
     let lu = reglages.as_ref().and_then(|r| {
         let systeme = r.cle("System")?;
         let valeur = match cle {
