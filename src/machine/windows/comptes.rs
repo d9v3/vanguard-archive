@@ -173,9 +173,12 @@ unsafe extern "system" {
     ) -> u32;
 }
 
+// ConvertSidToStringSidW et LocalFree sont déclarés une seule fois, dans `processus` : deux déclarations du même
+// import, un futur changement de signature n'en corrigerait qu'une.
+use super::processus::{ConvertSidToStringSidW, LocalFree};
+
 #[link(name = "advapi32")]
 unsafe extern "system" {
-    fn ConvertSidToStringSidW(sid: *mut std::ffi::c_void, texte: *mut *mut u16) -> i32;
     fn ConvertStringSidToSidW(texte: *const u16, sid: *mut *mut std::ffi::c_void) -> i32;
     fn LookupAccountSidW(
         systeme: *const u16,
@@ -186,11 +189,6 @@ unsafe extern "system" {
         taille_domaine: *mut u32,
         genre: *mut u32,
     ) -> i32;
-}
-
-#[link(name = "kernel32")]
-unsafe extern "system" {
-    fn LocalFree(memoire: *mut std::ffi::c_void) -> *mut std::ffi::c_void;
 }
 
 /// USER_INFO_4 de lmaccess.h, champ par champ : seuls le nom, les drapeaux, la dernière connexion et le SID servent.
@@ -319,10 +317,15 @@ fn comptes_natifs() -> Option<Vec<Compte>> {
         // son SID est dans le même bloc, converti avant de le rendre une seule fois.
         let compte = unsafe {
             let code = NetUserGetInfo(std::ptr::null(), nom_large.as_ptr(), 4, &raw mut info);
-            if code == COMPTE_DISPARU {
-                continue;
-            }
+            // Windows ne remplit normalement pas le tampon quand il refuse ; s'il l'a fait, il est rendu quand même,
+            // comme pour les deux autres appels.
             if code != 0 || info.is_null() {
+                if !info.is_null() {
+                    NetApiBufferFree(info.cast());
+                }
+                if code == COMPTE_DISPARU {
+                    continue;
+                }
                 return None;
             }
             let u = &*info.cast::<Utilisateur4>();
@@ -458,17 +461,18 @@ fn sections_comptes(
     t
 }
 
-/// La lecture des comptes par les fonctions de Windows, sans PowerShell ; `None` si la liste des comptes est refusée
-/// (l'appelant reprend alors le script PowerShell).
+/// La lecture des comptes par les fonctions de Windows, sans PowerShell ; `None` si la liste des comptes ou celle
+/// des administrateurs est refusée (l'appelant reprend alors le script PowerShell, qui sait peut-être lire le groupe :
+/// sans cela, la section ADM manquerait et « Nouveau compte administrateur » resterait non vérifié).
 pub(super) fn lecture_native() -> Option<String> {
     let comptes = comptes_natifs()?;
+    let admins = administrateurs_natifs()?;
     let lbp = winreg::RegKey::predef(winreg::enums::HKEY_LOCAL_MACHINE)
         .open_subkey(r"SYSTEM\CurrentControlSet\Control\Lsa")
         .and_then(|k| k.get_value::<u32, _>("LimitBlankPasswordUse"))
         .ok();
     let moi = super::processus::sid();
-    let admins = administrateurs_natifs();
-    Some(sections_comptes(&comptes, moi.as_deref(), lbp, admins.as_deref()))
+    Some(sections_comptes(&comptes, moi.as_deref(), lbp, Some(&admins)))
 }
 
 /// Un niveau de NetUserModalsGet sur cet ordinateur ; `None` si Windows refuse.
@@ -591,7 +595,8 @@ mod tests {
     #[test]
     fn lecture_native_sous_wine() {
         if let Some(t) = lecture_native() {
-            assert!(t.contains("USR_FIN\n") && t.contains("CPT_FIN\n"));
+            // Une lecture rendue est complète : la section ADM y est toujours (sinon le script la relit).
+            assert!(t.contains("USR_FIN\n") && t.contains("CPT_FIN\n") && t.contains("ADM_FIN\n"));
             assert!(section(Some(t.as_str()), "USR").is_some());
         }
         let texte = [u16::from(b'a'), u16::from(b'b'), u16::from(b'c')];
