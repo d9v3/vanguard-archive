@@ -163,7 +163,7 @@ gh release create "$TAG" --target "$COMMIT" --title "$NOM $VERSION" --notes "$NO
 echo "Version $TAG publiée : $(gh release view "$TAG" --json url -q .url)"
 # Les mêmes programmes, avec leur manifeste signé (outils/signer-versions.sh), dans le dépôt public des versions : la
 # mise à jour depuis GitHub les y prend (src/mise_a_jour/github.rs), le code restant privé. Seule la dernière y reste.
-DEPOT_VERSIONS=d9v3/vanguard-versions
+DEPOT_VERSIONS=d9v3/vanguard-officiel
 if ! gh repo view "$DEPOT_VERSIONS" >/dev/null 2>&1; then
   echo "Dépôt public des versions absent ($DEPOT_VERSIONS, outils/depot-versions.sh) : mise à jour depuis GitHub non publiée."
 elif outils/signer-versions.sh "$DOSSIER" &&

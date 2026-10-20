@@ -80,7 +80,7 @@ chaque version garde son étiquette dans le dépôt (`git checkout v0.62.0`, par
   menu principal l'annonce. Rien n'est cru sur parole : chaque version est signée en Ed25519 sur l'ordinateur de
   l'auteur, et Vanguard refuse un manifeste mal signé, une version qui n'est pas plus récente, ou un programme dont
   la taille, l'empreinte ou la version ne sont pas celles signées. Qui prendrait le compte GitHub ne pourrait pas
-  faire installer autre chose. Les programmes sont publiés à part, le code restant privé.
+  faire installer autre chose. Les programmes signés sont publiés à part (d9v3/vanguard-officiel), le code dans d9v3/vanguard-beta.
 - **Client HTTPS en Rust** : listes, registres, fuites, tldr, débit et listes noires sans curl ; redirections en HTTPS
   seulement. Le programme prend 2 à 3 Mo.
 - **Lu directement par le système** : connexions, processus, droits et compte, registre des traces et journaux

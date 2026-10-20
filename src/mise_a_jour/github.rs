@@ -17,7 +17,7 @@ use super::{TAILLE_MAX, Version, lire_version};
 use crate::ui::*;
 
 /// Les fichiers de la dernière version publiée : le lien « latest » de GitHub suit toujours la plus récente.
-const ADRESSE: &str = "https://github.com/d9v3/vanguard-versions/releases/latest/download/";
+const ADRESSE: &str = "https://github.com/d9v3/vanguard-officiel/releases/latest/download/";
 
 /// La clé publique qui signe les manifestes ; la clé privée ne quitte pas l'ordinateur de l'auteur
 /// (~/.config/vanguard-dev/versions-ed25519.pem, `outils/signer-versions.sh --cle` la redonne sous cette forme).
