@@ -328,9 +328,9 @@ enum Commande {
         /// Le disque ou le dossier de la copie (par défaut : choisi parmi les disques branchés).
         dossier: Option<std::path::PathBuf>,
     },
-    /// Vérifier ma sauvegarde : la sauvegarde mise en place par Vanguard relue pour de vrai, des fichiers au hasard
-    /// comparés à leur original ; pour Time Machine, Déjà Dup et l'Historique des fichiers, la marche à suivre.
-    /// Rien n'est écrit ni effacé.
+    /// Vérifier ma sauvegarde : la sauvegarde mise en place par Vanguard relue pour de vrai, des fichiers répartis
+    /// sur toute la sauvegarde comparés à leur original ; pour Time Machine, Déjà Dup et l'Historique des fichiers,
+    /// la marche à suivre. Rien n'est écrit ni effacé.
     #[command(name = "verifier-sauvegarde", visible_alias = "check-backup")]
     VerifierSauvegarde,
     /// Vérifier ma clé : capacité réelle (fausses clés), vitesses et blocs en erreur d'une clé USB ou d'un disque
@@ -1495,9 +1495,9 @@ const AIDES_EN: &[(&str, &str)] = &[
                          copy, nothing deleted or overwritten, an interrupted copy resumes"),
     ("verifier-copie", "Check a copy made by “Copy my files” (restore test): files spread over the whole copy, read \
                         back from the disk and compared with their original. Nothing is written or deleted"),
-    ("verifier-sauvegarde", "Check my backup: the backup set up by Vanguard really read back, random files compared with \
-                             their original; for Time Machine, Déjà Dup and File History, the steps. Nothing is written or \
-                             deleted"),
+    ("verifier-sauvegarde", "Check my backup: the backup set up by Vanguard really read back, files spread over the \
+                             whole backup compared with their original; for Time Machine, Déjà Dup and File History, \
+                             the steps. Nothing is written or deleted"),
     ("verifier-cle", "Check my drive: real capacity (fake drives), speeds and bad blocks of a USB stick or an \
                       external disk. Writes into the free space after your consent, reads back, then erases; your \
                       files are not touched"),
