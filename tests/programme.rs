@@ -59,7 +59,21 @@ fn vanguard(langue: &str, args: &[&str], entree: &str, secondes: u64) -> Sortie 
 
 /// Comme `vanguard`, avec un programme et un dossier personnel donnés (gardé après le lancement).
 fn vanguard_dans(programme: &Path, maison: &Path, langue: &str, args: &[&str], entree: &str, secondes: u64) -> Sortie {
+    vanguard_dans_env(programme, maison, langue, args, entree, secondes, &[])
+}
+
+/// Comme `vanguard_dans`, avec des variables d'environnement en plus.
+fn vanguard_dans_env(
+    programme: &Path,
+    maison: &Path,
+    langue: &str,
+    args: &[&str],
+    entree: &str,
+    secondes: u64,
+    env: &[(&str, &str)],
+) -> Sortie {
     let mut commande = Command::new(programme);
+    commande.envs(env.iter().copied());
     commande
         .args(args)
         .env("VANGUARD_LANG", langue)
@@ -632,6 +646,10 @@ fn outils_de_disque_quittes_sans_rien_ecrire() {
 /// Lancé depuis une clé (le programme copié dans <clé>/Linux, témoin vide : jamais la protection de la clé), Vanguard
 /// remplace sur accord la copie plus ancienne de cet ordinateur par lui-même ; lancé depuis cette copie, il se tourne
 /// vers GitHub. Dans le dossier temporaire de cargo, pas dans /tmp : deux programmes de debug y pèsent 250 Mo.
+/// Aucune requête vers GitHub pendant les tests : la mise à jour depuis GitHub, proposée en fin d'écran, s'arrête là.
+#[cfg(target_os = "linux")]
+const HORS_LIGNE: &[(&str, &str)] = &[("VANGUARD_HORS_LIGNE", "1")];
+
 #[cfg(target_os = "linux")]
 #[test]
 fn mise_a_jour_depuis_la_cle() {
@@ -647,7 +665,7 @@ fn mise_a_jour_depuis_la_cle() {
     std::fs::write(&copie, "vieille copie, sans version gravée").unwrap();
 
     // Refusée (Entrée) : rien ne change.
-    let refus = vanguard_dans(&sur_la_cle, &maison, "fr", &["se-mettre-a-jour"], "\n", 60);
+    let refus = vanguard_dans_env(&sur_la_cle, &maison, "fr", &["se-mettre-a-jour"], "\n", 60, HORS_LIGNE);
     assert_eq!(refus.code, Some(0), "{}", refus.erreurs);
     let t = sans_couleurs(&refus.texte);
     assert!(t.contains("d'avant la 0.78") && t.contains("La remplacer"), "{t}");
@@ -656,7 +674,7 @@ fn mise_a_jour_depuis_la_cle() {
         b"vieille copie, sans version grav\xc3\xa9e"
     );
     // Acceptée : la copie devient le programme de la clé, octet pour octet.
-    let accord = vanguard_dans(&sur_la_cle, &maison, "fr", &["se-mettre-a-jour"], "o\n", 60);
+    let accord = vanguard_dans_env(&sur_la_cle, &maison, "fr", &["se-mettre-a-jour"], "o\n", 60, HORS_LIGNE);
     assert!(
         sans_couleurs(&accord.texte).contains("Copie de cet ordinateur mise à jour"),
         "{}",
@@ -666,13 +684,13 @@ fn mise_a_jour_depuis_la_cle() {
     let identique = std::fs::read(&copie).unwrap() == std::fs::read(&sur_la_cle).unwrap();
     assert!(identique, "la copie n'est pas le programme de la clé");
     // Ensuite : à jour depuis la clé ; depuis la copie, renvoi vers la clé (jamais une clé seulement branchée).
-    let ensuite = vanguard_dans(&sur_la_cle, &maison, "fr", &["se-mettre-a-jour"], "", 60);
+    let ensuite = vanguard_dans_env(&sur_la_cle, &maison, "fr", &["se-mettre-a-jour"], "", 60, HORS_LIGNE);
     assert!(
         sans_couleurs(&ensuite.texte).contains("est à jour"),
         "{}",
         ensuite.texte
     );
-    let depuis_la_copie = vanguard_dans(&copie, &maison, "en", &["se-mettre-a-jour"], "", 60);
+    let depuis_la_copie = vanguard_dans_env(&copie, &maison, "en", &["se-mettre-a-jour"], "", 60, HORS_LIGNE);
     assert!(
         sans_couleurs(&depuis_la_copie.texte).contains("the update comes from"),
         "{}",

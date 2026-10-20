@@ -316,11 +316,17 @@ fn cibles_github() -> Vec<PathBuf> {
     }
     if let Some(exe) = programme() {
         let sur_la_cle = crate::reseau::cle_du_programme().is_some_and(|c| exe.starts_with(c));
-        if !sur_la_cle && exe != copie {
+        if !sur_la_cle && !meme_fichier(&exe, &copie) {
             cibles.push(exe);
         }
     }
     cibles
+}
+
+/// Deux chemins vers le même fichier ? Comparés une fois résolus : sous Windows, le programme lancé se lit en
+/// « \\?\C:\… » et la copie en « C:\… ».
+fn meme_fichier(a: &Path, b: &Path) -> bool {
+    a == b || matches!((a.canonicalize(), b.canonicalize()), (Ok(x), Ok(y)) if x == y)
 }
 
 /// Ce programme est-il plus ancien que `publiee` ? Sans version gravée (d'avant la 0.78), oui ; illisible, non :
@@ -337,8 +343,12 @@ fn plus_ancien(chemin: &Path, publiee: Version) -> bool {
 /// s'installe : la clé a pu changer depuis l'affichage), relue et comparée, puis renommée d'un coup ; une copie
 /// interrompue ou abîmée ne remplace jamais celle qui marche, et ne reste pas sur le disque.
 fn remplacer(source: &Path, cible: &Path, attendue: Version, max: u64) -> Result<(), String> {
-    let octets = lire_octets(source, max)?;
-    if version_gravee(&octets) != Some(attendue) {
+    installer(&lire_octets(source, max)?, cible, attendue)
+}
+
+/// Les octets d'un programme à la place de `cible`, s'ils portent la version `attendue`.
+fn installer(octets: &[u8], cible: &Path, attendue: Version) -> Result<(), String> {
+    if version_gravee(octets) != Some(attendue) {
         return Err(tr!(
             "le programme de la clé a changé depuis l'affichage, rien n'est remplacé",
             "the key's program changed since it was shown, nothing is replaced"
@@ -347,14 +357,27 @@ fn remplacer(source: &Path, cible: &Path, attendue: Version, max: u64) -> Result
     }
     let provisoire = cible.with_file_name(format!("{NOM}.nouveau"));
     let ecrite = (|| -> Result<(), String> {
-        std::fs::write(&provisoire, &octets).map_err(|e| e.to_string())?;
-        if std::fs::read(&provisoire).ok().as_deref() != Some(&octets[..]) {
-            return Err(tr!("la copie relue ne correspond pas", "the copy read back does not match").into());
-        }
+        use std::io::Write;
+        // Créé neuf (O_EXCL) : un lien posé à ce nom n'est jamais suivi, l'écriture échoue plutôt. Les droits sont
+        // donnés par le descripteur, pas par le chemin.
+        let _ = std::fs::remove_file(&provisoire);
+        let mut f = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&provisoire)
+            .map_err(|e| e.to_string())?;
+        f.write_all(octets)
+            .and_then(|()| f.sync_all())
+            .map_err(|e| e.to_string())?;
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&provisoire, std::fs::Permissions::from_mode(0o755)).map_err(|e| e.to_string())?;
+            f.set_permissions(std::fs::Permissions::from_mode(0o755))
+                .map_err(|e| e.to_string())?;
+        }
+        drop(f);
+        if std::fs::read(&provisoire).ok().as_deref() != Some(octets) {
+            return Err(tr!("la copie relue ne correspond pas", "the copy read back does not match").into());
         }
         mettre_en_place(&provisoire, cible).map_err(|e| e.to_string())
     })();
@@ -437,6 +460,13 @@ fn depuis_github() {
     if cibles.is_empty() {
         return;
     }
+    if !github::dossier_sur() {
+        trp!(
+            "\n  {GRIS}Lancé en root avec le dossier d'un autre compte : pas de mise à jour depuis GitHub.\n  Relance Vanguard depuis ce compte.{RESET}",
+            "\n  {GRIS}Started as root with another account's folder: no update from GitHub.\n  Start Vanguard again from that account.{RESET}"
+        );
+        return;
+    }
     trp!(
         "\n  {GRIS}Dernière version publiée sur GitHub…{RESET}",
         "\n  {GRIS}Latest version published on GitHub…{RESET}"
@@ -481,15 +511,15 @@ fn depuis_github() {
     {
         return;
     }
-    let source = match github::programme_verifie(&publiee) {
-        Ok(s) => s,
+    let octets = match github::programme_verifie(&publiee) {
+        Ok(o) => o,
         Err(e) => {
             trp!("  ✖ {}", "  ✖ {}", affichable(&e));
             return;
         }
     };
     for c in &a_remplacer {
-        match remplacer(&source, c, publiee.version, TAILLE_MAX) {
+        match installer(&octets, c, publiee.version) {
             Ok(()) => trp!(
                 "  {VERT}✔{RESET} {} : Vanguard {}.",
                 "  {VERT}✔{RESET} {}: Vanguard {}.",
@@ -504,7 +534,6 @@ fn depuis_github() {
             ),
         }
     }
-    let _ = std::fs::remove_file(&source);
 }
 
 /// Montre les deux versions et d'où vient la nouvelle, puis remplace la copie après un « o ».

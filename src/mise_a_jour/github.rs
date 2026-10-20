@@ -138,11 +138,43 @@ fn dossier() -> PathBuf {
     crate::reseau::dossier_local().join("versions")
 }
 
+/// curl : sous Windows, celui de System32, jamais un curl.exe posé à côté de Vanguard (Windows cherche d'abord dans
+/// le dossier du programme lancé, qui peut être en administrateur).
+fn curl() -> Command {
+    #[cfg(windows)]
+    {
+        let racine = std::env::var_os("SystemRoot").unwrap_or_else(|| "C:\\Windows".into());
+        Command::new(PathBuf::from(racine).join("System32").join("curl.exe"))
+    }
+    #[cfg(not(windows))]
+    {
+        Command::new("curl")
+    }
+}
+
+/// Le dossier de Vanguard est-il sûr pour y télécharger et écrire ? Lancé en root avec le dossier d'un autre compte
+/// (sudo qui garde HOME), ce compte pourrait y poser des liens et faire écrire root ailleurs : rien n'y est fait.
+pub(super) fn dossier_sur() -> bool {
+    #[cfg(unix)]
+    {
+        // SAFETY : geteuid n'a ni pointeur ni effet de bord.
+        if unsafe { libc::geteuid() } != 0 {
+            return true;
+        }
+        std::fs::symlink_metadata(crate::reseau::dossier_local())
+            .is_ok_and(|m| std::os::unix::fs::MetadataExt::uid(&m) == 0)
+    }
+    #[cfg(windows)]
+    {
+        true
+    }
+}
+
 /// Télécharge un fichier de la dernière version, en HTTPS seulement (redirections comprises), `max` octets au plus.
 fn telecharger(nom: &str, destination: &Path, max: u64, secondes: u64) -> bool {
     let _ = std::fs::remove_file(destination);
     let reussi = crate::commande::lancer(
-        Command::new("curl")
+        curl()
             .args(["-sfL", "--proto", "=https", "--proto-redir", "=https", "--max-time"])
             .arg(secondes.to_string())
             .arg("--max-filesize")
@@ -189,24 +221,24 @@ pub(super) fn derniere() -> Result<Publiee, String> {
     )
 }
 
-/// Télécharge le programme de `p`, et le garde seulement si sa taille et son empreinte sont celles signées : son
-/// chemin, à passer à `remplacer`, qui vérifie encore sa version gravée.
-pub(super) fn programme_verifie(p: &Publiee) -> Result<PathBuf, String> {
+/// Télécharge le programme de `p` et rend ses octets, seulement si leur taille et leur empreinte sont celles signées.
+/// Ce sont ces octets-là qui s'installent (`installer`, qui vérifie encore la version gravée) : le fichier
+/// téléchargé, effacé aussitôt lu, ne peut pas être changé entre la vérification et l'installation.
+pub(super) fn programme_verifie(p: &Publiee) -> Result<Vec<u8>, String> {
     let chemin = dossier().join(format!("{}.nouveau", p.fichier));
     if !telecharger(p.fichier, &chemin, p.taille, 900) {
         return Err(tr!("téléchargement interrompu", "download interrupted").into());
     }
-    let conforme = lire_octets(&chemin, p.taille)
-        .is_ok_and(|o| u64::try_from(o.len()).ok() == Some(p.taille) && Sha256::digest(&o)[..] == p.sha256);
-    if !conforme {
-        let _ = std::fs::remove_file(&chemin);
-        return Err(tr!(
+    let lus = lire_octets(&chemin, p.taille);
+    let _ = std::fs::remove_file(&chemin);
+    match lus {
+        Ok(o) if u64::try_from(o.len()).ok() == Some(p.taille) && Sha256::digest(&o)[..] == p.sha256 => Ok(o),
+        _ => Err(tr!(
             "le programme téléchargé n'est pas celui que l'auteur a signé : rien n'est remplacé",
             "the downloaded program is not the one the author signed: nothing is replaced"
         )
-        .into());
+        .into()),
     }
-    Ok(chemin)
 }
 
 static ANNONCE: Mutex<Option<Version>> = Mutex::new(None);
@@ -216,7 +248,7 @@ static CHERCHEE: Once = Once::new();
 /// l'attend jamais, elle paraît à l'affichage suivant), et seulement dans un vrai terminal (ni scripts, ni tests).
 /// La réponse est gardée 12 heures ; l'installation, elle, revérifie tout.
 pub(super) fn annonce() -> Option<Version> {
-    if cfg!(test) || !std::io::stdin().is_terminal() || SYSTEME.is_none() {
+    if cfg!(test) || !std::io::stdin().is_terminal() || SYSTEME.is_none() || !dossier_sur() {
         return None;
     }
     CHERCHEE.call_once(|| {
