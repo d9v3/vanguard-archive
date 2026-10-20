@@ -18,6 +18,7 @@ mod exclusions;
 pub(crate) mod gestionnaire;
 pub(crate) mod installes;
 mod maj;
+pub(crate) mod partages;
 pub(crate) mod peripheriques;
 mod persistance;
 mod portes;

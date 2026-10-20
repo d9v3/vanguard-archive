@@ -430,6 +430,10 @@ mod systeme {
 
     pub fn relever() -> Option<Releve> {
         // Les comptes sont rendus avec leur SID : « Tout le monde » s'écrit dans la langue de Windows, S-1-1-0 non.
+        // Lus par les fonctions de Windows ; PowerShell seulement si elles refusent la liste des partages.
+        if let Some(sortie) = crate::machine::windows::partages::releve() {
+            return super::lire_windows(&sortie);
+        }
         let sortie = crate::machine::windows::ps(
             "try { Get-SmbShare -ErrorAction Stop | Where-Object { -not $_.Special } | ForEach-Object { $s = $_; $a = @(); \
              try { $a = @(Get-SmbShareAccess -Name $s.Name -ErrorAction Stop) } catch { \"ACC|$($s.Name)|$($s.Path)|?|?|?|?\" }; \
