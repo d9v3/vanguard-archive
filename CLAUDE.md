@@ -15,8 +15,10 @@ Réponses à l'utilisateur en français, claires, avec le pourquoi.
   dépend d'Internet doit s'y arrêter de lui-même, en moins d'une minute, et dire pourquoi il ne conclut pas.
 - Tests : `cargo test` (cible par défaut x86_64-unknown-linux-musl, voir `.cargo/config.toml`). Unitaires dans chaque
   module ; `tests/programme.rs` lance le vrai programme (dossier personnel jetable, rien ne change le système).
-- Lint, zéro remarque (clippy pedantic, voir Cargo.toml) sur les quatre cibles :
-  `for c in x86_64-unknown-linux-musl x86_64-pc-windows-gnu aarch64-apple-darwin x86_64-apple-darwin; do cargo clippy -q --all-targets --target $c; done`
+- Lint, zéro remarque (clippy pedantic, voir Cargo.toml) sur les quatre cibles : les étapes clippy de
+  `outils/verifier.sh`. À la main, Linux et Windows : `cargo clippy -q --all-targets --target <cible>` ; les cibles
+  Mac (YARA-X compile du C, sans les outils d'Apple) demandent en plus `CC_<cible>=clang` et
+  `CFLAGS_<cible>=-ffreestanding -nostdlibinc -I$PWD/outils/mac-entetes` (`<cible>` avec des `_`, voir verifier.sh).
 - Mise en forme : `cargo fmt`, toujours avant un commit.
 - Tests Windows sous Wine (pas de PowerShell sous Wine ; le registre, lui, marche) :
   `WINEPREFIX=<dossier jetable> WINEDEBUG=-all CARGO_TARGET_X86_64_PC_WINDOWS_GNU_RUNNER=~/.local/share/Steam/compatibilitytools.d/GE-Proton11-9-x86_64/files/bin/wine cargo test --target x86_64-pc-windows-gnu`
