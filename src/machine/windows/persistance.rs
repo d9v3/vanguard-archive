@@ -126,7 +126,7 @@ pub(super) fn lancement_suspect(exe: &str, args: &str) -> Option<&'static str> {
     None
 }
 
-/// Les tâches planifiées hors \Microsoft\, lues par PowerShell : le planificateur ne se lit que par COM.
+/// Les tâches planifiées hors \Microsoft\, lues par PowerShell en secours du planificateur (`planificateur::taches`).
 const TACHES: &str = "try { Get-ScheduledTask | Where-Object { $_.State -ne 'Disabled' -and $_.TaskPath -notlike '\\Microsoft\\*' } | ForEach-Object { $t = $_; \
          $t.Actions | Where-Object { $_.Execute } | ForEach-Object { \"TCH|$($t.TaskPath)|$($t.TaskName)|$($_.Execute)|$($_.Arguments)\" } }; 'TCH_FIN' } catch {}";
 
@@ -408,17 +408,23 @@ fn lignes_demarrage() -> Option<Vec<String>> {
 }
 
 /// Ce qui se lance tout seul hors de Windows : tâches planifiées (hors \Microsoft\), clés Run et RunOnce,
-/// dossiers Démarrage. Clés et dossiers sont lus sans PowerShell ; lui ne lit plus que les tâches, et les dossiers
-/// Démarrage quand un raccourci ne se lit pas autrement.
+/// dossiers Démarrage. Tout est lu sans PowerShell (le planificateur par COM) ; lui ne sert plus qu'en secours :
+/// planificateur muet, ou raccourci du dossier Démarrage qui ne se lit pas autrement.
 pub(super) fn persistance() -> Vec<Constat> {
     let run = lignes_run();
     let demarrage = lignes_demarrage();
-    let sortie = ps(&if demarrage.is_some() {
-        TACHES.to_string()
-    } else {
-        format!("{TACHES}; {DEMARRAGE}")
-    });
-    let taches = section(sortie.as_deref(), "TCH");
+    let taches_com = super::planificateur::taches();
+    let script = match (taches_com.is_some(), demarrage.is_some()) {
+        (true, true) => None,
+        (true, false) => Some(DEMARRAGE.to_string()),
+        (false, true) => Some(TACHES.to_string()),
+        (false, false) => Some(format!("{TACHES}; {DEMARRAGE}")),
+    };
+    let sortie = script.and_then(|s| ps(&s));
+    let taches: Option<Vec<&str>> = match &taches_com {
+        Some(lignes) => Some(lignes.iter().map(String::as_str).collect()),
+        None => section(sortie.as_deref(), "TCH"),
+    };
     let demarrage: Option<Vec<&str>> = match &demarrage {
         Some(lignes) => Some(lignes.iter().map(String::as_str).collect()),
         None => section(sortie.as_deref(), "DEM"),
@@ -636,6 +642,15 @@ mod tests {
         let _ = lignes_run();
         let _ = lignes_demarrage();
         assert!(dossiers_demarrage().iter().all(|d| d.is_absolute()));
+    }
+
+    /// Sous Wine, ni le planificateur (GetTasks n'y est qu'une ébauche) ni PowerShell ne répondent : les tâches sont
+    /// « non lues », jamais comptées saines.
+    #[test]
+    fn taches_non_lues_sous_wine() {
+        if std::path::Path::new(r"C:\windows\system32\wineboot.exe").is_file() {
+            assert!(persistance().iter().any(|c| !c.verifie && c.categorie == "Persistance"));
+        }
     }
 
     #[test]

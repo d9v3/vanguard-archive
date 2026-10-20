@@ -14,8 +14,8 @@ use windows::Win32::System::Com::{
 };
 use windows::Win32::System::Ole::{SafeArrayGetDim, SafeArrayGetElement, SafeArrayGetLBound, SafeArrayGetUBound};
 use windows::Win32::System::Variant::{
-    VARENUM, VARIANT, VT_ARRAY, VT_BOOL, VT_BSTR, VT_I1, VT_I2, VT_I4, VT_I8, VT_INT, VT_UI1, VT_UI2, VT_UI4, VT_UI8,
-    VT_UINT, VariantClear,
+    VARENUM, VARIANT, VARIANT_0, VARIANT_0_0, VARIANT_0_0_0, VT_ARRAY, VT_BOOL, VT_BSTR, VT_I1, VT_I2, VT_I4, VT_I8,
+    VT_INT, VT_UI1, VT_UI2, VT_UI4, VT_UI8, VT_UINT, VariantClear,
 };
 use windows::Win32::System::Wmi::{
     IWbemLocator, WBEM_FLAG_FORWARD_ONLY, WBEM_FLAG_RETURN_IMMEDIATELY, WBEM_GENERIC_FLAG_TYPE, WBEM_INFINITE,
@@ -27,7 +27,7 @@ use windows::core::{BSTR, HSTRING, IUnknown, Interface};
 const RPC_C_AUTHN_WINNT: u32 = 10;
 const RPC_C_AUTHZ_NONE: u32 = 0;
 
-/// Le délai de `ps()` est de 60 s ; ici la moitié, puisque PowerShell prend le relais si WMI ne répond pas.
+/// Le délai de `ps()` est de 60 s ; ici la moitié, puisque PowerShell prend le relais si COM ne répond pas.
 const DELAI: Duration = Duration::from_secs(30);
 
 /// Plus d'éléments qu'aucune liste lue par Vanguard n'en a : une liste plus longue est tronquée, pas parcourue.
@@ -70,7 +70,6 @@ pub(crate) type Ligne = HashMap<String, Valeur>;
 /// édition de Windows sans ce composant), délai dépassé ; l'appelant passe alors par PowerShell ou dit « non
 /// vérifié ». Une liste vide est une vraie réponse, aucune instance : la classe a été trouvée.
 pub(crate) fn requete(espace: &str, classe: &str, condition: &str, champs: &[&str]) -> Option<Vec<Ligne>> {
-    let (envoi, reception) = mpsc::channel();
     // Tous les champs (`*`), lus ensuite un par un : un champ que cette version de Windows n'a pas devient
     // `Valeur::Nul`, au lieu de faire échouer toute la requête.
     let wql = if condition.is_empty() {
@@ -81,21 +80,52 @@ pub(crate) fn requete(espace: &str, classe: &str, condition: &str, champs: &[&st
     let (espace, classe) = (espace.to_string(), classe.to_string());
     let champs: Vec<String> = champs.iter().map(|c| (*c).to_string()).collect();
     let debut: String = wql.chars().take(240).collect();
+    com("WMI", &debut, move || dans_ce_fil(&espace, &classe, &wql, &champs))
+}
+
+/// Une lecture par COM dans un fil à elle, avec son propre appartement (multithread), arrêtée d'attendre après le
+/// délai. `None` si elle échoue (composant absent : rien au journal, PowerShell ou « non vérifié » suivent) ou ne
+/// répond pas à temps (noté au journal sous `nom`, avec `quoi`). Le fil d'une lecture bloquée est abandonné, pas tué :
+/// COM ne sait pas interrompre un appel en cours.
+pub(crate) fn com<T: Send + 'static>(
+    nom: &str,
+    quoi: &str,
+    lecture: impl FnOnce() -> windows::core::Result<T> + Send + 'static,
+) -> Option<T> {
+    let (envoi, reception) = mpsc::channel();
     std::thread::Builder::new()
-        .name("wmi".into())
+        .name("com".into())
         .spawn(move || {
-            let _ = envoi.send(dans_ce_fil(&espace, &classe, &wql, &champs));
+            // SAFETY : fil créé pour cette seule lecture ; l'appartement est rendu par `Appartement` à la sortie.
+            let resultat = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) }
+                .ok()
+                .and_then(|()| {
+                    let _appartement = Appartement;
+                    lecture()
+                });
+            let _ = envoi.send(resultat);
         })
         .ok()?;
-    match reception.recv_timeout(DELAI) {
-        Ok(Ok(lignes)) => Some(lignes),
-        // Classe ou espace absents sont le cas courant sous Wine et sur les éditions familiales : PowerShell ou
-        // « non vérifié » suivent, rien à noter au journal.
-        Ok(Err(_)) => None,
-        Err(_) => {
-            crate::journal::erreur("WMI", &format!("délai de {} s dépassé\n{debut}", DELAI.as_secs()));
-            None
-        }
+    if let Ok(resultat) = reception.recv_timeout(DELAI) {
+        resultat.ok()
+    } else {
+        crate::journal::erreur(nom, &format!("délai de {} s dépassé\n{quoi}", DELAI.as_secs()));
+        None
+    }
+}
+
+/// Un entier dans un VARIANT, pour les collections COM qui s'indexent ainsi (`get_Item`, à partir de 1).
+pub(crate) fn variant_entier(n: i32) -> VARIANT {
+    VARIANT {
+        Anonymous: VARIANT_0 {
+            Anonymous: std::mem::ManuallyDrop::new(VARIANT_0_0 {
+                vt: VT_I4,
+                wReserved1: 0,
+                wReserved2: 0,
+                wReserved3: 0,
+                Anonymous: VARIANT_0_0_0 { lVal: n },
+            }),
+        },
     }
 }
 
@@ -132,10 +162,7 @@ fn droits_d_appel<T: Interface>(objet: &T) {
 }
 
 fn dans_ce_fil(espace: &str, classe: &str, wql: &str, champs: &[String]) -> windows::core::Result<Vec<Ligne>> {
-    // SAFETY : fil créé pour cette seule requête ; l'appartement est rendu par `Appartement` à la sortie.
-    unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) }.ok()?;
-    let _appartement = Appartement;
-    // SAFETY : COM est initialisé dans ce fil ; WbemLocator est la classe du localisateur WMI de Windows.
+    // SAFETY : COM est initialisé dans ce fil (par `com`) ; WbemLocator est la classe du localisateur WMI de Windows.
     let localisateur: IWbemLocator = unsafe { CoCreateInstance(&WbemLocator, None, CLSCTX_INPROC_SERVER) }?;
     let vide = BSTR::new();
     // SAFETY : chaînes BSTR valides pendant l'appel ; utilisateur et mot de passe vides = le compte qui lance.
