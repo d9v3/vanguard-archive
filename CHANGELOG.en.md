@@ -22,12 +22,15 @@ repository (`git checkout v0.62.0`, for example), to be rebuilt if needed.
   An account that does not require a password is described as it is (“accepts an empty password”) and is
   fixed from Vanguard: a password becomes required, the current one does not change.
 - **macOS.** Automatic proxy discovery on; command folders open to all.
-- **Command guide: 980 commands** (38 more), mostly for security and troubleshooting: lynis, SUID programs, locked
+- **Command guide: 1,040 commands** (98 more), mostly for security and troubleshooting: lynis, SUID programs, locked
   accounts, ClamAV, gpg signatures, WireGuard, certificates, service exposure, needrestart, sbctl, dnf
   needs-restarting; on Windows, public or private network, shared folders, TPM chip, a program's signature, wiping
   free space, memory test; on macOS, what starts by itself, camera, microphone and screen access, a file's
-  fingerprint, traffic per program. The tldr-pages examples are also renewed by the monitoring and the monthly
-  check-up, without opening the guide.
+  fingerprint, traffic per program; on Omarchy, 60 more commands: firmware, keyrings and clock that block an update,
+  orphan packages, pacman's cache, FIDO2 key, SSH server and docker group to turn off, network and speed, sharing
+  with LocalSend, screen captures and text, brightness, boot screen, web apps, games and services to install,
+  factory reset. The tldr-pages examples are also renewed by the monitoring and the monthly check-up, without
+  opening the guide.
 - **Secrets in git projects.** Vanguard reads the history of the home folder's projects, where a password, API key
   or token written once stays, even when deleted later: keys recognized by their shape (AWS, GitHub, GitLab, Google,
   Stripe, Slack…), private keys, passwords in an address or in the code; gitleaks, when installed, adds its rules. No
@@ -66,6 +69,8 @@ repository (`git checkout v0.62.0`, for example), to be rebuilt if needed.
   current folder look like a “suspicious shortcut” (a false high alert, especially when run from the key); the last
   quick commands (notifications, df on a dead network volume…) have a time limit and no longer freeze the
   monitoring; the list of known keys no longer loses a note when two are written at once.
+- **Rescue key: the Omarchy installer** in the boot menu, next to Arch, Debian, Fedora and SystemRescue:
+  complete, no Internet needed, kept up to date like them and checked with the key that signs Omarchy's packages.
 - **For testing**: the program's PowerShell scripts parsed and replayed with pwsh at each check, in a sandbox
   closed to the system;
   Windows virtual machine test that counts skipped steps, compares each run with the previous one and

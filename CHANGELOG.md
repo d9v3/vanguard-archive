@@ -24,12 +24,15 @@ chaque version garde son étiquette dans le dépôt (`git checkout v0.62.0`, par
   (« accepte un mot de passe vide ») et se corrige depuis Vanguard : un mot de passe devient exigé, l'actuel ne
   change pas.
 - **macOS.** Découverte automatique du proxy allumée ; dossiers de commandes ouverts à tous.
-- **Guide des commandes : 980 commandes** (38 de plus), surtout pour la sécurité et le dépannage : lynis, programmes
+- **Guide des commandes : 1 040 commandes** (98 de plus), surtout pour la sécurité et le dépannage : lynis, programmes
   SUID, comptes bloqués, ClamAV, signatures gpg, WireGuard, certificats, exposition des services, needrestart, sbctl,
   dnf needs-restarting ; sous Windows, réseau public ou privé, dossiers partagés, puce TPM, signature d'un programme,
   effacement de l'espace libre, test de la mémoire ; sous macOS, ce qui se lance tout seul, accès à la caméra, au
-  micro et à l'écran, empreinte d'un fichier, trafic par programme. Les exemples de tldr-pages se renouvellent aussi
-  pendant la surveillance et l'entretien du mois, sans ouvrir le guide.
+  micro et à l'écran, empreinte d'un fichier, trafic par programme ; sous Omarchy, 60 commandes de plus : firmware,
+  trousseaux et heure qui bloquent une mise à jour, paquets orphelins, cache de pacman, clé FIDO2, serveur SSH et
+  groupe docker à couper, réseau et vitesse, partage par LocalSend, captures et texte de l'écran, luminosité, écran
+  de démarrage, applications web, jeux et services à installer, remise à neuf. Les exemples de tldr-pages se
+  renouvellent aussi pendant la surveillance et l'entretien du mois, sans ouvrir le guide.
 - **Secrets dans les projets git.** Vanguard relit l'historique des projets du dossier personnel, où un mot de passe,
   une clé d'API ou un jeton écrit un jour reste, même effacé ensuite : clés reconnues à leur forme (AWS, GitHub,
   GitLab, Google, Stripe, Slack…), clés privées, mots de passe dans une adresse ou dans le code ; gitleaks, s'il est
@@ -69,6 +72,8 @@ chaque version garde son étiquette dans le dépôt (`git checkout v0.62.0`, par
   du dossier courant pour un « raccourci suspect » (alerte élevée à tort, surtout lancé depuis la clé) ; les
   dernières commandes rapides (notifications, df sur un volume réseau mort…) ont un délai et ne figent plus la
   surveillance ; la liste des clés connues ne perd plus une note quand deux s'écrivent en même temps.
+- **Clé de secours : l'installateur d'Omarchy** dans le menu de démarrage, à côté d'Arch, Debian, Fedora et
+  SystemRescue : complet, sans Internet, tenu à jour comme eux et vérifié par la clé qui signe les paquets d'Omarchy.
 - **Pour les tests** : scripts PowerShell du programme analysés et rejoués avec pwsh à chaque vérification, dans
   un bac à sable fermé au système ; test de la machine virtuelle Windows qui compte les étapes sautées, compare chaque passe à la
   précédente et vérifie les réglages de la 0.79 ; scripts déposés depuis Linux et lancés par la VM
