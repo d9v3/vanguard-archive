@@ -67,6 +67,13 @@ repository (`git checkout v0.62.0`, for example), to be rebuilt if needed.
   found leads to “After an infection”, Internet cut first. Hourly monitoring warns when a program talks to a known
   command server. And the account's temporary folder is recognized wherever it is (a moved TEMP let a program
   started from there go unnoticed).
+- **Update from GitHub, without the key.** “Update Vanguard” takes the latest published version, and the main menu
+  announces it. Nothing is taken on trust: each version is signed with Ed25519 on the author's computer, and Vanguard
+  refuses a badly signed manifest, a version that is not newer, or a program whose size, fingerprint or version are
+  not the signed ones. Someone who took over the GitHub account could not get anything else installed. The programs
+  are published separately, the code staying private.
+- **HTTPS client in Rust**: lists, registries, leaks, tldr, speed test and blocklists without curl; redirects over
+  HTTPS only. The program grows by 2 to 3 MB.
 - **Read directly from the system**: connections, processes, rights and account, the traces' registry and event logs,
   without ss, tasklist, taskkill, whoami, pgrep, id or PowerShell; faster, and nothing depends on Windows' language.
   Without rights, the security log is reported unchecked (before, it passed as healthy without being read).

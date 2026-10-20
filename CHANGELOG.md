@@ -70,6 +70,13 @@ chaque version garde son étiquette dans le dépôt (`git checkout v0.62.0`, par
   serveur trouvé mène à « Après une infection », Internet coupé d'abord. La surveillance horaire prévient quand un
   programme parle à un serveur de commande connu. Et le dossier temporaire du compte est reconnu où qu'il soit (un
   TEMP déplacé laissait passer un programme lancé de là).
+- **Mise à jour depuis GitHub, sans la clé.** « Mettre Vanguard à jour » prend la dernière version publiée, et le
+  menu principal l'annonce. Rien n'est cru sur parole : chaque version est signée en Ed25519 sur l'ordinateur de
+  l'auteur, et Vanguard refuse un manifeste mal signé, une version qui n'est pas plus récente, ou un programme dont
+  la taille, l'empreinte ou la version ne sont pas celles signées. Qui prendrait le compte GitHub ne pourrait pas
+  faire installer autre chose. Les programmes sont publiés à part, le code restant privé.
+- **Client HTTPS en Rust** : listes, registres, fuites, tldr, débit et listes noires sans curl ; redirections en HTTPS
+  seulement. Le programme prend 2 à 3 Mo.
 - **Lu directement par le système** : connexions, processus, droits et compte, registre des traces et journaux
   d'événements, sans ss, tasklist, taskkill, whoami, pgrep, id ni PowerShell ; plus rapide, et rien ne dépend de la
   langue de Windows. Sans droits, le journal de sécurité est dit non vérifié (avant, il passait pour sain sans avoir
