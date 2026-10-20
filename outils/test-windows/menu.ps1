@@ -2,7 +2,8 @@
 # Le dossier « programme » (vanguard.exe, ce menu, test.ps1, version.txt) est remplacé à chaque déploiement depuis
 # Linux (outils/deployer.sh) ; les résultats de chaque passe vont dans « resultats » et y restent.
 # -Surveiller : lancé par la tâche planifiée (choix 6) ; teste en arrière-plan chaque nouvelle version déposée, une
-# seule fois, puis prévient par une notification.
+# seule fois, puis prévient par une notification. Avec le choix 7, lance aussi les scripts déposés depuis Linux dans
+# « a-lancer » (sans droits administrateur), pour que Claude fasse une passe sans qu'on ait à cliquer.
 param([switch]$Surveiller)
 
 $ErrorActionPreference = 'Continue'
@@ -18,6 +19,11 @@ $fichierVersion = Join-Path $programme 'version.txt'
 $versionTestee = Join-Path $resultats '.version-testee.txt'
 $enCours = Join-Path $resultats '.test-en-cours.txt'
 $historique = Join-Path $resultats 'historique.txt'
+$aLancer = Join-Path $racine 'a-lancer'
+# L'accord pour les scripts déposés vit dans ce Windows, hors du partage : écrit depuis Linux, il ne vaudrait rien,
+# puisque c'est justement Linux qui dépose les scripts.
+$local = Join-Path $env:LOCALAPPDATA 'vanguard-test'
+$permis = Join-Path $local 'scripts-de-linux-acceptes.txt'
 
 # version.txt : « vanguard X.Y.Z » puis l'empreinte du programme (une nouvelle compilation change l'empreinte).
 function Version-Deposee { if (Test-Path $fichierVersion) { (Get-Content $fichierVersion -Raw).Trim() } else { '' } }
@@ -87,7 +93,36 @@ function Derniere-Passe {
     if (Test-Path $historique) { (Get-Content $historique -Encoding UTF8 | Where-Object { $_ } | Select-Object -Last 1) } else { $null }
 }
 
+function Scripts-Acceptes { Test-Path -LiteralPath $permis }
+
+# Chaque script de « a-lancer », par ordre de nom : copié dans ce Windows puis retiré du partage, de sorte que ce qui
+# tourne est ce qui a été lu (pas un fichier remplacé en route), et lancé par le même PowerShell que ce menu. Ses
+# sorties et son code vont dans resultats\<date>_script-<nom>\, FINI.txt en dernier : Linux attend ce fichier.
+function Lancer-Scripts-Deposes {
+    if (-not (Scripts-Acceptes)) { return }
+    $scripts = @(Get-ChildItem -LiteralPath $aLancer -Filter '*.ps1' -File -ErrorAction SilentlyContinue | Sort-Object Name)
+    $powershell = (Get-Process -Id $PID).Path
+    foreach ($s in $scripts) {
+        $dossier = Join-Path $resultats ((Get-Date -Format 'yyyy-MM-dd_HH-mm-ss') + '_script-' + $s.BaseName)
+        New-Item -ItemType Directory -Force $dossier | Out-Null
+        $copie = Join-Path $local $s.Name
+        Copy-Item -LiteralPath $s.FullName $copie -Force
+        Remove-Item -LiteralPath $s.FullName -Force
+        Copy-Item -LiteralPath $copie $dossier
+        $debut = Get-Date
+        & $powershell -NoProfile -ExecutionPolicy Bypass -File $copie 2>&1 | Out-File -FilePath (Join-Path $dossier 'sortie.txt') -Encoding UTF8
+        $code = $LASTEXITCODE
+        Remove-Item -LiteralPath $copie -Force -ErrorAction SilentlyContinue
+        "fin $(Get-Date -Format 'HH:mm:ss'), code $code, $([int]((Get-Date) - $debut).TotalSeconds) s" |
+            Set-Content -LiteralPath (Join-Path $dossier 'FINI.txt') -Encoding UTF8
+        Notifier "Vanguard : script $($s.Name) terminé" "code $code"
+    }
+}
+
 if ($Surveiller) {
+    # Jamais pendant une passe : un script pourrait la fausser.
+    if (Test-En-Cours) { exit 0 }
+    Lancer-Scripts-Deposes
     if (-not (Version-Deposee) -or (Version-Deja-Testee) -or (Test-En-Cours)) { exit 0 }
     if (Lancer-Test @('-Auto', '-SansOuvrir')) {
         Notifier "Vanguard : $(Version-Courte) testée" ((Derniere-Passe) -replace '\s+->.*$', '')
@@ -95,7 +130,8 @@ if ($Surveiller) {
     exit 0
 }
 
-# Tâche planifiée du compte, sans droits administrateur : à l'ouverture de session puis toutes les 15 minutes.
+# Tâche planifiée du compte, sans droits administrateur : à l'ouverture de session puis toutes les 5 minutes (sans
+# rien à faire, elle s'arrête aussitôt ; 15 minutes faisaient trop attendre un script déposé).
 function Surveillance-Active { [bool](Get-ScheduledTask -TaskName $tache -ErrorAction SilentlyContinue) }
 function Basculer-Surveillance {
     if (Surveillance-Active) {
@@ -108,7 +144,7 @@ function Basculer-Surveillance {
         -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$(Join-Path $programme 'menu.ps1')`" -Surveiller"
     $declencheurs = @(
         (New-ScheduledTaskTrigger -AtLogOn -User $moi),
-        (New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -RepetitionInterval (New-TimeSpan -Minutes 15))
+        (New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -RepetitionInterval (New-TimeSpan -Minutes 5))
     )
     $reglages = New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
         -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Hours 3)
@@ -116,11 +152,30 @@ function Basculer-Surveillance {
     try {
         Register-ScheduledTask -TaskName $tache -Action $action -Trigger $declencheurs -Settings $reglages -Principal $principal `
             -Description 'Teste en arrière-plan chaque nouvelle version de Vanguard déposée depuis Linux, puis prévient.' -Force -ErrorAction Stop | Out-Null
-        Write-Host '  Test automatique activé : chaque nouvelle version sera testée seule (dans la minute, puis toutes les 15 minutes),' -ForegroundColor Green
+        Write-Host '  Test automatique activé : chaque nouvelle version sera testée seule (dans la minute, puis toutes les 5 minutes),' -ForegroundColor Green
         Write-Host '  sans rien ouvrir à l''écran ; une notification prévient à la fin.' -ForegroundColor Green
     } catch {
         Write-Host "  Impossible de créer la tâche planifiée : $($_.Exception.Message)" -ForegroundColor Red
     }
+}
+
+# Le partage s'écrit depuis Linux : accepter ses scripts, c'est laisser Linux lancer ce qu'il veut dans ce compte (sans
+# droits administrateur). À réserver à une machine de test, et dit tel quel avant l'accord.
+function Basculer-Scripts {
+    if (Scripts-Acceptes) {
+        Remove-Item -LiteralPath $permis -Force
+        Write-Host '  Scripts déposés depuis Linux : refusés désormais.' -ForegroundColor Yellow
+        return
+    }
+    Write-Host '  Tout script .ps1 posé dans VANGUARD-TEST\a-lancer (depuis Linux) sera lancé dans ce compte,' -ForegroundColor Yellow
+    Write-Host '  sans droits administrateur, dans les 5 minutes ; sa sortie va dans resultats. Le dossier partagé' -ForegroundColor Yellow
+    Write-Host '  s''écrit depuis Linux : à n''accepter que dans une machine virtuelle de test.' -ForegroundColor Yellow
+    if ((Read-Host '  Accepter ? [o/N]') -notmatch '^(o|oui|y)') { return }
+    New-Item -ItemType Directory -Force $local, $aLancer | Out-Null
+    Set-Content -LiteralPath $permis -Value (Get-Date -Format o)
+    Write-Host '  Scripts déposés depuis Linux : acceptés.' -ForegroundColor Green
+    # Ils passent par la tâche du test automatique : elle doit exister.
+    if (-not (Surveillance-Active)) { Basculer-Surveillance }
 }
 
 function Ouvrir-Vanguard {
@@ -152,6 +207,8 @@ while ($true) {
     Write-Host '   4  Voir le dernier rapport'
     Write-Host '   5  Ouvrir le dossier des résultats'
     Write-Host "   6  Tester seul chaque nouvelle version        $etatAuto"
+    $etatScripts = if (Scripts-Acceptes) { if ($auto) { 'ACCEPTÉS' } else { 'acceptés, mais 6 désactivé' } } else { 'refusés' }
+    Write-Host "   7  Lancer les scripts déposés depuis Linux    $etatScripts"
     Write-Host '   Q  Quitter'
     if (Test-Path $historique) {
         Write-Host ''
@@ -171,6 +228,7 @@ while ($true) {
         }
         '5' { Start-Process explorer.exe $resultats }
         '6' { Basculer-Surveillance; Pause-Menu }
+        '7' { Basculer-Scripts; Pause-Menu }
         'q' { exit 0 }
     }
 }

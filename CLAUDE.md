@@ -94,6 +94,9 @@ Réponses à l'utilisateur en français, claires, avec le pourquoi.
   `\\host.lan\Data` dans Windows ; `TESTER-VANGUARD.bat` ouvre le menu). Chaque passe y laisse son dossier dans
   `resultats/`, avec `historique.txt` et `dernier-rapport.html`, lisibles d'ici. Ne jamais lancer un `.exe` d'ici :
   binfmt le confie à Wine, qui crée un `~/.wine`.
+  Un script PowerShell à faire tourner dans la VM : `outils/vm-script.sh --attendre <script.ps1>` (sans droits
+  administrateur ; seulement si le menu des tests a accepté les scripts de Linux, choix 7). Les touches envoyées
+  d'ici (wtype, raccourcis de Hyprland) n'arrivent pas à Windows.
 - Tout seul au déploiement : la page de la version quand il en faut une (`outils/publier-version.sh` ; aperçu de
   ses notes : `--notes`) et celle du dépôt (`outils/github.py` applique `.github/depot.json` : description et
   dernière version publiée, lien du journal, sujets, options). Si les fonctions changent, réécrire la description

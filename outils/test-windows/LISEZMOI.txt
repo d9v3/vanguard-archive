@@ -9,16 +9,24 @@ Double-clic sur TESTER-VANGUARD.bat : un menu propose
   4  Voir le dernier rapport
   5  Ouvrir le dossier des résultats
   6  Tester seul chaque nouvelle version (activer / désactiver)
+  7  Lancer les scripts déposés depuis Linux (accepter / refuser)
 
 Avec le choix 6 activé, chaque nouvelle version déposée depuis Linux est testée
 toute seule, en arrière-plan, sans rien ouvrir à l'écran ; une notification
 prévient à la fin. Rien à faire de ton côté.
+
+Avec le choix 7 accepté, un script PowerShell posé dans a-lancer\ depuis Linux
+(outils/vm-script.sh) est lancé tout seul dans les 5 minutes, dans ce compte,
+sans droits administrateur ; sa sortie va dans resultats\. Le dossier partagé
+s'écrit depuis Linux : à n'accepter que dans une machine virtuelle de test.
+L'accord est gardé dans ce Windows, pas dans le dossier partagé.
 
 CE QU'IL Y A ICI
 ----------------
 programme\    vanguard.exe et les scripts de test. Remplacé à chaque mise à
               jour de Vanguard (outils/deployer.sh, côté Linux) : ne rien y
               mettre.
+a-lancer\     les scripts déposés depuis Linux qui attendent (choix 7).
 resultats\    une passe par dossier, nommée AAAA-MM-JJ_HH-MM-SS_vX.Y.Z (date et
               version testée), avec son rapport (rapport-test.html) et la
               sortie de chaque commande.

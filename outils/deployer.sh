@@ -212,7 +212,7 @@ if [[ -n ${VANGUARD_INTERMEDIAIRE:-} ]]; then
 elif [[ -n $(find "$EN_COURS" -mmin -180 2>/dev/null) ]]; then
   echo "VM Windows : un test y tourne (depuis $(date -r "$EN_COURS" +%H:%M)) : rien n'y est déposé cette fois."
 elif [[ -d $HOME/Windows && -f $WINDOWS ]]; then
-  mkdir -p "$VM/programme" "$VM/resultats"
+  mkdir -p "$VM/programme" "$VM/resultats" "$VM/a-lancer"
   cp -f "$WINDOWS" "$VM/programme/vanguard.exe"
   # Le lanceur de la clé aussi : test.ps1 l'essaie dans un dossier sans programme (Vanguard bloqué par Defender).
   cp -f outils/test-windows/test.ps1 outils/test-windows/menu.ps1 "outils/cle/Lancer Vanguard.bat" "$VM/programme/"
