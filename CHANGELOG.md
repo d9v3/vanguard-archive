@@ -63,9 +63,17 @@ chaque version garde son étiquette dans le dépôt (`git checkout v0.62.0`, par
   de Vanguard : processus avec l'empreinte SHA-256 de leur programme, connexions, ce qui se lance tout seul, bilan en
   JSON, comptes, journaux des 7 derniers jours, fichiers récents ; un LISEZMOI et un MANIFESTE que `sha256sum -c`
   vérifie. Lecture seule, rien n'est envoyé ; Vanguard prévient que le dossier contient des données personnelles.
-- **« Qui parle à Internet ? »** reconnaît les serveurs de commande de botnets (liste de Feodo Tracker, abuse.ch ;
-  indisponible ou trop vieille, c'est dit, jamais comptée comme vide), et le dossier temporaire du compte où qu'il
-  soit (un TEMP déplacé laissait passer un programme lancé de là).
+- **« Qui parle à Internet ? » reconnaît les serveurs de commande de botnets** : listes de Feodo Tracker et de
+  ThreatFox (abuse.ch), avec le nom du logiciel malveillant, clé abuse.ch facultative (indisponibles ou trop vieilles,
+  c'est dit, jamais comptées comme vides). La mémoire DNS aussi : un programme qui a demandé le nom d'un serveur de
+  commande connu se voit, même la connexion fermée. Les connexions des autres comptes sont comparées aussi ; un
+  serveur trouvé mène à « Après une infection », Internet coupé d'abord. La surveillance horaire prévient quand un
+  programme parle à un serveur de commande connu. Et le dossier temporaire du compte est reconnu où qu'il soit (un
+  TEMP déplacé laissait passer un programme lancé de là).
+- **Lu directement par le système** : connexions, processus, droits et compte, registre des traces et journaux
+  d'événements, sans ss, tasklist, taskkill, whoami, pgrep, id ni PowerShell ; plus rapide, et rien ne dépend de la
+  langue de Windows. Sans droits, le journal de sécurité est dit non vérifié (avant, il passait pour sain sans avoir
+  été lu).
 - **Nettoyage de Windows** : chemins écrits en entier, jamais le dossier courant quand une variable comme TEMP est
   vide ; la file d'impression se vide sans risque.
 - **Plus justes et plus sûrs.** Sous Windows, un compte sans dossier Démarrage ne fait plus prendre chaque fichier

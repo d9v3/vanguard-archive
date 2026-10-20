@@ -60,9 +60,16 @@ repository (`git checkout v0.62.0`, for example), to be rebuilt if needed.
   folder: processes with their program's SHA-256 fingerprint, connections, what starts by itself, the check as JSON,
   accounts, logs of the last 7 days, recent files; a README and a manifest that `sha256sum -c` checks. Read-only,
   nothing is sent; Vanguard warns that the folder holds personal data.
-- **“Who talks to the Internet?”** recognizes botnet command servers (Feodo Tracker's list, abuse.ch; when
-  unavailable or too old, it says so, never counts it as empty), and the account's temporary folder wherever it is (a
-  moved TEMP let a program started from there go unnoticed).
+- **“Who talks to the Internet?” recognizes botnet command servers**: Feodo Tracker and ThreatFox lists (abuse.ch),
+  with the malware's name, optional abuse.ch key (unavailable or too old: said, never counted as empty); the DNS
+  cache too: a program that asked for a known command
+  server's name shows up, even once the connection is closed. Other accounts' connections are compared too; a server
+  found leads to “After an infection”, Internet cut first. Hourly monitoring warns when a program talks to a known
+  command server. And the account's temporary folder is recognized wherever it is (a moved TEMP let a program
+  started from there go unnoticed).
+- **Read directly from the system**: connections, processes, rights and account, the traces' registry and event logs,
+  without ss, tasklist, taskkill, whoami, pgrep, id or PowerShell; faster, and nothing depends on Windows' language.
+  Without rights, the security log is reported unchecked (before, it passed as healthy without being read).
 - **Windows cleanup**: paths written in full, never the current folder when a variable such as TEMP is empty
  ; the print queue empties safely.
 - **More accurate and safer.** On Windows, an account without a Startup folder no longer makes every file in the
