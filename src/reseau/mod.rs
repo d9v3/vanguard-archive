@@ -10,6 +10,7 @@ pub mod nat;
 pub mod nmap;
 pub mod scan;
 pub mod surveillance;
+pub mod tableau;
 pub mod upnp;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -563,6 +564,59 @@ pub fn restaurer_base(sauvegarde: serde_json::Value) -> Result<Contenu, String> 
     base.absorber(autre);
     base.enregistrer(&chemins);
     Ok(contenu)
+}
+
+/// Un appareil de la base, tel que le tableau de bord de la surveillance le montre.
+pub struct FicheAppareil {
+    /// L'identifiant du réseau (MAC de la box, sinon « plage … ») : deux réseaux peuvent porter le même nom.
+    pub reseau: String,
+    /// Le nom du réseau, souvent celui du Wi-Fi, quand il est connu.
+    pub nom_reseau: Option<String>,
+    /// La clé de la fiche : l'adresse MAC, sinon l'adresse IP.
+    pub id: String,
+    pub ip: Ipv4Addr,
+    pub surnom: Option<String>,
+    /// Nom et fabricant, sans le surnom, montré à part.
+    pub description: String,
+    pub premier_vu: Option<String>,
+    pub dernier_vu: Option<String>,
+}
+
+/// Les appareils de la base (clé et copie locale fusionnées), en lecture seule : rien n'est réécrit.
+pub fn appareils_connus() -> Vec<FicheAppareil> {
+    let (base, _, _verrou) = Base::charger();
+    base.fiches_montrees()
+}
+
+impl Base {
+    fn fiches_montrees(&self) -> Vec<FicheAppareil> {
+        let fiche = |reseau: &str, nom_reseau: Option<&String>, id: &String, a: &AppareilConnu| FicheAppareil {
+            reseau: reseau.to_string(),
+            nom_reseau: nom_reseau.cloned(),
+            id: id.clone(),
+            ip: a.ip,
+            surnom: a.surnom.clone(),
+            description: titre_de([
+                None,
+                a.nom.as_deref(),
+                a.fabricant.as_deref().map(scan::fabricant_traduit),
+            ]),
+            premier_vu: a.premier_vu.clone(),
+            dernier_vu: a.dernier_vu.clone(),
+        };
+        let mut fiches: Vec<FicheAppareil> = self
+            .reseaux
+            .iter()
+            .flat_map(|(id_reseau, r)| {
+                r.appareils
+                    .iter()
+                    .map(move |(id, a)| fiche(id_reseau, r.nom.as_ref(), id, a))
+            })
+            .collect();
+        // Ancien format, sans carnet par réseau : les fiches restent montrées, sous un réseau sans nom.
+        fiches.extend(self.appareils.iter().map(|(id, a)| fiche("", None, id, a)));
+        fiches
+    }
 }
 
 /// Donne (ou retire, avec `None`) un surnom à un appareil, désigné par son IP ou son adresse MAC.

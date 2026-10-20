@@ -811,3 +811,32 @@ fn traces_collectees_et_manifeste_juste() {
     assert!(listes.contains(&"LISEZMOI.txt".to_string()));
     let _ = std::fs::remove_dir_all(&maison);
 }
+
+/// Le dossier de Vanguard dans un dossier personnel jetable, selon le système (voir `reseau::dossier_local`).
+fn dossier_vanguard(maison: &Path) -> PathBuf {
+    if cfg!(windows) {
+        maison.join("local").join("vanguard")
+    } else if cfg!(target_os = "macos") {
+        maison.join("Library").join("Application Support").join("vanguard")
+    } else {
+        maison.join("donnees").join("vanguard")
+    }
+}
+
+#[test]
+fn tableau_de_bord_sans_surveillance_explique() {
+    // Ni surveillance, ni historique, ni appareil : la page le dit et explique comment l'activer, sans navigateur.
+    let maison = maison_jetable();
+    let programme = Path::new(env!("CARGO_BIN_EXE_vanguard"));
+    for (langue, args, attendu) in [
+        ("fr", ["tableau", "--sans-ouvrir"], "vanguard surveillance on"),
+        ("en", ["dashboard", "--no-open"], "vanguard monitor on"),
+    ] {
+        let s = vanguard_dans(programme, &maison, langue, &args, "", 60);
+        assert_eq!(s.code, Some(0), "{}", s.erreurs);
+        let page = std::fs::read_to_string(dossier_vanguard(&maison).join("tableau.html")).unwrap();
+        assert!(page.contains(attendu), "{page}");
+        assert!(page.ends_with("</main></body></html>"));
+    }
+    let _ = std::fs::remove_dir_all(&maison);
+}

@@ -113,6 +113,14 @@ enum Commande {
         #[arg(value_parser = ["on", "off"])]
         etat: String,
     },
+    /// Tableau de bord de la surveillance dans le navigateur : son état, les alertes jour par jour, les nouveaux
+    /// appareils et les connexions suspectes. Page locale, rien n'est envoyé.
+    #[command(visible_alias = "dashboard")]
+    Tableau {
+        /// Écrire la page sans l'ouvrir (sans affichage graphique, par SSH).
+        #[arg(long, visible_alias = "no-open")]
+        sans_ouvrir: bool,
+    },
     /// Entretien du mois : une fois par mois, en silence, la note, les mises à jour en attente, la place à libérer et
     /// les problèmes nouveaux, en une notification ; rien n'est changé. Sans argument : ce qu'il dirait maintenant.
     #[command(visible_alias = "maintenance")]
@@ -790,6 +798,7 @@ enum Action {
     Appareil,
     Nommer,
     Surveillance,
+    Tableau,
     Connexion,
     ListesNoires,
     WifiCanaux,
@@ -916,6 +925,11 @@ const OUTILS: &[Outil] = &[
     Outil { action: Action::Surveillance, groupe: Some(Groupe::Reseau), lettre: "",
         titre: ["Surveillance toutes les heures", "Hourly monitoring"], precision: ["", ""],
         mots: "monitor surveiller notification" },
+    Outil { action: Action::Tableau, groupe: Some(Groupe::Reseau), lettre: "",
+        titre: ["Tableau de bord de la surveillance", "Monitoring dashboard"],
+        precision: ["alertes, nouveaux appareils", "alerts, new devices"],
+        mots: "tableau dashboard historique history alertes alerts nouveaux new appareils devices botnet \
+               connexions suspectes suspicious connections" },
     Outil { action: Action::Connexion, groupe: Some(Groupe::Reseau), lettre: "c",
         titre: ["Test de connexion pour le jeu", "Connection test for gaming"],
         precision: ["ping, gigue, débit, bufferbloat", "ping, jitter, speed, bufferbloat"],
@@ -1310,6 +1324,7 @@ async fn executer(s: &mut Session, action: Action) {
             nommer(&qui, &surnom);
         }
         Action::Surveillance => reseau::surveillance::activer(!reseau::surveillance::active()),
+        Action::Tableau => reseau::tableau::ouvrir(false),
         Action::Connexion => reseau::connexion::tester().await,
         Action::ListesNoires => reseau::listes_noires::verifier(),
         Action::WifiCanaux => reseau::canaux::analyser(),
@@ -1372,6 +1387,8 @@ const AIDES_EN: &[(&str, &str)] = &[
     ("reseau", "Network scan: devices, open ports, risks, changes since previous scans"),
     ("antivirus", "Malware scan: ClamAV (Linux, macOS) or Microsoft Defender (Windows)"),
     ("surveillance", "Turn hourly network monitoring on or off (notification for unknown devices)"),
+    ("tableau", "Monitoring dashboard in the browser: its state, the alerts day by day, the new devices and the \
+                 suspicious connections. Local page, nothing is sent"),
     ("entretien", "Monthly check-up: once a month, silently, the grade, waiting updates, space to free and new \
                    problems, in one notification; nothing is changed. Without argument: what it would say now"),
     ("maj", "Updates: system, programs, drivers and firmware checked at once, then installed with your consent"),
@@ -1466,6 +1483,7 @@ const OPTIONS_EN: &[(&str, &str, &str)] = &[
     ("logiciels", "recommandes", "Install the starter pack (browser, passwords, video, office, archives), after your \
                                   consent"),
     ("complet", "html", "Also open the HTML report in the browser"),
+    ("tableau", "sans_ouvrir", "Write the page without opening it (no graphical display, over SSH)"),
     ("complet", "texte", "Show the report as plain text (Markdown) in the terminal: no browser or graphical display \
                           needed"),
     ("reseau", "cible", "IP, CIDR network (10.0.0.0/24) or range (10.0.0.1-50). Default: your local network"),
@@ -1584,6 +1602,7 @@ async fn main() {
         }
         Some(Commande::Antivirus { complet, dossier }) => protection::antivirus::analyser(portee(dossier, complet)),
         Some(Commande::Surveillance { etat }) => reseau::surveillance::activer(etat == "on"),
+        Some(Commande::Tableau { sans_ouvrir }) => reseau::tableau::ouvrir(sans_ouvrir),
         Some(Commande::Surveiller) => reseau::surveillance::surveiller().await,
         Some(Commande::Entretien { etat }) => match etat {
             Some(e) => entretien::activer(e == "on"),

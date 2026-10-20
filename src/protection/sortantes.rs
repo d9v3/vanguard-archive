@@ -871,6 +871,12 @@ fn nouvelles_alertes<'a>(avant: &str, actuelles: &'a BTreeSet<String>) -> Vec<&'
     actuelles.iter().filter(|a| !deja.contains(a.as_str())).collect()
 }
 
+/// Les connexions vers un serveur de commande vues à la dernière passe de la surveillance, une par ligne : le
+/// tableau de bord les montre comme encore en cours.
+pub(crate) fn fichier_botnets() -> PathBuf {
+    crate::reseau::dossier_local().join("surveillance-botnets.txt")
+}
+
 /// Pour la surveillance horaire : les programmes qui parlent à un serveur de commande connu, en (titre, texte) de
 /// notification. Les listes se rafraîchissent au même rythme que pour l'écran (elles ne disent à personne ce qu'on a
 /// trouvé) ; sans elles, rien n'est dit ici : l'écran dit, lui, ce qui n'a pas pu être vérifié. Une connexion déjà
@@ -899,7 +905,7 @@ pub(crate) fn botnets_a_signaler() -> Vec<(String, String)> {
                 .map(|n| tr!("nom demandé : ", "name asked: ").to_string() + &n),
         );
     }
-    let fichier = crate::reseau::dossier_local().join("surveillance-botnets.txt");
+    let fichier = fichier_botnets();
     let avant = std::fs::read_to_string(&fichier).unwrap_or_default();
     let alertes = nouvelles_alertes(&avant, &actuelles)
         .into_iter()

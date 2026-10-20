@@ -8,7 +8,7 @@ use crate::reseau::Rapport;
 use crate::risk::{Niveau, note};
 use crate::{tr, trf, trp, trw, trwln};
 
-fn esc(s: &str) -> String {
+pub(crate) fn esc(s: &str) -> String {
     s.replace('&', "&amp;")
         .replace('<', "&lt;")
         .replace('>', "&gt;")
@@ -25,7 +25,7 @@ fn classe(n: Option<Niveau>) -> &'static str {
     }
 }
 
-fn badge(n: Option<Niveau>) -> String {
+pub(crate) fn badge(n: Option<Niveau>) -> String {
     format!(
         "<span class=\"badge {}\">{}</span>",
         classe(n),
@@ -40,7 +40,7 @@ fn carte_note(titre: &str, score: u32) -> String {
     )
 }
 
-const CSS: &str = r"
+pub(crate) const CSS: &str = r"
 :root{--bg:#f6f6f4;--carte:#fff;--texte:#1b1b1b;--doux:#666;--bord:#e2e2de;
 --ok:#1f8a4c;--info:#2a7bb5;--moyen:#b58900;--eleve:#d0611b;--critique:#c62828;color-scheme:light}
 @media (prefers-color-scheme:dark){:root:not([data-theme=light]){--bg:#000;--carte:#0d0d0d;--texte:#ececec;--doux:#9a9a9a;--bord:#222;
@@ -182,7 +182,7 @@ pub fn markdown(audit: Option<&Audit>, reseau: Option<&Rapport>) -> String {
 }
 
 /// Encodage base64, pour mettre une image dans la page elle-même (le rapport reste un seul fichier).
-fn base64(octets: &[u8]) -> String {
+pub(crate) fn base64(octets: &[u8]) -> String {
     const LETTRES: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut s = String::with_capacity(octets.len().div_ceil(3) * 4);
     for bloc in octets.chunks(3) {

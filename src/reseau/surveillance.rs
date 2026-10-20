@@ -7,6 +7,7 @@
 #[cfg(unix)]
 use std::process::Command;
 
+use crate::reseau::tableau::{self, Genre};
 use crate::reseau::{self, Options};
 use crate::risk::Niveau;
 use crate::ui::*;
@@ -89,6 +90,13 @@ pub(crate) fn notifier(titre: &str, corps: &str) {
         );
         let _ = crate::machine::windows::ps(&script);
     }
+}
+
+/// Une alerte de la surveillance : gardée au journal du tableau de bord, puis notifiée. Une notification disparaît
+/// en quelques secondes ; celle de la nuit se relit ainsi le matin (« vanguard tableau »).
+fn alerter(genre: Genre, titre: &str, texte: &str) {
+    tableau::noter_alerte(genre, titre, texte);
+    notifier(titre, texte);
 }
 
 /// Appelé par le planificateur : scan silencieux, puis notification s'il y a du nouveau.
@@ -197,7 +205,7 @@ fn veiller_machine() {
         .and_then(|t| serde_json::from_str(&t).ok());
     if let Some(avant) = &avant {
         for (titre, texte) in nouveautes_machine(avant, &apres) {
-            notifier(&titre, &texte);
+            alerter(Genre::Machine, &titre, &texte);
         }
     }
     if let Ok(texte) = serde_json::to_string(&apres) {
@@ -239,7 +247,8 @@ fn mac_changee(avant: &Passerelle, apres: &Passerelle) -> Option<(String, String
 /// précédent. Le changement est retenu seulement s'il n'y a pas d'alerte de partage (on garde l'ancienne référence).
 fn veiller_passerelle(r: &reseau::Rapport) {
     if let Some((boite, mac, autre)) = reseau::usurpation_arp(r) {
-        notifier(
+        alerter(
+            Genre::Passerelle,
             tr!("Vanguard : box usurpée ?", "Vanguard: router impersonated?"),
             &reseau::message_usurpation(boite, &mac, autre),
         );
@@ -250,7 +259,8 @@ fn veiller_passerelle(r: &reseau::Rapport) {
         .ok()
         .and_then(|t| serde_json::from_str(&t).ok());
     if let Some((ancienne, nouvelle)) = avant.as_ref().and_then(|a| mac_changee(a, &apres)) {
-        notifier(
+        alerter(
+            Genre::Passerelle,
             tr!(
                 "Vanguard : la box a changé d'adresse MAC",
                 "Vanguard: the router's MAC address changed"
@@ -276,9 +286,11 @@ pub async fn surveiller() {
 }
 
 async fn passe() {
+    tableau::noter_passe();
     veiller_machine();
     if let Some(fichiers) = crate::protection::integrite::changements_a_signaler() {
-        notifier(
+        alerter(
+            Genre::Fichiers,
             tr!(
                 "Vanguard : fichiers critiques modifiés",
                 "Vanguard: critical files changed"
@@ -287,10 +299,10 @@ async fn passe() {
         );
     }
     for (titre, texte) in crate::protection::telechargement::nouveaux_a_signaler() {
-        notifier(&titre, &texte);
+        alerter(Genre::Telechargement, &titre, &texte);
     }
     for (titre, texte) in crate::protection::sortantes::botnets_a_signaler() {
-        notifier(&titre, &texte);
+        alerter(Genre::Botnet, &titre, &texte);
     }
     let Ok(r) = reseau::executer(Options {
         silencieux: true,
@@ -311,7 +323,8 @@ async fn passe() {
                 .find(|h| h.ip == e.ip)
                 .map(reseau::Hote::titre)
                 .filter(|t| !t.is_empty());
-            notifier(
+            alerter(
+                Genre::Empoisonneur,
                 tr!(
                     "Vanguard : empoisonneur de noms sur le réseau",
                     "Vanguard: name poisoner on the network"
@@ -330,14 +343,16 @@ async fn passe() {
         } else {
             h.titre()
         };
-        notifier(
+        alerter(
+            Genre::Appareil,
             tr!("Nouvel appareil sur ton réseau", "New device on your network"),
             &format!("{} — {qui} {}", h.ip, h.mac.as_deref().unwrap_or("")),
         );
     }
     for h in r.hotes.iter().filter(|h| !h.nouvelle) {
         for p in h.ports.iter().filter(|p| p.nouveau && p.niveau >= Niveau::Eleve) {
-            notifier(
+            alerter(
+                Genre::Port,
                 &trf!("Port {} nouvellement ouvert", "Port {} newly opened", p.port),
                 &format!("{} ({}) : {} — {}", h.ip, h.titre(), p.service, p.conseil),
             );
