@@ -21,7 +21,7 @@ modification. Sur GitHub, `@claude` dans un ticket ou une demande de fusion le f
 | `src/langue.rs` | choix de la langue et macros de traduction |
 | `src/machine/mod.rs` | types communs, affichage, exécution parallèle des vérifications |
 | `src/machine/regles.rs` | registre des règles du bilan : chacune se déclare où elle est écrite (`inventory::submit!`), avec un identifiant stable (« LNX-PLT-001 ») ; `vanguard regles` les liste |
-| `src/machine/linux/plateforme.rs` | sécurité de la plateforme d'après fwupd (HSI), verrouillage du noyau, BPF, auditd : les premières règles du registre |
+| `src/machine/linux/plateforme.rs` | sécurité de la plateforme d'après fwupd (HSI), verrouillage du noyau, BPF, espaces de noms, auditd : les premières règles du registre |
 | `src/machine/linux/`, `src/machine/windows/`, `src/machine/macos/` | audit propre à chaque système, un fichier par thème |
 | `src/machine/dns.rs`, `certificats.rs`, `extensions.rs`, `partages.rs`, `sante.rs`, `wifi.rs`, `bluetooth.rs` | vérifications communes aux trois systèmes (partages.rs : partages de fichiers ouverts à tout le monde ; bluetooth.rs : ordinateur visible, appareils appairés depuis peu) |
 | `src/machine/unix.rs` | vérifications communes à Linux et macOS : fichiers secrets, sudo |

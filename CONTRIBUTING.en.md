@@ -21,7 +21,7 @@ turn on once with `/install-github-app`).
 | `src/langue.rs` | language choice and translation macros |
 | `src/machine/mod.rs` | shared types, display, parallel execution of the checks |
 | `src/machine/regles.rs` | registry of check rules: each one is declared where it is written (`inventory::submit!`), with a stable identifier (“LNX-PLT-001”); `vanguard rules` lists them |
-| `src/machine/linux/plateforme.rs` | platform security according to fwupd (HSI), kernel lockdown, BPF, auditd: the first rules of the registry |
+| `src/machine/linux/plateforme.rs` | platform security according to fwupd (HSI), kernel lockdown, BPF, user namespaces, auditd: the first rules of the registry |
 | `src/machine/linux/`, `src/machine/windows/`, `src/machine/macos/` | per-system audit, one file per topic |
 | `src/machine/dns.rs`, `certificats.rs`, `extensions.rs`, `partages.rs`, `sante.rs`, `wifi.rs`, `bluetooth.rs` | checks shared by the three systems (partages.rs: file shares open to everyone; bluetooth.rs: visible computer, recently paired devices) |
 | `src/machine/unix.rs` | checks shared by Linux and macOS: secret files, sudo |
