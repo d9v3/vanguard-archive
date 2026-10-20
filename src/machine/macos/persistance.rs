@@ -26,24 +26,23 @@ fn programme(plist: &Path) -> Lancement {
     let Ok(lu) = crate::plist::lire_fichier(plist) else {
         return Lancement::Rien;
     };
-    let reglages = match lu {
-        Some(r) => r,
-        None => {
-            if std::fs::read(plist).is_ok_and(|o| crate::plist::hostile(&o)) {
-                return Lancement::Hostile;
-            }
-            let secours = crate::commande::lancer(
-                std::process::Command::new("plutil")
-                    .args(["-convert", "xml1", "-o", "-"])
-                    .arg(plist),
-                10,
-            )
-            .and_then(|r| crate::plist::lire(r.sortie.as_bytes()));
-            match secours {
-                Some(r) => r,
-                None => return Lancement::Rien,
-            }
+    let reglages = if let Some(r) = lu {
+        r
+    } else {
+        if std::fs::read(plist).is_ok_and(|o| crate::plist::hostile(&o)) {
+            return Lancement::Hostile;
         }
+        let secours = crate::commande::lancer(
+            std::process::Command::new("plutil")
+                .args(["-convert", "xml1", "-o", "-"])
+                .arg(plist),
+            10,
+        )
+        .and_then(|r| crate::plist::lire(r.sortie.as_bytes()));
+        let Some(r) = secours else {
+            return Lancement::Rien;
+        };
+        r
     };
     match lire_programme(&reglages) {
         Some((p, a)) => Lancement::Programme(p, a),
