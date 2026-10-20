@@ -16,6 +16,7 @@ mod ecoute;
 mod evenements;
 mod exclusions;
 pub(crate) mod gestionnaire;
+pub(crate) mod hachage;
 pub(crate) mod installes;
 pub(crate) mod lecteurs;
 mod maj;

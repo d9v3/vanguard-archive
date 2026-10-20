@@ -133,7 +133,7 @@ fn empreinte_a_cote(fichier: &Path) -> Option<(Algo, String, PathBuf)> {
     })
 }
 
-/// L'empreinte du fichier, calculée par l'outil du système.
+/// L'empreinte du fichier, calculée par l'outil du système (BCrypt sous Windows, Get-FileHash en secours).
 pub(crate) fn calculer(fichier: &Path, algo: Algo) -> Result<String, String> {
     #[cfg(windows)]
     let sortie = {
@@ -143,9 +143,19 @@ pub(crate) fn calculer(fichier: &Path, algo: Algo) -> Result<String, String> {
             Algo::Sha256 => "SHA256",
             Algo::Sha512 => "SHA512",
         };
-        let chemin = crate::commande::ps_texte(&fichier.display().to_string());
-        crate::machine::windows::ps(&format!("(Get-FileHash -Algorithm {nom} -LiteralPath '{chemin}').Hash"))
-            .ok_or_else(|| tr!("Get-FileHash a échoué", "Get-FileHash failed").to_string())?
+        let octets = match algo {
+            Algo::Md5 => 16,
+            Algo::Sha1 => 20,
+            Algo::Sha256 => 32,
+            Algo::Sha512 => 64,
+        };
+        if let Some(e) = crate::machine::windows::hachage::empreinte(fichier, nom, octets) {
+            e
+        } else {
+            let chemin = crate::commande::ps_texte(&fichier.display().to_string());
+            crate::machine::windows::ps(&format!("(Get-FileHash -Algorithm {nom} -LiteralPath '{chemin}').Hash"))
+                .ok_or_else(|| tr!("Get-FileHash a échoué", "Get-FileHash failed").to_string())?
+        }
     };
     #[cfg(unix)]
     let sortie = {
