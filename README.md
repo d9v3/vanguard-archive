@@ -285,8 +285,8 @@ ne les ayant pas vérifiées.
   empreinte seulement) ; fuites d'adresse courriel, après ton accord (l'adresse est envoyée au service).
 - Qui parle à Internet ? : les connexions en cours de chaque programme, avec le nom du serveur ; un programme lancé
   depuis un dossier temporaire ou les Téléchargements, un port de logiciel d'accès à distance, un serveur sans nom ou
-  un serveur de commande de botnet connu (liste de Feodo Tracker, abuse.ch) sont signalés. Lecture seule : rien n'est
-  coupé.
+  un serveur de commande de botnet connu (listes de Feodo Tracker et de ThreatFox, abuse.ch ; une clé gratuite
+  d'abuse.ch, facultative, ajoute l'accès officiel de ThreatFox) sont signalés. Lecture seule : rien n'est coupé.
 - Quelqu'un contrôle mon ordi ? : l'arnaque au faux technicien (« votre ordinateur est infecté ») fait installer un
   logiciel de prise de contrôle à distance. Vanguard cherche AnyDesk, TeamViewer, RustDesk, Assistance rapide,
   Splashtop, UltraViewer… installés (et depuis quand), lancés au démarrage, en cours d'exécution ou simplement posés

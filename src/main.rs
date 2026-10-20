@@ -1129,7 +1129,7 @@ impl Action {
     /// Après l'outil, attendre Entrée avant de revenir au menu ? Pas pour ceux qui ont leurs propres écrans et se
     /// quittent par Échap (le guide, le dépannage) : on y reviendrait deux fois.
     fn attendre_apres(self) -> bool {
-        !matches!(self, Action::Guide | Action::Depanner)
+        !matches!(self, Action::Guide | Action::Depanner | Action::QuiParle)
     }
 }
 
@@ -1318,7 +1318,7 @@ async fn executer(s: &mut Session, action: Action) {
         }
         Action::MotsDePasse => protection::fuites::verifier(),
         Action::Courriel => protection::fuites::verifier_courriel(),
-        Action::QuiParle => protection::sortantes::afficher(),
+        Action::QuiParle => protection::sortantes::menu(),
         Action::CameraMicro => protection::camera::afficher_tout(),
         Action::Distance => protection::distance::menu(),
         Action::Lien => protection::lien::verifier(None),

@@ -6,7 +6,8 @@
 //! ni bloqué.
 
 use std::collections::{BTreeSet, HashMap};
-use std::net::IpAddr;
+use std::net::{IpAddr, SocketAddr};
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use crate::risk::Niveau;
@@ -421,10 +422,31 @@ fn qui(nom: &str) -> String {
         .unwrap_or(domaine)
 }
 
-/// Les serveurs de commande de botnets (Feodo Tracker, abuse.ch, CC0) : une adresse IP par ligne, lignes « # » de
-/// commentaire. `None` pour tout autre texte : la page d'un portail Wi-Fi (hôtel, gare) arrive à la place de la liste
-/// sans erreur, et ne doit pas passer pour une liste vide, donc vérifiée. Fonction pure, testée sur un texte inventé (le
-/// conteneur ne peut pas joindre abuse.ch).
+/// Les serveurs de commande de botnets connus, des deux listes d'abuse.ch (CC0) : Feodo Tracker donne des adresses,
+/// ThreatFox des adresses avec leur port et le nom du logiciel malveillant.
+#[derive(Debug, Default)]
+struct Botnets {
+    feodo: BTreeSet<IpAddr>,
+    threatfox: HashMap<(IpAddr, u16), String>,
+}
+
+impl Botnets {
+    /// Le serveur d'une connexion tel qu'il sera montré, s'il est sur une des listes. Une adresse IPv4 vue par une
+    /// prise IPv6 (« ::ffff:192.0.2.1 ») est comparée sous sa forme IPv4, celle des listes.
+    fn serveur(&self, c: &Connexion) -> Option<String> {
+        let ip = c.distante.to_canonical();
+        let adresse = SocketAddr::new(ip, c.port);
+        match self.threatfox.get(&(ip, c.port)) {
+            Some(famille) if famille.is_empty() => Some(format!("{adresse} (ThreatFox)")),
+            Some(famille) => Some(format!("{adresse} ({famille}, ThreatFox)")),
+            None => self.feodo.contains(&ip).then(|| format!("{ip} (Feodo Tracker)")),
+        }
+    }
+}
+
+/// La liste de Feodo Tracker : une adresse IP par ligne, lignes « # » de commentaire. `None` pour tout autre texte :
+/// la page d'un portail Wi-Fi (hôtel, gare) arrive à la place de la liste sans erreur, et ne doit pas passer pour une
+/// liste vide, donc vérifiée. Fonction pure, testée sur un texte inventé (le conteneur ne peut pas joindre abuse.ch).
 fn analyser_feodo(texte: &str) -> Option<BTreeSet<IpAddr>> {
     let lignes: Vec<&str> = texte.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
     // abuse.ch ouvre toujours ses listes par un en-tête en commentaire.
@@ -438,66 +460,316 @@ fn analyser_feodo(texte: &str) -> Option<BTreeSet<IpAddr>> {
         .collect()
 }
 
-/// La liste des serveurs de botnets (Feodo Tracker), téléchargée et gardée comme celles d'URLhaus (12 h fraîche, une
-/// semaine au plus). La télécharger ne dit à personne ce qu'on a trouvé : on prend la liste entière. `Err` : liste
-/// indisponible (hors ligne, téléchargement raté, trop vieille) — on ne conclut jamais que rien ne parle à un botnet.
-fn botnets() -> Result<BTreeSet<IpAddr>, String> {
+/// En dessous, ThreatFox lui-même doute (50 : signalement pas encore confirmé) : une fausse alerte élevée ferait
+/// couper Internet pour rien.
+const THREATFOX_CONFIANCE: u8 = 75;
+
+/// La liste de ThreatFox, export CSV « ip:port » des derniers mois : (adresse, port) → nom du logiciel malveillant,
+/// prêt à montrer. Seuls les serveurs de commande (« botnet_cc ») assez sûrs ; les serveurs de téléchargement
+/// (« payload_delivery ») n'ont pas leur place parmi les serveurs de commande. `None` pour tout autre texte (portail
+/// Wi-Fi, ligne illisible), comme pour Feodo Tracker.
+fn analyser_threatfox(texte: &str) -> Option<HashMap<(IpAddr, u16), String>> {
+    let lignes: Vec<&str> = texte.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
+    if !lignes.first()?.starts_with('#') {
+        return None;
+    }
+    let mut serveurs = HashMap::new();
+    for ligne in lignes.into_iter().filter(|l| !l.starts_with('#')) {
+        // « "2026-10-20 13:46:40", "1975828", "192.0.2.25:6662", "ip:port", "botnet_cc", … » : les champs libres
+        // (références, étiquettes, auteur) viennent après ceux qu'on lit.
+        let champs: Vec<&str> = ligne.strip_prefix('"')?.strip_suffix('"')?.split("\", \"").collect();
+        let [_, _, valeur, "ip:port", menace, _, _, famille, _, confiance, ..] = champs.as_slice() else {
+            return None;
+        };
+        garder_threatfox(
+            &mut serveurs,
+            valeur.parse().ok()?,
+            menace,
+            famille,
+            confiance.parse().ok()?,
+        );
+    }
+    Some(serveurs)
+}
+
+/// Un serveur de ThreatFox gardé s'il est un serveur de commande assez sûr.
+fn garder_threatfox(
+    serveurs: &mut HashMap<(IpAddr, u16), String>,
+    adresse: SocketAddr,
+    menace: &str,
+    famille: &str,
+    confiance: u64,
+) {
+    if menace == "botnet_cc" && confiance >= u64::from(THREATFOX_CONFIANCE) {
+        // N'importe qui signale à ThreatFox : le nom est montré tel quel seulement s'il est inoffensif, et court.
+        let famille: String = affichable(famille).chars().take(40).collect();
+        serveurs.insert((adresse.ip().to_canonical(), adresse.port()), famille);
+    }
+}
+
+/// La réponse de l'API de ThreatFox (avec une clé) : les signalements des 7 derniers jours, tous genres confondus, en
+/// JSON. Mêmes règles que l'export ; `None` pour une réponse qui n'en est pas une (portail Wi-Fi, refus).
+fn analyser_threatfox_api(texte: &str) -> Option<HashMap<(IpAddr, u16), String>> {
+    let reponse: serde_json::Value = serde_json::from_str(texte).ok()?;
+    let mut serveurs = HashMap::new();
+    match reponse["query_status"].as_str()? {
+        "no_result" => return Some(serveurs),
+        "ok" => {}
+        _ => return None,
+    }
+    for ioc in reponse["data"].as_array()? {
+        if ioc["ioc_type"] != "ip:port" {
+            continue;
+        }
+        garder_threatfox(
+            &mut serveurs,
+            ioc["ioc"].as_str()?.parse().ok()?,
+            ioc["threat_type"].as_str()?,
+            ioc["malware_printable"].as_str().unwrap_or_default(),
+            ioc["confidence_level"].as_u64()?,
+        );
+    }
+    Some(serveurs)
+}
+
+/// Avec une clé, ThreatFox permet de redemander ses listes toutes les 5 minutes : un serveur de commande change
+/// d'adresse en quelques jours. Les listes publiques, sans compte, restent à 12 heures (`lien::URLHAUS_FRAICHE`).
+const THREATFOX_CLE_FRAICHE: Duration = Duration::from_mins(5);
+
+/// Une liste d'abuse.ch, téléchargée et gardée (`fraiche` sans être redemandée, une semaine au plus). La télécharger ne
+/// dit à personne ce qu'on a trouvé : on prend la liste entière. `options` : ce que curl reçoit en plus (la clé de
+/// ThreatFox). `Err` : la raison, à montrer.
+fn liste_botnets<T>(
+    nom: &str,
+    (sous_dossier, adresse, fichier): (&str, &str, &str),
+    (options, fraiche): (&[std::ffi::OsString], Duration),
+    analyser: fn(&str) -> Option<T>,
+) -> Result<T, String> {
     use crate::protection::lien;
-    let (texte, age) = lien::liste_abuse_ch(
-        "feodo",
-        "https://feodotracker.abuse.ch/downloads/ipblocklist_recommended.txt",
-        "botnets.txt",
-    )
-    .ok_or_else(|| {
-        tr!(
-            "liste des botnets pas vérifiée (pas d'Internet, ou curl absent)",
-            "botnet list not checked (no Internet, or curl missing)"
-        )
-        .to_string()
+    let (texte, age) = lien::liste_abuse_ch(sous_dossier, (adresse, options), fichier, fraiche).ok_or_else(|| {
+        if options.is_empty() {
+            trf!(
+                "liste de {nom} pas vérifiée (pas d'Internet, ou curl absent)",
+                "{nom} list not checked (no Internet, or curl missing)"
+            )
+        } else {
+            trf!(
+                "liste de {nom} pas vérifiée (pas d'Internet, curl absent, ou clé refusée : donne-la de nouveau)",
+                "{nom} list not checked (no Internet, curl missing, or key refused: give it again)"
+            )
+        }
     })?;
     if age > lien::URLHAUS_TROP_VIEILLE {
-        return Err(tr!(
-            "liste des botnets trop vieille pour servir : rafraîchissement impossible",
-            "botnet list too old to use: could not refresh it"
-        )
-        .to_string());
+        return Err(trf!(
+            "liste de {nom} trop vieille pour servir : rafraîchissement impossible",
+            "{nom} list too old to use: could not refresh it"
+        ));
     }
-    analyser_feodo(&texte).ok_or_else(|| {
-        tr!(
-            "liste des botnets illisible (page d'un portail Wi-Fi ?) : pas vérifiée",
-            "botnet list unreadable (a Wi-Fi portal page?): not checked"
+    analyser(&texte).ok_or_else(|| {
+        trf!(
+            "liste de {nom} illisible (page d'un portail Wi-Fi ?) : pas vérifiée",
+            "{nom} list unreadable (a Wi-Fi portal page?): not checked"
         )
-        .to_string()
     })
+}
+
+/// Les serveurs de botnets des listes d'abuse.ch, téléchargées en même temps, et ce qui n'a pas pu être vérifié. Une
+/// liste indisponible (hors ligne, téléchargement raté, trop vieille) est dite : on ne conclut jamais que rien ne parle
+/// à un botnet, et les autres servent quand même. Avec une clé, l'API de ThreatFox s'ajoute à son export public : elle
+/// ne remonte que 7 jours, l'export des mois.
+fn botnets() -> (Botnets, Vec<String>) {
+    let entete = fichier_cle();
+    let avec_cle = entete.is_file();
+    let (feodo, threatfox, api) = std::thread::scope(|s| {
+        let feodo = s.spawn(|| {
+            liste_botnets(
+                "Feodo Tracker",
+                (
+                    "feodo",
+                    "https://feodotracker.abuse.ch/downloads/ipblocklist_recommended.txt",
+                    "botnets.txt",
+                ),
+                (&[], crate::protection::lien::URLHAUS_FRAICHE),
+                analyser_feodo,
+            )
+        });
+        let api = s.spawn(|| {
+            // La clé est lue par curl dans son fichier : jamais dans la liste des processus.
+            let mut cle = std::ffi::OsString::from("@");
+            cle.push(&entete);
+            let options = ["-H".into(), cle, "-d".into(), r#"{"query":"get_iocs","days":7}"#.into()];
+            avec_cle.then(|| {
+                liste_botnets(
+                    tr!("ThreatFox (ta clé)", "ThreatFox (your key)"),
+                    ("threatfox", "https://threatfox-api.abuse.ch/api/v1/", FICHIER_API),
+                    (&options, THREATFOX_CLE_FRAICHE),
+                    analyser_threatfox_api,
+                )
+            })
+        });
+        let threatfox = liste_botnets(
+            "ThreatFox",
+            (
+                "threatfox",
+                "https://threatfox.abuse.ch/export/csv/ip-port/recent/",
+                "ip-port.csv",
+            ),
+            (&[], crate::protection::lien::URLHAUS_FRAICHE),
+            analyser_threatfox,
+        );
+        let pas_verifiee = |nom| trf!("liste de {nom} pas vérifiée", "{nom} list not checked");
+        (
+            feodo.join().unwrap_or_else(|_| Err(pas_verifiee("Feodo Tracker"))),
+            threatfox,
+            api.join().unwrap_or_else(|_| Some(Err(pas_verifiee("ThreatFox")))),
+        )
+    });
+    let mut botnets = Botnets::default();
+    let mut absentes = Vec::new();
+    match feodo {
+        Ok(liste) => botnets.feodo = liste,
+        Err(raison) => absentes.push(raison),
+    }
+    for liste in [Some(threatfox), api].into_iter().flatten() {
+        match liste {
+            Ok(liste) => botnets.threatfox.extend(liste),
+            Err(raison) => absentes.push(raison),
+        }
+    }
+    (botnets, absentes)
+}
+
+// ───────────────────────────── La clé de ThreatFox ─────────────────────────────
+
+/// La réponse de l'API, gardée à côté de la clé : effacée quand la clé change, pour que la nouvelle serve aussitôt.
+const FICHIER_API: &str = "api.json";
+
+/// La clé de ThreatFox, sur cet ordinateur seulement (le dossier de Vanguard du compte, jamais la clé USB), sous la
+/// forme de l'en-tête que curl lit lui-même (« -H @fichier »).
+fn fichier_cle() -> PathBuf {
+    crate::reseau::dossier_local().join("threatfox").join("cle-entete")
+}
+
+/// Une clé d'abuse.ch telle qu'elle se copie : lettres et chiffres seulement. Un retour à la ligne glissé dedans
+/// ajouterait un en-tête de plus à la demande.
+fn cle_valide(cle: &str) -> bool {
+    (20..=128).contains(&cle.len()) && cle.bytes().all(|b| b.is_ascii_alphanumeric())
+}
+
+/// Garde la clé, lisible par ce compte seul. Le fichier est recréé : un ancien, plus ouvert, ne garde pas ses droits.
+fn enregistrer_cle(cle: &str) -> std::io::Result<()> {
+    use std::io::Write;
+    let fichier = fichier_cle();
+    if let Some(dossier) = fichier.parent() {
+        std::fs::create_dir_all(dossier)?;
+    }
+    oublier_cle();
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+    options
+        .open(&fichier)?
+        .write_all(format!("Auth-Key: {cle}\n").as_bytes())
+}
+
+/// Retire la clé et ce qu'elle a téléchargé.
+fn oublier_cle() {
+    let fichier = fichier_cle();
+    let _ = std::fs::remove_file(&fichier);
+    if let Some(dossier) = fichier.parent() {
+        let _ = std::fs::remove_file(dossier.join(FICHIER_API));
+    }
+}
+
+/// Donner une clé : où la trouver, puis la clé collée.
+fn donner_cle() {
+    println!();
+    for ligne in envelopper(
+        tr!(
+            "Une clé gratuite d'abuse.ch ajoute les serveurs signalés à ThreatFox ces 7 derniers jours, par son accès officiel. Crée un compte sur https://auth.abuse.ch/, puis copie ta clé (« Auth-Key »). Elle reste sur cet ordinateur, jamais sur la clé USB.",
+            "A free abuse.ch key adds the servers reported to ThreatFox over the last 7 days, through its official access. Create an account at https://auth.abuse.ch/, then copy your key (“Auth-Key”). It stays on this computer, never on the USB key."
+        ),
+        LARGEUR - 2,
+    ) {
+        println!("  {ligne}");
+    }
+    let cle = demander(tr!("  Clé (Entrée pour annuler) : ", "  Key (Enter to cancel): "));
+    if cle.is_empty() {
+        return;
+    }
+    if !cle_valide(&cle) {
+        trp!(
+            "  ✖ Clé illisible : seulement des lettres et des chiffres, sans espace.",
+            "  ✖ Unreadable key: letters and digits only, no space."
+        );
+        return;
+    }
+    match enregistrer_cle(&cle) {
+        Ok(()) => trp!(
+            "  {VERT}✔{RESET} Clé gardée : elle sert dès la prochaine ouverture de cet écran.",
+            "  {VERT}✔{RESET} Key saved: it is used from the next time this screen opens."
+        ),
+        Err(e) => trp!("  ✖ Clé pas gardée : {e}.", "  ✖ Key not saved: {e}."),
+    }
+}
+
+/// Depuis le menu : l'écran, puis Entrée pour revenir, ou C pour donner ou retirer la clé de ThreatFox. Le retour au
+/// menu se demande ici, pas après : une seule pause.
+pub fn menu() {
+    afficher();
+    loop {
+        let reponse = if fichier_cle().is_file() {
+            demander(&trf!(
+                "\n{GRIS}Entrée pour revenir au menu, C pour retirer ta clé ThreatFox…{RESET} ",
+                "\n{GRIS}Enter to go back to the menu, C to remove your ThreatFox key…{RESET} "
+            ))
+        } else {
+            demander(&trf!(
+                "\n{GRIS}Entrée pour revenir au menu, C pour donner une clé ThreatFox (facultative)…{RESET} ",
+                "\n{GRIS}Enter to go back to the menu, C to give a ThreatFox key (optional)…{RESET} "
+            ))
+        };
+        if !reponse.eq_ignore_ascii_case("c") {
+            return;
+        }
+        if fichier_cle().is_file() {
+            oublier_cle();
+            trp!(
+                "  {VERT}✔{RESET} Clé ThreatFox retirée de cet ordinateur.",
+                "  {VERT}✔{RESET} ThreatFox key removed from this computer."
+            );
+        } else {
+            donner_cle();
+        }
+    }
 }
 
 /// Ce qui mérite l'attention dans les connexions d'un programme : (gravité, texte). `image` : celle d'une AppImage
 /// (variable APPIMAGE), jugée à la place de son point de montage dans /tmp. `botnets` : les serveurs de commande de
-/// botnets connus (vide quand la liste n'a pas pu être vérifiée ; l'absence est alors dite ailleurs, jamais ici).
+/// botnets connus (sans une liste qui n'a pas pu être vérifiée ; l'absence est alors dite ailleurs, jamais ici).
 fn signes(
     chemin: Option<&str>,
     connexions: &[(&Connexion, Option<&String>)],
     montages: &str,
     image: Option<&str>,
-    botnets: &BTreeSet<IpAddr>,
+    botnets: &Botnets,
 ) -> Vec<(Niveau, String)> {
     let mut signes = Vec::new();
     // Un serveur de commande de botnet connu passe avant tout le reste : c'est le signe le plus grave.
     let vers_botnet: Vec<String> = connexions
         .iter()
-        .map(|(c, _)| c.distante)
-        .filter(|ip| botnets.contains(ip))
+        .filter_map(|(c, _)| botnets.serveur(c))
         .collect::<BTreeSet<_>>()
-        .iter()
-        .map(IpAddr::to_string)
+        .into_iter()
         .collect();
     if !vers_botnet.is_empty() {
         let adresses = resume(&vers_botnet, 4, ", ");
         signes.push((
             Niveau::Eleve,
             trf!(
-                "Parle à un serveur de commande de botnet connu (Feodo Tracker, abuse.ch) : {adresses}.",
-                "Talks to a known botnet command server (Feodo Tracker, abuse.ch): {adresses}."
+                "Parle à un serveur de commande de botnet connu (listes d'abuse.ch) : {adresses}.",
+                "Talks to a known botnet command server (abuse.ch lists): {adresses}."
             ),
         ));
     }
@@ -693,11 +965,9 @@ pub fn afficher() {
     } else {
         String::new()
     };
-    // La liste des serveurs de botnets, une fois pour toutes les connexions. Indisponible : on le dira plus bas, et
-    // aucune connexion ne sera dédouanée pour autant (ensemble vide).
-    let liste_botnets = botnets();
-    let aucun_botnet = BTreeSet::new();
-    let botnets = liste_botnets.as_ref().unwrap_or(&aucun_botnet);
+    // Les listes des serveurs de botnets, une fois pour toutes les connexions. Une liste indisponible : on le dira
+    // plus bas, et aucune connexion ne sera dédouanée pour autant.
+    let (botnets, listes_absentes) = botnets();
 
     // Regroupées par programme ; celles des autres comptes à part.
     let mut groupes: Vec<Groupe> = Vec::new();
@@ -731,7 +1001,7 @@ pub fn afficher() {
                 .and_then(|_| g.liste.iter().find_map(|(c, _)| c.pid))
                 .and_then(|pid| std::fs::read(format!("/proc/{pid}/environ")).ok())
                 .and_then(|e| image_appimage(&e));
-            let signes = signes(g.chemin.as_deref(), &g.liste, &montages, image.as_deref(), botnets);
+            let signes = signes(g.chemin.as_deref(), &g.liste, &montages, image.as_deref(), &botnets);
             Programme {
                 pire: signes.iter().map(|(n, _)| *n).filter(|n| *n > Niveau::Info).max(),
                 nom: g.programme.clone().unwrap_or_default(),
@@ -812,7 +1082,7 @@ pub fn afficher() {
         connexions.len()
     );
     // Ce qui n'a pas pu être vérifié est dit, jamais compté comme sain.
-    if let Err(raison) = &liste_botnets {
+    for raison in &listes_absentes {
         afficher_aligne(&format!("  {GRIS}ℹ{RESET} "), raison, 4, GRIS);
     }
     if !a_regarder.is_empty() {
@@ -1000,7 +1270,7 @@ mod tests {
                 &[(&firefox, Some(&nom))],
                 "",
                 None,
-                &BTreeSet::new()
+                &Botnets::default()
             ),
             Vec::new()
         );
@@ -1009,7 +1279,13 @@ mod tests {
             port: 4444,
             ..firefox.clone()
         };
-        let s = signes(piege.chemin.as_deref(), &[(&piege, None)], "", None, &BTreeSet::new());
+        let s = signes(
+            piege.chemin.as_deref(),
+            &[(&piege, None)],
+            "",
+            None,
+            &Botnets::default(),
+        );
         let niveaux: Vec<Niveau> = s.iter().map(|(n, _)| *n).collect();
         assert_eq!(niveaux, [Niveau::Eleve, Niveau::Eleve, Niveau::Eleve, Niveau::Info]);
         // Un jeu en UDP sur un port quelconque : rien à dire.
@@ -1019,12 +1295,25 @@ mod tests {
             ..firefox.clone()
         };
         assert_eq!(
-            signes(jeu.chemin.as_deref(), &[(&jeu, Some(&nom))], "", None, &BTreeSet::new()),
+            signes(
+                jeu.chemin.as_deref(),
+                &[(&jeu, Some(&nom))],
+                "",
+                None,
+                &Botnets::default()
+            ),
             Vec::new()
         );
         let tcp = Connexion { port: 61234, ..firefox };
         assert_eq!(
-            signes(tcp.chemin.as_deref(), &[(&tcp, Some(&nom))], "", None, &BTreeSet::new())[0].0,
+            signes(
+                tcp.chemin.as_deref(),
+                &[(&tcp, Some(&nom))],
+                "",
+                None,
+                &Botnets::default()
+            )[0]
+            .0,
             Niveau::Moyen
         );
     }
@@ -1051,7 +1340,10 @@ mod tests {
 
     #[test]
     fn connexion_vers_un_botnet_signalee() {
-        let botnets = BTreeSet::from([ip("203.0.113.9")]);
+        let botnets = Botnets {
+            feodo: BTreeSet::from([ip("203.0.113.9")]),
+            ..Botnets::default()
+        };
         let c = Connexion {
             pid: Some(10),
             programme: Some("inconnu".into()),
@@ -1064,8 +1356,125 @@ mod tests {
         assert_eq!(s[0].0, Niveau::Eleve);
         assert!(s[0].1.contains("botnet") && s[0].1.contains("203.0.113.9"));
         // Même serveur, mais liste vide (indisponible) : aucune connexion n'est dédouanée ni accusée ici.
-        let vide = signes(c.chemin.as_deref(), &[(&c, None)], "", None, &BTreeSet::new());
+        let vide = signes(c.chemin.as_deref(), &[(&c, None)], "", None, &Botnets::default());
         assert!(!vide.iter().any(|(_, t)| t.contains("botnet")));
+    }
+
+    #[test]
+    fn liste_threatfox_decodee() {
+        // Texte inventé, à la forme de l'export (fins de ligne Windows) : seuls les serveurs de commande assez sûrs
+        // comptent, avec leur port et le nom du logiciel malveillant.
+        let texte = concat!(
+            "################################################################\r\n",
+            "# ThreatFox IOCs: recent ip-port - CSV format                  #\r\n",
+            "#\r\n",
+            "# \"first_seen_utc\",\"ioc_id\",\"ioc_value\",\"ioc_type\",\"threat_type\",\"fk_malware\",\"malware_alias\",\"malware_printable\",\"last_seen_utc\",\"confidence_level\"\r\n",
+            "\"2026-10-20 13:46:40\", \"1\", \"192.0.2.25:6662\", \"ip:port\", \"botnet_cc\", \"win.cobalt_strike\", \"BEACON\", \"Cobalt Strike\", \"\", \"75\", \"False\", \"None\", \"a, b\", \"0\", \"alice\"\r\n",
+            "\"2026-10-20 13:30:04\", \"2\", \"[2001:db8::7]:2000\", \"ip:port\", \"botnet_cc\", \"win.nanocore\", \"\", \"Nanocore\u{1b}[2K RAT\", \"\", \"100\", \"False\", \"None\", \"\", \"0\", \"bob\"\r\n",
+            "\"2026-10-20 12:00:00\", \"3\", \"198.51.100.3:80\", \"ip:port\", \"botnet_cc\", \"win.x\", \"\", \"Douteux\", \"\", \"50\", \"False\", \"None\", \"\", \"0\", \"bob\"\r\n",
+            "\"2026-10-20 11:00:00\", \"4\", \"198.51.100.4:80\", \"ip:port\", \"payload_delivery\", \"win.y\", \"\", \"Téléchargeur\", \"\", \"100\", \"False\", \"None\", \"\", \"0\", \"bob\"\r\n",
+        );
+        let liste = analyser_threatfox(texte).unwrap();
+        assert_eq!(liste.len(), 2);
+        assert_eq!(liste[&(ip("192.0.2.25"), 6662)], "Cobalt Strike");
+        // Un nom signalé par n'importe qui ne pilote pas le terminal.
+        assert_eq!(liste[&(ip("2001:db8::7"), 2000)], "Nanocore\u{fffd}[2K RAT");
+        // Une liste sans serveur reste une liste ; autre chose (portail Wi-Fi, ligne tronquée ou illisible) : pas
+        // vérifiée, jamais vide.
+        assert!(analyser_threatfox("# ThreatFox\r\n#\r\n").unwrap().is_empty());
+        assert!(analyser_threatfox("").is_none());
+        assert!(analyser_threatfox("<html><body>Bienvenue au Salon</body></html>").is_none());
+        assert!(analyser_threatfox("# ThreatFox\n\"2026-10-20\", \"1\", \"192.0.2.25:6662\"\n").is_none());
+        assert!(
+            analyser_threatfox(concat!(
+                "# ThreatFox\n",
+                "\"2026-10-20\", \"1\", \"pas-une-ip:80\", \"ip:port\", \"botnet_cc\", \"\", \"\", \"X\", \"\", \"75\"\n",
+            ))
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn reponse_de_l_api_threatfox_decodee() {
+        // Réponse inventée, à la forme de celle de l'API : les autres genres (domaines, liens) sont sautés.
+        let texte = r#"{"query_status": "ok", "data": [
+            {"ioc": "192.0.2.25:6662", "ioc_type": "ip:port", "threat_type": "botnet_cc",
+             "malware_printable": "Cobalt Strike", "confidence_level": 75},
+            {"ioc": "exemple.invalid", "ioc_type": "domain", "threat_type": "botnet_cc",
+             "malware_printable": "X", "confidence_level": 100},
+            {"ioc": "198.51.100.3:80", "ioc_type": "ip:port", "threat_type": "botnet_cc",
+             "malware_printable": "Douteux", "confidence_level": 50},
+            {"ioc": "[2001:db8::7]:2000", "ioc_type": "ip:port", "threat_type": "botnet_cc",
+             "malware_printable": null, "confidence_level": 100}
+        ]}"#;
+        let liste = analyser_threatfox_api(texte).unwrap();
+        assert_eq!(liste.len(), 2);
+        assert_eq!(liste[&(ip("192.0.2.25"), 6662)], "Cobalt Strike");
+        assert_eq!(liste[&(ip("2001:db8::7"), 2000)], "");
+        assert!(
+            analyser_threatfox_api(r#"{"query_status": "no_result", "data": "Your search did not yield any results"}"#)
+                .unwrap()
+                .is_empty()
+        );
+        // Clé refusée, portail Wi-Fi, adresse illisible : pas vérifiée, jamais vide.
+        assert!(analyser_threatfox_api(r#"{"query_status": "unknown_auth_key"}"#).is_none());
+        assert!(analyser_threatfox_api("<html><body>Bienvenue au Salon</body></html>").is_none());
+        assert!(
+            analyser_threatfox_api(
+                r#"{"query_status": "ok", "data": [{"ioc": "x:1", "ioc_type": "ip:port", "threat_type": "botnet_cc", "confidence_level": 100}]}"#
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn cle_threatfox_gardee_puis_retiree() {
+        // Une clé collée avec un retour à la ligne ou un espace ajouterait un en-tête à la demande : refusée.
+        assert!(cle_valide("a1B2c3D4e5F6g7H8i9J0k1L2"));
+        assert!(!cle_valide("a1B2c3D4e5F6g7H8i9J0\r\nX-Autre: 1"));
+        assert!(!cle_valide("a1B2c3D4 e5F6g7H8i9J0k1L2"));
+        assert!(!cle_valide("court"));
+        // Le dossier de Vanguard est jetable en test.
+        enregistrer_cle("a1B2c3D4e5F6g7H8i9J0k1L2").unwrap();
+        let fichier = fichier_cle();
+        assert_eq!(
+            std::fs::read_to_string(&fichier).unwrap(),
+            "Auth-Key: a1B2c3D4e5F6g7H8i9J0k1L2\n"
+        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(std::fs::metadata(&fichier).unwrap().permissions().mode() & 0o777, 0o600);
+        }
+        let reponse = fichier.with_file_name(FICHIER_API);
+        std::fs::write(&reponse, "{}").unwrap();
+        oublier_cle();
+        assert!(!fichier.exists() && !reponse.exists());
+    }
+
+    #[test]
+    fn serveur_threatfox_reconnu_a_son_port() {
+        let botnets = Botnets {
+            threatfox: HashMap::from([((ip("192.0.2.25"), 6662), "Cobalt Strike".to_string())]),
+            ..Botnets::default()
+        };
+        let vers = |distante: &str, port| Connexion {
+            programme: Some("inconnu".into()),
+            chemin: Some("/usr/bin/inconnu".into()),
+            ..Connexion::vers(ip(distante), port)
+        };
+        let c = vers("192.0.2.25", 6662);
+        let s = signes(c.chemin.as_deref(), &[(&c, None)], "", None, &botnets);
+        assert_eq!(s[0].0, Niveau::Eleve);
+        assert!(
+            s[0].1.contains("192.0.2.25:6662 (Cobalt Strike, ThreatFox)"),
+            "{}",
+            s[0].1
+        );
+        // Même serveur vu par une prise IPv6 : la forme « ::ffff: » ne le cache pas.
+        assert!(botnets.serveur(&vers("::ffff:192.0.2.25", 6662)).is_some());
+        // Même adresse, autre port : un hébergeur partagé n'accuse pas tous ses clients.
+        assert!(botnets.serveur(&vers("192.0.2.25", 443)).is_none());
     }
 
     // Linux : un programme mis à jour pendant qu'il tourne (Firefox après une mise à jour du système) a son ancien
@@ -1087,7 +1496,7 @@ mod tests {
             &[(&c, Some(&nom))],
             "",
             None,
-            &BTreeSet::new(),
+            &Botnets::default(),
         );
         assert_eq!(s.iter().map(|(n, _)| *n).collect::<Vec<_>>(), [Niveau::Info]);
     }
@@ -1111,14 +1520,14 @@ mod tests {
         }
         let efface = format!("{} (deleted)", repose.display());
         let c = Connexion::vers(ip("140.82.112.4"), 443);
-        let s = signes(Some(&efface), &[(&c, None)], "", None, &BTreeSet::new());
+        let s = signes(Some(&efface), &[(&c, None)], "", None, &Botnets::default());
         assert_eq!(
             s.iter().map(|(n, _)| *n).take(2).collect::<Vec<_>>(),
             [Niveau::Eleve, Niveau::Eleve]
         );
         std::fs::remove_dir_all(&dossier).unwrap();
         // Plus rien à sa place : effacé pour de bon.
-        let s = signes(Some(&efface), &[(&c, None)], "", None, &BTreeSet::new());
+        let s = signes(Some(&efface), &[(&c, None)], "", None, &Botnets::default());
         assert_eq!(s[0].0, Niveau::Eleve);
     }
 
@@ -1145,7 +1554,7 @@ mod tests {
         let nom = "github.com".to_string();
         let telechargee = "/home/alice/Downloads/ArtCraft.AppImage";
         let niveaux = |image| {
-            signes(Some(monte), &[(&c, Some(&nom))], montages, image, &BTreeSet::new())
+            signes(Some(monte), &[(&c, Some(&nom))], montages, image, &Botnets::default())
                 .iter()
                 .map(|(n, _)| *n)
                 .collect::<Vec<_>>()

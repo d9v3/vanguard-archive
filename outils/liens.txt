@@ -41,3 +41,6 @@ ignorer https://github.com/rustwasm/walrus/tree/crates/macro
 
 # Images d'Omarchy (outils/images-cle.sh) : le serveur ne liste pas ses fichiers, le programme ajoute le nom de l'image.
 serveur https://iso.omarchy.org/
+
+# API de ThreatFox (src/protection/sortantes.rs) : elle n'accepte que POST avec la clé d'abuse.ch de la personne.
+serveur https://threatfox-api.abuse.ch/api/v1/

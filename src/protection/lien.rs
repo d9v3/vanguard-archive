@@ -880,14 +880,21 @@ pub(crate) const URLHAUS_TROP_VIEILLE: Duration = Duration::from_hours(7 * 24);
 /// Une liste d'URLhaus (abuse.ch), gardée 12 heures dans le dossier de Vanguard. La télécharger ne dit à personne quel
 /// lien on vérifie. Sans Internet, la copie d'avant sert encore : son texte, et son âge.
 fn liste_urlhaus(adresse: &str, nom: &str) -> Option<(String, Duration)> {
-    liste_abuse_ch("urlhaus", adresse, nom)
+    liste_abuse_ch("urlhaus", (adresse, &[]), nom, URLHAUS_FRAICHE)
 }
 
-/// Une liste publique d'abuse.ch, gardée dans `sous_dossier` du dossier de Vanguard : 12 heures fraîche, retéléchargée
-/// ensuite, et sa copie d'avant garde sa valeur jusqu'à une semaine (voir `age_des_listes`). La télécharger ne dit à
-/// personne ce qu'on cherche (on prend la liste entière). Sans Internet, curl échoue et la copie d'avant sert encore :
-/// son texte, et son âge. Partagé entre URLhaus (liens) et Feodo Tracker (serveurs de botnets).
-pub(crate) fn liste_abuse_ch(sous_dossier: &str, adresse: &str, nom: &str) -> Option<(String, Duration)> {
+/// Une liste d'abuse.ch, gardée dans `sous_dossier` du dossier de Vanguard : `fraiche` sans être redemandée,
+/// retéléchargée ensuite, et sa copie d'avant garde sa valeur jusqu'à une semaine (voir `age_des_listes`). La
+/// télécharger ne dit à personne ce qu'on cherche (on prend la liste entière). Sans Internet, curl échoue et la copie
+/// d'avant sert encore : son texte, et son âge. `options` : ce que curl reçoit en plus pour cette adresse (la clé de
+/// ThreatFox, lue dans un fichier pour ne jamais paraître dans la liste des processus). Partagé entre URLhaus (liens),
+/// Feodo Tracker et ThreatFox (serveurs de botnets).
+pub(crate) fn liste_abuse_ch(
+    sous_dossier: &str,
+    (adresse, options): (&str, &[std::ffi::OsString]),
+    nom: &str,
+    fraiche: Duration,
+) -> Option<(String, Duration)> {
     let dossier = crate::reseau::dossier_local().join(sous_dossier);
     let fichier = dossier.join(nom);
     let age = || {
@@ -896,13 +903,14 @@ pub(crate) fn liste_abuse_ch(sous_dossier: &str, adresse: &str, nom: &str) -> Op
             .ok()
             .map(|t| t.elapsed().unwrap_or_default())
     };
-    let fraiche = age().is_some_and(|d| d < URLHAUS_FRAICHE);
+    let fraiche = age().is_some_and(|d| d < fraiche);
     if !fraiche && std::fs::create_dir_all(&dossier).is_ok() {
         let provisoire = dossier.join(format!("{nom}.nouveau"));
         let telecharge = crate::commande::lancer(
             Command::new("curl")
                 .args(["-sf", "--max-time", "40", "-o"])
                 .arg(&provisoire)
+                .args(options)
                 .arg(adresse),
             50,
         )

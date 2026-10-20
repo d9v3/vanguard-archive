@@ -265,7 +265,8 @@ since Vanguard has not checked them.
   email address leaks, after your consent (the address is sent to the service).
 - Who talks to the Internet?: each program's current connections, with the server's name; a program started from a
   temporary folder or Downloads, a remote access tool's port, a server without a name or a known botnet command
-  server (Feodo Tracker's list, abuse.ch) are flagged. Read-only: nothing is cut.
+  server (Feodo Tracker and ThreatFox lists, abuse.ch; a free, optional abuse.ch key adds ThreatFox's official
+  access) are flagged. Read-only: nothing is cut.
 - Is someone controlling my PC?: the tech-support scam (“your computer is infected”) gets a remote control tool
   installed. Vanguard looks for AnyDesk, TeamViewer, RustDesk, Quick Assist, Splashtop, UltraViewer… installed (and
   since when), started at boot, running or simply sitting in Downloads; it explains what to do (cut the Internet, tell
