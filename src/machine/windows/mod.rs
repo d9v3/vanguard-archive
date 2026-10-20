@@ -362,7 +362,7 @@ pub fn powershell_admin_chacune(correctifs: &[Vec<String>]) -> Vec<bool> {
 /// État de chaque profil du pare-feu, lu dans le registre (les valeurs que rend Get-NetFirewallProfile, sans
 /// lancer PowerShell : le pare-feu passe avant toutes les autres vérifications, son attente retardait tout le bilan).
 /// Une stratégie de groupe passe avant le réglage local, comme pour Windows. Un profil illisible n'est pas listé.
-fn profils_pare_feu() -> Vec<(&'static str, bool)> {
+pub(crate) fn profils_pare_feu() -> Vec<(&'static str, bool)> {
     use winreg::enums::HKEY_LOCAL_MACHINE;
     [
         ("Domain", "DomainProfile"),

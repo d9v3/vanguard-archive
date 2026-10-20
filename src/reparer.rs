@@ -873,8 +873,8 @@ pub fn liste() -> Vec<Reparation> {
     l
 }
 
-/// Ce que la réparation Windows doit savoir avant d'ouvrir le menu, lu en un seul appel PowerShell (chacun
-/// coûte une seconde) : proxy de l'utilisateur, proxy WinHTTP (services, mises à jour), profils du pare-feu.
+/// Ce que la réparation Windows doit savoir avant d'ouvrir le menu, lu dans le registre : proxy de l'utilisateur,
+/// proxy WinHTTP (services, mises à jour), profils du pare-feu.
 #[cfg(windows)]
 #[derive(Default, serde::Deserialize)]
 #[serde(default)]
@@ -888,6 +888,74 @@ struct EtatWindows {
 
 #[cfg(windows)]
 fn etat_windows() -> Option<EtatWindows> {
+    etat_windows_natif().map(affichables).or_else(etat_windows_powershell)
+}
+
+/// Le même état sans PowerShell ; `None` si aucun profil du pare-feu ne se lit (l'appelant demande à PowerShell).
+#[cfg(windows)]
+fn etat_windows_natif() -> Option<EtatWindows> {
+    use winreg::RegKey;
+    use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE};
+    let profils = machine::windows::profils_pare_feu();
+    if profils.is_empty() {
+        return None;
+    }
+    let internet = RegKey::predef(HKEY_CURRENT_USER)
+        .open_subkey(r"Software\Microsoft\Windows\CurrentVersion\Internet Settings")
+        .ok();
+    let texte = |nom: &str| {
+        internet
+            .as_ref()
+            .and_then(|c| c.get_value::<String, _>(nom).ok())
+            .unwrap_or_default()
+    };
+    let actif = internet
+        .as_ref()
+        .and_then(|c| c.get_value::<u32, _>("ProxyEnable").ok())
+        == Some(1);
+    let winhttp = RegKey::predef(HKEY_LOCAL_MACHINE)
+        .open_subkey(r"SOFTWARE\Microsoft\Windows\CurrentVersion\Internet Settings\Connections")
+        .ok()
+        .and_then(|c| c.get_raw_value("WinHttpSettings").ok())
+        .map(|v| proxy_winhttp(&v.bytes))
+        .unwrap_or_default();
+    Some(EtatWindows {
+        proxy: if actif { texte("ProxyServer") } else { String::new() },
+        pac: texte("AutoConfigURL"),
+        winhttp,
+        parefeu_coupe: profils
+            .iter()
+            .filter(|(_, actif)| !actif)
+            .map(|(n, _)| *n)
+            .collect::<Vec<_>>()
+            .join(", "),
+        profils: u32::try_from(profils.len()).unwrap_or(0),
+    })
+}
+
+/// Le proxy de WinHttpSettings : l'octet 8 vaut 1 pour « accès direct » ; sinon la longueur du proxy est à l'octet 12
+/// et son nom (ASCII) suit à l'octet 16. Vide pour l'accès direct ; « configuré » quand le nom ne se lit pas.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn proxy_winhttp(octets: &[u8]) -> String {
+    if octets.len() < 16 || octets[8] == 1 {
+        return String::new();
+    }
+    let n = i32::from_le_bytes([octets[12], octets[13], octets[14], octets[15]]);
+    match usize::try_from(n)
+        .ok()
+        .filter(|&n| n > 0)
+        .and_then(|n| octets.get(16..16 + n))
+    {
+        Some(nom) => nom
+            .iter()
+            .map(|&o| if o.is_ascii() { char::from(o) } else { '?' })
+            .collect(),
+        None => "configuré".into(),
+    }
+}
+
+#[cfg(windows)]
+fn etat_windows_powershell() -> Option<EtatWindows> {
     // WinHttpSettings : l'octet 8 vaut 1 pour « accès direct » ; sinon la longueur du proxy est à l'octet 12
     // et son nom suit à l'octet 16.
     let json = machine::windows::ps(
@@ -911,11 +979,15 @@ fn etat_windows() -> Option<EtatWindows> {
 /// écrire, et ne servent qu'à être montrés : rendus inoffensifs.
 #[cfg(windows)]
 fn lire_etat_windows(json: &str) -> Option<EtatWindows> {
-    let mut e: EtatWindows = serde_json::from_str(json).ok()?;
+    serde_json::from_str(json).ok().map(affichables)
+}
+
+#[cfg(windows)]
+fn affichables(mut e: EtatWindows) -> EtatWindows {
     for t in [&mut e.proxy, &mut e.pac, &mut e.winhttp] {
         *t = affichable(t);
     }
-    Some(e)
+    e
 }
 
 #[cfg(windows)]
@@ -1486,5 +1558,30 @@ mod tests {
         assert_eq!(e.pac, "http://pac.exemple�[2K��/p.pac");
         assert_eq!(e.winhttp, "proxy�[8m");
         assert_eq!(e.profils, 3);
+    }
+
+    #[test]
+    fn proxy_de_winhttp() {
+        let mut v = vec![0x28, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 14, 0, 0, 0];
+        v.extend_from_slice(b"10.0.0.9:3128\xe9");
+        assert_eq!(proxy_winhttp(&v), "10.0.0.9:3128?");
+        let mut direct = v.clone();
+        direct[8] = 1;
+        assert_eq!(proxy_winhttp(&direct), "");
+        assert_eq!(proxy_winhttp(&v[..20]), "configuré");
+        assert_eq!(proxy_winhttp(&v[..10]), "");
+        let mut negatif = v.clone();
+        negatif[15] = 0x80;
+        assert_eq!(proxy_winhttp(&negatif), "configuré");
+    }
+
+    /// Le vrai registre (Wine ici, la VM ensuite), sans PowerShell : le pare-feu de Wine n'a pas de profils, l'état se
+    /// lit alors par PowerShell (absent ici) ; ailleurs, les trois profils.
+    #[cfg(windows)]
+    #[test]
+    fn etat_lu_sans_powershell() {
+        if let Some(e) = etat_windows_natif() {
+            assert!(e.profils > 0);
+        }
     }
 }
