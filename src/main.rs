@@ -384,6 +384,10 @@ enum Commande {
         /// décrivent).
         sujet: Vec<String>,
     },
+    /// Ordinateur d'un proche : trois questions (qui s'en sert, pourquoi on te l'a confié, son réseau), le bilan, un
+    /// résumé en mots simples, les corrections acceptées une à une, puis la page à laisser avec ses conseils.
+    #[command(visible_alias = "relative")]
+    Proche,
     /// Vérifier Vanguard lui-même : version, date de compilation, empreinte SHA-256 du programme (à comparer à la
     /// page de la version) et, sur la clé du propriétaire, le manifeste de la clé.
     #[command(name = "verifier-moi", visible_alias = "self-check")]
@@ -1500,6 +1504,9 @@ const AIDES_EN: &[(&str, &str)] = &[
                 fingerprints). Read-only; nothing goes to the Internet"),
     ("depanner", "Troubleshoot step by step: no Internet, Wi-Fi dropping, slow computer, no sound, printer, disk full; \
                   after an infection, new computer, computer leaving (sale, gift)"),
+    ("proche", "A relative's computer: three questions (who uses it, why you were asked to look at it, their \
+                network), the check-up, a summary in plain words, the fixes accepted one by one, then the page to \
+                leave with its tips"),
 ];
 
 /// Aide anglaise des options : (commande, option, aide).
@@ -1717,6 +1724,7 @@ async fn main() {
         Some(Commande::SeMettreAJour) => mise_a_jour::commande(),
         Some(Commande::Regles) => machine::regles::afficher(),
         Some(Commande::Depanner { sujet }) => depanner::executer(&sujet.join(" ")),
+        Some(Commande::Proche) => depanner::executer("proche"),
         Some(Commande::Traces { dossier }) => {
             if !traces::commande(dossier.as_deref()) {
                 std::process::exit(1);

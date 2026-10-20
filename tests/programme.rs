@@ -291,6 +291,36 @@ fn sauvegarde_puis_restauration() {
     let _ = std::fs::remove_file(&fichier);
 }
 
+/// Ordinateur d'un proche, tout refusé : les trois questions, le bilan et son résumé, aucune correction, aucun scan du
+/// réseau, aucune page posée.
+#[test]
+fn ordinateur_d_un_proche_tout_refuse() {
+    let maison = maison_jetable();
+    // Un Bureau, pour qu'une page posée par erreur s'y voie.
+    std::fs::create_dir_all(maison.join("Desktop")).unwrap();
+    let entree = format!("1\n2\n1\n{}", "n\n".repeat(80));
+    let sortie = vanguard_dans(
+        Path::new(env!("CARGO_BIN_EXE_vanguard")),
+        &maison,
+        "en",
+        &["relative"],
+        &entree,
+        180,
+    );
+    let texte = sans_couleurs(&sortie.texte);
+    let bureau: Vec<_> = std::fs::read_dir(maison.join("Desktop")).unwrap().flatten().collect();
+    let _ = std::fs::remove_dir_all(&maison);
+    assert_eq!(sortie.code, Some(0), "{}", sortie.erreurs);
+    assert!(
+        texte.contains("A relative's computer") && texte.contains("IN SHORT") && texte.contains("What is left to do"),
+        "{texte}"
+    );
+    // Réseau refusé : pas de scan ; page refusée : rien sur le Bureau.
+    assert!(!texte.contains("Network scan"), "{texte}");
+    assert!(texte.contains("The page is still possible later"), "{texte}");
+    assert!(bureau.is_empty(), "{bureau:?}");
+}
+
 #[test]
 fn lenteur_fiche_depanner_et_copie_sans_rien_changer() {
     // Fiche en JSON : lisible, et sans les numéros de série (ils ne s'affichent qu'à l'écran).

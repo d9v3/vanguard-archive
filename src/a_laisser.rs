@@ -2,7 +2,8 @@
 //! de l'ordinateur (et celle de l'arrivée, si un bilan a été fait plus tôt dans la journée), ce qu'il lui reste à
 //! faire, du plus important au moins important, ce qui va bien, et trois habitudes. Un fichier HTML autonome, posé sur
 //! son Bureau après accord, ouvert dans le navigateur pour être lu ou imprimé. Pas d'adresse, pas de nom d'appareil,
-//! pas de commande : seulement ce qu'elle peut comprendre et faire.
+//! pas de commande : seulement ce qu'elle peut comprendre et faire. Le parcours « Ordinateur d'un proche » y ajoute
+//! des conseils choisis pour la personne.
 
 use std::fmt::Write;
 use std::path::PathBuf;
@@ -27,8 +28,8 @@ fn note_a_l_arrivee(historique: &[crate::historique::Bilan], aujourd_hui: &str) 
         .flatten()
 }
 
-/// La page, d'après le bilan.
-pub(crate) fn page(a: &Audit, arrivee: Option<u32>, date: &str) -> String {
+/// La page, d'après le bilan, avec les conseils choisis pour la personne (avant les habitudes de tout le monde).
+pub(crate) fn page(a: &Audit, arrivee: Option<u32>, date: &str, conseils: &[&str]) -> String {
     let mut h = String::new();
     let _ = write!(
         h,
@@ -110,13 +111,19 @@ pub(crate) fn page(a: &Audit, arrivee: Option<u32>, date: &str) -> String {
         }
         h += "</ol>";
     }
-    let mut bien: Vec<&str> = a
-        .constats
-        .iter()
-        .filter(|c| c.verifie && c.probleme.is_none())
-        .map(|c| crate::langue::categorie(c.categorie))
-        .collect();
-    bien.dedup();
+    // Une catégorie va bien quand rien n'y est signalé, pas même une information ; une fois chacune, même si ses
+    // vérifications ne se suivent pas dans le bilan.
+    let mut bien: Vec<&str> = Vec::new();
+    for c in a.constats.iter().filter(|c| c.verifie && c.probleme.is_none()) {
+        let signale = a
+            .constats
+            .iter()
+            .any(|d| d.categorie == c.categorie && d.probleme.is_some());
+        let nom = crate::langue::categorie(c.categorie);
+        if !signale && !bien.contains(&nom) {
+            bien.push(nom);
+        }
+    }
     if !bien.is_empty() {
         let _ = write!(
             h,
@@ -124,6 +131,17 @@ pub(crate) fn page(a: &Audit, arrivee: Option<u32>, date: &str) -> String {
             tr!("Ce qui va bien", "What is fine"),
             esc(&bien.join(" · "))
         );
+    }
+    if !conseils.is_empty() {
+        let _ = write!(
+            h,
+            "<h2>{}</h2><ul>",
+            tr!("Pour toi en particulier", "Especially for you")
+        );
+        for c in conseils {
+            let _ = write!(h, "<li>{}</li>", esc(c));
+        }
+        h += "</ul>";
     }
     let _ = write!(
         h,
@@ -187,6 +205,11 @@ fn bureau() -> Option<PathBuf> {
 
 /// Menu Cette machine › Rapport à laisser (`vanguard a-laisser`) : d'après le dernier bilan de la session, ou un neuf.
 pub fn laisser(audit: &Audit) {
+    laisser_avec(audit, &[]);
+}
+
+/// La page à laisser, avec des conseils choisis pour la personne.
+pub(crate) fn laisser_avec(audit: &Audit, conseils: &[&str]) {
     titre(tr!("Rapport à laisser", "Report to leave behind"));
     let aujourd_hui = chrono::Local::now().format("%Y-%m-%d").to_string();
     let date = chrono::Local::now()
@@ -196,6 +219,7 @@ pub fn laisser(audit: &Audit) {
         audit,
         note_a_l_arrivee(&crate::historique::charger(), &aujourd_hui),
         &date,
+        conseils,
     );
     let nom = trf!(
         "Vanguard - bilan du {aujourd_hui}.html",
@@ -250,7 +274,7 @@ mod tests {
                 alerte("DNS", Niveau::Info, "Information seulement."),
             ],
         };
-        let p = page(&a, Some(55), "19/10/2026 à 10:00");
+        let p = page(&a, Some(55), "19/10/2026 à 10:00", &[]);
         assert!(p.contains(">C</span>") && p.contains("72/100") && p.contains("à l'arrivée : D 55/100"));
         // Le plus grave d'abord ; l'information n'est pas « à faire » ; rien d'exécutable dans la page.
         let i_comptes = p.find("Comptes").unwrap();
@@ -259,6 +283,26 @@ mod tests {
         assert!(!p.contains("Information seulement") && !p.contains("<script>"));
         assert!(p.contains("&lt;script&gt;") && p.contains("Lui donner un mot de passe"));
         assert!(p.contains("Ce qui va bien") && p.contains("Pare-feu"));
+        assert!(!p.contains("Pour toi en particulier"));
+        // Une catégorie dite une fois, et jamais « bien » quand une de ses vérifications signale quelque chose.
+        let b = Audit {
+            systeme: "test",
+            score: 90,
+            constats: vec![
+                ok("Comptes", "Mot de passe partout."),
+                ok("SSH", "Clés seulement."),
+                ok("Comptes", "Écran verrouillé."),
+                ok("Persistance", "Rien d'inconnu au démarrage."),
+                alerte("Persistance", Niveau::Info, "Service inconnu au démarrage."),
+            ],
+        };
+        let p = page(&b, None, "19/10/2026 à 10:00", &[]);
+        assert!(p.contains("Comptes · SSH<") && !p.contains("Persistance"), "{p}");
+        // Les conseils d'un proche : leur section, avant les habitudes, échappés comme le reste.
+        let p = page(&a, None, "19/10/2026 à 10:00", &["Raccroche <b>vite</b>."]);
+        let i_toi = p.find("Pour toi en particulier").unwrap();
+        assert!(i_toi < p.find("Trois habitudes").unwrap());
+        assert!(p.contains("Raccroche &lt;b&gt;vite&lt;/b&gt;.") && !p.contains("à l'arrivée"));
     }
 
     #[test]

@@ -9,6 +9,7 @@ mod depuis_maj;
 mod imprimante;
 pub(crate) mod infection;
 mod nouveau;
+mod proche;
 mod reseau;
 mod son;
 
@@ -27,7 +28,7 @@ pub struct Parcours {
     lancer: fn(),
 }
 
-static PARCOURS: [Parcours; 11] = [
+static PARCOURS: [Parcours; 12] = [
     Parcours {
         cles: ("internet", "internet"),
         titre: ("Pas d'Internet", "No Internet"),
@@ -107,6 +108,14 @@ static PARCOURS: [Parcours; 11] = [
         mots: "traces preuves evidence forensique forensic collecte collect spécialiste specialist expert enquête \
                investigation journaux logs processus processes",
         lancer: infection::traces,
+    },
+    Parcours {
+        cles: ("proche", "relative"),
+        titre: ("Ordinateur d'un proche", "A relative's computer"),
+        apercu: ("bilan simple, page à laisser", "simple check-up, page to leave"),
+        mots: "proche relative parent parents famille family ami friend grand-mère grandmother grand-père \
+               grandfather enfant child aîné senior",
+        lancer: proche::proche,
     },
 ];
 
@@ -692,8 +701,9 @@ mod tests {
         assert!(trouver("printer").is_some_and(|p| p.cles.0 == "imprimante"));
         assert!(trouver("zzz").is_none());
         assert_eq!(chemin("3"), Some(3));
-        assert_eq!(chemin("11"), Some(11));
-        assert_eq!(chemin("12"), None);
+        assert_eq!(chemin("12"), Some(12));
+        assert_eq!(chemin("13"), None);
+        assert!(trouver("grand-mère").is_some_and(|p| p.cles.1 == "relative"));
         assert!(trouver("traces").is_some_and(|p| p.cles.1 == "evidence"));
         assert_eq!(lignes_de_recherche("11").len(), PARCOURS.len());
     }
