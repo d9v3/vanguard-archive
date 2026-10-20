@@ -364,6 +364,21 @@ fn plus_frequents<'a>(valeurs: impl Iterator<Item = &'a str>, n: usize) -> Vec<S
         .collect()
 }
 
+/// Tous les échecs par le réseau viennent-ils d'une seule adresse du réseau local, pour un seul compte ? C'est le
+/// portrait d'un appareil de la maison qui répète un mot de passe périmé, pas celui d'une attaque (plusieurs origines,
+/// plusieurs comptes, souvent depuis Internet). L'adresse et le compte, sinon rien.
+fn appareil_qui_insiste(echecs: &[Echec]) -> Option<(String, String)> {
+    let mut reseau = echecs.iter().filter(|e| e.reseau);
+    let premier = reseau.next()?;
+    let locale = match premier.adresse.parse::<std::net::IpAddr>().ok()? {
+        std::net::IpAddr::V4(a) => a.is_private() || a.is_link_local(),
+        std::net::IpAddr::V6(a) => (a.segments()[0] & 0xfe00) == 0xfc00 || (a.segments()[0] & 0xffc0) == 0xfe80,
+    };
+    let meme = |e: &&Echec| e.adresse == premier.adresse && e.compte.eq_ignore_ascii_case(&premier.compte);
+    (locale && !premier.compte.is_empty() && reseau.all(|e| meme(&e)))
+        .then(|| (premier.adresse.clone(), premier.compte.clone()))
+}
+
 fn juger_echecs(echecs: &[Echec]) -> Constat {
     let total = echecs.len();
     if total == 0 {
@@ -392,6 +407,27 @@ fn juger_echecs(echecs: &[Echec]) -> Constat {
         total.to_string()
     };
     let comptes = plus_frequents(echecs.iter().map(|e| e.compte.as_str()), 3).join(", ");
+    if rafale_reseau >= RAFALE
+        && let Some((adresse, compte)) = appareil_qui_insiste(echecs)
+    {
+        return alerte(
+            "Comptes",
+            Niveau::Moyen,
+            trf!(
+                "{rafale_reseau} échecs de connexion en une heure, tous depuis {} sur le réseau local et pour le seul compte {} ({total} en {JOURS} jours) : sans doute un appareil de la maison (NAS, imprimante, autre ordinateur) qui garde un vieux mot de passe pour un partage. Si tu ne le reconnais pas, c'est peut-être quelqu'un sur ton réseau.",
+                "{rafale_reseau} failed sign-ins within an hour, all from {} on the local network and for the single account {} ({total} in {JOURS} days): most likely a device at home (NAS, printer, another computer) keeping an old password for a share. If you do not recognize it, it may be someone on your network.",
+                affichable(&adresse),
+                affichable(&compte)
+            ),
+        )
+        .manuel(
+            tr!(
+                "Sur cet appareil, remets le mot de passe actuel du partage, ou retire le partage enregistré",
+                "On that device, enter the share's current password again, or remove the saved share"
+            ),
+            &[],
+        );
+    }
     if rafale_reseau >= RAFALE {
         let origines = plus_frequents(echecs.iter().filter(|e| e.reseau).map(|e| e.adresse.as_str()), 3);
         let origines = if origines.is_empty() {
@@ -635,6 +671,22 @@ mod tests {
         assert_eq!(c.probleme, Some(Niveau::Eleve));
         assert!(c.message.contains("203.0.113.7 (25), 192.0.2.44 (5)"), "{}", c.message);
         assert!(c.message.contains("alice (30)"), "{}", c.message);
+        // Un NAS de la maison qui répète un vieux mot de passe (une adresse locale, un compte) : moyen, expliqué.
+        let c = juger_echecs(&lignes(&rafale(40, "3", "192.168.1.20")));
+        assert_eq!(c.probleme, Some(Niveau::Moyen));
+        assert!(
+            c.message.contains("192.168.1.20") && c.message.contains("NAS"),
+            "{}",
+            c.message
+        );
+        // Deux adresses locales, ou une adresse d'Internet : toujours élevé.
+        let mut deux = rafale(25, "3", "192.168.1.20");
+        deux.extend(rafale(5, "3", "192.168.1.21"));
+        assert_eq!(juger_echecs(&lignes(&deux)).probleme, Some(Niveau::Eleve));
+        assert_eq!(
+            juger_echecs(&lignes(&rafale(25, "3", "203.0.113.9"))).probleme,
+            Some(Niveau::Eleve)
+        );
         // Au clavier : moyen.
         let c = juger_echecs(&lignes(&rafale(22, "2", "-")));
         assert_eq!(c.probleme, Some(Niveau::Moyen));

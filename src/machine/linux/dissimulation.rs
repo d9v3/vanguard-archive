@@ -410,11 +410,13 @@ pub(crate) fn juger_exe(lien: &str, remplace: bool, montages: &str) -> Option<Sa
         return Some(SansFichier::EffaceTemporaire);
     }
     // Un nouveau fichier à la même place : une mise à jour (paquets, Steam ou Firefox qui se mettent à jour eux-mêmes).
-    // Nix, Snap et Flatpak rangent chaque version à part et effacent l'ancienne : même chose.
+    // Nix, Snap et Flatpak rangent chaque version à part et effacent l'ancienne : même chose, Flatpak du système comme
+    // ceux installés pour le compte (~/.local/share/flatpak, qu'une mise à jour faisait passer pour effacés).
     if remplace
         || ["/nix/store/", "/snap/", "/var/lib/flatpak/"]
             .iter()
             .any(|d| chemin.starts_with(d))
+        || (chemin.starts_with("/home/") && chemin.contains("/.local/share/flatpak/"))
     {
         return Some(SansFichier::AJour);
     }
@@ -958,6 +960,13 @@ mod tests {
         );
         assert_eq!(
             j("/nix/store/abc-hello/bin/hello (deleted)", false),
+            Some(SansFichier::AJour)
+        );
+        assert_eq!(
+            j(
+                "/home/alice/.local/share/flatpak/app/org.exemple.App/x86_64/stable/abc/files/bin/app (deleted)",
+                false
+            ),
             Some(SansFichier::AJour)
         );
         assert_eq!(j("/usr/local/bin/outil (deleted)", false), Some(SansFichier::Efface));
