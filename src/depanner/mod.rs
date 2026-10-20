@@ -504,10 +504,19 @@ fn volumes() -> Vec<(String, u64, u64)> {
     }
     #[cfg(windows)]
     {
-        crate::machine::windows::ps(
-            "[IO.DriveInfo]::GetDrives() | Where-Object { $_.IsReady -and $_.DriveType -in 'Fixed','Removable' } | \
-             ForEach-Object { \"$($_.Name)|$($_.AvailableFreeSpace)|$($_.TotalSize)\" }",
-        )
+        // Lus par kernel32 ; PowerShell seulement si la liste revient vide (le lecteur du système y est toujours).
+        let natifs: Vec<String> = crate::machine::windows::lecteurs::lecteurs()
+            .iter()
+            .map(|l| format!("{}|{}|{}", l.racine.display(), l.libre, l.total))
+            .collect();
+        if natifs.is_empty() {
+            crate::machine::windows::ps(
+                "[IO.DriveInfo]::GetDrives() | Where-Object { $_.IsReady -and $_.DriveType -in 'Fixed','Removable' } | \
+                 ForEach-Object { \"$($_.Name)|$($_.AvailableFreeSpace)|$($_.TotalSize)\" }",
+            )
+        } else {
+            Some(natifs.join("\n"))
+        }
         .unwrap_or_default()
         .lines()
         .filter_map(|l| {

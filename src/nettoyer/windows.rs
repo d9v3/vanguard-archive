@@ -170,8 +170,12 @@ fn elements_selon(env: &dyn Fn(&str) -> Option<PathBuf>) -> Vec<Element> {
     .collect()
 }
 
-/// Place libre du disque du système, lue par .NET (le seul disque que le nettoyage touche).
+/// Place libre du disque du système (le seul disque que le nettoyage touche), lue par kernel32 ; .NET en secours.
 pub fn place() -> Option<(u64, u64, u64)> {
+    let systeme = std::env::var("SystemDrive").unwrap_or_else(|_| "C:".into());
+    if let Some(l) = crate::machine::windows::lecteurs::lecteur(std::path::Path::new(&systeme)) {
+        return Some((l.libre, l.total, l.libre));
+    }
     let s = crate::machine::windows::ps(
         "$d = [IO.DriveInfo]::new($env:SystemDrive); \"$($d.AvailableFreeSpace) $($d.TotalSize)\"",
     )?;

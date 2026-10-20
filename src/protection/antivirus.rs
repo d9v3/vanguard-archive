@@ -169,6 +169,18 @@ fn lire_lsblk(texte: &str) -> Vec<(PathBuf, String)> {
 
 #[cfg(windows)]
 fn volumes_amovibles() -> Vec<(PathBuf, String)> {
+    let lecteurs = crate::machine::windows::lecteurs::lecteurs();
+    if !lecteurs.is_empty() {
+        #[allow(clippy::cast_precision_loss)] // une taille en Go, montrée avec une décimale
+        return lecteurs
+            .into_iter()
+            .filter(|l| l.amovible)
+            .map(|l| {
+                let taille = crate::langue::decimal(l.total as f64 / f64::from(1u32 << 30), 1);
+                (l.racine, affichable(&format!("{} · {taille} Go", l.etiquette)))
+            })
+            .collect();
+    }
     crate::machine::windows::ps(
         "Get-Volume | Where-Object { $_.DriveType -eq 'Removable' -and $_.DriveLetter } | ForEach-Object { \
          \"$($_.DriveLetter)|$($_.FileSystemLabel)|$([math]::Round($_.Size / 1GB, 1))\" }",

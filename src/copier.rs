@@ -187,6 +187,9 @@ pub(crate) fn genre_du_volume(p: &Path) -> Option<String> {
         .chars()
         .take(3)
         .collect();
+    if let Some(l) = crate::machine::windows::lecteurs::lecteur(Path::new(&lecteur)) {
+        return Some(l.format).filter(|f| !f.is_empty());
+    }
     let format = crate::machine::windows::ps(&format!(
         "[IO.DriveInfo]::new('{}').DriveFormat",
         crate::commande::ps_texte(&lecteur)
@@ -397,11 +400,24 @@ pub(crate) fn disques() -> Vec<Disque> {
 /// Windows : les lecteurs prêts, amovibles ou fixes, sauf celui du système et la clé.
 #[cfg(windows)]
 pub(crate) fn disques() -> Vec<Disque> {
-    let lecteurs = crate::machine::windows::ps(
-        "[IO.DriveInfo]::GetDrives() | Where-Object { $_.IsReady -and ($_.DriveType -eq 'Removable' -or $_.DriveType -eq 'Fixed') } | \
-         ForEach-Object { $n = (Get-Partition -DriveLetter $_.Name[0] -ErrorAction SilentlyContinue).DiskNumber; \
-         \"$($_.Name)|$($_.VolumeLabel)|$($_.AvailableFreeSpace)|$($_.TotalSize)|$n\" }",
-    );
+    // Lus par kernel32 ; PowerShell seulement si la liste revient vide (le lecteur du système y est toujours).
+    let natifs: Vec<String> = crate::machine::windows::lecteurs::lecteurs()
+        .iter()
+        .map(|l| {
+            let disque = l.disque.map(|n| n.to_string()).unwrap_or_default();
+            let etiquette = l.etiquette.replace('|', " ");
+            format!("{}|{etiquette}|{}|{}|{disque}", l.racine.display(), l.libre, l.total)
+        })
+        .collect();
+    let lecteurs = if natifs.is_empty() {
+        crate::machine::windows::ps(
+            "[IO.DriveInfo]::GetDrives() | Where-Object { $_.IsReady -and ($_.DriveType -eq 'Removable' -or $_.DriveType -eq 'Fixed') } | \
+             ForEach-Object { $n = (Get-Partition -DriveLetter $_.Name[0] -ErrorAction SilentlyContinue).DiskNumber; \
+             \"$($_.Name)|$($_.VolumeLabel)|$($_.AvailableFreeSpace)|$($_.TotalSize)|$n\" }",
+        )
+    } else {
+        Some(natifs.join("\n"))
+    };
     let texte = lecteurs.unwrap_or_default();
     let systeme = std::env::var("SystemDrive").map_or("C:".into(), |s| s.to_uppercase());
     let mut liste = lire_lecteurs(&texte, &systeme);
