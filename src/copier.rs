@@ -544,14 +544,14 @@ fn nom_libre(dossier: &Path, nom: &str) -> PathBuf {
         .unwrap_or_else(|| dossier.join(nom))
 }
 
-fn empreinte(chemin: &Path) -> std::io::Result<blake3::Hash> {
+pub(crate) fn empreinte(chemin: &Path) -> std::io::Result<blake3::Hash> {
     Ok(blake3::Hasher::new().update_reader(File::open(chemin)?)?.finalize())
 }
 
 /// L'empreinte relue sur le disque, pas dans la mémoire où la copie vient de passer : sans cela, une erreur
 /// d'écriture du disque passerait inaperçue. Linux : les pages du fichier, propres après `sync_all`, sont retirées du
 /// cache avant de lire ; macOS : lecture sans cache. Windows : lecture ordinaire.
-fn empreinte_relue(chemin: &Path) -> std::io::Result<blake3::Hash> {
+pub(crate) fn empreinte_relue(chemin: &Path) -> std::io::Result<blake3::Hash> {
     let f = File::open(chemin)?;
     sans_cache(&f);
     Ok(blake3::Hasher::new().update_reader(f)?.finalize())
@@ -1095,7 +1095,7 @@ fn fichiers_de_la_copie(dossier: &Path) -> Vec<PathBuf> {
 }
 
 /// Au plus `n` fichiers répartis sur toute la copie (le premier, le dernier, et à intervalles réguliers entre).
-fn echantillon(fichiers: &[PathBuf], n: usize) -> Vec<&PathBuf> {
+pub(crate) fn echantillon(fichiers: &[PathBuf], n: usize) -> Vec<&PathBuf> {
     if fichiers.len() <= n {
         return fichiers.iter().collect();
     }

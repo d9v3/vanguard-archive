@@ -1023,9 +1023,240 @@ pub fn menu() {
     }
 }
 
+// ───────────────────────────── Vérifier la sauvegarde ─────────────────────────────
+
+/// Fichiers relus au plus dans la sauvegarde : répartis sur toute la liste, assez pour qu'un disque qui perd des
+/// données se voie, assez peu pour finir en quelques secondes même sur un disque lent.
+const A_RELIRE: usize = 20;
+/// Au-delà, la liste de la sauvegarde s'arrête : l'échantillon reste réparti sur ce qui a été lu.
+const LISTE_MAX: usize = 200_000;
+
+/// Un fichier de la sauvegarde comparé à son original.
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+enum Comparaison {
+    Identique,
+    /// L'original a changé depuis la sauvegarde : la copie d'hier est juste, elle date d'hier.
+    ModifieDepuis,
+    /// Différent alors que l'original n'a pas changé : la sauvegarde est abîmée.
+    Different,
+    SansOriginal,
+    Illisible,
+}
+
+/// La copie relue sur le disque (cache contourné, comme « Vérifier une copie ») puis comparée à l'original. rsync garde
+/// sur la copie l'heure de modification de l'original : un original plus récent a changé depuis la sauvegarde, ce
+/// n'est pas une copie abîmée. Deux secondes de marge : FAT et exFAT arrondissent l'heure.
+fn comparer(copie: &Path, original: &Path) -> Comparaison {
+    let Ok(relue) = crate::copier::empreinte_relue(copie) else {
+        return Comparaison::Illisible;
+    };
+    let Ok(attendue) = crate::copier::empreinte(original) else {
+        return Comparaison::SansOriginal;
+    };
+    if relue == attendue {
+        return Comparaison::Identique;
+    }
+    let heure = |p: &Path| std::fs::metadata(p).and_then(|m| m.modified()).ok();
+    match (heure(copie), heure(original)) {
+        (Some(c), Some(o)) if o > c + std::time::Duration::from_secs(2) => Comparaison::ModifieDepuis,
+        _ => Comparaison::Different,
+    }
+}
+
+/// Les fichiers ordinaires de la sauvegarde, en chemins relatifs et triés, sans suivre les liens.
+fn fichiers_de(dossier: &Path) -> Vec<PathBuf> {
+    let mut trouves = Vec::new();
+    let mut a_voir = vec![PathBuf::new()];
+    while let Some(relatif) = a_voir.pop() {
+        for e in std::fs::read_dir(dossier.join(&relatif))
+            .into_iter()
+            .flatten()
+            .flatten()
+        {
+            let chemin = relatif.join(e.file_name());
+            match std::fs::symlink_metadata(e.path()) {
+                Ok(m) if m.is_dir() => a_voir.push(chemin),
+                Ok(m) if m.is_file() => trouves.push(chemin),
+                _ => {}
+            }
+            if trouves.len() >= LISTE_MAX {
+                break;
+            }
+        }
+    }
+    trouves.sort();
+    trouves
+}
+
+/// La sauvegarde rsync de `destination` (un dossier par dossier sauvegardé : Documents, Images…) relue par
+/// échantillon et comparée aux originaux du dossier personnel `maison` : chaque fichier relu, avec son verdict.
+fn relire_sauvegarde(destination: &Path, maison: &Path) -> Vec<(PathBuf, Comparaison)> {
+    let fichiers = fichiers_de(destination);
+    crate::copier::echantillon(&fichiers, A_RELIRE)
+        .into_iter()
+        .map(|relatif| {
+            let verdict = comparer(&destination.join(relatif), &maison.join(relatif));
+            (relatif.clone(), verdict)
+        })
+        .collect()
+}
+
+/// « Vérifier ma sauvegarde » (menu Données, `vanguard verifier-sauvegarde`) : la sauvegarde que Vanguard a mise en
+/// place est relue pour de vrai, quelques fichiers au hasard comparés à leur original. Rien n'est écrit ni effacé.
+pub fn verifier_sauvegarde() {
+    println!();
+    titre(tr!("Vérifier ma sauvegarde", "Check my backup"));
+    let mise_en_place = charger_de(&fichier_notes()).mise_en_place;
+    let Some(MiseEnPlace::Systemd { destination, date, .. }) = mise_en_place else {
+        let texte = match mise_en_place {
+            Some(MiseEnPlace::DejaDup { .. }) => tr!(
+                "Déjà Dup compresse et chiffre ses sauvegardes : Vanguard ne les relit pas. Pour l'essayer : Déjà Dup › Restaurer, un fichier vers un autre dossier, puis l'ouvrir. Non vérifié ici.",
+                "Déjà Dup compresses and encrypts its backups: Vanguard does not read them back. To try it: Déjà Dup › Restore, one file to another folder, then open it. Not checked here."
+            ),
+            Some(MiseEnPlace::TimeMachine { .. }) => tr!(
+                "Time Machine : « Entrer dans Time Machine » depuis le Finder, restaurer un fichier, puis l'ouvrir. Non vérifié ici.",
+                "Time Machine: “Enter Time Machine” from the Finder, restore one file, then open it. Not checked here."
+            ),
+            _ if cfg!(windows) => tr!(
+                "Historique des fichiers : Panneau de configuration › Historique des fichiers › Restaurer des fichiers personnels, un fichier vers un autre dossier. Non vérifié ici.",
+                "File History: Control Panel › File History › Restore personal files, one file to another folder. Not checked here."
+            ),
+            _ => tr!(
+                "Aucune sauvegarde mise en place par Vanguard sur cet ordinateur : Données › Sauvegarde automatique. Une copie faite par « Copier mes fichiers » se vérifie avec « Vérifier une copie ».",
+                "No backup set up by Vanguard on this computer: Data › Automatic backup. A copy made by “Copy my files” is checked with “Check a copy”."
+            ),
+        };
+        info(texte);
+        return;
+    };
+    let destination = PathBuf::from(destination);
+    trp!(
+        "  Sauvegarde rsync mise en place le {date} : {}",
+        "  rsync backup set up on {date}: {}",
+        chemin_affichable(&destination)
+    );
+    if !destination.is_dir() {
+        mauvais(&trf!(
+            "Sauvegarde introuvable (disque débranché ?) : rien n'a été vérifié.",
+            "Backup not found (disk unplugged?): nothing was checked."
+        ));
+        return;
+    }
+    let maison = PathBuf::from(std::env::var_os("HOME").unwrap_or_default());
+    let relus = relire_sauvegarde(&destination, &maison);
+    if relus.is_empty() {
+        mauvais(tr!(
+            "La sauvegarde est vide : rsync n'y a encore rien copié (disque branché à midi ?). Rien n'a été vérifié.",
+            "The backup is empty: rsync has not copied anything yet (disk plugged in at noon?). Nothing was checked."
+        ));
+        return;
+    }
+    let compte = |c: Comparaison| relus.iter().filter(|(_, v)| *v == c).count();
+    let (identiques, modifies, differents, sans, illisibles) = (
+        compte(Comparaison::Identique),
+        compte(Comparaison::ModifieDepuis),
+        compte(Comparaison::Different),
+        compte(Comparaison::SansOriginal),
+        compte(Comparaison::Illisible),
+    );
+    if identiques > 0 {
+        bon(&trf!(
+            "{identiques} fichier(s) relu(s) sur le disque de sauvegarde, identiques à leur original.",
+            "{identiques} file(s) read back from the backup disk, identical to their original."
+        ));
+    }
+    if modifies > 0 {
+        info(&trf!(
+            "{modifies} fichier(s) modifié(s) depuis la sauvegarde : normal, la prochaine les reprendra.",
+            "{modifies} file(s) changed since the backup: normal, the next one will take them."
+        ));
+    }
+    if sans > 0 {
+        info(&trf!(
+            "{sans} fichier(s) sans original à comparer (effacé depuis, ou hors du dossier personnel).",
+            "{sans} file(s) with no original to compare (deleted since, or outside the home folder)."
+        ));
+    }
+    for (relatif, verdict) in relus
+        .iter()
+        .filter(|(_, v)| matches!(v, Comparaison::Different | Comparaison::Illisible))
+    {
+        let pourquoi = if *verdict == Comparaison::Different {
+            tr!(
+                "différent de l'original, qui n'a pas changé",
+                "different from the original, which has not changed"
+            )
+        } else {
+            tr!("illisible sur le disque de sauvegarde", "unreadable on the backup disk")
+        };
+        mauvais(&format!("{} : {pourquoi}", chemin_affichable(relatif)));
+    }
+    println!();
+    if differents + illisibles > 0 {
+        mauvais(tr!(
+            "La sauvegarde est abîmée : le disque perd peut-être des données. Vérifie-le (Données › Vérifier ma clé) et refais une sauvegarde complète sur un autre disque.",
+            "The backup is damaged: the disk may be losing data. Check it (Data › Check my drive) and make a full backup to another disk."
+        ));
+    } else if identiques > 0 {
+        bon(tr!(
+            "La sauvegarde se relit : un fichier perdu s'y retrouverait. Rien n'a été écrit ni effacé.",
+            "The backup reads back: a lost file would be found there. Nothing was written or deleted."
+        ));
+    } else {
+        info(tr!(
+            "Aucun fichier n'a pu être comparé : rien n'est conclu.",
+            "No file could be compared: nothing is concluded."
+        ));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Une sauvegarde rsync jouée dans un dossier jetable : copie identique, original modifié depuis (plus récent),
+    /// copie abîmée (original inchangé, plus ancien que la copie), fichier sans original.
+    #[test]
+    fn sauvegarde_relue_et_comparee() {
+        let base = crate::reseau::dossier_local().join("verifier-sauvegarde");
+        let _ = std::fs::remove_dir_all(&base);
+        let (maison, sauvegarde) = (base.join("maison"), base.join("disque"));
+        for d in [maison.join("Documents"), sauvegarde.join("Documents")] {
+            std::fs::create_dir_all(d).unwrap();
+        }
+        let ecrire = |racine: &Path, nom: &str, contenu: &str, il_y_a: u64| {
+            let p = racine.join("Documents").join(nom);
+            std::fs::write(&p, contenu).unwrap();
+            let heure = std::time::SystemTime::now() - std::time::Duration::from_secs(il_y_a);
+            std::fs::File::options()
+                .write(true)
+                .open(&p)
+                .unwrap()
+                .set_modified(heure)
+                .unwrap();
+        };
+        ecrire(&maison, "facture.pdf", "même contenu", 7200);
+        ecrire(&sauvegarde, "facture.pdf", "même contenu", 7200);
+        ecrire(&maison, "notes.txt", "écrit ce matin", 60);
+        ecrire(&sauvegarde, "notes.txt", "écrit hier", 86_400);
+        ecrire(&maison, "photo.jpg", "original", 86_400);
+        ecrire(&sauvegarde, "photo.jpg", "abîmée", 3600);
+        ecrire(&sauvegarde, "efface.txt", "plus d'original", 86_400);
+        let mut relus = relire_sauvegarde(&sauvegarde, &maison);
+        relus.sort_by(|a, b| a.0.cmp(&b.0));
+        let attendu = [
+            ("efface.txt", Comparaison::SansOriginal),
+            ("facture.pdf", Comparaison::Identique),
+            ("notes.txt", Comparaison::ModifieDepuis),
+            ("photo.jpg", Comparaison::Different),
+        ];
+        assert_eq!(relus.len(), attendu.len());
+        for ((chemin, verdict), (nom, attendu)) in relus.iter().zip(attendu) {
+            assert_eq!(chemin, &PathBuf::from("Documents").join(nom));
+            assert_eq!(*verdict, attendu, "{nom}");
+        }
+        let _ = std::fs::remove_dir_all(&base);
+    }
 
     fn findmnt() -> &'static Path {
         Path::new("/usr/bin/findmnt")

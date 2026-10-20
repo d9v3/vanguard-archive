@@ -318,6 +318,11 @@ enum Commande {
         /// Le disque ou le dossier de la copie (par défaut : choisi parmi les disques branchés).
         dossier: Option<std::path::PathBuf>,
     },
+    /// Vérifier ma sauvegarde : la sauvegarde mise en place par Vanguard relue pour de vrai, des fichiers au hasard
+    /// comparés à leur original ; pour Time Machine, Déjà Dup et l'Historique des fichiers, la marche à suivre.
+    /// Rien n'est écrit ni effacé.
+    #[command(name = "verifier-sauvegarde", visible_alias = "check-backup")]
+    VerifierSauvegarde,
     /// Vérifier ma clé : capacité réelle (fausses clés), vitesses et blocs en erreur d'une clé USB ou d'un disque
     /// externe. Écrit dans l'espace libre après accord, relit, puis efface ; tes fichiers ne sont pas touchés.
     #[command(name = "verifier-cle", visible_alias = "check-drive")]
@@ -841,6 +846,7 @@ enum Action {
     Ordinateurs,
     ProtegerDonnees,
     MettreAJour,
+    VerifierSauvegarde,
     Guide,
     Depanner,
 }
@@ -1108,6 +1114,10 @@ const OUTILS: &[Outil] = &[
         titre: ["Mettre Vanguard à jour", "Update Vanguard"],
         precision: ["sur cet ordinateur, depuis la clé", "on this computer, from the key"],
         mots: "mise à jour mettre update upgrade vanguard version nouvelle new copie copy installer install" },
+    Outil { action: Action::VerifierSauvegarde, groupe: Some(Groupe::Donnees), lettre: "",
+        titre: ["Vérifier ma sauvegarde", "Check my backup"],
+        precision: ["relue pour de vrai", "really read back"],
+        mots: "sauvegarde backup vérifier verify restauration restore test rsync time machine" },
     Outil { action: Action::Guide, groupe: Some(Groupe::Guide), lettre: "",
         titre: ["Guide des commandes", "Command guide"],
         precision: ["Linux, Windows, macOS, tous", "Linux, Windows, macOS, all"],
@@ -1368,6 +1378,7 @@ async fn executer(s: &mut Session, action: Action) {
         Action::CopierFichiers => copier::menu(),
         Action::SauvegardeAuto => sauvegarde::menu(),
         Action::VerifierCopie => copier::verifier_copie(None),
+        Action::VerifierSauvegarde => sauvegarde::verifier_sauvegarde(),
         Action::VerifierCle => verifier_cle::menu(),
         Action::Raccourci => raccourci::commande(None),
         Action::Ordinateurs => ordinateurs::menu(),
@@ -1452,6 +1463,9 @@ const AIDES_EN: &[(&str, &str)] = &[
                          copy, nothing deleted or overwritten, an interrupted copy resumes"),
     ("verifier-copie", "Check a copy made by “Copy my files” (restore test): files spread over the whole copy, read \
                         back from the disk and compared with their original. Nothing is written or deleted"),
+    ("verifier-sauvegarde", "Check my backup: the backup set up by Vanguard really read back, random files compared with \
+                             their original; for Time Machine, Déjà Dup and File History, the steps. Nothing is written or \
+                             deleted"),
     ("verifier-cle", "Check my drive: real capacity (fake drives), speeds and bad blocks of a USB stick or an \
                       external disk. Writes into the free space after your consent, reads back, then erases; your \
                       files are not touched"),
@@ -1673,6 +1687,7 @@ async fn main() {
         Some(Commande::Fiche { json }) => fiche::fiche(json),
         Some(Commande::CopierFichiers { destination }) => copier::commande(destination.as_deref()),
         Some(Commande::VerifierCopie { dossier }) => copier::verifier_copie(dossier.as_deref()),
+        Some(Commande::VerifierSauvegarde) => sauvegarde::verifier_sauvegarde(),
         Some(Commande::VerifierCle { dossier }) => verifier_cle::commande(dossier.as_deref()),
         Some(Commande::Changements) => changements::afficher(),
         Some(Commande::ALaisser) => a_laisser::laisser(&machine::executer(false)),
