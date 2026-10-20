@@ -580,6 +580,10 @@ mod linux {
         }
     }
 
+    /// Applications Flatpak examinées au plus (un `flatpak info` chacune, ~0,1 s) : une installation ordinaire en a
+    /// quelques dizaines.
+    const APPLICATIONS_MAX: usize = 300;
+
     fn flatpak(b: &mut Bilan) {
         match sortie("flatpak", &["permissions"]) {
             Some(t) => b.ajouter(lire_flatpak_portails(&t)),
@@ -614,11 +618,24 @@ mod linux {
             );
         }
         let mut illisibles = 0;
-        for a in applications.iter().take(300) {
+        for a in applications.iter().take(APPLICATIONS_MAX) {
             match sortie("flatpak", &["info", "--show-permissions", a]) {
                 Some(t) => b.ajouter(lire_flatpak_statiques(a, &t)),
                 None => illisibles += 1,
             }
+        }
+        // Au-delà de la borne, les applications restantes ne sont pas examinées : le dire, sinon elles
+        // passeraient pour vérifiées.
+        if applications.len() > APPLICATIONS_MAX {
+            let restantes = applications.len() - APPLICATIONS_MAX;
+            non_verifie(
+                b,
+                &PERMISSIONS,
+                &trf!(
+                    "{restantes} application(s) Flatpak non examinée(s) : seules les {APPLICATIONS_MAX} premières le sont.",
+                    "{restantes} Flatpak app(s) not examined: only the first {APPLICATIONS_MAX} are."
+                ),
+            );
         }
         if illisibles > 0 {
             non_verifie(
