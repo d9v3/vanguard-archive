@@ -879,6 +879,63 @@ try {
     else { Info "Exclusions de Defender : $(@($exclusions | Where-Object { $_ }).Count) dossier(s)" }
 } catch { Bug "Comparaison impossible : $($_.Exception.Message)" }
 
+Etape 'Réglages de la 0.79 : WPAD, règle des mots de passe, guide'
+# Chaque réglage est relu ici sans Vanguard, et comparé à ce que dit le bilan JSON déjà fait plus haut.
+try {
+    $audit = Sortie 'machine-json' | ConvertFrom-Json
+    function Signale79($motif) { [bool]@($audit.constats | Where-Object { $_.probleme -and $_.message -match $motif }).Count }
+    function Accord79($nom, [bool]$risque, $motif) {
+        $vu = Signale79 $motif
+        if ($vu -eq $risque) { Ok "$nom : $(if ($risque) { 'risqué, signalé' } else { 'sûr, rien signalé' })" }
+        elseif ($risque) { Bug "$nom : risqué selon Windows, NON signalé par Vanguard" }
+        else { Bug "$nom : sûr selon Windows, mais signalé par Vanguard" }
+    }
+    $domaine = $env:USERDOMAIN -and $env:USERDOMAIN -ne $env:COMPUTERNAME
+    $wpad = (Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Services\WinHttp\Parameters' -ErrorAction SilentlyContinue).DisableWpad
+    Accord79 'WPAD' ($wpad -ne 1 -and -not $domaine) 'proxy tout seul|proxy by itself'
+    # La règle des mots de passe : lue par ADSI, comme Vanguard (sans droits, quelle que soit la langue), et par
+    # net accounts pour comparer. Une lecture ADSI vide dirait que Vanguard ne peut rien conclure.
+    $adsi = [ADSI]"WinNT://$env:COMPUTERNAME"
+    $longueur = $adsi.MinPasswordLength.Value
+    $seuil = $adsi.MaxBadPasswordsAllowed.Value
+    if ($null -eq $longueur -or $null -eq $seuil) { Bug 'Règle des mots de passe illisible par ADSI : Vanguard n''en dira rien' }
+    else { Ok "ADSI : longueur minimale $longueur, blocage après $seuil essai(s) (0 : jamais)" }
+    Info "net accounts : $((net accounts | Select-String 'length|lockout threshold|longueur|seuil') -join ' ; ')"
+    if ($null -ne $seuil) {
+        Accord79 'Blocage après des mots de passe faux' ($seuil -eq 0) 'Aucun blocage après|No lockout after'
+        if ($seuil -ne 0) { Accord79 'Longueur minimale des mots de passe' ($longueur -lt 8) 'moins de 8 caractères|shorter than 8 characters' }
+    }
+    # Commandes du guide marquées « administrateur » : se lisent-elles sans droits ? (si oui, la marque peut partir)
+    foreach ($commande in 'Get-SmbShare', 'Get-Tpm') {
+        try { $null = & $commande -ErrorAction Stop; Info "$commande marche sans droits : la marque « administrateur » du guide peut partir" }
+        catch { Ok "$commande demande bien les droits d'administrateur" }
+    }
+} catch { Bug "Comparaison impossible : $($_.Exception.Message)" }
+# « Lancer ici » : « 10.6.36.1 » ouvre Get-NetConnectionProfile (Windows 11, 36e programme), « 2 » la lance.
+LancerAvec 'guide-profil' @() "10.6.36.1`n2`n`n`nq`n"
+$profil = Sortie 'guide-profil'
+if ($profil -match 'NetworkCategory' -and $profil -match 'Done in|Terminée en') { Ok 'Profil réseau lancé depuis le guide, sortie montrée' }
+else { Bug 'Profil réseau : commande du guide pas lancée ou sortie absente' }
+
+Etape 'Compte sans mot de passe exigé : signalé, puis corrigé par Vanguard (UAC)'
+Info 'Crée un compte de test « vanguard-essai » sans mot de passe exigé, puis Vanguard doit proposer de l''exiger. Le compte est retiré à la fin.'
+if (Question 'Faire ce test ?') {
+    Start-Process powershell -Verb RunAs -Wait -ArgumentList '-NoProfile', '-Command', 'New-LocalUser -Name vanguard-essai -NoPassword | Out-Null; Set-LocalUser -Name vanguard-essai -PasswordRequired $false'
+    $essai = Get-LocalUser -Name 'vanguard-essai' -ErrorAction SilentlyContinue
+    if (-not $essai) { Bug 'Compte de test non créé (UAC refusée ?)' }
+    else {
+        Lancer 'machine-compte-essai' @('machine')
+        if ((Sortie 'machine-compte-essai') -match 'vanguard-essai') { Ok 'Compte sans mot de passe exigé signalé' } else { Bug 'Compte sans mot de passe exigé NON signalé' }
+        Write-Host ''
+        Write-Host '      Réponds « o » à « Exiger un mot de passe pour vanguard-essai » et accepte l''UAC. Réponds « n » à tout le reste.' -ForegroundColor Yellow
+        Vider-Clavier
+        & $exe corriger
+        if ((Get-LocalUser -Name 'vanguard-essai').PasswordRequired) { Ok 'Mot de passe désormais exigé pour le compte de test' } else { Bug 'Mot de passe TOUJOURS pas exigé après la correction' }
+    }
+    Start-Process powershell -Verb RunAs -Wait -ArgumentList '-NoProfile', '-Command', 'Remove-LocalUser -Name vanguard-essai -ErrorAction SilentlyContinue'
+    if (Get-LocalUser -Name 'vanguard-essai' -ErrorAction SilentlyContinue) { Bug 'Compte de test ENCORE présent : à retirer à la main' } else { Ok 'Compte de test retiré' }
+} else { Info 'Sautée (il faut répondre aux fenêtres UAC).' }
+
 Etape 'Couleurs et accents dans la console'
 if ($Auto) { Info 'Sautée : il faut regarder l''écran (test avec questions).' } else {
     Vider-Clavier

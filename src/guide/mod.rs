@@ -1769,7 +1769,11 @@ mod tests {
     fn les_chemins_du_test_de_la_vm_menent_aux_bonnes_commandes() {
         let script =
             std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/outils/test-windows/test.ps1")).unwrap();
-        for (tape, attendue) in [("10.6.7.2", "winget upgrade --all"), ("10.6.11.1", "ipconfig /all")] {
+        for (tape, attendue) in [
+            ("10.6.7.2", "winget upgrade --all"),
+            ("10.6.11.1", "ipconfig /all"),
+            ("10.6.36.1", "Get-NetConnectionProfile"),
+        ] {
             assert!(script.contains(&format!("\"{tape}`n")), "test.ps1 n'ouvre plus {tape}");
             let (s, p, c) = chemin(tape.strip_prefix("10.").unwrap()).unwrap();
             let (_, programme) = SYSTEMES[s - 1].programmes()[p.unwrap() - 1];
