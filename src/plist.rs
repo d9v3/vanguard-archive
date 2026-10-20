@@ -8,6 +8,9 @@ use std::path::Path;
 
 /// Au-delà, ce n'est pas un fichier de réglages.
 const TAILLE_MAX: u64 = 8 * 1024 * 1024;
+/// Octets copiés hors du fichier en tout (textes et données) : un plist binaire peut citer le même objet des milliers
+/// de fois par référence, et chaque citation en refait une copie ; sans ce budget, 62 Ko piégés en demandaient 120 Mo.
+const COPIES_MAX: usize = 16 * 1024 * 1024;
 /// Imbrication des tableaux et des dictionnaires ; une boucle de références binaires bute dessus.
 const PROFONDEUR_MAX: usize = 64;
 /// Valeurs lues en tout : un plist binaire peut citer mille fois le même grand tableau.
@@ -65,6 +68,13 @@ impl Valeur {
     }
 }
 
+/// Un plist binaire que le lecteur refuse pour ses bornes (trop d'objets, trop profond, références qui bouclent ou
+/// qui multiplient les copies) : fabriqué pour gêner l'analyse, pas un format inconnu. À ne jamais confier à
+/// `plutil`, qui développerait les références sans limite.
+pub fn hostile(octets: &[u8]) -> bool {
+    octets.starts_with(b"bplist00") && binaire::lire(octets).is_none()
+}
+
 /// Un plist en mémoire, binaire ou XML. `None` : format inconnu, fichier abîmé ou hors des bornes.
 pub fn lire(octets: &[u8]) -> Option<Valeur> {
     if octets.starts_with(b"bplist00") {
@@ -95,7 +105,7 @@ pub fn lire_fichier(chemin: &Path) -> std::io::Result<Option<Valeur>> {
 }
 
 mod binaire {
-    use super::{PROFONDEUR_MAX, VALEURS_MAX, Valeur};
+    use super::{COPIES_MAX, PROFONDEUR_MAX, VALEURS_MAX, Valeur};
 
     /// Entier non signé gros-boutiste de 1 à 8 octets.
     fn entier(octets: &[u8]) -> Option<u64> {
@@ -112,6 +122,8 @@ mod binaire {
         taille_reference: usize,
         nombre: usize,
         lues: usize,
+        /// Octets copiés jusqu'ici (textes et données), contre l'amplification par références.
+        copies: usize,
     }
 
     impl Lecteur<'_> {
@@ -134,6 +146,12 @@ mod binaire {
             let taille = 1usize << (marque & 0xF);
             let n = usize::try_from(entier(self.tranche(apres + 1, taille)?)?).ok()?;
             Some((n, apres + 1 + taille))
+        }
+
+        /// Compte `n` octets copiés ; `None` au-delà du budget.
+        fn copie(&mut self, n: usize) -> Option<()> {
+            self.copies = self.copies.checked_add(n)?;
+            (self.copies <= COPIES_MAX).then_some(())
         }
 
         /// Les objets cités par une suite de `n` références à partir de `debut`.
@@ -171,10 +189,12 @@ mod binaire {
                 (0x3, 3) => Valeur::Date(f64::from_be_bytes(self.tranche(corps, 8)?.try_into().ok()?)),
                 (0x4, _) => {
                     let (n, d) = self.longueur(info, corps)?;
+                    self.copie(n)?;
                     Valeur::Donnees(self.tranche(d, n)?.to_vec())
                 }
                 (0x5, _) => {
                     let (n, d) = self.longueur(info, corps)?;
+                    self.copie(n)?;
                     let octets = self.tranche(d, n)?;
                     if !octets.is_ascii() {
                         return None;
@@ -183,6 +203,7 @@ mod binaire {
                 }
                 (0x6, _) => {
                     let (n, d) = self.longueur(info, corps)?;
+                    self.copie(n.checked_mul(2)?)?;
                     let octets = self.tranche(d, n.checked_mul(2)?)?;
                     let unites: Vec<u16> = octets
                         .as_chunks::<2>()
@@ -247,6 +268,7 @@ mod binaire {
             taille_reference,
             nombre,
             lues: 0,
+            copies: 0,
         }
         .objet(racine, 0)
     }
@@ -521,6 +543,47 @@ mod tests {
         let mut o = if n < 15 { vec![0x50 | n] } else { vec![0x5F, 0x10, n] };
         o.extend(t.as_bytes());
         o
+    }
+
+    /// Un tableau de 2 000 références vers une seule donnée de 60 Ko : 62 Ko sur disque, 120 Mo une fois copié
+    /// objet par objet. Le budget de copies le refuse, et le dit hostile (jamais confié à plutil).
+    #[test]
+    fn amplification_par_references_refusee() {
+        let donnee = {
+            // Données de 60 000 octets : marque 0x4F, longueur sur un entier de 2 octets (0x11), puis le contenu.
+            let mut o = vec![0x4F, 0x11];
+            o.extend(60_000u16.to_be_bytes());
+            o.extend(std::iter::repeat_n(0x42u8, 60_000));
+            o
+        };
+        let tableau = {
+            // Tableau de 2 000 éléments (0xAF + longueur sur 2 octets), tous la référence 1 (sur un octet).
+            let mut o = vec![0xAF, 0x11];
+            o.extend(2000u16.to_be_bytes());
+            o.extend(std::iter::repeat_n(1u8, 2000));
+            o
+        };
+        let piege = bplist(&[tableau, donnee], 0);
+        assert!(piege.len() < 70_000);
+        assert_eq!(lire(&piege), None);
+        assert!(hostile(&piege));
+        // Un plist binaire ordinaire n'est pas hostile ; un XML refusé n'est pas « binaire hostile ».
+        assert!(!hostile(&bplist(&[ascii("ok")], 0)));
+        assert!(!hostile(b"<plist><string>&a;</string></plist>"));
+        // Le même tableau avec 200 références reste sous le budget : lu.
+        let petit = {
+            let mut o = vec![0xAF, 0x11];
+            o.extend(200u16.to_be_bytes());
+            o.extend(std::iter::repeat_n(1u8, 200));
+            o
+        };
+        let donnee = {
+            let mut o = vec![0x4F, 0x11];
+            o.extend(60_000u16.to_be_bytes());
+            o.extend(std::iter::repeat_n(0x42u8, 60_000));
+            o
+        };
+        assert!(lire(&bplist(&[petit, donnee], 0)).is_some());
     }
 
     #[test]

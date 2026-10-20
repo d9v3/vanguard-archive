@@ -305,8 +305,12 @@ pub fn au_demarrage() -> Vec<Programme> {
         .iter()
         .filter_map(|f| {
             // Le plist est lu directement ; plutil ne sert qu'en secours, pour un format que le lecteur ne connaît
-            // pas. Un fichier qui n'en est pas un (tube nommé) est sauté.
+            // pas, jamais pour un fichier refusé par ses bornes (il développerait ses références sans limite). Un
+            // fichier qui n'en est pas un (tube nommé) est sauté ; le bilan, lui, signale l'agent hostile.
             let lu = crate::plist::lire_fichier(f).ok()?;
+            if lu.is_none() && std::fs::read(f).is_ok_and(|o| crate::plist::hostile(&o)) {
+                return None;
+            }
             let xml = |cle: &str| match &lu {
                 Some(r) => en_xml(r.cle(cle)),
                 None => xml(f, cle),

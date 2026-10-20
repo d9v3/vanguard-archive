@@ -10,21 +10,45 @@ use crate::{tr, trf};
 
 const CAT: &str = "Persistance";
 
+/// Ce qu'un .plist de launchd lance.
+enum Lancement {
+    Programme(String, String),
+    /// Fichier fabriqué pour gêner l'analyse (références qui multiplient les copies, bornes dépassées) : jamais
+    /// confié à plutil, qui développerait tout sans limite ; montré tel quel.
+    Hostile,
+    /// Absent, interdit, pas un fichier ordinaire (tube nommé), ou sans programme : sauté.
+    Rien,
+}
+
 /// Programme lancé par un .plist de launchd, et ses arguments. Le fichier est lu directement ; plutil ne sert qu'en
-/// secours, pour un format que le lecteur ne connaît pas. Un fichier qui n'en est pas un (tube nommé) est sauté.
-fn programme(plist: &Path) -> Option<(String, String)> {
-    let reglages = if let Some(r) = crate::plist::lire_fichier(plist).ok()? {
-        r
-    } else {
-        let r = crate::commande::lancer(
-            std::process::Command::new("plutil")
-                .args(["-convert", "xml1", "-o", "-"])
-                .arg(plist),
-            10,
-        )?;
-        crate::plist::lire(r.sortie.as_bytes())?
+/// secours, pour un format que le lecteur ne connaît pas, jamais pour un fichier refusé par ses bornes.
+fn programme(plist: &Path) -> Lancement {
+    let Ok(lu) = crate::plist::lire_fichier(plist) else {
+        return Lancement::Rien;
     };
-    lire_programme(&reglages)
+    let reglages = match lu {
+        Some(r) => r,
+        None => {
+            if std::fs::read(plist).is_ok_and(|o| crate::plist::hostile(&o)) {
+                return Lancement::Hostile;
+            }
+            let secours = crate::commande::lancer(
+                std::process::Command::new("plutil")
+                    .args(["-convert", "xml1", "-o", "-"])
+                    .arg(plist),
+                10,
+            )
+            .and_then(|r| crate::plist::lire(r.sortie.as_bytes()));
+            match secours {
+                Some(r) => r,
+                None => return Lancement::Rien,
+            }
+        }
+    };
+    match lire_programme(&reglages) {
+        Some((p, a)) => Lancement::Programme(p, a),
+        None => Lancement::Rien,
+    }
 }
 
 /// Program, ou à défaut le premier élément de ProgramArguments ; les arguments sont ceux de ProgramArguments après
@@ -114,8 +138,30 @@ pub fn persistance() -> Vec<Constat> {
             // inoffensifs ; les commandes, elles, visent le vrai fichier.
             let nom = crate::ui::affichable(f.file_name().to_string_lossy().trim_end_matches(".plist"));
             // Les services d'Apple vivent dans /System : ceux-ci sont tous ajoutés par des programmes installés.
-            let Some((prog, args)) = programme(&chemin) else {
-                continue;
+            let (prog, args) = match programme(&chemin) {
+                Lancement::Programme(p, a) => (p, a),
+                Lancement::Rien => continue,
+                Lancement::Hostile => {
+                    tiers.push(nom.clone());
+                    constats.push(
+                        alerte(
+                            CAT,
+                            Niveau::Eleve,
+                            trf!(
+                                "L'agent « {nom} » est un fichier fabriqué pour gêner l'analyse (références en boucle ou qui multiplient les copies) : aucun programme légitime n'écrit ça.",
+                                "Agent “{nom}” is a file built to hinder analysis (looping references or ones that multiply copies): no legitimate program writes that."
+                            ),
+                        )
+                        .manuel(
+                            tr!(
+                                "Regarde-le avec « plutil -p » dans le Terminal ; s'il ne vient d'aucun programme que tu connais, mets-le à la corbeille et redémarre",
+                                "Look at it with “plutil -p” in Terminal; if it comes from no program you know, move it to the Trash and restart"
+                            ),
+                            &[],
+                        ),
+                    );
+                    continue;
+                }
             };
             tiers.push(nom.clone());
             let Some(raison) = soupcon(&prog, &args) else { continue };
