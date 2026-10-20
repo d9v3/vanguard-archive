@@ -100,6 +100,8 @@ pub(crate) enum Raison {
     /// PowerShell n'a pas répondu (absent, bloqué par une stratégie, délai dépassé).
     #[cfg_attr(not(windows), allow(dead_code))]
     SansPowerShell,
+    /// Un lien posé par un compte ordinaire, vers cette cible : pas suivi (voir `lien_sur`).
+    LienNonSuivi(String),
     /// Ce que le système a répondu.
     Erreur(String),
 }
@@ -132,6 +134,10 @@ impl Raison {
             }
             Raison::Introuvable => Bi::new("introuvable", "not found"),
             Raison::SansPowerShell => Bi::new("PowerShell n'a pas répondu", "PowerShell did not answer"),
+            Raison::LienNonSuivi(c) => bi!(
+                "lien vers {c}, posé par un compte : pas suivi",
+                "link to {c}, set by an account: not followed"
+            ),
             Raison::Erreur(e) => Bi::meme(e.clone()),
         }
     }
@@ -298,11 +304,21 @@ impl Feuille {
     /// Recopie un fichier (son début, `BORNE_FICHIER` au plus) sous son chemin ; absent, rien n'est écrit.
     /// `importante` : illisible faute de droits, c'est un manque dit à l'écran.
     pub(crate) fn fichier(&mut self, chemin: &Path, importante: bool) {
+        let Ok(lien) = std::fs::symlink_metadata(chemin) else {
+            return;
+        };
+        let est_lien = lien.file_type().is_symlink();
+        if est_lien && !lien_sur(&lien) {
+            self.section(&chemin.to_string_lossy());
+            let cible = std::fs::read_link(chemin).map_or_else(|_| String::new(), |c| champ(&c.to_string_lossy()));
+            let _ = writeln!(self.texte, "{}", Raison::LienNonSuivi(cible).note());
+            return;
+        }
         let Ok(meta) = std::fs::metadata(chemin) else {
             return;
         };
         self.section(&chemin.to_string_lossy());
-        match lire_debut(chemin, BORNE_FICHIER) {
+        match lire_debut(chemin, BORNE_FICHIER, !est_lien) {
             Ok(texte) => {
                 self.lues += 1;
                 self.ajouter(&texte);
@@ -437,10 +453,51 @@ pub(crate) fn texte_sur(t: &str) -> String {
 }
 
 /// Le début d'un fichier, en texte (les octets qui ne sont pas de l'UTF-8 deviennent « � »).
-pub(crate) fn lire_debut(chemin: &Path, borne: u64) -> std::io::Result<String> {
+/// Avec `sans_lien`, l'ouverture refuse un lien (O_NOFOLLOW) : un fichier vérifié comme n'en étant pas un, puis
+/// remplacé par un lien avant d'être ouvert, n'est pas suivi pour autant.
+fn lire_debut(chemin: &Path, borne: u64, sans_lien: bool) -> std::io::Result<String> {
     let mut octets = Vec::new();
-    std::fs::File::open(chemin)?.take(borne).read_to_end(&mut octets)?;
+    ouvrir_ordinaire(chemin, sans_lien)?
+        .take(borne)
+        .read_to_end(&mut octets)?;
     Ok(String::from_utf8_lossy(&octets).into_owned())
+}
+
+/// Ouvre un fichier ordinaire seulement. Un tube nommé (FIFO) de /tmp bloquait son ouverture jusqu'à ce que quelqu'un y
+/// écrive, et avec elle toute la collecte (ceux des compilations en parallèle, vus le 20 octobre) : l'ouverture est
+/// non bloquante, puis tout ce qui n'est pas un fichier ordinaire (tube, socket, périphérique) est refusé sans être lu.
+/// Avec `sans_lien`, un lien est refusé aussi (O_NOFOLLOW).
+fn ouvrir_ordinaire(chemin: &Path, sans_lien: bool) -> std::io::Result<std::fs::File> {
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::custom_flags(
+        &mut options,
+        libc::O_NONBLOCK | if sans_lien { libc::O_NOFOLLOW } else { 0 },
+    );
+    #[cfg(windows)]
+    let _ = sans_lien;
+    let f = options.open(chemin)?;
+    if !f.metadata()?.is_file() {
+        return Err(std::io::Error::other("pas un fichier ordinaire"));
+    }
+    Ok(f)
+}
+
+/// Un lien qu'on peut suivre : posé par root, qu'un programme sans droits ne peut pas imiter (/etc/resolv.conf, les
+/// services activés de /etc/systemd/system). Celui d'un compte ordinaire n'est pas suivi : lancée avec sudo, la
+/// collecte recopiait la cible, et un lien de ~/.config/autostart vers /etc/shadow y mettait le fichier des mots de
+/// passe. Sous Windows, créer un lien demande déjà des droits.
+fn lien_sur(m: &std::fs::Metadata) -> bool {
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::MetadataExt::uid(m) == 0
+    }
+    #[cfg(windows)]
+    {
+        let _ = m;
+        true
+    }
 }
 
 /// Une date en UTC, sans ambiguïté pour qui lira les traces ailleurs : « 2026-10-20T12:03:22Z ».
@@ -516,7 +573,7 @@ pub(crate) fn sha256_de(mut lecteur: impl Read) -> std::io::Result<String> {
 /// L'empreinte d'un fichier de `max` octets au plus.
 pub(crate) fn empreinte(chemin: &Path, max: u64) -> Empreinte {
     let lire = || -> std::io::Result<Empreinte> {
-        let f = std::fs::File::open(chemin)?;
+        let f = ouvrir_ordinaire(chemin, false)?;
         if f.metadata()?.len() > max {
             return Ok(Empreinte::TropGros);
         }
@@ -819,7 +876,7 @@ fn decrire(chemin: &Path, m: &std::fs::Metadata) -> Entree {
 /// Les premiers octets d'un fichier, pour reconnaître un programme ou un script.
 fn premiers_octets(chemin: &Path) -> Vec<u8> {
     let mut debut = Vec::with_capacity(4);
-    if let Ok(f) = std::fs::File::open(chemin) {
+    if let Ok(f) = ouvrir_ordinaire(chemin, false) {
         let _ = f.take(4).read_to_end(&mut debut);
     }
     debut
@@ -1738,6 +1795,34 @@ mod tests {
         f.fichier(&dossier.join("hosts"), true);
         assert_eq!(f.lues, 1);
         assert!(f.texte.contains("127.0.0.1 localhost\n\\u{1b}[2J"));
+        // Un lien posé par un compte ordinaire est dit, jamais suivi : sa cible (ici un faux secret) n'est pas recopiée.
+        #[cfg(unix)]
+        // SAFETY : geteuid n'a ni pointeur ni effet de bord.
+        if unsafe { libc::geteuid() } != 0 {
+            std::fs::write(dossier.join("secret"), "mot-de-passe-de-root\n").unwrap();
+            std::os::unix::fs::symlink(dossier.join("secret"), dossier.join("lien")).unwrap();
+            f.fichier(&dossier.join("lien"), true);
+            f.dossier(&dossier, 10, false);
+            assert!(f.texte.contains("pas suivi") && f.texte.contains("secret"));
+            assert_eq!(
+                f.texte.matches("mot-de-passe-de-root").count(),
+                1,
+                "seul le fichier lui-même est recopié"
+            );
+        }
+        // Un tube nommé ne bloque ni l'empreinte, ni le début lu, ni la copie : refusé aussitôt, sans écrivain en face.
+        #[cfg(unix)]
+        {
+            let tube = dossier.join("tube");
+            let nom = std::ffi::CString::new(tube.to_string_lossy().as_bytes()).unwrap();
+            // SAFETY : mkfifo lit le chemin terminé par un zéro que `nom` garde en vie pendant l'appel.
+            assert_eq!(unsafe { libc::mkfifo(nom.as_ptr(), 0o600) }, 0);
+            let debut = Instant::now();
+            assert_eq!(empreinte(&tube, 1024), Empreinte::Illisible);
+            assert_eq!(premiers_octets(&tube), Vec::<u8>::new());
+            f.fichier(&tube, false);
+            assert!(debut.elapsed() < Duration::from_secs(2));
+        }
     }
 
     #[test]
