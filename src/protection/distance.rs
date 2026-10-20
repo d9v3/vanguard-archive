@@ -774,14 +774,20 @@ fn installes_du_registre(sortie: &mut String) {
     sortie.push_str("INS_FIN\n");
 }
 
-/// Processus (« PRC|numéro|nom|chemin », le chemin quand Windows le donne) et ceux qui parlent à une autre machine
+/// Processus (« PRC|numéro|nom|chemin », le chemin quand Windows le donne et que le logiciel est reconnu) et ceux qui parlent à une autre machine
 /// (« CNX|numéro »), lus par les fonctions de Windows.
 #[cfg(windows)]
 fn processus_et_connexions(sortie: &mut String) {
     use crate::machine::windows::processus;
     use std::fmt::Write;
     for p in processus::liste() {
-        let chemin = processus::chemin(p.pid).map(|c| sur_une_ligne(&c)).unwrap_or_default();
+        // Le nom (celui du fichier du programme) suffit à reconnaître un logiciel : le chemin, qui coûte une ouverture
+        // du processus, seulement pour ceux-là, au lieu des deux ou trois cents d'un Windows.
+        let chemin = if reconnu(&p.nom).is_some() {
+            processus::chemin(p.pid).map(|c| sur_une_ligne(&c)).unwrap_or_default()
+        } else {
+            String::new()
+        };
         let _ = writeln!(sortie, "PRC|{}|{}|{chemin}", p.pid, sur_une_ligne(&p.nom));
     }
     sortie.push_str("PRC_FIN\n");
