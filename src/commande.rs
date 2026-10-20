@@ -872,11 +872,6 @@ mod tests_sh_chaine {
             "$_.FullName",
             "le chemin d'un dossier que Get-ChildItem vient de lister",
         ),
-        (
-            "protection/distance.rs",
-            "$d",
-            "vérifié juste avant : $d -and (Test-Path $d)",
-        ),
     ];
 
     /// Les variables passées comme chemin à Get-ChildItem ou Remove-Item sans -LiteralPath, avec leur ligne.

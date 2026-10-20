@@ -699,26 +699,186 @@ fn relever() -> Option<Vec<Trouvaille>> {
 
 #[cfg(windows)]
 fn relever() -> Option<Vec<Trouvaille>> {
-    // Une seule lecture PowerShell, en sections : programmes installés (date d'installation, ou celle de leur clé, lue
-    // seulement quand la première manque : un Get-Item par programme installé, des centaines, ralentissait tout),
-    // processus, connexions établies, clés Run, fichiers posés dans Téléchargements, Bureau, temporaires. Les
-    // services viennent du registre, plus bas.
-    let sortie = crate::machine::windows::ps(
-        "try { foreach ($k in 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*', 'HKLM:\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*', 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*') { \
-         Get-ItemProperty $k -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName } | ForEach-Object { $d = ''; if ($_.InstallDate -notmatch '^\\d{8}$') { try { $d = (Get-Item $_.PSPath).LastWriteTime.ToString('yyyy-MM-dd') } catch {} }; \
-         \"INS|$($_.DisplayName)|$($_.InstallDate)|$d|$($_.UninstallString)|$($_.QuietUninstallString)\" } }; 'INS_FIN' } catch {}; \
-         try { Get-Process | ForEach-Object { $c = ''; try { $c = $_.Path } catch {}; \"PRC|$($_.Id)|$($_.ProcessName)|$c\" }; 'PRC_FIN' } catch {}; \
-         try { Get-NetTCPConnection -State Established -ErrorAction SilentlyContinue | Where-Object { $_.RemoteAddress -ne '127.0.0.1' -and $_.RemoteAddress -ne '::1' } | ForEach-Object { \"CNX|$($_.OwningProcess)\" }; 'CNX_FIN' } catch {}; \
-         try { foreach ($c in 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run', 'HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run', 'HKLM:\\Software\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Run') { \
-         $p = Get-ItemProperty $c -ErrorAction SilentlyContinue; if ($p) { $p.PSObject.Properties | Where-Object { $_.Name -notlike 'PS*' } | ForEach-Object { \"RUN|$c|$($_.Name)|$($_.Value)\" } } }; 'RUN_FIN' } catch {}; \
-         try { $u = [Environment]::GetFolderPath('UserProfile'); foreach ($d in (Join-Path $u 'Downloads'), [Environment]::GetFolderPath('Desktop'), $env:TEMP, (Join-Path $env:LOCALAPPDATA 'Programs')) { \
-         if ($d -and (Test-Path $d)) { Get-ChildItem $d -File -Depth 1 -ErrorAction SilentlyContinue | Where-Object { $_.Extension -in '.exe', '.msi', '.zip' } | ForEach-Object { \"FIC|$($_.FullName)|$($_.LastWriteTime.ToString('yyyy-MM-dd'))\" } } }; 'FIC_FIN' } catch {}",
-    )?;
-    // Les services viennent du registre, lus directement : la requête WMI (Win32_Service) était la plus lente du
-    // script, pour trois valeurs qui y sont (nom, nom affiché, chemin du programme).
-    let mut sortie = sortie;
+    // Tout est lu par Vanguard lui-même, sans PowerShell (c'était la vérification la plus lente du bilan, plus de 3 s) :
+    // programmes installés et clés Run dans le registre, processus et connexions par les fonctions de Windows,
+    // fichiers posés par une lecture des dossiers. Le texte garde les sections du script d'avant (INS, PRC, CNX, RUN,
+    // FIC, SVC), que `lire_windows` lit.
+    let mut sortie = String::new();
+    installes_du_registre(&mut sortie);
+    processus_et_connexions(&mut sortie);
+    run_du_registre(&mut sortie);
+    fichiers_poses_windows(&mut sortie);
     sortie.push_str(&services_du_registre());
     lire_windows(&sortie).map(sans_doublons)
+}
+
+/// Une valeur sur une ligne de section : sans saut de ligne (qui ouvrirait une fausse ligne).
+#[cfg(windows)]
+fn sur_une_ligne(v: &str) -> String {
+    v.replace(['\n', '\r'], " ")
+}
+
+/// Programmes et fonctionnalités (64 et 32 bits, et ceux du compte) : « INS|nom|date d'installation|date de la clé|
+/// désinstallation|désinstallation silencieuse ». La date de la clé seulement quand l'installateur n'en donne pas.
+#[cfg(windows)]
+fn installes_du_registre(sortie: &mut String) {
+    use std::fmt::Write;
+    use winreg::RegKey;
+    use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE};
+    for (racine, chemin) in [
+        (
+            HKEY_LOCAL_MACHINE,
+            r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall",
+        ),
+        (
+            HKEY_LOCAL_MACHINE,
+            r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall",
+        ),
+        (
+            HKEY_CURRENT_USER,
+            r"Software\Microsoft\Windows\CurrentVersion\Uninstall",
+        ),
+    ] {
+        let Ok(liste) = RegKey::predef(racine).open_subkey(chemin) else {
+            continue;
+        };
+        for nom_de_cle in liste.enum_keys().flatten() {
+            let Ok(cle) = liste.open_subkey(&nom_de_cle) else {
+                continue;
+            };
+            let texte = |v: &str| sur_une_ligne(&cle.get_value::<String, _>(v).unwrap_or_default());
+            let nom = texte("DisplayName");
+            if nom.trim().is_empty() {
+                continue;
+            }
+            let installation = texte("InstallDate");
+            let date_de_cle = if installation.len() == 8 && installation.bytes().all(|b| b.is_ascii_digit()) {
+                String::new()
+            } else {
+                cle.query_info().map_or_else(
+                    |_| String::new(),
+                    |i| {
+                        let t = i.get_last_write_time_system();
+                        format!("{:04}-{:02}-{:02}", t.wYear, t.wMonth, t.wDay)
+                    },
+                )
+            };
+            let _ = writeln!(
+                sortie,
+                "INS|{nom}|{installation}|{date_de_cle}|{}|{}",
+                texte("UninstallString"),
+                texte("QuietUninstallString")
+            );
+        }
+    }
+    sortie.push_str("INS_FIN\n");
+}
+
+/// Processus (« PRC|numéro|nom|chemin », le chemin quand Windows le donne) et ceux qui parlent à une autre machine
+/// (« CNX|numéro »), lus par les fonctions de Windows.
+#[cfg(windows)]
+fn processus_et_connexions(sortie: &mut String) {
+    use crate::machine::windows::processus;
+    use std::fmt::Write;
+    for p in processus::liste() {
+        let chemin = processus::chemin(p.pid).map(|c| sur_une_ligne(&c)).unwrap_or_default();
+        let _ = writeln!(sortie, "PRC|{}|{}|{chemin}", p.pid, sur_une_ligne(&p.nom));
+    }
+    sortie.push_str("PRC_FIN\n");
+    if let Some(connectes) = crate::protection::sortantes::processus_connectes() {
+        for pid in connectes {
+            let _ = writeln!(sortie, "CNX|{pid}");
+        }
+        sortie.push_str("CNX_FIN\n");
+    }
+}
+
+/// Les clés Run du compte et de la machine : « RUN|clé|nom|commande ». La clé est écrite comme PowerShell l'écrit
+/// (« HKCU:\… ») : c'est elle que la commande de retrait reprend.
+#[cfg(windows)]
+fn run_du_registre(sortie: &mut String) {
+    use std::fmt::Write;
+    use winreg::RegKey;
+    use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE};
+    for (racine, chemin, ecrit) in [
+        (
+            HKEY_CURRENT_USER,
+            r"Software\Microsoft\Windows\CurrentVersion\Run",
+            r"HKCU:\Software\Microsoft\Windows\CurrentVersion\Run",
+        ),
+        (
+            HKEY_LOCAL_MACHINE,
+            r"Software\Microsoft\Windows\CurrentVersion\Run",
+            r"HKLM:\Software\Microsoft\Windows\CurrentVersion\Run",
+        ),
+        (
+            HKEY_LOCAL_MACHINE,
+            r"Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Run",
+            r"HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Run",
+        ),
+    ] {
+        let Ok(cle) = RegKey::predef(racine).open_subkey(chemin) else {
+            continue;
+        };
+        for (nom, _) in cle.enum_values().flatten() {
+            let valeur = cle.get_value::<String, _>(&nom).unwrap_or_default();
+            let _ = writeln!(sortie, "RUN|{ecrit}|{}|{}", sur_une_ligne(&nom), sur_une_ligne(&valeur));
+        }
+    }
+    sortie.push_str("RUN_FIN\n");
+}
+
+/// Les programmes, installateurs et archives posés dans Téléchargements, sur le Bureau, dans le dossier temporaire et
+/// dans les programmes du compte, sous-dossiers compris (un niveau) : « FIC|chemin|date ».
+#[cfg(windows)]
+fn fichiers_poses_windows(sortie: &mut String) {
+    use std::fmt::Write;
+    use std::path::{Path, PathBuf};
+    let profil = std::env::var_os("USERPROFILE").map(PathBuf::from);
+    // Le Bureau peut être ailleurs (OneDrive) : son vrai chemin est dans le registre.
+    let bureau = winreg::RegKey::predef(winreg::enums::HKEY_CURRENT_USER)
+        .open_subkey(r"Software\Microsoft\Windows\CurrentVersion\Explorer\Shell Folders")
+        .and_then(|k| k.get_value::<String, _>("Desktop"))
+        .ok()
+        .map(PathBuf::from)
+        .or_else(|| profil.as_ref().map(|p| p.join("Desktop")));
+    let dossiers = [
+        profil.as_ref().map(|p| p.join("Downloads")),
+        bureau,
+        std::env::var_os("TEMP").map(PathBuf::from),
+        std::env::var_os("LOCALAPPDATA").map(|d| PathBuf::from(d).join("Programs")),
+    ];
+    let a_garder = |c: &Path| {
+        c.extension()
+            .and_then(|e| e.to_str())
+            .is_some_and(|e| ["exe", "msi", "zip"].iter().any(|x| e.eq_ignore_ascii_case(x)))
+    };
+    for dossier in dossiers.into_iter().flatten().filter(|d| d.is_absolute()) {
+        let mut a_lire = vec![(dossier, 0)];
+        while let Some((d, niveau)) = a_lire.pop() {
+            for entree in std::fs::read_dir(&d).into_iter().flatten().flatten() {
+                let Ok(type_) = entree.file_type() else {
+                    continue;
+                };
+                let chemin = entree.path();
+                if type_.is_dir() && niveau == 0 {
+                    a_lire.push((chemin, 1));
+                } else if type_.is_file() && a_garder(&chemin) {
+                    let date = entree
+                        .metadata()
+                        .and_then(|m| m.modified())
+                        .map(|t| {
+                            chrono::DateTime::<chrono::Local>::from(t)
+                                .format("%Y-%m-%d")
+                                .to_string()
+                        })
+                        .unwrap_or_default();
+                    let _ = writeln!(sortie, "FIC|{}|{date}", sur_une_ligne(&chemin.to_string_lossy()));
+                }
+            }
+        }
+    }
+    sortie.push_str("FIC_FIN\n");
 }
 
 /// Les services, lus dans le registre, au format de la section SVC : « SVC|nom|nom affiché||chemin », puis SVC_FIN.

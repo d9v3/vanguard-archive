@@ -329,6 +329,25 @@ mod windows {
     }
 }
 
+/// Les processus qui ont une connexion TCP établie vers une autre machine (ni 127.0.0.1 ni ::1), lus par Windows sans
+/// PowerShell : pour « Quelqu'un contrôle mon ordi ? ». `None` : aucune des deux tables lisible.
+#[cfg(windows)]
+pub(crate) fn processus_connectes() -> Option<std::collections::BTreeSet<u32>> {
+    let v4 = windows::table_tcp(2).map(|t| lire_table_tcp(&t, false));
+    let v6 = windows::table_tcp(23).map(|t| lire_table_tcp(&t, true));
+    if v4.is_none() && v6.is_none() {
+        return None;
+    }
+    Some(
+        v4.into_iter()
+            .chain(v6)
+            .flatten()
+            .filter(|(ip, _, _)| !ip.is_loopback())
+            .map(|(_, _, pid)| pid)
+            .collect(),
+    )
+}
+
 /// Lu par les fonctions de Windows, sans PowerShell : rien à lancer, et quelques millisecondes au lieu de secondes.
 /// `None` : aucune des deux tables lisible.
 #[cfg(windows)]
