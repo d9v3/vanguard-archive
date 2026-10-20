@@ -111,6 +111,16 @@ pub(crate) fn com<T: Send + 'static>(
     quoi: &str,
     lecture: impl FnOnce() -> windows::core::Result<T> + Send + 'static,
 ) -> Option<T> {
+    com_delai(nom, quoi, DELAI, lecture)
+}
+
+/// Comme `com`, avec un délai choisi : la recherche de Windows Update peut prendre deux ou trois minutes.
+pub(crate) fn com_delai<T: Send + 'static>(
+    nom: &str,
+    quoi: &str,
+    delai: Duration,
+    lecture: impl FnOnce() -> windows::core::Result<T> + Send + 'static,
+) -> Option<T> {
     let (envoi, reception) = mpsc::channel();
     std::thread::Builder::new()
         .name("com".into())
@@ -125,10 +135,10 @@ pub(crate) fn com<T: Send + 'static>(
             let _ = envoi.send(resultat);
         })
         .ok()?;
-    if let Ok(resultat) = reception.recv_timeout(DELAI) {
+    if let Ok(resultat) = reception.recv_timeout(delai) {
         resultat.ok()
     } else {
-        crate::journal::erreur(nom, &format!("délai de {} s dépassé\n{quoi}", DELAI.as_secs()));
+        crate::journal::erreur(nom, &format!("délai de {} s dépassé\n{quoi}", delai.as_secs()));
         None
     }
 }

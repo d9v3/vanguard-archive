@@ -72,16 +72,92 @@ fn installer_windows_update(pilotes: bool) -> Vec<String> {
     ]
 }
 
+/// La catégorie « Mises à jour de sécurité » de Windows Update : son identifiant est le même dans toutes les langues.
+const CATEGORIE_SECURITE: &str = "0fa1201d-4330-4fa8-8ae9-b877473b6441";
+
+/// Ce que l'API de Windows Update a répondu.
+enum Recherche {
+    /// Lignes « type|gravité|titre », comme le script PowerShell.
+    Faite(String),
+    /// La recherche a échoué (hors ligne, service bloqué) : inutile de la refaire par PowerShell.
+    Echouee,
+}
+
+/// La recherche de Windows Update par son API (COM). `None` : l'API ne répond pas du tout, PowerShell prend le
+/// relais.
+fn windows_update_com() -> Option<Recherche> {
+    use windows::Win32::System::Com::{CLSCTX_INPROC_SERVER, CoCreateInstance};
+    use windows::Win32::System::UpdateAgent::{IUpdateSession, UpdateSession, orcSucceeded, orcSucceededWithErrors};
+    use windows::core::BSTR;
+    wmi::com_delai(
+        "Windows Update",
+        "IUpdateSearcher::Search",
+        std::time::Duration::from_secs(180),
+        || {
+            // SAFETY : COM est initialisé dans ce fil (par `wmi::com_delai`) ; les collections de Windows Update
+            // s'indexent de 0 à Count - 1, bornes lues avant chaque accès.
+            unsafe {
+                let session: IUpdateSession = CoCreateInstance(&UpdateSession, None, CLSCTX_INPROC_SERVER)?;
+                let chercheur = session.CreateUpdateSearcher()?;
+                let Ok(resultat) = chercheur.Search(&BSTR::from("IsInstalled=0 and IsHidden=0")) else {
+                    return Ok(Recherche::Echouee);
+                };
+                // Une recherche qui n'a pas abouti ne dit pas « à jour », même avec une liste vide.
+                let code = resultat.ResultCode()?;
+                if code != orcSucceeded && code != orcSucceededWithErrors {
+                    return Ok(Recherche::Echouee);
+                }
+                let trouvees = resultat.Updates()?;
+                let mut lignes = Vec::new();
+                for i in 0..trouvees.Count()? {
+                    let maj = trouvees.get_Item(i)?;
+                    let mut gravite = maj.MsrcSeverity().map(|g| g.to_string()).unwrap_or_default();
+                    // La mise à jour cumulative de sécurité arrive souvent sans gravité (vu dans la VM) : sa catégorie
+                    // la classe alors « Important », comme dans le script.
+                    if gravite.is_empty() {
+                        let categories = maj.Categories()?;
+                        for j in 0..categories.Count()? {
+                            if categories
+                                .get_Item(j)?
+                                .CategoryID()?
+                                .to_string()
+                                .eq_ignore_ascii_case(CATEGORIE_SECURITE)
+                            {
+                                gravite = "Important".into();
+                            }
+                        }
+                    }
+                    lignes.push(format!("{}|{gravite}|{}", maj.Type()?.0, maj.Title()?));
+                }
+                Ok(Recherche::Faite(lignes.join("\n")))
+            }
+        },
+    )
+}
+
 /// Ce que Windows Update propose et qui n'est pas installé : correctifs (Windows, .NET, Defender) et pilotes.
 fn windows_update() -> Vec<Constat> {
-    let Some(sortie) = ps_delai(
+    let sortie = match windows_update_com() {
+        Some(Recherche::Faite(lignes)) => Some(lignes),
+        Some(Recherche::Echouee) => None,
+        None => windows_update_powershell(),
+    };
+    windows_update_juge(sortie)
+}
+
+fn windows_update_powershell() -> Option<String> {
+    ps_delai(
         // La mise à jour cumulative de sécurité arrive souvent sans gravité (vu dans la VM) : sa catégorie
         // « Mises à jour de sécurité » (identifiant fixe, quelle que soit la langue) la classe alors « Important ».
         "foreach ($u in (New-Object -ComObject Microsoft.Update.Session).CreateUpdateSearcher().Search('IsInstalled=0 and IsHidden=0').Updates) \
          { $g = $u.MsrcSeverity; foreach ($c in $u.Categories) { if (-not $g -and $c.CategoryID -eq '0fa1201d-4330-4fa8-8ae9-b877473b6441') { $g = 'Important' } }; \
          \"$([int]$u.Type)|$g|$($u.Title)\" }",
         180,
-    ) else {
+    )
+}
+
+fn windows_update_juge(sortie: Option<String>) -> Vec<Constat> {
+    let Some(sortie) = sortie else {
         return vec![
             impossible(
                 "Windows Update",
@@ -157,19 +233,154 @@ fn constat_windows_update(
     .corriger(action, &installer_windows_update(pilotes))
 }
 
-/// Les quatre petites lectures de `vanguard maj` (redémarrage, signatures, périphériques, cartes graphiques) en un
-/// seul PowerShell : une seconde de démarrage au lieu de quatre. Chaque section a son try et se termine par
-/// « NOM_FIN » : une lecture qui échoue (Defender remplacé par un antivirus tiers…) ne prive pas les autres.
-fn lectures_rapides() -> Option<String> {
-    ps(
+/// Les quatre petites lectures de `vanguard maj` (redémarrage, signatures, périphériques, cartes graphiques), chacune
+/// avec son script de secours. Chaque section a son try et se termine par « NOM_FIN » : une lecture qui échoue
+/// (Defender remplacé par un antivirus tiers…) ne prive pas les autres.
+const LECTURES_RAPIDES: [(&str, &str); 4] = [
+    (
+        "REB",
         "try { 'REB|' + [bool]((New-Object -ComObject Microsoft.Update.SystemInfo).RebootRequired -or \
-         (Test-Path 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Component Based Servicing\\RebootPending')); 'REB_FIN' } catch {}; \
-         try { 'SIG|' + (Get-MpComputerStatus).AntivirusSignatureAge; 'SIG_FIN' } catch {}; \
-         try { Get-CimInstance Win32_PnPEntity -Filter 'ConfigManagerErrorCode <> 0 AND ConfigManagerErrorCode <> 22' | \
-         ForEach-Object { \"PNP|$($_.ConfigManagerErrorCode)|$(if ($_.Name) { $_.Name } else { $_.PNPDeviceID })\" }; 'PNP_FIN' } catch {}; \
-         try { Get-CimInstance Win32_VideoController | ForEach-Object { \
+         (Test-Path 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Component Based Servicing\\RebootPending')); 'REB_FIN' } catch {}",
+    ),
+    (
+        "SIG",
+        "try { 'SIG|' + (Get-MpComputerStatus).AntivirusSignatureAge; 'SIG_FIN' } catch {}",
+    ),
+    (
+        "PNP",
+        "try { Get-CimInstance Win32_PnPEntity -Filter 'ConfigManagerErrorCode <> 0 AND ConfigManagerErrorCode <> 22' | \
+         ForEach-Object { \"PNP|$($_.ConfigManagerErrorCode)|$(if ($_.Name) { $_.Name } else { $_.PNPDeviceID })\" }; 'PNP_FIN' } catch {}",
+    ),
+    (
+        "GPU",
+        "try { Get-CimInstance Win32_VideoController | ForEach-Object { \
          \"GPU|$($_.Name)|$($_.DriverVersion)|$(if ($_.DriverDate) { ((Get-Date) - $_.DriverDate).Days })\" }; 'GPU_FIN' } catch {}",
+    ),
+];
+
+/// Un redémarrage attendu : par Windows Update (son API) ou par la maintenance des composants (la clé du registre que
+/// le script testait).
+fn redemarrage_com() -> Option<Vec<String>> {
+    use windows::Win32::System::Com::{CLSCTX_INPROC_SERVER, CoCreateInstance};
+    use windows::Win32::System::UpdateAgent::{ISystemInformation, SystemInformation};
+    let windows_update = wmi::com("Windows Update", "ISystemInformation::RebootRequired", || {
+        // SAFETY : COM est initialisé dans ce fil (par `wmi::com`) ; SystemInformation est la classe de l'API.
+        unsafe {
+            let info: ISystemInformation = CoCreateInstance(&SystemInformation, None, CLSCTX_INPROC_SERVER)?;
+            Ok(info.RebootRequired()?.as_bool())
+        }
+    })?;
+    let composants = winreg::RegKey::predef(winreg::enums::HKEY_LOCAL_MACHINE)
+        .open_subkey(r"SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending")
+        .is_ok();
+    // Écrit comme le [bool] de PowerShell.
+    Some(vec![format!(
+        "REB|{}",
+        if windows_update || composants { "True" } else { "False" }
+    )])
+}
+
+fn signatures_wmi() -> Option<Vec<String>> {
+    let lignes = wmi::requete(
+        r"root\Microsoft\Windows\Defender",
+        "MSFT_MpComputerStatus",
+        "",
+        &["AntivirusSignatureAge"],
+    )?;
+    let age = lignes.first()?["AntivirusSignatureAge"].entier()?;
+    Some(vec![format!("SIG|{age}")])
+}
+
+fn peripheriques_wmi() -> Option<Vec<String>> {
+    let lignes = wmi::requete(
+        r"root\cimv2",
+        "Win32_PnPEntity",
+        "ConfigManagerErrorCode <> 0 AND ConfigManagerErrorCode <> 22",
+        &["ConfigManagerErrorCode", "Name", "PNPDeviceID"],
+    )?;
+    Some(
+        lignes
+            .iter()
+            .map(|l| {
+                let code = l["ConfigManagerErrorCode"]
+                    .entier()
+                    .map(|c| c.to_string())
+                    .unwrap_or_default();
+                let nom = l["Name"]
+                    .texte()
+                    .filter(|n| !n.is_empty())
+                    .or_else(|| l["PNPDeviceID"].texte())
+                    .unwrap_or_default();
+                format!("PNP|{code}|{nom}")
+            })
+            .collect(),
     )
+}
+
+/// Jours écoulés depuis une date CIM (« 20240115000000.000000-000 »), comme `((Get-Date) - $_.DriverDate).Days` ;
+/// `None` sans date lisible.
+fn jours_depuis(date_cim: &str, aujourd_hui: chrono::NaiveDate) -> Option<i64> {
+    let date = chrono::NaiveDate::parse_from_str(date_cim.get(..8)?, "%Y%m%d").ok()?;
+    Some((aujourd_hui - date).num_days())
+}
+
+fn cartes_graphiques_wmi() -> Option<Vec<String>> {
+    let lignes = wmi::requete(
+        r"root\cimv2",
+        "Win32_VideoController",
+        "",
+        &["Name", "DriverVersion", "DriverDate"],
+    )?;
+    let aujourd_hui = chrono::Local::now().date_naive();
+    Some(
+        lignes
+            .iter()
+            .map(|l| {
+                let jours = l["DriverDate"]
+                    .texte()
+                    .and_then(|d| jours_depuis(d, aujourd_hui))
+                    .map(|j| j.to_string())
+                    .unwrap_or_default();
+                format!(
+                    "GPU|{}|{}|{jours}",
+                    l["Name"].texte().unwrap_or_default(),
+                    l["DriverVersion"].texte().unwrap_or_default()
+                )
+            })
+            .collect(),
+    )
+}
+
+/// Les sections « NOM|… » puis « NOM_FIN » des quatre lectures : sans PowerShell (COM, WMI, registre), et un seul
+/// PowerShell pour celles qui n'ont pas répondu.
+fn lectures_rapides() -> Option<String> {
+    let lues = [
+        redemarrage_com(),
+        signatures_wmi(),
+        peripheriques_wmi(),
+        cartes_graphiques_wmi(),
+    ];
+    let mut sortie = String::new();
+    let mut secours = Vec::new();
+    for ((nom, script), lu) in LECTURES_RAPIDES.iter().zip(lues) {
+        match lu {
+            Some(lignes) => {
+                for l in lignes {
+                    sortie.push_str(&l);
+                    sortie.push('\n');
+                }
+                sortie.push_str(nom);
+                sortie.push_str("_FIN\n");
+            }
+            None => secours.push(*script),
+        }
+    }
+    if !secours.is_empty()
+        && let Some(ps) = ps(&secours.join("; "))
+    {
+        sortie.push_str(&ps);
+    }
+    (!sortie.is_empty()).then_some(sortie)
 }
 
 fn redemarrage_en_attente(lectures: Option<&str>) -> Constat {
@@ -505,6 +716,41 @@ pub fn mises_a_jour_completes(seulement: Option<&[&str]>) -> Vec<Constat> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Sous Wine, l'API de Windows Update n'est qu'une ébauche : jamais une recherche « faite » qui dirait Windows
+    /// à jour.
+    #[test]
+    fn jours_d_un_pilote() {
+        let jour = chrono::NaiveDate::from_ymd_opt(2026, 10, 20).unwrap();
+        assert_eq!(jours_depuis("20260101000000.000000-000", jour), Some(292));
+        assert_eq!(jours_depuis("20261020000000.000000-000", jour), Some(0));
+        assert_eq!(jours_depuis("", jour), None);
+        assert_eq!(jours_depuis("pas une date", jour), None);
+    }
+
+    /// Chaque section rendue est complète (son marqueur de fin), lue par les fonctions de toujours.
+    #[test]
+    fn lectures_rapides_completes() {
+        if let Some(l) = lectures_rapides().as_deref() {
+            for nom in ["REB", "SIG", "PNP", "GPU"] {
+                let lignes = l.lines().filter(|x| x.starts_with(&format!("{nom}|"))).count();
+                assert!(lignes == 0 || l.lines().any(|x| x == format!("{nom}_FIN")), "{nom}");
+            }
+            let _ = (
+                redemarrage_en_attente(Some(l)),
+                peripheriques(Some(l)),
+                cartes_graphiques(Some(l)),
+            );
+        }
+    }
+
+    #[test]
+    fn windows_update_sous_wine() {
+        let r = windows_update_com();
+        if std::path::Path::new(r"C:\windows\system32\wineboot.exe").is_file() {
+            assert!(!matches!(r, Some(Recherche::Faite(_))));
+        }
+    }
 
     #[test]
     fn tableau_de_winget() {
