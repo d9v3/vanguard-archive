@@ -294,6 +294,18 @@ regle!(
 );
 
 regle!(
+    "LNX-CPT-002",
+    Os::Linux,
+    351,
+    (
+        "blocage des comptes et longueur des mots de passe (PAM)",
+        "account lockout and password length (PAM)"
+    ),
+    &[],
+    || pam()
+);
+
+regle!(
     "LNX-WIF-001",
     Os::Linux,
     360,

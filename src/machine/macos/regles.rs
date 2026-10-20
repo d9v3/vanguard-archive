@@ -76,6 +76,18 @@ regle!("MAC-PAR-001", Os::MacOs, 170, ("AirDrop", "AirDrop"), &[], || {
 });
 
 regle!(
+    "MAC-RES-002",
+    Os::MacOs,
+    175,
+    (
+        "découverte automatique du proxy (WPAD)",
+        "automatic proxy discovery (WPAD)"
+    ),
+    &[],
+    || durcissement::decouverte_proxy().into_iter().collect()
+);
+
+regle!(
     "MAC-SES-001",
     Os::MacOs,
     180,
@@ -125,6 +137,15 @@ regle!(
     ),
     &[],
     || privileges::fichiers_secrets().into_iter().collect()
+);
+
+regle!(
+    "MAC-PRV-004",
+    Os::MacOs,
+    235,
+    ("dossiers de commandes ouverts à tous", "command folders open to all"),
+    &[],
+    || privileges::dossiers_de_commandes().into_iter().collect()
 );
 
 regle!(
