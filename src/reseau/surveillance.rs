@@ -1,5 +1,6 @@
-//! Surveillance automatique : scan du réseau toutes les heures, notification si un appareil inconnu apparaît ; et les
-//! programmes arrivés dans Téléchargements, à vérifier avant de les ouvrir (rien n'est bloqué).
+//! Surveillance automatique : scan du réseau toutes les heures, notification si un appareil inconnu apparaît ; les
+//! programmes arrivés dans Téléchargements, à vérifier avant de les ouvrir ; un programme qui parle à un serveur de
+//! commande de botnet connu (rien n'est bloqué).
 //! Planificateur natif de chaque système : timer systemd (Linux), Planificateur de tâches (Windows), agent launchd
 //! (macOS).
 
@@ -286,6 +287,9 @@ async fn passe() {
         );
     }
     for (titre, texte) in crate::protection::telechargement::nouveaux_a_signaler() {
+        notifier(&titre, &texte);
+    }
+    for (titre, texte) in crate::protection::sortantes::botnets_a_signaler() {
         notifier(&titre, &texte);
     }
     let Ok(r) = reseau::executer(Options {

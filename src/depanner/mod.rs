@@ -7,7 +7,7 @@ mod compte;
 mod depart;
 mod depuis_maj;
 mod imprimante;
-mod infection;
+pub(crate) mod infection;
 mod nouveau;
 mod reseau;
 mod son;

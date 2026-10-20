@@ -127,7 +127,7 @@ pub(super) fn mots_de_passe(signe: Signe) -> Vec<&'static str> {
     m
 }
 
-pub(super) fn infection() {
+pub(crate) fn infection() {
     let Some(signe) = question(
         tr!(
             "Qu'est-ce qui te fait penser à une infection ?",

@@ -861,6 +861,55 @@ fn botnets() -> (Botnets, Vec<String>) {
     (botnets, absentes)
 }
 
+/// Les connexions d'une passe qui n'étaient pas déjà signalées à la passe d'avant (`avant` : une par ligne).
+fn nouvelles_alertes<'a>(avant: &str, actuelles: &'a BTreeSet<String>) -> Vec<&'a String> {
+    let deja: BTreeSet<&str> = avant.lines().collect();
+    actuelles.iter().filter(|a| !deja.contains(a.as_str())).collect()
+}
+
+/// Pour la surveillance horaire : les programmes qui parlent à un serveur de commande connu, en (titre, texte) de
+/// notification. Les listes se rafraîchissent au même rythme que pour l'écran (elles ne disent à personne ce qu'on a
+/// trouvé) ; sans elles, rien n'est dit ici : l'écran dit, lui, ce qui n'a pas pu être vérifié. Une connexion déjà
+/// signalée à la passe d'avant ne l'est pas deux fois.
+pub(crate) fn botnets_a_signaler() -> Vec<(String, String)> {
+    let Some(connexions) = connexions() else {
+        return Vec::new();
+    };
+    let (botnets, _) = botnets();
+    let actuelles: BTreeSet<String> = connexions
+        .iter()
+        .filter_map(|c| {
+            let serveur = botnets.serveur(c)?;
+            let programme = c
+                .programme
+                .clone()
+                .unwrap_or_else(|| tr!("programme d'un autre compte", "another account's program").to_string());
+            Some(format!("{programme} → {serveur}"))
+        })
+        .collect();
+    let fichier = crate::reseau::dossier_local().join("surveillance-botnets.txt");
+    let avant = std::fs::read_to_string(&fichier).unwrap_or_default();
+    let alertes = nouvelles_alertes(&avant, &actuelles)
+        .into_iter()
+        .map(|a| {
+            (
+                tr!(
+                    "Vanguard : programme relié à un botnet",
+                    "Vanguard: program connected to a botnet"
+                )
+                .to_string(),
+                trf!(
+                    "{a} : un serveur de commande connu. Ouvre « Après une infection » dans Vanguard : coupe Internet d'abord.",
+                    "{a}: a known command server. Open “After an infection” in Vanguard: cut the Internet first."
+                ),
+            )
+        })
+        .collect();
+    let _ = std::fs::create_dir_all(crate::reseau::dossier_local());
+    let _ = std::fs::write(&fichier, actuelles.into_iter().collect::<Vec<_>>().join("\n"));
+    alertes
+}
+
 // ───────────────────────────── La clé de ThreatFox ─────────────────────────────
 
 /// La réponse de l'API, gardée à côté de la clé : effacée quand la clé change, pour que la nouvelle serve aussitôt.
@@ -939,30 +988,43 @@ fn donner_cle() {
 /// Depuis le menu : l'écran, puis Entrée pour revenir, ou C pour donner ou retirer la clé de ThreatFox. Le retour au
 /// menu se demande ici, pas après : une seule pause.
 pub fn menu() {
-    afficher();
+    let botnet = afficher_et_juger();
     loop {
-        let reponse = if fichier_cle().is_file() {
+        let cle = fichier_cle().is_file();
+        let cle_texte = if cle {
+            tr!("C pour retirer ta clé ThreatFox", "C to remove your ThreatFox key")
+        } else {
+            tr!(
+                "C pour donner une clé ThreatFox (facultative)",
+                "C to give a ThreatFox key (optional)"
+            )
+        };
+        // Un serveur de commande trouvé : le parcours qui dit quoi faire passe en premier, en tenant sur une ligne.
+        let reponse = if botnet {
             demander(&trf!(
-                "\n{GRIS}Entrée pour revenir au menu, C pour retirer ta clé ThreatFox…{RESET} ",
-                "\n{GRIS}Enter to go back to the menu, C to remove your ThreatFox key…{RESET} "
+                "\n{GRIS}I : « Après une infection » · Entrée : revenir · C : clé ThreatFox…{RESET} ",
+                "\n{GRIS}I: “After an infection” · Enter: go back · C: ThreatFox key…{RESET} "
             ))
         } else {
             demander(&trf!(
-                "\n{GRIS}Entrée pour revenir au menu, C pour donner une clé ThreatFox (facultative)…{RESET} ",
-                "\n{GRIS}Enter to go back to the menu, C to give a ThreatFox key (optional)…{RESET} "
+                "\n{GRIS}Entrée pour revenir au menu, {cle_texte}…{RESET} ",
+                "\n{GRIS}Enter to go back to the menu, {cle_texte}…{RESET} "
             ))
         };
-        if !reponse.eq_ignore_ascii_case("c") {
-            return;
-        }
-        if fichier_cle().is_file() {
-            oublier_cle();
-            trp!(
-                "  {VERT}✔{RESET} Clé ThreatFox retirée de cet ordinateur.",
-                "  {VERT}✔{RESET} ThreatFox key removed from this computer."
-            );
-        } else {
-            donner_cle();
+        match reponse.to_lowercase().as_str() {
+            "i" if botnet => {
+                crate::depanner::infection::infection();
+                return;
+            }
+            "c" if cle => {
+                oublier_cle();
+                trp!(
+                    "  {VERT}✔{RESET} Clé ThreatFox retirée de cet ordinateur.",
+                    "  {VERT}✔{RESET} ThreatFox key removed from this computer."
+                );
+            }
+            "c" => donner_cle(),
+            _ => return,
         }
     }
 }
@@ -1149,6 +1211,11 @@ fn serveurs(connexions: &[(&Connexion, Option<&String>)]) -> String {
 
 /// Menu Antivirus et protection › Qui parle à Internet ?, ou `vanguard sortantes`.
 pub fn afficher() {
+    let _ = afficher_et_juger();
+}
+
+/// L'écran, puis : un programme parle-t-il à un serveur de commande connu ?
+fn afficher_et_juger() -> bool {
     titre(tr!("Qui parle à Internet ?", "Who talks to the Internet?"));
     for ligne in envelopper(
         tr!(
@@ -1165,7 +1232,7 @@ pub fn afficher() {
             "  ✖ Impossible de lire les connexions de cet ordinateur.",
             "  ✖ Could not read this computer's connections."
         );
-        return;
+        return false;
     };
     let connexions: Vec<Connexion> = toutes.into_iter().filter(|c| sur_internet(c.distante)).collect();
     if connexions.is_empty() {
@@ -1173,7 +1240,7 @@ pub fn afficher() {
             "  {VERT}✔{RESET} Aucune connexion vers Internet en ce moment.",
             "  {VERT}✔{RESET} No connection to the Internet right now."
         );
-        return;
+        return false;
     }
     let adresses: BTreeSet<IpAddr> = connexions.iter().map(|c| c.distante).collect();
     trp!(
@@ -1190,6 +1257,8 @@ pub fn afficher() {
     // Les listes des serveurs de botnets, une fois pour toutes les connexions. Une liste indisponible : on le dira
     // plus bas, et aucune connexion ne sera dédouanée pour autant.
     let (botnets, listes_absentes) = botnets();
+    // Toutes les connexions, celles des autres comptes comprises : un programme du système détourné parle aussi.
+    let vers_botnets: BTreeSet<String> = connexions.iter().filter_map(|c| botnets.serveur(c)).collect();
 
     // Regroupées par programme ; celles des autres comptes à part.
     let mut groupes: Vec<Groupe> = Vec::new();
@@ -1333,6 +1402,20 @@ pub fn afficher() {
             "  {GRIS}To see everything: {comment}.{RESET}"
         );
     }
+    if !vers_botnets.is_empty() {
+        let serveurs = resume(&vers_botnets.iter().collect::<Vec<_>>(), 3, ", ");
+        println!();
+        for ligne in envelopper(
+            &trf!(
+                "⚠ Cet ordinateur parle à un serveur de commande de botnet ({serveurs}) : quelqu'un peut le piloter. Coupe Internet d'abord (câble ou Wi-Fi), puis suis « Après une infection » (Dépanner).",
+                "⚠ This computer talks to a botnet command server ({serveurs}): someone may be controlling it. Cut the Internet first (cable or Wi-Fi), then follow “After an infection” (Troubleshoot)."
+            ),
+            LARGEUR - 2,
+        ) {
+            println!("  {}{ligne}{RESET}", couleur(Niveau::Eleve));
+        }
+    }
+    !vers_botnets.is_empty()
 }
 
 #[cfg(test)]
@@ -1686,6 +1769,21 @@ mod tests {
                 r#"{"query_status": "ok", "data": [{"ioc": "x:1", "ioc_type": "ip:port", "threat_type": "botnet_cc", "confidence_level": 100}]}"#
             )
             .is_none()
+        );
+    }
+
+    #[test]
+    fn botnet_signale_une_fois() {
+        let actuelles = BTreeSet::from(["x → 192.0.2.25:6662 (Cobalt Strike, ThreatFox)".to_string()]);
+        assert_eq!(nouvelles_alertes("", &actuelles).len(), 1);
+        // Déjà vue à la passe d'avant : pas de deuxième notification ; une autre, si.
+        assert_eq!(
+            nouvelles_alertes("x → 192.0.2.25:6662 (Cobalt Strike, ThreatFox)", &actuelles).len(),
+            0
+        );
+        assert_eq!(
+            nouvelles_alertes("y → 198.51.100.1 (Feodo Tracker)", &actuelles).len(),
+            1
         );
     }
 
