@@ -34,7 +34,7 @@ modification. Sur GitHub, `@claude` dans un ticket ou une demande de fusion le f
 | `src/risk.rs` | base de connaissances des ports et niveaux de risque |
 | `src/reseau/connexion.rs` | test de connexion pour le jeu |
 | `src/protection/antivirus.rs` | ClamAV / Defender, quarantaine |
-| `src/protection/yara.rs`, `src/protection/pieges.rs` | analyse YARA (règles intégrées, moteur du système) ; fichiers-pièges contre les rançongiciels |
+| `src/protection/yara.rs`, `src/protection/pieges.rs` | analyse YARA (règles intégrées, YARA-X compilé dans le programme) ; fichiers-pièges contre les rançongiciels |
 | `src/protection/outil.rs`, `src/protection/secrets_git.rs`, `src/protection/conteneurs.rs` | secrets dans l'historique des projets git (règles de Vanguard, gitleaks en plus s'il est là) ; outils libres lancés s'ils sont installés, installation proposée sinon (trivy sur les images Docker ou Podman) |
 | `src/reseau/surveillance.rs` | minuterie systemd / Planificateur de tâches / agent launchd, notifications |
 | `src/rapport.rs`, `src/historique.rs` | rapport HTML, historique des bilans, courbe des notes |
@@ -95,7 +95,9 @@ Le jugement s'écrit à part (`juger_…`, sans rien lire du système), pour se 
 
 ## Compiler, tester, déployer
 
-Prérequis : `rustup target add x86_64-unknown-linux-musl x86_64-pc-windows-gnu` et `mingw-w64-gcc`.
+Prérequis : `rustup target add x86_64-unknown-linux-musl x86_64-pc-windows-gnu`, `musl` (musl-gcc), `mingw-w64-gcc`
+et `clang` : YARA-X compile un peu de C pour chaque cible (clang pour clippy sur les cibles Mac, voir
+`outils/verifier.sh`).
 
 ```sh
 outils/deployer.sh     # compile Linux (musl, statique) + Windows, installe en local, pousse sur GitHub, met à jour la clé

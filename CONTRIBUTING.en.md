@@ -34,7 +34,7 @@ turn on once with `/install-github-app`).
 | `src/risk.rs` | knowledge base of ports and risk levels |
 | `src/reseau/connexion.rs` | connection test for gaming |
 | `src/protection/antivirus.rs` | ClamAV / Defender, quarantine |
-| `src/protection/yara.rs`, `src/protection/pieges.rs` | YARA scan (bundled rules, system engine); decoy files against ransomware |
+| `src/protection/yara.rs`, `src/protection/pieges.rs` | YARA scan (bundled rules, YARA-X compiled into the program); decoy files against ransomware |
 | `src/protection/outil.rs`, `src/protection/secrets_git.rs`, `src/protection/conteneurs.rs` | secrets in git project history (Vanguard's rules, plus gitleaks when present); open source tools run when installed, installation offered otherwise (trivy on Docker or Podman images) |
 | `src/reseau/surveillance.rs` | systemd timer / Task Scheduler / launchd agent, notifications |
 | `src/rapport.rs`, `src/historique.rs` | HTML report, check history, grade curve |
@@ -95,7 +95,9 @@ The judgment is written separately (`juger_…`, reading nothing from the system
 
 ## Build, test, deploy
 
-Requirements: `rustup target add x86_64-unknown-linux-musl x86_64-pc-windows-gnu` and `mingw-w64-gcc`.
+Requirements: `rustup target add x86_64-unknown-linux-musl x86_64-pc-windows-gnu`, `musl` (musl-gcc), `mingw-w64-gcc`
+and `clang`: YARA-X compiles a little C for each target (clang for clippy on the Mac targets, see
+`outils/verifier.sh`).
 
 ```sh
 outils/deployer.sh     # builds Linux (musl, static) + Windows, installs locally, pushes to GitHub, updates the key

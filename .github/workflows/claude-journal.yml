@@ -31,6 +31,9 @@ jobs:
           rustup update stable
           rustup default stable
           rustup target add x86_64-unknown-linux-musl
+          # musl-gcc : YARA-X compile un petit fichier C pour la cible musl.
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq musl-tools
       - uses: anthropics/claude-code-action@5eb090f3c3afd701a0672cd32981197ca27688f6 # v1.0.253
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
