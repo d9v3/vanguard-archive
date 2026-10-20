@@ -983,10 +983,12 @@ mod tests_lancer_vers {
     }
 
     #[cfg(unix)]
+    /// Nommé par processus : verifier.sh lance deux suites Linux en même temps (avec et sans Internet) sur le même
+    /// dossier jetable, et le `sh` de l'une écrivait « apres » dans le fichier que l'autre relisait.
     fn fichier_jetable(nom: &str) -> (std::path::PathBuf, std::fs::File) {
         let dossier = crate::reseau::dossier_local();
         std::fs::create_dir_all(&dossier).unwrap();
-        let chemin = dossier.join(nom);
+        let chemin = dossier.join(format!("{}-{nom}", std::process::id()));
         (chemin.clone(), std::fs::File::create(&chemin).unwrap())
     }
 

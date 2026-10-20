@@ -441,6 +441,17 @@ fn lire_flatpak_portails(texte: &str) -> Vec<Acces> {
 /// `flatpak info --show-permissions <application>` : les permissions fixées à l'installation (et les réglages
 /// ajoutés), qui passent outre les portails. Tous les appareils : la caméra ; le son de PulseAudio ou PipeWire : le
 /// micro ; le carnet d'adresses (Evolution, Akonadi) ; GeoClue : la position.
+/// Une permission Flatpak qui ouvre tout le dossier personnel, ou toutes ses données (« home », « host »,
+/// « xdg-data », « ~/.local/share »…), en lecture ou en écriture (« :ro », « :rw », « :create » n'y changent rien).
+#[cfg(any(target_os = "linux", test))]
+fn dossier_personnel(valeur: &str) -> bool {
+    let sans_mode = valeur.split(':').next().unwrap_or(valeur).trim_end_matches('/');
+    matches!(
+        sans_mode,
+        "home" | "host" | "xdg-data" | "~" | "~/.local" | "~/.local/share" | "xdg-config"
+    )
+}
+
 #[cfg(any(target_os = "linux", test))]
 fn lire_flatpak_statiques(application: &str, texte: &str) -> Vec<Acces> {
     let mut trouvees: Vec<(Permission, &'static str)> = Vec::new();
@@ -455,8 +466,10 @@ fn lire_flatpak_statiques(application: &str, texte: &str) -> Vec<Acces> {
         };
         let valeurs = || valeur.split(';').map(str::trim);
         match (groupe, cle.trim()) {
+            // Tous les appareils : /dev/video* et /dev/snd, donc la caméra et le micro.
             ("Context", "devices") if valeurs().any(|v| v == "all") => {
                 trouvees.push((Permission::Camera, tr!("tous les appareils", "all devices")));
+                trouvees.push((Permission::Micro, tr!("tous les appareils", "all devices")));
             }
             ("Context", "sockets") if valeurs().any(|v| v == "pulseaudio") => {
                 trouvees.push((Permission::Micro, tr!("son (pulseaudio)", "sound (pulseaudio)")));
@@ -468,6 +481,12 @@ fn lire_flatpak_statiques(application: &str, texte: &str) -> Vec<Acces> {
                         trouvees.push((Permission::Camera, "PipeWire"));
                     } else if v.starts_with("xdg-data/evolution") || v.starts_with("~/.local/share/evolution") {
                         trouvees.push((Permission::Contacts, tr!("fichiers d'Evolution", "Evolution files")));
+                    } else if dossier_personnel(v) {
+                        // Tout le dossier personnel (ou toutes ses données) contient le carnet d'adresses.
+                        trouvees.push((
+                            Permission::Contacts,
+                            tr!("fichiers du dossier personnel", "home folder files"),
+                        ));
                     }
                 }
             }
@@ -900,6 +919,18 @@ mod tests {
             ]
         );
         assert!(a.iter().all(|x| x.application == "org.exemple.Visio"));
+        // Tout le dossier personnel (très courant : filesystems=home) donne le carnet d'adresses ; tous les
+        // appareils donnent aussi le micro (/dev/snd).
+        let large = "[Context]\nfilesystems=home:ro;xdg-download;\ndevices=all;\n";
+        let p: Vec<Permission> = lire_flatpak_statiques("org.exemple.Editeur", large)
+            .iter()
+            .map(|x| x.permission)
+            .collect();
+        assert!(p.contains(&Permission::Contacts) && p.contains(&Permission::Micro) && p.contains(&Permission::Camera));
+        assert!(
+            dossier_personnel("host") && dossier_personnel("xdg-data:create") && dossier_personnel("~/.local/share/")
+        );
+        assert!(!dossier_personnel("xdg-download") && !dossier_personnel("xdg-data/evolution"));
         // Un réglage qui retire (« !pulseaudio ») ou des appareils limités ne donnent rien.
         let sobre = "[Context]\nsockets=wayland;!pulseaudio;\ndevices=dri;\n\n[Session Bus Policy]\n\
                      org.gnome.evolution.dataserver.AddressBook10=none\n";

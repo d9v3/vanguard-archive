@@ -1044,8 +1044,10 @@ enum Comparaison {
 }
 
 /// La copie relue sur le disque (cache contourné, comme « Vérifier une copie ») puis comparée à l'original. rsync garde
-/// sur la copie l'heure de modification de l'original : un original plus récent a changé depuis la sauvegarde, ce
-/// n'est pas une copie abîmée. Deux secondes de marge : FAT et exFAT arrondissent l'heure.
+/// sur la copie l'heure de modification de l'original : un contenu différent n'est une copie abîmée que si les deux
+/// heures sont égales (c'est le « quick check » de rsync). Un original plus récent a changé depuis ; un original plus
+/// ancien a été remplacé (restauration, archive extraite) : rsync reprendra l'un comme l'autre au prochain passage.
+/// Deux secondes de marge : FAT et exFAT arrondissent l'heure.
 fn comparer(copie: &Path, original: &Path) -> Comparaison {
     let Ok(relue) = crate::copier::empreinte_relue(copie) else {
         return Comparaison::Illisible;
@@ -1057,8 +1059,9 @@ fn comparer(copie: &Path, original: &Path) -> Comparaison {
         return Comparaison::Identique;
     }
     let heure = |p: &Path| std::fs::metadata(p).and_then(|m| m.modified()).ok();
+    let marge = std::time::Duration::from_secs(2);
     match (heure(copie), heure(original)) {
-        (Some(c), Some(o)) if o > c + std::time::Duration::from_secs(2) => Comparaison::ModifieDepuis,
+        (Some(c), Some(o)) if o > c + marge || c > o + marge => Comparaison::ModifieDepuis,
         _ => Comparaison::Different,
     }
 }
@@ -1088,15 +1091,41 @@ fn fichiers_de(dossier: &Path) -> Vec<PathBuf> {
     trouves
 }
 
+/// L'original d'un fichier de la sauvegarde : rsync copie chaque dossier sauvegardé sous son nom
+/// (`disque/Documents`), et ce dossier peut être ailleurs que dans le dossier personnel (XDG_DOCUMENTS_DIR) : le
+/// premier composant du chemin relatif désigne la source, comme dans « Vérifier une copie ».
+fn original_de(relatif: &Path, sources: &[(String, PathBuf)]) -> Option<PathBuf> {
+    let mut morceaux = relatif.components();
+    let premier = morceaux.next()?.as_os_str().to_string_lossy().into_owned();
+    let (_, source) = sources.iter().find(|(nom, _)| *nom == premier)?;
+    Some(source.join(morceaux.as_path()))
+}
+
 /// La sauvegarde rsync de `destination` (un dossier par dossier sauvegardé : Documents, Images…) relue par
-/// échantillon et comparée aux originaux du dossier personnel `maison` : chaque fichier relu, avec son verdict.
-fn relire_sauvegarde(destination: &Path, maison: &Path) -> Vec<(PathBuf, Comparaison)> {
+/// échantillon et comparée aux originaux, `sources` = (nom du dossier sur la sauvegarde, dossier d'origine) : chaque
+/// fichier relu, avec son verdict. Un dossier de la sauvegarde qui ne correspond plus à aucune source reste sans
+/// original : rien n'est conclu sur lui.
+fn relire_sauvegarde(destination: &Path, sources: &[(String, PathBuf)]) -> Vec<(PathBuf, Comparaison)> {
     let fichiers = fichiers_de(destination);
     crate::copier::echantillon(&fichiers, A_RELIRE)
         .into_iter()
         .map(|relatif| {
-            let verdict = comparer(&destination.join(relatif), &maison.join(relatif));
+            let verdict = match original_de(relatif, sources) {
+                Some(original) => comparer(&destination.join(relatif), &original),
+                None => Comparaison::SansOriginal,
+            };
             (relatif.clone(), verdict)
+        })
+        .collect()
+}
+
+/// Les dossiers sauvegardés par Vanguard (Documents, Images…), nommés comme rsync les pose sur la sauvegarde.
+fn sources_actuelles() -> Vec<(String, PathBuf)> {
+    crate::copier::sources()
+        .into_iter()
+        .filter_map(|(_, chemin)| {
+            let nom = chemin.file_name()?.to_string_lossy().into_owned();
+            Some((nom, chemin))
         })
         .collect()
 }
@@ -1142,8 +1171,7 @@ pub fn verifier_sauvegarde() {
         ));
         return;
     }
-    let maison = PathBuf::from(std::env::var_os("HOME").unwrap_or_default());
-    let relus = relire_sauvegarde(&destination, &maison);
+    let relus = relire_sauvegarde(&destination, &sources_actuelles());
     if relus.is_empty() {
         mauvais(tr!(
             "La sauvegarde est vide : rsync n'y a encore rien copié (disque branché à midi ?). Rien n'a été vérifié.",
@@ -1239,12 +1267,19 @@ mod tests {
         ecrire(&sauvegarde, "facture.pdf", "même contenu", 7200);
         ecrire(&maison, "notes.txt", "écrit ce matin", 60);
         ecrire(&sauvegarde, "notes.txt", "écrit hier", 86_400);
+        // Même heure, contenu différent : la seule preuve d'une copie abîmée.
         ecrire(&maison, "photo.jpg", "original", 86_400);
-        ecrire(&sauvegarde, "photo.jpg", "abîmée", 3600);
+        ecrire(&sauvegarde, "photo.jpg", "abîmée", 86_400);
         ecrire(&sauvegarde, "efface.txt", "plus d'original", 86_400);
-        let mut relus = relire_sauvegarde(&sauvegarde, &maison);
+        // Remplacé par une version plus ancienne après la sauvegarde (restauration, archive) : pas abîmé.
+        ecrire(&maison, "ancien.txt", "version d'archive", 172_800);
+        ecrire(&sauvegarde, "ancien.txt", "version d'hier", 86_400);
+        // Les Documents peuvent être hors du dossier personnel : la source est nommée, pas devinée.
+        let sources = vec![("Documents".to_string(), maison.join("Documents"))];
+        let mut relus = relire_sauvegarde(&sauvegarde, &sources);
         relus.sort_by(|a, b| a.0.cmp(&b.0));
         let attendu = [
+            ("ancien.txt", Comparaison::ModifieDepuis),
             ("efface.txt", Comparaison::SansOriginal),
             ("facture.pdf", Comparaison::Identique),
             ("notes.txt", Comparaison::ModifieDepuis),
@@ -1255,6 +1290,12 @@ mod tests {
             assert_eq!(chemin, &PathBuf::from("Documents").join(nom));
             assert_eq!(*verdict, attendu, "{nom}");
         }
+        // Un dossier de la sauvegarde qui n'est plus une source : rien n'est conclu, jamais « abîmé ».
+        assert!(
+            relire_sauvegarde(&sauvegarde, &[])
+                .iter()
+                .all(|(_, v)| *v == Comparaison::SansOriginal)
+        );
         let _ = std::fs::remove_dir_all(&base);
     }
 
