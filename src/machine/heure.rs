@@ -62,35 +62,83 @@ fn juger(e: &Etat) -> Constat {
     }
 }
 
-/// « NTP=yes\nNTPSynchronized=no » (timedatectl show).
+/// Les services de temps que systemd sait piloter (listes de ntp-units.d : systemd-timesyncd, chronyd…), installés ;
+/// l'heure est automatique si l'un d'eux est activé. C'est la règle de timedated (« NTP » de timedatectl), lue sans le
+/// lancer. Aucun service installé (un conteneur) : rien à dire, comme « CanNTP=no ».
 #[cfg(any(target_os = "linux", test))]
-fn lire_timedatectl(texte: &str) -> Option<Etat> {
-    let valeur = |cle: &str| {
-        texte
-            .lines()
-            .find_map(|l| l.trim().strip_prefix(cle)?.strip_prefix('='))
-            .map(|v| v.trim() == "yes")
-    };
-    // Sans service de temps du tout (conteneur), timedatectl ne peut rien régler : rien à dire.
-    if valeur("CanNTP") == Some(false) {
+fn juger_unites(
+    listes: &str,
+    installee: impl Fn(&str) -> bool,
+    activee: impl Fn(&str) -> bool,
+    synchronisee: Option<bool>,
+) -> Option<Etat> {
+    let unites: Vec<&str> = listes
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && !l.starts_with('#'))
+        .filter(|u| installee(u))
+        .collect();
+    if unites.is_empty() {
         return None;
     }
     Some(Etat {
-        automatique: valeur("NTP")?,
-        synchronisee: valeur("NTPSynchronized"),
+        automatique: unites.iter().any(|u| activee(u)),
+        synchronisee,
     })
 }
 
 #[cfg(target_os = "linux")]
 fn lire() -> Option<Etat> {
-    if !std::path::Path::new("/run/systemd/system").is_dir() {
+    use std::path::Path;
+    if !Path::new("/run/systemd/system").is_dir() {
         return None;
     }
-    let r = crate::commande::lancer_en_anglais(
-        std::process::Command::new("timedatectl").args(["show", "-p", "NTP", "-p", "NTPSynchronized", "-p", "CanNTP"]),
-        10,
-    )?;
-    (r.code == Some(0)).then(|| lire_timedatectl(&r.sortie)).flatten()
+    let mut listes = String::new();
+    for d in [
+        "/etc/systemd/ntp-units.d",
+        "/run/systemd/ntp-units.d",
+        "/usr/local/lib/systemd/ntp-units.d",
+        "/usr/lib/systemd/ntp-units.d",
+    ] {
+        for f in std::fs::read_dir(d).into_iter().flatten().flatten() {
+            if f.path().extension().is_some_and(|e| e == "list") {
+                listes.push_str(&std::fs::read_to_string(f.path()).unwrap_or_default());
+                listes.push('\n');
+            }
+        }
+    }
+    let installee = |u: &str| {
+        [
+            "/etc/systemd/system",
+            "/usr/local/lib/systemd/system",
+            "/usr/lib/systemd/system",
+            "/lib/systemd/system",
+        ]
+        .iter()
+        .any(|d| Path::new(d).join(u).exists())
+    };
+    // Activé : un lien dans un dossier « .wants » de l'administrateur ou du démarrage en cours.
+    let activee = |u: &str| {
+        ["/etc/systemd/system", "/run/systemd/system"].iter().any(|d| {
+            std::fs::read_dir(d).into_iter().flatten().flatten().any(|w| {
+                w.file_name().to_string_lossy().ends_with(".wants") && w.path().join(u).symlink_metadata().is_ok()
+            })
+        })
+    };
+    juger_unites(&listes, installee, activee, synchronisee())
+}
+
+/// L'horloge est-elle synchronisée ? Le noyau le sait (adjtimex, celui que lit timedated) : pas d'état d'erreur et
+/// pas de drapeau « non synchronisée ». `None` : le noyau refuse.
+#[cfg(target_os = "linux")]
+fn synchronisee() -> Option<bool> {
+    // SAFETY : avec `modes` à zéro, adjtimex ne change rien ; il remplit seulement la structure, à nous, passée par
+    // un pointeur valable pendant l'appel.
+    let (etat, t) = unsafe {
+        let mut t: libc::timex = std::mem::zeroed();
+        (libc::adjtimex(&raw mut t), t)
+    };
+    (etat >= 0).then_some(etat != libc::TIME_ERROR && t.status & libc::STA_UNSYNC == 0)
 }
 
 /// Windows : le service de temps (Start = 4 : désactivé) et son type de synchronisation (« NoSync » : aucune).
@@ -125,15 +173,39 @@ mod tests {
 
     #[test]
     fn heure_automatique() {
-        let e = lire_timedatectl("CanNTP=yes\nNTP=yes\nNTPSynchronized=yes\n").unwrap();
+        let listes = "# commentaire\n\nchronyd.service\nsystemd-timesyncd.service\n";
+        let installee = |u: &str| u == "systemd-timesyncd.service";
+        let e = juger_unites(listes, installee, |u| u == "systemd-timesyncd.service", Some(true)).unwrap();
         assert!(juger(&e).probleme.is_none());
-        let e = lire_timedatectl("CanNTP=yes\nNTP=yes\nNTPSynchronized=no\n").unwrap();
+        let e = juger_unites(listes, installee, |_| true, Some(false)).unwrap();
         assert_eq!(juger(&e).probleme, Some(Niveau::Info));
-        let e = lire_timedatectl("CanNTP=yes\nNTP=no\nNTPSynchronized=no\n").unwrap();
+        // chronyd activé mais pas installé ne compte pas : timesyncd, lui, est installé et pas activé.
+        let e = juger_unites(listes, installee, |u| u == "chronyd.service", Some(false)).unwrap();
         let c = juger(&e);
         assert_eq!(c.probleme, Some(Niveau::Moyen));
         assert!(c.correctif.as_ref().unwrap().automatique);
-        assert_eq!(lire_timedatectl("CanNTP=no\nNTP=no\n"), None);
-        assert_eq!(lire_timedatectl(""), None);
+        // Aucun service de temps installé, ou aucune liste : rien à dire.
+        assert_eq!(juger_unites(listes, |_| false, |_| true, None), None);
+        assert_eq!(juger_unites("", |_| true, |_| true, None), None);
+    }
+
+    /// Sur cet ordinateur, la lecture directe dit la même chose que timedatectl, quand il est là.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn comme_timedatectl() {
+        let Some(r) = crate::commande::lancer_en_anglais(
+            std::process::Command::new("timedatectl").args(["show", "-p", "NTP", "-p", "NTPSynchronized"]),
+            10,
+        )
+        .filter(|r| r.code == Some(0)) else {
+            return;
+        };
+        let Some(e) = lire() else {
+            return;
+        };
+        assert_eq!(r.sortie.contains("NTP=yes"), e.automatique, "{}", r.sortie);
+        if let Some(s) = e.synchronisee {
+            assert_eq!(r.sortie.contains("NTPSynchronized=yes"), s, "{}", r.sortie);
+        }
     }
 }

@@ -279,15 +279,174 @@ pub async fn decouvrir(ips: &[Ipv4Addr], delai: Duration, parallele: usize) -> V
     vivantes
 }
 
-/// État de chaque voisin dans `ip -4 neigh show` (« 10.0.0.1 dev wlan0 lladdr … REACHABLE » : l'état est le
-/// dernier mot). `None` si la commande manque.
+/// État de chaque voisin IPv4, demandé au noyau par netlink (RTM_GETNEIGH), comme `ip -4 neigh show` le fait, sans
+/// le lancer : rien à installer (iproute2 manque dans des conteneurs) et quelques microsecondes. Les états gardent les
+/// noms qu'ip leur donne (REACHABLE, STALE…). `None` : le noyau refuse.
 #[cfg(target_os = "linux")]
 fn etats_voisins() -> Option<HashMap<Ipv4Addr, String>> {
-    let r = crate::commande::lancer(std::process::Command::new("ip").args(["-4", "neigh", "show"]), 5)?;
-    (r.code == Some(0)).then(|| lire_etats_voisins(&r.sortie))
+    demander_voisins().map(|r| lire_voisins_netlink(&r))
 }
 
+/// Envoie la demande des voisins IPv4 et rend les réponses du noyau, jusqu'à la fin de la liste.
+#[cfg(target_os = "linux")]
+fn demander_voisins() -> Option<Vec<u8>> {
+    const RTM_GETNEIGH: u16 = 30;
+    // En-tête netlink (16 octets) puis ndmsg (12) : la famille IPv4, rien d'autre.
+    let mut demande = [0u8; 28];
+    demande[0..4].copy_from_slice(&28u32.to_ne_bytes());
+    demande[4..6].copy_from_slice(&RTM_GETNEIGH.to_ne_bytes());
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    demande[6..8].copy_from_slice(&((libc::NLM_F_REQUEST | libc::NLM_F_DUMP) as u16).to_ne_bytes());
+    demande[8..12].copy_from_slice(&1u32.to_ne_bytes());
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    {
+        demande[16] = libc::AF_INET as u8;
+    }
+    // SAFETY : une socket netlink ouverte ici et refermée une seule fois à la sortie ; chaque appel reçoit un pointeur
+    // et la taille exacte d'un objet à nous, vivant pendant l'appel (demande, adresse, délai, tampon). Le délai de
+    // réception (2 s) empêche recv de bloquer sans fin si le noyau ne répondait pas.
+    unsafe {
+        let s = libc::socket(
+            libc::AF_NETLINK,
+            libc::SOCK_RAW | libc::SOCK_CLOEXEC,
+            libc::NETLINK_ROUTE,
+        );
+        if s < 0 {
+            return None;
+        }
+        let delai = libc::timeval { tv_sec: 2, tv_usec: 0 };
+        let taille = |t: usize| libc::socklen_t::try_from(t).unwrap_or(0);
+        libc::setsockopt(
+            s,
+            libc::SOL_SOCKET,
+            libc::SO_RCVTIMEO,
+            (&raw const delai).cast(),
+            taille(std::mem::size_of::<libc::timeval>()),
+        );
+        let mut adresse: libc::sockaddr_nl = std::mem::zeroed();
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        {
+            adresse.nl_family = libc::AF_NETLINK as u16;
+        }
+        let envoye = libc::sendto(
+            s,
+            demande.as_ptr().cast(),
+            demande.len(),
+            0,
+            (&raw const adresse).cast(),
+            taille(std::mem::size_of::<libc::sockaddr_nl>()),
+        );
+        let mut tout = Vec::new();
+        let mut resultat = None;
+        if usize::try_from(envoye).ok() == Some(demande.len()) {
+            let mut tampon = vec![0u8; 32 << 10];
+            loop {
+                let n = libc::recv(s, tampon.as_mut_ptr().cast(), tampon.len(), 0);
+                let Ok(n @ 1..) = usize::try_from(n) else {
+                    break;
+                };
+                tout.extend_from_slice(&tampon[..n]);
+                match fin_netlink(&tampon[..n]) {
+                    Some(true) => {
+                        resultat = Some(std::mem::take(&mut tout));
+                        break;
+                    }
+                    Some(false) => break,
+                    // Une table démesurée n'en est pas une : on s'arrête.
+                    None if tout.len() > 16 << 20 => break,
+                    None => {}
+                }
+            }
+        }
+        libc::close(s);
+        resultat
+    }
+}
+
+/// Les messages netlink d'un morceau de réponse, un par un : (type, corps).
 #[cfg(any(target_os = "linux", test))]
+fn messages_netlink(octets: &[u8]) -> impl Iterator<Item = (u16, &[u8])> {
+    let mut pos = 0usize;
+    std::iter::from_fn(move || {
+        let entete = octets.get(pos..pos + 16)?;
+        let longueur = usize::try_from(u32::from_ne_bytes([entete[0], entete[1], entete[2], entete[3]])).ok()?;
+        let genre = u16::from_ne_bytes([entete[4], entete[5]]);
+        let corps = octets.get(pos + 16..pos.checked_add(longueur)?)?;
+        if longueur < 16 {
+            return None;
+        }
+        pos += longueur.next_multiple_of(4);
+        Some((genre, corps))
+    })
+}
+
+/// Le morceau finit-il la réponse ? `Some(true)` : NLMSG_DONE ; `Some(false)` : NLMSG_ERROR ; `None` : la suite vient.
+#[cfg(any(target_os = "linux", test))]
+fn fin_netlink(morceau: &[u8]) -> Option<bool> {
+    messages_netlink(morceau).find_map(|(genre, _)| match genre {
+        3 => Some(true),
+        2 => Some(false),
+        _ => None,
+    })
+}
+
+/// Les voisins IPv4 des messages RTM_NEWNEIGH : l'adresse (attribut NDA_DST) et l'état, nommé comme ip le nomme.
+#[cfg(any(target_os = "linux", test))]
+fn lire_voisins_netlink(octets: &[u8]) -> HashMap<Ipv4Addr, String> {
+    const RTM_NEWNEIGH: u16 = 28;
+    // AF_INET de Linux, écrit ici : la lecture est aussi testée sous Windows, sans libc.
+    const AF_INET: u8 = 2;
+    let mut voisins = HashMap::new();
+    for (genre, corps) in messages_netlink(octets) {
+        // ndmsg : famille (1), bourrage (3), interface (4), état (2), drapeaux (1), type (1) ; puis les attributs.
+        if genre != RTM_NEWNEIGH || corps.len() < 12 || corps[0] != AF_INET {
+            continue;
+        }
+        let etat = u16::from_ne_bytes([corps[8], corps[9]]);
+        // Comme ip sans « nud all » : ni les entrées sans ARP (diffusion, multidiffusion), ni celles sans état.
+        if etat == 0 || etat & 0x40 != 0 {
+            continue;
+        }
+        let mut pos = 12;
+        while let Some(attribut) = corps.get(pos..pos + 4) {
+            let longueur = usize::from(u16::from_ne_bytes([attribut[0], attribut[1]]));
+            let genre_attribut = u16::from_ne_bytes([attribut[2], attribut[3]]);
+            if longueur < 4 {
+                break;
+            }
+            if genre_attribut == 1
+                && let Some(ip) = corps
+                    .get(pos + 4..pos + longueur)
+                    .and_then(|a| <[u8; 4]>::try_from(a).ok())
+            {
+                voisins.insert(Ipv4Addr::from(ip), nom_d_etat(etat).to_string());
+            }
+            pos += longueur.next_multiple_of(4);
+        }
+    }
+    voisins
+}
+
+/// Le nom d'un état de voisin (NUD_*), celui qu'ip affiche ; plusieurs bits : le plus fort.
+#[cfg(any(target_os = "linux", test))]
+fn nom_d_etat(etat: u16) -> &'static str {
+    [
+        (0x80, "PERMANENT"),
+        (0x40, "NOARP"),
+        (0x20, "FAILED"),
+        (0x10, "PROBE"),
+        (0x08, "DELAY"),
+        (0x04, "STALE"),
+        (0x02, "REACHABLE"),
+        (0x01, "INCOMPLETE"),
+    ]
+    .iter()
+    .find(|(bit, _)| etat & bit != 0)
+    .map_or("NONE", |(_, nom)| nom)
+}
+
+/// La sortie de `ip -4 neigh show` : ne sert plus qu'à comparer netlink à ip dans les tests.
+#[cfg(test)]
 fn lire_etats_voisins(texte: &str) -> HashMap<Ipv4Addr, String> {
     texte
         .lines()
@@ -899,6 +1058,71 @@ mod tests {
         // Confirmé pendant le scan puis vieilli (STALE) : présent. Sans réponse (FAILED) ou oublié : absent.
         assert!(voisin_present(etat(1)) && voisin_present(etat(48)));
         assert!(!voisin_present(etat(99)) && !voisin_present(etat(200)));
+    }
+
+    /// Une réponse netlink inventée, à la forme de celle du noyau : deux voisins IPv4, un IPv6 ignoré, puis la fin.
+    #[test]
+    fn voisins_lus_par_netlink() {
+        fn voisin(famille: u8, etat: u16, adresse: &[u8]) -> Vec<u8> {
+            let mut corps = vec![famille, 0, 0, 0, 2, 0, 0, 0];
+            corps.extend_from_slice(&etat.to_ne_bytes());
+            corps.extend_from_slice(&[0, 1]);
+            let longueur = u16::try_from(4 + adresse.len()).unwrap();
+            corps.extend_from_slice(&longueur.to_ne_bytes());
+            corps.extend_from_slice(&1u16.to_ne_bytes());
+            corps.extend_from_slice(adresse);
+            while corps.len() % 4 != 0 {
+                corps.push(0);
+            }
+            message(28, &corps)
+        }
+        fn message(genre: u16, corps: &[u8]) -> Vec<u8> {
+            let mut m = u32::try_from(16 + corps.len()).unwrap().to_ne_bytes().to_vec();
+            m.extend_from_slice(&genre.to_ne_bytes());
+            m.extend_from_slice(&[0; 10]);
+            m.extend_from_slice(corps);
+            m
+        }
+        let mut reponse = voisin(2, 0x02, &[10, 0, 0, 1]);
+        reponse.extend(voisin(2, 0x40, &[224, 0, 0, 251]));
+        reponse.extend(voisin(2, 0x24, &[10, 0, 0, 48]));
+        reponse.extend(voisin(
+            10,
+            0x02,
+            &[0xfe, 0x80, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+        ));
+        let fin = message(3, &[0, 0, 0, 0]);
+        let voisins = lire_voisins_netlink(&reponse);
+        assert_eq!(voisins.len(), 2);
+        assert_eq!(voisins[&Ipv4Addr::new(10, 0, 0, 1)], "REACHABLE");
+        assert_eq!(voisins[&Ipv4Addr::new(10, 0, 0, 48)], "FAILED");
+        assert_eq!(fin_netlink(&reponse), None);
+        assert_eq!(fin_netlink(&fin), Some(true));
+        assert_eq!(fin_netlink(&message(2, &[0; 20])), Some(false));
+        // Tronquée ou mensongère : rien de plus, sans paniquer.
+        assert!(lire_voisins_netlink(&reponse[..30]).is_empty());
+        assert!(lire_voisins_netlink(&message(28, &[2, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 1, 2, 0, 1, 0])).is_empty());
+    }
+
+    /// Sur cet ordinateur, netlink donne les mêmes voisins que la commande ip, quand elle est là.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn voisins_comme_ip() {
+        let Some(r) = crate::commande::lancer(std::process::Command::new("ip").args(["-4", "neigh", "show"]), 5)
+            .filter(|r| r.code == Some(0))
+        else {
+            return;
+        };
+        let Some(natifs) = etats_voisins() else {
+            return;
+        };
+        let par_ip = lire_etats_voisins(&r.sortie);
+        // Les états bougent d'un instant à l'autre ; les adresses, elles, sont les mêmes.
+        let mut a: Vec<_> = par_ip.keys().collect();
+        let mut b: Vec<_> = natifs.keys().collect();
+        a.sort();
+        b.sort();
+        assert_eq!(a, b, "ip : {par_ip:?}, netlink : {natifs:?}");
     }
 }
 
