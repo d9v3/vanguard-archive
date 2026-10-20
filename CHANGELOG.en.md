@@ -6,7 +6,7 @@ What each day brought to Vanguard, most recent first. Since October 19, 2026, Va
 gathering the day's work. Only the latest version has its download page; every version keeps its tag in the
 repository (`git checkout v0.62.0`, for example), to be rebuilt if needed.
 
-## October 20, 2026: version 0.79
+## October 20, 2026: version 0.81
 
 - **Linux, the check sees further.** ICMP redirects accepted (IPv4 and IPv6) and source address filtering off,
   fixed in `99-vanguard.conf` without ever loosening an interface set to strict; user namespaces open to every

@@ -6,7 +6,7 @@ Ce que chaque journée a apporté à Vanguard, la plus récente en haut. Depuis 
 publication par jour, qui regroupe le travail de la journée. Seule la dernière version a sa page de téléchargement ;
 chaque version garde son étiquette dans le dépôt (`git checkout v0.62.0`, par exemple), pour être recompilée au besoin.
 
-## 20 octobre 2026 : version 0.79
+## 20 octobre 2026 : version 0.81
 
 - **Linux, le bilan voit plus loin.** Redirections ICMP acceptées (IPv4 et IPv6) et filtre des adresses d'origine
   coupé, corrigés dans `99-vanguard.conf` sans jamais relâcher une interface réglée en strict ; espaces de noms
