@@ -104,8 +104,9 @@ Réponses à l'utilisateur en français, claires, avec le pourquoi.
   ses notes : `--notes`) et celle du dépôt (`outils/github.py` applique `.github/depot.json` : description et
   dernière version publiée, lien du journal, sujets, options). Si les fonctions changent, réécrire la description
   dans `.github/depot.json` (en anglais, 350 caractères au plus avec la version). À la main : journal du projet,
-  liste des fonctions (README.md, README.en.md, outils/LISEZMOI.txt, outils/README.txt) et tableau Structure
-  (CONTRIBUTING.md, CONTRIBUTING.en.md) si un module change.
+  liste des fonctions (README.md, README.en.md, outils/LISEZMOI.txt, outils/README.txt), page des fonctions sur
+  claude.ai (outils/page-fonctions.html et .py, voir /livrer) et tableau Structure (CONTRIBUTING.md,
+  CONTRIBUTING.en.md) si un module change.
 
 ## Erreurs rapportées
 

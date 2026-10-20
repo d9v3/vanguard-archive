@@ -34,5 +34,10 @@ sans rien envoyer : `VANGUARD_INTERMEDIAIRE=1 outils/deployer.sh --local`.
    - journal du projet (document Claude) : ligne d'historique, version en tête, fonctions, pistes ;
    - liste des fonctions : README.md, README.en.md, outils/LISEZMOI.txt, outils/README.txt ; tableau Structure de
      CONTRIBUTING.md et CONTRIBUTING.en.md si un module change.
+   - page des fonctions sur claude.ai (https://claude.ai/artifact/NG3P6Gq6XQaWRXqVvEFDMC, partagée par lien) : si des
+     fonctions changent, les écrire d'abord dans outils/page-fonctions.html (à la main, comme les README, et les
+     étiquettes « nouveau ») ; puis `python3 outils/page-fonctions.py --verifier <sortie de verifier.sh>` remplit
+     version, date, lignes, commandes du guide, tests et passe de la VM ; passer la page par
+     `python3 outils/confidentialite.py --texte`, puis la publier avec l'outil Artifact à la même adresse (`url`).
 6. Compte rendu : la version, ce qui a changé, ce qui est vérifié, ce qui ne l'est pas encore (Windows réel,
    Mac réel…).
