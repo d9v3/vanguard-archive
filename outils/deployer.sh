@@ -214,7 +214,8 @@ elif [[ -n $(find "$EN_COURS" -mmin -180 2>/dev/null) ]]; then
 elif [[ -d $HOME/Windows && -f $WINDOWS ]]; then
   mkdir -p "$VM/programme" "$VM/resultats"
   cp -f "$WINDOWS" "$VM/programme/vanguard.exe"
-  cp -f outils/test-windows/test.ps1 outils/test-windows/menu.ps1 "$VM/programme/"
+  # Le lanceur de la clé aussi : test.ps1 l'essaie dans un dossier sans programme (Vanguard bloqué par Defender).
+  cp -f outils/test-windows/test.ps1 outils/test-windows/menu.ps1 "outils/cle/Lancer Vanguard.bat" "$VM/programme/"
   cp -f outils/test-windows/TESTER-VANGUARD.bat outils/test-windows/LISEZMOI.txt "$VM/"
   # La version déposée et l'empreinte du programme : le menu les montre, le test automatique part quand elles changent.
   printf '%s\r\n%s\r\n' "$(./"$LINUX" --version)" "$(sha256sum "$WINDOWS" | cut -c1-16)" >"$VM/programme/version.txt"

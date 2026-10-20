@@ -673,7 +673,11 @@ if (Test-Path -LiteralPath $lanceur) {
     if ($codeLanceur -eq 1) { Ok 'Code 1 quand Vanguard ne démarre pas' } else { Bug "Code $codeLanceur au lieu de 1" }
     if ((Get-MpPreference | Select-Object ExclusionPath, ControlledFolderAccessAllowedApplications | Out-String) -eq $defLanceur) { Ok 'Defender pas touché' } else { Bug 'Defender modifié par le lanceur' }
     Remove-Item -LiteralPath $essai -Recurse -Force -ErrorAction SilentlyContinue
-} else { Info 'Sautée : lanceur absent du dossier du programme.' }
+} else {
+    # deployer.sh le dépose avec le programme : absent, c'est le dépôt qui est incomplet, et une étape « sautée »
+    # le cacherait (quatre vérifications perdues sans un seul échec, le 19 octobre).
+    Bug 'Lanceur de la clé absent du dossier du programme (dépôt incomplet)'
+}
 
 Etape 'Blocages de Windows Defender : liste, rien changé sans accord'
 function Etat-Defender {
