@@ -139,7 +139,8 @@ accounts, logs of the last 7 days (as .evtx on Windows), recent files from risky
 LISEZMOI.txt, in French and English, tells what each file holds and what could not be read, MANIFESTE.txt gives
 their fingerprints (`sha256sum -c MANIFESTE.txt`). Read-only: nothing is stopped, moved or sent. The folder holds
 personal data, to hand only to someone you trust. It is also the first step of “After an infection”, ticked by
-default: cutting the network or cleaning up erases these traces.
+default: cutting the network or cleaning up erases these traces. With ransomware or a remote control still connected to
+the Internet, cutting comes first: every minute counts.
 
 **Report to leave behind** — a simple page for the person you just helped: their grade, what is left to do from the most
 to the least serious, what is fine and three habits; put on their Desktop, to read or print.

@@ -151,7 +151,8 @@ risque (décrits, pas copiés) ; LISEZMOI.txt, en français et en anglais, dit c
 n'a pas pu être lu, MANIFESTE.txt donne leurs empreintes (`sha256sum -c MANIFESTE.txt`). Lecture seule : rien n'est
 arrêté, déplacé ni envoyé. Le dossier contient des données personnelles, à ne confier qu'à quelqu'un de confiance.
 C'est aussi la première étape d'« Après une infection », cochée d'office : couper le réseau ou nettoyer efface ces
-traces.
+traces. Devant un rançongiciel ou une prise de contrôle encore reliés à Internet, la coupure passe d'abord : chaque
+minute compte.
 
 **Rapport à laisser** — une page simple pour la personne qu'on vient de dépanner : sa note, ce qu'il lui reste à
 faire du plus grave au moins grave, ce qui va bien et trois habitudes ; posée sur son Bureau, à lire ou imprimer.

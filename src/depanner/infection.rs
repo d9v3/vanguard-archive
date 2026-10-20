@@ -1,5 +1,6 @@
 //! Parcours « Après une infection » : d'abord garder les traces (processus, connexions, démarrage, journaux), avant que
-//! débrancher le réseau ou mettre en quarantaine ne les efface ; ce qui presse (couper Internet, ne pas payer, ne pas
+//! débrancher le réseau ou mettre en quarantaine ne les efface — sauf devant un rançongiciel ou une prise de contrôle
+//! encore reliés à Internet, où couper passe avant tout ; ce qui presse (couper Internet, ne pas payer, ne pas
 //! rappeler le numéro affiché), puis ce que Vanguard vérifie lui-même (persistance, accès à distance, comptes,
 //! intégrité, fichiers suspects, navigation détournée), les analyses qu'il propose (YARA, antivirus et démarrage,
 //! intégrité en détail, connexions sortantes, prise de contrôle à distance), et enfin la liste des mots de passe à
@@ -87,6 +88,12 @@ pub(super) fn urgences(signe: Signe, internet: bool) -> Vec<&'static str> {
     u
 }
 
+/// Rançongiciel ou prise de contrôle : couper Internet passe avant les traces. Chaque minute reliée chiffre un disque
+/// partagé de plus ou laisse l'intrus agir ; les traces suivent, sans les connexions, qui partent avec le réseau.
+pub(super) fn couper_d_abord(signe: Signe) -> bool {
+    matches!(signe, Signe::Rancon | Signe::PriseDeControle)
+}
+
 /// Les mots de passe à changer, dans l'ordre : le courriel d'abord, parce qu'il réinitialise tous les autres.
 pub(super) fn mots_de_passe(signe: Signe) -> Vec<&'static str> {
     let mut m = vec![
@@ -159,10 +166,24 @@ pub(super) fn infection() {
         return;
     };
     let internet = relie == 0;
+    let urgences = urgences(signe, internet);
+    let couper = internet && couper_d_abord(signe);
+    if couper {
+        ecran();
+        section(tr!("D'ABORD", "FIRST"));
+        for u in &urgences {
+            conseil(u);
+        }
+        demander(&trf!(
+            "\n{GRIS}Entrée une fois Internet coupé…{RESET}",
+            "\n{GRIS}Enter once the Internet is cut…{RESET}"
+        ));
+    }
+    // Coupé à l'instant : la suite fait comme sans Internet (pas de connexions à garder ni à regarder).
+    let internet = internet && !couper;
     garder_les_traces(internet);
     ecran();
-    let urgences = urgences(signe, internet);
-    if !urgences.is_empty() {
+    if !couper && !urgences.is_empty() {
         section(tr!("D'ABORD", "FIRST"));
         for u in &urgences {
             conseil(u);
@@ -191,7 +212,7 @@ pub(super) fn infection() {
     if internet {
         proposer_outil(
             tr!(
-                "\n  Vérifier si un de tes anciens mots de passe est dans les fuites connues ? [o/N] : ",
+                "\n  Chercher tes anciens mots de passe dans les fuites connues ? [o/N] : ",
                 "\n  Check whether one of your old passwords is in the known leaks? [y/N]: "
             ),
             crate::protection::fuites::verifier,
@@ -220,7 +241,8 @@ pub(super) fn infection() {
     }
 }
 
-/// La case des traces, première étape du parcours et cochée d'office : les connexions et les processus disparaissent
+/// La case des traces, cochée d'office, première étape du parcours (après la coupure d'Internet si elle presse,
+/// voir `couper_d_abord`) : les connexions et les processus disparaissent
 /// dès que le réseau est débranché, qu'un programme est mis en quarantaine ou que l'ordinateur redémarre.
 pub(super) fn case_des_traces(internet: bool) -> Case {
     Case {
@@ -250,10 +272,17 @@ fn garder_les_traces(internet: bool) {
     let titre = vec![
         String::new(),
         ligne_section(tr!("AVANT TOUT : GARDER LES TRACES", "FIRST OF ALL: KEEP THE TRACES")),
-        trf!(
-            "  {GRIS}Après, il sera trop tard : couper le réseau ou nettoyer les efface.{RESET}",
-            "  {GRIS}Afterwards it is too late: cutting the network or cleaning erases them.{RESET}"
-        ),
+        if internet {
+            trf!(
+                "  {GRIS}Après, il sera trop tard : couper le réseau ou nettoyer les efface.{RESET}",
+                "  {GRIS}Afterwards it is too late: cutting the network or cleaning erases them.{RESET}"
+            )
+        } else {
+            trf!(
+                "  {GRIS}Après, il sera trop tard : nettoyer ou redémarrer les efface.{RESET}",
+                "  {GRIS}Afterwards it is too late: cleaning or restarting erases them.{RESET}"
+            )
+        },
         String::new(),
     ];
     if cocher(&titre, &[case_des_traces(internet)]).is_some_and(|c| c.first() == Some(&true)) {
@@ -271,8 +300,8 @@ pub(super) fn traces() {
     ecran();
     section(tr!("COLLECTER LES TRACES", "COLLECT THE TRACES"));
     conseil(tr!(
-        "Avant de nettoyer ou de réinstaller un ordinateur infecté : ce qu'un spécialiste voudra voir, gardé dans un dossier daté. Lecture seule, rien ne part sur Internet. Fais-le avant de débrancher le réseau : les connexions en cours disparaissent avec lui.",
-        "Before cleaning up or reinstalling an infected computer: what a specialist will want to see, kept in a dated folder. Read-only, nothing goes to the Internet. Do it before unplugging the network: current connections vanish with it."
+        "Avant de nettoyer ou de réinstaller un ordinateur infecté : ce qu'un spécialiste voudra voir, gardé dans un dossier daté. Lecture seule, rien ne part sur Internet. Fais-le avant de débrancher le réseau : les connexions en cours disparaissent avec lui. Sauf devant un rançongiciel ou une prise de contrôle en cours : coupe Internet d'abord.",
+        "Before cleaning up or reinstalling an infected computer: what a specialist will want to see, kept in a dated folder. Read-only, nothing goes to the Internet. Do it before unplugging the network: current connections vanish with it. Except with ransomware or a remote control in progress: cut the Internet first."
     ));
     crate::traces::collecter(None);
 }
@@ -444,6 +473,17 @@ mod tests {
         }
         assert!(case_des_traces(true).detail.contains("AVANT de débrancher"));
         assert!(case_des_traces(false).detail.contains("ont disparu"));
+    }
+
+    #[test]
+    fn couper_avant_les_traces_seulement_quand_ca_presse() {
+        assert!(couper_d_abord(Signe::Rancon) && couper_d_abord(Signe::PriseDeControle));
+        for signe in [Signe::FichierOuvert, Signe::AntivirusAlerte, Signe::Doute] {
+            assert!(!couper_d_abord(signe), "{signe:?}");
+        }
+        // Ce qui est montré avant les traces commence bien par la coupure.
+        assert!(urgences(Signe::Rancon, true)[0].contains("Coupe Internet"));
+        assert!(urgences(Signe::PriseDeControle, true)[0].contains("coupe Internet"));
     }
 
     #[test]

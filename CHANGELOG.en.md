@@ -53,7 +53,7 @@ repository (`git checkout v0.62.0`, for example), to be rebuilt if needed.
   mDNS for a random name that does not exist: the device that answers is a tool like Responder, which steals the
   network's Windows passwords. High alert, and a notification from the hourly monitoring.
 - **Collect the traces** (Troubleshoot, `vanguard evidence`, and first step of “After an infection”, ticked by
-  default). Before cleaning up, what a specialist will want to see, in a dated folder on the key or in Vanguard's
+  default; with ransomware or a remote control, right after cutting the Internet, which cannot wait). Before cleaning up, what a specialist will want to see, in a dated folder on the key or in Vanguard's
   folder: processes with their program's SHA-256 fingerprint, connections, what starts by itself, the check as JSON,
   accounts, logs of the last 7 days, recent files; a README and a manifest that `sha256sum -c` checks. Read-only,
   nothing is sent; Vanguard warns that the folder holds personal data.
