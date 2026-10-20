@@ -172,7 +172,7 @@ pub(crate) fn sid() -> Option<String> {
             return None;
         }
         let mut fin = 0;
-        while *texte.add(fin) != 0 && fin < 256 {
+        while fin < 256 && *texte.add(fin) != 0 {
             fin += 1;
         }
         let sid = String::from_utf16_lossy(std::slice::from_raw_parts(texte, fin));
