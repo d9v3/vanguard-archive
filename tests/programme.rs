@@ -210,10 +210,6 @@ fn sous_menu_optimiser() {
 fn logiciels_listes_sans_rien_installer() {
     let s = vanguard("fr", &["logiciels", "--liste"], "", 120);
     let t = sans_couleurs(&s.texte);
-    if sous_wine() {
-        assert!(t.contains("PowerShell ne répond pas"), "{t}");
-        return;
-    }
     assert_eq!(s.code, Some(0), "{}", s.erreurs);
     assert!(
         t.contains("Navigateurs et courriel") && t.contains("logiciels proposés ici"),
@@ -367,10 +363,6 @@ fn lenteur_fiche_depanner_et_copie_sans_rien_changer() {
 fn gaming_quitte_sans_rien_installer() {
     let s = vanguard("fr", &["gaming"], "\n", 120);
     let t = sans_couleurs(&s.texte);
-    if sous_wine() {
-        assert!(t.contains("PowerShell ne répond pas"), "{t}");
-        return;
-    }
     assert_eq!(s.code, Some(0), "{}", s.erreurs);
     assert!(t.contains("Gaming") && !t.contains("Terminé"), "{t}");
 }
