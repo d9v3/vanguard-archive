@@ -765,9 +765,15 @@ $presseAvant = Get-Clipboard -Raw -ErrorAction SilentlyContinue
 # « 10.6.7.2 » : guide, Windows 11 (6e système), winget (7e programme, après les six marches à suivre), sa 2e
 # commande, dont la page s'ouvre ; « 1 » la copie, Entrée revient, « q » quitte.
 LancerAvec 'guide-copie' @() "10.6.7.2`n1`n`nq`n"
-$copiee = Get-Clipboard -Raw -ErrorAction SilentlyContinue
+# Le presse-papier de la VM est synchronisé avec Linux par xfreerdp : il peut se relire vide un instant. Trois lectures.
+for ($i = 0; $i -lt 3; $i++) {
+    $copiee = Get-Clipboard -Raw -ErrorAction SilentlyContinue
+    if ($copiee) { break }
+    Start-Sleep -Milliseconds 500
+}
 if ($copiee -and $copiee.Trim() -eq 'winget upgrade --all') { Ok 'Commande copiée dans le presse-papier (Set-Clipboard)' }
 elseif ((Sortie 'guide-copie') -match 'Presse-papier inaccessible|Clipboard unavailable') { Info 'Presse-papier inaccessible ici (test en arrière-plan ?) : Vanguard l''a dit et a remontré la commande' }
+elseif (-not $copiee -and (Sortie 'guide-copie') -match 'Copié|Copied') { Info 'Vanguard dit « copié », presse-papier non relu après 3 lectures (synchronisation de la VM)' }
 else { Bug "Commande PAS copiée (presse-papier : « $copiee »)" }
 if ($presseAvant) { Set-Clipboard -Value $presseAvant }
 # « Lancer ici » : « 10.6.11.1 » ouvre ipconfig /all (Windows 11, 11e programme : ipconfig), « 2 » la lance dans
