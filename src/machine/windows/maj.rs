@@ -247,11 +247,33 @@ fn commandes_winget(programmes: &[(String, String)]) -> Vec<String> {
 
 /// Programmes installés que winget sait mettre à jour (navigateurs, 7-Zip, Discord, Steam…).
 fn programmes() -> Constat {
-    let Some(sortie) = ps_delai(
-        "if (-not (Get-Command winget -ErrorAction SilentlyContinue)) { 'WINGET_ABSENT' } \
-         else { winget upgrade --accept-source-agreements --disable-interactivity | Out-String; \"CODE=$LASTEXITCODE\" }",
-        150,
-    ) else {
+    // winget lancé directement, sans PowerShell autour ; PowerShell seulement s'il ne démarre pas.
+    let direct = if super::installes::winget_present() {
+        crate::commande::lancer(
+            std::process::Command::new("winget").args([
+                "upgrade",
+                "--accept-source-agreements",
+                "--disable-interactivity",
+            ]),
+            150,
+        )
+        .map(|r| {
+            format!(
+                "{}\nCODE={}",
+                r.sortie,
+                r.code.map_or_else(String::new, |c| c.to_string())
+            )
+        })
+    } else {
+        Some("WINGET_ABSENT".to_string())
+    };
+    let Some(sortie) = direct.or_else(|| {
+        ps_delai(
+            "if (-not (Get-Command winget -ErrorAction SilentlyContinue)) { 'WINGET_ABSENT' } \
+             else { winget upgrade --accept-source-agreements --disable-interactivity | Out-String; \"CODE=$LASTEXITCODE\" }",
+            150,
+        )
+    }) else {
         return illisible("Programmes");
     };
     if sortie.contains("WINGET_ABSENT") {
