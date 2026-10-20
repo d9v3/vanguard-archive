@@ -77,14 +77,18 @@ fn juger_comptes(utilisateurs: &[&str], moi: Option<&str>, lbp: Option<u32>) -> 
                         "The “{nom}” account does not require a password: it may open without typing anything."
                     ),
                 )
-                // Le mot de passe actuel ne change pas (personne n'est enfermé dehors) : Windows refusera seulement
-                // qu'on lui en mette un vide ensuite.
-                .corriger(
+                // À faire soi-même : -PasswordRequired lève seulement le drapeau, sans donner de mot de passe. Un compte
+                // déjà vide s'ouvrirait toujours sans rien taper, et le bilan le dirait sain. Le mot de passe d'abord
+                // (Paramètres), puis le drapeau.
+                .manuel(
                     trf!(
-                        "Exiger un mot de passe pour « {nom} »",
-                        "Require a password for “{nom}”"
+                        "Donner un mot de passe à « {nom} » (Paramètres > Comptes), puis l'exiger toujours",
+                        "Give “{nom}” a password (Settings > Accounts), then always require one"
                     ),
-                    &[&format!("Set-LocalUser -Name '{nom_ps}' -PasswordRequired $true")],
+                    &[
+                        "Start-Process ms-settings:otherusers",
+                        &format!("Set-LocalUser -Name '{nom_ps}' -PasswordRequired $true"),
+                    ],
                 ),
             );
         }
@@ -124,16 +128,31 @@ fn juger_comptes(utilisateurs: &[&str], moi: Option<&str>, lbp: Option<u32>) -> 
 /// langue de Windows comme « net accounts ») : (longueur minimale, essais ratés avant blocage ; 0 : jamais bloqué).
 pub(super) fn politique() -> Option<Constat> {
     let sortie = super::comptes_locaux();
-    let ligne = section(sortie.as_deref(), "POL")?.first()?.trim().to_string();
-    let (longueur, seuil) = ligne.split_once('|')?;
-    juger_politique(longueur.trim().parse().ok()?, seuil.trim().parse().ok()?)
+    let lue = section(sortie.as_deref(), "POL")
+        .and_then(|l| l.first().map(|l| l.trim().to_string()))
+        .and_then(|ligne| {
+            let (longueur, seuil) = ligne.split_once('|')?;
+            Some((longueur.trim().parse().ok()?, seuil.trim().parse().ok()?))
+        });
+    match lue {
+        Some((longueur, seuil)) => juger_politique(longueur, seuil),
+        // Sans PowerShell, la règle des comptes le dit déjà ; ADSI muet, c'est celle-ci qui le dit.
+        None if sortie.is_some() => Some(impossible(
+            "Comptes",
+            tr!(
+                "règle des mots de passe illisible (ADSI)",
+                "password policy unreadable (ADSI)"
+            ),
+        )),
+        None => None,
+    }
 }
 
 /// Sans blocage, un programme essaie des milliers de mots de passe sur un compte local (par le réseau, le Bureau à
 /// distance) : Windows 11 bloque 10 minutes après 10 essais depuis 2022, les installations plus anciennes jamais.
 /// Une longueur minimale sous 8 ne vaut qu'une information : elle ne touche que les comptes locaux, pas ceux de
 /// Microsoft, et seulement au prochain changement de mot de passe. Rien d'illisible n'est compté comme sain : sans
-/// valeur lue, aucun constat.
+/// valeur lue, `politique` le dit.
 fn juger_politique(longueur: u32, seuil: u32) -> Option<Constat> {
     if seuil == 0 {
         return Some(
@@ -216,8 +235,16 @@ mod tests {
         );
         // Administrateur intégré utilisé en ce moment : conseil, pas de désactivation automatique.
         assert!(c[2].correctif.as_ref().is_some_and(|k| !k.automatique));
-        // Compte sans mot de passe exigé : corrigé par Vanguard, le nom protégé dans la commande.
+        // Compte sans mot de passe exigé : à faire soi-même (le drapeau seul ne donne pas de mot de passe), le nom
+        // protégé dans la commande montrée.
         let k = c[0].correctif.as_ref().unwrap();
-        assert!(k.automatique && k.commandes == ["Set-LocalUser -Name 'enfant' -PasswordRequired $true"]);
+        assert!(!k.automatique);
+        assert_eq!(
+            k.commandes,
+            [
+                "Start-Process ms-settings:otherusers",
+                "Set-LocalUser -Name 'enfant' -PasswordRequired $true"
+            ]
+        );
     }
 }

@@ -917,20 +917,22 @@ $profil = Sortie 'guide-profil'
 if ($profil -match 'NetworkCategory' -and $profil -match 'Done in|Terminée en') { Ok 'Profil réseau lancé depuis le guide, sortie montrée' }
 else { Bug 'Profil réseau : commande du guide pas lancée ou sortie absente' }
 
-Etape 'Compte sans mot de passe exigé : signalé, puis corrigé par Vanguard (UAC)'
-Info 'Crée un compte de test « vanguard-essai » sans mot de passe exigé, puis Vanguard doit proposer de l''exiger. Le compte est retiré à la fin.'
+Etape 'Compte sans mot de passe exigé : signalé, à corriger soi-même (UAC pour le créer)'
+# Le drapeau « mot de passe exigé » ne donne pas de mot de passe : Vanguard ne le lève pas tout seul, il renvoie aux
+# Paramètres. Le compte de test est retiré à la fin.
+Info 'Crée un compte de test « vanguard-essai » sans mot de passe exigé, puis regarde ce que Vanguard en dit.'
 if (Question 'Faire ce test ?') {
     Start-Process powershell -Verb RunAs -Wait -ArgumentList '-NoProfile', '-Command', 'New-LocalUser -Name vanguard-essai -NoPassword | Out-Null; Set-LocalUser -Name vanguard-essai -PasswordRequired $false'
     $essai = Get-LocalUser -Name 'vanguard-essai' -ErrorAction SilentlyContinue
     if (-not $essai) { Bug 'Compte de test non créé (UAC refusée ?)' }
     else {
-        Lancer 'machine-compte-essai' @('machine')
-        if ((Sortie 'machine-compte-essai') -match 'vanguard-essai') { Ok 'Compte sans mot de passe exigé signalé' } else { Bug 'Compte sans mot de passe exigé NON signalé' }
-        Write-Host ''
-        Write-Host '      Réponds « o » à « Exiger un mot de passe pour vanguard-essai » et accepte l''UAC. Réponds « n » à tout le reste.' -ForegroundColor Yellow
-        Vider-Clavier
-        & $exe corriger
-        if ((Get-LocalUser -Name 'vanguard-essai').PasswordRequired) { Ok 'Mot de passe désormais exigé pour le compte de test' } else { Bug 'Mot de passe TOUJOURS pas exigé après la correction' }
+        Lancer 'machine-compte-essai' @('machine', '--json')
+        try {
+            $vu = @((Sortie 'machine-compte-essai' | ConvertFrom-Json).constats | Where-Object { $_.probleme -and $_.message -match 'vanguard-essai' })
+            if (-not $vu.Count) { Bug 'Compte sans mot de passe exigé NON signalé' }
+            elseif ($vu[0].correctif -and -not $vu[0].correctif.automatique) { Ok 'Compte signalé, correction à faire soi-même (mot de passe dans les Paramètres)' }
+            else { Bug 'Compte signalé, mais Vanguard propose de le corriger tout seul : le drapeau ne donne pas de mot de passe' }
+        } catch { Bug "machine --json illisible : $($_.Exception.Message)" }
     }
     Start-Process powershell -Verb RunAs -Wait -ArgumentList '-NoProfile', '-Command', 'Remove-LocalUser -Name vanguard-essai -ErrorAction SilentlyContinue'
     if (Get-LocalUser -Name 'vanguard-essai' -ErrorAction SilentlyContinue) { Bug 'Compte de test ENCORE présent : à retirer à la main' } else { Ok 'Compte de test retiré' }

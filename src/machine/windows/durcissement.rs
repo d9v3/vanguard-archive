@@ -500,8 +500,10 @@ const WINHTTP: &str = r"SYSTEM\CurrentControlSet\Services\WinHttp\Parameters";
 
 /// WPAD : Windows cherche tout seul sur le réseau un fichier qui dit par où passer pour aller sur Internet. Dans un café
 /// ou un hôtel, n'importe quel appareil du Wi-Fi peut répondre et faire passer la navigation par lui (même famille
-/// d'attaques que LLMNR et NetBIOS). `DisableWpad` à 1 coupe la recherche pour WinHTTP, par qui passent aussi Edge et
-/// les services ; un proxy réglé à la main ou par une adresse PAC marche toujours. Sur un ordinateur d'entreprise
+/// d'attaques que LLMNR et NetBIOS). `DisableWpad` à 1 coupe la recherche pour WinHTTP, celle des services de Windows
+/// et de beaucoup de programmes ; un navigateur peut garder la sienne, selon le réglage « Détecter automatiquement les
+/// paramètres » du compte, dans un format que Vanguard ne réécrit pas : la correction le dit. Un proxy réglé à la
+/// main ou par une adresse PAC marche toujours. Sur un ordinateur d'entreprise
 /// (compte de domaine), le proxy vient souvent de WPAD : rien à dire.
 pub(super) fn juger_wpad(desactive: Option<u32>, domaine: bool) -> Option<Constat> {
     (desactive != Some(1) && !domaine).then(|| {
@@ -515,8 +517,8 @@ pub(super) fn juger_wpad(desactive: Option<u32>, domaine: bool) -> Option<Consta
         )
         .corriger(
             tr!(
-                "Couper la recherche automatique du proxy (effective au prochain redémarrage)",
-                "Turn off automatic proxy discovery (takes effect at the next restart)"
+                "Couper la recherche automatique du proxy de Windows (effective au prochain redémarrage) ; pour le navigateur, décoche aussi « Détecter automatiquement les paramètres » (Paramètres > Réseau > Proxy)",
+                "Turn off Windows' automatic proxy discovery (takes effect at the next restart); for the browser, also untick “Automatically detect settings” (Settings > Network > Proxy)"
             ),
             // Clé créée seulement si elle manque, comme pour LLMNR : « New-Item -Force » écraserait ses autres valeurs.
             &[

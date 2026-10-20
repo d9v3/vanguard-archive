@@ -784,8 +784,9 @@ fn juger_ssh_secondaire(conf: &str) -> Option<Constat> {
             "{n} essais de mot de passe par connexion",
             "{n} password attempts per connection"
         ));
+        // La valeur par défaut d'OpenSSH, pas moins : chaque clé refusée de l'agent SSH compte pour un essai.
         commandes.push(format!(
-            "echo 'MaxAuthTries 4' | sudo tee -a {SSHD_VANGUARD} >/dev/null"
+            "echo 'MaxAuthTries 6' | sudo tee -a {SSHD_VANGUARD} >/dev/null"
         ));
     }
     commandes.push(RECHARGER_SSHD.to_string());
@@ -1836,7 +1837,7 @@ pas-un-uuid;rm -rf ~:802-11-wireless:yes:Piège
         assert_eq!(c.probleme, Some(Niveau::Info));
         let commandes = c.correctif.unwrap().commandes;
         assert!(commandes[0].starts_with("echo 'X11Forwarding no' | sudo tee -a"));
-        assert!(commandes[1].starts_with("echo 'MaxAuthTries 4' | sudo tee -a"));
+        assert!(commandes[1].starts_with("echo 'MaxAuthTries 6' | sudo tee -a"));
         assert_eq!(commandes[2], RECHARGER_SSHD);
     }
 

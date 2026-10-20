@@ -171,6 +171,10 @@ pub(super) fn reglages_faibles(lire: impl Fn(&str) -> Option<i64>) -> Vec<(&'sta
     });
     let interdits = INTERDITS.iter().filter_map(|&(cle, risquee, sure, role)| {
         let v = lire(cle)?;
+        // Le filtre effectif est le plus fort de `all` et de l'interface : `all` déjà réglé, rien de faible.
+        if cle == "net/ipv4/conf/default/rp_filter" && lire("net/ipv4/conf/all/rp_filter").is_some_and(|a| a > 0) {
+            return None;
+        }
         (v == risquee).then(|| (cle, v, sure, langue(role)))
     });
     trop_bas.chain(interdits).collect()
@@ -384,12 +388,23 @@ mod tests {
             reglages_faibles(move |c| {
                 Some(match c {
                     "net/ipv4/conf/all/accept_redirects" | "net/ipv4/conf/default/accept_redirects" => redirections,
-                    "net/ipv4/conf/default/rp_filter" => filtre,
+                    "net/ipv4/conf/default/rp_filter" | "net/ipv4/conf/all/rp_filter" => filtre,
                     _ => 2,
                 })
             })
         };
         assert!(reseau(0, 2).is_empty() && reseau(0, 1).is_empty());
+        // `default` à 0 mais `all` en strict : chaque interface filtre déjà.
+        let all_strict = reglages_faibles(|c| {
+            Some(match c {
+                "net/ipv4/conf/all/rp_filter" => 1,
+                "net/ipv4/conf/default/rp_filter"
+                | "net/ipv4/conf/all/accept_redirects"
+                | "net/ipv4/conf/default/accept_redirects" => 0,
+                _ => 2,
+            })
+        });
+        assert!(all_strict.is_empty());
         let noms: Vec<(&str, i64)> = reseau(1, 0).iter().map(|f| (f.0, f.2)).collect();
         assert_eq!(
             noms,
