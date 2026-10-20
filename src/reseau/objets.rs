@@ -105,6 +105,10 @@ const PORTS_IMPRIMANTE: [u16; 2] = [515, 9100];
 /// Ports d'un ordinateur (SSH, partage Windows, bureau à distance, VNC, partage du Mac) : son port 631 est le partage
 /// d'imprimantes du système, pas une imprimante.
 const PORTS_ORDINATEUR: [u16; 7] = [22, 135, 139, 445, 548, 3389, 5900];
+/// Une imprimante réseau a une page web (80 ou 443) à côté de son IPP (631) ; un portable Linux qui partage
+/// CUPS sans SSH ni Samba n'a que 631 : il n'est pas une imprimante, et ne doit pas recevoir le conseil du mot de
+/// passe d'origine.
+const PORTS_PAGE_WEB: [u16; 2] = [80, 443];
 
 /// Les mots entiers d'un nom (« Chromecast-Salon.local » → chromecast, salon, local).
 fn mots(nom: &str) -> Vec<String> {
@@ -130,7 +134,9 @@ pub fn genre(a: &Appareil) -> Option<Genre> {
     if camera {
         return Some(Genre::Camera);
     }
-    if PORTS_IMPRIMANTE.iter().any(tcp) || (tcp(&631) && !PORTS_ORDINATEUR.iter().any(tcp)) {
+    if PORTS_IMPRIMANTE.iter().any(tcp)
+        || (tcp(&631) && PORTS_PAGE_WEB.iter().any(tcp) && !PORTS_ORDINATEUR.iter().any(tcp))
+    {
         return Some(Genre::Imprimante);
     }
     // Google Cast (8008 et 8009 ensemble) : Chromecast, télé ou enceinte qui reçoit la diffusion.
@@ -169,9 +175,11 @@ pub fn annonces(ports: &[PortOuvert]) -> Vec<String> {
     liste
 }
 
-/// L'administration de la box ne se fait qu'en HTTP : son mot de passe passe en clair sur le réseau.
+/// Le scan a trouvé la page d'administration en HTTP (80) et aucun HTTPS (443, ni 8443 où bien des box le
+/// mettent) : le mot de passe passe peut-être en clair. « Peut-être » : la liste de ports choisie pour le scan n'a pas
+/// forcément cherché le HTTPS, et le texte le dit.
 fn admin_en_clair(a: &Appareil) -> bool {
-    a.tcp.contains(&80) && !a.tcp.contains(&443)
+    a.tcp.contains(&80) && !a.tcp.contains(&443) && !a.tcp.contains(&8443)
 }
 
 /// La section « Box et objets connectés ». `carnet` : lue dans le carnet du réseau (commande `objets`) et non dans
@@ -231,8 +239,8 @@ pub fn afficher(appareils: &[Appareil], carnet: bool) -> usize {
                 afficher_aligne(
                     &format!("      {}→{RESET} ", couleur(Niveau::Moyen)),
                     tr!(
-                        "Sa page d'administration n'est qu'en HTTP : son mot de passe passe en clair sur le réseau. Ouvre-la depuis un câble plutôt que d'un Wi-Fi partagé, et active HTTPS dans ses réglages s'il existe.",
-                        "Its admin page is HTTP only: its password travels in clear text on the network. Open it over a cable rather than a shared Wi-Fi, and turn on HTTPS in its settings if it exists."
+                        "Sa page d'administration répond en HTTP et le scan n'a pas trouvé de HTTPS : son mot de passe passe peut-être en clair sur le réseau. Ouvre-la depuis un câble plutôt que d'un Wi-Fi partagé, et active HTTPS dans ses réglages s'il existe.",
+                        "Its admin page answers over HTTP and the scan found no HTTPS: its password may travel in clear text on the network. Open it over a cable rather than a shared Wi-Fi, and turn on HTTPS in its settings if it exists."
                     ),
                     8,
                     "",
@@ -361,8 +369,12 @@ mod tests {
     #[test]
     fn rien_sans_indice_sur() {
         let g = |f, n, t: &[u16]| genre(&appareil(f, n, t, &[]));
-        // Un ordinateur qui partage ses imprimantes ouvre 631 : ce n'est pas une imprimante.
+        // Un ordinateur qui partage ses imprimantes ouvre 631 : ce n'est pas une imprimante, même sans SSH ni
+        // Samba (portable Linux avec CUPS seul). Une imprimante a sa page web à côté.
         assert_eq!(g(None, None, &[22, 631]), None);
+        assert_eq!(g(None, None, &[631]), None);
+        assert_eq!(g(None, None, &[80, 631]), Some(Genre::Imprimante));
+        assert_eq!(g(None, None, &[9100]), Some(Genre::Imprimante));
         assert_eq!(g(Some("Hewlett Packard"), Some("portable-alice"), &[135, 445]), None);
         // Un indice du nom compte en mot entier, pas à l'intérieur d'un autre (« nas » dans « nastassia »).
         assert_eq!(g(None, Some("nastassia-pc"), &[]), None);
@@ -378,6 +390,10 @@ mod tests {
         b.boite = true;
         assert_eq!(genre(&b), Some(Genre::Boite));
         assert!(admin_en_clair(&b));
+        // Le HTTPS d'une box est souvent sur 8443 : ce n'est pas « HTTP seulement ».
+        b.tcp.push(8443);
+        assert!(!admin_en_clair(&b));
+        b.tcp.pop();
         b.tcp.push(443);
         assert!(!admin_en_clair(&b));
     }
