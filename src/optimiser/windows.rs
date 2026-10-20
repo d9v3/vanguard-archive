@@ -673,13 +673,14 @@ pub fn apres(touches: &[&Reglage]) {
         );
         return;
     }
-    let _ = Command::new("taskkill").args(["/f", "/im", "explorer.exe"]).output();
+    let _ = crate::commande::lancer(Command::new("taskkill").args(["/f", "/im", "explorer.exe"]), 10);
     // Windows relance le bureau tout seul ; sinon on le relance.
     std::thread::sleep(std::time::Duration::from_secs(3));
-    let tourne = Command::new("tasklist")
-        .args(["/fi", "imagename eq explorer.exe", "/nh"])
-        .output()
-        .is_ok_and(|o| String::from_utf8_lossy(&o.stdout).contains("explorer.exe"));
+    let tourne = crate::commande::lancer(
+        Command::new("tasklist").args(["/fi", "imagename eq explorer.exe", "/nh"]),
+        10,
+    )
+    .is_some_and(|o| o.sortie.contains("explorer.exe"));
     if !tourne {
         let _ = Command::new("explorer.exe").spawn();
     }

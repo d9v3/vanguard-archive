@@ -55,22 +55,24 @@ pub(crate) fn executable() -> String {
 }
 
 pub(crate) fn notifier(titre: &str, corps: &str) {
+    // Délai : sans service de notifications qui réponde, notify-send attendrait sans fin, et la surveillance avec.
     #[cfg(target_os = "linux")]
-    let _ = Command::new("notify-send")
-        .args(["-a", "Vanguard", "-i", "vanguard", "-u", "critical", titre, corps])
-        .status();
+    let _ = crate::commande::lancer(
+        Command::new("notify-send").args(["-a", "Vanguard", "-i", "vanguard", "-u", "critical", titre, corps]),
+        10,
+    );
     // macOS : notification du Centre de notifications, par AppleScript (texte entre guillemets échappés).
     #[cfg(target_os = "macos")]
     {
         let e = |s: &str| s.replace('\\', "\\\\").replace('"', "\\\"");
-        let _ = Command::new("osascript")
-            .arg("-e")
-            .arg(format!(
+        let _ = crate::commande::lancer(
+            Command::new("osascript").arg("-e").arg(format!(
                 "display notification \"{}\" with title \"{}\" sound name \"Basso\"",
                 e(corps),
                 e(titre)
-            ))
-            .status();
+            )),
+            10,
+        );
     }
     #[cfg(windows)]
     {
@@ -452,10 +454,8 @@ fn plist_agent() -> std::path::PathBuf {
 /// Domaine launchd de la session graphique de l'utilisateur (« gui/501 »).
 #[cfg(target_os = "macos")]
 pub(crate) fn domaine_launchd() -> String {
-    let uid = Command::new("id")
-        .arg("-u")
-        .output()
-        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+    let uid = crate::commande::lancer(Command::new("id").arg("-u"), 5)
+        .map(|o| o.sortie.trim().to_string())
         .unwrap_or_default();
     format!("gui/{uid}")
 }

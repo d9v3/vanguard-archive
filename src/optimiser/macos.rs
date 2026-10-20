@@ -336,7 +336,7 @@ pub fn apres(touches: &[&Reglage]) {
         .iter()
         .any(|r| matches!(r.id.as_ref(), "extensions" | "fichiers_caches" | "chemin_finder"))
     {
-        let _ = Command::new("killall").arg("Finder").status();
+        let _ = crate::commande::lancer(Command::new("killall").arg("Finder"), 10);
     }
 }
 

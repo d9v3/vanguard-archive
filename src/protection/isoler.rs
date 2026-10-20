@@ -109,10 +109,11 @@ fn configuration_wsb(dossier: &str, nom: &str) -> String {
 
 #[cfg(target_os = "linux")]
 fn present(cmd: &str) -> bool {
-    std::process::Command::new("sh")
-        .args(["-c", &format!("command -v {cmd}")])
-        .output()
-        .is_ok_and(|o| o.status.success())
+    crate::commande::lancer(
+        std::process::Command::new("sh").args(["-c", &format!("command -v {cmd}")]),
+        5,
+    )
+    .is_some_and(|o| o.code == Some(0))
 }
 
 /// « vanguard isoler <fichier> » : lance le programme dans un bac à sable.

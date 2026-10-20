@@ -121,13 +121,10 @@ fn volumes_amovibles() -> Vec<(PathBuf, String)> {
         .map(|d| d.path())
         .filter(|p| std::fs::canonicalize(p).is_ok_and(|r| r != racine))
         .map(|p| {
-            let taille = Command::new("df")
-                .args(["-h", "-P"])
-                .arg(&p)
-                .output()
-                .ok()
+            // Délai : un volume réseau qui ne répond plus ferait attendre df sans fin.
+            let taille = crate::commande::lancer(Command::new("df").args(["-h", "-P"]).arg(&p), 10)
                 .and_then(|o| {
-                    String::from_utf8_lossy(&o.stdout)
+                    o.sortie
                         .lines()
                         .nth(1)
                         .and_then(|l| l.split_whitespace().nth(1).map(str::to_string))
@@ -455,11 +452,13 @@ fn outil_clamav(nom: &str) -> String {
 /// Installe ClamAV et télécharge les signatures si besoin. Retourne `false` si l'utilisateur refuse.
 #[cfg(unix)]
 fn preparer() -> bool {
-    let present = Command::new("bash")
-        .arg("-c")
-        .arg(format!("command -v '{}'", outil_clamav("clamscan")))
-        .output()
-        .is_ok_and(|o| o.status.success());
+    let present = crate::commande::lancer(
+        Command::new("bash")
+            .arg("-c")
+            .arg(format!("command -v '{}'", outil_clamav("clamscan"))),
+        5,
+    )
+    .is_some_and(|o| o.code == Some(0));
     if !present {
         trp!(
             "  ClamAV (antivirus open source) n'est pas installé.",
