@@ -315,13 +315,31 @@ mod systeme {
     use super::{Etat, fait};
     use crate::ui::*;
 
+    /// Les mêmes lignes que le script de secours (« service|état », « carte|nom|OK ou Error »), lues auprès du
+    /// gestionnaire de services et de SetupAPI ; `None` si l'un des deux ne répond pas.
+    pub(super) fn lire_natif() -> Option<String> {
+        use crate::machine::windows::{gestionnaire, peripheriques};
+        let mut lignes = Vec::new();
+        for service in ["Audiosrv", "AudioEndpointBuilder"] {
+            lignes.push(format!("{service}|{}", gestionnaire::statut(service)?));
+        }
+        for carte in peripheriques::presents(&peripheriques::SON)? {
+            let statut = if carte.marche { "OK" } else { "Error" };
+            lignes.push(format!("carte|{}|{statut}", carte.nom.replace('|', " ")));
+        }
+        Some(lignes.join("\n"))
+    }
+
     pub fn verifier(_ou: usize, _voulue: usize) {
         // Les deux services du son ; le volume et la sortie, eux, ne se lisent qu'à travers les API de Windows.
-        let etat = crate::machine::windows::ps(
-            "@('Audiosrv','AudioEndpointBuilder') | ForEach-Object { $s = Get-Service $_ -ErrorAction SilentlyContinue; \"$_|$($s.Status)\" }; \
-             @(Get-CimInstance Win32_SoundDevice) | ForEach-Object { \"carte|$($_.Name)|$($_.Status)\" }",
-        )
-        .unwrap_or_default();
+        let etat = lire_natif()
+            .or_else(|| {
+                crate::machine::windows::ps(
+                    "@('Audiosrv','AudioEndpointBuilder') | ForEach-Object { $s = Get-Service $_ -ErrorAction SilentlyContinue; \"$_|$($s.Status)\" }; \
+                     @(Get-CimInstance Win32_SoundDevice) | ForEach-Object { \"carte|$($_.Name)|$($_.Status)\" }",
+                )
+            })
+            .unwrap_or_default();
         let mut arrete = false;
         for l in etat.lines() {
             let c: Vec<&str> = l.trim().split('|').collect();
@@ -393,6 +411,22 @@ mod systeme {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Le vrai gestionnaire de services et SetupAPI (Wine ici, la VM ensuite), sans PowerShell : les deux services
+    /// sont toujours dans les lignes, chacune de la forme lue par `verifier`.
+    #[cfg(windows)]
+    #[test]
+    fn son_lu_sans_powershell() {
+        if let Some(t) = systeme::lire_natif() {
+            assert!(t.lines().take(2).all(|l| l.split('|').count() == 2), "{t}");
+            assert!(
+                t.lines()
+                    .skip(2)
+                    .all(|l| l.starts_with("carte|") && l.split('|').count() == 3),
+                "{t}"
+            );
+        }
+    }
 
     #[test]
     fn sorties_de_pactl() {

@@ -1,6 +1,7 @@
 //! Gaming sous Windows : composants dont les jeux ont besoin (Visual C++, .NET, DirectX, XNA, PhysX, pilote
 //! graphique) et réglages de Windows utiles en jeu.
-//! Tout est lu d'abord (un seul appel PowerShell), montré avec son état, puis appliqué seulement après accord.
+//! Tout est lu d'abord (registre, SetupAPI, fichiers ; PowerShell en secours), montré avec son état, puis appliqué
+//! seulement après accord.
 //! Les réglages qui retirent une protection (intégrité de la mémoire, Defender, pare-feu…) ne sont jamais proposés.
 
 use std::fmt::Write;
@@ -13,7 +14,7 @@ use crate::machine;
 use crate::trw;
 use crate::ui::*;
 
-/// Ce que Vanguard lit avant d'afficher le menu : une photo de l'état, lue telle quelle depuis PowerShell.
+/// Ce que Vanguard lit avant d'afficher le menu : une photo de l'état (la forme du JSON du script de secours).
 #[allow(clippy::struct_excessive_bools)]
 #[derive(Default, Deserialize)]
 #[serde(default)]
@@ -48,7 +49,111 @@ struct Carte {
     date: String,
 }
 
+/// L'état lu dans le registre, SetupAPI et le système de fichiers, sans PowerShell ; PowerShell seulement si la clé
+/// des programmes de la machine ne s'ouvre pas.
 fn lire_etat() -> Option<Etat> {
+    use machine::windows::{installes, peripheriques};
+    use winreg::RegKey;
+    use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE};
+    let Some(programmes) = installes::noms() else {
+        return lire_par_powershell();
+    };
+    let (machine, compte) = (RegKey::predef(HKEY_LOCAL_MACHINE), RegKey::predef(HKEY_CURRENT_USER));
+    let dword = |racine: &RegKey, cle: &str, nom: &str| racine.open_subkey(cle).ok()?.get_value::<u32, _>(nom).ok();
+    let texte = |racine: &RegKey, cle: &str, nom: &str| racine.open_subkey(cle).ok()?.get_value::<String, _>(nom).ok();
+    let vc = r"SOFTWARE\WOW6432Node\Microsoft\VisualStudio\14.0\VC\Runtimes";
+    let systeme = std::path::PathBuf::from(std::env::var_os("SystemRoot").unwrap_or_else(|| r"C:\Windows".into()));
+    let gpu = peripheriques::presents(&peripheriques::AFFICHAGE)
+        .unwrap_or_default()
+        .iter()
+        .filter(|p| !carte_ignoree(&p.nom))
+        .map(|p| {
+            let cle = peripheriques::cle_du_pilote(p);
+            let valeur = |nom: &str| cle.as_ref().and_then(|c| c.get_value::<String, _>(nom).ok());
+            Carte {
+                nom: valeur("DriverDesc").unwrap_or_else(|| p.nom.clone()),
+                version: valeur("DriverVersion").unwrap_or_default(),
+                date: valeur("DriverDate")
+                    .and_then(|d| peripheriques::date_du_pilote(&d))
+                    .unwrap_or_default(),
+            }
+        })
+        .collect();
+    let build: u32 = texte(
+        &machine,
+        r"SOFTWARE\Microsoft\Windows NT\CurrentVersion",
+        "CurrentBuildNumber",
+    )
+    .and_then(|b| b.trim().parse().ok())
+    .unwrap_or(0);
+    Some(Etat {
+        winget: installes::winget_present(),
+        programmes,
+        vc14_x64: dword(&machine, &format!(r"{vc}\x64"), "Installed") == Some(1),
+        vc14_x86: dword(&machine, &format!(r"{vc}\x86"), "Installed") == Some(1),
+        directx9: systeme.join(r"System32\d3dx9_43.dll").is_file() && systeme.join(r"SysWOW64\d3dx9_43.dll").is_file(),
+        netfx3: dword(&machine, r"SOFTWARE\Microsoft\NET Framework Setup\NDP\v3.5", "Install") == Some(1),
+        gpu,
+        portable: batterie(),
+        windows11: build >= 22000,
+        mode_jeu: dword(&compte, r"Software\Microsoft\GameBar", "AutoGameModeEnabled"),
+        hags: dword(
+            &machine,
+            r"SYSTEM\CurrentControlSet\Control\GraphicsDrivers",
+            "HwSchMode",
+        ),
+        dvr: dword(&compte, r"System\GameConfigStore", "GameDVR_Enabled"),
+        capture: dword(
+            &compte,
+            r"Software\Microsoft\Windows\CurrentVersion\GameDVR",
+            "AppCaptureEnabled",
+        ),
+        souris: texte(&compte, r"Control Panel\Mouse", "MouseSpeed"),
+        seuil1: texte(&compte, r"Control Panel\Mouse", "MouseThreshold1"),
+        seuil2: texte(&compte, r"Control Panel\Mouse", "MouseThreshold2"),
+        fenetres: texte(
+            &compte,
+            r"Software\Microsoft\DirectX\UserGpuPreferences",
+            "DirectXUserGlobalSettings",
+        ),
+        alimentation: crate::commande::lancer(std::process::Command::new("powercfg").arg("/getactivescheme"), 15)
+            .filter(|r| r.code == Some(0))
+            .map(|r| r.sortie.trim().to_string())
+            .unwrap_or_default(),
+    })
+}
+
+/// Les cartes que Win32_VideoController filtré ignorait : affichage de base, bureau à distance, écrans virtuels.
+fn carte_ignoree(nom: &str) -> bool {
+    let nom = nom.to_lowercase();
+    ["basic", "remote", "virtual", "parsec", "meta"]
+        .iter()
+        .any(|m| nom.contains(m))
+}
+
+/// Une batterie dans la machine (Win32_Battery) : GetSystemPowerStatus dit « aucune batterie » (128) ou « inconnu »
+/// (255) sinon.
+fn batterie() -> bool {
+    #[repr(C)]
+    #[derive(Default)]
+    struct Alimentation {
+        secteur: u8,
+        drapeaux: u8,
+        pourcentage: u8,
+        economie: u8,
+        restant: u32,
+        complet: u32,
+    }
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn GetSystemPowerStatus(etat: *mut Alimentation) -> i32;
+    }
+    let mut etat = Alimentation::default();
+    // SAFETY : la structure a la forme de SYSTEM_POWER_STATUS (4 octets puis deux u32) et vit pendant l'appel.
+    (unsafe { GetSystemPowerStatus(&raw mut etat) }) != 0 && !matches!(etat.drapeaux, 128 | 255)
+}
+
+fn lire_par_powershell() -> Option<Etat> {
     let json = machine::windows::ps(
         r#"$noms = @(Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*', 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*', 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*' -ErrorAction SilentlyContinue | ForEach-Object { [string]$_.DisplayName } | Where-Object { $_ })
           function Lire($cle, $nom) { $v = Get-ItemProperty $cle -Name $nom -ErrorAction SilentlyContinue; if ($v) { $v.$nom } else { $null } }
@@ -536,6 +641,14 @@ mod tests {
             windows11: true,
             ..Etat::default()
         }
+    }
+
+    /// Le vrai registre et SetupAPI (Wine ici, la VM ensuite), sans PowerShell : l'état se lit.
+    #[test]
+    fn etat_lu_sans_powershell() {
+        assert!(lire_etat().is_some_and(|e| !e.programmes.iter().any(String::is_empty)));
+        assert!(carte_ignoree("Microsoft Basic Display Adapter") && carte_ignoree("Parsec Virtual Display"));
+        assert!(!carte_ignoree("NVIDIA GeForce RTX 4070"));
     }
 
     #[test]
