@@ -175,6 +175,61 @@ const SCRIPT_RESEAU: &str = "$p = @{}; Get-Process | ForEach-Object { $p[$_.Id] 
      Get-NetUDPEndpoint -ErrorAction SilentlyContinue | ForEach-Object { 'NET|UDP' + $s + '-' + $s + $_.LocalAddress + ':' + $_.LocalPort + $s + '-' + $s + $_.OwningProcess + $s + (N $p[[int]$_.OwningProcess]) }; \
      'NET_FIN'";
 
+/// Une valeur sur une ligne, sans le séparateur des champs (la fonction N des scripts).
+fn n(v: &str) -> String {
+    v.split(['\r', '\n', SEP])
+        .filter(|m| !m.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
+        .trim()
+        .to_string()
+}
+
+/// Les mêmes lignes « NET|… » que SCRIPT_RESEAU, lues dans les tables de Windows ; `None` si elles ne se lisent pas.
+fn lignes_reseau() -> Option<String> {
+    let noms: std::collections::HashMap<u32, String> = crate::machine::windows::processus::liste()
+        .into_iter()
+        .map(|p| (p.pid, p.nom))
+        .collect();
+    let mut lignes: Vec<String> = crate::machine::windows::connexions::sockets()?
+        .into_iter()
+        .map(|c| {
+            let nom = n(noms.get(&c.pid).map_or("", String::as_str));
+            let (proto, etat) = if c.tcp { ("TCP", c.etat) } else { ("UDP", "-") };
+            let distante = c
+                .distante
+                .map_or_else(|| "-".to_string(), |(ip, port)| format!("{ip}:{port}"));
+            let (ip, port) = c.locale;
+            format!(
+                "NET|{proto}{SEP}{etat}{SEP}{ip}:{port}{SEP}{distante}{SEP}{}{SEP}{nom}",
+                c.pid
+            )
+        })
+        .collect();
+    lignes.push("NET_FIN".into());
+    Some(lignes.join("\n"))
+}
+
+/// Les mêmes lignes « SRV|… » que la partie services de SCRIPT_DEMARRAGE, lues dans le registre et auprès du
+/// gestionnaire de services ; `None` si la clé des services ne s'ouvre pas.
+fn lignes_services() -> Option<String> {
+    let mut lignes: Vec<String> = crate::machine::windows::gestionnaire::inscrits()?
+        .into_iter()
+        .map(|s| {
+            format!(
+                "SRV|{}{SEP}{}{SEP}{}{SEP}{}{SEP}{}",
+                n(&s.nom),
+                s.etat,
+                s.demarrage,
+                n(&s.compte),
+                n(&s.programme)
+            )
+        })
+        .collect();
+    lignes.push("SRV_FIN".into());
+    Some(lignes.join("\n"))
+}
+
 /// Les lignes « NET|… » mises en tableau, une connexion par ligne, champs séparés par des tabulations.
 pub(crate) fn tableau_reseau(lignes: &[&str]) -> String {
     let mut t = String::from("PROTO\tÉTAT/STATE\tLOCALE/LOCAL\tDISTANTE/REMOTE\tPID\tPROGRAMME/PROGRAM\n");
@@ -188,7 +243,8 @@ pub(crate) fn tableau_reseau(lignes: &[&str]) -> String {
 pub(super) fn reseau(dossier: &Path) -> Partie {
     let mut p = Partie::new(Bi::new("Réseau", "Network"));
     let mut f = Feuille::new(&p.titre);
-    let sortie = crate::machine::windows::ps(&format!("{N}{SCRIPT_RESEAU}"));
+    // Les tables de Windows (iphlpapi) ; PowerShell seulement si elles ne se lisent pas.
+    let sortie = lignes_reseau().or_else(|| crate::machine::windows::ps(&format!("{N}{SCRIPT_RESEAU}")));
     let connexions = section(sortie.as_deref(), "NET");
     f.section("Get-NetTCPConnection, Get-NetUDPEndpoint");
     if let Some(lignes) = &connexions {
@@ -352,9 +408,11 @@ pub(super) fn demarrage(dossier: &Path) -> Partie {
         // Des raccourcis (.lnk) : la liste seulement ; leur empreinte est dans les fichiers récents.
         f.dossier(&dossier_demarrage, 0, false);
     }
+    // Les services sans PowerShell ; les abonnements WMI, eux, demandent encore PowerShell.
+    let natifs = lignes_services();
     let sortie = crate::machine::windows::ps(&format!("{N}{SCRIPT_DEMARRAGE}"));
     f.section("Win32_Service");
-    if let Some(services) = section(sortie.as_deref(), "SRV") {
+    if let Some(services) = section(natifs.as_deref(), "SRV").or_else(|| section(sortie.as_deref(), "SRV")) {
         f.lues += 1;
         let mut t = String::from("NOM/NAME\tÉTAT/STATE\tDÉMARRAGE/START\tCOMPTE/ACCOUNT\tPROGRAMME/PROGRAM\n");
         for s in services {
@@ -692,6 +750,18 @@ mod tests {
 
     /// Les scripts envoyés à PowerShell, tels qu'ils partent : écrits dans le dossier des tests pour être analysés
     /// par pwsh (VANGUARD_SCRIPTS : le dossier où les copier).
+    /// Les tables et le registre de Windows (Wine ici, la VM ensuite), sans PowerShell : lignes complètes, dans la
+    /// forme des scripts.
+    #[test]
+    fn reseau_et_services_sans_powershell() {
+        for (texte, section_, champs) in [(lignes_reseau(), "NET", 6), (lignes_services(), "SRV", 5)] {
+            let texte = texte.expect(section_);
+            let l = section(Some(&texte), section_).expect(section_);
+            assert!(l.iter().all(|l| l.split(SEP).count() == champs), "{texte}");
+        }
+        assert_eq!(n(" a\r\nb\u{1f}c "), "a b c");
+    }
+
     #[test]
     fn scripts_complets() {
         let scripts = [

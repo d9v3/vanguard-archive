@@ -11,6 +11,7 @@ use crate::ui::{resume, tr, trf, trp};
 
 pub(crate) mod cartes;
 mod comptes;
+pub(crate) mod connexions;
 mod durcissement;
 mod ecoute;
 pub(crate) mod evenements;
