@@ -770,19 +770,25 @@ fn juger_ssh_secondaire(conf: &str) -> Option<Constat> {
     if !x11 && essais.is_none() {
         return None;
     }
+    // Une commande écrite en toutes lettres par réglage : rien de variable n'entre dans sudo.
     let mut constats = Vec::new();
-    let mut lignes = String::new();
+    let mut commandes = Vec::new();
     if x11 {
         constats.push(tr!("affichage X11 renvoyé", "X11 display forwarded").to_string());
-        lignes.push_str("X11Forwarding no\\n");
+        commandes.push(format!(
+            "echo 'X11Forwarding no' | sudo tee -a {SSHD_VANGUARD} >/dev/null"
+        ));
     }
     if let Some(n) = essais {
         constats.push(trf!(
             "{n} essais de mot de passe par connexion",
             "{n} password attempts per connection"
         ));
-        lignes.push_str("MaxAuthTries 4\\n");
+        commandes.push(format!(
+            "echo 'MaxAuthTries 4' | sudo tee -a {SSHD_VANGUARD} >/dev/null"
+        ));
     }
+    commandes.push(RECHARGER_SSHD.to_string());
     Some(
         alerte(
             "SSH",
@@ -795,10 +801,7 @@ fn juger_ssh_secondaire(conf: &str) -> Option<Constat> {
         )
         .corriger(
             tr!("Les resserrer (le réglage de sshd)", "Tighten them (sshd's setting)"),
-            &[
-                &format!("printf '{lignes}' | sudo tee -a {SSHD_VANGUARD} >/dev/null"),
-                RECHARGER_SSHD,
-            ],
+            &commandes,
         ),
     )
 }
@@ -1831,10 +1834,10 @@ pas-un-uuid;rm -rf ~:802-11-wireless:yes:Piège
         assert!(juger_ssh_secondaire("X11Forwarding no\nMaxAuthTries 6\n").is_none());
         let c = juger_ssh_secondaire("X11Forwarding yes\nMaxAuthTries 10\n").unwrap();
         assert_eq!(c.probleme, Some(Niveau::Info));
-        assert!(
-            c.correctif.unwrap().commandes[0]
-                .starts_with("printf 'X11Forwarding no\\nMaxAuthTries 4\\n' | sudo tee -a")
-        );
+        let commandes = c.correctif.unwrap().commandes;
+        assert!(commandes[0].starts_with("echo 'X11Forwarding no' | sudo tee -a"));
+        assert!(commandes[1].starts_with("echo 'MaxAuthTries 4' | sudo tee -a"));
+        assert_eq!(commandes[2], RECHARGER_SSHD);
     }
 
     #[test]
