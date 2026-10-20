@@ -87,6 +87,8 @@ h1, h2, h3 { font-family: var(--titre); text-wrap: balance; margin: 0; }
 
 /* Sections */
 main { display: grid; gap: 5rem; padding-block: 4.5rem 4rem; }
+/* Une section, élément de grille, prendrait sinon la largeur de son plus long contenu (code, exemple) : la page déborderait sur téléphone. */
+main > section { min-width: 0; }
 .tete-section { display: grid; gap: .6rem; max-width: 46rem; margin-bottom: 2rem; }
 .tete-section h2 { font-size: clamp(1.7rem, 3.2vw, 2.4rem); line-height: 1.12; font-weight: 700; }
 .tete-section p { color: var(--doux); margin: 0; font-size: 1.05rem; }
@@ -128,12 +130,51 @@ main { display: grid; gap: 5rem; padding-block: 4.5rem 4rem; }
 footer { border-top: 1px solid var(--trait); }
 footer .cadre { display: flex; flex-wrap: wrap; justify-content: space-between; gap: .5rem 1.5rem; padding-block: 1.6rem 2.2rem; color: var(--doux); font-size: .88rem; font-family: var(--mono); }
 
+
+/* Fiche technique : des cartes denses, du code en chasse fixe ; aucune table qui déborde sur téléphone. */
+.specs { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 16rem), 1fr)); gap: 1px; background: var(--trait); border: 1px solid var(--trait); border-radius: .7rem; overflow: hidden; margin: 0; }
+.specs div { background: var(--surface); padding: 1rem 1.1rem; min-width: 0; }
+.specs dt { font-family: var(--mono); font-size: .72rem; letter-spacing: .08em; text-transform: uppercase; color: var(--doux); }
+.specs dd { margin: .25rem 0 0; font-size: .95rem; }
+code, .k { font-family: var(--mono); font-size: .86em; }
+code { background: var(--accent-fond); color: var(--encre); border-radius: .3rem; padding: .05rem .35rem; overflow-wrap: anywhere; }
+.sous-titre { font-family: var(--titre); font-size: 1.35rem; margin: 2.6rem 0 1rem; }
+.os { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 20rem), 1fr)); gap: 1.25rem; }
+.os article { background: var(--surface); border: 1px solid var(--trait); border-radius: .7rem; padding: 1.3rem; min-width: 0; }
+.os h4 { font-family: var(--titre); font-size: 1.15rem; margin: 0 0 .2rem; display: flex; justify-content: space-between; align-items: baseline; gap: .5rem; }
+.os h4 span { font-family: var(--mono); font-size: .72rem; font-weight: 400; color: var(--doux); }
+.os ul, .regles-sources ul { list-style: none; margin: .7rem 0 0; padding: 0; display: grid; gap: .5rem; }
+.os li { font-size: .92rem; color: var(--doux); padding-left: .9rem; border-left: 2px solid var(--trait); }
+.os li b { color: var(--encre); font-weight: 600; }
+.sources { display: grid; gap: .6rem; }
+.source { display: grid; grid-template-columns: minmax(0, 12rem) minmax(0, 1fr) minmax(0, 13rem); gap: .4rem 1.2rem; align-items: baseline; background: var(--surface); border: 1px solid var(--trait); border-radius: .6rem; padding: .85rem 1.1rem; }
+.source b { font-weight: 600; }
+.source span { color: var(--doux); font-size: .92rem; }
+.source .k { color: var(--accent); font-size: .78rem; }
+.chaine { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 13rem), 1fr)); gap: .8rem; list-style: none; margin: 0; padding: 0; counter-reset: maillon; }
+.chaine li { counter-increment: maillon; background: var(--surface); border: 1px solid var(--trait); border-radius: .6rem; padding: 1rem 1.1rem; font-size: .92rem; color: var(--doux); }
+.chaine li::before { content: "0" counter(maillon); display: block; font-family: var(--mono); font-size: .75rem; color: var(--accent); margin-bottom: .3rem; }
+.chaine li b { display: block; color: var(--encre); margin-bottom: .15rem; }
+details.cli { background: var(--surface); border: 1px solid var(--trait); border-radius: .7rem; }
+details.cli summary { cursor: pointer; padding: 1rem 1.2rem; font-weight: 600; list-style-position: inside; }
+details.cli summary span { font-weight: 400; color: var(--doux); font-size: .92rem; }
+details.cli[open] summary { border-bottom: 1px solid var(--trait); }
+.cli-groupes { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 19rem), 1fr)); gap: 1.4rem 2rem; padding: 1.2rem; }
+.cli-groupes h5 { margin: 0 0 .5rem; font-family: var(--mono); font-size: .72rem; letter-spacing: .08em; text-transform: uppercase; color: var(--accent); }
+.cli-groupes dl { margin: 0; display: grid; gap: .45rem; }
+.cli-groupes dt { font-family: var(--mono); font-size: .84rem; }
+.cli-groupes dt i { font-style: normal; color: var(--doux); }
+.cli-groupes dd { margin: 0 0 .2rem; font-size: .88rem; color: var(--doux); }
+.exemple { background: #0d1117; color: #e6edf3; border-radius: .6rem; padding: 1rem 1.1rem; font-family: var(--mono); font-size: .8rem; line-height: 1.6; overflow-x: auto; margin: 1rem 0 0; }
+.exemple .g { color: #7d8898; }
+
 @media (max-width: 960px) {
   .heros { grid-template-columns: 1fr; gap: 2.2rem; padding-block: 1.5rem 3rem; }
   .chiffres { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 720px) {
   .nav { display: none; }
+  .source { grid-template-columns: 1fr; }
   .etapes { grid-template-columns: 1fr; }
   .fenetre pre { display: none; }
   .menu-court { display: block; }
@@ -159,6 +200,7 @@ footer .cadre { display: flex; flex-wrap: wrap; justify-content: space-between; 
       <nav class="nav" aria-label="Sections">
         <a href="#comment">Comment ça marche</a>
         <a href="#fonctions">Fonctions</a>
+        <a href="#technique">Technique</a>
         <a href="#nouveautes">Nouveautés</a>
         <a href="#principes">Principes</a>
       </nav>
@@ -302,6 +344,167 @@ footer .cadre { display: flex; flex-wrap: wrap; justify-content: space-between; 
         </ul>
       </article>
     </div>
+  </section>
+
+  <section id="technique">
+    <div class="tete-section">
+      <p class="surtitre">Fiche technique</p>
+      <h2>Ce qu'il vérifie, et comment</h2>
+      <p>Pour qui veut savoir ce qui se passe sous le capot : les règles du bilan, les interfaces du système lues directement, les sources de menaces, la chaîne de confiance des mises à jour, et chaque commande.</p>
+    </div>
+
+    <dl class="specs">
+      <div><dt>Langage</dt><dd>Rust, édition 2024 · ≈ {{LIGNES}} lignes</dd></div>
+      <div><dt>Programme</dt><dd>Un seul exécutable, rien à installer : Linux x86_64 (statique, musl), Windows x86_64, macOS Apple Silicon et Intel</dd></div>
+      <div><dt>Règles du bilan</dt><dd>119 règles à identifiant stable (<code>LNX-SSH-006</code>) : 67 sous Linux, 48 sous Windows, 52 sous macOS, communes comprises</dd></div>
+      <div><dt>Interface</dt><dd>Menu au clavier, ou 55 commandes en ligne ; sorties <code>--json</code>, rapport HTML ou Markdown</dd></div>
+      <div><dt>Moteurs intégrés</dt><dd>YARA-X (règles YARA), reqwest + rustls/ring (HTTPS sans OpenSSL), tokio (scan asynchrone)</dd></div>
+      <div><dt>Cryptographie</dt><dd>Ed25519 (versions signées), SHA-256, BLAKE3 (intégrité), XChaCha20-Poly1305 + Argon2 (carnet chiffré)</dd></div>
+      <div><dt>Hors ligne</dt><dd>Tout ce qui demande Internet s'arrête seul en moins d'une minute et le dit ; listes gardées en cache</dd></div>
+      <div><dt>Licence</dt><dd>GPL-3.0-or-later · français et anglais</dd></div>
+    </dl>
+
+    <h3 class="sous-titre">Lu directement dans le système</h3>
+    <div class="os">
+      <article>
+        <h4>Linux <span>43 + 24 communes</span></h4>
+        <ul>
+          <li><b>Noyau (sysctl)</b> : redirections ICMP, <code>rp_filter</code>, BPF non privilégié, espaces de noms utilisateur, lockdown et signature des modules, attributs HSI de fwupd.</li>
+          <li><b>SSH</b> : <code>sshd_config</code> lu dans l'ordre exact des <code>Include</code>, algorithmes cassés (SHA-1, CBC, 3DES, arcfour, DSA), <code>GatewayPorts</code>, X11 ; correction validée par <code>sshd -t</code>.</li>
+          <li><b>Comptes</b> : PAM (blocage après échecs, longueur minimale), dossiers du <code>PATH</code> modifiables par d'autres comptes.</li>
+          <li><b>Rootkit</b> : PID cachés dans <code>/proc</code>, programmes sans fichier (memfd, supprimés, <code>/tmp</code>, <code>/dev/shm</code>), modules cachés ou non signés, carte en mode promiscuité.</li>
+          <li><b>Natif</b> : voisins réseau par netlink, horloge par <code>adjtimex</code>, mémoire DNS par varlink (systemd-resolved).</li>
+        </ul>
+      </article>
+      <article>
+        <h4>Windows <span>24 + 24 communes</span></h4>
+        <ul>
+          <li><b>Registre</b> : WPAD, IFEO et SilentProcessExit, <code>Winlogon</code> Shell/Userinit, AppInit_DLLs, clés Run, SMBv1 client et serveur.</li>
+          <li><b>API Win32</b> : <code>NetUserModalsGet</code> (verrouillage, longueur des mots de passe), Toolhelp32 (processus), <code>GetExtendedTcpTable</code> (connexions par PID), <code>DnsGetCacheDataTable</code>.</li>
+          <li><b>Journaux (EvtQuery)</b> : 4625 en rafale, 1102 journal effacé, 4720 compte créé, 7045 service installé, sur 7 jours.</li>
+          <li><b>Defender</b> : règles ASR, protection réseau, accès contrôlé aux dossiers (<code>durcir</code>), chacun annulable.</li>
+          <li><b>Corrections</b> : point de restauration d'abord, une seule fenêtre administrateur pour toutes.</li>
+        </ul>
+      </article>
+      <article>
+        <h4>macOS <span>28 + 24 communes</span></h4>
+        <ul>
+          <li><b>Système</b> : FileVault, SIP et Gatekeeper, volume système signé, extensions du noyau de tiers, pare-feu et mode furtif, AirDrop.</li>
+          <li><b>XProtect</b> : âge et version des définitions de l'antivirus intégré.</li>
+          <li><b>Profils de configuration</b> : installés hors gestion d'entreprise (MDM), qui peuvent imposer un proxy, un DNS ou un certificat.</li>
+          <li><b>Comptes et accès</b> : root activé, sudo sans mot de passe, dossiers de commandes ouverts à tous, clés et session SSH, ce qui se lance tout seul.</li>
+          <li><b>Mises à jour et sauvegardes</b> : automatiques, en attente, Homebrew ; Time Machine et son chiffrement.</li>
+          <li><b>Testé</b> sur un vrai Mac de GitHub à chaque version.</li>
+        </ul>
+      </article>
+    </div>
+
+    <h3 class="sous-titre">Réseau local</h3>
+    <div class="os">
+      <article>
+        <h4>Découverte et ports</h4>
+        <ul>
+          <li><b>Scan TCP « connect »</b>, sans droits root : ports courants ou <code>1-65535</code>, 512 connexions simultanées, délai réglable.</li>
+          <li><b>Identification</b> : fabricant, mDNS, SSDP/UPnP de la box, caméras ; nouveautés depuis le scan précédent.</li>
+        </ul>
+      </article>
+      <article>
+        <h4>Attaques sur le réseau</h4>
+        <ul>
+          <li><b>Empoisonneur (Responder)</b> : noms tirés au hasard demandés en LLMNR, NBT-NS et mDNS ; qui y répond est démasqué.</li>
+          <li><b>Surveillance horaire</b> : appareil inconnu, serveur de commande, notification du système.</li>
+        </ul>
+      </article>
+      <article>
+        <h4>Connexion</h4>
+        <ul>
+          <li><b>Jeu</b> : ping, gigue, pertes, débit, bufferbloat ; type de NAT par STUN.</li>
+          <li><b>Wi-Fi et DNS</b> : canal le plus libre, DNS le plus rapide (un DNS qui protège est gardé).</li>
+        </ul>
+      </article>
+    </div>
+
+    <h3 class="sous-titre">Sources de menaces</h3>
+    <div class="sources">
+      <div class="source"><b>MalwareBazaar</b><span>Empreintes SHA-256 de plus d'un million de logiciels malveillants, comparées à chaque fichier lu par l'analyse YARA.</span><span class="k">liste complète chaque semaine · 48 h chaque jour</span></div>
+      <div class="source"><b>ReversingLabs</b><span>308 règles YARA par famille (rançongiciels, voleurs, portes dérobées), appliquées par YARA-X sur 4 fils.</span><span class="k">intégrées au programme</span></div>
+      <div class="source"><b>ThreatFox · Feodo Tracker</b><span>Serveurs de commande de botnets, comparés aux connexions de chaque programme et à la mémoire DNS.</span><span class="k">abuse.ch · clé facultative</span></div>
+      <div class="source"><b>URLhaus · Spamhaus DBL · SURBL</b><span>Liens dangereux ; le domaine seulement sort, jamais le lien entier. Âge du domaine par RDAP.</span><span class="k">après accord</span></div>
+      <div class="source"><b>Have I Been Pwned</b><span>Mots de passe fuités par k-anonymat : seuls 5 caractères de l'empreinte SHA-1 partent.</span><span class="k">après accord</span></div>
+      <div class="source"><b>Spamhaus · SpamCop · DroneBL · PSBL</b><span>L'adresse Internet de la maison sur une liste noire : signe d'un appareil infecté.</span><span class="k">après accord</span></div>
+    </div>
+
+    <h3 class="sous-titre">Chaîne de confiance des mises à jour</h3>
+    <ol class="chaine">
+      <li><b>Signée chez l'auteur</b>Le manifeste (version, taille et SHA-256 de chaque programme) est signé en Ed25519 hors de GitHub.</li>
+      <li><b>Clé gravée</b>La clé publique est dans le programme ; un domaine de séparation empêche de réutiliser une autre signature.</li>
+      <li><b>Tout est revérifié</b>Refus d'un manifeste mal signé, d'une version pas plus récente, d'une taille, d'une empreinte ou d'une version différentes.</li>
+      <li><b>Transport</b>HTTPS seulement, redirections en HTTPS, réception en mémoire bornée ; jamais installé sans accord.</li>
+      <li><b>Vérifiable</b><code>vanguard verifier-moi</code> donne l'empreinte du programme, à comparer à la page de la version.</li>
+    </ol>
+
+    <h3 class="sous-titre">Toutes les commandes</h3>
+    <details class="cli">
+      <summary>55 commandes en ligne <span>· le nom anglais marche aussi · sans argument, le menu</span></summary>
+      <div class="cli-groupes">
+        <div><h5>Bilan</h5><dl>
+          <dt>complet <i>full · --html · --texte</i></dt><dd>machine puis réseau, note de A à F</dd>
+          <dt>machine <i>audit · --json</i></dt><dd>audit de cet ordinateur</dd>
+          <dt>corriger <i>fix</i></dt><dd>correctifs guidés, un accord chacun</dd>
+          <dt>regles <i>rules</i></dt><dd>règles du système, identifiants et références</dd>
+          <dt>changements <i>changes</i></dt><dd>chaque correction faite, date et résultat</dd>
+          <dt>appris <i>learned</i></dt><dd>alertes déclarées normales</dd>
+          <dt>a-laisser <i>handout</i></dt><dd>page simple pour la personne dépannée</dd>
+          <dt>ordinateurs <i>computers</i></dt><dd>ordinateurs vus par la clé</dd>
+        </dl></div>
+        <div><h5>Réseau</h5><dl>
+          <dt>reseau <i>network · --ports · --json</i></dt><dd>appareils, ports, risques, nouveautés</dd>
+          <dt>surveillance <i>monitor</i></dt><dd>surveillance horaire, notifications</dd>
+          <dt>connexion <i>connection</i></dt><dd>ping, gigue, débit, bufferbloat</dd>
+          <dt>nat · canaux <i>channels</i></dt><dd>type de NAT (STUN), canaux Wi-Fi</dd>
+          <dt>dns-rapide <i>fast-dns</i></dt><dd>DNS le plus rapide, annulable</dd>
+          <dt>cameras</dt><dd>caméras cachées sur un réseau</dd>
+          <dt>listes-noires <i>blocklists</i></dt><dd>adresse de la maison sur une liste noire</dd>
+          <dt>sauvegarder · restaurer · nommer</dt><dd>carnet des appareils</dd>
+        </dl></div>
+        <div><h5>Protection</h5><dl>
+          <dt>yara <i>--complet · [dossier]</i></dt><dd>règles YARA et empreintes MalwareBazaar</dd>
+          <dt>antivirus</dt><dd>ClamAV ou Microsoft Defender</dd>
+          <dt>sortantes <i>outbound</i></dt><dd>qui parle à Internet, botnets</dd>
+          <dt>distance <i>remote-access</i></dt><dd>AnyDesk, TeamViewer, RustDesk…</dd>
+          <dt>lien <i>link</i> · verifier-fichier <i>check-file</i></dt><dd>lien ou fichier téléchargé</dd>
+          <dt>motdepasse <i>password</i> · courriel <i>email</i></dt><dd>fuites</dd>
+          <dt>camera-micro · quarantaine</dt><dd>qui s'en sert · fichiers isolés</dd>
+          <dt>secrets · conteneurs <i>containers</i></dt><dd>secrets dans git · failles des images (trivy)</dd>
+          <dt>integrite · pieges <i>decoys</i></dt><dd>empreintes BLAKE3 · fichiers-pièges</dd>
+          <dt>durcir <i>harden</i> · isoler <i>sandbox</i></dt><dd>blocages Defender · bac à sable</dd>
+          <dt>traces <i>evidence</i></dt><dd>preuves datées, manifeste SHA-256</dd>
+        </dl></div>
+        <div><h5>Cette machine</h5><dl>
+          <dt>maj <i>update</i></dt><dd>système, programmes, pilotes, firmware</dd>
+          <dt>reparer <i>repair</i></dt><dd>réseau, pare-feu, fichiers système, heure…</dd>
+          <dt>diagnostic <i>diag</i> · lenteur <i>slow</i></dt><dd>plantages, erreurs · ce qui ralentit</dd>
+          <dt>demarrage <i>startup</i> · fiche <i>specs</i></dt><dd>lancés au démarrage · matériel</dd>
+          <dt>nettoyer <i>clean</i> · entretien <i>maintenance</i></dt><dd>place à libérer · bilan du mois</dd>
+          <dt>gaming · logiciels <i>apps</i></dt><dd>composants des jeux · logiciels libres</dd>
+          <dt>raccourci <i>shortcut</i></dt><dd>Vanguard installé d'un clic</dd>
+        </dl></div>
+        <div><h5>Données et Vanguard</h5><dl>
+          <dt>copier-fichiers · verifier-copie</dt><dd>copie vérifiée, test de restauration</dd>
+          <dt>verifier-cle <i>check-drive</i></dt><dd>fausses clés, vitesses, blocs en erreur</dd>
+          <dt>sauvegarde-auto <i>auto-backup</i></dt><dd>Déjà Dup, Time Machine, Historique des fichiers</dd>
+          <dt>se-mettre-a-jour <i>self-update</i></dt><dd>depuis la clé ou GitHub, signé</dd>
+          <dt>verifier-moi <i>self-check</i></dt><dd>version et empreinte du programme</dd>
+          <dt>guide · depanner <i>troubleshoot</i></dt><dd>{{COMMANDES}} commandes · pas à pas</dd>
+        </dl></div>
+      </div>
+    </details>
+<pre class="exemple"><span class="g"># bilan lisible par un script (sans menu ni question)</span>
+vanguard machine --json &gt; bilan.json
+<span class="g"># tous les ports de tous les appareils du réseau</span>
+vanguard reseau --ports tous --json
+<span class="g"># tout le dossier personnel, règles YARA et empreintes</span>
+vanguard yara --complet</pre>
   </section>
 
   <section id="nouveautes">
