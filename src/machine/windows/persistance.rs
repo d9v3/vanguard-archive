@@ -126,21 +126,24 @@ fn lancement_suspect(exe: &str, args: &str) -> Option<&'static str> {
     None
 }
 
-/// Ce qui se lance tout seul hors de Windows : tâches planifiées (hors \Microsoft\), clés Run et RunOnce,
-/// dossiers Démarrage. Une seule lecture PowerShell, en sections.
-pub(super) fn persistance() -> Vec<Constat> {
-    let sortie = ps(
-        "try { Get-ScheduledTask | Where-Object { $_.State -ne 'Disabled' -and $_.TaskPath -notlike '\\Microsoft\\*' } | ForEach-Object { $t = $_; \
+/// La lecture de ce qui se lance tout seul, en sections. Un dossier Démarrage qui n'existe pas (profil neuf, dossier
+/// supprimé) donne un chemin vide, et `Get-ChildItem ''` lit le dossier courant : lancé depuis la clé, chacun de ses
+/// programmes passait pour un démarrage suspect. D'où les chemins vides écartés.
+const LECTURE: &str = "try { Get-ScheduledTask | Where-Object { $_.State -ne 'Disabled' -and $_.TaskPath -notlike '\\Microsoft\\*' } | ForEach-Object { $t = $_; \
          $t.Actions | Where-Object { $_.Execute } | ForEach-Object { \"TCH|$($t.TaskPath)|$($t.TaskName)|$($_.Execute)|$($_.Arguments)\" } }; 'TCH_FIN' } catch {}; \
          try { foreach ($c in 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run', 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\RunOnce', \
          'HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run', 'HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\RunOnce', \
          'HKLM:\\Software\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Run') { $p = Get-ItemProperty $c -ErrorAction SilentlyContinue; \
          if ($p) { $p.PSObject.Properties | Where-Object { $_.Name -notlike 'PS*' } | ForEach-Object { \"RUN|$c|$($_.Name)|$($_.Value)\" } } }; 'RUN_FIN' } catch {}; \
-         try { $w = New-Object -ComObject WScript.Shell; foreach ($d in [Environment]::GetFolderPath('Startup'), [Environment]::GetFolderPath('CommonStartup')) { \
-         Get-ChildItem $d -File -ErrorAction SilentlyContinue | Where-Object Name -ne 'desktop.ini' | ForEach-Object { \
+         try { $w = New-Object -ComObject WScript.Shell; foreach ($d in [Environment]::GetFolderPath('Startup'), [Environment]::GetFolderPath('CommonStartup') | Where-Object { $_ }) { \
+         Get-ChildItem -LiteralPath $d -File -ErrorAction SilentlyContinue | Where-Object Name -ne 'desktop.ini' | ForEach-Object { \
          $cible = if ($_.Extension -eq '.lnk') { $r = $w.CreateShortcut($_.FullName); '\"' + $r.TargetPath + '\" ' + $r.Arguments } else { '\"' + $_.FullName + '\"' }; \
-         \"DEM|$($_.FullName)|$cible\" } }; 'DEM_FIN' } catch {}",
-    );
+         \"DEM|$($_.FullName)|$cible\" } }; 'DEM_FIN' } catch {}";
+
+/// Ce qui se lance tout seul hors de Windows : tâches planifiées (hors \Microsoft\), clés Run et RunOnce,
+/// dossiers Démarrage. Une seule lecture PowerShell, en sections.
+pub(super) fn persistance() -> Vec<Constat> {
+    let sortie = ps(LECTURE);
     let taches = section(sortie.as_deref(), "TCH");
     let run = section(sortie.as_deref(), "RUN");
     let demarrage = section(sortie.as_deref(), "DEM");
@@ -263,6 +266,14 @@ fn juger_persistance(taches: &[&str], run: &[&str], demarrage: &[&str]) -> Vec<C
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dossier_demarrage_absent_ne_lit_pas_le_dossier_courant() {
+        // Un chemin vide lirait le dossier courant (constaté dans un compte neuf, le 19 octobre).
+        assert!(LECTURE.contains("[Environment]::GetFolderPath('CommonStartup') | Where-Object { $_ })"));
+        assert!(LECTURE.contains("Get-ChildItem -LiteralPath $d -File"));
+        assert!(!LECTURE.contains("Get-ChildItem $d"));
+    }
 
     #[test]
     fn lancements_suspects() {
