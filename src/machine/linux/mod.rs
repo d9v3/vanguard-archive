@@ -729,6 +729,42 @@ fn ssh_serveur() -> Constat {
     )
 }
 
+/// Ports renvoyés par SSH ouverts à tout le réseau : avec « GatewayPorts yes » (ou « clientspecified »), une personne
+/// connectée en SSH ouvre sur cet ordinateur un port que tout le réseau joint, et que le pare-feu ne connaît pas.
+/// Par défaut, sshd ne les ouvre qu'à cet ordinateur lui-même. Un rechargement de sshd ne coupe aucune connexion en
+/// cours.
+fn juger_ports_ssh(conf: &str) -> Option<Constat> {
+    let valeur = valeur_sshd(conf, "GatewayPorts")?;
+    matches!(valeur.as_str(), "yes" | "clientspecified").then(|| {
+        alerte(
+            "SSH",
+            Niveau::Moyen,
+            trf!(
+                "« GatewayPorts {valeur} » : un port renvoyé par SSH peut s'ouvrir à tout le réseau, sans passer par le pare-feu.",
+                "“GatewayPorts {valeur}”: a port forwarded over SSH can open to the whole network, bypassing the firewall."
+            ),
+        )
+        .corriger(
+            tr!(
+                "Garder les ports renvoyés pour cet ordinateur seul",
+                "Keep forwarded ports for this computer only"
+            ),
+            &[
+                &format!("echo 'GatewayPorts no' | sudo tee -a {SSHD_VANGUARD} >/dev/null"),
+                RECHARGER_SSHD,
+            ],
+        )
+    })
+}
+
+fn ports_ssh() -> Option<Constat> {
+    // Configuration illisible : la règle du serveur SSH le dit déjà.
+    if !systemd() || !sshd_actif() {
+        return None;
+    }
+    juger_ports_ssh(&configuration_sshd()?)
+}
+
 /// Quelqu'un essaie-t-il de deviner un mot de passe SSH ? Tentatives ratées des dernières 24 h, dans le journal.
 fn ssh_echecs() -> Option<Constat> {
     if !systemd() || !sshd_actif() {
@@ -1734,6 +1770,16 @@ pas-un-uuid;rm -rf ~:802-11-wireless:yes:Piège
             Paquets::Zypper.commande_retrait(false, None, "x"),
             "sudo zypper --non-interactive remove x"
         );
+    }
+
+    #[test]
+    fn ports_renvoyes_par_ssh() {
+        assert!(juger_ports_ssh("").is_none() && juger_ports_ssh("GatewayPorts no\n").is_none());
+        for ouvert in ["GatewayPorts yes\n", "gatewayports=clientspecified\n"] {
+            let c = juger_ports_ssh(ouvert).unwrap();
+            assert_eq!(c.probleme, Some(Niveau::Moyen));
+            assert!(c.correctif.unwrap().commandes[0].contains("'GatewayPorts no'"));
+        }
     }
 
     #[test]

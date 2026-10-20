@@ -45,6 +45,18 @@ regle!(
 );
 
 regle!(
+    "LNX-SSH-004",
+    Os::Linux,
+    125,
+    (
+        "ports renvoyés par SSH ouverts au réseau",
+        "SSH-forwarded ports open to the network"
+    ),
+    &[],
+    || ports_ssh().into_iter().collect()
+);
+
+regle!(
     "LNX-SSH-002",
     Os::Linux,
     130,
