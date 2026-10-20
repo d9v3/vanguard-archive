@@ -317,6 +317,16 @@ fn port_suspect(port: u16) -> bool {
     )
 }
 
+/// Le dossier temporaire du compte, tel que le système le donne (TEMP sous Windows, TMPDIR ailleurs) : déplacé
+/// (« C:\Temp » réglé par un administrateur, un autre disque), il ne se reconnaît pas à son chemin habituel, et un
+/// programme lancé de là passerait inaperçu. `chemin` : en minuscules, barres obliques. Un dossier temporaire à la
+/// racine d'un disque (« C:\ », « / ») ne compte pas : tout serait dedans.
+fn dans_le_temporaire_du_compte(chemin: &str) -> bool {
+    let temp = std::env::temp_dir().to_string_lossy().to_lowercase().replace('\\', "/");
+    let temp = format!("{}/", temp.trim_end_matches('/'));
+    temp.trim_matches('/').contains('/') && chemin.starts_with(&temp)
+}
+
 /// Un dossier d'où un vrai programme ne se lance pas d'habitude.
 fn dossier_risque(chemin: &str, montages: &str) -> Option<&'static str> {
     let c = chemin.to_lowercase().replace('\\', "/");
@@ -336,6 +346,7 @@ fn dossier_risque(chemin: &str, montages: &str) -> Option<&'static str> {
     ];
     if racines.iter().any(|t| c.starts_with(t))
         || ["/appdata/local/temp/", "/windows/temp/"].iter().any(|t| c.contains(t))
+        || dans_le_temporaire_du_compte(&c)
     {
         return Some(tr!("un dossier temporaire", "a temporary folder"));
     }
@@ -883,6 +894,15 @@ mod tests {
             None
         );
         assert_eq!(dossier_risque("/usr/lib/firefox/firefox", ""), None);
+        // Le dossier temporaire du compte, où qu'il soit (TEMP déplacé sous Windows, TMPDIR ailleurs).
+        let temp = std::env::temp_dir().join("x").join("outil.exe");
+        assert_eq!(
+            dossier_risque(&temp.to_string_lossy(), ""),
+            Some("un dossier temporaire"),
+            "{}",
+            temp.display()
+        );
+        assert!(!dans_le_temporaire_du_compte("c:/"));
         assert_eq!(service(443, false), Some("HTTPS"));
         assert!(service(4444, false).is_none() && port_suspect(4444));
         let firefox = Connexion {
