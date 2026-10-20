@@ -3,7 +3,7 @@
 
 use std::path::{Path, PathBuf};
 
-use super::super::{Constat, alerte, ok};
+use super::super::{Constat, alerte, impossible, ok};
 use crate::plist::Valeur;
 use crate::risk::Niveau;
 use crate::{tr, trf};
@@ -14,17 +14,23 @@ const CAT: &str = "Persistance";
 enum Lancement {
     Programme(String, String),
     /// Fichier fabriqué pour gêner l'analyse (références qui multiplient les copies, bornes dépassées, taille
-    /// démesurée) : jamais relu ni confié à plutil, qui développerait tout sans limite ; montré tel quel.
+    /// démesurée), ou binaire abîmé : jamais relu ni confié à plutil, qui développerait tout sans limite ; montré
+    /// tel quel.
     Hostile,
-    /// Absent, interdit, pas un fichier ordinaire (tube nommé), ou sans programme : sauté.
+    /// Les droits refusent la lecture (un LaunchDaemon de root en 600, que launchd lit mais pas Vanguard) : rien ne
+    /// peut en être dit, et le bilan doit le savoir au lieu de le taire.
+    Interdit,
+    /// Absent, pas un fichier ordinaire (tube nommé), ou sans programme : sauté.
     Rien,
 }
 
 /// Programme lancé par un .plist de launchd, et ses arguments. Le fichier est lu directement ; plutil ne sert qu'en
 /// secours, pour un format que le lecteur ne connaît pas, jamais pour un fichier refusé par ses bornes.
 fn programme(plist: &Path) -> Lancement {
-    let Ok(lu) = crate::plist::lire_fichier(plist) else {
-        return Lancement::Rien;
+    let lu = match crate::plist::lire_fichier(plist) {
+        Ok(lu) => lu,
+        Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => return Lancement::Interdit,
+        Err(_) => return Lancement::Rien,
     };
     let reglages = match lu {
         crate::plist::Lu::Plist(r) => r,
@@ -126,6 +132,7 @@ pub fn persistance() -> Vec<Constat> {
     ];
     let mut constats = Vec::new();
     let mut tiers = Vec::new();
+    let mut interdits = 0usize;
     for (dossier, systeme) in dossiers {
         for f in std::fs::read_dir(&dossier).into_iter().flatten().flatten() {
             let chemin = f.path();
@@ -139,6 +146,10 @@ pub fn persistance() -> Vec<Constat> {
             let (prog, args) = match programme(&chemin) {
                 Lancement::Programme(p, a) => (p, a),
                 Lancement::Rien => continue,
+                Lancement::Interdit => {
+                    interdits += 1;
+                    continue;
+                }
                 Lancement::Hostile => {
                     tiers.push(nom.clone());
                     constats.push(
@@ -146,8 +157,8 @@ pub fn persistance() -> Vec<Constat> {
                             CAT,
                             Niveau::Eleve,
                             trf!(
-                                "L'agent « {nom} » est un fichier fabriqué pour gêner l'analyse (références en boucle, copies multipliées ou taille démesurée) : aucun programme légitime n'écrit ça.",
-                                "Agent “{nom}” is a file built to hinder analysis (looping references, multiplied copies or an outsized file): no legitimate program writes that."
+                                "L'agent « {nom} » est illisible ou fabriqué pour gêner l'analyse (références en boucle, copies multipliées ou taille démesurée) : aucun programme légitime n'écrit ça, mais un fichier abîmé donne aussi ce message.",
+                                "Agent “{nom}” is unreadable or built to hinder analysis (looping references, multiplied copies or an outsized file): no legitimate program writes that, but a damaged file gives this message too."
                             ),
                         )
                         .manuel(
@@ -215,6 +226,17 @@ pub fn persistance() -> Vec<Constat> {
                 ),
             )
         });
+    }
+    // Les agents que les droits cachent ne sont ni sains ni suspects : dits « non vérifiés », jamais passés sous
+    // silence.
+    if interdits > 0 {
+        constats.push(impossible(
+            CAT,
+            &trf!(
+                "{interdits} agent(s) de démarrage que les droits refusent de lire sans administrateur",
+                "{interdits} startup agent(s) the permissions refuse to read without administrator rights"
+            ),
+        ));
     }
     constats
 }
