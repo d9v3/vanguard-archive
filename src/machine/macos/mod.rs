@@ -116,7 +116,11 @@ fn reglages(domaine: &str) -> Reglages {
 }
 
 /// Lit une préférence système, ce que donne `defaults read <domaine> <clé>` ; `None` si elle n'existe pas. Le fichier
-/// est lu directement ; `defaults` ne sert plus qu'en secours, quand il est illisible.
+/// est lu directement ; `defaults` ne sert plus qu'en secours, quand il est illisible. Une clé absente du fichier
+/// n'est pas redemandée à `defaults` : c'est voulu, un programme de moins par lecture. Le prix : `defaults` passe par
+/// cfprefsd, qui peut tenir une valeur changée dans Réglages Système il y a quelques secondes et pas encore écrite
+/// sur le disque ; pour `-g` ou com.apple.sharingd, ce changement tout récent est manqué jusqu'au prochain vidage.
+/// Pour les domaines de /Library/Preferences lus en tant qu'utilisateur, sans effet (pas de cache utilisateur).
 pub(crate) fn preference(domaine: &str, cle: &str) -> Option<String> {
     let defaults = || sortie("defaults", &["read", domaine, cle]).map(|s| s.trim().to_string());
     match reglages(domaine) {
