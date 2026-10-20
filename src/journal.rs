@@ -920,9 +920,17 @@ mod tests {
             let t = anonymiser(&format!("hôte {nom} injoignable"));
             assert!(!t.contains(nom.as_str()), "{t}");
         }
-        // Linux le lit dans /proc, macOS le demande à scutil : il doit avoir été trouvé.
+        // Linux le lit dans /proc, macOS le demande à scutil : il doit avoir été trouvé, sauf s'il est trop court
+        // pour être masqué (« vm », « pc »), comme le veut noms_personnels.
+        #[cfg(target_os = "linux")]
+        let masquable =
+            std::fs::read_to_string("/proc/sys/kernel/hostname").is_ok_and(|n| n.trim().chars().count() >= 3);
+        #[cfg(target_os = "macos")]
+        let masquable = true;
         #[cfg(unix)]
-        assert!(noms_personnels().iter().any(|(_, r)| *r == "<machine>"));
+        if masquable {
+            assert!(noms_personnels().iter().any(|(_, r)| *r == "<machine>"));
+        }
     }
 
     // Valeurs inventées : comptes alice, bob, Zoé, Jean Dupont ; réseau « Chez Max » ; préfixe d'Apple (3c:22:fb).
