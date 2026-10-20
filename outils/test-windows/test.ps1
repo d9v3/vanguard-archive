@@ -845,6 +845,8 @@ try {
     Accord 'Registre à distance' ((Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Services\RemoteRegistry' -ErrorAction SilentlyContinue).Start -eq 2) 'Registre à distance démarre|Remote Registry starts'
     $smb1c = (Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Services\mrxsmb10' -ErrorAction SilentlyContinue).Start
     Accord 'Client SMBv1' ($null -ne $smb1c -and $smb1c -ne 4) 'client SMBv1|SMBv1 client'
+    # Le serveur SMBv1 : Vanguard le lit dans le registre (0.80) ; PowerShell, lui, demande au service.
+    Accord 'Serveur SMBv1' ((Get-SmbServerConfiguration -ErrorAction SilentlyContinue).EnableSMB1Protocol -eq $true) 'SMBv1 activé|SMBv1 on'
     $msiM = (Get-ItemProperty 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\Installer' -ErrorAction SilentlyContinue).AlwaysInstallElevated
     $msiC = (Get-ItemProperty 'HKCU:\SOFTWARE\Policies\Microsoft\Windows\Installer' -ErrorAction SilentlyContinue).AlwaysInstallElevated
     Accord 'Installation MSI élevée' ($msiM -eq 1 -and $msiC -eq 1) 'AlwaysInstallElevated'

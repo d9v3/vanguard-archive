@@ -57,9 +57,14 @@ regle!(
     }
 );
 
-regle!("WIN-RES-003", Os::Windows, 140, ("SMBv1", "SMBv1"), &[], || smb1()
-    .into_iter()
-    .collect());
+regle!(
+    "WIN-RES-003",
+    Os::Windows,
+    140,
+    ("SMBv1", "SMBv1"),
+    &[],
+    || vec![smb1()]
+);
 
 regle!(
     "WIN-DIS-001",

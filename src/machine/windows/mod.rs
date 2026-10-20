@@ -518,12 +518,28 @@ fn juger_cloud(valeur: Option<&str>) -> Option<Constat> {
     })
 }
 
-fn smb1() -> Option<Constat> {
-    let actif = ps("(Get-SmbServerConfiguration).EnableSMB1Protocol")?.to_ascii_lowercase();
-    if actif != "true" && actif != "false" {
-        return Some(illisible("SMBv1"));
+/// Le serveur SMBv1 est-il actif ? Lu dans le registre, comme Get-SmbServerConfiguration le lit (près de 2 s de
+/// PowerShell de moins) : sans son pilote (service « srv », absent quand la fonctionnalité n'est pas installée, le cas
+/// de Windows 11), il ne peut pas l'être ; sinon, la valeur SMB1 des paramètres du serveur (absente : actif).
+fn smb1_actif() -> Option<bool> {
+    let services = winreg::RegKey::predef(winreg::enums::HKEY_LOCAL_MACHINE)
+        .open_subkey(r"SYSTEM\CurrentControlSet\Services")
+        .ok()?;
+    if services.open_subkey("srv").is_err() {
+        return Some(false);
     }
-    Some(if actif == "true" {
+    let valeur: Option<u32> = services
+        .open_subkey(r"LanmanServer\Parameters")
+        .ok()
+        .and_then(|p| p.get_value("SMB1").ok());
+    Some(valeur != Some(0))
+}
+
+fn smb1() -> Constat {
+    let Some(actif) = smb1_actif() else {
+        return illisible("SMBv1");
+    };
+    if actif {
         alerte(
             "SMBv1",
             Niveau::Critique,
@@ -538,7 +554,7 @@ fn smb1() -> Option<Constat> {
         )
     } else {
         ok("SMBv1", tr!("SMBv1 désactivé.", "SMBv1 off."))
-    })
+    }
 }
 
 fn bureau_distance() -> Constat {
