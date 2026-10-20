@@ -3,13 +3,15 @@
 //! sans en changer le sens) et appliquées par YARA-X, le moteur YARA écrit en Rust par VirusTotal (licence
 //! BSD-3-Clause), compilé dans Vanguard : rien à installer, depuis la clé et sans Internet comme ailleurs. En
 //! complément de l'antivirus : une règle décrit une famille entière, variantes comprises. Lecture seule : rien n'est
-//! déplacé ni supprimé.
+//! déplacé ni supprimé. Chaque fichier lu est aussi comparé aux empreintes de MalwareBazaar (`empreintes`) : là, c'est
+//! un logiciel malveillant précis, reconnu sans doute possible.
 
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use std::time::Duration;
 
 use crate::protection::antivirus::{Examen, Portee};
+use crate::protection::empreintes::{self, Empreintes};
 use crate::ui::*;
 
 const REGLES: &str = include_str!(concat!(env!("OUT_DIR"), "/reversinglabs.yara"));
@@ -112,9 +114,13 @@ fn fichiers(cible: &Path, illisibles: &mut Vec<PathBuf>) -> Vec<PathBuf> {
     trouves
 }
 
-/// Les règles appliquées à des fichiers, par `FILS` fils, chacun avec son propre analyseur : (correspondances,
-/// fichiers illisibles ou trop longs à lire).
-fn analyser_fichiers(regles: &yara_x::Rules, liste: &[PathBuf]) -> (Vec<Trouve>, Vec<PathBuf>) {
+/// Les règles appliquées à des fichiers, par `FILS` fils, chacun avec son propre analyseur, et l'empreinte de chaque
+/// fichier cherchée dans celles de MalwareBazaar : (correspondances, fichiers illisibles ou trop longs à lire).
+fn analyser_fichiers(
+    regles: &yara_x::Rules,
+    empreintes: Option<&Empreintes>,
+    liste: &[PathBuf],
+) -> (Vec<Trouve>, Vec<PathBuf>) {
     let morceaux: Vec<&[PathBuf]> = liste.chunks(liste.len().div_ceil(FILS).max(1)).collect();
     std::thread::scope(|s| {
         let fils: Vec<_> = morceaux
@@ -128,6 +134,12 @@ fn analyser_fichiers(regles: &yara_x::Rules, liste: &[PathBuf]) -> (Vec<Trouve>,
                         match analyseur.scan_file(f) {
                             Ok(r) => trouves.extend(r.matching_rules().map(|m| Trouve::nouveau(m.identifier(), f))),
                             Err(_) => echecs.push(f.clone()),
+                        }
+                        // Le fichier vient d'être lu : il est encore en mémoire, l'empreinte coûte peu.
+                        if let Some(empreintes) = empreintes {
+                            for (chemin, e) in empreintes::connus(empreintes, std::slice::from_ref(f)) {
+                                trouves.push(Trouve::nouveau(&format!("{MALWAREBAZAAR}{e}"), &chemin));
+                            }
                         }
                     }
                     (trouves, echecs)
@@ -156,8 +168,17 @@ fn illisible(cible: &Path, echecs: &[PathBuf]) -> Option<String> {
     ))
 }
 
+/// Le début du nom d'une correspondance par empreinte : « MalwareBazaar sha256:<empreinte> ».
+const MALWAREBAZAAR: &str = "MalwareBazaar sha256:";
+
 /// La famille d'une règle de ReversingLabs, lue dans son nom (« ByteCode_MSIL_Ransomware_Apis »).
 fn famille(regle: &str) -> &'static str {
+    if regle.starts_with(MALWAREBAZAAR) {
+        return tr!(
+            "logiciel malveillant connu, empreinte exacte",
+            "known malware, exact fingerprint"
+        );
+    }
     for morceau in regle.split('_') {
         let nom = match morceau {
             "Ransomware" => tr!("rançongiciel", "ransomware"),
@@ -175,9 +196,10 @@ fn famille(regle: &str) -> &'static str {
     tr!("logiciel malveillant", "malware")
 }
 
-/// Applique les 308 règles aux cibles : (correspondances, ce qui n'a pas pu être lu). `None` : règles qui ne se
-/// compilent pas, ce qui est dit. Tout ce qui n'a pas pu être lu est rendu : jamais compté comme sain.
-fn appliquer(cibles: &[PathBuf]) -> Option<(Vec<Trouve>, Vec<String>)> {
+/// Applique les 308 règles et les empreintes de MalwareBazaar aux cibles : (correspondances, ce qui n'a pas pu être
+/// lu, les empreintes s'il y en avait). `None` : règles qui ne se compilent pas, ce qui est dit. Tout ce qui n'a pas
+/// pu être lu est rendu : jamais compté comme sain.
+fn appliquer(cibles: &[PathBuf]) -> Option<(Vec<Trouve>, Vec<String>, Option<&'static Empreintes>)> {
     let regles = match regles() {
         Ok(r) => r,
         Err(e) => {
@@ -191,18 +213,19 @@ fn appliquer(cibles: &[PathBuf]) -> Option<(Vec<Trouve>, Vec<String>)> {
             return None;
         }
     };
+    let empreintes = empreintes::connues();
     let mut trouves = Vec::new();
     let mut erreurs = Vec::new();
     for cible in cibles {
         trp!("  Analyse de {}…", "  Scanning {}…", chemin_affichable(cible));
         let mut echecs = Vec::new();
         let liste = fichiers(cible, &mut echecs);
-        let (t, e) = analyser_fichiers(regles, &liste);
+        let (t, e) = analyser_fichiers(regles, empreintes, &liste);
         trouves.extend(t);
         echecs.extend(e);
         erreurs.extend(illisible(cible, &echecs));
     }
-    Some((trouves, erreurs))
+    Some((trouves, erreurs, empreintes))
 }
 
 pub fn analyser(portee: &Portee) {
@@ -220,10 +243,16 @@ pub fn analyser(portee: &Portee) {
         trp!("  Rien à analyser ici.", "  Nothing to scan here.");
         return;
     }
-    let Some((trouves, erreurs)) = appliquer(&cibles) else {
+    let Some((trouves, erreurs, empreintes)) = appliquer(&cibles) else {
         return;
     };
     println!();
+    if empreintes.is_none() {
+        trp!(
+            "  ⚠ Empreintes de MalwareBazaar indisponibles (hors ligne, et aucune copie gardée) : seules les 308 règles ont servi.",
+            "  ⚠ MalwareBazaar fingerprints unavailable (offline, and no saved copy): only the 308 rules were used."
+        );
+    }
     for e in &erreurs {
         for (i, ligne) in envelopper(
             &trf!(
@@ -239,16 +268,27 @@ pub fn analyser(portee: &Portee) {
         }
     }
     if trouves.is_empty() {
-        if erreurs.is_empty() {
-            trp!(
+        match (erreurs.is_empty(), empreintes) {
+            (true, Some(e)) => trp!(
+                "  {VERT}✔{RESET} Aucun fichier ne correspond aux 308 règles ni aux {} empreintes de MalwareBazaar.",
+                "  {VERT}✔{RESET} No file matches the 308 rules or the {} MalwareBazaar fingerprints.",
+                e.nombre()
+            ),
+            (true, None) => trp!(
                 "  {VERT}✔{RESET} Aucun fichier ne correspond aux 308 règles.",
                 "  {VERT}✔{RESET} No file matches the 308 rules."
-            );
+            ),
+            _ => {}
         }
         return;
     }
     for t in &trouves {
-        println!("  {}✖{RESET} {}", couleur(crate::risk::Niveau::Eleve), t.fichier);
+        let niveau = if t.regle.starts_with(MALWAREBAZAAR) {
+            crate::risk::Niveau::Critique
+        } else {
+            crate::risk::Niveau::Eleve
+        };
+        println!("  {}✖{RESET} {}", couleur(niveau), t.fichier);
         println!("      {GRIS}{} ({}){RESET}", famille(&t.regle), t.regle);
     }
     println!();
@@ -264,7 +304,12 @@ pub fn analyser(portee: &Portee) {
     let mut a_isoler: Vec<(PathBuf, String)> = Vec::new();
     for t in &trouves {
         if t.chemin.is_file() && !a_isoler.iter().any(|(c, _)| *c == t.chemin) {
-            a_isoler.push((t.chemin.clone(), format!("YARA {}", t.regle)));
+            let raison = if t.regle.starts_with(MALWAREBAZAAR) {
+                t.regle.clone()
+            } else {
+                format!("YARA {}", t.regle)
+            };
+            a_isoler.push((t.chemin.clone(), raison));
         }
     }
     crate::protection::quarantaine::proposer(&a_isoler);
@@ -274,13 +319,13 @@ pub fn analyser(portee: &Portee) {
 pub(crate) fn examiner(fichier: &Path) -> Examen {
     match appliquer(&[fichier.to_path_buf()]) {
         None => Examen::Impossible(tr!("règles YARA inutilisables", "YARA rules unusable").into()),
-        Some((trouves, _)) if !trouves.is_empty() => Examen::Trouve(
+        Some((trouves, _, _)) if !trouves.is_empty() => Examen::Trouve(
             trouves
                 .iter()
                 .map(|t| format!("{} ({})", famille(&t.regle), t.regle))
                 .collect(),
         ),
-        Some((_, erreurs)) if !erreurs.is_empty() => Examen::Impossible(erreurs.join(" ; ")),
+        Some((_, erreurs, _)) if !erreurs.is_empty() => Examen::Impossible(erreurs.join(" ; ")),
         Some(_) => Examen::Sain,
     }
 }
@@ -437,7 +482,7 @@ mod tests {
         let mut illisibles = Vec::new();
         let liste = fichiers(&dossier, &mut illisibles);
         assert_eq!(liste.len(), 2, "{liste:?}");
-        let (trouves, echecs) = analyser_fichiers(&essai, &liste);
+        let (trouves, echecs) = analyser_fichiers(&essai, None, &liste);
         // Le trop gros n'est pas lu, mais il est dit.
         assert!(
             illisibles.len() == 1 && illisibles[0].ends_with("image.iso"),
@@ -449,7 +494,21 @@ mod tests {
         assert!(trouves[0].chemin.ends_with("sous/facture.exe"));
         assert_eq!(famille(&trouves[0].regle), "cheval de Troie");
         // Les vraies règles, sur le même dossier : rien.
-        assert_eq!(analyser_fichiers(regles().unwrap(), &liste).0, []);
+        assert_eq!(analyser_fichiers(regles().unwrap(), None, &liste).0, []);
+        // Avec l'empreinte de note.txt parmi celles de MalwareBazaar : trouvé par elle, sans règle.
+        let note = dossier.join("note.txt");
+        let connues = Empreintes::depuis(vec![empreintes::sha256(&note).unwrap()]);
+        let par_empreinte = analyser_fichiers(regles().unwrap(), Some(&connues), &liste).0;
+        assert_eq!(par_empreinte.len(), 1);
+        assert_eq!(par_empreinte[0].chemin, note);
+        assert!(
+            par_empreinte[0].regle.starts_with(MALWAREBAZAAR)
+                && par_empreinte[0].regle.len() == MALWAREBAZAAR.len() + 64
+        );
+        assert_eq!(
+            famille(&par_empreinte[0].regle),
+            "logiciel malveillant connu, empreinte exacte"
+        );
         // Une cible qui n'existe pas : dite, pas comptée comme saine.
         let mut absents = Vec::new();
         assert_eq!(fichiers(&dossier.join("absent"), &mut absents), Vec::<PathBuf>::new());

@@ -10,6 +10,7 @@ pub mod cle;
 pub mod cles_connues;
 pub mod conteneurs;
 pub mod distance;
+pub(crate) mod empreintes;
 pub mod environnement;
 pub mod fuites;
 pub mod integrite;

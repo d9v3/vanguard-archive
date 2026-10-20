@@ -41,6 +41,10 @@ repository (`git checkout v0.62.0`, for example), to be rebuilt if needed.
   license), compiled into Vanguard on Linux, Windows and macOS: no engine to install or offer any more, and four
   files read at once. A file over 256 MB or taking more than 30 s to scan is reported, never counted as clean. The
   program grows from about 10 to 25 MB.
+- **Fingerprint antivirus, everywhere, even from the USB drive.** The YARA scan also compares every file it reads
+  with MalwareBazaar's SHA-256 fingerprints (abuse.ch, public domain): a file listed there is that exact malware, no
+  doubt possible, offered for quarantine. The full list updates once a week, the last 48 hours every day; offline,
+  the saved copy is used, and with no copy, that is said.
 - **Recognized open source tools, when installed.** “Flaws in Docker images”: trivy tells the known serious or
   critical flaws in Docker or Podman images; when missing, Vanguard offers to install it with the system's tool. After failed SSH logins, the
   check tells whether fail2ban, sshguard or CrowdSec already blocks the addresses that keep trying.

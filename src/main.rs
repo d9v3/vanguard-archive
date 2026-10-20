@@ -194,8 +194,8 @@ enum Commande {
     /// dossiers. Chacun s'active après accord et s'annule exactement (Windows seulement).
     #[command(visible_alias = "harden")]
     Durcir,
-    /// Analyse YARA : 308 règles de familles de logiciels malveillants (ReversingLabs), en complément de l'antivirus.
-    /// Sans dossier : téléchargements, bureau, démarrage. Lecture seule.
+    /// Analyse YARA : 308 règles de familles de logiciels malveillants (ReversingLabs) et les empreintes de
+    /// MalwareBazaar, en complément de l'antivirus. Sans dossier : téléchargements, bureau, démarrage. Lecture seule.
     Yara {
         /// Tout le dossier personnel au lieu des endroits à risque.
         #[arg(long, visible_alias = "full")]
@@ -1375,8 +1375,8 @@ const AIDES_EN: &[(&str, &str)] = &[
     ("appris", "What Vanguard has learned on this computer: the alerts declared normal, and forgetting them"),
     ("listes-noires", "Is your home's Internet address on a blocklist (Spamhaus, SpamCop, DroneBL, PSBL)? If so, a \
                        device is probably infected. After your consent: the lists see the address"),
-    ("yara", "YARA scan: 308 rules for malware families (ReversingLabs), alongside the antivirus. Without a folder: \
-              downloads, desktop, startup. Read-only"),
+    ("yara", "YARA scan: 308 rules for malware families (ReversingLabs) and MalwareBazaar's fingerprints, alongside \
+              the antivirus. Without a folder: downloads, desktop, startup. Read-only"),
     ("secrets", "Secrets in the history of the home folder's git projects (passwords, API keys, tokens), searched by \
                  Vanguard, and also by gitleaks if installed. No secret is shown. Read-only"),
     ("conteneurs", "Known flaws in this computer's Docker or Podman images, by trivy if installed. Read-only"),

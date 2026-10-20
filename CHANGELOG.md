@@ -43,6 +43,10 @@ chaque version garde son étiquette dans le dépôt (`git checkout v0.62.0`, par
   licence BSD), compilé dans Vanguard sous Linux, Windows et macOS : plus de moteur à installer ni à proposer, et
   quatre fichiers lus à la fois. Un fichier de plus de 256 Mo ou plus long que 30 s à analyser est dit, jamais compté
   comme sain. Le programme passe d'environ 10 à 25 Mo.
+- **Antivirus par empreintes, partout, même depuis la clé.** L'analyse YARA compare aussi chaque fichier lu aux
+  empreintes SHA-256 de MalwareBazaar (abuse.ch, domaine public) : un fichier qui y est, c'est ce logiciel malveillant
+  précis, sans doute possible, proposé en quarantaine. La liste complète se met à jour une fois par semaine, les
+  48 dernières heures chaque jour ; sans Internet, la copie gardée sert, et sans copie, c'est dit.
 - **Outils libres reconnus, s'ils sont installés.** « Failles des images Docker » : trivy dit les failles connues,
   graves ou critiques, des images Docker ou Podman ; absent, Vanguard propose de l'installer par l'outil du système. Après
   des connexions SSH ratées, le bilan dit si fail2ban, sshguard ou CrowdSec bloque déjà les adresses qui insistent.
