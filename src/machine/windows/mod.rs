@@ -19,6 +19,7 @@ pub(crate) mod gestionnaire;
 pub(crate) mod hachage;
 pub(crate) mod installes;
 pub(crate) mod lecteurs;
+pub(crate) mod magasins;
 mod maj;
 pub(crate) mod partages;
 pub(crate) mod peripheriques;

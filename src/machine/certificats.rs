@@ -340,13 +340,16 @@ pub fn certificats() -> Vec<Constat> {
 /// machine. Windows met à jour lui-même ses racines : seules les marques d'un ajout sont examinées.
 #[cfg(windows)]
 pub fn certificats() -> Vec<Constat> {
-    let Some(sortie) = super::windows::ps(
+    // Lus par crypt32 ; PowerShell seulement si le magasin de l'ordinateur ne s'ouvre pas.
+    let Some(sortie) = super::windows::magasins::racines().or_else(|| {
+        super::windows::ps(
         // Module du lecteur Cert: chargé d'office (voir windows::powershell pour la cause de la panne vue en VM).
         "Import-Module Microsoft.PowerShell.Security -ErrorAction SilentlyContinue; \
          foreach ($m in 'LocalMachine', 'CurrentUser') { Get-ChildItem \"Cert:\\$m\\Root\" | ForEach-Object { $c = $_; \
          $nom = try { $c.GetNameInfo([Security.Cryptography.X509Certificates.X509NameType]::SimpleName, $false) } catch { $c.Subject }; \
          \"CERT|$m|$($c.HasPrivateKey)|$($c.Thumbprint)|$nom\" } }",
-    ) else {
+        )
+    }) else {
         return vec![super::windows::illisible(CAT)];
     };
     let mut vus = std::collections::HashSet::new();
