@@ -5,6 +5,8 @@
 
 use std::ffi::c_void;
 
+use super::securite::sid_en_texte;
+
 /// SHARE_INFO_502 de lmshare.h.
 #[repr(C)]
 struct Partage502 {
@@ -64,8 +66,6 @@ unsafe extern "system" {
 
 #[link(name = "advapi32")]
 unsafe extern "system" {
-    fn IsValidSecurityDescriptor(descripteur: *const c_void) -> i32;
-    fn GetSecurityDescriptorLength(descripteur: *const c_void) -> u32;
     fn LookupAccountSidW(
         systeme: *const u16,
         sid: *const c_void,
@@ -159,18 +159,8 @@ fn droits(descripteur: *const c_void) -> Option<Vec<String>> {
     if descripteur.is_null() {
         return Some(vec!["Everyone|S-1-1-0|Allow|Full".into()]);
     }
-    // SAFETY : le descripteur vient de NetShareEnum et vit avec son tampon ; il est vérifié avant que sa longueur soit
-    // demandée, et copié sur cette longueur seulement.
-    let octets = unsafe {
-        if IsValidSecurityDescriptor(descripteur) == 0 {
-            return None;
-        }
-        let n = usize::try_from(GetSecurityDescriptorLength(descripteur)).ok()?;
-        if n == 0 || n > 64 * 1024 {
-            return None;
-        }
-        std::slice::from_raw_parts(descripteur.cast::<u8>(), n).to_vec()
-    };
+    // SAFETY : le descripteur vient de NetShareEnum et vit avec son tampon.
+    let octets = unsafe { super::securite::copier(descripteur) }?;
     let Some(regles) = regles_du_descripteur(&octets) else {
         return Some(vec!["Everyone|S-1-1-0|Allow|Full".into()]);
     };
@@ -191,50 +181,27 @@ struct Regle {
     droit: &'static str,
 }
 
-/// Les règles d'un descripteur de sécurité autonome (SECURITY_DESCRIPTOR_RELATIVE) ; `None` sans liste de droits
-/// (tout le monde a tout). Seules les règles « autoriser » et « refuser » simples comptent, comme pour
-/// Get-SmbShareAccess. Chaque décalage est vérifié dans `octets` avant d'être lu.
+/// Les règles « autoriser » et « refuser » simples d'un descripteur, les seules que Get-SmbShareAccess montre ; `None`
+/// sans liste de droits (tout le monde a tout).
 fn regles_du_descripteur(octets: &[u8]) -> Option<Vec<Regle>> {
-    const AUTONOME: u16 = 0x8000;
-    const LISTE_PRESENTE: u16 = 0x4;
-    let u16_a = |d: usize| Some(u16::from_le_bytes(octets.get(d..d + 2)?.try_into().ok()?));
-    let u32_a = |d: usize| Some(u32::from_le_bytes(octets.get(d..d + 4)?.try_into().ok()?));
-    let controle = u16_a(2)?;
-    let liste = usize::try_from(u32_a(16)?).ok()?;
-    if controle & AUTONOME == 0 || controle & LISTE_PRESENTE == 0 || liste == 0 {
-        return None;
-    }
-    let taille = usize::from(u16_a(liste + 2)?);
-    let nombre = u16_a(liste + 4)?;
-    let fin = liste.checked_add(taille).filter(|&f| f <= octets.len())?;
-    let mut regles = Vec::new();
-    let mut d = liste + 8;
-    for _ in 0..nombre {
-        let (sorte, taille_regle) = (*octets.get(d)?, usize::from(u16_a(d + 2)?));
-        if taille_regle < 8 || d + taille_regle > fin {
-            break;
-        }
-        let genre = match sorte {
-            0 => "Allow",
-            1 => "Deny",
-            _ => {
-                d += taille_regle;
-                continue;
-            }
-        };
-        let masque = u32_a(d + 4)?;
-        let sid = octets[d + 8..d + taille_regle].to_vec();
-        if let Some(sid_texte) = sid_en_texte(&sid) {
-            regles.push(Regle {
-                sid_texte,
-                sid,
-                genre,
-                droit: droit(masque),
-            });
-        }
-        d += taille_regle;
-    }
-    Some(regles)
+    Some(
+        super::securite::aces(octets)?
+            .into_iter()
+            .filter_map(|a| {
+                let genre = match a.sorte {
+                    0 => "Allow",
+                    1 => "Deny",
+                    _ => return None,
+                };
+                Some(Regle {
+                    sid_texte: sid_en_texte(&a.sid)?,
+                    droit: droit(a.masque),
+                    sid: a.sid,
+                    genre,
+                })
+            })
+            .collect(),
+    )
 }
 
 /// Le droit d'un masque, dans les mots de Get-SmbShareAccess : Full (contrôle total), Change (modifier), Read (lire),
@@ -254,23 +221,6 @@ fn droit(masque: u32) -> &'static str {
     } else {
         "Custom"
     }
-}
-
-/// « S-1-5-21-… » d'un SID binaire : révision, nombre de sous-autorités, autorité sur six octets (gros-boutiste), puis
-/// les sous-autorités (petit-boutistes).
-fn sid_en_texte(sid: &[u8]) -> Option<String> {
-    use std::fmt::Write as _;
-    let (revision, n) = (*sid.first()?, usize::from(*sid.get(1)?));
-    if revision != 1 || n > 15 || sid.len() < 8 + 4 * n {
-        return None;
-    }
-    let autorite = sid[2..8].iter().fold(0u64, |a, &o| (a << 8) | u64::from(o));
-    let mut t = format!("S-1-{autorite}");
-    for i in 0..n {
-        let s = u32::from_le_bytes(sid[8 + 4 * i..12 + 4 * i].try_into().ok()?);
-        let _ = write!(t, "-{s}");
-    }
-    Some(t)
 }
 
 /// Le nom d'un compte (« Everyone », « BUILTIN\Administrators ») ; son SID en texte s'il ne se traduit pas.
@@ -379,18 +329,6 @@ mod tests {
         d.extend_from_slice(&[0, 0]);
         d.extend_from_slice(&corps);
         d
-    }
-
-    #[test]
-    fn sids_en_texte() {
-        assert_eq!(sid_en_texte(&TOUT_LE_MONDE).as_deref(), Some("S-1-1-0"));
-        let mut invite = vec![1, 5, 0, 0, 0, 0, 0, 5];
-        for s in [21u32, 111, 222, 333, 501] {
-            invite.extend_from_slice(&s.to_le_bytes());
-        }
-        assert_eq!(sid_en_texte(&invite).as_deref(), Some("S-1-5-21-111-222-333-501"));
-        assert_eq!(sid_en_texte(&invite[..20]), None);
-        assert_eq!(sid_en_texte(&[2, 0, 0, 0, 0, 0, 0, 1]), None);
     }
 
     #[test]

@@ -41,8 +41,107 @@ foreach ($s in Get-CimInstance Win32_Service) {
 "#;
 
 pub(super) fn services_sans_guillemets() -> Option<Constat> {
-    let sortie = ps(SCRIPT)?;
+    // Lus dans le registre et par les droits de Windows ; PowerShell si la clé des services ne s'ouvre pas.
+    let sortie = lire_natif().or_else(|| ps(SCRIPT))?;
     juger(&sortie)
+}
+
+/// Les comptes de tous (Utilisateurs, Utilisateurs authentifiés, Tout le monde, Interactif), par leur SID.
+const TOUS: [&str; 4] = ["S-1-5-32-545", "S-1-5-11", "S-1-1-0", "S-1-5-4"];
+
+/// Les mêmes lignes que le script, sans PowerShell : les services Win32 du registre (ImagePath, variables développées
+/// comme Win32_Service le fait) et les droits des dossiers lus par Windows. `None` si la clé des services ne s'ouvre
+/// pas.
+fn lire_natif() -> Option<String> {
+    use winreg::enums::HKEY_LOCAL_MACHINE;
+    // Service dans son propre processus (0x10) ou partagé (0x20) : les pilotes (1, 2) n'en sont pas.
+    const SERVICE_WIN32: u32 = 0x30;
+    let services = winreg::RegKey::predef(HKEY_LOCAL_MACHINE)
+        .open_subkey(r"SYSTEM\CurrentControlSet\Services")
+        .ok()?;
+    let mut lignes = Vec::new();
+    for nom in services.enum_keys().flatten() {
+        let Ok(cle) = services.open_subkey(&nom) else { continue };
+        if cle.get_value::<u32, _>("Type").unwrap_or(0) & SERVICE_WIN32 == 0 {
+            continue;
+        }
+        let Ok(chemin) = cle.get_value::<String, _>("ImagePath") else {
+            continue;
+        };
+        let chemin = developper(&chemin, |v| std::env::var(v).ok());
+        let Some((exe, suite)) = programme_sans_guillemets(&chemin) else {
+            continue;
+        };
+        if let Some(d) = dossier_piege(exe, |d| {
+            d.is_dir() && super::securite::du_fichier(d).is_some_and(|o| modifiable_par_tous(&o))
+        }) {
+            lignes.push(format!("SVC|{nom}|{exe}|{suite}|{}", d.display()));
+        }
+    }
+    lignes.push("SVC_FIN".into());
+    Some(lignes.join("\n"))
+}
+
+/// « %SystemRoot%\x » développé ; une variable inconnue reste telle quelle.
+fn developper(texte: &str, variable: impl Fn(&str) -> Option<String>) -> String {
+    let mut sortie = String::new();
+    let mut reste = texte;
+    while let Some(debut) = reste.find('%') {
+        let apres = &reste[debut + 1..];
+        let Some(fin) = apres.find('%') else { break };
+        sortie.push_str(&reste[..debut]);
+        match variable(&apres[..fin]).filter(|_| fin > 0) {
+            Some(v) => sortie.push_str(&v),
+            None => sortie.push_str(&reste[debut..debut + fin + 2]),
+        }
+        reste = &apres[fin + 1..];
+    }
+    sortie.push_str(reste);
+    sortie
+}
+
+/// Le programme d'une ligne de service sans guillemets et la suite (arguments, espace de tête compris), comme
+/// `'^(.+?\.exe)(\s.*)?$'` ; `None` si la ligne commence par un guillemet, n'a pas de « .exe » suivi d'un blanc ou
+/// de la fin, ou si le programme n'a pas d'espace (rien à piéger).
+fn programme_sans_guillemets(ligne: &str) -> Option<(&str, &str)> {
+    if ligne.is_empty() || ligne.starts_with('"') {
+        return None;
+    }
+    let bas = ligne.to_ascii_lowercase();
+    let fin = bas
+        .match_indices(".exe")
+        .map(|(i, _)| i + 4)
+        .find(|&f| f > 4 && ligne[f..].chars().next().is_none_or(char::is_whitespace))?;
+    let (exe, suite) = ligne.split_at(fin);
+    exe.contains(' ').then_some((exe, suite))
+}
+
+/// Le premier dossier où un programme piégé démarrerait à la place du service (« C:\ » pour « C:\Program.exe », puis
+/// « C:\Program Files » pour « C:\Program Files\Mon.exe »…), s'il est `modifiable`.
+fn dossier_piege(exe: &str, modifiable: impl Fn(&std::path::Path) -> bool) -> Option<std::path::PathBuf> {
+    let parties: Vec<&str> = exe.split(' ').collect();
+    (1..parties.len()).find_map(|i| {
+        let debut = parties[..i].join(" ");
+        let d = std::path::Path::new(&debut).parent()?;
+        (!d.as_os_str().is_empty() && modifiable(d)).then(|| d.to_path_buf())
+    })
+}
+
+/// Une règle « autoriser » qui n'est pas « héritée seulement » donne à un compte de tous le droit de créer un fichier
+/// (0x2), d'écrire (générique, 0x40000000) ou tout (générique, 0x10000000) : ce que le script lisait dans Get-Acl.
+fn modifiable_par_tous(descripteur: &[u8]) -> bool {
+    const HERITEE_SEULEMENT: u8 = 0x8;
+    const ECRIRE: u32 = 0x5000_0002;
+    let Some(regles) = super::securite::aces(descripteur) else {
+        // Sans liste de droits, tout le monde a tout.
+        return true;
+    };
+    regles.iter().any(|r| {
+        r.sorte == 0
+            && r.drapeaux & HERITEE_SEULEMENT == 0
+            && r.masque & ECRIRE != 0
+            && super::securite::sid_en_texte(&r.sid).is_some_and(|s| TOUS.contains(&s.as_str()))
+    })
 }
 
 /// Les services exploitables lus dans la sortie du script, avec la commande qui met leur chemin entre guillemets.
@@ -102,6 +201,79 @@ pub(super) fn juger(sortie: &str) -> Option<Constat> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn programmes_sans_guillemets() {
+        assert_eq!(
+            programme_sans_guillemets(r"C:\Program Files\Mon Outil\svc.exe -k x"),
+            Some((r"C:\Program Files\Mon Outil\svc.exe", " -k x"))
+        );
+        assert_eq!(
+            programme_sans_guillemets(r"C:\Mon Outil\a.exe.bak\svc.EXE"),
+            Some((r"C:\Mon Outil\a.exe.bak\svc.EXE", ""))
+        );
+        assert_eq!(programme_sans_guillemets(r#""C:\Program Files\a.exe""#), None);
+        assert_eq!(programme_sans_guillemets(r"C:\Windows\svchost.exe -k netsvcs"), None);
+        assert_eq!(programme_sans_guillemets(r"C:\Program Files\pilote.sys"), None);
+        assert_eq!(programme_sans_guillemets(".exe x"), None);
+    }
+
+    #[test]
+    fn variables_developpees() {
+        let v = |n: &str| (n == "SystemRoot").then(|| r"C:\Windows".to_string());
+        assert_eq!(
+            developper(r"%SystemRoot%\system32\a.exe", v),
+            r"C:\Windows\system32\a.exe"
+        );
+        assert_eq!(developper("%Inconnue%\\a %SystemRoot%", v), r"%Inconnue%\a C:\Windows");
+        assert_eq!(developper("100% sûr", v), "100% sûr");
+        assert_eq!(developper("%%", v), "%%");
+    }
+
+    #[test]
+    fn dossiers_pieges() {
+        let exe = r"C:\Program Files\Mon Outil\svc.exe";
+        let ouvert = |d: &std::path::Path| d.to_string_lossy() == r"C:\Program Files";
+        assert_eq!(dossier_piege(exe, ouvert), Some(r"C:\Program Files".into()));
+        assert_eq!(dossier_piege(exe, |_| false), None);
+    }
+
+    /// Un descripteur avec une règle : (sorte, drapeaux, masque) pour Utilisateurs (S-1-5-32-545).
+    fn descripteur(sorte: u8, drapeaux: u8, masque: u32) -> Vec<u8> {
+        let mut sid = vec![1, 2, 0, 0, 0, 0, 0, 5];
+        sid.extend_from_slice(&32u32.to_le_bytes());
+        sid.extend_from_slice(&545u32.to_le_bytes());
+        let mut regle = vec![sorte, drapeaux];
+        regle.extend_from_slice(&u16::try_from(8 + sid.len()).unwrap().to_le_bytes());
+        regle.extend_from_slice(&masque.to_le_bytes());
+        regle.extend_from_slice(&sid);
+        let mut d = vec![1, 0, 0x04, 0x80];
+        d.extend_from_slice(&[0; 12]);
+        d.extend_from_slice(&20u32.to_le_bytes());
+        d.extend_from_slice(&[2, 0]);
+        d.extend_from_slice(&u16::try_from(8 + regle.len()).unwrap().to_le_bytes());
+        d.extend_from_slice(&[1, 0, 0, 0]);
+        d.extend_from_slice(&regle);
+        d
+    }
+
+    #[test]
+    fn droits_de_tous() {
+        assert!(modifiable_par_tous(&descripteur(0, 0, 0x2)));
+        assert!(modifiable_par_tous(&descripteur(0, 0x3, 0x4000_0000)));
+        // Héritée seulement, refus, ou lecture seule : pas exploitable.
+        assert!(!modifiable_par_tous(&descripteur(0, 0x8, 0x2)));
+        assert!(!modifiable_par_tous(&descripteur(1, 0, 0x2)));
+        assert!(!modifiable_par_tous(&descripteur(0, 0, 0x0012_00A9)));
+    }
+
+    /// Le vrai registre et les vrais droits (Wine ici, la VM ensuite) : la liste se lit jusqu'au bout.
+    #[test]
+    fn services_lus_sans_powershell() {
+        let t = lire_natif().expect("clé des services");
+        assert!(t.ends_with("SVC_FIN"), "{t}");
+        let _ = juger(&t);
+    }
 
     #[test]
     fn chemins_sans_guillemets() {

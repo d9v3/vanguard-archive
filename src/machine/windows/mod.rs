@@ -28,6 +28,7 @@ mod persistance;
 mod portes;
 pub(crate) mod processus;
 mod regles;
+pub(crate) mod securite;
 mod services;
 mod verrouillage;
 
