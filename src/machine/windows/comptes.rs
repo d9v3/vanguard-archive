@@ -1,4 +1,5 @@
-//! Comptes locaux Windows : invité, Administrateur intégré, comptes sans mot de passe exigé.
+//! Comptes locaux Windows : invité, Administrateur intégré, comptes sans mot de passe exigé, règle des mots de passe
+//! (longueur minimale, blocage après des essais ratés).
 
 use super::*;
 
@@ -119,9 +120,74 @@ fn juger_comptes(utilisateurs: &[&str], moi: Option<&str>, lbp: Option<u32>) -> 
     constats
 }
 
+/// La règle des mots de passe des comptes locaux, lue par ADSI (sans droits d'administrateur, et sans dépendre de la
+/// langue de Windows comme « net accounts ») : (longueur minimale, essais ratés avant blocage ; 0 : jamais bloqué).
+pub(super) fn politique() -> Option<Constat> {
+    let sortie = super::comptes_locaux();
+    let ligne = section(sortie.as_deref(), "POL")?.first()?.trim().to_string();
+    let (longueur, seuil) = ligne.split_once('|')?;
+    juger_politique(longueur.trim().parse().ok()?, seuil.trim().parse().ok()?)
+}
+
+/// Sans blocage, un programme essaie des milliers de mots de passe sur un compte local (par le réseau, le Bureau à
+/// distance) : Windows 11 bloque 10 minutes après 10 essais depuis 2022, les installations plus anciennes jamais.
+/// Une longueur minimale sous 8 ne vaut qu'une information : elle ne touche que les comptes locaux, pas ceux de
+/// Microsoft, et seulement au prochain changement de mot de passe. Rien d'illisible n'est compté comme sain : sans
+/// valeur lue, aucun constat.
+fn juger_politique(longueur: u32, seuil: u32) -> Option<Constat> {
+    if seuil == 0 {
+        return Some(
+            alerte(
+                "Comptes",
+                Niveau::Moyen,
+                tr!(
+                    "Aucun blocage après des mots de passe faux : un programme peut en essayer des milliers sur les comptes locaux.",
+                    "No lockout after wrong passwords: a program can try thousands of them on the local accounts."
+                ),
+            )
+            .corriger(
+                tr!(
+                    "Bloquer un compte 10 minutes après 10 essais ratés (réglage de Windows 11)",
+                    "Lock an account for 10 minutes after 10 failed attempts (Windows 11's setting)"
+                ),
+                &["net accounts /lockoutthreshold:10 /lockoutduration:10 /lockoutwindow:10"],
+            ),
+        );
+    }
+    (longueur < 8).then(|| {
+        alerte(
+            "Comptes",
+            Niveau::Info,
+            trf!(
+                "Les mots de passe des comptes locaux peuvent faire moins de 8 caractères (minimum : {longueur}).",
+                "Local account passwords can be shorter than 8 characters (minimum: {longueur})."
+            ),
+        )
+        .corriger(
+            tr!(
+                "Exiger 8 caractères au prochain changement de mot de passe",
+                "Require 8 characters at the next password change"
+            ),
+            &["net accounts /minpwlen:8"],
+        )
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn regle_des_mots_de_passe() {
+        assert!(juger_politique(8, 10).is_none() && juger_politique(14, 5).is_none());
+        let sans_blocage = juger_politique(0, 0).unwrap();
+        assert_eq!(sans_blocage.probleme, Some(Niveau::Moyen));
+        assert!(sans_blocage.correctif.unwrap().commandes[0].contains("/lockoutthreshold:10"));
+        let courts = juger_politique(0, 10).unwrap();
+        assert_eq!(courts.probleme, Some(Niveau::Info));
+        assert_eq!(courts.correctif.unwrap().commandes, ["net accounts /minpwlen:8"]);
+        assert_eq!(section(Some("POL|0|10\nPOL_FIN\n"), "POL"), Some(vec!["0|10"]));
+    }
 
     #[test]
     fn comptes_juges() {
