@@ -251,12 +251,7 @@ fn serveurs() -> Option<Serveurs> {
 /// est écrite dans le registre de la carte (NameServer), donc réglée à la main ou par un programme, pas par le DHCP.
 #[cfg(windows)]
 fn serveurs() -> Option<Serveurs> {
-    let sortie = super::windows::ps(
-        "Get-NetAdapter | Where-Object Status -eq 'Up' | ForEach-Object { $i = $_.InterfaceIndex; \
-         $fixe = (Get-ItemProperty \"HKLM:\\SYSTEM\\CurrentControlSet\\Services\\Tcpip\\Parameters\\Interfaces\\$($_.InterfaceGuid)\" -ErrorAction SilentlyContinue).NameServer; \
-         (Get-DnsClientServerAddress -InterfaceIndex $i -ErrorAction SilentlyContinue).ServerAddresses | ForEach-Object { \
-         \"DNS|$i|$_|$([bool]($fixe -and $fixe.Contains($_)))\" } }",
-    )?;
+    let sortie = lignes_natives().or_else(lignes_powershell)?;
     let mut liste = Vec::new();
     let mut remise = Vec::new();
     for l in sortie.lines() {
@@ -282,6 +277,42 @@ fn serveurs() -> Option<Serveurs> {
         resolveur_local: None,
         remise,
     })
+}
+
+/// Les mêmes lignes lues par GetAdaptersAddresses et le registre, sans PowerShell : les cartes actives que
+/// Get-NetAdapter liste (ni boucle locale ni tunnel). `None` si Windows refuse la liste.
+#[cfg(windows)]
+fn lignes_natives() -> Option<String> {
+    use winreg::enums::HKEY_LOCAL_MACHINE;
+    let mut lignes = Vec::new();
+    for carte in super::windows::cartes::cartes()?
+        .into_iter()
+        .filter(|c| c.active && !c.cachee)
+    {
+        let fixe: String = winreg::RegKey::predef(HKEY_LOCAL_MACHINE)
+            .open_subkey(format!(
+                r"SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces\{}",
+                carte.guid
+            ))
+            .and_then(|c| c.get_value("NameServer"))
+            .unwrap_or_default();
+        for ip in &carte.dns {
+            let ip = ip.to_string();
+            let manuel = !fixe.is_empty() && fixe.contains(&ip);
+            lignes.push(format!("DNS|{}|{ip}|{manuel}", carte.index));
+        }
+    }
+    Some(lignes.join("\n"))
+}
+
+#[cfg(windows)]
+fn lignes_powershell() -> Option<String> {
+    super::windows::ps(
+        "Get-NetAdapter | Where-Object Status -eq 'Up' | ForEach-Object { $i = $_.InterfaceIndex; \
+         $fixe = (Get-ItemProperty \"HKLM:\\SYSTEM\\CurrentControlSet\\Services\\Tcpip\\Parameters\\Interfaces\\$($_.InterfaceGuid)\" -ErrorAction SilentlyContinue).NameServer; \
+         (Get-DnsClientServerAddress -InterfaceIndex $i -ErrorAction SilentlyContinue).ServerAddresses | ForEach-Object { \
+         \"DNS|$i|$_|$([bool]($fixe -and $fixe.Contains($_)))\" } }",
+    )
 }
 
 /// Ce que l'outil « DNS le plus rapide » doit savoir des serveurs DNS de cette machine.
@@ -457,6 +488,20 @@ pub fn dns() -> Vec<Constat> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Les vraies fonctions de Windows (Wine ici, la VM ensuite), sans PowerShell : chaque ligne a la forme lue par
+    /// `serveurs`.
+    #[cfg(windows)]
+    #[test]
+    fn serveurs_lus_sans_powershell() {
+        let lignes = lignes_natives().expect("cartes réseau");
+        assert!(
+            lignes
+                .lines()
+                .all(|l| l.starts_with("DNS|") && l.split('|').count() == 4),
+            "{lignes}"
+        );
+    }
 
     fn ip(s: &str) -> IpAddr {
         s.parse().unwrap()
