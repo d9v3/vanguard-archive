@@ -103,7 +103,7 @@ Entrée ouvre celle en surbrillance, Échap efface. Au menu principal, elle trou
        Raccourci sur cet ordinateur : Vanguard copié ici et lancé d'un clic
        Mes ordinateurs : ceux où la clé a fait un bilan, leur note et leurs problèmes restants (vanguard ordinateurs)
        Protéger les données de la clé : carnet des appareils chiffré par une phrase, demandée ailleurs seulement
-       Mettre Vanguard à jour : la copie de cet ordinateur, depuis la clé quand elle est plus récente
+       Mettre Vanguard à jour : la copie de cet ordinateur, depuis la clé ou GitHub (signée)
  10  Guide des commandes › les commandes utiles d'Omarchy, Arch, Fedora, Debian, Windows 11, macOS et de tous les
        systèmes, par programme, chacune expliquée (⚠ : elle change quelque chose), avec des marches à suivre pas à
        pas (mettre à jour, réparer, réseau, faire de la place…). Tape ce que tu cherches : les

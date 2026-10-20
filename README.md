@@ -386,7 +386,7 @@ Chaque entrée du menu existe aussi en commande.
 | `vanguard a-laisser` | rapport à laisser : une page simple pour la personne dépannée |
 | `vanguard sauvegarde-auto [--annuler]` | sauvegarde automatique vers un disque externe, avec l'outil du système |
 | `vanguard raccourci [on\|off]` | raccourci sur cet ordinateur |
-| `vanguard se-mettre-a-jour` | mettre Vanguard à jour sur cet ordinateur, depuis la clé quand elle est plus récente |
+| `vanguard se-mettre-a-jour` | mettre Vanguard à jour sur cet ordinateur, depuis la clé ou depuis GitHub (versions signées par l'auteur) |
 | `vanguard fiche [--json]` | fiche de l'ordinateur ; `--json` sans les numéros de série |
 | `vanguard copier-fichiers [destination]` | copier mes fichiers vers un disque externe, copie vérifiée |
 | `vanguard verifier-cle [dossier]` | vérifier ma clé : capacité réelle, vitesses, blocs en erreur (écrit dans le libre après accord, puis efface) |

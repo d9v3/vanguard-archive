@@ -362,7 +362,7 @@ Each menu entry is also a command.
 | `vanguard handout` | report to leave behind: a simple page for the person you helped |
 | `vanguard auto-backup [--undo]` | automatic backup to an external disk, with the system's tool |
 | `vanguard shortcut [on\|off]` | shortcut on this computer |
-| `vanguard self-update` | update Vanguard on this computer, from the key when it is newer |
+| `vanguard self-update` | update Vanguard on this computer, from the key or from GitHub (versions signed by the author) |
 | `vanguard specs [--json]` | computer specs; `--json` without the serial numbers |
 | `vanguard copy-files [destination]` | copy my files to an external disk, checked copy |
 | `vanguard check-drive [folder]` | check my drive: real capacity, speeds, bad blocks (writes into the free space after your consent, then erases) |

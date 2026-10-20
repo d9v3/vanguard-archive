@@ -102,7 +102,7 @@ highlighted one, Esc clears it. In the main menu, it also finds each tool of the
        Shortcut on this computer: Vanguard copied here and started with one click
        My computers: those where the key ran a check, their grade and remaining problems (vanguard computers)
        Protect the key's data: device record encrypted by a passphrase, asked only elsewhere
-       Update Vanguard: the copy on this computer, from the key when it is newer
+       Update Vanguard: the copy on this computer, from the key or from GitHub (signed)
  10  Command guide › the useful commands of Omarchy, Arch, Fedora, Debian, Windows 11, macOS and all systems, by
        program, each one explained (⚠: it changes something), with step-by-step guides (update, repair, network,
        free up space…). Type what you are looking for: commands show up as

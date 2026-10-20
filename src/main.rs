@@ -339,8 +339,8 @@ enum Commande {
     /// partition VANGUARDLOG de la clé).
     #[command(visible_alias = "computers")]
     Ordinateurs,
-    /// Mettre Vanguard à jour sur cet ordinateur : lancé depuis une clé VANGUARD plus récente, la copie qu'y lancent la
-    /// surveillance, l'entretien et le raccourci est remplacée sur accord par ce programme (jamais l'inverse).
+    /// Mettre Vanguard à jour sur cet ordinateur : depuis une clé VANGUARD plus récente, ou depuis la dernière version
+    /// publiée sur GitHub, signée par l'auteur et vérifiée ; toujours sur accord, jamais vers une version plus ancienne.
     #[command(name = "se-mettre-a-jour", visible_alias = "self-update")]
     SeMettreAJour,
     /// Les règles du bilan déclarées pour ce système : identifiant stable, sujet, références de durcissement.
@@ -1433,9 +1433,9 @@ const AIDES_EN: &[(&str, &str)] = &[
     ("raccourci", "Shortcut on this computer: Vanguard copied here and started with one click (applications menu on \
                    Linux, Desktop on Windows and macOS). Without argument: the state, then the offer"),
     ("regles", "The check rules declared for this system: stable identifier, subject, hardening references"),
-    ("se-mettre-a-jour", "Update Vanguard on this computer: started from a newer VANGUARD key, the copy that \
-                          monitoring, maintenance and the shortcut start there is replaced by this program after your \
-                          consent (never the other way)"),
+    ("se-mettre-a-jour", "Update Vanguard on this computer: from a newer VANGUARD key, or from the latest version \
+                          published on GitHub, signed by the author and checked; always after your consent, never to \
+                          an older version"),
     ("ordinateurs", "My computers: those where the VANGUARD key ran a check, their grade and remaining problems (on the \
      key's VANGUARDLOG partition)"),
     ("traces", "Collect the traces after an infection, before cleaning up: processes, connections, what starts by \
