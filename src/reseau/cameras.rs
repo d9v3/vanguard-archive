@@ -48,7 +48,7 @@ const MOTS_WEB: &[&str] = &[
 
 /// Ce que dit un flux vidéo à qui demande sa description sans mot de passe.
 #[derive(Debug, PartialEq, Clone, Copy)]
-enum Flux {
+pub(crate) enum Flux {
     /// Mot de passe demandé : bien.
     Protege,
     /// Description donnée sans mot de passe : n'importe qui sur le réseau peut regarder.
@@ -59,23 +59,23 @@ enum Flux {
 
 /// Les indices trouvés sur un appareil.
 #[derive(Default, Debug)]
-struct Indices {
-    fabricant: Option<&'static str>,
+pub(crate) struct Indices {
+    pub(crate) fabricant: Option<&'static str>,
     /// Nom et modèle annoncés par ONVIF (« IPC · DS-2CD2032 »), vides s'ils ne sont pas donnés.
-    onvif: Option<String>,
-    rtsp: Vec<(u16, Flux)>,
-    ports: Vec<u16>,
-    web: Option<String>,
+    pub(crate) onvif: Option<String>,
+    pub(crate) rtsp: Vec<(u16, Flux)>,
+    pub(crate) ports: Vec<u16>,
+    pub(crate) web: Option<String>,
 }
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
-enum Force {
+pub(crate) enum Force {
     AVerifier,
     Probable,
 }
 
 impl Indices {
-    fn force(&self) -> Option<Force> {
+    pub(crate) fn force(&self) -> Option<Force> {
         let fort = self.fabricant.is_some() || self.onvif.is_some() || !self.rtsp.is_empty() || self.web.is_some();
         if fort || self.ports.iter().any(|p| PORTS_CAMERA.contains(p)) {
             Some(Force::Probable)
@@ -217,8 +217,8 @@ fn chercher_onvif() -> BTreeMap<Ipv4Addr, String> {
     trouvees
 }
 
-/// Les indices de chaque appareil du réseau local.
-async fn chercher(cible: &str, moi: Ipv4Addr) -> Result<(usize, BTreeMap<Ipv4Addr, Indices>), String> {
+/// Les indices de chaque appareil du réseau local ; l'audit du réseau (domaine Appareils) les réutilise.
+pub(crate) async fn chercher(cible: &str, moi: Ipv4Addr) -> Result<(usize, BTreeMap<Ipv4Addr, Indices>), String> {
     let ips = scan::parse_cible(cible)?;
     let parallele = scan::limite_connexions(512);
     let onvif = tokio::task::spawn_blocking(chercher_onvif);
@@ -257,7 +257,7 @@ async fn chercher(cible: &str, moi: Ipv4Addr) -> Result<(usize, BTreeMap<Ipv4Add
     Ok((vivantes.len(), indices))
 }
 
-fn lignes_indices(i: &Indices) -> Vec<(String, Option<Niveau>)> {
+pub(crate) fn lignes_indices(i: &Indices) -> Vec<(String, Option<Niveau>)> {
     let mut l = Vec::new();
     if let Some(f) = i.fabricant {
         l.push((trf!("fabricant de caméras ({f})", "camera maker ({f})"), None));

@@ -200,6 +200,10 @@ fn categorie_en(nom: &str) -> Option<&'static str> {
         "Affichage X11" => "X11 display",
         "Erreurs" => "Errors",
         "Erreurs du journal" => "Log errors",
+        // Les domaines de l'audit du réseau (audit/).
+        "Exposition" => "Exposure",
+        "Appareils" => "Connected devices",
+        "Postes" => "Computers",
         _ => return None,
     })
 }
@@ -221,6 +225,7 @@ const MEMES_EN: &[&str] = &[
     "SMBv1",
     "SSH",
     "Secure Boot",
+    "Segmentation",
     "Services",
     "Signatures",
     "Snap",

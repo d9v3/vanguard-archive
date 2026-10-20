@@ -40,7 +40,7 @@ pub enum Genre {
 }
 
 impl Genre {
-    fn nom(self) -> &'static str {
+    pub(crate) fn nom(self) -> &'static str {
         match self {
             Genre::Boite => tr!("box", "router"),
             Genre::Camera => tr!("caméra", "camera"),
@@ -54,7 +54,7 @@ impl Genre {
     }
 
     /// Types d'appareils souvent livrés avec un mot de passe d'origine connu de tous (« admin », celui de la notice).
-    fn mot_de_passe_d_origine(self) -> bool {
+    pub(crate) fn mot_de_passe_d_origine(self) -> bool {
         matches!(self, Genre::Boite | Genre::Camera | Genre::Imprimante | Genre::Nas)
     }
 }

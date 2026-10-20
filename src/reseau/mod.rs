@@ -113,8 +113,8 @@ impl Hote {
         titre_de([self.surnom.as_deref(), self.nom.as_deref(), self.fabricant.as_deref()])
     }
 
-    /// L'appareil tel que le voit la section « Box et objets connectés ».
-    fn objet(&self) -> objets::Appareil {
+    /// L'appareil tel que le voit la section « Box et objets connectés » (et l'audit du réseau).
+    pub(crate) fn objet(&self) -> objets::Appareil {
         let tcp = self.ports.iter().filter(|p| !p.udp).map(|p| p.port).collect();
         objets::Appareil {
             ip: self.ip,

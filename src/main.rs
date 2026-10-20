@@ -5,6 +5,7 @@
 
 mod a_laisser;
 mod apprentissage;
+mod audit;
 mod changements;
 mod chiffrement;
 mod commande;
@@ -98,6 +99,14 @@ enum Commande {
         /// Nombre de connexions simultanées.
         #[arg(short = 'j', long, default_value_t = 512)]
         parallele: usize,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Audit du réseau par domaine : six notes (exposition à Internet, Wi-Fi, segmentation, DNS et TLS, objets
+    /// connectés, ordinateurs) d'après le scan du réseau local, les constats réseau de cette machine et quelques
+    /// lectures de plus, sans rien attaquer ; ce qui n'a pas pu être vérifié est dit, jamais compté comme sain.
+    #[command(name = "audit-reseau", visible_alias = "network-audit")]
+    AuditReseau {
         #[arg(long)]
         json: bool,
     },
@@ -421,17 +430,62 @@ enum Commande {
 struct Session {
     audit: Option<Audit>,
     reseau: Option<Rapport>,
+    /// Quand le scan du réseau local (ports courants) a fini : l'audit du réseau le réutilise s'il a moins de dix
+    /// minutes.
+    scan_le: Option<std::time::Instant>,
+    audit_reseau: Option<audit::AuditReseau>,
 }
 
 impl Session {
     async fn scanner_reseau(&mut self, cible: Option<String>, ports: &str) {
+        let du_reseau_local = cible.is_none() && ports == "courants";
         match reseau::executer(Options::defaut(cible, ports)).await {
-            Ok(r) => self.reseau = Some(r),
+            Ok(r) => {
+                self.reseau = Some(r);
+                self.scan_le = du_reseau_local.then(std::time::Instant::now);
+            }
             Err(e) => {
                 journal::erreur("scan réseau", &e);
                 eprintln!("{}", trf!("Scan réseau impossible : {e}", "Network scan failed: {e}"));
             }
         }
+    }
+
+    /// L'audit du réseau par domaine : le scan de la session s'il a moins de dix minutes, sinon un scan silencieux ;
+    /// puis les six domaines, à l'écran ou en JSON. Sans réseau local, six domaines « non vérifié ».
+    async fn audit_reseau(&mut self, json: bool) {
+        let recent = self
+            .scan_le
+            .is_some_and(|t| t.elapsed() < std::time::Duration::from_secs(600));
+        if self.reseau.is_none() || !recent {
+            if !json {
+                trp!(
+                    "  {GRIS}Scan du réseau local en cours…{RESET}",
+                    "  {GRIS}Scanning the local network…{RESET}"
+                );
+            }
+            let options = Options {
+                silencieux: true,
+                ..Options::defaut(None, "courants")
+            };
+            match reseau::executer(options).await {
+                Ok(r) => {
+                    self.reseau = Some(r);
+                    self.scan_le = Some(std::time::Instant::now());
+                }
+                Err(e) => {
+                    journal::erreur("audit du réseau", &e);
+                    let a = audit::AuditReseau::sans_reseau(&e);
+                    audit::rendre(&a, json);
+                    self.audit_reseau = Some(a);
+                    return;
+                }
+            }
+        }
+        let Some(scan) = &self.reseau else { return };
+        let a = audit::auditer(scan, None, false, false).await;
+        audit::rendre(&a, json);
+        self.audit_reseau = Some(a);
     }
 
     async fn complet(&mut self) {
@@ -1424,6 +1478,10 @@ const AIDES_EN: &[(&str, &str)] = &[
     ("machine", "Audit this machine (firewall, ports, SSH, updates, encryption…)"),
     ("corriger", "Audit the machine, then apply the fixes step by step"),
     ("reseau", "Network scan: devices, open ports, risks, changes since previous scans"),
+    ("audit-reseau", "Network audit by domain: six grades (exposure to the Internet, Wi-Fi, segmentation, DNS and TLS, \
+                      connected devices, computers) from the local network scan, this machine's network findings and \
+                      a few more read-only checks, attacking nothing; what could not be checked is said, never counted \
+                      as safe"),
     ("antivirus", "Malware scan: ClamAV (Linux, macOS) or Microsoft Defender (Windows)"),
     ("surveillance", "Turn hourly network monitoring on or off (notification for unknown devices)"),
     ("tableau", "Monitoring dashboard in the browser: its state, the alerts day by day, the new devices and the \
@@ -1649,6 +1707,7 @@ async fn main() {
                 std::process::exit(1);
             }
         }
+        Some(Commande::AuditReseau { json }) => Session::default().audit_reseau(json).await,
         Some(Commande::Antivirus { complet, dossier }) => protection::antivirus::analyser(portee(dossier, complet)),
         Some(Commande::Surveillance { etat }) => reseau::surveillance::activer(etat == "on"),
         Some(Commande::Tableau { sans_ouvrir }) => reseau::tableau::ouvrir(sans_ouvrir),

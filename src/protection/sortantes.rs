@@ -877,15 +877,20 @@ pub(crate) fn fichier_botnets() -> PathBuf {
     crate::reseau::dossier_local().join("surveillance-botnets.txt")
 }
 
-/// Pour la surveillance horaire : les programmes qui parlent à un serveur de commande connu, en (titre, texte) de
-/// notification. Les listes se rafraîchissent au même rythme que pour l'écran (elles ne disent à personne ce qu'on a
-/// trouvé) ; sans elles, rien n'est dit ici : l'écran dit, lui, ce qui n'a pas pu être vérifié. Une connexion déjà
-/// signalée à la passe d'avant ne l'est pas deux fois.
-pub(crate) fn botnets_a_signaler() -> Vec<(String, String)> {
-    let Some(connexions) = connexions() else {
-        return Vec::new();
-    };
-    let (botnets, _) = botnets();
+/// Ce que cet ordinateur envoie en ce moment vers un serveur de commande connu, en lecture seule (rien d'écrit) :
+/// pour l'audit du réseau et la surveillance. `None` : les connexions ne se lisent pas.
+pub(crate) struct EnCours {
+    /// « programme → serveur (famille, liste) », et les noms demandés qui sont ceux d'un serveur de commande.
+    pub connexions: BTreeSet<String>,
+    /// Les listes qui n'ont pas pu être vérifiées (hors ligne, téléchargement raté) : rien n'est conclu pour elles.
+    pub listes_absentes: Vec<String>,
+}
+
+/// Les programmes qui parlent à un serveur de commande connu, d'après les connexions du moment et la mémoire DNS.
+/// Les listes se rafraîchissent au même rythme que pour l'écran (elles ne disent à personne ce qu'on a trouvé).
+pub(crate) fn botnets_en_cours() -> Option<EnCours> {
+    let connexions = connexions()?;
+    let (botnets, listes_absentes) = botnets();
     let mut actuelles: BTreeSet<String> = connexions
         .iter()
         .filter_map(|c| {
@@ -905,6 +910,20 @@ pub(crate) fn botnets_a_signaler() -> Vec<(String, String)> {
                 .map(|n| tr!("nom demandé : ", "name asked: ").to_string() + &n),
         );
     }
+    Some(EnCours {
+        connexions: actuelles,
+        listes_absentes,
+    })
+}
+
+/// Pour la surveillance horaire : les programmes qui parlent à un serveur de commande connu, en (titre, texte) de
+/// notification. Sans les listes, rien n'est dit ici : l'écran dit, lui, ce qui n'a pas pu être vérifié. Une
+/// connexion déjà signalée à la passe d'avant ne l'est pas deux fois.
+pub(crate) fn botnets_a_signaler() -> Vec<(String, String)> {
+    let Some(en_cours) = botnets_en_cours() else {
+        return Vec::new();
+    };
+    let actuelles = en_cours.connexions;
     let fichier = fichier_botnets();
     let avant = std::fs::read_to_string(&fichier).unwrap_or_default();
     let alertes = nouvelles_alertes(&avant, &actuelles)
