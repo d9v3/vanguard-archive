@@ -514,18 +514,139 @@ mod systeme {
 mod systeme {
     use super::{Disque, Volume};
 
-    /// Une seule lecture PowerShell, en sections : volumes fixes, disques physiques, batterie.
-    pub fn lectures() -> Option<String> {
-        crate::machine::windows::ps(
+    use crate::machine::windows::wmi::{self, Ligne};
+
+    const STOCKAGE: &str = r"root\Microsoft\Windows\Storage";
+
+    /// Les quatre lectures, chacune avec son script de secours : volumes fixes, disques physiques, batterie,
+    /// zones thermiques.
+    const SCRIPTS: [(&str, &str); 4] = [
+        (
+            "VOL",
             "try { Get-Volume | Where-Object { $_.DriveLetter -and $_.DriveType -eq 'Fixed' } | ForEach-Object { \
-             \"VOL|$($_.DriveLetter):|$($_.SizeRemaining)|$($_.Size)\" }; 'VOL_FIN' } catch {}; \
-             try { Get-PhysicalDisk | ForEach-Object { \"DSK|$($_.HealthStatus)|$($_.FriendlyName)\" }; 'DSK_FIN' } catch {}; \
-             try { $p = @(Get-CimInstance -Namespace root\\wmi -ClassName BatteryFullChargedCapacity -ErrorAction Stop)[0].FullChargedCapacity; \
+             \"VOL|$($_.DriveLetter):|$($_.SizeRemaining)|$($_.Size)\" }; 'VOL_FIN' } catch {}",
+        ),
+        (
+            "DSK",
+            "try { Get-PhysicalDisk | ForEach-Object { \"DSK|$($_.HealthStatus)|$($_.FriendlyName)\" }; 'DSK_FIN' } catch {}",
+        ),
+        (
+            "BAT",
+            "try { $p = @(Get-CimInstance -Namespace root\\wmi -ClassName BatteryFullChargedCapacity -ErrorAction Stop)[0].FullChargedCapacity; \
              $o = @(Get-CimInstance -Namespace root\\wmi -ClassName BatteryStaticData -ErrorAction Stop)[0].DesignedCapacity; \
-             if ($p -and $o) { \"BAT|$p|$o\" }; 'BAT_FIN' } catch {}; \
-             try { Get-CimInstance Win32_PerfFormattedData_Counters_ThermalZoneInformation -ErrorAction Stop | ForEach-Object { \
+             if ($p -and $o) { \"BAT|$p|$o\" }; 'BAT_FIN' } catch {}",
+        ),
+        (
+            "TZ",
+            "try { Get-CimInstance Win32_PerfFormattedData_Counters_ThermalZoneInformation -ErrorAction Stop | ForEach-Object { \
              \"TZ|$($_.HighPrecisionTemperature)\" }; 'TZ_FIN' } catch {}",
+        ),
+    ];
+
+    /// Un texte de champ comme PowerShell l'écrirait (`$($_.Champ)`) : vide s'il manque.
+    fn texte(ligne: &Ligne, champ: &str) -> String {
+        match &ligne[champ] {
+            wmi::Valeur::Texte(t) => t.clone(),
+            wmi::Valeur::Entier(n) => n.to_string(),
+            _ => String::new(),
+        }
+    }
+
+    /// Volumes fixes avec une lettre (MSFT_Volume : DriveType 3 = Fixed ; la lettre est un caractère UTF-16).
+    fn volumes_wmi() -> Option<Vec<String>> {
+        let lignes = wmi::requete(
+            STOCKAGE,
+            "MSFT_Volume",
+            "DriveType = 3",
+            &["DriveLetter", "SizeRemaining", "Size"],
+        )?;
+        Some(
+            lignes
+                .iter()
+                .filter_map(|l| {
+                    let lettre = u32::try_from(l["DriveLetter"].entier()?)
+                        .ok()
+                        .and_then(char::from_u32)?;
+                    (lettre != '\0')
+                        .then(|| format!("VOL|{lettre}:|{}|{}", texte(l, "SizeRemaining"), texte(l, "Size")))
+                })
+                .collect(),
         )
+    }
+
+    /// État de chaque disque (MSFT_PhysicalDisk.HealthStatus), écrit comme Get-PhysicalDisk l'écrit.
+    fn disques_wmi() -> Option<Vec<String>> {
+        let lignes = wmi::requete(STOCKAGE, "MSFT_PhysicalDisk", "", &["HealthStatus", "FriendlyName"])?;
+        Some(
+            lignes
+                .iter()
+                .map(|l| {
+                    let etat = match l["HealthStatus"].entier() {
+                        Some(0) => "Healthy",
+                        Some(1) => "Warning",
+                        Some(2) => "Unhealthy",
+                        _ => "Unknown",
+                    };
+                    format!("DSK|{etat}|{}", texte(l, "FriendlyName"))
+                })
+                .collect(),
+        )
+    }
+
+    /// Capacité de la batterie, pleine et d'origine (la première de chaque, comme `@(…)[0]`) ; sans batterie, rien.
+    fn batterie_wmi() -> Option<Vec<String>> {
+        let plein = wmi::requete(r"root\wmi", "BatteryFullChargedCapacity", "", &["FullChargedCapacity"])?;
+        let origine = wmi::requete(r"root\wmi", "BatteryStaticData", "", &["DesignedCapacity"])?;
+        let premiere = |l: &[Ligne], champ: &str| l.first().and_then(|x| x[champ].entier()).filter(|n| *n != 0);
+        Some(
+            premiere(&plein, "FullChargedCapacity")
+                .zip(premiere(&origine, "DesignedCapacity"))
+                .map(|(p, o)| format!("BAT|{p}|{o}"))
+                .into_iter()
+                .collect(),
+        )
+    }
+
+    fn temperatures_wmi() -> Option<Vec<String>> {
+        let lignes = wmi::requete(
+            r"root\cimv2",
+            "Win32_PerfFormattedData_Counters_ThermalZoneInformation",
+            "",
+            &["HighPrecisionTemperature"],
+        )?;
+        Some(
+            lignes
+                .iter()
+                .map(|l| format!("TZ|{}", texte(l, "HighPrecisionTemperature")))
+                .collect(),
+        )
+    }
+
+    /// Les sections « NOM|… » puis « NOM_FIN » que lisent les fonctions suivantes : par WMI (quelques millisecondes),
+    /// et un seul PowerShell pour celles que WMI n'a pas pu lire.
+    pub fn lectures() -> Option<String> {
+        let wmi = [volumes_wmi(), disques_wmi(), batterie_wmi(), temperatures_wmi()];
+        let mut sortie = String::new();
+        let mut secours = Vec::new();
+        for ((nom, script), lu) in SCRIPTS.iter().zip(wmi) {
+            match lu {
+                Some(lignes) => {
+                    for l in lignes {
+                        sortie.push_str(&l);
+                        sortie.push('\n');
+                    }
+                    sortie.push_str(nom);
+                    sortie.push_str("_FIN\n");
+                }
+                None => secours.push(*script),
+            }
+        }
+        if !secours.is_empty()
+            && let Some(ps) = crate::machine::windows::ps(&secours.join("; "))
+        {
+            sortie.push_str(&ps);
+        }
+        (!sortie.is_empty()).then_some(sortie)
     }
 
     pub fn volumes(lectures: Option<&str>) -> Vec<Volume> {
@@ -615,6 +736,22 @@ pub fn sante() -> Vec<Constat> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Chaque section rendue est complète (son marqueur de fin) et lisible par les fonctions de toujours ; sous Wine,
+    /// une classe absente n'est pas une section vide.
+    #[cfg(windows)]
+    #[test]
+    fn lectures_windows_completes() {
+        if let Some(lu) = systeme::lectures().as_deref() {
+            for nom in ["VOL", "DSK", "BAT", "TZ"] {
+                let lignes = lu.lines().filter(|l| l.starts_with(&format!("{nom}|"))).count();
+                assert!(lignes == 0 || lu.lines().any(|l| l == format!("{nom}_FIN")), "{nom}");
+            }
+            for v in systeme::volumes(Some(lu)) {
+                assert!(v.point.ends_with(':') && v.total >= v.libre);
+            }
+        }
+    }
 
     #[cfg(target_os = "macos")]
     #[test]
