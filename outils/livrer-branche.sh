@@ -29,7 +29,9 @@ if [[ -z ${VANGUARD_INTERMEDIAIRE:-} ]]; then
   # de la branche après une attente fixe pouvait tomber sur un ancien, ou sur aucun, et la fusion partait alors sans
   # attendre le Mac.
   AVANT=$(gh run list --workflow macos.yml --commit "$COMMIT" --limit 20 --json databaseId -q '.[].databaseId')
-  gh workflow run macos.yml --ref "$BRANCHE" >/dev/null
+  # Avec l'essai complet (outils/test-macos/essai.sh) : chaque publication passe aussi sur un vrai Mac, ses résultats
+  # rapatriés ici après la fusion.
+  gh workflow run macos.yml --ref "$BRANCHE" -f essai_complet=true >/dev/null
   for _ in {1..30}; do
     ID=$(gh run list --workflow macos.yml --commit "$COMMIT" --event workflow_dispatch --limit 1 --json databaseId \
       -q '.[0].databaseId // ""')
@@ -48,6 +50,15 @@ fi
 if [[ -n $ID ]]; then
   echo "· attente du Mac de GitHub"
   gh run watch "$ID" --exit-status --interval 20 >/dev/null 2>&1 || { echo "✖ Mac de GitHub en échec : gh run view $ID --log-failed"; exit 1; }
+fi
+if [[ -n $ID ]]; then
+  # Les résultats de l'essai complet sur le Mac, lisibles ici comme ceux de la VM Windows : un dossier par passage.
+  ESSAI_MAC="$HOME/.local/share/vanguard/essais-macos/$(date +%Y-%m-%d_%H-%M)"
+  if gh run download "$ID" -n essai-macos -D "$ESSAI_MAC" >/dev/null 2>&1; then
+    echo "· essai sur le Mac : $(grep -E '^=== Fin' "$ESSAI_MAC/journal.txt" 2>/dev/null | sed 's/=== //; s/ ===//') ($ESSAI_MAC)"
+  else
+    echo "· essai sur le Mac : résultats non récupérés (gh run download $ID -n essai-macos)"
+  fi
 fi
 echo "· fusion et déploiement"
 cd "$DEPOT"

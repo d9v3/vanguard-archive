@@ -14,6 +14,7 @@ mod durcissement;
 mod maj;
 mod persistance;
 mod privileges;
+mod protection;
 mod regles;
 
 pub use maj::mises_a_jour_completes;

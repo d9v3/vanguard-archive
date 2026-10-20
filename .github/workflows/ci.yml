@@ -85,6 +85,19 @@ jobs:
           ./target/x86_64-unknown-linux-musl/debug/vanguard --version
           ./target/x86_64-unknown-linux-musl/debug/vanguard logiciels --liste
           ./target/x86_64-unknown-linux-musl/debug/vanguard nettoyer --liste
+      # Le bilan sur de vraies distributions (Fedora, Debian, Ubuntu, openSUSE), dans des conteneurs, avec le serveur
+      # SSH installé : le programme statique que les tests viennent de compiler. Minutes de Linux, comptées une fois.
+      # Pas encore passé une seule fois (ajouté le 20 oct., jamais essayé hors de GitHub, Docker valant root ici) : il
+      # ne fait pas échouer la CI tant qu'il n'a pas été vert une première fois ; retirer continue-on-error ensuite.
+      - name: Vraies distributions Linux
+        continue-on-error: true
+        run: bash outils/test-distributions.sh ./target/x86_64-unknown-linux-musl/debug/vanguard distributions
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: distributions
+          path: distributions
+          retention-days: 14
       # Les règles YARA intégrées au programme, compilées par le moteur de VirusTotal (libyara dans yara-python) : une
       # règle cassée par une mise à jour (outils/maj-yara.sh) se voit ici, pas chez quelqu'un.
       - name: Règles YARA

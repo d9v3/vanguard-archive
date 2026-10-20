@@ -161,6 +161,24 @@ regle!(
 );
 
 regle!(
+    "MAC-PRF-001",
+    Os::MacOs,
+    245,
+    ("profils de configuration", "configuration profiles"),
+    &[],
+    || protection::profils_de_configuration().into_iter().collect()
+);
+
+regle!(
+    "MAC-ANV-001",
+    Os::MacOs,
+    248,
+    ("définitions de XProtect", "XProtect definitions"),
+    &[],
+    || vec![protection::xprotect()]
+);
+
+regle!(
     "MAC-MAJ-001",
     Os::MacOs,
     250,

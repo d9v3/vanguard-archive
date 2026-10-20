@@ -76,6 +76,13 @@ verifier "aucune vérification impossible" python3 -c "
 import json,sys; a=json.load(open('$RES/machine-json.txt'))
 bad=[c['categorie']+': '+c['message'] for c in a['constats'] if not c['verifie']]
 print('\n'.join(bad)); sys.exit(1 if bad else 0)"
+# Les règles de la 0.80 : XProtect et les profils de configuration, lus et vérifiés sur ce vrai Mac.
+for regle in MAC-ANV-001 MAC-PRF-001; do
+  verifier "bilan : $regle lue et vérifiée" python3 -c "
+import json,sys; a=json.load(open('$RES/machine-json.txt'))
+c=[x for x in a['constats'] if x.get('regle')=='$regle']
+print(c); sys.exit(0 if c and all(x['verifie'] for x in c) else 1)"
+done
 
 section "Diagnostic"
 lancer diagnostic 120 '' diagnostic

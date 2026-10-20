@@ -21,7 +21,9 @@ repository (`git checkout v0.62.0`, for example), to be rebuilt if needed.
   account lockout after wrong passwords (fixed like Windows 11: 10 attempts, 10 minutes); minimum password length.
   An account that does not require a password is described as it is (“accepts an empty password”) and is
   fixed from Vanguard: a password becomes required, the current one does not change.
-- **macOS.** Automatic proxy discovery on; command folders open to all.
+- **macOS.** Automatic proxy discovery on; command folders open to all; XProtect definitions, the built-in
+  antivirus, too old; configuration profiles installed outside company management (adware uses them to force a
+  proxy, a DNS or a certificate).
 - **Command guide: 1,040 commands** (98 more), mostly for security and troubleshooting: lynis, SUID programs, locked
   accounts, ClamAV, gpg signatures, WireGuard, certificates, service exposure, needrestart, sbctl, dnf
   needs-restarting; on Windows, public or private network, shared folders, TPM chip, a program's signature, wiping
