@@ -23,14 +23,15 @@ rpassword = "7.5.4"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 sha1_smol = "1.0.1"
+# SHA-256 : l'empreinte du script lancé en administrateur sous Windows, vérifiée par la fenêtre élevée avant de
+# l'exécuter ; celle des programmes et des fichiers des traces collectées, à chercher sur VirusTotal.
+sha2 = { version = "0.11.1", default-features = false }
 tokio = { version = "1.53.3", features = ["rt-multi-thread", "net", "time", "io-util", "macros"] }
 # Le moteur YARA en Rust (VirusTotal) : seulement les modules dont les règles intégrées ont besoin (pe, elf).
 yara-x = { version = "1.21.0", default-features = false, features = ["pe-module", "elf-module", "constant-folding", "exact-atoms", "fast-regexp"] }
 
 [target."cfg(windows)".dependencies]
 enable-ansi-support = "0.3.1"
-# Empreinte du script lancé en administrateur, vérifiée par la fenêtre élevée avant de l'exécuter.
-sha2 = { version = "0.11.1", default-features = false }
 winreg = "0.56.0"
 
 [target."cfg(unix)".dependencies]
@@ -50,6 +51,11 @@ codegen-units = 1
 # mise à jour depuis la clé accepte de lire (mise_a_jour.rs, TAILLE_MAX).
 [profile.dev.package."*"]
 debug = "line-tables-only"
+
+# SHA-256 optimisé même en développement : sans cela, les empreintes des traces (programmes en marche, fichiers récents)
+# prenaient plus d'une minute dans `cargo run` et dans les tests, contre quelques secondes une fois optimisé.
+[profile.dev.package.sha2]
+opt-level = 3
 
 [build-dependencies]
 winresource = "0.1.34"

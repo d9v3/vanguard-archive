@@ -539,6 +539,37 @@ elseif ($y -match 'illisible|unreadable') { Bug 'Des fichiers du dossier d''essa
 else { Bug 'Résultat de l''analyse YARA inattendu' }
 Remove-Item $dossierYara -Recurse -Force -ErrorAction SilentlyContinue
 
+Etape 'Collecter les traces (0.79) : dossier daté, LISEZMOI, manifeste juste, rien gardé'
+$dossierTraces = Join-Path $env:TEMP 'vanguard-traces-test'
+Remove-Item $dossierTraces -Recurse -Force -ErrorAction SilentlyContinue
+New-Item -ItemType Directory -Force $dossierTraces | Out-Null
+Lancer 'traces' @('traces', $dossierTraces)
+$tr = Sortie 'traces'
+if ($tr -match 'Collecter les traces|Collect the traces') { Ok 'Collecte lancée' } else { Bug 'Collecte PAS lancée' }
+$dates = @(Get-ChildItem -LiteralPath $dossierTraces -Directory -Filter 'traces-*')
+if ($dates.Count -eq 1) {
+    $d = $dates[0].FullName
+    foreach ($f in 'LISEZMOI.txt', 'MANIFESTE.txt', '01-processus.txt', '02-reseau.txt', '03-demarrage.txt', '04-comptes.txt', '06-fichiers-recents.txt') {
+        if (Test-Path -LiteralPath (Join-Path $d $f)) { Ok "$f écrit" } else { Bug "$f ABSENT" }
+    }
+    # Chaque ligne du manifeste : « empreinte  nom », l'empreinte recalculée ici par Windows.
+    $fausses = @(Get-Content -LiteralPath (Join-Path $d 'MANIFESTE.txt') -Encoding UTF8 | ForEach-Object {
+        $empreinte, $nom = $_ -split '  ', 2
+        $calculee = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $d $nom)).Hash
+        if ($calculee -ne $empreinte.ToUpper()) { $nom }
+    })
+    if ($fausses.Count -eq 0) { Ok 'Manifeste juste (Get-FileHash)' } else { Bug "Manifeste FAUX pour : $($fausses -join ', ')" }
+    $evtx = @(Get-ChildItem -LiteralPath $d -Filter '05-*.evtx')
+    if ($evtx.Count) { Ok "$($evtx.Count) journal(aux) exporté(s) en .evtx" } else { Bug 'Aucun journal exporté' }
+    if ($tr -match 'Journal de sécurité : réservé|Security log: administrator only') { Info 'Journal de sécurité réservé à l''administrateur (dit)' }
+    $processus = @(Get-Content -LiteralPath (Join-Path $d '01-processus.txt') -Encoding UTF8 | Where-Object { $_ -match '^\d+\t' })
+    $avecEmpreinte = @($processus | Where-Object { ($_ -split "`t")[4] -match '^[0-9a-f]{64}$' })
+    if ($processus.Count -gt 20 -and $avecEmpreinte.Count -gt 5) { Ok "$($processus.Count) processus, $($avecEmpreinte.Count) avec empreinte" }
+    else { Bug "Processus : $($processus.Count), avec empreinte : $($avecEmpreinte.Count)" }
+} else { Bug "Dossier daté : $($dates.Count) trouvé(s) au lieu d'un" }
+Remove-Item $dossierTraces -Recurse -Force -ErrorAction SilentlyContinue
+if (Test-Path $dossierTraces) { Bug 'Dossier des traces ENCORE là' } else { Ok 'Dossier des traces retiré' }
+
 Etape 'Copier mes fichiers : disque du système refusé, puis vraie copie vers le dossier partagé'
 $refuse = Join-Path $env:TEMP 'vanguard-copie-test'
 New-Item -ItemType Directory -Force $refuse | Out-Null

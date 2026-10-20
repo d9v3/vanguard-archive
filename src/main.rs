@@ -39,6 +39,7 @@ mod reseau;
 mod risk;
 mod sauvegarde;
 mod selection;
+mod traces;
 mod ui;
 mod verifier_cle;
 
@@ -344,6 +345,15 @@ enum Commande {
     /// Les règles du bilan déclarées pour ce système : identifiant stable, sujet, références de durcissement.
     #[command(visible_alias = "rules")]
     Regles,
+    /// Collecter les traces après une infection, avant de nettoyer : processus, connexions, ce qui se lance tout seul,
+    /// comptes, journaux des 7 derniers jours et fichiers récents, dans un dossier daté (LISEZMOI, empreintes SHA-256).
+    /// Lecture seule ; rien ne part sur Internet.
+    #[command(visible_alias = "evidence")]
+    Traces {
+        /// Le dossier où créer traces-AAAAMMJJ-HHMMSS (par défaut : la clé VANGUARD si Vanguard tourne depuis elle,
+        /// sinon le dossier de Vanguard de l'ordinateur).
+        dossier: Option<std::path::PathBuf>,
+    },
     /// Dépanner pas à pas : pas d'Internet, Wi-Fi qui coupe, ordinateur lent, pas de son, imprimante, disque plein ;
     /// après une infection, nouvel ordinateur, ordinateur qui part (vente, don).
     #[command(visible_alias = "troubleshoot")]
@@ -1427,6 +1437,9 @@ const AIDES_EN: &[(&str, &str)] = &[
                           consent (never the other way)"),
     ("ordinateurs", "My computers: those where the VANGUARD key ran a check, their grade and remaining problems (on the \
      key's VANGUARDLOG partition)"),
+    ("traces", "Collect the traces after an infection, before cleaning up: processes, connections, what starts by \
+                itself, accounts, logs of the last 7 days and recent files, in a dated folder (README, SHA-256 \
+                fingerprints). Read-only; nothing goes to the Internet"),
     ("depanner", "Troubleshoot step by step: no Internet, Wi-Fi dropping, slow computer, no sound, printer, disk full; \
                   after an infection, new computer, computer leaving (sale, gift)"),
 ];
@@ -1468,6 +1481,8 @@ const OPTIONS_EN: &[(&str, &str, &str)] = &[
     ("verifier-copie", "dossier", "The disk or the folder of the copy (default: chosen among the plugged-in disks)"),
     ("verifier-cle", "dossier", "A folder of the drive or disk (default: chosen among the plugged-in disks)"),
     ("sauvegarde-auto", "annuler", "Remove the automatic backup set up by Vanguard (the backed-up files stay)"),
+    ("traces", "dossier", "The folder where traces-YYYYMMDD-HHMMSS is created (default: the VANGUARD key if Vanguard \
+                           runs from it, otherwise this computer's Vanguard folder)"),
     ("depanner", "sujet", "The subject: internet, wifi, slow, sound, printer, disk, infection, new, leaving (or words \
                              describing it)"),
 ];
@@ -1639,6 +1654,11 @@ async fn main() {
         Some(Commande::SeMettreAJour) => mise_a_jour::commande(),
         Some(Commande::Regles) => machine::regles::afficher(),
         Some(Commande::Depanner { sujet }) => depanner::executer(&sujet.join(" ")),
+        Some(Commande::Traces { dossier }) => {
+            if !traces::commande(dossier.as_deref()) {
+                std::process::exit(1);
+            }
+        }
     }
 }
 

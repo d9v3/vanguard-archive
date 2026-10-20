@@ -668,3 +668,81 @@ fn mise_a_jour_depuis_la_cle() {
     );
     let _ = std::fs::remove_dir_all(&racine);
 }
+
+/// Les traces collectées dans un dossier jetable : un seul dossier daté, réservé au compte, avec LISEZMOI (en
+/// français puis en anglais), MANIFESTE et les processus ; chaque empreinte du manifeste est juste et chaque fichier y
+/// est. Sous Wine, sans PowerShell, une partie manque et c'est dit ; LISEZMOI et MANIFESTE, eux, sont là.
+#[test]
+fn traces_collectees_et_manifeste_juste() {
+    use sha2::Digest;
+    let maison = maison_jetable();
+    let dossier = maison.join("enquete");
+    let s = vanguard_dans(
+        Path::new(env!("CARGO_BIN_EXE_vanguard")),
+        &maison,
+        "fr",
+        &["traces", dossier.to_str().unwrap()],
+        "",
+        300,
+    );
+    assert_eq!(s.code, Some(0), "{}\n{}", s.texte, s.erreurs);
+    assert!(!s.erreurs.contains("panicked"), "{}", s.erreurs);
+    let texte = sans_couleurs(&s.texte);
+    assert!(
+        texte.contains("Collecter les traces") && texte.contains("Traces : "),
+        "{texte}"
+    );
+    let traces: Vec<PathBuf> = std::fs::read_dir(&dossier)
+        .unwrap()
+        .flatten()
+        .map(|e| e.path())
+        .collect();
+    assert_eq!(traces.len(), 1, "{traces:?}");
+    let d = &traces[0];
+    let nom = d.file_name().unwrap().to_string_lossy().into_owned();
+    assert!(
+        nom.starts_with("traces-") && nom.len() == "traces-20261020-140322".len(),
+        "{nom}"
+    );
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(std::fs::metadata(d).unwrap().permissions().mode() & 0o777, 0o700);
+    }
+    let lisezmoi = std::fs::read_to_string(d.join("LISEZMOI.txt")).unwrap();
+    assert!(
+        lisezmoi.contains("TRACES COLLECTÉES PAR VANGUARD") && lisezmoi.contains("TRACES COLLECTED BY VANGUARD"),
+        "{lisezmoi}"
+    );
+    assert!(lisezmoi.contains("données personnelles") && lisezmoi.contains(env!("CARGO_PKG_VERSION")));
+    if !sous_wine() {
+        let processus = std::fs::read_to_string(d.join("01-processus.txt")).unwrap();
+        assert!(processus.lines().count() > 3, "{processus}");
+    }
+    // Le manifeste : chaque fichier du dossier, sauf lui-même, avec son empreinte juste (format de sha256sum).
+    let manifeste = std::fs::read_to_string(d.join("MANIFESTE.txt")).unwrap();
+    let mut listes: Vec<String> = Vec::new();
+    for ligne in manifeste.lines() {
+        let (empreinte, nom) = ligne.split_once("  ").expect("ligne du manifeste mal formée");
+        let calculee =
+            sha2::Sha256::digest(std::fs::read(d.join(nom)).unwrap())
+                .iter()
+                .fold(String::new(), |mut s, o| {
+                    use std::fmt::Write;
+                    let _ = write!(s, "{o:02x}");
+                    s
+                });
+        assert_eq!(empreinte, calculee, "{nom}");
+        listes.push(nom.to_string());
+    }
+    let mut presents: Vec<String> = std::fs::read_dir(d)
+        .unwrap()
+        .flatten()
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|n| n != "MANIFESTE.txt")
+        .collect();
+    presents.sort();
+    assert_eq!(listes, presents);
+    assert!(listes.contains(&"LISEZMOI.txt".to_string()));
+    let _ = std::fs::remove_dir_all(&maison);
+}

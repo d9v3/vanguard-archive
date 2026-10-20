@@ -27,7 +27,7 @@ pub struct Parcours {
     lancer: fn(),
 }
 
-static PARCOURS: [Parcours; 10] = [
+static PARCOURS: [Parcours; 11] = [
     Parcours {
         cles: ("internet", "internet"),
         titre: ("Pas d'Internet", "No Internet"),
@@ -98,6 +98,15 @@ static PARCOURS: [Parcours; 10] = [
         mots: "piraté hacked compte account courriel email facebook instagram banque bank mot de passe password \
                volé stolen connexion login",
         lancer: compte::compte,
+    },
+    // À la fin : les numéros des parcours d'avant (« 11.7 », après une infection) ne changent pas.
+    Parcours {
+        cles: ("traces", "evidence"),
+        titre: ("Collecter les traces", "Collect the traces"),
+        apercu: ("avant de nettoyer, pour un expert", "before cleaning, for an expert"),
+        mots: "traces preuves evidence forensique forensic collecte collect spécialiste specialist expert enquête \
+               investigation journaux logs processus processes",
+        lancer: infection::traces,
     },
 ];
 
@@ -683,7 +692,9 @@ mod tests {
         assert!(trouver("printer").is_some_and(|p| p.cles.0 == "imprimante"));
         assert!(trouver("zzz").is_none());
         assert_eq!(chemin("3"), Some(3));
-        assert_eq!(chemin("11"), None);
+        assert_eq!(chemin("11"), Some(11));
+        assert_eq!(chemin("12"), None);
+        assert!(trouver("traces").is_some_and(|p| p.cles.1 == "evidence"));
         assert_eq!(lignes_de_recherche("11").len(), PARCOURS.len());
     }
 

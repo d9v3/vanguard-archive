@@ -103,7 +103,7 @@ fn sous_wine() -> bool {
 }
 
 /// Système et version, pour situer l'erreur (« Windows 10.0.26200.9711 », « Arch Linux 6.17.2 », « macOS 15.1 »).
-fn systeme() -> &'static str {
+pub(crate) fn systeme() -> &'static str {
     static SYSTEME: OnceLock<String> = OnceLock::new();
     SYSTEME.get_or_init(|| {
         #[cfg(target_os = "linux")]

@@ -10,7 +10,7 @@ use crate::risk::{Niveau, info_port};
 use crate::{tr, trf, trw};
 
 mod algorithmes_ssh;
-mod dissimulation;
+pub(crate) mod dissimulation;
 mod docker;
 mod durcissement;
 mod maj;

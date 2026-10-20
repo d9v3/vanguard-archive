@@ -1,8 +1,9 @@
-//! Parcours « Après une infection » : ce qui presse (couper Internet, ne pas payer, ne pas rappeler le numéro
-//! affiché), puis ce que Vanguard vérifie lui-même (persistance, accès à distance, comptes, intégrité, fichiers
-//! suspects, navigation détournée), les analyses qu'il propose (YARA, antivirus et démarrage, intégrité en détail,
-//! connexions sortantes, prise de contrôle à distance), et enfin la liste des mots de passe à changer, dans l'ordre,
-//! depuis un autre appareil. Rien n'est changé sans accord : chaque outil redemande le sien.
+//! Parcours « Après une infection » : d'abord garder les traces (processus, connexions, démarrage, journaux), avant que
+//! débrancher le réseau ou mettre en quarantaine ne les efface ; ce qui presse (couper Internet, ne pas payer, ne pas
+//! rappeler le numéro affiché), puis ce que Vanguard vérifie lui-même (persistance, accès à distance, comptes,
+//! intégrité, fichiers suspects, navigation détournée), les analyses qu'il propose (YARA, antivirus et démarrage,
+//! intégrité en détail, connexions sortantes, prise de contrôle à distance), et enfin la liste des mots de passe à
+//! changer, dans l'ordre, depuis un autre appareil. Rien n'est changé sans accord : chaque outil redemande le sien.
 
 use super::{a_savoir, bilan, conseil, ecran, proposer_outil, question};
 use crate::selection::{Case, cocher};
@@ -158,6 +159,7 @@ pub(super) fn infection() {
         return;
     };
     let internet = relie == 0;
+    garder_les_traces(internet);
     ecran();
     let urgences = urgences(signe, internet);
     if !urgences.is_empty() {
@@ -216,6 +218,63 @@ pub(super) fn infection() {
             crate::copier::menu,
         );
     }
+}
+
+/// La case des traces, première étape du parcours et cochée d'office : les connexions et les processus disparaissent
+/// dès que le réseau est débranché, qu'un programme est mis en quarantaine ou que l'ordinateur redémarre.
+pub(super) fn case_des_traces(internet: bool) -> Case {
+    Case {
+        texte: tr!("Collecter les traces", "Collect the traces").to_string(),
+        precision: tr!("lecture seule, 1 min", "read-only, 1 min").to_string(),
+        detail: if internet {
+            tr!(
+                "Processus, connexions en cours, ce qui se lance tout seul, comptes, journaux des 7 derniers jours et fichiers récents, gardés dans un dossier daté AVANT de débrancher le réseau ou de mettre quoi que ce soit en quarantaine : c'est ce qu'un spécialiste voudra voir. Rien n'est arrêté, déplacé ni envoyé.",
+                "Processes, current connections, what starts by itself, accounts, logs of the last 7 days and recent files, kept in a dated folder BEFORE unplugging the network or quarantining anything: that is what a specialist will want to see. Nothing is stopped, moved or sent."
+            )
+        } else {
+            tr!(
+                "Processus, ce qui se lance tout seul, comptes, journaux des 7 derniers jours et fichiers récents, gardés dans un dossier daté avant toute quarantaine (les connexions d'avant le débranchement, elles, ont disparu) : c'est ce qu'un spécialiste voudra voir. Rien n'est arrêté, déplacé ni envoyé.",
+                "Processes, what starts by itself, accounts, logs of the last 7 days and recent files, kept in a dated folder before any quarantine (the connections from before unplugging are gone): that is what a specialist will want to see. Nothing is stopped, moved or sent."
+            )
+        }
+        .to_string(),
+        cochee: true,
+        recommandee: true,
+        fixe: false,
+    }
+}
+
+/// Avant tout le reste : les traces, si on les veut (cochées d'office ; Échap ou décochées, le parcours continue).
+fn garder_les_traces(internet: bool) {
+    ecran();
+    let titre = vec![
+        String::new(),
+        ligne_section(tr!("AVANT TOUT : GARDER LES TRACES", "FIRST OF ALL: KEEP THE TRACES")),
+        trf!(
+            "  {GRIS}Après, il sera trop tard : couper le réseau ou nettoyer les efface.{RESET}",
+            "  {GRIS}Afterwards it is too late: cutting the network or cleaning erases them.{RESET}"
+        ),
+        String::new(),
+    ];
+    if cocher(&titre, &[case_des_traces(internet)]).is_some_and(|c| c.first() == Some(&true)) {
+        println!();
+        crate::traces::collecter(None);
+        demander(&trf!(
+            "\n{GRIS}Entrée pour continuer le parcours…{RESET}",
+            "\n{GRIS}Enter to continue…{RESET}"
+        ));
+    }
+}
+
+/// Le parcours « Collecter les traces » du menu Dépanner : ce qu'il garde, puis la collecte.
+pub(super) fn traces() {
+    ecran();
+    section(tr!("COLLECTER LES TRACES", "COLLECT THE TRACES"));
+    conseil(tr!(
+        "Avant de nettoyer ou de réinstaller un ordinateur infecté : ce qu'un spécialiste voudra voir, gardé dans un dossier daté. Lecture seule, rien ne part sur Internet. Fais-le avant de débrancher le réseau : les connexions en cours disparaissent avec lui.",
+        "Before cleaning up or reinstalling an infected computer: what a specialist will want to see, kept in a dated folder. Read-only, nothing goes to the Internet. Do it before unplugging the network: current connections vanish with it."
+    ));
+    crate::traces::collecter(None);
 }
 
 /// Une analyse proposée : son nom, ce qu'elle fait, et ce qu'elle lance.
@@ -374,6 +433,17 @@ mod tests {
             assert!(largeur_affichee(x.texte) <= 42, "{}", x.texte);
             assert!(largeur_affichee(x.precision) <= 22, "{}", x.precision);
         }
+    }
+
+    #[test]
+    fn les_traces_d_abord_cochees() {
+        for internet in [true, false] {
+            let c = case_des_traces(internet);
+            assert!(c.cochee && c.recommandee && !c.fixe);
+            assert!(largeur_affichee(&c.texte) <= 42 && largeur_affichee(&c.precision) <= 22);
+        }
+        assert!(case_des_traces(true).detail.contains("AVANT de débrancher"));
+        assert!(case_des_traces(false).detail.contains("ont disparu"));
     }
 
     #[test]

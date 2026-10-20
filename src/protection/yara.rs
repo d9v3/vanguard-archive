@@ -38,7 +38,7 @@ fn regles() -> Result<&'static yara_x::Rules, &'static str> {
 
 /// Les endroits à risque : téléchargements, bureau, programmes lancés au démarrage (et le dossier temporaire sous
 /// Windows, où atterrissent les programmes téléchargés).
-fn endroits_a_risque() -> Vec<PathBuf> {
+pub(crate) fn endroits_a_risque() -> Vec<PathBuf> {
     let maison = PathBuf::from(
         std::env::var_os("HOME")
             .or_else(|| std::env::var_os("USERPROFILE"))

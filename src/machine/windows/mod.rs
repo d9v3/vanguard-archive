@@ -61,7 +61,7 @@ pub fn ps(script: &str) -> Option<String> {
 }
 
 /// Comme `ps`, avec un délai choisi : la recherche Windows Update ou winget peuvent prendre une minute ou deux.
-pub(super) fn ps_delai(script: &str, secondes: u64) -> Option<String> {
+pub(crate) fn ps_delai(script: &str, secondes: u64) -> Option<String> {
     let complet =
         format!("[Console]::OutputEncoding=[Text.Encoding]::UTF8; $ErrorActionPreference='Stop'; {script}; '{FIN}'");
     // Début du script, pour retrouver lequel a échoué dans le journal.
