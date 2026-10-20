@@ -3,59 +3,50 @@
 <p align="center"><a href="README.md">Français</a> · <b>English</b></p>
 
 <p align="center">
-  <b>Secures and optimizes your computer and your network, from a USB key.</b><br>
-  Vanguard checks your machine and every device on your network, explains each problem in
-  plain language,<br>and fixes it once you agree. Linux, Windows and macOS, nothing to install, in English or French.
+  <b>Cyber defense for your home, from a USB key.</b><br>
+  Vanguard checks your machine and every device on your network, explains each threat in plain language,<br>
+  and fixes it once you agree; when something stops working, it helps you troubleshoot too.<br>
+  Linux, Windows and macOS, nothing to install, in English or French.
 </p>
 
 ![Vanguard's security check: a grade from A to F, each problem explained with its fix](assets/captures/bilan-en.png)
 
 ## At a glance
 
-- **A security check graded from A to F**: firewall, updates, encryption, open ports, backups… Each problem is
-  explained simply, with its fix.
+- **A home's threats, one by one**: what the router exposes to the Internet, an intruder on the Wi-Fi, a vulnerable
+  connected device, an infected computer, a hijacked DNS or certificate, scams. Each problem is explained simply,
+  with its fix.
+- **A security check graded from A to F**: firewall, updates, encryption, open ports, backups…
 - **Your whole network**: every device, its manufacturer, its open ports and its risks; newcomers are flagged.
 - **Nothing changes without your consent**: a restore point first, and every setting is undone exactly.
+- **And troubleshooting**: diagnostic, everyday problems step by step, slowness, a relative's computer, repairs.
 - **One USB key for all your computers**, and your friends': it write-protects itself anywhere but at home.
-
-## Getting started
-
-**Download** (latest version): [Windows](../../releases/latest/download/vanguard-windows-x86_64.exe) ·
-[Linux](../../releases/latest/download/vanguard-linux-x86_64) · [macOS](../../releases/latest/download/vanguard-macos)
-— or the whole [releases page](../../releases/latest), with the SHA-256 checksums. What each version brought:
-[history](CHANGELOG.en.md).
-
-- **Windows**: double-click the program. It is not signed: SmartScreen may warn (“More info”, then “Run anyway”).
-  Microsoft Defender sometimes mistakes it for a virus (“Trojan:Win32/Bearfoos.A!ml”, an automatic detection of
-  a new program): it is a false positive; check the SHA-256 checksum on the release page.
-- **Linux**: `chmod +x vanguard-linux-x86_64`, then `./vanguard-linux-x86_64` in a terminal (any distribution, nothing
-  to install).
-- **macOS**: copied from the Internet, the program is blocked the first time: `xattr -d com.apple.quarantine
-  vanguard-macos`, then `./vanguard-macos` in Terminal.
-- **From the USB key**: `Windows/vanguard.exe`, `Linux/vanguard`, or `Lancer Vanguard.command` on macOS; the key's guide
-  is in `README.txt`.
 
 In the menu, choose **1** (full check), then **2** (fix). Arrows, Enter, and Esc or Backspace to go back.
 
 ## What Vanguard does
 
-| Area | What Vanguard does |
+| Threat or area | What Vanguard does |
 |---|---|
-| **Security check** | A grade from A to F: firewall, updates and vulnerabilities, encryption, open ports, accounts, SSH, what starts in secret, backdoors and rootkit signs, suspicious event logs, shares open to everyone, Wi-Fi, Bluetooth, clock, end of support, forgotten accounts, browser passwords, sensitive files lying around, disk health… Each problem is explained, with its fix. |
-| **Local network** | Every device, its manufacturer, its open ports and its risks; newcomers flagged, ports opened on the router, the home's address on a blocklist, a password thief like Responder unmasked; the router and connected devices (cameras, printers, NAS, TVs…) recognized, with their default password to change. |
-| **Wi-Fi, NAT, DNS, cameras** | The freest Wi-Fi channel, the NAT type for gaming, the fastest DNS (without removing a DNS that protects you), hidden cameras. |
-| **Connection for gaming** | Ping, jitter, loss, speed and bufferbloat, compared with your habits. |
-| **Troubleshoot** | Computer diagnostic, everyday problems step by step (Internet, Wi-Fi, slowness, sound, printer, full disk), after an infection, collect the traces (before cleaning up), new computer, computer leaving, hacked account, a relative's computer, “Why is it slow?”, computer specs, report to leave behind, repairs. |
-| **Optimize and clean up** | Privacy and performance settings undone exactly, a cleanup checklist with the space gained measured, startup programs. |
-| **Protection** | Decoy files against ransomware, Windows Defender blocking, 308 YARA rules and over a million fingerprints of known malware (MalwareBazaar), antivirus, sandbox, integrity of critical files, leaked passwords, outbound connections (known botnet servers), tech-support scam (remote control tools), camera and microphone, privacy check (who can access location, contacts, camera and microphone), dangerous links, downloaded files, reversible quarantine; secrets forgotten in git project history; flaws in Docker images (trivy, when installed). |
-| **Follow-up** | Hourly monitoring and its dashboard in the browser, monthly check-up, HTML report with the grade curve, learning on your computer, what Vanguard changed (each fix, dated). |
-| **Software and games** | The best software in 8 categories, from its official source; update everything at once; settings for gaming. |
-| **Tools** | Automatic backup, copy my files (checked copy) and check a copy, check my backup (really read back), check my drive (fake drives, speed), my computers (tracked by the key), key data protected by a passphrase, shortcut on this computer, Vanguard updated from the key or from GitHub (versions signed by the author), command guide, search in every menu. |
+| **The check** | A grade from A to F on everything below, and also: firewall, updates and known vulnerabilities, encryption, accounts, SSH, shares open to everyone, clock, end of support, forgotten accounts, disk health… Each problem is explained, with its fix, applied once you agree. |
+| **Exposure to the Internet** | The ports the router opens to the Internet (UPnP), this computer's open ports and firewall, the home's address on a blocklist, the router's admin page over HTTP only. |
+| **Intruders on the Wi-Fi** | Every device on the network, its manufacturer, its open ports and its risks; newcomers flagged every hour, with a dashboard in the browser; the Wi-Fi's protection (WEP, WPA2, WPA3), the fake access point copying its name, Bluetooth devices paired recently. |
+| **Connected devices** | The router and the devices on the network (cameras, printers, NAS, TVs, smart home…) recognized, with their default password to change; hidden cameras, in a rental or at someone's place. |
+| **Infected computer** | Antivirus, 308 YARA rules and over a million fingerprints of known malware (MalwareBazaar), decoy files against ransomware, Windows Defender blocking, what starts in secret, backdoors and rootkit signs, suspicious event logs, connections to known botnet servers, a password thief like Responder unmasked, integrity of critical files, flaws in Docker images (trivy, when installed), reversible quarantine, and the traces collected before cleaning up. |
+| **Hijacked DNS and certificates** | The DNS really in use (and made-up answers), added root certificates (HTTPS interception), a forced proxy and sites redirected by the hosts file, automatic proxy discovery (WPAD), browser extensions that read every site. |
+| **Scams and remote control** | Tech-support scam (remote control tools), dangerous links checked without opening them, downloaded files checked, leaked passwords and email addresses, hacked account, a sandbox for an unknown program. |
+| **Data and privacy** | Automatic backup and check my backup (really read back), copy my files (checked copy) and check a copy, privacy check (who can access location, contacts, camera and microphone), camera and microphone, browser passwords without protection, sensitive files lying around, secrets forgotten in git project history, key data protected by a passphrase. |
+| **Troubleshooting** | Computer diagnostic, everyday problems step by step (Internet, Wi-Fi, slowness, sound, printer, full disk), after an infection, new computer, computer leaving, a relative's computer, “Why is it slow?”, computer specs, report to leave behind, repairs. |
+| **Optimizing, software and gaming** | Privacy and performance settings undone exactly, a cleanup checklist with the space gained measured, startup programs; the best software in 8 categories, from its official source, and updating everything at once; connection for gaming (ping, jitter, loss, speed and bufferbloat, compared with your habits), crowded Wi-Fi, NAT type, fastest DNS (without removing a DNS that protects you), settings for gaming. |
+| **Follow-up and tools** | HTML report with the grade curve, monthly check-up, learning on your computer, what Vanguard changed (each fix, dated); check my drive (fake drives, speed), my computers (tracked by the key), shortcut on this computer, Vanguard updated from the key or from GitHub (versions signed by the author), command guide, search in every menu. |
 
 <details>
-<summary><b>The details, feature by feature</b></summary>
+<summary><b>The details, threat by threat</b></summary>
+
+#### The check, graded from A to F
 
 **Security check** — a grade from A to F, then each problem with its fix.
+
 - Firewall, open ports (TCP and UDP), updates and known vulnerabilities, disk encryption, Secure Boot, screen lock,
   accounts (and their lockout after wrong passwords, minimum length: Linux, Windows), automatic proxy discovery
   (WPAD: Windows, macOS), SSH (and its failed login attempts, from the Internet or from home, and a client that does
@@ -66,22 +57,6 @@ In the menu, choose **1** (full check), then **2** (fix). Arrows, Enter, and Esc
   all; on macOS: sealed system volume, enforced code signing, library validation, added extensions), badly protected
   secret files, backups, file shares open to everyone (Samba, NFS, Windows shares, macOS File Sharing: the
   password-less access is closed after your consent, named accounts keep theirs).
-- What hides: programs started at boot, scheduled tasks, library preloading, modified privileged programs. On
-  Windows, the classic backdoors: a debugger set on a sign-in screen accessibility program (IFEO, SilentProcessExit),
-  sethc or utilman (Sticky Keys, Ease of Access) replaced by cmd, Winlogon's Shell or Userinit hijacked, AppInit_DLLs,
-  WMI subscriptions that run a command; tracked by the monitoring, fixed when the original state is known exactly.
-  On Linux, the signs of a rootkit: hidden processes, programs running without a file (memfd, deleted, started from
-  /tmp), a kernel module that hides or unknown unsigned modules, a network card in promiscuous mode (it listens to
-  the whole network).
-- Windows event logs, over the last 7 days: bursts of wrong passwords from the network (Remote Desktop, shares),
-  security log cleared, accounts created, services installed from a temporary folder or that start an interpreter.
-  The security log can only be read as administrator: without that right, it is said.
-- The DNS actually used (and forged answers), added root certificates (HTTPS interception), browser extensions that
-  read every site.
-- Wi-Fi: the network's protection (WEP, WPA2, WPA3), and fake access points ("evil twin") that copy its name without
-  a password to lure devices; on Linux, saved open networks that reconnect by themselves.
-- Bluetooth: computer visible all the time, and devices paired less than a week ago (a keyboard paired by someone
-  else types whatever it wants).
 - Clock set automatically; end of support: Windows 10 and the Windows 11 or macOS versions that no longer get fixes,
   programs abandoned by their publisher (Flash, Java 7, Office 2016…), browsers that no longer update; forgotten
   accounts (active but unused for six months); new administrators.
@@ -93,15 +68,17 @@ In the menu, choose **1** (full check), then **2** (fix). Arrows, Enter, and Esc
   all allowed, passwords kept as LM hashes, Remote Registry, SMBv1 client, MSI installs with system rights, services
   with unquoted paths, exploit protection off, Windows Update turned off; Linux: automatic security updates, session
   that opens by itself without an encrypted disk; macOS: unencrypted Time Machine backup.
-- Hijacked browsing (forced proxy, sites redirected by the hosts file).
-- Passwords saved in the browser without protection, sensitive files lying around (passwords or keys in clear text),
-  missing backup with its set-up offered.
 - Health: disk space, SMART status of the disks (without root), battery, temperatures.
 - What could not be checked is said, never counted as healthy.
 - The check reads what it checks by itself, without starting a program for each reading: on Windows, the accounts,
   the Run keys and the Startup folder (Windows functions and the registry, PowerShell as a fallback); on macOS, the settings,
   launchd agents, the version, the Mac's name, free space and administrators (plists read directly, instead of
   defaults, plutil, sw_vers, sysctl, scutil or df). Faster, and fewer ways to fail.
+- Fixes applied only after confirmation, with a restore point created automatically beforehand (snapper or
+  timeshift on Linux, Windows restore point, Time Machine snapshot on macOS); on Windows, each one is a readable
+  script.
+
+#### Exposure to the Internet and the home network
 
 **Local network** — every device, its manufacturer, its open ports (TCP, and UDP: SNMP, NetBIOS, UPnP, DNS, mDNS)
 and its risks; newcomers flagged, one notebook per network (at home, at each friend's), nicknames ("HP printer");
@@ -110,20 +87,148 @@ After your consent, the home's Internet address is looked up in four blocklists 
 listed for spam or attacks, a device is probably infected. During the scan, Vanguard also asks for a name that does
 not exist (LLMNR, NetBIOS, mDNS): nobody legitimate answers, and the device that does is a poisoner like Responder,
 which steals the network's Windows passwords; the hourly monitoring flags it too.
-**Router and connected devices**: after the scan, or later from the last scan kept (`vanguard iot`), what the router
+
+#### Intruders on the Wi-Fi
+
+- Wi-Fi: the network's protection (WEP, WPA2, WPA3), and fake access points ("evil twin") that copy its name without
+  a password to lure devices; on Linux, saved open networks that reconnect by themselves.
+- Bluetooth: computer visible all the time, and devices paired less than a week ago (a keyboard paired by someone
+  else types whatever it wants).
+- Hourly monitoring: a notification if an unknown device shows up, if a port opens, if the machine's grade drops, if
+  the router seems spoofed (shared or changed MAC address: ARP spoofing), or if a program or a disguised file lands
+  in Downloads (to check before opening it; nothing is blocked). Its dashboard, a local page opened in the browser:
+  its state, the alerts day by day (kept even when the night's notification is gone), the devices that showed up and
+  the connections to botnet servers. Nothing is sent.
+
+#### Connected devices
+
+**Router and connected devices** — after the scan, or later from the last scan kept (`vanguard iot`), what the router
 says about itself (often its model and software version), an admin page over HTTP only, and the cameras, printers,
 NAS, TVs, speakers, consoles and smart home devices, recognized by their manufacturer, name, ports and
 announcements. For the router, cameras, printers and NAS, the advice to change the default password: nothing more is
 probed and no password is tried.
 
-**Connection for gaming** — ping, jitter, loss, speed and bufferbloat (the lag when someone downloads), with a
-verdict criterion by criterion and advice.
+**Hidden cameras** — in a rental or at someone's place, the devices on the network that look like cameras (maker,
+video stream, ONVIF), without turning anything off or watching anything.
 
-**Wi-Fi, NAT, DNS and cameras** — crowded Wi-Fi: nearby networks by channel, and the freest channel to set on the
-router; the NAT type for gaming (open, moderate or strict, as consoles show it), double NAT and provider-shared
-address included; the fastest DNS, measured here, offered only if it does not replace a DNS that protects you
-(NextDNS, encrypted, filtering), and undoable; and, in a rental or at someone's place, the devices on the network
-that look like cameras (maker, video stream, ONVIF), without turning anything off or watching anything.
+#### Infected computer
+
+**Against ransomware and malware** — decoy files: a decoy text file and PDF in Documents, Pictures and Desktop,
+which nobody has a reason to touch. Ransomware that encrypts or renames them triggers a critical alert, at each
+check and hourly through monitoring, with what to do; placed and removed after your consent. And a YARA scan: 308
+ReversingLabs rules that recognize whole families (ransomware, password stealers, trojans, backdoors…), alongside
+the antivirus, applied by YARA-X, compiled into Vanguard: nothing to install. Each file read is also compared with
+MalwareBazaar's SHA-256 fingerprints (abuse.ch, over a million known malware samples): there, it is that very
+program, beyond doubt. The full list is downloaded once a week (about 43 MB), the last 48 hours once a day; offline,
+the saved copy is used, and with no copy at all, it says so. What the antivirus or YARA finds can go into a reversible quarantine: the file is made unusable and noted, then put back exactly in its place if it was a false
+positive.
+
+**Windows Defender blocking** — Vanguard blocks nothing itself: after your consent, it turns on what Windows blocks
+from its kernel and protects against being turned off. Attack surface reduction rules (password theft from memory,
+vulnerable drivers, booby-trapped Office documents and attachments), network protection against dangerous sites,
+unwanted software, controlled folder access against ransomware. Each rule is named before you agree and is undone
+exactly; those that would block Vanguard on its USB drive or troubleshooting are never turned on, and nothing is
+offered when another antivirus replaces Defender.
+
+**Collect the traces** — after an infection, before cleaning up or reinstalling: what a specialist will want to
+see, kept in a dated folder on the VANGUARD key (or in this computer's Vanguard folder), in the order it vanishes.
+Processes (with their program's SHA-256 fingerprint), current connections, what starts by itself, the check as JSON,
+accounts, logs of the last 7 days (as .evtx on Windows), recent files from risky places (described, not copied);
+LISEZMOI.txt, in French and English, tells what each file holds and what could not be read, MANIFESTE.txt gives
+their fingerprints (`sha256sum -c MANIFESTE.txt`). Read-only: nothing is stopped, moved or sent. The folder holds
+personal data, to hand only to someone you trust. It is also the first step of “After an infection”, ticked by
+default: cutting the network or cleaning up erases these traces. With ransomware or a remote control still connected to
+the Internet, cutting comes first: every minute counts.
+
+**Recognized open source tools, when installed** — Vanguard runs them and explains what they find, without
+changing anything; when missing, it offers to install them with the system's tool. trivy tells the known serious or
+critical flaws in Docker or Podman images: an image does not update by itself. And when someone fails SSH logins, the check tells whether fail2ban,
+sshguard or CrowdSec already blocks the addresses that keep trying.
+
+- What hides: programs started at boot, scheduled tasks, library preloading, modified privileged programs. On
+  Windows, the classic backdoors: a debugger set on a sign-in screen accessibility program (IFEO, SilentProcessExit),
+  sethc or utilman (Sticky Keys, Ease of Access) replaced by cmd, Winlogon's Shell or Userinit hijacked, AppInit_DLLs,
+  WMI subscriptions that run a command; tracked by the monitoring, fixed when the original state is known exactly.
+  On Linux, the signs of a rootkit: hidden processes, programs running without a file (memfd, deleted, started from
+  /tmp), a kernel module that hides or unknown unsigned modules, a network card in promiscuous mode (it listens to
+  the whole network).
+- Windows event logs, over the last 7 days: bursts of wrong passwords from the network (Remote Desktop, shares),
+  security log cleared, accounts created, services installed from a temporary folder or that start an interpreter.
+  The security log can only be read as administrator: without that right, it is said.
+- Antivirus: ClamAV (Linux, macOS) or Microsoft Defender (Windows), on the computer or on a chosen USB key / folder,
+  with the tricks of USB worms (shortcut posing as a folder, autorun.inf, scripts).
+- Integrity of critical files (accounts, sudo, SSH, PAM, cron, services, autostart): BLAKE3 fingerprints, what changed
+  since the reference, and live monitoring.
+- Who talks to the Internet?: each program's current connections, with the server's name; a program started from a
+  temporary folder or Downloads, a remote access tool's port, a server without a name or a known botnet command
+  server (Feodo Tracker and ThreatFox lists, abuse.ch; a free, optional abuse.ch key adds ThreatFox's official
+  access) are flagged. Read-only: nothing is cut.
+- Vanguard also distrusts itself: at startup, it says whether a library is injected into every program of the
+  session (LD_PRELOAD, DYLD_INSERT_LIBRARIES, AppInit_DLLs: one from a system package, like GameMode, is mere
+  information) and whether it runs as root for no reason, since its results go through there. In the check: the
+  hourly monitoring you had turned on and that disappeared (malware first cuts what watches it), and the check
+  history rewritten afterwards (each check carries the previous one's checksum). Each night the code has changed, CI
+  builds Vanguard twice and checks that the program is identical down to the byte.
+
+#### Hijacked DNS and certificates
+
+- The DNS actually used (and forged answers), added root certificates (HTTPS interception), browser extensions that
+  read every site.
+- Hijacked browsing (forced proxy, sites redirected by the hosts file).
+
+#### Scams and remote control
+
+- Is someone controlling my PC?: the tech-support scam (“your computer is infected”) gets a remote control tool
+  installed. Vanguard looks for AnyDesk, TeamViewer, RustDesk, Quick Assist, Splashtop, UltraViewer… installed (and
+  since when), started at boot, running or simply sitting in Downloads; it explains what to do (cut the Internet, tell
+  the bank, change passwords) and removes them after your consent. A running program is never cut without a second,
+  explicit consent: the person helping may be connected through it. In the check too (“Remote access”).
+- Is this link dangerous?: a link you received, checked without ever opening it (disguised letters, misleading
+  subdomain, imitated brand, link shortener, raw IP address); after your consent, the domain's age and three public
+  lists of dangerous sites (URLhaus, Spamhaus, SURBL). Only the domain name leaves the computer.
+- Check a downloaded file: its checksum compared with the one the site publishes (pasted, or a SHA256SUMS next to
+  it), its name and content (double extension, program disguised as a document), then YARA and the antivirus.
+- Sandbox: run an unknown program without network, with a read-only system and an invisible home folder (bubblewrap
+  or firejail on Linux, Windows Sandbox on Windows, sandbox-exec on macOS).
+- Leaked passwords: checked with Have I Been Pwned without ever sending the password (only 5 characters of its hash);
+  email address leaks, after your consent (the address is sent to the service).
+
+#### Data and privacy
+
+**Automatic backup** — set up with the system's tool (Déjà Dup or a daily rsync copy on Linux, Time Machine, File
+History on Windows), to an external disk, after your consent and undoable. **Check my backup**: the rsync copy
+really read back from the disk, random files compared with their original; an original changed since is not counted
+as an error, a copy that differs from an unchanged original means a disk losing data. For Time Machine, Déjà Dup and
+File History, which keep their backups in their own format, how to restore one file. Nothing is written or deleted.
+
+**Copy my files** — Documents, Pictures, Desktop, Videos and Music to an external disk, before a risky repair or a
+reinstall: space is checked first, each file is read back and compared with the original (BLAKE3 fingerprint),
+nothing is deleted or overwritten, and an interrupted copy resumes where it stopped. **Check a copy**, later, is the
+restore test: files spread over the whole copy are read back from the disk and compared with their original; a disk
+that loses data shows up before the day you need it.
+
+**Protect the key's data** — the key's device record (names, MAC addresses, nicknames) encrypted by a passphrase
+(XChaCha20-Poly1305, passphrase derived by Argon2id), against a lost or lent key. At home, nothing changes: the data
+key is kept on the owner's computer. Elsewhere, Vanguard asks for the passphrase, or goes on without the record. The
+report and the diagnostic are no longer written to the key. On request, reversible, with a backup offered first; the
+check reports a record left in clear.
+
+**Secrets in git projects** — Vanguard reads the history of the git projects in the home folder: a password, API
+key or token written once stays there, even when deleted later. Its own rules recognize keys by their shape (AWS,
+GitHub, GitLab, Google, Stripe, Slack…), private keys, passwords in an address or written in the code; gitleaks, when
+installed, adds its own. No secret is shown or kept.
+
+**Camera and microphone: who uses them?** — on Windows, each program that used the camera or the microphone, and the
+last time (a program started from a temporary folder or Downloads is flagged); on Linux, what holds them right now.
+Read-only. **Privacy check**: the apps that can access location, contacts, camera and microphone, and their last use
+when the system records it (the permission store on Windows, Flatpak and Snap on Linux, the macOS permission
+database, readable with Full Disk Access). Nothing is removed: what to do is given, and what could not be read is
+said to be unchecked.
+
+- Passwords saved in the browser without protection, sensitive files lying around (passwords or keys in clear text),
+  missing backup with its set-up offered.
+
+#### Troubleshooting
 
 **Computer diagnostic** — the first step of any troubleshooting: hardware, system, and recent problems (journal
 errors and crashed programs on Linux; blue screens, sudden shutdowns and crashes on Windows; kernel panics and crash
@@ -145,25 +250,8 @@ network may be looked at, only with their consent), the check, then a summary in
 answers: what is left to do first, what is fine next. The tools that match the reason (slowness, antivirus, fake
 technician), the fixes one by one, and the page to leave behind, with tips chosen for the person.
 
-**Collect the traces** — after an infection, before cleaning up or reinstalling: what a specialist will want to
-see, kept in a dated folder on the VANGUARD key (or in this computer's Vanguard folder), in the order it vanishes.
-Processes (with their program's SHA-256 fingerprint), current connections, what starts by itself, the check as JSON,
-accounts, logs of the last 7 days (as .evtx on Windows), recent files from risky places (described, not copied);
-LISEZMOI.txt, in French and English, tells what each file holds and what could not be read, MANIFESTE.txt gives
-their fingerprints (`sha256sum -c MANIFESTE.txt`). Read-only: nothing is stopped, moved or sent. The folder holds
-personal data, to hand only to someone you trust. It is also the first step of “After an infection”, ticked by
-default: cutting the network or cleaning up erases these traces. With ransomware or a remote control still connected to
-the Internet, cutting comes first: every minute counts.
-
 **Report to leave behind** — a simple page for the person you just helped: their grade, what is left to do from the most
 to the least serious, what is fine and three habits; put on their Desktop, to read or print.
-
-**Automatic backup** — set up with the system's tool (Déjà Dup or a daily rsync copy on Linux, Time Machine, File
-History on Windows), to an external disk, after your consent and undoable. **Check my backup**: the rsync copy
-really read back from the disk, random files compared with their original; an original changed since is not counted
-as an error, a copy that differs from an unchanged original means a disk losing data. For Time Machine, Déjà Dup and
-File History, which keep their backups in their own format, how to restore one file. Nothing is written or deleted.
-**Shortcut on this computer**: Vanguard copied here and started with one click.
 
 **Why is it slow?** — a two-second snapshot: what keeps the processor, memory and disk busy, program by program;
 how long startup takes and what delays it; the programs started at login and their weight. Those that work for a
@@ -173,28 +261,10 @@ there, after your consent: they stay installed, and each removal is undone exact
 **Computer specs** — model, motherboard, BIOS, processor, memory (modules, type, speed), graphics card and driver,
 disks: what you are asked on the phone or to buy a part. Serial numbers are shown on screen only, never written.
 
-**Copy my files** — Documents, Pictures, Desktop, Videos and Music to an external disk, before a risky repair or a
-reinstall: space is checked first, each file is read back and compared with the original (BLAKE3 fingerprint),
-nothing is deleted or overwritten, and an interrupted copy resumes where it stopped. **Check a copy**, later, is the
-restore test: files spread over the whole copy are read back from the disk and compared with their original; a disk
-that loses data shows up before the day you need it.
+- Repairs: Internet, hijacked browsing, firewall, disk, full disk, deep cleaning, stuck Windows Update, system files,
+  clock.
 
-**Check my drive** — does a USB stick or an external disk hold what it claims? Fake drives (a 16 GB chip sold as
-“1 TB”) accept everything and return garbage beyond their real size. After your consent, Vanguard writes recognizable
-content into the free space, reads it all back bypassing the computer's memory, measures the write and read speeds,
-then erases everything; the files already on the drive are not touched. Quick (a quarter of the free space) or full
-(all of it, the only proof); never on the VANGUARD key or the system disk.
-
-**My computers** — each full check run with the VANGUARD key notes the computer there: nickname (“system · model”,
-renamable), grade, remaining problems (their category and level only, the five worst), date of the last check. The
-table travels on the key's VANGUARDLOG partition, without computer name, account, address or Wi-Fi name; it never
-goes to GitHub.
-
-**Protect the key's data** — the key's device record (names, MAC addresses, nicknames) encrypted by a passphrase
-(XChaCha20-Poly1305, passphrase derived by Argon2id), against a lost or lent key. At home, nothing changes: the data
-key is kept on the owner's computer. Elsewhere, Vanguard asks for the passphrase, or goes on without the record. The
-report and the diagnostic are no longer written to the key. On request, reversible, with a backup offered first; the
-check reports a record left in clear.
+#### Optimizing, software and gaming
 
 **Optimize** — privacy, performance and comfort settings written for Vanguard. On Windows: telemetry kept to a
 minimum, ads and tracking off, Recall without screen snapshots, file extensions shown, no autorun from USB drives,
@@ -208,44 +278,42 @@ files, Windows Update and Delivery Optimization caches, old components (Windows)
 snapshots (macOS). The space each item frees is measured first, what rebuilds itself is checked by default, the trash
 never; the free space read again afterwards tells what was really gained.
 
-**Against ransomware and malware** — decoy files: a decoy text file and PDF in Documents, Pictures and Desktop,
-which nobody has a reason to touch. Ransomware that encrypts or renames them triggers a critical alert, at each
-check and hourly through monitoring, with what to do; placed and removed after your consent. And a YARA scan: 308
-ReversingLabs rules that recognize whole families (ransomware, password stealers, trojans, backdoors…), alongside
-the antivirus, applied by YARA-X, compiled into Vanguard: nothing to install. Each file read is also compared with
-MalwareBazaar's SHA-256 fingerprints (abuse.ch, over a million known malware samples): there, it is that very
-program, beyond doubt. The full list is downloaded once a week (about 43 MB), the last 48 hours once a day; offline,
-the saved copy is used, and with no copy at all, it says so. What the antivirus or YARA finds can go into a reversible quarantine: the file is made unusable and noted, then put back exactly in its place if it was a false
-positive.
+**Connection for gaming** — ping, jitter, loss, speed and bufferbloat (the lag when someone downloads), with a
+verdict criterion by criterion and advice.
 
-**Secrets in git projects** — Vanguard reads the history of the git projects in the home folder: a password, API
-key or token written once stays there, even when deleted later. Its own rules recognize keys by their shape (AWS,
-GitHub, GitLab, Google, Stripe, Slack…), private keys, passwords in an address or written in the code; gitleaks, when
-installed, adds its own. No secret is shown or kept.
+**Wi-Fi, NAT and DNS** — crowded Wi-Fi: nearby networks by channel, and the freest channel to set on the
+router; the NAT type for gaming (open, moderate or strict, as consoles show it), double NAT and provider-shared
+address included; the fastest DNS, measured here, offered only if it does not replace a DNS that protects you
+(NextDNS, encrypted, filtering), and undoable.
 
-**Recognized open source tools, when installed** — Vanguard runs them and explains what they find, without
-changing anything; when missing, it offers to install them with the system's tool. trivy tells the known serious or
-critical flaws in Docker or Podman images: an image does not update by itself. And when someone fails SSH logins, the check tells whether fail2ban,
-sshguard or CrowdSec already blocks the addresses that keep trying.
+- Update everything at once: system, programs, drivers, firmware.
+- Software: the best program for each use, mostly open source, in 8 categories (browsers and email, messaging and
+  sharing, security and privacy, office, video and music, images and design, system tools, programming) plus a
+  starter pack (Firefox, Bitwarden, VLC, LibreOffice, 7-Zip): checklist, installed ones recognized, installation from
+  the official source that checks each download (winget, distribution packages or Flathub, Homebrew).
+- Gaming: on Windows, game components and Windows settings; on Linux, Steam, 32- and 64-bit Vulkan drivers for your
+  graphics card, GameMode, MangoHud, Gamescope, Wine, Lutris, Heroic, ProtonUp-Qt, vm.max_map_count, ntsync; on
+  macOS, Rosetta 2, Steam, Heroic, Epic Games, GOG Galaxy, Prism Launcher and the Metal frame counter.
 
-**Camera and microphone: who uses them?** — on Windows, each program that used the camera or the microphone, and the
-last time (a program started from a temporary folder or Downloads is flagged); on Linux, what holds them right now.
-Read-only. **Privacy check**: the apps that can access location, contacts, camera and microphone, and their last use
-when the system records it (the permission store on Windows, Flatpak and Snap on Linux, the macOS permission
-database, readable with Full Disk Access). Nothing is removed: what to do is given, and what could not be read is
-said to be unchecked.
-
-**Windows Defender blocking** — Vanguard blocks nothing itself: after your consent, it turns on what Windows blocks
-from its kernel and protects against being turned off. Attack surface reduction rules (password theft from memory,
-vulnerable drivers, booby-trapped Office documents and attachments), network protection against dangerous sites,
-unwanted software, controlled folder access against ransomware. Each rule is named before you agree and is undone
-exactly; those that would block Vanguard on its USB drive or troubleshooting are never turned on, and nothing is
-offered when another antivirus replaces Defender.
+#### Follow-up and tools
 
 **Learning** — Vanguard learns on your computer, sending nothing. An alert you declare normal for you ("i" when it is
 offered as a fix) drops to information for 90 days, or until it gets worse; each connection test is compared with
 your habits on the same network; a known device that suddenly seems all closed (asleep) is checked again more
 patiently. "What Vanguard has learned" shows everything and lets you forget.
+
+**Check my drive** — does a USB stick or an external disk hold what it claims? Fake drives (a 16 GB chip sold as
+“1 TB”) accept everything and return garbage beyond their real size. After your consent, Vanguard writes recognizable
+content into the free space, reads it all back bypassing the computer's memory, measures the write and read speeds,
+then erases everything; the files already on the drive are not touched. Quick (a quarter of the free space) or full
+(all of it, the only proof); never on the VANGUARD key or the system disk.
+
+**My computers** — each full check run with the VANGUARD key notes the computer there: nickname (“system · model”,
+renamable), grade, remaining problems (their category and level only, the five worst), date of the last check. The
+table travels on the key's VANGUARDLOG partition, without computer name, account, address or Wi-Fi name; it never
+goes to GitHub.
+
+**Shortcut on this computer** — Vanguard copied here and started with one click.
 
 **Command guide** — the useful commands of Omarchy, Arch, Fedora, Debian and Ubuntu (and other Linux), Windows 11,
 macOS, and the ones typed the same way everywhere (Vanguard, ping, nslookup, ssh, curl, git…), each one explained; ⚠
@@ -262,40 +330,9 @@ opening the guide, once it has used them), and the key brings them along: run fr
 has them from the first launch, even without Internet. They can be searched and copied, but never run from here,
 since Vanguard has not checked them.
 
-**And also**
-- Search in every menu and checklist: type a word (wifi, disk, dns, update…), only the lines containing it stay,
-  whatever the accents or capitals; the end of the most likely word shows in grey, and Tab completes it. In the main
-  menu, it also finds each tool of the submenus, and each page and each command of the guide.
-- Fixes applied only after confirmation, with a restore point created automatically beforehand (snapper or
-  timeshift on Linux, Windows restore point, Time Machine snapshot on macOS); on Windows, each one is a readable
-  script.
-- Update everything at once: system, programs, drivers, firmware.
-- Software: the best program for each use, mostly open source, in 8 categories (browsers and email, messaging and
-  sharing, security and privacy, office, video and music, images and design, system tools, programming) plus a
-  starter pack (Firefox, Bitwarden, VLC, LibreOffice, 7-Zip): checklist, installed ones recognized, installation from
-  the official source that checks each download (winget, distribution packages or Flathub, Homebrew).
-- Repairs: Internet, hijacked browsing, firewall, disk, full disk, deep cleaning, stuck Windows Update, system files,
-  clock.
-- Antivirus: ClamAV (Linux, macOS) or Microsoft Defender (Windows), on the computer or on a chosen USB key / folder,
-  with the tricks of USB worms (shortcut posing as a folder, autorun.inf, scripts).
-- Sandbox: run an unknown program without network, with a read-only system and an invisible home folder (bubblewrap
-  or firejail on Linux, Windows Sandbox on Windows, sandbox-exec on macOS).
-- Integrity of critical files (accounts, sudo, SSH, PAM, cron, services, autostart): BLAKE3 fingerprints, what changed
-  since the reference, and live monitoring.
-- Leaked passwords: checked with Have I Been Pwned without ever sending the password (only 5 characters of its hash);
-  email address leaks, after your consent (the address is sent to the service).
-- Who talks to the Internet?: each program's current connections, with the server's name; a program started from a
-  temporary folder or Downloads, a remote access tool's port, a server without a name or a known botnet command
-  server (Feodo Tracker and ThreatFox lists, abuse.ch; a free, optional abuse.ch key adds ThreatFox's official
-  access) are flagged. Read-only: nothing is cut.
-- Is someone controlling my PC?: the tech-support scam (“your computer is infected”) gets a remote control tool
-  installed. Vanguard looks for AnyDesk, TeamViewer, RustDesk, Quick Assist, Splashtop, UltraViewer… installed (and
-  since when), started at boot, running or simply sitting in Downloads; it explains what to do (cut the Internet, tell
-  the bank, change passwords) and removes them after your consent. A running program is never cut without a second,
-  explicit consent: the person helping may be connected through it. In the check too (“Remote access”).
-- Is this link dangerous?: a link you received, checked without ever opening it (disguised letters, misleading
-  subdomain, imitated brand, link shortener, raw IP address); after your consent, the domain's age and three public
-  lists of dangerous sites (URLhaus, Spamhaus, SURBL). Only the domain name leaves the computer.
+- Monthly check-up: one notification a month with the machine's grade, waiting updates, the space a cleanup would
+  free and new problems; nothing is changed.
+- HTML report with the grade history curve, and what changed since the previous check.
 - Check Vanguard itself: its version, the date of its last commit and its SHA-256 checksum, to compare with the
   release page (Vanguard is not signed: this comparison is what proves it is genuine). A copy older than six months
   says so in the menu. And the key manifest: at deployment, the checksum of every file on the key is kept on your
@@ -307,25 +344,9 @@ since Vanguard has not checked them.
   version is described by a manifest signed with Ed25519 on the author's computer, whose public key Vanguard carries.
   A badly signed manifest, an older version, a program whose size or checksum differs: refused. The menu announces a
   newer version; nothing is installed without your consent.
-- Vanguard also distrusts itself: at startup, it says whether a library is injected into every program of the
-  session (LD_PRELOAD, DYLD_INSERT_LIBRARIES, AppInit_DLLs: one from a system package, like GameMode, is mere
-  information) and whether it runs as root for no reason, since its results go through there. In the check: the
-  hourly monitoring you had turned on and that disappeared (malware first cuts what watches it), and the check
-  history rewritten afterwards (each check carries the previous one's checksum). Each night the code has changed, CI
-  builds Vanguard twice and checks that the program is identical down to the byte.
-- Check a downloaded file: its checksum compared with the one the site publishes (pasted, or a SHA256SUMS next to
-  it), its name and content (double extension, program disguised as a document), then YARA and the antivirus.
-- Hourly monitoring: a notification if an unknown device shows up, if a port opens, if the machine's grade drops, if
-  the router seems spoofed (shared or changed MAC address: ARP spoofing), or if a program or a disguised file lands
-  in Downloads (to check before opening it; nothing is blocked). Its dashboard, a local page opened in the browser:
-  its state, the alerts day by day (kept even when the night's notification is gone), the devices that showed up and
-  the connections to botnet servers. Nothing is sent.
-- Monthly check-up: one notification a month with the machine's grade, waiting updates, the space a cleanup would
-  free and new problems; nothing is changed.
-- HTML report with the grade history curve, and what changed since the previous check.
-- Gaming: on Windows, game components and Windows settings; on Linux, Steam, 32- and 64-bit Vulkan drivers for your
-  graphics card, GameMode, MangoHud, Gamescope, Wine, Lutris, Heroic, ProtonUp-Qt, vm.max_map_count, ntsync; on
-  macOS, Rosetta 2, Steam, Heroic, Epic Games, GOG Galaxy, Prism Launcher and the Metal frame counter.
+- Search in every menu and checklist: type a word (wifi, disk, dns, update…), only the lines containing it stay,
+  whatever the accents or capitals; the end of the most likely word shows in grey, and Tab completes it. In the main
+  menu, it also finds each tool of the submenus, and each page and each command of the guide.
 
 </details>
 
