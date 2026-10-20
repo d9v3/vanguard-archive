@@ -45,6 +45,27 @@ regle!(
 );
 
 regle!(
+    "LNX-SSH-004",
+    Os::Linux,
+    125,
+    (
+        "ports renvoyés par SSH ouverts au réseau",
+        "SSH-forwarded ports open to the network"
+    ),
+    &[],
+    || ports_ssh().into_iter().collect()
+);
+
+regle!(
+    "LNX-SSH-005",
+    Os::Linux,
+    126,
+    ("réglages secondaires de sshd", "secondary sshd settings"),
+    &[],
+    || ssh_secondaire().into_iter().collect()
+);
+
+regle!(
     "LNX-SSH-002",
     Os::Linux,
     130,
@@ -243,6 +264,18 @@ regle!(
 );
 
 regle!(
+    "LNX-PRV-004",
+    Os::Linux,
+    335,
+    (
+        "dossiers de commandes modifiables par d'autres",
+        "command folders writable by others"
+    ),
+    &[],
+    || dossiers_de_commandes().into_iter().collect()
+);
+
+regle!(
     "LNX-MAJ-006",
     Os::Linux,
     340,
@@ -258,6 +291,18 @@ regle!(
     ("comptes aux droits root cachés", "hidden accounts with root rights"),
     &[],
     || vec![comptes()]
+);
+
+regle!(
+    "LNX-CPT-002",
+    Os::Linux,
+    351,
+    (
+        "blocage des comptes et longueur des mots de passe (PAM)",
+        "account lockout and password length (PAM)"
+    ),
+    &[],
+    || pam()
 );
 
 regle!(

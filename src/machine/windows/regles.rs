@@ -125,6 +125,18 @@ regle!(
 );
 
 regle!(
+    "WIN-CPT-002",
+    Os::Windows,
+    211,
+    (
+        "règle des mots de passe des comptes locaux",
+        "local account password policy"
+    ),
+    &[],
+    || politique().into_iter().collect()
+);
+
+regle!(
     "WIN-PRS-001",
     Os::Windows,
     220,

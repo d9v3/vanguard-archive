@@ -35,9 +35,9 @@ fn entete() -> [u8; 17] {
     std::hint::black_box(ENTETE_DECALE).map(|o| o - 1)
 }
 
-/// Au-delà, un fichier n'est pas un programme de Vanguard (un release fait une quinzaine de Mo, un debug 130) : il
-/// n'est pas lu, la mémoire ne se remplit pas.
-const TAILLE_MAX: u64 = 256 << 20;
+/// Au-delà, un fichier n'est pas un programme de Vanguard (un release fait environ 25 Mo avec YARA-X, un debug
+/// un peu plus de 200) : il n'est pas lu, la mémoire ne se remplit pas.
+const TAILLE_MAX: u64 = 512 << 20;
 
 const NOM: &str = if cfg!(windows) { "vanguard.exe" } else { "vanguard" };
 

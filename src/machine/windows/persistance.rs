@@ -5,7 +5,7 @@ use crate::commande::decouper_commande;
 
 /// Pourquoi ce programme lancé automatiquement (tâche planifiée, clé Run, dossier Démarrage) ressemble à un
 /// malware, ou `None`. Seules des formes précises sont retenues : les programmes installés normalement n'y tombent pas.
-fn lancement_suspect(exe: &str, args: &str) -> Option<&'static str> {
+pub(super) fn lancement_suspect(exe: &str, args: &str) -> Option<&'static str> {
     let exe = exe.trim().trim_matches('"').to_lowercase().replace('/', "\\");
     let args = args.to_lowercase();
     let tout = format!("{exe} {args}");

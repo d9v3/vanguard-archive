@@ -1,5 +1,5 @@
 //! Privilèges sous macOS : fichiers de mots de passe et de jetons lisibles par d'autres comptes, sudo sans mot de
-//! passe (vérifiés comme sous Linux : machine/unix.rs), compte root activé.
+//! passe, dossiers de commandes ouverts à tous (vérifiés comme sous Linux : machine/unix.rs), compte root activé.
 
 use std::process::Command;
 
@@ -69,6 +69,14 @@ pub(super) fn compte_root() -> Option<Constat> {
     } else {
         ok("Comptes", tr!("Compte root désactivé.", "Root account off."))
     })
+}
+
+/// Les dossiers de commandes du système. Seulement ceux ouverts à tous : Homebrew prend /usr/local/bin à son compte
+/// sur les Mac Intel, et sudo garde le PATH de la personne (machine/unix.rs).
+const DOSSIERS_DU_SYSTEME: &[&str] = &["/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin"];
+
+pub(super) fn dossiers_de_commandes() -> Option<Constat> {
+    crate::machine::unix::dossiers_de_commandes(DOSSIERS_DU_SYSTEME, &maison(), false)
 }
 
 #[cfg(test)]

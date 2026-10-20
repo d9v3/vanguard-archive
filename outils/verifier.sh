@@ -33,7 +33,22 @@ etape() {
   fi
 }
 
-clippy() { cargo clippy -q --all-targets --target "$1" -- -D warnings; }
+# YARA-X (par wasmtime) compile un petit fichier C : musl-gcc pour Linux, le gcc de MinGW pour Windows, clang pour les
+# cibles Mac, qu'il vise sans les outils d'Apple (outils/mac-entetes) ; clippy n'assemble jamais le programme.
+clippy() {
+  case $1 in
+    *-apple-darwin)
+      local v=${1//-/_}
+      env "CC_$v=clang" "CFLAGS_$v=-ffreestanding -nostdlibinc -I$PWD/outils/mac-entetes" \
+        cargo clippy -q --all-targets --target "$1" -- -D warnings ;;
+    *) cargo clippy -q --all-targets --target "$1" -- -D warnings ;;
+  esac
+}
+
+# Les compilateurs C qu'il faut ici, dits d'emblée plutôt qu'au milieu d'une compilation.
+for outil in musl-gcc x86_64-w64-mingw32-gcc clang; do
+  command -v "$outil" >/dev/null || echo "⚠ $outil manque (Arch : musl, mingw-w64-gcc, clang) : la compilation de YARA-X échouera."
+done
 
 tests_wine() {
   local prefixe resultat

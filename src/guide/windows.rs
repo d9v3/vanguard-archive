@@ -895,6 +895,88 @@ pub const PROGRAMMES: &[Programme] = &[
             ),
         ],
     },
+    Programme {
+        nom: "Get-NetConnectionProfile",
+        role: ("réseau public ou privé", "public or private network"),
+        executable: "",
+        commandes: &[
+            voir(
+                "Get-NetConnectionProfile",
+                "Chaque réseau : public (fermé aux autres appareils) ou privé.",
+                "Each network: public (closed to other devices) or private.",
+            ),
+            changer(
+                "Set-NetConnectionProfile -Name <nom> -NetworkCategory Public",
+                "Passe un réseau en public, plus sûr hors de chez soi (terminal administrateur).",
+                "Makes a network public, safer away from home (administrator terminal).",
+            ),
+        ],
+    },
+    Programme {
+        nom: "Get-SmbShare",
+        role: ("dossiers partagés", "shared folders"),
+        executable: "",
+        commandes: &[
+            voir(
+                "Get-SmbShare",
+                "Les dossiers partagés ; ceux finissant par $ sont ceux de Windows (administrateur).",
+                "Shared folders; those ending with $ are Windows' own (administrator).",
+            )
+            .sauf(Obstacle::Administrateur),
+            voir(
+                "Get-SmbShareAccess -Name <nom>",
+                "Qui peut ouvrir un partage, et avec quels droits (administrateur).",
+                "Who can open a share, and with which rights (administrator).",
+            )
+            .sauf(Obstacle::Administrateur),
+        ],
+    },
+    Programme {
+        nom: "Get-Tpm, tpm.msc",
+        role: ("puce de sécurité TPM", "TPM security chip"),
+        executable: "",
+        commandes: &[
+            voir(
+                "Get-Tpm",
+                "La puce TPM : présente, prête, activée (administrateur).",
+                "The TPM chip: present, ready, enabled (administrator).",
+            )
+            .sauf(Obstacle::Administrateur),
+            voir(
+                "tpm.msc",
+                "La console de la puce TPM, avec sa version.",
+                "The TPM chip console, with its version.",
+            )
+            .sauf(Obstacle::Fenetre),
+        ],
+    },
+    Programme {
+        nom: "Get-AuthenticodeSignature",
+        role: ("signature d'un programme", "a program's signature"),
+        executable: "",
+        commandes: &[voir(
+            "Get-AuthenticodeSignature <fichier> | Format-List",
+            "Qui a signé un programme, et si la signature est valide (Status : Valid).",
+            "Who signed a program, and whether the signature is valid (Status: Valid).",
+        )],
+    },
+    Programme {
+        nom: "cipher, mdsched",
+        role: ("espace libre, mémoire vive", "free space, memory"),
+        executable: "cipher",
+        commandes: &[
+            changer(
+                "cipher /w:C:\\",
+                "Écrase l'espace libre du disque C : ce qui a été effacé ne se récupère plus (long).",
+                "Overwrites drive C's free space: what was deleted can no longer be recovered (long).",
+            ),
+            changer(
+                "mdsched",
+                "Teste la mémoire vive au prochain redémarrage (Diagnostic de la mémoire Windows).",
+                "Tests the memory at the next restart (Windows Memory Diagnostic).",
+            ),
+        ],
+    },
 ];
 
 /// Les marches à suivre : chaque étape est une commande expliquée, dans l'ordre.

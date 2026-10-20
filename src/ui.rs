@@ -147,7 +147,7 @@ pub fn largeur_car(c: char) -> usize {
 /// octets (U+FEFF). Et ce qui rend un nom trompeur sans rien piloter : séparateurs de ligne et de paragraphe (U+2028,
 /// U+2029), trait d'union conditionnel (U+00AD), séparateur mongol (U+180E), étiquettes invisibles (U+E0000 à
 /// U+E007F). Le sélecteur de variante des émojis (U+FE0F) reste.
-fn piege(c: char) -> bool {
+pub(crate) fn piege(c: char) -> bool {
     matches!(
         u32::from(c),
         0x00..=0x1F

@@ -848,6 +848,24 @@ pub fn auditer(bavard: bool) -> Audit {
     a
 }
 
+/// Le bilan des seules règles que `garder` retient (d'après leur identifiant), tel que le système le montre : sans les
+/// alertes déclarées normales, qu'`auditer` rabaisse. Les traces le joignent sans les mises à jour, qui interrogent
+/// Internet et peuvent prendre des minutes.
+pub fn auditer_seulement(garder: impl Fn(&str) -> bool) -> Audit {
+    BILAN.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let verifications = regles::regles(regles::Os::actuel())
+        .into_iter()
+        .filter(|r| garder(r.id))
+        .map(regles::verification)
+        .collect();
+    let constats = en_parallele(verifications);
+    Audit {
+        systeme: os::NOM,
+        score: score(&constats),
+        constats,
+    }
+}
+
 /// Système, programmes, pilotes et firmware : tout ce qui doit être à jour (`vanguard maj`). `seulement` limite
 /// les longues recherches à ces catégories, pour revérifier ce qui vient d'être installé.
 pub fn mises_a_jour_completes(seulement: Option<&[&str]>) -> Vec<Constat> {

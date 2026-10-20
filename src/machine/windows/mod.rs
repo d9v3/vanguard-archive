@@ -12,14 +12,16 @@ use crate::ui::{resume, tr, trf, trp};
 mod comptes;
 mod durcissement;
 mod ecoute;
+mod evenements;
 mod exclusions;
 mod maj;
 mod persistance;
+mod portes;
 mod regles;
 mod services;
 mod verrouillage;
 
-use comptes::comptes;
+use comptes::{comptes, politique};
 use maj::signatures;
 pub use maj::{mises_a_jour_completes, pilote_fabricant};
 use persistance::persistance;
@@ -59,7 +61,7 @@ pub fn ps(script: &str) -> Option<String> {
 }
 
 /// Comme `ps`, avec un délai choisi : la recherche Windows Update ou winget peuvent prendre une minute ou deux.
-fn ps_delai(script: &str, secondes: u64) -> Option<String> {
+pub(crate) fn ps_delai(script: &str, secondes: u64) -> Option<String> {
     let complet =
         format!("[Console]::OutputEncoding=[Text.Encoding]::UTF8; $ErrorActionPreference='Stop'; {script}; '{FIN}'");
     // Début du script, pour retrouver lequel a échoué dans le journal.
@@ -120,7 +122,8 @@ const SCRIPT_COMPTES: &str = "try { Get-LocalUser | ForEach-Object { \"USR|$($_.
      try { $moi = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value; \
        Get-LocalUser | Where-Object { $_.Enabled -and $_.SID.Value -ne $moi -and $_.SID.Value -notmatch '-(500|501|503|504)$' } | \
        ForEach-Object { \"CPT|$(if ($_.LastLogon) { $_.LastLogon.ToString('yyyy-MM-dd') })|$($_.Name)\" }; 'CPT_FIN' } catch {}; \
-     try { Get-LocalGroupMember -SID 'S-1-5-32-544' | ForEach-Object { 'ADM|' + $_.Name }; 'ADM_FIN' } catch {}";
+     try { Get-LocalGroupMember -SID 'S-1-5-32-544' | ForEach-Object { 'ADM|' + $_.Name }; 'ADM_FIN' } catch {}; \
+     try { $p = [ADSI]\"WinNT://$env:COMPUTERNAME\"; 'POL|' + $p.MinPasswordLength.Value + '|' + $p.MaxBadPasswordsAllowed.Value; 'POL_FIN' } catch {}";
 
 /// La dernière lecture des comptes et son heure. Vidée au début de chaque bilan ; plus d'une minute, relue.
 static COMPTES: std::sync::Mutex<Option<(std::time::Instant, Option<String>)>> = std::sync::Mutex::new(None);

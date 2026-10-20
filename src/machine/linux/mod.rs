@@ -9,6 +9,8 @@ use super::{Audit, Constat, alerte, cles_ssh, impossible, ok, sortie};
 use crate::risk::{Niveau, info_port};
 use crate::{tr, trf, trw};
 
+mod algorithmes_ssh;
+pub(crate) mod dissimulation;
 mod docker;
 mod durcissement;
 mod maj;
@@ -729,6 +731,99 @@ fn ssh_serveur() -> Constat {
     )
 }
 
+/// Ports renvoyés par SSH ouverts à tout le réseau : avec « GatewayPorts yes » (ou « clientspecified »), une personne
+/// connectée en SSH ouvre sur cet ordinateur un port que tout le réseau joint, et que le pare-feu ne connaît pas.
+/// Par défaut, sshd ne les ouvre qu'à cet ordinateur lui-même. Un rechargement de sshd ne coupe aucune connexion en
+/// cours.
+fn juger_ports_ssh(conf: &str) -> Option<Constat> {
+    let valeur = valeur_sshd(conf, "GatewayPorts")?;
+    matches!(valeur.as_str(), "yes" | "clientspecified").then(|| {
+        alerte(
+            "SSH",
+            Niveau::Moyen,
+            trf!(
+                "« GatewayPorts {valeur} » : un port renvoyé par SSH peut s'ouvrir à tout le réseau, sans passer par le pare-feu.",
+                "“GatewayPorts {valeur}”: a port forwarded over SSH can open to the whole network, bypassing the firewall."
+            ),
+        )
+        .corriger(
+            tr!(
+                "Garder les ports renvoyés pour cet ordinateur seul",
+                "Keep forwarded ports for this computer only"
+            ),
+            &[
+                &format!("echo 'GatewayPorts no' | sudo tee -a {SSHD_VANGUARD} >/dev/null"),
+                RECHARGER_SSHD,
+            ],
+        )
+    })
+}
+
+/// Réglages secondaires de sshd, une information : l'affichage X11 renvoyé (« X11Forwarding yes », que Debian et
+/// Ubuntu posent) ouvre à chaque client un passage de plus vers cet ordinateur ; plus de 6 essais de mot de passe par
+/// connexion (« MaxAuthTries », 6 par défaut) laissent deviner plus vite. Seulement des valeurs écrites : celles par
+/// défaut d'OpenSSH sont sûres. Couper X11 gêne qui lance ici des fenêtres par « ssh -X » : la correction se montre
+/// avant.
+fn juger_ssh_secondaire(conf: &str) -> Option<Constat> {
+    let x11 = valeur_sshd(conf, "X11Forwarding").as_deref() == Some("yes");
+    let essais = valeur_sshd(conf, "MaxAuthTries")
+        .and_then(|v| v.parse::<u32>().ok())
+        .filter(|n| *n > 6);
+    if !x11 && essais.is_none() {
+        return None;
+    }
+    // Une commande écrite en toutes lettres par réglage : rien de variable n'entre dans sudo.
+    let mut constats = Vec::new();
+    let mut commandes = Vec::new();
+    if x11 {
+        constats.push(tr!("affichage X11 renvoyé", "X11 display forwarded").to_string());
+        commandes.push(format!(
+            "echo 'X11Forwarding no' | sudo tee -a {SSHD_VANGUARD} >/dev/null"
+        ));
+    }
+    if let Some(n) = essais {
+        constats.push(trf!(
+            "{n} essais de mot de passe par connexion",
+            "{n} password attempts per connection"
+        ));
+        // La valeur par défaut d'OpenSSH, pas moins : chaque clé refusée de l'agent SSH compte pour un essai.
+        commandes.push(format!(
+            "echo 'MaxAuthTries 6' | sudo tee -a {SSHD_VANGUARD} >/dev/null"
+        ));
+    }
+    commandes.push(RECHARGER_SSHD.to_string());
+    Some(
+        alerte(
+            "SSH",
+            Niveau::Info,
+            trf!(
+                "Réglages de sshd à resserrer : {}.",
+                "sshd settings to tighten: {}.",
+                constats.join(", ")
+            ),
+        )
+        .corriger(
+            tr!("Les resserrer (le réglage de sshd)", "Tighten them (sshd's setting)"),
+            &commandes,
+        ),
+    )
+}
+
+fn ssh_secondaire() -> Option<Constat> {
+    if !systemd() || !sshd_actif() {
+        return None;
+    }
+    juger_ssh_secondaire(&configuration_sshd()?)
+}
+
+fn ports_ssh() -> Option<Constat> {
+    // Configuration illisible : la règle du serveur SSH le dit déjà.
+    if !systemd() || !sshd_actif() {
+        return None;
+    }
+    juger_ports_ssh(&configuration_sshd()?)
+}
+
 /// Quelqu'un essaie-t-il de deviner un mot de passe SSH ? Tentatives ratées des dernières 24 h, dans le journal.
 fn ssh_echecs() -> Option<Constat> {
     if !systemd() || !sshd_actif() {
@@ -784,18 +879,48 @@ fn ssh_echecs() -> Option<Constat> {
             "{tentatives} failed SSH login attempt(s) in 24 h, from {n} address(es){origine}. Harmless as long as only keys are accepted."
         )
     };
-    let mut conseil = trf!(
-        "Bloquer les adresses qui insistent : sshguard (ou fail2ban), à régler avec ton pare-feu selon la documentation de ta distribution : {}",
-        "Block the addresses that keep trying: sshguard (or fail2ban), to set up with your firewall following your distribution's documentation: {}",
-        commande_installation("sshguard")
-    );
-    if internet > 0 {
-        conseil += tr!(
-            ". Si tu n'as pas besoin de SSH depuis l'extérieur, retire la redirection du port sur ta box",
-            ". If you do not need SSH from outside, remove the port forwarding on your router"
-        );
+    let bloqueur = BLOQUEURS.into_iter().find(|s| service_actif(s));
+    let texte = match bloqueur {
+        Some(b) => format!(
+            "{texte} {}",
+            trf!(
+                "{b} bloque déjà les adresses qui insistent.",
+                "{b} already blocks the addresses that keep trying."
+            )
+        ),
+        None => texte,
+    };
+    let constat = alerte("SSH", niveau, texte);
+    Some(match conseil_echecs_ssh(bloqueur.is_some(), internet > 0) {
+        Some(conseil) => constat.manuel(&conseil, &[]),
+        None => constat,
+    })
+}
+
+/// Les programmes qui bloquent les adresses qui insistent, lus dans le journal : fail2ban, sshguard, CrowdSec.
+const BLOQUEURS: [&str; 3] = ["fail2ban", "sshguard", "crowdsec"];
+
+/// Le conseil après des tentatives ratées : installer un bloqueur s'il n'y en a pas, et fermer le port vers Internet
+/// s'il y est ouvert. Avec un bloqueur et rien venu d'Internet, il n'y a rien de plus à faire.
+fn conseil_echecs_ssh(bloqueur: bool, internet: bool) -> Option<String> {
+    let installer = (!bloqueur).then(|| {
+        trf!(
+            "Bloquer les adresses qui insistent : sshguard (ou fail2ban), à régler avec ton pare-feu selon la documentation de ta distribution : {}",
+            "Block the addresses that keep trying: sshguard (or fail2ban), to set up with your firewall following your distribution's documentation: {}",
+            commande_installation("sshguard")
+        )
+    });
+    let fermer = internet.then(|| {
+        tr!(
+            "Si tu n'as pas besoin de SSH depuis l'extérieur, retire la redirection du port sur ta box",
+            "If you do not need SSH from outside, remove the port forwarding on your router"
+        )
+        .to_string()
+    });
+    match (installer, fermer) {
+        (Some(i), Some(f)) => Some(format!("{i}. {f}")),
+        (i, f) => i.or(f),
     }
-    Some(alerte("SSH", niveau, texte).manuel(&conseil, &[]))
 }
 
 /// Tentatives de connexion SSH ratées dans le journal de sshd : (nombre, adresses d'origine). Une tentative laisse
@@ -1734,6 +1859,39 @@ pas-un-uuid;rm -rf ~:802-11-wireless:yes:Piège
             Paquets::Zypper.commande_retrait(false, None, "x"),
             "sudo zypper --non-interactive remove x"
         );
+    }
+
+    #[test]
+    fn reglages_secondaires_de_sshd() {
+        assert!(juger_ssh_secondaire("").is_none());
+        assert!(juger_ssh_secondaire("X11Forwarding no\nMaxAuthTries 6\n").is_none());
+        let c = juger_ssh_secondaire("X11Forwarding yes\nMaxAuthTries 10\n").unwrap();
+        assert_eq!(c.probleme, Some(Niveau::Info));
+        let commandes = c.correctif.unwrap().commandes;
+        assert!(commandes[0].starts_with("echo 'X11Forwarding no' | sudo tee -a"));
+        assert!(commandes[1].starts_with("echo 'MaxAuthTries 6' | sudo tee -a"));
+        assert_eq!(commandes[2], RECHARGER_SSHD);
+    }
+
+    #[test]
+    fn conseil_selon_le_bloqueur() {
+        // Sans bloqueur : l'installer ; avec, rien de plus, sauf fermer le port ouvert vers Internet.
+        assert!(conseil_echecs_ssh(false, false).unwrap().contains("sshguard"));
+        assert!(conseil_echecs_ssh(true, false).is_none());
+        let internet = conseil_echecs_ssh(true, true).unwrap();
+        assert!(!internet.contains("sshguard") && internet.contains("box"));
+        let tout = conseil_echecs_ssh(false, true).unwrap();
+        assert!(tout.contains("sshguard") && tout.contains("box"));
+    }
+
+    #[test]
+    fn ports_renvoyes_par_ssh() {
+        assert!(juger_ports_ssh("").is_none() && juger_ports_ssh("GatewayPorts no\n").is_none());
+        for ouvert in ["GatewayPorts yes\n", "gatewayports=clientspecified\n"] {
+            let c = juger_ports_ssh(ouvert).unwrap();
+            assert_eq!(c.probleme, Some(Niveau::Moyen));
+            assert!(c.correctif.unwrap().commandes[0].contains("'GatewayPorts no'"));
+        }
     }
 
     #[test]

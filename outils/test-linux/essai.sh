@@ -165,7 +165,7 @@ verifier "antivirus : fichier laissé en place (quarantaine refusée)" test -f "
 section "Fichiers-pièges, listes noires, YARA, ce que Vanguard a appris (dossier personnel jetable)"
 # Les pièges vont dans Documents et Images : jamais ceux de la maison.
 MAISON="$BAC/maison"
-mkdir -p "$MAISON/Documents" "$MAISON/Images" "$BAC/yara/moteur" "$BAC/yara/dossier"
+mkdir -p "$MAISON/Documents" "$MAISON/Images" "$BAC/yara/dossier"
 lancer_maison() { HOME="$MAISON" XDG_CONFIG_HOME="$MAISON/.config" XDG_DATA_HOME="$MAISON/.local/share" lancer "$@"; }
 lancer_maison pieges-pose 60 'o\n' pieges
 verifier "pièges : 4 posés (Documents, Images)" test "$(find "$MAISON" -name '!Vanguard*' | wc -l)" = 4
@@ -181,20 +181,14 @@ verifier "pièges : tous retirés" test "$(find "$MAISON" -name '!Vanguard*' | w
 lancer_maison listes-noires 60 'n\n' listes-noires
 verifier "listes noires : refus respecté, rien envoyé" bash -c "grep -q \"Rien n'a été envoyé\" '$RES/listes-noires.txt' && ! grep -q 'Adresse publique' '$RES/listes-noires.txt'"
 
-# Faux moteur YARA en tête du PATH : une version, puis une correspondance ; il garde ses arguments.
-cat >"$BAC/yara/moteur/yara" <<EOF
-#!/bin/sh
-[ "\$1" = --version ] && { echo 4.5.4; exit 0; }
-echo "\$@" >"$BAC/yara/arguments.txt"
-for d; do :; done
-echo "Win32_Ransomware_Essai \$d/note.txt"
-EOF
-chmod +x "$BAC/yara/moteur/yara"
+# YARA-X est dans le programme : un dossier sans danger (un faux programme « MZ », un texte) est lu en entier, rien n'y
+# correspond, et aucun moteur n'est cherché ni proposé.
 echo "fichier de l'essai" >"$BAC/yara/dossier/note.txt"
-PATH="$BAC/yara/moteur:$PATH" lancer_maison yara 60 '' yara "$BAC/yara/dossier"
-verifier "yara : correspondance montrée avec sa famille" grep -q 'rançongiciel (Win32_Ransomware_Essai)' "$RES/yara.txt"
-verifier "yara : règles passées au moteur puis effacées" bash -c "f=\$(grep -o '[^ ]*reversinglabs.yara' '$BAC/yara/arguments.txt') && [ ! -e \"\$f\" ]"
-verifier "yara : fichier laissé en place (lecture seule)" test -f "$BAC/yara/dossier/note.txt"
+printf 'MZ\220\000 programme sans danger' >"$BAC/yara/dossier/outil.exe"
+lancer_maison yara 120 '' yara "$BAC/yara/dossier"
+verifier "yara : dossier lu en entier, rien trouvé" grep -q 'Aucun fichier ne correspond aux 308 règles' "$RES/yara.txt"
+verifier "yara : aucun moteur à installer" bash -c "! grep -qiE 'installer|winget' '$RES/yara.txt'"
+verifier "yara : fichiers laissés en place (lecture seule)" test -f "$BAC/yara/dossier/note.txt" -a -f "$BAC/yara/dossier/outil.exe"
 
 lancer_maison appris 60 '' appris
 verifier "appris : aucun choix enregistré" grep -q "Rien pour l'instant" "$RES/appris.txt"

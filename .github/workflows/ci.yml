@@ -44,9 +44,9 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
-      # binutils de MinGW seulement : sans gcc-mingw-w64, son préprocesseur, windres ne compile pas l'icône et le
-      # manifeste, et build.rs le dit d'un avertissement (« ressources Windows non intégrées »), sans effet sur
-      # clippy. Le travail « reproductible », qui compile le vrai .exe, installe gcc-mingw-w64.
+      # Compilateurs C : YARA-X (par wasmtime) compile un petit fichier C pour chaque cible ; musl-gcc pour Linux, le
+      # gcc de MinGW pour Windows (et le préprocesseur de windres, pour l'icône et le manifeste), clang pour les cibles
+      # Mac, qu'il vise sans les outils d'Apple (outils/mac-entetes).
       - name: Rust à jour, cibles et outils de compilation croisée
         run: |
           rustup update stable
@@ -54,7 +54,7 @@ jobs:
           rustup component add rustfmt clippy
           rustup target add x86_64-unknown-linux-musl x86_64-pc-windows-gnu aarch64-apple-darwin x86_64-apple-darwin
           sudo apt-get update -qq
-          sudo apt-get install -y -qq musl-tools binutils-mingw-w64-x86-64
+          sudo apt-get install -y -qq musl-tools gcc-mingw-w64-x86-64 clang
       # Actions venues d'autres que GitHub : épinglées par leur commit. Une étiquette (v2) se déplace ; si leur dépôt était
       # piraté, une version piégée toucherait ce que compile ce travail. À mettre à jour à la main (le commentaire dit la
       # version).
@@ -63,9 +63,15 @@ jobs:
         run: cargo fmt --check
       - name: Clippy, zéro remarque, sur les quatre cibles
         run: |
+          entetes="$PWD/outils/mac-entetes"
           for c in x86_64-unknown-linux-musl x86_64-pc-windows-gnu aarch64-apple-darwin x86_64-apple-darwin; do
             echo "::group::$c"
-            cargo clippy --all-targets --target "$c" -- -D warnings
+            v=${c//-/_}
+            case $c in
+              *-apple-darwin) env "CC_$v=clang" "CFLAGS_$v=-ffreestanding -nostdlibinc -I$entetes" \
+                cargo clippy --all-targets --target "$c" -- -D warnings ;;
+              *) cargo clippy --all-targets --target "$c" -- -D warnings ;;
+            esac
             echo "::endgroup::"
           done
       # .cargo/config.toml vise la cible musl : « cargo test » teste la version qui part sur la clé.

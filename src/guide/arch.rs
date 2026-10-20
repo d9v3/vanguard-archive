@@ -3,7 +3,7 @@
 
 use super::{Programme, changer, voir};
 
-pub const PROGRAMMES: &[Programme] = &[PACMAN, YAY, CONTRIB, NOYAU, super::linux::UFW];
+pub const PROGRAMMES: &[Programme] = &[PACMAN, YAY, CONTRIB, NOYAU, super::linux::UFW, SBCTL];
 
 /// Les marches à suivre : chaque étape est une commande expliquée, dans l'ordre.
 pub const PAS_A_PAS: &[Programme] = &[
@@ -482,6 +482,29 @@ const NOYAU: Programme = Programme {
             "sudo pacman -S linux-lts",
             "Installe un second noyau, au long cours : un secours si le noyau à jour ne démarre plus.",
             "Installs a second, long-term kernel: a fallback if the updated kernel no longer boots.",
+        ),
+    ],
+};
+
+const SBCTL: Programme = Programme {
+    nom: "sbctl",
+    role: ("Secure Boot sur Arch", "Secure Boot on Arch"),
+    executable: "sbctl",
+    commandes: &[
+        voir(
+            "sudo sbctl status",
+            "Secure Boot : actif ou non, mode configuration, clés installées.",
+            "Secure Boot: on or off, setup mode, keys installed.",
+        ),
+        voir(
+            "sudo sbctl verify",
+            "Les fichiers de démarrage : signés ou non.",
+            "Boot files: signed or not.",
+        ),
+        changer(
+            "sudo sbctl sign -s <fichier>",
+            "Signe un fichier de démarrage, et le resignera à chaque mise à jour.",
+            "Signs a boot file, and will sign it again at each update.",
         ),
     ],
 };

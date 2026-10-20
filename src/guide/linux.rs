@@ -57,6 +57,16 @@ pub const COMMUNS: &[Programme] = &[
                 "Ce qui ralentit le démarrage, du plus lent au plus rapide.",
                 "What slows down boot, slowest first.",
             ),
+            voir(
+                "systemd-analyze security",
+                "L'exposition de chaque service : plus la note est haute, moins il est enfermé.",
+                "Each service's exposure: the higher the score, the less it is confined.",
+            ),
+            voir(
+                "systemd-analyze security <service>",
+                "Le détail pour un service : ce qui le protège, ce qui lui manque.",
+                "The details for one service: what protects it, what it lacks.",
+            ),
         ],
     },
     Programme {
@@ -1126,6 +1136,141 @@ pub const COMMUNS: &[Programme] = &[
                 "sudo dkms autoinstall",
                 "Les reconstruit pour le noyau actuel.",
                 "Rebuilds them for the current kernel.",
+            ),
+        ],
+    },
+    Programme {
+        nom: "lynis",
+        role: ("audit de sécurité complet", "full security audit"),
+        executable: "lynis",
+        commandes: &[
+            voir(
+                "sudo lynis audit system --quick",
+                "Passe tout le système en revue ; avertissements et suggestions à la fin.",
+                "Reviews the whole system; warnings and suggestions at the end.",
+            ),
+            voir(
+                "sudo grep -E '^(warning|suggestion)' /var/log/lynis-report.dat",
+                "Les avertissements et suggestions du dernier audit, à relire.",
+                "The warnings and suggestions of the latest audit, to read again.",
+            ),
+            voir(
+                "sudo lynis show details <id>",
+                "Le détail d'un test cité par l'audit (SSH-7408…).",
+                "The details of a test named by the audit (SSH-7408…).",
+            ),
+        ],
+    },
+    Programme {
+        nom: "getcap",
+        role: ("droits spéciaux des programmes", "programs' special rights"),
+        executable: "getcap",
+        commandes: &[
+            voir(
+                "find / -xdev -perm -4000 -type f 2>/dev/null",
+                "Les programmes qui tournent avec les droits de leur propriétaire (SUID), root le plus souvent.",
+                "Programs that run with their owner's rights (SUID), most often root.",
+            ),
+            voir(
+                "getcap -r /usr /opt 2>/dev/null",
+                "Les programmes dotés de capacités : une partie des droits de root.",
+                "Programs given capabilities: part of root's rights.",
+            ),
+        ],
+    },
+    Programme {
+        nom: "faillock",
+        role: ("comptes bloqués", "locked accounts"),
+        executable: "faillock",
+        commandes: &[
+            voir(
+                "sudo faillock --user <utilisateur>",
+                "Les mots de passe ratés qui comptent pour bloquer ce compte.",
+                "The failed passwords that count toward locking this account.",
+            ),
+            changer(
+                "sudo faillock --user <utilisateur> --reset",
+                "Débloque un compte bloqué après trop de mots de passe faux.",
+                "Unlocks an account locked after too many wrong passwords.",
+            ),
+        ],
+    },
+    Programme {
+        nom: "clamscan, freshclam",
+        role: ("antivirus ClamAV", "ClamAV antivirus"),
+        executable: "clamscan",
+        commandes: &[
+            changer(
+                "sudo freshclam",
+                "Met à jour les signatures de virus (le service clamav-freshclam le fait déjà s'il tourne).",
+                "Updates the virus signatures (the clamav-freshclam service already does if it runs).",
+            ),
+            voir(
+                "clamscan -r -i <dossier>",
+                "Cherche des virus dans un dossier ; seuls les fichiers infectés s'affichent.",
+                "Scans a folder for viruses; only infected files are shown.",
+            ),
+            voir(
+                "clamscan -i <fichier>",
+                "Un seul fichier, par exemple un téléchargement.",
+                "A single file, for example a download.",
+            ),
+        ],
+    },
+    Programme {
+        nom: "gpg",
+        role: ("signatures des téléchargements", "download signatures"),
+        executable: "gpg",
+        commandes: &[
+            voir(
+                "gpg --verify <fichier>.sig <fichier>",
+                "Vérifie qu'un téléchargement (image ISO…) est bien signé par son auteur.",
+                "Checks that a download (ISO image…) is really signed by its author.",
+            ),
+            changer(
+                "gpg --recv-keys <clé>",
+                "Récupère la clé publique de l'auteur ; son identifiant est donné sur le site du projet.",
+                "Fetches the author's public key; its identifier is given on the project's site.",
+            ),
+            voir(
+                "gpg --list-keys",
+                "Les clés publiques gardées.",
+                "The public keys kept.",
+            ),
+        ],
+    },
+    Programme {
+        nom: "wg",
+        role: ("tunnels VPN WireGuard", "WireGuard VPN tunnels"),
+        executable: "wg",
+        commandes: &[
+            voir(
+                "sudo wg show",
+                "Les tunnels ouverts : pairs, dernier contact, données échangées.",
+                "Open tunnels: peers, latest contact, data exchanged.",
+            ),
+            changer(
+                "sudo wg-quick up <interface>",
+                "Ouvre le tunnel décrit dans /etc/wireguard/<interface>.conf.",
+                "Opens the tunnel described in /etc/wireguard/<interface>.conf.",
+            ),
+            changer("sudo wg-quick down <interface>", "Le ferme.", "Closes it."),
+        ],
+    },
+    Programme {
+        nom: "openssl",
+        role: ("certificats d'un site", "a site's certificates"),
+        executable: "openssl",
+        commandes: &[
+            voir(
+                "openssl s_client -connect <site>:443 -brief </dev/null",
+                "Le chiffrement d'un site, et si son certificat se vérifie.",
+                "A site's encryption, and whether its certificate checks out.",
+            ),
+            voir(
+                "openssl x509 -in <fichier> -noout -subject -issuer -dates",
+                "Un certificat enregistré : pour qui, par qui, jusqu'à quand.",
+                "A saved certificate: for whom, by whom, until when.",
             ),
         ],
     },

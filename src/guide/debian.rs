@@ -3,7 +3,16 @@
 
 use super::{Obstacle, Programme, changer, voir};
 
-pub const PROGRAMMES: &[Programme] = &[APT, DPKG, SNAP, super::linux::UFW, APPARMOR, VERSIONS, AUTO];
+pub const PROGRAMMES: &[Programme] = &[
+    APT,
+    DPKG,
+    SNAP,
+    super::linux::UFW,
+    APPARMOR,
+    VERSIONS,
+    AUTO,
+    NEEDRESTART,
+];
 
 /// Les marches à suivre : chaque étape est une commande expliquée, dans l'ordre.
 pub const PAS_A_PAS: &[Programme] = &[
@@ -553,4 +562,15 @@ const AUTO: Programme = Programme {
             "Turns automatic security updates on.",
         ),
     ],
+};
+
+const NEEDRESTART: Programme = Programme {
+    nom: "needrestart",
+    role: ("services à relancer", "services to restart"),
+    executable: "needrestart",
+    commandes: &[voir(
+        "sudo needrestart -r l",
+        "Les services et le noyau à relancer après des mises à jour, sans rien relancer.",
+        "Services and kernel to restart after updates, without restarting anything.",
+    )],
 };

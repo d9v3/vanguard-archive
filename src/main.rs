@@ -39,6 +39,7 @@ mod reseau;
 mod risk;
 mod sauvegarde;
 mod selection;
+mod traces;
 mod ui;
 mod verifier_cle;
 
@@ -243,6 +244,12 @@ enum Commande {
     /// supprimer pour de bon.
     #[command(visible_alias = "quarantine")]
     Quarantaine,
+    /// Secrets dans l'historique des projets git du dossier personnel (mots de passe, clés d'API, jetons), cherchés par
+    /// Vanguard, et aussi par gitleaks s'il est installé. Aucun secret n'est affiché. Lecture seule.
+    Secrets,
+    /// Failles connues des images Docker ou Podman de cet ordinateur, par trivy s'il est installé. Lecture seule.
+    #[command(visible_alias = "containers")]
+    Conteneurs,
     /// Sauvegarde la base des appareils et l'état de la surveillance dans un fichier JSON.
     #[command(visible_alias = "backup")]
     Sauvegarder {
@@ -338,6 +345,15 @@ enum Commande {
     /// Les règles du bilan déclarées pour ce système : identifiant stable, sujet, références de durcissement.
     #[command(visible_alias = "rules")]
     Regles,
+    /// Collecter les traces après une infection, avant de nettoyer : processus, connexions, ce qui se lance tout seul,
+    /// comptes, journaux des 7 derniers jours et fichiers récents, dans un dossier daté (LISEZMOI, empreintes SHA-256).
+    /// Lecture seule ; rien ne part sur Internet.
+    #[command(visible_alias = "evidence")]
+    Traces {
+        /// Le dossier où créer traces-AAAAMMJJ-HHMMSS (par défaut : la clé VANGUARD si Vanguard tourne depuis elle,
+        /// sinon le dossier de Vanguard de l'ordinateur).
+        dossier: Option<std::path::PathBuf>,
+    },
     /// Dépanner pas à pas : pas d'Internet, Wi-Fi qui coupe, ordinateur lent, pas de son, imprimante, disque plein ;
     /// après une infection, nouvel ordinateur, ordinateur qui part (vente, don).
     #[command(visible_alias = "troubleshoot")]
@@ -789,6 +805,8 @@ enum Action {
     Lien,
     VerifierFichier,
     Quarantaine,
+    SecretsGit,
+    Conteneurs,
     Logiciels,
     Gaming,
     Nettoyer,
@@ -975,6 +993,15 @@ const OUTILS: &[Outil] = &[
         titre: ["Quarantaine : remettre un fichier", "Quarantine: restore a file"],
         precision: ["isolés, remis à l'identique", "isolated, put back exactly"],
         mots: "quarantaine quarantine isolé isolated faux positif false positive remettre restore restaurer" },
+    Outil { action: Action::SecretsGit, groupe: Some(Groupe::Protection), lettre: "",
+        titre: ["Secrets dans les projets git", "Secrets in git projects"],
+        precision: ["mots de passe et clés oubliés", "forgotten passwords and keys"],
+        mots: "secrets git gitleaks clé key api jeton token mot de passe password historique history dépôt \
+               repository fuite leak" },
+    Outil { action: Action::Conteneurs, groupe: Some(Groupe::Protection), lettre: "",
+        titre: ["Failles des images Docker", "Flaws in Docker images"],
+        precision: ["failles connues (trivy)", "known flaws (trivy)"],
+        mots: "docker podman conteneur container image trivy faille vulnerability cve" },
     Outil { action: Action::Logiciels, groupe: Some(Groupe::Installer), lettre: "l",
         titre: ["Logiciels", "Software"], precision: ["les meilleurs, par catégorie", "the best ones, by category"],
         mots: "apps programmes programs installer install firefox vlc libreoffice" },
@@ -1297,6 +1324,8 @@ async fn executer(s: &mut Session, action: Action) {
         Action::Lien => protection::lien::verifier(None),
         Action::VerifierFichier => protection::telechargement::verifier(None, None),
         Action::Quarantaine => protection::quarantaine::menu(),
+        Action::SecretsGit => protection::secrets_git::analyser(),
+        Action::Conteneurs => protection::conteneurs::analyser(),
         Action::Logiciels => logiciels::menu(),
         Action::Gaming => gaming::menu(),
         Action::Nettoyer => nettoyer::menu(),
@@ -1347,6 +1376,9 @@ const AIDES_EN: &[(&str, &str)] = &[
                        device is probably infected. After your consent: the lists see the address"),
     ("yara", "YARA scan: 308 rules for malware families (ReversingLabs), alongside the antivirus. Without a folder: \
               downloads, desktop, startup. Read-only"),
+    ("secrets", "Secrets in the history of the home folder's git projects (passwords, API keys, tokens), searched by \
+                 Vanguard, and also by gitleaks if installed. No secret is shown. Read-only"),
+    ("conteneurs", "Known flaws in this computer's Docker or Podman images, by trivy if installed. Read-only"),
     ("canaux", "Crowded Wi-Fi: nearby networks by channel, and the freest channel to set on the router. Read-only"),
     ("nat", "NAT type for gaming (open, moderate or strict), from two public servers (STUN). Read-only"),
     ("cameras", "Hidden cameras: on a rental's or someone's network, the devices that look like cameras. Read-only"),
@@ -1405,6 +1437,9 @@ const AIDES_EN: &[(&str, &str)] = &[
                           consent (never the other way)"),
     ("ordinateurs", "My computers: those where the VANGUARD key ran a check, their grade and remaining problems (on the \
      key's VANGUARDLOG partition)"),
+    ("traces", "Collect the traces after an infection, before cleaning up: processes, connections, what starts by \
+                itself, accounts, logs of the last 7 days and recent files, in a dated folder (README, SHA-256 \
+                fingerprints). Read-only; nothing goes to the Internet"),
     ("depanner", "Troubleshoot step by step: no Internet, Wi-Fi dropping, slow computer, no sound, printer, disk full; \
                   after an infection, new computer, computer leaving (sale, gift)"),
 ];
@@ -1446,6 +1481,8 @@ const OPTIONS_EN: &[(&str, &str, &str)] = &[
     ("verifier-copie", "dossier", "The disk or the folder of the copy (default: chosen among the plugged-in disks)"),
     ("verifier-cle", "dossier", "A folder of the drive or disk (default: chosen among the plugged-in disks)"),
     ("sauvegarde-auto", "annuler", "Remove the automatic backup set up by Vanguard (the backed-up files stay)"),
+    ("traces", "dossier", "The folder where traces-YYYYMMDD-HHMMSS is created (default: the VANGUARD key if Vanguard \
+                           runs from it, otherwise this computer's Vanguard folder)"),
     ("depanner", "sujet", "The subject: internet, wifi, slow, sound, printer, disk, infection, new, leaving (or words \
                              describing it)"),
 ];
@@ -1574,6 +1611,8 @@ async fn main() {
         }
         Some(Commande::CameraMicro) => protection::camera::afficher_tout(),
         Some(Commande::Quarantaine) => protection::quarantaine::menu(),
+        Some(Commande::Secrets) => protection::secrets_git::analyser(),
+        Some(Commande::Conteneurs) => protection::conteneurs::analyser(),
         Some(Commande::Isoler { fichier }) => protection::isoler::isoler(&fichier),
         Some(Commande::Pieges { retirer }) => protection::pieges::commande(retirer),
         Some(Commande::Durcir) => optimiser::protection(),
@@ -1615,6 +1654,11 @@ async fn main() {
         Some(Commande::SeMettreAJour) => mise_a_jour::commande(),
         Some(Commande::Regles) => machine::regles::afficher(),
         Some(Commande::Depanner { sujet }) => depanner::executer(&sujet.join(" ")),
+        Some(Commande::Traces { dossier }) => {
+            if !traces::commande(dossier.as_deref()) {
+                std::process::exit(1);
+            }
+        }
     }
 }
 

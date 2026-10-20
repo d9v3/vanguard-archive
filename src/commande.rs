@@ -74,6 +74,156 @@ pub fn lancer_en_anglais(commande: &mut Command, secondes: u64) -> Option<Result
     lancer(commande.env("LC_ALL", "C.UTF-8").env_remove("LANGUAGE"), secondes)
 }
 
+/// Quelle part d'une sortie trop longue garder.
+#[cfg(unix)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Garder {
+    /// Le début : la commande est arrêtée à la borne (journalctl --reverse, le plus récent d'abord).
+    #[cfg_attr(target_os = "macos", allow(dead_code))] // journalctl n'existe que sous Linux
+    Debut,
+    /// La fin : tout est lu, seuls les derniers octets restent (log show de macOS, le plus ancien d'abord).
+    Fin,
+}
+
+/// Ce que `lancer_vers` a écrit.
+#[cfg(unix)]
+pub struct Ecrit {
+    /// Code de retour (`None` : arrêtée par la borne, le délai ou un signal).
+    pub code: Option<i32>,
+    pub octets: u64,
+    /// La sortie dépassait la borne : une partie manque.
+    pub tronque: bool,
+    /// Le délai est passé : la commande a été arrêtée, ce qui était déjà écrit reste.
+    pub delai: bool,
+    pub erreurs: String,
+}
+
+/// Les morceaux à garder pour n'avoir que les `borne` derniers octets : les plus anciens tombent, et ce qui reste
+/// commence au début d'une ligne (une ligne coupée par le milieu se lirait de travers). Rend aussi s'il en est tombé.
+#[cfg(any(unix, test))]
+pub fn garder_la_fin(morceaux: std::collections::VecDeque<Vec<u8>>, borne: u64) -> (Vec<u8>, bool) {
+    let total: usize = morceaux.iter().map(Vec::len).sum();
+    let borne = usize::try_from(borne).unwrap_or(usize::MAX);
+    let mut tout: Vec<u8> = morceaux.into_iter().flatten().collect();
+    if total <= borne {
+        return (tout, false);
+    }
+    let mut debut = total - borne;
+    if debut > 0 && tout[debut - 1] != b'\n' {
+        debut = tout[debut..]
+            .iter()
+            .position(|&o| o == b'\n')
+            .map_or(total, |p| debut + p + 1);
+    }
+    tout.drain(..debut);
+    (tout, true)
+}
+
+/// Comme `lancer`, la sortie écrite dans `fichier` au fil de l'eau, `borne` octets au plus : un journal de plusieurs
+/// centaines de Mo ne passe pas tout entier par la mémoire. `Garder::Debut` arrête la commande à la borne ;
+/// `Garder::Fin` lit tout et ne garde que la fin (en mémoire, la borne au plus). Le délai passé, la commande est
+/// arrêtée et ce qui est déjà lu reste. `None` : la commande ne démarre pas, ou le fichier ne s'écrit pas.
+#[cfg(unix)]
+pub fn lancer_vers(
+    commande: &mut Command,
+    secondes: u64,
+    fichier: &std::fs::File,
+    borne: u64,
+    garder: Garder,
+) -> Option<Ecrit> {
+    use std::io::Write;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let mut enfant = commande
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .ok()?;
+    let mut flux = enfant.stdout.take()?;
+    let erreurs = lire_en_fond(enfant.stderr.take()?);
+    let mut vers = fichier.try_clone().ok()?;
+    let plein = std::sync::Arc::new(AtomicBool::new(false));
+    let plein_lu = plein.clone();
+    let (envoi, fini) = mpsc::channel();
+    std::thread::spawn(move || {
+        let mut tampon = vec![0u8; 64 << 10];
+        let (mut ecrits, mut tronque, mut ok) = (0u64, false, true);
+        let mut fin = std::collections::VecDeque::new();
+        let mut en_memoire = 0u64;
+        loop {
+            let n = match flux.read(&mut tampon) {
+                Ok(0) | Err(_) => break,
+                Ok(n) => n,
+            };
+            match garder {
+                Garder::Debut => {
+                    let reste = usize::try_from(borne.saturating_sub(ecrits)).unwrap_or(usize::MAX);
+                    let n_gardes = n.min(reste);
+                    ok &= vers.write_all(&tampon[..n_gardes]).is_ok();
+                    ecrits += n_gardes as u64;
+                    if n_gardes < n || !ok {
+                        tronque = n_gardes < n;
+                        plein_lu.store(true, Ordering::Relaxed);
+                        break;
+                    }
+                }
+                Garder::Fin => {
+                    fin.push_back(tampon[..n].to_vec());
+                    en_memoire += n as u64;
+                    // Les morceaux entièrement hors de la borne tombent tout de suite : la mémoire reste bornée.
+                    while fin
+                        .front()
+                        .is_some_and(|m: &Vec<u8>| en_memoire - m.len() as u64 >= borne)
+                    {
+                        en_memoire -= fin.pop_front().map_or(0, |m| m.len() as u64);
+                        tronque = true;
+                    }
+                }
+            }
+        }
+        if garder == Garder::Fin {
+            let (derniers, coupe) = garder_la_fin(fin, borne);
+            tronque |= coupe;
+            ok &= vers.write_all(&derniers).is_ok();
+            ecrits = derniers.len() as u64;
+        }
+        let _ = envoi.send((ecrits, tronque, ok));
+    });
+    let limite = Instant::now() + Duration::from_secs(secondes);
+    let mut pause = Duration::from_millis(1);
+    let mut delai = false;
+    let code = loop {
+        match enfant.try_wait() {
+            Ok(Some(statut)) => break statut.code(),
+            Ok(None) if plein.load(Ordering::Relaxed) => {
+                arreter(&mut enfant);
+                break None;
+            }
+            Ok(None) if Instant::now() < limite => {
+                std::thread::sleep(pause);
+                pause = (pause * 2).min(Duration::from_millis(50));
+            }
+            _ => {
+                delai = true;
+                arreter(&mut enfant);
+                break None;
+            }
+        }
+    };
+    // Après la fin, la lecture finit vite ; `Garder::Fin` écrit encore ce qu'il a gardé (la borne au plus).
+    let (octets, tronque, ok) = fini.recv_timeout(DELAI_LECTURE + Duration::from_secs(30)).ok()?;
+    if !ok {
+        return None;
+    }
+    Some(Ecrit {
+        code,
+        octets,
+        tronque,
+        delai,
+        erreurs: erreurs.recv_timeout(DELAI_LECTURE).unwrap_or_default(),
+    })
+}
+
 /// Arrête le programme et tout ce qu'il a lancé : sinon un sous-processus (winget sous PowerShell, un outil sous un
 /// script) continuerait en arrière-plan, avec ses verrous.
 pub fn arreter(enfant: &mut Child) {
@@ -744,5 +894,70 @@ mod tests_sh_chaine {
         let sans_sudo = "let c = format!(\"ls {nom}\");";
         assert_eq!(douteux(sans_sudo), []);
         assert!(!lance_sudo_ou_rm("format ce disque") && lance_sudo_ou_rm("a && rm -rf x"));
+    }
+}
+
+#[cfg(test)]
+mod tests_lancer_vers {
+    use super::*;
+
+    #[test]
+    fn la_fin_gardee_commence_a_une_ligne() {
+        let morceaux = |m: &[&str]| m.iter().map(|t| t.as_bytes().to_vec()).collect();
+        // Tout tient : rien ne tombe.
+        assert_eq!(
+            garder_la_fin(morceaux(&["a\nb", "\nc\n"]), 10),
+            (b"a\nb\nc\n".to_vec(), false)
+        );
+        // Dix octets au plus : « un\n » tombe, et « eux\n » aussi, coupée en plein milieu.
+        let (gardes, coupe) = garder_la_fin(morceaux(&["un\ndeux\n", "trois\n"]), 10);
+        assert!(coupe);
+        assert_eq!(gardes, b"trois\n".to_vec());
+        // La coupure tombe juste après un saut de ligne : la ligne suivante reste entière.
+        assert_eq!(garder_la_fin(morceaux(&["un\n", "deux\n"]), 5).0, b"deux\n".to_vec());
+        // Une seule ligne trop longue : rien ne reste plutôt qu'une ligne coupée.
+        assert_eq!(garder_la_fin(morceaux(&["abcdefghij"]), 4), (Vec::new(), true));
+    }
+
+    #[cfg(unix)]
+    fn fichier_jetable(nom: &str) -> (std::path::PathBuf, std::fs::File) {
+        let dossier = crate::reseau::dossier_local();
+        std::fs::create_dir_all(&dossier).unwrap();
+        let chemin = dossier.join(nom);
+        (chemin.clone(), std::fs::File::create(&chemin).unwrap())
+    }
+
+    /// Une sortie de 200 000 octets bornée à 1 000 : le début seul, la commande arrêtée ; ou la fin seule, en
+    /// commençant par une ligne entière.
+    #[cfg(unix)]
+    #[test]
+    fn sortie_bornee_dans_un_fichier() {
+        let (chemin, f) = fichier_jetable("debut.txt");
+        let mut c = Command::new("sh");
+        c.args(["-c", "i=0; while [ $i -lt 20000 ]; do echo ligne$i; i=$((i+1)); done"]);
+        let e = lancer_vers(&mut c, 30, &f, 1000, Garder::Debut).unwrap();
+        assert!(e.tronque && !e.delai && e.octets == 1000);
+        let texte = std::fs::read_to_string(&chemin).unwrap();
+        assert!(texte.starts_with("ligne0\nligne1\n") && texte.len() == 1000);
+
+        let (chemin, f) = fichier_jetable("fin.txt");
+        let mut c = Command::new("sh");
+        c.args(["-c", "i=0; while [ $i -lt 20000 ]; do echo ligne$i; i=$((i+1)); done"]);
+        let e = lancer_vers(&mut c, 30, &f, 1000, Garder::Fin).unwrap();
+        assert!(e.tronque && e.code == Some(0));
+        let texte = std::fs::read_to_string(&chemin).unwrap();
+        assert!(texte.ends_with("ligne19999\n") && texte.starts_with("ligne") && texte.len() <= 1000);
+
+        // Sous la borne : tout, sans troncature ; le délai passé, la commande est arrêtée et le début reste.
+        let (chemin, f) = fichier_jetable("court.txt");
+        let e = lancer_vers(Command::new("echo").arg("bonjour"), 10, &f, 1000, Garder::Debut).unwrap();
+        assert!(!e.tronque && e.code == Some(0));
+        assert_eq!(std::fs::read_to_string(&chemin).unwrap(), "bonjour\n");
+        let (chemin, f) = fichier_jetable("lent.txt");
+        let mut c = Command::new("sh");
+        c.args(["-c", "echo avant; sleep 30; echo apres"]);
+        let e = lancer_vers(&mut c, 1, &f, 1000, Garder::Debut).unwrap();
+        assert!(e.delai && e.code.is_none());
+        assert_eq!(std::fs::read_to_string(&chemin).unwrap(), "avant\n");
     }
 }

@@ -496,6 +496,47 @@ pub(super) fn juger_registre_distant(demarrage: Option<u32>) -> Option<Constat> 
     })
 }
 
+const WINHTTP: &str = r"SYSTEM\CurrentControlSet\Services\WinHttp\Parameters";
+
+/// WPAD : Windows cherche tout seul sur le réseau un fichier qui dit par où passer pour aller sur Internet. Dans un café
+/// ou un hôtel, n'importe quel appareil du Wi-Fi peut répondre et faire passer la navigation par lui (même famille
+/// d'attaques que LLMNR et NetBIOS). `DisableWpad` à 1 coupe la recherche pour WinHTTP, celle des services de Windows
+/// et de beaucoup de programmes ; un navigateur peut garder la sienne, selon le réglage « Détecter automatiquement les
+/// paramètres » du compte, dans un format que Vanguard ne réécrit pas : la correction le dit. Un proxy réglé à la
+/// main ou par une adresse PAC marche toujours. Sur un ordinateur d'entreprise
+/// (compte de domaine), le proxy vient souvent de WPAD : rien à dire.
+pub(super) fn juger_wpad(desactive: Option<u32>, domaine: bool) -> Option<Constat> {
+    (desactive != Some(1) && !domaine).then(|| {
+        alerte(
+            DURCI,
+            Niveau::Moyen,
+            tr!(
+                "Windows cherche son proxy tout seul sur le réseau (WPAD) : sur un Wi-Fi public, un autre appareil peut répondre et faire passer ta navigation par lui.",
+                "Windows looks for its proxy by itself on the network (WPAD): on public Wi-Fi, another device can answer and route your browsing through itself."
+            ),
+        )
+        .corriger(
+            tr!(
+                "Couper la recherche automatique du proxy de Windows (effective au prochain redémarrage) ; pour le navigateur, décoche aussi « Détecter automatiquement les paramètres » (Paramètres > Réseau > Proxy)",
+                "Turn off Windows' automatic proxy discovery (takes effect at the next restart); for the browser, also untick “Automatically detect settings” (Settings > Network > Proxy)"
+            ),
+            // Clé créée seulement si elle manque, comme pour LLMNR : « New-Item -Force » écraserait ses autres valeurs.
+            &[
+                "if (-not (Test-Path 'HKLM:\\SYSTEM\\CurrentControlSet\\Services\\WinHttp\\Parameters')) { New-Item -Path 'HKLM:\\SYSTEM\\CurrentControlSet\\Services\\WinHttp\\Parameters' -Force | Out-Null }",
+                "Set-ItemProperty -Path 'HKLM:\\SYSTEM\\CurrentControlSet\\Services\\WinHttp\\Parameters' -Name DisableWpad -Value 1 -Type DWord",
+            ],
+        )
+    })
+}
+
+/// Un compte de domaine (entreprise, école) : son domaine n'est pas le nom de l'ordinateur.
+fn compte_de_domaine() -> bool {
+    match (std::env::var("USERDOMAIN"), std::env::var("COMPUTERNAME")) {
+        (Ok(domaine), Ok(ordinateur)) => !domaine.eq_ignore_ascii_case(&ordinateur),
+        _ => false,
+    }
+}
+
 /// Client SMBv1 (pilote mrxsmb10) : installé et pas désactivé, Windows peut encore parler SMBv1 à un partage du
 /// réseau, un protocole sans protection contre l'interception. Absent sur Windows 11 ; le serveur SMBv1 est jugé à
 /// part (`smb1`).
@@ -931,6 +972,7 @@ pub(super) fn durcissement() -> Vec<Constat> {
         r"SYSTEM\CurrentControlSet\Services\mrxsmb10",
         "Start",
     )));
+    c.extend(juger_wpad(lire_dword(WINHTTP, "DisableWpad"), compte_de_domaine()));
     c.extend(juger_windows_update(
         lire_dword(r"SYSTEM\CurrentControlSet\Services\wuauserv", "Start"),
         lire_dword(r"SYSTEM\CurrentControlSet\Services\UsoSvc", "Start"),
@@ -1200,5 +1242,18 @@ mod tests {
             juger_pause(Some("2026-10-01T09:00:00Z"), "2026-10-19").is_none()
                 && juger_pause(None, "2026-10-19").is_none()
         );
+    }
+
+    #[test]
+    fn recherche_automatique_du_proxy() {
+        assert!(juger_wpad(Some(1), false).is_none());
+        // Compte de domaine : le proxy de l'entreprise vient souvent de WPAD.
+        assert!(juger_wpad(None, true).is_none());
+        for valeur in [None, Some(0)] {
+            let c = juger_wpad(valeur, false).unwrap();
+            assert_eq!(c.probleme, Some(Niveau::Moyen));
+            let k = c.correctif.unwrap();
+            assert!(k.automatique && k.commandes[1].contains("-Name DisableWpad -Value 1"));
+        }
     }
 }

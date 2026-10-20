@@ -45,7 +45,7 @@ impl Algo {
 }
 
 /// Extensions de programmes, de scripts et d'installateurs.
-const PROGRAMMES: &[&str] = &[
+pub(crate) const PROGRAMMES: &[&str] = &[
     "exe", "scr", "com", "pif", "bat", "cmd", "msi", "msix", "js", "jse", "vbs", "vbe", "wsf", "hta", "ps1", "jar",
     "lnk", "apk", "app", "sh", "run", "bin", "elf", "appimage", "dmg", "pkg",
 ];

@@ -1,5 +1,6 @@
-//! Privilèges : fichiers secrets lisibles, groupes équivalents à root, sudo sans mot de passe. Fichiers secrets et sudo
-//! se vérifient comme sous macOS (machine/unix.rs).
+//! Privilèges : fichiers secrets lisibles, groupes équivalents à root, sudo sans mot de passe, dossiers de commandes
+//! modifiables par d'autres comptes, blocage des comptes et longueur des mots de passe (PAM). Fichiers secrets, sudo et
+//! dossiers de commandes se vérifient comme sous macOS (machine/unix.rs).
 
 use super::*;
 #[cfg(test)]
@@ -60,6 +61,141 @@ pub(super) fn sudo_sans_mot_de_passe() -> Vec<Constat> {
     ))
 }
 
+/// Les dossiers où root cherche ses commandes : le `secure_path` de sudo des grandes distributions.
+const DOSSIERS_DE_ROOT: &[&str] = &[
+    "/usr/local/sbin",
+    "/usr/local/bin",
+    "/usr/sbin",
+    "/usr/bin",
+    "/sbin",
+    "/bin",
+    "/snap/bin",
+];
+
+/// Sous Linux, un dossier de root qui appartient à un autre compte est fautif aussi.
+pub(super) fn dossiers_de_commandes() -> Option<Constat> {
+    crate::machine::unix::dossiers_de_commandes(DOSSIERS_DE_ROOT, Path::new(&home()), true)
+}
+
+/// Les fichiers de PAM où se règlent l'ouverture de session et les mots de passe : Arch et Fedora, puis Debian et
+/// Ubuntu. Lisibles par tous.
+const PAM: &[&str] = &[
+    "/etc/pam.d/system-auth",
+    "/etc/pam.d/password-auth",
+    "/etc/pam.d/common-auth",
+    "/etc/pam.d/common-password",
+];
+
+/// La valeur d'un réglage « nom = valeur » d'un fichier de configuration (faillock.conf, pwquality.conf), la
+/// dernière qui compte.
+fn reglage(conf: &str, nom: &str) -> Option<u32> {
+    conf.lines()
+        .filter(|l| !l.trim_start().starts_with('#'))
+        .filter_map(|l| l.split_once('='))
+        .filter(|(k, _)| k.trim() == nom)
+        .filter_map(|(_, v)| v.trim().parse().ok())
+        .next_back()
+}
+
+/// L'option « nom=valeur » d'un module dans les lignes de PAM qui le chargent.
+fn option_pam(lignes: &[&str], nom: &str) -> Option<u32> {
+    lignes
+        .iter()
+        .flat_map(|l| l.split_whitespace())
+        .filter_map(|mot| mot.strip_prefix(nom)?.strip_prefix('='))
+        .filter_map(|v| v.parse().ok())
+        .next_back()
+}
+
+/// Blocage des comptes après des mots de passe faux (pam_faillock, ou pam_tally2 sur les vieux systèmes), et longueur
+/// minimale quand pam_pwquality vérifie les mots de passe. Des informations, sans correction automatique : PAM mal
+/// réglé peut empêcher toute connexion, même celle de root. Les options de la ligne de PAM passent avant le fichier de
+/// réglages ; sans l'un ni l'autre, les valeurs par défaut des modules (3 essais, 8 caractères). Sans pam_pwquality,
+/// rien n'est dit de la longueur : elle n'est pas lue ailleurs.
+pub(super) fn juger_pam(pam: &str, faillock: Option<&str>, pwquality: Option<&str>) -> Vec<Constat> {
+    let actives: Vec<&str> = pam
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && !l.starts_with('#'))
+        .collect();
+    let charge = |module: &str| -> Vec<&str> { actives.iter().copied().filter(|l| l.contains(module)).collect() };
+    let mut constats = Vec::new();
+    let blocage = charge("pam_faillock.so");
+    let essais = option_pam(&blocage, "deny")
+        .or_else(|| faillock.and_then(|c| reglage(c, "deny")))
+        .unwrap_or(3);
+    if blocage.is_empty() && charge("pam_tally2.so").is_empty() {
+        constats.push(
+            alerte(
+                "Comptes",
+                Niveau::Info,
+                tr!(
+                    "Aucun blocage après des mots de passe faux sur les comptes de cet ordinateur (pam_faillock n'est pas utilisé).",
+                    "No lockout after wrong passwords on this computer's accounts (pam_faillock is not used)."
+                ),
+            )
+            .manuel(
+                tr!(
+                    "L'activer avec l'outil de la distribution (Fedora : sudo authselect enable-feature with-faillock), une session root ouverte à côté pendant l'essai",
+                    "Turn it on with the distribution's tool (Fedora: sudo authselect enable-feature with-faillock), with a root session open alongside while trying"
+                ),
+                &[],
+            ),
+        );
+    } else if !blocage.is_empty() && essais == 0 {
+        constats.push(alerte(
+            "Comptes",
+            Niveau::Info,
+            tr!(
+                "pam_faillock ne bloque jamais un compte (deny = 0) : les essais de mot de passe sont illimités.",
+                "pam_faillock never locks an account (deny = 0): password attempts are unlimited."
+            ),
+        ));
+    }
+    let qualite = charge("pam_pwquality.so");
+    if !qualite.is_empty() {
+        let longueur = option_pam(&qualite, "minlen")
+            .or_else(|| pwquality.and_then(|c| reglage(c, "minlen")))
+            .unwrap_or(8);
+        if longueur < 8 {
+            constats.push(
+                alerte(
+                    "Comptes",
+                    Niveau::Info,
+                    trf!(
+                        "Les mots de passe peuvent faire moins de 8 caractères (minimum : {longueur}).",
+                        "Passwords can be shorter than 8 characters (minimum: {longueur})."
+                    ),
+                )
+                .manuel(
+                    tr!(
+                        "Mettre « minlen = 8 » dans /etc/security/pwquality.conf (vaut au prochain changement de mot de passe)",
+                        "Set “minlen = 8” in /etc/security/pwquality.conf (applies at the next password change)"
+                    ),
+                    &[],
+                ),
+            );
+        }
+    }
+    constats
+}
+
+pub(super) fn pam() -> Vec<Constat> {
+    let pam: String = PAM
+        .iter()
+        .filter_map(|f| std::fs::read_to_string(f).ok())
+        .collect::<Vec<_>>()
+        .join("\n");
+    if pam.is_empty() {
+        return Vec::new();
+    }
+    juger_pam(
+        &pam,
+        std::fs::read_to_string("/etc/security/faillock.conf").ok().as_deref(),
+        std::fs::read_to_string("/etc/security/pwquality.conf").ok().as_deref(),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -70,6 +206,27 @@ mod tests {
         assert!(!secret_expose(0o40700));
         assert!(secret_expose(0o100_644));
         assert!(secret_expose(0o100_640));
+    }
+
+    #[test]
+    fn blocage_et_longueur_d_apres_pam() {
+        // Debian, Ubuntu : ni blocage ni pam_pwquality.
+        let debian = "auth\t[success=1 default=ignore]\tpam_unix.so nullok\n# auth required pam_faillock.so\n";
+        let c = juger_pam(debian, None, None);
+        assert_eq!(c.len(), 1);
+        assert!(c[0].probleme == Some(Niveau::Info) && !c[0].correctif.as_ref().unwrap().automatique);
+        // Arch : pam_faillock (3 essais par défaut), pam_pwquality absent.
+        let arch = "auth required pam_faillock.so preauth\nauth [default=die] pam_faillock.so authfail\n";
+        assert!(juger_pam(arch, None, None).is_empty());
+        assert_eq!(juger_pam(arch, Some("# deny = 3\ndeny = 0\n"), None).len(), 1);
+        // L'option de la ligne passe avant le fichier.
+        let fedora =
+            "auth required pam_faillock.so preauth deny=5\npassword requisite pam_pwquality.so local_users_only\n";
+        assert!(juger_pam(fedora, Some("deny = 0\n"), None).is_empty());
+        assert_eq!(juger_pam(fedora, None, Some("minlen = 6\n")).len(), 1);
+        assert!(juger_pam(fedora, None, Some("# minlen = 6\n")).is_empty());
+        let court = "auth required pam_faillock.so\npassword requisite pam_pwquality.so minlen=6\n";
+        assert_eq!(juger_pam(court, None, Some("minlen = 12\n")).len(), 1);
     }
 
     #[test]

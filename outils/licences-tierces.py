@@ -17,7 +17,9 @@ from pathlib import Path
 CIBLES = ["x86_64-unknown-linux-musl", "x86_64-pc-windows-gnu", "aarch64-apple-darwin", "x86_64-apple-darwin"]
 SORTIE = Path("LICENCES-TIERCES.txt")
 FICHIERS_LICENCE = re.compile(r"^(LICEN[CS]E|COPYING|NOTICE|UNLICENSE)", re.IGNORECASE)
-SPDX = Path("/usr/share/licenses/spdx")
+# Textes types : ceux du dépôt d'abord (le paquet licenses d'Arch n'a ni MIT, ni BSD-3-Clause, ni LLVM-exception,
+# propres à chaque projet), puis ceux du système.
+TYPES = [Path("outils/licences-types"), Path("/usr/share/licenses/spdx")]
 # Données intégrées au programme qui ne sont pas des bibliothèques Rust : (nom, licence, source, texte de la licence).
 DONNEES = [
     (
@@ -57,11 +59,12 @@ def textes_licence(paquet):
         return [(f.name, f.read_text(encoding="utf-8", errors="replace").strip()) for f in fichiers]
     # Paquet publié sans fichier de licence : texte type de chaque licence nommée dans son Cargo.toml.
     ids = re.findall(r"[A-Za-z0-9.\-]+", paquet.get("license") or "")
-    return [
-        (f"{i} (texte type)", (SPDX / f"{i}.txt").read_text(encoding="utf-8").strip())
-        for i in dict.fromkeys(ids)
-        if (SPDX / f"{i}.txt").is_file()
-    ]
+    textes = []
+    for i in dict.fromkeys(ids):
+        f = next((d / f"{i}.txt" for d in TYPES if (d / f"{i}.txt").is_file()), None)
+        if f:
+            textes.append((f"{i} (texte type)", f.read_text(encoding="utf-8").strip()))
+    return textes
 
 
 def main():

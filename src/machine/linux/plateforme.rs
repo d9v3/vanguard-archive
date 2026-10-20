@@ -1,6 +1,6 @@
 //! Plateforme : ce que le matériel et le noyau protègent sous le système. La sécurité de la plateforme vue par fwupd
 //! (attributs HSI : TPM, protection en écriture du BIOS, IOMMU…), le verrouillage du noyau et la signature de ses
-//! modules, BPF réservé à root, et le journal d'audit quand auditd est installé.
+//! modules, BPF réservé à root, les espaces de noms ouverts à tous, et le journal d'audit quand auditd est installé.
 
 use super::*;
 use crate::machine::regles::{Os, Regle};
@@ -35,6 +35,17 @@ inventory::submit! {
         sujet: ("BPF réservé à root", "BPF reserved for root"),
         references: &["kernel.org : unprivileged_bpf_disabled"],
         verifier: || bpf().into_iter().collect(),
+    }
+}
+
+inventory::submit! {
+    Regle {
+        id: "LNX-NOY-005",
+        systeme: Os::Linux,
+        rang: 232,
+        sujet: ("espaces de noms ouverts à tous", "user namespaces open to all"),
+        references: &["kernel.org : user_namespaces(7)"],
+        verifier: || espaces_de_noms().into_iter().collect(),
     }
 }
 
@@ -332,6 +343,39 @@ pub(super) fn bpf() -> Option<Constat> {
     )
 }
 
+/// Espaces de noms sans droits : un programme ordinaire s'y donne des droits root à l'intérieur et atteint ainsi des
+/// parties du noyau d'habitude réservées à root, une voie fréquente des failles du noyau. Flatpak, Chrome, Steam et
+/// Podman en ont besoin : une information, jamais une correction, qui casserait ces programmes. Sont fermés : le
+/// réglage de Debian (`unprivileged_userns_clone` à 0), aucun espace permis (`max_user_namespaces` à 0), ou AppArmor
+/// qui les réserve aux programmes qu'il connaît (Ubuntu 23.10 et suivantes).
+pub(super) fn juger_espaces_de_noms(
+    clone: Option<i64>,
+    maximum: Option<i64>,
+    apparmor: Option<i64>,
+) -> Option<Constat> {
+    let fermes = clone == Some(0) || maximum == Some(0) || apparmor == Some(1);
+    // Réglage illisible : noyau sans espaces de noms, ou rien à conclure.
+    (maximum.is_some() && !fermes).then(|| {
+        alerte(
+            "Noyau durci",
+            Niveau::Info,
+            tr!(
+                "Tout programme peut créer des espaces de noms et s'y donner des droits root : une voie fréquente des failles du noyau. Flatpak, Chrome et Steam en ont besoin, Vanguard n'y touche pas.",
+                "Any program can create user namespaces and give itself root rights inside: a frequent path for kernel flaws. Flatpak, Chrome and Steam need them, Vanguard leaves them alone."
+            ),
+        )
+    })
+}
+
+pub(super) fn espaces_de_noms() -> Option<Constat> {
+    let lire = |chemin: &str| std::fs::read_to_string(chemin).ok().and_then(|v| v.trim().parse().ok());
+    juger_espaces_de_noms(
+        lire("/proc/sys/kernel/unprivileged_userns_clone"),
+        lire("/proc/sys/user/max_user_namespaces"),
+        lire("/proc/sys/kernel/apparmor_restrict_unprivileged_userns"),
+    )
+}
+
 /// Le journal d'audit du noyau : seulement quand auditd est installé (Fedora le lance ; ailleurs, il vient souvent avec
 /// d'autres paquets sans être voulu, d'où une information, jamais une alerte).
 pub(super) fn juger_journal_audit(installe: bool, actif: bool) -> Option<Constat> {
@@ -447,5 +491,13 @@ mod tests {
         assert!(juger_journal_audit(false, false).is_none());
         assert_eq!(juger_journal_audit(true, true).map(|c| c.probleme), Some(None));
         assert!(juger_journal_audit(true, false).is_some_and(|c| c.correctif.is_some()));
+        // Espaces de noms : ouverts (Fedora, Arch), fermés par Debian, par le maximum ou par AppArmor (Ubuntu).
+        let ouverts = juger_espaces_de_noms(None, Some(63_000), None).unwrap();
+        assert!(ouverts.probleme == Some(Niveau::Info) && ouverts.correctif.is_none());
+        assert!(juger_espaces_de_noms(Some(1), Some(63_000), Some(0)).is_some());
+        assert!(juger_espaces_de_noms(Some(0), Some(63_000), None).is_none());
+        assert!(juger_espaces_de_noms(None, Some(0), None).is_none());
+        assert!(juger_espaces_de_noms(None, Some(63_000), Some(1)).is_none());
+        assert!(juger_espaces_de_noms(None, None, None).is_none());
     }
 }

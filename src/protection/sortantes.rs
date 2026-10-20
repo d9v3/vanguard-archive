@@ -317,6 +317,16 @@ fn port_suspect(port: u16) -> bool {
     )
 }
 
+/// Le dossier temporaire du compte, tel que le système le donne (TEMP sous Windows, TMPDIR ailleurs) : déplacé
+/// (« C:\Temp » réglé par un administrateur, un autre disque), il ne se reconnaît pas à son chemin habituel, et un
+/// programme lancé de là passerait inaperçu. `chemin` : en minuscules, barres obliques. Un dossier temporaire à la
+/// racine d'un disque (« C:\ », « / ») ne compte pas : tout serait dedans.
+fn dans_le_temporaire_du_compte(chemin: &str) -> bool {
+    let temp = std::env::temp_dir().to_string_lossy().to_lowercase().replace('\\', "/");
+    let temp = format!("{}/", temp.trim_end_matches('/'));
+    temp.trim_matches('/').contains('/') && chemin.starts_with(&temp)
+}
+
 /// Un dossier d'où un vrai programme ne se lance pas d'habitude.
 fn dossier_risque(chemin: &str, montages: &str) -> Option<&'static str> {
     let c = chemin.to_lowercase().replace('\\', "/");
@@ -336,6 +346,7 @@ fn dossier_risque(chemin: &str, montages: &str) -> Option<&'static str> {
     ];
     if racines.iter().any(|t| c.starts_with(t))
         || ["/appdata/local/temp/", "/windows/temp/"].iter().any(|t| c.contains(t))
+        || dans_le_temporaire_du_compte(&c)
     {
         return Some(tr!("un dossier temporaire", "a temporary folder"));
     }
@@ -353,7 +364,7 @@ fn dossier_risque(chemin: &str, montages: &str) -> Option<&'static str> {
 
 /// Linux : une AppImage tourne depuis son image, montée dans « /tmp/.mount_<nom><code> » le temps qu'elle tourne. Un
 /// simple dossier de ce nom ne suffit pas : il faut qu'il soit monté (`montages` : le contenu de /proc/self/mounts).
-fn appimage(chemin: &str, montages: &str) -> bool {
+pub(crate) fn appimage(chemin: &str, montages: &str) -> bool {
     let Some(reste) = chemin.strip_prefix("/tmp/.mount_") else {
         return false;
     };
@@ -410,15 +421,86 @@ fn qui(nom: &str) -> String {
         .unwrap_or(domaine)
 }
 
+/// Les serveurs de commande de botnets (Feodo Tracker, abuse.ch, CC0) : une adresse IP par ligne, lignes « # » de
+/// commentaire. `None` pour tout autre texte : la page d'un portail Wi-Fi (hôtel, gare) arrive à la place de la liste
+/// sans erreur, et ne doit pas passer pour une liste vide, donc vérifiée. Fonction pure, testée sur un texte inventé (le
+/// conteneur ne peut pas joindre abuse.ch).
+fn analyser_feodo(texte: &str) -> Option<BTreeSet<IpAddr>> {
+    let lignes: Vec<&str> = texte.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
+    // abuse.ch ouvre toujours ses listes par un en-tête en commentaire.
+    if !lignes.first()?.starts_with('#') {
+        return None;
+    }
+    lignes
+        .into_iter()
+        .filter(|l| !l.starts_with('#'))
+        .map(|l| l.parse().ok())
+        .collect()
+}
+
+/// La liste des serveurs de botnets (Feodo Tracker), téléchargée et gardée comme celles d'URLhaus (12 h fraîche, une
+/// semaine au plus). La télécharger ne dit à personne ce qu'on a trouvé : on prend la liste entière. `Err` : liste
+/// indisponible (hors ligne, téléchargement raté, trop vieille) — on ne conclut jamais que rien ne parle à un botnet.
+fn botnets() -> Result<BTreeSet<IpAddr>, String> {
+    use crate::protection::lien;
+    let (texte, age) = lien::liste_abuse_ch(
+        "feodo",
+        "https://feodotracker.abuse.ch/downloads/ipblocklist_recommended.txt",
+        "botnets.txt",
+    )
+    .ok_or_else(|| {
+        tr!(
+            "liste des botnets pas vérifiée (pas d'Internet, ou curl absent)",
+            "botnet list not checked (no Internet, or curl missing)"
+        )
+        .to_string()
+    })?;
+    if age > lien::URLHAUS_TROP_VIEILLE {
+        return Err(tr!(
+            "liste des botnets trop vieille pour servir : rafraîchissement impossible",
+            "botnet list too old to use: could not refresh it"
+        )
+        .to_string());
+    }
+    analyser_feodo(&texte).ok_or_else(|| {
+        tr!(
+            "liste des botnets illisible (page d'un portail Wi-Fi ?) : pas vérifiée",
+            "botnet list unreadable (a Wi-Fi portal page?): not checked"
+        )
+        .to_string()
+    })
+}
+
 /// Ce qui mérite l'attention dans les connexions d'un programme : (gravité, texte). `image` : celle d'une AppImage
-/// (variable APPIMAGE), jugée à la place de son point de montage dans /tmp.
+/// (variable APPIMAGE), jugée à la place de son point de montage dans /tmp. `botnets` : les serveurs de commande de
+/// botnets connus (vide quand la liste n'a pas pu être vérifiée ; l'absence est alors dite ailleurs, jamais ici).
 fn signes(
     chemin: Option<&str>,
     connexions: &[(&Connexion, Option<&String>)],
     montages: &str,
     image: Option<&str>,
+    botnets: &BTreeSet<IpAddr>,
 ) -> Vec<(Niveau, String)> {
     let mut signes = Vec::new();
+    // Un serveur de commande de botnet connu passe avant tout le reste : c'est le signe le plus grave.
+    let vers_botnet: Vec<String> = connexions
+        .iter()
+        .map(|(c, _)| c.distante)
+        .filter(|ip| botnets.contains(ip))
+        .collect::<BTreeSet<_>>()
+        .iter()
+        .map(IpAddr::to_string)
+        .collect();
+    if !vers_botnet.is_empty() {
+        let adresses = resume(&vers_botnet, 4, ", ");
+        signes.push((
+            Niveau::Eleve,
+            trf!(
+                "Parle à un serveur de commande de botnet connu (Feodo Tracker, abuse.ch) : {adresses}.",
+                "Talks to a known botnet command server (Feodo Tracker, abuse.ch): {adresses}."
+            ),
+        ));
+    }
     if let Some(c) = chemin {
         // Un nouveau fichier à la même place, posé par le système : le programme a été mis à jour pendant qu'il
         // tournait (Firefox après une mise à jour du système), l'ancienne version reste en mémoire.
@@ -611,6 +693,11 @@ pub fn afficher() {
     } else {
         String::new()
     };
+    // La liste des serveurs de botnets, une fois pour toutes les connexions. Indisponible : on le dira plus bas, et
+    // aucune connexion ne sera dédouanée pour autant (ensemble vide).
+    let liste_botnets = botnets();
+    let aucun_botnet = BTreeSet::new();
+    let botnets = liste_botnets.as_ref().unwrap_or(&aucun_botnet);
 
     // Regroupées par programme ; celles des autres comptes à part.
     let mut groupes: Vec<Groupe> = Vec::new();
@@ -644,7 +731,7 @@ pub fn afficher() {
                 .and_then(|_| g.liste.iter().find_map(|(c, _)| c.pid))
                 .and_then(|pid| std::fs::read(format!("/proc/{pid}/environ")).ok())
                 .and_then(|e| image_appimage(&e));
-            let signes = signes(g.chemin.as_deref(), &g.liste, &montages, image.as_deref());
+            let signes = signes(g.chemin.as_deref(), &g.liste, &montages, image.as_deref(), botnets);
             Programme {
                 pire: signes.iter().map(|(n, _)| *n).filter(|n| *n > Niveau::Info).max(),
                 nom: g.programme.clone().unwrap_or_default(),
@@ -724,6 +811,10 @@ pub fn afficher() {
         affiches.len(),
         connexions.len()
     );
+    // Ce qui n'a pas pu être vérifié est dit, jamais compté comme sain.
+    if let Err(raison) = &liste_botnets {
+        afficher_aligne(&format!("  {GRIS}ℹ{RESET} "), raison, 4, GRIS);
+    }
     if !a_regarder.is_empty() {
         let liste = resume(&a_regarder, 4, ", ");
         for ligne in envelopper(
@@ -883,6 +974,15 @@ mod tests {
             None
         );
         assert_eq!(dossier_risque("/usr/lib/firefox/firefox", ""), None);
+        // Le dossier temporaire du compte, où qu'il soit (TEMP déplacé sous Windows, TMPDIR ailleurs).
+        let temp = std::env::temp_dir().join("x").join("outil.exe");
+        assert_eq!(
+            dossier_risque(&temp.to_string_lossy(), ""),
+            Some("un dossier temporaire"),
+            "{}",
+            temp.display()
+        );
+        assert!(!dans_le_temporaire_du_compte("c:/"));
         assert_eq!(service(443, false), Some("HTTPS"));
         assert!(service(4444, false).is_none() && port_suspect(4444));
         let firefox = Connexion {
@@ -895,7 +995,13 @@ mod tests {
         };
         let nom = "lb-140-82-112-4-iad.github.com".to_string();
         assert_eq!(
-            signes(firefox.chemin.as_deref(), &[(&firefox, Some(&nom))], "", None),
+            signes(
+                firefox.chemin.as_deref(),
+                &[(&firefox, Some(&nom))],
+                "",
+                None,
+                &BTreeSet::new()
+            ),
             Vec::new()
         );
         let piege = Connexion {
@@ -903,7 +1009,7 @@ mod tests {
             port: 4444,
             ..firefox.clone()
         };
-        let s = signes(piege.chemin.as_deref(), &[(&piege, None)], "", None);
+        let s = signes(piege.chemin.as_deref(), &[(&piege, None)], "", None, &BTreeSet::new());
         let niveaux: Vec<Niveau> = s.iter().map(|(n, _)| *n).collect();
         assert_eq!(niveaux, [Niveau::Eleve, Niveau::Eleve, Niveau::Eleve, Niveau::Info]);
         // Un jeu en UDP sur un port quelconque : rien à dire.
@@ -913,14 +1019,53 @@ mod tests {
             ..firefox.clone()
         };
         assert_eq!(
-            signes(jeu.chemin.as_deref(), &[(&jeu, Some(&nom))], "", None),
+            signes(jeu.chemin.as_deref(), &[(&jeu, Some(&nom))], "", None, &BTreeSet::new()),
             Vec::new()
         );
         let tcp = Connexion { port: 61234, ..firefox };
         assert_eq!(
-            signes(tcp.chemin.as_deref(), &[(&tcp, Some(&nom))], "", None)[0].0,
+            signes(tcp.chemin.as_deref(), &[(&tcp, Some(&nom))], "", None, &BTreeSet::new())[0].0,
             Niveau::Moyen
         );
+    }
+
+    #[test]
+    fn liste_de_botnets_decodee() {
+        // Texte inventé (le conteneur ne peut pas joindre abuse.ch) : commentaires et lignes vides ignorés, IPv4 et
+        // IPv6 gardées ; une liste sans adresse reste une liste.
+        let texte = "# Feodo Tracker\n\n192.0.2.66\n198.51.100.7\n2001:db8::1\n";
+        let liste = analyser_feodo(texte).unwrap();
+        assert_eq!(liste.len(), 3);
+        assert!(liste.contains(&ip("192.0.2.66")));
+        assert!(liste.contains(&ip("2001:db8::1")));
+        assert!(
+            analyser_feodo("# Feodo Tracker\n# vide aujourd'hui\n")
+                .unwrap()
+                .is_empty()
+        );
+        // Autre chose qu'une liste (portail Wi-Fi, fichier vide, ligne illisible) : pas vérifiée, jamais vide.
+        assert!(analyser_feodo("").is_none());
+        assert!(analyser_feodo("<html><body>Bienvenue au Salon</body></html>").is_none());
+        assert!(analyser_feodo("# Feodo Tracker\n192.0.2.66\npas-une-ip\n").is_none());
+    }
+
+    #[test]
+    fn connexion_vers_un_botnet_signalee() {
+        let botnets = BTreeSet::from([ip("203.0.113.9")]);
+        let c = Connexion {
+            pid: Some(10),
+            programme: Some("inconnu".into()),
+            chemin: Some("/usr/bin/inconnu".into()),
+            distante: ip("203.0.113.9"),
+            port: 443,
+            udp: false,
+        };
+        let s = signes(c.chemin.as_deref(), &[(&c, None)], "", None, &botnets);
+        assert_eq!(s[0].0, Niveau::Eleve);
+        assert!(s[0].1.contains("botnet") && s[0].1.contains("203.0.113.9"));
+        // Même serveur, mais liste vide (indisponible) : aucune connexion n'est dédouanée ni accusée ici.
+        let vide = signes(c.chemin.as_deref(), &[(&c, None)], "", None, &BTreeSet::new());
+        assert!(!vide.iter().any(|(_, t)| t.contains("botnet")));
     }
 
     // Linux : un programme mis à jour pendant qu'il tourne (Firefox après une mise à jour du système) a son ancien
@@ -937,7 +1082,13 @@ mod tests {
         }
         let c = Connexion::vers(ip("140.82.112.4"), 443);
         let nom = "github.com".to_string();
-        let s = signes(Some("/usr/bin/env (deleted)"), &[(&c, Some(&nom))], "", None);
+        let s = signes(
+            Some("/usr/bin/env (deleted)"),
+            &[(&c, Some(&nom))],
+            "",
+            None,
+            &BTreeSet::new(),
+        );
         assert_eq!(s.iter().map(|(n, _)| *n).collect::<Vec<_>>(), [Niveau::Info]);
     }
 
@@ -960,14 +1111,14 @@ mod tests {
         }
         let efface = format!("{} (deleted)", repose.display());
         let c = Connexion::vers(ip("140.82.112.4"), 443);
-        let s = signes(Some(&efface), &[(&c, None)], "", None);
+        let s = signes(Some(&efface), &[(&c, None)], "", None, &BTreeSet::new());
         assert_eq!(
             s.iter().map(|(n, _)| *n).take(2).collect::<Vec<_>>(),
             [Niveau::Eleve, Niveau::Eleve]
         );
         std::fs::remove_dir_all(&dossier).unwrap();
         // Plus rien à sa place : effacé pour de bon.
-        let s = signes(Some(&efface), &[(&c, None)], "", None);
+        let s = signes(Some(&efface), &[(&c, None)], "", None, &BTreeSet::new());
         assert_eq!(s[0].0, Niveau::Eleve);
     }
 
@@ -994,7 +1145,7 @@ mod tests {
         let nom = "github.com".to_string();
         let telechargee = "/home/alice/Downloads/ArtCraft.AppImage";
         let niveaux = |image| {
-            signes(Some(monte), &[(&c, Some(&nom))], montages, image)
+            signes(Some(monte), &[(&c, Some(&nom))], montages, image, &BTreeSet::new())
                 .iter()
                 .map(|(n, _)| *n)
                 .collect::<Vec<_>>()

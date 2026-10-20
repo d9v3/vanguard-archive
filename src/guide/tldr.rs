@@ -1,9 +1,9 @@
 //! Les commandes de tldr-pages (tldr.sh, licence CC BY 4.0) : des milliers d'exemples pour Linux, Windows, macOS et
 //! d'autres systèmes, écrits et tenus à jour par une communauté. Vanguard télécharge leurs archives (anglais et
-//! français) au plus une fois par semaine, en arrière-plan quand le guide s'ouvre, et les lit sans rien exécuter : ces
-//! commandes se copient, elles ne se lancent jamais d'ici, Vanguard ne les ayant pas vérifiées
-//! (`Obstacle::NonVerifiee`). Tout texte de l'archive passe par `ui::affichable` : une page piégée ne pilote pas le
-//! terminal. Le déploiement en met aussi une copie sur la clé (`outils/tldr-cle.sh`) : lancé depuis la clé, Vanguard
+//! français) au plus une fois par semaine, en arrière-plan quand le guide s'ouvre, ou pendant la surveillance et
+//! l'entretien du mois, et les lit sans rien exécuter : ces commandes se copient, elles ne se lancent jamais d'ici,
+//! Vanguard ne les ayant pas vérifiées (`Obstacle::NonVerifiee`). Tout texte de l'archive passe par `ui::affichable` :
+//! une page piégée ne pilote pas le terminal. Le déploiement en met aussi une copie sur la clé (`outils/tldr-cle.sh`) : lancé depuis la clé, Vanguard
 //! les a dès le premier lancement, même sur un ordinateur sans Internet. Des deux copies, la plus récente sert.
 
 use std::collections::BTreeMap;
@@ -177,6 +177,14 @@ fn a_telecharger(langue: &str, dossiers: &[PathBuf]) -> bool {
 /// Le téléchargement d'arrière-plan tourne déjà.
 static EN_COURS: AtomicBool = AtomicBool::new(false);
 
+/// Les langues dont l'archive est à renouveler, ou pas encore lue (fraîche, elle peut être abîmée).
+fn langues_a_voir(dossiers: &[PathBuf]) -> Vec<&'static str> {
+    LANGUES
+        .into_iter()
+        .filter(|l| a_renouveler(l, dossiers) || a_verifier(l, dossiers))
+        .collect()
+}
+
 /// Renouvelle les archives qui en ont besoin, en arrière-plan : le guide s'ouvre sans les attendre, et les lit à son
 /// prochain affichage. Seulement dans un vrai terminal (pas pour un script ni pour les tests) ; sans Internet, curl
 /// échoue vite et rien ne change. Le fil principal ne regarde que les dates ; une archive pas encore lue l'est dans le
@@ -184,36 +192,55 @@ static EN_COURS: AtomicBool = AtomicBool::new(false);
 pub(super) fn renouveler_en_fond() {
     use std::io::IsTerminal;
     let dossiers = dossiers();
-    let a_voir: Vec<&str> = LANGUES
-        .into_iter()
-        .filter(|l| a_renouveler(l, &dossiers) || a_verifier(l, &dossiers))
-        .collect();
+    let a_voir = langues_a_voir(&dossiers);
     if !std::io::stdin().is_terminal() || a_voir.is_empty() || EN_COURS.swap(true, Ordering::SeqCst) {
         return;
     }
     std::thread::spawn(move || {
-        // Les restes d'un téléchargement interrompu (Vanguard quitté avant la fin) partent d'abord. Seulement ceux qui
-        // n'avancent plus : celui d'un autre Vanguard ouvert en même temps grossit encore (curl abandonne après 2 min).
-        if let Ok(fichiers) = std::fs::read_dir(dossier()) {
-            for f in fichiers.flatten() {
-                let immobile = f
-                    .metadata()
-                    .and_then(|m| m.modified())
-                    .ok()
-                    .and_then(|date| date.elapsed().ok())
-                    .is_some_and(|age| age > Duration::from_mins(10));
-                if immobile && f.file_name().to_string_lossy().contains(".zip.") {
-                    let _ = std::fs::remove_file(f.path());
-                }
-            }
-        }
-        for langue in a_voir {
-            if a_telecharger(langue, &dossiers) {
-                telecharger(langue);
-            }
-        }
+        renouveler(&a_voir, &dossiers);
         EN_COURS.store(false, Ordering::SeqCst);
     });
+}
+
+/// Sans attendre qu'on ouvre le guide : la surveillance de chaque heure et l'entretien du mois renouvellent les
+/// archives de plus d'une semaine, pour que le guide les ait fraîches à son ouverture, même alors hors ligne.
+/// Seulement sur un ordinateur où le guide en a déjà téléchargé : qui ne s'en sert pas ne télécharge rien. Jamais
+/// pendant les tests.
+pub(super) fn renouveler_maintenant() {
+    if cfg!(test) || !LANGUES.iter().any(|l| archive(l).exists()) {
+        return;
+    }
+    let dossiers = dossiers();
+    let a_voir = langues_a_voir(&dossiers);
+    if a_voir.is_empty() || EN_COURS.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    renouveler(&a_voir, &dossiers);
+    EN_COURS.store(false, Ordering::SeqCst);
+}
+
+/// Télécharge les archives de `a_voir` qui en ont besoin. Lent : jamais sur le fil du guide.
+fn renouveler(a_voir: &[&str], dossiers: &[PathBuf]) {
+    // Les restes d'un téléchargement interrompu (Vanguard quitté avant la fin) partent d'abord. Seulement ceux qui
+    // n'avancent plus : celui d'un autre Vanguard ouvert en même temps grossit encore (curl abandonne après 2 min).
+    if let Ok(fichiers) = std::fs::read_dir(dossier()) {
+        for f in fichiers.flatten() {
+            let immobile = f
+                .metadata()
+                .and_then(|m| m.modified())
+                .ok()
+                .and_then(|date| date.elapsed().ok())
+                .is_some_and(|age| age > Duration::from_mins(10));
+            if immobile && f.file_name().to_string_lossy().contains(".zip.") {
+                let _ = std::fs::remove_file(f.path());
+            }
+        }
+    }
+    for langue in a_voir {
+        if a_telecharger(langue, dossiers) {
+            telecharger(langue);
+        }
+    }
 }
 
 /// Le téléchargement est-il en cours ?

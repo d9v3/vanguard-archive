@@ -74,6 +74,12 @@ pub(super) const DURCISSEMENT: &[(&str, i64, (&str, &str))] = &[
 
 /// Réglages dont une valeur précise est risquée, sans que « plus haut » veuille dire « plus sûr » : (réglage, valeur
 /// risquée, valeur sûre écrite à sa place, rôle).
+///
+/// Réseau IPv4 : une interface prend la valeur de `default` tant que personne ne l'a réglée elle-même, y compris
+/// quand `default` change après sa création (carte réseau montée avant que les réglages ne soient lus au
+/// démarrage). Hors routage, une redirection est acceptée si `all` ou l'interface le permet : il faut les deux à 0.
+/// Le filtre des adresses d'origine prend le plus fort de `all` et de l'interface : `default` à 2 (souple, ce que
+/// systemd pose) suffit, et `all` à 2 relâcherait une interface réglée exprès en strict (1).
 pub(super) const INTERDITS: &[(&str, i64, i64, (&str, &str))] = &[
     (
         "fs/suid_dumpable",
@@ -93,7 +99,68 @@ pub(super) const INTERDITS: &[(&str, i64, i64, (&str, &str))] = &[
             "the kernel's magic keys neither kill programs nor dump memory",
         ),
     ),
+    (
+        "net/ipv4/conf/all/accept_redirects",
+        1,
+        0,
+        (
+            "le réseau ne peut pas détourner le trafic par des redirections ICMP",
+            "the network cannot divert traffic with ICMP redirects",
+        ),
+    ),
+    (
+        "net/ipv4/conf/default/accept_redirects",
+        1,
+        0,
+        (
+            "pareil pour chaque interface réseau",
+            "the same for each network interface",
+        ),
+    ),
+    (
+        "net/ipv6/conf/default/accept_redirects",
+        1,
+        0,
+        (
+            "pareil en IPv6 pour les interfaces à venir",
+            "the same in IPv6 for interfaces to come",
+        ),
+    ),
+    (
+        "net/ipv4/conf/default/rp_filter",
+        0,
+        2,
+        (
+            "les paquets à l'adresse d'origine impossible sont écartés",
+            "packets with an impossible source address are dropped",
+        ),
+    ),
 ];
+
+/// IPv6 : chaque interface décide seule des redirections (ni `all` ni `default` ne comptent pour elle une fois créée),
+/// et `default` ne change pas les interfaces déjà là. D'où un motif pour toutes (`*`) : systemd l'applique au
+/// démarrage puis à chaque interface qui arrive ; procps l'applique depuis la 4.0, et la 3.3 (Ubuntu 22.04, Debian 11)
+/// le saute sans erreur avec --system. Tout de suite, une boucle sur /proc le fait partout.
+pub(super) const REDIRECTIONS_IPV6: &str = "net/ipv6/conf/*/accept_redirects";
+
+/// Une interface IPv6 qui accepte les redirections, parmi (nom, valeur) ; `all`, `default` et la boucle locale à part.
+pub(super) fn redirections_ipv6(interfaces: &[(String, i64)]) -> bool {
+    interfaces
+        .iter()
+        .any(|(nom, v)| *v == 1 && !matches!(nom.as_str(), "all" | "default" | "lo"))
+}
+
+fn interfaces_ipv6() -> Vec<(String, i64)> {
+    std::fs::read_dir("/proc/sys/net/ipv6/conf")
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|e| {
+            let v = std::fs::read_to_string(e.path().join("accept_redirects")).ok()?;
+            Some((e.file_name().to_string_lossy().into_owned(), v.trim().parse().ok()?))
+        })
+        .collect()
+}
 
 /// Réglages trop faibles parmi les valeurs lues : (chemin, valeur lue, valeur sûre, rôle).
 pub(super) fn reglages_faibles(lire: impl Fn(&str) -> Option<i64>) -> Vec<(&'static str, i64, i64, &'static str)> {
@@ -104,25 +171,38 @@ pub(super) fn reglages_faibles(lire: impl Fn(&str) -> Option<i64>) -> Vec<(&'sta
     });
     let interdits = INTERDITS.iter().filter_map(|&(cle, risquee, sure, role)| {
         let v = lire(cle)?;
+        // Le filtre effectif est le plus fort de `all` et de l'interface : `all` déjà réglé, rien de faible.
+        if cle == "net/ipv4/conf/default/rp_filter" && lire("net/ipv4/conf/all/rp_filter").is_some_and(|a| a > 0) {
+            return None;
+        }
         (v == risquee).then(|| (cle, v, sure, langue(role)))
     });
     trop_bas.chain(interdits).collect()
 }
 
 pub(super) fn durcissement_noyau() -> Constat {
-    let faibles = reglages_faibles(|cle| {
+    let mut faibles = reglages_faibles(|cle| {
         std::fs::read_to_string(format!("/proc/sys/{cle}"))
             .ok()?
             .trim()
             .parse()
             .ok()
     });
+    let ipv6 = redirections_ipv6(&interfaces_ipv6());
+    if ipv6 {
+        let role = if crate::langue::anglais() {
+            "network interfaces in IPv6 do not follow ICMP redirects"
+        } else {
+            "les interfaces réseau en IPv6 ne suivent pas les redirections ICMP"
+        };
+        faibles.push((REDIRECTIONS_IPV6, 1, 0, role));
+    }
     if faibles.is_empty() {
         return ok(
             "Noyau durci",
             tr!(
-                "Réglages de sécurité du noyau corrects (ASLR, ptrace, dmesg, liens…).",
-                "Kernel security settings are correct (ASLR, ptrace, dmesg, links…)."
+                "Réglages de sécurité du noyau corrects (ASLR, ptrace, dmesg, liens, réseau…).",
+                "Kernel security settings are correct (ASLR, ptrace, dmesg, links, network…)."
             ),
         );
     }
@@ -156,9 +236,14 @@ pub(super) fn durcissement_noyau() -> Constat {
             "Apply the safe values (file /etc/sysctl.d/99-vanguard.conf, kept after restart)"
         ),
         &[
-            &format!("printf '{lignes}' | sudo tee {SYSCTL_VANGUARD} >/dev/null"),
-            "sudo sysctl --system >/dev/null",
-        ],
+            format!("printf '{lignes}' | sudo tee {SYSCTL_VANGUARD} >/dev/null"),
+            "sudo sysctl --system >/dev/null".to_string(),
+        ]
+        .into_iter()
+        .chain(ipv6.then(|| {
+            "sudo sh -c 'for f in /proc/sys/net/ipv6/conf/*/accept_redirects; do echo 0 > \"$f\"; done'".to_string()
+        }))
+        .collect::<Vec<_>>(),
     )
 }
 
@@ -171,7 +256,9 @@ pub(super) fn fusion_sysctl(existant: &str, nouveaux: &[(String, i64)]) -> Strin
             let (k, v) = (k.trim(), v.trim());
             // Le contenu repasse par printf dans le shell : seuls des caractères sans effet y sont gardés.
             let sur = |s: &str| !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric() || " ._-/".contains(c));
-            (sur(k) && sur(v)).then(|| (k.to_string(), v.to_string()))
+            // « * » : le motif des interfaces (REDIRECTIONS_IPV6), sans effet entre apostrophes pour le shell.
+            let cle_sure = !k.is_empty() && k.chars().all(|c| c.is_ascii_alphanumeric() || "._-/*".contains(c));
+            (cle_sure && sur(v)).then(|| (k.to_string(), v.to_string()))
         })
         .collect();
     for (cle, valeur) in nouveaux {
@@ -295,6 +382,38 @@ mod tests {
         let faibles = reglages_faibles(lu(1, 1));
         let noms: Vec<(&str, i64)> = faibles.iter().map(|f| (f.0, f.2)).collect();
         assert_eq!(noms, [("fs/suid_dumpable", 0), ("kernel/sysrq", 176)]);
+        // Réseau : valeurs d'origine du noyau (redirections acceptées, filtre coupé) contre celles d'un système durci ;
+        // le filtre strict (1) n'est jamais relâché.
+        let reseau = |redirections: i64, filtre: i64| {
+            reglages_faibles(move |c| {
+                Some(match c {
+                    "net/ipv4/conf/all/accept_redirects" | "net/ipv4/conf/default/accept_redirects" => redirections,
+                    "net/ipv4/conf/default/rp_filter" | "net/ipv4/conf/all/rp_filter" => filtre,
+                    _ => 2,
+                })
+            })
+        };
+        assert!(reseau(0, 2).is_empty() && reseau(0, 1).is_empty());
+        // `default` à 0 mais `all` en strict : chaque interface filtre déjà.
+        let all_strict = reglages_faibles(|c| {
+            Some(match c {
+                "net/ipv4/conf/all/rp_filter" => 1,
+                "net/ipv4/conf/default/rp_filter"
+                | "net/ipv4/conf/all/accept_redirects"
+                | "net/ipv4/conf/default/accept_redirects" => 0,
+                _ => 2,
+            })
+        });
+        assert!(all_strict.is_empty());
+        let noms: Vec<(&str, i64)> = reseau(1, 0).iter().map(|f| (f.0, f.2)).collect();
+        assert_eq!(
+            noms,
+            [
+                ("net/ipv4/conf/all/accept_redirects", 0),
+                ("net/ipv4/conf/default/accept_redirects", 0),
+                ("net/ipv4/conf/default/rp_filter", 2)
+            ]
+        );
         // Réglage absent (noyau sans Yama…) : ni faible ni fort, on ne conclut pas.
         assert_eq!(reglages_faibles(|_| None), [] as [(&str, i64, i64, &str); 0]);
     }
@@ -311,5 +430,23 @@ mod tests {
             "kernel.kptr_restrict = 1\nkernel.dmesg_restrict = 1\nfs.protected_symlinks = 1\n"
         );
         assert_eq!(fusion_sysctl("", &nouveaux[..1]), "kernel.dmesg_restrict = 1\n");
+        // Le motif des interfaces IPv6 se garde d'une correction à l'autre.
+        assert_eq!(
+            fusion_sysctl("net.ipv6.conf.*.accept_redirects = 0\n", &nouveaux[..1]),
+            "net.ipv6.conf.*.accept_redirects = 0\nkernel.dmesg_restrict = 1\n"
+        );
+    }
+
+    #[test]
+    fn redirections_en_ipv6() {
+        let i = |nom: &str, v: i64| (nom.to_string(), v);
+        assert!(!redirections_ipv6(&[
+            i("all", 1),
+            i("default", 1),
+            i("lo", 1),
+            i("eth0", 0)
+        ]));
+        assert!(redirections_ipv6(&[i("all", 0), i("wlan0", 1)]));
+        assert!(!redirections_ipv6(&[]));
     }
 }

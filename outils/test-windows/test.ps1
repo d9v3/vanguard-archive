@@ -529,37 +529,51 @@ if (Question 'Faire ce test (six fichiers posés puis retirés dans Documents, I
     if (Get-ChildItem $dossiersPieges -Filter '!Vanguard*' -ErrorAction SilentlyContinue) { Bug 'Fichiers-pièges ENCORE présents' } else { Ok 'Fichiers-pièges retirés' }
 } else { Sautee 'Sautée.' }
 
-Etape 'YARA : moteur installé par winget, puis analyse d''un dossier'
-$yaraLien = Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Links\yara.exe'
-# Le moteur, là où Vanguard le cherche : le PATH, puis ce que winget pose pour le compte ou la machine (le lien de
-# Links, ou le programme dans Packages quand winget n'a pas pu créer le lien).
-function Moteur-Yara {
-    $dans = Get-Command yara.exe, yara64.exe -ErrorAction SilentlyContinue | Select-Object -First 1
-    if ($dans) { return $dans.Source }
-    foreach ($racine in (Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet'), (Join-Path $env:ProgramFiles 'WinGet')) {
-        $lien = Join-Path $racine 'Links\yara.exe'
-        if (Test-Path $lien) { return $lien }
-        $p = Get-ChildItem (Join-Path $racine 'Packages') -Directory -Filter 'VirusTotal.YARA*' -ErrorAction SilentlyContinue |
-            ForEach-Object { Get-ChildItem $_.FullName -Recurse -Include yara64.exe, yara.exe -ErrorAction SilentlyContinue } | Select-Object -First 1
-        if ($p) { return $p.FullName }
-    }
-    return $null
-}
+Etape 'YARA : analyse d''un dossier par YARA-X, compilé dans Vanguard (rien à installer)'
+# Depuis la 0.79, le moteur est dans le programme : aucune installation, aucune question, et rien de winget n'est cherché.
 $dossierYara = Join-Path $env:TEMP 'vanguard-dossier-yara'
 New-Item -ItemType Directory -Force $dossierYara | Out-Null
 Set-Content -Path (Join-Path $dossierYara 'note.txt') -Value 'fichier sans danger' -Encoding UTF8
-if ((Moteur-Yara) -or (Question 'Installer le moteur YARA par winget (VirusTotal.YARA), puis analyser un dossier ?')) {
-    LancerAvec 'yara' @('yara', $dossierYara) "o`n"
-    $moteur = Moteur-Yara
-    if ($moteur) { Ok "Moteur trouvé : $moteur" } else { Bug 'Moteur YARA introuvable (PATH, WinGet Links ou Packages)' }
-    $y = Sortie 'yara'
-    if ($y -match 'Analyse de|Scanning') { Ok 'Analyse lancée' } else { Bug 'Analyse PAS lancée' }
-    if ($y -match "n'a pas pu aller au bout|could not finish") { Bug 'Le moteur n''est pas allé au bout' }
-} else {
-    LancerAvec 'yara-refus' @('yara', $dossierYara) "n`n"
-    if ((Sortie 'yara-refus') -match "n'est pas installé|is not installed") { Ok 'Moteur absent dit, refus de l''installer respecté' } else { Bug 'Moteur absent PAS dit' }
-}
+[IO.File]::WriteAllBytes((Join-Path $dossierYara 'outil.exe'), [byte[]](0x4D, 0x5A, 0x90, 0x00) + [Text.Encoding]::ASCII.GetBytes('programme sans danger'))
+Lancer 'yara' @('yara', $dossierYara)
+$y = Sortie 'yara'
+if ($y -match 'Analyse de|Scanning') { Ok 'Analyse lancée' } else { Bug 'Analyse PAS lancée' }
+if ($y -match "installer|install it|winget") { Bug 'Vanguard parle encore d''installer un moteur YARA' }
+if ($y -match 'Aucun fichier ne correspond|No file matches') { Ok 'Dossier sans danger : rien trouvé, tout lu' }
+elseif ($y -match 'illisible|unreadable') { Bug 'Des fichiers du dossier d''essai n''ont pas pu être lus' }
+else { Bug 'Résultat de l''analyse YARA inattendu' }
 Remove-Item $dossierYara -Recurse -Force -ErrorAction SilentlyContinue
+
+Etape 'Collecter les traces (0.79) : dossier daté, LISEZMOI, manifeste juste, rien gardé'
+$dossierTraces = Join-Path $env:TEMP 'vanguard-traces-test'
+Remove-Item $dossierTraces -Recurse -Force -ErrorAction SilentlyContinue
+New-Item -ItemType Directory -Force $dossierTraces | Out-Null
+Lancer 'traces' @('traces', $dossierTraces)
+$tr = Sortie 'traces'
+if ($tr -match 'Collecter les traces|Collect the traces') { Ok 'Collecte lancée' } else { Bug 'Collecte PAS lancée' }
+$dates = @(Get-ChildItem -LiteralPath $dossierTraces -Directory -Filter 'traces-*')
+if ($dates.Count -eq 1) {
+    $d = $dates[0].FullName
+    foreach ($f in 'LISEZMOI.txt', 'MANIFESTE.txt', '01-processus.txt', '02-reseau.txt', '03-demarrage.txt', '04-comptes.txt', '06-fichiers-recents.txt') {
+        if (Test-Path -LiteralPath (Join-Path $d $f)) { Ok "$f écrit" } else { Bug "$f ABSENT" }
+    }
+    # Chaque ligne du manifeste : « empreinte  nom », l'empreinte recalculée ici par Windows.
+    $fausses = @(Get-Content -LiteralPath (Join-Path $d 'MANIFESTE.txt') -Encoding UTF8 | ForEach-Object {
+        $empreinte, $nom = $_ -split '  ', 2
+        $calculee = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $d $nom)).Hash
+        if ($calculee -ne $empreinte.ToUpper()) { $nom }
+    })
+    if ($fausses.Count -eq 0) { Ok 'Manifeste juste (Get-FileHash)' } else { Bug "Manifeste FAUX pour : $($fausses -join ', ')" }
+    $evtx = @(Get-ChildItem -LiteralPath $d -Filter '05-*.evtx')
+    if ($evtx.Count) { Ok "$($evtx.Count) journal(aux) exporté(s) en .evtx" } else { Bug 'Aucun journal exporté' }
+    if ($tr -match 'Journal de sécurité : réservé|Security log: administrator only') { Info 'Journal de sécurité réservé à l''administrateur (dit)' }
+    $processus = @(Get-Content -LiteralPath (Join-Path $d '01-processus.txt') -Encoding UTF8 | Where-Object { $_ -match '^\d+\t' })
+    $avecEmpreinte = @($processus | Where-Object { ($_ -split "`t")[4] -match '^[0-9a-f]{64}$' })
+    if ($processus.Count -gt 20 -and $avecEmpreinte.Count -gt 5) { Ok "$($processus.Count) processus, $($avecEmpreinte.Count) avec empreinte" }
+    else { Bug "Processus : $($processus.Count), avec empreinte : $($avecEmpreinte.Count)" }
+} else { Bug "Dossier daté : $($dates.Count) trouvé(s) au lieu d'un" }
+Remove-Item $dossierTraces -Recurse -Force -ErrorAction SilentlyContinue
+if (Test-Path $dossierTraces) { Bug 'Dossier des traces ENCORE là' } else { Ok 'Dossier des traces retiré' }
 
 Etape 'Copier mes fichiers : disque du système refusé, puis vraie copie vers le dossier partagé'
 $refuse = Join-Path $env:TEMP 'vanguard-copie-test'
@@ -887,6 +901,80 @@ try {
     if ($exclusions | Where-Object { $_ -like 'N/A*' }) { Info 'Exclusions de Defender cachées sans droits administrateur' }
     else { Info "Exclusions de Defender : $(@($exclusions | Where-Object { $_ }).Count) dossier(s)" }
 } catch { Bug "Comparaison impossible : $($_.Exception.Message)" }
+
+Etape 'Réglages de la 0.79 : WPAD, règle des mots de passe, portes dérobées, guide'
+# Chaque réglage est relu ici sans Vanguard, et comparé à ce que dit le bilan JSON déjà fait plus haut.
+try {
+    $audit = Sortie 'machine-json' | ConvertFrom-Json
+    function Signale79($motif) { [bool]@($audit.constats | Where-Object { $_.probleme -and $_.message -match $motif }).Count }
+    function Accord79($nom, [bool]$risque, $motif) {
+        $vu = Signale79 $motif
+        if ($vu -eq $risque) { Ok "$nom : $(if ($risque) { 'risqué, signalé' } else { 'sûr, rien signalé' })" }
+        elseif ($risque) { Bug "$nom : risqué selon Windows, NON signalé par Vanguard" }
+        else { Bug "$nom : sûr selon Windows, mais signalé par Vanguard" }
+    }
+    $domaine = $env:USERDOMAIN -and $env:USERDOMAIN -ne $env:COMPUTERNAME
+    $wpad = (Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Services\WinHttp\Parameters' -ErrorAction SilentlyContinue).DisableWpad
+    Accord79 'WPAD' ($wpad -ne 1 -and -not $domaine) 'proxy tout seul|proxy by itself'
+    # Portes dérobées classiques, en lecture seule : un débogueur posé sur un programme d'accessibilité de l'écran de
+    # connexion, le bureau ou Userinit de Winlogon détournés. Relus ici dans le registre, comparés au bilan.
+    $ifeo = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options'
+    $accessibilite = 'sethc.exe', 'utilman.exe', 'osk.exe', 'narrator.exe', 'magnify.exe', 'displayswitch.exe', 'atbroker.exe'
+    $porte = [bool]@($accessibilite | Where-Object { (Get-ItemProperty (Join-Path $ifeo $_) -ErrorAction SilentlyContinue).Debugger }).Count
+    Accord79 'Débogueur sur un programme d''accessibilité' $porte 'Porte dérobée sur|Backdoor on'
+    $winlogon = Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon' -ErrorAction SilentlyContinue
+    $userinit = @("$($winlogon.Userinit)".Split(',') | ForEach-Object { $_.Trim().Trim('"') } | Where-Object { $_ })
+    $shellDetourne = "$($winlogon.Shell)".Trim() -notin '', 'explorer.exe', "$env:SystemRoot\explorer.exe"
+    $userinitDetourne = $userinit.Count -gt 1 -or ($userinit.Count -eq 1 -and $userinit[0] -notin "$env:SystemRoot\system32\userinit.exe", '%SystemRoot%\system32\userinit.exe', 'userinit.exe')
+    Info "Winlogon : Shell « $($winlogon.Shell) », Userinit « $($winlogon.Userinit) »"
+    Accord79 'Winlogon (bureau, Userinit)' ($shellDetourne -or $userinitDetourne) 'Winlogon lance|Winlogon starts'
+    $portes = @($audit.constats | Where-Object { $_.regle -in 'WIN-PRS-002', 'WIN-PRS-004' })
+    if (@($portes.regle | Sort-Object -Unique).Count -eq 2 -and -not @($portes | Where-Object { -not $_.verifie }).Count) { Ok 'Règles IFEO et Winlogon au bilan, vérifiées' }
+    else { Bug 'Règle IFEO ou Winlogon absente du bilan, ou non vérifiée' }
+    # La règle des mots de passe : lue par ADSI, comme Vanguard (sans droits, quelle que soit la langue), et par
+    # net accounts pour comparer. Une lecture ADSI vide dirait que Vanguard ne peut rien conclure.
+    $adsi = [ADSI]"WinNT://$env:COMPUTERNAME"
+    $longueur = $adsi.MinPasswordLength.Value
+    $seuil = $adsi.MaxBadPasswordsAllowed.Value
+    if ($null -eq $longueur -or $null -eq $seuil) { Bug 'Règle des mots de passe illisible par ADSI : Vanguard n''en dira rien' }
+    else { Ok "ADSI : longueur minimale $longueur, blocage après $seuil essai(s) (0 : jamais)" }
+    Info "net accounts : $((net accounts | Select-String 'length|lockout threshold|longueur|seuil') -join ' ; ')"
+    if ($null -ne $seuil) {
+        Accord79 'Blocage après des mots de passe faux' ($seuil -eq 0) 'Aucun blocage après|No lockout after'
+        if ($seuil -ne 0) { Accord79 'Longueur minimale des mots de passe' ($longueur -lt 8) 'moins de 8 caractères|shorter than 8 characters' }
+    }
+    # Commandes du guide marquées « administrateur » : se lisent-elles sans droits ? (si oui, la marque peut partir)
+    foreach ($commande in 'Get-SmbShare', 'Get-Tpm') {
+        try { $null = & $commande -ErrorAction Stop; Info "$commande marche sans droits : la marque « administrateur » du guide peut partir" }
+        catch { Ok "$commande demande bien les droits d'administrateur" }
+    }
+} catch { Bug "Comparaison impossible : $($_.Exception.Message)" }
+# « Lancer ici » : « 10.6.36.1 » ouvre Get-NetConnectionProfile (Windows 11, 36e programme), « 2 » la lance.
+LancerAvec 'guide-profil' @() "10.6.36.1`n2`n`n`nq`n"
+$profil = Sortie 'guide-profil'
+if ($profil -match 'NetworkCategory' -and $profil -match 'Done in|Terminée en') { Ok 'Profil réseau lancé depuis le guide, sortie montrée' }
+else { Bug 'Profil réseau : commande du guide pas lancée ou sortie absente' }
+
+Etape 'Compte sans mot de passe exigé : signalé, à corriger soi-même (UAC pour le créer)'
+# Le drapeau « mot de passe exigé » ne donne pas de mot de passe : Vanguard ne le lève pas tout seul, il renvoie aux
+# Paramètres. Le compte de test est retiré à la fin.
+Info 'Crée un compte de test « vanguard-essai » sans mot de passe exigé, puis regarde ce que Vanguard en dit.'
+if (Question 'Faire ce test ?') {
+    Start-Process powershell -Verb RunAs -Wait -ArgumentList '-NoProfile', '-Command', 'New-LocalUser -Name vanguard-essai -NoPassword | Out-Null; Set-LocalUser -Name vanguard-essai -PasswordRequired $false'
+    $essai = Get-LocalUser -Name 'vanguard-essai' -ErrorAction SilentlyContinue
+    if (-not $essai) { Bug 'Compte de test non créé (UAC refusée ?)' }
+    else {
+        Lancer 'machine-compte-essai' @('machine', '--json')
+        try {
+            $vu = @((Sortie 'machine-compte-essai' | ConvertFrom-Json).constats | Where-Object { $_.probleme -and $_.message -match 'vanguard-essai' })
+            if (-not $vu.Count) { Bug 'Compte sans mot de passe exigé NON signalé' }
+            elseif ($vu[0].correctif -and -not $vu[0].correctif.automatique) { Ok 'Compte signalé, correction à faire soi-même (mot de passe dans les Paramètres)' }
+            else { Bug 'Compte signalé, mais Vanguard propose de le corriger tout seul : le drapeau ne donne pas de mot de passe' }
+        } catch { Bug "machine --json illisible : $($_.Exception.Message)" }
+    }
+    Start-Process powershell -Verb RunAs -Wait -ArgumentList '-NoProfile', '-Command', 'Remove-LocalUser -Name vanguard-essai -ErrorAction SilentlyContinue'
+    if (Get-LocalUser -Name 'vanguard-essai' -ErrorAction SilentlyContinue) { Bug 'Compte de test ENCORE présent : à retirer à la main' } else { Ok 'Compte de test retiré' }
+} else { Info 'Sautée (il faut répondre aux fenêtres UAC).' }
 
 Etape 'Couleurs et accents dans la console'
 if ($Auto) { Sautee 'Sautée : il faut regarder l''écran (test avec questions).' } else {

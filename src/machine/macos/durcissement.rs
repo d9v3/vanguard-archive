@@ -1,6 +1,6 @@
 //! Durcissement de macOS, lu sans droits d'administrateur : volume du système scellé et signé (SSV), signature du
 //! code imposée au démarrage (AMFI), validation des bibliothèques, extensions du noyau et du système ajoutées par
-//! d'autres qu'Apple, visibilité d'AirDrop.
+//! d'autres qu'Apple, visibilité d'AirDrop, découverte automatique du proxy.
 
 use std::process::Command;
 
@@ -239,9 +239,51 @@ pub(super) fn airdrop() -> Option<Constat> {
     })
 }
 
+/// Découverte automatique du proxy (WPAD), coupée par défaut sur Mac : allumée sur un service réseau, n'importe quel
+/// appareil d'un Wi-Fi public peut répondre et faire passer la navigation par lui. `scutil --proxy` donne la réunion
+/// des réglages en service. Changer un service réseau demande le mot de passe d'un administrateur et le nom du service
+/// (« Wi-Fi ») : à faire soi-même, la commande montrée en exemple.
+pub(super) fn juger_decouverte_proxy(scutil: &str) -> Option<Constat> {
+    let allumee = scutil.lines().any(|l| {
+        let mut c = l.split(':').map(str::trim);
+        c.next() == Some("ProxyAutoDiscoveryEnable") && c.next() == Some("1")
+    });
+    allumee.then(|| {
+        alerte(
+            "Durcissement",
+            Niveau::Moyen,
+            tr!(
+                "Le Mac cherche son proxy tout seul sur le réseau (WPAD) : sur un Wi-Fi public, un autre appareil peut répondre et faire passer ta navigation par lui.",
+                "The Mac looks for its proxy by itself on the network (WPAD): on public Wi-Fi, another device can answer and route your browsing through itself."
+            ),
+        )
+        .manuel(
+            tr!(
+                "Réglages Système > Réseau > ta connexion > Détails > Proxys : décoche « Découverte automatique du proxy »",
+                "System Settings > Network > your connection > Details > Proxies: untick “Auto proxy discovery”"
+            ),
+            &["networksetup -setproxyautodiscovery Wi-Fi off"],
+        )
+    })
+}
+
+pub(super) fn decouverte_proxy() -> Option<Constat> {
+    juger_decouverte_proxy(&sortie("scutil", &["--proxy"])?)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn decouverte_automatique_du_proxy() {
+        let coupee =
+            "<dictionary> {\n  ExceptionsList : <array> {\n  }\n  FTPPassive : 1\n  ProxyAutoDiscoveryEnable : 0\n}\n";
+        assert!(juger_decouverte_proxy(coupee).is_none() && juger_decouverte_proxy("").is_none());
+        let allumee = juger_decouverte_proxy("<dictionary> {\n  ProxyAutoDiscoveryEnable : 1\n}\n").unwrap();
+        assert_eq!(allumee.probleme, Some(Niveau::Moyen));
+        assert!(!allumee.correctif.unwrap().automatique);
+    }
 
     #[test]
     fn sceau_et_options_de_demarrage() {

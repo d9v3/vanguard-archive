@@ -268,6 +268,13 @@ fn veiller_passerelle(r: &reseau::Rapport) {
 }
 
 pub async fn surveiller() {
+    // Les exemples du guide se renouvellent pendant la passe (au plus une fois par semaine), sans la retarder.
+    let exemples = std::thread::spawn(crate::guide::renouveler_exemples);
+    passe().await;
+    let _ = exemples.join();
+}
+
+async fn passe() {
     veiller_machine();
     if let Some(fichiers) = crate::protection::integrite::changements_a_signaler() {
         notifier(
@@ -290,6 +297,29 @@ pub async fn surveiller() {
         return;
     };
     veiller_passerelle(&r);
+    // Empoisonneur de noms (Responder…) : la sonde est déjà faite pendant le scan du réseau local, elle ne coûte
+    // rien de plus ici. Sans réseau local (VPN seul), le scan n'aurait pas tourné : rien à signaler.
+    if let Some(reseau::empoisonnement::Rapport::Teste(empoisonneurs)) = &r.empoisonnement {
+        for e in empoisonneurs {
+            let titre = r
+                .hotes
+                .iter()
+                .find(|h| h.ip == e.ip)
+                .map(reseau::Hote::titre)
+                .filter(|t| !t.is_empty());
+            notifier(
+                tr!(
+                    "Vanguard : empoisonneur de noms sur le réseau",
+                    "Vanguard: name poisoner on the network"
+                ),
+                &trf!(
+                    "{} répond à des noms qui n'existent pas : un outil comme Responder vole les mots de passe Windows. Débranche-le.",
+                    "{} answers names that do not exist: a tool like Responder steals Windows passwords. Unplug it.",
+                    titre.map_or_else(|| e.ip.to_string(), |t| format!("{} ({t})", e.ip))
+                ),
+            );
+        }
+    }
     for h in r.hotes.iter().filter(|h| h.nouvelle) {
         let qui = if h.titre().is_empty() {
             tr!("appareil inconnu", "unknown device").into()

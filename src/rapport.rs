@@ -504,6 +504,7 @@ mod tests {
             note: "A",
             hotes: vec![h],
             upnp: None,
+            empoisonnement: None,
         };
         let page = html(None, Some(&r));
         assert!(!page.contains("<script>alert"));
@@ -542,6 +543,7 @@ mod tests {
             note: "A",
             hotes: vec![h],
             upnp: None,
+            empoisonnement: None,
         };
         let page = html(None, Some(&r));
         assert!(
