@@ -544,6 +544,66 @@ pub const PROGRAMMES: &[Programme] = &[
             ),
         ],
     },
+    Programme {
+        nom: "sfltool",
+        role: ("ce qui se lance tout seul", "what starts by itself"),
+        executable: "sfltool",
+        commandes: &[voir(
+            "sudo sfltool dumpbtm",
+            "Tout ce qui se lance tout seul : ouverture de session, tâches de fond (macOS 13 et plus).",
+            "Everything that starts by itself: login items, background tasks (macOS 13 and later).",
+        )],
+    },
+    Programme {
+        nom: "tccutil",
+        role: ("accès caméra, micro, écran", "camera, mic, screen access"),
+        executable: "tccutil",
+        commandes: &[
+            changer(
+                "tccutil reset Camera",
+                "Retire la caméra à toutes les apps : chacune redemandera l'accès.",
+                "Takes the camera away from every app: each will ask again.",
+            ),
+            changer(
+                "tccutil reset Microphone",
+                "Pareil pour le micro.",
+                "The same for the microphone.",
+            ),
+            changer(
+                "tccutil reset ScreenCapture",
+                "Pareil pour l'enregistrement de l'écran.",
+                "The same for screen recording.",
+            ),
+        ],
+    },
+    Programme {
+        nom: "shasum",
+        role: ("empreinte d'un fichier", "a file's fingerprint"),
+        executable: "shasum",
+        commandes: &[voir(
+            "shasum -a 256 <fichier>",
+            "L'empreinte SHA-256 d'un fichier, à comparer à celle du site.",
+            "A file's SHA-256 fingerprint, to compare with the site's.",
+        )],
+    },
+    Programme {
+        nom: "nettop",
+        role: ("trafic réseau par programme", "network traffic per program"),
+        executable: "nettop",
+        commandes: &[
+            voir(
+                "nettop -P -L 1",
+                "Le trafic réseau de chaque programme, relevé une fois.",
+                "Each program's network traffic, measured once.",
+            ),
+            voir(
+                "nettop -P",
+                "Le même, en direct (q pour quitter).",
+                "The same, live (q to quit).",
+            )
+            .sauf(Obstacle::PleinEcran),
+        ],
+    },
 ];
 
 /// Les marches à suivre : chaque étape est une commande expliquée, dans l'ordre.
