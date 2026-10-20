@@ -128,8 +128,9 @@ fn lire() -> Option<Etat> {
     juger_unites(&listes, installee, activee, synchronisee())
 }
 
-/// L'horloge est-elle synchronisée ? Le noyau le sait (adjtimex, celui que lit timedated) : pas d'état d'erreur et
-/// pas de drapeau « non synchronisée ». `None` : le noyau refuse.
+/// L'horloge est-elle synchronisée ? Le noyau le sait (adjtimex), jugé comme timedated : une erreur estimée sous
+/// 16 secondes. Pas sur le drapeau « non synchronisée » : chrony sans « rtcsync » le laisse posé pour toujours.
+/// `None` : le noyau refuse.
 #[cfg(target_os = "linux")]
 fn synchronisee() -> Option<bool> {
     // SAFETY : avec `modes` à zéro, adjtimex ne change rien ; il remplit seulement la structure, à nous, passée par
@@ -138,7 +139,7 @@ fn synchronisee() -> Option<bool> {
         let mut t: libc::timex = std::mem::zeroed();
         (libc::adjtimex(&raw mut t), t)
     };
-    (etat >= 0).then_some(etat != libc::TIME_ERROR && t.status & libc::STA_UNSYNC == 0)
+    (etat >= 0).then_some(t.maxerror < 16_000_000)
 }
 
 /// Windows : le service de temps (Start = 4 : désactivé) et son type de synchronisation (« NoSync » : aucune).

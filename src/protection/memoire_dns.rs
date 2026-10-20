@@ -43,7 +43,21 @@ fn lire() -> Result<Vec<String>, String> {
         )
         .to_string()
     };
-    let mut prise = std::os::unix::net::UnixStream::connect(SOCKET).map_err(|_| pas_de_resolved())?;
+    let en_root = || {
+        crate::tr!(
+            "lisible seulement en root : sudo vanguard sortantes",
+            "readable only as root: sudo vanguard outbound"
+        )
+        .to_string()
+    };
+    // Le socket est en 0600 sur les systemd d'avant polkit : refusé n'est pas absent.
+    let mut prise = std::os::unix::net::UnixStream::connect(SOCKET).map_err(|e| {
+        if e.kind() == std::io::ErrorKind::PermissionDenied {
+            en_root()
+        } else {
+            pas_de_resolved()
+        }
+    })?;
     let delai = Some(std::time::Duration::from_secs(5));
     let _ = prise.set_read_timeout(delai);
     let _ = prise.set_write_timeout(delai);
@@ -62,9 +76,10 @@ fn lire() -> Result<Vec<String>, String> {
     let texte = String::from_utf8_lossy(reponse.strip_suffix(&[0]).unwrap_or(&reponse)).into_owned();
     match lire_dump(&texte) {
         Some(Ok(noms)) => Ok(noms),
-        Some(Err(e)) if e.contains("Authentication") || e.contains("PermissionDenied") => Err(crate::tr!(
-            "lisible seulement en root : sudo vanguard sortantes",
-            "readable only as root: sudo vanguard outbound"
+        Some(Err(e)) if e.contains("Authentication") || e.contains("PermissionDenied") => Err(en_root()),
+        Some(Err(e)) if e.contains("MethodNotFound") => Err(crate::tr!(
+            "systemd-resolved trop ancien pour montrer sa mémoire DNS",
+            "systemd-resolved too old to show its DNS cache"
         )
         .to_string()),
         Some(Err(e)) => Err(crate::ui::affichable(&e)),

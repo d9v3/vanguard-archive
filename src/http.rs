@@ -74,11 +74,13 @@ fn fournisseur() {
 }
 
 /// Une redirection ne quitte jamais HTTPS : sinon quelqu'un sur le chemin pourrait répondre à la place du service (le
-/// registre d'un domaine, une liste d'abuse.ch). Dix au plus.
-fn client(delai: Duration) -> Option<reqwest::Client> {
+/// registre d'un domaine, une liste d'abuse.ch). Dix au plus. Avec `meme_hote`, jamais vers un autre hôte : reqwest n'y
+/// retire que les en-têtes d'authentification qu'il connaît, une clé d'API (« Auth-Key », « hibp-api-key ») suivrait.
+fn client(delai: Duration, meme_hote: bool) -> Option<reqwest::Client> {
     fournisseur();
-    let redirections = reqwest::redirect::Policy::custom(|essai| {
-        if essai.previous().len() >= 10 || essai.url().scheme() != "https" {
+    let redirections = reqwest::redirect::Policy::custom(move |essai| {
+        let autre_hote = essai.previous().first().and_then(|u| u.host_str()) != essai.url().host_str();
+        if essai.previous().len() >= 10 || essai.url().scheme() != "https" || (meme_hote && autre_hote) {
             essai.stop()
         } else {
             essai.follow()
@@ -110,7 +112,7 @@ pub(crate) fn envoyer(demande: Demande) -> Option<Reponse> {
     let adresse = adresse.to_string();
     let entetes: Vec<(String, String)> = entetes.into_iter().map(|(n, v)| (n.to_string(), v)).collect();
     a_part(async move {
-        let client = client(delai)?;
+        let client = client(delai, !entetes.is_empty())?;
         let mut requete = match corps {
             Some(corps) => client.post(&adresse).body(corps),
             None => client.get(&adresse),
@@ -158,7 +160,7 @@ pub(crate) fn recevoir_en_comptant(adresse: &str, fin: Instant, octets: &AtomicU
                 .build()
                 .ok()?;
             let resultat = moteur.block_on(async {
-                let mut reponse = client(reste)?.get(adresse).send().await.ok()?;
+                let mut reponse = client(reste, false)?.get(adresse).send().await.ok()?;
                 let mut recus = 0u64;
                 while Instant::now() < fin && !arret.load(Ordering::Relaxed) {
                     let Ok(Some(morceau)) = reponse.chunk().await else {
