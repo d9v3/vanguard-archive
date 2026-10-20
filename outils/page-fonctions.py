@@ -84,6 +84,18 @@ def verifications_vm() -> str:
     return nombres[-1]
 
 
+def alleger(page: str) -> str:
+    """La page publiée sans ce qui ne sert qu'à la tenir : commentaires HTML et CSS, indentation et lignes vides. Les
+    blocs <pre> gardent leurs espaces, qui y sont le texte même."""
+    morceaux = re.split(r"(<pre\b.*?</pre>)", page, flags=re.S)
+    for i in range(0, len(morceaux), 2):
+        m = re.sub(r"<!--.*?-->", "", morceaux[i], flags=re.S)
+        m = re.sub(r"/\*.*?\*/", "", m, flags=re.S)
+        m = re.sub(r"\n[ \t]+", "\n", m)
+        morceaux[i] = re.sub(r"\n{2,}", "\n", m)
+    return "".join(morceaux)
+
+
 def main():
     a = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     a.add_argument("--verifier", help="sortie de outils/verifier.sh (nombres de tests)")
@@ -103,7 +115,7 @@ def main():
         "VERSION": v,
         "VERSION_COURTE": courte,
         # Dans la boîte du terminal (76 colonnes), le numéro garde la place d'origine.
-        "VERSION_COURTE_TERMINAL": courte.ljust(14),
+        "VERSION_COURTE_TERMINAL": courte.ljust(16),
         "DATE": f"{jour.day} {MOIS[jour.month - 1]} {jour.year}",
         "LIGNES": lignes_de_rust(),
         "COMMANDES": commandes_du_guide(args.programme),
@@ -114,6 +126,7 @@ def main():
     page = re.sub(r"<!--.*?-->\n", "", page, count=1, flags=re.S)
     for cle, valeur in valeurs.items():
         page = page.replace("{{" + cle + "}}", valeur)
+    page = alleger(page)
     reste = re.findall(r"\{\{[A-Z_]+\}\}", page)
     if reste:
         sys.exit(f"✖ trous non remplis : {', '.join(sorted(set(reste)))}")

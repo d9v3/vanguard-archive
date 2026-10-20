@@ -2,10 +2,12 @@
      Les {{…}} sont remplis par le script ; le reste (les fonctions, les nouveautés) se tient à la main, comme la liste
      des fonctions des README. Rien de personnel : ni nom, ni réseau, ni lien du dépôt privé. -->
 <title>Vanguard {{VERSION_COURTE}}</title>
+<meta name="description" content="Vanguard : bilan de sécurité, antivirus et dépannage pour Windows, Linux et macOS, depuis une clé USB. Fonctions, fiche technique et commandes.">
+<meta name="theme-color" content="#0b1220">
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Condensed:wght@600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Condensed:wght@700&family=IBM+Plex+Sans:wght@400;600&family=IBM+Plex+Mono:wght@400&display=swap">
 <style>
 /* Mise en page : une bande d'ouverture sombre (le message à gauche, la vraie fenêtre du programme à droite), puis des
    sections claires sur une colonne de 72 rem ; tout passe sur une colonne sur téléphone. */
@@ -71,15 +73,23 @@ h1, h2, h3 { font-family: var(--titre); text-wrap: balance; margin: 0; }
 .fait b { display: block; font-family: var(--titre); font-size: 1.6rem; line-height: 1.1; font-variant-numeric: tabular-nums; }
 .fait span { font-size: .85rem; color: var(--nuit-doux); }
 
-/* La fenêtre du programme */
-.fenetre { background: #0d1117; border: 1px solid var(--nuit-trait); border-radius: .75rem; box-shadow: 0 24px 60px -24px rgba(0, 0, 0, .65); min-width: 0; }
+/* La fenêtre du programme : son texte se règle sur la largeur de la boîte, pour que les 76 colonnes du vrai
+   terminal y tiennent sans défiler (un caractère d'IBM Plex Mono fait 0,6 em). */
+.fenetre { container-type: inline-size; background: #0d1117; border: 1px solid var(--nuit-trait); border-radius: .75rem; box-shadow: 0 24px 60px -24px rgba(0, 0, 0, .65); min-width: 0; }
 .fenetre .titre-fenetre { display: flex; align-items: center; gap: .45rem; padding: .6rem .8rem; border-bottom: 1px solid #1d2430; }
 .fenetre .titre-fenetre i { width: .62rem; height: .62rem; border-radius: 50%; background: #2c3442; }
 .fenetre .titre-fenetre span { margin-left: .4rem; font-family: var(--mono); font-size: .72rem; color: #7d8898; }
-.fenetre pre { margin: 0; padding: 1rem 1.1rem 1.2rem; overflow-x: auto; font-family: var(--mono); font-size: .78rem; line-height: 1.55; color: #e6edf3; }
+.fenetre pre { margin: 0; padding: 1rem 1.1rem 1.2rem; overflow-x: auto; font-family: var(--mono); font-size: min(.78rem, calc((100cqi - 2.3rem) / 47.5)); line-height: 1.55; color: #e6edf3; }
 .fenetre pre a { color: #e6edf3; text-decoration: none; }
 .fenetre pre a:hover, .fenetre pre a:focus-visible { color: #3cc3d4; }
 .g { color: #7d8898; } .c { color: #3cc3d4; }
+/* Cadre et filets en CSS, pas en caractères ╭─╮ : IBM Plex Mono ne les a pas, et ceux d'une autre police, un peu plus
+   larges, décalaient le bord droit. 1ch = un caractère du terminal. */
+.boite { display: inline-block; width: 76ch; padding: .45em 0; border: 1px solid #7d8898; border-radius: .5em; margin-bottom: .2em; }
+.filet { display: inline-flex; align-items: center; gap: 1ch; width: 74ch; color: #7d8898; }
+.filet::before, .filet::after { content: ""; border-top: 1px solid #7d8898; }
+.filet::before { width: 2ch; }
+.filet::after { flex: 1; }
 .menu-court { display: none; list-style: none; margin: 0; padding: .4rem 1rem 1rem; font-family: var(--mono); font-size: .86rem; }
 .menu-court li a { display: grid; grid-template-columns: 1.8rem 1fr; gap: .6rem; padding: .5rem 0; border-top: 1px solid #1d2430; color: #e6edf3; text-decoration: none; }
 .menu-court li:first-child a { border-top: 0; }
@@ -89,13 +99,15 @@ h1, h2, h3 { font-family: var(--titre); text-wrap: balance; margin: 0; }
 main { display: grid; gap: 5rem; padding-block: 4.5rem 4rem; }
 /* Une section, élément de grille, prendrait sinon la largeur de son plus long contenu (code, exemple) : la page déborderait sur téléphone. */
 main > section { min-width: 0; }
+/* Les sections loin sous l'écran ne sont mises en page qu'en approchant : la page s'affiche plus vite sur téléphone. */
+main > section + section { content-visibility: auto; contain-intrinsic-size: auto 1200px; }
 .tete-section { display: grid; gap: .6rem; max-width: 46rem; margin-bottom: 2rem; }
 .tete-section h2 { font-size: clamp(1.7rem, 3.2vw, 2.4rem); line-height: 1.12; font-weight: 700; }
 .tete-section p { color: var(--doux); margin: 0; font-size: 1.05rem; }
 
 .etapes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1.25rem; list-style: none; padding: 0; margin: 0; counter-reset: etape; }
 .etapes li { background: var(--surface); border: 1px solid var(--trait); border-radius: .7rem; padding: 1.3rem 1.3rem 1.4rem; counter-increment: etape; }
-.etapes li::before { content: counter(etape); display: grid; place-items: center; width: 2rem; height: 2rem; border-radius: 50%; background: var(--accent-fond); color: var(--accent); font-family: var(--mono); font-weight: 500; margin-bottom: .9rem; }
+.etapes li::before { content: counter(etape); display: grid; place-items: center; width: 2rem; height: 2rem; border-radius: 50%; background: var(--accent-fond); color: var(--accent); font-family: var(--mono); margin-bottom: .9rem; }
 .etapes h3 { font-size: 1.2rem; margin-bottom: .3rem; }
 .etapes p { margin: 0; color: var(--doux); font-size: .96rem; }
 
@@ -221,16 +233,14 @@ details.cli[open] summary { border-bottom: 1px solid var(--trait); }
       </div>
       <div class="fenetre" role="navigation" aria-label="Menu principal de Vanguard">
         <div class="titre-fenetre"><i></i><i></i><i></i><span>vanguard</span></div>
-<pre><span class="g">╭──────────────────────────────────────────────────────────────────────────╮</span>
-<span class="g">│</span>  <b>VANGUARD {{VERSION_COURTE_TERMINAL}}</b>sécurise et optimise ta machine et ton réseau  <span class="g">│</span>
-<span class="g">╰──────────────────────────────────────────────────────────────────────────╯</span>
+<pre><span class="boite">  <b>VANGUARD {{VERSION_COURTE_TERMINAL}}</b>sécurise et optimise ta machine et ton réseau</span>
 
-  <span class="g">── BILAN DE SÉCURITÉ ─────────────────────────────────────────────────────</span>
+  <span class="filet">BILAN DE SÉCURITÉ</span>
  <span class="c">►</span>  1  <a href="#bilan">Bilan complet : machine + réseau</a>     <span class="c">← commencer ici</span>
     2  <a href="#bilan">Corriger les problèmes trouvés</a>
     3  <a href="#bilan">Rapport détaillé dans le navigateur</a>
 
-  <span class="g">── OUTILS ────────────────────────────────────────────────────────────────</span>
+  <span class="filet">OUTILS</span>
     4  <a href="#depanner">Cette machine ›</a>                      <span class="g">audit, mises à jour, réparer…</span>
     5  <a href="#reseau">Réseau et Internet ›</a>                 <span class="g">appareils, surveillance, débit</span>
     6  <a href="#protection">Antivirus et protection ›</a>            <span class="g">analyses, clé USB, fuites…</span>
