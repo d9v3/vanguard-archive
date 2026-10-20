@@ -1,123 +1,39 @@
 //! Analyse YARA : 308 règles de ReversingLabs (rançongiciels, voleurs de mots de passe, chevaux de Troie, portes
 //! dérobées…), intégrées au programme (assets/yara, outils/maj-yara.sh ; allégées par build.rs, de 2,7 Mo à 1,2 Mo,
-//! sans en changer le sens) et appliquées par le moteur « yara » du système. En complément de l'antivirus : une règle décrit une famille entière, variantes comprises. Lecture seule :
-//! rien n'est déplacé ni supprimé. Le moteur s'installe après accord (paquet de la distribution, Homebrew, winget).
+//! sans en changer le sens) et appliquées par YARA-X, le moteur YARA écrit en Rust par VirusTotal (licence
+//! BSD-3-Clause), compilé dans Vanguard : rien à installer, depuis la clé et sans Internet comme ailleurs. En
+//! complément de l'antivirus : une règle décrit une famille entière, variantes comprises. Lecture seule : rien n'est
+//! déplacé ni supprimé.
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::sync::OnceLock;
+use std::time::Duration;
 
 use crate::protection::antivirus::{Examen, Portee};
 use crate::ui::*;
 
 const REGLES: &str = include_str!(concat!(env!("OUT_DIR"), "/reversinglabs.yara"));
 
-/// Le moteur : dans le PATH, ou, sous Windows, là où winget le pose (juste après l'installation, le PATH de ce
-/// programme ne le connaît pas encore).
-fn moteur() -> Option<PathBuf> {
-    let nom = if cfg!(windows) { "yara.exe" } else { "yara" };
-    let dans_le_path =
-        std::env::var_os("PATH").and_then(|p| std::env::split_paths(&p).map(|d| d.join(nom)).find(|f| f.is_file()));
-    #[cfg(windows)]
-    let dans_le_path = dans_le_path.or_else(|| {
-        let racines: Vec<PathBuf> = [("LOCALAPPDATA", r"Microsoft\WinGet"), ("ProgramFiles", "WinGet")]
-            .iter()
-            .filter_map(|(variable, sous)| std::env::var_os(variable).map(|d| PathBuf::from(d).join(sous)))
-            .collect();
-        poses_par_winget(&racines).into_iter().find(|f| f.is_file())
-    });
-    dans_le_path
-}
+/// Les fichiers plus gros ne sont pas lus (images disque, vidéos), mais dits : aucun des programmes que visent les
+/// règles n'en approche, et les lire prendrait de longues minutes.
+const TAILLE_MAX: u64 = 256 << 20;
 
-/// Où winget pose le moteur, pour le compte (%LOCALAPPDATA%\Microsoft\WinGet) ou pour la machine
-/// (%ProgramFiles%\WinGet, winget lancé en administrateur) : le lien « yara » de Links, puis le programme lui-même
-/// dans Packages, quand winget n'a pas pu créer le lien et a seulement ajouté son dossier au PATH.
-#[cfg_attr(not(windows), allow(dead_code))]
-fn poses_par_winget(racines: &[PathBuf]) -> Vec<PathBuf> {
-    let mut candidats = Vec::new();
-    for racine in racines {
-        candidats.push(racine.join("Links").join("yara.exe"));
-        let mut paquets: Vec<PathBuf> = std::fs::read_dir(racine.join("Packages"))
-            .into_iter()
-            .flatten()
-            .flatten()
-            .filter(|p| p.file_name().to_string_lossy().starts_with("VirusTotal.YARA_"))
-            .map(|p| p.path())
-            .collect();
-        paquets.sort();
-        for paquet in paquets {
-            candidats.extend([paquet.join("yara64.exe"), paquet.join("yara.exe")]);
-        }
-    }
-    candidats
-}
+/// Le temps laissé à chaque fichier, et le nombre de fichiers analysés ensemble.
+const DELAI_PAR_FICHIER: Duration = Duration::from_secs(30);
+const FILS: usize = 4;
 
-/// Les options de prudence que ce moteur connaît, lues dans son aide : -N (liens non suivis : pas de boucle, rien
-/// hors des dossiers choisis) existe déjà dans la 4.1 d'Ubuntu 22.04, -z (fichiers de plus de 256 Mo sautés : images
-/// disque, vidéos) seulement depuis la 4.2. Le numéro de version ne suffisait pas : il retirait -N à la 4.1.
-fn options_de_prudence(moteur: &Path) -> Vec<&'static str> {
-    let aide = crate::commande::lancer(Command::new(moteur).arg("--help"), 10)
-        .map(|r| r.sortie + &r.erreurs)
-        .unwrap_or_default();
-    options_connues(&aide)
-}
-
-fn options_connues(aide: &str) -> Vec<&'static str> {
-    let mut options = Vec::new();
-    if aide.contains("--no-follow-symlinks") {
-        options.push("-N");
-    }
-    if aide.contains("--skip-larger") {
-        options.extend(["-z", "268435456"]);
-    }
-    options
-}
-
-/// Propose d'installer le moteur ; `true` s'il est là ensuite.
-fn installer() -> bool {
-    trp!(
-        "  Le moteur YARA (libre, de VirusTotal) n'est pas installé.",
-        "  The YARA engine (open source, by VirusTotal) is not installed."
-    );
-    #[cfg(target_os = "linux")]
-    let commande = crate::machine::linux::Paquets::detecter().map(|g| g.installer("yara"));
-    #[cfg(target_os = "macos")]
-    let commande = crate::machine::macos::homebrew().map(|brew| format!("{brew} install yara"));
-    #[cfg(windows)]
-    let commande = Some(
-        "winget install --id VirusTotal.YARA -e --source winget --accept-source-agreements --accept-package-agreements"
-            .to_string(),
-    );
-    let Some(commande) = commande else {
-        trp!(
-            "  Installe le paquet « yara » avec l'outil de ton système, puis relance l'analyse.",
-            "  Install the “yara” package with your system's tool, then run the scan again."
-        );
-        return false;
-    };
-    println!("  {GRIS}{commande}{RESET}");
-    if !demander(tr!("  L'installer maintenant ? [o/N] : ", "  Install it now? [y/N]: ")).oui() {
-        return false;
-    }
-    // Installation au premier plan : sudo ou winget peuvent poser une question.
-    #[cfg(unix)]
-    let fait = Command::new("bash").arg("-c").arg(&commande).status();
-    #[cfg(windows)]
-    let fait = Command::new("winget")
-        .args(commande.split_whitespace().skip(1))
-        .status();
-    if !fait.is_ok_and(|s| s.success()) {
-        trp!("  ✖ Installation impossible.", "  ✖ Installation failed.");
-        return false;
-    }
-    // Installé, mais introuvable d'ici : ce n'est pas un échec, il suffit de relancer Vanguard.
-    if moteur().is_none() {
-        trp!(
-            "  ✖ Moteur installé, mais pas encore trouvé : relance Vanguard.",
-            "  ✖ Engine installed, but not found yet: restart Vanguard."
-        );
-        return false;
-    }
-    true
+/// Les règles, compilées une fois par lancement (une seconde et demie) ; les analyses suivantes les reprennent.
+/// `Err` : elles ne se compilent pas, ce qu'un test empêche d'arriver jusqu'à une version livrée.
+fn regles() -> Result<&'static yara_x::Rules, &'static str> {
+    static COMPILEES: OnceLock<Result<yara_x::Rules, String>> = OnceLock::new();
+    COMPILEES
+        .get_or_init(|| {
+            let mut compilateur = yara_x::Compiler::new();
+            compilateur.add_source(REGLES).map_err(|e| e.to_string())?;
+            Ok(compilateur.build())
+        })
+        .as_ref()
+        .map_err(String::as_str)
 }
 
 /// Les endroits à risque : téléchargements, bureau, programmes lancés au démarrage (et le dossier temporaire sous
@@ -158,20 +74,86 @@ struct Trouve {
     chemin: PathBuf,
 }
 
-/// Sortie de yara : une ligne « Règle chemin » par correspondance (le chemin peut contenir des espaces). Le chemin,
-/// seulement montré, est lu prêt à montrer : son nom est celui qu'a choisi l'auteur du fichier.
-fn lire_sortie(sortie: &str) -> Vec<Trouve> {
-    sortie
-        .lines()
-        .filter_map(|l| {
-            let (regle, fichier) = l.split_once(' ')?;
-            (!regle.is_empty() && !fichier.is_empty()).then(|| Trouve {
-                regle: regle.to_string(),
-                fichier: affichable(fichier),
-                chemin: PathBuf::from(fichier),
+impl Trouve {
+    /// Le chemin, seulement montré, est rendu inoffensif : son nom est celui qu'a choisi l'auteur du fichier.
+    fn nouveau(regle: &str, chemin: &Path) -> Trouve {
+        Trouve {
+            regle: regle.to_string(),
+            fichier: affichable(&chemin.display().to_string()),
+            chemin: chemin.to_path_buf(),
+        }
+    }
+}
+
+/// Les fichiers d'une cible, sans suivre les liens (pas de boucle, rien hors des dossiers choisis) ; les dossiers
+/// illisibles s'ajoutent à `illisibles`, et les fichiers de plus de `TAILLE_MAX`, qui ne sont pas lus : ce qui n'a pas
+/// été vérifié est dit.
+fn fichiers(cible: &Path, illisibles: &mut Vec<PathBuf>) -> Vec<PathBuf> {
+    let mut trouves = Vec::new();
+    let mut a_voir = vec![cible.to_path_buf()];
+    while let Some(chemin) = a_voir.pop() {
+        let Ok(meta) = std::fs::symlink_metadata(&chemin) else {
+            illisibles.push(chemin);
+            continue;
+        };
+        if meta.is_file() {
+            if meta.len() <= TAILLE_MAX {
+                trouves.push(chemin);
+            } else {
+                illisibles.push(chemin);
+            }
+        } else if meta.is_dir() {
+            match std::fs::read_dir(&chemin) {
+                Ok(entrees) => a_voir.extend(entrees.flatten().map(|e| e.path())),
+                Err(_) => illisibles.push(chemin),
+            }
+        }
+    }
+    trouves
+}
+
+/// Les règles appliquées à des fichiers, par `FILS` fils, chacun avec son propre analyseur : (correspondances,
+/// fichiers illisibles ou trop longs à lire).
+fn analyser_fichiers(regles: &yara_x::Rules, liste: &[PathBuf]) -> (Vec<Trouve>, Vec<PathBuf>) {
+    let morceaux: Vec<&[PathBuf]> = liste.chunks(liste.len().div_ceil(FILS).max(1)).collect();
+    std::thread::scope(|s| {
+        let fils: Vec<_> = morceaux
+            .into_iter()
+            .map(|morceau| {
+                s.spawn(move || {
+                    let mut analyseur = yara_x::Scanner::new(regles);
+                    analyseur.set_timeout(DELAI_PAR_FICHIER);
+                    let (mut trouves, mut echecs) = (Vec::new(), Vec::new());
+                    for f in morceau {
+                        match analyseur.scan_file(f) {
+                            Ok(r) => trouves.extend(r.matching_rules().map(|m| Trouve::nouveau(m.identifier(), f))),
+                            Err(_) => echecs.push(f.clone()),
+                        }
+                    }
+                    (trouves, echecs)
+                })
             })
-        })
-        .collect()
+            .collect();
+        fils.into_iter()
+            .filter_map(|f| f.join().ok())
+            .fold((Vec::new(), Vec::new()), |(mut t, mut e), (t2, e2)| {
+                t.extend(t2);
+                e.extend(e2);
+                (t, e)
+            })
+    })
+}
+
+/// Ce qui n'a pas pu être lu dans une cible, en une phrase : le nombre, et le premier pour exemple.
+fn illisible(cible: &Path, echecs: &[PathBuf]) -> Option<String> {
+    let premier = echecs.first()?;
+    Some(trf!(
+        "{} : {} élément(s) illisible(s), trop gros ou trop long(s) à lire, dont {}",
+        "{}: {} item(s) unreadable, too large or too slow to read, including {}",
+        chemin_affichable(cible),
+        echecs.len(),
+        chemin_affichable(premier)
+    ))
 }
 
 /// La famille d'une règle de ReversingLabs, lue dans son nom (« ByteCode_MSIL_Ransomware_Apis »).
@@ -193,55 +175,33 @@ fn famille(regle: &str) -> &'static str {
     tr!("logiciel malveillant", "malware")
 }
 
-/// Applique les 308 règles aux cibles : (correspondances, erreurs du moteur). `None` : moteur absent (installation
-/// refusée) ou règles impossibles à écrire, ce qui est déjà dit.
+/// Applique les 308 règles aux cibles : (correspondances, ce qui n'a pas pu être lu). `None` : règles qui ne se
+/// compilent pas, ce qui est dit. Tout ce qui n'a pas pu être lu est rendu : jamais compté comme sain.
 fn appliquer(cibles: &[PathBuf]) -> Option<(Vec<Trouve>, Vec<String>)> {
-    let moteur = moteur().or_else(|| installer().then(moteur).flatten())?;
-    // Les règles sont écrites dans un dossier jetable réservé à l'utilisateur, puis effacées.
-    let Ok(dossier) = crate::protection::isoler::dossier_jetable() else {
-        trp!(
-            "  ✖ Dossier temporaire impossible à créer.",
-            "  ✖ Could not create a temporary folder."
-        );
-        return None;
+    let regles = match regles() {
+        Ok(r) => r,
+        Err(e) => {
+            println!(
+                "  ✖ {}",
+                trf!(
+                    "Règles YARA impossibles à compiler : {e}",
+                    "YARA rules could not be compiled: {e}"
+                )
+            );
+            return None;
+        }
     };
-    let regles = dossier.join("reversinglabs.yara");
-    if std::fs::write(&regles, REGLES).is_err() {
-        let _ = std::fs::remove_dir_all(&dossier);
-        trp!("  ✖ Règles impossibles à écrire.", "  ✖ Could not write the rules.");
-        return None;
-    }
-    let prudence = options_de_prudence(&moteur);
     let mut trouves = Vec::new();
-    // Toute sortie en erreur du moteur est dite : ce qu'il n'a pas pu lire n'est jamais compté comme sain.
-    let mut erreurs: Vec<String> = Vec::new();
+    let mut erreurs = Vec::new();
     for cible in cibles {
         trp!("  Analyse de {}…", "  Scanning {}…", chemin_affichable(cible));
-        let mut commande = Command::new(&moteur);
-        commande.args(["-r", "-w", "-p", "4", "-a", "30"]).args(&prudence);
-        commande.arg(&regles).arg(cible);
-        match crate::commande::lancer(&mut commande, 3600) {
-            Some(r) => {
-                trouves.extend(lire_sortie(&r.sortie));
-                if r.code != Some(0) {
-                    // Le message du moteur cite souvent le fichier qu'il n'a pas pu lire.
-                    let raison = r
-                        .erreurs
-                        .lines()
-                        .map(str::trim)
-                        .find(|l| !l.is_empty())
-                        .map_or_else(|| trf!("code {:?}", "code {:?}", r.code), affichable);
-                    erreurs.push(format!("{} : {raison}", chemin_affichable(cible)));
-                }
-            }
-            None => erreurs.push(trf!(
-                "{} : le moteur n'a pas pu aller au bout (lancement impossible, ou plus d'une heure)",
-                "{}: the engine could not finish (could not start, or over an hour)",
-                chemin_affichable(cible)
-            )),
-        }
+        let mut echecs = Vec::new();
+        let liste = fichiers(cible, &mut echecs);
+        let (t, e) = analyser_fichiers(regles, &liste);
+        trouves.extend(t);
+        echecs.extend(e);
+        erreurs.extend(illisible(cible, &echecs));
     }
-    let _ = std::fs::remove_dir_all(&dossier);
     Some((trouves, erreurs))
 }
 
@@ -313,7 +273,7 @@ pub fn analyser(portee: &Portee) {
 /// Un seul fichier, pour « Vérifier un fichier téléchargé » : le résultat, que l'appelant affiche.
 pub(crate) fn examiner(fichier: &Path) -> Examen {
     match appliquer(&[fichier.to_path_buf()]) {
-        None => Examen::Impossible(tr!("moteur YARA absent", "YARA engine missing").into()),
+        None => Examen::Impossible(tr!("règles YARA inutilisables", "YARA rules unusable").into()),
         Some((trouves, _)) if !trouves.is_empty() => Examen::Trouve(
             trouves
                 .iter()
@@ -435,54 +395,65 @@ mod tests {
     }
 
     #[test]
-    fn sortie_de_yara() {
-        let sortie = "Win32_Ransomware_WannaCry /home/alice/Téléchargements/facture urgente.exe\n\
-                      ByteCode_MSIL_Infostealer_RedLine C:\\Users\\alice\\Downloads\\outil.exe\n";
-        let trouves = lire_sortie(sortie);
-        assert_eq!(trouves.len(), 2);
-        assert_eq!(trouves[0].fichier, "/home/alice/Téléchargements/facture urgente.exe");
-        assert_eq!(famille(&trouves[0].regle), "rançongiciel");
-        assert_eq!(famille(&trouves[1].regle), "voleur de mots de passe");
+    fn familles_des_regles() {
+        assert_eq!(famille("Win32_Ransomware_WannaCry"), "rançongiciel");
+        assert_eq!(famille("ByteCode_MSIL_Infostealer_RedLine"), "voleur de mots de passe");
         assert_eq!(famille("Linux_Inconnu_X"), "logiciel malveillant");
         // Le nom du fichier est celui que son auteur a choisi : piégé, il arrive inoffensif.
-        let piege =
-            lire_sortie("Win32_Ransomware_WannaCry /home/alice/fa\x1b]52;c;eA==\x07\x1b[2K\r\u{202e}cture.exe\n");
-        assert_eq!(piege[0].fichier, "/home/alice/fa�]52;c;eA==��[2K��cture.exe");
-    }
-
-    #[test]
-    fn moteur_pose_par_winget() {
-        // Pour le compte puis pour la machine : le lien de Links d'abord, puis le programme dans son paquet.
-        let d = std::env::temp_dir().join(format!("vanguard-yara-winget-{}", std::process::id()));
-        let compte = d.join("compte");
-        let paquet = compte
-            .join("Packages")
-            .join("VirusTotal.YARA_Microsoft.Winget.Source_8wekyb3d8bbwe");
-        std::fs::create_dir_all(&paquet).unwrap();
-        std::fs::create_dir_all(compte.join("Packages").join("Autre.Paquet_x")).unwrap();
-        let machine = d.join("machine");
-        assert_eq!(
-            poses_par_winget(&[compte.clone(), machine.clone()]),
-            [
-                compte.join("Links").join("yara.exe"),
-                paquet.join("yara64.exe"),
-                paquet.join("yara.exe"),
-                machine.join("Links").join("yara.exe"),
-            ]
+        let piege = Trouve::nouveau(
+            "X",
+            Path::new("/home/alice/fa\x1b]52;c;eA==\x07\x1b[2K\r\u{202e}cture.exe"),
         );
-        let _ = std::fs::remove_dir_all(&d);
+        assert!(!piege.fichier.contains('\x1b') && !piege.fichier.contains('\u{202e}'));
     }
 
+    /// Les 308 règles se compilent avec YARA-X : une règle refusée ne passe pas jusqu'à une version livrée.
     #[test]
-    fn options_lues_dans_l_aide_du_moteur() {
-        // Lignes de l'aide de la 4.1.3 d'Ubuntu 22.04 (-N, pas de -z) et de la 4.5.0 d'Ubuntu 24.04 (les deux).
-        let aide_41 = "  -r,  --recursive                      recursively search directories\n\
-                       -N,  --no-follow-symlinks             do not follow symlinks when scanning\n";
-        let aide_45 = "  -N,  --no-follow-symlinks                do not follow symlinks when scanning\n\
-                       -z,  --skip-larger=NUMBER                skip files larger than the given size\n";
-        assert_eq!(options_connues(aide_41), ["-N"]);
-        assert_eq!(options_connues(aide_45), ["-N", "-z", "268435456"]);
-        // Aide illisible (moteur bloqué, sortie vide) : rien de plus, comme avec un vieux moteur.
-        assert_eq!(options_connues(""), [] as [&str; 0]);
+    fn les_308_regles_se_compilent() {
+        assert!(regles().is_ok(), "{:?}", regles().err());
+    }
+
+    /// Un dossier d'essai : un faux programme qui remplit une règle d'essai de même forme que celles de ReversingLabs
+    /// (en-tête « MZ » et textes), un fichier ordinaire, un lien et un fichier creux trop gros, sautés.
+    #[test]
+    fn analyse_d_un_dossier() {
+        let mut compilateur = yara_x::Compiler::new();
+        compilateur
+            .add_source(
+                r#"rule Win32_Trojan_Essai { strings: $a = "vanguard-essai-yara" $b = { 4D 5A 90 } condition: uint16(0) == 0x5A4D and all of them }"#,
+            )
+            .unwrap();
+        let essai = compilateur.build();
+        let dossier = crate::protection::isoler::dossier_jetable().unwrap();
+        std::fs::create_dir_all(dossier.join("sous")).unwrap();
+        std::fs::write(dossier.join("sous/facture.exe"), b"MZ\x90\x00 vanguard-essai-yara").unwrap();
+        std::fs::write(dossier.join("note.txt"), b"PK vanguard-essai-yara").unwrap();
+        std::fs::File::create(dossier.join("image.iso"))
+            .unwrap()
+            .set_len(TAILLE_MAX + 1)
+            .unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(dossier.join("sous/facture.exe"), dossier.join("lien.exe")).unwrap();
+        let mut illisibles = Vec::new();
+        let liste = fichiers(&dossier, &mut illisibles);
+        assert_eq!(liste.len(), 2, "{liste:?}");
+        let (trouves, echecs) = analyser_fichiers(&essai, &liste);
+        // Le trop gros n'est pas lu, mais il est dit.
+        assert!(
+            illisibles.len() == 1 && illisibles[0].ends_with("image.iso"),
+            "{illisibles:?}"
+        );
+        assert!(echecs.is_empty());
+        assert_eq!(trouves.len(), 1);
+        assert_eq!(trouves[0].regle, "Win32_Trojan_Essai");
+        assert!(trouves[0].chemin.ends_with("sous/facture.exe"));
+        assert_eq!(famille(&trouves[0].regle), "cheval de Troie");
+        // Les vraies règles, sur le même dossier : rien.
+        assert!(analyser_fichiers(regles().unwrap(), &liste).0.is_empty());
+        // Une cible qui n'existe pas : dite, pas comptée comme saine.
+        let mut absents = Vec::new();
+        assert!(fichiers(&dossier.join("absent"), &mut absents).is_empty());
+        assert!(illisible(&dossier, &absents).is_some());
+        let _ = std::fs::remove_dir_all(&dossier);
     }
 }

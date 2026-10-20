@@ -174,8 +174,8 @@ never; the free space read again afterwards tells what was really gained.
 which nobody has a reason to touch. Ransomware that encrypts or renames them triggers a critical alert, at each
 check and hourly through monitoring, with what to do; placed and removed after your consent. And a YARA scan: 308
 ReversingLabs rules that recognize whole families (ransomware, password stealers, trojans, backdoors…), alongside
-the antivirus. What the antivirus or YARA finds can go into a
-reversible quarantine: the file is made unusable and noted, then put back exactly in its place if it was a false
+the antivirus, applied by YARA-X, compiled into Vanguard: nothing to install. What the antivirus or YARA finds can
+go into a reversible quarantine: the file is made unusable and noted, then put back exactly in its place if it was a false
 positive.
 
 **Secrets in git projects** — Vanguard reads the history of the git projects in the home folder: a password, API

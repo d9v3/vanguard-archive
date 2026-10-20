@@ -24,6 +24,8 @@ serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 sha1_smol = "1.0.1"
 tokio = { version = "1.53.3", features = ["rt-multi-thread", "net", "time", "io-util", "macros"] }
+# Le moteur YARA en Rust (VirusTotal) : seulement les modules dont les règles intégrées ont besoin (pe, elf).
+yara-x = { version = "1.21.0", default-features = false, features = ["pe-module", "elf-module", "constant-folding", "exact-atoms", "fast-regexp"] }
 
 [target."cfg(windows)".dependencies]
 enable-ansi-support = "0.3.1"
@@ -42,6 +44,12 @@ notify = { version = "8.2.0", default-features = false, features = ["macos_fseve
 strip = true
 lto = true
 codegen-units = 1
+
+# Les bibliothèques en développement : seulement les numéros de ligne (les traces d'erreur restent lisibles). Avec toutes
+# leurs informations de débogage, YARA-X et wasmtime portaient le programme de test au-delà de 400 Mo, plus que ce que la
+# mise à jour depuis la clé accepte de lire (mise_a_jour.rs, TAILLE_MAX).
+[profile.dev.package."*"]
+debug = "line-tables-only"
 
 [build-dependencies]
 winresource = "0.1.34"

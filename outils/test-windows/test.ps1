@@ -524,36 +524,19 @@ if (Question 'Faire ce test (six fichiers posés puis retirés dans Documents, I
     if (Get-ChildItem $dossiersPieges -Filter '!Vanguard*' -ErrorAction SilentlyContinue) { Bug 'Fichiers-pièges ENCORE présents' } else { Ok 'Fichiers-pièges retirés' }
 } else { Info 'Sautée.' }
 
-Etape 'YARA : moteur installé par winget, puis analyse d''un dossier'
-$yaraLien = Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Links\yara.exe'
-# Le moteur, là où Vanguard le cherche : le PATH, puis ce que winget pose pour le compte ou la machine (le lien de
-# Links, ou le programme dans Packages quand winget n'a pas pu créer le lien).
-function Moteur-Yara {
-    $dans = Get-Command yara.exe, yara64.exe -ErrorAction SilentlyContinue | Select-Object -First 1
-    if ($dans) { return $dans.Source }
-    foreach ($racine in (Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet'), (Join-Path $env:ProgramFiles 'WinGet')) {
-        $lien = Join-Path $racine 'Links\yara.exe'
-        if (Test-Path $lien) { return $lien }
-        $p = Get-ChildItem (Join-Path $racine 'Packages') -Directory -Filter 'VirusTotal.YARA*' -ErrorAction SilentlyContinue |
-            ForEach-Object { Get-ChildItem $_.FullName -Recurse -Include yara64.exe, yara.exe -ErrorAction SilentlyContinue } | Select-Object -First 1
-        if ($p) { return $p.FullName }
-    }
-    return $null
-}
+Etape 'YARA : analyse d''un dossier par YARA-X, compilé dans Vanguard (rien à installer)'
+# Depuis la 0.79, le moteur est dans le programme : aucune installation, aucune question, et rien de winget n'est cherché.
 $dossierYara = Join-Path $env:TEMP 'vanguard-dossier-yara'
 New-Item -ItemType Directory -Force $dossierYara | Out-Null
 Set-Content -Path (Join-Path $dossierYara 'note.txt') -Value 'fichier sans danger' -Encoding UTF8
-if ((Moteur-Yara) -or (Question 'Installer le moteur YARA par winget (VirusTotal.YARA), puis analyser un dossier ?')) {
-    LancerAvec 'yara' @('yara', $dossierYara) "o`n"
-    $moteur = Moteur-Yara
-    if ($moteur) { Ok "Moteur trouvé : $moteur" } else { Bug 'Moteur YARA introuvable (PATH, WinGet Links ou Packages)' }
-    $y = Sortie 'yara'
-    if ($y -match 'Analyse de|Scanning') { Ok 'Analyse lancée' } else { Bug 'Analyse PAS lancée' }
-    if ($y -match "n'a pas pu aller au bout|could not finish") { Bug 'Le moteur n''est pas allé au bout' }
-} else {
-    LancerAvec 'yara-refus' @('yara', $dossierYara) "n`n"
-    if ((Sortie 'yara-refus') -match "n'est pas installé|is not installed") { Ok 'Moteur absent dit, refus de l''installer respecté' } else { Bug 'Moteur absent PAS dit' }
-}
+[IO.File]::WriteAllBytes((Join-Path $dossierYara 'outil.exe'), [byte[]](0x4D, 0x5A, 0x90, 0x00) + [Text.Encoding]::ASCII.GetBytes('programme sans danger'))
+Lancer 'yara' @('yara', $dossierYara)
+$y = Sortie 'yara'
+if ($y -match 'Analyse de|Scanning') { Ok 'Analyse lancée' } else { Bug 'Analyse PAS lancée' }
+if ($y -match "installer|install it|winget") { Bug 'Vanguard parle encore d''installer un moteur YARA' }
+if ($y -match 'Aucun fichier ne correspond|No file matches') { Ok 'Dossier sans danger : rien trouvé, tout lu' }
+elseif ($y -match 'illisible|unreadable') { Bug 'Des fichiers du dossier d''essai n''ont pas pu être lus' }
+else { Bug 'Résultat de l''analyse YARA inattendu' }
 Remove-Item $dossierYara -Recurse -Force -ErrorAction SilentlyContinue
 
 Etape 'Copier mes fichiers : disque du système refusé, puis vraie copie vers le dossier partagé'

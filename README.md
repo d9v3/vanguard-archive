@@ -187,7 +187,7 @@ dans Documents, Images et Bureau, que personne n'a de raison de toucher. Un ran�
 renomme déclenche une alerte critique, au bilan et toutes les heures par la surveillance, avec la marche à suivre ;
 posés et retirés après accord. Et une analyse YARA : 308 règles de ReversingLabs qui reconnaissent des familles
 entières (rançongiciels, voleurs de mots de passe, chevaux de Troie, portes dérobées…), en complément de
-l'antivirus. Ce que l'antivirus ou YARA trouve peut aller en quarantaine, réversible : le fichier est rendu
+l'antivirus, appliquées par YARA-X, compilé dans Vanguard : rien à installer. Ce que l'antivirus ou YARA trouve peut aller en quarantaine, réversible : le fichier est rendu
 inutilisable et noté, puis remis exactement à sa place si c'était un faux positif.
 
 **Secrets dans les projets git** — Vanguard relit l'historique des projets git du dossier personnel : un mot de passe,

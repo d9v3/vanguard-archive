@@ -5,6 +5,11 @@ fait pour être publié). Date à ajuster au jour de la publication. Les lignes 
 travail resté sur l'ordinateur (branche `0.79`), décrit seulement d'après le résumé de la session : à vérifier contre
 `git log` avant de coller.
 
+À faire avant `/livrer` : installer `musl`, `clang` et `mingw-w64-gcc` (YARA-X compile un peu de C), et mettre à jour
+la ligne clippy de CLAUDE.md : `outils/verifier.sh` passe aux cibles Mac `CC_<cible>=clang` et
+`CFLAGS_<cible>=-ffreestanding -nostdlibinc -I outils/mac-entetes` (laissé tel quel ici : CLAUDE.md a une
+modification en cours sur l'ordinateur).
+
 ---
 
 ## 20 octobre 2026 : version 0.79
@@ -31,6 +36,10 @@ travail resté sur l'ordinateur (branche `0.79`), décrit seulement d'après le 
   une clé d'API ou un jeton écrit un jour reste, même effacé ensuite : clés reconnues à leur forme (AWS, GitHub,
   GitLab, Google, Stripe, Slack…), clés privées, mots de passe dans une adresse ou dans le code ; gitleaks, s'il est
   installé, ajoute ses règles. Aucun secret n'est affiché ni gardé.
+- **YARA sans rien installer.** Les 308 règles sont appliquées par YARA-X (le moteur YARA en Rust de VirusTotal,
+  licence BSD), compilé dans Vanguard sous Linux, Windows et macOS : plus de moteur à installer ni à proposer, et
+  quatre fichiers lus à la fois. Un fichier de plus de 256 Mo ou plus long que 30 s à analyser est dit, jamais compté
+  comme sain. Le programme passe d'environ 10 à 25 Mo.
 - **Outils libres reconnus, s'ils sont installés.** « Failles des images Docker » : trivy dit les failles connues,
   graves ou critiques, des images Docker ou Podman ; absent, Vanguard propose de l'installer par l'outil du système. Après
   des connexions SSH ratées, le bilan dit si fail2ban, sshguard ou CrowdSec bloque déjà les adresses qui insistent.
@@ -72,6 +81,10 @@ travail resté sur l'ordinateur (branche `0.79`), décrit seulement d'après le 
   or token written once stays, even when deleted later: keys recognized by their shape (AWS, GitHub, GitLab, Google,
   Stripe, Slack…), private keys, passwords in an address or in the code; gitleaks, when installed, adds its rules. No
   secret is shown or kept.
+- **YARA with nothing to install.** The 308 rules are applied by YARA-X (VirusTotal's YARA engine in Rust, BSD
+  license), compiled into Vanguard on Linux, Windows and macOS: no engine to install or offer any more, and four
+  files read at once. A file over 256 MB or taking more than 30 s to scan is reported, never counted as clean. The
+  program grows from about 10 to 25 MB.
 - **Recognized open source tools, when installed.** “Flaws in Docker images”: trivy tells the known serious or
   critical flaws in Docker or Podman images; when missing, Vanguard offers to install it with the system's tool. After failed SSH logins, the
   check tells whether fail2ban, sshguard or CrowdSec already blocks the addresses that keep trying.

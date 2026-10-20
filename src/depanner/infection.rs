@@ -247,8 +247,8 @@ fn liste_des_analyses(signe: Signe, internet: bool) -> Vec<Analyse> {
             texte: tr!("Analyse YARA", "YARA scan"),
             precision: tr!("familles connues", "known families"),
             detail: tr!(
-                "308 règles qui reconnaissent des familles entières (rançongiciels, voleurs de mots de passe, portes dérobées) dans Téléchargements, sur le Bureau et au démarrage. Lecture seule ; le moteur s'installe après accord.",
-                "308 rules that recognize whole families (ransomware, password stealers, backdoors) in Downloads, on the Desktop and at startup. Read-only; the engine installs after consent."
+                "308 règles qui reconnaissent des familles entières (rançongiciels, voleurs de mots de passe, portes dérobées) dans Téléchargements, sur le Bureau et au démarrage. Lecture seule, rien à installer.",
+                "308 rules that recognize whole families (ransomware, password stealers, backdoors) in Downloads, on the Desktop and at startup. Read-only, nothing to install."
             ),
             cochee: true,
             lancer: yara,
