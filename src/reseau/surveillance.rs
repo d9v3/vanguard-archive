@@ -266,6 +266,13 @@ fn veiller_passerelle(r: &reseau::Rapport) {
 }
 
 pub async fn surveiller() {
+    // Les exemples du guide se renouvellent pendant la passe (au plus une fois par semaine), sans la retarder.
+    let exemples = std::thread::spawn(crate::guide::renouveler_exemples);
+    passe().await;
+    let _ = exemples.join();
+}
+
+async fn passe() {
     veiller_machine();
     if let Some(fichiers) = crate::protection::integrite::changements_a_signaler() {
         notifier(

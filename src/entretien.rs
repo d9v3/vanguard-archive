@@ -156,6 +156,8 @@ pub fn entretenir() {
         let _ = std::fs::create_dir_all(crate::reseau::dossier_local());
         let _ = std::fs::write(fichier_etat(), t);
     }
+    // Sans surveillance, l'entretien du mois garde les exemples du guide à jour.
+    crate::guide::renouveler_exemples();
 }
 
 /// « vanguard entretien » sans argument : ce que dirait l'entretien maintenant, dans le terminal. Rien n'est gardé :

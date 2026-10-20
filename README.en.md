@@ -202,7 +202,8 @@ has its page: copy it, to type it here or on the computer of the person you help
 its output scrolls in Vanguard, and Esc stops it. Every system can be read everywhere (Windows commands from Linux,
 for example), and the guide tells when a program is missing on this computer. On top of that, the examples of
 [tldr-pages](https://tldr.sh) (CC BY 4.0 license): over 30,000 community commands for Linux, Windows, macOS and
-others. The guide downloads them by itself, at most once a week, and the key brings them along: run from the key, it
+others. The guide downloads them by itself, at most once a week, so do the monitoring and the monthly check-up (without
+opening the guide, once it has used them), and the key brings them along: run from the key, it
 has them from the first launch, even without Internet. They can be searched and copied, but never run from here,
 since Vanguard has not checked them.
 

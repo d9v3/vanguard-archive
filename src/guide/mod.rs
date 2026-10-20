@@ -25,6 +25,13 @@ use crate::risk::Niveau;
 use crate::selection::{Ligne, choisir, correspond, simplifier};
 use crate::ui::*;
 
+/// Renouvelle les exemples de tldr-pages de plus d'une semaine, sans ouvrir le guide (surveillance, entretien) : il
+/// les a frais à son ouverture. Les commandes vérifiées du guide, elles, font partie de Vanguard et arrivent avec ses
+/// mises à jour.
+pub fn renouveler_exemples() {
+    tldr::renouveler_maintenant();
+}
+
 /// Un système du guide. Linux se lit par distribution ; `Linux` lui-même ne paraît pas au menu : c'est le système des
 /// programmes communs à toutes, montrés avec chacune.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
