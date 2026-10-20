@@ -13,7 +13,8 @@ unsafe extern "system" {
     fn TerminateProcess(processus: *mut c_void, code: u32) -> i32;
     fn GetCurrentProcess() -> *mut c_void;
     fn CloseHandle(objet: *mut c_void) -> i32;
-    fn LocalFree(memoire: *mut c_void) -> *mut c_void;
+    /// Partagé avec `comptes` : une seule déclaration de chaque import.
+    pub(super) fn LocalFree(memoire: *mut c_void) -> *mut c_void;
 }
 
 #[link(name = "advapi32")]
@@ -26,7 +27,7 @@ unsafe extern "system" {
         taille: u32,
         rendue: *mut u32,
     ) -> i32;
-    fn ConvertSidToStringSidW(sid: *mut c_void, texte: *mut *mut u16) -> i32;
+    pub(super) fn ConvertSidToStringSidW(sid: *mut c_void, texte: *mut *mut u16) -> i32;
 }
 
 /// PROCESSENTRY32W (tlhelp32.h).
