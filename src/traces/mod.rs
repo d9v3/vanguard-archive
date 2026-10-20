@@ -304,6 +304,17 @@ impl Feuille {
     /// Recopie un fichier (son début, `BORNE_FICHIER` au plus) sous son chemin ; absent, rien n'est écrit.
     /// `importante` : illisible faute de droits, c'est un manque dit à l'écran.
     pub(crate) fn fichier(&mut self, chemin: &Path, importante: bool) {
+        self.fichier_avec(chemin, importante, false);
+    }
+
+    /// Un fichier du shell (.bashrc, .zshrc…) : recopié comme `fichier`, mais la valeur des variables au nom de secret
+    /// masquée (`masquer_secrets`).
+    #[cfg_attr(windows, allow(dead_code))]
+    pub(crate) fn fichier_shell(&mut self, chemin: &Path) {
+        self.fichier_avec(chemin, false, true);
+    }
+
+    fn fichier_avec(&mut self, chemin: &Path, importante: bool, masquer: bool) {
         let Ok(lien) = std::fs::symlink_metadata(chemin) else {
             return;
         };
@@ -321,7 +332,7 @@ impl Feuille {
         match lire_debut(chemin, BORNE_FICHIER, !est_lien) {
             Ok(texte) => {
                 self.lues += 1;
-                self.ajouter(&texte);
+                self.ajouter(&if masquer { masquer_secrets(&texte) } else { texte });
                 if meta.len() > BORNE_FICHIER {
                     let _ = writeln!(self.texte, "{}", Raison::Borne(BORNE_FICHIER).note());
                 }
@@ -453,6 +464,102 @@ pub(crate) fn texte_sur(t: &str) -> String {
 }
 
 /// Le début d'un fichier, en texte (les octets qui ne sont pas de l'UTF-8 deviennent « � »).
+/// Les fichiers du shell gardent souvent des secrets (« export GITHUB_TOKEN=… ») : les traces partent chez un
+/// spécialiste, pas les secrets. La valeur d'une variable dont un morceau du nom désigne un secret (TOKEN, SECRET,
+/// PASSWORD, KEY…) devient « (masqué) », comme le mot de passe d'une adresse « ://nom:mot@ ». Le reste reste tel quel :
+/// LD_PRELOAD=, PATH=, un alias, c'est justement ce qu'il faut voir.
+fn masquer_secrets(texte: &str) -> String {
+    let mut sortie = String::with_capacity(texte.len());
+    for ligne in texte.split_inclusive('\n') {
+        let (corps, fin) = ligne.strip_suffix('\n').map_or((ligne, ""), |c| (c, "\n"));
+        sortie.push_str(&masquer_adresse(&masquer_affectation(corps)));
+        sortie.push_str(fin);
+    }
+    sortie
+}
+
+/// « [export|declare -x|typeset -x|local|readonly] NOM=valeur » ou, en fish, « set [-gx…] NOM valeur ».
+fn masquer_affectation(ligne: &str) -> String {
+    let debut = ligne.len() - ligne.trim_start().len();
+    let mots: Vec<&str> = ligne[debut..].split_whitespace().collect();
+    if mots.first() == Some(&"set") {
+        if let Some(nom) = mots.iter().skip(1).find(|m| !m.starts_with('-'))
+            && nom_de_secret(nom)
+            && let Some(i) = ligne.find(&format!(" {nom} "))
+        {
+            return format!("{}(masqué)", &ligne[..i + nom.len() + 2]);
+        }
+        return ligne.to_string();
+    }
+    let Some(egal) = ligne.find('=') else {
+        return ligne.to_string();
+    };
+    let avant = ligne[..egal].trim();
+    let nom = avant.rsplit(char::is_whitespace).next().unwrap_or(avant);
+    let prefixe = avant[..avant.len() - nom.len()].split_whitespace().collect::<Vec<_>>();
+    let mots_permis = ["export", "declare", "typeset", "local", "readonly", "-x", "-gx", "-r"];
+    if !nom.is_empty()
+        && nom.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+        && prefixe.iter().all(|m| mots_permis.contains(m))
+        && nom_de_secret(nom)
+    {
+        format!("{}(masqué)", &ligne[..=egal])
+    } else {
+        ligne.to_string()
+    }
+}
+
+/// Un morceau du nom (séparé par « _ ») désigne-t-il un secret ? Par morceau : KEYBOARD ou PWD ne sont pas des secrets.
+fn nom_de_secret(nom: &str) -> bool {
+    const MOTS: &[&str] = &[
+        "KEY",
+        "APIKEY",
+        "TOKEN",
+        "SECRET",
+        "PASS",
+        "PASSWD",
+        "PASSWORD",
+        "PASSPHRASE",
+        "AUTH",
+        "CREDENTIAL",
+        "CREDENTIALS",
+        "PRIVATE",
+        "COOKIE",
+        "PAT",
+        "MDP",
+        "CLE",
+        "JETON",
+    ];
+    nom.to_ascii_uppercase()
+        .split('_')
+        .any(|m| MOTS.contains(&m) || ["TOKEN", "SECRET", "PASSWORD", "APIKEY"].iter().any(|s| m.ends_with(s)))
+}
+
+/// « scheme://nom:mot@hôte » : le mot devient « (masqué) ».
+fn masquer_adresse(ligne: &str) -> String {
+    let mut sortie = String::new();
+    let mut reste = ligne;
+    while let Some(i) = reste.find("://") {
+        let (avant, apres) = reste.split_at(i + 3);
+        sortie.push_str(avant);
+        let fin = apres
+            .find(|c: char| c == '/' || c.is_whitespace() || c == '"' || c == '\'')
+            .unwrap_or(apres.len());
+        let hote = &apres[..fin];
+        match (hote.rfind('@'), hote.find(':')) {
+            (Some(a), Some(d)) if d < a => {
+                sortie.push_str(&hote[..=d]);
+                sortie.push_str("(masqué)");
+                sortie.push_str(&hote[a..]);
+            }
+            _ => sortie.push_str(hote),
+        }
+        reste = &apres[fin..];
+    }
+    sortie.push_str(reste);
+    sortie
+}
+
 /// Avec `sans_lien`, l'ouverture refuse un lien (O_NOFOLLOW) : un fichier vérifié comme n'en étant pas un, puis
 /// remplacé par un lien avant d'être ouvert, n'est pas suivi pour autant.
 fn lire_debut(chemin: &Path, borne: u64, sans_lien: bool) -> std::io::Result<String> {
@@ -1823,6 +1930,37 @@ mod tests {
             f.fichier(&tube, false);
             assert!(debut.elapsed() < Duration::from_secs(2));
         }
+    }
+
+    #[test]
+    fn secrets_du_shell_masques() {
+        let texte = "export GITHUB_TOKEN=ghp_abc123\n\
+            CLE_API=\"x\" # commentaire\n\
+            declare -x DB_PASSWORD='p'\n\
+            set -gx OPENAI_API_KEY sk-123\n\
+            export LD_PRELOAD=/tmp/x.so\n\
+            export PATH=$HOME/bin:$PATH\n\
+            XKB_KEYBOARD=fr\n\
+            alias ll='ls -l'\n\
+            git clone https://alice:hunter2@exemple.org/depot\n\
+            export PWD_DE_BASE=/home\n";
+        let m = masquer_secrets(texte);
+        for secret in ["ghp_abc123", "\"x\"", "'p'", "sk-123", "hunter2"] {
+            assert!(!m.contains(secret), "{secret} visible :\n{m}");
+        }
+        for garde in [
+            "export GITHUB_TOKEN=(masqué)",
+            "set -gx OPENAI_API_KEY (masqué)",
+            "export LD_PRELOAD=/tmp/x.so",
+            "export PATH=$HOME/bin:$PATH",
+            "XKB_KEYBOARD=fr",
+            "alias ll='ls -l'",
+            "https://alice:(masqué)@exemple.org/depot",
+            "export PWD_DE_BASE=/home",
+        ] {
+            assert!(m.contains(garde), "{garde} manque :\n{m}");
+        }
+        assert_eq!(m.lines().count(), texte.lines().count());
     }
 
     #[test]

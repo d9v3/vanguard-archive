@@ -46,9 +46,14 @@ pub fn winget_installer(id: &str) -> String {
 
 /// Windows PowerShell 5.1, avec ses propres modules. Lancé depuis PowerShell 7 (Windows Terminal), il hériterait
 /// de son PSModulePath et chargerait des modules de la version 7, incompatibles : le lecteur Cert: manquait ainsi
-/// dans le test de la VM. Sans la variable, la 5.1 reprend ses chemins par défaut.
+/// dans le test de la VM. Sans la variable, la 5.1 reprend ses chemins par défaut. Celui de System32 : par son seul nom,
+/// Windows chercherait d'abord un powershell.exe posé à côté de Vanguard (dossier du programme lancé, peut-être en
+/// administrateur) ; introuvable là (Wine), le nom seul.
 pub fn powershell() -> Command {
-    let mut c = Command::new("powershell");
+    let systeme = std::env::var_os("SystemRoot")
+        .map(|r| std::path::PathBuf::from(r).join(r"System32\WindowsPowerShell\v1.0\powershell.exe"))
+        .filter(|p| p.is_file());
+    let mut c = Command::new(systeme.unwrap_or_else(|| "powershell".into()));
     c.env_remove("PSModulePath");
     c
 }

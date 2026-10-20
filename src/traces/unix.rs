@@ -30,10 +30,10 @@ pub(super) fn shell_et_ssh(f: &mut Feuille) {
         ".xinitrc",
         ".config/fish/config.fish",
     ] {
-        f.fichier(&m.join(nom), false);
+        f.fichier_shell(&m.join(nom));
     }
     for chemin in ["/etc/profile", "/etc/bash.bashrc", "/etc/zshrc", "/etc/zprofile"] {
-        f.fichier(Path::new(chemin), false);
+        f.fichier_shell(Path::new(chemin));
     }
     f.dossier(Path::new("/etc/profile.d"), 0, false);
     f.fichier(&m.join(".ssh/authorized_keys"), true);
