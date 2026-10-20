@@ -68,9 +68,10 @@ impl Valeur {
     }
 }
 
-/// Un plist binaire que le lecteur refuse pour ses bornes (trop d'objets, trop profond, références qui bouclent ou
-/// qui multiplient les copies) : fabriqué pour gêner l'analyse, pas un format inconnu. À ne jamais confier à
-/// `plutil`, qui développerait les références sans limite.
+/// Un plist binaire que le lecteur refuse : pour ses bornes (trop d'objets, trop profond, références qui bouclent ou
+/// qui multiplient les copies), ou parce qu'il est abîmé ou d'un type inconnu. Les deux sont confondus à dessein :
+/// un fichier qui place un type inconnu avant l'amplification passerait pour « format inconnu » et irait chez
+/// `plutil`, qui développerait les références sans limite. Le texte du bilan dit donc « illisible ou fabriqué ».
 fn hostile(octets: &[u8]) -> bool {
     octets.starts_with(b"bplist00") && binaire::lire(octets).is_none()
 }
@@ -92,8 +93,9 @@ pub enum Lu {
     Plist(Valeur),
     /// Plus de 8 Mo : aucun fichier de réglages ne fait cette taille ; fabriqué pour gêner l'analyse.
     TropGros,
-    /// Plist binaire refusé par les bornes (références qui bouclent ou qui multiplient les copies) : fabriqué pour
-    /// gêner l'analyse. À ne jamais confier à `plutil`, qui développerait les références sans limite.
+    /// Plist binaire refusé : par les bornes (références qui bouclent ou qui multiplient les copies), fabriqué pour
+    /// gêner l'analyse, ou abîmé (voir `hostile`). À ne jamais confier à `plutil`, qui développerait les références
+    /// sans limite.
     Hostile,
     /// Format inconnu ou fichier abîmé : `plutil` peut encore essayer en secours.
     Inconnu,
