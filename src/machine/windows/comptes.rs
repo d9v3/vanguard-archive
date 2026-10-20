@@ -275,12 +275,15 @@ struct Compte {
     derniere_connexion: u32,
 }
 
-/// Les comptes locaux ordinaires (NetUserEnum, puis NetUserGetInfo niveau 4 pour le SID) ; `None` si Windows refuse.
+/// Les comptes locaux ordinaires (NetUserEnum, puis NetUserGetInfo niveau 4 pour le SID) ; `None` si Windows refuse
+/// l'un d'eux ou n'en rend aucun.
 fn comptes_natifs() -> Option<Vec<Compte>> {
     const NORMAUX: u32 = 2;
     const TOUT: u32 = u32::MAX;
     const DESACTIVE: u32 = 0x2;
     const SANS_MOT_DE_PASSE: u32 = 0x20;
+    /// NERR_UserNotFound : le compte a été supprimé entre la liste et sa lecture ; le seul refus qui ne cache rien.
+    const COMPTE_DISPARU: u32 = 2221;
     let mut tampon: *mut std::ffi::c_void = std::ptr::null_mut();
     let (mut lus, mut total, mut reprise) = (0u32, 0u32, 0u32);
     // SAFETY : niveau 0 : un tableau de `lus` pointeurs vers des noms (USER_INFO_0), alloué par Windows, lu tant
@@ -315,8 +318,12 @@ fn comptes_natifs() -> Option<Vec<Compte>> {
         // SAFETY : NetUserGetInfo niveau 4 écrit un USER_INFO_4 alloué par Windows (que `Utilisateur4` reproduit) ;
         // son SID est dans le même bloc, converti avant de le rendre une seule fois.
         let compte = unsafe {
-            if NetUserGetInfo(std::ptr::null(), nom_large.as_ptr(), 4, &raw mut info) != 0 || info.is_null() {
+            let code = NetUserGetInfo(std::ptr::null(), nom_large.as_ptr(), 4, &raw mut info);
+            if code == COMPTE_DISPARU {
                 continue;
+            }
+            if code != 0 || info.is_null() {
+                return None;
             }
             let u = &*info.cast::<Utilisateur4>();
             let compte = sid_texte(u.sid).map(|sid| Compte {
@@ -329,9 +336,11 @@ fn comptes_natifs() -> Option<Vec<Compte>> {
             NetApiBufferFree(info.cast());
             compte
         };
-        comptes.extend(compte);
+        // Un compte sans SID lisible manquerait au bilan sans que rien ne le dise : toute la lecture passe alors à
+        // PowerShell.
+        comptes.push(compte?);
     }
-    Some(comptes)
+    (!comptes.is_empty()).then_some(comptes)
 }
 
 /// Les membres du groupe des administrateurs, « ORDINATEUR\nom » comme Get-LocalGroupMember : le groupe est trouvé

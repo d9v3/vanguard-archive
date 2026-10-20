@@ -90,24 +90,35 @@ fn lire() -> Option<Vec<String>> {
     }
 }
 
+/// Le nom sous lequel cet administrateur a déjà été vu. Sous Windows, un nom de compte ne dépend pas de la casse :
+/// « PC\Alice » lu autrement qu'au bilan d'avant (« PC\alice ») n'est pas un nouvel administrateur.
+fn cle_vue(vus: &BTreeMap<String, String>, nom: &str, sans_casse: bool) -> String {
+    sans_casse
+        .then(|| vus.keys().find(|k| k.to_lowercase() == nom.to_lowercase()).cloned())
+        .flatten()
+        .unwrap_or_else(|| nom.to_string())
+}
+
 fn juger(admins: &[String], avant: Option<&Vus>, aujourd_hui: NaiveDate) -> (Constat, Vus) {
     let mut vus = avant.map(|v| v.vus.clone()).unwrap_or_default();
-    for a in admins {
+    let cles: Vec<String> = admins.iter().map(|a| cle_vue(&vus, a, cfg!(windows))).collect();
+    for cle in &cles {
         let date = if avant.is_some() {
             aujourd_hui.format("%Y-%m-%d").to_string()
         } else {
             String::new()
         };
-        vus.entry(a.clone()).or_insert(date);
+        vus.entry(cle.clone()).or_insert(date);
     }
     let recents: Vec<String> = admins
         .iter()
-        .filter(|a| {
-            vus.get(*a)
+        .zip(&cles)
+        .filter(|(_, cle)| {
+            vus.get(*cle)
                 .and_then(|d| NaiveDate::parse_from_str(d, "%Y-%m-%d").ok())
                 .is_some_and(|d| (aujourd_hui - d).num_days() < RECENT_JOURS)
         })
-        .map(|a| affichable(a))
+        .map(|(a, _)| affichable(a))
         .collect();
     let constat = if recents.is_empty() {
         let noms: Vec<String> = admins.iter().map(|a| affichable(a)).collect();
@@ -178,6 +189,15 @@ mod tests {
 
     fn jour(j: u32) -> NaiveDate {
         NaiveDate::from_ymd_opt(2026, 10, j).unwrap()
+    }
+
+    #[test]
+    fn meme_compte_sans_casse_sous_windows() {
+        let vus = BTreeMap::from([(r"PC\Alice".to_string(), String::new())]);
+        assert_eq!(cle_vue(&vus, r"PC\alice", true), r"PC\Alice");
+        assert_eq!(cle_vue(&vus, r"PC\ÉLODIE", true), r"PC\ÉLODIE");
+        // Ailleurs, « alice » et « Alice » sont deux comptes.
+        assert_eq!(cle_vue(&vus, r"PC\alice", false), r"PC\alice");
     }
 
     #[test]
