@@ -650,6 +650,8 @@ fn qui(nom: &str) -> String {
 struct Botnets {
     feodo: BTreeSet<IpAddr>,
     threatfox: HashMap<(IpAddr, u16), String>,
+    /// Les noms de domaine des serveurs de commande (ThreatFox) ; `None` : liste pas vérifiée.
+    domaines: Option<HashMap<String, String>>,
 }
 
 impl Botnets {
@@ -663,6 +665,22 @@ impl Botnets {
             Some(famille) => Some(format!("{adresse} ({famille}, ThreatFox)")),
             None => self.feodo.contains(&ip).then(|| format!("{ip} (Feodo Tracker)")),
         }
+    }
+
+    /// Un nom demandé par l'ordinateur, tel qu'il sera montré, s'il est celui d'un serveur de commande ou l'un de ses
+    /// sous-domaines (« a.mal.example » quand la liste donne « mal.example »).
+    fn domaine(&self, nom: &str) -> Option<String> {
+        let nom = nom.trim_end_matches('.').to_lowercase();
+        let domaines = self.domaines.as_ref()?;
+        let famille = std::iter::successors(Some(nom.as_str()), |n| n.split_once('.').map(|(_, reste)| reste))
+            .filter(|n| n.contains('.'))
+            .find_map(|n| domaines.get(n))?;
+        let nom = affichable(&nom);
+        Some(if famille.is_empty() {
+            format!("{nom} (ThreatFox)")
+        } else {
+            format!("{nom} ({famille}, ThreatFox)")
+        })
     }
 }
 
@@ -686,32 +704,58 @@ fn analyser_feodo(texte: &str) -> Option<BTreeSet<IpAddr>> {
 /// couper Internet pour rien.
 const THREATFOX_CONFIANCE: u8 = 75;
 
-/// La liste de ThreatFox, export CSV « ip:port » des derniers mois : (adresse, port) → nom du logiciel malveillant,
-/// prêt à montrer. Seuls les serveurs de commande (« botnet_cc ») assez sûrs ; les serveurs de téléchargement
-/// (« payload_delivery ») n'ont pas leur place parmi les serveurs de commande. `None` pour tout autre texte (portail
-/// Wi-Fi, ligne illisible), comme pour Feodo Tracker.
-fn analyser_threatfox(texte: &str) -> Option<HashMap<(IpAddr, u16), String>> {
+/// Les lignes d'un export CSV de ThreatFox d'un genre (« ip:port », « domain ») : (valeur, nom du logiciel
+/// malveillant, prêt à montrer), seulement les serveurs de commande (« botnet_cc ») assez sûrs ; les serveurs de
+/// téléchargement (« payload_delivery ») n'ont pas leur place parmi eux. `None` pour tout autre texte (portail Wi-Fi,
+/// ligne illisible ou d'un autre genre), comme pour Feodo Tracker.
+fn lignes_threatfox<'a>(texte: &'a str, genre: &str) -> Option<Vec<(&'a str, String)>> {
     let lignes: Vec<&str> = texte.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
     if !lignes.first()?.starts_with('#') {
         return None;
     }
-    let mut serveurs = HashMap::new();
+    let mut gardees = Vec::new();
     for ligne in lignes.into_iter().filter(|l| !l.starts_with('#')) {
         // « "2026-10-20 13:46:40", "1975828", "192.0.2.25:6662", "ip:port", "botnet_cc", … » : les champs libres
         // (références, étiquettes, auteur) viennent après ceux qu'on lit.
         let champs: Vec<&str> = ligne.strip_prefix('"')?.strip_suffix('"')?.split("\", \"").collect();
-        let [_, _, valeur, "ip:port", menace, _, _, famille, _, confiance, ..] = champs.as_slice() else {
+        let [_, _, valeur, genre_lu, menace, _, _, famille, _, confiance, ..] = champs.as_slice() else {
             return None;
         };
-        garder_threatfox(
-            &mut serveurs,
-            valeur.parse().ok()?,
-            menace,
-            famille,
-            confiance.parse().ok()?,
-        );
+        if genre_lu != &genre {
+            return None;
+        }
+        if *menace == "botnet_cc" && confiance.parse::<u8>().ok()? >= THREATFOX_CONFIANCE {
+            gardees.push((*valeur, famille_montree(famille)));
+        }
     }
-    Some(serveurs)
+    Some(gardees)
+}
+
+/// N'importe qui signale à ThreatFox : le nom est montré tel quel seulement s'il est inoffensif, et court.
+fn famille_montree(famille: &str) -> String {
+    affichable(famille).chars().take(40).collect()
+}
+
+/// La liste de ThreatFox, export CSV « ip:port » des derniers mois : (adresse, port) → nom du logiciel malveillant.
+fn analyser_threatfox(texte: &str) -> Option<HashMap<(IpAddr, u16), String>> {
+    lignes_threatfox(texte, "ip:port")?
+        .into_iter()
+        .map(|(valeur, famille)| {
+            let adresse: SocketAddr = valeur.parse().ok()?;
+            Some(((adresse.ip().to_canonical(), adresse.port()), famille))
+        })
+        .collect()
+}
+
+/// La liste des domaines de ThreatFox (export CSV « domain ») : nom en minuscules → nom du logiciel malveillant.
+fn analyser_domaines(texte: &str) -> Option<HashMap<String, String>> {
+    lignes_threatfox(texte, "domain")?
+        .into_iter()
+        .map(|(nom, famille)| {
+            let nom = nom.trim_end_matches('.').to_lowercase();
+            (nom.contains('.') && !nom.contains([' ', '/', ':'])).then_some((nom, famille))
+        })
+        .collect()
 }
 
 /// Un serveur de ThreatFox gardé s'il est un serveur de commande assez sûr.
@@ -723,9 +767,7 @@ fn garder_threatfox(
     confiance: u64,
 ) {
     if menace == "botnet_cc" && confiance >= u64::from(THREATFOX_CONFIANCE) {
-        // N'importe qui signale à ThreatFox : le nom est montré tel quel seulement s'il est inoffensif, et court.
-        let famille: String = affichable(famille).chars().take(40).collect();
-        serveurs.insert((adresse.ip().to_canonical(), adresse.port()), famille);
+        serveurs.insert((adresse.ip().to_canonical(), adresse.port()), famille_montree(famille));
     }
 }
 
@@ -802,7 +844,7 @@ fn liste_botnets<T>(
 fn botnets() -> (Botnets, Vec<String>) {
     let entete = fichier_cle();
     let avec_cle = entete.is_file();
-    let (feodo, threatfox, api) = std::thread::scope(|s| {
+    let (feodo, threatfox, api, domaines) = std::thread::scope(|s| {
         let feodo = s.spawn(|| {
             liste_botnets(
                 "Feodo Tracker",
@@ -829,6 +871,18 @@ fn botnets() -> (Botnets, Vec<String>) {
                 )
             })
         });
+        let domaines = s.spawn(|| {
+            liste_botnets(
+                tr!("ThreatFox (domaines)", "ThreatFox (domains)"),
+                (
+                    "threatfox",
+                    "https://threatfox.abuse.ch/export/csv/domains/recent/",
+                    "domaines.csv",
+                ),
+                (&[], crate::protection::lien::URLHAUS_FRAICHE),
+                analyser_domaines,
+            )
+        });
         let threatfox = liste_botnets(
             "ThreatFox",
             (
@@ -844,6 +898,7 @@ fn botnets() -> (Botnets, Vec<String>) {
             feodo.join().unwrap_or_else(|_| Err(pas_verifiee("Feodo Tracker"))),
             threatfox,
             api.join().unwrap_or_else(|_| Some(Err(pas_verifiee("ThreatFox")))),
+            domaines.join().unwrap_or_else(|_| Err(pas_verifiee("ThreatFox"))),
         )
     });
     let mut botnets = Botnets::default();
@@ -857,6 +912,10 @@ fn botnets() -> (Botnets, Vec<String>) {
             Ok(liste) => botnets.threatfox.extend(liste),
             Err(raison) => absentes.push(raison),
         }
+    }
+    match domaines {
+        Ok(liste) => botnets.domaines = Some(liste),
+        Err(raison) => absentes.push(raison),
     }
     (botnets, absentes)
 }
@@ -876,7 +935,7 @@ pub(crate) fn botnets_a_signaler() -> Vec<(String, String)> {
         return Vec::new();
     };
     let (botnets, _) = botnets();
-    let actuelles: BTreeSet<String> = connexions
+    let mut actuelles: BTreeSet<String> = connexions
         .iter()
         .filter_map(|c| {
             let serveur = botnets.serveur(c)?;
@@ -887,6 +946,14 @@ pub(crate) fn botnets_a_signaler() -> Vec<(String, String)> {
             Some(format!("{programme} → {serveur}"))
         })
         .collect();
+    // La mémoire DNS : sans droits sous Windows ; sous Linux, seulement quand la surveillance tourne en root.
+    if let Ok(noms) = crate::protection::memoire_dns::noms() {
+        actuelles.extend(
+            noms.iter()
+                .filter_map(|n| botnets.domaine(n))
+                .map(|n| tr!("nom demandé : ", "name asked: ").to_string() + &n),
+        );
+    }
     let fichier = crate::reseau::dossier_local().join("surveillance-botnets.txt");
     let avant = std::fs::read_to_string(&fichier).unwrap_or_default();
     let alertes = nouvelles_alertes(&avant, &actuelles)
@@ -1227,12 +1294,80 @@ fn afficher_et_juger() -> bool {
         println!("  {ligne}");
     }
     println!();
+    // Les listes des serveurs de botnets, une fois pour tout l'écran. Une liste indisponible : on le dira plus bas, et
+    // rien ne sera dédouané pour autant.
+    let (botnets, listes_absentes) = botnets();
+    let mut trouves: Vec<String> = afficher_connexions(&botnets).into_iter().collect();
+    trouves.extend(afficher_memoire_dns(&botnets));
+    // Ce qui n'a pas pu être vérifié est dit, jamais compté comme sain.
+    for raison in &listes_absentes {
+        afficher_aligne(&format!("  {GRIS}ℹ{RESET} "), raison, 4, GRIS);
+    }
+    if !trouves.is_empty() {
+        let liste = resume(&trouves, 3, ", ");
+        println!();
+        for ligne in envelopper(
+            &trf!(
+                "⚠ Cet ordinateur parle à un serveur de commande de botnet, ou en a demandé le nom ({liste}) : quelqu'un peut le piloter. Coupe Internet d'abord (câble ou Wi-Fi), puis suis « Après une infection » (Dépanner).",
+                "⚠ This computer talks to a botnet command server, or asked for its name ({liste}): someone may be controlling it. Cut the Internet first (cable or Wi-Fi), then follow “After an infection” (Troubleshoot)."
+            ),
+            LARGEUR - 2,
+        ) {
+            println!("  {}{ligne}{RESET}", couleur(Niveau::Eleve));
+        }
+    }
+    !trouves.is_empty()
+}
+
+/// La mémoire DNS comparée aux domaines des serveurs de commande : un programme qui a demandé le nom de son serveur il
+/// y a une heure se voit, même si la connexion est fermée. Rend les noms trouvés.
+fn afficher_memoire_dns(botnets: &Botnets) -> Vec<String> {
+    println!();
+    match crate::protection::memoire_dns::noms() {
+        Err(raison) => {
+            afficher_aligne(
+                &format!("  {GRIS}ℹ{RESET} "),
+                &trf!(
+                    "Mémoire DNS pas vérifiée : {raison}.",
+                    "DNS cache not checked: {raison}."
+                ),
+                4,
+                GRIS,
+            );
+            Vec::new()
+        }
+        Ok(noms) => {
+            let trouves: Vec<String> = noms
+                .iter()
+                .filter_map(|n| botnets.domaine(n))
+                .map(|n| tr!("nom demandé : ", "name asked: ").to_string() + &n)
+                .collect();
+            if botnets.domaines.is_none() {
+                // Liste indisponible : dit plus bas, rien n'est déclaré sain.
+            } else if trouves.is_empty() {
+                trp!(
+                    "  {VERT}✔{RESET} Mémoire DNS : aucun des {} noms demandés récemment n'est un serveur de commande connu.",
+                    "  {VERT}✔{RESET} DNS cache: none of the {} recently asked names is a known command server.",
+                    noms.len()
+                );
+            } else {
+                for t in &trouves {
+                    println!("  {}✖{RESET} {t}", couleur(Niveau::Eleve));
+                }
+            }
+            trouves
+        }
+    }
+}
+
+/// Les connexions, programme par programme. Rend les serveurs de commande trouvés.
+fn afficher_connexions(botnets: &Botnets) -> BTreeSet<String> {
     let Some(toutes) = connexions() else {
         trp!(
             "  ✖ Impossible de lire les connexions de cet ordinateur.",
             "  ✖ Could not read this computer's connections."
         );
-        return false;
+        return BTreeSet::new();
     };
     let connexions: Vec<Connexion> = toutes.into_iter().filter(|c| sur_internet(c.distante)).collect();
     if connexions.is_empty() {
@@ -1240,7 +1375,7 @@ fn afficher_et_juger() -> bool {
             "  {VERT}✔{RESET} Aucune connexion vers Internet en ce moment.",
             "  {VERT}✔{RESET} No connection to the Internet right now."
         );
-        return false;
+        return BTreeSet::new();
     }
     let adresses: BTreeSet<IpAddr> = connexions.iter().map(|c| c.distante).collect();
     trp!(
@@ -1254,9 +1389,6 @@ fn afficher_et_juger() -> bool {
     } else {
         String::new()
     };
-    // Les listes des serveurs de botnets, une fois pour toutes les connexions. Une liste indisponible : on le dira
-    // plus bas, et aucune connexion ne sera dédouanée pour autant.
-    let (botnets, listes_absentes) = botnets();
     // Toutes les connexions, celles des autres comptes comprises : un programme du système détourné parle aussi.
     let vers_botnets: BTreeSet<String> = connexions.iter().filter_map(|c| botnets.serveur(c)).collect();
 
@@ -1292,7 +1424,7 @@ fn afficher_et_juger() -> bool {
                 .and_then(|_| g.liste.iter().find_map(|(c, _)| c.pid))
                 .and_then(|pid| std::fs::read(format!("/proc/{pid}/environ")).ok())
                 .and_then(|e| image_appimage(&e));
-            let signes = signes(g.chemin.as_deref(), &g.liste, &montages, image.as_deref(), &botnets);
+            let signes = signes(g.chemin.as_deref(), &g.liste, &montages, image.as_deref(), botnets);
             Programme {
                 pire: signes.iter().map(|(n, _)| *n).filter(|n| *n > Niveau::Info).max(),
                 nom: g.programme.clone().unwrap_or_default(),
@@ -1372,10 +1504,6 @@ fn afficher_et_juger() -> bool {
         affiches.len(),
         connexions.len()
     );
-    // Ce qui n'a pas pu être vérifié est dit, jamais compté comme sain.
-    for raison in &listes_absentes {
-        afficher_aligne(&format!("  {GRIS}ℹ{RESET} "), raison, 4, GRIS);
-    }
     if !a_regarder.is_empty() {
         let liste = resume(&a_regarder, 4, ", ");
         for ligne in envelopper(
@@ -1402,20 +1530,7 @@ fn afficher_et_juger() -> bool {
             "  {GRIS}To see everything: {comment}.{RESET}"
         );
     }
-    if !vers_botnets.is_empty() {
-        let serveurs = resume(&vers_botnets.iter().collect::<Vec<_>>(), 3, ", ");
-        println!();
-        for ligne in envelopper(
-            &trf!(
-                "⚠ Cet ordinateur parle à un serveur de commande de botnet ({serveurs}) : quelqu'un peut le piloter. Coupe Internet d'abord (câble ou Wi-Fi), puis suis « Après une infection » (Dépanner).",
-                "⚠ This computer talks to a botnet command server ({serveurs}): someone may be controlling it. Cut the Internet first (cable or Wi-Fi), then follow “After an infection” (Troubleshoot)."
-            ),
-            LARGEUR - 2,
-        ) {
-            println!("  {}{ligne}{RESET}", couleur(Niveau::Eleve));
-        }
-    }
-    !vers_botnets.is_empty()
+    vers_botnets
 }
 
 #[cfg(test)]
@@ -1770,6 +1885,38 @@ mod tests {
             )
             .is_none()
         );
+    }
+
+    #[test]
+    fn domaines_de_threatfox() {
+        let texte = concat!(
+            "# ThreatFox IOCs: recent domains\r\n",
+            "\"2026-10-20 14:29:08\", \"1\", \"mal.example\", \"domain\", \"botnet_cc\", \"win.vidar\", \"None\", \"Vidar\", \"\", \"100\", \"False\"\r\n",
+            "\"2026-10-20 14:29:09\", \"2\", \"doute.example\", \"domain\", \"botnet_cc\", \"win.x\", \"None\", \"X\", \"\", \"50\", \"False\"\r\n",
+        );
+        let domaines = analyser_domaines(texte).unwrap();
+        assert_eq!(domaines.len(), 1);
+        // Un export d'un autre genre (des liens au lieu de domaines) n'est pas pris pour une liste de domaines.
+        assert!(analyser_domaines(&texte.replace("\"domain\"", "\"url\"")).is_none());
+        let botnets = Botnets {
+            domaines: Some(domaines),
+            ..Botnets::default()
+        };
+        assert_eq!(
+            botnets.domaine("mal.example").as_deref(),
+            Some("mal.example (Vidar, ThreatFox)")
+        );
+        // Un sous-domaine, en majuscules, avec le point final du DNS : trouvé.
+        assert_eq!(
+            botnets.domaine("A.Mal.Example.").as_deref(),
+            Some("a.mal.example (Vidar, ThreatFox)")
+        );
+        // Un nom qui finit pareil sans être un sous-domaine, ou un domaine parent : pas accusé.
+        assert_eq!(botnets.domaine("normal.example"), None);
+        assert_eq!(botnets.domaine("example"), None);
+        assert_eq!(botnets.domaine("doute.example"), None);
+        // Liste indisponible : rien n'est accusé ni dédouané ici.
+        assert_eq!(Botnets::default().domaine("mal.example"), None);
     }
 
     #[test]

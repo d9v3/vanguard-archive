@@ -16,6 +16,7 @@ pub mod integrite;
 pub mod isoler;
 pub mod lien;
 pub mod manifeste;
+pub(crate) mod memoire_dns;
 pub(crate) mod outil;
 pub mod pieges;
 pub mod quarantaine;
