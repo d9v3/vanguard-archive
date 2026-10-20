@@ -9,6 +9,8 @@ use super::{Audit, Constat, alerte, cles_ssh, impossible, ok, sortie};
 use crate::risk::{Niveau, info_port};
 use crate::{tr, trf, trw};
 
+mod algorithmes_ssh;
+mod dissimulation;
 mod docker;
 mod durcissement;
 mod maj;

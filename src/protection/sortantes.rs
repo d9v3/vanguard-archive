@@ -364,7 +364,7 @@ fn dossier_risque(chemin: &str, montages: &str) -> Option<&'static str> {
 
 /// Linux : une AppImage tourne depuis son image, montée dans « /tmp/.mount_<nom><code> » le temps qu'elle tourne. Un
 /// simple dossier de ce nom ne suffit pas : il faut qu'il soit monté (`montages` : le contenu de /proc/self/mounts).
-fn appimage(chemin: &str, montages: &str) -> bool {
+pub(crate) fn appimage(chemin: &str, montages: &str) -> bool {
     let Some(reste) = chemin.strip_prefix("/tmp/.mount_") else {
         return false;
     };
