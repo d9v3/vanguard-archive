@@ -145,7 +145,7 @@ pub(super) fn espace_initial(lien: &str) -> bool {
 
 /// /proc monté avec « hidepid » : sans droits, les processus des autres comptes manquent à la liste ou se lisent
 /// mal, ce qui fausserait le compte. La dernière ligne de /proc/self/mounts pour /proc est celle qui vaut.
-pub(super) fn proc_masque(montages: &str) -> bool {
+pub(crate) fn proc_masque(montages: &str) -> bool {
     montages
         .lines()
         .rfind(|l| l.split_whitespace().nth(1) == Some("/proc"))
@@ -246,12 +246,7 @@ pub(super) enum Couverture {
     Pids { jusqu_a: u32, borne: u32 },
 }
 
-pub(super) fn juger_processus_caches(
-    caches: &[(u32, String)],
-    ecart: Option<u32>,
-    couverture: &Couverture,
-    outils: &[&str],
-) -> Constat {
+pub(super) fn juger_processus_caches(caches: &[(u32, String)], couverture: &Couverture, outils: &[&str]) -> Constat {
     if !caches.is_empty() {
         let liste: Vec<String> = caches.iter().map(|(pid, nom)| processus_montre(*pid, nom)).collect();
         return enquete(
@@ -268,20 +263,8 @@ pub(super) fn juger_processus_caches(
             outils,
         );
     }
-    if let Some(n) = ecart.filter(|n| *n > 0) {
-        return enquete(
-            alerte(
-                "Persistance",
-                Niveau::Moyen,
-                trf!(
-                    "Le noyau compte {n} fil(s) d'exécution de plus que la liste des processus n'en montre, à chaque relecture, sans que Vanguard trouve lesquels : un rootkit cache peut-être un processus.",
-                    "The kernel counts {n} more thread(s) than the process list shows, on every reread, and Vanguard cannot find which: a rootkit may be hiding a process."
-                ),
-            ),
-            false,
-            outils,
-        );
-    }
+    // Un écart du compte sans PID trouvé n'est pas signalé : des fils d'exécution qui naissent et meurent sans cesse
+    // (navigateur, compilation) le font durer plusieurs relevés. La recherche PID par PID tranche ; elle seule accuse.
     match *couverture {
         Couverture::Compte => ok(
             "Persistance",
@@ -320,7 +303,7 @@ pub(super) fn processus_caches() -> Constat {
     let masque = std::fs::read_to_string("/proc/self/mounts").is_ok_and(|m| proc_masque(&m));
     let ecart = if initial && !masque { compter_les_fils() } else { None };
     if ecart == Some(0) {
-        return juger_processus_caches(&[], ecart, &Couverture::Compte, &[]);
+        return juger_processus_caches(&[], &Couverture::Compte, &[]);
     }
     let lire = |chemin: &str| {
         std::fs::read_to_string(chemin)
@@ -349,14 +332,14 @@ pub(super) fn processus_caches() -> Constat {
                     .is_some_and(|(tgid, n)| tgid == *pid && n == *nom)
         })
         .collect();
-    juger_processus_caches(&caches, ecart, &Couverture::Pids { jusqu_a, borne }, &deuxieme_avis())
+    juger_processus_caches(&caches, &Couverture::Pids { jusqu_a, borne }, &deuxieme_avis())
 }
 
 // ───────────────────────────── Programmes sans fichier ─────────────────────────────
 
 /// Pourquoi un programme qui tourne n'a pas (ou plus) de fichier à lui sur le disque.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub(super) enum SansFichier {
+pub(crate) enum SansFichier {
     /// Chargé en mémoire seulement (memfd) : rien sur le disque, la marque des logiciels malveillants « sans fichier ».
     Memoire,
     /// Lancé depuis un dossier temporaire puis effacé : un programme déposé qui efface sa trace.
@@ -409,7 +392,7 @@ fn dans_un_temporaire(chemin: &str, montages: &str) -> bool {
 
 /// Le jugement du lien /proc/<pid>/exe d'un programme. `remplace` : un fichier existe encore au chemin d'origine (vu
 /// depuis la racine du programme) ; `montages` : /proc/self/mounts, pour reconnaître une AppImage. `None` : rien à dire.
-pub(super) fn juger_exe(lien: &str, remplace: bool, montages: &str) -> Option<SansFichier> {
+pub(crate) fn juger_exe(lien: &str, remplace: bool, montages: &str) -> Option<SansFichier> {
     if let Some(nom) = lien.strip_prefix("/memfd:") {
         // runc et crun se recopient en mémoire un instant en lançant un conteneur (protection contre une faille de
         // runc) ; le reste n'a aucune raison de tourner sans fichier.
@@ -916,7 +899,7 @@ mod tests {
 
     #[test]
     fn processus_caches_juges() {
-        let c = juger_processus_caches(&[(4242, "x\x1b[2Ky".into())], None, &Couverture::Compte, &[]);
+        let c = juger_processus_caches(&[(4242, "x\x1b[2Ky".into())], &Couverture::Compte, &[]);
         assert_eq!(c.probleme, Some(Niveau::Eleve));
         assert!(
             c.message.contains("4242") && !c.message.contains('\x1b'),
@@ -925,22 +908,21 @@ mod tests {
         );
         let k = c.correctif.unwrap();
         assert!(!k.automatique && k.commandes == ["vanguard depanner infection"]);
+        // Écart du compte, mais rien de caché trouvé PID par PID : des fils passagers, pas une alerte.
         let c = juger_processus_caches(
             &[],
-            Some(2),
             &Couverture::Pids {
                 jusqu_a: 900,
                 borne: 900,
             },
             &[],
         );
-        assert_eq!(c.probleme, Some(Niveau::Moyen));
-        let c = juger_processus_caches(&[], Some(0), &Couverture::Compte, &[]);
+        assert!(c.probleme.is_none() && c.verifie, "{}", c.message);
+        let c = juger_processus_caches(&[], &Couverture::Compte, &[]);
         assert!(c.probleme.is_none() && c.verifie);
         // Recherche coupée : dit jusqu'où, sans prétendre avoir tout vu.
         let c = juger_processus_caches(
             &[],
-            None,
             &Couverture::Pids {
                 jusqu_a: 70_000,
                 borne: 400_000,
