@@ -57,8 +57,9 @@ In the menu, choose **1** (full check), then **2** (fix). Arrows, Enter, and Esc
 
 **Security check** — a grade from A to F, then each problem with its fix.
 - Firewall, open ports (TCP and UDP), updates and known vulnerabilities, disk encryption, Secure Boot, screen lock,
-  accounts, SSH (and its failed login attempts, from the Internet or from home, and a client that does not check servers), sudo, groups worth root (docker,
-  lxd, libvirt, disk), kernel hardening (on macOS: sealed system volume, enforced code signing, library
+  accounts, SSH (and its failed login attempts, from the Internet or from home, and a client that does not check servers; forwarded ports open to the network), sudo, groups worth root (docker,
+  lxd, libvirt, disk), kernel hardening (on Linux: ICMP redirects, impossible source addresses, user namespaces open
+  to all; on macOS: sealed system volume, enforced code signing, library
   validation, added extensions), badly protected secret files, backups, file shares open to everyone (Samba, NFS,
   Windows shares, macOS File Sharing: the password-less access is closed after your consent, named accounts keep
   theirs).

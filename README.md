@@ -61,8 +61,9 @@ pour revenir.
 
 **Bilan de sécurité** — une note de A à F, puis chaque problème avec sa correction.
 - Pare-feu, ports ouverts (TCP et UDP), mises à jour et failles connues, chiffrement du disque, Secure Boot,
-  verrouillage de l'écran, comptes, SSH (et ses tentatives de connexion ratées, venues d'Internet ou de la maison, et le client qui ne vérifie pas les serveurs),
-  sudo, groupes qui valent root (docker, lxd, libvirt, disk), durcissement du noyau (sous macOS : volume du système scellé,
+  verrouillage de l'écran, comptes, SSH (et ses tentatives de connexion ratées, venues d'Internet ou de la maison, et le client qui ne vérifie pas les serveurs ; les ports renvoyés ouverts au réseau),
+  sudo, groupes qui valent root (docker, lxd, libvirt, disk), durcissement du noyau (sous Linux : redirections ICMP,
+  adresses d'origine impossibles, espaces de noms ouverts à tous ; sous macOS : volume du système scellé,
   signature du code imposée, validation des bibliothèques, extensions ajoutées), fichiers secrets mal protégés,
   sauvegardes, partages de fichiers ouverts à tout le monde (Samba, NFS, partages Windows, Partage de fichiers de
   macOS : l'accès sans mot de passe est fermé après accord, les comptes nommés gardent le leur).
