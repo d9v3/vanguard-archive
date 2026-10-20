@@ -163,6 +163,63 @@ verifier "antivirus : EICAR détecté" grep -qi 'eicar' "$RES/antivirus.txt"
 verifier "antivirus : message « NULL X509 store » de ClamAV masqué" bash -c "! grep -q 'ERROR: NULL X509' '$RES/antivirus.txt'"
 verifier "antivirus : refus de la quarantaine annoncé" grep -q 'Rien n.a été fait' "$RES/antivirus.txt"
 
+section "YARA et empreintes de MalwareBazaar (0.81) : téléchargement, puis une vraie correspondance"
+ESSAI_YARA="$RES/dossier-yara"
+mkdir -p "$ESSAI_YARA"
+echo "fichier d'essai de Vanguard $(date +%s)" >"$ESSAI_YARA/facture.pdf.exe"
+lancer yara 600 '' yara "$ESSAI_YARA"
+# Le texte est replié à 76 colonnes : les mots se cherchent remis bout à bout.
+verifier "yara : 308 règles et empreintes chargées, rien trouvé" python3 -c "import re,sys; t=' '.join(open('$RES/yara.txt',encoding='utf-8').read().split()); sys.exit(0 if re.search(r'ni aux \d+ empreintes de MalwareBazaar', t) else 1)"
+# L'empreinte du fichier d'essai ajoutée à la copie gardée des 48 dernières heures : il doit être reconnu, hors ligne.
+EMPREINTES="$HOME/Library/Application Support/vanguard/malwarebazaar/recentes.txt"
+verifier "empreintes : copie gardée dans le dossier de Vanguard" test -s "$EMPREINTES"
+shasum -a 256 "$ESSAI_YARA/facture.pdf.exe" | cut -c1-64 >>"$EMPREINTES"
+VANGUARD_HORS_LIGNE=1 lancer yara-empreinte 300 'n\n' yara "$ESSAI_YARA"
+verifier "empreintes : fichier reconnu par son empreinte exacte" grep -q 'empreinte exacte' "$RES/yara-empreinte.txt"
+verifier "empreintes : quarantaine refusée, rien fait" grep -q 'Rien n.a été fait' "$RES/yara-empreinte.txt"
+verifier "empreintes : fichier laissé en place" test -f "$ESSAI_YARA/facture.pdf.exe"
+
+section "Protection : qui parle à Internet, prise de contrôle, lien, fichier téléchargé"
+lancer sortantes 180 '' sortantes
+verifier "sortantes : connexions listées" grep -qE 'connexion\(s\) vers Internet|Aucune connexion' "$RES/sortantes.txt"
+lancer distance 120 '' distance
+verifier "distance : verdict donné" grep -qE 'Aucun logiciel de prise de contrôle|prise de contrôle à distance' "$RES/distance.txt"
+lancer lien 60 'n\n' lien 'https://paypal.com.compte-securite.xyz/login'
+verifier "lien : faux sous-domaine de PayPal repéré" grep -q 'le vrai : paypal.com' "$RES/lien.txt"
+lancer verifier-fichier 300 '\n' verifier-fichier "$ESSAI_AV/eicar.com"
+verifier "verifier-fichier : EICAR signalé" grep -qiE 'eicar|danger|malveillant' "$RES/verifier-fichier.txt"
+lancer camera-micro 60 '' camera-micro
+lancer quarantaine 60 '' quarantaine
+
+section "Collecter les traces : dossier daté, manifeste vérifié par shasum"
+lancer traces 600 '\n' traces
+TRACES=$(ls -dt "$HOME/Library/Application Support/vanguard/traces/traces-"* 2>/dev/null | head -1)
+note "traces : $TRACES"
+verifier "traces : dossier daté écrit" test -d "$TRACES"
+verifier "traces : LISEZMOI présent" test -s "$TRACES/LISEZMOI.txt"
+verifier "traces : manifeste juste (shasum -c)" bash -c "cd \"$TRACES\" && shasum -a 256 -c MANIFESTE.txt"
+
+section "Règles, mise à jour depuis GitHub, outils du quotidien"
+lancer regles 30 '' regles
+verifier "règles : au moins 50 déclarées pour macOS" python3 -c "import re,sys; t=open('$RES/regles.txt',encoding='utf-8').read(); m=re.search(r'ce système : (\d+)', t); sys.exit(0 if m and int(m.group(1)) >= 50 else 1)"
+lancer se-mettre-a-jour 120 'n\n' se-mettre-a-jour
+verifier "mise à jour : GitHub interrogé, rien installé sans accord" grep -qE 'GitHub|Dernière version' "$RES/se-mettre-a-jour.txt"
+lancer verifier-moi 30 '' verifier-moi
+verifier "verifier-moi : empreinte SHA-256 du programme" grep -qE '[0-9a-f]{64}' "$RES/verifier-moi.txt"
+lancer fiche 60 '' fiche
+lancer lenteur 120 '' lenteur
+lancer demarrage 60 '\n' demarrage
+lancer entretien 120 '' entretien
+lancer changements 30 '' changements
+lancer appris 30 '\n' appris
+lancer guide-brew 30 '' guide brew
+verifier "guide : page de Homebrew" grep -q 'brew' "$RES/guide-brew.txt"
+lancer depanner 30 '' depanner xyz
+lancer nat 60 '' nat
+lancer listes-noires 30 'n\n' listes-noires
+lancer pieges 30 '\n' pieges
+lancer secrets 300 '' secrets
+
 section "Clé USB simulée (images disque exFAT) : protection et journal d'erreurs"
 CLE_IMG="$RES/cle.dmg"
 LOG_IMG="$RES/log.dmg"
@@ -193,6 +250,10 @@ verifier "menu : « protégée en écriture »" grep -q 'protégée en écriture
 hdiutil detach -quiet /Volumes/VANGUARD || hdiutil detach -force -quiet /Volumes/VANGUARD
 hdiutil detach -quiet /Volumes/VANGUARDLOG || hdiutil detach -force -quiet /Volumes/VANGUARDLOG
 rm -f "$CLE_IMG" "$LOG_IMG"
+
+section "Aucun plantage dans toutes les sorties"
+verifier "aucun « panicked » dans les sorties de Vanguard" bash -c "! grep -l 'panicked at' '$RES'/*.txt"
+verifier "aucun délai dépassé" bash -c "! grep -q 'DÉLAI DÉPASSÉ' '$JOURNAL'"
 
 bilan
 # Rapport HTML au même style que celui du test Windows (dans l'artefact « essai-macos »).
