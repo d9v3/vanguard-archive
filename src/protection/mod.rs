@@ -8,6 +8,7 @@ pub mod camera;
 #[cfg(unix)]
 pub mod cle;
 pub mod cles_connues;
+pub mod conteneurs;
 pub mod distance;
 pub mod environnement;
 pub mod fuites;
@@ -15,8 +16,10 @@ pub mod integrite;
 pub mod isoler;
 pub mod lien;
 pub mod manifeste;
+pub(crate) mod outil;
 pub mod pieges;
 pub mod quarantaine;
+pub mod secrets_git;
 pub mod sortantes;
 pub mod telechargement;
 pub mod yara;

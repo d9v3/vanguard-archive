@@ -877,18 +877,48 @@ fn ssh_echecs() -> Option<Constat> {
             "{tentatives} failed SSH login attempt(s) in 24 h, from {n} address(es){origine}. Harmless as long as only keys are accepted."
         )
     };
-    let mut conseil = trf!(
-        "Bloquer les adresses qui insistent : sshguard (ou fail2ban), à régler avec ton pare-feu selon la documentation de ta distribution : {}",
-        "Block the addresses that keep trying: sshguard (or fail2ban), to set up with your firewall following your distribution's documentation: {}",
-        commande_installation("sshguard")
-    );
-    if internet > 0 {
-        conseil += tr!(
-            ". Si tu n'as pas besoin de SSH depuis l'extérieur, retire la redirection du port sur ta box",
-            ". If you do not need SSH from outside, remove the port forwarding on your router"
-        );
+    let bloqueur = BLOQUEURS.into_iter().find(|s| service_actif(s));
+    let texte = match bloqueur {
+        Some(b) => format!(
+            "{texte} {}",
+            trf!(
+                "{b} bloque déjà les adresses qui insistent.",
+                "{b} already blocks the addresses that keep trying."
+            )
+        ),
+        None => texte,
+    };
+    let constat = alerte("SSH", niveau, texte);
+    Some(match conseil_echecs_ssh(bloqueur.is_some(), internet > 0) {
+        Some(conseil) => constat.manuel(&conseil, &[]),
+        None => constat,
+    })
+}
+
+/// Les programmes qui bloquent les adresses qui insistent, lus dans le journal : fail2ban, sshguard, CrowdSec.
+const BLOQUEURS: [&str; 3] = ["fail2ban", "sshguard", "crowdsec"];
+
+/// Le conseil après des tentatives ratées : installer un bloqueur s'il n'y en a pas, et fermer le port vers Internet
+/// s'il y est ouvert. Avec un bloqueur et rien venu d'Internet, il n'y a rien de plus à faire.
+fn conseil_echecs_ssh(bloqueur: bool, internet: bool) -> Option<String> {
+    let installer = (!bloqueur).then(|| {
+        trf!(
+            "Bloquer les adresses qui insistent : sshguard (ou fail2ban), à régler avec ton pare-feu selon la documentation de ta distribution : {}",
+            "Block the addresses that keep trying: sshguard (or fail2ban), to set up with your firewall following your distribution's documentation: {}",
+            commande_installation("sshguard")
+        )
+    });
+    let fermer = internet.then(|| {
+        tr!(
+            "Si tu n'as pas besoin de SSH depuis l'extérieur, retire la redirection du port sur ta box",
+            "If you do not need SSH from outside, remove the port forwarding on your router"
+        )
+        .to_string()
+    });
+    match (installer, fermer) {
+        (Some(i), Some(f)) => Some(format!("{i}. {f}")),
+        (i, f) => i.or(f),
     }
-    Some(alerte("SSH", niveau, texte).manuel(&conseil, &[]))
 }
 
 /// Tentatives de connexion SSH ratées dans le journal de sshd : (nombre, adresses d'origine). Une tentative laisse
@@ -1839,6 +1869,17 @@ pas-un-uuid;rm -rf ~:802-11-wireless:yes:Piège
         assert!(commandes[0].starts_with("echo 'X11Forwarding no' | sudo tee -a"));
         assert!(commandes[1].starts_with("echo 'MaxAuthTries 6' | sudo tee -a"));
         assert_eq!(commandes[2], RECHARGER_SSHD);
+    }
+
+    #[test]
+    fn conseil_selon_le_bloqueur() {
+        // Sans bloqueur : l'installer ; avec, rien de plus, sauf fermer le port ouvert vers Internet.
+        assert!(conseil_echecs_ssh(false, false).unwrap().contains("sshguard"));
+        assert!(conseil_echecs_ssh(true, false).is_none());
+        let internet = conseil_echecs_ssh(true, true).unwrap();
+        assert!(!internet.contains("sshguard") && internet.contains("box"));
+        let tout = conseil_echecs_ssh(false, true).unwrap();
+        assert!(tout.contains("sshguard") && tout.contains("box"));
     }
 
     #[test]
