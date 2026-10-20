@@ -423,20 +423,40 @@ impl Base {
 /// base tronquée.
 pub(crate) fn ecrire_atomique(chemin: &std::path::Path, contenu: impl AsRef<[u8]>) -> std::io::Result<()> {
     use std::io::Write;
+    // Un nom par écriture, pas seulement par processus : deux fils qui écrivent le même fichier en même temps se
+    // volaient leur fichier temporaire, et le second renommage échouait (vu dans les tests sous Wine).
+    static ECRITURES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     if let Some(d) = chemin.parent() {
         std::fs::create_dir_all(d)?;
     }
-    let temporaire = chemin.with_extension(format!("tmp-{}", std::process::id()));
+    let n = ECRITURES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let temporaire = chemin.with_extension(format!("tmp-{}-{n}", std::process::id()));
     let resultat = (|| {
         let mut f = std::fs::File::create(&temporaire)?;
         f.write_all(contenu.as_ref())?;
         f.sync_all()?;
-        std::fs::rename(&temporaire, chemin)
+        remplacer(&temporaire, chemin)
     })();
     if resultat.is_err() {
         let _ = std::fs::remove_file(&temporaire);
     }
     resultat
+}
+
+/// Renomme `de` à la place de `vers`. Sous Windows, le remplacement échoue tant qu'un autre programme tient `vers`
+/// ouvert : Defender qui analyse le fichier qu'on vient d'écrire, un autre fil qui le lit. Quelques essais
+/// rapprochés (une demi-seconde au plus) plutôt qu'une écriture perdue.
+fn remplacer(de: &std::path::Path, vers: &std::path::Path) -> std::io::Result<()> {
+    let mut essais = 0;
+    loop {
+        match std::fs::rename(de, vers) {
+            Err(_) if cfg!(windows) && essais < 10 => {
+                essais += 1;
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            r => return r,
+        }
+    }
 }
 
 /// Verrou entre processus Vanguard (fichier créé de façon exclusive, retiré à la fin).

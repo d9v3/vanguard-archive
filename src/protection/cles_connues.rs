@@ -102,6 +102,21 @@ fn chemin(base: &Path) -> PathBuf {
     base.join(FICHIER)
 }
 
+/// Lire, changer, réécrire le fichier des clés connues : sans verrou, deux notes en même temps (deux fils, ou les
+/// tests en parallèle) en perdaient une, et la clé perdue n'était plus reconnue. Les lectures le prennent aussi : sous
+/// Windows, remplacer un fichier qu'un autre fil est en train de lire échoue.
+static VERROU: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn verrou() -> std::sync::MutexGuard<'static, ()> {
+    VERROU.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// `lire_dans`, sous le verrou.
+fn lire_verrouille(base: &Path) -> BTreeMap<String, CleConnue> {
+    let _garde = verrou();
+    lire_dans(base)
+}
+
 /// Un fichier illisible est mis de côté, jamais écrasé en silence : il nommait les clés de la personne.
 fn lire_dans(base: &Path) -> BTreeMap<String, CleConnue> {
     let fichier = chemin(base);
@@ -132,7 +147,7 @@ fn ecrire_dans(base: &Path, cles: &BTreeMap<String, CleConnue>) -> std::io::Resu
 
 /// Les jetons que cet ordinateur reconnaît.
 pub(crate) fn jetons() -> BTreeSet<String> {
-    lire_dans(&crate::reseau::dossier_local()).into_keys().collect()
+    lire_verrouille(&crate::reseau::dossier_local()).into_keys().collect()
 }
 
 /// Un volume au jeton connu de cet ordinateur ?
@@ -154,6 +169,7 @@ fn empreinte_du_carnet(donnees: &Path) -> Option<String> {
 /// Note dans `base` l'état actuel du carnet de la clé `racine` : reconnue si elle ne l'était pas, empreinte et
 /// protection telles qu'elles sont. Rien sans jeton (clé pas encore redéployée : rien à reconnaître).
 fn noter_dans(base: &Path, racine: &Path) -> bool {
+    let _garde = verrou();
     let Some(jeton) = jeton_de(racine) else {
         return false;
     };
@@ -177,7 +193,7 @@ pub(crate) fn noter(racine: &Path) -> bool {
 /// la personne l'a branchée et lancée, ou la déploie).
 fn reconnaitre_dans(base: &Path, racine: &Path) -> bool {
     match jeton_de(racine) {
-        Some(j) if lire_dans(base).contains_key(&j) => true,
+        Some(j) if lire_verrouille(base).contains_key(&j) => true,
         Some(_) => noter_dans(base, racine),
         None => false,
     }
@@ -197,7 +213,7 @@ pub fn reconnaitre_la_cle_du_programme() {
 /// Le carnet de la clé `racine` peut-il être lu et réécrit ? `modifiable` : la clé s'écrit ici, l'empreinte compte.
 fn verdict_dans(base: &Path, racine: &Path, modifiable: bool) -> Result<(), Refus> {
     // Sans jeton (clé d'avant le jeton, lancée depuis elle) ou pas encore notée : rien à comparer.
-    let Some(connue) = jeton_de(racine).and_then(|j| lire_dans(base).remove(&j)) else {
+    let Some(connue) = jeton_de(racine).and_then(|j| lire_verrouille(base).remove(&j)) else {
         return Ok(());
     };
     let donnees = racine.join("donnees");
@@ -316,6 +332,26 @@ mod tests {
             std::fs::write(cle.join(JETON), format!("{j}\n")).unwrap();
         }
         cle
+    }
+
+    /// Huit clés notées en même temps dans le même fichier : les huit y sont (une note perdue, et la clé n'était
+    /// plus reconnue ; un fichier temporaire partagé, et la note échouait).
+    #[test]
+    fn notes_simultanees_toutes_gardees() {
+        let base = jetable("simultanees");
+        let cles: Vec<PathBuf> = (0..8)
+            .map(|i| fausse_cle(&format!("simultanee-{i}"), Some(&format!("{i:032x}"))))
+            .collect();
+        std::thread::scope(|s| {
+            for c in &cles {
+                let base = &base;
+                s.spawn(move || assert!(noter_dans(base, c)));
+            }
+        });
+        assert_eq!(lire_dans(&base).len(), 8);
+        for c in cles.iter().chain([&base]) {
+            let _ = std::fs::remove_dir_all(c);
+        }
     }
 
     #[test]
