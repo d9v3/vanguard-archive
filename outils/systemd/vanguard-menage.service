@@ -1,0 +1,10 @@
+[Unit]
+Description=Vanguard : ménage des fichiers de développement devenus inutiles
+# Compilations inutilisées depuis 14 jours, restes d'essais interrompus, passes de la VM de plus de 30 jours (les 20
+# dernières restent) : outils/menage-dev.sh. Jamais les images ni les sauvegardes de la clé.
+
+[Service]
+Type=oneshot
+ExecStart=%h/Projects/vanguard/outils/menage-dev.sh
+Nice=19
+IOSchedulingClass=idle

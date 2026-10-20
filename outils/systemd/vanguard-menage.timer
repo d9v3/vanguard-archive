@@ -1,0 +1,11 @@
+[Unit]
+Description=Vanguard : ménage hebdomadaire des fichiers de développement
+
+[Timer]
+OnCalendar=weekly
+# Ordinateur éteint à l'heure prévue : rattrapé au démarrage suivant, à un moment tiré au hasard.
+Persistent=true
+RandomizedDelaySec=6h
+
+[Install]
+WantedBy=timers.target
