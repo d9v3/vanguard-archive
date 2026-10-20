@@ -44,3 +44,12 @@ serveur https://iso.omarchy.org/
 
 # API de ThreatFox (src/protection/sortantes.rs) : elle n'accepte que POST avec la clé d'abuse.ch de la personne.
 serveur https://threatfox-api.abuse.ch/api/v1/
+
+# Dépôt des versions signées (src/mise_a_jour/github.rs, outils/depot-versions.sh) : privé jusqu’à la première version, publiée par outils/publier-version.sh juste après l'envoi du code ;
+# avant la première, l'adresse ne répond pas. L'essai de « se-mettre-a-jour » après chaque publication la vérifie.
+ignorer https://github.com/d9v3/vanguard-officiel
+# Faux lien d'hameçonnage de l'essai sur le Mac (outils/test-macos/essai.sh) : inventé, jamais ouvert.
+ignorer https://paypal.com.compte-securite.xyz/
+# Préconnexion des polices de la page des fonctions (outils/page-fonctions.html) : des serveurs, pas des pages.
+essai https://fonts.googleapis.com https://fonts.googleapis.com/css2?family=IBM+Plex+Mono
+ignorer https://fonts.gstatic.com
