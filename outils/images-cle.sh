@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Images Linux de la clé de secours, tenues à jour toutes seules : Arch Linux (qui installe aussi Omarchy, par sa
-# commande officielle après archinstall), Debian et Fedora en installateurs par Internet, et SystemRescue (réparer,
-# sauver des fichiers, tester la mémoire).
+# Images Linux de la clé de secours, tenues à jour toutes seules : Omarchy (son installateur complet, sans Internet),
+# Arch Linux, Debian et Fedora en installateurs par Internet, et SystemRescue (réparer, sauver des fichiers, tester la
+# mémoire).
 #   outils/images-cle.sh --chercher     dernières versions téléchargées dans le cache et vérifiées (minuterie
 #                                       hebdomadaire vanguard-images.timer) ; une image mal signée est effacée
 #   outils/images-cle.sh --verifier     revérifie signature et empreinte des images du cache
@@ -25,18 +25,20 @@ MIO=$((1024 * 1024))
 # Place gardée sur la clé pour Vanguard, sa base et ses rapports.
 MARGE_MIO=512
 # Ordre de copie quand la place manque : la plus utile d'abord.
-SORTES=(systemrescue arch debian fedora)
+SORTES=(systemrescue arch omarchy debian fedora)
 
 # Clés principales qui signent les images de chaque projet. Arch : celle de son responsable des images (trousseau
 # archlinux-keyring, « PGP fingerprint » de archlinux.org/download). Debian : « Debian CD signing key »
 # (debian.org/CD/verify). Fedora : une clé par version, 43 à 46 (fedoraproject.org/fedora.gpg et le paquet
-# fedora-repos). SystemRescue : celle de son auteur (system-rescue.org/security).
+# fedora-repos). SystemRescue : celle de son auteur (system-rescue.org/security). Omarchy : celle de ses paquets
+# (la clé « Omarchy » du paquet omarchy-keyring), qui signe aussi son image.
 declare -A SIGNATAIRES=(
   [arch]="3E80CA1A8B89F69CBA57D98A76A5EF9054449A5C"
   [debian]="DF9B9C49EAA9298432589D76DA87E80D6294BE9B 10460DAD76165AD81FBC0CE9988021A964E6EA7D"
   [fedora]="C6E7F081CF80E13146676E88829B606631645531 36F612DCF27F7D1A48A835E4DBFCF71C6D9F90A6
             4F50A6114CD5C6976A7F1179655A4B02F577861E D924B10D3E810DABDD8B56B596E7E91491211FCE"
   [systemrescue]="0FF11AF081E98345594812037091115F8320B897"
+  [omarchy]="40DFB630FF42BCFFB047046CF0134EE680CAC571"
 )
 # Noms des images de chaque sorte : les anciennes versions se reconnaissent sur la clé et dans le cache.
 declare -A MOTIFS=(
@@ -44,8 +46,9 @@ declare -A MOTIFS=(
   [debian]='debian-*-amd64-netinst.iso'
   [fedora]='Fedora-Everything-netinst-x86_64-*.iso'
   [systemrescue]='systemrescue-*-amd64.iso'
+  [omarchy]='omarchy-*.iso'
 )
-declare -A NOMS=([arch]="Arch Linux" [debian]=Debian [fedora]=Fedora [systemrescue]=SystemRescue)
+declare -A NOMS=([arch]="Arch Linux" [debian]=Debian [fedora]=Fedora [systemrescue]=SystemRescue [omarchy]=Omarchy)
 
 erreur() { echo "✖ $*" >&2; exit 1; }
 lire() { curl -fsSL --retry 3 --connect-timeout 20 --max-time 120 "$1"; }
@@ -101,10 +104,18 @@ derniere_systemrescue() {
   echo "systemrescue-$version-amd64.iso https://fastly-cdn.system-rescue.org/releases/$version/"
 }
 
+# Omarchy : la page d'accueil donne le lien de l'image du moment (iso.omarchy.org ne liste pas ses fichiers).
+derniere_omarchy() {
+  local nom
+  nom=$(lire https://omarchy.org/ | grep -oE 'omarchy-[0-9]+(\.[0-9]+)*\.iso' | sort -uV | tail -1)
+  [[ -n $nom ]] || return 1
+  echo "$nom https://iso.omarchy.org/"
+}
+
 # Fichiers de signature à télécharger avec l'image (noms dans le dossier de la version).
 signatures() { # sorte nom
   case $1 in
-    arch) echo "$2.sig" ;;
+    arch | omarchy) echo "$2.sig" ;;
     systemrescue) echo "$2.asc" ;;
     debian) echo "SHA512SUMS SHA512SUMS.sign" ;;
     fedora)
@@ -134,7 +145,7 @@ verifier_image() { # sorte dossier nom
   chmod 700 "$trousseau"
   gpg --homedir "$trousseau" --quiet --import "$CLES/$sorte.asc" 2>/dev/null
   case $sorte in
-    arch | systemrescue)
+    arch | systemrescue | omarchy)
       local sig
       sig=$(signatures "$sorte" "$nom")
       statut=$(gpg --homedir "$trousseau" --status-fd 1 --verify "$d/$sig" "$d/$nom" 2>/dev/null || true)
@@ -358,11 +369,11 @@ menu() { # point
 import fnmatch, json, sys
 noms = [
     (["Win11*.iso", "Windows11*.iso"], "Windows 11 (secours, si le PC ne propose pas WIN11)"),
-    (["archlinux-*.iso"], "Arch Linux : installer par Internet (Omarchy aussi, voir LISEZMOI)"),
+    (["archlinux-*.iso"], "Arch Linux : installer par Internet"),
     (["debian-*-netinst.iso"], "Debian : installer par Internet"),
     (["Fedora-Everything-netinst-*.iso"], "Fedora : installer par Internet"),
     (["systemrescue-*.iso"], "SystemRescue : réparer, sauver des fichiers, tester la mémoire"),
-    (["omarchy-*.iso"], "Omarchy (Linux) : installer"),
+    (["omarchy-*.iso"], "Omarchy : installer (sans Internet)"),
 ]
 alias = []
 for image in sys.stdin.read().split("\n"):

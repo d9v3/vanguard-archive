@@ -208,8 +208,8 @@ La clé a deux partitions : `VANGUARD`, en lecture seule partout sauf sur l'ordi
 respecté par Windows ; sous Linux et macOS, Vanguard la remonte lui-même en lecture seule), et `VANGUARDLOG`, qui ne
 reçoit que le journal des erreurs, anonymisé. `outils/preparer-cle.sh` prépare une nouvelle clé.
 
-En préparation, une clé de secours qui démarre aussi les ordinateurs : `outils/cle-secours.sh`. Ventoy démarre Arch
-(qui installe aussi Omarchy), Debian et Fedora en installateurs par Internet, SystemRescue (et Windows 11 en
+En préparation, une clé de secours qui démarre aussi les ordinateurs : `outils/cle-secours.sh`. Ventoy démarre
+l'installateur d'Omarchy, Arch, Debian et Fedora en installateurs par Internet, SystemRescue (et Windows 11 en
 secours), tenus à jour par `outils/images-cle.sh` (signature de chaque projet vérifiée, minuterie hebdomadaire, copie
 au branchement) ; une partition FAT32 `WIN11` installe Windows 11 avec Secure Boot actif,
 sans ajouter de clé au PC (`install.wim` découpé par wimlib sous la limite de 4 Go) ; une partition HFS+ porte la

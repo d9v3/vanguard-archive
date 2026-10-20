@@ -1,6 +1,6 @@
 [Unit]
 Description=Vanguard : télécharger et vérifier les nouvelles images Linux de la clé de secours
-# Arch, Debian, Fedora et SystemRescue : la dernière version de chacune, vérifiée par la signature de son projet,
+# Omarchy, Arch, Debian, Fedora et SystemRescue : la dernière version de chacune, vérifiée par la signature de son projet,
 # dans ~/.cache/vanguard/images-cle. Elles vont sur la clé à son prochain branchement (vanguard-images-cle.service).
 After=network-online.target
 

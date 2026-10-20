@@ -58,11 +58,9 @@ The program: "vanguard", in this folder. Any 64-bit distribution (x86_64), nothi
 
    Boot the computer from the key (boot menu key: F12, F11, F8 or Esc depending on the PC), then pick
    from the Ventoy menu. Debian, Fedora and Arch install over the Internet (cable or Wi-Fi).
-   - Omarchy: pick Arch Linux, join the Wi-Fi (iwctl, then "station wlan0 connect <network>"), run
-     archinstall (LUKS-encrypted disk, btrfs, Limine boot loader, pipewire audio, network "copy ISO
-     network config"), reboot, log in, then type:
-       curl -fsSL https://omarchy.org/install | bash
-     Official guide: https://learn.omacom.io/2/the-omarchy-manual/96/manual-installation
+   - Omarchy: pick "Omarchy": its installer sets up everything (encrypted disk included), no Internet.
+     By hand from Arch Linux (archinstall, then "curl -fsSL https://omarchy.org/install | bash"):
+     https://learn.omacom.io/2/the-omarchy-manual/96/manual-installation
    - The images update themselves when the key is plugged into the computer that prepares it.
 
 Full guide (menu, key protection, language): README.txt at the root of the key.

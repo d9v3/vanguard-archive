@@ -38,3 +38,6 @@ essai https://github.com/tldr-pages/tldr/releases/latest/download/ https://githu
 # chez leur auteur, gardées telles quelles. Vues le 20 oct. 2026 (dépendances de YARA-X).
 ignorer https://github.com/bpressure/ascii_tree
 ignorer https://github.com/rustwasm/walrus/tree/crates/macro
+
+# Images d'Omarchy (outils/images-cle.sh) : le serveur ne liste pas ses fichiers, le programme ajoute le nom de l'image.
+serveur https://iso.omarchy.org/

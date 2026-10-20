@@ -204,8 +204,8 @@ The key has two partitions: `VANGUARD`, read-only everywhere except on its owner
 Windows; on Linux and macOS, Vanguard remounts it read-only itself), and `VANGUARDLOG`, which only receives the error
 log, anonymized. `outils/preparer-cle.sh` prepares a new key.
 
-In preparation, a rescue key that also boots computers: `outils/cle-secours.sh`. Ventoy boots Arch (which
-also installs Omarchy), Debian and Fedora as network installers, SystemRescue (and Windows 11 as a fallback), kept up
+In preparation, a rescue key that also boots computers: `outils/cle-secours.sh`. Ventoy boots the Omarchy
+installer, Arch, Debian and Fedora as network installers, SystemRescue (and Windows 11 as a fallback), kept up
 to date by `outils/images-cle.sh` (each project's signature checked, weekly timer, copy on plug-in); a FAT32 `WIN11` partition installs Windows 11 with Secure Boot on,
 without adding a key to the PC (`install.wim` split by wimlib under the 4 GB limit); an HFS+ partition holds the macOS
 recovery of Intel Macs; `VANGUARD` and `VANGUARDLOG` as before. `--plan` and `--essai` (on a disk image) touch no disk;

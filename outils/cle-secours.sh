@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Clé de secours : la clé VANGUARD démarre aussi les ordinateurs, pour réparer ou réinstaller Linux, Windows et macOS.
 #   1 VANGUARD     partition de Ventoy, exFAT : Vanguard comme avant (témoin vanguard.cle), et ses images dans ISO/ :
-#                 Arch Linux (qui installe aussi Omarchy), Debian et Fedora en installateurs par Internet, SystemRescue
+#                 Omarchy (installateur complet), Arch Linux, Debian et Fedora en installateurs par Internet, SystemRescue
 #                 (réparer, sauver des fichiers, tester la mémoire), et Windows 11 en secours s'il reste la place.
 #                 Les images Linux viennent de outils/images-cle.sh, qui les vérifie et les tient à jour au
 #                 branchement. Attribut GPT « lecture seule » (bit 60) : Windows la monte en lecture seule.
@@ -39,9 +39,9 @@ JOURNAL_MIO=64
 VTOYEFI_MIO=32
 # Taille de la récupération de Monterey (volume HFS+ de 2,68 Gio) arrondie ; mesurée sur l'image quand elle est là.
 MACOS_MIO_ESTIME=2816
-# Images Linux (Arch 1,5 Go, Debian 0,8, Fedora 1,2, SystemRescue 1,3 en 2026) avec de quoi grandir ; mesurées dans
+# Images Linux (Omarchy 6,4 Go, Arch 1,5, Debian 0,8, Fedora 1,2, SystemRescue 1,3 en 2026) avec de quoi grandir ; mesurées dans
 # le cache de images-cle.sh quand elles y sont. Windows 11 : l'ISO multi-édition, de 7,2 à 7,9 Go selon la langue.
-LINUX_MIO_ESTIME=5632
+LINUX_MIO_ESTIME=12032
 WINDOWS_ISO_MIO_ESTIME=7534
 IMAGES_LINUX=${VANGUARD_IMAGES:-${XDG_CACHE_HOME:-$HOME/.cache}/vanguard/images-cle}
 # Partition WIN11 sans l'image sous la main : de quoi tenir l'ISO la plus grosse.
@@ -99,12 +99,12 @@ fichiers_iso() { # image
     END { sortir() }'
 }
 
-# Place des images Linux : celles prêtes dans le cache (toutes les quatre), sinon l'estimation.
+# Place des images Linux : celles prêtes dans le cache (toutes les cinq), sinon l'estimation.
 linux_mio() {
   local octets n
   read -r n octets < <(find "$IMAGES_LINUX" -maxdepth 1 -name '*.iso' -exec test -f {}.sha256 \; -printf '%s\n' \
     2>/dev/null | awk '{s += $1; n++} END {printf "%d %d\n", n, s}')
-  if ((n == 4)); then echo $(((octets + MIO - 1) / MIO + 256)); else echo "$LINUX_MIO_ESTIME"; fi
+  if ((n == 5)); then echo $(((octets + MIO - 1) / MIO + 256)); else echo "$LINUX_MIO_ESTIME"; fi
 }
 
 # Volume HFS+ de la récupération de macOS dans l'image d'Apple : (nom dans l'image, taille en octets).
@@ -230,7 +230,8 @@ telecharger() { # dossier
   empreinte_ok "$d/ventoy-$VENTOY-linux.tar.gz" "$VENTOY_SHA256" ||
     "${recuperer[@]}" -o "$d/ventoy-$VENTOY-linux.tar.gz" \
       "https://github.com/ventoy/Ventoy/releases/download/v$VENTOY/ventoy-$VENTOY-linux.tar.gz"
-  # Arch, Debian, Fedora et SystemRescue : dans le cache de images-cle.sh, vérifiés par la signature de leur projet.
+  # Omarchy, Arch, Debian, Fedora et SystemRescue : dans le cache de images-cle.sh, vérifiés par la signature de leur
+  # projet.
   outils/images-cle.sh --chercher || true
   # macrecovery (OpenCorePkg, licence BSD) demande l'image de récupération aux serveurs d'Apple et la vérifie.
   "${recuperer[@]}" -o "$d/macrecovery.py" \
@@ -327,8 +328,8 @@ Clé de $(numfmt --to=iec-i --suffix=o --format='%.1f' "$octets") ($disque), tab
   4 MACOS       $(printf '%6d' "$macos") Mio  HFS+, récupération de macOS (Mac Intel)
   5 WIN11       $(printf '%6d' "$windows") Mio  FAT32, installation de Windows 11 (démarre seule, Secure Boot actif)
 
-Dans VANGUARD : Vanguard et sa base ($MARGE_VANGUARD_MIO Mio gardés), les images Linux $(linux_mio) Mio (Arch, Debian,
-Fedora, SystemRescue).
+Dans VANGUARD : Vanguard et sa base ($MARGE_VANGUARD_MIO Mio gardés), les images Linux $(linux_mio) Mio (Omarchy, Arch,
+Debian, Fedora, SystemRescue).
 $(place_vanguard "$vanguard" "$iso_windows" || true)
 
 Commandes de --ecrire (rien n'est lancé ici) :
