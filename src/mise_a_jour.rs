@@ -555,14 +555,19 @@ mod tests {
         assert_eq!(etat(&racine.join("ailleurs").join(NOM), None), Etat::PasDepuisLaCle);
         // Sans version lisible pour ce programme : rien n'est proposé.
         assert_eq!(etat_de(&sur_la_cle, Some(&cle), &copie, None, TAILLE_MAX), Etat::Rien);
-        // Une copie qui ne se lit pas (ici un dossier, ou démesurée) est dite, jamais comptée comme à jour.
-        std::fs::remove_file(&copie).unwrap();
-        std::fs::create_dir_all(&copie).unwrap();
-        assert!(matches!(etat(&sur_la_cle, Some(&cle)), Etat::Illisible(_)));
-        std::fs::remove_dir(&copie).unwrap();
-        faux_programme(&copie, Some("0.70.0"));
+        // Une copie qui ne se lit pas (ici un dossier, ou démesurée) est dite, jamais comptée comme à jour. Chaque cas
+        // a son chemin : sous Windows, un nom tout juste supprimé reste pris tant qu'un autre programme (Defender,
+        // Wine) tient le fichier ouvert, et le recréer aussitôt échouait parfois.
+        let en_dossier = racine.join("ordinateur-dossier").join(NOM);
+        std::fs::create_dir_all(&en_dossier).unwrap();
         assert!(matches!(
-            etat_de(&sur_la_cle, Some(&cle), &copie, Some(v), 4),
+            etat_de(&sur_la_cle, Some(&cle), &en_dossier, Some(v), TAILLE_MAX),
+            Etat::Illisible(_)
+        ));
+        let demesuree = racine.join("ordinateur-demesure").join(NOM);
+        faux_programme(&demesuree, Some("0.70.0"));
+        assert!(matches!(
+            etat_de(&sur_la_cle, Some(&cle), &demesuree, Some(v), 4),
             Etat::Illisible(_)
         ));
         let _ = std::fs::remove_dir_all(&racine);
