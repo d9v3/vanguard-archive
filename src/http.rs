@@ -52,7 +52,12 @@ fn a_part<T: Send + 'static>(travail: impl Future<Output = T> + Send + 'static) 
             .enable_all()
             .build()
             .ok()
-            .map(|moteur| moteur.block_on(travail))
+            .map(|moteur| {
+                let resultat = moteur.block_on(travail);
+                // Sans attendre une résolution DNS encore bloquée dans un fil du moteur : le délai reste le délai.
+                moteur.shutdown_background();
+                resultat
+            })
     })
     .join()
     .ok()
@@ -98,6 +103,10 @@ pub(crate) fn envoyer(demande: Demande) -> Option<Reponse> {
         delai,
         taille_max,
     } = demande;
+    // HTTPS seulement, dès l'adresse de départ ; en clair, seulement vers cette machine (les tests).
+    if !(adresse.starts_with("https://") || adresse.starts_with("http://127.0.0.1:")) {
+        return None;
+    }
     let adresse = adresse.to_string();
     let entetes: Vec<(String, String)> = entetes.into_iter().map(|(n, v)| (n.to_string(), v)).collect();
     a_part(async move {
@@ -114,7 +123,9 @@ pub(crate) fn envoyer(demande: Demande) -> Option<Reponse> {
         if reponse.content_length().is_some_and(|t| t > taille_max) {
             return None;
         }
-        let mut recu = Vec::new();
+        // La place d'un coup quand la taille est annoncée (bornée), au lieu de doublements successifs.
+        let annoncee = reponse.content_length().unwrap_or(0).min(taille_max);
+        let mut recu = Vec::with_capacity(usize::try_from(annoncee).unwrap_or(0));
         while let Some(morceau) = reponse.chunk().await.ok()? {
             recu.extend_from_slice(&morceau);
             if recu.len() as u64 > taille_max {
@@ -146,7 +157,7 @@ pub(crate) fn recevoir_en_comptant(adresse: &str, fin: Instant, octets: &AtomicU
                 .enable_all()
                 .build()
                 .ok()?;
-            moteur.block_on(async {
+            let resultat = moteur.block_on(async {
                 let mut reponse = client(reste)?.get(adresse).send().await.ok()?;
                 let mut recus = 0u64;
                 while Instant::now() < fin && !arret.load(Ordering::Relaxed) {
@@ -157,7 +168,9 @@ pub(crate) fn recevoir_en_comptant(adresse: &str, fin: Instant, octets: &AtomicU
                     octets.fetch_add(morceau.len() as u64, Ordering::Relaxed);
                 }
                 Some(recus > 0)
-            })
+            });
+            moteur.shutdown_background();
+            resultat
         })
         .join()
         .ok()
