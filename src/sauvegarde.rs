@@ -1030,6 +1030,16 @@ pub fn menu() {
 const A_RELIRE: usize = 20;
 /// Au-delà, la liste de la sauvegarde s'arrête : l'échantillon reste réparti sur ce qui a été lu.
 const LISTE_MAX: usize = 200_000;
+/// Un fichier plus gros n'entre pas dans l'échantillon : relu deux fois (copie puis original), une image de
+/// machine virtuelle de 40 Go prendrait une heure sur une clé lente, et « quelques secondes » ne tiendrait plus.
+const TAILLE_RELUE_MAX: u64 = 1 << 30;
+
+/// Les fichiers ordinaires trouvés dans la sauvegarde, et combien de gros fichiers ont été laissés de côté.
+#[derive(Debug, Default, PartialEq, Eq)]
+struct Liste {
+    fichiers: Vec<PathBuf>,
+    gros: usize,
+}
 
 /// Un fichier de la sauvegarde comparé à son original.
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
@@ -1052,7 +1062,7 @@ fn comparer(copie: &Path, original: &Path) -> Comparaison {
     let Ok(relue) = crate::copier::empreinte_relue(copie) else {
         return Comparaison::Illisible;
     };
-    let Ok(attendue) = crate::copier::empreinte(original) else {
+    let Ok(attendue) = empreinte_originale(original) else {
         return Comparaison::SansOriginal;
     };
     if relue == attendue {
@@ -1066,11 +1076,31 @@ fn comparer(copie: &Path, original: &Path) -> Comparaison {
     }
 }
 
-/// Les fichiers ordinaires de la sauvegarde, en chemins relatifs et triés, sans suivre les liens.
-fn fichiers_de(dossier: &Path) -> Vec<PathBuf> {
-    let mut trouves = Vec::new();
+/// L'empreinte de l'original, qui doit être un fichier ordinaire : depuis la sauvegarde, il a pu devenir un lien
+/// vers /dev/zero ou un tube nommé, que `File::open` suivrait et lirait sans fin, écran figé. Le lien n'est pas
+/// suivi (rsync ne copie pas sa cible sous ce nom), et l'ouverture est non bloquante, comme dans le bilan des
+/// traces ; le descripteur ouvert est revérifié, pour qu'un échange entre les deux appels ne passe pas.
+fn empreinte_originale(original: &Path) -> std::io::Result<blake3::Hash> {
+    if !std::fs::symlink_metadata(original)?.is_file() {
+        return Err(std::io::Error::other("pas un fichier ordinaire"));
+    }
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::custom_flags(&mut options, libc::O_NONBLOCK);
+    let fichier = options.open(original)?;
+    if !fichier.metadata()?.is_file() {
+        return Err(std::io::Error::other("pas un fichier ordinaire"));
+    }
+    Ok(blake3::Hasher::new().update_reader(fichier)?.finalize())
+}
+
+/// Les fichiers ordinaires de la sauvegarde, en chemins relatifs et triés, sans suivre les liens. La borne arrête
+/// tout le parcours (pas seulement le dossier en cours) : sinon chaque dossier restant serait encore ouvert.
+fn fichiers_de(dossier: &Path) -> Liste {
+    let mut liste = Liste::default();
     let mut a_voir = vec![PathBuf::new()];
-    while let Some(relatif) = a_voir.pop() {
+    'tout: while let Some(relatif) = a_voir.pop() {
         for e in std::fs::read_dir(dossier.join(&relatif))
             .into_iter()
             .flatten()
@@ -1079,16 +1109,17 @@ fn fichiers_de(dossier: &Path) -> Vec<PathBuf> {
             let chemin = relatif.join(e.file_name());
             match std::fs::symlink_metadata(e.path()) {
                 Ok(m) if m.is_dir() => a_voir.push(chemin),
-                Ok(m) if m.is_file() => trouves.push(chemin),
+                Ok(m) if m.is_file() && m.len() > TAILLE_RELUE_MAX => liste.gros += 1,
+                Ok(m) if m.is_file() => liste.fichiers.push(chemin),
                 _ => {}
             }
-            if trouves.len() >= LISTE_MAX {
-                break;
+            if liste.fichiers.len() >= LISTE_MAX {
+                break 'tout;
             }
         }
     }
-    trouves.sort();
-    trouves
+    liste.fichiers.sort();
+    liste
 }
 
 /// L'original d'un fichier de la sauvegarde : rsync copie chaque dossier sauvegardé sous son nom
@@ -1103,11 +1134,11 @@ fn original_de(relatif: &Path, sources: &[(String, PathBuf)]) -> Option<PathBuf>
 
 /// La sauvegarde rsync de `destination` (un dossier par dossier sauvegardé : Documents, Images…) relue par
 /// échantillon et comparée aux originaux, `sources` = (nom du dossier sur la sauvegarde, dossier d'origine) : chaque
-/// fichier relu, avec son verdict. Un dossier de la sauvegarde qui ne correspond plus à aucune source reste sans
-/// original : rien n'est conclu sur lui.
-fn relire_sauvegarde(destination: &Path, sources: &[(String, PathBuf)]) -> Vec<(PathBuf, Comparaison)> {
-    let fichiers = fichiers_de(destination);
-    crate::copier::echantillon(&fichiers, A_RELIRE)
+/// fichier relu, avec son verdict, et le nombre de gros fichiers laissés de côté. Un dossier de la sauvegarde qui
+/// ne correspond plus à aucune source reste sans original : rien n'est conclu sur lui.
+fn relire_sauvegarde(destination: &Path, sources: &[(String, PathBuf)]) -> (Vec<(PathBuf, Comparaison)>, usize) {
+    let liste = fichiers_de(destination);
+    let relus = crate::copier::echantillon(&liste.fichiers, A_RELIRE)
         .into_iter()
         .map(|relatif| {
             let verdict = match original_de(relatif, sources) {
@@ -1116,7 +1147,8 @@ fn relire_sauvegarde(destination: &Path, sources: &[(String, PathBuf)]) -> Vec<(
             };
             (relatif.clone(), verdict)
         })
-        .collect()
+        .collect();
+    (relus, liste.gros)
 }
 
 /// Les dossiers sauvegardés par Vanguard (Documents, Images…), nommés comme rsync les pose sur la sauvegarde.
@@ -1131,7 +1163,8 @@ fn sources_actuelles() -> Vec<(String, PathBuf)> {
 }
 
 /// « Vérifier ma sauvegarde » (menu Données, `vanguard verifier-sauvegarde`) : la sauvegarde que Vanguard a mise en
-/// place est relue pour de vrai, quelques fichiers au hasard comparés à leur original. Rien n'est écrit ni effacé.
+/// place est relue pour de vrai, quelques fichiers répartis sur toute la sauvegarde (toujours les mêmes d'un
+/// passage à l'autre : l'échantillon est déterministe) comparés à leur original. Rien n'est écrit ni effacé.
 pub fn verifier_sauvegarde() {
     println!();
     titre(tr!("Vérifier ma sauvegarde", "Check my backup"));
@@ -1171,8 +1204,8 @@ pub fn verifier_sauvegarde() {
         ));
         return;
     }
-    let relus = relire_sauvegarde(&destination, &sources_actuelles());
-    if relus.is_empty() {
+    let (relus, gros) = relire_sauvegarde(&destination, &sources_actuelles());
+    if relus.is_empty() && gros == 0 {
         mauvais(tr!(
             "La sauvegarde est vide : rsync n'y a encore rien copié (disque branché à midi ?). Rien n'a été vérifié.",
             "The backup is empty: rsync has not copied anything yet (disk plugged in at noon?). Nothing was checked."
@@ -1203,6 +1236,12 @@ pub fn verifier_sauvegarde() {
         info(&trf!(
             "{sans} fichier(s) sans original à comparer (effacé depuis, ou hors du dossier personnel).",
             "{sans} file(s) with no original to compare (deleted since, or outside the home folder)."
+        ));
+    }
+    if gros > 0 {
+        info(&trf!(
+            "{gros} gros fichier(s) (plus de 1 Gio) non relu(s) : trop longs à comparer.",
+            "{gros} large file(s) (over 1 GiB) not read back: too long to compare."
         ));
     }
     for (relatif, verdict) in relus
@@ -1276,7 +1315,8 @@ mod tests {
         ecrire(&sauvegarde, "ancien.txt", "version d'hier", 86_400);
         // Les Documents peuvent être hors du dossier personnel : la source est nommée, pas devinée.
         let sources = vec![("Documents".to_string(), maison.join("Documents"))];
-        let mut relus = relire_sauvegarde(&sauvegarde, &sources);
+        let (mut relus, gros) = relire_sauvegarde(&sauvegarde, &sources);
+        assert_eq!(gros, 0);
         relus.sort_by(|a, b| a.0.cmp(&b.0));
         let attendu = [
             ("ancien.txt", Comparaison::ModifieDepuis),
@@ -1293,9 +1333,59 @@ mod tests {
         // Un dossier de la sauvegarde qui n'est plus une source : rien n'est conclu, jamais « abîmé ».
         assert!(
             relire_sauvegarde(&sauvegarde, &[])
+                .0
                 .iter()
                 .all(|(_, v)| *v == Comparaison::SansOriginal)
         );
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// Un original qui n'est plus un fichier ordinaire (tube nommé, lien vers /dev/zero) n'est pas lu : il
+    /// bloquerait ou lirait sans fin. Il est « sans original », jamais « abîmé ».
+    #[cfg(unix)]
+    #[test]
+    fn original_qui_n_est_plus_un_fichier() {
+        let base = crate::reseau::dossier_local().join("verifier-sauvegarde-tube");
+        let _ = std::fs::remove_dir_all(&base);
+        let (maison, sauvegarde) = (base.join("maison"), base.join("disque"));
+        for d in [maison.join("Documents"), sauvegarde.join("Documents")] {
+            std::fs::create_dir_all(d).unwrap();
+        }
+        std::fs::write(sauvegarde.join("Documents/tube.txt"), "copie").unwrap();
+        std::fs::write(sauvegarde.join("Documents/zero.txt"), "copie").unwrap();
+        let tube = std::ffi::CString::new(maison.join("Documents/tube.txt").to_str().unwrap()).unwrap();
+        // SAFETY : chemin C terminé par un zéro, vivant pendant l'appel ; mkfifo ne touche aucune mémoire du
+        // programme.
+        assert_eq!(unsafe { libc::mkfifo(tube.as_ptr(), 0o600) }, 0);
+        std::os::unix::fs::symlink("/dev/zero", maison.join("Documents/zero.txt")).unwrap();
+        let sources = vec![("Documents".to_string(), maison.join("Documents"))];
+        let depart = std::time::Instant::now();
+        let (relus, _) = relire_sauvegarde(&sauvegarde, &sources);
+        assert!(depart.elapsed() < std::time::Duration::from_secs(3));
+        assert_eq!(relus.len(), 2);
+        assert!(relus.iter().all(|(_, v)| *v == Comparaison::SansOriginal));
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// La borne arrête tout le parcours, et un gros fichier est compté sans entrer dans la liste.
+    #[test]
+    fn liste_bornee_et_gros_fichiers_comptes() {
+        let base = crate::reseau::dossier_local().join("verifier-sauvegarde-liste");
+        let _ = std::fs::remove_dir_all(&base);
+        for d in ["a", "b", "c"] {
+            std::fs::create_dir_all(base.join(d)).unwrap();
+            for f in ["1", "2", "3"] {
+                std::fs::write(base.join(d).join(f), "x").unwrap();
+            }
+        }
+        // Un fichier creux : la taille déclarée compte, pas la place prise.
+        let gros = std::fs::File::create(base.join("a/gros.img")).unwrap();
+        gros.set_len(TAILLE_RELUE_MAX + 1).unwrap();
+        drop(gros);
+        let liste = fichiers_de(&base);
+        assert_eq!(liste.fichiers.len(), 9);
+        assert_eq!(liste.gros, 1);
+        assert!(!liste.fichiers.iter().any(|f| f.ends_with("gros.img")));
         let _ = std::fs::remove_dir_all(&base);
     }
 
