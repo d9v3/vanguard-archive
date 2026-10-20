@@ -62,7 +62,7 @@ GitHub | github.com";
 // ───────────────────────────── Lecture des connexions ─────────────────────────────
 
 /// « 140.82.112.4:443 », « [2606:4700::1111]:443 », « 192.168.1.2%wlan0:68 » → (adresse, port).
-#[cfg(any(target_os = "linux", target_os = "macos", test))]
+#[cfg(any(target_os = "macos", test))]
 fn adresse_et_port(t: &str) -> Option<(IpAddr, u16)> {
     let (hote, port) = t.rsplit_once(':')?;
     let hote = hote.trim_start_matches('[').trim_end_matches(']');
@@ -70,66 +70,128 @@ fn adresse_et_port(t: &str) -> Option<(IpAddr, u16)> {
     Some((hote.parse().ok()?, port.parse().ok()?))
 }
 
-/// Le programme d'une ligne de ss : users:(("firefox",pid=4242,fd=56)). Son nom peut contenir des espaces
-/// (« Web Content »). N'importe quel programme choisit son nom : lu prêt à montrer, comme dans chaque lecture de ce
-/// fichier (le chemin, lui, reste tel quel pour juger d'où le programme a été lancé).
+/// Une adresse de /proc/net : des mots de 32 bits en hexadécimal (un pour IPv4, quatre pour IPv6), chacun écrit tel que
+/// la machine le range en mémoire. Ses octets, dans l'ordre de la machine, sont donc ceux du réseau.
 #[cfg(any(target_os = "linux", test))]
-fn lire_processus(ligne: &str) -> (Option<String>, Option<u32>) {
-    let Some(debut) = ligne.find("users:((\"") else {
-        return (None, None);
+fn adresse_proc(hex: &str) -> Option<IpAddr> {
+    if hex.is_empty() || !hex.len().is_multiple_of(8) || !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return None;
+    }
+    let octets: Vec<u8> = (0..hex.len())
+        .step_by(8)
+        .map(|i| u32::from_str_radix(&hex[i..i + 8], 16).map(u32::to_ne_bytes))
+        .collect::<Result<Vec<_>, _>>()
+        .ok()?
+        .concat();
+    match octets.len() {
+        4 => Some(IpAddr::from(<[u8; 4]>::try_from(octets).ok()?)),
+        16 => Some(IpAddr::from(<[u8; 16]>::try_from(octets).ok()?)),
+        _ => None,
+    }
+}
+
+/// Les connexions établies d'un fichier de /proc/net (tcp, tcp6, udp, udp6) : « sl locale distante état … uid délai
+/// inode ». État 01 : établie (pour UDP, une prise reliée à un seul serveur, comme ss la montre). Le port est écrit en
+/// hexadécimal, dans l'ordre humain. → (distante, port, inode de la prise).
+#[cfg(any(target_os = "linux", test))]
+fn lire_proc_net(texte: &str) -> Vec<(IpAddr, u16, u64)> {
+    texte
+        .lines()
+        .skip(1)
+        .filter_map(|l| {
+            let champs: Vec<&str> = l.split_whitespace().collect();
+            if champs.get(3)? != &"01" {
+                return None;
+            }
+            let (adresse, port) = champs.get(2)?.split_once(':')?;
+            if port.len() != 4 || !port.bytes().all(|b| b.is_ascii_hexdigit()) {
+                return None;
+            }
+            Some((
+                adresse_proc(adresse)?,
+                u16::from_str_radix(port, 16).ok()?,
+                champs.get(9)?.parse().ok()?,
+            ))
+        })
+        .collect()
+}
+
+/// Le programme de chaque prise réseau : /proc/<pid>/fd/* pointe vers « socket:[inode] ». Sans droits root, seuls
+/// les programmes de ce compte se lisent, comme avec ss : ceux des autres comptes restent sans nom.
+#[cfg(target_os = "linux")]
+fn proprietaires() -> HashMap<u64, u32> {
+    let mut liste = HashMap::new();
+    let Ok(processus) = std::fs::read_dir("/proc") else {
+        return liste;
     };
-    let reste = &ligne[debut + 9..];
-    let nom = reste.split_once('"').map(|(n, _)| affichable(n));
-    let pid = reste
-        .split_once("pid=")
-        .and_then(|(_, r)| r.split([',', ')']).next()?.parse().ok());
-    (nom, pid)
+    for p in processus.flatten() {
+        let Some(pid) = p.file_name().to_str().and_then(|n| n.parse::<u32>().ok()) else {
+            continue;
+        };
+        let Ok(descripteurs) = std::fs::read_dir(p.path().join("fd")) else {
+            continue;
+        };
+        for d in descripteurs.flatten() {
+            let inode = std::fs::read_link(d.path()).ok().and_then(|cible| {
+                cible
+                    .to_str()?
+                    .strip_prefix("socket:[")?
+                    .strip_suffix(']')?
+                    .parse::<u64>()
+                    .ok()
+            });
+            if let Some(inode) = inode {
+                liste.entry(inode).or_insert(pid);
+            }
+        }
+    }
+    liste
 }
 
-/// Sortie de `ss -tunpH state established` : « tcp 0 0 local distante users:((…)) ». Sans droits root, les
-/// connexions des autres comptes paraissent sans « users: ».
-#[cfg(any(target_os = "linux", test))]
-fn lire_ss(sortie: &str) -> Vec<Connexion> {
-    sortie
-        .lines()
-        .filter_map(|l| {
-            let avant = l.split("users:").next().unwrap_or(l);
-            let champs: Vec<&str> = avant.split_whitespace().collect();
-            let udp = champs.first()? == &"udp";
-            let adresses: Vec<(IpAddr, u16)> = champs.iter().filter_map(|c| adresse_et_port(c)).collect();
-            let &(distante, port) = adresses.get(1)?;
-            let (programme, pid) = lire_processus(l);
-            Some(Connexion {
-                pid,
-                programme,
-                udp,
-                ..Connexion::vers(distante, port)
-            })
-        })
-        .collect()
-}
-
-/// Sortie du script PowerShell : « distante|port|pid|nom|chemin ». Le chemin d'un programme d'un autre compte
-/// reste vide sans droits d'administrateur ; son nom, lui, se lit.
+/// La table des connexions TCP de Windows (GetExtendedTcpTable, classe « propriétaire, toutes ») : un compte, puis une
+/// ligne par connexion. IPv4 : état, adresse et port locaux, adresse et port distants, processus (6 × 4 octets). IPv6 :
+/// adresse locale (16), zone, port, adresse distante (16), zone, port, état, processus (56 octets). Adresses et ports
+/// sont dans l'ordre du réseau ; état et processus dans celui de la machine. État 5 : établie.
+/// → (distante, port, processus).
 #[cfg(any(windows, test))]
-fn lire_windows(sortie: &str) -> Vec<Connexion> {
-    sortie
-        .lines()
+fn lire_table_tcp(octets: &[u8], ipv6: bool) -> Vec<(IpAddr, u16, u32)> {
+    let mot = |o: &[u8], i: usize| o.get(i..i + 4).map(|m| u32::from_ne_bytes([m[0], m[1], m[2], m[3]]));
+    let (taille, adresse, port, etat, processus) = if ipv6 {
+        (56, 24, 44, 48, 52)
+    } else {
+        (24, 12, 16, 0, 20)
+    };
+    let Some(nombre) = mot(octets, 0) else {
+        return Vec::new();
+    };
+    octets
+        .get(4..)
+        .unwrap_or_default()
+        .chunks_exact(taille)
+        .take(usize::try_from(nombre).unwrap_or(usize::MAX))
+        .filter(|l| mot(l, etat) == Some(5))
         .filter_map(|l| {
-            let mut p = l.split('|');
-            let distante: IpAddr = p.next()?.trim().parse().ok()?;
-            let port = p.next()?.trim().parse().ok()?;
-            let pid = p.next()?.trim().parse().ok();
-            let programme = p.next().map(str::trim).filter(|n| !n.is_empty()).map(affichable);
-            let chemin = p.next().map(str::trim).filter(|c| !c.is_empty()).map(String::from);
-            Some(Connexion {
-                pid,
-                programme,
-                chemin,
-                ..Connexion::vers(distante, port)
-            })
+            let distante = if ipv6 {
+                IpAddr::from(<[u8; 16]>::try_from(l.get(adresse..adresse + 16)?).ok()?)
+            } else {
+                IpAddr::from(<[u8; 4]>::try_from(l.get(adresse..adresse + 4)?).ok()?)
+            };
+            Some((distante, u16::from_be_bytes([l[port], l[port + 1]]), mot(l, processus)?))
         })
         .collect()
+}
+
+/// Le nom d'un programme tel que Windows le donne (« firefox.exe ») : sans « .exe », comme Get-Process le montrait, et
+/// prêt à montrer (n'importe quel programme choisit le nom de son fichier).
+#[cfg(any(windows, test))]
+fn nom_windows(fichier: &[u16]) -> String {
+    let fin = fichier.iter().position(|&c| c == 0).unwrap_or(fichier.len());
+    let nom = String::from_utf16_lossy(&fichier[..fin]);
+    let court = match nom.len().checked_sub(4) {
+        Some(i) if nom.get(i..).is_some_and(|e| e.eq_ignore_ascii_case(".exe")) => &nom[..i],
+        _ => &nom,
+    };
+    affichable(court)
 }
 
 /// Sortie de `lsof -nP -iTCP -sTCP:ESTABLISHED -F pcn` : un champ par ligne, « p » (processus), « c » (nom),
@@ -187,36 +249,196 @@ fn invisibles(netstat: &str, visibles: &[Connexion]) -> Vec<Connexion> {
         .collect()
 }
 
+/// Lu dans /proc, sans lancer ss : rien à installer, et rien qu'un programme posé plus tôt dans le PATH puisse remplacer.
+/// `None` : aucun fichier de /proc/net lisible.
 #[cfg(target_os = "linux")]
 fn connexions() -> Option<Vec<Connexion>> {
-    let r = crate::commande::lancer(
-        std::process::Command::new("ss").args(["-tunpH", "state", "established"]),
-        15,
-    )?;
-    if r.code != Some(0) {
-        return None;
-    }
-    let mut liste = lire_ss(&r.sortie);
-    for c in &mut liste {
-        if let Some(pid) = c.pid {
-            c.chemin = std::fs::read_link(format!("/proc/{pid}/exe"))
-                .ok()
-                .map(|p| p.display().to_string());
+    let mut lues = Vec::new();
+    let mut lisible = false;
+    for (fichier, udp) in [("tcp", false), ("tcp6", false), ("udp", true), ("udp6", true)] {
+        // tcp6 et udp6 manquent quand IPv6 est coupé : ce n'est pas une panne.
+        if let Ok(texte) = std::fs::read_to_string(format!("/proc/net/{fichier}")) {
+            lisible = true;
+            lues.extend(lire_proc_net(&texte).into_iter().map(|(d, p, i)| (d, p, i, udp)));
         }
     }
-    Some(liste)
+    if !lisible {
+        return None;
+    }
+    let proprietaires = if lues.is_empty() {
+        HashMap::new()
+    } else {
+        proprietaires()
+    };
+    Some(
+        lues.into_iter()
+            .map(|(distante, port, inode, udp)| {
+                let pid = proprietaires.get(&inode).copied();
+                Connexion {
+                    pid,
+                    // Le nom court du programme, celui que ss montrait ; n'importe quel programme le choisit.
+                    programme: pid
+                        .and_then(|p| std::fs::read_to_string(format!("/proc/{p}/comm")).ok())
+                        .map(|n| affichable(n.trim_end_matches('\n'))),
+                    chemin: pid
+                        .and_then(|p| std::fs::read_link(format!("/proc/{p}/exe")).ok())
+                        .map(|c| c.display().to_string()),
+                    udp,
+                    ..Connexion::vers(distante, port)
+                }
+            })
+            .collect(),
+    )
 }
 
 #[cfg(windows)]
+mod windows {
+    use std::ffi::c_void;
+
+    #[link(name = "iphlpapi")]
+    unsafe extern "system" {
+        fn GetExtendedTcpTable(
+            table: *mut c_void,
+            taille: *mut u32,
+            trier: i32,
+            famille: u32,
+            classe: u32,
+            reserve: u32,
+        ) -> u32;
+    }
+
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn CreateToolhelp32Snapshot(drapeaux: u32, processus: u32) -> *mut c_void;
+        fn Process32FirstW(instantane: *mut c_void, entree: *mut Entree) -> i32;
+        fn Process32NextW(instantane: *mut c_void, entree: *mut Entree) -> i32;
+        fn OpenProcess(acces: u32, heriter: i32, processus: u32) -> *mut c_void;
+        fn QueryFullProcessImageNameW(processus: *mut c_void, drapeaux: u32, nom: *mut u16, taille: *mut u32) -> i32;
+        fn CloseHandle(objet: *mut c_void) -> i32;
+    }
+
+    /// PROCESSENTRY32W (tlhelp32.h).
+    #[repr(C)]
+    pub(super) struct Entree {
+        taille: u32,
+        utilisations: u32,
+        pub(super) processus: u32,
+        tas: usize,
+        module: u32,
+        fils: u32,
+        parent: u32,
+        priorite: i32,
+        drapeaux: u32,
+        pub(super) fichier: [u16; 260],
+    }
+
+    /// La table des connexions TCP d'une famille (2 : IPv4, 23 : IPv6), telle que `lire_table_tcp` la lit. Elle peut
+    /// grandir entre la demande de sa taille et sa lecture : quelques essais.
+    pub(super) fn table_tcp(famille: u32) -> Option<Vec<u8>> {
+        const PROPRIETAIRE_TOUTES: u32 = 5;
+        const TAMPON_TROP_PETIT: u32 = 122;
+        let mut taille = 0u32;
+        for _ in 0..5 {
+            // Des mots de 32 bits : la table en contient, alignés.
+            let mut tampon = vec![0u32; usize::try_from(taille.div_ceil(4)).ok()?];
+            let mut place = u32::try_from(tampon.len() * 4).ok()?;
+            // SAFETY : `tampon` fait `place` octets, alignés sur 4 ; Windows y écrit au plus `place` octets, ou rien
+            // en disant la taille qu'il faut (TAMPON_TROP_PETIT). Un tampon vide est passé comme un pointeur valable.
+            let code = unsafe {
+                GetExtendedTcpTable(
+                    tampon.as_mut_ptr().cast(),
+                    &raw mut place,
+                    0,
+                    famille,
+                    PROPRIETAIRE_TOUTES,
+                    0,
+                )
+            };
+            match code {
+                0 => {
+                    let octets = tampon.iter().flat_map(|m| m.to_ne_bytes());
+                    return Some(octets.take(usize::try_from(place).ok()?).collect());
+                }
+                TAMPON_TROP_PETIT => taille = place,
+                _ => return None,
+            }
+        }
+        None
+    }
+
+    /// Le nom de fichier de chaque processus, lu sans droits d'administrateur (comme le Gestionnaire des tâches).
+    pub(super) fn processus() -> Vec<(u32, [u16; 260])> {
+        const INSTANTANE_PROCESSUS: u32 = 2;
+        let mut liste = Vec::new();
+        // SAFETY : CreateToolhelp32Snapshot rend un instantané (ou INVALID_HANDLE_VALUE, -1, vérifié), refermé une
+        // seule fois plus bas. `entree` est une PROCESSENTRY32W dont le champ de taille est rempli, comme Windows
+        // l'exige ; il la remplit à chaque appel, sans rien garder.
+        unsafe {
+            let instantane = CreateToolhelp32Snapshot(INSTANTANE_PROCESSUS, 0);
+            if instantane as isize == -1 {
+                return liste;
+            }
+            let mut entree: Entree = std::mem::zeroed();
+            entree.taille = u32::try_from(std::mem::size_of::<Entree>()).unwrap_or(0);
+            let mut suivant = Process32FirstW(instantane, &raw mut entree) != 0;
+            while suivant {
+                liste.push((entree.processus, entree.fichier));
+                suivant = Process32NextW(instantane, &raw mut entree) != 0;
+            }
+            CloseHandle(instantane);
+        }
+        liste
+    }
+
+    /// Le chemin complet du programme d'un processus. Les droits « limités » suffisent pour la plupart, même d'un
+    /// autre compte ; un processus protégé (System, antivirus) refuse : `None`.
+    pub(super) fn chemin(processus: u32) -> Option<String> {
+        const INFORMATION_LIMITEE: u32 = 0x1000;
+        let mut tampon = vec![0u16; 32_768];
+        let mut taille = u32::try_from(tampon.len()).ok()?;
+        // SAFETY : la poignée vient d'OpenProcess (nulle : refus, vérifié) et n'est refermée qu'une fois.
+        // QueryFullProcessImageNameW écrit au plus `taille` caractères dans `tampon`, puis le nombre écrit dans
+        // `taille`.
+        unsafe {
+            let poignee = OpenProcess(INFORMATION_LIMITEE, 0, processus);
+            if poignee.is_null() {
+                return None;
+            }
+            let lu = QueryFullProcessImageNameW(poignee, 0, tampon.as_mut_ptr(), &raw mut taille) != 0;
+            CloseHandle(poignee);
+            lu.then(|| String::from_utf16_lossy(&tampon[..usize::try_from(taille).unwrap_or(0).min(tampon.len())]))
+        }
+    }
+}
+
+/// Lu par les fonctions de Windows, sans PowerShell : rien à lancer, et quelques millisecondes au lieu de secondes.
+/// `None` : aucune des deux tables lisible.
+#[cfg(windows)]
 fn connexions() -> Option<Vec<Connexion>> {
-    // Le chemin d'un processus protégé lève une erreur au lieu d'être vide : rattrapée, sinon tout le script tombe.
-    let sortie = crate::machine::windows::ps(
-        "Get-NetTCPConnection -State Established -ErrorAction SilentlyContinue | ForEach-Object { \
-         $p = Get-Process -Id $_.OwningProcess -ErrorAction SilentlyContinue; \
-         $c = try { $p.Path } catch { '' }; \
-         \"$($_.RemoteAddress)|$($_.RemotePort)|$($_.OwningProcess)|$($p.ProcessName)|$c\" }",
-    )?;
-    Some(lire_windows(&sortie))
+    let v4 = windows::table_tcp(2).map(|t| lire_table_tcp(&t, false));
+    let v6 = windows::table_tcp(23).map(|t| lire_table_tcp(&t, true));
+    if v4.is_none() && v6.is_none() {
+        return None;
+    }
+    let lues: Vec<(IpAddr, u16, u32)> = v4.into_iter().chain(v6).flatten().collect();
+    if lues.is_empty() {
+        return Some(Vec::new());
+    }
+    let noms: HashMap<u32, String> = windows::processus()
+        .into_iter()
+        .map(|(pid, fichier)| (pid, nom_windows(&fichier)))
+        .collect();
+    let mut chemins: HashMap<u32, Option<String>> = HashMap::new();
+    Some(
+        lues.into_iter()
+            .map(|(distante, port, pid)| Connexion {
+                pid: Some(pid),
+                programme: noms.get(&pid).filter(|n| !n.is_empty()).cloned(),
+                chemin: chemins.entry(pid).or_insert_with(|| windows::chemin(pid)).clone(),
+                ..Connexion::vers(distante, port)
+            })
+            .collect(),
+    )
 }
 
 #[cfg(target_os = "macos")]
@@ -1121,6 +1343,19 @@ mod tests {
         t.parse().unwrap()
     }
 
+    /// Les vraies fonctions de Windows (sous Wine ici, puis dans la VM) : les tables se lisent, sans PowerShell.
+    #[cfg(windows)]
+    #[test]
+    fn connexions_lues_par_windows() {
+        assert!(windows::table_tcp(2).is_some());
+        assert!(connexions().is_some());
+        assert!(windows::processus().iter().any(|(pid, _)| *pid == std::process::id()));
+    }
+
+    fn ip6(t: &str) -> [u8; 16] {
+        t.parse::<std::net::Ipv6Addr>().unwrap().octets()
+    }
+
     #[test]
     fn adresses() {
         assert_eq!(adresse_et_port("140.82.112.4:443"), Some((ip("140.82.112.4"), 443)));
@@ -1134,38 +1369,71 @@ mod tests {
     }
 
     #[test]
-    fn ss_linux() {
-        let sortie = "udp 0 0 192.168.1.20%wlan0:68 192.168.1.1:67\n\
-                      tcp 0 0 192.168.1.20:43180 140.82.112.4:443 users:((\"firefox\",pid=4242,fd=18))\n\
-                      tcp 0 0 192.168.1.20:43190 203.0.113.9:4444 users:((\"Web Content\",pid=4300,fd=7),(\"x\",pid=1,fd=2))\n\
-                      tcp 0 0 [2a01:db8::2]:50000 [2606:4700::1111]:443\n";
-        let liste = lire_ss(sortie);
-        assert_eq!(liste.len(), 4);
-        assert!(liste[0].udp && liste[0].programme.is_none());
-        assert_eq!(liste[1].programme.as_deref(), Some("firefox"));
-        assert_eq!(liste[1].pid, Some(4242));
-        assert_eq!(liste[1].distante, ip("140.82.112.4"));
-        assert_eq!(liste[2].programme.as_deref(), Some("Web Content"));
-        assert_eq!(liste[2].port, 4444);
-        // Sans « users: » : un programme d'un autre compte.
-        assert_eq!(liste[3].programme, None);
-        assert_eq!(liste[3].distante, ip("2606:4700::1111"));
+    fn proc_net_linux() {
+        // Lignes à la forme de /proc/net, adresses écrites comme la machine les range (ici, celle qui fait les tests :
+        // x86 ou ARM, petit-boutistes) : 127.0.0.1 est « 0100007F ».
+        let tcp = "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n\
+                   0: 1401A8C0:A8AC 0470528C:01BB 01 00000000:00000000 00:00000000 00000000  1000        0 4242 1 0\n\
+                   1: 0100007F:2CAA 00000000:0000 0A 00000000:00000000 00:00000000 00000000   955        0 22541 2 0\n\
+                   2: 1401A8C0:A8B6 097100CB:115C 01 00000000:00000000 00:00000000 00000000  1000        0 4300 1 0\n";
+        let liste = lire_proc_net(tcp);
+        assert_eq!(
+            liste,
+            [(ip("140.82.112.4"), 443, 4242), (ip("203.0.113.9"), 4444, 4300)]
+        );
+        let tcp6 = "  sl  local_address remote_address st\n\
+                    0: 00000000000000000000000001000000:0277 B80D01200000000000000000020000A0:C350 01 0:0 00:0 0 1000 0 77 1\n";
+        assert_eq!(lire_proc_net(tcp6), [(ip("2001:db8::a000:2"), 0xC350, 77)]);
+        // Lignes tronquées ou piégées : sautées.
+        assert_eq!(
+            lire_proc_net("en-tête\n 0: 0100007F:0035 +100007F:01BB 01 0 0 0 0 0 1\n 1: x\n"),
+            Vec::new()
+        );
     }
 
     #[test]
     fn windows_et_macos() {
-        let w = lire_windows(
-            "140.82.112.4|443|4242|firefox|C:\\Program Files\\Mozilla Firefox\\firefox.exe\n\
-             203.0.113.9|4444|5000|svchost|\n\
-             pas une ligne\n",
-        );
-        assert_eq!(w.len(), 2);
+        // Table inventée, à la forme de celle de GetExtendedTcpTable : 3 lignes IPv4, dont une en écoute (état 2).
+        let ligne4 = |etat: u32, distante: [u8; 4], port: u16, pid: u32| {
+            let mut l = Vec::new();
+            l.extend(etat.to_ne_bytes());
+            l.extend([192, 168, 1, 20, 0xA8, 0xAC, 0, 0]);
+            l.extend(distante);
+            l.extend(port.to_be_bytes());
+            l.extend([0, 0]);
+            l.extend(pid.to_ne_bytes());
+            l
+        };
+        let mut t4 = 3u32.to_ne_bytes().to_vec();
+        t4.extend(ligne4(5, [140, 82, 112, 4], 443, 4242));
+        t4.extend(ligne4(2, [0, 0, 0, 0], 0, 4));
+        t4.extend(ligne4(5, [203, 0, 113, 9], 4444, 5000));
         assert_eq!(
-            w[0].chemin.as_deref(),
-            Some("C:\\Program Files\\Mozilla Firefox\\firefox.exe")
+            lire_table_tcp(&t4, false),
+            [(ip("140.82.112.4"), 443, 4242), (ip("203.0.113.9"), 4444, 5000)]
         );
-        assert_eq!(w[1].programme.as_deref(), Some("svchost"));
-        assert_eq!(w[1].chemin, None);
+        // Une table qui annonce plus de lignes qu'elle n'en contient : lue jusqu'où elle va.
+        let mut tronquee = 9u32.to_ne_bytes().to_vec();
+        tronquee.extend(ligne4(5, [140, 82, 112, 4], 443, 4242));
+        tronquee.extend([1, 2, 3]);
+        assert_eq!(lire_table_tcp(&tronquee, false).len(), 1);
+        assert_eq!(lire_table_tcp(&[1, 0], false), Vec::new());
+        // IPv6.
+        let mut t6 = 1u32.to_ne_bytes().to_vec();
+        t6.extend([0; 24]);
+        t6.extend(ip6("2606:4700::1111"));
+        t6.extend([0; 4]);
+        t6.extend(443u16.to_be_bytes());
+        t6.extend([0, 0]);
+        t6.extend(5u32.to_ne_bytes());
+        t6.extend(777u32.to_ne_bytes());
+        assert_eq!(lire_table_tcp(&t6, true), [(ip("2606:4700::1111"), 443, 777)]);
+        // Le nom du fichier, sans « .exe », quelle que soit sa casse.
+        let fichier = |n: &str| n.encode_utf16().chain([0, 0x41]).collect::<Vec<u16>>();
+        assert_eq!(nom_windows(&fichier("firefox.exe")), "firefox");
+        assert_eq!(nom_windows(&fichier("SVCHOST.EXE")), "SVCHOST");
+        assert_eq!(nom_windows(&fichier("System")), "System");
+        assert_eq!(nom_windows(&fichier("a.exe.exe")), "a.exe");
         let lsof = "p501\ncGoogle Chrome\nf23\nn192.168.1.20:50000->142.250.1.1:443\np777\ncssh\nf3\nn[2a01:db8::2]:50001->[2001:db8::7]:22\n";
         let m = lire_lsof(lsof);
         assert_eq!(m.len(), 2);
@@ -1186,16 +1454,10 @@ mod tests {
     /// chaque lecture ; le chemin, lui, reste tel quel pour juger d'où le programme a été lancé.
     #[test]
     fn noms_de_programmes_pieges() {
-        let ss = lire_ss(
-            "tcp 0 0 192.168.1.20:43180 140.82.112.4:443 users:((\"x\x1b]52;c;eA==\x07\x1b[2K\rfaux\u{202e}\",pid=4242,fd=18))\n",
-        );
-        assert_eq!(ss[0].programme.as_deref(), Some("x�]52;c;eA==��[2K�faux�"));
-        assert_eq!(ss[0].pid, Some(4242));
         let lsof = lire_lsof("p501\ncChrome\x1b[8m\u{2066}\nf23\nn192.168.1.20:50000->142.250.1.1:443\n");
         assert_eq!(lsof[0].programme.as_deref(), Some("Chrome�[8m�"));
-        let w = lire_windows("140.82.112.4|443|4242|fire\x1b]0;x\x07fox|C:\\Temp\\a\x1b.exe\n");
-        assert_eq!(w[0].programme.as_deref(), Some("fire�]0;x�fox"));
-        assert_eq!(w[0].chemin.as_deref(), Some("C:\\Temp\\a\x1b.exe"));
+        let w: Vec<u16> = "fire\x1b]0;x\x07fox.exe".encode_utf16().collect();
+        assert_eq!(nom_windows(&w), "fire�]0;x�fox");
     }
 
     #[test]
@@ -1616,16 +1878,15 @@ mod proprietes {
         .prop_map(|l| l.join("\n"))
     }
 
-    fn programme() -> impl Strategy<Value = String> {
-        "[a-zA-Z0-9 ._-]{1,15}".prop_filter("nom non vide", |n| !n.trim().is_empty())
-    }
-
     proptest! {
         #![proptest_config(ProptestConfig { cases: 256, failure_persistence: None, ..ProptestConfig::default() })]
 
         #[test]
         fn lectures_sans_plantage(t in sortie()) {
-            let connexions = [lire_ss(&t), lire_windows(&t), lire_lsof(&t)].concat();
+            let _ = lire_proc_net(&t);
+            let _ = lire_table_tcp(t.as_bytes(), false);
+            let _ = lire_table_tcp(t.as_bytes(), true);
+            let connexions = lire_lsof(&t);
             let _ = invisibles(&t, &connexions);
             for c in &connexions {
                 prop_assert!(c.programme.as_deref().is_none_or(|p| !crate::ui::contient_un_piege(p)));
@@ -1640,21 +1901,23 @@ mod proprietes {
         }
 
         #[test]
-        fn ss_redonne_ses_valeurs(locale in any::<SocketAddr>(), distante in any::<SocketAddr>(), nom in programme(), pid in 1u32..4_000_000) {
-            let ligne = format!("tcp 0 0 {locale} {distante} users:((\"{nom}\",pid={pid},fd=7))\n");
-            let l = lire_ss(&ligne);
-            prop_assert_eq!(l.len(), 1);
-            prop_assert_eq!((l[0].distante, l[0].port, l[0].pid), (distante.ip(), distante.port(), Some(pid)));
-            prop_assert_eq!(l[0].programme.as_deref(), Some(nom.as_str()));
-            prop_assert!(!l[0].udp);
+        fn proc_net_redonne_ses_valeurs(distante in any::<SocketAddr>(), inode in any::<u64>()) {
+            // L'adresse écrite comme le noyau l'écrit : chaque mot de 32 bits tel que la machine le range.
+            let hex: String = match distante.ip() {
+                IpAddr::V4(v4) => format!("{:08X}", u32::from_ne_bytes(v4.octets())),
+                IpAddr::V6(v6) => {
+                    let o = v6.octets();
+                    let mot = |i: usize| u32::from_ne_bytes([o[i], o[i + 1], o[i + 2], o[i + 3]]);
+                    format!("{:08X}{:08X}{:08X}{:08X}", mot(0), mot(4), mot(8), mot(12))
+                }
+            };
+            let ligne = format!("en-tête\n 0: 0100007F:0035 {hex}:{:04X} 01 0:0 00:0 0 1000 0 {inode} 1\n", distante.port());
+            prop_assert_eq!(lire_proc_net(&ligne), [(distante.ip(), distante.port(), inode)]);
         }
 
         #[test]
-        fn windows_redonne_ses_valeurs(distante in any::<std::net::IpAddr>(), port in any::<u16>(), nom in programme(), pid in any::<u32>()) {
-            let l = lire_windows(&format!("{distante}|{port}|{pid}|{nom}|C:\\Program Files\\x.exe\n"));
-            prop_assert_eq!(l.len(), 1);
-            prop_assert_eq!((l[0].distante, l[0].port, l[0].pid), (distante, port, Some(pid)));
-            prop_assert_eq!(l[0].programme.as_deref(), Some(nom.trim()));
+        fn nom_windows_sans_plantage(fichier in prop::collection::vec(any::<u16>(), 0..300)) {
+            prop_assert!(!crate::ui::contient_un_piege(&nom_windows(&fichier)));
         }
 
         #[test]
