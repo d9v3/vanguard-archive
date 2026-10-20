@@ -727,28 +727,29 @@ fn analyser_threatfox_api(texte: &str) -> Option<HashMap<(IpAddr, u16), String>>
 const THREATFOX_CLE_FRAICHE: Duration = Duration::from_mins(5);
 
 /// Une liste d'abuse.ch, téléchargée et gardée (`fraiche` sans être redemandée, une semaine au plus). La télécharger ne
-/// dit à personne ce qu'on a trouvé : on prend la liste entière. `options` : ce que curl reçoit en plus (la clé de
+/// dit à personne ce qu'on a trouvé : on prend la liste entière. `requete` : ce que la demande porte en plus (la clé de
 /// ThreatFox). `Err` : la raison, à montrer.
 fn liste_botnets<T>(
     nom: &str,
     (sous_dossier, adresse, fichier): (&str, &str, &str),
-    (options, fraiche): (&[std::ffi::OsString], Duration),
+    (entetes, corps, fraiche): (&[(&str, String)], Option<&str>, Duration),
     analyser: fn(&str) -> Option<T>,
 ) -> Result<T, String> {
     use crate::protection::lien;
-    let (texte, age) = lien::liste_abuse_ch(sous_dossier, (adresse, options), fichier, fraiche).ok_or_else(|| {
-        if options.is_empty() {
-            trf!(
-                "liste de {nom} pas vérifiée (pas d'Internet, ou curl absent)",
-                "{nom} list not checked (no Internet, or curl missing)"
-            )
-        } else {
-            trf!(
-                "liste de {nom} pas vérifiée (pas d'Internet, curl absent, ou clé refusée : donne-la de nouveau)",
-                "{nom} list not checked (no Internet, curl missing, or key refused: give it again)"
-            )
-        }
-    })?;
+    let (texte, age) =
+        lien::liste_abuse_ch(sous_dossier, (adresse, entetes, corps), fichier, fraiche).ok_or_else(|| {
+            if entetes.is_empty() {
+                trf!(
+                    "liste de {nom} pas vérifiée (pas d'Internet ?)",
+                    "{nom} list not checked (no Internet?)"
+                )
+            } else {
+                trf!(
+                    "liste de {nom} pas vérifiée (pas d'Internet, ou clé refusée : donne-la de nouveau)",
+                    "{nom} list not checked (no Internet, or key refused: give it again)"
+                )
+            }
+        })?;
     if age > lien::URLHAUS_TROP_VIEILLE {
         return Err(trf!(
             "liste de {nom} trop vieille pour servir : rafraîchissement impossible",
@@ -768,8 +769,7 @@ fn liste_botnets<T>(
 /// à un botnet, et les autres servent quand même. Avec une clé, l'API de ThreatFox s'ajoute à son export public : elle
 /// ne remonte que 7 jours, l'export des mois.
 fn botnets() -> (Botnets, Vec<String>) {
-    let entete = fichier_cle();
-    let avec_cle = entete.is_file();
+    let cle = cle();
     let (feodo, threatfox, api, domaines) = std::thread::scope(|s| {
         let feodo = s.spawn(|| {
             liste_botnets(
@@ -779,20 +779,20 @@ fn botnets() -> (Botnets, Vec<String>) {
                     "https://feodotracker.abuse.ch/downloads/ipblocklist_recommended.txt",
                     "botnets.txt",
                 ),
-                (&[], crate::protection::lien::URLHAUS_FRAICHE),
+                (&[], None, crate::protection::lien::URLHAUS_FRAICHE),
                 analyser_feodo,
             )
         });
         let api = s.spawn(|| {
-            // La clé est lue par curl dans son fichier : jamais dans la liste des processus.
-            let mut cle = std::ffi::OsString::from("@");
-            cle.push(&entete);
-            let options = ["-H".into(), cle, "-d".into(), r#"{"query":"get_iocs","days":7}"#.into()];
-            avec_cle.then(|| {
+            cle.as_ref().map(|cle| {
                 liste_botnets(
                     tr!("ThreatFox (ta clé)", "ThreatFox (your key)"),
                     ("threatfox", "https://threatfox-api.abuse.ch/api/v1/", FICHIER_API),
-                    (&options, THREATFOX_CLE_FRAICHE),
+                    (
+                        &[("Auth-Key", cle.clone())],
+                        Some(r#"{"query":"get_iocs","days":7}"#),
+                        THREATFOX_CLE_FRAICHE,
+                    ),
                     analyser_threatfox_api,
                 )
             })
@@ -805,7 +805,7 @@ fn botnets() -> (Botnets, Vec<String>) {
                     "https://threatfox.abuse.ch/export/csv/domains/recent/",
                     "domaines.csv",
                 ),
-                (&[], crate::protection::lien::URLHAUS_FRAICHE),
+                (&[], None, crate::protection::lien::URLHAUS_FRAICHE),
                 analyser_domaines,
             )
         });
@@ -816,7 +816,7 @@ fn botnets() -> (Botnets, Vec<String>) {
                 "https://threatfox.abuse.ch/export/csv/ip-port/recent/",
                 "ip-port.csv",
             ),
-            (&[], crate::protection::lien::URLHAUS_FRAICHE),
+            (&[], None, crate::protection::lien::URLHAUS_FRAICHE),
             analyser_threatfox,
         );
         let pas_verifiee = |nom| trf!("liste de {nom} pas vérifiée", "{nom} list not checked");
@@ -909,9 +909,16 @@ pub(crate) fn botnets_a_signaler() -> Vec<(String, String)> {
 const FICHIER_API: &str = "api.json";
 
 /// La clé de ThreatFox, sur cet ordinateur seulement (le dossier de Vanguard du compte, jamais la clé USB), sous la
-/// forme de l'en-tête que curl lit lui-même (« -H @fichier »).
+/// forme d'un en-tête (« Auth-Key: … »), celle qu'elle a depuis qu'on peut la donner.
 fn fichier_cle() -> PathBuf {
     crate::reseau::dossier_local().join("threatfox").join("cle-entete")
+}
+
+/// La clé gardée, vérifiée de nouveau : un fichier modifié à la main n'ajoute pas d'en-tête à la demande.
+fn cle() -> Option<String> {
+    let texte = std::fs::read_to_string(fichier_cle()).ok()?;
+    let cle = texte.trim().strip_prefix("Auth-Key:")?.trim();
+    cle_valide(cle).then(|| cle.to_string())
 }
 
 /// Une clé d'abuse.ch telle qu'elle se copie : lettres et chiffres seulement. Un retour à la ligne glissé dedans
@@ -1865,6 +1872,10 @@ mod tests {
             std::fs::read_to_string(&fichier).unwrap(),
             "Auth-Key: a1B2c3D4e5F6g7H8i9J0k1L2\n"
         );
+        assert_eq!(cle().as_deref(), Some("a1B2c3D4e5F6g7H8i9J0k1L2"));
+        // Modifié à la main avec un en-tête de plus : refusé.
+        std::fs::write(&fichier, "Auth-Key: a1B2c3D4e5F6g7H8i9J0k1L2\r\nX-Autre: 1\n").unwrap();
+        assert_eq!(cle(), None);
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;

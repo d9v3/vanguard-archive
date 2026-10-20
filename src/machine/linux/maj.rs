@@ -822,7 +822,7 @@ pub(super) fn paquets_aur() -> Option<Constat> {
                 .collect::<Vec<_>>()
                 .join("&")
         );
-        let Some(json) = sortie_delai("curl", &["-fsS", "--max-time", "20", &requete], 25, &[0])
+        let Some(json) = crate::http::texte(&requete, std::time::Duration::from_secs(20))
             .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
         else {
             return Some(impossible(

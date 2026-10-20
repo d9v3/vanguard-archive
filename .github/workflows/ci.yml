@@ -68,7 +68,7 @@ jobs:
             echo "::group::$c"
             v=${c//-/_}
             case $c in
-              *-apple-darwin) env "CC_$v=clang" "CFLAGS_$v=-ffreestanding -nostdlibinc -I$entetes" \
+              *-apple-darwin) env "CC_$v=clang" "CFLAGS_$v=-ffreestanding -nostdlibinc -DRING_CORE_NOSTDLIBINC -I$entetes" \
                 cargo clippy --all-targets --target "$c" -- -D warnings ;;
               *) cargo clippy --all-targets --target "$c" -- -D warnings ;;
             esac

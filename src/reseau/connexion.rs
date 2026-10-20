@@ -98,57 +98,40 @@ enum Sens {
     Envoi,
 }
 
-/// Charge la connexion dans un sens pendant `duree` (4 transferts curl à la fois, 500 Mo au plus) et rend le débit
-/// en Mbit/s. `None` : aucun transfert n'a abouti (pas de curl, pas d'Internet).
+/// Ce qu'un envoi porte : assez pour que la mesure ne soit pas que des débuts de connexion, assez peu pour qu'un envoi
+/// en cours à la fin des 8 s ne compte pas pour rien.
+const MORCEAU_ENVOYE: usize = 2_000_000;
+
+/// Charge la connexion dans un sens pendant `duree` (4 transferts à la fois, 500 Mo au plus) et rend le débit en
+/// Mbit/s. La réception se compte au fil de l'eau ; l'envoi, par morceaux reçus par le serveur. `None` : aucun
+/// transfert n'a abouti (pas d'Internet).
 fn charger(sens: Sens, duree: Duration, arret: &Arc<AtomicBool>) -> Option<f64> {
-    let nul = if cfg!(windows) { "NUL" } else { "/dev/null" };
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |d| d.subsec_nanos());
-    let fichier = std::env::temp_dir().join(format!("vanguard-envoi-{}-{nanos}.bin", std::process::id()));
-    // Création exclusive : jamais un fichier ou un lien posé d'avance par un autre compte dans un /tmp partagé (le
-    // contenu, 25 Mo de zéros, l'aurait écrasé).
-    if sens == Sens::Envoi
-        && std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&fichier)
-            .and_then(|mut f| std::io::Write::write_all(&mut f, &vec![0u8; 25_000_000]))
-            .is_err()
-    {
-        return None;
-    }
     let octets = Arc::new(AtomicU64::new(0));
     let debut = Instant::now();
+    let fin = debut + duree;
     let travailleurs: Vec<_> = (0..4)
         .map(|_| {
-            let (octets, arret, fichier) = (Arc::clone(&octets), Arc::clone(arret), fichier.clone());
+            let (octets, arret) = (Arc::clone(&octets), Arc::clone(arret));
             std::thread::spawn(move || {
-                while !arret.load(Ordering::Relaxed)
-                    && debut.elapsed() < duree
-                    && octets.load(Ordering::Relaxed) < PLAFOND
+                while !arret.load(Ordering::Relaxed) && Instant::now() < fin && octets.load(Ordering::Relaxed) < PLAFOND
                 {
-                    let reste = duree.saturating_sub(debut.elapsed()).as_secs().max(1).to_string();
-                    let mut curl = std::process::Command::new("curl");
-                    curl.args(["-s", "-o", nul, "--max-time", &reste, "-A", "vanguard"]);
-                    match sens {
-                        Sens::Reception => curl.args(["-w", "%{size_download}", TELECHARGEMENT]),
-                        Sens::Envoi => curl.args([
-                            "-w",
-                            "%{size_upload}",
-                            "--data-binary",
-                            &format!("@{}", fichier.display()),
-                            ENVOI,
-                        ]),
+                    let abouti = match sens {
+                        Sens::Reception => crate::http::recevoir_en_comptant(TELECHARGEMENT, fin, &octets, &arret),
+                        Sens::Envoi => {
+                            let demande = crate::http::Demande {
+                                corps: Some(vec![0u8; MORCEAU_ENVOYE]),
+                                ..crate::http::Demande::get(ENVOI, fin.saturating_duration_since(Instant::now()))
+                            };
+                            let recu = crate::http::envoyer(demande).is_some_and(|r| r.code == 200);
+                            if recu {
+                                octets.fetch_add(MORCEAU_ENVOYE as u64, Ordering::Relaxed);
+                            }
+                            recu
+                        }
                     };
-                    let Some(r) = crate::commande::lancer(&mut curl, 30) else {
-                        break;
-                    };
-                    let n: u64 = r.sortie.trim().parse().unwrap_or(0);
-                    if n == 0 {
+                    if !abouti {
                         break;
                     }
-                    octets.fetch_add(n, Ordering::Relaxed);
                 }
             })
         })
@@ -157,7 +140,6 @@ fn charger(sens: Sens, duree: Duration, arret: &Arc<AtomicBool>) -> Option<f64> 
         let _ = t.join();
     }
     arret.store(true, Ordering::Relaxed);
-    let _ = std::fs::remove_file(&fichier);
     let total = octets.load(Ordering::Relaxed);
     #[allow(clippy::cast_precision_loss)]
     let mbits = total as f64 * 8.0 / debut.elapsed().as_secs_f64() / 1_000_000.0;

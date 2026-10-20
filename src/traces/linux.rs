@@ -494,7 +494,15 @@ mod tests {
             .find(|l| l.split('\t').next() == Some(moi.as_str()))
             .expect("le processus des tests manque");
         let champs: Vec<&str> = ligne.split('\t').collect();
-        assert_eq!(champs[4].len(), 64, "{ligne}");
+        // Le programme des tests (debug, avec le client HTTPS) dépasse parfois la borne des empreintes : c'est dit.
+        let gros = std::env::current_exe()
+            .and_then(std::fs::metadata)
+            .is_ok_and(|m| m.len() > super::super::TAILLE_EMPREINTE);
+        if gros {
+            assert_eq!(champs[4], "(trop gros/too big)", "{ligne}");
+        } else {
+            assert_eq!(champs[4].len(), 64, "{ligne}");
+        }
         assert!(champs[5].starts_with('/'), "{ligne}");
     }
 }

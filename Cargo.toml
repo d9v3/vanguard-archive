@@ -18,6 +18,10 @@ if-addrs = "0.15.0"
 inventory = "0.3.25"
 miniz_oxide = "0.9.1"
 quick-xml = { version = "0.42.0", features = ["serialize"] }
+# HTTPS en Rust : les fonctions par défaut (HTTP/2, proxy du système, jeux de caractères) avec rustls, mais ring pour
+# le chiffrement au lieu d'aws-lc, qui compile du C impossible à construire ici pour macOS et pèse le double.
+reqwest = { version = "0.13.5", default-features = false, features = ["json", "charset", "http2", "system-proxy", "rustls-no-provider"] }
+rustls = { version = "0.23.46", default-features = false, features = ["ring", "std", "tls12"] }
 notify = { version = "8.2.0", default-features = false }
 rpassword = "7.5.4"
 serde = { version = "1.0.229", features = ["derive"] }
@@ -26,7 +30,7 @@ sha1_smol = "1.0.1"
 # SHA-256 : l'empreinte du script lancé en administrateur sous Windows, vérifiée par la fenêtre élevée avant de
 # l'exécuter ; celle des programmes et des fichiers des traces collectées, à chercher sur VirusTotal.
 sha2 = { version = "0.11.1", default-features = false }
-tokio = { version = "1.53.3", features = ["rt-multi-thread", "net", "time", "io-util", "macros"] }
+tokio = { version = "1.53.3", features = ["full"] }
 # Le moteur YARA en Rust (VirusTotal) : seulement les modules dont les règles intégrées ont besoin (pe, elf).
 yara-x = { version = "1.21.0", default-features = false, features = ["pe-module", "elf-module", "constant-folding", "exact-atoms", "fast-regexp"] }
 ed25519-dalek = { version = "3.0.0", default-features = false }

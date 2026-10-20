@@ -33,13 +33,14 @@ etape() {
   fi
 }
 
-# YARA-X (par wasmtime) compile un petit fichier C : musl-gcc pour Linux, le gcc de MinGW pour Windows, clang pour les
-# cibles Mac, qu'il vise sans les outils d'Apple (outils/mac-entetes) ; clippy n'assemble jamais le programme.
+# YARA-X (par wasmtime) et ring (TLS du client HTTPS) compilent un peu de C : musl-gcc pour Linux, le gcc de MinGW pour
+# Windows, clang pour les cibles Mac, visées sans les outils d'Apple (outils/mac-entetes, ring sans en-têtes du
+# système) ; clippy n'assemble jamais le programme.
 clippy() {
   case $1 in
     *-apple-darwin)
       local v=${1//-/_}
-      env "CC_$v=clang" "CFLAGS_$v=-ffreestanding -nostdlibinc -I$PWD/outils/mac-entetes" \
+      env "CC_$v=clang" "CFLAGS_$v=-ffreestanding -nostdlibinc -DRING_CORE_NOSTDLIBINC -I$PWD/outils/mac-entetes" \
         cargo clippy -q --all-targets --target "$1" -- -D warnings ;;
     *) cargo clippy -q --all-targets --target "$1" -- -D warnings ;;
   esac

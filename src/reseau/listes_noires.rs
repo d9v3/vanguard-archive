@@ -191,11 +191,11 @@ fn sens(zone: &str, codes: &[Ipv4Addr]) -> (String, Option<Niveau>) {
 
 /// Adresse publique IPv4 de la maison, vue par Cloudflare (qui la voit de toute façon) : « ip=203.0.113.7 ».
 fn adresse_publique() -> Option<Ipv4Addr> {
-    let r = crate::commande::lancer(
-        std::process::Command::new("curl").args(["-4", "-s", "--max-time", "8", "https://1.1.1.1/cdn-cgi/trace"]),
-        12,
-    )?;
-    lire_trace(&r.sortie)
+    // Une adresse IPv4 en guise de nom : la demande part forcément en IPv4.
+    lire_trace(&crate::http::texte(
+        "https://1.1.1.1/cdn-cgi/trace",
+        std::time::Duration::from_secs(8),
+    )?)
 }
 
 fn lire_trace(trace: &str) -> Option<Ipv4Addr> {
@@ -223,8 +223,8 @@ pub fn verifier() {
     }
     let Some(ip) = adresse_publique() else {
         trp!(
-            "  ✖ Adresse publique introuvable (pas d'Internet, ou curl absent).",
-            "  ✖ Public address not found (no Internet, or curl missing)."
+            "  ✖ Adresse publique introuvable (pas d'Internet ?).",
+            "  ✖ Public address not found (no Internet?)."
         );
         return;
     };

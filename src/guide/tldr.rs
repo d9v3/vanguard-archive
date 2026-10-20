@@ -186,9 +186,9 @@ fn langues_a_voir(dossiers: &[PathBuf]) -> Vec<&'static str> {
 }
 
 /// Renouvelle les archives qui en ont besoin, en arrière-plan : le guide s'ouvre sans les attendre, et les lit à son
-/// prochain affichage. Seulement dans un vrai terminal (pas pour un script ni pour les tests) ; sans Internet, curl
-/// échoue vite et rien ne change. Le fil principal ne regarde que les dates ; une archive pas encore lue l'est dans le
-/// fil, qui décide alors.
+/// prochain affichage. Seulement dans un vrai terminal (pas pour un script ni pour les tests) ; sans Internet, la
+/// demande échoue vite et rien ne change. Le fil principal ne regarde que les dates ; une archive pas encore lue l'est
+/// dans le fil, qui décide alors.
 pub(super) fn renouveler_en_fond() {
     use std::io::IsTerminal;
     let dossiers = dossiers();
@@ -222,7 +222,7 @@ pub(super) fn renouveler_maintenant() {
 /// Télécharge les archives de `a_voir` qui en ont besoin. Lent : jamais sur le fil du guide.
 fn renouveler(a_voir: &[&str], dossiers: &[PathBuf]) {
     // Les restes d'un téléchargement interrompu (Vanguard quitté avant la fin) partent d'abord. Seulement ceux qui
-    // n'avancent plus : celui d'un autre Vanguard ouvert en même temps grossit encore (curl abandonne après 2 min).
+    // n'avancent plus : celui d'un autre Vanguard ouvert en même temps peut encore arriver (abandonné après 2 min).
     if let Ok(fichiers) = std::fs::read_dir(dossier()) {
         for f in fichiers.flatten() {
             let immobile = f
@@ -256,21 +256,14 @@ fn telecharger(langue: &str) -> bool {
     }
     let fin = archive(langue);
     let provisoire = fin.with_extension(format!("zip.{}", std::process::id()));
-    let recu = crate::commande::lancer(
-        std::process::Command::new("curl")
-            .args([
-                "-fsSL",
-                "--max-time",
-                "120",
-                "--max-filesize",
-                &TAILLE_ARCHIVE.to_string(),
-                "-o",
-            ])
-            .arg(&provisoire)
-            .arg(format!("{ADRESSE}tldr-pages.{langue}.zip")),
-        130,
-    )
-    .is_some_and(|r| r.code == Some(0));
+    let adresse = format!("{ADRESSE}tldr-pages.{langue}.zip");
+    let demande = crate::http::Demande {
+        taille_max: TAILLE_ARCHIVE,
+        ..crate::http::Demande::get(&adresse, std::time::Duration::from_secs(120))
+    };
+    let recu = crate::http::envoyer(demande)
+        .filter(|r| r.code == 200)
+        .is_some_and(|r| std::fs::write(&provisoire, &r.corps).is_ok());
     let lisible = recu && std::fs::read(&provisoire).is_ok_and(|octets| !lire_zip(&octets).is_empty());
     if lisible && std::fs::rename(&provisoire, &fin).is_ok() {
         return true;

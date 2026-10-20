@@ -19,6 +19,7 @@ mod fiche;
 mod gaming;
 mod guide;
 mod historique;
+mod http;
 mod journal;
 mod langue;
 mod lenteur;

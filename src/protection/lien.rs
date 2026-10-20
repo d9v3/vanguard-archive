@@ -8,7 +8,6 @@
 //! ne peut dire qu'un lien est sûr.
 
 use std::net::{IpAddr, Ipv4Addr};
-use std::process::Command;
 use std::time::Duration;
 
 use crate::reseau::listes_noires::resoudre;
@@ -880,18 +879,17 @@ pub(crate) const URLHAUS_TROP_VIEILLE: Duration = Duration::from_hours(7 * 24);
 /// Une liste d'URLhaus (abuse.ch), gardée 12 heures dans le dossier de Vanguard. La télécharger ne dit à personne quel
 /// lien on vérifie. Sans Internet, la copie d'avant sert encore : son texte, et son âge.
 fn liste_urlhaus(adresse: &str, nom: &str) -> Option<(String, Duration)> {
-    liste_abuse_ch("urlhaus", (adresse, &[]), nom, URLHAUS_FRAICHE)
+    liste_abuse_ch("urlhaus", (adresse, &[], None), nom, URLHAUS_FRAICHE)
 }
 
 /// Une liste d'abuse.ch, gardée dans `sous_dossier` du dossier de Vanguard : `fraiche` sans être redemandée,
 /// retéléchargée ensuite, et sa copie d'avant garde sa valeur jusqu'à une semaine (voir `age_des_listes`). La
-/// télécharger ne dit à personne ce qu'on cherche (on prend la liste entière). Sans Internet, curl échoue et la copie
-/// d'avant sert encore : son texte, et son âge. `options` : ce que curl reçoit en plus pour cette adresse (la clé de
-/// ThreatFox, lue dans un fichier pour ne jamais paraître dans la liste des processus). Partagé entre URLhaus (liens),
-/// Feodo Tracker et ThreatFox (serveurs de botnets).
+/// télécharger ne dit à personne ce qu'on cherche (on prend la liste entière). Sans Internet, la copie d'avant sert
+/// encore : son texte, et son âge. `entetes` et `corps` : ce que la demande porte en plus (la clé de ThreatFox, la
+/// requête de son API). Partagé entre URLhaus (liens), Feodo Tracker et ThreatFox (serveurs de botnets).
 pub(crate) fn liste_abuse_ch(
     sous_dossier: &str,
-    (adresse, options): (&str, &[std::ffi::OsString]),
+    (adresse, entetes, corps): (&str, &[(&str, String)], Option<&str>),
     nom: &str,
     fraiche: Duration,
 ) -> Option<(String, Duration)> {
@@ -905,20 +903,20 @@ pub(crate) fn liste_abuse_ch(
     };
     let fraiche = age().is_some_and(|d| d < fraiche);
     if !fraiche && std::fs::create_dir_all(&dossier).is_ok() {
-        let provisoire = dossier.join(format!("{nom}.nouveau"));
-        let telecharge = crate::commande::lancer(
-            Command::new("curl")
-                .args(["-sf", "--max-time", "40", "-o"])
-                .arg(&provisoire)
-                .args(options)
-                .arg(adresse),
-            50,
-        )
-        .is_some_and(|r| r.code == Some(0));
-        if telecharge {
-            let _ = std::fs::rename(&provisoire, &fichier);
-        } else {
-            let _ = std::fs::remove_file(&provisoire);
+        let demande = crate::http::Demande {
+            entetes: entetes.to_vec(),
+            corps: corps.map(|c| c.as_bytes().to_vec()),
+            taille_max: 256 << 20,
+            ..crate::http::Demande::get(adresse, Duration::from_secs(40))
+        };
+        // Seule une réponse 200 remplace la copie d'avant, par un fichier provisoire renommé : jamais à moitié écrite.
+        if let Some(r) = crate::http::envoyer(demande).filter(|r| r.code == 200) {
+            let provisoire = dossier.join(format!("{nom}.nouveau"));
+            if std::fs::write(&provisoire, &r.corps).is_ok() {
+                let _ = std::fs::rename(&provisoire, &fichier);
+            } else {
+                let _ = std::fs::remove_file(&provisoire);
+            }
         }
     }
     Some((std::fs::read_to_string(&fichier).ok()?, age()?))
@@ -955,8 +953,8 @@ fn chercher_urlhaus(lien: &Lien, adresse: &str, hotes: Option<&str>, liens: Opti
     let (Some(hotes), Some(liens)) = (hotes, liens) else {
         return Inscription::Impossible(
             tr!(
-                "listes impossibles à télécharger (pas d'Internet, ou curl absent)",
-                "lists could not be downloaded (no Internet, or curl missing)"
+                "listes impossibles à télécharger (pas d'Internet ?)",
+                "lists could not be downloaded (no Internet?)"
             )
             .into(),
         );
@@ -1005,44 +1003,20 @@ fn age(domaine: &str) -> Result<(chrono::DateTime<chrono::Utc>, i64), String> {
     {
         return Err(tr!("nom non latin : âge non vérifié", "non-Latin name: age not checked").into());
     }
-    let r = crate::commande::lancer(
-        Command::new("curl")
-            // rdap.org renvoie vers le registre du domaine : la redirection reste en HTTPS, sinon quelqu'un sur le
-            // chemin pourrait répondre à sa place et rajeunir ou vieillir le domaine.
-            .args([
-                "-sL",
-                "--proto",
-                "=https",
-                "--proto-redir",
-                "=https",
-                "--max-time",
-                "12",
-            ])
-            .args(["-H", "Accept: application/rdap+json"])
-            .args(["-w", "\n%{http_code}"])
-            .arg(format!("https://rdap.org/domain/{domaine}")),
-        18,
-    )
-    .ok_or_else(|| {
+    // rdap.org renvoie vers le registre du domaine : la redirection reste en HTTPS (voir http.rs).
+    let adresse = format!("https://rdap.org/domain/{domaine}");
+    let mut demande = crate::http::Demande::get(&adresse, Duration::from_secs(12));
+    demande.entetes.push(("Accept", "application/rdap+json".into()));
+    let r = crate::http::envoyer(demande).ok_or_else(|| {
         tr!(
-            "pas de réponse (pas d'Internet, ou curl absent)",
-            "no answer (no Internet, or curl missing)"
+            "pas de réponse du registre (pas d'Internet ?)",
+            "no answer from the registry (no Internet?)"
         )
         .to_string()
     })?;
-    let sortie = r.sortie.trim_end();
-    let (corps, code) = sortie.rsplit_once('\n').unwrap_or(("", sortie));
-    match code.trim() {
-        "200" => {}
-        // curl n'a reçu aucune réponse (pas d'Internet, nom introuvable, délai dépassé).
-        "000" | "" => {
-            return Err(tr!(
-                "pas de réponse du registre (pas d'Internet ?)",
-                "no answer from the registry (no Internet?)"
-            )
-            .into());
-        }
-        "404" => {
+    match r.code {
+        200 => {}
+        404 => {
             return Err(tr!(
                 "inconnu du registre, ou registre sans RDAP",
                 "unknown to the registry, or registry without RDAP"
@@ -1051,6 +1025,8 @@ fn age(domaine: &str) -> Result<(chrono::DateTime<chrono::Utc>, i64), String> {
         }
         autre => return Err(trf!("le registre a répondu {autre}", "the registry answered {autre}")),
     }
+    let corps = r.texte();
+    let corps = corps.as_str();
     let date = date_d_enregistrement(corps).ok_or_else(|| {
         tr!(
             "date d'enregistrement absente de la réponse",

@@ -24,22 +24,15 @@ fn occurrences(reponse: &str, fin: &str) -> u64 {
         .unwrap_or(0)
 }
 
-/// Interroge le service avec curl (présent sous Linux et dans Windows 10/11). `None` : pas de réponse.
+/// Interroge le service (le début de l'empreinte seulement). `None` : pas de réponse.
 fn interroger(debut: &str) -> Option<String> {
-    let r = crate::commande::lancer(
-        std::process::Command::new("curl").args([
-            "-fsS",
-            "--max-time",
-            "15",
-            "-H",
-            "Add-Padding: true",
-            "-A",
-            "vanguard",
-            &format!("{SERVICE}{debut}"),
-        ]),
-        20,
-    )?;
-    (r.code == Some(0) && r.sortie.contains(':')).then_some(r.sortie)
+    let adresse = format!("{SERVICE}{debut}");
+    let mut demande = crate::http::Demande::get(&adresse, std::time::Duration::from_secs(15));
+    // Des réponses de taille égale : sur le réseau, la longueur ne trahit pas quelle empreinte a été demandée.
+    demande.entetes.push(("Add-Padding", "true".into()));
+    let r = crate::http::envoyer(demande).filter(|r| r.code == 200)?;
+    let texte = r.texte();
+    texte.contains(':').then_some(texte)
 }
 
 /// « 52 372 427 » en français, « 52,372,427 » en anglais.
@@ -79,8 +72,8 @@ pub fn verifier() {
         let (debut, fin) = empreinte(&mot_de_passe);
         let Some(reponse) = interroger(&debut) else {
             trp!(
-                "  ✖ Service injoignable (pas d'Internet, ou curl absent).",
-                "  ✖ Service unreachable (no Internet, or curl missing)."
+                "  ✖ Service injoignable (pas d'Internet ?).",
+                "  ✖ Service unreachable (no Internet?)."
             );
             break;
         };
@@ -150,60 +143,32 @@ fn cle_hibp() -> Option<String> {
 
 /// Fuites où apparaît l'adresse : par Have I Been Pwned si une clé est fournie (`cle_hibp`), sinon par
 /// XposedOrNot (gratuit, sans clé). `None` : service injoignable.
-/// En-tête portant la clé, dans un fichier réservé à l'utilisateur, passé à curl par « -H @fichier » : sur la ligne
-/// de commande, la clé serait lisible par tous les comptes de l'ordinateur (ps, /proc/<pid>/cmdline).
-fn fichier_entete(cle: &str) -> Option<std::path::PathBuf> {
-    use std::io::Write;
-    let dossier = crate::reseau::dossier_local();
-    std::fs::create_dir_all(&dossier).ok()?;
-    let chemin = dossier.join(format!("hibp-entete-{}.txt", std::process::id()));
-    let _ = std::fs::remove_file(&chemin);
-    let mut options = std::fs::OpenOptions::new();
-    options.write(true).create_new(true);
-    #[cfg(unix)]
-    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
-    let ecrit = options
-        .open(&chemin)
-        .and_then(|mut f| f.write_all(format!("hibp-api-key: {cle}\n").as_bytes()));
-    if ecrit.is_err() {
-        let _ = std::fs::remove_file(&chemin);
-        return None;
-    }
-    Some(chemin)
-}
-
 fn fuites_courriel(adresse: &str) -> Option<(Vec<String>, &'static str)> {
-    let mut curl = std::process::Command::new("curl");
-    curl.args(["-sS", "--max-time", "20", "-A", "vanguard", "-w", "\n%{http_code}"]);
-    let cle = cle_hibp();
-    let mut entete = None;
-    let service = if let Some(cle) = &cle {
-        let fichier = fichier_entete(cle)?;
-        curl.arg("-H").arg(format!("@{}", fichier.display()));
-        entete = Some(fichier);
-        curl.arg(format!(
-            "https://haveibeenpwned.com/api/v3/breachedaccount/{}?truncateResponse=true",
-            encoder(adresse)
-        ));
-        "Have I Been Pwned"
-    } else {
-        curl.arg(format!(
-            "https://api.xposedornot.com/v1/check-email/{}",
-            encoder(adresse)
-        ));
-        "XposedOrNot"
+    // La clé part dans un en-tête de la demande, jamais sur la ligne de commande d'un programme.
+    let (adresse_du_service, service) = match cle_hibp() {
+        Some(_) => (
+            format!(
+                "https://haveibeenpwned.com/api/v3/breachedaccount/{}?truncateResponse=true",
+                encoder(adresse)
+            ),
+            "Have I Been Pwned",
+        ),
+        None => (
+            format!("https://api.xposedornot.com/v1/check-email/{}", encoder(adresse)),
+            "XposedOrNot",
+        ),
     };
-    let r = crate::commande::lancer(&mut curl, 25);
-    if let Some(fichier) = &entete {
-        let _ = std::fs::remove_file(fichier);
+    let mut demande = crate::http::Demande::get(&adresse_du_service, std::time::Duration::from_secs(20));
+    if let Some(cle) = cle_hibp() {
+        demande.entetes.push(("hibp-api-key", cle));
     }
-    let r = r?;
-    let (corps, code) = r.sortie.trim_end().rsplit_once('\n')?;
-    match (cle.is_some(), code.trim()) {
+    let r = crate::http::envoyer(demande)?;
+    let corps = r.texte();
+    match (cle_hibp().is_some(), r.code) {
         // Have I Been Pwned répond 404 quand l'adresse n'apparaît dans aucune fuite.
-        (true, "404") => Some((Vec::new(), service)),
-        (true, "200") => lire_hibp(corps).map(|l| (l, service)),
-        (false, _) => lire_xposedornot(corps).map(|l| (l, service)),
+        (true, 404) => Some((Vec::new(), service)),
+        (true, 200) => lire_hibp(&corps).map(|l| (l, service)),
+        (false, _) => lire_xposedornot(&corps).map(|l| (l, service)),
         _ => None,
     }
 }
@@ -245,8 +210,8 @@ pub fn verifier_courriel() {
     }
     match fuites_courriel(&adresse) {
         None => trp!(
-            "  ✖ Service injoignable (pas d'Internet, curl absent, ou clé refusée).",
-            "  ✖ Service unreachable (no Internet, curl missing, or key refused)."
+            "  ✖ Service injoignable (pas d'Internet, ou clé refusée).",
+            "  ✖ Service unreachable (no Internet, or key refused)."
         ),
         Some((liste, _)) if liste.is_empty() => trp!(
             "\n  {VERT}✔{RESET} Cette adresse n'apparaît dans aucune fuite connue de {service}.",
@@ -303,18 +268,5 @@ mod tests {
         );
         assert_eq!(lire_xposedornot("pas du json"), None);
         assert!(conseil_forme("cheval agrafe batterie correct").is_none());
-    }
-
-    #[test]
-    fn cle_hors_de_la_ligne_de_commande() {
-        let f = fichier_entete("0123456789abcdef").unwrap();
-        assert_eq!(std::fs::read_to_string(&f).unwrap(), "hibp-api-key: 0123456789abcdef\n");
-        // Réservé à l'utilisateur : aucun autre compte ne lit la clé.
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            assert_eq!(std::fs::metadata(&f).unwrap().permissions().mode() & 0o777, 0o600);
-        }
-        std::fs::remove_file(&f).unwrap();
     }
 }
