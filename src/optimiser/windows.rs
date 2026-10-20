@@ -673,15 +673,20 @@ pub fn apres(touches: &[&Reglage]) {
         );
         return;
     }
-    let _ = crate::commande::lancer(Command::new("taskkill").args(["/f", "/im", "explorer.exe"]), 10);
+    let explorateur = || {
+        crate::machine::windows::processus::liste()
+            .into_iter()
+            .filter(|p| p.nom.eq_ignore_ascii_case("explorer"))
+            .map(|p| p.pid)
+            .collect::<Vec<_>>()
+    };
+    // Accepté juste au-dessus : comme taskkill /f /im explorer.exe, chaque Explorateur de cette session.
+    for pid in explorateur() {
+        crate::machine::windows::processus::terminer(pid);
+    }
     // Windows relance le bureau tout seul ; sinon on le relance.
     std::thread::sleep(std::time::Duration::from_secs(3));
-    let tourne = crate::commande::lancer(
-        Command::new("tasklist").args(["/fi", "imagename eq explorer.exe", "/nh"]),
-        10,
-    )
-    .is_some_and(|o| o.sortie.contains("explorer.exe"));
-    if !tourne {
+    if explorateur().is_empty() {
         let _ = Command::new("explorer.exe").spawn();
     }
 }

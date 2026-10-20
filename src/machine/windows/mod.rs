@@ -17,6 +17,7 @@ mod exclusions;
 mod maj;
 mod persistance;
 mod portes;
+pub(crate) mod processus;
 mod regles;
 mod services;
 mod verrouillage;

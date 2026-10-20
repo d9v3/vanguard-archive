@@ -188,44 +188,7 @@ unsafe extern "system" {
     fn EvtClose(objet: *mut c_void) -> i32;
 }
 
-#[link(name = "advapi32")]
-unsafe extern "system" {
-    fn OpenProcessToken(processus: *mut c_void, acces: u32, jeton: *mut *mut c_void) -> i32;
-    fn GetTokenInformation(
-        jeton: *mut c_void,
-        classe: u32,
-        information: *mut c_void,
-        taille: u32,
-        rendue: *mut u32,
-    ) -> i32;
-}
-
-#[link(name = "kernel32")]
-unsafe extern "system" {
-    fn GetCurrentProcess() -> *mut c_void;
-    fn CloseHandle(objet: *mut c_void) -> i32;
-}
-
 use std::ffi::c_void;
-
-/// Lancé en administrateur (jeton élevé) ? Un compte administrateur sans élévation (UAC) ne lit pas Security non plus.
-fn administrateur() -> bool {
-    const LECTURE: u32 = 0x0008;
-    const ELEVATION: u32 = 20;
-    let mut jeton = std::ptr::null_mut();
-    let mut eleve = 0u32;
-    let mut taille = 0u32;
-    // SAFETY : GetCurrentProcess rend une pseudo-poignée, sans rien à fermer. Le jeton ouvert (vérifié) est fermé une
-    // seule fois ; TokenElevation écrit un seul DWORD dans `eleve`, de la taille donnée.
-    unsafe {
-        if OpenProcessToken(GetCurrentProcess(), LECTURE, &raw mut jeton) == 0 {
-            return false;
-        }
-        let lu = GetTokenInformation(jeton, ELEVATION, (&raw mut eleve).cast(), 4, &raw mut taille) != 0;
-        CloseHandle(jeton);
-        lu && eleve != 0
-    }
-}
 
 /// Le XML d'un événement ; `None` s'il ne se rend pas.
 fn rendre(evenement: *mut c_void) -> Option<String> {
@@ -324,7 +287,10 @@ fn lire(lecture: &Lecture, fin: std::time::Instant) -> Option<Vec<String>> {
 fn lire_journaux() -> String {
     use std::fmt::Write as _;
     let fin = std::time::Instant::now() + std::time::Duration::from_secs(30);
-    let mut texte = format!("ADM|{}\nADM_FIN\n", if administrateur() { "True" } else { "False" });
+    let mut texte = format!(
+        "ADM|{}\nADM_FIN\n",
+        if super::processus::eleve() { "True" } else { "False" }
+    );
     for lecture in &LECTURES {
         if let Some(lignes) = lire(lecture, fin) {
             for l in lignes {

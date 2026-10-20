@@ -224,35 +224,87 @@ pub fn lancer_vers(
     })
 }
 
-/// Arrête le programme et tout ce qu'il a lancé : sinon un sous-processus (winget sous PowerShell, un outil sous un
-/// script) continuerait en arrière-plan, avec ses verrous.
-pub fn arreter(enfant: &mut Child) {
-    // Windows : taskkill suit lui-même l'arbre des processus.
-    #[cfg(windows)]
-    let _ = Command::new("taskkill")
-        .args(["/T", "/F", "/PID", &enfant.id().to_string()])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status();
-    // Unix : les descendants sont d'abord tous repérés (pgrep -P, de proche en proche), puis tués. Tué en premier, le
-    // programme laisserait ses enfants rattachés à init, introuvables.
-    #[cfg(unix)]
+/// Les descendants de `racine` (enfants, petits-enfants…) dans une liste de (processus, parent), sans `racine`
+/// elle-même. Une boucle dans la liste (un numéro réutilisé, le processus 0 parent de lui-même) ne fait pas tourner
+/// sans fin ; 1 000 au plus.
+fn descendants(liste: &[(u32, u32)], racine: u32) -> Vec<u32> {
+    let mut vus = vec![racine];
+    let mut i = 0;
+    while let Some(&pid) = vus.get(i)
+        && vus.len() < 1000
     {
-        let mut pids = vec![enfant.id()];
-        let mut i = 0;
-        while let Some(&pid) = pids.get(i)
-            && pids.len() < 1000
-        {
-            i += 1;
-            if let Ok(o) = Command::new("pgrep").args(["-P", &pid.to_string()]).output() {
-                pids.extend(
-                    String::from_utf8_lossy(&o.stdout)
-                        .split_whitespace()
-                        .filter_map(|p| p.parse::<u32>().ok()),
-                );
+        i += 1;
+        for &(enfant, parent) in liste {
+            if parent == pid && !vus.contains(&enfant) {
+                vus.push(enfant);
             }
         }
-        for pid in pids.into_iter().skip(1).filter_map(|p| libc::pid_t::try_from(p).ok()) {
+    }
+    vus.split_off(1)
+}
+
+/// Les (processus, parent) de Linux, lus dans /proc/<pid>/stat : « 4242 (nom) S 4200 … ». Le nom peut contenir des
+/// espaces et des parenthèses : le parent se lit après la dernière.
+#[cfg(any(target_os = "linux", all(test, unix)))]
+fn parent_linux(stat: &str) -> Option<(u32, u32)> {
+    let (debut, reste) = stat.rsplit_once(") ")?;
+    let pid = debut.split_once(" (")?.0.trim().parse().ok()?;
+    let parent = reste.split_whitespace().nth(1)?.parse().ok()?;
+    Some((pid, parent))
+}
+
+/// Tous les (processus, parent) de l'ordinateur, sans lancer de commande sous Linux et Windows ; pgrep sur macOS.
+fn processus_et_parents(racine: u32) -> Vec<(u32, u32)> {
+    #[cfg(target_os = "linux")]
+    {
+        let _ = racine;
+        std::fs::read_dir("/proc")
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter_map(|d| parent_linux(&std::fs::read_to_string(d.path().join("stat")).ok()?))
+            .collect()
+    }
+    #[cfg(windows)]
+    {
+        let _ = racine;
+        crate::machine::windows::processus::liste()
+            .into_iter()
+            .map(|p| (p.pid, p.parent))
+            .collect()
+    }
+    // macOS : pas de /proc ; pgrep -P, de proche en proche.
+    #[cfg(target_os = "macos")]
+    {
+        let mut liste = Vec::new();
+        let mut a_voir = vec![racine];
+        while let Some(pid) = a_voir.pop()
+            && liste.len() < 1000
+        {
+            if let Ok(o) = Command::new("pgrep").args(["-P", &pid.to_string()]).output() {
+                for enfant in String::from_utf8_lossy(&o.stdout)
+                    .split_whitespace()
+                    .filter_map(|p| p.parse::<u32>().ok())
+                {
+                    liste.push((enfant, pid));
+                    a_voir.push(enfant);
+                }
+            }
+        }
+        liste
+    }
+}
+
+/// Arrête le programme et tout ce qu'il a lancé : sinon un sous-processus (winget sous PowerShell, un outil sous un
+/// script) continuerait en arrière-plan, avec ses verrous. Les descendants sont d'abord tous repérés, puis tués : tué
+/// en premier, le programme laisserait ses enfants rattachés à un autre parent, introuvables.
+pub fn arreter(enfant: &mut Child) {
+    let racine = enfant.id();
+    for pid in descendants(&processus_et_parents(racine), racine) {
+        #[cfg(windows)]
+        crate::machine::windows::processus::terminer(pid);
+        #[cfg(unix)]
+        if let Ok(pid) = libc::pid_t::try_from(pid) {
             // SAFETY : simple envoi d'un signal à un numéro de processus.
             unsafe { libc::kill(pid, libc::SIGKILL) };
         }
@@ -397,6 +449,22 @@ mod tests_powershell {
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn arbre_des_processus() {
+        // 10 lance 11 et 12 ; 11 lance 13 ; 20 n'est pas de la famille ; 0 est son propre parent (Windows).
+        let liste = [(11, 10), (12, 10), (13, 11), (20, 1), (0, 0), (10, 1)];
+        let mut d = descendants(&liste, 10);
+        d.sort_unstable();
+        assert_eq!(d, [11, 12, 13]);
+        assert_eq!(descendants(&liste, 0), Vec::<u32>::new());
+        // Une boucle (numéro réutilisé) ne tourne pas sans fin.
+        assert_eq!(descendants(&[(2, 1), (1, 2)], 1), [2]);
+        assert_eq!(parent_linux("4242 (Web Content) S 4200 4242 0"), Some((4242, 4200)));
+        // Un nom piégé avec « ) » et des espaces : le parent se lit après la dernière parenthèse.
+        assert_eq!(parent_linux("77 (a) S 1 (b) R 55 77"), Some((77, 55)));
+        assert_eq!(parent_linux("pas une ligne"), None);
+    }
 
     /// Les sorties analysées que leur outil traduit (relevées outil par outil, en français et en anglais) passent
     /// toutes par `lancer_en_anglais` : nmcli écrit « oui » pour « yes » dans la colonne ACTIVE, lscpu « Nom de

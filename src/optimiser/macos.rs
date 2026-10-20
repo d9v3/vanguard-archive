@@ -29,13 +29,8 @@ pub enum Changement {
 
 /// Les réglages de launchd pour ce compte (`launchctl print-disabled`), nom → désactivé ; `None` : illisible.
 fn agents_etats() -> Option<std::collections::HashMap<String, bool>> {
-    let uid = crate::commande::lancer(Command::new("id").arg("-u"), 10)?
-        .sortie
-        .trim()
-        .to_string();
-    if uid.is_empty() || !uid.chars().all(|c| c.is_ascii_digit()) {
-        return None;
-    }
+    // SAFETY : getuid n'a ni argument ni échec possible.
+    let uid = unsafe { libc::getuid() };
     let r = crate::commande::lancer(
         Command::new("launchctl").args(["print-disabled", &format!("gui/{uid}")]),
         10,

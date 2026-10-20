@@ -181,20 +181,7 @@ pub(crate) fn point_restauration(titre: &str) -> Option<(&'static str, String)> 
 /// cet autre compte, et un réglage de la personne doit s'écrire dans sa propre ruche, sous HKEY_USERS.
 #[cfg(windows)]
 pub(crate) fn sid_de_la_personne() -> Option<String> {
-    let r = crate::commande::lancer(
-        std::process::Command::new("whoami").args(["/user", "/fo", "csv", "/nh"]),
-        10,
-    )?;
-    lire_sid(&r.sortie)
-}
-
-/// `whoami /user /fo csv /nh` : « "pc\alice","S-1-5-21-1-2-3-1001" ». Seulement des chiffres et des tirets après
-/// « S-1- » : le SID entre tel quel dans une commande PowerShell.
-#[cfg(any(windows, test))]
-fn lire_sid(sortie: &str) -> Option<String> {
-    let sid = sortie.trim().rsplit(',').next()?.trim().trim_matches('"');
-    let chiffres = sid.strip_prefix("S-1-")?;
-    (!chiffres.is_empty() && chiffres.chars().all(|c| c.is_ascii_digit() || c == '-')).then(|| sid.to_string())
+    crate::machine::windows::processus::sid()
 }
 
 /// Chemin PowerShell d'une clé du HKCU de la personne, pour la fenêtre administrateur. Sans SID, le HKCU de la
@@ -1420,18 +1407,6 @@ mod tests {
             "{lignes}"
         );
         let _ = std::fs::remove_file(&f);
-    }
-
-    #[test]
-    fn sid_lu_et_controle() {
-        assert_eq!(
-            lire_sid("\"pc\\alice\",\"S-1-5-21-1004336348-1177238915-682003330-1001\"\r\n").as_deref(),
-            Some("S-1-5-21-1004336348-1177238915-682003330-1001")
-        );
-        // Rien d'autre que des chiffres et des tirets n'entre dans la commande PowerShell.
-        assert_eq!(lire_sid("\"pc\\alice\",\"S-1-5-21'; Remove-Item C:\\\""), None);
-        assert_eq!(lire_sid("\"pc\\alice\",\"S-1-\""), None);
-        assert_eq!(lire_sid(""), None);
     }
 
     /// Un fichier hosts de liste de blocage : des centaines de milliers de lignes, une seule redirection.

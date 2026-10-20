@@ -1,5 +1,5 @@
-//! Ports en écoute de Windows lus sans PowerShell : `netstat -ano` (les sockets et le numéro de leur programme) et
-//! `tasklist` (le nom de chaque programme), deux programmes ordinaires qui répondent en quelques millisecondes. Les
+//! Ports en écoute de Windows lus sans PowerShell : `netstat -ano` (les sockets et le numéro de leur programme) et la
+//! liste des processus de Windows (le nom de chaque programme), qui répondent en quelques millisecondes. Les
 //! lectures par PowerShell (Get-NetTCPConnection, Get-NetUDPEndpoint) prenaient chacune 2 à 5 s au bilan, une
 //! vingtaine de PowerShell démarrant ensemble. Les règles de blocage de Vanguard se lisent dans le registre.
 
@@ -17,18 +17,10 @@ pub(crate) struct Ecoute {
 }
 
 /// Les ports en écoute (TCP et UDP) et le nom de leur programme. `None` si netstat ne répond pas : l'appelant se
-/// replie alors sur PowerShell. Sans tasklist, les noms restent vides.
+/// replie alors sur PowerShell. Les noms viennent de la liste des processus de Windows (Toolhelp32).
 pub(crate) fn ecoutes() -> Option<Vec<Ecoute>> {
-    let (sockets, noms) = std::thread::scope(|s| {
-        let sockets = s.spawn(|| crate::commande::lancer(Command::new("netstat").arg("-ano"), 20));
-        let noms = s.spawn(|| crate::commande::lancer(Command::new("tasklist").args(["/fo", "csv", "/nh"]), 20));
-        (sockets.join().ok().flatten(), noms.join().ok().flatten())
-    });
-    let sockets = sockets.filter(|r| r.code == Some(0))?;
-    let noms = noms
-        .filter(|r| r.code == Some(0))
-        .map(|r| lire_tasklist(&r.sortie))
-        .unwrap_or_default();
+    let sockets = crate::commande::lancer(Command::new("netstat").arg("-ano"), 20).filter(|r| r.code == Some(0))?;
+    let noms: HashMap<u32, String> = super::processus::liste().into_iter().map(|p| (p.pid, p.nom)).collect();
     let ecoutes = lire_netstat(&sockets.sortie)
         .into_iter()
         .map(|(adresse, port, pid, tcp)| Ecoute {
@@ -67,27 +59,6 @@ pub(crate) fn lire_netstat(sortie: &str) -> Vec<(String, u16, u32, bool)> {
                 c[c.len() - 1].parse().ok()?,
                 tcp,
             ))
-        })
-        .collect()
-}
-
-/// Les noms des programmes de `tasklist /fo csv /nh` (« "svchost.exe","1012","Services","0","13 784 K" »), sans
-/// « .exe ». Le processus 0 s'appelle « Idle », comme pour Get-Process.
-pub(crate) fn lire_tasklist(sortie: &str) -> HashMap<u32, String> {
-    sortie
-        .lines()
-        .filter_map(|ligne| {
-            let mut champs = ligne.trim().strip_prefix('"')?.split("\",\"");
-            let nom = champs.next()?;
-            let pid: u32 = champs.next()?.trim_end_matches('"').parse().ok()?;
-            let nom = if pid == 0 {
-                "Idle"
-            } else {
-                nom.strip_suffix(".exe")
-                    .or_else(|| nom.strip_suffix(".EXE"))
-                    .unwrap_or(nom)
-            };
-            Some((pid, nom.to_string()))
         })
         .collect()
 }
@@ -157,20 +128,6 @@ Active Connections\r
     }
 
     #[test]
-    fn noms_de_tasklist() {
-        let sortie = "\"System Idle Process\",\"0\",\"Services\",\"0\",\"8 K\"\r
-\"System\",\"4\",\"Services\",\"0\",\"144 K\"\r
-\"svchost.exe\",\"1012\",\"Services\",\"0\",\"13 784 K\"\r
-\"Mon Outil.EXE\",\"5560\",\"Console\",\"1\",\"1,024 K\"\r
-";
-        let noms = lire_tasklist(sortie);
-        assert_eq!(noms.get(&0).map(String::as_str), Some("Idle"));
-        assert_eq!(noms.get(&4).map(String::as_str), Some("System"));
-        assert_eq!(noms.get(&1012).map(String::as_str), Some("svchost"));
-        assert_eq!(noms.get(&5560).map(String::as_str), Some("Mon Outil"));
-    }
-
-    #[test]
     fn regles_de_blocage() {
         let regle = "v2.32|Action=Block|Active=TRUE|Dir=In|Protocol=6|LPort=8080|Name=Vanguard : bloquer 8080|";
         assert_eq!(port_bloque(regle), Some(8080));
@@ -188,7 +145,7 @@ Active Connections\r
     }
 }
 
-/// Sorties de netstat et tasklist, et règles du registre, au hasard : jamais de plantage, adresses sans crochets.
+/// Sorties de netstat et règles du registre, au hasard : jamais de plantage, adresses sans crochets.
 #[cfg(test)]
 mod tests_au_hasard {
     use super::*;
@@ -215,7 +172,6 @@ mod tests_au_hasard {
             for (adresse, _, _, _) in lire_netstat(&t) {
                 prop_assert!(!adresse.starts_with('[') && !adresse.ends_with(']'));
             }
-            let _ = lire_tasklist(&t);
             for ligne in t.lines() {
                 let _ = port_bloque(ligne);
             }

@@ -22,14 +22,10 @@ fn console(ligne: &str) -> Command {
     c
 }
 
-/// Lancé en administrateur (fenêtre élevée) ? Le niveau d'intégrité « élevé » ou « système » de `whoami /groups`
-/// (S-1-16-12288, S-1-16-16384), le même dans toutes les langues.
+/// Lancé en administrateur (fenêtre élevée) ? Lu sur le jeton du processus, sans whoami.
 pub(super) fn administrateur() -> bool {
     static ADMIN: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ADMIN.get_or_init(|| {
-        crate::commande::lancer(Command::new("whoami").arg("/groups"), 10)
-            .is_some_and(|r| r.sortie.contains("S-1-16-12288") || r.sortie.contains("S-1-16-16384"))
-    })
+    *ADMIN.get_or_init(crate::machine::windows::processus::eleve)
 }
 
 /// Place libre pour ce compte sur le disque de `d`.

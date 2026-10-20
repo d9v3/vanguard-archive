@@ -181,19 +181,6 @@ fn lire_table_tcp(octets: &[u8], ipv6: bool) -> Vec<(IpAddr, u16, u32)> {
         .collect()
 }
 
-/// Le nom d'un programme tel que Windows le donne (« firefox.exe ») : sans « .exe », comme Get-Process le montrait, et
-/// prêt à montrer (n'importe quel programme choisit le nom de son fichier).
-#[cfg(any(windows, test))]
-fn nom_windows(fichier: &[u16]) -> String {
-    let fin = fichier.iter().position(|&c| c == 0).unwrap_or(fichier.len());
-    let nom = String::from_utf16_lossy(&fichier[..fin]);
-    let court = match nom.len().checked_sub(4) {
-        Some(i) if nom.get(i..).is_some_and(|e| e.eq_ignore_ascii_case(".exe")) => &nom[..i],
-        _ => &nom,
-    };
-    affichable(court)
-}
-
 /// Sortie de `lsof -nP -iTCP -sTCP:ESTABLISHED -F pcn` : un champ par ligne, « p » (processus), « c » (nom),
 /// « n » (« locale->distante »).
 #[cfg(any(target_os = "macos", test))]
@@ -307,31 +294,6 @@ mod windows {
         ) -> u32;
     }
 
-    #[link(name = "kernel32")]
-    unsafe extern "system" {
-        fn CreateToolhelp32Snapshot(drapeaux: u32, processus: u32) -> *mut c_void;
-        fn Process32FirstW(instantane: *mut c_void, entree: *mut Entree) -> i32;
-        fn Process32NextW(instantane: *mut c_void, entree: *mut Entree) -> i32;
-        fn OpenProcess(acces: u32, heriter: i32, processus: u32) -> *mut c_void;
-        fn QueryFullProcessImageNameW(processus: *mut c_void, drapeaux: u32, nom: *mut u16, taille: *mut u32) -> i32;
-        fn CloseHandle(objet: *mut c_void) -> i32;
-    }
-
-    /// PROCESSENTRY32W (tlhelp32.h).
-    #[repr(C)]
-    pub(super) struct Entree {
-        taille: u32,
-        utilisations: u32,
-        pub(super) processus: u32,
-        tas: usize,
-        module: u32,
-        fils: u32,
-        parent: u32,
-        priorite: i32,
-        drapeaux: u32,
-        pub(super) fichier: [u16; 260],
-    }
-
     /// La table des connexions TCP d'une famille (2 : IPv4, 23 : IPv6), telle que `lire_table_tcp` la lit. Elle peut
     /// grandir entre la demande de sa taille et sa lecture : quelques essais.
     pub(super) fn table_tcp(famille: u32) -> Option<Vec<u8>> {
@@ -365,50 +327,6 @@ mod windows {
         }
         None
     }
-
-    /// Le nom de fichier de chaque processus, lu sans droits d'administrateur (comme le Gestionnaire des tâches).
-    pub(super) fn processus() -> Vec<(u32, [u16; 260])> {
-        const INSTANTANE_PROCESSUS: u32 = 2;
-        let mut liste = Vec::new();
-        // SAFETY : CreateToolhelp32Snapshot rend un instantané (ou INVALID_HANDLE_VALUE, -1, vérifié), refermé une
-        // seule fois plus bas. `entree` est une PROCESSENTRY32W dont le champ de taille est rempli, comme Windows
-        // l'exige ; il la remplit à chaque appel, sans rien garder.
-        unsafe {
-            let instantane = CreateToolhelp32Snapshot(INSTANTANE_PROCESSUS, 0);
-            if instantane as isize == -1 {
-                return liste;
-            }
-            let mut entree: Entree = std::mem::zeroed();
-            entree.taille = u32::try_from(std::mem::size_of::<Entree>()).unwrap_or(0);
-            let mut suivant = Process32FirstW(instantane, &raw mut entree) != 0;
-            while suivant {
-                liste.push((entree.processus, entree.fichier));
-                suivant = Process32NextW(instantane, &raw mut entree) != 0;
-            }
-            CloseHandle(instantane);
-        }
-        liste
-    }
-
-    /// Le chemin complet du programme d'un processus. Les droits « limités » suffisent pour la plupart, même d'un
-    /// autre compte ; un processus protégé (System, antivirus) refuse : `None`.
-    pub(super) fn chemin(processus: u32) -> Option<String> {
-        const INFORMATION_LIMITEE: u32 = 0x1000;
-        let mut tampon = vec![0u16; 32_768];
-        let mut taille = u32::try_from(tampon.len()).ok()?;
-        // SAFETY : la poignée vient d'OpenProcess (nulle : refus, vérifié) et n'est refermée qu'une fois.
-        // QueryFullProcessImageNameW écrit au plus `taille` caractères dans `tampon`, puis le nombre écrit dans
-        // `taille`.
-        unsafe {
-            let poignee = OpenProcess(INFORMATION_LIMITEE, 0, processus);
-            if poignee.is_null() {
-                return None;
-            }
-            let lu = QueryFullProcessImageNameW(poignee, 0, tampon.as_mut_ptr(), &raw mut taille) != 0;
-            CloseHandle(poignee);
-            lu.then(|| String::from_utf16_lossy(&tampon[..usize::try_from(taille).unwrap_or(0).min(tampon.len())]))
-        }
-    }
 }
 
 /// Lu par les fonctions de Windows, sans PowerShell : rien à lancer, et quelques millisecondes au lieu de secondes.
@@ -424,9 +342,9 @@ fn connexions() -> Option<Vec<Connexion>> {
     if lues.is_empty() {
         return Some(Vec::new());
     }
-    let noms: HashMap<u32, String> = windows::processus()
+    let noms: HashMap<u32, String> = crate::machine::windows::processus::liste()
         .into_iter()
-        .map(|(pid, fichier)| (pid, nom_windows(&fichier)))
+        .map(|p| (p.pid, p.nom))
         .collect();
     let mut chemins: HashMap<u32, Option<String>> = HashMap::new();
     Some(
@@ -434,7 +352,10 @@ fn connexions() -> Option<Vec<Connexion>> {
             .map(|(distante, port, pid)| Connexion {
                 pid: Some(pid),
                 programme: noms.get(&pid).filter(|n| !n.is_empty()).cloned(),
-                chemin: chemins.entry(pid).or_insert_with(|| windows::chemin(pid)).clone(),
+                chemin: chemins
+                    .entry(pid)
+                    .or_insert_with(|| crate::machine::windows::processus::chemin(pid))
+                    .clone(),
                 ..Connexion::vers(distante, port)
             })
             .collect(),
@@ -451,11 +372,16 @@ fn connexions() -> Option<Vec<Connexion>> {
     )?;
     let mut liste = lire_lsof(&lsof.sortie);
     let pids: BTreeSet<u32> = liste.iter().filter_map(|c| c.pid).collect();
+    // Le chemin de chaque programme, demandé au noyau (proc_pidpath), sans lancer ps pour chacun.
     let chemins: HashMap<u32, String> = pids
         .into_iter()
         .filter_map(|pid| {
-            let r = crate::commande::lancer(Command::new("ps").args(["-o", "comm=", "-p", &pid.to_string()]), 5)?;
-            let chemin = r.sortie.trim().to_string();
+            let mut tampon = vec![0u8; 4096];
+            let taille = u32::try_from(tampon.len()).ok()?;
+            // SAFETY : proc_pidpath écrit au plus `taille` octets dans `tampon` et rend leur nombre (0 : refus).
+            let lus =
+                unsafe { libc::proc_pidpath(libc::c_int::try_from(pid).ok()?, tampon.as_mut_ptr().cast(), taille) };
+            let chemin = String::from_utf8_lossy(tampon.get(..usize::try_from(lus).ok()?)?).into_owned();
             chemin.starts_with('/').then_some((pid, chemin))
         })
         .collect();
@@ -1547,7 +1473,6 @@ mod tests {
     fn connexions_lues_par_windows() {
         assert!(windows::table_tcp(2).is_some());
         assert!(connexions().is_some());
-        assert!(windows::processus().iter().any(|(pid, _)| *pid == std::process::id()));
     }
 
     fn ip6(t: &str) -> [u8; 16] {
@@ -1626,12 +1551,6 @@ mod tests {
         t6.extend(5u32.to_ne_bytes());
         t6.extend(777u32.to_ne_bytes());
         assert_eq!(lire_table_tcp(&t6, true), [(ip("2606:4700::1111"), 443, 777)]);
-        // Le nom du fichier, sans « .exe », quelle que soit sa casse.
-        let fichier = |n: &str| n.encode_utf16().chain([0, 0x41]).collect::<Vec<u16>>();
-        assert_eq!(nom_windows(&fichier("firefox.exe")), "firefox");
-        assert_eq!(nom_windows(&fichier("SVCHOST.EXE")), "SVCHOST");
-        assert_eq!(nom_windows(&fichier("System")), "System");
-        assert_eq!(nom_windows(&fichier("a.exe.exe")), "a.exe");
         let lsof = "p501\ncGoogle Chrome\nf23\nn192.168.1.20:50000->142.250.1.1:443\np777\ncssh\nf3\nn[2a01:db8::2]:50001->[2001:db8::7]:22\n";
         let m = lire_lsof(lsof);
         assert_eq!(m.len(), 2);
@@ -1654,8 +1573,6 @@ mod tests {
     fn noms_de_programmes_pieges() {
         let lsof = lire_lsof("p501\ncChrome\x1b[8m\u{2066}\nf23\nn192.168.1.20:50000->142.250.1.1:443\n");
         assert_eq!(lsof[0].programme.as_deref(), Some("Chrome�[8m�"));
-        let w: Vec<u16> = "fire\x1b]0;x\x07fox.exe".encode_utf16().collect();
-        assert_eq!(nom_windows(&w), "fire�]0;x�fox");
     }
 
     #[test]
@@ -2158,11 +2075,6 @@ mod proprietes {
             };
             let ligne = format!("en-tête\n 0: 0100007F:0035 {hex}:{:04X} 01 0:0 00:0 0 1000 0 {inode} 1\n", distante.port());
             prop_assert_eq!(lire_proc_net(&ligne), [(distante.ip(), distante.port(), inode)]);
-        }
-
-        #[test]
-        fn nom_windows_sans_plantage(fichier in prop::collection::vec(any::<u16>(), 0..300)) {
-            prop_assert!(!crate::ui::contient_un_piege(&nom_windows(&fichier)));
         }
 
         #[test]
