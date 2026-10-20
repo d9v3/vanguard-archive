@@ -8,7 +8,7 @@
 use std::net::{IpAddr, SocketAddr, UdpSocket};
 use std::time::{Duration, Instant};
 
-use crate::machine::dns::{Actuel, service_public};
+use crate::machine::dns::{Actuel, bouclier_canadien, bouclier_canadien_filtrant, service_public};
 use crate::reseau::nat::{hasard, recevoir};
 use crate::selection::{Ligne, choisir};
 use crate::ui::*;
@@ -132,10 +132,11 @@ fn cloudflare_famille(ip: IpAddr) -> bool {
 }
 
 /// Un service qui protège : il bloque des sites (malveillants, publicités, contrôle parental), chiffre, ou passe par
-/// un VPN. Seuls Cloudflare (hors familles) et Google ne filtrent rien.
+/// un VPN. Seuls Cloudflare (hors familles), le Bouclier canadien « Privé » et Google ne filtrent rien.
 fn filtrant(ip: IpAddr) -> Option<&'static str> {
     match service_public(ip)? {
         "Cloudflare" => cloudflare_famille(ip).then_some("Cloudflare"),
+        nom if nom == bouclier_canadien() => bouclier_canadien_filtrant(ip).then_some(nom),
         "Google" => None,
         autre => Some(autre),
     }
@@ -512,7 +513,15 @@ mod tests {
         assert!(protection(&actuel(&["127.0.0.1"], Some("NextDNS"), Some(true)), box_).is_some());
         assert!(protection(&actuel(&["127.0.0.1"], None, None), box_).is_some());
         assert!(protection(&actuel(&["10.0.0.1"], None, Some(true)), box_).is_some());
-        for s in ["9.9.9.9", "45.90.28.1", "94.140.14.14", "1.1.1.3", "100.100.100.100"] {
+        assert_eq!(protection(&actuel(&["149.112.121.10"], None, None), box_), None);
+        for s in [
+            "9.9.9.9",
+            "45.90.28.1",
+            "94.140.14.14",
+            "1.1.1.3",
+            "100.100.100.100",
+            "149.112.121.20",
+        ] {
             assert!(protection(&actuel(&[s], None, None), box_).is_some(), "{s}");
         }
         assert!(protection(&actuel(&["10.0.0.53"], None, None), box_).is_some());

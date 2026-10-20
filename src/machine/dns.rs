@@ -24,6 +24,20 @@ enum Origine {
     Inconnu,
 }
 
+/// Le DNS gratuit de l'ACEI, qui gère le .ca : « Privé » (…10, aucun filtre), « Protégé » (…20, sites malveillants
+/// bloqués), « Famille » (…30, contenus pour adultes aussi).
+pub(crate) fn bouclier_canadien() -> &'static str {
+    tr!("Bouclier canadien de l'ACEI", "CIRA Canadian Shield")
+}
+
+/// Les adresses du Bouclier canadien qui filtrent (« Protégé », « Famille ») ; « Privé » ne filtre rien.
+pub(crate) fn bouclier_canadien_filtrant(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => matches!(v4.octets(), [149, 112, 121 | 122, 20 | 30]),
+        IpAddr::V6(v6) => matches!(v6.segments(), [0x2620, 0x10a, 0x80bb | 0x80bc, 0, 0, 0, 0, 0x20 | 0x30]),
+    }
+}
+
 /// Services DNS publics reconnus à leur adresse.
 fn fournisseur(ip: IpAddr) -> Option<&'static str> {
     match ip {
@@ -38,6 +52,7 @@ fn fournisseur(ip: IpAddr) -> Option<&'static str> {
             [185, 228, 168 | 169, _] => Some("CleanBrowsing"),
             [76, 76, 2 | 10, _] => Some("Control D"),
             [100, 100, 100, 100] => Some("Tailscale"),
+            [149, 112, 121 | 122, _] => Some(bouclier_canadien()),
             _ => None,
         },
         IpAddr::V6(v6) => match v6.segments() {
@@ -48,6 +63,7 @@ fn fournisseur(ip: IpAddr) -> Option<&'static str> {
             [0x2a07, 0xa8c0 | 0xa8c1, ..] => Some("NextDNS"),
             [0x2a10, 0x50c0, ..] => Some("AdGuard DNS"),
             [0x2a07, 0xe340, ..] => Some("Mullvad DNS"),
+            [0x2620, 0x10a, 0x80bb | 0x80bc, ..] => Some(bouclier_canadien()),
             _ => None,
         },
     }
@@ -522,6 +538,20 @@ mod tests {
         assert_eq!(origine(ip("2620:fe::fe")), Origine::Connu("Quad9"));
         assert_eq!(origine(ip("2a07:a8c1::ab")), Origine::Connu("NextDNS"));
         assert_eq!(origine(ip("203.0.113.53")), Origine::Inconnu);
+        for a in [
+            "149.112.121.10",
+            "149.112.122.20",
+            "2620:10a:80bb::30",
+            "2620:10A:80BC::10",
+        ] {
+            assert_eq!(origine(ip(a)), Origine::Connu(bouclier_canadien()), "{a}");
+        }
+        assert!(
+            bouclier_canadien_filtrant(ip("149.112.121.20")) && bouclier_canadien_filtrant(ip("2620:10a:80bc::30"))
+        );
+        assert!(
+            !bouclier_canadien_filtrant(ip("149.112.121.10")) && !bouclier_canadien_filtrant(ip("2620:10a:80bb::10"))
+        );
     }
 
     #[test]
