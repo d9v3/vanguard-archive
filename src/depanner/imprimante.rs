@@ -316,8 +316,26 @@ mod systeme {
         format!("Get-ChildItem -LiteralPath {file} -File | Remove-Item -Force")
     }
 
-    pub fn verifier() -> Option<Vec<Imprimante>> {
-        let Some(json) = crate::machine::windows::ps(
+    /// L'état lu par le gestionnaire de services et le spouleur, sans PowerShell ; `None` si le gestionnaire de
+    /// services ne répond pas.
+    fn lire_natif() -> Option<(String, Vec<Imprimante>)> {
+        let spouleur = crate::machine::windows::gestionnaire::statut("Spooler")?.to_string();
+        let imprimantes = crate::machine::windows::impression::imprimantes()
+            .into_iter()
+            .map(|i| Imprimante {
+                nom: i.nom,
+                en_pause: i.en_pause,
+                hote: i.hote,
+                en_attente: i.en_attente,
+                par_defaut: i.par_defaut,
+            })
+            .collect();
+        Some((spouleur, imprimantes))
+    }
+
+    /// L'état lu par PowerShell, en secours.
+    fn lire_par_powershell() -> Option<(String, Vec<Imprimante>)> {
+        let json = crate::machine::windows::ps(
             "$s = (Get-Service Spooler -ErrorAction SilentlyContinue).Status
              $defaut = (Get-CimInstance Win32_Printer | Where-Object Default).Name
              $l = @(try { Get-Printer | ForEach-Object { $p = $_
@@ -325,12 +343,9 @@ mod systeme {
                @{ nom = $p.Name; pause = ($p.PrinterStatus -match 'Paused|Offline'); hote = \"$hote\"
                   attente = @(try { Get-PrintJob -PrinterName $p.Name -ErrorAction Stop } catch { }).Count; defaut = ($p.Name -eq $defaut) } } } catch { })
              [pscustomobject]@{ spouleur = \"$s\"; imprimantes = $l } | ConvertTo-Json -Compress -Depth 3",
-        ) else {
-            Etat::Info.dire(tr!("État de l'impression illisible (PowerShell).", "Printing state not readable (PowerShell)."));
-            return None;
-        };
+        )?;
         let v: serde_json::Value = serde_json::from_str(&json).unwrap_or_default();
-        let spouleur = v["spouleur"].as_str().unwrap_or_default();
+        let spouleur = v["spouleur"].as_str().unwrap_or_default().to_string();
         let imprimantes: Vec<Imprimante> = v["imprimantes"]
             .as_array()
             .into_iter()
@@ -343,6 +358,17 @@ mod systeme {
                 par_defaut: i["defaut"].as_bool().unwrap_or(false),
             })
             .collect();
+        Some((spouleur, imprimantes))
+    }
+
+    pub fn verifier() -> Option<Vec<Imprimante>> {
+        let Some((spouleur, imprimantes)) = lire_natif().or_else(lire_par_powershell) else {
+            Etat::Info.dire(tr!(
+                "État de l'impression illisible (PowerShell).",
+                "Printing state not readable (PowerShell)."
+            ));
+            return None;
+        };
         let marche = spouleur == "Running";
         Etat::selon(marche).dire(if marche {
             tr!("Le spouleur d'impression tourne.", "The print spooler is running.")
