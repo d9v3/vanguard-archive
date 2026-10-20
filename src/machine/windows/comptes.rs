@@ -71,13 +71,18 @@ fn juger_comptes(utilisateurs: &[&str], moi: Option<&str>, lbp: Option<u32>) -> 
                 alerte(
                     "Comptes",
                     Niveau::Moyen,
+                    // Windows dit seulement qu'un mot de passe vide serait accepté (« mot de passe non exigé »), pas
+                    // s'il l'est : un compte créé par New-LocalUser a ce réglage même avec un mot de passe.
                     trf!(
-                        "Le compte « {nom} » n'exige pas de mot de passe : il peut s'ouvrir sans rien taper.",
-                        "The “{nom}” account does not require a password: it may open without typing anything."
+                        "Le compte « {nom} » accepte un mot de passe vide (Windows ne l'exige pas pour lui) : s'il n'en a pas, il s'ouvre sans rien taper.",
+                        "The “{nom}” account accepts an empty password (Windows does not require one for it): if it has none, it opens without typing anything."
                     ),
                 )
                 .manuel(
-                    trf!("Donner un mot de passe à « {nom} »", "Give “{nom}” a password"),
+                    trf!(
+                        "Donner un mot de passe à « {nom} » s'il n'en a pas, puis, en administrateur : net user \"{nom}\" /passwordreq:yes",
+                        "Give “{nom}” a password if it has none, then, as administrator: net user \"{nom}\" /passwordreq:yes"
+                    ),
                     &["Start-Process ms-settings:signinoptions"],
                 ),
             );
