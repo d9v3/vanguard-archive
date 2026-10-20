@@ -15,7 +15,9 @@ JOURNAUX=$HOME/.cache/vanguard-dev
 
 cd "$ARBRE"
 [[ -z $(git status --porcelain) ]] || { echo "✖ $ARBRE a des changements non commités"; exit 1; }
-git rebase -q master
+# Master déjà à la base de la branche : rien à rebaser (un rebase referait à plat les fusions de la journée, en
+# faux conflits).
+git merge-base --is-ancestor master HEAD || git rebase -q master
 COMMIT=$(git rev-parse HEAD)
 # Le Mac de GitHub d'abord, la vérification d'ici pendant qu'il compile (3 min 30 d'attente sinon perdues) ; une
 # vérification en échec annule la compilation.
