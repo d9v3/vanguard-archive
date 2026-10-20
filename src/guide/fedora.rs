@@ -278,6 +278,16 @@ const DNF: Programme = Programme {
             "N'installe que les mises à jour de sécurité.",
             "Installs the security updates only.",
         ),
+        voir(
+            "dnf needs-restarting -r",
+            "Après des mises à jour : faut-il redémarrer, et à cause de quels paquets ?",
+            "After updates: is a restart needed, and because of which packages?",
+        ),
+        voir(
+            "dnf needs-restarting -s",
+            "Les services à relancer, sans redémarrer tout l'ordinateur.",
+            "The services to restart, without restarting the whole computer.",
+        ),
         changer(
             "sudo dnf reinstall <paquet>",
             "Réinstalle un paquet abîmé.",
