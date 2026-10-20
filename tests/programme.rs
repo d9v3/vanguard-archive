@@ -630,8 +630,8 @@ fn outils_de_disque_quittes_sans_rien_ecrire() {
 }
 
 /// Lancé depuis une clé (le programme copié dans <clé>/Linux, témoin vide : jamais la protection de la clé), Vanguard
-/// remplace sur accord la copie plus ancienne de cet ordinateur par lui-même ; lancé depuis cette copie, il renvoie
-/// vers la clé. Dans le dossier temporaire de cargo, pas dans /tmp : deux programmes de debug y pèsent 250 Mo.
+/// remplace sur accord la copie plus ancienne de cet ordinateur par lui-même ; lancé depuis cette copie, il se tourne
+/// vers GitHub. Dans le dossier temporaire de cargo, pas dans /tmp : deux programmes de debug y pèsent 250 Mo.
 #[cfg(target_os = "linux")]
 #[test]
 fn mise_a_jour_depuis_la_cle() {
@@ -674,7 +674,7 @@ fn mise_a_jour_depuis_la_cle() {
     );
     let depuis_la_copie = vanguard_dans(&copie, &maison, "en", &["se-mettre-a-jour"], "", 60);
     assert!(
-        sans_couleurs(&depuis_la_copie.texte).contains("start Vanguard from the key"),
+        sans_couleurs(&depuis_la_copie.texte).contains("the update comes from"),
         "{}",
         depuis_la_copie.texte
     );

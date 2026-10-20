@@ -5,13 +5,17 @@
 //! ancienne. La source est toujours le programme lancé depuis la clé, la confiance que la surveillance lui faisait
 //! déjà en le copiant ; jamais un volume seulement branché, qui n'aurait qu'à porter le fichier témoin. La version
 //! d'une copie se lit dans son fichier, sans la lancer : une vieille copie ne refait pas ses étapes de démarrage
-//! (protection de la clé, passage à un nouveau nom). GitHub n'est pas une source : le dépôt est privé.
+//! (protection de la clé, passage à un nouveau nom). Sans clé, la dernière version publiée vient de GitHub, signée par
+//! l'auteur et vérifiée (`github`) ; elle remplace la copie de cet ordinateur et le programme lancé, s'il n'est pas
+//! sur la clé (la clé, elle, se met à jour chez son propriétaire).
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::SystemTime;
 
 use crate::ui::*;
+
+mod github;
 
 /// La version de ce programme et la date de son commit, gravées dans son fichier pour qu'une autre copie les lise sans
 /// le lancer (« VANGUARD-VERSION:0.78.0+1760900000; »). `courante` la lit là : sans lecture, l'éditeur de liens
@@ -281,13 +285,51 @@ fn version_affichee(v: Option<Version>) -> String {
 /// La ligne du menu quand la clé d'où tourne Vanguard est plus récente que la copie de cet ordinateur, sinon rien.
 /// `touche` : l'entrée du menu qui la met à jour (« 9.9 »).
 pub fn avertissement(touche: &str) -> Option<String> {
-    match etat() {
-        Etat::AMettreAJour { cle, .. } => Some(trf!(
+    if let Etat::AMettreAJour { cle, .. } = etat() {
+        return Some(trf!(
             "Nouvelle version sur la clé ({}) : {touche} met à jour cet ordinateur.",
             "New version on the key ({}): {touche} updates this computer.",
             ecrire(cle)
-        )),
-        _ => None,
+        ));
+    }
+    // Sinon, une version plus récente publiée sur GitHub, s'il y a ici quelque chose qu'elle remplacerait.
+    let publiee = github::annonce()?;
+    cibles_github().iter().any(|c| plus_ancien(c, publiee)).then(|| {
+        trf!(
+            "Vanguard {} est sorti : {touche} met à jour cet ordinateur.",
+            "Vanguard {} is out: {touche} updates this computer.",
+            ecrire(publiee)
+        )
+    })
+}
+
+/// Ce que la mise à jour depuis GitHub remplace : la copie de cet ordinateur, et le programme lancé s'il n'est ni
+/// sur la clé (elle se met à jour chez son propriétaire) ni cette copie.
+fn cibles_github() -> Vec<PathBuf> {
+    if cfg!(test) {
+        return Vec::new();
+    }
+    let copie = copie_de_cet_ordinateur();
+    let mut cibles = Vec::new();
+    if std::fs::symlink_metadata(&copie).is_ok() {
+        cibles.push(copie.clone());
+    }
+    if let Some(exe) = programme() {
+        let sur_la_cle = crate::reseau::cle_du_programme().is_some_and(|c| exe.starts_with(c));
+        if !sur_la_cle && exe != copie {
+            cibles.push(exe);
+        }
+    }
+    cibles
+}
+
+/// Ce programme est-il plus ancien que `publiee` ? Sans version gravée (d'avant la 0.78), oui ; illisible, non :
+/// on ne remplace pas ce qu'on n'a pas pu lire.
+fn plus_ancien(chemin: &Path, publiee: Version) -> bool {
+    match lire_programme(chemin, TAILLE_MAX) {
+        Lu::Ancien => true,
+        Lu::Version(v) => v < publiee,
+        Lu::Absent | Lu::Illisible(_) => false,
     }
 }
 
@@ -358,12 +400,12 @@ pub fn commande() {
     let _ = std::fs::remove_file(cible.with_file_name(format!("{NOM}.ancien")));
     match etat() {
         Etat::Rien => trp!(
-            "  Pas de copie de Vanguard sur cet ordinateur : rien à mettre à jour.\n  La surveillance, l'entretien et le raccourci en posent une.",
-            "  No copy of Vanguard on this computer: nothing to update.\n  Monitoring, maintenance and the shortcut place one."
+            "  Pas de copie de Vanguard posée sur cet ordinateur (la surveillance,\n  l'entretien et le raccourci en posent une).",
+            "  No copy of Vanguard placed on this computer (monitoring, maintenance\n  and the shortcut place one)."
         ),
         Etat::PasDepuisLaCle => trp!(
-            "  La mise à jour vient de la clé VANGUARD : lance Vanguard depuis la clé,\n  puis reviens ici.",
-            "  The update comes from the VANGUARD key: start Vanguard from the key,\n  then come back here."
+            "  {GRIS}Vanguard ne tourne pas depuis la clé VANGUARD : la mise à jour vient de GitHub.{RESET}",
+            "  {GRIS}Vanguard is not running from the VANGUARD key: the update comes from GitHub.{RESET}"
         ),
         Etat::Illisible(e) => trp!(
             "  ✖ La copie de cet ordinateur ne se lit pas : sa version reste inconnue.\n    {GRIS}{} : {}{RESET}",
@@ -385,6 +427,84 @@ pub fn commande() {
         }
         Etat::AMettreAJour { source, copie, cle } => proposer(&source, &cible, copie, cle),
     }
+    depuis_github();
+}
+
+/// La dernière version publiée sur GitHub : montrée, puis téléchargée, vérifiée et installée après un « o », à la
+/// place de chaque programme d'ici qui est plus ancien.
+fn depuis_github() {
+    let cibles = cibles_github();
+    if cibles.is_empty() {
+        return;
+    }
+    trp!(
+        "\n  {GRIS}Dernière version publiée sur GitHub…{RESET}",
+        "\n  {GRIS}Latest version published on GitHub…{RESET}"
+    );
+    let publiee = match github::derniere() {
+        Ok(p) => p,
+        Err(e) => {
+            trp!(
+                "  GitHub : {}. Rien n'a été vérifié.",
+                "  GitHub: {}. Nothing was checked.",
+                affichable(&e)
+            );
+            return;
+        }
+    };
+    let a_remplacer: Vec<PathBuf> = cibles.into_iter().filter(|c| plus_ancien(c, publiee.version)).collect();
+    if a_remplacer.is_empty() {
+        trp!(
+            "  {VERT}✔{RESET} Rien de plus récent sur GitHub (dernière version : {}).",
+            "  {VERT}✔{RESET} Nothing newer on GitHub (latest version: {}).",
+            ecrire(publiee.version)
+        );
+        return;
+    }
+    trp!(
+        "  Vanguard {} est publié, signé par son auteur (signature vérifiée).\n  Il remplacerait :",
+        "  Vanguard {} is published, signed by its author (signature checked).\n  It would replace:",
+        ecrire(publiee.version)
+    );
+    for c in &a_remplacer {
+        let v = match lire_programme(c, TAILLE_MAX) {
+            Lu::Version(v) => ecrire(v),
+            _ => version_affichee(None),
+        };
+        println!("    {} {GRIS}({v}){RESET}", affichable(&c.display().to_string()));
+    }
+    if !demander(tr!(
+        "  Le télécharger et l'installer ? [o/N] : ",
+        "  Download and install it? [y/N]: "
+    ))
+    .oui()
+    {
+        return;
+    }
+    let source = match github::programme_verifie(&publiee) {
+        Ok(s) => s,
+        Err(e) => {
+            trp!("  ✖ {}", "  ✖ {}", affichable(&e));
+            return;
+        }
+    };
+    for c in &a_remplacer {
+        match remplacer(&source, c, publiee.version, TAILLE_MAX) {
+            Ok(()) => trp!(
+                "  {VERT}✔{RESET} {} : Vanguard {}.",
+                "  {VERT}✔{RESET} {}: Vanguard {}.",
+                affichable(&c.display().to_string()),
+                ecrire(publiee.version)
+            ),
+            Err(e) => trp!(
+                "  ✖ {} n'est pas remplacé, l'ancien reste en place :\n    {}",
+                "  ✖ {} is not replaced, the old one stays in place:\n    {}",
+                affichable(&c.display().to_string()),
+                affichable(&e)
+            ),
+        }
+    }
+    let _ = std::fs::remove_file(&source);
 }
 
 /// Montre les deux versions et d'où vient la nouvelle, puis remplace la copie après un « o ».
