@@ -862,7 +862,7 @@ try {
     else { Info "Exclusions de Defender : $(@($exclusions | Where-Object { $_ }).Count) dossier(s)" }
 } catch { Bug "Comparaison impossible : $($_.Exception.Message)" }
 
-Etape 'Réglages de la 0.79 : WPAD, règle des mots de passe, guide'
+Etape 'Réglages de la 0.79 : WPAD, règle des mots de passe, portes dérobées, guide'
 # Chaque réglage est relu ici sans Vanguard, et comparé à ce que dit le bilan JSON déjà fait plus haut.
 try {
     $audit = Sortie 'machine-json' | ConvertFrom-Json
@@ -876,6 +876,21 @@ try {
     $domaine = $env:USERDOMAIN -and $env:USERDOMAIN -ne $env:COMPUTERNAME
     $wpad = (Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Services\WinHttp\Parameters' -ErrorAction SilentlyContinue).DisableWpad
     Accord79 'WPAD' ($wpad -ne 1 -and -not $domaine) 'proxy tout seul|proxy by itself'
+    # Portes dérobées classiques, en lecture seule : un débogueur posé sur un programme d'accessibilité de l'écran de
+    # connexion, le bureau ou Userinit de Winlogon détournés. Relus ici dans le registre, comparés au bilan.
+    $ifeo = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options'
+    $accessibilite = 'sethc.exe', 'utilman.exe', 'osk.exe', 'narrator.exe', 'magnify.exe', 'displayswitch.exe', 'atbroker.exe'
+    $porte = [bool]@($accessibilite | Where-Object { (Get-ItemProperty (Join-Path $ifeo $_) -ErrorAction SilentlyContinue).Debugger }).Count
+    Accord79 'Débogueur sur un programme d''accessibilité' $porte 'Porte dérobée sur|Backdoor on'
+    $winlogon = Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon' -ErrorAction SilentlyContinue
+    $userinit = @("$($winlogon.Userinit)".Split(',') | ForEach-Object { $_.Trim().Trim('"') } | Where-Object { $_ })
+    $shellDetourne = "$($winlogon.Shell)".Trim() -notin '', 'explorer.exe', "$env:SystemRoot\explorer.exe"
+    $userinitDetourne = $userinit.Count -gt 1 -or ($userinit.Count -eq 1 -and $userinit[0] -notin "$env:SystemRoot\system32\userinit.exe", '%SystemRoot%\system32\userinit.exe', 'userinit.exe')
+    Info "Winlogon : Shell « $($winlogon.Shell) », Userinit « $($winlogon.Userinit) »"
+    Accord79 'Winlogon (bureau, Userinit)' ($shellDetourne -or $userinitDetourne) 'Winlogon lance|Winlogon starts'
+    $portes = @($audit.constats | Where-Object { $_.regle -in 'WIN-PRS-002', 'WIN-PRS-004' })
+    if (@($portes.regle | Sort-Object -Unique).Count -eq 2 -and -not @($portes | Where-Object { -not $_.verifie }).Count) { Ok 'Règles IFEO et Winlogon au bilan, vérifiées' }
+    else { Bug 'Règle IFEO ou Winlogon absente du bilan, ou non vérifiée' }
     # La règle des mots de passe : lue par ADSI, comme Vanguard (sans droits, quelle que soit la langue), et par
     # net accounts pour comparer. Une lecture ADSI vide dirait que Vanguard ne peut rien conclure.
     $adsi = [ADSI]"WinNT://$env:COMPUTERNAME"

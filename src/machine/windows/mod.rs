@@ -12,9 +12,11 @@ use crate::ui::{resume, tr, trf, trp};
 mod comptes;
 mod durcissement;
 mod ecoute;
+mod evenements;
 mod exclusions;
 mod maj;
 mod persistance;
+mod portes;
 mod regles;
 mod services;
 mod verrouillage;
@@ -59,7 +61,7 @@ pub fn ps(script: &str) -> Option<String> {
 }
 
 /// Comme `ps`, avec un délai choisi : la recherche Windows Update ou winget peuvent prendre une minute ou deux.
-fn ps_delai(script: &str, secondes: u64) -> Option<String> {
+pub(super) fn ps_delai(script: &str, secondes: u64) -> Option<String> {
     let complet =
         format!("[Console]::OutputEncoding=[Text.Encoding]::UTF8; $ErrorActionPreference='Stop'; {script}; '{FIN}'");
     // Début du script, pour retrouver lequel a échoué dans le journal.
