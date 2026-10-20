@@ -1,311 +1,352 @@
-<!-- Page des fonctions de Vanguard, publiée sur claude.ai à chaque version (skill /livrer, outils/page-fonctions.py).
-     Les {{…}} sont remplis par le script ; le reste (les fonctions, les étiquettes « nouveau ») se tient à la main, comme
-     la liste des fonctions des README. Rien de personnel : ni nom, ni réseau, ni lien du dépôt privé. -->
+<!-- Page de présentation de Vanguard, publiée sur claude.ai à chaque version (skill /livrer, outils/page-fonctions.py).
+     Les {{…}} sont remplis par le script ; le reste (les fonctions, les nouveautés) se tient à la main, comme la liste
+     des fonctions des README. Rien de personnel : ni nom, ni réseau, ni lien du dépôt privé. -->
 <title>Vanguard {{VERSION_COURTE}}</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;900&family=Instrument+Sans:wght@400;500;600&family=Chivo+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Condensed:wght@600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
 <style>
-/* Mise en page : une colonne de lecture, ouverte par le vrai menu du programme en terminal, puis une section par entrée du menu. */
+/* Mise en page : une bande d'ouverture sombre (le message à gauche, la vraie fenêtre du programme à droite), puis des
+   sections claires sur une colonne de 72 rem ; tout passe sur une colonne sur téléphone. */
 :root {
-  --fond: #f6f7f8;
-  --encre: #15181c;
-  --doux: #5b636d;
-  --trait: #d9dde2;
-  --plaque: #0d0f12;
-  --plaque-texte: #eef1f4;
-  --accent: #0d7f92;
-  --accent-doux: #e2f1f3;
-  --alerte: #b4462f;
-  --titre: "Big Shoulders Display", "Arial Narrow", Impact, sans-serif;
-  --texte: "Instrument Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
-  --mono: "Chivo Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  --fond: #f6f8fa;
+  --surface: #ffffff;
+  --encre: #0f1724;
+  --doux: #556274;
+  --trait: #dde3ea;
+  --nuit: #0b1220;
+  --nuit-texte: #e8edf3;
+  --nuit-doux: #93a1b3;
+  --nuit-trait: #1e2a3b;
+  --accent: #0b7f8f;
+  --accent-fond: #e3f3f5;
+  --bon: #1d7a4b;
+  --titre: "IBM Plex Sans Condensed", "Arial Narrow", system-ui, sans-serif;
+  --texte: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --fond: #000000; --encre: #eceff2; --doux: #9aa3ad; --trait: #22272d;
-    --plaque: #0b0d10; --plaque-texte: #eef1f4; --accent: #3cc6db; --accent-doux: #0b2a30; --alerte: #ef7b62;
+    --fond: #05080d; --surface: #0c121b; --encre: #e8edf3; --doux: #9aa8ba; --trait: #1c2634;
+    --nuit: #000000; --nuit-texte: #e8edf3; --nuit-doux: #93a1b3; --nuit-trait: #1a2433;
+    --accent: #3cc3d4; --accent-fond: #0b2730; --bon: #4fc28a;
     color-scheme: dark;
   }
 }
 :root[data-theme="dark"] {
-  --fond: #000000; --encre: #eceff2; --doux: #9aa3ad; --trait: #22272d;
-  --plaque: #0b0d10; --plaque-texte: #eef1f4; --accent: #3cc6db; --accent-doux: #0b2a30; --alerte: #ef7b62;
+  --fond: #05080d; --surface: #0c121b; --encre: #e8edf3; --doux: #9aa8ba; --trait: #1c2634;
+  --nuit: #000000; --nuit-texte: #e8edf3; --nuit-doux: #93a1b3; --nuit-trait: #1a2433;
+  --accent: #3cc3d4; --accent-fond: #0b2730; --bon: #4fc28a;
   color-scheme: dark;
 }
-body {
-  background: var(--fond); color: var(--encre); font-family: var(--texte); font-size: 1rem; line-height: 1.6;
-}
-.page {
-  max-width: 62rem; margin: 0 auto;
-  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
-  padding-block: 2.5rem 4rem; display: grid; gap: 3.5rem;
-}
+* { box-sizing: border-box; }
+body { background: var(--fond); color: var(--encre); font-family: var(--texte); font-size: 1rem; line-height: 1.6; }
 a { color: var(--accent); }
-a:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 2px; }
+a:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 3px; }
+.cadre {
+  max-width: 72rem; margin: 0 auto;
+  padding-left: max(20px, env(safe-area-inset-left, 0px)); padding-right: max(20px, env(safe-area-inset-right, 0px));
+}
+h1, h2, h3 { font-family: var(--titre); text-wrap: balance; margin: 0; }
+.surtitre { font-family: var(--mono); font-size: .75rem; letter-spacing: .1em; text-transform: uppercase; color: var(--accent); margin: 0; }
 
-/* En-tête : la plaque du logo et le nom */
-.tete { display: grid; grid-template-columns: auto 1fr; gap: 1.5rem; align-items: center; }
-.plaque {
-  width: 6.5rem; aspect-ratio: 1; max-width: 100%; background: var(--plaque); border-radius: 1.1rem;
-  display: grid; place-items: center; box-shadow: 0 0 0 1px var(--trait);
-}
-.plaque svg { width: 62%; height: auto; }
-.tete h1 {
-  font-family: var(--titre); font-weight: 900; font-size: clamp(3rem, 9vw, 5.5rem); line-height: .9;
-  letter-spacing: .02em; margin: 0; text-wrap: balance;
-}
-.tete p { margin: .6rem 0 0; color: var(--doux); font-size: 1.12rem; max-width: 40rem; }
-.puces { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: 1rem; }
-.puce {
-  font-family: var(--mono); font-size: .78rem; padding: .25rem .6rem; border: 1px solid var(--trait);
-  border-radius: 999px; color: var(--doux); font-variant-numeric: tabular-nums;
-}
-@media (max-width: 34rem) { .tete { grid-template-columns: 1fr; } .plaque { width: 5rem; } }
+/* Bandeau de tête */
+.ouverture { background: var(--nuit); color: var(--nuit-texte); }
+.barre { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding-block: 1.1rem; }
+.marque { display: flex; align-items: center; gap: .7rem; color: var(--nuit-texte); text-decoration: none; }
+.plaque { width: 2.4rem; height: 2.4rem; border-radius: .55rem; background: #0d0f12; display: grid; place-items: center; box-shadow: 0 0 0 1px var(--nuit-trait); flex: none; }
+.plaque svg { width: 64%; height: auto; }
+.marque b { font-family: var(--titre); font-size: 1.35rem; letter-spacing: .04em; }
+.version { font-family: var(--mono); font-size: .72rem; color: var(--nuit-doux); border: 1px solid var(--nuit-trait); border-radius: 999px; padding: .1rem .55rem; }
+.nav { display: flex; gap: 1.4rem; font-size: .92rem; }
+.nav a { color: var(--nuit-doux); text-decoration: none; }
+.nav a:hover { color: var(--nuit-texte); }
+.heros { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.08fr); gap: 3rem; align-items: center; padding-block: 2.5rem 4rem; }
+.heros h1 { font-size: clamp(2.2rem, 4.6vw, 3.5rem); line-height: 1.05; font-weight: 700; }
+.heros .chapeau { color: var(--nuit-doux); font-size: 1.1rem; margin: 1.1rem 0 0; max-width: 34rem; }
+.systemes { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: 1.6rem; }
+.systeme { font-family: var(--mono); font-size: .76rem; color: var(--nuit-texte); background: var(--nuit-trait); border-radius: .4rem; padding: .3rem .6rem; }
+.faits { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; margin-top: 2rem; padding-top: 1.4rem; border-top: 1px solid var(--nuit-trait); }
+.fait b { display: block; font-family: var(--titre); font-size: 1.6rem; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.fait span { font-size: .85rem; color: var(--nuit-doux); }
 
-/* Le menu principal, tel que le programme l'affiche */
-.terminal {
-  background: var(--plaque); color: var(--plaque-texte); border-radius: .8rem; overflow-x: auto;
-  font-family: var(--mono); font-size: .84rem; line-height: 1.55; padding: 1.1rem 1.2rem;
-}
-.terminal pre { margin: 0; white-space: pre; }
-.terminal a { color: var(--plaque-texte); text-decoration: none; }
-.terminal a:hover, .terminal a:focus-visible { color: #3cc6db; }
-.terminal .gris { color: #8b949e; }
-.terminal .cyan { color: #3cc6db; }
-.legende { margin: .6rem 0 0; color: var(--doux); font-size: .9rem; }
-
-/* Sur téléphone : le même menu, en liste qui tient dans la largeur (le terminal de 76 colonnes glisserait de côté) */
-.menu-mobile { display: none; list-style: none; margin: 0; padding: 0; }
-.menu-mobile .groupe { color: #8b949e; font-size: .72rem; letter-spacing: .08em; text-transform: uppercase; padding: .9rem 0 .35rem; }
-.menu-mobile .groupe:first-child { padding-top: 0; }
-.menu-mobile a { display: grid; grid-template-columns: 2.1rem 1fr; gap: .1rem .6rem; padding: .55rem 0; border-top: 1px solid #22272d; color: var(--plaque-texte); text-decoration: none; }
-.menu-mobile a .n { color: #3cc6db; font-variant-numeric: tabular-nums; text-align: right; }
-.menu-mobile a .s { grid-column: 2; color: #8b949e; font-size: .78rem; }
-.menu-mobile .entete { display: flex; justify-content: space-between; align-items: baseline; gap: .5rem; flex-wrap: wrap; padding-bottom: .7rem; margin-bottom: .2rem; border-bottom: 1px solid #22272d; }
-.menu-mobile .entete b { font-weight: 500; }
-.menu-mobile .entete span { color: #8b949e; font-size: .75rem; }
-@media (max-width: 40rem) {
-  .terminal pre { display: none; }
-  .menu-mobile { display: block; }
-  .terminal { font-size: .9rem; padding: 1rem; }
-  .page { gap: 2.6rem; padding-block: 1.5rem 3rem; }
-  .tete { gap: 1rem; }
-  .tete p { font-size: 1.02rem; }
-  .liste { grid-template-columns: 1fr; gap: .7rem; }
-  .chiffre b { font-size: 2rem; }
-  .puce { font-size: .72rem; }
-}
+/* La fenêtre du programme */
+.fenetre { background: #0d1117; border: 1px solid var(--nuit-trait); border-radius: .75rem; box-shadow: 0 24px 60px -24px rgba(0, 0, 0, .65); min-width: 0; }
+.fenetre .titre-fenetre { display: flex; align-items: center; gap: .45rem; padding: .6rem .8rem; border-bottom: 1px solid #1d2430; }
+.fenetre .titre-fenetre i { width: .62rem; height: .62rem; border-radius: 50%; background: #2c3442; }
+.fenetre .titre-fenetre span { margin-left: .4rem; font-family: var(--mono); font-size: .72rem; color: #7d8898; }
+.fenetre pre { margin: 0; padding: 1rem 1.1rem 1.2rem; overflow-x: auto; font-family: var(--mono); font-size: .78rem; line-height: 1.55; color: #e6edf3; }
+.fenetre pre a { color: #e6edf3; text-decoration: none; }
+.fenetre pre a:hover, .fenetre pre a:focus-visible { color: #3cc3d4; }
+.g { color: #7d8898; } .c { color: #3cc3d4; }
+.menu-court { display: none; list-style: none; margin: 0; padding: .4rem 1rem 1rem; font-family: var(--mono); font-size: .86rem; }
+.menu-court li a { display: grid; grid-template-columns: 1.8rem 1fr; gap: .6rem; padding: .5rem 0; border-top: 1px solid #1d2430; color: #e6edf3; text-decoration: none; }
+.menu-court li:first-child a { border-top: 0; }
+.menu-court .n { color: #3cc3d4; text-align: right; font-variant-numeric: tabular-nums; }
 
 /* Sections */
-section { display: grid; gap: 1rem; scroll-margin-top: 1.5rem; }
-.cadre {
-  font-family: var(--mono); font-size: .8rem; letter-spacing: .08em; text-transform: uppercase; color: var(--accent);
-  display: flex; align-items: center; gap: .75rem;
-}
-.cadre::after { content: ""; flex: 1; border-top: 2px solid var(--trait); }
-.cadre b { font-weight: 500; color: var(--doux); }
-h2 { font-family: var(--titre); font-weight: 700; font-size: clamp(1.9rem, 4.5vw, 2.6rem); line-height: 1; margin: 0; text-wrap: balance; }
-.intro { margin: 0; color: var(--doux); max-width: 44rem; }
-.liste { display: grid; grid-template-columns: repeat(auto-fit, minmax(17rem, 1fr)); gap: .9rem 2rem; margin: 0; padding: 0; list-style: none; }
-.liste li { min-width: 0; padding-top: .7rem; border-top: 1px solid var(--trait); }
-.liste strong { display: block; font-weight: 600; margin-bottom: .15rem; }
-.liste span { color: var(--doux); font-size: .95rem; }
-.nouveau {
-  font-family: var(--mono); font-size: .68rem; text-transform: uppercase; letter-spacing: .08em; color: var(--accent);
-  background: var(--accent-doux); padding: .05rem .4rem; border-radius: .25rem; margin-left: .35rem; vertical-align: .1em;
-}
+main { display: grid; gap: 5rem; padding-block: 4.5rem 4rem; }
+.tete-section { display: grid; gap: .6rem; max-width: 46rem; margin-bottom: 2rem; }
+.tete-section h2 { font-size: clamp(1.7rem, 3.2vw, 2.4rem); line-height: 1.12; font-weight: 700; }
+.tete-section p { color: var(--doux); margin: 0; font-size: 1.05rem; }
 
-/* Promesses */
-.promesses { display: grid; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); gap: 1rem; }
-.promesse { border-left: 3px solid var(--accent); padding: .2rem 0 .2rem 1rem; }
-.promesse strong { display: block; }
-.promesse span { color: var(--doux); font-size: .95rem; }
+.etapes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1.25rem; list-style: none; padding: 0; margin: 0; counter-reset: etape; }
+.etapes li { background: var(--surface); border: 1px solid var(--trait); border-radius: .7rem; padding: 1.3rem 1.3rem 1.4rem; counter-increment: etape; }
+.etapes li::before { content: counter(etape); display: grid; place-items: center; width: 2rem; height: 2rem; border-radius: 50%; background: var(--accent-fond); color: var(--accent); font-family: var(--mono); font-weight: 500; margin-bottom: .9rem; }
+.etapes h3 { font-size: 1.2rem; margin-bottom: .3rem; }
+.etapes p { margin: 0; color: var(--doux); font-size: .96rem; }
 
-/* Chiffres */
-.chiffres { display: grid; grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr)); gap: 1rem; }
-.chiffre { border-top: 2px solid var(--encre); padding-top: .6rem; }
-.chiffre b { display: block; font-family: var(--titre); font-weight: 900; font-size: 2.4rem; line-height: 1; font-variant-numeric: tabular-nums; }
+.domaines { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 21rem), 1fr)); gap: 1.25rem; }
+.domaine { background: var(--surface); border: 1px solid var(--trait); border-radius: .7rem; padding: 1.4rem; display: grid; gap: .8rem; align-content: start; min-width: 0; }
+.domaine header { display: flex; align-items: center; gap: .75rem; }
+.icone { width: 2.4rem; height: 2.4rem; border-radius: .55rem; background: var(--accent-fond); color: var(--accent); display: grid; place-items: center; flex: none; }
+.icone svg { width: 1.25rem; height: 1.25rem; }
+.domaine h3 { font-size: 1.2rem; }
+.domaine .touche { font-family: var(--mono); font-size: .72rem; color: var(--doux); }
+.domaine ul { list-style: none; margin: 0; padding: 0; display: grid; gap: .55rem; }
+.domaine li { position: relative; padding-left: 1.2rem; font-size: .95rem; color: var(--doux); }
+.domaine li::before { content: ""; position: absolute; left: 0; top: .62em; width: .45rem; height: .45rem; border-radius: 50%; background: var(--accent); }
+.domaine li b { color: var(--encre); font-weight: 600; }
+
+.nouveautes { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 19rem), 1fr)); gap: 1rem 2rem; list-style: none; margin: 0; padding: 0; }
+.nouveautes li { border-top: 2px solid var(--accent); padding-top: .8rem; }
+.nouveautes b { display: block; margin-bottom: .2rem; }
+.nouveautes span { color: var(--doux); font-size: .95rem; }
+
+.principes { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr)); gap: 1.25rem; }
+.principe { display: grid; grid-template-columns: auto 1fr; gap: .8rem; align-items: start; }
+.principe svg { width: 1.3rem; height: 1.3rem; color: var(--bon); margin-top: .2rem; }
+.principe b { display: block; }
+.principe span { color: var(--doux); font-size: .95rem; }
+
+.chiffres { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1.25rem; background: var(--surface); border: 1px solid var(--trait); border-radius: .7rem; padding: 1.6rem; }
+.chiffre b { display: block; font-family: var(--titre); font-size: clamp(1.9rem, 3.5vw, 2.6rem); line-height: 1; font-variant-numeric: tabular-nums; }
 .chiffre span { color: var(--doux); font-size: .9rem; }
+.note { color: var(--doux); font-size: .95rem; margin: 1rem 0 0; max-width: 46rem; }
 
-footer { color: var(--doux); font-size: .88rem; border-top: 1px solid var(--trait); padding-top: 1.2rem; font-family: var(--mono); }
+footer { border-top: 1px solid var(--trait); }
+footer .cadre { display: flex; flex-wrap: wrap; justify-content: space-between; gap: .5rem 1.5rem; padding-block: 1.6rem 2.2rem; color: var(--doux); font-size: .88rem; font-family: var(--mono); }
+
+@media (max-width: 960px) {
+  .heros { grid-template-columns: 1fr; gap: 2.2rem; padding-block: 1.5rem 3rem; }
+  .chiffres { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 720px) {
+  .nav { display: none; }
+  .etapes { grid-template-columns: 1fr; }
+  .fenetre pre { display: none; }
+  .menu-court { display: block; }
+  main { gap: 3.5rem; padding-block: 3rem; }
+  .faits { gap: .8rem; }
+  .fait b { font-size: 1.35rem; }
+}
+@media (max-width: 420px) {
+  .faits { grid-template-columns: 1fr 1fr; }
+  .chiffres { padding: 1.2rem; }
+}
 @media (prefers-reduced-motion: no-preference) { html { scroll-behavior: smooth; } }
 </style>
 
-<div class="page">
-  <header class="tete">
-    <div class="plaque" aria-hidden="true">
-      <svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg"><path fill="#ffffff" d="M8 12h22l20 52 20-52h22L60 90H40z"/><path fill="#0d0f12" d="M30 12h6l14 37 14-37h6L50 66z"/></svg>
+<div class="ouverture">
+  <div class="cadre">
+    <div class="barre">
+      <a class="marque" href="#haut" id="haut">
+        <span class="plaque" aria-hidden="true"><svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg"><path fill="#ffffff" d="M8 12h22l20 52 20-52h22L60 90H40z"/><path fill="#0d0f12" d="M30 12h6l14 37 14-37h6L50 66z"/></svg></span>
+        <b>VANGUARD</b>
+        <span class="version">{{VERSION}}</span>
+      </a>
+      <nav class="nav" aria-label="Sections">
+        <a href="#comment">Comment ça marche</a>
+        <a href="#fonctions">Fonctions</a>
+        <a href="#nouveautes">Nouveautés</a>
+        <a href="#principes">Principes</a>
+      </nav>
     </div>
-    <div>
-      <h1>VANGUARD</h1>
-      <p>La trousse de sécurité et de dépannage pour ton ordinateur et ton réseau, qui tourne depuis une clé USB. Elle explique chaque problème en mots simples et ne change rien sans ton accord.</p>
-      <div class="puces">
-        <span class="puce">Windows · Linux · macOS</span>
-        <span class="puce">Français · English</span>
-        <span class="puce">Version {{VERSION_COURTE}}</span>
-        <span class="puce">≈ {{LIGNES}} lignes de Rust</span>
+    <div class="heros">
+      <div>
+        <p class="surtitre">Sécurité et dépannage, sur une clé USB</p>
+        <h1>Vérifie, protège et répare ton ordinateur et ton réseau.</h1>
+        <p class="chapeau">Vanguard donne une note de A à F, explique chaque problème en mots simples et le corrige seulement avec ton accord. Il tourne depuis une clé USB, sans rien installer.</p>
+        <div class="systemes">
+          <span class="systeme">Windows 11</span><span class="systeme">Linux</span><span class="systeme">macOS</span><span class="systeme">Français · English</span>
+        </div>
+        <div class="faits">
+          <div class="fait"><b>A → F</b><span>une note claire pour l'ordinateur</span></div>
+          <div class="fait"><b>{{COMMANDES}}</b><span>commandes expliquées</span></div>
+          <div class="fait"><b>0</b><span>changement sans ton accord</span></div>
+        </div>
       </div>
-    </div>
-  </header>
+      <div class="fenetre" role="navigation" aria-label="Menu principal de Vanguard">
+        <div class="titre-fenetre"><i></i><i></i><i></i><span>vanguard</span></div>
+<pre><span class="g">╭──────────────────────────────────────────────────────────────────────────╮</span>
+<span class="g">│</span>  <b>VANGUARD {{VERSION_COURTE_TERMINAL}}</b>sécurise et optimise ta machine et ton réseau  <span class="g">│</span>
+<span class="g">╰──────────────────────────────────────────────────────────────────────────╯</span>
 
-  <div>
-    <div class="terminal" role="navigation" aria-label="Menu principal de Vanguard">
-<pre><span class="gris">╭──────────────────────────────────────────────────────────────────────────╮</span>
-<span class="gris">│</span>  <b>VANGUARD {{VERSION_COURTE_TERMINAL}}</b>sécurise et optimise ta machine et ton réseau  <span class="gris">│</span>
-<span class="gris">╰──────────────────────────────────────────────────────────────────────────╯</span>
-
-  <span class="gris">── BILAN DE SÉCURITÉ ─────────────────────────────────────────────────────</span>
- <span class="cyan">►</span>  1  <a href="#bilan">Bilan complet : machine + réseau</a>     <span class="cyan">← commencer ici</span>
+  <span class="g">── BILAN DE SÉCURITÉ ─────────────────────────────────────────────────────</span>
+ <span class="c">►</span>  1  <a href="#bilan">Bilan complet : machine + réseau</a>     <span class="c">← commencer ici</span>
     2  <a href="#bilan">Corriger les problèmes trouvés</a>
     3  <a href="#bilan">Rapport détaillé dans le navigateur</a>
 
-  <span class="gris">── OUTILS ────────────────────────────────────────────────────────────────</span>
-    4  <a href="#depanner">Cette machine ›</a>                      <span class="gris">audit, mises à jour, réparer…</span>
-    5  <a href="#reseau">Réseau et Internet ›</a>                 <span class="gris">appareils, surveillance, débit</span>
-    6  <a href="#protection">Antivirus et protection ›</a>            <span class="gris">analyses, clé USB, fuites…</span>
-    7  <a href="#optimiser">Installer et jouer ›</a>                 <span class="gris">logiciels libres, gaming</span>
-    8  <a href="#optimiser">Optimiser ›</a>                          <span class="gris">nettoyer, confidentialité…</span>
-    9  <a href="#donnees">Données ›</a>                            <span class="gris">sauvegarder, copier mes fichiers</span>
-   10  <a href="#guide">Guide des commandes ›</a>                <span class="gris">Linux, Windows, macOS, pas à pas</span>
-   11  <a href="#depanner">Dépanner pas à pas ›</a>                 <span class="gris">Internet, son, imprimante…</span>
-    q  Quitter</pre>
-      <ul class="menu-mobile">
-        <li class="entete"><b>VANGUARD {{VERSION_COURTE}}</b><span>sécurise et optimise ta machine</span></li>
-        <li class="groupe">Bilan de sécurité</li>
-        <li><a href="#bilan"><span class="n">1</span><span>Bilan complet : machine + réseau</span><span class="s">← commencer ici</span></a></li>
-        <li><a href="#bilan"><span class="n">2</span><span>Corriger les problèmes trouvés</span></a></li>
-        <li><a href="#bilan"><span class="n">3</span><span>Rapport détaillé dans le navigateur</span></a></li>
-        <li class="groupe">Outils</li>
-        <li><a href="#depanner"><span class="n">4</span><span>Cette machine ›</span><span class="s">audit, mises à jour, réparer</span></a></li>
-        <li><a href="#reseau"><span class="n">5</span><span>Réseau et Internet ›</span><span class="s">appareils, surveillance, débit</span></a></li>
-        <li><a href="#protection"><span class="n">6</span><span>Antivirus et protection ›</span><span class="s">analyses, clé USB, fuites</span></a></li>
-        <li><a href="#optimiser"><span class="n">7</span><span>Installer et jouer ›</span><span class="s">logiciels libres, gaming</span></a></li>
-        <li><a href="#optimiser"><span class="n">8</span><span>Optimiser ›</span><span class="s">nettoyer, confidentialité</span></a></li>
-        <li><a href="#donnees"><span class="n">9</span><span>Données ›</span><span class="s">sauvegarder, copier mes fichiers</span></a></li>
-        <li><a href="#guide"><span class="n">10</span><span>Guide des commandes ›</span><span class="s">Linux, Windows, macOS</span></a></li>
-        <li><a href="#depanner"><span class="n">11</span><span>Dépanner pas à pas ›</span><span class="s">Internet, son, imprimante</span></a></li>
-      </ul>
+  <span class="g">── OUTILS ────────────────────────────────────────────────────────────────</span>
+    4  <a href="#depanner">Cette machine ›</a>                      <span class="g">audit, mises à jour, réparer…</span>
+    5  <a href="#reseau">Réseau et Internet ›</a>                 <span class="g">appareils, surveillance, débit</span>
+    6  <a href="#protection">Antivirus et protection ›</a>            <span class="g">analyses, clé USB, fuites…</span>
+    7  <a href="#optimiser">Installer et jouer ›</a>                 <span class="g">logiciels libres, gaming</span>
+    8  <a href="#optimiser">Optimiser ›</a>                          <span class="g">nettoyer, confidentialité…</span>
+    9  <a href="#donnees">Données ›</a>                            <span class="g">sauvegarder, copier mes fichiers</span>
+   10  <a href="#guide">Guide des commandes ›</a>                <span class="g">Linux, Windows, macOS, pas à pas</span>
+   11  <a href="#depanner">Dépanner pas à pas ›</a>                 <span class="g">Internet, son, imprimante…</span></pre>
+        <ul class="menu-court">
+          <li><a href="#bilan"><span class="n">1</span><span>Bilan complet : machine + réseau</span></a></li>
+          <li><a href="#depanner"><span class="n">4</span><span>Cette machine</span></a></li>
+          <li><a href="#reseau"><span class="n">5</span><span>Réseau et Internet</span></a></li>
+          <li><a href="#protection"><span class="n">6</span><span>Antivirus et protection</span></a></li>
+          <li><a href="#optimiser"><span class="n">8</span><span>Optimiser</span></a></li>
+          <li><a href="#donnees"><span class="n">9</span><span>Données</span></a></li>
+          <li><a href="#guide"><span class="n">10</span><span>Guide des commandes</span></a></li>
+          <li><a href="#depanner"><span class="n">11</span><span>Dépanner pas à pas</span></a></li>
+        </ul>
+      </div>
     </div>
-    <p class="legende">Le menu principal de Vanguard. Chaque entrée mène à sa section ci-dessous.</p>
   </div>
+</div>
 
-  <section id="bilan">
-    <div class="cadre">1 · 2 · 3 <b>Bilan de sécurité</b></div>
-    <h2>Une note de A à F, et chaque problème réglé avec ton accord</h2>
-    <p class="intro">Chaque correction est montrée avant d'être faite, précédée d'un point de restauration, et s'annule exactement.</p>
-    <ul class="liste">
-      <li><strong>Les bases</strong><span>Pare-feu, mises à jour, chiffrement du disque, antivirus, comptes et mots de passe, blocage après des essais ratés.</span></li>
-      <li><strong>Accès à distance</strong><span>SSH et ses algorithmes faibles, Bureau à distance, ports renvoyés ouverts à tout le réseau.</span></li>
-      <li><strong>Détournements discrets</strong><span>Proxy détourné par WPAD, redirections ICMP, dossiers de commandes modifiables par d'autres comptes.</span></li>
-      <li><strong>Portes dérobées de Windows</strong><span>Débogueur posé sur l'écran de connexion, Winlogon détourné, abonnements WMI qui lancent une commande.</span></li>
-      <li><strong>Signes d'un rootkit sous Linux</strong><span>Processus cachés, programmes qui tournent sans fichier, module du noyau qui se cache.</span></li>
-      <li><strong>Journaux d'événements</strong><span>Rafales de mots de passe faux, journal de sécurité effacé, comptes créés, services suspects, sur 7 jours.</span></li>
+<main class="cadre">
+  <section id="comment">
+    <div class="tete-section">
+      <p class="surtitre">Comment ça marche</p>
+      <h2>Trois étapes, et rien ne change sans toi</h2>
+    </div>
+    <ol class="etapes">
+      <li><h3>Branche la clé</h3><p>Vanguard tourne depuis la clé USB, sur Windows, Linux ou macOS. Rien à installer sur l'ordinateur.</p></li>
+      <li><h3>Lance le bilan</h3><p>En quelques secondes : une note de A à F pour l'ordinateur, le réseau, et chaque problème expliqué.</p></li>
+      <li><h3>Corrige avec ton accord</h3><p>Chaque correction est montrée avant d'être faite, précédée d'un point de restauration, et s'annule exactement.</p></li>
+    </ol>
+  </section>
+
+  <section id="fonctions">
+    <div class="tete-section">
+      <p class="surtitre">Fonctions</p>
+      <h2>Tout ce qu'il faut pour un ordinateur sain</h2>
+      <p>Chaque domaine correspond à une entrée du menu principal.</p>
+    </div>
+    <div class="domaines">
+      <article class="domaine" id="bilan">
+        <header><span class="icone"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l8 3v6c0 4.5-3.4 8.1-8 9-4.6-.9-8-4.5-8-9V6z"/><path d="M8.5 12l2.5 2.5 4.5-5"/></svg></span><div><h3>Bilan de sécurité</h3><span class="touche">menu 1 · 2 · 3</span></div></header>
+        <ul>
+          <li><b>Les bases</b> : pare-feu, mises à jour, chiffrement du disque, antivirus, comptes et mots de passe.</li>
+          <li><b>Accès à distance</b> : SSH et ses algorithmes faibles, Bureau à distance, proxy détourné (WPAD).</li>
+          <li><b>Ce qui se cache</b> : portes dérobées de Windows, signes d'un rootkit sous Linux.</li>
+          <li><b>Journaux d'événements</b> : mots de passe faux en rafale, journal effacé, services suspects.</li>
+        </ul>
+      </article>
+      <article class="domaine" id="reseau">
+        <header><span class="icone"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="3" width="6" height="5" rx="1"/><rect x="3" y="16" width="6" height="5" rx="1"/><rect x="15" y="16" width="6" height="5" rx="1"/><path d="M12 8v4M6 16v-4h12v4"/></svg></span><div><h3>Réseau et Internet</h3><span class="touche">menu 5</span></div></header>
+        <ul>
+          <li><b>Scan du réseau</b> : appareils, fabricants, ports ouverts, caméras, UPnP de la box.</li>
+          <li><b>Empoisonneur démasqué</b> : l'appareil qui vole les mots de passe Windows du réseau.</li>
+          <li><b>Surveillance horaire</b> : nouvel appareil ou botnet, une notification.</li>
+          <li><b>Connexion pour le jeu</b> : ping, gigue, débit, bufferbloat ; Wi-Fi, NAT et DNS.</li>
+        </ul>
+      </article>
+      <article class="domaine" id="protection">
+        <header><span class="icone"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4M8 11h6M11 8v6"/></svg></span><div><h3>Antivirus et protection</h3><span class="touche">menu 6</span></div></header>
+        <ul>
+          <li><b>YARA intégré</b> : 308 règles qui reconnaissent des familles entières de logiciels malveillants.</li>
+          <li><b>Qui parle à Internet ?</b> : chaque programme, les serveurs de botnets connus, la mémoire DNS.</li>
+          <li><b>Ce lien est-il dangereux ?</b> : âge du domaine, faux sites, listes publiques, sans l'ouvrir.</li>
+          <li><b>Fuites, caméra, prise de contrôle</b> : mots de passe fuités, micro, AnyDesk ou TeamViewer.</li>
+        </ul>
+      </article>
+      <article class="domaine" id="depanner">
+        <header><span class="icone"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.5 6.5a4 4 0 0 0-5.3 5.3L3.5 17.5l3 3 5.7-5.7a4 4 0 0 0 5.3-5.3l-2.3 2.3-2.4-.6-.6-2.4z"/></svg></span><div><h3>Dépanner</h3><span class="touche">menu 4 · 11</span></div></header>
+        <ul>
+          <li><b>Pas à pas</b> : Internet, son, imprimante, écran, lenteur, une question à la fois.</li>
+          <li><b>Après une infection</b> : couper Internet quand ça presse, garder les traces, puis les mots de passe à changer.</li>
+          <li><b>Collecter les traces</b> : un dossier daté pour un spécialiste, les secrets masqués.</li>
+          <li><b>Comprendre</b> : pourquoi c'est lent, diagnostic, fiche de l'ordinateur.</li>
+        </ul>
+      </article>
+      <article class="domaine" id="optimiser">
+        <header><span class="icone"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 18a8 8 0 1 1 16 0"/><path d="M12 18l4-6"/></svg></span><div><h3>Optimiser et entretenir</h3><span class="touche">menu 7 · 8</span></div></header>
+        <ul>
+          <li><b>Optimiser</b> : confidentialité, performance, démarrage, jeux ; chaque réglage s'annule.</li>
+          <li><b>Nettoyer</b> : ce qui prend de la place sans servir, dans une liste à cocher.</li>
+          <li><b>Entretien du mois</b>, et une alerte déclarée normale ne revient plus.</li>
+          <li><b>Installer et jouer</b> : logiciels libres, Steam et les jeux.</li>
+        </ul>
+      </article>
+      <article class="domaine" id="donnees">
+        <header><span class="icone"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><ellipse cx="12" cy="6" rx="7" ry="3"/><path d="M5 6v12c0 1.7 3.1 3 7 3s7-1.3 7-3V6M5 12c0 1.7 3.1 3 7 3s7-1.3 7-3"/></svg></span><div><h3>Données</h3><span class="touche">menu 9</span></div></header>
+        <ul>
+          <li><b>Sauvegarde automatique</b> avec l'outil du système, chaque jour.</li>
+          <li><b>Copier mes fichiers</b> vers un disque externe, avant une réparation.</li>
+          <li><b>Vérifier ma clé</b> : démasque les fausses clés USB qui mentent sur leur taille.</li>
+        </ul>
+      </article>
+      <article class="domaine" id="guide">
+        <header><span class="icone"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2z"/><path d="M4 19V5M9 8h6M9 12h6"/></svg></span><div><h3>Guide des commandes</h3><span class="touche">menu 10</span></div></header>
+        <ul>
+          <li><b>{{COMMANDES}} commandes</b> expliquées pour Omarchy, Arch, Fedora, Debian, Ubuntu, Windows 11 et macOS.</li>
+          <li><b>Pas à pas</b> : mettre à jour, faire de la place, réparer, pare-feu, carte graphique.</li>
+          <li>Les commandes qui ne font que lire <b>se lancent directement</b> ; plus de 30 000 exemples de tldr-pages.</li>
+        </ul>
+      </article>
+      <article class="domaine" id="cle">
+        <header><span class="icone"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="7" y="9" width="10" height="12" rx="2"/><path d="M9 9V3h6v6M10.5 5.5h.01M13.5 5.5h.01"/></svg></span><div><h3>La clé de secours</h3><span class="touche">Ventoy</span></div></header>
+        <ul>
+          <li><b>Elle démarre les ordinateurs</b> : Omarchy, Arch, Debian, Fedora, SystemRescue, Windows 11, récupération de macOS.</li>
+          <li><b>Protégée</b> : en lecture seule ailleurs que chez toi, carnet des appareils chiffré.</li>
+          <li><b>Mise à jour signée</b> : depuis la clé ou depuis GitHub, chaque version vérifiée.</li>
+        </ul>
+      </article>
+    </div>
+  </section>
+
+  <section id="nouveautes">
+    <div class="tete-section">
+      <p class="surtitre">Nouveautés de la version {{VERSION_COURTE}}</p>
+      <h2>Ce qui vient d'arriver</h2>
+    </div>
+    <ul class="nouveautes">
+      <li><b>Serveurs de botnets et mémoire DNS</b><span>« Qui parle à Internet ? » reconnaît les serveurs de commande de Feodo Tracker et ThreatFox, même une connexion déjà fermée.</span></li>
+      <li><b>Mise à jour signée depuis GitHub</b><span>Chaque version est signée par l'auteur ; Vanguard refuse tout ce qui ne l'est pas, ou qui serait plus ancien.</span></li>
+      <li><b>Lu directement par le système</b><span>Connexions, processus, registre, journaux, HTTPS : moins de programmes externes, et une vérification Windows passée de 3,5 s à 33 ms.</span></li>
+      <li><b>Après une infection</b><span>Devant un rançongiciel ou une prise de contrôle, couper Internet passe en premier.</span></li>
+      <li><b>Omarchy sur la clé</b><span>L'installateur complet, sans Internet, dans le menu de démarrage, tenu à jour et vérifié.</span></li>
+      <li><b>Moins de fausses alertes</b><span>Un NAS qui répète un vieux mot de passe, un Flatpak mis à jour : reconnus pour ce qu'ils sont.</span></li>
     </ul>
   </section>
 
-  <section id="reseau">
-    <div class="cadre">5 <b>Réseau et Internet</b></div>
-    <h2>Tout ce qui est branché chez toi, et ce qui écoute</h2>
-    <ul class="liste">
-      <li><strong>Scan du réseau</strong><span>Chaque appareil, son fabricant, ses ports ouverts, l'UPnP de la box, les caméras.</span></li>
-      <li><strong>Empoisonneur démasqué</strong><span>Un appareil qui vole les mots de passe Windows du réseau, comme Responder, est repéré pendant le scan.</span></li>
-      <li><strong>Surveillance horaire</strong><span>Un nouvel appareil, un programme qui parle à un botnet : une notification, sans rien couper.</span></li>
-      <li><strong>Connexion pour le jeu</strong><span>Ping, gigue, pertes, débit et bufferbloat, le lag quand quelqu'un d'autre télécharge.</span></li>
-      <li><strong>Wi-Fi, NAT et DNS</strong><span>Les réseaux voisins par canal et le canal le plus libre, le type de NAT, le DNS le plus rapide.</span></li>
-      <li><strong>Listes noires</strong><span>Ton adresse Internet sur une liste pour pourriel ou attaques, signe d'un appareil infecté.</span></li>
-    </ul>
-  </section>
-
-  <section id="protection">
-    <div class="cadre">6 <b>Antivirus et protection</b></div>
-    <h2>Reconnaître les menaces, même celles qui se cachent</h2>
-    <ul class="liste">
-      <li><strong>YARA intégré</strong><span>308 règles qui reconnaissent des familles entières de logiciels malveillants, sans rien installer.</span></li>
-      <li><strong>Qui parle à Internet ?<span class="nouveau">{{VERSION_COURTE}}</span></strong><span>Chaque programme et ses connexions, comparés aux serveurs de botnets connus (Feodo Tracker, ThreatFox) et à la mémoire DNS.</span></li>
-      <li><strong>Ce lien est-il dangereux ?</strong><span>Âge du domaine, faux sites, URLhaus et Spamhaus, sans jamais ouvrir le lien.</span></li>
-      <li><strong>Fuites</strong><span>Tes mots de passe et ton courriel dans les fuites connues ; le mot de passe ne quitte jamais l'ordinateur.</span></li>
-      <li><strong>Quelqu'un contrôle mon ordi ?</strong><span>AnyDesk, TeamViewer, RustDesk installés, au démarrage ou en cours, retirés seulement après accord.</span></li>
-      <li><strong>Caméra et micro</strong><span>Les programmes qui s'en sont servis, et quand.</span></li>
-      <li><strong>Fichiers-pièges</strong><span>Des leurres qu'un rançongiciel toucherait en premier : l'alerte part dès qu'ils changent.</span></li>
-      <li><strong>Secrets oubliés</strong><span>Une clé d'API ou un mot de passe resté dans l'historique de tes projets git.</span></li>
-      <li><strong>Outils reconnus</strong><span>Defender, ClamAV, trivy, fail2ban, CrowdSec, rkhunter : lancés et expliqués s'ils sont là.</span></li>
-    </ul>
-  </section>
-
-  <section id="depanner">
-    <div class="cadre">4 · 11 <b>Cette machine · Dépanner</b></div>
-    <h2>Dépanner comme quelqu'un qui s'y connaît</h2>
-    <ul class="liste">
-      <li><strong>Pas à pas</strong><span>Internet, son, imprimante, écran, lenteur : les pannes de tous les jours, une question à la fois.</span></li>
-      <li><strong>Après une infection<span class="nouveau">{{VERSION_COURTE}}</span></strong><span>Couper Internet d'abord quand ça presse, garder les traces, analyser, puis les mots de passe à changer dans l'ordre.</span></li>
-      <li><strong>Collecter les traces</strong><span>Un dossier daté pour un spécialiste, avec ses empreintes SHA-256 ; les secrets y sont masqués.</span></li>
-      <li><strong>Pourquoi c'est lent ?</strong><span>En deux secondes : ce qui occupe le processeur, la mémoire et le disque.</span></li>
-      <li><strong>Diagnostic et fiche</strong><span>Le matériel, le système, les problèmes récents ; le modèle, la mémoire, la carte graphique.</span></li>
-      <li><strong>Mon compte a été piraté</strong><span>Ce qu'il faut vérifier sur cet ordinateur avant de changer les mots de passe.</span></li>
-    </ul>
-  </section>
-
-  <section id="optimiser">
-    <div class="cadre">7 · 8 <b>Installer, jouer, optimiser</b></div>
-    <h2>Plus rapide et plus discret, et tout s'annule</h2>
-    <ul class="liste">
-      <li><strong>Optimiser</strong><span>Confidentialité, performance, démarrage, gaming ; la valeur d'avant est notée pour revenir en arrière.</span></li>
-      <li><strong>Nettoyer</strong><span>Une liste à cocher de ce qui prend de la place sans servir.</span></li>
-      <li><strong>Installer et jouer</strong><span>Logiciels libres, Steam et les jeux, avec l'outil du système.</span></li>
-      <li><strong>Entretien et apprentissage</strong><span>Un entretien chaque mois ; une alerte que tu déclares normale ne revient plus.</span></li>
-    </ul>
-  </section>
-
-  <section id="donnees">
-    <div class="cadre">9 <b>Données</b></div>
-    <h2>Tes fichiers à l'abri</h2>
-    <ul class="liste">
-      <li><strong>Sauvegarde automatique</strong><span>Mise en place avec l'outil du système, chaque jour.</span></li>
-      <li><strong>Copier mes fichiers</strong><span>Documents, Images, Bureau vers un disque externe, avant une réparation.</span></li>
-      <li><strong>Vérifier ma clé</strong><span>Démasque les fausses clés USB, qui annoncent plus de place qu'elles n'en ont.</span></li>
-    </ul>
-  </section>
-
-  <section id="guide">
-    <div class="cadre">10 <b>Guide des commandes</b></div>
-    <h2>{{COMMANDES}} commandes expliquées, pour sept systèmes</h2>
-    <p class="intro">Omarchy, Arch, Fedora, Debian et Ubuntu, Windows 11, macOS et les commandes communes à tous, avec des marches à suivre « Pas à pas ». Celles qui ne font que lire se lancent directement dans Vanguard. En plus, plus de 30 000 exemples de tldr-pages.</p>
-  </section>
-
-  <section id="cle">
-    <div class="cadre"><b>La clé USB de secours</b></div>
-    <h2>Une clé qui répare, et qui démarre les ordinateurs</h2>
-    <ul class="liste">
-      <li><strong>Elle démarre tout<span class="nouveau">{{VERSION_COURTE}}</span></strong><span>Omarchy, Arch, Debian, Fedora, SystemRescue, Windows 11 et la récupération de macOS, tenus à jour et vérifiés par leur signature.</span></li>
-      <li><strong>Protégée</strong><span>En lecture seule hors de chez toi ; le carnet des appareils est chiffré.</span></li>
-      <li><strong>Mes ordinateurs</strong><span>Chaque ordinateur vérifié avec la clé, sa note et ce qu'il lui reste à régler.</span></li>
-      <li><strong>Rapport à laisser</strong><span>Une page simple pour la personne qu'on vient de dépanner.</span></li>
-      <li><strong>Mise à jour signée<span class="nouveau">{{VERSION_COURTE}}</span></strong><span>Depuis la clé, ou depuis GitHub : chaque version est signée par l'auteur, et Vanguard refuse tout ce qui ne l'est pas.</span></li>
-    </ul>
-  </section>
-
-  <section id="promesses">
-    <div class="cadre"><b>Ce que Vanguard promet</b></div>
-    <div class="promesses">
-      <div class="promesse"><strong>Rien sans ton accord</strong><span>Chaque changement est montré avant d'être fait.</span></div>
-      <div class="promesse"><strong>Rien n'est compté sain par défaut</strong><span>Ce qui n'a pas pu être vérifié est dit.</span></div>
-      <div class="promesse"><strong>Jamais affaiblir la sécurité</strong><span>Pas de pare-feu coupé, pas de Defender ou d'UAC désactivés.</span></div>
-      <div class="promesse"><strong>Rien d'envoyé en cachette</strong><span>Le journal des erreurs est anonymisé, et rien ne part sans le dire.</span></div>
+  <section id="principes">
+    <div class="tete-section">
+      <p class="surtitre">Principes</p>
+      <h2>Ce que Vanguard promet</h2>
+    </div>
+    <div class="principes">
+      <div class="principe"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7"/></svg><div><b>Rien sans ton accord</b><span>Chaque changement est montré avant d'être fait.</span></div></div>
+      <div class="principe"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7"/></svg><div><b>Jamais « sain » par défaut</b><span>Ce qui n'a pas pu être vérifié est dit clairement.</span></div></div>
+      <div class="principe"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7"/></svg><div><b>Jamais affaiblir la sécurité</b><span>Pas de pare-feu coupé, ni de Defender ou d'UAC désactivés.</span></div></div>
+      <div class="principe"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7"/></svg><div><b>Rien d'envoyé en cachette</b><span>Le journal des erreurs est anonymisé ; rien ne part sans le dire.</span></div></div>
     </div>
   </section>
 
   <section id="chiffres">
-    <div class="cadre"><b>Comment c'est construit</b></div>
+    <div class="tete-section">
+      <p class="surtitre">Comment c'est construit</p>
+      <h2>Écrit en Rust, testé à chaque version</h2>
+    </div>
     <div class="chiffres">
       <div class="chiffre"><b>≈ {{LIGNES}}</b><span>lignes de code Rust</span></div>
       <div class="chiffre"><b>{{TESTS_LINUX}}</b><span>tests sous Linux</span></div>
       <div class="chiffre"><b>{{TESTS_WINE}}</b><span>tests sous Windows (Wine)</span></div>
-      <div class="chiffre"><b>{{VM}}</b><span>vérifications sur un vrai Windows, à chaque version</span></div>
+      <div class="chiffre"><b>{{VM}}</b><span>vérifications sur un vrai Windows</span></div>
     </div>
-    <p class="intro">Écrit en Rust, de plus en plus en lisant le système directement plutôt qu'en lançant d'autres programmes, et relu par des relectures de sécurité indépendantes.</p>
+    <p class="note">Chaque version passe par des relectures de sécurité indépendantes et par un vrai Windows qui se teste tout seul.</p>
   </section>
+</main>
 
-  <footer>Vanguard {{VERSION}} · {{DATE}} · GPL-3.0-or-later</footer>
-</div>
+<footer>
+  <div class="cadre"><span>Vanguard {{VERSION}} · {{DATE}}</span><span>Logiciel libre · GPL-3.0-or-later</span></div>
+</footer>

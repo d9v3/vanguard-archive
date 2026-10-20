@@ -92,10 +92,11 @@ def main():
     a.add_argument("--programme", type=Path,
                    default=RACINE / "target/x86_64-unknown-linux-musl/release/vanguard")
     a.add_argument("--sortie", type=Path, default=Path.home() / ".cache/vanguard-dev/page-fonctions.html")
+    a.add_argument("--version", help="la version à montrer, avant que Cargo.toml la porte (un aperçu)")
     args = a.parse_args()
     if not args.programme.is_file():
         sys.exit(f"✖ programme introuvable : {args.programme} (--programme)")
-    v = version()
+    v = args.version or version()
     courte = ".".join(v.split(".")[:2])
     jour = datetime.date.today()
     valeurs = {
