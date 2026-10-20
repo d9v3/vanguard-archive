@@ -233,15 +233,15 @@ fn complements_scan_markdown(m: &mut String, r: &Rapport) {
                     "Not checked: the router's forwardings could not be read."
                 );
             }
-            upnp::Etat::Actif(liste) if liste.is_empty() => {
+            upnp::Etat::Actif(l) if l.lues && l.redirections.is_empty() => {
                 let _ = trwln!(
                     m,
                     "UPnP actif sur la box, aucun port ouvert pour l'instant. À couper dans la box si aucun appareil n'en a besoin.",
                     "UPnP on at the router, no port open for now. Turn it off in the router if no device needs it."
                 );
             }
-            upnp::Etat::Actif(liste) => {
-                for d in liste {
+            upnp::Etat::Actif(l) => {
+                for d in &l.redirections {
                     let _ = writeln!(
                         m,
                         "- {}/{} → {}:{} [{}] {}",
@@ -536,13 +536,13 @@ fn complements_scan_html(h: &mut String, r: &Rapport) {
                     )
                 );
             }
-            upnp::Etat::Actif(liste) if liste.is_empty() => h.push_str(tr!(
+            upnp::Etat::Actif(l) if l.lues && l.redirections.is_empty() => h.push_str(tr!(
                 "<div class=meta>UPnP actif sur la box, aucun port ouvert pour l'instant. À couper dans la box si aucun appareil n'en a besoin.</div>",
                 "<div class=meta>UPnP on at the router, no port open for now. Turn it off in the router if no device needs it.</div>"
             )),
-            upnp::Etat::Actif(liste) => {
+            upnp::Etat::Actif(l) => {
                 h.push_str("<table>");
-                for d in liste {
+                for d in &l.redirections {
                     let _ = write!(
                         h,
                         "<tr><td>{}/{}</td><td>→ {}:{}</td><td>{}</td><td>{}</td></tr>",
@@ -978,13 +978,30 @@ mod tests {
             score_global: 90,
             note: "A",
             hotes: vec![],
-            upnp: Some(upnp::Etat::Actif(vec![upnp::Redirection {
-                protocole: "TCP".into(),
-                port_public: 8080,
-                appareil: "10.0.0.30".into(),
-                port_appareil: 80,
-                description: "<img src=x onerror=alert(5)>".into(),
-            }])),
+            upnp: Some(upnp::Etat::Actif(Box::new(crate::audit::igd::Lecture {
+                description: crate::audit::igd::Description {
+                    adresse: None,
+                    nom: None,
+                    fabricant: None,
+                    modele: None,
+                    version: None,
+                    serveur: None,
+                },
+                adresse_externe: None,
+                connexion: None,
+                redirections: vec![upnp::Redirection {
+                    protocole: "TCP".into(),
+                    port_public: 8080,
+                    appareil: "10.0.0.30".into(),
+                    port_appareil: 80,
+                    description: "<img src=x onerror=alert(5)>".into(),
+                    bail: 0,
+                    hote_distant: String::new(),
+                    active: true,
+                }],
+                lues: true,
+                tronquees: false,
+            }))),
             empoisonnement: Some(empoisonnement::Rapport::Teste(vec![empoisonnement::Empoisonneur {
                 ip: "10.0.0.66".parse().unwrap(),
                 protocoles: vec!["LLMNR", "NetBIOS"],

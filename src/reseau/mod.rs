@@ -477,6 +477,18 @@ pub(crate) fn carnet_du_reseau() -> Option<(Option<String>, Vec<objets::Appareil
     Some((reseau.nom.clone(), appareils))
 }
 
+/// Résumé de chaque carnet de réseau reconnu à la MAC de sa box, pour l'audit (`audit::arp`) : cette MAC (la clé du
+/// carnet), le nom du Wi-Fi et l'adresse de la box. Les carnets reconnus à leur plage d'adresses, sans MAC, n'y sont
+/// pas. Lecture seule.
+pub(crate) fn resumes_des_carnets() -> Vec<(String, Option<String>, Option<Ipv4Addr>)> {
+    let (base, _, _verrou) = Base::charger();
+    base.reseaux
+        .iter()
+        .filter(|(id, _)| id.contains(':'))
+        .map(|(id, r)| (id.clone(), r.nom.clone(), r.appareils.get(id).map(|a| a.ip)))
+        .collect()
+}
+
 /// Écrit d'abord un fichier temporaire, le force sur le disque, puis le renomme à la place de l'ancien :
 /// une coupure, un Ctrl-C ou une clé arrachée laissent soit l'ancienne base, soit la nouvelle, jamais une
 /// base tronquée.

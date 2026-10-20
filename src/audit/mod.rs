@@ -18,13 +18,20 @@ use std::time::{Duration, Instant};
 use serde::Serialize;
 
 use crate::machine::Constat;
-use crate::reseau::{self, Rapport, cameras, objets, upnp};
+use crate::reseau::{self, Hote, Rapport, cameras, objets, upnp};
 use crate::risk::{Niveau, note};
 use crate::ui::*;
 
 pub mod appareils;
+pub mod arp;
+// Des variantes et des aides ne servent que sous Windows ou macOS, ou dans les tests du lot.
+#[allow(dead_code)]
 pub mod bail;
+// Des variantes et des aides ne servent que sous Windows ou macOS, ou dans les tests du lot.
+#[allow(dead_code)]
 pub mod dns_client;
+// Des variantes et des aides ne servent que sous Windows ou macOS, ou dans les tests du lot.
+#[allow(dead_code)]
 pub mod dns_tls;
 pub mod exposition;
 pub mod fiches;
@@ -216,6 +223,7 @@ pub(crate) fn avec_regle(mut c: Constat, regle: &'static str) -> Constat {
 }
 
 /// Ce que répond un domaine dont les règles ne sont pas encore écrites : non vérifié, jamais un faux sain.
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn pas_encore_ecrit(d: Domaine) -> Constat {
     non_verifie(
         d.categorie(),
@@ -263,7 +271,9 @@ pub(crate) fn appareil(h: &reseau::Hote) -> objets::Appareil {
 /// réglées à la main dans la box ne se lisent pas d'ici), `None` quand rien n'a pu être lu.
 pub fn redirections_du_scan(scan: &Rapport) -> Option<Vec<upnp::Redirection>> {
     match &scan.upnp {
-        Some(upnp::Etat::Actif(liste)) => Some(liste.clone()),
+        // Une box qui a répondu à la recherche mais refusé les actions : ses redirections restent non lues.
+        Some(upnp::Etat::Actif(l)) if !l.lues => None,
+        Some(upnp::Etat::Actif(l)) => Some(l.redirections.clone()),
         Some(upnp::Etat::Absent) => Some(Vec::new()),
         Some(upnp::Etat::OutilAbsent) | None => None,
     }
@@ -431,8 +441,19 @@ fn constats_du_domaine(d: Domaine, c: &Contexte) -> Vec<Constat> {
             e.pare_feu_local = pare_feu_local(c.machine);
             exposition::constats(&e)
         }
-        Domaine::WiFi => wifi::constats(&wifi::Entree { contexte: c }),
-        Domaine::Segmentation => segmentation::constats(&segmentation::Entree { contexte: c }),
+        Domaine::WiFi => {
+            // Les appareils nouveaux du scan et la MAC de la box : WIF-005 (appareils inconnus) et le fabricant de la
+            // box (WPS) en ont besoin ; la lecture des bornes, elle, vient du système.
+            let nouveaux = c.scan.hotes.iter().filter(|h| h.nouvelle).map(Hote::titre).collect();
+            let mac_box = c
+                .scan
+                .hotes
+                .iter()
+                .find(|h| h.role == Some("passerelle"))
+                .and_then(|h| h.mac.clone());
+            wifi::constats(&wifi::entree().avec_scan(nouveaux, mac_box))
+        }
+        Domaine::Segmentation => segmentation::constats(&segmentation::entree(c)),
         Domaine::DnsTls => dns_tls::constats(&dns_tls::entree(c.passerelle)),
         Domaine::Appareils => appareils::constats(&appareils::Entree {
             hotes: &c.scan.hotes,

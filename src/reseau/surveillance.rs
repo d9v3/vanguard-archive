@@ -847,6 +847,9 @@ mod tests {
             appareil: appareil.into(),
             port_appareil: port,
             description: "Camera".into(),
+            bail: 0,
+            hote_distant: String::new(),
+            active: true,
         };
         let constat = |regle: &'static str, niveau: Niveau, message: &str| {
             let mut c = crate::machine::alerte("Wi-Fi", niveau, message);

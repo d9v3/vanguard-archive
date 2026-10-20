@@ -430,6 +430,9 @@ pub(crate) mod tests {
             appareil: appareil.into(),
             port_appareil: port,
             description: String::new(),
+            bail: 0,
+            hote_distant: String::new(),
+            active: true,
         }
     }
 

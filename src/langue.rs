@@ -152,6 +152,7 @@ pub fn categorie(nom: &str) -> &str {
 fn categorie_en(nom: &str) -> Option<&'static str> {
     Some(match nom {
         "Pare-feu" => "Firewall",
+        "Réseau local" => "Local network",
         "Accès à distance" => "Remote access",
         "Bureau à distance" => "Remote Desktop",
         "Carte graphique" => "Graphics card",
