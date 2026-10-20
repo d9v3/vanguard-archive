@@ -98,6 +98,31 @@ fn decrire_dns(v: Option<&str>) -> String {
     super::texte_dns(&serveurs, false)
 }
 
+/// La ligne « CARTE|guid|IPv6 » de la carte qui porte la route vers Internet, sans PowerShell : GetBestInterface (une
+/// recherche dans la table de routage, rien n'est envoyé) puis GetAdaptersAddresses. Vide sans route par défaut ;
+/// `None` si Windows refuse la liste des cartes (PowerShell la refait).
+fn carte_principale() -> Option<String> {
+    #[link(name = "iphlpapi")]
+    unsafe extern "system" {
+        fn GetBestInterface(destination: u32, index: *mut u32) -> u32;
+    }
+    let cartes = crate::machine::windows::cartes::cartes()?;
+    let mut index = 0u32;
+    // Une adresse publique quelconque (ordre réseau) : sa route est celle par défaut.
+    let destination = u32::from_ne_bytes([1, 1, 1, 1]);
+    // SAFETY : `index` vit pendant l'appel ; Windows n'y écrit qu'un u32.
+    if unsafe { GetBestInterface(destination, &raw mut index) } != 0 {
+        return Some(String::new());
+    }
+    Some(
+        cartes
+            .iter()
+            .find(|c| c.index == index)
+            .map(|c| format!("CARTE|{}|{}", c.guid, if c.ipv6 { "True" } else { "False" }))
+            .unwrap_or_default(),
+    )
+}
+
 /// Le DNS de la carte de la route par défaut, à régler sur ces serveurs ; ceux en IPv6 seulement si la carte s'en
 /// sert. Erreur : pourquoi il faut le faire à la main.
 pub fn dns_principal(v4: &[&str], v6: &[&str]) -> Result<Changement, String> {
@@ -105,13 +130,16 @@ pub fn dns_principal(v4: &[&str], v6: &[&str]) -> Result<Changement, String> {
         "La carte réseau principale est illisible : le DNS se règle à la main (Paramètres > Réseau, ou dans la box).",
         "The main network adapter is unreadable: set the DNS by hand (Settings > Network, or in the router)."
     );
-    let sortie = crate::machine::windows::ps(
-        "$r = Get-NetRoute -DestinationPrefix '0.0.0.0/0' -ErrorAction SilentlyContinue | Sort-Object RouteMetric | \
-         Select-Object -First 1; if ($r) { $a = Get-NetAdapter -InterfaceIndex $r.ifIndex -ErrorAction SilentlyContinue; \
-         $v6 = (Get-NetAdapterBinding -Name $a.Name -ComponentID ms_tcpip6 -ErrorAction SilentlyContinue).Enabled; \
-         \"CARTE|$($a.InterfaceGuid)|$v6\" }",
-    )
-    .ok_or_else(|| a_la_main.to_string())?;
+    let sortie = match carte_principale() {
+        Some(ligne) => ligne,
+        None => crate::machine::windows::ps(
+            "$r = Get-NetRoute -DestinationPrefix '0.0.0.0/0' -ErrorAction SilentlyContinue | Sort-Object RouteMetric | \
+             Select-Object -First 1; if ($r) { $a = Get-NetAdapter -InterfaceIndex $r.ifIndex -ErrorAction SilentlyContinue; \
+             $v6 = (Get-NetAdapterBinding -Name $a.Name -ComponentID ms_tcpip6 -ErrorAction SilentlyContinue).Enabled; \
+             \"CARTE|$($a.InterfaceGuid)|$v6\" }",
+        )
+        .ok_or_else(|| a_la_main.to_string())?,
+    };
     let (carte, ipv6) = sortie
         .lines()
         .find_map(|l| {
@@ -1316,6 +1344,17 @@ fn protection() -> Vec<Reglage> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Les vraies fonctions de Windows (Wine ici, la VM ensuite), sans PowerShell : la ligne de la carte principale
+    /// est vide (pas de route) ou de la forme lue par `dns_principal`.
+    #[test]
+    fn carte_principale_sans_powershell() {
+        let ligne = carte_principale().expect("cartes réseau");
+        assert!(
+            ligne.is_empty() || ligne.starts_with("CARTE|{") && ligne.split('|').count() == 3,
+            "{ligne}"
+        );
+    }
 
     #[test]
     fn ecrire_puis_remettre_dans_le_compte() {
