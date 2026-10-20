@@ -142,7 +142,8 @@ pub(crate) fn comptes_locaux() -> Option<String> {
     {
         return sortie.clone();
     }
-    let sortie = ps(SCRIPT_COMPTES);
+    // Par les fonctions de Windows d'abord (plus d'une demi-seconde de moins) ; le script en secours.
+    let sortie = comptes::lecture_native().or_else(|| ps(SCRIPT_COMPTES));
     *garde = Some((std::time::Instant::now(), sortie.clone()));
     sortie
 }

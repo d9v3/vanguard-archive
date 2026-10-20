@@ -150,6 +150,316 @@ struct Modales3 {
 unsafe extern "system" {
     fn NetUserModalsGet(serveur: *const u16, niveau: u32, tampon: *mut *mut u8) -> u32;
     fn NetApiBufferFree(tampon: *mut std::ffi::c_void) -> u32;
+    fn NetUserEnum(
+        serveur: *const u16,
+        niveau: u32,
+        filtre: u32,
+        tampon: *mut *mut std::ffi::c_void,
+        taille_max: u32,
+        lus: *mut u32,
+        total: *mut u32,
+        reprise: *mut u32,
+    ) -> u32;
+    fn NetUserGetInfo(serveur: *const u16, nom: *const u16, niveau: u32, tampon: *mut *mut std::ffi::c_void) -> u32;
+    fn NetLocalGroupGetMembers(
+        serveur: *const u16,
+        groupe: *const u16,
+        niveau: u32,
+        tampon: *mut *mut std::ffi::c_void,
+        taille_max: u32,
+        lus: *mut u32,
+        total: *mut u32,
+        reprise: *mut usize,
+    ) -> u32;
+}
+
+#[link(name = "advapi32")]
+unsafe extern "system" {
+    fn ConvertSidToStringSidW(sid: *mut std::ffi::c_void, texte: *mut *mut u16) -> i32;
+    fn ConvertStringSidToSidW(texte: *const u16, sid: *mut *mut std::ffi::c_void) -> i32;
+    fn LookupAccountSidW(
+        systeme: *const u16,
+        sid: *mut std::ffi::c_void,
+        nom: *mut u16,
+        taille_nom: *mut u32,
+        domaine: *mut u16,
+        taille_domaine: *mut u32,
+        genre: *mut u32,
+    ) -> i32;
+}
+
+#[link(name = "kernel32")]
+unsafe extern "system" {
+    fn LocalFree(memoire: *mut std::ffi::c_void) -> *mut std::ffi::c_void;
+}
+
+/// USER_INFO_4 de lmaccess.h, champ par champ : seuls le nom, les drapeaux, la dernière connexion et le SID servent.
+#[repr(C)]
+struct Utilisateur4 {
+    nom: *const u16,
+    _mot_de_passe: *const u16,
+    _age_mot_de_passe: u32,
+    _privilege: u32,
+    _dossier: *const u16,
+    _commentaire: *const u16,
+    drapeaux: u32,
+    _script: *const u16,
+    _droits: u32,
+    _nom_complet: *const u16,
+    _commentaire_utilisateur: *const u16,
+    _parametres: *const u16,
+    _postes: *const u16,
+    derniere_connexion: u32,
+    _derniere_deconnexion: u32,
+    _expiration: u32,
+    _stockage: u32,
+    _unites: u32,
+    _heures: *const u8,
+    _essais_rates: u32,
+    _connexions: u32,
+    _serveur: *const u16,
+    _pays: u32,
+    _page_de_code: u32,
+    sid: *mut std::ffi::c_void,
+    _groupe: u32,
+    _profil: *const u16,
+    _lecteur: *const u16,
+    _mot_de_passe_expire: u32,
+}
+
+/// Une chaîne UTF-16 terminée par un zéro, lue au plus sur `max` caractères (borne vérifiée avant chaque lecture).
+///
+/// # Safety
+/// `p` est nul ou pointe vers une chaîne terminée par un zéro, ou longue d'au moins `max` caractères.
+unsafe fn texte_large(p: *const u16, max: usize) -> String {
+    if p.is_null() {
+        return String::new();
+    }
+    let mut fin = 0;
+    // SAFETY : voir la fonction ; la borne est testée avant la lecture.
+    while fin < max && unsafe { *p.add(fin) } != 0 {
+        fin += 1;
+    }
+    // SAFETY : les `fin` premiers caractères viennent d'être lus.
+    String::from_utf16_lossy(unsafe { std::slice::from_raw_parts(p, fin) })
+}
+
+fn large(texte: &str) -> Vec<u16> {
+    texte.encode_utf16().chain([0]).collect()
+}
+
+/// Un SID en texte (« S-1-5-21-… »), alloué puis rendu par Windows.
+///
+/// # Safety
+/// `sid` est nul ou pointe vers un SID valide.
+unsafe fn sid_texte(sid: *mut std::ffi::c_void) -> Option<String> {
+    let mut texte: *mut u16 = std::ptr::null_mut();
+    // SAFETY : ConvertSidToStringSidW alloue une chaîne terminée par un zéro, lue puis rendue une seule fois.
+    unsafe {
+        if sid.is_null() || ConvertSidToStringSidW(sid, &raw mut texte) == 0 || texte.is_null() {
+            return None;
+        }
+        let t = texte_large(texte, 256);
+        LocalFree(texte.cast());
+        Some(t)
+    }
+}
+
+/// Un compte local, tel que la lecture des comptes le décrit.
+struct Compte {
+    nom: String,
+    actif: bool,
+    mot_de_passe_exige: bool,
+    sid: String,
+    /// Secondes depuis 1970 ; 0 : jamais connecté.
+    derniere_connexion: u32,
+}
+
+/// Les comptes locaux ordinaires (NetUserEnum, puis NetUserGetInfo niveau 4 pour le SID) ; `None` si Windows refuse.
+fn comptes_natifs() -> Option<Vec<Compte>> {
+    const NORMAUX: u32 = 2;
+    const TOUT: u32 = u32::MAX;
+    const DESACTIVE: u32 = 0x2;
+    const SANS_MOT_DE_PASSE: u32 = 0x20;
+    let mut tampon: *mut std::ffi::c_void = std::ptr::null_mut();
+    let (mut lus, mut total, mut reprise) = (0u32, 0u32, 0u32);
+    // SAFETY : niveau 0 : un tableau de `lus` pointeurs vers des noms (USER_INFO_0), alloué par Windows, lu tant
+    // qu'il vit puis rendu une seule fois. Code non nul (sauf « il en reste », 234, qu'on n'accepte pas ici) : rien.
+    let noms: Vec<String> = unsafe {
+        let code = NetUserEnum(
+            std::ptr::null(),
+            0,
+            NORMAUX,
+            &raw mut tampon,
+            TOUT,
+            &raw mut lus,
+            &raw mut total,
+            &raw mut reprise,
+        );
+        if code != 0 || tampon.is_null() {
+            if !tampon.is_null() {
+                NetApiBufferFree(tampon.cast());
+            }
+            return None;
+        }
+        let noms = (0..lus as usize)
+            .map(|i| texte_large(tampon.cast::<*const u16>().add(i).read_unaligned(), 256))
+            .collect();
+        NetApiBufferFree(tampon.cast());
+        noms
+    };
+    let mut comptes = Vec::new();
+    for nom in noms {
+        let mut info: *mut std::ffi::c_void = std::ptr::null_mut();
+        let nom_large = large(&nom);
+        // SAFETY : NetUserGetInfo niveau 4 écrit un USER_INFO_4 alloué par Windows (que `Utilisateur4` reproduit) ;
+        // son SID est dans le même bloc, converti avant de le rendre une seule fois.
+        let compte = unsafe {
+            if NetUserGetInfo(std::ptr::null(), nom_large.as_ptr(), 4, &raw mut info) != 0 || info.is_null() {
+                continue;
+            }
+            let u = &*info.cast::<Utilisateur4>();
+            let compte = sid_texte(u.sid).map(|sid| Compte {
+                nom: texte_large(u.nom, 256),
+                actif: u.drapeaux & DESACTIVE == 0,
+                mot_de_passe_exige: u.drapeaux & SANS_MOT_DE_PASSE == 0,
+                sid,
+                derniere_connexion: u.derniere_connexion,
+            });
+            NetApiBufferFree(info.cast());
+            compte
+        };
+        comptes.extend(compte);
+    }
+    Some(comptes)
+}
+
+/// Les membres du groupe des administrateurs, « ORDINATEUR\nom » comme Get-LocalGroupMember : le groupe est trouvé
+/// par son SID (S-1-5-32-544), son nom changeant avec la langue de Windows.
+fn administrateurs_natifs() -> Option<Vec<String>> {
+    let mut sid: *mut std::ffi::c_void = std::ptr::null_mut();
+    let (mut nom, mut domaine) = (vec![0u16; 256], vec![0u16; 256]);
+    let (mut taille_nom, mut taille_domaine, mut genre) = (256u32, 256u32, 0u32);
+    // SAFETY : ConvertStringSidToSidW alloue le SID (rendu par LocalFree) ; LookupAccountSidW écrit au plus les tailles
+    // données dans les deux tampons, qui les ont.
+    let groupe = unsafe {
+        if ConvertStringSidToSidW(large("S-1-5-32-544").as_ptr(), &raw mut sid) == 0 || sid.is_null() {
+            return None;
+        }
+        let trouve = LookupAccountSidW(
+            std::ptr::null(),
+            sid,
+            nom.as_mut_ptr(),
+            &raw mut taille_nom,
+            domaine.as_mut_ptr(),
+            &raw mut taille_domaine,
+            &raw mut genre,
+        ) != 0;
+        LocalFree(sid);
+        if !trouve {
+            return None;
+        }
+        texte_large(nom.as_ptr(), 256)
+    };
+    let mut tampon: *mut std::ffi::c_void = std::ptr::null_mut();
+    let (mut lus, mut total, mut reprise) = (0u32, 0u32, 0usize);
+    // SAFETY : niveau 3 : un tableau de `lus` pointeurs vers « domaine\nom » (LOCALGROUP_MEMBERS_INFO_3), alloué par
+    // Windows, lu tant qu'il vit puis rendu une seule fois.
+    unsafe {
+        let code = NetLocalGroupGetMembers(
+            std::ptr::null(),
+            large(&groupe).as_ptr(),
+            3,
+            &raw mut tampon,
+            u32::MAX,
+            &raw mut lus,
+            &raw mut total,
+            &raw mut reprise,
+        );
+        if code != 0 || tampon.is_null() {
+            if !tampon.is_null() {
+                NetApiBufferFree(tampon.cast());
+            }
+            return None;
+        }
+        let membres = (0..lus as usize)
+            .map(|i| texte_large(tampon.cast::<*const u16>().add(i).read_unaligned(), 512))
+            .collect();
+        NetApiBufferFree(tampon.cast());
+        Some(membres)
+    }
+}
+
+/// La date locale (« 2026-10-20 ») d'une dernière connexion en secondes depuis 1970 ; vide pour « jamais ».
+fn date_locale(secondes: u32) -> String {
+    use chrono::TimeZone;
+    if secondes == 0 {
+        return String::new();
+    }
+    chrono::Local
+        .timestamp_opt(i64::from(secondes), 0)
+        .single()
+        .map(|d| d.format("%Y-%m-%d").to_string())
+        .unwrap_or_default()
+}
+
+/// Les sections de la lecture des comptes (USR, MOI, LBP, CPT, ADM), écrites comme le script PowerShell d'avant les
+/// écrivait, pour que chaque vérification les lise sans changer son verdict.
+fn sections_comptes(
+    comptes: &[Compte],
+    moi: Option<&str>,
+    lbp: Option<u32>,
+    administrateurs: Option<&[String]>,
+) -> String {
+    let vrai = |b: bool| if b { "True" } else { "False" };
+    let mut t = String::new();
+    for c in comptes {
+        let _ = writeln!(
+            t,
+            "USR|{}|{}|{}|{}",
+            vrai(c.actif),
+            vrai(c.mot_de_passe_exige),
+            c.sid,
+            c.nom
+        );
+    }
+    t.push_str("USR_FIN\n");
+    if let Some(moi) = moi {
+        let _ = writeln!(t, "MOI|{moi}\nMOI_FIN");
+    }
+    if let Some(lbp) = lbp {
+        let _ = writeln!(t, "LBP|{lbp}\nLBP_FIN");
+    }
+    // Les comptes oubliés : actifs, pas celui-ci, ni les comptes intégrés (500 Administrateur, 501 invité,
+    // 503 DefaultAccount, 504 WDAGUtilityAccount).
+    let integre = |sid: &str| ["-500", "-501", "-503", "-504"].iter().any(|f| sid.ends_with(f));
+    for c in comptes
+        .iter()
+        .filter(|c| c.actif && Some(c.sid.as_str()) != moi && !integre(&c.sid))
+    {
+        let _ = writeln!(t, "CPT|{}|{}", date_locale(c.derniere_connexion), c.nom);
+    }
+    t.push_str("CPT_FIN\n");
+    if let Some(admins) = administrateurs {
+        for a in admins {
+            let _ = writeln!(t, "ADM|{a}");
+        }
+        t.push_str("ADM_FIN\n");
+    }
+    t
+}
+
+/// La lecture des comptes par les fonctions de Windows, sans PowerShell ; `None` si la liste des comptes est refusée
+/// (l'appelant reprend alors le script PowerShell).
+pub(super) fn lecture_native() -> Option<String> {
+    let comptes = comptes_natifs()?;
+    let lbp = winreg::RegKey::predef(winreg::enums::HKEY_LOCAL_MACHINE)
+        .open_subkey(r"SYSTEM\CurrentControlSet\Control\Lsa")
+        .and_then(|k| k.get_value::<u32, _>("LimitBlankPasswordUse"))
+        .ok();
+    let moi = super::processus::sid();
+    let admins = administrateurs_natifs();
+    Some(sections_comptes(&comptes, moi.as_deref(), lbp, admins.as_deref()))
 }
 
 /// Un niveau de NetUserModalsGet sur cet ordinateur ; `None` si Windows refuse.
@@ -238,6 +548,47 @@ fn juger_politique(longueur: u32, seuil: u32) -> Option<Constat> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Les sections écrites comme le script PowerShell : un compte actif, l'invité désactivé, celui de la personne,
+    /// et un compte jamais connecté ; puis relues par les vérifications des comptes.
+    #[test]
+    fn sections_des_comptes_comme_powershell() {
+        let compte = |nom: &str, actif, exige, rid: u32, connexion| Compte {
+            nom: nom.into(),
+            actif,
+            mot_de_passe_exige: exige,
+            sid: format!("S-1-5-21-1-1-1-{rid}"),
+            derniere_connexion: connexion,
+        };
+        let comptes = [
+            compte("alice", true, true, 1001, 1_792_000_000),
+            compte("Invité", false, false, 501, 0),
+            compte("bob", true, false, 1002, 0),
+        ];
+        let admins = vec![r"SALON-PC\alice".to_string()];
+        let t = sections_comptes(&comptes, Some("S-1-5-21-1-1-1-1001"), Some(1), Some(&admins));
+        assert!(t.starts_with("USR|True|True|S-1-5-21-1-1-1-1001|alice\nUSR|False|False|S-1-5-21-1-1-1-501|Invité\n"));
+        assert!(t.contains("MOI|S-1-5-21-1-1-1-1001\nMOI_FIN\nLBP|1\nLBP_FIN\n"));
+        // Seul bob est un compte oublié possible : alice est la personne, l'invité est désactivé.
+        assert!(t.contains("CPT||bob\nCPT_FIN\n"));
+        assert!(t.ends_with("ADM|SALON-PC\\alice\nADM_FIN\n"));
+        let usr = section(Some(t.as_str()), "USR").unwrap();
+        assert_eq!(usr.len(), 3);
+        // Le compte sans mot de passe exigé est vu par le jugement d'avant.
+        assert!(!juger_comptes(&usr, Some("S-1-5-21-1-1-1-1001"), Some(1)).is_empty());
+    }
+
+    /// Sous Wine, les vraies fonctions de Windows répondent ou refusent sans planter ; ce qu'elles rendent se relit.
+    #[test]
+    fn lecture_native_sous_wine() {
+        if let Some(t) = lecture_native() {
+            assert!(t.contains("USR_FIN\n") && t.contains("CPT_FIN\n"));
+            assert!(section(Some(t.as_str()), "USR").is_some());
+        }
+        let texte = [u16::from(b'a'), u16::from(b'b'), u16::from(b'c')];
+        // SAFETY : trois caractères sans zéro final, lus au plus sur trois.
+        assert_eq!(unsafe { texte_large(texte.as_ptr(), 3) }, "abc");
+    }
 
     #[test]
     fn regle_des_mots_de_passe() {
