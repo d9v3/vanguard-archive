@@ -32,6 +32,9 @@ Réponses à l'utilisateur en français, claires, avec le pourquoi.
   comme 0.x.y ; elle reprend les versions intermédiaires d'avant, qui n'ont pas la leur. Pour chaque page, il refait
   aussi les captures du README (`outils/captures.py`, sur une copie des données, ce qui identifierait la maison
   masqué) et les commite à part.
+- master est protégé sur GitHub (Settings › Rules) : jamais réécrit ni supprimé, même par le propriétaire (une
+  réécriture d'historique demande de couper d'abord la règle « master : jamais réécrite ni supprimée », avec son
+  accord) ; seul son compte y envoie directement (`deployer.sh`), le reste passe par une demande de fusion approuvée.
 - Liens : `outils/liens.py` les vérifie tous (`--hors-ligne` : les internes seulement), tout seul avant chaque envoi
   et chaque version. Un lien qu'on ne peut pas ouvrir tel quel (API, espace de noms, site qui refuse les programmes)
   se décrit dans `outils/liens.txt`.

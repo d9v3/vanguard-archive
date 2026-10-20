@@ -145,7 +145,9 @@ elif git remote get-url origin >/dev/null 2>&1; then
     echo "Rien n'est envoyé sur GitHub : un détail personnel paraît dans les commits (voir ci-dessus)."
   elif ! python3 outils/liens.py; then
     echo "Rien n'est envoyé sur GitHub : un lien est mort (voir ci-dessus)."
-  elif timeout 30 git push -q origin HEAD 2>/dev/null; then
+  # La sortie est gardée : un refus de GitHub (règles de master, historique qui a divergé) n'est pas une panne
+  # d'Internet, et le redire au prochain déploiement n'y changerait rien.
+  elif ENVOI=$(timeout 30 git push -q origin HEAD 2>&1); then
     echo "Code envoyé sur GitHub."
     # La page du dépôt suit le dépôt : description et version, lien, sujets (outils/github.py, .github/depot.json).
     python3 outils/github.py || echo "Page du dépôt sur GitHub pas mise à jour (voir ci-dessus)."
@@ -155,6 +157,9 @@ elif git remote get-url origin >/dev/null 2>&1; then
     elif [[ -z $MODE ]] && ! timeout 30 gh release view "v$VERSION" >/dev/null 2>&1; then
       echo "Version v$VERSION sans page sur GitHub (version intermédiaire) : la prochaine page la reprendra."
     fi
+  elif grep -q "rejected" <<<"$ENVOI"; then
+    echo "GitHub refuse l'envoi de master :"
+    grep -E "rejected|^remote: - " <<<"$ENVOI" | sed 's/^/  /'
   else
     echo "GitHub injoignable : le code partira au prochain déploiement."
   fi
