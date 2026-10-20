@@ -2,22 +2,30 @@
 //! l'optimisation de distribution, anciennes versions des composants (DISM), rapports de plantage, corbeille. Ce qui
 //! est à toi se nettoie dans ton compte ; ce qui est à Windows passe par une seule fenêtre administrateur.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use super::{Age, Element, taille_dossier};
+use crate::commande::ps_chaine;
 use crate::ui::*;
 
-fn variable(nom: &str) -> PathBuf {
-    PathBuf::from(std::env::var_os(nom).unwrap_or_default())
+/// Un dossier lu dans l'environnement, s'il est absolu. Vide ou relatif, une commande de suppression viserait le
+/// dossier courant (« Get-ChildItem '' » le lit) ou la racine du disque (« \Temp ») : l'élément n'est pas proposé.
+fn dossier(env: &dyn Fn(&str) -> Option<PathBuf>, nom: &str) -> Option<PathBuf> {
+    env(nom).filter(|p| p.is_absolute())
 }
 
-fn dossier_windows() -> PathBuf {
-    let racine = variable("SystemRoot");
-    if racine.as_os_str().is_empty() {
-        PathBuf::from(r"C:\Windows")
-    } else {
-        racine
-    }
+fn dossier_windows(env: &dyn Fn(&str) -> Option<PathBuf>) -> PathBuf {
+    dossier(env, "SystemRoot").unwrap_or_else(|| PathBuf::from(r"C:\Windows"))
+}
+
+/// Vide les dossiers nommés, sans toucher aux dossiers eux-mêmes ; un fichier encore ouvert reste. Les chemins sont
+/// écrits en toutes lettres (la personne voit lesquels avant d'accepter) et lus tels quels (-LiteralPath).
+fn vider(dossiers: &[&Path]) -> String {
+    let liste: Vec<String> = dossiers.iter().map(|d| ps_chaine(&d.to_string_lossy())).collect();
+    format!(
+        "Get-ChildItem -LiteralPath {} -Force -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue",
+        liste.join(", ")
+    )
 }
 
 /// La corbeille du disque système : un dossier par compte dans `$Recycle.Bin`, seul le sien est lisible.
@@ -32,9 +40,19 @@ fn taille_corbeille() -> Option<u64> {
 }
 
 pub fn elements() -> Vec<Element> {
-    let windows = dossier_windows();
-    vec![
-        Element {
+    elements_selon(&|nom| std::env::var_os(nom).map(PathBuf::from))
+}
+
+/// Les éléments, avec les dossiers de `env` : les tests y mettent une variable vide ou relative.
+fn elements_selon(env: &dyn Fn(&str) -> Option<PathBuf>) -> Vec<Element> {
+    let windows = dossier_windows(env);
+    let temp_windows = windows.join("Temp");
+    let telechargements = windows.join(r"SoftwareDistribution\Download");
+    let mut rapports = vec![windows.join("Minidump")];
+    rapports.extend(dossier(env, "ProgramData").map(|d| d.join(r"Microsoft\Windows\WER\ReportArchive")));
+    let rapports: Vec<&Path> = rapports.iter().map(PathBuf::as_path).collect();
+    [
+        dossier(env, "TEMP").map(|temp| Element {
             titre: tr!("Tes fichiers temporaires", "Your temporary files"),
             effet: tr!(
                 "Ce que les programmes laissent dans ton dossier temporaire ; un fichier encore ouvert reste.",
@@ -42,12 +60,12 @@ pub fn elements() -> Vec<Element> {
             )
             .into(),
             prudence: None,
-            taille: taille_dossier(&variable("TEMP"), Age::Tout, &[]),
-            commandes: vec!["Get-ChildItem $env:TEMP -Force -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue".into()],
+            taille: taille_dossier(&temp, Age::Tout, &[]),
+            commandes: vec![vider(&[&temp])],
             recommande: true,
             admin: false,
-        },
-        Element {
+        }),
+        Some(Element {
             titre: tr!("Fichiers temporaires de Windows", "Windows temporary files"),
             effet: tr!(
                 "Le dossier temporaire de Windows lui-même (installations, mises à jour).",
@@ -55,15 +73,12 @@ pub fn elements() -> Vec<Element> {
             )
             .into(),
             prudence: None,
-            taille: taille_dossier(&windows.join("Temp"), Age::Tout, &[]),
-            commandes: vec![
-                "Get-ChildItem \"$env:SystemRoot\\Temp\" -Force -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue"
-                    .into(),
-            ],
+            taille: taille_dossier(&temp_windows, Age::Tout, &[]),
+            commandes: vec![vider(&[&temp_windows])],
             recommande: true,
             admin: true,
-        },
-        Element {
+        }),
+        Some(Element {
             titre: tr!("Cache de Windows Update", "Windows Update cache"),
             effet: tr!(
                 "Les mises à jour déjà téléchargées et installées.",
@@ -74,15 +89,15 @@ pub fn elements() -> Vec<Element> {
                 "Une mise à jour en cours de téléchargement recommencera.",
                 "An update being downloaded will start over."
             )),
-            taille: taille_dossier(&windows.join(r"SoftwareDistribution\Download"), Age::Tout, &[]),
-            commandes: vec![
-                "Stop-Service wuauserv -Force; Get-ChildItem \"$env:SystemRoot\\SoftwareDistribution\\Download\" -Force -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue; Start-Service wuauserv"
-                    .into(),
-            ],
+            taille: taille_dossier(&telechargements, Age::Tout, &[]),
+            commandes: vec![format!(
+                "Stop-Service wuauserv -Force; {}; Start-Service wuauserv",
+                vider(&[&telechargements])
+            )],
             recommande: true,
             admin: true,
-        },
-        Element {
+        }),
+        Some(Element {
             titre: tr!("Optimisation de distribution", "Delivery Optimization"),
             effet: tr!(
                 "Le cache des mises à jour partagées avec les autres PC (réseau local ou Internet).",
@@ -94,8 +109,8 @@ pub fn elements() -> Vec<Element> {
             commandes: vec!["Delete-DeliveryOptimizationCache -Force -ErrorAction SilentlyContinue".into()],
             recommande: true,
             admin: true,
-        },
-        Element {
+        }),
+        Some(Element {
             titre: tr!("Anciens composants de Windows", "Old Windows components"),
             effet: tr!(
                 "Les versions remplacées des composants de Windows (DISM), gardées après chaque mise à jour ; quelques minutes.",
@@ -107,21 +122,24 @@ pub fn elements() -> Vec<Element> {
             commandes: vec!["Dism /Online /Cleanup-Image /StartComponentCleanup".into()],
             recommande: true,
             admin: true,
-        },
-        Element {
-            titre: tr!("Tes rapports de plantage", "Your crash reports"),
-            effet: tr!(
-                "Copies de la mémoire des programmes qui ont planté.",
-                "Memory copies of programs that crashed."
-            )
-            .into(),
-            prudence: None,
-            taille: Some(taille_dossier(&variable("LOCALAPPDATA").join("CrashDumps"), Age::Tout, &[]).unwrap_or(0)),
-            commandes: vec!["Remove-Item \"$env:LOCALAPPDATA\\CrashDumps\\*\" -Recurse -Force -ErrorAction SilentlyContinue".into()],
-            recommande: true,
-            admin: false,
-        },
-        Element {
+        }),
+        dossier(env, "LOCALAPPDATA").map(|local| {
+            let plantages = local.join("CrashDumps");
+            Element {
+                titre: tr!("Tes rapports de plantage", "Your crash reports"),
+                effet: tr!(
+                    "Copies de la mémoire des programmes qui ont planté.",
+                    "Memory copies of programs that crashed."
+                )
+                .into(),
+                prudence: None,
+                taille: Some(taille_dossier(&plantages, Age::Tout, &[]).unwrap_or(0)),
+                commandes: vec![vider(&[&plantages])],
+                recommande: true,
+                admin: false,
+            }
+        }),
+        Some(Element {
             titre: tr!("Rapports d'erreurs de Windows", "Windows error reports"),
             effet: tr!(
                 "Rapports d'erreurs déjà traités et copies de la mémoire après un écran bleu.",
@@ -130,14 +148,11 @@ pub fn elements() -> Vec<Element> {
             .into(),
             prudence: None,
             taille: None,
-            commandes: vec![
-                "Remove-Item \"$env:SystemRoot\\Minidump\\*\", \"$env:ProgramData\\Microsoft\\Windows\\WER\\ReportArchive\\*\" -Recurse -Force -ErrorAction SilentlyContinue"
-                    .into(),
-            ],
+            commandes: vec![vider(&rapports)],
             recommande: true,
             admin: true,
-        },
-        Element {
+        }),
+        Some(Element {
             titre: tr!("Corbeille", "Recycle Bin"),
             effet: tr!("Les fichiers mis à la corbeille.", "Files moved to the Recycle Bin.").into(),
             prudence: Some(tr!(
@@ -148,8 +163,11 @@ pub fn elements() -> Vec<Element> {
             commandes: vec!["Clear-RecycleBin -Force -ErrorAction SilentlyContinue".into()],
             recommande: false,
             admin: false,
-        },
+        }),
     ]
+    .into_iter()
+    .flatten()
+    .collect()
 }
 
 /// Place libre du disque du système, lue par .NET (le seul disque que le nettoyage touche).
@@ -189,4 +207,78 @@ pub fn executer(choisis: &[&Element]) -> Vec<bool> {
             }
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn env_de(paires: &[(&str, &str)]) -> impl Fn(&str) -> Option<PathBuf> + use<> {
+        let paires: Vec<(String, String)> = paires.iter().map(|(n, v)| ((*n).into(), (*v).into())).collect();
+        move |nom| paires.iter().find(|(n, _)| n == nom).map(|(_, v)| PathBuf::from(v))
+    }
+
+    fn commandes(env: &dyn Fn(&str) -> Option<PathBuf>) -> Vec<String> {
+        elements_selon(env).into_iter().flat_map(|e| e.commandes).collect()
+    }
+
+    /// Variables vides ou relatives : rien ne vise le dossier courant ni la racine du disque, et ce qui en dépend
+    /// n'est pas proposé.
+    #[test]
+    fn variables_vides_rien_vers_le_dossier_courant() {
+        let env = env_de(&[
+            ("TEMP", ""),
+            ("LOCALAPPDATA", "AppData"),
+            ("SystemRoot", ""),
+            ("ProgramData", r"\ProgramData"),
+        ]);
+        let tout = commandes(&env);
+        assert_eq!(elements_selon(&env).len(), 6);
+        for c in &tout {
+            assert!(!c.contains("$env:"), "{c}");
+            assert!(!c.contains("''"), "{c}");
+            assert!(!c.contains(r"'\"), "{c}");
+        }
+        assert!(tout.iter().any(|c| c.contains(r"-LiteralPath 'C:\Windows\Temp'")));
+        assert!(
+            tout.iter()
+                .any(|c| c.contains(r"-LiteralPath 'C:\Windows\Minidump' -Force"))
+        );
+    }
+
+    #[test]
+    fn chemins_ecrits_en_toutes_lettres() {
+        let env = env_de(&[
+            ("TEMP", r"C:\Users\alice\AppData\Local\Temp"),
+            ("LOCALAPPDATA", r"C:\Users\alice\AppData\Local"),
+            ("SystemRoot", r"D:\Windows"),
+            ("ProgramData", r"C:\ProgramData"),
+        ]);
+        let tout = commandes(&env);
+        assert_eq!(elements_selon(&env).len(), 8);
+        assert!(tout.contains(
+            &r"Get-ChildItem -LiteralPath 'C:\Users\alice\AppData\Local\Temp' -Force -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue".to_string()
+        ));
+        assert!(
+            tout.iter()
+                .any(|c| c.contains(r"-LiteralPath 'C:\Users\alice\AppData\Local\CrashDumps'"))
+        );
+        assert!(tout.iter().any(|c| {
+            c.contains(r"-LiteralPath 'D:\Windows\Minidump', 'C:\ProgramData\Microsoft\Windows\WER\ReportArchive'")
+        }));
+        assert!(tout.iter().any(|c| c.starts_with(
+            "Stop-Service wuauserv -Force; Get-ChildItem -LiteralPath 'D:\\Windows\\SoftwareDistribution\\Download'"
+        )));
+    }
+
+    /// Une apostrophe dans le chemin ne ferme pas la chaîne : la suite du chemin n'est pas une commande.
+    #[test]
+    fn apostrophe_dans_le_chemin_citee() {
+        let env = env_de(&[("TEMP", r"D:\l'atelier\Temp")]);
+        assert!(
+            commandes(&env)
+                .iter()
+                .any(|c| c.contains(r"-LiteralPath 'D:\l''atelier\Temp'"))
+        );
+    }
 }
