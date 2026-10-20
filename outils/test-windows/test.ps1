@@ -296,6 +296,14 @@ if ($lentes) { Info ("Vérifications les plus lentes : " + (($lentes | ForEach-O
 try {
     $audit = Sortie 'machine-json' | ConvertFrom-Json
     $impossibles = @($audit.constats | Where-Object { -not $_.verifie })
+    # Sans droits, ce qui demande l'administrateur (journal de sécurité) est dit non vérifié : c'est la règle (jamais
+    # compté comme sain), pas un échec. Seul ce qui le dit en toutes lettres est mis à part.
+    $admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+    if (-not $admin) {
+        $attendus = @($impossibles | Where-Object { $_.message -match 'administrat' })
+        $attendus | ForEach-Object { Info "Non vérifié sans droits, comme attendu : $($_.categorie) — $($_.message)" }
+        $impossibles = @($impossibles | Where-Object { $_.message -notmatch 'administrat' })
+    }
     if ($impossibles.Count) { $impossibles | ForEach-Object { Bug "Vérification impossible : $($_.categorie) — $($_.message)" } }
     else { Ok "Toutes les vérifications ont pu se faire ($(@($audit.constats).Count) constats, note $($audit.score)/100)" }
 } catch { Bug "machine --json illisible : $($_.Exception.Message)" }
