@@ -126,35 +126,320 @@ pub(super) fn lancement_suspect(exe: &str, args: &str) -> Option<&'static str> {
     None
 }
 
-/// La lecture de ce qui se lance tout seul, en sections. Un dossier Démarrage qui n'existe pas (profil neuf, dossier
-/// supprimé) donne un chemin vide, et `Get-ChildItem ''` lit le dossier courant : lancé depuis la clé, chacun de ses
-/// programmes passait pour un démarrage suspect. D'où les chemins vides écartés.
-const LECTURE: &str = "try { Get-ScheduledTask | Where-Object { $_.State -ne 'Disabled' -and $_.TaskPath -notlike '\\Microsoft\\*' } | ForEach-Object { $t = $_; \
-         $t.Actions | Where-Object { $_.Execute } | ForEach-Object { \"TCH|$($t.TaskPath)|$($t.TaskName)|$($_.Execute)|$($_.Arguments)\" } }; 'TCH_FIN' } catch {}; \
-         try { foreach ($c in 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run', 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\RunOnce', \
-         'HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run', 'HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\RunOnce', \
-         'HKLM:\\Software\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Run') { $p = Get-ItemProperty $c -ErrorAction SilentlyContinue; \
-         if ($p) { $p.PSObject.Properties | Where-Object { $_.Name -notlike 'PS*' } | ForEach-Object { \"RUN|$c|$($_.Name)|$($_.Value)\" } } }; 'RUN_FIN' } catch {}; \
-         try { $w = New-Object -ComObject WScript.Shell; foreach ($d in [Environment]::GetFolderPath('Startup'), [Environment]::GetFolderPath('CommonStartup') | Where-Object { $_ }) { \
+/// Les tâches planifiées hors \Microsoft\, lues par PowerShell : le planificateur ne se lit que par COM.
+const TACHES: &str = "try { Get-ScheduledTask | Where-Object { $_.State -ne 'Disabled' -and $_.TaskPath -notlike '\\Microsoft\\*' } | ForEach-Object { $t = $_; \
+         $t.Actions | Where-Object { $_.Execute } | ForEach-Object { \"TCH|$($t.TaskPath)|$($t.TaskName)|$($_.Execute)|$($_.Arguments)\" } }; 'TCH_FIN' } catch {}";
+
+/// Les dossiers Démarrage par PowerShell, en secours d'un raccourci que la lecture native ne comprend pas. Un dossier
+/// qui n'existe pas (profil neuf, dossier supprimé) donne un chemin vide, et `Get-ChildItem ''` lit le dossier
+/// courant : lancé depuis la clé, chacun de ses programmes passait pour un démarrage suspect. D'où les chemins vides
+/// écartés.
+const DEMARRAGE: &str = "try { $w = New-Object -ComObject WScript.Shell; foreach ($d in [Environment]::GetFolderPath('Startup'), [Environment]::GetFolderPath('CommonStartup') | Where-Object { $_ }) { \
          Get-ChildItem -LiteralPath $d -File -ErrorAction SilentlyContinue | Where-Object Name -ne 'desktop.ini' | ForEach-Object { \
          $cible = if ($_.Extension -eq '.lnk') { $r = $w.CreateShortcut($_.FullName); '\"' + $r.TargetPath + '\" ' + $r.Arguments } else { '\"' + $_.FullName + '\"' }; \
          \"DEM|$($_.FullName)|$cible\" } }; 'DEM_FIN' } catch {}";
 
-/// Ce qui se lance tout seul hors de Windows : tâches planifiées (hors \Microsoft\), clés Run et RunOnce,
-/// dossiers Démarrage. Une seule lecture PowerShell, en sections.
-pub(super) fn persistance() -> Vec<Constat> {
-    let sortie = ps(LECTURE);
-    let taches = section(sortie.as_deref(), "TCH");
-    let run = section(sortie.as_deref(), "RUN");
-    let demarrage = section(sortie.as_deref(), "DEM");
-    if taches.is_none() && run.is_none() && demarrage.is_none() {
-        return vec![illisible("Persistance")];
+/// Les clés Run et RunOnce de la lecture, sous le nom que PowerShell leur donne (la correction le reprend tel quel).
+const CLES_RUN: [&str; 5] = [
+    r"HKCU:\Software\Microsoft\Windows\CurrentVersion\Run",
+    r"HKCU:\Software\Microsoft\Windows\CurrentVersion\RunOnce",
+    r"HKLM:\Software\Microsoft\Windows\CurrentVersion\Run",
+    r"HKLM:\Software\Microsoft\Windows\CurrentVersion\RunOnce",
+    r"HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Run",
+];
+
+/// Les variables d'environnement d'un texte (« %APPDATA%\x.vbs ») remplacées comme Windows les remplace ; une
+/// variable inconnue reste telle quelle.
+fn developper(texte: &str, variable: impl Fn(&str) -> Option<String>) -> String {
+    let mut sortie = String::new();
+    let mut reste = texte;
+    while let Some(debut) = reste.find('%') {
+        sortie.push_str(&reste[..debut]);
+        let apres = &reste[debut + 1..];
+        if let Some(fin) = apres.find('%')
+            && fin > 0
+            && let Some(v) = variable(&apres[..fin])
+        {
+            sortie.push_str(&v);
+            reste = &apres[fin + 1..];
+        } else {
+            sortie.push('%');
+            reste = apres;
+        }
     }
-    juger_persistance(
-        &taches.unwrap_or_default(),
-        &run.unwrap_or_default(),
-        &demarrage.unwrap_or_default(),
-    )
+    sortie.push_str(reste);
+    sortie
+}
+
+/// Une valeur du registre en texte, comme Get-ItemProperty la rend : REG_EXPAND_SZ développée (sinon
+/// « %APPDATA%\… » échapperait au jugement), plusieurs chaînes jointes par une espace, nombres en décimal.
+fn valeur_texte(valeur: &winreg::RegValue) -> String {
+    use winreg::enums::RegType::{REG_DWORD, REG_EXPAND_SZ, REG_MULTI_SZ, REG_QWORD, REG_SZ};
+    use winreg::types::FromRegValue;
+    match valeur.vtype {
+        REG_SZ | REG_MULTI_SZ => String::from_reg_value(valeur).unwrap_or_default().replace('\n', " "),
+        REG_EXPAND_SZ => developper(&String::from_reg_value(valeur).unwrap_or_default(), |n| {
+            std::env::var(n).ok()
+        }),
+        REG_DWORD => u32::from_reg_value(valeur).map(|n| n.to_string()).unwrap_or_default(),
+        REG_QWORD => u64::from_reg_value(valeur).map(|n| n.to_string()).unwrap_or_default(),
+        _ => String::new(),
+    }
+}
+
+/// La section RUN, lue par winreg. Toutes les valeurs comptent : le filtre « PS* » du script n'écartait que les
+/// propriétés ajoutées par PowerShell (PSPath…), mais cachait aussi une valeur nommée « PSUpdate ».
+fn lignes_run() -> Vec<String> {
+    use winreg::RegKey;
+    use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE};
+    let mut lignes = Vec::new();
+    for nom_cle in CLES_RUN {
+        let Some((ruche, chemin)) = nom_cle.split_once(r":\") else {
+            continue;
+        };
+        let racine = RegKey::predef(if ruche == "HKCU" {
+            HKEY_CURRENT_USER
+        } else {
+            HKEY_LOCAL_MACHINE
+        });
+        let Ok(cle) = racine.open_subkey(chemin) else {
+            continue;
+        };
+        for (nom, valeur) in cle.enum_values().flatten() {
+            let nom = if nom.is_empty() { "(default)".to_string() } else { nom };
+            lignes.push(format!("{nom_cle}|{nom}|{}", valeur_texte(&valeur)));
+        }
+    }
+    lignes
+}
+
+/// Le texte d'un tampon UTF-16 (petit-boutiste) jusqu'au premier zéro.
+fn utf16_zero(octets: &[u8]) -> String {
+    let mots: Vec<u16> = octets
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|&m| u16::from_le_bytes(m))
+        .take_while(|&m| m != 0)
+        .collect();
+    String::from_utf16_lossy(&mots)
+}
+
+/// Le texte d'un tampon ANSI jusqu'au premier zéro, lu en Latin-1 (les chemins des raccourcis récents ont aussi
+/// leur version UTF-16, préférée quand elle existe).
+fn ansi_zero(octets: &[u8]) -> String {
+    octets.iter().take_while(|&&o| o != 0).map(|&o| char::from(o)).collect()
+}
+
+/// Le chemin de la cible dans le bloc LinkInfo d'un raccourci : chemin local (ou nom réseau) suivi du suffixe commun.
+fn chemin_infos(infos: &[u8]) -> Option<String> {
+    let u32_a = |p: usize| octets_u32(infos, p).and_then(|n| usize::try_from(n).ok());
+    let a_partir = |p: usize| infos.get(p..);
+    let entete = u32_a(4)?;
+    let drapeaux = u32_a(8)?;
+    let unicode = |champ: usize| (entete >= 0x24).then(|| u32_a(champ)).flatten().filter(|&o| o != 0);
+    let base = if drapeaux & 0x1 != 0 {
+        match unicode(0x1C) {
+            Some(o) => utf16_zero(a_partir(o)?),
+            None => ansi_zero(a_partir(u32_a(0x10)?)?),
+        }
+    } else if drapeaux & 0x2 != 0 {
+        let reseau = a_partir(u32_a(0x14)?)?;
+        let nom = usize::try_from(octets_u32(reseau, 8)?).ok()?;
+        let nom_unicode = (nom > 0x14).then(|| octets_u32(reseau, 0x14)).flatten();
+        let nom = match nom_unicode.and_then(|o| usize::try_from(o).ok()) {
+            Some(o) => utf16_zero(reseau.get(o..)?),
+            None => ansi_zero(reseau.get(nom..)?),
+        };
+        nom + "\\"
+    } else {
+        return None;
+    };
+    let suffixe = match unicode(0x20) {
+        Some(o) => utf16_zero(a_partir(o)?),
+        None => ansi_zero(a_partir(u32_a(0x18)?)?),
+    };
+    let cible = if suffixe.is_empty() || base.ends_with('\\') {
+        base + &suffixe
+    } else {
+        format!("{base}\\{suffixe}")
+    };
+    (!cible.is_empty()).then_some(cible)
+}
+
+fn octets_u32(octets: &[u8], p: usize) -> Option<u32> {
+    let b = octets.get(p..p.checked_add(4)?)?;
+    Some(u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+}
+
+fn octets_u16(octets: &[u8], p: usize) -> Option<u16> {
+    let b = octets.get(p..p.checked_add(2)?)?;
+    Some(u16::from_le_bytes([b[0], b[1]]))
+}
+
+/// La cible et les arguments d'un raccourci (.lnk), lus dans le fichier (format MS-SHLLINK) sans COM. `None` quand
+/// la cible ne s'y lit pas (raccourci réduit à une liste d'éléments du shell) : l'appelant reprend alors PowerShell,
+/// pour qu'aucun raccourci ne compte comme sain sans avoir été lu.
+fn cible_raccourci(octets: &[u8]) -> Option<(String, String)> {
+    // L'identifiant de classe des raccourcis, 00021401-0000-0000-C000-000000000046, tel qu'il est écrit dans le fichier.
+    const CLASSE: [u8; 16] = [1, 0x14, 2, 0, 0, 0, 0, 0, 0xC0, 0, 0, 0, 0, 0, 0, 0x46];
+    const LISTE: u32 = 0x1;
+    const INFOS: u32 = 0x2;
+    const UNICODE: u32 = 0x80;
+    const VARIABLES: u32 = 0xA000_0001;
+    let tranche = |p: usize, n: usize| octets.get(p..p.checked_add(n)?);
+    if octets_u32(octets, 0)? != 0x4C || tranche(4, 16)? != CLASSE {
+        return None;
+    }
+    let drapeaux = octets_u32(octets, 0x14)?;
+    let mut p = 0x4C;
+    if drapeaux & LISTE != 0 {
+        p += 2 + usize::from(octets_u16(octets, p)?);
+    }
+    let mut cible_infos = None;
+    if drapeaux & INFOS != 0 {
+        let infos = tranche(p, usize::try_from(octets_u32(octets, p)?).ok()?)?;
+        cible_infos = chemin_infos(infos);
+        p += infos.len();
+    }
+    // Nom, chemin relatif, dossier de travail, arguments, icône : chacun présent selon son drapeau.
+    let mut arguments = String::new();
+    for drapeau in [0x4, 0x8, 0x10, 0x20, 0x40] {
+        if drapeaux & drapeau == 0 {
+            continue;
+        }
+        let n = usize::from(octets_u16(octets, p)?);
+        let taille = if drapeaux & UNICODE != 0 { n * 2 } else { n };
+        let brut = tranche(p + 2, taille)?;
+        if drapeau == 0x20 {
+            arguments = if drapeaux & UNICODE != 0 {
+                utf16_zero(brut)
+            } else {
+                ansi_zero(brut)
+            };
+        }
+        p += 2 + taille;
+    }
+    // Les blocs de la fin : celui des variables d'environnement donne la cible que Windows développe et préfère.
+    let mut cible_variables = None;
+    while let Some(taille) = octets_u32(octets, p).and_then(|n| usize::try_from(n).ok())
+        && taille >= 8
+    {
+        let bloc = tranche(p, taille)?;
+        if octets_u32(bloc, 4) == Some(VARIABLES) && bloc.len() >= 8 + 260 + 520 {
+            let texte = match utf16_zero(&bloc[268..788]) {
+                t if t.is_empty() => ansi_zero(&bloc[8..268]),
+                t => t,
+            };
+            if !texte.is_empty() {
+                cible_variables = Some(developper(&texte, |n| std::env::var(n).ok()));
+            }
+        }
+        p += taille;
+    }
+    Some((cible_variables.or(cible_infos)?, arguments))
+}
+
+/// Les dossiers Démarrage de la personne puis de tous, comme [Environment]::GetFolderPath les donne. Un chemin vide
+/// ou relatif est écarté : il lirait le dossier courant (la clé, avec ses programmes).
+fn dossiers_demarrage() -> Vec<std::path::PathBuf> {
+    use winreg::RegKey;
+    use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE};
+    const DOSSIERS: &str = r"Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders";
+    let lire = |ruche, nom: &str, defaut: &str| {
+        RegKey::predef(ruche)
+            .open_subkey(DOSSIERS)
+            .and_then(|k| k.get_raw_value(nom))
+            .map(|v| valeur_texte(&v))
+            .ok()
+            .filter(|d| !d.is_empty())
+            .unwrap_or_else(|| developper(defaut, |n| std::env::var(n).ok()))
+    };
+    [
+        lire(
+            HKEY_CURRENT_USER,
+            "Startup",
+            r"%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup",
+        ),
+        lire(
+            HKEY_LOCAL_MACHINE,
+            "Common Startup",
+            r"%ProgramData%\Microsoft\Windows\Start Menu\Programs\Startup",
+        ),
+    ]
+    .into_iter()
+    .map(std::path::PathBuf::from)
+    .filter(|d| d.is_absolute())
+    .collect()
+}
+
+/// La section DEM : `None` si un raccourci ne se lit pas sans COM. Les fichiers cachés comptent aussi (le script
+/// d'avant, sans -Force, ne les voyait pas).
+fn lignes_demarrage() -> Option<Vec<String>> {
+    use std::io::Read;
+    let mut lignes = Vec::new();
+    for dossier in dossiers_demarrage() {
+        let Ok(entrees) = std::fs::read_dir(&dossier) else {
+            continue;
+        };
+        for entree in entrees.flatten() {
+            let chemin = entree.path();
+            if !chemin.is_file() || entree.file_name().eq_ignore_ascii_case("desktop.ini") {
+                continue;
+            }
+            let plein = chemin.to_string_lossy();
+            let cible = if chemin.extension().is_some_and(|x| x.eq_ignore_ascii_case("lnk")) {
+                // Un raccourci tient en quelques kilo-octets : lu au plus sur un mégaoctet.
+                let mut octets = Vec::new();
+                std::fs::File::open(&chemin)
+                    .ok()?
+                    .take(1 << 20)
+                    .read_to_end(&mut octets)
+                    .ok()?;
+                let (cible, arguments) = cible_raccourci(&octets)?;
+                format!("\"{cible}\" {arguments}")
+            } else {
+                format!("\"{plein}\"")
+            };
+            lignes.push(format!("{plein}|{cible}"));
+        }
+    }
+    Some(lignes)
+}
+
+/// Ce qui se lance tout seul hors de Windows : tâches planifiées (hors \Microsoft\), clés Run et RunOnce,
+/// dossiers Démarrage. Clés et dossiers sont lus sans PowerShell ; lui ne lit plus que les tâches, et les dossiers
+/// Démarrage quand un raccourci ne se lit pas autrement.
+pub(super) fn persistance() -> Vec<Constat> {
+    let run = lignes_run();
+    let demarrage = lignes_demarrage();
+    let sortie = ps(&if demarrage.is_some() {
+        TACHES.to_string()
+    } else {
+        format!("{TACHES}; {DEMARRAGE}")
+    });
+    let taches = section(sortie.as_deref(), "TCH");
+    let demarrage: Option<Vec<&str>> = match &demarrage {
+        Some(lignes) => Some(lignes.iter().map(String::as_str).collect()),
+        None => section(sortie.as_deref(), "DEM"),
+    };
+    let run: Vec<&str> = run.iter().map(String::as_str).collect();
+    let Some(taches) = taches else {
+        // Clés et dossiers restent jugés, mais rien ne dit que les tâches sont saines : pas de « aucun suspect ».
+        let mut constats: Vec<Constat> = juger_persistance(&[], &run, &demarrage.unwrap_or_default())
+            .into_iter()
+            .filter(|c| c.probleme.is_some())
+            .collect();
+        constats.push(impossible(
+            "Persistance",
+            tr!(
+                "tâches planifiées non lues (PowerShell indisponible ou bloqué)",
+                "scheduled tasks not read (PowerShell unavailable or blocked)"
+            ),
+        ));
+        return constats;
+    };
+    juger_persistance(&taches, &run, &demarrage.unwrap_or_default())
 }
 
 fn juger_persistance(taches: &[&str], run: &[&str], demarrage: &[&str]) -> Vec<Constat> {
@@ -270,9 +555,87 @@ mod tests {
     #[test]
     fn dossier_demarrage_absent_ne_lit_pas_le_dossier_courant() {
         // Un chemin vide lirait le dossier courant (constaté dans un compte neuf, le 19 octobre).
-        assert!(LECTURE.contains("[Environment]::GetFolderPath('CommonStartup') | Where-Object { $_ })"));
-        assert!(LECTURE.contains("Get-ChildItem -LiteralPath $d -File"));
-        assert!(!LECTURE.contains("Get-ChildItem $d"));
+        assert!(DEMARRAGE.contains("[Environment]::GetFolderPath('CommonStartup') | Where-Object { $_ })"));
+        assert!(DEMARRAGE.contains("Get-ChildItem -LiteralPath $d -File"));
+        assert!(!DEMARRAGE.contains("Get-ChildItem $d"));
+    }
+
+    /// Un raccourci fabriqué octet par octet comme Windows l'écrit : en-tête, LinkInfo (chemin local ANSI), arguments
+    /// en UTF-16, bloc de fin.
+    fn raccourci(drapeaux: u32, infos: bool, fin: &[u8]) -> Vec<u8> {
+        let mut o = vec![0u8; 0x4C];
+        o[..4].copy_from_slice(&0x4Cu32.to_le_bytes());
+        o[4..20].copy_from_slice(&[1, 0x14, 2, 0, 0, 0, 0, 0, 0xC0, 0, 0, 0, 0, 0, 0, 0x46]);
+        o[0x14..0x18].copy_from_slice(&drapeaux.to_le_bytes());
+        if infos {
+            let base = b"C:\\Users\\Public\\c.exe\0";
+            let mut bloc = Vec::new();
+            let taille = 0x1C + base.len() + 1;
+            for champ in [taille, 0x1C, 1, 0, 0x1C, 0, 0x1C + base.len()] {
+                bloc.extend_from_slice(&u32::try_from(champ).unwrap().to_le_bytes());
+            }
+            bloc.extend_from_slice(base);
+            bloc.push(0);
+            o.extend_from_slice(&bloc);
+        }
+        if drapeaux & 0x20 != 0 {
+            let args: Vec<u16> = "-x".encode_utf16().collect();
+            o.extend_from_slice(&u16::try_from(args.len()).unwrap().to_le_bytes());
+            o.extend(args.iter().flat_map(|m| m.to_le_bytes()));
+        }
+        o.extend_from_slice(fin);
+        o.extend_from_slice(&0u32.to_le_bytes());
+        o
+    }
+
+    #[test]
+    fn raccourcis_lus_sans_com() {
+        let o = raccourci(0x2 | 0x20 | 0x80, true, &[]);
+        assert_eq!(
+            cible_raccourci(&o),
+            Some((r"C:\Users\Public\c.exe".to_string(), "-x".to_string()))
+        );
+        // Le bloc des variables d'environnement passe avant LinkInfo, comme pour Windows.
+        let mut bloc = vec![0u8; 0x314];
+        bloc[..4].copy_from_slice(&0x314u32.to_le_bytes());
+        bloc[4..8].copy_from_slice(&0xA000_0001u32.to_le_bytes());
+        for (i, m) in r"C:\Users\alice\AppData\Roaming\b.vbs".encode_utf16().enumerate() {
+            bloc[268 + 2 * i..270 + 2 * i].copy_from_slice(&m.to_le_bytes());
+        }
+        let o = raccourci(0x2 | 0x20 | 0x80 | 0x200, true, &bloc);
+        assert_eq!(cible_raccourci(&o).unwrap().0, r"C:\Users\alice\AppData\Roaming\b.vbs");
+        // Sans LinkInfo ni variables (liste d'éléments du shell seule), tronqué ou pas un raccourci : rien, jamais
+        // une cible inventée.
+        assert_eq!(cible_raccourci(&raccourci(0x20 | 0x80, false, &[])), None);
+        let o = raccourci(0x2 | 0x20 | 0x80, true, &[]);
+        for n in [0, 10, 0x4C, 0x60, o.len() - 6] {
+            assert_eq!(cible_raccourci(&o[..n]), None, "{n}");
+        }
+        let mut faux = o.clone();
+        faux[4] = 0;
+        assert_eq!(cible_raccourci(&faux), None);
+        // Tailles absurdes : refusées sans paniquer.
+        let mut geant = o;
+        geant[0x4C..0x50].copy_from_slice(&u32::MAX.to_le_bytes());
+        assert_eq!(cible_raccourci(&geant), None);
+    }
+
+    #[test]
+    fn variables_developpees() {
+        let v = |n: &str| (n == "APPDATA").then(|| r"C:\Users\alice\AppData\Roaming".to_string());
+        assert_eq!(
+            developper(r"%APPDATA%\b.vbs", v),
+            r"C:\Users\alice\AppData\Roaming\b.vbs"
+        );
+        assert_eq!(developper("100% %INCONNUE% %%", v), "100% %INCONNUE% %%");
+    }
+
+    /// Sous Wine, les vraies lectures répondent sans planter ; aucun dossier Démarrage relatif (le dossier courant).
+    #[test]
+    fn lectures_natives_sous_wine() {
+        let _ = lignes_run();
+        let _ = lignes_demarrage();
+        assert!(dossiers_demarrage().iter().all(|d| d.is_absolute()));
     }
 
     #[test]
