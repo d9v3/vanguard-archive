@@ -42,10 +42,10 @@ In the menu, choose **1** (full check), then **2** (fix). Arrows, Enter, and Esc
 | Area | What Vanguard does |
 |---|---|
 | **Security check** | A grade from A to F: firewall, updates and vulnerabilities, encryption, open ports, accounts, SSH, what starts in secret, backdoors and rootkit signs, suspicious event logs, shares open to everyone, Wi-Fi, Bluetooth, clock, end of support, forgotten accounts, browser passwords, sensitive files lying around, disk health… Each problem is explained, with its fix. |
-| **Local network** | Every device, its manufacturer, its open ports and its risks; newcomers flagged, ports opened on the router, the home's address on a blocklist, a password thief like Responder unmasked. |
+| **Local network** | Every device, its manufacturer, its open ports and its risks; newcomers flagged, ports opened on the router, the home's address on a blocklist, a password thief like Responder unmasked; the router and connected devices (cameras, printers, NAS, TVs…) recognized, with their default password to change. |
 | **Wi-Fi, NAT, DNS, cameras** | The freest Wi-Fi channel, the NAT type for gaming, the fastest DNS (without removing a DNS that protects you), hidden cameras. |
 | **Connection for gaming** | Ping, jitter, loss, speed and bufferbloat, compared with your habits. |
-| **Troubleshoot** | Computer diagnostic, everyday problems step by step (Internet, Wi-Fi, slowness, sound, printer, full disk), after an infection, collect the traces (before cleaning up), new computer, computer leaving, hacked account, “Why is it slow?”, computer specs, report to leave behind, repairs. |
+| **Troubleshoot** | Computer diagnostic, everyday problems step by step (Internet, Wi-Fi, slowness, sound, printer, full disk), after an infection, collect the traces (before cleaning up), new computer, computer leaving, hacked account, a relative's computer, “Why is it slow?”, computer specs, report to leave behind, repairs. |
 | **Optimize and clean up** | Privacy and performance settings undone exactly, a cleanup checklist with the space gained measured, startup programs. |
 | **Protection** | Decoy files against ransomware, Windows Defender blocking, 308 YARA rules and over a million fingerprints of known malware (MalwareBazaar), antivirus, sandbox, integrity of critical files, leaked passwords, outbound connections (known botnet servers), tech-support scam (remote control tools), camera and microphone, privacy check (who can access location, contacts, camera and microphone), dangerous links, downloaded files, reversible quarantine; secrets forgotten in git project history; flaws in Docker images (trivy, when installed). |
 | **Follow-up** | Hourly monitoring and its dashboard in the browser, monthly check-up, HTML report with the grade curve, learning on your computer, what Vanguard changed (each fix, dated). |
@@ -98,6 +98,10 @@ In the menu, choose **1** (full check), then **2** (fix). Arrows, Enter, and Esc
   missing backup with its set-up offered.
 - Health: disk space, SMART status of the disks (without root), battery, temperatures.
 - What could not be checked is said, never counted as healthy.
+- The check reads what it checks by itself, without starting a program for each reading: on Windows, the accounts,
+  the Run keys and the Startup folder (Windows functions and the registry, PowerShell as a fallback); on macOS, the settings,
+  launchd agents, the version, the Mac's name, free space and administrators (plists read directly, instead of
+  defaults, plutil, sw_vers, sysctl, scutil or df). Faster, and fewer ways to fail.
 
 **Local network** — every device, its manufacturer, its open ports (TCP, and UDP: SNMP, NetBIOS, UPnP, DNS, mDNS)
 and its risks; newcomers flagged, one notebook per network (at home, at each friend's), nicknames ("HP printer");
@@ -106,6 +110,11 @@ After your consent, the home's Internet address is looked up in four blocklists 
 listed for spam or attacks, a device is probably infected. During the scan, Vanguard also asks for a name that does
 not exist (LLMNR, NetBIOS, mDNS): nobody legitimate answers, and the device that does is a poisoner like Responder,
 which steals the network's Windows passwords; the hourly monitoring flags it too.
+**Router and connected devices**: after the scan, or later from the last scan kept (`vanguard iot`), what the router
+says about itself (often its model and software version), an admin page over HTTP only, and the cameras, printers,
+NAS, TVs, speakers, consoles and smart home devices, recognized by their manufacturer, name, ports and
+announcements. For the router, cameras, printers and NAS, the advice to change the default password: nothing more is
+probed and no password is tried.
 
 **Connection for gaming** — ping, jitter, loss, speed and bufferbloat (the lag when someone downloads), with a
 verdict criterion by criterion and advice.
@@ -130,7 +139,11 @@ sign, the check of what may have been installed, the scans in order, then the pa
 (verified copy first, accounts signed out, BitLocker or FileVault key set aside, secure wipe by the system's tool,
 TPM chip cleared). Vanguard never wipes anything itself. And **my account was hacked**: take back control through the
 official page, then password, two-step verification, sessions signed out, and a check that this computer did not give
-the password away. Slow **since an update**: the latest updates, dated, and how to go back.
+the password away. Slow **since an update**: the latest updates, dated, and how to go back. And **a relative's
+computer** (`vanguard relative`): three questions (who uses it, why you were asked to look at it, and whether their
+network may be looked at, only with their consent), the check, then a summary in everyday words, ordered by the
+answers: what is left to do first, what is fine next. The tools that match the reason (slowness, antivirus, fake
+technician), the fixes one by one, and the page to leave behind, with tips chosen for the person.
 
 **Collect the traces** — after an infection, before cleaning up or reinstalling: what a specialist will want to
 see, kept in a dated folder on the VANGUARD key (or in this computer's Vanguard folder), in the order it vanishes.
@@ -369,12 +382,13 @@ Each menu entry is also a command.
 | `vanguard clean [--list]` | clean up the system; `--list`: the space to gain, deleting nothing |
 | `vanguard apps [--list] [--recommended]` | software to install by category; `--list`: their state, installing nothing |
 | `vanguard diag` | computer diagnostic: hardware, system, recent crashes and errors |
-| `vanguard troubleshoot [subject]` | troubleshoot step by step: `internet`, `wifi`, `slow`, `sound`, `printer`, `disk`, `infection`, `new`, `leaving`, `account`, `evidence` |
+| `vanguard troubleshoot [subject]` | troubleshoot step by step: `internet`, `wifi`, `slow`, `sound`, `printer`, `disk`, `infection`, `new`, `leaving`, `account`, `evidence`, `relative` |
 | `vanguard evidence [folder]` | collect the traces after an infection, before cleaning up: processes, connections, startup, accounts, logs, recent files, in a dated folder with their SHA-256 fingerprints (read-only) |
 | `vanguard slow` | why it is slow: processor, memory, disk, startup, programs at login |
 | `vanguard startup` | startup programs: remove or put them back, after your consent; each removal is undone exactly |
 | `vanguard changes` | what Vanguard changed: each fix run here, its date and its result |
 | `vanguard handout` | report to leave behind: a simple page for the person you helped |
+| `vanguard relative` | a relative's computer: three questions, the check, a summary in plain words, the fixes, the page to leave behind with its tips |
 | `vanguard auto-backup [--undo]` | automatic backup to an external disk, with the system's tool |
 | `vanguard shortcut [on\|off]` | shortcut on this computer |
 | `vanguard self-update` | update Vanguard on this computer, from the key or from GitHub (versions signed by the author) |
@@ -391,6 +405,7 @@ Each menu entry is also a command.
 | `vanguard channels` | crowded Wi-Fi: nearby networks by channel, and the freest channel |
 | `vanguard nat` | NAT type for gaming: open, moderate or strict |
 | `vanguard cameras` | hidden cameras on the network (rental, someone else's place) |
+| `vanguard iot` | router and connected devices from the last scan kept: the router's model, cameras, printers, NAS… and their default password (nothing is probed) |
 | `vanguard fast-dns` | fastest DNS, measured here and undoable; a DNS that protects you is kept |
 | `vanguard learned` | what Vanguard has learned: your habits, your choices, and forgetting them |
 | `vanguard password` | leaked passwords |
@@ -423,7 +438,7 @@ Each menu entry is also a command.
 also keep their French names (`complet`, `machine`, `corriger`, `reseau`, `connexion`, `logiciels`, `diagnostic`,
 `motdepasse`, `isoler`, `courriel`, `integrite`, `maj`, `reparer`, `surveillance`, `nommer`, `sauvegarder`,
 `restaurer`, `nettoyer`, `pieges`, `durcir`, `listes-noires`, `appris`, `entretien`, `sortantes`, `lien`,
-`verifier-fichier`, `canaux`, `dns-rapide`, `traces`, `acces`, `tableau`, `verifier-sauvegarde`).
+`verifier-fichier`, `canaux`, `dns-rapide`, `traces`, `acces`, `tableau`, `verifier-sauvegarde`, `objets`, `proche`).
 
 **Emojis**: in the old Windows console (command prompt or PowerShell outside Windows Terminal, common on Windows 10),
 which draws them badly and shifts the menus, 💡 and 🔧 become → and +. `VANGUARD_EMOJI=0` removes them everywhere,

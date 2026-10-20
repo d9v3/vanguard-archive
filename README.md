@@ -46,10 +46,10 @@ pour revenir.
 | Domaine | Ce que fait Vanguard |
 |---|---|
 | **Bilan de sécurité** | Une note de A à F : pare-feu, mises à jour et failles, chiffrement, ports ouverts, comptes, SSH, ce qui se lance en cachette, portes dérobées et signes de rootkit, journaux d'événements suspects, partages ouverts à tous, Wi-Fi, Bluetooth, heure, fin de support, comptes oubliés, mots de passe du navigateur, fichiers sensibles qui traînent, santé des disques… Chaque problème est expliqué, avec sa correction. |
-| **Réseau local** | Chaque appareil, son fabricant, ses ports ouverts et ses risques ; les nouveaux venus signalés, les ports ouverts sur la box, l'adresse de la maison sur liste noire, un voleur de mots de passe comme Responder démasqué. |
+| **Réseau local** | Chaque appareil, son fabricant, ses ports ouverts et ses risques ; les nouveaux venus signalés, les ports ouverts sur la box, l'adresse de la maison sur liste noire, un voleur de mots de passe comme Responder démasqué ; la box et les objets connectés (caméras, imprimantes, NAS, télés…) reconnus, avec leur mot de passe d'origine à changer. |
 | **Wi-Fi, NAT, DNS, caméras** | Le canal Wi-Fi le plus libre, le type de NAT pour le jeu, le DNS le plus rapide (sans retirer un DNS qui protège), les caméras cachées. |
 | **Connexion pour le jeu** | Ping, gigue, pertes, débit et bufferbloat, comparés à tes habitudes. |
-| **Dépanner** | Diagnostic de l'ordinateur, pannes de tous les jours pas à pas (Internet, Wi-Fi, lenteur, son, imprimante, disque plein), après une infection, collecter les traces (avant de nettoyer), nouvel ordinateur, ordinateur qui part, compte piraté, « Pourquoi c'est lent ? », fiche de l'ordinateur, rapport à laisser, réparations. |
+| **Dépanner** | Diagnostic de l'ordinateur, pannes de tous les jours pas à pas (Internet, Wi-Fi, lenteur, son, imprimante, disque plein), après une infection, collecter les traces (avant de nettoyer), nouvel ordinateur, ordinateur qui part, compte piraté, ordinateur d'un proche, « Pourquoi c'est lent ? », fiche de l'ordinateur, rapport à laisser, réparations. |
 | **Optimiser et nettoyer** | Réglages de confidentialité et de performance qui s'annulent exactement, nettoyage à cocher avec la place gagnée mesurée, programmes du démarrage. |
 | **Protection** | Fichiers-pièges contre les rançongiciels, blocages de Windows Defender, 308 règles YARA et plus d'un million d'empreintes de logiciels malveillants connus (MalwareBazaar), antivirus, bac à sable, intégrité des fichiers critiques, mots de passe fuités, connexions sortantes (serveurs de botnets connus), faux technicien (logiciels de prise de contrôle à distance), caméra et micro, bilan de confidentialité (qui a accès à la position, aux contacts, à la caméra et au micro), liens dangereux, fichiers téléchargés, quarantaine réversible ; secrets oubliés dans l'historique des projets git ; failles des images Docker (trivy, s'il est installé). |
 | **Suivi** | Surveillance toutes les heures et son tableau de bord dans le navigateur, entretien du mois, rapport HTML avec la courbe des notes, apprentissage sur ton ordinateur, ce que Vanguard a changé (chaque correction, datée). |
@@ -107,6 +107,10 @@ pour revenir.
   clés en clair), sauvegarde absente avec la mise en place proposée.
 - Santé : espace disque, état SMART des disques (sans root), batterie, températures.
 - Ce qui n'a pas pu être vérifié est dit, jamais compté comme sain.
+- Le bilan lit lui-même ce qu'il vérifie, sans lancer un programme par lecture : sous Windows, les comptes, les clés Run
+  et le dossier Démarrage (fonctions de Windows et registre, PowerShell en secours) ; sous macOS, les réglages,
+  les agents launchd, la version, le nom du Mac, la place libre et les administrateurs (plist lus directement, au
+  lieu de defaults, plutil, sw_vers, sysctl, scutil ou df). Plus rapide, et moins de façons d'échouer.
 
 **Réseau local** — tous les appareils, leur fabricant, leurs ports ouverts (TCP, et UDP : SNMP, NetBIOS, UPnP, DNS,
 mDNS) et leurs risques ; les nouveaux venus signalés, un carnet par réseau (chez toi, chez chaque ami), des surnoms
@@ -116,6 +120,11 @@ miniupnpc sous Linux). Après accord, l'adresse Internet de la maison est cherch
 Pendant le scan, Vanguard demande aussi un nom qui n'existe pas (LLMNR, NetBIOS, mDNS) : personne de légitime n'y
 répond, et l'appareil qui le fait est un empoisonneur comme Responder, qui vole les mots de passe Windows du réseau ;
 la surveillance horaire le signale aussi.
+**Box et objets connectés** : après le scan, ou plus tard d'après le dernier scan gardé (`vanguard objets`), ce
+que la box dit d'elle-même (souvent son modèle et la version de son logiciel), une page d'administration en HTTP
+seul, et les caméras, imprimantes, NAS, télés, enceintes, consoles et objets de domotique, reconnus à leur
+fabricant, à leur nom, à leurs ports et à leurs annonces. Pour la box, les caméras, les imprimantes et les NAS, le
+conseil de changer le mot de passe d'origine : rien n'est sondé en plus et aucun mot de passe n'est essayé.
 
 **Connexion pour le jeu** — ping, gigue, pertes, débit et bufferbloat (le lag quand quelqu'un télécharge), avec un
 verdict critère par critère et des conseils.
@@ -142,6 +151,11 @@ comptes déconnectés, clé BitLocker ou FileVault mise de côté, effacement s�
 à zéro). Vanguard n'efface rien lui-même. Et **mon compte a été piraté** : reprendre la main par la page officielle,
 puis mot de passe, validation en deux étapes, sessions fermées, et la vérification que cet ordinateur n'a pas livré
 le mot de passe. Lent **depuis une mise à jour** : les dernières mises à jour, datées, et comment revenir en arrière.
+Et l'**ordinateur d'un proche** (`vanguard proche`) : trois questions (qui s'en sert, pourquoi on te l'a confié, et
+si son réseau peut être regardé, avec son accord seulement), le bilan, puis un résumé en mots de tous les jours, mis
+en ordre selon les réponses : ce qui reste à faire d'abord, ce qui va bien ensuite. Les outils qui répondent à la
+raison (lenteur, antivirus, faux technicien), les corrections une à une, et la page à laisser, avec des conseils
+choisis pour la personne.
 
 **Collecter les traces** — après une infection, avant de nettoyer ou de réinstaller : ce qu'un spécialiste voudra
 voir, gardé dans un dossier daté sur la clé VANGUARD (ou dans le dossier de Vanguard de l'ordinateur), dans l'ordre
@@ -397,12 +411,13 @@ Chaque entrée du menu existe aussi en commande.
 | `vanguard nettoyer [--liste]` | nettoyer le système ; `--liste` : la place à gagner, sans rien effacer |
 | `vanguard logiciels [--liste] [--recommandes]` | logiciels à installer par catégorie ; `--liste` : leur état, sans rien installer |
 | `vanguard diagnostic` | diagnostic de l'ordinateur : matériel, système, plantages et erreurs récents |
-| `vanguard depanner [sujet]` | dépanner pas à pas : `internet`, `wifi`, `lent`, `son`, `imprimante`, `disque`, `infection`, `nouveau`, `depart`, `compte`, `traces` |
+| `vanguard depanner [sujet]` | dépanner pas à pas : `internet`, `wifi`, `lent`, `son`, `imprimante`, `disque`, `infection`, `nouveau`, `depart`, `compte`, `traces`, `proche` |
 | `vanguard traces [dossier]` | collecter les traces après une infection, avant de nettoyer : processus, connexions, démarrage, comptes, journaux, fichiers récents, dans un dossier daté avec leurs empreintes SHA-256 (lecture seule) |
 | `vanguard lenteur` | pourquoi c'est lent : processeur, mémoire, disque, démarrage, programmes à l'ouverture |
 | `vanguard demarrage` | programmes au démarrage : les retirer ou les remettre, après accord ; chaque retrait s'annule |
 | `vanguard changements` | ce que Vanguard a changé : chaque correction lancée ici, sa date et son résultat |
 | `vanguard a-laisser` | rapport à laisser : une page simple pour la personne dépannée |
+| `vanguard proche` | ordinateur d'un proche : trois questions, le bilan, un résumé en mots simples, les corrections, la page à laisser avec ses conseils |
 | `vanguard sauvegarde-auto [--annuler]` | sauvegarde automatique vers un disque externe, avec l'outil du système |
 | `vanguard raccourci [on\|off]` | raccourci sur cet ordinateur |
 | `vanguard se-mettre-a-jour` | mettre Vanguard à jour sur cet ordinateur, depuis la clé ou depuis GitHub (versions signées par l'auteur) |
@@ -419,6 +434,7 @@ Chaque entrée du menu existe aussi en commande.
 | `vanguard canaux` | Wi-Fi encombré : les réseaux voisins par canal, et le canal le plus libre |
 | `vanguard nat` | type de NAT pour le jeu : ouvert, modéré ou strict |
 | `vanguard cameras` | caméras cachées sur le réseau (location, chez quelqu'un) |
+| `vanguard objets` | box et objets connectés d'après le dernier scan gardé : modèle de la box, caméras, imprimantes, NAS… et leur mot de passe d'origine (rien n'est sondé) |
 | `vanguard dns-rapide` | DNS le plus rapide, mesuré ici et annulable ; un DNS qui protège est gardé |
 | `vanguard appris` | ce que Vanguard a appris : tes habitudes, tes choix, et les oublier |
 | `vanguard motdepasse` | mots de passe fuités |
@@ -451,7 +467,7 @@ Chaque entrée du menu existe aussi en commande.
 commandes ont aussi un nom anglais (`full`, `audit`, `fix`, `network`, `connection`, `apps`, `diag`, `password`,
 `sandbox`, `email`, `integrity`, `update`, `repair`, `monitor`, `name`, `backup`, `restore`, `clean`, `decoys`,
 `harden`, `blocklists`, `learned`, `channels`, `fast-dns`, `outbound`, `link`, `check-file`, `maintenance`, `slow`,
-`startup`, `specs`, `copy-files`, `troubleshoot`, `evidence`, `permissions`, `dashboard`, `check-backup`).
+`startup`, `specs`, `copy-files`, `troubleshoot`, `evidence`, `permissions`, `dashboard`, `check-backup`, `iot`, `relative`).
 
 **Emojis** : dans l'ancienne console de Windows (invite de commandes ou PowerShell hors du Terminal Windows, courant
 sous Windows 10), qui les dessine mal et décale les menus, 💡 et 🔧 deviennent → et +. `VANGUARD_EMOJI=0` les retire

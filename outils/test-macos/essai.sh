@@ -89,6 +89,157 @@ done
 section "Diagnostic"
 lancer diagnostic 120 '' diagnostic
 verifier "diagnostic : section MATÉRIEL" grep -q 'MATÉRIEL' "$RES/diagnostic.txt"
+lancer fiche-json 60 '' fiche --json
+
+section "Lectures en Rust (0.82) : les mêmes réponses que les outils d'Apple"
+# Depuis la 0.82, Vanguard lit lui-même les plist, sysctl, les noms du Mac, la place libre et les administrateurs, au
+# lieu de lancer defaults, plutil, sw_vers, sysctl, scutil, dscl et df. Ces outils servent ici de référence : chaque
+# verdict du bilan, de la fiche et du diagnostic doit dire ce qu'ils disent. Le détail va dans comparaisons.txt.
+COMPARER="$RES/comparer.py"
+cat >"$COMPARER" <<'FIN'
+import json, os, plistlib, re, subprocess, sys
+
+cas, res = sys.argv[1], sys.argv[2]
+constats = json.load(open(f"{res}/machine-json.txt", encoding="utf-8"))["constats"]
+
+
+def noter(*texte):
+    with open(f"{res}/comparaisons.txt", "a", encoding="utf-8") as f:
+        f.write(f"{cas} : " + " | ".join(map(str, texte)) + "\n")
+
+
+def sortie(*commande):
+    r = subprocess.run(commande, capture_output=True, text=True)
+    return r.stdout.strip() if r.returncode == 0 else None
+
+
+def defaults(domaine, cle):
+    return sortie("defaults", "read", domaine, cle)
+
+
+def de(regle, motif=""):
+    return [c for c in constats if c.get("regle") == regle and motif in c["message"]]
+
+
+def verdict(liste):
+    if not liste:
+        return "absent"
+    return "probleme" if any(c["probleme"] for c in liste) else "ok"
+
+
+def comparer(attendu, vu, *detail):
+    noter(f"attendu {attendu}", f"vu {vu}", *detail)
+    sys.exit(0 if attendu == vu else 1)
+
+
+LOGIN = "/Library/Preferences/com.apple.loginwindow"
+if cas == "airdrop":
+    mode = defaults("com.apple.sharingd", "DiscoverableMode")
+    attendu = "absent" if mode is None else "probleme" if mode.startswith("Everyone") else "ok"
+    vus = de("MAC-PAR-001")
+    comparer(attendu, verdict(vus), mode, [c["message"] for c in vus])
+elif cas == "session-auto":
+    compte = defaults(LOGIN, "autoLoginUser")
+    comparer(compte is not None, bool(de("MAC-SES-002", "s'ouvre toute seule")), compte)
+elif cas == "invite":
+    invite = defaults(LOGIN, "GuestEnabled")
+    comparer(invite == "1", bool(de("MAC-SES-002", "compte invité est activé")), invite)
+elif cas == "maj-auto":
+    domaine = "/Library/Preferences/com.apple.SoftwareUpdate"
+    coupes = [c for c in ("AutomaticCheckEnabled", "CriticalUpdateInstall", "ConfigDataInstall") if defaults(domaine, c) == "0"]
+    vus = de("MAC-MAJ-001")
+    comparer("probleme" if coupes else "ok", verdict(vus), coupes, [c["message"] for c in vus])
+elif cas == "bibliotheques":
+    valeur = defaults("/Library/Preferences/com.apple.security.libraryvalidation", "DisableLibraryValidation")
+    vus = de("MAC-SYS-001", "alidation des bibliothèques")
+    comparer("probleme" if valeur == "1" else "ok", verdict(vus), valeur)
+elif cas == "xprotect":
+    bases = [
+        "/private/var/protected/xprotect/XProtect.bundle/Contents/Info",
+        "/Library/Apple/System/Library/CoreServices/XProtect.bundle/Contents/Info",
+        "/System/Library/CoreServices/XProtect.bundle/Contents/Info",
+    ]
+    dates = []
+    for b in bases:
+        try:
+            dates.append((os.stat(f"{b}.plist").st_mtime, b))
+        except OSError:
+            pass
+    base = max(dates)[1] if dates else None
+    version = defaults(base, "CFBundleShortVersionString") if base else None
+    vus = de("MAC-ANV-001")
+    juste = bool(vus) and all(c["verifie"] for c in vus) and (version is None or f"(version {version})" in vus[0]["message"])
+    comparer(True, juste, base, version, [c["message"] for c in vus])
+elif cas == "time-machine":
+    texte = sortie("defaults", "export", "/Library/Preferences/com.apple.TimeMachine", "-")
+    try:
+        destinations = plistlib.loads(texte.encode()).get("Destinations", []) if texte else []
+    except Exception:
+        destinations = []
+    non_chiffrees = sum(d.get("LastKnownEncryptionState") == "NotEncrypted" for d in destinations)
+    comparer(non_chiffrees > 0, bool(de("MAC-SAV-002")), f"{len(destinations)} destination(s), {non_chiffrees} non chiffrée(s)")
+elif cas == "admins":
+    texte = sortie("dscl", ".", "-read", "/Groups/admin", "GroupMembership") or ""
+    admins = [n for n in texte.split()[1:] if n != "root" and not n.startswith("_")]
+    vus = de("MAC-CPT-001")
+    message = vus[0]["message"] if vus else ""
+    juste = bool(vus) and all(n in message for n in admins) and (len(admins) <= 2 or message.startswith(f"{len(admins)} comptes"))
+    comparer(True, juste, admins, message)
+elif cas == "persistance":
+    agents = []
+    for dossier in (os.path.expanduser("~/Library/LaunchAgents"), "/Library/LaunchAgents", "/Library/LaunchDaemons"):
+        for nom in sorted(os.listdir(dossier)) if os.path.isdir(dossier) else []:
+            if not nom.endswith(".plist"):
+                continue
+            try:
+                with open(os.path.join(dossier, nom), "rb") as f:
+                    r = plistlib.load(f)
+            except Exception:
+                continue
+            arguments = [a for a in r.get("ProgramArguments", []) if isinstance(a, str)]
+            if isinstance(r.get("Program"), str) or arguments:
+                agents.append(nom[: -len(".plist")])
+    vus = de("MAC-PRS-001")
+    if any(c["probleme"] for c in vus):
+        juste = all(c["verifie"] for c in vus)
+    elif agents:
+        juste = bool(vus) and vus[0]["message"].startswith(f"{len(agents)} programme(s) tiers")
+    else:
+        juste = bool(vus) and vus[0]["message"].startswith("Aucun programme tiers")
+    comparer(True, juste, f"{len(agents)} agent(s) : {', '.join(agents)}", [c["message"] for c in vus])
+elif cas == "place-libre":
+    point = "/System/Volumes/Data" if os.path.isdir("/System/Volumes/Data") else "/"
+    lignes = (sortie("df", "-k", "-P", point) or "").splitlines()
+    libre = int(lignes[1].split()[3]) * 1024 if len(lignes) > 1 else 0
+    vus = [c for c in constats if c["categorie"] == "Santé" and ("Espace disque" in c["message"] or "presque plein" in c["message"])]
+    m = re.search(r"(\d+(?:,\d+)?)\s(To|Go)", vus[0]["message"]) if vus else None
+    lu = float(m.group(1).replace(",", ".")) * 1024 ** (4 if m.group(2) == "To" else 3) if m else 0
+    juste = libre > 0 and 0.85 < lu / libre < 1.15
+    comparer(True, juste, f"df : {libre} octets", f"Vanguard : {lu:.0f} octets", [c["message"] for c in vus])
+elif cas == "fiche":
+    fiche = json.load(open(f"{res}/fiche-json.txt", encoding="utf-8"))
+    version, build = sortie("sw_vers", "-productVersion"), sortie("sw_vers", "-buildVersion")
+    memoire = int(sortie("sysctl", "-n", "hw.memsize") or 0)
+    juste = version in fiche["systeme"] and build in fiche["systeme"] and fiche["memoire"] == memoire
+    comparer(True, juste, version, build, memoire, fiche["systeme"], fiche["memoire"])
+elif cas == "diagnostic":
+    texte = " ".join(re.sub(r"\x1b\[[0-9;]*m", "", open(f"{res}/diagnostic.txt", encoding="utf-8").read()).split())
+    attendus = [
+        sortie("sw_vers", "-productVersion"),
+        sortie("sw_vers", "-buildVersion"),
+        sortie("scutil", "--get", "ComputerName"),
+        " ".join((sortie("sysctl", "-n", "machdep.cpu.brand_string") or "").split()),
+        "Allumé depuis",
+    ]
+    manquants = [a for a in attendus if a and a not in texte]
+    comparer([], manquants, attendus)
+elif cas == "sans-outils":
+    cites = [c["message"] for c in constats if not c["verifie"] and re.search(r"\b(defaults|plutil|sw_vers)\b", c["message"])]
+    comparer([], cites)
+FIN
+for cas in airdrop session-auto invite maj-auto bibliotheques xprotect time-machine admins persistance place-libre fiche diagnostic sans-outils; do
+  verifier "Rust contre Apple : $cas" python3 -I "$COMPARER" "$cas" "$RES"
+done
 
 section "Intégrité (référence, vérification, modification détectée)"
 lancer integrite-reference 60 '' integrite

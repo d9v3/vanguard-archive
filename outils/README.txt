@@ -64,6 +64,8 @@ highlighted one, Esc clears it. In the main menu, it also finds each tool of the
        Internet address on blocklists? (Spamhaus, SpamCop, DroneBL, PSBL, after your consent)
        Crowded Wi-Fi? (nearby networks by channel, and the freest channel to set on the router)
        NAT type for gaming (open, moderate or strict) · Hidden cameras? (rental, someone else's place)
+       Router and connected devices: the router's model, cameras, printers, NAS… and their default password
+         (from the last scan, nothing is probed)
   6  Antivirus and protection ›
        Quick scan · Full scan of the home folder
        USB drive or folder, with USB worm traps (fake shortcuts, autorun)
@@ -116,7 +118,8 @@ highlighted one, Esc clears it. In the main menu, it also finds each tool of the
        vanguard guide fedora, vanguard guide winget, vanguard guide dns cache
  11  Troubleshoot step by step › no Internet, Wi-Fi dropping, slow computer, no sound, printer, disk full:
        two or three questions, then Vanguard checks and suggests the right repair.
-       And: after an infection, new computer, computer leaving (sale, gift), hacked account.
+       And: after an infection, new computer, computer leaving (sale, gift), hacked account,
+       a relative's computer (three questions, a summary in plain words, the page to leave; vanguard relative).
        Collect the traces before cleaning up: processes, connections, startup, logs, recent files, in a
        dated folder with their fingerprints (read-only, nothing is sent; vanguard evidence).
        From the command line: vanguard troubleshoot sound

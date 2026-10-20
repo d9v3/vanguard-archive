@@ -308,6 +308,63 @@ try {
     else { Ok "Toutes les vérifications ont pu se faire ($(@($audit.constats).Count) constats, note $($audit.score)/100)" }
 } catch { Bug "machine --json illisible : $($_.Exception.Message)" }
 
+Etape 'Comptes et démarrage lus sans PowerShell (0.82) : les mêmes réponses que Windows'
+# Depuis la 0.82, Vanguard lit les comptes (NetUserEnum, groupe S-1-5-32-544), les clés Run et le dossier Démarrage
+# par les fonctions de Windows. PowerShell, qui les lisait avant, sert ici de référence pour le bilan JSON ci-dessus.
+try {
+    $audit = Sortie 'machine-json' | ConvertFrom-Json
+    $messages = @($audit.constats | ForEach-Object { $_.message })
+    # Les noms que le bilan cite dans les messages qui suivent l'un des motifs (anglais ou français).
+    function Noms-Cites([string[]]$motifs) {
+        @($messages | ForEach-Object { $m = $_; foreach ($motif in $motifs) { if ($m -match $motif) { $Matches[1] } } })
+    }
+    # Deux listes de noms, sans ordre ni casse (Compare-Object refuse une liste vide).
+    function Meme-Liste($quoi, [string[]]$windows, [string[]]$vanguard) {
+        $w = (@($windows | Where-Object { $_ } | Sort-Object -Unique)) -join ', '
+        $v = (@($vanguard | Where-Object { $_ } | Sort-Object -Unique)) -join ', '
+        if ($w -eq $v) { Ok "$quoi : Windows et Vanguard d'accord ($(if ($w) { $w } else { 'aucun' }))" }
+        else { Bug "$quoi : Windows dit « $w », Vanguard « $v »" }
+    }
+    $actifs = @(Get-LocalUser | Where-Object Enabled)
+    Meme-Liste 'Compte invité activé' @($actifs | Where-Object { $_.SID.Value -like '*-501' } | ForEach-Object Name) `
+        (Noms-Cites 'Guest account “(.+?)” enabled', 'Compte invité « (.+?) » activé')
+    Meme-Liste 'Administrateur intégré activé' @($actifs | Where-Object { $_.SID.Value -like '*-500' } | ForEach-Object Name) `
+        (Noms-Cites 'Built-in Administrator account “(.+?)” enabled', 'Compte Administrateur intégré « (.+?) » activé')
+    # L'invité est jugé à part : il n'est pas compté parmi les mots de passe vides.
+    Meme-Liste 'Mot de passe vide accepté' @($actifs | Where-Object { $_.SID.Value -notlike '*-501' -and -not $_.PasswordRequired } | ForEach-Object Name) `
+        (Noms-Cites 'The “(.+?)” account accepts an empty password', 'Le compte « (.+?) » accepte un mot de passe vide')
+    $lbp = (Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa' -ErrorAction SilentlyContinue).LimitBlankPasswordUse
+    if (($lbp -eq 0) -eq [bool]@($messages | Where-Object { $_ -match 'LimitBlankPasswordUse = 0' }).Count) { Ok "LimitBlankPasswordUse ($lbp) : même verdict" } else { Bug "LimitBlankPasswordUse ($lbp) : verdict différent" }
+    # Comptes oubliés : actifs, hors comptes intégrés et compte en cours, jamais connectés ou pas depuis 180 jours.
+    $limite = (Get-Date).Date.AddDays(-180)
+    Meme-Liste 'Comptes oubliés' @($actifs | Where-Object { $_.SID.Value -notmatch '-(500|501|503|504)$' -and $_.Name -ne $env:USERNAME -and (-not $_.LastLogon -or $_.LastLogon -lt $limite) } | ForEach-Object Name) `
+        (Noms-Cites 'The “(.+?)” account is active but has', 'Le compte « (.+?) » est actif mais')
+    # Administrateurs : le groupe par son SID, comme Vanguard ; noms « ORDINATEUR\compte ».
+    try {
+        $admins = @(Get-LocalGroupMember -SID 'S-1-5-32-544' -ErrorAction Stop | ForEach-Object Name)
+        $message = @($messages | Where-Object { $_ -match 'Administrators of this computer|Administrateurs de cet ordinateur|New administrator account|Nouveau compte administrateur' }) | Select-Object -First 1
+        $absents = @($admins | Where-Object { $message -notlike "*$_*" })
+        if (-not $message) { Bug 'Administrateurs : rien au bilan' }
+        elseif ($admins.Count -gt 5) { Info "Administrateurs : $($admins.Count), le bilan n'en cite que 5 : $message" }
+        elseif ($absents.Count) { Bug "Administrateurs absents du bilan : $($absents -join ', ') ($message)" }
+        else { Ok "Administrateurs : les mêmes que Get-LocalGroupMember ($($admins -join ', '))" }
+    } catch { Info "Get-LocalGroupMember illisible ici : $($_.Exception.Message)" }
+    # Programmes au démarrage : toutes les valeurs des clés Run et RunOnce, et chaque fichier des dossiers Démarrage
+    # (cachés compris, hors desktop.ini).
+    $cles = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run', 'HKCU:\Software\Microsoft\Windows\CurrentVersion\RunOnce',
+        'HKLM:\Software\Microsoft\Windows\CurrentVersion\Run', 'HKLM:\Software\Microsoft\Windows\CurrentVersion\RunOnce',
+        'HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Run'
+    $valeurs = ($cles | ForEach-Object { @((Get-Item -LiteralPath $_ -ErrorAction SilentlyContinue).GetValueNames()).Count } | Measure-Object -Sum).Sum
+    $fichiers = @([Environment]::GetFolderPath('Startup'), [Environment]::GetFolderPath('CommonStartup') | Where-Object { $_ } |
+        ForEach-Object { Get-ChildItem -LiteralPath $_ -File -Force -ErrorAction SilentlyContinue } | Where-Object Name -ne 'desktop.ini').Count
+    $persistance = @($audit.constats | Where-Object { $_.categorie -eq 'Persistance' })
+    if (@($persistance | Where-Object { $_.probleme }).Count) { Info 'Programmes au démarrage : un lancement suspect au bilan, nombre pas comparé' }
+    elseif (@($persistance | ForEach-Object { $_.message }) -join ' ' -match '(?:task\(s\) and|hors Microsoft et) (\d+) (?:startup program|programme)') {
+        if ([int]$Matches[1] -eq $valeurs + $fichiers) { Ok "Programmes au démarrage : $($Matches[1]), comme le registre et les dossiers ($valeurs + $fichiers)" }
+        else { Bug "Programmes au démarrage : Vanguard $($Matches[1]), registre et dossiers $valeurs + $fichiers" }
+    } else { Bug 'Programmes au démarrage : nombre absent du bilan' }
+} catch { Bug "Comparaison impossible : $($_.Exception.Message)" }
+
 Etape 'Scan du réseau de la VM'
 Lancer 'reseau' @('reseau')
 Lancer 'reseau-json' @('reseau', '--json')
@@ -316,26 +373,74 @@ try {
     Ok "$(@($scan.hotes).Count) appareil(s) trouvé(s) sur $($scan.reseau)"
 } catch { Bug "reseau --json illisible : $($_.Exception.Message)" }
 
+Etape 'Box et objets connectés (0.82) : sans scan gardé, puis d''après le scan, en 76 colonnes'
+# Les lignes de l'écran sans couleurs ; la plus longue doit tenir dans les 76 colonnes de Vanguard.
+function Lignes([string]$texte) { @(($texte -replace '\x1b\[[0-9;]*[A-Za-z]', '') -split "`r?`n") }
+function Trop-Larges([string[]]$lignes) { @($lignes | Where-Object { $_.TrimEnd().Length -gt 76 }) }
+# Sans scan gardé : le dossier de Vanguard pointé, pour cette commande seulement, vers un dossier vide.
+$vraiLocal = $env:LOCALAPPDATA
+$localVide = Join-Path $env:TEMP 'vanguard-objets-vide'
+New-Item -ItemType Directory -Force $localVide | Out-Null
+try {
+    $env:LOCALAPPDATA = $localVide
+    Lancer 'objets-sans-scan' @('iot')
+} finally { $env:LOCALAPPDATA = $vraiLocal }
+Remove-Item $localVide -Recurse -Force -ErrorAction SilentlyContinue
+$o = (Sortie 'objets-sans-scan') -replace '\s+', ' '
+if ($o -match 'Aucun scan gardé pour ce réseau|No scan kept for this network') { Ok 'Sans scan gardé : renvoi vers le scan du réseau' } else { Bug 'Sans scan gardé : pas de renvoi vers le scan' }
+# Après le scan de la VM : la commande relit le carnet, et le scan a déjà montré la section si la box y est.
+Lancer 'objets' @('iot')
+$o = Sortie 'objets'
+if ($o -match 'BOX ET OBJETS CONNECTÉS|ROUTER AND CONNECTED DEVICES') { Ok 'iot : écran affiché' } else { Bug 'iot : écran ABSENT' }
+if (($o -replace '\s+', ' ') -match "D'après le dernier scan|From the last scan") { Ok 'iot : d''après le dernier scan gardé, rien sondé' } else { Bug 'iot : dernier scan gardé PAS relu' }
+$larges = Trop-Larges (Lignes $o)
+if ($larges.Count) { Bug "iot : $($larges.Count) ligne(s) au-delà de 76 colonnes : $($larges[0].Trim())" } else { Ok 'iot : tout tient en 76 colonnes' }
+try {
+    $passerelle = @((Sortie 'reseau-json' | ConvertFrom-Json).hotes | Where-Object { $_.role -eq 'passerelle' }).Count
+    $lignesScan = Lignes (Sortie 'reseau')
+    $debut = @(0..($lignesScan.Count - 1) | Where-Object { $lignesScan[$_] -match 'BOX ET OBJETS CONNECTÉS|ROUTER AND CONNECTED DEVICES' })
+    if (-not $passerelle) { Info 'Pas de box dans le scan : section du scan non attendue' }
+    elseif (-not $debut.Count) { Bug 'Scan : box trouvée, mais section « Router and connected devices » ABSENTE' }
+    else {
+        # La section va jusqu'au titre suivant (── ou ━━).
+        $fin = $debut[0] + 1
+        while ($fin -lt $lignesScan.Count -and $lignesScan[$fin] -notmatch '^\s*(──|━━)') { $fin++ }
+        $section = $lignesScan[$debut[0]..($fin - 1)]
+        Info "Section du scan : $(($section | Where-Object { $_.Trim() } | Select-Object -Skip 1 | ForEach-Object { $_.Trim() }) -join ' / ')"
+        $larges = Trop-Larges $section
+        if ($larges.Count) { Bug "Scan : section des objets au-delà de 76 colonnes : $($larges[0].Trim())" } else { Ok 'Scan : section des objets en 76 colonnes' }
+    }
+} catch { Bug "Scan illisible ($($_.Exception.Message))" }
+
 Etape 'Tous les ports de cette machine (127.0.0.1)'
 Lancer 'local-tous' @('reseau', '127.0.0.1', '-p', 'tous')
 
 Etape 'Persistance suspecte : fausse tâche planifiée et fausse entrée de démarrage'
-Info 'Une tâche « PowerShell caché en base64 » et un programme dans C:\Users\Public, inoffensifs, retirés juste après.'
+Info 'Une tâche et un raccourci du dossier Démarrage « PowerShell caché en base64 », et un programme dans C:\Users\Public, inoffensifs, retirés juste après.'
 if (Question 'Faire ce test ?' 'o') {
     try {
         Register-ScheduledTask -TaskName 'vanguard-test-suspect' -Force `
             -Action (New-ScheduledTaskAction -Execute 'powershell.exe' -Argument '-NoProfile -enc VwByAGkAdABlAC0ASABvAHMAdAAgAHQAZQBzAHQA') `
             -Trigger (New-ScheduledTaskTrigger -Once -At (Get-Date).AddYears(5)) | Out-Null
         Set-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name 'vanguard-test-suspect' -Value 'C:\Users\Public\vanguard-test.exe /q'
+        # 0.82 : un raccourci du dossier Démarrage lu sans PowerShell, vers PowerShell caché en base64.
+        $raccourciSuspect = Join-Path ([Environment]::GetFolderPath('Startup')) 'vanguard-test-suspect.lnk'
+        $r = (New-Object -ComObject WScript.Shell).CreateShortcut($raccourciSuspect)
+        $r.TargetPath = "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
+        $r.Arguments = '-NoProfile -w hidden -enc VwByAGkAdABlAC0ASABvAHMAdAAgAHQAZQBzAHQA'
+        $r.Save()
         Lancer 'machine-persistance' @('machine')
         $sortie = Sortie 'machine-persistance'
         if ($sortie -match '(?s)vanguard-test-suspect.*base64|base64.*vanguard-test-suspect') { Ok 'Tâche suspecte repérée' } else { Bug 'Tâche suspecte NON repérée' }
         if ($sortie -match 'Public') { Ok 'Entrée de démarrage suspecte repérée' } else { Bug 'Entrée de démarrage suspecte NON repérée' }
+        if ($sortie -match 'Suspicious shortcut in the Startup folder|Raccourci suspect dans le dossier Démarrage' -and $sortie -match 'vanguard-test-suspect\.lnk') { Ok 'Raccourci suspect du dossier Démarrage repéré (lu sans PowerShell)' }
+        else { Bug 'Raccourci suspect du dossier Démarrage NON repéré' }
     } catch { Bug "Test de persistance impossible : $($_.Exception.Message)" }
     finally {
         Unregister-ScheduledTask -TaskName 'vanguard-test-suspect' -Confirm:$false -ErrorAction SilentlyContinue
         Remove-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name 'vanguard-test-suspect' -ErrorAction SilentlyContinue
-        Info 'Fausse tâche et fausse entrée retirées.'
+        if ($raccourciSuspect) { Remove-Item -LiteralPath $raccourciSuspect -Force -ErrorAction SilentlyContinue }
+        Info 'Fausse tâche, fausse entrée et faux raccourci retirés.'
     }
 }
 
@@ -727,6 +832,49 @@ if ($notesAvant) { Info 'Notes de sauvegarde déjà présentes : la marche à su
 elseif ($vs -match 'Historique des fichiers|File History' -and $vs -match 'Non vérifié ici|Not checked here') { Ok 'Historique des fichiers : marche à suivre, dit non vérifié' }
 else { Bug 'Marche à suivre de l''Historique des fichiers ABSENTE' }
 if ((Test-Path -LiteralPath $notesSauvegarde) -eq $notesAvant) { Ok 'Rien écrit' } else { Bug 'Notes de sauvegarde créées par une simple vérification' }
+
+Etape 'Ordinateur d''un proche (0.82) : personne âgée, peur d''un virus, réseau refusé, tout refusé'
+# Ce qu'une correction acceptée par erreur changerait : pare-feu, démarrage du compte, réglages de Defender.
+function Etat-Systeme {
+    "pare-feu=$((Get-NetFirewallProfile | ForEach-Object { "$($_.Name):$($_.Enabled)" }) -join ',')"
+    "run=$(Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -ErrorAction SilentlyContinue | Out-String)"
+    $p = Get-MpPreference -ErrorAction SilentlyContinue
+    "defender=$($p.EnableControlledFolderAccess),$($p.EnableNetworkProtection),$($p.PUAProtection),$($p.MAPSReporting)"
+}
+$etatAvant = Etat-Systeme | Out-String
+$bureauProche = [Environment]::GetFolderPath('Desktop')
+$motifPage = "Vanguard - * $(Get-Date -Format 'yyyy-MM-dd').html"
+$pagesAvant = @(Get-ChildItem -LiteralPath $bureauProche -Filter $motifPage -ErrorAction SilentlyContinue | ForEach-Object FullName)
+# Réponses : 1 personne âgée, 2 peur d'un virus, 1 réseau refusé ; Entrée seule à l'analyse antivirus (non), « y » à la
+# recherche du faux technicien. Puis des lignes vides : chaque correction est sautée (non par défaut) et la page est
+# posée sur le Bureau (oui par défaut). En arrière-plan, « n » partout : la page s'ouvrirait dans le navigateur.
+$poserPage = -not $SansOuvrir
+$avantProche = Get-Date
+$reste = if ($poserPage) { "`n" * 80 } else { "n`n" * 80 }
+LancerAvec 'proche' @('relative') ("1`n2`n1`n`ny`n" + $reste)
+$pr = (Sortie 'proche') -replace '\x1b\[[0-9;]*m', ''
+$prPlat = $pr -replace '\s+', ' '
+Info ("Durée du parcours (bilan compris) : {0:N1} s" -f $script:etape.Commandes[-1].Duree)
+if ($pr -match 'EN RÉSUMÉ|IN SHORT') { Ok 'Résumé affiché' } else { Bug 'Résumé ABSENT' }
+if ($pr -match 'Note de l.ordinateur|Computer grade') { Ok 'Note de l''ordinateur au résumé' } else { Info 'Pas de note au résumé (bilan pas assez fiable ici)' }
+if ($pr -match 'Ce qui reste à faire|What is left to do') { Ok 'Ce qui reste à faire : présent' } else { Bug 'Ce qui reste à faire : ABSENT' }
+if ($pr -match 'Ce qui va bien|What is fine') { Info "Ce qui va bien : $(($pr -split "`r?`n" | Where-Object { $_ -match '^\s+✔' } | Select-Object -First 2 | ForEach-Object { $_.Trim() }) -join ' / ')" }
+if ($prPlat -match "Quelqu'un contrôle mon ordi|Is someone controlling my PC") { Ok 'Faux technicien : la recherche de prise de contrôle s''est ouverte' } else { Bug 'Faux technicien : recherche PAS ouverte' }
+if ($pr -match 'Network scan|Scan du réseau') { Bug 'Réseau scanné malgré le refus' } else { Ok 'Réseau refusé : pas de scan' }
+if ((Etat-Systeme | Out-String) -eq $etatAvant) { Ok 'Rien changé (pare-feu, démarrage, Defender)' } else { Bug 'Le système a changé alors que tout était refusé' }
+$pagesNouvelles = @(Get-ChildItem -LiteralPath $bureauProche -Filter $motifPage -ErrorAction SilentlyContinue | Where-Object { $_.FullName -notin $pagesAvant -or $_.LastWriteTime -ge $avantProche })
+if ($poserPage) {
+    if ($pagesNouvelles.Count) {
+        Ok "Page posée sur le Bureau : $($pagesNouvelles[0].Name)"
+        $html = Get-Content -LiteralPath $pagesNouvelles[0].FullName -Raw -Encoding UTF8
+        if ($html -match 'Pour toi en particulier|Especially for you') { Ok 'Page : conseils pour la personne' } else { Bug 'Page : section des conseils ABSENTE' }
+        # Retirée si elle n'existait pas avant la passe.
+        $pagesNouvelles | Where-Object { $_.FullName -notin $pagesAvant } | Remove-Item -Force -ErrorAction SilentlyContinue
+    } else { Bug 'Page PAS posée sur le Bureau' }
+} else {
+    if ($pagesNouvelles.Count) { Bug 'Page posée alors qu''elle a été refusée' } else { Ok 'Page refusée : rien sur le Bureau' }
+    if ($prPlat -match 'La page reste possible plus tard|The page is still possible later') { Ok 'Page refusée : dit possible plus tard' } else { Bug 'Page refusée : rien dit' }
+}
 
 Etape 'Rapport HTML de Vanguard'
 if ($SansOuvrir) {
