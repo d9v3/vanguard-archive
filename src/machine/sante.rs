@@ -442,35 +442,34 @@ mod systeme {
             .unwrap_or_default()
     }
 
-    /// Le volume de données (le volume système scellé partage la même place) : `df -k -P`, en kibioctets.
+    /// Le volume de données (le volume système scellé partage la même place), par statfs : ce que lit `df`, sans le
+    /// lancer. Libre = la place disponible pour un compte ordinaire (la colonne « Available » de df).
     pub fn volumes() -> Vec<Volume> {
         let point = if std::path::Path::new("/System/Volumes/Data").is_dir() {
-            "/System/Volumes/Data"
+            c"/System/Volumes/Data"
         } else {
-            "/"
+            c"/"
         };
-        sortie("df", &["-k", "-P", point])
-            .lines()
-            .skip(1)
-            .filter_map(|l| {
-                let c: Vec<&str> = l.split_whitespace().collect();
-                let total: u64 = c.get(1)?.parse().ok()?;
-                let libre: u64 = c.get(3)?.parse().ok()?;
-                Some(Volume {
-                    point: "/".into(),
-                    libre: libre * 1024,
-                    total: total * 1024,
-                })
-            })
-            .collect()
+        // SAFETY : une struct statfs faite de nombres, que statfs remplit avant toute lecture.
+        let mut infos: libc::statfs = unsafe { std::mem::zeroed() };
+        // SAFETY : chemin C terminé par un nul, infos vit pendant l'appel.
+        if unsafe { libc::statfs(point.as_ptr(), &raw mut infos) } != 0 {
+            return Vec::new();
+        }
+        let bloc = u64::from(infos.f_bsize);
+        vec![Volume {
+            point: "/".into(),
+            libre: infos.f_bavail.saturating_mul(bloc),
+            total: infos.f_blocks.saturating_mul(bloc),
+        }]
     }
 
-    /// Valeur d'une clé dans un plist XML : « <key>SMARTStatus</key> <string>Verified</string> ».
+    /// Valeur texte d'une clé de la sortie de `diskutil info -plist` (« SMARTStatus » : « Verified »).
     pub(super) fn valeur_plist(plist: &str, cle: &str) -> Option<String> {
-        let apres = plist.split_once(&format!("<key>{cle}</key>"))?.1;
-        let debut = apres.find('>')? + 1;
-        let fin = apres[debut..].find('<')? + debut;
-        Some(apres[debut..fin].trim().to_string())
+        crate::plist::lire(plist.as_bytes())?
+            .cle(cle)?
+            .texte()
+            .map(|t| t.trim().to_string())
     }
 
     /// Disques physiques internes et leur état SMART selon diskutil (« Verified », « Failing », « Not Supported »).

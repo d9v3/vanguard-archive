@@ -7,6 +7,7 @@
 use std::path::PathBuf;
 
 use super::{Audit, Constat, alerte, cles_ssh, impossible, ok, sortie};
+use crate::plist::Valeur;
 use crate::risk::{Niveau, info_port};
 use crate::{tr, trf};
 
@@ -86,9 +87,64 @@ fn maison() -> PathBuf {
     PathBuf::from(std::env::var_os("HOME").unwrap_or_default())
 }
 
-/// Lit une préférence système (`defaults read <domaine> <clé>`) ; `None` si elle n'existe pas.
-fn preference(domaine: &str, cle: &str) -> Option<String> {
-    sortie("defaults", &["read", domaine, cle]).map(|s| s.trim().to_string())
+/// Les réglages d'un domaine de préférences, lus dans leur fichier.
+enum Reglages {
+    Lus(Valeur),
+    Absents,
+    /// Fichier interdit ou d'un format inconnu : à demander à `defaults`.
+    Illisibles,
+}
+
+/// Le fichier d'un domaine, comme `defaults` le comprend : un chemin sans « .plist », le domaine global (« -g »), ou
+/// un domaine du compte.
+fn fichier_preferences(domaine: &str) -> PathBuf {
+    if domaine.starts_with('/') {
+        PathBuf::from(format!("{domaine}.plist"))
+    } else if domaine == "-g" || domaine == "NSGlobalDomain" {
+        maison().join("Library/Preferences/.GlobalPreferences.plist")
+    } else {
+        maison().join("Library/Preferences").join(format!("{domaine}.plist"))
+    }
+}
+
+fn reglages(domaine: &str) -> Reglages {
+    match crate::plist::lire_fichier(&fichier_preferences(domaine)) {
+        Ok(Some(r @ Valeur::Dico(_))) => Reglages::Lus(r),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Reglages::Absents,
+        _ => Reglages::Illisibles,
+    }
+}
+
+/// Lit une préférence système, ce que donne `defaults read <domaine> <clé>` ; `None` si elle n'existe pas. Le fichier
+/// est lu directement ; `defaults` ne sert plus qu'en secours, quand il est illisible.
+pub(crate) fn preference(domaine: &str, cle: &str) -> Option<String> {
+    let defaults = || sortie("defaults", &["read", domaine, cle]).map(|s| s.trim().to_string());
+    match reglages(domaine) {
+        Reglages::Lus(r) => r
+            .cle(cle)
+            .and_then(|v| v.comme_defaults().map(|s| s.trim().to_string()).or_else(defaults)),
+        Reglages::Absents => None,
+        Reglages::Illisibles => defaults(),
+    }
+}
+
+/// Une valeur de SystemVersion.plist (« ProductName », « ProductVersion », « ProductBuildVersion »), ce qu'affiche
+/// `sw_vers` ; lui en secours.
+pub fn version_systeme(cle: &str) -> Option<String> {
+    let lue = crate::plist::lire_fichier(std::path::Path::new("/System/Library/CoreServices/SystemVersion.plist"))
+        .ok()
+        .flatten()
+        .and_then(|v| v.cle(cle)?.texte().map(str::to_string));
+    if lue.is_some() {
+        return lue;
+    }
+    let option = match cle {
+        "ProductName" => "-productName",
+        "ProductVersion" => "-productVersion",
+        "ProductBuildVersion" => "-buildVersion",
+        _ => return None,
+    };
+    sortie("sw_vers", &[option]).map(|s| s.trim().to_string())
 }
 
 /// « Firewall is enabled. (State = 1) » ; « State = 2 » : tout bloquer sauf l'essentiel.
@@ -422,15 +478,154 @@ fn ouverture_de_session() -> Vec<Constat> {
     constats
 }
 
-/// Comptes administrateurs (« GroupMembership: root alice »).
+/// Une valeur de sysctl en octets, par sysctlbyname : le même appel au noyau que la commande `sysctl`, sans la lancer.
+fn sysctl(nom: &str) -> Option<Vec<u8>> {
+    let nom = std::ffi::CString::new(nom).ok()?;
+    let mut taille: libc::size_t = 0;
+    // SAFETY : nom est une chaîne C terminée par un nul ; sans tampon (pointeur nul), sysctlbyname n'écrit que la
+    // taille voulue dans `taille`.
+    let code = unsafe {
+        libc::sysctlbyname(
+            nom.as_ptr(),
+            std::ptr::null_mut(),
+            &raw mut taille,
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+    if code != 0 || taille == 0 || taille > 1024 * 1024 {
+        return None;
+    }
+    let mut tampon = vec![0u8; taille];
+    // SAFETY : tampon de `taille` octets, vivant pendant l'appel ; le noyau n'écrit pas au-delà et redit dans
+    // `taille` ce qu'il a écrit.
+    let code = unsafe {
+        libc::sysctlbyname(
+            nom.as_ptr(),
+            tampon.as_mut_ptr().cast(),
+            &raw mut taille,
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+    if code != 0 {
+        return None;
+    }
+    tampon.truncate(taille);
+    Some(tampon)
+}
+
+/// Texte de sysctl (« machdep.cpu.brand_string », « hw.model ») : une chaîne C.
+pub fn sysctl_texte(nom: &str) -> Option<String> {
+    let octets = sysctl(nom)?;
+    let fin = octets.iter().position(|&o| o == 0).unwrap_or(octets.len());
+    let texte = String::from_utf8_lossy(&octets[..fin]).trim().to_string();
+    (!texte.is_empty()).then_some(texte)
+}
+
+/// Nombre de sysctl (« hw.memsize ») : un entier de 4 ou 8 octets, dans l'ordre de la machine.
+pub fn sysctl_nombre(nom: &str) -> Option<u64> {
+    let octets = sysctl(nom)?;
+    match octets.len() {
+        4 => Some(u64::from(u32::from_ne_bytes(octets.try_into().ok()?))),
+        8 => Some(u64::from_ne_bytes(octets.try_into().ok()?)),
+        _ => None,
+    }
+}
+
+/// Heure du démarrage en secondes depuis 1970 : « kern.boottime », une struct timeval dont les secondes viennent en
+/// premier, sur 8 octets.
+pub fn demarrage() -> Option<u64> {
+    let octets = sysctl("kern.boottime")?;
+    u64::try_from(i64::from_ne_bytes(octets.get(..8)?.try_into().ok()?)).ok()
+}
+
+/// Un nom de ce Mac dans ses réglages réseau, ce que donne `scutil --get` : « ComputerName » (le nom affiché) ou
+/// « LocalHostName » (le nom sur le réseau local, sans « .local ») ; scutil en secours.
+pub fn nom_machine(cle: &str) -> Option<String> {
+    let reglages = crate::plist::lire_fichier(std::path::Path::new(
+        "/Library/Preferences/SystemConfiguration/preferences.plist",
+    ))
+    .ok()
+    .flatten();
+    let lu = reglages.as_ref().and_then(|r| {
+        let systeme = r.cle("System")?;
+        let valeur = match cle {
+            "ComputerName" => systeme.cle("System")?.cle("ComputerName")?,
+            "LocalHostName" => systeme.cle("Network")?.cle("HostNames")?.cle("LocalHostName")?,
+            _ => return None,
+        };
+        valeur.texte().map(|t| t.trim().to_string())
+    });
+    lu.or_else(|| sortie("scutil", &["--get", cle]).map(|s| s.trim().to_string()))
+}
+
+/// Nom d'hôte, ce qu'affiche `hostname` (gethostname).
+pub fn nom_hote() -> Option<String> {
+    let mut tampon = [0u8; 256];
+    // SAFETY : tampon de 256 octets vivant pendant l'appel ; gethostname n'écrit pas au-delà de la taille donnée.
+    if unsafe { libc::gethostname(tampon.as_mut_ptr().cast(), tampon.len()) } != 0 {
+        return None;
+    }
+    let fin = tampon.iter().position(|&o| o == 0)?;
+    let nom = String::from_utf8_lossy(&tampon[..fin]).trim().to_string();
+    (!nom.is_empty()).then_some(nom)
+}
+
+/// Membres du groupe admin, ceux du « GroupMembership » de dscl, demandés à la bibliothèque du système. `None` :
+/// groupe introuvable ou illisible.
+fn membres_admin() -> Option<Vec<String>> {
+    let mut taille = 16 * 1024;
+    loop {
+        let mut tampon: Vec<libc::c_char> = vec![0; taille];
+        // SAFETY : une struct group faite de nombres et de pointeurs, que getgrnam_r remplit avant toute lecture.
+        let mut groupe: libc::group = unsafe { std::mem::zeroed() };
+        let mut trouve: *mut libc::group = std::ptr::null_mut();
+        // SAFETY : le nom est une chaîne C terminée par un nul ; tampon, groupe et trouve vivent pendant l'appel, et
+        // getgrnam_r n'écrit que dans les tailles données.
+        let code = unsafe {
+            libc::getgrnam_r(
+                c"admin".as_ptr(),
+                &raw mut groupe,
+                tampon.as_mut_ptr(),
+                tampon.len(),
+                &raw mut trouve,
+            )
+        };
+        if code == libc::ERANGE && taille < 1024 * 1024 {
+            taille *= 4;
+            continue;
+        }
+        if code != 0 || trouve.is_null() || groupe.gr_mem.is_null() {
+            return None;
+        }
+        let mut membres = Vec::new();
+        // SAFETY : gr_mem est un tableau de chaînes C terminé par un pointeur nul, rangé dans tampon, encore vivant ;
+        // la borne du nombre de membres arrête un tableau sans fin.
+        unsafe {
+            let mut p = groupe.gr_mem;
+            while !(*p).is_null() && membres.len() < 10_000 {
+                membres.push(std::ffi::CStr::from_ptr(*p).to_string_lossy().into_owned());
+                p = p.add(1);
+            }
+        }
+        return Some(membres);
+    }
+}
+
+/// Comptes administrateurs : par la bibliothèque du système, dscl en secours (« GroupMembership: root alice »).
 fn comptes() -> Constat {
-    let Some(texte) = sortie("dscl", &[".", "-read", "/Groups/admin", "GroupMembership"]) else {
+    let membres = membres_admin().or_else(|| {
+        let texte = sortie("dscl", &[".", "-read", "/Groups/admin", "GroupMembership"])?;
+        Some(texte.split_whitespace().skip(1).map(str::to_string).collect())
+    });
+    let Some(membres) = membres else {
         return impossible("Comptes", tr!("dscl illisible", "dscl unreadable"));
     };
     // root et les comptes internes de macOS (« _mbsetupuser ») ne sont pas des personnes.
-    let admins: Vec<&str> = texte
-        .split_whitespace()
-        .skip(1)
+    let admins: Vec<&str> = membres
+        .iter()
+        .map(String::as_str)
         .filter(|n| *n != "root" && !n.starts_with('_'))
         .collect();
     if admins.len() > 2 {
@@ -556,11 +751,19 @@ fn destinations_non_chiffrees(reglages: &str) -> usize {
 
 /// Sauvegarde Time Machine non chiffrée : le disque de sauvegarde volé donne tous les fichiers, même avec FileVault.
 fn sauvegarde_chiffree() -> Option<Constat> {
-    let reglages = sortie(
-        "defaults",
-        &["read", "/Library/Preferences/com.apple.TimeMachine", "Destinations"],
-    )?;
-    let n = destinations_non_chiffrees(&reglages);
+    const TIME_MACHINE: &str = "/Library/Preferences/com.apple.TimeMachine";
+    let n = match reglages(TIME_MACHINE) {
+        Reglages::Lus(r) => r
+            .cle("Destinations")?
+            .tableau()?
+            .iter()
+            .filter(|d| d.cle("LastKnownEncryptionState").and_then(Valeur::texte) == Some("NotEncrypted"))
+            .count(),
+        Reglages::Absents => return None,
+        Reglages::Illisibles => {
+            destinations_non_chiffrees(&sortie("defaults", &["read", TIME_MACHINE, "Destinations"])?)
+        }
+    };
     (n > 0).then(|| {
         alerte(
             "Sauvegardes",

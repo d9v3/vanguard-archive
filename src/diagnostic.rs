@@ -380,19 +380,6 @@ mod systeme {
             .filter(|v| !v.is_empty())
     }
 
-    /// Secondes depuis le démarrage, d'après `sysctl -n kern.boottime` : « { sec = 1715000000, usec = 0 } … ».
-    pub(super) fn depuis_demarrage(boottime: &str, maintenant: u64) -> Option<u64> {
-        let sec: u64 = boottime
-            .split_once("sec = ")?
-            .1
-            .split(',')
-            .next()?
-            .trim()
-            .parse()
-            .ok()?;
-        maintenant.checked_sub(sec)
-    }
-
     /// Rapports de plantage récents (moins de `jours`) : nom du programme avant la date (« Safari-2024-05-01-… »).
     fn rapports(dossiers: &[std::path::PathBuf], extensions: &[&str], jours: u64) -> Vec<String> {
         let limite = std::time::Duration::from_secs(jours * 86_400);
@@ -418,23 +405,22 @@ mod systeme {
     pub fn sections() -> Vec<Section> {
         let mut systeme = Vec::new();
         // Une valeur d'une ligne, prête à montrer.
-        let valeur_seule = |cmd: &str, args: &[&str]| sortie(cmd, args).map(|v| affichable(&v));
-        let version = [
-            valeur_seule("sw_vers", &["-productName"]),
-            valeur_seule("sw_vers", &["-productVersion"]),
-        ]
-        .into_iter()
-        .flatten()
-        .collect::<Vec<_>>()
-        .join(" ");
-        let build = valeur_seule("sw_vers", &["-buildVersion"]).unwrap_or_default();
+        let version_systeme = |cle: &str| crate::machine::macos::version_systeme(cle).map(|v| affichable(&v));
+        let version = [version_systeme("ProductName"), version_systeme("ProductVersion")]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>()
+            .join(" ");
+        let build = version_systeme("ProductBuildVersion").unwrap_or_default();
         systeme.push(ligne(
             tr!("Système", "System"),
             format!("{version} ({build}) · {}", crate::machine::macos::architecture()),
         ));
         systeme.push(ligne(
             tr!("Nom", "Name"),
-            valeur_seule("scutil", &["--get", "ComputerName"]).unwrap_or_default(),
+            crate::machine::macos::nom_machine("ComputerName")
+                .map(|n| affichable(&n))
+                .unwrap_or_default(),
         ));
         let materiel_txt = sortie("system_profiler", &["SPHardwareDataType"]).unwrap_or_default();
         let modele = [
@@ -451,22 +437,19 @@ mod systeme {
         let maintenant = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |d| d.as_secs());
-        if let Some(s) = sortie("sysctl", &["-n", "kern.boottime"])
-            .as_deref()
-            .and_then(|b| depuis_demarrage(b, maintenant))
-        {
+        if let Some(s) = crate::machine::macos::demarrage().and_then(|d| maintenant.checked_sub(d)) {
             systeme.push(ligne(tr!("Allumé depuis", "Up for"), duree(s)));
         }
 
         let mut materiel = Vec::new();
-        if let Some(cpu) = valeur_seule("sysctl", &["-n", "machdep.cpu.brand_string"]) {
+        if let Some(cpu) = crate::machine::macos::sysctl_texte("machdep.cpu.brand_string").map(|c| affichable(&c)) {
             let fils = std::thread::available_parallelism().map_or(0, std::num::NonZero::get);
             materiel.push(ligne(
                 tr!("Processeur", "Processor"),
                 trf!("{cpu} ({fils} cœurs)", "{cpu} ({fils} cores)"),
             ));
         }
-        if let Some(total) = sortie("sysctl", &["-n", "hw.memsize"]).and_then(|t| t.parse::<u64>().ok()) {
+        if let Some(total) = crate::machine::macos::sysctl_nombre("hw.memsize") {
             materiel.push(ligne(tr!("Mémoire", "Memory"), go(total)));
         }
         let ecrans = sortie("system_profiler", &["SPDisplaysDataType"]).unwrap_or_default();
@@ -846,13 +829,6 @@ mod tests {
             "Hardware:\n\n    Hardware Overview:\n\n      Model Name: MacBook Air\n      Model Identifier: Mac14,2\n";
         assert_eq!(systeme::valeur(profil, "Model Name").as_deref(), Some("MacBook Air"));
         assert_eq!(systeme::valeur(profil, "Model Identifier").as_deref(), Some("Mac14,2"));
-        assert_eq!(
-            systeme::depuis_demarrage(
-                "{ sec = 1715000000, usec = 123 } Mon May  6 12:53:20 2024",
-                1_715_003_600
-            ),
-            Some(3600)
-        );
     }
 
     #[cfg(target_os = "linux")]

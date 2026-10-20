@@ -31,6 +31,8 @@ mod nettoyer;
 mod optimiser;
 mod ordinateurs;
 mod passage;
+#[cfg(any(target_os = "macos", test))]
+mod plist;
 mod prediction;
 mod protection;
 mod raccourci;

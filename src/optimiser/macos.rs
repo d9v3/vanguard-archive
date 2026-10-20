@@ -304,25 +304,69 @@ pub fn au_demarrage() -> Vec<Programme> {
     fichiers
         .iter()
         .filter_map(|f| {
-            let label = plutil(f, "Label").filter(|l| label_valide(l))?;
-            if !agent_au_demarrage(xml(f, "RunAtLoad").as_deref(), xml(f, "KeepAlive").as_deref()) {
+            // Le plist est lu directement ; plutil ne sert qu'en secours, pour un format que le lecteur ne connaît
+            // pas. Un fichier qui n'en est pas un (tube nommé) est sauté.
+            let lu = crate::plist::lire_fichier(f).ok()?;
+            let xml = |cle: &str| match &lu {
+                Some(r) => en_xml(r.cle(cle)),
+                None => xml(f, cle),
+            };
+            let plutil = |cle: &str| match &lu {
+                Some(r) => brut(r, cle),
+                None => plutil(f, cle),
+            };
+            let label = plutil("Label").filter(|l| label_valide(l))?;
+            if !agent_au_demarrage(xml("RunAtLoad").as_deref(), xml("KeepAlive").as_deref()) {
                 return None;
             }
-            let programme = plutil(f, "Program")
-                .or_else(|| plutil(f, "ProgramArguments.0"))
+            let programme = plutil("Program")
+                .or_else(|| plutil("ProgramArguments.0"))
                 .unwrap_or_else(|| f.display().to_string());
             Some(Programme {
                 nom: Path::new(&programme)
                     .file_name()
                     .map_or_else(|| label.clone(), |n| n.to_string_lossy().into_owned()),
                 commande: programme,
-                actif: agent_actif(etats.get(&label).copied(), xml(f, "Disabled").as_deref()),
+                actif: agent_actif(etats.get(&label).copied(), xml("Disabled").as_deref()),
                 machine: false,
                 bureau: label.starts_with("com.apple."),
                 changement: Changement::Demarrage { label },
             })
         })
         .collect()
+}
+
+/// Une clé en texte, ce que donne `plutil -extract <clé> raw` (« ProgramArguments.0 » : un élément d'un tableau).
+fn brut(reglages: &crate::plist::Valeur, chemin: &str) -> Option<String> {
+    let mut v = reglages;
+    for morceau in chemin.split('.') {
+        v = match morceau.parse::<usize>() {
+            Ok(i) => v.tableau()?.get(i)?,
+            Err(_) => v.cle(morceau)?,
+        };
+    }
+    let t = v.texte()?.trim();
+    (!t.is_empty()).then(|| t.to_string())
+}
+
+/// Une clé comme `plutil -extract <clé> xml1` l'écrit, pour les jugements de demarrage.rs, qui ne regardent que son
+/// premier élément (« <true/> », « <dict> »…).
+fn en_xml(v: Option<&crate::plist::Valeur>) -> Option<String> {
+    use crate::plist::Valeur as V;
+    let element = match v? {
+        V::Booleen(true) => "<true/>",
+        V::Booleen(false) => "<false/>",
+        V::Entier(_) => "<integer>",
+        V::Reel(_) => "<real>",
+        V::Date(_) => "<date>",
+        V::Donnees(_) => "<data>",
+        V::Texte(_) => "<string>",
+        V::Tableau(_) => "<array>",
+        V::Dico(_) => "<dict>",
+    };
+    Some(format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<plist version=\"1.0\">\n{element}\n</plist>\n"
+    ))
 }
 
 /// Le Finder relit ses préférences à son démarrage : on le relance si l'une d'elles a changé.
@@ -447,6 +491,35 @@ pub fn catalogue() -> Vec<Reglage> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn agent_lu_sans_plutil() {
+        let lire = |corps: &str| {
+            crate::plist::lire(format!("<plist version=\"1.0\"><dict>{corps}</dict></plist>").as_bytes()).unwrap()
+        };
+        let agent = lire(
+            "<key>Label</key><string> com.exemple.agent </string>\
+             <key>ProgramArguments</key><array><string>/Applications/A.app/Contents/MacOS/a</string><string>-x</string></array>\
+             <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>",
+        );
+        assert_eq!(brut(&agent, "Label").as_deref(), Some("com.exemple.agent"));
+        assert_eq!(brut(&agent, "Program"), None);
+        assert_eq!(
+            brut(&agent, "ProgramArguments.0").as_deref(),
+            Some("/Applications/A.app/Contents/MacOS/a")
+        );
+        assert!(agent_au_demarrage(
+            en_xml(agent.cle("RunAtLoad")).as_deref(),
+            en_xml(agent.cle("KeepAlive")).as_deref()
+        ));
+        let coupe = lire("<key>RunAtLoad</key><false/><key>KeepAlive</key><false/><key>Disabled</key><true/>");
+        assert!(!agent_au_demarrage(
+            en_xml(coupe.cle("RunAtLoad")).as_deref(),
+            en_xml(coupe.cle("KeepAlive")).as_deref()
+        ));
+        assert!(!agent_actif(None, en_xml(coupe.cle("Disabled")).as_deref()));
+        assert!(agent_actif(None, en_xml(agent.cle("Disabled")).as_deref()));
+    }
 
     #[test]
     fn dns_d_un_service_reseau() {

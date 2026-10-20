@@ -559,11 +559,12 @@ fn lire() -> Fiche {
     let sections = ["-json", "SPHardwareDataType", "SPMemoryDataType", "SPDisplaysDataType"];
     let profil = sortie("system_profiler", &sections);
     let mut f = fiche_macos(&serde_json::from_str(&profil).unwrap_or_default());
+    let version = |cle: &str| crate::machine::macos::version_systeme(cle).unwrap_or_default();
     f.systeme = format!(
         "{} {} ({})",
-        sortie("sw_vers", &["-productName"]),
-        sortie("sw_vers", &["-productVersion"]),
-        sortie("sw_vers", &["-buildVersion"])
+        version("ProductName"),
+        version("ProductVersion"),
+        version("ProductBuildVersion")
     );
     let valeur = |texte: &str, cle: &str| {
         texte

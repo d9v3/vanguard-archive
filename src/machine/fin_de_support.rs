@@ -279,8 +279,8 @@ pub fn constats() -> Vec<Constat> {
 #[cfg(target_os = "macos")]
 pub fn constats() -> Vec<Constat> {
     let mut constats = Vec::new();
-    if let Some(r) = crate::commande::lancer(std::process::Command::new("sw_vers").arg("-productVersion"), 10)
-        && let Some(c) = systeme_macos(&r.sortie)
+    if let Some(version) = super::macos::version_systeme("ProductVersion")
+        && let Some(c) = systeme_macos(&version)
     {
         constats.push(c);
     }

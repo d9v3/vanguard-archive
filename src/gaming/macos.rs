@@ -12,13 +12,9 @@ fn rosetta_installe() -> bool {
 }
 
 /// Le compteur de Metal est-il affiché dans tous les jeux ? (« defaults read -g MetalForceHudEnabled » : 1)
-fn compteur_metal() -> Option<bool> {
-    let r = crate::commande::lancer(
-        std::process::Command::new("defaults").args(["read", "-g", "MetalForceHudEnabled"]),
-        10,
-    )?;
-    // Clé absente : le compteur est caché (réglage d'origine), la commande répond en erreur.
-    Some(r.code == Some(0) && r.sortie.trim() == "1")
+fn compteur_metal() -> bool {
+    // Clé absente : le compteur est caché (réglage d'origine).
+    crate::machine::macos::preference("-g", "MetalForceHudEnabled").as_deref() == Some("1")
 }
 
 fn lanceur(nom: &str, pourquoi: &str, app: &str, cask: &str) -> Element {
@@ -92,7 +88,7 @@ fn elements() -> Vec<Element> {
             "Affiche dans chaque jeu les images par seconde et la mémoire graphique. Pour l'enlever : defaults delete -g MetalForceHudEnabled.",
             "Shows frames per second and graphics memory in every game. To remove it: defaults delete -g MetalForceHudEnabled."
         ),
-        compteur_metal(),
+        Some(compteur_metal()),
         vec!["defaults write -g MetalForceHudEnabled -bool YES".into()],
     ));
     elements

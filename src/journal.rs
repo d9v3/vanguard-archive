@@ -122,9 +122,7 @@ pub(crate) fn systeme() -> &'static str {
         // « macOS 15.1 (Apple Silicon) »
         #[cfg(target_os = "macos")]
         {
-            let version = crate::commande::lancer(std::process::Command::new("sw_vers").arg("-productVersion"), 5)
-                .map(|r| r.sortie.trim().to_string())
-                .unwrap_or_default();
+            let version = crate::machine::macos::version_systeme("ProductVersion").unwrap_or_default();
             format!("macOS {version} ({})", crate::machine::macos::architecture())
         }
         #[cfg(windows)]
@@ -161,12 +159,10 @@ fn noms_personnels() -> &'static [(String, &'static str)] {
         // nom réseau, nom d'hôte « ….local »).
         #[cfg(target_os = "macos")]
         {
-            let lire = |cmd: &str, args: &[&str]| {
-                crate::commande::lancer(std::process::Command::new(cmd).args(args), 5).map(|r| r.sortie)
-            };
-            machines.extend(lire("scutil", &["--get", "ComputerName"]));
-            machines.extend(lire("scutil", &["--get", "LocalHostName"]));
-            machines.extend(lire("hostname", &[]));
+            use crate::machine::macos::{nom_hote, nom_machine};
+            machines.extend(nom_machine("ComputerName"));
+            machines.extend(nom_machine("LocalHostName"));
+            machines.extend(nom_hote());
         }
         noms.extend(machines.into_iter().map(|n| (n.trim().to_string(), "<machine>")));
         // Un nom très court (« pc », « a ») remplacerait des morceaux de mots.

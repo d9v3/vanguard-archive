@@ -55,8 +55,8 @@ pub fn mises_a_jour() -> Vec<Constat> {
             tr!("hors ligne ou réponse illisible", "offline or unreadable answer"),
         )];
     };
-    let majeure_actuelle = super::super::sortie("sw_vers", &["-productVersion"])
-        .and_then(|v| v.trim().split('.').next()?.parse::<u32>().ok())
+    let majeure_actuelle = super::version_systeme("ProductVersion")
+        .and_then(|v| v.split('.').next()?.parse::<u32>().ok())
         .unwrap_or(u32::MAX);
     let (niveaux, mises): (Vec<MiseAJour>, Vec<MiseAJour>) =
         liste.into_iter().partition(|m| mise_a_niveau(m, majeure_actuelle));

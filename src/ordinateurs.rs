@@ -204,18 +204,13 @@ fn nom_windows(produit: &str, build: &str, version: &str) -> String {
 
 #[cfg(target_os = "macos")]
 fn systeme_et_modele() -> (String, String) {
-    let sortie = |cmd: &str, args: &[&str]| {
-        crate::commande::lancer(std::process::Command::new(cmd).args(args), 10)
-            .filter(|r| r.code == Some(0))
-            .map(|r| r.sortie.trim().to_string())
-            .unwrap_or_default()
-    };
+    use crate::machine::macos::{sysctl_texte, version_systeme};
     let systeme = format!(
         "{} {}",
-        sortie("sw_vers", &["-productName"]),
-        sortie("sw_vers", &["-productVersion"])
+        version_systeme("ProductName").unwrap_or_default(),
+        version_systeme("ProductVersion").unwrap_or_default()
     );
-    (systeme.trim().to_string(), sortie("sysctl", &["-n", "hw.model"]))
+    (systeme.trim().to_string(), sysctl_texte("hw.model").unwrap_or_default())
 }
 
 // ───────────────────────────── Tableau ─────────────────────────────

