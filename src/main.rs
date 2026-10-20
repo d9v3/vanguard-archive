@@ -229,6 +229,10 @@ enum Commande {
     /// Vérifie si des mots de passe ont fuité (Have I Been Pwned) ; seuls 5 caractères de leur empreinte partent.
     #[command(name = "motdepasse", visible_alias = "password")]
     MotDePasse,
+    /// Mots de passe enregistrés dans les navigateurs : combien et comment protégés (comptés, jamais lus), où lancer
+    /// la vérification intégrée du navigateur (faibles, réutilisés, compromis), et la vérification HIBP d'un mot tapé.
+    #[command(visible_alias = "browser-passwords")]
+    Navigateurs,
     /// Qui parle à Internet ? Les connexions en cours de chaque programme, avec le nom du serveur. Lecture seule.
     #[command(visible_alias = "outbound")]
     Sortantes,
@@ -828,6 +832,7 @@ enum Action {
     Protection,
     Bac,
     MotsDePasse,
+    Navigateurs,
     Courriel,
     QuiParle,
     CameraMicro,
@@ -1005,6 +1010,11 @@ const OUTILS: &[Outil] = &[
         titre: ["Mots de passe : ont-ils fuité ?", "Passwords: have they leaked?"],
         precision: ["rien n'est envoyé en clair", "nothing sent in clear"],
         mots: "password hibp pwned fuite leak" },
+    Outil { action: Action::Navigateurs, groupe: Some(Groupe::Protection), lettre: "",
+        titre: ["Mots de passe des navigateurs", "Browser passwords"],
+        precision: ["comptés, jamais lus", "counted, never read"],
+        mots: "navigateur browser firefox chrome edge chromium brave vivaldi mots de passe password \
+               enregistrés saved faible weak réutilisé reused fuite leak checkup about:logins" },
     Outil { action: Action::Courriel, groupe: Some(Groupe::Protection), lettre: "e",
         titre: ["Courriel : a-t-il fuité ?", "Email address: has it leaked?"],
         precision: ["avec ton accord", "with your consent"],
@@ -1370,6 +1380,7 @@ async fn executer(s: &mut Session, action: Action) {
             }
         }
         Action::MotsDePasse => protection::fuites::verifier(),
+        Action::Navigateurs => machine::mots_de_passe::navigateurs(),
         Action::Courriel => protection::fuites::verifier_courriel(),
         Action::QuiParle => protection::sortantes::menu(),
         Action::CameraMicro => protection::camera::afficher_tout(),
@@ -1452,6 +1463,8 @@ const AIDES_EN: &[(&str, &str)] = &[
     ("integrite", "Critical file integrity: BLAKE3 fingerprint reference, then what changed since"),
     ("motdepasse", "Check whether passwords have leaked (Have I Been Pwned); only 5 characters of their fingerprint \
                     are sent"),
+    ("navigateurs", "Passwords saved in the browsers: how many and how protected (counted, never read), where to run \
+                     the browser's built-in check (weak, reused, compromised), and the HIBP check of a typed password"),
     ("sortantes", "Who talks to the Internet? Each program's current connections, with the server's name. Read-only"),
     ("verifier-moi", "Check Vanguard itself: version, build date, SHA-256 fingerprint of the program (to compare with the release page) and, on the owner's key, the key manifest"),
     ("distance", "Is someone controlling my computer? Remote control software (AnyDesk, TeamViewer, RustDesk…) installed, started at boot, running or downloaded: the fake technicians' tool. Removed after your consent; a running program asks for a second consent"),
@@ -1667,6 +1680,7 @@ async fn main() {
             }
         }
         Some(Commande::MotDePasse) => protection::fuites::verifier(),
+        Some(Commande::Navigateurs) => machine::mots_de_passe::navigateurs(),
         Some(Commande::Courriel) => protection::fuites::verifier_courriel(),
         Some(Commande::Sortantes) => protection::sortantes::afficher(),
         Some(Commande::Distance) => protection::distance::menu(),

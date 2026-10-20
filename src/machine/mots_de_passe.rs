@@ -407,6 +407,110 @@ pub fn constats() -> Vec<Constat> {
     juger(&profils())
 }
 
+// ───────────────────────────── La commande « navigateurs » ─────────────────────────────
+
+/// La vérification intégrée d'un navigateur présent, à conseiller à la personne : c'est elle qui
+/// trouve les mots de passe faibles, réutilisés ou compromis, en sécurité, dans le navigateur.
+#[derive(Debug, PartialEq, Eq)]
+enum Checkup {
+    Firefox,
+    Chrome,
+    Edge,
+    Autre(&'static str),
+}
+
+/// Quelles vérifications intégrées montrer, d'après les familles qui ont des mots de passe
+/// enregistrés (sans doublon, dans l'ordre où elles apparaissent). Un profil illisible n'invente
+/// pas une famille ; un profil vide non plus.
+fn checkups(profils: &[Result<Profil, (String, String)>]) -> Vec<Checkup> {
+    let mut v: Vec<Checkup> = Vec::new();
+    for p in profils.iter().flatten().filter(|p| p.identifiants > 0) {
+        let c = if p.firefox {
+            Checkup::Firefox
+        } else {
+            match p.navigateur {
+                "Chrome" | "Chromium" => Checkup::Chrome,
+                "Edge" => Checkup::Edge,
+                autre => Checkup::Autre(autre),
+            }
+        };
+        if !v.contains(&c) {
+            v.push(c);
+        }
+    }
+    v
+}
+
+/// « vanguard navigateurs » : l'état des mots de passe enregistrés dans les navigateurs (comptés,
+/// jamais lus), où lancer la vérification intégrée de chaque navigateur pour trouver les faibles,
+/// réutilisés et compromis, puis la vérification HIBP d'un mot de passe tapé. Vanguard ne lit ni ne
+/// déchiffre jamais un mot de passe enregistré : les lire, c'est le geste d'un voleur de mots de
+/// passe, et un antivirus classerait alors Vanguard comme malveillant.
+pub(crate) fn navigateurs() {
+    titre(tr!("Mots de passe des navigateurs", "Browser passwords"));
+    let profils = profils();
+    // 1. L'état, repris du bilan : comptés, jamais lus.
+    let constats = juger(&profils);
+    if constats.is_empty() {
+        trp!(
+            "  Aucun navigateur avec des mots de passe enregistrés n'a été trouvé.",
+            "  No browser with saved passwords was found."
+        );
+    } else {
+        for constat in &constats {
+            let puce = match constat.probleme {
+                None => format!("{VERT}✔{RESET}"),
+                Some(niveau) => format!("{}•{RESET}", couleur(niveau)),
+            };
+            println!("  {puce} {}", constat.message);
+        }
+    }
+    // 2. Ce que Vanguard ne fait pas, et pourquoi : c'est une garantie, pas une limite.
+    trp!(
+        "\n  {GRIS}Vanguard ne lit ni ne déchiffre jamais tes mots de passe enregistrés : les lire, c'est le\n  geste d'un voleur de mots de passe. Il les compte seulement, et te renvoie à ton navigateur.{RESET}",
+        "\n  {GRIS}Vanguard never reads or decrypts your saved passwords: reading them is what a password\n  stealer does. It only counts them, and points you to your browser.{RESET}"
+    );
+    // 3. La vérification intégrée de chaque navigateur présent (faibles, réutilisés, compromis).
+    let a_montrer = checkups(&profils);
+    if !a_montrer.is_empty() {
+        trp!(
+            "\n  {} Pour les mots de passe faibles, réutilisés ou compromis, ouvre la vérification intégrée\n     de ton navigateur (copie l'adresse dans sa barre) :",
+            "\n  {} For weak, reused or compromised passwords, open your browser's built-in check\n     (paste the address into its bar):",
+            ampoule()
+        );
+        for c in a_montrer {
+            let (quoi, adresse): (&str, &str) = match c {
+                Checkup::Firefox => (tr!("Firefox et cousins", "Firefox and similar"), "about:logins"),
+                Checkup::Chrome => ("Chrome / Chromium", "chrome://password-manager/checkup"),
+                Checkup::Edge => ("Edge", "edge://settings/passwords"),
+                Checkup::Autre(nom) => (
+                    nom,
+                    tr!(
+                        "gestionnaire de mots de passe du navigateur",
+                        "the browser's password manager"
+                    ),
+                ),
+            };
+            println!("       {quoi} : {GRIS}{adresse}{RESET}");
+        }
+    }
+    // 4. Vérifier un mot de passe précis, tapé maintenant : jamais affiché, jamais écrit, seuls 5
+    //    caractères de son empreinte partent (réutilise la vérification HIBP existante).
+    trp!(
+        "\n  Tu peux aussi vérifier un mot de passe précis : il ne s'affiche pas, ne quitte pas cet\n  ordinateur, et seuls 5 caractères de son empreinte partent vers Have I Been Pwned.",
+        "\n  You can also check a specific password: it is not shown, it does not leave this computer,\n  and only 5 characters of its fingerprint are sent to Have I Been Pwned."
+    );
+    if demander(tr!(
+        "  Vérifier un mot de passe maintenant ? [o/N] : ",
+        "  Check a password now? [y/N]: "
+    ))
+    .oui()
+    {
+        println!();
+        crate::protection::fuites::verifier();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -494,6 +598,41 @@ mod tests {
             c[1].correctif
                 .as_ref()
                 .is_some_and(|k| !k.automatique && k.action.contains("Firefox"))
+        );
+    }
+
+    #[test]
+    fn checkups_selon_les_familles_presentes() {
+        let lu = |navigateur, nom: &str, n, firefox| {
+            Ok(Profil {
+                navigateur,
+                nom: nom.into(),
+                identifiants: n,
+                firefox,
+            })
+        };
+        // Rien à montrer : aucun profil, ou seulement des profils vides.
+        assert_eq!(checkups(&[]), Vec::<Checkup>::new());
+        assert_eq!(checkups(&[lu("Firefox", "x.default", 0, true)]), Vec::<Checkup>::new());
+        // Les familles sont dédoublonnées (Zen = Firefox, Chromium = Chrome) et gardent leur ordre ;
+        // un profil illisible n'invente pas de famille.
+        let c = checkups(&[
+            lu("Firefox", "x.default-release", 3, true),
+            lu("Zen", "y.default", 2, true),
+            lu("Chrome", "Default", 5, false),
+            lu("Chromium", "Default", 1, false),
+            lu("Edge", "Default", 4, false),
+            lu("Brave", "Default", 1, false),
+            Err(("Vivaldi".into(), "Default/Login Data".into())),
+        ]);
+        assert_eq!(
+            c,
+            vec![
+                Checkup::Firefox,
+                Checkup::Chrome,
+                Checkup::Edge,
+                Checkup::Autre("Brave")
+            ]
         );
     }
 }

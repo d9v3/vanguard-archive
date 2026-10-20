@@ -19,7 +19,7 @@ mod heure;
 mod journaux;
 #[cfg(target_os = "linux")]
 pub mod linux;
-mod mots_de_passe;
+pub(crate) mod mots_de_passe;
 mod navigateur;
 mod navigation_detournee;
 mod partages;
