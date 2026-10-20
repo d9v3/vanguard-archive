@@ -68,7 +68,7 @@ unsafe extern "system" {
 unsafe extern "system" {
     fn LookupAccountSidW(
         systeme: *const u16,
-        sid: *const c_void,
+        sid: *mut c_void,
         nom: *mut u16,
         taille_nom: *mut u32,
         domaine: *mut u16,
@@ -237,7 +237,7 @@ fn nom_du_compte(sid: &[u8]) -> String {
     let lu = unsafe {
         LookupAccountSidW(
             std::ptr::null(),
-            aligne.as_ptr().cast(),
+            aligne.as_mut_ptr().cast(),
             nom.as_mut_ptr(),
             &raw mut taille_nom,
             domaine.as_mut_ptr(),
