@@ -59,6 +59,7 @@ highlighted one, Esc clears it. In the main menu, it also finds each tool of the
        Deep scan of one device · Name a device ("HP printer")
        Hourly monitoring (unknown device, problem on this machine, router impersonation,
          name poisoner, program landing in Downloads)
+       Monitoring dashboard: alerts day by day, new devices (local page)
        Connection test for gaming (ping, jitter, speed, bufferbloat), compared with your habits
        Internet address on blocklists? (Spamhaus, SpamCop, DroneBL, PSBL, after your consent)
        Crowded Wi-Fi? (nearby networks by channel, and the freest channel to set on the router)
@@ -67,14 +68,16 @@ highlighted one, Esc clears it. In the main menu, it also finds each tool of the
        Quick scan · Full scan of the home folder
        USB drive or folder, with USB worm traps (fake shortcuts, autorun)
        YARA scan: 308 rules for malware families (ransomware, password stealers…)
+         and over a million fingerprints of known malware (MalwareBazaar)
        Decoy files: decoys in your folders; ransomware touching them triggers the alert
        Windows Defender blocking: password theft, booby-trapped attachments, dangerous sites, ransomware
        Sandbox: run an unknown program with no network, away from your files
        Passwords: have they leaked? (only 5 characters of their fingerprint are sent)
        Email address: has it leaked? (sent to the search service, after your consent)
        Who talks to the Internet? Each program's connections, with the server's name, and known botnet
-         servers (Feodo Tracker); read-only
+         servers (Feodo Tracker, ThreatFox); read-only
        Camera and microphone: who uses them? (Windows: each program and the last time; read-only)
+       Privacy check: who can access location, contacts, camera and microphone (read-only)
        Is someone controlling my PC? Remote control tools (tech-support scam), removed after your consent
        Is this link dangerous? Checked without opening it; its age and public lists, after your consent
        Check a downloaded file: checksum compared with the site's, name and content, YARA, antivirus
@@ -102,7 +105,9 @@ highlighted one, Esc clears it. In the main menu, it also finds each tool of the
        Shortcut on this computer: Vanguard copied here and started with one click
        My computers: those where the key ran a check, their grade and remaining problems (vanguard computers)
        Protect the key's data: device record encrypted by a passphrase, asked only elsewhere
-       Update Vanguard: the copy on this computer, from the key or from GitHub (signed)
+       Update Vanguard: the copy on this computer, from the key or from GitHub (d9v3/vanguard-officiel,
+         each version signed by the author and checked)
+       Check my backup: the rsync backup read back, random files compared with their original
  10  Command guide › the useful commands of Omarchy, Arch, Fedora, Debian, Windows 11, macOS and all systems, by
        program, each one explained (⚠: it changes something), with step-by-step guides (update, repair, network,
        free up space…). Type what you are looking for: commands show up as
@@ -139,7 +144,7 @@ Good to know
     (snapper or timeshift on Linux, a restore point on Windows, a local Time Machine snapshot on macOS).
   - If you help someone connected remotely (Remote Desktop, SSH), Vanguard never cuts that access.
   - The program is not signed: SmartScreen may warn ("More info" > "Run anyway") and Microsoft Defender may
-    flag it, because it scans ports. The source code is on the key.
+    flag it, because it scans ports. The source code is on the key and on GitHub (d9v3/vanguard-beta).
   - macOS: run from the key, Vanguard opens without a warning. Copied from the Internet or AirDrop, macOS blocks it
     ("unidentified developer"): right-click > Open, or System Settings > Privacy & Security > "Open Anyway".
     Antivirus, software and gaming go through Homebrew (offered if missing).

@@ -29,7 +29,7 @@ turn on once with `/install-github-app`).
 | `src/machine/unix.rs` | checks shared by Linux and macOS: secret files, sudo |
 | `src/machine/heure.rs`, `fin_de_support.rs`, `comptes_oublies.rs`, `mots_de_passe.rs`, `sensibles.rs` | clock set automatically; system, abandoned programs and browsers without updates; unused accounts; unprotected browser passwords; sensitive files lying around |
 | `src/changements.rs` | what Vanguard changed: each fix run by `machine::appliquer_chacune`, noted on the computer |
-| `src/sauvegarde.rs`, `src/raccourci.rs`, `src/mise_a_jour.rs`, `src/a_laisser.rs` | guided automatic backup (Déjà Dup or rsync, Time Machine, File History); shortcut on this computer; updating its copy from the key (version engraved in the program, read without running it); report to leave with the person you helped |
+| `src/sauvegarde.rs`, `src/raccourci.rs`, `src/mise_a_jour.rs`, `src/a_laisser.rs` | guided automatic backup (Déjà Dup or rsync, Time Machine, File History) and check my backup (the rsync copy read back without cache, random files compared with their original; a newer original is not an error); shortcut on this computer; updating its copy from the key (version engraved in the program, read without running it) or from GitHub (`mise_a_jour/github.rs`: Ed25519-signed manifest published in d9v3/vanguard-officiel, the program's size, checksum and version checked); report to leave with the person you helped |
 | `src/corriger.rs` | guided application of fixes |
 | `src/reseau/mod.rs`, `src/reseau/scan.rs` | network scan (TCP connect, without root), ARP, network notebooks |
 | `src/reseau/nmap.rs` | service versions with nmap -sV, when installed: deep scan of a local network device, on the ports already found open |
@@ -38,8 +38,10 @@ turn on once with `/install-github-app`).
 | `src/reseau/connexion.rs` | connection test for gaming |
 | `src/protection/antivirus.rs` | ClamAV / Defender, quarantine |
 | `src/protection/yara.rs`, `src/protection/pieges.rs` | YARA scan (bundled rules, YARA-X compiled into the program); decoy files against ransomware |
+| `src/protection/empreintes.rs` | MalwareBazaar SHA-256 fingerprints (abuse.ch, CC0): full list every week (zip archive), recent ones every day, kept in Vanguard's folder and sorted; the YARA scan looks up every file it reads |
 | `src/protection/outil.rs`, `src/protection/secrets_git.rs`, `src/protection/conteneurs.rs` | secrets in git project history (Vanguard's rules, plus gitleaks when present); open source tools run when installed, installation offered otherwise (trivy on Docker or Podman images) |
 | `src/reseau/surveillance.rs` | systemd timer / Task Scheduler / launchd agent, notifications |
+| `src/reseau/tableau.rs` | monitoring dashboard: alert log (bounded in number and age), single-file local HTML page (state, alerts by day, new devices, connections to botnets) |
 | `src/rapport.rs`, `src/historique.rs` | HTML report, check history, grade curve |
 | `src/reparer.rs`, `src/maj.rs`, `src/gaming/` | repairs, updates, gaming |
 | `src/optimiser/` | privacy, performance and comfort settings, with exact undo; startup programs (`demarrage.rs`); Windows Defender blocking: ASR rules, network protection, PUA, controlled folder access (`defender.rs`) |
@@ -59,6 +61,7 @@ turn on once with `/install-github-app`).
 | `src/protection/lien.rs` | is this link dangerous? local check (punycode, imitated brands…), then RDAP, URLhaus, Spamhaus DBL, SURBL |
 | `src/protection/telechargement.rs` | check a downloaded file: checksum by the system's tool, name and content, YARA and antivirus; programs landing in Downloads, for monitoring |
 | `src/protection/quarantaine.rs`, `src/protection/camera.rs` | reversible quarantine (antivirus, YARA): isolate, put back exactly, delete; camera and microphone: who uses them (registry on Windows, /dev/video and pactl on Linux) |
+| `src/protection/acces.rs` | privacy check: apps that can access location, contacts, camera and microphone (ConsentStore on Windows, Flatpak and Snap on Linux, TCC.db on macOS); read-only |
 | `src/reseau/canaux.rs`, `src/reseau/nat.rs` | crowded Wi-Fi (nearby networks by channel); NAT type (home-made STUN client) |
 | `src/dns_rapide.rs` | fastest DNS: measurement, protecting DNS kept, setting undone through `optimiser/` |
 | `src/reseau/cameras.rs` | hidden cameras: maker, RTSP stream, ONVIF discovery (WS-Discovery), web page |

@@ -47,10 +47,10 @@ In the menu, choose **1** (full check), then **2** (fix). Arrows, Enter, and Esc
 | **Connection for gaming** | Ping, jitter, loss, speed and bufferbloat, compared with your habits. |
 | **Troubleshoot** | Computer diagnostic, everyday problems step by step (Internet, Wi-Fi, slowness, sound, printer, full disk), after an infection, collect the traces (before cleaning up), new computer, computer leaving, hacked account, “Why is it slow?”, computer specs, report to leave behind, repairs. |
 | **Optimize and clean up** | Privacy and performance settings undone exactly, a cleanup checklist with the space gained measured, startup programs. |
-| **Protection** | Decoy files against ransomware, Windows Defender blocking, 308 YARA rules, antivirus, sandbox, integrity of critical files, leaked passwords, outbound connections (known botnet servers), tech-support scam (remote control tools), camera and microphone, dangerous links, downloaded files, reversible quarantine; secrets forgotten in git project history; flaws in Docker images (trivy, when installed). |
-| **Follow-up** | Hourly monitoring, monthly check-up, HTML report with the grade curve, learning on your computer, what Vanguard changed (each fix, dated). |
+| **Protection** | Decoy files against ransomware, Windows Defender blocking, 308 YARA rules and over a million fingerprints of known malware (MalwareBazaar), antivirus, sandbox, integrity of critical files, leaked passwords, outbound connections (known botnet servers), tech-support scam (remote control tools), camera and microphone, privacy check (who can access location, contacts, camera and microphone), dangerous links, downloaded files, reversible quarantine; secrets forgotten in git project history; flaws in Docker images (trivy, when installed). |
+| **Follow-up** | Hourly monitoring and its dashboard in the browser, monthly check-up, HTML report with the grade curve, learning on your computer, what Vanguard changed (each fix, dated). |
 | **Software and games** | The best software in 8 categories, from its official source; update everything at once; settings for gaming. |
-| **Tools** | Automatic backup, copy my files (checked copy) and check a copy, check my drive (fake drives, speed), my computers (tracked by the key), key data protected by a passphrase, shortcut on this computer, Vanguard updated from the key, command guide, search in every menu. |
+| **Tools** | Automatic backup, copy my files (checked copy) and check a copy, check my backup (really read back), check my drive (fake drives, speed), my computers (tracked by the key), key data protected by a passphrase, shortcut on this computer, Vanguard updated from the key or from GitHub (versions signed by the author), command guide, search in every menu. |
 
 <details>
 <summary><b>The details, feature by feature</b></summary>
@@ -146,8 +146,11 @@ the Internet, cutting comes first: every minute counts.
 to the least serious, what is fine and three habits; put on their Desktop, to read or print.
 
 **Automatic backup** — set up with the system's tool (Déjà Dup or a daily rsync copy on Linux, Time Machine, File
-History on Windows), to an external disk, after your consent and undoable. **Shortcut on this computer**: Vanguard
-copied here and started with one click.
+History on Windows), to an external disk, after your consent and undoable. **Check my backup**: the rsync copy
+really read back from the disk, random files compared with their original; an original changed since is not counted
+as an error, a copy that differs from an unchanged original means a disk losing data. For Time Machine, Déjà Dup and
+File History, which keep their backups in their own format, how to restore one file. Nothing is written or deleted.
+**Shortcut on this computer**: Vanguard copied here and started with one click.
 
 **Why is it slow?** — a two-second snapshot: what keeps the processor, memory and disk busy, program by program;
 how long startup takes and what delays it; the programs started at login and their weight. Those that work for a
@@ -196,8 +199,10 @@ never; the free space read again afterwards tells what was really gained.
 which nobody has a reason to touch. Ransomware that encrypts or renames them triggers a critical alert, at each
 check and hourly through monitoring, with what to do; placed and removed after your consent. And a YARA scan: 308
 ReversingLabs rules that recognize whole families (ransomware, password stealers, trojans, backdoors…), alongside
-the antivirus, applied by YARA-X, compiled into Vanguard: nothing to install. What the antivirus or YARA finds can
-go into a reversible quarantine: the file is made unusable and noted, then put back exactly in its place if it was a false
+the antivirus, applied by YARA-X, compiled into Vanguard: nothing to install. Each file read is also compared with
+MalwareBazaar's SHA-256 fingerprints (abuse.ch, over a million known malware samples): there, it is that very
+program, beyond doubt. The full list is downloaded once a week (about 43 MB), the last 48 hours once a day; offline,
+the saved copy is used, and with no copy at all, it says so. What the antivirus or YARA finds can go into a reversible quarantine: the file is made unusable and noted, then put back exactly in its place if it was a false
 positive.
 
 **Secrets in git projects** — Vanguard reads the history of the git projects in the home folder: a password, API
@@ -212,7 +217,10 @@ sshguard or CrowdSec already blocks the addresses that keep trying.
 
 **Camera and microphone: who uses them?** — on Windows, each program that used the camera or the microphone, and the
 last time (a program started from a temporary folder or Downloads is flagged); on Linux, what holds them right now.
-Read-only.
+Read-only. **Privacy check**: the apps that can access location, contacts, camera and microphone, and their last use
+when the system records it (the permission store on Windows, Flatpak and Snap on Linux, the macOS permission
+database, readable with Full Disk Access). Nothing is removed: what to do is given, and what could not be read is
+said to be unchecked.
 
 **Windows Defender blocking** — Vanguard blocks nothing itself: after your consent, it turns on what Windows blocks
 from its kernel and protects against being turned off. Attack surface reduction rules (password theft from memory,
@@ -281,6 +289,11 @@ since Vanguard has not checked them.
   computer; back from someone's place, the check names what was added, replaced or removed (a planted autorun, a
   replaced program). Data, ISO images and the Ventoy menu, which change normally, are not compared. Each key has
   its own reference (recognized by its volume identifier): a second VANGUARD key does not pass for a modified one.
+- Update itself: from a newer VANGUARD key, or, without a key, from GitHub. The published programs have their own
+  repository there, [vanguard-officiel](https://github.com/d9v3/vanguard-officiel), next to the code's; the latest
+  version is described by a manifest signed with Ed25519 on the author's computer, whose public key Vanguard carries.
+  A badly signed manifest, an older version, a program whose size or checksum differs: refused. The menu announces a
+  newer version; nothing is installed without your consent.
 - Vanguard also distrusts itself: at startup, it says whether a library is injected into every program of the
   session (LD_PRELOAD, DYLD_INSERT_LIBRARIES, AppInit_DLLs: one from a system package, like GameMode, is mere
   information) and whether it runs as root for no reason, since its results go through there. In the check: the
@@ -291,7 +304,9 @@ since Vanguard has not checked them.
   it), its name and content (double extension, program disguised as a document), then YARA and the antivirus.
 - Hourly monitoring: a notification if an unknown device shows up, if a port opens, if the machine's grade drops, if
   the router seems spoofed (shared or changed MAC address: ARP spoofing), or if a program or a disguised file lands
-  in Downloads (to check before opening it; nothing is blocked).
+  in Downloads (to check before opening it; nothing is blocked). Its dashboard, a local page opened in the browser:
+  its state, the alerts day by day (kept even when the night's notification is gone), the devices that showed up and
+  the connections to botnet servers. Nothing is sent.
 - Monthly check-up: one notification a month with the machine's grade, waiting updates, the space a cleanup would
   free and new problems; nothing is changed.
 - HTML report with the grade history curve, and what changed since the previous check.
@@ -367,8 +382,9 @@ Each menu entry is also a command.
 | `vanguard copy-files [destination]` | copy my files to an external disk, checked copy |
 | `vanguard check-drive [folder]` | check my drive: real capacity, speeds, bad blocks (writes into the free space after your consent, then erases) |
 | `vanguard check-copy [folder]` | check a copy: read back from the disk and compared with the originals (restore test) |
+| `vanguard check-backup` | check my backup: the rsync backup read back, random files compared with their original (read-only) |
 | `vanguard antivirus [--full] [folder]` | antivirus scan (computer, or a key / a folder) |
-| `vanguard yara [--full] [folder]` | YARA scan: 308 rules for malware families |
+| `vanguard yara [--full] [folder]` | YARA scan: 308 rules for malware families, and MalwareBazaar's fingerprints |
 | `vanguard decoys [--remove]` | decoy files against ransomware: place them, check them, remove them |
 | `vanguard harden` | Windows Defender blocking: ASR rules, network protection, unwanted software, controlled folder access; each after your consent, undoable (Windows) |
 | `vanguard blocklists` | the home's Internet address on a blocklist? (after your consent) |
@@ -383,6 +399,7 @@ Each menu entry is also a command.
 | `vanguard outbound` | who talks to the Internet: each program's connections (read-only) |
 | `vanguard self-check` | check Vanguard itself: version, build date, SHA-256 checksum to compare with the release page; on the owner's key, the key manifest |
 | `vanguard camera-mic` | camera and microphone: who uses them? (read-only) |
+| `vanguard permissions` | privacy check: who can access location, contacts, camera and microphone (read-only) |
 | `vanguard quarantine` | the isolated files, to put back in their place or to delete |
 | `vanguard secrets` | secrets forgotten in the history of git projects (and gitleaks, if installed; read-only) |
 | `vanguard containers` | known flaws in Docker or Podman images (trivy, if installed; read-only) |
@@ -393,6 +410,7 @@ Each menu entry is also a command.
 | `vanguard update` | updates |
 | `vanguard repair` | repairs and cleaning |
 | `vanguard monitor on\|off` | hourly monitoring |
+| `vanguard dashboard [--no-open]` | monitoring dashboard: a local page opened in the browser; `--no-open` only writes it |
 | `vanguard maintenance [on\|off]` | monthly check-up; without an argument: what it would say now |
 | `vanguard name <ip\|mac> <nickname>` | name a device |
 | `vanguard backup [file]`, `vanguard restore <file>` | data backup |
@@ -405,7 +423,7 @@ Each menu entry is also a command.
 also keep their French names (`complet`, `machine`, `corriger`, `reseau`, `connexion`, `logiciels`, `diagnostic`,
 `motdepasse`, `isoler`, `courriel`, `integrite`, `maj`, `reparer`, `surveillance`, `nommer`, `sauvegarder`,
 `restaurer`, `nettoyer`, `pieges`, `durcir`, `listes-noires`, `appris`, `entretien`, `sortantes`, `lien`,
-`verifier-fichier`, `canaux`, `dns-rapide`, `traces`).
+`verifier-fichier`, `canaux`, `dns-rapide`, `traces`, `acces`, `tableau`, `verifier-sauvegarde`).
 
 **Emojis**: in the old Windows console (command prompt or PowerShell outside Windows Terminal, common on Windows 10),
 which draws them badly and shifts the menus, 💡 and 🔧 become → and +. `VANGUARD_EMOJI=0` removes them everywhere,

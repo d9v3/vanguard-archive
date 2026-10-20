@@ -60,6 +60,7 @@ Entrée ouvre celle en surbrillance, Échap efface. Au menu principal, elle trou
        Scan approfondi d'un appareil · Nommer un appareil (« imprimante HP »)
        Surveillance toutes les heures (appareil inconnu, problème sur cette machine, usurpation de la box,
          empoisonneur de noms, programme arrivé dans Téléchargements)
+       Tableau de bord de la surveillance : alertes jour par jour, nouveaux appareils (page locale)
        Test de connexion pour le jeu (ping, gigue, débit, bufferbloat), comparé à tes habitudes
        Adresse Internet sur liste noire ? (Spamhaus, SpamCop, DroneBL, PSBL, après ton accord)
        Wi-Fi encombré ? (réseaux voisins par canal, et le canal le plus libre à régler sur la box)
@@ -68,14 +69,16 @@ Entrée ouvre celle en surbrillance, Échap efface. Au menu principal, elle trou
        Analyse rapide · Analyse complète du dossier personnel
        Clé USB ou dossier, avec les pièges des vers de clé (faux raccourcis, autorun)
        Analyse YARA : 308 règles de familles de logiciels malveillants (rançongiciels, voleurs de mots de passe…)
+         et plus d'un million d'empreintes de logiciels malveillants connus (MalwareBazaar)
        Fichiers-pièges : des leurres dans tes dossiers ; un rançongiciel qui les touche déclenche l'alerte
        Blocages de Windows Defender : vol de mots de passe, pièces jointes piégées, sites dangereux, rançongiciels
        Bac à sable : lancer un programme inconnu sans réseau, à l'écart de tes fichiers
        Mots de passe : ont-ils fuité ? (seuls 5 caractères de leur empreinte sont envoyés)
        Courriel : a-t-il fuité ? (l'adresse est envoyée au service de recherche, après ton accord)
        Qui parle à Internet ? Les connexions de chaque programme, avec le nom du serveur, et les serveurs de
-         botnets connus (Feodo Tracker) ; lecture seule
+         botnets connus (Feodo Tracker, ThreatFox) ; lecture seule
        Caméra et micro : qui s'en sert ? (Windows : chaque programme et la dernière fois ; lecture seule)
+       Bilan de confidentialité : qui a accès à la position, aux contacts, à la caméra et au micro (lecture seule)
        Quelqu'un contrôle mon ordi ? Logiciels de prise de contrôle à distance (faux technicien), retirés après accord
        Ce lien est-il dangereux ? Examiné sans l'ouvrir ; son âge et des listes publiques, après accord
        Vérifier un fichier téléchargé : empreinte comparée à celle du site, nom et contenu, YARA, antivirus
@@ -103,7 +106,9 @@ Entrée ouvre celle en surbrillance, Échap efface. Au menu principal, elle trou
        Raccourci sur cet ordinateur : Vanguard copié ici et lancé d'un clic
        Mes ordinateurs : ceux où la clé a fait un bilan, leur note et leurs problèmes restants (vanguard ordinateurs)
        Protéger les données de la clé : carnet des appareils chiffré par une phrase, demandée ailleurs seulement
-       Mettre Vanguard à jour : la copie de cet ordinateur, depuis la clé ou GitHub (signée)
+       Mettre Vanguard à jour : la copie de cet ordinateur, depuis la clé ou GitHub (d9v3/vanguard-officiel,
+         chaque version signée par l'auteur et vérifiée)
+       Vérifier ma sauvegarde : la sauvegarde rsync relue, des fichiers au hasard comparés à leur original
  10  Guide des commandes › les commandes utiles d'Omarchy, Arch, Fedora, Debian, Windows 11, macOS et de tous les
        systèmes, par programme, chacune expliquée (⚠ : elle change quelque chose), avec des marches à suivre pas à
        pas (mettre à jour, réparer, réseau, faire de la place…). Tape ce que tu cherches : les
@@ -142,7 +147,8 @@ Bon à savoir
     de Time Machine sous macOS).
   - Si tu aides quelqu'un connecté à distance (Bureau à distance, SSH), Vanguard ne coupe jamais cet accès.
   - Le programme n'est pas signé : SmartScreen peut avertir (« Informations complémentaires » > « Exécuter
-    quand même ») et Microsoft Defender peut le signaler, car il scanne des ports. Le code source est sur la clé.
+    quand même ») et Microsoft Defender peut le signaler, car il scanne des ports. Le code source est sur la clé
+    et sur GitHub (d9v3/vanguard-beta).
   - macOS : lancé depuis la clé, Vanguard s'ouvre sans avertissement. Copié depuis Internet ou AirDrop, macOS le
     bloque (« développeur non identifié ») : clic droit > Ouvrir, ou Réglages Système > Confidentialité et
     sécurité > « Ouvrir quand même ». Antivirus, logiciels et gaming passent par Homebrew (proposé s'il manque).

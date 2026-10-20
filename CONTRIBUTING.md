@@ -29,7 +29,7 @@ modification. Sur GitHub, `@claude` dans un ticket ou une demande de fusion le f
 | `src/machine/unix.rs` | vérifications communes à Linux et macOS : fichiers secrets, sudo |
 | `src/machine/heure.rs`, `fin_de_support.rs`, `comptes_oublies.rs`, `mots_de_passe.rs`, `sensibles.rs` | heure réglée automatiquement ; système, programmes abandonnés et navigateurs sans mise à jour ; comptes inutilisés ; mots de passe du navigateur sans protection ; fichiers sensibles qui traînent |
 | `src/changements.rs` | ce que Vanguard a changé : chaque correction lancée par `machine::appliquer_chacune`, notée sur l'ordinateur |
-| `src/sauvegarde.rs`, `src/raccourci.rs`, `src/mise_a_jour.rs`, `src/a_laisser.rs` | sauvegarde automatique guidée (Déjà Dup ou rsync, Time Machine, Historique des fichiers) ; raccourci sur cet ordinateur ; mise à jour de sa copie depuis la clé (version gravée dans le programme, lue sans le lancer) ; rapport à laisser à la personne dépannée |
+| `src/sauvegarde.rs`, `src/raccourci.rs`, `src/mise_a_jour.rs`, `src/a_laisser.rs` | sauvegarde automatique guidée (Déjà Dup ou rsync, Time Machine, Historique des fichiers) et vérifier ma sauvegarde (la copie rsync relue sans cache, des fichiers au hasard comparés à leur original ; un original plus récent n'est pas une erreur) ; raccourci sur cet ordinateur ; mise à jour de sa copie depuis la clé (version gravée dans le programme, lue sans le lancer) ou depuis GitHub (`mise_a_jour/github.rs` : manifeste signé en Ed25519 publié dans d9v3/vanguard-officiel, taille, empreinte et version du programme vérifiées) ; rapport à laisser à la personne dépannée |
 | `src/corriger.rs` | application guidée des correctifs |
 | `src/reseau/mod.rs`, `src/reseau/scan.rs` | scan réseau (TCP connect, sans root), ARP, carnets des réseaux |
 | `src/reseau/nmap.rs` | versions des services par nmap -sV, s'il est installé : scan approfondi d'un appareil du réseau local, sur ses ports déjà trouvés ouverts |
@@ -38,8 +38,10 @@ modification. Sur GitHub, `@claude` dans un ticket ou une demande de fusion le f
 | `src/reseau/connexion.rs` | test de connexion pour le jeu |
 | `src/protection/antivirus.rs` | ClamAV / Defender, quarantaine |
 | `src/protection/yara.rs`, `src/protection/pieges.rs` | analyse YARA (règles intégrées, YARA-X compilé dans le programme) ; fichiers-pièges contre les rançongiciels |
+| `src/protection/empreintes.rs` | empreintes SHA-256 de MalwareBazaar (abuse.ch, CC0) : liste complète chaque semaine (archive zip), récentes chaque jour, gardées dans le dossier de Vanguard et triées ; l'analyse YARA y cherche chaque fichier lu |
 | `src/protection/outil.rs`, `src/protection/secrets_git.rs`, `src/protection/conteneurs.rs` | secrets dans l'historique des projets git (règles de Vanguard, gitleaks en plus s'il est là) ; outils libres lancés s'ils sont installés, installation proposée sinon (trivy sur les images Docker ou Podman) |
 | `src/reseau/surveillance.rs` | minuterie systemd / Planificateur de tâches / agent launchd, notifications |
+| `src/reseau/tableau.rs` | tableau de bord de la surveillance : journal des alertes (borné en nombre et en âge), page HTML locale d'un seul fichier (état, alertes par jour, nouveaux appareils, connexions vers des botnets) |
 | `src/rapport.rs`, `src/historique.rs` | rapport HTML, historique des bilans, courbe des notes |
 | `src/reparer.rs`, `src/maj.rs`, `src/gaming/` | réparations, mises à jour, gaming |
 | `src/optimiser/` | réglages de confidentialité, de performance et de confort, avec annulation exacte ; programmes au démarrage (`demarrage.rs`) ; blocages de Windows Defender : règles ASR, protection réseau, PUA, accès contrôlé aux dossiers (`defender.rs`) |
@@ -59,6 +61,7 @@ modification. Sur GitHub, `@claude` dans un ticket ou une demande de fusion le f
 | `src/protection/lien.rs` | ce lien est-il dangereux ? examen local (punycode, marques imitées…), puis RDAP, URLhaus, Spamhaus DBL, SURBL |
 | `src/protection/telechargement.rs` | vérifier un fichier téléchargé : empreinte par l'outil du système, nom et contenu, YARA et antivirus ; programmes arrivés dans Téléchargements, pour la surveillance |
 | `src/protection/quarantaine.rs`, `src/protection/camera.rs` | quarantaine réversible (antivirus, YARA) : isoler, remettre exactement, supprimer ; caméra et micro : qui s'en sert (registre sous Windows, /dev/video et pactl sous Linux) |
+| `src/protection/acces.rs` | bilan de confidentialité : applications qui ont accès à la position, aux contacts, à la caméra et au micro (ConsentStore sous Windows, Flatpak et Snap sous Linux, TCC.db sous macOS) ; lecture seule |
 | `src/reseau/canaux.rs`, `src/reseau/nat.rs` | Wi-Fi encombré (réseaux voisins par canal) ; type de NAT (client STUN maison) |
 | `src/dns_rapide.rs` | DNS le plus rapide : mesure, DNS qui protège gardé, réglage annulable par `optimiser/` |
 | `src/reseau/cameras.rs` | caméras cachées : fabricant, flux RTSP, recherche ONVIF (WS-Discovery), page web |

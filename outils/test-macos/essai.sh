@@ -38,6 +38,8 @@ ecran_commande() { # ecran_commande <code> <secondes> <arguments…>
     printf '      %-60s \033[31m✗ code %s\033[0m \033[90m%4s s\033[0m\n' "$texte" "$code" "$duree"
   fi
 }
+# contient <fichier> <texte> : le texte replié à 76 colonnes est cherché mots remis bout à bout, couleurs retirées.
+contient() { python3 -c "import re,sys; t=' '.join(re.sub(r'\x1b\[[0-9;]*m', '', open(sys.argv[1],encoding='utf-8').read()).split()); sys.exit(0 if sys.argv[2] in t else 1)" "$1" "$2"; }
 # macOS n'a pas la commande timeout : perl s'en charge (alarme puis exec).
 delai() { perl -e 'alarm shift; exec @ARGV' "$@"; }
 
@@ -128,6 +130,41 @@ lancer sauvegarder 60 '' sauvegarder "$RES/sauvegarde.json"
 lancer restaurer 60 '' restaurer "$RES/sauvegarde.json"
 verifier "sauvegarde écrite" test -s "$RES/sauvegarde.json"
 
+section "Vérifier ma sauvegarde (0.81) : aucune, puis une fausse sauvegarde rsync relue et une copie abîmée"
+DOSSIER_VANGUARD="$HOME/Library/Application Support/vanguard"
+NOTES="$DOSSIER_VANGUARD/sauvegarde.json"
+mkdir -p "$DOSSIER_VANGUARD"
+verifier "verifier-sauvegarde : aucune note de sauvegarde avant l'essai" test ! -e "$NOTES"
+lancer verifier-sauvegarde-aucune 60 '' verifier-sauvegarde
+verifier "verifier-sauvegarde : « aucune sauvegarde » dit" contient "$RES/verifier-sauvegarde-aucune.txt" 'Aucune sauvegarde mise en place'
+verifier "verifier-sauvegarde : rien écrit" test ! -e "$NOTES"
+# Une sauvegarde comme celle de rsync : la copie du dossier personnel, heures de modification gardées (cp -p), et
+# la note que Vanguard écrit en la mettant en place. Les originaux sont datés d'avant, pour qu'un original réécrit
+# ensuite soit « modifié depuis » et une copie réécrite « abîmée ».
+ORIGINAUX="$HOME/vanguard-essai-sauvegarde"
+DISQUE="$RES/disque-sauvegarde"
+mkdir -p "$ORIGINAUX" "$DISQUE/vanguard-essai-sauvegarde"
+for n in a b c; do echo "fichier $n de l'essai" >"$ORIGINAUX/$n.txt"; done
+touch -t 202601010000 "$ORIGINAUX"/*.txt
+cp -p "$ORIGINAUX"/*.txt "$DISQUE/vanguard-essai-sauvegarde/"
+python3 -c "import json,sys; json.dump({'mise_en_place': {'Systemd': {'date': '2026-01-01', 'destination': sys.argv[1], 'empreinte_timer': '', 'empreinte_service': ''}}}, open(sys.argv[2], 'w'))" "$DISQUE" "$NOTES"
+lancer verifier-sauvegarde 60 '' verifier-sauvegarde
+verifier "verifier-sauvegarde : 3 fichiers relus, identiques" contient "$RES/verifier-sauvegarde.txt" '3 fichier(s) relu(s) sur le disque de sauvegarde, identiques'
+verifier "verifier-sauvegarde : la sauvegarde se relit" contient "$RES/verifier-sauvegarde.txt" 'La sauvegarde se relit'
+echo "b réécrit après la sauvegarde" >"$ORIGINAUX/b.txt"
+echo "c abîmé sur le disque" >"$DISQUE/vanguard-essai-sauvegarde/c.txt"
+lancer verifier-sauvegarde-abimee 60 '' verifier-sauvegarde
+verifier "verifier-sauvegarde : original modifié depuis, pas compté comme abîmé" contient "$RES/verifier-sauvegarde-abimee.txt" '1 fichier(s) modifié(s) depuis la sauvegarde'
+verifier "verifier-sauvegarde : copie abîmée nommée" contient "$RES/verifier-sauvegarde-abimee.txt" "c.txt : différent de l'original"
+verifier "verifier-sauvegarde : sauvegarde dite abîmée" contient "$RES/verifier-sauvegarde-abimee.txt" 'La sauvegarde est abîmée'
+rm -rf "$NOTES" "$ORIGINAUX" "$DISQUE"
+
+section "Tableau de bord de la surveillance (0.81) : page écrite, sans navigateur"
+lancer tableau 60 '' tableau --sans-ouvrir
+verifier "tableau : chemin de la page affiché" grep -q 'Tableau de bord :' "$RES/tableau.txt"
+verifier "tableau : page écrite dans le dossier de Vanguard" grep -q 'Surveillance du réseau' "$DOSSIER_VANGUARD/tableau.html"
+cp "$DOSSIER_VANGUARD/tableau.html" "$RES/tableau.html" 2>/dev/null
+
 section "Courriel (refus de l'envoi)"
 lancer courriel 60 'test@example.com\nn\n' courriel
 
@@ -173,7 +210,8 @@ verifier "yara : 308 règles et empreintes chargées, rien trouvé" python3 -c "
 # L'empreinte du fichier d'essai ajoutée à la copie gardée des 48 dernières heures : il doit être reconnu, hors ligne.
 EMPREINTES="$HOME/Library/Application Support/vanguard/malwarebazaar/recentes.txt"
 verifier "empreintes : copie gardée dans le dossier de Vanguard" test -s "$EMPREINTES"
-shasum -a 256 "$ESSAI_YARA/facture.pdf.exe" | cut -c1-64 >>"$EMPREINTES"
+# Une ligne à part même si la copie ne finit pas par un saut de ligne.
+{ echo; shasum -a 256 "$ESSAI_YARA/facture.pdf.exe" | cut -c1-64; } >>"$EMPREINTES"
 VANGUARD_HORS_LIGNE=1 lancer yara-empreinte 300 'n\n' yara "$ESSAI_YARA"
 verifier "empreintes : fichier reconnu par son empreinte exacte" grep -q 'empreinte exacte' "$RES/yara-empreinte.txt"
 verifier "empreintes : quarantaine refusée, rien fait" grep -q 'Rien n.a été fait' "$RES/yara-empreinte.txt"

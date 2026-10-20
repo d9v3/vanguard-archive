@@ -544,12 +544,44 @@ New-Item -ItemType Directory -Force $dossierYara | Out-Null
 Set-Content -Path (Join-Path $dossierYara 'note.txt') -Value 'fichier sans danger' -Encoding UTF8
 [IO.File]::WriteAllBytes((Join-Path $dossierYara 'outil.exe'), [byte[]](0x4D, 0x5A, 0x90, 0x00) + [Text.Encoding]::ASCII.GetBytes('programme sans danger'))
 Lancer 'yara' @('yara', $dossierYara)
-$y = Sortie 'yara'
+# Le texte est replié à 76 colonnes : les mots se cherchent remis bout à bout.
+$y = (Sortie 'yara') -replace '\s+', ' '
 if ($y -match 'Analyse de|Scanning') { Ok 'Analyse lancée' } else { Bug 'Analyse PAS lancée' }
 if ($y -match "installer|install it|winget") { Bug 'Vanguard parle encore d''installer un moteur YARA' }
 if ($y -match 'Aucun fichier ne correspond|No file matches') { Ok 'Dossier sans danger : rien trouvé, tout lu' }
 elseif ($y -match 'illisible|unreadable') { Bug 'Des fichiers du dossier d''essai n''ont pas pu être lus' }
 else { Bug 'Résultat de l''analyse YARA inattendu' }
+# 0.81 : les empreintes de MalwareBazaar, téléchargées par cette analyse puis gardées dans le dossier de Vanguard.
+if ($y -match '(?:ni aux|or the) ([0-9]+) (?:empreintes de MalwareBazaar|MalwareBazaar fingerprints)') { Ok "Empreintes de MalwareBazaar chargées : $($Matches[1])" }
+elseif ($y -match 'MalwareBazaar (?:fingerprints unavailable|indisponibles)') { Bug 'Empreintes de MalwareBazaar indisponibles (téléchargement en échec ?)' }
+else { Bug 'Empreintes de MalwareBazaar : rien dit' }
+Etape 'Empreintes de MalwareBazaar (0.81) : un fichier d''essai reconnu par son empreinte exacte, quarantaine refusée'
+# L'empreinte du fichier d'essai ajoutée à la copie gardée des 48 dernières heures, puis l'analyse hors ligne : il
+# doit être reconnu sans aucune règle. La copie est remise ensuite telle quelle, heure comprise : Vanguard la
+# rafraîchit d'après cette heure.
+$recentes = Join-Path $env:LOCALAPPDATA 'vanguard\malwarebazaar\recentes.txt'
+if (Test-Path -LiteralPath $recentes) {
+    Ok 'Copie des empreintes récentes gardée dans le dossier de Vanguard'
+    $essaiEmpreinte = Join-Path $dossierYara 'facture.pdf.exe'
+    Set-Content -Path $essaiEmpreinte -Value "fichier d'essai de Vanguard $(Get-Date -Format o)" -Encoding UTF8
+    $copieRecentes = [IO.File]::ReadAllBytes($recentes)
+    $heureRecentes = (Get-Item -LiteralPath $recentes).LastWriteTimeUtc
+    try {
+        # Une ligne à part même si la copie ne finit pas par un saut de ligne.
+        Add-Content -LiteralPath $recentes -Value ("`r`n" + (Get-FileHash $essaiEmpreinte -Algorithm SHA256).Hash.ToLower()) -Encoding ASCII
+        $env:VANGUARD_HORS_LIGNE = '1'
+        LancerAvec 'yara-empreinte' @('yara', $dossierYara) "n`n"
+    } finally {
+        Remove-Item Env:VANGUARD_HORS_LIGNE -ErrorAction SilentlyContinue
+        [IO.File]::WriteAllBytes($recentes, $copieRecentes)
+        (Get-Item -LiteralPath $recentes).LastWriteTimeUtc = $heureRecentes
+    }
+    $ye = (Sortie 'yara-empreinte') -replace '\s+', ' '
+    if ($ye -match 'facture\.pdf\.exe' -and $ye -match 'empreinte exacte|exact fingerprint') { Ok 'Fichier d''essai reconnu par son empreinte exacte' } else { Bug 'Fichier d''essai PAS reconnu par son empreinte' }
+    if ($ye -match "Rien n'a été fait|Nothing was done") { Ok 'Quarantaine refusée : rien fait' } else { Bug 'Refus de la quarantaine PAS respecté' }
+    if (Test-Path -LiteralPath $essaiEmpreinte) { Ok 'Fichier d''essai laissé en place' } else { Bug 'Fichier d''essai déplacé malgré le refus' }
+    if ((Get-FileHash -LiteralPath $recentes).Hash -eq (Get-FileHash -InputStream ([IO.MemoryStream]::new($copieRecentes))).Hash) { Ok 'Copie des empreintes remise comme avant' } else { Bug 'Copie des empreintes PAS remise comme avant' }
+} else { Bug "Copie des empreintes récentes ABSENTE ($recentes) : correspondance pas essayée" }
 Remove-Item $dossierYara -Recurse -Force -ErrorAction SilentlyContinue
 
 Etape 'Collecter les traces (0.79) : dossier daté, LISEZMOI, manifeste juste, rien gardé'
@@ -667,6 +699,34 @@ if (Test-Path $base) {
 } else {
     Sautee 'Pas de base créée par le scan : test de notification sauté.'
 }
+
+Etape 'Tableau de bord de la surveillance (0.81) : page écrite, sans navigateur'
+# Après la surveillance ci-dessus : la page doit montrer sa dernière passe. --sans-ouvrir : rien ne surgit à l'écran.
+$page = Join-Path $env:LOCALAPPDATA 'vanguard\tableau.html'
+$avantTableau = Get-Date
+Lancer 'tableau' @('tableau', '--sans-ouvrir')
+if ((Sortie 'tableau') -match 'Tableau de bord :|Dashboard:') { Ok 'Chemin de la page affiché' } else { Bug 'Chemin de la page PAS affiché' }
+if ((Test-Path -LiteralPath $page) -and (Get-Item -LiteralPath $page).LastWriteTime -ge $avantTableau.AddSeconds(-2)) {
+    Ok 'Page écrite dans le dossier de Vanguard'
+    $html = Get-Content -LiteralPath $page -Raw -Encoding UTF8
+    if ($html -match 'Surveillance du réseau|Network monitoring') { Ok 'Page lisible : titre présent' } else { Bug 'Page sans titre' }
+    if ($html -match 'Rien à montrer pour l.instant|Nothing to show yet') {
+        # Le scan du réseau a rempli la base des appareils : la page ne doit pas se dire vide.
+        if (Test-Path $base) { Bug 'Page dite vide alors que des appareils sont connus' } else { Info 'Page vide : aucun appareil connu ni surveillance passée' }
+    } elseif ($html -match 'Alertes par jour|Alerts by day') { Ok 'Alertes par jour, appareils et connexions affichés' }
+    else { Bug 'Page sans la section des alertes' }
+} else { Bug "Page PAS écrite ($page)" }
+
+Etape 'Vérifier ma sauvegarde (0.81) : sous Windows, la marche à suivre de l''Historique des fichiers, rien écrit'
+$notesSauvegarde = Join-Path $env:LOCALAPPDATA 'vanguard\sauvegarde.json'
+$notesAvant = Test-Path -LiteralPath $notesSauvegarde
+Lancer 'verifier-sauvegarde' @('verifier-sauvegarde')
+$vs = (Sortie 'verifier-sauvegarde') -replace '\s+', ' '
+if ($vs -match 'Vérifier ma sauvegarde|Check my backup') { Ok 'Écran affiché' } else { Bug 'Écran ABSENT' }
+if ($notesAvant) { Info 'Notes de sauvegarde déjà présentes : la marche à suivre peut différer' }
+elseif ($vs -match 'Historique des fichiers|File History' -and $vs -match 'Non vérifié ici|Not checked here') { Ok 'Historique des fichiers : marche à suivre, dit non vérifié' }
+else { Bug 'Marche à suivre de l''Historique des fichiers ABSENTE' }
+if ((Test-Path -LiteralPath $notesSauvegarde) -eq $notesAvant) { Ok 'Rien écrit' } else { Bug 'Notes de sauvegarde créées par une simple vérification' }
 
 Etape 'Rapport HTML de Vanguard'
 if ($SansOuvrir) {

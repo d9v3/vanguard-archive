@@ -51,10 +51,10 @@ pour revenir.
 | **Connexion pour le jeu** | Ping, gigue, pertes, débit et bufferbloat, comparés à tes habitudes. |
 | **Dépanner** | Diagnostic de l'ordinateur, pannes de tous les jours pas à pas (Internet, Wi-Fi, lenteur, son, imprimante, disque plein), après une infection, collecter les traces (avant de nettoyer), nouvel ordinateur, ordinateur qui part, compte piraté, « Pourquoi c'est lent ? », fiche de l'ordinateur, rapport à laisser, réparations. |
 | **Optimiser et nettoyer** | Réglages de confidentialité et de performance qui s'annulent exactement, nettoyage à cocher avec la place gagnée mesurée, programmes du démarrage. |
-| **Protection** | Fichiers-pièges contre les rançongiciels, blocages de Windows Defender, 308 règles YARA, antivirus, bac à sable, intégrité des fichiers critiques, mots de passe fuités, connexions sortantes (serveurs de botnets connus), faux technicien (logiciels de prise de contrôle à distance), caméra et micro, liens dangereux, fichiers téléchargés, quarantaine réversible ; secrets oubliés dans l'historique des projets git ; failles des images Docker (trivy, s'il est installé). |
-| **Suivi** | Surveillance toutes les heures, entretien du mois, rapport HTML avec la courbe des notes, apprentissage sur ton ordinateur, ce que Vanguard a changé (chaque correction, datée). |
+| **Protection** | Fichiers-pièges contre les rançongiciels, blocages de Windows Defender, 308 règles YARA et plus d'un million d'empreintes de logiciels malveillants connus (MalwareBazaar), antivirus, bac à sable, intégrité des fichiers critiques, mots de passe fuités, connexions sortantes (serveurs de botnets connus), faux technicien (logiciels de prise de contrôle à distance), caméra et micro, bilan de confidentialité (qui a accès à la position, aux contacts, à la caméra et au micro), liens dangereux, fichiers téléchargés, quarantaine réversible ; secrets oubliés dans l'historique des projets git ; failles des images Docker (trivy, s'il est installé). |
+| **Suivi** | Surveillance toutes les heures et son tableau de bord dans le navigateur, entretien du mois, rapport HTML avec la courbe des notes, apprentissage sur ton ordinateur, ce que Vanguard a changé (chaque correction, datée). |
 | **Logiciels et jeux** | Les meilleurs logiciels en 8 catégories, depuis leur source officielle ; mises à jour de tout d'un coup ; réglages pour jouer. |
-| **Outils** | Sauvegarde automatique, copier mes fichiers (copie vérifiée) et vérifier une copie, vérifier ma clé (fausses clés, vitesse), mes ordinateurs (suivis par la clé), données de la clé protégées par une phrase, raccourci sur cet ordinateur, Vanguard mis à jour depuis la clé, guide des commandes, recherche dans tous les menus. |
+| **Outils** | Sauvegarde automatique, copier mes fichiers (copie vérifiée) et vérifier une copie, vérifier ma sauvegarde (relue pour de vrai), vérifier ma clé (fausses clés, vitesse), mes ordinateurs (suivis par la clé), données de la clé protégées par une phrase, raccourci sur cet ordinateur, Vanguard mis à jour depuis la clé ou depuis GitHub (versions signées par l'auteur), guide des commandes, recherche dans tous les menus. |
 
 <details>
 <summary><b>Le détail, fonction par fonction</b></summary>
@@ -159,6 +159,10 @@ faire du plus grave au moins grave, ce qui va bien et trois habitudes ; posée s
 
 **Sauvegarde automatique** — mise en place avec l'outil du système (Déjà Dup ou une copie rsync chaque jour sous
 Linux, Time Machine, Historique des fichiers sous Windows), vers un disque externe, après accord et annulable.
+**Vérifier ma sauvegarde** : la copie rsync relue pour de vrai sur le disque, des fichiers au hasard comparés à leur
+original ; un original modifié depuis n'est pas compté comme une erreur, une copie différente d'un original inchangé
+dit un disque qui perd des données. Pour Time Machine, Déjà Dup et l'Historique des fichiers, qui gardent leurs
+sauvegardes dans leur propre format, la marche à suivre pour restaurer un fichier. Rien n'est écrit ni effacé.
 **Raccourci sur cet ordinateur** : Vanguard copié ici et lancé d'un clic.
 
 **Pourquoi c'est lent ?** — un instantané de deux secondes : ce qui occupe le processeur, la mémoire et le disque,
@@ -214,7 +218,11 @@ dans Documents, Images et Bureau, que personne n'a de raison de toucher. Un ran�
 renomme déclenche une alerte critique, au bilan et toutes les heures par la surveillance, avec la marche à suivre ;
 posés et retirés après accord. Et une analyse YARA : 308 règles de ReversingLabs qui reconnaissent des familles
 entières (rançongiciels, voleurs de mots de passe, chevaux de Troie, portes dérobées…), en complément de
-l'antivirus, appliquées par YARA-X, compilé dans Vanguard : rien à installer. Ce que l'antivirus ou YARA trouve peut aller en quarantaine, réversible : le fichier est rendu
+l'antivirus, appliquées par YARA-X, compilé dans Vanguard : rien à installer. Chaque fichier lu est aussi comparé
+aux empreintes SHA-256 de MalwareBazaar (abuse.ch, plus d'un million de logiciels malveillants connus) : là, c'est ce
+logiciel précis, sans doute possible. La liste complète se télécharge une fois par semaine (environ 43 Mo), les
+nouveautés des 48 dernières heures une fois par jour ; sans Internet, la copie gardée sert, et sans copie du tout,
+c'est dit. Ce que l'antivirus ou YARA trouve peut aller en quarantaine, réversible : le fichier est rendu
 inutilisable et noté, puis remis exactement à sa place si c'était un faux positif.
 
 **Secrets dans les projets git** — Vanguard relit l'historique des projets git du dossier personnel : un mot de passe,
@@ -229,7 +237,10 @@ fail2ban, sshguard ou CrowdSec bloque déjà les adresses qui insistent.
 
 **Caméra et micro : qui s'en sert ?** — sous Windows, chaque programme qui a utilisé la caméra ou le micro, et la
 dernière fois (un programme lancé depuis un dossier temporaire ou Téléchargements est signalé) ; sous Linux, ce qui
-les tient en ce moment. En lecture seule.
+les tient en ce moment. En lecture seule. **Bilan de confidentialité** : les applications qui ont accès à la
+position, aux contacts, à la caméra et au micro, et leur dernier usage quand le système le note (registre des
+autorisations sous Windows, Flatpak et Snap sous Linux, base des autorisations de macOS, lisible avec l'accès complet
+au disque). Rien n'est retiré : la marche à suivre est donnée, et ce qui n'a pas pu être lu est dit non vérifié.
 
 **Blocages de Windows Defender** — Vanguard ne bloque rien lui-même : il active, après accord, ce que Windows bloque
 depuis son noyau et protège contre la désactivation. Règles de réduction de la surface d'attaque (vol des mots de
@@ -303,6 +314,11 @@ ne les ayant pas vérifiées.
   retiré (un autorun planté, un programme remplacé). Les données, les images ISO et le menu Ventoy, qui changent
   normalement, ne sont pas comparés. Chaque clé a sa référence (reconnue par l'identifiant de son volume) : une
   deuxième clé VANGUARD ne passe pas pour une clé modifiée.
+- Se mettre à jour : depuis une clé VANGUARD plus récente, ou, sans clé, depuis GitHub. Les programmes publiés y ont
+  leur propre dépôt, [vanguard-officiel](https://github.com/d9v3/vanguard-officiel), à côté de celui du code ; la
+  dernière version y est décrite par un manifeste signé en Ed25519 sur l'ordinateur de l'auteur, dont Vanguard porte
+  la clé publique. Un manifeste mal signé, une version plus ancienne, un programme dont la taille ou l'empreinte
+  diffère : refusés. Le menu annonce une version plus récente ; rien ne s'installe sans accord.
 - Vanguard se méfie aussi de lui-même : au démarrage, il dit si une bibliothèque est injectée dans tous les
   programmes de la session (LD_PRELOAD, DYLD_INSERT_LIBRARIES, AppInit_DLLs : celle d'un paquet du système, comme
   GameMode, est une simple information) et s'il tourne en root sans raison, car ses résultats passent par là. Au
@@ -315,6 +331,9 @@ ne les ayant pas vérifiées.
 - Surveillance toutes les heures : notification si un appareil inconnu arrive, si un port s'ouvre, si la note de
   la machine baisse, si la box semble usurpée (adresse MAC partagée ou changée : usurpation ARP), ou si un
   programme ou un fichier déguisé arrive dans Téléchargements (à vérifier avant de l'ouvrir ; rien n'est bloqué).
+  Son tableau de bord, une page locale ouverte dans le navigateur : son état, les alertes jour par jour (gardées
+  même quand la notification de la nuit a disparu), les appareils apparus et les connexions vers des serveurs de
+  botnets. Rien n'est envoyé.
 - Entretien du mois : une notification par mois avec la note de la machine, les mises à jour en attente, la place
   que le nettoyage libérerait et les problèmes nouveaux ; rien n'est changé.
 - Rapport HTML avec la courbe des notes, et ce qui a changé depuis le bilan précédent.
@@ -391,8 +410,9 @@ Chaque entrée du menu existe aussi en commande.
 | `vanguard copier-fichiers [destination]` | copier mes fichiers vers un disque externe, copie vérifiée |
 | `vanguard verifier-cle [dossier]` | vérifier ma clé : capacité réelle, vitesses, blocs en erreur (écrit dans le libre après accord, puis efface) |
 | `vanguard verifier-copie [dossier]` | vérifier une copie : relue sur le disque et comparée aux originaux (test de restauration) |
+| `vanguard verifier-sauvegarde` | vérifier ma sauvegarde : la sauvegarde rsync relue, des fichiers au hasard comparés à leur original (lecture seule) |
 | `vanguard antivirus [--complet] [dossier]` | analyse antivirus (ordinateur, ou une clé / un dossier) |
-| `vanguard yara [--complet] [dossier]` | analyse YARA : 308 règles de familles de logiciels malveillants |
+| `vanguard yara [--complet] [dossier]` | analyse YARA : 308 règles de familles de logiciels malveillants, et les empreintes de MalwareBazaar |
 | `vanguard pieges [--retirer]` | fichiers-pièges contre les rançongiciels : les poser, les vérifier, les retirer |
 | `vanguard durcir` | blocages de Windows Defender : règles ASR, protection réseau, logiciels indésirables, accès contrôlé aux dossiers ; chacun après accord, annulable (Windows) |
 | `vanguard listes-noires` | l'adresse Internet de la maison sur liste noire ? (après accord) |
@@ -407,6 +427,7 @@ Chaque entrée du menu existe aussi en commande.
 | `vanguard sortantes` | qui parle à Internet : les connexions de chaque programme (lecture seule) |
 | `vanguard verifier-moi` | vérifier Vanguard lui-même : version, date de compilation, empreinte SHA-256 à comparer à la page de la version ; sur la clé du propriétaire, le manifeste de la clé |
 | `vanguard camera-micro` | caméra et micro : qui s'en sert ? (lecture seule) |
+| `vanguard acces` | bilan de confidentialité : qui a accès à la position, aux contacts, à la caméra et au micro (lecture seule) |
 | `vanguard quarantaine` | les fichiers isolés, à remettre à leur place ou à supprimer |
 | `vanguard secrets` | secrets oubliés dans l'historique des projets git (et gitleaks, s'il est installé ; lecture seule) |
 | `vanguard conteneurs` | failles connues des images Docker ou Podman (trivy, s'il est installé ; lecture seule) |
@@ -417,6 +438,7 @@ Chaque entrée du menu existe aussi en commande.
 | `vanguard maj` | mises à jour |
 | `vanguard reparer` | réparations et nettoyage |
 | `vanguard surveillance on\|off` | surveillance horaire |
+| `vanguard tableau [--sans-ouvrir]` | tableau de bord de la surveillance : page locale ouverte dans le navigateur ; `--sans-ouvrir` l'écrit seulement |
 | `vanguard entretien [on\|off]` | entretien du mois ; sans argument : ce qu'il dirait maintenant |
 | `vanguard nommer <ip\|mac> <surnom>` | nommer un appareil |
 | `vanguard sauvegarder [fichier]`, `vanguard restaurer <fichier>` | sauvegarde des données |
@@ -429,7 +451,7 @@ Chaque entrée du menu existe aussi en commande.
 commandes ont aussi un nom anglais (`full`, `audit`, `fix`, `network`, `connection`, `apps`, `diag`, `password`,
 `sandbox`, `email`, `integrity`, `update`, `repair`, `monitor`, `name`, `backup`, `restore`, `clean`, `decoys`,
 `harden`, `blocklists`, `learned`, `channels`, `fast-dns`, `outbound`, `link`, `check-file`, `maintenance`, `slow`,
-`startup`, `specs`, `copy-files`, `troubleshoot`, `evidence`).
+`startup`, `specs`, `copy-files`, `troubleshoot`, `evidence`, `permissions`, `dashboard`, `check-backup`).
 
 **Emojis** : dans l'ancienne console de Windows (invite de commandes ou PowerShell hors du Terminal Windows, courant
 sous Windows 10), qui les dessine mal et décale les menus, 💡 et 🔧 deviennent → et +. `VANGUARD_EMOJI=0` les retire
