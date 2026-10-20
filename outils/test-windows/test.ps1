@@ -931,13 +931,22 @@ try {
     $portes = @($audit.constats | Where-Object { $_.regle -in 'WIN-PRS-002', 'WIN-PRS-004' })
     if (@($portes.regle | Sort-Object -Unique).Count -eq 2 -and -not @($portes | Where-Object { -not $_.verifie }).Count) { Ok 'Règles IFEO et Winlogon au bilan, vérifiées' }
     else { Bug 'Règle IFEO ou Winlogon absente du bilan, ou non vérifiée' }
-    # La règle des mots de passe : lue par ADSI, comme Vanguard (sans droits, quelle que soit la langue), et par
-    # net accounts pour comparer. Une lecture ADSI vide dirait que Vanguard ne peut rien conclure.
-    $adsi = [ADSI]"WinNT://$env:COMPUTERNAME"
-    $longueur = $adsi.MinPasswordLength.Value
-    $seuil = $adsi.MaxBadPasswordsAllowed.Value
-    if ($null -eq $longueur -or $null -eq $seuil) { Bug 'Règle des mots de passe illisible par ADSI : Vanguard n''en dira rien' }
-    else { Ok "ADSI : longueur minimale $longueur, blocage après $seuil essai(s) (0 : jamais)" }
+    # La règle des mots de passe : lue par NetUserModalsGet, comme Vanguard (sans droits, quelle que soit la langue), et
+    # par net accounts pour comparer. Une lecture vide dirait que Vanguard ne peut rien conclure.
+    Add-Type -Namespace VanguardTest -Name Modales -MemberDefinition @'
+[DllImport("netapi32.dll", CharSet = CharSet.Unicode)] public static extern int NetUserModalsGet(string serveur, int niveau, out IntPtr tampon);
+[DllImport("netapi32.dll")] public static extern int NetApiBufferFree(IntPtr tampon);
+'@
+    function Modale([int]$niveau, [int]$champ) {
+        $tampon = [IntPtr]::Zero
+        if ([VanguardTest.Modales]::NetUserModalsGet($null, $niveau, [ref]$tampon) -ne 0) { return $null }
+        try { [Runtime.InteropServices.Marshal]::ReadInt32($tampon, 4 * $champ) } finally { [void][VanguardTest.Modales]::NetApiBufferFree($tampon) }
+    }
+    $longueur = Modale 0 0
+    $seuil = Modale 3 2
+    if ($null -eq $longueur -or $null -eq $seuil) { Bug 'Règle des mots de passe illisible par NetUserModalsGet : Vanguard n''en dira rien' }
+    else { Ok "NetUserModalsGet : longueur minimale $longueur, blocage après $seuil essai(s) (0 : jamais)" }
+    Accord79 'Règle des mots de passe lue par Vanguard' $false 'password policy unreadable|règle des mots de passe illisible'
     Info "net accounts : $((net accounts | Select-String 'length|lockout threshold|longueur|seuil') -join ' ; ')"
     if ($null -ne $seuil) {
         Accord79 'Blocage après des mots de passe faux' ($seuil -eq 0) 'Aucun blocage après|No lockout after'

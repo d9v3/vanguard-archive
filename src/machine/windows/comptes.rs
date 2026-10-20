@@ -126,27 +126,68 @@ fn juger_comptes(utilisateurs: &[&str], moi: Option<&str>, lbp: Option<u32>) -> 
     constats
 }
 
-/// La règle des mots de passe des comptes locaux, lue par ADSI (sans droits d'administrateur, et sans dépendre de la
-/// langue de Windows comme « net accounts ») : (longueur minimale, essais ratés avant blocage ; 0 : jamais bloqué).
+/// USER_MODALS_INFO_0 de lmaccess.h : la longueur minimale des mots de passe, puis des champs qui ne servent pas ici.
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct Modales0 {
+    longueur_min: u32,
+    _age_max: u32,
+    _age_min: u32,
+    _deconnexion: u32,
+    _historique: u32,
+}
+
+/// USER_MODALS_INFO_3 de lmaccess.h : durée et fenêtre du blocage, puis le nombre d'essais ratés qui bloque.
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct Modales3 {
+    _duree: u32,
+    _fenetre: u32,
+    seuil: u32,
+}
+
+#[link(name = "netapi32")]
+unsafe extern "system" {
+    fn NetUserModalsGet(serveur: *const u16, niveau: u32, tampon: *mut *mut u8) -> u32;
+    fn NetApiBufferFree(tampon: *mut std::ffi::c_void) -> u32;
+}
+
+/// Un niveau de NetUserModalsGet sur cet ordinateur ; `None` si Windows refuse.
+fn modales<T: Copy>(niveau: u32) -> Option<T> {
+    let mut tampon: *mut u8 = std::ptr::null_mut();
+    // SAFETY : NetUserModalsGet (serveur nul : cet ordinateur) écrit dans `tampon` un bloc alloué par Windows au format
+    // du niveau demandé, que `T` reproduit (repr(C), champs de lmaccess.h) ; il est copié tant qu'il vit, puis rendu
+    // une seule fois par NetApiBufferFree. Code non nul : rien n'a été alloué.
+    unsafe {
+        if NetUserModalsGet(std::ptr::null(), niveau, &raw mut tampon) != 0 || tampon.is_null() {
+            return None;
+        }
+        let valeur = std::ptr::read_unaligned(tampon.cast::<T>());
+        NetApiBufferFree(tampon.cast());
+        Some(valeur)
+    }
+}
+
+/// La règle des mots de passe des comptes locaux, lue comme « net accounts » la lit (NetUserModalsGet : sans droits
+/// d'administrateur, sans dépendre de la langue de Windows) : (longueur minimale, essais ratés avant blocage ; 0 :
+/// jamais bloqué). ADSI (« WinNT://<nom de l'ordinateur> ») ne convient pas : sur un vrai Windows, ce nom désigne
+/// l'objet ordinateur, qui n'a pas ces réglages (vu dans la VM de test le 20 octobre).
+fn lire_politique() -> Option<(u32, u32)> {
+    let longueur = modales::<Modales0>(0)?.longueur_min;
+    let seuil = modales::<Modales3>(3)?.seuil;
+    Some((longueur, seuil))
+}
+
 pub(super) fn politique() -> Option<Constat> {
-    let sortie = super::comptes_locaux();
-    let lue = section(sortie.as_deref(), "POL")
-        .and_then(|l| l.first().map(|l| l.trim().to_string()))
-        .and_then(|ligne| {
-            let (longueur, seuil) = ligne.split_once('|')?;
-            Some((longueur.trim().parse().ok()?, seuil.trim().parse().ok()?))
-        });
-    match lue {
+    match lire_politique() {
         Some((longueur, seuil)) => juger_politique(longueur, seuil),
-        // Sans PowerShell, la règle des comptes le dit déjà ; ADSI muet, c'est celle-ci qui le dit.
-        None if sortie.is_some() => Some(impossible(
+        None => Some(impossible(
             "Comptes",
             tr!(
-                "règle des mots de passe illisible (ADSI)",
-                "password policy unreadable (ADSI)"
+                "règle des mots de passe illisible (NetUserModalsGet)",
+                "password policy unreadable (NetUserModalsGet)"
             ),
         )),
-        None => None,
     }
 }
 
@@ -207,7 +248,15 @@ mod tests {
         let courts = juger_politique(0, 10).unwrap();
         assert_eq!(courts.probleme, Some(Niveau::Info));
         assert_eq!(courts.correctif.unwrap().commandes, ["net accounts /minpwlen:8"]);
-        assert_eq!(section(Some("POL|0|10\nPOL_FIN\n"), "POL"), Some(vec!["0|10"]));
+    }
+
+    /// Les deux structures ont la taille de celles de lmaccess.h : un champ de trop ou de moins décalerait le seuil.
+    #[test]
+    fn modales_au_format_de_windows() {
+        assert_eq!(std::mem::size_of::<Modales0>(), 20);
+        assert_eq!(std::mem::size_of::<Modales3>(), 12);
+        // Sous Wine, l'appel répond ou refuse, sans planter ; la valeur lue n'est jamais inventée.
+        let _ = lire_politique();
     }
 
     #[test]
