@@ -10,6 +10,8 @@ check everything and ship a version; a hook reformats Rust after each edit. On G
 pull request gets an answer, and each “journal” issue is analyzed automatically (`.github/workflows/claude*.yml`, to
 turn on once with `/install-github-app`).
 
+A security flaw? No public issue or pull request: report it privately, see [SECURITY.md](SECURITY.md#security).
+
 ## Layout
 
 | File | Purpose |

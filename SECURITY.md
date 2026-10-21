@@ -3,35 +3,93 @@
 **Français** · [English](#security)
 
 Vanguard protège des ordinateurs : une faille dans Vanguard lui-même toucherait ceux qui l'utilisent. Si tu en trouves
-une, **ne l'écris pas dans un ticket public**.
+une, **ne l'écris pas dans un ticket public**, ni ailleurs en public, avant que sa correction soit publiée.
 
 ## Signaler une faille
 
-Signale-la en privé, depuis l'onglet **Security** du dépôt, bouton **Report a vulnerability** : seuls le mainteneur
-et toi voyez le signalement, aucun courriel n'est échangé. Indique :
+En privé, depuis l'onglet **Security** du dépôt, bouton **Report a vulnerability**
+([lien direct](https://github.com/d9v3/vanguard-beta/security/advisories/new), avec un compte GitHub). Seuls le
+mainteneur et toi voyez le signalement et la discussion qui suit. C'est la seule voie : aucune adresse courriel,
+aucune personne à joindre ailleurs.
 
-- ce que tu as trouvé, et ce qu'un attaquant pourrait en faire ;
-- comment le reproduire (étapes, commandes, fichiers) ;
-- le système (Linux et sa distribution, Windows, macOS) et la version de Vanguard (`vanguard --version`).
+## Ce qu'il faut joindre
 
-La correction part dans une nouvelle version (page Releases), avec ton nom dans les notes si tu le souhaites. Merci
-de garder le secret jusque-là.
+- la version de Vanguard : `vanguard --version` ;
+- le système : Linux et sa distribution, Windows (10 ou 11, et sa version), macOS (version, Intel ou Apple) ;
+- les étapes pour reproduire : commandes lancées, choix dans les menus, fichiers utilisés ;
+- une preuve minimale : le plus petit fichier, la plus courte commande qui montre la faille, et ce qu'un attaquant
+  pourrait en faire ;
+- **rien de personnel** : ni nom d'ordinateur, ni compte, ni adresse IP ou MAC, ni réseau Wi-Fi, ni rapport ou journal
+  complet tel quel. Une preuve n'en a pas besoin : remplace-les par des valeurs inventées (`alice`, `Salon`,
+  `192.168.1.10`).
 
 ## Versions suivies
 
-Seule la dernière version reçoit les corrections de sécurité : mets Vanguard à jour avant de signaler.
+Seule la dernière version publiée (page Releases) reçoit les corrections. Vanguard publie au plus une version par
+jour : la correction part dans la suivante, et aucune version plus ancienne n'est corrigée à part. Mets Vanguard à jour
+(`vanguard se-mettre-a-jour`) et vérifie que la faille y est encore avant de la signaler.
 
-## Ce qui compte
+## Délai de réponse
+
+Une première réponse est visée dans les **7 jours** : signalement reçu, puis faille confirmée ou non. Vanguard n'a
+qu'un mainteneur : la correction prend le temps qu'il faut, et le signalement dit où elle en est.
+
+## Publication
+
+1. La faille est corrigée dans une nouvelle version, avec un test qui la reproduit.
+2. Ensuite seulement, un avis de sécurité GitHub (GHSA) la décrit dans l'onglet **Security** : ce qui est touché, la
+   version corrigée, ce qu'il faut faire.
+3. Si la faille le mérite, une CVE est demandée à GitHub depuis l'avis.
+4. Tu es remercié dans l'avis et dans les notes de la version, sous le nom ou le pseudonyme que tu choisis, ou pas du
+   tout si tu préfères.
+
+Merci de garder le secret jusqu'à la publication de l'avis.
+
+## Dans le champ
+
+- le programme `vanguard` pour Linux, Windows et macOS, tel que publié (page Releases et dépôt
+  [vanguard-officiel](https://github.com/d9v3/vanguard-officiel)), et les scripts qu'il écrit puis lance (PowerShell,
+  shell) ;
+- les scripts de la clé USB : `Lancer Vanguard.bat`, `Lancer Vanguard.command`, `autorun.sh` et ce qu'ils exécutent ;
+- l'installation : la copie sur l'ordinateur depuis la clé, le raccourci, la mise à jour depuis la clé ou depuis
+  GitHub.
+
+Par exemple :
 
 - Vanguard qui affaiblit la sécurité : une correction qui coupe une protection, un réglage qui ne s'annule pas
-  exactement, une commande lancée sans ton accord.
-- Une injection de commande (shell, PowerShell) par un nom de fichier, un nom d'appareil, une réponse du réseau ou
-  le contenu d'un fichier lu par Vanguard.
-- La clé USB : protection en écriture contournée, programme de la clé remplacé ou lancé à la place d'un autre.
-- Une fuite de données personnelles : journal des erreurs, rapport, captures, tickets.
+  exactement, une commande lancée sans ton accord ;
+- une injection de commande (shell, PowerShell) par un nom de fichier, un nom d'appareil, une réponse du réseau ou le
+  contenu d'un fichier lu par Vanguard ;
+- la clé USB : protection en écriture contournée, programme de la clé remplacé ou lancé à la place d'un autre ;
+- une mise à jour acceptée alors qu'elle est mal signée, plus ancienne ou modifiée ;
+- une fuite de données personnelles : journal des erreurs, rapport, captures, tickets.
 
-Ne sont pas des failles : les problèmes que Vanguard trouve sur ton ordinateur (c'est son travail, le bilan les
-explique), ni l'avertissement de SmartScreen ou d'un antivirus sur le programme, qui n'est pas signé.
+## Hors du champ
+
+- Les failles de Windows, de macOS ou d'une distribution Linux, même trouvées avec Vanguard : à signaler à leur
+  éditeur. Windows : [Microsoft Security Response Center](https://msrc.microsoft.com/report/vulnerability). macOS :
+  [Apple Security Research](https://security.apple.com/submit). Linux : l'équipe de sécurité de ta distribution, par
+  exemple [Debian](https://www.debian.org/security/), [Ubuntu](https://ubuntu.com/security/disclosure-policy),
+  [Fedora](https://fedoraproject.org/wiki/Security_Bugs) ou [Arch Linux](https://security.archlinux.org/).
+- Les failles d'un outil que Vanguard lance sans l'avoir écrit (trivy, ClamAV…) : à signaler à son projet.
+- Les problèmes que Vanguard trouve sur ton ordinateur : c'est son travail, le bilan les explique.
+- L'avertissement de SmartScreen ou d'un antivirus sur le programme : il n'a pas de certificat de signature de code.
+  Son intégrité se vérifie autrement, voir plus bas.
+
+## Vérifications déjà en place
+
+- **cargo deny**, à chaque vérification complète (`outils/verifier.sh`) et chaque nuit sur GitHub : failles connues
+  des dépendances (base RustSec), licences permises, crates.io comme seule source. Un avis admis l'est avec sa preuve,
+  dans [deny.toml](deny.toml).
+- **cargo audit**, chaque nuit sur GitHub, sur la même base RustSec.
+- **cargo auditable** : chaque programme publié porte la liste de ses dépendances, versions comprises. N'importe qui
+  peut la comparer aux failles connues sur le programme téléchargé, avec `cargo audit bin` (voir la section
+  [Développer](README.md#développer) du README) ; `outils/failles-programmes.sh` le fait avant chaque publication.
+- **Ed25519** : chaque version publiée est décrite par un manifeste (taille et empreinte SHA-256 de chaque programme)
+  signé en Ed25519 sur l'ordinateur de l'auteur. Vanguard porte la clé publique et refuse une mise à jour mal signée,
+  plus ancienne, ou dont la taille ou l'empreinte diffère.
+- **Compilation reproductible**, vérifiée la nuit sur GitHub : le même code donne exactement le même programme, et
+  l'empreinte de la page de la version se retrouve avec les mêmes outils.
 
 ---
 
@@ -40,32 +98,87 @@ explique), ni l'avertissement de SmartScreen ou d'un antivirus sur le programme,
 [Français](#sécurité) · **English**
 
 Vanguard protects computers: a flaw in Vanguard itself would hit the people who use it. If you find one, **do not
-write it in a public issue**.
+write it in a public issue**, or anywhere public, before its fix is published.
 
 ## Reporting a vulnerability
 
-Report it privately, from the repository's **Security** tab, **Report a vulnerability** button: only the maintainer
-and you see the report, no email is exchanged. Please include:
+Privately, from the repository's **Security** tab, **Report a vulnerability** button
+([direct link](https://github.com/d9v3/vanguard-beta/security/advisories/new), with a GitHub account). Only the
+maintainer and you see the report and the discussion that follows. It is the only channel: no email address, no one to
+reach elsewhere.
 
-- what you found, and what an attacker could do with it;
-- how to reproduce it (steps, commands, files);
-- the system (Linux and its distribution, Windows, macOS) and Vanguard's version (`vanguard --version`).
+## What to include
 
-The fix ships in a new version (Releases page), with your name in the notes if you wish. Please keep the issue secret
-until then.
+- Vanguard's version: `vanguard --version`;
+- the system: Linux and its distribution, Windows (10 or 11, and its version), macOS (version, Intel or Apple);
+- the steps to reproduce: commands run, menu choices, files used;
+- a minimal proof: the smallest file, the shortest command that shows the flaw, and what an attacker could do with it;
+- **nothing personal**: no computer name, account, IP or MAC address, Wi-Fi network, or full report or journal as is.
+  A proof does not need them: replace them with made-up values (`alice`, `Salon`, `192.168.1.10`).
 
 ## Supported versions
 
-Only the latest version receives security fixes: update Vanguard before reporting.
+Only the latest published version (Releases page) receives fixes. Vanguard publishes at most one version a day: the
+fix ships in the next one, and no older version is fixed separately. Update Vanguard (`vanguard self-update`) and
+check that the flaw is still there before reporting it.
 
-## What counts
+## Response time
+
+A first answer is aimed for within **7 days**: report received, then flaw confirmed or not. Vanguard has a single
+maintainer: the fix takes the time it needs, and the report says where it stands.
+
+## Disclosure
+
+1. The flaw is fixed in a new version, with a test that reproduces it.
+2. Only then, a GitHub security advisory (GHSA) describes it in the **Security** tab: what is affected, the fixed
+   version, what to do.
+3. If the flaw warrants it, a CVE is requested from GitHub through the advisory.
+4. You are credited in the advisory and in the release notes, under the name or nickname you choose, or not at all if
+   you prefer.
+
+Please keep the flaw secret until the advisory is published.
+
+## In scope
+
+- the `vanguard` program for Linux, Windows and macOS, as published (Releases page and the
+  [vanguard-officiel](https://github.com/d9v3/vanguard-officiel) repository), and the scripts it writes then runs
+  (PowerShell, shell);
+- the USB key's scripts: `Lancer Vanguard.bat`, `Lancer Vanguard.command`, `autorun.sh` and what they run;
+- the installation: the copy onto the computer from the key, the shortcut, the update from the key or from GitHub.
+
+For example:
 
 - Vanguard weakening security: a fix that turns a protection off, a setting that cannot be undone exactly, a command
-  run without your consent.
-- Command injection (shell, PowerShell) through a file name, a device name, a network answer or the content of a
-  file Vanguard reads.
-- The USB key: write protection bypassed, the key's program replaced or run instead of another one.
-- A personal data leak: error journal, report, screenshots, issues.
+  run without your consent;
+- command injection (shell, PowerShell) through a file name, a device name, a network answer or the content of a file
+  Vanguard reads;
+- the USB key: write protection bypassed, the key's program replaced or run instead of another one;
+- an update accepted although it is badly signed, older or modified;
+- a personal data leak: error journal, report, screenshots, issues.
 
-Not vulnerabilities: the problems Vanguard finds on your computer (that is its job, the check explains them), or the
-SmartScreen or antivirus warning about the program, which is not signed.
+## Out of scope
+
+- Flaws in Windows, macOS or a Linux distribution, even found with Vanguard: report them to their vendor. Windows:
+  [Microsoft Security Response Center](https://msrc.microsoft.com/report/vulnerability). macOS:
+  [Apple Security Research](https://security.apple.com/submit). Linux: your distribution's security team, for example
+  [Debian](https://www.debian.org/security/), [Ubuntu](https://ubuntu.com/security/disclosure-policy),
+  [Fedora](https://fedoraproject.org/wiki/Security_Bugs) or [Arch Linux](https://security.archlinux.org/).
+- Flaws in a tool Vanguard runs without having written it (trivy, ClamAV…): report them to its project.
+- The problems Vanguard finds on your computer: that is its job, the check explains them.
+- The SmartScreen or antivirus warning about the program: it has no code signing certificate. Its integrity is checked
+  another way, see below.
+
+## Checks already in place
+
+- **cargo deny**, in each full check (`outils/verifier.sh`) and every night on GitHub: known vulnerabilities in the
+  dependencies (RustSec database), allowed licenses, crates.io as the only source. An accepted advisory comes with its
+  proof, in [deny.toml](deny.toml).
+- **cargo audit**, every night on GitHub, on the same RustSec database.
+- **cargo auditable**: every published program carries the list of its dependencies, versions included. Anyone can
+  check it against known vulnerabilities on the downloaded program, with `cargo audit bin` (see the README's
+  [Development](README.en.md#development) section); `outils/failles-programmes.sh` does it before each release.
+- **Ed25519**: each published version is described by a manifest (size and SHA-256 checksum of each program) signed
+  with Ed25519 on the author's computer. Vanguard carries the public key and refuses an update that is badly signed,
+  older, or whose size or checksum differs.
+- **Reproducible build**, checked nightly on GitHub: the same code gives exactly the same program, and the checksum on
+  the release page can be found again with the same tools.

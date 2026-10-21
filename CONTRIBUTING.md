@@ -10,6 +10,9 @@ Avec Claude Code : `CLAUDE.md` donne les commandes et les règles du projet, `/v
 modification. Sur GitHub, `@claude` dans un ticket ou une demande de fusion le fait répondre, et chaque ticket
 « journal » est analysé tout seul (`.github/workflows/claude*.yml`, à activer une fois avec `/install-github-app`).
 
+Une faille de sécurité ? Pas de ticket ni de demande de fusion publics : signale-la en privé, voir
+[SECURITY.md](SECURITY.md).
+
 ## Structure
 
 | Fichier | Rôle |

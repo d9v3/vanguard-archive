@@ -12,6 +12,7 @@ Ce qui est vérifié :
   titre visé par une ancre (« SECURITY.md#security ») existe dans la page ;
 - les pages du dépôt sur GitHub (« ../../releases/latest/download/… ») : la dernière version a bien ce fichier, ou la
   version qui va être publiée (--version). Le dépôt est privé : elles se vérifient avec gh, pas en les ouvrant.
+  Le bouton « Report a vulnerability » (security/advisories/new) : le signalement privé des failles est activé ;
 
 Un lien mort (page introuvable, nom de domaine inconnu, fichier, titre ou téléchargement absent) arrête l'envoi. Un
 lien douteux (refusé aux programmes, serveur lent ou en panne, certificat refusé) est montré sans rien arrêter : il
@@ -262,7 +263,15 @@ class GitHub:
             if parties[0] in ("blob", "tree", "raw") and len(parties) >= 3:
                 chemin = "/".join(parties[2:])
                 return ("ok", "") if existe(chemin, self.suivis) else ("mort", "absent du dépôt (ou pas suivi par git)")
-            if parties[0] in ("", "releases", "issues", "pulls", "actions", "tags", "commits", "branches"):
+            # Le bouton « Report a vulnerability » de SECURITY.md : la page n'existe que si le signalement privé des
+            # failles est activé (Settings › Security), sinon le seul chemin donné pour signaler mène nulle part.
+            if parties == ["security", "advisories", "new"]:
+                etat = self.demander("api", f"repos/{self.nom}/private-vulnerability-reporting")
+                if etat is None:
+                    return "mort", "dépôt introuvable"
+                return ("ok", "") if etat.get("enabled") else (
+                    "mort", "signalement privé des failles coupé (Settings › Security)")
+            if parties[0] in ("", "releases", "issues", "pulls", "actions", "tags", "commits", "branches", "security"):
                 trouve = self.demander("repo", "view", self.nom, "--json", "name")
                 return ("ok", "") if trouve else ("mort", "dépôt introuvable")
         except GhMuet as e:
