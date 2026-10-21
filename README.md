@@ -9,7 +9,17 @@
   Linux, Windows et macOS, sans installation, en français ou en anglais.
 </p>
 
+<p align="center"><b>En développement actif · écrit en Rust · défensif</b></p>
+
 ![Bilan de sécurité de Vanguard : une note de A à F, chaque problème expliqué avec sa correction](assets/captures/bilan.png)
+
+**Où va Vanguard.** Renforcer le système le plus possible : chaque correction faite par Vanguard lui-même, en Rust,
+sans script, et toujours annulable (en développement), mesurée aux référentiels reconnus, CIS et ANSSI (prévu).
+Détecter les failles : celles déjà connues de tes logiciels, croisées sur ta machine avec le catalogue des failles
+exploitées de la CISA (KEV) et OSV (prévu), et les attaques, avec les journaux de Windows lus par Hayabusa puis
+l'observation en direct sous Linux par eBPF (prévu). Préparer les rapports de failles nouvelles pour les éditeurs
+(Microsoft, Google…), anonymisés : c'est toi qui les relis et les envoies, Vanguard n'envoie rien (prévu). Toujours
+défensif : il n'attaque aucun appareil.
 
 ## En bref
 

@@ -1,19 +1,20 @@
 {
   "_lisez-moi": "Page du dépôt sur GitHub, appliquée par outils/github.py après chaque envoi. La version (Cargo.toml) s'ajoute seule au bout de la description ; le nom du dépôt suit celui du programme.",
-  "description": "Home cyber defense from a USB key: audits your network by domain (Internet exposure, Wi-Fi, segmentation, DNS, devices, computers) and your PCs, explains each risk plainly and fixes it with your OK, undoably. Hunts malware and intruders, blocks threats in one click, runs your own plugins; never attacks. Windows · Linux · macOS · FR/EN",
+  "description": "Home cyber defense from a portable USB key, written in Rust, in active development. Hardens your PCs, audits your network (Internet exposure, Wi-Fi, DNS, devices), explains each risk plainly and fixes it with your OK, undoably. Hunts malware and intruders, blocks threats in one click; never attacks. Windows · Linux · macOS · FR/EN",
   "accueil": "https://claude.ai/code/artifact/d0b6d00e-38d4-4d9d-ad29-75dbdbecf37f",
   "sujets": [
     "security",
     "security-audit",
     "vulnerability-scanner",
     "hardening",
+    "vulnerability-detection",
+    "blue-team",
+    "security-tools",
     "privacy",
     "network-security",
     "network-scanner",
     "troubleshooting",
     "optimization",
-    "cleanup",
-    "software-installer",
     "portable",
     "usb",
     "tui",
@@ -21,8 +22,7 @@
     "linux",
     "windows",
     "macos",
-    "french",
-    "open-source"
+    "french"
   ],
   "options": {
     "tickets": true,

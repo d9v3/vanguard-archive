@@ -9,7 +9,17 @@
   Linux, Windows and macOS, nothing to install, in English or French.
 </p>
 
+<p align="center"><b>In active development · written in Rust · defensive</b></p>
+
 ![Vanguard's security check: a grade from A to F, each problem explained with its fix](assets/captures/bilan-en.png)
+
+**Where Vanguard is going.** Harden the system as far as possible: every fix made by Vanguard itself, in Rust,
+without scripts, and always undoable (in development), measured against recognized benchmarks, CIS and ANSSI
+(planned). Detect vulnerabilities: those already known in your software, matched on your machine against CISA's
+catalog of exploited vulnerabilities (KEV) and OSV (planned), and attacks, with Windows event logs read by Hayabusa
+then live observation on Linux with eBPF (planned). Prepare reports of new vulnerabilities for vendors (Microsoft,
+Google…), anonymized: you review and send them yourself, Vanguard sends nothing (planned). Always defensive: it
+attacks no device.
 
 ## At a glance
 
