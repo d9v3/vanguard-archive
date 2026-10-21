@@ -267,6 +267,7 @@ pub(crate) fn parcourir(
         let (id, date, valeurs) = lire_xml(xml)?;
         faire(id, &date, &valeurs)
     })
+    .ok()
 }
 
 /// Comme `parcourir`, les valeurs données avec leur nom : `faire` reçoit (numéro, date, [(nom, valeur)]).
@@ -275,8 +276,28 @@ pub(crate) fn parcourir_nommes(
     requete: &str,
     max: usize,
     fin: std::time::Instant,
-    mut faire: impl FnMut(u32, &str, &[(String, String)]) -> Option<String>,
+    faire: impl FnMut(u32, &str, &[(String, String)]) -> Option<String>,
 ) -> Option<Vec<String>> {
+    parcourir_nommes_ou_arret(journal, requete, max, fin, faire).ok()
+}
+
+/// Pourquoi une lecture s'est arrêtée avant la fin.
+#[derive(Debug, PartialEq)]
+enum Arret {
+    /// Le journal refuse : droits, journal absent, requête refusée.
+    Refus,
+    /// Le délai est dépassé ; les lignes lues jusque-là.
+    Delai(Vec<String>),
+}
+
+/// Comme `parcourir_nommes`, en disant pourquoi la lecture s'est arrêtée : un délai dépassé n'est pas un refus.
+fn parcourir_nommes_ou_arret(
+    journal: &str,
+    requete: &str,
+    max: usize,
+    fin: std::time::Instant,
+    mut faire: impl FnMut(u32, &str, &[(String, String)]) -> Option<String>,
+) -> Result<Vec<String>, Arret> {
     parcourir_xml(journal, requete, max, fin, |xml| {
         let (id, date, valeurs, noms) = lire_xml_nomme(xml)?;
         let paires: Vec<(String, String)> = noms.into_iter().zip(valeurs).collect();
@@ -290,10 +311,11 @@ fn parcourir_xml(
     max: usize,
     fin: std::time::Instant,
     mut faire: impl FnMut(&str) -> Option<String>,
-) -> Option<Vec<String>> {
+) -> Result<Vec<String>, Arret> {
     const CHEMIN_DU_JOURNAL: u32 = 0x1;
     const PLUS_RECENTS_D_ABORD: u32 = 0x200;
     const PLUS_RIEN: i32 = 259;
+    const DELAI_DEPASSE: i32 = 1460;
     let large = |t: &str| t.encode_utf16().chain([0]).collect::<Vec<u16>>();
     let (journal, requete) = (large(journal), large(requete));
     let mut lignes = Vec::new();
@@ -307,20 +329,26 @@ fn parcourir_xml(
             CHEMIN_DU_JOURNAL | PLUS_RECENTS_D_ABORD,
         );
         if resultats.is_null() {
-            return None;
+            return Err(Arret::Refus);
         }
         let mut lot = [std::ptr::null_mut::<c_void>(); 64];
-        let mut complet = true;
+        // `None` : lu jusqu'au bout ou jusqu'à `max`. Le délai reçoit ses lignes à la fin.
+        let mut arret = None;
         while lignes.len() < max {
             let reste = fin.saturating_duration_since(std::time::Instant::now());
             if reste.is_zero() {
-                complet = false;
+                arret = Some(Arret::Delai(Vec::new()));
                 break;
             }
             let mut rendus = 0u32;
             let delai = u32::try_from(reste.as_millis()).unwrap_or(u32::MAX);
             if EvtNext(resultats, 64, lot.as_mut_ptr(), delai, 0, &raw mut rendus) == 0 {
-                complet = std::io::Error::last_os_error().raw_os_error() == Some(PLUS_RIEN);
+                arret = match std::io::Error::last_os_error().raw_os_error() {
+                    Some(PLUS_RIEN) => None,
+                    _ if std::time::Instant::now() >= fin => Some(Arret::Delai(Vec::new())),
+                    Some(DELAI_DEPASSE) => Some(Arret::Delai(Vec::new())),
+                    _ => Some(Arret::Refus),
+                };
                 break;
             }
             for &evenement in lot.iter().take(usize::try_from(rendus).unwrap_or(0)) {
@@ -333,7 +361,11 @@ fn parcourir_xml(
             }
         }
         EvtClose(resultats);
-        complet.then_some(lignes)
+        match arret {
+            None => Ok(lignes),
+            Some(Arret::Delai(_)) => Err(Arret::Delai(lignes)),
+            Some(Arret::Refus) => Err(Arret::Refus),
+        }
     }
 }
 
@@ -766,13 +798,14 @@ fn requetes_des_reussites(adresses: &[String]) -> Vec<(String, usize)> {
 }
 
 /// Ce que la lecture n'a pas vu, quand une borne est atteinte : les échecs plus anciens que les `MAX_ECHECS` les plus
-/// récents (une rafale noyée sous les robots qui ont suivi), ou des réussites plus anciennes que celles d'un lot. Dit
-/// avec le constat sain, qui n'est alors jamais sans réserve.
+/// récents (une rafale noyée sous les robots qui ont suivi), ou des réussites plus anciennes que celles d'un lot ; puis
+/// les `autres` manques (journal d'OpenSSH, délai dépassé). Dit avec le constat sain, qui n'est alors jamais sans
+/// réserve.
 fn lecture_partielle(
     echecs: &[Echec],
     echecs_bornes: bool,
     reussites_bornees: bool,
-    openssh: Option<&str>,
+    autres: &[&str],
 ) -> Option<String> {
     let mut manques = Vec::new();
     if echecs_bornes {
@@ -797,7 +830,7 @@ fn lecture_partielle(
             .to_string(),
         );
     }
-    manques.extend(openssh.map(str::to_string));
+    manques.extend(autres.iter().map(|a| (*a).to_string()));
     (!manques.is_empty()).then(|| {
         trf!(
             "Lecture partielle : {}.",
@@ -861,6 +894,23 @@ fn dans_l_ordre(echecs: &[Echec], reussites: &[Echec]) -> Vec<crate::machine::ch
             })
         })
         .collect()
+}
+
+/// Le journal de la sécurité lu au-delà du délai : ni un refus ni un journal illisible, et ce qui a été lu reste.
+fn trop_long() -> &'static str {
+    tr!(
+        "lecture du journal de sécurité trop longue (plus de 30 s)",
+        "security log reading too long (more than 30 s)"
+    )
+}
+
+/// Le manque quand le délai tombe pendant la lecture des réussites.
+fn reussites_non_lues() -> String {
+    trf!(
+        "{}, des connexions réussies depuis les adresses insistantes n'ont pas été lues",
+        "{}, successful sign-ins from the persistent addresses were not read",
+        trop_long()
+    )
 }
 
 /// Les messages d'OpenSSH lus au plus : un robot en écrit des milliers par jour.
@@ -952,12 +1002,17 @@ fn echecs_et_reussites_ssh(lignes: &[String]) -> (Vec<Echec>, Vec<Echec>) {
 /// deviné (`machine::chasse`). Les réussites ne se lisent que pour ces adresses-là, toutes, par lots : le journal en
 /// garde des milliers d'autres. S'y ajoutent les tentatives d'OpenSSH pour Windows, lues dans son journal. Avec, quand
 /// une borne est atteinte ou que le journal d'OpenSSH ne se lit pas, ce que la lecture n'a pas vu. `Err` : pourquoi le
-/// journal Security refuse (sans droits d'administrateur, souvent), ou que la lecture a dépassé son délai.
+/// journal Security refuse (sans droits d'administrateur, souvent), ou que la lecture des échecs a dépassé son délai ;
+/// passé pendant les réussites, le délai garde celles déjà lues et rend la lecture partielle.
 pub(crate) fn tentatives_lues() -> Result<(Vec<crate::machine::chasse::Tentative>, Option<String>), &'static str> {
     let fin = std::time::Instant::now() + std::time::Duration::from_secs(30);
     let refus = || refus_de_securite(Some(super::processus::eleve()));
     let Some(lignes) = lire(&LECTURES[0], fin) else {
-        return Err(refus());
+        return Err(if std::time::Instant::now() >= fin {
+            trop_long()
+        } else {
+            refus()
+        });
     };
     let mut echecs = lire_echecs(&lignes.iter().map(String::as_str).collect::<Vec<_>>());
     // Les échecs les plus anciens lus dans le journal de la sécurité, avant d'y ajouter ceux d'OpenSSH.
@@ -987,16 +1042,26 @@ pub(crate) fn tentatives_lues() -> Result<(Vec<crate::machine::chasse::Tentative
     }
     let mut reussites = Vec::new();
     let mut reussites_bornees = false;
+    let mut delai = None;
     for (requete, max) in requetes_des_reussites(&adresses_insistantes(&echecs)) {
-        let Some(lues) = parcourir_nommes("Security", &requete, max, fin, ligne_reussite) else {
-            return Err(refus());
-        };
-        reussites_bornees |= lues.len() >= max;
-        reussites.extend(lues);
+        match parcourir_nommes_ou_arret("Security", &requete, max, fin, ligne_reussite) {
+            Ok(lues) => {
+                reussites_bornees |= lues.len() >= max;
+                reussites.extend(lues);
+            }
+            // Le délai tombe entre deux lots : les réussites déjà lues restent, le reste est dit non lu.
+            Err(Arret::Delai(lues)) => {
+                reussites.extend(lues);
+                delai = Some(reussites_non_lues());
+                break;
+            }
+            Err(Arret::Refus) => return Err(refus()),
+        }
     }
     let mut reussites = lire_echecs(&reussites.iter().map(String::as_str).collect::<Vec<_>>());
     reussites.extend(reussites_ssh);
-    let partiel = lecture_partielle(&echecs, echecs_bornes, reussites_bornees, partiel_ssh.as_deref());
+    let autres: Vec<&str> = partiel_ssh.as_deref().into_iter().chain(delai.as_deref()).collect();
+    let partiel = lecture_partielle(&echecs, echecs_bornes, reussites_bornees, &autres);
     Ok((dans_l_ordre(&echecs, &reussites), partiel))
 }
 
@@ -1309,7 +1374,7 @@ mod tests {
         assert_eq!((echecs.len(), reussites.len()), (SEUIL_ECHECS, 1));
         assert_eq!(intrusions(&dans_l_ordre(&echecs, &reussites)), Vec::<Intrusion>::new());
         // Le journal d'OpenSSH illisible ou borné : dit avec le constat sain.
-        let p = lecture_partielle(&[], false, false, Some("OpenSSH")).unwrap();
+        let p = lecture_partielle(&[], false, false, &["OpenSSH"]).unwrap();
         assert!(p.contains("OpenSSH"), "{p}");
     }
 
@@ -1378,15 +1443,23 @@ mod tests {
             "2026-10-18 10:00|3|192.0.2.10|alice",
             "2026-10-17 08:05|3|192.0.2.10|alice",
         ]);
-        assert_eq!(lecture_partielle(&echecs, false, false, None), None);
-        let p = lecture_partielle(&echecs, true, false, None).unwrap();
+        assert_eq!(lecture_partielle(&echecs, false, false, &[]), None);
+        let p = lecture_partielle(&echecs, true, false, &[]).unwrap();
         assert!(
             p.contains(&MAX_ECHECS.to_string()) && p.contains("2026-10-17 08:05"),
             "{p}"
         );
-        let p = lecture_partielle(&[], true, true, None).unwrap();
+        let p = lecture_partielle(&[], true, true, &[]).unwrap();
         assert!(p.contains(&MAX_ECHECS.to_string()), "{p}");
-        assert!(lecture_partielle(&echecs, false, true, None).is_some());
+        assert!(lecture_partielle(&echecs, false, true, &[]).is_some());
+        // Le délai tombé pendant les réussites : une lecture partielle, avec sa vraie raison, pas un journal illisible.
+        let delai = reussites_non_lues();
+        let p = lecture_partielle(&echecs, false, false, &["OpenSSH", &delai]).unwrap();
+        assert!(
+            p.contains("OpenSSH") && p.contains("30 s") && p.contains(trop_long()),
+            "{p}"
+        );
+        assert!(!p.contains(refus_de_securite(Some(true))), "{p}");
         // Le constat sain le dit.
         let c = crate::machine::chasse::juger_intrusions(&[], Os::Windows, Some(&p));
         assert!(
