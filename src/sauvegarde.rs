@@ -641,7 +641,10 @@ fn mettre_en_place() -> Option<MiseEnPlace> {
         }
         let mut avant = Vec::new();
         for (schema, cle, valeur) in &cles {
-            let ancienne = crate::machine::sortie("gsettings", &["get", schema, cle]).unwrap_or_default();
+            // Lue dans dconf et les schémas compilés, au format que `gsettings set` reprendra ; lui en secours.
+            let ancienne = crate::machine::linux::dconf::gsettings_get(schema, cle)
+                .or_else(|| crate::machine::sortie("gsettings", &["get", schema, cle]))
+                .unwrap_or_default();
             avant.push((format!("{schema} {cle}"), ancienne.trim().to_string()));
             if crate::machine::sortie("gsettings", &["set", schema, cle, valeur]).is_none() {
                 mauvais(&trf!(

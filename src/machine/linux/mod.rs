@@ -12,10 +12,12 @@ use crate::{tr, trf, trw};
 
 mod algorithmes_ssh;
 pub(crate) mod dbus;
+pub(crate) mod dconf;
 pub(crate) mod dissimulation;
 mod docker;
 mod durcissement;
 pub(crate) mod ecoute;
+pub(crate) mod gvdb;
 mod maj;
 pub(crate) mod natif;
 mod persistance;
@@ -1548,9 +1550,12 @@ fn verrouillage_ecran() -> Option<Constat> {
         } else {
             "org.gnome.desktop"
         };
-        let actif =
-            sortie("gsettings", &["get", &format!("{racine}.screensaver"), "lock-enabled"]).map(|v| v.trim() == "true");
-        let inactivite = sortie("gsettings", &["get", &format!("{racine}.session"), "idle-delay"])
+        // Lus dans dconf et les schémas compilés ; gsettings en secours.
+        let lire = |schema: String, cle: &str| {
+            dconf::gsettings_get(&schema, cle).or_else(|| sortie("gsettings", &["get", &schema, cle]))
+        };
+        let actif = lire(format!("{racine}.screensaver"), "lock-enabled").map(|v| v.trim() == "true");
+        let inactivite = lire(format!("{racine}.session"), "idle-delay")
             .and_then(|v| v.split_whitespace().last()?.parse::<u64>().ok());
         match (actif, inactivite) {
             (Some(false), _) => Some(0),

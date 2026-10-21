@@ -281,15 +281,20 @@ fn variables_proxy(lire: impl Fn(&str) -> Option<String>) -> Vec<String> {
 fn navigation() -> Reparation {
     let detournees = redirections(&std::fs::read_to_string("/etc/hosts").unwrap_or_default());
     let variables = variables_proxy(|v| std::env::var(v).ok());
-    let gnome = present("gsettings")
-        .then(|| {
-            crate::commande::lancer(
-                std::process::Command::new("gsettings").args(["get", "org.gnome.system.proxy", "mode"]),
-                5,
-            )
+    // Lu dans dconf et les schémas compilés ; gsettings en secours.
+    let gnome = crate::machine::linux::dconf::gsettings_get("org.gnome.system.proxy", "mode")
+        .or_else(|| {
+            present("gsettings")
+                .then(|| {
+                    crate::commande::lancer(
+                        std::process::Command::new("gsettings").args(["get", "org.gnome.system.proxy", "mode"]),
+                        5,
+                    )
+                })
+                .flatten()
+                .map(|r| r.sortie)
         })
-        .flatten()
-        .map(|r| r.sortie.trim().trim_matches('\'').to_string())
+        .map(|s| s.trim().trim_matches('\'').to_string())
         .filter(|m| m == "manual" || m == "auto");
 
     let mut constats = Vec::new();

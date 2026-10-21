@@ -389,53 +389,64 @@ fn colonnes(ligne: &str) -> Vec<&str> {
 }
 
 /// `flatpak permissions` : les autorisations données par les portails (table, objet, application, permissions,
-/// données). Position : la précision accordée (NONE : refusée), suivie d'une date ; caméra et micro : « yes ».
+/// données).
 #[cfg(any(target_os = "linux", test))]
 fn lire_flatpak_portails(texte: &str) -> Vec<Acces> {
-    let mut acces = Vec::new();
-    for ligne in texte.lines() {
-        let c = colonnes(ligne);
-        let [table, objet, application, permissions, ..] = c.as_slice() else {
-            continue;
-        };
-        if application.is_empty() || *table == "Table" {
-            continue;
-        }
-        let premiere = permissions.split(',').next().unwrap_or("").trim().to_ascii_uppercase();
-        let (permission, source) = match (*table, *objet) {
-            ("location", "location") => {
-                let precision = match premiere.as_str() {
-                    "" | "NONE" => continue,
-                    "COUNTRY" => tr!("pays", "country"),
-                    "CITY" => tr!("ville", "city"),
-                    "NEIGHBORHOOD" => tr!("quartier", "neighborhood"),
-                    "STREET" => tr!("rue", "street"),
-                    _ => tr!("précise", "exact"),
-                };
-                (
-                    Permission::Position,
-                    trf!("Flatpak : portail, {precision}", "Flatpak: portal, {precision}"),
-                )
+    texte
+        .lines()
+        .filter_map(|ligne| {
+            let c = colonnes(ligne);
+            let [table, objet, application, permissions, ..] = c.as_slice() else {
+                return None;
+            };
+            if *table == "Table" {
+                return None;
             }
-            ("devices", "camera") if premiere == "YES" => (
-                Permission::Camera,
-                tr!("Flatpak : portail", "Flatpak: portal").to_string(),
-            ),
-            ("devices", "microphone") if premiere == "YES" => (
-                Permission::Micro,
-                tr!("Flatpak : portail", "Flatpak: portal").to_string(),
-            ),
-            _ => continue,
-        };
-        acces.push(Acces {
-            permission,
-            application: (*application).to_string(),
-            source,
-            quand: None,
-            en_cours: false,
-        });
+            acces_portail(table, objet, application, permissions.split(',').next().unwrap_or(""))
+        })
+        .collect()
+}
+
+/// Ce qu'ouvre une autorisation d'un portail, d'après sa première permission. Position : la précision accordée
+/// (NONE : refusée), suivie d'une date ; caméra et micro : « yes ».
+#[cfg(any(target_os = "linux", test))]
+fn acces_portail(table: &str, objet: &str, application: &str, premiere: &str) -> Option<Acces> {
+    if application.is_empty() {
+        return None;
     }
-    acces
+    let premiere = premiere.trim().to_ascii_uppercase();
+    let (permission, source) = match (table, objet) {
+        ("location", "location") => {
+            let precision = match premiere.as_str() {
+                "" | "NONE" => return None,
+                "COUNTRY" => tr!("pays", "country"),
+                "CITY" => tr!("ville", "city"),
+                "NEIGHBORHOOD" => tr!("quartier", "neighborhood"),
+                "STREET" => tr!("rue", "street"),
+                _ => tr!("précise", "exact"),
+            };
+            (
+                Permission::Position,
+                trf!("Flatpak : portail, {precision}", "Flatpak: portal, {precision}"),
+            )
+        }
+        ("devices", "camera") if premiere == "YES" => (
+            Permission::Camera,
+            tr!("Flatpak : portail", "Flatpak: portal").to_string(),
+        ),
+        ("devices", "microphone") if premiere == "YES" => (
+            Permission::Micro,
+            tr!("Flatpak : portail", "Flatpak: portal").to_string(),
+        ),
+        _ => return None,
+    };
+    Some(Acces {
+        permission,
+        application: application.to_string(),
+        source,
+        quand: None,
+        en_cours: false,
+    })
 }
 
 /// `flatpak info --show-permissions <application>` : les permissions fixées à l'installation (et les réglages
@@ -557,7 +568,10 @@ fn lire_snap(texte: &str) -> Vec<Acces> {
 
 #[cfg(target_os = "linux")]
 mod linux {
-    use super::{Bilan, PERMISSIONS, Permission, lire_flatpak_portails, lire_flatpak_statiques, lire_snap};
+    use super::{
+        Acces, Bilan, PERMISSIONS, Permission, acces_portail, lire_flatpak_portails, lire_flatpak_statiques, lire_snap,
+    };
+    use crate::machine::linux::gvdb::{Genre, Gvdb, Variante};
     use crate::machine::linux::natif;
     use crate::{tr, trf};
     use std::fmt::Write;
@@ -582,15 +596,60 @@ mod linux {
     /// quelques dizaines.
     const APPLICATIONS_MAX: usize = 300;
 
+    /// Les autorisations des portails, lues dans les fichiers du magasin des permissions (`flatpak/db/devices`,
+    /// `flatpak/db/location` des données de l'utilisateur), ceux que `flatpak permissions` fait lire au service :
+    /// une table absente n'a rien accordé. `None` si une table ne se lit pas : la commande prend le relais.
+    pub(super) fn lire_magasin_flatpak(dossier: &std::path::Path) -> Option<Vec<Acces>> {
+        let mut acces = Vec::new();
+        for table in ["devices", "location"] {
+            let octets = match std::fs::read(dossier.join(table)) {
+                Ok(o) => o,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(_) => return None,
+            };
+            // Chaque objet (« camera », « location ») : ses données, puis la liste des permissions par application.
+            let Some(principale) = Gvdb::depuis(octets)?.racine()?.table("main") else {
+                continue;
+            };
+            let mut objets: Vec<&str> = principale.noms_des_valeurs().collect();
+            objets.sort_unstable();
+            for objet in objets {
+                let Variante::Tuple(m) = principale.valeur(objet)? else {
+                    return None;
+                };
+                let [Variante::Boite(_), Variante::Tableau(Genre::Entree(..), applications)] = m.as_slice() else {
+                    return None;
+                };
+                for a in applications {
+                    let Variante::Entree(application, permissions) = a else {
+                        return None;
+                    };
+                    let premiere = permissions.chaines()?.first().copied().unwrap_or("");
+                    acces.extend(acces_portail(table, objet, application.chaine()?, premiere));
+                }
+            }
+        }
+        Some(acces)
+    }
+
+    fn dossier_magasin_flatpak() -> std::path::PathBuf {
+        std::env::var_os("XDG_DATA_HOME")
+            .filter(|d| !d.is_empty())
+            .map_or_else(|| crate::nettoyer::maison().join(".local/share"), PathBuf::from)
+            .join("flatpak/db")
+    }
+
     fn flatpak(b: &mut Bilan) {
-        match sortie("flatpak", &["permissions"]) {
-            Some(t) => b.ajouter(lire_flatpak_portails(&t)),
+        match lire_magasin_flatpak(&dossier_magasin_flatpak())
+            .or_else(|| sortie("flatpak", &["permissions"]).map(|t| lire_flatpak_portails(&t)))
+        {
+            Some(a) => b.ajouter(a),
             None => non_verifie(
                 b,
                 &[Permission::Position, Permission::Camera, Permission::Micro],
                 tr!(
-                    "les autorisations des portails Flatpak sont illisibles : la commande flatpak permissions a échoué.",
-                    "the Flatpak portal permissions cannot be read: the flatpak permissions command failed."
+                    "les autorisations des portails Flatpak sont illisibles : ni leur base (flatpak/db) ni la commande flatpak permissions n'ont répondu.",
+                    "the Flatpak portal permissions cannot be read: neither their database (flatpak/db) nor the flatpak permissions command answered."
                 ),
             ),
         }
@@ -986,6 +1045,98 @@ mod tests {
         assert_eq!(lire_flatpak_portails(alignee).len(), 1);
         assert_eq!(lire_flatpak_portails(""), Vec::<Acces>::new());
     }
+
+    /// Le magasin des permissions lu dans ses fichiers : une table écrite par xdg-permission-store lui-même
+    /// (`flatpak permission-set` dans une session D-Bus à part), et des tables fabriquées ici.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn magasin_des_permissions_de_flatpak() {
+        use crate::machine::linux::gvdb::fabrique::{Contenu, chaines, fichier, hexa, valeur};
+        use crate::machine::linux::gvdb::{Genre, Variante};
+        let dossier = std::env::temp_dir().join(format!("vanguard-acces-magasin-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dossier);
+        std::fs::create_dir_all(&dossier).unwrap();
+        let resume = |a: &[Acces]| -> Vec<(Permission, String)> {
+            a.iter().map(|x| (x.permission, x.application.clone())).collect()
+        };
+        // Aucune table : rien n'a été accordé.
+        assert_eq!(linux::lire_magasin_flatpak(&dossier), Some(Vec::new()));
+        // camera : org.exemple.Camera et org.exemple.Deux « yes » ; microphone : org.exemple.Micro « no ».
+        std::fs::write(dossier.join("devices"), hexa(MAGASIN_DEVICES)).unwrap();
+        assert_eq!(
+            resume(&linux::lire_magasin_flatpak(&dossier).unwrap()),
+            [
+                (Permission::Camera, "org.exemple.Camera".to_string()),
+                (Permission::Camera, "org.exemple.Deux".to_string())
+            ]
+        );
+        let entree = |app: &str, permissions: &[&str]| {
+            Variante::Entree(Box::new(Variante::Chaine(app.into())), Box::new(chaines(permissions)))
+        };
+        let objet = |entrees: Vec<Variante>| {
+            Variante::Tuple(vec![
+                Variante::Boite(Box::new(Variante::Octet(0))),
+                Variante::Tableau(
+                    Genre::Entree(
+                        Box::new(Genre::Simple(b's')),
+                        Box::new(Genre::Tableau(Box::new(Genre::Simple(b's')))),
+                    ),
+                    entrees,
+                ),
+            ])
+        };
+        let location = fichier(
+            &[(
+                "main".into(),
+                Contenu::Table(vec![valeur(
+                    "location",
+                    objet(vec![
+                        entree("org.exemple.Cartes", &["EXACT", "1792285200"]),
+                        entree("org.exemple.Meteo", &["CITY", "1792285200"]),
+                        entree("org.exemple.Refuse", &["NONE", "0"]),
+                        entree("org.exemple.Vide", &[]),
+                    ]),
+                )]),
+            )],
+            false,
+        );
+        std::fs::write(dossier.join("location"), location).unwrap();
+        let a = linux::lire_magasin_flatpak(&dossier).unwrap();
+        assert_eq!(
+            resume(&a)[2..],
+            [
+                (Permission::Position, "org.exemple.Cartes".to_string()),
+                (Permission::Position, "org.exemple.Meteo".to_string())
+            ]
+        );
+        assert!(a[2].source.contains("précise") && a[3].source.contains("ville"));
+        // Une table qui ne se lit pas : la commande prendra le relais.
+        std::fs::write(dossier.join("location"), b"GVariant mais tronque").unwrap();
+        assert_eq!(linux::lire_magasin_flatpak(&dossier), None);
+        let abimee = fichier(
+            &[(
+                "main".into(),
+                Contenu::Table(vec![valeur("location", Variante::Booleen(true))]),
+            )],
+            false,
+        );
+        std::fs::write(dossier.join("location"), abimee).unwrap();
+        assert_eq!(linux::lire_magasin_flatpak(&dossier), None);
+        let _ = std::fs::remove_dir_all(&dossier);
+    }
+
+    /// `~/.local/share/flatpak/db/devices` écrit par le xdg-permission-store de xdg-desktop-portal 1.22 (applications inventées).
+    #[cfg(target_os = "linux")]
+    const MAGASIN_DEVICES: &str = "
+    4756617269616e7400000000000000001800000058000000000000280200000000000000010000006a7f9a7cffffffff5800000004004800
+    5c0000009c000000992b947cffffffff2e0100000400480034010000900100006d61696e00000028020000000000000001000000ee85e6f5
+    ffffffff9c00000006007600a8000000fb00000019a92e65fffffffffb0000000a007600080100002e01000063616d657261000000000000
+    7800000000000000010000000069020f00617b73767d6f72672e6578656d706c652e43616d657261007965730004136f72672e6578656d70
+    6c652e4465757800796573000411193016002876617b7361737d296d6963726f70686f6e650000000000796f72672e6578656d706c652e4d
+    6963726f006e6f0003121703002876617b7361737d296170707300000000002803000000000000000100000003000000826f5084ffffffff
+    9001000012007600a8010000b301000033be37f5ffffffffb301000011007600c8010000d70100002f1790a2ffffffffd701000010007600
+    e8010000f30100006f72672e6578656d706c652e43616d65726100000000000063616d65726100070061736f72672e6578656d706c652e4d
+    6963726f000000006d6963726f70686f6e65000b0061736f72672e6578656d706c652e446575780063616d6572610007006173";
 
     /// Les surcharges de `flatpak override` ajoutent et retirent des permissions au metadata, comme Flatpak.
     #[cfg(target_os = "linux")]

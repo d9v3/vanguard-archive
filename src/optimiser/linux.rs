@@ -265,7 +265,9 @@ impl Changement {
                 let t = std::fs::read_to_string(chemin).ok()?;
                 Some(if t == *contenu { "present" } else { "autre" }.to_string())
             }
-            Changement::Gnome { schema, cle, .. } => sortie("gsettings", &["get", schema, cle]),
+            // Lue dans dconf et les schémas compilés, au format de gsettings ; lui en secours.
+            Changement::Gnome { schema, cle, .. } => crate::machine::linux::dconf::gsettings_get(schema, cle)
+                .or_else(|| sortie("gsettings", &["get", schema, cle])),
             Changement::Option { fichier, cle, .. } => std::fs::read_to_string(fichier).ok()?.lines().find_map(|l| {
                 l.trim()
                     .strip_prefix(cle)
