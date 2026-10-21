@@ -810,17 +810,25 @@ fn interpreteur(fichier: &str) -> bool {
     INTERPRETEURS.contains(&nom.trim_end_matches(|c: char| c.is_ascii_digit() || c == '.'))
 }
 
-/// Le signe le plus sûr qu'un programme en marche fait partie d'une attaque, ou `None`. Dans l'ordre : un outil
-/// offensif connu, une ligne de commande qui télécharge ou cache ce qu'elle exécute, puis un programme lancé d'un
-/// dossier où rien ne s'installe (moyen, élevé s'il a été effacé depuis).
-pub(crate) fn juger_programme(p: &EnMarche, systeme: Os) -> Option<Soupcon> {
+/// Un outil offensif connu en marche, la raison « outil offensif » de COM-PRG-001 : le seul signe de cette règle que
+/// le blocage automatique tient pour certain. Le nom du processus, celui de son fichier, le premier mot de sa ligne
+/// de commande et, pour un interpréteur, chaque mot de la suite, où est le script.
+pub(crate) fn offensif(p: &EnMarche) -> Option<&'static str> {
     let ligne = p.ligne.as_deref().unwrap_or("");
     let premier = ligne.split_whitespace().next().unwrap_or("");
     let mut noms = vec![p.nom.as_str(), p.chemin.as_deref().unwrap_or(""), premier];
     if interpreteur(nom_de_fichier(premier)) || interpreteur(nom_de_fichier(&p.nom)) {
         noms.extend(ligne.split_whitespace().skip(1));
     }
-    if let Some(raison) = outil_offensif(&noms, ligne) {
+    outil_offensif(&noms, ligne)
+}
+
+/// Le signe le plus sûr qu'un programme en marche fait partie d'une attaque, ou `None`. Dans l'ordre : un outil
+/// offensif connu, une ligne de commande qui télécharge ou cache ce qu'elle exécute, puis un programme lancé d'un
+/// dossier où rien ne s'installe (moyen, élevé s'il a été effacé depuis).
+pub(crate) fn juger_programme(p: &EnMarche, systeme: Os) -> Option<Soupcon> {
+    let ligne = p.ligne.as_deref().unwrap_or("");
+    if let Some(raison) = offensif(p) {
         return Some(Soupcon {
             niveau: Niveau::Eleve,
             raison,
@@ -883,6 +891,43 @@ pub(crate) fn de_vanguard(liste: &[EnMarche], moi: u32, mon_programme: Option<&s
         ecartes.extend(crate::commande::descendants(&paires, racine));
     }
     ecartes
+}
+
+/// Les ancêtres de `pid` (parent, grand-parent…) d'après la liste : le terminal, le shell ou la session SSH d'où
+/// Vanguard a été lancé. Les arrêter couperait la session en cours. Un parent né après son enfant n'est pas son
+/// parent (numéro repris, voir `de_vanguard`) : la remontée s'arrête là. 1 000 au plus, contre une boucle.
+pub(crate) fn ancetres(liste: &[EnMarche], pid: u32) -> Vec<u32> {
+    let par_pid: HashMap<u32, &EnMarche> = liste.iter().map(|p| (p.pid, p)).collect();
+    let mut trouves = Vec::new();
+    let mut courant = pid;
+    while let Some(p) = par_pid.get(&courant)
+        && let Some(parent) = p.parent
+        && trouves.len() < 1000
+    {
+        let repris =
+            p.ne.zip(par_pid.get(&parent).and_then(|q| q.ne))
+                .is_some_and(|(enfant, parent)| parent > enfant);
+        if repris || parent == courant || trouves.contains(&parent) || parent == pid {
+            break;
+        }
+        trouves.push(parent);
+        courant = parent;
+    }
+    trouves
+}
+
+/// Pour le blocage : les programmes en marche, et ceux qu'il ne faut jamais arrêter parce qu'ils sont Vanguard, ce
+/// qu'il a lancé, ou ce qui le fait tourner (ses ancêtres). `None` : la liste ne se lit pas.
+pub(crate) fn en_marche() -> Option<(Vec<EnMarche>, HashSet<u32>)> {
+    let (liste, _) = programmes_en_marche().filter(|(l, _)| !l.is_empty())?;
+    let mon_programme = std::env::current_exe().ok().map(|c| {
+        let c = c.to_string_lossy();
+        c.strip_suffix(" (deleted)").unwrap_or(&c).to_string()
+    });
+    let moi = std::process::id();
+    let mut intouchables = de_vanguard(&liste, moi, mon_programme.as_deref());
+    intouchables.extend(ancetres(&liste, moi));
+    Some((liste, intouchables))
 }
 
 /// Un programme repéré, tel qu'il est montré : son nom (choisi par qui l'a lancé, rendu inoffensif), son numéro, la
@@ -1769,6 +1814,45 @@ mod tests {
             .collect();
         let ecartes = de_vanguard(&sans, 100, Some(moi));
         assert!(ecartes.contains(&500) && ecartes.contains(&600), "{ecartes:?}");
+    }
+
+    /// Garde-fou du blocage : ce qui fait tourner Vanguard (terminal, shell, session SSH) n'est jamais arrêté.
+    #[test]
+    fn ancetres_de_vanguard() {
+        let a = |heure: &str| date_cim(&format!("20261021{heure}.000000-240"));
+        let p = |pid: u32, parent: u32, ne: &str| EnMarche {
+            pid,
+            parent: Some(parent),
+            ne: a(ne),
+            ..EnMarche::default()
+        };
+        // sshd (10), puis bash (20), puis Vanguard (30) ; 40 est un voisin.
+        let liste = vec![
+            p(1, 0, "070000"),
+            p(10, 1, "071000"),
+            p(20, 10, "080000"),
+            p(30, 20, "090000"),
+            p(40, 1, "090500"),
+        ];
+        // Un parent absent de la liste (0 ici) compte aussi : mieux vaut l'épargner à tort.
+        assert_eq!(ancetres(&liste, 30), [20, 10, 1, 0]);
+        // Le parent du shell est mort et son numéro a été repris par un processus plus jeune : la remontée s'arrête.
+        let repris = vec![p(10, 1, "095000"), p(20, 10, "080000"), p(30, 20, "090000")];
+        assert_eq!(ancetres(&repris, 30), [20]);
+        // Une boucle ne fait pas tourner sans fin.
+        let boucle = vec![
+            EnMarche {
+                pid: 5,
+                parent: Some(6),
+                ..EnMarche::default()
+            },
+            EnMarche {
+                pid: 6,
+                parent: Some(5),
+                ..EnMarche::default()
+            },
+        ];
+        assert_eq!(ancetres(&boucle, 5), [6]);
     }
 
     /// Les dates de WMI : à la microseconde, ramenées en UTC.

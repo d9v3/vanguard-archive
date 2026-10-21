@@ -294,6 +294,15 @@ enum Commande {
     /// Failles connues des images Docker ou Podman de cet ordinateur, par trivy s'il est installé. Lecture seule.
     #[command(visible_alias = "containers")]
     Conteneurs,
+    /// Blocage des menaces : chaque menace trouvée propose « Bloquer » (le geste montré, accepté, noté, annulable) ;
+    /// la protection active, après un accord donné une fois, bloque toute seule le certain (empreinte de
+    /// MalwareBazaar, outil d'attaque connu, serveur de commande), puis prévient. Sans argument : le menu.
+    #[command(visible_alias = "blocking")]
+    Blocage {
+        /// « chercher », « annuler », « etat », « auto » ou « clic » (la protection active), ou une catégorie
+        /// (programmes, connexions, demarrage, agents) suivie d'un mode (off, clic, auto).
+        quoi: Vec<String>,
+    },
     /// Sauvegarde la base des appareils et l'état de la surveillance dans un fichier JSON.
     #[command(visible_alias = "backup")]
     Sauvegarder {
@@ -593,6 +602,8 @@ impl Session {
         if let Some(p) = precedent {
             historique::afficher_changements(&p, &nouveau);
         }
+        // Les menaces à bloquer : le certain tout seul si la protection active est en marche, le reste d'un clic.
+        protection::blocage::au_bilan();
         let a_corriger = self.audit.as_ref().is_some_and(|a| {
             a.constats
                 .iter()
@@ -980,6 +991,7 @@ enum Action {
     Quarantaine,
     SecretsGit,
     Conteneurs,
+    Blocage,
     Logiciels,
     Gaming,
     Nettoyer,
@@ -1206,6 +1218,10 @@ const OUTILS: &[Outil] = &[
         titre: ["Failles des images Docker", "Flaws in Docker images"],
         precision: ["failles connues (trivy)", "known flaws (trivy)"],
         mots: "docker podman conteneur container image trivy faille vulnerability cve" },
+    Outil { action: Action::Blocage, groupe: Some(Groupe::Protection), lettre: "",
+        titre: ["Blocage des menaces", "Threat blocking"], precision: ["", ""],
+        mots: "bloquer block blocage blocking protection active automatique automatic pare-feu firewall arrêter stop \
+               processus process quarantaine quarantine malwarebazaar botnet threatfox pilotes drivers annuler undo" },
     Outil { action: Action::Logiciels, groupe: Some(Groupe::Installer), lettre: "l",
         titre: ["Logiciels", "Software"], precision: ["les meilleurs, par catégorie", "the best ones, by category"],
         mots: "apps programmes programs installer install firefox vlc libreoffice" },
@@ -1321,6 +1337,7 @@ impl Action {
             Action::Entretien => tr!("désactivé", "off"),
             Action::Surveillance if reseau::surveillance::active() => tr!("activée", "on"),
             Action::Surveillance => tr!("désactivée", "off"),
+            Action::Blocage => protection::blocage::etat_court(),
             _ => texte(self.outil().precision),
         };
         (texte(self.outil().titre), precision)
@@ -1552,6 +1569,7 @@ async fn executer(s: &mut Session, action: Action) {
         Action::Quarantaine => protection::quarantaine::menu(),
         Action::SecretsGit => protection::secrets_git::analyser(),
         Action::Conteneurs => protection::conteneurs::analyser(),
+        Action::Blocage => protection::blocage::menu(),
         Action::Logiciels => logiciels::menu(),
         Action::Gaming => gaming::menu(),
         Action::Nettoyer => nettoyer::menu(),
@@ -1615,6 +1633,9 @@ const AIDES_EN: &[(&str, &str)] = &[
     ("secrets", "Secrets in the history of the home folder's git projects (passwords, API keys, tokens), searched by \
                  Vanguard, and also by gitleaks if installed. No secret is shown. Read-only"),
     ("conteneurs", "Known flaws in this computer's Docker or Podman images, by trivy if installed. Read-only"),
+    ("blocage", "Threat blocking: each threat found offers “Block” (the action shown, accepted, written down, \
+                 undoable); active protection, after a consent given once, blocks what is certain by itself \
+                 (MalwareBazaar fingerprint, known attack tool, command server), then warns you. No argument: the menu"),
     ("canaux", "Crowded Wi-Fi: nearby networks by channel, and the freest channel to set on the router. Read-only"),
     ("nat", "NAT type for gaming (open, moderate or strict), from two public servers (STUN). Read-only"),
     ("cameras", "Hidden cameras: on a rental's or someone's network, the devices that look like cameras. Read-only"),
@@ -1749,6 +1770,8 @@ const OPTIONS_EN: &[(&str, &str, &str)] = &[
     ("extensions", "sans_restrictions", "on: the extensions' restrictions turned off (no consent, fingerprint or scan, \
                                          with all your rights); off: back on. The extensions folder must stay yours \
                                          alone"),
+    ("blocage", "quoi", "“search”, “undo”, “status”, “auto” or “click” (active protection), or a category (programs, \
+                           connections, startup, agents) followed by a mode (off, click, auto)"),
     ("depanner", "sujet", "The subject: internet, wifi, slow, sound, printer, disk, infection, new, leaving (or words \
                              describing it)"),
 ];
@@ -1909,6 +1932,7 @@ async fn main() {
         Some(Commande::Quarantaine) => protection::quarantaine::menu(),
         Some(Commande::Secrets) => protection::secrets_git::analyser(),
         Some(Commande::Conteneurs) => protection::conteneurs::analyser(),
+        Some(Commande::Blocage { quoi }) => protection::blocage::commande(&quoi),
         Some(Commande::Isoler { fichier }) => protection::isoler::isoler(&fichier),
         Some(Commande::Pieges { retirer }) => protection::pieges::commande(retirer),
         Some(Commande::Durcir) => optimiser::protection(),

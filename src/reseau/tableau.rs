@@ -41,11 +41,13 @@ pub(crate) enum Genre {
     Port,
     /// Le Wi-Fi moins protégé qu'au passage d'avant (ouvert, TKIP, WPS apparu) : l'audit du réseau.
     WiFi,
+    /// Une menace bloquée par la protection active, ou qu'elle n'a pas pu bloquer (protection/blocage).
+    Blocage,
     Autre,
 }
 
 impl Genre {
-    const TOUS: [Genre; 10] = [
+    const TOUS: [Genre; 11] = [
         Genre::Machine,
         Genre::Fichiers,
         Genre::Telechargement,
@@ -55,6 +57,7 @@ impl Genre {
         Genre::Appareil,
         Genre::Port,
         Genre::WiFi,
+        Genre::Blocage,
         Genre::Autre,
     ];
 
@@ -70,6 +73,7 @@ impl Genre {
             Genre::Appareil => "appareil",
             Genre::Port => "port",
             Genre::WiFi => "wifi",
+            Genre::Blocage => "blocage",
             Genre::Autre => "autre",
         }
     }
@@ -90,6 +94,7 @@ impl Genre {
             Genre::Appareil => tr!("APPAREIL", "DEVICE"),
             Genre::Port => tr!("PORT", "PORT"),
             Genre::WiFi => tr!("WI-FI", "WI-FI"),
+            Genre::Blocage => tr!("BLOCAGE", "BLOCKING"),
             Genre::Autre => tr!("AUTRE", "OTHER"),
         }
     }
@@ -97,7 +102,7 @@ impl Genre {
     /// La classe de couleur du rapport HTML : rouge pour ce qui trahit une attaque en cours.
     fn classe(self) -> &'static str {
         match self {
-            Genre::Botnet | Genre::Passerelle | Genre::Empoisonneur => "critique",
+            Genre::Botnet | Genre::Passerelle | Genre::Empoisonneur | Genre::Blocage => "critique",
             Genre::Appareil | Genre::Port | Genre::Fichiers | Genre::WiFi => "eleve",
             Genre::Machine | Genre::Telechargement => "moyen",
             Genre::Autre => "info",

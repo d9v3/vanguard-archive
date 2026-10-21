@@ -194,6 +194,17 @@ fn remettre_dans(e: &Entree, dossier: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// Remet à sa place le fichier isolé sous ce nom (l'annulation d'un blocage) ; même garde que le menu : rien n'est
+/// écrasé.
+pub(crate) fn remettre(nom: &str) -> Result<(), String> {
+    let dossier = dossier();
+    let e = liste_dans(&dossier)
+        .into_iter()
+        .find(|e| e.nom == nom)
+        .ok_or_else(|| tr!("plus dans la quarantaine", "no longer in the quarantine").to_string())?;
+    remettre_dans(&e, &dossier)
+}
+
 /// Supprime pour de bon un fichier de la quarantaine.
 fn supprimer_dans(e: &Entree, dossier: &Path) -> Result<(), String> {
     let chemin = dossier.join(&e.nom);

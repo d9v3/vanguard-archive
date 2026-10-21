@@ -796,6 +796,16 @@ mod tests_sh_chaine {
             "adresses IP relues par IpAddr, ou « empty »",
         ),
         (
+            "protection/blocage/gestes.rs",
+            "pid",
+            "un numéro de processus (u32) : des chiffres seulement",
+        ),
+        (
+            "protection/blocage/pare_feu.rs",
+            "lot",
+            "lignes de nft du code, chacune passée par sh_chaine ; l'élément est une adresse ou un port analysés",
+        ),
+        (
             "protection/distance.rs",
             "if application { \"rf\" } else { \"f\" }",
             "deux constantes",

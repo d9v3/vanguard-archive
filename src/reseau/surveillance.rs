@@ -1,6 +1,6 @@
 //! Surveillance automatique : scan du réseau toutes les heures, notification si un appareil inconnu apparaît ; les
 //! programmes arrivés dans Téléchargements, à vérifier avant de les ouvrir ; un programme qui parle à un serveur de
-//! commande de botnet connu (rien n'est bloqué).
+//! commande de botnet connu (bloqué seulement si la protection active a été activée : protection/blocage).
 //! Planificateur natif de chaque système : timer systemd (Linux), Planificateur de tâches (Windows), agent launchd
 //! (macOS).
 
@@ -105,7 +105,7 @@ pub(crate) fn notifier(titre: &str, corps: &str) {
 
 /// Une alerte de la surveillance : gardée au journal du tableau de bord, puis notifiée. Une notification disparaît
 /// en quelques secondes ; celle de la nuit se relit ainsi le matin (« vanguard tableau »).
-fn alerter(genre: Genre, titre: &str, texte: &str) {
+pub(crate) fn alerter(genre: Genre, titre: &str, texte: &str) {
     tableau::noter_alerte(genre, titre, texte);
     notifier(titre, texte);
 }
@@ -475,6 +475,8 @@ async fn passe() {
     for (titre, texte) in crate::plugins::a_signaler() {
         notifier(&titre, &texte);
     }
+    // La protection active, si elle a été activée : le certain bloqué tout seul, chaque blocage notifié.
+    crate::protection::blocage::en_surveillance();
     let Ok(r) = reseau::executer(Options {
         silencieux: true,
         ..Options::defaut(None, "courants")

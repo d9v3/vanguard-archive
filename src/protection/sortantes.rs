@@ -397,6 +397,13 @@ pub(crate) fn processus_connectes() -> Option<std::collections::BTreeSet<u32>> {
     )
 }
 
+/// La table TCP brute d'une famille (2 : IPv4, 23 : IPv6), pour qui lit d'autres colonnes (le blocage : les ports
+/// locaux des sessions à distance).
+#[cfg(windows)]
+pub(crate) fn table_tcp(famille: u32) -> Option<Vec<u8>> {
+    windows::table_tcp(famille)
+}
+
 /// Lu par les fonctions de Windows, sans PowerShell : rien à lancer, et quelques millisecondes au lieu de secondes.
 /// `None` : aucune des deux tables lisible.
 #[cfg(windows)]
@@ -963,6 +970,36 @@ pub(crate) fn botnets_en_cours() -> Option<EnCours> {
         connexions: actuelles,
         listes_absentes,
     })
+}
+
+/// Une connexion en cours vers un serveur de commande connu, pour le blocage (règle de pare-feu vers l'adresse).
+pub(crate) struct VersBotnet {
+    pub pid: Option<u32>,
+    /// Le programme, prêt à montrer ; `None` : celui d'un autre compte, invisible sans droits.
+    pub programme: Option<String>,
+    /// Sous sa forme IPv4 quand une prise IPv6 la voit en « ::ffff:… » : celle que le pare-feu doit bloquer.
+    pub adresse: IpAddr,
+    /// Le serveur tel qu'il est montré : « 203.0.113.7:443 (Emotet, ThreatFox) ».
+    pub serveur: String,
+}
+
+/// Les connexions en cours vers un serveur de commande connu (Feodo Tracker, ThreatFox), et les listes qui n'ont
+/// pas pu être vérifiées. `None` : les connexions ne se lisent pas.
+pub(crate) fn connexions_botnets() -> Option<(Vec<VersBotnet>, Vec<String>)> {
+    let connexions = connexions()?;
+    let (botnets, absentes) = botnets();
+    let liste = connexions
+        .iter()
+        .filter_map(|c| {
+            Some(VersBotnet {
+                serveur: botnets.serveur(c)?,
+                pid: c.pid,
+                programme: c.programme.clone(),
+                adresse: c.distante.to_canonical(),
+            })
+        })
+        .collect();
+    Some((liste, absentes))
 }
 
 /// Pour la surveillance horaire : les programmes qui parlent à un serveur de commande connu, en (titre, texte) de

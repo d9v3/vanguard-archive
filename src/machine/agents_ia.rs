@@ -11,6 +11,7 @@
 //! mais illisible rend l'outil « non vérifié », jamais « aucun agent ». Aucune valeur secrète n'est affichée ni
 //! gardée : seulement le nom du serveur et celui de la clé. Rien ne se corrige tout seul.
 
+use std::collections::HashSet;
 use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 
@@ -40,7 +41,7 @@ pub(crate) struct Prise {
     pub programme: String,
 }
 
-fn serveur_ia(p: &Prise) -> Option<String> {
+pub(crate) fn serveur_ia(p: &Prise) -> Option<String> {
     if let Some((_, nom)) = PORTS_IA.iter().find(|(port, _)| *port == p.port) {
         return Some((*nom).to_string());
     }
@@ -51,19 +52,49 @@ fn serveur_ia(p: &Prise) -> Option<String> {
         .then(|| p.programme.clone())
 }
 
-fn juger_exposition(prises: &[Prise]) -> Constat {
-    let mut ouverts: Vec<String> = prises
-        .iter()
-        .filter(|p| {
-            !p.adresse
-                .trim_matches(['[', ']'])
-                .parse::<IpAddr>()
-                .is_ok_and(|a| a.is_loopback())
-        })
-        .filter_map(|p| serveur_ia(p).map(|nom| format!("{nom} ({}:{})", p.adresse, p.port)))
-        .collect();
+/// Les ports que Vanguard a fermés en entrée : sa note (« 11434/tcp », ufw) et, sous Windows, ses règles « Vanguard :
+/// bloquer <port> » relues dans le pare-feu.
+pub(crate) fn ports_fermes() -> HashSet<u16> {
+    let notes = super::ports_bloques();
+    let fermes = notes.iter().filter_map(|p| p.strip_suffix("/tcp")?.parse::<u16>().ok());
+    #[cfg(windows)]
+    let fermes = fermes.chain(super::windows::ecoute::ports_bloques().unwrap_or_default());
+    fermes.collect()
+}
+
+/// `fermes` : les ports que Vanguard a fermés au réseau (blocage) ; un serveur derrière l'un d'eux n'est plus ouvert.
+fn juger_exposition(prises: &[Prise], fermes: &HashSet<u16>) -> Constat {
+    let mut ouverts: Vec<String> = Vec::new();
+    let mut proteges: Vec<String> = Vec::new();
+    for p in prises.iter().filter(|p| {
+        !p.adresse
+            .trim_matches(['[', ']'])
+            .parse::<IpAddr>()
+            .is_ok_and(|a| a.is_loopback())
+    }) {
+        if let Some(nom) = serveur_ia(p) {
+            let ligne = format!("{nom} ({}:{})", p.adresse, p.port);
+            if fermes.contains(&p.port) {
+                proteges.push(ligne);
+            } else {
+                ouverts.push(ligne);
+            }
+        }
+    }
     ouverts.sort();
     ouverts.dedup();
+    proteges.sort();
+    proteges.dedup();
+    if ouverts.is_empty() && !proteges.is_empty() {
+        let liste = couper(&affichable(&proteges.join(", ")), 200);
+        return ok(
+            CAT,
+            trf!(
+                "Serveur d'IA fermé au réseau par une règle de pare-feu de Vanguard : {liste}",
+                "AI server closed to the network by a Vanguard firewall rule: {liste}"
+            ),
+        );
+    }
     if ouverts.is_empty() {
         return ok(
             CAT,
@@ -85,7 +116,7 @@ fn juger_exposition(prises: &[Prise]) -> Constat {
 }
 
 #[cfg(target_os = "linux")]
-fn prises() -> Option<Vec<Prise>> {
+pub(crate) fn prises() -> Option<Vec<Prise>> {
     Some(
         super::linux::ecoute::prises_ou_ss()?
             .into_iter()
@@ -100,7 +131,7 @@ fn prises() -> Option<Vec<Prise>> {
 }
 
 #[cfg(windows)]
-fn prises() -> Option<Vec<Prise>> {
+pub(crate) fn prises() -> Option<Vec<Prise>> {
     Some(
         super::windows::ecoute::ecoutes()?
             .into_iter()
@@ -115,13 +146,13 @@ fn prises() -> Option<Vec<Prise>> {
 }
 
 #[cfg(not(any(target_os = "linux", windows)))]
-fn prises() -> Option<Vec<Prise>> {
+pub(crate) fn prises() -> Option<Vec<Prise>> {
     None
 }
 
 pub(crate) fn exposition() -> Vec<Constat> {
     match prises() {
-        Some(p) => vec![juger_exposition(&p)],
+        Some(p) => vec![juger_exposition(&p, &ports_fermes())],
         None => vec![impossible(
             CAT,
             tr!(
@@ -343,6 +374,14 @@ fn lire_serveurs(outil: &str, serveurs: &serde_json::Map<String, Value>, t: &mut
     }
 }
 
+/// Un agent y est-il réglé pour tout faire sans demander (« defaultMode » à « bypassPermissions », dans les
+/// permissions ou dans un projet de ~/.claude.json) ? Ce que le blocage remet aux demandes de permission.
+pub(crate) fn tout_permis(json: &Value) -> bool {
+    let mut t = Trouvailles::default();
+    lire_reglages("", json, &mut t);
+    !t.tout_permis.is_empty()
+}
+
 /// Les permissions de Claude Code : le mode par défaut et la liste des outils permis sans demander.
 fn lire_permissions(outil: &str, permissions: &Value, t: &mut Trouvailles) {
     if permissions.get("defaultMode").and_then(Value::as_str) == Some("bypassPermissions") {
@@ -480,7 +519,7 @@ fn juger_reglages(t: &Trouvailles, fichiers: usize, illisibles: &[String]) -> Ve
 }
 
 /// Les fichiers de réglages connus : (outil, chemin).
-fn fichiers_de_reglages() -> Vec<(&'static str, PathBuf)> {
+pub(crate) fn fichiers_de_reglages() -> Vec<(&'static str, PathBuf)> {
     let maison =
         PathBuf::from(std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).unwrap_or_default());
     if maison.as_os_str().is_empty() {
@@ -575,7 +614,7 @@ fn json_sans_jsonc(texte: &str) -> String {
 }
 
 /// Un fichier de réglages lu en JSON, ou à défaut en JSONC ; `None` s'il n'est ni l'un ni l'autre.
-fn lire_json(octets: &[u8]) -> Option<Value> {
+pub(crate) fn lire_json(octets: &[u8]) -> Option<Value> {
     if let Ok(json) = serde_json::from_slice(octets) {
         return Some(json);
     }
@@ -642,17 +681,23 @@ mod tests {
             prise("::1", 1234, ""),
             prise("0.0.0.0", 22, "sshd"),
         ];
-        assert!(juger_exposition(&locaux).probleme.is_none());
+        let aucun = HashSet::new();
+        assert!(juger_exposition(&locaux, &aucun).probleme.is_none());
         let ouvert = [prise("0.0.0.0", 11434, "ollama"), prise("[::]", 8188, "python3")];
-        let c = juger_exposition(&ouvert);
+        let c = juger_exposition(&ouvert, &aucun);
         assert_eq!(c.probleme, Some(Niveau::Eleve));
         assert!(c.message.contains("Ollama (0.0.0.0:11434)") && c.message.contains("ComfyUI"));
         // Reconnu par son nom, sur un autre port.
         assert!(
-            juger_exposition(&[prise("192.168.1.20", 9000, "llama-server")])
+            juger_exposition(&[prise("192.168.1.20", 9000, "llama-server")], &aucun)
                 .probleme
                 .is_some()
         );
+        // Fermé au réseau par une règle de Vanguard (blocage) : plus une alerte, mais dit.
+        let un_ferme = juger_exposition(&ouvert, &[11434].into());
+        assert!(un_ferme.probleme.is_some() && !un_ferme.message.contains("11434"));
+        let fermes = juger_exposition(&ouvert, &[11434, 8188].into());
+        assert!(fermes.probleme.is_none() && fermes.message.contains("Ollama (0.0.0.0:11434)"));
     }
 
     #[test]

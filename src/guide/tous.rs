@@ -241,6 +241,20 @@ pub const PROGRAMMES: &[Programme] = &[
                 false,
             ),
             traduite(
+                "vanguard blocage",
+                "vanguard blocking",
+                "Bloquer les menaces : d'un clic, ou tout seul pour le certain (protection active) ; chaque blocage s'annule.",
+                "Block threats: with one click, or by itself for what is certain (active protection); each block can be undone.",
+                true,
+            ),
+            traduite(
+                "vanguard blocage annuler",
+                "vanguard blocking undo",
+                "Défaire un blocage, exactement : règle de pare-feu retirée, fichier remis à sa place.",
+                "Undo a block, exactly: firewall rule removed, file put back in its place.",
+                true,
+            ),
+            traduite(
                 "vanguard verifier-moi",
                 "vanguard self-check",
                 "Vérifier Vanguard lui-même : version et empreinte, à comparer à la page de la version.",

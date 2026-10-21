@@ -6,7 +6,7 @@
 
 use std::borrow::Cow;
 
-use super::{Categorie, Historique, Reglage, charger, confirmer_et_executer, systeme};
+use super::{Categorie, Etat, Historique, Reglage, charger, confirmer_et_executer, etat, executer, systeme};
 use crate::selection::{Case, cocher};
 use crate::ui::*;
 
@@ -313,6 +313,59 @@ fn lignes(programmes: Vec<Programme>, h: &Historique) -> Vec<Ligne> {
     }
     l.sort_by_key(|x| x.nom.to_lowercase());
     l
+}
+
+/// Pour le blocage : un programme qui se lance à l'ouverture de session et que Vanguard saurait retirer.
+pub struct AuDemarrage {
+    /// Prêt à montrer.
+    pub nom: String,
+    /// Ce qui est lancé, tel quel : le blocage y cherche le fichier du programme.
+    pub commande: String,
+    /// Le réglage (« demarrage:… ») qui le retire, puis le remet exactement.
+    pub id: String,
+    /// De toute la machine : il faut les droits d'administrateur.
+    pub machine: bool,
+}
+
+/// Les programmes qui se lancent à l'ouverture de session, sauf ceux à garder (sécurité, Vanguard, pilotes,
+/// accessibilité, bureau) : ceux-là ne sont jamais proposés, ni ici ni au blocage.
+pub fn retirables() -> Vec<AuDemarrage> {
+    systeme::au_demarrage()
+        .into_iter()
+        .filter(|p| p.actif && a_garder(&p.nom, &p.commande, p.bureau).is_none())
+        .filter_map(|p| {
+            let (nom, commande, machine) = (affichable(&p.nom), p.commande.clone(), p.machine);
+            let r = reglage(&p.nom, p.changement)?;
+            Some(AuDemarrage {
+                nom,
+                commande,
+                id: r.id.into_owned(),
+                machine,
+            })
+        })
+        .collect()
+}
+
+/// Retire du démarrage le programme de ce réglage, l'accord ayant été donné avant (blocage) : la valeur d'avant est
+/// notée comme pour la liste à cocher. `None` : il ne se lance plus, ou n'est plus là.
+pub fn retirer(id: &str) -> Option<bool> {
+    let r = systeme::au_demarrage()
+        .into_iter()
+        .filter(|p| p.actif)
+        .filter_map(|p| reglage(&p.nom, p.changement))
+        .find(|r| r.id == id)?;
+    let mut h = charger();
+    let (faits, _) = executer(&[&r], &[], &mut h);
+    Some(faits == [true] && etat(&r) == Etat::Fait)
+}
+
+/// Remet au démarrage ce que Vanguard en a retiré, d'après sa note (l'annulation d'un blocage). `None` : aucune note
+/// pour ce réglage.
+pub fn remettre(id: &str) -> Option<bool> {
+    let mut h = charger();
+    let r = notes(&h).into_iter().find(|r| r.id == id)?;
+    let (_, remis) = executer(&[], &[&r], &mut h);
+    Some(remis == [true])
 }
 
 /// La liste à cocher : coché = se lance à l'ouverture de session. Décocher retire, recocher remet exactement comme

@@ -12,7 +12,7 @@ mod administrateurs;
 pub(crate) mod agents_ia;
 mod bluetooth;
 pub(crate) mod certificats;
-mod chasse;
+pub(crate) mod chasse;
 mod comptes_oublies;
 pub(crate) mod dns;
 pub(crate) mod extensions;
@@ -655,8 +655,9 @@ fn lire_blocages(texte: &str) -> std::collections::HashSet<String> {
         .collect()
 }
 
-#[cfg(target_os = "linux")]
-fn ports_bloques() -> std::collections::HashSet<String> {
+/// Les ports que Vanguard a bloqués en entrée, d'après sa note (« 11434/tcp ») : le bilan (Linux) et le blocage ne
+/// les reproposent pas.
+pub(crate) fn ports_bloques() -> std::collections::HashSet<String> {
     lire_blocages(&std::fs::read_to_string(fichier_blocages()).unwrap_or_default())
 }
 
@@ -686,14 +687,34 @@ pub fn empreinte_machine() -> Option<String> {
 }
 
 pub fn retenir_blocage(k: &Correctif) {
-    let Some(port) = &k.bloque else { return };
+    if let Some(port) = &k.bloque {
+        retenir_port(port);
+    }
+}
+
+/// Retient un port bloqué en entrée par Vanguard (« 11434/tcp ») : le bilan le dit fermé au lieu de le reproposer.
+pub(crate) fn retenir_port(port: &str) {
+    changer_blocages(|deja| deja.insert(port.to_string()));
+}
+
+/// L'oublie, quand sa règle est retirée (l'annulation d'un blocage) : le bilan le voit de nouveau ouvert.
+pub(crate) fn oublier_port(port: &str) {
+    changer_blocages(|deja| deja.remove(port));
+}
+
+fn changer_blocages(changer: impl FnOnce(&mut std::collections::HashSet<String>) -> bool) {
     let chemin = fichier_blocages();
     let mut deja = lire_blocages(&std::fs::read_to_string(&chemin).unwrap_or_default());
-    if deja.insert(port.clone()) {
+    if changer(&mut deja) {
         let mut lignes: Vec<_> = deja.into_iter().collect();
         lignes.sort();
         let _ = std::fs::create_dir_all(chemin.parent().unwrap_or(&chemin));
-        let _ = std::fs::write(&chemin, lignes.join("\n") + "\n");
+        let texte = if lignes.is_empty() {
+            String::new()
+        } else {
+            lignes.join("\n") + "\n"
+        };
+        let _ = std::fs::write(&chemin, texte);
     }
 }
 
@@ -711,6 +732,13 @@ pub fn appliquer_chacune(correctifs: &[Vec<String>]) -> Vec<bool> {
     // processus élevé l'a lue, pour annuler exactement.
     crate::changements::noter(&notes, &resultats);
     resultats
+}
+
+/// Comme `appliquer`, sans la note : pour un blocage (protection/blocage), qui note lui-même une seule ligne avec de
+/// quoi l'annuler (`changements::noter_blocage`). Rend la réussite et les commandes telles qu'il faut les noter.
+pub(crate) fn appliquer_sans_noter(commandes: &[String]) -> (bool, Vec<String>) {
+    let (resultats, notes) = lancer_chacune(&[commandes.to_vec()]);
+    (resultats == [true], notes.into_iter().next().unwrap_or_default())
 }
 
 /// Les résultats, et ce qu'il faut noter pour chaque correctif (ses commandes, enrichies de la valeur d'avant).

@@ -140,6 +140,21 @@ fn tampon_du_jeton(rendue: u32) -> (Vec<u64>, u32) {
     )
 }
 
+/// Ce compte a-t-il le droit d'arrêter ce processus ? La poignée d'arrêt est demandée puis refermée aussitôt, sans
+/// rien arrêter : le blocage le sait avant de commencer, pour ne rien faire à moitié.
+pub(crate) fn peut_terminer(processus: u32) -> bool {
+    const ARRET: u32 = 0x0001;
+    // SAFETY : la poignée vient d'OpenProcess (nulle : refus, vérifié) et n'est refermée qu'une fois.
+    unsafe {
+        let poignee = OpenProcess(ARRET, 0, processus);
+        if poignee.is_null() {
+            return false;
+        }
+        CloseHandle(poignee);
+        true
+    }
+}
+
 /// Une information du jeton de ce processus (GetTokenInformation), dans un tampon aligné ; `None` si Windows refuse.
 fn jeton(classe: u32) -> Option<Vec<u64>> {
     const LECTURE: u32 = 0x0008;

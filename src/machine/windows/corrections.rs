@@ -61,6 +61,8 @@ const LSA: &str = r"SYSTEM\CurrentControlSet\Control\Lsa";
 const UAC: &str = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System";
 const APPINIT: &str = r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Windows";
 const APPINIT_32: &str = r"SOFTWARE\WOW6432Node\Microsoft\Windows NT\CurrentVersion\Windows";
+/// La clé que le basculeur « Liste de blocage des pilotes vulnérables » de Sécurité Windows écrit (Isolation du noyau).
+pub(crate) const PILOTES_VULNERABLES: &str = r"SYSTEM\CurrentControlSet\Control\CI\Config";
 
 /// La liste fermée. Chaque entrée renforce la sécurité ; aucune ne coupe un pare-feu, Defender, BitLocker ou l'UAC,
 /// ni une connexion à distance en cours (`rdp-nla` exige une authentification, il ne ferme pas le Bureau à distance).
@@ -186,6 +188,14 @@ static TABLE: &[Correction] = &[
         5,
         "Remettre la demande de l'UAC, le réglage de Windows (HKLM\\…\\Policies\\System, ConsentPromptBehaviorAdmin = 5)",
         "Bring back the UAC prompt, the Windows setting (HKLM\\...\\Policies\\System, ConsentPromptBehaviorAdmin = 5)",
+    ),
+    dword(
+        "pilotes-vulnerables-bloques",
+        PILOTES_VULNERABLES,
+        "VulnerableDriverBlocklistEnable",
+        1,
+        "Activer la liste de Microsoft qui bloque les pilotes vulnérables, effectif après redémarrage (HKLM\\…\\CI\\Config, VulnerableDriverBlocklistEnable = 1)",
+        "Turn on Microsoft's vulnerable driver blocklist, effective after a restart (HKLM\\...\\CI\\Config, VulnerableDriverBlocklistEnable = 1)",
     ),
     dword(
         "llmnr-coupe",
@@ -410,6 +420,7 @@ mod tests {
                     ("EnableLUA", 1),
                     ("ConsentPromptBehaviorAdmin", 5),
                     ("EnableMulticast", 0),
+                    ("VulnerableDriverBlocklistEnable", 1),
                 ];
                 assert!(DURCIES.contains(&(valeur, donnee)), "{valeur} = {donnee}");
             }

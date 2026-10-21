@@ -133,30 +133,47 @@ pub(crate) fn rafraichir(adresse: &str, chemin: &Path, apres: Duration, max: u64
 /// liste, ni téléchargée ni gardée.
 pub(crate) fn connues() -> Option<&'static Empreintes> {
     static CHARGEES: OnceLock<Option<Empreintes>> = OnceLock::new();
-    CHARGEES
-        .get_or_init(|| {
-            let d = dossier();
-            let _ = std::fs::create_dir_all(&d);
-            let (complete, recentes) = (d.join("complete.zip"), d.join("recentes.txt"));
-            if age(&complete).is_none_or(|a| a > SEMAINE) {
-                trp!(
-                    "  {GRIS}Empreintes de MalwareBazaar : liste complète (environ 43 Mo, une fois par semaine)…{RESET}",
-                    "  {GRIS}MalwareBazaar fingerprints: full list (about 43 MB, once a week)…{RESET}"
-                );
-            }
-            rafraichir(COMPLETE, &complete, SEMAINE, ARCHIVE_MAX, 600);
-            rafraichir(RECENTES, &recentes, JOUR, 16 << 20, 60);
-            let mut triees = std::fs::read(&complete)
-                .ok()
-                .and_then(|a| premier_fichier_zip(&a, TEXTE_MAX))
-                .map(|t| lire_texte(&String::from_utf8_lossy(&t)))
-                .unwrap_or_default();
-            triees.extend(lire_texte(&std::fs::read_to_string(&recentes).unwrap_or_default()));
-            triees.sort_unstable();
-            triees.dedup();
-            (!triees.is_empty()).then_some(Empreintes { triees })
-        })
-        .as_ref()
+    CHARGEES.get_or_init(|| charger(true)).as_ref()
+}
+
+/// Les empreintes déjà gardées sur cet ordinateur, sans rien télécharger : pour le bilan, qui ne doit pas attendre
+/// 43 Mo quand personne n'a demandé la protection active. `None` : aucune liste gardée.
+pub(crate) fn gardees() -> Option<&'static Empreintes> {
+    static GARDEES: OnceLock<Option<Empreintes>> = OnceLock::new();
+    GARDEES.get_or_init(|| charger(false)).as_ref()
+}
+
+fn charger(telecharger: bool) -> Option<Empreintes> {
+    let d = dossier();
+    let (complete, recentes) = (d.join("complete.zip"), d.join("recentes.txt"));
+    if telecharger {
+        let _ = std::fs::create_dir_all(&d);
+        if age(&complete).is_none_or(|a| a > SEMAINE) {
+            trp!(
+                "  {GRIS}Empreintes de MalwareBazaar : liste complète (environ 43 Mo, une fois par semaine)…{RESET}",
+                "  {GRIS}MalwareBazaar fingerprints: full list (about 43 MB, once a week)…{RESET}"
+            );
+        }
+        rafraichir(COMPLETE, &complete, SEMAINE, ARCHIVE_MAX, 600);
+        rafraichir(RECENTES, &recentes, JOUR, 16 << 20, 60);
+    }
+    let mut triees = std::fs::read(&complete)
+        .ok()
+        .and_then(|a| premier_fichier_zip(&a, TEXTE_MAX))
+        .map(|t| lire_texte(&String::from_utf8_lossy(&t)))
+        .unwrap_or_default();
+    triees.extend(lire_texte(&std::fs::read_to_string(&recentes).unwrap_or_default()));
+    triees.sort_unstable();
+    triees.dedup();
+    (!triees.is_empty()).then_some(Empreintes { triees })
+}
+
+/// Une empreinte en hexadécimal minuscule, telle que MalwareBazaar l'écrit.
+pub(crate) fn hex(e: &[u8; 32]) -> String {
+    e.iter().fold(String::with_capacity(64), |mut s, o| {
+        let _ = write!(s, "{o:02x}");
+        s
+    })
 }
 
 /// L'empreinte SHA-256 d'un fichier, lue par morceaux. `None` : illisible.
@@ -181,13 +198,7 @@ pub(crate) fn connus(empreintes: &Empreintes, fichiers: &[PathBuf]) -> Vec<(Path
         .iter()
         .filter_map(|f| {
             let e = sha256(f)?;
-            empreintes.contient(&e).then(|| {
-                let hex = e.iter().fold(String::with_capacity(64), |mut s, o| {
-                    let _ = write!(s, "{o:02x}");
-                    s
-                });
-                (f.clone(), hex)
-            })
+            empreintes.contient(&e).then(|| (f.clone(), hex(&e)))
         })
         .collect()
 }

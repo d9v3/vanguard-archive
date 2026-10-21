@@ -1,11 +1,12 @@
 //! Les outils du groupe « Antivirus et protection » du menu : antivirus, YARA, fichiers-pièges, bac à sable,
 //! intégrité des fichiers critiques, mots de passe fuités, connexions sortantes, logiciels de prise de contrôle à
 //! distance (faux technicien), liens et fichiers téléchargés, caméra et micro, bilan de confidentialité
-//! (`acces`) ; et,
-//! sous Linux et macOS, la protection de la clé USB (`cle`).
+//! (`acces`), blocage des menaces, d'un clic ou tout seul pour le certain (`blocage`) ; et, sous Linux et macOS, la
+//! protection de la clé USB (`cle`).
 
 pub mod acces;
 pub mod antivirus;
+pub mod blocage;
 pub mod camera;
 #[cfg(unix)]
 pub mod cle;

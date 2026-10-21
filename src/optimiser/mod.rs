@@ -15,6 +15,9 @@ mod macos;
 mod windows;
 
 pub use demarrage::menu as programmes_au_demarrage;
+pub use demarrage::{
+    remettre as remettre_au_demarrage, retirables as demarrage_retirables, retirer as retirer_du_demarrage,
+};
 
 #[cfg(target_os = "linux")]
 use linux as systeme;
