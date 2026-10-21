@@ -176,10 +176,12 @@ le code a changé, à chaque demande de fusion et à la demande (`gh workflow ru
 envoi : sur un dépôt privé, leurs minutes comptent double et dix fois.
 
 Dépendances : `cargo deny` (`deny.toml` : failles connues de RustSec, licences de sa liste, crates.io seulement,
-doublons ; `extensions/deny.toml` pour la bibliothèque des extensions et l'exemple en Rust, sans dépendance), dans
-`outils/verifier.sh` (sauté sans l'outil) et chaque nuit dans la CI. La liste ne garde que des licences permissives
-(MIT, Apache-2.0, BSD, ISC…), compatibles avec la GPL-3.0-or-later et avec une double licence possible de Vanguard :
-toute autre, même libre et compatible avec la GPL (MPL, LGPL), demande d'abord l'accord de l'auteur.
+doublons ; `extensions/deny.toml` pour la bibliothèque des extensions et l'exemple en Rust, sans dépendance) et
+`cargo audit` (second avis sur les failles, avec les seules exceptions de `deny.toml`, que `.cargo/audit.toml` recopie),
+dans `outils/verifier.sh` (sautés sans l'outil, cargo audit aussi sans Internet) et chaque nuit dans la CI. La liste
+ne garde que des licences permissives (MIT, Apache-2.0, BSD, ISC…), compatibles avec la GPL-3.0-or-later et avec une
+double licence possible de Vanguard : toute autre, même libre et compatible avec la GPL (MPL, LGPL), demande d'abord
+l'accord de l'auteur.
 
 Liens morts : `outils/liens.py` ouvre tous les liens du dépôt (documentation, code du programme hors tests, scripts,
 licences) et vérifie les liens internes des pages Markdown : fichier visé, titre d'une ancre, téléchargements de la

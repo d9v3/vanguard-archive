@@ -25,6 +25,9 @@ Réponses à l'utilisateur en français, claires, avec le pourquoi.
 - Dépendances : `cargo deny check` (`deny.toml` : failles RustSec, licences permises, crates.io seulement, doublons dits
   sans échouer ; une faille admise l'est avec sa preuve ; `extensions/deny.toml` pour la bibliothèque des extensions
   et l'exemple en Rust) ; étape de verifier.sh, sautée sans `cargo-deny`.
+- Failles connues : `cargo audit`, second avis, jugé comme `outils/failles-programmes.sh` (abandon, code défaillant,
+  notice refusés) ; seules exceptions celles de deny.toml (`outils/exceptions-rustsec.py`), que `.cargo/audit.toml`
+  recopie à l'identique ; étape de verifier.sh, sautée sans `cargo-audit` ou sans Internet.
 - Tests Windows sous Wine (pas de PowerShell sous Wine ; le registre, lui, marche) :
   `WINEPREFIX=<dossier jetable> WINEDEBUG=-all CARGO_TARGET_X86_64_PC_WINDOWS_GNU_RUNNER=~/.local/share/Steam/compatibilitytools.d/GE-Proton11-9-x86_64/files/bin/wine cargo test --target x86_64-pc-windows-gnu`
 - macOS : compilé et testé sur un Mac de GitHub (`.github/workflows/macos.yml`), à chaque publication et la nuit si

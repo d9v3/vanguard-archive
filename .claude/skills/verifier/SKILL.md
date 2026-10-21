@@ -14,6 +14,8 @@ relance. Le détail, si une étape demande d'y regarder de près :
 4. Tests Windows sous Wine (commande dans CLAUDE.md), avec un WINEPREFIX jetable dans le dossier temporaire de la
    session. La première fois, Wine prépare ce dossier (une minute).
 5. Si un script généré a changé : commandes shell par `bash -n -c`, PowerShell par pwsh (voir .claude/rules/windows.md).
+6. Dépendances : `cargo deny check` (deny.toml) et `cargo audit` ; « sautée » sans l'outil (cargo audit aussi sans
+   Internet), ce qui n'est pas un échec mais se dit.
 
 Pièges :
 - Un test qui passe sous Linux peut ne pas compiler pour macOS ou Windows (`#[cfg]`) : les quatre clippy comptent.

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Tout vérifier en une commande, avant un commit ou une livraison : mise en forme, clippy sur les quatre cibles, tests
 # Linux et Windows (sous Wine), les tests Linux refaits sans Internet, scripts PowerShell, shell et Python, essais des
-# outils de la clé (outils/essais-cle.sh), liens internes, textes français et anglais, dépendances (cargo deny).
+# outils de la clé (outils/essais-cle.sh), liens internes, textes français et anglais, dépendances (cargo deny) et
+# leurs failles connues (cargo audit).
 # Chaque cible de compilation a sa chaîne (clippy, puis ses tests) et les quatre tournent en même temps : cargo garde
 # un dossier par cible, elles ne s'attendent presque pas. À la fin, une ligne par étape ; le code de sortie dit si tout
 # est vert.
@@ -150,6 +151,32 @@ dependances() {
   return "$code"
 }
 
+# Les failles connues des dépendances selon cargo audit : un second avis, indépendant de cargo deny (sa propre copie
+# de la base RustSec, sa propre lecture de Cargo.lock), jugé comme outils/failles-programmes.sh juge les programmes :
+# abandon, code défaillant et avis « notice » refusés, seules exceptions celles de deny.toml (--ignore, par
+# outils/exceptions-rustsec.py). .cargo/audit.toml, que cargo audit lit aussi, doit en avoir les mêmes identifiants.
+# Sautée sans cargo-audit, et sans Internet : une base qui n'est plus à jour dirait vert à tort.
+failles_connues() {
+  python3 -I outils/exceptions-rustsec.py --audit-toml || return 1
+  command -v cargo-audit >/dev/null || { echo "cargo-audit absent (cargo install --locked cargo-audit)"; return "$SAUTEE"; }
+  internet || { echo "sans Internet, base RustSec pas à jour"; return "$SAUTEE"; }
+  local exceptions id sortie code=0 options=(--color never --deny unmaintained --deny unsound)
+  exceptions=$(python3 -I outils/exceptions-rustsec.py) || return 1
+  for id in $exceptions; do
+    options+=(--ignore "$id")
+  done
+  sortie=$(cargo audit "${options[@]}" 2>&1) || code=1
+  printf '%s\n' "$sortie"
+  # cargo audit n'a pas d'option pour refuser une « notice » : comptée ici, comme dans outils/failles-programmes.sh
+  # (une version retirée de crates.io reste un simple avertissement).
+  if awk '$1 == "Warning:" && $2 != "yanked" { n++ } END { exit !n }' <<<"$sortie"; then
+    echo "✖ avis que cargo deny refuse aussi (notice)"
+    code=1
+  fi
+  echo "exceptions de deny.toml : $(printf '%s\n' "$exceptions" | paste -sd, - | sed 's/,/, /g')"
+  return "$code"
+}
+
 # Les textes affichés comparés à master : un texte perdu ou nouveau se voit avant le commit. Sur master, rien à
 # comparer.
 textes() {
@@ -184,6 +211,7 @@ if [[ $MODE != --rapide ]]; then
   etape liens python3 outils/liens.py --hors-ligne &
   etape textes textes &
   etape dependances dependances &
+  etape failles-connues failles_connues &
 fi
 wait
 
@@ -254,6 +282,7 @@ if [[ $MODE != --rapide ]]; then
   [[ -f $TRAVAIL/textes.log ]] && grep -E '^(perdues|nouvelles) : \[[^]]' "$TRAVAIL/textes.log" | cut -c1-200 | sed 's/^/      /'
   ligne dependances "dépendances (cargo deny)"
   remarques_dependances
+  ligne failles-connues "failles connues (cargo audit)"
 fi
 DUREE=$((SECONDS - DEBUT))
 if ((ECHECS)); then

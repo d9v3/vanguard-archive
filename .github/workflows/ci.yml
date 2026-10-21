@@ -149,6 +149,7 @@ jobs:
       - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
         with:
           tool: cargo-audit,cargo-deny
+      # Ses exceptions sont dans .cargo/audit.toml : celles de deny.toml, où est leur preuve.
       - name: cargo audit
         run: cargo audit
       # Lancé même si cargo audit a échoué : les deux avis servent.

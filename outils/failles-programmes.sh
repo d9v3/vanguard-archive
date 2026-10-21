@@ -40,20 +40,9 @@ if [[ $1 == --outil ]]; then
 fi
 
 OPTIONS=(--color never --deny unmaintained --deny unsound)
-# Les exceptions de deny.toml, par leur identifiant RustSec. Une exception d'une autre forme (toute une bibliothèque)
-# n'a pas d'équivalent pour cargo audit : refusée plutôt que perdue en route.
-EXCEPTIONS=$(python3 -I -c '
-import sys
-import tomllib
-
-with open(sys.argv[1], "rb") as f:
-    exceptions = tomllib.load(f).get("advisories", {}).get("ignore", [])
-for e in exceptions:
-    ident = e if isinstance(e, str) else e.get("id")
-    if not ident:
-        sys.exit(f"exception de deny.toml sans identifiant RustSec, sans équivalent pour cargo audit : {e}")
-    print(ident)
-' "$RACINE/deny.toml")
+# Les exceptions de deny.toml, par leur identifiant RustSec (outils/exceptions-rustsec.py, qui les donne aussi à
+# outils/verifier.sh) ; une exception d'une autre forme y est refusée plutôt que perdue en route.
+EXCEPTIONS=$(python3 -I "$RACINE/outils/exceptions-rustsec.py")
 for id in $EXCEPTIONS; do
   OPTIONS+=(--ignore "$id")
 done
