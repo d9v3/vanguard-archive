@@ -283,7 +283,7 @@ pub async fn decouvrir(ips: &[Ipv4Addr], delai: Duration, parallele: usize) -> V
 /// le lancer : rien à installer (iproute2 manque dans des conteneurs) et quelques microsecondes. Les états gardent les
 /// noms qu'ip leur donne (REACHABLE, STALE…). `None` : le noyau refuse.
 #[cfg(target_os = "linux")]
-fn etats_voisins() -> Option<HashMap<Ipv4Addr, String>> {
+pub(crate) fn etats_voisins() -> Option<HashMap<Ipv4Addr, String>> {
     demander_voisins().map(|r| lire_voisins_netlink(&r))
 }
 
