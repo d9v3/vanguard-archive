@@ -373,12 +373,12 @@ pub(super) fn comptes(dossier: &Path) -> Partie {
 pub(super) fn journaux(dossier: &Path) -> Partie {
     let mut p = Partie::new(Bi::new("Journaux", "Logs"));
     let titre = Bi::new("Journal du système, 7 jours", "System log, 7 days");
-    let nom = "05-journal.txt";
+    let nom = JOURNAL_ECRIT;
     let mut commande = Command::new("journalctl");
     commande
         .args(["--since=-7d", "--reverse", "--no-pager", "-o", "short-iso"])
         .env("LC_ALL", "C.UTF-8");
-    let ecrit = journal_vers(dossier, nom, &titre, &mut commande, 120, Garder::Debut);
+    let ecrit = journal_vers(dossier, nom, &titre, &mut commande, 120, Garder::Debut, None);
     let vide = match ecrit {
         Err(e) => {
             p.manque(titre.clone(), Raison::Erreur(e.to_string()));
@@ -455,32 +455,31 @@ pub(super) fn journaux(dossier: &Path) -> Partie {
 /// robot essaie des mots de passe par milliers.
 const ENTREES_CIBLEES: usize = 20_000;
 
-/// Les lectures ciblées du journal pour la chronologie : les programmes qui disent une connexion, une élévation ou un
-/// compte (par leur identifiant), puis le noyau. Le noyau par son transport plutôt que par -k, qui se limite au
-/// démarrage en cours : un module chargé avant le dernier redémarrage compte aussi.
-const LECTURES_CIBLEES: [(&str, &str, &[&str]); 2] = [
+/// Le journal de systemd écrit par `journaux`.
+const JOURNAL_ECRIT: &str = "05-journal.txt";
+
+/// Les lectures ciblées du journal pour la chronologie, chacune bornée à part : une force brute qui remplit celle de
+/// SSH ne pousse pas hors de la chronologie le sudo ni le compte créé qui suivent l'intrusion. Les programmes par leur
+/// identifiant ; le noyau par son transport plutôt que par -k, qui se limite au démarrage en cours : un module chargé
+/// avant le dernier redémarrage compte aussi.
+const LECTURES_CIBLEES: [(&str, &str, &[&str]); 3] = [
+    ("SSH", "SSH", &["-t", "sshd", "-t", "sshd-session", "-t", "sshd-auth"]),
     (
-        "SSH, sudo, comptes",
-        "SSH, sudo, accounts",
-        &[
-            "-t",
-            "sshd",
-            "-t",
-            "sshd-session",
-            "-t",
-            "sshd-auth",
-            "-t",
-            "sudo",
-            "-t",
-            "useradd",
-            "-t",
-            "usermod",
-            "-t",
-            "gpasswd",
-        ],
+        "sudo, comptes",
+        "sudo, accounts",
+        &["-t", "sudo", "-t", "useradd", "-t", "usermod", "-t", "gpasswd"],
     ),
     ("noyau", "kernel", &["_TRANSPORT=kernel"]),
 ];
+
+/// Une lecture ciblée (`quoi`) qui atteint sa borne : ses plus anciennes entrées de la semaine manquent, et c'est
+/// dit.
+fn lecture_coupee(quoi: Bi, entrees: usize) -> Option<Manque> {
+    (entrees >= ENTREES_CIBLEES).then_some(Manque {
+        quoi,
+        raison: Raison::Entrees(ENTREES_CIBLEES),
+    })
+}
 
 /// journalctl sur les 7 derniers jours, en sortie courte datée avec l'année, en anglais.
 fn journalctl_7_jours() -> Command {
@@ -526,6 +525,7 @@ pub(super) fn evenements_des_journaux(dossier: &Path) -> Apport {
                 break;
             }
             Some(r) if r.code != Some(0) => {
+                reserve |= journal_reserve(&r.erreurs);
                 let premiere = r.erreurs.lines().next().unwrap_or_default().trim().to_string();
                 apport.manques.push(Manque {
                     quoi,
@@ -536,12 +536,7 @@ pub(super) fn evenements_des_journaux(dossier: &Path) -> Apport {
                 lu = true;
                 reserve |= journal_reserve(&r.erreurs);
                 let mut lecture = super::unix::lire_texte(&r.sortie, maintenant);
-                if lecture.entrees >= ENTREES_CIBLEES {
-                    apport.manques.push(Manque {
-                        quoi,
-                        raison: Raison::Entrees(ENTREES_CIBLEES),
-                    });
-                }
+                apport.manques.extend(lecture_coupee(quoi, lecture.entrees));
                 apport.evenements.append(&mut lecture.evenements);
             }
         }
@@ -569,19 +564,31 @@ pub(super) fn evenements_des_journaux(dossier: &Path) -> Apport {
             });
         if let Some(q) = plus_ancienne.filter(|q| *q > debut + 3600) {
             let depuis = chronologie::date_locale(q, &chrono::Local);
-            apport.manques.push(Manque {
-                quoi: bi!(
-                    "Chronologie : le journal du système ne remonte qu'au {depuis}",
-                    "Timeline: the system log only goes back to {depuis}"
-                ),
-                raison: Raison::NonGarde,
+            apport.manques.push(if reserve {
+                // Sans droits, la plus ancienne entrée lisible est celle du compte : le système en garde peut-être
+                // de bien plus anciennes, que seul root (ou le groupe systemd-journal) peut lire.
+                Manque {
+                    quoi: bi!(
+                        "Chronologie : le journal lisible sans droits ne remonte qu'au {depuis}",
+                        "Timeline: the log readable without rights only goes back to {depuis}"
+                    ),
+                    raison: Raison::Droits,
+                }
+            } else {
+                Manque {
+                    quoi: bi!(
+                        "Chronologie : le journal du système ne remonte qu'au {depuis}",
+                        "Timeline: the system log only goes back to {depuis}"
+                    ),
+                    raison: Raison::NonGarde,
+                }
             });
         }
         // Le journal complet est déjà lu, en mieux ; la fin des fichiers de /var/log, écrite sans journal de
         // systemd, reste à reprendre.
-        super::unix::journaux_ecrits(dossier, Some("05-journal.txt"), false)
+        super::unix::journaux_ecrits(dossier, Some(JOURNAL_ECRIT), false, None)
     } else {
-        super::unix::journaux_ecrits(dossier, None, true)
+        super::unix::journaux_ecrits(dossier, None, true, reserve.then_some(JOURNAL_ECRIT))
     };
     apport.evenements.append(&mut ecrits.evenements);
     apport.manques.append(&mut ecrits.manques);
@@ -640,6 +647,43 @@ mod tests {
             "Hint: You are currently not seeing messages from other users and the system."
         ));
         assert!(!journal_reserve(""));
+    }
+
+    /// Trois lectures bornées à part : SSH, puis sudo et les comptes, puis le noyau. Une force brute inventée remplit
+    /// celle de SSH, qui est dite coupée ; sudo et les comptes gardent la leur.
+    #[test]
+    fn lectures_ciblees_separees() {
+        use std::fmt::Write as _;
+        let identifiants = |filtres: &[&str]| -> Vec<String> {
+            filtres
+                .chunks(2)
+                .filter(|c| c[0] == "-t")
+                .map(|c| c[1].to_string())
+                .collect()
+        };
+        let [ssh, comptes, noyau] = LECTURES_CIBLEES;
+        assert_eq!(identifiants(ssh.2), ["sshd", "sshd-session", "sshd-auth"]);
+        assert_eq!(identifiants(comptes.2), ["sudo", "useradd", "usermod", "gpasswd"]);
+        assert_eq!(noyau.2, ["_TRANSPORT=kernel"]);
+        let mut force_brute = String::new();
+        for i in 0..ENTREES_CIBLEES {
+            let (minute, seconde) = (i / 60 % 60, i % 60);
+            let _ = writeln!(
+                force_brute,
+                "2026-10-20T14:{minute:02}:{seconde:02}-04:00 portable sshd[{i}]: Failed password for alice from 203.0.113.7 port 22 ssh2"
+            );
+        }
+        let lecture = super::super::unix::lire_texte(&force_brute, chrono::Local::now().naive_local());
+        assert_eq!(lecture.entrees, ENTREES_CIBLEES);
+        let quoi = Bi::new("Chronologie : journal ciblé (SSH)", "Timeline: targeted log (SSH)");
+        assert_eq!(
+            lecture_coupee(quoi.clone(), lecture.entrees),
+            Some(Manque {
+                quoi,
+                raison: Raison::Entrees(ENTREES_CIBLEES)
+            })
+        );
+        assert_eq!(lecture_coupee(Bi::meme("sudo"), 3), None);
     }
 
     #[test]

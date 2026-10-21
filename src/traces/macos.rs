@@ -203,7 +203,8 @@ pub(super) fn journaux(dossier: &Path) -> Partie {
     let nom = "05-log-show.txt";
     let mut commande = Command::new("log");
     commande.args(["show", "--last", "1d", "--style", "syslog"]);
-    match journal_vers(dossier, nom, &titre, &mut commande, 120, Garder::Fin) {
+    let jour = Bi::new("1 jour", "1 day");
+    match journal_vers(dossier, nom, &titre, &mut commande, 120, Garder::Fin, Some(&jour)) {
         Err(e) => p.manque(titre.clone(), Raison::Erreur(e.to_string())),
         Ok(None) => p.manque(titre.clone(), Raison::Absente("log".into())),
         Ok(Some(e)) => {
@@ -241,7 +242,7 @@ pub(super) fn journaux(dossier: &Path) -> Partie {
 /// Les événements des journaux pour la chronologie : repris dans le journal unifié et le journal des installations
 /// que la collecte vient d'écrire (log show n'a pas de filtre aussi simple que journalctl, et il est lent).
 pub(super) fn evenements_des_journaux(dossier: &Path) -> super::chronologie::Apport {
-    super::unix::journaux_ecrits(dossier, None, true)
+    super::unix::journaux_ecrits(dossier, None, true, None)
 }
 
 /// Les dossiers temporaires et le dossier partagé, où un programme dépose ce qu'il lance.

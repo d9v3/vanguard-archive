@@ -107,9 +107,13 @@ pub(crate) enum Raison {
     /// Tant de lignes de plus, au-delà de la borne de la chronologie : pas gardées.
     Lignes(usize),
     /// Coupé à tant d'entrées, les plus récentes gardées.
-    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+    #[cfg_attr(target_os = "macos", allow(dead_code))]
     Entrees(usize),
-    /// Le système ne l'a pas gardé (journal tourné ou vidé, ou lu sur moins de jours).
+    /// Vanguard ne l'a lu que sur cette étendue, par choix (« 10 Mo », la fin d'un fichier ; « 1 jour ») : le reste
+    /// existe peut-être.
+    #[cfg_attr(windows, allow(dead_code))]
+    LuSur(Bi),
+    /// Le système ne l'a pas gardé (journal tourné ou vidé), alors que Vanguard l'a lu en entier, avec les droits.
     #[cfg_attr(windows, allow(dead_code))]
     NonGarde,
     /// Ce que le système a répondu.
@@ -156,6 +160,10 @@ impl Raison {
             Raison::Entrees(n) => bi!(
                 "coupé à {n} entrées, les plus anciennes ne sont pas gardées",
                 "cut at {n} entries, the oldest are not kept"
+            ),
+            Raison::LuSur(etendue) => Bi::new(
+                format!("lu sur {} par Vanguard", etendue.fr),
+                format!("only {} read by Vanguard", etendue.en),
             ),
             Raison::NonGarde => Bi::new("le système ne l'a pas gardé", "the system did not keep it"),
             Raison::Erreur(e) => Bi::meme(e.clone()),
@@ -354,7 +362,9 @@ impl Feuille {
         let Ok(meta) = std::fs::metadata(chemin) else {
             return;
         };
-        self.noter_date(chemin, &meta);
+        // Un lien se date par lui-même : un service activé l'est quand son lien est posé, pas quand une mise à jour
+        // réécrit le fichier du paquet qu'il désigne (ce qui ferait un faux « service ajouté » dans la chronologie).
+        self.noter_date(chemin, &lien);
         self.section(&chemin.to_string_lossy());
         match lire_debut(chemin, BORNE_FICHIER, !est_lien) {
             Ok(texte) => {
@@ -2041,6 +2051,50 @@ mod tests {
                 "12 more lines are not kept (5000 at most)"
             )
         );
+    }
+
+    /// Un lien de root, comme un service activé de systemd, se date par lui-même et jamais par sa cible, que la mise à
+    /// jour d'un paquet réécrit : les vrais liens de cet ordinateur, lus sans rien changer.
+    #[cfg(unix)]
+    #[test]
+    fn lien_date_par_lui_meme() {
+        let mut liens: Vec<PathBuf> = ["/etc/localtime", "/etc/os-release"]
+            .iter()
+            .map(PathBuf::from)
+            .collect();
+        for dossier in [
+            "/etc/systemd/system/multi-user.target.wants",
+            "/etc/systemd/system/default.target.wants",
+        ] {
+            liens.extend(
+                std::fs::read_dir(dossier)
+                    .into_iter()
+                    .flatten()
+                    .flatten()
+                    .map(|e| e.path()),
+            );
+        }
+        for lien in liens {
+            let Ok(m) = std::fs::symlink_metadata(&lien) else {
+                continue;
+            };
+            if !m.file_type().is_symlink() || !lien_sur(&m) || !lien.is_file() {
+                continue;
+            }
+            let attendue = m.modified().unwrap();
+            let mut f = Feuille::new(&bi("Démarrage", "Startup"));
+            f.fichier(&lien, false);
+            let dates: Vec<SystemTime> = f
+                .dates
+                .iter()
+                .filter(|(c, _)| Path::new(c) == lien)
+                .map(|(_, t)| *t)
+                .collect();
+            assert!(
+                !dates.is_empty() && dates.iter().all(|t| *t == attendue),
+                "{lien:?} : {dates:?}"
+            );
+        }
     }
 
     #[test]

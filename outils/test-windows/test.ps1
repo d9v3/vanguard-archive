@@ -1610,15 +1610,23 @@ if ($Auto) { Sautee 'Sautée : il faut regarder l''écran (test avec questions).
 
 Etape 'Détection en profondeur (0.83) : points d''ancrage, pilotes, agents d''IA, chasse, sans fausse alerte sur un Windows propre'
 # Une VM propre n'a ni paquet LSA inconnu, ni AppCertDlls, ni pilote rangé dans un dossier du compte : une alerte
-# Moyen ou Élevé ici est sans doute une fausse alerte, à regarder avant la publication.
+# Moyen ou Élevé ici est sans doute une fausse alerte, à regarder avant la publication. Un constat non vérifié n'est
+# jamais un succès : attendu s'il demande l'administrateur (passe sans droits), un défaut sinon.
 try {
     $audit = Sortie 'machine-json' | ConvertFrom-Json
     foreach ($id in 'WIN-PRS-007', 'WIN-PRS-008', 'WIN-PRS-009', 'WIN-PRS-010', 'WIN-PRS-011', 'WIN-PRS-012', 'COM-AGT-001', 'COM-AGT-002', 'COM-CPT-003', 'COM-PRG-001') {
         $c = @($audit.constats | Where-Object regle -eq $id)
         if (-not $c.Count) { Bug "$id absente du bilan"; continue }
         $alertes = @($c | Where-Object { $_.probleme -and $_.probleme -ne 'Info' })
-        if ($alertes.Count) { $alertes | ForEach-Object { Bug "Alerte sur une VM propre (fausse alerte ?) : $id $($_.probleme) : $($_.message)" } }
-        else { Ok "$id : $((@($c | ForEach-Object { $_.message })) -join ' | ')" }
+        $calmes = @($c | Where-Object { -not $_.probleme -or $_.probleme -eq 'Info' })
+        $nonVerifies = @($calmes | Where-Object { -not $_.verifie })
+        $verifies = @($calmes | Where-Object verifie)
+        $alertes | ForEach-Object { Bug "Alerte sur une VM propre (fausse alerte ?) : $id $($_.probleme) : $($_.message)" }
+        foreach ($n in $nonVerifies) {
+            if ($n.message -match 'administrat') { Info "$id non vérifié sans droits (attendu) : $($n.message)" }
+            else { Bug "$id non vérifié : $($n.message)" }
+        }
+        if ($verifies.Count -and -not $alertes.Count) { Ok "$id : $((@($verifies | ForEach-Object { $_.message })) -join ' | ')" }
     }
 } catch { Bug "machine --json illisible : $($_.Exception.Message)" }
 
@@ -1647,8 +1655,15 @@ try {
         -RedirectStandardOutput (Join-Path $res 'memoire.out.txt') -RedirectStandardError (Join-Path $res 'memoire.err.txt')
     Noter-Commande 'memoire' @('memoire') $p.ExitCode ((Get-Date) - $avantMemoire).TotalSeconds $null
     $t = "$(Sortie 'memoire')"
-    if ($p.ExitCode -eq 0 -and $t.Length -gt 0) { Ok "Analyse de la mémoire terminée en $([int]((Get-Date) - $avantMemoire).TotalSeconds) s" }
-    else { Bug "vanguard memoire : code $($p.ExitCode), sortie de $($t.Length) caractère(s)" }
+    # Le bilan dit combien de processus ont été lus (« Rien trouvé dans les 38 processus lus », « No memory region of
+    # the 38 processes read ») ; aucun lu, ou une ligne ✖ (règles qui ne compilent pas, correspondance) : un défaut.
+    $lus = @([regex]::Matches($t, '(\d+) (?:processus lus(?!\s+en partie)|processes read)'))
+    $croix = @($t -split "`r?`n" | Where-Object { $_ -match '✖' })
+    if ($p.ExitCode -ne 0 -or $t.Length -eq 0) { Bug "vanguard memoire : code $($p.ExitCode), sortie de $($t.Length) caractère(s)" }
+    elseif ($croix.Count) { $croix | ForEach-Object { Bug "vanguard memoire : $(($_ -replace '\e\[[0-9;]*m', '').Trim())" } }
+    elseif (-not $lus.Count) { Bug 'vanguard memoire : aucun « N processus lus » / « N processes read » dans la sortie' }
+    elseif ([int]$lus[-1].Groups[1].Value -eq 0) { Bug "vanguard memoire : aucun processus lu ($($lus[-1].Value))" }
+    else { Ok "Analyse de la mémoire terminée en $([int]((Get-Date) - $avantMemoire).TotalSeconds) s : $($lus[-1].Value)" }
 } catch { Bug "vanguard memoire n'a pas pu se lancer : $($_.Exception.Message)" }
 if (Test-Path $exe) { Ok 'vanguard.exe toujours là après l''analyse (pas mis en quarantaine)' }
 else { Bug 'vanguard.exe a DISPARU après l''analyse de la mémoire : Defender l''a mis en quarantaine' }

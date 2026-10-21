@@ -922,16 +922,27 @@ fn lire_journaux_chronologie(admin: bool) -> Apport {
         if lu.is_none() && code == Some(REQUETE_INVALIDE) && filtre.is_some() {
             (lu, code) = lire(None);
         }
-        if lu.is_some() {
+        let quoi = bi!("Chronologie : {fr}", "Timeline: {en}");
+        if let Some(lignes) = lu {
+            apport.manques.extend(lecture_coupee(quoi, lignes.len(), max));
             apport.evenements.append(&mut evenements);
         } else {
             apport.manques.push(Manque {
-                quoi: bi!("Chronologie : {fr}", "Timeline: {en}"),
+                quoi,
                 raison: raison_evtquery(code, std::time::Instant::now() >= fin),
             });
         }
     }
     apport
+}
+
+/// Une lecture (`quoi`) qui atteint sa borne, `max` événements : les plus anciens de la semaine manquent, et c'est
+/// dit, comme sous Linux. Une rafale d'échecs de connexion qui remplit la sienne ne passe plus pour toute la semaine.
+fn lecture_coupee(quoi: Bi, lus: usize, max: usize) -> Option<Manque> {
+    (lus >= max).then_some(Manque {
+        quoi,
+        raison: Raison::Entrees(max),
+    })
 }
 
 /// Pas de montage à écarter sous Windows : un autre système de fichiers y est un autre lecteur.
@@ -1055,6 +1066,30 @@ mod tests {
         assert_eq!(raison_evtquery(Some(15007), false), Raison::Introuvable);
         assert_eq!(raison_evtquery(Some(5), true), Raison::Delai(30));
         assert!(matches!(raison_evtquery(Some(1), false), Raison::Erreur(_)));
+    }
+
+    /// Une lecture qui atteint sa borne (1000, 500 ou 300) est dite coupée, avec ce qu'elle lisait ; en deçà, rien.
+    #[test]
+    fn lecture_bornee_dite() {
+        for l in &LECTURES_CHRONOLOGIE {
+            let quoi = bi!("Chronologie : {}", "Timeline: {}", l.titre.0);
+            let m = lecture_coupee(quoi.clone(), l.max, l.max).expect(l.titre.0);
+            assert_eq!(
+                m,
+                Manque {
+                    quoi,
+                    raison: Raison::Entrees(l.max)
+                }
+            );
+            assert!(lecture_coupee(Bi::meme("x"), l.max - 1, l.max).is_none());
+        }
+        assert_eq!(
+            Raison::Entrees(1000).texte(),
+            Bi::new(
+                "coupé à 1000 entrées, les plus anciennes ne sont pas gardées",
+                "cut at 1000 entries, the oldest are not kept"
+            )
+        );
     }
 
     /// Les vraies fonctions de Windows (Wine ici, la VM ensuite) : chaque journal est lu ou dit, jamais passé sous

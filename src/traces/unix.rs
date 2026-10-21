@@ -80,8 +80,27 @@ pub(super) fn cron(f: &mut Feuille) {
     }
 }
 
+/// La fin d'un fichier journal recopiée, au plus (`journaux_classiques`).
+const FIN_JOURNAL: u64 = 10 << 20;
+
+/// L'en-tête d'un journal écrit dont Vanguard n'a lu qu'une partie, par choix (la fin d'un fichier, le dernier
+/// jour) : qui lit le fichier le sait, et la chronologie le relit pour ne pas dire que le système n'a pas gardé le
+/// reste.
+const LU_SUR: &str = "# Lu par Vanguard sur / Read by Vanguard over: ";
+
+/// La ligne d'en-tête « lu sur » d'une étendue (« 10 Mo », « 1 jour »).
+fn ligne_lu_sur(etendue: &Bi) -> String {
+    format!("{LU_SUR}{} / {}\n", etendue.fr, etendue.en)
+}
+
+/// L'étendue lue d'après la ligne d'en-tête « lu sur ».
+fn lu_sur(ligne: &str) -> Option<Bi> {
+    let (fr, en) = ligne.strip_prefix(LU_SUR)?.trim_end().split_once(" / ")?;
+    Some(Bi::new(fr, en))
+}
+
 /// Recopie la fin d'un fichier journal (`borne` octets au plus, à partir d'une ligne entière) dans `nom` ; rend la
-/// taille écrite.
+/// taille écrite. Coupé, l'en-tête le dit.
 pub(super) fn copier_la_fin(source: &Path, dossier: &Path, nom: &str, borne: u64) -> std::io::Result<u64> {
     let mut f = std::fs::File::open(source)?;
     let taille = f.metadata()?.len();
@@ -96,12 +115,16 @@ pub(super) fn copier_la_fin(source: &Path, dossier: &Path, nom: &str, borne: u64
     }
     let mut sortie = creer_fichier(&dossier.join(nom))?;
     sortie.write_all(entete(&Bi::meme(source.to_string_lossy())).as_bytes())?;
+    if depart > 0 {
+        sortie.write_all(ligne_lu_sur(&mo(borne)).as_bytes())?;
+    }
     sortie.write_all(super::texte_sur(&String::from_utf8_lossy(&octets)).as_bytes())?;
     Ok(octets.len() as u64)
 }
 
-/// Lance une commande qui écrit un journal dans `nom` (après l'en-tête), `borne` octets au plus. `Err` : le fichier
-/// ne s'écrit pas ; `Ok(None)` : la commande ne démarre pas.
+/// Lance une commande qui écrit un journal dans `nom` (après l'en-tête), `borne` octets au plus ; `etendue` : celle à
+/// laquelle Vanguard limite la commande (« 1 jour »), dite dans l'en-tête. `Err` : le fichier ne s'écrit pas ;
+/// `Ok(None)` : la commande ne démarre pas.
 pub(super) fn journal_vers(
     dossier: &Path,
     nom: &str,
@@ -109,9 +132,13 @@ pub(super) fn journal_vers(
     commande: &mut Command,
     secondes: u64,
     garder: Garder,
+    etendue: Option<&Bi>,
 ) -> std::io::Result<Option<crate::commande::Ecrit>> {
     let mut f = creer_fichier(&dossier.join(nom))?;
     f.write_all(entete(titre).as_bytes())?;
+    if let Some(etendue) = etendue {
+        f.write_all(ligne_lu_sur(etendue).as_bytes())?;
+    }
     let _ = writeln!(f, "# $ {}", super::affichage_commande(commande));
     Ok(lancer_vers(commande, secondes, &f, super::BORNE_JOURNAL, garder))
 }
@@ -140,7 +167,7 @@ pub(super) fn journaux_classiques(p: &mut Partie, dossier: &Path, fichiers: &[&s
             "05-{}.txt",
             source.to_string_lossy().trim_start_matches('/').replace('/', "-")
         );
-        match copier_la_fin(source, dossier, &nom, 10 << 20) {
+        match copier_la_fin(source, dossier, &nom, FIN_JOURNAL) {
             Ok(n) => {
                 total += n;
                 p.fichiers.push(super::Produit {
@@ -167,8 +194,14 @@ pub(super) fn journaux_classiques(p: &mut Partie, dossier: &Path, fichiers: &[&s
 
 /// Les événements de la chronologie dans les journaux texte que la collecte vient d'écrire (05-*.txt : journal de
 /// systemd, fin des fichiers de /var/log, journal unifié de macOS), sauf `sauf` : ces fichiers sont relus, pas
-/// l'ordinateur. Aucun journal écrit (place, droits, commande absente) : dit si `signaler_absence`.
-pub(super) fn journaux_ecrits(dossier: &Path, sauf: Option<&str>, signaler_absence: bool) -> Apport {
+/// l'ordinateur. Aucun journal écrit (place, droits, commande absente) : dit si `signaler_absence`. `sans_droits` :
+/// le journal écrit lu sans droits (celui de systemd, par un compte ordinaire), qui ne montre que le compte.
+pub(super) fn journaux_ecrits(
+    dossier: &Path,
+    sauf: Option<&str>,
+    signaler_absence: bool,
+    sans_droits: Option<&str>,
+) -> Apport {
     let mut apport = Apport::default();
     let mut journaux: Vec<PathBuf> = std::fs::read_dir(dossier)
         .into_iter()
@@ -198,8 +231,9 @@ pub(super) fn journaux_ecrits(dossier: &Path, sauf: Option<&str>, signaler_absen
         match lire_fichier(&chemin, maintenant) {
             Ok(mut lecture) => {
                 apport.evenements.append(&mut lecture.evenements);
-                // Un journal qui ne couvre pas la semaine (borne de 50 Mo sur un ordinateur bavard, journal tourné
-                // ou vidé, macOS lu sur un jour) : ce qui précède manque à la chronologie, et c'est dit.
+                // Un journal qui ne couvre pas la semaine : ce qui précède manque à la chronologie, et c'est dit avec
+                // sa vraie raison. Seul un journal lu en entier, avec les droits, dit ce que le système a gardé ; les
+                // bornes de Vanguard (50 Mo, la fin d'un fichier, le dernier jour de macOS) ne l'accusent pas.
                 if let Some(q) = lecture.plus_ancienne.filter(|q| *q > debut + 3600) {
                     let depuis = chronologie::date_locale(q, &chrono::Local);
                     let borne = std::fs::metadata(&chemin).is_ok_and(|m| m.len() >= super::BORNE_JOURNAL);
@@ -210,6 +244,10 @@ pub(super) fn journaux_ecrits(dossier: &Path, sauf: Option<&str>, signaler_absen
                         ),
                         raison: if borne {
                             Raison::Borne(super::BORNE_JOURNAL)
+                        } else if let Some(etendue) = lecture.lu_sur {
+                            Raison::LuSur(etendue)
+                        } else if sans_droits == Some(nom.as_str()) {
+                            Raison::Droits
                         } else {
                             Raison::NonGarde
                         },
@@ -226,16 +264,26 @@ pub(super) fn journaux_ecrits(dossier: &Path, sauf: Option<&str>, signaler_absen
 }
 
 /// Ce qu'un journal texte donne à la chronologie : ses événements, la date de sa ligne la plus ancienne (jusqu'où il
-/// remonte) et le nombre de ses lignes datées (ses entrées).
+/// remonte), le nombre de ses lignes datées (ses entrées) et, s'il le dit dans son en-tête, l'étendue à laquelle
+/// Vanguard l'a limité.
 #[derive(Debug, Default)]
 pub(super) struct Lecture {
     pub evenements: Vec<Evenement>,
     pub plus_ancienne: Option<i64>,
     pub entrees: usize,
+    pub lu_sur: Option<Bi>,
 }
 
 impl Lecture {
     fn ligne(&mut self, ligne: &str, maintenant: chrono::NaiveDateTime) {
+        // Seul l'en-tête compte, avant la première entrée datée.
+        if self.entrees == 0
+            && self.lu_sur.is_none()
+            && let Some(etendue) = lu_sur(ligne)
+        {
+            self.lu_sur = Some(etendue);
+            return;
+        }
         if let Some(q) = chronologie::quand_de_ligne(ligne, maintenant, &chrono::Local) {
             self.entrees += 1;
             self.plus_ancienne = Some(self.plus_ancienne.map_or(q, |p| p.min(q)));
@@ -281,7 +329,7 @@ mod tests {
         let dossier = crate::reseau::dossier_local().join("chronologie-journal");
         let _ = std::fs::remove_dir_all(&dossier);
         std::fs::create_dir_all(&dossier).unwrap();
-        let vide = journaux_ecrits(&dossier, None, true);
+        let vide = journaux_ecrits(&dossier, None, true, None);
         assert_eq!(vide.evenements, Vec::new());
         assert_eq!(vide.manques.len(), 1);
         assert_eq!(vide.manques[0].raison, Raison::Introuvable);
@@ -301,9 +349,9 @@ mod tests {
         )
         .unwrap();
         // Le journal complet écarté (Linux l'a lu filtré) : rien d'autre, et rien à dire.
-        let sans = journaux_ecrits(&dossier, Some("05-journal.txt"), false);
+        let sans = journaux_ecrits(&dossier, Some("05-journal.txt"), false, None);
         assert_eq!((sans.evenements.len(), sans.manques.len()), (0, 0));
-        let a = journaux_ecrits(&dossier, None, true);
+        let a = journaux_ecrits(&dossier, None, true, None);
         // Le journal inventé est daté : selon le jour où le test tourne, il couvre la semaine ou ne remonte qu'au
         // 20 octobre 2026 (à l'heure de l'ordinateur), et c'est dit.
         assert!(
@@ -323,6 +371,62 @@ mod tests {
         );
     }
 
+    /// Un journal qui ne couvre pas la semaine, avec sa vraie raison : coupé ou limité par Vanguard (la fin d'un
+    /// fichier, le dernier jour de macOS), lu sans droits, ou seulement alors pas gardé par le système. Les journaux
+    /// sont inventés, datés d'hier, et écrits par les vraies fonctions de la collecte.
+    #[test]
+    fn raison_d_un_journal_court() {
+        let dossier = crate::reseau::dossier_local().join("chronologie-raisons");
+        let _ = std::fs::remove_dir_all(&dossier);
+        std::fs::create_dir_all(&dossier).unwrap();
+        let hier = (chrono::Local::now() - chrono::Duration::hours(30)).format("%Y-%m-%dT%H:%M:%S%:z");
+        let ligne = format!("{hier} portable sshd[4242]: Accepted password for alice from 192.0.2.10 port 1 ssh2\n");
+        // La fin d'un fichier de /var/log, coupée par Vanguard.
+        let source = dossier.join("auth.log");
+        std::fs::write(&source, format!("{}{ligne}", "x\n".repeat(64))).unwrap();
+        let borne = u64::try_from(ligne.len()).unwrap() + 4;
+        copier_la_fin(&source, &dossier, "05-var-log-auth.log.txt", borne).unwrap();
+        // Le journal unifié, que Vanguard ne lit que sur le dernier jour.
+        let jour = Bi::new("1 jour", "1 day");
+        let mut echo = Command::new("echo");
+        echo.arg(ligne.trim_end());
+        let titre = Bi::new("Journal unifié, 1 jour", "Unified log, 1 day");
+        let ecrit = journal_vers(
+            &dossier,
+            "05-log-show.txt",
+            &titre,
+            &mut echo,
+            10,
+            Garder::Fin,
+            Some(&jour),
+        );
+        assert!(ecrit.unwrap().is_some());
+        // Le journal de systemd lu sans droits, et un journal lu en entier.
+        for nom in ["05-journal.txt", "05-var-log-messages.txt"] {
+            std::fs::write(dossier.join(nom), format!("{}{ligne}", entete(&Bi::meme(nom)))).unwrap();
+        }
+        let a = journaux_ecrits(&dossier, None, true, Some("05-journal.txt"));
+        let raison = |nom: &str| {
+            a.manques
+                .iter()
+                .find(|m| m.quoi.fr.starts_with(&format!("Chronologie : {nom} ne remonte qu'au ")))
+                .map(|m| m.raison.clone())
+        };
+        assert_eq!(raison("05-var-log-auth.log.txt"), Some(Raison::LuSur(mo(borne))));
+        assert_eq!(raison("05-log-show.txt"), Some(Raison::LuSur(jour.clone())));
+        assert_eq!(raison("05-journal.txt"), Some(Raison::Droits));
+        assert_eq!(raison("05-var-log-messages.txt"), Some(Raison::NonGarde));
+        assert_eq!(a.manques.len(), 4, "{:?}", a.manques);
+        assert_eq!(
+            Raison::LuSur(jour).texte(),
+            Bi::new("lu sur 1 jour par Vanguard", "only 1 day read by Vanguard")
+        );
+        // L'en-tête ne compte qu'avant la première entrée : la même ligne plus bas n'est qu'une ligne du journal.
+        let texte = format!("{ligne}{}", ligne_lu_sur(&Bi::new("10 Mo", "10 MB")));
+        let l = lire_texte(&texte, chrono::Local::now().naive_local());
+        assert_eq!((l.entrees, l.lu_sur), (1, None));
+    }
+
     #[test]
     fn fin_d_un_journal_a_partir_d_une_ligne() {
         let dossier = crate::reseau::dossier_local().join("fin-journal");
@@ -336,8 +440,18 @@ mod tests {
             "{texte}"
         );
         assert!(!texte.contains("deux"));
-        // Tout tient : rien n'est coupé.
+        // Coupé : l'en-tête le dit.
+        assert!(
+            texte.contains("\n# Lu par Vanguard sur / Read by Vanguard over: moins de 1 Mo / less than 1 MB\n"),
+            "{texte}"
+        );
+        // Tout tient : rien n'est coupé, et l'en-tête n'en dit rien.
         assert_eq!(copier_la_fin(&source, &dossier, "tout.txt", 100).unwrap(), 14);
+        assert!(
+            !std::fs::read_to_string(dossier.join("tout.txt"))
+                .unwrap()
+                .contains(LU_SUR)
+        );
         // Jamais un fichier existant écrasé.
         assert!(copier_la_fin(&source, &dossier, "tout.txt", 100).is_err());
         assert_eq!(mo(3 << 20).fr, "3 Mo");
