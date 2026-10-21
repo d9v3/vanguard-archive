@@ -395,7 +395,7 @@ main { gap: 3.5rem; padding-block: 3rem; }
 <p>Pour qui veut savoir ce qui se passe sous le capot : les règles du bilan, les interfaces du système lues directement en Rust, les sources de menaces, la chaîne de confiance des mises à jour, et chaque commande.</p>
 </div>
 <dl class="specs">
-<div><dt>Langage</dt><dd>Rust, édition 2024 · ≈ 113 000 lignes ; aucun programme externe pour lire le système</dd></div>
+<div><dt>Langage</dt><dd>Rust, édition 2024 · ≈ 113 100 lignes ; aucun programme externe pour lire le système</dd></div>
 <div><dt>Programme</dt><dd>Un seul exécutable, rien à installer : Linux x86_64 (statique, musl), Windows x86_64, macOS Apple Silicon et Intel</dd></div>
 <div><dt>Règles du bilan</dt><dd>119 règles à identifiant stable (<code>LNX-SSH-006</code>) : 67 sous Linux, 48 sous Windows, 52 sous macOS, communes comprises ; 32 fiches d'audit du réseau</dd></div>
 <div><dt>Interface</dt><dd>Menu au clavier, ou 62 commandes en ligne ; sorties <code>--json</code>, rapport HTML ou Markdown</dd></div>
@@ -565,7 +565,8 @@ vanguard yara --complet</pre>
 <li><b>Box et objets connectés</b><span>Caméras, imprimantes, NAS, télés, domotique reconnus, avec le mot de passe d'origine à changer. Rien n'est sondé en plus.</span></li>
 <li><b>Ordinateur d'un proche</b><span>Trois questions, un résumé en cinq points simples, les corrections une à une, puis une page à laisser avec des conseils pour la personne.</span></li>
 <li><b>Données et vie privée</b><span>Bilan de confidentialité (position, contacts, caméra, micro), tableau de bord de la surveillance, sauvegarde relue pour de vrai, mots de passe du navigateur comptés sans jamais être lus.</span></li>
-<li><b>Tout en Rust</b><span>Windows lu sans PowerShell (comptes, démarrage, tâches, Defender, BitLocker, Windows Update, partages, certificats…), macOS sans defaults ni plutil : plus rapide, et ça marche même quand ces outils sont bloqués.</span></li>
+<li><b>Windows lu sans PowerShell</b><span>Comptes, démarrage, tâches planifiées, Defender, BitLocker, Windows Update, santé du disque, lenteur, diagnostic, fiche, partages, certificats : par les fonctions de Windows et WMI. Plus rapide, et ça marche même quand PowerShell est bloqué.</span></li>
+<li><b>Linux et macOS lus sans commandes</b><span>Paquets, disques, DNS, minuteries, pare-feu, ports sous Linux ; préférences, agents et comptes sous macOS, sans defaults, plutil, dscl ni last : tout en Rust.</span></li>
 </ul>
 </section>
 <section id="principes">
@@ -586,9 +587,9 @@ vanguard yara --complet</pre>
 <h2>Écrit en Rust, testé à chaque version</h2>
 </div>
 <div class="chiffres">
-<div class="chiffre"><b>≈ 113 000</b><span>lignes de code Rust</span></div>
-<div class="chiffre"><b>965</b><span>tests sous Linux</span></div>
-<div class="chiffre"><b>859</b><span>tests sous Windows (Wine)</span></div>
+<div class="chiffre"><b>≈ 113 100</b><span>lignes de code Rust</span></div>
+<div class="chiffre"><b>969</b><span>tests sous Linux</span></div>
+<div class="chiffre"><b>862</b><span>tests sous Windows (Wine)</span></div>
 <div class="chiffre"><b>151</b><span>vérifications sur un vrai Windows</span></div>
 </div>
 <p class="note">Chaque version passe par des relectures de sécurité indépendantes, par un vrai Windows qui se teste tout seul et par un vrai Mac. Cette page est refaite par le script de publication à chaque version.</p>
