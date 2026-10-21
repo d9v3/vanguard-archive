@@ -19,6 +19,9 @@ pub(crate) struct Demande<'a> {
     pub delai: Duration,
     /// Au-delà, la réponse est abandonnée (`None`) : une archive ne doit pas remplir le disque.
     pub taille_max: u64,
+    /// Jamais de redirection vers un autre hôte, même sans en-tête : l'adresse porte un secret (la clé d'abuse.ch dans
+    /// le chemin de ses exports). Toujours le cas avec des en-têtes.
+    pub meme_hote: bool,
 }
 
 impl<'a> Demande<'a> {
@@ -29,6 +32,7 @@ impl<'a> Demande<'a> {
             corps: None,
             delai,
             taille_max: 64 << 20,
+            meme_hote: false,
         }
     }
 }
@@ -106,6 +110,7 @@ pub(crate) fn envoyer(demande: Demande) -> Option<Reponse> {
         corps,
         delai,
         taille_max,
+        meme_hote,
     } = demande;
     // HTTPS seulement, dès l'adresse de départ ; en clair, seulement vers cette machine (les tests).
     if !(adresse.starts_with("https://") || adresse.starts_with("http://127.0.0.1:")) {
@@ -114,7 +119,7 @@ pub(crate) fn envoyer(demande: Demande) -> Option<Reponse> {
     let adresse = adresse.to_string();
     let entetes: Vec<(String, String)> = entetes.into_iter().map(|(n, v)| (n.to_string(), v)).collect();
     a_part(async move {
-        let client = client(delai, !entetes.is_empty(), false)?;
+        let client = client(delai, meme_hote || !entetes.is_empty(), false)?;
         let mut requete = match corps {
             Some(corps) => client.post(&adresse).body(corps),
             None => client.get(&adresse),
@@ -122,6 +127,8 @@ pub(crate) fn envoyer(demande: Demande) -> Option<Reponse> {
         for (nom, valeur) in &entetes {
             requete = requete.header(nom.as_str(), valeur.as_str());
         }
+        // L'erreur de reqwest est jetée sans être lue ni gardée : son texte contient l'adresse, et avec elle la clé
+        // d'abuse.ch quand elle est dans le chemin.
         let mut reponse = requete.send().await.ok()?;
         let code = reponse.status().as_u16();
         if reponse.content_length().is_some_and(|t| t > taille_max) {

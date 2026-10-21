@@ -244,7 +244,7 @@ pub(crate) fn famille(regle: &str) -> &'static str {
 /// Applique les 308 règles et les empreintes de MalwareBazaar aux cibles : (correspondances, ce qui n'a pas pu être
 /// lu, les empreintes s'il y en avait). `None` : règles qui ne se compilent pas, ce qui est dit. Tout ce qui n'a pas
 /// pu être lu est rendu : jamais compté comme sain.
-fn appliquer(cibles: &[PathBuf]) -> Option<(Vec<Trouve>, Vec<String>, Option<&'static Empreintes>)> {
+fn appliquer(cibles: &[PathBuf]) -> Option<(Vec<Trouve>, Vec<String>, empreintes::Chargees)> {
     let regles = match regles() {
         Ok(r) => r,
         Err(e) => {
@@ -265,7 +265,7 @@ fn appliquer(cibles: &[PathBuf]) -> Option<(Vec<Trouve>, Vec<String>, Option<&'s
         trp!("  Analyse de {}…", "  Scanning {}…", chemin_affichable(cible));
         let mut echecs = Vec::new();
         let liste = fichiers(cible, &mut echecs);
-        let (t, e) = analyser_fichiers(regles, empreintes, &liste);
+        let (t, e) = analyser_fichiers(regles, empreintes.ok(), &liste);
         trouves.extend(t);
         echecs.extend(e);
         erreurs.extend(illisible(cible, &echecs));
@@ -292,11 +292,20 @@ pub fn analyser(portee: &Portee) {
         return;
     };
     println!();
-    if empreintes.is_none() {
-        trp!(
-            "  ⚠ Empreintes de MalwareBazaar indisponibles (hors ligne, et aucune copie gardée) : seules les 308 règles ont servi.",
-            "  ⚠ MalwareBazaar fingerprints unavailable (offline, and no saved copy): only the 308 rules were used."
-        );
+    match empreintes {
+        Err(raison) => afficher_aligne(
+            "  ⚠ ",
+            &trf!(
+                "Empreintes de MalwareBazaar {raison} : seules les 308 règles ont servi.",
+                "MalwareBazaar fingerprints {raison}: only the 308 rules were used."
+            ),
+            4,
+            "",
+        ),
+        Ok(Empreintes {
+            avertissement: Some(a), ..
+        }) => afficher_aligne("  ⚠ ", a, 4, ""),
+        Ok(_) => {}
     }
     for e in &erreurs {
         for (i, ligne) in envelopper(
@@ -313,7 +322,7 @@ pub fn analyser(portee: &Portee) {
         }
     }
     if trouves.is_empty() {
-        match (erreurs.is_empty(), empreintes) {
+        match (erreurs.is_empty(), empreintes.ok()) {
             (true, Some(e)) => trp!(
                 "  {VERT}✔{RESET} Aucun fichier ne correspond aux 308 règles ni aux {} empreintes de MalwareBazaar.",
                 "  {VERT}✔{RESET} No file matches the 308 rules or the {} MalwareBazaar fingerprints.",

@@ -138,8 +138,8 @@ pub const PROGRAMMES: &[Programme] = &[
             traduite(
                 "vanguard yara <dossier>",
                 "vanguard yara <folder>",
-                "Règles YARA et empreintes de MalwareBazaar, en plus de l'antivirus.",
-                "YARA rules and MalwareBazaar fingerprints, on top of the antivirus.",
+                "Règles YARA et empreintes de MalwareBazaar (clé abuse.ch gratuite), en plus de l'antivirus.",
+                "YARA rules and MalwareBazaar fingerprints (free abuse.ch key), on top of the antivirus.",
                 false,
             ),
             traduite(
@@ -243,8 +243,8 @@ pub const PROGRAMMES: &[Programme] = &[
             traduite(
                 "vanguard parametres",
                 "vanguard settings",
-                "Tous les réglages : langue, emojis, sans Internet, surveillance, entretien, alertes apprises, blocage, restrictions des extensions.",
-                "All settings: language, emojis, offline, monitoring, check-up, learned alerts, blocking, extension restrictions.",
+                "Réglages : langue, emojis, sans Internet, surveillance, entretien, alertes apprises, blocage, restrictions des extensions, clé abuse.ch.",
+                "Settings: language, emojis, offline, monitoring, check-up, learned alerts, blocking, extension restrictions, abuse.ch key.",
                 false,
             ),
             traduite(

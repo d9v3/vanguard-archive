@@ -645,8 +645,8 @@ fn qui(nom: &str) -> String {
         .unwrap_or(domaine)
 }
 
-/// Les serveurs de commande de botnets connus, des deux listes d'abuse.ch (CC0) : Feodo Tracker donne des adresses,
-/// ThreatFox des adresses avec leur port et le nom du logiciel malveillant.
+/// Les serveurs de commande de botnets connus, des deux listes d'abuse.ch : Feodo Tracker (CC0, sans clé) donne des
+/// adresses, ThreatFox (avec la clé) des adresses avec leur port et le nom du logiciel malveillant, et des domaines.
 #[derive(Debug, Default)]
 struct Botnets {
     feodo: BTreeSet<IpAddr>,
@@ -705,31 +705,108 @@ fn analyser_feodo(texte: &str) -> Option<BTreeSet<IpAddr>> {
 /// couper Internet pour rien.
 const THREATFOX_CONFIANCE: u8 = 75;
 
-/// Les lignes d'un export CSV de ThreatFox d'un genre (« ip:port », « domain ») : (valeur, nom du logiciel
-/// malveillant, prêt à montrer), seulement les serveurs de commande (« botnet_cc ») assez sûrs ; les serveurs de
-/// téléchargement (« payload_delivery ») n'ont pas leur place parmi eux. `None` pour tout autre texte (portail Wi-Fi,
-/// ligne illisible ou d'un autre genre), comme pour Feodo Tracker.
-fn lignes_threatfox<'a>(texte: &'a str, genre: &str) -> Option<Vec<(&'a str, String)>> {
+/// Les champs d'une ligne CSV d'abuse.ch : entre guillemets (« "" » pour un guillemet) ou nus, séparés par des
+/// virgules suivies ou non d'espaces. `None` : guillemet pas fermé, ou texte collé après lui.
+fn champs_csv(ligne: &str) -> Option<Vec<String>> {
+    let mut champs = Vec::new();
+    let mut reste = ligne.trim();
+    loop {
+        reste = reste.trim_start_matches(' ');
+        if let Some(apres) = reste.strip_prefix('"') {
+            let mut valeur = String::new();
+            let mut caracteres = apres.char_indices().peekable();
+            let fin = loop {
+                let (i, c) = caracteres.next()?;
+                if c != '"' {
+                    valeur.push(c);
+                } else if caracteres.next_if(|&(_, c)| c == '"').is_some() {
+                    valeur.push('"');
+                } else {
+                    break i + 1;
+                }
+            };
+            champs.push(valeur);
+            reste = apres[fin..].trim_start_matches(' ');
+        } else {
+            let fin = reste.find(',').unwrap_or(reste.len());
+            champs.push(reste[..fin].trim().to_string());
+            reste = &reste[fin..];
+        }
+        match reste.strip_prefix(',') {
+            Some(apres) => reste = apres,
+            None if reste.is_empty() => return Some(champs),
+            None => return None,
+        }
+    }
+}
+
+/// Les colonnes lues dans un export de ThreatFox, par leur nom (avec ceux qu'elles ont parfois ailleurs) : l'en-tête
+/// décide, abuse.ch pouvant changer leur ordre d'un export à l'autre.
+const COLONNES_THREATFOX: [&[&str]; 5] = [
+    &["ioc_value", "ioc"],
+    &["ioc_type"],
+    &["threat_type"],
+    &["malware_printable", "malware"],
+    &["confidence_level", "confidence"],
+];
+/// Leurs places dans les exports d'avant le 21 oct. 2026, pour un export sans en-tête lisible.
+const PLACES_THREATFOX: [usize; 5] = [2, 3, 4, 7, 9];
+
+/// Les lignes d'un export CSV de ThreatFox d'un genre (« ip:port », « domain ») : (valeur lue par `lire`, nom du
+/// logiciel malveillant, prêt à montrer), seulement les serveurs de commande (« botnet_cc ») assez sûrs ; les serveurs
+/// de téléchargement (« payload_delivery ») n'ont pas leur place parmi eux. L'export complet mêle tous les genres :
+/// les autres sont sautés. `None` pour tout autre texte (portail Wi-Fi, export dont plus de la moitié des lignes ne se
+/// lisent pas), comme pour Feodo Tracker : jamais une liste vide, donc vérifiée, à sa place. Une ligne illisible seule
+/// est sautée, sans faire tomber six mois de signalements.
+fn lignes_threatfox<T>(texte: &str, genre: &str, lire: impl Fn(&str) -> Option<T>) -> Option<Vec<(T, String)>> {
     let lignes: Vec<&str> = texte.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
-    if !lignes.first()?.starts_with('#') {
-        return None;
-    }
-    let mut gardees = Vec::new();
-    for ligne in lignes.into_iter().filter(|l| !l.starts_with('#')) {
-        // « "2026-10-20 13:46:40", "1975828", "192.0.2.25:6662", "ip:port", "botnet_cc", … » : les champs libres
-        // (références, étiquettes, auteur) viennent après ceux qu'on lit.
-        let champs: Vec<&str> = ligne.strip_prefix('"')?.strip_suffix('"')?.split("\", \"").collect();
-        let [_, _, valeur, genre_lu, menace, _, _, famille, _, confiance, ..] = champs.as_slice() else {
-            return None;
+    let premiere = *lignes.first()?;
+    let noms = |l: &str| champs_csv(l.trim_start_matches('#').trim());
+    // L'en-tête : parmi les premières lignes, celle qui nomme les colonnes, en commentaire ou non.
+    let entete = lignes
+        .iter()
+        .take(20)
+        .position(|l| noms(l).is_some_and(|n| n.iter().any(|c| c == "ioc_type")));
+    let places = match entete {
+        Some(i) => {
+            let noms = noms(lignes[i])?;
+            let mut places = [0; 5];
+            for (place, possibles) in places.iter_mut().zip(COLONNES_THREATFOX) {
+                *place = noms.iter().position(|n| possibles.contains(&n.as_str()))?;
+            }
+            places
+        }
+        // abuse.ch ouvre ses listes par un en-tête en commentaire ; sans lui, ce n'en est pas une.
+        None if premiere.starts_with('#') => PLACES_THREATFOX,
+        None => return None,
+    };
+    let (mut gardees, mut vues, mut illisibles) = (Vec::new(), 0usize, 0usize);
+    for (i, ligne) in lignes.iter().enumerate() {
+        if Some(i) == entete || ligne.starts_with('#') {
+            continue;
+        }
+        vues += 1;
+        let Some(champs) = champs_csv(ligne) else {
+            illisibles += 1;
+            continue;
         };
-        if genre_lu != &genre {
-            return None;
+        let lu = |k: usize| champs.get(places[k]).map(String::as_str);
+        let (Some(valeur), Some(genre_lu), Some(menace), Some(famille), Some(confiance)) =
+            (lu(0), lu(1), lu(2), lu(3), lu(4))
+        else {
+            illisibles += 1;
+            continue;
+        };
+        if genre_lu != genre || menace != "botnet_cc" {
+            continue;
         }
-        if *menace == "botnet_cc" && confiance.parse::<u8>().ok()? >= THREATFOX_CONFIANCE {
-            gardees.push((*valeur, famille_montree(famille)));
+        match (lire(valeur), confiance.parse::<u8>()) {
+            (Some(lue), Ok(c)) if c >= THREATFOX_CONFIANCE => gardees.push((lue, famille_montree(famille))),
+            (Some(_), Ok(_)) => {}
+            _ => illisibles += 1,
         }
     }
-    Some(gardees)
+    (illisibles * 2 <= vues).then_some(gardees)
 }
 
 /// N'importe qui signale à ThreatFox : le nom est montré tel quel seulement s'il est inoffensif, et court.
@@ -737,26 +814,24 @@ fn famille_montree(famille: &str) -> String {
     affichable(famille).chars().take(40).collect()
 }
 
-/// La liste de ThreatFox, export CSV « ip:port » des derniers mois : (adresse, port) → nom du logiciel malveillant.
+/// Les serveurs « ip:port » de l'export de ThreatFox : (adresse, port) → nom du logiciel malveillant.
 fn analyser_threatfox(texte: &str) -> Option<HashMap<(IpAddr, u16), String>> {
-    lignes_threatfox(texte, "ip:port")?
-        .into_iter()
-        .map(|(valeur, famille)| {
-            let adresse: SocketAddr = valeur.parse().ok()?;
-            Some(((adresse.ip().to_canonical(), adresse.port()), famille))
-        })
-        .collect()
+    let lignes = lignes_threatfox(texte, "ip:port", |valeur| valeur.parse::<SocketAddr>().ok())?;
+    Some(
+        lignes
+            .into_iter()
+            .map(|(adresse, famille)| ((adresse.ip().to_canonical(), adresse.port()), famille))
+            .collect(),
+    )
 }
 
-/// La liste des domaines de ThreatFox (export CSV « domain ») : nom en minuscules → nom du logiciel malveillant.
+/// Les domaines de l'export de ThreatFox (genre « domain ») : nom en minuscules → nom du logiciel malveillant.
 fn analyser_domaines(texte: &str) -> Option<HashMap<String, String>> {
-    lignes_threatfox(texte, "domain")?
-        .into_iter()
-        .map(|(nom, famille)| {
-            let nom = nom.trim_end_matches('.').to_lowercase();
-            (nom.contains('.') && !nom.contains([' ', '/', ':'])).then_some((nom, famille))
-        })
-        .collect()
+    let lignes = lignes_threatfox(texte, "domain", |nom| {
+        let nom = nom.trim_end_matches('.').to_lowercase();
+        (nom.contains('.') && !nom.contains([' ', '/', ':'])).then_some(nom)
+    })?;
+    Some(lignes.into_iter().collect())
 }
 
 /// Un serveur de ThreatFox gardé s'il est un serveur de commande assez sûr.
@@ -798,40 +873,30 @@ fn analyser_threatfox_api(texte: &str) -> Option<HashMap<(IpAddr, u16), String>>
 }
 
 /// Avec une clé, ThreatFox permet de redemander ses listes toutes les 5 minutes : un serveur de commande change
-/// d'adresse en quelques jours. Les listes publiques, sans compte, restent à 12 heures (`lien::URLHAUS_FRAICHE`).
+/// d'adresse en quelques jours. Ses exports restent à 12 heures (`lien::URLHAUS_FRAICHE`), comme avant.
 const THREATFOX_CLE_FRAICHE: Duration = Duration::from_mins(5);
 
-/// Une liste d'abuse.ch, téléchargée et gardée (`fraiche` sans être redemandée, une semaine au plus). La télécharger ne
-/// dit à personne ce qu'on a trouvé : on prend la liste entière. `requete` : ce que la demande porte en plus (la clé de
-/// ThreatFox). `Err` : la raison, à montrer.
-fn liste_botnets<T>(
+/// Une liste téléchargée (ou la copie d'avant), jugée : `Err` dit pourquoi elle ne sert pas (non vérifiée, trop
+/// vieille, illisible). `analyser` : `None` pour ce qui n'est pas la liste attendue (portail Wi-Fi).
+fn verifiee<T>(
     nom: &str,
-    (sous_dossier, adresse, fichier): (&str, &str, &str),
-    (entetes, corps, fraiche): (&[(&str, String)], Option<&str>, Duration),
-    analyser: fn(&str) -> Option<T>,
+    telechargee: Result<(Vec<u8>, Duration), crate::protection::abuse_ch::Echec>,
+    analyser: impl FnOnce(&[u8]) -> Option<T>,
 ) -> Result<T, String> {
-    use crate::protection::lien;
-    let (texte, age) =
-        lien::liste_abuse_ch(sous_dossier, (adresse, entetes, corps), fichier, fraiche).ok_or_else(|| {
-            if entetes.is_empty() {
-                trf!(
-                    "liste de {nom} pas vérifiée (pas d'Internet ?)",
-                    "{nom} list not checked (no Internet?)"
-                )
-            } else {
-                trf!(
-                    "liste de {nom} pas vérifiée (pas d'Internet, ou clé refusée : donne-la de nouveau)",
-                    "{nom} list not checked (no Internet, or key refused: give it again)"
-                )
-            }
-        })?;
-    if age > lien::URLHAUS_TROP_VIEILLE {
+    let (octets, age) = telechargee.map_err(|echec| {
+        trf!(
+            "liste de {nom} non vérifiée : {}",
+            "{nom} list not checked: {}",
+            echec.raison()
+        )
+    })?;
+    if age > crate::protection::lien::URLHAUS_TROP_VIEILLE {
         return Err(trf!(
             "liste de {nom} trop vieille pour servir : rafraîchissement impossible",
             "{nom} list too old to use: could not refresh it"
         ));
     }
-    analyser(&texte).ok_or_else(|| {
+    analyser(&octets).ok_or_else(|| {
         trf!(
             "liste de {nom} illisible (page d'un portail Wi-Fi ?) : pas vérifiée",
             "{nom} list unreadable (a Wi-Fi portal page?): not checked"
@@ -839,67 +904,74 @@ fn liste_botnets<T>(
     })
 }
 
+/// Un texte d'abuse.ch, lu par `analyser`.
+fn en_texte<T>(analyser: fn(&str) -> Option<T>) -> impl FnOnce(&[u8]) -> Option<T> {
+    move |octets| analyser(&String::from_utf8_lossy(octets))
+}
+
+/// L'export complet de ThreatFox (une archive zip d'un CSV, tous genres mêlés, six mois de signalements), avec la
+/// clé : ses serveurs « ip:port » et ses domaines, lus dans le même fichier.
+type ExportThreatfox = (HashMap<(IpAddr, u16), String>, HashMap<String, String>);
+
+fn analyser_export_threatfox(archive: &[u8]) -> Option<ExportThreatfox> {
+    let csv = crate::protection::empreintes::premier_fichier_zip(archive, 1 << 30)?;
+    let texte = String::from_utf8_lossy(&csv);
+    Some((analyser_threatfox(&texte)?, analyser_domaines(&texte)?))
+}
+
 /// Les serveurs de botnets des listes d'abuse.ch, téléchargées en même temps, et ce qui n'a pas pu être vérifié. Une
-/// liste indisponible (hors ligne, téléchargement raté, trop vieille) est dite : on ne conclut jamais que rien ne parle
-/// à un botnet, et les autres servent quand même. Avec une clé, l'API de ThreatFox s'ajoute à son export public : elle
-/// ne remonte que 7 jours, l'export des mois.
+/// liste indisponible (sans clé, clé refusée, hors ligne, trop vieille) est dite : on ne conclut jamais que rien ne
+/// parle à un botnet, et les autres servent quand même. Feodo Tracker se lit sans clé ; l'export de ThreatFox et son
+/// API la demandent (l'API ne remonte que 7 jours, mais se redemande toutes les 5 minutes).
 fn botnets() -> (Botnets, Vec<String>) {
-    let cle = cle();
-    let (feodo, threatfox, api, domaines) = std::thread::scope(|s| {
+    use crate::http::Demande;
+    use crate::protection::abuse_ch::{self, Service};
+    use crate::protection::lien::URLHAUS_FRAICHE;
+    let cle = abuse_ch::cle();
+    let (feodo, export, api) = std::thread::scope(|s| {
         let feodo = s.spawn(|| {
-            liste_botnets(
-                "Feodo Tracker",
-                (
-                    "feodo",
+            let demande = Demande {
+                taille_max: 256 << 20,
+                ..Demande::get(
                     "https://feodotracker.abuse.ch/downloads/ipblocklist_recommended.txt",
-                    "botnets.txt",
-                ),
-                (&[], None, crate::protection::lien::URLHAUS_FRAICHE),
-                analyser_feodo,
-            )
+                    Duration::from_secs(40),
+                )
+            };
+            let liste = abuse_ch::liste(demande, ("feodo", "botnets.txt"), URLHAUS_FRAICHE);
+            verifiee("Feodo Tracker", liste.resultat(false), en_texte(analyser_feodo))
         });
         let api = s.spawn(|| {
             cle.as_ref().map(|cle| {
-                liste_botnets(
-                    tr!("ThreatFox (ta clé)", "ThreatFox (your key)"),
-                    ("threatfox", "https://threatfox-api.abuse.ch/api/v1/", FICHIER_API),
-                    (
-                        &[("Auth-Key", cle.clone())],
-                        Some(r#"{"query":"get_iocs","days":7}"#),
-                        THREATFOX_CLE_FRAICHE,
-                    ),
-                    analyser_threatfox_api,
+                let demande = Demande {
+                    entetes: vec![("Auth-Key", cle.clone())],
+                    corps: Some(br#"{"query":"get_iocs","days":7}"#.to_vec()),
+                    taille_max: 256 << 20,
+                    ..Demande::get("https://threatfox-api.abuse.ch/api/v1/", Duration::from_secs(40))
+                };
+                let liste = abuse_ch::liste(demande, ("threatfox", abuse_ch::FICHIER_API), THREATFOX_CLE_FRAICHE);
+                verifiee(
+                    tr!("ThreatFox (7 jours)", "ThreatFox (7 days)"),
+                    liste.resultat(true),
+                    en_texte(analyser_threatfox_api),
                 )
             })
         });
-        let domaines = s.spawn(|| {
-            liste_botnets(
-                tr!("ThreatFox (domaines)", "ThreatFox (domains)"),
-                (
-                    "threatfox",
-                    "https://threatfox.abuse.ch/export/csv/domains/recent/",
-                    "domaines.csv",
-                ),
-                (&[], None, crate::protection::lien::URLHAUS_FRAICHE),
-                analyser_domaines,
-            )
-        });
-        let threatfox = liste_botnets(
+        let export = verifiee(
             "ThreatFox",
-            (
-                "threatfox",
-                "https://threatfox.abuse.ch/export/csv/ip-port/recent/",
-                "ip-port.csv",
+            abuse_ch::export(
+                Service::ThreatFox,
+                "full.csv.zip",
+                ("threatfox", "export.zip"),
+                URLHAUS_FRAICHE,
+                Duration::from_secs(120),
             ),
-            (&[], None, crate::protection::lien::URLHAUS_FRAICHE),
-            analyser_threatfox,
+            analyser_export_threatfox,
         );
         let pas_verifiee = |nom| trf!("liste de {nom} pas vérifiée", "{nom} list not checked");
         (
             feodo.join().unwrap_or_else(|_| Err(pas_verifiee("Feodo Tracker"))),
-            threatfox,
+            export,
             api.join().unwrap_or_else(|_| Some(Err(pas_verifiee("ThreatFox")))),
-            domaines.join().unwrap_or_else(|_| Err(pas_verifiee("ThreatFox"))),
         )
     });
     let mut botnets = Botnets::default();
@@ -908,15 +980,18 @@ fn botnets() -> (Botnets, Vec<String>) {
         Ok(liste) => botnets.feodo = liste,
         Err(raison) => absentes.push(raison),
     }
-    for liste in [Some(threatfox), api].into_iter().flatten() {
-        match liste {
-            Ok(liste) => botnets.threatfox.extend(liste),
-            Err(raison) => absentes.push(raison),
+    match export {
+        Ok((serveurs, domaines)) => {
+            botnets.threatfox.extend(serveurs);
+            botnets.domaines = Some(domaines);
         }
-    }
-    match domaines {
-        Ok(liste) => botnets.domaines = Some(liste),
         Err(raison) => absentes.push(raison),
+    }
+    match api {
+        Some(Ok(serveurs)) => botnets.threatfox.extend(serveurs),
+        Some(Err(raison)) => absentes.push(raison),
+        // Sans clé, l'export l'a déjà dit : une seule fois.
+        None => {}
     }
     (botnets, absentes)
 }
@@ -1033,107 +1108,26 @@ pub(crate) fn botnets_a_signaler() -> Vec<(String, String)> {
     alertes
 }
 
-// ───────────────────────────── La clé de ThreatFox ─────────────────────────────
-
-/// La réponse de l'API, gardée à côté de la clé : effacée quand la clé change, pour que la nouvelle serve aussitôt.
-const FICHIER_API: &str = "api.json";
-
-/// La clé de ThreatFox, sur cet ordinateur seulement (le dossier de Vanguard du compte, jamais la clé USB), sous la
-/// forme d'un en-tête (« Auth-Key: … »), celle qu'elle a depuis qu'on peut la donner.
-fn fichier_cle() -> PathBuf {
-    crate::reseau::dossier_local().join("threatfox").join("cle-entete")
-}
-
-/// La clé gardée, vérifiée de nouveau : un fichier modifié à la main n'ajoute pas d'en-tête à la demande.
-fn cle() -> Option<String> {
-    let texte = std::fs::read_to_string(fichier_cle()).ok()?;
-    let cle = texte.trim().strip_prefix("Auth-Key:")?.trim();
-    cle_valide(cle).then(|| cle.to_string())
-}
-
-/// Une clé d'abuse.ch telle qu'elle se copie : lettres et chiffres seulement. Un retour à la ligne glissé dedans
-/// ajouterait un en-tête de plus à la demande.
-fn cle_valide(cle: &str) -> bool {
-    (20..=128).contains(&cle.len()) && cle.bytes().all(|b| b.is_ascii_alphanumeric())
-}
-
-/// Garde la clé, lisible par ce compte seul. Le fichier est recréé : un ancien, plus ouvert, ne garde pas ses droits.
-fn enregistrer_cle(cle: &str) -> std::io::Result<()> {
-    use std::io::Write;
-    let fichier = fichier_cle();
-    if let Some(dossier) = fichier.parent() {
-        std::fs::create_dir_all(dossier)?;
-    }
-    oublier_cle();
-    let mut options = std::fs::OpenOptions::new();
-    options.write(true).create_new(true);
-    #[cfg(unix)]
-    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
-    options
-        .open(&fichier)?
-        .write_all(format!("Auth-Key: {cle}\n").as_bytes())
-}
-
-/// Retire la clé et ce qu'elle a téléchargé.
-fn oublier_cle() {
-    let fichier = fichier_cle();
-    let _ = std::fs::remove_file(&fichier);
-    if let Some(dossier) = fichier.parent() {
-        let _ = std::fs::remove_file(dossier.join(FICHIER_API));
-    }
-}
-
-/// Donner une clé : où la trouver, puis la clé collée.
-fn donner_cle() {
-    println!();
-    for ligne in envelopper(
-        tr!(
-            "Une clé gratuite d'abuse.ch ajoute les serveurs signalés à ThreatFox ces 7 derniers jours, par son accès officiel. Crée un compte sur https://auth.abuse.ch/, puis copie ta clé (« Auth-Key »). Elle reste sur cet ordinateur, jamais sur la clé USB.",
-            "A free abuse.ch key adds the servers reported to ThreatFox over the last 7 days, through its official access. Create an account at https://auth.abuse.ch/, then copy your key (“Auth-Key”). It stays on this computer, never on the USB key."
-        ),
-        LARGEUR - 2,
-    ) {
-        println!("  {ligne}");
-    }
-    let cle = demander(tr!("  Clé (Entrée pour annuler) : ", "  Key (Enter to cancel): "));
-    if cle.is_empty() {
-        return;
-    }
-    if !cle_valide(&cle) {
-        trp!(
-            "  ✖ Clé illisible : seulement des lettres et des chiffres, sans espace.",
-            "  ✖ Unreadable key: letters and digits only, no space."
-        );
-        return;
-    }
-    match enregistrer_cle(&cle) {
-        Ok(()) => trp!(
-            "  {VERT}✔{RESET} Clé gardée : elle sert dès la prochaine ouverture de cet écran.",
-            "  {VERT}✔{RESET} Key saved: it is used from the next time this screen opens."
-        ),
-        Err(e) => trp!("  ✖ Clé pas gardée : {e}.", "  ✖ Key not saved: {e}."),
-    }
-}
-
-/// Depuis le menu : l'écran, puis Entrée pour revenir, ou C pour donner ou retirer la clé de ThreatFox. Le retour au
-/// menu se demande ici, pas après : une seule pause.
+/// Depuis le menu : l'écran, puis Entrée pour revenir, ou C pour donner ou retirer la clé abuse.ch (celle qui ouvre
+/// les listes de ThreatFox). Le retour au menu se demande ici, pas après : une seule pause.
 pub fn menu() {
+    use crate::protection::abuse_ch;
     let botnet = afficher_et_juger();
     loop {
-        let cle = fichier_cle().is_file();
+        let cle = abuse_ch::cle().is_some();
         let cle_texte = if cle {
-            tr!("C pour retirer ta clé ThreatFox", "C to remove your ThreatFox key")
+            tr!("C pour retirer ta clé abuse.ch", "C to remove your abuse.ch key")
         } else {
             tr!(
-                "C pour donner une clé ThreatFox (facultative)",
-                "C to give a ThreatFox key (optional)"
+                "C pour donner ta clé abuse.ch (gratuite)",
+                "C to give your abuse.ch key (free)"
             )
         };
         // Un serveur de commande trouvé : le parcours qui dit quoi faire passe en premier, en tenant sur une ligne.
         let reponse = if botnet {
             demander(&trf!(
-                "\n{GRIS}I : « Après une infection » · Entrée : revenir · C : clé ThreatFox…{RESET} ",
-                "\n{GRIS}I: “After an infection” · Enter: go back · C: ThreatFox key…{RESET} "
+                "\n{GRIS}I : « Après une infection » · Entrée : revenir · C : clé abuse.ch…{RESET} ",
+                "\n{GRIS}I: “After an infection” · Enter: go back · C: abuse.ch key…{RESET} "
             ))
         } else {
             demander(&trf!(
@@ -1146,14 +1140,10 @@ pub fn menu() {
                 crate::depanner::infection::infection();
                 return;
             }
-            "c" if cle => {
-                oublier_cle();
-                trp!(
-                    "  {VERT}✔{RESET} Clé ThreatFox retirée de cet ordinateur.",
-                    "  {VERT}✔{RESET} ThreatFox key removed from this computer."
-                );
+            "c" if cle => abuse_ch::retirer(),
+            "c" => {
+                abuse_ch::donner();
             }
-            "c" => donner_cle(),
             _ => return,
         }
     }
@@ -1908,6 +1898,38 @@ mod tests {
         );
     }
 
+    /// L'export complet avec clé (depuis le 21 oct. 2026) : un en-tête qui nomme les colonnes, dans un ordre qui peut
+    /// changer, tous les genres mêlés ; les champs libres peuvent contenir des virgules et des guillemets.
+    #[test]
+    fn export_complet_de_threatfox_lu_par_son_entete() {
+        assert_eq!(
+            champs_csv(r#""a, b", "c ""d""",e,"#),
+            Some(vec!["a, b".into(), "c \"d\"".into(), "e".into(), String::new()])
+        );
+        assert_eq!(champs_csv(r#""pas fermé"#), None);
+        assert_eq!(champs_csv(r#""a"b"#), None);
+        let texte = concat!(
+            "\"ioc_id\",\"confidence_level\",\"ioc_type\",\"ioc_value\",\"threat_type\",\"malware_printable\",\"tags\"\r\n",
+            "\"1\",\"100\",\"ip:port\",\"192.0.2.25:6662\",\"botnet_cc\",\"Cobalt Strike\",\"a, \"\"b\"\"\"\r\n",
+            "\"2\",\"90\",\"domain\",\"Mal.Example.\",\"botnet_cc\",\"Vidar\",\"\"\r\n",
+            "\"3\",\"100\",\"url\",\"https://198.51.100.9/x\",\"payload_delivery\",\"X\",\"\"\r\n",
+            "\"4\",\"100\",\"ip:port\",\"198.51.100.4:80\",\"payload_delivery\",\"Y\",\"\"\r\n",
+            "\"5\",\"50\",\"domain\",\"doute.example\",\"botnet_cc\",\"Z\",\"\"\r\n",
+            "\"6\",\"100\",\"ip:port\",\"pas-une-ip:80\",\"botnet_cc\",\"W\",\"\"\r\n",
+        );
+        let serveurs = analyser_threatfox(texte).unwrap();
+        assert_eq!(serveurs.len(), 1);
+        assert_eq!(serveurs[&(ip("192.0.2.25"), 6662)], "Cobalt Strike");
+        let domaines = analyser_domaines(texte).unwrap();
+        assert_eq!(domaines.len(), 1);
+        assert_eq!(domaines["mal.example"], "Vidar");
+        // Un en-tête sans la colonne de confiance : pas une liste, jamais vide.
+        assert!(analyser_threatfox(&texte.replace("confidence_level", "autre")).is_none());
+        // Plus de la moitié des lignes illisibles : le format a changé, pas vérifiée.
+        let abime = "\"ioc_type\",\"ioc_value\",\"threat_type\",\"malware_printable\",\"confidence_level\"\n\"ip:port\"\n\"ip:port\"\n";
+        assert!(analyser_threatfox(abime).is_none());
+    }
+
     #[test]
     fn reponse_de_l_api_threatfox_decodee() {
         // Réponse inventée, à la forme de celle de l'API : les autres genres (domaines, liens) sont sautés.
@@ -1950,8 +1972,12 @@ mod tests {
         );
         let domaines = analyser_domaines(texte).unwrap();
         assert_eq!(domaines.len(), 1);
-        // Un export d'un autre genre (des liens au lieu de domaines) n'est pas pris pour une liste de domaines.
-        assert!(analyser_domaines(&texte.replace("\"domain\"", "\"url\"")).is_none());
+        // L'export complet mêle les genres : des liens n'y sont pas pris pour des domaines.
+        assert!(
+            analyser_domaines(&texte.replace("\"domain\"", "\"url\""))
+                .unwrap()
+                .is_empty()
+        );
         let botnets = Botnets {
             domaines: Some(domaines),
             ..Botnets::default()
@@ -1986,35 +2012,6 @@ mod tests {
             nouvelles_alertes("y → 198.51.100.1 (Feodo Tracker)", &actuelles).len(),
             1
         );
-    }
-
-    #[test]
-    fn cle_threatfox_gardee_puis_retiree() {
-        // Une clé collée avec un retour à la ligne ou un espace ajouterait un en-tête à la demande : refusée.
-        assert!(cle_valide("a1B2c3D4e5F6g7H8i9J0k1L2"));
-        assert!(!cle_valide("a1B2c3D4e5F6g7H8i9J0\r\nX-Autre: 1"));
-        assert!(!cle_valide("a1B2c3D4 e5F6g7H8i9J0k1L2"));
-        assert!(!cle_valide("court"));
-        // Le dossier de Vanguard est jetable en test.
-        enregistrer_cle("a1B2c3D4e5F6g7H8i9J0k1L2").unwrap();
-        let fichier = fichier_cle();
-        assert_eq!(
-            std::fs::read_to_string(&fichier).unwrap(),
-            "Auth-Key: a1B2c3D4e5F6g7H8i9J0k1L2\n"
-        );
-        assert_eq!(cle().as_deref(), Some("a1B2c3D4e5F6g7H8i9J0k1L2"));
-        // Modifié à la main avec un en-tête de plus : refusé.
-        std::fs::write(&fichier, "Auth-Key: a1B2c3D4e5F6g7H8i9J0k1L2\r\nX-Autre: 1\n").unwrap();
-        assert_eq!(cle(), None);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            assert_eq!(std::fs::metadata(&fichier).unwrap().permissions().mode() & 0o777, 0o600);
-        }
-        let reponse = fichier.with_file_name(FICHIER_API);
-        std::fs::write(&reponse, "{}").unwrap();
-        oublier_cle();
-        assert!(!fichier.exists() && !reponse.exists());
     }
 
     #[test]

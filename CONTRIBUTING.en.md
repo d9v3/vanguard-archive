@@ -19,7 +19,7 @@ turn on once with `/install-github-app`).
 | `src/selection.rs` | keyboard menus and checklists (arrows, Enter, Esc or Backspace), word search in menus |
 | `src/prediction.rs` | prediction of the word being typed, the same in every menu: its end in grey, Tab completes it |
 | `src/langue.rs` | language choice and translation macros |
-| `src/parametres.rs` | Settings menu and `vanguard settings`: the startup settings (language, emojis, offline) in parametres.json, read before anything is shown, an environment variable winning; monitoring, check-up, learned alerts, blocking and extension restrictions changed by their own code |
+| `src/parametres.rs` | Settings menu and `vanguard settings`: the startup settings (language, emojis, offline) in parametres.json, read before anything is shown, an environment variable winning; monitoring, check-up, learned alerts, blocking, extension restrictions and abuse.ch key changed by their own code |
 | `src/machine/mod.rs` | shared types, display, parallel execution of the checks |
 | `src/machine/regles.rs` | registry of check rules: each one is declared where it is written (`inventory::submit!`), with a stable identifier (“LNX-PLT-001”); `vanguard rules` lists them |
 | `src/machine/linux/plateforme.rs` | platform security according to fwupd (HSI), kernel lockdown, BPF, user namespaces, auditd: the first rules of the registry |
@@ -44,7 +44,8 @@ turn on once with `/install-github-app`).
 | `src/protection/antivirus.rs` | ClamAV / Defender, quarantine |
 | `src/protection/yara.rs`, `src/protection/pieges.rs` | YARA scan (bundled rules, YARA-X compiled into the program); decoy files against ransomware |
 | `src/protection/memoire.rs`, `src/machine/windows/memoire.rs` | program memory (`vanguard memory`, on demand): the YARA rules on the private or executable regions of running processes, bounded (64 MiB per region, 512 MiB per process, 4 GiB and 5 minutes in all); /proc/<pid>/maps and mem on Linux, VirtualQueryEx and ReadProcessMemory on Windows (LSASS, protected and critical processes never read); macOS not checked; nothing read is kept |
-| `src/protection/empreintes.rs` | MalwareBazaar SHA-256 fingerprints (abuse.ch, CC0): full list every week (zip archive), recent ones every day, kept in Vanguard's folder and sorted; the YARA scan looks up every file it reads |
+| `src/protection/empreintes.rs` | MalwareBazaar SHA-256 fingerprints (abuse.ch, with the key): full list every week (zip archive), recent ones every day, kept in Vanguard's folder and sorted; the YARA scan looks up every file it reads |
+| `src/protection/abuse_ch.rs` | abuse.ch lists and the person's key (MalwareBazaar, URLhaus, ThreatFox since the public exports closed): kept on the computer (600), shown masked, never in a written address; without a key or with a refused one, lists not checked |
 | `src/protection/outil.rs`, `src/protection/secrets_git.rs`, `src/protection/conteneurs.rs` | secrets in git project history (Vanguard's rules, plus gitleaks when present); open source tools run when installed, installation offered otherwise (trivy on Docker or Podman images) |
 | `src/reseau/surveillance.rs` | systemd timer / Task Scheduler / launchd agent, notifications |
 | `src/reseau/tableau.rs` | monitoring dashboard: alert log (bounded in number and age), single-file local HTML page (state, alerts by day, new devices, connections to botnets) |
@@ -64,7 +65,7 @@ turn on once with `/install-github-app`).
 | `src/apprentissage.rs` | what Vanguard learns here: alerts declared normal (appris.json), habits |
 | `src/reseau/listes_noires.rs` | the home's Internet address in blocklists (DNSBL), after consent |
 | `src/entretien.rs` | monthly check-up: grade, updates, space, new problems, in one notification |
-| `src/protection/sortantes.rs` | who talks to the Internet: established connections by program (ss, PowerShell, lsof), reverse DNS; botnet command servers (Feodo Tracker, list kept like URLhaus's) |
+| `src/protection/sortantes.rs` | who talks to the Internet: established connections by program (ss, PowerShell, lsof), reverse DNS; botnet command servers (Feodo Tracker without a key, ThreatFox with the abuse.ch key: full export read by its header, and API) |
 | `src/protection/environnement.rs` | at startup: library injected into the session (LD_PRELOAD, DYLD, AppInit_DLLs), judged like preloading |
 | `src/protection/manifeste.rs` | check Vanguard itself (version, commit date, SHA-256) and key manifest (BLAKE3 checksums kept on the owner's computer, one reference per key, compared in the check) |
 | `src/protection/cles_connues.rs` | VANGUARD keys known to this computer (`vanguard.jeton` token written at deployment, `cles-connues.json`); per key, the checksum of the record as Vanguard wrote it and its protection: a record changed outside Vanguard is neither read nor rewritten |

@@ -755,7 +755,7 @@ fn decrire(programme: &str, arguments: &[String]) -> String {
 /// impossible : dite, et l'accord reste à demander. Rend la ligne à montrer.
 fn analyser_avant_accord(chemin: &Path) -> Result<String, String> {
     use crate::protection::antivirus::Examen;
-    let bazaar = crate::protection::empreintes::connues().is_some();
+    let bazaar = crate::protection::empreintes::connues();
     match crate::protection::yara::examiner(chemin) {
         Examen::Trouve(regles) => Err(trf!(
             "Refusé : l'analyse de Vanguard reconnaît un logiciel malveillant ({}). Rien n'a été approuvé.",
@@ -767,16 +767,23 @@ fn analyser_avant_accord(chemin: &Path) -> Result<String, String> {
             "⚠ scan not possible ({}): nothing says it is safe",
             affichable(&pourquoi)
         )),
-        Examen::Sain if bazaar => Ok(tr!(
-            "aucune règle YARA ni empreinte MalwareBazaar ne correspond",
-            "no YARA rule nor MalwareBazaar fingerprint matches"
-        )
-        .to_string()),
-        Examen::Sain => Ok(tr!(
-            "aucune règle YARA ne correspond (⚠ empreintes MalwareBazaar absentes : non comparées)",
-            "no YARA rule matches (⚠ MalwareBazaar fingerprints missing: not compared)"
-        )
-        .to_string()),
+        Examen::Sain => Ok(match bazaar {
+            Ok(e) => match &e.avertissement {
+                None => tr!(
+                    "aucune règle YARA ni empreinte MalwareBazaar ne correspond",
+                    "no YARA rule nor MalwareBazaar fingerprint matches"
+                )
+                .to_string(),
+                Some(a) => trf!(
+                    "aucune règle YARA ni empreinte MalwareBazaar ne correspond (⚠ {a})",
+                    "no YARA rule nor MalwareBazaar fingerprint matches (⚠ {a})"
+                ),
+            },
+            Err(raison) => trf!(
+                "aucune règle YARA ne correspond (⚠ empreintes MalwareBazaar {raison} : non comparées)",
+                "no YARA rule matches (⚠ MalwareBazaar fingerprints {raison}: not compared)"
+            ),
+        }),
     }
 }
 

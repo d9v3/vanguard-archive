@@ -19,7 +19,7 @@ modification. Sur GitHub, `@claude` dans un ticket ou une demande de fusion le f
 | `src/selection.rs` | menus et listes à cocher au clavier (flèches, Entrée, Échap ou Retour arrière), recherche par mot dans les menus |
 | `src/prediction.rs` | prédiction du mot en cours de frappe, la même dans tous les menus : sa fin en gris, Tab la complète |
 | `src/langue.rs` | choix de la langue et macros de traduction |
-| `src/parametres.rs` | menu Paramètres et `vanguard parametres` : les réglages du lancement (langue, emojis, sans Internet) dans parametres.json, lus avant tout affichage, une variable d'environnement l'emportant ; surveillance, entretien, alertes apprises, blocage et restrictions des extensions changés par leur propre code |
+| `src/parametres.rs` | menu Paramètres et `vanguard parametres` : les réglages du lancement (langue, emojis, sans Internet) dans parametres.json, lus avant tout affichage, une variable d'environnement l'emportant ; surveillance, entretien, alertes apprises, blocage, restrictions des extensions et clé abuse.ch changés par leur propre code |
 | `src/machine/mod.rs` | types communs, affichage, exécution parallèle des vérifications |
 | `src/machine/regles.rs` | registre des règles du bilan : chacune se déclare où elle est écrite (`inventory::submit!`), avec un identifiant stable (« LNX-PLT-001 ») ; `vanguard regles` les liste |
 | `src/machine/linux/plateforme.rs` | sécurité de la plateforme d'après fwupd (HSI), verrouillage du noyau, BPF, espaces de noms, auditd : les premières règles du registre |
@@ -44,7 +44,8 @@ modification. Sur GitHub, `@claude` dans un ticket ou une demande de fusion le f
 | `src/protection/antivirus.rs` | ClamAV / Defender, quarantaine |
 | `src/protection/yara.rs`, `src/protection/pieges.rs` | analyse YARA (règles intégrées, YARA-X compilé dans le programme) ; fichiers-pièges contre les rançongiciels |
 | `src/protection/memoire.rs`, `src/machine/windows/memoire.rs` | mémoire des programmes (`vanguard memoire`, à la demande) : les règles YARA sur les régions privées ou exécutables des processus en marche, bornées (64 Mio par région, 512 Mio par processus, 4 Gio et 5 minutes en tout) ; /proc/<pid>/maps et mem sous Linux, VirtualQueryEx et ReadProcessMemory sous Windows (LSASS, processus protégés et critiques jamais lus) ; macOS non vérifié ; rien de lu n'est gardé |
-| `src/protection/empreintes.rs` | empreintes SHA-256 de MalwareBazaar (abuse.ch, CC0) : liste complète chaque semaine (archive zip), récentes chaque jour, gardées dans le dossier de Vanguard et triées ; l'analyse YARA y cherche chaque fichier lu |
+| `src/protection/empreintes.rs` | empreintes SHA-256 de MalwareBazaar (abuse.ch, avec la clé) : liste complète chaque semaine (archive zip), récentes chaque jour, gardées dans le dossier de Vanguard et triées ; l'analyse YARA y cherche chaque fichier lu |
+| `src/protection/abuse_ch.rs` | listes d'abuse.ch et clé de la personne (MalwareBazaar, URLhaus, ThreatFox depuis la fermeture des exports publics) : gardée sur l'ordinateur (600), montrée masquée, jamais dans une adresse écrite ; sans clé ou clé refusée, listes non vérifiées |
 | `src/protection/outil.rs`, `src/protection/secrets_git.rs`, `src/protection/conteneurs.rs` | secrets dans l'historique des projets git (règles de Vanguard, gitleaks en plus s'il est là) ; outils libres lancés s'ils sont installés, installation proposée sinon (trivy sur les images Docker ou Podman) |
 | `src/reseau/surveillance.rs` | minuterie systemd / Planificateur de tâches / agent launchd, notifications |
 | `src/reseau/tableau.rs` | tableau de bord de la surveillance : journal des alertes (borné en nombre et en âge), page HTML locale d'un seul fichier (état, alertes par jour, nouveaux appareils, connexions vers des botnets) |
@@ -64,7 +65,7 @@ modification. Sur GitHub, `@claude` dans un ticket ou une demande de fusion le f
 | `src/apprentissage.rs` | ce que Vanguard apprend ici : alertes déclarées normales (appris.json), habitudes |
 | `src/reseau/listes_noires.rs` | adresse Internet de la maison dans les listes noires (DNSBL), après accord |
 | `src/entretien.rs` | entretien du mois : note, mises à jour, place, problèmes nouveaux, en une notification |
-| `src/protection/sortantes.rs` | qui parle à Internet : connexions établies par programme (ss, PowerShell, lsof), DNS inverse ; serveurs de commande de botnets (Feodo Tracker, liste gardée comme celle d'URLhaus) |
+| `src/protection/sortantes.rs` | qui parle à Internet : connexions établies par programme (ss, PowerShell, lsof), DNS inverse ; serveurs de commande de botnets (Feodo Tracker sans clé, ThreatFox avec la clé abuse.ch : export complet lu par son en-tête, et API) |
 | `src/protection/environnement.rs` | au démarrage : bibliothèque injectée dans la session (LD_PRELOAD, DYLD, AppInit_DLLs), jugée comme le préchargement |
 | `src/protection/manifeste.rs` | vérifier Vanguard lui-même (version, date du commit, SHA-256) et manifeste de la clé (empreintes BLAKE3 gardées chez le propriétaire, une référence par clé, comparées au bilan) |
 | `src/protection/cles_connues.rs` | clés VANGUARD connues de cet ordinateur (jeton `vanguard.jeton` posé au déploiement, `cles-connues.json`) ; par clé, l'empreinte du carnet tel que Vanguard l'a écrit et sa protection : un carnet changé hors de Vanguard n'est ni lu ni réécrit |

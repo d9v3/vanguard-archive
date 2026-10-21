@@ -166,6 +166,7 @@ fn recevoir(nom: &str, max: u64, secondes: u64) -> Option<Vec<u8>> {
         corps: None,
         delai: Duration::from_secs(secondes),
         taille_max: max,
+        meme_hote: false,
     })
     .filter(|r| r.code == 200)
     .map(|r| r.corps)

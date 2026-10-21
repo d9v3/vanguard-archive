@@ -1,8 +1,10 @@
-//! Les empreintes SHA-256 de logiciels malveillants connus (MalwareBazaar, abuse.ch, CC0), pour l'analyse YARA : un
-//! fichier dont l'empreinte y est, c'est ce logiciel malveillant précis, sans doute possible (une règle YARA, elle,
-//! reconnaît une famille et peut se tromper). Gardées dans le dossier de Vanguard, triées pour une recherche en
-//! quelques microsecondes : la liste complète (une archive zip d'environ 43 Mo, une fois par semaine) et les récentes
-//! (48 heures, une fois par jour). Sans Internet, la copie d'avant sert ; sans copie du tout, c'est dit, jamais sain.
+//! Les empreintes SHA-256 de logiciels malveillants connus (MalwareBazaar, abuse.ch), pour l'analyse YARA : un fichier
+//! dont l'empreinte y est, c'est ce logiciel malveillant précis, sans doute possible (une règle YARA, elle, reconnaît
+//! une famille et peut se tromper). Gardées dans le dossier de Vanguard, triées pour une recherche en quelques
+//! microsecondes : la liste complète (une archive zip d'environ 43 Mo, une fois par semaine) et les récentes
+//! (48 heures, une fois par jour). Depuis le 21 oct. 2026, elles ne se téléchargent qu'avec la clé abuse.ch de la
+//! personne (`abuse_ch`). Sans Internet ou sans clé, la copie d'avant sert (une empreinte connue le reste), et le
+//! rafraîchissement manqué est dit ; sans copie du tout, c'est dit, jamais sain.
 
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
@@ -13,25 +15,31 @@ use sha2::{Digest, Sha256};
 
 use crate::ui::*;
 
-const COMPLETE: &str = "https://bazaar.abuse.ch/export/txt/sha256/full/";
-const RECENTES: &str = "https://bazaar.abuse.ch/export/txt/sha256/recent/";
+/// Leurs noms chez MalwareBazaar (exports avec clé). Celui des récentes est confirmé par d'autres programmes qui le
+/// téléchargent ; celui de la liste complète l'est moins : un nom changé se dit (« abuse.ch a répondu 404 »).
+const COMPLETE: &str = "sha256_full.txt.zip";
+const RECENTES: &str = "sha256_recent.txt";
 /// La liste complète se retélécharge après une semaine, les récentes après un jour.
 const SEMAINE: Duration = Duration::from_hours(7 * 24);
 const JOUR: Duration = Duration::from_hours(24);
-/// Au-delà, ce n'est pas l'archive attendue (elle fait environ 43 Mo, 90 décompressée).
-const ARCHIVE_MAX: u64 = 256 << 20;
 const TEXTE_MAX: usize = 1 << 30;
 
 /// Les empreintes connues, triées : (combien, de quand) se dit avec.
 pub(crate) struct Empreintes {
     triees: Vec<[u8; 32]>,
+    /// Pourquoi les listes n'ont pas pu être rafraîchies (clé abuse.ch manquante ou refusée) : la copie gardée sert,
+    /// et c'est dit à côté du résultat.
+    pub(crate) avertissement: Option<String>,
 }
 
 impl Empreintes {
     #[cfg(test)]
     pub(crate) fn depuis(mut triees: Vec<[u8; 32]>) -> Empreintes {
         triees.sort_unstable();
-        Empreintes { triees }
+        Empreintes {
+            triees,
+            avertissement: None,
+        }
     }
 
     pub(crate) fn contient(&self, empreinte: &[u8; 32]) -> bool {
@@ -43,12 +51,19 @@ impl Empreintes {
     }
 }
 
-/// Les empreintes d'un texte d'abuse.ch : une par ligne, 64 chiffres hexadécimaux, lignes « # » de commentaire.
+/// Les empreintes d'un texte d'abuse.ch : une par ligne, lignes « # » de commentaire. Dans chaque ligne, le premier
+/// champ de 64 chiffres hexadécimaux, guillemets et fins de ligne Windows ôtés : la liste nue comme l'export CSV (où
+/// l'empreinte SHA-256 est la seule de cette longueur) se lisent pareil.
 fn lire_texte(texte: &str) -> Vec<[u8; 32]> {
     texte
         .lines()
         .map(str::trim)
-        .filter(|l| l.len() == 64 && !l.starts_with('#'))
+        .filter(|l| !l.starts_with('#'))
+        .filter_map(|l| {
+            l.split(',')
+                .map(|c| c.trim().trim_matches('"').trim())
+                .find(|c| c.len() == 64 && c.bytes().all(|b| b.is_ascii_hexdigit()))
+        })
         .filter_map(|l| {
             let mut e = [0u8; 32];
             for (i, o) in e.iter_mut().enumerate() {
@@ -71,7 +86,7 @@ fn mot32(o: &[u8], i: usize) -> Option<usize> {
 /// Le premier fichier d'une archive zip, décompressé : lu par son répertoire central (fin de l'archive), qui donne les
 /// vraies tailles même quand l'en-tête local les laisse à zéro. Compression « deflate » (8) ou aucune (0) ; au-delà de
 /// `max` octets décompressés, rien. `None` : ce n'est pas une archive lisible.
-fn premier_fichier_zip(archive: &[u8], max: usize) -> Option<Vec<u8>> {
+pub(crate) fn premier_fichier_zip(archive: &[u8], max: usize) -> Option<Vec<u8>> {
     // La fin du répertoire central : 22 octets, au plus 64 Kio de commentaire après.
     let debut = archive.len().saturating_sub(22 + 0xffff);
     let fin = (debut..archive.len().saturating_sub(21))
@@ -109,17 +124,16 @@ pub(crate) fn age(chemin: &Path) -> Option<Duration> {
 }
 
 /// Télécharge `adresse` dans `chemin` quand la copie a plus de `apres` (écrite à côté puis renommée : une coupure ne
-/// laisse jamais un fichier à moitié). Rien hors ligne, ni pendant les tests.
+/// laisse jamais un fichier à moitié). Rien hors ligne, ni pendant les tests. Pour la liste publique de LOLDrivers ;
+/// celles de MalwareBazaar passent par `abuse_ch::export`, avec la clé.
+#[cfg(windows)]
 pub(crate) fn rafraichir(adresse: &str, chemin: &Path, apres: Duration, max: u64, secondes: u64) {
     if cfg!(test) || crate::parametres::hors_ligne() || age(chemin).is_some_and(|a| a < apres) {
         return;
     }
     let reponse = crate::http::envoyer(crate::http::Demande {
-        adresse,
-        entetes: Vec::new(),
-        corps: None,
-        delai: Duration::from_secs(secondes),
         taille_max: max,
+        ..crate::http::Demande::get(adresse, Duration::from_secs(secondes))
     });
     if let Some(r) = reponse.filter(|r| r.code == 200 && !r.corps.is_empty()) {
         let provisoire = chemin.with_extension("nouveau");
@@ -129,24 +143,30 @@ pub(crate) fn rafraichir(adresse: &str, chemin: &Path, apres: Duration, max: u64
     }
 }
 
-/// Les empreintes connues, chargées une fois par lancement (et rafraîchies d'abord quand il le faut). `None` : aucune
-/// liste, ni téléchargée ni gardée.
-pub(crate) fn connues() -> Option<&'static Empreintes> {
-    static CHARGEES: OnceLock<Option<Empreintes>> = OnceLock::new();
+/// Les empreintes chargées, ou pourquoi il n'y en a pas.
+pub(crate) type Chargees = Result<&'static Empreintes, &'static String>;
+
+/// Les empreintes connues, chargées une fois par lancement (et rafraîchies d'abord quand il le faut). `Err` : aucune
+/// liste, ni téléchargée ni gardée, et pourquoi.
+pub(crate) fn connues() -> Chargees {
+    static CHARGEES: OnceLock<Result<Empreintes, String>> = OnceLock::new();
     CHARGEES.get_or_init(|| charger(true)).as_ref()
 }
 
 /// Les empreintes déjà gardées sur cet ordinateur, sans rien télécharger : pour le bilan, qui ne doit pas attendre
-/// 43 Mo quand personne n'a demandé la protection active. `None` : aucune liste gardée.
-pub(crate) fn gardees() -> Option<&'static Empreintes> {
-    static GARDEES: OnceLock<Option<Empreintes>> = OnceLock::new();
+/// 43 Mo quand personne n'a demandé la protection active. `Err` : aucune liste gardée, et pourquoi.
+pub(crate) fn gardees() -> Chargees {
+    static GARDEES: OnceLock<Result<Empreintes, String>> = OnceLock::new();
     GARDEES.get_or_init(|| charger(false)).as_ref()
 }
 
-fn charger(telecharger: bool) -> Option<Empreintes> {
+fn charger(telecharger: bool) -> Result<Empreintes, String> {
+    use crate::protection::abuse_ch::{self, Echec, Service};
     let d = dossier();
     let (complete, recentes) = (d.join("complete.zip"), d.join("recentes.txt"));
-    if telecharger {
+    // Sans clé, rien ne se rafraîchit, même quand on ne voulait rien télécharger : la copie vieillit, c'est dit.
+    let mut echec = abuse_ch::cle().is_none().then_some(Echec::Manquante);
+    if telecharger && echec.is_none() && !cfg!(test) && !crate::parametres::hors_ligne() {
         let _ = std::fs::create_dir_all(&d);
         if age(&complete).is_none_or(|a| a > SEMAINE) {
             trp!(
@@ -154,8 +174,21 @@ fn charger(telecharger: bool) -> Option<Empreintes> {
                 "  {GRIS}MalwareBazaar fingerprints: full list (about 43 MB, once a week)…{RESET}"
             );
         }
-        rafraichir(COMPLETE, &complete, SEMAINE, ARCHIVE_MAX, 600);
-        rafraichir(RECENTES, &recentes, JOUR, 16 << 20, 60);
+        for (fichier, nom, apres, secondes) in [
+            (COMPLETE, "complete.zip", SEMAINE, 600),
+            (RECENTES, "recentes.txt", JOUR, 60),
+        ] {
+            let lieu = ("malwarebazaar", nom);
+            if let Err(e) = abuse_ch::export(
+                Service::MalwareBazaar,
+                fichier,
+                lieu,
+                apres,
+                Duration::from_secs(secondes),
+            ) {
+                echec.get_or_insert(e);
+            }
+        }
     }
     let mut triees = std::fs::read(&complete)
         .ok()
@@ -165,7 +198,25 @@ fn charger(telecharger: bool) -> Option<Empreintes> {
     triees.extend(lire_texte(&std::fs::read_to_string(&recentes).unwrap_or_default()));
     triees.sort_unstable();
     triees.dedup();
-    (!triees.is_empty()).then_some(Empreintes { triees })
+    if triees.is_empty() {
+        return Err(match echec {
+            Some(e) => trf!("non vérifiées : {}", "not checked: {}", e.raison()),
+            None if telecharger => tr!("hors ligne, et aucune copie gardée", "offline, and no saved copy").into(),
+            None => tr!(
+                "absentes : une analyse YARA (vanguard yara) les télécharge",
+                "missing: a YARA scan (vanguard yara) downloads them"
+            )
+            .into(),
+        });
+    }
+    let avertissement = echec.map(|e| {
+        trf!(
+            "empreintes de MalwareBazaar non rafraîchies, la copie gardée a servi : {}",
+            "MalwareBazaar fingerprints not refreshed, the saved copy was used: {}",
+            e.raison()
+        )
+    });
+    Ok(Empreintes { triees, avertissement })
 }
 
 /// Une empreinte en hexadécimal minuscule, telle que MalwareBazaar l'écrit.
@@ -217,10 +268,24 @@ mod tests {
         let mut triees = lire_texte(texte);
         assert_eq!(triees.len(), 2);
         triees.sort_unstable();
-        let e = Empreintes { triees };
+        let e = Empreintes::depuis(triees);
         assert_eq!(e.nombre(), 2);
         assert!(e.contient(&lire_texte("23b2bee6d808e7d3caf0e3e6f51e10d470f4cf298766c87f2062a4121dfb0d19")[0]));
         assert!(!e.contient(&[0; 32]));
+    }
+
+    /// L'export avec clé : fins de ligne Windows, valeurs parfois entre guillemets ; et l'export CSV, où l'empreinte
+    /// SHA-256 est le seul champ de 64 chiffres (MD5 et SHA-1 sont plus courts).
+    #[test]
+    fn empreintes_de_l_export_avec_cle() {
+        let e = "9edfda3b77b3973f37708add497130d44cd88374c85812926f7974687006e3e5";
+        assert_eq!(lire_texte(&format!("# MalwareBazaar\r\n\"{e}\"\r\n{e}\r\n")).len(), 2);
+        let csv = format!(
+            "# \"first_seen_utc\",\"sha256_hash\",\"md5_hash\",\"sha1_hash\"\r\n\"2026-10-21 12:00:00\", \"{e}\", \"{}\", \"{}\"\r\n",
+            "0".repeat(32),
+            "1".repeat(40)
+        );
+        assert_eq!(lire_texte(&csv), lire_texte(e));
     }
 
     /// Une archive zip faite ici, comme celle d'abuse.ch (un fichier, « deflate », tailles dans le répertoire central
@@ -285,9 +350,7 @@ mod tests {
         let (mauvais, bon) = (d.join("facture.exe"), d.join("photo.jpg"));
         std::fs::write(&mauvais, b"contenu d'essai qui joue le logiciel malveillant").unwrap();
         std::fs::write(&bon, b"autre chose").unwrap();
-        let empreintes = Empreintes {
-            triees: vec![sha256(&mauvais).unwrap()],
-        };
+        let empreintes = Empreintes::depuis(vec![sha256(&mauvais).unwrap()]);
         let trouves = connus(&empreintes, &[mauvais.clone(), bon, d.join("absent")]);
         assert_eq!(trouves.len(), 1);
         assert_eq!(trouves[0].0, mauvais);

@@ -4,8 +4,8 @@
 //! (VANGUARD_LANG, VANGUARD_EMOJI, VANGUARD_HORS_LIGNE) l'emporte toujours sur le fichier. Les autres gardent leur
 //! place et leur code, que ce menu appelle : la surveillance horaire et l'entretien du mois (leurs minuteries), les
 //! alertes apprises (appris.json), le blocage (blocage.json), les restrictions des extensions (plugins/reglages.json,
-//! par leur interrupteur et son accord). Chaque changement est montré avec sa valeur d'avant, et s'annule en la
-//! remettant.
+//! par leur interrupteur et son accord), la clé abuse.ch (`protection::abuse_ch`, jamais montrée en entier). Chaque
+//! changement est montré avec sa valeur d'avant, et s'annule en la remettant.
 
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
@@ -112,10 +112,11 @@ enum Reglage {
     Appris,
     Blocage,
     Restrictions,
+    CleAbuseCh,
 }
 
 impl Reglage {
-    const TOUS: [Reglage; 8] = [
+    const TOUS: [Reglage; 9] = [
         Reglage::Langue,
         Reglage::Emojis,
         Reglage::HorsLigne,
@@ -124,6 +125,7 @@ impl Reglage {
         Reglage::Appris,
         Reglage::Blocage,
         Reglage::Restrictions,
+        Reglage::CleAbuseCh,
     ];
 
     /// Le mot de la ligne de commande.
@@ -137,6 +139,7 @@ impl Reglage {
             Reglage::Appris => tr!("appris", "learned"),
             Reglage::Blocage => tr!("blocage", "blocking"),
             Reglage::Restrictions => "restrictions",
+            Reglage::CleAbuseCh => "abuse.ch",
         }
     }
 
@@ -150,6 +153,9 @@ impl Reglage {
             "appris" | "learned" | "apprentissage" | "learning" => Some(Reglage::Appris),
             "blocage" | "blocking" => Some(Reglage::Blocage),
             "restrictions" | "restriction" => Some(Reglage::Restrictions),
+            "abuse.ch" | "abuse-ch" | "abusech" | "cle-abuse.ch" | "cle-abuse-ch" | "clé-abuse.ch" | "abuse.ch-key" => {
+                Some(Reglage::CleAbuseCh)
+            }
             _ => None,
         }
     }
@@ -164,6 +170,7 @@ impl Reglage {
             Reglage::Appris => tr!("Alertes apprises", "Learned alerts"),
             Reglage::Blocage => tr!("Blocage des menaces", "Threat blocking"),
             Reglage::Restrictions => tr!("Restrictions des extensions", "Extension restrictions"),
+            Reglage::CleAbuseCh => tr!("Clé abuse.ch", "abuse.ch key"),
         }
     }
 
@@ -189,7 +196,7 @@ impl Reglage {
                 &["yes", "no"]
             }
             Reglage::HorsLigne | Reglage::Surveillance | Reglage::Entretien | Reglage::Restrictions => &["oui", "non"],
-            Reglage::Appris | Reglage::Blocage => &[],
+            Reglage::Appris | Reglage::Blocage | Reglage::CleAbuseCh => &[],
         }
     }
 }
@@ -282,6 +289,8 @@ fn valeur(r: Reglage) -> String {
         Reglage::Restrictions => {
             texte_restrictions(&restrictions_actives(crate::plugins::reglages_lisibles().as_deref()))
         }
+        // Masquée : seuls ses quatre derniers caractères, jamais la clé entière.
+        Reglage::CleAbuseCh => crate::protection::abuse_ch::etat_court(),
     };
     if let Some(v) = r.variable().filter(|v| std::env::var_os(v).is_some()) {
         texte += &trf!(" ({v} l'emporte)", " ({v} wins)");
@@ -319,7 +328,8 @@ fn restrictions_dans(racine: &Path, actives: bool, accord: impl FnOnce(&str) -> 
 }
 
 /// `vanguard parametres` : l'état ; avec un réglage et une valeur, le change ; « appris » et « blocage » ouvrent leur
-/// outil (« blocage » prend aussi ses propres mots : `vanguard parametres blocage connexions auto`).
+/// outil (« blocage » prend aussi ses propres mots : `vanguard parametres blocage connexions auto`) ; « abuse.ch »
+/// demande la clé, ou la retire (« retirer »), mais ne la prend jamais en argument.
 pub fn commande(mots: &[String]) {
     let Some((premier, reste)) = mots.split_first() else {
         afficher();
@@ -337,6 +347,13 @@ pub fn commande(mots: &[String]) {
     match (r, reste) {
         (Reglage::Appris, _) => crate::apprentissage::menu(),
         (Reglage::Blocage, _) => crate::protection::blocage::commande(reste),
+        (Reglage::CleAbuseCh, []) => crate::protection::abuse_ch::menu(),
+        (Reglage::CleAbuseCh, [mot]) if est_retirer(mot) => crate::protection::abuse_ch::retirer(),
+        // L'historique du terminal et la liste des processus garderaient une clé donnée en argument.
+        (Reglage::CleAbuseCh, _) => trp!(
+            "  ✖ La clé ne se donne pas sur la ligne de commande : l'historique du terminal la garderait. « vanguard parametres abuse.ch » la demande ; « vanguard parametres abuse.ch retirer » la retire.",
+            "  ✖ The key is not given on the command line: the terminal history would keep it. “vanguard settings abuse.ch” asks for it; “vanguard settings abuse.ch remove” removes it."
+        ),
         (_, [valeur]) => {
             changer(r, valeur);
         }
@@ -348,6 +365,14 @@ pub fn commande(mots: &[String]) {
             r.valeurs().join(", ")
         ),
     }
+}
+
+/// « retirer », dans les deux langues.
+fn est_retirer(mot: &str) -> bool {
+    matches!(
+        mot.trim().to_lowercase().as_str(),
+        "retirer" | "oublier" | "supprimer" | "aucune" | "remove" | "delete" | "forget" | "none"
+    )
 }
 
 /// Change un réglage : la valeur d'avant et la nouvelle sont montrées, avec de quoi revenir. `false` : rien changé.
@@ -425,7 +450,7 @@ fn changer(r: Reglage, saisie: &str) -> bool {
                 Ok((avant, apres)) => (mot_oui_non(avant).to_string(), mot_oui_non(apres).to_string()),
             }
         }
-        Reglage::Appris | Reglage::Blocage => return false,
+        Reglage::Appris | Reglage::Blocage | Reglage::CleAbuseCh => return false,
     };
     trp!(
         "  {VERT}✔{RESET} {} : {avant} → {apres}",
@@ -511,7 +536,7 @@ fn explication(r: Reglage) -> &'static str {
             "Oui : une extension demande ton accord, son empreinte est vérifiée, elle est analysée et bornée, jamais en administrateur. Non : elle tourne comme un de tes programmes, sans contrôle ; couper demande ton accord une fois.",
             "Yes: an extension asks for your consent, its fingerprint is checked, it is scanned and limited, never as administrator. No: it runs like one of your programs, without checks; turning them off asks for your consent once."
         ),
-        Reglage::Appris | Reglage::Blocage => "",
+        Reglage::Appris | Reglage::Blocage | Reglage::CleAbuseCh => "",
     }
 }
 
@@ -549,6 +574,7 @@ pub fn menu() {
         match r {
             Reglage::Appris => crate::apprentissage::menu(),
             Reglage::Blocage => crate::protection::blocage::menu(),
+            Reglage::CleAbuseCh => crate::protection::abuse_ch::menu(),
             _ => choisir_valeur(r),
         }
     }
@@ -750,6 +776,7 @@ mod tests {
                 Reglage::Appris => ("alertes apprises", "learned alerts"),
                 Reglage::Blocage => ("blocage", "blocking"),
                 Reglage::Restrictions => ("restrictions des extensions", "extension restrictions"),
+                Reglage::CleAbuseCh => ("clé abuse.ch", "abuse.ch key"),
             };
             assert!(fr.contains(nom_fr), "{r:?} absent du guide : {fr}");
             assert!(en.contains(nom_en), "{r:?} missing from the guide: {en}");
@@ -773,5 +800,7 @@ mod tests {
         assert_eq!(Reglage::depuis_mot("settings"), None);
         assert_eq!(Reglage::depuis_mot("Language"), Some(Reglage::Langue));
         assert_eq!(Reglage::depuis_mot("offline"), Some(Reglage::HorsLigne));
+        assert_eq!(Reglage::depuis_mot("abuse-ch"), Some(Reglage::CleAbuseCh));
+        assert!(est_retirer("Retirer") && est_retirer("remove") && !est_retirer("a1B2c3D4e5F6g7H8i9J0k1L2"));
     }
 }

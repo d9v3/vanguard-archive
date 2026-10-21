@@ -167,7 +167,11 @@ l'antivirus, appliquées par YARA-X, compilé dans Vanguard : rien à installer.
 aux empreintes SHA-256 de MalwareBazaar (abuse.ch, plus d'un million de logiciels malveillants connus) : là, c'est ce
 logiciel précis, sans doute possible. La liste complète se télécharge une fois par semaine (environ 43 Mo), les
 nouveautés des 48 dernières heures une fois par jour ; sans Internet, la copie gardée sert, et sans copie du tout,
-c'est dit. Ce que l'antivirus ou YARA trouve peut aller en quarantaine, réversible : le fichier est rendu
+c'est dit.
+
+Les listes de MalwareBazaar, URLhaus et ThreatFox demandent une clé abuse.ch gratuite (compte sur
+https://auth.abuse.ch/, clé donnée dans Paramètres) : abuse.ch a fermé ses téléchargements publics le 21 octobre
+2026. La clé reste sur l'ordinateur, jamais montrée en entier ; sans elle, ces listes sont dites non vérifiées. Ce que l'antivirus ou YARA trouve peut aller en quarantaine, réversible : le fichier est rendu
 inutilisable et noté, puis remis exactement à sa place si c'était un faux positif.
 
 **Blocage des menaces** (menu Antivirus et protection › Blocage des menaces, `vanguard blocage`) — chaque menace
@@ -246,9 +250,9 @@ fail2ban, sshguard ou CrowdSec bloque déjà les adresses qui insistent.
   BLAKE3, ce qui a changé depuis la référence, et surveillance en direct.
 - Qui parle à Internet ? : les connexions en cours de chaque programme, avec le nom du serveur ; un programme lancé
   depuis un dossier temporaire ou les Téléchargements, un port de logiciel d'accès à distance, un serveur sans nom ou
-  un serveur de commande de botnet connu (listes de Feodo Tracker et de ThreatFox, abuse.ch ; une clé gratuite
-  d'abuse.ch, facultative, ajoute l'accès officiel de ThreatFox) sont signalés. Lecture seule : rien n'est coupé ici ;
-  un serveur de commande connu se bloque par le blocage des menaces.
+  un serveur de commande de botnet connu (listes de Feodo Tracker et de ThreatFox, abuse.ch ; celles de ThreatFox
+  avec la clé abuse.ch gratuite) sont signalés. Lecture seule : rien n'est coupé ici ; un serveur de commande connu se
+  bloque par le blocage des menaces.
 - Vanguard se méfie aussi de lui-même : au démarrage, il dit si une bibliothèque est injectée dans tous les
   programmes de la session (LD_PRELOAD, DYLD_INSERT_LIBRARIES, AppInit_DLLs : celle d'un paquet du système, comme
   GameMode, est une simple information) et s'il tourne en root sans raison, car ses résultats passent par là. Au
@@ -275,7 +279,7 @@ fail2ban, sshguard ou CrowdSec bloque déjà les adresses qui insistent.
   aide peut être connectée par lui. Au bilan aussi (« Accès à distance »).
 - Ce lien est-il dangereux ? : un lien reçu examiné sans jamais l'ouvrir (lettres déguisées, sous-domaine trompeur,
   marque imitée, raccourcisseur, adresse IP brute) ; après accord, l'âge du domaine et trois listes publiques de
-  sites dangereux (URLhaus, Spamhaus, SURBL). Seul le nom du domaine sort de l'ordinateur.
+  sites dangereux (URLhaus avec la clé abuse.ch, Spamhaus, SURBL). Seul le nom du domaine sort de l'ordinateur.
 - Vérifier un fichier téléchargé : son empreinte comparée à celle que publie le site (collée, ou un SHA256SUMS posé
   à côté), son nom et son contenu (double extension, programme déguisé en document), puis YARA et l'antivirus.
 - Bac à sable : lancer un programme inconnu sans réseau, système en lecture seule, dossier personnel invisible
@@ -540,7 +544,7 @@ Chaque entrée du menu existe aussi en commande.
 | `vanguard lenteur` | pourquoi c'est lent : processeur, mémoire, disque, démarrage, programmes à l'ouverture |
 | `vanguard demarrage` | programmes au démarrage : les retirer ou les remettre, après accord ; chaque retrait s'annule |
 | `vanguard changements` | ce que Vanguard a changé : chaque correction lancée ici, sa date et son résultat |
-| `vanguard parametres [réglage valeur]` | paramètres (aussi « s » au menu principal) : langue, emojis, travail sans Internet, surveillance, entretien du mois, alertes apprises, blocage, restrictions des extensions ; la valeur d'avant est montrée pour revenir |
+| `vanguard parametres [réglage valeur]` | paramètres (aussi « s » au menu principal) : langue, emojis, travail sans Internet, surveillance, entretien du mois, alertes apprises, blocage, restrictions des extensions, clé abuse.ch (masquée) ; la valeur d'avant est montrée pour revenir |
 | `vanguard blocage [chercher\|annuler\|auto\|clic\|catégorie mode]` | blocage des menaces : « Bloquer » d'un clic pour chaque menace (geste montré, noté, annulable) ; protection active, après un accord, qui bloque toute seule le certain (empreinte de MalwareBazaar, outil d'attaque connu, serveur de commande) |
 | `vanguard a-laisser` | rapport à laisser : une page simple pour la personne dépannée |
 | `vanguard proche` | ordinateur d'un proche : trois questions, le bilan, un résumé en mots simples, les corrections, la page à laisser avec ses conseils |

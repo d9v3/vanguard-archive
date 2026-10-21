@@ -876,50 +876,20 @@ pub(crate) const URLHAUS_FRAICHE: Duration = Duration::from_hours(12);
 /// jours, une vieille liste ne le connaît pas encore.
 pub(crate) const URLHAUS_TROP_VIEILLE: Duration = Duration::from_hours(7 * 24);
 
-/// Une liste d'URLhaus (abuse.ch), gardée 12 heures dans le dossier de Vanguard. La télécharger ne dit à personne quel
-/// lien on vérifie. Sans Internet, la copie d'avant sert encore : son texte, et son âge.
-fn liste_urlhaus(adresse: &str, nom: &str) -> Option<(String, Duration)> {
-    liste_abuse_ch("urlhaus", (adresse, &[], None), nom, URLHAUS_FRAICHE)
-}
-
-/// Une liste d'abuse.ch, gardée dans `sous_dossier` du dossier de Vanguard : `fraiche` sans être redemandée,
-/// retéléchargée ensuite, et sa copie d'avant garde sa valeur jusqu'à une semaine (voir `age_des_listes`). La
-/// télécharger ne dit à personne ce qu'on cherche (on prend la liste entière). Sans Internet, la copie d'avant sert
-/// encore : son texte, et son âge. `entetes` et `corps` : ce que la demande porte en plus (la clé de ThreatFox, la
-/// requête de son API). Partagé entre URLhaus (liens), Feodo Tracker et ThreatFox (serveurs de botnets).
-pub(crate) fn liste_abuse_ch(
-    sous_dossier: &str,
-    (adresse, entetes, corps): (&str, &[(&str, String)], Option<&str>),
-    nom: &str,
-    fraiche: Duration,
-) -> Option<(String, Duration)> {
-    let dossier = crate::reseau::dossier_local().join(sous_dossier);
-    let fichier = dossier.join(nom);
-    let age = || {
-        std::fs::metadata(&fichier)
-            .and_then(|m| m.modified())
-            .ok()
-            .map(|t| t.elapsed().unwrap_or_default())
-    };
-    let fraiche = age().is_some_and(|d| d < fraiche);
-    if !fraiche && std::fs::create_dir_all(&dossier).is_ok() {
-        let demande = crate::http::Demande {
-            entetes: entetes.to_vec(),
-            corps: corps.map(|c| c.as_bytes().to_vec()),
-            taille_max: 256 << 20,
-            ..crate::http::Demande::get(adresse, Duration::from_secs(40))
-        };
-        // Seule une réponse 200 remplace la copie d'avant, par un fichier provisoire renommé : jamais à moitié écrite.
-        if let Some(r) = crate::http::envoyer(demande).filter(|r| r.code == 200) {
-            let provisoire = dossier.join(format!("{nom}.nouveau"));
-            if std::fs::write(&provisoire, &r.corps).is_ok() {
-                let _ = std::fs::rename(&provisoire, &fichier);
-            } else {
-                let _ = std::fs::remove_file(&provisoire);
-            }
-        }
-    }
-    Some((std::fs::read_to_string(&fichier).ok()?, age()?))
+/// Une liste d'URLhaus (abuse.ch), avec la clé de la personne, gardée 12 heures dans le dossier de Vanguard : la liste
+/// des hôtes qui distribuent des logiciels malveillants (`hostfile.txt`, « 127.0.0.1 <hôte> » par ligne) ou celle des
+/// liens en service (`urls_online.txt`, un par ligne), de la même forme que les exports publics fermés le 21 oct. 2026.
+/// La télécharger ne dit à personne quel lien on vérifie. Sans Internet, la copie d'avant sert encore : son contenu, et
+/// son âge.
+fn liste_urlhaus(fichier: &str, nom: &str) -> Result<(Vec<u8>, Duration), crate::protection::abuse_ch::Echec> {
+    use crate::protection::abuse_ch;
+    abuse_ch::export(
+        abuse_ch::Service::Urlhaus,
+        fichier,
+        ("urlhaus", nom),
+        URLHAUS_FRAICHE,
+        Duration::from_secs(40),
+    )
 }
 
 /// Ce que dit l'âge des listes d'URLhaus utilisées : rien quand elles sont fraîches ; leur âge quand elles n'ont pas
@@ -1157,20 +1127,27 @@ fn en_ligne(lien: &Lien, adresse: &str) -> Vec<Verification> {
     let ip = adresse_ip(&lien.hote);
     std::thread::scope(|s| {
         let urlhaus = s.spawn(|| {
-            let hotes = liste_urlhaus("https://urlhaus.abuse.ch/downloads/hostfile/", "hotes.txt");
-            let liens = liste_urlhaus("https://urlhaus.abuse.ch/downloads/text_online/", "liens.txt");
+            let (hotes, liens) = match (
+                liste_urlhaus("hostfile.txt", "hotes.txt"),
+                liste_urlhaus("urls_online.txt", "liens.txt"),
+            ) {
+                (Ok(hotes), Ok(liens)) => (hotes, liens),
+                (Err(echec), _) | (_, Err(echec)) => {
+                    let raison = trf!("listes non vérifiées : {}", "lists not checked: {}", echec.raison());
+                    return (Inscription::Impossible(raison), None);
+                }
+            };
             // La plus vieille des deux listes décide.
-            let age = hotes.iter().chain(&liens).map(|(_, a)| *a).max();
-            match age.map(age_des_listes).transpose() {
+            match age_des_listes(hotes.1.max(liens.1)) {
                 Err(raison) => (Inscription::Impossible(raison), None),
                 Ok(note) => (
                     chercher_urlhaus(
                         lien,
                         adresse,
-                        hotes.as_ref().map(|(t, _)| t.as_str()),
-                        liens.as_ref().map(|(t, _)| t.as_str()),
+                        Some(String::from_utf8_lossy(&hotes.0).as_ref()),
+                        Some(String::from_utf8_lossy(&liens.0).as_ref()),
                     ),
-                    note.flatten(),
+                    note,
                 ),
             }
         });

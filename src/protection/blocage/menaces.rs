@@ -536,16 +536,17 @@ pub(crate) fn chercher(categories: &[Categorie], telecharger: bool) -> Trouvees 
         } else {
             empreintes::gardees()
         };
-        if e.is_none() {
-            t.non_verifie.push(
-                tr!(
-                    "empreintes de MalwareBazaar absentes : une analyse YARA (vanguard yara) les télécharge",
-                    "MalwareBazaar fingerprints missing: a YARA scan (vanguard yara) downloads them"
-                )
-                .to_string(),
-            );
+        match e {
+            Err(raison) => t.non_verifie.push(trf!(
+                "empreintes de MalwareBazaar {raison}",
+                "MalwareBazaar fingerprints {raison}"
+            )),
+            Ok(Empreintes {
+                avertissement: Some(a), ..
+            }) => t.non_verifie.push(a.clone()),
+            Ok(_) => {}
         }
-        e
+        e.ok()
     } else {
         None
     };

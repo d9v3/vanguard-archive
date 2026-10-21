@@ -44,6 +44,12 @@ serveur https://iso.omarchy.org/
 
 # API de ThreatFox (src/protection/sortantes.rs) : elle n'accepte que POST avec la clé d'abuse.ch de la personne.
 serveur https://threatfox-api.abuse.ch/api/v1/
+# Exports d'abuse.ch avec clé (src/protection/abuse_ch.rs), depuis la fermeture des exports publics le 21 oct. 2026 :
+# le programme ajoute la clé de la personne puis le nom du fichier ; sans clé, 404, avec une fausse, 401. Seul compte
+# que le serveur réponde.
+serveur https://mb-api.abuse.ch/v2/files/exports/
+serveur https://urlhaus-api.abuse.ch/v2/files/exports/
+serveur https://threatfox-api.abuse.ch/v2/files/exports/
 
 # Dépôt des versions signées (src/mise_a_jour/github.rs, outils/depot-versions.sh) : privé jusqu’à la première version, publiée par outils/publier-version.sh juste après l'envoi du code ;
 # avant la première, l'adresse ne répond pas. L'essai de « se-mettre-a-jour » après chaque publication la vérifie.

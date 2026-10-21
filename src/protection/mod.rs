@@ -4,6 +4,7 @@
 //! (`acces`), blocage des menaces, d'un clic ou tout seul pour le certain (`blocage`) ; et, sous Linux et macOS, la
 //! protection de la clé USB (`cle`).
 
+pub(crate) mod abuse_ch;
 pub mod acces;
 pub mod antivirus;
 pub mod blocage;

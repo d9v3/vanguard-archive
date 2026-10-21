@@ -1,0 +1,567 @@
+//! Les listes d'abuse.ch et la clé de la personne. MalwareBazaar (empreintes de logiciels malveillants), URLhaus (liens
+//! piégés) et ThreatFox (serveurs de botnets) ont fermé leurs exports publics le 21 oct. 2026 (410 Gone) : leurs listes
+//! ne se téléchargent plus qu'avec la clé gratuite d'un compte (https://auth.abuse.ch/). Une seule clé sert aux trois,
+//! et à l'API de ThreatFox ; Feodo Tracker reste ouvert sans clé.
+//!
+//! La clé reste sur cet ordinateur : dans le dossier de Vanguard du compte (jamais sur la clé USB), lisible par ce
+//! compte seul. Les exports la veulent dans le chemin de l'adresse : cette adresse n'est faite qu'ici, au moment de la
+//! demande, et n'en sort jamais (ni message, ni journal, ni rapport, ni JSON) ; l'erreur rendue ne dit que ce qui
+//! s'est passé. Montrée, la clé l'est masquée (« ••••3f2a »). Sans clé, ou clé refusée, une liste n'est pas vérifiée,
+//! et c'est dit avec la raison : jamais comptée comme saine.
+
+use std::path::{Path, PathBuf};
+use std::time::Duration;
+
+use crate::selection::{Ligne, choisir};
+use crate::ui::*;
+
+/// La réponse de l'API de ThreatFox, gardée à côté de la clé : effacée quand la clé change, pour que la nouvelle serve
+/// aussitôt.
+pub(crate) const FICHIER_API: &str = "api.json";
+
+/// Les services d'abuse.ch qui demandent la clé pour leurs exports.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Service {
+    MalwareBazaar,
+    Urlhaus,
+    ThreatFox,
+}
+
+impl Service {
+    /// Le début de l'adresse des exports ; la clé puis le nom du fichier s'y ajoutent (seul ce chemin est reconnu :
+    /// l'en-tête Auth-Key ou « ?auth-key= » y valent 404, vérifié le 21 oct. 2026).
+    fn exports(self) -> &'static str {
+        match self {
+            Service::MalwareBazaar => "https://mb-api.abuse.ch/v2/files/exports/",
+            Service::Urlhaus => "https://urlhaus-api.abuse.ch/v2/files/exports/",
+            Service::ThreatFox => "https://threatfox-api.abuse.ch/v2/files/exports/",
+        }
+    }
+}
+
+/// Pourquoi une liste n'a pas pu être vérifiée. Elle ne porte ni l'adresse ni la clé : rien à masquer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Echec {
+    /// Aucune clé donnée (ou un fichier de clé abîmé) : rien n'est demandé.
+    Manquante,
+    /// abuse.ch a refusé la clé (401, 403).
+    Refusee,
+    /// Une autre réponse, et aucune copie d'avant : 404 (fichier renommé ?), 429 (trop de demandes), panne…
+    Reponse(u16),
+    /// Pas de réponse (pas d'Internet ?), et aucune copie d'avant.
+    SansReponse,
+}
+
+impl Echec {
+    /// La raison, prête à montrer après « liste … non vérifiée : ».
+    pub(crate) fn raison(self) -> String {
+        match self {
+            Echec::Manquante => tr!(
+                "clé abuse.ch manquante (gratuite sur https://auth.abuse.ch/, à donner dans Paramètres)",
+                "abuse.ch key missing (free at https://auth.abuse.ch/, to give in Settings)"
+            )
+            .into(),
+            Echec::Refusee => tr!(
+                "clé abuse.ch refusée (vérifie-la sur https://auth.abuse.ch/, puis redonne-la dans Paramètres)",
+                "abuse.ch key refused (check it at https://auth.abuse.ch/, then give it again in Settings)"
+            )
+            .into(),
+            Echec::Reponse(429) => tr!(
+                "abuse.ch limite les demandes de ce compte pour l'instant",
+                "abuse.ch is limiting this account's requests for now"
+            )
+            .into(),
+            Echec::Reponse(code) => trf!("abuse.ch a répondu {code}", "abuse.ch answered {code}"),
+            Echec::SansReponse => tr!("pas d'Internet ?", "no Internet?").into(),
+        }
+    }
+}
+
+// ───────────────────────────── Les listes ─────────────────────────────
+
+/// Une liste demandée : la copie gardée et son âge (la nouvelle quand le téléchargement a réussi, sinon celle
+/// d'avant ; `None` : aucune), et le code de la réponse quand une demande a été faite.
+pub(crate) struct Liste {
+    pub copie: Option<(Vec<u8>, Duration)>,
+    pub code: Option<u16>,
+}
+
+impl Liste {
+    /// La copie à utiliser, ou pourquoi il n'y en a pas. `avec_cle` : une réponse 401 ou 403 veut dire clé refusée,
+    /// et la copie d'avant ne sert pas (elle était celle d'une clé qui ne vaut plus).
+    pub(crate) fn resultat(self, avec_cle: bool) -> Result<(Vec<u8>, Duration), Echec> {
+        if avec_cle && matches!(self.code, Some(401 | 403)) {
+            return Err(Echec::Refusee);
+        }
+        match (self.copie, self.code) {
+            (Some(copie), _) => Ok(copie),
+            (None, Some(code)) => Err(Echec::Reponse(code)),
+            (None, None) => Err(Echec::SansReponse),
+        }
+    }
+}
+
+/// Une liste d'abuse.ch, gardée dans `sous_dossier/nom` du dossier de Vanguard : `fraiche` sans être redemandée,
+/// retéléchargée ensuite. La télécharger ne dit à personne ce qu'on cherche (on prend la liste entière). Seule une
+/// réponse 200 remplace la copie d'avant (un 429 ou une panne la gardent), par un fichier provisoire renommé :
+/// jamais à moitié écrite. Partagé entre MalwareBazaar, URLhaus, Feodo Tracker et ThreatFox.
+pub(crate) fn liste(demande: crate::http::Demande, (sous_dossier, nom): (&str, &str), fraiche: Duration) -> Liste {
+    let dossier = crate::reseau::dossier_local().join(sous_dossier);
+    let fichier = dossier.join(nom);
+    let age = || {
+        std::fs::metadata(&fichier)
+            .and_then(|m| m.modified())
+            .ok()
+            .map(|t| t.elapsed().unwrap_or_default())
+    };
+    let mut code = None;
+    if age().is_none_or(|d| d >= fraiche) && std::fs::create_dir_all(&dossier).is_ok() {
+        let reponse = crate::http::envoyer(demande);
+        code = reponse.as_ref().map(|r| r.code);
+        if let Some(r) = reponse.filter(|r| r.code == 200) {
+            let provisoire = dossier.join(format!("{nom}.nouveau"));
+            if std::fs::write(&provisoire, &r.corps).is_ok() {
+                let _ = std::fs::rename(&provisoire, &fichier);
+            } else {
+                let _ = std::fs::remove_file(&provisoire);
+            }
+        }
+    }
+    Liste {
+        copie: std::fs::read(&fichier).ok().zip(age()),
+        code,
+    }
+}
+
+/// Un export d'abuse.ch, avec la clé de la personne : `fichier` (son nom chez abuse.ch) gardé dans `lieu`
+/// (sous-dossier, nom), comme `liste`. Sans clé, rien n'est demandé.
+pub(crate) fn export(
+    service: Service,
+    fichier: &str,
+    lieu: (&str, &str),
+    fraiche: Duration,
+    delai: Duration,
+) -> Result<(Vec<u8>, Duration), Echec> {
+    let cle = cle().ok_or(Echec::Manquante)?;
+    export_depuis(service.exports(), &cle, fichier, lieu, (fraiche, delai))
+}
+
+/// L'export, depuis `base` (un serveur local dans les tests). L'adresse qui porte la clé naît et meurt ici.
+fn export_depuis(
+    base: &str,
+    cle: &str,
+    fichier: &str,
+    lieu: (&str, &str),
+    (fraiche, delai): (Duration, Duration),
+) -> Result<(Vec<u8>, Duration), Echec> {
+    // Lettres et chiffres seulement : un segment de chemin sûr, sans « / ? # % » ni « .. » qui changerait l'adresse.
+    if !cle_valide(cle) {
+        return Err(Echec::Manquante);
+    }
+    let adresse = format!("{base}{cle}/{fichier}");
+    let demande = crate::http::Demande {
+        taille_max: 256 << 20,
+        // Une redirection vers un autre hôte n'emporte pas la clé.
+        meme_hote: true,
+        ..crate::http::Demande::get(&adresse, delai)
+    };
+    liste(demande, lieu, fraiche).resultat(true)
+}
+
+// ───────────────────────────── La clé ─────────────────────────────
+
+/// La clé, sur cet ordinateur seulement (le dossier de Vanguard du compte, jamais la clé USB), sous la forme d'un
+/// en-tête (« Auth-Key: … »). C'est là que la clé de l'API de ThreatFox était gardée avant que les exports la
+/// demandent aussi : celle qu'on avait déjà donnée sert aux trois services sans rien refaire.
+fn fichier_cle() -> PathBuf {
+    crate::reseau::dossier_local().join("threatfox").join("cle-entete")
+}
+
+/// La clé gardée dans `chemin`, vérifiée de nouveau : `Ok(None)` absente ; `Err` : là mais illisible (un fichier
+/// modifié à la main n'ajoute rien à une demande).
+fn lire_de(chemin: &Path) -> Result<Option<String>, ()> {
+    let texte = match std::fs::read_to_string(chemin) {
+        Ok(t) => t,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(_) => return Err(()),
+    };
+    let cle = texte.trim().strip_prefix("Auth-Key:").ok_or(())?.trim();
+    if cle_valide(cle) {
+        Ok(Some(cle.to_string()))
+    } else {
+        Err(())
+    }
+}
+
+/// La clé de la personne ; `None` : pas donnée, ou illisible.
+pub(crate) fn cle() -> Option<String> {
+    lire_de(&fichier_cle()).ok().flatten()
+}
+
+/// Une clé d'abuse.ch telle qu'elle se copie : lettres et chiffres seulement. Un retour à la ligne glissé dedans
+/// ajouterait un en-tête à la demande de l'API ; un « / » ou un « ? », un autre chemin à celle des exports.
+pub(crate) fn cle_valide(cle: &str) -> bool {
+    (20..=128).contains(&cle.len()) && cle.bytes().all(|b| b.is_ascii_alphanumeric())
+}
+
+/// La clé telle qu'elle se montre : ses quatre derniers caractères, assez pour la reconnaître.
+pub(crate) fn masquee(cle: &str) -> String {
+    let fin = cle.char_indices().rev().nth(3).map_or(0, |(i, _)| i);
+    format!("••••{}", &cle[fin..])
+}
+
+/// `texte` avec la clé masquée partout où elle paraît : pour tout texte qui pourrait l'avoir prise au passage.
+pub(crate) fn masquer(texte: &str, cle: &str) -> String {
+    if cle.is_empty() {
+        return texte.to_string();
+    }
+    texte.replace(cle, &masquee(cle))
+}
+
+/// Garde la clé dans `chemin`, lisible par ce compte seul (600 sous Unix ; sous Windows, le dossier local du compte
+/// n'est ouvert qu'à lui). Le fichier est recréé : un ancien, plus ouvert, ne garde pas ses droits.
+fn enregistrer_dans(chemin: &Path, cle: &str) -> std::io::Result<()> {
+    use std::io::Write;
+    if let Some(dossier) = chemin.parent() {
+        std::fs::create_dir_all(dossier)?;
+    }
+    oublier_de(chemin);
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+    options.open(chemin)?.write_all(format!("Auth-Key: {cle}\n").as_bytes())
+}
+
+/// Retire la clé de `chemin` et la réponse de l'API qu'elle a obtenue. Les listes téléchargées restent (des données
+/// publiques), mais ne servent plus sans clé.
+fn oublier_de(chemin: &Path) {
+    let _ = std::fs::remove_file(chemin);
+    if let Some(dossier) = chemin.parent() {
+        let _ = std::fs::remove_file(dossier.join(FICHIER_API));
+    }
+}
+
+/// Retire la clé de cet ordinateur.
+pub(crate) fn oublier() {
+    oublier_de(&fichier_cle());
+}
+
+/// La clé, telle que Paramètres la montre : masquée, absente ou illisible.
+pub(crate) fn etat_court() -> String {
+    match lire_de(&fichier_cle()) {
+        Ok(Some(cle)) => masquee(&cle),
+        Ok(None) => tr!("aucune : listes non vérifiées", "none: lists not checked").into(),
+        Err(()) => tr!("illisible : à redonner", "unreadable: give it again").into(),
+    }
+}
+
+/// Ce que la clé ouvre, et où la trouver.
+fn explication() -> &'static str {
+    tr!(
+        "Depuis le 21 octobre 2026, abuse.ch ne donne ses listes qu'avec la clé gratuite d'un compte : empreintes de logiciels malveillants (MalwareBazaar), liens piégés (URLhaus), serveurs de botnets (ThreatFox). Sans elle, ces listes ne sont pas vérifiées, et c'est dit. Crée un compte sur https://auth.abuse.ch/, puis copie ta clé (« Auth-Key »). Elle reste sur cet ordinateur, lisible par ton compte seul : jamais sur la clé USB, jamais montrée en entier.",
+        "Since October 21, 2026, abuse.ch only gives its lists with a free account key: malware fingerprints (MalwareBazaar), malicious links (URLhaus), botnet servers (ThreatFox). Without it, these lists are not checked, and that is said. Create an account at https://auth.abuse.ch/, then copy your key (“Auth-Key”). It stays on this computer, readable by your account only: never on the USB key, never shown in full."
+    )
+}
+
+/// Donner la clé : où la trouver, puis la clé collée. `true` : gardée.
+pub(crate) fn donner() -> bool {
+    println!();
+    for ligne in envelopper(explication(), LARGEUR - 2) {
+        println!("  {ligne}");
+    }
+    let cle = demander(tr!("  Clé (Entrée pour annuler) : ", "  Key (Enter to cancel): "));
+    if cle.is_empty() {
+        return false;
+    }
+    if !cle_valide(&cle) {
+        trp!(
+            "  ✖ Clé illisible : seulement des lettres et des chiffres, sans espace.",
+            "  ✖ Unreadable key: letters and digits only, no space."
+        );
+        return false;
+    }
+    let avant = self::cle().map_or_else(|| tr!("aucune", "none").to_string(), |c| masquee(&c));
+    match enregistrer_dans(&fichier_cle(), &cle) {
+        Ok(()) => {
+            trp!(
+                "  {VERT}✔{RESET} Clé abuse.ch : {avant} → {} (elle sert dès la prochaine vérification).",
+                "  {VERT}✔{RESET} abuse.ch key: {avant} → {} (used from the next check on).",
+                masquee(&cle)
+            );
+            true
+        }
+        // L'erreur d'écriture ne parle que du fichier ; masquée quand même, au cas où.
+        Err(e) => {
+            let e = masquer(&e.to_string(), &cle);
+            trp!("  ✖ Clé pas gardée : {e}.", "  ✖ Key not saved: {e}.");
+            false
+        }
+    }
+}
+
+/// Retire la clé, en montrant ce qui change.
+pub(crate) fn retirer() {
+    let avant = etat_court();
+    oublier();
+    trp!(
+        "  {VERT}✔{RESET} Clé abuse.ch : {avant} → {}. Pour la remettre : la redonner (https://auth.abuse.ch/ la montre).",
+        "  {VERT}✔{RESET} abuse.ch key: {avant} → {}. To put it back: give it again (https://auth.abuse.ch/ shows it).",
+        tr!("aucune", "none")
+    );
+}
+
+/// L'écran de la clé dans Paramètres : son état masqué, la donner (ou la remplacer), la retirer.
+pub(crate) fn menu() {
+    loop {
+        let presente = fichier_cle().is_file();
+        let mut lignes = vec![
+            Ligne::Texte(String::new()),
+            Ligne::Texte(ligne_titre(tr!("Clé abuse.ch", "abuse.ch key"))),
+        ];
+        lignes.extend(
+            envelopper(explication(), LARGEUR - 4)
+                .into_iter()
+                .map(|l| Ligne::Texte(format!("  {GRIS}{l}{RESET}"))),
+        );
+        lignes.push(Ligne::Texte(String::new()));
+        lignes.push(Ligne::Texte(trf!(
+            "  {GRAS}En ce moment{RESET} : {}",
+            "  {GRAS}Now{RESET}: {}",
+            etat_court()
+        )));
+        lignes.push(Ligne::Texte(String::new()));
+        if presente {
+            lignes.push(Ligne::choix("1", tr!("Remplacer la clé", "Replace the key"), ""));
+            lignes.push(Ligne::choix("2", tr!("Retirer la clé", "Remove the key"), ""));
+        } else {
+            lignes.push(Ligne::choix("1", tr!("Donner ma clé", "Give my key"), ""));
+        }
+        lignes.push(Ligne::Texte(String::new()));
+        lignes.push(Ligne::choix("↵", tr!("Revenir", "Back"), ""));
+        let Some(choix) = choisir(
+            &lignes,
+            tr!("\n  Choix (Entrée pour revenir) : ", "\n  Choice (Enter to go back): "),
+            "1",
+            tr!("revenir", "back"),
+        ) else {
+            return;
+        };
+        match choix.trim() {
+            "1" => {
+                donner();
+            }
+            "2" if presente => retirer(),
+            _ => return,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::{Read, Write};
+
+    /// Une clé inventée, à la forme de celles d'abuse.ch (48 lettres et chiffres).
+    const CLE: &str = "a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8s9T0u1V2w3X4";
+
+    fn jetable(nom: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("vanguard-abuse-ch-{nom}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    /// Un serveur HTTP local qui répond `reponse` à une demande et rend la ligne de demande reçue.
+    fn serveur(reponse: &'static [u8]) -> (String, std::thread::JoinHandle<String>) {
+        let ecoute = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let base = format!("http://{}/v2/files/exports/", ecoute.local_addr().unwrap());
+        let fil = std::thread::spawn(move || {
+            let (mut prise, _) = ecoute.accept().unwrap();
+            prise.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+            let mut recu = vec![0u8; 65_536];
+            let n = prise.read(&mut recu).unwrap_or(0);
+            let _ = prise.write_all(reponse);
+            String::from_utf8_lossy(&recu[..n])
+                .lines()
+                .next()
+                .unwrap_or_default()
+                .to_string()
+        });
+        (base, fil)
+    }
+
+    /// Tout ce qu'un sous-dossier de listes contient, en texte.
+    fn contenu(sous_dossier: &str) -> String {
+        std::fs::read_dir(crate::reseau::dossier_local().join(sous_dossier))
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|f| String::from_utf8_lossy(&std::fs::read(f.path()).unwrap_or_default()).into_owned())
+            .collect()
+    }
+
+    #[test]
+    fn cle_gardee_lue_puis_retiree() {
+        // Une clé collée avec un retour à la ligne, un espace ou de quoi changer le chemin d'une adresse : refusée.
+        assert!(cle_valide(CLE));
+        for mauvaise in [
+            "a1B2c3D4e5F6g7H8i9J0\r\nX-Autre: 1",
+            "a1B2c3D4 e5F6g7H8i9J0k1L2",
+            "a1B2c3D4e5F6g7H8i9J0/../../autre",
+            "a1B2c3D4e5F6g7H8i9J0k1L2?x=1",
+            "a1B2c3D4e5F6g7H8i9J0k1L2#a",
+            "a1B2c3D4e5F6g7H8i9J0%2Fk1L2",
+            "court",
+        ] {
+            assert!(!cle_valide(mauvaise), "{mauvaise}");
+        }
+        let fichier = jetable("cle").join("threatfox").join("cle-entete");
+        assert_eq!(lire_de(&fichier), Ok(None));
+        enregistrer_dans(&fichier, CLE).unwrap();
+        assert_eq!(std::fs::read_to_string(&fichier).unwrap(), format!("Auth-Key: {CLE}\n"));
+        assert_eq!(lire_de(&fichier), Ok(Some(CLE.to_string())));
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(std::fs::metadata(&fichier).unwrap().permissions().mode() & 0o777, 0o600);
+        }
+        // Modifié à la main avec un en-tête de plus : illisible, pas une clé.
+        std::fs::write(&fichier, format!("Auth-Key: {CLE}\r\nX-Autre: 1\n")).unwrap();
+        assert_eq!(lire_de(&fichier), Err(()));
+        // Retirée, avec la réponse de l'API qu'elle avait obtenue.
+        let reponse = fichier.with_file_name(FICHIER_API);
+        std::fs::write(&reponse, "{}").unwrap();
+        oublier_de(&fichier);
+        assert!(!fichier.exists() && !reponse.exists());
+        let _ = std::fs::remove_dir_all(fichier.parent().unwrap().parent().unwrap());
+    }
+
+    #[test]
+    fn cle_montree_masquee() {
+        assert_eq!(masquee(CLE), "••••w3X4");
+        let texte = format!("échec de https://urlhaus-api.abuse.ch/v2/files/exports/{CLE}/hostfile.txt ({CLE})");
+        let masque = masquer(&texte, CLE);
+        assert!(!masque.contains(CLE), "{masque}");
+        assert!(masque.contains("/exports/••••w3X4/hostfile.txt"), "{masque}");
+        assert_eq!(masquer("rien", ""), "rien");
+    }
+
+    /// La clé va dans le chemin de la demande, au serveur seul : ni l'erreur rendue, ni sa raison, ni ce qui est
+    /// écrit à côté de la liste ne la contiennent, quoi que réponde le serveur (refus, panne, rien du tout).
+    #[test]
+    fn la_cle_ne_fuit_jamais() {
+        let lieu = ("essai-cle-abuse-ch", "liste.txt");
+        let _ = std::fs::remove_dir_all(crate::reseau::dossier_local().join(lieu.0));
+        let delais = (Duration::ZERO, Duration::from_secs(5));
+        let mut raisons = Vec::new();
+        // Clé refusée : la réponse d'abuse.ch, vue le 21 oct. 2026.
+        let (base, fil) = serveur(
+            b"HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nContent-Length: 45\r\nConnection: close\r\n\r\n{\"status\":401,\"message\":\"Invalid auth token\"}",
+        );
+        let refus = export_depuis(&base, CLE, "hostfile.txt", lieu, delais).unwrap_err();
+        assert_eq!(refus, Echec::Refusee);
+        let demande = fil.join().unwrap();
+        assert_eq!(demande, format!("GET /v2/files/exports/{CLE}/hostfile.txt HTTP/1.1"));
+        raisons.push(format!("{refus:?} {}", refus.raison()));
+        // Panne, sans copie d'avant.
+        let (base, fil) = serveur(b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+        let panne = export_depuis(&base, CLE, "hostfile.txt", lieu, delais).unwrap_err();
+        assert_eq!(panne, Echec::Reponse(502));
+        fil.join().unwrap();
+        raisons.push(format!("{panne:?} {}", panne.raison()));
+        // Personne n'écoute.
+        let libre = std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap();
+        let rien = export_depuis(&format!("http://{libre}/v2/files/exports/"), CLE, "x.txt", lieu, delais).unwrap_err();
+        assert_eq!(rien, Echec::SansReponse);
+        raisons.push(format!("{rien:?} {}", rien.raison()));
+        // Une clé qui changerait l'adresse n'est même pas envoyée.
+        assert_eq!(
+            export_depuis(&base, "a1B2c3D4e5F6g7H8i9J0/../x", "x.txt", lieu, delais),
+            Err(Echec::Manquante)
+        );
+        for raison in &raisons {
+            assert!(!raison.contains(CLE) && !raison.contains("w3X4"), "{raison}");
+        }
+        // Rien de ce qui a été écrit à côté de la liste ne la contient (aucune liste, d'ailleurs : seul un 200 en
+        // écrit une).
+        assert!(!contenu(lieu.0).contains(CLE));
+        // Réussie : la liste est gardée, toujours sans la clé.
+        let (base, fil) =
+            serveur(b"HTTP/1.1 200 OK\r\nContent-Length: 22\r\nConnection: close\r\n\r\n# URLhaus\n127.0.0.1 x\n");
+        let (octets, _) = export_depuis(&base, CLE, "hostfile.txt", lieu, delais).unwrap();
+        fil.join().unwrap();
+        assert_eq!(octets, b"# URLhaus\n127.0.0.1 x\n");
+        assert!(!contenu(lieu.0).contains(CLE));
+        let _ = std::fs::remove_dir_all(crate::reseau::dossier_local().join(lieu.0));
+    }
+
+    /// Ce que dit une demande : la copie gardée sert tant que la clé n'est pas refusée ; sans copie, le code dit
+    /// pourquoi. Sans clé (Feodo Tracker), un 403 n'est pas une clé refusée.
+    #[test]
+    fn resultat_d_une_liste() {
+        let copie = || Some((b"# x\n".to_vec(), Duration::ZERO));
+        assert!(
+            Liste {
+                copie: copie(),
+                code: Some(502)
+            }
+            .resultat(true)
+            .is_ok()
+        );
+        assert!(
+            Liste {
+                copie: copie(),
+                code: None
+            }
+            .resultat(true)
+            .is_ok()
+        );
+        assert_eq!(
+            Liste {
+                copie: copie(),
+                code: Some(401)
+            }
+            .resultat(true),
+            Err(Echec::Refusee)
+        );
+        assert_eq!(
+            Liste {
+                copie: None,
+                code: Some(403)
+            }
+            .resultat(true),
+            Err(Echec::Refusee)
+        );
+        assert!(
+            Liste {
+                copie: copie(),
+                code: Some(403)
+            }
+            .resultat(false)
+            .is_ok()
+        );
+        assert_eq!(
+            Liste {
+                copie: None,
+                code: Some(404)
+            }
+            .resultat(true),
+            Err(Echec::Reponse(404))
+        );
+        assert_eq!(
+            Liste {
+                copie: None,
+                code: None
+            }
+            .resultat(false),
+            Err(Echec::SansReponse)
+        );
+        // Chaque raison montrée dit où trouver la clé quand c'est elle qui manque.
+        assert!(Echec::Manquante.raison().contains("https://auth.abuse.ch/"));
+        assert!(Echec::Refusee.raison().contains("https://auth.abuse.ch/"));
+    }
+}

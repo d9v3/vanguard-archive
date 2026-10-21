@@ -135,7 +135,11 @@ ReversingLabs rules that recognize whole families (ransomware, password stealers
 the antivirus, applied by YARA-X, compiled into Vanguard: nothing to install. Each file read is also compared with
 MalwareBazaar's SHA-256 fingerprints (abuse.ch, over a million known malware samples): there, it is that very
 program, beyond doubt. The full list is downloaded once a week (about 43 MB), the last 48 hours once a day; offline,
-the saved copy is used, and with no copy at all, it says so. What the antivirus or YARA finds can go into a reversible quarantine: the file is made unusable and noted, then put back exactly in its place if it was a false
+the saved copy is used, and with no copy at all, it says so.
+
+The MalwareBazaar, URLhaus and ThreatFox lists need a free abuse.ch key (account at https://auth.abuse.ch/, key given
+in Settings): abuse.ch closed its public downloads on October 21, 2026. The key stays on the computer, never shown in
+full; without it, these lists are reported as not checked. What the antivirus or YARA finds can go into a reversible quarantine: the file is made unusable and noted, then put back exactly in its place if it was a false
 positive.
 
 **Threat blocking** (Antivirus and protection › Threat blocking menu, `vanguard blocking`) — each threat found offers
@@ -210,8 +214,8 @@ sshguard or CrowdSec already blocks the addresses that keep trying.
   since the reference, and live monitoring.
 - Who talks to the Internet?: each program's current connections, with the server's name; a program started from a
   temporary folder or Downloads, a remote access tool's port, a server without a name or a known botnet command
-  server (Feodo Tracker and ThreatFox lists, abuse.ch; a free, optional abuse.ch key adds ThreatFox's official
-  access) are flagged. Read-only: nothing is cut here; a known command server is blocked through threat blocking.
+  server (Feodo Tracker and ThreatFox lists, abuse.ch; ThreatFox's with the free abuse.ch key) are flagged.
+  Read-only: nothing is cut here; a known command server is blocked through threat blocking.
 - Vanguard also distrusts itself: at startup, it says whether a library is injected into every program of the
   session (LD_PRELOAD, DYLD_INSERT_LIBRARIES, AppInit_DLLs: one from a system package, like GameMode, is mere
   information) and whether it runs as root for no reason, since its results go through there. In the check: the
@@ -237,7 +241,7 @@ sshguard or CrowdSec already blocks the addresses that keep trying.
   explicit consent: the person helping may be connected through it. In the check too (“Remote access”).
 - Is this link dangerous?: a link you received, checked without ever opening it (disguised letters, misleading
   subdomain, imitated brand, link shortener, raw IP address); after your consent, the domain's age and three public
-  lists of dangerous sites (URLhaus, Spamhaus, SURBL). Only the domain name leaves the computer.
+  lists of dangerous sites (URLhaus with the abuse.ch key, Spamhaus, SURBL). Only the domain name leaves the computer.
 - Check a downloaded file: its checksum compared with the one the site publishes (pasted, or a SHA256SUMS next to
   it), its name and content (double extension, program disguised as a document), then YARA and the antivirus.
 - Sandbox: run an unknown program without network, with a read-only system and an invisible home folder (bubblewrap
@@ -486,7 +490,7 @@ Each menu entry is also a command.
 | `vanguard slow` | why it is slow: processor, memory, disk, startup, programs at login |
 | `vanguard startup` | startup programs: remove or put them back, after your consent; each removal is undone exactly |
 | `vanguard changes` | what Vanguard changed: each fix run here, its date and its result |
-| `vanguard settings [setting value]` | settings (also “s” in the main menu): language, emojis, working without the Internet, monitoring, monthly check-up, learned alerts, blocking, extension restrictions; the previous value is shown to go back |
+| `vanguard settings [setting value]` | settings (also “s” in the main menu): language, emojis, working without the Internet, monitoring, monthly check-up, learned alerts, blocking, extension restrictions, abuse.ch key (masked); the previous value is shown to go back |
 | `vanguard blocking [search\|undo\|auto\|click\|category mode]` | threat blocking: one-click “Block” for each threat (action shown, written down, undoable); active protection, after a consent, that blocks what is certain by itself (MalwareBazaar fingerprint, known attack tool, command server) |
 | `vanguard handout` | report to leave behind: a simple page for the person you helped |
 | `vanguard relative` | a relative's computer: three questions, the check, a summary in plain words, the fixes, the page to leave behind with its tips |
