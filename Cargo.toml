@@ -65,6 +65,12 @@ notify = { version = "8.2.0", default-features = false, features = ["macos_fseve
 strip = true
 lto = true
 codegen-units = 1
+# Dépassements de capacité vérifiés aussi dans la version publiée (guide Rust sécurisé de l'ANSSI, règle LANG-ARITH) :
+# sans cela, une taille ou un décalage lu dans une donnée hostile (paquet réseau, bail, journal, fichier PE) qui
+# déborde repart à zéro en silence et fausse la suite de la lecture. Ici, il panique, comme en développement. Les
+# paniques restent rattrapées (catch_unwind autour de chaque règle et de chaque domaine du bilan, qui deviennent
+# « non vérifié ») : panic garde donc sa valeur par défaut, « unwind », jamais « abort ».
+overflow-checks = true
 
 # Les bibliothèques en développement : seulement les numéros de ligne (les traces d'erreur restent lisibles). Avec toutes
 # leurs informations de débogage, YARA-X et wasmtime portaient le programme de test au-delà de 400 Mo, plus que ce que la
