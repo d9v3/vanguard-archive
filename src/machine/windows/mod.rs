@@ -10,6 +10,7 @@ use crate::trw;
 use crate::ui::{resume, tr, trf, trp};
 
 pub(crate) mod cartes;
+mod chargement;
 mod comptes;
 pub(crate) mod connexions;
 pub(crate) mod correctifs;

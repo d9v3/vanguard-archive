@@ -79,6 +79,11 @@ if [[ $MODE == --sans-compiler ]] && grep -qs "/\.git/worktrees/" "$LINUX.d" "${
   echo "Compilation venue d'une branche en cours (worktree) : rien n'est copié ni envoyé."
   exit 0
 fi
+# Une DLL posée à côté de vanguard.exe ne doit jamais être chargée : le programme Windows qui n'en porte pas la
+# garde (chargement.rs) ne part nulle part.
+if [[ -f $WINDOWS ]] && ! python3 outils/verifier-pe.py "$WINDOWS"; then
+  exit 1
+fi
 
 VENU_DE_GITHUB=""
 if [[ $MODE == --branchement ]]; then
