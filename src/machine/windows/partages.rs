@@ -129,15 +129,17 @@ fn acces() -> Option<Vec<String>> {
                 }
             }
             NetApiBufferFree(tampon);
-        } else if NetShareEnum(
-            std::ptr::null(),
-            1,
-            &raw mut tampon,
-            TOUT,
-            &raw mut lus,
-            &raw mut total,
-            std::ptr::null_mut(),
-        ) == 0
+        // Un code d'erreur (ERROR_MORE_DATA…) peut venir avec un tampon alloué : rendu avant le second essai.
+        } else if rendre(&mut tampon)
+            && NetShareEnum(
+                std::ptr::null(),
+                1,
+                &raw mut tampon,
+                TOUT,
+                &raw mut lus,
+                &raw mut total,
+                std::ptr::null_mut(),
+            ) == 0
             && !tampon.is_null()
         {
             let liste = std::slice::from_raw_parts(tampon.cast::<Partage1>(), usize::try_from(lus).ok()?);
@@ -146,6 +148,7 @@ fn acces() -> Option<Vec<String>> {
             }
             NetApiBufferFree(tampon);
         } else {
+            rendre(&mut tampon);
             return None;
         }
     }
@@ -256,6 +259,23 @@ fn nom_du_compte(sid: &[u8]) -> String {
     }
 }
 
+/// ERROR_MORE_DATA : Windows a répondu en partie, d'autres entrées restent à lire.
+const ERROR_MORE_DATA: u32 = 234;
+
+/// Rend à Windows un tampon de NetShareEnum ou NetUserEnum s'il en a alloué un, même avec un code d'erreur, et le
+/// remet à nul. Toujours vrai : il se place en tête d'une condition, avant un nouvel essai.
+///
+/// # Safety
+/// `tampon` est nul, ou un tampon alloué par une fonction Net* et pas encore rendu.
+unsafe fn rendre(tampon: &mut *mut c_void) -> bool {
+    if !tampon.is_null() {
+        // SAFETY : tampon alloué par Windows, rendu une seule fois (remis à nul aussitôt).
+        unsafe { NetApiBufferFree(*tampon) };
+        *tampon = std::ptr::null_mut();
+    }
+    true
+}
+
 /// « INV|True » si le compte Invité (RID 501) est activé, « INV|False » sinon, « INV| » s'il n'existe pas ; `None`
 /// si la liste des comptes ne se lit pas.
 fn invite() -> Option<String> {
@@ -265,7 +285,7 @@ fn invite() -> Option<String> {
     let (mut lus, mut total, mut reprise) = (0u32, 0u32, 0u32);
     // SAFETY : comme pour NetShareEnum : `lus` structures USER_INFO_20, lues tant que le tampon vit, rendu une fois.
     unsafe {
-        if NetUserEnum(
+        let code = NetUserEnum(
             std::ptr::null(),
             20,
             COMPTES_NORMAUX,
@@ -274,18 +294,24 @@ fn invite() -> Option<String> {
             &raw mut lus,
             &raw mut total,
             &raw mut reprise,
-        ) != 0
-            || tampon.is_null()
-        {
+        );
+        if tampon.is_null() {
             return None;
         }
-        let liste = std::slice::from_raw_parts(tampon.cast::<Compte20>(), usize::try_from(lus).unwrap_or(0));
-        let etat = liste
-            .iter()
-            .find(|c| c.rid == 501)
-            .map_or("", |c| if c.drapeaux & DESACTIVE == 0 { "True" } else { "False" });
+        // ERROR_MORE_DATA : un premier lot est lu (beaucoup de comptes). L'Invité y est presque toujours ; absent de
+        // ce lot, il n'est pas pour autant absent de l'ordinateur : non lu.
+        let etat = if code == 0 || code == ERROR_MORE_DATA {
+            let liste = std::slice::from_raw_parts(tampon.cast::<Compte20>(), usize::try_from(lus).unwrap_or(0));
+            match liste.iter().find(|c| c.rid == 501) {
+                Some(c) => Some(if c.drapeaux & DESACTIVE == 0 { "True" } else { "False" }),
+                None => (code == 0).then_some(""),
+            }
+        } else {
+            None
+        };
+        // Rendu dans tous les cas où Windows l'a alloué, code d'erreur compris.
         NetApiBufferFree(tampon);
-        Some(format!("INV|{etat}"))
+        etat.map(|e| format!("INV|{e}"))
     }
 }
 
