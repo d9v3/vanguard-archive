@@ -8,6 +8,7 @@ use std::process::Command;
 use super::demarrage::Programme;
 use super::{Categorie, Reglage, Valeur};
 use crate::commande::sh_chaine;
+use crate::machine::linux::natif;
 use crate::ui::*;
 
 /// Ce que retire un réglage de démarrage.
@@ -259,7 +260,7 @@ impl Changement {
     pub fn lire(&self) -> Valeur {
         match self {
             // « is-enabled » répond aussi par son code de retour : seul le texte compte ici.
-            Changement::Unite { nom, .. } => sortie("systemctl", &["is-enabled", nom]).filter(|t| !t.is_empty()),
+            Changement::Unite { nom, .. } => etat_unite_lu(nom, false),
             Changement::Fichier { chemin, contenu, .. } => {
                 let t = std::fs::read_to_string(chemin).ok()?;
                 Some(if t == *contenu { "present" } else { "autre" }.to_string())
@@ -288,7 +289,7 @@ impl Changement {
                     // Illisible : ni présent ni absent, rien ne doit s'écrire d'après cette lecture.
                     Err(_) => None,
                 },
-                Entree::Service(u) => sortie("systemctl", &["--user", "is-enabled", u]).filter(|t| !t.is_empty()),
+                Entree::Service(u) => etat_unite_lu(u, true),
             },
         }
     }
@@ -702,27 +703,148 @@ fn programme_autostart(chemin: PathBuf, texte: &str, bureau: &str) -> Programme 
 
 pub fn apres(_touches: &[&Reglage]) {}
 
+/// Le fichier de l'unité existe (ce que vérifiait `systemctl cat`), lu dans les dossiers de systemd.
 fn unite_existe(nom: &str) -> bool {
-    crate::commande::lancer(Command::new("systemctl").args(["cat", nom]), 10).is_some_and(|r| r.code == Some(0))
+    natif::unite_existe(nom)
 }
 
-/// Au moins un disque sans pièce mobile (SSD, NVMe) : `lsblk` le marque ROTA 0.
+/// Au moins un disque sans pièce mobile (SSD, NVMe), que sysfs marque non rotatif.
 fn ssd() -> bool {
-    sortie("lsblk", &["-dno", "NAME,ROTA,TYPE"]).is_some_and(|t| a_un_ssd(&t))
+    a_un_ssd(&natif::disques())
 }
 
-/// `lsblk -dno NAME,ROTA,TYPE` : la mémoire compressée (zram) se dit aussi « disque » sans pièce mobile, mais TRIM
-/// n'y a pas de sens.
-fn a_un_ssd(lsblk: &str) -> bool {
-    lsblk.lines().any(|l| {
-        let c: Vec<&str> = l.split_whitespace().collect();
-        matches!(c[..], [nom, "0", "disk"] if !nom.starts_with("zram") && !nom.starts_with("loop"))
+/// Ce que `lsblk` dit « disk » : la mémoire compressée (zram) s'y dit aussi disque sans pièce mobile, mais TRIM n'y
+/// a pas de sens ; loop non plus.
+fn a_un_ssd(disques: &[natif::Disque]) -> bool {
+    disques.iter().any(|d| {
+        crate::fiche::disque_entier(d) && !d.rotatif && !d.nom.starts_with("zram") && !d.nom.starts_with("loop")
     })
 }
 
+/// GNOME est le bureau, et ses réglages de vie privée sont installés : le schéma se lit dans sa description XML,
+/// gsettings en secours quand elle manque.
 fn gnome() -> bool {
     std::env::var("XDG_CURRENT_DESKTOP").is_ok_and(|d| d.to_uppercase().contains("GNOME"))
-        && sortie("gsettings", &["list-keys", "org.gnome.desktop.privacy"]).is_some_and(|t| !t.is_empty())
+        && crate::sauvegarde::schema_gsettings("org.gnome.desktop.privacy", None).unwrap_or_else(|| {
+            sortie("gsettings", &["list-keys", "org.gnome.desktop.privacy"]).is_some_and(|t| !t.is_empty())
+        })
+}
+
+/// L'état d'une unité comme `systemctl [--user] is-enabled` le dit (la valeur notée avant un changement, remise
+/// pour l'annuler) : lu dans les dossiers de systemd quand c'est un état qu'un réglage sait remettre, sinon
+/// demandé à systemctl, qui sait nommer les autres.
+fn etat_unite_lu(nom: &str, utilisateur: bool) -> Valeur {
+    let maison = crate::nettoyer::maison();
+    let config = std::env::var_os("XDG_CONFIG_HOME").map_or_else(|| maison.join(".config"), PathBuf::from);
+    let donnees = std::env::var_os("XDG_DATA_HOME").map_or_else(|| maison.join(".local/share"), PathBuf::from);
+    // SAFETY : getuid ne peut pas échouer et ne touche à aucune mémoire du programme.
+    let uid = unsafe { libc::getuid() };
+    let dossiers = DossiersUnites::du_systeme(Path::new("/"), &config, &donnees, uid, utilisateur);
+    etat_unite_selon(&dossiers, nom, natif::unite_activee(nom, utilisateur))
+        .map(str::to_string)
+        .or_else(|| {
+            let mut args = vec!["is-enabled", nom];
+            if utilisateur {
+                args.insert(0, "--user");
+            }
+            // « is-enabled » répond aussi par son code de retour : seul le texte compte ici.
+            sortie("systemctl", &args).filter(|t| !t.is_empty())
+        })
+}
+
+/// Où systemd range les unités : (dossier de configuration, valable pour ce démarrage seulement), du plus
+/// prioritaire au moins prioritaire, puis les dossiers des paquets.
+struct DossiersUnites {
+    configuration: Vec<(PathBuf, bool)>,
+    paquets: Vec<PathBuf>,
+}
+
+impl DossiersUnites {
+    fn du_systeme(racine: &Path, config: &Path, donnees: &Path, uid: u32, utilisateur: bool) -> Self {
+        let sous = |d: &str| racine.join(d.trim_start_matches('/'));
+        if utilisateur {
+            DossiersUnites {
+                configuration: vec![
+                    (sous(&config.join("systemd/user").to_string_lossy()), false),
+                    (sous("/etc/systemd/user"), false),
+                    (sous(&format!("/run/user/{uid}/systemd/user")), true),
+                    (sous("/run/systemd/user"), true),
+                ],
+                paquets: vec![
+                    sous(&donnees.join("systemd/user").to_string_lossy()),
+                    sous("/usr/local/lib/systemd/user"),
+                    sous("/usr/lib/systemd/user"),
+                    sous("/lib/systemd/user"),
+                ],
+            }
+        } else {
+            DossiersUnites {
+                configuration: vec![
+                    (sous("/etc/systemd/system"), false),
+                    (sous("/run/systemd/system"), true),
+                ],
+                paquets: vec![
+                    sous("/usr/local/lib/systemd/system"),
+                    sous("/usr/lib/systemd/system"),
+                    sous("/lib/systemd/system"),
+                ],
+            }
+        }
+    }
+}
+
+/// « masked », « enabled » ou « disabled », les seuls états qu'un réglage remet ; `activee` est la lecture de
+/// natif (un lien d'activation). `None` pour le reste, que systemctl nomme : un masque de ce démarrage seulement
+/// (« masked-runtime »), un fichier d'unité introuvable, un lien (« linked », « alias »), une unité sans
+/// [Install] (« static ») ou qui n'y cite que d'autres unités (« indirect »).
+fn etat_unite_selon(dossiers: &DossiersUnites, nom: &str, activee: Option<bool>) -> Option<&'static str> {
+    for (d, ce_demarrage) in &dossiers.configuration {
+        if std::fs::read_link(d.join(nom)).is_ok_and(|c| c == Path::new("/dev/null")) {
+            return (!ce_demarrage).then_some("masked");
+        }
+    }
+    if activee? {
+        // Activée pour ce démarrage seulement (« enabled-runtime », un lien sous /run), ou par un alias ou une
+        // instance : seul un lien à son nom dans un dossier durable se remet à coup sûr.
+        let lien_durable = dossiers
+            .configuration
+            .iter()
+            .filter(|(_, ce_demarrage)| !ce_demarrage)
+            .any(|(d, _)| {
+                std::fs::read_dir(d).into_iter().flatten().flatten().any(|w| {
+                    let n = w.file_name();
+                    let n = n.to_string_lossy();
+                    (n.ends_with(".wants") || n.ends_with(".requires")) && w.path().join(nom).symlink_metadata().is_ok()
+                })
+            });
+        return lien_durable.then_some("enabled");
+    }
+    let fichier = dossiers
+        .configuration
+        .iter()
+        .map(|(d, _)| d)
+        .chain(&dossiers.paquets)
+        .map(|d| d.join(nom))
+        .find(|f| f.symlink_metadata().is_ok())?;
+    if !fichier_ordinaire(&fichier) {
+        return None;
+    }
+    installable(&std::fs::read_to_string(&fichier).ok()?).then_some("disabled")
+}
+
+/// La section [Install] dit à `systemctl enable` quoi poser : une cible qui la veut, ou un autre nom.
+fn installable(unite: &str) -> bool {
+    let mut dans_install = false;
+    unite.lines().map(str::trim).any(|l| {
+        if l.starts_with('[') {
+            dans_install = l == "[Install]";
+            return false;
+        }
+        dans_install
+            && l.split_once('=').is_some_and(|(cle, valeur)| {
+                matches!(cle.trim(), "WantedBy" | "RequiredBy" | "UpheldBy" | "Alias") && !valeur.trim().is_empty()
+            })
+    })
 }
 
 pub fn catalogue() -> Vec<Reglage> {
@@ -991,11 +1113,198 @@ mod tests {
         assert_eq!(carte_par_defaut("Iface\tDestination\n"), None);
     }
 
+    fn disque(nom: &str, rotatif: bool, genre: &str) -> natif::Disque {
+        natif::Disque {
+            nom: nom.into(),
+            octets: 1 << 30,
+            rotatif,
+            amovible: false,
+            modele: String::new(),
+            serie: String::new(),
+            bus: String::new(),
+            genre: genre.into(),
+        }
+    }
+
+    /// Ni la mémoire compressée, ni loop, ni device-mapper, ni une grappe RAID (non rotatifs pour sysfs) ne sont un
+    /// SSD.
     #[test]
     fn la_memoire_compressee_n_est_pas_un_ssd() {
-        assert!(!a_un_ssd("zram0 0 disk\nsda 1 disk\nloop0 0 loop\n"));
-        assert!(a_un_ssd("zram0 0 disk\nnvme0n1 0 disk\n"));
-        assert!(!a_un_ssd(""));
+        let sans = [
+            disque("zram0", false, "disk"),
+            disque("sda", true, "disk"),
+            disque("loop0", false, "loop"),
+            disque("dm-0", false, "dm"),
+            disque("md0", false, "disk"),
+        ];
+        assert!(!a_un_ssd(&sans));
+        assert!(a_un_ssd(&[
+            disque("zram0", false, "disk"),
+            disque("nvme0n1", false, "disk")
+        ]));
+        assert!(!a_un_ssd(&[]));
+    }
+
+    /// Sur cet ordinateur, « un SSD » se lit comme `lsblk -dno NAME,ROTA,TYPE` le disait, quand il est là.
+    #[test]
+    fn ssd_comme_lsblk() {
+        let Some(r) = crate::commande::lancer(Command::new("lsblk").args(["-dno", "NAME,ROTA,TYPE"]), 10)
+            .filter(|r| r.code == Some(0))
+        else {
+            return;
+        };
+        let attendu = r.sortie.lines().any(|l| {
+            let c: Vec<&str> = l.split_whitespace().collect();
+            matches!(c[..], [nom, "0", "disk"] if !nom.starts_with("zram") && !nom.starts_with("loop"))
+        });
+        assert_eq!(ssd(), attendu, "{}", r.sortie);
+    }
+
+    /// Une arborescence de systemd inventée, pour le système ou le compte.
+    fn dossiers_inventes(nom: &str, utilisateur: bool) -> (PathBuf, DossiersUnites) {
+        let d = std::env::temp_dir().join(format!("vanguard-optimiser-unites-{nom}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        let dossiers = DossiersUnites::du_systeme(
+            &d,
+            Path::new("/home/alice/.config"),
+            Path::new("/home/alice/.local/share"),
+            1000,
+            utilisateur,
+        );
+        for c in dossiers.configuration.iter().map(|(c, _)| c).chain(&dossiers.paquets) {
+            std::fs::create_dir_all(c).unwrap();
+        }
+        (d, dossiers)
+    }
+
+    /// L'état noté avant un changement : masquée (par l'administrateur seulement), activée, désactivée ; le reste
+    /// (statique, indirecte, liée, introuvable, masque de ce démarrage) est laissé à systemctl.
+    #[test]
+    fn etat_d_une_unite_lu_dans_les_dossiers() {
+        use std::os::unix::fs::symlink;
+        let (d, dossiers) = dossiers_inventes("systeme", false);
+        let paquet = &dossiers.paquets[1];
+        let etc = &dossiers.configuration[0].0;
+        let run = &dossiers.configuration[1].0;
+        std::fs::write(
+            paquet.join("fstrim.timer"),
+            "[Timer]\nOnCalendar=weekly\n[Install]\nWantedBy=timers.target\n",
+        )
+        .unwrap();
+        std::fs::write(paquet.join("statique.service"), "[Service]\nExecStart=/bin/true\n").unwrap();
+        std::fs::write(
+            paquet.join("indirecte.service"),
+            "[Install]\nAlso=autre.socket\nWantedBy=\n",
+        )
+        .unwrap();
+        symlink(paquet.join("fstrim.timer"), etc.join("liee.timer")).unwrap();
+        assert_eq!(
+            etat_unite_selon(&dossiers, "fstrim.timer", Some(false)),
+            Some("disabled")
+        );
+        // Activée : un lien à son nom dans un « *.wants » durable ; sous /run seulement, c'est « enabled-runtime ».
+        std::fs::create_dir_all(run.join("timers.target.wants")).unwrap();
+        symlink(
+            paquet.join("fstrim.timer"),
+            run.join("timers.target.wants/fstrim.timer"),
+        )
+        .unwrap();
+        assert_eq!(
+            etat_unite_selon(&dossiers, "fstrim.timer", Some(true)),
+            None,
+            "enabled-runtime"
+        );
+        std::fs::create_dir_all(etc.join("timers.target.wants")).unwrap();
+        symlink(
+            paquet.join("fstrim.timer"),
+            etc.join("timers.target.wants/fstrim.timer"),
+        )
+        .unwrap();
+        assert_eq!(etat_unite_selon(&dossiers, "fstrim.timer", Some(true)), Some("enabled"));
+        assert_eq!(etat_unite_selon(&dossiers, "fstrim.timer", None), None, "sans systemd");
+        assert_eq!(etat_unite_selon(&dossiers, "statique.service", Some(false)), None);
+        assert_eq!(etat_unite_selon(&dossiers, "indirecte.service", Some(false)), None);
+        assert_eq!(etat_unite_selon(&dossiers, "liee.timer", Some(false)), None);
+        assert_eq!(etat_unite_selon(&dossiers, "absente.service", Some(false)), None);
+        symlink("/dev/null", run.join("fstrim.timer")).unwrap();
+        assert_eq!(
+            etat_unite_selon(&dossiers, "fstrim.timer", Some(false)),
+            None,
+            "masked-runtime"
+        );
+        symlink("/dev/null", etc.join("fstrim.timer")).unwrap();
+        assert_eq!(etat_unite_selon(&dossiers, "fstrim.timer", Some(false)), Some("masked"));
+        let _ = std::fs::remove_dir_all(&d);
+
+        // Un service du compte, ajouté dans ~/.config/systemd/user.
+        let (d, dossiers) = dossiers_inventes("compte", true);
+        let config = &dossiers.configuration[0].0;
+        assert!(
+            config.ends_with("home/alice/.config/systemd/user"),
+            "{}",
+            config.display()
+        );
+        std::fs::write(config.join("synchro.service"), "[Install]\nWantedBy=default.target\n").unwrap();
+        assert_eq!(
+            etat_unite_selon(&dossiers, "synchro.service", Some(false)),
+            Some("disabled")
+        );
+        std::fs::create_dir_all(config.join("default.target.wants")).unwrap();
+        std::os::unix::fs::symlink(
+            config.join("synchro.service"),
+            config.join("default.target.wants/synchro.service"),
+        )
+        .unwrap();
+        assert_eq!(
+            etat_unite_selon(&dossiers, "synchro.service", Some(true)),
+            Some("enabled")
+        );
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// Sur cet ordinateur, chaque état que la lecture native conclut est celui que dit `systemctl is-enabled`, pour
+    /// toutes les unités des dossiers du système et du compte, quand il répond.
+    #[test]
+    fn etats_comme_systemctl_is_enabled() {
+        let maison = crate::nettoyer::maison();
+        let config = std::env::var_os("XDG_CONFIG_HOME").map_or_else(|| maison.join(".config"), PathBuf::from);
+        let donnees = std::env::var_os("XDG_DATA_HOME").map_or_else(|| maison.join(".local/share"), PathBuf::from);
+        // SAFETY : getuid ne peut pas échouer et ne touche à aucune mémoire du programme.
+        let uid = unsafe { libc::getuid() };
+        for utilisateur in [false, true] {
+            let dossiers = DossiersUnites::du_systeme(Path::new("/"), &config, &donnees, uid, utilisateur);
+            let mut noms: Vec<String> = dossiers
+                .configuration
+                .iter()
+                .map(|(d, _)| d)
+                .chain(&dossiers.paquets)
+                .flat_map(|d| std::fs::read_dir(d).into_iter().flatten().flatten())
+                .map(|e| e.file_name().to_string_lossy().into_owned())
+                .filter(|n| !n.contains('@') && [".service", ".timer", ".socket"].iter().any(|s| n.ends_with(s)))
+                .collect();
+            noms.sort();
+            noms.dedup();
+            if noms.is_empty() {
+                continue;
+            }
+            let mut args = vec!["is-enabled"];
+            if utilisateur {
+                args.insert(0, "--user");
+            }
+            args.extend(noms.iter().map(String::as_str));
+            let Some(r) = crate::commande::lancer(Command::new("systemctl").args(&args), 30) else {
+                continue;
+            };
+            let etats: Vec<&str> = r.sortie.lines().map(str::trim).collect();
+            if etats.len() != noms.len() {
+                continue;
+            }
+            for (nom, etat) in noms.iter().zip(etats) {
+                if let Some(natif) = etat_unite_selon(&dossiers, nom, natif::unite_activee(nom, utilisateur)) {
+                    assert_eq!(natif, etat, "{nom} (utilisateur : {utilisateur})");
+                }
+            }
+        }
     }
 
     #[test]
