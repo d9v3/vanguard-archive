@@ -577,8 +577,8 @@ pub fn nom_hote() -> Option<String> {
 }
 
 /// Membres du groupe admin, ceux du « GroupMembership » de dscl, demandés à la bibliothèque du système. `None` :
-/// groupe introuvable ou illisible.
-fn membres_admin() -> Option<Vec<String>> {
+/// groupe introuvable ou illisible. Aussi lu par `administrateurs` (nouveaux administrateurs).
+pub(super) fn membres_admin() -> Option<Vec<String>> {
     let mut taille = 16 * 1024;
     loop {
         let mut tampon: Vec<libc::c_char> = vec![0; taille];

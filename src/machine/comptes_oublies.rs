@@ -130,7 +130,8 @@ pub fn constats() -> Vec<Constat> {
 
 /// Les comptes de session parmi ceux de la base (nom, UID, dossier personnel) : UID à partir de 501 (ceux créés
 /// dans Réglages Système), sans les comptes de service (« _ ») ni celui qui lance Vanguard. La dernière trace est
-/// la plus récente de la dernière session et de la date du dossier.
+/// la plus récente de la dernière session et de la date du dossier. Un nom rendu deux fois par la base (deux
+/// sources d'Open Directory) ne compte qu'une fois : la première.
 #[cfg(any(target_os = "macos", test))]
 fn comptes_macos(
     base: &[(String, u32, std::path::PathBuf)],
@@ -138,8 +139,10 @@ fn comptes_macos(
     moi: &str,
     date_dossier: impl Fn(&std::path::Path) -> Option<chrono::NaiveDate>,
 ) -> Vec<Compte> {
+    let mut vus = std::collections::HashSet::new();
     base.iter()
         .filter(|(nom, uid, _)| *uid >= 501 && !nom.starts_with('_') && nom != moi)
+        .filter(|(nom, _, _)| vus.insert(nom.as_str()))
         .map(|(nom, _, maison)| Compte {
             nom: nom.clone(),
             derniere: sessions.get(nom).copied().max(date_dossier(maison)),
@@ -148,17 +151,18 @@ fn comptes_macos(
 }
 
 /// La base des comptes (nom, UID, dossier personnel), une entrée par `getpwent` : sous macOS, elle vient d'Open
-/// Directory, comme `dscl`. Bornée : une base en boucle ne ferait pas tourner Vanguard sans fin.
+/// Directory, comme `dscl`. Bornée en entrées lues, celles sans nom comprises : une base en boucle ne ferait pas
+/// tourner Vanguard sans fin.
 #[cfg(target_os = "macos")]
 fn base_des_comptes() -> Vec<(String, u32, std::path::PathBuf)> {
-    const COMPTES_MAX: usize = 10_000;
+    const ENTREES_MAX: usize = 10_000;
     let mut comptes = Vec::new();
     // SAFETY : setpwent, getpwent et endpwent s'enchaînent dans ce seul fil, et rien d'autre dans le programme ne
     // parcourt la base des comptes ; la struct passwd rendue reste valable jusqu'à l'appel suivant et elle est lue
     // tout de suite ; pw_name et pw_dir sont des chaînes C terminées par un nul, ou nuls (vérifié avant la lecture).
     unsafe {
         libc::setpwent();
-        while comptes.len() < COMPTES_MAX {
+        for _ in 0..ENTREES_MAX {
             let p = libc::getpwent();
             if p.is_null() {
                 break;
@@ -346,6 +350,8 @@ mod tests {
             ("alice".to_string(), 501, std::path::PathBuf::from("/Users/alice")),
             ("bob".to_string(), 502, std::path::PathBuf::from("/Volumes/Externe/bob")),
             ("zoé".to_string(), 503, std::path::PathBuf::from("/Users/zoé")),
+            // Rendu une seconde fois par la base : déjà compté.
+            ("bob".to_string(), 502, std::path::PathBuf::from("/Users/bob")),
         ];
         let sessions = std::collections::HashMap::from([("alice".to_string(), jour(2026, 10, 18))]);
         let dossiers = |chemin: &std::path::Path| match chemin.to_str() {

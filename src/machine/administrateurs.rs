@@ -53,13 +53,29 @@ fn lire_groupes(texte: &str) -> Vec<String> {
 fn lire_dscl(texte: &str) -> Vec<String> {
     texte
         .split_once("GroupMembership:")
-        .map(|(_, r)| {
-            r.split_whitespace()
-                .filter(|n| *n != "root")
-                .map(String::from)
-                .collect()
-        })
+        .map(|(_, r)| sans_root(r.split_whitespace().map(String::from).collect()))
         .unwrap_or_default()
+}
+
+/// Les membres sans root (toujours là, il n'est pas une personne), triés, chacun une fois.
+#[cfg(any(target_os = "macos", test))]
+fn sans_root(mut membres: Vec<String>) -> Vec<String> {
+    membres.retain(|n| n != "root");
+    membres.sort();
+    membres.dedup();
+    membres
+}
+
+/// macOS : les membres du groupe admin rendus par la bibliothèque du système (getgrnam_r, la base que lit dscl),
+/// sans lancer de programme. dscl (sa sortie, demandée par `secours`) ne sert que si cette lecture ne rend personne
+/// d'autre que root : un Mac a toujours un administrateur, une liste vide est une lecture manquée (groupe dont Open
+/// Directory ne remplit pas les noms), pas un groupe vidé. `None` : ni l'une ni l'autre ne se lit.
+#[cfg(any(target_os = "macos", test))]
+fn admins_macos(natif: Option<Vec<String>>, secours: impl FnOnce() -> Option<String>) -> Option<Vec<String>> {
+    natif
+        .map(sans_root)
+        .filter(|m| !m.is_empty())
+        .or_else(|| secours().map(|t| lire_dscl(&t)))
 }
 
 /// Les administrateurs de cet ordinateur ; `None` : la liste ne se lit pas.
@@ -70,11 +86,13 @@ fn lire() -> Option<Vec<String>> {
     }
     #[cfg(target_os = "macos")]
     {
-        let r = crate::commande::lancer(
-            std::process::Command::new("dscl").args([".", "-read", "/Groups/admin", "GroupMembership"]),
-            10,
-        )?;
-        Some(lire_dscl(&r.sortie))
+        admins_macos(super::macos::membres_admin(), || {
+            crate::commande::lancer(
+                std::process::Command::new("dscl").args([".", "-read", "/Groups/admin", "GroupMembership"]),
+                10,
+            )
+            .map(|r| r.sortie)
+        })
     }
     #[cfg(windows)]
     {
@@ -213,6 +231,29 @@ mod tests {
         assert_eq!(lire_groupes(group), ["alice", "bob"]);
         assert_eq!(lire_dscl("GroupMembership: root alice bob\n"), ["alice", "bob"]);
         assert_eq!(lire_dscl("No such key: GroupMembership"), Vec::<String>::new());
+    }
+
+    /// macOS, sur des listes inventées : la lecture par la bibliothèque du système suffit dès qu'elle rend une
+    /// personne ; dscl ne sert que si elle échoue ou ne rend que root.
+    #[test]
+    fn administrateurs_macos_sans_dscl() {
+        let noms = |v: &[&str]| v.iter().map(|n| (*n).to_string()).collect::<Vec<_>>();
+        let jamais = || -> Option<String> { panic!("dscl lancé alors que la lecture native suffit") };
+        assert_eq!(
+            admins_macos(Some(noms(&["root", "bob", "alice", "bob"])), jamais),
+            Some(noms(&["alice", "bob"]))
+        );
+        let dscl = || Some("GroupMembership: root carol\n".to_string());
+        assert_eq!(admins_macos(Some(noms(&["root"])), dscl), Some(noms(&["carol"])));
+        assert_eq!(admins_macos(Some(Vec::new()), dscl), Some(noms(&["carol"])));
+        assert_eq!(admins_macos(None, dscl), Some(noms(&["carol"])));
+        // Ni l'une ni l'autre : rien n'est affirmé.
+        assert_eq!(admins_macos(None, || None), None);
+        // dscl lisible mais sans membre : une liste vide, que `juger` garde sans rien oublier.
+        assert_eq!(
+            admins_macos(None, || Some("No such key: GroupMembership".into())),
+            Some(Vec::new())
+        );
     }
 
     #[test]
