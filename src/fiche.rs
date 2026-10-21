@@ -383,12 +383,73 @@ fn proprietes_udev(texte: &str) -> String {
         .join("\n")
 }
 
-/// Sans « model name » dans /proc/cpuinfo (bien des processeurs ARM), le modèle que donne l'arbre des
-/// périphériques (« Raspberry Pi 4 Model B Rev 1.4 », terminé par un octet nul), sinon rien. lscpu tirait un nom de
-/// cœur (« Cortex-A72 ») de sa propre table des numéros ARM : sans commande, la carte se nomme elle-même.
+/// Le nom du cœur d'un processeur ARM d'après son fabricant et son numéro de pièce (registre MIDR), comme la
+/// table de lscpu : /proc/cpuinfo n'a pas de « model name » sur ARM 64 bits. Un code absent de la table ne
+/// donne rien : mieux vaut un champ vide qu'un nom faux (le nom de la carte, par exemple, n'est pas celui du
+/// processeur).
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
-fn modele_device_tree(texte: &str) -> Option<String> {
-    Some(texte.trim_end_matches('\0').trim().to_string()).filter(|m| !m.is_empty())
+fn coeur_arm(fabricant: u32, piece: u32) -> Option<&'static str> {
+    let nom = match (fabricant, piece) {
+        (0x41, 0xc07) => "Cortex-A7",
+        (0x41, 0xc09) => "Cortex-A9",
+        (0x41, 0xc0f) => "Cortex-A15",
+        (0x41, 0xd03) => "Cortex-A53",
+        (0x41, 0xd04) => "Cortex-A35",
+        (0x41, 0xd05) => "Cortex-A55",
+        (0x41, 0xd07) => "Cortex-A57",
+        (0x41, 0xd08) => "Cortex-A72",
+        (0x41, 0xd09) => "Cortex-A73",
+        (0x41, 0xd0a) => "Cortex-A75",
+        (0x41, 0xd0b) => "Cortex-A76",
+        (0x41, 0xd0c) => "Neoverse-N1",
+        (0x41, 0xd0d) => "Cortex-A77",
+        (0x41, 0xd40) => "Neoverse-V1",
+        (0x41, 0xd41) => "Cortex-A78",
+        (0x41, 0xd44) => "Cortex-X1",
+        (0x41, 0xd46) => "Cortex-A510",
+        (0x41, 0xd47) => "Cortex-A710",
+        (0x41, 0xd48) => "Cortex-X2",
+        (0x41, 0xd49) => "Neoverse-N2",
+        (0x41, 0xd4f) => "Neoverse-V2",
+        _ => return None,
+    };
+    Some(nom)
+}
+
+/// Le cœur d'après les lignes « CPU implementer » et « CPU part » de /proc/cpuinfo (« 0x41 », « 0xd08 »).
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn coeur_cpuinfo(fabricant: &str, piece: &str) -> Option<&'static str> {
+    let hexa = |t: &str| u32::from_str_radix(t.trim().strip_prefix("0x")?, 16).ok();
+    coeur_arm(hexa(fabricant)?, hexa(piece)?)
+}
+
+/// Le cœur d'après /sys/devices/system/cpu/cpu0/regs/identification/midr_el1 (« 0x00000000410fd083 ») :
+/// fabricant aux bits 31 à 24, pièce aux bits 15 à 4.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn coeur_midr(texte: &str) -> Option<&'static str> {
+    let midr = u64::from_str_radix(texte.trim().strip_prefix("0x")?, 16).ok()?;
+    let champ = |decalage: u32, masque: u64| u32::try_from((midr >> decalage) & masque).ok();
+    coeur_arm(champ(24, 0xff)?, champ(4, 0xfff)?)
+}
+
+/// Le nom du processeur, dans l'ordre de lscpu : « model name » (x86, ARM 32 bits), « cpu » (POWER :
+/// « POWER9, altivec supported »), puis le numéro du cœur ARM, de /proc/cpuinfo ou du registre MIDR. Rien
+/// d'autre : un champ vide se lit « non renseigné », alors qu'un nom de carte se lirait comme celui du
+/// processeur.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn nom_du_processeur(cpuinfo: &str, midr: &str) -> String {
+    let valeur = |cle: &str| {
+        cpuinfo
+            .lines()
+            .find_map(|l| l.strip_prefix(cle)?.trim_start().strip_prefix(':'))
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty())
+    };
+    valeur("model name")
+        .or_else(|| valeur("cpu"))
+        .or_else(|| coeur_cpuinfo(&valeur("CPU implementer")?, &valeur("CPU part")?).map(str::to_string))
+        .or_else(|| coeur_midr(midr).map(str::to_string))
+        .unwrap_or_default()
 }
 
 #[cfg(target_os = "linux")]
@@ -421,9 +482,10 @@ fn lire() -> Fiche {
             .find_map(|l| l.strip_prefix(cle)?.trim_start().strip_prefix(':'))
             .map(|v| v.trim().to_string())
     };
-    f.processeur = valeur("model name")
-        .or_else(|| modele_device_tree(&fichier("/proc/device-tree/model")))
-        .unwrap_or_default();
+    f.processeur = nom_du_processeur(
+        &cpuinfo,
+        &fichier("/sys/devices/system/cpu/cpu0/regs/identification/midr_el1"),
+    );
     let processeurs: std::collections::BTreeSet<&str> = cpuinfo
         .lines()
         .filter_map(|l| l.strip_prefix("physical id")?.split(':').nth(1).map(str::trim))
@@ -1139,14 +1201,57 @@ mod tests {
         assert_eq!(barrettes_udev(&proprietes_udev(&fichier)), barrettes_udev(&r.sortie));
     }
 
+    /// Le nom du cœur ARM, comme lscpu, d'après /proc/cpuinfo ou le registre MIDR ; un code inconnu ne donne rien.
     #[test]
-    fn modele_de_l_arbre_des_peripheriques() {
-        assert_eq!(
-            modele_device_tree("Carte Essai Model B Rev 1.0\0").as_deref(),
-            Some("Carte Essai Model B Rev 1.0")
-        );
-        assert_eq!(modele_device_tree("\0"), None);
-        assert_eq!(modele_device_tree(""), None);
+    fn coeurs_arm() {
+        assert_eq!(coeur_cpuinfo("0x41", "0xd08"), Some("Cortex-A72"));
+        assert_eq!(coeur_cpuinfo(" 0x41", "0xd0c "), Some("Neoverse-N1"));
+        assert_eq!(coeur_cpuinfo("0x41", "0xfff"), None);
+        assert_eq!(coeur_cpuinfo("65", "3336"), None, "toujours en hexadécimal");
+        assert_eq!(coeur_midr("0x00000000410fd083\n"), Some("Cortex-A72"));
+        assert_eq!(coeur_midr("0x00000000413fd0c1"), Some("Neoverse-N1"));
+        assert_eq!(coeur_midr("0x000000004e0f0030"), None, "fabricant inconnu");
+        assert_eq!(coeur_midr(""), None);
+    }
+
+    /// Le nom du processeur selon le système : x86, POWER, ARM 64 bits par /proc/cpuinfo ou par MIDR seul, et
+    /// une carte ARM inconnue, qui reste vide (jamais le nom de la carte).
+    #[test]
+    fn noms_des_processeurs() {
+        let x86 = "processor\t: 0\ncpu family\t: 25\nmodel name\t: Processeur Essai 8 cœurs\ncpu cores\t: 8\n";
+        assert_eq!(nom_du_processeur(x86, ""), "Processeur Essai 8 cœurs");
+        let power = "processor\t: 0\ncpu\t\t: POWER9, altivec supported\nclock\t\t: 2300.000000MHz\n";
+        assert_eq!(nom_du_processeur(power, ""), "POWER9, altivec supported");
+        let arm = "processor\t: 0\nBogoMIPS\t: 108.00\nCPU implementer\t: 0x41\nCPU part\t: 0xd08\n";
+        assert_eq!(nom_du_processeur(arm, ""), "Cortex-A72");
+        assert_eq!(nom_du_processeur("", "0x00000000413fd0c1\n"), "Neoverse-N1");
+        let inconnu = "processor\t: 0\nCPU implementer\t: 0x99\nCPU part\t: 0x001\n";
+        assert_eq!(nom_du_processeur(inconnu, "0x00000000990f0010"), "");
+    }
+
+    /// Le nom du processeur, comme le « Model name » de lscpu quand il est là.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn processeur_comme_lscpu() {
+        let Some(r) = crate::commande::lancer(std::process::Command::new("lscpu").env("LC_ALL", "C"), 20)
+            .filter(|r| r.code == Some(0))
+        else {
+            return;
+        };
+        let Some(attendu) = r
+            .sortie
+            .lines()
+            .find_map(|l| l.strip_prefix("Model name:"))
+            .map(str::trim)
+        else {
+            return;
+        };
+        let cpuinfo = std::fs::read_to_string("/proc/cpuinfo").unwrap_or_default();
+        let midr =
+            std::fs::read_to_string("/sys/devices/system/cpu/cpu0/regs/identification/midr_el1").unwrap_or_default();
+        let natif = nom_du_processeur(&cpuinfo, &midr);
+        // Un cœur absent de notre petite table reste vide : non renseigné, jamais un autre nom.
+        assert!(natif.is_empty() || natif == attendu, "{natif} ≠ {attendu}");
     }
 
     #[cfg(target_os = "linux")]
