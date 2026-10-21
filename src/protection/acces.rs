@@ -558,7 +558,10 @@ fn lire_snap(texte: &str) -> Vec<Acces> {
 #[cfg(target_os = "linux")]
 mod linux {
     use super::{Bilan, PERMISSIONS, Permission, lire_flatpak_portails, lire_flatpak_statiques, lire_snap};
+    use crate::machine::linux::natif;
     use crate::{tr, trf};
+    use std::fmt::Write;
+    use std::path::PathBuf;
     use std::process::Command;
 
     /// Le programme est-il installé ? Distingue « absent » de « en panne », qui se dit non vérifié.
@@ -596,7 +599,8 @@ mod linux {
                 ),
             ),
         }
-        let Some(liste) = sortie("flatpak", &["list", "--app", "--columns=application"]) else {
+        // Lues dans les dossiers de Flatpak ; sa commande en secours, quand d'autres installations sont réglées.
+        let Some(liste) = crate::gaming::linux::applications_flatpak() else {
             non_verifie(
                 b,
                 &PERMISSIONS,
@@ -607,7 +611,7 @@ mod linux {
             );
             return;
         };
-        let mut applications: Vec<&str> = liste.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
+        let mut applications: Vec<&str> = liste.iter().map(String::as_str).collect();
         applications.sort_unstable();
         applications.dedup();
         if applications.is_empty() {
@@ -619,7 +623,7 @@ mod linux {
         }
         let mut illisibles = 0;
         for a in applications.iter().take(APPLICATIONS_MAX) {
-            match sortie("flatpak", &["info", "--show-permissions", a]) {
+            match permissions(a) {
                 Some(t) => b.ajouter(lire_flatpak_statiques(a, &t)),
                 None => illisibles += 1,
             }
@@ -647,6 +651,74 @@ mod linux {
                 ),
             );
         }
+    }
+
+    /// Les permissions statiques d'une application, ce que montre `flatpak info --show-permissions` : son fichier
+    /// metadata, puis les surcharges posées par `flatpak override` (pour toutes les applications, « global », puis
+    /// pour elle ; celles du système, puis celles du compte). La commande ne sert qu'en secours : installations
+    /// réglées ailleurs, ou application dont le metadata manque.
+    pub(super) fn permissions(id: &str) -> Option<String> {
+        if crate::gaming::linux::flatpak_par_defaut()
+            && let Some(metadata) = natif::flatpak_metadata(id)
+        {
+            let donnees = std::env::var_os("XDG_DATA_HOME")
+                .map_or_else(|| crate::nettoyer::maison().join(".local/share"), PathBuf::from);
+            let surcharges: Vec<String> = [PathBuf::from("/var/lib/flatpak"), donnees.join("flatpak")]
+                .iter()
+                .flat_map(|i| [i.join("overrides/global"), i.join("overrides").join(id)])
+                .filter_map(|f| std::fs::read_to_string(f).ok())
+                .collect();
+            return Some(fusionner(&metadata, &surcharges));
+        }
+        sortie("flatpak", &["info", "--show-permissions", id])
+    }
+
+    /// Le metadata et ses surcharges réunis comme Flatpak le fait, en un texte que `lire_flatpak_statiques` lit.
+    /// Dans [Context], chaque clé est une liste (« sockets=x11;pulseaudio; ») : une surcharge ajoute ses valeurs, et
+    /// « !valeur » en retire une (« !home » retire aussi « home:ro »). Dans les politiques de bus, la dernière valeur
+    /// d'un nom l'emporte (« none » retire l'accès).
+    pub(super) fn fusionner(metadata: &str, surcharges: &[String]) -> String {
+        let nom = |v: &str| {
+            v.rsplit_once(':')
+                .filter(|(_, mode)| ["ro", "rw", "create"].contains(mode))
+                .map_or(v, |(n, _)| n)
+                .to_string()
+        };
+        let mut contexte: Vec<(String, Vec<String>)> = Vec::new();
+        let mut bus: Vec<(&str, String, String)> = Vec::new();
+        for texte in std::iter::once(metadata).chain(surcharges.iter().map(String::as_str)) {
+            for (cle, valeur) in natif::section_ini(texte, "Context") {
+                let i = contexte.iter().position(|(c, _)| c == cle).unwrap_or_else(|| {
+                    contexte.push((cle.to_string(), Vec::new()));
+                    contexte.len() - 1
+                });
+                let liste = &mut contexte[i].1;
+                for v in valeur.split(';').map(str::trim).filter(|v| !v.is_empty()) {
+                    if let Some(retire) = v.strip_prefix('!') {
+                        liste.retain(|x| nom(x) != nom(retire));
+                    } else if !liste.iter().any(|x| x == v) {
+                        liste.push(v.to_string());
+                    }
+                }
+            }
+            for groupe in ["Session Bus Policy", "System Bus Policy"] {
+                for (cle, valeur) in natif::section_ini(texte, groupe) {
+                    bus.retain(|(g, c, _)| *g != groupe || c != cle);
+                    bus.push((groupe, cle.to_string(), valeur.to_string()));
+                }
+            }
+        }
+        let mut texte = String::from("[Context]\n");
+        for (cle, valeurs) in contexte.iter().filter(|(_, v)| !v.is_empty()) {
+            let _ = writeln!(texte, "{cle}={};", valeurs.join(";"));
+        }
+        for groupe in ["Session Bus Policy", "System Bus Policy"] {
+            let _ = writeln!(texte, "\n[{groupe}]");
+            for (_, cle, valeur) in bus.iter().filter(|(g, _, _)| *g == groupe) {
+                let _ = writeln!(texte, "{cle}={valeur}");
+            }
+        }
+        texte
     }
 
     pub(super) fn lire(b: &mut Bilan) {
@@ -915,6 +987,63 @@ mod tests {
                        devices  camera   org.exemple.Visio   yes         0x00\n";
         assert_eq!(lire_flatpak_portails(alignee).len(), 1);
         assert_eq!(lire_flatpak_portails(""), Vec::<Acces>::new());
+    }
+
+    /// Les surcharges de `flatpak override` ajoutent et retirent des permissions au metadata, comme Flatpak.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn surcharges_de_flatpak_reunies() {
+        let metadata = "[Application]\nname=org.exemple.Visio\n\n[Context]\nsockets=x11;pulseaudio;\n\
+                        filesystems=home:ro;xdg-download;\n\n[Session Bus Policy]\norg.exemple.Carnet=talk\n";
+        let global = "[Context]\ndevices=all;\n".to_string();
+        let app = "[Context]\nsockets=!pulseaudio;\nfilesystems=!home;\n\n\
+                   [Session Bus Policy]\norg.exemple.Carnet=none\n\n\
+                   [System Bus Policy]\norg.freedesktop.GeoClue2=talk\n"
+            .to_string();
+        let t = linux::fusionner(metadata, &[global, app]);
+        assert_eq!(
+            t,
+            "[Context]\nsockets=x11;\nfilesystems=xdg-download;\ndevices=all;\n\n\
+             [Session Bus Policy]\norg.exemple.Carnet=none\n\n\
+             [System Bus Policy]\norg.freedesktop.GeoClue2=talk\n"
+        );
+        let p: Vec<Permission> = lire_flatpak_statiques("org.exemple.Visio", &t)
+            .iter()
+            .map(|a| a.permission)
+            .collect();
+        assert_eq!(p, [Permission::Camera, Permission::Micro, Permission::Position]);
+        // Sans surcharge, le metadata seul.
+        let seul = linux::fusionner(metadata, &[]);
+        assert!(
+            seul.contains("sockets=x11;pulseaudio;") && seul.contains("org.exemple.Carnet=talk"),
+            "{seul}"
+        );
+    }
+
+    /// Sur cet ordinateur, les permissions lues donnent les mêmes accès que `flatpak info --show-permissions`.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn permissions_comme_flatpak_info() {
+        let Some(apps) = crate::gaming::linux::applications_flatpak() else {
+            return;
+        };
+        for a in apps.iter().take(20) {
+            let Some(r) = crate::commande::lancer_en_anglais(
+                std::process::Command::new("flatpak").args(["info", "--show-permissions", a]),
+                20,
+            )
+            .filter(|r| r.code == Some(0)) else {
+                continue;
+            };
+            let Some(lu) = linux::permissions(a) else {
+                continue;
+            };
+            assert_eq!(
+                lire_flatpak_statiques(a, &lu),
+                lire_flatpak_statiques(a, &r.sortie),
+                "{a}"
+            );
+        }
     }
 
     #[test]
