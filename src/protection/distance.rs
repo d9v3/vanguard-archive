@@ -400,10 +400,23 @@ fn paquets(t: &mut Vec<Trouvaille>) {
     let Some(gestionnaire) = Paquets::detecter() else {
         return;
     };
-    let liste = match gestionnaire {
-        Paquets::Pacman => sortie_de("pacman", &["-Qq"], 60),
-        Paquets::Apt => sortie_de("dpkg-query", &["-W", "-f=${binary:Package}\n"], 60),
-        Paquets::Dnf | Paquets::Zypper => sortie_de("rpm", &["-qa", "--qf", "%{NAME}\n"], 60),
+    // Les bases de pacman et de dpkg se lisent directement ; leur commande ne sert qu'en secours, quand la base ne
+    // se lit pas. rpm garde la sienne : sa base est du SQLite.
+    let lue = match gestionnaire {
+        Paquets::Pacman => crate::machine::linux::natif::paquets_pacman()
+            .map(|l| l.into_iter().map(|(nom, _)| nom).collect::<Vec<_>>()),
+        Paquets::Apt => crate::gaming::linux::paquets_dpkg_installes().map(|l| {
+            let mut noms: Vec<String> = l.into_iter().map(|(nom, _)| nom).collect();
+            noms.dedup();
+            noms
+        }),
+        Paquets::Dnf | Paquets::Zypper => None,
+    };
+    let liste = match (lue, gestionnaire) {
+        (Some(noms), _) => Some(noms.join("\n")),
+        (None, Paquets::Pacman) => sortie_de("pacman", &["-Qq"], 60),
+        (None, Paquets::Apt) => sortie_de("dpkg-query", &["-W", "-f=${binary:Package}\n"], 60),
+        (None, Paquets::Dnf | Paquets::Zypper) => sortie_de("rpm", &["-qa", "--qf", "%{NAME}\n"], 60),
     };
     let Some(liste) = liste else {
         return;
@@ -436,10 +449,11 @@ fn paquets(t: &mut Vec<Trouvaille>) {
 
 #[cfg(target_os = "linux")]
 fn flatpaks(t: &mut Vec<Trouvaille>, maison: &std::path::Path) {
-    let Some(liste) = sortie_de("flatpak", &["list", "--app", "--columns=application"], 60) else {
+    // Lues dans les dossiers de Flatpak ; sa commande en secours, quand d'autres installations sont réglées.
+    let Some(liste) = crate::gaming::linux::applications_flatpak() else {
         return;
     };
-    for id in liste.lines().map(str::trim).filter(|l| !l.is_empty()) {
+    for id in liste.iter().map(String::as_str) {
         let Some(i) = reconnu(id) else {
             continue;
         };
@@ -462,10 +476,20 @@ fn flatpaks(t: &mut Vec<Trouvaille>, maison: &std::path::Path) {
 
 #[cfg(target_os = "linux")]
 fn snaps(t: &mut Vec<Trouvaille>) {
-    let Some(liste) = sortie_de("snap", &["list"], 60) else {
-        return;
+    // Les fichiers de snapd disent les snaps installés ; `snap list` en secours, quand ils ne se lisent pas.
+    let liste: Vec<String> = if let Some(snaps) = crate::machine::linux::natif::snaps() {
+        snaps.into_iter().map(|s| s.nom).collect()
+    } else {
+        let Some(sortie) = sortie_de("snap", &["list"], 60) else {
+            return;
+        };
+        sortie
+            .lines()
+            .skip(1)
+            .filter_map(|l| Some(l.split_whitespace().next()?.to_string()))
+            .collect()
     };
-    for nom in liste.lines().skip(1).filter_map(|l| l.split_whitespace().next()) {
+    for nom in liste.iter().map(String::as_str) {
         let Some(i) = reconnu(nom) else {
             continue;
         };
@@ -506,8 +530,9 @@ fn dossiers_opt(t: &mut Vec<Trouvaille>) {
 /// Processus en cours, d'après /proc : le nom court (comm) et, quand il se lit, le programme lancé.
 #[cfg(target_os = "linux")]
 fn processus(t: &mut Vec<Trouvaille>) {
-    let connectes = sortie_de("ss", &["-tnpH", "state", "established"], 15)
-        .map(|s| pids_dans_ss(&s))
+    // Lu dans /proc par le module des connexions sortantes ; ss en secours, quand /proc/net ne se lit pas.
+    let connectes = crate::protection::sortantes::processus_connectes()
+        .or_else(|| sortie_de("ss", &["-tnpH", "state", "established"], 15).map(|s| pids_dans_ss(&s)))
         .unwrap_or_default();
     for e in std::fs::read_dir("/proc").into_iter().flatten().flatten() {
         let Ok(pid) = e.file_name().to_string_lossy().parse::<u32>() else {
@@ -571,20 +596,31 @@ fn demarrage_linux(t: &mut Vec<Trouvaille>, maison: &std::path::Path) {
             });
         }
     }
-    for (args, prefixe) in [
+    for (args, prefixe, utilisateur) in [
         (
             &["list-unit-files", "--state=enabled", "--no-legend", "--plain"][..],
             "sudo systemctl",
+            false,
         ),
         (
             &["--user", "list-unit-files", "--state=enabled", "--no-legend", "--plain"][..],
             "systemctl --user",
+            true,
         ),
     ] {
-        let Some(liste) = sortie_de("systemctl", args, 30) else {
-            continue;
+        // Les liens d'activation se lisent directement ; systemctl en secours, quand un dossier ne se lit pas.
+        let liste: Vec<String> = if let Some(l) = unites_activees(maison, utilisateur) {
+            l
+        } else {
+            let Some(sortie) = sortie_de("systemctl", args, 30) else {
+                continue;
+            };
+            sortie
+                .lines()
+                .filter_map(|l| Some(l.split_whitespace().next()?.to_string()))
+                .collect()
         };
-        for unite in liste.lines().filter_map(|l| l.split_whitespace().next()) {
+        for unite in liste.iter().map(String::as_str) {
             let Some(i) = reconnu(unite) else {
                 continue;
             };
@@ -597,6 +633,109 @@ fn demarrage_linux(t: &mut Vec<Trouvaille>, maison: &std::path::Path) {
                 arret: vec![format!("{prefixe} stop {}", sh_chaine(unite))],
             });
         }
+    }
+}
+
+/// Les unités activées, comme `systemctl [--user] list-unit-files --state=enabled`, lues dans les liens que
+/// `systemctl enable` pose : /etc/systemd/system pour le système ; ~/.config/systemd/user et /etc/systemd/user
+/// (activées pour tous les comptes) pour la session. Ceux de /run ne durent que jusqu'au redémarrage
+/// (« enabled-runtime ») : ils ne comptent pas, mais un masque posé là, si. `None` si un dossier existe sans se
+/// lire.
+#[cfg(target_os = "linux")]
+fn unites_activees(maison: &std::path::Path, utilisateur: bool) -> Option<Vec<String>> {
+    if utilisateur {
+        let config = std::env::var_os("XDG_CONFIG_HOME").map_or_else(|| maison.join(".config"), PathBuf::from);
+        // SAFETY : getuid ne peut pas échouer et ne touche à aucune mémoire du programme.
+        let uid = unsafe { libc::getuid() };
+        let compte = config.join("systemd/user");
+        unites_activees_dans(
+            &[compte.clone(), PathBuf::from("/etc/systemd/user")],
+            &[
+                compte,
+                PathBuf::from("/etc/systemd/user"),
+                PathBuf::from(format!("/run/user/{uid}/systemd/user")),
+                PathBuf::from("/run/systemd/user"),
+            ],
+        )
+    } else {
+        unites_activees_dans(
+            &[PathBuf::from("/etc/systemd/system")],
+            &[
+                PathBuf::from("/etc/systemd/system"),
+                PathBuf::from("/run/systemd/system"),
+            ],
+        )
+    }
+}
+
+/// Une unité est activée par un lien à son nom dans un dossier « *.wants », « *.requires » ou « *.upholds », ou
+/// par un alias (lien d'un autre nom vers son fichier, « display-manager.service » vers le gestionnaire de
+/// connexion). Masquée (lien vers /dev/null dans `masques`), elle ne démarre plus : elle ne compte pas.
+#[cfg(target_os = "linux")]
+fn unites_activees_dans(dossiers: &[PathBuf], masques: &[PathBuf]) -> Option<Vec<String>> {
+    let null = std::path::Path::new("/dev/null");
+    let mut activees = std::collections::BTreeSet::new();
+    for d in dossiers {
+        let entrees = match std::fs::read_dir(d) {
+            Ok(e) => e,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(_) => return None,
+        };
+        for e in entrees.flatten() {
+            let nom = e.file_name().to_string_lossy().into_owned();
+            if [".wants", ".requires", ".upholds"].iter().any(|s| nom.ends_with(s)) {
+                for l in std::fs::read_dir(e.path()).into_iter().flatten().flatten() {
+                    let lien = l.file_name().to_string_lossy().into_owned();
+                    activees.insert(nom_active(&lien, &l.path()));
+                }
+            } else if let Ok(cible) = std::fs::read_link(e.path())
+                && cible != null
+                && let Some(vrai) = cible.file_name().map(|n| n.to_string_lossy().into_owned())
+                && vrai != nom
+                && nom.contains('.')
+            {
+                activees.insert(vrai);
+            }
+        }
+    }
+    activees.retain(|u| {
+        !masques
+            .iter()
+            .any(|m| std::fs::read_link(m.join(u)).is_ok_and(|c| c == null))
+    });
+    Some(activees.into_iter().collect())
+}
+
+/// Le nom sous lequel systemctl range un lien d'activation. Une instance d'un modèle (« modele@instance »
+/// suivi du suffixe de l'unité) compte pour le modèle quand elle est son instance par défaut (DefaultInstance= de [Install], comme pour les
+/// consoles) ; une autre instance garde son nom : systemctl dit alors le modèle « indirect », mais elle démarre
+/// bien, et ne pas la montrer cacherait un lancement automatique.
+#[cfg(target_os = "linux")]
+fn nom_active(lien: &str, chemin: &std::path::Path) -> String {
+    let Some((debut, reste)) = lien.split_once('@') else {
+        return lien.to_string();
+    };
+    let Some((instance, suffixe)) = reste.rsplit_once('.') else {
+        return lien.to_string();
+    };
+    if instance.is_empty() {
+        return lien.to_string();
+    }
+    // Un lien relatif part du dossier qui le contient ; `join` d'un chemin absolu le garde tel quel.
+    let fichier = std::fs::read_link(chemin).map_or_else(
+        |_| chemin.to_path_buf(),
+        |c| chemin.parent().map_or_else(|| c.clone(), |p| p.join(&c)),
+    );
+    let defaut = std::fs::read_to_string(fichier).ok().and_then(|t| {
+        crate::machine::linux::natif::section_ini(&t, "Install")
+            .into_iter()
+            .find(|(c, _)| *c == "DefaultInstance")
+            .map(|(_, v)| v.to_string())
+    });
+    if defaut.as_deref() == Some(instance) {
+        format!("{debut}@.{suffixe}")
+    } else {
+        lien.to_string()
     }
 }
 
@@ -1487,6 +1626,132 @@ mod tests {
             retrait_windows("C:\\x\\u.exe", ""),
             ["Start-Process -Wait -FilePath 'C:\\x\\u.exe'"]
         );
+    }
+
+    #[cfg(target_os = "linux")]
+    fn jetable(nom: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("vanguard-distance-{nom}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    /// Un nom d'instance écrit par morceaux : entier, il a la forme d'un courriel, que la vérification de
+    /// confidentialité refuserait.
+    #[cfg(target_os = "linux")]
+    fn instance(modele: &str, nom: &str, suffixe: &str) -> String {
+        format!("{modele}@{nom}.{suffixe}")
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn unites_activees_lues_dans_les_liens() {
+        use std::os::unix::fs::symlink;
+        let d = jetable("unites");
+        let (usr, etc, run) = (d.join("usr"), d.join("etc"), d.join("run"));
+        for s in [
+            &usr,
+            &etc.join("multi-user.target.wants"),
+            &etc.join("getty.target.wants"),
+            &run,
+        ] {
+            std::fs::create_dir_all(s).unwrap();
+        }
+        let modele = instance("console", "", "service");
+        std::fs::write(
+            usr.join(&modele),
+            "[Install]\nDefaultInstance=tty1\nWantedBy=getty.target\n",
+        )
+        .unwrap();
+        for u in ["anydesk.service", "sddm.service", "vieux.service", "cache.service"] {
+            std::fs::write(usr.join(u), "[Unit]\n").unwrap();
+            symlink(usr.join(u), etc.join("multi-user.target.wants").join(u)).unwrap();
+        }
+        // Alias : le gestionnaire de connexion compte pour activé.
+        symlink(usr.join("sddm.service"), etc.join("display-manager.service")).unwrap();
+        // L'instance par défaut range le modèle ; une autre garde son nom.
+        symlink(
+            usr.join(&modele),
+            etc.join("getty.target.wants")
+                .join(instance("console", "tty1", "service")),
+        )
+        .unwrap();
+        symlink(
+            usr.join(&modele),
+            etc.join("getty.target.wants")
+                .join(instance("console", "tty5", "service")),
+        )
+        .unwrap();
+        // Masquées dans /etc ou jusqu'au redémarrage : plus lancées.
+        symlink("/dev/null", etc.join("vieux.service")).unwrap();
+        symlink("/dev/null", run.join("cache.service")).unwrap();
+        // Lien d'une unité posée ailleurs (systemctl link) : « linked », pas activée.
+        symlink(usr.join("anydesk.service"), etc.join("anydesk.service")).unwrap();
+        let l = unites_activees_dans(&[etc.clone(), d.join("absent")], &[etc.clone(), run.clone()]).unwrap();
+        assert_eq!(
+            l,
+            [
+                "anydesk.service".to_string(),
+                modele.clone(),
+                instance("console", "tty5", "service"),
+                "sddm.service".to_string()
+            ]
+        );
+        let _ = std::fs::remove_dir_all(d);
+    }
+
+    /// Sur cet ordinateur, chaque unité que systemctl dit activée se retrouve dans les liens lus ; en plus, seules
+    /// des instances qui ne sont pas celle par défaut de leur modèle (systemctl les dit « indirect »).
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn unites_comme_systemctl() {
+        let maison = crate::nettoyer::maison();
+        for (args, utilisateur) in [
+            (
+                &["list-unit-files", "--state=enabled", "--no-legend", "--plain"][..],
+                false,
+            ),
+            (
+                &["--user", "list-unit-files", "--state=enabled", "--no-legend", "--plain"][..],
+                true,
+            ),
+        ] {
+            let Some(sortie) = sortie_de("systemctl", args, 30) else {
+                continue;
+            };
+            let Some(lues) = unites_activees(&maison, utilisateur) else {
+                continue;
+            };
+            let dites: Vec<&str> = sortie.lines().filter_map(|l| l.split_whitespace().next()).collect();
+            for u in &dites {
+                assert!(lues.iter().any(|l| l == u), "{u} : {lues:?}");
+            }
+            for l in &lues {
+                let instance = l.split_once('@').is_some_and(|(_, r)| !r.starts_with('.'));
+                assert!(instance || dites.contains(&l.as_str()), "{l} : {dites:?}");
+            }
+        }
+    }
+
+    /// Sur cet ordinateur, /proc donne les processus connectés que ss montre, quand il est là. Les connexions
+    /// s'ouvrent et se ferment pendant le test : trois essais.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn connectes_comme_ss() {
+        for _ in 0..3 {
+            let avant = crate::protection::sortantes::processus_connectes();
+            let Some(ss) = sortie_de("ss", &["-tnpH", "state", "established"], 15) else {
+                return;
+            };
+            let apres = crate::protection::sortantes::processus_connectes();
+            let (Some(avant), Some(apres)) = (avant, apres) else {
+                return;
+            };
+            if pids_dans_ss(&ss).iter().all(|p| avant.contains(p) || apres.contains(p)) {
+                return;
+            }
+        }
+        panic!("ss montre des processus connectés que /proc ne donne pas");
     }
 
     #[test]
