@@ -68,6 +68,17 @@ fn recentes() -> Vec<Maj> {
 /// Windows : les mises à jour de Windows (KB) les plus récentes.
 #[cfg(windows)]
 fn recentes() -> Vec<Maj> {
+    // WMI d'abord (la classe que lit Get-HotFix), PowerShell en secours.
+    if let Some(c) = crate::machine::windows::correctifs::installes() {
+        return c
+            .iter()
+            .take(8)
+            .map(|c| Maj {
+                date: c.date.format("%Y-%m-%d").to_string(),
+                quoi: affichable(format!("{} {}", c.numero, c.description).trim()),
+            })
+            .collect();
+    }
     crate::machine::windows::ps(
         "Get-HotFix | Where-Object { $_.InstalledOn } | Sort-Object InstalledOn -Descending | Select-Object -First 8 | \
          ForEach-Object { \"MAJ|$($_.InstalledOn.ToString('yyyy-MM-dd'))|$($_.HotFixID) $($_.Description)\" }; 'MAJ_FIN'",

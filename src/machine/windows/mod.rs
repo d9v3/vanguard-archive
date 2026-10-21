@@ -12,6 +12,7 @@ use crate::ui::{resume, tr, trf, trp};
 pub(crate) mod cartes;
 mod comptes;
 pub(crate) mod connexions;
+pub(crate) mod correctifs;
 mod durcissement;
 mod ecoute;
 pub(crate) mod evenements;
@@ -781,8 +782,13 @@ fn juger_uac(lua: Option<&str>, consentement: Option<&str>) -> Option<Constat> {
 }
 
 fn mises_a_jour() -> Constat {
-    let jours = ps("((Get-Date) - (Get-HotFix | Where-Object InstalledOn | Sort-Object InstalledOn -Descending | Select-Object -First 1).InstalledOn).Days")
-        .and_then(|j| j.parse::<i64>().ok());
+    // WMI d'abord (la classe que lit Get-HotFix), PowerShell en secours.
+    let jours = correctifs::installes()
+        .and_then(|c| c.first().map(|d| (chrono::Local::now().date_naive() - d.date).num_days()))
+        .or_else(|| {
+            ps("((Get-Date) - (Get-HotFix | Where-Object InstalledOn | Sort-Object InstalledOn -Descending | Select-Object -First 1).InstalledOn).Days")
+                .and_then(|j| j.parse::<i64>().ok())
+        });
     match jours {
         Some(j) if j > 45 => alerte(
             "Mises à jour",
