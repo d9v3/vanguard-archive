@@ -565,6 +565,74 @@ fn sans_internet_chaque_outil_le_dit() {
         "{}",
         s.erreurs
     );
+    // L'audit du réseau sans réseau local : en moins d'une minute, six domaines tous « non vérifié », aucune note,
+    // un JSON qui se relit ; à l'écran, le pourquoi.
+    let debut = Instant::now();
+    let s = vanguard("fr", &["audit-reseau", "--json"], "", 60);
+    assert_eq!(s.code, Some(0), "{}", s.erreurs);
+    assert!(debut.elapsed() < Duration::from_secs(60), "{:?}", debut.elapsed());
+    let audit: serde_json::Value = serde_json::from_str(&s.texte).expect("audit-reseau --json : JSON illisible");
+    assert!(audit["score"].is_null() && audit["reseau"].is_null(), "{audit}");
+    let domaines = audit["domaines"].as_array().expect("pas de domaines");
+    assert_eq!(domaines.len(), 6);
+    for d in domaines {
+        assert!(d["score"].is_null(), "{d}");
+        let constats = d["constats"].as_array().expect("pas de constats");
+        assert!(
+            !constats.is_empty() && constats.iter().all(|c| c["verifie"] == false),
+            "{d}"
+        );
+    }
+    let ecran = vanguard("fr", &["audit-reseau"], "", 60);
+    assert_eq!(ecran.code, Some(0), "{}", ecran.erreurs);
+    let texte = sans_couleurs(&ecran.texte);
+    assert!(
+        texte.contains("Pas de réseau local à auditer") && texte.contains("Note de l'audit : aucune"),
+        "{texte}"
+    );
+}
+
+/// L'audit du réseau : dans l'aide des deux langues, avec son alias et ses options ; au sous-menu « Réseau et
+/// Internet », juste après « Scanner le réseau », chaque ligne dans 76 colonnes. Rien n'est lancé.
+#[test]
+fn audit_du_reseau_au_menu_et_dans_l_aide() {
+    let aide = vanguard("en", &["--help"], "", 30);
+    assert!(
+        aide.texte.contains("audit-reseau") && aide.texte.contains("network-audit"),
+        "{}",
+        aide.texte
+    );
+    let commande = vanguard("en", &["network-audit", "--help"], "", 30);
+    assert_eq!(commande.code, Some(0), "{}", commande.erreurs);
+    assert!(
+        commande.texte.contains("Network audit by domain")
+            && commande.texte.contains("--invite")
+            && commande.texte.contains("guest network"),
+        "{}",
+        commande.texte
+    );
+    let fr = vanguard("fr", &["audit-reseau", "--help"], "", 30);
+    assert!(
+        fr.texte.contains("six notes") && fr.texte.contains("réseau invité"),
+        "{}",
+        fr.texte
+    );
+    // 5 : le groupe Réseau et Internet ; Entrée : revenir ; q : quitter.
+    let s = vanguard("fr", &[], "5\n\nq\n", 60);
+    assert_eq!(s.code, Some(0), "{}", s.erreurs);
+    let t = sans_couleurs(&s.texte);
+    let scanner = t.find("Scanner le réseau").expect("« Scanner le réseau » absent");
+    let audit = t.find("Audit du réseau").expect("« Audit du réseau » absent");
+    let appareil = t
+        .find("Scan approfondi d'un appareil")
+        .expect("« Scan approfondi » absent");
+    assert!(scanner < audit && audit < appareil, "{t}");
+    assert!(t.contains("six notes : box, Wi-Fi, DNS…"), "{t}");
+    let longues: Vec<&str> = t
+        .lines()
+        .filter(|l| !l.contains("Choix :") && l.chars().count() > 76)
+        .collect();
+    assert_eq!(longues, Vec::<&str>::new(), "lignes trop longues");
 }
 
 /// Les outils de la 0.61 et de la 0.62, en lecture seule ou refusés : ils s'ouvrent, disent ce qu'ils voient et ne
