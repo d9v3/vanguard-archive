@@ -996,7 +996,7 @@ fn plugin_d_exemple_et_labo() {
         "{}",
         s.texte
     );
-    let plugins = maison.join("donnees/vanguard/plugins");
+    let plugins = dossier_vanguard(&maison).join("plugins");
     let mut script = std::fs::read_to_string(plugins.join("exemple/exemple.sh")).unwrap();
     script.push_str("echo de plus\n");
     std::fs::write(plugins.join("exemple/exemple.sh"), script).unwrap();
