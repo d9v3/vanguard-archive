@@ -2,7 +2,7 @@
 //! Un disque qui lâche ou plein, c'est des données perdues ; seuls ces deux cas comptent dans la note.
 //! Batterie et chaleur sont de simples informations.
 
-use super::{Constat, alerte, ok};
+use super::{Constat, alerte, impossible, ok};
 use crate::risk::Niveau;
 use crate::{tr, trf};
 
@@ -119,6 +119,8 @@ struct Disque {
     usure: Option<u64>,
     /// Secteurs défectueux (SATA) ou erreurs de support (NVMe).
     erreurs: u64,
+    /// Son état SMART n'a pas pu être lu (attributs NVMe refusés, délai dépassé) : ni sain ni malade, non vérifié.
+    illisible: bool,
 }
 
 fn constats_disques(disques: &[Disque]) -> Vec<Constat> {
@@ -138,6 +140,11 @@ fn constats_disques(disques: &[Disque]) -> Vec<Constat> {
                 )
                 .manuel(tr!("Sauvegarder puis remplacer le disque", "Back up, then replace the disk"), &[]),
             );
+        } else if d.illisible {
+            constats.push(impossible(
+                CAT,
+                &trf!("état SMART du disque {}", "SMART status of the {} disk", d.modele),
+            ));
         } else if d.usure.is_some_and(|u| u >= 90) || d.erreurs > 0 {
             let detail = match (d.usure.filter(|u| *u >= 90), d.erreurs) {
                 (Some(u), 0) => trf!("usé à {u} %", "{u}% worn"),
@@ -240,7 +247,7 @@ mod systeme {
     use std::path::Path;
 
     use super::{Disque, Volume};
-    use crate::machine::linux::dbus::{Bus, Valeur};
+    use crate::machine::linux::dbus::{Bus, Valeur, service_absent};
 
     const SYSTEMES_DE_FICHIERS: &[&str] = &[
         "ext2", "ext3", "ext4", "btrfs", "xfs", "f2fs", "vfat", "exfat", "ntfs", "ntfs3", "zfs", "bcachefs", "jfs",
@@ -291,12 +298,23 @@ mod systeme {
 
     /// Disques internes lus par udisks2 sur le bus système, sans droits root : NVMe (attributs SMART complets) et
     /// SATA (verdict SMART). Tous les objets d'udisks2 arrivent en un appel (`GetManagedObjects`) ; seuls les
-    /// attributs NVMe demandent le leur. Bus ou udisks2 absent : aucun disque, comme avant sans `busctl`.
-    pub fn disques() -> Vec<Disque> {
+    /// attributs NVMe demandent le leur. Bus ou udisks2 absent : aucun disque, comme avant sans `busctl`. Une
+    /// lecture qui échoue, elle, est dite : `Err` pour la liste des disques, `illisible` pour les attributs d'un
+    /// disque.
+    pub fn disques() -> Result<Vec<Disque>, String> {
         let Ok(mut bus) = Bus::systeme() else {
-            return Vec::new();
+            return Ok(Vec::new());
         };
-        let objets = bus.objets(UDISKS, "/org/freedesktop/UDisks2").unwrap_or_default();
+        let objets = match bus.objets(UDISKS, "/org/freedesktop/UDisks2") {
+            Ok(objets) => objets,
+            Err(e) if service_absent(&e) => return Ok(Vec::new()),
+            Err(e) => {
+                return Err(crate::trf!(
+                    "état SMART des disques : {e}",
+                    "SMART status of the disks: {e}"
+                ));
+            }
+        };
         let mut disques = Vec::new();
         for (chemin, interfaces) in &objets {
             if !chemin.starts_with("/org/freedesktop/UDisks2/drives/") {
@@ -320,8 +338,9 @@ mod systeme {
                         "a{sv}",
                         vec![Valeur::Dictionnaire(Vec::new())],
                     )
-                    .ok()
-                    .and_then(|corps| corps.into_iter().next());
+                    .map(|corps| corps.into_iter().next());
+                let illisible = attributs.is_err();
+                let attributs = attributs.ok().flatten();
                 let nombre = |cle: &str| attributs.as_ref().and_then(|a| a.champ(cle)).and_then(Valeur::entier);
                 let reserve_epuisee =
                     matches!((nombre("avail_spare"), nombre("spare_thresh")), (Some(r), Some(s)) if r < s);
@@ -330,6 +349,7 @@ mod systeme {
                     defaillant: !avertissements.elements().is_empty() || reserve_epuisee,
                     usure: nombre("percent_used"),
                     erreurs: nombre("media_errors").unwrap_or(0),
+                    illisible,
                 });
                 continue;
             }
@@ -343,10 +363,11 @@ mod systeme {
                     erreurs: propriete(ata, "SmartNumBadSectors")
                         .and_then(Valeur::entier)
                         .unwrap_or(0),
+                    illisible: false,
                 });
             }
         }
-        disques
+        Ok(disques)
     }
 
     fn lire(chemin: &Path) -> Option<String> {
@@ -675,6 +696,7 @@ mod systeme {
                     defaillant: etat.eq_ignore_ascii_case("Unhealthy"),
                     usure: None,
                     erreurs: u64::from(etat.eq_ignore_ascii_case("Warning")),
+                    illisible: false,
                 })
             })
             .collect()
@@ -720,8 +742,14 @@ pub fn sante() -> Vec<Constat> {
         systeme::disques(lectures.as_deref()),
         systeme::batterie(lectures.as_deref()),
     );
+    // Seul Linux sait dire que la liste des disques n'a pas pu être lue.
+    #[cfg(not(target_os = "linux"))]
+    let disques: Result<_, String> = Ok(disques);
     let mut constats = constats_volumes(&volumes);
-    constats.extend(constats_disques(&disques));
+    match disques {
+        Ok(disques) => constats.extend(constats_disques(&disques)),
+        Err(raison) => constats.push(impossible(CAT, &raison)),
+    }
     constats.extend(batterie.map(constat_batterie));
     #[cfg(unix)]
     let temperatures = systeme::temperatures();
@@ -800,6 +828,7 @@ mod tests {
             defaillant,
             usure,
             erreurs,
+            illisible: false,
         };
         assert_eq!(constats_disques(&[d(false, Some(6), 0)])[0].probleme, None);
         assert_eq!(
@@ -811,6 +840,16 @@ mod tests {
             Some(Niveau::Moyen)
         );
         assert_eq!(constats_disques(&[d(false, None, 3)])[0].probleme, Some(Niveau::Moyen));
+        // SMART illisible : non vérifié, jamais « en bonne santé » ; un disque qui annonce lui-même sa panne le reste.
+        let illisible = |defaillant| Disque {
+            illisible: true,
+            ..d(defaillant, None, 0)
+        };
+        let c = constats_disques(&[illisible(false), d(false, Some(6), 0)]);
+        assert_eq!(c.len(), 2);
+        assert!(!c[0].verifie && c[0].message.contains("SSD"));
+        assert!(c[1].verifie && c[1].probleme.is_none());
+        assert_eq!(constats_disques(&[illisible(true)])[0].probleme, Some(Niveau::Eleve));
         assert_eq!(constat_batterie(72).probleme, Some(Niveau::Info));
         assert_eq!(
             constat_temperatures(&[("processeur", 43.0, 90.0)]).unwrap().probleme,
@@ -877,6 +916,7 @@ mod tests {
             }
         }
         let lus: Vec<_> = systeme::disques()
+            .expect("busctl lit udisks2 : le client D-Bus aussi")
             .into_iter()
             .map(|d| (Some(d.modele), d.usure, if d.usure.is_some() { d.erreurs } else { 0 }))
             .collect();

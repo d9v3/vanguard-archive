@@ -176,13 +176,29 @@ struct UniteDemarrage {
 /// (au plus 5, d'une demi-seconde au moins), comme `systemd-analyze critical-chain` : depuis `racine`, parmi les
 /// dépendances `After` démarrées avant la fin du démarrage (`fin`), on suit celle devenue active en dernier (toutes
 /// celles à égalité). `blame` mélangerait ce qui tourne après le démarrage (mise à jour de la base de locate, par
-/// exemple) avec ce qui le retarde vraiment. `lire` donne une unité chargée par son nom (`None` : pas chargée). Le
-/// nom d'une unité de l'utilisateur est le sien : rendu prêt à montrer.
+/// exemple) avec ce qui le retarde vraiment. `lire` donne une unité chargée par son nom (`Ok(None)` : pas chargée).
+/// Une lecture qui échoue (`Err`) rend la liste vide : écarter l'unité ferait suivre une autre branche, et la liste
+/// serait fausse. Le nom d'une unité de l'utilisateur est le sien : rendu prêt à montrer.
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 #[allow(clippy::cast_precision_loss)]
-fn chaine_critique(racine: &str, fin: u64, mut lire: impl FnMut(&str) -> Option<UniteDemarrage>) -> Vec<(String, f64)> {
+fn chaine_critique(
+    racine: &str,
+    fin: u64,
+    mut lire: impl FnMut(&str) -> Result<Option<UniteDemarrage>, String>,
+) -> Vec<(String, f64)> {
     let mut connues: HashMap<String, Option<UniteDemarrage>> = HashMap::new();
-    let mut unite = |nom: &str| connues.entry(nom.to_string()).or_insert_with(|| lire(nom)).clone();
+    let illisible = std::cell::Cell::new(false);
+    let mut unite = |nom: &str| {
+        if let Some(u) = connues.get(nom) {
+            return u.clone();
+        }
+        let u = lire(nom).unwrap_or_else(|_| {
+            illisible.set(true);
+            None
+        });
+        connues.insert(nom.to_string(), u.clone());
+        u
+    };
     // Une unité jamais démarrée (début nul) n'a pas de durée, comme pour systemd-analyze.
     let duree = |u: &UniteDemarrage| {
         let us = if u.debut == 0 {
@@ -209,6 +225,9 @@ fn chaine_critique(racine: &str, fin: u64, mut lire: impl FnMut(&str) -> Option<
             .filter_map(|d| unite(d).map(|t| (d.clone(), t)))
             .filter(|(_, t)| t.debut > 0 && t.active > 0 && t.active <= fin)
             .collect();
+        if illisible.get() {
+            return Vec::new();
+        }
         let Some(derniere) = demarrees.iter().map(|(_, t)| t.active).max() else {
             continue;
         };
@@ -218,6 +237,9 @@ fn chaine_critique(racine: &str, fin: u64, mut lire: impl FnMut(&str) -> Option<
                 a_suivre.push(d);
             }
         }
+    }
+    if illisible.get() {
+        return Vec::new();
     }
     let mut lents: Vec<(String, f64)> = lents
         .into_iter()
@@ -863,14 +885,18 @@ mod systeme {
         };
         chemins.insert(RACINE.to_string(), racine);
         chaine_critique(RACINE, fin, |nom| {
-            let p = bus.proprietes(dbus::SYSTEMD, chemins.get(nom)?, dbus::UNITE).ok()?;
+            // Absente de ListUnits : pas chargée, ce n'est pas une erreur.
+            let Some(chemin) = chemins.get(nom) else {
+                return Ok(None);
+            };
+            let p = bus.proprietes(dbus::SYSTEMD, chemin, dbus::UNITE)?;
             let instant = |cle: &str| p.champ(cle).and_then(Valeur::entier).unwrap_or(0);
-            Some(UniteDemarrage {
+            Ok(Some(UniteDemarrage {
                 apres: p.champ("After").map(Valeur::textes).unwrap_or_default(),
                 debut: instant("InactiveExitTimestampMonotonic"),
                 active: instant("ActiveEnterTimestampMonotonic"),
                 inactive: instant("InactiveEnterTimestampMonotonic"),
-            })
+            }))
         })
     }
 
@@ -1746,7 +1772,7 @@ mod tests {
         let mut lus = Vec::new();
         let lents = chaine_critique("default.target", 20 * s, |nom| {
             lus.push(nom.to_string());
-            graphe.get(nom).cloned()
+            Ok(graphe.get(nom).cloned())
         });
         assert_eq!(
             lents,
@@ -1765,13 +1791,26 @@ mod tests {
             inactive: 7 * s,
             ..unite(&[], 6 * s, 3 * s)
         };
-        let lents = chaine_critique("r", 10 * s, |nom| match nom {
-            "r" => Some(unite(&["e", "f"], 0, 5 * s)),
-            "e" => Some(relancee.clone()),
-            "f" => Some(unite(&[], s, 2 * s)),
-            _ => None,
+        let lents = chaine_critique("r", 10 * s, |nom| {
+            Ok(match nom {
+                "r" => Some(unite(&["e", "f"], 0, 5 * s)),
+                "e" => Some(relancee.clone()),
+                "f" => Some(unite(&[], s, 2 * s)),
+                _ => None,
+            })
         });
         assert_eq!(lents, [("e".to_string(), 1.0)]);
+        // La lecture de la dépendance devenue active en dernier échoue (délai, erreur du bus) : la chaîne ne passe pas
+        // par une autre branche, elle est vide. Même chose si l'échec vient plus bas dans la chaîne.
+        for en_echec in ["docker.service", "nm-wait-online.service"] {
+            let lents = chaine_critique("default.target", 20 * s, |nom| {
+                if nom == en_echec {
+                    return Err("le bus n'a pas répondu à temps".into());
+                }
+                Ok(graphe.get(nom).cloned())
+            });
+            assert!(lents.is_empty(), "{en_echec} : {lents:?}");
+        }
     }
 
     /// Sur cet ordinateur, quand `systemd-analyze` répond : la durée lue sur le bus est la sienne, ses étapes aussi,
@@ -1840,11 +1879,11 @@ mod tests {
         assert_eq!(p[0].nom, vu);
         let service = format!("{piege}.service");
         let lents = chaine_critique("default.target", 20_000_000, |nom| {
-            Some(if nom == "default.target" {
+            Ok(Some(if nom == "default.target" {
                 unite(&[&service], 0, 10_000_000)
             } else {
                 unite(&[], 1_000_000, 5_512_000)
-            })
+            }))
         });
         assert_eq!(lents[0].0, format!("{vu}.service"));
         assert_eq!(

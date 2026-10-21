@@ -26,6 +26,10 @@ const TAILLE_MAX: usize = 32 << 20;
 const TABLEAU_MAX: usize = 64 << 20;
 /// Tableaux, structures et variantes imbriqués : la spécification en permet 64 en tout.
 const PROFONDEUR_MAX: usize = 64;
+/// Valeurs décodées dans un message, au plus. La taille seule ne suffit pas : chaque valeur prend 32 octets en mémoire,
+/// et un « ay » de 32 Mio en ferait 1 Gio. Un million (32 Mio) laisse de la marge aux plus grosses réponses lues
+/// (GetManagedObjects d'udisks2 sur une machine à centaines de volumes : quelques centaines de milliers).
+const VALEURS_MAX: usize = 1 << 20;
 
 const DBUS: &str = "org.freedesktop.DBus";
 const PROPRIETES: &str = "org.freedesktop.DBus.Properties";
@@ -355,6 +359,8 @@ struct Lecteur<'a> {
     octets: &'a [u8],
     pos: usize,
     grand_boutiste: bool,
+    /// Valeurs déjà décodées (voir `VALEURS_MAX`).
+    valeurs: usize,
 }
 
 impl Lecteur<'_> {
@@ -366,9 +372,13 @@ impl Lecteur<'_> {
         Ok(morceau)
     }
 
+    /// Saute le remplissage, que la spécification veut nul.
     fn aligner(&mut self, n: usize) -> Result<(), String> {
         let reste = (n - self.pos % n) % n;
-        self.prendre(reste).map(|_| ())
+        if self.prendre(reste)?.iter().any(|&o| o != 0) {
+            return Err(mal_forme("remplissage non nul"));
+        }
+        Ok(())
     }
 
     fn fixe<const N: usize>(&mut self) -> Result<[u8; N], String> {
@@ -391,6 +401,10 @@ impl Lecteur<'_> {
         if self.prendre(1)? != [0] {
             return Err(mal_forme("chaîne sans nul final"));
         }
+        // Le nul est interdit dans une chaîne D-Bus, comme à l'encodage.
+        if t.contains(&0) {
+            return Err(mal_forme("caractère nul dans une chaîne"));
+        }
         String::from_utf8(t).map_err(|_| mal_forme("chaîne hors UTF-8"))
     }
 
@@ -405,6 +419,10 @@ impl Lecteur<'_> {
     fn lire(&mut self, sig: &[u8], profondeur: usize) -> Result<Valeur, String> {
         if profondeur > PROFONDEUR_MAX {
             return Err(mal_forme("valeur trop imbriquée"));
+        }
+        self.valeurs += 1;
+        if self.valeurs > VALEURS_MAX {
+            return Err(mal_forme("trop de valeurs"));
         }
         Ok(match sig[0] {
             b'y' => Valeur::Octet(self.prendre(1)?[0]),
@@ -577,8 +595,16 @@ impl Message {
         Ok(e.octets)
     }
 
-    /// Le message entier lu dans `octets` (ni plus ni moins).
+    /// Le message entier lu dans `octets` (ni plus ni moins), corps compris.
+    #[cfg(test)]
     fn decoder(octets: &[u8]) -> Result<Self, String> {
+        Self::decoder_si(octets, |_| true)
+    }
+
+    /// Comme `decoder`, mais le corps n'est décodé que si `voulu` le demande d'après l'en-tête ; sinon il reste vide.
+    /// Un message qui ne répond pas à l'appel en cours (un signal que n'importe quel compte peut envoyer) est ainsi
+    /// jeté sans que son corps soit lu.
+    fn decoder_si(octets: &[u8], voulu: impl FnOnce(&Message) -> bool) -> Result<Self, String> {
         let grand_boutiste = match octets.first() {
             Some(b'l') => false,
             Some(b'B') => true,
@@ -588,6 +614,7 @@ impl Message {
             octets,
             pos: 1,
             grand_boutiste,
+            valeurs: 0,
         };
         let [genre, drapeaux, version] = l.prendre(3)?.try_into().map_err(|_| mal_forme("en-tête"))?;
         if version != 1 {
@@ -630,12 +657,7 @@ impl Message {
         if l.pos.checked_add(longueur_corps) != Some(octets.len()) {
             return Err(mal_forme("longueur du corps"));
         }
-        for s in types(&m.signature)? {
-            m.corps.push(l.lire(s, 0)?);
-        }
-        if l.pos != octets.len() {
-            return Err(mal_forme("corps plus long que sa signature"));
-        }
+        let types_du_corps = types(&m.signature)?;
         let complet = match genre {
             APPEL => m.chemin.is_some() && m.membre.is_some(),
             RETOUR => m.reponse_a.is_some(),
@@ -645,6 +667,14 @@ impl Message {
         };
         if !complet {
             return Err(mal_forme("champ d'en-tête manquant"));
+        }
+        if voulu(&m) {
+            for s in types_du_corps {
+                m.corps.push(l.lire(s, 0)?);
+            }
+            if l.pos != octets.len() {
+                return Err(mal_forme("corps plus long que sa signature"));
+            }
         }
         Ok(m)
     }
@@ -682,6 +712,18 @@ fn erreur_io(e: &std::io::Error) -> String {
 pub(crate) struct Bus {
     prise: UnixStream,
     serie: u32,
+    /// Une lecture ou une écriture a échoué en route (délai dépassé au milieu d'un message, prise coupée) : le flux
+    /// est désynchronisé, l'appel suivant lirait du milieu d'un message. La connexion n'est plus utilisée.
+    casse: bool,
+}
+
+/// L'uid tel que l'authentification EXTERNAL l'écrit : ses chiffres décimaux en ASCII, puis en hexadécimal
+/// (1000 → « 31303030 »).
+fn uid_hexa(uid: u32) -> String {
+    uid.to_string().bytes().fold(String::new(), |mut h, b| {
+        let _ = write!(h, "{b:02x}");
+        h
+    })
 }
 
 impl Bus {
@@ -696,7 +738,11 @@ impl Bus {
     fn sur(prise: UnixStream) -> Result<Self, String> {
         prise.set_read_timeout(Some(DELAI)).map_err(|e| erreur_io(&e))?;
         prise.set_write_timeout(Some(DELAI)).map_err(|e| erreur_io(&e))?;
-        let mut bus = Bus { prise, serie: 0 };
+        let mut bus = Bus {
+            prise,
+            serie: 0,
+            casse: false,
+        };
         bus.authentifier()?;
         bus.echanger(Message::appel(
             DBUS,
@@ -710,7 +756,29 @@ impl Bus {
     }
 
     fn ecrire(&mut self, octets: &[u8]) -> Result<(), String> {
-        self.prise.write_all(octets).map_err(|e| erreur_io(&e))
+        self.verifier_entiere()?;
+        let r = self.prise.write_all(octets).map_err(|e| erreur_io(&e));
+        if r.is_err() {
+            self.condamner();
+        }
+        r
+    }
+
+    /// Ferme la prise : plus rien n'en est lu ni écrit (voir `casse`).
+    fn condamner(&mut self) {
+        self.casse = true;
+        let _ = self.prise.shutdown(std::net::Shutdown::Both);
+    }
+
+    fn verifier_entiere(&self) -> Result<(), String> {
+        if self.casse {
+            return Err(tr!(
+                "connexion au bus fermée après une erreur",
+                "bus connection closed after an error"
+            )
+            .to_string());
+        }
+        Ok(())
     }
 
     /// Une ligne de l'authentification, sans « \r\n ». Lue octet par octet : rien du flux binaire qui suit n'est pris.
@@ -741,11 +809,7 @@ impl Bus {
         if reponse.starts_with("REJECTED") {
             // SAFETY : geteuid ne prend rien et ne peut pas échouer.
             let uid = unsafe { libc::geteuid() };
-            let hexa = uid.to_string().bytes().fold(String::new(), |mut h, b| {
-                let _ = write!(h, "{b:02x}");
-                h
-            });
-            self.ecrire(format!("AUTH EXTERNAL {hexa}\r\n").as_bytes())?;
+            self.ecrire(format!("AUTH EXTERNAL {}\r\n", uid_hexa(uid)).as_bytes())?;
             reponse = self.ligne()?;
         }
         if !reponse.starts_with("OK ") {
@@ -758,18 +822,31 @@ impl Bus {
         self.ecrire(b"BEGIN\r\n")
     }
 
-    fn recevoir(&mut self, echeance: Instant) -> Result<Message, String> {
+    /// Le prochain message ; son corps n'est décodé que s'il répond à l'appel `attendu`.
+    fn recevoir(&mut self, echeance: Instant, attendu: u32) -> Result<Message, String> {
         let reste = echeance.saturating_duration_since(Instant::now());
         if reste.is_zero() {
             return Err(tr!("le bus n'a pas répondu à temps", "the bus did not answer in time").to_string());
         }
-        self.prise.set_read_timeout(Some(reste)).map_err(|e| erreur_io(&e))?;
+        let octets = self.lire_message(reste);
+        // Un message lu à moitié (ou une longueur refusée, dont la suite reste dans la prise) désynchronise le flux.
+        let octets = octets.inspect_err(|_| self.condamner())?;
+        // Lu en entier, un message mal formé ne désynchronise rien : la connexion reste bonne.
+        Message::decoder_si(&octets, |m| {
+            m.reponse_a == Some(attendu) && matches!(m.genre, RETOUR | ERREUR)
+        })
+    }
+
+    /// Les octets d'un message entier, d'après la longueur annoncée dans ses 16 premiers.
+    fn lire_message(&mut self, delai: Duration) -> Result<Vec<u8>, String> {
+        self.verifier_entiere()?;
+        self.prise.set_read_timeout(Some(delai)).map_err(|e| erreur_io(&e))?;
         let mut debut = [0; 16];
         self.prise.read_exact(&mut debut).map_err(|e| erreur_io(&e))?;
         let mut octets = debut.to_vec();
         octets.resize(longueur_totale(&debut)?.max(16), 0);
         self.prise.read_exact(&mut octets[16..]).map_err(|e| erreur_io(&e))?;
-        Message::decoder(&octets)
+        Ok(octets)
     }
 
     /// Envoie un appel et attend sa réponse ; les signaux et ce qui répond à autre chose sont passés.
@@ -780,7 +857,7 @@ impl Bus {
         self.ecrire(&octets)?;
         let echeance = Instant::now() + DELAI;
         loop {
-            let r = self.recevoir(echeance)?;
+            let r = self.recevoir(echeance, appel.serie)?;
             if r.reponse_a != Some(appel.serie) || !matches!(r.genre, RETOUR | ERREUR) {
                 continue;
             }
@@ -862,6 +939,14 @@ impl Bus {
         objets.sort_by(|a, b| a.0.cmp(&b.0));
         Ok(objets)
     }
+}
+
+/// L'erreur d'un appel dit que le service n'est pas sur ce bus (pas installé, ou arrêté sans activation) : rien à
+/// lire, ce qui n'est pas une lecture qui échoue.
+pub(crate) fn service_absent(erreur: &str) -> bool {
+    ["ServiceUnknown", "NameHasNoOwner"]
+        .iter()
+        .any(|nom| erreur.starts_with(&format!("org.freedesktop.DBus.Error.{nom} ")))
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -987,6 +1072,7 @@ mod tests {
             octets: &e.octets,
             pos: 0,
             grand_boutiste: false,
+            valeurs: 0,
         };
         for (s, v) in &valeurs {
             assert_eq!(&l.lire(s, 0).unwrap(), v);
@@ -1077,12 +1163,30 @@ mod tests {
         long[corps..corps + 4].copy_from_slice(&u32::MAX.to_le_bytes());
         assert!(Message::decoder(&long).is_err());
         // Un booléen qui vaut 2, une version 2, un numéro de série nul, un boutisme inconnu.
-        let mut lecteur = Lecteur {
-            octets: &[2, 0, 0, 0],
+        let lecteur = |octets: &'static [u8]| Lecteur {
+            octets,
             pos: 0,
             grand_boutiste: false,
+            valeurs: 0,
         };
-        assert!(lecteur.lire(b"b", 0).is_err());
+        assert!(lecteur(&[2, 0, 0, 0]).lire(b"b", 0).is_err());
+        // Un nul dans une chaîne, un chemin ou une signature (la spécification l'interdit, l'encodeur le refuse).
+        assert!(lecteur(&[3, 0, 0, 0, b'a', 0, b'b', 0]).lire(b"s", 0).is_err());
+        assert!(lecteur(&[3, 0, 0, 0, b'/', 0, b'b', 0]).lire(b"o", 0).is_err());
+        assert!(lecteur(&[2, b'y', 0, 0]).lire(b"g", 0).is_err());
+        assert_eq!(lecteur(&[3, 0, 0, 0, b'a', b'b', b'c', 0]).lire(b"s", 0), Ok(t("abc")));
+        // Un remplissage d'alignement non nul : avant un u64, avant le premier élément d'un tableau.
+        let mut l = lecteur(&[7, 1, 0, 0, 0, 0, 0, 0, 9, 0, 0, 0, 0, 0, 0, 0]);
+        assert_eq!(l.lire(b"y", 0), Ok(Valeur::Octet(7)));
+        assert!(l.lire(b"t", 0).is_err());
+        let mut l = lecteur(&[7, 0, 0, 0, 0, 0, 0, 0, 9, 0, 0, 0, 0, 0, 0, 0]);
+        assert_eq!(l.lire(b"y", 0), Ok(Valeur::Octet(7)));
+        assert_eq!(l.lire(b"t", 0), Ok(Valeur::U64(9)));
+        assert!(
+            lecteur(&[8, 0, 0, 0, 1, 0, 0, 0, 9, 0, 0, 0, 0, 0, 0, 0])
+                .lire(b"at", 0)
+                .is_err()
+        );
         for (i, v) in [(3, 2), (8, 0), (0, b'x')] {
             let mut faux = bon.clone();
             faux[i] = v;
@@ -1110,6 +1214,7 @@ mod tests {
         let mut bus = Bus {
             prise: client,
             serie: 0,
+            casse: false,
         };
         let r = bus.appeler(
             SYSTEMD,
@@ -1153,11 +1258,20 @@ mod tests {
     fn faux_bus(
         repondre: impl FnOnce(&mut UnixStream, Message) + Send + 'static,
     ) -> (UnixStream, std::thread::JoinHandle<Vec<u8>>) {
+        faux_bus_qui(b"DATA\r\n", repondre)
+    }
+
+    /// `faux_bus`, dont la première réponse à l'authentification est `premiere` (« DATA », ou « REJECTED » pour un bus
+    /// qui veut l'identité écrite).
+    fn faux_bus_qui(
+        premiere: &'static [u8],
+        repondre: impl FnOnce(&mut UnixStream, Message) + Send + 'static,
+    ) -> (UnixStream, std::thread::JoinHandle<Vec<u8>>) {
         let (client, mut serveur) = UnixStream::pair().unwrap();
         let fil = std::thread::spawn(move || {
             let mut auth = Vec::new();
             lire_ligne(&mut serveur, &mut auth);
-            serveur.write_all(b"DATA\r\n").unwrap();
+            serveur.write_all(premiere).unwrap();
             lire_ligne(&mut serveur, &mut auth);
             serveur.write_all(b"OK 0123456789abcdef0123456789abcdef\r\n").unwrap();
             lire_ligne(&mut serveur, &mut auth);
@@ -1237,6 +1351,36 @@ mod tests {
         assert_eq!(fil.join().unwrap(), b"\0AUTH EXTERNAL\r\nDATA\r\nBEGIN\r\n");
     }
 
+    /// Un bus qui refuse EXTERNAL sans identité (REJECTED) : le client la redonne écrite, l'uid décimal en
+    /// hexadécimal, puis continue.
+    #[test]
+    fn authentification_apres_un_refus() {
+        assert_eq!(uid_hexa(1000), "31303030");
+        assert_eq!(uid_hexa(0), "30");
+        assert_eq!(uid_hexa(u32::MAX), "34323934393637323935");
+        let (client, fil) = faux_bus_qui(b"REJECTED EXTERNAL DBUS_COOKIE_SHA1\r\n", |s, appel| {
+            s.write_all(&retour(&appel, "a(ssssssouso)", vec![Valeur::Tableau(vec![])]))
+                .unwrap();
+        });
+        let mut bus = Bus::sur(client).unwrap();
+        assert_eq!(unites_en_echec(&mut bus).unwrap(), Vec::<String>::new());
+        // SAFETY : geteuid ne prend rien et ne peut pas échouer.
+        let uid = unsafe { libc::geteuid() };
+        let attendu = format!("\0AUTH EXTERNAL\r\nAUTH EXTERNAL {}\r\nBEGIN\r\n", uid_hexa(uid));
+        assert_eq!(String::from_utf8(fil.join().unwrap()).unwrap(), attendu);
+        // Refusé deux fois : la connexion n'est pas ouverte.
+        let (client, mut serveur) = UnixStream::pair().unwrap();
+        let fil = std::thread::spawn(move || {
+            let mut auth = Vec::new();
+            for _ in 0..2 {
+                lire_ligne(&mut serveur, &mut auth);
+                serveur.write_all(b"REJECTED EXTERNAL\r\n").unwrap();
+            }
+        });
+        assert!(Bus::sur(client).is_err());
+        fil.join().unwrap();
+    }
+
     /// Une erreur du service arrive comme une erreur, avec son nom et son message ; une propriété arrive sans sa
     /// variante.
     #[test]
@@ -1263,6 +1407,13 @@ mod tests {
         );
         assert_eq!(r.unwrap_err(), "org.freedesktop.DBus.Error.UnknownInterface : pas là");
         fil.join().unwrap();
+        // Un service absent du bus n'est pas une lecture qui échoue ; un refus ou un autre nom, si.
+        assert!(service_absent(
+            "org.freedesktop.DBus.Error.ServiceUnknown : The name is not activatable"
+        ));
+        assert!(service_absent("org.freedesktop.DBus.Error.NameHasNoOwner : x"));
+        assert!(!service_absent("org.freedesktop.DBus.Error.AccessDenied : x"));
+        assert!(!service_absent("org.freedesktop.DBus.Error.ServiceUnknownX : x"));
 
         let (client, fil) = faux_bus(|s, appel| {
             s.write_all(&retour(
@@ -1290,9 +1441,136 @@ mod tests {
         let mut bus = Bus {
             prise: client,
             serie: 0,
+            casse: false,
         };
         let echeance = Instant::now() + Duration::from_millis(50);
-        assert!(bus.recevoir(echeance).is_err());
+        assert!(bus.recevoir(echeance, 1).is_err());
+    }
+
+    /// Un délai dépassé au milieu d'un message condamne la connexion : la suite du message, arrivée après, n'est
+    /// jamais prise pour le début d'un autre, et l'appel suivant échoue aussitôt, sans rien envoyer ni attendre.
+    #[test]
+    fn connexion_condamnee_apres_une_lecture_coupee() {
+        let (client, mut serveur) = UnixStream::pair().unwrap();
+        let mut bus = Bus {
+            prise: client,
+            serie: 0,
+            casse: false,
+        };
+        let appel = Message {
+            serie: 1,
+            ..Message::default()
+        };
+        let reponse = retour(&appel, "s", vec![t("x")]);
+        serveur.write_all(&reponse[..20]).unwrap();
+        assert!(bus.recevoir(Instant::now() + Duration::from_millis(50), 1).is_err());
+        // La suite du message et une réponse entière arrivent trop tard : la prise est déjà fermée de ce côté.
+        assert!(serveur.write_all(&reponse[20..]).is_err());
+        let debut = Instant::now();
+        let r = bus.proprietes(SYSTEMD, "/a", UNITE);
+        assert_eq!(
+            r.unwrap_err(),
+            tr!(
+                "connexion au bus fermée après une erreur",
+                "bus connection closed after an error"
+            )
+        );
+        assert!(debut.elapsed() < Duration::from_secs(1));
+        // Rien n'est parti après la coupure, et la prise est fermée de son côté.
+        assert_eq!(serveur.read(&mut [0; 1]).unwrap(), 0);
+        // Un message entier mais mal formé, lui, ne condamne rien : le flux reste aligné.
+        let (client, mut serveur) = UnixStream::pair().unwrap();
+        let mut bus = Bus {
+            prise: client,
+            serie: 0,
+            casse: false,
+        };
+        let mut faux = reponse.clone();
+        faux[3] = 2;
+        serveur.write_all(&faux).unwrap();
+        serveur.write_all(&reponse).unwrap();
+        let echeance = Instant::now() + Duration::from_secs(5);
+        assert!(bus.recevoir(echeance, 1).is_err());
+        assert_eq!(bus.recevoir(echeance, 1).unwrap().corps, vec![t("x")]);
+    }
+
+    /// Trop de valeurs dans un message (un « ay » de plusieurs millions d'octets en ferait autant de 32 octets en
+    /// mémoire) : refusé dès la limite. Juste en dessous, il passe.
+    #[test]
+    fn trop_de_valeurs() {
+        let octets = |n: usize| {
+            let mut o = u32::try_from(n).unwrap().to_le_bytes().to_vec();
+            o.resize(4 + n, 7);
+            o
+        };
+        let lire = |o: &[u8]| {
+            Lecteur {
+                octets: o,
+                pos: 0,
+                grand_boutiste: false,
+                valeurs: 0,
+            }
+            .lire(b"ay", 0)
+        };
+        // Le tableau compte pour une valeur.
+        assert_eq!(
+            lire(&octets(VALEURS_MAX - 1)).unwrap().elements().len(),
+            VALEURS_MAX - 1
+        );
+        assert_eq!(lire(&octets(VALEURS_MAX)), Err(mal_forme("trop de valeurs")));
+    }
+
+    /// Le corps d'un message qui ne répond pas à l'appel en cours n'est pas décodé : un signal envoyé par n'importe
+    /// quel compte, même au corps énorme ou faux, ne coûte rien et ne fait pas échouer l'appel.
+    #[test]
+    fn corps_des_autres_messages_ignore() {
+        let mut signal = Message {
+            genre: SIGNAL,
+            serie: 5,
+            chemin: Some("/a".into()),
+            interface: Some("a.b".into()),
+            membre: Some("C".into()),
+            signature: "u".into(),
+            corps: vec![Valeur::U32(2)],
+            ..Message::default()
+        }
+        .encoder()
+        .unwrap();
+        // Le même corps lu comme un booléen : 2 n'en est pas un.
+        let i = signal.windows(4).position(|f| f == [b'g', 0, 1, b'u']).unwrap();
+        signal[i + 3] = b'b';
+        assert!(Message::decoder(&signal).is_err());
+        let m = Message::decoder_si(&signal, |_| false).unwrap();
+        assert_eq!((m.genre, m.corps.len()), (SIGNAL, 0));
+        let (client, mut serveur) = UnixStream::pair().unwrap();
+        let mut bus = Bus {
+            prise: client,
+            serie: 0,
+            casse: false,
+        };
+        let appel = Message {
+            serie: 1,
+            ..Message::default()
+        };
+        serveur.write_all(&signal).unwrap();
+        // Une réponse à un autre appel, au corps faux elle aussi.
+        let mut autre = retour(
+            &Message {
+                serie: 9,
+                ..appel.clone()
+            },
+            "u",
+            vec![Valeur::U32(2)],
+        );
+        let i = autre.windows(4).position(|f| f == [b'g', 0, 1, b'u']).unwrap();
+        autre[i + 3] = b'b';
+        serveur.write_all(&autre).unwrap();
+        serveur.write_all(&retour(&appel, "s", vec![t("x")])).unwrap();
+        let echeance = Instant::now() + Duration::from_secs(5);
+        for _ in 0..2 {
+            assert_eq!(bus.recevoir(echeance, 1).unwrap().corps, Vec::new());
+        }
+        assert_eq!(bus.recevoir(echeance, 1).unwrap().corps, vec![t("x")]);
     }
 
     /// Le vrai bus système, quand il est là : les unités en échec sont celles que dit `systemctl --failed`.
