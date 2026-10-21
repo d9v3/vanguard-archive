@@ -150,8 +150,9 @@ pub(crate) fn entrante(pf: PareFeu, port: u16) -> Option<Regle> {
     match pf {
         PareFeu::Ufw => {
             let regle = sh_chaine(&format!("{port}/tcp"));
+            // En tête des règles : ajoutée à la fin, une autorisation déjà là pour ce port passerait avant elle.
             Some(Regle {
-                poser: vec![format!("sudo ufw deny {regle}")],
+                poser: vec![format!("sudo ufw prepend deny {regle}")],
                 retirer: vec![format!("sudo ufw delete deny {regle}")],
                 limite: None,
             })
@@ -175,6 +176,62 @@ pub(crate) fn entrante(pf: PareFeu, port: u16) -> Option<Regle> {
         }
         PareFeu::Pf => None,
     }
+}
+
+/// La destination d'une règle d'ufw (« 11434/tcp », « 8000:9000/tcp », « 80,443/tcp », « Anywhere ») vise-t-elle ce
+/// port TCP ?
+fn vise_le_port(destination: &str, port: u16) -> bool {
+    let d = destination.trim_end_matches(" (v6)").trim();
+    if d.eq_ignore_ascii_case("anywhere") {
+        return true;
+    }
+    let (ports, proto) = d.split_once('/').unwrap_or((d, "tcp"));
+    if !proto.eq_ignore_ascii_case("tcp") {
+        return false;
+    }
+    ports.split(',').any(|p| match p.split_once(':') {
+        Some((a, b)) => a.parse::<u16>().is_ok_and(|a| a <= port) && b.parse::<u16>().is_ok_and(|b| port <= b),
+        None => p.parse::<u16>() == Ok(port),
+    })
+}
+
+/// D'après `ufw status`, ce port TCP est-il refusé en entrée avant toute autorisation, en IPv4 comme en IPv6 ? Les
+/// règles se lisent dans l'ordre où ufw les applique ; la première qui vise le port décide.
+pub(crate) fn refuse_en_premier(status: &str, port: u16) -> bool {
+    let mut decision: [Option<bool>; 2] = [None, None];
+    let actions = ["ALLOW", "DENY", "REJECT", "LIMIT"];
+    for l in status.lines().skip_while(|l| !l.trim_start().starts_with("--")).skip(1) {
+        let mots: Vec<&str> = l.split_whitespace().collect();
+        let Some(i) = mots.iter().position(|m| actions.contains(m)) else {
+            continue;
+        };
+        // « ALLOW OUT » : une règle de sortie ne dit rien de l'entrée.
+        if mots.get(i + 1) == Some(&"OUT") {
+            continue;
+        }
+        let destination = mots[..i].join(" ");
+        if !vise_le_port(&destination, port) {
+            continue;
+        }
+        let famille = usize::from(l.contains("(v6)"));
+        decision[famille].get_or_insert(matches!(mots[i], "DENY" | "REJECT"));
+    }
+    decision[0] == Some(true) && decision[1] != Some(false)
+}
+
+/// ufw refuse-t-il ce port avant toute autorisation, sur cet ordinateur ? Lu par `ufw status` (root, ou sudo sans
+/// redemander le mot de passe, juste donné pour la règle). `None` : pas lisible.
+pub(crate) fn ufw_refuse_en_premier(port: u16) -> Option<bool> {
+    let mut c = if super::gestes::administrateur() {
+        std::process::Command::new("ufw")
+    } else {
+        let mut c = std::process::Command::new("sudo");
+        c.args(["-n", "ufw"]);
+        c
+    };
+    c.arg("status").env("LC_ALL", "C");
+    let r = crate::commande::lancer(&mut c, 15).filter(|r| r.code == Some(0))?;
+    Some(refuse_en_premier(&r.sortie, port))
 }
 
 /// Le pare-feu par lequel bloquer ici ; `Err` : pourquoi il n'y en a pas (« non disponible »).
@@ -278,10 +335,41 @@ mod tests {
         );
     }
 
+    /// Défaut de la relecture : un refus ajouté après une autorisation du même port ne ferme rien. Le port n'est dit
+    /// fermé que si ufw le refuse avant toute autorisation.
+    #[test]
+    fn refus_d_ufw_avant_toute_autorisation() {
+        let entete = "Status: active\n\nTo                         Action      From\n--                         ------      ----\n";
+        let refus_d_abord = format!(
+            "{entete}11434/tcp                  DENY IN     Anywhere\n11434/tcp                  ALLOW IN    192.168.1.0/24\n22/tcp                     ALLOW IN    Anywhere\n11434/tcp (v6)             DENY IN     Anywhere (v6)\n"
+        );
+        assert!(refuse_en_premier(&refus_d_abord, 11434));
+        let apres = format!(
+            "{entete}11000:12000/tcp            ALLOW IN    Anywhere\n11434/tcp                  DENY IN     Anywhere\n"
+        );
+        assert!(!refuse_en_premier(&apres, 11434));
+        let v6_ouvert = format!(
+            "{entete}11434/tcp                  DENY        Anywhere\n11434/tcp (v6)             ALLOW       Anywhere (v6)\n11434/tcp (v6)             DENY        Anywhere (v6)\n"
+        );
+        assert!(!refuse_en_premier(&v6_ouvert, 11434));
+        // Une autorisation de tout depuis une adresse passe aussi avant.
+        let depuis = format!(
+            "{entete}Anywhere                   ALLOW IN    192.168.1.20\n11434/tcp                  DENY IN     Anywhere\n"
+        );
+        assert!(!refuse_en_premier(&depuis, 11434));
+        // Les règles de sortie et des autres ports ne comptent pas ; aucune règle pour ce port : pas fermé.
+        let autres = format!(
+            "{entete}Anywhere                   ALLOW OUT   Anywhere on wg0\n80,443/tcp                 ALLOW IN    Anywhere\n11434/tcp                  DENY IN     Anywhere\n"
+        );
+        assert!(refuse_en_premier(&autres, 11434));
+        assert!(!refuse_en_premier(entete, 11434));
+        assert!(!refuse_en_premier("Status: inactive\n", 11434));
+    }
+
     #[test]
     fn regles_entrantes_et_leur_inverse() {
         let u = entrante(PareFeu::Ufw, 11434).unwrap();
-        assert_eq!(u.poser, ["sudo ufw deny '11434/tcp'"]);
+        assert_eq!(u.poser, ["sudo ufw prepend deny '11434/tcp'"]);
         assert_eq!(u.retirer, ["sudo ufw delete deny '11434/tcp'"]);
         let n = entrante(PareFeu::Nftables, 7860).unwrap();
         assert!(n.poser[0].contains("'add rule inet vanguard entree iifname != \"lo\" tcp dport @ports drop'"));

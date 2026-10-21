@@ -688,40 +688,47 @@ pub(crate) fn commande_suspecte(ligne: &str) -> Option<(&'static str, String)> {
     Some((m.raison, montrer_le_motif(programme, ligne, &m)))
 }
 
-/// Un outil offensif connu, reconnu au nom de son fichier : voleurs de mots de passe, outils d'attaque d'Active
-/// Directory, mineur de cryptomonnaie, copie de la mémoire de LSASS. `noms` : le nom du processus, celui de son
-/// fichier, et pour un interpréteur (Python, PowerShell…) chaque mot de sa ligne de commande, où est le script.
-fn outil_offensif(noms: &[&str], ligne: &str) -> Option<&'static str> {
+/// Le nom d'un fichier est-il celui de l'outil, en entier, avec ou sans extension (« xmrig », « xmrig.exe »,
+/// « laZagne.py ») ? Jamais un préfixe : « sharphound_parser.py » ou « Rubeus-Audit.ps1 » ne sont pas ces outils.
+fn est_l_outil(nom: &str, outil: &str) -> bool {
+    nom == outil || nom.strip_prefix(outil).is_some_and(|reste| reste.starts_with('.'))
+}
+
+/// Un outil offensif connu, reconnu au nom entier de son fichier : voleurs de mots de passe, outils d'attaque
+/// d'Active Directory, mineur de cryptomonnaie, copie de la mémoire de LSASS. `noms` : le nom du processus, celui de
+/// son fichier, et pour un interpréteur (Python, PowerShell…) chaque mot de sa ligne de commande, où est le script.
+/// Rend la raison et la place, dans `noms`, du nom reconnu.
+fn outil_offensif(noms: &[&str], ligne: &str) -> Option<(&'static str, usize)> {
     let bas = ligne.to_ascii_lowercase();
-    for nom in noms {
+    for (i, nom) in noms.iter().enumerate() {
         let n = nom_de_fichier(nom).to_ascii_lowercase();
-        let est = |outil: &str| n.starts_with(outil) || (outil == "mimikatz" && n.contains("invoke-mimikatz"));
-        let raison = if est("mimikatz") {
+        let est = |outils: &[&str]| outils.iter().any(|o| est_l_outil(&n, o));
+        let raison = if est(&["mimikatz", "invoke-mimikatz"]) {
             tr!(
                 "voleur de mots de passe connu (Mimikatz)",
                 "known password stealer (Mimikatz)"
             )
-        } else if est("rubeus") {
+        } else if est(&["rubeus"]) {
             tr!(
                 "outil connu d'attaque de Kerberos (Rubeus)",
                 "known Kerberos attack tool (Rubeus)"
             )
-        } else if est("sharphound") {
+        } else if est(&["sharphound"]) {
             tr!(
                 "outil connu de reconnaissance d'Active Directory (SharpHound)",
                 "known Active Directory reconnaissance tool (SharpHound)"
             )
-        } else if est("lazagne") {
+        } else if est(&["lazagne"]) {
             tr!(
                 "voleur de mots de passe connu (LaZagne)",
                 "known password stealer (LaZagne)"
             )
-        } else if est("xmrig") {
+        } else if est(&["xmrig"]) {
             tr!(
                 "mineur de cryptomonnaie connu (XMRig)",
                 "known cryptocurrency miner (XMRig)"
             )
-        } else if est("procdump") && bas.contains("lsass") {
+        } else if est(&["procdump", "procdump64", "procdump64a"]) && bas.contains("lsass") {
             tr!(
                 "copie la mémoire de LSASS, où sont les mots de passe (procdump)",
                 "copies the memory of LSASS, where the passwords are (procdump)"
@@ -729,7 +736,7 @@ fn outil_offensif(noms: &[&str], ligne: &str) -> Option<&'static str> {
         } else {
             continue;
         };
-        return Some(raison);
+        return Some((raison, i));
     }
     None
 }
@@ -804,23 +811,39 @@ fn temporaire_du_compte_macos(c: &str) -> bool {
 const INTERPRETEURS: [&str; 8] = ["python", "perl", "ruby", "powershell", "pwsh", "dotnet", "java", "node"];
 
 /// Un interpréteur, quelle que soit sa version (« python3.12 », « pwsh.exe »).
-fn interpreteur(fichier: &str) -> bool {
+pub(crate) fn interpreteur(fichier: &str) -> bool {
     let nom = fichier.to_ascii_lowercase();
     let nom = nom.strip_suffix(".exe").unwrap_or(&nom);
     INTERPRETEURS.contains(&nom.trim_end_matches(|c: char| c.is_ascii_digit() || c == '.'))
 }
 
-/// Un outil offensif connu en marche, la raison « outil offensif » de COM-PRG-001 : le seul signe de cette règle que
-/// le blocage automatique tient pour certain. Le nom du processus, celui de son fichier, le premier mot de sa ligne
-/// de commande et, pour un interpréteur, chaque mot de la suite, où est le script.
-pub(crate) fn offensif(p: &EnMarche) -> Option<&'static str> {
+/// D'où vient la reconnaissance d'un outil offensif.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum Origine {
+    /// Le programme lui-même : le nom du processus, son fichier, ou le premier mot de sa ligne de commande.
+    Programme,
+    /// Un argument d'un interpréteur (le mot tel qu'il est écrit) : le script lancé, peut-être, mais le processus
+    /// est l'interpréteur ; le blocage n'y voit qu'un doute.
+    Argument(String),
+}
+
+/// Un outil offensif connu en marche, la raison « outil offensif » de COM-PRG-001, et d'où vient la reconnaissance :
+/// seule celle du programme lui-même est certaine pour le blocage automatique. Le nom du processus, celui de son
+/// fichier, le premier mot de sa ligne de commande et, pour un interpréteur, chaque mot de la suite, où est le script.
+pub(crate) fn offensif(p: &EnMarche) -> Option<(&'static str, Origine)> {
     let ligne = p.ligne.as_deref().unwrap_or("");
     let premier = ligne.split_whitespace().next().unwrap_or("");
     let mut noms = vec![p.nom.as_str(), p.chemin.as_deref().unwrap_or(""), premier];
     if interpreteur(nom_de_fichier(premier)) || interpreteur(nom_de_fichier(&p.nom)) {
         noms.extend(ligne.split_whitespace().skip(1));
     }
-    outil_offensif(&noms, ligne)
+    let (raison, i) = outil_offensif(&noms, ligne)?;
+    let origine = if i < 3 {
+        Origine::Programme
+    } else {
+        Origine::Argument(noms[i].to_string())
+    };
+    Some((raison, origine))
 }
 
 /// Le signe le plus sûr qu'un programme en marche fait partie d'une attaque, ou `None`. Dans l'ordre : un outil
@@ -828,7 +851,7 @@ pub(crate) fn offensif(p: &EnMarche) -> Option<&'static str> {
 /// dossier où rien ne s'installe (moyen, élevé s'il a été effacé depuis).
 pub(crate) fn juger_programme(p: &EnMarche, systeme: Os) -> Option<Soupcon> {
     let ligne = p.ligne.as_deref().unwrap_or("");
-    if let Some(raison) = offensif(p) {
+    if let Some((raison, _)) = offensif(p) {
         return Some(Soupcon {
             niveau: Niveau::Eleve,
             raison,
@@ -1635,6 +1658,40 @@ mod tests {
             ))
             .is_none()
         );
+        // Le nom entier, jamais un préfixe : un script qui commence par le nom d'un outil n'est pas cet outil.
+        for ligne in [
+            "python3 sharphound_parser.py rapport.json",
+            "pwsh ./Rubeus-Audit.ps1",
+            "python3 xmrig_stats.py",
+            "python3 mimikatz2john.py",
+        ] {
+            let p = programme(
+                15,
+                "python3",
+                Some("/home/alice/.pyenv/versions/3.12.4/bin/python3.12"),
+                Some(ligne),
+            );
+            assert!(offensif(&p).is_none(), "{ligne}");
+        }
+        // Reconnu par un argument : le processus est l'interpréteur, l'origine le dit.
+        let p = programme(
+            16,
+            "python3",
+            Some("/home/alice/.pyenv/versions/3.12.4/bin/python3.12"),
+            Some("python3 /home/alice/outils/laZagne.py all"),
+        );
+        assert_eq!(
+            offensif(&p).map(|(_, o)| o),
+            Some(Origine::Argument("/home/alice/outils/laZagne.py".into()))
+        );
+        // Reconnu par le programme lui-même : certain.
+        let p = programme(
+            17,
+            "xmrig",
+            Some("/home/alice/.cache/xmrig"),
+            Some("./xmrig -o pool.example:3333"),
+        );
+        assert_eq!(offensif(&p).map(|(_, o)| o), Some(Origine::Programme));
         // Un mot dans les arguments d'un programme ordinaire ne suffit pas.
         assert!(
             j(&programme(

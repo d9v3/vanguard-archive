@@ -438,7 +438,7 @@ pub fn au_bilan() {
 /// surveillance, les menaces déjà dites non bloquées au passage d'avant, pour ne pas le répéter chaque heure ; elle
 /// y ajoute celle-ci si elle reste non bloquée.
 fn bloquer_tout_seul(m: &Menace, ctx: &Contexte, signalees: Option<(&BTreeSet<String>, &mut BTreeSet<String>)>) {
-    let resultat = gestes::preparer(m, ctx).and_then(|pret| {
+    let resultat = gestes::preparer(m, ctx, true).and_then(|pret| {
         if ctx.interactif {
             montrer(m, &pret);
         }
@@ -556,7 +556,7 @@ fn proposer(menaces: Vec<Menace>, ctx: &Contexte) {
     let mut restantes: Vec<Menace> = Vec::new();
     let mut refusees = 0;
     for m in menaces {
-        match gestes::preparer(&m, ctx) {
+        match gestes::preparer(&m, ctx, false) {
             Ok(_) => restantes.push(m),
             Err(r) => {
                 refusees += 1;
@@ -623,7 +623,7 @@ fn proposer(menaces: Vec<Menace>, ctx: &Contexte) {
             return;
         };
         let m = restantes.remove(i);
-        let pret = match gestes::preparer(&m, ctx) {
+        let pret = match gestes::preparer(&m, ctx, false) {
             Ok(p) => p,
             Err(raison) => {
                 trp!("  ✖ {raison}", "  ✖ {raison}");

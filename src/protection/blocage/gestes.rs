@@ -3,7 +3,6 @@
 //! (garde-fou, droits, pare-feu absent) est vérifié avant d'y toucher : rien n'est fait à moitié.
 
 use std::collections::HashSet;
-use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 
 use super::gardes;
@@ -19,8 +18,8 @@ pub(crate) struct Contexte {
     pub os: Os,
     /// Vanguard, ce qu'il a lancé, ce qui le fait tourner : jamais arrêtés.
     pub intouchables: HashSet<u32>,
-    /// Les adresses des sessions à distance en cours ; `None` : illisibles.
-    pub sessions: Option<Vec<IpAddr>>,
+    /// Ce que les connexions en cours interdisent de couper ; `None` : illisibles.
+    pub sessions: Option<gardes::Sessions>,
     pub pare_feu: Result<PareFeu, String>,
     /// Vanguard tourne en administrateur (root, jeton élevé) : rien à demander.
     pub admin: bool,
@@ -60,7 +59,8 @@ enum Faire {
     /// Les commandes seules : leur inverse est connu d'avance.
     Commandes {
         annulation: Annulation,
-        retenir: Option<String>,
+        /// ufw : le port fermé en entrée, retenu seulement si `ufw status` montre le refus avant toute autorisation.
+        retenir: Option<u16>,
     },
     /// Arrêter le processus (par les commandes, ou par Windows lui-même pour un processus de ce compte), puis mettre
     /// le fichier en quarantaine.
@@ -95,17 +95,19 @@ fn droits_manquants() -> String {
 }
 
 /// Prépare le geste d'une menace : `Err` dit pourquoi il ne se fera pas (garde-fou, droits, pare-feu non
-/// disponible) ; la menace reste alors une alerte.
-pub(crate) fn preparer(m: &Menace, ctx: &Contexte) -> Result<Pret, String> {
+/// disponible) ; la menace reste alors une alerte. `automatique` : le geste se fera sans clic (protection active),
+/// et les garde-fous sont alors plus stricts.
+pub(crate) fn preparer(m: &Menace, ctx: &Contexte, automatique: bool) -> Result<Pret, String> {
     let (pret, droits) = match &m.geste {
         Geste::Programme {
             pid,
             nom,
             chemin,
+            fichier,
             detection,
-        } => preparer_programme(*pid, nom, chemin.as_deref(), detection, ctx)?,
+        } => preparer_programme(*pid, nom, (chemin.as_deref(), fichier.as_deref()), detection, ctx)?,
         Geste::Adresse { ip } => {
-            if let Some(raison) = gardes::adresse_intouchable(*ip, ctx.sessions.as_deref()) {
+            if let Some(raison) = gardes::adresse_intouchable(*ip, ctx.sessions.as_ref(), automatique) {
                 return Err(raison.to_string());
             }
             let pf = ctx.pare_feu.clone()?;
@@ -180,14 +182,14 @@ pub(crate) fn preparer(m: &Menace, ctx: &Contexte) -> Result<Pret, String> {
             )];
             etapes.extend(regle.limite.map(str::to_string));
             // ufw : le port est retenu, comme pour la correction du bilan, qui le dit alors fermé.
-            let retenir = (pf == PareFeu::Ufw).then(|| format!("{port}/tcp"));
+            let retenir = (pf == PareFeu::Ufw).then_some(*port);
             let pret = Pret {
                 etapes,
                 commandes: regle.poser,
                 faire: Faire::Commandes {
                     annulation: Annulation::Commandes {
                         commandes: regle.retirer,
-                        port: retenir.clone(),
+                        port: retenir.map(|p| format!("{p}/tcp")),
                     },
                     retenir,
                 },
@@ -231,10 +233,21 @@ pub(crate) fn preparer(m: &Menace, ctx: &Contexte) -> Result<Pret, String> {
     Ok(pret)
 }
 
+/// Deux chemins de programme sont-ils le même ? Sans tenir compte de la casse sous Windows.
+fn meme_chemin(a: &str, b: &str) -> bool {
+    if cfg!(windows) {
+        a.eq_ignore_ascii_case(b)
+    } else {
+        a == b
+    }
+}
+
+/// `chemin` : le programme du processus à la détection ; `fichier` : ce qui serait mis en quarantaine (jamais un
+/// interpréteur, voir `menaces::a_isoler`).
 fn preparer_programme(
     pid: Option<u32>,
     nom: &str,
-    chemin: Option<&Path>,
+    (chemin, fichier): (Option<&Path>, Option<&Path>),
     detection: &str,
     ctx: &Contexte,
 ) -> Result<(Pret, bool), String> {
@@ -246,7 +259,7 @@ fn preparer_programme(
     // jamais.
     let arret = match (pid, chemin_du_processus_tel(pid)) {
         (Some(pid), Some(actuel)) => {
-            if chemin_texte.as_deref() != Some(actuel.as_str()) {
+            if !chemin_texte.as_deref().is_some_and(|c| meme_chemin(c, &actuel)) {
                 return Err(trf!(
                     "le PID {pid} désigne maintenant un autre programme : rien n'est arrêté",
                     "PID {pid} now points to another program: nothing is stopped"
@@ -258,9 +271,9 @@ fn preparer_programme(
             let ici = arret_sans_droits(pid);
             if !ici {
                 droits = !ctx.admin;
-                commandes.push(commande_d_arret(pid, ctx.admin));
+                commandes.push(commande_d_arret(pid, &actuel, !ctx.admin));
             } else if cfg!(not(windows)) {
-                commandes.push(commande_d_arret(pid, true));
+                commandes.push(commande_d_arret(pid, &actuel, false));
             }
             etapes.push(trf!(
                 "Arrêter « {nom} » (PID {pid}) tout de suite",
@@ -274,7 +287,9 @@ fn preparer_programme(
         }
         _ => None,
     };
-    let quarantaine = match chemin.filter(|c| c.is_file()) {
+    // Un interpréteur ou un shell n'est jamais mis en quarantaine, même si on le désignait ici : seul son script.
+    let fichier = fichier.filter(|f| !super::menaces::lance_du_code(&f.to_string_lossy()));
+    let quarantaine = match fichier.filter(|c| c.is_file()) {
         Some(c) => {
             let texte = c.to_string_lossy();
             if let Some(raison) = gardes::fichier_intouchable(&texte, ctx.os, ctx.mon_programme.as_deref()) {
@@ -306,8 +321,8 @@ fn preparer_programme(
     if arret.is_some() && quarantaine.is_none() {
         etapes.push(
             tr!(
-                "Son fichier n'est plus sur le disque : rien à mettre en quarantaine, et un arrêt ne se défait pas",
-                "Its file is no longer on the disk: nothing to quarantine, and a stop cannot be undone"
+                "Rien à mettre en quarantaine (fichier effacé, ou interpréteur, qui ne l'est jamais) : un arrêt ne se défait pas",
+                "Nothing to quarantine (file deleted, or an interpreter, which never is): a stop cannot be undone"
             )
             .to_string(),
         );
@@ -322,15 +337,34 @@ fn preparer_programme(
     ))
 }
 
-/// La commande qui arrête un processus : kill (sudo pour celui d'un autre compte) sous Linux et macOS, Stop-Process
-/// dans la fenêtre administrateur sous Windows.
-fn commande_d_arret(pid: u32, sans_sudo: bool) -> String {
+/// Ce que le shell de l'arrêt lit du processus « $1 », à comparer au programme attendu « $2 ».
+#[cfg(not(target_os = "macos"))]
+const LIRE_PROGRAMME: &str = r#"e=$(readlink "/proc/$1/exe")"#;
+#[cfg(target_os = "macos")]
+const LIRE_PROGRAMME: &str = r#"e=$(ps -o comm= -p "$1")"#;
+
+/// La commande qui arrête un processus, l'identité vérifiée DANS la commande, au moment même de l'arrêt : entre le
+/// contrôle et l'arrêt, la demande de mot de passe ou de la fenêtre administrateur peut durer, et le numéro passer à
+/// un autre programme (un service, csrss). Linux et macOS : kill seulement si le programme du numéro est toujours
+/// celui attendu (« (deleted) » compris : effacé depuis) ; Windows : Stop-Process seulement si son chemin l'est.
+fn commande_d_arret(pid: u32, attendu: &str, sudo: bool) -> String {
     if cfg!(windows) {
-        format!("Stop-Process -Id {pid} -Force")
-    } else if sans_sudo {
-        format!("kill -KILL {pid}")
+        let attendu = crate::commande::ps_texte(attendu);
+        trf!(
+            "$p = Get-Process -Id {pid} -ErrorAction SilentlyContinue; if ($p -and $p.Path -eq '{attendu}') {{ Stop-Process -Id {pid} -Force }} else {{ throw 'PID {pid} réaffecté à un autre programme : rien n''est arrêté' }}",
+            "$p = Get-Process -Id {pid} -ErrorAction SilentlyContinue; if ($p -and $p.Path -eq '{attendu}') {{ Stop-Process -Id {pid} -Force }} else {{ throw 'PID {pid} reassigned to another program: nothing is stopped' }}"
+        )
     } else {
-        format!("sudo kill -KILL {pid}")
+        let attendu = crate::commande::sh_chaine(attendu);
+        if sudo {
+            format!(
+                "sudo sh -c '{LIRE_PROGRAMME}; {{ [ \"$e\" = \"$2\" ] || [ \"$e\" = \"$2 (deleted)\" ]; }} && kill -KILL \"$1\"' sh {pid} {attendu}"
+            )
+        } else {
+            format!(
+                "sh -c '{LIRE_PROGRAMME}; {{ [ \"$e\" = \"$2\" ] || [ \"$e\" = \"$2 (deleted)\" ]; }} && kill -KILL \"$1\"' sh {pid} {attendu}"
+            )
+        }
     }
 }
 
@@ -404,7 +438,7 @@ pub(crate) fn chemin_du_processus(pid: u32) -> Option<String> {
 }
 
 /// Vanguard tourne-t-il en administrateur ?
-fn administrateur() -> bool {
+pub(super) fn administrateur() -> bool {
     #[cfg(windows)]
     {
         crate::machine::windows::processus::eleve()
@@ -470,12 +504,21 @@ pub(crate) fn faire(m: &Menace, pret: Pret, automatique: bool) -> Result<String,
     match pret.faire {
         Faire::Commandes { annulation, retenir } => {
             let (reussi, lancees) = crate::machine::appliquer_sans_noter(&pret.commandes);
-            if reussi && let Some(port) = &retenir {
-                crate::machine::retenir_port(port);
+            let mut fait = m.quoi.clone();
+            if reussi && let Some(port) = retenir {
+                // Le bilan dira le port fermé seulement si ufw le refuse vraiment avant toute autorisation.
+                if pare_feu::ufw_refuse_en_premier(port) == Some(true) {
+                    crate::machine::retenir_port(&format!("{port}/tcp"));
+                } else {
+                    fait += tr!(
+                        " (règle posée, mais pas vue avant les autorisations d'ufw : le port n'est pas compté comme fermé)",
+                        " (rule added, but not seen before ufw's allow rules: the port is not counted as closed)"
+                    );
+                }
             }
             changements::noter_blocage(lancees, reussi, note(Some(annulation)));
             if reussi {
-                Ok(m.quoi.clone())
+                Ok(fait)
             } else {
                 Err(tr!(
                     "la commande a échoué (voir le message ci-dessus) : rien n'est bloqué",
@@ -488,7 +531,7 @@ pub(crate) fn faire(m: &Menace, pret: Pret, automatique: bool) -> Result<String,
             let mut lancees = Vec::new();
             if let Some(a) = &arret {
                 // Relu juste avant : entre la question et la réponse, le processus a pu finir et son numéro être repris.
-                if chemin_du_processus(a.pid).as_deref() == Some(a.chemin.as_str()) {
+                if chemin_du_processus(a.pid).is_some_and(|c| meme_chemin(&c, &a.chemin)) {
                     let arrete = arreter(a, &pret.commandes, &mut lancees);
                     if !arrete {
                         changements::noter_blocage(lancees, false, note(None));
@@ -573,10 +616,11 @@ pub(crate) fn faire(m: &Menace, pret: Pret, automatique: bool) -> Result<String,
 
 /// Arrête le processus : par Windows lui-même pour un processus de ce compte, sinon par sa commande.
 fn arreter(a: &Arret, commandes: &[String], lancees: &mut Vec<String>) -> bool {
+    // Sous Windows, la poignée qui arrête est celle qui a lu le chemin : le numéro ne peut pas changer entre les deux.
     #[cfg(windows)]
     if a.ici {
         lancees.push(format!("TerminateProcess {}", a.pid));
-        return crate::machine::windows::processus::terminer(a.pid);
+        return crate::machine::windows::processus::terminer_si(a.pid, &a.chemin);
     }
     let _ = a;
     let (reussi, notes) = crate::machine::appliquer_sans_noter(commandes);
@@ -587,7 +631,7 @@ fn arreter(a: &Arret, commandes: &[String], lancees: &mut Vec<String>) -> bool {
 /// Attend que le processus arrêté soit bien fini (5 secondes au plus) : son fichier se libère pour la quarantaine.
 fn attendre_la_fin(a: &Arret) {
     for _ in 0..50 {
-        if chemin_du_processus(a.pid).as_deref() != Some(a.chemin.as_str()) {
+        if !chemin_du_processus(a.pid).is_some_and(|c| meme_chemin(&c, &a.chemin)) {
             return;
         }
         std::thread::sleep(std::time::Duration::from_millis(100));
@@ -853,18 +897,38 @@ mod tests {
         );
         assert_eq!(proprietaire_status("Name:\tx\n"), None);
         if cfg!(windows) {
-            assert_eq!(commande_d_arret(4242, false), "Stop-Process -Id 4242 -Force");
+            let c = commande_d_arret(4242, r"C:\Users\alice\AppData\Local\Temp\l'outil.exe", true);
+            assert!(c.starts_with("$p = Get-Process -Id 4242 -ErrorAction SilentlyContinue; if ($p -and $p.Path -eq 'C:\\Users\\alice\\AppData\\Local\\Temp\\l''outil.exe') { Stop-Process -Id 4242 -Force } else { throw"), "{c}");
         } else {
-            assert_eq!(commande_d_arret(4242, true), "kill -KILL 4242");
-            assert_eq!(commande_d_arret(4242, false), "sudo kill -KILL 4242");
+            let c = commande_d_arret(4242, "/home/alice/.cache/x m'rig", true);
+            assert!(c.starts_with("sudo sh -c '"), "{c}");
+            assert!(
+                c.ends_with(" && kill -KILL \"$1\"' sh 4242 '/home/alice/.cache/x m'\\''rig'"),
+                "{c}"
+            );
+            assert!(!commande_d_arret(4242, "/x", false).starts_with("sudo"));
         }
+    }
+
+    /// Défaut de la relecture : le numéro peut passer à un autre programme pendant la demande de mot de passe. La
+    /// commande d'arrêt vérifie elle-même le programme du numéro au moment de l'arrêt : avec un autre programme
+    /// attendu, rien n'est arrêté (essayé sur ce processus de test, qui survit).
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn arret_refuse_si_le_numero_a_change() {
+        let c = commande_d_arret(std::process::id(), "/autre/programme", false);
+        let r = std::process::Command::new("bash").arg("-c").arg(&c).status().unwrap();
+        assert!(!r.success(), "{c}");
     }
 
     fn contexte(interactif: bool, admin: bool) -> Contexte {
         Contexte {
             os: Os::Linux,
             intouchables: HashSet::new(),
-            sessions: Some(vec!["198.51.100.20".parse().unwrap()]),
+            sessions: Some(gardes::Sessions {
+                sessions: vec!["198.51.100.20".parse().unwrap()],
+                autres_comptes: vec!["203.0.113.9".parse().unwrap()],
+            }),
             pare_feu: Ok(PareFeu::Ufw),
             admin,
             interactif,
@@ -892,9 +956,9 @@ mod tests {
             })
         };
         // Une session SSH en cours avec cette adresse : jamais coupée.
-        assert!(preparer(&adresse("198.51.100.20"), &contexte(true, false)).is_err());
+        assert!(preparer(&adresse("198.51.100.20"), &contexte(true, false), false).is_err());
         // Interactif : la règle se prépare, avec son inverse exact.
-        let p = preparer(&adresse("203.0.113.7"), &contexte(true, false)).unwrap();
+        let p = preparer(&adresse("203.0.113.7"), &contexte(true, false), false).unwrap();
         assert_eq!(p.commandes[0], "sudo ufw prepend deny out to '203.0.113.7'");
         assert!(matches!(
             &p.faire,
@@ -902,37 +966,42 @@ mod tests {
                 if commandes == &["sudo ufw delete deny out to '203.0.113.7'".to_string()]
         ));
         // Surveillance (personne pour répondre) sans droits : rien.
-        let refus = preparer(&adresse("203.0.113.7"), &contexte(false, false)).err();
+        let refus = preparer(&adresse("203.0.113.7"), &contexte(false, false), false).err();
         assert!(refus.is_some_and(|r| r.contains("droits") || r.contains("rights")));
+        // Un autre compte a une connexion avec cette adresse : d'un clic oui, jamais tout seul.
+        assert!(preparer(&adresse("203.0.113.9"), &contexte(true, true), false).is_ok());
+        assert!(preparer(&adresse("203.0.113.9"), &contexte(true, true), true).is_err());
         // En administrateur, la surveillance peut le faire.
-        assert!(preparer(&adresse("203.0.113.7"), &contexte(false, true)).is_ok());
+        assert!(preparer(&adresse("203.0.113.7"), &contexte(false, true), false).is_ok());
         // Pas de pare-feu : non disponible.
         let mut sans = contexte(true, true);
         sans.pare_feu = Err("non disponible".into());
-        assert!(preparer(&adresse("203.0.113.7"), &sans).is_err());
+        assert!(preparer(&adresse("203.0.113.7"), &sans, false).is_err());
         // Jamais fermer SSH en entrée.
         let ssh = menace(Geste::ServeurIa {
             port: 22,
             nom: "x".into(),
         });
-        assert!(preparer(&ssh, &contexte(true, true)).is_err());
+        assert!(preparer(&ssh, &contexte(true, true), false).is_err());
         let ollama = preparer(
             &menace(Geste::ServeurIa {
                 port: 11434,
                 nom: "Ollama".into(),
             }),
             &contexte(true, false),
+            false,
         )
         .unwrap();
-        assert_eq!(ollama.commandes, ["sudo ufw deny '11434/tcp'"]);
+        assert_eq!(ollama.commandes, ["sudo ufw prepend deny '11434/tcp'"]);
         // Un programme dont le processus est fini et le fichier parti : rien à bloquer.
         let parti = menace(Geste::Programme {
             pid: None,
             nom: "x".into(),
             chemin: Some(PathBuf::from("/home/alice/inexistant-vanguard-test")),
+            fichier: Some(PathBuf::from("/home/alice/inexistant-vanguard-test")),
             detection: "x".into(),
         });
-        assert!(preparer(&parti, &contexte(true, true)).is_err());
+        assert!(preparer(&parti, &contexte(true, true), false).is_err());
         // Vanguard lui-même n'est jamais mis en quarantaine.
         let moi = std::env::current_exe().unwrap();
         let mut ctx = contexte(true, true);
@@ -941,9 +1010,26 @@ mod tests {
         let vanguard = menace(Geste::Programme {
             pid: None,
             nom: "vanguard".into(),
-            chemin: Some(moi),
+            chemin: Some(moi.clone()),
+            fichier: Some(moi),
             detection: "x".into(),
         });
-        assert!(preparer(&vanguard, &ctx).is_err());
+        assert!(preparer(&vanguard, &ctx, false).is_err());
+        // Un interpréteur désigné comme fichier à isoler ne l'est jamais : sans processus en marche, rien à faire.
+        let dossier = std::env::temp_dir().join(format!("vanguard-blocage-python-{}", std::process::id()));
+        std::fs::create_dir_all(&dossier).unwrap();
+        let python = dossier.join("python3.12");
+        std::fs::write(&python, b"x").unwrap();
+        let interpreteur = menace(Geste::Programme {
+            pid: None,
+            nom: "python3".into(),
+            chemin: Some(python.clone()),
+            fichier: Some(python.clone()),
+            detection: "x".into(),
+        });
+        let mut ctx = contexte(true, true);
+        ctx.os = Os::actuel();
+        assert!(preparer(&interpreteur, &ctx, false).is_err());
+        let _ = std::fs::remove_dir_all(&dossier);
     }
 }

@@ -140,6 +140,28 @@ fn tampon_du_jeton(rendue: u32) -> (Vec<u64>, u32) {
     )
 }
 
+/// Arrête un processus seulement s'il fait encore tourner le programme `attendu` (casse ignorée) : le chemin est lu
+/// par la poignée même qui arrête, le numéro ne peut pas passer à un autre programme entre les deux. `false` : refusé,
+/// déjà fini, ou un autre programme.
+pub(crate) fn terminer_si(processus: u32, attendu: &str) -> bool {
+    const ARRET_ET_LECTURE: u32 = 0x0001 | 0x1000;
+    let mut tampon = vec![0u16; 32_768];
+    let mut taille = u32::try_from(tampon.len()).unwrap_or(0);
+    // SAFETY : la poignée vient d'OpenProcess (nulle : refus, vérifié) et n'est refermée qu'une fois.
+    // QueryFullProcessImageNameW écrit au plus `taille` caractères dans `tampon`, puis le nombre écrit dans `taille`.
+    unsafe {
+        let poignee = OpenProcess(ARRET_ET_LECTURE, 0, processus);
+        if poignee.is_null() {
+            return false;
+        }
+        let lu = QueryFullProcessImageNameW(poignee, 0, tampon.as_mut_ptr(), &raw mut taille) != 0;
+        let chemin = String::from_utf16_lossy(&tampon[..usize::try_from(taille).unwrap_or(0).min(tampon.len())]);
+        let arrete = lu && chemin.eq_ignore_ascii_case(attendu) && TerminateProcess(poignee, 1) != 0;
+        CloseHandle(poignee);
+        arrete
+    }
+}
+
 /// Ce compte a-t-il le droit d'arrêter ce processus ? La poignée d'arrêt est demandée puis refermée aussitôt, sans
 /// rien arrêter : le blocage le sait avant de commencer, pour ne rien faire à moitié.
 pub(crate) fn peut_terminer(processus: u32) -> bool {
