@@ -400,6 +400,32 @@ enum Ufw {
     Protege,
 }
 
+/// La zone par défaut de firewalld (`firewall-cmd --get-default-zone`), lue dans sa configuration : celle de
+/// l'administrateur, puis celle du paquet (firewalld 2 y met ses valeurs d'usine). `--set-default-zone` l'écrit
+/// aussitôt, la zone en service est donc celle-là. `None` sans fichier ni clé lisibles : firewall-cmd, qui
+/// demande au service, prend alors le relais.
+#[cfg(target_os = "linux")]
+fn zone_firewalld(racine: &std::path::Path) -> Option<String> {
+    ["etc/firewalld/firewalld.conf", "usr/lib/firewalld/firewalld.conf"]
+        .iter()
+        .filter_map(|f| std::fs::read_to_string(racine.join(f)).ok())
+        .find_map(|t| {
+            t.lines()
+                .find_map(|l| l.trim().strip_prefix("DefaultZone=").map(str::trim))
+                .filter(|z| !z.is_empty())
+                .map(str::to_string)
+        })
+}
+
+/// L'unité est-elle masquée par l'administrateur (`systemctl is-enabled` dit « masked ») : son nom dans
+/// /etc/systemd/system est un lien vers /dev/null. Un masque posé pour ce démarrage seulement, dans /run, se dit
+/// « masked-runtime » : il passe au prochain démarrage, la réparation reste proposée.
+#[cfg(target_os = "linux")]
+fn masquee_par_l_administrateur(racine: &std::path::Path, unite: &str) -> bool {
+    std::fs::read_link(racine.join("etc/systemd/system").join(unite))
+        .is_ok_and(|cible| cible == std::path::Path::new("/dev/null"))
+}
+
 /// Ce que la réparation du pare-feu Linux sait de la machine, lu à l'ouverture du menu.
 #[cfg(target_os = "linux")]
 #[derive(Clone, Default)]
@@ -418,11 +444,12 @@ impl EtatPareFeu {
         use crate::machine::linux::{politique_ufw, service_actif, ufw_actif};
         use std::process::Command;
         let firewalld = if service_actif("firewalld") {
-            let zone = crate::commande::lancer(Command::new("firewall-cmd").arg("--get-default-zone"), 10);
-            Firewalld::Actif(zone.map(|z| z.sortie.trim().to_string()))
-        } else if present("firewalld")
-            && crate::commande::lancer(Command::new("systemctl").args(["is-enabled", "firewalld"]), 10)
-                .is_none_or(|r| r.sortie.trim() != "masked")
+            let zone = zone_firewalld(std::path::Path::new("/")).or_else(|| {
+                crate::commande::lancer(Command::new("firewall-cmd").arg("--get-default-zone"), 10)
+                    .map(|z| z.sortie.trim().to_string())
+            });
+            Firewalld::Actif(zone)
+        } else if present("firewalld") && !masquee_par_l_administrateur(std::path::Path::new("/"), "firewalld.service")
         {
             Firewalld::Arrete
         } else {
@@ -635,8 +662,8 @@ pub fn liste() -> Vec<Reparation> {
         // zram (mémoire compressée) et loop ne sont pas des disques physiques : pas de SMART.
         "for d in $(lsblk -dno NAME,TYPE | awk '$2==\"disk\" && $1 !~ /^(zram|loop)/{print $1}'); do echo \"== /dev/$d\"; sudo smartctl -H /dev/$d | tail -n +4; done",
     );
-    let btrfs = crate::commande::lancer(std::process::Command::new("findmnt").args(["-no", "FSTYPE", "/"]), 10)
-        .is_some_and(|r| r.sortie.trim() == "btrfs");
+    // /proc/self/mountinfo, ce que findmnt lisait lui-même.
+    let btrfs = machine::linux::natif::racine().is_some_and(|(_, genre)| genre == "btrfs");
     if btrfs {
         disque.push("sudo btrfs scrub start -B /");
     }
@@ -1582,6 +1609,85 @@ mod tests {
     fn etat_lu_sans_powershell() {
         if let Some(e) = etat_windows_natif() {
             assert!(e.profils > 0);
+        }
+    }
+
+    /// La zone par défaut de firewalld : celle de l'administrateur d'abord, puis celle du paquet ; une clé en
+    /// commentaire ou vide ne compte pas ; sans fichier, rien n'est conclu (firewall-cmd prend le relais).
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn zone_de_firewalld_lue_dans_sa_configuration() {
+        let d = std::env::temp_dir().join(format!("vanguard-reparer-firewalld-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        assert_eq!(zone_firewalld(&d), None);
+        let ecrire = |f: &str, t: &str| {
+            let f = d.join(f);
+            std::fs::create_dir_all(f.parent().unwrap()).unwrap();
+            std::fs::write(f, t).unwrap();
+        };
+        ecrire("usr/lib/firewalld/firewalld.conf", "# usine\nDefaultZone=public\n");
+        assert_eq!(zone_firewalld(&d).as_deref(), Some("public"));
+        ecrire(
+            "etc/firewalld/firewalld.conf",
+            "# DefaultZone=work\nDefaultZone=\nLogDenied=off\n",
+        );
+        assert_eq!(
+            zone_firewalld(&d).as_deref(),
+            Some("public"),
+            "clé vide : celle du paquet"
+        );
+        ecrire("etc/firewalld/firewalld.conf", "  DefaultZone=trusted  \n");
+        assert_eq!(zone_firewalld(&d).as_deref(), Some("trusted"));
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// Masquée par l'administrateur : un lien vers /dev/null dans /etc/systemd/system, pas un autre lien, ni un masque
+    /// de ce démarrage seulement (/run).
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn firewalld_masque() {
+        use std::os::unix::fs::symlink;
+        let d = std::env::temp_dir().join(format!("vanguard-reparer-masque-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        for dossier in ["etc/systemd/system", "run/systemd/system"] {
+            std::fs::create_dir_all(d.join(dossier)).unwrap();
+        }
+        assert!(!masquee_par_l_administrateur(&d, "firewalld.service"));
+        symlink("/dev/null", d.join("run/systemd/system/firewalld.service")).unwrap();
+        assert!(!masquee_par_l_administrateur(&d, "firewalld.service"));
+        symlink(
+            "/usr/lib/systemd/system/autre.service",
+            d.join("etc/systemd/system/firewalld.service"),
+        )
+        .unwrap();
+        assert!(!masquee_par_l_administrateur(&d, "firewalld.service"));
+        std::fs::remove_file(d.join("etc/systemd/system/firewalld.service")).unwrap();
+        symlink("/dev/null", d.join("etc/systemd/system/firewalld.service")).unwrap();
+        assert!(masquee_par_l_administrateur(&d, "firewalld.service"));
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// Sur cet ordinateur, « masquée » se lit comme le dit `systemctl is-enabled`, et la zone comme `firewall-cmd`,
+    /// quand ils répondent.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn firewalld_comme_systemctl_et_firewall_cmd() {
+        let racine = std::path::Path::new("/");
+        let lancer = |cmd: &str, args: &[&str]| {
+            crate::commande::lancer(std::process::Command::new(cmd).args(args), 10).map(|r| r.sortie.trim().to_string())
+        };
+        if let Some(etat) = lancer("systemctl", &["is-enabled", "firewalld.service"]).filter(|e| !e.is_empty()) {
+            assert_eq!(
+                masquee_par_l_administrateur(racine, "firewalld.service"),
+                etat == "masked",
+                "{etat}"
+            );
+        }
+        if let (Some(zone), Some(natif)) = (
+            lancer("firewall-cmd", &["--get-default-zone"]).filter(|z| !z.is_empty() && !z.contains(' ')),
+            zone_firewalld(racine),
+        ) {
+            assert_eq!(natif, zone);
         }
     }
 }
