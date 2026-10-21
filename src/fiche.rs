@@ -427,8 +427,145 @@ fn fiche_windows(l: LectureWindows) -> Fiche {
     f.prete_a_montrer()
 }
 
+/// Le JSON qu'écrivait le script, lu sans PowerShell : WMI (les mêmes classes) et le registre. `None` sans
+/// Win32_OperatingSystem.
+#[cfg(windows)]
+fn lire_directement() -> Option<serde_json::Value> {
+    use crate::machine::windows::wmi::{self, Ligne};
+    use serde_json::json;
+    const CIMV2: &str = r"root\cimv2";
+    let toutes = |classe: &str, champs: &[&str]| wmi::requete(CIMV2, classe, "", champs).unwrap_or_default();
+    let os = wmi::requete(CIMV2, "Win32_OperatingSystem", "", &["Caption", "BuildNumber"])?
+        .into_iter()
+        .next()?;
+    let premiere = |classe: &str, champs: &[&str]| toutes(classe, champs).into_iter().next().unwrap_or_default();
+    let cs = premiere(
+        "Win32_ComputerSystem",
+        &["Manufacturer", "Model", "TotalPhysicalMemory"],
+    );
+    let bb = premiere("Win32_BaseBoard", &["Manufacturer", "Product", "SerialNumber"]);
+    let bios = premiere("Win32_BIOS", &["SMBIOSBIOSVersion", "ReleaseDate", "SerialNumber"]);
+    let cpu = toutes(
+        "Win32_Processor",
+        &["Name", "NumberOfCores", "NumberOfLogicalProcessors"],
+    );
+    let cv = winreg::RegKey::predef(winreg::enums::HKEY_LOCAL_MACHINE)
+        .open_subkey(r"SOFTWARE\Microsoft\Windows NT\CurrentVersion")
+        .ok();
+    let version: String = cv
+        .as_ref()
+        .and_then(|k| k.get_value("DisplayVersion").ok())
+        .unwrap_or_default();
+    let ubr = cv
+        .as_ref()
+        .and_then(|k| k.get_value::<u32, _>("UBR").ok())
+        .map(|u| u.to_string())
+        .unwrap_or_default();
+    // Un champ comme `"$($x.Champ)"` l'écrit : vide s'il manque ; un nombre comme `[uint64]` (0 s'il manque).
+    let texte = |l: &Ligne, c: &str| match l.get(c) {
+        Some(wmi::Valeur::Texte(t)) => t.clone(),
+        Some(wmi::Valeur::Entier(n)) => n.to_string(),
+        _ => String::new(),
+    };
+    let nombre = |l: &Ligne, c: &str| {
+        l.get(c)
+            .and_then(wmi::Valeur::entier)
+            .map_or(0, |n| u64::try_from(n).unwrap_or(0))
+    };
+    // Une date CIM (« 20240115000000.000000+000 ») en « 2024-01-15 », comme `.ToString('yyyy-MM-dd')`.
+    let date = |l: &Ligne, c: &str| {
+        let d = texte(l, c);
+        chrono::NaiveDate::parse_from_str(d.get(..8).unwrap_or_default(), "%Y%m%d")
+            .map(|d| d.format("%Y-%m-%d").to_string())
+            .unwrap_or_default()
+    };
+    let somme = |c: &str| cpu.iter().map(|p| nombre(p, c)).sum::<u64>();
+    let barrettes: Vec<serde_json::Value> = toutes(
+        "Win32_PhysicalMemory",
+        &[
+            "Capacity",
+            "SMBIOSMemoryType",
+            "ConfiguredClockSpeed",
+            "Speed",
+            "Manufacturer",
+            "PartNumber",
+            "DeviceLocator",
+            "SerialNumber",
+        ],
+    )
+    .iter()
+    .map(|b| {
+        let vitesse = match nombre(b, "ConfiguredClockSpeed") {
+            0 => nombre(b, "Speed"),
+            v => v,
+        };
+        json!({
+            "taille": nombre(b, "Capacity"), "sorte": nombre(b, "SMBIOSMemoryType"), "vitesse": vitesse,
+            "fabricant": texte(b, "Manufacturer"), "reference": texte(b, "PartNumber"),
+            "emplacement": texte(b, "DeviceLocator"), "serie": texte(b, "SerialNumber"),
+        })
+    })
+    .collect();
+    let graphique: Vec<serde_json::Value> = toutes("Win32_VideoController", &["Name", "DriverVersion", "DriverDate"])
+        .iter()
+        .map(|g| json!({ "nom": texte(g, "Name"), "pilote": texte(g, "DriverVersion"), "date": date(g, "DriverDate") }))
+        .collect();
+    let disques: Vec<serde_json::Value> = wmi::requete(
+        r"root\Microsoft\Windows\Storage",
+        "MSFT_PhysicalDisk",
+        "",
+        &[
+            "DeviceId",
+            "FriendlyName",
+            "Size",
+            "MediaType",
+            "BusType",
+            "SerialNumber",
+        ],
+    )
+    .unwrap_or_default()
+    .iter()
+    .map(|d| {
+        // MediaType et BusType écrits comme Get-PhysicalDisk les écrit (seuls NVMe, USB, HDD et SSD sont lus).
+        let sorte = match d["MediaType"].entier() {
+            Some(3) => "HDD",
+            Some(4) => "SSD",
+            Some(5) => "SCM",
+            _ => "Unspecified",
+        };
+        let bus = match d["BusType"].entier() {
+            Some(3) => "ATA",
+            Some(7) => "USB",
+            Some(8) => "RAID",
+            Some(10) => "SAS",
+            Some(11) => "SATA",
+            Some(17) => "NVMe",
+            _ => "Unknown",
+        };
+        json!({
+            "nom": texte(d, "DeviceId"), "modele": texte(d, "FriendlyName"), "taille": nombre(d, "Size"),
+            "sorte": sorte, "bus": bus, "serie": texte(d, "SerialNumber"),
+        })
+    })
+    .collect();
+    Some(json!({
+        "systeme": texte(&os, "Caption"), "version": version, "build": format!("{}.{ubr}", texte(&os, "BuildNumber")),
+        "fabricant": texte(&cs, "Manufacturer"), "modele": texte(&cs, "Model"),
+        "carte_fabricant": texte(&bb, "Manufacturer"), "carte": texte(&bb, "Product"),
+        "bios": texte(&bios, "SMBIOSBIOSVersion"), "bios_date": date(&bios, "ReleaseDate"),
+        "processeur": cpu.first().map(|c| texte(c, "Name")).unwrap_or_default().trim(),
+        "coeurs": somme("NumberOfCores"), "fils": somme("NumberOfLogicalProcessors"),
+        "memoire": nombre(&cs, "TotalPhysicalMemory"),
+        "barrettes": barrettes, "graphique": graphique, "disques": disques,
+        "serie": texte(&bios, "SerialNumber"), "serie_carte": texte(&bb, "SerialNumber"),
+    }))
+}
+
 #[cfg(windows)]
 fn lire() -> Fiche {
+    if let Some(serde_json::Value::Object(l)) = lire_directement() {
+        return fiche_windows(l);
+    }
     crate::machine::windows::ps(
         r#"$os = Get-CimInstance Win32_OperatingSystem; $cs = Get-CimInstance Win32_ComputerSystem
            $bb = Get-CimInstance Win32_BaseBoard; $bios = Get-CimInstance Win32_BIOS; $cpu = @(Get-CimInstance Win32_Processor)
@@ -833,6 +970,26 @@ mod tests {
         assert_eq!(f.barrettes[0].vitesse, Some(2400));
         assert_eq!(taille_lue("512 MB"), Some(512 << 20));
         assert_eq!(taille_lue("vide"), None);
+    }
+
+    /// Le WMI de Wine connaît le système : la fiche se lit sans PowerShell, avec les clés qu'attend fiche_windows.
+    #[cfg(windows)]
+    #[test]
+    fn fiche_windows_directe() {
+        let l = lire_directement().expect("Win32_OperatingSystem répond");
+        for cle in [
+            "systeme",
+            "build",
+            "processeur",
+            "fils",
+            "barrettes",
+            "graphique",
+            "disques",
+            "serie",
+        ] {
+            assert!(l.get(cle).is_some(), "{cle}");
+        }
+        assert!(l["systeme"].as_str().is_some_and(|s| !s.is_empty()));
     }
 
     #[test]
