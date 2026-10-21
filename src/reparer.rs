@@ -162,9 +162,17 @@ pub(crate) const SANS_POINT_ARRETE: i32 = 5;
 #[cfg(windows)]
 #[allow(clippy::unnecessary_wraps)] // même signature que sur Linux, où l'outil peut manquer
 pub(crate) fn point_restauration(titre: &str) -> Option<(&'static str, String)> {
-    let description = entre_apostrophes(&trf!("Vanguard : avant « {titre} »", "Vanguard: before “{titre}”"));
-    Some((
-        "Windows",
+    // Le titre ne voyage plus : la correction native le fait par SRSetRestorePoint (eleve.rs), et le script
+    // PowerShell, quand il reste nécessaire, reçoit la forme ci-dessous par `corrections::en_powershell`.
+    let _ = titre;
+    Some(("Windows", crate::machine::windows::corrections::POINT.to_string()))
+}
+
+/// La forme PowerShell du point de restauration, pour le script administrateur (liste mêlée à du PowerShell).
+#[cfg(windows)]
+pub(crate) fn point_restauration_powershell() -> String {
+    let description = entre_apostrophes(tr!("Vanguard : avant une correction", "Vanguard: before a fix"));
+    {
         trf!(
             "try {{ Checkpoint-Computer -Description {description} -RestorePointType MODIFY_SETTINGS }} \
              catch {{ Write-Host 'Point de restauration impossible (protection du système désactivée sur C: ?).' -ForegroundColor Red; \
@@ -172,8 +180,8 @@ pub(crate) fn point_restauration(titre: &str) -> Option<(&'static str, String)> 
             "try {{ Checkpoint-Computer -Description {description} -RestorePointType MODIFY_SETTINGS }} \
              catch {{ Write-Host 'Restore point not possible (system protection turned off on C:?).' -ForegroundColor Red; \
              if ((Read-Host 'Continue without a restore point? [y/N]') -notin 'y', 'o') {{ exit {SANS_POINT_ARRETE} }} }}"
-        ),
-    ))
+        )
+    }
 }
 
 /// SID du compte de la personne (« S-1-5-21-… »). La fenêtre administrateur peut s'ouvrir sous un autre compte
@@ -1345,6 +1353,8 @@ mod tests {
     #[test]
     fn arret_sans_point_de_restauration_reconnu() {
         let (_, commande) = point_restauration("essai").unwrap();
+        assert_eq!(commande, "vanguard:point-de-restauration");
+        let commande = point_restauration_powershell();
         assert!(commande.contains(&format!("exit {SANS_POINT_ARRETE} }}")), "{commande}");
         assert!(!commande.contains("exit 1"), "{commande}");
     }

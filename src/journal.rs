@@ -97,7 +97,7 @@ fn lecteur_windows(connues: &std::collections::BTreeSet<String>) -> Option<PathB
 
 /// Wine installe ses propres programmes dans system32 ; wineboot.exe n'existe pas sur un vrai Windows.
 #[cfg(windows)]
-fn sous_wine() -> bool {
+pub(crate) fn sous_wine() -> bool {
     let systeme = std::env::var_os("SystemRoot").map_or_else(|| PathBuf::from("C:\\windows"), PathBuf::from);
     systeme.join("system32").join("wineboot.exe").is_file()
 }

@@ -16,6 +16,9 @@ paths:
   `Test-Path` dit qu'elle manque.
 - HKCU dans la fenêtre administrateur = le compte qui l'ouvre (pas forcément la personne) : le HKCU de la personne
   s'écrit depuis Vanguard (winreg). HKCU\Software\Policies est en lecture seule pour l'utilisateur.
+- Un processus lancé « runas » (ShellExecuteExW) est créé par le service AppInfo : il n'hérite ni poignée ni tube
+  anonyme de Vanguard. Le processus élevé (`eleve.rs`) dialogue par un tube nommé à instance unique, PID vérifié des
+  deux côtés ; `const` pour une table dont on compare les adresses se copie à chaque usage : `static`.
 - La fenêtre administrateur répond par le fichier `.resultats` (une ligne ok/echec par correctif) : c'est un autre
   processus, son code de retour ne suffit pas.
 - Vérifier un script généré : l'écrire depuis un test temporaire sous Wine (chemin `Z:\…`), puis l'analyser avec

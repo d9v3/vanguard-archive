@@ -15,8 +15,10 @@ mod chargement;
 mod comptes;
 pub(crate) mod connexions;
 pub(crate) mod correctifs;
+pub(crate) mod corrections;
 mod durcissement;
 pub(crate) mod ecoute;
+pub(crate) mod eleve;
 pub(crate) mod evenements;
 mod exclusions;
 pub(crate) mod gestionnaire;
@@ -246,7 +248,7 @@ const SCRIPT_MODIFIE: i32 = 6;
 const LANGAGE_RESTREINT: i32 = 7;
 
 /// L'empreinte SHA-256, en hexadécimal majuscule, comme la calcule PowerShell.
-fn sha256_hex(octets: &[u8]) -> String {
+pub(super) fn sha256_hex(octets: &[u8]) -> String {
     use sha2::Digest;
     sha2::Sha256::digest(octets)
         .iter()
@@ -292,6 +294,8 @@ pub fn powershell_admin(commandes: &[String]) -> bool {
 /// lire avant d'accepter la demande d'administrateur, et il reste comme trace de ce qui a été modifié.
 pub fn powershell_admin_chacune(correctifs: &[Vec<String>]) -> Vec<bool> {
     let echec = vec![false; correctifs.len()];
+    // Une correction native (« vanguard:… ») mêlée à du PowerShell passe par le script, sous sa forme PowerShell.
+    let correctifs = &corrections::en_powershell(correctifs);
     let dossier = crate::reseau::dossier_local().join("corrections");
     let nom = format!("correction-{}", chrono::Local::now().format("%Y%m%d-%H%M%S"));
     let chemin = dossier.join(format!("{nom}.ps1"));
@@ -697,9 +701,7 @@ fn bureau_distance() -> Constat {
         )
         .corriger(
             tr!("Exiger NLA pour le Bureau à distance", "Require NLA for Remote Desktop"),
-            &[&format!(
-                r"Set-ItemProperty '{cle}\WinStations\RDP-Tcp' -Name UserAuthentication -Value 1"
-            )],
+            &[&corrections::id("rdp-nla")],
         )
     }
 }

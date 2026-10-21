@@ -705,27 +705,54 @@ pub fn appliquer(commandes: &[String]) -> bool {
 /// correctif en échec n'empêche pas les suivants. Sous Linux et macOS, les commandes d'un correctif s'arrêtent à la
 /// première en échec ; sous Windows, une seule fenêtre UAC pour tous.
 pub fn appliquer_chacune(correctifs: &[Vec<String>]) -> Vec<bool> {
-    let resultats = lancer_chacune(correctifs);
-    // Gardé sur cet ordinateur : « Ce que Vanguard a changé » (changements.rs).
-    crate::changements::noter(correctifs, &resultats);
+    let (resultats, notes) = lancer_chacune(correctifs);
+    // Gardé sur cet ordinateur : « Ce que Vanguard a changé » (changements.rs), avec la valeur d'avant quand le
+    // processus élevé l'a lue, pour annuler exactement.
+    crate::changements::noter(&notes, &resultats);
     resultats
 }
 
-fn lancer_chacune(correctifs: &[Vec<String>]) -> Vec<bool> {
+/// Les résultats, et ce qu'il faut noter pour chaque correctif (ses commandes, enrichies de la valeur d'avant).
+fn lancer_chacune(correctifs: &[Vec<String>]) -> (Vec<bool>, Vec<Vec<String>>) {
     #[cfg(windows)]
     {
         for c in correctifs.iter().flatten() {
-            println!("    {GRIS}PS> {}{RESET}", crate::ui::commande_affichable(c));
+            println!("    {GRIS}> {}{RESET}", windows::corrections::affichable(c));
+        }
+        // Rien que des corrections natives, et une vraie élévation possible (pas sous Wine) : par Vanguard lui-même,
+        // relancé en administrateur ; sinon par le script PowerShell, comme avant.
+        if windows::corrections::toutes_natives(correctifs) && !crate::journal::sous_wine() {
+            let lignes: Vec<String> = correctifs.iter().flatten().cloned().collect();
+            if let Some(reponses) = windows::eleve::appliquer(&lignes) {
+                let mut reponses = reponses.into_iter();
+                let mut resultats = Vec::with_capacity(correctifs.len());
+                let mut notes = Vec::with_capacity(correctifs.len());
+                for commandes in correctifs {
+                    let mut reussi = true;
+                    let mut note = Vec::with_capacity(commandes.len());
+                    for c in commandes {
+                        let r = reponses.next();
+                        reussi &= r.as_ref().is_some_and(|r| r.reussi);
+                        note.push(match r.and_then(|r| r.avant) {
+                            Some(avant) => format!("{c} (avant : {avant})"),
+                            None => c.clone(),
+                        });
+                    }
+                    resultats.push(reussi);
+                    notes.push(note);
+                }
+                return (resultats, notes);
+            }
         }
         trp!(
             "    {GRIS}Une fenêtre administrateur s'ouvre et montre chaque étape ; attends qu'elle se ferme.{RESET}",
             "    {GRIS}An administrator window opens and shows each step; wait for it to close.{RESET}"
         );
-        windows::powershell_admin_chacune(correctifs)
+        (windows::powershell_admin_chacune(correctifs), correctifs.to_vec())
     }
     #[cfg(not(windows))]
     {
-        correctifs
+        let resultats = correctifs
             .iter()
             .map(|commandes| {
                 commandes.iter().all(|c| {
@@ -737,7 +764,8 @@ fn lancer_chacune(correctifs: &[Vec<String>]) -> Vec<bool> {
                         .is_ok_and(|s| s.success())
                 })
             })
-            .collect()
+            .collect();
+        (resultats, correctifs.to_vec())
     }
 }
 

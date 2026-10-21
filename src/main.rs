@@ -429,6 +429,15 @@ enum Commande {
     /// Entretien silencieux + notification (utilisé par le planificateur, une fois par mois).
     #[command(hide = true)]
     Entretenir,
+    /// Windows : le processus élevé qui applique les corrections natives (lancé par Vanguard lui-même, après la
+    /// demande d'administrateur ; voir machine/windows/eleve.rs).
+    #[command(name = "appliquer-eleve", hide = true)]
+    AppliquerEleve {
+        #[arg(long)]
+        canal: String,
+        #[arg(long)]
+        parent: u32,
+    },
 }
 
 /// Résultats de la session, pour le rapport HTML et les corrections.
@@ -1768,6 +1777,15 @@ async fn main() {
             None => entretien::maintenant(),
         },
         Some(Commande::Entretenir) => entretien::entretenir(),
+        Some(Commande::AppliquerEleve { canal, parent }) => {
+            #[cfg(windows)]
+            std::process::exit(machine::windows::eleve::executer(&canal, parent));
+            #[cfg(not(windows))]
+            {
+                let _ = (canal, parent);
+                trp!("Sous Windows seulement.", "Windows only.");
+            }
+        }
         Some(Commande::Maj) => maj::executer(),
         Some(Commande::Reparer) => reparer::menu(),
         Some(Commande::Gaming) => gaming::menu(),

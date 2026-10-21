@@ -33,9 +33,7 @@ pub(super) fn juger_wdigest(valeur: Option<u32>) -> Constat {
                 "Couper WDigest (valeur par défaut depuis Windows 8.1 ; effet à la prochaine ouverture de session)",
                 "Turn WDigest off (the default since Windows 8.1; takes effect at the next sign-in)"
             ),
-            &[&format!(
-                "Set-ItemProperty -LiteralPath 'HKLM:\\{WDIGEST}' -Name UseLogonCredential -Value 0 -Type DWord"
-            )],
+            &[&super::corrections::id("wdigest-coupe")],
         )
     } else {
         ok(
@@ -1186,7 +1184,7 @@ mod tests {
     fn durcissement_juge() {
         let w = juger_wdigest(Some(1));
         assert_eq!(w.probleme, Some(Niveau::Eleve));
-        assert!(w.correctif.as_ref().unwrap().commandes[0].contains("UseLogonCredential -Value 0"));
+        assert_eq!(w.correctif.as_ref().unwrap().commandes[0], "vanguard:wdigest-coupe");
         assert!(juger_wdigest(None).probleme.is_none() && juger_wdigest(Some(0)).probleme.is_none());
         assert!(juger_lsa(Some(2)).probleme.is_none());
         assert_eq!(juger_lsa(None).probleme, Some(Niveau::Info));

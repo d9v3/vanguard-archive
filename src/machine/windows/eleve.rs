@@ -1,0 +1,694 @@
+//! Le processus élevé qui applique les corrections natives (`corrections`) : Vanguard se relance lui-même en
+//! administrateur (une seule demande UAC, qui nomme Vanguard et non « Windows PowerShell »), avec la sous-commande
+//! cachée `appliquer-eleve`. Le parent, non élevé, prépare la liste ; le fils, élevé, la relit contre la liste
+//! fermée, la montre, attend Entrée dans sa propre console, puis fait chaque geste et répond ligne à ligne.
+//!
+//! La frontière entre les deux : un tube nommé au nom aléatoire, créé par le parent AVANT la relance, à instance
+//! unique (personne ne peut en créer une deuxième et se faire passer pour le serveur), aux clients distants refusés
+//! et à la DACL explicite. Le parent n'accepte que le client dont le PID est celui du processus qu'il vient de lancer ;
+//! le fils n'accepte qu'un serveur dont le PID est celui annoncé et dont le programme a la même empreinte SHA-256 que
+//! le sien. Un tube anonyme hérité ne marcherait pas : un processus « runas » est créé par le service AppInfo, il
+//! n'hérite rien de nous. Pendant que la demande d'administrateur attend, le parent garde son propre fichier ouvert
+//! sans partage de suppression : ni lui ni ses dossiers parents ne peuvent être renommés ou remplacés (même sur une
+//! clé USB), et son contenu est déjà verrouillé par l'image chargée. Le processus élevé n'écrit aucun fichier dans
+//! un dossier du compte : ses réponses passent par le tube.
+
+use std::ffi::c_void;
+use std::fmt::Write as _;
+use std::io::{BufRead, BufReader, Read, Write};
+use std::os::windows::ffi::OsStrExt;
+use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
+
+use super::corrections::{self, Correction, LIGNE_MAX, LIGNES_MAX, Resultat};
+use crate::ui::{GRIS, RESET, VERT, tr, trf, trp};
+
+#[link(name = "kernel32")]
+unsafe extern "system" {
+    fn CreateNamedPipeW(
+        nom: *const u16,
+        acces: u32,
+        mode: u32,
+        instances: u32,
+        sortie: u32,
+        entree: u32,
+        delai: u32,
+        securite: *const Securite,
+    ) -> *mut c_void;
+    fn ConnectNamedPipe(tube: *mut c_void, recouvrement: *mut c_void) -> i32;
+    fn DisconnectNamedPipe(tube: *mut c_void) -> i32;
+    fn GetNamedPipeClientProcessId(tube: *mut c_void, pid: *mut u32) -> i32;
+    fn GetNamedPipeServerProcessId(tube: *mut c_void, pid: *mut u32) -> i32;
+    fn WaitNamedPipeW(nom: *const u16, delai: u32) -> i32;
+    fn GetLastError() -> u32;
+    fn GetProcessId(processus: *mut c_void) -> u32;
+    fn WaitForSingleObject(objet: *mut c_void, delai: u32) -> u32;
+    fn LoadLibraryW(nom: *const u16) -> *mut c_void;
+    fn GetProcAddress(module: *mut c_void, nom: *const u8) -> *mut c_void;
+}
+
+#[link(name = "advapi32")]
+unsafe extern "system" {
+    fn ConvertStringSecurityDescriptorToSecurityDescriptorW(
+        texte: *const u16,
+        revision: u32,
+        descripteur: *mut *mut c_void,
+        taille: *mut u32,
+    ) -> i32;
+}
+
+#[link(name = "shell32")]
+unsafe extern "system" {
+    fn ShellExecuteExW(info: *mut InfoLancement) -> i32;
+}
+
+/// SECURITY_ATTRIBUTES.
+#[repr(C)]
+struct Securite {
+    taille: u32,
+    descripteur: *mut c_void,
+    heritable: i32,
+}
+
+/// SHELLEXECUTEINFOW (112 octets en 64 bits).
+#[repr(C)]
+struct InfoLancement {
+    taille: u32,
+    masque: u32,
+    fenetre: *mut c_void,
+    verbe: *const u16,
+    fichier: *const u16,
+    parametres: *const u16,
+    dossier: *const u16,
+    affichage: i32,
+    instance: *mut c_void,
+    liste: *mut c_void,
+    classe: *const u16,
+    cle: *mut c_void,
+    raccourci: u32,
+    icone: *mut c_void,
+    processus: *mut c_void,
+}
+
+/// RESTOREPOINTINFOW et STATEMGRSTATUS (srrestoreptapi.h).
+#[repr(C)]
+struct PointInfo {
+    evenement: u32,
+    genre: u32,
+    sequence: i64,
+    description: [u16; 256],
+}
+#[repr(C)]
+struct PointEtat {
+    statut: u32,
+    sequence: i64,
+}
+
+const POIGNEE_INVALIDE: *mut c_void = -1isize as *mut c_void;
+/// Sortie du fils : la liste reçue n'est pas celle de Vanguard (rien n'a été fait).
+const LISTE_REFUSEE: i32 = 8;
+/// Sortie du fils : le canal ne mène pas au Vanguard qui l'a lancé (rien n'a été fait).
+const CANAL_REFUSE: i32 = 9;
+/// La dernière ligne de chaque sens du dialogue.
+const FIN: &str = "fin";
+
+fn large(t: &str) -> Vec<u16> {
+    std::ffi::OsStr::new(t).encode_wide().chain(Some(0)).collect()
+}
+
+fn nom_du_tube(canal: &str) -> String {
+    format!(r"\\.\pipe\vanguard-{canal}")
+}
+
+/// Un nom de canal est 32 chiffres hexadécimaux, tirés au hasard par le parent : tout autre argument est refusé
+/// avant même d'ouvrir quoi que ce soit.
+fn canal_valide(canal: &str) -> bool {
+    canal.len() == 32 && canal.bytes().all(|o| matches!(o, b'0'..=b'9' | b'a'..=b'f'))
+}
+
+/// L'empreinte SHA-256 d'un programme, pour reconnaître « le même Vanguard » de part et d'autre du tube.
+fn empreinte(chemin: &std::path::Path) -> Option<String> {
+    std::fs::read(chemin).ok().map(|o| super::sha256_hex(&o))
+}
+
+/// Réponse du fils pour une correction : « ok avant=1 », « echec raison… ».
+fn ligne_resultat(r: &Resultat) -> String {
+    match (&r.reussi, &r.avant) {
+        (true, Some(avant)) => format!("ok avant={avant}"),
+        (true, None) => "ok".to_string(),
+        (false, _) => format!("echec {}", r.raison.replace(['\r', '\n'], " ")),
+    }
+}
+
+/// Ce que le parent retient d'une réponse : réussie ?, et la valeur d'avant à noter dans « Ce que Vanguard a changé ».
+pub(crate) struct Reponse {
+    pub reussi: bool,
+    pub avant: Option<String>,
+}
+
+fn lire_reponse(ligne: &str) -> Reponse {
+    let reussi = ligne == "ok" || ligne.starts_with("ok ");
+    let avant = ligne.strip_prefix("ok avant=").map(str::to_string);
+    Reponse { reussi, avant }
+}
+
+// ---------------------------------------------------------------- le parent
+
+/// Applique des corrections natives avec les droits d'administrateur : en place si ce processus est déjà élevé,
+/// sinon par une relance élevée de Vanguard. Une réponse par commande, dans l'ordre reçu. `None` : impossible de
+/// préparer la relance (tube, identité du compte) ; l'appelant repasse alors par le script PowerShell. Une demande
+/// d'administrateur refusée n'est pas `None` : tout est « non fait », sans redemander.
+pub(crate) fn appliquer(lignes: &[String]) -> Option<Vec<Reponse>> {
+    if super::processus::eleve() {
+        return Some(appliquer_en_place(lignes));
+    }
+    let mut aleatoire = [0u8; 16];
+    getrandom::fill(&mut aleatoire).ok()?;
+    let canal = aleatoire.iter().fold(String::with_capacity(32), |mut s, o| {
+        let _ = write!(s, "{o:02x}");
+        s
+    });
+    let serveur = Serveur::creer(&canal)?;
+    let exe = std::env::current_exe().ok()?;
+    // Ouvert sans partage de suppression tant que le fils n'a pas répondu : ni renommage ni remplacement possibles.
+    let _verrou = {
+        use std::os::windows::fs::OpenOptionsExt;
+        std::fs::OpenOptions::new().read(true).share_mode(1).open(&exe).ok()?
+    };
+    trp!(
+        "    {GRIS}Une fenêtre Vanguard administrateur s'ouvre, montre la liste et attend Entrée ; attends qu'elle se ferme.{RESET}",
+        "    {GRIS}A Vanguard administrator window opens, shows the list and waits for Enter; wait for it to close.{RESET}"
+    );
+    let parametres = format!("appliquer-eleve --canal {canal} --parent {}", std::process::id());
+    let fils = match relancer_eleve(&exe, &parametres) {
+        Ok(f) => f,
+        Err(1223) => {
+            trp!(
+                "    Demande d'administrateur refusée : rien n'a été modifié.",
+                "    Administrator prompt refused: nothing was changed."
+            );
+            return Some(
+                lignes
+                    .iter()
+                    .map(|_| Reponse {
+                        reussi: false,
+                        avant: None,
+                    })
+                    .collect(),
+            );
+        }
+        Err(code) => {
+            trp!(
+                "    Impossible de relancer Vanguard en administrateur (erreur Windows {code}).",
+                "    Could not relaunch Vanguard as administrator (Windows error {code})."
+            );
+            return None;
+        }
+    };
+    let pid = fils.pid();
+    // Si le fils meurt sans s'être branché, l'attente du serveur ne finirait jamais : un fil le surveille et, à sa
+    // mort, se branche lui-même pour la débloquer (le serveur reconnaît alors son propre PID).
+    let nom = nom_du_tube(&canal);
+    let veilleur = std::thread::spawn(move || {
+        fils.attendre();
+        let _ = std::fs::OpenOptions::new().read(true).write(true).open(&nom);
+    });
+    let reponses = serveur.dialoguer(pid, lignes);
+    drop(serveur);
+    let _ = veilleur.join();
+    Some(reponses.unwrap_or_else(|| {
+        lignes
+            .iter()
+            .map(|_| Reponse {
+                reussi: false,
+                avant: None,
+            })
+            .collect()
+    }))
+}
+
+/// Déjà administrateur : chaque geste est fait ici, montré au passage.
+fn appliquer_en_place(lignes: &[String]) -> Vec<Reponse> {
+    let Some(liste) = corrections::valider(lignes) else {
+        return lignes
+            .iter()
+            .map(|_| Reponse {
+                reussi: false,
+                avant: None,
+            })
+            .collect();
+    };
+    let mut reponses = Vec::with_capacity(liste.len());
+    let mut arret = false;
+    for c in liste {
+        let r = if arret { refusee() } else { faire(c) };
+        arret |= !r.reussi && matches!(c.geste, corrections::Geste::PointDeRestauration);
+        reponses.push(lire_reponse(&ligne_resultat(&r)));
+    }
+    reponses
+}
+
+/// Le processus lancé élevé, à attendre.
+struct Fils(OwnedHandle);
+// SAFETY : une poignée de processus se partage entre fils d'exécution (c'est un objet noyau, pas un état local).
+unsafe impl Send for Fils {}
+
+impl Fils {
+    fn pid(&self) -> u32 {
+        // SAFETY : la poignée est valide tant que `self` vit.
+        unsafe { GetProcessId(self.0.as_raw_handle()) }
+    }
+    fn attendre(&self) {
+        // SAFETY : idem ; INFINITE, la fenêtre est visible et c'est la personne qui la ferme.
+        unsafe { WaitForSingleObject(self.0.as_raw_handle(), u32::MAX) };
+    }
+}
+
+/// Relance ce programme avec « runas » (la demande d'administrateur) et rend le processus ; l'erreur Windows sinon
+/// (1223 : la personne a refusé).
+fn relancer_eleve(exe: &std::path::Path, parametres: &str) -> Result<Fils, u32> {
+    const SANS_FERMER_PROCESSUS: u32 = 0x40;
+    const SYNCHRONE: u32 = 0x100;
+    const SANS_DIALOGUE_D_ERREUR: u32 = 0x400;
+    let verbe = large("runas");
+    let fichier: Vec<u16> = exe.as_os_str().encode_wide().chain(Some(0)).collect();
+    let parametres = large(parametres);
+    let mut info = InfoLancement {
+        taille: u32::try_from(std::mem::size_of::<InfoLancement>()).map_err(|_| 0u32)?,
+        masque: SANS_FERMER_PROCESSUS | SYNCHRONE | SANS_DIALOGUE_D_ERREUR,
+        fenetre: std::ptr::null_mut(),
+        verbe: verbe.as_ptr(),
+        fichier: fichier.as_ptr(),
+        parametres: parametres.as_ptr(),
+        dossier: std::ptr::null(),
+        affichage: 1,
+        instance: std::ptr::null_mut(),
+        liste: std::ptr::null_mut(),
+        classe: std::ptr::null(),
+        cle: std::ptr::null_mut(),
+        raccourci: 0,
+        icone: std::ptr::null_mut(),
+        processus: std::ptr::null_mut(),
+    };
+    // SAFETY : la structure a la taille et la disposition de SHELLEXECUTEINFOW ; les chaînes sont terminées par un
+    // zéro et vivent pendant l'appel. La poignée du processus (demandée par le masque, vérifiée non nulle) est à nous
+    // et fermée une seule fois, par OwnedHandle.
+    unsafe {
+        if ShellExecuteExW(&raw mut info) == 0 || info.processus.is_null() {
+            return Err(GetLastError());
+        }
+        Ok(Fils(OwnedHandle::from_raw_handle(info.processus)))
+    }
+}
+
+/// Le serveur du tube, côté parent.
+struct Serveur {
+    tube: OwnedHandle,
+}
+
+impl Serveur {
+    /// Crée le tube : instance unique et première (un nom déjà pris, même par hasard, est une erreur), clients de
+    /// cet ordinateur seulement, accès au compte, à SYSTEM et aux administrateurs, à personne d'autre.
+    fn creer(canal: &str) -> Option<Self> {
+        const ACCES_DUPLEX: u32 = 0x3;
+        const PREMIERE_INSTANCE: u32 = 0x0008_0000;
+        const SANS_CLIENT_DISTANT: u32 = 0x8;
+        let sid = super::processus::sid()?;
+        let sddl = large(&format!("D:P(A;;GA;;;{sid})(A;;GA;;;SY)(A;;GA;;;BA)"));
+        let nom = large(&nom_du_tube(canal));
+        let mut descripteur: *mut c_void = std::ptr::null_mut();
+        // SAFETY : le descripteur alloué par Windows (vérifié non nul) vit pendant CreateNamedPipeW, puis est rendu
+        // une seule fois par LocalFree. La poignée du tube (vérifiée) est fermée une seule fois, par OwnedHandle.
+        unsafe {
+            if ConvertStringSecurityDescriptorToSecurityDescriptorW(
+                sddl.as_ptr(),
+                1,
+                &raw mut descripteur,
+                std::ptr::null_mut(),
+            ) == 0
+                || descripteur.is_null()
+            {
+                return None;
+            }
+            let securite = Securite {
+                taille: u32::try_from(std::mem::size_of::<Securite>()).ok()?,
+                descripteur,
+                heritable: 0,
+            };
+            let tube = CreateNamedPipeW(
+                nom.as_ptr(),
+                ACCES_DUPLEX | PREMIERE_INSTANCE,
+                SANS_CLIENT_DISTANT,
+                1,
+                4096,
+                4096,
+                0,
+                &raw const securite,
+            );
+            super::processus::LocalFree(descripteur);
+            if tube.is_null() || tube == POIGNEE_INVALIDE {
+                return None;
+            }
+            Some(Self {
+                tube: OwnedHandle::from_raw_handle(tube),
+            })
+        }
+    }
+
+    /// Attend le fils, et lui seul : un autre client (ou le veilleur, quand le fils est mort) est débranché.
+    fn attendre_le_fils(&self, pid: u32) -> bool {
+        const DEJA_BRANCHE: u32 = 535;
+        let moi = std::process::id();
+        for _ in 0..8 {
+            let mut client = 0u32;
+            // SAFETY : la poignée du tube est valide tant que `self` vit ; `client` est un entier à nous.
+            let branche = unsafe {
+                let r = ConnectNamedPipe(self.tube.as_raw_handle(), std::ptr::null_mut());
+                (r != 0 || GetLastError() == DEJA_BRANCHE)
+                    && GetNamedPipeClientProcessId(self.tube.as_raw_handle(), &raw mut client) != 0
+            };
+            if branche && client == pid {
+                return true;
+            }
+            if !branche || client == moi {
+                return false;
+            }
+            crate::journal::erreur(
+                "Correction élevée",
+                &format!("un client inattendu (PID {client}) s'est branché sur le canal : débranché"),
+            );
+            // SAFETY : idem.
+            unsafe { DisconnectNamedPipe(self.tube.as_raw_handle()) };
+        }
+        false
+    }
+
+    /// Envoie la liste, lit une réponse par ligne ; `None` si le fils n'a pas répondu jusqu'au bout.
+    fn dialoguer(&self, pid: u32, lignes: &[String]) -> Option<Vec<Reponse>> {
+        if !self.attendre_le_fils(pid) {
+            return None;
+        }
+        // SAFETY : la poignée reste à `self` (fermée par lui seul) : le File est oublié sans la fermer.
+        let fichier = unsafe { std::fs::File::from_raw_handle(self.tube.as_raw_handle()) };
+        let fichier = std::mem::ManuallyDrop::new(fichier);
+        let mut ecrivain = &*fichier;
+        let envoi: String = lignes
+            .iter()
+            .map(|l| format!("{l}\n"))
+            .chain(Some(format!("{FIN}\n")))
+            .collect();
+        ecrivain.write_all(envoi.as_bytes()).ok()?;
+        ecrivain.flush().ok()?;
+        let mut reponses = Vec::with_capacity(lignes.len());
+        for ligne in lire_lignes(&*fichier)? {
+            reponses.push(lire_reponse(&ligne));
+        }
+        (reponses.len() == lignes.len()).then_some(reponses)
+    }
+}
+
+/// Les lignes reçues jusqu'à « fin », bornées en nombre et en longueur ; `None` si le flux s'arrête avant.
+fn lire_lignes(source: impl Read) -> Option<Vec<String>> {
+    let mut lecteur = BufReader::new(source.take(u64::try_from((LIGNES_MAX + 1) * (LIGNE_MAX + 1)).ok()?));
+    let mut lignes = Vec::new();
+    loop {
+        let mut ligne = String::new();
+        if lecteur.read_line(&mut ligne).ok()? == 0 {
+            return None;
+        }
+        let ligne = ligne.trim_end_matches(['\r', '\n']).to_string();
+        if ligne == FIN {
+            return Some(lignes);
+        }
+        if ligne.len() > LIGNE_MAX || lignes.len() >= LIGNES_MAX {
+            return None;
+        }
+        lignes.push(ligne);
+    }
+}
+
+// ------------------------------------------------------------------ le fils
+
+/// La sous-commande `appliquer-eleve` : rend le code de sortie du processus.
+pub(crate) fn executer(canal: &str, parent: u32) -> i32 {
+    trp!(
+        "Vanguard applique une correction (administrateur).",
+        "Vanguard is applying a fix (administrator)."
+    );
+    if !super::processus::eleve() {
+        trp!(
+            "Ce processus n'a pas les droits d'administrateur : rien n'est fait.",
+            "This process has no administrator rights: nothing is done."
+        );
+        return CANAL_REFUSE;
+    }
+    let Some(tube) = ouvrir_le_canal(canal, parent) else {
+        trp!(
+            "Le canal ne mène pas au Vanguard qui a demandé la correction : rien n'est fait.",
+            "The channel does not lead to the Vanguard that asked for the fix: nothing is done."
+        );
+        attendre_entree_pour_fermer();
+        return CANAL_REFUSE;
+    };
+    let mut tube = tube;
+    let Some(lignes) = lire_lignes(&tube) else {
+        return CANAL_REFUSE;
+    };
+    let Some(liste) = corrections::valider(&lignes) else {
+        trp!(
+            "La liste reçue n'est pas une liste de corrections de Vanguard : rien n'est fait. Un autre programme y a touché : lance une analyse antivirus.",
+            "The list received is not a Vanguard fix list: nothing is done. Another program touched it: run an antivirus scan."
+        );
+        let _ = tube.write_all(format!("{FIN}\n").as_bytes());
+        attendre_entree_pour_fermer();
+        return LISTE_REFUSEE;
+    };
+    println!();
+    trp!("Ce qui va être fait :", "What will be done:");
+    for c in &liste {
+        println!("  · {}", c.texte());
+    }
+    println!();
+    let accord = crate::ui::demander(tr!(
+        "Appuie sur Entrée pour appliquer, ou tape n pour annuler : ",
+        "Press Enter to apply, or type n to cancel: "
+    ));
+    let mut code = 0;
+    let mut arret = !accord.trim().is_empty();
+    if arret {
+        trp!("Annulé : rien n'a été modifié.", "Cancelled: nothing was changed.");
+    }
+    for c in &liste {
+        let r = if arret { refusee() } else { faire(c) };
+        if !r.reussi {
+            code = 1;
+            // Sans point de restauration, et la personne ne veut pas continuer sans : tout le reste est abandonné.
+            arret |= matches!(c.geste, corrections::Geste::PointDeRestauration);
+        }
+        if tube.write_all(format!("{}\n", ligne_resultat(&r)).as_bytes()).is_err() {
+            code = CANAL_REFUSE;
+        }
+    }
+    let _ = tube.write_all(format!("{FIN}\n").as_bytes());
+    let _ = tube.flush();
+    drop(tube);
+    println!();
+    if code == 0 {
+        trp!("{VERT}Terminé.{RESET}", "{VERT}Finished.{RESET}");
+    } else {
+        trp!(
+            "Terminé, avec au moins une étape en échec.",
+            "Finished, with at least one failed step."
+        );
+    }
+    attendre_entree_pour_fermer();
+    code
+}
+
+fn attendre_entree_pour_fermer() {
+    let _ = crate::ui::demander(tr!("Appuie sur Entrée pour fermer : ", "Press Enter to close: "));
+}
+
+/// Une correction non faite parce qu'on s'est arrêté avant.
+fn refusee() -> Resultat {
+    Resultat {
+        reussi: false,
+        avant: None,
+        raison: tr!("non faite (arrêt demandé)", "not done (stopped as asked)").to_string(),
+    }
+}
+
+/// Fait un geste de la liste, en l'annonçant, puis « OK » ou l'erreur : une fenêtre muette ne se distingue pas d'une
+/// fenêtre figée.
+fn faire(c: &Correction) -> Resultat {
+    println!("{GRIS}> {}  {}{RESET}", chrono::Local::now().format("%H:%M"), c.texte());
+    let r = corrections::appliquer(c);
+    if r.reussi {
+        match &r.avant {
+            Some(avant) => trp!(
+                "  {VERT}OK{RESET} (avant : {avant})",
+                "  {VERT}OK{RESET} (before: {avant})"
+            ),
+            None => trp!("  {VERT}OK{RESET}", "  {VERT}OK{RESET}"),
+        }
+    } else {
+        trp!("  Échec : {}", "  Failed: {}", r.raison);
+    }
+    r
+}
+
+/// Se branche sur le tube du parent, puis vérifie que le serveur est bien le processus annoncé et que son programme
+/// est le même que celui-ci (même empreinte).
+fn ouvrir_le_canal(canal: &str, parent: u32) -> Option<std::fs::File> {
+    const OCCUPE: u32 = 231;
+    if !canal_valide(canal) || parent == 0 {
+        return None;
+    }
+    let nom = nom_du_tube(canal);
+    let nom_large = large(&nom);
+    let mut tube = None;
+    for _ in 0..10 {
+        match std::fs::OpenOptions::new().read(true).write(true).open(&nom) {
+            Ok(f) => {
+                tube = Some(f);
+                break;
+            }
+            Err(e) if e.raw_os_error() == Some(i32::try_from(OCCUPE).ok()?) => {
+                // SAFETY : chaîne terminée par un zéro, vivante pendant l'appel.
+                unsafe { WaitNamedPipeW(nom_large.as_ptr(), 30_000) };
+            }
+            Err(_) => return None,
+        }
+    }
+    let tube = tube?;
+    let mut serveur = 0u32;
+    // SAFETY : poignée valide (le File vit) ; `serveur` est un entier à nous.
+    if unsafe { GetNamedPipeServerProcessId(tube.as_raw_handle(), &raw mut serveur) } == 0 || serveur != parent {
+        return None;
+    }
+    let moi = std::env::current_exe().ok()?;
+    let chemin_parent = std::path::PathBuf::from(super::processus::chemin(parent)?);
+    (empreinte(&moi)? == empreinte(&chemin_parent)?).then_some(tube)
+}
+
+/// Point de restauration par srclient.dll (chargée à la demande : absente, rien ne manque au programme). Impossible
+/// (protection du système coupée sur C:) : on le dit et on demande s'il faut continuer sans. Windows ne crée qu'un
+/// point par 24 h : le plus récent sert alors, l'appel réussit sans en créer.
+pub(crate) fn point_de_restauration() -> (bool, String) {
+    const DEBUT: u32 = 100;
+    const FIN_CHANGEMENT: u32 = 101;
+    const REGLAGES: u32 = 12;
+    type Poser = unsafe extern "system" fn(*mut PointInfo, *mut PointEtat) -> i32;
+    let description = trf!("Vanguard : avant une correction", "Vanguard: before a fix");
+    let mut info = PointInfo {
+        evenement: DEBUT,
+        genre: REGLAGES,
+        sequence: 0,
+        description: [0; 256],
+    };
+    for (place, c) in info.description.iter_mut().zip(description.encode_utf16().take(255)) {
+        *place = c;
+    }
+    let mut etat = PointEtat { statut: 0, sequence: 0 };
+    let bibliotheque = large("srclient.dll");
+    // SAFETY : la bibliothèque et la fonction sont vérifiées non nulles avant l'appel ; la signature est celle de
+    // SRSetRestorePointW ; les deux structures ont la disposition attendue et vivent pendant l'appel. Un deuxième appel
+    // ferme le changement (séquence rendue par le premier).
+    let pose = unsafe {
+        let module = LoadLibraryW(bibliotheque.as_ptr());
+        if module.is_null() {
+            return (false, "srclient.dll absente".into());
+        }
+        let adresse = GetProcAddress(module, c"SRSetRestorePointW".as_ptr().cast());
+        if adresse.is_null() {
+            return (false, "SRSetRestorePointW absente".into());
+        }
+        let poser: Poser = std::mem::transmute::<*mut c_void, Poser>(adresse);
+        let ok = poser(&raw mut info, &raw mut etat) != 0;
+        if ok {
+            info.evenement = FIN_CHANGEMENT;
+            info.sequence = etat.sequence;
+            poser(&raw mut info, &raw mut etat);
+        }
+        ok
+    };
+    if pose {
+        return (true, String::new());
+    }
+    trp!(
+        "  Point de restauration impossible (erreur {}) : protection du système désactivée sur C: ?",
+        "  Restore point not possible (error {}): system protection turned off on C:?",
+        etat.statut
+    );
+    let reponse = crate::ui::demander(tr!(
+        "  Continuer sans point de restauration ? [o/N] : ",
+        "  Continue without a restore point? [y/N]: "
+    ));
+    if crate::langue::oui(&reponse) {
+        (true, String::new())
+    } else {
+        (false, tr!("arrêté à ta demande", "stopped as you asked").to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn le_canal_a_une_forme_fixe() {
+        assert!(canal_valide("0123456789abcdef0123456789abcdef"));
+        for mauvais in [
+            "",
+            "0123456789ABCDEF0123456789abcdef",
+            "0123456789abcdef0123456789abcde",
+            "0123456789abcdef0123456789abcdef0",
+            "../0123456789abcdef0123456789abc",
+            "0123456789abcdef0123456789abcdeg",
+        ] {
+            assert!(!canal_valide(mauvais), "{mauvais}");
+        }
+        assert_eq!(nom_du_tube("ab"), r"\\.\pipe\vanguard-ab");
+    }
+
+    #[test]
+    fn les_reponses_se_lisent() {
+        let r = lire_reponse("ok avant=1");
+        assert!(r.reussi && r.avant.as_deref() == Some("1"));
+        let r = lire_reponse("ok");
+        assert!(r.reussi && r.avant.is_none());
+        assert!(!lire_reponse("echec relu 0 au lieu de 1").reussi);
+        assert!(!lire_reponse("okay").reussi);
+        assert!(!lire_reponse("").reussi);
+        let aller_retour = ligne_resultat(&Resultat {
+            reussi: false,
+            avant: Some("1".into()),
+            raison: "a\r\nb".into(),
+        });
+        assert_eq!(aller_retour, "echec a  b");
+    }
+
+    /// Les lignes reçues s'arrêtent à « fin » et sont bornées : un flux sans fin, trop long ou trop fourni est refusé.
+    #[test]
+    fn la_lecture_est_bornee() {
+        let flux = b"vanguard:rdp-nla\r\nvanguard:wdigest-coupe\nfin\nautre\n";
+        assert_eq!(
+            lire_lignes(&flux[..]).unwrap(),
+            ["vanguard:rdp-nla", "vanguard:wdigest-coupe"]
+        );
+        assert!(lire_lignes(&b"vanguard:rdp-nla\n"[..]).is_none());
+        let longue = format!("{}\nfin\n", "a".repeat(LIGNE_MAX + 1));
+        assert!(lire_lignes(longue.as_bytes()).is_none());
+        let fournie = format!("{}fin\n", "x\n".repeat(LIGNES_MAX + 1));
+        assert!(lire_lignes(fournie.as_bytes()).is_none());
+        let sans_fin = "x\n".repeat(100_000);
+        assert!(lire_lignes(sans_fin.as_bytes()).is_none());
+    }
+
+    #[test]
+    fn les_structures_ont_la_taille_de_windows() {
+        assert_eq!(std::mem::size_of::<InfoLancement>(), 112);
+        assert_eq!(std::mem::size_of::<Securite>(), 24);
+        assert_eq!(std::mem::size_of::<PointInfo>(), 528);
+        assert_eq!(std::mem::size_of::<PointEtat>(), 16);
+    }
+}
