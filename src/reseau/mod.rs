@@ -1279,10 +1279,6 @@ fn afficher(r: &Rapport) {
         .collect();
     objets::afficher(&objets, false);
 
-    if let Some(e) = &r.upnp {
-        crate::reseau::upnp::afficher(e);
-    }
-
     if let Some(e) = &r.empoisonnement {
         crate::reseau::empoisonnement::afficher(e, &r.hotes);
     }
@@ -1301,6 +1297,12 @@ fn afficher(r: &Rapport) {
                 ajuster(&a.titre, 30)
             );
         }
+    }
+    // Ce que la maison montre à Internet, d'après ce scan du réseau local (l'UPnP n'est demandé à la box que pour
+    // lui) : les ports que la box renvoie, son adresse, l'IPv6, ses services. Rien n'est demandé à Internet ici.
+    if r.upnp.is_some() {
+        let entree = crate::audit::exposition::Entree::du_scan(r);
+        crate::audit::exposition::afficher_section(&crate::audit::exposition::constats(&entree));
     }
     // Chemins du menu depuis la 0.43 (groupe 5 « Réseau et Internet »), et la même chose en ligne de commande.
     println!();
@@ -1338,8 +1340,9 @@ pub async fn executer(o: Options) -> Result<Rapport, String> {
     let delai = Duration::from_millis(o.timeout);
     let gw = scan::passerelle();
     let parallele = scan::limite_connexions(o.parallele);
-    // L'état de l'UPnP : upnpc attend les réponses de la box jusqu'à 8 s. Demandé dès maintenant, à côté, il est prêt à
-    // la fin du scan au lieu de l'allonger d'autant. Après les lectures qui peuvent échouer : rien ne tourne pour rien.
+    // L'état de l'UPnP : la recherche de la box attend ses réponses 3 s, puis lui demande ses redirections. Demandé
+    // dès maintenant, à côté, il est prêt à la fin du scan au lieu de l'allonger d'autant. Après les lectures qui
+    // peuvent échouer : rien ne tourne pour rien.
     let upnp = reseau_local.then(|| tokio::task::spawn_blocking(crate::reseau::upnp::etat));
     // Les faux noms sur le réseau local, demandés à côté du scan : la sonde (deux essais d'environ 1,5 s) finit avant
     // le scan (8-10 s) et ne le ralentit pas. Seulement sur le réseau local (pas de cible précise ni de VPN seul) ;
