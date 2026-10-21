@@ -744,20 +744,16 @@ fn lancer_chacune(correctifs: &[Vec<String>]) -> Vec<bool> {
 /// prêt à montrer). Sans droits admin, les programmes de root/SYSTEM restent souvent anonymes.
 pub fn programmes_en_ecoute() -> std::collections::HashMap<u16, String> {
     let mut map = std::collections::HashMap::new();
+    // Les prises lues dans le noyau (netlink, sinon /proc/net), sans lancer ss : le service de chacune vient de son
+    // groupe de contrôle, ce qui nomme aussi ceux de root.
     #[cfg(target_os = "linux")]
-    for l in sortie("ss", &["-Htlnpe"]).unwrap_or_default().lines() {
-        let c: Vec<&str> = l.split_whitespace().collect();
-        let port = c
-            .get(3)
-            .and_then(|a| a.rsplit_once(':'))
-            .and_then(|(_, p)| p.parse::<u16>().ok());
-        let nom = c
-            .get(5)
-            .and_then(|u| u.split('"').nth(1))
-            .map(affichable)
-            .or_else(|| linux::service_du_cgroup(l));
-        if let (Some(port), Some(nom)) = (port, nom) {
-            map.insert(port, nom);
+    for p in linux::ecoute::prises_ou_ss()
+        .unwrap_or_default()
+        .iter()
+        .filter(|p| !p.udp)
+    {
+        if let Some(nom) = p.nom() {
+            map.insert(p.port, nom);
         }
     }
     // « COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME » … « ControlCe 512 alice 9u IPv4 … TCP *:7000 (LISTEN) ».
