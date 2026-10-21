@@ -552,28 +552,122 @@ mod systeme {
         sorte: String,
     }
 
-    /// Une seule lecture PowerShell, en JSON : matériel, système, puis les événements des 30 derniers jours
-    /// (1001 = écran bleu, 41 = arrêt brutal) et les programmes plantés des 7 derniers jours (événement 1000).
-    fn lire() -> Option<Etat> {
-        let json = crate::machine::windows::ps(
-            r#"$os = Get-CimInstance Win32_OperatingSystem; $cs = Get-CimInstance Win32_ComputerSystem
-               $cpu = @(Get-CimInstance Win32_Processor)[0]; $mois = (Get-Date).AddDays(-30); $semaine = (Get-Date).AddDays(-7)
-               $bleus = @(Get-WinEvent -FilterHashtable @{ LogName = 'System'; Id = 1001; ProviderName = 'Microsoft-Windows-WER-SystemErrorReporting'; StartTime = $mois } -ErrorAction SilentlyContinue)
-               [pscustomobject]@{
-                 systeme = $os.Caption; version = "$($os.Version)"; nom = $env:COMPUTERNAME
-                 modele = "$($cs.Manufacturer) $($cs.Model)"; bios = "$((Get-CimInstance Win32_BIOS).SMBIOSBIOSVersion)"
-                 allume_s = [uint64]((Get-Date) - $os.LastBootUpTime).TotalSeconds
-                 processeur = "$($cpu.Name)".Trim(); fils = [uint32]$cpu.NumberOfLogicalProcessors
-                 memoire = [uint64]$cs.TotalPhysicalMemory; memoire_libre = [uint64]$os.FreePhysicalMemory * 1024
-                 cartes = @(Get-CimInstance Win32_VideoController | ForEach-Object { @{ nom = "$($_.Name)"; pilote = "$($_.DriverVersion)" } })
-                 disques = @(try { Get-PhysicalDisk | ForEach-Object { @{ nom = "$($_.FriendlyName)"; taille = [uint64]$_.Size; sorte = "$($_.MediaType)" } } } catch { })
-                 ecrans_bleus = $bleus.Count
-                 dernier_ecran_bleu = if ($bleus.Count) { $bleus[0].TimeCreated.ToString('yyyy-MM-dd') } else { '' }
-                 arrets_brutaux = @(Get-WinEvent -FilterHashtable @{ LogName = 'System'; Id = 41; StartTime = $mois } -ErrorAction SilentlyContinue).Count
-                 plantages = @(Get-WinEvent -FilterHashtable @{ LogName = 'Application'; Id = 1000; StartTime = $semaine } -ErrorAction SilentlyContinue | ForEach-Object { "$($_.Properties[0].Value)" })
-               } | ConvertTo-Json -Compress -Depth 3"#,
+    /// Ce que lisait le script, sans PowerShell : WMI pour le système et le matériel, les journaux par wevtapi.
+    /// `None` sans Win32_OperatingSystem.
+    fn lire_directement() -> Option<Etat> {
+        use crate::machine::windows::evenements::{date_locale, parcourir};
+        use crate::machine::windows::wmi::{self, Ligne};
+        const CIMV2: &str = r"root\cimv2";
+        let premiere = |classe: &str, champs: &[&str]| -> Option<Ligne> {
+            wmi::requete(CIMV2, classe, "", champs).and_then(|l| l.into_iter().next())
+        };
+        let os = premiere(
+            "Win32_OperatingSystem",
+            &["Caption", "Version", "LastBootUpTime", "FreePhysicalMemory"],
         )?;
-        let mut e: Etat = serde_json::from_str(&json).ok()?;
+        let cs = premiere(
+            "Win32_ComputerSystem",
+            &["Manufacturer", "Model", "TotalPhysicalMemory"],
+        );
+        let cpu = premiere("Win32_Processor", &["Name", "NumberOfLogicalProcessors"]);
+        let bios = premiere("Win32_BIOS", &["SMBIOSBIOSVersion"]);
+        let texte = |l: Option<&Ligne>, c: &str| l.and_then(|l| l[c].texte()).unwrap_or_default().to_string();
+        let nombre = |l: Option<&Ligne>, c: &str| {
+            l.and_then(|l| l[c].entier())
+                .map_or(0, |n| u64::try_from(n).unwrap_or(0))
+        };
+        let cartes = wmi::requete(CIMV2, "Win32_VideoController", "", &["Name", "DriverVersion"])
+            .unwrap_or_default()
+            .iter()
+            .map(|c| Carte {
+                nom: texte(Some(c), "Name"),
+                pilote: texte(Some(c), "DriverVersion"),
+            })
+            .collect();
+        let disques = wmi::requete(
+            r"root\Microsoft\Windows\Storage",
+            "MSFT_PhysicalDisk",
+            "",
+            &["FriendlyName", "Size", "MediaType"],
+        )
+        .unwrap_or_default()
+        .iter()
+        .map(|d| Disque {
+            nom: texte(Some(d), "FriendlyName"),
+            taille: nombre(Some(d), "Size"),
+            // MediaType écrit comme Get-PhysicalDisk l'écrit.
+            sorte: match d["MediaType"].entier() {
+                Some(3) => "HDD",
+                Some(4) => "SSD",
+                Some(5) => "SCM",
+                _ => "Unspecified",
+            }
+            .into(),
+        })
+        .collect();
+        let fin = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        let depuis = |jours: u64| format!("TimeCreated[timediff(@SystemTime) <= {}]", jours * 86_400_000);
+        // Les événements d'un journal, du plus récent au plus ancien : la date locale et la première valeur.
+        let evenements = |journal: &str, filtre: String| {
+            parcourir(
+                journal,
+                &format!("*[System[{filtre}]]"),
+                10_000,
+                fin,
+                |_, date, valeurs| {
+                    Some(format!(
+                        "{}|{}",
+                        date_locale(date).unwrap_or_default(),
+                        valeurs.first().map(String::as_str).unwrap_or_default()
+                    ))
+                },
+            )
+            .unwrap_or_default()
+        };
+        let bleus = evenements(
+            "System",
+            format!(
+                "Provider[@Name='Microsoft-Windows-WER-SystemErrorReporting'] and (EventID=1001) and {}",
+                depuis(30)
+            ),
+        );
+        let arrets = evenements("System", format!("(EventID=41) and {}", depuis(30)));
+        let plantages = evenements("Application", format!("(EventID=1000) and {}", depuis(7)));
+        let os = Some(&os);
+        Some(Etat {
+            systeme: texte(os, "Caption"),
+            version: texte(os, "Version"),
+            nom: std::env::var("COMPUTERNAME").unwrap_or_default(),
+            modele: format!("{} {}", texte(cs.as_ref(), "Manufacturer"), texte(cs.as_ref(), "Model")),
+            bios: texte(bios.as_ref(), "SMBIOSBIOSVersion"),
+            allume_s: os
+                .and_then(|o| o["LastBootUpTime"].texte())
+                .and_then(|d| wmi::secondes_depuis(d, chrono::Utc::now()))
+                .unwrap_or(0),
+            processeur: texte(cpu.as_ref(), "Name").trim().to_string(),
+            fils: u32::try_from(nombre(cpu.as_ref(), "NumberOfLogicalProcessors")).unwrap_or(0),
+            memoire: nombre(cs.as_ref(), "TotalPhysicalMemory"),
+            memoire_libre: nombre(os, "FreePhysicalMemory") * 1024,
+            cartes,
+            disques,
+            ecrans_bleus: u32::try_from(bleus.len()).unwrap_or(u32::MAX),
+            dernier_ecran_bleu: bleus.first().and_then(|l| l.get(..10)).unwrap_or_default().to_string(),
+            arrets_brutaux: u32::try_from(arrets.len()).unwrap_or(u32::MAX),
+            plantages: plantages
+                .iter()
+                .map(|l| l.split_once('|').map_or("", |(_, p)| p).to_string())
+                .collect(),
+        })
+    }
+
+    /// Une seule lecture, directe (WMI, journaux) ou par PowerShell en secours : matériel, système, puis les
+    /// événements des 30 derniers jours (1001 = écran bleu, 41 = arrêt brutal) et les programmes plantés des
+    /// 7 derniers jours (événement 1000).
+    fn lire() -> Option<Etat> {
+        let mut e = match lire_directement() {
+            Some(e) => e,
+            None => lire_powershell()?,
+        };
         // Chaque texte prêt à montrer : un programme planté porte le nom de son choix, un disque branché aussi.
         for t in [
             &mut e.systeme,
@@ -596,6 +690,37 @@ mod systeme {
             *p = affichable(p);
         }
         Some(e)
+    }
+
+    /// Le WMI de Wine connaît le système et le processeur : la lecture directe répond, sans PowerShell.
+    #[cfg(test)]
+    #[test]
+    fn diagnostic_direct() {
+        let e = lire_directement().expect("Win32_OperatingSystem répond");
+        assert!(!e.systeme.is_empty() && e.fils >= 1, "{} {}", e.systeme, e.fils);
+        assert!(e.dernier_ecran_bleu.is_empty() || e.dernier_ecran_bleu.len() == 10);
+    }
+
+    fn lire_powershell() -> Option<Etat> {
+        let json = crate::machine::windows::ps(
+            r#"$os = Get-CimInstance Win32_OperatingSystem; $cs = Get-CimInstance Win32_ComputerSystem
+               $cpu = @(Get-CimInstance Win32_Processor)[0]; $mois = (Get-Date).AddDays(-30); $semaine = (Get-Date).AddDays(-7)
+               $bleus = @(Get-WinEvent -FilterHashtable @{ LogName = 'System'; Id = 1001; ProviderName = 'Microsoft-Windows-WER-SystemErrorReporting'; StartTime = $mois } -ErrorAction SilentlyContinue)
+               [pscustomobject]@{
+                 systeme = $os.Caption; version = "$($os.Version)"; nom = $env:COMPUTERNAME
+                 modele = "$($cs.Manufacturer) $($cs.Model)"; bios = "$((Get-CimInstance Win32_BIOS).SMBIOSBIOSVersion)"
+                 allume_s = [uint64]((Get-Date) - $os.LastBootUpTime).TotalSeconds
+                 processeur = "$($cpu.Name)".Trim(); fils = [uint32]$cpu.NumberOfLogicalProcessors
+                 memoire = [uint64]$cs.TotalPhysicalMemory; memoire_libre = [uint64]$os.FreePhysicalMemory * 1024
+                 cartes = @(Get-CimInstance Win32_VideoController | ForEach-Object { @{ nom = "$($_.Name)"; pilote = "$($_.DriverVersion)" } })
+                 disques = @(try { Get-PhysicalDisk | ForEach-Object { @{ nom = "$($_.FriendlyName)"; taille = [uint64]$_.Size; sorte = "$($_.MediaType)" } } } catch { })
+                 ecrans_bleus = $bleus.Count
+                 dernier_ecran_bleu = if ($bleus.Count) { $bleus[0].TimeCreated.ToString('yyyy-MM-dd') } else { '' }
+                 arrets_brutaux = @(Get-WinEvent -FilterHashtable @{ LogName = 'System'; Id = 41; StartTime = $mois } -ErrorAction SilentlyContinue).Count
+                 plantages = @(Get-WinEvent -FilterHashtable @{ LogName = 'Application'; Id = 1000; StartTime = $semaine } -ErrorAction SilentlyContinue | ForEach-Object { "$($_.Properties[0].Value)" })
+               } | ConvertTo-Json -Compress -Depth 3"#,
+        )?;
+        serde_json::from_str(&json).ok()
     }
 
     pub fn sections() -> Vec<Section> {

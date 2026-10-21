@@ -1057,14 +1057,6 @@ mod systeme {
             .collect()
     }
 
-    /// Secondes depuis une date CIM (« 20261020075504.500000-240 », décalage en minutes) ; `None` si illisible.
-    pub(super) fn secondes_depuis(date_cim: &str, maintenant: chrono::DateTime<chrono::Utc>) -> Option<u64> {
-        let locale = chrono::NaiveDateTime::parse_from_str(date_cim.get(..14)?, "%Y%m%d%H%M%S").ok()?;
-        let decalage: i64 = date_cim.get(21..)?.parse().ok()?;
-        let utc = locale - chrono::Duration::minutes(decalage);
-        u64::try_from((maintenant.naive_utc() - utc).num_seconds()).ok()
-    }
-
     /// Durée du dernier démarrage (événement 100) et ce qui l'a ralenti depuis trente jours (101, 102, 103, 106),
     /// comme le script : (durée, après l'ouverture de session, illisible, lents). Le journal ne s'ouvre qu'aux
     /// administrateurs : refusé sans élévation, c'est « illisible ».
@@ -1237,7 +1229,7 @@ mod systeme {
             allume_s: os.as_ref().and_then(|o| {
                 o["LastBootUpTime"]
                     .texte()
-                    .and_then(|d| secondes_depuis(d, chrono::Utc::now()))
+                    .and_then(|d| wmi::secondes_depuis(d, chrono::Utc::now()))
             }),
             libre: lecteur.as_ref().map_or(0, |l| l.libre),
             total: lecteur.as_ref().map_or(0, |l| l.total),
@@ -1320,14 +1312,6 @@ mod systeme {
             assert_eq!(nom_du_processus("chrome"), "chrome");
             assert_eq!(nom_du_processus("C#"), "C#");
             assert_eq!(nom_du_processus("a#b"), "a#b");
-            let maintenant = chrono::DateTime::parse_from_rfc3339("2026-10-20T16:00:00Z")
-                .unwrap()
-                .to_utc();
-            // 07:55:04 à UTC−4 = 11:55:04 UTC : 4 h 4 min 56 s plus tôt.
-            assert_eq!(secondes_depuis("20261020075504.500000-240", maintenant), Some(14_696));
-            assert_eq!(secondes_depuis("20261020160000.000000+000", maintenant), Some(0));
-            assert_eq!(secondes_depuis("pas une date", maintenant), None);
-            assert_eq!(secondes_depuis("20261021000000.000000+000", maintenant), None);
         }
 
         /// Le relevé direct répond ou laisse la main à PowerShell ; jamais une valeur hors bornes.
