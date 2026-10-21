@@ -26,8 +26,8 @@ delivered just before it. Only the latest version has its download page; every v
   public DNS; an interpreter (python3, PowerShell) is never quarantined, at most the script it runs. Without the
   rights needed, nothing is done halfway.
 - **Settings, all in one place** (This machine › Settings, "s" in the main menu, or `vanguard settings`): language,
-  emojis, working without the Internet, hourly monitoring, monthly check-up, learned alerts, blocking and extension
-  restrictions. Each change shows the previous value and the command to put it back; learned alerts and blocking open
+  emojis, working without the Internet, real-time protection, hourly monitoring, monthly check-up, learned alerts,
+  blocking, extension restrictions and the abuse.ch key. Each change shows the previous value and the command to put it back; learned alerts and blocking open
   their own screen ("What Vanguard has learned", Threat blocking). Language, emojis and working without the Internet
   stay chosen from one launch to the next (VANGUARD_LANG, VANGUARD_EMOJI and VANGUARD_HORS_LIGNE always win).
 - **Vanguard's real-time protection turns off, for a while or until turned back on** (Settings, or `vanguard settings
@@ -59,6 +59,28 @@ delivered just before it. Only the latest version has its download page; every v
 - **Calculations checked in the released version** (ANSSI guide, LANG-ARITH): a number that overflows on hostile data
   (a size read in a network packet, a log, a Windows program) stops the check concerned instead of silently wrapping
   to zero and skewing what follows; the rest of the check goes on.
+- **abuse.ch lists with your key.** On October 21, abuse.ch closed its public lists: MalwareBazaar, URLhaus and
+  ThreatFox now require a free key, created at auth.abuse.ch. Vanguard takes it in Settings or in "Who talks to the
+  Internet?", keeps it on this computer (readable by the account only), shows it only masked and never writes it in a
+  displayed address or a log. Without a key, or with a refused key, these lists are reported as not checked, never as
+  clean; Feodo Tracker stays keyless.
+- **Linux read without extra commands.** A D-Bus client written for Vanguard reads failed services, boot time and disk
+  health (UDisks2), instead of systemctl, systemd-analyze and busctl; GNOME settings and Flatpak app permissions are
+  read from their files (GVDB); the systemd journal and its compressed data (zstd) are read in Rust, with journalctl and
+  pacman kept as fallbacks. On macOS, administrator accounts are read through the system library, without dscl.
+- **Each released program carries the list of its dependencies** (cargo auditable): anyone can check it against known
+  flaws with `cargo audit bin`, and a known flaw stops the release. cargo audit joins cargo deny in every check, and
+  unsound code is refused across the whole dependency tree.
+- **Hostile input put to the test**: property tests on the readers of data that comes from elsewhere (router, DNS, HTTP,
+  DHCP lease, logs, AI agent settings, Windows drivers and events) and a fuzzing bench. Two crashes found and fixed: an
+  outsized date in a macOS lease, and a nested "cmd /c" that overflowed the stack. File size sums are bounded, a file
+  that crashes the YARA scan is still matched against the fingerprints, and a DNS measurement whose thread crashes is
+  reported as not checked.
+- **Rescue key tools**: the key keeps itself up to date even when it stays plugged in (program and images every day,
+  new images looked for on the 1st and the 15th, each download announced), Ventoy is checked on the key and its update
+  offered, then done without erasing anything after the password; Windows 11 is flagged past six months.
+- **Reporting a flaw**: SECURITY.md says how (GitHub's private reporting), what to include, and what follows the fix
+  (a published security advisory, a CVE if the flaw warrants one).
 - **Security review.** An attack tool is certain only by the name of the program itself: a script run by an interpreter
   that bears the tool's exact name (python3 laZagne.py) is only a doubt, and a name that merely starts like the tool
   (python3 sharphound_parser.py) is no longer reported. The program is checked again at the very moment it is stopped

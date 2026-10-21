@@ -27,8 +27,8 @@ chaque version garde son étiquette dans le dépôt (`git checkout v0.62.0`, par
   locale ou un DNS public ; un interpréteur (python3, PowerShell) n'est jamais mis en quarantaine, au plus le script
   qu'il lance. Sans les droits nécessaires, rien n'est fait à moitié.
 - **Paramètres, tous au même endroit** (Cette machine › Paramètres, « s » au menu principal, ou `vanguard parametres`) :
-  langue, emojis, travail sans Internet, surveillance horaire, entretien du mois, alertes apprises, blocage et
-  restrictions des extensions. Chaque changement montre la valeur d'avant et la commande pour la remettre ; les alertes
+  langue, emojis, travail sans Internet, protection en temps réel, surveillance horaire, entretien du mois, alertes
+  apprises, blocage, restrictions des extensions et clé abuse.ch. Chaque changement montre la valeur d'avant et la commande pour la remettre ; les alertes
   apprises et le blocage ouvrent leur propre écran (« Ce que Vanguard a appris », Blocage des menaces). La langue, les
   emojis et le travail sans Internet restent choisis d'un lancement à l'autre (VANGUARD_LANG, VANGUARD_EMOJI et
   VANGUARD_HORS_LIGNE l'emportent toujours).
@@ -65,6 +65,30 @@ chaque version garde son étiquette dans le dépôt (`git checkout v0.62.0`, par
 - **Calculs vérifiés dans la version publiée** (guide de l'ANSSI, LANG-ARITH) : un nombre qui déborde sur une donnée
   hostile (une taille lue dans un paquet réseau, un journal, un programme Windows) arrête la vérification en cause au
   lieu de repartir à zéro en silence et de fausser la suite ; le reste du bilan continue.
+- **Listes d'abuse.ch avec ta clé.** Le 21 octobre, abuse.ch a fermé ses listes publiques : MalwareBazaar, URLhaus et
+  ThreatFox demandent désormais une clé gratuite, à créer sur auth.abuse.ch. Vanguard la prend dans Paramètres ou dans
+  « Qui parle à Internet ? », la garde sur cet ordinateur (lisible par le compte seul), ne la montre que masquée et ne
+  l'écrit jamais dans une adresse affichée ni dans un journal. Sans clé, ou avec une clé refusée, ces listes sont dites
+  non vérifiées, jamais saines ; Feodo Tracker reste sans clé.
+- **Linux lu sans commandes de plus.** Un client D-Bus écrit pour Vanguard lit les services en échec, la durée du
+  démarrage et la santé des disques (UDisks2), à la place de systemctl, systemd-analyze et busctl ; les réglages de
+  GNOME et les autorisations des applications Flatpak se lisent dans leurs fichiers (GVDB) ; le journal de systemd et
+  ses données compressées (zstd) se lisent en Rust, journalctl et pacman restant en secours. Sous macOS, les comptes
+  administrateurs se lisent par la bibliothèque du système, sans dscl.
+- **Chaque programme publié porte la liste de ses dépendances** (cargo auditable) : n'importe qui peut le vérifier
+  contre les failles connues avec `cargo audit bin`, et une faille connue arrête la publication. cargo audit s'ajoute à
+  cargo deny dans chaque vérification, et le code défaillant est refusé dans tout l'arbre des dépendances.
+- **Entrées hostiles mises à l'épreuve** : des tests de propriétés sur les lecteurs de données venues d'ailleurs (box,
+  DNS, HTTP, bail DHCP, journaux, réglages des agents d'IA, pilotes et événements de Windows) et un banc de fuzzing. Deux
+  plantages trouvés et corrigés : une date démesurée dans un bail macOS, et un « cmd /c » imbriqué qui débordait la pile.
+  Les sommes de tailles de fichiers sont bornées, un fichier qui fait planter l'analyse YARA reste comparé aux
+  empreintes, et une mesure DNS dont le fil plante est dite non vérifiée.
+- **Outils de la clé de secours** : la clé se tient à jour même branchée en permanence (programme et images chaque
+  jour, nouvelles images cherchées le 1er et le 15 du mois, chaque téléchargement annoncé), Ventoy est vérifié sur la clé
+  et sa mise à jour proposée, puis faite sans rien effacer après le mot de passe ; Windows 11 est signalé au-delà de six
+  mois.
+- **Signaler une faille** : SECURITY.md dit comment (le signalement privé de GitHub), ce qu'il faut joindre, et ce qui
+  suit la correction (avis de sécurité publié, CVE si la faille le mérite).
 - **Relecture de sécurité.** Un outil d'attaque n'est certain que par le nom du programme lui-même : un script lancé par
   un interpréteur et qui porte le nom exact de l'outil (python3 laZagne.py) n'est qu'un doute, et un nom qui ne fait que
   commencer comme l'outil (python3 sharphound_parser.py) n'est plus signalé. Le programme est revérifié au moment même
