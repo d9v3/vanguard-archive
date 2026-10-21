@@ -846,13 +846,22 @@ fn aur_a_mettre_a_jour() -> Option<usize> {
     if Paquets::detecter() != Some(Paquets::Pacman) || !depots_pacman_lus() {
         return None;
     }
-    let liste = sortie("pacman", &["-Qmq"])?;
-    let installes: Vec<&str> = liste.lines().filter(|l| !l.is_empty()).collect();
+    aur_selon(&paquets_etrangers()?, fiches_aur, natif::paquets_pacman)
+}
+
+/// Le compte, l'AUR et la base locale passés en paramètres pour que les tests n'aillent ni sur le réseau ni dans
+/// /var/lib/pacman. Aucun paquet étranger : tout est à jour, sans rien demander à l'AUR.
+fn aur_selon(
+    etrangers: &[String],
+    fiches: impl FnOnce(&[&str]) -> Option<Vec<serde_json::Value>>,
+    locaux: impl FnOnce() -> Option<Vec<(String, String)>>,
+) -> Option<usize> {
+    let installes: Vec<&str> = etrangers.iter().map(String::as_str).collect();
     if installes.is_empty() {
         return Some(0);
     }
-    let fiches = fiches_aur(&installes)?;
-    let locales: HashMap<String, String> = natif::paquets_pacman()?.into_iter().collect();
+    let fiches = fiches(&installes)?;
+    let locales: HashMap<String, String> = locaux()?.into_iter().collect();
     Some(plus_recents_dans_l_aur(&locales, &fiches))
 }
 
@@ -972,6 +981,111 @@ fn rpmvercmp(a: &str, b: &str) -> std::cmp::Ordering {
     }
 }
 
+/// Les paquets installés qu'aucun dépôt de pacman.conf ne fournit, ce que liste « pacman -Qmq » : les noms de la
+/// base locale absents de toutes les bases sync/*.db. La commande ne reste qu'en secours, quand une base ne se lit
+/// pas en Rust (compressée en zstd ou en xz, ce que nos dépendances ne savent pas ouvrir) : compter un paquet comme
+/// étranger parce que sa base est illisible ferait interroger l'AUR pour un paquet qui n'y est pas.
+fn paquets_etrangers() -> Option<Vec<String>> {
+    static ETRANGERS: std::sync::OnceLock<Option<Vec<String>>> = std::sync::OnceLock::new();
+    ETRANGERS
+        .get_or_init(|| etrangers_lus().or_else(etrangers_selon_pacman))
+        .clone()
+}
+
+/// La lecture native ; `None` dès qu'un dépôt configuré manque ou ne se lit pas.
+fn etrangers_lus() -> Option<Vec<String>> {
+    let depots = depots_configures(&std::fs::read_to_string("/etc/pacman.conf").ok()?);
+    if depots.is_empty() {
+        return None;
+    }
+    let mut fournis = std::collections::HashSet::new();
+    for depot in &depots {
+        let octets = std::fs::read(format!("/var/lib/pacman/sync/{depot}.db")).ok()?;
+        fournis.extend(noms_base_sync(&octets)?);
+    }
+    Some(etrangers(&natif::paquets_pacman()?, &fournis))
+}
+
+/// Le secours : « pacman -Qmq » rend le code 1 quand aucun paquet ne passe le filtre (query.c : `if(!match) ret =
+/// 1`) ; ce code avec une sortie vide veut dire « aucun paquet étranger », pas « on ne sait pas ».
+fn etrangers_selon_pacman() -> Option<Vec<String>> {
+    etrangers_selon_sortie(&crate::commande::lancer_en_anglais(
+        Command::new("pacman").arg("-Qmq"),
+        30,
+    )?)
+}
+
+fn etrangers_selon_sortie(r: &crate::commande::Resultat) -> Option<Vec<String>> {
+    matches!(r.code, Some(0 | 1)).then(|| r.sortie.lines().filter(|l| !l.is_empty()).map(str::to_string).collect())
+}
+
+/// Les noms installés absents des dépôts, dans l'ordre de la base locale (celui de pacman).
+fn etrangers(locaux: &[(String, String)], fournis: &std::collections::HashSet<String>) -> Vec<String> {
+    locaux
+        .iter()
+        .filter(|(nom, _)| !fournis.contains(nom))
+        .map(|(nom, _)| nom.clone())
+        .collect()
+}
+
+/// Les dépôts de pacman.conf : chaque section sauf [options]. Les seules bases à compter : une base restée dans
+/// sync/ après qu'on a retiré son dépôt (offline.db d'une installation, community.db d'avant la fusion) ne fournit
+/// plus rien pour pacman, et la compter cacherait des paquets étrangers.
+fn depots_configures(conf: &str) -> Vec<String> {
+    conf.lines()
+        .filter_map(|l| {
+            let l = l.split('#').next().unwrap_or_default().trim();
+            l.strip_prefix('[')?.strip_suffix(']').map(str::trim)
+        })
+        .filter(|s| !s.is_empty() && *s != "options")
+        .map(str::to_string)
+        .collect()
+}
+
+/// Les noms des paquets d'une base sync (une archive tar, en gzip ou sans compression), lus dans le %NAME% de
+/// chaque « desc » comme pour la base locale. `None` pour un autre format (zstd, xz) ou une archive abîmée.
+fn noms_base_sync(octets: &[u8]) -> Option<Vec<String>> {
+    let tar = if octets.starts_with(&[0x1f, 0x8b]) {
+        degzip(octets)?
+    } else if octets.get(257..262) == Some(b"ustar") {
+        octets.to_vec()
+    } else {
+        return None;
+    };
+    noms_tar(&tar)
+}
+
+/// Le parcours d'une archive tar : blocs de 512 octets, un en-tête (nom, taille en octal, type) puis le contenu
+/// arrondi au bloc. Seuls les fichiers « …/desc » sont lus ; le nom complet d'un en-tête pax (« path= ») ou GNU
+/// (type L) n'importe pas, puisque le nom du paquet vient du contenu.
+fn noms_tar(tar: &[u8]) -> Option<Vec<String>> {
+    let mut noms = Vec::new();
+    let mut pos = 0usize;
+    while let Some(entete) = tar.get(pos..pos + 512) {
+        // Deux blocs nuls marquent la fin ; le premier suffit à dire qu'il n'y a plus rien à lire.
+        if entete.iter().all(|&o| o == 0) {
+            return Some(noms);
+        }
+        let champ = |de: usize, a: usize| {
+            let c = &entete[de..a];
+            &c[..c.iter().position(|&o| o == 0).unwrap_or(c.len())]
+        };
+        let taille = usize::from_str_radix(std::str::from_utf8(champ(124, 136)).ok()?.trim(), 8).ok()?;
+        let contenu = tar.get(pos + 512..pos + 512 + taille)?;
+        let type_ = entete[156];
+        if matches!(type_, b'0' | 0) && champ(0, 100).ends_with(b"/desc") {
+            let champs = natif::champs_pacman(&String::from_utf8_lossy(contenu));
+            if let Some(nom) = champs.get("NAME").and_then(|v| v.first()) {
+                noms.push(nom.clone());
+            }
+        }
+        pos += 512 + taille.div_ceil(512) * 512;
+    }
+    // Archive coupée avant ses blocs de fin (bsdtar et repo-add les écrivent toujours) : ce qui a été lu ne dit
+    // pas tout, et un paquet de la partie perdue passerait pour étranger.
+    None
+}
+
 /// Les bases des dépôts ont-elles été téléchargées ? Sans elles, pacman -Qm prend chaque paquet pour un paquet de
 /// l'AUR et toute la base serait déclarée « absente de l'AUR » (vu dans un conteneur Arch neuf).
 fn depots_pacman_lus() -> bool {
@@ -1015,8 +1129,8 @@ pub(super) fn paquets_aur() -> Option<Constat> {
             ),
         ));
     }
-    let liste = sortie("pacman", &["-Qmq"])?;
-    let installes: Vec<&str> = liste.lines().filter(|l| !l.is_empty()).collect();
+    let liste = paquets_etrangers()?;
+    let installes: Vec<&str> = liste.iter().map(String::as_str).collect();
     if installes.is_empty() {
         return None;
     }
@@ -1068,6 +1182,150 @@ pub(super) fn paquets_aur() -> Option<Constat> {
 
 #[cfg(test)]
 mod tests {
+    /// Un en-tête tar ustar minimal : nom, mode, taille en octal, type, somme de contrôle comprise.
+    fn entete_tar(nom: &str, taille: usize, type_: u8) -> Vec<u8> {
+        let mut h = vec![0u8; 512];
+        h[..nom.len()].copy_from_slice(nom.as_bytes());
+        h[100..107].copy_from_slice(b"0000644");
+        h[124..135].copy_from_slice(format!("{taille:011o}").as_bytes());
+        h[156] = type_;
+        h[257..263].copy_from_slice(b"ustar\0");
+        h[148..156].copy_from_slice(b"        ");
+        let somme: u32 = h.iter().map(|&o| u32::from(o)).sum();
+        h[148..155].copy_from_slice(format!("{somme:06o}\0").as_bytes());
+        h
+    }
+
+    /// Une archive comme une base sync : un dossier et un « desc » par paquet, un « files » à ignorer, un en-tête
+    /// pax devant le second paquet (bsdtar en écrit pour les noms longs), puis les deux blocs de fin.
+    fn base_inventee() -> Vec<u8> {
+        let mut tar = Vec::new();
+        let fichier = |tar: &mut Vec<u8>, nom: &str, contenu: &[u8], type_: u8| {
+            tar.extend(entete_tar(nom, contenu.len(), type_));
+            tar.extend(contenu);
+            tar.resize(tar.len().div_ceil(512) * 512, 0);
+        };
+        fichier(&mut tar, "zorglub-1.0-1/", b"", b'5');
+        fichier(
+            &mut tar,
+            "zorglub-1.0-1/desc",
+            b"%FILENAME%\nzorglub.pkg\n\n%NAME%\nzorglub\n\n",
+            b'0',
+        );
+        fichier(&mut tar, "zorglub-1.0-1/files", b"%FILES%\nusr/\n", b'0');
+        fichier(&mut tar, "PaxHeader/x", b"30 path=python-3to2-1.1.1-1/desc\n", b'x');
+        fichier(
+            &mut tar,
+            "python-3to2-1.1.1-1/desc",
+            b"%NAME%\npython-3to2\n\n%VERSION%\n1.1.1-1\n",
+            b'0',
+        );
+        tar.extend([0u8; 1024]);
+        tar
+    }
+
+    #[test]
+    fn base_sync_lue_en_tar_et_en_gzip() {
+        let tar = base_inventee();
+        let attendu = vec!["zorglub".to_string(), "python-3to2".to_string()];
+        assert_eq!(noms_base_sync(&tar), Some(attendu.clone()));
+        // Un gzip à la main : en-tête de 10 octets, flux deflate, puis CRC et taille (que degzip ne lit pas).
+        let mut gz = vec![0x1f, 0x8b, 8, 0, 0, 0, 0, 0, 0, 3];
+        gz.extend(miniz_oxide::deflate::compress_to_vec(&tar, 6));
+        gz.extend([0u8; 8]);
+        assert_eq!(noms_base_sync(&gz), Some(attendu));
+    }
+
+    #[test]
+    fn base_sync_illisible_dit_qu_on_ne_sait_pas() {
+        // zstd (omarchy.db) : pas de décodeur, la commande prendra le relais.
+        assert_eq!(noms_base_sync(&[0x28, 0xb5, 0x2f, 0xfd, 4, 0x58]), None);
+        // Archive coupée au milieu d'un contenu.
+        let tar = base_inventee();
+        assert_eq!(noms_base_sync(&tar[..512 * 3 + 10]), None);
+        // Coupée entre deux entrées, sans blocs de fin : ce qui manque pourrait fournir un paquet.
+        assert_eq!(noms_tar(&tar[..512]), None);
+    }
+
+    #[test]
+    fn depots_de_pacman_conf_sans_options() {
+        let conf = "[options]\nHoldPkg = pacman\n#[testing]\n[omarchy]\nServer = x\n [core] # principal\n\
+                    [extra]\nInclude = /etc/pacman.d/mirrorlist\n";
+        assert_eq!(depots_configures(conf), ["omarchy", "core", "extra"]);
+        assert_eq!(depots_configures("[options]\n"), Vec::<String>::new());
+    }
+
+    #[test]
+    fn etrangers_selon_les_depots() {
+        let locaux = vec![
+            ("bash".to_string(), "5.2-1".to_string()),
+            ("zorglub-git".to_string(), "r12-1".to_string()),
+        ];
+        let fournis: std::collections::HashSet<String> = ["bash".to_string()].into();
+        assert_eq!(etrangers(&locaux, &fournis), ["zorglub-git"]);
+        let tous: std::collections::HashSet<String> = ["bash".into(), "zorglub-git".into()].into();
+        assert_eq!(etrangers(&locaux, &tous), Vec::<String>::new());
+    }
+
+    /// Le défaut relevé : sans paquet étranger, pacman -Qmq rend le code 1 ; c'est « à jour », pas « hors ligne ».
+    #[test]
+    fn aucun_paquet_etranger_veut_dire_a_jour() {
+        let r = |code, sortie: &str| crate::commande::Resultat {
+            code,
+            sortie: sortie.to_string(),
+            erreurs: String::new(),
+        };
+        assert_eq!(etrangers_selon_sortie(&r(Some(1), "")), Some(vec![]));
+        assert_eq!(
+            etrangers_selon_sortie(&r(Some(0), "yay-bin\n")),
+            Some(vec!["yay-bin".to_string()])
+        );
+        assert_eq!(etrangers_selon_sortie(&r(None, "")), None);
+        assert_eq!(etrangers_selon_sortie(&r(Some(2), "")), None);
+        // Liste vide : Some(0) sans toucher à l'AUR ni à la base locale.
+        assert_eq!(aur_selon(&[], |_| unreachable!(), || unreachable!()), Some(0));
+        // Un paquet plus ancien que l'AUR est compté.
+        let fiches = vec![serde_json::json!({ "Name": "zorglub-git", "Version": "r13-1" })];
+        let locaux = vec![("zorglub-git".to_string(), "r12-1".to_string())];
+        assert_eq!(
+            aur_selon(&["zorglub-git".into()], |_| Some(fiches), || Some(locaux)),
+            Some(1)
+        );
+    }
+
+    /// Sur cet ordinateur, la base sync lue en Rust donne les mêmes noms que « pacman -Slq », quand les deux sont là.
+    #[test]
+    fn base_sync_comme_pacman_sl() {
+        let Ok(octets) = std::fs::read("/var/lib/pacman/sync/core.db") else {
+            return;
+        };
+        let Some(mut noms) = noms_base_sync(&octets) else {
+            return;
+        };
+        let Some(r) = crate::commande::lancer_en_anglais(Command::new("pacman").args(["-Slq", "core"]), 30)
+            .filter(|r| r.code == Some(0))
+        else {
+            return;
+        };
+        let mut attendu: Vec<&str> = r.sortie.lines().collect();
+        attendu.sort_unstable();
+        noms.sort();
+        assert_eq!(noms, attendu);
+    }
+
+    /// Sur cet ordinateur, les paquets étrangers lus en Rust sont ceux de « pacman -Qmq », quand la lecture native
+    /// est possible (aucune base en zstd) et que pacman est là.
+    #[test]
+    fn etrangers_comme_pacman_qm() {
+        let Some(natifs) = etrangers_lus() else {
+            return;
+        };
+        let Some(selon_pacman) = etrangers_selon_pacman() else {
+            return;
+        };
+        assert_eq!(natifs, selon_pacman);
+    }
+
     use super::*;
 
     #[test]
