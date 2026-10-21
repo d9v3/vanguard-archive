@@ -50,6 +50,8 @@ pub(crate) enum Echec {
     Reponse(u16),
     /// Pas de réponse (pas d'Internet ?), et aucune copie d'avant.
     SansReponse,
+    /// La réponse n'a pas pu être gardée sur le disque (plein ? droits ?).
+    Ecriture,
 }
 
 impl Echec {
@@ -73,6 +75,11 @@ impl Echec {
             .into(),
             Echec::Reponse(code) => trf!("abuse.ch a répondu {code}", "abuse.ch answered {code}"),
             Echec::SansReponse => tr!("pas d'Internet ?", "no Internet?").into(),
+            Echec::Ecriture => tr!(
+                "copie impossible à écrire dans le dossier de Vanguard (disque plein ?)",
+                "copy could not be written to Vanguard's folder (disk full?)"
+            )
+            .into(),
         }
     }
 }
@@ -80,10 +87,12 @@ impl Echec {
 // ───────────────────────────── Les listes ─────────────────────────────
 
 /// Une liste demandée : la copie gardée et son âge (la nouvelle quand le téléchargement a réussi, sinon celle
-/// d'avant ; `None` : aucune), et le code de la réponse quand une demande a été faite.
+/// d'avant ; `None` : aucune), le code de la réponse quand une demande a été faite, et pourquoi la copie n'a pas été
+/// rafraîchie quand elle devait l'être (`None` : encore fraîche, ou remplacée).
 pub(crate) struct Liste {
     pub copie: Option<(Vec<u8>, Duration)>,
     pub code: Option<u16>,
+    pub manque: Option<Echec>,
 }
 
 impl Liste {
@@ -114,27 +123,41 @@ pub(crate) fn liste(demande: crate::http::Demande, (sous_dossier, nom): (&str, &
             .ok()
             .map(|t| t.elapsed().unwrap_or_default())
     };
-    let mut code = None;
-    if age().is_none_or(|d| d >= fraiche) && std::fs::create_dir_all(&dossier).is_ok() {
-        let reponse = crate::http::envoyer(demande);
-        code = reponse.as_ref().map(|r| r.code);
-        if let Some(r) = reponse.filter(|r| r.code == 200) {
-            let provisoire = dossier.join(format!("{nom}.nouveau"));
-            if std::fs::write(&provisoire, &r.corps).is_ok() {
-                let _ = std::fs::rename(&provisoire, &fichier);
-            } else {
-                let _ = std::fs::remove_file(&provisoire);
-            }
+    let (mut code, mut manque) = (None, None);
+    if age().is_none_or(|d| d >= fraiche) {
+        manque = Some(Echec::Ecriture);
+        if std::fs::create_dir_all(&dossier).is_ok() {
+            let reponse = crate::http::envoyer(demande);
+            code = reponse.as_ref().map(|r| r.code);
+            manque = match reponse {
+                Some(r) if r.code == 200 => {
+                    let provisoire = dossier.join(format!("{nom}.nouveau"));
+                    if std::fs::write(&provisoire, &r.corps).is_ok() && std::fs::rename(&provisoire, &fichier).is_ok() {
+                        None
+                    } else {
+                        let _ = std::fs::remove_file(&provisoire);
+                        Some(Echec::Ecriture)
+                    }
+                }
+                Some(r) => Some(Echec::Reponse(r.code)),
+                None => Some(Echec::SansReponse),
+            };
         }
     }
     Liste {
         copie: std::fs::read(&fichier).ok().zip(age()),
         code,
+        manque,
     }
 }
 
+/// Un export utilisable : la copie et son âge, et pourquoi elle n'a pas été rafraîchie quand c'est celle d'avant qui
+/// sert (404 sur un nom changé, 429, panne, pas d'Internet) : à dire, jamais à taire.
+pub(crate) type Export = ((Vec<u8>, Duration), Option<Echec>);
+
 /// Un export d'abuse.ch, avec la clé de la personne : `fichier` (son nom chez abuse.ch) gardé dans `lieu`
-/// (sous-dossier, nom), comme `liste`. Sans clé, rien n'est demandé.
+/// (sous-dossier, nom), comme `liste`. Sans clé, rien n'est demandé. Le rafraîchissement manqué ne se lit ici que
+/// par l'âge de la copie : `export_et_manque` le dit aussi.
 pub(crate) fn export(
     service: Service,
     fichier: &str,
@@ -142,6 +165,18 @@ pub(crate) fn export(
     fraiche: Duration,
     delai: Duration,
 ) -> Result<(Vec<u8>, Duration), Echec> {
+    export_et_manque(service, fichier, lieu, fraiche, delai).map(|(copie, _)| copie)
+}
+
+/// `export`, avec la raison d'un rafraîchissement manqué quand la copie d'avant sert : pour une liste sans limite
+/// d'âge (les empreintes de MalwareBazaar), où l'âge seul ne le dirait pas.
+pub(crate) fn export_et_manque(
+    service: Service,
+    fichier: &str,
+    lieu: (&str, &str),
+    fraiche: Duration,
+    delai: Duration,
+) -> Result<Export, Echec> {
     let cle = cle().ok_or(Echec::Manquante)?;
     export_depuis(service.exports(), &cle, fichier, lieu, (fraiche, delai))
 }
@@ -153,7 +188,7 @@ fn export_depuis(
     fichier: &str,
     lieu: (&str, &str),
     (fraiche, delai): (Duration, Duration),
-) -> Result<(Vec<u8>, Duration), Echec> {
+) -> Result<Export, Echec> {
     // Lettres et chiffres seulement : un segment de chemin sûr, sans « / ? # % » ni « .. » qui changerait l'adresse.
     if !cle_valide(cle) {
         return Err(Echec::Manquante);
@@ -165,7 +200,9 @@ fn export_depuis(
         meme_hote: true,
         ..crate::http::Demande::get(&adresse, delai)
     };
-    liste(demande, lieu, fraiche).resultat(true)
+    let liste = liste(demande, lieu, fraiche);
+    let manque = liste.manque;
+    liste.resultat(true).map(|copie| (copie, manque))
 }
 
 // ───────────────────────────── La clé ─────────────────────────────
@@ -270,7 +307,19 @@ pub(crate) fn donner() -> bool {
     for ligne in envelopper(explication(), LARGEUR - 2) {
         println!("  {ligne}");
     }
-    let cle = demander(tr!("  Clé (Entrée pour annuler) : ", "  Key (Enter to cancel): "));
+    let question = tr!(
+        "  Clé (elle ne s'affiche pas ; Entrée pour annuler) : ",
+        "  Key (it is not shown; Enter to cancel): "
+    );
+    // Sans écho : la clé collée ne paraît pas à l'écran (ni dans l'historique du terminal). Entrée redirigée (pas de
+    // terminal) : lue telle quelle, il n'y a rien à cacher.
+    let cle = if std::io::IsTerminal::is_terminal(&std::io::stdin()) {
+        rpassword::prompt_password(question)
+            .map(|c| c.trim().to_string())
+            .unwrap_or_default()
+    } else {
+        demander(question)
+    };
     if cle.is_empty() {
         return false;
     }
@@ -492,11 +541,56 @@ mod tests {
         // Réussie : la liste est gardée, toujours sans la clé.
         let (base, fil) =
             serveur(b"HTTP/1.1 200 OK\r\nContent-Length: 22\r\nConnection: close\r\n\r\n# URLhaus\n127.0.0.1 x\n");
-        let (octets, _) = export_depuis(&base, CLE, "hostfile.txt", lieu, delais).unwrap();
+        let ((octets, _), manque) = export_depuis(&base, CLE, "hostfile.txt", lieu, delais).unwrap();
         fil.join().unwrap();
         assert_eq!(octets, b"# URLhaus\n127.0.0.1 x\n");
+        assert_eq!(manque, None);
         assert!(!contenu(lieu.0).contains(CLE));
         let _ = std::fs::remove_dir_all(crate::reseau::dossier_local().join(lieu.0));
+    }
+
+    /// Un rafraîchissement manqué alors qu'une copie d'avant existe : la copie sert, et la raison est rendue avec
+    /// (404 d'un nom changé, 429, pas d'Internet), jamais tue. Une copie encore fraîche n'est pas redemandée : rien à
+    /// dire.
+    #[test]
+    fn rafraichissement_manque_dit_avec_la_copie() {
+        let lieu = ("essai-manque-abuse-ch", "liste.txt");
+        let dossier = crate::reseau::dossier_local().join(lieu.0);
+        let _ = std::fs::remove_dir_all(&dossier);
+        std::fs::create_dir_all(&dossier).unwrap();
+        std::fs::write(dossier.join(lieu.1), b"# d'avant\n").unwrap();
+        let due = (Duration::ZERO, Duration::from_secs(5));
+        for (reponse, attendu) in [
+            (
+                &b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"[..],
+                Echec::Reponse(404),
+            ),
+            (
+                &b"HTTP/1.1 429 Too Many Requests\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"[..],
+                Echec::Reponse(429),
+            ),
+        ] {
+            let reponse: &'static [u8] = reponse;
+            let (base, fil) = serveur(reponse);
+            let ((octets, _), manque) = export_depuis(&base, CLE, "nom_change.zip", lieu, due).unwrap();
+            fil.join().unwrap();
+            assert_eq!(octets, b"# d'avant\n");
+            assert_eq!(manque, Some(attendu));
+            assert!(!attendu.raison().contains(CLE));
+        }
+        // Personne n'écoute : la copie sert, « pas d'Internet ? ».
+        let libre = std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap();
+        let base = format!("http://{libre}/v2/files/exports/");
+        let (_, manque) = export_depuis(&base, CLE, "x.zip", lieu, due).unwrap();
+        assert_eq!(manque, Some(Echec::SansReponse));
+        // Encore fraîche : rien n'est demandé (personne n'écoute), rien à dire.
+        let fraiche = (Duration::from_hours(1), Duration::from_secs(5));
+        let (_, manque) = export_depuis(&base, CLE, "x.zip", lieu, fraiche).unwrap();
+        assert_eq!(manque, None);
+        let _ = std::fs::remove_dir_all(&dossier);
     }
 
     /// Ce que dit une demande : la copie gardée sert tant que la clé n'est pas refusée ; sans copie, le code dit
@@ -507,7 +601,8 @@ mod tests {
         assert!(
             Liste {
                 copie: copie(),
-                code: Some(502)
+                code: Some(502),
+                manque: None
             }
             .resultat(true)
             .is_ok()
@@ -515,7 +610,8 @@ mod tests {
         assert!(
             Liste {
                 copie: copie(),
-                code: None
+                code: None,
+                manque: None
             }
             .resultat(true)
             .is_ok()
@@ -523,7 +619,8 @@ mod tests {
         assert_eq!(
             Liste {
                 copie: copie(),
-                code: Some(401)
+                code: Some(401),
+                manque: None
             }
             .resultat(true),
             Err(Echec::Refusee)
@@ -531,7 +628,8 @@ mod tests {
         assert_eq!(
             Liste {
                 copie: None,
-                code: Some(403)
+                code: Some(403),
+                manque: None
             }
             .resultat(true),
             Err(Echec::Refusee)
@@ -539,7 +637,8 @@ mod tests {
         assert!(
             Liste {
                 copie: copie(),
-                code: Some(403)
+                code: Some(403),
+                manque: None
             }
             .resultat(false)
             .is_ok()
@@ -547,7 +646,8 @@ mod tests {
         assert_eq!(
             Liste {
                 copie: None,
-                code: Some(404)
+                code: Some(404),
+                manque: None
             }
             .resultat(true),
             Err(Echec::Reponse(404))
@@ -555,7 +655,8 @@ mod tests {
         assert_eq!(
             Liste {
                 copie: None,
-                code: None
+                code: None,
+                manque: None
             }
             .resultat(false),
             Err(Echec::SansReponse)

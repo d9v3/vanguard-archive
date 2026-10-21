@@ -13,6 +13,7 @@ use std::time::Duration;
 
 use sha2::{Digest, Sha256};
 
+use crate::protection::abuse_ch::{self, Echec, Export, Service};
 use crate::ui::*;
 
 /// Leurs noms chez MalwareBazaar (exports avec clé). Celui des récentes est confirmé par d'autres programmes qui le
@@ -27,8 +28,8 @@ const TEXTE_MAX: usize = 1 << 30;
 /// Les empreintes connues, triées : (combien, de quand) se dit avec.
 pub(crate) struct Empreintes {
     triees: Vec<[u8; 32]>,
-    /// Pourquoi les listes n'ont pas pu être rafraîchies (clé abuse.ch manquante ou refusée) : la copie gardée sert,
-    /// et c'est dit à côté du résultat.
+    /// Pourquoi les listes n'ont pas pu être rafraîchies (clé abuse.ch manquante ou refusée, 404 d'un nom changé,
+    /// 429, panne, pas d'Internet) : la copie gardée sert, et c'est dit à côté du résultat.
     pub(crate) avertissement: Option<String>,
 }
 
@@ -161,7 +162,6 @@ pub(crate) fn gardees() -> Chargees {
 }
 
 fn charger(telecharger: bool) -> Result<Empreintes, String> {
-    use crate::protection::abuse_ch::{self, Echec, Service};
     let d = dossier();
     let (complete, recentes) = (d.join("complete.zip"), d.join("recentes.txt"));
     // Sans clé, rien ne se rafraîchit, même quand on ne voulait rien télécharger : la copie vieillit, c'est dit.
@@ -179,13 +179,14 @@ fn charger(telecharger: bool) -> Result<Empreintes, String> {
             (RECENTES, "recentes.txt", JOUR, 60),
         ] {
             let lieu = ("malwarebazaar", nom);
-            if let Err(e) = abuse_ch::export(
+            let rendu = abuse_ch::export_et_manque(
                 Service::MalwareBazaar,
                 fichier,
                 lieu,
                 apres,
                 Duration::from_secs(secondes),
-            ) {
+            );
+            if let Some(e) = manque(&rendu) {
                 echec.get_or_insert(e);
             }
         }
@@ -209,14 +210,26 @@ fn charger(telecharger: bool) -> Result<Empreintes, String> {
             .into(),
         });
     }
-    let avertissement = echec.map(|e| {
-        trf!(
-            "empreintes de MalwareBazaar non rafraîchies, la copie gardée a servi : {}",
-            "MalwareBazaar fingerprints not refreshed, the saved copy was used: {}",
-            e.raison()
-        )
-    });
+    let avertissement = echec.map(avertissement);
     Ok(Empreintes { triees, avertissement })
+}
+
+/// Ce qui a manqué à un export : son échec, ou, quand la copie d'avant a servi, pourquoi elle n'a pas été
+/// rafraîchie. La liste des empreintes n'a pas de limite d'âge : sans cette raison, elle vieillirait sans le dire.
+fn manque(rendu: &Result<Export, Echec>) -> Option<Echec> {
+    match rendu {
+        Ok((_, manque)) => *manque,
+        Err(e) => Some(*e),
+    }
+}
+
+/// L'avertissement montré à côté du résultat quand la copie gardée a servi.
+fn avertissement(e: Echec) -> String {
+    trf!(
+        "empreintes de MalwareBazaar non rafraîchies, la copie gardée a servi : {}",
+        "MalwareBazaar fingerprints not refreshed, the saved copy was used: {}",
+        e.raison()
+    )
 }
 
 /// Une empreinte en hexadécimal minuscule, telle que MalwareBazaar l'écrit.
@@ -257,6 +270,25 @@ pub(crate) fn connus(empreintes: &Empreintes, fichiers: &[PathBuf]) -> Vec<(Path
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Un rafraîchissement manqué avec la clé (404 d'un nom changé, 429, pas d'Internet) se dit même quand la copie
+    /// d'avant sert ; une copie rafraîchie, rien.
+    #[test]
+    fn rafraichissement_manque_dit() {
+        let copie = || (b"x".to_vec(), Duration::ZERO);
+        assert_eq!(manque(&Ok((copie(), None))), None);
+        assert_eq!(
+            manque(&Ok((copie(), Some(Echec::Reponse(404))))),
+            Some(Echec::Reponse(404))
+        );
+        assert_eq!(
+            manque(&Ok((copie(), Some(Echec::SansReponse)))),
+            Some(Echec::SansReponse)
+        );
+        assert_eq!(manque(&Err(Echec::Refusee)), Some(Echec::Refusee));
+        let a = avertissement(Echec::Reponse(404));
+        assert!(a.contains("404") && a.contains("MalwareBazaar"), "{a}");
+    }
 
     #[test]
     fn empreintes_lues_triees_cherchees() {
