@@ -483,6 +483,12 @@ fn lire_lignes(source: impl Read) -> Option<Vec<String>> {
 /// LOAD_LIBRARY_SEARCH_SYSTEM32 : une DLL cherchée par son nom ne vient que de System32.
 const CHARGER_DE_SYSTEM32: u32 = 0x800;
 
+/// L'accord avant d'appliquer en administrateur : Entrée seule ou un oui. Toute autre réponse (« n », « annuler »,
+/// « cancel », « q », une faute de frappe) annule : devant un geste qui modifie la machine, le doute ne l'applique pas.
+fn accepte(accord: &str) -> bool {
+    accord.trim().is_empty() || crate::langue::oui(accord)
+}
+
 /// La sous-commande `appliquer-eleve` : rend le code de sortie du processus.
 pub(crate) fn executer(canal: &str, parent: u32) -> i32 {
     // Le programme tourne souvent depuis une clé USB ou Téléchargements : une DLL posée à côté de lui ne doit jamais
@@ -530,11 +536,11 @@ pub(crate) fn executer(canal: &str, parent: u32) -> i32 {
     }
     println!();
     let accord = crate::ui::demander(tr!(
-        "Appuie sur Entrée pour appliquer, ou tape n pour annuler : ",
-        "Press Enter to apply, or type n to cancel: "
+        "Appuie sur Entrée pour appliquer ; toute autre réponse qu'oui annule : ",
+        "Press Enter to apply; any answer other than yes cancels: "
     ));
     let mut code = 0;
-    let mut arret = matches!(accord.trim().to_lowercase().as_str(), "n" | "non" | "no");
+    let mut arret = !accepte(&accord);
     if arret {
         trp!("Annulé : rien n'a été modifié.", "Cancelled: nothing was changed.");
     }
@@ -836,6 +842,16 @@ fn poser_le_point() -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn l_accord_avant_d_appliquer() {
+        for oui in ["", "  \n", "o", "oui", "O", "y", "yes", "Yes\r\n"] {
+            assert!(accepte(oui), "{oui:?}");
+        }
+        for non in ["n", "non", "no", "annuler", "cancel", "q", "stop", "non.", "ok"] {
+            assert!(!accepte(non), "{non:?}");
+        }
+    }
 
     #[test]
     fn une_dll_a_cote_du_programme_se_voit() {
