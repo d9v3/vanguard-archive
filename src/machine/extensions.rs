@@ -240,7 +240,7 @@ fn juger(navigateur: &str, extensions: &[Extension]) -> Vec<Constat> {
 }
 
 /// Dossiers racine des navigateurs : (nom, dossier, famille Firefox).
-pub(super) fn racines() -> Vec<(&'static str, PathBuf, bool)> {
+pub(crate) fn racines() -> Vec<(&'static str, PathBuf, bool)> {
     let mut r = Vec::new();
     #[cfg(target_os = "linux")]
     {

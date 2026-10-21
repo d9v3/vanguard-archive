@@ -284,14 +284,15 @@ pub async fn decouvrir(ips: &[Ipv4Addr], delai: Duration, parallele: usize) -> V
 /// noms qu'ip leur donne (REACHABLE, STALE…). `None` : le noyau refuse.
 #[cfg(target_os = "linux")]
 pub(crate) fn etats_voisins() -> Option<HashMap<Ipv4Addr, String>> {
-    demander_voisins().map(|r| lire_voisins_netlink(&r))
+    demander_voisins(libc::AF_INET).map(|r| lire_voisins_netlink(&r))
 }
 
-/// Envoie la demande des voisins IPv4 et rend les réponses du noyau, jusqu'à la fin de la liste.
+/// Envoie la demande des voisins d'une famille (`libc::AF_INET` ou `AF_INET6`) et rend les réponses du noyau,
+/// jusqu'à la fin de la liste. La même socket sert à l'IPv4 du scan et à l'IPv6 de l'audit.
 #[cfg(target_os = "linux")]
-fn demander_voisins() -> Option<Vec<u8>> {
+pub(crate) fn demander_voisins(famille: libc::c_int) -> Option<Vec<u8>> {
     const RTM_GETNEIGH: u16 = 30;
-    // En-tête netlink (16 octets) puis ndmsg (12) : la famille IPv4, rien d'autre.
+    // En-tête netlink (16 octets) puis ndmsg (12) : la famille, rien d'autre.
     let mut demande = [0u8; 28];
     demande[0..4].copy_from_slice(&28u32.to_ne_bytes());
     demande[4..6].copy_from_slice(&RTM_GETNEIGH.to_ne_bytes());
@@ -300,11 +301,12 @@ fn demander_voisins() -> Option<Vec<u8>> {
     demande[8..12].copy_from_slice(&1u32.to_ne_bytes());
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     {
-        demande[16] = libc::AF_INET as u8;
+        demande[16] = famille as u8;
     }
     // SAFETY : une socket netlink ouverte ici et refermée une seule fois à la sortie ; chaque appel reçoit un pointeur
-    // et la taille exacte d'un objet à nous, vivant pendant l'appel (demande, adresse, délai, tampon). Le délai de
-    // réception (2 s) empêche recv de bloquer sans fin si le noyau ne répondait pas.
+    // et la taille exacte d'un objet à nous, vivant pendant l'appel (demande, adresse, délai, tampon) ; recv écrit au
+    // plus `tampon.len()` octets dans le tampon, et seuls les `n` reçus sont lus. Le délai de réception (2 s) empêche
+    // recv de bloquer sans fin si le noyau ne répondait pas.
     unsafe {
         let s = libc::socket(
             libc::AF_NETLINK,

@@ -13,7 +13,7 @@ mod bluetooth;
 pub(crate) mod certificats;
 mod comptes_oublies;
 pub(crate) mod dns;
-mod extensions;
+pub(crate) mod extensions;
 mod fin_de_support;
 mod heure;
 mod journaux;

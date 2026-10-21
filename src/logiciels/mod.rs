@@ -68,13 +68,11 @@ fn rang(gestion: crate::machine::linux::Paquets) -> usize {
     }
 }
 
-/// Programme présent dans le PATH ou parmi les Snap.
+/// Programme présent dans le PATH ou parmi les Snap (/snap/bin n'est pas toujours dans le PATH).
 #[cfg(target_os = "linux")]
 fn dans_le_path(commande: &str) -> bool {
-    let chemins = std::env::var_os("PATH").unwrap_or_default();
-    std::env::split_paths(&chemins)
-        .chain([std::path::PathBuf::from("/snap/bin")])
-        .any(|d| d.join(commande).is_file())
+    use crate::machine::linux::natif::present;
+    present(commande) || present(&format!("/snap/bin/{commande}"))
 }
 
 /// Linux : le paquet de la distribution quand elle a le logiciel, sinon Flathub. Un logiciel installé autrement

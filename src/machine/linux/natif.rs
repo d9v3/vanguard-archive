@@ -30,27 +30,38 @@ fn sous(racine: &Path, chemin: &str) -> PathBuf {
 
 /// Le programme `cmd` est-il là et exécutable, comme le dirait `command -v` ?
 pub(crate) fn present(cmd: &str) -> bool {
-    present_dans(cmd, &std::env::var_os("PATH").unwrap_or_default())
+    chemin(cmd).is_some()
+}
+
+/// Le chemin du programme `cmd`, le premier du PATH qui s'exécute (`None` : absent) : pour qui doit l'écrire en
+/// entier, comme une unité systemd, qui ne cherche pas dans le PATH.
+pub(crate) fn chemin(cmd: &str) -> Option<PathBuf> {
+    chemin_dans(cmd, &std::env::var_os("PATH").unwrap_or_default())
 }
 
 /// Un nom avec une barre oblique est un chemin, pris tel quel, comme le fait le shell. Le bit d'exécution compte :
 /// un fichier ordinaire du même nom dans le PATH ne se lance pas, et `command -v` l'ignore aussi.
 fn present_dans(cmd: &str, path: &OsStr) -> bool {
+    chemin_dans(cmd, path).is_some()
+}
+
+fn chemin_dans(cmd: &str, path: &OsStr) -> Option<PathBuf> {
     let executable = |f: &Path| {
         f.metadata()
             .is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
     };
     if cmd.is_empty() {
-        return false;
+        return None;
     }
     if cmd.contains('/') {
-        return executable(Path::new(cmd));
+        return executable(Path::new(cmd)).then(|| PathBuf::from(cmd));
     }
     // Une entrée vide du PATH veut dire le dossier courant pour le shell : on ne la suit pas, un programme posé là
     // par un tiers passerait pour installé.
     std::env::split_paths(path)
         .filter(|d| !d.as_os_str().is_empty())
-        .any(|d| executable(&d.join(cmd)))
+        .map(|d| d.join(cmd))
+        .find(|f| executable(f))
 }
 
 // ---------------------------------------------------------------------------------------------------------------

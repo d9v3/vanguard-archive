@@ -145,117 +145,13 @@ fn lire_if_inet6(texte: &str) -> Vec<(Ipv6Addr, bool, String)> {
 /// plusieurs adresses publiques (une stable, des temporaires). `None` : le noyau refuse, ou pas de Linux.
 #[cfg(target_os = "linux")]
 fn voisins_publics() -> Option<usize> {
-    demander_voisins_ipv6().map(|r| compter_voisins_publics(&r))
+    // La même demande que le scan fait pour l'IPv4 (`scan::demander_voisins`), avec la famille AF_INET6.
+    crate::reseau::scan::demander_voisins(libc::AF_INET6).map(|r| compter_voisins_publics(&r))
 }
 
 #[cfg(not(target_os = "linux"))]
 fn voisins_publics() -> Option<usize> {
     None
-}
-
-/// Envoie la demande des voisins IPv6 et rend les réponses du noyau, jusqu'à la fin de la liste. La même demande
-/// que `scan::demander_voisins` (IPv4), avec la famille AF_INET6.
-#[cfg(target_os = "linux")]
-fn demander_voisins_ipv6() -> Option<Vec<u8>> {
-    const RTM_GETNEIGH: u16 = 30;
-    // En-tête netlink (16 octets) puis ndmsg (12) : la famille IPv6, rien d'autre.
-    let mut demande = [0u8; 28];
-    demande[0..4].copy_from_slice(&28u32.to_ne_bytes());
-    demande[4..6].copy_from_slice(&RTM_GETNEIGH.to_ne_bytes());
-    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-    demande[6..8].copy_from_slice(&((libc::NLM_F_REQUEST | libc::NLM_F_DUMP) as u16).to_ne_bytes());
-    demande[8..12].copy_from_slice(&1u32.to_ne_bytes());
-    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-    {
-        demande[16] = libc::AF_INET6 as u8;
-    }
-    // SAFETY : une socket netlink ouverte ici et refermée une seule fois à la sortie ; chaque appel reçoit un pointeur
-    // et la taille exacte d'un objet à nous, vivant pendant l'appel (demande, adresse, délai, tampon) ; recv écrit au
-    // plus `tampon.len()` octets dans le tampon, et seuls les `n` reçus sont lus. Le délai de réception (2 s) empêche
-    // recv de bloquer sans fin si le noyau ne répondait pas.
-    unsafe {
-        let s = libc::socket(
-            libc::AF_NETLINK,
-            libc::SOCK_RAW | libc::SOCK_CLOEXEC,
-            libc::NETLINK_ROUTE,
-        );
-        if s < 0 {
-            return None;
-        }
-        let delai = libc::timeval { tv_sec: 2, tv_usec: 0 };
-        let taille = |t: usize| libc::socklen_t::try_from(t).unwrap_or(0);
-        libc::setsockopt(
-            s,
-            libc::SOL_SOCKET,
-            libc::SO_RCVTIMEO,
-            (&raw const delai).cast(),
-            taille(std::mem::size_of::<libc::timeval>()),
-        );
-        let mut adresse: libc::sockaddr_nl = std::mem::zeroed();
-        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-        {
-            adresse.nl_family = libc::AF_NETLINK as u16;
-        }
-        let envoye = libc::sendto(
-            s,
-            demande.as_ptr().cast(),
-            demande.len(),
-            0,
-            (&raw const adresse).cast(),
-            taille(std::mem::size_of::<libc::sockaddr_nl>()),
-        );
-        let mut tout = Vec::new();
-        let mut resultat = None;
-        if usize::try_from(envoye).ok() == Some(demande.len()) {
-            let mut tampon = vec![0u8; 32 << 10];
-            loop {
-                let n = libc::recv(s, tampon.as_mut_ptr().cast(), tampon.len(), 0);
-                let Ok(n @ 1..) = usize::try_from(n) else {
-                    break;
-                };
-                tout.extend_from_slice(&tampon[..n]);
-                match fin_netlink(&tampon[..n]) {
-                    Some(true) => {
-                        resultat = Some(std::mem::take(&mut tout));
-                        break;
-                    }
-                    Some(false) => break,
-                    // Une table démesurée n'en est pas une : on s'arrête.
-                    None if tout.len() > 16 << 20 => break,
-                    None => {}
-                }
-            }
-        }
-        libc::close(s);
-        resultat
-    }
-}
-
-/// Les messages netlink d'un morceau de réponse, un par un : (type, corps).
-#[cfg(any(target_os = "linux", test))]
-fn messages_netlink(octets: &[u8]) -> impl Iterator<Item = (u16, &[u8])> {
-    let mut pos = 0usize;
-    std::iter::from_fn(move || {
-        let entete = octets.get(pos..pos + 16)?;
-        let longueur = usize::try_from(u32::from_ne_bytes([entete[0], entete[1], entete[2], entete[3]])).ok()?;
-        let genre = u16::from_ne_bytes([entete[4], entete[5]]);
-        let corps = octets.get(pos + 16..pos.checked_add(longueur)?)?;
-        if longueur < 16 {
-            return None;
-        }
-        pos += longueur.next_multiple_of(4);
-        Some((genre, corps))
-    })
-}
-
-/// Le morceau finit-il la réponse ? `Some(true)` : NLMSG_DONE ; `Some(false)` : NLMSG_ERROR ; `None` : la suite vient.
-#[cfg(target_os = "linux")]
-fn fin_netlink(morceau: &[u8]) -> Option<bool> {
-    messages_netlink(morceau).find_map(|(genre, _)| match genre {
-        3 => Some(true),
-        2 => Some(false),
-        _ => None,
-    })
 }
 
 /// Le nombre d'appareils voisins avec une adresse IPv6 publique, dans les messages RTM_NEWNEIGH : famille AF_INET6,
@@ -269,7 +165,7 @@ fn compter_voisins_publics(octets: &[u8]) -> usize {
     const NDA_DST: u16 = 1;
     const NDA_LLADDR: u16 = 2;
     let mut appareils = std::collections::HashSet::new();
-    for (genre, corps) in messages_netlink(octets) {
+    for (genre, corps) in crate::reseau::scan::messages_netlink(octets) {
         // ndmsg : famille (1), bourrage (3), interface (4), état (2), drapeaux (1), type (1) ; puis les attributs.
         if genre != RTM_NEWNEIGH || corps.len() < 12 || corps[0] != AF_INET6 {
             continue;

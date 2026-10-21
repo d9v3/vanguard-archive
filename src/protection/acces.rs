@@ -564,11 +564,6 @@ mod linux {
     use std::path::PathBuf;
     use std::process::Command;
 
-    /// Le programme est-il installé ? Distingue « absent » de « en panne », qui se dit non vérifié.
-    fn dans_le_path(nom: &str) -> bool {
-        std::env::var_os("PATH").is_some_and(|p| std::env::split_paths(&p).any(|d| d.join(nom).is_file()))
-    }
-
     fn sortie(programme: &str, args: &[&str]) -> Option<String> {
         crate::commande::lancer_en_anglais(Command::new(programme).args(args), 20)
             .filter(|r| r.code == Some(0))
@@ -724,8 +719,9 @@ mod linux {
     }
 
     pub(super) fn lire(b: &mut Bilan) {
-        let flatpak = dans_le_path("flatpak");
-        let snap = dans_le_path("snap");
+        // Le programme est-il installé ? Distingue « absent » de « en panne », qui se dit non vérifié.
+        let flatpak = natif::present("flatpak");
+        let snap = natif::present("snap");
         if flatpak {
             self::flatpak(b);
         }

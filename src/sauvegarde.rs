@@ -275,11 +275,10 @@ fn dossier_unites() -> PathBuf {
         .join("systemd/user")
 }
 
+/// Le chemin d'un programme du PATH, écrit en entier dans l'unité systemd (qui ne cherche pas dans le PATH).
 #[cfg(target_os = "linux")]
 fn dans_le_path(commande: &str) -> Option<PathBuf> {
-    std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
-        .map(|d| d.join(commande))
-        .find(|f| f.is_file())
+    crate::machine::linux::natif::chemin(commande)
 }
 
 /// Les clés de Déjà Dup que Vanguard règle : (schéma, clé, valeur voulue) ; la destination se construit à part.

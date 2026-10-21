@@ -271,49 +271,14 @@ fn autorite_publique(nom: &str) -> bool {
 // Acquisition
 // ---------------------------------------------------------------------------------------------------------------
 
-/// Les dossiers de profils des navigateurs de la famille Firefox (les mêmes que `machine::extensions::racines`,
-/// qui n'est pas visible d'ici).
+/// Les dossiers de profils des navigateurs de la famille Firefox : ceux que `machine::extensions::racines`
+/// connaît, une seule liste pour tout le programme.
 fn racines_firefox() -> Vec<(&'static str, PathBuf)> {
-    let mut r = Vec::new();
-    #[cfg(target_os = "linux")]
-    {
-        let maison = PathBuf::from(std::env::var_os("HOME").unwrap_or_default());
-        let config = std::env::var_os("XDG_CONFIG_HOME").map_or_else(|| maison.join(".config"), PathBuf::from);
-        r.extend([
-            ("Firefox", maison.join(".mozilla/firefox")),
-            ("Firefox", config.join("mozilla/firefox")),
-            ("Firefox", maison.join(".var/app/org.mozilla.firefox/.mozilla/firefox")),
-            ("Zen", maison.join(".zen")),
-            ("Zen", config.join("zen")),
-            ("Zen", maison.join(".var/app/app.zen_browser.zen/.zen")),
-            ("LibreWolf", maison.join(".librewolf")),
-            ("Floorp", maison.join(".floorp")),
-            ("Waterfox", maison.join(".waterfox")),
-        ]);
-    }
-    #[cfg(target_os = "macos")]
-    {
-        let support = PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join("Library/Application Support");
-        r.extend([
-            ("Firefox", support.join("Firefox/Profiles")),
-            ("Zen", support.join("zen/Profiles")),
-            ("LibreWolf", support.join("librewolf/Profiles")),
-            ("Floorp", support.join("Floorp/Profiles")),
-            ("Waterfox", support.join("Waterfox/Profiles")),
-        ]);
-    }
-    #[cfg(windows)]
-    {
-        let appdata = PathBuf::from(std::env::var_os("APPDATA").unwrap_or_default());
-        r.extend([
-            ("Firefox", appdata.join("Mozilla\\Firefox\\Profiles")),
-            ("Zen", appdata.join("zen\\Profiles")),
-            ("LibreWolf", appdata.join("librewolf\\Profiles")),
-            ("Floorp", appdata.join("Floorp\\Profiles")),
-            ("Waterfox", appdata.join("Waterfox\\Profiles")),
-        ]);
-    }
-    r
+    crate::machine::extensions::racines()
+        .into_iter()
+        .filter(|(_, _, firefox)| *firefox)
+        .map(|(nom, dossier, _)| (nom, dossier))
+        .collect()
 }
 
 /// Les profils d'une racine : les dossiers qui ont un prefs.js (un profil déjà ouvert).
