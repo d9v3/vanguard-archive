@@ -1596,6 +1596,56 @@ if ($Auto) { Sautee 'Sautée : il faut regarder l''écran (test avec questions).
     Constat 'Dans l''audit ci-dessus, les couleurs et les accents (é, è, ✔, ✖) s''affichent-ils correctement ?'
 }
 
+Etape 'Détection en profondeur (0.83) : points d''ancrage, pilotes, agents d''IA, sans fausse alerte sur un Windows propre'
+# Une VM propre n'a ni paquet LSA inconnu, ni AppCertDlls, ni pilote rangé dans un dossier du compte : une alerte
+# Moyen ou Élevé ici est sans doute une fausse alerte, à regarder avant la publication.
+try {
+    $audit = Sortie 'machine-json' | ConvertFrom-Json
+    foreach ($id in 'WIN-PRS-007', 'WIN-PRS-008', 'WIN-PRS-009', 'WIN-PRS-010', 'WIN-PRS-011', 'WIN-PRS-012', 'COM-AGT-001', 'COM-AGT-002') {
+        $c = @($audit.constats | Where-Object regle -eq $id)
+        if (-not $c.Count) { Bug "$id absente du bilan"; continue }
+        $alertes = @($c | Where-Object { $_.probleme -and $_.probleme -ne 'Info' })
+        if ($alertes.Count) { $alertes | ForEach-Object { Bug "Alerte sur une VM propre (fausse alerte ?) : $id $($_.probleme) : $($_.message)" } }
+        else { Ok "$id : $((@($c | ForEach-Object { $_.message })) -join ' | ')" }
+    }
+} catch { Bug "machine --json illisible : $($_.Exception.Message)" }
+
+Etape 'Une DLL posée à côté de Vanguard n''est pas chargée (bibliothèques prises dans System32)'
+# Sans DependentLoadFlags, Windows chargerait cet iphlpapi.dll vide avant la première ligne du programme et refuserait
+# de le lancer (0xC000007B) ; avec, il prend celui de System32 et Vanguard démarre.
+$piege = Join-Path $env:TEMP "vanguard-dll-$PID"
+try {
+    New-Item -ItemType Directory -Force -Path $piege | Out-Null
+    Copy-Item $exe (Join-Path $piege 'vanguard.exe') -Force
+    [IO.File]::WriteAllBytes((Join-Path $piege 'iphlpapi.dll'), [byte[]]@())
+    $p = Start-Process -FilePath (Join-Path $piege 'vanguard.exe') -ArgumentList '--version' -NoNewWindow -Wait -PassThru `
+        -RedirectStandardOutput (Join-Path $res 'dll-piege.out.txt') -RedirectStandardError (Join-Path $res 'dll-piege.err.txt')
+    $v = "$(Sortie 'dll-piege')".Trim()
+    if ($p.ExitCode -eq 0 -and $v -match 'vanguard') { Ok "Démarre malgré un iphlpapi.dll vide à côté : $v" }
+    else { Bug "Ne démarre pas avec un iphlpapi.dll vide à côté (code $($p.ExitCode)) : la DLL locale a été chargée" }
+} catch { Bug "Essai de la DLL posée à côté impossible : $($_.Exception.Message)" }
+finally { Remove-Item -Recurse -Force $piege -ErrorAction SilentlyContinue }
+
+Etape 'Mémoire des programmes (vanguard memoire, 0.83) : Defender ne bloque pas Vanguard'
+# En dernier : lire la mémoire des autres programmes ressemble au geste d'un voleur de mots de passe ; si Defender mettait
+# Vanguard en quarantaine, les étapes d'avant n'en sont pas faussées. Décide si la fonction entre dans la 0.83.
+$avantMemoire = Get-Date
+try {
+    $p = Start-Process -FilePath $exe -ArgumentList 'memoire' -NoNewWindow -Wait -PassThru `
+        -RedirectStandardOutput (Join-Path $res 'memoire.out.txt') -RedirectStandardError (Join-Path $res 'memoire.err.txt')
+    Noter-Commande 'memoire' @('memoire') $p.ExitCode ((Get-Date) - $avantMemoire).TotalSeconds $null
+    $t = "$(Sortie 'memoire')"
+    if ($p.ExitCode -eq 0 -and $t.Length -gt 0) { Ok "Analyse de la mémoire terminée en $([int]((Get-Date) - $avantMemoire).TotalSeconds) s" }
+    else { Bug "vanguard memoire : code $($p.ExitCode), sortie de $($t.Length) caractère(s)" }
+} catch { Bug "vanguard memoire n'a pas pu se lancer : $($_.Exception.Message)" }
+if (Test-Path $exe) { Ok 'vanguard.exe toujours là après l''analyse (pas mis en quarantaine)' }
+else { Bug 'vanguard.exe a DISPARU après l''analyse de la mémoire : Defender l''a mis en quarantaine' }
+try {
+    $detections = @(Get-MpThreatDetection -ErrorAction Stop | Where-Object { $_.InitialDetectionTime -ge $avantMemoire })
+    if ($detections.Count) { $detections | ForEach-Object { Bug "Defender a réagi pendant l'analyse : menace $($_.ThreatID), $($_.Resources -join ', ')" } }
+    else { Ok 'Aucune détection de Defender pendant l''analyse de la mémoire' }
+} catch { Info "Détections de Defender illisibles sans droits : $($_.Exception.Message)" }
+
 Journal "FIN $(Get-Date -Format 'HH:mm:ss')"
 $rapport = Rapport
 $toutes = @($script:etapes | ForEach-Object { $_.Verifs })
