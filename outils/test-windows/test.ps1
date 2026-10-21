@@ -1614,6 +1614,8 @@ Etape 'Détection en profondeur (0.83) : points d''ancrage, pilotes, agents d''I
 # jamais un succès : attendu s'il demande l'administrateur (passe sans droits), un défaut sinon.
 try {
     $audit = Sortie 'machine-json' | ConvertFrom-Json
+    # Recalculé ici : celui de l'étape « Audit de la machine » manque si sa lecture du bilan a échoué.
+    $admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
     foreach ($id in 'WIN-PRS-007', 'WIN-PRS-008', 'WIN-PRS-009', 'WIN-PRS-010', 'WIN-PRS-011', 'WIN-PRS-012', 'COM-AGT-001', 'COM-AGT-002', 'COM-CPT-003', 'COM-PRG-001') {
         $c = @($audit.constats | Where-Object regle -eq $id)
         if (-not $c.Count) { Bug "$id absente du bilan"; continue }
@@ -1623,7 +1625,8 @@ try {
         $verifies = @($calmes | Where-Object verifie)
         $alertes | ForEach-Object { Bug "Alerte sur une VM propre (fausse alerte ?) : $id $($_.probleme) : $($_.message)" }
         foreach ($n in $nonVerifies) {
-            if ($n.message -match 'administrat') { Info "$id non vérifié sans droits (attendu) : $($n.message)" }
+            # En administrateur, « relance en administrateur » est un défaut, pas l'effet d'une passe sans droits.
+            if (-not $admin -and $n.message -match 'administrat') { Info "$id non vérifié sans droits (attendu) : $($n.message)" }
             else { Bug "$id non vérifié : $($n.message)" }
         }
         if ($verifies.Count -and -not $alertes.Count) { Ok "$id : $((@($verifies | ForEach-Object { $_.message })) -join ' | ')" }
