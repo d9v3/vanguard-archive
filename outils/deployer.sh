@@ -42,16 +42,70 @@ dire_durees() { [[ -z $DUREES ]] || echo "Durées : $DUREES (en tout $SECONDS s)
 # Copié seulement s'il a changé : une clé USB écrit lentement, et chaque écriture l'use un peu.
 copier() { cmp -s "$1" "$2" 2>/dev/null || cp -f "$1" "$2"; }
 
+# Erreurs du journal de Vanguard (plantages, PowerShell en échec…) : celles de cet ordinateur et celles que la clé
+# rapporte des autres sont gardées dans retours/, puis envoyées en tickets GitHub avec gh (un ticket par erreur, les
+# répétitions en commentaire ; outils/journal-vers-github.py). Sans Internet, elles attendent le déploiement suivant.
+RETOURS="${XDG_DATA_HOME:-$HOME/.local/share}/vanguard/retours"
+rapatrier_journal() { # $1 : journal à vider, $2 : d'où il vient
+  [[ -s $1 ]] || return 0
+  mkdir -p "$RETOURS"
+  local nb
+  nb=$(grep -c '^== ' "$1" || true)
+  cat "$1" >>"$RETOURS/journal-erreurs.txt"
+  cat "$1" >>"$RETOURS/a-envoyer-github.txt"
+  : >"$1"
+  echo "Journal $2 : $nb erreur(s) rapatriée(s) dans $RETOURS/journal-erreurs.txt"
+  command -v notify-send >/dev/null &&
+    notify-send -a Vanguard -i vanguard "Vanguard : $nb erreur(s) rapportée(s) ($2)" "$RETOURS/journal-erreurs.txt" || true
+}
+envoyer_journal() {
+  [[ -z $LOCAL && -s $RETOURS/a-envoyer-github.txt ]] && command -v gh >/dev/null || return 0
+  timeout 300 python3 outils/journal-vers-github.py "$RETOURS/a-envoyer-github.txt" ||
+    echo "Journal : envoi sur GitHub impossible, il repartira au prochain déploiement."
+}
+
+# Programmes refusés par outils/failles-programmes.sh : rien ne part, ni sur la clé, ni dans la VM, ni sur GitHub.
+# Une faille peut paraître n'importe quand, sans changement de code, et au branchement de la clé (vanguard-cle.service)
+# personne ne lit cette sortie : une notification le dit, une seule pour les mêmes programmes en cinq minutes (le
+# service de copie qui suit une compilation repasse aussitôt). Les journaux d'erreurs, eux, rentrent quand même : ils
+# n'envoient aucun programme.
+refuser() {
+  local cle journal="" repere="${XDG_RUNTIME_DIR:-/tmp}/vanguard-refus.empreinte" empreinte
+  echo "Déploiement arrêté : seuls les journaux d'erreurs sont rapatriés."
+  rapatrier_journal "${XDG_DATA_HOME:-$HOME/.local/share}/vanguard/journal-erreurs.txt" "de cet ordinateur"
+  cle=$(find "/run/media/$USER" -maxdepth 2 -name vanguard.cle -printf '%h\n' 2>/dev/null | head -1 || true)
+  [[ -z $cle ]] || journal=$(findmnt -nro TARGET -S LABEL=VANGUARDLOG 2>/dev/null | head -1 || true)
+  [[ -z $journal ]] || rapatrier_journal "$journal/journal-erreurs.txt" "de la clé"
+  envoyer_journal
+  empreinte=$({ cat "$LINUX" "$WINDOWS" 2>/dev/null || true; } | sha256sum)
+  if [[ -z $(find "$repere" -mmin -5 2>/dev/null) || $(cat "$repere" 2>/dev/null) != "$empreinte" ]]; then
+    command -v notify-send >/dev/null && notify-send -a Vanguard -i vanguard "Vanguard : programmes refusés" \
+      "Faille connue ou liste absente : rien n'est copié ni envoyé. Le détail : outils/failles-programmes.sh" || true
+    echo "$empreinte" >"$repere"
+  fi
+  exit 1
+}
+
 compiler() {
   # Chaque programme porte la liste de ses dépendances, versions comprises (cargo auditable, section .dep-v0), que
   # cargo audit bin relit plus bas, et chez quiconque l'a téléchargé. Sans ces outils, rien n'est compilé : jamais de
-  # programme publié sans sa liste. La version est celle de la CI (.github/workflows/ci.yml) : la même liste, la même
-  # empreinte.
-  if ! command -v cargo-auditable >/dev/null || ! command -v cargo-audit >/dev/null; then
-    echo "✖ Compilation refusée : il faut cargo-auditable et cargo-audit (un programme publié porte la liste de ses"
-    echo "  dépendances). cargo install cargo-auditable --locked --version 0.7.7 && cargo install cargo-audit --locked"
+  # programme publié sans sa liste. cargo-auditable dans la version de la CI (.github/workflows/ci.yml) : une autre
+  # écrirait une autre liste, donc un autre programme, que la compilation reproductible ne retrouverait pas.
+  # cargo-audit, lui, est vérifié par outils/failles-programmes.sh (--outil : avant la compilation, pas après).
+  local auditable installes
+  auditable=$(sed -n 's/.*cargo-auditable@\([0-9][0-9.]*\).*/\1/p' .github/workflows/ci.yml | head -1)
+  installes=$(cargo install --list 2>/dev/null || true)
+  if [[ -z $auditable ]]; then
+    echo "✖ Compilation refusée : version de cargo-auditable introuvable dans .github/workflows/ci.yml."
     exit 1
   fi
+  if ! grep -qxF "cargo-auditable v$auditable:" <<<"$installes"; then
+    echo "✖ Compilation refusée : il faut cargo-auditable $auditable, celui de la CI (.github/workflows/ci.yml) : un"
+    echo "  programme publié porte la liste de ses dépendances, la même qu'en CI."
+    echo "  cargo install cargo-auditable --locked --version $auditable"
+    exit 1
+  fi
+  outils/failles-programmes.sh --outil || exit 1
   # Liste des fabricants de plus d'un mois : on la rafraîchit avant de compiler (elle est intégrée au programme), et
   # elle part dans son propre commit. Sans Internet, on garde l'ancienne.
   if [[ -n $(find assets/oui.tsv -mtime +30) ]] && outils/maj-fabricants.sh; then
@@ -119,10 +173,11 @@ if [[ -f $WINDOWS ]] && ! python3 outils/verifier-pe.py "$WINDOWS"; then
   exit 1
 fi
 # Les failles connues de leurs dépendances, lues dans la liste que chaque programme porte (outils/failles-programmes.sh,
-# avis traités comme par cargo deny) : une seule, et rien ne part, ni sur la clé, ni dans la VM, ni sur GitHub.
+# avis traités comme par cargo deny) : une seule, et rien ne part, ni sur la clé, ni dans la VM, ni sur GitHub
+# (refuser, plus haut).
 PROGRAMMES=("$LINUX")
 [[ -f $WINDOWS ]] && PROGRAMMES+=("$WINDOWS")
-outils/failles-programmes.sh "${PROGRAMMES[@]}" || exit 1
+outils/failles-programmes.sh "${PROGRAMMES[@]}" || refuser
 # Page de la version sur GitHub (Releases) : chaque publication a la sienne, 0.x.0 comme 0.x.y. Il n'y en a qu'une par
 # jour : le lien « dernière version » du README mène toujours à celle du jour, et le Mac de GitHub ne compile qu'une
 # fois par jour. Une version intermédiaire (VANGUARD_INTERMEDIAIRE) va sur la clé et sur GitHub (le code) sans page :
@@ -211,28 +266,7 @@ for png in assets/icones/vanguard-*.png; do
 done
 command -v gtk-update-icon-cache >/dev/null && gtk-update-icon-cache -qtf "$ICONES" || true
 
-# Erreurs du journal de Vanguard (plantages, PowerShell en échec…) : celles de cet ordinateur et celles que la clé
-# rapporte des autres sont gardées dans retours/, puis envoyées en tickets GitHub avec gh (un ticket par erreur, les
-# répétitions en commentaire ; outils/journal-vers-github.py). Sans Internet, elles attendent le déploiement suivant.
-RETOURS="${XDG_DATA_HOME:-$HOME/.local/share}/vanguard/retours"
-rapatrier_journal() { # $1 : journal à vider, $2 : d'où il vient
-  [[ -s $1 ]] || return 0
-  mkdir -p "$RETOURS"
-  local nb
-  nb=$(grep -c '^== ' "$1" || true)
-  cat "$1" >>"$RETOURS/journal-erreurs.txt"
-  cat "$1" >>"$RETOURS/a-envoyer-github.txt"
-  : >"$1"
-  echo "Journal $2 : $nb erreur(s) rapatriée(s) dans $RETOURS/journal-erreurs.txt"
-  command -v notify-send >/dev/null &&
-    notify-send -a Vanguard -i vanguard "Vanguard : $nb erreur(s) rapportée(s) ($2)" "$RETOURS/journal-erreurs.txt" || true
-}
-envoyer_journal() {
-  [[ -z $LOCAL && -s $RETOURS/a-envoyer-github.txt ]] && command -v gh >/dev/null || return 0
-  timeout 300 python3 outils/journal-vers-github.py "$RETOURS/a-envoyer-github.txt" ||
-    echo "Journal : envoi sur GitHub impossible, il repartira au prochain déploiement."
-}
-# Sans clé branchée, Vanguard écrit son journal dans son dossier de cet ordinateur.
+# Sans clé branchée, Vanguard écrit son journal dans son dossier de cet ordinateur (fonctions du journal : en tête).
 rapatrier_journal "${XDG_DATA_HOME:-$HOME/.local/share}/vanguard/journal-erreurs.txt" "de cet ordinateur"
 envoyer_journal
 
@@ -344,7 +378,11 @@ if [[ -z $LOCAL ]] && command -v gh >/dev/null; then
     fi
   fi
 fi
-if [[ -f $MAC/vanguard ]]; then
+# La version macOS passe la même vérification que les deux autres (outils/failles-programmes.sh, moitié par moitié) :
+# un artefact compilé avant cargo auditable, donc sans sa liste, ou une faille parue depuis, et la clé garde la sienne.
+if [[ -f $MAC/vanguard ]] && ! outils/failles-programmes.sh "$MAC/vanguard"; then
+  echo "Version macOS pas copiée sur la clé (voir ci-dessus) : elle y reste telle qu'elle était."
+elif [[ -f $MAC/vanguard ]]; then
   mkdir -p "$CLE/macOS"
   copier "$MAC/vanguard" "$CLE/macOS/vanguard"
   cp -f "outils/cle/Lancer Vanguard.command" "$CLE/"

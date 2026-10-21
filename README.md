@@ -565,9 +565,13 @@ partout, `VANGUARD_EMOJI=1` les garde partout ; le menu Paramètres fait de mêm
 
 Compiler, tester, déployer, la clé USB, le journal des erreurs : voir [CONTRIBUTING.md](CONTRIBUTING.md).
 Une faille de sécurité dans Vanguard ? Signale-la en privé : voir [SECURITY.md](SECURITY.md).
-Chaque programme publié porte la liste de ses dépendances, versions comprises (cargo auditable) :
-`cargo audit bin <programme>` la compare aux failles connues de la base RustSec. Sous macOS, sur une moitié du
-programme universel, que cargo audit ne lit pas tel quel : `lipo vanguard-macos -thin arm64 -output vanguard-arm64`.
+Chaque programme publié porte la liste de ses dépendances, versions comprises (cargo auditable), que cargo audit
+compare aux failles connues de la base RustSec :
+`cargo audit bin --ignore RUSTSEC-2023-0071 --ignore RUSTSEC-2025-0141 <programme>`. Ces deux avis sont admis, chacun
+avec sa preuve dans [deny.toml](deny.toml) : rsa, sans version corrigée, et bincode, abandonné, tous deux par YARA-X ;
+sans `--ignore`, cargo audit les signale (« 1 vulnerability found »). Sous macOS, sur une moitié du programme
+universel, qu'il ne lit pas tel quel : `lipo vanguard-macos -thin arm64 -output vanguard-arm64`. La vérification de
+chaque publication, avis traités comme par cargo deny : `outils/failles-programmes.sh <programme>`, depuis le code.
 
 ## Licence
 

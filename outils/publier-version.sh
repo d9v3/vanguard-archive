@@ -105,6 +105,11 @@ DOSSIER=$(mktemp -d)
 trap 'rm -rf "$DOSSIER"' EXIT
 cp "$LINUX" "$DOSSIER/vanguard-linux-x86_64"
 cp "$WINDOWS" "$DOSSIER/vanguard-windows-x86_64.exe"
+# Les failles connues, revérifiées sur les fichiers mêmes qui partent (outils/failles-programmes.sh, comme dans
+# deployer.sh) : depuis, une compilation ordinaire a pu remplacer ceux de target/ par d'autres, sans leur liste, sans
+# toucher .commit-compile, et une faille paraître. Avant d'attendre le Mac ; la version macOS l'est une fois récupérée.
+outils/failles-programmes.sh "$DOSSIER/vanguard-linux-x86_64" "$DOSSIER/vanguard-windows-x86_64.exe" ||
+  { echo "Programmes : rien de publié."; exit 1; }
 
 # Une compilation macOS qui a vraiment produit le programme de ce code : celle de ce commit, ou celle d'un commit
 # d'avant dont le programme est le même (seuls des captures, la documentation ou les outils ont changé depuis :
@@ -148,6 +153,7 @@ if [[ -z $RUN ]]; then
 fi
 gh run download "$RUN" -n vanguard-macos -D "$DOSSIER/mac" >/dev/null
 cp "$DOSSIER/mac/vanguard" "$DOSSIER/vanguard-macos"
+outils/failles-programmes.sh "$DOSSIER/vanguard-macos" || { echo "Version macOS : rien de publié."; exit 1; }
 (cd "$DOSSIER" && sha256sum vanguard-windows-x86_64.exe vanguard-linux-x86_64 vanguard-macos >SHA256SUMS.txt)
 
 NOTES=$(notes)

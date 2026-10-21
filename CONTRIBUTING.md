@@ -142,9 +142,9 @@ Le jugement s'écrit à part (`juger_…`, sans rien lire du système), pour se 
 Prérequis : `rustup target add x86_64-unknown-linux-musl x86_64-pc-windows-gnu`, `musl` (musl-gcc), `mingw-w64-gcc`
 et `clang` : YARA-X compile un peu de C pour chaque cible (clang pour clippy sur les cibles Mac, voir
 `outils/verifier.sh`). Pour déployer, aussi `cargo install cargo-auditable --locked --version 0.7.7` et
-`cargo install cargo-audit --locked` : `deployer.sh` grave dans chaque programme la liste de ses dépendances,
-versions comprises (`cargo auditable build`), puis y cherche les failles connues (`outils/failles-programmes.sh`) ;
-sans eux, il refuse.
+`cargo install cargo-audit --locked --version 0.22.2`, les versions de la CI (`.github/workflows/ci.yml`) :
+`deployer.sh` grave dans chaque programme la liste de ses dépendances, versions comprises (`cargo auditable build`),
+puis y cherche les failles connues (`outils/failles-programmes.sh`) ; sans eux, ou dans une autre version, il refuse.
 
 ```sh
 outils/deployer.sh     # compile Linux (musl, statique) + Windows, installe en local, pousse sur GitHub, met à jour la clé
