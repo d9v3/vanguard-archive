@@ -148,10 +148,22 @@ jobs:
       # (cargo metadata), téléchargés sans rien compiler.
       - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
         with:
-          tool: cargo-audit,cargo-deny
-      # Ses exceptions sont dans .cargo/audit.toml : celles de deny.toml, où est leur preuve.
+          tool: cargo-audit@0.22.2,cargo-deny
+      # Jugé comme outils/verifier.sh et outils/failles-programmes.sh, dans la même version de cargo-audit : abandon,
+      # code défaillant et « notice » refusés, une version retirée de crates.io (yanked) seulement signalée ; un
+      # cargo audit nu laisserait passer les trois premiers. Ses exceptions sont dans .cargo/audit.toml : celles de
+      # deny.toml, où est leur preuve.
       - name: cargo audit
-        run: cargo audit
+        run: |
+          code=0
+          sortie=$(cargo audit --color never --deny unmaintained --deny unsound 2>&1) || code=1
+          printf '%s\n' "$sortie"
+          # cargo audit n'a pas d'option pour refuser une « notice » : comptée ici.
+          if awk '$1 == "Warning:" && $2 != "yanked" { n++ } END { exit !n }' <<<"$sortie"; then
+            echo "✖ avis que cargo deny refuse aussi (notice)"
+            code=1
+          fi
+          exit "$code"
       # Lancé même si cargo audit a échoué : les deux avis servent.
       - name: Dépendances (cargo deny)
         if: ${{ !cancelled() }}

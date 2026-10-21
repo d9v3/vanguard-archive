@@ -19,7 +19,9 @@ DUREE=${2:-60}
 FUZZ=${VANGUARD_FUZZ:-$HOME/.cache/vanguard-dev/fuzz}
 
 usage() {
-  echo "usage : outils/fuzz.sh [tout|${CIBLES[*]// /|}] [secondes par cible, 60 par défaut]" >&2
+  # "${CIBLES[*]}" joint les cibles par le premier caractère d'IFS.
+  local IFS='|'
+  echo "usage : outils/fuzz.sh [tout|${CIBLES[*]}] [secondes par cible, 60 par défaut]" >&2
   exit 2
 }
 [[ $DUREE =~ ^[1-9][0-9]*$ ]] || usage
