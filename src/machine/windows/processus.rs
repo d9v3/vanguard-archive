@@ -130,21 +130,30 @@ pub(crate) fn terminer(processus: u32) -> bool {
     }
 }
 
+/// Le tampon d'une information du jeton, pour les `rendue` octets annoncés par Windows : des u64 (alignés sur 8 pour
+/// les structures), et la longueur à lui donner, qui reste `rendue`. Une classe de taille fixe refuse un tampon plus
+/// grand (TokenElevation, 4 octets : ERROR_BAD_LENGTH avec 8, vu en administrateur dans la VM) ; Wine l'accepte.
+fn tampon_du_jeton(rendue: u32) -> (Vec<u64>, u32) {
+    (
+        vec![0u64; usize::try_from(rendue.div_ceil(8)).unwrap_or(0).max(1)],
+        rendue,
+    )
+}
+
 /// Une information du jeton de ce processus (GetTokenInformation), dans un tampon aligné ; `None` si Windows refuse.
 fn jeton(classe: u32) -> Option<Vec<u64>> {
     const LECTURE: u32 = 0x0008;
     let mut poignee = std::ptr::null_mut();
     // SAFETY : GetCurrentProcess rend une pseudo-poignée, sans rien à fermer. Le jeton ouvert (vérifié) est fermé une
-    // seule fois. Le premier appel donne la taille ; le second écrit au plus `taille` octets dans `tampon`, aligné sur
-    // 8 octets pour les structures qu'il contient.
+    // seule fois. Le premier appel donne la taille ; le second écrit au plus `place` octets (la taille annoncée) dans
+    // `tampon`, qui en a au moins autant, aligné sur 8 octets pour les structures qu'il contient.
     unsafe {
         if OpenProcessToken(GetCurrentProcess(), LECTURE, &raw mut poignee) == 0 {
             return None;
         }
         let mut taille = 0u32;
         GetTokenInformation(poignee, classe, std::ptr::null_mut(), 0, &raw mut taille);
-        let mut tampon = vec![0u64; usize::try_from(taille.div_ceil(8)).unwrap_or(0).max(1)];
-        let place = u32::try_from(tampon.len() * 8).unwrap_or(0);
+        let (mut tampon, place) = tampon_du_jeton(taille);
         let lu = GetTokenInformation(poignee, classe, tampon.as_mut_ptr().cast(), place, &raw mut taille) != 0;
         CloseHandle(poignee);
         lu.then_some(tampon)
@@ -272,6 +281,24 @@ mod tests {
         assert_eq!(
             nom_du_fichier(8, &f("fire\x1b]0;x\x07fox.exe")),
             "fire\u{fffd}]0;x\u{fffd}fox"
+        );
+    }
+
+    /// La longueur donnée à Windows est celle qu'il a annoncée, jamais le tampon arrondi à 8 : avec 8 octets pour les 4
+    /// de TokenElevation, Windows refusait, et Vanguard en administrateur se croyait sans droits (corrections natives
+    /// jamais faites, « relance en administrateur » dit à qui l'était déjà).
+    #[test]
+    fn jeton_lu_avec_la_taille_annoncee() {
+        const ELEVATION: u32 = 20;
+        for rendue in [4, 8, 12, 44] {
+            let (tampon, longueur) = tampon_du_jeton(rendue);
+            assert_eq!(longueur, rendue);
+            assert!(tampon.len() * 8 >= usize::try_from(rendue).unwrap());
+        }
+        assert_eq!(tampon_du_jeton(0), (vec![0], 0));
+        assert!(
+            jeton(ELEVATION).is_some(),
+            "TokenElevation illisible avec sa taille exacte"
         );
     }
 
