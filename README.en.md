@@ -18,8 +18,10 @@ without scripts, and always undoable (in development), measured against recogniz
 (planned). Detect vulnerabilities: those already known in your software, matched on your machine against CISA's
 catalog of exploited vulnerabilities (KEV) and OSV (planned), and attacks, with Windows event logs read by Hayabusa
 then live observation on Linux with eBPF (planned). Prepare reports of new vulnerabilities for vendors (Microsoft,
-Google…), anonymized: you review and send them yourself, Vanguard sends nothing (planned). Always defensive: it
-attacks no device.
+Google…), anonymized: you review and send them yourself, Vanguard sends nothing (planned). Protect against AI
+agents: AI servers open to the network, agents that act without asking and badly protected MCP servers are already
+flagged, the first two blocked in one click; defense against the new threats of AI agents is in development.
+Always defensive: it attacks no device.
 
 ## At a glance
 

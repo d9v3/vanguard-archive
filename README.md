@@ -18,8 +18,10 @@ sans script, et toujours annulable (en développement), mesurée aux référenti
 Détecter les failles : celles déjà connues de tes logiciels, croisées sur ta machine avec le catalogue des failles
 exploitées de la CISA (KEV) et OSV (prévu), et les attaques, avec les journaux de Windows lus par Hayabusa puis
 l'observation en direct sous Linux par eBPF (prévu). Préparer les rapports de failles nouvelles pour les éditeurs
-(Microsoft, Google…), anonymisés : c'est toi qui les relis et les envoies, Vanguard n'envoie rien (prévu). Toujours
-défensif : il n'attaque aucun appareil.
+(Microsoft, Google…), anonymisés : c'est toi qui les relis et les envoies, Vanguard n'envoie rien (prévu). Protéger
+contre les agents d'IA : les serveurs d'IA ouverts au réseau, les agents qui agissent sans demander et les
+serveurs MCP mal protégés sont déjà signalés, les deux premiers bloqués d'un clic ; la défense contre les menaces
+nouvelles des agents d'IA est en développement. Toujours défensif : il n'attaque aucun appareil.
 
 ## En bref
 
