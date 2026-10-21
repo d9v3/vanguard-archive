@@ -619,19 +619,24 @@ fn membres_admin() -> Option<Vec<String>> {
 
 /// Comptes administrateurs : par la bibliothèque du système, dscl en secours (« GroupMembership: root alice »).
 fn comptes() -> Constat {
-    let membres = membres_admin().or_else(|| {
+    // Un Mac a toujours un administrateur : une liste vide (groupe dont Open Directory ne remplit pas
+    // les noms, adhésion par identifiant seulement) est une lecture manquée, qui passe à dscl.
+    let membres = membres_admin().filter(|m| !m.is_empty()).or_else(|| {
         let texte = sortie("dscl", &[".", "-read", "/Groups/admin", "GroupMembership"])?;
-        Some(texte.split_whitespace().skip(1).map(str::to_string).collect())
+        let m: Vec<String> = texte.split_whitespace().skip(1).map(str::to_string).collect();
+        (!m.is_empty()).then_some(m)
     });
     let Some(membres) = membres else {
         return impossible("Comptes", tr!("dscl illisible", "dscl unreadable"));
     };
-    // root et les comptes internes de macOS (« _mbsetupuser ») ne sont pas des personnes.
-    let admins: Vec<&str> = membres
-        .iter()
-        .map(String::as_str)
-        .filter(|n| *n != "root" && !n.starts_with('_'))
-        .collect();
+    let admins = personnes(&membres);
+    if admins.is_empty() {
+        // Seulement root ou des comptes internes : la vraie liste n'a pas été lue.
+        return impossible(
+            "Comptes",
+            tr!("aucune personne dans le groupe admin", "no person in the admin group"),
+        );
+    }
     if admins.len() > 2 {
         alerte(
             "Comptes",
@@ -649,6 +654,16 @@ fn comptes() -> Constat {
             trf!("Administrateurs : {}.", "Administrators: {}.", admins.join(", ")),
         )
     }
+}
+
+/// Les membres qui sont des personnes : root et les comptes internes de macOS (« _mbsetupuser ») n'en
+/// sont pas.
+fn personnes(membres: &[String]) -> Vec<&str> {
+    membres
+        .iter()
+        .map(String::as_str)
+        .filter(|n| *n != "root" && !n.starts_with('_'))
+        .collect()
 }
 
 /// Gestion à distance (MDM) : une organisation qui gère ce Mac peut y installer des programmes et des profils.
@@ -879,6 +894,15 @@ pub fn auditer() -> Audit {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// root et les comptes internes ne comptent pas : une liste sans personne n'est pas un bilan.
+    #[test]
+    fn administrateurs_personnes() {
+        let m: Vec<String> = ["root", "alice", "_mbsetupuser"].map(String::from).into();
+        assert_eq!(personnes(&m), ["alice"]);
+        assert_eq!(personnes(&["root".to_string()]), [] as [&str; 0]);
+        assert_eq!(personnes(&[]), [] as [&str; 0]);
+    }
 
     #[test]
     fn lecture_du_pare_feu() {
