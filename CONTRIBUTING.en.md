@@ -269,7 +269,10 @@ an HFS+ partition holds the macOS recovery of Intel Macs; `VANGUARD` and `VANGUA
 read every day and on plug-in (`cle-secours.sh --a-jour`); when older than the pinned one, its update, which erases
 nothing (`Ventoy2Disk.sh -u`, as root through pkexec, disk and archive checked again, logged), is offered by a
 notification. A newer Ventoy on GitHub is reported to the developer by the weekly search, never taken on its own: the
-archive is not signed, the pin changes by hand.
+archive is not signed, the pin changes by hand. Windows 11 older than six months (the date of its image's files) is
+reported by a notification, not replaced: Microsoft only gives a 24-hour link, and the hash that checks the image is
+read on its page. The macOS recovery has no age that matters: it installs the latest macOS, fetched from Apple at
+install time.
 
 ## Errors and crashes
 

@@ -28,11 +28,12 @@
 # LA CLÉ DÉJÀ FAITE, tenue à jour sans rien effacer :
 #   outils/cle-secours.sh --a-jour [POINT]        la clé branchée : Ventoy lu sur la clé ; plus ancien que celui épinglé
 #                                                 ici, sa mise à jour est proposée (notification ; chaque jour par
-#                                                 outils/maj-cle.sh, et au branchement)
+#                                                 outils/maj-cle.sh, et au branchement). Windows 11 de plus de six mois
+#                                                 est signalé : son image se prend à la main chez Microsoft
 #   outils/cle-secours.sh --ventoy-maj [/dev/sdX] met Ventoy à jour sur la clé, sans rien effacer (root : une fenêtre
 #                                                 pkexec ; journal dans ~/.local/state/vanguard/ventoy/)
 #   outils/cle-secours.sh --ventoy-publie         (développement) GitHub a-t-il un Ventoy plus récent que l'épingle ?
-# Essais : VANGUARD_VTOYEFI, un dossier lu à la place de la partition VTOYEFI de la clé.
+# Essais : VANGUARD_VTOYEFI et VANGUARD_WIN11, des dossiers lus à la place des partitions VTOYEFI et WIN11 de la clé.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -687,7 +688,7 @@ ecrire() { # disque dossier
   lsblk -o NAME,SIZE,FSTYPE,LABEL,PARTLABEL,MOUNTPOINTS "$disque"
 }
 
-# --- La clé déjà faite : Ventoy à jour -------------------------------------------------------------------------------
+# --- La clé déjà faite : Ventoy à jour, Windows 11 pas trop vieux -----------------------------------------------------
 
 avertir() { # titre texte
   command -v notify-send >/dev/null && notify-send -a Vanguard -i vanguard -- "$1" "$2" || true
@@ -968,8 +969,48 @@ outils/cle-secours.sh). L'archive n'est pas signée : comparer son empreinte à 
   fi
 }
 
+# L'âge de Windows 11 sur la clé : la date de ses fichiers, que 7z garde en les tirant de l'image (setup.exe de la
+# partition WIN11, sinon celui de l'image dans ISO/). Plus de six mois : dit, au plus une fois par mois. Rien ne la
+# remplace tout seul : Microsoft ne donne qu'un lien de 24 heures, et l'empreinte qui la vérifie se lit sur sa page.
+verifier_windows_age() { # point de la clé
+  local point=$1 disque p5 win=${VANGUARD_WIN11:-} date="" iso quand
+  if [[ -z $win ]]; then
+    disque=$(disque_de "$point")
+    p5=$([[ -n $disque ]] && partition "$disque" 5 || true)
+    if [[ -n $p5 && -b $p5 && $(lsblk -dno PARTLABEL "$p5" 2>/dev/null) == WIN11 ]]; then
+      win=$(findmnt -nro TARGET -S "$p5" 2>/dev/null | head -1 || true)
+    fi
+  fi
+  if [[ -n $win && -f $win/setup.exe ]]; then
+    date=$(stat -c %Y "$win/setup.exe")
+  else
+    iso=$([[ -d $point/ISO ]] && fichier_windows "$point/ISO" || true)
+    if [[ -n $iso ]]; then
+      date=$(7z l -slt -ba "$iso" setup.exe 2>/dev/null | sed -n 's/^Modified = \([0-9-]* [0-9:]*\).*/\1/p' | head -1 ||
+        true)
+      [[ -z $date ]] || date=$(date -d "$date" +%s 2>/dev/null || true)
+    fi
+  fi
+  if [[ -z $date ]]; then
+    echo "· Windows 11 : ni partition WIN11 montée, ni image dans ISO/ : âge non vérifié."
+    return 0
+  fi
+  quand=$(date -d "@$date" +%F)
+  if (($(date +%s) - date <= 183 * 86400)); then
+    echo "✔ Windows 11 : image du $quand."
+    return 0
+  fi
+  echo "↑ Windows 11 : image du $quand, de plus de six mois ; une neuve se prend à la main chez Microsoft."
+  if ! deja_dit windows-age "$quand" 43200; then
+    noter windows-age "$quand"
+    avertir "Clé VANGUARD : Windows 11 de plus de six mois" "Image du $quand (partition WIN11 et ISO/). Une \
+installation se met à jour ensuite par Windows Update. Pour une image neuve : $PWD/outils/cle-secours.sh --telecharger \
+DOSSIER dit comment la prendre chez Microsoft."
+  fi
+}
+
 # La clé branchée est-elle à jour pour démarrer les ordinateurs ? Lancé par maj-cle.sh (chaque jour) et au branchement
-# (vanguard-images-cle.service).
+# (vanguard-images-cle.service). Ventoy en dernier : sa proposition peut attendre une réponse un quart d'heure.
 a_jour() { # point de la clé (facultatif)
   local point=${1:-}
   [[ -n $point ]] || point=$(point_cle)
@@ -977,6 +1018,10 @@ a_jour() { # point de la clé (facultatif)
     echo "Clé VANGUARD non branchée : rien à vérifier."
     return 0
   fi
+  verifier_windows_age "$point"
+  # La récupération de macOS n'a pas d'âge qui compte : elle installe le dernier macOS, pris chez Apple au moment
+  # d'installer. La réécrire demanderait root et --ecrire, qui efface la clé.
+  echo "· Récupération de macOS : rien à tenir à jour (elle prend le dernier macOS chez Apple en installant)."
   verifier_ventoy "$point"
 }
 
@@ -995,5 +1040,5 @@ case ${1:-} in
     ventoy_racine "${@:2}"
     ;;
   --ventoy-publie) ventoy_publie ;;
-  *) sed -n '2,35p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
+  *) sed -n '2,36p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
 esac

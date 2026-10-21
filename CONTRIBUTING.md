@@ -273,7 +273,10 @@ disque ; seul `--ecrire` efface la clé. Ventoy lui-même : sa version sur la cl
 (`cle-secours.sh --a-jour`) ; plus ancienne que celle épinglée, sa mise à jour, qui n'efface rien
 (`Ventoy2Disk.sh -u`, en root par pkexec, disque et archive revérifiés, journalisée), est proposée par une
 notification. Un Ventoy plus récent sur GitHub est signalé au développeur par la recherche de la semaine, jamais pris
-tout seul : l'archive n'est pas signée, l'épingle change à la main.
+tout seul : l'archive n'est pas signée, l'épingle change à la main. Windows 11 de plus de six mois (la date des
+fichiers de son image) est signalé par une notification, pas remplacé : Microsoft ne donne qu'un lien de 24 heures, et
+l'empreinte qui vérifie l'image se lit sur sa page. La récupération de macOS n'a pas d'âge qui compte : elle installe
+le dernier macOS, pris chez Apple au moment d'installer.
 
 ## Erreurs et plantages
 
