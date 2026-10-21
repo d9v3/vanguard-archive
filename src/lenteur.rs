@@ -947,9 +947,308 @@ fn instantane_windows(l: LectureWindows) -> Instantane {
 
 #[cfg(windows)]
 mod systeme {
-    use super::{Instantane, LectureWindows, instantane_windows};
+    use std::collections::HashMap;
+    use std::time::{Duration, Instant};
+
+    use super::{DemarrageWindows, Instantane, LectureWindows, LentWindows, Programme, instantane_windows};
+    use crate::machine::windows::wmi::{self, Ligne};
+
+    const CIMV2: &str = r"root\cimv2";
+    const PERFORMANCES: &str = "Microsoft-Windows-Diagnostics-Performance/Operational";
+
+    /// Une lecture des compteurs bruts : le processeur (temps de repos), chaque disque (temps de repos), chaque
+    /// processus (temps de processeur, octets lus et écrits, mémoire). Les mêmes classes que le script PowerShell.
+    struct Releve {
+        processeur: Option<Ligne>,
+        disques: Vec<Ligne>,
+        processus: Vec<Ligne>,
+        quand: Instant,
+    }
+
+    fn releve() -> Option<Releve> {
+        let processeur = wmi::requete(
+            CIMV2,
+            "Win32_PerfRawData_PerfOS_Processor",
+            "Name='_Total'",
+            &["PercentProcessorTime", "Timestamp_Sys100NS"],
+        )
+        .and_then(|l| l.into_iter().next());
+        let disques = wmi::requete(
+            CIMV2,
+            "Win32_PerfRawData_PerfDisk_PhysicalDisk",
+            "Name <> '_Total'",
+            &["Name", "PercentIdleTime", "Timestamp_Sys100NS"],
+        )
+        .unwrap_or_default();
+        // Sans les compteurs des processus (compteurs de performance coupés), PowerShell prend tout le relais.
+        let processus = wmi::requete(
+            CIMV2,
+            "Win32_PerfRawData_PerfProc_Process",
+            "Name <> '_Total'",
+            &[
+                "IDProcess",
+                "Name",
+                "PercentProcessorTime",
+                "IODataBytesPersec",
+                "WorkingSet",
+            ],
+        )?;
+        Some(Releve {
+            processeur,
+            disques,
+            processus,
+            quand: Instant::now(),
+        })
+    }
+
+    #[allow(clippy::cast_precision_loss)]
+    fn nombre(l: &Ligne, champ: &str) -> Option<f64> {
+        l[champ].entier().map(|n| n as f64)
+    }
+
+    /// Part occupée entre deux lectures d'un compteur de repos : 100 × (1 − repos / temps écoulé).
+    fn occupe(avant: &Ligne, apres: &Ligne, repos: &str) -> Option<f64> {
+        let ecoule = nombre(apres, "Timestamp_Sys100NS")? - nombre(avant, "Timestamp_Sys100NS")?;
+        let libre = nombre(apres, repos)? - nombre(avant, repos)?;
+        (ecoule > 0.0).then(|| 100.0 * (1.0 - libre / ecoule))
+    }
+
+    /// Le nom d'un processus comme Get-Process le donne : les compteurs numérotent les homonymes (« chrome#3 »).
+    pub(super) fn nom_du_processus(instance: &str) -> &str {
+        match instance.rsplit_once('#') {
+            Some((nom, n)) if !n.is_empty() && n.bytes().all(|c| c.is_ascii_digit()) => nom,
+            _ => instance,
+        }
+    }
+
+    #[allow(
+        clippy::cast_precision_loss,
+        clippy::cast_sign_loss,
+        clippy::cast_possible_truncation
+    )]
+    fn programmes(avant: &Releve, apres: &Releve, ms: f64, fils: usize) -> Vec<Programme> {
+        let par_pid = |r: &Releve| -> HashMap<i64, Ligne> {
+            r.processus
+                .iter()
+                .filter_map(|l| Some((l["IDProcess"].entier()?, l.clone())))
+                .collect()
+        };
+        let debut = par_pid(avant);
+        apres
+            .processus
+            .iter()
+            .filter_map(|l| {
+                let pid = l["IDProcess"].entier()?;
+                let d = debut.get(&pid);
+                // Temps de processeur en centaines de nanosecondes, comme TotalProcessorTime.Ticks.
+                let cpu = d
+                    .and_then(|d| Some(nombre(l, "PercentProcessorTime")? - nombre(d, "PercentProcessorTime")?))
+                    .map_or(0.0, |t| t / 10_000.0 / ms / fils as f64 * 100.0);
+                let disque = d.and_then(|d| {
+                    Some((nombre(l, "IODataBytesPersec")? - nombre(d, "IODataBytesPersec")?) / (ms / 1000.0))
+                });
+                Some(Programme {
+                    nom: nom_du_processus(l["Name"].texte().unwrap_or_default()).to_string(),
+                    processeur: cpu,
+                    memoire: l["WorkingSet"].entier().map_or(0, |m| m.max(0) as u64),
+                    disque,
+                })
+            })
+            .collect()
+    }
+
+    /// Secondes depuis une date CIM (« 20261020075504.500000-240 », décalage en minutes) ; `None` si illisible.
+    pub(super) fn secondes_depuis(date_cim: &str, maintenant: chrono::DateTime<chrono::Utc>) -> Option<u64> {
+        let locale = chrono::NaiveDateTime::parse_from_str(date_cim.get(..14)?, "%Y%m%d%H%M%S").ok()?;
+        let decalage: i64 = date_cim.get(21..)?.parse().ok()?;
+        let utc = locale - chrono::Duration::minutes(decalage);
+        u64::try_from((maintenant.naive_utc() - utc).num_seconds()).ok()
+    }
+
+    /// Durée du dernier démarrage (événement 100) et ce qui l'a ralenti depuis trente jours (101, 102, 103, 106),
+    /// comme le script : (durée, après l'ouverture de session, illisible, lents). Le journal ne s'ouvre qu'aux
+    /// administrateurs : refusé sans élévation, c'est « illisible ».
+    fn demarrage() -> (Option<u64>, Option<u64>, bool, Vec<LentWindows>) {
+        use crate::machine::windows::evenements::parcourir_nommes;
+        let fin = Instant::now() + Duration::from_secs(30);
+        let champ = |v: &[(String, String)], nom: &str| v.iter().find(|(n, _)| n == nom).map(|(_, x)| x.clone());
+        let Some(dernier) = parcourir_nommes(PERFORMANCES, "*[System[(EventID=100)]]", 1, fin, |_, _, v| {
+            Some(format!(
+                "{}|{}",
+                champ(v, "BootTime")?,
+                champ(v, "BootPostBootTime").unwrap_or_default()
+            ))
+        }) else {
+            return (None, None, !crate::machine::windows::processus::eleve(), Vec::new());
+        };
+        let Some((total, apres)) = dernier.first().and_then(|l| l.split_once('|')) else {
+            return (None, None, false, Vec::new());
+        };
+        let lents = parcourir_nommes(
+            PERFORMANCES,
+            "*[System[(EventID=101 or EventID=102 or EventID=103 or EventID=106) and TimeCreated[timediff(@SystemTime) <= 2592000000]]]",
+            50,
+            fin,
+            |_, _, v| {
+                let nom = champ(v, "FriendlyName").filter(|n| !n.is_empty()).or_else(|| champ(v, "Name"))?;
+                Some(format!("{}|{nom}", champ(v, "DegradationTime")?))
+            },
+        )
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|l| {
+            let (ms, nom) = l.split_once('|')?;
+            Some(LentWindows { nom: nom.to_string(), ms: ms.parse().ok()? })
+        })
+        .collect();
+        (total.parse().ok(), apres.parse().ok(), false, lents)
+    }
+
+    /// Ce que StartupApproved dit d'une entrée : coupée dans le Gestionnaire des tâches si le premier octet est
+    /// impair ; sans valeur, lancée.
+    fn approuve(hklm: bool, sous: &str, nom: &str) -> bool {
+        use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE};
+        let ruche = winreg::RegKey::predef(if hklm { HKEY_LOCAL_MACHINE } else { HKEY_CURRENT_USER });
+        ruche
+            .open_subkey(format!(
+                r"SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\{sous}"
+            ))
+            .and_then(|k| k.get_raw_value(nom))
+            .ok()
+            .and_then(|v| v.bytes.first().copied())
+            .is_none_or(|octet| octet & 1 == 0)
+    }
+
+    /// Les programmes lancés à l'ouverture de session (Win32_StartupCommand), sans ceux qu'on a coupés.
+    fn au_demarrage() -> Vec<DemarrageWindows> {
+        let lignes = wmi::requete(
+            CIMV2,
+            "Win32_StartupCommand",
+            "",
+            &["Caption", "Command", "Location", "Name"],
+        )
+        .unwrap_or_default();
+        lignes
+            .iter()
+            .filter_map(|s| {
+                let texte = |c: &str| s[c].texte().unwrap_or_default().to_string();
+                let lieu = texte("Location").to_ascii_lowercase();
+                let sous = if lieu.contains("startup") {
+                    "StartupFolder"
+                } else if lieu.contains("wow6432node") {
+                    "Run32"
+                } else {
+                    "Run"
+                };
+                let commande = texte("Command");
+                let cle = if sous == "StartupFolder" {
+                    commande.rsplit(['\\', '/']).next().unwrap_or_default().to_string()
+                } else {
+                    texte("Name")
+                };
+                if !approuve(lieu.starts_with("hklm"), sous, &cle) {
+                    return None;
+                }
+                let c = commande.trim();
+                let programme = match c.strip_prefix('"') {
+                    Some(reste) => reste.split('"').next().unwrap_or_default(),
+                    None => c.split_whitespace().next().unwrap_or_default(),
+                };
+                let programme = std::path::Path::new(programme)
+                    .file_stem()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                Some(DemarrageWindows {
+                    nom: texte("Caption"),
+                    programme,
+                })
+            })
+            .collect()
+    }
+
+    /// Tout ce que lisait le script, sans PowerShell : WMI (compteurs bruts, système, fichier d'échange, programmes au
+    /// démarrage), le journal des performances (wevtapi), le registre et le lecteur système. `None` sans les
+    /// compteurs des processus.
+    #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+    fn lecture_directe() -> Option<LectureWindows> {
+        let fils = std::thread::available_parallelism().map_or(1, std::num::NonZero::get);
+        let avant = releve()?;
+        std::thread::sleep(Duration::from_secs(2));
+        let apres = releve()?;
+        let ms = apres
+            .quand
+            .duration_since(avant.quand)
+            .as_secs_f64()
+            .mul_add(1000.0, 0.0)
+            .max(1.0);
+        let processeur = avant
+            .processeur
+            .as_ref()
+            .zip(apres.processeur.as_ref())
+            .and_then(|(a, b)| occupe(a, b, "PercentProcessorTime"));
+        let disque = apres
+            .disques
+            .iter()
+            .filter_map(|d| {
+                let nom = d["Name"].texte()?;
+                let a = avant.disques.iter().find(|x| x["Name"].texte() == Some(nom))?;
+                occupe(a, d, "PercentIdleTime")
+            })
+            .reduce(f64::max);
+        let os = wmi::requete(
+            CIMV2,
+            "Win32_OperatingSystem",
+            "",
+            &["TotalVisibleMemorySize", "LastBootUpTime"],
+        )
+        .and_then(|l| l.into_iter().next());
+        let disponible = wmi::requete(CIMV2, "Win32_PerfRawData_PerfOS_Memory", "", &["AvailableBytes"])
+            .and_then(|l| l.first().and_then(|m| m["AvailableBytes"].entier()));
+        let echange =
+            wmi::requete(CIMV2, "Win32_PageFileUsage", "", &["AllocatedBaseSize", "CurrentUsage"]).unwrap_or_default();
+        let somme = |champ: &str| -> u64 {
+            echange
+                .iter()
+                .filter_map(|l| l[champ].entier())
+                .map(|n| n.max(0) as u64)
+                .sum::<u64>()
+                * 1_048_576
+        };
+        let (demarrage_ms, apres_ms, demarrage_illisible, lents) = demarrage();
+        let systeme = std::env::var("SystemDrive").unwrap_or_else(|_| "C:".into());
+        let lecteur = crate::machine::windows::lecteurs::lecteur(std::path::Path::new(&format!("{systeme}\\")));
+        Some(LectureWindows {
+            processeur,
+            fils,
+            memoire: os
+                .as_ref()
+                .and_then(|o| o["TotalVisibleMemorySize"].entier())
+                .map_or(0, |k| k.max(0) as u64 * 1024),
+            disponible: disponible.map_or(0, |d| d.max(0) as u64),
+            echange: somme("AllocatedBaseSize"),
+            echange_utilise: somme("CurrentUsage"),
+            disque,
+            programmes: programmes(&avant, &apres, ms, fils),
+            demarrage_ms,
+            apres_ms,
+            demarrage_illisible,
+            lents,
+            au_demarrage: au_demarrage(),
+            allume_s: os.as_ref().and_then(|o| {
+                o["LastBootUpTime"]
+                    .texte()
+                    .and_then(|d| secondes_depuis(d, chrono::Utc::now()))
+            }),
+            libre: lecteur.as_ref().map_or(0, |l| l.libre),
+            total: lecteur.as_ref().map_or(0, |l| l.total),
+        })
+    }
 
     pub fn instantane() -> Instantane {
+        if let Some(l) = lecture_directe() {
+            return instantane_windows(l);
+        }
+        // Secours : le même relevé par PowerShell.
         // Compteurs bruts lus deux fois, à deux secondes d'écart : les compteurs « mis en forme » de WMI ne sont justes
         // qu'à leur deuxième lecture, et leurs noms ne changent pas avec la langue de Windows (ceux de Get-Counter, si).
         let script = r#"
@@ -1009,6 +1308,41 @@ mod systeme {
         crate::machine::windows::ps(script)
             .and_then(|json| serde_json::from_str::<LectureWindows>(&json).ok())
             .map_or_else(Instantane::default, instantane_windows)
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn noms_et_dates() {
+            assert_eq!(nom_du_processus("chrome#3"), "chrome");
+            assert_eq!(nom_du_processus("chrome"), "chrome");
+            assert_eq!(nom_du_processus("C#"), "C#");
+            assert_eq!(nom_du_processus("a#b"), "a#b");
+            let maintenant = chrono::DateTime::parse_from_rfc3339("2026-10-20T16:00:00Z")
+                .unwrap()
+                .to_utc();
+            // 07:55:04 à UTC−4 = 11:55:04 UTC : 4 h 4 min 56 s plus tôt.
+            assert_eq!(secondes_depuis("20261020075504.500000-240", maintenant), Some(14_696));
+            assert_eq!(secondes_depuis("20261020160000.000000+000", maintenant), Some(0));
+            assert_eq!(secondes_depuis("pas une date", maintenant), None);
+            assert_eq!(secondes_depuis("20261021000000.000000+000", maintenant), None);
+        }
+
+        /// Le relevé direct répond ou laisse la main à PowerShell ; jamais une valeur hors bornes.
+        #[test]
+        fn releve_reel() {
+            if let Some(l) = lecture_directe() {
+                assert!(l.fils >= 1);
+                assert!(l.processeur.is_none_or(f64::is_finite));
+                assert!(
+                    l.programmes
+                        .iter()
+                        .all(|p| p.processeur.is_finite() && !p.nom.contains('#'))
+                );
+            }
+        }
     }
 }
 

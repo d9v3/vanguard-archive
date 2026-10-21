@@ -56,10 +56,16 @@ const LECTURES: [Lecture; 3] = [
 /// ses valeurs dans l'ordre (EventData/Data, ou les champs sous UserData pour le 1102) : les « Properties » que
 /// Get-WinEvent donnait. `None` : XML illisible.
 fn lire_xml(xml: &str) -> Option<(u32, String, Vec<String>)> {
+    lire_xml_nomme(xml).map(|(id, date, valeurs, _)| (id, date, valeurs))
+}
+
+/// Comme `lire_xml`, avec le nom de chaque valeur (l'attribut Name d'un Data, ou le nom du champ sous UserData) :
+/// des événements dont les champs changent de place d'un numéro à l'autre (Diagnostics-Performance).
+fn lire_xml_nomme(xml: &str) -> Option<(u32, String, Vec<String>, Vec<String>)> {
     use quick_xml::events::Event;
     let mut lecteur = quick_xml::Reader::from_str(xml);
     let mut chemin: Vec<Vec<u8>> = Vec::new();
-    let (mut id, mut date, mut valeurs) = (String::new(), String::new(), Vec::new());
+    let (mut id, mut date, mut valeurs, mut noms) = (String::new(), String::new(), Vec::new(), Vec::new());
     // La valeur en cours de lecture, et la profondeur de son élément.
     let mut valeur: Option<(usize, String)> = None;
     loop {
@@ -84,6 +90,14 @@ fn lire_xml(xml: &str) -> Option<(u32, String, Vec<String>)> {
             let est_valeur =
                 (dans(b"EventData") && nom == b"Data") || chemin.len() >= 2 && chemin[chemin.len() - 2] == b"UserData";
             if est_valeur && valeur.is_none() {
+                let attribut = e.try_get_attribute("Name").ok().flatten();
+                noms.push(match attribut {
+                    Some(a) => a
+                        .normalized_value(quick_xml::XmlVersion::Implicit1_0)
+                        .ok()?
+                        .into_owned(),
+                    None => String::from_utf8_lossy(&nom).into_owned(),
+                });
                 if vide {
                     valeurs.push(String::new());
                 } else {
@@ -130,7 +144,7 @@ fn lire_xml(xml: &str) -> Option<(u32, String, Vec<String>)> {
             _ => {}
         }
     }
-    Some((id.trim().parse().ok()?, date, valeurs))
+    Some((id.trim().parse().ok()?, date, valeurs, noms))
 }
 
 /// Une valeur sur une ligne, sans le séparateur des champs.
@@ -249,6 +263,34 @@ pub(crate) fn parcourir(
     fin: std::time::Instant,
     mut faire: impl FnMut(u32, &str, &[String]) -> Option<String>,
 ) -> Option<Vec<String>> {
+    parcourir_xml(journal, requete, max, fin, |xml| {
+        let (id, date, valeurs) = lire_xml(xml)?;
+        faire(id, &date, &valeurs)
+    })
+}
+
+/// Comme `parcourir`, les valeurs données avec leur nom : `faire` reçoit (numéro, date, [(nom, valeur)]).
+pub(crate) fn parcourir_nommes(
+    journal: &str,
+    requete: &str,
+    max: usize,
+    fin: std::time::Instant,
+    mut faire: impl FnMut(u32, &str, &[(String, String)]) -> Option<String>,
+) -> Option<Vec<String>> {
+    parcourir_xml(journal, requete, max, fin, |xml| {
+        let (id, date, valeurs, noms) = lire_xml_nomme(xml)?;
+        let paires: Vec<(String, String)> = noms.into_iter().zip(valeurs).collect();
+        faire(id, &date, &paires)
+    })
+}
+
+fn parcourir_xml(
+    journal: &str,
+    requete: &str,
+    max: usize,
+    fin: std::time::Instant,
+    mut faire: impl FnMut(&str) -> Option<String>,
+) -> Option<Vec<String>> {
     const CHEMIN_DU_JOURNAL: u32 = 0x1;
     const PLUS_RECENTS_D_ABORD: u32 = 0x200;
     const PLUS_RIEN: i32 = 259;
@@ -283,8 +325,7 @@ pub(crate) fn parcourir(
             }
             for &evenement in lot.iter().take(usize::try_from(rendus).unwrap_or(0)) {
                 if lignes.len() < max
-                    && let Some((id, date, valeurs)) = rendre(evenement).as_deref().and_then(lire_xml)
-                    && let Some(l) = faire(id, &date, &valeurs)
+                    && let Some(l) = rendre(evenement).as_deref().and_then(&mut faire)
                 {
                     lignes.push(l);
                 }
@@ -804,6 +845,13 @@ mod tests {
         assert_eq!(ligne("SRV", 4625, "d", &p), None);
         assert!(lire_xml("<Event><System><EventID>x</EventID></System></Event>").is_none());
         assert!(lire_xml("pas du xml <").is_none());
+        let demarrage = "<Event><System><EventID>100</EventID></System><EventData>\
+            <Data Name='BootTsVersion'>2</Data><Data Name='BootTime'>41234</Data><Data Name='BootPostBootTime'>9000</Data>\
+            <Data Name='Vide'/></EventData></Event>";
+        let (id, _, valeurs, noms) = lire_xml_nomme(demarrage).unwrap();
+        assert_eq!(id, 100);
+        assert_eq!(noms, ["BootTsVersion", "BootTime", "BootPostBootTime", "Vide"]);
+        assert_eq!(valeurs, ["2", "41234", "9000", ""]);
         assert_eq!(date_locale("pas une date"), None);
     }
 
