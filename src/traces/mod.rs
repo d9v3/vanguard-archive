@@ -645,7 +645,12 @@ fn ouvrir_ordinaire(chemin: &Path, sans_lien: bool) -> std::io::Result<std::fs::
 fn lien_sur(m: &std::fs::Metadata) -> bool {
     #[cfg(unix)]
     {
-        std::os::unix::fs::MetadataExt::uid(m) == 0
+        let uid = std::os::unix::fs::MetadataExt::uid(m);
+        #[cfg(test)]
+        if tests::LIENS_SURS_DE.get() == Some(uid) {
+            return true;
+        }
+        uid == 0
     }
     #[cfg(windows)]
     {
@@ -1722,6 +1727,12 @@ pub fn commande(dossier: Option<&Path>) -> bool {
 mod tests {
     use super::*;
 
+    #[cfg(unix)]
+    thread_local! {
+        /// Le compte dont les liens sont tenus pour sûrs, comme ceux de root, dans le fil d'un test seulement.
+        pub(super) static LIENS_SURS_DE: std::cell::Cell<Option<u32>> = const { std::cell::Cell::new(None) };
+    }
+
     fn bi(fr: &str, en: &str) -> Bi {
         Bi::new(fr, en)
     }
@@ -2054,47 +2065,54 @@ mod tests {
     }
 
     /// Un lien de root, comme un service activé de systemd, se date par lui-même et jamais par sa cible, que la mise à
-    /// jour d'un paquet réécrit : les vrais liens de cet ordinateur, lus sans rien changer.
+    /// jour d'un paquet réécrit. Un lien et sa cible inventés dans un dossier jetable ; le lien, posé par ce compte,
+    /// est tenu pour sûr le temps du test (`LIENS_SURS_DE`), pour passer par le même chemin qu'un lien de root.
     #[cfg(unix)]
     #[test]
     fn lien_date_par_lui_meme() {
-        let mut liens: Vec<PathBuf> = ["/etc/localtime", "/etc/os-release"]
-            .iter()
-            .map(PathBuf::from)
-            .collect();
-        for dossier in [
-            "/etc/systemd/system/multi-user.target.wants",
-            "/etc/systemd/system/default.target.wants",
-        ] {
-            liens.extend(
-                std::fs::read_dir(dossier)
-                    .into_iter()
-                    .flatten()
-                    .flatten()
-                    .map(|e| e.path()),
-            );
-        }
-        for lien in liens {
-            let Ok(m) = std::fs::symlink_metadata(&lien) else {
-                continue;
-            };
-            if !m.file_type().is_symlink() || !lien_sur(&m) || !lien.is_file() {
-                continue;
-            }
-            let attendue = m.modified().unwrap();
-            let mut f = Feuille::new(&bi("Démarrage", "Startup"));
-            f.fichier(&lien, false);
-            let dates: Vec<SystemTime> = f
-                .dates
+        let d = crate::reseau::dossier_local().join("essai-lien-date");
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        let cible = d.join("service-du-paquet.service");
+        std::fs::write(&cible, "[Service]\nExecStart=/usr/bin/true\n").unwrap();
+        // La cible réécrite par une « mise à jour » datée de 2001 : rien ne doit l'en faire sortir.
+        let ancienne = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_000_000_000);
+        std::fs::File::options()
+            .write(true)
+            .open(&cible)
+            .unwrap()
+            .set_modified(ancienne)
+            .unwrap();
+        let lien = d.join("service-active.service");
+        std::os::unix::fs::symlink(&cible, &lien).unwrap();
+        let m = std::fs::symlink_metadata(&lien).unwrap();
+        let attendue = m.modified().unwrap();
+        assert_ne!(attendue, ancienne);
+        let dates_de = |f: &Feuille| -> Vec<SystemTime> {
+            f.dates
                 .iter()
                 .filter(|(c, _)| Path::new(c) == lien)
                 .map(|(_, t)| *t)
-                .collect();
-            assert!(
-                !dates.is_empty() && dates.iter().all(|t| *t == attendue),
-                "{lien:?} : {dates:?}"
-            );
+                .collect()
+        };
+        // Sûr : la cible est recopiée, et le lien daté par lui-même.
+        LIENS_SURS_DE.set(Some(std::os::unix::fs::MetadataExt::uid(&m)));
+        assert!(lien_sur(&m));
+        let mut f = Feuille::new(&bi("Démarrage", "Startup"));
+        f.fichier(&lien, false);
+        LIENS_SURS_DE.set(None);
+        let dates = dates_de(&f);
+        assert!(!dates.is_empty() && dates.iter().all(|t| *t == attendue), "{dates:?}");
+        assert!(f.texte.contains("ExecStart=/usr/bin/true"), "{}", f.texte);
+        // Pas sûr (posé par un compte ordinaire) : pas suivi, daté par lui-même aussi.
+        if std::os::unix::fs::MetadataExt::uid(&m) != 0 {
+            let mut f = Feuille::new(&bi("Démarrage", "Startup"));
+            f.fichier(&lien, false);
+            let dates = dates_de(&f);
+            assert!(!dates.is_empty() && dates.iter().all(|t| *t == attendue), "{dates:?}");
+            assert!(!f.texte.contains("ExecStart"), "{}", f.texte);
         }
+        let _ = std::fs::remove_dir_all(&d);
     }
 
     #[test]
