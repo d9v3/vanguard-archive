@@ -8,6 +8,7 @@
 use std::net::{IpAddr, SocketAddr, UdpSocket};
 use std::time::{Duration, Instant};
 
+use crate::audit::dns_client;
 use crate::machine::dns::{Actuel, bouclier_canadien, bouclier_canadien_filtrant, service_public};
 use crate::reseau::nat::{hasard, recevoir};
 use crate::selection::{Ligne, choisir};
@@ -49,21 +50,15 @@ const TOURS: usize = 2;
 /// Délai d'une réponse : au-delà, la question compte comme perdue.
 const DELAI: Duration = Duration::from_millis(1500);
 
-/// Question DNS : un nom, type A (IPv4), récursion demandée.
+/// Question DNS : un nom, type A (IPv4), récursion demandée, sans EDNS (le client de l'audit).
 fn question(id: u16, nom: &str) -> Vec<u8> {
-    let mut q = [&id.to_be_bytes()[..], &[0x01, 0x00, 0, 1, 0, 0, 0, 0, 0, 0]].concat();
-    for etiquette in nom.split('.') {
-        q.push(u8::try_from(etiquette.len()).unwrap_or(0));
-        q.extend(etiquette.as_bytes());
-    }
-    q.extend([0, 0, 1, 0, 1]);
-    q
+    dns_client::question(id, nom, dns_client::Genre::A, false, false)
 }
 
 /// Une réponse à notre question : même identifiant, drapeau « réponse », et le serveur a su répondre (« ce nom
 /// n'existe pas » compris), pas un refus ni une panne.
 fn repond(r: &[u8], id: u16) -> bool {
-    r.len() >= 12 && r[..2] == id.to_be_bytes() && r[2] & 0x80 != 0 && matches!(r[3] & 0x0f, 0 | 3)
+    dns_client::lire(r, id).is_some_and(|reponse| matches!(reponse.rcode, 0 | 3))
 }
 
 fn mediane(mut temps: Vec<Duration>) -> Option<Duration> {

@@ -23,6 +23,8 @@ use crate::risk::{Niveau, note};
 use crate::ui::*;
 
 pub mod appareils;
+pub mod bail;
+pub mod dns_client;
 pub mod dns_tls;
 pub mod exposition;
 pub mod fiches;
