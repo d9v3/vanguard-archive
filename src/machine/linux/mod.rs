@@ -1,7 +1,8 @@
 //! Audit de sécurité Linux (Arch/Omarchy), sans privilèges root.
 
+use std::collections::HashMap;
 use std::fmt::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use super::unix::{configuration_sshd, mots_de_passe_sshd, mots_de_passe_vides_sshd, valeur_sshd};
@@ -13,6 +14,7 @@ mod algorithmes_ssh;
 pub(crate) mod dissimulation;
 mod docker;
 mod durcissement;
+pub(crate) mod ecoute;
 mod maj;
 mod natif;
 mod persistance;
@@ -183,6 +185,11 @@ impl Paquets {
 
     /// Nom du paquet qui a installé ce fichier, `None` s'il a été ajouté à la main.
     pub fn proprietaire(self, fichier: &Path) -> Option<String> {
+        self.proprietaires(&[fichier.to_path_buf()]).pop().flatten()
+    }
+
+    /// Le secours, quand la base du gestionnaire ne se lit pas directement : sa commande, un fichier à la fois.
+    fn proprietaire_par_commande(self, fichier: &Path) -> Option<String> {
         let nom = |f: &Path| {
             let arg = f.to_string_lossy();
             match self {
@@ -201,11 +208,19 @@ impl Paquets {
         nom(fichier).or_else(|| chemin_hors_usr(fichier).and_then(|ancien| nom(&ancien)))
     }
 
-    /// Ces fichiers du paquet ont-ils changé depuis son installation ? Contenu comparé à l'empreinte enregistrée
-    /// par le gestionnaire de paquets. `None` pour un fichier qu'on ne peut pas vérifier (illisible, sans empreinte).
-    /// Le paquet de chaque fichier, dans l'ordre. pacman répond pour tous en un appel (un par fichier coûtait une
-    /// seconde pour les programmes privilégiés) ; les autres gestionnaires, un fichier à la fois.
+    /// Le paquet de chaque fichier, dans l'ordre. Les listes de fichiers de pacman et de dpkg se lisent
+    /// directement, en un seul passage pour tous ; rpm garde sa commande (sa base est en SQLite). Les commandes ne
+    /// servent qu'en secours, quand la base ne se lit pas.
     pub fn proprietaires(self, fichiers: &[std::path::PathBuf]) -> Vec<Option<String>> {
+        let lire: Option<fn(&[&Path]) -> Proprietaires> = match self {
+            Paquets::Pacman => Some(natif::proprietaire_pacman),
+            Paquets::Apt => Some(proprietaire_dpkg),
+            Paquets::Dnf | Paquets::Zypper => None,
+        };
+        if let Some(trouves) = lire.and_then(|l| proprietaires_selon(fichiers, l)) {
+            return trouves;
+        }
+        // pacman répond pour tous en un appel (un par fichier coûtait une seconde pour les programmes privilégiés).
         if self == Paquets::Pacman && !fichiers.is_empty() {
             // Code 1 dès qu'un fichier n'a pas de paquet : la sortie vaut quand même pour les autres.
             if let Some(r) = crate::commande::lancer_en_anglais(Command::new("pacman").arg("-Qo").args(fichiers), 60) {
@@ -216,22 +231,23 @@ impl Paquets {
                     .collect();
             }
         }
-        fichiers.iter().map(|f| self.proprietaire(f)).collect()
+        fichiers.iter().map(|f| self.proprietaire_par_commande(f)).collect()
     }
+
+    /// Ces fichiers du paquet ont-ils changé depuis son installation ? Contenu comparé à l'empreinte enregistrée
+    /// par le gestionnaire de paquets. `None` pour un fichier qu'on ne peut pas vérifier (illisible, sans empreinte).
     pub fn modifies(self, paquet: &str, fichiers: &[std::path::PathBuf]) -> Vec<Option<bool>> {
         match self {
             Paquets::Pacman => {
                 // Empreintes SHA-256 dans le mtree du paquet : ne calcule que les fichiers demandés
                 // (pacman -Qkk relirait tout le paquet, des centaines de Mo pour Electron).
-                let mtree = sortie("pacman", &["-Q", paquet])
-                    .map(|s| s.trim().replace(' ', "-"))
-                    .and_then(|dossier| sortie("zcat", &[&format!("/var/lib/pacman/local/{dossier}/mtree")]));
+                let mtree = mtree_pacman(paquet);
                 fichiers
                     .iter()
                     .map(|f| {
                         let attendue = empreinte_mtree(mtree.as_deref()?, f)?;
-                        let calculee = sortie("sha256sum", &[&f.to_string_lossy()])?;
-                        Some(calculee.split_whitespace().next()? != attendue)
+                        let calculee = crate::traces::sha256_de(std::fs::File::open(f).ok()?).ok()?;
+                        Some(calculee != attendue)
                     })
                     .collect()
             }
@@ -350,6 +366,24 @@ pub(crate) fn ufw_actif() -> bool {
         && service_actif("ufw")
 }
 
+/// La zone par défaut de firewalld : « DefaultZone= » de sa configuration, que « --set-default-zone » réécrit ;
+/// celle de /etc l'emporte sur celle du paquet. firewall-cmd seulement si aucune ne la donne.
+fn zone_firewalld() -> Option<String> {
+    ["/etc/firewalld/firewalld.conf", "/usr/lib/firewalld/firewalld.conf"]
+        .iter()
+        .find_map(|f| zone_par_defaut(&std::fs::read_to_string(f).ok()?))
+        .or_else(|| sortie("firewall-cmd", &["--get-default-zone"]).map(|z| z.trim().to_string()))
+}
+
+/// « DefaultZone=public » (la dernière ligne l'emporte) ; une valeur vide ne dit rien.
+fn zone_par_defaut(conf: &str) -> Option<String> {
+    conf.lines()
+        .filter_map(|l| l.trim().strip_prefix("DefaultZone=").map(str::trim))
+        .next_back()
+        .filter(|z| !z.is_empty())
+        .map(str::to_string)
+}
+
 fn pare_feu() -> Constat {
     if !systemd() {
         return impossible("Pare-feu", tr!("systemd absent", "systemd missing"));
@@ -386,7 +420,7 @@ fn pare_feu() -> Constat {
         }
     } else if service_actif("firewalld") {
         // La zone « trusted » laisse tout passer.
-        match sortie("firewall-cmd", &["--get-default-zone"]).map(|z| z.trim().to_string()) {
+        match zone_firewalld() {
             Some(z) if z == "trusted" => alerte(
                 "Pare-feu",
                 Niveau::Eleve,
@@ -476,10 +510,9 @@ fn adresses_exposees() -> std::collections::HashSet<String> {
         .collect()
 }
 
-/// Service systemd d'une ligne de `ss -e` (« cgroup:/system.slice/passim.service » → « passim »), prêt à montrer :
-/// le nom d'un service de l'utilisateur est le sien.
-pub(crate) fn service_du_cgroup(ligne: &str) -> Option<String> {
-    let groupe = ligne.split_whitespace().find_map(|m| m.strip_prefix("cgroup:"))?;
+/// Service systemd d'un groupe de contrôle (« /system.slice/passim.service » → « passim »), prêt à montrer : le
+/// nom d'un service de l'utilisateur est le sien.
+pub(crate) fn service_du_groupe(groupe: &str) -> Option<String> {
     let unite = groupe.rsplit('/').next()?;
     let nom = unite.strip_suffix(".service")?;
     // Une session (« session-2.scope ») ou une app de l'utilisateur ne dit rien de plus que « programme inconnu ».
@@ -516,31 +549,20 @@ fn ports_ecoute(pare_feu_actif: bool, ufw: bool) -> Vec<Constat> {
     let mut vus = std::collections::HashSet::new();
     let mut deja_conseille = std::collections::HashSet::new();
     let bloques = super::ports_bloques();
-    // « e » : le groupe de contrôle (« cgroup:/system.slice/passim.service ») nomme le service même quand le programme,
-    // lancé par root ou un compte système, reste invisible sans droits admin.
-    for (proto, options) in [("tcp", "-Htlnpe"), ("udp", "-Hulnpe")] {
-        let Some(ss) = sortie("ss", &[options]) else {
-            return vec![alerte(
-                "Ports en écoute",
-                Niveau::Info,
-                tr!("Commande ss indisponible.", "ss command unavailable."),
-            )];
-        };
-        for ligne in ss.lines() {
-            let c: Vec<&str> = ligne.split_whitespace().collect();
-            let Some(local) = c.get(3) else { continue };
-            let Some((adresse, port)) = local.rsplit_once(':') else {
-                continue;
-            };
-            let Ok(port) = port.parse::<u16>() else { continue };
-            // Zone d'une IPv6 de lien local (« [fe80::1%wlan0] ») : retirée, crochet fermant gardé.
-            let sans_zone = match adresse.split_once('%') {
-                Some((ip, _)) if adresse.starts_with('[') => format!("{ip}]"),
-                Some((ip, _)) => ip.to_string(),
-                None => adresse.to_string(),
-            };
-            let adresse = sans_zone.as_str();
-            let expose = matches!(adresse, "0.0.0.0" | "*" | "[::]") || adresses.contains(adresse);
+    // Le groupe de contrôle de chaque prise (« /system.slice/passim.service ») nomme le service même quand le
+    // programme, lancé par root ou un compte système, reste invisible sans droits admin (voir ecoute.rs).
+    let Some(prises) = ecoute::prises_ou_ss() else {
+        return vec![alerte(
+            "Ports en écoute",
+            Niveau::Info,
+            tr!("Commande ss indisponible.", "ss command unavailable."),
+        )];
+    };
+    // TCP d'abord, comme ss était lu.
+    for (proto, udp) in [("tcp", false), ("udp", true)] {
+        for prise in prises.iter().filter(|p| p.udp == udp) {
+            let port = prise.port;
+            let expose = prise.adresse.is_unspecified() || adresses.contains(&prise.adresse_ss());
             let i = info_port(port);
             // UDP : client DHCP (68) et ports éphémères anonymes (sockets clientes), ce ne sont pas des services.
             let bruit = proto == "udp" && (port == 68 || (port >= 32768 && i.service == crate::risk::inconnu()));
@@ -548,11 +570,7 @@ fn ports_ecoute(pare_feu_actif: bool, ufw: bool) -> Vec<Constat> {
                 continue;
             }
             // Le nom que s'est donné le programme, prêt à montrer ; sinon son service.
-            let nomme = c
-                .get(5)
-                .and_then(|u| u.split('"').nth(1))
-                .map(crate::ui::affichable)
-                .or_else(|| service_du_cgroup(ligne));
+            let nomme = prise.nom();
             let programme = nomme
                 .as_deref()
                 .unwrap_or(tr!("programme inconnu (root ?)", "unknown program (root?)"));
@@ -1116,9 +1134,132 @@ fn proprietaires_pacman(sortie: &str) -> std::collections::HashMap<String, Strin
         .collect()
 }
 
+/// Le paquet de chaque fichier trouvé dans une base ; `None` si elle ne se lit pas.
+type Proprietaires = Option<HashMap<PathBuf, String>>;
+
+/// Le paquet de chaque fichier d'après une lecture native (`lire`, un seul passage pour tous) ; `None` si la base
+/// ne se lit pas. Le chemin d'avant la fusion de /usr est cherché aussi : dpkg garde souvent l'ancien
+/// (/usr/bin/fusermount3 y est enregistré comme /bin/fusermount3, vu sur Mint 22).
+fn proprietaires_selon(
+    fichiers: &[PathBuf],
+    lire: impl FnOnce(&[&Path]) -> Proprietaires,
+) -> Option<Vec<Option<String>>> {
+    let anciens: Vec<Option<PathBuf>> = fichiers.iter().map(|f| chemin_hors_usr(f)).collect();
+    let cherches: Vec<&Path> = fichiers
+        .iter()
+        .map(PathBuf::as_path)
+        .chain(anciens.iter().flatten().map(PathBuf::as_path))
+        .collect();
+    let trouves = lire(&cherches)?;
+    Some(
+        fichiers
+            .iter()
+            .zip(&anciens)
+            .map(|(f, ancien)| {
+                trouves
+                    .get(f)
+                    .or_else(|| ancien.as_ref().and_then(|a| trouves.get(a)))
+                    .cloned()
+            })
+            .collect(),
+    )
+}
+
+const DPKG_INFO: &str = "/var/lib/dpkg/info";
+
+/// Le paquet de chaque fichier d'après les listes de dpkg (`dpkg -S`) ; `None` sans base dpkg lisible.
+fn proprietaire_dpkg(fichiers: &[&Path]) -> Option<HashMap<PathBuf, String>> {
+    proprietaire_dpkg_dans(Path::new(DPKG_INFO), fichiers)
+}
+
+/// Une liste « <paquet>.list » ou « <paquet>:<architecture>.list » par paquet, un chemin par ligne. Le nom est
+/// gardé avec son architecture, comme dpkg -S l'écrit (« libc6:amd64 ») : quand libc6:i386 est là aussi (Steam
+/// sur Ubuntu), « dpkg --verify libc6 » serait ambigu et la vérification du fichier perdue.
+fn proprietaire_dpkg_dans(info: &Path, fichiers: &[&Path]) -> Option<HashMap<PathBuf, String>> {
+    let cherches: std::collections::HashSet<&Path> = fichiers.iter().copied().collect();
+    let mut listes: Vec<PathBuf> = std::fs::read_dir(info)
+        .ok()?
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|e| e == "list"))
+        .collect();
+    listes.sort();
+    let mut trouves = HashMap::new();
+    for l in listes {
+        let Some(nom) = l.file_stem().map(|s| s.to_string_lossy().into_owned()) else {
+            continue;
+        };
+        for ligne in std::fs::read_to_string(&l).unwrap_or_default().lines() {
+            if let Some(&f) = cherches.get(Path::new(ligne)) {
+                trouves.entry(f.to_path_buf()).or_insert_with(|| nom.clone());
+            }
+        }
+    }
+    Some(trouves)
+}
+
+const PACMAN_LOCAL: &str = "/var/lib/pacman/local";
+
+/// Le mtree d'un paquet installé (ses empreintes SHA-256). Son dossier est « <nom>-<version> », la version lue
+/// dans sa fiche ; pacman -Q seulement si la base ne se lit pas à l'endroit habituel (DBPath changé dans
+/// pacman.conf), zcat seulement pour un fichier qui n'est pas du gzip.
+fn mtree_pacman(paquet: &str) -> Option<String> {
+    let dossier = match natif::desc_pacman(paquet) {
+        Some(champs) => format!("{paquet}-{}", champs.get("VERSION")?.first()?),
+        None if std::fs::read_dir(PACMAN_LOCAL).is_ok() => return None,
+        None => sortie("pacman", &["-Q", paquet])?.trim().replace(' ', "-"),
+    };
+    let fichier = format!("{PACMAN_LOCAL}/{dossier}/mtree");
+    let octets = std::fs::read(&fichier).ok()?;
+    match degzip(&octets) {
+        Some(texte) => String::from_utf8(texte).ok(),
+        None if octets.starts_with(&[0x1f, 0x8b]) => None,
+        None => sortie("zcat", &[&fichier]),
+    }
+}
+
+/// Le contenu d'un fichier gzip (RFC 1952) : l'en-tête sauté (nom, commentaire, champ libre et son contrôle s'ils
+/// sont là), puis le flux deflate que miniz_oxide sait lire. `None` si ce n'est pas du gzip ou s'il est abîmé.
+fn degzip(octets: &[u8]) -> Option<Vec<u8>> {
+    const FHCRC: u8 = 2;
+    const FEXTRA: u8 = 4;
+    const FNAME: u8 = 8;
+    const FCOMMENT: u8 = 16;
+    if octets.get(..3)? != [0x1f, 0x8b, 8] {
+        return None;
+    }
+    let drapeaux = *octets.get(3)?;
+    let mut pos = 10usize;
+    if drapeaux & FEXTRA != 0 {
+        let n = u16::from_le_bytes([*octets.get(pos)?, *octets.get(pos + 1)?]);
+        pos += 2 + usize::from(n);
+    }
+    for champ in [FNAME, FCOMMENT] {
+        if drapeaux & champ != 0 {
+            pos += octets.get(pos..)?.iter().position(|&o| o == 0)? + 1;
+        }
+    }
+    if drapeaux & FHCRC != 0 {
+        pos += 2;
+    }
+    // Un mtree fait quelques centaines de ko ; au-delà de 256 Mo, ce n'en est pas un.
+    miniz_oxide::inflate::decompress_to_vec_with_limit(octets.get(pos..)?, 256 << 20).ok()
+}
+
 /// Le système de fichiers racine repose-t-il sur un volume chiffré (LUKS, éventuellement sous LVM) ?
 /// `None` si on ne peut pas remonter la chaîne des périphériques.
 fn racine_chiffree() -> Option<bool> {
+    // Lu dans /proc/self/mountinfo puis sysfs ; findmnt et lsblk ne servent que si l'un des deux ne répond pas
+    // (mountinfo illisible, périphérique inconnu de sysfs comme /dev/root).
+    match natif::racine() {
+        Some((source, _)) if !source.starts_with("/dev/") => return None,
+        Some((source, _)) => {
+            if let Some(chiffree) = natif::chiffre(&source) {
+                return Some(chiffree);
+            }
+        }
+        None => {}
+    }
     let source = sortie("findmnt", &["-no", "SOURCE", "/"])?;
     // Btrfs affiche le sous-volume : « /dev/mapper/root[/@] ».
     let peripherique = source.trim().split('[').next()?.to_string();
@@ -1408,7 +1549,7 @@ fn verrouillage_ecran() -> Option<Constat> {
         // Hyprland sans Omarchy : hypridle doit avoir un délai qui verrouille.
         std::fs::read_to_string(maison.join(".config/hypr/hypridle.conf"))
             .ok()
-            .map(|t| u64::from(t.contains("lock") && sortie("pgrep", &["-x", "hypridle"]).is_some()))
+            .map(|t| u64::from(t.contains("lock") && natif::processus_nomme("hypridle")))
     } else {
         None
     };
@@ -1685,6 +1826,173 @@ mod tests {
         assert_eq!(trouves.len(), 2);
     }
 
+    fn jetable(nom: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("vanguard-linux-{nom}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    /// La commande quand elle est là et réussit ; sinon le test s'arrête sans rien conclure.
+    fn commande(programme: &str, args: &[&str]) -> Option<String> {
+        crate::commande::lancer_en_anglais(Command::new(programme).args(args), 60)
+            .filter(|r| r.code == Some(0))
+            .map(|r| r.sortie)
+    }
+
+    #[test]
+    fn proprietaires_dans_les_listes_de_dpkg() {
+        let info = jetable("dpkg");
+        std::fs::write(info.join("libc6:amd64.list"), "/.\n/usr\n/usr/bin\n/usr/bin/ldd\n").unwrap();
+        std::fs::write(info.join("fuse3.list"), "/bin/fusermount3\n").unwrap();
+        std::fs::write(info.join("fuse3.md5sums"), "0123 /bin/fusermount3\n").unwrap();
+        let trouves = proprietaire_dpkg_dans(
+            &info,
+            &[
+                Path::new("/usr/bin/ldd"),
+                Path::new("/bin/fusermount3"),
+                Path::new("/opt/x"),
+            ],
+        )
+        .unwrap();
+        // L'architecture reste, comme dpkg -S l'écrit.
+        assert_eq!(
+            trouves.get(Path::new("/usr/bin/ldd")).map(String::as_str),
+            Some("libc6:amd64")
+        );
+        assert_eq!(
+            trouves.get(Path::new("/bin/fusermount3")).map(String::as_str),
+            Some("fuse3")
+        );
+        assert_eq!(trouves.len(), 2);
+        // Sans base, rien n'est conclu.
+        assert!(proprietaire_dpkg_dans(&info.join("absent"), &[Path::new("/usr/bin/ldd")]).is_none());
+        let _ = std::fs::remove_dir_all(&info);
+    }
+
+    #[test]
+    fn proprietaire_par_l_ancien_chemin() {
+        let fichiers = [
+            PathBuf::from("/usr/bin/fusermount3"),
+            PathBuf::from("/usr/lib/x.so"),
+            PathBuf::from("/opt/x"),
+        ];
+        assert_eq!(
+            proprietaires_selon(&fichiers, |cherches| Some(
+                cherches
+                    .iter()
+                    .filter(|f| f.starts_with("/bin") || f.starts_with("/usr/lib"))
+                    .map(|f| (f.to_path_buf(), "fuse3".to_string()))
+                    .collect()
+            ))
+            .unwrap(),
+            [Some("fuse3".to_string()), Some("fuse3".to_string()), None]
+        );
+        assert!(proprietaires_selon(&fichiers, |_| None).is_none());
+    }
+
+    /// Sur cet ordinateur, la lecture des listes de pacman donne les mêmes paquets que pacman -Qo, quand il est
+    /// là : un fichier d'un paquet, un autre par un dossier qui est un lien (/bin), un fichier sans paquet.
+    /// pacman répond avec le chemin résolu (« /usr/bin/sh is owned by bash ») : c'est sous lui qu'on le cherche.
+    #[test]
+    fn proprietaires_comme_pacman_qo() {
+        let fichiers = [
+            PathBuf::from("/usr/bin/pacman"),
+            PathBuf::from("/bin/sh"),
+            PathBuf::from("/usr/bin/vanguard-introuvable"),
+        ];
+        let Some(natifs) = proprietaires_selon(&fichiers, natif::proprietaire_pacman) else {
+            return;
+        };
+        let Some(r) = crate::commande::lancer_en_anglais(Command::new("pacman").arg("-Qo").args(&fichiers), 60) else {
+            return;
+        };
+        let attendus = proprietaires_pacman(&r.sortie);
+        for (f, n) in fichiers.iter().zip(&natifs) {
+            let resolu = f
+                .parent()
+                .and_then(|p| p.canonicalize().ok())
+                .zip(f.file_name())
+                .map_or_else(|| f.clone(), |(p, n)| p.join(n));
+            assert_eq!(
+                n.as_ref(),
+                attendus.get(resolu.to_string_lossy().as_ref()),
+                "{}",
+                f.display()
+            );
+        }
+    }
+
+    #[test]
+    fn gzip_lu_sans_zcat() {
+        let texte = b"#mtree\n./usr/bin/sudo time=1 sha256digest=00ff\n";
+        let flux = miniz_oxide::deflate::compress_to_vec(texte, 6);
+        // En-tête avec un nom de fichier (FNAME), comme gzip l'écrit ; la fin (CRC, taille) est ignorée.
+        let mut gz = vec![0x1f, 0x8b, 8, 8, 0, 0, 0, 0, 0, 3];
+        gz.extend_from_slice(b".MTREE\0");
+        gz.extend_from_slice(&flux);
+        gz.extend_from_slice(&[0; 8]);
+        assert_eq!(degzip(&gz).as_deref(), Some(&texte[..]));
+        // Champ libre (FEXTRA) et contrôle d'en-tête (FHCRC).
+        let mut gz = vec![0x1f, 0x8b, 8, 4 | 2, 0, 0, 0, 0, 0, 3, 3, 0, 1, 2, 3, 0xaa, 0xbb];
+        gz.extend_from_slice(&flux);
+        assert_eq!(degzip(&gz).as_deref(), Some(&texte[..]));
+        assert!(degzip("#mtree pas compressé".as_bytes()).is_none());
+        assert!(degzip(&[0x1f, 0x8b, 8, 8, 0]).is_none());
+    }
+
+    /// Sur cet ordinateur, le mtree d'un paquet pacman se lit comme zcat le lit, quand les deux sont là.
+    #[test]
+    fn mtree_comme_zcat() {
+        let Some(mtree) = std::fs::read_dir(PACMAN_LOCAL)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|e| e.path().join("mtree"))
+            .find(|m| m.is_file())
+        else {
+            return;
+        };
+        let Some(attendu) = commande("zcat", &[&mtree.to_string_lossy()]) else {
+            return;
+        };
+        let lu = degzip(&std::fs::read(&mtree).unwrap()).map(|o| String::from_utf8(o).unwrap());
+        assert_eq!(lu.as_deref(), Some(attendu.as_str()), "{}", mtree.display());
+    }
+
+    #[test]
+    fn zone_de_firewalld() {
+        assert_eq!(
+            zone_par_defaut("# défaut\nDefaultZone=public\nCleanupOnExit=yes\n").as_deref(),
+            Some("public")
+        );
+        assert_eq!(
+            zone_par_defaut("DefaultZone=public\nDefaultZone=trusted\n").as_deref(),
+            Some("trusted")
+        );
+        assert_eq!(zone_par_defaut("DefaultZone=\n"), None);
+        assert_eq!(zone_par_defaut("#DefaultZone=trusted\n"), None);
+    }
+
+    /// Sur cet ordinateur, la racine se dit chiffrée ou non comme lsblk le dit, quand findmnt et lsblk sont là.
+    #[test]
+    fn racine_chiffree_comme_lsblk() {
+        let Some(chiffree) = natif::racine()
+            .filter(|(s, _)| s.starts_with("/dev/"))
+            .and_then(|(s, _)| natif::chiffre(&s))
+        else {
+            return;
+        };
+        let Some(source) = commande("findmnt", &["-no", "SOURCE", "/"]) else {
+            return;
+        };
+        let peripherique = source.trim().split('[').next().unwrap_or_default().to_string();
+        let Some(chaine) = commande("lsblk", &["-nso", "TYPE", &peripherique]) else {
+            return;
+        };
+        assert_eq!(chiffree, chaine.lines().any(|l| l.trim() == "crypt"));
+    }
+
     #[test]
     fn ouverture_de_session_automatique() {
         let f = |c: &str, t: &str| (c.to_string(), t.to_string());
@@ -1779,7 +2087,7 @@ mod tests {
         );
         // Nommé par son groupe de contrôle quand le programme est invisible sans droits.
         assert_eq!(
-            service_du_cgroup("UNCONN 0 0 0.0.0.0:631 0.0.0.0:* cgroup:/system.slice/cups-browsed.service").as_deref(),
+            service_du_groupe("/system.slice/cups-browsed.service").as_deref(),
             Some("cups-browsed")
         );
     }
@@ -1922,13 +2230,13 @@ pas-un-uuid;rm -rf ~:802-11-wireless:yes:Piège
     }
 
     #[test]
-    fn service_d_une_ligne_ss() {
-        let l =
-            "LISTEN 0 10 0.0.0.0:27500 0.0.0.0:* uid:958 ino:109369 sk:5003 cgroup:/system.slice/passim.service <->";
-        assert_eq!(service_du_cgroup(l).as_deref(), Some("passim"));
-        let session = "LISTEN 0 4096 0.0.0.0:8080 0.0.0.0:* users:((\"x\",pid=1,fd=3)) uid:1000 cgroup:/user.slice/user-1000.slice/session-2.scope";
-        assert_eq!(service_du_cgroup(session), None);
-        assert_eq!(service_du_cgroup("LISTEN 0 1 0.0.0.0:1 0.0.0.0:*"), None);
+    fn service_d_un_groupe() {
+        assert_eq!(
+            service_du_groupe("/system.slice/passim.service").as_deref(),
+            Some("passim")
+        );
+        assert_eq!(service_du_groupe("/user.slice/user-1000.slice/session-2.scope"), None);
+        assert_eq!(service_du_groupe("/"), None);
     }
 
     #[test]
