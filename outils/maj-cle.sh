@@ -3,7 +3,9 @@
 # sinon (les unités du branchement ne repartent qu'au montage suivant). Chaque jour (vanguard-cle-maj.timer, rattrapé
 # au démarrage si l'ordinateur était éteint), seulement si la clé est montée ; à la main : outils/maj-cle.sh.
 #   1. le programme : deployer.sh --branchement (la dernière version de GitHub, compilée si elle est nouvelle) ;
-#   2. les images : images-cle.sh --cle (celles du cache, vérifiées, à la place des anciennes de la clé).
+#   2. les images : images-cle.sh --cle (celles du cache, vérifiées, à la place des anciennes de la clé) ;
+#   3. le démarrage : cle-secours.sh --a-jour (Ventoy plus ancien que celui épinglé : sa mise à jour, qui n'efface
+#      rien, est proposée par une notification, et faite sur accord).
 # deployer.sh et images-cle.sh prennent le même verrou : jamais deux écritures de la clé à la fois, même avec un
 # déploiement lancé à la main ou un branchement en même temps. Une étape ratée n'empêche pas la suivante ; la
 # notification dit laquelle, et le code de sortie aussi. Clé absente : rien à faire, sans erreur.
@@ -37,9 +39,10 @@ etape() { # libellé commande…
 }
 etape "programme" outils/deployer.sh --branchement
 etape "images" outils/images-cle.sh --cle
+etape "démarrage" outils/cle-secours.sh --a-jour
 if ((${#RATEES[@]})); then
   avertir "Clé VANGUARD : mise à jour du jour incomplète" "Raté : ${RATEES[*]}. Le détail : journalctl --user -u \
 vanguard-cle-maj"
   exit 1
 fi
-echo "Clé VANGUARD à jour : programme et images."
+echo "Clé VANGUARD à jour : programme, images et démarrage."

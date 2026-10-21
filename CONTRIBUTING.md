@@ -269,7 +269,11 @@ branchée, copie au branchement ; une image téléchargée ailleurs entre dans l
 même) ; une partition FAT32 `WIN11` installe Windows 11 avec Secure Boot actif, sans ajouter de clé au PC
 (`install.wim` découpé par wimlib sous la limite de 4 Go) ; une partition HFS+ porte la récupération de macOS des Mac
 Intel ; `VANGUARD` et `VANGUARDLOG` comme avant. `--plan` et `--essai` (sur une image de disque) ne touchent à aucun
-disque ; seul `--ecrire` efface la clé.
+disque ; seul `--ecrire` efface la clé. Ventoy lui-même : sa version sur la clé est lue chaque jour et au branchement
+(`cle-secours.sh --a-jour`) ; plus ancienne que celle épinglée, sa mise à jour, qui n'efface rien
+(`Ventoy2Disk.sh -u`, en root par pkexec, disque et archive revérifiés, journalisée), est proposée par une
+notification. Un Ventoy plus récent sur GitHub est signalé au développeur par la recherche de la semaine, jamais pris
+tout seul : l'archive n'est pas signée, l'épingle change à la main.
 
 ## Erreurs et plantages
 

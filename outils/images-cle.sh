@@ -404,6 +404,8 @@ chercher() {
       fi
     fi
   done
+  # Le démarrage de la clé aussi : un Ventoy plus récent que celui épinglé est signalé, jamais pris tout seul.
+  outils/cle-secours.sh --ventoy-publie || true
   if ((${#neuves[@]})); then
     avertir "Clé VANGUARD : nouvelles images prêtes" \
       "$(printf '%s\n' "${neuves[@]}")

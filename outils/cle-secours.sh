@@ -24,11 +24,23 @@
 #   outils/cle-secours.sh --windows /dev/sdX DOSSIER  remplit ou répare la partition WIN11 d'une clé déjà faite,
 #                                                     sans rien effacer d'autre (ni root)
 # Windows 11 se télécharge à la main chez Microsoft (lien valable 24 h) : --telecharger dit comment.
+#
+# LA CLÉ DÉJÀ FAITE, tenue à jour sans rien effacer :
+#   outils/cle-secours.sh --a-jour [POINT]        la clé branchée : Ventoy lu sur la clé ; plus ancien que celui épinglé
+#                                                 ici, sa mise à jour est proposée (notification ; chaque jour par
+#                                                 outils/maj-cle.sh, et au branchement)
+#   outils/cle-secours.sh --ventoy-maj [/dev/sdX] met Ventoy à jour sur la clé, sans rien effacer (root : une fenêtre
+#                                                 pkexec ; journal dans ~/.local/state/vanguard/ventoy/)
+#   outils/cle-secours.sh --ventoy-publie         (développement) GitHub a-t-il un Ventoy plus récent que l'épingle ?
+# Essais : VANGUARD_VTOYEFI, un dossier lu à la place de la partition VTOYEFI de la clé.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 VENTOY=1.1.18
 VENTOY_SHA256=d86ff9de63d94c8b8f1f6b14d23c55af4b88e8207bf2893890892a6a97b1ad54
+VENTOY_DEPOT=https://github.com/ventoy/Ventoy/releases
+# Ce qui a été proposé ou dit (une fois par jour au plus), et les journaux des mises à jour de Ventoy.
+ETAT=${XDG_STATE_HOME:-$HOME/.local/state}/vanguard
 OPENCORE=1.0.8
 MACRECOVERY_SHA256=3023a9b4ca79a5255d93c00f25ab5df37e6f938b729b797d9ecea56184b17aff
 # Récupération de macOS : Monterey par défaut, la plus récente des Mac Intel sans puce T2 (2015 à 2017), qui
@@ -675,6 +687,299 @@ ecrire() { # disque dossier
   lsblk -o NAME,SIZE,FSTYPE,LABEL,PARTLABEL,MOUNTPOINTS "$disque"
 }
 
+# --- La clé déjà faite : Ventoy à jour -------------------------------------------------------------------------------
+
+avertir() { # titre texte
+  command -v notify-send >/dev/null && notify-send -a Vanguard -i vanguard -- "$1" "$2" || true
+}
+
+# Une notification à bouton (le serveur de notifications d'Omarchy en a) : écrit l'action choisie ; rien si elle est
+# fermée, ou laissée sans réponse pendant le délai, après lequel elle disparaît aussi.
+proposer() { # délai_s titre texte action libellé
+  command -v notify-send >/dev/null || return 0
+  timeout "$1" notify-send -a Vanguard -i vanguard -t "$(($1 * 1000))" -A "$4=$5" -- "$2" "$3" 2>/dev/null || true
+}
+
+# Ce qui a déjà été dit, pour ne pas le redire à chaque passage (le minuteur du jour et chaque branchement).
+deja_dit() { # nom texte minutes
+  [[ $(cat "$ETAT/$1" 2>/dev/null) == "$2" && -n $(find "$ETAT/$1" -mmin -"$3" 2>/dev/null) ]]
+}
+noter() { # nom texte
+  mkdir -p "$ETAT" && printf '%s\n' "$2" >"$ETAT/$1"
+}
+
+# La clé VANGUARD montée (témoin vanguard.cle), comme deployer.sh la cherche.
+point_cle() { find "/run/media/$USER" -maxdepth 2 -name vanguard.cle -printf '%h\n' 2>/dev/null | head -1 || true; }
+
+# Le disque d'une clé montée (/dev/sda pour /dev/sda1) ; rien si ce n'est pas une partition d'un disque. Deux montages
+# l'un sur l'autre au même endroit : celui du dessus, le seul visible, est le dernier de la liste.
+disque_de() { # point
+  local source
+  source=$(findmnt -nvo SOURCE -T "$1" 2>/dev/null | tail -1 || true)
+  [[ -n $source && $(lsblk -dno TYPE "$source" 2>/dev/null) == part ]] || return 0
+  echo "/dev/$(lsblk -dno PKNAME "$source")"
+}
+
+# a est-elle une version plus ancienne que b (1.1.10 avant 1.1.18) ?
+plus_ancienne() { [[ $1 != "$2" && $(printf '%s\n%s\n' "$1" "$2" | sort -V | head -1) == "$1" ]]; }
+
+# Version de Ventoy d'un dossier VTOYEFI : « set VENTOY_VERSION="1.1.18" » dans grub/grub.cfg, là où Ventoy2Disk.sh
+# la lit lui-même.
+version_ventoy() { # dossier
+  sed -n 's/^[[:space:]]*set[[:space:]]\{1,\}VENTOY_VERSION="\([0-9][0-9.]*\)".*/\1/p' "$1/grub/grub.cfg" 2>/dev/null |
+    head -1 || true
+}
+
+# Version de Ventoy d'une clé, lue sans rien écrire : sa partition VTOYEFI, montée par le bureau, sinon montée en
+# lecture seule le temps de lire. VANGUARD_VTOYEFI : un dossier lu à sa place (essais).
+ventoy_de() { # disque
+  local p2 point montee="" version=""
+  if [[ -n ${VANGUARD_VTOYEFI:-} ]]; then
+    version_ventoy "$VANGUARD_VTOYEFI"
+    return 0
+  fi
+  [[ -n $1 ]] || return 0
+  p2=$(partition "$1" 2)
+  [[ -b $p2 && $(lsblk -dno LABEL "$p2" 2>/dev/null) == VTOYEFI ]] || return 0
+  point=$(findmnt -nro TARGET -S "$p2" 2>/dev/null | head -1 || true)
+  if [[ -z $point ]] && command -v udisksctl >/dev/null && udisksctl mount -b "$p2" -o ro >/dev/null 2>&1; then
+    montee=1
+    point=$(findmnt -nro TARGET -S "$p2" 2>/dev/null | head -1 || true)
+  fi
+  [[ -z $point ]] || version=$(version_ventoy "$point")
+  if [[ -n $montee ]]; then udisksctl unmount -b "$p2" >/dev/null 2>&1 || true; fi
+  echo "$version"
+}
+
+# Le disque peut-il recevoir la mise à jour de Ventoy ? Une clé USB amovible, partition 1 VANGUARD (exFAT) et 2
+# VTOYEFI de Ventoy (FAT de 32 Mio), rien de chiffré ni de LVM, aucune partition montée ailleurs que sous /run/media
+# ni en swap, et pas le disque par où passe le système (/, /boot, /usr, /var, /home). Sinon la raison, et code 1.
+# Lancé deux fois : avant de proposer, et en root juste avant d'écrire.
+cle_ventoy() { # disque
+  local disque=$1 p1 p2 point m source
+  if [[ -z $disque || ! -b $disque || $(lsblk -dno TYPE "$disque" 2>/dev/null) != disk ]]; then
+    echo "${disque:-la clé} n'est pas un disque"
+    return 1
+  fi
+  if [[ $(lsblk -dno RM,TRAN "$disque" | tr -s ' ') != "1 usb" ]]; then
+    echo "$disque n'est pas une clé USB amovible"
+    return 1
+  fi
+  p1=$(partition "$disque" 1)
+  p2=$(partition "$disque" 2)
+  if [[ ! -b $p1 || $(lsblk -dno LABEL "$p1") != VANGUARD || $(lsblk -dno FSTYPE "$p1") != exfat ]]; then
+    echo "la partition 1 de $disque n'est pas VANGUARD (exFAT)"
+    return 1
+  fi
+  if [[ ! -b $p2 || $(lsblk -dno LABEL "$p2") != VTOYEFI || $(lsblk -dno PARTLABEL "$p2") != VTOYEFI ||
+    $(lsblk -dno FSTYPE "$p2") != vfat || $(lsblk -bdno SIZE "$p2") != $((VTOYEFI_MIO * MIO)) ]]; then
+    echo "la partition 2 de $disque n'est pas VTOYEFI, celle de Ventoy"
+    return 1
+  fi
+  if lsblk -lnpo TYPE "$disque" | awk '$1 != "disk" && $1 != "part" {t = 1} END {exit !t}'; then
+    echo "$disque porte un volume chiffré, LVM ou RAID : pas une clé de secours"
+    return 1
+  fi
+  while IFS= read -r point; do
+    if [[ -n $point && $point != /run/media/* ]]; then
+      echo "une partition de $disque est montée sur $point"
+      return 1
+    fi
+  done < <(lsblk -lnpo MOUNTPOINTS "$disque")
+  if swapon --show=NAME --noheadings 2>/dev/null | awk -v d="$disque" '$1 ~ "^" d "p?[0-9]*$" {t = 1} END {exit !t}'; then
+    echo "une partition de $disque sert de swap"
+    return 1
+  fi
+  for m in / /boot /usr /var /home; do
+    source=$(findmnt -nvo SOURCE "$m" 2>/dev/null | head -1 || true)
+    [[ -n $source ]] || continue
+    if lsblk -spnlo NAME,TYPE "$source" 2>/dev/null | awk -v d="$disque" '$1 == d && $2 == "disk" {t = 1} END {exit !t}'
+    then
+      echo "$disque porte $m : c'est le disque du système"
+      return 1
+    fi
+  done
+}
+
+# L'archive de Ventoy épinglée, rangée avec les images (téléchargée au besoin), vérifiée par son empreinte : son chemin,
+# ou code 1.
+archive_ventoy() {
+  local a=$IMAGES_LINUX/ventoy-$VENTOY-linux.tar.gz
+  if ! empreinte_ok "$a" "$VENTOY_SHA256"; then
+    mkdir -p "$IMAGES_LINUX"
+    rm -f "$a.part"
+    if ! curl -fsSL --retry 3 --connect-timeout 20 --max-time 600 -o "$a.part" \
+      "$VENTOY_DEPOT/download/v$VENTOY/ventoy-$VENTOY-linux.tar.gz" || ! empreinte_ok "$a.part" "$VENTOY_SHA256"; then
+      rm -f "$a.part"
+      return 1
+    fi
+    mv -f "$a.part" "$a"
+  fi
+  realpath "$a"
+}
+
+# Ventoy sur la clé branchée. Plus ancien que celui épinglé ici : la mise à jour, qui n'efface rien, est proposée par
+# une notification (bouton « Mettre à jour », et la commande à lancer plus tard), au plus une fois par jour pour une
+# même version ; sur accord, --ventoy-maj tout de suite.
+verifier_ventoy() { # point de la clé
+  local point=$1 disque version raison commande
+  disque=$(disque_de "$point")
+  version=$(ventoy_de "$disque")
+  if [[ -z $version ]]; then
+    echo "· Ventoy : version pas lue (VTOYEFI introuvable ou illisible) : non vérifié."
+    return 0
+  fi
+  if ! plus_ancienne "$version" "$VENTOY"; then
+    echo "✔ Ventoy $version sur la clé (épinglé ici : $VENTOY)."
+    return 0
+  fi
+  echo "↑ Ventoy $version sur la clé, $VENTOY épinglé ici : mise à jour sans rien effacer, après accord."
+  if ! raison=$(cle_ventoy "$disque"); then
+    echo "  ✖ Mise à jour impossible : $raison."
+    return 1
+  fi
+  if ! archive_ventoy >/dev/null; then
+    echo "  ✖ Archive de Ventoy $VENTOY pas téléchargée, ou différente de l'empreinte épinglée : nouvel essai au prochain"
+    echo "    passage."
+    return 1
+  fi
+  commande="$PWD/outils/cle-secours.sh --ventoy-maj"
+  if deja_dit ventoy-propose "$version $VENTOY" 1200; then
+    echo "  Déjà proposée aujourd'hui ; à la main : $commande"
+    return 0
+  fi
+  noter ventoy-propose "$version $VENTOY"
+  case $(proposer 900 "Clé VANGUARD : Ventoy $version → $VENTOY" "Le démarrage de la clé, mis à jour sans rien \
+effacer : le mot de passe administrateur est demandé. Plus tard, dans un terminal : $commande" maj "Mettre à jour") in
+    maj) ventoy_maj "$disque" ;;
+    *) echo "  Pas de réponse dans le quart d'heure ; plus tard : $commande" ;;
+  esac
+}
+
+# Mise à jour de Ventoy sur la clé, sans rien effacer : l'archive épinglée vérifiée ici, puis la partie root par pkexec
+# (une fenêtre de mot de passe), journalisée dans ~/.local/state/vanguard/ventoy/. Le même verrou que deployer.sh et
+# images-cle.sh : rien d'autre n'écrit la clé pendant ce temps. Ventoy démonte les partitions de la clé pour écrire :
+# celles qui étaient montées le sont de nouveau après.
+ventoy_maj() { # disque (facultatif : celui de la clé branchée)
+  local disque=${1:-} point raison archive journal part code=0 apres pourquoi montees=()
+  if [[ -z $disque ]]; then
+    point=$(point_cle)
+    [[ -n $point ]] || erreur "Clé VANGUARD non branchée."
+    disque=$(disque_de "$point")
+  fi
+  raison=$(cle_ventoy "$disque") || erreur "$raison : rien n'est fait."
+  command -v pkexec >/dev/null || erreur "il manque pkexec."
+  archive=$(archive_ventoy) || erreur "archive de Ventoy $VENTOY pas téléchargée, ou différente de l'empreinte épinglée."
+  mkdir -p "$ETAT/ventoy"
+  journal=$ETAT/ventoy/maj-$(date +%Y%m%d-%H%M%S).log
+  exec 9>"${XDG_RUNTIME_DIR:-/tmp}/vanguard-deployer.lock"
+  echo "Ventoy $VENTOY sur $disque : attente des autres écritures de la clé (verrou de deployer.sh)…"
+  flock 9
+  while read -r part; do
+    if [[ -n $(findmnt -nro TARGET -S "$part" 2>/dev/null || true) ]]; then montees+=("$part"); fi
+  done < <(lsblk -lnpo NAME "$disque" | tail -n +2)
+  echo "La fenêtre du mot de passe administrateur s'ouvre. Journal : $journal"
+  pkexec --keep-cwd "$PWD/outils/cle-secours.sh" --ventoy-racine "$disque" "$(lsblk -dno SERIAL "$disque")" \
+    "$(lsblk -bdno SIZE "$disque")" "$archive" 2>&1 | tee -a "$journal" || code=${PIPESTATUS[0]}
+  udevadm settle 2>/dev/null || true
+  for part in "${montees[@]}"; do
+    if [[ -z $(findmnt -nro TARGET -S "$part" 2>/dev/null || true) ]] && command -v udisksctl >/dev/null; then
+      udisksctl mount -b "$part" >/dev/null 2>&1 || true
+    fi
+  done
+  flock -u 9
+  apres=$(ventoy_de "$disque")
+  echo "Ventoy lu sur la clé après la mise à jour : ${apres:-pas lu}." | tee -a "$journal"
+  if ((code == 0)) && [[ $apres == "$VENTOY" ]]; then
+    echo "✔ Ventoy $VENTOY sur la clé ; rien n'a été effacé." | tee -a "$journal"
+    avertir "Clé VANGUARD : Ventoy $VENTOY installé" "Rien n'a été effacé. Journal : $journal"
+    return 0
+  fi
+  case $code in
+    0) pourquoi="la clé dit encore Ventoy ${apres:-?}" ;;
+    126) pourquoi="fenêtre du mot de passe fermée : rien n'a changé" ;;
+    127) pourquoi="pas d'autorisation (mot de passe refusé, ou aucune fenêtre de mot de passe possible) : rien n'a \
+changé ; la commande se lance aussi dans un terminal : $PWD/outils/cle-secours.sh --ventoy-maj" ;;
+    *) pourquoi="la partie root s'est arrêtée (code $code)" ;;
+  esac
+  echo "✖ Ventoy pas mis à jour : $pourquoi." | tee -a "$journal" >&2
+  avertir "Clé VANGUARD : Ventoy pas mis à jour" "$pourquoi. Journal : $journal"
+  return 1
+}
+
+# Partie root de --ventoy-maj, lancée par pkexec. Rien n'est effacé : Ventoy2Disk.sh -u ne réécrit que son démarrage
+# (les secteurs d'avant la partition 1) et VTOYEFI. Tout est revérifié ici : le disque (même numéro de série, même
+# taille : une autre clé a pu prendre son nom depuis l'accord, et jamais le disque du système) et l'archive, recopiée
+# hors d'atteinte du compte puis vérifiée par son empreinte avant d'être ouverte.
+ventoy_racine() { # disque serie octets archive
+  local disque=$1 serie=$2 octets=$3 archive=$4 raison tmp attributs code=0
+  echo "$(date '+%F %T') Ventoy $VENTOY sur $disque, archive $archive"
+  raison=$(cle_ventoy "$disque") || erreur "$raison : rien n'a été écrit."
+  [[ $(lsblk -dno SERIAL "$disque") == "$serie" && $(lsblk -bdno SIZE "$disque") == "$octets" ]] ||
+    erreur "$disque n'est plus la clé choisie : rien n'a été écrit."
+  tmp=$(mktemp -d)
+  cp "$archive" "$tmp/ventoy.tar.gz"
+  if ! empreinte_ok "$tmp/ventoy.tar.gz" "$VENTOY_SHA256"; then
+    rm -rf "$tmp"
+    erreur "l'archive de Ventoy n'est plus celle vérifiée : rien n'a été écrit."
+  fi
+  tar -xzf "$tmp/ventoy.tar.gz" -C "$tmp" --no-same-owner
+  if [[ $(cat "$tmp/ventoy-$VENTOY/ventoy/version" 2>/dev/null) != "$VENTOY" ]]; then
+    rm -rf "$tmp"
+    erreur "l'archive ne contient pas Ventoy $VENTOY : rien n'a été écrit."
+  fi
+  # La lecture seule de VANGUARD sous Windows (attribut GPT 60) : Ventoy réécrit la table GPT (vtoycli gpt -f) ; si
+  # l'attribut de la partition 1 a changé, il est remis comme avant.
+  attributs=$(sfdisk --part-attrs "$disque" 1)
+  echo "$(date '+%T') Ventoy2Disk.sh -u $disque (attributs de la partition 1 : ${attributs:-aucun})"
+  # Ventoy demande une fois s'il peut mettre à jour : la question a été posée, en clair, avant la fenêtre.
+  (cd "$tmp/ventoy-$VENTOY" && printf 'y\n' | sh Ventoy2Disk.sh -u "$disque") 2>&1 | sed 's/\x1b\[[0-9;]*m//g' ||
+    code=$?
+  udevadm settle || true
+  if [[ $(sfdisk --part-attrs "$disque" 1) != "$attributs" ]]; then
+    echo "Attributs de la partition 1 changés par Ventoy : remis à ${attributs:-aucun}."
+    sfdisk --no-reread --part-attrs "$disque" 1 "$attributs" || code=1
+  fi
+  if [[ -f $tmp/ventoy-$VENTOY/log.txt ]]; then sed 's/^/  log.txt de Ventoy : /' "$tmp/ventoy-$VENTOY/log.txt"; fi
+  rm -rf "$tmp"
+  ((code == 0)) || erreur "Ventoy2Disk.sh -u a échoué (code $code)."
+  echo "$(date '+%T') Ventoy $VENTOY écrit sur $disque."
+}
+
+# Pour le développeur (images-cle.sh --chercher le lance) : GitHub a-t-il un Ventoy plus récent que l'épingle ? Rien
+# n'est pris tout seul : l'archive n'a pas de signature et son empreinte ne se croit pas sur parole ; l'épingle
+# (VENTOY et VENTOY_SHA256, plus haut) change à la main, après vérification. Une notification par version.
+ventoy_publie() {
+  local derniere
+  derniere=$(curl -fsS --max-time 30 -o /dev/null -w '%{redirect_url}' "$VENTOY_DEPOT/latest" 2>/dev/null |
+    sed -n 's|.*/tag/v\([0-9][0-9.]*\)$|\1|p' || true)
+  if [[ -z $derniere ]]; then
+    echo "· Ventoy : dernière version de GitHub introuvable (pas d'Internet ?)."
+  elif plus_ancienne "$VENTOY" "$derniere"; then
+    echo "↑ Ventoy $derniere publié sur GitHub (épinglé ici : $VENTOY) : à vérifier, puis à épingler à la main."
+    if [[ $(cat "$ETAT/ventoy-publie" 2>/dev/null) != "$derniere" ]]; then
+      noter ventoy-publie "$derniere"
+      avertir "Vanguard, développement : Ventoy $derniere publié" "Épinglé : $VENTOY (VENTOY et VENTOY_SHA256 dans \
+outils/cle-secours.sh). L'archive n'est pas signée : comparer son empreinte à celle de la page de la version, puis \
+épingler à la main."
+    fi
+  else
+    echo "✔ Ventoy : $VENTOY épinglé, le dernier publié sur GitHub."
+  fi
+}
+
+# La clé branchée est-elle à jour pour démarrer les ordinateurs ? Lancé par maj-cle.sh (chaque jour) et au branchement
+# (vanguard-images-cle.service).
+a_jour() { # point de la clé (facultatif)
+  local point=${1:-}
+  [[ -n $point ]] || point=$(point_cle)
+  if [[ -z $point || ! -d $point ]]; then
+    echo "Clé VANGUARD non branchée : rien à vérifier."
+    return 0
+  fi
+  verifier_ventoy "$point"
+}
+
 case ${1:-} in
   --plan) plan "${2:-}" "${3:-}" ;;
   --essai) essai "${2:-}" ;;
@@ -683,5 +988,12 @@ case ${1:-} in
   --ecrire) ecrire "${2:?disque, par exemple /dev/sdb}" "${3:?dossier des images vérifiées}" ;;
   --windows) completer_windows "${2:?disque, par exemple /dev/sdb}" "${3:?dossier des images vérifiées}" ;;
   --racine) [[ $EUID -eq 0 ]] || erreur "--racine se lance par pkexec, depuis --ecrire."; racine "${@:2}" ;;
-  *) sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
+  --a-jour) a_jour "${2:-}" ;;
+  --ventoy-maj) ventoy_maj "${2:-}" ;;
+  --ventoy-racine)
+    [[ $EUID -eq 0 && $# -eq 5 ]] || erreur "--ventoy-racine se lance par pkexec, depuis --ventoy-maj."
+    ventoy_racine "${@:2}"
+    ;;
+  --ventoy-publie) ventoy_publie ;;
+  *) sed -n '2,35p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
 esac

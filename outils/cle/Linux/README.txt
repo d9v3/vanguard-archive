@@ -63,7 +63,7 @@ The program: "vanguard", in this folder. Any 64-bit distribution (x86_64), nothi
      https://learn.omacom.io/2/the-omarchy-manual/96/manual-installation
    - Kali Linux: pick "Kali Linux": its security tools, nothing installed, the disk left untouched
      (full live image, there if the key has room for it).
-   - The images update themselves when the key is plugged into the computer that prepares it, and every
-     day if it stays plugged in there.
+   - The images update themselves (Ventoy too, once you agree) when the key is plugged into the computer
+     that prepares it, and every day if it stays plugged in there.
 
 Full guide (menu, key protection, language): README.txt at the root of the key.

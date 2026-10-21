@@ -259,13 +259,17 @@ Windows; on Linux and macOS, Vanguard remounts it read-only itself), and `VANGUA
 log, anonymized. `outils/preparer-cle.sh` prepares a new key.
 
 In preparation, a rescue key that also boots computers: `outils/cle-secours.sh`. Ventoy boots the Omarchy installer,
-Arch, Debian and Fedora as network installers, SystemRescue, the full Kali Linux live image if there is room left (16
-GiB, published as a torrent only: aria2c) and Windows 11 as a fallback, kept up to date by `outils/images-cle.sh`
+Arch, Debian and Fedora as network installers, SystemRescue, the full Kali Linux live image if there is room left
+(16 GiB, published as a torrent only: aria2c) and Windows 11 as a fallback, kept up to date by `outils/images-cle.sh`
 (each project's signature checked, weekly timer that copies right away to a plugged-in key, copy on plug-in; an image
 downloaded elsewhere enters the cache through `--importer`, checked the same way); a FAT32 `WIN11` partition installs
 Windows 11 with Secure Boot on, without adding a key to the PC (`install.wim` split by wimlib under the 4 GB limit);
 an HFS+ partition holds the macOS recovery of Intel Macs; `VANGUARD` and `VANGUARDLOG` as before. `--plan` and
-`--essai` (on a disk image) touch no disk; only `--ecrire` erases the key.
+`--essai` (on a disk image) touch no disk; only `--ecrire` erases the key. Ventoy itself: its version on the key is
+read every day and on plug-in (`cle-secours.sh --a-jour`); when older than the pinned one, its update, which erases
+nothing (`Ventoy2Disk.sh -u`, as root through pkexec, disk and archive checked again, logged), is offered by a
+notification. A newer Ventoy on GitHub is reported to the developer by the weekly search, never taken on its own: the
+archive is not signed, the pin changes by hand.
 
 ## Errors and crashes
 
