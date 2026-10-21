@@ -132,7 +132,12 @@ fn carte(octets: &[u8], base: usize, d: usize) -> Option<Carte> {
     let sorte = u32_a(octets, d + SORTE)?;
     let mut dns = Vec::new();
     let mut maillon = pointeur_a(octets, d + PREMIER_DNS)?;
-    while maillon != 0 && dns.len() < 64 {
+    // Bornée par les maillons parcourus, pas par les adresses retenues : un maillon sans adresse lisible qui pointe
+    // sur lui-même ne doit pas faire tourner la boucle sans fin.
+    for _ in 0..64 {
+        if maillon == 0 {
+            break;
+        }
         let Some(m) = dans_le_tampon(maillon, base, DNS_TAILLE, octets.len()) else {
             break;
         };
@@ -240,6 +245,12 @@ mod tests {
         ecrire_ptr(&mut boucle, 128 + SUIVANTE, BASE);
         assert_eq!(lire(&boucle, BASE).len(), 4096);
         assert_eq!(lire(&[0u8; 50], BASE), Vec::new());
+        // Un DNS sans adresse lisible (famille 9) qui pointe sur lui-même : la boucle des DNS s'arrête aussi.
+        let mut dns_en_boucle = tampon();
+        ecrire_ptr(&mut dns_en_boucle, 320 + DNS_SUIVANT, BASE + 320);
+        dns_en_boucle[448] = 9;
+        let c = lire(&dns_en_boucle, BASE);
+        assert_eq!(c[0].dns, Vec::<std::net::IpAddr>::new());
     }
 
     #[test]
