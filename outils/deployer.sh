@@ -43,6 +43,15 @@ dire_durees() { [[ -z $DUREES ]] || echo "Durées : $DUREES (en tout $SECONDS s)
 copier() { cmp -s "$1" "$2" 2>/dev/null || cp -f "$1" "$2"; }
 
 compiler() {
+  # Chaque programme porte la liste de ses dépendances, versions comprises (cargo auditable, section .dep-v0), que
+  # cargo audit bin relit plus bas, et chez quiconque l'a téléchargé. Sans ces outils, rien n'est compilé : jamais de
+  # programme publié sans sa liste. La version est celle de la CI (.github/workflows/ci.yml) : la même liste, la même
+  # empreinte.
+  if ! command -v cargo-auditable >/dev/null || ! command -v cargo-audit >/dev/null; then
+    echo "✖ Compilation refusée : il faut cargo-auditable et cargo-audit (un programme publié porte la liste de ses"
+    echo "  dépendances). cargo install cargo-auditable --locked --version 0.7.7 && cargo install cargo-audit --locked"
+    exit 1
+  fi
   # Liste des fabricants de plus d'un mois : on la rafraîchit avant de compiler (elle est intégrée au programme), et
   # elle part dans son propre commit. Sans Internet, on garde l'ancienne.
   if [[ -n $(find assets/oui.tsv -mtime +30) ]] && outils/maj-fabricants.sh; then
@@ -56,7 +65,7 @@ compiler() {
   # n'occupe qu'un cœur chacune. Deux cargo lancés ensemble, eux, s'attendaient l'un l'autre (« Blocking waiting for
   # file lock on build directory ») : 97 s au lieu de 52 (mesuré le 19 oct. 2026).
   local debut=$SECONDS
-  cargo build --release --target x86_64-unknown-linux-musl --target x86_64-pc-windows-gnu
+  cargo auditable build --release --target x86_64-unknown-linux-musl --target x86_64-pc-windows-gnu
   git rev-parse HEAD >"$COMMIT_COMPILE"
   duree compilation "$debut"
 }
@@ -109,6 +118,11 @@ fi
 if [[ -f $WINDOWS ]] && ! python3 outils/verifier-pe.py "$WINDOWS"; then
   exit 1
 fi
+# Les failles connues de leurs dépendances, lues dans la liste que chaque programme porte (outils/failles-programmes.sh,
+# avis traités comme par cargo deny) : une seule, et rien ne part, ni sur la clé, ni dans la VM, ni sur GitHub.
+PROGRAMMES=("$LINUX")
+[[ -f $WINDOWS ]] && PROGRAMMES+=("$WINDOWS")
+outils/failles-programmes.sh "${PROGRAMMES[@]}" || exit 1
 # Page de la version sur GitHub (Releases) : chaque publication a la sienne, 0.x.0 comme 0.x.y. Il n'y en a qu'une par
 # jour : le lien « dernière version » du README mène toujours à celle du jour, et le Mac de GitHub ne compile qu'une
 # fois par jour. Une version intermédiaire (VANGUARD_INTERMEDIAIRE) va sur la clé et sur GitHub (le code) sans page :

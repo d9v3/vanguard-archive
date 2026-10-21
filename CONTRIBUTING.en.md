@@ -142,7 +142,10 @@ The judgment is written separately (`juger_…`, reading nothing from the system
 
 Requirements: `rustup target add x86_64-unknown-linux-musl x86_64-pc-windows-gnu`, `musl` (musl-gcc), `mingw-w64-gcc`
 and `clang`: YARA-X compiles a little C for each target (clang for clippy on the Mac targets, see
-`outils/verifier.sh`).
+`outils/verifier.sh`). To deploy, also `cargo install cargo-auditable --locked --version 0.7.7` and
+`cargo install cargo-audit --locked`: `deployer.sh` embeds in each program the list of its dependencies, versions
+included (`cargo auditable build`), then looks for known vulnerabilities in it (`outils/failles-programmes.sh`);
+without them, it refuses.
 
 ```sh
 outils/deployer.sh     # builds Linux (musl, static) + Windows, installs locally, pushes to GitHub, updates the key

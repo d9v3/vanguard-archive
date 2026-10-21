@@ -565,6 +565,9 @@ partout, `VANGUARD_EMOJI=1` les garde partout ; le menu Paramètres fait de mêm
 
 Compiler, tester, déployer, la clé USB, le journal des erreurs : voir [CONTRIBUTING.md](CONTRIBUTING.md).
 Une faille de sécurité dans Vanguard ? Signale-la en privé : voir [SECURITY.md](SECURITY.md).
+Chaque programme publié porte la liste de ses dépendances, versions comprises (cargo auditable) :
+`cargo audit bin <programme>` la compare aux failles connues de la base RustSec. Sous macOS, sur une moitié du
+programme universel, que cargo audit ne lit pas tel quel : `lipo vanguard-macos -thin arm64 -output vanguard-arm64`.
 
 ## Licence
 
