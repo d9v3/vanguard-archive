@@ -155,8 +155,8 @@ the Winsock catalog. And kernel drivers stored where nothing installed puts one,
 LOLDrivers list): being signed, they are used to disarm the antivirus.
 
 **Program memory** (`vanguard memory`, on demand) — the YARA rules applied to the memory of running programs:
-"fileless" malware lives nowhere else. LSASS and protected processes are never opened, nothing read is kept, and
-what could not be read is said.
+"fileless" malware lives nowhere else. LSASS and protected processes: their memory is never read; nothing read is
+kept, and what could not be read is said.
 
 **AI agents** — a local AI server (Ollama, LM Studio, ComfyUI) open to the whole network without a password, an agent
 set to do everything without asking, an MCP server started without a pinned version, reached without encryption or
@@ -442,7 +442,7 @@ Each menu entry is also a command.
 | `vanguard check-backup` | check my backup: the rsync backup read back, random files compared with their original (read-only) |
 | `vanguard antivirus [--full] [folder]` | antivirus scan (computer, or a key / a folder) |
 | `vanguard yara [--full] [folder]` | YARA scan: 308 rules for malware families, and MalwareBazaar's fingerprints |
-| `vanguard memory` | YARA scan of the memory of running programs (fileless malware), on demand; LSASS and protected processes never opened |
+| `vanguard memory` | YARA scan of the memory of running programs (fileless malware), on demand; LSASS and protected processes: their memory is never read |
 | `vanguard decoys [--remove]` | decoy files against ransomware: place them, check them, remove them |
 | `vanguard harden` | Windows Defender blocking: ASR rules, network protection, unwanted software, controlled folder access; each after your consent, undoable (Windows) |
 | `vanguard blocklists` | the home's Internet address on a blocklist? (after your consent) |

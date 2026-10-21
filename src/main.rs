@@ -233,7 +233,8 @@ enum Commande {
         dossier: Option<std::path::PathBuf>,
     },
     /// Mémoire des processus en marche passée aux 308 règles YARA : un logiciel malveillant sans fichier ne vit que
-    /// là. Lecture seule, à la demande ; LSASS et les processus protégés ne sont jamais ouverts, rien n'est gardé.
+    /// là. Lecture seule, à la demande ; LSASS et processus protégés : leur mémoire n'est jamais lue ; rien n'est
+    /// gardé.
     #[command(visible_alias = "memory")]
     Memoire,
     /// Lance un programme inconnu dans un bac à sable : pas de réseau, dossier personnel invisible.
@@ -1565,7 +1566,7 @@ const AIDES_EN: &[(&str, &str)] = &[
     ("yara", "YARA scan: 308 rules for malware families (ReversingLabs) and MalwareBazaar's fingerprints, alongside \
               the antivirus. Without a folder: downloads, desktop, startup. Read-only"),
     ("memoire", "Memory of running processes passed through the 308 YARA rules: fileless malware lives nowhere else. \
-                 Read-only, on demand; LSASS and protected processes are never opened, nothing is kept"),
+                 Read-only, on demand; LSASS and protected processes: their memory is never read; nothing is kept"),
     ("secrets", "Secrets in the history of the home folder's git projects (passwords, API keys, tokens), searched by \
                  Vanguard, and also by gitleaks if installed. No secret is shown. Read-only"),
     ("conteneurs", "Known flaws in this computer's Docker or Podman images, by trivy if installed. Read-only"),

@@ -145,12 +145,29 @@ struct Trouvailles {
     serveurs: usize,
 }
 
+/// Les options d'un lanceur suivies d'une valeur (« --python 3.12 ») : sautées avec elle, pour que la valeur ne passe
+/// pas pour le paquet. Le second groupe nomme le paquet lui-même (« uvx --from paquet==1.0 commande », « npx -p paquet
+/// commande ») : c'est lui qui est jugé, et non la commande qui suit.
+const OPTIONS_PYTHON: [&str; 5] = ["--python", "-p", "--with", "--index-url", "--pip-args"];
+const PAQUET_PYTHON: [&str; 2] = ["--from", "--spec"];
+const PAQUET_JS: [&str; 2] = ["--package", "-p"];
+
 /// Le paquet lancé par un lanceur (`npx`, `bunx`, `pnpm dlx`, `uvx`, `pipx run`), s'il n'a pas de version fixée.
+/// « cmd /c npx -y paquet », la forme de Claude Desktop sous Windows, est jugée comme « npx -y paquet ».
 fn paquet_non_epingle(commande: &str, args: &[&str]) -> Option<String> {
     let lanceur = Path::new(commande)
         .file_stem()
         .map(|s| s.to_string_lossy().to_lowercase())
         .unwrap_or_default();
+    if lanceur == "cmd" {
+        // cmd relit la ligne qui suit /c (ou /k) : un mot peut en porter plusieurs.
+        let i = args
+            .iter()
+            .position(|a| a.eq_ignore_ascii_case("/c") || a.eq_ignore_ascii_case("/k"))?;
+        let mots: Vec<&str> = args[i + 1..].iter().flat_map(|a| a.split_whitespace()).collect();
+        let (commande, reste) = mots.split_first()?;
+        return paquet_non_epingle(commande, reste);
+    }
     let mut reste = args.iter().copied();
     match lanceur.as_str() {
         "npx" | "bunx" | "uvx" => {}
@@ -162,16 +179,45 @@ fn paquet_non_epingle(commande: &str, args: &[&str]) -> Option<String> {
         }
         _ => return None,
     }
-    let paquet = reste.find(|a| !a.is_empty() && !a.starts_with('-'))?;
     let pyth = lanceur == "uvx" || lanceur == "pipx";
-    let epingle = if pyth {
-        paquet.contains("==") || paquet.contains('@')
+    let (avec_valeur, nomment): (&[&str], &[&str]) = if pyth {
+        (&OPTIONS_PYTHON, &PAQUET_PYTHON)
     } else {
-        // « @portee/nom@1.2.3 » ou « nom@1.2.3 » : le @ de la version vient après le premier caractère.
-        paquet.chars().skip(1).any(|c| c == '@')
+        (&[], &PAQUET_JS)
     };
-    let flottant = paquet.ends_with("@latest") || paquet.ends_with("@next");
-    (!epingle || flottant).then(|| paquet.to_string())
+    let mut nommes = Vec::new();
+    let mut premier = None;
+    while let Some(a) = reste.next() {
+        let (option, valeur) = match a.split_once('=') {
+            Some((o, v)) if a.starts_with('-') => (o, Some(v)),
+            _ => (a, None),
+        };
+        if nomment.contains(&option) {
+            nommes.extend(valeur.or_else(|| reste.next()));
+        } else if avec_valeur.contains(&option) {
+            if valeur.is_none() {
+                reste.next();
+            }
+        } else if premier.is_none() && !a.is_empty() && !a.starts_with('-') {
+            premier = Some(a);
+        }
+    }
+    let candidats = if nommes.is_empty() {
+        Vec::from_iter(premier)
+    } else {
+        nommes
+    };
+    let non_epingle = |paquet: &&str| {
+        let epingle = if pyth {
+            paquet.contains("==") || paquet.contains('@')
+        } else {
+            // « @portee/nom@1.2.3 » ou « nom@1.2.3 » : le @ de la version vient après le premier caractère.
+            paquet.chars().skip(1).any(|c| c == '@')
+        };
+        let flottant = paquet.ends_with("@latest") || paquet.ends_with("@next");
+        !epingle || flottant
+    };
+    candidats.into_iter().find(non_epingle).map(str::to_string)
 }
 
 /// Les mots d'un nom qui désignent un secret, comparés entiers : « TOKENIZERS » n'est pas « TOKEN », ni « MONKEY »
@@ -626,6 +672,91 @@ mod tests {
         assert_eq!(paquet_non_epingle("pnpm", &["dlx", "outil"]), Some("outil".into()));
         assert_eq!(paquet_non_epingle("node", &["serveur.js"]), None);
         assert_eq!(paquet_non_epingle("npx.cmd", &["-y", "outil"]), Some("outil".into()));
+    }
+
+    /// Une option suivie de sa valeur n'est pas le paquet ; une option qui nomme le paquet le donne à juger.
+    #[test]
+    fn options_avant_le_paquet() {
+        assert_eq!(paquet_non_epingle("uvx", &["--python", "3.12", "paquet==1.0"]), None);
+        assert_eq!(
+            paquet_non_epingle("uvx", &["--python", "3.12", "paquet"]),
+            Some("paquet".into())
+        );
+        assert_eq!(
+            paquet_non_epingle("uvx", &["-p", "3.12", "--with", "outil-b", "paquet==2.1"]),
+            None
+        );
+        assert_eq!(paquet_non_epingle("uvx", &["--python=3.12", "paquet==1.0"]), None);
+        assert_eq!(
+            paquet_non_epingle("uvx", &["--index-url", "https://depot.exemple/simple", "paquet"]),
+            Some("paquet".into())
+        );
+        // « --from » nomme le paquet ; ce qui suit est la commande qu'il fournit.
+        assert_eq!(
+            paquet_non_epingle("uvx", &["--from", "serveur-git==0.6.2", "serveur-git"]),
+            None
+        );
+        assert_eq!(
+            paquet_non_epingle("uvx", &["--from", "serveur-git", "serveur-git"]),
+            Some("serveur-git".into())
+        );
+        assert_eq!(
+            paquet_non_epingle("uvx", &["--from=serveur-git==0.6.2", "serveur-git"]),
+            None
+        );
+        assert_eq!(
+            paquet_non_epingle("pipx", &["run", "--python", "3.11", "outil==3.0"]),
+            None
+        );
+        assert_eq!(
+            paquet_non_epingle("pipx", &["run", "--spec", "outil==3.0", "outil"]),
+            None
+        );
+        assert_eq!(paquet_non_epingle("npx", &["-p", "@exemple/cli@1.2.0", "cli"]), None);
+        assert_eq!(
+            paquet_non_epingle("npx", &["--package", "@exemple/cli", "cli"]),
+            Some("@exemple/cli".into())
+        );
+        assert_eq!(
+            paquet_non_epingle("npx", &["--package=@exemple/cli@1.2.0", "cli"]),
+            None
+        );
+        assert_eq!(
+            paquet_non_epingle("npx", &["-y", "-p", "a@1.0.0", "-p", "b", "cli"]),
+            Some("b".into())
+        );
+    }
+
+    /// « cmd /c npx -y paquet » (Claude Desktop sous Windows) se juge comme « npx -y paquet ».
+    #[test]
+    fn cmd_avant_le_lanceur() {
+        assert_eq!(
+            paquet_non_epingle("cmd", &["/c", "npx", "-y", "@exemple/fichiers"]),
+            Some("@exemple/fichiers".into())
+        );
+        assert_eq!(
+            paquet_non_epingle("cmd.exe", &["/C", "npx", "-y", "@exemple/fichiers@1.4.2"]),
+            None
+        );
+        assert_eq!(
+            paquet_non_epingle("CMD.EXE", &["/s", "/k", "uvx", "--python", "3.12", "outil"]),
+            Some("outil".into())
+        );
+        // cmd relit la ligne : un seul mot peut porter la commande entière.
+        assert_eq!(
+            paquet_non_epingle("cmd", &["/c", "npx -y @exemple/fichiers"]),
+            Some("@exemple/fichiers".into())
+        );
+        assert_eq!(paquet_non_epingle("cmd", &["/c", "node", "serveur.js"]), None);
+        assert_eq!(paquet_non_epingle("cmd", &["/c"]), None);
+        assert_eq!(paquet_non_epingle("cmd", &["npx", "-y", "outil"]), None);
+        let json: Value = serde_json::from_str(
+            r#"{ "mcpServers": { "fichiers": { "command": "cmd", "args": ["/c", "npx", "-y", "@exemple/fichiers", "C:\\Users\\alice"] } } }"#,
+        )
+        .unwrap();
+        let mut t = Trouvailles::default();
+        lire_reglages("Claude Desktop", &json, &mut t);
+        assert_eq!(t.non_epingles, ["Claude Desktop › fichiers (@exemple/fichiers)"]);
     }
 
     #[test]

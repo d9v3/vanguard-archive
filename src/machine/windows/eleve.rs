@@ -18,6 +18,19 @@ use std::fmt::Write as _;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::os::windows::ffi::OsStrExt;
 use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
+use std::sync::Once;
+
+use windows::Win32::Security::{
+    ACL, ACL_REVISION, AddAccessAllowedAce, CreateWellKnownSid, InitializeAcl, InitializeSecurityDescriptor,
+    PSECURITY_DESCRIPTOR, PSID, SECURITY_DESCRIPTOR, SetSecurityDescriptorDacl, SetSecurityDescriptorGroup,
+    SetSecurityDescriptorOwner, WELL_KNOWN_SID_TYPE, WinBuiltinAdministratorsSid, WinLocalServiceSid,
+    WinLocalSystemSid, WinNetworkServiceSid, WinSelfSid,
+};
+use windows::Win32::System::Com::{
+    COINIT_MULTITHREADED, COM_RIGHTS_EXECUTE, COM_RIGHTS_EXECUTE_LOCAL, CoInitializeEx, CoInitializeSecurity,
+    EOAC_DISABLE_AAA, EOAC_NO_CUSTOM_MARSHAL, EOLE_AUTHENTICATION_CAPABILITIES, RPC_C_AUTHN_LEVEL_PKT_PRIVACY,
+    RPC_C_IMP_LEVEL_IDENTIFY,
+};
 
 use super::corrections::{self, Correction, LIGNE_MAX, LIGNES_MAX, Resultat};
 use crate::ui::{GRIS, RESET, VERT, tr, trf, trp};
@@ -656,6 +669,113 @@ fn continuer_sans_point(raison: &str, demander: impl FnOnce(&str) -> String) -> 
     }
 }
 
+/// Les comptes à qui COM permet de rappeler ce processus : les Administrateurs (aussi propriétaire et groupe du
+/// descripteur), Service local, Service réseau, le compte lui-même (« principal self ») et Système.
+const COMPTES_COM: [WELL_KNOWN_SID_TYPE; 5] = [
+    WinBuiltinAdministratorsSid,
+    WinLocalServiceSid,
+    WinNetworkServiceSid,
+    WinSelfSid,
+    WinLocalSystemSid,
+];
+
+/// Le descripteur de sécurité COM que l'exemple de Microsoft donne à tout processus qui appelle SRSetRestorePoint,
+/// sous forme absolue : CoInitializeSecurity refuse la forme relative que rend
+/// ConvertStringSecurityDescriptorToSecurityDescriptor. Il équivaut au SDDL
+/// « O:BAG:BAD:(A;;0x3;;;BA)(A;;0x3;;;LS)(A;;0x3;;;NS)(A;;0x3;;;PS)(A;;0x3;;;SY) » : les droits COM d'exécution, à
+/// distance et en local (COM_RIGHTS_EXECUTE | COM_RIGHTS_EXECUTE_LOCAL), à ces seuls comptes. Ses SID et sa liste
+/// d'accès vivent avec lui, dans une boîte qui ne bouge plus : le descripteur absolu pointe dessus.
+struct DescripteurCom {
+    /// SECURITY_MAX_SID_SIZE (68 octets) chacun, alignés sur 8.
+    sids: [[u64; 9]; 5],
+    /// L'en-tête (8 octets) et cinq entrées de 8 octets plus leur SID : 228 octets au plus.
+    acl: [u64; 32],
+    descripteur: SECURITY_DESCRIPTOR,
+}
+
+impl DescripteurCom {
+    fn nouveau() -> windows::core::Result<Box<DescripteurCom>> {
+        /// SECURITY_DESCRIPTOR_REVISION.
+        const REVISION: u32 = 1;
+        let mut d = Box::new(DescripteurCom {
+            sids: [[0; 9]; 5],
+            acl: [0; 32],
+            descripteur: SECURITY_DESCRIPTOR::default(),
+        });
+        let taille_sid = u32::try_from(size_of::<[u64; 9]>()).unwrap_or(0);
+        let taille_acl = u32::try_from(size_of::<[u64; 32]>()).unwrap_or(0);
+        let acl: *mut ACL = (&raw mut d.acl).cast();
+        let descripteur = PSECURITY_DESCRIPTOR((&raw mut d.descripteur).cast());
+        // SAFETY : chaque SID est écrit dans son propre tampon, de la taille annoncée ; la liste d'accès dans le sien,
+        // de la taille annoncée et aligné sur 8 octets (InitializeAcl demande 4). Tous les pointeurs viennent de
+        // `&raw mut` sur des champs de la boîte, qui ne bouge plus : le descripteur absolu, qui ne garde que des
+        // pointeurs vers les SID et la liste, reste valide tant qu'elle vit.
+        unsafe {
+            for (i, compte) in COMPTES_COM.into_iter().enumerate() {
+                let mut taille = taille_sid;
+                CreateWellKnownSid(compte, None, Some(PSID((&raw mut d.sids[i]).cast())), &raw mut taille)?;
+            }
+            InitializeAcl(acl, taille_acl, ACL_REVISION)?;
+            for i in 0..COMPTES_COM.len() {
+                AddAccessAllowedAce(
+                    acl,
+                    ACL_REVISION,
+                    COM_RIGHTS_EXECUTE | COM_RIGHTS_EXECUTE_LOCAL,
+                    PSID((&raw mut d.sids[i]).cast()),
+                )?;
+            }
+            let administrateurs = PSID((&raw mut d.sids[0]).cast());
+            InitializeSecurityDescriptor(descripteur, REVISION)?;
+            SetSecurityDescriptorOwner(descripteur, Some(administrateurs), false)?;
+            SetSecurityDescriptorGroup(descripteur, Some(administrateurs), false)?;
+            SetSecurityDescriptorDacl(descripteur, true, Some(acl), false)?;
+        }
+        Ok(d)
+    }
+
+    fn pointeur(&mut self) -> PSECURITY_DESCRIPTOR {
+        PSECURITY_DESCRIPTOR((&raw mut self.descripteur).cast())
+    }
+}
+
+/// COM et sa sécurité, une seule fois pour tout le processus élevé, avant le premier point de restauration. La
+/// documentation de Microsoft (« Using System Restore », citée de mémoire) le demande à tout processus qui appelle
+/// SRSetRestorePoint, pour que Service réseau, Service local et Système puissent le rappeler : CoInitializeEx en
+/// appartement multithread, puis CoInitializeSecurity avec un descripteur explicite (`DescripteurCom`), -1 (COM
+/// choisit les services d'authentification), RPC_C_AUTHN_LEVEL_PKT_PRIVACY, RPC_C_IMP_LEVEL_IDENTIFY et
+/// EOAC_DISABLE_AAA | EOAC_NO_CUSTOM_MARSHAL. Comme dans l'exemple, un échec est sans suite : le point est tenté quand
+/// même (COM déjà dans un autre appartement, ou sécurité déjà fixée : RPC_E_TOO_LATE).
+fn initialiser_com() {
+    static UNE_FOIS: Once = Once::new();
+    UNE_FOIS.call_once(|| {
+        // SAFETY : sans réserve, en appartement multithread ; jamais refermé : il vaut pour tout le processus élevé.
+        if unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) }.is_err() {
+            return;
+        }
+        let Ok(descripteur) = DescripteurCom::nouveau() else {
+            return;
+        };
+        // Gardé pour toute la vie du processus : l'exemple de Microsoft libère le sien aussitôt (COM en garde une
+        // copie), mais quelques centaines d'octets valent la certitude.
+        let descripteur = Box::leak(descripteur);
+        // SAFETY : descripteur absolu valide (ci-dessus), qui ne sera jamais libéré ; aucune liste d'authentification,
+        // pointeurs réservés nuls.
+        let _ = unsafe {
+            CoInitializeSecurity(
+                Some(descripteur.pointeur()),
+                -1,
+                None,
+                None,
+                RPC_C_AUTHN_LEVEL_PKT_PRIVACY,
+                RPC_C_IMP_LEVEL_IDENTIFY,
+                None,
+                EOLE_AUTHENTICATION_CAPABILITIES(EOAC_DISABLE_AAA.0 | EOAC_NO_CUSTOM_MARSHAL.0),
+                None,
+            )
+        };
+    });
+}
+
 /// Pose le point (début puis fin du changement) ; `Err` : pourquoi il ne l'est pas, prêt à montrer.
 fn poser_le_point() -> Result<(), String> {
     const DEBUT: u32 = 100;
@@ -673,6 +793,7 @@ fn poser_le_point() -> Result<(), String> {
         *place = c;
     }
     let mut etat = PointEtat { statut: 0, sequence: 0 };
+    initialiser_com();
     let bibliotheque = large("srclient.dll");
     // SAFETY : la bibliothèque et la fonction sont vérifiées non nulles avant l'appel ; la signature est celle de
     // SRSetRestorePointW ; les deux structures ont la disposition attendue et vivent pendant l'appel. Un deuxième appel
@@ -807,6 +928,68 @@ mod tests {
                 assert!(!continuer && note != sans_point_accepte(), "{raison} / {refus:?}");
             }
         }
+    }
+
+    /// Le descripteur COM construit à la main est exactement celui du SDDL de l'exemple de Microsoft : les deux,
+    /// rendus en SDDL par Windows (ou Wine) lui-même, sont identiques.
+    #[test]
+    fn le_descripteur_com_est_celui_de_microsoft() {
+        #[link(name = "advapi32")]
+        unsafe extern "system" {
+            fn ConvertSecurityDescriptorToStringSecurityDescriptorW(
+                descripteur: *mut c_void,
+                revision: u32,
+                parties: u32,
+                texte: *mut *mut u16,
+                taille: *mut u32,
+            ) -> i32;
+        }
+        /// Propriétaire, groupe et DACL.
+        const PARTIES: u32 = 1 | 2 | 4;
+        let en_sddl = |descripteur: *mut c_void| {
+            let mut texte = std::ptr::null_mut();
+            // SAFETY : descripteur valide pendant l'appel ; Windows alloue le texte (terminé par un zéro), lu jusqu'au
+            // zéro puis rendu par LocalFree, une seule fois.
+            unsafe {
+                assert_ne!(
+                    ConvertSecurityDescriptorToStringSecurityDescriptorW(
+                        descripteur,
+                        1,
+                        PARTIES,
+                        &raw mut texte,
+                        std::ptr::null_mut()
+                    ),
+                    0
+                );
+                let mut longueur = 0;
+                while *texte.add(longueur) != 0 {
+                    longueur += 1;
+                }
+                let sddl = String::from_utf16_lossy(std::slice::from_raw_parts(texte, longueur));
+                super::super::processus::LocalFree(texte.cast());
+                sddl
+            }
+        };
+        let mut construit = DescripteurCom::nouveau().expect("descripteur COM");
+        let attendu = large("O:BAG:BAD:(A;;0x3;;;BA)(A;;0x3;;;LS)(A;;0x3;;;NS)(A;;0x3;;;PS)(A;;0x3;;;SY)");
+        let mut relatif = std::ptr::null_mut();
+        // SAFETY : chaîne terminée par un zéro ; le descripteur rendu est libéré par LocalFree, une seule fois.
+        let reference = unsafe {
+            assert_ne!(
+                ConvertStringSecurityDescriptorToSecurityDescriptorW(
+                    attendu.as_ptr(),
+                    1,
+                    &raw mut relatif,
+                    std::ptr::null_mut()
+                ),
+                0
+            );
+            let sddl = en_sddl(relatif);
+            super::super::processus::LocalFree(relatif);
+            sddl
+        };
+        assert_eq!(en_sddl(construit.pointeur().0), reference);
+        assert!(reference.starts_with("O:BAG:BAD:"), "{reference}");
     }
 
     #[test]

@@ -187,13 +187,22 @@ fn decider(taille: u64, lu_processus: u64, lu_total: u64, ecoule: Duration) -> D
 }
 
 /// Ce qu'a donné la lecture d'un processus : les règles trouvées avec leur région, les octets lus, les régions
-/// sautées ou illisibles, et si une borne générale a tout arrêté.
+/// sautées ou illisibles, celles lues seulement jusqu'à un trou (une partie libérée entre la liste des régions et leur
+/// lecture : le reste n'est pas lu), et si une borne générale a tout arrêté.
 #[derive(Debug, Default, PartialEq)]
 struct Lecture {
     trouves: Vec<(String, Region)>,
     octets: u64,
     sautees: usize,
+    partielles: usize,
     arret: bool,
+}
+
+impl Lecture {
+    /// Tout ce qui devait être lu ne l'a pas été : le processus compte comme lu en partie, jamais comme lu en entier.
+    fn incomplete(&self) -> bool {
+        self.sautees > 0 || self.partielles > 0
+    }
 }
 
 /// Le tampon de lecture : sa taille est fixée à sa création (la plus grosse région lue) et ne change jamais. Un
@@ -266,6 +275,9 @@ fn analyser_regions(
                 if lus == 0 {
                     lecture.sautees += 1;
                     continue;
+                }
+                if lus < zone.len() {
+                    lecture.partielles += 1;
                 }
                 lecture.octets += lus as u64;
                 match analyseur.scan(&zone[..lus]) {
@@ -563,7 +575,7 @@ fn parcourir(regles: &yara_x::Rules) -> Bilan {
                 );
                 lu_total += lecture.octets;
                 bilan.lus += 1;
-                if lecture.sautees > 0 {
+                if lecture.incomplete() {
                     bilan.incomplets += 1;
                 }
                 bilan
@@ -620,8 +632,8 @@ fn afficher(bilan: &Bilan) {
     }
     if bilan.incomplets > 0 {
         avertir(&trf!(
-            "{} processus lus en partie : régions de plus de {} Mio, au-delà de {} Mio par processus, ou disparues entre-temps.",
-            "{} processes partly read: regions over {} MiB, beyond {} MiB per process, or gone in the meantime.",
+            "{} processus lus en partie : régions de plus de {} Mio, au-delà de {} Mio par processus, ou disparues entre-temps, en tout ou en partie.",
+            "{} processes partly read: regions over {} MiB, beyond {} MiB per process, or gone in the meantime, wholly or in part.",
             bilan.incomplets,
             TAILLE_REGION_MAX >> 20,
             PAR_PROCESSUS_MAX >> 20
@@ -935,6 +947,7 @@ mod tests {
                 trouves: vec![],
                 octets: PAR_PROCESSUS_MAX,
                 sautees: 2,
+                partielles: 0,
                 arret: false
             }
         );
@@ -968,6 +981,7 @@ mod tests {
                 trouves: vec![],
                 octets: 8,
                 sautees: 1,
+                partielles: 0,
                 arret: false
             }
         );
@@ -1014,6 +1028,9 @@ mod tests {
         assert_eq!(tour, 2, "la région de 101 octets ne doit pas être lue");
         assert_eq!(lecture.octets, 68);
         assert_eq!(lecture.sautees, 1);
+        // La seconde n'a rendu que 4 octets sur 16 : lue en partie, et le processus avec elle.
+        assert_eq!(lecture.partielles, 1);
+        assert!(lecture.incomplete());
         assert_eq!(lecture.trouves, [("Ancien".to_string(), regions[0])]);
         assert_eq!(tampon.0.len(), 100);
         effacer(&mut tampon.0);
@@ -1133,6 +1150,7 @@ mod tests {
                 trouves: vec![("Essai_Memoire".into(), pages[0])],
                 octets: pages[0].taille,
                 sautees: 0,
+                partielles: 0,
                 arret: false
             },
             "marque à {adresse:#x}"

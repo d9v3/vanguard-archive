@@ -188,8 +188,8 @@ moniteurs d'impression, fournisseurs de temps, catalogue Winsock. Et les pilotes
 d'installé n'en pose, ou connus pour être vulnérables (liste LOLDrivers) : signés, ils servent à désarmer l'antivirus.
 
 **Mémoire des programmes** (`vanguard memoire`, à la demande) — les règles YARA appliquées à la mémoire des programmes
-qui tournent : un logiciel malveillant « sans fichier » ne vit que là. LSASS et les processus protégés ne sont
-jamais ouverts, rien de la mémoire lue n'est gardé, et ce qui n'a pas pu être lu est dit.
+qui tournent : un logiciel malveillant « sans fichier » ne vit que là. LSASS et processus protégés : leur mémoire
+n'est jamais lue ; rien de la mémoire lue n'est gardé, et ce qui n'a pas pu être lu est dit.
 
 **Agents d'IA** — un serveur d'IA local (Ollama, LM Studio, ComfyUI) ouvert à tout le réseau sans mot de passe, un
 agent réglé pour tout faire sans demander, un serveur MCP lancé sans version fixée, joint sans chiffrement ou avec
@@ -491,7 +491,7 @@ Chaque entrée du menu existe aussi en commande.
 | `vanguard verifier-sauvegarde` | vérifier ma sauvegarde : la sauvegarde rsync relue, des fichiers au hasard comparés à leur original (lecture seule) |
 | `vanguard antivirus [--complet] [dossier]` | analyse antivirus (ordinateur, ou une clé / un dossier) |
 | `vanguard yara [--complet] [dossier]` | analyse YARA : 308 règles de familles de logiciels malveillants, et les empreintes de MalwareBazaar |
-| `vanguard memoire` | analyse YARA de la mémoire des programmes qui tournent (malware sans fichier), à la demande ; LSASS et processus protégés jamais ouverts |
+| `vanguard memoire` | analyse YARA de la mémoire des programmes qui tournent (malware sans fichier), à la demande ; LSASS et processus protégés : leur mémoire n'est jamais lue |
 | `vanguard pieges [--retirer]` | fichiers-pièges contre les rançongiciels : les poser, les vérifier, les retirer |
 | `vanguard durcir` | blocages de Windows Defender : règles ASR, protection réseau, logiciels indésirables, accès contrôlé aux dossiers ; chacun après accord, annulable (Windows) |
 | `vanguard listes-noires` | l'adresse Internet de la maison sur liste noire ? (après accord) |
