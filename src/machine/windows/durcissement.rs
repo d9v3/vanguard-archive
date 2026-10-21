@@ -717,7 +717,7 @@ pub(super) fn juger_invite_smb(strategie: Option<u32>, reglage: Option<u32>) -> 
                     "Si aucun vieux NAS ne s'ouvre sans mot de passe : couper la connexion invité (commande ci-dessous, en administrateur)",
                     "If no old NAS opens without a password: turn guest connections off (command below, as administrator)"
                 ),
-                &[&super::corrections::id("smb-invite-coupe")],
+                &[r"Set-ItemProperty -LiteralPath 'HKLM:\SYSTEM\CurrentControlSet\Services\LanmanWorkstation\Parameters' -Name AllowInsecureGuestAuth -Value 0 -Type DWord"],
             )
         }
     })
@@ -1335,7 +1335,7 @@ mod tests {
         assert!(juger_invite_smb(Some(0), Some(1)).is_none());
         let c = juger_invite_smb(None, Some(1)).unwrap();
         assert_eq!(c.probleme, Some(Niveau::Moyen));
-        assert_eq!(c.correctif.unwrap().commandes[0], "vanguard:smb-invite-coupe");
+        assert!(c.correctif.unwrap().commandes[0].ends_with("-Name AllowInsecureGuestAuth -Value 0 -Type DWord"));
         let impose = juger_invite_smb(Some(1), Some(0)).unwrap().correctif.unwrap();
         assert_eq!(impose.commandes.len(), 0);
         assert!(

@@ -98,7 +98,8 @@ struct PointInfo {
     sequence: i64,
     description: [u16; 256],
 }
-#[repr(C)]
+/// STATEMGRSTATUS, déclarée en #pragma pack(1) dans srrestoreptapi.h : 12 octets, la séquence à l'octet 4.
+#[repr(C, packed)]
 struct PointEtat {
     statut: u32,
     sequence: i64,
@@ -520,7 +521,7 @@ pub(crate) fn executer(canal: &str, parent: u32) -> i32 {
         "Press Enter to apply, or type n to cancel: "
     ));
     let mut code = 0;
-    let mut arret = !accord.trim().is_empty();
+    let mut arret = matches!(accord.trim().to_lowercase().as_str(), "n" | "non" | "no");
     if arret {
         trp!("Annulé : rien n'a été modifié.", "Cancelled: nothing was changed.");
     }
@@ -660,7 +661,8 @@ pub(crate) fn point_de_restauration() -> (bool, String) {
         let ok = poser(&raw mut info, &raw mut etat) != 0;
         if ok {
             info.evenement = FIN_CHANGEMENT;
-            info.sequence = etat.sequence;
+            let sequence = etat.sequence; // copie : jamais de référence vers un champ packed
+            info.sequence = sequence;
             poser(&raw mut info, &raw mut etat);
         }
         ok
@@ -671,7 +673,7 @@ pub(crate) fn point_de_restauration() -> (bool, String) {
     trp!(
         "  Point de restauration impossible (erreur {}) : protection du système désactivée sur C: ?",
         "  Restore point not possible (error {}): system protection turned off on C:?",
-        etat.statut
+        { etat.statut }
     );
     let reponse = crate::ui::demander(tr!(
         "  Continuer sans point de restauration ? [o/N] : ",
@@ -764,6 +766,7 @@ mod tests {
         assert_eq!(std::mem::size_of::<InfoLancement>(), 112);
         assert_eq!(std::mem::size_of::<Securite>(), 24);
         assert_eq!(std::mem::size_of::<PointInfo>(), 528);
-        assert_eq!(std::mem::size_of::<PointEtat>(), 16);
+        assert_eq!(std::mem::size_of::<PointEtat>(), 12);
+        assert_eq!(std::mem::offset_of!(PointEtat, sequence), 4);
     }
 }

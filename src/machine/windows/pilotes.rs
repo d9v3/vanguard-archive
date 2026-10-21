@@ -52,14 +52,21 @@ fn fichier_du_pilote(nom: &str, image: Option<&str>, racine: &str) -> PathBuf {
             .join("drivers")
             .join(format!("{nom}.sys"));
     };
-    let bas = image.to_lowercase();
-    if let Some(reste) = bas.strip_prefix("\\systemroot\\") {
-        return Path::new(racine).join(&image[image.len() - reste.len()..]);
+    // Préfixes comparés en ASCII : to_lowercase change la longueur de certains caractères (K Kelvin, İ), et un
+    // découpage fait d'après la chaîne en minuscules tombait au mauvais endroit, ou au milieu d'un caractère.
+    if image
+        .get(..12)
+        .is_some_and(|p| p.eq_ignore_ascii_case("\\systemroot\\"))
+    {
+        return Path::new(racine).join(&image[12..]);
     }
     if let Some(reste) = image.strip_prefix("\\??\\") {
         return PathBuf::from(reste);
     }
-    if bas.starts_with("system32\\") || bas.starts_with("syswow64\\") {
+    if image
+        .get(..9)
+        .is_some_and(|p| p.eq_ignore_ascii_case("system32\\") || p.eq_ignore_ascii_case("syswow64\\"))
+    {
         return Path::new(racine).join(image);
     }
     PathBuf::from(image)
@@ -115,6 +122,7 @@ fn juger_pilotes(pilotes: &[(Pilote, Option<[u8; 32]>)], liste: Option<&HashSet<
     let mut constats = Vec::new();
     let suspects: Vec<String> = pilotes
         .iter()
+        .filter(|(_, e)| e.is_some())
         .filter_map(|(p, _)| {
             emplacement_suspect(&p.fichier).map(|r| format!("{} : {} ({r})", p.nom, p.fichier.display()))
         })
