@@ -161,8 +161,7 @@ fn retirer_minuterie(nom: &str) -> bool {
         if !dossier.join(format!("{nom}.timer")).exists() {
             return false;
         }
-        let actif =
-            crate::reseau::surveillance::reussit("systemctl", &["--user", "is-enabled", &format!("{nom}.timer")]);
+        let actif = crate::reseau::surveillance::minuterie_activee(&format!("{nom}.timer"));
         crate::reseau::surveillance::reussit("systemctl", &["--user", "disable", "--now", &format!("{nom}.timer")]);
         let _ = std::fs::remove_file(dossier.join(format!("{nom}.service")));
         let _ = std::fs::remove_file(dossier.join(format!("{nom}.timer")));
@@ -233,7 +232,7 @@ fn reprendre_sauvegarde() -> bool {
     ) else {
         return false;
     };
-    let actif = crate::reseau::surveillance::reussit("systemctl", &["--user", "is-enabled", &ancien(timer)]);
+    let actif = crate::reseau::surveillance::minuterie_activee(&ancien(timer));
     let (t, s) = (unite_sauvegarde(&t), unite_sauvegarde(&s));
     if std::fs::write(dossier.join(timer), &t).is_err() || std::fs::write(dossier.join(service), &s).is_err() {
         return false;
