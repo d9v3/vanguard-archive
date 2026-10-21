@@ -203,7 +203,8 @@ fn juger_lsa(lues: &[(&str, Vec<String>)]) -> Constat {
     let mut chemin = false;
     for (valeur, paquets) in lues {
         for p in paquets {
-            let nom = p.trim().to_lowercase();
+            // Windows 10 et 11 écrivent « "" » (deux guillemets) dans Security Packages, pas une chaîne vide.
+            let nom = p.trim().trim_matches('"').to_lowercase();
             let nom = nom.strip_suffix(".dll").unwrap_or(&nom);
             if PAQUETS_DE_WINDOWS.contains(&nom) {
                 continue;
@@ -449,6 +450,12 @@ mod tests {
         assert!(c.message.contains("filtremdp (Notification Packages)"));
         let chemin = [("Security Packages", vec![r"C:\Users\alice\x.dll".into()])];
         assert_eq!(juger_lsa(&chemin).probleme, Some(Niveau::Eleve));
+        // La valeur d'origine de Windows : deux guillemets, vue sur une vraie VM.
+        assert!(
+            juger_lsa(&[("Security Packages", vec!["\"\"".into()])])
+                .probleme
+                .is_none()
+        );
         // La casse et « .dll » ne changent rien.
         assert!(
             juger_lsa(&[("Security Packages", vec!["Kerberos.DLL".into()])])

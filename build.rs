@@ -375,5 +375,11 @@ fn ressources_windows() {
     // ceux de [build] (--remap-path-prefix).
     if std::env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("gnu") {
         println!("cargo:rustc-link-arg=-Wl,--no-insert-timestamp");
+        // La garde contre une DLL posée à côté du programme (src/machine/windows/chargement.rs) n'est référencée par
+        // aucun code : `#[used]` ne suffit pas toujours, et l'éditeur de liens jetait sa section dans certains
+        // découpages de la compilation (vu le 21 oct. : programme sans « Load Config »). Exigée ici, elle reste, et
+        // son absence fait échouer la compilation au lieu de passer en silence. Le programme seulement : les tests
+        // d'intégration n'ont pas ce module.
+        println!("cargo:rustc-link-arg-bins=-Wl,--require-defined=_load_config_used");
     }
 }
