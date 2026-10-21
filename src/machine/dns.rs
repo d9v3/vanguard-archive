@@ -133,7 +133,12 @@ struct Serveurs {
     remise: Vec<(IpAddr, String)>,
 }
 
-/// Résolveurs locaux connus : (service systemd, nom affiché, chiffre ses requêtes).
+/// Les serveurs amont de systemd-resolved, qu'il réécrit à chaque changement (ceux de `resolvectl dns`).
+#[cfg(target_os = "linux")]
+const RESOLV_CONF_AMONT: &str = "/run/systemd/resolve/resolv.conf";
+
+/// Résolveurs locaux connus : (service systemd, qui est aussi le nom du processus ; nom affiché ; chiffre ses
+/// requêtes).
 #[cfg(target_os = "linux")]
 const RESOLVEURS: &[(&str, &str, bool)] = &[
     ("nextdns", "NextDNS", true),
@@ -151,30 +156,29 @@ fn serveurs() -> Option<Serveurs> {
     let conf = std::fs::read_to_string("/etc/resolv.conf").ok()?;
     let mut liste = lire_resolv_conf(&conf);
     let mut chiffre = None;
-    // 127.0.0.53 : systemd-resolved, qui transmet aux vrais serveurs (ceux de resolvectl).
+    // 127.0.0.53 : systemd-resolved, qui transmet aux vrais serveurs. Il les écrit lui-même dans son
+    // resolv.conf « amont » ; resolvectl ne sert plus qu'en secours, si ce fichier manque.
     if liste.iter().any(|ip| *ip == IpAddr::from([127, 0, 0, 53]))
-        && let Some(dns) = super::sortie("resolvectl", &["dns"])
+        && let Some(vrais) = std::fs::read_to_string(RESOLV_CONF_AMONT)
+            .ok()
+            .map(|t| lire_resolv_conf(&t))
+            .or_else(|| super::sortie("resolvectl", &["dns"]).map(|d| lire_resolvectl(&d)))
     {
-        let vrais = lire_resolvectl(&dns);
         if !vrais.is_empty() {
             liste = vrais;
         }
+        // DNS over TLS : l'état n'est écrit dans aucun fichier (resolved.conf dit la consigne, pas ce qui
+        // tourne) ; seul resolvectl le dit sans parler D-Bus.
         chiffre = super::sortie("resolvectl", &["status"]).map(|s| s.contains("+DNSOverTLS"));
     }
     let mut resolveur_local = None;
     if liste.iter().any(IpAddr::is_loopback) {
-        let noms: Vec<&str> = RESOLVEURS.iter().map(|r| r.0).collect();
-        let mut args = vec!["is-active"];
-        args.extend(&noms);
-        // is-active répond une ligne par service, dans l'ordre ; son code de retour n'est 0 que si tous tournent.
-        let etats = crate::commande::lancer(std::process::Command::new("systemctl").args(&args), 10)
-            .map(|r| r.sortie)
-            .unwrap_or_default();
+        // Le processus qui tourne, lu dans /proc : vrai aussi pour un résolveur lancé hors de systemd, et
+        // sans dépendre de systemctl. Le premier de la liste gagne, comme avant.
         if let Some((_, nom, chiffrant)) = RESOLVEURS
             .iter()
-            .zip(etats.lines())
-            .find(|(_, etat)| etat.trim() == "active")
-            .map(|(r, _)| *r)
+            .find(|r| crate::machine::linux::natif::processus_nomme(r.0))
+            .copied()
         {
             resolveur_local = Some(nom);
             if chiffrant {
@@ -605,12 +609,56 @@ mod tests {
     fn lecture_des_configurations() {
         let conf = "# généré\nnameserver 127.0.0.53\noptions edns0 trust-ad\nnameserver fe80::1%wlan0\n";
         assert_eq!(lire_resolv_conf(conf), [ip("127.0.0.53"), ip("fe80::1")]);
+        // Le fichier amont de resolved : au-delà de trois serveurs, un commentaire avant les suivants, qui
+        // restent des serveurs.
+        let amont = "nameserver 10.0.0.1\nnameserver 1.1.1.1\nnameserver 9.9.9.9\n# Too many DNS servers \
+                     configured, the following entries may be ignored.\nnameserver 2001:db8::1\nsearch maison\n";
+        assert_eq!(
+            lire_resolv_conf(amont),
+            [ip("10.0.0.1"), ip("1.1.1.1"), ip("9.9.9.9"), ip("2001:db8::1")]
+        );
         let resolvectl =
             "Global: 127.0.0.1\nLink 2 (enp12s0):\nLink 3 (wlp13s0): 10.0.0.1 1.1.1.1#cloudflare-dns.com fe80::1%3\n";
         assert_eq!(
             lire_resolvectl(resolvectl),
             [ip("127.0.0.1"), ip("10.0.0.1"), ip("1.1.1.1"), ip("fe80::1")]
         );
+    }
+
+    /// Sur cet ordinateur, le resolv.conf amont de resolved donne les serveurs de `resolvectl dns`.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn serveurs_amont_comme_resolvectl() {
+        let (Some(dns), Ok(conf)) = (
+            super::super::sortie("resolvectl", &["dns"]),
+            std::fs::read_to_string(RESOLV_CONF_AMONT),
+        ) else {
+            return;
+        };
+        // Même ensemble : resolved retire les doublons du fichier, et l'ordre des interfaces peut changer.
+        let ensemble = |v: Vec<IpAddr>| v.into_iter().collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(
+            ensemble(lire_resolv_conf(&conf)),
+            ensemble(lire_resolvectl(&dns)),
+            "{conf}\n{dns}"
+        );
+    }
+
+    /// Un résolveur que systemd dit actif est vu dans /proc. L'inverse n'est pas exigé : le processus peut
+    /// tourner hors de systemd (lancé à la main, par NetworkManager ou libvirt).
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn resolveurs_comme_systemctl() {
+        for (service, _, _) in RESOLVEURS {
+            let Some(r) =
+                crate::commande::lancer(std::process::Command::new("systemctl").args(["is-active", service]), 10)
+            else {
+                return;
+            };
+            if r.sortie.trim() == "active" {
+                assert!(crate::machine::linux::natif::processus_nomme(service), "{service}");
+            }
+        }
     }
 
     #[test]
