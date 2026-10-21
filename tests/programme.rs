@@ -870,6 +870,21 @@ fn traces_collectees_et_manifeste_juste() {
         "{lisezmoi}"
     );
     assert!(lisezmoi.contains("données personnelles") && lisezmoi.contains(env!("CARGO_PKG_VERSION")));
+    // La chronologie : toujours écrite (vide au besoin), une ligne de quatre champs par événement, dite au LISEZMOI.
+    let chronologie = std::fs::read_to_string(d.join("CHRONOLOGIE.txt")).unwrap();
+    assert!(
+        chronologie.starts_with("# Vanguard ") && chronologie.contains("\nDATE\tSOURCE\tQUOI/WHAT\tMITRE ATT&CK\n"),
+        "{chronologie}"
+    );
+    assert!(
+        chronologie
+            .lines()
+            .skip_while(|l| !l.starts_with("DATE\t"))
+            .skip(1)
+            .all(|l| l.split('\t').count() == 4 || l.starts_with("(aucun")),
+        "{chronologie}"
+    );
+    assert!(lisezmoi.contains("CHRONOLOGIE.txt"));
     if !sous_wine() {
         let processus = std::fs::read_to_string(d.join("01-processus.txt")).unwrap();
         assert!(processus.lines().count() > 3, "{processus}");

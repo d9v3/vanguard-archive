@@ -5,8 +5,9 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+pub(super) use super::unix::evenements_des_journaux;
 use super::unix::{cron, journal_vers, journaux_classiques, maison, mo, shell_et_ssh};
-use super::{Bi, Empreinte, Feuille, Partie, Processus, Raison, bi};
+use super::{Bi, Empreinte, Feuille, Partie, Processus, Raison, bi, chronologie};
 use crate::commande::Garder;
 use crate::machine::linux::dissimulation::{SansFichier, juger_exe, proc_masque};
 
@@ -258,9 +259,14 @@ pub(super) fn demarrage(dossier: &Path) -> Partie {
         20,
         false,
     );
-    // Les unités posées à la main (hors paquets) : là où une persistance s'installe.
-    f.dossier(Path::new("/etc/systemd/system"), 100, false);
-    f.dossier(&m.join(".config/systemd/user"), 100, false);
+    // Les unités posées à la main (hors paquets) : là où une persistance s'installe. Dans leurs dossiers .wants, la
+    // date de chaque lien est celle où le service a été activé : la chronologie la reprend.
+    for racine in [PathBuf::from("/etc/systemd/system"), m.join(".config/systemd/user")] {
+        f.dossier(&racine, 100, false);
+        for d in dossiers_wants(&racine) {
+            f.dossier(&d, 0, false);
+        }
+    }
     cron(&mut f);
     f.dossier(&m.join(".config/autostart"), 100, false);
     f.dossier(Path::new("/etc/xdg/autostart"), 100, false);
@@ -269,18 +275,36 @@ pub(super) fn demarrage(dossier: &Path) -> Partie {
     }
     shell_et_ssh(&mut f);
     p.manques.append(&mut f.manques);
+    p.evenements = chronologie::lancements(&f.dates);
     if p.ecrire(
         dossier,
         "03-demarrage.txt",
         &f.texte,
         Bi::new(
-            "ce qui se lance tout seul, tel quel : unités et minuteries de systemd, tâches cron, démarrage de session (autostart), bibliothèque préchargée (ld.so.preload), fichiers du shell, clés SSH autorisées, modules du noyau chargés",
-            "what starts by itself, as is: systemd units and timers, cron jobs, session autostart, preloaded library (ld.so.preload), shell files, authorized SSH keys, loaded kernel modules",
+            "ce qui se lance tout seul, tel quel : unités et minuteries de systemd (et services activés, dossiers .wants), tâches cron, démarrage de session (autostart), bibliothèque préchargée (ld.so.preload), fichiers du shell, clés SSH autorisées, modules du noyau chargés",
+            "what starts by itself, as is: systemd units and timers (and enabled services, .wants folders), cron jobs, session autostart, preloaded library (ld.so.preload), shell files, authorized SSH keys, loaded kernel modules",
         ),
     ) {
         p.compte = Some(bi!("{} source(s) lue(s)", "{} source(s) read", f.lues));
     }
     p
+}
+
+/// Les dossiers « .wants » et « .requires » d'un dossier d'unités : un lien par service activé.
+fn dossiers_wants(racine: &Path) -> Vec<PathBuf> {
+    let mut v: Vec<PathBuf> = std::fs::read_dir(racine)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|e| {
+            let chemin = e.path();
+            let extension = chemin.extension().unwrap_or_default();
+            (extension == "wants" || extension == "requires") && e.file_type().is_ok_and(|t| t.is_dir())
+        })
+        .map(|e| e.path())
+        .collect();
+    v.sort();
+    v
 }
 
 /// Comptes et groupes, sessions ouvertes, dernières connexions réussies et ratées.
@@ -295,8 +319,15 @@ pub(super) fn comptes(dossier: &Path) -> Partie {
         10,
         false,
     );
-    f.commande(Command::new("last").args(["-F", "-w", "-n", "1000"]), 20, false);
-    f.commande(Command::new("wtmpdb").arg("last"), 20, false);
+    // Les dates en anglais, quelle que soit la langue de l'ordinateur : la chronologie les relit.
+    let last = f.commande(
+        Command::new("last")
+            .args(["-F", "-w", "-n", "1000"])
+            .env("LC_ALL", "C.UTF-8"),
+        20,
+        false,
+    );
+    let wtmpdb = f.commande(Command::new("wtmpdb").arg("last").env("LC_ALL", "C.UTF-8"), 20, false);
     f.commande(&mut Command::new("lastlog"), 20, false);
     f.commande(&mut Command::new("lastlog2"), 20, false);
     if super::privilegie() {
@@ -311,6 +342,18 @@ pub(super) fn comptes(dossier: &Path) -> Partie {
     }
     let n = std::fs::read_to_string("/etc/passwd").map_or(0, |t| t.lines().filter(|l| l.contains(':')).count());
     p.manques.append(&mut f.manques);
+    // Pour la chronologie : démarrages et sessions depuis le réseau (wtmpdb seulement sans last : les mêmes), et la
+    // date des fichiers des comptes, changée par chaque compte créé ou modifié.
+    let sessions = last.filter(|s| !s.trim().is_empty()).or(wtmpdb).unwrap_or_default();
+    p.evenements = chronologie::lire_last(&sessions, chrono::Local::now().naive_local(), &chrono::Local);
+    p.evenements.extend(f.dates.iter().filter_map(|(c, t)| {
+        Some(chronologie::Evenement::new(
+            chronologie::secondes(*t)?,
+            chronologie::Source::Compte,
+            chronologie::Genre::FichierDesComptes,
+            c.clone(),
+        ))
+    }));
     if p.ecrire(
         dossier,
         "04-comptes.txt",

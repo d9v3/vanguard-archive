@@ -1,13 +1,15 @@
 //! Collecter les traces : après une infection, avant de nettoyer ou de réinstaller, garder ce qu'un spécialiste (ou la
 //! personne elle-même, plus tard) voudra voir, dans l'ordre où cela disparaît : processus, connexions, ce qui se lance
 //! tout seul, comptes, journaux des 7 derniers jours, fichiers récents des endroits à risque. Chaque partie a son
-//! fichier texte ; LISEZMOI.txt dit ce que contient chacun et ce qui n'a pas pu être lu, et pourquoi ; MANIFESTE.txt
-//! donne l'empreinte SHA-256 de chaque fichier, pour prouver plus tard qu'ils n'ont pas changé.
+//! fichier texte ; CHRONOLOGIE.txt remet ce qu'elles ont de daté dans l'ordre du temps (voir `chronologie`) ;
+//! LISEZMOI.txt dit ce que contient chacun et ce qui n'a pas pu être lu, et pourquoi ; MANIFESTE.txt donne
+//! l'empreinte SHA-256 de chaque fichier, pour prouver plus tard qu'ils n'ont pas changé.
 //!
 //! Lecture seule : aucun processus arrêté, aucun fichier déplacé ; les fichiers récents sont décrits, pas copiés.
 //! Rien ne part sur Internet : le bilan joint est fait sans ses règles de mises à jour, les seules qui interrogent des
 //! serveurs.
 
+mod chronologie;
 #[cfg(target_os = "linux")]
 mod linux;
 #[cfg(target_os = "macos")]
@@ -102,6 +104,8 @@ pub(crate) enum Raison {
     SansPowerShell,
     /// Un lien posé par un compte ordinaire, vers cette cible : pas suivi (voir `lien_sur`).
     LienNonSuivi(String),
+    /// Tant de lignes de plus, au-delà de la borne de la chronologie : pas gardées.
+    Lignes(usize),
     /// Ce que le système a répondu.
     Erreur(String),
 }
@@ -138,6 +142,11 @@ impl Raison {
                 "lien vers {c}, posé par un compte : pas suivi",
                 "link to {c}, set by an account: not followed"
             ),
+            Raison::Lignes(n) => bi!(
+                "{n} lignes de plus ne sont pas gardées ({} au plus)",
+                "{n} more lines are not kept ({} at most)",
+                chronologie::MAX_LIGNES
+            ),
             Raison::Erreur(e) => Bi::meme(e.clone()),
         }
     }
@@ -169,13 +178,14 @@ pub(crate) struct Produit {
 }
 
 /// Une partie collectée : son titre, ce qu'elle a trouvé (`None` : rien n'a pu être lu), ce qui lui manque, ses
-/// fichiers.
+/// fichiers, et ce qu'elle a lu de daté pour la chronologie.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Partie {
     pub titre: Bi,
     pub compte: Option<Bi>,
     pub manques: Vec<Manque>,
     pub fichiers: Vec<Produit>,
+    pub evenements: Vec<chronologie::Evenement>,
 }
 
 impl Partie {
@@ -185,6 +195,7 @@ impl Partie {
             compte: None,
             manques: Vec::new(),
             fichiers: Vec::new(),
+            evenements: Vec::new(),
         }
     }
 
@@ -241,6 +252,8 @@ pub(crate) struct Feuille {
     /// Les sections lues.
     pub lues: usize,
     pub manques: Vec<Manque>,
+    /// La date de modification de chaque fichier et dossier listé ou recopié : la chronologie la reprend sans relire.
+    pub dates: Vec<(String, SystemTime)>,
 }
 
 impl Feuille {
@@ -249,6 +262,7 @@ impl Feuille {
             texte: entete(titre),
             lues: 0,
             manques: Vec::new(),
+            dates: Vec::new(),
         }
     }
 
@@ -320,6 +334,7 @@ impl Feuille {
         };
         let est_lien = lien.file_type().is_symlink();
         if est_lien && !lien_sur(&lien) {
+            self.noter_date(chemin, &lien);
             self.section(&chemin.to_string_lossy());
             let cible = std::fs::read_link(chemin).map_or_else(|_| String::new(), |c| champ(&c.to_string_lossy()));
             let _ = writeln!(self.texte, "{}", Raison::LienNonSuivi(cible).note());
@@ -328,6 +343,7 @@ impl Feuille {
         let Ok(meta) = std::fs::metadata(chemin) else {
             return;
         };
+        self.noter_date(chemin, &meta);
         self.section(&chemin.to_string_lossy());
         match lire_debut(chemin, BORNE_FICHIER, !est_lien) {
             Ok(texte) => {
@@ -381,6 +397,9 @@ impl Feuille {
         self.section(&format!("{} ({})", dossier.to_string_lossy(), chemins.len()));
         for c in &chemins {
             let m = std::fs::symlink_metadata(c);
+            if let Ok(m) = &m {
+                self.noter_date(c, m);
+            }
             let (taille, date) = m.as_ref().map_or((0, String::new()), |m| {
                 (m.len(), m.modified().ok().map(date_iso).unwrap_or_default())
             });
@@ -395,6 +414,13 @@ impl Feuille {
         }
         for c in chemins.iter().filter(|c| c.is_file()).take(max) {
             self.fichier(c, false);
+        }
+    }
+
+    /// Note la date de modification d'un fichier lu ou listé, pour la chronologie.
+    fn noter_date(&mut self, chemin: &Path, m: &std::fs::Metadata) {
+        if let Ok(t) = m.modified() {
+            self.dates.push((chemin.to_string_lossy().into_owned(), t));
         }
     }
 }
@@ -1037,6 +1063,23 @@ fn fichiers_recents(dossier: &Path) -> Partie {
         }
     }
     parcours.entrees.sort_by(|a, b| a.chemin.cmp(&b.chemin));
+    // Pour la chronologie : la date de modification de chaque fichier, et son empreinte si elle a été calculée.
+    p.evenements = parcours
+        .entrees
+        .iter()
+        .filter_map(|e| {
+            let empreinte = match &e.empreinte {
+                Some(Empreinte::Sha256(h)) => Some(h.as_str()),
+                _ => None,
+            };
+            Some(chronologie::Evenement::fichier(
+                chronologie::secondes(e.modifie?)?,
+                &e.chemin,
+                e.taille,
+                empreinte,
+            ))
+        })
+        .collect();
     let mut texte = entete(&p.titre);
     let _ = writeln!(
         texte,
@@ -1432,8 +1475,8 @@ pub fn collecter(argument: Option<&Path>) -> Option<PathBuf> {
     afficher_aligne(
         "  ",
         tr!(
-            "Lecture seule : rien n'est arrêté, déplacé ni envoyé. Ce qui disparaît le plus vite d'abord (processus, connexions), puis ce qui se lance tout seul, les comptes, les journaux et les fichiers récents.",
-            "Read-only: nothing is stopped, moved or sent. What vanishes fastest first (processes, connections), then what starts by itself, accounts, logs and recent files."
+            "Lecture seule : rien n'est arrêté, déplacé ni envoyé. Ce qui disparaît le plus vite d'abord (processus, connexions), puis ce qui se lance tout seul, les comptes, les journaux et les fichiers récents ; enfin, la chronologie de l'incident.",
+            "Read-only: nothing is stopped, moved or sent. What vanishes fastest first (processes, connections), then what starts by itself, accounts, logs and recent files; last, the incident timeline."
         ),
         2,
         GRIS,
@@ -1532,17 +1575,17 @@ pub fn collecter(argument: Option<&Path>) -> Option<PathBuf> {
     );
     let debut = Instant::now();
     let mut parties = Vec::new();
-    let mut montrer = |(p, duree): (Partie, Duration)| {
+    let montrer = |(p, duree): (Partie, Duration)| {
         // VANGUARD_CHRONO : le temps de chaque partie sur la sortie d'erreur, comme pour le bilan.
         if std::env::var_os("VANGUARD_CHRONO").is_some() {
             eprintln!("chrono {:>6} ms  {}", duree.as_millis(), p.titre.fr);
         }
         afficher(&p);
-        parties.push(p);
+        p
     };
     // Dans l'ordre de volatilité : les processus et les connexions changent d'une seconde à l'autre.
-    montrer(chrono(|| os::processus(&dossier)));
-    montrer(chrono(|| os::reseau(&dossier)));
+    parties.push(montrer(chrono(|| os::processus(&dossier))));
+    parties.push(montrer(chrono(|| os::reseau(&dossier))));
     // Le reste en même temps : chacun attend surtout des commandes du système.
     let place_pour_journaux = libre.is_none_or(|l| l >= besoin);
     let resultats = std::thread::scope(|s| {
@@ -1578,8 +1621,14 @@ pub fn collecter(argument: Option<&Path>) -> Option<PathBuf> {
         })
     });
     for p in resultats {
-        montrer(p);
+        parties.push(montrer(p));
     }
+    // Enfin, ce que les parties ont lu de daté, dans l'ordre du temps : après les journaux, qu'elle reprend.
+    let maintenant = chronologie::secondes(SystemTime::now()).unwrap_or(0);
+    let c = montrer(chrono(|| {
+        chronologie::partie(&dossier, &parties, os::evenements_des_journaux(&dossier), maintenant)
+    }));
+    parties.push(c);
     let (machine, compte) = machine_et_compte();
     let contexte = Contexte {
         date: chrono::Local::now().format("%Y-%m-%d %H:%M:%S %:z").to_string(),
@@ -1930,6 +1979,35 @@ mod tests {
             f.fichier(&tube, false);
             assert!(debut.elapsed() < Duration::from_secs(2));
         }
+    }
+
+    /// Chaque fichier listé ou recopié garde sa date pour la chronologie, sans être relu.
+    #[test]
+    fn feuille_garde_les_dates() {
+        let dossier = crate::reseau::dossier_local().join("feuille-dates");
+        let _ = std::fs::remove_dir_all(&dossier);
+        std::fs::create_dir_all(dossier.join("sous")).unwrap();
+        std::fs::write(dossier.join("a.service"), "[Unit]\n").unwrap();
+        let mut f = Feuille::new(&bi("Démarrage", "Startup"));
+        f.dossier(&dossier, 10, false);
+        f.fichier(&dossier.join("absent"), false);
+        let chemins: Vec<String> = f.dates.iter().map(|(c, _)| c.clone()).collect();
+        let a = dossier.join("a.service").to_string_lossy().into_owned();
+        let sous = dossier.join("sous").to_string_lossy().into_owned();
+        // Listé puis recopié : deux fois la même date, une seule ligne dans la chronologie.
+        assert_eq!(chemins.iter().filter(|c| **c == a).count(), 2, "{chemins:?}");
+        assert!(chemins.contains(&sous));
+        assert_eq!(chemins.len(), 3);
+        let maintenant = chronologie::secondes(SystemTime::now()).unwrap();
+        let v = chronologie::garder(chronologie::lancements(&f.dates), maintenant - 60, maintenant + 60);
+        assert_eq!(v.len(), 2);
+        assert_eq!(
+            Raison::Lignes(12).texte(),
+            bi(
+                "12 lignes de plus ne sont pas gardées (5000 au plus)",
+                "12 more lines are not kept (5000 at most)"
+            )
+        );
     }
 
     #[test]

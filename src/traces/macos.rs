@@ -5,8 +5,9 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+pub(super) use super::unix::evenements_des_journaux;
 use super::unix::{cron, journal_vers, journaux_classiques, maison, mo, shell_et_ssh};
-use super::{Bi, Empreinte, Feuille, Manque, Partie, Processus, Raison, bi, lire_args, lire_ps};
+use super::{Bi, Empreinte, Feuille, Manque, Partie, Processus, Raison, bi, chronologie, lire_args, lire_ps};
 use crate::commande::Garder;
 
 pub(super) fn processus(dossier: &Path) -> Partie {
@@ -141,6 +142,7 @@ pub(super) fn demarrage(dossier: &Path) -> Partie {
     cron(&mut f);
     shell_et_ssh(&mut f);
     p.manques.append(&mut f.manques);
+    p.evenements = chronologie::lancements(&f.dates);
     if p.ecrire(
         dossier,
         "03-demarrage.txt",
@@ -169,8 +171,14 @@ pub(super) fn comptes(dossier: &Path) -> Partie {
         true,
     );
     f.commande(&mut Command::new("who"), 10, false);
-    f.commande(Command::new("last").args(["-100"]), 20, true);
+    // Les dates en anglais, quelle que soit la langue de l'ordinateur : la chronologie les relit.
+    let last = f.commande(Command::new("last").args(["-100"]).env("LC_ALL", "C"), 20, true);
     p.manques.append(&mut f.manques);
+    p.evenements = chronologie::lire_last(
+        &last.unwrap_or_default(),
+        chrono::Local::now().naive_local(),
+        &chrono::Local,
+    );
     if p.ecrire(
         dossier,
         "04-comptes.txt",

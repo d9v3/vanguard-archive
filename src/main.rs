@@ -393,8 +393,8 @@ enum Commande {
     #[command(visible_alias = "rules")]
     Regles,
     /// Collecter les traces après une infection, avant de nettoyer : processus, connexions, ce qui se lance tout seul,
-    /// comptes, journaux des 7 derniers jours et fichiers récents, dans un dossier daté (LISEZMOI, empreintes SHA-256).
-    /// Lecture seule ; rien ne part sur Internet.
+    /// comptes, journaux des 7 derniers jours, fichiers récents et la chronologie de l'incident, dans un dossier daté
+    /// (LISEZMOI, empreintes SHA-256). Lecture seule ; rien ne part sur Internet.
     #[command(visible_alias = "evidence")]
     Traces {
         /// Le dossier où créer traces-AAAAMMJJ-HHMMSS (par défaut : la clé VANGUARD si Vanguard tourne depuis elle,
@@ -1637,8 +1637,8 @@ const AIDES_EN: &[(&str, &str)] = &[
     ("ordinateurs", "My computers: those where the VANGUARD key ran a check, their grade and remaining problems (on the \
      key's VANGUARDLOG partition)"),
     ("traces", "Collect the traces after an infection, before cleaning up: processes, connections, what starts by \
-                itself, accounts, logs of the last 7 days and recent files, in a dated folder (README, SHA-256 \
-                fingerprints). Read-only; nothing goes to the Internet"),
+                itself, accounts, logs of the last 7 days, recent files and the incident timeline, in a dated folder \
+                (README, SHA-256 fingerprints). Read-only; nothing goes to the Internet"),
     ("depanner", "Troubleshoot step by step: no Internet, Wi-Fi dropping, slow computer, no sound, printer, disk full; \
                   after an infection, new computer, computer leaving (sale, gift)"),
     ("proche", "A relative's computer: three questions (who uses it, why you were asked to look at it, their \

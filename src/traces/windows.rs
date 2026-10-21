@@ -1,12 +1,14 @@
 //! Les traces sous Windows : processus par PowerShell (Win32_Process), connexions et ports par Get-NetTCPConnection,
 //! tâches planifiées, services, clés Run et abonnements WMI, comptes locaux, journaux d'événements exportés en .evtx
-//! par wevtutil (le format que lisent l'Observateur d'événements et les outils des spécialistes).
+//! par wevtutil (le format que lisent l'Observateur d'événements et les outils des spécialistes). Pour la chronologie,
+//! les événements qui racontent une intrusion sont lus en plus par les fonctions de Windows (wevtapi).
 
 use std::collections::HashMap;
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use super::chronologie::{self, Apport};
 use super::{Bi, Empreinte, Feuille, Manque, Partie, Processus, Produit, Raison, bi};
 use crate::commande::section;
 
@@ -434,9 +436,10 @@ fn texte_registre(genre: &str, octets: &[u8]) -> String {
 }
 
 /// Une clé du registre lue directement, comme « reg query » la montrerait : ses valeurs (ou la seule demandée), puis
-/// ses sous-clés. Sans cmd ni ligne de commande à échapper : un nom à espaces (« Windows NT », « Command Processor »)
-/// se lit comme les autres. `Err` : la note à sa place (clé absente ou refusée).
-fn cle_registre(chemin: &str, seule: Option<&str>) -> Result<String, String> {
+/// ses sous-clés ; et la date de sa dernière écriture (secondes depuis 1970), pour la chronologie. Sans cmd ni ligne
+/// de commande à échapper : un nom à espaces (« Windows NT », « Command Processor ») se lit comme les autres. `Err` :
+/// la note à sa place (clé absente ou refusée).
+fn cle_registre(chemin: &str, seule: Option<&str>) -> Result<(String, Option<i64>), String> {
     use winreg::RegKey;
     use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE};
     let (racine, reste) = match chemin.split_once('\\') {
@@ -474,21 +477,32 @@ fn cle_registre(chemin: &str, seule: Option<&str>) -> Result<String, String> {
     if texte.is_empty() {
         texte.push_str("(vide / empty)\n");
     }
-    Ok(texte)
+    let ecrite = cle.query_info().ok().and_then(|i| {
+        let ft = &*i.last_write_time;
+        chronologie::filetime_vers_unix((u64::from(ft.dwHighDateTime) << 32) | u64::from(ft.dwLowDateTime))
+    });
+    Ok((texte, ecrite))
 }
 
 pub(super) fn demarrage(dossier: &Path) -> Partie {
     let mut p = Partie::new(Bi::new("Ce qui se lance tout seul", "What starts by itself"));
     let mut f = Feuille::new(&p.titre);
     f.commande(&mut console("schtasks /query /fo LIST /v"), 90, true);
+    let racine = std::env::var_os("SystemRoot").map_or_else(|| PathBuf::from(r"C:\Windows"), PathBuf::from);
+    // Les fichiers des tâches planifiées : la date de chacun dit quand la tâche a été posée ou changée, même sans
+    // l'audit des tâches (4698), coupé d'ordinaire. La liste seulement ; leur contenu est dans schtasks.
+    f.dossier(&racine.join(r"System32\Tasks"), 0, false);
     for cle in CLES_DEMARRAGE {
         // Session Manager : seulement BootExecute, le reste est long et sans rapport.
         let seule = cle.ends_with("Session Manager").then_some("BootExecute");
         f.section(cle);
         match cle_registre(cle, seule) {
-            Ok(texte) => {
+            Ok((texte, ecrite)) => {
                 f.lues += 1;
                 f.ajouter(&texte);
+                if let Some(quand) = ecrite {
+                    p.evenements.push(chronologie::Evenement::lancement(quand, cle));
+                }
             }
             Err(note) => f.ajouter(&note),
         }
@@ -557,13 +571,14 @@ pub(super) fn demarrage(dossier: &Path) -> Partie {
         });
     }
     p.manques.append(&mut f.manques);
+    p.evenements.extend(chronologie::lancements(&f.dates));
     if p.ecrire(
         dossier,
         "03-demarrage.txt",
         &f.texte,
         Bi::new(
-            "ce qui se lance tout seul, tel quel : tâches planifiées (schtasks), clés Run et RunOnce, Winlogon, AppInit_DLLs, AutoRun, BootExecute, dossiers Démarrage, services (programme et compte), abonnements WMI permanents",
-            "what starts by itself, as is: scheduled tasks (schtasks), Run and RunOnce keys, Winlogon, AppInit_DLLs, AutoRun, BootExecute, Startup folders, services (program and account), permanent WMI subscriptions",
+            "ce qui se lance tout seul, tel quel : tâches planifiées (schtasks, et la liste datée de leurs fichiers), clés Run et RunOnce, Winlogon, AppInit_DLLs, AutoRun, BootExecute, dossiers Démarrage, services (programme et compte), abonnements WMI permanents",
+            "what starts by itself, as is: scheduled tasks (schtasks, and the dated list of their files), Run and RunOnce keys, Winlogon, AppInit_DLLs, AutoRun, BootExecute, Startup folders, services (program and account), permanent WMI subscriptions",
         ),
     ) {
         p.compte = Some(bi!("{} source(s) lue(s)", "{} source(s) read", f.lues));
@@ -585,6 +600,7 @@ pub(super) fn comptes(dossier: &Path) -> Partie {
     f.section("Get-LocalUser");
     if let Some(u) = &utilisateurs {
         f.lues += 1;
+        p.evenements = chronologie::comptes_windows(u, SEP, &chrono::Local);
         let mut t = String::from(
             "NOM/NAME\tACTIVÉ/ENABLED\tDERNIÈRE CONNEXION/LAST LOGON\tMOT DE PASSE/PASSWORD SET\tSID\tDESCRIPTION\n",
         );
@@ -750,6 +766,174 @@ pub(super) fn journaux(dossier: &Path) -> Partie {
     p
 }
 
+/// Une lecture d'un journal pour la chronologie.
+struct LectureChronologie {
+    journal: &'static str,
+    /// Les numéros voulus, en XPath.
+    numeros: &'static str,
+    /// Un filtre sur les valeurs, en XPath, s'il en faut un.
+    filtre: Option<&'static str>,
+    max: usize,
+    titre: (&'static str, &'static str),
+}
+
+/// Les lectures des journaux pour la chronologie, les plus récents d'abord, chacune bornée : une rafale d'échecs de
+/// connexion n'éteint pas les autres. Les ouvertures de session sont filtrées dans la requête (au clavier, Bureau à
+/// distance, en cache ; par le réseau depuis une autre machine) : celles des services se comptent par milliers.
+const LECTURES_CHRONOLOGIE: [LectureChronologie; 7] = [
+    LectureChronologie {
+        journal: "Security",
+        numeros: "EventID=4624",
+        filtre: Some(
+            "EventData[Data[@Name='LogonType']='2' or Data[@Name='LogonType']='10' or Data[@Name='LogonType']='11']",
+        ),
+        max: 1000,
+        titre: ("Ouvertures de session (4624)", "Logons (4624)"),
+    },
+    LectureChronologie {
+        journal: "Security",
+        numeros: "EventID=4624",
+        filtre: Some(
+            "EventData[Data[@Name='LogonType']='3' and Data[@Name='IpAddress']!='-' and Data[@Name='IpAddress']!='127.0.0.1' and Data[@Name='IpAddress']!='::1']",
+        ),
+        max: 500,
+        titre: ("Ouvertures de session par le réseau (4624)", "Network logons (4624)"),
+    },
+    LectureChronologie {
+        journal: "Security",
+        numeros: "EventID=4625",
+        filtre: None,
+        max: 1000,
+        titre: ("Échecs d'ouverture de session (4625)", "Failed logons (4625)"),
+    },
+    LectureChronologie {
+        journal: "Security",
+        numeros: "EventID=4720 or EventID=4732 or EventID=4697 or EventID=4698 or EventID=1102",
+        filtre: None,
+        max: 500,
+        titre: (
+            "Comptes, services, tâches, journal effacé (4720, 4732, 4697, 4698, 1102)",
+            "Accounts, services, tasks, log cleared (4720, 4732, 4697, 4698, 1102)",
+        ),
+    },
+    LectureChronologie {
+        journal: "System",
+        numeros: "EventID=7045 or EventID=104",
+        filtre: None,
+        max: 300,
+        titre: (
+            "Services installés, journaux effacés (7045, 104)",
+            "Services installed, logs cleared (7045, 104)",
+        ),
+    },
+    LectureChronologie {
+        journal: "Microsoft-Windows-PowerShell/Operational",
+        numeros: "EventID=4104",
+        filtre: None,
+        max: 300,
+        titre: ("Blocs de script PowerShell (4104)", "PowerShell script blocks (4104)"),
+    },
+    LectureChronologie {
+        journal: "Microsoft-Windows-Windows Defender/Operational",
+        numeros: "EventID=1116 or EventID=1117 or EventID=5001",
+        filtre: None,
+        max: 300,
+        titre: (
+            "Détections et protection de Defender (1116, 1117, 5001)",
+            "Defender detections and protection (1116, 1117, 5001)",
+        ),
+    },
+];
+
+/// La requête XPath d'une lecture : ses numéros, les 7 derniers jours, et son filtre s'il en a un.
+fn requete_chronologie(numeros: &str, filtre: Option<&str>) -> String {
+    let jours = u64::try_from(chronologie::JOURS).unwrap_or(7) * 86_400_000;
+    let mut r = format!("*[System[({numeros}) and TimeCreated[timediff(@SystemTime) <= {jours}]]");
+    if let Some(f) = filtre {
+        r.push_str(" and ");
+        r.push_str(f);
+    }
+    r.push(']');
+    r
+}
+
+/// Ce que dit le code d'erreur laissé par EvtQuery quand un journal refuse.
+fn raison_evtquery(code: Option<i32>, delai: bool) -> Raison {
+    match code {
+        _ if delai => Raison::Delai(30),
+        Some(5) => Raison::Droits,
+        // Journal introuvable (Defender retiré, PowerShell sans journal opérationnel).
+        Some(2 | 15007) => Raison::Introuvable,
+        Some(c) => Raison::Erreur(format!("EvtQuery : code {c}")),
+        None => Raison::Erreur("EvtQuery".into()),
+    }
+}
+
+/// Les événements des journaux de Windows pour la chronologie, lus par wevtapi sans PowerShell : 30 s en tout. Le
+/// journal de sécurité ne se lit qu'en administrateur : sans, c'est dit une fois. Chaque journal qui refuse est dit.
+pub(super) fn evenements_des_journaux(_dossier: &Path) -> Apport {
+    lire_journaux_chronologie(administrateur())
+}
+
+fn lire_journaux_chronologie(admin: bool) -> Apport {
+    use crate::machine::windows::evenements::parcourir_nommes;
+    const REQUETE_INVALIDE: i32 = 15001;
+    let fin = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    let mut apport = Apport::default();
+    if !admin {
+        apport.manques.push(Manque {
+            quoi: Bi::new(
+                "Chronologie : journal de sécurité (sessions, échecs, comptes, services, tâches, effacement)",
+                "Timeline: security log (logons, failures, accounts, services, tasks, clearing)",
+            ),
+            raison: Raison::Droits,
+        });
+    }
+    for &LectureChronologie {
+        journal,
+        numeros,
+        filtre,
+        max,
+        titre: (fr, en),
+    } in &LECTURES_CHRONOLOGIE
+    {
+        if journal == "Security" && !admin {
+            continue;
+        }
+        let mut evenements = Vec::new();
+        let mut lire = |filtre: Option<&str>| {
+            evenements.clear();
+            let lu = parcourir_nommes(
+                journal,
+                &requete_chronologie(numeros, filtre),
+                max,
+                fin,
+                |id, date, v| {
+                    let e = chronologie::evenement_windows(id, date, v)?;
+                    evenements.push(e);
+                    Some(String::new())
+                },
+            );
+            // Le code d'EvtQuery, lu aussitôt : rien d'autre n'a appelé Windows entre-temps.
+            (lu, std::io::Error::last_os_error().raw_os_error())
+        };
+        let (mut lu, mut code) = lire(filtre);
+        // Un filtre sur les valeurs que ce Windows ne comprendrait pas : la même lecture sans lui, le tri se fait ici.
+        if lu.is_none() && code == Some(REQUETE_INVALIDE) && filtre.is_some() {
+            (lu, code) = lire(None);
+        }
+        if lu.is_some() {
+            apport.evenements.append(&mut evenements);
+        } else {
+            apport.manques.push(Manque {
+                quoi: bi!("Chronologie : {fr}", "Timeline: {en}"),
+                raison: raison_evtquery(code, std::time::Instant::now() >= fin),
+            });
+        }
+    }
+    apport
+}
+
 /// Pas de montage à écarter sous Windows : un autre système de fichiers y est un autre lecteur.
 pub(super) fn points_de_montage() -> Vec<PathBuf> {
     Vec::new()
@@ -818,8 +1002,14 @@ mod tests {
     /// Le vrai registre (celui de Wine ici, puis de la VM) : une clé à espaces se lit, une clé absente le dit.
     #[test]
     fn cles_du_registre_lues() {
-        let texte = cle_registre(r"HKLM\Software\Microsoft\Windows NT\CurrentVersion", None).unwrap();
+        let (texte, ecrite) = cle_registre(r"HKLM\Software\Microsoft\Windows NT\CurrentVersion", None).unwrap();
         assert!(texte.contains("REG_SZ"), "{texte}");
+        // La date de la dernière écriture de la clé : après 2000, pas dans le futur.
+        let maintenant = chronologie::secondes(std::time::SystemTime::now()).unwrap();
+        assert!(
+            ecrite.is_some_and(|t| (946_684_800..=maintenant + 86_400).contains(&t)),
+            "{ecrite:?}"
+        );
         assert_eq!(
             cle_registre(r"HKLM\Software\Vanguard\Cle qui n existe pas", None),
             Err("(clé absente / key not found)".to_string())
@@ -850,6 +1040,43 @@ mod tests {
             t.ends_with("TCP\tEstablished\t10.0.0.2:50000\t203.0.113.5:4444\t4242\tx\n"),
             "{t}"
         );
+    }
+
+    #[test]
+    fn requetes_de_la_chronologie() {
+        assert_eq!(
+            requete_chronologie("EventID=4625", None),
+            "*[System[(EventID=4625) and TimeCreated[timediff(@SystemTime) <= 604800000]]]"
+        );
+        let r = requete_chronologie("EventID=4624", Some("EventData[Data[@Name='LogonType']='10']"));
+        assert!(r.ends_with("]] and EventData[Data[@Name='LogonType']='10']]"), "{r}");
+        assert_eq!(r.matches('[').count(), r.matches(']').count());
+        assert_eq!(raison_evtquery(Some(5), false), Raison::Droits);
+        assert_eq!(raison_evtquery(Some(15007), false), Raison::Introuvable);
+        assert_eq!(raison_evtquery(Some(5), true), Raison::Delai(30));
+        assert!(matches!(raison_evtquery(Some(1), false), Raison::Erreur(_)));
+    }
+
+    /// Les vraies fonctions de Windows (Wine ici, la VM ensuite) : chaque journal est lu ou dit, jamais passé sous
+    /// silence ; sans droits, le journal de sécurité n'est pas demandé et c'est dit une fois.
+    #[test]
+    fn journaux_de_la_chronologie_lus_ou_dits() {
+        for admin in [false, true] {
+            let a = lire_journaux_chronologie(admin);
+            let securite = LECTURES_CHRONOLOGIE.iter().filter(|l| l.journal == "Security").count();
+            let autres = LECTURES_CHRONOLOGIE.len() - securite;
+            let dits = a.manques.len();
+            if admin {
+                assert!(dits <= LECTURES_CHRONOLOGIE.len(), "{:?}", a.manques);
+            } else {
+                assert!(
+                    a.manques[0].raison == Raison::Droits && dits <= 1 + autres,
+                    "{:?}",
+                    a.manques
+                );
+            }
+            assert!(a.evenements.iter().all(|e| e.source == chronologie::Source::Journal));
+        }
     }
 
     #[test]
