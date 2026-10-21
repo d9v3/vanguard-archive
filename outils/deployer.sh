@@ -132,6 +132,21 @@ if [[ -z $MODE ]]; then
     fi
     duree captures "$T_CAPTURES"
   fi
+  # La page des fonctions (docs/index.html, servie par GitHub Pages) : refaite pour chaque version publiée à partir
+  # du code, du programme compilé et de la dernière vérification, puis committée à part. En cas d'échec, GitHub
+  # Pages garde celle d'avant.
+  if [[ -n $A_PUBLIER ]]; then
+    if python3 outils/page-fonctions.py --complet --programme "$LINUX" --sortie docs/index.html >/dev/null; then
+      git add docs/index.html
+      if git diff --quiet --cached -- docs/index.html; then
+        echo "Page des fonctions déjà à jour."
+      elif git commit -q -m "Page des fonctions : v$VERSION" -- docs/index.html; then
+        echo "Page des fonctions refaite (v$VERSION) : docs/index.html." && git rev-parse HEAD >"$COMMIT_COMPILE"
+      fi
+    else
+      echo "Page des fonctions non refaite : GitHub Pages garde celle d'avant."
+    fi
+  fi
 fi
 install -Dm755 "$LINUX" "$HOME/.cargo/bin/vanguard"
 # Sauvegarde hors de la maison : les commits partent vers le dépôt GitHub (sans bloquer s'il n'y a pas d'Internet),

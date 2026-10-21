@@ -1,0 +1,601 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vanguard 0.82</title>
+<meta name="description" content="Vanguard : la cyberdéfense de ton foyer depuis une clé USB. Bilan noté de A à F, audit du réseau, antivirus, dépannage, pour Windows, Linux et macOS. Fonctions, fiche technique et commandes.">
+<meta name="theme-color" content="#0b1220">
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Condensed:wght@700&family=IBM+Plex+Sans:wght@400;600&family=IBM+Plex+Mono:wght@400&display=swap">
+<style>
+:root {
+--fond: #f6f8fa;
+--surface: #ffffff;
+--encre: #0f1724;
+--doux: #556274;
+--trait: #dde3ea;
+--nuit: #0b1220;
+--nuit-texte: #e8edf3;
+--nuit-doux: #93a1b3;
+--nuit-trait: #1e2a3b;
+--accent: #0b7f8f;
+--accent-fond: #e3f3f5;
+--bon: #1d7a4b;
+--titre: "IBM Plex Sans Condensed", "Arial Narrow", system-ui, sans-serif;
+--texte: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+--mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+:root:not([data-theme="light"]) {
+--fond: #05080d; --surface: #0c121b; --encre: #e8edf3; --doux: #9aa8ba; --trait: #1c2634;
+--nuit: #000000; --nuit-texte: #e8edf3; --nuit-doux: #93a1b3; --nuit-trait: #1a2433;
+--accent: #3cc3d4; --accent-fond: #0b2730; --bon: #4fc28a;
+color-scheme: dark;
+}
+}
+:root[data-theme="dark"] {
+--fond: #05080d; --surface: #0c121b; --encre: #e8edf3; --doux: #9aa8ba; --trait: #1c2634;
+--nuit: #000000; --nuit-texte: #e8edf3; --nuit-doux: #93a1b3; --nuit-trait: #1a2433;
+--accent: #3cc3d4; --accent-fond: #0b2730; --bon: #4fc28a;
+color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--fond); color: var(--encre); font-family: var(--texte); font-size: 1rem; line-height: 1.6; }
+a { color: var(--accent); }
+a:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 3px; }
+.cadre {
+max-width: 72rem; margin: 0 auto;
+padding-left: max(20px, env(safe-area-inset-left, 0px)); padding-right: max(20px, env(safe-area-inset-right, 0px));
+}
+h1, h2, h3 { font-family: var(--titre); text-wrap: balance; margin: 0; }
+.surtitre { font-family: var(--mono); font-size: .75rem; letter-spacing: .1em; text-transform: uppercase; color: var(--accent); margin: 0; }
+.ouverture { background: var(--nuit); color: var(--nuit-texte); }
+.barre { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding-block: 1.1rem; }
+.marque { display: flex; align-items: center; gap: .7rem; color: var(--nuit-texte); text-decoration: none; }
+.plaque { width: 2.4rem; height: 2.4rem; border-radius: .55rem; background: #0d0f12; display: grid; place-items: center; box-shadow: 0 0 0 1px var(--nuit-trait); flex: none; }
+.plaque svg { width: 64%; height: auto; }
+.marque b { font-family: var(--titre); font-size: 1.35rem; letter-spacing: .04em; }
+.version { font-family: var(--mono); font-size: .72rem; color: var(--nuit-doux); border: 1px solid var(--nuit-trait); border-radius: 999px; padding: .1rem .55rem; }
+.nav { display: flex; gap: 1.4rem; font-size: .92rem; }
+.nav a { color: var(--nuit-doux); text-decoration: none; }
+.nav a:hover { color: var(--nuit-texte); }
+.heros { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.08fr); gap: 3rem; align-items: center; padding-block: 2.5rem 4rem; }
+.heros h1 { font-size: clamp(2.2rem, 4.6vw, 3.5rem); line-height: 1.05; font-weight: 700; }
+.heros .chapeau { color: var(--nuit-doux); font-size: 1.1rem; margin: 1.1rem 0 0; max-width: 34rem; }
+.systemes { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: 1.6rem; }
+.systeme { font-family: var(--mono); font-size: .76rem; color: var(--nuit-texte); background: var(--nuit-trait); border-radius: .4rem; padding: .3rem .6rem; }
+.boutons { display: flex; flex-wrap: wrap; gap: .6rem; margin-top: 1.4rem; }
+.bouton { display: inline-flex; align-items: center; gap: .45rem; font-size: .9rem; font-weight: 600; text-decoration: none; border-radius: .5rem; padding: .55rem .9rem; border: 1px solid var(--nuit-trait); color: var(--nuit-texte); background: #121a28; }
+.bouton.principal { background: var(--accent); border-color: var(--accent); color: #04141a; }
+.bouton:hover { filter: brightness(1.12); }
+.bouton svg { width: 1rem; height: 1rem; }
+.faits { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; margin-top: 2rem; padding-top: 1.4rem; border-top: 1px solid var(--nuit-trait); }
+.fait b { display: block; font-family: var(--titre); font-size: 1.6rem; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.fait span { font-size: .85rem; color: var(--nuit-doux); }
+.fenetre { container-type: inline-size; background: #0d1117; border: 1px solid var(--nuit-trait); border-radius: .75rem; box-shadow: 0 24px 60px -24px rgba(0, 0, 0, .65); min-width: 0; }
+.fenetre .titre-fenetre { display: flex; align-items: center; gap: .45rem; padding: .6rem .8rem; border-bottom: 1px solid #1d2430; }
+.fenetre .titre-fenetre i { width: .62rem; height: .62rem; border-radius: 50%; background: #2c3442; }
+.fenetre .titre-fenetre span { margin-left: .4rem; font-family: var(--mono); font-size: .72rem; color: #7d8898; }
+.fenetre pre { margin: 0; padding: 1rem 1.1rem 1.2rem; overflow-x: auto; font-family: var(--mono); font-size: min(.78rem, calc((100cqi - 2.3rem) / 47.5)); line-height: 1.55; color: #e6edf3; }
+.fenetre pre a { color: #e6edf3; text-decoration: none; }
+.fenetre pre a:hover, .fenetre pre a:focus-visible { color: #3cc3d4; }
+.g { color: #7d8898; } .c { color: #3cc3d4; }
+.boite { display: inline-block; width: 76ch; padding: .45em 0; border: 1px solid #7d8898; border-radius: .5em; margin-bottom: .2em; }
+.filet { display: inline-flex; align-items: center; gap: 1ch; width: 74ch; color: #7d8898; }
+.filet::before, .filet::after { content: ""; border-top: 1px solid #7d8898; }
+.filet::before { width: 2ch; }
+.filet::after { flex: 1; }
+.menu-court { display: none; list-style: none; margin: 0; padding: .4rem 1rem 1rem; font-family: var(--mono); font-size: .86rem; }
+.menu-court li a { display: grid; grid-template-columns: 1.8rem 1fr; gap: .6rem; padding: .5rem 0; border-top: 1px solid #1d2430; color: #e6edf3; text-decoration: none; }
+.menu-court li:first-child a { border-top: 0; }
+.menu-court .n { color: #3cc3d4; text-align: right; font-variant-numeric: tabular-nums; }
+main { display: grid; gap: 5rem; padding-block: 4.5rem 4rem; }
+main > section { min-width: 0; }
+main > section + section { content-visibility: auto; contain-intrinsic-size: auto 1200px; }
+.tete-section { display: grid; gap: .6rem; max-width: 46rem; margin-bottom: 2rem; }
+.tete-section h2 { font-size: clamp(1.7rem, 3.2vw, 2.4rem); line-height: 1.12; font-weight: 700; }
+.tete-section p { color: var(--doux); margin: 0; font-size: 1.05rem; }
+.etapes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1.25rem; list-style: none; padding: 0; margin: 0; counter-reset: etape; }
+.etapes li { background: var(--surface); border: 1px solid var(--trait); border-radius: .7rem; padding: 1.3rem 1.3rem 1.4rem; counter-increment: etape; }
+.etapes li::before { content: counter(etape); display: grid; place-items: center; width: 2rem; height: 2rem; border-radius: 50%; background: var(--accent-fond); color: var(--accent); font-family: var(--mono); margin-bottom: .9rem; }
+.etapes h3 { font-size: 1.2rem; margin-bottom: .3rem; }
+.etapes p { margin: 0; color: var(--doux); font-size: .96rem; }
+.domaines { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 21rem), 1fr)); gap: 1.25rem; }
+.domaine { background: var(--surface); border: 1px solid var(--trait); border-radius: .7rem; padding: 1.4rem; display: grid; gap: .8rem; align-content: start; min-width: 0; }
+.domaine header { display: flex; align-items: center; gap: .75rem; }
+.icone { width: 2.4rem; height: 2.4rem; border-radius: .55rem; background: var(--accent-fond); color: var(--accent); display: grid; place-items: center; flex: none; }
+.icone svg { width: 1.25rem; height: 1.25rem; }
+.domaine h3 { font-size: 1.2rem; }
+.domaine .touche { font-family: var(--mono); font-size: .72rem; color: var(--doux); overflow-wrap: anywhere; }
+.domaine ul { list-style: none; margin: 0; padding: 0; display: grid; gap: .55rem; }
+.domaine li { position: relative; padding-left: 1.2rem; font-size: .95rem; color: var(--doux); }
+.domaine li::before { content: ""; position: absolute; left: 0; top: .62em; width: .45rem; height: .45rem; border-radius: 50%; background: var(--accent); }
+.domaine li b { color: var(--encre); font-weight: 600; }
+.nouveau { display: inline-block; font-family: var(--mono); font-size: .66rem; letter-spacing: .06em; text-transform: uppercase; color: var(--bon); border: 1px solid var(--bon); border-radius: .3rem; padding: 0 .35rem; margin-left: .3rem; vertical-align: middle; }
+.audit { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 20rem), 1fr)); background: var(--surface); border: 1px solid var(--trait); border-radius: .7rem; overflow: hidden; }
+.audit div { padding: 1.1rem 1.1rem 1.2rem; min-width: 0; border-right: 1px solid var(--trait); border-bottom: 1px solid var(--trait); margin-right: -1px; margin-bottom: -1px; }
+.audit b { display: block; font-family: var(--titre); font-size: 1.15rem; margin-bottom: .3rem; }
+.audit span { color: var(--doux); font-size: .92rem; }
+.audit .k { display: block; margin-top: .55rem; color: var(--accent); font-size: .74rem; }
+.nouveautes { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 19rem), 1fr)); gap: 1rem 2rem; list-style: none; margin: 0; padding: 0; }
+.nouveautes li { border-top: 2px solid var(--accent); padding-top: .8rem; }
+.nouveautes b { display: block; margin-bottom: .2rem; }
+.nouveautes span { color: var(--doux); font-size: .95rem; }
+.principes { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr)); gap: 1.25rem; }
+.principe { display: grid; grid-template-columns: auto 1fr; gap: .8rem; align-items: start; }
+.principe svg { width: 1.3rem; height: 1.3rem; color: var(--bon); margin-top: .2rem; }
+.principe b { display: block; }
+.principe span { color: var(--doux); font-size: .95rem; }
+.chiffres { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1.25rem; background: var(--surface); border: 1px solid var(--trait); border-radius: .7rem; padding: 1.6rem; }
+.chiffre b { display: block; font-family: var(--titre); font-size: clamp(1.9rem, 3.5vw, 2.6rem); line-height: 1; font-variant-numeric: tabular-nums; }
+.chiffre span { color: var(--doux); font-size: .9rem; }
+.note { color: var(--doux); font-size: .95rem; margin: 1rem 0 0; max-width: 46rem; }
+footer { border-top: 1px solid var(--trait); }
+footer .cadre { display: flex; flex-wrap: wrap; justify-content: space-between; gap: .5rem 1.5rem; padding-block: 1.6rem 2.2rem; color: var(--doux); font-size: .88rem; font-family: var(--mono); }
+footer a { color: var(--doux); }
+.specs { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 16rem), 1fr)); gap: 1px; background: var(--trait); border: 1px solid var(--trait); border-radius: .7rem; overflow: hidden; margin: 0; }
+.specs div { background: var(--surface); padding: 1rem 1.1rem; min-width: 0; }
+.specs dt { font-family: var(--mono); font-size: .72rem; letter-spacing: .08em; text-transform: uppercase; color: var(--doux); }
+.specs dd { margin: .25rem 0 0; font-size: .95rem; }
+code, .k { font-family: var(--mono); font-size: .86em; }
+code { background: var(--accent-fond); color: var(--encre); border-radius: .3rem; padding: .05rem .35rem; overflow-wrap: anywhere; }
+.sous-titre { font-family: var(--titre); font-size: 1.35rem; margin: 2.6rem 0 1rem; }
+.os { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 20rem), 1fr)); gap: 1.25rem; }
+.os article { background: var(--surface); border: 1px solid var(--trait); border-radius: .7rem; padding: 1.3rem; min-width: 0; }
+.os h4 { font-family: var(--titre); font-size: 1.15rem; margin: 0 0 .2rem; display: flex; justify-content: space-between; align-items: baseline; gap: .5rem; }
+.os h4 span { font-family: var(--mono); font-size: .72rem; font-weight: 400; color: var(--doux); }
+.os ul { list-style: none; margin: .7rem 0 0; padding: 0; display: grid; gap: .5rem; }
+.os li { font-size: .92rem; color: var(--doux); padding-left: .9rem; border-left: 2px solid var(--trait); }
+.os li b { color: var(--encre); font-weight: 600; }
+.sources { display: grid; gap: .6rem; }
+.source { display: grid; grid-template-columns: minmax(0, 12rem) minmax(0, 1fr) minmax(0, 13rem); gap: .4rem 1.2rem; align-items: baseline; background: var(--surface); border: 1px solid var(--trait); border-radius: .6rem; padding: .85rem 1.1rem; }
+.source b { font-weight: 600; }
+.source span { color: var(--doux); font-size: .92rem; }
+.source .k { color: var(--accent); font-size: .78rem; }
+.chaine { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 13rem), 1fr)); gap: .8rem; list-style: none; margin: 0; padding: 0; counter-reset: maillon; }
+.chaine li { counter-increment: maillon; background: var(--surface); border: 1px solid var(--trait); border-radius: .6rem; padding: 1rem 1.1rem; font-size: .92rem; color: var(--doux); }
+.chaine li::before { content: "0" counter(maillon); display: block; font-family: var(--mono); font-size: .75rem; color: var(--accent); margin-bottom: .3rem; }
+.chaine li b { display: block; color: var(--encre); margin-bottom: .15rem; }
+details.cli { background: var(--surface); border: 1px solid var(--trait); border-radius: .7rem; }
+details.cli summary { cursor: pointer; padding: 1rem 1.2rem; font-weight: 600; list-style-position: inside; }
+details.cli summary span { font-weight: 400; color: var(--doux); font-size: .92rem; }
+details.cli[open] summary { border-bottom: 1px solid var(--trait); }
+.cli-liste { columns: 3 19rem; column-gap: 2rem; margin: 0; padding: 1.2rem; }
+.cli-liste div { break-inside: avoid; padding: .3rem 0; }
+.cli-liste dt { font-family: var(--mono); font-size: .84rem; }
+.cli-liste dt i { font-style: normal; color: var(--doux); }
+.cli-liste dd { margin: 0; font-size: .88rem; color: var(--doux); }
+.exemple { background: #0d1117; color: #e6edf3; border-radius: .6rem; padding: 1rem 1.1rem; font-family: var(--mono); font-size: .8rem; line-height: 1.6; overflow-x: auto; margin: 1rem 0 0; }
+.exemple .g { color: #7d8898; }
+@media (max-width: 960px) {
+.heros { grid-template-columns: 1fr; gap: 2.2rem; padding-block: 1.5rem 3rem; }
+.chiffres { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 720px) {
+.nav { display: none; }
+.source { grid-template-columns: 1fr; }
+.etapes { grid-template-columns: 1fr; }
+.fenetre pre { display: none; }
+.menu-court { display: block; }
+main { gap: 3.5rem; padding-block: 3rem; }
+.faits { gap: .8rem; }
+.fait b { font-size: 1.35rem; }
+}
+@media (max-width: 420px) {
+.faits { grid-template-columns: 1fr 1fr; }
+.chiffres { padding: 1.2rem; }
+.bouton { width: 100%; justify-content: center; }
+}
+@media (prefers-reduced-motion: no-preference) { html { scroll-behavior: smooth; } }
+</style>
+</head>
+<body>
+<div class="ouverture">
+<div class="cadre">
+<div class="barre">
+<a class="marque" href="#haut" id="haut">
+<span class="plaque" aria-hidden="true"><svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg"><path fill="#ffffff" d="M8 12h22l20 52 20-52h22L60 90H40z"/><path fill="#0d0f12" d="M30 12h6l14 37 14-37h6L50 66z"/></svg></span>
+<b>VANGUARD</b>
+<span class="version">0.82.0</span>
+</a>
+<nav class="nav" aria-label="Sections">
+<a href="#comment">Comment ça marche</a>
+<a href="#menaces">Menaces</a>
+<a href="#audit">Audit du réseau</a>
+<a href="#technique">Technique</a>
+<a href="#nouveautes">Nouveautés</a>
+</nav>
+</div>
+<div class="heros">
+<div>
+<p class="surtitre">La cyberdéfense de ton foyer, depuis une clé USB</p>
+<h1>Trouve les points faibles de ta maison numérique, et répare-les.</h1>
+<p class="chapeau">Vanguard audite ton ordinateur et ton réseau, note tout de A à F, explique chaque problème en mots simples et le corrige seulement avec ton accord. Il n'attaque rien : il observe ce que ta maison montre à Internet. Et il aide aussi à dépanner.</p>
+<div class="systemes">
+<span class="systeme">Windows 10 · 11</span><span class="systeme">Linux</span><span class="systeme">macOS</span><span class="systeme">Français · English</span>
+</div>
+<div class="boutons">
+<a class="bouton principal" href="https://github.com/d9v3/vanguard-beta/releases/latest/download/vanguard-windows-x86_64.exe"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0l-4-4m4 4l4-4M4 17v3h16v-3"/></svg>Windows</a>
+<a class="bouton" href="https://github.com/d9v3/vanguard-beta/releases/latest/download/vanguard-linux-x86_64">Linux</a>
+<a class="bouton" href="https://github.com/d9v3/vanguard-beta/releases/latest/download/vanguard-macos">macOS</a>
+<a class="bouton" href="https://github.com/d9v3/vanguard-beta">Code source et notes de version</a>
+</div>
+<div class="faits">
+<div class="fait"><b>A → F</b><span>une note pour l'ordinateur, une par domaine du réseau</span></div>
+<div class="fait"><b>119</b><span>règles du bilan, 32 fiches d'audit du réseau</span></div>
+<div class="fait"><b>0</b><span>changement sans ton accord</span></div>
+</div>
+</div>
+<div class="fenetre" role="navigation" aria-label="Menu principal de Vanguard">
+<div class="titre-fenetre"><i></i><i></i><i></i><span>vanguard</span></div>
+<pre><span class="boite">  <b>VANGUARD 0.82            </b>sécurise et optimise ta machine et ton réseau</span>
+
+  <span class="filet">BILAN DE SÉCURITÉ</span>
+ <span class="c">►</span>  1  <a href="#bilan">Bilan complet : machine + réseau</a>     <span class="c">← commencer ici</span>
+    2  <a href="#bilan">Corriger les problèmes trouvés</a>
+    3  <a href="#bilan">Rapport détaillé dans le navigateur</a>
+
+  <span class="filet">OUTILS</span>
+    4  <a href="#depannage">Cette machine ›</a>                      <span class="g">audit, mises à jour, réparer…</span>
+    5  <a href="#audit">Réseau et Internet ›</a>                 <span class="g">audit du réseau, appareils, box</span>
+    6  <a href="#infection">Antivirus et protection ›</a>            <span class="g">analyses, clé USB, fuites…</span>
+    7  <a href="#optimiser">Installer et jouer ›</a>                 <span class="g">logiciels libres, gaming</span>
+    8  <a href="#optimiser">Optimiser ›</a>                          <span class="g">nettoyer, confidentialité…</span>
+    9  <a href="#donnees">Données ›</a>                            <span class="g">sauvegarder, copier mes fichiers</span>
+   10  <a href="#suivi">Guide des commandes ›</a>                <span class="g">Linux, Windows, macOS, pas à pas</span>
+   11  <a href="#depannage">Dépanner pas à pas ›</a>                 <span class="g">Internet, son, un proche…</span></pre>
+<ul class="menu-court">
+<li><a href="#bilan"><span class="n">1</span><span>Bilan complet : machine + réseau</span></a></li>
+<li><a href="#depannage"><span class="n">4</span><span>Cette machine</span></a></li>
+<li><a href="#audit"><span class="n">5</span><span>Réseau et Internet</span></a></li>
+<li><a href="#infection"><span class="n">6</span><span>Antivirus et protection</span></a></li>
+<li><a href="#optimiser"><span class="n">8</span><span>Optimiser</span></a></li>
+<li><a href="#donnees"><span class="n">9</span><span>Données</span></a></li>
+<li><a href="#suivi"><span class="n">10</span><span>Guide des commandes</span></a></li>
+<li><a href="#depannage"><span class="n">11</span><span>Dépanner pas à pas</span></a></li>
+</ul>
+</div>
+</div>
+</div>
+</div>
+<main class="cadre">
+<section id="comment">
+<div class="tete-section">
+<p class="surtitre">Comment ça marche</p>
+<h2>Trois étapes, et rien ne change sans toi</h2>
+</div>
+<ol class="etapes">
+<li><h3>Branche la clé</h3><p>Vanguard tourne depuis la clé USB, sur Windows, Linux ou macOS. Rien à installer sur l'ordinateur. La clé démarre aussi les ordinateurs en panne.</p></li>
+<li><h3>Lance le bilan</h3><p>En quelques secondes : une note de A à F pour l'ordinateur, six notes pour le réseau, et chaque problème expliqué avec le pourquoi.</p></li>
+<li><h3>Corrige avec ton accord</h3><p>Chaque correction est montrée avant d'être faite, précédée d'un point de restauration, et s'annule exactement.</p></li>
+</ol>
+</section>
+<section id="menaces">
+<div class="tete-section">
+<p class="surtitre">Menace par menace</p>
+<h2>Ce que Vanguard cherche, et ce qu'il fait</h2>
+<p>Les menaces d'un foyer, dans l'ordre où elles arrivent : par Internet, par le Wi-Fi, par un objet connecté, par un poste infecté, par un DNS détourné, par une arnaque. Puis les données, le dépannage et l'entretien.</p>
+</div>
+<div class="domaines">
+<article class="domaine" id="bilan">
+<header><span class="icone"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l8 3v6c0 4.5-3.4 8.1-8 9-4.6-.9-8-4.5-8-9V6z"/><path d="M8.5 12l2.5 2.5 4.5-5"/></svg></span><div><h3>Le bilan, noté de A à F</h3><span class="touche">menu 1 · 2 · 3 · vanguard complet</span></div></header>
+<ul>
+<li><b>Les bases</b> : pare-feu, mises à jour et failles connues, chiffrement du disque, antivirus, comptes et mots de passe, heure, fin de support.</li>
+<li><b>Accès à distance</b> : SSH et ses algorithmes faibles, Bureau à distance, partages ouverts à tous, proxy détourné (WPAD).</li>
+<li><b>Ce qui se cache</b> : portes dérobées de Windows, signes d'un rootkit sous Linux, journaux d'événements suspects.</li>
+<li><b>Chaque problème</b> expliqué avec sa correction, appliquée après ton accord et annulable.</li>
+</ul>
+</article>
+<article class="domaine" id="exposition">
+<header><span class="icone"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3.5 3 14.5 0 18M12 3c-3 3.5-3 14.5 0 18"/></svg></span><div><h3>Exposition vers Internet <span class="nouveau">nouveau</span></h3><span class="touche">vanguard audit-reseau · reseau</span></div></header>
+<ul>
+<li><b>Les ports que la box ouvre vers Internet</b>, demandés à la box elle-même (UPnP) : une caméra ou un bureau à distance joignable de n'importe où, c'est critique.</li>
+<li><b>UPnP actif</b> : n'importe quel programme de la maison peut ouvrir un port ; CGNAT ou double NAT reconnus.</li>
+<li><b>IPv6 publique</b> de l'ordinateur sans pare-feu, services d'administration de la box côté réseau, adresse de la maison sur liste noire.</li>
+</ul>
+</article>
+<article class="domaine" id="wifi">
+<header><span class="icone"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 9a14 14 0 0 1 19 0M6 12.5a9 9 0 0 1 12 0M9.5 16a4 4 0 0 1 5 0"/><circle cx="12" cy="19.5" r="1"/></svg></span><div><h3>Intrus sur le Wi-Fi <span class="nouveau">nouveau</span></h3><span class="touche">vanguard audit-reseau · surveillance · tableau</span></div></header>
+<ul>
+<li><b>Chaque appareil du réseau</b> : fabricant, ports ouverts, risques ; les nouveaux venus signalés toutes les heures, avec un tableau de bord dans le navigateur.</li>
+<li><b>La protection du Wi-Fi</b> lue dans les balises de la box : WEP ou TKIP, WPS allumé (le code PIN cassable), plusieurs émetteurs pour le même nom (faux point d'accès).</li>
+<li><b>Les réseaux ouverts</b> qui se reconnectent seuls, les appareils Bluetooth appairés depuis peu.</li>
+</ul>
+</article>
+<article class="domaine" id="objets">
+<header><span class="icone"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="12" rx="2"/><path d="M8 21h8M12 17v4M7 9h4M7 13h2"/></svg></span><div><h3>Objets connectés <span class="nouveau">nouveau</span></h3><span class="touche">vanguard objets · cameras</span></div></header>
+<ul>
+<li><b>La box et les objets reconnus</b> : caméras, imprimantes, NAS, télés, enceintes, consoles, domotique, avec ce que la box annonce (modèle, logiciel).</li>
+<li><b>Mot de passe d'origine à changer</b>, administration en HTTP seul ou en telnet : un conseil clair, jamais un essai de mot de passe.</li>
+<li><b>Caméras cachées</b> dans une location ou chez quelqu'un ; objets et ordinateurs sur le même réseau (conseil du réseau invité).</li>
+</ul>
+</article>
+<article class="domaine" id="infection">
+<header><span class="icone"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4M8 11h6M11 8v6"/></svg></span><div><h3>Poste infecté</h3><span class="touche">menu 6 · vanguard yara · sortantes · traces</span></div></header>
+<ul>
+<li><b>Antivirus, 308 règles YARA et plus d'un million d'empreintes</b> de logiciels malveillants connus (MalwareBazaar), même hors ligne ; quarantaine réversible.</li>
+<li><b>Ce qui se lance en cachette</b>, portes dérobées, rootkit, connexions vers des serveurs de botnets, voleur de mots de passe (Responder) démasqué sur le réseau.</li>
+<li><b>Fichiers-pièges</b> contre les rançongiciels, blocages de Defender, intégrité des fichiers critiques, failles des images Docker.</li>
+<li><b>Les traces collectées</b> avant de nettoyer, Internet coupé d'abord quand ça presse.</li>
+</ul>
+</article>
+<article class="domaine" id="dns">
+<header><span class="icone"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l7 3v5c0 4.5-3 8.2-7 10-4-1.8-7-5.5-7-10V6z"/><path d="M9.5 12.5l2 2 3.5-4"/></svg></span><div><h3>DNS et certificats détournés <span class="nouveau">nouveau</span></h3><span class="touche">vanguard audit-reseau · dns-rapide</span></div></header>
+<ul>
+<li><b>Le DNS que la box distribue</b> à toute la maison comparé à celui de l'ordinateur ; réponses comparées à deux résolveurs publics ; DNSSEC ; DNS chiffré.</li>
+<li><b>HTTPS intercepté en acte</b> : le certificat présenté par un site connu, les racines ajoutées, les exceptions gardées par Firefox.</li>
+<li><b>Proxy imposé</b>, sites redirigés par le fichier hosts, WPAD, extensions de navigateur qui lisent tous les sites.</li>
+</ul>
+</article>
+<article class="domaine" id="arnaques">
+<header><span class="icone"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 4h16v12H8l-4 4z"/><path d="M12 7v4M12 13.5h.01"/></svg></span><div><h3>Arnaques et prise de contrôle</h3><span class="touche">vanguard distance · lien · verifier-fichier</span></div></header>
+<ul>
+<li><b>Faux technicien</b> : AnyDesk, TeamViewer, RustDesk… installés, lancés ou téléchargés, retirés après accord.</li>
+<li><b>Ce lien est-il dangereux ?</b> examiné sans l'ouvrir ; fichier téléchargé vérifié (empreinte, YARA, antivirus).</li>
+<li><b>Mots de passe et courriels fuités</b>, compte piraté, bac à sable pour un programme inconnu.</li>
+</ul>
+</article>
+<article class="domaine" id="donnees">
+<header><span class="icone"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><ellipse cx="12" cy="6" rx="7" ry="3"/><path d="M5 6v12c0 1.7 3.1 3 7 3s7-1.3 7-3V6M5 12c0 1.7 3.1 3 7 3s7-1.3 7-3"/></svg></span><div><h3>Données et vie privée</h3><span class="touche">menu 9 · vanguard acces · verifier-sauvegarde</span></div></header>
+<ul>
+<li><b>Sauvegarde automatique</b>, et <b>vérifier ma sauvegarde</b> : des fichiers relus pour de vrai sur le disque et comparés à l'original. <span class="nouveau">nouveau</span></li>
+<li><b>Bilan de confidentialité</b> : qui a accès à la position, aux contacts, à la caméra et au micro. <span class="nouveau">nouveau</span></li>
+<li><b>Copier mes fichiers</b> (copie vérifiée), mots de passe du navigateur comptés sans jamais être lus, secrets oubliés dans git, fichiers sensibles qui traînent.</li>
+</ul>
+</article>
+<article class="domaine" id="depannage">
+<header><span class="icone"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.5 6.5a4 4 0 0 0-5.3 5.3L3.5 17.5l3 3 5.7-5.7a4 4 0 0 0 5.3-5.3l-2.3 2.3-2.4-.6-.6-2.4z"/></svg></span><div><h3>Dépannage</h3><span class="touche">menu 4 · 11 · vanguard depanner · proche</span></div></header>
+<ul>
+<li><b>Pas à pas</b> : Internet, Wi-Fi, lenteur, son, imprimante, disque plein, une question à la fois.</li>
+<li><b>Ordinateur d'un proche</b> : trois questions, un résumé en mots simples, une page à laisser avec des conseils choisis pour la personne. <span class="nouveau">nouveau</span></li>
+<li><b>Après une infection</b>, nouvel ordinateur, ordinateur qui part ; diagnostic, « Pourquoi c'est lent ? », fiche de l'ordinateur, réparations.</li>
+</ul>
+</article>
+<article class="domaine" id="optimiser">
+<header><span class="icone"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 18a8 8 0 1 1 16 0"/><path d="M12 18l4-6"/></svg></span><div><h3>Optimiser, logiciels et jeu</h3><span class="touche">menu 7 · 8 · vanguard connexion</span></div></header>
+<ul>
+<li><b>Réglages</b> de confidentialité et de performance qui s'annulent exactement ; nettoyage à cocher ; programmes du démarrage.</li>
+<li><b>Les meilleurs logiciels</b> en 8 catégories, depuis leur source officielle ; les mises à jour de tout d'un coup.</li>
+<li><b>Connexion pour le jeu</b> : ping, gigue, pertes, débit, bufferbloat ; Wi-Fi encombré, type de NAT, DNS le plus rapide.</li>
+</ul>
+</article>
+<article class="domaine" id="suivi">
+<header><span class="icone"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2z"/><path d="M4 19V5M9 8h6M9 12h6"/></svg></span><div><h3>Suivi, outils et la clé</h3><span class="touche">menu 10 · vanguard guide · verifier-cle</span></div></header>
+<ul>
+<li><b>Rapport HTML</b> avec la courbe des notes, entretien du mois, apprentissage, ce que Vanguard a changé.</li>
+<li><b>1 040 commandes expliquées</b> pour Omarchy, Arch, Fedora, Debian, Ubuntu, Windows et macOS, plus de 30 000 exemples.</li>
+<li><b>La clé de secours</b> : démarre les ordinateurs (Omarchy, SystemRescue, Windows 11…), lecture seule ailleurs que chez toi, mise à jour signée depuis la clé ou GitHub.</li>
+</ul>
+</article>
+</div>
+</section>
+<section id="audit">
+<div class="tete-section">
+<p class="surtitre">Audit du réseau <span class="nouveau">nouveau</span></p>
+<h2>Six notes pour ton réseau, sans rien attaquer</h2>
+<p><code>vanguard audit-reseau</code>, ou menu Réseau et Internet › 2, enchaîné au bilan complet : chaque domaine est noté de 100 vers 0 selon ce qui a été trouvé. Ce qui n'a pas pu être vérifié est dit, exclu de la note, et jamais compté comme sain.</p>
+</div>
+<div class="audit">
+<div><b>Exposition</b><span>Redirections de la box, UPnP, adresse publique, IPv6, administration de la box.</span><span class="k">COM-EXP-001 à 004</span></div>
+<div><b>Wi-Fi</b><span>Chiffrement faible, WPS, faux point d'accès, réseaux ouverts, appareils inconnus.</span><span class="k">COM-WIF-001 à 005</span></div>
+<div><b>Segmentation</b><span>Objets et ordinateurs mêlés, isolation, DHCP qui n'est pas la box, deux routeurs IPv6, box usurpée.</span><span class="k">COM-SEG · COM-ARP</span></div>
+<div><b>DNS et TLS</b><span>DNS de la box, chiffré, divergent, DNSSEC ; HTTPS intercepté, exceptions de certificat.</span><span class="k">COM-DNS · COM-TLS</span></div>
+<div><b>Appareils</b><span>Objet joignable d'Internet, administrations ouvertes, mots de passe d'origine, caméras.</span><span class="k">COM-APP-001 à 005</span></div>
+<div><b>Postes</b><span>Cet ordinateur vu du réseau, les autres ordinateurs, empoisonneur, botnets, liste noire.</span><span class="k">COM-PST-001 à 003</span></div>
+</div>
+<p class="note">Règles écrites d'après les guides de la NSA, du Centre canadien pour la cybersécurité, de l'ANSSI, du NIST et de l'ETSI pour les objets connectés. La surveillance horaire alerte au changement : redirection nouvelle, DNS de la box changé, Wi-Fi qui descend, IPv6 nouvelle.</p>
+</section>
+<section id="technique">
+<div class="tete-section">
+<p class="surtitre">Fiche technique</p>
+<h2>Ce qu'il vérifie, et comment</h2>
+<p>Pour qui veut savoir ce qui se passe sous le capot : les règles du bilan, les interfaces du système lues directement en Rust, les sources de menaces, la chaîne de confiance des mises à jour, et chaque commande.</p>
+</div>
+<dl class="specs">
+<div><dt>Langage</dt><dd>Rust, édition 2024 · ≈ 113 000 lignes ; aucun programme externe pour lire le système</dd></div>
+<div><dt>Programme</dt><dd>Un seul exécutable, rien à installer : Linux x86_64 (statique, musl), Windows x86_64, macOS Apple Silicon et Intel</dd></div>
+<div><dt>Règles du bilan</dt><dd>119 règles à identifiant stable (<code>LNX-SSH-006</code>) : 67 sous Linux, 48 sous Windows, 52 sous macOS, communes comprises ; 32 fiches d'audit du réseau</dd></div>
+<div><dt>Interface</dt><dd>Menu au clavier, ou 62 commandes en ligne ; sorties <code>--json</code>, rapport HTML ou Markdown</dd></div>
+<div><dt>Moteurs intégrés</dt><dd>YARA-X (règles YARA), reqwest + rustls/ring (HTTPS sans OpenSSL), tokio (scan asynchrone), lecteur de plist et client UPnP maison</dd></div>
+<div><dt>Cryptographie</dt><dd>Ed25519 (versions signées), SHA-256, BLAKE3 (intégrité), XChaCha20-Poly1305 + Argon2 (carnet chiffré)</dd></div>
+<div><dt>Hors ligne</dt><dd>Tout ce qui demande Internet s'arrête seul en moins d'une minute et le dit ; listes gardées en cache</dd></div>
+<div><dt>Licence</dt><dd>GPL-3.0-or-later · français et anglais · <a href="https://github.com/d9v3/vanguard-beta">code source</a></dd></div>
+</dl>
+<h3 class="sous-titre">Lu directement dans le système, en Rust</h3>
+<div class="os">
+<article>
+<h4>Linux <span>43 + 24 communes</span></h4>
+<ul>
+<li><b>Noyau (sysctl)</b> : redirections ICMP, <code>rp_filter</code>, BPF non privilégié, espaces de noms utilisateur, lockdown et signature des modules, attributs HSI de fwupd.</li>
+<li><b>SSH</b> : <code>sshd_config</code> lu dans l'ordre exact des <code>Include</code>, algorithmes cassés (SHA-1, CBC, 3DES, arcfour, DSA), <code>GatewayPorts</code>, X11 ; correction validée par <code>sshd -t</code>.</li>
+<li><b>Rootkit</b> : PID cachés dans <code>/proc</code>, programmes sans fichier (memfd, supprimés, <code>/tmp</code>, <code>/dev/shm</code>), modules cachés ou non signés, carte en mode promiscuité.</li>
+<li><b>Natif</b> : Wi-Fi par nl80211, voisins par netlink, horloge par <code>adjtimex</code>, mémoire DNS par varlink, bail DHCP de NetworkManager, minuteries lues dans leurs liens.</li>
+</ul>
+</article>
+<article>
+<h4>Windows <span>24 + 24 communes</span></h4>
+<ul>
+<li><b>Registre</b> : WPAD, IFEO et SilentProcessExit, <code>Winlogon</code>, AppInit_DLLs, clés Run, SMBv1, bail DHCP et DoH, programmes installés.</li>
+<li><b>API Win32</b> : comptes et administrateurs (<code>NetUserEnum</code>), processus (Toolhelp32), connexions par PID, partages (<code>NetShareEnum</code>), certificats, Wi-Fi (WLAN API), raccourcis .lnk lus sans COM.</li>
+<li><b>WMI et COM</b> : Defender, BitLocker, Windows Update, santé du disque, tâches planifiées, durcissement — sans lancer PowerShell, gardé en secours seulement.</li>
+<li><b>Journaux (EvtQuery)</b> : 4625 en rafale, 1102 journal effacé, 4720 compte créé, 7045 service installé, sur 7 jours.</li>
+<li><b>Corrections</b> : point de restauration d'abord, une seule fenêtre administrateur pour toutes.</li>
+</ul>
+</article>
+<article>
+<h4>macOS <span>28 + 24 communes</span></h4>
+<ul>
+<li><b>Système</b> : FileVault, SIP et Gatekeeper, volume système signé, extensions du noyau de tiers, pare-feu et mode furtif, AirDrop.</li>
+<li><b>Lecteur de plist maison</b> (XML et binaire, borné contre un fichier piégé) : préférences, agents de launchd, version, à la place de <code>defaults</code> et <code>plutil</code>.</li>
+<li><b>XProtect</b> et profils de configuration hors gestion d'entreprise ; comptes, sudo sans mot de passe, SSH, Time Machine.</li>
+<li><b>Testé</b> sur un vrai Mac de GitHub à chaque version.</li>
+</ul>
+</article>
+</div>
+<h3 class="sous-titre">Réseau local</h3>
+<div class="os">
+<article>
+<h4>Découverte et ports</h4>
+<ul>
+<li><b>Scan TCP « connect »</b>, sans droits root : ports courants ou <code>1-65535</code>, 512 connexions simultanées, délai réglable.</li>
+<li><b>Identification</b> : fabricant, mDNS, SSDP, caméras ; nouveautés depuis le scan précédent.</li>
+</ul>
+</article>
+<article>
+<h4>La box</h4>
+<ul>
+<li><b>Client UPnP IGD en Rust</b> : SSDP, description, SOAP en lecture seule ; les redirections de ports jusqu'au bout de la liste, l'adresse publique, le modèle et le logiciel.</li>
+<li><b>Rien d'autre n'est envoyé</b> : aucune sonde de mot de passe, aucun identifiant par défaut essayé.</li>
+</ul>
+</article>
+<article>
+<h4>Attaques sur le réseau</h4>
+<ul>
+<li><b>Empoisonneur (Responder)</b> : noms tirés au hasard demandés en LLMNR, NBT-NS et mDNS ; qui y répond est démasqué.</li>
+<li><b>Surveillance horaire</b> : appareil inconnu, serveur de commande, redirection nouvelle, une notification.</li>
+</ul>
+</article>
+</div>
+<h3 class="sous-titre">Sources de menaces</h3>
+<div class="sources">
+<div class="source"><b>MalwareBazaar</b><span>Empreintes SHA-256 de plus d'un million de logiciels malveillants, comparées à chaque fichier lu par l'analyse YARA.</span><span class="k">liste complète chaque semaine · 48 h chaque jour</span></div>
+<div class="source"><b>ReversingLabs</b><span>308 règles YARA par famille (rançongiciels, voleurs, portes dérobées), appliquées par YARA-X sur 4 fils.</span><span class="k">intégrées au programme</span></div>
+<div class="source"><b>ThreatFox · Feodo Tracker</b><span>Serveurs de commande de botnets, comparés aux connexions de chaque programme et à la mémoire DNS.</span><span class="k">abuse.ch · clé facultative</span></div>
+<div class="source"><b>URLhaus · Spamhaus DBL · SURBL</b><span>Liens dangereux ; le domaine seulement sort, jamais le lien entier. Âge du domaine par RDAP.</span><span class="k">après accord</span></div>
+<div class="source"><b>Have I Been Pwned</b><span>Mots de passe fuités par k-anonymat : seuls 5 caractères de l'empreinte SHA-1 partent.</span><span class="k">après accord</span></div>
+<div class="source"><b>Spamhaus · SpamCop · DroneBL · PSBL</b><span>L'adresse Internet de la maison sur une liste noire : signe d'un appareil infecté.</span><span class="k">après accord</span></div>
+<div class="source"><b>Résolveurs publics</b><span>Les réponses du DNS utilisé comparées à celles de deux résolveurs publics sur des noms stables ; le Bouclier canadien de l'ACEI reconnu comme DNS qui protège.</span><span class="k">audit du réseau</span></div>
+</div>
+<h3 class="sous-titre">Chaîne de confiance des mises à jour</h3>
+<ol class="chaine">
+<li><b>Signée chez l'auteur</b>Le manifeste (version, taille et SHA-256 de chaque programme) est signé en Ed25519 hors de GitHub.</li>
+<li><b>Clé gravée</b>La clé publique est dans le programme ; un domaine de séparation empêche de réutiliser une autre signature.</li>
+<li><b>Tout est revérifié</b>Refus d'un manifeste mal signé, d'une version pas plus récente, d'une taille, d'une empreinte ou d'une version différentes.</li>
+<li><b>Transport</b>HTTPS seulement, redirections en HTTPS, réception en mémoire bornée ; jamais installé sans accord.</li>
+<li><b>Vérifiable</b><code>vanguard verifier-moi</code> donne l'empreinte du programme, à comparer à la page de la version.</li>
+</ol>
+<h3 class="sous-titre">Toutes les commandes</h3>
+<details class="cli">
+<summary>62 commandes en ligne <span>· le nom anglais marche aussi · sans argument, le menu · liste tirée de <code>vanguard --help</code></span></summary>
+<dl class="cli-liste">
+<div><dt>complet <i>full</i></dt><dd>Bilan complet : cette machine puis le réseau</dd></div>
+<div><dt>machine <i>audit</i></dt><dd>Audit de cette machine (pare-feu, ports, SSH, mises à jour, chiffrement…)</dd></div>
+<div><dt>corriger <i>fix</i></dt><dd>Audit de la machine puis application guidée des correctifs</dd></div>
+<div><dt>reseau <i>network</i></dt><dd>Scan du réseau : appareils, ports ouverts, risques, nouveautés depuis les scans précédents</dd></div>
+<div><dt>audit-reseau <i>network-audit</i></dt><dd>Audit du réseau par domaine : six notes (exposition à Internet, Wi-Fi, segmentation, DNS et TLS, objets…</dd></div>
+<div><dt>antivirus</dt><dd>Recherche de malwares : ClamAV (Linux, macOS) ou Microsoft Defender (Windows)</dd></div>
+<div><dt>surveillance <i>monitor</i></dt><dd>Active ou désactive la surveillance horaire du réseau (notification si appareil inconnu)</dd></div>
+<div><dt>tableau <i>dashboard</i></dt><dd>Tableau de bord de la surveillance dans le navigateur : son état, les alertes jour par jour, les nouveaux…</dd></div>
+<div><dt>entretien <i>maintenance</i></dt><dd>Entretien du mois : une fois par mois, en silence, la note, les mises à jour en attente, la place à libérer…</dd></div>
+<div><dt>maj <i>update</i></dt><dd>Mises à jour : système, programmes, pilotes et firmware vérifiés d&#x27;un coup, puis installés après accord</dd></div>
+<div><dt>reparer <i>repair</i></dt><dd>Réparations courantes : réseau, navigation détournée, pare-feu, antivirus, fichiers système, disque, place,…</dd></div>
+<div><dt>gaming</dt><dd>Gaming : composants pour les jeux (Windows : Visual C++, DirectX… ; Linux : Steam, Vulkan, GameMode, Wine……</dd></div>
+<div><dt>diagnostic <i>diag</i></dt><dd>Diagnostic de l&#x27;ordinateur : matériel, système et problèmes récents (plantages, erreurs).</dd></div>
+<div><dt>logiciels <i>apps</i></dt><dd>Logiciels : les meilleurs, libres pour la plupart (navigateurs, mots de passe, bureautique, vidéo,…</dd></div>
+<div><dt>nettoyer <i>clean</i></dt><dd>Nettoyer le système : caches, fichiers temporaires, paquets téléchargés, vieux journaux, corbeille… La…</dd></div>
+<div><dt>appris <i>learned</i></dt><dd>Ce que Vanguard a appris sur cet ordinateur : les alertes déclarées normales, et les oublier</dd></div>
+<div><dt>connexion <i>connection</i></dt><dd>Test de connexion pour le jeu : ping, gigue, pertes, débit et bufferbloat</dd></div>
+<div><dt>listes-noires <i>blocklists</i></dt><dd>L&#x27;adresse Internet de la maison est-elle sur une liste noire (Spamhaus, SpamCop, DroneBL, PSBL) ?</dd></div>
+<div><dt>canaux <i>channels</i></dt><dd>Wi-Fi encombré : les réseaux voisins par canal, et le canal le plus libre à régler sur la box.</dd></div>
+<div><dt>nat</dt><dd>Type de NAT pour le jeu (ouvert, modéré ou strict), d&#x27;après deux serveurs publics (STUN).</dd></div>
+<div><dt>cameras</dt><dd>Caméras cachées : sur le réseau d&#x27;une location ou de quelqu&#x27;un, les appareils qui ressemblent à des caméras.</dd></div>
+<div><dt>objets <i>iot</i></dt><dd>Box et objets connectés d&#x27;après le dernier scan gardé : ce que la box annonce (modèle, logiciel), son…</dd></div>
+<div><dt>dns-rapide <i>fast-dns</i></dt><dd>DNS le plus rapide : mesure le DNS actuel et des DNS publics, puis propose le plus rapide, annulable.</dd></div>
+<div><dt>integrite <i>integrity</i></dt><dd>Intégrité des fichiers critiques : référence d&#x27;empreintes BLAKE3, puis ce qui a changé depuis</dd></div>
+<div><dt>pieges <i>decoys</i></dt><dd>Fichiers-pièges contre les rançongiciels : les poser (après accord), voir s&#x27;ils sont intacts, ou les retirer</dd></div>
+<div><dt>durcir <i>harden</i></dt><dd>Blocages de Windows Defender : règles ASR, protection réseau, logiciels indésirables, accès contrôlé aux…</dd></div>
+<div><dt>yara</dt><dd>Analyse YARA : 308 règles de familles de logiciels malveillants (ReversingLabs) et les empreintes de…</dd></div>
+<div><dt>isoler <i>sandbox</i></dt><dd>Lance un programme inconnu dans un bac à sable : pas de réseau, dossier personnel invisible</dd></div>
+<div><dt>courriel <i>email</i></dt><dd>Fuites d&#x27;adresse courriel : l&#x27;adresse est envoyée au service de recherche, après ton accord</dd></div>
+<div><dt>motdepasse <i>password</i></dt><dd>Vérifie si des mots de passe ont fuité (Have I Been Pwned) ; seuls 5 caractères de leur empreinte partent</dd></div>
+<div><dt>navigateurs <i>browser-passwords</i></dt><dd>Mots de passe enregistrés dans les navigateurs : combien et comment protégés (comptés, jamais lus), où…</dd></div>
+<div><dt>sortantes <i>outbound</i></dt><dd>Qui parle à Internet ?</dd></div>
+<div><dt>distance <i>remote-access</i></dt><dd>Quelqu&#x27;un contrôle mon ordinateur ?</dd></div>
+<div><dt>lien <i>link</i></dt><dd>Ce lien est-il dangereux ?</dd></div>
+<div><dt>verifier-fichier <i>check-file</i></dt><dd>Vérifier un fichier téléchargé : empreinte comparée à celle du site, nom et contenu, YARA et antivirus</dd></div>
+<div><dt>camera-micro <i>camera-mic</i></dt><dd>Caméra et micro : qui s&#x27;en sert ?</dd></div>
+<div><dt>acces <i>permissions</i></dt><dd>Bilan de confidentialité : les applications qui ont accès à la position, aux contacts, à la caméra et au…</dd></div>
+<div><dt>quarantaine <i>quarantine</i></dt><dd>Quarantaine : les fichiers isolés par l&#x27;antivirus ou YARA, à remettre à leur place (faux positif) ou à…</dd></div>
+<div><dt>secrets</dt><dd>Secrets dans l&#x27;historique des projets git du dossier personnel (mots de passe, clés d&#x27;API, jetons),…</dd></div>
+<div><dt>conteneurs <i>containers</i></dt><dd>Failles connues des images Docker ou Podman de cet ordinateur, par trivy s&#x27;il est installé.</dd></div>
+<div><dt>sauvegarder <i>backup</i></dt><dd>Sauvegarde la base des appareils et l&#x27;état de la surveillance dans un fichier JSON</dd></div>
+<div><dt>restaurer <i>restore</i></dt><dd>Ajoute une sauvegarde (ou un appareils.json) à la base actuelle, sans rien effacer</dd></div>
+<div><dt>nommer <i>name</i></dt><dd>Donne un surnom à un appareil de la base (« imprimante HP »), désigné par son IP ou sa MAC</dd></div>
+<div><dt>guide</dt><dd>Guide des commandes : celles d&#x27;Omarchy, d&#x27;Arch, de Fedora, de Debian, des autres Linux, de Windows, de…</dd></div>
+<div><dt>lenteur <i>slow</i></dt><dd>Pourquoi c&#x27;est lent ?</dd></div>
+<div><dt>demarrage <i>startup</i></dt><dd>Programmes au démarrage : ceux qui se lancent à l&#x27;ouverture de session, à retirer ou à remettre après accord.</dd></div>
+<div><dt>fiche <i>specs</i></dt><dd>Fiche de l&#x27;ordinateur : modèle, carte mère, processeur, mémoire, carte graphique, disques, système.</dd></div>
+<div><dt>copier-fichiers <i>copy-files</i></dt><dd>Copier mes fichiers (Documents, Images, Bureau, Vidéos, Musique) vers un disque externe : copie vérifiée,…</dd></div>
+<div><dt>verifier-copie <i>check-copy</i></dt><dd>Vérifier une copie faite par « Copier mes fichiers » (test de restauration) : des fichiers répartis sur…</dd></div>
+<div><dt>verifier-sauvegarde <i>check-backup</i></dt><dd>Vérifier ma sauvegarde : la sauvegarde mise en place par Vanguard relue pour de vrai, des fichiers répartis…</dd></div>
+<div><dt>verifier-cle <i>check-drive</i></dt><dd>Vérifier ma clé : capacité réelle (fausses clés), vitesses et blocs en erreur d&#x27;une clé USB ou d&#x27;un disque…</dd></div>
+<div><dt>a-laisser <i>handout</i></dt><dd>Rapport à laisser : une page simple pour la personne qu&#x27;on vient de dépanner (note, ce qu&#x27;il lui reste à…</dd></div>
+<div><dt>changements <i>changes</i></dt><dd>Ce que Vanguard a changé : chaque correction lancée sur cet ordinateur, sa date et son résultat</dd></div>
+<div><dt>sauvegarde-auto <i>auto-backup</i></dt><dd>Sauvegarde automatique : mise en place avec l&#x27;outil du système (Déjà Dup ou rsync chaque jour, Time…</dd></div>
+<div><dt>raccourci <i>shortcut</i></dt><dd>Raccourci sur cet ordinateur : Vanguard copié ici et lancé d&#x27;un clic (menu des applications sous Linux,…</dd></div>
+<div><dt>ordinateurs <i>computers</i></dt><dd>Mes ordinateurs : ceux où la clé VANGUARD a fait un bilan, leur note et leurs problèmes restants (sur la…</dd></div>
+<div><dt>se-mettre-a-jour <i>self-update</i></dt><dd>Mettre Vanguard à jour sur cet ordinateur : depuis une clé VANGUARD plus récente, ou depuis la dernière…</dd></div>
+<div><dt>regles <i>rules</i></dt><dd>Les règles du bilan déclarées pour ce système : identifiant stable, sujet, références de durcissement</dd></div>
+<div><dt>traces <i>evidence</i></dt><dd>Collecter les traces après une infection, avant de nettoyer : processus, connexions, ce qui se lance tout…</dd></div>
+<div><dt>depanner <i>troubleshoot</i></dt><dd>Dépanner pas à pas : pas d&#x27;Internet, Wi-Fi qui coupe, ordinateur lent, pas de son, imprimante, disque plein…</dd></div>
+<div><dt>proche <i>relative</i></dt><dd>Ordinateur d&#x27;un proche : trois questions (qui s&#x27;en sert, pourquoi on te l&#x27;a confié, son réseau), le bilan,…</dd></div>
+<div><dt>verifier-moi <i>self-check</i></dt><dd>Vérifier Vanguard lui-même : version, date de compilation, empreinte SHA-256 du programme (à comparer à la…</dd></div>
+</dl>
+</details>
+<pre class="exemple"><span class="g"># l'audit du réseau, lisible par un script</span>
+vanguard audit-reseau --json &gt; audit.json
+<span class="g"># le bilan de cet ordinateur, sans menu ni question</span>
+vanguard machine --json &gt; bilan.json
+<span class="g"># tout le dossier personnel, règles YARA et empreintes</span>
+vanguard yara --complet</pre>
+</section>
+<section id="nouveautes">
+<div class="tete-section">
+<p class="surtitre">Nouveautés de la version 0.82</p>
+<h2>Ce qui vient d'arriver</h2>
+</div>
+<ul class="nouveautes">
+<li><b>Audit du réseau par domaine</b><span>Six notes : exposition, Wi-Fi, segmentation, DNS et TLS, appareils, postes. Ce qui n'a pas pu être vérifié est dit et n'entre jamais dans la note.</span></li>
+<li><b>Exposition vers Internet</b><span>Vanguard demande à la box, en Rust pur, les ports qu'elle ouvre vers Internet et son adresse publique, puis juge ce que la maison montre.</span></li>
+<li><b>Wi-Fi lu dans les balises</b><span>TKIP, WPS allumé, faux point d'accès, réseaux ouverts qui se reconnectent seuls : lus par le système, sans programme externe.</span></li>
+<li><b>DNS et HTTPS détournés</b><span>DNS de la box comparé à celui de l'ordinateur, DNSSEC, DNS chiffré, certificat présenté par un site connu, exceptions de Firefox.</span></li>
+<li><b>Box et objets connectés</b><span>Caméras, imprimantes, NAS, télés, domotique reconnus, avec le mot de passe d'origine à changer. Rien n'est sondé en plus.</span></li>
+<li><b>Ordinateur d'un proche</b><span>Trois questions, un résumé en cinq points simples, les corrections une à une, puis une page à laisser avec des conseils pour la personne.</span></li>
+<li><b>Données et vie privée</b><span>Bilan de confidentialité (position, contacts, caméra, micro), tableau de bord de la surveillance, sauvegarde relue pour de vrai, mots de passe du navigateur comptés sans jamais être lus.</span></li>
+<li><b>Tout en Rust</b><span>Windows lu sans PowerShell (comptes, démarrage, tâches, Defender, BitLocker, Windows Update, partages, certificats…), macOS sans defaults ni plutil : plus rapide, et ça marche même quand ces outils sont bloqués.</span></li>
+</ul>
+</section>
+<section id="principes">
+<div class="tete-section">
+<p class="surtitre">Principes</p>
+<h2>Ce que Vanguard promet</h2>
+</div>
+<div class="principes">
+<div class="principe"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7"/></svg><div><b>Rien sans ton accord</b><span>Chaque changement est montré avant d'être fait.</span></div></div>
+<div class="principe"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7"/></svg><div><b>Jamais « sain » par défaut</b><span>Ce qui n'a pas pu être vérifié est dit clairement.</span></div></div>
+<div class="principe"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7"/></svg><div><b>Jamais d'attaque</b><span>Il observe et mesure ton réseau ; aucun exploit, aucun mot de passe essayé sur un appareil.</span></div></div>
+<div class="principe"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7"/></svg><div><b>Rien d'envoyé en cachette</b><span>Le journal des erreurs est anonymisé ; rien ne part sans le dire.</span></div></div>
+</div>
+</section>
+<section id="chiffres">
+<div class="tete-section">
+<p class="surtitre">Comment c'est construit</p>
+<h2>Écrit en Rust, testé à chaque version</h2>
+</div>
+<div class="chiffres">
+<div class="chiffre"><b>≈ 113 000</b><span>lignes de code Rust</span></div>
+<div class="chiffre"><b>965</b><span>tests sous Linux</span></div>
+<div class="chiffre"><b>859</b><span>tests sous Windows (Wine)</span></div>
+<div class="chiffre"><b>151</b><span>vérifications sur un vrai Windows</span></div>
+</div>
+<p class="note">Chaque version passe par des relectures de sécurité indépendantes, par un vrai Windows qui se teste tout seul et par un vrai Mac. Cette page est refaite par le script de publication à chaque version.</p>
+</section>
+</main>
+<footer>
+<div class="cadre"><span>Vanguard 0.82.0 · 21 octobre 2026</span><span><a href="https://github.com/d9v3/vanguard-beta">Logiciel libre · GPL-3.0-or-later</a></span></div>
+</footer>
+</body>
+</html>

@@ -133,15 +133,19 @@ done
 passes() { grep -o 'ok\. [0-9]* passed' "$TRAVAIL/$1.log" 2>/dev/null | awk '{s += $2} END {print s + 0}'; }
 
 ECHECS=0
+# Le résumé est aussi gardé dans un fichier : la page des fonctions (outils/page-fonctions.py) y lit les nombres de
+# tests de la dernière vérification, au déploiement.
+RESUME=$HOME/.cache/vanguard-dev/verifier-dernier.txt
+mkdir -p "$(dirname "$RESUME")" && : >"$RESUME"
 ligne() {
   local nom=$1 libelle=$2 etat duree
-  [[ -f $TRAVAIL/$nom.etat ]] || { printf '  · %-34s non lancé\n' "$libelle"; return; }
+  [[ -f $TRAVAIL/$nom.etat ]] || { printf '  · %-34s non lancé\n' "$libelle" | tee -a "$RESUME"; return; }
   read -r etat duree <"$TRAVAIL/$nom.etat"
   if [[ $etat == ok ]]; then
-    printf '  ✔ %-34s %4s s\n' "$libelle" "$duree"
+    printf '  ✔ %-34s %4s s\n' "$libelle" "$duree" | tee -a "$RESUME"
   else
     ECHECS=$((ECHECS + 1))
-    printf '  ✖ %-34s %4s s\n' "$libelle" "$duree"
+    printf '  ✖ %-34s %4s s\n' "$libelle" "$duree" | tee -a "$RESUME"
     tail -n 25 "$TRAVAIL/$nom.log" | sed 's/^/      /'
   fi
 }

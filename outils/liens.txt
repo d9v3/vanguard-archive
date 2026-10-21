@@ -53,3 +53,6 @@ ignorer https://paypal.com.compte-securite.xyz/
 # Préconnexion des polices de la page des fonctions (outils/page-fonctions.html) : des serveurs, pas des pages.
 essai https://fonts.googleapis.com https://fonts.googleapis.com/css2?family=IBM+Plex+Mono
 ignorer https://fonts.gstatic.com
+# Page des fonctions sur GitHub Pages (docs/index.html, refaite par deployer.sh) : servie seulement une fois docs/ sur
+# master ; jusque-là, 404. Ce qu'on vérifie, c'est que GitHub répond (serveur : toute réponse compte).
+serveur https://d9v3.github.io/vanguard-beta/
