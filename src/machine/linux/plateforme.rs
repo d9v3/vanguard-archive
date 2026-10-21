@@ -414,13 +414,97 @@ pub(super) fn journal_audit() -> Option<Constat> {
     let installe = ["/usr/bin/auditd", "/usr/sbin/auditd", "/sbin/auditd"]
         .iter()
         .any(|p| Path::new(p).exists());
-    let actif = installe && sortie("systemctl", &["is-active", "auditd"]).is_some_and(|s| s.trim() == "active");
+    let actif = installe
+        && service_tourne_dans(&RACINES_CGROUP.map(Path::new), "auditd.service")
+            .unwrap_or_else(|| sortie("systemctl", &["is-active", "auditd"]).is_some_and(|s| s.trim() == "active"));
     juger_journal_audit(installe, actif)
+}
+
+/// Les hiérarchies où systemd range ses services : cgroup2 seul, cgroup2 d'un système hybride, puis l'arbre
+/// « name=systemd » de cgroup1.
+const RACINES_CGROUP: [&str; 3] = ["/sys/fs/cgroup", "/sys/fs/cgroup/unified", "/sys/fs/cgroup/systemd"];
+
+/// Le service tourne-t-il, comme `systemctl is-active` le dirait ? systemd place chaque service dans son groupe de
+/// contrôle, sous system.slice (ou une tranche à lui, system-cups.slice) : il tourne tant que ce groupe a des
+/// processus. `None` sans hiérarchie lisible (pas de systemd, /sys absent) : non vérifié.
+fn service_tourne_dans(racines: &[&Path], unite: &str) -> Option<bool> {
+    let systeme = racines.iter().map(|r| r.join("system.slice")).find(|d| d.is_dir())?;
+    let mut a_voir = vec![(systeme, 0u8)];
+    while let Some((dossier, profondeur)) = a_voir.pop() {
+        for e in std::fs::read_dir(&dossier).into_iter().flatten().flatten() {
+            if !e.file_type().is_ok_and(|t| t.is_dir()) {
+                continue;
+            }
+            let nom = e.file_name();
+            if nom == unite {
+                return Some(
+                    std::fs::read_to_string(e.path().join("cgroup.procs")).is_ok_and(|p| !p.trim().is_empty()),
+                );
+            }
+            // Seules les tranches contiennent d'autres services ; quatre étages suffisent à toutes.
+            if profondeur < 4 && nom.to_string_lossy().ends_with(".slice") {
+                a_voir.push((e.path(), profondeur + 1));
+            }
+        }
+    }
+    Some(false)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn service_actif_selon_son_groupe() {
+        let racine = std::env::temp_dir().join(format!("vanguard-cgroup-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&racine);
+        let ecrire = |c: &str, t: &str| {
+            let f = racine.join(c);
+            std::fs::create_dir_all(f.parent().unwrap()).unwrap();
+            std::fs::write(f, t).unwrap();
+        };
+        ecrire("unified/system.slice/auditd.service/cgroup.procs", "812\n");
+        ecrire(
+            "unified/system.slice/system-cups.slice/cups.service/cgroup.procs",
+            "940\n",
+        );
+        ecrire("unified/system.slice/arrete.service/cgroup.procs", "");
+        // Un système hybride : la première racine n'a pas de system.slice.
+        let racines = [racine.as_path(), &racine.join("unified")];
+        assert_eq!(service_tourne_dans(&racines, "auditd.service"), Some(true));
+        assert_eq!(service_tourne_dans(&racines, "cups.service"), Some(true));
+        assert_eq!(service_tourne_dans(&racines, "arrete.service"), Some(false));
+        assert_eq!(service_tourne_dans(&racines, "absent.service"), Some(false));
+        assert_eq!(
+            service_tourne_dans(&[racine.join("rien").as_path()], "auditd.service"),
+            None
+        );
+        let _ = std::fs::remove_dir_all(&racine);
+    }
+
+    /// Sur cet ordinateur, les mêmes réponses que `systemctl is-active`, quand il est là.
+    #[test]
+    fn service_actif_comme_systemctl() {
+        for unite in [
+            "auditd",
+            "systemd-journald",
+            "systemd-resolved",
+            "sshd",
+            "cups",
+            "avahi-daemon",
+        ] {
+            // Sans réponse (pas de bus de systemd, comme dans un espace de noms d'utilisateur), rien à comparer.
+            let Some(r) = crate::commande::lancer(Command::new("systemctl").args(["is-active", unite]), 10)
+                .filter(|r| !r.sortie.trim().is_empty())
+            else {
+                return;
+            };
+            let Some(natif) = service_tourne_dans(&RACINES_CGROUP.map(Path::new), &format!("{unite}.service")) else {
+                return;
+            };
+            assert_eq!(natif, r.sortie.trim() == "active", "{unite} : {}", r.sortie.trim());
+        }
+    }
 
     /// La forme de `fwupdmgr security --json` (fwupd 2), relevée sur un vrai ordinateur et raccourcie.
     const JSON: &str = r#"{"SecurityAttributes":[
