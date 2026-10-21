@@ -2,7 +2,7 @@
 //! un programme (Image File Execution Options), qui se lance à sa place ; un programme d'accessibilité de l'écran de
 //! connexion remplacé par une invite de commandes ; un bureau ou un Userinit détourné dans Winlogon ; une DLL imposée à
 //! chaque programme qui ouvre une fenêtre (AppInit_DLLs) ; un abonnement WMI permanent qui lance une commande. Tout se
-//! lit dans le registre et les fichiers, sans PowerShell, sauf WMI (une seule lecture, en sections).
+//! lit dans le registre et les fichiers, sans PowerShell ; les abonnements, par WMI (PowerShell en secours).
 
 use std::path::{Path, PathBuf};
 
@@ -593,6 +593,128 @@ const SCRIPT_WMI: &str = "function N($v) { (\"$v\" -replace '[\\r\\n]+', ' ' -re
      try { try { Get-CimInstance -Namespace root/subscription -ClassName ActiveScriptEventConsumer | ForEach-Object { 'SCR|' + (N $_.Name) + '|' + (N $_.ScriptingEngine) + '|' + (N $_.ScriptFileName) + '|' + (N $_.ScriptText) } } catch { if (\"$($_.Exception.NativeErrorCode)\" -ne 'InvalidClass') { throw } }; 'SCR_FIN' } catch {}; \
      try { Get-CimInstance -Namespace root/subscription -ClassName __FilterToConsumerBinding | ForEach-Object { 'LIE|' + (N $_.Filter.Name) + '|' + (N $_.Consumer.CimSystemProperties.ClassName) + '|' + (N $_.Consumer.Name) }; 'LIE_FIN' } catch {}";
 
+/// Un texte sur une ligne de section, comme la fonction N du script : sauts de ligne en espaces, « | » en « ¦ ».
+fn sur_une_ligne(v: &str) -> String {
+    let mut sortie = String::with_capacity(v.len());
+    let mut saut = false;
+    for c in v.chars() {
+        if matches!(c, '\r' | '\n') {
+            if !saut {
+                sortie.push(' ');
+            }
+            saut = true;
+            continue;
+        }
+        saut = false;
+        sortie.push(if c == '|' { '¦' } else { c });
+    }
+    sortie.trim().to_string()
+}
+
+/// Classe et nom d'une référence WMI (`\\.\root\subscription:CommandLineEventConsumer.Name="x"`), ce que
+/// PowerShell résolvait en objet ($_.Consumer.Name) ; « \" » et « \\ » y sont échappés.
+fn reference(chemin: &str) -> Option<(String, String)> {
+    let sans_espace = if chemin.starts_with("\\\\") {
+        chemin.split_once(':')?.1
+    } else {
+        chemin
+    };
+    let (classe, cle) = sans_espace.split_once('.')?;
+    let valeur = cle.strip_prefix("Name=")?.strip_prefix('"')?.strip_suffix('"')?;
+    let mut nom = String::new();
+    let mut lettres = valeur.chars();
+    while let Some(c) = lettres.next() {
+        nom.push(if c == '\\' { lettres.next()? } else { c });
+    }
+    Some((classe.to_string(), nom))
+}
+
+/// Les sections de SCRIPT_WMI lues par WMI, et si toutes ont pu l'être (la section ADM l'est toujours) : sinon,
+/// PowerShell est essayé, et faute de mieux cette lecture partielle dit « non vérifié ».
+fn sortie_wmi() -> (bool, String) {
+    use super::wmi::{Reponse, interroger, requete};
+    use std::fmt::Write;
+    const ABONNEMENTS: &str = r"root\subscription";
+    let mut sortie = format!(
+        "ADM|{}\nADM_FIN\n",
+        if super::processus::eleve() { "True" } else { "False" }
+    );
+    let mut complet = true;
+    let champ = |l: &super::wmi::Ligne, c: &str| sur_une_ligne(l[c].texte().unwrap_or_default());
+    let mut section = |nom: &str, lignes: Option<Vec<String>>| match lignes {
+        Some(lignes) => {
+            for l in lignes {
+                let _ = writeln!(sortie, "{nom}|{l}");
+            }
+            let _ = writeln!(sortie, "{nom}_FIN");
+        }
+        None => complet = false,
+    };
+    section(
+        "FLT",
+        requete(ABONNEMENTS, "__EventFilter", "", &["Name", "Query"]).map(|l| {
+            l.iter()
+                .map(|f| format!("{}|{}", champ(f, "Name"), champ(f, "Query")))
+                .collect()
+        }),
+    );
+    // Une classe de consommateur que ce Windows n'inscrit pas : aucun consommateur, pas un échec.
+    let consommateurs = |classe: &str, champs: &[&str]| match interroger(ABONNEMENTS, classe, "", champs) {
+        Some(Reponse::Lignes(l)) => Some(
+            l.iter()
+                .map(|c| champs.iter().map(|n| champ(c, n)).collect::<Vec<_>>().join("|"))
+                .collect(),
+        ),
+        Some(Reponse::ClasseAbsente) => Some(Vec::new()),
+        None => None,
+    };
+    section(
+        "CMD",
+        consommateurs(
+            "CommandLineEventConsumer",
+            &["Name", "ExecutablePath", "CommandLineTemplate"],
+        ),
+    );
+    section(
+        "SCR",
+        consommateurs(
+            "ActiveScriptEventConsumer",
+            &["Name", "ScriptingEngine", "ScriptFileName", "ScriptText"],
+        ),
+    );
+    section(
+        "LIE",
+        requete(ABONNEMENTS, "__FilterToConsumerBinding", "", &["Filter", "Consumer"]).map(|l| {
+            l.iter()
+                .map(|b| {
+                    let filtre = b["Filter"]
+                        .texte()
+                        .and_then(reference)
+                        .map(|(_, n)| n)
+                        .unwrap_or_default();
+                    let (classe, nom) = b["Consumer"].texte().and_then(reference).unwrap_or_default();
+                    format!(
+                        "{}|{}|{}",
+                        sur_une_ligne(&filtre),
+                        sur_une_ligne(&classe),
+                        sur_une_ligne(&nom)
+                    )
+                })
+                .collect()
+        }),
+    );
+    (complet, sortie)
+}
+
+/// Les abonnements par WMI ; PowerShell s'il a manqué une section, et sinon la lecture partielle (« non vérifié »).
+fn abonnements() -> String {
+    let (complet, sortie) = sortie_wmi();
+    if complet {
+        return sortie;
+    }
+    ps(SCRIPT_WMI).unwrap_or(sortie)
+}
+
 /// Un consommateur qui lance quelque chose : sa classe, son nom, ce qu'il lance.
 struct Consommateur<'a> {
     classe: &'static str,
@@ -790,7 +912,7 @@ regle!(
     225,
     ("abonnements WMI permanents", "permanent WMI subscriptions"),
     &["MITRE ATT&CK T1546.003"],
-    || juger_wmi(ps(SCRIPT_WMI).as_deref())
+    || juger_wmi(Some(&abonnements()))
 );
 
 #[cfg(test)]
@@ -803,6 +925,31 @@ mod tests {
             programme: programme.to_string(),
             debogueur: debogueur.map(str::to_string),
             drapeaux,
+        }
+    }
+
+    #[test]
+    fn references_et_lignes() {
+        assert_eq!(
+            reference(r#"\\.\root\subscription:CommandLineEventConsumer.Name="Mise à jour""#),
+            Some(("CommandLineEventConsumer".into(), "Mise à jour".into()))
+        );
+        assert_eq!(
+            reference(r#"__EventFilter.Name="a\"b\\c""#),
+            Some(("__EventFilter".into(), r#"a"b\c"#.into()))
+        );
+        assert_eq!(reference("pas une référence"), None);
+        assert_eq!(
+            sur_une_ligne(" powershell -c a|b\r\n\r\nsuite "),
+            "powershell -c a¦b suite"
+        );
+    }
+
+    /// Sous Wine, sans root\subscription : jamais « aucun abonnement », toujours « non vérifié ».
+    #[test]
+    fn abonnements_sous_wine() {
+        if std::path::Path::new(r"C:\windows\system32\wineboot.exe").is_file() {
+            assert!(juger_wmi(Some(&abonnements())).iter().all(|c| !c.verifie));
         }
     }
 

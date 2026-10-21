@@ -89,6 +89,23 @@ pub(crate) type Ligne = HashMap<String, Valeur>;
 /// édition de Windows sans ce composant), délai dépassé ; l'appelant passe alors par PowerShell ou dit « non
 /// vérifié ». Une liste vide est une vraie réponse, aucune instance : la classe a été trouvée.
 pub(crate) fn requete(espace: &str, classe: &str, condition: &str, champs: &[&str]) -> Option<Vec<Ligne>> {
+    match interroger(espace, classe, condition, champs)? {
+        Reponse::Lignes(lignes) => Some(lignes),
+        Reponse::ClasseAbsente => None,
+    }
+}
+
+/// Ce que WMI a répondu, quand une classe absente se distingue d'un échec (un refus, une panne).
+pub(crate) enum Reponse {
+    Lignes(Vec<Ligne>),
+    /// La classe n'existe pas dans cet espace de noms (pas inscrite sur ce Windows).
+    ClasseAbsente,
+}
+
+/// Comme `requete`, avec « classe absente » à part ; `None` : tout autre échec (refus, espace inconnu, délai).
+pub(crate) fn interroger(espace: &str, classe: &str, condition: &str, champs: &[&str]) -> Option<Reponse> {
+    /// WBEM_E_NOT_FOUND et WBEM_E_INVALID_CLASS.
+    const ABSENTE: [i32; 2] = [0x8004_1002_u32.cast_signed(), 0x8004_1010_u32.cast_signed()];
     // Tous les champs (`*`), lus ensuite un par un : un champ que cette version de Windows n'a pas devient
     // `Valeur::Nul`, au lieu de faire échouer toute la requête.
     let wql = if condition.is_empty() {
@@ -99,7 +116,13 @@ pub(crate) fn requete(espace: &str, classe: &str, condition: &str, champs: &[&st
     let (espace, classe) = (espace.to_string(), classe.to_string());
     let champs: Vec<String> = champs.iter().map(|c| (*c).to_string()).collect();
     let debut: String = wql.chars().take(240).collect();
-    com("WMI", &debut, move || dans_ce_fil(&espace, &classe, &wql, &champs))
+    com("WMI", &debut, move || {
+        match dans_ce_fil(&espace, &classe, &wql, &champs) {
+            Ok(lignes) => Ok(Reponse::Lignes(lignes)),
+            Err(e) if ABSENTE.contains(&e.code().0) => Ok(Reponse::ClasseAbsente),
+            Err(e) => Err(e),
+        }
+    })
 }
 
 /// Une lecture par COM dans un fil à elle, avec son propre appartement (multithread), arrêtée d'attendre après le
@@ -426,6 +449,11 @@ mod tests {
     #[test]
     fn classe_inconnue() {
         assert!(requete(r"root\cimv2", "Classe_Qui_N_Existe_Pas", "", &["Name"]).is_none());
+        assert!(matches!(
+            interroger(r"root\cimv2", "Classe_Qui_N_Existe_Pas", "", &["Name"]),
+            Some(Reponse::ClasseAbsente)
+        ));
+        assert!(interroger(r"root\EspaceQuiNExistePas", "Win32_OperatingSystem", "", &["Name"]).is_none());
         assert!(requete(r"root\EspaceQuiNExistePas", "Win32_OperatingSystem", "", &["Name"]).is_none());
         // Une classe connue sans instance qui réponde : une vraie liste vide.
         assert_eq!(

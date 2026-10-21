@@ -294,6 +294,62 @@ const SCRIPT_DEMARRAGE: &str = "try { Get-CimInstance Win32_Service | ForEach-Ob
        Get-CimInstance -Namespace root/subscription -ClassName __FilterToConsumerBinding -ErrorAction Stop | ForEach-Object { 'WMI|lien' + $s + (N $_.Filter) + $s + (N $_.Consumer) }; \
        'WMI_FIN' } catch {}";
 
+/// Un texte sur une ligne de trace, comme la fonction N du script : sauts de ligne et séparateurs en espaces.
+fn sur_une_ligne(v: &str) -> String {
+    v.split(['\r', '\n', SEP])
+        .filter(|m| !m.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
+        .trim()
+        .to_string()
+}
+
+/// La section WMI de SCRIPT_DEMARRAGE lue par WMI : filtres, consommateurs de commandes et de scripts, liens. Une
+/// classe de consommateur que ce Windows n'inscrit pas n'en a aucun (le script, lui, perdait toute la section).
+/// `None` si root/subscription refuse (droits) ou ne répond pas.
+fn abonnements_wmi() -> Option<String> {
+    use crate::machine::windows::wmi::{Ligne, Reponse, interroger};
+    const ABONNEMENTS: &str = r"root\subscription";
+    let lire = |classe: &str, champs: &[&str]| -> Option<Vec<Ligne>> {
+        match interroger(ABONNEMENTS, classe, "", champs)? {
+            Reponse::Lignes(l) => Some(l),
+            Reponse::ClasseAbsente => Some(Vec::new()),
+        }
+    };
+    let champ = |l: &Ligne, c: &str| sur_une_ligne(l[c].texte().unwrap_or_default());
+    let mut lignes = Vec::new();
+    for f in lire("__EventFilter", &["Name", "Query"])? {
+        lignes.push(format!(
+            "WMI|filtre{SEP}{}{SEP}{}",
+            champ(&f, "Name"),
+            champ(&f, "Query")
+        ));
+    }
+    for c in lire(
+        "CommandLineEventConsumer",
+        &["Name", "ExecutablePath", "CommandLineTemplate"],
+    )? {
+        let lance = format!("{} {}", champ(&c, "ExecutablePath"), champ(&c, "CommandLineTemplate"));
+        lignes.push(format!("WMI|commande{SEP}{}{SEP}{}", champ(&c, "Name"), lance.trim()));
+    }
+    for s in lire("ActiveScriptEventConsumer", &["Name", "ScriptText"])? {
+        lignes.push(format!(
+            "WMI|script{SEP}{}{SEP}{}",
+            champ(&s, "Name"),
+            champ(&s, "ScriptText")
+        ));
+    }
+    for l in lire("__FilterToConsumerBinding", &["Filter", "Consumer"])? {
+        lignes.push(format!(
+            "WMI|lien{SEP}{}{SEP}{}",
+            champ(&l, "Filter"),
+            champ(&l, "Consumer")
+        ));
+    }
+    lignes.push("WMI_FIN".into());
+    Some(lignes.join("\n"))
+}
+
 /// Les clés du registre qui lancent un programme à l'ouverture de session ou au démarrage, ou s'immiscent dans
 /// chaque lancement (Winlogon, AppInit_DLLs, AutoRun de l'invite de commandes, BootExecute).
 const CLES_DEMARRAGE: [&str; 13] = [
@@ -408,9 +464,14 @@ pub(super) fn demarrage(dossier: &Path) -> Partie {
         // Des raccourcis (.lnk) : la liste seulement ; leur empreinte est dans les fichiers récents.
         f.dossier(&dossier_demarrage, 0, false);
     }
-    // Les services sans PowerShell ; les abonnements WMI, eux, demandent encore PowerShell.
+    // Les services et les abonnements WMI sans PowerShell ; lui seulement si l'un des deux n'a pas répondu.
     let natifs = lignes_services();
-    let sortie = crate::machine::windows::ps(&format!("{N}{SCRIPT_DEMARRAGE}"));
+    let abonnements_natifs = abonnements_wmi();
+    let sortie = if natifs.is_some() && abonnements_natifs.is_some() {
+        None
+    } else {
+        crate::machine::windows::ps(&format!("{N}{SCRIPT_DEMARRAGE}"))
+    };
     f.section("Win32_Service");
     if let Some(services) = section(natifs.as_deref(), "SRV").or_else(|| section(sortie.as_deref(), "SRV")) {
         f.lues += 1;
@@ -428,7 +489,9 @@ pub(super) fn demarrage(dossier: &Path) -> Partie {
         });
     }
     f.section("root/subscription (WMI)");
-    if let Some(abonnements) = section(sortie.as_deref(), "WMI") {
+    if let Some(abonnements) =
+        section(abonnements_natifs.as_deref(), "WMI").or_else(|| section(sortie.as_deref(), "WMI"))
+    {
         f.lues += 1;
         if abonnements.is_empty() {
             f.ajouter("(aucun / none)");
@@ -669,6 +732,15 @@ pub(super) fn endroits_temporaires() -> Vec<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn abonnement_sur_une_ligne() {
+        assert_eq!(sur_une_ligne(" a\r\nb\u{1f}c  "), "a b c");
+        // Sous Wine, root/subscription n'existe pas : pas de section, donc « non lu », jamais « aucun ».
+        if std::path::Path::new(r"C:\windows\system32\wineboot.exe").is_file() {
+            assert!(abonnements_wmi().is_none());
+        }
+    }
 
     #[test]
     fn valeurs_du_registre() {
