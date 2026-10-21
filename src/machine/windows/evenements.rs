@@ -1488,3 +1488,155 @@ mod tests {
         assert!(juger_evenements(Some("ADM|True\nADM_FIN")).iter().all(|c| !c.verifie));
     }
 }
+
+/// Les champs d'un événement viennent souvent d'ailleurs : le compte tenté et l'adresse d'un échec de connexion par
+/// le réseau, le message de sshd, le nom d'un service. Jamais de panique, et un champ ne déborde jamais sur son voisin
+/// dans les lignes que les jugements relisent.
+#[cfg(test)]
+mod entrees_hostiles {
+    use super::*;
+    use proptest::prelude::*;
+
+    /// Une valeur d'attaquant : quelconque, ou faite des séparateurs des lignes (« | », fins de ligne), d'entités XML,
+    /// de débuts de messages de sshd et de multi-octets.
+    fn valeur() -> impl Strategy<Value = String> {
+        let bout = prop_oneof![
+            any::<String>(),
+            prop::sample::select(vec![
+                "|",
+                "\r\n",
+                "\n",
+                "&amp;",
+                "&#124;",
+                "&#x0;",
+                "&bogus;",
+                "<",
+                "]]>",
+                "sshd: ",
+                "Accepted password for ",
+                "Failed password for ",
+                "Invalid user ",
+                " from ",
+                " port ",
+                "203.0.113.5",
+                "::ffff:192.0.2.5",
+                "fe80::1%12",
+                "-",
+                "é",
+                "😀",
+                "\u{202e}",
+            ])
+            .prop_map(str::to_string),
+        ];
+        prop::collection::vec(bout, 0..8).prop_map(|b| b.concat())
+    }
+
+    /// Un événement rendu en XML, comme EvtRender le donne : numéro, date, valeurs nommées sous EventData ou champs
+    /// sous UserData, aux contenus échappés ou non ; parfois coupé, parfois suivi de bruit.
+    fn xml() -> impl Strategy<Value = String> {
+        let echapper = |v: &str| v.replace('&', "&amp;").replace('<', "&lt;").replace('"', "&quot;");
+        let donnee = (valeur(), valeur(), any::<bool>()).prop_map(move |(n, v, brut)| {
+            if brut {
+                format!("<Data Name=\"{n}\">{v}</Data>")
+            } else {
+                format!("<Data Name=\"{}\">{}</Data>", echapper(&n), echapper(&v))
+            }
+        });
+        (
+            prop_oneof![Just("4625".to_string()), Just("4624".to_string()), "[0-9 ]{0,12}", valeur()],
+            prop_oneof![Just("2026-10-20T13:46:40.1234567Z".to_string()), valeur()],
+            prop::collection::vec(donnee, 0..25),
+            any::<bool>(),
+            prop::option::of(any::<usize>()),
+            valeur(),
+        )
+            .prop_map(|(id, date, donnees, sous_userdata, coupe, bruit)| {
+                let corps = if sous_userdata {
+                    format!("<UserData><LogFileCleared>{}</LogFileCleared></UserData>", donnees.concat().replace("Data Name", "Champ x"))
+                } else {
+                    format!("<EventData>{}</EventData>", donnees.concat())
+                };
+                let mut x = format!(
+                    "<Event xmlns=\"http://schemas.microsoft.com/win/2004/08/events/event\"><System><EventID>{id}</EventID>\
+                     <TimeCreated SystemTime=\"{date}\"/></System>{corps}</Event>{bruit}"
+                );
+                if let Some(c) = coupe {
+                    let mut i = c % (x.len() + 1);
+                    while !x.is_char_boundary(i) {
+                        i -= 1;
+                    }
+                    x.truncate(i);
+                }
+                x
+            })
+    }
+
+    fn noms() -> impl Strategy<Value = String> {
+        prop_oneof![
+            prop::sample::select(vec![
+                "LogonType",
+                "IpAddress",
+                "TargetUserName",
+                "TargetDomainName",
+                "TargetUserSid",
+                "payload",
+            ])
+            .prop_map(str::to_string),
+            valeur(),
+        ]
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig { cases: 256, failure_persistence: None, ..ProptestConfig::default() })]
+
+        #[test]
+        fn evenements_en_xml(x in prop_oneof![xml(), any::<String>()]) {
+            if let Some((_, date, valeurs, noms)) = lire_xml_nomme(&x) {
+                prop_assert!(valeurs.len() <= noms.len());
+                let _ = date_locale(&date);
+            }
+            let _ = lire_xml(&x);
+        }
+
+        /// Les lignes relues par les jugements : autant de champs, quoi que contiennent les valeurs.
+        #[test]
+        fn lignes_aux_champs_fixes(p in prop::collection::vec(valeur(), 0..22), date in prop_oneof![valeur(), Just("2026-10-20T13:46:40.1234567Z".to_string())]) {
+            // La date passe d'abord par date_locale, comme dans la vraie lecture.
+            let date = date_locale(&date).unwrap_or_default();
+            for (section, id, separateurs) in [("ECH", 4625, 3), ("SEC", 1102, 2), ("SEC", 4720, 3), ("SRV", 7045, 2)] {
+                let l = ligne(section, id, &date, &p).unwrap();
+                prop_assert_eq!(l.matches('|').count(), separateurs, "{:?}", l);
+                prop_assert!(!l.contains(['\r', '\n']));
+            }
+            // Un échec écrit puis relu : son adresse et son compte, entiers.
+            let l = ligne("ECH", 4625, "2026-10-20 09:46", &p).unwrap();
+            let echecs = lire_echecs(&[l.as_str()]);
+            prop_assert_eq!(echecs.len(), 1);
+            prop_assert_eq!(&echecs[0].adresse, &champ(p.get(19)));
+            prop_assert_eq!(&echecs[0].compte, &champ(p.get(5)));
+        }
+
+        #[test]
+        fn champs_nommes(
+            champs in prop::collection::vec((noms(), valeur()), 0..10),
+            type_ in prop::sample::select(vec!["3", "8", "10", "2", ""]),
+            machine in prop::option::of(valeur()),
+            lignes in prop::collection::vec(valeur(), 0..10),
+        ) {
+            let mut champs = champs;
+            champs.push(("LogonType".to_string(), type_.to_string()));
+            if let Some(l) = ligne_reussite_sur(machine.as_deref(), 4624, "2026-10-20T13:46:40.1234567Z", &champs) {
+                prop_assert_eq!(l.matches('|').count(), 3, "{:?}", l);
+                prop_assert_eq!(lire_echecs(&[l.as_str()]).len(), 1);
+            }
+            if let Some(m) = message_sshd(&champs) {
+                prop_assert!(!m.contains(['|', '\r', '\n']), "{:?}", m);
+            }
+            let lignes: Vec<String> = lignes.into_iter().map(|l| format!("2026-10-20T13:46:40Z|{l}")).collect();
+            let _ = echecs_et_reussites_ssh(&lignes);
+            for (_, v) in &champs {
+                let _ = adresse(v);
+            }
+        }
+    }
+}

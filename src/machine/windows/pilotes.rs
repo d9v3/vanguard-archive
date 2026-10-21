@@ -400,3 +400,83 @@ mod tests {
         assert!(!c[1].verifie);
     }
 }
+
+/// La liste LOLDrivers vient d'Internet, et l'ImagePath d'un pilote de qui l'a installé : jamais de panique, et une
+/// empreinte gardée est bien écrite dans la liste.
+#[cfg(test)]
+mod entrees_hostiles {
+    use super::*;
+    use proptest::prelude::*;
+
+    fn hexa(e: &[u8; 32], majuscules: bool) -> String {
+        e.iter()
+            .map(|o| {
+                if majuscules {
+                    format!("{o:02X}")
+                } else {
+                    format!("{o:02x}")
+                }
+            })
+            .collect()
+    }
+
+    /// Une liste CSV : des empreintes (minuscules, majuscules), des suites hexadécimales trop courtes ou trop longues,
+    /// des séparateurs, des chiffres qui n'en sont pas en ASCII (pleine chasse, arabes), du texte quelconque.
+    fn liste() -> impl Strategy<Value = String> {
+        let bout = prop_oneof![
+            (any::<[u8; 32]>(), any::<bool>()).prop_map(|(e, m)| hexa(&e, m)),
+            "[0-9a-fA-F]{60,70}",
+            prop::sample::select(vec![
+                ",", "\"", "\n", ";", " ", "é", "😀", "\u{ff21}", "\u{0663}", "\u{212a}"
+            ])
+            .prop_map(str::to_string),
+            any::<String>(),
+        ];
+        prop::collection::vec(bout, 0..30).prop_map(|b| b.concat())
+    }
+
+    /// Un ImagePath : les préfixes que Windows lit, avec une casse ou des caractères qui changent de longueur en
+    /// minuscules, puis un chemin quelconque.
+    fn image() -> impl Strategy<Value = String> {
+        let prefixe = prop::sample::select(vec![
+            "\\SystemRoot\\",
+            "\\systemroot\\",
+            "\\SYSTEMROOT",
+            "System32\\",
+            "SysWOW64\\",
+            "\\??\\",
+            "\"",
+            "İ",
+            "\u{212a}",
+            "",
+        ]);
+        (prefixe, any::<String>()).prop_map(|(p, c)| format!("{p}{c}"))
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig { cases: 256, failure_persistence: None, ..ProptestConfig::default() })]
+
+        #[test]
+        fn liste_de_loldrivers(t in liste()) {
+            let bas = t.to_ascii_lowercase();
+            let empreintes = empreintes_de_la_liste(&t);
+            prop_assert!(empreintes.len() <= t.len() / 64);
+            for e in &empreintes {
+                prop_assert!(bas.contains(&hexa(e, false)));
+            }
+        }
+
+        /// Chaque empreinte d'une liste bien formée est lue.
+        #[test]
+        fn empreintes_lues(liste in prop::collection::vec(any::<[u8; 32]>(), 0..20), majuscules: bool) {
+            let texte = liste.iter().map(|e| format!("\"{}\",x", hexa(e, majuscules))).collect::<Vec<_>>().join("\n");
+            prop_assert_eq!(empreintes_de_la_liste(&texte), liste.into_iter().collect::<HashSet<_>>());
+        }
+
+        #[test]
+        fn chemins_de_pilote(nom in any::<String>(), image in prop::option::of(image()), racine in prop_oneof![Just("C:\\Windows".to_string()), any::<String>()]) {
+            let fichier = fichier_du_pilote(&nom, image.as_deref(), &racine);
+            let _ = emplacement_suspect(&fichier);
+        }
+    }
+}

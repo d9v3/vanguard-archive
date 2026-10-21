@@ -183,21 +183,33 @@ const OPTIONS_PYTHON: [&str; 5] = ["--python", "-p", "--with", "--index-url", "-
 const PAQUET_PYTHON: [&str; 2] = ["--from", "--spec"];
 const PAQUET_JS: [&str; 2] = ["--package", "-p"];
 
+/// Le nom d'un lanceur, sans dossier ni extension, en minuscules : « /usr/bin/npx », « NPX.cmd » → « npx ».
+fn nom_du_lanceur(commande: &str) -> String {
+    Path::new(commande)
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_lowercase())
+        .unwrap_or_default()
+}
+
 /// Le paquet lancé par un lanceur (`npx`, `bunx`, `pnpm dlx`, `uvx`, `pipx run`), s'il n'a pas de version fixée.
 /// « cmd /c npx -y paquet », la forme de Claude Desktop sous Windows, est jugée comme « npx -y paquet ».
 fn paquet_non_epingle(commande: &str, args: &[&str]) -> Option<String> {
-    let lanceur = Path::new(commande)
-        .file_stem()
-        .map(|s| s.to_string_lossy().to_lowercase())
-        .unwrap_or_default();
+    let lanceur = nom_du_lanceur(commande);
     if lanceur == "cmd" {
-        // cmd relit la ligne qui suit /c (ou /k) : un mot peut en porter plusieurs.
-        let i = args
-            .iter()
-            .position(|a| a.eq_ignore_ascii_case("/c") || a.eq_ignore_ascii_case("/k"))?;
+        // cmd relit la ligne qui suit /c (ou /k) : un mot peut en porter plusieurs. Les « cmd /c » imbriqués se
+        // déroulent en boucle, sur des mots découpés une seule fois : en récursion, « cmd /c » répété cinquante mille
+        // fois (un fichier de réglages piégé, 350 Ko) faisait déborder la pile, ce qui arrête tout le programme.
+        let barre = |a: &&str| a.eq_ignore_ascii_case("/c") || a.eq_ignore_ascii_case("/k");
+        let i = args.iter().position(barre)?;
         let mots: Vec<&str> = args[i + 1..].iter().flat_map(|a| a.split_whitespace()).collect();
-        let (commande, reste) = mots.split_first()?;
-        return paquet_non_epingle(commande, reste);
+        let mut reste = &mots[..];
+        loop {
+            let (commande, suite) = reste.split_first()?;
+            if nom_du_lanceur(commande) != "cmd" {
+                return paquet_non_epingle(commande, suite);
+            }
+            reste = &suite[suite.iter().position(barre)? + 1..];
+        }
     }
     let mut reste = args.iter().copied();
     match lanceur.as_str() {
@@ -795,6 +807,15 @@ mod tests {
         assert_eq!(paquet_non_epingle("cmd", &["/c", "node", "serveur.js"]), None);
         assert_eq!(paquet_non_epingle("cmd", &["/c"]), None);
         assert_eq!(paquet_non_epingle("cmd", &["npx", "-y", "outil"]), None);
+        // Imbriqués, en mots séparés ou dans un seul : déroulés. Trouvé en écrivant les tests d'entrées hostiles : cinquante
+        // mille « cmd /c » faisaient déborder la pile (récursion), ce qui arrêtait tout le programme.
+        assert_eq!(
+            paquet_non_epingle("cmd", &["/c", "cmd", "/k", "CMD.EXE", "/c", "npx", "outil"]),
+            Some("outil".into())
+        );
+        let imbriques = "cmd /c ".repeat(50_000) + "npx outil";
+        assert_eq!(paquet_non_epingle("cmd", &["/c", &imbriques]), Some("outil".into()));
+        assert_eq!(paquet_non_epingle("cmd", &["/c", &"cmd /c ".repeat(50_000)]), None);
         let json: Value = serde_json::from_str(
             r#"{ "mcpServers": { "fichiers": { "command": "cmd", "args": ["/c", "npx", "-y", "@exemple/fichiers", "C:\\Users\\alice"] } } }"#,
         )
@@ -1004,5 +1025,223 @@ mod tests {
         }
         assert_eq!(mots("x-goog-api.KEY_id"), ["X", "GOOG", "API", "KEY", "ID"]);
         assert_eq!(mots("accessToken"), ["ACCESS", "TOKEN"]);
+    }
+}
+
+/// Les fichiers de réglages des outils d'IA s'écrivent à la main ou par n'importe quel programme (une extension, un
+/// installeur de serveur MCP) : jamais de panique, et le JSONC ramené au JSON garde exactement la valeur.
+#[cfg(test)]
+mod entrees_hostiles {
+    use super::*;
+    use proptest::prelude::*;
+
+    /// Un texte qui ressemble à du JSONC sans en être forcément : délimiteurs, commentaires ouverts ou non, guillemets
+    /// et barres obliques inverses, multi-octets.
+    fn presque_jsonc() -> impl Strategy<Value = String> {
+        let bout = prop_oneof![
+            prop::sample::select(vec![
+                "{",
+                "}",
+                "[",
+                "]",
+                ",",
+                ":",
+                "\"",
+                "\\",
+                "\\\"",
+                "//",
+                "/*",
+                "*/",
+                "/",
+                "*",
+                "\n",
+                " ",
+                "\u{feff}",
+                "é",
+                "😀",
+                "\"mcpServers\"",
+                "null",
+                "1",
+            ])
+            .prop_map(str::to_string),
+            any::<String>(),
+        ];
+        prop::collection::vec(bout, 0..40).prop_map(|b| b.concat())
+    }
+
+    /// Une clé : connue des lecteurs de réglages, ou quelconque.
+    fn cle() -> impl Strategy<Value = String> {
+        prop_oneof![
+            prop::sample::select(vec![
+                "mcpServers",
+                "servers",
+                "mcp",
+                "command",
+                "args",
+                "url",
+                "serverUrl",
+                "httpUrl",
+                "env",
+                "headers",
+                "permissions",
+                "defaultMode",
+                "allow",
+                "allowedTools",
+                "projects",
+                "API_KEY",
+                "apiToken",
+                "PASSWORD_FILE",
+            ])
+            .prop_map(str::to_string),
+            any::<String>(),
+        ]
+    }
+
+    /// Une valeur JSON quelconque, imbriquée (sans réels : leur relecture peut différer d'un bit, sans rapport avec le
+    /// JSONC), aux textes pleins de « // », « /* », « , » et de multi-octets.
+    fn json() -> impl Strategy<Value = Value> {
+        let feuille = prop_oneof![
+            Just(Value::Null),
+            any::<bool>().prop_map(Value::Bool),
+            any::<i64>().prop_map(Value::from),
+            prop_oneof![
+                any::<String>(),
+                "[ -~é😀/*,\\\\\"]{0,20}",
+                prop::sample::select(vec![
+                    "npx",
+                    "cmd",
+                    "uvx",
+                    "/c",
+                    "-y",
+                    "paquet@latest",
+                    "x==1",
+                    "${API_KEY}",
+                    "Bearer abc",
+                    "bypassPermissions",
+                    "Bash(*)",
+                    "http://192.0.2.10/mcp",
+                    "http://[::1]:8080/"
+                ])
+                .prop_map(str::to_string),
+            ]
+            .prop_map(Value::String),
+        ];
+        feuille.prop_recursive(4, 48, 6, |interieur| {
+            prop_oneof![
+                prop::collection::vec(interieur.clone(), 0..6).prop_map(Value::Array),
+                prop::collection::vec((cle(), interieur), 0..6).prop_map(|v| Value::Object(v.into_iter().collect())),
+            ]
+        })
+    }
+
+    /// Des réglages bien formés aux valeurs quelconques : serveurs MCP (lanceurs, arguments, adresses, variables et
+    /// en-têtes), permissions, et les mêmes par projet.
+    fn reglages() -> impl Strategy<Value = Value> {
+        fn serveurs() -> impl Strategy<Value = Value> {
+            let mot = || {
+                prop_oneof![
+                    prop::sample::select(vec![
+                        "npx",
+                        "cmd",
+                        "CMD.EXE",
+                        "uvx",
+                        "pipx",
+                        "pnpm",
+                        "yarn",
+                        "bunx",
+                        "/c",
+                        "/K",
+                        "-y",
+                        "dlx",
+                        "run",
+                        "--from",
+                        "--spec",
+                        "--package",
+                        "-p",
+                        "--python",
+                        "--with=x",
+                        "paquet",
+                        "paquet@latest",
+                        "@portee/nom@1.2.3",
+                        "x==1",
+                        "npx -y outil",
+                        "cmd /c npx outil",
+                    ])
+                    .prop_map(|m| Value::String(m.to_string())),
+                    json(),
+                ]
+            };
+            let args = prop_oneof![prop::collection::vec(mot(), 0..8).prop_map(Value::Array), json()];
+            let serveur = (mot(), args, json(), json(), json()).prop_map(|(command, args, url, env, headers)| {
+                serde_json::json!({ "command": command, "args": args, "url": url, "env": env, "headers": headers })
+            });
+            prop::collection::vec((cle(), serveur), 0..4).prop_map(|v| Value::Object(v.into_iter().collect()))
+        }
+        (serveurs(), json(), serveurs(), json()).prop_map(|(mcp, permissions, projet, allow)| {
+            serde_json::json!({
+                "mcpServers": mcp,
+                "permissions": permissions,
+                "projects": { "/home/alice/projet": { "mcpServers": projet, "allowedTools": allow } },
+            })
+        })
+    }
+
+    /// La valeur écrite en JSONC, comme VS Code le permet : à la fin de certaines lignes, un commentaire « // » ou
+    /// « /* */ » au texte quelconque, ou une virgule finale avant « } » ou « ] » ; et parfois une marque d'ordre des
+    /// octets en tête.
+    fn en_jsonc(v: &Value, choix: &[(u8, String)], bom: bool) -> String {
+        let joli = serde_json::to_string_pretty(v).unwrap();
+        let lignes: Vec<&str> = joli.lines().collect();
+        let mut sortie = String::from(if bom { "\u{feff}" } else { "" });
+        for (i, ligne) in lignes.iter().enumerate() {
+            sortie.push_str(ligne);
+            let ferme = lignes
+                .get(i + 1)
+                .is_some_and(|l| l.trim_start().starts_with(['}', ']']));
+            match choix.get(i) {
+                Some((1, t)) => {
+                    sortie.push_str(" // ");
+                    sortie.push_str(&t.replace('\n', " "));
+                }
+                Some((2, t)) => {
+                    sortie.push_str(" /* ");
+                    sortie.push_str(&t.replace("*/", "* /"));
+                    sortie.push_str(" */");
+                }
+                Some((3, _)) if ferme && !ligne.ends_with(['{', '[']) => sortie.push(','),
+                _ => {}
+            }
+            sortie.push('\n');
+        }
+        sortie
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig { cases: 256, failure_persistence: None, ..ProptestConfig::default() })]
+
+        #[test]
+        fn jsonc_quelconque(t in prop_oneof![presque_jsonc(), any::<String>()], octets in prop::collection::vec(any::<u8>(), 0..200)) {
+            prop_assert!(json_sans_jsonc(&t).len() <= t.len());
+            let _ = lire_json(t.as_bytes());
+            let _ = lire_json(&octets);
+        }
+
+        /// Du JSON reste tel quel ; écrit en JSONC, il se relit à la même valeur.
+        #[test]
+        fn jsonc_ramene_au_json(v in json(), choix in prop::collection::vec((0u8..4, any::<String>()), 0..80), bom: bool) {
+            let compact = serde_json::to_string(&v).unwrap();
+            prop_assert_eq!(json_sans_jsonc(&compact), compact);
+            let jsonc = en_jsonc(&v, &choix, bom);
+            prop_assert_eq!(lire_json(jsonc.as_bytes()), Some(v), "{}", jsonc);
+        }
+
+        #[test]
+        fn reglages_quelconques(v in prop_oneof![json(), reglages()]) {
+            let mut t = Trouvailles::default();
+            lire_reglages("Outil", &v, &mut t);
+            prop_assert!(t.non_epingles.len() <= t.serveurs);
+            prop_assert!(t.sans_chiffrement.len() <= 3 * t.serveurs);
+            let _ = juger_reglages(&t, 1, &[]);
+        }
     }
 }

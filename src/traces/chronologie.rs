@@ -1676,3 +1676,240 @@ mod tests {
         assert!(texte(&[], 0, T, &fuseau(), &[]).contains("(aucun événement / no event)"));
     }
 }
+
+/// Les journaux racontent ce que d'autres ont tapé : un nom de compte essayé par un robot, une commande, un script
+/// PowerShell, un nom de service. Jamais de panique, et chaque ligne de la chronologie reste une seule ligne de quatre
+/// champs, au détail borné.
+#[cfg(test)]
+mod entrees_hostiles {
+    use super::*;
+    use proptest::prelude::*;
+
+    fn maintenant() -> chrono::NaiveDateTime {
+        chrono::NaiveDate::from_ymd_opt(2026, 10, 21)
+            .unwrap()
+            .and_hms_opt(10, 0, 0)
+            .unwrap()
+    }
+
+    /// Un fuseau quelconque, de −23 h 59 à +23 h 59.
+    fn fuseau() -> impl Strategy<Value = chrono::FixedOffset> {
+        (-86_399i32..86_400).prop_map(|s| chrono::FixedOffset::east_opt(s).unwrap())
+    }
+
+    /// Du texte d'attaquant : quelconque, ou fait des séparateurs que les lecteurs cherchent (« from », « port »,
+    /// « : », « ; », « ' to group ' ») et de caractères qui casseraient une ligne ou l'affichage.
+    fn texte() -> impl Strategy<Value = String> {
+        let mot = prop_oneof![
+            any::<String>(),
+            prop::sample::select(vec![
+                " from ",
+                " port ",
+                " for ",
+                "invalid user ",
+                ": ",
+                " : ",
+                " ; ",
+                "COMMAND=",
+                "USER=",
+                "TTY=",
+                "name=",
+                ", UID=",
+                ", shell=",
+                "' to group '",
+                "'",
+                " added by ",
+                " to group ",
+                "] ",
+                "[",
+                "\t",
+                "\n",
+                "\r",
+                "|",
+                "\\",
+                "\u{202e}",
+                "\u{1b}[2J",
+                "é",
+                "😀",
+                "192.0.2.10",
+                "::1",
+                "-",
+            ])
+            .prop_map(str::to_string),
+        ];
+        prop::collection::vec(mot, 0..10).prop_map(|m| m.concat())
+    }
+
+    /// Un mot d'attaquant (sans blanc, comme un nom de compte ou d'hôte), ou un texte d'attaquant.
+    fn mot() -> impl Strategy<Value = String> {
+        prop_oneof![3 => "[a-zA-Z0-9_.$é😀\u{202e}-]{1,12}", 1 => texte()]
+    }
+
+    /// Une ligne de journal texte : une date à l'un des trois formats (valide ou non), l'hôte, le programme et un
+    /// message construit comme ceux que la chronologie lit, aux valeurs d'attaquant.
+    fn ligne_de_journal() -> impl Strategy<Value = String> {
+        let date = prop_oneof![
+            3 => prop::sample::select(vec![
+                "2026-10-20T14:03:22-04:00",
+                "2026-10-20T14:03:22.5+0200",
+                "2026-10-20 14:03:22.123456-0400",
+                "Oct 20 14:03:22",
+                "Dec 31 23:59",
+                "Feb 29 12:00:00",
+            ])
+            .prop_map(str::to_string),
+            1 => "[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.+-]{0,20}",
+            1 => "(Jan|Feb|Dec|Oct) +[0-9]{1,3} [0-9:]{0,9}",
+            1 => any::<String>(),
+        ];
+        let adresse = prop_oneof![
+            any::<[u8; 4]>().prop_map(|o| std::net::IpAddr::from(o).to_string()),
+            mot()
+        ];
+        let message = prop_oneof![
+            (
+                prop::sample::select(vec![
+                    "Accepted publickey for ",
+                    "Failed password for ",
+                    "Failed password for invalid user "
+                ]),
+                texte(),
+                adresse,
+                mot(),
+                texte()
+            )
+                .prop_map(|(d, compte, a, port, reste)| format!(
+                    "sshd[1]: {d}{compte} from {a} port {port} ssh2{reste}"
+                )),
+            (mot(), texte(), mot(), texte()).prop_map(|(compte, raison, cible, commande)| format!(
+                "sudo[77]:     {compte} : {raison}TTY=pts/0 ; PWD=/home/x ; USER={cible} ; COMMAND={commande}"
+            )),
+            (texte(), mot(), texte()).prop_map(|(nom, uid, shell)| format!(
+                "useradd[9]: new user: name={nom}, UID={uid}, GID=1001, home=/home/x, shell={shell}, from=/dev/pts/1"
+            )),
+            (texte(), texte()).prop_map(|(c, g)| format!("usermod[9]: add '{c}' to group '{g}'")),
+            (texte(), texte(), texte()).prop_map(|(c, a, g)| format!("gpasswd[9]: user {c} added by {a} to group {g}")),
+            (mot(), texte(), any::<bool>()).prop_map(|(nom, reste, signe)| if signe {
+                format!("kernel: [   12.345678] {nom}: module verification failed: {reste}")
+            } else {
+                format!("kernel: {nom}: loading out-of-tree module taints kernel{reste}")
+            }),
+            texte().prop_map(|m| format!("cron[1]: {m}")),
+        ];
+        (date, mot(), message).prop_map(|(d, hote, m)| format!("{d} {hote} {m}"))
+    }
+
+    /// Une sortie de « last » : compte, terminal, hôte, puis une date (jour, mois, quantième, heure, année) vraie ou
+    /// fausse, et la suite.
+    fn sortie_de_last() -> impl Strategy<Value = String> {
+        let choix =
+            |v: Vec<&'static str>| prop_oneof![3 => prop::sample::select(v).prop_map(str::to_string), 1 => mot()];
+        let ligne = (
+            choix(vec!["reboot", "shutdown", "runlevel", "alice", "wtmp"]),
+            choix(vec!["system boot", "pts/3", "~", "ttys001", "begins"]),
+            choix(vec![
+                "6.17.1-arch1-1",
+                "192.0.2.10",
+                ":0",
+                "wayland-1",
+                "box.example",
+                "(:0)",
+                "",
+            ]),
+            choix(vec!["Tue", "Mon", "Sun"]),
+            choix(vec!["Oct", "Feb", "Dec"]),
+            choix(vec!["20", "29", "31", "0", "99999999999"]),
+            choix(vec!["14:03:22", "14:03", "25:61", ":"]),
+            choix(vec!["2026", "2025", "0000", "99999", ""]),
+            texte(),
+        )
+            .prop_map(|(c, t, h, j, m, q, heure, a, suite)| format!("{c} {t} {h} {j} {m} {q} {heure} {a} {suite}"));
+        prop::collection::vec(prop_oneof![3 => ligne, 1 => texte()], 0..8).prop_map(|l| l.join("\n"))
+    }
+
+    /// Les valeurs nommées d'un événement de Windows : les noms lus, des valeurs d'attaquant.
+    fn valeurs() -> impl Strategy<Value = Vec<(String, String)>> {
+        let nom = prop::sample::select(vec![
+            "TargetUserName",
+            "TargetDomainName",
+            "LogonType",
+            "IpAddress",
+            "SubjectUserName",
+            "MemberName",
+            "MemberSid",
+            "ServiceName",
+            "ServiceFileName",
+            "ImagePath",
+            "TaskName",
+            "TaskContent",
+            "Channel",
+            "MessageNumber",
+            "ScriptBlockText",
+            "Path",
+            "Threat Name",
+            "Action Name",
+        ]);
+        let valeur = prop_oneof![
+            texte(),
+            prop::sample::select(vec!["2", "3", "10", "11", "1", "-", "", "SYSTEM", "PC$", "127.0.0.1"])
+                .prop_map(str::to_string),
+            (texte(), texte()).prop_map(|(c, a)| format!("<Task><Command>{c}</Command><Arguments>{a}</Arguments>")),
+        ];
+        prop::collection::vec((nom.prop_map(str::to_string), valeur), 0..12)
+    }
+
+    /// Une ligne de la chronologie : une seule ligne, quatre champs, un détail borné.
+    fn ligne_sure(e: &Evenement, fuseau: chrono::FixedOffset) -> Result<(), TestCaseError> {
+        let l = ligne(e, &fuseau);
+        prop_assert!(!l.contains(['\n', '\r']), "{l:?}");
+        prop_assert_eq!(l.split('\t').count(), 4, "{:?}", l);
+        prop_assert!(
+            l.split('\t').nth(2).unwrap().chars().count() <= 200 + MAX_DETAIL,
+            "{l:?}"
+        );
+        Ok(())
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig { cases: 512, failure_persistence: None, ..ProptestConfig::default() })]
+
+        #[test]
+        fn journaux_texte(l in prop_oneof![ligne_de_journal(), any::<String>()], f in fuseau()) {
+            let _ = quand_de_ligne(&l, maintenant(), &f);
+            if let Some(e) = lire_ligne_journal(&l, maintenant(), &f) {
+                ligne_sure(&e, f)?;
+            }
+        }
+
+        #[test]
+        fn sorties_de_last(s in prop_oneof![sortie_de_last(), any::<String>()], f in fuseau()) {
+            let evenements = lire_last(&s, maintenant(), &f);
+            prop_assert!(evenements.len() <= s.lines().count());
+            for e in &evenements {
+                ligne_sure(e, f)?;
+            }
+        }
+
+        #[test]
+        fn evenements_de_windows(
+            id in prop::sample::select(vec![4624u32, 4625, 4720, 4732, 4697, 7045, 4698, 1102, 104, 4104, 1116, 1117, 5001, 0]),
+            date in prop_oneof![Just("2026-10-20T18:03:22.1234567Z".to_string()), "[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.Z+-]{0,24}", any::<String>()],
+            v in valeurs(),
+            f in fuseau(),
+        ) {
+            if let Some(e) = evenement_windows(id, &date, &v) {
+                ligne_sure(&e, f)?;
+            }
+        }
+
+        #[test]
+        fn comptes_et_dates_de_windows(lignes in prop::collection::vec(texte(), 0..6), sep in prop_oneof![Just('\u{241f}'), Just('|'), any::<char>()], f in fuseau(), ft: u64, quand: i64) {
+            let lignes: Vec<&str> = lignes.iter().map(String::as_str).collect();
+            for e in comptes_windows(&lignes, sep, &f) {
+                ligne_sure(&e, f)?;
+            }
+            let _ = filetime_vers_unix(ft);
+            let _ = date_locale(quand, &f);
+        }
+    }
+}

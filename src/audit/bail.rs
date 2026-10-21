@@ -915,8 +915,8 @@ mod tests {
         assert_eq!(b.expire, Some(800_000_000 + 978_307_200 + 86_400));
         assert!(bail_macos(&Valeur::Dico(vec![])).is_none());
         // Une date démesurée (plist binaire abîmé) : ignorée, le reste du bail lu. Elle débordait (« as u64 » sature,
-        // puis l'addition), et le domaine entier devenait une erreur interne.
-        for demesuree in [1e300, f64::INFINITY] {
+        // puis l'addition), et le domaine entier devenait une erreur interne. proptest l'avait trouvée aussi (1e30).
+        for demesuree in [1e300, f64::INFINITY, 1e30] {
             let bail = Valeur::Dico(vec![
                 ("LeaseStartDate".into(), Valeur::Date(demesuree)),
                 ("PacketData".into(), Valeur::Donnees(paquet())),
@@ -958,5 +958,198 @@ mod tests {
         }
         let c = configuration();
         assert!(c.serveurs.iter().all(|(nom, _)| !nom.is_empty()));
+    }
+}
+
+/// Ce que le serveur DHCP (la box, ou ce qui se fait passer pour elle) met dans un bail, et ce que les fichiers du
+/// système en gardent : jamais de panique, une lecture bornée.
+#[cfg(test)]
+mod entrees_hostiles {
+    use super::*;
+    use crate::plist::Valeur;
+    use proptest::prelude::*;
+
+    /// Une valeur d'adresse : des adresses vraies (IPv4, IPv6 avec zone, entre crochets ou guillemets) séparées comme
+    /// les fichiers le font, ou du texte quelconque.
+    fn valeur() -> impl Strategy<Value = String> {
+        let adresse = prop_oneof![
+            any::<[u8; 4]>().prop_map(|o| IpAddr::from(o).to_string()),
+            any::<[u8; 16]>().prop_map(|o| format!("[{}%wlan0]", IpAddr::from(o))),
+            "[0-9a-f.:%\"\\[\\]]{0,20}",
+            any::<String>(),
+        ];
+        prop::collection::vec(
+            (adresse, prop::sample::select(vec![" ", ",", ";", "\t", "#", ""])),
+            0..6,
+        )
+        .prop_map(|v| v.into_iter().map(|(a, s)| a + s).collect())
+    }
+
+    /// Les lignes d'un fichier de bail ou de réglages : sections, « clé=valeur » ou « option clé valeur; » aux clés
+    /// connues (avec ou sans le préfixe de leur section), commentaires, et lignes quelconques.
+    fn fichier() -> impl Strategy<Value = String> {
+        let cles = prop::sample::select(vec![
+            "ip_address",
+            "dhcp4.ip_address",
+            "dhcp6.ip6_address",
+            "dhcp_server_identifier",
+            "routers",
+            "domain_name_servers",
+            "dhcp6_name_servers",
+            "domain_name",
+            "expiry",
+            "ADDRESS",
+            "ROUTER",
+            "SERVER_ADDRESS",
+            "DNS",
+            "DOMAINNAME",
+            "LIFETIME",
+            "DNSOverTLS",
+            "DNSSEC",
+            "nameserver",
+        ]);
+        let ligne = prop_oneof![
+            prop::sample::select(vec![
+                "[dhcp4]",
+                "[dhcp6]",
+                "[device]",
+                "[Resolve]",
+                "[",
+                "lease {",
+                "}",
+                "#",
+                ";"
+            ])
+            .prop_map(str::to_string),
+            (cles.clone(), valeur()).prop_map(|(c, v)| format!("{c}={v}")),
+            (cles, valeur()).prop_map(|(c, v)| format!("{c} {v}")),
+            (
+                prop::sample::select(vec![
+                    "interface",
+                    "fixed-address",
+                    "routers",
+                    "dhcp-server-identifier",
+                    "domain-name-servers",
+                    "domain-name",
+                ]),
+                valeur()
+            )
+                .prop_map(|(c, v)| format!("  option {c} {v};")),
+            "(expiry|LIFETIME)=[0-9]{0,25}",
+            any::<String>(),
+        ];
+        prop::collection::vec(ligne, 0..20).prop_map(|l| l.join("\n"))
+    }
+
+    /// Un paquet DHCP : l'en-tête BOOTP (réponse, cookie magique) puis des options aux longueurs vraies ou fausses ;
+    /// ou des octets quelconques.
+    fn paquet() -> impl Strategy<Value = Vec<u8>> {
+        let option = (
+            prop::sample::select(vec![0u8, 3, 6, 15, 51, 54, 255, 1, 128]),
+            prop::collection::vec(any::<u8>(), 0..40),
+            prop::option::of(any::<u8>()),
+        )
+            .prop_map(|(code, valeur, longueur)| {
+                let mut o = vec![code, longueur.unwrap_or(u8::try_from(valeur.len()).unwrap_or(0))];
+                o.extend(valeur);
+                o
+            });
+        let construit = (any::<[u8; 4]>(), prop::collection::vec(option, 0..12)).prop_map(|(adresse, options)| {
+            let mut p = vec![0u8; 240];
+            p[0] = 2;
+            p[16..20].copy_from_slice(&adresse);
+            p[236..240].copy_from_slice(&[0x63, 0x82, 0x53, 0x63]);
+            p.extend(options.concat());
+            p
+        });
+        prop_oneof![construit, prop::collection::vec(any::<u8>(), 0..300)]
+    }
+
+    /// Le bail lu doit rester dans ce qu'un paquet peut porter : 63 serveurs DNS au plus (255 octets d'option).
+    fn borne(b: &Bail) -> bool {
+        b.dns.len() <= 64 && b.domaine.as_ref().is_none_or(|d| d.len() <= 3 * 255)
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig { cases: 512, failure_persistence: None, ..ProptestConfig::default() })]
+
+        #[test]
+        fn paquets_dhcp(p in paquet(), debut in prop::option::of(any::<u64>())) {
+            if let Some(b) = paquet_dhcp(&p, debut) {
+                prop_assert!(borne(&b));
+            }
+        }
+
+        #[test]
+        fn fichiers_de_bail_et_de_reglages(t in fichier(), debut in prop::option::of(any::<u64>()), maintenant: u64) {
+            for b in etat_networkmanager(&t) {
+                let _ = b.en_cours(maintenant);
+            }
+            let _ = bail_systemd(&t, debut);
+            let _ = bail_dhclient(&t);
+            let _ = resolv_conf(&t);
+            let mut r = Resolved::default();
+            resolved_conf(&t, &mut r);
+        }
+
+        /// Les valeurs du registre de Windows : écrites par le client DHCP d'après la box.
+        #[test]
+        fn registre_de_windows(
+            enable_dhcp in prop::option::of(any::<u32>()),
+            valeurs in prop::collection::vec(prop::option::of(valeur()), 5),
+            passerelles in prop::collection::vec(valeur(), 0..3),
+            lease_terminates_time in prop::option::of(any::<u32>()),
+            maintenant: u64,
+        ) {
+            let c = CarteRegistre {
+                guid: "{4D36E972-E325-11CE-BFC1-08002BE10318}".to_string(),
+                enable_dhcp,
+                dhcp_ip_address: valeurs[0].clone(),
+                dhcp_server: valeurs[1].clone(),
+                dhcp_name_server: valeurs[2].clone(),
+                dhcp_default_gateway: passerelles,
+                dhcp_domain: valeurs[3].clone(),
+                name_server: valeurs[4].clone(),
+                lease_terminates_time,
+            };
+            let _ = bail_du_registre(&c, maintenant);
+        }
+
+        /// Les plists de macOS : le paquet reçu, daté d'un réel quelconque (infini, NaN, négatif, démesuré), et les
+        /// serveurs réglés à la main.
+        #[test]
+        fn plists_de_macos(
+            p in paquet(),
+            date in prop_oneof![any::<f64>(), Just(f64::INFINITY), Just(f64::MAX), Just(f64::NAN), 0.0..1e10f64],
+            routeur in any::<String>(),
+            nom in any::<String>(),
+            serveurs in prop::collection::vec(valeur(), 0..4),
+        ) {
+            let bail = Valeur::Dico(vec![
+                ("PacketData".to_string(), Valeur::Donnees(p)),
+                ("LeaseStartDate".to_string(), Valeur::Date(date)),
+                ("RouterIPAddress".to_string(), Valeur::Texte(routeur)),
+            ]);
+            if let Some(b) = bail_macos(&bail) {
+                prop_assert!(borne(&b));
+            }
+            let services = Valeur::Dico(vec![(
+                "NetworkServices".to_string(),
+                Valeur::Dico(vec![(
+                    "0F1E2D3C".to_string(),
+                    Valeur::Dico(vec![
+                        ("UserDefinedName".to_string(), Valeur::Texte(nom)),
+                        (
+                            "DNS".to_string(),
+                            Valeur::Dico(vec![(
+                                "ServerAddresses".to_string(),
+                                Valeur::Tableau(serveurs.into_iter().map(Valeur::Texte).collect()),
+                            )]),
+                        ),
+                    ]),
+                )]),
+            )]);
+            let _ = manuels_macos(&services);
+        }
     }
 }

@@ -333,3 +333,106 @@ mod tests {
         assert_eq!(demander("GET", &url, &[], None, Instant::now()), None);
     }
 }
+
+/// Ce qu'un appareil du réseau local peut répondre de pire : jamais de panique, un corps jamais plus long que ce qui
+/// est arrivé, et une adresse acceptée qui reste locale.
+#[cfg(test)]
+mod entrees_hostiles {
+    use super::*;
+    use proptest::prelude::*;
+
+    /// Une réponse HTTP brute : ligne d'état, en-têtes (longueurs énormes ou fausses, « chunked »), puis des
+    /// morceaux annoncés en hexadécimal (tailles démesurées comprises), des fins de morceau, des octets quelconques
+    /// et du texte UTF-8 multi-octets. Ou rien que des octets quelconques.
+    fn reponse() -> impl Strategy<Value = Vec<u8>> {
+        let etat = prop_oneof![
+            Just("HTTP/1.1 200 OK".to_string()),
+            Just("HTTP/1.0 500 Internal Server Error".to_string()),
+            "(HTTP|http|HtTp)/1\\.[0-9é] [0-9]{0,7}[ -~é]{0,10}",
+            any::<String>(),
+        ];
+        let entete = prop_oneof![
+            "Content-Length: ?[0-9]{0,25}",
+            "content-length:[ -~é]{0,10}",
+            Just("Transfer-Encoding: chunked".to_string()),
+            "[ -~é😀]{0,30}",
+            any::<String>(),
+        ];
+        let morceau = prop_oneof![
+            "[0-9a-fA-F]{1,20}(;[ -~é]{0,5})?\r\n".prop_map(String::into_bytes),
+            Just(b"\r\n".to_vec()),
+            Just(b"0\r\n\r\n".to_vec()),
+            prop::collection::vec(any::<u8>(), 0..40),
+            any::<String>().prop_map(String::into_bytes),
+        ];
+        let construite = (
+            etat,
+            prop::collection::vec(entete, 0..6),
+            prop::collection::vec(morceau, 0..12),
+        )
+            .prop_map(|(etat, entetes, corps)| {
+                let mut brut = format!("{etat}\r\n{}\r\n\r\n", entetes.join("\r\n")).into_bytes();
+                brut.extend(corps.concat());
+                brut
+            });
+        prop_oneof![construite, prop::collection::vec(any::<u8>(), 0..300)]
+    }
+
+    /// Une adresse d'appareil : http:// suivi de n'importe quoi, d'une adresse IPv4 (locale ou non) avec un port
+    /// quelconque, puis d'un chemin quelconque.
+    fn url() -> impl Strategy<Value = String> {
+        let hote = prop_oneof![
+            Just("10.0.0.1".to_string()),
+            Just("192.168.1.1".to_string()),
+            Just("8.8.8.8".to_string()),
+            "[0-9.]{0,16}",
+            any::<String>(),
+        ];
+        let port = prop_oneof![
+            Just(String::new()),
+            ":[0-9]{0,7}",
+            any::<String>().prop_map(|p| format!(":{p}"))
+        ];
+        (hote, port, any::<String>(), "[ -~é\r\n\t]{0,20}").prop_map(|(h, p, c, d)| format!("http://{h}{p}/{c}{d}"))
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig { cases: 512, failure_persistence: None, ..ProptestConfig::default() })]
+
+        #[test]
+        fn reponses_brutes(brut in reponse()) {
+            let _ = complete(&brut);
+            if let Some(r) = lire_reponse(&brut) {
+                prop_assert!(r.corps.len() <= brut.len());
+                let _ = r.texte();
+            }
+            prop_assert!(recoller(&brut).len() <= brut.len());
+        }
+
+        /// Des morceaux bien annoncés se recollent exactement, quels que soient leurs octets.
+        #[test]
+        fn morceaux_recolles(morceaux in prop::collection::vec(prop::collection::vec(any::<u8>(), 1..50), 0..8)) {
+            let mut corps = Vec::new();
+            for m in &morceaux {
+                corps.extend(format!("{:x}\r\n", m.len()).into_bytes());
+                corps.extend(m);
+                corps.extend(b"\r\n");
+            }
+            corps.extend(b"0\r\n\r\n");
+            let mut brut = b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n".to_vec();
+            brut.extend(&corps);
+            prop_assert!(complete(&brut));
+            prop_assert_eq!(lire_reponse(&brut).map(|r| r.corps), Some(morceaux.concat()));
+        }
+
+        #[test]
+        fn adresses_d_appareil(u in prop_oneof![url(), any::<String>()], lien in any::<String>()) {
+            if let Some(a) = Adresse::lire(&u) {
+                prop_assert!(crate::reseau::nmap::locale(a.ip), "{u:?}");
+                prop_assert!(a.chemin.starts_with('/'));
+                prop_assert!(!a.chemin.chars().any(|c| c.is_ascii_control() || c == ' '), "{u:?}");
+                let _ = a.resoudre(&lien);
+            }
+        }
+    }
+}

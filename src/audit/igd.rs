@@ -907,3 +907,198 @@ mod tests {
         assert_eq!((liste.len(), lues, tronquees), (1, true, true));
     }
 }
+
+/// Ce que la box (ou un appareil qui se fait passer pour elle) peut répondre de pire : jamais de panique, et ce qui
+/// en est gardé reste borné et inoffensif.
+#[cfg(test)]
+mod entrees_hostiles {
+    use super::*;
+    use crate::ui::piege;
+    use proptest::prelude::*;
+
+    /// Un texte gardé de la box : court, sans caractère qui piloterait le terminal.
+    fn montrable(t: &str) -> bool {
+        t.chars().count() <= TEXTE_MAX && !t.chars().any(piege)
+    }
+
+    /// Du XML de box, ni ordonné ni équilibré : balises UPnP et SOAP connues (ouvrantes, fermantes, vides), entités et
+    /// références de caractères valides ou non, CDATA, et du texte quelconque (UTF-8 multi-octets compris).
+    fn xml() -> impl Strategy<Value = String> {
+        let balises = prop::sample::select(vec![
+            "root",
+            "device",
+            "friendlyName",
+            "manufacturer",
+            "modelName",
+            "modelNumber",
+            "URLBase",
+            "serviceList",
+            "service",
+            "serviceType",
+            "controlURL",
+            "NewExternalIPAddress",
+            "NewExternalPort",
+            "NewInternalPort",
+            "NewInternalClient",
+            "NewProtocol",
+            "NewPortMappingDescription",
+            "NewLeaseDuration",
+            "NewRemoteHost",
+            "NewEnabled",
+            "errorCode",
+            "s:Envelope",
+            "u:GetGenericPortMappingEntryResponse",
+        ]);
+        let bouts = prop::sample::select(vec![
+            "&amp;",
+            "&lt;",
+            "&#x27;",
+            "&#39;",
+            "&#xD800;",
+            "&#99999999999;",
+            "&#x;",
+            "&inconnue;",
+            "&",
+            "<![CDATA[",
+            "]]>",
+            "<?xml version=\"1.0\"?>",
+            "<!--",
+            "-->",
+            "urn:schemas-upnp-org:service:WANIPConnection:1",
+            "urn:schemas-upnp-org:service:WANPPPConnection:1\" x=\"",
+            "http://10.0.0.1:5000/",
+            "http://8.8.8.8/",
+            "/ctl/IPConn",
+            "65535",
+            "70000",
+            "-1",
+            "192.168.1.20",
+        ]);
+        let contenu = prop_oneof![
+            any::<String>(),
+            "[0-9]{1,7}",
+            "[ -~é😀\u{202e}\u{1b}]{0,100}",
+            bouts.clone().prop_map(str::to_string),
+        ];
+        let morceau = prop_oneof![
+            any::<String>(),
+            "[ -~é€😀\u{202e}\u{1b}\t\r\n]{0,20}",
+            (balises.clone(), 0..3u8).prop_map(|(b, forme)| match forme {
+                0 => format!("<{b}>"),
+                1 => format!("</{b}>"),
+                _ => format!("<{b}/>"),
+            }),
+            // Un élément entier, pour aller jusqu'aux champs lus (port, client, service WAN).
+            (balises, contenu.clone()).prop_map(|(b, c)| format!("<{b}>{c}</{b}>")),
+            (contenu.clone(), contenu).prop_map(|(genre, controle)| format!(
+                "<service><serviceType>{genre}</serviceType><controlURL>{controle}</controlURL></service>"
+            )),
+            bouts.prop_map(str::to_string),
+        ];
+        prop::collection::vec(morceau, 0..60).prop_map(|v| v.concat())
+    }
+
+    /// Un texte écrit par la box : quelconque, ou fait de caractères qui pilotent un terminal ou retournent le texte.
+    fn texte() -> impl Strategy<Value = String> {
+        prop_oneof![any::<String>(), "[ -~é😀\u{202e}\u{1b}\u{200b}<&]{0,120}"]
+    }
+
+    /// Une description de box bien formée, aux valeurs quelconques : nom, fabricant, URLBase, type et adresse du
+    /// service (WAN ou non, avec des caractères qui sortiraient de l'en-tête SOAPAction), suivie de bruit.
+    fn description() -> impl Strategy<Value = String> {
+        let genre = prop_oneof![
+            Just("urn:schemas-upnp-org:service:WANIPConnection:1".to_string()),
+            Just("urn:schemas-upnp-org:service:WANPPPConnection:1".to_string()),
+            texte().prop_map(|t| format!("WANIPConnection{t}")),
+            texte(),
+        ];
+        let lien = prop_oneof![
+            Just("/ctl/IPConn".to_string()),
+            Just("http://10.0.0.1:5000/".to_string()),
+            texte()
+        ];
+        (texte(), texte(), lien.clone(), genre, lien, xml()).prop_map(
+            |(nom, fabricant, base, genre, controle, bruit)| {
+                format!(
+                    "<root><URLBase>{base}</URLBase><device><friendlyName>{nom}</friendlyName>\
+                 <manufacturer>{fabricant}</manufacturer><serviceList><service><serviceType>{genre}</serviceType>\
+                 <controlURL>{controle}</controlURL></service></serviceList></device>{bruit}</root>"
+                )
+            },
+        )
+    }
+
+    /// Une réponse à GetGenericPortMappingEntry bien formée, aux valeurs quelconques (ports hors de 0..65535
+    /// compris), suivie de bruit.
+    fn reponse_soap() -> impl Strategy<Value = String> {
+        let nombre = prop_oneof![3 => (0u32..70_000).prop_map(|n| n.to_string()), 1 => texte()];
+        (nombre.clone(), nombre.clone(), texte(), texte(), texte(), nombre, xml()).prop_map(
+            |(public, interne, client, description, protocole, bail, bruit)| {
+                format!(
+                    "<s:Envelope><s:Body><u:R><NewExternalPort>{public}</NewExternalPort>\
+                     <NewInternalPort>{interne}</NewInternalPort><NewInternalClient>{client}</NewInternalClient>\
+                     <NewPortMappingDescription>{description}</NewPortMappingDescription>\
+                     <NewProtocol>{protocole}</NewProtocol><NewLeaseDuration>{bail}</NewLeaseDuration>{bruit}\
+                     </u:R></s:Body></s:Envelope>"
+                )
+            },
+        )
+    }
+
+    /// Une réponse SSDP : la ligne d'état, des en-têtes connus ou non, des valeurs quelconques.
+    fn ssdp() -> impl Strategy<Value = String> {
+        let ligne = prop_oneof![
+            any::<String>(),
+            Just("HTTP/1.1 200 OK".to_string()),
+            Just("ST: urn:schemas-upnp-org:device:InternetGatewayDevice:1".to_string()),
+            "(LOCATION|Location|SERVER|NT|ST|location): ?[ -~é😀\u{202e}]{0,40}",
+            "LOCATION: http://(10\\.0\\.0\\.1|192\\.168\\.1\\.1|8\\.8\\.8\\.8|é)(:[0-9]{0,6})?/[ -~é]{0,20}",
+        ];
+        prop::collection::vec(ligne, 0..10).prop_map(|l| l.join("\r\n"))
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig { cases: 512, failure_persistence: None, ..ProptestConfig::default() })]
+
+        #[test]
+        fn xml_de_la_box(x in prop_oneof![xml(), description(), reponse_soap()]) {
+            let debuts = noeuds(&x).iter().filter(|n| matches!(n, Noeud::Debut(_))).count();
+            prop_assert!(debuts <= ELEMENTS_MAX);
+            let base = Adresse::lire("http://10.0.0.1:5000/rootDesc.xml").unwrap();
+            let (description, service) = lire_description(&x, &base);
+            for champ in [description.nom, description.fabricant, description.modele, description.version].iter().flatten() {
+                prop_assert!(montrable(champ), "{champ:?}");
+            }
+            if let Some(s) = service {
+                prop_assert!(s.genre.chars().all(|c| c.is_ascii_alphanumeric() || ":-._".contains(c)), "{:?}", s.genre);
+            }
+            if let Some(r) = redirection(&x) {
+                for champ in [&r.protocole, &r.appareil, &r.description, &r.hote_distant] {
+                    prop_assert!(montrable(champ), "{champ:?}");
+                }
+            }
+            let _ = erreur_soap(&x);
+            let _ = valeur(&x, "NewExternalIPAddress");
+        }
+
+        #[test]
+        fn reponses_ssdp(t in ssdp()) {
+            if let Some(r) = lire_reponse_ssdp(&t) {
+                prop_assert!(Adresse::lire(&r.emplacement).is_some());
+                prop_assert!(r.serveur.as_deref().is_none_or(montrable));
+            }
+        }
+    }
+
+    // Deux cents lectures par cas : moins de cas.
+    proptest! {
+        #![proptest_config(ProptestConfig { cases: 64, failure_persistence: None, ..ProptestConfig::default() })]
+
+        /// Une box qui répond toujours la même chose, quoi que ce soit : la liste reste bornée.
+        #[test]
+        fn redirections_bornees(x in prop_oneof![xml(), reponse_soap()], code in prop::sample::select(vec![200u16, 500])) {
+            let (liste, _, _) = lire_redirections(|_| Some(Reponse { code, corps: x.clone().into_bytes() }));
+            prop_assert!(liste.len() <= MAX_REDIRECTIONS as usize);
+        }
+    }
+}

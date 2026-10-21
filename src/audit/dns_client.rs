@@ -493,3 +493,190 @@ mod tests {
         assert!(debut.elapsed() < Duration::from_secs(8), "{:?}", debut.elapsed());
     }
 }
+
+/// Ce que n'importe quel serveur (ou un paquet forgé qui se fait passer pour sa réponse) peut envoyer : jamais de
+/// panique, une lecture bornée (enregistrements, noms, chaînes).
+#[cfg(test)]
+mod entrees_hostiles {
+    use super::*;
+    use proptest::prelude::*;
+
+    const ID: u16 = 0x1234;
+
+    /// Un nom en forme de fil : étiquettes (longueur vraie ou mensongère, octets quelconques), pointeurs de
+    /// compression vers n'importe où (y compris vers eux-mêmes), étiquettes étendues, fin ou pas de fin.
+    fn nom_brut() -> impl Strategy<Value = Vec<u8>> {
+        let morceau = prop_oneof![
+            prop::collection::vec(any::<u8>(), 0..70).prop_map(|e| {
+                let mut m = vec![u8::try_from(e.len()).unwrap_or(63) & 0x3F];
+                m.extend(e);
+                m
+            }),
+            "[a-zé😀]{1,20}".prop_map(|e| {
+                let mut m = vec![u8::try_from(e.len()).unwrap_or(63) & 0x3F];
+                m.extend(e.into_bytes());
+                m
+            }),
+            (any::<u8>(), any::<u8>()).prop_map(|(h, b)| vec![0xC0 | h, b]),
+            Just(vec![0xC0, 0x0C]),
+            any::<u8>().prop_map(|o| vec![o]),
+        ];
+        (prop::collection::vec(morceau, 0..6), any::<bool>()).prop_map(|(m, fin)| {
+            let mut n = m.concat();
+            if fin {
+                n.push(0);
+            }
+            n
+        })
+    }
+
+    /// Les données d'un enregistrement : octets quelconques, chaînes TXT, ou un SVCB (priorité, cible, paramètres
+    /// alpn, port, adresses, chemin DoH, de longueurs vraies ou fausses).
+    fn donnees() -> impl Strategy<Value = Vec<u8>> {
+        let parametre = (
+            prop::sample::select(vec![1u16, 3, 4, 6, 7, 0, 65535]),
+            prop::collection::vec(any::<u8>(), 0..40),
+            any::<bool>(),
+        )
+            .prop_map(|(cle, valeur, ment)| {
+                let mut p = cle.to_be_bytes().to_vec();
+                let longueur = if ment {
+                    u16::MAX
+                } else {
+                    u16::try_from(valeur.len()).unwrap_or(0)
+                };
+                p.extend(longueur.to_be_bytes());
+                p.extend(valeur);
+                p
+            });
+        prop_oneof![
+            prop::collection::vec(any::<u8>(), 0..60),
+            prop::collection::vec(any::<String>(), 0..40).prop_map(|t| t
+                .iter()
+                .flat_map(|c| {
+                    let c = c.as_bytes();
+                    let mut m = vec![u8::try_from(c.len()).unwrap_or(255)];
+                    m.extend(c);
+                    m
+                })
+                .collect()),
+            (
+                any::<u16>(),
+                souvent(Just(vec![0]), nom_brut()),
+                prop::collection::vec(parametre, 0..6)
+            )
+                .prop_map(|(priorite, cible, params)| {
+                    let mut d = priorite.to_be_bytes().to_vec();
+                    d.extend(cible);
+                    d.extend(params.concat());
+                    d
+                }),
+        ]
+    }
+
+    /// Le plus souvent vrai, parfois quelconque : pour aller loin dans la lecture avant d'y tomber.
+    fn souvent<T: std::fmt::Debug + Clone + 'static>(
+        vrai: impl Strategy<Value = T> + 'static,
+        quelconque: impl Strategy<Value = T> + 'static,
+    ) -> BoxedStrategy<T> {
+        prop_oneof![3 => vrai, 1 => quelconque].boxed()
+    }
+
+    /// Un enregistrement : nom, type (lus ou non), classe, TTL, longueur annoncée (vraie ou fausse), données.
+    fn enregistrement_brut() -> impl Strategy<Value = Vec<u8>> {
+        (
+            souvent(Just(vec![0xC0, 0x0C]), nom_brut()),
+            prop::sample::select(vec![1u16, 28, 16, 64, 65, 5, 46, 41]),
+            any::<u32>(),
+            donnees(),
+            souvent(Just(None), any::<u16>().prop_map(Some)),
+        )
+            .prop_map(|(nom, genre, ttl, d, longueur)| {
+                let mut e = nom;
+                e.extend(genre.to_be_bytes());
+                e.extend([0, 1]);
+                e.extend(ttl.to_be_bytes());
+                e.extend(longueur.unwrap_or(u16::try_from(d.len()).unwrap_or(0)).to_be_bytes());
+                e.extend(d);
+                e
+            })
+    }
+
+    /// Une réponse à la question `ID` : drapeaux quelconques (bit de réponse posé), nombres de questions et de
+    /// réponses quelconques, une question, des enregistrements, puis quelques octets changés et une coupe.
+    fn message() -> impl Strategy<Value = Vec<u8>> {
+        (
+            any::<u16>(),
+            souvent(Just(1u16), 0u16..8),
+            souvent(Just(None), any::<u16>().prop_map(Some)),
+            souvent(Just(b"\x03dns\x06google\x00".to_vec()), nom_brut()),
+            prop::collection::vec(enregistrement_brut(), 0..10),
+            souvent(
+                Just(Vec::new()),
+                prop::collection::vec((any::<usize>(), any::<u8>()), 1..4),
+            ),
+            souvent(Just(None), any::<usize>().prop_map(Some)),
+        )
+            .prop_map(|(drapeaux, questions, reponses, q, enregistrements, changes, coupe)| {
+                let mut m = ID.to_be_bytes().to_vec();
+                m.extend((drapeaux | 0x8000).to_be_bytes());
+                m.extend(questions.to_be_bytes());
+                let nombre = reponses.unwrap_or(u16::try_from(enregistrements.len()).unwrap_or(0));
+                m.extend(nombre.to_be_bytes());
+                m.extend([0, 0, 0, 0]);
+                m.extend(q);
+                m.extend([0, 1, 0, 1]);
+                m.extend(enregistrements.concat());
+                let n = m.len();
+                for (i, o) in changes {
+                    m[i % n] = o;
+                }
+                if let Some(coupe) = coupe {
+                    m.truncate(12 + coupe % (n - 11));
+                }
+                m
+            })
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig { cases: 1024, failure_persistence: None, ..ProptestConfig::default() })]
+
+        #[test]
+        fn reponses_forgees(m in prop_oneof![message(), prop::collection::vec(any::<u8>(), 0..200)]) {
+            let Some(r) = lire(&m, ID) else { return Ok(()) };
+            prop_assert!(r.enregistrements.len() <= ENREGISTREMENTS_MAX);
+            for e in &r.enregistrements {
+                prop_assert!(e.nom.len() <= 253);
+                match &e.donnees {
+                    Donnees::Txt(t) => prop_assert!(t.len() <= 32),
+                    Donnees::Svcb { cible, alpn, .. } => prop_assert!(cible.len() <= 253 && alpn.len() <= 32),
+                    _ => {}
+                }
+            }
+            let _ = (r.adresses_v4(), r.resolu());
+        }
+
+        /// Une question n'est jamais lue comme une réponse, quel que soit le nom demandé.
+        #[test]
+        fn questions(nom in any::<String>(), edns: bool, dnssec: bool) {
+            let q = question(ID, &nom, Genre::Https, edns, dnssec);
+            prop_assert_eq!(lire(&q, ID), None);
+        }
+
+        /// Des réponses A bien formées : chaque adresse est lue, dans l'ordre.
+        #[test]
+        fn adresses_lues(adresses in prop::collection::vec(any::<[u8; 4]>(), 0..ENREGISTREMENTS_MAX)) {
+            let mut m = ID.to_be_bytes().to_vec();
+            m.extend([0x81, 0x80, 0, 1]);
+            m.extend(u16::try_from(adresses.len()).unwrap().to_be_bytes());
+            m.extend([0, 0, 0, 0]);
+            m.extend(b"\x03dns\x06google\x00\x00\x01\x00\x01");
+            for a in &adresses {
+                m.extend([0xC0, 0x0C, 0, 1, 0, 1, 0, 0, 0, 60, 0, 4]);
+                m.extend(a);
+            }
+            let lues = lire(&m, ID).map(|r| r.adresses_v4());
+            prop_assert_eq!(lues, Some(adresses.into_iter().map(Ipv4Addr::from).collect::<Vec<_>>()));
+        }
+    }
+}

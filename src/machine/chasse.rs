@@ -1973,3 +1973,219 @@ mod tests {
         let _ = connexion_forcee();
     }
 }
+
+/// Une ligne de commande, un chemin ou un nom tenté sur SSH sont choisis par celui qu'on cherche : jamais de panique,
+/// un motif toujours à sa place dans la ligne, et ce qui est montré reste court et inoffensif.
+#[cfg(test)]
+mod entrees_hostiles {
+    use super::*;
+    use crate::ui::piege;
+    use proptest::prelude::*;
+
+    /// Une ligne de commande : des mots que la chasse cherche (téléchargeurs, interpréteurs, relais et leurs options,
+    /// LOLBins et leurs détournements, tirets longs), des séparateurs du shell, des caractères multi-octets ou qui
+    /// changent de longueur en minuscules (İ, K de Kelvin), des pièges d'affichage, et des mots quelconques.
+    fn ligne() -> impl Strategy<Value = String> {
+        let mot = prop_oneof![
+            prop::sample::select(vec![
+                "curl",
+                "wget",
+                "-fsSL",
+                "http://203.0.113.9/a.sh",
+                "|",
+                "||",
+                "sh",
+                "bash",
+                "ash",
+                "/bin/sh",
+                "python3",
+                "busybox",
+                "sudo",
+                "-u",
+                "root",
+                "-s",
+                "-i",
+                "-Es",
+                "-p",
+                "su",
+                "-",
+                "-c",
+                "--command=sh",
+                "doas",
+                "env",
+                "exec",
+                "-a",
+                "X=1",
+                "GITHUB_TOKEN=ghp_x",
+                "base64",
+                "-d",
+                "--decode",
+                "powershell",
+                "pwsh.exe",
+                "powershell.exe",
+                "-enc",
+                "\u{2013}enc",
+                "\u{2014}EncodedCommand",
+                "/e",
+                "-ec",
+                "iex",
+                "IEX(",
+                "Invoke-Expression",
+                "DownloadString(",
+                "mshta",
+                "mshta.exe",
+                "javascript:",
+                "vbscript:",
+                "regsvr32",
+                "/i:http://x",
+                "scrobj.dll",
+                "rundll32",
+                "certutil",
+                "-urlcache",
+                "/decode",
+                "bitsadmin",
+                "/transfer",
+                "\"C:\\Program Files\\App\\x.exe\"",
+                "C:\\Program Files\\İ\\run.exe",
+                "node.exec\\run.exe",
+                ".exe",
+                "İ",
+                "\u{212a}",
+                "é",
+                "😀",
+                "\u{202e}",
+                "\u{1b}[2J",
+                "(",
+                ")",
+                ";",
+                "&",
+                "`",
+                "{",
+                "}",
+                "\"",
+                "'",
+                "",
+            ])
+            .prop_map(str::to_string),
+            any::<String>(),
+            "[ -~]{0,12}",
+        ];
+        let separateur = prop::sample::select(vec![" ", "", "\t", "|", "||", ";", "  "]);
+        prop::collection::vec((mot, separateur), 0..14).prop_map(|v| v.into_iter().map(|(m, s)| m + s).collect())
+    }
+
+    /// Un outil de Windows détourné (ou non) en tête, puis des mots de la chasse et du bruit.
+    fn lolbin() -> impl Strategy<Value = String> {
+        let programme = prop::sample::select(vec![
+            "powershell",
+            "PowerShell.exe",
+            "pwsh",
+            "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+            "\"C:\\Program Files\\PowerShell\\7\\pwsh.exe\"",
+            "mshta",
+            "regsvr32.exe",
+            "rundll32",
+            "certutil",
+            "CertUtil.exe",
+            "bitsadmin",
+            "İ.exe",
+        ]);
+        (programme, ligne()).prop_map(|(p, l)| format!("{p} {l}"))
+    }
+
+    /// Un téléchargeur ou un décodeur passé par un tube à un interpréteur, derrière des relais et leurs options, au
+    /// milieu de bruit.
+    fn tube() -> impl Strategy<Value = String> {
+        let source = prop::sample::select(vec![
+            "curl",
+            "wget",
+            "/usr/bin/curl",
+            "CURL",
+            "base64 -d",
+            "base64 --decode",
+        ]);
+        let relais = prop::collection::vec(
+            prop::sample::select(vec![
+                "sudo",
+                "-u",
+                "root",
+                "-s",
+                "-i",
+                "-H",
+                "env",
+                "-i",
+                "X=1",
+                "busybox",
+                "exec",
+                "-a",
+                "nom",
+                "doas",
+                "su",
+                "-",
+                "-c",
+                "--command=sh",
+            ]),
+            0..5,
+        );
+        let interprete = prop::sample::select(vec!["sh", "bash", "ash", "python3", "/bin/sh", "PERL", "x", "\"sh\""]);
+        (ligne(), source, ligne(), relais, interprete, ligne())
+            .prop_map(|(avant, s, milieu, r, i, apres)| format!("{avant}{s} {milieu}|{} {i} {apres}", r.join(" ")))
+    }
+
+    /// Une ligne de sshd : les débuts lus, des noms tentés qui contiennent eux-mêmes « from … port … », des adresses
+    /// et des ports vrais ou faux.
+    fn ligne_ssh() -> impl Strategy<Value = String> {
+        let debut = prop::sample::select(vec![
+            "Failed password for ",
+            "Failed password for invalid user ",
+            "Failed keyboard-interactive/pam for ",
+            "Invalid user ",
+            "Accepted password for ",
+            "Accepted publickey for ",
+            "",
+        ]);
+        let adresse = prop_oneof![
+            any::<[u8; 4]>().prop_map(|o| IpAddr::from(o).to_string()),
+            any::<[u8; 16]>().prop_map(|o| IpAddr::from(o).to_string()),
+            any::<String>(),
+        ];
+        let port = prop_oneof![any::<u16>().prop_map(|p| p.to_string()), "[0-9:]{0,8}", any::<String>()];
+        (debut, ligne(), adresse, port, any::<String>())
+            .prop_map(|(d, compte, a, p, fin)| format!("{d}{compte} from {a} port {p} ssh2{fin}"))
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig { cases: 1024, failure_persistence: None, ..ProptestConfig::default() })]
+
+        #[test]
+        fn lignes_de_commande(l in prop_oneof![ligne(), lolbin(), tube(), any::<String>()]) {
+            if let Some((_, montre)) = commande_suspecte(&l) {
+                prop_assert!(montre.chars().count() <= LONGUEUR_EXTRAIT + 1, "{montre:?}");
+                prop_assert!(!montre.chars().any(piege), "{montre:?}");
+            }
+            if let Some(m) = passe_a_un_shell(&l) {
+                prop_assert!(m.debut <= m.fin && l.get(m.debut..m.fin).is_some(), "{l:?} {m:?}");
+            }
+            let args = l.split_once(' ').map_or("", |(_, a)| a);
+            for programme in ["powershell", "pwsh", "mshta", "regsvr32", "rundll32", "certutil", "bitsadmin"] {
+                if let Some(m) = detournement(programme, args) {
+                    prop_assert!(m.debut <= m.fin && args.get(m.debut..m.fin).is_some(), "{args:?} {m:?}");
+                }
+            }
+            let p = EnMarche { nom: l.clone(), chemin: Some(l.clone()), ligne: Some(l.clone()), ..EnMarche::default() };
+            for systeme in [Os::Linux, Os::Windows, Os::MacOs] {
+                if let Some(s) = juger_programme(&p, systeme) {
+                    prop_assert!(s.extrait.is_none_or(|e| e.chars().count() <= LONGUEUR_EXTRAIT + 1));
+                }
+            }
+        }
+
+        #[test]
+        fn lignes_de_sshd(lignes in prop::collection::vec(prop_oneof![ligne_ssh(), any::<String>()], 0..12)) {
+            let datees: Vec<((), &str)> = lignes.iter().map(|l| ((), l.as_str())).collect();
+            let tentatives = tentatives_ssh_datees(&datees);
+            prop_assert!(tentatives.len() <= lignes.len());
+            let _ = intrusions(&tentatives.into_iter().map(|((), t)| t).collect::<Vec<_>>());
+        }
+    }
+}
