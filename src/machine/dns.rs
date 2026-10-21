@@ -82,7 +82,9 @@ fn origine(ip: IpAddr) -> Origine {
             let o = v4.octets();
             v4.is_private() || v4.is_link_local() || (o[0] == 100 && (64..128).contains(&o[1]))
         }
-        IpAddr::V6(v6) => v6.is_unique_local() || v6.is_unicast_link_local(),
+        // fec0::/10 (site-local, abandonné mais toujours là) : Windows met fec0:0:0:ffff::1 à 3
+        // quand le réseau n'annonce aucun DNS IPv6 ; jamais une adresse d'Internet.
+        IpAddr::V6(v6) => v6.is_unique_local() || v6.is_unicast_link_local() || (v6.segments()[0] & 0xffc0) == 0xfec0,
     };
     if local { Origine::Reseau } else { Origine::Inconnu }
 }
@@ -565,6 +567,9 @@ mod tests {
         assert_eq!(origine(ip("192.168.1.1")), Origine::Reseau);
         assert_eq!(origine(ip("fe80::1")), Origine::Reseau);
         assert_eq!(origine(ip("fd00::53")), Origine::Reseau);
+        assert_eq!(origine(ip("fec0:0:0:ffff::1")), Origine::Reseau);
+        assert_eq!(origine(ip("feff::1")), Origine::Reseau);
+        assert_eq!(origine(ip("ff02::1")), Origine::Inconnu);
         assert_eq!(origine(ip("100.64.0.1")), Origine::Reseau);
         assert_eq!(origine(ip("100.100.100.100")), Origine::Connu("Tailscale"));
         assert_eq!(origine(ip("1.1.1.1")), Origine::Connu("Cloudflare"));
