@@ -1047,7 +1047,7 @@ fn depots_configures(conf: &str) -> Vec<String> {
 fn noms_base_sync(octets: &[u8]) -> Option<Vec<String>> {
     let tar = if octets.starts_with(&[0x1f, 0x8b]) {
         degzip(octets)?
-    } else if octets.starts_with(&super::zstd::SIGNATURE) {
+    } else if super::zstd::est_zstd(octets) {
         // repo-add écrit en zstd quand on le lui demande (omarchy.db) ; la base d'extra fait 10 Mo décompressée, la
         // borne de degzip vaut ici aussi.
         super::zstd::decompresser(octets, 256 << 20)?
@@ -1242,7 +1242,11 @@ mod tests {
         let mut zst = vec![0x28, 0xb5, 0x2f, 0xfd, 0, 0x50];
         zst.extend(&(1 | (u32::try_from(tar.len()).unwrap() << 3)).to_le_bytes()[..3]);
         zst.extend(&tar);
-        assert_eq!(noms_base_sync(&zst), Some(attendu));
+        assert_eq!(noms_base_sync(&zst), Some(attendu.clone()));
+        // La même, précédée d'une trame à sauter (pzstd en écrit une en tête).
+        let mut sautee = vec![0x50, 0x2a, 0x4d, 0x18, 0, 0, 0, 0];
+        sautee.extend(&zst);
+        assert_eq!(noms_base_sync(&sautee), Some(attendu));
     }
 
     #[test]
@@ -1322,6 +1326,15 @@ mod tests {
             };
             let mut attendu: Vec<&str> = r.sortie.lines().collect();
             attendu.sort_unstable();
+            // Une base dans un format qu'on ne lit pas (xz, bzip2…) rend None, et pacman -Qmq prend le relais : c'est
+            // prévu. Une base en gzip, en zstd ou en clair, elle, doit se lire.
+            let lue = octets.starts_with(&[0x1f, 0x8b])
+                || super::super::zstd::est_zstd(&octets)
+                || octets.get(257..262) == Some(b"ustar");
+            if !lue {
+                assert_eq!(noms_base_sync(&octets), None, "{depot}");
+                continue;
+            }
             let mut noms = noms_base_sync(&octets).unwrap_or_else(|| panic!("{depot}.db illisible"));
             noms.sort();
             assert_eq!(noms, attendu, "{depot}");

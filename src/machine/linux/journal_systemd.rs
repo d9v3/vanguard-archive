@@ -118,14 +118,26 @@ fn id_hexa(texte: &str) -> Option<[u8; 16]> {
 /// l'un d'eux ne s'ouvre pas : hors des groupes adm, wheel et systemd-journal, on ne verrait que son propre journal.
 fn fichiers_du_systeme() -> Option<Vec<PathBuf>> {
     let machine = std::fs::read_to_string("/etc/machine-id").ok()?;
-    let machine = machine.trim();
+    fichiers_dans(
+        &[Path::new("/var/log/journal"), Path::new("/run/log/journal")],
+        machine.trim(),
+    )
+}
+
+/// Les journaux de `machine` sous chaque racine. Un dossier absent (pas de journal persistant, ou pas encore de
+/// volatil) ne compte pas ; un dossier là mais qui ne se liste pas (droits) rend `None` : lire le seul journal
+/// volatil ferait dire « aucune erreur » d'une lecture partielle.
+fn fichiers_dans(racines: &[&Path], machine: &str) -> Option<Vec<PathBuf>> {
     id_hexa(machine)?;
     let mut fichiers = Vec::new();
-    for racine in ["/var/log/journal", "/run/log/journal"] {
-        let Ok(dossier) = std::fs::read_dir(Path::new(racine).join(machine)) else {
-            continue;
+    for racine in racines {
+        let dossier = match std::fs::read_dir(racine.join(machine)) {
+            Ok(d) => d,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(_) => return None,
         };
-        for e in dossier.flatten() {
+        for e in dossier {
+            let e = e.ok()?;
             let nom = e.file_name();
             let nom = nom.to_string_lossy();
             if nom.ends_with(".journal") || nom.ends_with(".journal~") {
@@ -181,21 +193,45 @@ pub(crate) fn chercher(fichiers: &[PathBuf], requete: &Requete) -> Option<Vec<En
 }
 
 /// Un fichier ouvert, lu par morceaux de 64 Kio gardés en mémoire (les objets voisins se lisent d'un coup).
+///
+/// Un budget borne ce que lit une requête : un fichier abîmé ou hostile (des objets qui se chevauchent, une chaîne
+/// qui revient sur elle-même) pourrait sinon faire relire ses octets un nombre de fois qui croît avec sa taille.
+/// Une requête sur un vrai journal lit chaque objet utile une ou deux fois : seize fois le fichier laisse de la
+/// marge, et au-delà, la lecture renonce (`None`) et journalctl prend le relais.
 struct Lecteur {
     fichier: std::fs::File,
     longueur: u64,
     morceaux: HashMap<u64, Vec<u8>>,
+    lus: u64,
+    budget: u64,
 }
 
 const MORCEAU: u64 = 64 << 10;
 
 impl Lecteur {
+    fn new(fichier: std::fs::File, longueur: u64) -> Self {
+        Lecteur {
+            fichier,
+            longueur,
+            morceaux: HashMap::new(),
+            lus: 0,
+            budget: longueur.saturating_mul(16).saturating_add(256 << 20),
+        }
+    }
+
+    /// `n` octets de plus lus (ou décompressés) ; `None` quand le budget est épuisé.
+    fn compter(&mut self, n: usize) -> Option<()> {
+        self.lus = self.lus.saturating_add(n as u64);
+        (self.lus <= self.budget).then_some(())
+    }
+
     /// `n` octets à `pos`, ou `None` au-delà de la fin du fichier.
     fn lire(&mut self, pos: u64, n: usize) -> Option<Vec<u8>> {
         let fin = pos.checked_add(n as u64)?;
         if fin > self.longueur {
             return None;
         }
+        self.compter(n)?;
         let mut sortie = Vec::with_capacity(n);
         let mut p = pos;
         while p < fin {
@@ -232,9 +268,11 @@ fn u32_a(o: &[u8], pos: usize) -> u32 {
         .map_or(0, u32::from_le_bytes)
 }
 
-/// Un objet DATA lu : son empreinte, le champ décompressé, et la liste de ses entrées.
+/// Un objet DATA lu : son empreinte, la taille de ce qu'il range (compressé ou non), le champ décompressé, et la
+/// liste de ses entrées.
 struct Donnee {
     empreinte: u64,
+    longueur: u64,
     suivant_meme_case: u64,
     premiere_entree: u64,
     tableau: u64,
@@ -274,11 +312,7 @@ impl Journal {
     /// L'en-tête lu ; `None` pour un format inconnu ou abîmé.
     fn ouvrir(fichier: std::fs::File) -> Option<Ouvert> {
         let longueur = fichier.metadata().ok()?.len();
-        let mut lecteur = Lecteur {
-            fichier,
-            longueur,
-            morceaux: HashMap::new(),
-        };
+        let mut lecteur = Lecteur::new(fichier, longueur);
         let Some(h) = lecteur.lire(0, 208) else {
             return Some(Ouvert::Vide);
         };
@@ -339,7 +373,7 @@ impl Journal {
             if tete == 0 {
                 continue;
             }
-            let d = self.donnee(tete, true)?;
+            let d = self.donnee(tete, Some(CHAMP_MAX))?;
             // Trop long pour être lu (un vidage mémoire) : la case suivante fera l'essai.
             let Some(charge) = d.charge else {
                 continue;
@@ -362,26 +396,36 @@ impl Journal {
         Some((o[1], taille))
     }
 
-    /// Un objet DATA ; avec `charge`, le champ lui-même, décompressé (sauté s'il dépasse `CHAMP_MAX`).
-    fn donnee(&mut self, pos: u64, charge: bool) -> Option<Donnee> {
+    /// Un objet DATA ; avec `charge` (`Some(max)`), le champ lui-même, décompressé, s'il tient en `max` octets.
+    /// `charge` vaut `None` pour un champ trop long (un vidage mémoire) ou qui ne se décompresse pas (abîmé) : à
+    /// l'appelant de dire si ce champ-là pouvait compter.
+    fn donnee(&mut self, pos: u64, charge: Option<usize>) -> Option<Donnee> {
         let debut = if self.compact() { 72 } else { 64 };
         let (drapeaux, taille) = self.objet(pos, DATA, debut)?;
         let o = self.lecteur.lire(pos, usize::try_from(debut).ok()?)?;
         let longueur = usize::try_from(taille - debut).ok()?;
-        let charge = if charge && longueur <= CHAMP_MAX {
-            let brut = self.lecteur.lire(pos + debut, longueur)?;
-            match drapeaux & COMPRESSE {
-                0 => Some(brut),
-                4 => super::zstd::decompresser(&brut, CHAMP_MAX),
-                2 => delz4(&brut),
-                // xz : rien ici ne le lit ; journalctl le fera.
-                _ => return None,
+        let compresse = drapeaux & COMPRESSE != 0;
+        let charge = match charge.map(|m| m.min(CHAMP_MAX)) {
+            Some(max) if longueur <= CHAMP_MAX && (compresse || longueur <= max) => {
+                let brut = self.lecteur.lire(pos + debut, longueur)?;
+                let lu = match drapeaux & COMPRESSE {
+                    0 => Some(brut),
+                    4 => super::zstd::decompresser(&brut, max),
+                    2 => delz4(&brut, max),
+                    // xz : rien ici ne le lit ; journalctl le fera.
+                    _ => return None,
+                };
+                // Ce qui est décompressé compte dans le budget de lecture, comme ce qui est lu.
+                if let Some(l) = &lu {
+                    self.lecteur.compter(l.len())?;
+                }
+                lu
             }
-        } else {
-            None
+            _ => None,
         };
         Some(Donnee {
             empreinte: u64_a(&o, 16),
+            longueur: taille - debut,
             suivant_meme_case: u64_a(&o, 24),
             premiere_entree: u64_a(&o, 40),
             tableau: u64_a(&o, 48),
@@ -395,16 +439,28 @@ impl Journal {
     fn entrees_du_champ(&mut self, champ: &[u8]) -> Option<Vec<u64>> {
         let h = self.empreinte(champ);
         let mut pos = u64_a(&self.lecteur.lire(self.table + (h % self.cases) * 16, 8)?, 0);
-        // Une chaîne qui boucle (fichier abîmé) s'arrête : jamais plus de maillons que d'objets possibles. Un maillon
-        // au-delà de la taille lue à l'ouverture a été écrit depuis (le fichier en cours) : la chaîne s'arrête là.
+        // Une chaîne qui revient sur un maillon déjà vu (fichier abîmé ou hostile) rend None tout de suite ; et jamais
+        // plus de maillons que d'objets possibles. Un maillon au-delà de la taille lue à l'ouverture a été écrit
+        // depuis (le fichier en cours) : la chaîne s'arrête là.
+        let mut vus: HashSet<u64> = HashSet::new();
         let mut pas = self.lecteur.longueur / 64;
         while pos != 0 && pos < self.lecteur.longueur {
             pas = pas.checked_sub(1)?;
-            let entete = self.donnee(pos, false)?;
-            if entete.empreinte == h {
-                let d = self.donnee(pos, true)?;
-                if d.charge.as_deref() == Some(champ) {
-                    return self.entrees_de(&d);
+            if !vus.insert(pos) {
+                return None;
+            }
+            let entete = self.donnee(pos, None)?;
+            // journald ne garde la forme compressée d'un champ que plus courte que lui (journal-file.c, compress_blob
+            // dans size - 1 octets) : un DATA qui range plus que le champ n'est pas celui qu'on cherche, et sa charge
+            // (jusqu'à 16 Mio) n'est ni lue ni décompressée.
+            if entete.empreinte == h && entete.longueur <= champ.len() as u64 {
+                let d = self.donnee(pos, Some(champ.len()))?;
+                match d.charge.as_deref() {
+                    Some(c) if c == champ => return self.entrees_de(&d),
+                    Some(_) => {}
+                    // Compressé, et illisible ou plus long que le champ une fois décompressé : la bonne empreinte,
+                    // mais rien ne dit que ce n'est pas lui. Le dire « absent » ferait compter « aucune erreur ».
+                    None => return None,
                 }
             }
             pos = entete.suivant_meme_case;
@@ -422,12 +478,20 @@ impl Journal {
             return Some(sortie);
         }
         sortie.push(d.premiere_entree);
+        // Le nombre d'entrées vient du fichier : ce n'est pas lui qui borne la liste. Une entrée fait au moins
+        // 64 octets, un DATA n'en tient donc jamais plus que longueur / 64 ; au-delà, ou si un tableau revient dans la
+        // chaîne, le fichier est abîmé (ou hostile) et la liste grossirait sans fin.
+        let plafond = usize::try_from(longueur / 64).unwrap_or(usize::MAX);
+        let mut vus: HashSet<u64> = HashSet::new();
         let mut reste = d.nombre - 1;
         let mut tableau = d.tableau;
         let largeur: u64 = if self.compact() { 4 } else { 8 };
         let mut pas = self.lecteur.longueur / 24;
         while reste > 0 && tableau != 0 && tableau < longueur {
             pas = pas.checked_sub(1)?;
+            if !vus.insert(tableau) {
+                return None;
+            }
             let (_, taille) = self.objet(tableau, TABLEAU, 24)?;
             let o = self.lecteur.lire(tableau, usize::try_from(taille).ok()?)?;
             for k in 0..(taille - 24) / largeur {
@@ -443,6 +507,9 @@ impl Journal {
                 // Une case encore vide : le fichier en cours d'écriture s'arrête là.
                 if e == 0 || e >= longueur {
                     return Some(sortie);
+                }
+                if sortie.len() >= plafond {
+                    return None;
                 }
                 sortie.push(e);
                 reste -= 1;
@@ -502,7 +569,9 @@ impl Journal {
     }
 
     /// Le champ à `pos`, s'il fait partie de ceux qu'on veut : le début seul se lit d'abord, un champ long qui n'est
-    /// pas compressé ne se lit en entier que s'il est voulu.
+    /// pas compressé ne se lit en entier que s'il est voulu. `None` pour un champ voulu qui ne se lit pas, ou un champ
+    /// compressé qui ne se décompresse pas (son nom ne se sait qu'après) : l'entrée compterait sans son message, et
+    /// un échec SSH disparaîtrait du décompte au lieu de passer à journalctl.
     fn champ(&mut self, pos: u64, voulus: &[&str]) -> Option<Champ> {
         let debut = if self.compact() { 72 } else { 64 };
         let (drapeaux, taille) = self.objet(pos, DATA, debut)?;
@@ -514,9 +583,7 @@ impl Journal {
                 return Some(Champ::Autre);
             }
         }
-        let Some(charge) = self.donnee(pos, true)?.charge else {
-            return Some(Champ::Autre);
-        };
+        let charge = self.donnee(pos, Some(CHAMP_MAX))?.charge?;
         let Some(egal) = charge.iter().position(|&c| c == b'=') else {
             return Some(Champ::Autre);
         };
@@ -531,10 +598,10 @@ impl Journal {
 
 /// Un champ compressé en LZ4 par journald : la taille décompressée sur 8 octets, puis un bloc LZ4 (des séquences
 /// « n littéraux, puis une copie de m octets pris d plus tôt », la dernière sans copie).
-fn delz4(entree: &[u8]) -> Option<Vec<u8>> {
+fn delz4(entree: &[u8], max: usize) -> Option<Vec<u8>> {
     let taille = usize::try_from(u64_a(entree, 0))
         .ok()
-        .filter(|&t| t <= CHAMP_MAX && entree.len() >= 8)?;
+        .filter(|&t| t <= max && entree.len() >= 8)?;
     let mut s: Vec<u8> = Vec::with_capacity(taille);
     let mut i = 8;
     let longueur = |i: &mut usize, mut n: usize| -> Option<usize> {
@@ -711,17 +778,19 @@ mod tests {
         bloc.extend([0x68]);
         bloc.extend(b"salon ");
         bloc.extend([6, 0, 0x00]);
-        assert_eq!(delz4(&bloc).as_deref(), Some(&b"salon salon salon "[..]));
+        assert_eq!(delz4(&bloc, CHAMP_MAX).as_deref(), Some(&b"salon salon salon "[..]));
         // Taille annoncée fausse, recul vers avant le début, coupé.
         let mut faux = bloc.clone();
         faux[0] = 19;
-        assert_eq!(delz4(&faux), None);
+        assert_eq!(delz4(&faux, CHAMP_MAX), None);
         let mut avant = bloc.clone();
         avant[15] = 7;
-        assert_eq!(delz4(&avant), None);
+        assert_eq!(delz4(&avant, CHAMP_MAX), None);
         for n in 0..bloc.len() {
-            assert_eq!(delz4(&bloc[..n]), None);
+            assert_eq!(delz4(&bloc[..n], CHAMP_MAX), None);
         }
+        // Plus long que la borne demandée : rien, sans rien écrire.
+        assert_eq!(delz4(&bloc, 17), None);
     }
 
     /// Un fichier du journal écrit pour l'essai, comme journald l'écrirait : en-tête, table de hachage, puis les
@@ -1030,6 +1099,21 @@ mod tests {
         let m = xz.donnee(b"_COMM=sshd", Some((1, b"\xfd7zXZ\0".to_vec())));
         xz.entree_de(1, DEMARRAGE, &[m]);
         assert_eq!(sshd(&[xz.fichier(&d, "xz.journal")], 0), None);
+        // Un MESSAGE en zstd ou en LZ4 abîmé, dans une entrée de sshd : l'entrée sans son message ferait disparaître
+        // l'échec du décompte. Le nom d'un champ compressé ne se sait qu'après : même chercher d'autres champs renonce.
+        for (drapeau, abime) in [
+            (4, b"\x28\xb5\x2f\xfd\x20\x30abime".to_vec()),
+            (2, b"\x30\0\0\0\0\0\0\0\xf0".to_vec()),
+        ] {
+            let mut j = Ecrivain::new(HACHAGE_A_CLE | ZSTD | LZ4);
+            let comm = j.donnee(b"_COMM=sshd", None);
+            let p3 = j.donnee(b"PRIORITY=3", None);
+            let m = j.donnee(b"MESSAGE=Failed password for alice", Some((drapeau, abime)));
+            j.entree_de(5_000, DEMARRAGE, &[p3, comm, m]);
+            let f = j.fichier(&d, "abime.journal");
+            assert_eq!(sshd(std::slice::from_ref(&f), 0), None, "drapeau {drapeau}");
+            assert_eq!(erreurs(std::slice::from_ref(&f)), None, "drapeau {drapeau}");
+        }
         // Pas un journal.
         std::fs::write(d.join("faux.journal"), vec![b'x'; 4096]).unwrap();
         assert_eq!(erreurs(&[d.join("faux.journal")]), None);
@@ -1054,6 +1138,121 @@ mod tests {
             std::fs::write(&f, &bon.o[..i]).unwrap();
             let _ = erreurs(std::slice::from_ref(&f));
         }
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// Ouvre un journal d'essai déjà écrit.
+    fn ouvert(chemin: &Path) -> Journal {
+        match Journal::ouvrir(std::fs::File::open(chemin).unwrap()) {
+            Some(Ouvert::Pret(j)) => j,
+            _ => panic!("{} ne s'ouvre pas", chemin.display()),
+        }
+    }
+
+    /// Une chaîne de tableaux qui revient sur elle-même, avec un nombre d'entrées démesuré venu du fichier : la
+    /// lecture renonce sans empiler une position par tour (avant : environ 180 Mo pour un fichier de 66 Ko).
+    #[test]
+    fn tableaux_en_boucle_sans_remplir_la_memoire() {
+        let d = jetable("tableaux");
+        let mut e = journal_invente(HACHAGE_A_CLE);
+        let p3 = e.donnees[&b"PRIORITY=3"[..]];
+        let entree = e.positions[0];
+        let pos = e.o.len() as u64;
+        let mut tableau = vec![0u8; 24 + 8192 * 8];
+        tableau[0] = TABLEAU;
+        tableau[16..24].copy_from_slice(&pos.to_le_bytes());
+        for k in 0..8192 {
+            tableau[24 + k * 8..32 + k * 8].copy_from_slice(&entree.to_le_bytes());
+        }
+        assert_eq!(e.objet(tableau), pos);
+        e.ecrire(p3 + 48, &pos.to_le_bytes());
+        e.ecrire(p3 + 56, &u64::MAX.to_le_bytes());
+        let f = e.fichier(&d, "system.journal");
+        let mut j = ouvert(&f);
+        assert_eq!(j.entrees_du_champ(b"PRIORITY=3"), None);
+        assert!(j.lecteur.lus <= 2 * j.lecteur.longueur, "{} lus", j.lecteur.lus);
+        // Deux tableaux qui se renvoient l'un à l'autre, sans case : la boucle se voit aussi.
+        let mut e = journal_invente(HACHAGE_A_CLE);
+        let p3 = e.donnees[&b"PRIORITY=3"[..]];
+        let premier = e.o.len() as u64;
+        let mut tableau = vec![0u8; 24];
+        tableau[0] = TABLEAU;
+        tableau[16..24].copy_from_slice(&(premier + 24).to_le_bytes());
+        e.objet(tableau.clone());
+        tableau[16..24].copy_from_slice(&premier.to_le_bytes());
+        e.objet(tableau);
+        e.ecrire(p3 + 48, &premier.to_le_bytes());
+        e.ecrire(p3 + 56, &u64::MAX.to_le_bytes());
+        assert_eq!(
+            ouvert(&e.fichier(&d, "system.journal")).entrees_du_champ(b"PRIORITY=3"),
+            None
+        );
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// Un DATA qui porte l'empreinte du champ cherché, une autre charge (longue) et lui-même pour suivant : la chaîne
+    /// renonce au premier retour, sans relire la charge (avant : 4,8 s pour 4 Mio, la durée croissant au carré).
+    #[test]
+    fn chaine_de_hachage_en_boucle_sans_relire() {
+        let d = jetable("chaine");
+        let mut e = Ecrivain::new(HACHAGE_A_CLE);
+        // Un champ honnête en tête de la même case : l'empreinte se vérifie à l'ouverture, sur lui.
+        let case = e.empreinte(b"PRIORITY=3") % e.cases;
+        let honnete = (0..100_000)
+            .map(|k| format!("MESSAGE={k}"))
+            .find(|c| e.empreinte(c.as_bytes()) % e.cases == case)
+            .unwrap();
+        e.entree(1_000, DEMARRAGE, &[honnete.as_bytes()]);
+        let hostile = e.donnee(b"PRIORITY=3", Some((0, vec![b'x'; 256 << 10])));
+        e.ecrire(hostile + 24, &hostile.to_le_bytes());
+        let f = e.fichier(&d, "system.journal");
+        let mut j = ouvert(&f);
+        assert_eq!(j.entrees_du_champ(b"PRIORITY=3"), None);
+        assert!(j.lecteur.lus < 4096, "{} lus", j.lecteur.lus);
+        // Sans la boucle, le DATA trop long est sauté sans être lu, et le champ n'est pas là.
+        e.ecrire(hostile + 24, &0u64.to_le_bytes());
+        let f = e.fichier(&d, "system.journal");
+        let mut j = ouvert(&f);
+        assert_eq!(j.entrees_du_champ(b"PRIORITY=3"), Some(Vec::new()));
+        assert!(j.lecteur.lus < 4096, "{} lus", j.lecteur.lus);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// Des objets qui se chevauchent peuvent faire relire le fichier sans fin, quelle que soit la garde de chaque
+    /// boucle : le budget de lecture arrête la requête, qui rend None.
+    #[test]
+    fn budget_de_lecture() {
+        let d = jetable("budget");
+        let f = journal_invente(HACHAGE_A_CLE).fichier(&d, "system.journal");
+        let mut j = ouvert(&f);
+        assert!(j.lecteur.lus < j.lecteur.longueur, "{} lus", j.lecteur.lus);
+        j.lecteur.budget = j.lecteur.lus;
+        assert_eq!(j.entrees_du_champ(b"PRIORITY=3"), None);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// Un dossier du journal absent ne compte pas ; un dossier là mais qui ne se liste pas rend None (lire le seul
+    /// journal volatil ferait dire « aucune erreur » d'une lecture partielle).
+    #[test]
+    fn dossier_du_journal_illisible() {
+        let d = jetable("dossiers");
+        let machine = "0123456789abcdef0123456789abcdef";
+        let (persistant, volatil) = (d.join("var"), d.join("run"));
+        std::fs::create_dir_all(volatil.join(machine)).unwrap();
+        std::fs::write(volatil.join(machine).join("system.journal"), b"").unwrap();
+        std::fs::write(volatil.join(machine).join("notes.txt"), b"").unwrap();
+        let racines = [persistant.as_path(), volatil.as_path()];
+        assert_eq!(
+            fichiers_dans(&racines, machine),
+            Some(vec![volatil.join(machine).join("system.journal")])
+        );
+        // Là, mais pas un dossier qui se liste (ENOTDIR ; des droits refusés donnent le même chemin, mais un essai
+        // lancé en root, ou sous unshare -r, les passerait).
+        std::fs::create_dir_all(&persistant).unwrap();
+        std::fs::write(persistant.join(machine), b"").unwrap();
+        assert_eq!(fichiers_dans(&racines, machine), None);
+        // Un identifiant de machine qui n'en est pas un.
+        assert_eq!(fichiers_dans(&racines, "../etc"), None);
         let _ = std::fs::remove_dir_all(&d);
     }
 
@@ -1125,6 +1324,15 @@ mod tests {
             return;
         };
         let Some(lues) = lire() else {
+            // Ne rien lire en Rust n'est permis que si le journal du système ne s'ouvre pas ici (hors des groupes
+            // adm, wheel et systemd-journal) : sinon, une lecture qui rendrait toujours None (empreinte mal calculée,
+            // décodeur cassé) passerait inaperçue, journalctl prenant la relève en silence.
+            let ouverts = fichiers_du_systeme().is_some_and(|f| f.iter().all(|p| std::fs::File::open(p).is_ok()));
+            assert!(
+                !ouverts,
+                "{arguments:?} : journalctl lit {} entrées, le journal du système s'ouvre, et la lecture en Rust rend None",
+                avant.len()
+            );
             return;
         };
         let apres = exportees(arguments, champs).unwrap();
@@ -1199,6 +1407,8 @@ mod tests {
             let Some(Ouvert::Pret(mut j)) = Journal::ouvrir(f) else {
                 continue;
             };
+            // Chaque objet lu, une fois : bien plus qu'une requête, le budget ne vaut pas ici.
+            j.lecteur.budget = u64::MAX;
             let entete = j.lecteur.lire(0, 208).unwrap();
             let dernier = u64_a(&entete, 136);
             let mut pos = j.entete;
@@ -1210,7 +1420,7 @@ mod tests {
                 }
                 if o[0] == DATA && o[1] & 7 != 0 {
                     let d = j
-                        .donnee(pos, true)
+                        .donnee(pos, Some(CHAMP_MAX))
                         .unwrap_or_else(|| panic!("{} : {pos}", chemin.display()));
                     let charge = d.charge.unwrap();
                     assert_eq!(j.empreinte(&charge), d.empreinte, "{} : {pos}", chemin.display());

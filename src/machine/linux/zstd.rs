@@ -13,18 +13,30 @@ pub(crate) const SIGNATURE: [u8; 4] = [0x28, 0xb5, 0x2f, 0xfd];
 /// Un bloc ne dépasse jamais 128 Kio, décompressé (RFC 8878, 3.1.1.2.4).
 const BLOC_MAX: usize = 128 << 10;
 
+/// Une trame à sauter commence par l'une des 16 signatures 0x184D2A50 à 0x184D2A5F (RFC 8878, 3.1.2).
+fn a_sauter(magique: u64) -> bool {
+    magique & 0xffff_fff0 == 0x184d_2a50
+}
+
+/// Les octets commencent-ils comme un flux zstd : une trame, ou une trame à sauter (la RFC les permet partout, en
+/// tête comprise ; pzstd en écrit une en tête).
+pub(crate) fn est_zstd(octets: &[u8]) -> bool {
+    octets.starts_with(&SIGNATURE) || octets.get(..4).is_some_and(|m| a_sauter(le(m)))
+}
+
 /// Le contenu décompressé de toutes les trames qui se suivent dans `entree` (le programme zstd les met bout à bout),
-/// les trames à sauter ignorées. `None` si ce n'est pas du zstd, si c'est abîmé, si une trame demande un dictionnaire
-/// ou si le résultat dépasserait `max` octets (une bombe de décompression s'arrête là).
+/// les trames à sauter ignorées, où qu'elles soient. `None` si ce n'est pas du zstd (rien, comme pour `zstd -d`, est
+/// une fin inattendue), si c'est abîmé, si une trame demande un dictionnaire ou si le résultat dépasserait `max`
+/// octets (une bombe de décompression s'arrête là).
 pub(crate) fn decompresser(entree: &[u8], max: usize) -> Option<Vec<u8>> {
-    if !entree.starts_with(&SIGNATURE) {
+    if !est_zstd(entree) {
         return None;
     }
     let mut sortie = Vec::new();
     let mut reste = entree;
     while !reste.is_empty() {
         let magique = le(reste.get(..4)?);
-        let lus = if magique & 0xffff_fff0 == 0x184d_2a50 {
+        let lus = if a_sauter(magique) {
             // Trame à sauter : 4 octets de taille, puis ce que le programme qui l'a écrite y a mis.
             8usize.checked_add(usize::try_from(le(reste.get(4..8)?)).ok()?)?
         } else if reste.starts_with(&SIGNATURE) {
@@ -999,6 +1011,20 @@ mod tests {
         deux.extend([0x5a, 0x2a, 0x4d, 0x18, 2, 0, 0, 0, 0xaa, 0xbb]);
         deux.extend(&t);
         assert_eq!(decompresser(&deux, 100).as_deref(), Some(&b"salon zzzzsalon zzzz"[..]));
+        // Une trame à sauter en tête (pzstd en écrit une), vide ou non : `zstd -dc` la saute, ici aussi. Seule, elle
+        // ne contient rien ; rien du tout n'est pas du zstd.
+        let mut en_tete = vec![0x50, 0x2a, 0x4d, 0x18, 0, 0, 0, 0];
+        en_tete.extend(&t);
+        assert!(est_zstd(&en_tete));
+        assert_eq!(decompresser(&en_tete, 100).as_deref(), Some(&b"salon zzzz"[..]));
+        let mut pleine = vec![0x5f, 0x2a, 0x4d, 0x18, 3, 0, 0, 0, 1, 2, 3];
+        pleine.extend(&t);
+        assert_eq!(decompresser(&pleine, 100).as_deref(), Some(&b"salon zzzz"[..]));
+        assert_eq!(decompresser(&en_tete[..8], 100), Some(Vec::new()));
+        assert_eq!(decompresser(&en_tete[..7], 100), None);
+        assert_eq!(decompresser(&pleine[..10], 100), None);
+        assert_eq!(decompresser(b"", 100), None);
+        assert!(!est_zstd(b"\x50\x2a\x4d\x19\0\0\0\0"));
         // Au-delà de la borne, rien : une bombe de décompression s'arrête avant d'occuper la mémoire.
         assert_eq!(decompresser(&t, 9), None);
         // Somme de contrôle fausse, taille annoncée fausse, bit réservé, dictionnaire, signature.
