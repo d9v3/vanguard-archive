@@ -566,12 +566,59 @@ pub(crate) fn empreinte(chemin: &Path) -> std::io::Result<blake3::Hash> {
 
 /// L'empreinte relue sur le disque, pas dans la mémoire où la copie vient de passer : sans cela, une erreur
 /// d'écriture du disque passerait inaperçue. Linux : les pages du fichier, propres après `sync_all`, sont retirées du
-/// cache avant de lire ; macOS : lecture sans cache. Windows : lecture ordinaire.
+/// cache avant de lire ; macOS : lecture sans cache. Windows : voir l'autre version, juste en dessous.
+#[cfg(not(windows))]
 pub(crate) fn empreinte_relue(chemin: &Path) -> std::io::Result<blake3::Hash> {
     let f = File::open(chemin)?;
     sans_cache(&f);
     Ok(blake3::Hasher::new().update_reader(f)?.finalize())
 }
+
+/// Windows n'a pas de conseil « retire ces pages du cache » : une lecture ordinaire rendrait les pages que la copie
+/// vient d'y laisser, identiques à l'original même si la clé (capacité truquée, disque qui perd des écritures) a
+/// gardé n'importe quoi. Le fichier est donc ouvert sans mise en mémoire (`FILE_FLAG_NO_BUFFERING`), ce qui oblige
+/// à lire dans un tampon aligné, par tailles et à des positions multiples du secteur : des blocs de 1 Mio, multiples
+/// de tout secteur réel, le dernier rendant seulement ce qui reste.
+#[cfg(windows)]
+pub(crate) fn empreinte_relue(chemin: &Path) -> std::io::Result<blake3::Hash> {
+    use std::os::windows::fs::OpenOptionsExt;
+    const FILE_FLAG_NO_BUFFERING: u32 = 0x2000_0000;
+    let mut f = OpenOptions::new()
+        .read(true)
+        .custom_flags(FILE_FLAG_NO_BUFFERING)
+        .open(chemin)?;
+    let taille = f.metadata()?.len();
+    let mut memoire = vec![0u8; BLOC_RELU + ALIGNEMENT_RELU];
+    let debut = memoire.as_ptr().align_offset(ALIGNEMENT_RELU);
+    let tampon = &mut memoire[debut..debut + BLOC_RELU];
+    let mut h = blake3::Hasher::new();
+    let mut lu = 0u64;
+    while lu < taille {
+        let n = f.read(tampon)?;
+        if n == 0 {
+            // Plus court que sa taille annoncée : l'empreinte diffère, la copie est vue abîmée.
+            break;
+        }
+        lu += n as u64;
+        // Une lecture courte avant la fin laisserait la suivante à une position que Windows refuse sans cache :
+        // mieux vaut le dire que de relire ce morceau par le cache et le croire vérifié.
+        if n % ALIGNEMENT_RELU != 0 && lu < taille {
+            return Err(std::io::Error::other(tr!(
+                "relecture sans cache interrompue au milieu du fichier",
+                "uncached read-back stopped in the middle of the file"
+            )));
+        }
+        h.update(&tampon[..n]);
+    }
+    Ok(h.finalize())
+}
+
+/// Lecture sans cache de Windows : taille de chaque lecture, et alignement de l'adresse du tampon. 4 Kio couvre les
+/// secteurs de 512 octets comme ceux de 4 Kio ; 1 Mio en est un multiple.
+#[cfg(windows)]
+const BLOC_RELU: usize = 1 << 20;
+#[cfg(windows)]
+const ALIGNEMENT_RELU: usize = 4096;
 
 #[cfg(target_os = "linux")]
 pub(crate) fn sans_cache(f: &File) {
@@ -841,6 +888,23 @@ fn destination_permise(chemin: &Path, sources: &[(Sorte, PathBuf)]) -> Result<Pa
     Err(refus.into())
 }
 
+/// `chemin` est-il sur le lecteur `racine` (« E:\ ») ? Une destination tapée en ligne de commande sort de
+/// `canonicalize` en forme étendue (« \\?\E:\Sauvegarde ») : `Path::starts_with` compare les préfixes tels quels, et
+/// « \\?\E: » n'y vaut pas « E: », si bien qu'aucun disque ne correspondait et que la place libre n'était jamais
+/// vérifiée. La lettre, elle, est la même sous les deux formes.
+#[cfg(windows)]
+fn meme_lecteur(chemin: &Path, racine: &Path) -> bool {
+    use std::path::{Component, Prefix};
+    let lettre = |p: &Path| match p.components().next() {
+        Some(Component::Prefix(x)) => match x.kind() {
+            Prefix::Disk(l) | Prefix::VerbatimDisk(l) => Some(l.to_ascii_uppercase()),
+            _ => None,
+        },
+        _ => None,
+    };
+    lettre(chemin).is_some_and(|l| lettre(racine) == Some(l))
+}
+
 fn choisir_disque() -> Option<PathBuf> {
     let liste = disques();
     if liste.is_empty() {
@@ -948,9 +1012,17 @@ pub fn commande(destination: Option<&Path>) {
     #[cfg(windows)]
     let libre = disques()
         .into_iter()
-        .find(|d| racine.starts_with(&d.racine))
+        .find(|d| meme_lecteur(&racine, &d.racine))
         .map(|d| d.libre);
     let besoin = total.1.saturating_sub(deja);
+    if libre.is_none() {
+        // Sans la place libre, la copie se lance quand même (le disque plein se verra en échecs), mais pas en silence.
+        trp!(
+            "\n  ⚠ La place libre de ce disque ne se lit pas : elle n'a pas pu être comparée aux {} à copier.",
+            "\n  ⚠ This disk's free space cannot be read: it could not be compared with the {} to copy.",
+            taille_lisible(besoin)
+        );
+    }
     if let Some(libre) = libre
         && besoin > libre
     {
@@ -1073,9 +1145,15 @@ fn sources_du_compte_rendu(texte: &str) -> Vec<(String, PathBuf)> {
         .collect()
 }
 
-/// Les fichiers d'une copie (sans le compte rendu, le témoin ni un fichier partiel), relatifs à son dossier.
-fn fichiers_de_la_copie(dossier: &Path) -> Vec<PathBuf> {
+/// Un fichier plus gros n'entre pas dans l'échantillon : relu deux fois (copie sans cache, puis original), une image
+/// de machine virtuelle de 40 Go prendrait une heure sur une clé lente. Il est compté, et le nombre est dit.
+const TAILLE_RELUE_MAX: u64 = 1 << 30;
+
+/// Les fichiers d'une copie (sans le compte rendu, le témoin ni un fichier partiel), relatifs à son dossier, et
+/// combien de gros fichiers (plus de `TAILLE_RELUE_MAX`) ont été laissés de côté.
+fn fichiers_de_la_copie(dossier: &Path) -> (Vec<PathBuf>, usize) {
     let mut trouves = Vec::new();
+    let mut gros = 0;
     let mut a_voir = vec![PathBuf::new()];
     while let Some(relatif) = a_voir.pop() {
         for e in std::fs::read_dir(dossier.join(&relatif))
@@ -1099,15 +1177,19 @@ fn fichiers_de_la_copie(dossier: &Path) -> Vec<PathBuf> {
                     .iter()
                     .any(|p| nom.ends_with(p.as_str()))
             {
-                trouves.push(chemin);
+                if meta.len() > TAILLE_RELUE_MAX {
+                    gros += 1;
+                } else {
+                    trouves.push(chemin);
+                }
             }
             if trouves.len() >= 200_000 {
-                return trouves;
+                return (trouves, gros);
             }
         }
     }
     trouves.sort();
-    trouves
+    (trouves, gros)
 }
 
 /// Au plus `n` fichiers répartis sur toute la copie (le premier, le dernier, et à intervalles réguliers entre).
@@ -1220,7 +1302,7 @@ pub fn verifier_copie(destination: Option<&Path>) {
     let copie_le = std::fs::metadata(&compte_rendu)
         .and_then(|m| m.modified())
         .unwrap_or(std::time::UNIX_EPOCH);
-    let fichiers = fichiers_de_la_copie(&dossier);
+    let (fichiers, gros) = fichiers_de_la_copie(&dossier);
     let choisis = echantillon(&fichiers, ECHANTILLON);
     trp!(
         "  Copie : {}
@@ -1258,7 +1340,19 @@ pub fn verifier_copie(destination: Option<&Path>) {
         r.modifies_depuis,
         r.sans_original
     );
-    if choisis.is_empty() {
+    if gros > 0 {
+        trp!(
+            "  {gros} gros fichier(s) (plus de 1 Gio) non relu(s) : trop longs à comparer.",
+            "  {gros} large file(s) (over 1 GiB) not read back: too long to compare."
+        );
+    }
+    if choisis.is_empty() && gros > 0 {
+        // Rien de relu : la copie n'est pas vide, mais rien ne permet de dire qu'elle se relit.
+        trp!(
+            "  ⚠ Aucun fichier relu : la copie n'a que de gros fichiers, elle n'est pas vérifiée.",
+            "  ⚠ No file read back: the copy only has large files, it is not checked."
+        );
+    } else if choisis.is_empty() {
         trp!("  ✖ La copie est vide.", "  ✖ The copy is empty.");
     } else if r.abimes.is_empty() {
         trp!(
@@ -1353,10 +1447,58 @@ mod tests {
     fn relecture_sans_cache() {
         let d = jetable("sans-cache");
         let f = d.join("a.bin");
-        std::fs::write(&f, vec![7u8; 3 << 20]).unwrap();
+        // Une taille qui n'est pas un multiple du secteur : sans cache, Windows lit par blocs alignés et la dernière
+        // lecture, courte, rend le reste.
+        let contenu: Vec<u8> = (0..(3 << 20) + 1234u32)
+            .map(|i| u8::try_from(i % 251).unwrap())
+            .collect();
+        std::fs::write(&f, &contenu).unwrap();
         // Ouvert en écriture : Windows refuse de vider sur le disque un fichier ouvert en lecture seule.
         OpenOptions::new().write(true).open(&f).unwrap().sync_all().unwrap();
-        assert_eq!(empreinte_relue(&f).unwrap(), empreinte(&f).unwrap());
+        assert_eq!(empreinte_relue(&f).unwrap(), blake3::hash(&contenu));
+        let vide = d.join("vide.bin");
+        std::fs::write(&vide, b"").unwrap();
+        assert_eq!(empreinte_relue(&vide).unwrap(), blake3::hash(b""));
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// Un fichier de plus de 1 Gio n'est pas relu, mais il est compté : « Vérifier une copie » reste rapide et le dit.
+    #[test]
+    fn gros_fichiers_hors_echantillon() {
+        let d = jetable("gros-copie");
+        std::fs::create_dir_all(d.join("Vidéos")).unwrap();
+        std::fs::write(d.join("Vidéos/court.txt"), b"court").unwrap();
+        // Fichier creux : 1 Gio + 1 octet annoncés, presque rien d'écrit sur le disque.
+        let gros = File::create(d.join("Vidéos/machine.img")).unwrap();
+        gros.set_len(TAILLE_RELUE_MAX + 1).unwrap();
+        drop(gros);
+        let (fichiers, gros) = fichiers_de_la_copie(&d);
+        assert_eq!(fichiers, [Path::new("Vidéos").join("court.txt")]);
+        assert_eq!(gros, 1);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// Une destination tapée en ligne de commande sort de `canonicalize` en « \\?\E:\… » : elle doit retrouver le
+    /// lecteur « E:\ » de la liste des disques, sinon la place libre n'est pas vérifiée.
+    #[cfg(windows)]
+    #[test]
+    fn meme_lecteur_sous_forme_etendue() {
+        let e = Path::new(r"E:\");
+        assert!(meme_lecteur(Path::new(r"\\?\E:\Sauvegarde"), e));
+        assert!(meme_lecteur(Path::new(r"e:\Sauvegarde"), e));
+        assert!(meme_lecteur(Path::new(r"E:\"), e));
+        assert!(!meme_lecteur(Path::new(r"\\?\F:\Sauvegarde"), e));
+        assert!(!meme_lecteur(Path::new(r"\\?\UNC\nas\partage"), e));
+        // La vraie chaîne : un dossier créé puis canonisé, comme le fait `destination_permise`.
+        let d = jetable("lecteur");
+        let canonique = d.canonicalize().unwrap();
+        let lecteur: String = canonique
+            .to_string_lossy()
+            .trim_start_matches(r"\\?\")
+            .chars()
+            .take(3)
+            .collect();
+        assert!(meme_lecteur(&canonique, Path::new(&lecteur)), "{canonique:?}");
         let _ = std::fs::remove_dir_all(&d);
     }
 
@@ -1545,8 +1687,8 @@ mod tests {
         assert_eq!(copie_a_verifier(&disque), Some(dossier.clone()));
         let sources = sources_du_compte_rendu(&std::fs::read_to_string(dossier.join(COMPTE_RENDU)).unwrap());
         assert_eq!(sources, [("Documents".to_string(), source.clone())]);
-        let fichiers = fichiers_de_la_copie(&dossier);
-        assert_eq!(fichiers.len(), 6, "{fichiers:?}");
+        let (fichiers, gros) = fichiers_de_la_copie(&dossier);
+        assert_eq!((fichiers.len(), gros), (6, 0), "{fichiers:?}");
         let copie_le = std::fs::metadata(dossier.join(COMPTE_RENDU))
             .unwrap()
             .modified()
