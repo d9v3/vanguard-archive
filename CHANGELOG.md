@@ -6,6 +6,61 @@ Ce que chaque journée a apporté à Vanguard, la plus récente en haut. Depuis 
 publication par jour, qui regroupe le travail de la journée. Seule la dernière version a sa page de téléchargement ;
 chaque version garde son étiquette dans le dépôt (`git checkout v0.62.0`, par exemple), pour être recompilée au besoin.
 
+## 21 octobre 2026, au soir : version 0.84
+
+- **Blocage des menaces, en un clic.** Chaque menace trouvée propose « Bloquer » : le geste est montré, fait après ton
+  accord, noté dans « Ce que Vanguard a changé » et défait exactement par `vanguard blocage annuler` (seul l'arrêt
+  d'un programme ne se défait pas). Selon la menace : le programme arrêté puis mis en quarantaine, la connexion fermée
+  au pare-feu (ufw, nftables, Pare-feu Windows, pf), un lancement retiré du démarrage, la liste de blocage des pilotes
+  vulnérables de Windows activée (effective au redémarrage), le port d'un serveur d'IA fermé au réseau, un agent d'IA
+  remis à demander avant d'agir. Menu Antivirus et protection › Blocage des menaces, ou `vanguard blocage`.
+- **Protection active, qui bloque le certain.** Acceptée une fois, elle bloque toute seule ce qui ne fait aucun doute,
+  puis prévient : un fichier dont l'empreinte est dans MalwareBazaar, un outil d'attaque connu en marche, une
+  connexion vers un serveur de commande connu (Feodo Tracker, ThreatFox). Le douteux reste une alerte avec son bouton.
+  Elle tourne au bilan et dans la surveillance horaire. Quatre catégories (programmes, connexions, démarrage et
+  pilotes, agents d'IA), chacune désactivée, en un clic, ou automatique pour les programmes et les connexions. En
+  administrateur, elle ne bloque rien toute seule : ses réglages peuvent être écrits par n'importe quel programme du
+  compte, et le certain s'y propose d'un clic.
+- **Jamais un blocage qui ferait plus de mal que la menace** : ni Vanguard, ni un programme du système ou un processus
+  critique, ni une session à distance en cours (SSH, Bureau à distance, RustDesk, AnyDesk, Tailscale…), ni une adresse
+  locale ou un DNS public ; un interpréteur (python3, PowerShell) n'est jamais mis en quarantaine, au plus le script
+  qu'il lance. Sans les droits nécessaires, rien n'est fait à moitié.
+- **Paramètres, tous au même endroit** (Cette machine › Paramètres, « s » au menu principal, ou
+  `vanguard parametres`) : langue, emojis, travail sans Internet, surveillance horaire, entretien du mois, alertes
+  apprises, blocage et restrictions des extensions. Chaque changement montre la valeur d'avant et la commande pour la
+  remettre ; la langue, les emojis et le travail sans Internet restent choisis d'un lancement à l'autre
+  (VANGUARD_LANG, VANGUARD_EMOJI et VANGUARD_HORS_LIGNE l'emportent toujours).
+- **Extensions : tes propres programmes dans Vanguard, sans toucher à son code** (menu 12 Extensions,
+  `vanguard extensions`). Un plugin est un dossier avec un manifeste `plugin.toml`, ajouté une fois depuis un dossier
+  ou une archive .zip (`vanguard plugin ajouter`) ; un script du laboratoire est un fichier posé tel quel
+  (`vanguard labo`), pour essayer une idée vite. Leurs constats sont montrés à part, ne comptent jamais dans la note,
+  et vont dans une section à part du rapport HTML avec `--rapport`. Pour écrire un plugin en Rust : la bibliothèque
+  `extensions/sdk`, sans dépendance, et un exemple complet.
+- **Une extension est vérifiée avant de tourner.** Avant l'accord, tout son dossier ou son archive est analysé (YARA,
+  empreintes de MalwareBazaar) et chaque fichier haché (SHA-256) : un fichier changé, ajouté ou retiré, et il faut la
+  réapprouver. C'est la copie vérifiée qui tourne, sans accès au terminal, avec un délai et une sortie bornés, et tout
+  ce qu'elle a lancé est arrêté à la fin ; une archive ne peut rien écrire hors de son dossier. Sous Linux, `--isole`
+  la lance sans réseau, le dossier personnel masqué. Un manifeste ne fait que demander la confiance totale ou de
+  tourner avec le bilan ou la surveillance : c'est accordé par une question à part, et l'accord tombe au moindre
+  changement. En administrateur, rien du dossier des extensions ne lève une garde : rien n'y tourne tout seul, et
+  chaque lancement est demandé. L'interrupteur **Restrictions** (Extensions › 3, Paramètres, ou pour un seul plugin ou
+  script) coupe ces garde-fous pour ce qui est à toi ; une seule chose reste : le dossier des extensions doit être à
+  toi, fermé aux autres comptes.
+- **YARA-X 1.22.0**, qui corrige huit failles connues de wasmtime, la bibliothèque sur laquelle tourne YARA, dont une
+  sur les Mac à puce Apple. Chaque bibliothèque utilisée est maintenant vérifiée à chaque version et chaque nuit
+  (cargo deny) : failles connues, licences compatibles avec la GPL, provenance (crates.io seulement). Les deux avis
+  restants, sans correctif publié, viennent de YARA-X et ne s'appliquent pas à l'usage qu'en fait Vanguard (la raison
+  est notée).
+- **Calculs vérifiés dans la version publiée** (guide de l'ANSSI, LANG-ARITH) : un nombre qui déborde sur une donnée
+  hostile (une taille lue dans un paquet réseau, un journal, un programme Windows) arrête la vérification en cause au
+  lieu de repartir à zéro en silence et de fausser la suite ; le reste du bilan continue.
+- **Relecture de sécurité.** Un outil d'attaque n'est certain que par le nom du programme lui-même : un argument qui
+  lui ressemble (python3 sharphound_parser.py) n'est qu'un doute. Le programme est revérifié au moment même de l'arrêt
+  (son numéro pouvait passer à un autre). La règle ufw qui ferme un port passe avant les autorisations, et le port
+  n'est dit fermé qu'une fois vérifié. En automatique, une adresse où un autre compte a une connexion établie n'est
+  jamais bloquée. Un fichier de réglages illisible (paramètres, blocage, extensions) est mis de côté tel quel, jamais
+  écrasé en silence.
+
 ## 21 octobre 2026, au soir : version 0.83
 
 - **Chasse aux menaces en direct.** Une connexion réussie depuis une adresse qui venait de rater au moins dix mots de

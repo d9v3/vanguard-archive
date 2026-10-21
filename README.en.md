@@ -18,7 +18,8 @@
   with its fix.
 - **A security check graded from A to F**: firewall, updates, encryption, open ports, backups…
 - **Your whole network**: every device, its manufacturer, its open ports and its risks; newcomers are flagged.
-- **Nothing changes without your consent**: a restore point first, and every setting is undone exactly.
+- **Nothing changes without your consent**: a restore point first, and every setting is undone exactly. Each
+  threat found is blocked with one click; active protection, if you accept it, blocks what is certain by itself.
 - **And troubleshooting**: diagnostic, everyday problems step by step, slowness, a relative's computer, repairs.
 - **One USB key for all your computers**, and your friends': it write-protects itself anywhere but at home.
 
@@ -32,13 +33,13 @@ In the menu, choose **1** (full check), then **2** (fix). Arrows, Enter, and Esc
 | **Exposure to the Internet** | The network audit in six grades (exposure, Wi-Fi, device separation, DNS and certificates, connected devices, computers); the ports the router opens to the Internet (UPnP), this computer's open ports and firewall, the home's address on a blocklist, the router's admin page over HTTP only. |
 | **Intruders on the Wi-Fi** | Every device on the network, its manufacturer, its open ports and its risks; newcomers flagged every hour, with a dashboard in the browser; the Wi-Fi's protection (WEP, WPA2, WPA3), the fake access point copying its name, Bluetooth devices paired recently. |
 | **Connected devices** | The router and the devices on the network (cameras, printers, NAS, TVs, smart home…) recognized, with their default password to change; hidden cameras, in a rental or at someone's place. |
-| **Infected computer** | Antivirus, 308 YARA rules and over a million fingerprints of known malware (MalwareBazaar), the memory of running programs (on demand), live threat hunting (guessed password, suspicious running programs), decoy files against ransomware, Windows Defender blocking, what starts in secret, backdoors, Windows' hidden doors and vulnerable drivers, rootkit signs, suspicious event logs, connections to known botnet servers, a password thief like Responder unmasked, overly permissive AI agents, integrity of critical files, flaws in Docker images (trivy, when installed), reversible quarantine, and the traces collected before cleaning up, with the incident timeline. |
+| **Infected computer** | Antivirus, 308 YARA rules and over a million fingerprints of known malware (MalwareBazaar), the memory of running programs (on demand), live threat hunting (guessed password, suspicious running programs), threat blocking, with one click or by itself for what is certain (active protection), decoy files against ransomware, Windows Defender blocking, what starts in secret, backdoors, Windows' hidden doors and vulnerable drivers, rootkit signs, suspicious event logs, connections to known botnet servers, a password thief like Responder unmasked, overly permissive AI agents, integrity of critical files, flaws in Docker images (trivy, when installed), reversible quarantine, and the traces collected before cleaning up, with the incident timeline. |
 | **Hijacked DNS and certificates** | The DNS really in use (and made-up answers), added root certificates (HTTPS interception), a forced proxy and sites redirected by the hosts file, automatic proxy discovery (WPAD), browser extensions that read every site. |
 | **Scams and remote control** | Tech-support scam (remote control tools), dangerous links checked without opening them, downloaded files checked, leaked passwords and email addresses, hacked account, a sandbox for an unknown program. |
 | **Data and privacy** | Automatic backup and check my backup (really read back), copy my files (checked copy) and check a copy, privacy check (who can access location, contacts, camera and microphone), camera and microphone, browser passwords without protection, sensitive files lying around, secrets forgotten in git project history, key data protected by a passphrase. |
 | **Troubleshooting** | Computer diagnostic, everyday problems step by step (Internet, Wi-Fi, slowness, sound, printer, full disk), after an infection, new computer, computer leaving, a relative's computer, “Why is it slow?”, computer specs, report to leave behind, repairs. |
 | **Optimizing, software and gaming** | Privacy and performance settings undone exactly, a cleanup checklist with the space gained measured, startup programs; the best software in 8 categories, from its official source, and updating everything at once; connection for gaming (ping, jitter, loss, speed and bufferbloat, compared with your habits), crowded Wi-Fi, NAT type, fastest DNS (without removing a DNS that protects you), settings for gaming. |
-| **Follow-up and tools** | HTML report with the grade curve, monthly check-up, learning on your computer, what Vanguard changed (each fix, dated); check my drive (fake drives, speed), my computers (tracked by the key), shortcut on this computer, Vanguard updated from the key or from GitHub (versions signed by the author), command guide, search in every menu. |
+| **Follow-up and tools** | HTML report with the grade curve, monthly check-up, learning on your computer, what Vanguard changed (each fix, dated), every setting in one place, your own extensions (plugins and scripts, checked before they run); check my drive (fake drives, speed), my computers (tracked by the key), shortcut on this computer, Vanguard updated from the key or from GitHub (versions signed by the author), command guide, search in every menu. |
 
 <details>
 <summary><b>The details, threat by threat</b></summary>
@@ -106,7 +107,8 @@ which steals the network's Windows passwords; the hourly monitoring flags it too
   else types whatever it wants).
 - Hourly monitoring: a notification if an unknown device shows up, if a port opens, if the machine's grade drops, if
   the router seems spoofed (shared or changed MAC address: ARP spoofing), or if a program or a disguised file lands
-  in Downloads (to check before opening it; nothing is blocked). Its dashboard, a local page opened in the browser:
+  in Downloads (to check before opening it; with active protection, one whose fingerprint is in MalwareBazaar is
+  quarantined by itself). Its dashboard, a local page opened in the browser:
   its state, the alerts day by day (kept even when the night's notification is gone), the devices that showed up and
   the connections to botnet servers. Nothing is sent.
 
@@ -135,7 +137,21 @@ program, beyond doubt. The full list is downloaded once a week (about 43 MB), th
 the saved copy is used, and with no copy at all, it says so. What the antivirus or YARA finds can go into a reversible quarantine: the file is made unusable and noted, then put back exactly in its place if it was a false
 positive.
 
-**Windows Defender blocking** — Vanguard blocks nothing itself: after your consent, it turns on what Windows blocks
+**Threat blocking** (Antivirus and protection › Threat blocking menu, `vanguard blocking`) — each threat found offers
+"Block": the action is shown, carried out after your consent, written down in "What Vanguard changed" and undone
+exactly by `vanguard blocking undo`; only stopping a program cannot be undone. Depending on the threat: the program
+stopped then quarantined, the connection closed at the firewall (ufw, nftables, Windows Firewall, pf), a launch
+removed from startup, Windows' vulnerable driver blocklist turned on, an AI server's port closed to the network, an
+AI agent set back to asking before it acts. **Active protection**, accepted once, blocks by itself what leaves no
+doubt (a file whose fingerprint is in MalwareBazaar, a known attack tool running, a connection to a known command
+server), during the check and in the hourly monitoring, then lets you know; what is doubtful stays an alert with its
+button. Four categories (programs, connections, startup and drivers, AI agents), each off, one click or automatic
+(programs and connections). Never Vanguard, a system program, a critical process, a remote session in progress, a
+local address or a public DNS; an interpreter (python3, PowerShell) is never quarantined, at most the script it
+runs. As administrator, nothing is blocked by itself: the blocking settings can be written by any program of the
+account, and what is certain is offered with one click there.
+
+**Windows Defender blocking** — on top of its own blocking, Vanguard turns on, after your consent, what Windows blocks
 from its kernel and protects against being turned off. Attack surface reduction rules (password theft from memory,
 vulnerable drivers, booby-trapped Office documents and attachments), network protection against dangerous sites,
 unwanted software, controlled folder access against ransomware. Each rule is named before you agree and is undone
@@ -194,13 +210,16 @@ sshguard or CrowdSec already blocks the addresses that keep trying.
 - Who talks to the Internet?: each program's current connections, with the server's name; a program started from a
   temporary folder or Downloads, a remote access tool's port, a server without a name or a known botnet command
   server (Feodo Tracker and ThreatFox lists, abuse.ch; a free, optional abuse.ch key adds ThreatFox's official
-  access) are flagged. Read-only: nothing is cut.
+  access) are flagged. Read-only: nothing is cut here; a known command server is blocked through threat blocking.
 - Vanguard also distrusts itself: at startup, it says whether a library is injected into every program of the
   session (LD_PRELOAD, DYLD_INSERT_LIBRARIES, AppInit_DLLs: one from a system package, like GameMode, is mere
   information) and whether it runs as root for no reason, since its results go through there. In the check: the
   hourly monitoring you had turned on and that disappeared (malware first cuts what watches it), and the check
   history rewritten afterwards (each check carries the previous one's checksum). Each night the code has changed, CI
-  builds Vanguard twice and checks that the program is identical down to the byte.
+  builds Vanguard twice and checks that the program is identical down to the byte. Every included library is checked
+  at each version and every night (cargo deny: known flaws, compatible licenses, origin), and the released version
+  checks its calculations: a number that overflows on hostile data stops the check concerned instead of skewing what
+  follows.
 
 #### Hijacked DNS and certificates
 
@@ -339,6 +358,25 @@ address included; the fastest DNS, measured here, offered only if it does not re
 offered as a fix) drops to information for 90 days, or until it gets worse; each connection test is compared with
 your habits on the same network; a known device that suddenly seems all closed (asleep) is checked again more
 patiently. "What Vanguard has learned" shows everything and lets you forget.
+
+**Settings** (This machine › Settings, "s" in the main menu, `vanguard settings`) — every setting in one place:
+language, emojis, working without the Internet, hourly monitoring, monthly check-up, learned alerts, threat blocking
+and extension restrictions. Each change shows the previous value and the command to put it back; language, emojis and
+working without the Internet stay chosen from one launch to the next (VANGUARD_LANG, VANGUARD_EMOJI and
+VANGUARD_HORS_LIGNE always win).
+
+**Extensions** (menu 12, `vanguard extensions`) — your own programs in Vanguard, without touching its code. A plugin
+is a folder with a `plugin.toml` manifest, added once from a folder or a .zip archive (`vanguard plugin add`); a lab
+script is a file dropped as it is (`vanguard lab`), to try an idea quickly. A plugin is a script (sh, bash,
+PowerShell, Python) or a compiled program, in Rust for instance with the `extensions/sdk` library. Their findings are
+shown apart and never count in the grade (`--report` puts them in a separate section of the HTML report). Before your
+consent, the whole folder or archive is scanned (YARA, MalwareBazaar fingerprints) and every file hashed: a file
+changed, added or removed, and it must be approved again. The checked copy is what runs, without a terminal, with a
+bounded time and output; an archive cannot write anything outside its folder; on Linux, `--isolated` runs it without
+network, the home folder hidden. As administrator, nothing runs by itself and each run is asked for. The
+**Restrictions** switch (Extensions › 3, Settings, or for a single plugin or script) turns these safeguards off for
+what is yours; one rule stays: the extensions folder must be yours, closed to other accounts. How-to (in French):
+[extensions/LISEZMOI.md](extensions/LISEZMOI.md).
 
 **Check my drive** — does a USB stick or an external disk hold what it claims? Fake drives (a 16 GB chip sold as
 “1 TB”) accept everything and return garbage beyond their real size. After your consent, Vanguard writes recognizable
@@ -496,6 +534,9 @@ Each menu entry is also a command.
 | `vanguard backup [file]`, `vanguard restore <file>` | data backup |
 | `vanguard gaming` | packages and settings for gaming (Windows and Linux) |
 | `vanguard guide [system\|program\|words]` | command guide: a system (`omarchy`, `arch`, `fedora`, `debian`, `windows`, `macos`, `all`, or `linux` for the common programs, or `tldr`), a program (`winget`, `systemctl`…) or words to look for (`dns cache`) |
+| `vanguard extensions [--no-restrictions on\|off]` | extensions: the menu of plugins and lab scripts; `--no-restrictions on` turns their safeguards off for what is yours (refused as administrator) |
+| `vanguard plugin [add <folder\|archive.zip>\|approve <name>\|list\|remove <name>\|<name> [--report] [--isolated]]` | plugins: added after a scan (YARA, MalwareBazaar) and approved by their SHA-256 fingerprints, run, approved again after a change, removed; outside the grade |
+| `vanguard lab [open\|list\|<file> [--isolated] [arguments]]` | lab: a script dropped as it is, shown and approved by its fingerprint at its first run; outside the grade |
 
 </details>
 
@@ -504,7 +545,8 @@ Each menu entry is also a command.
 `reseau`, `connexion`, `logiciels`, `diagnostic`, `motdepasse`, `isoler`, `courriel`, `integrite`, `maj`, `reparer`,
 `surveillance`, `nommer`, `sauvegarder`, `restaurer`, `nettoyer`, `pieges`, `durcir`, `listes-noires`, `appris`,
 `entretien`, `sortantes`, `lien`, `verifier-fichier`, `canaux`, `dns-rapide`, `traces`, `acces`, `tableau`,
-`verifier-sauvegarde`, `objets`, `proche`, `blocage`, `parametres`).
+`verifier-sauvegarde`, `objets`, `proche`, `blocage`, `parametres`, `memoire`, `audit-reseau`, `navigateurs`,
+`ordinateurs`, `labo`).
 
 **Emojis**: in the old Windows console (command prompt or PowerShell outside Windows Terminal, common on Windows 10),
 which draws them badly and shifts the menus, 💡 and 🔧 become → and +. `VANGUARD_EMOJI=0` removes them everywhere,

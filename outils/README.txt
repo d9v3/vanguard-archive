@@ -54,6 +54,8 @@ highlighted one, Esc clears it. In the main menu, it also finds each tool of the
        Report to leave behind: a simple page for the person you helped, put on their Desktop
        What Vanguard changed: each fix run here, dated, successful or not
        Monthly check-up: one notification a month (grade, updates, space to free, new problems)
+       Settings (also "s" in the main menu): language, emojis, working without the Internet, monitoring, check-up,
+         learned alerts, blocking, extension restrictions; the previous value is shown (vanguard settings)
   5  Network and Internet ›
        Scan the network (and unmask a password thief like Responder)
        Network audit: six grades (Internet exposure, Wi-Fi, device separation, DNS and certificates, connected
@@ -91,6 +93,8 @@ highlighted one, Esc clears it. In the main menu, it also finds each tool of the
        Quarantine: the files isolated by the antivirus or YARA, put back in their place (false positive) or deleted
        Secrets in git projects: passwords and keys forgotten in the history (and gitleaks, if present)
        Flaws in Docker images: known serious or critical flaws (trivy, if present)
+       Threat blocking: one-click "Block" for each threat found (action shown, written down, undoable);
+         active protection, if you accept it, blocks what is certain by itself (vanguard blocking)
   7  Install and play ›
        Software: the best ones, mostly open source, by category (browsers, passwords, office, video,
        design, system tools…) plus a starter pack, from the official source
@@ -129,7 +133,12 @@ highlighted one, Esc clears it. In the main menu, it also finds each tool of the
        dated folder with their fingerprints, and the incident timeline (CHRONOLOGIE.txt): everything dated,
        in time order (read-only, nothing is sent; vanguard evidence).
        From the command line: vanguard troubleshoot sound
-  q  Quit
+ 12  Extensions › your own programs, outside Vanguard's code: plugins (a folder with plugin.toml, added from a
+       folder or a .zip archive), lab scripts dropped as they are, and the restrictions switch. Each one is scanned
+       (YARA, MalwareBazaar) and approved by its fingerprints before it runs, never by itself as administrator; its
+       findings never count in the grade.
+       From the command line: vanguard plugin, vanguard lab, vanguard extensions
+  q  Quit · s Settings
   Shortcuts from earlier versions, in the main menu: u updates, r repair, o diagnostic, i integrity,
   n name, c connection, a USB drive, b sandbox, p passwords, e email, l software, g gaming, d data.
 
@@ -140,7 +149,7 @@ and hidden doors (LSA packages, print monitors…), vulnerable drivers, rootkit 
 overly permissive AI agents, DNS, added root certificates, browser extensions, Bluetooth, clock, end of support,
 forgotten accounts, browser passwords, sensitive files, backups, disk and battery health.
 
-Language: French or English, following the system. To force English:
+Language: French or English, following the system. To force English: the Settings menu ("s"), or
   Linux:   VANGUARD_LANG=en ./vanguard
   Windows: in the command prompt, set VANGUARD_LANG=en then vanguard.exe
   macOS:   VANGUARD_LANG=en <key>/macOS/vanguard
@@ -152,6 +161,10 @@ Good to know
     Remote Desktop NLA, NTLMv2, LLMNR, UAC…) are made by Vanguard itself, relaunched as administrator: Windows'
     prompt names it, and only Enter or yes applies them. The other fixes, and those chosen along with them, are
     first written to a readable script (its path is shown). All of them ask for administrator approval.
+  - Threat blocking: each threat found is blocked with one click, after your consent; active protection, accepted
+    once, blocks what is certain by itself (MalwareBazaar fingerprint, known attack tool, command server), then lets
+    you know; as administrator, it blocks nothing by itself. Each block is undone (vanguard blocking undo), except
+    stopping a program.
   - Before the first fix, update or repair that changes the system, a restore point is created automatically
     (snapper or timeshift on Linux, a restore point on Windows, a local Time Machine snapshot on macOS).
   - If you help someone connected remotely (Remote Desktop, SSH), Vanguard never cuts that access.

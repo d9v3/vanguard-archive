@@ -55,6 +55,8 @@ Entrée ouvre celle en surbrillance, Échap efface. Au menu principal, elle trou
        Rapport à laisser : une page simple pour la personne dépannée, posée sur son Bureau
        Ce que Vanguard a changé : chaque correction lancée ici, datée, réussie ou non
        Entretien du mois : une notification par mois (note, mises à jour, place à libérer, problèmes nouveaux)
+       Paramètres (aussi « s » au menu principal) : langue, emojis, travail sans Internet, surveillance, entretien,
+         alertes apprises, blocage, restrictions des extensions ; la valeur d'avant est montrée (vanguard parametres)
   5  Réseau et Internet ›
        Scanner le réseau (et démasquer un voleur de mots de passe comme Responder)
        Audit du réseau : six notes (exposition à Internet, Wi-Fi, séparation des appareils, DNS et certificats,
@@ -92,6 +94,8 @@ Entrée ouvre celle en surbrillance, Échap efface. Au menu principal, elle trou
        Quarantaine : les fichiers isolés par l'antivirus ou YARA, remis à leur place (faux positif) ou supprimés
        Secrets dans les projets git : mots de passe et clés oubliés dans l'historique (et gitleaks, s'il est là)
        Failles des images Docker : failles connues, graves ou critiques (trivy, s'il est là)
+       Blocage des menaces : « Bloquer » d'un clic pour chaque menace trouvée (geste montré, noté, annulable) ;
+         la protection active, si tu l'acceptes, bloque toute seule le certain (vanguard blocage)
   7  Installer et jouer ›
        Logiciels : les meilleurs, libres pour la plupart, par catégorie (navigateurs, mots de passe,
        bureautique, vidéo, création, outils système…) et un pack de départ, depuis la source officielle
@@ -130,7 +134,12 @@ Entrée ouvre celle en surbrillance, Échap efface. Au menu principal, elle trou
        dans un dossier daté avec leurs empreintes, et la chronologie de l'incident (CHRONOLOGIE.txt) : tout ce
        qui est daté, dans l'ordre du temps (lecture seule, rien n'est envoyé ; vanguard traces).
        En ligne de commande : vanguard depanner son
-  q  Quitter
+ 12  Extensions › tes propres programmes, hors du code de Vanguard : plugins (un dossier avec plugin.toml, ajouté
+       depuis un dossier ou une archive .zip), scripts du labo posés tels quels, et l'interrupteur des restrictions.
+       Chacun est analysé (YARA, MalwareBazaar) et approuvé par ses empreintes avant de tourner, jamais tout seul en
+       administrateur ; ses constats ne comptent jamais dans la note.
+       En ligne de commande : vanguard plugin, vanguard labo, vanguard extensions
+  q  Quitter · s Paramètres
   Raccourcis des anciennes versions, depuis le menu principal : u mises à jour, r réparer, o diagnostic,
   i intégrité, n nommer, c connexion, a clé USB, b bac à sable, p mots de passe, e courriel, l logiciels,
   g gaming, d données.
@@ -143,7 +152,7 @@ de rootkit sous Linux, journaux d'événements de Windows, agents d'IA trop perm
 ajoutés, extensions de navigateur, Bluetooth, heure, fin de support, comptes oubliés, mots de passe du navigateur,
 fichiers sensibles, sauvegardes, santé des disques et de la batterie.
 
-Langue : français ou anglais selon le système. Pour forcer le français :
+Langue : français ou anglais selon le système. Pour forcer le français : menu Paramètres (« s »), ou
   Linux :   VANGUARD_LANG=fr ./vanguard
   Windows : dans l'invite de commandes, set VANGUARD_LANG=fr puis vanguard.exe
   macOS :   VANGUARD_LANG=fr <clé>/macOS/vanguard
@@ -156,6 +165,10 @@ Bon à savoir
     administrateur : la fenêtre de Windows le nomme, et seuls Entrée ou oui les appliquent. Les autres corrections,
     et celles choisies avec elles, sont d'abord écrites dans un script lisible (le chemin est affiché). Toutes
     demandent l'accord administrateur.
+  - Blocage des menaces : chaque menace trouvée se bloque d'un clic, après ton accord ; la protection active,
+    acceptée une fois, bloque toute seule ce qui est certain (empreinte de MalwareBazaar, outil d'attaque connu,
+    serveur de commande), puis prévient ; en administrateur, elle ne bloque rien seule. Chaque blocage se défait
+    (vanguard blocage annuler), sauf l'arrêt d'un programme.
   - Avant la première correction, mise à jour ou réparation qui modifie le système, un point de restauration est
     créé automatiquement (snapper ou timeshift sous Linux, point de restauration sous Windows, instantané local
     de Time Machine sous macOS).

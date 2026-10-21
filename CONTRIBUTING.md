@@ -71,7 +71,7 @@ modification. Sur GitHub, `@claude` dans un ticket ou une demande de fusion le f
 | `src/protection/distance.rs` | quelqu'un contrôle mon ordi ? logiciels de prise de contrôle à distance (installés, au démarrage, en cours, téléchargés), au bilan et en parcours guidé |
 | `src/protection/lien.rs` | ce lien est-il dangereux ? examen local (punycode, marques imitées…), puis RDAP, URLhaus, Spamhaus DBL, SURBL |
 | `src/protection/telechargement.rs` | vérifier un fichier téléchargé : empreinte par l'outil du système, nom et contenu, YARA et antivirus ; programmes arrivés dans Téléchargements, pour la surveillance |
-| `src/protection/blocage/` | blocage des menaces : chaque menace propose « Bloquer » (geste montré, accepté, noté, annulable) ; protection active, après un accord donné une fois, qui bloque toute seule le certain (empreinte de MalwareBazaar, outil d'attaque connu, serveur de commande) au bilan et dans la surveillance horaire. `parametres` (blocage.json : un mode par catégorie), `menaces` (ce qui se trouve), `gestes` (préparer, faire, défaire), `gardes` (garde-fous purs : Vanguard, processus critiques, programmes du système, sessions à distance), `pare_feu` (ufw, nftables, Pare-feu Windows, pf) |
+| `src/protection/blocage/` | blocage des menaces : chaque menace propose « Bloquer » (geste montré, accepté, noté, annulable) ; protection active, après un accord donné une fois, qui bloque toute seule le certain (empreinte de MalwareBazaar, outil d'attaque connu, serveur de commande) au bilan et dans la surveillance horaire ; en administrateur, l'accord et les modes automatiques de blocage.json (que tout programme du compte peut écrire) ne font rien bloquer tout seul (`pour_agir`). `parametres` (blocage.json : un mode par catégorie), `menaces` (ce qui se trouve), `gestes` (préparer, faire, défaire), `gardes` (garde-fous purs : Vanguard, processus critiques, programmes du système, sessions à distance), `pare_feu` (ufw, nftables, Pare-feu Windows, pf) |
 | `src/protection/quarantaine.rs`, `src/protection/camera.rs` | quarantaine réversible (antivirus, YARA) : isoler, remettre exactement, supprimer ; caméra et micro : qui s'en sert (registre sous Windows, /dev/video et pactl sous Linux) |
 | `src/protection/acces.rs` | bilan de confidentialité : applications qui ont accès à la position, aux contacts, à la caméra et au micro (ConsentStore sous Windows, Flatpak et Snap sous Linux, TCC.db sous macOS) ; lecture seule |
 | `src/reseau/canaux.rs`, `src/reseau/nat.rs` | Wi-Fi encombré (réseaux voisins par canal) ; type de NAT (client STUN maison) |
@@ -104,8 +104,8 @@ Ce qui ne doit pas changer sans relire la conception (`src/plugins/mod.rs`, en t
 - une extension ne tourne qu'à la demande et ses constats ne touchent jamais la note : ni l'audit, ni
   l'historique, ni `risk::score` ne les voient (section à part du rapport HTML) ;
 - restrictions actives (par défaut) : approbation par SHA-256 de tout le dossier, analyse YARA et MalwareBazaar
-  avant l'accord, la copie hachée est celle qui tourne, aucun lien suivi, jamais en administrateur, sans terminal
-  (setsid, CREATE_NO_WINDOW), `commande::lancer_borne`, environnement minimal ;
+  avant l'accord, la copie hachée est celle qui tourne, aucun lien suivi, jamais tout seul en administrateur, sans
+  terminal (setsid, CREATE_NO_WINDOW), `commande::lancer_borne`, environnement minimal ;
 - un manifeste ne fait que demander (`confiance`, `dans_le_bilan`, `dans_la_surveillance`) : seule la personne
   accorde, et l'accord est lié à l'empreinte (`reglages::Confiance`) ;
 - en administrateur, rien du dossier ne lève une garde : jamais tout seul, et chaque lancement est demandé ;

@@ -6,6 +6,57 @@ What each day brought to Vanguard, most recent first. Since October 19, 2026, Va
 gathering the day's work. Only the latest version has its download page; every version keeps its tag in the
 repository (`git checkout v0.62.0`, for example), to be rebuilt if needed.
 
+## October 21, 2026, evening: version 0.84
+
+- **Threat blocking, in one click.** Each threat found offers "Block": the action is shown, carried out after your
+  consent, written down in "What Vanguard changed" and undone exactly by `vanguard blocking undo` (only stopping a
+  program cannot be undone). Depending on the threat: the program stopped then quarantined, the connection closed at
+  the firewall (ufw, nftables, Windows Firewall, pf), a launch removed from startup, Windows' vulnerable driver
+  blocklist turned on (effective after a restart), an AI server's port closed to the network, an AI agent set back to
+  asking before it acts. Antivirus and protection › Threat blocking menu, or `vanguard blocking`.
+- **Active protection, which blocks what is certain.** Accepted once, it blocks by itself what leaves no doubt, then
+  lets you know: a file whose fingerprint is in MalwareBazaar, a known attack tool running, a connection to a known
+  command server (Feodo Tracker, ThreatFox). What is doubtful stays an alert with its button. It runs during the check
+  and in the hourly monitoring. Four categories (programs, connections, startup and drivers, AI agents), each off, one
+  click, or automatic for programs and connections. As administrator, it blocks nothing by itself: its settings can be
+  written by any program of the account, and what is certain is offered with one click there.
+- **Never a block that would do more harm than the threat**: not Vanguard, not a system program or a critical process,
+  not a remote session in progress (SSH, Remote Desktop, RustDesk, AnyDesk, Tailscale…), not a local address or a
+  public DNS; an interpreter (python3, PowerShell) is never quarantined, at most the script it runs. Without the
+  rights needed, nothing is done halfway.
+- **Settings, all in one place** (This machine › Settings, "s" in the main menu, or `vanguard settings`): language,
+  emojis, working without the Internet, hourly monitoring, monthly check-up, learned alerts, blocking and extension
+  restrictions. Each change shows the previous value and the command to put it back; language, emojis and working
+  without the Internet stay chosen from one launch to the next (VANGUARD_LANG, VANGUARD_EMOJI and VANGUARD_HORS_LIGNE
+  always win).
+- **Extensions: your own programs in Vanguard, without touching its code** (menu 12 Extensions,
+  `vanguard extensions`). A plugin is a folder with a `plugin.toml` manifest, added once from a folder or a .zip
+  archive (`vanguard plugin add`); a lab script is a file dropped as it is (`vanguard lab`), to try an idea quickly.
+  Their findings are shown apart, never count in the grade, and go into a separate section of the HTML report with
+  `--report`. To write a plugin in Rust: the `extensions/sdk` library, with no dependency, and a complete example.
+- **An extension is checked before it runs.** Before your consent, its whole folder or archive is scanned (YARA,
+  MalwareBazaar fingerprints) and every file hashed (SHA-256): a file changed, added or removed, and it must be
+  approved again. The checked copy is what runs, without access to the terminal, with a bounded time and output, and
+  everything it started is stopped at the end; an archive cannot write anything outside its folder. On Linux,
+  `--isolated` runs it without network, the home folder hidden. A manifest can only ask for full trust or to run with
+  the check or the monitoring: it is granted by a separate question, and the consent falls at the slightest change. As
+  administrator, nothing in the extensions folder lifts a safeguard: nothing there runs by itself, and each run is
+  asked for. The **Restrictions** switch (Extensions › 3, Settings, or for a single plugin or script) turns these
+  safeguards off for what is yours; one thing stays: the extensions folder must be yours, closed to other accounts.
+- **YARA-X 1.22.0**, which fixes eight known flaws in wasmtime, the library YARA runs on, one of them on Apple silicon
+  Macs. Every library used is now checked at each version and every night (cargo deny): known flaws, licenses
+  compatible with the GPL, origin (crates.io only). The two remaining advisories, with no published fix, come from
+  YARA-X and do not apply to the way Vanguard uses it (the reason is written down).
+- **Calculations checked in the released version** (ANSSI guide, LANG-ARITH): a number that overflows on hostile data
+  (a size read in a network packet, a log, a Windows program) stops the check concerned instead of silently wrapping
+  to zero and skewing what follows; the rest of the check goes on.
+- **Security review.** An attack tool is certain only by the name of the program itself: an argument that looks like
+  it (python3 sharphound_parser.py) is only a doubt. The program is checked again at the very moment it is stopped
+  (its number could have passed to another one). The ufw rule that closes a port goes before the allow rules, and the
+  port is reported closed only once checked. In automatic mode, an address where another account has an established
+  connection is never blocked. An unreadable settings file (settings, blocking, extensions) is set aside as it is,
+  never silently overwritten.
+
 ## October 21, 2026, evening: version 0.83
 
 - **Live threat hunting.** A successful sign-in from an address that had just failed at least ten passwords: a guessed

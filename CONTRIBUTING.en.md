@@ -71,7 +71,7 @@ turn on once with `/install-github-app`).
 | `src/protection/distance.rs` | is someone controlling my PC? remote control tools (installed, at boot, running, downloaded), in the check and as a guided walkthrough |
 | `src/protection/lien.rs` | is this link dangerous? local check (punycode, imitated brands…), then RDAP, URLhaus, Spamhaus DBL, SURBL |
 | `src/protection/telechargement.rs` | check a downloaded file: checksum by the system's tool, name and content, YARA and antivirus; programs landing in Downloads, for monitoring |
-| `src/protection/blocage/` | threat blocking: each threat offers “Block” (action shown, accepted, written down, undoable); active protection, after a consent given once, blocks what is certain by itself (MalwareBazaar fingerprint, known attack tool, command server) at the check-up and in the hourly monitoring. `parametres` (blocage.json: one mode per category), `menaces` (what is found), `gestes` (prepare, do, undo), `gardes` (pure safeguards: Vanguard, critical processes, system programs, remote sessions), `pare_feu` (ufw, nftables, Windows Firewall, pf) |
+| `src/protection/blocage/` | threat blocking: each threat offers “Block” (action shown, accepted, written down, undoable); active protection, after a consent given once, blocks what is certain by itself (MalwareBazaar fingerprint, known attack tool, command server) at the check-up and in the hourly monitoring; as administrator, the consent and the automatic modes in blocage.json (which any program of the account can write) block nothing by themselves (`pour_agir`). `parametres` (blocage.json: one mode per category), `menaces` (what is found), `gestes` (prepare, do, undo), `gardes` (pure safeguards: Vanguard, critical processes, system programs, remote sessions), `pare_feu` (ufw, nftables, Windows Firewall, pf) |
 | `src/protection/quarantaine.rs`, `src/protection/camera.rs` | reversible quarantine (antivirus, YARA): isolate, put back exactly, delete; camera and microphone: who uses them (registry on Windows, /dev/video and pactl on Linux) |
 | `src/protection/acces.rs` | privacy check: apps that can access location, contacts, camera and microphone (ConsentStore on Windows, Flatpak and Snap on Linux, TCC.db on macOS); read-only |
 | `src/reseau/canaux.rs`, `src/reseau/nat.rs` | crowded Wi-Fi (nearby networks by channel); NAT type (home-made STUN client) |
@@ -105,8 +105,8 @@ What must not change without rereading the design (`src/plugins/mod.rs`, at the 
 - an extension only runs on request and its findings never touch the grade: neither the audit, the history nor
   `risk::score` see them (separate section of the HTML report);
 - restrictions on (the default): approval by SHA-256 of the whole folder, YARA and MalwareBazaar scan before
-  consent, the hashed copy is the one that runs, no link followed, never as administrator, no terminal (setsid,
-  CREATE_NO_WINDOW), `commande::lancer_borne`, minimal environment;
+  consent, the hashed copy is the one that runs, no link followed, never by itself as administrator, no terminal
+  (setsid, CREATE_NO_WINDOW), `commande::lancer_borne`, minimal environment;
 - a manifest only asks (`confiance`, `dans_le_bilan`, `dans_la_surveillance`): only the person grants, and the grant
   is tied to the fingerprint (`reglages::Confiance`);
 - as administrator, nothing in the folder lifts a guard: never by itself, and each run is asked;

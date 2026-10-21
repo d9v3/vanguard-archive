@@ -20,6 +20,7 @@
 - **Tout ton réseau** : chaque appareil, son fabricant, ses ports ouverts et ses risques ; les nouveaux venus sont
   signalés.
 - **Rien n'est changé sans ton accord** : un point de restauration d'abord, et chaque réglage s'annule exactement.
+  Chaque menace trouvée se bloque d'un clic ; la protection active, si tu l'acceptes, bloque toute seule le certain.
 - **Et le dépannage** : diagnostic, pannes de tous les jours pas à pas, lenteur, l'ordinateur d'un proche,
   réparations.
 - **Une clé USB pour tous tes ordinateurs**, et ceux de tes amis : elle se protège elle-même en écriture ailleurs que
@@ -54,13 +55,13 @@ pour revenir.
 | **Exposition vers Internet** | L'audit du réseau en six notes (exposition, Wi-Fi, séparation des appareils, DNS et certificats, objets connectés, ordinateurs) ; les ports que la box ouvre vers Internet (UPnP), les ports ouverts et le pare-feu de cet ordinateur, l'adresse de la maison sur liste noire, la page d'administration de la box en HTTP seul. |
 | **Intrus sur le Wi-Fi** | Chaque appareil du réseau, son fabricant, ses ports ouverts et ses risques ; les nouveaux venus signalés toutes les heures, avec un tableau de bord dans le navigateur ; la protection du Wi-Fi (WEP, WPA2, WPA3), le faux point d'accès qui copie son nom, les appareils Bluetooth appairés depuis peu. |
 | **Objets connectés** | La box et les objets du réseau (caméras, imprimantes, NAS, télés, domotique…) reconnus, avec leur mot de passe d'origine à changer ; les caméras cachées, dans une location ou chez quelqu'un. |
-| **Poste infecté** | Antivirus, 308 règles YARA et plus d'un million d'empreintes de logiciels malveillants connus (MalwareBazaar), la mémoire des programmes qui tournent (à la demande), la chasse aux menaces en direct (mot de passe deviné, programmes en marche suspects), fichiers-pièges contre les rançongiciels, blocages de Windows Defender, ce qui se lance en cachette, portes dérobées, portes cachées de Windows et pilotes vulnérables, signes de rootkit, journaux d'événements suspects, connexions vers des serveurs de botnets connus, un voleur de mots de passe comme Responder démasqué, agents d'IA trop permissifs, intégrité des fichiers critiques, failles des images Docker (trivy, s'il est installé), quarantaine réversible, et les traces collectées avant de nettoyer, avec la chronologie de l'incident. |
+| **Poste infecté** | Antivirus, 308 règles YARA et plus d'un million d'empreintes de logiciels malveillants connus (MalwareBazaar), la mémoire des programmes qui tournent (à la demande), la chasse aux menaces en direct (mot de passe deviné, programmes en marche suspects), le blocage des menaces, d'un clic ou tout seul pour le certain (protection active), fichiers-pièges contre les rançongiciels, blocages de Windows Defender, ce qui se lance en cachette, portes dérobées, portes cachées de Windows et pilotes vulnérables, signes de rootkit, journaux d'événements suspects, connexions vers des serveurs de botnets connus, un voleur de mots de passe comme Responder démasqué, agents d'IA trop permissifs, intégrité des fichiers critiques, failles des images Docker (trivy, s'il est installé), quarantaine réversible, et les traces collectées avant de nettoyer, avec la chronologie de l'incident. |
 | **DNS et certificats détournés** | Le DNS réellement utilisé (et les réponses inventées), les certificats racine ajoutés (interception du HTTPS), le proxy imposé et les sites redirigés par le fichier hosts, la recherche automatique du proxy (WPAD), les extensions de navigateur qui lisent tous les sites. |
 | **Arnaques et prise de contrôle** | Faux technicien (logiciels de prise de contrôle à distance), liens dangereux examinés sans les ouvrir, fichiers téléchargés vérifiés, mots de passe et adresses courriel fuités, compte piraté, bac à sable pour un programme inconnu. |
 | **Données et vie privée** | Sauvegarde automatique et vérifier ma sauvegarde (relue pour de vrai), copier mes fichiers (copie vérifiée) et vérifier une copie, bilan de confidentialité (qui a accès à la position, aux contacts, à la caméra et au micro), caméra et micro, mots de passe du navigateur sans protection, fichiers sensibles qui traînent, secrets oubliés dans l'historique des projets git, données de la clé protégées par une phrase. |
 | **Dépannage** | Diagnostic de l'ordinateur, pannes de tous les jours pas à pas (Internet, Wi-Fi, lenteur, son, imprimante, disque plein), après une infection, nouvel ordinateur, ordinateur qui part, ordinateur d'un proche, « Pourquoi c'est lent ? », fiche de l'ordinateur, rapport à laisser, réparations. |
 | **Optimiser, logiciels et jeu** | Réglages de confidentialité et de performance qui s'annulent exactement, nettoyage à cocher avec la place gagnée mesurée, programmes du démarrage ; les meilleurs logiciels en 8 catégories, depuis leur source officielle, et les mises à jour de tout d'un coup ; connexion pour le jeu (ping, gigue, pertes, débit et bufferbloat, comparés à tes habitudes), Wi-Fi encombré, type de NAT, DNS le plus rapide (sans retirer un DNS qui protège), réglages pour jouer. |
-| **Suivi et outils** | Rapport HTML avec la courbe des notes, entretien du mois, apprentissage sur ton ordinateur, ce que Vanguard a changé (chaque correction, datée) ; vérifier ma clé (fausses clés, vitesse), mes ordinateurs (suivis par la clé), raccourci sur cet ordinateur, Vanguard mis à jour depuis la clé ou depuis GitHub (versions signées par l'auteur), guide des commandes, recherche dans tous les menus. |
+| **Suivi et outils** | Rapport HTML avec la courbe des notes, entretien du mois, apprentissage sur ton ordinateur, ce que Vanguard a changé (chaque correction, datée), tous les paramètres au même endroit, tes propres extensions (plugins et scripts, vérifiés avant de tourner) ; vérifier ma clé (fausses clés, vitesse), mes ordinateurs (suivis par la clé), raccourci sur cet ordinateur, Vanguard mis à jour depuis la clé ou depuis GitHub (versions signées par l'auteur), guide des commandes, recherche dans tous les menus. |
 
 <details>
 <summary><b>Le détail, menace par menace</b></summary>
@@ -134,7 +135,8 @@ la surveillance horaire le signale aussi.
   appairé par quelqu'un d'autre tape ce qu'il veut).
 - Surveillance toutes les heures : notification si un appareil inconnu arrive, si un port s'ouvre, si la note de
   la machine baisse, si la box semble usurpée (adresse MAC partagée ou changée : usurpation ARP), ou si un
-  programme ou un fichier déguisé arrive dans Téléchargements (à vérifier avant de l'ouvrir ; rien n'est bloqué).
+  programme ou un fichier déguisé arrive dans Téléchargements (à vérifier avant de l'ouvrir ; avec la protection
+  active, celui dont l'empreinte est dans MalwareBazaar est mis en quarantaine tout seul).
   Son tableau de bord, une page locale ouverte dans le navigateur : son état, les alertes jour par jour (gardées
   même quand la notification de la nuit a disparu), les appareils apparus et les connexions vers des serveurs de
   botnets. Rien n'est envoyé.
@@ -167,7 +169,22 @@ nouveautés des 48 dernières heures une fois par jour ; sans Internet, la copie
 c'est dit. Ce que l'antivirus ou YARA trouve peut aller en quarantaine, réversible : le fichier est rendu
 inutilisable et noté, puis remis exactement à sa place si c'était un faux positif.
 
-**Blocages de Windows Defender** — Vanguard ne bloque rien lui-même : il active, après accord, ce que Windows bloque
+**Blocage des menaces** (menu Antivirus et protection › Blocage des menaces, `vanguard blocage`) — chaque menace
+trouvée propose « Bloquer » : le geste est montré, fait après ton accord, noté dans « Ce que Vanguard a changé » et
+défait exactement par `vanguard blocage annuler` ; seul l'arrêt d'un programme ne se défait pas. Selon la menace : le
+programme arrêté puis mis en quarantaine, la connexion fermée au pare-feu (ufw, nftables, Pare-feu Windows, pf), un
+lancement retiré du démarrage, la liste de blocage des pilotes vulnérables de Windows activée, le port d'un serveur
+d'IA fermé au réseau, un agent d'IA remis à demander avant d'agir. La **protection active**, acceptée une fois, bloque
+toute seule ce qui ne fait aucun doute (un fichier dont l'empreinte est dans MalwareBazaar, un outil d'attaque connu
+en marche, une connexion vers un serveur de commande connu), au bilan et dans la surveillance horaire, puis prévient ;
+le douteux reste une alerte avec son bouton. Quatre catégories (programmes, connexions, démarrage et pilotes, agents
+d'IA), chacune désactivée, en un clic ou automatique (programmes et connexions). Jamais Vanguard, un programme du
+système, un processus critique, une session à distance en cours, une adresse locale ni un DNS public ; un
+interpréteur (python3, PowerShell) n'est jamais mis en quarantaine, au plus le script qu'il lance. En administrateur,
+rien n'est bloqué tout seul : les réglages du blocage peuvent être écrits par n'importe quel programme du compte, et
+le certain s'y propose d'un clic.
+
+**Blocages de Windows Defender** — en plus de son propre blocage, Vanguard active, après accord, ce que Windows bloque
 depuis son noyau et protège contre la désactivation. Règles de réduction de la surface d'attaque (vol des mots de
 passe en mémoire, pilotes vulnérables, documents Office et pièces jointes piégés), protection réseau contre les
 sites dangereux, logiciels indésirables, accès contrôlé aux dossiers contre les rançongiciels. Chaque règle est
@@ -229,14 +246,17 @@ fail2ban, sshguard ou CrowdSec bloque déjà les adresses qui insistent.
 - Qui parle à Internet ? : les connexions en cours de chaque programme, avec le nom du serveur ; un programme lancé
   depuis un dossier temporaire ou les Téléchargements, un port de logiciel d'accès à distance, un serveur sans nom ou
   un serveur de commande de botnet connu (listes de Feodo Tracker et de ThreatFox, abuse.ch ; une clé gratuite
-  d'abuse.ch, facultative, ajoute l'accès officiel de ThreatFox) sont signalés. Lecture seule : rien n'est coupé.
+  d'abuse.ch, facultative, ajoute l'accès officiel de ThreatFox) sont signalés. Lecture seule : rien n'est coupé ici ;
+  un serveur de commande connu se bloque par le blocage des menaces.
 - Vanguard se méfie aussi de lui-même : au démarrage, il dit si une bibliothèque est injectée dans tous les
   programmes de la session (LD_PRELOAD, DYLD_INSERT_LIBRARIES, AppInit_DLLs : celle d'un paquet du système, comme
   GameMode, est une simple information) et s'il tourne en root sans raison, car ses résultats passent par là. Au
   bilan : la surveillance horaire que tu avais activée et qui a disparu (un logiciel malveillant coupe d'abord ce
   qui le surveille), et l'historique des bilans réécrit après coup (chaque bilan porte l'empreinte du précédent).
   Chaque nuit où le code a changé, la CI recompile Vanguard deux fois et vérifie que le programme est identique à
-  l'octet près.
+  l'octet près. Chaque bibliothèque incluse est vérifiée à chaque version et chaque nuit (cargo deny : failles
+  connues, licences compatibles, provenance), et la version publiée vérifie ses calculs : un nombre qui déborde sur
+  une donnée hostile arrête la vérification en cause au lieu de fausser la suite.
 
 #### DNS et certificats détournés
 
@@ -385,6 +405,26 @@ pas un DNS qui protège (NextDNS, chiffré, filtrant) et annulable.
 toi (« i » à la correction) passe au niveau info pendant 90 jours, ou jusqu'à ce qu'elle s'aggrave ; chaque test de
 connexion se compare à tes habitudes sur le même réseau ; un appareil connu qui paraît soudain tout fermé (en
 veille) est revérifié plus patiemment. « Ce que Vanguard a appris » montre tout et permet d'oublier.
+
+**Paramètres** (Cette machine › Paramètres, « s » au menu principal, `vanguard parametres`) — tous les réglages au
+même endroit : langue, emojis, travail sans Internet, surveillance horaire, entretien du mois, alertes apprises,
+blocage des menaces et restrictions des extensions. Chaque changement montre la valeur d'avant et la commande pour la
+remettre ; la langue, les emojis et le travail sans Internet restent choisis d'un lancement à l'autre
+(VANGUARD_LANG, VANGUARD_EMOJI et VANGUARD_HORS_LIGNE l'emportent toujours).
+
+**Extensions** (menu 12, `vanguard extensions`) — tes propres programmes dans Vanguard, sans toucher à son code. Un
+plugin est un dossier avec un manifeste `plugin.toml`, ajouté une fois depuis un dossier ou une archive .zip
+(`vanguard plugin ajouter`) ; un script du laboratoire est un fichier posé tel quel (`vanguard labo`), pour essayer
+une idée vite. Un plugin est un script (sh, bash, PowerShell, Python) ou un programme compilé, en Rust par exemple
+avec la bibliothèque `extensions/sdk`. Leurs constats sont montrés à part et ne comptent jamais dans la note
+(`--rapport` les met dans une section à part du rapport HTML). Avant l'accord, tout le dossier ou l'archive est
+analysé (YARA, empreintes de MalwareBazaar) et chaque fichier haché : un fichier changé, ajouté ou retiré, et il faut
+réapprouver. C'est la copie vérifiée qui tourne, sans terminal, avec un délai et une sortie bornés ; une archive ne
+peut rien écrire hors de son dossier ; sous Linux, `--isole` la lance sans réseau, le dossier personnel masqué. En
+administrateur, rien ne tourne tout seul et chaque lancement est demandé. L'interrupteur **Restrictions**
+(Extensions › 3, Paramètres, ou pour un seul plugin ou script) coupe ces garde-fous pour ce qui est à toi ; une seule
+règle reste : le dossier des extensions doit être à toi, fermé aux autres comptes. Mode d'emploi :
+[extensions/LISEZMOI.md](extensions/LISEZMOI.md).
 
 **Vérifier ma clé** — une clé USB ou un disque externe tient-il ce qu'il annonce ? Les fausses clés (une puce de
 16 Go vendue « 1 To ») acceptent tout et rendent n'importe quoi au-delà de leur vraie taille. Après accord, Vanguard
@@ -547,6 +587,9 @@ Chaque entrée du menu existe aussi en commande.
 | `vanguard sauvegarder [fichier]`, `vanguard restaurer <fichier>` | sauvegarde des données |
 | `vanguard gaming` | paquets et réglages pour jouer (Windows et Linux) |
 | `vanguard guide [système\|programme\|mots]` | guide des commandes : un système (`omarchy`, `arch`, `fedora`, `debian`, `windows`, `macos`, `tous`, ou `linux` pour les programmes communs, ou `tldr`), un programme (`winget`, `systemctl`…) ou des mots à chercher (`cache dns`) |
+| `vanguard extensions [--sans-restrictions on\|off]` | extensions : le menu des plugins et des scripts du labo ; `--sans-restrictions on` coupe leurs garde-fous pour ce qui est à toi (refusé en administrateur) |
+| `vanguard plugin [ajouter <dossier\|archive.zip>\|approuver <nom>\|liste\|retirer <nom>\|<nom> [--rapport] [--isole]]` | plugins : ajouté après analyse (YARA, MalwareBazaar) et approuvé par ses empreintes SHA-256, lancé, réapprouvé après un changement, retiré ; hors de la note |
+| `vanguard labo [ouvrir\|liste\|<fichier> [--isole] [arguments]]` | laboratoire : un script posé tel quel, montré et approuvé par son empreinte au premier lancement ; hors de la note |
 
 </details>
 
@@ -555,7 +598,8 @@ Chaque entrée du menu existe aussi en commande.
 `connection`, `apps`, `diag`, `password`, `sandbox`, `email`, `integrity`, `update`, `repair`, `monitor`, `name`,
 `backup`, `restore`, `clean`, `decoys`, `harden`, `blocklists`, `learned`, `channels`, `fast-dns`, `outbound`, `link`,
 `check-file`, `maintenance`, `slow`, `startup`, `specs`, `copy-files`, `troubleshoot`, `evidence`, `permissions`,
-`dashboard`, `check-backup`, `iot`, `relative`, `blocking`, `settings`).
+`dashboard`, `check-backup`, `iot`, `relative`, `blocking`, `settings`, `memory`, `network-audit`,
+`browser-passwords`, `computers`, `lab`, `ext`).
 
 **Emojis** : dans l'ancienne console de Windows (invite de commandes ou PowerShell hors du Terminal Windows, courant
 sous Windows 10), qui les dessine mal et décale les menus, 💡 et 🔧 deviennent → et +. `VANGUARD_EMOJI=0` les retire
