@@ -4,8 +4,10 @@
 //! (VANGUARD_LANG, VANGUARD_EMOJI, VANGUARD_HORS_LIGNE) l'emporte toujours sur le fichier. Les autres gardent leur
 //! place et leur code, que ce menu appelle : la surveillance horaire et l'entretien du mois (leurs minuteries), les
 //! alertes apprises (appris.json), le blocage (blocage.json), les restrictions des extensions (plugins/reglages.json,
-//! par leur interrupteur et son accord), la clé abuse.ch (`protection::abuse_ch`, jamais montrée en entier). Chaque
-//! changement est montré avec sa valeur d'avant, et s'annule en la remettant.
+//! par leur interrupteur et son accord), la clé abuse.ch (`protection::abuse_ch`, jamais montrée en entier), la
+//! protection en temps réel (`protection::temps_reel` : coupée d'un coup pour un temps ou jusqu'à reprise, après
+//! accord, sans toucher aux réglages de chacun). Chaque changement est montré avec sa valeur d'avant, et s'annule en
+//! la remettant.
 
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
@@ -107,6 +109,7 @@ enum Reglage {
     Langue,
     Emojis,
     HorsLigne,
+    TempsReel,
     Surveillance,
     Entretien,
     Appris,
@@ -116,10 +119,11 @@ enum Reglage {
 }
 
 impl Reglage {
-    const TOUS: [Reglage; 9] = [
+    const TOUS: [Reglage; 10] = [
         Reglage::Langue,
         Reglage::Emojis,
         Reglage::HorsLigne,
+        Reglage::TempsReel,
         Reglage::Surveillance,
         Reglage::Entretien,
         Reglage::Appris,
@@ -134,6 +138,7 @@ impl Reglage {
             Reglage::Langue => tr!("langue", "language"),
             Reglage::Emojis => "emojis",
             Reglage::HorsLigne => tr!("sans-internet", "offline"),
+            Reglage::TempsReel => tr!("temps-reel", "real-time"),
             Reglage::Surveillance => tr!("surveillance", "monitoring"),
             Reglage::Entretien => tr!("entretien", "maintenance"),
             Reglage::Appris => tr!("appris", "learned"),
@@ -148,6 +153,14 @@ impl Reglage {
             "langue" | "language" | "lang" => Some(Reglage::Langue),
             "emojis" | "emoji" => Some(Reglage::Emojis),
             "sans-internet" | "hors-ligne" | "horsligne" | "offline" | "internet" => Some(Reglage::HorsLigne),
+            "temps-reel"
+            | "temps-réel"
+            | "tempsreel"
+            | "temps_reel"
+            | "temps-reel-vanguard"
+            | "real-time"
+            | "realtime"
+            | "real_time" => Some(Reglage::TempsReel),
             "surveillance" | "monitoring" | "monitor" => Some(Reglage::Surveillance),
             "entretien" | "maintenance" => Some(Reglage::Entretien),
             "appris" | "learned" | "apprentissage" | "learning" => Some(Reglage::Appris),
@@ -165,6 +178,7 @@ impl Reglage {
             Reglage::Langue => tr!("Langue", "Language"),
             Reglage::Emojis => tr!("Emojis", "Emojis"),
             Reglage::HorsLigne => tr!("Travailler sans Internet", "Work without the Internet"),
+            Reglage::TempsReel => tr!("Protection en temps réel", "Real-time protection"),
             Reglage::Surveillance => tr!("Surveillance horaire du réseau", "Hourly network monitoring"),
             Reglage::Entretien => tr!("Entretien du mois", "Monthly check-up"),
             Reglage::Appris => tr!("Alertes apprises", "Learned alerts"),
@@ -192,10 +206,20 @@ impl Reglage {
             Reglage::Langue => &["auto", "fr", "en"],
             Reglage::Emojis if anglais => &["auto", "yes", "no"],
             Reglage::Emojis => &["auto", "oui", "non"],
-            Reglage::HorsLigne | Reglage::Surveillance | Reglage::Entretien | Reglage::Restrictions if anglais => {
+            Reglage::HorsLigne
+            | Reglage::TempsReel
+            | Reglage::Surveillance
+            | Reglage::Entretien
+            | Reglage::Restrictions
+                if anglais =>
+            {
                 &["yes", "no"]
             }
-            Reglage::HorsLigne | Reglage::Surveillance | Reglage::Entretien | Reglage::Restrictions => &["oui", "non"],
+            Reglage::HorsLigne
+            | Reglage::TempsReel
+            | Reglage::Surveillance
+            | Reglage::Entretien
+            | Reglage::Restrictions => &["oui", "non"],
             Reglage::Appris | Reglage::Blocage | Reglage::CleAbuseCh => &[],
         }
     }
@@ -279,6 +303,7 @@ fn valeur(r: Reglage) -> String {
             .emojis
             .map_or_else(|| tr!("auto", "auto").to_string(), |e| mot_oui_non(e).to_string()),
         Reglage::HorsLigne => mot_oui_non(fichier.hors_ligne).to_string(),
+        Reglage::TempsReel => crate::protection::temps_reel::valeur(),
         Reglage::Surveillance => mot_oui_non(crate::reseau::surveillance::active()).to_string(),
         Reglage::Entretien => mot_oui_non(crate::entretien::active()).to_string(),
         Reglage::Appris => match crate::apprentissage::nombre() {
@@ -329,7 +354,8 @@ fn restrictions_dans(racine: &Path, actives: bool, accord: impl FnOnce(&str) -> 
 
 /// `vanguard parametres` : l'état ; avec un réglage et une valeur, le change ; « appris » et « blocage » ouvrent leur
 /// outil (« blocage » prend aussi ses propres mots : `vanguard parametres blocage connexions auto`) ; « abuse.ch »
-/// demande la clé, ou la retire (« retirer »), mais ne la prend jamais en argument.
+/// demande la clé, ou la retire (« retirer »), mais ne la prend jamais en argument ; « temps-reel non » prend aussi
+/// « --pendant 1h|4h ».
 pub fn commande(mots: &[String]) {
     let Some((premier, reste)) = mots.split_first() else {
         afficher();
@@ -354,6 +380,9 @@ pub fn commande(mots: &[String]) {
             "  ✖ La clé ne se donne pas sur la ligne de commande : l'historique du terminal la garderait. « vanguard parametres abuse.ch » la demande ; « vanguard parametres abuse.ch retirer » la retire.",
             "  ✖ The key is not given on the command line: the terminal history would keep it. “vanguard settings abuse.ch” asks for it; “vanguard settings abuse.ch remove” removes it."
         ),
+        (Reglage::TempsReel, [valeur, options @ ..]) => {
+            changer_temps_reel(valeur, options);
+        }
         (_, [valeur]) => {
             changer(r, valeur);
         }
@@ -362,9 +391,152 @@ pub fn commande(mots: &[String]) {
             "  {}: {}. Values: {}.",
             r.mot(),
             valeur(r),
-            r.valeurs().join(", ")
+            valeurs_dites(r)
         ),
     }
+}
+
+/// Les valeurs, telles que l'aide les dit : la protection en temps réel coupée prend aussi sa durée.
+fn valeurs_dites(r: Reglage) -> String {
+    let valeurs = r.valeurs().join(", ");
+    if r == Reglage::TempsReel {
+        trf!(
+            "{valeurs} [--pendant 1h|4h] (sans --pendant : jusqu'à ce que tu la remettes)",
+            "{valeurs} [--for 1h|4h] (without --for: until you turn it back on)"
+        )
+    } else {
+        valeurs
+    }
+}
+
+/// « --pendant 1h », « --pendant=4h » (et « --for », « --duree ») : `Ok(None)` sans option, `Err` sinon.
+fn duree_saisie(options: &[String]) -> Result<Option<crate::protection::temps_reel::Duree>, ()> {
+    use crate::protection::temps_reel::Duree;
+    let est_option = |o: &str| matches!(o, "--pendant" | "--for" | "--duree" | "--durée" | "--duration");
+    let valeur = match options {
+        [] => return Ok(None),
+        [o, v] if est_option(o) => v.as_str(),
+        [o] => match o.split_once('=') {
+            Some((o, v)) if est_option(o) => v,
+            _ => return Err(()),
+        },
+        _ => return Err(()),
+    };
+    Duree::depuis_mot(valeur).map(Some).ok_or(())
+}
+
+/// `vanguard parametres temps-reel oui|non [--pendant 1h|4h]`. `false` : rien changé.
+fn changer_temps_reel(saisie: &str, options: &[String]) -> bool {
+    use crate::protection::temps_reel::Duree;
+    let r = Reglage::TempsReel;
+    let (Some(en_marche), Ok(duree)) = (oui_non(saisie), duree_saisie(options)) else {
+        trp!(
+            "  ✖ Valeur inconnue pour {} : « {} ». Valeurs : {}.",
+            "  ✖ Unknown value for {}: “{}”. Values: {}.",
+            r.mot(),
+            affichable(
+                &std::iter::once(saisie)
+                    .chain(options.iter().map(String::as_str))
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            ),
+            valeurs_dites(r)
+        );
+        return false;
+    };
+    match (en_marche, duree) {
+        (true, None) => regler_temps_reel(None),
+        (true, Some(_)) => {
+            trp!(
+                "  ✖ --pendant va avec « non » : la protection remise l'est jusqu'à la prochaine coupure.",
+                "  ✖ --for goes with “no”: protection turned back on stays on until the next pause."
+            );
+            false
+        }
+        (false, d) => regler_temps_reel(Some(d.unwrap_or(Duree::JusquaReprise))),
+    }
+}
+
+/// Coupe (`Some(durée)`, après la liste de ce qui s'arrête et un accord) ou remet (`None`, sans rien demander) la
+/// protection en temps réel. `false` : rien changé.
+fn regler_temps_reel(voulu: Option<crate::protection::temps_reel::Duree>) -> bool {
+    use crate::protection::temps_reel;
+    let r = Reglage::TempsReel;
+    let mut accepte = false;
+    let fait = temps_reel::regler(voulu, |d| {
+        println!();
+        afficher_aligne(
+            "  ",
+            &trf!(
+                "Couper la protection en temps réel {} arrête :",
+                "Turning real-time protection off {} stops:",
+                d.libelle()
+            ),
+            2,
+            GRAS,
+        );
+        let lignes = temps_reel::ce_qui_s_arrete(
+            crate::reseau::surveillance::active(),
+            crate::protection::blocage::protection_active(),
+        );
+        for l in &lignes {
+            afficher_aligne("  ", l, 4, "");
+        }
+        accepte = demander(&trf!(
+            "\n  Couper la protection en temps réel {} ? [o/N] : ",
+            "\n  Turn real-time protection off {}? [y/N]: ",
+            d.libelle()
+        ))
+        .oui();
+        accepte
+    });
+    let (avant, apres) = match fait {
+        Err(e) => {
+            afficher_aligne(
+                &format!("  {}✖{RESET} ", couleur(crate::risk::Niveau::Eleve)),
+                &e,
+                4,
+                "",
+            );
+            return false;
+        }
+        Ok(_) if voulu.is_some() && !accepte => {
+            trp!("  Rien n'a changé.", "  Nothing changed.");
+            return false;
+        }
+        Ok(etats) => etats,
+    };
+    trp!(
+        "  {VERT}✔{RESET} {} : {} → {}",
+        "  {VERT}✔{RESET} {}: {} → {}",
+        r.titre(),
+        temps_reel::montrer(&avant),
+        temps_reel::montrer(&apres)
+    );
+    match apres.coupure() {
+        Some(c) => {
+            if let Some(h) = temps_reel::heure_de_reprise(&c) {
+                trp!(
+                    "  {GRIS}Elle reprend toute seule à {h}, chacun comme il était réglé.{RESET}",
+                    "  {GRIS}It comes back by itself at {h}, each part as it was set.{RESET}"
+                );
+            }
+            trp!(
+                "  {GRIS}Pour la remettre tout de suite : vanguard parametres {} {}{RESET}",
+                "  {GRIS}To turn it back on right now: vanguard settings {} {}{RESET}",
+                r.mot(),
+                mot_oui_non(true)
+            );
+        }
+        None if avant.coupure().is_some() => trp!(
+            "  {GRIS}Pour la couper de nouveau : vanguard parametres {} {} [--pendant 1h|4h]{RESET}",
+            "  {GRIS}To turn it off again: vanguard settings {} {} [--for 1h|4h]{RESET}",
+            r.mot(),
+            mot_oui_non(false)
+        ),
+        None => {}
+    }
+    true
 }
 
 /// « retirer », dans les deux langues.
@@ -450,6 +622,7 @@ fn changer(r: Reglage, saisie: &str) -> bool {
                 Ok((avant, apres)) => (mot_oui_non(avant).to_string(), mot_oui_non(apres).to_string()),
             }
         }
+        Reglage::TempsReel => return changer_temps_reel(saisie, &[]),
         Reglage::Appris | Reglage::Blocage | Reglage::CleAbuseCh => return false,
     };
     trp!(
@@ -524,6 +697,10 @@ fn explication(r: Reglage) -> &'static str {
             "Ce que Vanguard demande à Internet de lui-même est sauté : adresse vue d'Internet, DNS de l'audit, nouvelle version, empreintes de MalwareBazaar.",
             "What Vanguard asks the Internet by itself is skipped: address seen from the Internet, the audit's DNS, new version, MalwareBazaar fingerprints."
         ),
+        Reglage::TempsReel => tr!(
+            "Coupe d'un coup ce que Vanguard fait tout seul en continu : la surveillance horaire et la protection active du blocage, pendant 1 heure, 4 heures ou jusqu'à ce que tu la remettes. Les réglages de chacun ne changent pas : à la reprise, chacun retrouve son état d'avant. Jamais Defender, le pare-feu ni l'UAC.",
+            "Turns off at once what Vanguard does by itself all the time: the hourly monitoring and the active protection of blocking, for 1 hour, 4 hours or until you turn it back on. Each part's settings do not change: when it comes back, each one is as it was. Never Defender, the firewall or UAC."
+        ),
         Reglage::Surveillance => tr!(
             "Un scan du réseau toutes les heures, notification si un appareil inconnu arrive.",
             "A network scan every hour, notification if an unknown device shows up."
@@ -575,8 +752,63 @@ pub fn menu() {
             Reglage::Appris => crate::apprentissage::menu(),
             Reglage::Blocage => crate::protection::blocage::menu(),
             Reglage::CleAbuseCh => crate::protection::abuse_ch::menu(),
+            Reglage::TempsReel => choisir_temps_reel(),
             _ => choisir_valeur(r),
         }
+    }
+}
+
+/// Le choix de la protection en temps réel : en marche, ou coupée pour une des trois durées ; la valeur actuelle
+/// marquée.
+fn choisir_temps_reel() {
+    use crate::protection::temps_reel::{self as temps_reel, Duree};
+    let r = Reglage::TempsReel;
+    let coupure = temps_reel::coupure();
+    let mut lignes = vec![Ligne::Texte(String::new()), Ligne::Texte(ligne_titre(r.titre()))];
+    // Ce qui ne change jamais est dit en entier avec la question, juste après le choix d'une durée.
+    lignes.extend(
+        envelopper(explication(r), LARGEUR - 4)
+            .into_iter()
+            .map(|l| Ligne::Texte(format!("  {GRIS}{l}{RESET}"))),
+    );
+    lignes.push(Ligne::Texte(String::new()));
+    let en_ce_moment = tr!("← en ce moment", "← now");
+    lignes.push(Ligne::choix(
+        "1",
+        &trf!("{}, en marche", "{}, on", mot_oui_non(true)),
+        if coupure.is_none() { en_ce_moment } else { "" },
+    ));
+    for (i, d) in Duree::TOUTES.iter().enumerate() {
+        let precision = coupure
+            .filter(|c| c.duree() == *d)
+            .map(|c| format!("← {}", temps_reel::echeance(&c)))
+            .unwrap_or_default();
+        lignes.push(Ligne::choix(
+            &(i + 2).to_string(),
+            &format!("{}, {}", mot_oui_non(false), d.libelle()),
+            &couper(&precision, 33),
+        ));
+    }
+    lignes.push(Ligne::Texte(String::new()));
+    lignes.push(Ligne::choix("↵", tr!("Revenir", "Back"), ""));
+    let Some(choix) = choisir(
+        &lignes,
+        tr!("\n  Choix (Entrée pour revenir) : ", "\n  Choice (Enter to go back): "),
+        "1",
+        tr!("revenir", "back"),
+    ) else {
+        return;
+    };
+    match choix.trim().parse::<usize>() {
+        Ok(1) => {
+            regler_temps_reel(None);
+        }
+        Ok(n) => {
+            if let Some(&d) = n.checked_sub(2).and_then(|i| Duree::TOUTES.get(i)) {
+                regler_temps_reel(Some(d));
+            }
+        }
+        Err(_) => {}
     }
 }
 
@@ -771,6 +1003,7 @@ mod tests {
                 Reglage::Langue => ("langue", "language"),
                 Reglage::Emojis => ("emojis", "emojis"),
                 Reglage::HorsLigne => ("sans Internet", "offline"),
+                Reglage::TempsReel => ("temps réel", "real-time"),
                 Reglage::Surveillance => ("surveillance", "monitoring"),
                 Reglage::Entretien => ("entretien", "check-up"),
                 Reglage::Appris => ("alertes apprises", "learned alerts"),
@@ -778,9 +1011,33 @@ mod tests {
                 Reglage::Restrictions => ("restrictions des extensions", "extension restrictions"),
                 Reglage::CleAbuseCh => ("clé abuse.ch", "abuse.ch key"),
             };
-            assert!(fr.contains(nom_fr), "{r:?} absent du guide : {fr}");
-            assert!(en.contains(nom_en), "{r:?} missing from the guide: {en}");
+            // Sans tenir compte des majuscules : la phrase du guide commence par l'un d'eux.
+            assert!(
+                fr.to_lowercase().contains(&nom_fr.to_lowercase()),
+                "{r:?} absent du guide : {fr}"
+            );
+            assert!(
+                en.to_lowercase().contains(&nom_en.to_lowercase()),
+                "{r:?} missing from the guide: {en}"
+            );
         }
+    }
+
+    /// « temps-reel non » et sa durée : « --pendant 1h », « --pendant=4h », « --for 1h » ; une autre durée ou une
+    /// option inconnue est refusée (rien ne change).
+    #[test]
+    fn duree_de_la_coupure() {
+        use crate::protection::temps_reel::Duree;
+        let mots = |t: &str| t.split_whitespace().map(String::from).collect::<Vec<_>>();
+        assert_eq!(duree_saisie(&[]), Ok(None));
+        assert_eq!(duree_saisie(&mots("--pendant 1h")), Ok(Some(Duree::UneHeure)));
+        assert_eq!(duree_saisie(&mots("--pendant=4h")), Ok(Some(Duree::QuatreHeures)));
+        assert_eq!(duree_saisie(&mots("--for 4h")), Ok(Some(Duree::QuatreHeures)));
+        assert_eq!(duree_saisie(&mots("--pendant 2h")), Err(()));
+        assert_eq!(duree_saisie(&mots("--pendant")), Err(()));
+        assert_eq!(duree_saisie(&mots("--toujours 1h")), Err(()));
+        assert_eq!(duree_saisie(&mots("--pendant 1h encore")), Err(()));
+        assert!(valeurs_dites(Reglage::TempsReel).contains("1h|4h"));
     }
 
     #[test]
@@ -791,7 +1048,9 @@ mod tests {
             for v in r.valeurs() {
                 let mut f = Fichier::default();
                 let ok = match r {
-                    Reglage::Surveillance | Reglage::Entretien | Reglage::Restrictions => oui_non(v).is_some(),
+                    Reglage::TempsReel | Reglage::Surveillance | Reglage::Entretien | Reglage::Restrictions => {
+                        oui_non(v).is_some()
+                    }
                     _ => changer_dans(&mut f, r, v).is_ok(),
                 };
                 assert!(ok, "{r:?} {v}");
@@ -801,6 +1060,8 @@ mod tests {
         assert_eq!(Reglage::depuis_mot("Language"), Some(Reglage::Langue));
         assert_eq!(Reglage::depuis_mot("offline"), Some(Reglage::HorsLigne));
         assert_eq!(Reglage::depuis_mot("abuse-ch"), Some(Reglage::CleAbuseCh));
+        assert_eq!(Reglage::depuis_mot("Temps-Réel"), Some(Reglage::TempsReel));
+        assert_eq!(Reglage::depuis_mot("realtime"), Some(Reglage::TempsReel));
         assert!(est_retirer("Retirer") && est_retirer("remove") && !est_retirer("a1B2c3D4e5F6g7H8i9J0k1L2"));
     }
 }

@@ -365,10 +365,21 @@ your habits on the same network; a known device that suddenly seems all closed (
 patiently. "What Vanguard has learned" shows everything and lets you forget.
 
 **Settings** (This machine › Settings, "s" in the main menu, `vanguard settings`) — every setting in one place:
-language, emojis, working without the Internet, hourly monitoring, monthly check-up, learned alerts, threat blocking and
-extension restrictions. Each change shows the previous value and the command to put it back; learned alerts and blocking
-open their own screen ("What Vanguard has learned", Threat blocking). Language, emojis and working without the Internet
-stay chosen from one launch to the next (VANGUARD_LANG, VANGUARD_EMOJI and VANGUARD_HORS_LIGNE always win).
+language, emojis, working without the Internet, real-time protection, hourly monitoring, monthly check-up, learned
+alerts, threat blocking and extension restrictions. Each change shows the previous value and the command to put it
+back; learned alerts and blocking open their own screen ("What Vanguard has learned", Threat blocking). Language, emojis
+and working without the Internet stay chosen from one launch to the next (VANGUARD_LANG, VANGUARD_EMOJI and
+VANGUARD_HORS_LIGNE always win).
+
+**Real-time protection** (Settings, `vanguard settings real-time no [--for 1h|4h]`) — turns off at once, after your
+consent and the list of what stops, what Vanguard does by itself all the time: the hourly monitoring (and everything it
+watches and notifies) and the active protection of blocking, which no longer blocks anything by itself. For 1 hour, 4
+hours or until you turn it back on (`vanguard settings real-time yes`); it comes back by itself when the time is up, and
+the monitoring checks that itself. Each part's settings do not change: when it comes back, each one is as it was. While
+it is off, this is said again at the top of the main menu, in each check-up (a piece of information, with no effect on
+the grade), in "Who talks to the Internet?" and in blocking. It only concerns Vanguard: Defender, the firewall and UAC
+are never touched, and a block already made stays in place. As administrator, it is not set: its setting belongs to
+your account.
 
 **Extensions** (menu 12, `vanguard extensions`) — your own programs in Vanguard, without touching its code. A plugin
 is a folder with a `plugin.toml` manifest, added once from a folder or a .zip archive (`vanguard plugin add`); a lab
@@ -490,7 +501,7 @@ Each menu entry is also a command.
 | `vanguard slow` | why it is slow: processor, memory, disk, startup, programs at login |
 | `vanguard startup` | startup programs: remove or put them back, after your consent; each removal is undone exactly |
 | `vanguard changes` | what Vanguard changed: each fix run here, its date and its result |
-| `vanguard settings [setting value]` | settings (also “s” in the main menu): language, emojis, working without the Internet, monitoring, monthly check-up, learned alerts, blocking, extension restrictions, abuse.ch key (masked); the previous value is shown to go back |
+| `vanguard settings [setting value]` | settings (also “s” in the main menu): language, emojis, working without the Internet, monitoring, real-time protection (`real-time no --for 1h\|4h`, or until turned back on), monthly check-up, learned alerts, blocking, extension restrictions, abuse.ch key (masked); the previous value is shown to go back |
 | `vanguard blocking [search\|undo\|auto\|click\|category mode]` | threat blocking: one-click “Block” for each threat (action shown, written down, undoable); active protection, after a consent, that blocks what is certain by itself (MalwareBazaar fingerprint, known attack tool, command server) |
 | `vanguard handout` | report to leave behind: a simple page for the person you helped |
 | `vanguard relative` | a relative's computer: three questions, the check, a summary in plain words, the fixes, the page to leave behind with its tips |

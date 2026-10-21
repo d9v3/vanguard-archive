@@ -1020,3 +1020,84 @@ fn plugin_d_exemple_et_labo() {
     );
     let _ = std::fs::remove_dir_all(&maison);
 }
+
+/// La protection en temps réel : couper demande l'accord, avec la liste de ce qui s'arrête (refusé : rien d'écrit),
+/// pour une durée choisie ; c'est redit en tête du menu principal, et la remettre ne demande rien. Par la ligne de
+/// commande en français et en anglais, par le menu Paramètres, et dans l'aide des deux langues.
+#[test]
+fn protection_en_temps_reel_coupee_puis_remise() {
+    let maison = maison_jetable();
+    let programme = Path::new(env!("CARGO_BIN_EXE_vanguard"));
+    let fichier = dossier_vanguard(&maison).join("temps-reel.json");
+    let lancer = |langue: &str, args: &[&str], entree: &str| {
+        let s = vanguard_dans(programme, &maison, langue, args, entree, 60);
+        assert_eq!(s.code, Some(0), "{args:?} : {}{}", s.texte, s.erreurs);
+        sans_couleurs(&s.texte)
+    };
+    // En administrateur (dans `unshare -rn`, verifier.sh, le compte devient root) : refusé sans question, rien
+    // d'écrit, comme les restrictions des extensions.
+    #[cfg(unix)]
+    if std::fs::metadata("/proc/self")
+        .map(|m| std::os::unix::fs::MetadataExt::uid(&m))
+        .ok()
+        == Some(0)
+    {
+        let t = lancer("fr", &["parametres", "temps-reel", "non", "--pendant", "1h"], "o\n");
+        assert!(t.contains("tourne en administrateur") && !t.contains("[o/N]"), "{t}");
+        assert!(!fichier.exists());
+        let _ = std::fs::remove_dir_all(&maison);
+        return;
+    }
+    // Refusé : la liste a été montrée, rien n'est écrit.
+    let t = lancer("fr", &["parametres", "temps-reel", "non", "--pendant", "1h"], "n\n");
+    assert!(
+        t.contains("La surveillance horaire") && t.contains("Defender, le pare-feu et l'UAC"),
+        "{t}"
+    );
+    assert!(t.contains("[o/N]") && t.contains("Rien n'a changé"), "{t}");
+    assert!(!fichier.exists());
+    // Une durée inconnue, ou « --pendant » avec « oui » : refusés sans question.
+    let t = lancer("fr", &["parametres", "temps-reel", "non", "--pendant", "2h"], "");
+    assert!(t.contains("Valeur inconnue") && !t.contains("[o/N]"), "{t}");
+    let t = lancer("fr", &["parametres", "temps-reel", "oui", "--pendant", "1h"], "");
+    assert!(t.contains("--pendant va avec « non »"), "{t}");
+    assert!(!fichier.exists());
+    // Accepté : coupée pour une heure, dit dans Paramètres et en tête du menu principal.
+    let t = lancer("fr", &["parametres", "temps-reel", "non", "--pendant", "1h"], "o\n");
+    assert!(t.contains("oui → non (jusqu'à"), "{t}");
+    assert!(fichier.is_file());
+    let t = lancer("fr", &["parametres"], "");
+    assert!(t.contains("temps-reel") && t.contains("non (jusqu'à"), "{t}");
+    let t = lancer("fr", &[], "q\n");
+    assert!(t.contains("temps réel coupé"), "{t}");
+    // Remise : sans question, le fichier retiré, et le menu ne le dit plus.
+    let t = lancer("fr", &["parametres", "temps-reel", "oui"], "");
+    assert!(t.contains("→ oui") && !t.contains("[o/N]"), "{t}");
+    assert!(!fichier.exists());
+    assert!(!lancer("fr", &[], "q\n").contains("temps réel coupé"));
+    // En anglais, jusqu'à reprise.
+    let t = lancer("en", &["settings", "real-time", "no"], "y\n");
+    assert!(
+        t.contains("until you turn it back on") && t.contains("yes → no (until turned back on)"),
+        "{t}"
+    );
+    assert!(lancer("en", &[], "q\n").contains("real-time off"));
+    lancer("en", &["settings", "real-time", "yes"], "");
+    assert!(!fichier.exists());
+    // Par le menu : « s » (Paramètres), 4 (Protection en temps réel), 3 (4 heures), accord, puis revenir.
+    let t = lancer("fr", &[], "s\n4\n3\no\n\n\nq\n");
+    assert!(
+        t.contains("PROTECTION EN TEMPS RÉEL") || t.contains("Protection en temps réel"),
+        "{t}"
+    );
+    assert!(
+        t.contains("non, pendant 4 heures") && t.contains("oui → non (jusqu'à"),
+        "{t}"
+    );
+    assert!(fichier.is_file());
+    lancer("fr", &["parametres", "temps-reel", "oui"], "");
+    // L'aide, dans les deux langues.
+    assert!(lancer("fr", &["parametres", "--help"], "").contains("temps-reel non"));
+    assert!(lancer("en", &["settings", "--help"], "").contains("real-time no --for 1h|4h"));
+    let _ = std::fs::remove_dir_all(&maison);
+}

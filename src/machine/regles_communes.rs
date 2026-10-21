@@ -194,6 +194,18 @@ regle!(
 );
 
 regle!(
+    "COM-SUR-002",
+    Os::Tous,
+    701,
+    (
+        "protection en temps réel de Vanguard",
+        "Vanguard's real-time protection"
+    ),
+    &[],
+    || vec![crate::protection::temps_reel::constat()]
+);
+
+regle!(
     "COM-CLE-002",
     Os::Tous,
     710,

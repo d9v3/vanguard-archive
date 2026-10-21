@@ -1346,6 +1346,7 @@ fn afficher_et_juger() -> bool {
     ) {
         println!("  {ligne}");
     }
+    crate::protection::temps_reel::dire_si_coupee(crate::protection::temps_reel::Ou::Sortantes);
     println!();
     // Les listes des serveurs de botnets, une fois pour tout l'écran. Une liste indisponible : on le dira plus bas, et
     // rien ne sera dédouané pour autant.

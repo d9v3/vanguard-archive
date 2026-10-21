@@ -58,9 +58,13 @@ Entrée ouvre celle en surbrillance, Échap efface. Au menu principal, elle trou
        Rapport à laisser : une page simple pour la personne dépannée, posée sur son Bureau
        Ce que Vanguard a changé : chaque correction lancée ici, datée, réussie ou non
        Entretien du mois : une notification par mois (note, mises à jour, place à libérer, problèmes nouveaux)
-       Paramètres (aussi « s » au menu principal) : langue, emojis, travail sans Internet, surveillance, entretien,
-         alertes apprises, blocage, restrictions des extensions ; la valeur d'avant est montrée, sauf pour les
-         alertes apprises et le blocage, qui ouvrent leur propre écran (vanguard parametres)
+       Paramètres (aussi « s » au menu principal) : langue, emojis, travail sans Internet, protection en temps
+         réel, surveillance, entretien, alertes apprises, blocage, restrictions des extensions ; la valeur d'avant
+         est montrée, sauf pour les alertes apprises et le blocage, qui ouvrent leur propre écran
+         (vanguard parametres)
+       Protection en temps réel : la surveillance horaire et la protection active du blocage coupées d'un coup,
+         après accord, pendant 1 h, 4 h ou jusqu'à reprise ; jamais Defender, le pare-feu ni l'UAC, et un blocage
+         déjà fait reste en place (vanguard parametres temps-reel non --pendant 1h)
   5  Réseau et Internet ›
        Scanner le réseau (et démasquer un voleur de mots de passe comme Responder)
        Audit du réseau : six notes (exposition à Internet, Wi-Fi, séparation des appareils, DNS et certificats,

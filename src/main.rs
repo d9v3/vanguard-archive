@@ -295,13 +295,16 @@ enum Commande {
     /// Failles connues des images Docker ou Podman de cet ordinateur, par trivy s'il est installé. Lecture seule.
     #[command(visible_alias = "containers")]
     Conteneurs,
-    /// Paramètres : tous les réglages de Vanguard (langue, emojis, travail sans Internet, surveillance, entretien,
-    /// alertes apprises, blocage, restrictions des extensions, clé abuse.ch). Sans argument : leur état ; avec un
-    /// réglage et une valeur : le change, la valeur d'avant montrée pour revenir.
+    /// Paramètres : tous les réglages de Vanguard (langue, emojis, travail sans Internet, protection en temps réel,
+    /// surveillance, entretien, alertes apprises, blocage, restrictions des extensions, clé abuse.ch). Sans argument :
+    /// leur état ; avec un réglage et une valeur : le change, la valeur d'avant montrée pour revenir. « temps-reel non
+    /// --pendant 1h|4h » coupe la protection en temps réel de Vanguard pour ce temps (sans --pendant : jusqu'à
+    /// reprise), après accord ; jamais Defender, le pare-feu ni l'UAC.
     #[command(visible_alias = "settings")]
     Parametres {
-        /// Un réglage (langue, emojis, sans-internet, surveillance, entretien, appris, blocage, restrictions,
-        /// abuse.ch) et sa valeur.
+        /// Un réglage (langue, emojis, sans-internet, temps-reel, surveillance, entretien, appris, blocage,
+        /// restrictions, abuse.ch) et sa valeur ; temps-reel non prend aussi --pendant 1h ou 4h.
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         quoi: Vec<String>,
     },
     /// Blocage des menaces : chaque menace trouvée propose « Bloquer » (le geste montré, accepté, noté, annulable) ;
@@ -746,7 +749,7 @@ fn etat_du_menu(surveillance_active: bool) -> Vec<String> {
     } else {
         format!("{GRIS}{}{RESET}", tr!("surveillance coupée", "monitoring off"))
     };
-    let cle = format!("  {cle} {GRIS}·{RESET} {surveillance}");
+    let cle = ligne_de_la_cle(&cle, &surveillance, protection::temps_reel::en_tete());
     // La copie périmée d'abord : remettre la clé à jour passe avant d'en recopier le programme.
     let avis = protection::manifeste::avertissement_perime()
         .map(|a| format!("  {}⚠{RESET} {a}", couleur(risk::Niveau::Moyen)))
@@ -756,6 +759,23 @@ fn etat_du_menu(surveillance_active: bool) -> Vec<String> {
                 .map(|a| format!("  {ACCENT}↑{RESET} {a}"))
         });
     lignes_d_etat(bilan, connexion, cle, avis)
+}
+
+/// La ligne de la clé et de la surveillance, avec la protection en temps réel quand elle est coupée : à côté de la
+/// surveillance si tout tient dans la largeur, sinon à sa place (elle ne passe plus, de toute façon), et sans son
+/// échéance en dernier recours.
+fn ligne_de_la_cle(cle: &str, surveillance: &str, temps_reel: Option<(String, String)>) -> String {
+    let point = format!(" {GRIS}·{RESET} ");
+    let Some((long, court)) = temps_reel else {
+        return format!("  {cle}{point}{surveillance}");
+    };
+    [
+        format!("  {cle}{point}{surveillance}{point}{long}"),
+        format!("  {cle}{point}{long}"),
+    ]
+    .into_iter()
+    .find(|l| largeur_affichee(l) <= LARGEUR)
+    .unwrap_or_else(|| format!("  {cle}{point}{court}"))
 }
 
 /// Les lignes d'état, trois au plus : avec plus, le menu ne tiendrait plus dans un terminal de 24 lignes (test). Un
@@ -1342,7 +1362,7 @@ const OUTILS: &[Outil] = &[
         precision: ["langue, surveillance, blocage…", "language, monitoring, blocking…"],
         mots: "paramètres settings réglages options préférences preferences langue language emojis internet \
                hors ligne offline surveillance monitoring entretien maintenance appris learned blocage blocking \
-               restrictions" },
+               restrictions temps réel real-time realtime pause" },
 ];
 
 // Une action ajoutée sans sa ligne décalerait toutes les suivantes : la compilation s'arrête.
@@ -1657,9 +1677,12 @@ const AIDES_EN: &[(&str, &str)] = &[
     ("secrets", "Secrets in the history of the home folder's git projects (passwords, API keys, tokens), searched by \
                  Vanguard, and also by gitleaks if installed. No secret is shown. Read-only"),
     ("conteneurs", "Known flaws in this computer's Docker or Podman images, by trivy if installed. Read-only"),
-    ("parametres", "Settings: all of Vanguard's settings (language, emojis, working without the Internet, monitoring, \
-                    monthly check-up, learned alerts, blocking, extension restrictions, abuse.ch key). No argument: \
-                    their state; with a setting and a value: changes it, showing the previous value to go back"),
+    ("parametres", "Settings: all of Vanguard's settings (language, emojis, working without the Internet, real-time \
+                    protection, monitoring, monthly check-up, learned alerts, blocking, extension restrictions, \
+                    abuse.ch key). No argument: their state; with a setting and a value: changes it, showing the \
+                    previous value to go back. “real-time no --for 1h|4h” turns Vanguard's real-time protection off \
+                    for that long (without --for: until turned back on), after your consent; never Defender, the \
+                    firewall or UAC"),
     ("blocage", "Threat blocking: each threat found offers “Block” (the action shown, accepted, written down, \
                  undoable); active protection, after a consent given once, blocks what is certain by itself \
                  (MalwareBazaar fingerprint, known attack tool, command server), then warns you. No argument: the menu"),
@@ -1797,8 +1820,9 @@ const OPTIONS_EN: &[(&str, &str, &str)] = &[
     ("extensions", "sans_restrictions", "on: the extensions' restrictions turned off (no consent, fingerprint or scan, \
                                          with all your rights); off: back on. The extensions folder must stay yours \
                                          alone"),
-    ("parametres", "quoi", "A setting (language, emojis, offline, monitoring, maintenance, learned, blocking, \
-                              restrictions, abuse.ch) and its value"),
+    ("parametres", "quoi", "A setting (language, emojis, offline, real-time, monitoring, maintenance, learned, \
+                              blocking, restrictions, abuse.ch) and its value; real-time no also takes --for 1h or \
+                              4h"),
     ("blocage", "quoi", "“search”, “undo”, “status”, “auto” or “click” (active protection), or a category (programs, \
                            connections, startup, agents) followed by a mode (off, click, auto)"),
     ("depanner", "sujet", "The subject: internet, wifi, slow, sound, printer, disk, infection, new, leaving (or words \
@@ -2117,6 +2141,34 @@ mod tests_menu {
         assert!(affichees + 2 <= 24, "{affichees} lignes affichées");
         // La recherche voit plus que l'écran : outils des sous-menus et pages du guide.
         assert!(lignes.len() > affichees + 50);
+    }
+
+    /// La protection en temps réel coupée se dit sur la ligne de la clé, à côté de la surveillance, sans jamais
+    /// dépasser la largeur : la clé la plus longue lui laisse la place de la surveillance, puis sans son échéance.
+    #[test]
+    fn temps_reel_coupe_dans_l_en_tete() {
+        let coupe = Some((
+            "temps réel coupé → 22/10 01:30".to_string(),
+            "temps réel coupé".to_string(),
+        ));
+        let courte = ligne_de_la_cle("clé non branchée", "surveillance active", coupe.clone());
+        assert!(
+            courte.contains("surveillance active") && courte.contains("→ 22/10"),
+            "{courte}"
+        );
+        assert_eq!(
+            ligne_de_la_cle("clé non branchée", "surveillance active", None),
+            format!("  clé non branchée {GRIS}·{RESET} surveillance active")
+        );
+        for cle in [
+            "clé VANGUARD branchée (protégée en écriture)",
+            "clé VANGUARD inconnue, ignorée",
+            &"x".repeat(60),
+        ] {
+            let l = ligne_de_la_cle(cle, "surveillance coupée", coupe.clone());
+            assert!(l.contains("temps réel coupé"), "{l}");
+            assert!(largeur_affichee(&l) <= LARGEUR || cle.len() == 60, "{l}");
+        }
     }
 
     #[test]

@@ -2,7 +2,9 @@
 //! que Vanguard a changé » et toujours annulable (`vanguard blocage annuler`). La protection active, activée une
 //! fois avec accord, bloque toute seule ce qui est certain (un fichier dont l'empreinte est dans MalwareBazaar, un
 //! outil d'attaque connu en marche, une connexion vers un serveur de commande connu), puis prévient ; le douteux reste
-//! une alerte avec son bouton. Elle tourne au bilan et dans la surveillance horaire, jamais dans un service à part.
+//! une alerte avec son bouton. Elle tourne au bilan et dans la surveillance horaire, jamais dans un service à part ;
+//! la protection en temps réel coupée (`protection::temps_reel`), elle ne bloque plus rien toute seule, sans que ses
+//! réglages changent, et ce qu'elle a déjà bloqué reste bloqué.
 //!
 //! Quatre catégories, chacune désactivée, en un clic (par défaut) ou automatique (le certain seulement) : programmes
 //! malveillants, connexions dangereuses, démarrage et pilotes, agents et serveurs d'IA (`parametres`). Les
@@ -71,12 +73,25 @@ fn enregistrer(p: &Parametres) -> bool {
 /// pas : tout processus du compte peut écrire ce fichier (sous Windows, une fenêtre « en tant qu'administrateur »
 /// garde le même %LOCALAPPDATA%), et il ne doit pas faire agir Vanguard avec tous les droits sans une question. Le
 /// certain s'y propose alors d'un clic, comme le reste ; les extensions font de même (en administrateur, leurs
-/// réglages ne lèvent rien).
-fn pour_agir(mut p: Parametres, administrateur: bool) -> Parametres {
-    if administrateur {
+/// réglages ne lèvent rien). La protection en temps réel coupée fait de même, le temps de la coupure : blocage.json
+/// n'est pas touché, et l'accord revient tel quel à la reprise.
+fn pour_agir(mut p: Parametres, rien_tout_seul: bool) -> Parametres {
+    if rien_tout_seul {
         p.accord = None;
     }
     p
+}
+
+/// Vanguard tourne-t-il en administrateur, ou ne peut-il pas le savoir ? Le garde-fou de la protection active, que le
+/// réglage de la protection en temps réel suit aussi.
+pub(crate) fn administrateur_ou_inconnu() -> bool {
+    gestes::administrateur_ou_inconnu()
+}
+
+/// La protection active est-elle réglée (accord donné, une catégorie automatique) ? Ce que la coupure du temps réel
+/// arrêterait.
+pub(crate) fn protection_active() -> bool {
+    parametres::charger().is_ok_and(|p| p.actif())
 }
 
 /// Ce que la protection active devient en administrateur, dit là où elle tournerait.
@@ -177,6 +192,7 @@ fn afficher_etat(p: &Parametres) {
     if p.actif() && gestes::administrateur_ou_inconnu() {
         dire_administrateur();
     }
+    crate::protection::temps_reel::dire_si_coupee(crate::protection::temps_reel::Ou::Blocage);
 }
 
 /// Le texte de l'accord, montré une seule fois, avant le premier « automatique ».
@@ -235,7 +251,17 @@ fn changer_mode(c: Categorie, m: Mode) -> bool {
         c.titre(),
         p.effectif(c).libelle()
     );
-    if m == Mode::Automatique && !crate::reseau::surveillance::active() {
+    if m == Mode::Automatique && crate::protection::temps_reel::coupure().is_some() {
+        afficher_aligne(
+            "  ",
+            tr!(
+                "La protection en temps réel est coupée : rien ne se bloquera tout seul avant qu'elle reprenne (vanguard parametres temps-reel oui).",
+                "Real-time protection is off: nothing will be blocked by itself until it comes back (vanguard settings real-time yes)."
+            ),
+            2,
+            GRIS,
+        );
+    } else if m == Mode::Automatique && !crate::reseau::surveillance::active() {
         afficher_aligne(
             "  ",
             tr!(
@@ -257,7 +283,13 @@ pub fn menu() {
         let mut lignes = vec![
             Ligne::Texte(String::new()),
             Ligne::Texte(ligne_titre(tr!("Blocage des menaces", "Threat blocking"))),
-            Ligne::Texte(if p.actif() {
+            Ligne::Texte(if p.actif() && crate::protection::temps_reel::coupure().is_some() {
+                trf!(
+                    "  {}Protection en temps réel coupée{RESET} {GRIS}: rien ne se bloque tout seul.{RESET}",
+                    "  {}Real-time protection off{RESET}{GRIS}: nothing is blocked by itself.{RESET}",
+                    couleur(crate::risk::Niveau::Moyen)
+                )
+            } else if p.actif() {
                 trf!(
                     "  {VERT}Protection active{RESET} {GRIS}: le certain est bloqué tout seul.{RESET}",
                     "  {VERT}Active protection{RESET}{GRIS}: what is certain is blocked by itself.{RESET}"
@@ -411,9 +443,9 @@ fn chercher_et_proposer() {
     dire_non_verifie(&t.non_verifie);
 }
 
-/// Au bilan : le certain des catégories automatiques est bloqué tout seul (jamais en administrateur, voir
-/// `pour_agir`), puis chaque autre menace propose « Bloquer » (dans un terminal ; sinon elle est seulement dite, sans
-/// question).
+/// Au bilan : le certain des catégories automatiques est bloqué tout seul (jamais en administrateur ni la protection
+/// en temps réel coupée, voir `pour_agir`), puis chaque autre menace propose « Bloquer » (dans un terminal ; sinon
+/// elle est seulement dite, sans question).
 pub fn au_bilan() {
     let p = parametres();
     if p.rien() {
@@ -430,7 +462,8 @@ pub fn au_bilan() {
     if p.actif() && administrateur {
         dire_administrateur();
     }
-    let p = pour_agir(p, administrateur);
+    let coupee = crate::protection::temps_reel::dire_si_coupee(crate::protection::temps_reel::Ou::Blocage);
+    let p = pour_agir(p, administrateur || coupee);
     let (auto, un_clic): (Vec<Menace>, Vec<Menace>) = t
         .menaces
         .into_iter()
@@ -532,8 +565,12 @@ pub(crate) fn en_surveillance() {
     let Ok(p) = parametres::charger() else {
         return;
     };
-    // En administrateur, rien ne s'y bloque tout seul (`pour_agir`) : il n'y a rien à chercher.
-    let p = pour_agir(p, gestes::administrateur_ou_inconnu());
+    // En administrateur, ou la protection en temps réel coupée (la passe s'arrête déjà avant ; ceci tient même si elle
+    // ne le faisait plus), rien ne s'y bloque tout seul (`pour_agir`) : il n'y a rien à chercher.
+    let p = pour_agir(
+        p,
+        gestes::administrateur_ou_inconnu() || crate::protection::temps_reel::coupure().is_some(),
+    );
     if !p.actif() {
         return;
     }

@@ -1,0 +1,641 @@
+//! Protection en temps réel de Vanguard : un interrupteur qui coupe d'un coup ce qui veille et agit en continu (la
+//! surveillance horaire et tout ce qu'elle regarde, la protection active du blocage), pendant une heure, quatre heures
+//! ou jusqu'à ce que la personne la remette. Les réglages de chacun ne sont pas touchés : la minuterie de la
+//! surveillance reste en place, blocage.json reste tel quel ; chacun les relit à la reprise, et retrouve donc son état
+//! d'avant. La coupure tient dans temps-reel.json (son début, son échéance) ; à l'échéance, elle ne vaut plus, et la
+//! surveillance, qui passe toutes les heures, le constate elle-même, retire le fichier et le notifie.
+//!
+//! Jamais Defender, le pare-feu ni l'UAC : ce réglage ne concerne que Vanguard. Ce qu'un blocage a déjà posé (règle du
+//! pare-feu, quarantaine) reste en place : couper le temps réel ne défait rien. Un fichier abîmé ne coupe rien : la
+//! protection reste en marche, et c'est dit. En administrateur, il ne se règle pas (comme les restrictions des
+//! extensions) : le fichier est celui du compte, que la surveillance lit sans droits ; lu, il ne change rien à ce
+//! qu'y fait Vanguard, qui n'y bloque déjà rien tout seul (`blocage::pour_agir`).
+
+use std::path::{Path, PathBuf};
+
+use serde::{Deserialize, Serialize};
+
+use crate::machine::Constat;
+use crate::risk::Niveau;
+use crate::ui::*;
+
+/// Au-delà, ce n'est pas le fichier de Vanguard : il n'est pas lu.
+const TAILLE_MAX: u64 = 4 << 10;
+
+/// Une horloge retardée de plus que cela depuis la coupure (changement d'heure à la main, pile de la carte mère) : une
+/// coupure à durée ne se croit plus sur parole, et la protection reprend.
+const RETARD_TOLERE: i64 = 5 * 60;
+
+/// Combien de temps la coupure dure.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum Duree {
+    UneHeure,
+    QuatreHeures,
+    JusquaReprise,
+}
+
+impl Duree {
+    pub(crate) const TOUTES: [Duree; 3] = [Duree::UneHeure, Duree::QuatreHeures, Duree::JusquaReprise];
+
+    fn secondes(self) -> Option<i64> {
+        match self {
+            Duree::UneHeure => Some(3600),
+            Duree::QuatreHeures => Some(4 * 3600),
+            Duree::JusquaReprise => None,
+        }
+    }
+
+    /// Ce qui suit « --pendant » ; `None` : inconnu.
+    pub(crate) fn depuis_mot(mot: &str) -> Option<Duree> {
+        match mot.trim().to_lowercase().replace(' ', "").as_str() {
+            "1h" | "1" | "1heure" | "1hour" | "60min" | "60m" => Some(Duree::UneHeure),
+            "4h" | "4" | "4heures" | "4hours" | "240min" | "240m" => Some(Duree::QuatreHeures),
+            _ => None,
+        }
+    }
+
+    /// Telle qu'elle se lit dans une phrase (« couper … ? »).
+    pub(crate) fn libelle(self) -> &'static str {
+        match self {
+            Duree::UneHeure => tr!("pendant 1 heure", "for 1 hour"),
+            Duree::QuatreHeures => tr!("pendant 4 heures", "for 4 hours"),
+            Duree::JusquaReprise => tr!("jusqu'à ce que tu la remettes", "until you turn it back on"),
+        }
+    }
+
+    /// Les plus longues durées données par Vanguard : une échéance plus lointaine n'est pas la sienne.
+    const PLUS_LONGUE: i64 = 4 * 3600;
+}
+
+/// Ce que garde temps-reel.json : des secondes depuis 1970, comme l'horloge du système.
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
+struct Fichier {
+    coupee_le: i64,
+    /// Absente : jusqu'à ce que la personne la remette.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    jusqu_a: Option<i64>,
+}
+
+/// Une coupure : son début et son échéance (`None` : jusqu'à reprise).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) struct Coupure {
+    pub depuis: i64,
+    pub jusqu_a: Option<i64>,
+}
+
+impl Coupure {
+    /// La durée choisie, retrouvée de son échéance.
+    pub(crate) fn duree(&self) -> Duree {
+        match self.jusqu_a {
+            None => Duree::JusquaReprise,
+            Some(fin) if fin.saturating_sub(self.depuis) <= 3600 => Duree::UneHeure,
+            Some(_) => Duree::QuatreHeures,
+        }
+    }
+}
+
+/// L'état lu.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub(crate) enum Etat {
+    /// Pas de coupure : chacun fait ce qui est réglé.
+    EnMarche,
+    Coupee(Coupure),
+    /// L'échéance est passée : la protection a repris, et le fichier attend d'être retiré (surveillance, changement).
+    Echue(Coupure),
+    /// Le fichier ne se lit plus : rien n'est coupé sur la foi d'un fichier abîmé.
+    Illisible(String),
+}
+
+impl Etat {
+    pub(crate) fn coupure(&self) -> Option<Coupure> {
+        match self {
+            Etat::Coupee(c) => Some(*c),
+            _ => None,
+        }
+    }
+}
+
+fn fichier() -> PathBuf {
+    crate::reseau::dossier_local().join("temps-reel.json")
+}
+
+fn maintenant() -> i64 {
+    chrono::Local::now().timestamp()
+}
+
+/// L'état de `chemin` à l'instant `maintenant`.
+fn lire_de(chemin: &Path, maintenant: i64) -> Etat {
+    match std::fs::metadata(chemin) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Etat::EnMarche,
+        Err(e) => return Etat::Illisible(e.to_string()),
+        Ok(m) if m.len() > TAILLE_MAX => {
+            return Etat::Illisible(trf!("plus de {} Kio", "over {} KiB", TAILLE_MAX >> 10));
+        }
+        Ok(_) => {}
+    }
+    let lu = std::fs::read_to_string(chemin)
+        .map_err(|e| e.to_string())
+        .and_then(|t| serde_json::from_str::<Fichier>(t.trim_start_matches('\u{feff}')).map_err(|e| e.to_string()));
+    let f = match lu {
+        Ok(f) => f,
+        Err(e) => return Etat::Illisible(e),
+    };
+    let c = Coupure {
+        depuis: f.coupee_le,
+        jusqu_a: f.jusqu_a,
+    };
+    match c.jusqu_a {
+        // Une durée que Vanguard ne donne jamais : ce n'est pas lui qui a écrit ce fichier.
+        Some(fin) if fin <= c.depuis || fin.saturating_sub(c.depuis) > Duree::PLUS_LONGUE => {
+            Etat::Illisible(tr!("durée inconnue", "unknown duration").to_string())
+        }
+        Some(fin) if maintenant >= fin || maintenant < c.depuis.saturating_sub(RETARD_TOLERE) => Etat::Echue(c),
+        _ => Etat::Coupee(c),
+    }
+}
+
+/// L'état de la protection en temps réel, maintenant.
+pub(crate) fn etat() -> Etat {
+    lire_de(&fichier(), maintenant())
+}
+
+/// La coupure en cours, s'il y en a une : ce que la surveillance et le blocage consultent.
+pub(crate) fn coupure() -> Option<Coupure> {
+    etat().coupure()
+}
+
+/// Un fichier qu'on ne sait plus lire n'est jamais écrasé ni effacé en silence : il est gardé à côté, tel quel, sous
+/// un nom libre (deux mis de côté dans la même seconde ne s'écrasent pas l'un l'autre).
+fn mettre_de_cote(chemin: &Path) -> std::io::Result<PathBuf> {
+    let date = chrono::Local::now().format("%Y%m%d-%H%M%S").to_string();
+    let copie = (0..100)
+        .map(|n| {
+            let suite = if n == 0 { String::new() } else { format!("-{n}") };
+            chemin.with_extension(format!("illisible-{date}{suite}.json"))
+        })
+        .find(|c| !c.exists())
+        .ok_or_else(|| std::io::Error::other(tr!("trop de fichiers mis de côté", "too many files set aside")))?;
+    std::fs::rename(chemin, &copie)?;
+    Ok(copie)
+}
+
+/// Coupe pour `duree` à partir de `maintenant`.
+fn couper_dans(chemin: &Path, duree: Duree, maintenant: i64) -> Result<Coupure, String> {
+    if matches!(lire_de(chemin, maintenant), Etat::Illisible(_)) {
+        mettre_de_cote(chemin).map_err(|e| e.to_string())?;
+    }
+    let f = Fichier {
+        coupee_le: maintenant,
+        jusqu_a: duree.secondes().map(|s| maintenant.saturating_add(s)),
+    };
+    let texte = serde_json::to_string_pretty(&f).map_err(|e| e.to_string())?;
+    crate::reseau::ecrire_atomique(chemin, texte).map_err(|e| e.to_string())?;
+    Ok(Coupure {
+        depuis: f.coupee_le,
+        jusqu_a: f.jusqu_a,
+    })
+}
+
+/// Remet la protection : le fichier retiré (illisible : gardé à côté).
+fn reprendre_dans(chemin: &Path, maintenant: i64) -> Result<(), String> {
+    match lire_de(chemin, maintenant) {
+        Etat::EnMarche => Ok(()),
+        Etat::Illisible(_) => mettre_de_cote(chemin).map(|_| ()).map_err(|e| e.to_string()),
+        Etat::Coupee(_) | Etat::Echue(_) => match std::fs::remove_file(chemin) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e.to_string()),
+            _ => Ok(()),
+        },
+    }
+}
+
+/// Le changement voulu : `None` remet la protection, `Some(durée)` la coupe, après `accord` (refusé : rien ne
+/// change). Rend (avant, après).
+fn regler_dans(
+    chemin: &Path,
+    voulu: Option<Duree>,
+    maintenant: i64,
+    accord: impl FnOnce(Duree) -> bool,
+) -> Result<(Etat, Etat), String> {
+    let avant = lire_de(chemin, maintenant);
+    match voulu {
+        None => reprendre_dans(chemin, maintenant)?,
+        Some(d) => {
+            if !accord(d) {
+                return Ok((avant.clone(), avant));
+            }
+            couper_dans(chemin, d, maintenant)?;
+        }
+    }
+    Ok((avant, lire_de(chemin, maintenant)))
+}
+
+/// Vanguard tourne-t-il en administrateur (ou ne peut-il pas le savoir) ?
+fn administrateur() -> bool {
+    crate::protection::blocage::administrateur_ou_inconnu()
+}
+
+fn refus_administrateur() -> String {
+    tr!(
+        "Vanguard tourne en administrateur : la protection en temps réel ne se règle pas d'ici. Son réglage est celui de ton compte, lu par la surveillance sans droits ; relance Vanguard sans droits d'administrateur (sans sudo, ou pas « en tant qu'administrateur ») pour la couper ou la remettre.",
+        "Vanguard is running as administrator: real-time protection is not set from here. Its setting belongs to your account and is read by the monitoring without rights; start Vanguard again without administrator rights (no sudo, or not “as administrator”) to turn it off or back on."
+    )
+    .to_string()
+}
+
+/// Le réglage changé pour de vrai, dans le fichier de ce compte. `Err` : refusé en administrateur, ou non écrit.
+pub(crate) fn regler(voulu: Option<Duree>, accord: impl FnOnce(Duree) -> bool) -> Result<(Etat, Etat), String> {
+    if administrateur() {
+        return Err(refus_administrateur());
+    }
+    regler_dans(&fichier(), voulu, maintenant(), accord)
+}
+
+/// Une heure montrée : « 17:30 » le jour même, avec la date sinon.
+fn heure(ts: i64, maintenant: i64) -> String {
+    use chrono::TimeZone;
+    let local = |t: i64| chrono::Local.timestamp_opt(t, 0).single();
+    match (local(ts), local(maintenant)) {
+        (Some(t), Some(m)) if t.date_naive() == m.date_naive() => t.format("%H:%M").to_string(),
+        (Some(t), _) => t.format(tr!("%d/%m %H:%M", "%m-%d %H:%M")).to_string(),
+        (None, _) => "?".into(),
+    }
+}
+
+/// « jusqu'à 17:30 » ou « jusqu'à reprise ».
+fn jusqu_a(c: &Coupure, maintenant: i64) -> String {
+    match c.jusqu_a {
+        Some(fin) => trf!("jusqu'à {}", "until {}", heure(fin, maintenant)),
+        None => tr!("jusqu'à reprise", "until turned back on").to_string(),
+    }
+}
+
+/// La valeur montrée dans Paramètres : le mot tapé devant (« oui », « non »), puis ce qu'il veut dire.
+pub(crate) fn valeur_de(e: &Etat, maintenant: i64) -> String {
+    let (oui, non) = (tr!("oui", "yes"), tr!("non", "no"));
+    match e {
+        Etat::EnMarche | Etat::Echue(_) => oui.to_string(),
+        Etat::Coupee(c) => format!("{non} ({})", jusqu_a(c, maintenant)),
+        Etat::Illisible(_) => trf!("{oui} (fichier illisible)", "{oui} (file unreadable)"),
+    }
+}
+
+pub(crate) fn valeur() -> String {
+    valeur_de(&etat(), maintenant())
+}
+
+/// Un état tel qu'il se montre maintenant (avant et après un changement).
+pub(crate) fn montrer(e: &Etat) -> String {
+    valeur_de(e, maintenant())
+}
+
+/// L'échéance d'une coupure, telle qu'elle se montre (« jusqu'à 17:30 »).
+pub(crate) fn echeance(c: &Coupure) -> String {
+    jusqu_a(c, maintenant())
+}
+
+/// L'heure de la reprise (« 17:30 ») ; `None` : jusqu'à reprise.
+pub(crate) fn heure_de_reprise(c: &Coupure) -> Option<String> {
+    c.jusqu_a.map(|fin| heure(fin, maintenant()))
+}
+
+/// Pour l'en-tête du menu principal, en couleur : avec l'échéance, puis sans (quand la ligne serait trop longue).
+pub(crate) fn en_tete() -> Option<(String, String)> {
+    let c = coupure()?;
+    let teinte = couleur(Niveau::Moyen);
+    let court = trf!("{teinte}temps réel coupé{RESET}", "{teinte}real-time off{RESET}");
+    let long = match c.jusqu_a {
+        Some(fin) => trf!(
+            "{teinte}temps réel coupé → {}{RESET}",
+            "{teinte}real-time off → {}{RESET}",
+            heure(fin, maintenant())
+        ),
+        None => court.clone(),
+    };
+    Some((long, court))
+}
+
+/// La phrase qui dit la coupure au bilan : tout ce qu'elle arrête, ce qui reste, et comment la remettre.
+fn phrase(c: &Coupure, maintenant: i64) -> String {
+    let reprise = match c.jusqu_a {
+        Some(_) => tr!(
+            "Elle reprend toute seule à l'échéance ; tout de suite : vanguard parametres temps-reel oui.",
+            "It comes back by itself when the time is up; right now: vanguard settings real-time yes."
+        ),
+        None => tr!(
+            "Pour la remettre : vanguard parametres temps-reel oui.",
+            "To turn it back on: vanguard settings real-time yes."
+        ),
+    };
+    trf!(
+        "Protection en temps réel de Vanguard coupée depuis {} ({}) : la surveillance horaire ne passe plus et rien n'est bloqué tout seul. Defender, le pare-feu, l'UAC et les blocages déjà faits restent en place. {reprise}",
+        "Vanguard's real-time protection off since {} ({}): the hourly monitoring no longer runs and nothing is blocked by itself. Defender, the firewall, UAC and the blocks already made stay in place. {reprise}",
+        heure(c.depuis, maintenant),
+        jusqu_a(c, maintenant)
+    )
+}
+
+/// Là où la coupure se dit, chacun avec ce qu'elle y change.
+#[derive(Clone, Copy)]
+pub(crate) enum Ou {
+    Blocage,
+    Sortantes,
+}
+
+/// Ce que la coupure change à l'écran `ou`.
+fn phrase_pour(ou: Ou, c: &Coupure, maintenant: i64) -> String {
+    let quand = jusqu_a(c, maintenant);
+    match ou {
+        Ou::Blocage => trf!(
+            "Protection en temps réel coupée ({quand}) : rien n'est bloqué tout seul, le certain se propose d'un clic. Les blocages déjà faits restent en place ; tes réglages reviennent tels quels à la reprise.",
+            "Real-time protection off ({quand}): nothing is blocked by itself, what is certain is offered with one click. The blocks already made stay in place; your settings come back as they were when it resumes."
+        ),
+        Ou::Sortantes => trf!(
+            "Protection en temps réel coupée ({quand}) : la surveillance ne notifie ni ne bloque plus une connexion vers un serveur de commande ; cet écran, lui, la montre. Les blocages déjà faits restent en place.",
+            "Real-time protection off ({quand}): the monitoring no longer notifies or blocks a connection to a command server; this screen still shows it. The blocks already made stay in place."
+        ),
+    }
+}
+
+/// Dit la coupure en une ligne d'information, s'il y en a une. Rend `true` si elle l'a dite.
+pub(crate) fn dire_si_coupee(ou: Ou) -> bool {
+    let Some(c) = coupure() else {
+        return false;
+    };
+    afficher_aligne(
+        &format!("  {}ℹ{RESET} ", couleur(Niveau::Moyen)),
+        &phrase_pour(ou, &c, maintenant()),
+        4,
+        "",
+    );
+    true
+}
+
+/// Le constat du bilan : toujours un, en marche ou coupée, pour que la coupure ne change jamais la note ni ce qui
+/// la rend possible (le nombre de vérifications) ; coupée, une information, jamais une alerte.
+pub(crate) fn constat() -> Constat {
+    constat_de(&etat(), maintenant())
+}
+
+fn constat_de(e: &Etat, maintenant: i64) -> Constat {
+    const CAT: &str = "Surveillance";
+    match e {
+        Etat::Coupee(c) => crate::machine::alerte(CAT, Niveau::Info, phrase(c, maintenant)),
+        Etat::Illisible(raison) => crate::machine::alerte(
+            CAT,
+            Niveau::Info,
+            trf!(
+                "Le réglage de la protection en temps réel ne se lit plus ({raison}) : elle reste en marche. « vanguard parametres temps-reel oui » le met de côté.",
+                "The real-time protection setting can no longer be read ({raison}): it stays on. “vanguard settings real-time yes” sets it aside."
+            ),
+        ),
+        Etat::EnMarche | Etat::Echue(_) => crate::machine::ok(
+            CAT,
+            tr!(
+                "Protection en temps réel de Vanguard : pas coupée.",
+                "Vanguard's real-time protection: not turned off."
+            ),
+        ),
+    }
+}
+
+/// Au début de chaque passe de la surveillance : `true` si la passe s'arrête là (coupée). Une échéance passée remet
+/// la protection (le fichier retiré, la reprise notifiée), puis la passe se fait comme d'habitude. Un fichier
+/// illisible ne coupe rien.
+pub(crate) fn a_la_passe() -> bool {
+    match etat() {
+        Etat::Coupee(_) => true,
+        Etat::Echue(_) => {
+            if reprendre_dans(&fichier(), maintenant()).is_ok() {
+                crate::reseau::surveillance::notifier(
+                    tr!(
+                        "Vanguard : protection en temps réel reprise",
+                        "Vanguard: real-time protection back on"
+                    ),
+                    tr!(
+                        "La coupure est finie : la surveillance et la protection active reprennent comme tu les avais réglées.",
+                        "The pause is over: monitoring and active protection resume as you had set them."
+                    ),
+                );
+            }
+            false
+        }
+        Etat::EnMarche | Etat::Illisible(_) => false,
+    }
+}
+
+/// Ce que la coupure arrête, avec l'état de chacun (rien n'est arrêté qui ne tournait déjà), puis ce qui reste.
+pub(crate) fn ce_qui_s_arrete(surveillance: bool, protection_active: bool) -> Vec<String> {
+    let etat = |oui: bool| {
+        if oui {
+            tr!("en marche", "running")
+        } else {
+            tr!("déjà coupée", "already off")
+        }
+    };
+    vec![
+        trf!(
+            "• La surveillance horaire ({}) : plus de scan du réseau ni d'audit de la machine, plus aucune notification (appareil nouveau, port ouvert, box, DNS, Wi-Fi, fichiers critiques, téléchargements, serveurs de botnet, extensions qui veillent).",
+            "• Hourly monitoring ({}): no more network scan or machine audit, no notification at all (new device, open port, router, DNS, Wi-Fi, critical files, downloads, botnet servers, extensions that watch).",
+            etat(surveillance)
+        ),
+        trf!(
+            "• La protection active du blocage ({}) : plus rien n'est bloqué tout seul, ni au bilan ni dans la surveillance ; au bilan, le certain se propose d'un clic.",
+            "• Active protection of blocking ({}): nothing is blocked by itself any more, neither at the check-up nor in the monitoring; at the check-up, what is certain is offered with one click.",
+            if protection_active {
+                tr!("en marche", "running")
+            } else {
+                tr!("pas activée", "not turned on")
+            }
+        ),
+        ce_qui_reste().to_string(),
+    ]
+}
+
+/// Ce que la coupure ne touche jamais.
+pub(crate) fn ce_qui_reste() -> &'static str {
+    tr!(
+        "Ce qui ne change pas : Defender, le pare-feu et l'UAC, que ce réglage ne touche jamais ; les blocages déjà faits, qui restent en place (règles du pare-feu, quarantaine ; « vanguard blocage annuler » en défait un) ; tes réglages de surveillance et de blocage, retrouvés tels quels à la reprise ; le bilan, l'antivirus et les outils que tu lances ; l'entretien du mois.",
+        "What does not change: Defender, the firewall and UAC, which this setting never touches; the blocks already made, which stay in place (firewall rules, quarantine; “vanguard blocking undo” undoes one); your monitoring and blocking settings, found as they were when it comes back; the check-up, the antivirus and the tools you start; the monthly check-up notification."
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn jetable(nom: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("vanguard-temps-reel-{nom}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d.join("temps-reel.json")
+    }
+
+    const MIDI: i64 = 1_792_000_000;
+
+    /// Sans fichier : en marche. Coupée pour une heure : coupée, puis échue passé l'heure ; jusqu'à reprise : coupée
+    /// même un an après. La reprise retire le fichier.
+    #[test]
+    fn coupure_puis_reprise() {
+        let f = jetable("coupure");
+        assert_eq!(lire_de(&f, MIDI), Etat::EnMarche);
+        let c = couper_dans(&f, Duree::UneHeure, MIDI).unwrap();
+        assert_eq!(c.jusqu_a, Some(MIDI + 3600));
+        assert_eq!(lire_de(&f, MIDI + 60), Etat::Coupee(c));
+        assert_eq!(lire_de(&f, MIDI + 3599).coupure(), Some(c));
+        // L'échéance passée : elle a repris, même si personne n'a encore retiré le fichier.
+        assert_eq!(lire_de(&f, MIDI + 3600), Etat::Echue(c));
+        assert_eq!(lire_de(&f, MIDI + 3600).coupure(), None);
+        // Une horloge retardée bien avant la coupure : une coupure à durée ne se croit plus.
+        assert_eq!(lire_de(&f, MIDI - 3600), Etat::Echue(c));
+        assert_eq!(lire_de(&f, MIDI - 60).coupure(), Some(c), "un petit écart est toléré");
+        reprendre_dans(&f, MIDI + 3600).unwrap();
+        assert!(!f.exists());
+        assert_eq!(lire_de(&f, MIDI), Etat::EnMarche);
+        let c = couper_dans(&f, Duree::QuatreHeures, MIDI).unwrap();
+        assert_eq!(c.jusqu_a, Some(MIDI + 4 * 3600));
+        let c = couper_dans(&f, Duree::JusquaReprise, MIDI).unwrap();
+        assert_eq!(c.jusqu_a, None);
+        assert_eq!(lire_de(&f, MIDI + 365 * 86_400).coupure(), Some(c));
+        reprendre_dans(&f, MIDI).unwrap();
+        assert_eq!(lire_de(&f, MIDI), Etat::EnMarche);
+        // Déjà en marche : remettre ne fait rien, sans erreur.
+        reprendre_dans(&f, MIDI).unwrap();
+        let _ = std::fs::remove_dir_all(f.parent().unwrap());
+    }
+
+    /// Couper passe par l'accord : refusé, rien ne change ni ne s'écrit ; remettre ne demande rien.
+    #[test]
+    fn refus_qui_ne_change_rien() {
+        let f = jetable("refus");
+        let (avant, apres) = regler_dans(&f, Some(Duree::UneHeure), MIDI, |_| false).unwrap();
+        assert_eq!((avant, apres), (Etat::EnMarche, Etat::EnMarche));
+        assert!(!f.exists());
+        let mut demandee = None;
+        let (_, apres) = regler_dans(&f, Some(Duree::QuatreHeures), MIDI, |d| {
+            demandee = Some(d);
+            true
+        })
+        .unwrap();
+        assert_eq!(demandee, Some(Duree::QuatreHeures));
+        assert!(apres.coupure().is_some());
+        // Déjà coupée, un refus garde la coupure telle quelle.
+        let (avant, apres) = regler_dans(&f, Some(Duree::UneHeure), MIDI + 10, |_| false).unwrap();
+        assert_eq!(avant, apres);
+        assert_eq!(apres.coupure().unwrap().jusqu_a, Some(MIDI + 4 * 3600));
+        let (avant, apres) = regler_dans(&f, None, MIDI, |_| panic!("remettre ne demande rien")).unwrap();
+        assert!(avant.coupure().is_some());
+        assert_eq!(apres, Etat::EnMarche);
+        let _ = std::fs::remove_dir_all(f.parent().unwrap());
+    }
+
+    /// Un fichier abîmé, démesuré ou d'une durée que Vanguard ne donne pas : rien n'est coupé, et c'est dit. Il n'est
+    /// jamais écrasé ni effacé en silence : remettre ou couper le met d'abord de côté.
+    #[test]
+    fn fichier_abime() {
+        let f = jetable("abime");
+        let d = f.parent().unwrap().to_path_buf();
+        let de_cote = || {
+            std::fs::read_dir(&d)
+                .unwrap()
+                .flatten()
+                .filter(|e| e.file_name().to_string_lossy().contains("illisible-"))
+                .count()
+        };
+        std::fs::write(&f, "{pas du json").unwrap();
+        let e = lire_de(&f, MIDI);
+        assert!(matches!(e, Etat::Illisible(_)), "{e:?}");
+        assert_eq!(e.coupure(), None);
+        assert!(valeur_de(&e, MIDI).starts_with(&format!("{} (", tr!("oui", "yes"))));
+        reprendre_dans(&f, MIDI).unwrap();
+        assert!(!f.exists());
+        assert_eq!(de_cote(), 1);
+        std::fs::write(&f, " ".repeat(usize::try_from(TAILLE_MAX).unwrap() + 1)).unwrap();
+        assert!(matches!(lire_de(&f, MIDI), Etat::Illisible(_)));
+        // Une échéance plus lointaine que quatre heures, ou d'avant la coupure : pas la sienne.
+        for fin in [MIDI + 4 * 3600 + 1, MIDI, MIDI - 1] {
+            std::fs::write(&f, format!("{{\"coupee_le\": {MIDI}, \"jusqu_a\": {fin}}}")).unwrap();
+            assert!(matches!(lire_de(&f, MIDI), Etat::Illisible(_)), "{fin}");
+        }
+        // Des nombres extrêmes ne font pas planter la lecture.
+        std::fs::write(
+            &f,
+            format!("{{\"coupee_le\": {}, \"jusqu_a\": {}}}", i64::MIN, i64::MAX),
+        )
+        .unwrap();
+        assert!(matches!(lire_de(&f, MIDI), Etat::Illisible(_)));
+        std::fs::write(&f, format!("{{\"coupee_le\": {}}}", i64::MIN)).unwrap();
+        assert!(
+            lire_de(&f, MIDI).coupure().is_some(),
+            "jusqu'à reprise : la date de début ne compte pas"
+        );
+        // Couper par-dessus un fichier abîmé : l'ancien est gardé à côté, la nouvelle coupure se lit.
+        std::fs::write(&f, "{abîmé").unwrap();
+        let c = couper_dans(&f, Duree::UneHeure, MIDI).unwrap();
+        assert_eq!(lire_de(&f, MIDI), Etat::Coupee(c));
+        assert_eq!(de_cote(), 2);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// Le bilan : toujours un constat, d'information quand elle est coupée, jamais une alerte ; la note reste la même.
+    #[test]
+    fn au_bilan_une_information_sans_effet_sur_la_note() {
+        let c = Coupure {
+            depuis: MIDI,
+            jusqu_a: Some(MIDI + 3600),
+        };
+        let coupee = constat_de(&Etat::Coupee(c), MIDI);
+        let en_marche = constat_de(&Etat::EnMarche, MIDI);
+        let illisible = constat_de(&Etat::Illisible("x".into()), MIDI);
+        for k in [&coupee, &en_marche, &illisible] {
+            assert!(k.verifie);
+            assert!(k.probleme.is_none_or(|n| n == Niveau::Info), "{}", k.message);
+            assert_eq!(k.probleme.map_or(0, Niveau::penalite), 0);
+            assert!(k.correctif.is_none());
+        }
+        assert_eq!(coupee.probleme, Some(Niveau::Info));
+        assert!(coupee.message.contains("temps-reel oui") || coupee.message.contains("real-time yes"));
+        assert!(en_marche.probleme.is_none());
+        assert_eq!(constat_de(&Etat::Echue(c), MIDI + 3600).probleme, None);
+    }
+
+    /// Les mots de « --pendant », et ce que montre Paramètres.
+    #[test]
+    fn durees_et_valeurs() {
+        assert_eq!(Duree::depuis_mot("1h"), Some(Duree::UneHeure));
+        assert_eq!(Duree::depuis_mot("4 H"), Some(Duree::QuatreHeures));
+        assert_eq!(Duree::depuis_mot("4"), Some(Duree::QuatreHeures));
+        assert_eq!(Duree::depuis_mot("2h"), None);
+        assert_eq!(Duree::depuis_mot("toujours"), None);
+        for d in Duree::TOUTES {
+            assert_ne!(d.libelle(), "");
+            assert!(d.secondes().is_none_or(|s| s <= Duree::PLUS_LONGUE));
+        }
+        let c = Coupure {
+            depuis: MIDI,
+            jusqu_a: None,
+        };
+        let v = valeur_de(&Etat::Coupee(c), MIDI);
+        assert!(v.starts_with(&format!("{} (", tr!("non", "no"))), "{v}");
+        assert!(largeur_affichee(&v) <= 33, "{v}");
+        let c = Coupure {
+            depuis: MIDI,
+            jusqu_a: Some(MIDI + 4 * 3600),
+        };
+        assert!(largeur_affichee(&valeur_de(&Etat::Coupee(c), MIDI)) <= 33);
+        assert_eq!(valeur_de(&Etat::EnMarche, MIDI), tr!("oui", "yes"));
+        assert_eq!(valeur_de(&Etat::Echue(c), MIDI + 4 * 3600), tr!("oui", "yes"));
+    }
+
+    /// La liste de ce qui s'arrête dit l'état de chacun, et ce qui ne change pas : Defender, le pare-feu, l'UAC et les
+    /// blocages déjà faits.
+    #[test]
+    fn liste_de_ce_qui_s_arrete() {
+        let l = ce_qui_s_arrete(true, false).join(" ");
+        assert!(l.contains("Defender") && l.contains("UAC"), "{l}");
+        assert!(
+            l.contains(tr!("vanguard blocage annuler", "vanguard blocking undo")),
+            "{l}"
+        );
+        assert_ne!(ce_qui_s_arrete(true, true), ce_qui_s_arrete(false, false));
+    }
+}

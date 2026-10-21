@@ -32,6 +32,12 @@ chaque version garde son étiquette dans le dépôt (`git checkout v0.62.0`, par
   apprises et le blocage ouvrent leur propre écran (« Ce que Vanguard a appris », Blocage des menaces). La langue, les
   emojis et le travail sans Internet restent choisis d'un lancement à l'autre (VANGUARD_LANG, VANGUARD_EMOJI et
   VANGUARD_HORS_LIGNE l'emportent toujours).
+- **La protection en temps réel de Vanguard se coupe, pour un temps ou jusqu'à reprise** (Paramètres, ou
+  `vanguard parametres temps-reel non --pendant 1h|4h`) : la surveillance horaire et la protection active du blocage
+  s'arrêtent d'un coup, après ton accord et la liste de ce qui s'arrête, sans que leurs réglages changent. Elle reprend
+  toute seule à l'échéance ; tant qu'elle est coupée, c'est redit en tête du menu, dans chaque bilan (sans effet sur la
+  note), dans « Qui parle à Internet ? » et dans le blocage. Defender, le pare-feu et l'UAC ne sont jamais touchés, et
+  un blocage déjà fait reste en place.
 - **Extensions : tes propres programmes dans Vanguard, sans toucher à son code** (menu 12 Extensions,
   `vanguard extensions`). Un plugin est un dossier avec un manifeste `plugin.toml`, ajouté une fois depuis un dossier
   ou une archive .zip (`vanguard plugin ajouter`) ; un script du laboratoire est un fichier posé tel quel

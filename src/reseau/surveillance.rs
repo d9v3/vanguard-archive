@@ -1,6 +1,8 @@
 //! Surveillance automatique : scan du réseau toutes les heures, notification si un appareil inconnu apparaît ; les
 //! programmes arrivés dans Téléchargements, à vérifier avant de les ouvrir ; un programme qui parle à un serveur de
-//! commande de botnet connu (bloqué seulement si la protection active a été activée : protection/blocage).
+//! commande de botnet connu (bloqué seulement si la protection active a été activée : protection/blocage). La
+//! protection en temps réel coupée (`protection::temps_reel`), chaque passe s'arrête au début, sans rien regarder ni
+//! notifier ; c'est aussi la passe qui constate l'échéance de la coupure et remet la protection.
 //! Planificateur natif de chaque système : timer systemd (Linux), Planificateur de tâches (Windows), agent launchd
 //! (macOS).
 
@@ -453,6 +455,11 @@ pub async fn surveiller() {
 }
 
 async fn passe() {
+    // Coupée : rien ne se regarde ni ne se notifie, et la dernière passe notée reste la dernière vraie. Échue : la
+    // protection est remise, et la passe se fait.
+    if crate::protection::temps_reel::a_la_passe() {
+        return;
+    }
     tableau::noter_passe();
     let machine = veiller_machine();
     if let Some(fichiers) = crate::protection::integrite::changements_a_signaler() {

@@ -1,8 +1,8 @@
 //! Les outils du groupe « Antivirus et protection » du menu : antivirus, YARA, fichiers-pièges, bac à sable,
 //! intégrité des fichiers critiques, mots de passe fuités, connexions sortantes, logiciels de prise de contrôle à
 //! distance (faux technicien), liens et fichiers téléchargés, caméra et micro, bilan de confidentialité
-//! (`acces`), blocage des menaces, d'un clic ou tout seul pour le certain (`blocage`) ; et, sous Linux et macOS, la
-//! protection de la clé USB (`cle`).
+//! (`acces`), blocage des menaces, d'un clic ou tout seul pour le certain (`blocage`), l'interrupteur de la
+//! protection en temps réel (`temps_reel`) ; et, sous Linux et macOS, la protection de la clé USB (`cle`).
 
 pub(crate) mod abuse_ch;
 pub mod acces;
@@ -29,4 +29,5 @@ pub mod quarantaine;
 pub mod secrets_git;
 pub mod sortantes;
 pub mod telechargement;
+pub(crate) mod temps_reel;
 pub mod yara;
