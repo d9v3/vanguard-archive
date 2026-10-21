@@ -462,7 +462,11 @@ pub(crate) fn navigateurs() {
                 None => format!("{VERT}✔{RESET}"),
                 Some(niveau) => format!("{}•{RESET}", couleur(niveau)),
             };
-            println!("  {puce} {}", constat.message);
+            // Un message long (plusieurs navigateurs) se coupe aux espaces, la suite sous le premier mot.
+            for (i, ligne) in envelopper(&constat.message, LARGEUR - 4).into_iter().enumerate() {
+                let marque = if i == 0 { puce.as_str() } else { " " };
+                println!("  {marque} {ligne}");
+            }
         }
     }
     // 2. Ce que Vanguard ne fait pas, et pourquoi : c'est une garantie, pas une limite.
@@ -473,11 +477,17 @@ pub(crate) fn navigateurs() {
     // 3. La vérification intégrée de chaque navigateur présent (faibles, réutilisés, compromis).
     let a_montrer = checkups(&profils);
     if !a_montrer.is_empty() {
-        trp!(
-            "\n  {} Pour les mots de passe faibles, réutilisés ou compromis, ouvre la vérification intégrée\n     de ton navigateur (copie l'adresse dans sa barre) :",
-            "\n  {} For weak, reused or compromised passwords, open your browser's built-in check\n     (paste the address into its bar):",
-            ampoule()
+        // Enveloppé ici, à 76 colonnes, sous le conseil : un retour à la ligne écrit dans le texte tombait au milieu
+        // de la phrase une fois la première ligne recoupée par l'affichage.
+        println!();
+        let conseil = tr!(
+            "Pour les mots de passe faibles, réutilisés ou compromis, ouvre la vérification intégrée de ton navigateur, en copiant l'adresse dans sa barre :",
+            "For weak, reused or compromised passwords, open your browser's built-in check (paste the address into its bar):"
         );
+        for (i, ligne) in envelopper(conseil, LARGEUR - 5).into_iter().enumerate() {
+            let marque = if i == 0 { ampoule() } else { "  " };
+            println!("  {marque} {ligne}");
+        }
         for c in a_montrer {
             let (quoi, adresse): (&str, &str) = match c {
                 Checkup::Firefox => (tr!("Firefox et cousins", "Firefox and similar"), "about:logins"),
