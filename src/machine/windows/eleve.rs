@@ -625,10 +625,39 @@ pub(crate) fn sans_point_accepte() -> &'static str {
     tr!("sans point de restauration, accepté", "no restore point, accepted")
 }
 
-/// Point de restauration par srclient.dll (chargée à la demande : absente, rien ne manque au programme). Impossible
-/// (protection du système coupée sur C:) : on le dit et on demande s'il faut continuer sans. Windows ne crée qu'un
-/// point par 24 h : le plus récent sert alors, l'appel réussit sans en créer.
+/// Point de restauration par srclient.dll (chargée à la demande : absente, rien ne manque au programme). Impossible,
+/// quelle qu'en soit la raison (protection du système coupée sur C:, ou srclient.dll ou sa fonction absente : Windows
+/// Server, Windows allégés) : on le dit et on demande s'il faut continuer sans. Windows ne crée qu'un point par 24 h :
+/// le plus récent sert alors, l'appel réussit sans en créer.
 pub(crate) fn point_de_restauration() -> (bool, String) {
+    match poser_le_point() {
+        Ok(()) => (true, String::new()),
+        Err(raison) => continuer_sans_point(&raison, crate::ui::demander),
+    }
+}
+
+/// Le point ne s'est pas posé : la raison, puis la même question pour toutes les raisons. `demander` pose la question
+/// et rend la réponse (le terminal ; une réponse écrite dans les tests).
+fn continuer_sans_point(raison: &str, demander: impl FnOnce(&str) -> String) -> (bool, String) {
+    trp!(
+        "  Point de restauration impossible ({}).",
+        "  Restore point not possible ({}).",
+        raison
+    );
+    let reponse = demander(tr!(
+        "  Continuer sans point de restauration ? [o/N] : ",
+        "  Continue without a restore point? [y/N]: "
+    ));
+    if crate::langue::oui(&reponse) {
+        // Pas de point, accepté : la suite continue, et « Ce que Vanguard a changé » le note.
+        (true, sans_point_accepte().to_string())
+    } else {
+        (false, tr!("arrêté à ta demande", "stopped as you asked").to_string())
+    }
+}
+
+/// Pose le point (début puis fin du changement) ; `Err` : pourquoi il ne l'est pas, prêt à montrer.
+fn poser_le_point() -> Result<(), String> {
     const DEBUT: u32 = 100;
     const FIN_CHANGEMENT: u32 = 101;
     const REGLAGES: u32 = 12;
@@ -651,11 +680,17 @@ pub(crate) fn point_de_restauration() -> (bool, String) {
     let pose = unsafe {
         let module = LoadLibraryExW(bibliotheque.as_ptr(), std::ptr::null_mut(), CHARGER_DE_SYSTEM32);
         if module.is_null() {
-            return (false, "srclient.dll absente".into());
+            return Err(trf!(
+                "srclient.dll absente de ce Windows",
+                "srclient.dll missing from this Windows"
+            ));
         }
         let adresse = GetProcAddress(module, c"SRSetRestorePointW".as_ptr().cast());
         if adresse.is_null() {
-            return (false, "SRSetRestorePointW absente".into());
+            return Err(trf!(
+                "SRSetRestorePointW absente de srclient.dll",
+                "SRSetRestorePointW missing from srclient.dll"
+            ));
         }
         let poser: Poser = std::mem::transmute::<*mut c_void, Poser>(adresse);
         let ok = poser(&raw mut info, &raw mut etat) != 0;
@@ -668,23 +703,13 @@ pub(crate) fn point_de_restauration() -> (bool, String) {
         ok
     };
     if pose {
-        return (true, String::new());
+        return Ok(());
     }
-    trp!(
-        "  Point de restauration impossible (erreur {}) : protection du système désactivée sur C: ?",
-        "  Restore point not possible (error {}): system protection turned off on C:?",
+    Err(trf!(
+        "erreur {} : protection du système désactivée sur C: ?",
+        "error {}: system protection turned off on C:?",
         { etat.statut }
-    );
-    let reponse = crate::ui::demander(tr!(
-        "  Continuer sans point de restauration ? [o/N] : ",
-        "  Continue without a restore point? [y/N]: "
-    ));
-    if crate::langue::oui(&reponse) {
-        // Pas de point, accepté : la suite continue, et « Ce que Vanguard a changé » le note.
-        (true, sans_point_accepte().to_string())
-    } else {
-        (false, tr!("arrêté à ta demande", "stopped as you asked").to_string())
-    }
+    ))
 }
 
 #[cfg(test)]
@@ -759,6 +784,29 @@ mod tests {
         assert!(lire_lignes(fournie.as_bytes()).is_none());
         let sans_fin = "x\n".repeat(100_000);
         assert!(lire_lignes(sans_fin.as_bytes()).is_none());
+    }
+
+    /// srclient.dll ou sa fonction absente (Windows Server, Windows allégés) passe par la même question que l'échec de
+    /// poser : la raison est dite, puis « o » continue sans point (noté), tout le reste arrête.
+    #[test]
+    fn sans_point_la_question_est_posee() {
+        for raison in [
+            "srclient.dll absente de ce Windows",
+            "SRSetRestorePointW absente de srclient.dll",
+            "erreur 1058 : protection du système désactivée sur C: ?",
+        ] {
+            let mut posee = None;
+            let (continuer, note) = continuer_sans_point(raison, |question| {
+                posee = Some(question.to_string());
+                "o".into()
+            });
+            assert!(continuer && note == sans_point_accepte(), "{raison}");
+            assert!(posee.is_some_and(|q| q.contains("[o/N]") || q.contains("[y/N]")));
+            for refus in ["", "n", "non"] {
+                let (continuer, note) = continuer_sans_point(raison, |_| refus.into());
+                assert!(!continuer && note != sans_point_accepte(), "{raison} / {refus:?}");
+            }
+        }
     }
 
     #[test]

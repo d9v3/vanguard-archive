@@ -1,11 +1,14 @@
 //! Scan YARA de la mémoire des processus en marche : les 308 règles de `yara` appliquées aux régions privées ou
 //! exécutables de chaque programme, là où vit un logiciel malveillant « sans fichier » (chargeur réfléchi, shellcode,
 //! programme effacé du disque mais encore en marche, exécutable déballé que son emballage cachait sur le disque).
-//! Lecture seule, à la demande seulement, jamais en fond : aucun processus n'est touché. LSASS, les processus
-//! protégés et les processus critiques ne sont jamais ouverts (lire LSASS est le geste d'un voleur de mots de passe,
-//! que Defender bloque), et rien de ce qui est lu n'est gardé nulle part : seulement la règle, le PID, le programme
-//! et l'adresse. Ce qui n'a pas pu être lu est dit, jamais compté comme sain. Sur macOS, la mémoire d'autrui demande
-//! des droits spéciaux (task_for_pid) : non vérifié, dit tel quel.
+//! Lecture seule, à la demande seulement, jamais en fond : aucun processus n'est touché. Sous Windows, LSASS, les
+//! processus protégés et les processus critiques ne sont jamais lus (lire LSASS est le geste d'un voleur de mots de
+//! passe, que Defender bloque) ; un nom ne suffit pas à écarter un processus : seul le programme de System32 qui le
+//! porte l'est, et un autre qui prend ce nom est lu et signalé (masquage). Sous Linux et macOS, le nom d'un processus
+//! est choisi par le programme lui-même : rien n'est écarté sur lui, seul Vanguard ne se lit pas. Rien de ce qui est
+//! lu n'est gardé nulle part : seulement la règle, le PID, le programme et l'adresse. Ce qui n'a pas pu être lu est
+//! dit, jamais compté comme sain. Sur macOS, la mémoire d'autrui demande des droits spéciaux (task_for_pid) : non
+//! vérifié, dit tel quel.
 
 use std::time::{Duration, Instant};
 
@@ -13,17 +16,17 @@ use crate::protection::yara;
 use crate::ui::*;
 
 /// Une région plus grosse n'est pas lue (tas de navigateurs et de jeux) : les charges malveillantes sont petites, et
-/// la région est comptée comme non lue.
-const TAILLE_REGION_MAX: u64 = 64 << 20;
+/// la région est comptée comme non lue. C'est aussi la taille du tampon de lecture, fixée une fois pour toutes.
+const TAILLE_REGION_MAX: usize = 64 << 20;
 /// Lu au plus par processus, puis en tout ; au-delà, on s'arrête et on dit ce qui manque.
 const PAR_PROCESSUS_MAX: u64 = 512 << 20;
 const TOTAL_MAX: u64 = 4 << 30;
 const DUREE_MAX: Duration = Duration::from_secs(300);
 const DELAI_PAR_REGION: Duration = Duration::from_secs(10);
 
-/// Jamais ouverts, même pour lire leur niveau de protection : LSASS et son isolat (les mots de passe), le noyau et
-/// ses processus critiques (en tuer un arrête Windows ; les lire ne sert à rien). Seconde barrière derrière le niveau
-/// de protection, lue sans ouvrir quoi que ce soit.
+/// Les processus critiques de Windows, jamais lus : LSASS et son isolat (les mots de passe), le noyau et ses
+/// processus critiques (en tuer un arrête Windows ; les lire ne sert à rien). Seconde barrière derrière le niveau de
+/// protection, mais un nom se choisit : seul le programme de System32 qui le porte est écarté (`trier`).
 const CRITIQUES: &[&str] = &[
     "lsass",
     "lsaiso",
@@ -52,10 +55,65 @@ pub(crate) struct Region {
     pub taille: u64,
 }
 
-/// Exclu avant tout : Vanguard lui-même (`moi`), Idle (0) et System (4) de Windows, et les processus critiques, quelle
-/// que soit la casse du nom.
-fn exclu(pid: u32, nom: &str, moi: u32) -> bool {
-    pid == moi || pid == 0 || pid == 4 || CRITIQUES.iter().any(|c| nom.eq_ignore_ascii_case(c))
+/// Le nom d'un processus critique de Windows, quelle que soit sa casse.
+fn critique(nom: &str) -> bool {
+    CRITIQUES.iter().any(|c| nom.eq_ignore_ascii_case(c))
+}
+
+/// Sous Windows, où est le programme d'un processus au nom critique : le dossier System32 et le chemin complet du
+/// programme, chacun `None` s'il ne se lit pas (pour un autre nom, rien n'est demandé).
+#[derive(Debug, Default)]
+struct Lieux {
+    system32: Option<String>,
+    programme: Option<String>,
+}
+
+/// Le sort d'un processus, décidé avant toute lecture.
+#[derive(Debug, PartialEq)]
+enum Tri {
+    /// Jamais lu, par choix.
+    Exclu,
+    Lire,
+    /// Le nom d'un processus critique de Windows porté par un programme hors de System32 : un masquage (MITRE ATT&CK
+    /// T1036.005). Lu comme les autres, et signalé.
+    Masque,
+    /// Un nom critique dont le programme ne se lit pas (droits, processus du noyau sans fichier) : seul son niveau de
+    /// protection peut l'écarter. Sinon il n'est pas ouvert en lecture (ce peut être le vrai LSASS) et il compte comme
+    /// non lu : jamais sain sur son seul nom.
+    Incertain,
+}
+
+/// Le programme est-il exactement `<System32>\<nom>.exe` ? Comparé tel que Windows écrit les deux chemins, sans casse
+/// pour les lettres ASCII seulement : « SysWOW64 », un sous-dossier, « ..\ », un nom court ou un flux sont ailleurs.
+fn a_sa_place(nom: &str, programme: &str, system32: &str) -> bool {
+    let attendu = format!(r"{}\{nom}.exe", system32.trim_end_matches('\\'));
+    !system32.is_empty() && programme.eq_ignore_ascii_case(&attendu)
+}
+
+/// Vanguard lui-même (`moi`) n'est jamais lu, partout. `windows` : `None` sous Linux et macOS, où le nom (comm, ps)
+/// est choisi par le programme : rien d'autre n'est écarté. Sous Windows, Idle (0) et System (4) sont écartés par leur
+/// numéro, et un nom critique ne l'est que si son programme est celui de System32.
+fn trier(pid: u32, nom: &str, moi: u32, windows: Option<&Lieux>) -> Tri {
+    if pid == moi {
+        return Tri::Exclu;
+    }
+    let Some(lieux) = windows else {
+        return Tri::Lire;
+    };
+    if pid == 0 || pid == 4 {
+        return Tri::Exclu;
+    }
+    if !critique(nom) {
+        return Tri::Lire;
+    }
+    // Un « chemin » sans « \ » n'est pas un fichier : les processus minimaux du noyau (Registry, MemCompression) n'en
+    // ont pas.
+    let programme = lieux.programme.as_deref().filter(|p| p.contains('\\'));
+    match (lieux.system32.as_deref(), programme) {
+        (Some(system32), Some(programme)) if a_sa_place(nom, programme, system32) => Tri::Exclu,
+        (Some(_), Some(_)) => Tri::Masque,
+        _ => Tri::Incertain,
+    }
 }
 
 /// Une région de Windows à lire (VirtualQueryEx : état, protection, type) : validée (MEM_COMMIT), lisible (ni
@@ -119,7 +177,7 @@ enum Decision {
 fn decider(taille: u64, lu_processus: u64, lu_total: u64, ecoule: Duration) -> Decision {
     if ecoule >= DUREE_MAX || lu_total >= TOTAL_MAX {
         Decision::Arret
-    } else if taille > TAILLE_REGION_MAX {
+    } else if taille > TAILLE_REGION_MAX as u64 {
         Decision::Sauter
     } else if lu_processus + taille > PAR_PROCESSUS_MAX {
         Decision::ProcessusPlein
@@ -138,18 +196,50 @@ struct Lecture {
     arret: bool,
 }
 
-/// Lit les régions par `lire` (dans un tampon réutilisé, remis à zéro à la fin : rien de la mémoire lue ne reste) et
-/// leur applique les règles, dans les bornes. `lu_total` et `debut` : ce qui a déjà été lu dans les processus
-/// d'avant, et le départ de l'analyse.
+/// Le tampon de lecture : sa taille est fixée à sa création (la plus grosse région lue) et ne change jamais. Un
+/// tampon qui grandit est recopié ailleurs, et l'ancien bloc, libéré sans être effacé, garde la mémoire lue. Il est
+/// effacé en entier quand il disparaît, même après une panique.
+struct Tampon(Box<[u8]>);
+
+impl Tampon {
+    fn nouveau(taille: usize) -> Tampon {
+        Tampon(vec![0; taille].into_boxed_slice())
+    }
+}
+
+impl Drop for Tampon {
+    fn drop(&mut self) {
+        effacer(&mut self.0);
+    }
+}
+
+/// Remet chaque octet à zéro par des écritures que le compilateur ne peut pas retirer : un simple `fill(0)` juste
+/// avant la libération est une écriture sans lecteur, qu'il a le droit de supprimer.
+fn effacer(octets: &mut [u8]) {
+    let (blocs, reste) = octets.as_chunks_mut::<64>();
+    for bloc in blocs {
+        // SAFETY : `bloc` vient d'une référence exclusive : adresse valide, alignée (octets), initialisée, à nous seuls.
+        unsafe { std::ptr::write_volatile(bloc, [0; 64]) };
+    }
+    for octet in reste {
+        // SAFETY : comme plus haut, un seul octet.
+        unsafe { std::ptr::write_volatile(octet, 0) };
+    }
+    std::sync::atomic::compiler_fence(std::sync::atomic::Ordering::SeqCst);
+}
+
+/// Lit les régions par `lire`, chacune dans le début de `tampon` (jamais agrandi : une région plus grande est sautée),
+/// et leur applique les règles, dans les bornes. `lire` rend le nombre d'octets lus (0 : rien). `lu_total` et
+/// `debut` : ce qui a déjà été lu dans les processus d'avant, et le départ de l'analyse.
 fn analyser_regions(
     analyseur: &mut yara_x::Scanner,
     regions: &[Region],
-    mut lire: impl FnMut(&Region, &mut Vec<u8>) -> bool,
+    tampon: &mut [u8],
+    mut lire: impl FnMut(&Region, &mut [u8]) -> usize,
     lu_total: u64,
     debut: Instant,
 ) -> Lecture {
     let mut lecture = Lecture::default();
-    let mut tampon = Vec::new();
     for (i, region) in regions.iter().enumerate() {
         match decider(
             region.taille,
@@ -168,13 +258,17 @@ fn analyser_regions(
             }
             Decision::Sauter => lecture.sautees += 1,
             Decision::Lire => {
-                tampon.clear();
-                if !lire(region, &mut tampon) {
+                let Some(zone) = usize::try_from(region.taille).ok().and_then(|t| tampon.get_mut(..t)) else {
+                    lecture.sautees += 1;
+                    continue;
+                };
+                let lus = lire(region, zone).min(zone.len());
+                if lus == 0 {
                     lecture.sautees += 1;
                     continue;
                 }
-                lecture.octets += tampon.len() as u64;
-                match analyseur.scan(&tampon) {
+                lecture.octets += lus as u64;
+                match analyseur.scan(&zone[..lus]) {
                     Ok(resultat) => lecture
                         .trouves
                         .extend(resultat.matching_rules().map(|m| (m.identifier().to_string(), *region))),
@@ -183,7 +277,6 @@ fn analyser_regions(
             }
         }
     }
-    tampon.fill(0);
     lecture
 }
 
@@ -238,6 +331,11 @@ mod plateforme {
         }
     }
 
+    /// Aucun niveau de protection ici : le tri n'en demande jamais (rien n'y est « incertain »).
+    pub(super) fn protege(_pid: u32) -> bool {
+        false
+    }
+
     pub(super) struct Lecteur {
         fichier: File,
         regions: Vec<Region>,
@@ -248,40 +346,53 @@ mod plateforme {
             self.regions.clone()
         }
 
-        /// Lit une région dans `tampon`, mis à sa taille ; `false` si rien n'a pu être lu (région disparue
-        /// entre-temps). Une lecture partielle est gardée telle quelle : ce qui est lu est analysé.
-        pub(super) fn lire(&self, region: &Region, tampon: &mut Vec<u8>) -> bool {
-            let Ok(taille) = usize::try_from(region.taille) else {
-                return false;
-            };
-            tampon.clear();
-            tampon.resize(taille, 0);
+        /// Lit le début d'une région dans `zone` (de sa taille) et rend le nombre d'octets lus : 0 si rien n'a pu
+        /// l'être (région disparue entre-temps). Une lecture partielle est gardée telle quelle : ce qui est lu est
+        /// analysé.
+        pub(super) fn lire(&self, region: &Region, zone: &mut [u8]) -> usize {
             let mut fait = 0usize;
-            while fait < taille {
-                match self.fichier.read_at(&mut tampon[fait..], region.debut + fait as u64) {
+            while fait < zone.len() {
+                match self.fichier.read_at(&mut zone[fait..], region.debut + fait as u64) {
                     Ok(0) | Err(_) => break,
                     Ok(n) => fait += n,
                 }
             }
-            tampon.truncate(fait);
-            fait > 0
+            fait
         }
     }
 }
 
 #[cfg(windows)]
 mod plateforme {
-    use super::{Acces, Processus};
-    use crate::machine::windows::memoire;
+    use super::{Acces, Lieux, Processus, critique};
+    use crate::machine::windows::{memoire, processus};
 
     pub(super) type Lecteur = memoire::Lecteur;
 
-    /// Toolhelp32, sans rien ouvrir : les exclusions par nom se décident avant tout OpenProcess.
+    /// Toolhelp32, sans rien ouvrir ; seul un nom critique fait ensuite lire le chemin de son programme (`lieux`).
     pub(super) fn processus() -> Vec<Processus> {
-        crate::machine::windows::processus::liste()
+        processus::liste()
             .into_iter()
             .map(|p| Processus { pid: p.pid, nom: p.nom })
             .collect()
+    }
+
+    /// Le dossier System32 et le chemin du programme, demandés pour un nom critique seulement : le chemin se lit avec
+    /// les seuls droits « limités », comme dans le Gestionnaire des tâches, jamais avec le droit de lire la mémoire.
+    pub(super) fn lieux(pid: u32, nom: &str) -> Lieux {
+        if !critique(nom) {
+            return Lieux::default();
+        }
+        Lieux {
+            system32: memoire::system32(),
+            programme: processus::chemin(pid),
+        }
+    }
+
+    /// Le niveau de protection seul, pour un processus au nom critique dont le programme ne se lit pas : protégé, il
+    /// est écarté par son niveau ; sinon, ou illisible, il n'est pas lu.
+    pub(super) fn protege(pid: u32) -> bool {
+        memoire::protege(pid) == Some(true)
     }
 
     /// Le niveau de protection d'abord, avec les seuls droits « limités » ; PROCESS_VM_READ seulement ensuite, et
@@ -324,6 +435,11 @@ mod plateforme {
         Acces::Refuse
     }
 
+    /// Aucun niveau de protection ici : le tri n'en demande jamais (rien n'y est « incertain »).
+    pub(super) fn protege(_pid: u32) -> bool {
+        false
+    }
+
     /// Jamais construit ici (`Infallible`) : la forme attendue par le reste du module.
     #[allow(dead_code)]
     pub(super) struct Lecteur(std::convert::Infallible);
@@ -333,7 +449,7 @@ mod plateforme {
             match self.0 {}
         }
 
-        pub(super) fn lire(&self, _region: &Region, _tampon: &mut Vec<u8>) -> bool {
+        pub(super) fn lire(&self, _region: &Region, _zone: &mut [u8]) -> usize {
             match self.0 {}
         }
     }
@@ -348,8 +464,16 @@ struct Trouve {
     region: Region,
 }
 
+/// Un programme qui porte le nom d'un processus critique de Windows hors de System32 (T1036.005).
+#[derive(Debug, PartialEq)]
+struct Masque {
+    pid: u32,
+    programme: String,
+    chemin: String,
+}
+
 /// Le bilan de l'analyse : combien de processus lus, non lus (droits), exclus par choix, lus en partie, si une
-/// borne a tout arrêté, et les correspondances.
+/// borne a tout arrêté, les correspondances et les masquages.
 #[derive(Debug, Default, PartialEq)]
 struct Bilan {
     lus: usize,
@@ -358,6 +482,7 @@ struct Bilan {
     incomplets: usize,
     arrete: bool,
     trouves: Vec<Trouve>,
+    masques: Vec<Masque>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -371,7 +496,7 @@ enum Verdict {
 /// Le jugement : sain seulement si tout ce qui devait être lu l'a été. Les exclus par choix ne rendent pas l'analyse
 /// incomplète (ils sont dits à part), mais zéro processus lu, si.
 fn verdict(bilan: &Bilan) -> Verdict {
-    if !bilan.trouves.is_empty() {
+    if !bilan.trouves.is_empty() || !bilan.masques.is_empty() {
         Verdict::Trouve
     } else if bilan.lus == 0 || bilan.non_lus > 0 || bilan.incomplets > 0 || bilan.arrete {
         Verdict::Incomplet
@@ -389,6 +514,7 @@ fn parcourir(regles: &yara_x::Rules) -> Bilan {
     analyseur.set_timeout(DELAI_PAR_REGION);
     let mut bilan = Bilan::default();
     let mut lu_total = 0u64;
+    let mut tampon = Tampon::nouveau(TAILLE_REGION_MAX);
     let liste = plateforme::processus();
     trp!(
         "  {} processus en marche ; lecture seule, au plus {} minutes…",
@@ -398,16 +524,43 @@ fn parcourir(regles: &yara_x::Rules) -> Bilan {
     );
     let mut restants = liste.iter();
     for p in restants.by_ref() {
-        if exclu(p.pid, &p.nom, moi) {
-            bilan.exclus += 1;
-            continue;
+        #[cfg(windows)]
+        let lieux = Some(plateforme::lieux(p.pid, &p.nom));
+        #[cfg(not(windows))]
+        let lieux: Option<Lieux> = None;
+        match trier(p.pid, &p.nom, moi, lieux.as_ref()) {
+            Tri::Exclu => {
+                bilan.exclus += 1;
+                continue;
+            }
+            Tri::Incertain => {
+                if plateforme::protege(p.pid) {
+                    bilan.exclus += 1;
+                } else {
+                    bilan.non_lus += 1;
+                }
+                continue;
+            }
+            Tri::Masque => bilan.masques.push(Masque {
+                pid: p.pid,
+                programme: p.nom.clone(),
+                chemin: lieux.and_then(|l| l.programme).unwrap_or_default(),
+            }),
+            Tri::Lire => {}
         }
         match plateforme::ouvrir(p.pid) {
             Acces::Protege => bilan.exclus += 1,
             Acces::Refuse => bilan.non_lus += 1,
             Acces::Ouvert(lecteur) => {
                 let regions = lecteur.regions();
-                let lecture = analyser_regions(&mut analyseur, &regions, |r, t| lecteur.lire(r, t), lu_total, debut);
+                let lecture = analyser_regions(
+                    &mut analyseur,
+                    &regions,
+                    &mut tampon.0,
+                    |r, z| lecteur.lire(r, z),
+                    lu_total,
+                    debut,
+                );
                 lu_total += lecture.octets;
                 bilan.lus += 1;
                 if lecture.sautees > 0 {
@@ -441,14 +594,22 @@ fn avertir(texte: &str) {
 fn afficher(bilan: &Bilan) {
     println!();
     if bilan.exclus > 0 {
-        println!(
-            "  {GRIS}{}{RESET}",
+        let texte = if cfg!(windows) {
             trf!(
-                "{} processus jamais ouverts, par choix : LSASS, les processus protégés et critiques, Vanguard lui-même.",
-                "{} processes never opened, by design: LSASS, protected and critical processes, Vanguard itself.",
+                "{} processus jamais lus, par choix : LSASS et les processus critiques de Windows (leur programme de System32), les processus protégés, Vanguard lui-même.",
+                "{} processes never read, by design: LSASS and critical Windows processes (their System32 program), protected processes, Vanguard itself.",
                 bilan.exclus
             )
-        );
+        } else {
+            trf!(
+                "{} processus jamais lu, par choix : Vanguard lui-même.",
+                "{} process never read, by design: Vanguard itself.",
+                bilan.exclus
+            )
+        };
+        for ligne in envelopper(&texte, LARGEUR - 2) {
+            println!("  {GRIS}{ligne}{RESET}");
+        }
     }
     if bilan.non_lus > 0 {
         avertir(&trf!(
@@ -486,6 +647,16 @@ fn afficher(bilan: &Bilan) {
             bilan.lus
         ),
         Verdict::Trouve => {
+            for m in &bilan.masques {
+                trp!(
+                    "  {}✖{RESET} {} (PID {}) : nom d'un processus de Windows, porté par un programme hors de System32 (masquage, T1036.005)",
+                    "  {}✖{RESET} {} (PID {}): a Windows process name, carried by a program outside System32 (masquerading, T1036.005)",
+                    couleur(crate::risk::Niveau::Eleve),
+                    m.programme,
+                    m.pid
+                );
+                println!("      {GRIS}{}{RESET}", couper(&affichable(&m.chemin), LARGEUR - 6));
+            }
             for t in &bilan.trouves {
                 println!(
                     "  {}✖{RESET} {} (PID {}) : {} ({})",
@@ -524,8 +695,8 @@ pub fn analyser() {
     titre(tr!("Mémoire des processus", "Process memory"));
     for ligne in envelopper(
         tr!(
-            "Lecture seule de la mémoire des programmes en marche, à la recherche des 308 règles YARA : un logiciel malveillant sans fichier ne vit que là. LSASS, les processus protégés et critiques ne sont jamais ouverts ; rien de ce qui est lu n'est gardé.",
-            "Read-only pass over the memory of running programs, looking for the 308 YARA rules: fileless malware lives nowhere else. LSASS, protected and critical processes are never opened; nothing read is kept."
+            "Lecture seule de la mémoire des programmes en marche, à la recherche des 308 règles YARA : un logiciel malveillant sans fichier ne vit que là. LSASS, les processus protégés et critiques de Windows ne sont jamais lus (un programme qui prend leur nom hors de System32, si) ; rien de ce qui est lu n'est gardé.",
+            "Read-only pass over the memory of running programs, looking for the 308 YARA rules: fileless malware lives nowhere else. LSASS, protected and critical Windows processes are never read (a program taking their name outside System32 is); nothing read is kept."
         ),
         LARGEUR - 2,
     ) {
@@ -557,19 +728,121 @@ pub fn analyser() {
 mod tests {
     use super::*;
 
+    /// Sous Linux et macOS, le nom (comm, ps) est choisi par le programme : un maliciel qui s'appelle « lsass » ou
+    /// « services » est lu comme les autres ; seul Vanguard, par son numéro, ne l'est pas.
     #[test]
-    fn exclusions() {
-        let moi = std::process::id();
-        assert!(exclu(moi, "vanguard", moi));
-        assert!(exclu(0, "Idle", moi));
-        assert!(exclu(4, "System", moi));
-        assert!(exclu(700, "LSASS", moi));
-        assert!(exclu(701, "lsass", moi));
-        assert!(exclu(702, "Secure System", moi));
-        assert!(exclu(703, "MemCompression", moi));
-        assert!(exclu(704, "services", moi));
-        assert!(!exclu(705, "firefox", moi));
-        assert!(!exclu(706, "services-web", moi));
+    fn tri_sans_windows() {
+        let moi = 4242;
+        assert_eq!(trier(moi, "vanguard", moi, None), Tri::Exclu);
+        assert_eq!(trier(moi, "lsass", moi, None), Tri::Exclu);
+        for nom in [
+            "lsass",
+            "LSASS",
+            "services",
+            "csrss",
+            "System",
+            "Idle",
+            "Secure System",
+            "firefox",
+        ] {
+            assert_eq!(trier(700, nom, moi, None), Tri::Lire, "{nom}");
+        }
+        // 0 et 4 ne sont Idle et System que sous Windows (sous Linux, dans un conteneur, le 4 est un programme).
+        assert_eq!(trier(0, "Idle", moi, None), Tri::Lire);
+        assert_eq!(trier(4, "System", moi, None), Tri::Lire);
+    }
+
+    /// Sous Windows, un nom critique n'écarte que le programme de System32 qui le porte ; ailleurs, c'est un masquage,
+    /// lu et signalé ; sans chemin lisible, seul le niveau de protection peut l'écarter.
+    #[test]
+    fn tri_sous_windows() {
+        let moi = 4242;
+        let lieux = |programme: &str| Lieux {
+            system32: Some(r"C:\WINDOWS\system32".into()),
+            programme: Some(programme.into()),
+        };
+        let rien = Lieux::default();
+        assert_eq!(trier(moi, "vanguard", moi, Some(&rien)), Tri::Exclu);
+        assert_eq!(trier(0, "Idle", moi, Some(&rien)), Tri::Exclu);
+        assert_eq!(trier(4, "System", moi, Some(&rien)), Tri::Exclu);
+        // À sa place, quelle que soit la casse : écarté.
+        let vrai = lieux(r"C:\Windows\System32\lsass.exe");
+        assert_eq!(trier(700, "lsass", moi, Some(&vrai)), Tri::Exclu);
+        assert_eq!(trier(701, "LSASS", moi, Some(&vrai)), Tri::Exclu);
+        let services = lieux(r"c:\windows\SYSTEM32\Services.EXE");
+        assert_eq!(trier(702, "services", moi, Some(&services)), Tri::Exclu);
+        // Le même nom ailleurs : lu et signalé (T1036.005).
+        for ailleurs in [
+            r"C:\Users\alice\AppData\Roaming\lsass.exe",
+            r"C:\Windows\SysWOW64\lsass.exe",
+            r"C:\Windows\System32\drivers\lsass.exe",
+            r"C:\Windows\System32\..\Temp\lsass.exe",
+            r"C:\WINDOW~1\System32\lsass.exe",
+            r"C:\Windows\System32\lsass.exe:cache",
+            r"D:\Windows\System32\lsass.exe",
+        ] {
+            assert_eq!(
+                trier(703, "lsass", moi, Some(&lieux(ailleurs))),
+                Tri::Masque,
+                "{ailleurs}"
+            );
+        }
+        // Le bon dossier, un autre programme : « services » n'est pas « svchost ».
+        let autre = lieux(r"C:\Windows\System32\svchost.exe");
+        assert_eq!(trier(704, "services", moi, Some(&autre)), Tri::Masque);
+        // Un processus du noyau n'a pas de programme : son nom porté par un programme est un masquage.
+        assert_eq!(
+            trier(
+                705,
+                "Secure System",
+                moi,
+                Some(&lieux(r"C:\ProgramData\Secure System.exe"))
+            ),
+            Tri::Masque
+        );
+        // Chemin illisible, « chemin » sans fichier (processus minimal du noyau), System32 inconnu : incertain.
+        let illisible = Lieux {
+            system32: Some(r"C:\Windows\System32".into()),
+            programme: None,
+        };
+        assert_eq!(trier(707, "lsass", moi, Some(&illisible)), Tri::Incertain);
+        assert_eq!(trier(708, "Registry", moi, Some(&lieux("Registry"))), Tri::Incertain);
+        let sans_system32 = Lieux {
+            system32: None,
+            programme: Some(r"C:\Windows\System32\lsass.exe".into()),
+        };
+        assert_eq!(trier(709, "lsass", moi, Some(&sans_system32)), Tri::Incertain);
+        // Un nom ordinaire est lu, sans rien demander de plus.
+        assert_eq!(trier(710, "firefox", moi, Some(&rien)), Tri::Lire);
+        assert_eq!(trier(711, "services-web", moi, Some(&rien)), Tri::Lire);
+    }
+
+    #[test]
+    fn programme_a_sa_place() {
+        assert!(a_sa_place(
+            "lsass",
+            r"C:\Windows\System32\lsass.exe",
+            r"C:\Windows\System32"
+        ));
+        assert!(a_sa_place(
+            "lsass",
+            r"C:\Windows\System32\lsass.exe",
+            r"C:\Windows\System32\"
+        ));
+        assert!(!a_sa_place("lsass", r"C:\Windows\System32\lsass.exe", ""));
+        assert!(!a_sa_place("lsass", r"\lsass.exe", ""));
+        assert!(!a_sa_place("lsass", r"C:\Windows\System32\lsass.exe", r"C:\Windows"));
+        assert!(!a_sa_place(
+            "lsass",
+            r"C:\Windows\System32\lsass",
+            r"C:\Windows\System32"
+        ));
+        // Pas de pliage de casse hors ASCII : « ſ » (s long, « S » en majuscule) n'est pas « s ».
+        assert!(!a_sa_place(
+            "lsass",
+            "C:\\Windows\\\u{17f}ystem32\\lsass.exe",
+            r"C:\Windows\System32"
+        ));
     }
 
     #[test]
@@ -632,8 +905,8 @@ mod tests {
     fn bornes() {
         let rien = Duration::ZERO;
         assert_eq!(decider(4096, 0, 0, rien), Decision::Lire);
-        assert_eq!(decider(TAILLE_REGION_MAX, 0, 0, rien), Decision::Lire);
-        assert_eq!(decider(TAILLE_REGION_MAX + 1, 0, 0, rien), Decision::Sauter);
+        assert_eq!(decider(TAILLE_REGION_MAX as u64, 0, 0, rien), Decision::Lire);
+        assert_eq!(decider(TAILLE_REGION_MAX as u64 + 1, 0, 0, rien), Decision::Sauter);
         assert_eq!(
             decider(4096, PAR_PROCESSUS_MAX - 4095, 0, rien),
             Decision::ProcessusPlein
@@ -642,23 +915,20 @@ mod tests {
         assert_eq!(decider(4096, 0, 0, DUREE_MAX), Decision::Arret);
         // Les bornes à l'œuvre : une région trop grosse sautée, puis la part du processus atteinte (le reste sauté
         // sans être lu) ; et un arrêt général, sans rien lire.
+        let max = TAILLE_REGION_MAX as u64;
         let mut regions = vec![Region {
             debut: 0,
-            taille: TAILLE_REGION_MAX + 1,
+            taille: max + 1,
         }];
         regions.extend((0..9).map(|i| Region {
-            debut: i * TAILLE_REGION_MAX,
-            taille: TAILLE_REGION_MAX,
+            debut: i * max,
+            taille: max,
         }));
-        let mut compilateur = yara_x::Compiler::new();
-        compilateur.add_source("rule Rien { condition: false }").unwrap();
-        let vides = compilateur.build();
+        let vides = regles("rule Rien { condition: false }");
         let mut analyseur = yara_x::Scanner::new(&vides);
-        let remplir = |r: &Region, t: &mut Vec<u8>| {
-            t.resize(usize::try_from(r.taille).unwrap(), 0);
-            true
-        };
-        let lecture = analyser_regions(&mut analyseur, &regions, remplir, 0, Instant::now());
+        let mut tampon = Tampon::nouveau(TAILLE_REGION_MAX);
+        let remplir = |_: &Region, z: &mut [u8]| z.len();
+        let lecture = analyser_regions(&mut analyseur, &regions, &mut tampon.0, remplir, 0, Instant::now());
         assert_eq!(
             lecture,
             Lecture {
@@ -668,7 +938,14 @@ mod tests {
                 arret: false
             }
         );
-        let lecture = analyser_regions(&mut analyseur, &regions, |_, _| panic!(), TOTAL_MAX, Instant::now());
+        let lecture = analyser_regions(
+            &mut analyseur,
+            &regions,
+            &mut tampon.0,
+            |_, _| panic!(),
+            TOTAL_MAX,
+            Instant::now(),
+        );
         assert!(lecture.arret && lecture.sautees == 10);
         // Une région illisible est sautée, dite ; une lue sans correspondance compte ses octets.
         let petites = [Region { debut: 0, taille: 8 }, Region { debut: 8, taille: 8 }];
@@ -676,10 +953,11 @@ mod tests {
         let lecture = analyser_regions(
             &mut analyseur,
             &petites,
-            |_, t| {
+            &mut tampon.0,
+            |_, z| {
                 tour += 1;
-                t.extend_from_slice(b"12345678");
-                tour > 1
+                z.copy_from_slice(b"12345678");
+                if tour > 1 { z.len() } else { 0 }
             },
             0,
             Instant::now(),
@@ -693,6 +971,56 @@ mod tests {
                 arret: false
             }
         );
+    }
+
+    fn regles(source: &str) -> yara_x::Rules {
+        let mut compilateur = yara_x::Compiler::new();
+        compilateur.add_source(source).unwrap();
+        compilateur.build()
+    }
+
+    /// Le tampon garde sa taille : une région plus grande que lui est sautée, jamais lue dans un tampon agrandi ; ce
+    /// qui est lu est analysé dans sa seule longueur lue ; et l'effacement le remet à zéro en entier.
+    #[test]
+    fn tampon_fixe_puis_efface() {
+        let essai = regles(r#"rule Ancien { strings: $a = "ancien" condition: $a }"#);
+        let mut analyseur = yara_x::Scanner::new(&essai);
+        let mut tampon = Tampon::nouveau(100);
+        let regions = [
+            Region { debut: 0, taille: 64 },
+            Region { debut: 64, taille: 16 },
+            Region { debut: 80, taille: 101 },
+        ];
+        let mut tour = 0;
+        let lecture = analyser_regions(
+            &mut analyseur,
+            &regions,
+            &mut tampon.0,
+            |_, z| {
+                tour += 1;
+                if tour == 1 {
+                    // La première région laisse « ancien » dans le tampon, après ce que lira la seconde.
+                    z.fill(b'x');
+                    z[8..14].copy_from_slice(b"ancien");
+                    z.len()
+                } else {
+                    z[..4].copy_from_slice(b"neuf");
+                    4
+                }
+            },
+            0,
+            Instant::now(),
+        );
+        assert_eq!(tour, 2, "la région de 101 octets ne doit pas être lue");
+        assert_eq!(lecture.octets, 68);
+        assert_eq!(lecture.sautees, 1);
+        assert_eq!(lecture.trouves, [("Ancien".to_string(), regions[0])]);
+        assert_eq!(tampon.0.len(), 100);
+        effacer(&mut tampon.0);
+        assert!(tampon.0.iter().all(|&o| o == 0));
+        let mut impair = vec![0xA5u8; 64 * 3 + 7];
+        effacer(&mut impair);
+        assert!(impair.iter().all(|&o| o == 0));
     }
 
     #[test]
@@ -715,6 +1043,14 @@ mod tests {
         bilan.arrete = false;
         bilan.lus = 0;
         assert_eq!(verdict(&bilan), Verdict::Incomplet);
+        // Un masquage seul suffit à l'alerte, même sans règle trouvée.
+        bilan.masques.push(Masque {
+            pid: 2,
+            programme: "lsass".into(),
+            chemin: r"C:\Users\alice\lsass.exe".into(),
+        });
+        assert_eq!(verdict(&bilan), Verdict::Trouve);
+        bilan.masques.clear();
         bilan.trouves.push(Trouve {
             regle: "X".into(),
             pid: 1,
@@ -724,18 +1060,43 @@ mod tests {
         assert_eq!(verdict(&bilan), Verdict::Trouve);
     }
 
+    /// Le vrai services.exe (Wine en lance un aussi) est écarté par son programme de System32, chemins lus comme
+    /// Windows les donne ; s'il ne se lit pas (sans droits d'administrateur), seul son niveau de protection décidera.
+    #[cfg(windows)]
+    #[test]
+    fn le_vrai_services_est_a_sa_place() {
+        let system32 = crate::machine::windows::memoire::system32().expect("System32 se lit");
+        assert!(system32.to_ascii_lowercase().ends_with(r"\system32"), "{system32}");
+        let moi = std::process::id();
+        for p in crate::machine::windows::processus::liste() {
+            if !p.nom.eq_ignore_ascii_case("services") {
+                continue;
+            }
+            let lieux = plateforme::lieux(p.pid, &p.nom);
+            let attendu = match lieux.programme.as_deref() {
+                Some(chemin) if chemin.contains('\\') => Tri::Exclu,
+                _ => Tri::Incertain,
+            };
+            assert_eq!(trier(p.pid, &p.nom, moi, Some(&lieux)), attendu, "{lieux:?}");
+        }
+    }
+
     /// La mémoire de CE processus de test, et de lui seul, lue comme celle d'un autre (/proc/self/mem ; sous Windows,
-    /// OpenProcess sur son propre numéro, sans passer par le niveau de protection, que Wine ne dit pas) : une règle
-    /// d'essai retrouve une chaîne construite à l'exécution et posée sur le tas, dans la région qui la contient.
+    /// OpenProcess sur son propre numéro, sans passer par le niveau de protection, que Wine ne dit pas) : la liste des
+    /// régions contient celle d'une chaîne construite à l'exécution et posée sur le tas, et une règle d'essai la
+    /// retrouve en la lisant. Seules les pages de la chaîne sont lues : quand toute la suite tourne, les autres tests,
+    /// dans le même processus, libèrent de la mémoire entre la liste des régions et leur lecture ; la région de la
+    /// marque perdait alors son début (lecture impossible, région sautée) ou un morceau avant elle (lecture arrêtée
+    /// au trou), et la règle ne la trouvait plus. Les pages de la marque, elles, restent là tant qu'elle vit.
     #[cfg(any(target_os = "linux", windows))]
     #[test]
     fn sa_propre_memoire() {
+        const PAGE: u64 = 4096;
         let marque = std::hint::black_box(["vanguard", "essai", "memoire", "7f3a9c"].join("-"));
-        let mut compilateur = yara_x::Compiler::new();
-        compilateur
-            .add_source(format!(r#"rule Essai_Memoire {{ strings: $a = "{marque}" condition: $a }}"#).as_str())
-            .unwrap();
-        let essai = compilateur.build();
+        let (adresse, longueur) = (marque.as_ptr() as u64, marque.len() as u64);
+        let essai = regles(&format!(
+            r#"rule Essai_Memoire {{ strings: $a = "{marque}" condition: $a }}"#
+        ));
         let mut analyseur = yara_x::Scanner::new(&essai);
         let moi = std::process::id();
         #[cfg(target_os = "linux")]
@@ -745,19 +1106,40 @@ mod tests {
         #[cfg(windows)]
         let lecteur = plateforme::Lecteur::ouvrir(moi).expect("son propre processus doit s'ouvrir");
         let regions = lecteur.regions();
-        assert_ne!(regions.len(), 0);
-        let lecture = analyser_regions(&mut analyseur, &regions, |r, t| lecteur.lire(r, t), 0, Instant::now());
-        assert!(lecture.octets > 0 && !lecture.arret, "{lecture:?}");
-        let adresse = marque.as_ptr() as u64;
-        assert!(
-            lecture
-                .trouves
-                .iter()
-                .any(|(regle, r)| regle == "Essai_Memoire" && r.debut <= adresse && adresse < r.debut + r.taille),
-            "{:?} ; marque à {adresse:#x}",
-            lecture.trouves
+        let contenante = regions
+            .iter()
+            .find(|r| r.debut <= adresse && adresse + longueur <= r.debut + r.taille)
+            .unwrap_or_else(|| panic!("aucune région ne contient la marque ({adresse:#x}) : {regions:x?}"));
+        let debut = (adresse / PAGE * PAGE).max(contenante.debut);
+        let fin = (adresse + longueur)
+            .next_multiple_of(PAGE)
+            .min(contenante.debut + contenante.taille);
+        let pages = [Region {
+            debut,
+            taille: fin - debut,
+        }];
+        let mut tampon = Tampon::nouveau(usize::try_from(pages[0].taille).unwrap());
+        let lecture = analyser_regions(
+            &mut analyseur,
+            &pages,
+            &mut tampon.0,
+            |r, z| lecteur.lire(r, z),
+            0,
+            Instant::now(),
         );
-        // Ce processus est exclu du parcours général : Vanguard ne se lit pas lui-même.
-        assert!(exclu(moi, "vanguard", moi));
+        assert_eq!(
+            lecture,
+            Lecture {
+                trouves: vec![("Essai_Memoire".into(), pages[0])],
+                octets: pages[0].taille,
+                sautees: 0,
+                arret: false
+            },
+            "marque à {adresse:#x}"
+        );
+        // Ce processus est exclu du parcours général, sur tous les systèmes : Vanguard ne se lit pas lui-même.
+        assert_eq!(trier(moi, "vanguard", moi, None), Tri::Exclu);
+        assert_eq!(trier(moi, "vanguard", moi, Some(&Lieux::default())), Tri::Exclu);
+        std::hint::black_box(&marque);
     }
 }

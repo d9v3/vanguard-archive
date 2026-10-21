@@ -3,6 +3,7 @@
 //! lecture : son niveau se lit d'abord avec les seuls droits « limités », et tout niveau autre que « aucun » l'exclut,
 //! comme un niveau qui ne se lit pas. Jamais d'écriture, d'injection, de suspension, de MiniDump ni de
 //! SeDebugPrivilege : lire la mémoire d'autrui ressemble déjà assez à un vol d'identifiants pour ne rien y ajouter.
+//! Le dossier System32 est lu ici aussi : un processus au nom critique n'est écarté que si son programme y est.
 
 use std::ffi::c_void;
 
@@ -29,6 +30,7 @@ unsafe extern "system" {
         taille: usize,
         lus: *mut usize,
     ) -> i32;
+    fn GetSystemDirectoryW(tampon: *mut u16, taille: u32) -> u32;
 }
 
 /// MEMORY_BASIC_INFORMATION (winnt.h), telle que VirtualQueryEx la remplit sur x86_64.
@@ -63,6 +65,18 @@ pub(crate) fn protege(pid: u32) -> Option<bool> {
         let _ = CloseHandle(poignee);
         lu.then(|| niveau.ProtectionLevel != PROTECTION_LEVEL_NONE)
     }
+}
+
+/// Le dossier System32 de ce Windows (« C:\WINDOWS\system32 »), tel que Windows le donne : pas la variable
+/// SystemRoot, que choisit le programme qui lance Vanguard, ni un chemin écrit en dur. `None` s'il ne se lit pas.
+pub(crate) fn system32() -> Option<String> {
+    let mut tampon = [0u16; 1024];
+    let taille = u32::try_from(tampon.len()).ok()?;
+    // SAFETY : le tampon fait `taille` caractères ; GetSystemDirectoryW n'écrit pas au-delà et rend le nombre écrit
+    // (sans le zéro final), la taille qu'il lui faudrait s'il est trop petit, ou 0 en cas d'échec.
+    let ecrits = unsafe { GetSystemDirectoryW(tampon.as_mut_ptr(), taille) };
+    let ecrits = usize::try_from(ecrits).ok()?;
+    (ecrits > 0 && ecrits < tampon.len()).then(|| String::from_utf16_lossy(&tampon[..ecrits]))
 }
 
 /// Un processus ouvert pour lire sa mémoire, et rien d'autre (PROCESS_VM_READ) ; refermé avec lui.
@@ -115,28 +129,26 @@ impl Lecteur {
         liste
     }
 
-    /// Lit une région dans `tampon`, mis à sa taille ; `false` si rien n'a pu être lu (région disparue ou changée
-    /// entre-temps). Une lecture partielle est gardée telle quelle : ce qui est lu est analysé.
-    pub(crate) fn lire(&self, region: &Region, tampon: &mut Vec<u8>) -> bool {
-        let (Ok(taille), Ok(debut)) = (usize::try_from(region.taille), usize::try_from(region.debut)) else {
-            return false;
+    /// Lit le début d'une région dans `zone` (de sa taille, prise dans un tampon qui ne grandit jamais) et rend le
+    /// nombre d'octets lus : 0 si rien n'a pu l'être (région disparue ou changée entre-temps). Une lecture partielle
+    /// est gardée telle quelle : ce qui est lu est analysé.
+    pub(crate) fn lire(&self, region: &Region, zone: &mut [u8]) -> usize {
+        let Ok(debut) = usize::try_from(region.debut) else {
+            return 0;
         };
-        tampon.clear();
-        tampon.resize(taille, 0);
         let mut lus = 0usize;
-        // SAFETY : le tampon fait `taille` octets, la taille passée à ReadProcessMemory, qui n'écrit pas au-delà et
-        // rend le nombre écrit ; la poignée est valide tant que `self` vit.
+        // SAFETY : `zone` est une tranche à nous de `zone.len()` octets, la taille passée à ReadProcessMemory, qui
+        // n'écrit pas au-delà et rend le nombre écrit ; la poignée est valide tant que `self` vit.
         unsafe {
             ReadProcessMemory(
                 self.0.0,
                 std::ptr::with_exposed_provenance(debut),
-                tampon.as_mut_ptr().cast(),
-                taille,
+                zone.as_mut_ptr().cast(),
+                zone.len(),
                 &raw mut lus,
             );
         }
-        tampon.truncate(lus.min(taille));
-        lus > 0
+        lus.min(zone.len())
     }
 }
 

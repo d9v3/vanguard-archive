@@ -7,8 +7,9 @@
 //!   s'exécute avec les droits de la personne), joint en HTTP sans chiffrement, ou avec une clé écrite en clair.
 //!
 //! Les fichiers lus : réglages de Claude Code (~/.claude), de Claude Desktop, de Cursor, de VS Code, de Windsurf et
-//! de Gemini CLI. Aucune valeur secrète n'est affichée ni gardée : seulement le nom du serveur et celui de la clé. Rien
-//! ne se corrige tout seul.
+//! de Gemini CLI, en JSON ou en JSONC (commentaires et virgules finales, que VS Code accepte) ; un fichier présent
+//! mais illisible rend l'outil « non vérifié », jamais « aucun agent ». Aucune valeur secrète n'est affichée ni
+//! gardée : seulement le nom du serveur et celui de la clé. Rien ne se corrige tout seul.
 
 use std::net::IpAddr;
 use std::path::{Path, PathBuf};
@@ -173,27 +174,87 @@ fn paquet_non_epingle(commande: &str, args: &[&str]) -> Option<String> {
     (!epingle || flottant).then(|| paquet.to_string())
 }
 
-fn ressemble_a_un_secret(nom: &str) -> bool {
-    let n = nom.to_uppercase();
-    [
-        "KEY",
-        "TOKEN",
-        "SECRET",
-        "PASSWORD",
-        "PASSWD",
-        "CREDENTIAL",
-        "AUTHORIZATION",
-    ]
-    .iter()
-    .any(|m| n.contains(m))
+/// Les mots d'un nom qui désignent un secret, comparés entiers : « TOKENIZERS » n'est pas « TOKEN », ni « MONKEY »
+/// « KEY ».
+const MOTS_SECRETS: [&str; 14] = [
+    "KEY",
+    "KEYS",
+    "APIKEY",
+    "TOKEN",
+    "TOKENS",
+    "SECRET",
+    "SECRETS",
+    "PASSWORD",
+    "PASSWORDS",
+    "PASSWD",
+    "PASSPHRASE",
+    "CREDENTIAL",
+    "CREDENTIALS",
+    "AUTHORIZATION",
+];
+
+/// Le dernier mot d'un nom qui dit où est le secret, ou comment il s'appelle, et non le secret lui-même :
+/// PASSWORD_STORE_DIR, API_KEY_FILE, TOKEN_URL, AWS_ACCESS_KEY_ID.
+const MOTS_HORS_SECRET: [&str; 14] = [
+    "DIR",
+    "DIRECTORY",
+    "PATH",
+    "FILE",
+    "STORE",
+    "URL",
+    "URI",
+    "HOST",
+    "PORT",
+    "ENDPOINT",
+    "ID",
+    "NAME",
+    "TYPE",
+    "HEADER",
+];
+
+/// Les mots d'un nom, en majuscules : coupé aux « _ », « - » et « . », et entre une minuscule et une majuscule
+/// (« apiKey », « accessToken »).
+fn mots(nom: &str) -> Vec<String> {
+    let mut mots = Vec::new();
+    let mut mot = String::new();
+    let mut apres_minuscule = false;
+    for c in nom.chars() {
+        let separateur = matches!(c, '_' | '-' | '.');
+        if (separateur || (apres_minuscule && c.is_uppercase())) && !mot.is_empty() {
+            mots.push(std::mem::take(&mut mot));
+        }
+        if !separateur {
+            mot.extend(c.to_uppercase());
+        }
+        apres_minuscule = c.is_lowercase();
+    }
+    if !mot.is_empty() {
+        mots.push(mot);
+    }
+    mots
 }
 
-/// Une valeur écrite en clair, et non une référence à une variable (« ${VAR} », « $VAR », « env:VAR »).
+fn ressemble_a_un_secret(nom: &str) -> bool {
+    let mots = mots(nom);
+    mots.iter().any(|m| MOTS_SECRETS.contains(&m.as_str()))
+        && mots.last().is_some_and(|m| !MOTS_HORS_SECRET.contains(&m.as_str()))
+}
+
+/// Les schémas d'authentification écrits devant le secret dans un en-tête (« Bearer jeton », « Basic base64 »).
+const SCHEMAS: [&str; 3] = ["Bearer", "Basic", "Token"];
+
+/// Une valeur écrite en clair, et non une référence à un secret gardé ailleurs : variable (« ${VAR} », « $VAR »,
+/// « ${env:VAR} », « env:VAR »), invite de VS Code (« ${input:jeton} »), y compris derrière un schéma
+/// d'authentification (« Bearer ${API_KEY} », « Basic ${IDENTIFIANTS} »).
 fn en_clair(valeur: &Value) -> bool {
-    valeur
-        .as_str()
-        .map(str::trim)
-        .is_some_and(|v| !v.is_empty() && !v.starts_with('$') && !v.starts_with("env:") && !v.starts_with("{env:"))
+    let Some(v) = valeur.as_str().map(str::trim) else {
+        return false;
+    };
+    let v = match v.split_once(char::is_whitespace) {
+        Some((schema, reste)) if SCHEMAS.iter().any(|s| s.eq_ignore_ascii_case(schema)) => reste.trim(),
+        _ => v,
+    };
+    !v.is_empty() && !v.starts_with('$') && !v.starts_with("env:") && !v.starts_with("{env:")
 }
 
 fn lire_serveurs(outil: &str, serveurs: &serde_json::Map<String, Value>, t: &mut Trouvailles) {
@@ -285,7 +346,9 @@ fn lire_reglages(outil: &str, json: &Value, t: &mut Trouvailles) {
     }
 }
 
-fn juger_reglages(t: &Trouvailles, fichiers: usize) -> Vec<Constat> {
+/// `fichiers` : les fichiers lus ; `illisibles` : les outils dont le fichier est là mais n'a pas pu être lu, avec la
+/// raison (« Cursor (JSON invalide) »).
+fn juger_reglages(t: &Trouvailles, fichiers: usize, illisibles: &[String]) -> Vec<Constat> {
     let liste = |v: &[String]| couper(&affichable(&v.join(", ")), 200);
     let mut constats = Vec::new();
     if !t.tout_permis.is_empty() {
@@ -345,16 +408,26 @@ fn juger_reglages(t: &Trouvailles, fichiers: usize) -> Vec<Constat> {
     }
     if constats.is_empty() {
         let n = t.serveurs;
-        constats.push(ok(
-            CAT,
-            if fichiers == 0 {
-                tr!("Aucun agent d'IA configuré", "No AI agent configured").to_string()
-            } else {
+        if fichiers > 0 {
+            constats.push(ok(
+                CAT,
                 trf!(
                     "Agents d'IA : {fichiers} fichier(s) de réglages, {n} serveur(s) MCP, rien de risqué",
                     "AI agents: {fichiers} settings file(s), {n} MCP server(s), nothing risky"
-                )
-            },
+                ),
+            ));
+        } else if illisibles.is_empty() {
+            constats.push(ok(CAT, tr!("Aucun agent d'IA configuré", "No AI agent configured")));
+        }
+    }
+    if !illisibles.is_empty() {
+        let l = liste(illisibles);
+        constats.push(impossible(
+            CAT,
+            &trf!(
+                "réglages d'agents d'IA présents mais illisibles : {l}",
+                "AI agent settings present but unreadable: {l}"
+            ),
         ));
     }
     constats
@@ -386,26 +459,122 @@ fn fichiers_de_reglages() -> Vec<(&'static str, PathBuf)> {
     ]
 }
 
-/// Au-delà, ce n'est pas un fichier de réglages (~/.claude.json grossit avec l'historique des projets).
+/// Au-delà, ce n'est pas un fichier de réglages (~/.claude.json grossit avec l'historique des projets) : il n'est
+/// pas lu, et l'outil est dit non vérifié.
 const REGLAGES_MAX: u64 = 64 << 20;
+
+/// Le JSONC des réglages de VS Code (que Cursor et Windsurf reprennent) ramené au JSON : commentaires « // » et
+/// « /* */ », et virgules finales, retirés hors des chaînes. Un commentaire devient une espace, ses fins de ligne
+/// restent : deux mots qu'il séparait le restent.
+fn json_sans_jsonc(texte: &str) -> String {
+    let mut json = String::with_capacity(texte.len());
+    let mut car = texte.chars().peekable();
+    // Une virgule pas encore suivie d'autre chose que des blancs ou des commentaires : finale si « } » ou « ] » vient.
+    let mut virgule: Option<usize> = None;
+    while let Some(c) = car.next() {
+        match c {
+            '"' => {
+                virgule = None;
+                json.push(c);
+                while let Some(c) = car.next() {
+                    json.push(c);
+                    match c {
+                        '\\' => json.extend(car.next()),
+                        '"' => break,
+                        _ => {}
+                    }
+                }
+            }
+            '/' if car.peek() == Some(&'/') => {
+                for c in car.by_ref() {
+                    if c == '\n' {
+                        json.push(c);
+                        break;
+                    }
+                }
+            }
+            '/' if car.peek() == Some(&'*') => {
+                car.next();
+                let mut etoile = false;
+                for c in car.by_ref() {
+                    if c == '\n' {
+                        json.push(c);
+                    }
+                    if etoile && c == '/' {
+                        break;
+                    }
+                    etoile = c == '*';
+                }
+                json.push(' ');
+            }
+            '}' | ']' => {
+                if let Some(i) = virgule.take() {
+                    json.replace_range(i..=i, " ");
+                }
+                json.push(c);
+            }
+            ',' => {
+                virgule = Some(json.len());
+                json.push(c);
+            }
+            _ => {
+                if !c.is_whitespace() {
+                    virgule = None;
+                }
+                json.push(c);
+            }
+        }
+    }
+    json
+}
+
+/// Un fichier de réglages lu en JSON, ou à défaut en JSONC ; `None` s'il n'est ni l'un ni l'autre.
+fn lire_json(octets: &[u8]) -> Option<Value> {
+    if let Ok(json) = serde_json::from_slice(octets) {
+        return Some(json);
+    }
+    let texte = std::str::from_utf8(octets).ok()?;
+    serde_json::from_str(&json_sans_jsonc(texte.trim_start_matches('\u{feff}'))).ok()
+}
+
+/// Les réglages d'un fichier : `Ok(None)` s'il n'existe pas (l'outil n'est pas installé), `Err` avec la raison s'il
+/// est là mais ne se lit pas (droits, trop gros, ni JSON ni JSONC).
+fn lire_fichier(chemin: &Path) -> Result<Option<Value>, String> {
+    use std::io::ErrorKind::NotFound;
+    let illisible = || tr!("illisible", "unreadable").to_string();
+    let taille = match std::fs::metadata(chemin) {
+        Ok(m) => m.len(),
+        Err(e) if e.kind() == NotFound => return Ok(None),
+        Err(_) => return Err(illisible()),
+    };
+    if taille > REGLAGES_MAX {
+        return Err(trf!("plus de {} Mio", "over {} MiB", REGLAGES_MAX >> 20));
+    }
+    let octets = match std::fs::read(chemin) {
+        Ok(o) => o,
+        Err(e) if e.kind() == NotFound => return Ok(None),
+        Err(_) => return Err(illisible()),
+    };
+    lire_json(&octets)
+        .map(Some)
+        .ok_or_else(|| tr!("JSON invalide", "invalid JSON").to_string())
+}
 
 pub(crate) fn reglages() -> Vec<Constat> {
     let mut t = Trouvailles::default();
     let mut lus = 0;
+    let mut illisibles = Vec::new();
     for (outil, chemin) in fichiers_de_reglages() {
-        if std::fs::metadata(&chemin).is_ok_and(|m| m.len() > REGLAGES_MAX) {
-            continue;
+        match lire_fichier(&chemin) {
+            Ok(None) => {}
+            Ok(Some(json)) => {
+                lus += 1;
+                lire_reglages(outil, &json, &mut t);
+            }
+            Err(raison) => illisibles.push(format!("{outil} ({raison})")),
         }
-        let Some(json) = std::fs::read(&chemin)
-            .ok()
-            .and_then(|o| serde_json::from_slice::<Value>(&o).ok())
-        else {
-            continue;
-        };
-        lus += 1;
-        lire_reglages(outil, &json, &mut t);
     }
-    juger_reglages(&t, lus)
+    juger_reglages(&t, lus, &illisibles)
 }
 
 #[cfg(test)]
@@ -489,7 +658,7 @@ mod tests {
         lire_reglages("Cursor", &json6, &mut v6);
         assert_eq!(v6.sans_chiffrement, ["Cursor › b"]);
         assert_eq!(t.cles_en_clair, ["Claude Code › fichiers (API_KEY)"]);
-        let c = juger_reglages(&t, 1);
+        let c = juger_reglages(&t, 1, &[]);
         assert_eq!(c.len(), 5);
         assert_eq!(c[0].probleme, Some(Niveau::Eleve));
         // Aucune valeur secrète dans les messages.
@@ -504,12 +673,160 @@ mod tests {
         .unwrap();
         let mut t = Trouvailles::default();
         lire_reglages("VS Code", &json, &mut t);
-        let c = juger_reglages(&t, 1);
+        let c = juger_reglages(&t, 1, &[]);
         assert!(c.len() == 1 && c[0].probleme.is_none() && c[0].message.contains("1 serveur"));
         assert!(
-            juger_reglages(&Trouvailles::default(), 0)[0]
+            juger_reglages(&Trouvailles::default(), 0, &[])[0]
                 .message
                 .contains("Aucun agent")
         );
+    }
+
+    /// Un fichier présent mais illisible n'est jamais « aucun agent » : l'outil est dit non vérifié, à côté de ce
+    /// qui a pu être lu.
+    #[test]
+    fn reglages_illisibles_non_verifies() {
+        let illisible = ["VS Code (JSON invalide)".to_string()];
+        let c = juger_reglages(&Trouvailles::default(), 0, &illisible);
+        assert_eq!(c.len(), 1);
+        assert!(!c[0].verifie && c[0].message.contains("VS Code (JSON invalide)"));
+        assert!(c.iter().all(|c| !c.message.contains("Aucun agent")));
+        let t = Trouvailles {
+            serveurs: 2,
+            ..Trouvailles::default()
+        };
+        let c = juger_reglages(&t, 1, &illisible);
+        assert_eq!(c.len(), 2);
+        assert!(c[0].verifie && c[0].message.contains("2 serveur"));
+        assert!(!c[1].verifie);
+    }
+
+    /// Le JSONC de VS Code : commentaires et virgules finales retirés, jamais dans une chaîne.
+    #[test]
+    fn jsonc_de_vs_code() {
+        let jsonc = r#"{
+          // Serveurs de l'équipe
+          "servers": {
+            /* documentation */ "doc": { "command": "npx", "args": ["-y", "doc-mcp",], },
+            "web": { "url": "http://exemple.test/a//b/*c*/", "headers": { "Authorization": "Bearer jeton-essai" } },
+          },
+        }"#;
+        let json = lire_json(jsonc.as_bytes()).expect("JSONC lisible");
+        assert_eq!(json["servers"]["doc"]["args"], serde_json::json!(["-y", "doc-mcp"]));
+        // Les « // » et « /* */ » d'une chaîne y restent.
+        assert_eq!(json["servers"]["web"]["url"], "http://exemple.test/a//b/*c*/");
+        let mut t = Trouvailles::default();
+        lire_reglages("VS Code", &json, &mut t);
+        assert_eq!(t.serveurs, 2);
+        assert_eq!(t.non_epingles, ["VS Code › doc (doc-mcp)"]);
+        assert_eq!(t.cles_en_clair, ["VS Code › web (Authorization)"]);
+        // Une virgule dans une chaîne, un guillemet échappé, un commentaire collé : rien de changé à tort.
+        let json = lire_json(br#"{"a": "x, }", "b": "y\"//z", /**/"c": [1,/* , */2,]}"#).unwrap();
+        assert_eq!(json, serde_json::json!({"a": "x, }", "b": "y\"//z", "c": [1, 2]}));
+        // Le BOM d'un éditeur de Windows, puis du JSON ordinaire, lu tel quel.
+        assert!(lire_json("\u{feff}{\"a\": 1, // b\n}".as_bytes()).is_some());
+        assert_eq!(lire_json(br#"{"a": [1, 2]}"#), Some(serde_json::json!({"a": [1, 2]})));
+        // Ni JSON ni JSONC : refusé.
+        for mauvais in [
+            &b"{\"a\": 1"[..],
+            b"{\"a\": /* sans fin",
+            b"\xff\xfe{}",
+            b"servers = 1",
+            b"",
+        ] {
+            assert!(lire_json(mauvais).is_none(), "{mauvais:?}");
+        }
+    }
+
+    /// Absent : rien à dire ; présent mais illisible, trop gros ou invalide : la raison.
+    #[test]
+    fn fichiers_absents_ou_illisibles() {
+        let dossier = std::env::temp_dir().join(format!("vanguard-agents-{}", std::process::id()));
+        std::fs::create_dir_all(&dossier).unwrap();
+        assert_eq!(lire_fichier(&dossier.join("absent.json")), Ok(None));
+        let bon = dossier.join("mcp.json");
+        std::fs::write(&bon, "{ \"servers\": {}, // VS Code\n }").unwrap();
+        assert_eq!(lire_fichier(&bon), Ok(Some(serde_json::json!({"servers": {}}))));
+        let casse = dossier.join("casse.json");
+        std::fs::write(&casse, "{ \"servers\": ").unwrap();
+        assert!(lire_fichier(&casse).is_err());
+        let gros = dossier.join("gros.json");
+        std::fs::File::create(&gros).unwrap().set_len(REGLAGES_MAX + 1).unwrap();
+        assert!(lire_fichier(&gros).unwrap_err().contains("64"));
+        // Un dossier à la place du fichier : là, mais illisible.
+        let dossier_a_la_place = dossier.join("settings.json");
+        std::fs::create_dir_all(&dossier_a_la_place).unwrap();
+        assert!(lire_fichier(&dossier_a_la_place).is_err());
+        std::fs::remove_dir_all(&dossier).unwrap();
+    }
+
+    /// Une référence reste une référence derrière « Bearer » ou « Basic » ; des noms qui contiennent « TOKEN » ou
+    /// « PASSWORD » sans désigner un secret ne sont pas des clés.
+    #[test]
+    fn cles_en_clair_ou_references() {
+        let json: Value = serde_json::from_str(
+            r#"{ "mcpServers": {
+              "a": { "url": "https://a.exemple/mcp", "headers": { "Authorization": "Bearer ${API_KEY}" } },
+              "b": { "url": "https://b.exemple/mcp", "headers": { "Authorization": "bearer ${input:jeton}", "X-Api-Key": "${input:cle}" } },
+              "c": { "url": "https://c.exemple/mcp", "headers": { "Authorization": "Basic ${IDENTIFIANTS}" } },
+              "d": { "command": "uvx", "args": ["d==1.0"], "env": { "TOKENIZERS_PARALLELISM": "false", "PASSWORD_STORE_DIR": "/home/alice/.password-store", "API_KEY_FILE": "/home/alice/cle" } },
+              "e": { "url": "https://e.exemple/mcp", "headers": { "Authorization": "Bearer sk-essai-123" } },
+              "f": { "url": "https://f.exemple/mcp", "headers": { "Authorization": "Basic YWxpY2U6c2Fsb24=" } },
+              "g": { "command": "uvx", "args": ["g==1.0"], "env": { "apiKey": "essai", "CLIENT_SECRET": "essai" } }
+            } }"#,
+        )
+        .unwrap();
+        let mut t = Trouvailles::default();
+        lire_reglages("Cursor", &json, &mut t);
+        assert_eq!(
+            t.cles_en_clair,
+            [
+                "Cursor › e (Authorization)",
+                "Cursor › f (Authorization)",
+                "Cursor › g (apiKey)",
+                "Cursor › g (CLIENT_SECRET)"
+            ]
+        );
+    }
+
+    #[test]
+    fn noms_de_secrets() {
+        for secret in [
+            "API_KEY",
+            "GITHUB_TOKEN",
+            "OPENAI_API_KEY",
+            "CLIENT_SECRET",
+            "DB_PASSWORD",
+            "Authorization",
+            "X-Api-Key",
+            "x-goog-api-key",
+            "apiKey",
+            "accessToken",
+            "AWS_SECRET_ACCESS_KEY",
+            "SECRET_KEY_BASE",
+            "api.key",
+            "APIKEY",
+            "SMTP_PASSWD",
+            "GOOGLE_CREDENTIALS",
+        ] {
+            assert!(ressemble_a_un_secret(secret), "{secret}");
+        }
+        for ordinaire in [
+            "TOKENIZERS_PARALLELISM",
+            "PASSWORD_STORE_DIR",
+            "KEYBOARD_LAYOUT",
+            "MONKEY",
+            "CHEMIN",
+            "AWS_ACCESS_KEY_ID",
+            "API_KEY_FILE",
+            "TOKEN_URL",
+            "SECRETARY",
+            "KEYCLOAK_URL",
+            "",
+        ] {
+            assert!(!ressemble_a_un_secret(ordinaire), "{ordinaire}");
+        }
+        assert_eq!(mots("x-goog-api.KEY_id"), ["X", "GOOG", "API", "KEY", "ID"]);
+        assert_eq!(mots("accessToken"), ["ACCESS", "TOKEN"]);
     }
 }
