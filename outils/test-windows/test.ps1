@@ -874,8 +874,20 @@ if ($tr -match 'Collecter les traces|Collect the traces') { Ok 'Collecte lancée
 $dates = @(Get-ChildItem -LiteralPath $dossierTraces -Directory -Filter 'traces-*')
 if ($dates.Count -eq 1) {
     $d = $dates[0].FullName
-    foreach ($f in 'LISEZMOI.txt', 'MANIFESTE.txt', '01-processus.txt', '02-reseau.txt', '03-demarrage.txt', '04-comptes.txt', '06-fichiers-recents.txt') {
+    foreach ($f in 'LISEZMOI.txt', 'MANIFESTE.txt', '01-processus.txt', '02-reseau.txt', '03-demarrage.txt', '04-comptes.txt', '06-fichiers-recents.txt', 'CHRONOLOGIE.txt') {
         if (Test-Path -LiteralPath (Join-Path $d $f)) { Ok "$f écrit" } else { Bug "$f ABSENT" }
+    }
+    # 0.83 : la chronologie de l'incident, du plus ancien au plus récent, une ligne par événement (date, source, quoi).
+    $chrono = @(Get-Content -LiteralPath (Join-Path $d 'CHRONOLOGIE.txt') -Encoding UTF8 -ErrorAction SilentlyContinue)
+    $evenements = @($chrono | Where-Object { $_ -match '^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d' })
+    $dates = @($evenements | ForEach-Object { $_.Substring(0, 19) })
+    $triees = @($dates | Sort-Object)
+    if (-not $chrono.Count -or $chrono[0] -notmatch '^# Vanguard') { Bug 'CHRONOLOGIE.txt sans son en-tête' }
+    elseif (-not $evenements.Count) { Bug 'CHRONOLOGIE.txt sans aucun événement' }
+    elseif (($dates -join '|') -ne ($triees -join '|')) { Bug 'CHRONOLOGIE.txt pas dans l''ordre du temps' }
+    else {
+        $parSource = $evenements | ForEach-Object { ($_ -split "`t")[1] } | Group-Object | ForEach-Object { "$($_.Name) $($_.Count)" }
+        Ok "Chronologie : $($evenements.Count) événement(s) dans l'ordre ($($parSource -join ', '))"
     }
     # Chaque ligne du manifeste : « empreinte  nom », l'empreinte recalculée ici par Windows.
     $fausses = @(Get-Content -LiteralPath (Join-Path $d 'MANIFESTE.txt') -Encoding UTF8 | ForEach-Object {
@@ -1596,12 +1608,12 @@ if ($Auto) { Sautee 'Sautée : il faut regarder l''écran (test avec questions).
     Constat 'Dans l''audit ci-dessus, les couleurs et les accents (é, è, ✔, ✖) s''affichent-ils correctement ?'
 }
 
-Etape 'Détection en profondeur (0.83) : points d''ancrage, pilotes, agents d''IA, sans fausse alerte sur un Windows propre'
+Etape 'Détection en profondeur (0.83) : points d''ancrage, pilotes, agents d''IA, chasse, sans fausse alerte sur un Windows propre'
 # Une VM propre n'a ni paquet LSA inconnu, ni AppCertDlls, ni pilote rangé dans un dossier du compte : une alerte
 # Moyen ou Élevé ici est sans doute une fausse alerte, à regarder avant la publication.
 try {
     $audit = Sortie 'machine-json' | ConvertFrom-Json
-    foreach ($id in 'WIN-PRS-007', 'WIN-PRS-008', 'WIN-PRS-009', 'WIN-PRS-010', 'WIN-PRS-011', 'WIN-PRS-012', 'COM-AGT-001', 'COM-AGT-002') {
+    foreach ($id in 'WIN-PRS-007', 'WIN-PRS-008', 'WIN-PRS-009', 'WIN-PRS-010', 'WIN-PRS-011', 'WIN-PRS-012', 'COM-AGT-001', 'COM-AGT-002', 'COM-CPT-003', 'COM-PRG-001') {
         $c = @($audit.constats | Where-Object regle -eq $id)
         if (-not $c.Count) { Bug "$id absente du bilan"; continue }
         $alertes = @($c | Where-Object { $_.probleme -and $_.probleme -ne 'Info' })
