@@ -140,9 +140,20 @@ mettre_a_jour() { # disque serie octets archive
   meme_cle "$disque" "$serie" "$octets" || erreur "$disque n'est plus la clé proposée : rien n'a été écrit."
   echo "$(date '+%T') Ventoy2Disk.sh -u $disque : $sur_cle → $VENTOY (attributs de la partition 1 :" \
     "${attributs:-aucun})"
+  # De Ventoy2Disk.sh -u à la lecture seule remise, l'écriture va au bout : coupée pendant VTOYEFI, la version ne se
+  # lit plus et un nouveau -u est refusé (seul --ecrire, qui efface, referait la clé) ; coupée avant les attributs, la
+  # lecture seule resterait perdue (la clé à jour, rien ne la remettrait). pkexec laisse la partie root dans le groupe
+  # de processus du terminal, que Ctrl-C, Ctrl-\ et sa fermeture (SIGHUP) atteignent, comme le SIGTERM d'une fin de
+  # session : ignorés jusque-là, par les enfants aussi (SIG_IGN passe fork et exec). Ventoy tourne en plus dans sa
+  # propre session (setsid, attendu par -w), hors d'atteinte du terminal même si un de ses programmes remettait Ctrl-C
+  # par défaut (un programme C le peut toujours, bash aussi par « trap - INT »). Le même Ctrl-C tue le tee du compte :
+  # ce que dit Ventoy va dans un fichier (un tube sans lecteur arrêterait celui qui y écrit), et SIGPIPE ignoré, une
+  # sortie ratée vers le compte n'arrête pas la suite.
   # Ventoy demande une fois s'il peut mettre à jour : les deux versions ont été dites avant la fenêtre du mot de passe,
   # et revérifiées ici.
-  (cd "$dossier" && printf 'y\n' | sh Ventoy2Disk.sh -u "$disque") 2>&1 | sed 's/\x1b\[[0-9;]*m//g' || code=$?
+  trap '' INT QUIT TERM HUP PIPE
+  (cd "$dossier" && printf 'y\n' | setsid -w sh Ventoy2Disk.sh -u "$disque") >"$tmp/sortie-u" 2>&1 || code=$?
+  sed 's/\x1b\[[0-9;]*m//g' "$tmp/sortie-u" || true
   udevadm settle || true
   # Ventoy écrit par le nom du disque, et la table GPT se relit et se réécrit par ce même nom : seulement si c'est
   # encore la même clé (retirée pendant la mise à jour, un autre disque a pu prendre son nom).
@@ -151,9 +162,10 @@ attributs de la partition 1 pas revérifiés. À relancer, la clé branchée."
   apres=$(sfdisk --part-attrs "$disque" 1) || erreur "attributs de la partition 1 pas relus après Ventoy."
   if [[ $apres != "$attributs" ]]; then
     meme_cle "$disque" "$serie" "$octets" || erreur "$disque n'est plus la clé : attributs pas remis."
-    echo "Attributs de la partition 1 changés par Ventoy : remis à ${attributs:-aucun}."
+    echo "Attributs de la partition 1 changés par Ventoy : remis à ${attributs:-aucun}." || true
     sfdisk --no-reread --part-attrs "$disque" 1 "$attributs" || code=1
   fi
+  trap - INT QUIT TERM HUP PIPE
   if [[ -f $dossier/log.txt ]]; then sed 's/^/  log.txt de Ventoy : /' "$dossier/log.txt"; fi
   ((code == 0)) || erreur "Ventoy2Disk.sh -u a échoué (code $code)."
   echo "$(date '+%T') Ventoy $VENTOY écrit sur $disque."

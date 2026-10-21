@@ -48,8 +48,16 @@ cd "$(dirname "$0")/.."
 source outils/ventoy-racine.sh
 
 VENTOY_DEPOT=https://github.com/ventoy/Ventoy/releases
-# La partie root installée, que pkexec lance (--installer-racine la pose ; VANGUARD_RACINE : essais).
-RACINE=${VANGUARD_RACINE:-/usr/local/libexec/vanguard/ventoy-racine}
+# La partie root installée, que pkexec lance (--installer-racine la pose). VANGUARD_RACINE en désigne une autre, dans
+# les essais seulement (VANGUARD_ESSAI, posée par outils/essais-cle.sh) : racine_installee ne demande qu'un fichier de
+# root identique à celui du dépôt, et une variable du compte ferait sinon lancer par pkexec n'importe quel programme de
+# root recopié dans le dépôt.
+RACINE=/usr/local/libexec/vanguard/ventoy-racine
+if [[ -n ${VANGUARD_RACINE:-} && -n ${VANGUARD_ESSAI:-} ]]; then
+  RACINE=$VANGUARD_RACINE
+elif [[ -n ${VANGUARD_RACINE:-} ]]; then
+  echo "· VANGUARD_RACINE ignorée hors des essais (sans VANGUARD_ESSAI) : la partie root reste $RACINE." >&2
+fi
 # Ce qui a été proposé ou dit (une fois par jour au plus), et les journaux des mises à jour de Ventoy.
 ETAT=${XDG_STATE_HOME:-$HOME/.local/state}/vanguard
 OPENCORE=1.0.8
@@ -831,22 +839,35 @@ racine_installee() {
 
 # Une fois, puis après chaque changement d'épingle : la partie root copiée en fichier de root, là où pkexec la lance.
 # C'est le seul moment où du code du dépôt passe en root ; lancé à la main, ce qui change est montré avant la fenêtre du
-# mot de passe.
+# mot de passe. Le fichier du dépôt n'est lu qu'une fois, dans une copie dont viennent le diff, l'empreinte et ce que
+# root installe : relu dans le dépôt, il aurait pu changer entre le diff et le mot de passe. La copie est au compte elle
+# aussi : le fichier installé, à root, qui ne change plus, doit avoir son empreinte.
 installer_racine() {
-  local source=$PWD/outils/ventoy-racine.sh raison
+  local source=$PWD/outils/ventoy-racine.sh copie empreinte raison
   if racine_installee >/dev/null; then
     echo "✔ Partie root déjà installée, identique à celle du dépôt : $RACINE (Ventoy $VENTOY)."
     return 0
   fi
   command -v pkexec >/dev/null || erreur "il manque pkexec."
+  copie=$(mktemp --tmpdir ventoy-racine.XXXXXXXX) || erreur "copie de la partie root impossible."
+  # Retirée même après une erreur ; son nom est pris tout de suite (copie est locale).
+  # shellcheck disable=SC2064
+  trap "rm -f -- $(printf %q "$copie")" EXIT
+  cp -- "$source" "$copie" || erreur "$source pas copiée."
   if [[ -f $RACINE ]]; then
     echo "Ce qui change dans la partie root installée ($RACINE) :"
-    diff -u "$RACINE" "$source" || true
+    diff -u --label "$RACINE" --label "$source" "$RACINE" "$copie" || true
   fi
-  echo "La fenêtre du mot de passe administrateur s'ouvre : $source copiée dans $RACINE (root, 755)."
-  pkexec /usr/bin/install -D -o root -g root -m 0755 "$source" "$RACINE" ||
+  empreinte=$(sha256sum "$copie" | cut -d' ' -f1)
+  echo "La fenêtre du mot de passe administrateur s'ouvre : $copie (copie de $source, SHA-256 $empreinte)" \
+    "installée dans $RACINE (root, 755)."
+  pkexec /usr/bin/install -D -o root -g root -m 0755 "$copie" "$RACINE" ||
     erreur "partie root pas installée (fenêtre fermée, ou mot de passe refusé)."
+  empreinte_ok "$RACINE" "$empreinte" || erreur "$RACINE n'est pas la copie montrée (changée pendant la fenêtre du mot \
+de passe ?) : à relire avant de s'en servir."
   raison=$(racine_installee) || erreur "$raison."
+  rm -f -- "$copie"
+  trap - EXIT
   echo "✔ Partie root installée : $RACINE (Ventoy $VENTOY épinglé)."
 }
 

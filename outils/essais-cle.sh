@@ -48,9 +48,10 @@ trap nettoyer EXIT
 mkdir -p "$BANC"/{bin,faux,maison,xdg-cache,etat,run,donnees,config,tmp,cache,disque,aria2}
 
 # Rien du vrai compte : dossiers, session, Internet (déjà coupé). Le témoin de la clé est cherché sous /run/media/$USER.
+# VANGUARD_RACINE n'est écoutée que dans les essais (VANGUARD_ESSAI).
 export BANC USER=alice HOME=$BANC/maison XDG_CACHE_HOME=$BANC/xdg-cache XDG_STATE_HOME=$BANC/etat \
   XDG_RUNTIME_DIR=$BANC/run XDG_DATA_HOME=$BANC/donnees XDG_CONFIG_HOME=$BANC/config TMPDIR=$BANC/tmp \
-  VANGUARD_IMAGES=$BANC/cache VANGUARD_RACINE=$BANC/libexec/vanguard/ventoy-racine
+  VANGUARD_IMAGES=$BANC/cache VANGUARD_RACINE=$BANC/libexec/vanguard/ventoy-racine VANGUARD_ESSAI=1
 unset DBUS_SESSION_BUS_ADDRESS DISPLAY WAYLAND_DISPLAY VANGUARD_VTOYEFI VANGUARD_WIN11 ESSAIS_CLE_DEDANS
 
 # Les commandes du système, sauf celles qui touchent un disque, un montage, root, systemd, la session ou Internet.
@@ -115,11 +116,19 @@ cat >"$BANC/faux/pkexec" <<'FIN'
 #!/usr/bin/env bash
 # Faux pkexec : ses arguments notés dans $BANC/pkexec.log. ESSAI_PKEXEC : lance (exécute la commande, seulement
 # /usr/bin/install vers le banc : --installer-racine), reussi (0, et le faux VTOYEFI dit la version ESSAI_VERSION), un
-# code (126, 127, 3…) ; sinon 0, sans rien lancer.
+# code (126, 127, 3…) ; sinon 0, sans rien lancer. ESSAI_PIEGE, avec lance : un programme du compte change un fichier
+# pendant la fenêtre du mot de passe (source : celui qu'install va copier ; sinon ce chemin), sous le banc seulement.
 printf '%s\n' "$*" >>"$BANC/pkexec.log"
 case ${ESSAI_PKEXEC:-0} in
   lance)
     [[ $1 == /usr/bin/install && ${!#} == "$BANC"/* ]] || { echo "faux pkexec : refusé ($*)" >&2; exit 1; }
+    arguments=("$@")
+    piege=${ESSAI_PIEGE:-}
+    [[ $piege != source ]] || piege=${arguments[-2]}
+    if [[ -n $piege ]]; then
+      [[ $piege == "$BANC"/* ]] || { echo "faux pkexec : piège hors du banc ($piege)" >&2; exit 1; }
+      echo "# piégée pendant la fenêtre du mot de passe" >>"$piege"
+    fi
     exec "$@"
     ;;
   reussi)
@@ -193,14 +202,38 @@ mkdir -p "$BANC/archive/ventoy-9.9.9/ventoy"
 echo 9.9.9 >"$BANC/archive/ventoy-9.9.9/ventoy/version"
 cat >"$BANC/archive/ventoy-9.9.9/Ventoy2Disk.sh" <<'FIN'
 # Faux Ventoy2Disk.sh : -l dit la version de la fausse clé ; -u lit la réponse, note l'écriture et pose la version
-# 9.9.9. ESSAI_U=retire : la clé est retirée pendant (plus de numéro de série) ; attributs : Ventoy les change.
+# 9.9.9. ESSAI_U=retire : la clé est retirée pendant (plus de numéro de série) ; attributs : Ventoy les change ; lent :
+# comme VentoyWorker.sh, le démarrage écrit, puis VTOYEFI et les attributs changés ; son numéro dans en-cours, et dans
+# masque-u les signaux qu'ignore un de ses programmes (grep, qui n'y touche pas : bash ignore toujours SIGQUIT pour
+# lui-même, et gawk SIGPIPE). VTOYEFI est écrite par un programme qui remet Ctrl-C par défaut (un programme C le
+# peut toujours) et s'arrête sur une sortie ratée : il attend que l'essai ait envoyé ses signaux, puis en dit plus que
+# ce qu'un sed garde avant d'écrire (4 Kio), et encore une ligne.
 case $1 in
   -l) echo "*****"; echo "Ventoy Version in Disk: $(cat "$BANC/disque/ventoy")"; echo "Disk Partition Style  : GPT" ;;
   -u)
     read -r r
     echo "Ventoy2Disk.sh -u $2 ($r)" >>"$BANC/disque/ecritures"
+    if [ "${ESSAI_U:-}" = lent ]; then
+      grep '^SigIgn' /proc/self/status >"$BANC/disque/masque-u"
+      echo "démarrage écrit" >>"$BANC/disque/ecritures"
+      echo $$ >"$BANC/disque/en-cours"
+      python3 -I -c 'import os, signal, sys, time
+signal.signal(signal.SIGINT, signal.SIG_DFL)
+for _ in range(100):
+    if os.path.exists(sys.argv[1] + "/signaux"):
+        break
+    time.sleep(0.1)
+for i in range(60):
+    print(f"esp partition processing ... {i:02d} " + "." * 60, flush=True)
+time.sleep(0.3)
+print("update esp partition attribute", flush=True)
+with open(sys.argv[1] + "/ecritures", "a") as f:
+    f.write("VTOYEFI écrite\n")' "$BANC/disque"
+      : >"$BANC/disque/attributs"
+    fi
     echo 9.9.9 >"$BANC/disque/ventoy"
     case ${ESSAI_U:-} in retire) : >"$BANC/disque/serie" ;; attributs) : >"$BANC/disque/attributs" ;; esac
+    [ "${ESSAI_U:-}" != lent ] || : >"$BANC/disque/fin-u"
     ;;
 esac
 FIN
@@ -241,6 +274,17 @@ else:
     quoi = f"signal{os.WTERMSIG(etat)}" if os.WIFSIGNALED(etat) else f"code{os.WEXITSTATUS(etat)}"
     print(f"fin {time.time() - (envoye or debut):.1f} {quoi}")
 sys.stdout.write(sortie.decode("utf-8", "replace"))
+FIN
+
+# Un groupe de processus à part, comme une commande au premier plan d'un terminal : Ctrl-C (SIGINT) et sa fermeture
+# (SIGHUP) atteignent tout le groupe. Les signaux rendus au défaut : les essais héritent de SIGINT et SIGQUIT ignorés,
+# et python ignore SIGPIPE.
+cat >"$BANC/groupe.py" <<'FIN'
+import os, signal, sys
+os.setpgid(0, 0)
+for s in (signal.SIGINT, signal.SIGQUIT, signal.SIGTERM, signal.SIGHUP, signal.SIGPIPE):
+    signal.signal(s, signal.SIG_DFL)
+os.execvp(sys.argv[1], sys.argv[1:])
 FIN
 
 ESSAIS=0
@@ -327,6 +371,56 @@ partie_root /dev/sdz "" 31037849600 "$BANC/ventoy-9.9.9.tar.gz"
 code=$?
 voir "clé sans numéro de série : refus" eval '((code == 1)) && rien_ecrit' || montrer "$BANC/sortie"
 
+# Ctrl-C (SIGINT au groupe du terminal), sa fermeture (SIGHUP) ou un SIGTERM pendant Ventoy2Disk.sh -u : l'écriture va
+# au bout, et la lecture seule est remise. Le compte est simulé comme cle-secours.sh lance la partie root (sa sortie
+# lue par tee, que le même Ctrl-C tue), dans un groupe à part (groupe.py) ; une fin de session (systemd) envoie aussi
+# SIGTERM et SIGHUP à tous les processus de Ventoy. Ses programmes héritent de l'ignorance : le masque de l'un d'eux
+# le dit.
+attendre() { # condition, évaluée : vraie dans les 10 s ?
+  local i
+  for ((i = 0; i < 100; i++)); do
+    eval "$1" && return 0
+    sleep 0.1
+  done
+  return 1
+}
+ignores() { # masque SigIgn (hexadécimal), signaux… : tous ignorés ?
+  local m=$((16#${1:-0})) s
+  for s in "${@:2}"; do (((m >> ($(kill -l "$s") - 1)) & 1)) || return 1; done
+}
+cle_simulee 1.1.10
+rm -f "$BANC/disque/"{en-cours,signaux,fin-u,masque-u} "$BANC/journal-u"
+ESSAI_U=lent python3 -I "$BANC/groupe.py" bash -c '{ source outils/ventoy-racine.sh; VENTOY=9.9.9 VENTOY_SHA256=$1
+    source "$BANC/simul-disque.sh"; mettre_a_jour /dev/sdz SERIE-A 31037849600 "$BANC/ventoy-9.9.9.tar.gz"; } 2>&1 |
+  tee -a "$BANC/journal-u"' essai "$FAUSSE_SHA256" >"$BANC/sortie" 2>&1 &
+groupe=$!
+attendre '[[ -s $BANC/disque/en-cours ]]'
+ventoy=$(cat "$BANC/disque/en-cours" 2>/dev/null)
+for s in INT TERM HUP; do kill -s "$s" -- "-$groupe" 2>/dev/null; done
+if [[ $ventoy =~ ^[1-9][0-9]*$ ]]; then for s in TERM HUP; do kill -s "$s" -- "-$ventoy" 2>/dev/null; done; fi
+: >"$BANC/disque/signaux"
+wait "$groupe" 2>/dev/null
+attendre '! kill -0 -- "-$groupe" 2>/dev/null' && attendre '[[ -e $BANC/disque/fin-u ]]'
+voir "Ctrl-C, SIGTERM ou SIGHUP pendant Ventoy2Disk.sh -u : écrit jusqu'au bout, la lecture seule remise" \
+  eval 'ecrit "Ventoy2Disk.sh -u /dev/sdz (y)" && ecrit "démarrage écrit" && ecrit "VTOYEFI écrite" &&
+    [[ $(cat "$BANC/disque/ventoy") == 9.9.9 && $(cat "$BANC/disque/attributs") == GUID:60 ]] &&
+    ecrit "sfdisk --no-reread --part-attrs /dev/sdz 1 GUID:60" && pas_dit "$BANC/journal-u" "esp partition"' ||
+  { montrer "$BANC/disque/ecritures"; montrer "$BANC/journal-u"; montrer "$BANC/sortie"; }
+voir "les programmes de Ventoy héritent de SIGINT, SIGQUIT, SIGTERM, SIGHUP et SIGPIPE ignorés" \
+  ignores "$(cut -f2 "$BANC/disque/masque-u" 2>/dev/null)" INT QUIT TERM HUP PIPE ||
+  echo "      | masque : $(cat "$BANC/disque/masque-u" 2>/dev/null)"
+
+# Ignorés pendant l'écriture seulement : après, Ctrl-C arrête de nouveau la partie root.
+cle_simulee 1.1.10
+python3 -I "$BANC/groupe.py" bash -c 'source outils/ventoy-racine.sh; VENTOY=9.9.9 VENTOY_SHA256=$1
+  source "$BANC/simul-disque.sh"; avant=$(trap -p INT QUIT TERM HUP PIPE)
+  mettre_a_jour /dev/sdz SERIE-A 31037849600 "$BANC/ventoy-9.9.9.tar.gz" >/dev/null 2>&1
+  apres=$(trap -p INT QUIT TERM HUP PIPE); echo "avant [$avant], après [$apres]"; [[ $apres == "$avant" ]]' \
+  essai "$FAUSSE_SHA256" >"$BANC/sortie" 2>&1
+code=$?
+voir "signaux rendus après Ventoy2Disk.sh -u (ignorés pendant l'écriture seulement)" \
+  eval '((code == 0)) && ecrit "Ventoy2Disk.sh -u /dev/sdz (y)"' || montrer "$BANC/sortie"
+
 # --- Proposition et mise à jour, côté compte (cle-secours.sh lue par source) ----------------------------------------
 
 compte() { # commande… dans cle-secours.sh, la fausse clé /dev/sdz branchée : sortie dans $BANC/sortie
@@ -382,11 +476,45 @@ voir "partie root modifiable par d'autres que root : refus" \
   eval '[[ ! -s $BANC/pkexec.log ]] && dit "$BANC/sortie" "d'"'"'autres que root"' || montrer "$BANC/sortie"
 
 cle_simulee 1.1.10
+( unset VANGUARD_ESSAI; compte ventoy_maj )
+voir "VANGUARD_RACINE hors des essais (sans VANGUARD_ESSAI) : ignorée, et dit ; pkexec ne la lance pas" \
+  eval 'dit "$BANC/sortie" "VANGUARD_RACINE ignorée hors des essais" && pas_dit "$BANC/pkexec.log" "$RACINE" &&
+    dit "$BANC/sortie" "/usr/local/libexec/vanguard/ventoy-racine"' || montrer "$BANC/sortie"
+
+cle_simulee 1.1.10
 ESSAI_PKEXEC=lance VANGUARD_RACINE=$BANC/libexec2/vanguard/ventoy-racine compte installer_racine
-voir "--installer-racine : copie en fichier de root par install, identique, 755" \
-  eval 'dit "$BANC/pkexec.log" "/usr/bin/install -D -o root -g root -m 0755 $DEPOT/outils/ventoy-racine.sh" &&
+voir "--installer-racine : une copie du dépôt installée en fichier de root par install, identique, 755, puis retirée" \
+  eval 'dit "$BANC/pkexec.log" "/usr/bin/install -D -o root -g root -m 0755 $TMPDIR/ventoy-racine." &&
+    dit "$BANC/pkexec.log" " $BANC/libexec2/vanguard/ventoy-racine" &&
     cmp -s outils/ventoy-racine.sh "$BANC/libexec2/vanguard/ventoy-racine" &&
-    [[ $(stat -c %a "$BANC/libexec2/vanguard/ventoy-racine") == 755 ]]' || montrer "$BANC/sortie"
+    [[ $(stat -c %a "$BANC/libexec2/vanguard/ventoy-racine") == 755 ]] &&
+    ! compgen -G "$TMPDIR/ventoy-racine.*" >/dev/null' || montrer "$BANC/sortie"
+
+# Un programme du compte change un fichier pendant la fenêtre du mot de passe : le dépôt (le diff montré venait de sa
+# copie), ou la copie elle-même (ce que root a installé est vérifié par son empreinte). Dans un faux dépôt, pour ne
+# jamais toucher au vrai ; une partie root plus ancienne déjà installée, pour que le diff se montre.
+F=$BANC/depot-racine
+racine_piegee() { # ESSAI_PIEGE : sortie dans $BANC/sortie, code de sortie de --installer-racine
+  rm -rf "$F" "$BANC/libexec3"
+  mkdir -p "$F/outils"
+  cp outils/cle-secours.sh outils/ventoy-racine.sh "$F/outils/"
+  install -D -m 0755 outils/ventoy-racine.sh "$BANC/libexec3/vanguard/ventoy-racine"
+  sed -i 's/^VENTOY=.*/VENTOY=1.1.10/' "$BANC/libexec3/vanguard/ventoy-racine"
+  rm -f "$BANC/pkexec.log"
+  ESSAI_PKEXEC=lance ESSAI_PIEGE=$1 VANGUARD_RACINE=$BANC/libexec3/vanguard/ventoy-racine \
+    bash "$F/outils/cle-secours.sh" --installer-racine >"$BANC/sortie" 2>&1
+}
+racine_piegee "$F/outils/ventoy-racine.sh"
+code=$?
+voir "--installer-racine, le dépôt changé pendant le mot de passe : root a la copie montrée, et le refus est dit" \
+  eval '((code == 1)) && cmp -s outils/ventoy-racine.sh "$BANC/libexec3/vanguard/ventoy-racine" &&
+    dit "$BANC/sortie" "+VENTOY=$EPINGLE" && dit "$BANC/sortie" "pas celle du dépôt" &&
+    ! compgen -G "$TMPDIR/ventoy-racine.*" >/dev/null' || montrer "$BANC/sortie"
+racine_piegee source
+code=$?
+voir "--installer-racine, la copie changée pendant le mot de passe : vue à son empreinte, et dite" \
+  eval '((code == 1)) && dit "$BANC/sortie" "n'"'"'est pas la copie montrée" &&
+    ! compgen -G "$TMPDIR/ventoy-racine.*" >/dev/null' || montrer "$BANC/sortie"
 
 echo "Notification à cliquer (proposer) :"
 cle_simulee 1.1.10
