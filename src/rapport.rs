@@ -3,7 +3,8 @@
 use std::fmt::Write;
 use std::path::PathBuf;
 
-use crate::machine::Audit;
+use crate::audit::AuditReseau;
+use crate::machine::{Audit, Constat};
 use crate::reseau::Rapport;
 use crate::risk::{Niveau, note};
 use crate::{tr, trf, trp, trw, trwln};
@@ -40,6 +41,20 @@ fn carte_note(titre: &str, score: u32) -> String {
     )
 }
 
+/// La carte d'un domaine sans note (trop de vérifications impossibles) : un tiret à la place de la lettre, le pourquoi
+/// à la place du score.
+fn carte_sans_note(titre: &str, detail: &str) -> String {
+    format!(
+        "<div class=\"note nonote\"><div class=\"lettre\">—</div><div><div class=\"etiq\">{titre}</div><div class=\"score\">{detail}</div></div></div>"
+    )
+}
+
+/// Le badge d'un constat de l'audit du réseau qui n'a pas pu être vérifié : jamais « OK », jamais une simple
+/// information.
+fn badge_non_verifie() -> String {
+    format!("<span class=\"badge nv\">{}</span>", tr!("NON VÉRIFIÉ", "NOT CHECKED"))
+}
+
 pub(crate) const CSS: &str = r"
 :root{--bg:#f6f6f4;--carte:#fff;--texte:#1b1b1b;--doux:#666;--bord:#e2e2de;
 --ok:#1f8a4c;--info:#2a7bb5;--moyen:#b58900;--eleve:#d0611b;--critique:#c62828;color-scheme:light}
@@ -50,11 +65,11 @@ main{max-width:960px;margin:0 auto;padding:24px 16px 64px}h1{font-size:26px;marg
 .sous{color:var(--doux);margin:0 0 20px}.notes{display:flex;gap:12px;flex-wrap:wrap}
 .note{display:flex;gap:14px;align-items:center;background:var(--carte);border:1px solid var(--bord);border-radius:12px;padding:14px 18px;flex:1;min-width:200px}
 .lettre{font-size:38px;font-weight:800;width:52px;text-align:center}.nA .lettre,.nB .lettre{color:var(--ok)}.nC .lettre{color:var(--moyen)}.nD .lettre,.nF .lettre{color:var(--critique)}
-.etiq{color:var(--doux);font-size:13px}.score{font-weight:600}
+.etiq{color:var(--doux);font-size:13px}.score{font-weight:600}.nonote .lettre{color:var(--doux);font-size:22px}.carte h3{margin:0 0 4px;font-size:16px}
 .carte{background:var(--carte);border:1px solid var(--bord);border-radius:12px;padding:14px 18px;margin:10px 0}
 .ligne{display:flex;gap:10px;align-items:baseline;padding:6px 0;border-top:1px solid var(--bord)}.ligne:first-child{border-top:0}
 .cat{font-weight:600;min-width:130px}.badge{font-size:11px;font-weight:700;padding:2px 7px;border-radius:6px;color:#fff;white-space:nowrap}
-.ok{background:var(--ok)}.info{background:var(--info)}.moyen{background:var(--moyen)}.eleve{background:var(--eleve)}.critique{background:var(--critique)}
+.ok{background:var(--ok)}.info{background:var(--info)}.moyen{background:var(--moyen)}.eleve{background:var(--eleve)}.critique{background:var(--critique)}.nv{background:var(--doux)}
 .fix{color:var(--doux);font-size:13px;margin-top:2px}code{font:12px ui-monospace,monospace;background:var(--bg);padding:1px 5px;border-radius:4px;word-break:break-all}
 .hote h3{margin:0;font-size:16px}.meta{color:var(--doux);font-size:13px}.neuf{color:var(--moyen);font-weight:700}
 table{width:100%;border-collapse:collapse;margin-top:8px;font-size:14px}td{padding:4px 6px;border-top:1px solid var(--bord);vertical-align:top}
@@ -96,17 +111,191 @@ fn connexions(tests: &[crate::reseau::connexion::Resultat]) -> String {
     h
 }
 
-pub fn generer(audit: Option<&Audit>, reseau: Option<&Rapport>) -> std::io::Result<PathBuf> {
+pub fn generer(
+    audit: Option<&Audit>,
+    reseau: Option<&Rapport>,
+    audit_reseau: Option<&AuditReseau>,
+) -> std::io::Result<PathBuf> {
     let chemin = crate::reseau::dossier_donnees().join("rapport.html");
     std::fs::create_dir_all(chemin.parent().unwrap_or(&chemin))?;
-    std::fs::write(&chemin, html(audit, reseau))?;
+    std::fs::write(&chemin, html(audit, reseau, audit_reseau))?;
     // Version texte à côté : lisible sans navigateur ni affichage graphique (mode urgence).
-    std::fs::write(chemin.with_extension("md"), markdown(audit, reseau))?;
+    std::fs::write(chemin.with_extension("md"), markdown(audit, reseau, audit_reseau))?;
     Ok(chemin)
 }
 
+/// Les notes d'un domaine de l'audit en Markdown : « **B** (80/100) », ou « incomplet (2 non vérifiés) ».
+fn note_markdown(d: &crate::audit::DomaineAudite) -> String {
+    match d.score {
+        Some(s) => format!("**{}** ({s}/100)", note(s)),
+        None => trf!(
+            "incomplet ({} non vérifié(s))",
+            "incomplete ({} not checked)",
+            d.non_verifies
+        ),
+    }
+}
+
+/// La section « Audit du réseau » en Markdown : les six notes, puis chaque domaine et ses constats.
+fn audit_markdown(m: &mut String, a: &AuditReseau) {
+    let nom = a
+        .nom_reseau
+        .as_deref()
+        .map(|n| trf!(" « {n} »", " “{n}”"))
+        .unwrap_or_default();
+    let _ = trwln!(m, "\n## Audit du réseau{nom}\n", "\n## Network audit{nom}\n");
+    if a.reseau.is_none() {
+        let _ = trwln!(
+            m,
+            "Aucun réseau local à auditer : rien n'a pu être vérifié.\n",
+            "No local network to audit: nothing could be checked.\n"
+        );
+    }
+    for d in &a.domaines {
+        let Some(domaine) = d.domaine() else { continue };
+        let _ = writeln!(m, "- {} : {}", domaine.titre(), note_markdown(d));
+    }
+    match a.score {
+        Some(s) => {
+            let _ = trwln!(
+                m,
+                "- Note de l'audit : **{}** ({s}/100), la plus basse des six",
+                "- Audit grade: **{}** ({s}/100), the lowest of the six",
+                note(s)
+            );
+        }
+        None => {
+            let _ = trwln!(
+                m,
+                "- Note de l'audit : aucune (un domaine sans note ne rend pas le réseau sain)",
+                "- Audit grade: none (a domain without a grade does not make the network safe)"
+            );
+        }
+    }
+    for d in &a.domaines {
+        let Some(domaine) = d.domaine() else { continue };
+        let _ = writeln!(m, "\n### {} — {}\n", domaine.titre(), note_markdown(d));
+        let _ = writeln!(m, "{}\n", domaine.precision());
+        for c in &d.constats {
+            let etiquette = if c.verifie {
+                c.probleme.map_or("OK", Niveau::libelle)
+            } else {
+                tr!("NON VÉRIFIÉ", "NOT CHECKED")
+            };
+            let _ = writeln!(
+                m,
+                "- [{etiquette}] **{}** : {}",
+                crate::langue::categorie(c.categorie),
+                c.message
+            );
+            if let Some(k) = &c.correctif {
+                let _ = trwln!(m, "  - À faire : {}", "  - To do: {}", k.action);
+                for cmd in &k.commandes {
+                    let _ = writeln!(m, "    `{cmd}`");
+                }
+            }
+        }
+        for f in crate::audit::references_du_domaine(d) {
+            let _ = writeln!(m, "- {} · {} · {}", f.id, f.sujet(), f.references.join(", "));
+        }
+    }
+    let non_verifies = a.non_verifies();
+    if non_verifies > 0 {
+        let _ = trwln!(
+            m,
+            "\n{non_verifies} vérification(s) impossible(s) : résultat incomplet, jamais compté comme sain.",
+            "\n{non_verifies} check(s) could not be done: incomplete result, never counted as safe."
+        );
+    }
+}
+
+/// Les redirections UPnP de la box et l'empoisonneur de noms, en Markdown, à la suite des appareils du scan.
+fn complements_scan_markdown(m: &mut String, r: &Rapport) {
+    use crate::reseau::{empoisonnement, upnp};
+    if let Some(e) = &r.upnp {
+        let _ = trwln!(
+            m,
+            "\n### Ports ouverts vers Internet (UPnP)\n",
+            "\n### Ports open to the Internet (UPnP)\n"
+        );
+        match e {
+            upnp::Etat::Absent => {
+                let _ = trwln!(
+                    m,
+                    "UPnP coupé ou absent sur la box : aucun appareil ne peut ouvrir de port vers Internet tout seul.",
+                    "UPnP off or absent on the router: no device can open a port to the Internet by itself."
+                );
+            }
+            upnp::Etat::OutilAbsent => {
+                let _ = trwln!(
+                    m,
+                    "Non vérifié : les redirections de la box n'ont pas pu être lues.",
+                    "Not checked: the router's forwardings could not be read."
+                );
+            }
+            upnp::Etat::Actif(liste) if liste.is_empty() => {
+                let _ = trwln!(
+                    m,
+                    "UPnP actif sur la box, aucun port ouvert pour l'instant. À couper dans la box si aucun appareil n'en a besoin.",
+                    "UPnP on at the router, no port open for now. Turn it off in the router if no device needs it."
+                );
+            }
+            upnp::Etat::Actif(liste) => {
+                for d in liste {
+                    let _ = writeln!(
+                        m,
+                        "- {}/{} → {}:{} [{}] {}",
+                        d.port_public,
+                        d.protocole.to_lowercase(),
+                        d.appareil,
+                        d.port_appareil,
+                        upnp::niveau(d).libelle(),
+                        d.description
+                    );
+                }
+                let _ = trwln!(
+                    m,
+                    "\nChaque ligne rend un appareil joignable depuis Internet. Si tu n'en as pas besoin, coupe UPnP dans la box.",
+                    "\nEach line makes a device reachable from the Internet. If you do not need it, turn UPnP off in the router."
+                );
+            }
+        }
+    }
+    if let Some(e) = &r.empoisonnement {
+        let _ = trwln!(m, "\n### Empoisonneur de noms\n", "\n### Name poisoner\n");
+        match e {
+            empoisonnement::Rapport::SansReseauLocal => {
+                let _ = trwln!(
+                    m,
+                    "Non testé : pas de réseau local pendant le scan.",
+                    "Not tested: no local network during the scan."
+                );
+            }
+            empoisonnement::Rapport::Teste(liste) if liste.is_empty() => {
+                let _ = trwln!(
+                    m,
+                    "Personne ne répond aux faux noms (LLMNR, NetBIOS, mDNS) : pas d'empoisonneur comme Responder sur ce réseau.",
+                    "No one answers bogus names (LLMNR, NetBIOS, mDNS): no poisoner like Responder on this network."
+                );
+            }
+            empoisonnement::Rapport::Teste(liste) => {
+                for p in liste {
+                    let _ = trwln!(
+                        m,
+                        "- [{}] {} répond à des noms qui n'existent pas ({}) : un outil comme Responder vole ainsi les mots de passe Windows. Débranche-le.",
+                        "- [{}] {} answers names that do not exist ({}): a tool like Responder steals Windows passwords this way. Unplug it.",
+                        Niveau::Eleve.libelle(),
+                        p.ip,
+                        p.protocoles.join(", ")
+                    );
+                }
+            }
+        }
+    }
+}
+
 /// Rapport en Markdown, sans couleur ni code : il se lit avec `cat`, un éditeur de texte ou sur un téléphone.
-pub fn markdown(audit: Option<&Audit>, reseau: Option<&Rapport>) -> String {
+pub fn markdown(audit: Option<&Audit>, reseau: Option<&Rapport>, audit_reseau: Option<&AuditReseau>) -> String {
     let mut m = String::new();
     let date = chrono::Local::now().format(tr!("%d/%m/%Y à %H:%M", "%Y-%m-%d %H:%M"));
     let _ = trwln!(
@@ -121,6 +310,9 @@ pub fn markdown(audit: Option<&Audit>, reseau: Option<&Rapport>) -> String {
     }
     if let Some(r) = reseau {
         m += &ligne_note(&trf!("Réseau {}", "Network {}", r.reseau), r.score_global);
+    }
+    if let Some(s) = audit_reseau.and_then(|a| a.score) {
+        m += &ligne_note(tr!("Audit du réseau", "Network audit"), s);
     }
     if let Some(a) = audit {
         let _ = trwln!(m, "\n## Cette machine ({})\n", "\n## This machine ({})\n", a.systeme);
@@ -177,8 +369,242 @@ pub fn markdown(audit: Option<&Audit>, reseau: Option<&Rapport>) -> String {
             m += &conseils.join("\n");
             m.push('\n');
         }
+        complements_scan_markdown(&mut m, r);
+    }
+    if let Some(a) = audit_reseau {
+        audit_markdown(&mut m, a);
     }
     m
+}
+
+/// La ligne d'un constat : badge, catégorie, message, marche à suivre. Dans l'audit du réseau, un constat non vérifié
+/// porte son propre badge (jamais « OK », jamais une simple information).
+fn ligne_constat(h: &mut String, c: &Constat, audit: bool) {
+    let badge = if audit && !c.verifie {
+        badge_non_verifie()
+    } else {
+        badge(c.probleme)
+    };
+    let _ = write!(
+        h,
+        "<div class=ligne>{badge}<div><span class=cat>{}</span> {}",
+        esc(crate::langue::categorie(c.categorie)),
+        esc(&c.message)
+    );
+    if let Some(k) = &c.correctif {
+        let icone = if k.automatique {
+            tr!(
+                "🔧 Correction automatique (Vanguard → Corriger)",
+                "🔧 Automatic fix (Vanguard → Fix)"
+            )
+        } else {
+            tr!("💡 À faire", "💡 To do")
+        };
+        let _ = trw!(
+            h,
+            "<div class=fix>{icone} : {}",
+            "<div class=fix>{icone}: {}",
+            esc(&k.action)
+        );
+        for cmd in &k.commandes {
+            let _ = write!(h, "<br><code>{}</code>", esc(cmd));
+        }
+        h.push_str("</div>");
+    }
+    h.push_str("</div></div>");
+}
+
+/// La section « Audit du réseau » : six cartes, la note d'ensemble, puis chaque domaine avec ses constats (badge,
+/// marche à suivre, références des règles qui ont alerté), et la liste de ce qui n'a pas pu être vérifié.
+fn audit_html(h: &mut String, a: &AuditReseau) {
+    let nom = a
+        .nom_reseau
+        .as_deref()
+        .map(|n| trf!(" « {} »", " “{}”", esc(n)))
+        .unwrap_or_default();
+    let _ = trw!(h, "<h2>Audit du réseau{nom}</h2>", "<h2>Network audit{nom}</h2>");
+    if a.reseau.is_none() {
+        h.push_str(tr!(
+            "<p class=meta>Aucun réseau local à auditer : rien n'a pu être vérifié.</p>",
+            "<p class=meta>No local network to audit: nothing could be checked.</p>"
+        ));
+    }
+    h.push_str("<div class=notes>");
+    for d in &a.domaines {
+        let Some(domaine) = d.domaine() else { continue };
+        match d.score {
+            Some(s) => h.push_str(&carte_note(&esc(domaine.titre()), s)),
+            None => h.push_str(&carte_sans_note(
+                &esc(domaine.titre()),
+                &trf!(
+                    "incomplet · {} non vérifié(s)",
+                    "incomplete · {} not checked",
+                    d.non_verifies
+                ),
+            )),
+        }
+    }
+    h.push_str("</div>");
+    match a.score {
+        Some(s) => {
+            let _ = trw!(
+                h,
+                "<p class=meta>Note de l'audit : {} ({s}/100), la plus basse des six.</p>",
+                "<p class=meta>Audit grade: {} ({s}/100), the lowest of the six.</p>",
+                note(s)
+            );
+        }
+        None => h.push_str(tr!(
+            "<p class=meta>Pas de note d'ensemble : un domaine sans note ne rend pas le réseau sain.</p>",
+            "<p class=meta>No overall grade: a domain without a grade does not make the network safe.</p>"
+        )),
+    }
+    for d in &a.domaines {
+        let Some(domaine) = d.domaine() else { continue };
+        let _ = write!(
+            h,
+            "<div class=carte><h3>{} — {}</h3><div class=meta>{}</div>",
+            esc(domaine.titre()),
+            match d.score {
+                Some(s) => format!("{} ({s}/100)", note(s)),
+                None => trf!(
+                    "incomplet ({} non vérifié(s))",
+                    "incomplete ({} not checked)",
+                    d.non_verifies
+                ),
+            },
+            esc(domaine.precision())
+        );
+        for c in &d.constats {
+            ligne_constat(h, c, true);
+        }
+        for f in crate::audit::references_du_domaine(d) {
+            let _ = write!(
+                h,
+                "<div class=meta>{} · {} · {}</div>",
+                esc(f.id),
+                esc(f.sujet()),
+                esc(&f.references.join(", "))
+            );
+        }
+        h.push_str("</div>");
+    }
+    let non_verifies: Vec<String> = a
+        .domaines
+        .iter()
+        .filter_map(|d| Some((d.domaine()?, d)))
+        .flat_map(|(domaine, d)| {
+            d.constats
+                .iter()
+                .filter(|c| !c.verifie)
+                .map(move |c| format!("<li>{} : {}</li>", esc(domaine.titre()), esc(&c.message)))
+        })
+        .collect();
+    if !non_verifies.is_empty() {
+        let _ = trw!(
+            h,
+            "<div class=carte><h3>Non vérifié ({})</h3><div class=meta>Ce que l'audit n'a pas pu vérifier : dit, jamais compté comme sain.</div><ul>{}</ul></div>",
+            "<div class=carte><h3>Not checked ({})</h3><div class=meta>What the audit could not check: said, never counted as safe.</div><ul>{}</ul></div>",
+            non_verifies.len(),
+            non_verifies.concat()
+        );
+    }
+}
+
+/// Les redirections UPnP de la box et l'empoisonneur de noms du scan, à la suite des appareils : ils manquaient au
+/// rapport.
+fn complements_scan_html(h: &mut String, r: &Rapport) {
+    use crate::reseau::{empoisonnement, upnp};
+    if let Some(e) = &r.upnp {
+        h.push_str(tr!(
+            "<div class=carte><h3>Ports ouverts vers Internet (UPnP)</h3>",
+            "<div class=carte><h3>Ports open to the Internet (UPnP)</h3>"
+        ));
+        match e {
+            upnp::Etat::Absent => h.push_str(tr!(
+                "<div class=meta>UPnP coupé ou absent sur la box : aucun appareil ne peut ouvrir de port vers Internet tout seul.</div>",
+                "<div class=meta>UPnP off or absent on the router: no device can open a port to the Internet by itself.</div>"
+            )),
+            upnp::Etat::OutilAbsent => {
+                let _ = write!(
+                    h,
+                    "<div class=ligne>{}<div>{}</div></div>",
+                    badge_non_verifie(),
+                    tr!(
+                        "Les redirections de la box n'ont pas pu être lues.",
+                        "The router's forwardings could not be read."
+                    )
+                );
+            }
+            upnp::Etat::Actif(liste) if liste.is_empty() => h.push_str(tr!(
+                "<div class=meta>UPnP actif sur la box, aucun port ouvert pour l'instant. À couper dans la box si aucun appareil n'en a besoin.</div>",
+                "<div class=meta>UPnP on at the router, no port open for now. Turn it off in the router if no device needs it.</div>"
+            )),
+            upnp::Etat::Actif(liste) => {
+                h.push_str("<table>");
+                for d in liste {
+                    let _ = write!(
+                        h,
+                        "<tr><td>{}/{}</td><td>→ {}:{}</td><td>{}</td><td>{}</td></tr>",
+                        d.port_public,
+                        esc(&d.protocole.to_lowercase()),
+                        esc(&d.appareil),
+                        d.port_appareil,
+                        esc(&d.description),
+                        badge(Some(upnp::niveau(d)))
+                    );
+                }
+                h.push_str(tr!(
+                    "</table><div class=meta>Chaque ligne rend un appareil joignable depuis Internet. Si tu n'en as pas besoin, coupe UPnP dans la box.</div>",
+                    "</table><div class=meta>Each line makes a device reachable from the Internet. If you do not need it, turn UPnP off in the router.</div>"
+                ));
+            }
+        }
+        h.push_str("</div>");
+    }
+    if let Some(e) = &r.empoisonnement {
+        h.push_str(tr!(
+            "<div class=carte><h3>Empoisonneur de noms</h3>",
+            "<div class=carte><h3>Name poisoner</h3>"
+        ));
+        match e {
+            empoisonnement::Rapport::SansReseauLocal => {
+                let _ = write!(
+                    h,
+                    "<div class=ligne>{}<div>{}</div></div>",
+                    badge_non_verifie(),
+                    tr!(
+                        "Pas de réseau local pendant le scan : la sonde des faux noms n'a pas tourné.",
+                        "No local network during the scan: the bogus-name probe did not run."
+                    )
+                );
+            }
+            empoisonnement::Rapport::Teste(liste) if liste.is_empty() => {
+                let _ = write!(
+                    h,
+                    "<div class=ligne>{}<div>{}</div></div>",
+                    badge(None),
+                    tr!(
+                        "Personne ne répond aux faux noms (LLMNR, NetBIOS, mDNS) : pas d'empoisonneur comme Responder sur ce réseau.",
+                        "No one answers bogus names (LLMNR, NetBIOS, mDNS): no poisoner like Responder on this network."
+                    )
+                );
+            }
+            empoisonnement::Rapport::Teste(liste) => {
+                for p in liste {
+                    let _ = trw!(
+                        h,
+                        "<div class=ligne>{}<div>{} répond à des noms qui n'existent pas ({}) : un outil comme Responder vole ainsi les mots de passe Windows. Débranche-le.</div></div>",
+                        "<div class=ligne>{}<div>{} answers names that do not exist ({}): a tool like Responder steals Windows passwords this way. Unplug it.</div></div>",
+                        badge(Some(Niveau::Eleve)),
+                        p.ip,
+                        esc(&p.protocoles.join(", "))
+                    );
+                }
+            }
+        }
+        h.push_str("</div>");
+    }
 }
 
 /// Encodage base64, pour mettre une image dans la page elle-même (le rapport reste un seul fichier).
@@ -199,7 +625,7 @@ pub(crate) fn base64(octets: &[u8]) -> String {
     s
 }
 
-fn html(audit: Option<&Audit>, reseau: Option<&Rapport>) -> String {
+fn html(audit: Option<&Audit>, reseau: Option<&Rapport>, audit_reseau: Option<&AuditReseau>) -> String {
     let mut h = String::new();
     let date = chrono::Local::now().format(tr!("%d/%m/%Y à %H:%M", "%Y-%m-%d %H:%M"));
     // Le logo dans l'onglet du navigateur (32 px, environ 3 Ko).
@@ -220,7 +646,11 @@ fn html(audit: Option<&Audit>, reseau: Option<&Rapport>) -> String {
         h += &carte_note(&trf!("Réseau {}", "Network {}", esc(&r.reseau)), r.score_global);
     }
     if let (Some(a), Some(r)) = (audit_note, reseau) {
-        h += &carte_note("Global", a.score.min(r.score_global));
+        // La note de l'audit du réseau, quand il en a une, compte dans le global : le minimum des trois.
+        let global = audit_reseau
+            .and_then(|x| x.score)
+            .map_or(a.score.min(r.score_global), |s| s.min(a.score).min(r.score_global));
+        h += &carte_note("Global", global);
     }
     h += "</div>";
     if let Some(svg) = crate::historique::courbe(&crate::historique::charger()) {
@@ -251,36 +681,12 @@ fn html(audit: Option<&Audit>, reseau: Option<&Rapport>) -> String {
             "<h2>This machine</h2><div class=carte>"
         );
         for c in &a.constats {
-            let _ = write!(
-                h,
-                "<div class=ligne>{}<div><span class=cat>{}</span> {}",
-                badge(c.probleme),
-                esc(crate::langue::categorie(c.categorie)),
-                esc(&c.message)
-            );
-            if let Some(k) = &c.correctif {
-                let icone = if k.automatique {
-                    tr!(
-                        "🔧 Correction automatique (Vanguard → Corriger)",
-                        "🔧 Automatic fix (Vanguard → Fix)"
-                    )
-                } else {
-                    tr!("💡 À faire", "💡 To do")
-                };
-                let _ = trw!(
-                    h,
-                    "<div class=fix>{icone} : {}",
-                    "<div class=fix>{icone}: {}",
-                    esc(&k.action)
-                );
-                for cmd in &k.commandes {
-                    let _ = write!(h, "<br><code>{}</code>", esc(cmd));
-                }
-                h += "</div>";
-            }
-            h += "</div></div>";
+            ligne_constat(&mut h, c, false);
         }
         h += "</div>";
+    }
+    if let Some(a) = audit_reseau {
+        audit_html(&mut h, a);
     }
 
     if let Some(r) = reseau {
@@ -369,6 +775,7 @@ fn html(audit: Option<&Audit>, reseau: Option<&Rapport>) -> String {
             }
             h += "</div>";
         }
+        complements_scan_html(&mut h, r);
     }
     if let Some(r) = reseau.filter(|r| !r.absents.is_empty()) {
         h += tr!(
@@ -389,8 +796,8 @@ fn html(audit: Option<&Audit>, reseau: Option<&Rapport>) -> String {
     h
 }
 
-pub fn ouvrir(audit: Option<&Audit>, reseau: Option<&Rapport>) {
-    match generer(audit, reseau) {
+pub fn ouvrir(audit: Option<&Audit>, reseau: Option<&Rapport>, audit_reseau: Option<&AuditReseau>) {
+    match generer(audit, reseau, audit_reseau) {
         Ok(p) => {
             trp!("  Rapport : {}", "  Report: {}", p.display());
             crate::machine::ouvrir(&p.display().to_string());
@@ -431,7 +838,7 @@ mod tests {
                 },
             ],
         };
-        let m = markdown(Some(&audit), None);
+        let m = markdown(Some(&audit), None, None);
         assert!(m.starts_with("# Bilan de sécurité Vanguard"));
         assert!(m.contains("**B** (85/100)"));
         // Le problème passe avant ce qui va bien.
@@ -465,7 +872,7 @@ mod tests {
         assert_eq!(base64(b"foo"), "Zm9v");
         assert_eq!(base64(b"foobar"), "Zm9vYmFy");
         // « iVBORw0KGgo » : la signature d'un fichier PNG, encodée.
-        assert!(html(None, None).contains("<link rel=icon href=\"data:image/png;base64,iVBORw0KGgo"));
+        assert!(html(None, None, None).contains("<link rel=icon href=\"data:image/png;base64,iVBORw0KGgo"));
     }
     use crate::reseau::{Hote, PortOuvert};
 
@@ -506,11 +913,121 @@ mod tests {
             upnp: None,
             empoisonnement: None,
         };
-        let page = html(None, Some(&r));
+        let page = html(None, Some(&r), None);
         assert!(!page.contains("<script>alert"));
         assert!(!page.contains("<img src=x"));
         assert!(!page.contains("<b>x</b>") && !page.contains("<i>wifi</i>"));
         assert!(page.contains("&lt;script&gt;alert(1)&lt;/script&gt;"));
+    }
+
+    /// L'audit du réseau dans le rapport : six cartes (note ou incomplet), les constats de chaque domaine avec leur
+    /// badge (« non vérifié » à part), les références des règles qui ont alerté, puis les redirections UPnP et
+    /// l'empoisonneur du scan, absents du rapport jusqu'ici ; un texte piégé reste du texte.
+    #[test]
+    fn audit_du_reseau_dans_le_rapport() {
+        use crate::audit::{AuditReseau, Domaine, DomaineAudite};
+        use crate::reseau::{empoisonnement, upnp};
+        let mut joignable =
+            crate::machine::alerte("Appareils", Niveau::Critique, "<b>cam</b> joignable depuis Internet.");
+        joignable.regle = "COM-APP-001";
+        let joignable = joignable.manuel("Retire la redirection", &[]);
+        let trafic = crate::audit::non_verifie("Appareils", "COM-APP-003", "trafic <script>x</script> non visible");
+        let domaines = Domaine::TOUS
+            .into_iter()
+            .map(|d| {
+                if d == Domaine::Appareils {
+                    DomaineAudite {
+                        domaine: d.nom(),
+                        score: Some(70),
+                        note: Some("C"),
+                        verifies: 2,
+                        non_verifies: 1,
+                        constats: vec![
+                            joignable.clone(),
+                            crate::machine::ok("Appareils", "bien"),
+                            trafic.clone(),
+                        ],
+                    }
+                } else {
+                    DomaineAudite {
+                        domaine: d.nom(),
+                        score: None,
+                        note: None,
+                        verifies: 0,
+                        non_verifies: 1,
+                        constats: vec![crate::audit::pas_encore_ecrit(d)],
+                    }
+                }
+            })
+            .collect();
+        let a = AuditReseau {
+            reseau: Some("10.0.0.0/24".into()),
+            nom_reseau: Some("<i>Salon</i>".into()),
+            invite: false,
+            rapide: false,
+            domaines,
+            score: None,
+            note: None,
+            duree_s: 1.0,
+        };
+        let r = Rapport {
+            reseau: "10.0.0.0/24".into(),
+            nom_reseau: Some("Salon".into()),
+            absents: vec![],
+            duree_s: 1.0,
+            score_global: 90,
+            note: "A",
+            hotes: vec![],
+            upnp: Some(upnp::Etat::Actif(vec![upnp::Redirection {
+                protocole: "TCP".into(),
+                port_public: 8080,
+                appareil: "10.0.0.30".into(),
+                port_appareil: 80,
+                description: "<img src=x onerror=alert(5)>".into(),
+            }])),
+            empoisonnement: Some(empoisonnement::Rapport::Teste(vec![empoisonnement::Empoisonneur {
+                ip: "10.0.0.66".parse().unwrap(),
+                protocoles: vec!["LLMNR", "NetBIOS"],
+            }])),
+        };
+        let page = html(None, Some(&r), Some(&a));
+        assert!(
+            page.contains("<h2>Audit du réseau « &lt;i&gt;Salon&lt;/i&gt; »</h2>"),
+            "{page}"
+        );
+        // Six cartes de l'audit, plus celle du réseau en tête.
+        assert_eq!(page.matches("<div class=\"note ").count(), 7);
+        assert_eq!(page.matches("class=\"note nonote\"").count(), 5);
+        assert!(page.contains("<h3>Appareils — C (70/100)</h3>"));
+        assert!(page.contains("NON VÉRIFIÉ") && page.contains("<h3>Non vérifié (6)</h3>"));
+        assert!(page.contains("COM-APP-001 · objet joignable depuis Internet"), "{page}");
+        assert!(page.contains("💡 À faire : Retire la redirection"));
+        assert!(
+            page.contains("Ports ouverts vers Internet (UPnP)")
+                && page.contains("<td>8080/tcp</td><td>→ 10.0.0.30:80</td>")
+        );
+        assert!(
+            page.contains("Empoisonneur de noms")
+                && page.contains("10.0.0.66 répond")
+                && page.contains("LLMNR, NetBIOS")
+        );
+        for piege in ["<b>cam</b>", "<script>", "<img src=x", "<i>Salon</i>"] {
+            assert!(!page.contains(piege), "{piege}");
+        }
+        let m = markdown(None, Some(&r), Some(&a));
+        assert!(m.contains("## Audit du réseau « <i>Salon</i> »") && m.contains("- Appareils : **C** (70/100)"));
+        assert!(m.contains("- Exposition : incomplet (1 non vérifié(s))"), "{m}");
+        assert!(m.contains("[NON VÉRIFIÉ] **Appareils**") && m.contains("[CRITIQUE] **Appareils**"));
+        assert!(
+            m.contains("### Ports ouverts vers Internet (UPnP)") && m.contains("- 8080/tcp → 10.0.0.30:80 [MOYEN]")
+        );
+        assert!(m.contains("### Empoisonneur de noms") && m.contains("[ÉLEVÉ] 10.0.0.66"));
+        assert!(m.contains("6 vérification(s) impossible(s)"));
+        // Sans réseau local : la section le dit, sans aucune carte notée.
+        let sans = AuditReseau::sans_reseau("hors ligne");
+        let page = html(None, None, Some(&sans));
+        assert!(page.contains("Aucun réseau local à auditer") && !page.contains("/100"));
+        assert_eq!(page.matches("class=\"note nonote\"").count(), 6);
     }
 
     /// Les dates du premier et du dernier passage d'un appareil viennent de la base, un fichier : une sauvegarde
@@ -545,7 +1062,7 @@ mod tests {
             upnp: None,
             empoisonnement: None,
         };
-        let page = html(None, Some(&r));
+        let page = html(None, Some(&r), None);
         assert!(
             !page.contains("<img src=x") && !page.contains("<script>alert(4)"),
             "{page}"

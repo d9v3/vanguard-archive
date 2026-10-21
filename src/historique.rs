@@ -8,11 +8,13 @@
 //! que la rotation a retiré, ce n'est pas une falsification. Barrière, pas coffre : qui réécrit tout le fichier peut
 //! aussi retirer toutes les empreintes.
 
+use std::collections::BTreeMap;
 use std::fmt::Write;
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+use crate::audit::AuditReseau;
 use crate::machine::Audit;
 use crate::reseau::Rapport;
 use crate::risk::Niveau;
@@ -34,6 +36,10 @@ pub struct Bilan {
     /// Problèmes moyens ou plus graves, « catégorie : message ».
     #[serde(default)]
     pub problemes: Vec<String>,
+    /// Les notes de l'audit du réseau par domaine (nom interne → note), hors de l'empreinte : les bilans d'avant
+    /// n'en ont pas et ne doivent pas devenir « rompus ».
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audit: Option<BTreeMap<String, u32>>,
     /// Empreinte BLAKE3 de ce bilan (`empreinte_de`), et celle du bilan précédent : la chaîne.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub empreinte: Option<String>,
@@ -41,7 +47,18 @@ pub struct Bilan {
     pub precedent: Option<String>,
 }
 
-/// L'empreinte d'un bilan : ses champs dans un ordre fixe, y compris l'empreinte du précédent.
+impl Bilan {
+    /// La note de l'audit du réseau : la plus basse des six domaines, seulement quand les six en ont une.
+    pub fn note_audit(&self) -> Option<u32> {
+        let notes = self.audit.as_ref()?;
+        (notes.len() == crate::audit::Domaine::TOUS.len())
+            .then(|| notes.values().copied().min())
+            .flatten()
+    }
+}
+
+/// L'empreinte d'un bilan : ses champs dans un ordre fixe, y compris l'empreinte du précédent (jamais les notes de
+/// l'audit du réseau, un champ arrivé après les premiers bilans chaînés).
 fn empreinte_de(b: &Bilan) -> String {
     let canon = serde_json::to_string(&(&b.date, b.machine, b.reseau, &b.nom_reseau, &b.problemes, &b.precedent))
         .unwrap_or_default();
@@ -158,7 +175,7 @@ fn lire_de(chemin: &std::path::Path) -> Result<Vec<Bilan>, String> {
     }
 }
 
-fn bilan(audit: Option<&Audit>, reseau: Option<&Rapport>) -> Bilan {
+fn bilan(audit: Option<&Audit>, reseau: Option<&Rapport>, audit_reseau: Option<&AuditReseau>) -> Bilan {
     Bilan {
         date: chrono::Local::now().format("%Y-%m-%d %H:%M").to_string(),
         machine: audit.filter(|a| a.fiable()).map(|a| a.score),
@@ -173,6 +190,7 @@ fn bilan(audit: Option<&Audit>, reseau: Option<&Rapport>) -> Bilan {
                     .collect()
             })
             .unwrap_or_default(),
+        audit: audit_reseau.map(AuditReseau::notes),
         empreinte: None,
         precedent: None,
     }
@@ -180,7 +198,16 @@ fn bilan(audit: Option<&Audit>, reseau: Option<&Rapport>) -> Bilan {
 
 /// Ajoute ce bilan à l'historique ; rend le précédent, s'il y en a un.
 pub fn enregistrer(audit: Option<&Audit>, reseau: Option<&Rapport>) -> (Option<Bilan>, Bilan) {
-    enregistrer_dans(&fichier(), bilan(audit, reseau))
+    enregistrer_complet(audit, reseau, None)
+}
+
+/// Comme `enregistrer`, avec l'audit du réseau par domaine du bilan complet.
+pub fn enregistrer_complet(
+    audit: Option<&Audit>,
+    reseau: Option<&Rapport>,
+    audit_reseau: Option<&AuditReseau>,
+) -> (Option<Bilan>, Bilan) {
+    enregistrer_dans(&fichier(), bilan(audit, reseau, audit_reseau))
 }
 
 fn enregistrer_dans(chemin: &std::path::Path, mut nouveau: Bilan) -> (Option<Bilan>, Bilan) {
@@ -266,6 +293,11 @@ pub fn afficher_changements(avant: &Bilan, apres: &Bilan) {
     evolution(tr!("Cette machine", "This machine"), avant.machine, apres.machine);
     if avant.nom_reseau == apres.nom_reseau {
         evolution(tr!("Réseau", "Network"), avant.reseau, apres.reseau);
+        evolution(
+            tr!("Audit du réseau", "Network audit"),
+            avant.note_audit(),
+            apres.note_audit(),
+        );
     }
     let (nouveaux, regles) = differences(avant, apres);
     let traduire = |p: &str| match p.split_once(" : ") {
@@ -296,7 +328,7 @@ pub fn afficher_changements(avant: &Bilan, apres: &Bilan) {
 }
 
 /// Courbe des notes (SVG intégré, couleurs du thème clair ou sombre) ; `None` s'il y a moins de deux bilans.
-/// Le réseau n'est tracé que pour le réseau du dernier bilan.
+/// Le réseau et son audit ne sont tracés que pour le réseau du dernier bilan.
 pub fn courbe(historique: &[Bilan]) -> Option<String> {
     let derniers = &historique[historique.len().saturating_sub(30)..];
     if derniers.len() < 2 {
@@ -309,7 +341,7 @@ pub fn courbe(historique: &[Bilan]) -> Option<String> {
     // Échelle à partir de la dizaine sous la note la plus basse (au plus 40) : le haut de l'échelle reste lisible.
     let plus_basse = derniers
         .iter()
-        .flat_map(|b| [b.machine, b.reseau])
+        .flat_map(|b| [b.machine, b.reseau, b.note_audit()])
         .flatten()
         .min()
         .unwrap_or(40);
@@ -370,6 +402,20 @@ pub fn courbe(historique: &[Bilan]) -> Option<String> {
         "--ok",
         tr!("Réseau", "Network"),
     );
+    serie(
+        derniers
+            .iter()
+            .map(|b| {
+                if b.nom_reseau == reseau_actuel {
+                    b.note_audit()
+                } else {
+                    None
+                }
+            })
+            .collect(),
+        "--moyen",
+        tr!("Audit du réseau", "Network audit"),
+    );
     let jour = |b: &Bilan| esc_court(&b.date);
     let _ = write!(
         svg,
@@ -399,6 +445,7 @@ mod tests {
             reseau: Some(80),
             nom_reseau: Some("10.0.0.0/24".into()),
             problemes: problemes.iter().map(ToString::to_string).collect(),
+            audit: None,
             empreinte: None,
             precedent: None,
         }
@@ -428,7 +475,7 @@ mod tests {
         let chemin = dossier.join("historique.json");
         std::fs::write(&chemin, "[{\"date\":\"2026-10-17 12:00\",\"machine\":8").unwrap();
         assert!(lire_de(&chemin).is_err());
-        let (precedent, _) = enregistrer_dans(&chemin, bilan(None, None));
+        let (precedent, _) = enregistrer_dans(&chemin, bilan(None, None, None));
         assert!(precedent.is_none());
         let copies = std::fs::read_dir(&dossier)
             .unwrap()
@@ -446,6 +493,23 @@ mod tests {
         let svg = courbe(&[b(70, &[]), b(85, &[]), b(95, &[])]).unwrap();
         assert!(svg.starts_with("<svg") && svg.ends_with("</svg>"));
         assert_eq!(svg.matches("<polyline").count(), 2);
+        // L'audit du réseau n'est tracé que quand ses six domaines ont une note : la plus basse.
+        let notes = |valeurs: &[u32]| {
+            crate::audit::Domaine::TOUS
+                .iter()
+                .zip(valeurs)
+                .map(|(d, n)| (d.nom().to_string(), *n))
+                .collect::<BTreeMap<_, _>>()
+        };
+        let mut complet = b(80, &[]);
+        complet.audit = Some(notes(&[90, 85, 100, 70, 95, 88]));
+        let mut partiel = b(82, &[]);
+        partiel.audit = Some(notes(&[90, 85]));
+        assert_eq!(complet.note_audit(), Some(70));
+        assert_eq!(partiel.note_audit(), None);
+        assert_eq!(b(80, &[]).note_audit(), None);
+        let svg = courbe(&[partiel, complet]).unwrap();
+        assert_eq!(svg.matches("<polyline").count(), 3);
     }
     #[test]
     fn chaine_des_bilans() {
@@ -470,10 +534,15 @@ mod tests {
         {
             let mut b = ancien(date);
             b.machine = Some(80 + u32::try_from(i).unwrap());
+            // Les notes de l'audit du réseau, hors de l'empreinte : un bilan qui en porte se chaîne comme les autres.
+            if i == 1 {
+                b.audit = Some(BTreeMap::from([("Appareils".to_string(), 95)]));
+            }
             enregistrer_dans(&chemin, b);
         }
         let tous = lire_de(&chemin).unwrap();
         assert_eq!(tous.len(), 5);
+        assert_eq!(tous[3].audit.as_ref().map(BTreeMap::len), Some(1));
         assert!(tous[1].empreinte.is_none() && tous[2].empreinte.is_some() && tous[2].precedent.is_none());
         assert_eq!(tous[3].precedent, tous[2].empreinte);
         assert_eq!(verifier_chaine(&tous), Chaine::Intacte { chaines: 3 });

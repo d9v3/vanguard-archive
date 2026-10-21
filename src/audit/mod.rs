@@ -128,7 +128,7 @@ pub struct Fiche {
 }
 
 impl Fiche {
-    fn sujet(&self) -> &'static str {
+    pub(crate) fn sujet(&self) -> &'static str {
         if crate::langue::anglais() {
             self.sujet.1
         } else {
@@ -358,6 +358,29 @@ impl AuditReseau {
     pub fn non_verifies(&self) -> usize {
         self.domaines.iter().map(|d| d.non_verifies).sum()
     }
+
+    /// Les notes des domaines notés, par nom interne : ce que l'historique garde.
+    pub fn notes(&self) -> BTreeMap<String, u32> {
+        self.domaines
+            .iter()
+            .filter_map(|d| Some((d.domaine.to_string(), d.score?)))
+            .collect()
+    }
+}
+
+/// Les fiches des règles qui ont alerté (moyen ou plus) dans ce domaine : le pourquoi et ses références, pour
+/// l'écran et le rapport.
+pub(crate) fn references_du_domaine(d: &DomaineAudite) -> Vec<&'static Fiche> {
+    let regles: BTreeSet<&str> = d
+        .constats
+        .iter()
+        .filter(|c| c.verifie && c.probleme.is_some_and(|n| n >= Niveau::Moyen))
+        .map(|c| c.regle)
+        .filter(|r| !r.is_empty())
+        .collect();
+    fiches()
+        .filter(|f| f.domaine.nom() == d.domaine && regles.contains(f.id) && !f.references.is_empty())
+        .collect()
 }
 
 fn erreur_interne(d: Domaine) -> Constat {
@@ -517,17 +540,7 @@ fn afficher_constat(c: &Constat) {
 
 /// Les références des règles qui ont alerté dans ce domaine : le pourquoi, en une ligne grise par règle.
 fn afficher_references(d: &DomaineAudite) {
-    let regles: BTreeSet<&str> = d
-        .constats
-        .iter()
-        .filter(|c| c.verifie && c.probleme.is_some_and(|n| n >= Niveau::Moyen))
-        .map(|c| c.regle)
-        .filter(|r| !r.is_empty())
-        .collect();
-    for f in fiches().filter(|f| f.domaine.nom() == d.domaine && regles.contains(f.id)) {
-        if f.references.is_empty() {
-            continue;
-        }
+    for f in references_du_domaine(d) {
         afficher_aligne(
             &format!("  {DISCRET}{} · ", f.id),
             &format!("{} · {}", f.sujet(), f.references.join(", ")),

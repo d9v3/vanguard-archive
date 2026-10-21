@@ -109,6 +109,9 @@ enum Commande {
     AuditReseau {
         #[arg(long)]
         json: bool,
+        /// Ouvrir aussi le rapport HTML dans le navigateur.
+        #[arg(long)]
+        html: bool,
         /// Tu es sur le réseau invité : Vanguard vérifie qu'il est bien séparé du réseau principal.
         #[arg(long, visible_alias = "guest")]
         invite: bool,
@@ -456,7 +459,7 @@ impl Session {
 
     /// L'audit du réseau par domaine : le scan de la session s'il a moins de dix minutes, sinon un scan silencieux ;
     /// puis les six domaines, à l'écran ou en JSON. Sans réseau local, six domaines « non vérifié ».
-    async fn audit_reseau(&mut self, json: bool, invite: bool) {
+    async fn audit_reseau(&mut self, json: bool, html: bool, invite: bool) {
         let recent = self
             .scan_le
             .is_some_and(|t| t.elapsed() < std::time::Duration::from_secs(600));
@@ -481,6 +484,9 @@ impl Session {
                     let a = audit::AuditReseau::sans_reseau(&e);
                     audit::rendre(&a, json);
                     self.audit_reseau = Some(a);
+                    if html {
+                        rapport::ouvrir(None, None, self.audit_reseau.as_ref());
+                    }
                     return;
                 }
             }
@@ -489,6 +495,9 @@ impl Session {
         let a = audit::auditer(scan, None, invite, false).await;
         audit::rendre(&a, json);
         self.audit_reseau = Some(a);
+        if html {
+            rapport::ouvrir(None, self.reseau.as_ref(), self.audit_reseau.as_ref());
+        }
     }
 
     async fn complet(&mut self) {
@@ -533,7 +542,8 @@ impl Session {
         if let Some(g) = [m, r, audit_reseau].into_iter().flatten().min() {
             afficher_note(tr!("Global", "Overall"), g);
         }
-        let (precedent, nouveau) = historique::enregistrer(self.audit.as_ref(), self.reseau.as_ref());
+        let (precedent, nouveau) =
+            historique::enregistrer_complet(self.audit.as_ref(), self.reseau.as_ref(), self.audit_reseau.as_ref());
         // Sur la clé VANGUARD branchée (partition VANGUARDLOG) : la visite de cet ordinateur, pour « Mes ordinateurs ».
         ordinateurs::noter(self.audit.as_ref(), self.reseau.as_ref());
         if let Some(p) = precedent {
@@ -551,7 +561,7 @@ impl Session {
                 "\n  {cle} Fixes are available: menu choice “2” or “vanguard fix”."
             );
         }
-        let _ = rapport::generer(self.audit.as_ref(), self.reseau.as_ref());
+        let _ = rapport::generer(self.audit.as_ref(), self.reseau.as_ref(), self.audit_reseau.as_ref());
     }
 
     fn corriger(&mut self) {
@@ -1410,7 +1420,7 @@ async fn executer(s: &mut Session, action: Action) {
             if s.audit.is_none() && s.reseau.is_none() {
                 s.complet().await;
             }
-            rapport::ouvrir(s.audit.as_ref(), s.reseau.as_ref());
+            rapport::ouvrir(s.audit.as_ref(), s.reseau.as_ref(), s.audit_reseau.as_ref());
         }
         Action::Audit => s.audit = Some(machine::executer(false)),
         Action::Integrite => protection::integrite::verifier(false),
@@ -1427,7 +1437,7 @@ async fn executer(s: &mut Session, action: Action) {
         Action::Maj => maj::executer(),
         Action::Reparer => reparer::menu(),
         Action::Scanner => s.scanner_reseau(None, "courants").await,
-        Action::AuditReseau => s.audit_reseau(false, false).await,
+        Action::AuditReseau => s.audit_reseau(false, false, false).await,
         Action::Appareil => {
             let ip = demander(tr!(
                 "Adresse IP de l'appareil (ex. 10.0.0.1) : ",
@@ -1630,6 +1640,7 @@ const OPTIONS_EN: &[(&str, &str, &str)] = &[
     ("reseau", "ports", "“courants”/“common” (default), “tous”/“all” (1-65535) or a list “22,80,8000-8100”"),
     ("reseau", "timeout", "Connection timeout per port, in milliseconds"),
     ("reseau", "parallele", "Number of simultaneous connections"),
+    ("audit-reseau", "html", "Also open the HTML report in the browser"),
     ("audit-reseau", "invite", "You are on the guest network: Vanguard checks that it is really separated from the main \
                                 one"),
     ("antivirus", "complet", "The whole home folder instead of the risky places"),
@@ -1711,10 +1722,13 @@ async fn main() {
             let mut s = Session::default();
             s.complet().await;
             if html {
-                rapport::ouvrir(s.audit.as_ref(), s.reseau.as_ref());
+                rapport::ouvrir(s.audit.as_ref(), s.reseau.as_ref(), s.audit_reseau.as_ref());
             }
             if texte {
-                println!("\n{}", rapport::markdown(s.audit.as_ref(), s.reseau.as_ref()));
+                println!(
+                    "\n{}",
+                    rapport::markdown(s.audit.as_ref(), s.reseau.as_ref(), s.audit_reseau.as_ref())
+                );
             }
         }
         Some(Commande::Machine { json }) => {
@@ -1742,7 +1756,9 @@ async fn main() {
                 std::process::exit(1);
             }
         }
-        Some(Commande::AuditReseau { json, invite }) => Session::default().audit_reseau(json, invite).await,
+        Some(Commande::AuditReseau { json, html, invite }) => {
+            Session::default().audit_reseau(json, html, invite).await;
+        }
         Some(Commande::Antivirus { complet, dossier }) => protection::antivirus::analyser(portee(dossier, complet)),
         Some(Commande::Surveillance { etat }) => reseau::surveillance::activer(etat == "on"),
         Some(Commande::Tableau { sans_ouvrir }) => reseau::tableau::ouvrir(sans_ouvrir),
