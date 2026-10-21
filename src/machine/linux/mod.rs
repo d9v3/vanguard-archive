@@ -11,6 +11,7 @@ use crate::risk::{Niveau, info_port};
 use crate::{tr, trf, trw};
 
 mod algorithmes_ssh;
+pub(crate) mod dbus;
 pub(crate) mod dissimulation;
 mod docker;
 mod durcissement;
@@ -1810,10 +1811,17 @@ fn services_en_echec() -> Constat {
     if !systemd() {
         return impossible("Services", tr!("systemd absent", "systemd missing"));
     }
-    let Some(liste) = sortie("systemctl", &["--failed", "--no-legend", "--plain"]) else {
-        return impossible("Services", tr!("systemctl n'a pas répondu", "systemctl did not answer"));
+    // Demandé à systemd par le bus système, ce que dit `systemctl --failed`.
+    let liste = dbus::Bus::systeme().and_then(|mut bus| dbus::unites_en_echec(&mut bus));
+    let n = match liste {
+        Ok(liste) => liste.len(),
+        Err(e) => {
+            return impossible(
+                "Services",
+                &trf!("systemd n'a pas répondu ({e})", "systemd did not answer ({e})"),
+            );
+        }
     };
-    let n = liste.lines().filter(|l| !l.trim().is_empty()).count();
     if n == 0 {
         ok(
             "Services",

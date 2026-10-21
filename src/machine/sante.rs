@@ -239,9 +239,8 @@ fn degres_nvidia() -> Option<f64> {
 mod systeme {
     use std::path::Path;
 
-    use serde_json::Value;
-
     use super::{Disque, Volume};
+    use crate::machine::linux::dbus::{Bus, Valeur};
 
     const SYSTEMES_DE_FICHIERS: &[&str] = &[
         "ext2", "ext3", "ext4", "btrfs", "xfs", "f2fs", "vfat", "exfat", "ntfs", "ntfs3", "zfs", "bcachefs", "jfs",
@@ -288,64 +287,61 @@ mod systeme {
         volumes
     }
 
-    fn busctl(args: &[&str]) -> Option<Value> {
-        let mut tous = vec!["--json=short"];
-        tous.extend(args);
-        let r = crate::commande::lancer(std::process::Command::new("busctl").args(&tous), 10)?;
-        if r.code != Some(0) {
-            return None;
-        }
-        serde_json::from_str::<Value>(&r.sortie).ok().map(|v| v["data"].clone())
-    }
-
     const UDISKS: &str = "org.freedesktop.UDisks2";
 
-    /// Disques internes lus par udisks2, sans droits root : NVMe (attributs SMART complets) et SATA (verdict SMART).
+    /// Disques internes lus par udisks2 sur le bus système, sans droits root : NVMe (attributs SMART complets) et
+    /// SATA (verdict SMART). Tous les objets d'udisks2 arrivent en un appel (`GetManagedObjects`) ; seuls les
+    /// attributs NVMe demandent le leur. Bus ou udisks2 absent : aucun disque, comme avant sans `busctl`.
     pub fn disques() -> Vec<Disque> {
-        let Some(r) = crate::commande::lancer(
-            std::process::Command::new("busctl").args(["--list", "tree", UDISKS]),
-            10,
-        ) else {
+        let Ok(mut bus) = Bus::systeme() else {
             return Vec::new();
         };
+        let objets = bus.objets(UDISKS, "/org/freedesktop/UDisks2").unwrap_or_default();
         let mut disques = Vec::new();
-        for chemin in r
-            .sortie
-            .lines()
-            .map(str::trim)
-            .filter(|l| l.starts_with("/org/freedesktop/UDisks2/drives/"))
-        {
-            let propriete = |interface: &str, nom: &str| busctl(&["get-property", UDISKS, chemin, interface, nom]);
+        for (chemin, interfaces) in &objets {
+            if !chemin.starts_with("/org/freedesktop/UDisks2/drives/") {
+                continue;
+            }
+            let propriete = |interface: &str, nom: &str| interfaces.champ(interface).and_then(|i| i.champ(nom));
             // Le disque dit son modèle lui-même (une clé USB dit ce qu'elle veut) : lu prêt à montrer.
             let modele = propriete("org.freedesktop.UDisks2.Drive", "Model")
-                .and_then(|v| v.as_str().map(crate::ui::affichable))
+                .and_then(Valeur::texte)
+                .map(crate::ui::affichable)
                 .filter(|m| !m.is_empty())
                 .unwrap_or_else(|| crate::ui::affichable(&chemin.rsplit('/').next().unwrap_or("?").replace('_', " ")));
             let nvme = "org.freedesktop.UDisks2.NVMe.Controller";
             if let Some(avertissements) = propriete(nvme, "SmartCriticalWarning") {
-                let attributs = busctl(&["call", UDISKS, chemin, nvme, "SmartGetAttributes", "a{sv}", "0"])
-                    .and_then(|d| d.get(0).cloned())
-                    .unwrap_or_default();
-                let nombre = |cle: &str| attributs[cle]["data"].as_u64();
+                let attributs = bus
+                    .appeler(
+                        UDISKS,
+                        chemin,
+                        nvme,
+                        "SmartGetAttributes",
+                        "a{sv}",
+                        vec![Valeur::Dictionnaire(Vec::new())],
+                    )
+                    .ok()
+                    .and_then(|corps| corps.into_iter().next());
+                let nombre = |cle: &str| attributs.as_ref().and_then(|a| a.champ(cle)).and_then(Valeur::entier);
                 let reserve_epuisee =
                     matches!((nombre("avail_spare"), nombre("spare_thresh")), (Some(r), Some(s)) if r < s);
                 disques.push(Disque {
                     modele,
-                    defaillant: avertissements.as_array().is_some_and(|a| !a.is_empty()) || reserve_epuisee,
+                    defaillant: !avertissements.elements().is_empty() || reserve_epuisee,
                     usure: nombre("percent_used"),
                     erreurs: nombre("media_errors").unwrap_or(0),
                 });
                 continue;
             }
             let ata = "org.freedesktop.UDisks2.Drive.Ata";
-            if propriete(ata, "SmartEnabled").and_then(|v| v.as_bool()) == Some(true) {
+            if propriete(ata, "SmartEnabled").and_then(Valeur::booleen) == Some(true) {
                 disques.push(Disque {
                     modele,
-                    defaillant: propriete(ata, "SmartFailing").and_then(|v| v.as_bool()) == Some(true),
+                    defaillant: propriete(ata, "SmartFailing").and_then(Valeur::booleen) == Some(true),
                     usure: None,
+                    // SmartNumBadSectors est signé (x) : un négatif n'est pas un nombre de secteurs.
                     erreurs: propriete(ata, "SmartNumBadSectors")
-                        .and_then(|v| v.as_i64())
-                        .and_then(|n| u64::try_from(n).ok())
+                        .and_then(Valeur::entier)
                         .unwrap_or(0),
                 });
             }
@@ -825,5 +821,65 @@ mod tests {
             Some(Niveau::Info)
         );
         assert!(constat_temperatures(&[]).is_none());
+    }
+
+    /// Sur cet ordinateur, quand `busctl` répond : les disques lus par le client D-Bus sont ceux que `busctl` lisait
+    /// (modèle, usure NVMe, erreurs de support).
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn disques_comme_busctl() {
+        let busctl = |args: &[&str]| {
+            crate::commande::lancer(std::process::Command::new("busctl").args(args), 10)
+                .filter(|r| r.code == Some(0))
+                .map(|r| r.sortie)
+        };
+        let json = |args: &[&str]| {
+            let mut tous = vec!["--json=short"];
+            tous.extend(args);
+            busctl(&tous)
+                .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
+                .map(|v| v["data"].clone())
+        };
+        let Some(arbre) = busctl(&["--list", "tree", "org.freedesktop.UDisks2"]) else {
+            return;
+        };
+        let mut attendus = Vec::new();
+        for chemin in arbre
+            .lines()
+            .map(str::trim)
+            .filter(|l| l.starts_with("/org/freedesktop/UDisks2/drives/"))
+        {
+            let propriete = |i: &str, n: &str| json(&["get-property", "org.freedesktop.UDisks2", chemin, i, n]);
+            let nvme = "org.freedesktop.UDisks2.NVMe.Controller";
+            let modele =
+                propriete("org.freedesktop.UDisks2.Drive", "Model").and_then(|v| v.as_str().map(crate::ui::affichable));
+            if propriete(nvme, "SmartCriticalWarning").is_some() {
+                let a = json(&[
+                    "call",
+                    "org.freedesktop.UDisks2",
+                    chemin,
+                    nvme,
+                    "SmartGetAttributes",
+                    "a{sv}",
+                    "0",
+                ])
+                .and_then(|d| d.get(0).cloned())
+                .unwrap_or_default();
+                attendus.push((
+                    modele,
+                    a["percent_used"]["data"].as_u64(),
+                    a["media_errors"]["data"].as_u64().unwrap_or(0),
+                ));
+            } else if propriete("org.freedesktop.UDisks2.Drive.Ata", "SmartEnabled").and_then(|v| v.as_bool())
+                == Some(true)
+            {
+                attendus.push((modele, None, 0));
+            }
+        }
+        let lus: Vec<_> = systeme::disques()
+            .into_iter()
+            .map(|d| (Some(d.modele), d.usure, if d.usure.is_some() { d.erreurs } else { 0 }))
+            .collect();
+        assert_eq!(lus, attendus);
     }
 }

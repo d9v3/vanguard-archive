@@ -108,61 +108,123 @@ fn avec_poids(programmes: &[Programme], liste: impl Iterator<Item = (String, Str
         .collect()
 }
 
-/// « 1min 2.105s », « 835ms », « 1.186s », « 2h 3min » (durées de systemd) → secondes.
-fn secondes_systemd(texte: &str) -> Option<f64> {
-    let mut total = None;
-    for morceau in texte.split_whitespace() {
-        let morceau = morceau.trim_start_matches('+');
-        let (nombre, unite) = morceau.split_at(morceau.find(|c: char| c.is_ascii_alphabetic())?);
-        let n: f64 = nombre.parse().ok()?;
-        let facteur = match unite {
-            "h" => 3600.0,
-            "min" => 60.0,
-            "s" => 1.0,
-            "ms" => 0.001,
-            "us" | "µs" => 0.000_001,
-            _ => return None,
-        };
-        total = Some(total.unwrap_or(0.0) + n * facteur);
+/// Les instants du démarrage notés par systemd (propriétés du Manager, en microsecondes) : avant le noyau, le
+/// micrologiciel et le chargeur se comptent à rebours depuis son départ ; après, l'initrd, le système et la fin depuis
+/// son départ. Zéro : pas noté (pas d'EFI, pas d'initrd).
+#[derive(Debug, Default, Clone, Copy)]
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+struct InstantsDemarrage {
+    micrologiciel: u64,
+    chargeur: u64,
+    initrd: u64,
+    espace_utilisateur: u64,
+    fin: u64,
+    /// Dans un conteneur, avant le système, ce sont les instants de l'hôte : seul le système compte.
+    conteneur: bool,
+}
+
+/// La durée du démarrage et ses étapes (« micrologiciel 11,8 s · chargeur 8,1 s · noyau 15,2 s · système 5,6 s »),
+/// calculées comme `systemd-analyze` ; `None` tant que le démarrage n'est pas fini.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+#[allow(clippy::cast_precision_loss)]
+fn duree_demarrage(t: &InstantsDemarrage) -> Option<(f64, String)> {
+    if t.fin == 0 {
+        return None;
     }
-    total
+    let secondes = |us: u64| us as f64 / 1e6;
+    let mut etapes = Vec::new();
+    let mut etape = |nom: &str, us: u64| etapes.push(format!("{nom} {}", secondes_lisibles(secondes(us))));
+    let systeme = t.fin.saturating_sub(t.espace_utilisateur);
+    if t.conteneur {
+        etape(tr!("système", "userspace"), systeme);
+        return Some((secondes(systeme), etapes.join(" · ")));
+    }
+    if t.micrologiciel > 0 {
+        etape(
+            tr!("micrologiciel", "firmware"),
+            t.micrologiciel.saturating_sub(t.chargeur),
+        );
+    }
+    if t.chargeur > 0 {
+        etape(tr!("chargeur", "loader"), t.chargeur);
+    }
+    let noyau = if t.initrd > 0 { t.initrd } else { t.espace_utilisateur };
+    if noyau > 0 {
+        etape(tr!("noyau", "kernel"), noyau);
+    }
+    if t.initrd > 0 {
+        etape("initrd", t.espace_utilisateur.saturating_sub(t.initrd));
+    }
+    etape(tr!("système", "userspace"), systeme);
+    let total = if noyau > 0 { t.micrologiciel + t.fin } else { systeme };
+    Some((secondes(total), etapes.join(" · ")))
 }
 
-/// `systemd-analyze` : « Startup finished in 11.846s (firmware) + 8.083s (loader) + 15.167s (kernel) + 5.575s
-/// (userspace) = 40.673s » → (total, étapes).
+/// Une unité vue par la chaîne critique : ses dépendances `After` et ses instants (microsecondes monotones) :
+/// début (`InactiveExitTimestampMonotonic`), active (`ActiveEnterTimestampMonotonic`), retombée inactive
+/// (`InactiveEnterTimestampMonotonic`).
+#[derive(Debug, Default, Clone)]
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
-fn duree_systemd(texte: &str) -> Option<(f64, String)> {
-    let ligne = texte.lines().find_map(|l| l.strip_prefix("Startup finished in "))?;
-    let (etapes, total) = ligne.rsplit_once(" = ")?;
-    let total = secondes_systemd(total.trim())?;
-    let etape = |e: &str| {
-        let (duree, nom) = e.trim().split_once(" (")?;
-        let nom = match nom.trim_end_matches(')') {
-            "firmware" => tr!("micrologiciel", "firmware"),
-            "loader" => tr!("chargeur", "loader"),
-            "kernel" => tr!("noyau", "kernel"),
-            "initrd" => "initrd",
-            "userspace" => tr!("système", "userspace"),
-            _ => return None,
+struct UniteDemarrage {
+    apres: Vec<String>,
+    debut: u64,
+    active: u64,
+    inactive: u64,
+}
+
+/// Les unités du chemin critique du démarrage et le temps que chacune a pris à démarrer, les plus longues d'abord
+/// (au plus 5, d'une demi-seconde au moins), comme `systemd-analyze critical-chain` : depuis `racine`, parmi les
+/// dépendances `After` démarrées avant la fin du démarrage (`fin`), on suit celle devenue active en dernier (toutes
+/// celles à égalité). `blame` mélangerait ce qui tourne après le démarrage (mise à jour de la base de locate, par
+/// exemple) avec ce qui le retarde vraiment. `lire` donne une unité chargée par son nom (`None` : pas chargée). Le
+/// nom d'une unité de l'utilisateur est le sien : rendu prêt à montrer.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+#[allow(clippy::cast_precision_loss)]
+fn chaine_critique(racine: &str, fin: u64, mut lire: impl FnMut(&str) -> Option<UniteDemarrage>) -> Vec<(String, f64)> {
+    let mut connues: HashMap<String, Option<UniteDemarrage>> = HashMap::new();
+    let mut unite = |nom: &str| connues.entry(nom.to_string()).or_insert_with(|| lire(nom)).clone();
+    // Une unité jamais démarrée (début nul) n'a pas de durée, comme pour systemd-analyze.
+    let duree = |u: &UniteDemarrage| {
+        let us = if u.debut == 0 {
+            0
+        } else if u.active >= u.debut {
+            u.active - u.debut
+        } else {
+            u.inactive.saturating_sub(u.debut)
         };
-        Some(format!("{nom} {}", secondes_lisibles(secondes_systemd(duree)?)))
+        us as f64 / 1e6
     };
-    let etapes: Vec<String> = etapes.split(" + ").filter_map(etape).collect();
-    Some((total, etapes.join(" · ")))
-}
-
-/// `systemd-analyze critical-chain` : les unités du chemin critique et le temps que chacune a pris à démarrer
-/// (« +1.186s »), les plus longues d'abord. `blame` mélangerait ce qui tourne après le démarrage (mise à jour de la
-/// base de locate, par exemple) avec ce qui le retarde vraiment. Le nom d'une unité de l'utilisateur est le sien :
-/// lu prêt à montrer.
-#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
-fn chaine_critique(texte: &str) -> Vec<(String, f64)> {
-    let unite = |l: &str| {
-        let (nom, reste) = l.trim_start_matches(|c: char| !c.is_alphanumeric()).split_once(' ')?;
-        Some((affichable(nom), secondes_systemd(reste.split_once('+')?.1)?))
-    };
-    let mut lents: Vec<(String, f64)> = texte.lines().filter_map(unite).filter(|(_, s)| *s >= 0.5).collect();
-    lents.sort_by(|a, b| b.1.total_cmp(&a.1));
+    let mut lents: HashMap<String, f64> = HashMap::new();
+    if let Some(u) = unite(racine) {
+        lents.insert(racine.to_string(), duree(&u));
+    }
+    let mut vues = std::collections::HashSet::from([racine.to_string()]);
+    let mut a_suivre = vec![racine.to_string()];
+    while let Some(nom) = a_suivre.pop() {
+        let Some(u) = unite(&nom) else { continue };
+        // Comme systemd-analyze : une unité jamais démarrée (début nul) ou active après la fin ne compte pas.
+        let demarrees: Vec<(String, UniteDemarrage)> = u
+            .apres
+            .iter()
+            .filter_map(|d| unite(d).map(|t| (d.clone(), t)))
+            .filter(|(_, t)| t.debut > 0 && t.active > 0 && t.active <= fin)
+            .collect();
+        let Some(derniere) = demarrees.iter().map(|(_, t)| t.active).max() else {
+            continue;
+        };
+        for (d, t) in demarrees.into_iter().filter(|(_, t)| t.active == derniere) {
+            lents.insert(d.clone(), duree(&t));
+            if vues.insert(d.clone()) {
+                a_suivre.push(d);
+            }
+        }
+    }
+    let mut lents: Vec<(String, f64)> = lents
+        .into_iter()
+        .filter(|(_, s)| *s >= 0.5)
+        .map(|(n, s)| (affichable(&n), s))
+        .collect();
+    lents.sort_by(|a, b| b.1.total_cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
     lents.truncate(5);
     lents
 }
@@ -688,11 +750,10 @@ fn occupation_disques(texte: &str, disques: &[String]) -> HashMap<String, u64> {
 mod systeme {
     use std::fs::{read_dir, read_link, read_to_string};
     use std::path::{Path, PathBuf};
-    use std::process::Command;
     use std::time::{Duration, Instant};
 
     use super::*;
-    use crate::commande::lancer;
+    use crate::machine::linux::dbus::{self, Bus, Valeur};
     use crate::machine::linux::natif;
 
     /// Durée entre les deux mesures : assez pour lisser un pic, assez courte pour qu'on attende sans s'impatienter.
@@ -705,13 +766,6 @@ mod systeme {
         /// pid → (nom, temps processeur, mémoire en pages, octets lus et écrits)
         processus: HashMap<u32, (String, u64, u64, Option<u64>)>,
         disques: HashMap<String, u64>,
-    }
-
-    /// La sortie d'une commande qui a réussi (« systemd-analyze critical-chain --no-pager »).
-    fn sortie(commande: &str) -> Option<String> {
-        let mut mots = commande.split(' ');
-        let r = lancer(Command::new(mots.next()?).args(mots), 20)?;
-        (r.code == Some(0)).then_some(r.sortie)
     }
 
     /// Les disques entiers (pas les partitions), sans les disques virtuels.
@@ -753,16 +807,71 @@ mod systeme {
         }
     }
 
-    fn demarrage() -> Result<Demarrage, String> {
-        let absent = tr!(
-            "durée illisible (systemd-analyze absent, ou démarrage pas encore fini)",
-            "duration not readable (no systemd-analyze, or startup not finished yet)"
-        );
-        let temps = sortie("systemd-analyze").ok_or(absent)?;
-        let (total, etapes) =
-            duree_systemd(&temps).ok_or_else(|| tr!("durée illisible", "duration not readable").to_string())?;
-        let lents = chaine_critique(&sortie("systemd-analyze critical-chain --no-pager").unwrap_or_default());
-        Ok(Demarrage { total, etapes, lents })
+    /// La durée du démarrage, demandée à systemd par le bus système (ce que calcule `systemd-analyze`), et ce qui l'a
+    /// retardé (son `critical-chain`).
+    pub(super) fn demarrage() -> Result<Demarrage, String> {
+        let illisible = |e: String| trf!("durée illisible ({e})", "duration not readable ({e})");
+        let mut bus = Bus::systeme().map_err(illisible)?;
+        let mut instant = |nom: &str| {
+            bus.propriete(dbus::SYSTEMD, dbus::CHEMIN_SYSTEMD, dbus::GESTIONNAIRE, nom)
+                .map(|v| v.entier().unwrap_or(0))
+        };
+        let instants = InstantsDemarrage {
+            micrologiciel: instant("FirmwareTimestampMonotonic").map_err(illisible)?,
+            chargeur: instant("LoaderTimestampMonotonic").map_err(illisible)?,
+            initrd: instant("InitRDTimestampMonotonic").map_err(illisible)?,
+            espace_utilisateur: instant("UserspaceTimestampMonotonic").map_err(illisible)?,
+            fin: instant("FinishTimestampMonotonic").map_err(illisible)?,
+            // systemd y écrit le nom du gestionnaire de conteneurs quand il tourne dans l'un d'eux.
+            conteneur: Path::new("/run/systemd/container").exists(),
+        };
+        let (total, etapes) = duree_demarrage(&instants).ok_or_else(|| {
+            tr!(
+                "durée illisible (démarrage pas encore fini)",
+                "duration not readable (startup not finished yet)"
+            )
+            .to_string()
+        })?;
+        Ok(Demarrage {
+            total,
+            etapes,
+            lents: unites_lentes(&mut bus, instants.fin),
+        })
+    }
+
+    /// La chaîne critique, lue unité par unité sur le bus : chemins des unités chargées (ListUnits), puis les
+    /// propriétés de chacune dont la chaîne a besoin. Une lecture qui échoue laisse la liste vide, pas fausse.
+    fn unites_lentes(bus: &mut Bus, fin: u64) -> Vec<(String, f64)> {
+        const RACINE: &str = "default.target";
+        let Ok(mut chemins) = dbus::unites_chargees(bus) else {
+            return Vec::new();
+        };
+        // default.target est un alias : ListUnits ne donne que le nom de l'unité qu'il désigne.
+        let Some(racine) = bus
+            .appeler(
+                dbus::SYSTEMD,
+                dbus::CHEMIN_SYSTEMD,
+                dbus::GESTIONNAIRE,
+                "GetUnit",
+                "s",
+                vec![Valeur::texte_de(RACINE)],
+            )
+            .ok()
+            .and_then(|corps| corps.first().and_then(Valeur::texte).map(String::from))
+        else {
+            return Vec::new();
+        };
+        chemins.insert(RACINE.to_string(), racine);
+        chaine_critique(RACINE, fin, |nom| {
+            let p = bus.proprietes(dbus::SYSTEMD, chemins.get(nom)?, dbus::UNITE).ok()?;
+            let instant = |cle: &str| p.champ(cle).and_then(Valeur::entier).unwrap_or(0);
+            Some(UniteDemarrage {
+                apres: p.champ("After").map(Valeur::textes).unwrap_or_default(),
+                debut: instant("InactiveExitTimestampMonotonic"),
+                active: instant("ActiveEnterTimestampMonotonic"),
+                inactive: instant("InactiveEnterTimestampMonotonic"),
+            })
+        })
     }
 
     /// Les programmes lancés à l'ouverture de session, (nom, programme) : entrées d'autostart actives (celles de
@@ -1507,32 +1616,210 @@ mod tests {
         ));
     }
 
+    #[cfg(target_os = "linux")]
+    /// « 1min 2.105s », « 835ms », « +1.186s » (durées écrites par systemd-analyze) → secondes : pour comparer à la
+    /// commande.
+    fn secondes_systemd(texte: &str) -> Option<f64> {
+        let mut total = None;
+        for morceau in texte.split_whitespace() {
+            let morceau = morceau.trim_start_matches('+');
+            let (nombre, unite) = morceau.split_at(morceau.find(|c: char| c.is_ascii_alphabetic())?);
+            let n: f64 = nombre.parse().ok()?;
+            let facteur = match unite {
+                "h" => 3600.0,
+                "min" => 60.0,
+                "s" => 1.0,
+                "ms" => 0.001,
+                "us" | "µs" => 0.000_001,
+                _ => return None,
+            };
+            total = Some(total.unwrap_or(0.0) + n * facteur);
+        }
+        total
+    }
+
+    #[cfg(target_os = "linux")]
+    /// `systemd-analyze` : « Startup finished in 11.846s (firmware) + … = 40.673s » → (total, noms des étapes).
+    fn duree_de_systemd_analyze(texte: &str) -> Option<(f64, Vec<String>)> {
+        let ligne = texte.lines().find_map(|l| l.strip_prefix("Startup finished in "))?;
+        let (etapes, total) = ligne.rsplit_once(" = ")?;
+        let noms = etapes
+            .split(" + ")
+            .filter_map(|e| Some(e.split_once(" (")?.1.trim_end_matches(')').to_string()))
+            .collect();
+        Some((secondes_systemd(total.trim())?, noms))
+    }
+
+    #[cfg(target_os = "linux")]
+    /// `systemd-analyze critical-chain` : (unité, « +durée ») de chaque ligne qui en a une.
+    fn chaine_de_systemd_analyze(texte: &str) -> Vec<(String, f64)> {
+        let unite = |l: &str| {
+            let (nom, reste) = l.trim_start_matches(|c: char| !c.is_alphanumeric()).split_once(' ')?;
+            Some((nom.to_string(), secondes_systemd(reste.split_once('+')?.1)?))
+        };
+        texte.lines().filter_map(unite).collect()
+    }
+
     #[test]
-    fn durees_de_systemd() {
-        assert_eq!(secondes_systemd("1min 2.105s"), Some(62.105));
-        assert_eq!(secondes_systemd("835ms"), Some(0.835));
-        assert_eq!(secondes_systemd("+1.186s"), Some(1.186));
-        assert_eq!(secondes_systemd("vite"), None);
-        let (total, etapes) = duree_systemd(
-            "Startup finished in 11.846s (firmware) + 8.083s (loader) + 15.167s (kernel) + 5.575s (userspace) = 40.673s \ngraphical.target reached after 3.750s in userspace.\n",
-        )
-        .unwrap();
-        assert!((total - 40.673).abs() < 1e-9);
+    fn durees_du_demarrage() {
+        // Les instants qui donnent « 11.846s (firmware) + 8.083s (loader) + 15.167s (kernel) + 5.575s (userspace) ».
+        let mut t = InstantsDemarrage {
+            micrologiciel: 19_929_000,
+            chargeur: 8_083_000,
+            initrd: 0,
+            espace_utilisateur: 15_167_000,
+            fin: 20_742_000,
+            conteneur: false,
+        };
+        let (total, etapes) = duree_demarrage(&t).unwrap();
+        assert!((total - 40.671).abs() < 1e-9);
         assert_eq!(
             etapes,
             "micrologiciel 11,8 s · chargeur 8,1 s · noyau 15,2 s · système 5,6 s"
         );
-        assert!(duree_systemd("Bootup is not yet finished.").is_none());
-        let chaine = "The time when unit became active or started is printed after the \"@\" character.\n\n\
-                      graphical.target @13.750s\n└─sddm.service @13.647s +102ms\n  └─docker.service @9.1s +4.512s\n    \
-                      └─NetworkManager-wait-online.service @2.3s +6.810s\n      └─basic.target @2.318s\n";
+        // Avec un initrd : le noyau s'arrête à l'initrd, qui dure jusqu'au système.
+        t.initrd = 4_000_000;
         assert_eq!(
-            chaine_critique(chaine),
+            duree_demarrage(&t).unwrap().1,
+            "micrologiciel 11,8 s · chargeur 8,1 s · noyau 4,0 s · initrd 11,2 s · système 5,6 s"
+        );
+        // Sans EFI (machine virtuelle, BIOS) : ni micrologiciel ni chargeur, le total part du noyau.
+        let sans_efi = InstantsDemarrage {
+            espace_utilisateur: 2_000_000,
+            fin: 5_000_000,
+            ..InstantsDemarrage::default()
+        };
+        assert_eq!(
+            duree_demarrage(&sans_efi).unwrap(),
+            (5.0, "noyau 2,0 s · système 3,0 s".to_string())
+        );
+        // Dans un conteneur, seul le système compte.
+        let conteneur = InstantsDemarrage { conteneur: true, ..t };
+        assert_eq!(
+            duree_demarrage(&conteneur).unwrap(),
+            (5.575, "système 5,6 s".to_string())
+        );
+        // Pas fini : rien.
+        assert!(duree_demarrage(&InstantsDemarrage::default()).is_none());
+    }
+
+    fn unite(apres: &[&str], debut: u64, active: u64) -> UniteDemarrage {
+        UniteDemarrage {
+            apres: apres.iter().map(|a| (*a).to_string()).collect(),
+            debut,
+            active,
+            inactive: 0,
+        }
+    }
+
+    /// Le chemin critique d'un faux démarrage : on suit, à chaque étape, la dépendance devenue active en dernier ;
+    /// ni ce qui a démarré après la fin, ni ce qui n'a jamais démarré, ni une unité non chargée.
+    #[test]
+    fn chemin_critique() {
+        let s = 1_000_000;
+        let graphe: HashMap<&str, UniteDemarrage> = HashMap::from([
+            (
+                "default.target",
+                unite(
+                    &["sddm.service", "locate.service", "absente.service", "x.service"],
+                    0,
+                    14 * s,
+                ),
+            ),
+            (
+                "sddm.service",
+                unite(&["docker.service", "rapide.service"], 13 * s, 13 * s + 102_000),
+            ),
+            // Démarrée après la fin du démarrage : hors du chemin, même longue.
+            ("locate.service", unite(&[], 15 * s, 60 * s)),
+            // Jamais démarrée.
+            ("x.service", unite(&[], 0, 0)),
+            (
+                "docker.service",
+                unite(&["nm-wait-online.service", "basic.target"], 9 * s, 13 * s),
+            ),
+            ("rapide.service", unite(&["basic.target"], 3 * s, 4 * s)),
+            ("nm-wait-online.service", unite(&["basic.target"], 2 * s, 8_810_000)),
+            // Une boucle de dépendances ne fait pas tourner en rond.
+            ("basic.target", unite(&["default.target"], 2 * s, 2 * s)),
+        ]);
+        let mut lus = Vec::new();
+        let lents = chaine_critique("default.target", 20 * s, |nom| {
+            lus.push(nom.to_string());
+            graphe.get(nom).cloned()
+        });
+        assert_eq!(
+            lents,
             [
-                ("NetworkManager-wait-online.service".to_string(), 6.81),
-                ("docker.service".to_string(), 4.512)
+                ("nm-wait-online.service".to_string(), 6.81),
+                ("docker.service".to_string(), 4.0)
             ]
         );
+        // Chaque unité n'est demandée qu'une fois au bus.
+        let mut uniques = lus.clone();
+        uniques.sort();
+        uniques.dedup();
+        assert_eq!(uniques.len(), lus.len());
+        // Une unité relancée depuis (son début est après son activation) : sa durée va jusqu'à sa retombée.
+        let relancee = UniteDemarrage {
+            inactive: 7 * s,
+            ..unite(&[], 6 * s, 3 * s)
+        };
+        let lents = chaine_critique("r", 10 * s, |nom| match nom {
+            "r" => Some(unite(&["e", "f"], 0, 5 * s)),
+            "e" => Some(relancee.clone()),
+            "f" => Some(unite(&[], s, 2 * s)),
+            _ => None,
+        });
+        assert_eq!(lents, [("e".to_string(), 1.0)]);
+    }
+
+    /// Sur cet ordinateur, quand `systemd-analyze` répond : la durée lue sur le bus est la sienne, ses étapes aussi,
+    /// et les unités lentes de son chemin critique sont celles trouvées ici.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn demarrage_comme_systemd_analyze() {
+        let commande = |args: &[&str]| {
+            crate::commande::lancer(std::process::Command::new("systemd-analyze").args(args), 30)
+                .filter(|r| r.code == Some(0))
+                .map(|r| r.sortie)
+        };
+        let Some((total, noms)) = commande(&[]).as_deref().and_then(duree_de_systemd_analyze) else {
+            return;
+        };
+        let d = systeme::demarrage().expect("systemd-analyze répond : le bus aussi");
+        // systemd-analyze arrondit chaque étape à la milliseconde.
+        assert!((d.total - total).abs() < 0.005, "{} contre {total}", d.total);
+        assert_eq!(
+            d.etapes.split(" · ").count(),
+            noms.len(),
+            "{} contre {noms:?}",
+            d.etapes
+        );
+        let Some(chaine) = commande(&["critical-chain", "--no-pager"]) else {
+            return;
+        };
+        let mut attendus: Vec<(String, f64)> = chaine_de_systemd_analyze(&chaine);
+        attendus.sort_by(|a, b| b.1.total_cmp(&a.1));
+        attendus.dedup_by(|a, b| a.0 == b.0);
+        // Chaque unité lente d'un côté est de l'autre, sauf au bord : arrondi autour d'une demi-seconde, ou égalité
+        // avec la cinquième.
+        let plus_petite = d.lents.last().map_or(0.0, |l| l.1);
+        for (nom, s) in &attendus {
+            let au_bord = (*s - 0.5).abs() < 0.002 || (d.lents.len() == 5 && *s <= plus_petite + 0.002);
+            assert!(
+                *s < 0.5 || au_bord || d.lents.iter().any(|l| &l.0 == nom),
+                "{nom} {s} absent de {:?}",
+                d.lents
+            );
+        }
+        for (nom, s) in &d.lents {
+            let theirs = attendus.iter().find(|a| &a.0 == nom);
+            assert!(
+                theirs.is_some_and(|a| (a.1 - s).abs() < 0.002),
+                "{nom} {s} : systemd-analyze dit {theirs:?}"
+            );
+        }
     }
 
     /// Un programme choisit son nom, un service ou une entrée de démarrage aussi : piégés, ils arrivent inoffensifs à
@@ -1551,8 +1838,15 @@ mod tests {
             .into_iter(),
         );
         assert_eq!(p[0].nom, vu);
-        let chaine = format!("graphical.target @13.750s\n└─{piege}.service @9.1s +4.512s\n");
-        assert_eq!(chaine_critique(&chaine)[0].0, format!("{vu}.service"));
+        let service = format!("{piege}.service");
+        let lents = chaine_critique("default.target", 20_000_000, |nom| {
+            Some(if nom == "default.target" {
+                unite(&[&service], 0, 10_000_000)
+            } else {
+                unite(&[], 1_000_000, 5_512_000)
+            })
+        });
+        assert_eq!(lents[0].0, format!("{vu}.service"));
         assert_eq!(
             avec_poids(&p, [(piege.to_string(), "x".to_string())].into_iter())[0].nom,
             vu

@@ -1,0 +1,1318 @@
+//! Un petit client D-Bus écrit pour Vanguard, sans bibliothèque : une prise Unix vers le bus système,
+//! l'authentification EXTERNAL, des messages encodés et décodés à la main (en-tête, corps aligné, signatures).
+//!
+//! Pourquoi : `systemctl`, `systemd-analyze` et `busctl` ne font que parler D-Bus puis mettre la réponse en texte, qu'il
+//! fallait ensuite relire (une langue, un format qui change d'une version à l'autre, un faux dans le PATH). La réponse
+//! D-Bus, elle, est typée.
+//!
+//! Lecture seule : seules les méthodes de `LECTURES` partent, toutes sans effet sur le système ; une autre est refusée
+//! avant d'être envoyée. Aucun appel ne demande d'autorisation interactive (pas de fenêtre polkit).
+
+use std::collections::HashMap;
+use std::fmt::Write as _;
+use std::io::{Read, Write};
+use std::os::unix::net::UnixStream;
+use std::time::{Duration, Instant};
+
+use crate::{tr, trf};
+
+/// La prise du bus système (chemin fixe de la spécification ; /var/run en est un lien).
+const BUS_SYSTEME: &str = "/run/dbus/system_bus_socket";
+/// Le temps laissé à une réponse, comme `busctl` (10 s) : un service bloqué ne doit pas figer Vanguard.
+const DELAI: Duration = Duration::from_secs(10);
+/// Un message plus gros est refusé (la spécification permet 128 Mio ; aucune lecture de Vanguard n'en approche).
+const TAILLE_MAX: usize = 32 << 20;
+/// Un tableau plus long est refusé (limite de la spécification).
+const TABLEAU_MAX: usize = 64 << 20;
+/// Tableaux, structures et variantes imbriqués : la spécification en permet 64 en tout.
+const PROFONDEUR_MAX: usize = 64;
+
+const DBUS: &str = "org.freedesktop.DBus";
+const PROPRIETES: &str = "org.freedesktop.DBus.Properties";
+const OBJETS: &str = "org.freedesktop.DBus.ObjectManager";
+
+pub(crate) const SYSTEMD: &str = "org.freedesktop.systemd1";
+pub(crate) const CHEMIN_SYSTEMD: &str = "/org/freedesktop/systemd1";
+pub(crate) const GESTIONNAIRE: &str = "org.freedesktop.systemd1.Manager";
+pub(crate) const UNITE: &str = "org.freedesktop.systemd1.Unit";
+
+/// Les seules méthodes que ce client envoie, (interface, méthode) : toutes lisent, aucune ne change le système.
+const LECTURES: &[(&str, &str)] = &[
+    (DBUS, "Hello"),
+    (PROPRIETES, "Get"),
+    (PROPRIETES, "GetAll"),
+    (OBJETS, "GetManagedObjects"),
+    (GESTIONNAIRE, "ListUnits"),
+    (GESTIONNAIRE, "ListUnitsFiltered"),
+    (GESTIONNAIRE, "GetUnit"),
+    // Lit le journal SMART déjà relevé par udisks2 ; SmartUpdate, qui le relève, n'est pas permis.
+    ("org.freedesktop.UDisks2.NVMe.Controller", "SmartGetAttributes"),
+];
+
+// Genres de message.
+const APPEL: u8 = 1;
+const RETOUR: u8 = 2;
+const ERREUR: u8 = 3;
+const SIGNAL: u8 = 4;
+
+/// Une valeur D-Bus. `Texte` sert aux chaînes (`s`), chemins d'objet (`o`) et signatures (`g`) ; une variante garde
+/// sa signature pour pouvoir être réécrite.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum Valeur {
+    Octet(u8),
+    Booleen(bool),
+    I16(i16),
+    U16(u16),
+    I32(i32),
+    U32(u32),
+    I64(i64),
+    U64(u64),
+    Reel(f64),
+    Texte(String),
+    Fd(u32),
+    Tableau(Vec<Valeur>),
+    Dictionnaire(Vec<(Valeur, Valeur)>),
+    Structure(Vec<Valeur>),
+    Variante(String, Box<Valeur>),
+}
+
+impl Valeur {
+    pub(crate) fn texte_de(t: &str) -> Self {
+        Valeur::Texte(t.to_string())
+    }
+
+    /// La valeur elle-même, sans les variantes qui l'enveloppent.
+    pub(crate) fn nue(&self) -> &Valeur {
+        let mut v = self;
+        while let Valeur::Variante(_, dedans) = v {
+            v = dedans;
+        }
+        v
+    }
+
+    pub(crate) fn texte(&self) -> Option<&str> {
+        match self.nue() {
+            Valeur::Texte(t) => Some(t),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn booleen(&self) -> Option<bool> {
+        match self.nue() {
+            Valeur::Booleen(b) => Some(*b),
+            _ => None,
+        }
+    }
+
+    /// Un entier positif ou nul, quel que soit son type ; `None` pour un négatif ou autre chose qu'un entier.
+    pub(crate) fn entier(&self) -> Option<u64> {
+        match *self.nue() {
+            Valeur::Octet(n) => Some(n.into()),
+            Valeur::U16(n) => Some(n.into()),
+            Valeur::U32(n) => Some(n.into()),
+            Valeur::U64(n) => Some(n),
+            Valeur::I16(n) => u64::try_from(n).ok(),
+            Valeur::I32(n) => u64::try_from(n).ok(),
+            Valeur::I64(n) => u64::try_from(n).ok(),
+            _ => None,
+        }
+    }
+
+    /// Les éléments d'un tableau ou les membres d'une structure (vide pour le reste).
+    pub(crate) fn elements(&self) -> &[Valeur] {
+        match self.nue() {
+            Valeur::Tableau(v) | Valeur::Structure(v) => v,
+            _ => &[],
+        }
+    }
+
+    /// Les entrées d'un dictionnaire (vide pour le reste).
+    pub(crate) fn entrees(&self) -> &[(Valeur, Valeur)] {
+        match self.nue() {
+            Valeur::Dictionnaire(v) => v,
+            _ => &[],
+        }
+    }
+
+    /// La valeur à la clé `cle` d'un dictionnaire à clés texte (`a{sv}`, `a{oa{sv}}`…), sans sa variante.
+    pub(crate) fn champ(&self, cle: &str) -> Option<&Valeur> {
+        self.entrees()
+            .iter()
+            .find(|(k, _)| k.texte() == Some(cle))
+            .map(|(_, v)| v.nue())
+    }
+
+    /// Les chaînes d'un tableau (`as`) ; les éléments d'un autre type sont sautés.
+    pub(crate) fn textes(&self) -> Vec<String> {
+        self.elements()
+            .iter()
+            .filter_map(|v| v.texte().map(String::from))
+            .collect()
+    }
+}
+
+fn mal_forme(detail: &str) -> String {
+    trf!(
+        "message D-Bus mal formé ({detail})",
+        "malformed D-Bus message ({detail})"
+    )
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Signatures
+
+fn type_de_base(c: u8) -> bool {
+    b"ybnqiuxtdsogh".contains(&c)
+}
+
+/// La longueur du premier type complet de `sig` (« a{sv}i » → 5).
+fn longueur_type(sig: &[u8], profondeur: usize) -> Result<usize, String> {
+    if profondeur > PROFONDEUR_MAX {
+        return Err(mal_forme("signature trop imbriquée"));
+    }
+    match sig.first() {
+        Some(&c) if type_de_base(c) || c == b'v' => Ok(1),
+        Some(b'a') if sig.get(1) == Some(&b'{') => {
+            if !sig.get(2).is_some_and(|&c| type_de_base(c)) {
+                return Err(mal_forme("clé de dictionnaire"));
+            }
+            let n = longueur_type(&sig[3..], profondeur + 1)?;
+            if sig.get(3 + n) != Some(&b'}') {
+                return Err(mal_forme("dictionnaire"));
+            }
+            Ok(4 + n)
+        }
+        Some(b'a') => Ok(1 + longueur_type(&sig[1..], profondeur + 1)?),
+        Some(b'(') => {
+            let mut i = 1;
+            loop {
+                match sig.get(i) {
+                    Some(b')') if i > 1 => return Ok(i + 1),
+                    None | Some(b')') => return Err(mal_forme("structure")),
+                    _ => i += longueur_type(&sig[i..], profondeur + 1)?,
+                }
+            }
+        }
+        _ => Err(mal_forme("signature")),
+    }
+}
+
+/// Les types complets d'une signature (« sa{sv} » → « s », « a{sv} »).
+fn types(sig: &str) -> Result<Vec<&[u8]>, String> {
+    let mut reste = sig.as_bytes();
+    if reste.len() > 255 {
+        return Err(mal_forme("signature trop longue"));
+    }
+    let mut liste = Vec::new();
+    while !reste.is_empty() {
+        let n = longueur_type(reste, 0)?;
+        liste.push(&reste[..n]);
+        reste = &reste[n..];
+    }
+    Ok(liste)
+}
+
+/// L'alignement d'un type, d'après son premier caractère.
+fn alignement(c: u8) -> usize {
+    match c {
+        b'n' | b'q' => 2,
+        b'b' | b'i' | b'u' | b's' | b'o' | b'a' | b'h' => 4,
+        b'x' | b't' | b'd' | b'(' | b'{' => 8,
+        _ => 1,
+    }
+}
+
+/// Un chemin d'objet valide : « / », ou des éléments [A-Za-z0-9_] non vides séparés par « / ».
+fn chemin_valide(c: &str) -> bool {
+    c == "/"
+        || c.strip_prefix('/').is_some_and(|reste| {
+            reste
+                .split('/')
+                .all(|e| !e.is_empty() && e.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_'))
+        })
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Encodage (petit-boutiste)
+
+#[derive(Default)]
+struct Ecrivain {
+    octets: Vec<u8>,
+}
+
+impl Ecrivain {
+    fn aligner(&mut self, n: usize) {
+        while !self.octets.len().is_multiple_of(n) {
+            self.octets.push(0);
+        }
+    }
+
+    fn u32(&mut self, n: u32) {
+        self.aligner(4);
+        self.octets.extend(n.to_le_bytes());
+    }
+
+    fn chaine(&mut self, t: &str) -> Result<(), String> {
+        if t.contains('\0') {
+            return Err(mal_forme("caractère nul dans une chaîne"));
+        }
+        self.u32(u32::try_from(t.len()).map_err(|_| mal_forme("chaîne trop longue"))?);
+        self.octets.extend(t.as_bytes());
+        self.octets.push(0);
+        Ok(())
+    }
+
+    fn signature(&mut self, t: &str) -> Result<(), String> {
+        types(t)?;
+        self.octets
+            .push(u8::try_from(t.len()).map_err(|_| mal_forme("signature trop longue"))?);
+        self.octets.extend(t.as_bytes());
+        self.octets.push(0);
+        Ok(())
+    }
+
+    /// Écrit `v`, du type complet `sig`.
+    fn ecrire(&mut self, sig: &[u8], v: &Valeur, profondeur: usize) -> Result<(), String> {
+        if profondeur > PROFONDEUR_MAX {
+            return Err(mal_forme("valeur trop imbriquée"));
+        }
+        let c = sig[0];
+        self.aligner(alignement(c));
+        match (c, v) {
+            (b'y', Valeur::Octet(n)) => self.octets.push(*n),
+            (b'b', Valeur::Booleen(b)) => self.u32(u32::from(*b)),
+            (b'n', Valeur::I16(n)) => self.octets.extend(n.to_le_bytes()),
+            (b'q', Valeur::U16(n)) => self.octets.extend(n.to_le_bytes()),
+            (b'i', Valeur::I32(n)) => self.octets.extend(n.to_le_bytes()),
+            (b'u', Valeur::U32(n)) | (b'h', Valeur::Fd(n)) => self.u32(*n),
+            (b'x', Valeur::I64(n)) => self.octets.extend(n.to_le_bytes()),
+            (b't', Valeur::U64(n)) => self.octets.extend(n.to_le_bytes()),
+            (b'd', Valeur::Reel(n)) => self.octets.extend(n.to_le_bytes()),
+            (b's', Valeur::Texte(t)) => self.chaine(t)?,
+            (b'o', Valeur::Texte(t)) if chemin_valide(t) => self.chaine(t)?,
+            (b'g', Valeur::Texte(t)) => self.signature(t)?,
+            (b'v', Valeur::Variante(s, dedans)) => {
+                let t = types(s)?;
+                let [seul] = t[..] else {
+                    return Err(mal_forme("variante à plusieurs types"));
+                };
+                self.signature(s)?;
+                self.ecrire(seul, dedans, profondeur + 1)?;
+            }
+            (b'(', Valeur::Structure(membres)) => {
+                let t = types(std::str::from_utf8(&sig[1..sig.len() - 1]).unwrap_or_default())?;
+                if t.len() != membres.len() {
+                    return Err(mal_forme("structure incomplète"));
+                }
+                for (s, m) in t.into_iter().zip(membres) {
+                    self.ecrire(s, m, profondeur + 1)?;
+                }
+            }
+            (b'a', Valeur::Tableau(_) | Valeur::Dictionnaire(_)) => self.tableau(sig, v, profondeur)?,
+            _ => return Err(mal_forme("valeur d'un autre type que sa signature")),
+        }
+        Ok(())
+    }
+
+    fn tableau(&mut self, sig: &[u8], v: &Valeur, profondeur: usize) -> Result<(), String> {
+        let element = &sig[1..];
+        let place = self.octets.len();
+        self.u32(0);
+        // Le remplissage avant le premier élément n'entre pas dans la longueur.
+        self.aligner(alignement(element[0]));
+        let debut = self.octets.len();
+        match (element[0], v) {
+            (b'{', Valeur::Dictionnaire(entrees)) => {
+                let cle = &element[1..2];
+                let valeur = &element[2..element.len() - 1];
+                for (k, val) in entrees {
+                    self.aligner(8);
+                    self.ecrire(cle, k, profondeur + 1)?;
+                    self.ecrire(valeur, val, profondeur + 1)?;
+                }
+            }
+            (c, Valeur::Tableau(elements)) if c != b'{' => {
+                for e in elements {
+                    self.ecrire(element, e, profondeur + 1)?;
+                }
+            }
+            _ => return Err(mal_forme("valeur d'un autre type que sa signature")),
+        }
+        let longueur = self.octets.len() - debut;
+        if longueur > TABLEAU_MAX {
+            return Err(mal_forme("tableau trop long"));
+        }
+        let n = u32::try_from(longueur).map_err(|_| mal_forme("tableau trop long"))?;
+        self.octets[place..place + 4].copy_from_slice(&n.to_le_bytes());
+        Ok(())
+    }
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Décodage (les deux boutismes)
+
+struct Lecteur<'a> {
+    octets: &'a [u8],
+    pos: usize,
+    grand_boutiste: bool,
+}
+
+impl Lecteur<'_> {
+    fn prendre(&mut self, n: usize) -> Result<&[u8], String> {
+        let fin = self.pos.checked_add(n).filter(|&f| f <= self.octets.len());
+        let fin = fin.ok_or_else(|| mal_forme("message tronqué"))?;
+        let morceau = &self.octets[self.pos..fin];
+        self.pos = fin;
+        Ok(morceau)
+    }
+
+    fn aligner(&mut self, n: usize) -> Result<(), String> {
+        let reste = (n - self.pos % n) % n;
+        self.prendre(reste).map(|_| ())
+    }
+
+    fn fixe<const N: usize>(&mut self) -> Result<[u8; N], String> {
+        self.aligner(N)?;
+        let mut t = [0; N];
+        t.copy_from_slice(self.prendre(N)?);
+        if self.grand_boutiste {
+            t.reverse();
+        }
+        // Rendu petit-boutiste : les appelants décodent tous en from_le_bytes.
+        Ok(t)
+    }
+
+    fn u32(&mut self) -> Result<u32, String> {
+        self.fixe::<4>().map(u32::from_le_bytes)
+    }
+
+    fn texte(&mut self, n: usize) -> Result<String, String> {
+        let t = self.prendre(n)?.to_vec();
+        if self.prendre(1)? != [0] {
+            return Err(mal_forme("chaîne sans nul final"));
+        }
+        String::from_utf8(t).map_err(|_| mal_forme("chaîne hors UTF-8"))
+    }
+
+    fn signature(&mut self) -> Result<String, String> {
+        let n = self.prendre(1)?[0];
+        let s = self.texte(n.into())?;
+        types(&s)?;
+        Ok(s)
+    }
+
+    /// Lit une valeur du type complet `sig`.
+    fn lire(&mut self, sig: &[u8], profondeur: usize) -> Result<Valeur, String> {
+        if profondeur > PROFONDEUR_MAX {
+            return Err(mal_forme("valeur trop imbriquée"));
+        }
+        Ok(match sig[0] {
+            b'y' => Valeur::Octet(self.prendre(1)?[0]),
+            b'b' => match self.u32()? {
+                0 => Valeur::Booleen(false),
+                1 => Valeur::Booleen(true),
+                _ => return Err(mal_forme("booléen")),
+            },
+            b'n' => Valeur::I16(i16::from_le_bytes(self.fixe()?)),
+            b'q' => Valeur::U16(u16::from_le_bytes(self.fixe()?)),
+            b'i' => Valeur::I32(i32::from_le_bytes(self.fixe()?)),
+            b'u' => Valeur::U32(self.u32()?),
+            b'h' => Valeur::Fd(self.u32()?),
+            b'x' => Valeur::I64(i64::from_le_bytes(self.fixe()?)),
+            b't' => Valeur::U64(u64::from_le_bytes(self.fixe()?)),
+            b'd' => Valeur::Reel(f64::from_le_bytes(self.fixe()?)),
+            b's' | b'o' => {
+                let n = self.u32()? as usize;
+                let t = self.texte(n)?;
+                if sig[0] == b'o' && !chemin_valide(&t) {
+                    return Err(mal_forme("chemin d'objet"));
+                }
+                Valeur::Texte(t)
+            }
+            b'g' => Valeur::Texte(self.signature()?),
+            b'v' => {
+                let s = self.signature()?;
+                let t = types(&s)?;
+                let [seul] = t[..] else {
+                    return Err(mal_forme("variante à plusieurs types"));
+                };
+                let dedans = self.lire(seul, profondeur + 1)?;
+                Valeur::Variante(s, Box::new(dedans))
+            }
+            b'(' => {
+                self.aligner(8)?;
+                let t = types(std::str::from_utf8(&sig[1..sig.len() - 1]).unwrap_or_default())?;
+                let mut membres = Vec::with_capacity(t.len());
+                for s in t {
+                    membres.push(self.lire(s, profondeur + 1)?);
+                }
+                Valeur::Structure(membres)
+            }
+            b'a' => self.tableau(&sig[1..], profondeur)?,
+            _ => return Err(mal_forme("signature")),
+        })
+    }
+
+    fn tableau(&mut self, element: &[u8], profondeur: usize) -> Result<Valeur, String> {
+        let longueur = self.u32()? as usize;
+        if longueur > TABLEAU_MAX {
+            return Err(mal_forme("tableau trop long"));
+        }
+        self.aligner(alignement(element[0]))?;
+        let fin = self
+            .pos
+            .checked_add(longueur)
+            .filter(|&f| f <= self.octets.len())
+            .ok_or_else(|| mal_forme("tableau tronqué"))?;
+        // Chaque élément prend au moins un octet : la boucle finit.
+        let dictionnaire = element[0] == b'{';
+        let mut elements = Vec::new();
+        let mut entrees = Vec::new();
+        while self.pos < fin {
+            if dictionnaire {
+                self.aligner(8)?;
+                let cle = self.lire(&element[1..2], profondeur + 1)?;
+                let valeur = self.lire(&element[2..element.len() - 1], profondeur + 1)?;
+                entrees.push((cle, valeur));
+            } else {
+                elements.push(self.lire(element, profondeur + 1)?);
+            }
+        }
+        if self.pos != fin {
+            return Err(mal_forme("tableau débordé"));
+        }
+        Ok(if dictionnaire {
+            Valeur::Dictionnaire(entrees)
+        } else {
+            Valeur::Tableau(elements)
+        })
+    }
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Messages
+
+/// Un message D-Bus : l'en-tête et ses champs, puis le corps décodé d'après `signature`.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub(crate) struct Message {
+    pub genre: u8,
+    pub drapeaux: u8,
+    pub serie: u32,
+    pub chemin: Option<String>,
+    pub interface: Option<String>,
+    pub membre: Option<String>,
+    pub nom_erreur: Option<String>,
+    pub reponse_a: Option<u32>,
+    pub destination: Option<String>,
+    pub expediteur: Option<String>,
+    pub signature: String,
+    pub corps: Vec<Valeur>,
+}
+
+impl Message {
+    fn appel(
+        destination: &str,
+        chemin: &str,
+        interface: &str,
+        membre: &str,
+        signature: &str,
+        corps: Vec<Valeur>,
+    ) -> Self {
+        Message {
+            genre: APPEL,
+            chemin: Some(chemin.into()),
+            interface: Some(interface.into()),
+            membre: Some(membre.into()),
+            destination: Some(destination.into()),
+            signature: signature.into(),
+            corps,
+            ..Message::default()
+        }
+    }
+
+    /// Les octets du message, petit-boutiste.
+    fn encoder(&self) -> Result<Vec<u8>, String> {
+        let t = types(&self.signature)?;
+        if t.len() != self.corps.len() {
+            return Err(mal_forme("corps différent de sa signature"));
+        }
+        let mut corps = Ecrivain::default();
+        for (s, v) in t.into_iter().zip(&self.corps) {
+            corps.ecrire(s, v, 0)?;
+        }
+        let champ = |code: u8, sig: &str, v: Valeur| {
+            Valeur::Structure(vec![Valeur::Octet(code), Valeur::Variante(sig.into(), Box::new(v))])
+        };
+        let mut champs = Vec::new();
+        let textes = [
+            (1, "o", &self.chemin),
+            (2, "s", &self.interface),
+            (3, "s", &self.membre),
+            (4, "s", &self.nom_erreur),
+            (6, "s", &self.destination),
+            (7, "s", &self.expediteur),
+        ];
+        for (code, sig, v) in textes {
+            if let Some(v) = v {
+                champs.push(champ(code, sig, Valeur::texte_de(v)));
+            }
+        }
+        if let Some(n) = self.reponse_a {
+            champs.push(champ(5, "u", Valeur::U32(n)));
+        }
+        if !self.signature.is_empty() {
+            champs.push(champ(8, "g", Valeur::texte_de(&self.signature)));
+        }
+        champs.sort_by_key(|c| c.elements().first().and_then(Valeur::entier));
+        let mut e = Ecrivain::default();
+        e.octets.extend([b'l', self.genre, self.drapeaux, 1]);
+        e.u32(u32::try_from(corps.octets.len()).map_err(|_| mal_forme("corps trop long"))?);
+        e.u32(self.serie);
+        e.ecrire(b"a(yv)", &Valeur::Tableau(champs), 0)?;
+        e.aligner(8);
+        e.octets.extend(corps.octets);
+        if e.octets.len() > TAILLE_MAX {
+            return Err(mal_forme("message trop long"));
+        }
+        Ok(e.octets)
+    }
+
+    /// Le message entier lu dans `octets` (ni plus ni moins).
+    fn decoder(octets: &[u8]) -> Result<Self, String> {
+        let grand_boutiste = match octets.first() {
+            Some(b'l') => false,
+            Some(b'B') => true,
+            _ => return Err(mal_forme("boutisme")),
+        };
+        let mut l = Lecteur {
+            octets,
+            pos: 1,
+            grand_boutiste,
+        };
+        let [genre, drapeaux, version] = l.prendre(3)?.try_into().map_err(|_| mal_forme("en-tête"))?;
+        if version != 1 {
+            return Err(mal_forme("version du protocole"));
+        }
+        let longueur_corps = l.u32()? as usize;
+        let serie = l.u32()?;
+        if serie == 0 {
+            return Err(mal_forme("numéro de série nul"));
+        }
+        let mut m = Message {
+            genre,
+            drapeaux,
+            serie,
+            ..Message::default()
+        };
+        for c in l.lire(b"a(yv)", 0)?.elements() {
+            let [Valeur::Octet(code), Valeur::Variante(sig, v)] = c.elements() else {
+                continue;
+            };
+            let texte = || v.texte().map(String::from).ok_or_else(|| mal_forme("champ d'en-tête"));
+            match (code, sig.as_str()) {
+                (1, "o") => m.chemin = Some(texte()?),
+                (2, "s") => m.interface = Some(texte()?),
+                (3, "s") => m.membre = Some(texte()?),
+                (4, "s") => m.nom_erreur = Some(texte()?),
+                (5, "u") => m.reponse_a = v.entier().and_then(|n| u32::try_from(n).ok()),
+                (6, "s") => m.destination = Some(texte()?),
+                (7, "s") => m.expediteur = Some(texte()?),
+                (8, "g") => m.signature = texte()?,
+                // Aucun descripteur n'a été négocié : un message qui en annonce n'est pas pour ce client.
+                (9, "u") if v.entier() != Some(0) => return Err(mal_forme("descripteurs de fichier")),
+                (9, "u") => {}
+                (1..=9, _) => return Err(mal_forme("type d'un champ d'en-tête")),
+                // Un champ inconnu est ignoré, comme le veut la spécification.
+                _ => {}
+            }
+        }
+        l.aligner(8)?;
+        if l.pos.checked_add(longueur_corps) != Some(octets.len()) {
+            return Err(mal_forme("longueur du corps"));
+        }
+        for s in types(&m.signature)? {
+            m.corps.push(l.lire(s, 0)?);
+        }
+        if l.pos != octets.len() {
+            return Err(mal_forme("corps plus long que sa signature"));
+        }
+        let complet = match genre {
+            APPEL => m.chemin.is_some() && m.membre.is_some(),
+            RETOUR => m.reponse_a.is_some(),
+            ERREUR => m.reponse_a.is_some() && m.nom_erreur.is_some(),
+            SIGNAL => m.chemin.is_some() && m.interface.is_some() && m.membre.is_some(),
+            _ => true,
+        };
+        if !complet {
+            return Err(mal_forme("champ d'en-tête manquant"));
+        }
+        Ok(m)
+    }
+}
+
+/// La longueur totale d'un message, d'après ses 16 premiers octets.
+fn longueur_totale(debut: &[u8; 16]) -> Result<usize, String> {
+    let nombre = |i: usize| {
+        let t = [debut[i], debut[i + 1], debut[i + 2], debut[i + 3]];
+        u64::from(if debut[0] == b'B' {
+            u32::from_be_bytes(t)
+        } else {
+            u32::from_le_bytes(t)
+        })
+    };
+    let entete = (16 + nombre(12)).div_ceil(8) * 8;
+    usize::try_from(entete + nombre(4))
+        .ok()
+        .filter(|&n| n <= TAILLE_MAX)
+        .ok_or_else(|| mal_forme("message trop long"))
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Connexion
+
+fn erreur_io(e: &std::io::Error) -> String {
+    if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) {
+        tr!("le bus n'a pas répondu à temps", "the bus did not answer in time").to_string()
+    } else {
+        trf!("bus D-Bus : {e}", "D-Bus: {e}")
+    }
+}
+
+/// Une connexion au bus, prête aux appels.
+pub(crate) struct Bus {
+    prise: UnixStream,
+    serie: u32,
+}
+
+impl Bus {
+    /// Le bus système (services de l'ordinateur : systemd, udisks2…).
+    pub(crate) fn systeme() -> Result<Self, String> {
+        let prise = UnixStream::connect(BUS_SYSTEME)
+            .map_err(|e| trf!("bus système injoignable ({e})", "system bus unreachable ({e})"))?;
+        Self::sur(prise)
+    }
+
+    /// Authentifie la prise puis se présente au bus (Hello, obligatoire avant tout autre appel).
+    fn sur(prise: UnixStream) -> Result<Self, String> {
+        prise.set_read_timeout(Some(DELAI)).map_err(|e| erreur_io(&e))?;
+        prise.set_write_timeout(Some(DELAI)).map_err(|e| erreur_io(&e))?;
+        let mut bus = Bus { prise, serie: 0 };
+        bus.authentifier()?;
+        bus.echanger(Message::appel(
+            DBUS,
+            "/org/freedesktop/DBus",
+            DBUS,
+            "Hello",
+            "",
+            Vec::new(),
+        ))?;
+        Ok(bus)
+    }
+
+    fn ecrire(&mut self, octets: &[u8]) -> Result<(), String> {
+        self.prise.write_all(octets).map_err(|e| erreur_io(&e))
+    }
+
+    /// Une ligne de l'authentification, sans « \r\n ». Lue octet par octet : rien du flux binaire qui suit n'est pris.
+    fn ligne(&mut self) -> Result<String, String> {
+        let mut ligne = Vec::new();
+        let mut octet = [0];
+        while !ligne.ends_with(b"\r\n") {
+            if ligne.len() > 1024 {
+                return Err(mal_forme("ligne d'authentification trop longue"));
+            }
+            self.prise.read_exact(&mut octet).map_err(|e| erreur_io(&e))?;
+            ligne.push(octet[0]);
+        }
+        ligne.truncate(ligne.len() - 2);
+        Ok(String::from_utf8_lossy(&ligne).into_owned())
+    }
+
+    /// EXTERNAL : le bus reconnaît le compte au noyau (les droits de la prise). Sans identité écrite d'abord, il prend
+    /// celle que le noyau lui donne, juste aussi dans un espace de noms d'utilisateurs (`unshare -r`), où le
+    /// programme se croit root ; un bus qui la veut écrite reçoit l'uid en hexadécimal.
+    fn authentifier(&mut self) -> Result<(), String> {
+        self.ecrire(b"\0AUTH EXTERNAL\r\n")?;
+        let mut reponse = self.ligne()?;
+        if reponse == "DATA" || reponse.starts_with("DATA ") {
+            self.ecrire(b"DATA\r\n")?;
+            reponse = self.ligne()?;
+        }
+        if reponse.starts_with("REJECTED") {
+            // SAFETY : geteuid ne prend rien et ne peut pas échouer.
+            let uid = unsafe { libc::geteuid() };
+            let hexa = uid.to_string().bytes().fold(String::new(), |mut h, b| {
+                let _ = write!(h, "{b:02x}");
+                h
+            });
+            self.ecrire(format!("AUTH EXTERNAL {hexa}\r\n").as_bytes())?;
+            reponse = self.ligne()?;
+        }
+        if !reponse.starts_with("OK ") {
+            let vu = crate::ui::affichable(&reponse);
+            return Err(trf!(
+                "le bus a refusé la connexion ({vu})",
+                "the bus refused the connection ({vu})"
+            ));
+        }
+        self.ecrire(b"BEGIN\r\n")
+    }
+
+    fn recevoir(&mut self, echeance: Instant) -> Result<Message, String> {
+        let reste = echeance.saturating_duration_since(Instant::now());
+        if reste.is_zero() {
+            return Err(tr!("le bus n'a pas répondu à temps", "the bus did not answer in time").to_string());
+        }
+        self.prise.set_read_timeout(Some(reste)).map_err(|e| erreur_io(&e))?;
+        let mut debut = [0; 16];
+        self.prise.read_exact(&mut debut).map_err(|e| erreur_io(&e))?;
+        let mut octets = debut.to_vec();
+        octets.resize(longueur_totale(&debut)?.max(16), 0);
+        self.prise.read_exact(&mut octets[16..]).map_err(|e| erreur_io(&e))?;
+        Message::decoder(&octets)
+    }
+
+    /// Envoie un appel et attend sa réponse ; les signaux et ce qui répond à autre chose sont passés.
+    fn echanger(&mut self, mut appel: Message) -> Result<Message, String> {
+        self.serie = self.serie.wrapping_add(1).max(1);
+        appel.serie = self.serie;
+        let octets = appel.encoder()?;
+        self.ecrire(&octets)?;
+        let echeance = Instant::now() + DELAI;
+        loop {
+            let r = self.recevoir(echeance)?;
+            if r.reponse_a != Some(appel.serie) || !matches!(r.genre, RETOUR | ERREUR) {
+                continue;
+            }
+            if r.genre == ERREUR {
+                let nom = r.nom_erreur.unwrap_or_default();
+                let detail = r.corps.first().and_then(Valeur::texte).unwrap_or_default();
+                return Err(crate::ui::affichable(&format!("{nom} : {detail}")));
+            }
+            return Ok(r);
+        }
+    }
+
+    /// Appelle une méthode de lecture (`LECTURES`) et rend le corps de la réponse.
+    pub(crate) fn appeler(
+        &mut self,
+        destination: &str,
+        chemin: &str,
+        interface: &str,
+        methode: &str,
+        signature: &str,
+        arguments: Vec<Valeur>,
+    ) -> Result<Vec<Valeur>, String> {
+        if !LECTURES.contains(&(interface, methode)) {
+            return Err(trf!(
+                "{interface}.{methode} n'est pas une lecture permise",
+                "{interface}.{methode} is not an allowed read"
+            ));
+        }
+        let appel = Message::appel(destination, chemin, interface, methode, signature, arguments);
+        Ok(self.echanger(appel)?.corps)
+    }
+
+    /// Une propriété d'un objet, sans sa variante.
+    pub(crate) fn propriete(
+        &mut self,
+        destination: &str,
+        chemin: &str,
+        interface: &str,
+        nom: &str,
+    ) -> Result<Valeur, String> {
+        let corps = self.appeler(
+            destination,
+            chemin,
+            PROPRIETES,
+            "Get",
+            "ss",
+            vec![Valeur::texte_de(interface), Valeur::texte_de(nom)],
+        )?;
+        corps
+            .into_iter()
+            .next()
+            .map(|v| v.nue().clone())
+            .ok_or_else(|| mal_forme("réponse vide"))
+    }
+
+    /// Toutes les propriétés d'une interface d'un objet : un dictionnaire `a{sv}`.
+    pub(crate) fn proprietes(&mut self, destination: &str, chemin: &str, interface: &str) -> Result<Valeur, String> {
+        let corps = self.appeler(
+            destination,
+            chemin,
+            PROPRIETES,
+            "GetAll",
+            "s",
+            vec![Valeur::texte_de(interface)],
+        )?;
+        corps.into_iter().next().ok_or_else(|| mal_forme("réponse vide"))
+    }
+
+    /// Les objets d'un service et leurs propriétés, par interface (`ObjectManager`), triés par chemin.
+    pub(crate) fn objets(&mut self, destination: &str, racine: &str) -> Result<Vec<(String, Valeur)>, String> {
+        let corps = self.appeler(destination, racine, OBJETS, "GetManagedObjects", "", Vec::new())?;
+        let mut objets: Vec<(String, Valeur)> = corps
+            .first()
+            .map(Valeur::entrees)
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|(chemin, interfaces)| Some((chemin.texte()?.to_string(), interfaces.clone())))
+            .collect();
+        objets.sort_by(|a, b| a.0.cmp(&b.0));
+        Ok(objets)
+    }
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// systemd
+
+/// Les unités en échec, triées, comme `systemctl --failed` : `ListUnitsFiltered(["failed"])` retient une unité dont
+/// l'état de chargement, d'activité ou le sous-état vaut « failed » ; comme systemctl sans --all, une unité qui en
+/// suit une autre (un périphérique vu sous plusieurs noms) n'est comptée qu'une fois.
+pub(crate) fn unites_en_echec(bus: &mut Bus) -> Result<Vec<String>, String> {
+    let corps = bus.appeler(
+        SYSTEMD,
+        CHEMIN_SYSTEMD,
+        GESTIONNAIRE,
+        "ListUnitsFiltered",
+        "as",
+        vec![Valeur::Tableau(vec![Valeur::texte_de("failed")])],
+    )?;
+    Ok(noms_d_unites(corps.first(), true))
+}
+
+/// Les unités chargées, nom → chemin d'objet (ListUnits).
+pub(crate) fn unites_chargees(bus: &mut Bus) -> Result<HashMap<String, String>, String> {
+    let corps = bus.appeler(SYSTEMD, CHEMIN_SYSTEMD, GESTIONNAIRE, "ListUnits", "", Vec::new())?;
+    Ok(corps
+        .first()
+        .map(Valeur::elements)
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|u| {
+            let m = u.elements();
+            Some((m.first()?.texte()?.to_string(), m.get(6)?.texte()?.to_string()))
+        })
+        .collect())
+}
+
+/// Les noms d'une liste d'unités `a(ssssssouso)` (nom, description, chargement, activité, sous-état, suivie…), triés ;
+/// `sans_suivies` : sans celles qui en suivent une autre.
+fn noms_d_unites(liste: Option<&Valeur>, sans_suivies: bool) -> Vec<String> {
+    let mut noms: Vec<String> = liste
+        .map(Valeur::elements)
+        .unwrap_or_default()
+        .iter()
+        .filter(|u| !sans_suivies || u.elements().get(5).and_then(Valeur::texte).is_none_or(str::is_empty))
+        .filter_map(|u| u.elements().first()?.texte().map(String::from))
+        .collect();
+    noms.sort();
+    noms
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn t(s: &str) -> Valeur {
+        Valeur::texte_de(s)
+    }
+
+    /// Un message de la spécification, octet par octet : l'appel Hello que tout client envoie en premier.
+    #[test]
+    fn hello_octet_par_octet() {
+        let mut m = Message::appel(DBUS, "/org/freedesktop/DBus", DBUS, "Hello", "", Vec::new());
+        m.serie = 1;
+        let octets = m.encoder().unwrap();
+        let mut attendu: Vec<u8> = vec![b'l', 1, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0];
+        // Longueur des champs (109, le « m » que tout bus voit en premier), puis chaque champ aligné sur 8 : code, signature de la variante, valeur.
+        attendu.extend(109u32.to_le_bytes());
+        let mut champ = |code: u8, sig: u8, texte: &str| {
+            while !attendu.len().is_multiple_of(8) {
+                attendu.push(0);
+            }
+            attendu.extend([code, 1, sig, 0]);
+            attendu.extend(u32::try_from(texte.len()).unwrap().to_le_bytes());
+            attendu.extend(texte.as_bytes());
+            attendu.push(0);
+        };
+        champ(1, b'o', "/org/freedesktop/DBus");
+        champ(2, b's', "org.freedesktop.DBus");
+        champ(3, b's', "Hello");
+        champ(6, b's', "org.freedesktop.DBus");
+        assert_eq!(attendu.len(), 16 + 109);
+        while !attendu.len().is_multiple_of(8) {
+            attendu.push(0);
+        }
+        assert_eq!(octets, attendu);
+        assert_eq!(Message::decoder(&octets).unwrap(), m);
+        assert_eq!(
+            longueur_totale(&octets[..16].try_into().unwrap()).unwrap(),
+            octets.len()
+        );
+    }
+
+    /// Un corps aux alignements piégeux, octet par octet : un octet, puis un u64 aligné sur 8, un tableau de u64 dont le
+    /// remplissage ne compte pas dans la longueur, un dictionnaire a{sv}, une structure.
+    #[test]
+    fn corps_aligne_octet_par_octet() {
+        let mut e = Ecrivain::default();
+        let valeurs = [
+            (&b"y"[..], Valeur::Octet(7)),
+            (b"t", Valeur::U64(0x0102_0304_0506_0708)),
+            (b"at", Valeur::Tableau(vec![Valeur::U64(1)])),
+            (
+                b"a{sv}",
+                Valeur::Dictionnaire(vec![(t("a"), Valeur::Variante("q".into(), Box::new(Valeur::U16(5))))]),
+            ),
+            (b"(bn)", Valeur::Structure(vec![Valeur::Booleen(true), Valeur::I16(-2)])),
+        ];
+        for (s, v) in &valeurs {
+            e.ecrire(s, v, 0).unwrap();
+        }
+        let attendu: Vec<u8> = [
+            &[7, 0, 0, 0, 0, 0, 0, 0][..],
+            &[8, 7, 6, 5, 4, 3, 2, 1],
+            // at : longueur 8 (sans les 4 octets de remplissage qui suivent), puis le u64 aligné sur 8.
+            &[8, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0],
+            // a{sv} : longueur 12 ; l'entrée alignée sur 8 : « a », variante « q », remplissage, 5.
+            &[12, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, b'a', 0, 1, b'q', 0, 0, 5, 0],
+            // (bn) aligné sur 8 : vrai, -2.
+            &[0, 0, 0, 0, 1, 0, 0, 0, 0xfe, 0xff],
+        ]
+        .concat();
+        assert_eq!(e.octets, attendu);
+        let mut l = Lecteur {
+            octets: &e.octets,
+            pos: 0,
+            grand_boutiste: false,
+        };
+        for (s, v) in &valeurs {
+            assert_eq!(&l.lire(s, 0).unwrap(), v);
+        }
+        assert_eq!(l.pos, e.octets.len());
+    }
+
+    /// Un message grand-boutiste (« B ») se lit aussi : un bus sur une machine grand-boutiste en envoie.
+    #[test]
+    fn grand_boutiste() {
+        let mut octets = vec![b'B', RETOUR, 0, 1, 0, 0, 0, 4, 0, 0, 0, 9];
+        // Réponse à 3, zéro descripteur de fichier (un champ permis), signature « u ».
+        let champs: Vec<u8> = [
+            &[5, 1, b'u', 0][..],
+            &[0, 0, 0, 3],
+            &[9, 1, b'u', 0],
+            &[0, 0, 0, 0],
+            &[8, 1, b'g', 0, 1, b'u', 0],
+        ]
+        .concat();
+        octets.extend(u32::try_from(champs.len()).unwrap().to_be_bytes());
+        octets.extend(champs);
+        while !octets.len().is_multiple_of(8) {
+            octets.push(0);
+        }
+        octets.extend(42u32.to_be_bytes());
+        let m = Message::decoder(&octets).unwrap();
+        assert_eq!((m.serie, m.reponse_a, m.corps), (9, Some(3), vec![Valeur::U32(42)]));
+        assert_eq!(
+            longueur_totale(&octets[..16].try_into().unwrap()).unwrap(),
+            octets.len()
+        );
+    }
+
+    /// Toutes les formes de valeurs repassent à l'identique (encodées puis décodées), dans un vrai message.
+    #[test]
+    fn aller_retour() {
+        let corps = vec![
+            Valeur::I32(-5),
+            Valeur::I64(i64::MIN),
+            Valeur::Reel(1.5),
+            t("é"),
+            t("/org/a_b"),
+            t("a{sv}"),
+            Valeur::Tableau(vec![]),
+            Valeur::Tableau(vec![Valeur::Tableau(vec![Valeur::Octet(1), Valeur::Octet(2)])]),
+            Valeur::Dictionnaire(vec![(
+                t("/x"),
+                Valeur::Dictionnaire(vec![(
+                    t("i"),
+                    Valeur::Variante("as".into(), Box::new(Valeur::Tableau(vec![t("z")]))),
+                )]),
+            )]),
+            Valeur::Variante(
+                "v".into(),
+                Box::new(Valeur::Variante("u".into(), Box::new(Valeur::U32(3)))),
+            ),
+        ];
+        let mut m = Message::appel("a.b", "/", "a.b", "C", "ixdsogayaaya{oa{sv}}v", corps);
+        m.serie = 77;
+        let octets = m.encoder().unwrap();
+        assert_eq!(Message::decoder(&octets).unwrap(), m);
+        assert_eq!(m.corps[9].nue(), &Valeur::U32(3));
+    }
+
+    /// Ce qu'un bus pourrait envoyer de travers est refusé, sans paniquer ni lire hors du message.
+    #[test]
+    fn messages_mal_formes() {
+        let mut m = Message::appel(
+            "a.b",
+            "/a",
+            "a.b",
+            "C",
+            "as",
+            vec![Valeur::Tableau(vec![t("x"), t("y")])],
+        );
+        m.serie = 2;
+        let bon = m.encoder().unwrap();
+        for n in 0..bon.len() {
+            assert!(Message::decoder(&bon[..n]).is_err(), "tronqué à {n}");
+        }
+        let mut ajoute = bon.clone();
+        ajoute.push(0);
+        assert!(Message::decoder(&ajoute).is_err());
+        // Un tableau qui se dit plus long que le message.
+        let mut long = bon.clone();
+        let corps = bon.len() - u32::from_le_bytes(bon[4..8].try_into().unwrap()) as usize;
+        long[corps..corps + 4].copy_from_slice(&u32::MAX.to_le_bytes());
+        assert!(Message::decoder(&long).is_err());
+        // Un booléen qui vaut 2, une version 2, un numéro de série nul, un boutisme inconnu.
+        let mut lecteur = Lecteur {
+            octets: &[2, 0, 0, 0],
+            pos: 0,
+            grand_boutiste: false,
+        };
+        assert!(lecteur.lire(b"b", 0).is_err());
+        for (i, v) in [(3, 2), (8, 0), (0, b'x')] {
+            let mut faux = bon.clone();
+            faux[i] = v;
+            assert!(Message::decoder(&faux).is_err());
+        }
+        // Une signature trop imbriquée, ou incomplète.
+        assert!(types(&format!("{}y", "a".repeat(100))).is_err());
+        for s in ["a", "(", "()", "a{vs}", "a{s}", "{sv}", "(i", "z"] {
+            assert!(types(s).is_err(), "{s}");
+        }
+        // Un message plus grand que la limite n'est pas lu.
+        let mut debut = [0u8; 16];
+        debut[0] = b'l';
+        debut[4..8].copy_from_slice(&u32::MAX.to_le_bytes());
+        assert!(longueur_totale(&debut).is_err());
+        // Une valeur qui ne va pas avec sa signature n'est pas écrite.
+        assert!(Ecrivain::default().ecrire(b"s", &Valeur::U32(1), 0).is_err());
+        assert!(Ecrivain::default().ecrire(b"o", &t("pas un chemin"), 0).is_err());
+    }
+
+    /// Une méthode hors de la liste des lectures n'est pas envoyée, même à un faux bus.
+    #[test]
+    fn seules_les_lectures_partent() {
+        let (client, mut serveur) = UnixStream::pair().unwrap();
+        let mut bus = Bus {
+            prise: client,
+            serie: 0,
+        };
+        let r = bus.appeler(
+            SYSTEMD,
+            CHEMIN_SYSTEMD,
+            GESTIONNAIRE,
+            "StartUnit",
+            "ss",
+            vec![t("x"), t("replace")],
+        );
+        assert!(r.is_err());
+        serveur.set_nonblocking(true).unwrap();
+        assert!(serveur.read(&mut [0; 1]).is_err(), "rien n'est parti");
+        assert!(
+            LECTURES
+                .iter()
+                .all(|(_, m)| !m.starts_with("Set") && !m.starts_with("Start"))
+        );
+    }
+
+    fn lire_ligne(s: &mut UnixStream, auth: &mut Vec<u8>) {
+        let debut = auth.len();
+        let mut o = [0];
+        while !auth[debut..].ends_with(b"\r\n") {
+            s.read_exact(&mut o).unwrap();
+            auth.push(o[0]);
+        }
+    }
+
+    fn lire_message(s: &mut UnixStream) -> Message {
+        let mut debut = [0; 16];
+        s.read_exact(&mut debut).unwrap();
+        let mut octets = debut.to_vec();
+        octets.resize(longueur_totale(&debut).unwrap(), 0);
+        s.read_exact(&mut octets[16..]).unwrap();
+        Message::decoder(&octets).unwrap()
+    }
+
+    /// Un faux bus (paire de prises) : il lit l'authentification et chaque message octet par octet, répond à Hello
+    /// après un signal, puis confie l'appel suivant à `repondre`. Rend la prise du client et ce qu'il a reçu pendant
+    /// l'authentification.
+    fn faux_bus(
+        repondre: impl FnOnce(&mut UnixStream, Message) + Send + 'static,
+    ) -> (UnixStream, std::thread::JoinHandle<Vec<u8>>) {
+        let (client, mut serveur) = UnixStream::pair().unwrap();
+        let fil = std::thread::spawn(move || {
+            let mut auth = Vec::new();
+            lire_ligne(&mut serveur, &mut auth);
+            serveur.write_all(b"DATA\r\n").unwrap();
+            lire_ligne(&mut serveur, &mut auth);
+            serveur.write_all(b"OK 0123456789abcdef0123456789abcdef\r\n").unwrap();
+            lire_ligne(&mut serveur, &mut auth);
+            let hello = lire_message(&mut serveur);
+            assert_eq!(hello.membre.as_deref(), Some("Hello"));
+            // Un signal avant la réponse (le bus annonce le nom donné) : le client doit le passer.
+            let signal = Message {
+                genre: SIGNAL,
+                serie: 1,
+                chemin: Some("/org/freedesktop/DBus".into()),
+                interface: Some(DBUS.into()),
+                membre: Some("NameAcquired".into()),
+                signature: "s".into(),
+                corps: vec![t(":1.42")],
+                ..Message::default()
+            };
+            serveur.write_all(&signal.encoder().unwrap()).unwrap();
+            serveur.write_all(&retour(&hello, "s", vec![t(":1.42")])).unwrap();
+            let appel = lire_message(&mut serveur);
+            repondre(&mut serveur, appel);
+            auth
+        });
+        (client, fil)
+    }
+
+    fn retour(a: &Message, signature: &str, corps: Vec<Valeur>) -> Vec<u8> {
+        Message {
+            genre: RETOUR,
+            serie: 3,
+            reponse_a: Some(a.serie),
+            signature: signature.into(),
+            corps,
+            ..Message::default()
+        }
+        .encoder()
+        .unwrap()
+    }
+
+    /// L'authentification EXTERNAL sans identité écrite, puis Hello, puis ListUnitsFiltered : ce que le client envoie
+    /// et ce qu'il comprend de la réponse.
+    #[test]
+    fn unites_en_echec_par_un_faux_bus() {
+        let (client, fil) = faux_bus(|s, appel| {
+            assert_eq!(
+                (
+                    appel.destination.as_deref(),
+                    appel.chemin.as_deref(),
+                    appel.interface.as_deref()
+                ),
+                (Some(SYSTEMD), Some(CHEMIN_SYSTEMD), Some(GESTIONNAIRE))
+            );
+            assert_eq!(appel.membre.as_deref(), Some("ListUnitsFiltered"));
+            assert_eq!(appel.corps, vec![Valeur::Tableau(vec![t("failed")])]);
+            let unite = |nom: &str, suivie: &str| {
+                Valeur::Structure(vec![
+                    t(nom),
+                    t("description"),
+                    t("loaded"),
+                    t("failed"),
+                    t("failed"),
+                    t(suivie),
+                    t("/org/freedesktop/systemd1/unit/x"),
+                    Valeur::U32(0),
+                    t(""),
+                    t("/"),
+                ])
+            };
+            let liste = Valeur::Tableau(vec![
+                unite("zz.service", ""),
+                unite("dev-sda.device", "dev-disk.device"),
+                unite("aa.mount", ""),
+            ]);
+            s.write_all(&retour(&appel, "a(ssssssouso)", vec![liste])).unwrap();
+        });
+        let mut bus = Bus::sur(client).unwrap();
+        assert_eq!(unites_en_echec(&mut bus).unwrap(), ["aa.mount", "zz.service"]);
+        assert_eq!(fil.join().unwrap(), b"\0AUTH EXTERNAL\r\nDATA\r\nBEGIN\r\n");
+    }
+
+    /// Une erreur du service arrive comme une erreur, avec son nom et son message ; une propriété arrive sans sa
+    /// variante.
+    #[test]
+    fn erreur_et_propriete() {
+        let (client, fil) = faux_bus(|s, appel| {
+            assert_eq!(appel.corps, vec![t("org.freedesktop.UDisks2.Drive"), t("Model")]);
+            let erreur = Message {
+                genre: ERREUR,
+                serie: 3,
+                reponse_a: Some(appel.serie),
+                nom_erreur: Some("org.freedesktop.DBus.Error.UnknownInterface".into()),
+                signature: "s".into(),
+                corps: vec![t("pas là")],
+                ..Message::default()
+            };
+            s.write_all(&erreur.encoder().unwrap()).unwrap();
+        });
+        let mut bus = Bus::sur(client).unwrap();
+        let r = bus.propriete(
+            "org.freedesktop.UDisks2",
+            "/a",
+            "org.freedesktop.UDisks2.Drive",
+            "Model",
+        );
+        assert_eq!(r.unwrap_err(), "org.freedesktop.DBus.Error.UnknownInterface : pas là");
+        fil.join().unwrap();
+
+        let (client, fil) = faux_bus(|s, appel| {
+            s.write_all(&retour(
+                &appel,
+                "v",
+                vec![Valeur::Variante("s".into(), Box::new(t("Disque")))],
+            ))
+            .unwrap();
+        });
+        let mut bus = Bus::sur(client).unwrap();
+        let r = bus.propriete(
+            "org.freedesktop.UDisks2",
+            "/a",
+            "org.freedesktop.UDisks2.Drive",
+            "Model",
+        );
+        assert_eq!(r.unwrap(), t("Disque"));
+        fil.join().unwrap();
+    }
+
+    /// Un bus qui ne répond plus : le client abandonne au bout du délai au lieu d'attendre toujours.
+    #[test]
+    fn bus_muet() {
+        let (client, _serveur) = UnixStream::pair().unwrap();
+        let mut bus = Bus {
+            prise: client,
+            serie: 0,
+        };
+        let echeance = Instant::now() + Duration::from_millis(50);
+        assert!(bus.recevoir(echeance).is_err());
+    }
+
+    /// Le vrai bus système, quand il est là : les unités en échec sont celles que dit `systemctl --failed`.
+    #[test]
+    fn en_echec_comme_systemctl() {
+        let Some(r) = crate::commande::lancer(
+            std::process::Command::new("systemctl").args(["--failed", "--no-legend", "--plain"]),
+            20,
+        )
+        .filter(|r| r.code == Some(0)) else {
+            return;
+        };
+        let mut attendues: Vec<String> = r
+            .sortie
+            .lines()
+            .filter_map(|l| l.split_whitespace().next())
+            .map(String::from)
+            .collect();
+        attendues.sort();
+        let mut bus = Bus::systeme().expect("systemctl répond : le bus système aussi");
+        assert_eq!(unites_en_echec(&mut bus).unwrap(), attendues);
+    }
+}

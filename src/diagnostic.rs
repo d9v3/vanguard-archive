@@ -337,6 +337,22 @@ mod systeme {
         )
     }
 
+    /// Les unités en échec, demandées à systemd par le bus système (ce que dit `systemctl --failed`). Un bus qui ne
+    /// répond pas laisse la ligne « non vérifié », pas « aucun ».
+    fn services_en_echec() -> Ligne {
+        use crate::machine::linux::dbus;
+        let libelle = tr!("Services en échec", "Failed services");
+        match dbus::Bus::systeme().and_then(|mut bus| dbus::unites_en_echec(&mut bus)) {
+            Ok(en_echec) if en_echec.is_empty() => ligne(libelle, tr!("aucun", "none")),
+            Ok(en_echec) => alerte(
+                libelle,
+                en_echec.iter().map(|u| affichable(u)).collect::<Vec<_>>().join(", "),
+                Niveau::Moyen,
+            ),
+            Err(e) => ligne(libelle, trf!("non vérifié ({e})", "not verified ({e})")),
+        }
+    }
+
     pub fn sections() -> Vec<Section> {
         let mut systeme = Vec::new();
         let os = lire("/etc/os-release")
@@ -460,20 +476,7 @@ mod systeme {
                 ),
             ),
         });
-        let en_echec: Vec<String> = sortie("systemctl", &["--failed", "--no-legend", "--plain"])
-            .unwrap_or_default()
-            .lines()
-            .filter_map(|l| l.split_whitespace().next().map(affichable))
-            .collect();
-        problemes.push(if en_echec.is_empty() {
-            ligne(tr!("Services en échec", "Failed services"), tr!("aucun", "none"))
-        } else {
-            alerte(
-                tr!("Services en échec", "Failed services"),
-                en_echec.join(", "),
-                Niveau::Moyen,
-            )
-        });
+        problemes.push(services_en_echec());
         super::trois_sections(systeme, materiel, problemes)
     }
 }
