@@ -151,8 +151,13 @@ pub(crate) fn noter_alerte(genre: Genre, titre: &str, texte: &str) {
 }
 
 /// Le journal relu, l'alerte ajoutée, le tout borné puis réécrit d'un coup (`ecrire_atomique`) : une coupure en
-/// pleine écriture laisse l'ancien journal ou le nouveau, jamais un journal tronqué.
+/// pleine écriture laisse l'ancien journal ou le nouveau, jamais un journal tronqué. Sous verrou : la minuterie et
+/// un `vanguard surveiller` lancé à la main en même temps réécrivaient chacun le journal lu avant l'autre, et la
+/// seconde écriture effaçait l'alerte de la première.
 fn ajouter(fichier: &Path, alerte: Alerte, maintenant: NaiveDateTime) -> std::io::Result<()> {
+    let _verrou = fichier
+        .parent()
+        .and_then(|d| reseau::Verrou::prendre_nomme(d, "alertes.verrou"));
     let mut alertes = lire_journal(fichier);
     alertes.push(alerte);
     let texte: String = borner(alertes, maintenant)
@@ -226,18 +231,29 @@ pub(crate) struct Donnees {
     pub derniere_passe: Option<String>,
     pub alertes: Vec<Alerte>,
     pub appareils: Vec<FicheAppareil>,
-    /// Les connexions vers un serveur de commande vues à la dernière passe.
+    /// Les connexions vers un serveur de commande vues à la dernière passe qui a pu lire les connexions.
     pub botnets_en_cours: Vec<String>,
+    /// Quand elles ont été vues (la date du fichier) : la passe suivante ne le réécrit pas si la lecture des
+    /// connexions échoue, et une liste d'il y a trois jours n'est plus « encore vue ».
+    pub botnets_vus: Option<NaiveDateTime>,
 }
 
+/// Au-delà, les connexions vues ne sont plus dites en cours : la surveillance repasse chaque heure.
+const BOTNETS_RECENTS_HEURES: i64 = 2;
+
 fn collecter() -> Donnees {
-    let botnets_en_cours = std::fs::read_to_string(crate::protection::sortantes::fichier_botnets())
+    let fichier_botnets = crate::protection::sortantes::fichier_botnets();
+    let botnets_en_cours = std::fs::read_to_string(&fichier_botnets)
         .unwrap_or_default()
         .lines()
         .map(str::trim)
         .filter(|l| !l.is_empty())
         .map(crate::ui::affichable)
         .collect();
+    let botnets_vus = std::fs::metadata(&fichier_botnets)
+        .and_then(|m| m.modified())
+        .ok()
+        .map(|t| chrono::DateTime::<chrono::Local>::from(t).naive_local());
     Donnees {
         maintenant: chrono::Local::now().naive_local(),
         active: reseau::surveillance::active(),
@@ -245,6 +261,7 @@ fn collecter() -> Donnees {
         alertes: lire_journal(&fichier_journal()),
         appareils: reseau::appareils_connus(),
         botnets_en_cours,
+        botnets_vus,
     }
 }
 
@@ -524,10 +541,30 @@ fn connexions_suspectes(d: &Donnees, vues: &[&Alerte]) -> String {
         );
     }
     if !d.botnets_en_cours.is_empty() {
-        h += tr!(
-            "<p class=jour>Encore vues à la dernière passe</p><ul>",
-            "<p class=jour>Still seen at the last run</p><ul>"
-        );
+        // Vues il y a moins de deux heures : la dernière passe les a revues. Plus vieilles (surveillance coupée,
+        // connexions illisibles depuis) : la date, sans « encore ».
+        let recentes = d
+            .botnets_vus
+            .is_some_and(|v| (d.maintenant - v) <= chrono::Duration::hours(BOTNETS_RECENTS_HEURES));
+        let vues = d
+            .botnets_vus
+            .map(|v| quand(&v.format(FORMAT_DATE).to_string()))
+            .unwrap_or_default();
+        let _ = if recentes {
+            trw!(
+                h,
+                "<p class=jour>Encore vues à la dernière passe (le {})</p><ul>",
+                "<p class=jour>Still seen at the last run ({})</p><ul>",
+                esc(&vues)
+            )
+        } else {
+            trw!(
+                h,
+                "<p class=jour>Vues le {} ; rien de plus récent : la surveillance n'a pas pu revérifier depuis</p><ul>",
+                "<p class=jour>Seen on {}; nothing more recent: monitoring could not check again since</p><ul>",
+                esc(&vues)
+            )
+        };
         for c in &d.botnets_en_cours {
             let _ = write!(h, "<li><span class=\"badge critique\">BOTNET</span> {}</li>", esc(c));
         }
@@ -551,6 +588,11 @@ fn connexions_suspectes(d: &Donnees, vues: &[&Alerte]) -> String {
     h
 }
 
+/// Ce que le navigateur a le droit de charger dans la page : rien, sauf sa feuille de style écrite dedans et son
+/// icône en data:. Deuxième barrière derrière l'échappement (`esc`) : une section qui l'oublierait un jour ne
+/// pourrait toujours pas faire tourner un script ni appeler Internet.
+const CSP: &str = "default-src 'none'; style-src 'unsafe-inline'; img-src data:";
+
 /// La page entière, à partir des données réunies.
 pub(crate) fn html(d: &Donnees) -> String {
     let mut h = String::new();
@@ -559,9 +601,11 @@ pub(crate) fn html(d: &Donnees) -> String {
     let _ = trw!(
         h,
         "<!doctype html><html lang=fr><head><meta charset=utf-8><meta name=viewport content=\"width=device-width,initial-scale=1\">\
+         <meta http-equiv=\"Content-Security-Policy\" content=\"{CSP}\">\
          <title>Tableau de bord Vanguard</title><link rel=icon href=\"data:image/png;base64,{logo}\"><style>{CSS}{CSS_TABLEAU}</style></head><body><main>\
          <h1>Surveillance du réseau</h1><p class=sous>Généré par Vanguard le {date}. Rien n'est envoyé : cette page est écrite sur cet ordinateur.</p>",
         "<!doctype html><html lang=en><head><meta charset=utf-8><meta name=viewport content=\"width=device-width,initial-scale=1\">\
+         <meta http-equiv=\"Content-Security-Policy\" content=\"{CSP}\">\
          <title>Vanguard dashboard</title><link rel=icon href=\"data:image/png;base64,{logo}\"><style>{CSS}{CSS_TABLEAU}</style></head><body><main>\
          <h1>Network monitoring</h1><p class=sous>Generated by Vanguard on {date}. Nothing is sent: this page is written on this computer.</p>"
     );
@@ -692,6 +736,7 @@ mod tests {
                 ),
             ],
             botnets_en_cours: vec!["<svg onload=alert(3)> → 192.0.2.7:443".into()],
+            botnets_vus: Some(date("2026-10-20 14:00:00")),
         }
     }
 
@@ -707,11 +752,35 @@ mod tests {
         assert!(!nouveaux.contains("10.0.0.10"));
         // Le surnom donné par « nommer » est montré.
         assert!(page.contains("<strong>imprimante HP</strong> · HP"));
-        assert!(page.contains("Emotet") && page.contains("Encore vues à la dernière passe"));
-        // Aucune ressource externe : la page se suffit (logo compris).
+        assert!(page.contains("Emotet") && page.contains("Encore vues à la dernière passe (le 20/10/2026 à 14:00)"));
+        // Aucune ressource externe : la page se suffit (logo compris), et sa politique de sécurité (CSP) interdit
+        // tout script et tout appel vers l'extérieur, même si une section oubliait d'échapper un nom.
         for externe in ["http://", "https://", "<script", "<img", "<link rel=stylesheet"] {
             assert!(!page.contains(externe), "{externe}");
         }
+        let entete = &page[..page.find("<title>").unwrap()];
+        assert!(entete.contains(&format!(
+            "<meta http-equiv=\"Content-Security-Policy\" content=\"{CSP}\">"
+        )));
+        assert!(CSP.starts_with("default-src 'none'") && !CSP.contains("script-src"));
+    }
+
+    /// Des connexions vues il y a trois jours ne sont plus « encore vues » : la surveillance a été coupée, ou la
+    /// lecture des connexions échoue depuis ; la page dit la date, sans laisser croire qu'elles durent.
+    #[test]
+    fn connexions_vues_datees() {
+        let vieilles = Donnees {
+            botnets_vus: Some(date("2026-10-17 09:00:00")),
+            ..donnees()
+        };
+        let page = html(&vieilles);
+        assert!(!page.contains("Encore vues"));
+        assert!(page.contains("Vues le 17/10/2026 à 09:00") && page.contains("Emotet"));
+        let sans_date = Donnees {
+            botnets_vus: None,
+            ..donnees()
+        };
+        assert!(!html(&sans_date).contains("Encore vues"));
     }
 
     #[test]
@@ -734,6 +803,7 @@ mod tests {
             alertes: vec![],
             appareils: vec![],
             botnets_en_cours: vec![],
+            botnets_vus: None,
         };
         let page = html(&vide);
         assert!(page.contains("Rien à montrer pour l'instant") && page.contains("vanguard surveillance on"));
@@ -795,7 +865,7 @@ mod tests {
         texte += "{pas du json\n{\"date\":\"<script>\",\"genre\":\"port\",\"titre\":\"t\",\"texte\":\"x\"}\n";
         std::fs::write(&fichier, texte).unwrap();
         assert_eq!(lire_journal(&fichier).len(), ALERTES_GARDEES);
-        // Aucun fichier temporaire laissé à côté (écriture atomique).
+        // Aucun fichier temporaire laissé à côté (écriture atomique), ni le verrou pris pendant l'ajout.
         let fichiers = std::fs::read_dir(&dossier).unwrap().count();
         assert_eq!(fichiers, 1);
     }

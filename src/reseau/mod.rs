@@ -531,13 +531,20 @@ fn remplacer(de: &std::path::Path, vers: &std::path::Path) -> std::io::Result<()
 }
 
 /// Verrou entre processus Vanguard (fichier créé de façon exclusive, retiré à la fin).
-struct Verrou(PathBuf);
+pub(crate) struct Verrou(PathBuf);
 
 impl Verrou {
-    /// Attend au plus 10 s. Un verrou de plus de 2 minutes vient d'un Vanguard interrompu : on le reprend.
+    /// Le verrou de la base des appareils.
     fn prendre(dossier: &std::path::Path) -> Option<Verrou> {
+        Self::prendre_nomme(dossier, "appareils.verrou")
+    }
+
+    /// Le verrou `nom` dans `dossier` (un par fichier à protéger : le journal des alertes a le sien, pris pendant
+    /// qu'un autre tient celui de la base). Attend au plus 10 s. Un verrou de plus de 2 minutes vient d'un Vanguard
+    /// interrompu : on le reprend.
+    pub(crate) fn prendre_nomme(dossier: &std::path::Path, nom: &str) -> Option<Verrou> {
         let _ = std::fs::create_dir_all(dossier);
-        let chemin = dossier.join("appareils.verrou");
+        let chemin = dossier.join(nom);
         let fin = std::time::Instant::now() + std::time::Duration::from_secs(10);
         loop {
             match std::fs::OpenOptions::new().write(true).create_new(true).open(&chemin) {
@@ -552,8 +559,8 @@ impl Verrou {
                         let _ = std::fs::remove_file(&chemin);
                     } else if std::time::Instant::now() > fin {
                         tre!(
-                            "Attention : base des appareils occupée par un autre Vanguard, enregistrement sans verrou.",
-                            "Warning: device database locked by another Vanguard, saving without a lock."
+                            "Attention : « {nom} » occupé par un autre Vanguard, écriture sans verrou.",
+                            "Warning: “{nom}” locked by another Vanguard, writing without a lock."
                         );
                         return None;
                     } else {
