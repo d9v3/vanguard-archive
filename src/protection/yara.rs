@@ -121,38 +121,80 @@ fn analyser_fichiers(
     empreintes: Option<&Empreintes>,
     liste: &[PathBuf],
 ) -> (Vec<Trouve>, Vec<PathBuf>) {
-    let morceaux: Vec<&[PathBuf]> = liste.chunks(liste.len().div_ceil(FILS).max(1)).collect();
+    par_lots(
+        liste,
+        || {
+            let mut analyseur = yara_x::Scanner::new(regles);
+            analyseur.set_timeout(DELAI_PAR_FICHIER);
+            analyseur
+        },
+        |analyseur, f| {
+            let mut trouves = Vec::new();
+            let lu = match analyseur.scan_file(f) {
+                Ok(r) => {
+                    trouves.extend(r.matching_rules().map(|m| Trouve::nouveau(m.identifier(), f)));
+                    true
+                }
+                Err(_) => false,
+            };
+            // Le fichier vient d'être lu : il est encore en mémoire, l'empreinte coûte peu.
+            if let Some(empreintes) = empreintes {
+                for (chemin, e) in empreintes::connus(empreintes, std::slice::from_ref(f)) {
+                    trouves.push(Trouve::nouveau(&format!("{MALWAREBAZAAR}{e}"), &chemin));
+                }
+            }
+            (trouves, lu)
+        },
+    )
+}
+
+/// `liste` répartie en `FILS` lots, un fil par lot avec son propre analyseur (`nouveau`) ; `un` passe un fichier :
+/// (correspondances, lu jusqu'au bout). Un fichier piégé peut faire paniquer YARA-X : il est alors rendu illisible,
+/// jamais sain, sans emporter les autres fichiers de son lot, et l'analyseur, peut-être resté au milieu de l'analyse
+/// interrompue, n'est plus réutilisé. Un fil qui tombe malgré tout (analyseur impossible à créer) rend tout son lot
+/// illisible : jeté en silence, ce lot faisait conclure « sain » sans avoir été lu.
+fn par_lots<A>(
+    liste: &[PathBuf],
+    nouveau: impl Fn() -> A + Sync,
+    un: impl Fn(&mut A, &PathBuf) -> (Vec<Trouve>, bool) + Sync,
+) -> (Vec<Trouve>, Vec<PathBuf>) {
+    let (nouveau, un) = (&nouveau, &un);
+    let lots: Vec<&[PathBuf]> = liste.chunks(liste.len().div_ceil(FILS).max(1)).collect();
     std::thread::scope(|s| {
-        let fils: Vec<_> = morceaux
+        let fils: Vec<_> = lots
             .into_iter()
-            .map(|morceau| {
-                s.spawn(move || {
-                    let mut analyseur = yara_x::Scanner::new(regles);
-                    analyseur.set_timeout(DELAI_PAR_FICHIER);
+            .map(|lot| {
+                let fil = s.spawn(move || {
+                    let mut analyseur = nouveau();
                     let (mut trouves, mut echecs) = (Vec::new(), Vec::new());
-                    for f in morceau {
-                        match analyseur.scan_file(f) {
-                            Ok(r) => trouves.extend(r.matching_rules().map(|m| Trouve::nouveau(m.identifier(), f))),
-                            Err(_) => echecs.push(f.clone()),
-                        }
-                        // Le fichier vient d'être lu : il est encore en mémoire, l'empreinte coûte peu.
-                        if let Some(empreintes) = empreintes {
-                            for (chemin, e) in empreintes::connus(empreintes, std::slice::from_ref(f)) {
-                                trouves.push(Trouve::nouveau(&format!("{MALWAREBAZAAR}{e}"), &chemin));
-                            }
+                    for f in lot {
+                        let examen = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| un(&mut analyseur, f)));
+                        let Ok((t, lu)) = examen else {
+                            echecs.push(f.clone());
+                            analyseur = nouveau();
+                            continue;
+                        };
+                        trouves.extend(t);
+                        if !lu {
+                            echecs.push(f.clone());
                         }
                     }
                     (trouves, echecs)
-                })
+                });
+                (lot, fil)
             })
             .collect();
-        fils.into_iter()
-            .filter_map(|f| f.join().ok())
-            .fold((Vec::new(), Vec::new()), |(mut t, mut e), (t2, e2)| {
-                t.extend(t2);
-                e.extend(e2);
-                (t, e)
-            })
+        let (mut trouves, mut echecs) = (Vec::new(), Vec::new());
+        for (lot, fil) in fils {
+            match fil.join() {
+                Ok((t, e)) => {
+                    trouves.extend(t);
+                    echecs.extend(e);
+                }
+                Err(_) => echecs.extend(lot.iter().cloned()),
+            }
+        }
+        (trouves, echecs)
     })
 }
 
@@ -514,5 +556,105 @@ mod tests {
         assert_eq!(fichiers(&dossier.join("absent"), &mut absents), Vec::<PathBuf>::new());
         assert!(illisible(&dossier, &absents).is_some());
         let _ = std::fs::remove_dir_all(&dossier);
+    }
+
+    /// Un PE réduit à l'essentiel, dont l'unique section commence à 0xFFFFFF00 pour 0x200 octets : sa fin dépasse un
+    /// u32. YARA-X (1.21 comme 1.22) l'additionne sans contrôle dans pe.section_index, et les tests compilent avec le
+    /// contrôle des débordements : l'analyse panique, comme sur un vrai fichier piégé.
+    fn pe_dont_la_section_deborde() -> Vec<u8> {
+        let mut pe = vec![0_u8; 0x200];
+        pe[..2].copy_from_slice(b"MZ");
+        // e_lfanew : l'en-tête PE suit l'en-tête DOS.
+        pe[0x3C..0x40].copy_from_slice(&0x40_u32.to_le_bytes());
+        pe[0x40..0x44].copy_from_slice(b"PE\0\0");
+        pe[0x44..0x46].copy_from_slice(&0x014C_u16.to_le_bytes());
+        pe[0x46..0x48].copy_from_slice(&1_u16.to_le_bytes());
+        // Sans en-tête optionnel, la table des sections suit les 24 octets de l'en-tête PE : taille, puis position.
+        pe[0x58..0x60].copy_from_slice(b".text\0\0\0");
+        pe[0x68..0x6C].copy_from_slice(&0x200_u32.to_le_bytes());
+        pe[0x6C..0x70].copy_from_slice(&0xFFFF_FF00_u32.to_le_bytes());
+        pe
+    }
+
+    /// Un fichier qui fait paniquer le vrai YARA-X n'est ni perdu ni dit sain. Avant, le fil emportait tout son lot (le
+    /// piège et son voisin), et le piège examiné seul ne donnait ni correspondance ni échec : « sain ». Une version de
+    /// YARA-X qui ne paniquerait plus lirait le piège, et l'essai tiendrait encore : chaque fichier est lu (la règle Tout
+    /// correspond à tout fichier lu) ou dit illisible, jamais ni l'un ni l'autre.
+    #[test]
+    fn un_fichier_qui_fait_paniquer_yara_x_n_est_ni_perdu_ni_sain() {
+        let mut compilateur = yara_x::Compiler::new();
+        compilateur
+            .add_source(
+                r#"import "pe" rule Section { condition: pe.section_index(0) == 0 } rule Tout { condition: true }"#,
+            )
+            .unwrap();
+        let essai = compilateur.build();
+        let dossier = crate::protection::isoler::dossier_jetable().unwrap();
+        let piege = dossier.join("piege.exe");
+        std::fs::write(&piege, pe_dont_la_section_deborde()).unwrap();
+        // Huit fichiers, quatre lots de deux : le piège ouvre le troisième, son voisin passe après lui.
+        let mut liste: Vec<PathBuf> = (0..7)
+            .map(|i| {
+                let f = dossier.join(format!("note{i}.txt"));
+                std::fs::write(&f, b"rien").unwrap();
+                f
+            })
+            .collect();
+        liste.insert(4, piege.clone());
+        let (trouves, echecs) = analyser_fichiers(&essai, None, &liste);
+        for f in &liste {
+            let lu = trouves.iter().any(|t| t.chemin == *f && t.regle == "Tout");
+            assert!(lu != echecs.contains(f), "{f:?} : {trouves:?} {echecs:?}");
+        }
+        assert!(echecs.iter().all(|f| *f == piege), "{echecs:?}");
+        // Seul, comme examiner() le passe : lu, ou illisible, donc « impossible à vérifier ».
+        let (trouves, echecs) = analyser_fichiers(&essai, None, std::slice::from_ref(&piege));
+        assert!(
+            !trouves.is_empty() || (echecs == std::slice::from_ref(&piege) && illisible(&piege, &echecs).is_some()),
+            "{trouves:?} {echecs:?}"
+        );
+        let _ = std::fs::remove_dir_all(&dossier);
+    }
+
+    /// La garde elle-même, sans YARA-X : une panique ne coûte que son fichier, l'analyseur qui l'a vue est remplacé,
+    /// et un fil qui tombe hors de toute analyse (analyseur impossible à créer) rend son lot illisible, sans toucher aux
+    /// autres.
+    #[test]
+    fn une_panique_ne_fait_disparaitre_aucun_fichier() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        let liste: Vec<PathBuf> = (0..8).map(|i| PathBuf::from(format!("/home/alice/f{i}"))).collect();
+        let piege = liste[4].clone();
+        // L'analyseur compte les fichiers qu'il a vus : le voisin du piège doit être le premier d'un analyseur neuf.
+        let (trouves, echecs) = par_lots(
+            &liste,
+            || 0_usize,
+            |vus, f| {
+                *vus += 1;
+                assert!(*f != piege, "fichier piégé");
+                (vec![Trouve::nouveau(&vus.to_string(), f)], true)
+            },
+        );
+        assert_eq!(echecs, std::slice::from_ref(&piege));
+        assert_eq!(trouves.len(), 7, "{trouves:?}");
+        assert!(
+            trouves.iter().any(|t| t.chemin == liste[5] && t.regle == "1"),
+            "{trouves:?}"
+        );
+        // Seul, comme examiner() le passe : illisible, donc « impossible à vérifier », et plus « sain ».
+        let (trouves, echecs) = par_lots(std::slice::from_ref(&piege), || (), |(), _| panic!("fichier piégé"));
+        assert_eq!(trouves, []);
+        assert_eq!(echecs, std::slice::from_ref(&piege));
+        assert!(illisible(Path::new("/home/alice"), &echecs).is_some());
+        // Le premier analyseur créé panique : son fil tombe, ses deux fichiers sont illisibles, les six autres lus.
+        let premier = AtomicBool::new(true);
+        let (trouves, mut echecs) = par_lots(
+            &liste,
+            || assert!(!premier.swap(false, Ordering::SeqCst), "analyseur impossible à créer"),
+            |(), f| (vec![Trouve::nouveau("lu", f)], true),
+        );
+        assert_eq!((trouves.len(), echecs.len()), (6, 2));
+        echecs.extend(trouves.into_iter().map(|t| t.chemin));
+        echecs.sort();
+        assert_eq!(echecs, liste);
     }
 }
