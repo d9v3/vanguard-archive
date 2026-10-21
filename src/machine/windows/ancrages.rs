@@ -196,9 +196,25 @@ fn juger_dlls(sujet: (&str, &str), entrees: &[(String, String)], installe: Nivea
 
 // ------------------------------------------------------------------------------------------------------------ LSA
 
-/// Chaque valeur lue : (nom de la valeur, paquets). Un paquet inconnu est dit ; un paquet donné par un chemin, que
-/// LSA charge alors hors de System32, est élevé.
-fn juger_lsa(lues: &[(&str, Vec<String>)]) -> Constat {
+/// Les paquets d'une valeur de LSA. Windows les écrit en REG_MULTI_SZ, mais LSA lit aussi une valeur REG_SZ (ou
+/// REG_EXPAND_SZ) posée à la main : l'ignorer laissait un filtre de mot de passe ajouté ainsi passer pour sain. Les
+/// chaînes sont coupées aussi aux zéros, pour qu'un second paquet caché après un zéro dans une REG_SZ soit vu. Une
+/// valeur d'un autre type rend None : elle n'est pas vérifiée, jamais comptée saine.
+fn paquets_de(valeur: &winreg::RegValue) -> Option<Vec<String>> {
+    use winreg::enums::RegType::{REG_EXPAND_SZ, REG_MULTI_SZ, REG_SZ};
+    use winreg::types::FromRegValue;
+    let texte = match valeur.vtype {
+        REG_MULTI_SZ => Vec::<String>::from_reg_value(valeur).ok()?.join("\0"),
+        REG_SZ | REG_EXPAND_SZ => String::from_reg_value(valeur).ok()?,
+        _ => return None,
+    };
+    Some(texte.split('\0').map(str::to_owned).collect())
+}
+
+/// Chaque valeur lue : (nom de la valeur, paquets) ; `illisibles` : les valeurs présentes mais illisibles ou d'un type
+/// inattendu. Un paquet inconnu est dit ; un paquet donné par un chemin, que LSA charge alors hors de System32, est
+/// élevé. Sans paquet inconnu, une valeur illisible rend le constat non vérifié.
+fn juger_lsa(lues: &[(&str, Vec<String>)], illisibles: &[&str]) -> Constat {
     let mut inconnus = Vec::new();
     let mut chemin = false;
     for (valeur, paquets) in lues {
@@ -213,7 +229,17 @@ fn juger_lsa(lues: &[(&str, Vec<String>)]) -> Constat {
             inconnus.push(format!("{p} ({valeur})"));
         }
     }
+    let non_lues = illisibles.join(", ");
     if inconnus.is_empty() {
+        if !illisibles.is_empty() {
+            return impossible(
+                CAT,
+                &trf!(
+                    "valeur de LSA illisible ou d'un type inattendu : {non_lues}",
+                    "LSA value unreadable or of an unexpected type: {non_lues}"
+                ),
+            );
+        }
         return ok(
             CAT,
             tr!(
@@ -223,14 +249,27 @@ fn juger_lsa(lues: &[(&str, Vec<String>)]) -> Constat {
         );
     }
     let liste = couper(&affichable(&inconnus.join(", ")), 200);
-    alerte(
-        CAT,
-        if chemin { Niveau::Eleve } else { Niveau::Moyen },
-        trf!(
-            "LSA, le gardien des mots de passe de Windows, charge un paquet que Vanguard ne connaît pas : {liste}. Un filtre de mot de passe (Notification Packages) reçoit chaque nouveau mot de passe en clair. S'il ne vient pas d'un logiciel que tu as installé (gestionnaire de mots de passe d'entreprise, par exemple), c'est un vol de mots de passe.",
-            "LSA, Windows' password keeper, loads a package Vanguard does not know: {liste}. A password filter (Notification Packages) receives every new password in clear text. If it does not come from software you installed (a company password manager, for example), it is password theft."
-        ),
-    )
+    let mut message = trf!(
+        "LSA, le gardien des mots de passe de Windows, charge un paquet que Vanguard ne connaît pas : {liste}. Un filtre de mot de passe (Notification Packages) reçoit chaque nouveau mot de passe en clair. S'il ne vient pas d'un logiciel que tu as installé (gestionnaire de mots de passe d'entreprise, par exemple), c'est un vol de mots de passe.",
+        "LSA, Windows' password keeper, loads a package Vanguard does not know: {liste}. A password filter (Notification Packages) receives every new password in clear text. If it does not come from software you installed (a company password manager, for example), it is password theft."
+    );
+    if !illisibles.is_empty() {
+        message.push_str(&trf!(
+            " Non vérifié (illisible ou d'un type inattendu) : {non_lues}.",
+            " Not checked (unreadable or of an unexpected type): {non_lues}."
+        ));
+    }
+    alerte(CAT, if chemin { Niveau::Eleve } else { Niveau::Moyen }, message)
+}
+
+/// Une valeur de LSA : Ok(None) si elle n'existe pas (Windows n'en pose pas toujours trois), Err si elle existe sans
+/// pouvoir être lue ou n'a pas un type de texte.
+fn valeur_lsa(cle: &RegKey, nom: &str) -> Result<Option<Vec<String>>, ()> {
+    match cle.get_raw_value(nom) {
+        Ok(v) => paquets_de(&v).map(Some).ok_or(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(_) => Err(()),
+    }
 }
 
 fn lsa() -> Vec<Constat> {
@@ -238,19 +277,25 @@ fn lsa() -> Vec<Constat> {
     let Ok(cle) = hklm.open_subkey(LSA) else {
         return vec![registre_illisible(CAT)];
     };
-    let mut lues: Vec<(&str, Vec<String>)> = ["Security Packages", "Authentication Packages", "Notification Packages"]
-        .into_iter()
-        .filter_map(|v| cle.get_value::<Vec<String>, _>(v).ok().map(|p| (v, p)))
-        .collect();
-    if let Ok(os) = cle.open_subkey("OSConfig")
-        && let Ok(p) = os.get_value::<Vec<String>, _>("Security Packages")
-    {
-        lues.push(("OSConfig\\Security Packages", p));
+    let mut lues: Vec<(&str, Vec<String>)> = Vec::new();
+    let mut illisibles: Vec<&str> = Vec::new();
+    let mut lire = |cle: &RegKey, nom: &'static str, affiche: &'static str| match valeur_lsa(cle, nom) {
+        Ok(Some(p)) => lues.push((affiche, p)),
+        Ok(None) => {}
+        Err(()) => illisibles.push(affiche),
+    };
+    for v in ["Security Packages", "Authentication Packages", "Notification Packages"] {
+        lire(&cle, v, v);
     }
-    if lues.is_empty() {
+    match cle.open_subkey("OSConfig") {
+        Ok(os) => lire(&os, "Security Packages", "OSConfig\\Security Packages"),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(_) => illisibles.push("OSConfig"),
+    }
+    if lues.is_empty() && illisibles.is_empty() {
         return vec![registre_illisible(CAT)];
     }
-    vec![juger_lsa(&lues)]
+    vec![juger_lsa(&lues, &illisibles)]
 }
 
 // ---------------------------------------------------------------------------------------------------- AppCertDlls
@@ -443,25 +488,71 @@ mod tests {
                 vec!["kerberos".into(), "msv1_0".into(), "cloudap".into()],
             ),
         ];
-        assert!(juger_lsa(&windows).probleme.is_none());
+        assert!(juger_lsa(&windows, &[]).probleme.is_none());
         let filtre = [("Notification Packages", vec!["scecli".into(), "filtremdp".into()])];
-        let c = juger_lsa(&filtre);
+        let c = juger_lsa(&filtre, &[]);
         assert_eq!(c.probleme, Some(Niveau::Moyen));
         assert!(c.message.contains("filtremdp (Notification Packages)"));
         let chemin = [("Security Packages", vec![r"C:\Users\alice\x.dll".into()])];
-        assert_eq!(juger_lsa(&chemin).probleme, Some(Niveau::Eleve));
+        assert_eq!(juger_lsa(&chemin, &[]).probleme, Some(Niveau::Eleve));
         // La valeur d'origine de Windows : deux guillemets, vue sur une vraie VM.
         assert!(
-            juger_lsa(&[("Security Packages", vec!["\"\"".into()])])
+            juger_lsa(&[("Security Packages", vec!["\"\"".into()])], &[])
                 .probleme
                 .is_none()
         );
         // La casse et « .dll » ne changent rien.
         assert!(
-            juger_lsa(&[("Security Packages", vec!["Kerberos.DLL".into()])])
+            juger_lsa(&[("Security Packages", vec!["Kerberos.DLL".into()])], &[])
                 .probleme
                 .is_none()
         );
+    }
+
+    /// Une valeur de LSA en REG_SZ est lue comme une REG_MULTI_SZ ; un autre type n'est pas vérifié.
+    #[test]
+    fn valeurs_de_lsa_de_tous_types() {
+        use std::borrow::Cow;
+        use winreg::enums::RegType::{REG_BINARY, REG_DWORD, REG_MULTI_SZ, REG_SZ};
+        let utf16 = |s: &str| -> Vec<u8> { s.encode_utf16().flat_map(u16::to_le_bytes).collect() };
+        let valeur = |vtype, s: &str| winreg::RegValue {
+            bytes: Cow::Owned(utf16(s)),
+            vtype,
+        };
+        assert_eq!(
+            paquets_de(&valeur(REG_MULTI_SZ, "scecli\0filtremdp\0\0")),
+            Some(vec!["scecli".into(), "filtremdp".into()])
+        );
+        assert_eq!(
+            paquets_de(&valeur(REG_SZ, "filtremdp\0")),
+            Some(vec!["filtremdp".into()])
+        );
+        // Un second paquet caché après un zéro dans une REG_SZ est vu.
+        assert_eq!(
+            paquets_de(&valeur(REG_SZ, "scecli\0cache\0")),
+            Some(vec!["scecli".into(), "cache".into()])
+        );
+        assert_eq!(paquets_de(&valeur(REG_BINARY, "scecli")), None);
+        assert_eq!(paquets_de(&valeur(REG_DWORD, "ab")), None);
+        let filtre = paquets_de(&valeur(REG_SZ, "filtremdp")).unwrap();
+        assert_eq!(
+            juger_lsa(&[("Notification Packages", filtre)], &[]).probleme,
+            Some(Niveau::Moyen)
+        );
+        // Une valeur d'un type inattendu, sans autre alerte : non vérifié, jamais sain.
+        let c = juger_lsa(
+            &[("Security Packages", vec!["kerberos".into()])],
+            &["Notification Packages"],
+        );
+        assert!(!c.verifie);
+        assert!(c.message.contains("Notification Packages"));
+        // Avec un paquet inconnu ailleurs, l'alerte reste et dit ce qui n'a pas été lu.
+        let c = juger_lsa(
+            &[("Security Packages", vec!["inconnu".into()])],
+            &["Notification Packages"],
+        );
+        assert!(c.verifie && c.probleme == Some(Niveau::Moyen));
+        assert!(c.message.contains("Notification Packages"));
     }
 
     #[test]
