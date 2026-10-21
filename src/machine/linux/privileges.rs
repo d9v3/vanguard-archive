@@ -18,7 +18,7 @@ pub(super) fn fichiers_secrets() -> Vec<Constat> {
 
 /// Groupes qui donnent en pratique les droits root sans mot de passe.
 pub(super) fn groupes_privilegies() -> Option<Constat> {
-    let groupes = sortie("id", &["-nG"])?;
+    let groupes = groupes_du_compte()?;
     let risques = groupes_a_risque(&groupes);
     Some(if risques.is_empty() {
         ok(
@@ -47,6 +47,16 @@ pub(super) fn groupes_privilegies() -> Option<Constat> {
 /// Groupes de `id -nG` qui valent root : docker, lxd et incus-admin par un conteneur qui monte /, libvirt par une
 /// machine virtuelle qui reçoit le disque de l'ordinateur, disk par la lecture et l'écriture directes du disque (donc
 /// de /etc/shadow).
+/// Les groupes du compte, séparés par des espaces comme `id -nG` les écrit : lus par getgroups et /etc/group.
+/// Un groupe resté un numéro vient d'un annuaire (LDAP, sssd) que le programme, lié à musl, ne consulte pas :
+/// seul `id` sait alors le nommer, et « docker » pourrait s'y cacher.
+fn groupes_du_compte() -> Option<String> {
+    natif::groupes()
+        .filter(|g| !g.iter().any(|n| n.bytes().all(|o| o.is_ascii_digit())))
+        .map(|g| g.join(" "))
+        .or_else(|| sortie("id", &["-nG"]))
+}
+
 fn groupes_a_risque(groupes: &str) -> Vec<&str> {
     groupes
         .split_whitespace()
@@ -236,6 +246,24 @@ mod tests {
             ["libvirt", "docker"]
         );
         assert_eq!(groupes_a_risque("alice wheel video audio kvm"), Vec::<&str>::new());
+    }
+
+    /// Sur cet ordinateur, les mêmes groupes que `id -nG`, quand il est là (l'ordre des groupes secondaires peut
+    /// différer : seul compte ce qui y est).
+    #[test]
+    fn groupes_comme_id() {
+        let Some(id) = crate::commande::lancer(Command::new("id").arg("-nG"), 5)
+            .filter(|r| r.code == Some(0))
+            .map(|r| r.sortie)
+        else {
+            return;
+        };
+        let trier = |t: &str| {
+            let mut v: Vec<String> = t.split_whitespace().map(str::to_string).collect();
+            v.sort();
+            v
+        };
+        assert_eq!(trier(&groupes_du_compte().unwrap()), trier(&id));
     }
 
     #[test]
