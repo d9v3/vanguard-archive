@@ -98,15 +98,199 @@ pub fn choisir() {
     analyser(Portee::Dossier(cible));
 }
 
-/// Clés et disques externes montés : (point de montage, description).
+/// Clés et disques externes montés : (point de montage, description). Lu dans /proc/self/mountinfo et /sys, comme
+/// lsblk le fait lui-même ; lsblk ne sert qu'en secours, quand mountinfo ne se lit pas.
 #[cfg(target_os = "linux")]
 fn volumes_amovibles() -> Vec<(PathBuf, String)> {
+    if let Ok(montages) = std::fs::read_to_string("/proc/self/mountinfo") {
+        return volumes_amovibles_sous(std::path::Path::new("/"), &montages);
+    }
     crate::commande::lancer(
         Command::new("lsblk").args(["-Pno", "RM,HOTPLUG,LABEL,SIZE,MOUNTPOINT"]),
         10,
     )
     .map(|o| lire_lsblk(&o.sortie))
     .unwrap_or_default()
+}
+
+/// Un chemin absolu du système, rattaché à `racine` (les tests passent la leur).
+#[cfg(target_os = "linux")]
+fn sous(racine: &std::path::Path, chemin: &str) -> PathBuf {
+    racine.join(chemin.trim_start_matches('/'))
+}
+
+/// Les volumes montés dont le disque est amovible ou branché à chaud. Chaque périphérique compte une fois, à son
+/// premier montage entier (racine « / » du système de fichiers, pas un sous-volume Btrfs ni un montage lié) s'il y en
+/// a un. Un volume chiffré ou LVM compte quand un des disques dessous est amovible : lsblk ne le disait pas, et une
+/// clé chiffrée s'analyse aussi. Description : étiquette et taille, prête à montrer (l'étiquette vient de qui a
+/// préparé la clé).
+#[cfg(target_os = "linux")]
+fn volumes_amovibles_sous(racine: &std::path::Path, mountinfo: &str) -> Vec<(PathBuf, String)> {
+    let mut choisis: Vec<(String, PathBuf, bool)> = Vec::new();
+    for l in mountinfo.lines() {
+        let Some((avant, apres)) = l.split_once(" - ") else {
+            continue;
+        };
+        let champs: Vec<&str> = avant.split(' ').collect();
+        let (Some(dedans), Some(point)) = (champs.get(3), champs.get(4)) else {
+            continue;
+        };
+        let Some(source) = apres.split(' ').nth(1).map(crate::copier::sans_echappements) else {
+            continue;
+        };
+        if !source.starts_with("/dev/") {
+            continue;
+        }
+        // /dev/mapper/<nom> et /dev/disk/by-* sont des liens : sysfs connaît le périphérique sous son nom réel.
+        let reel = std::fs::canonicalize(sous(racine, &source)).unwrap_or_else(|_| PathBuf::from(&source));
+        let Some(nom) = reel.file_name().map(|n| n.to_string_lossy().into_owned()) else {
+            continue;
+        };
+        let entier = *dedans == "/";
+        let point = PathBuf::from(crate::copier::sans_echappements(point));
+        match choisis.iter_mut().find(|(n, _, _)| *n == nom) {
+            Some(c) if entier && !c.2 => *c = (nom, point, true),
+            Some(_) => {}
+            None => choisis.push((nom, point, entier)),
+        }
+    }
+    choisis
+        .into_iter()
+        .filter(|(nom, _, _)| bloc_amovible(racine, &sous(racine, "/sys/class/block").join(nom), 0))
+        .map(|(nom, point, _)| {
+            let octets = std::fs::read_to_string(sous(racine, "/sys/class/block").join(&nom).join("size"))
+                .ok()
+                .and_then(|t| t.trim().parse::<u64>().ok())
+                .unwrap_or(0)
+                .saturating_mul(512);
+            let taille = taille_lsblk(octets);
+            let description = match etiquette(racine, &nom) {
+                Some(e) if !e.is_empty() => format!("{e} · {taille}"),
+                _ => taille,
+            };
+            (point, affichable(&description))
+        })
+        .collect()
+}
+
+/// Un périphérique bloc (/sys/class/block/<nom>) est-il sur un disque amovible ? Une partition regarde son disque
+/// (le dossier parent dans sysfs), un volume device-mapper les périphériques dessous (« slaves »).
+#[cfg(target_os = "linux")]
+fn bloc_amovible(racine: &std::path::Path, bloc: &std::path::Path, profondeur: u8) -> bool {
+    // Une boucle de liens ne doit pas faire tourner sans fin : aucune pile réelle n'a seize étages.
+    if profondeur > 16 {
+        return false;
+    }
+    let Ok(reel) = std::fs::canonicalize(bloc) else {
+        return false;
+    };
+    let disque = if reel.join("partition").exists() {
+        match reel.parent() {
+            Some(p) => p.to_path_buf(),
+            None => return false,
+        }
+    } else {
+        reel
+    };
+    let esclaves: Vec<PathBuf> = std::fs::read_dir(disque.join("slaves"))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|e| e.path())
+        .collect();
+    if !esclaves.is_empty() {
+        return esclaves.iter().any(|e| bloc_amovible(racine, e, profondeur + 1));
+    }
+    std::fs::read_to_string(disque.join("removable")).is_ok_and(|r| r.trim() == "1")
+        || branche_a_chaud(racine, &disque.join("device"))
+}
+
+/// Branché à chaud, comme le dit lsblk (HOTPLUG) : en remontant le chemin de l'appareil dans /sys/devices, le premier
+/// attribut « removable » rencontré dit « removable » (un port USB, un lecteur de cartes) ; « fixed » arrête.
+#[cfg(target_os = "linux")]
+fn branche_a_chaud(racine: &std::path::Path, appareil: &std::path::Path) -> bool {
+    let Ok(chemin) = std::fs::canonicalize(appareil) else {
+        return false;
+    };
+    let devices = sous(racine, "/sys/devices");
+    for d in chemin
+        .ancestors()
+        .take_while(|d| d.starts_with(&devices) && *d != devices)
+    {
+        match std::fs::read_to_string(d.join("removable")).as_deref().map(str::trim) {
+            Ok("removable") => return true,
+            Ok("fixed") => return false,
+            _ => {}
+        }
+    }
+    false
+}
+
+/// L'étiquette du système de fichiers, d'après les liens de /dev/disk/by-label (posés par udev, lisibles par tous).
+/// udev y écrit en « \xHH » les octets qui ne vont pas dans un nom de fichier (l'espace : « MA\x20CLE »).
+#[cfg(target_os = "linux")]
+fn etiquette(racine: &std::path::Path, nom: &str) -> Option<String> {
+    std::fs::read_dir(sous(racine, "/dev/disk/by-label"))
+        .ok()?
+        .flatten()
+        .find(|e| {
+            std::fs::read_link(e.path())
+                .ok()
+                .and_then(|c| c.file_name().map(|n| n == std::ffi::OsStr::new(nom)))
+                .unwrap_or(false)
+        })
+        .map(|e| sans_hex(&e.file_name().to_string_lossy()))
+}
+
+/// « MA\x20CLE » → « MA CLE » : les octets écrits en hexadécimal, puis le texte relu en UTF-8.
+#[cfg(any(target_os = "linux", test))]
+fn sans_hex(t: &str) -> String {
+    let o = t.as_bytes();
+    let mut sortie = Vec::with_capacity(o.len());
+    let mut i = 0;
+    while i < o.len() {
+        if o[i] == b'\\'
+            && o.get(i + 1) == Some(&b'x')
+            && let Some(h) = t.get(i + 2..i + 4).and_then(|h| u8::from_str_radix(h, 16).ok())
+        {
+            sortie.push(h);
+            i += 4;
+        } else {
+            sortie.push(o[i]);
+            i += 1;
+        }
+    }
+    String::from_utf8_lossy(&sortie).into_owned()
+}
+
+/// Une taille écrite comme lsblk l'écrit : en puissances de 1024, une lettre (« 512B », « 47G », « 28,9G »), un
+/// chiffre après la virgule quand il n'est pas nul, arrondi comme util-linux le fait.
+#[cfg(any(target_os = "linux", test))]
+fn taille_lsblk(octets: u64) -> String {
+    const LETTRES: [&str; 6] = ["K", "M", "G", "T", "P", "E"];
+    if octets < 1024 {
+        return format!("{octets}B");
+    }
+    let mut exposant = 10;
+    while exposant < 60 && octets >> (exposant + 10) > 0 {
+        exposant += 10;
+    }
+    let mut entier = octets >> exposant;
+    // Le reste en millièmes de l'unité (tronqués), puis arrondi au dixième.
+    let reste = u128::from(octets & ((1u64 << exposant) - 1));
+    let milliemes = u64::try_from((reste * 1000) >> exposant).unwrap_or(0);
+    let mut dixiemes = (milliemes + 50) / 100;
+    if dixiemes == 10 {
+        entier += 1;
+        dixiemes = 0;
+    }
+    let lettre = LETTRES[exposant / 10 - 1];
+    if dixiemes == 0 {
+        format!("{entier}{lettre}")
+    } else {
+        let virgule = if crate::langue::anglais() { '.' } else { ',' };
+        format!("{entier}{virgule}{dixiemes}{lettre}")
+    }
 }
 
 /// Clés et disques externes montés sous macOS : tout ce qui est dans /Volumes, sauf le disque du système (un
@@ -484,6 +668,10 @@ fn outil_clamav(nom: &str) -> String {
 /// Installe ClamAV et télécharge les signatures si besoin. Retourne `false` si l'utilisateur refuse.
 #[cfg(unix)]
 fn preparer() -> bool {
+    // Linux : le PATH parcouru sur le disque, sans lancer de shell.
+    #[cfg(target_os = "linux")]
+    let present = crate::machine::linux::natif::present(&outil_clamav("clamscan"));
+    #[cfg(target_os = "macos")]
     let present = crate::commande::lancer(
         Command::new("bash")
             .arg("-c")
@@ -969,6 +1157,133 @@ mod tests_cle {
         // L'étiquette d'une clé USB est choisie par qui l'a préparée : piégée, elle arrive inoffensive.
         let piege = "RM=\"1\" HOTPLUG=\"1\" LABEL=\"CLE\x1b]52;c;eA==\x07\u{202e}\" SIZE=\"8G\" MOUNTPOINT=\"/run/media/alice/CLE\"\n";
         assert_eq!(lire_lsblk(piege)[0].1, "CLE�]52;c;eA==�� · 8G");
+    }
+
+    #[test]
+    fn tailles_et_etiquettes_comme_lsblk() {
+        assert_eq!(taille_lsblk(512), "512B");
+        assert_eq!(taille_lsblk(47 << 30), "47G");
+        assert_eq!(taille_lsblk(32 << 20), "32M");
+        // 2,9 Gio + un peu : le dixième est arrondi, comme util-linux.
+        let t = taille_lsblk((29 << 30) / 10 + 1);
+        assert!(t == "2,9G" || t == "2.9G", "{t}");
+        // 1023,96 Mio s'arrondit à 1024M, pas à « 1023,10M ».
+        assert_eq!(taille_lsblk((1 << 30) - (40 << 10)), "1024M");
+        assert_eq!(sans_hex("MA\\x20CLE"), "MA CLE");
+        assert_eq!(sans_hex("caf\\xc3\\xa9\\x2"), "café\\x2");
+    }
+
+    /// Une arborescence inventée : une clé USB (amovible), un disque USB branché à chaud, le disque interne, un
+    /// volume chiffré sur la clé, un sous-volume Btrfs monté avant le volume entier.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn volumes_lus_dans_sys() {
+        use std::os::unix::fs::symlink;
+        let r = std::env::temp_dir().join(format!("vanguard-antivirus-volumes-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&r);
+        let ecrire = |chemin: &str, texte: &str| {
+            let f = sous(&r, chemin);
+            std::fs::create_dir_all(f.parent().unwrap()).unwrap();
+            std::fs::write(f, texte).unwrap();
+        };
+        let usb = "/sys/devices/pci0/usb2/2-1";
+        ecrire(&format!("{usb}/removable"), "removable\n");
+        ecrire("/sys/devices/pci0/ata1/removable", "fixed\n");
+        for (disque, appareil, amovible, parts) in [
+            ("sdb", format!("{usb}/host6/block/sdb"), "1", 1),
+            ("sdc", format!("{usb}/host7/block/sdc"), "0", 1),
+            ("sda", "/sys/devices/pci0/ata1/host0/block/sda".to_string(), "0", 2),
+        ] {
+            ecrire(&format!("{appareil}/removable"), amovible);
+            std::fs::create_dir_all(sous(&r, &format!("{appareil}/appareil"))).unwrap();
+            symlink(
+                sous(&r, &format!("{appareil}/appareil")),
+                sous(&r, &format!("{appareil}/device")),
+            )
+            .unwrap();
+            for p in 1..=parts {
+                ecrire(&format!("{appareil}/{disque}{p}/partition"), &p.to_string());
+                ecrire(&format!("{appareil}/{disque}{p}/size"), "61440000");
+                ecrire(&format!("/dev/{disque}{p}"), "");
+                std::fs::create_dir_all(sous(&r, "/sys/class/block")).unwrap();
+                symlink(
+                    sous(&r, &format!("{appareil}/{disque}{p}")),
+                    sous(&r, &format!("/sys/class/block/{disque}{p}")),
+                )
+                .unwrap();
+            }
+        }
+        // Le volume chiffré dm-0 repose sur sdb1 ; /dev/mapper/coffre pointe vers lui.
+        ecrire("/sys/devices/virtual/block/dm-0/size", "2048");
+        ecrire("/sys/devices/virtual/block/dm-0/removable", "0");
+        std::fs::create_dir_all(sous(&r, "/sys/devices/virtual/block/dm-0/slaves")).unwrap();
+        symlink(
+            sous(&r, "/sys/class/block/sdb1"),
+            sous(&r, "/sys/devices/virtual/block/dm-0/slaves/sdb1"),
+        )
+        .unwrap();
+        symlink(
+            sous(&r, "/sys/devices/virtual/block/dm-0"),
+            sous(&r, "/sys/class/block/dm-0"),
+        )
+        .unwrap();
+        ecrire("/dev/dm-0", "");
+        std::fs::create_dir_all(sous(&r, "/dev/mapper")).unwrap();
+        symlink("../dm-0", sous(&r, "/dev/mapper/coffre")).unwrap();
+        std::fs::create_dir_all(sous(&r, "/dev/disk/by-label")).unwrap();
+        symlink("../../sdb1", sous(&r, "/dev/disk/by-label/MA\\x20CLE")).unwrap();
+        let mountinfo = "22 1 259:2 / / rw - ext4 /dev/sda2 rw\n\
+                         30 22 8:17 /@donnees /run/media/alice/sous-volume rw - btrfs /dev/sdc1 rw\n\
+                         31 22 8:17 / /run/media/alice/disque\\040USB rw - btrfs /dev/sdc1 rw\n\
+                         32 22 8:17 / /run/media/alice/MA\\040CLE rw - vfat /dev/sdb1 rw\n\
+                         33 22 254:0 / /run/media/alice/coffre rw - ext4 /dev/mapper/coffre rw\n\
+                         34 22 0:5 / /proc rw - proc proc rw\n\
+                         35 22 8:1 / /boot rw - vfat /dev/sda1 rw\n";
+        let v = volumes_amovibles_sous(&r, mountinfo);
+        let points: Vec<&std::path::Path> = v.iter().map(|(p, _)| p.as_path()).collect();
+        assert_eq!(
+            points,
+            [
+                std::path::Path::new("/run/media/alice/disque USB"),
+                std::path::Path::new("/run/media/alice/MA CLE"),
+                std::path::Path::new("/run/media/alice/coffre")
+            ]
+        );
+        assert!(v[1].1.starts_with("MA CLE · 29"), "{}", v[1].1);
+        assert_eq!(v[2].1, "1M");
+        let _ = std::fs::remove_dir_all(&r);
+    }
+
+    /// Sur cet ordinateur, chaque volume amovible que lsblk montre se retrouve dans la lecture directe, avec la
+    /// même étiquette ; en plus, seulement des volumes chiffrés ou LVM posés sur un disque amovible.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn volumes_comme_lsblk() {
+        let Some(r) = crate::commande::lancer(
+            Command::new("lsblk").args(["-Pno", "RM,HOTPLUG,LABEL,SIZE,MOUNTPOINT"]),
+            10,
+        )
+        .filter(|r| r.code == Some(0)) else {
+            return;
+        };
+        let Ok(montages) = std::fs::read_to_string("/proc/self/mountinfo") else {
+            return;
+        };
+        let lus = volumes_amovibles_sous(std::path::Path::new("/"), &montages);
+        let dits = lire_lsblk(&r.sortie);
+        for (point, nom) in &dits {
+            let etiquette = |n: &str| n.rsplit_once(" · ").map(|(e, _)| e.to_string());
+            let trouve = lus.iter().find(|(p, _)| p == point);
+            assert!(trouve.is_some(), "{point:?} : {lus:?}");
+            assert_eq!(etiquette(nom), etiquette(&trouve.unwrap().1), "{point:?}");
+        }
+        for (point, _) in &lus {
+            let dm = montages.lines().any(|l| {
+                l.contains(&format!(" {} ", point.display().to_string().replace(' ', "\\040")))
+                    && (l.contains(" /dev/mapper/") || l.contains(" /dev/dm-"))
+            });
+            assert!(dm || dits.iter().any(|(p, _)| p == point), "{point:?} : {dits:?}");
+        }
     }
 
     #[test]
