@@ -79,11 +79,6 @@ if [[ $MODE == --sans-compiler ]] && grep -qs "/\.git/worktrees/" "$LINUX.d" "${
   echo "Compilation venue d'une branche en cours (worktree) : rien n'est copié ni envoyé."
   exit 0
 fi
-# Une DLL posée à côté de vanguard.exe ne doit jamais être chargée : le programme Windows qui n'en porte pas la
-# garde (chargement.rs) ne part nulle part.
-if [[ -f $WINDOWS ]] && ! python3 outils/verifier-pe.py "$WINDOWS"; then
-  exit 1
-fi
 
 VENU_DE_GITHUB=""
 if [[ $MODE == --branchement ]]; then
@@ -108,6 +103,11 @@ if [[ $MODE == --branchement ]]; then
   fi
 elif [[ $MODE != --sans-compiler ]]; then
   compiler
+fi
+# Une DLL posée à côté de vanguard.exe ne doit jamais être chargée : le programme Windows qui n'en porte pas la
+# garde (chargement.rs) ne part nulle part. Vérifié après la compilation, sur le programme qui va être copié.
+if [[ -f $WINDOWS ]] && ! python3 outils/verifier-pe.py "$WINDOWS"; then
+  exit 1
 fi
 # Page de la version sur GitHub (Releases) : chaque publication a la sienne, 0.x.0 comme 0.x.y. Il n'y en a qu'une par
 # jour : le lien « dernière version » du README mène toujours à celle du jour, et le Mac de GitHub ne compile qu'une
