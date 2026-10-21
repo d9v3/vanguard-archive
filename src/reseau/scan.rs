@@ -365,7 +365,7 @@ fn demander_voisins() -> Option<Vec<u8>> {
 
 /// Les messages netlink d'un morceau de réponse, un par un : (type, corps).
 #[cfg(any(target_os = "linux", test))]
-fn messages_netlink(octets: &[u8]) -> impl Iterator<Item = (u16, &[u8])> {
+pub(crate) fn messages_netlink(octets: &[u8]) -> impl Iterator<Item = (u16, &[u8])> {
     let mut pos = 0usize;
     std::iter::from_fn(move || {
         let entete = octets.get(pos..pos + 16)?;
@@ -382,7 +382,7 @@ fn messages_netlink(octets: &[u8]) -> impl Iterator<Item = (u16, &[u8])> {
 
 /// Le morceau finit-il la réponse ? `Some(true)` : NLMSG_DONE ; `Some(false)` : NLMSG_ERROR ; `None` : la suite vient.
 #[cfg(any(target_os = "linux", test))]
-fn fin_netlink(morceau: &[u8]) -> Option<bool> {
+pub(crate) fn fin_netlink(morceau: &[u8]) -> Option<bool> {
     messages_netlink(morceau).find_map(|(genre, _)| match genre {
         3 => Some(true),
         2 => Some(false),
