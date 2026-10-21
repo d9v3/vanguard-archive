@@ -168,6 +168,9 @@ remarque sur les quatre cibles et les tests, sous Linux ; sur un vrai Windows (P
 le code a changé, à chaque demande de fusion et à la demande (`gh workflow run ci.yml`). Pas Windows ni Mac à chaque
 envoi : sur un dépôt privé, leurs minutes comptent double et dix fois.
 
+Dépendances : `cargo deny` (`deny.toml` : failles connues de RustSec, licences compatibles avec la GPL-3.0, crates.io
+seulement, doublons), dans `outils/verifier.sh` (sauté sans l'outil) et chaque nuit dans la CI.
+
 Liens morts : `outils/liens.py` ouvre tous les liens du dépôt (documentation, code du programme hors tests, scripts,
 licences) et vérifie les liens internes des pages Markdown : fichier visé, titre d'une ancre, téléchargements de la
 dernière version. Il est lancé tout seul avant chaque envoi par `deployer.sh` et avant chaque page de version ; la CI

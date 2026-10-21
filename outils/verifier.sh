@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Tout vérifier en une commande, avant un commit ou une livraison : mise en forme, clippy sur les quatre cibles, tests
 # Linux et Windows (sous Wine), les tests Linux refaits sans Internet, scripts PowerShell, shell et Python, liens
-# internes, textes français et anglais.
+# internes, textes français et anglais, dépendances (cargo deny).
 # Chaque cible de compilation a sa chaîne (clippy, puis ses tests) et les quatre tournent en même temps : cargo garde
 # un dossier par cible, elles ne s'attendent presque pas. À la fin, une ligne par étape ; le code de sortie dit si tout
 # est vert.
@@ -21,17 +21,29 @@ TRAVAIL=$(mktemp -d "$HOME/.cache/vanguard-dev/verifier.XXXX")
 trap 'rm -rf "$TRAVAIL"' EXIT
 DEBUT=$SECONDS
 
-# Une étape : sa commande, son journal, son état (« ok 41 » ou « echec 41 », en secondes).
+# Une étape qui ne peut pas tourner ici (outil absent) sort avec ce code et dit pourquoi en première ligne : elle est
+# dite « sautée », sans compter comme un échec. 77, comme les tests d'automake ; 1 et 2 sont déjà ceux des échecs.
+SAUTEE=77
+
+# Une étape : sa commande, son journal, son état (« ok 41 », « sautee 0 » ou « echec 41 », en secondes).
 etape() {
-  local nom=$1 debut=$SECONDS
+  local nom=$1 debut=$SECONDS code
   shift
-  if "$@" >"$TRAVAIL/$nom.log" 2>&1; then
+  "$@" >"$TRAVAIL/$nom.log" 2>&1
+  code=$?
+  if ((code == 0)); then
     echo "ok $((SECONDS - debut))" >"$TRAVAIL/$nom.etat"
+  elif ((code == SAUTEE)); then
+    echo "sautee $((SECONDS - debut))" >"$TRAVAIL/$nom.etat"
   else
     echo "echec $((SECONDS - debut))" >"$TRAVAIL/$nom.etat"
     return 1
   fi
 }
+
+# Internet joignable : les bases de failles connues (RustSec) sont des dépôts de GitHub. Cinq secondes au plus ;
+# VANGUARD_HORS_LIGNE fait comme sans Internet.
+internet() { [[ -z ${VANGUARD_HORS_LIGNE:-} ]] && curl -fsI --max-time 5 https://github.com >/dev/null 2>&1; }
 
 # YARA-X (par wasmtime) et ring (TLS du client HTTPS) compilent un peu de C : musl-gcc pour Linux, le gcc de MinGW pour
 # Windows, clang pour les cibles Mac, visées sans les outils d'Apple (outils/mac-entetes, ring sans en-têtes du
@@ -101,6 +113,36 @@ scripts_python() {
     xargs -0 python3 -c 'import ast, sys; [ast.parse(open(f, encoding="utf-8").read(), f) for f in sys.argv[1:]]'
 }
 
+# Les dépendances selon deny.toml : failles connues (base RustSec), licences, provenance, doublons. Sans Internet, la
+# base du dernier téléchargement sert telle quelle ; sans aucune, seules les failles ne sont pas vérifiées, et c'est
+# dit. Sans cargo-deny, l'étape est sautée.
+dependances() {
+  command -v cargo-deny >/dev/null || { echo "cargo-deny absent (cargo install --locked cargo-deny)"; return "$SAUTEE"; }
+  local options=(--locked) verifications=() sortie code
+  if ! internet; then
+    options+=(--offline)
+    if compgen -G "${CARGO_HOME:-$HOME/.cargo}/advisory-dbs/advisory-db-*" >/dev/null; then
+      echo "sans Internet : base RustSec du dernier téléchargement"
+    else
+      echo "sans Internet ni base RustSec : failles connues non vérifiées"
+      verifications=(bans licenses sources)
+    fi
+  fi
+  sortie=$(cargo deny "${options[@]}" check --hide-inclusion-graph "${verifications[@]}" 2>&1)
+  code=$?
+  printf '%s\n' "$sortie"
+  # En échec, le résumé ne montre que la fin du journal, où sont les doublons : chaque erreur y est rappelée, avec la
+  # bibliothèque visée (dossier de son Cargo.toml pour une licence, ligne de Cargo.lock pour une faille).
+  ((code == 0)) || awk '
+    /^error\[/ { if (t != "") print t; t = $0; n = 0; next }
+    t != "" && ++n <= 5 && match($0, /[^\/]+\/Cargo\.toml:/) { print t " : " substr($0, RSTART, RLENGTH - 12); t = ""; next }
+    t != "" && n <= 5 && match($0, /[0-9]+ │ [^ ]+ [^ ]+ registry/) {
+      split(substr($0, RSTART, RLENGTH), m, " "); print t " : " m[3] " " m[4]; t = ""
+    }
+    END { if (t != "") print t }' <<<"$sortie"
+  return "$code"
+}
+
 # Les textes affichés comparés à master : un texte perdu ou nouveau se voit avant le commit. Sur master, rien à
 # comparer.
 textes() {
@@ -133,6 +175,7 @@ if [[ $MODE != --rapide ]]; then
   etape python scripts_python &
   etape liens python3 outils/liens.py --hors-ligne &
   etape textes textes &
+  etape dependances dependances &
 fi
 wait
 
@@ -156,11 +199,26 @@ ligne() {
   read -r etat duree <"$TRAVAIL/$nom.etat"
   if [[ $etat == ok ]]; then
     printf '  ✔ %-34s %4s s\n' "$libelle" "$duree" | tee -a "$RESUME"
+  elif [[ $etat == sautee ]]; then
+    printf '  · %-34s sautée : %s\n' "$libelle" "$(head -n1 "$TRAVAIL/$nom.log")" | tee -a "$RESUME"
   else
     ECHECS=$((ECHECS + 1))
     printf '  ✖ %-34s %4s s\n' "$libelle" "$duree" | tee -a "$RESUME"
     tail -n 25 "$TRAVAIL/$nom.log" | sed 's/^/      /'
   fi
+}
+
+# Ce que cargo deny laisse passer sans le taire : les failles admises dans deny.toml (leur raison commence par le nom
+# de la bibliothèque), les doublons, la base de failles hors ligne.
+remarques_dependances() {
+  local journal=$TRAVAIL/dependances.log admises doublons
+  [[ -f $journal && $(head -c6 "$TRAVAIL/dependances.etat" 2>/dev/null) != sautee ]] || return 0
+  grep -m1 '^sans Internet' "$journal" | sed 's/^/      /'
+  admises=$(grep -oE '\{ id = "RUSTSEC-[0-9]{4}-[0-9]{4}", reason = "[^,]+' deny.toml |
+    sed -E 's/.*"(RUSTSEC-[0-9-]+)", reason = "(.*)/\1 (\2)/' | paste -sd, | sed 's/,/, /g')
+  [[ -n $admises ]] && echo "      failles admises (deny.toml) : $admises"
+  doublons=$(grep -c '^warning\[duplicate\]' "$journal")
+  ((doublons == 0)) || echo "      $doublons bibliothèques en plusieurs versions (doublons)"
 }
 
 echo
@@ -181,6 +239,8 @@ if [[ $MODE != --rapide ]]; then
   ligne liens "liens internes"
   ligne textes "textes FR/EN"
   [[ -f $TRAVAIL/textes.log ]] && grep -E '^(perdues|nouvelles) : \[[^]]' "$TRAVAIL/textes.log" | cut -c1-200 | sed 's/^/      /'
+  ligne dependances "dépendances (cargo deny)"
+  remarques_dependances
 fi
 DUREE=$((SECONDS - DEBUT))
 if ((ECHECS)); then

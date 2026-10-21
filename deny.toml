@@ -1,0 +1,61 @@
+# Ce que les dépendances de Vanguard ont le droit d'être, vérifié par cargo deny (outils/verifier.sh, et chaque nuit
+# dans la CI) : failles connues (base RustSec), licences, provenance, doublons.
+
+# Les quatre cibles livrées, comme outils/licences-tierces.py : une dépendance propre à un autre système (Android,
+# WebAssembly…) n'est jamais compilée dans Vanguard.
+[graph]
+targets = [
+    "x86_64-unknown-linux-musl",
+    "x86_64-pc-windows-gnu",
+    "aarch64-apple-darwin",
+    "x86_64-apple-darwin",
+]
+
+# Failles connues, bibliothèques abandonnées ou au code défaillant (unsound) : refusées. Une version retirée de
+# crates.io (yanked) est seulement signalée : elle n'est pas forcément dangereuse. Une faille s'ôte en mettant la
+# dépendance à jour ; une exception n'est admise que sans correctif publié et pour un défaut que Vanguard ne peut pas
+# atteindre, dite ici avec sa preuve, affichée à chaque passage (outils/verifier.sh) et à relire à chaque mise à jour
+# de YARA-X : dès qu'elle disparaît de l'arbre, cargo deny le signale (advisory-not-detected). La raison commence
+# par le nom de la bibliothèque et une virgule : outils/verifier.sh la cite dans son résumé.
+[advisories]
+ignore = [
+    { id = "RUSTSEC-2023-0071", reason = "rsa, par YARA-X seulement, sans version corrigée : l'attaque Marvin vise les opérations à clé privée (déchiffrement), YARA-X ne fait que vérifier des signatures Authenticode avec une clé publique (modules/utils/crypto.rs, RsaPublicKey)" },
+    { id = "RUSTSEC-2025-0141", reason = "bincode, par YARA-X seulement, abandonné mais sans faille connue : il ne sert qu'à sérialiser des règles compilées, et Vanguard n'en relit jamais (pas de Rules::deserialize)" },
+]
+
+# Les licences déjà présentes parmi les dépendances (LICENCES-TIERCES.txt), toutes compatibles avec la GPL-3.0-or-later
+# de Vanguard et avec une double licence. Toute autre, même libre (MPL, LGPL, GPL…), demande d'abord une décision :
+# CLAUDE.md, « Nouvelle dépendance ».
+[licenses]
+allow = [
+    "0BSD",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "CC0-1.0",
+    "ISC",
+    "MIT",
+    "MIT-0",
+    "Unicode-3.0",
+    "Unlicense",
+    "Zlib",
+]
+confidence-threshold = 0.8
+# La GPL, seulement pour Vanguard lui-même.
+exceptions = [
+    { crate = "vanguard", allow = ["GPL-3.0-or-later"] },
+]
+
+# Les doublons (deux versions d'une même bibliothèque) sont dits, sans faire échouer : ils grossissent le programme,
+# mais viennent presque tous de dépendances de dépendances, hors de portée.
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+
+# crates.io seulement : ni autre registre, ni dépôt git, d'où un code non relu pourrait entrer.
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

@@ -168,6 +168,9 @@ the four targets and the tests, on Linux; on a real Windows (PowerShell, registr
 on each pull request and on demand (`gh workflow run ci.yml`). Not Windows or Mac on each push: on a private
 repository, their minutes count double and tenfold.
 
+Dependencies: `cargo deny` (`deny.toml`: known RustSec vulnerabilities, GPL-3.0-compatible licenses, crates.io only,
+duplicates), in `outils/verifier.sh` (skipped without the tool) and every night in CI.
+
 Dead links: `outils/liens.py` opens every link of the repository (documentation, the program's code except tests,
 scripts, licenses) and checks the internal links of the Markdown pages: target file, heading of an anchor, downloads
 of the latest release. It runs by itself before each push by `deployer.sh` and before each release page; CI checks
