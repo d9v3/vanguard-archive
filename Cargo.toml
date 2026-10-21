@@ -32,7 +32,7 @@ sha1_smol = "1.0.1"
 sha2 = { version = "0.11.1", default-features = false }
 tokio = { version = "1.53.3", features = ["full"] }
 # Le moteur YARA en Rust (VirusTotal) : seulement les modules dont les règles intégrées ont besoin (pe, elf).
-yara-x = { version = "1.21.0", default-features = false, features = ["pe-module", "elf-module", "constant-folding", "exact-atoms", "fast-regexp"] }
+yara-x = { version = "1.22.0", default-features = false, features = ["pe-module", "elf-module", "constant-folding", "exact-atoms", "fast-regexp"] }
 ed25519-dalek = { version = "3.0.0", default-features = false }
 
 [target."cfg(windows)".dependencies]
