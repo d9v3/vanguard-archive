@@ -73,10 +73,11 @@ pub(super) fn autres_mises_a_jour() -> Vec<Constat> {
             })
         });
         let snap = present("snap").then(|| portee.spawn(|| sortie_delai("snap", &["refresh", "--list"], 30, &[0])));
+        // L'assistant AUR ne sert plus qu'à nommer la commande proposée : la liste vient de l'AUR lui-même.
         let aur = ["yay", "paru"]
             .into_iter()
             .find(|c| present(c))
-            .map(|c| (c, portee.spawn(move || sortie_delai(c, &["-Qua"], 40, &[0, 1]))));
+            .map(|c| (c, portee.spawn(aur_a_mettre_a_jour)));
         let firmware = present("fwupdmgr").then(|| {
             portee.spawn(|| {
                 sortie_delai(
@@ -133,15 +134,11 @@ pub(super) fn autres_mises_a_jour() -> Vec<Constat> {
         if let Some((outil, t)) = aur {
             constats.push(match t.join().ok().flatten() {
                 None => impossible("AUR", tr!("hors ligne ?", "offline?")),
-                Some(l) if lignes(&l) == 0 => ok("AUR", tr!("Paquets AUR à jour.", "AUR packages up to date.")),
-                Some(l) => alerte(
+                Some(0) => ok("AUR", tr!("Paquets AUR à jour.", "AUR packages up to date.")),
+                Some(n) => alerte(
                     "AUR",
                     Niveau::Moyen,
-                    trf!(
-                        "{} paquet(s) AUR à mettre à jour.",
-                        "{} AUR package(s) to update.",
-                        lignes(&l)
-                    ),
+                    trf!("{} paquet(s) AUR à mettre à jour.", "{} AUR package(s) to update.", n),
                 )
                 .manuel(
                     tr!(
@@ -554,11 +551,10 @@ pub(super) fn bilan_failles(gestion: Paquets, failles: &[Faille]) -> Constat {
     )
 }
 
-/// Version du noyau qui tourne (« 7.2.5-3-omarchy »).
+/// Version du noyau qui tourne (« 7.2.5-3-omarchy »). /proc/sys/kernel/osrelease est ce que uname lit : sans
+/// lui, /proc n'est pas monté et uname ne saurait rien de plus.
 pub(super) fn noyau_en_cours() -> String {
     std::fs::read_to_string("/proc/sys/kernel/osrelease")
-        .ok()
-        .or_else(|| sortie("uname", &["-r"]))
         .unwrap_or_default()
         .trim()
         .to_string()
@@ -641,6 +637,55 @@ pub(super) fn redemarrage() -> Constat {
     }
 }
 
+const DKMS: &str = "/var/lib/dkms";
+
+/// Le texte de « dkms status », refait d'après son arbre : /var/lib/dkms/<module>/<version>/source pour un module
+/// ajouté, <version>/<noyau>/<arch> une fois compilé pour ce noyau, et le lien <module>/kernel-<noyau>-<arch> vers
+/// ce dossier quand il est installé (c'est ce lien que dkms consulte). « original_module » garde les modules du
+/// noyau remplacés : ce n'est pas une version. `None` si l'arbre ne se lit pas.
+fn status_dkms_dans(racine: &Path) -> Option<String> {
+    let dossiers = |d: &Path| -> Vec<std::path::PathBuf> {
+        let mut v: Vec<_> = std::fs::read_dir(d)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
+            .map(|e| e.path())
+            .collect();
+        v.sort();
+        v
+    };
+    let nom = |p: &Path| {
+        p.file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default()
+    };
+    std::fs::read_dir(racine).ok()?;
+    let mut lignes = Vec::new();
+    for module in dossiers(racine) {
+        let m = nom(&module);
+        for version in dossiers(&module).into_iter().filter(|v| nom(v) != "original_module") {
+            let v = nom(&version);
+            let mut compile = false;
+            for noyau in dossiers(&version).into_iter().filter(|k| nom(k) != "source") {
+                let k = nom(&noyau);
+                for arch in dossiers(&noyau) {
+                    let a = nom(&arch);
+                    compile = true;
+                    let lien = std::fs::read_link(module.join(format!("kernel-{k}-{a}"))).ok();
+                    let installe = lien.is_some_and(|l| l.ends_with(Path::new(&v).join(&k).join(&a)));
+                    let etat = if installe { "installed" } else { "built" };
+                    lignes.push(format!("{m}/{v}, {k}, {a}: {etat}"));
+                }
+            }
+            if !compile && version.join("source").exists() {
+                lignes.push(format!("{m}/{v}: added"));
+            }
+        }
+    }
+    Some(lignes.join("\n"))
+}
+
 /// Modules de « dkms status » et, pour chacun, les noyaux de `noyaux` où il n'est pas installé.
 /// Lignes « nvidia/610.57, 7.2.5-arch1, x86_64: installed » (ancien format : « nvidia, 610.57, 7.2.5, x86_64: »).
 pub(super) fn dkms_manquants(status: &str, noyaux: &[String]) -> Vec<(String, Vec<String>)> {
@@ -678,7 +723,16 @@ pub(super) fn dkms_manquants(status: &str, noyaux: &[String]) -> Vec<(String, Ve
 /// Pilotes DKMS (NVIDIA, manette, VirtualBox…) : recompilés pour chaque noyau. S'il en manque un pour le noyau
 /// qu'on va démarrer, c'est l'écran noir ou un périphérique muet au prochain démarrage.
 pub(super) fn pilotes_dkms() -> Option<Constat> {
-    let status = sortie("dkms", &["status"])?;
+    // Sans dkms, rien ne recompile : un arbre resté après sa désinstallation ne dit rien. L'arbre se lit
+    // directement ; la commande seulement s'il ne se lit pas.
+    if !natif::present("dkms") {
+        return None;
+    }
+    let status = match status_dkms_dans(Path::new(DKMS)) {
+        Some(s) => s,
+        None if Path::new(DKMS).exists() => sortie("dkms", &["status"])?,
+        None => return None,
+    };
     let mut noyaux: Vec<String> = noyaux_installes()
         .iter()
         .filter_map(|p| Some(p.file_name()?.to_string_lossy().into_owned()))
@@ -785,19 +839,174 @@ pub(super) fn encoder_url(texte: &str) -> String {
         .collect()
 }
 
+/// Le nombre de paquets AUR dont l'AUR a une version plus récente que celle installée, ce que listait
+/// « yay -Qua » : la même requête que la règle des paquets AUR (seuls les noms partent), comparée aux versions de
+/// la base locale comme pacman les compare. `None` si on ne peut pas savoir (dépôts jamais lus, AUR injoignable).
+fn aur_a_mettre_a_jour() -> Option<usize> {
+    if Paquets::detecter() != Some(Paquets::Pacman) || !depots_pacman_lus() {
+        return None;
+    }
+    let liste = sortie("pacman", &["-Qmq"])?;
+    let installes: Vec<&str> = liste.lines().filter(|l| !l.is_empty()).collect();
+    if installes.is_empty() {
+        return Some(0);
+    }
+    let fiches = fiches_aur(&installes)?;
+    let locales: HashMap<String, String> = natif::paquets_pacman()?.into_iter().collect();
+    Some(plus_recents_dans_l_aur(&locales, &fiches))
+}
+
+/// Les fiches de l'AUR dont la version (« Version ») dépasse celle installée.
+fn plus_recents_dans_l_aur(locales: &HashMap<String, String>, fiches: &[serde_json::Value]) -> usize {
+    fiches
+        .iter()
+        .filter(|f| {
+            let (Some(nom), Some(aur)) = (f["Name"].as_str(), f["Version"].as_str()) else {
+                return false;
+            };
+            locales
+                .get(nom)
+                .is_some_and(|installee| vercmp(installee, aur) == std::cmp::Ordering::Less)
+        })
+        .count()
+}
+
+/// Deux versions de paquet comparées comme pacman (alpm_pkg_vercmp) : « époque:version-révision », l'époque
+/// d'abord (0 si absente), puis la version, puis la révision quand les deux en ont une.
+pub(super) fn vercmp(a: &str, b: &str) -> std::cmp::Ordering {
+    use std::cmp::Ordering;
+    if a == b {
+        return Ordering::Equal;
+    }
+    // Les chiffres de tête suivis de « : » sont l'époque ; la révision suit le dernier tiret de ce qui reste.
+    let decouper = |evr: &str| -> (String, String, Option<String>) {
+        let chiffres = evr.bytes().take_while(u8::is_ascii_digit).count();
+        let (epoque, reste) = match evr[chiffres..].strip_prefix(':') {
+            Some(reste) if chiffres > 0 => (evr[..chiffres].to_string(), reste),
+            Some(reste) => ("0".to_string(), reste),
+            None => ("0".to_string(), evr),
+        };
+        match reste.rsplit_once('-') {
+            Some((v, r)) => (epoque, v.to_string(), Some(r.to_string())),
+            None => (epoque, reste.to_string(), None),
+        }
+    };
+    let (e1, v1, r1) = decouper(a);
+    let (e2, v2, r2) = decouper(b);
+    rpmvercmp(&e1, &e2)
+        .then_with(|| rpmvercmp(&v1, &v2))
+        .then_with(|| match (r1, r2) {
+            (Some(r1), Some(r2)) => rpmvercmp(&r1, &r2),
+            _ => Ordering::Equal,
+        })
+}
+
+/// La comparaison de rpm que pacman reprend : des segments de chiffres ou de lettres, séparés par le reste. Un
+/// segment numérique bat un segment de lettres ; les nombres se comparent sans leurs zéros de tête ; à la fin, ce
+/// qui reste gagne, sauf des lettres (« 1.0 » est plus récent que « 1.0beta »).
+fn rpmvercmp(a: &str, b: &str) -> std::cmp::Ordering {
+    use std::cmp::Ordering;
+    if a == b {
+        return Ordering::Equal;
+    }
+    let (a, b) = (a.as_bytes(), b.as_bytes());
+    let (mut i, mut j) = (0usize, 0usize);
+    while i < a.len() && j < b.len() {
+        let (debut_i, debut_j) = (i, j);
+        while i < a.len() && !a[i].is_ascii_alphanumeric() {
+            i += 1;
+        }
+        while j < b.len() && !b[j].is_ascii_alphanumeric() {
+            j += 1;
+        }
+        if i == a.len() || j == b.len() {
+            break;
+        }
+        // Des séparateurs de longueurs différentes décident à eux seuls.
+        if i - debut_i != j - debut_j {
+            return (i - debut_i).cmp(&(j - debut_j));
+        }
+        let (fin_i, fin_j, nombre) = if a[i].is_ascii_digit() {
+            (
+                i + a[i..].iter().take_while(|o| o.is_ascii_digit()).count(),
+                j + b[j..].iter().take_while(|o| o.is_ascii_digit()).count(),
+                true,
+            )
+        } else {
+            (
+                i + a[i..].iter().take_while(|o| o.is_ascii_alphabetic()).count(),
+                j + b[j..].iter().take_while(|o| o.is_ascii_alphabetic()).count(),
+                false,
+            )
+        };
+        // Deux segments de genres différents : les chiffres sont plus récents.
+        if fin_j == j {
+            return if nombre { Ordering::Greater } else { Ordering::Less };
+        }
+        let (mut s1, mut s2) = (&a[i..fin_i], &b[j..fin_j]);
+        if nombre {
+            while s1.first() == Some(&b'0') {
+                s1 = &s1[1..];
+            }
+            while s2.first() == Some(&b'0') {
+                s2 = &s2[1..];
+            }
+            if s1.len() != s2.len() {
+                return s1.len().cmp(&s2.len());
+            }
+        }
+        if s1 != s2 {
+            return s1.cmp(s2);
+        }
+        i = fin_i;
+        j = fin_j;
+    }
+    if i >= a.len() && j >= b.len() {
+        return Ordering::Equal;
+    }
+    let lettre = |s: &[u8], k: usize| s.get(k).is_some_and(u8::is_ascii_alphabetic);
+    if (i >= a.len() && !lettre(b, j)) || lettre(a, i) {
+        Ordering::Less
+    } else {
+        Ordering::Greater
+    }
+}
+
+/// Les bases des dépôts ont-elles été téléchargées ? Sans elles, pacman -Qm prend chaque paquet pour un paquet de
+/// l'AUR et toute la base serait déclarée « absente de l'AUR » (vu dans un conteneur Arch neuf).
+fn depots_pacman_lus() -> bool {
+    std::fs::read_dir("/var/lib/pacman/sync")
+        .into_iter()
+        .flatten()
+        .flatten()
+        .any(|f| f.path().extension().is_some_and(|e| e == "db"))
+}
+
+/// Les fiches de ces paquets dans l'AUR. Même requête que yay ou paru : seuls les noms partent vers
+/// aur.archlinux.org, par lots de 100 pour ne pas dépasser la longueur maximale d'une adresse. `None` : injoignable.
+fn fiches_aur(installes: &[&str]) -> Option<Vec<serde_json::Value>> {
+    let mut resultats = Vec::new();
+    for lot in installes.chunks(100) {
+        let requete = format!(
+            "https://aur.archlinux.org/rpc/v5/info?{}",
+            lot.iter()
+                .map(|n| format!("arg[]={}", encoder_url(n)))
+                .collect::<Vec<_>>()
+                .join("&")
+        );
+        let json = crate::http::texte(&requete, std::time::Duration::from_secs(20))
+            .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())?;
+        resultats.extend(json["results"].as_array().cloned().unwrap_or_default());
+    }
+    Some(resultats)
+}
+
 /// Un paquet retiré de l'AUR ne reçoit plus jamais de mise à jour, sans que rien ne prévienne.
 pub(super) fn paquets_aur() -> Option<Constat> {
     if Paquets::detecter() != Some(Paquets::Pacman) {
         return None;
     }
-    // Sans liste des dépôts (jamais téléchargée), pacman -Qm prend chaque paquet pour un paquet de l'AUR et toute
-    // la base serait déclarée « absente de l'AUR » (vu dans un conteneur Arch neuf).
-    let depots = std::fs::read_dir("/var/lib/pacman/sync")
-        .into_iter()
-        .flatten()
-        .flatten()
-        .any(|f| f.path().extension().is_some_and(|e| e == "db"));
-    if !depots {
+    if !depots_pacman_lus() {
         return Some(impossible(
             "Paquets AUR",
             tr!(
@@ -811,27 +1020,12 @@ pub(super) fn paquets_aur() -> Option<Constat> {
     if installes.is_empty() {
         return None;
     }
-    // Même requête que yay ou paru : seuls les noms des paquets partent vers aur.archlinux.org.
-    // Par lots de 100, pour ne pas dépasser la longueur maximale d'une adresse.
-    let mut resultats = Vec::new();
-    for lot in installes.chunks(100) {
-        let requete = format!(
-            "https://aur.archlinux.org/rpc/v5/info?{}",
-            lot.iter()
-                .map(|n| format!("arg[]={}", encoder_url(n)))
-                .collect::<Vec<_>>()
-                .join("&")
-        );
-        let Some(json) = crate::http::texte(&requete, std::time::Duration::from_secs(20))
-            .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
-        else {
-            return Some(impossible(
-                "Paquets AUR",
-                tr!("AUR injoignable, hors ligne ?", "AUR unreachable, offline?"),
-            ));
-        };
-        resultats.extend(json["results"].as_array().cloned().unwrap_or_default());
-    }
+    let Some(resultats) = fiches_aur(&installes) else {
+        return Some(impossible(
+            "Paquets AUR",
+            tr!("AUR injoignable, hors ligne ?", "AUR unreachable, offline?"),
+        ));
+    };
     let (absents, orphelins) = etat_aur(&installes, &serde_json::json!({ "results": resultats }));
     Some(if !absents.is_empty() {
         alerte(
@@ -925,6 +1119,133 @@ mod tests {
                 ("ancien".to_string(), vec!["7.3.0-arch1".to_string()]),
             ]
         );
+    }
+
+    #[test]
+    fn arbre_de_dkms() {
+        let racine = std::env::temp_dir().join(format!("vanguard-dkms-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&racine);
+        let dossier = |c: &str| std::fs::create_dir_all(racine.join(c)).unwrap();
+        dossier("nvidia/610.57/source");
+        dossier("nvidia/610.57/7.2.5-arch1/x86_64/module");
+        dossier("nvidia/610.57/7.3.0-arch1/x86_64/module");
+        dossier("nvidia/original_module/7.2.5-arch1/x86_64");
+        dossier("vboxhost/7.1/source");
+        std::os::unix::fs::symlink(
+            "610.57/7.2.5-arch1/x86_64",
+            racine.join("nvidia/kernel-7.2.5-arch1-x86_64"),
+        )
+        .unwrap();
+        std::fs::write(racine.join("mok.pub"), "clé publique").unwrap();
+        let status = status_dkms_dans(&racine).unwrap();
+        assert_eq!(
+            status,
+            "nvidia/610.57, 7.2.5-arch1, x86_64: installed\n\
+             nvidia/610.57, 7.3.0-arch1, x86_64: built\n\
+             vboxhost/7.1: added"
+        );
+        let noyaux = ["7.2.5-arch1".to_string(), "7.3.0-arch1".to_string()];
+        assert_eq!(
+            dkms_manquants(&status, &noyaux),
+            [
+                ("nvidia".to_string(), vec!["7.3.0-arch1".to_string()]),
+                ("vboxhost".to_string(), noyaux.to_vec()),
+            ]
+        );
+        assert!(status_dkms_dans(&racine.join("absent")).is_none());
+        let _ = std::fs::remove_dir_all(&racine);
+    }
+
+    /// Sur cet ordinateur, l'arbre de dkms donne les mêmes modules manquants que « dkms status », quand dkms est là.
+    #[test]
+    fn dkms_comme_dkms_status() {
+        let Some(natif) = status_dkms_dans(Path::new(DKMS)) else {
+            return;
+        };
+        let Some(r) = crate::commande::lancer(Command::new("dkms").arg("status"), 60).filter(|r| r.code == Some(0))
+        else {
+            return;
+        };
+        let noyaux: Vec<String> = noyaux_installes()
+            .iter()
+            .filter_map(|p| Some(p.file_name()?.to_string_lossy().into_owned()))
+            .collect();
+        let trier = |mut v: Vec<(String, Vec<String>)>| {
+            v.sort();
+            v
+        };
+        assert_eq!(
+            trier(dkms_manquants(&natif, &noyaux)),
+            trier(dkms_manquants(&r.sortie, &noyaux)),
+            "natif : {natif}\ndkms : {}",
+            r.sortie
+        );
+    }
+
+    #[test]
+    fn versions_comparees_comme_pacman() {
+        use std::cmp::Ordering::{Equal, Greater, Less};
+        for (a, b, attendu) in [
+            ("1.0-1", "1.0-1", Equal),
+            ("1.0-1", "1.0-2", Less),
+            ("1.0.1-1", "1.0-9", Greater),
+            ("1:1.0-1", "2.0-1", Greater),
+            ("0:2.0-1", "2.0-1", Equal),
+            ("1.0a-1", "1.0-1", Less),
+            ("1.0.a-1", "1.0.1-1", Less),
+            ("1.0", "1.0-5", Equal),
+            ("010", "10", Equal),
+            ("1.0.r9.g54d9411-3", "1.0.r10.gabc-1", Less),
+            ("2.0+git", "2.0", Greater),
+            ("1..0", "1.0", Greater),
+            // pacman ne connaît pas le tilde de Debian : ce qui reste après « 1.0 » gagne.
+            ("1.0~rc1", "1.0", Greater),
+            ("6.1.arch1-1", "6.1.arch2-1", Less),
+        ] {
+            assert_eq!(vercmp(a, b), attendu, "{a} {b}");
+            assert_eq!(vercmp(b, a), attendu.reverse(), "{b} {a}");
+        }
+    }
+
+    /// Sur cet ordinateur, les mêmes réponses que vercmp (le programme de pacman), quand il est là.
+    #[test]
+    fn versions_comme_vercmp() {
+        let paires = [
+            ("1.0-1", "1.0-2"),
+            ("1:1.0", "2.0"),
+            ("1.0a", "1.0"),
+            ("1.0.a", "1.0.1"),
+            ("1..0", "1.0"),
+            ("1.0~rc1", "1.0"),
+            ("2.0+git", "2.0"),
+            ("7.1.0.r9.g54d9411-3", "7.1.0-1"),
+            ("1.0alpha", "1.0.1"),
+            ("1.0", "1.0-5"),
+        ];
+        for (a, b) in paires {
+            let Some(r) = crate::commande::lancer(Command::new("vercmp").args([a, b]), 5).filter(|r| r.code == Some(0))
+            else {
+                return;
+            };
+            let attendu = r.sortie.trim().parse::<i32>().unwrap().cmp(&0);
+            assert_eq!(vercmp(a, b), attendu, "{a} {b}");
+        }
+    }
+
+    #[test]
+    fn paquets_aur_plus_recents() {
+        let locales: HashMap<String, String> = [("yay", "12.4.2-1"), ("spotify", "1:1.2.3-1"), ("vieux", "1.0-1")]
+            .into_iter()
+            .map(|(n, v)| (n.to_string(), v.to_string()))
+            .collect();
+        let fiches = serde_json::json!([
+            {"Name": "yay", "Version": "12.5.0-1"},
+            {"Name": "spotify", "Version": "1.9.9-1"},
+            {"Name": "vieux", "Version": "1.0-1"},
+            {"Name": "inconnu", "Version": "9-1"},
+            {"Name": "sans-version"}
+        ]);
+        assert_eq!(plus_recents_dans_l_aur(&locales, fiches.as_array().unwrap()), 1);
     }
 
     /// Un appareil branché choisit le nom que fwupd rapporte : piégé, il arrive inoffensif dans le constat.
@@ -1069,7 +1390,11 @@ pub(super) fn maj_automatiques() -> Option<Constat> {
             .join("\n");
         juger_apt_auto(&conf, std::path::Path::new("/usr/bin/unattended-upgrade").exists())
     } else if dnf {
-        let actif = |t: &str| sortie("systemctl", &["is-enabled", t]).is_some_and(|s| s.trim() == "enabled");
+        // Les liens d'activation se lisent dans /etc/systemd ; systemctl seulement sans dossier de systemd.
+        let actif = |t: &str| {
+            natif::unite_activee(t, false)
+                .unwrap_or_else(|| sortie("systemctl", &["is-enabled", t]).is_some_and(|s| s.trim() == "enabled"))
+        };
         let conf = ["/etc/dnf/automatic.conf", "/etc/dnf/dnf5-plugins/automatic.conf"]
             .iter()
             .filter_map(|c| std::fs::read_to_string(c).ok())
