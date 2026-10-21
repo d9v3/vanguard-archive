@@ -624,11 +624,22 @@ fn afficher(bilan: &Bilan) {
         }
     }
     if bilan.non_lus > 0 {
-        avertir(&trf!(
-            "{} processus n'ont pas pu être lus (droits insuffisants : relance en administrateur ou root) : rien n'est conclu pour eux.",
-            "{} processes could not be read (insufficient rights: run again as administrator or root): nothing is concluded for them.",
-            bilan.non_lus
-        ));
+        // Déjà en administrateur, conseiller de relancer en administrateur serait faux : sous Windows, les processus des
+        // services restent fermés sans le privilège de débogage, que Vanguard refuse exprès de prendre.
+        let texte = if crate::traces::privilegie() {
+            trf!(
+                "{} processus n'ont pas pu être lus, même en administrateur : le système les ferme à qui n'a pas le privilège de débogage, que Vanguard ne prend pas exprès. Rien n'est conclu pour eux.",
+                "{} processes could not be read, even as administrator: the system closes them to anyone without the debug privilege, which Vanguard deliberately does not take. Nothing is concluded for them.",
+                bilan.non_lus
+            )
+        } else {
+            trf!(
+                "{} processus n'ont pas pu être lus (droits insuffisants : relance en administrateur ou root) : rien n'est conclu pour eux.",
+                "{} processes could not be read (insufficient rights: run again as administrator or root): nothing is concluded for them.",
+                bilan.non_lus
+            )
+        };
+        avertir(&texte);
     }
     if bilan.incomplets > 0 {
         avertir(&trf!(

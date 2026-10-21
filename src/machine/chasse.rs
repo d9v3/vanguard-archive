@@ -980,10 +980,18 @@ pub(crate) fn juger_programmes(
             .count();
         if en_partie > 0 {
             texte.push(' ');
-            texte.push_str(&trf!(
-                "{en_partie} d'entre eux (d'autres comptes, ou protégés) ne montrent pas leur ligne de commande ou leur chemin sans droits d'administrateur : vérifiés en partie.",
-                "{en_partie} of them (other accounts, or protected) do not show their command line or path without administrator rights: partly checked."
-            ));
+            // En administrateur, il ne reste que les processus protégés par le système : le dire tel quel.
+            texte.push_str(&if crate::traces::privilegie() {
+                trf!(
+                    "{en_partie} d'entre eux, protégés par le système, ne montrent pas leur ligne de commande ou leur chemin, même en administrateur : vérifiés en partie.",
+                    "{en_partie} of them, protected by the system, do not show their command line or path, even as administrator: partly checked."
+                )
+            } else {
+                trf!(
+                    "{en_partie} d'entre eux (d'autres comptes, ou protégés) ne montrent pas leur ligne de commande ou leur chemin sans droits d'administrateur : vérifiés en partie.",
+                    "{en_partie} of them (other accounts, or protected) do not show their command line or path without administrator rights: partly checked."
+                )
+            });
         }
         if let Some(p) = partiel {
             texte.push(' ');
