@@ -172,8 +172,9 @@ fn nom_graphique(fabricant: &str, puce: &str) -> String {
     nom.trim().to_string()
 }
 
-/// Les cartes graphiques de `lspci -vmmk` (fiches séparées par une ligne vide) : (nom, module du pilote).
-#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+/// Les cartes graphiques de `lspci -vmmk` (fiches séparées par une ligne vide) : (nom, module du pilote). La fiche
+/// lit sysfs elle-même ; ce lecteur sert à comparer les deux sur un ordinateur où lspci est là.
+#[cfg(all(test, target_os = "linux"))]
 fn graphiques_lspci(texte: &str) -> Vec<(String, String)> {
     texte
         .split("\n\n")
@@ -189,6 +190,125 @@ fn graphiques_lspci(texte: &str) -> Vec<(String, String)> {
                 .then(|| (nom_graphique(&champ("Vendor"), &champ("Device")), champ("Driver")))
         })
         .collect()
+}
+
+/// Une carte graphique de /sys/bus/pci/devices, nommée comme `lspci` la nomme.
+#[cfg(target_os = "linux")]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CartePci {
+    /// « NVIDIA Corporation », « Advanced Micro Devices, Inc. [AMD/ATI] »…
+    pub fabricant: String,
+    /// « GB205 [GeForce RTX 5070] » : la puce, puis le nom commercial entre crochets.
+    pub puce: String,
+    /// Le module du pilote en service (« nvidia », « amdgpu ») ; vide si aucun n'est chargé.
+    pub pilote: String,
+}
+
+/// La liste des noms PCI : celle de hwdata (Arch, Fedora, openSUSE), puis celle de pciutils (Debian, Ubuntu).
+#[cfg(target_os = "linux")]
+const LISTES_PCI: [&str; 3] = [
+    "/usr/share/hwdata/pci.ids",
+    "/usr/share/misc/pci.ids",
+    "/usr/share/pci.ids",
+];
+
+/// Les cartes graphiques (`lspci -vmmk`), lues dans sysfs. Pas de commande en secours : lspci lit les mêmes
+/// fichiers, et sa liste de noms est celle-ci (pciutils en dépend) ; sans elle, lspci aussi ne donne que des
+/// numéros.
+#[cfg(target_os = "linux")]
+pub(crate) fn cartes_graphiques() -> Vec<CartePci> {
+    cartes_graphiques_sous(std::path::Path::new("/"))
+}
+
+#[cfg(target_os = "linux")]
+fn cartes_graphiques_sous(racine: &std::path::Path) -> Vec<CartePci> {
+    let lire = |chemin: &std::path::Path| {
+        std::fs::read_to_string(chemin)
+            .map(|t| t.trim().to_string())
+            .unwrap_or_default()
+    };
+    let hexa = |t: String| u32::from_str_radix(t.trim_start_matches("0x"), 16).ok();
+    let mut appareils: Vec<(String, u16, u16, String)> = std::fs::read_dir(racine.join("sys/bus/pci/devices"))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|e| {
+            let d = e.path();
+            // Classe 03 (affichage), sous-classes VGA (00), 3D (02) et « Display controller » (80) : celles
+            // que retenait la lecture de lspci, la carte NVIDIA d'un portable et bien des AMD de portable comprises.
+            let classe = hexa(lire(&d.join("class")))?;
+            if classe >> 16 != 0x03 || ![0x00, 0x02, 0x80].contains(&(classe >> 8 & 0xff)) {
+                return None;
+            }
+            let fabricant = u16::try_from(hexa(lire(&d.join("vendor")))?).ok()?;
+            let appareil = u16::try_from(hexa(lire(&d.join("device")))?).ok()?;
+            let pilote = std::fs::read_link(d.join("driver"))
+                .ok()
+                .and_then(|l| Some(l.file_name()?.to_string_lossy().into_owned()))
+                .unwrap_or_default();
+            Some((
+                e.file_name().to_string_lossy().into_owned(),
+                fabricant,
+                appareil,
+                pilote,
+            ))
+        })
+        .collect();
+    if appareils.is_empty() {
+        return Vec::new();
+    }
+    // L'adresse (« 0000:01:00.0 », chiffres hexadécimaux de largeur fixe) : l'ordre de lspci.
+    appareils.sort();
+    let ids = LISTES_PCI
+        .iter()
+        .find_map(|f| std::fs::read(racine.join(f.trim_start_matches('/'))).ok())
+        .map(|o| String::from_utf8_lossy(&o).into_owned())
+        .unwrap_or_default();
+    appareils
+        .into_iter()
+        .map(|(_, fabricant, appareil, pilote)| {
+            let (nom_fabricant, nom_puce) = noms_pci(&ids, fabricant, appareil);
+            CartePci {
+                // Inconnus de la liste : les numéros, écrits comme lspci les écrit.
+                fabricant: nom_fabricant.map_or_else(|| format!("Vendor {fabricant:04x}"), str::to_string),
+                puce: nom_puce.map_or_else(|| format!("Device {appareil:04x}"), str::to_string),
+                pilote,
+            }
+        })
+        .collect()
+}
+
+/// Les noms d'un fabricant et d'une puce dans pci.ids : « 10de  NVIDIA Corporation », puis ses puces en retrait
+/// d'une tabulation (« \t2f04  GB205 [GeForce RTX 5070] ») ; deux tabulations, c'est une carte d'un assembleur.
+/// La liste des classes (« C 03 … ») suit celle des fabricants : la lecture s'y arrête.
+#[cfg(target_os = "linux")]
+fn noms_pci<'a>(ids: &'a str, fabricant: u16, appareil: u16) -> (Option<&'a str>, Option<&'a str>) {
+    // « <4 chiffres hexadécimaux>  <nom> » : le nom, si la ligne porte ce numéro.
+    let nom = |ligne: &'a str, id: &str| ligne.strip_prefix(id)?.strip_prefix("  ").map(str::trim);
+    let (f, a) = (format!("{fabricant:04x}"), format!("{appareil:04x}"));
+    let mut trouve: Option<&str> = None;
+    for l in ids.lines().filter(|l| !l.is_empty() && !l.starts_with('#')) {
+        match (l.strip_prefix('\t'), trouve) {
+            (Some(puce), Some(_)) if !puce.starts_with('\t') => {
+                if let Some(n) = nom(puce, &a) {
+                    return (trouve, Some(n));
+                }
+            }
+            (Some(_), _) => {}
+            // Le fabricant suivant, ou la liste des classes : la puce n'y est pas.
+            (None, Some(_)) => break,
+            (None, None) if l.starts_with("C ") => break,
+            (None, None) => trouve = nom(l, &f),
+        }
+    }
+    (trouve, None)
+}
+
+/// Un disque entier, ce que `lsblk` dit « disk » : ni lecteur optique, ni loop, ni device-mapper (natif les met à
+/// part), ni grappe RAID logicielle, que lsblk dit « raid1 », « raid5 »… et que sysfs range avec les disques.
+#[cfg(target_os = "linux")]
+pub(crate) fn disque_entier(d: &crate::machine::linux::natif::Disque) -> bool {
+    d.genre == "disk" && !d.nom.starts_with("md")
 }
 
 /// Les barrettes de mémoire, d'après les propriétés que udev tire de la table DMI (`udevadm info -q property -p
@@ -251,16 +371,30 @@ fn sorte_disque(transport: &str, rotatif: bool) -> String {
     }
 }
 
+/// Les propriétés que udev garde d'un appareil (/run/udev/data, lisible par tous : « E:CLÉ=valeur ») dans la forme
+/// « CLÉ=valeur » de `udevadm info --query=property`, qui lit ce même fichier. Absent, udevadm n'en dirait pas
+/// plus : pas de commande en secours.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn proprietes_udev(texte: &str) -> String {
+    texte
+        .lines()
+        .filter_map(|l| l.strip_prefix("E:"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Sans « model name » dans /proc/cpuinfo (bien des processeurs ARM), le modèle que donne l'arbre des
+/// périphériques (« Raspberry Pi 4 Model B Rev 1.4 », terminé par un octet nul), sinon rien. lscpu tirait un nom de
+/// cœur (« Cortex-A72 ») de sa propre table des numéros ARM : sans commande, la carte se nomme elle-même.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn modele_device_tree(texte: &str) -> Option<String> {
+    Some(texte.trim_end_matches('\0').trim().to_string()).filter(|m| !m.is_empty())
+}
+
 #[cfg(target_os = "linux")]
 fn lire() -> Fiche {
     let fichier = |chemin: &str| std::fs::read_to_string(chemin).unwrap_or_default().trim().to_string();
     let dmi = |f: &str| fichier(&format!("/sys/class/dmi/id/{f}"));
-    let sortie = |cmd: &str, args: &[&str]| {
-        crate::commande::lancer(std::process::Command::new(cmd).args(args), 20)
-            .filter(|r| r.code == Some(0))
-            .map(|r| r.sortie)
-            .unwrap_or_default()
-    };
     let os = fichier("/etc/os-release")
         .lines()
         .find_map(|l| l.strip_prefix("PRETTY_NAME=").map(|v| v.trim_matches('"').to_string()))
@@ -288,15 +422,7 @@ fn lire() -> Fiche {
             .map(|v| v.trim().to_string())
     };
     f.processeur = valeur("model name")
-        .or_else(|| {
-            // En anglais : lscpu traduit ses libellés (« Nom de modèle : » en français).
-            crate::commande::lancer_en_anglais(&mut std::process::Command::new("lscpu"), 20)
-                .filter(|r| r.code == Some(0))
-                .map(|r| r.sortie)
-                .unwrap_or_default()
-                .lines()
-                .find_map(|l| l.strip_prefix("Model name:").map(|v| v.trim().to_string()))
-        })
+        .or_else(|| modele_device_tree(&fichier("/proc/device-tree/model")))
         .unwrap_or_default();
     let processeurs: std::collections::BTreeSet<&str> = cpuinfo
         .lines()
@@ -314,15 +440,15 @@ fn lire() -> Fiche {
         .find_map(|l| l.strip_prefix("MemTotal:"))
         .and_then(|v| v.split_whitespace().next()?.parse::<u64>().ok())
         .map(|ko| ko * 1024);
-    let udev = sortie("udevadm", &["info", "--query=property", "--path=/sys/class/dmi/id"]);
-    let (barrettes, series) = barrettes_udev(&udev);
+    let (barrettes, series) = barrettes_udev(&proprietes_udev(&fichier("/run/udev/data/+dmi:id")));
     f.barrettes_illisibles = barrettes.is_empty();
     f.barrettes = barrettes;
     f.series.extend(series);
 
     let noyau = fichier("/proc/sys/kernel/osrelease");
-    for (nom, module) in graphiques_lspci(&sortie("lspci", &["-vmmk"])) {
-        let pilote = match module.as_str() {
+    for carte in cartes_graphiques() {
+        let nom = nom_graphique(&carte.fabricant, &carte.puce);
+        let pilote = match carte.pilote.as_str() {
             "nvidia" => fichier("/proc/driver/nvidia/version")
                 .split_whitespace()
                 .find(|m| m.contains('.') && m.chars().all(|c| c.is_ascii_digit() || c == '.'))
@@ -333,22 +459,16 @@ fn lire() -> Fiche {
         f.graphique.push(Graphique { nom, pilote });
     }
 
-    for l in sortie("lsblk", &["-dnbP", "-o", "NAME,SIZE,ROTA,TYPE,TRAN,MODEL,SERIAL"]).lines() {
-        let champ = |cle: &str| {
-            l.split_once(&format!("{cle}=\""))
-                .and_then(|(_, reste)| reste.split_once('"'))
-                .map_or_else(String::new, |(valeur, _)| valeur.trim().to_string())
-        };
-        let nom = champ("NAME");
-        if champ("TYPE") != "disk" || ["zram", "loop", "ram", "sr"].iter().any(|p| nom.starts_with(p)) {
+    for d in crate::machine::linux::natif::disques() {
+        if !disque_entier(&d) || ["zram", "loop", "ram", "sr"].iter().any(|p| d.nom.starts_with(p)) {
             continue;
         }
-        f.serie(&trf!("Disque {nom}", "Disk {nom}"), &champ("SERIAL"));
+        f.serie(&trf!("Disque {}", "Disk {}", d.nom), &d.serie);
         f.disques.push(Disque {
-            modele: propre(&champ("MODEL")),
-            taille: champ("SIZE").parse().unwrap_or(0),
-            sorte: sorte_disque(&champ("TRAN"), champ("ROTA") == "1"),
-            nom,
+            modele: propre(&d.modele),
+            taille: d.octets,
+            sorte: sorte_disque(&d.bus, d.rotatif),
+            nom: d.nom,
         });
     }
     f.prete_a_montrer()
@@ -867,22 +987,213 @@ mod tests {
         assert_eq!(date_bios("2026-09-04"), "2026-09-04");
     }
 
+    /// Un dossier jetable qui tient lieu de racine du système.
+    #[cfg(target_os = "linux")]
+    fn racine(nom: &str) -> std::path::PathBuf {
+        let d = std::env::temp_dir().join(format!("vanguard-fiche-{nom}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        d
+    }
+
+    #[cfg(target_os = "linux")]
+    fn ecrire(racine: &std::path::Path, chemin: &str, texte: &str) {
+        let f = racine.join(chemin.trim_start_matches('/'));
+        std::fs::create_dir_all(f.parent().unwrap()).unwrap();
+        std::fs::write(f, texte).unwrap();
+    }
+
+    /// Un appareil PCI inventé : classe, fabricant, puce, et son pilote s'il en a un (le lien `driver` de sysfs).
+    #[cfg(target_os = "linux")]
+    fn appareil(racine: &std::path::Path, adresse: &str, ids: [&str; 3], pilote: Option<&str>) {
+        let d = format!("/sys/bus/pci/devices/{adresse}");
+        for (f, v) in ["class", "vendor", "device"].iter().zip(ids) {
+            ecrire(racine, &format!("{d}/{f}"), &format!("{v}\n"));
+        }
+        if let Some(p) = pilote {
+            let cible = racine.join(format!("sys/bus/pci/drivers/{p}"));
+            std::fs::create_dir_all(&cible).unwrap();
+            std::os::unix::fs::symlink(cible, racine.join(d.trim_start_matches('/')).join("driver")).unwrap();
+        }
+    }
+
+    /// Les cartes graphiques lues dans sysfs : VGA, 3D (la carte NVIDIA d'un portable, ici sans pilote chargé) et
+    /// « Display controller » (bien des AMD de portable) ; ni la carte réseau, ni la vieille classe XGA, que la
+    /// lecture de lspci ne retenait pas non plus. Une puce absente de pci.ids garde son numéro, comme dans lspci.
+    #[cfg(target_os = "linux")]
     #[test]
-    fn cartes_graphiques_de_lspci() {
-        let texte = "Slot:\t00:02.0\nClass:\tVGA compatible controller\nVendor:\tIntel Corporation\nDevice:\tAlder Lake-P GT2 [Iris Xe Graphics]\nDriver:\ti915\nModule:\ti915\n\n\
-                     Slot:\t01:00.0\nClass:\t3D controller\nVendor:\tNVIDIA Corporation\nDevice:\tGA107M [GeForce RTX 3050 Mobile]\nModule:\tnouveau\n\n\
-                     Slot:\t02:00.0\nClass:\tNetwork controller\nVendor:\tIntel Corporation\nDevice:\tWi-Fi 6E\nDriver:\tiwlwifi\n";
+    fn cartes_graphiques_de_sysfs() {
+        let d = racine("pci");
+        appareil(&d, "0000:00:02.0", ["0x030000", "0x8086", "0x46a6"], Some("i915"));
+        appareil(&d, "0000:01:00.0", ["0x030200", "0x10de", "0x25a2"], None);
+        appareil(&d, "0000:03:00.0", ["0x038000", "0x1002", "0x743f"], Some("amdgpu"));
+        appareil(&d, "0000:04:00.0", ["0x028000", "0x8086", "0x51f0"], Some("iwlwifi"));
+        appareil(&d, "0000:05:00.0", ["0x030100", "0x1002", "0x743f"], None);
+        appareil(&d, "0000:06:00.0", ["0x030000", "0x1d0f", "0xabcd"], None);
+        ecrire(
+            &d,
+            "/usr/share/hwdata/pci.ids",
+            "# Liste inventée, à la forme de pci.ids\n\
+             1002  Advanced Micro Devices, Inc. [AMD/ATI]\n\
+             \t743f  Navi 24 [Radeon RX 6500M]\n\
+             \t\t1002 0b0e  Carte d'un assembleur\n\
+             10de  NVIDIA Corporation\n\
+             \t25a2  GA107M [GeForce RTX 3050 Mobile]\n\
+             1d0f  Fabricant Essai\n\
+             8086  Intel Corporation\n\
+             \t46a6  Alder Lake-P GT2 [Iris Xe Graphics]\n\
+             \t51f0  Wi-Fi 6E\n\
+             C 03  Display controller\n\
+             \t00  VGA compatible controller\n",
+        );
+        let cartes = cartes_graphiques_sous(&d);
+        let vus: Vec<(String, &str)> = cartes
+            .iter()
+            .map(|c| (nom_graphique(&c.fabricant, &c.puce), c.pilote.as_str()))
+            .collect();
         assert_eq!(
-            graphiques_lspci(texte),
+            vus,
             [
-                ("Intel Iris Xe Graphics".to_string(), "i915".to_string()),
-                ("NVIDIA GeForce RTX 3050 Mobile".to_string(), String::new()),
+                ("Intel Iris Xe Graphics".to_string(), "i915"),
+                ("NVIDIA GeForce RTX 3050 Mobile".to_string(), ""),
+                ("AMD Radeon RX 6500M".to_string(), "amdgpu"),
+                ("Fabricant Essai Device abcd".to_string(), ""),
             ]
         );
+        assert_eq!(cartes[1].fabricant, "NVIDIA Corporation");
+        // Sans liste de noms : les numéros, rien d'inventé.
+        let _ = std::fs::remove_file(d.join("usr/share/hwdata/pci.ids"));
+        let sans_noms = cartes_graphiques_sous(&d);
+        assert_eq!(
+            (sans_noms[0].fabricant.as_str(), sans_noms[0].puce.as_str()),
+            ("Vendor 8086", "Device 46a6")
+        );
+        // Sans sysfs : aucune carte, et la liste n'est pas lue.
+        assert_eq!(cartes_graphiques_sous(&d.join("vide")), []);
         assert_eq!(
             nom_graphique("Advanced Micro Devices, Inc. [AMD/ATI]", "Navi 31 [Radeon RX 7900 XT]"),
             "AMD Radeon RX 7900 XT"
         );
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// pci.ids : la puce se cherche sous son seul fabricant (le même numéro existe ailleurs), jamais dans les cartes
+    /// des assembleurs (deux tabulations) ni dans la liste des classes qui suit les fabricants.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn noms_de_pci_ids() {
+        let ids = "1002  AMD\n\t\t1234 5678  Sous-système\n\t0001  Puce AMD\n\
+                   10de  NVIDIA\n\t0002  Puce NVIDIA\nC 12  Classe\n\t1234  Pas une puce\n";
+        assert_eq!(noms_pci(ids, 0x1002, 0x0001), (Some("AMD"), Some("Puce AMD")));
+        assert_eq!(noms_pci(ids, 0x1002, 0x0002), (Some("AMD"), None));
+        assert_eq!(noms_pci(ids, 0x1002, 0x1234), (Some("AMD"), None));
+        assert_eq!(noms_pci(ids, 0x10de, 0x0002), (Some("NVIDIA"), Some("Puce NVIDIA")));
+        assert_eq!(noms_pci(ids, 0x0c12, 0x1234), (None, None));
+        assert_eq!(noms_pci("", 0x10de, 0x0002), (None, None));
+    }
+
+    /// Sur cet ordinateur, sysfs donne les mêmes cartes graphiques et les mêmes pilotes que `lspci -vmmk`, quand il
+    /// est là.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn graphiques_comme_lspci() {
+        let Some(r) =
+            crate::commande::lancer(std::process::Command::new("lspci").arg("-vmmk"), 20).filter(|r| r.code == Some(0))
+        else {
+            return;
+        };
+        let natifs: Vec<(String, String)> = cartes_graphiques()
+            .into_iter()
+            .map(|c| (nom_graphique(&c.fabricant, &c.puce), c.pilote))
+            .collect();
+        assert_eq!(natifs, graphiques_lspci(&r.sortie));
+    }
+
+    /// Le fichier de udev (« E:CLÉ=valeur », d'autres lignes pour ses liens et ses étiquettes) se lit comme la
+    /// sortie de udevadm.
+    #[test]
+    fn proprietes_du_fichier_de_udev() {
+        let fichier = "I:12345678\nE:ID_VENDOR=Essai\nE:MEMORY_DEVICE_0_SIZE=8589934592\nG:etiquette\n\
+                       E:MEMORY_DEVICE_0_LOCATOR=DIMM_A1\n";
+        assert_eq!(
+            proprietes_udev(fichier),
+            "ID_VENDOR=Essai\nMEMORY_DEVICE_0_SIZE=8589934592\nMEMORY_DEVICE_0_LOCATOR=DIMM_A1"
+        );
+        let (barrettes, _) = barrettes_udev(&proprietes_udev(fichier));
+        assert_eq!(barrettes.len(), 1);
+        assert_eq!(barrettes[0].emplacement, "DIMM_A1");
+        assert_eq!(proprietes_udev(""), "");
+    }
+
+    /// Sur cet ordinateur, le fichier de udev donne les mêmes barrettes que `udevadm info`, quand il est là.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn barrettes_comme_udevadm() {
+        let Some(r) = crate::commande::lancer(
+            std::process::Command::new("udevadm").args(["info", "--query=property", "--path=/sys/class/dmi/id"]),
+            20,
+        )
+        .filter(|r| r.code == Some(0)) else {
+            return;
+        };
+        let fichier = std::fs::read_to_string("/run/udev/data/+dmi:id").unwrap_or_default();
+        assert_eq!(barrettes_udev(&proprietes_udev(&fichier)), barrettes_udev(&r.sortie));
+    }
+
+    #[test]
+    fn modele_de_l_arbre_des_peripheriques() {
+        assert_eq!(
+            modele_device_tree("Carte Essai Model B Rev 1.0\0").as_deref(),
+            Some("Carte Essai Model B Rev 1.0")
+        );
+        assert_eq!(modele_device_tree("\0"), None);
+        assert_eq!(modele_device_tree(""), None);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn disques_entiers() {
+        let disque = |nom: &str, genre: &str| crate::machine::linux::natif::Disque {
+            nom: nom.into(),
+            octets: 1,
+            rotatif: false,
+            amovible: false,
+            modele: String::new(),
+            serie: String::new(),
+            bus: String::new(),
+            genre: genre.into(),
+        };
+        assert!(disque_entier(&disque("nvme0n1", "disk")));
+        assert!(disque_entier(&disque("mmcblk0", "disk")));
+        assert!(!disque_entier(&disque("md127", "disk")), "RAID logiciel");
+        assert!(!disque_entier(&disque("sr0", "rom")));
+        assert!(!disque_entier(&disque("dm-0", "dm")));
+    }
+
+    /// Les disques de la fiche sont ceux que lsblk dit « disk » (sans zram, loop, ram ni lecteur), quand il est là :
+    /// une grappe RAID logicielle n'en est pas un.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn disques_comme_lsblk() {
+        let Some(r) = crate::commande::lancer(std::process::Command::new("lsblk").args(["-dno", "NAME,TYPE"]), 20)
+            .filter(|r| r.code == Some(0))
+        else {
+            return;
+        };
+        let garde = |nom: &str| !["zram", "loop", "ram", "sr"].iter().any(|p| nom.starts_with(p));
+        let mut attendus: Vec<&str> = r
+            .sortie
+            .lines()
+            .filter_map(|l| l.split_once(' ').map(|(n, t)| (n, t.trim())))
+            .filter(|&(n, t)| t == "disk" && garde(n))
+            .map(|(n, _)| n)
+            .collect();
+        attendus.sort_unstable();
+        let natifs: Vec<String> = crate::machine::linux::natif::disques()
+            .into_iter()
+            .filter(|d| disque_entier(d) && garde(&d.nom))
+            .map(|d| d.nom)
+            .collect();
+        assert_eq!(natifs, attendus);
     }
 
     #[test]
