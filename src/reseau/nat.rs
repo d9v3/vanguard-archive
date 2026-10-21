@@ -302,7 +302,7 @@ pub fn tester() {
         Etat::Absent => (Some(false), tr!("coupé ou absent", "off or absent")),
         Etat::OutilAbsent => (
             None,
-            tr!("inconnu (outil miniupnpc absent)", "unknown (miniupnpc tool missing)"),
+            tr!("inconnu (box non interrogée)", "unknown (router not queried)"),
         ),
     };
     let publique = mesure.vues[0].1;
