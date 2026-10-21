@@ -9,6 +9,7 @@ use crate::risk::{Niveau, info_port};
 use crate::trw;
 use crate::ui::{resume, tr, trf, trp};
 
+mod ancrages;
 pub(crate) mod cartes;
 mod chargement;
 mod comptes;
@@ -28,6 +29,7 @@ mod maj;
 pub(crate) mod partages;
 pub(crate) mod peripheriques;
 mod persistance;
+mod pilotes;
 pub(crate) mod planificateur;
 mod portes;
 pub(crate) mod processus;

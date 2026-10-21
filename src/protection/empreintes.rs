@@ -101,7 +101,7 @@ fn dossier() -> PathBuf {
     crate::reseau::dossier_local().join("malwarebazaar")
 }
 
-fn age(chemin: &Path) -> Option<Duration> {
+pub(crate) fn age(chemin: &Path) -> Option<Duration> {
     std::fs::metadata(chemin)
         .and_then(|m| m.modified())
         .ok()
@@ -110,7 +110,7 @@ fn age(chemin: &Path) -> Option<Duration> {
 
 /// Télécharge `adresse` dans `chemin` quand la copie a plus de `apres` (écrite à côté puis renommée : une coupure ne
 /// laisse jamais un fichier à moitié). Rien hors ligne, ni pendant les tests.
-fn rafraichir(adresse: &str, chemin: &Path, apres: Duration, max: u64, secondes: u64) {
+pub(crate) fn rafraichir(adresse: &str, chemin: &Path, apres: Duration, max: u64, secondes: u64) {
     if cfg!(test) || std::env::var_os("VANGUARD_HORS_LIGNE").is_some() || age(chemin).is_some_and(|a| a < apres) {
         return;
     }
