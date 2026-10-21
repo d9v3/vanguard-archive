@@ -130,6 +130,13 @@ dependances() {
   fi
   sortie=$(cargo deny "${options[@]}" check --hide-inclusion-graph "${verifications[@]}" 2>&1)
   code=$?
+  # La bibliothèque des extensions et l'exemple en Rust, crates à part avec leur Cargo.lock : leurs propres règles
+  # (extensions/deny.toml), sans les failles admises pour YARA-X.
+  local m
+  for m in extensions/sdk/Cargo.toml extensions/exemples/rust-exemple/Cargo.toml; do
+    sortie+=$'\n'"$m :"$'\n'$(cargo deny "${options[@]}" --manifest-path "$m" --config extensions/deny.toml check \
+      --hide-inclusion-graph "${verifications[@]}" 2>&1) || code=1
+  done
   printf '%s\n' "$sortie"
   # En échec, le résumé ne montre que la fin du journal, où sont les doublons : chaque erreur y est rappelée, avec la
   # bibliothèque visée (dossier de son Cargo.toml pour une licence, ligne de Cargo.lock pour une faille).

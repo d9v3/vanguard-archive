@@ -21,7 +21,8 @@ Réponses à l'utilisateur en français, claires, avec le pourquoi.
   `CFLAGS_<cible>=-ffreestanding -nostdlibinc -DRING_CORE_NOSTDLIBINC -I$PWD/outils/mac-entetes` (`<cible>` avec des `_`, voir verifier.sh).
 - Mise en forme : `cargo fmt`, toujours avant un commit.
 - Dépendances : `cargo deny check` (`deny.toml` : failles RustSec, licences permises, crates.io seulement, doublons dits
-  sans échouer ; une faille admise l'est avec sa preuve) ; étape de verifier.sh, sautée sans `cargo-deny`.
+  sans échouer ; une faille admise l'est avec sa preuve ; `extensions/deny.toml` pour la bibliothèque des extensions
+  et l'exemple en Rust) ; étape de verifier.sh, sautée sans `cargo-deny`.
 - Tests Windows sous Wine (pas de PowerShell sous Wine ; le registre, lui, marche) :
   `WINEPREFIX=<dossier jetable> WINEDEBUG=-all CARGO_TARGET_X86_64_PC_WINDOWS_GNU_RUNNER=~/.local/share/Steam/compatibilitytools.d/GE-Proton11-9-x86_64/files/bin/wine cargo test --target x86_64-pc-windows-gnu`
 - macOS : compilé et testé sur un Mac de GitHub (`.github/workflows/macos.yml`), à chaque publication et la nuit si

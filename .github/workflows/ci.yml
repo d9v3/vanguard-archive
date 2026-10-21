@@ -154,7 +154,12 @@ jobs:
       # Lancé même si cargo audit a échoué : les deux avis servent.
       - name: Dépendances (cargo deny)
         if: ${{ !cancelled() }}
-        run: cargo deny --locked check --hide-inclusion-graph
+        run: |
+          cargo deny --locked check --hide-inclusion-graph
+          # La bibliothèque des extensions et l'exemple en Rust : leurs propres règles (extensions/deny.toml).
+          for m in extensions/sdk/Cargo.toml extensions/exemples/rust-exemple/Cargo.toml; do
+            cargo deny --locked --manifest-path "$m" --config extensions/deny.toml check --hide-inclusion-graph
+          done
 
   # Windows la nuit seulement si le code a changé depuis le dernier passage réussi (comme macos.yml).
   utile:

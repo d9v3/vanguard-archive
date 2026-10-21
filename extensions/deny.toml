@@ -1,0 +1,39 @@
+# Ce que les dépendances de la bibliothèque des extensions (sdk) et de l'exemple en Rust ont le droit d'être, vérifié
+# par cargo deny (outils/verifier.sh, et chaque nuit dans la CI), comme deny.toml pour Vanguard. Les deux n'en ont
+# aucune aujourd'hui (le JSON du protocole est écrit à la main) : la première qui viendrait passerait les mêmes règles.
+# À part de deny.toml : ses failles admises (venues de YARA-X) n'ont rien à faire ici.
+
+# Les cibles où un plugin tourne : celles de Vanguard.
+[graph]
+targets = [
+    "x86_64-unknown-linux-musl",
+    "x86_64-pc-windows-gnu",
+    "aarch64-apple-darwin",
+    "x86_64-apple-darwin",
+]
+
+# Failles connues, bibliothèques abandonnées ou au code défaillant : refusées, sans exception.
+[advisories]
+ignore = []
+
+# Aucune licence de tiers permise d'avance : une dépendance demande d'abord une décision (CLAUDE.md, « Nouvelle
+# dépendance »), puis sa licence ici. La bibliothèque et l'exemple eux-mêmes (GPL-3.0-or-later, jamais publiés sur
+# crates.io : publish = false) ne sont pas vérifiés.
+[licenses]
+allow = []
+confidence-threshold = 0.8
+private = { ignore = true }
+
+# L'exemple prend la bibliothèque par son chemin (../../sdk), sans version : admis pour une crate jamais publiée,
+# refusé pour toute autre dépendance.
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+allow-wildcard-paths = true
+
+# crates.io seulement : ni autre registre, ni dépôt git.
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []
