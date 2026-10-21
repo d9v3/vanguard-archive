@@ -7,8 +7,9 @@
 #[cfg(unix)]
 use std::process::Command;
 
+use crate::machine::Constat;
 use crate::reseau::tableau::{self, Genre};
-use crate::reseau::{self, Options};
+use crate::reseau::{self, Options, upnp};
 use crate::risk::Niveau;
 use crate::ui::*;
 
@@ -197,9 +198,11 @@ fn nouveautes_machine(avant: &EtatMachine, apres: &EtatMachine) -> Vec<(String, 
     notes
 }
 
-/// Audit silencieux de cette machine, comparé au passage précédent. Le premier passage mémorise seulement.
-fn veiller_machine() {
-    let apres = etat_machine(&crate::machine::auditer(false));
+/// Audit silencieux de cette machine, comparé au passage précédent. Le premier passage mémorise seulement. Rend le
+/// bilan : l'audit du réseau reprend ses constats réseau sans relancer ces règles.
+fn veiller_machine() -> crate::machine::Audit {
+    let audit = crate::machine::auditer(false);
+    let apres = etat_machine(&audit);
     let avant: Option<EtatMachine> = std::fs::read_to_string(fichier_etat())
         .ok()
         .and_then(|t| serde_json::from_str(&t).ok());
@@ -211,6 +214,160 @@ fn veiller_machine() {
     if let Ok(texte) = serde_json::to_string(&apres) {
         let _ = std::fs::create_dir_all(reseau::dossier_local());
         let _ = std::fs::write(fichier_etat(), texte);
+    }
+    audit
+}
+
+/// L'audit du réseau au dernier passage, réduit à ce qui déclenche une alerte quand il change : les redirections de
+/// la box (`None` : non lues, rien à comparer) et les constats des règles suivies.
+#[derive(serde::Serialize, serde::Deserialize, Default, Debug, PartialEq)]
+struct EtatAudit {
+    redirections: Option<Vec<String>>,
+    /// « règle|catégorie : message », les nombres neutralisés sauf pour le DNS du bail, dont l'adresse compte.
+    constats: Vec<String>,
+}
+
+fn fichier_audit() -> std::path::PathBuf {
+    reseau::dossier_local().join("surveillance-audit.json")
+}
+
+/// La clé d'une redirection, stable d'une passe à l'autre.
+fn cle_redirection(r: &upnp::Redirection) -> String {
+    format!(
+        "{} {} → {}:{}",
+        r.protocole.to_uppercase(),
+        r.port_public,
+        r.appareil,
+        r.port_appareil
+    )
+}
+
+/// Le genre de l'alerte d'une règle de l'audit que la surveillance suit ; `None` : règle non suivie. Les
+/// redirections (COM-EXP-001) sont comparées à part, par redirection.
+fn genre_de(regle: &str) -> Option<Genre> {
+    match regle {
+        "COM-EXP-003" => Some(Genre::Machine),
+        "COM-DNS-002" | "COM-DNS-004" => Some(Genre::Passerelle),
+        r if r.starts_with("COM-WIF-") => Some(Genre::WiFi),
+        _ => None,
+    }
+}
+
+/// Un constat de l'audit que la surveillance suit : vérifié, d'une règle suivie, moyen ou plus grave — sauf le DNS
+/// distribué par la box, suivi dès l'information, puisque c'est son changement qui compte.
+fn surveille(c: &Constat) -> bool {
+    c.verifie
+        && genre_de(c.regle).is_some()
+        && (c.regle == "COM-DNS-002" || c.probleme.is_some_and(|n| n >= Niveau::Moyen))
+}
+
+fn cle_constat(c: &Constat) -> String {
+    let texte = format!("{} : {}", c.categorie, c.message);
+    let texte = if c.regle == "COM-DNS-002" {
+        texte
+    } else {
+        cle_alerte(&texte)
+    };
+    format!("{}|{texte}", c.regle)
+}
+
+fn etat_audit(r: &reseau::Rapport, a: &crate::audit::AuditReseau) -> EtatAudit {
+    EtatAudit {
+        redirections: crate::audit::redirections_du_scan(r).map(|l| l.iter().map(cle_redirection).collect()),
+        constats: a
+            .domaines
+            .iter()
+            .flat_map(|d| &d.constats)
+            .filter(|c| surveille(c))
+            .map(cle_constat)
+            .collect(),
+    }
+}
+
+/// Le titre de la notification d'un constat nouveau, selon sa règle.
+fn titre_alerte(regle: &str) -> String {
+    match regle {
+        "COM-DNS-002" => tr!(
+            "Vanguard : le DNS distribué par la box a changé",
+            "Vanguard: the DNS handed out by the router changed"
+        ),
+        "COM-DNS-004" => tr!("Vanguard : réponses DNS détournées", "Vanguard: DNS answers hijacked"),
+        "COM-EXP-003" => tr!(
+            "Vanguard : cet ordinateur exposé en IPv6",
+            "Vanguard: this computer exposed over IPv6"
+        ),
+        _ => tr!("Vanguard : Wi-Fi moins protégé", "Vanguard: Wi-Fi less protected"),
+    }
+    .to_string()
+}
+
+/// Les alertes entre deux passages de l'audit : (titre, texte, genre), une par redirection nouvelle de la box et par
+/// constat nouveau d'une règle suivie ; rien quand les redirections n'ont pas pu être lues à l'un des deux passages.
+fn nouveautes_audit(
+    avant: &EtatAudit,
+    apres: &EtatAudit,
+    redirections: &[upnp::Redirection],
+    constats: &[&Constat],
+) -> Vec<(String, String, Genre)> {
+    let mut alertes = Vec::new();
+    if let (Some(av), Some(ap)) = (&avant.redirections, &apres.redirections) {
+        for r in redirections.iter().filter(|r| {
+            let cle = cle_redirection(r);
+            ap.contains(&cle) && !av.contains(&cle)
+        }) {
+            let description = if r.description.is_empty() {
+                String::new()
+            } else {
+                format!(" « {} »", r.description)
+            };
+            alertes.push((
+                tr!(
+                    "Vanguard : la box ouvre un port vers Internet",
+                    "Vanguard: the router opens a port to the Internet"
+                )
+                .to_string(),
+                trf!(
+                    "Nouvelle redirection : port {}/{} d'Internet vers {}:{} ({}){description}. Un appareil l'a demandée à la box (UPnP) : si ce n'est pas voulu, retire-la et coupe UPnP dans la box.",
+                    "New forwarding: Internet port {}/{} to {}:{} ({}){description}. A device asked the router for it (UPnP): if it is not wanted, remove it and turn UPnP off in the router.",
+                    r.port_public,
+                    r.protocole.to_lowercase(),
+                    r.appareil,
+                    r.port_appareil,
+                    crate::risk::info_port(r.port_appareil).service
+                ),
+                Genre::Passerelle,
+            ));
+        }
+    }
+    for c in constats.iter().filter(|c| surveille(c)) {
+        let cle = cle_constat(c);
+        if apres.constats.contains(&cle) && !avant.constats.contains(&cle) {
+            let Some(genre) = genre_de(c.regle) else { continue };
+            alertes.push((titre_alerte(c.regle), c.message.clone(), genre));
+        }
+    }
+    alertes
+}
+
+/// Les domaines rapides de l'audit du réseau après le scan, comparés au passage précédent : une alerte par
+/// changement (redirection nouvelle de la box, DNS du bail changé, Wi-Fi moins protégé, exposition IPv6 nouvelle,
+/// divergence DNS), jamais à chaque passe. Le premier passage mémorise seulement.
+async fn veiller_audit(r: &reseau::Rapport, machine: Vec<Constat>) {
+    let a = crate::audit::auditer(r, Some(machine), false, true).await;
+    let apres = etat_audit(r, &a);
+    let avant: Option<EtatAudit> = std::fs::read_to_string(fichier_audit())
+        .ok()
+        .and_then(|t| serde_json::from_str(&t).ok());
+    if let Some(avant) = &avant {
+        let redirections = crate::audit::redirections_du_scan(r).unwrap_or_default();
+        let constats: Vec<&Constat> = a.domaines.iter().flat_map(|d| &d.constats).collect();
+        for (titre, texte, genre) in nouveautes_audit(avant, &apres, &redirections, &constats) {
+            alerter(genre, &titre, &texte);
+        }
+    }
+    if let Ok(texte) = serde_json::to_string(&apres) {
+        let _ = std::fs::create_dir_all(reseau::dossier_local());
+        let _ = std::fs::write(fichier_audit(), texte);
     }
 }
 
@@ -287,7 +444,7 @@ pub async fn surveiller() {
 
 async fn passe() {
     tableau::noter_passe();
-    veiller_machine();
+    let machine = veiller_machine();
     if let Some(fichiers) = crate::protection::integrite::changements_a_signaler() {
         alerter(
             Genre::Fichiers,
@@ -313,6 +470,15 @@ async fn passe() {
         return;
     };
     veiller_passerelle(&r);
+    veiller_audit(
+        &r,
+        machine
+            .constats
+            .into_iter()
+            .filter(|c| crate::audit::regle_du_reseau(c.regle))
+            .collect(),
+    )
+    .await;
     // Empoisonneur de noms (Responder…) : la sonde est déjà faite pendant le scan du réseau local, elle ne coûte
     // rien de plus ici. Sans réseau local (VPN seul), le scan n'aurait pas tourné : rien à signaler.
     if let Some(reseau::empoisonnement::Rapport::Teste(empoisonneurs)) = &r.empoisonnement {
@@ -670,6 +836,96 @@ mod tests {
         assert!(n[0].1.contains("4444"));
         assert!(n[1].1.contains("90") && n[1].1.contains("75"));
     }
+    /// L'audit du réseau entre deux passes : une alerte par redirection nouvelle de la box et par constat nouveau
+    /// d'une règle suivie ; un nombre qui change ne compte pas, sauf l'adresse du DNS distribué par la box ; des
+    /// redirections non lues ne se comparent pas.
+    #[test]
+    fn nouveautes_de_l_audit() {
+        let redirection = |public: u16, appareil: &str, port: u16| upnp::Redirection {
+            protocole: "TCP".into(),
+            port_public: public,
+            appareil: appareil.into(),
+            port_appareil: port,
+            description: "Camera".into(),
+        };
+        let constat = |regle: &'static str, niveau: Niveau, message: &str| {
+            let mut c = crate::machine::alerte("Wi-Fi", niveau, message);
+            c.regle = regle;
+            c
+        };
+        let redirections = [redirection(3074, "10.0.0.20", 3074), redirection(8080, "10.0.0.30", 80)];
+        let tkip = constat(
+            "COM-WIF-001",
+            Niveau::Moyen,
+            "Le Wi-Fi « Salon » accepte encore TKIP (3 bornes).",
+        );
+        let dns = constat(
+            "COM-DNS-002",
+            Niveau::Info,
+            "La box distribue le DNS 203.0.113.9 à tous tes appareils.",
+        );
+        let ipv6 = constat(
+            "COM-EXP-003",
+            Niveau::Eleve,
+            "Cet ordinateur a une adresse IPv6 publique sans pare-feu.",
+        );
+        // Non suivis : une règle hors liste, une information d'une règle suivie, un constat non vérifié.
+        let hors = constat("COM-APP-002", Niveau::Critique, "Telnet ouvert.");
+        let info = constat("COM-WIF-002", Niveau::Info, "WPS par bouton seulement.");
+        let mut non_verifie = constat("COM-WIF-001", Niveau::Moyen, "x");
+        non_verifie.verifie = false;
+        let constats = [&tkip, &dns, &ipv6, &hors, &info, &non_verifie];
+        let avant = EtatAudit {
+            redirections: Some(vec![cle_redirection(&redirections[0])]),
+            constats: vec![
+                cle_constat(&constat(
+                    "COM-WIF-001",
+                    Niveau::Moyen,
+                    "Le Wi-Fi « Salon » accepte encore TKIP (2 bornes).",
+                )),
+                cle_constat(&constat(
+                    "COM-DNS-002",
+                    Niveau::Info,
+                    "La box distribue le DNS 10.0.0.1 à tous tes appareils.",
+                )),
+            ],
+        };
+        let apres = EtatAudit {
+            redirections: Some(redirections.iter().map(cle_redirection).collect()),
+            constats: constats
+                .iter()
+                .filter(|c| surveille(c))
+                .map(|c| cle_constat(c))
+                .collect(),
+        };
+        assert_eq!(apres.constats.len(), 3);
+        let alertes = nouveautes_audit(&avant, &apres, &redirections, &constats);
+        let genres: Vec<Genre> = alertes.iter().map(|a| a.2).collect();
+        assert_eq!(genres, [Genre::Passerelle, Genre::Passerelle, Genre::Machine]);
+        assert!(
+            alertes[0].1.contains("8080/tcp")
+                && alertes[0].1.contains("10.0.0.30:80")
+                && alertes[0].1.contains("Camera")
+        );
+        assert!(alertes[1].0.contains("DNS") && alertes[1].1.contains("203.0.113.9"));
+        assert!(alertes[2].0.contains("IPv6"));
+        // Rien de nouveau : aucune alerte ; redirections non lues à l'un des deux passages : pas comparées.
+        assert_eq!(nouveautes_audit(&apres, &apres, &redirections, &constats).len(), 0);
+        let non_lues = EtatAudit {
+            redirections: None,
+            ..EtatAudit::default()
+        };
+        let seulement = nouveautes_audit(&non_lues, &apres, &redirections, &constats);
+        assert!(
+            seulement
+                .iter()
+                .all(|a| a.2 != Genre::Passerelle || a.0.contains("DNS"))
+        );
+        // L'état se relit tel qu'il a été écrit.
+        let relu: EtatAudit = serde_json::from_str(&serde_json::to_string(&apres).unwrap()).unwrap();
+        assert_eq!(relu, apres);
+    }
+
     #[test]
     fn surveillance_voulue_mais_disparue() {
         assert!(juger_disparition(false, false).is_none());

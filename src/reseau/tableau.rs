@@ -39,11 +39,13 @@ pub(crate) enum Genre {
     Empoisonneur,
     Appareil,
     Port,
+    /// Le Wi-Fi moins protégé qu'au passage d'avant (ouvert, TKIP, WPS apparu) : l'audit du réseau.
+    WiFi,
     Autre,
 }
 
 impl Genre {
-    const TOUS: [Genre; 9] = [
+    const TOUS: [Genre; 10] = [
         Genre::Machine,
         Genre::Fichiers,
         Genre::Telechargement,
@@ -52,6 +54,7 @@ impl Genre {
         Genre::Empoisonneur,
         Genre::Appareil,
         Genre::Port,
+        Genre::WiFi,
         Genre::Autre,
     ];
 
@@ -66,6 +69,7 @@ impl Genre {
             Genre::Empoisonneur => "empoisonneur",
             Genre::Appareil => "appareil",
             Genre::Port => "port",
+            Genre::WiFi => "wifi",
             Genre::Autre => "autre",
         }
     }
@@ -85,6 +89,7 @@ impl Genre {
             Genre::Empoisonneur => tr!("EMPOISONNEUR", "POISONER"),
             Genre::Appareil => tr!("APPAREIL", "DEVICE"),
             Genre::Port => tr!("PORT", "PORT"),
+            Genre::WiFi => tr!("WI-FI", "WI-FI"),
             Genre::Autre => tr!("AUTRE", "OTHER"),
         }
     }
@@ -93,7 +98,7 @@ impl Genre {
     fn classe(self) -> &'static str {
         match self {
             Genre::Botnet | Genre::Passerelle | Genre::Empoisonneur => "critique",
-            Genre::Appareil | Genre::Port | Genre::Fichiers => "eleve",
+            Genre::Appareil | Genre::Port | Genre::Fichiers | Genre::WiFi => "eleve",
             Genre::Machine | Genre::Telechargement => "moyen",
             Genre::Autre => "info",
         }
@@ -340,8 +345,8 @@ details summary{cursor:pointer;font-weight:600}
 /// Le comment l'activer, dit partout où la surveillance manque.
 fn comment_activer() -> &'static str {
     tr!(
-        "Pour l'activer : menu « Réseau et Internet » › « Surveillance toutes les heures », ou <code>vanguard surveillance on</code>. Elle scanne alors le réseau toutes les heures, sans rien changer, et notifie un nouvel appareil, un port dangereux nouvellement ouvert, une box usurpée ou un programme qui parle à un serveur de botnet ; chaque alerte est gardée ici.",
-        "To turn it on: menu “Network and Internet” › “Hourly monitoring”, or <code>vanguard monitor on</code>. It then scans the network every hour, changing nothing, and notifies a new device, a dangerous newly opened port, an impersonated router or a program talking to a botnet server; each alert is kept here."
+        "Pour l'activer : menu « Réseau et Internet » › « Surveillance toutes les heures », ou <code>vanguard surveillance on</code>. Elle scanne alors le réseau toutes les heures, sans rien changer, et notifie un nouvel appareil, un port dangereux nouvellement ouvert, une box usurpée, un port que la box ouvre vers Internet, un DNS ou un Wi-Fi qui changent, ou un programme qui parle à un serveur de botnet ; chaque alerte est gardée ici.",
+        "To turn it on: menu “Network and Internet” › “Hourly monitoring”, or <code>vanguard monitor on</code>. It then scans the network every hour, changing nothing, and notifies a new device, a dangerous newly opened port, an impersonated router, a port the router opens to the Internet, a DNS or Wi-Fi that changes, or a program talking to a botnet server; each alert is kept here."
     )
 }
 
