@@ -360,6 +360,7 @@ mod tests {
     fn borne(ssid: &str, bande: Bande, canal: u16, signal: u8, actif: bool) -> Borne {
         Borne {
             ssid: ssid.into(),
+            bssid: String::new(),
             bande,
             canal,
             signal: Some(signal),

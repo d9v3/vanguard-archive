@@ -7,6 +7,11 @@ use crate::risk::Niveau;
 use crate::ui::affichable;
 use crate::{tr, trf};
 
+pub(crate) mod elements;
+pub(crate) mod nl80211;
+pub(crate) mod profils;
+pub(crate) mod wlanapi;
+
 /// Nom d'un réseau que macOS 14 cache sans l'autorisation de localisation : sa protection se lit encore, mais il ne
 /// se compare pas aux autres.
 pub(super) const CACHE: &str = "<redacted>";
@@ -40,7 +45,7 @@ pub(super) fn force(securite: &str) -> u8 {
 }
 
 /// Protection du réseau où l'on est connecté. `admin` : commandes pour ouvrir l'administration de la box.
-pub(super) fn securite(ssid: &str, libelle: &str, admin: &[&str]) -> Constat {
+pub(crate) fn securite(ssid: &str, libelle: &str, admin: &[&str]) -> Constat {
     let routeur = tr!(
         "Ouvrir l'admin du routeur > Wi-Fi > Sécurité : choisir « WPA2/WPA3 » ou « WPA3 »",
         "Open the router admin > Wi-Fi > Security: choose “WPA2/WPA3” or “WPA3”"
@@ -92,8 +97,7 @@ pub(super) fn securite(ssid: &str, libelle: &str, admin: &[&str]) -> Constat {
 /// Réseaux ouverts enregistrés qui se reconnectent tout seuls : n'importe qui peut créer un faux réseau du même nom
 /// (« Wi-Fi gratuit », celui d'un hôtel) et l'ordinateur s'y joint sans rien demander. `noms` à montrer, une commande
 /// par réseau pour couper la reconnexion.
-#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
-pub(super) fn ouverts_automatiques(noms: &[String], commandes: &[String]) -> Option<Constat> {
+pub(crate) fn ouverts_automatiques(noms: &[String], commandes: &[String]) -> Option<Constat> {
     if noms.is_empty() {
         return None;
     }
@@ -358,12 +362,39 @@ pub(crate) fn pourcentage(dbm: i32) -> u8 {
 pub(crate) struct Borne {
     /// Nom du réseau ; vide s'il est caché.
     pub ssid: String,
+    /// Adresse de l'émetteur (BSSID), « aa:bb:cc:dd:ee:ff » ; vide si l'outil ne la donne pas.
+    pub bssid: String,
     pub bande: Bande,
     pub canal: u16,
     /// Force du signal reçu, de 0 à 100 %.
     pub signal: Option<u8>,
     /// La borne de la connexion actuelle.
     pub actif: bool,
+}
+
+/// Une borne et ce que ses balises annoncent : chiffrements acceptés, WPS. Lue nativement (nl80211, wlanapi).
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct Balise {
+    pub borne: Borne,
+    pub protection: elements::Protection,
+    pub wps: Option<elements::Wps>,
+}
+
+/// Le réseau où l'on est connecté, d'après le système.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Connexion {
+    pub ssid: String,
+    /// L'émetteur de la connexion ; vide si le système ne le dit pas.
+    pub bssid: String,
+}
+
+/// Ce qu'une lecture native a vu : les bornes du dernier balayage, et la connexion en cours.
+#[derive(Debug, Default, PartialEq)]
+pub(crate) struct Lecture {
+    pub balises: Vec<Balise>,
+    pub connexion: Option<Connexion>,
+    /// Une réserve du système sur la liste (Windows : l'autorisation de localisation).
+    pub note: Option<&'static str>,
 }
 
 /// `nmcli -t -e no -f ACTIVE,SIGNAL,FREQ,CHAN,SSID dev wifi list` : « yes:72:5180 MHz:36:Salon ». Le nom vient en
@@ -380,6 +411,7 @@ pub(crate) fn bornes_nmcli(sortie: &str) -> Vec<Borne> {
             let canal = champs.next()?.trim().parse().ok()?;
             Some(Borne {
                 ssid: affichable(champs.next().unwrap_or("")),
+                bssid: String::new(),
                 bande: Bande::de_frequence(mhz)?,
                 canal,
                 signal,
@@ -396,6 +428,7 @@ pub(crate) fn bornes_nmcli(sortie: &str) -> Vec<Borne> {
 pub(crate) fn bornes_iw(sortie: &str) -> Vec<Borne> {
     struct EnCours {
         actif: bool,
+        bssid: String,
         mhz: Option<u32>,
         dbm: Option<i32>,
         ssid: String,
@@ -404,6 +437,7 @@ pub(crate) fn bornes_iw(sortie: &str) -> Vec<Borne> {
         let mhz = b.mhz?;
         Some(Borne {
             ssid: b.ssid,
+            bssid: b.bssid,
             bande: Bande::de_frequence(mhz)?,
             canal: canal_de_frequence(mhz)?,
             signal: b.dbm.map(pourcentage),
@@ -418,6 +452,11 @@ pub(crate) fn bornes_iw(sortie: &str) -> Vec<Borne> {
             bornes.extend(courante.take().and_then(finir));
             courante = Some(EnCours {
                 actif: reste.contains("-- associated"),
+                bssid: reste
+                    .split('(')
+                    .next()
+                    .and_then(elements::mac_normalisee)
+                    .unwrap_or_default(),
                 mhz: None,
                 dbm: None,
                 ssid: String::new(),
@@ -460,6 +499,7 @@ fn champ_netsh(ligne: &str) -> Option<(&str, &str)> {
 #[derive(Default)]
 struct BorneNetsh {
     ssid: String,
+    bssid: String,
     bande: Option<Bande>,
     canal: Option<u16>,
     signal: Option<u8>,
@@ -482,6 +522,7 @@ impl BorneNetsh {
         let canal = self.canal?;
         Some(Borne {
             ssid: self.ssid,
+            bssid: self.bssid,
             bande: self.bande.or_else(|| Bande::de_canal(canal))?,
             canal,
             signal: self.signal,
@@ -511,6 +552,7 @@ pub(crate) fn bornes_netsh(sortie: &str) -> Vec<Borne> {
                 bornes.extend(courante.take().and_then(|b| b.finir(false)));
                 courante = Some(BorneNetsh {
                     ssid: ssid.clone(),
+                    bssid: elements::mac_normalisee(valeur).unwrap_or_default(),
                     ..BorneNetsh::default()
                 });
             }
@@ -563,6 +605,7 @@ pub(crate) fn bornes_system_profiler(sortie: &str) -> Vec<Borne> {
                 .map(pourcentage);
             Some(Borne {
                 ssid: if b.nom == CACHE { String::new() } else { b.nom },
+                bssid: String::new(),
                 bande,
                 canal,
                 signal,
@@ -713,10 +756,19 @@ mod tests {
     fn borne(ssid: &str, bande: Bande, canal: u16, signal: Option<u8>, actif: bool) -> Borne {
         Borne {
             ssid: ssid.into(),
+            bssid: String::new(),
             bande,
             canal,
             signal,
             actif,
+        }
+    }
+
+    /// La même borne, avec l'adresse de son émetteur.
+    fn emetteur(bssid: &str, borne: Borne) -> Borne {
+        Borne {
+            bssid: bssid.into(),
+            ..borne
         }
     }
 
@@ -769,8 +821,8 @@ mod tests {
         assert_eq!(
             bornes_iw(sortie),
             [
-                borne("Salon", Bande::G5, 36, Some(100), true),
-                borne("Voisin", Bande::G24, 6, Some(38), false),
+                emetteur("02:00:00:aa:bb:01", borne("Salon", Bande::G5, 36, Some(100), true)),
+                emetteur("02:00:00:aa:bb:02", borne("Voisin", Bande::G24, 6, Some(38), false)),
             ]
         );
     }
@@ -789,15 +841,21 @@ mod tests {
         assert_eq!(
             bornes_netsh(anglais),
             [
-                borne("Salon", Bande::G5, 36, Some(80), false),
-                borne("Salon", Bande::G24, 6, Some(60), false),
-                borne("", Bande::G24, 11, Some(30), false),
+                emetteur("02:00:00:aa:bb:01", borne("Salon", Bande::G5, 36, Some(80), false)),
+                emetteur("02:00:00:aa:bb:02", borne("Salon", Bande::G24, 6, Some(60), false)),
+                emetteur("02:00:00:aa:bb:03", borne("", Bande::G24, 11, Some(30), false)),
             ]
         );
         let francais = "SSID 1 : Salon\n    BSSID 1                 : 02:00:00:aa:bb:01\n         Signal             : 55%\n\
                         \x20        Bande              : 2,4 GHz\n         Canal              : 1\n\
                         \x20        Utilisation du canal : 10 (4 %)\n";
-        assert_eq!(bornes_netsh(francais), [borne("Salon", Bande::G24, 1, Some(55), false)]);
+        assert_eq!(
+            bornes_netsh(francais),
+            [emetteur(
+                "02:00:00:aa:bb:01",
+                borne("Salon", Bande::G24, 1, Some(55), false)
+            )]
+        );
         let interfaces = "    Name                   : Wi-Fi\n    State                  : connected\n\
                           \x20   SSID                   : Salon\n    BSSID                  : 02:00:00:aa:bb:01\n\
                           \x20   Band                   : 5 GHz\n    Channel                : 36\n\
@@ -939,6 +997,7 @@ mod proprietes {
             let b = bornes_iw(&iw);
             prop_assert_eq!(b.len(), 1);
             prop_assert_eq!((b[0].canal, b[0].signal), (canal, Some(pourcentage(-61))));
+            prop_assert_eq!(b[0].bssid.as_str(), "02:00:00:aa:bb:01");
             prop_assert_eq!(b[0].ssid.as_str(), ssid.trim());
         }
 
