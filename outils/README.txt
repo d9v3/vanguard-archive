@@ -1,6 +1,11 @@
-VANGUARD — portable security check (machine + network + antivirus + fixes)
-==========================================================================
+VANGUARD — portable cyber defense for homes and small networks
+==============================================================
 Version française : LISEZMOI.txt
+
+Vanguard hardens computers, detects vulnerabilities and intrusions (check graded from A to F, network audit,
+threat hunting, YARA scan, logs), blocks the threats it finds and collects the evidence of an incident. Every
+finding is explained; nothing is changed without consent. In addition: troubleshooting, optimization, data and
+backup, and images that boot a failed computer (ISO folder).
 
 This USB key holds the program for Linux, Windows and macOS, its database and its source code.
 

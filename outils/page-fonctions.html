@@ -1,10 +1,10 @@
 <!-- Page de présentation de Vanguard : publiée sur GitHub Pages (docs/index.html, refaite par outils/deployer.sh à chaque
      version) et sur claude.ai (skill /livrer). Les {{…}} sont remplis par outils/page-fonctions.py (version, date,
      nombres de règles, de commandes et de tests, liste des commandes) ; les fonctions et les nouveautés se tiennent à
-     la main, comme la liste des fonctions des README, rangées par menace comme eux. Rien de personnel : ni nom, ni
-     réseau, ni adresse de la maison. -->
+     la main, comme la liste des fonctions des README, rangées par menace comme eux : la défense d'abord, puis « En
+     plus » (dépannage, optimisation, données, suivi). Rien de personnel : ni nom, ni réseau, ni adresse de la maison. -->
 <title>Vanguard {{VERSION_COURTE}}</title>
-<meta name="description" content="Vanguard : la cyberdéfense de ton foyer depuis une clé USB. Bilan noté de A à F, audit du réseau, antivirus, dépannage, pour Windows, Linux et macOS. Fonctions, fiche technique et commandes.">
+<meta name="description" content="Vanguard : cyberdéfense du foyer et des petits réseaux, depuis une clé USB. Durcissement, détection, blocage et réponse aux incidents pour Windows, Linux et macOS ; le dépannage en plus. Fonctions, fiche technique et commandes.">
 <meta name="theme-color" content="#0b1220">
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -133,6 +133,9 @@ main > section + section { content-visibility: auto; contain-intrinsic-size: aut
 .domaine li { position: relative; padding-left: 1.2rem; font-size: .95rem; color: var(--doux); }
 .domaine li::before { content: ""; position: absolute; left: 0; top: .62em; width: .45rem; height: .45rem; border-radius: 50%; background: var(--accent); }
 .domaine li b { color: var(--encre); font-weight: 600; }
+/* Intertitre « En plus » : ce qui n'est pas de la défense (dépannage, optimisation, données, clé) vient après. */
+.sous-titre.en-plus { margin-top: 3rem; }
+.en-plus-texte { color: var(--doux); margin: 0 0 1.4rem; max-width: 46rem; }
 .nouveau { display: inline-block; font-family: var(--mono); font-size: .66rem; letter-spacing: .06em; text-transform: uppercase; color: var(--bon); border: 1px solid var(--bon); border-radius: .3rem; padding: 0 .35rem; margin-left: .3rem; vertical-align: middle; }
 
 /* Audit du réseau : six domaines notés. */
@@ -241,11 +244,11 @@ details.cli[open] summary { border-bottom: 1px solid var(--trait); }
     </div>
     <div class="heros">
       <div>
-        <p class="surtitre">La cyberdéfense de ton foyer, depuis une clé USB</p>
-        <h1>Trouve les points faibles de ta maison numérique, et répare-les.</h1>
-        <p class="chapeau">Vanguard audite ton ordinateur et ton réseau, note tout de A à F, explique chaque problème en mots simples et le corrige seulement avec ton accord. Il n'attaque rien : il observe ce que ta maison montre à Internet. Et il aide aussi à dépanner.</p>
+        <p class="surtitre">Cyberdéfense du foyer et des petits réseaux</p>
+        <h1>Durcir chaque machine, détecter les intrusions, bloquer les menaces.</h1>
+        <p class="chapeau">Depuis une clé USB, Vanguard durcit les ordinateurs, détecte les failles, les mauvais réglages et les intrusions, bloque les menaces trouvées et collecte les traces d'un incident, sur chaque machine comme sur le réseau. Chaque constat est expliqué ; rien n'est modifié sans accord. Le dépannage, l'optimisation et la sauvegarde viennent en plus.</p>
         <p class="statut">En développement actif · tout en Rust (en cours) · défensif</p>
-        <p class="cap"><b>Où va Vanguard.</b> Renforcer le système le plus possible : chaque correction faite par Vanguard lui-même, en Rust, sans script, et toujours annulable (en développement), mesurée aux référentiels reconnus, CIS et ANSSI (prévu). Détecter les failles : celles déjà connues de tes logiciels, croisées sur ta machine avec le catalogue des failles exploitées de la CISA (KEV) et OSV (prévu), et les attaques, avec les journaux de Windows lus par Hayabusa puis l'observation en direct sous Linux par eBPF (prévu). Préparer les rapports de failles nouvelles pour les éditeurs (Microsoft, Google…), anonymisés : c'est toi qui les relis et les envoies, Vanguard n'envoie rien (prévu). Protéger contre les agents d'IA : les serveurs d'IA ouverts au réseau, les agents qui agissent sans demander et les serveurs MCP mal protégés sont déjà signalés, les deux premiers bloqués d'un clic ; la défense contre les menaces nouvelles des agents d'IA est en développement. Toujours défensif : il n'attaque aucun appareil.</p>
+        <p class="cap"><b>Où va Vanguard.</b> Durcir : toutes les corrections faites par Vanguard lui-même, en Rust, sans script et toujours annulables (en développement), mesurées aux référentiels CIS et ANSSI (prévu). Détecter : les failles connues croisées sur la machine avec le catalogue des failles exploitées de la CISA (KEV) et la base OSV, les journaux de Windows lus par Hayabusa, puis l'observation en direct sous Linux par eBPF (prévu). Protéger contre les agents d'IA : les serveurs d'IA ouverts au réseau, les agents qui agissent sans demander et les serveurs MCP mal protégés sont déjà signalés, les deux premiers bloqués d'un clic ; la défense contre leurs menaces nouvelles est en développement. Signaler : des rapports de failles nouvelles préparés pour les éditeurs (Microsoft, Google…), anonymisés, que la personne relit et envoie elle-même ; Vanguard n'envoie rien (prévu). Toujours défensif : Vanguard n'attaque aucun appareil.</p>
         <div class="systemes">
           <span class="systeme">Windows 10 · 11</span><span class="systeme">Linux</span><span class="systeme">macOS</span><span class="systeme">Français · English</span>
         </div>
@@ -258,7 +261,7 @@ details.cli[open] summary { border-bottom: 1px solid var(--trait); }
         <div class="faits">
           <div class="fait"><b>A → F</b><span>une note pour l'ordinateur, une par domaine du réseau</span></div>
           <div class="fait"><b>{{REGLES}}</b><span>règles du bilan, {{FICHES}} fiches d'audit du réseau</span></div>
-          <div class="fait"><b>0</b><span>changement sans ton accord</span></div>
+          <div class="fait"><b>0</b><span>changement sans accord</span></div>
         </div>
       </div>
       <div class="fenetre" role="navigation" aria-label="Menu principal de Vanguard">
@@ -300,12 +303,12 @@ details.cli[open] summary { border-bottom: 1px solid var(--trait); }
   <section id="comment">
     <div class="tete-section">
       <p class="surtitre">Comment ça marche</p>
-      <h2>Trois étapes, et rien ne change sans toi</h2>
+      <h2>Trois étapes, aucune modification sans accord</h2>
     </div>
     <ol class="etapes">
-      <li><h3>Branche la clé</h3><p>Vanguard tourne depuis la clé USB, sur Windows, Linux ou macOS. Rien à installer sur l'ordinateur. La clé démarre aussi les ordinateurs en panne.</p></li>
-      <li><h3>Lance le bilan</h3><p>En quelques secondes : une note de A à F pour l'ordinateur, six notes pour le réseau, et chaque problème expliqué avec le pourquoi.</p></li>
-      <li><h3>Corrige avec ton accord</h3><p>Chaque correction est montrée avant d'être faite, précédée d'un point de restauration, et s'annule exactement.</p></li>
+      <li><h3>Brancher la clé</h3><p>Vanguard tourne depuis la clé USB, sous Windows, Linux ou macOS, sans rien installer sur l'ordinateur. La clé démarre aussi un ordinateur en panne.</p></li>
+      <li><h3>Lancer le bilan</h3><p>Une note de A à F pour l'ordinateur, six notes pour le réseau, et chaque problème expliqué, avec sa cause et sa correction.</p></li>
+      <li><h3>Corriger et bloquer, après accord</h3><p>Chaque correction est montrée avant d'être faite, précédée d'un point de restauration. Chaque menace trouvée se bloque d'un clic ; le blocage se défait, sauf l'arrêt d'un programme.</p></li>
     </ol>
   </section>
 
@@ -313,7 +316,7 @@ details.cli[open] summary { border-bottom: 1px solid var(--trait); }
     <div class="tete-section">
       <p class="surtitre">Menace par menace</p>
       <h2>Ce que Vanguard cherche, et ce qu'il fait</h2>
-      <p>Les menaces d'un foyer, dans l'ordre où elles arrivent : par Internet, par le Wi-Fi, par un objet connecté, par un poste infecté, par un DNS détourné, par une arnaque. Puis les données, le dépannage et l'entretien.</p>
+      <p>Les menaces d'un foyer ou d'un petit réseau, dans l'ordre où elles arrivent : par Internet, par le Wi-Fi, par un objet connecté, par un poste infecté, par un DNS détourné, par une arnaque ; puis la vie privée et les secrets. En plus : le dépannage, l'optimisation, les données et la clé de secours.</p>
     </div>
     <div class="domaines">
       <article class="domaine" id="bilan">
@@ -378,14 +381,17 @@ details.cli[open] summary { border-bottom: 1px solid var(--trait); }
           <li><b>Mots de passe et courriels fuités</b>, compte piraté, bac à sable pour un programme inconnu.</li>
         </ul>
       </article>
-      <article class="domaine" id="donnees">
-        <header><span class="icone"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><ellipse cx="12" cy="6" rx="7" ry="3"/><path d="M5 6v12c0 1.7 3.1 3 7 3s7-1.3 7-3V6M5 12c0 1.7 3.1 3 7 3s7-1.3 7-3"/></svg></span><div><h3>Données et vie privée</h3><span class="touche">menu 9 · vanguard acces · verifier-sauvegarde</span></div></header>
+      <article class="domaine" id="vie-privee">
+        <header><span class="icone"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg></span><div><h3>Vie privée et secrets</h3><span class="touche">menu 6 · vanguard acces · navigateurs · secrets</span></div></header>
         <ul>
-          <li><b>Sauvegarde automatique</b>, et <b>vérifier ma sauvegarde</b> : des fichiers relus pour de vrai sur le disque et comparés à l'original ; une copie réécrite après coup, comme par un rançongiciel, est dite abîmée. <span class="nouveau">nouveau</span></li>
           <li><b>Bilan de confidentialité</b> : qui a accès à la position, aux contacts, à la caméra et au micro.</li>
-          <li><b>Copier mes fichiers</b> (copie vérifiée), mots de passe du navigateur comptés sans jamais être lus, secrets oubliés dans git, fichiers sensibles qui traînent.</li>
+          <li><b>Mots de passe du navigateur</b> comptés sans jamais être lus, secrets oubliés dans git, fichiers sensibles qui traînent.</li>
         </ul>
       </article>
+    </div>
+    <h3 class="sous-titre en-plus" id="en-plus">En plus</h3>
+    <p class="en-plus-texte">Le dépannage, l'optimisation, les données et les outils de la clé, avec les mêmes garde-fous : rien n'est modifié sans accord.</p>
+    <div class="domaines">
       <article class="domaine" id="depannage">
         <header><span class="icone"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.5 6.5a4 4 0 0 0-5.3 5.3L3.5 17.5l3 3 5.7-5.7a4 4 0 0 0 5.3-5.3l-2.3 2.3-2.4-.6-.6-2.4z"/></svg></span><div><h3>Dépannage</h3><span class="touche">menu 4 · 11 · vanguard depanner · proche</span></div></header>
         <ul>
@@ -400,6 +406,13 @@ details.cli[open] summary { border-bottom: 1px solid var(--trait); }
           <li><b>Réglages</b> de confidentialité et de performance qui s'annulent exactement ; nettoyage à cocher ; programmes du démarrage.</li>
           <li><b>Les meilleurs logiciels</b> en 8 catégories, depuis leur source officielle ; les mises à jour de tout d'un coup.</li>
           <li><b>Connexion pour le jeu</b> : ping, gigue, pertes, débit, bufferbloat ; Wi-Fi encombré, type de NAT, DNS le plus rapide.</li>
+        </ul>
+      </article>
+      <article class="domaine" id="donnees">
+        <header><span class="icone"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><ellipse cx="12" cy="6" rx="7" ry="3"/><path d="M5 6v12c0 1.7 3.1 3 7 3s7-1.3 7-3V6M5 12c0 1.7 3.1 3 7 3s7-1.3 7-3"/></svg></span><div><h3>Données et sauvegarde</h3><span class="touche">menu 9 · vanguard verifier-sauvegarde · copier-fichiers</span></div></header>
+        <ul>
+          <li><b>Sauvegarde automatique</b>, et <b>vérifier ma sauvegarde</b> : des fichiers relus pour de vrai sur le disque et comparés à l'original ; une copie réécrite après coup, comme par un rançongiciel, est dite abîmée. <span class="nouveau">nouveau</span></li>
+          <li><b>Copier mes fichiers</b> (copie vérifiée), puis la vérifier plus tard : relue sur le disque et comparée aux originaux.</li>
         </ul>
       </article>
       <article class="domaine" id="suivi">
@@ -419,7 +432,7 @@ details.cli[open] summary { border-bottom: 1px solid var(--trait); }
   <section id="audit">
     <div class="tete-section">
       <p class="surtitre">Audit du réseau</p>
-      <h2>Six notes pour ton réseau, sans rien attaquer</h2>
+      <h2>Six notes pour le réseau, sans rien attaquer</h2>
       <p><code>vanguard audit-reseau</code>, ou menu Réseau et Internet › 2, enchaîné au bilan complet : chaque domaine est noté de 100 vers 0 selon ce qui a été trouvé. Ce qui n'a pas pu être vérifié est dit, exclu de la note, et jamais compté comme sain.</p>
     </div>
     <div class="audit">

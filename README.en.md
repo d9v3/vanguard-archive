@@ -3,41 +3,81 @@
 <p align="center"><a href="README.md">Français</a> · <b>English</b></p>
 
 <p align="center">
-  <b>Cyber defense for your home, from a USB key.</b><br>
-  Vanguard checks your machine and every device on your network, explains each threat in plain language,<br>
-  and fixes it once you agree; when something stops working, it helps you troubleshoot too.<br>
-  Linux, Windows and macOS, nothing to install, in English or French.
+  <b>Cyber defense for homes and small networks, from a USB key.</b><br>
+  Vanguard hardens computers, detects vulnerabilities and intrusions, blocks the threats it finds<br>
+  and collects the evidence of an incident, on each machine and across the network.<br>
+  Every finding is explained, and nothing is changed without consent. Troubleshooting comes in addition.<br>
+  Linux, Windows and macOS, nothing to install, in English and French.
 </p>
 
 <p align="center"><b>In active development · all in Rust (under way) · defensive</b></p>
 
 ![Vanguard's security check: a grade from A to F, each problem explained with its fix](assets/captures/bilan-en.png)
 
-**Where Vanguard is going.** Harden the system as far as possible: every fix made by Vanguard itself, in Rust,
-without scripts, and always undoable (in development), measured against recognized benchmarks, CIS and ANSSI
-(planned). Detect vulnerabilities: those already known in your software, matched on your machine against CISA's
-catalog of exploited vulnerabilities (KEV) and OSV (planned), and attacks, with Windows event logs read by Hayabusa
-then live observation on Linux with eBPF (planned). Prepare reports of new vulnerabilities for vendors (Microsoft,
-Google…), anonymized: you review and send them yourself, Vanguard sends nothing (planned). Protect against AI
-agents: AI servers open to the network, agents that act without asking and badly protected MCP servers are already
-flagged, the first two blocked in one click; defense against the new threats of AI agents is in development.
-Always defensive: it attacks no device.
+## Cyber defense
 
-## At a glance
+- **Harden.** Each weakness found is explained with its fix, applied after consent and preceded by a restore point.
+  On Windows, fourteen hardening settings from a closed list are applied by Vanguard itself, without scripts;
+  Microsoft Defender's protections (attack surface reduction, controlled folder access) are turned on after consent
+  and undone exactly.
+- **Detect.** Known vulnerabilities (missing security updates, security advisories of Linux distributions, end of
+  support) and misconfigurations, graded from A to F; the network audit in six grades, every device inventoried and
+  newcomers flagged; live threat hunting; 308 YARA rules and MalwareBazaar's fingerprints (with a free abuse.ch
+  key); Windows event logs and failed SSH login attempts.
+- **Block and respond.** Each threat found is blocked in one click: program stopped and quarantined, connection
+  closed at the firewall, launch removed from startup; everything can be undone, except stopping a program. Active
+  protection, accepted once, blocks by itself what leaves no doubt; real-time protection can be paused for one hour,
+  four hours or until it is turned back on, and the pause stays flagged. After an infection, the evidence is
+  collected before any cleanup, with the incident timeline.
+- **Protect against AI agents.** AI servers open to the network, agents that act without asking and badly protected
+  MCP servers are flagged, the first two blocked in one click. Defense against the new threats of AI agents is in
+  development.
+- **Report** (planned). Reports of new vulnerabilities prepared for vendors, anonymized, which the user reviews and
+  sends themselves: Vanguard sends nothing.
 
-- **A home's threats, one by one**: what the router exposes to the Internet, an intruder on the Wi-Fi, a vulnerable
-  connected device, an infected computer, a hijacked DNS or certificate, scams. Each problem is explained simply,
-  with its fix.
-- **A security check graded from A to F**: firewall, updates, encryption, open ports, backups…
-- **Your whole network**: every device, its manufacturer, its open ports and its risks; newcomers are flagged.
-- **Nothing changes without your consent**: a restore point first, and every setting is undone exactly. Each
-  threat found is blocked with one click; active protection, if you accept it, blocks what is certain by itself.
-- **And troubleshooting**: diagnostic, everyday problems step by step, slowness, a relative's computer, repairs.
-- **One USB key for all your computers**, and your friends': it write-protects itself anywhere but at home.
+**Where Vanguard is going.** Every fix made by Vanguard itself, in Rust, without scripts and always undoable (in
+development), measured against the CIS and ANSSI benchmarks (planned); known vulnerabilities matched on the machine
+against CISA's catalog of exploited vulnerabilities (KEV) and the OSV database, Windows event logs read by Hayabusa,
+then live observation on Linux with eBPF (planned); defense against the new threats of AI agents (in development);
+reports of vulnerabilities for vendors such as Microsoft or Google (planned). Always defensive: Vanguard attacks no
+device.
+
+## In addition
+
+- **Troubleshooting**: everyday problems step by step (Internet, Wi-Fi, sound, printer, full disk), a relative's
+  computer, the computer diagnostic, “Why is it slow?”.
+- **Optimization**: privacy and performance settings undone exactly, a cleanup with the space gained measured,
+  software installed from its official source, connection for gaming.
+- **Data and backup**: automatic backup with the system's tool and its verification, verified file copy.
+- **Rescue key**: one USB key for every computer, write-protected anywhere but on its owner's computer; it also
+  boots a failed computer.
+
+## Getting started
+
+**Download** (latest version): [Windows](../../releases/latest/download/vanguard-windows-x86_64.exe) ·
+[Linux](../../releases/latest/download/vanguard-linux-x86_64) · [macOS](../../releases/latest/download/vanguard-macos)
+— or the whole [releases page](../../releases/latest), with the SHA-256 checksums. What each version brought:
+[history](CHANGELOG.en.md).
+
+- **Windows**: double-click the program. It is not signed: SmartScreen may warn (“More info”, then “Run anyway”).
+  Microsoft Defender sometimes mistakes it for a virus (“Trojan:Win32/Bearfoos.A!ml”, an automatic detection of
+  a new program): it is a false positive; check the SHA-256 checksum on the release page.
+- **Linux**: `chmod +x vanguard-linux-x86_64`, then `./vanguard-linux-x86_64` in a terminal (any distribution, nothing
+  to install).
+- **macOS**: copied from the Internet, the program is blocked the first time: `xattr -d com.apple.quarantine
+  vanguard-macos`, then `./vanguard-macos` in Terminal.
+- **From the USB key**: `Windows/vanguard.exe`, `Linux/vanguard`, or `Lancer Vanguard.command` on macOS; the key's guide
+  is in `README.txt`.
 
 In the menu, choose **1** (full check), then **2** (fix). Arrows, Enter, and Esc or Backspace to go back.
 
 ## What Vanguard does
+
+### Cyber defense, threat by threat
+
+The threats to a home or a small network, one by one: what the router exposes to the Internet, an intruder on the
+Wi-Fi, a vulnerable connected device, an infected computer, a hijacked DNS or certificate, scams, privacy breaches.
+Each problem is explained, with its fix.
 
 | Threat or area | What Vanguard does |
 |---|---|
@@ -48,10 +88,7 @@ In the menu, choose **1** (full check), then **2** (fix). Arrows, Enter, and Esc
 | **Infected computer** | Antivirus, 308 YARA rules and over a million fingerprints of known malware (MalwareBazaar), the memory of running programs (on demand), live threat hunting (guessed password, suspicious running programs), threat blocking, with one click or by itself for what is certain (active protection), decoy files against ransomware, Windows Defender blocking, what starts in secret, backdoors, Windows' hidden doors and vulnerable drivers, rootkit signs, suspicious event logs, connections to known botnet servers, a password thief like Responder unmasked, overly permissive AI agents, integrity of critical files, flaws in Docker images (trivy, when installed), reversible quarantine, and the traces collected before cleaning up, with the incident timeline. |
 | **Hijacked DNS and certificates** | The DNS really in use (and made-up answers), added root certificates (HTTPS interception), a forced proxy and sites redirected by the hosts file, automatic proxy discovery (WPAD), browser extensions that read every site. |
 | **Scams and remote control** | Tech-support scam (remote control tools), dangerous links checked without opening them, downloaded files checked, leaked passwords and email addresses, hacked account, a sandbox for an unknown program. |
-| **Data and privacy** | Automatic backup and check my backup (really read back), copy my files (checked copy) and check a copy, privacy check (who can access location, contacts, camera and microphone), camera and microphone, browser passwords without protection, sensitive files lying around, secrets forgotten in git project history, key data protected by a passphrase. |
-| **Troubleshooting** | Computer diagnostic, everyday problems step by step (Internet, Wi-Fi, slowness, sound, printer, full disk), after an infection, new computer, computer leaving, a relative's computer, “Why is it slow?”, computer specs, report to leave behind, repairs. |
-| **Optimizing, software and gaming** | Privacy and performance settings undone exactly, a cleanup checklist with the space gained measured, startup programs; the best software in 8 categories, from its official source, and updating everything at once; connection for gaming (ping, jitter, loss, speed and bufferbloat, compared with your habits), crowded Wi-Fi, NAT type, fastest DNS (without removing a DNS that protects you), settings for gaming. |
-| **Follow-up and tools** | HTML report with the grade curve, monthly check-up, learning on your computer, what Vanguard changed (each fix, dated), every setting in one place, your own extensions (plugins and scripts, checked before they run); check my drive (fake drives, speed), my computers (tracked by the key), shortcut on this computer, Vanguard updated from the key or from GitHub (versions signed by the author), command guide, search in every menu. |
+| **Privacy and secrets** | Privacy check (who can access location, contacts, camera and microphone), camera and microphone, browser passwords without protection, sensitive files lying around, secrets forgotten in git project history, key data protected by a passphrase. |
 
 <details>
 <summary><b>The details, threat by threat</b></summary>
@@ -261,21 +298,7 @@ sshguard or CrowdSec already blocks the addresses that keep trying.
 - Leaked passwords: checked with Have I Been Pwned without ever sending the password (only 5 characters of its hash);
   email address leaks, after your consent (the address is sent to the service).
 
-#### Data and privacy
-
-**Automatic backup** — set up with the system's tool (Déjà Dup or a daily rsync copy on Linux, Time Machine, File
-History on Windows), to an external disk, after your consent and undoable. **Check my backup**: the rsync copy
-really read back from the disk, random files compared with their original; an original changed since, newer than
-its copy, is not counted as an error, a copy that differs from an unchanged original means a disk losing data, and a
-copy rewritten after the backup, newer than its original, is reported as damaged: that is how ransomware encrypting
-the backup disk shows up. For Time Machine, Déjà Dup and File History, which keep their backups in their own format,
-how to restore one file. Nothing is written or deleted.
-
-**Copy my files** — Documents, Pictures, Desktop, Videos and Music to an external disk, before a risky repair or a
-reinstall: space is checked first, each file is read back and compared with the original (BLAKE3 fingerprint),
-nothing is deleted or overwritten, and an interrupted copy resumes where it stopped. **Check a copy**, later, is the
-restore test: files spread over the whole copy are read back from the disk and compared with their original; a disk
-that loses data shows up before the day you need it.
+#### Privacy and secrets
 
 **Protect the key's data** — the key's device record (names, MAC addresses, nicknames) encrypted by a passphrase
 (XChaCha20-Poly1305, passphrase derived by Argon2id), against a lost or lent key. At home, nothing changes: the data
@@ -301,6 +324,22 @@ typed password can be looked up in leaks (Have I Been Pwned, only 5 characters o
 
 - Passwords saved in the browser without protection, sensitive files lying around (passwords or keys in clear text),
   missing backup with its set-up offered.
+
+</details>
+
+### In addition
+
+Beyond defense: troubleshooting, optimization, data and the key's tools.
+
+| Area | What Vanguard does |
+|---|---|
+| **Troubleshooting** | Computer diagnostic, everyday problems step by step (Internet, Wi-Fi, slowness, sound, printer, full disk), after an infection, new computer, computer leaving, a relative's computer, “Why is it slow?”, computer specs, report to leave behind, repairs. |
+| **Optimizing, software and gaming** | Privacy and performance settings undone exactly, a cleanup checklist with the space gained measured, startup programs; the best software in 8 categories, from its official source, and updating everything at once; connection for gaming (ping, jitter, loss, speed and bufferbloat, compared with your habits), crowded Wi-Fi, NAT type, fastest DNS (without removing a DNS that protects you), settings for gaming. |
+| **Data and backup** | Automatic backup and check my backup (really read back), copy my files (checked copy) and check a copy. |
+| **Follow-up and tools** | HTML report with the grade curve, monthly check-up, learning on your computer, what Vanguard changed (each fix, dated), every setting in one place, your own extensions (plugins and scripts, checked before they run); check my drive (fake drives, speed), my computers (tracked by the key), shortcut on this computer, Vanguard updated from the key or from GitHub (versions signed by the author), command guide, search in every menu. |
+
+<details>
+<summary><b>The details, area by area</b></summary>
 
 #### Troubleshooting
 
@@ -368,6 +407,22 @@ address included; the fastest DNS, measured here, offered only if it does not re
 - Gaming: on Windows, game components and Windows settings; on Linux, Steam, 32- and 64-bit Vulkan drivers for your
   graphics card, GameMode, MangoHud, Gamescope, Wine, Lutris, Heroic, ProtonUp-Qt, vm.max_map_count, ntsync; on
   macOS, Rosetta 2, Steam, Heroic, Epic Games, GOG Galaxy, Prism Launcher and the Metal frame counter.
+
+#### Data and backup
+
+**Automatic backup** — set up with the system's tool (Déjà Dup or a daily rsync copy on Linux, Time Machine, File
+History on Windows), to an external disk, after your consent and undoable. **Check my backup**: the rsync copy
+really read back from the disk, random files compared with their original; an original changed since, newer than
+its copy, is not counted as an error, a copy that differs from an unchanged original means a disk losing data, and a
+copy rewritten after the backup, newer than its original, is reported as damaged: that is how ransomware encrypting
+the backup disk shows up. For Time Machine, Déjà Dup and File History, which keep their backups in their own format,
+how to restore one file. Nothing is written or deleted.
+
+**Copy my files** — Documents, Pictures, Desktop, Videos and Music to an external disk, before a risky repair or a
+reinstall: space is checked first, each file is read back and compared with the original (BLAKE3 fingerprint),
+nothing is deleted or overwritten, and an interrupted copy resumes where it stopped. **Check a copy**, later, is the
+restore test: files spread over the whole copy are read back from the disk and compared with their original; a disk
+that loses data shows up before the day you need it.
 
 #### Follow-up and tools
 

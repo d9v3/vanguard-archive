@@ -1,6 +1,6 @@
 {
   "_lisez-moi": "Page du dépôt sur GitHub, appliquée par outils/github.py après chaque envoi. La version (Cargo.toml) s'ajoute seule au bout de la description ; le nom du dépôt suit celui du programme.",
-  "description": "Home cyber defense on a USB key, in Rust, going all-Rust, actively developed. Hardens your PCs, audits your network (Internet exposure, Wi-Fi, DNS, devices), explains each risk, fixes with your OK. Hunts malware and intruders, blocks threats in one click, flags risky AI agents, runs plugins; never attacks. Windows · Linux · macOS · FR/EN",
+  "description": "Cyber defense for homes and small networks, on a USB key; in Rust, going all-Rust, actively developed. Hardens PCs; detects vulnerabilities and intrusions (YARA, logs, network audit); blocks threats in one click; collects incident evidence; flags risky AI agents; never attacks. Troubleshooting as a bonus. Windows · Linux · macOS · FR/EN",
   "accueil": "https://claude.ai/code/artifact/d0b6d00e-38d4-4d9d-ad29-75dbdbecf37f",
   "sujets": [
     "security",
@@ -9,12 +9,12 @@
     "hardening",
     "vulnerability-detection",
     "blue-team",
+    "incident-response",
     "ai-security",
     "privacy",
     "network-security",
     "network-scanner",
     "troubleshooting",
-    "optimization",
     "portable",
     "usb",
     "tui",

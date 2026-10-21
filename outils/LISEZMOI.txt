@@ -1,6 +1,11 @@
-VANGUARD — bilan de sécurité portable (machine + réseau + antivirus + corrections)
-================================================================================
+VANGUARD — cyberdéfense portable du foyer et des petits réseaux
+===============================================================
 English version: README.txt
+
+Vanguard durcit les ordinateurs, détecte les failles et les intrusions (bilan noté de A à F, audit du réseau,
+chasse aux menaces, analyse YARA, journaux), bloque les menaces trouvées et collecte les traces d'un incident.
+Chaque constat est expliqué ; rien n'est modifié sans accord. En plus : le dépannage, l'optimisation, les
+données et la sauvegarde, et des images qui démarrent un ordinateur en panne (dossier ISO).
 
 Cette clé contient le programme pour Linux, Windows et macOS, sa base de données et son code source.
 

@@ -3,40 +3,56 @@
 <p align="center"><b>Français</b> · <a href="README.en.md">English</a></p>
 
 <p align="center">
-  <b>La cyberdéfense de ton foyer, depuis une clé USB.</b><br>
-  Vanguard vérifie ta machine et tous les appareils de ton réseau, explique chaque menace en français clair,<br>
-  et la corrige après ton accord ; quand quelque chose ne marche plus, il aide aussi à dépanner.<br>
-  Linux, Windows et macOS, sans installation, en français ou en anglais.
+  <b>Cyberdéfense du foyer et des petits réseaux, depuis une clé USB.</b><br>
+  Vanguard durcit les ordinateurs, détecte les failles et les intrusions, bloque les menaces trouvées<br>
+  et collecte les traces d'un incident, sur chaque machine comme sur le réseau.<br>
+  Chaque constat est expliqué, et rien n'est modifié sans accord. Le dépannage vient en plus.<br>
+  Linux, Windows et macOS, sans installation, en français et en anglais.
 </p>
 
 <p align="center"><b>En développement actif · tout en Rust (en cours) · défensif</b></p>
 
 ![Bilan de sécurité de Vanguard : une note de A à F, chaque problème expliqué avec sa correction](assets/captures/bilan.png)
 
-**Où va Vanguard.** Renforcer le système le plus possible : chaque correction faite par Vanguard lui-même, en Rust,
-sans script, et toujours annulable (en développement), mesurée aux référentiels reconnus, CIS et ANSSI (prévu).
-Détecter les failles : celles déjà connues de tes logiciels, croisées sur ta machine avec le catalogue des failles
-exploitées de la CISA (KEV) et OSV (prévu), et les attaques, avec les journaux de Windows lus par Hayabusa puis
-l'observation en direct sous Linux par eBPF (prévu). Préparer les rapports de failles nouvelles pour les éditeurs
-(Microsoft, Google…), anonymisés : c'est toi qui les relis et les envoies, Vanguard n'envoie rien (prévu). Protéger
-contre les agents d'IA : les serveurs d'IA ouverts au réseau, les agents qui agissent sans demander et les
-serveurs MCP mal protégés sont déjà signalés, les deux premiers bloqués d'un clic ; la défense contre les menaces
-nouvelles des agents d'IA est en développement. Toujours défensif : il n'attaque aucun appareil.
+## Cyberdéfense
 
-## En bref
+- **Durcir.** Chaque faiblesse relevée est expliquée avec sa correction, appliquée après accord et précédée d'un
+  point de restauration. Sous Windows, quatorze réglages de durcissement d'une liste fermée sont appliqués par
+  Vanguard lui-même, sans script ; les protections de Microsoft Defender (réduction de la surface d'attaque, accès
+  contrôlé aux dossiers) s'activent après accord et s'annulent exactement.
+- **Détecter.** Les failles connues (mises à jour de sécurité manquantes, avis de sécurité des distributions Linux,
+  fin de support) et les mauvais réglages, notés de A à F ; l'audit du réseau en six notes, chaque appareil
+  inventorié et les nouveaux venus signalés ; la chasse aux menaces en direct ; 308 règles YARA et les empreintes de
+  MalwareBazaar (avec une clé abuse.ch gratuite) ; les journaux d'événements de Windows et les tentatives de
+  connexion SSH ratées.
+- **Bloquer et répondre.** Chaque menace trouvée se bloque d'un clic : programme arrêté et mis en quarantaine,
+  connexion fermée au pare-feu, lancement retiré du démarrage ; tout se défait, sauf l'arrêt d'un programme. La
+  protection active, acceptée une fois, bloque seule ce qui ne fait aucun doute ; la protection en temps réel se
+  coupe pour une heure, quatre heures ou jusqu'à reprise, et la coupure reste signalée. Après une infection, les
+  traces sont collectées avant tout nettoyage, avec la chronologie de l'incident.
+- **Protéger contre les agents d'IA.** Les serveurs d'IA ouverts au réseau, les agents qui agissent sans demander et
+  les serveurs MCP mal protégés sont signalés, les deux premiers bloqués d'un clic. La défense contre les menaces
+  nouvelles des agents d'IA est en développement.
+- **Signaler** (prévu). Des rapports de failles nouvelles préparés pour les éditeurs, anonymisés, que la personne
+  relit et envoie elle-même : Vanguard n'envoie rien.
 
-- **Les menaces d'un foyer, une par une** : ce que la box expose à Internet, un intrus sur le Wi-Fi, un objet
-  connecté vulnérable, un ordinateur infecté, un DNS ou un certificat détourné, les arnaques. Chaque problème est
-  expliqué simplement, avec sa correction.
-- **Un bilan noté de A à F** : pare-feu, mises à jour, chiffrement, ports ouverts, sauvegardes…
-- **Tout ton réseau** : chaque appareil, son fabricant, ses ports ouverts et ses risques ; les nouveaux venus sont
-  signalés.
-- **Rien n'est changé sans ton accord** : un point de restauration d'abord, et chaque réglage s'annule exactement.
-  Chaque menace trouvée se bloque d'un clic ; la protection active, si tu l'acceptes, bloque toute seule le certain.
-- **Et le dépannage** : diagnostic, pannes de tous les jours pas à pas, lenteur, l'ordinateur d'un proche,
-  réparations.
-- **Une clé USB pour tous tes ordinateurs**, et ceux de tes amis : elle se protège elle-même en écriture ailleurs que
-  chez toi.
+**Où va Vanguard.** Toutes les corrections faites par Vanguard lui-même, en Rust, sans script et toujours annulables
+(en développement), mesurées aux référentiels CIS et ANSSI (prévu) ; les failles connues croisées sur la machine avec
+le catalogue des failles exploitées de la CISA (KEV) et la base OSV, les journaux de Windows lus par Hayabusa, puis
+l'observation en direct sous Linux par eBPF (prévu) ; la défense contre les menaces nouvelles des agents d'IA (en
+développement) ; les rapports de failles pour les éditeurs comme Microsoft ou Google (prévu). Toujours défensif :
+Vanguard n'attaque aucun appareil.
+
+## En plus
+
+- **Dépannage** : les pannes courantes pas à pas (Internet, Wi-Fi, son, imprimante, disque plein), l'ordinateur
+  d'un proche, le diagnostic de l'ordinateur, « Pourquoi c'est lent ? ».
+- **Optimisation** : réglages de confidentialité et de performance qui s'annulent exactement, nettoyage dont la
+  place gagnée est mesurée, logiciels installés depuis leur source officielle, connexion pour le jeu.
+- **Données et sauvegarde** : sauvegarde automatique par l'outil du système et sa vérification, copie de fichiers
+  vérifiée.
+- **Clé de secours** : une clé USB pour tous les ordinateurs, protégée en écriture ailleurs que sur l'ordinateur de
+  son propriétaire ; elle démarre aussi un ordinateur en panne.
 
 ## Démarrer
 
@@ -61,6 +77,12 @@ pour revenir.
 
 ## Ce que fait Vanguard
 
+### Cyberdéfense, menace par menace
+
+Les menaces d'un foyer ou d'un petit réseau, une par une : ce que la box expose à Internet, un intrus sur le Wi-Fi, un
+objet connecté vulnérable, un ordinateur infecté, un DNS ou un certificat détourné, les arnaques, les atteintes à la
+vie privée. Chaque problème est expliqué, avec sa correction.
+
 | Menace ou domaine | Ce que fait Vanguard |
 |---|---|
 | **Le bilan** | Une note de A à F sur tout ce qui suit, et aussi : pare-feu, mises à jour et failles connues, chiffrement, comptes, SSH, partages ouverts à tous, heure, fin de support, comptes oubliés, santé des disques… Chaque problème est expliqué, avec sa correction, appliquée après ton accord. |
@@ -70,10 +92,7 @@ pour revenir.
 | **Poste infecté** | Antivirus, 308 règles YARA et plus d'un million d'empreintes de logiciels malveillants connus (MalwareBazaar), la mémoire des programmes qui tournent (à la demande), la chasse aux menaces en direct (mot de passe deviné, programmes en marche suspects), le blocage des menaces, d'un clic ou tout seul pour le certain (protection active), fichiers-pièges contre les rançongiciels, blocages de Windows Defender, ce qui se lance en cachette, portes dérobées, portes cachées de Windows et pilotes vulnérables, signes de rootkit, journaux d'événements suspects, connexions vers des serveurs de botnets connus, un voleur de mots de passe comme Responder démasqué, agents d'IA trop permissifs, intégrité des fichiers critiques, failles des images Docker (trivy, s'il est installé), quarantaine réversible, et les traces collectées avant de nettoyer, avec la chronologie de l'incident. |
 | **DNS et certificats détournés** | Le DNS réellement utilisé (et les réponses inventées), les certificats racine ajoutés (interception du HTTPS), le proxy imposé et les sites redirigés par le fichier hosts, la recherche automatique du proxy (WPAD), les extensions de navigateur qui lisent tous les sites. |
 | **Arnaques et prise de contrôle** | Faux technicien (logiciels de prise de contrôle à distance), liens dangereux examinés sans les ouvrir, fichiers téléchargés vérifiés, mots de passe et adresses courriel fuités, compte piraté, bac à sable pour un programme inconnu. |
-| **Données et vie privée** | Sauvegarde automatique et vérifier ma sauvegarde (relue pour de vrai), copier mes fichiers (copie vérifiée) et vérifier une copie, bilan de confidentialité (qui a accès à la position, aux contacts, à la caméra et au micro), caméra et micro, mots de passe du navigateur sans protection, fichiers sensibles qui traînent, secrets oubliés dans l'historique des projets git, données de la clé protégées par une phrase. |
-| **Dépannage** | Diagnostic de l'ordinateur, pannes de tous les jours pas à pas (Internet, Wi-Fi, lenteur, son, imprimante, disque plein), après une infection, nouvel ordinateur, ordinateur qui part, ordinateur d'un proche, « Pourquoi c'est lent ? », fiche de l'ordinateur, rapport à laisser, réparations. |
-| **Optimiser, logiciels et jeu** | Réglages de confidentialité et de performance qui s'annulent exactement, nettoyage à cocher avec la place gagnée mesurée, programmes du démarrage ; les meilleurs logiciels en 8 catégories, depuis leur source officielle, et les mises à jour de tout d'un coup ; connexion pour le jeu (ping, gigue, pertes, débit et bufferbloat, comparés à tes habitudes), Wi-Fi encombré, type de NAT, DNS le plus rapide (sans retirer un DNS qui protège), réglages pour jouer. |
-| **Suivi et outils** | Rapport HTML avec la courbe des notes, entretien du mois, apprentissage sur ton ordinateur, ce que Vanguard a changé (chaque correction, datée), tous les paramètres au même endroit, tes propres extensions (plugins et scripts, vérifiés avant de tourner) ; vérifier ma clé (fausses clés, vitesse), mes ordinateurs (suivis par la clé), raccourci sur cet ordinateur, Vanguard mis à jour depuis la clé ou depuis GitHub (versions signées par l'auteur), guide des commandes, recherche dans tous les menus. |
+| **Vie privée et secrets** | Bilan de confidentialité (qui a accès à la position, aux contacts, à la caméra et au micro), caméra et micro, mots de passe du navigateur sans protection, fichiers sensibles qui traînent, secrets oubliés dans l'historique des projets git, données de la clé protégées par une phrase. |
 
 <details>
 <summary><b>Le détail, menace par menace</b></summary>
@@ -299,22 +318,7 @@ fail2ban, sshguard ou CrowdSec bloque déjà les adresses qui insistent.
 - Mots de passe fuités : vérifiés par Have I Been Pwned sans jamais envoyer le mot de passe (5 caractères de son
   empreinte seulement) ; fuites d'adresse courriel, après ton accord (l'adresse est envoyée au service).
 
-#### Données et vie privée
-
-**Sauvegarde automatique** — mise en place avec l'outil du système (Déjà Dup ou une copie rsync chaque jour sous
-Linux, Time Machine, Historique des fichiers sous Windows), vers un disque externe, après accord et annulable.
-**Vérifier ma sauvegarde** : la copie rsync relue pour de vrai sur le disque, des fichiers au hasard comparés à leur
-original ; un original modifié depuis, plus récent que sa copie, n'est pas compté comme une erreur, une copie
-différente d'un original inchangé dit un disque qui perd des données, et une copie réécrite après la sauvegarde, plus
-récente que son original, est dite abîmée : c'est ainsi qu'apparaît un rançongiciel qui chiffre le disque de
-sauvegarde. Pour Time Machine, Déjà Dup et l'Historique des fichiers, qui gardent leurs sauvegardes dans leur propre
-format, la marche à suivre pour restaurer un fichier. Rien n'est écrit ni effacé.
-
-**Copier mes fichiers** — Documents, Images, Bureau, Vidéos et Musique vers un disque externe, avant une réparation
-risquée ou une réinstallation : la place est vérifiée avant, chaque fichier relu et comparé à l'original (empreinte
-BLAKE3), rien n'est effacé ni écrasé, et une copie interrompue reprend où elle s'est arrêtée. **Vérifier une
-copie**, plus tard, fait le test de restauration : des fichiers répartis sur toute la copie sont relus sur le disque
-et comparés à leur original ; un disque qui perd des données se voit avant le jour où on en a besoin.
+#### Vie privée et secrets
 
 **Protéger les données de la clé** — le carnet des appareils de la clé (noms, adresses MAC, surnoms) chiffré par une
 phrase (XChaCha20-Poly1305, phrase dérivée par Argon2id), contre une clé perdue ou prêtée. Chez soi, rien ne change :
@@ -341,6 +345,22 @@ de son empreinte seulement).
 
 - Mots de passe enregistrés dans le navigateur sans protection, fichiers sensibles qui traînent (mots de passe ou
   clés en clair), sauvegarde absente avec la mise en place proposée.
+
+</details>
+
+### En plus
+
+Au-delà de la défense : le dépannage, l'optimisation, les données et les outils de la clé.
+
+| Domaine | Ce que fait Vanguard |
+|---|---|
+| **Dépannage** | Diagnostic de l'ordinateur, pannes de tous les jours pas à pas (Internet, Wi-Fi, lenteur, son, imprimante, disque plein), après une infection, nouvel ordinateur, ordinateur qui part, ordinateur d'un proche, « Pourquoi c'est lent ? », fiche de l'ordinateur, rapport à laisser, réparations. |
+| **Optimiser, logiciels et jeu** | Réglages de confidentialité et de performance qui s'annulent exactement, nettoyage à cocher avec la place gagnée mesurée, programmes du démarrage ; les meilleurs logiciels en 8 catégories, depuis leur source officielle, et les mises à jour de tout d'un coup ; connexion pour le jeu (ping, gigue, pertes, débit et bufferbloat, comparés à tes habitudes), Wi-Fi encombré, type de NAT, DNS le plus rapide (sans retirer un DNS qui protège), réglages pour jouer. |
+| **Données et sauvegarde** | Sauvegarde automatique et vérifier ma sauvegarde (relue pour de vrai), copier mes fichiers (copie vérifiée) et vérifier une copie. |
+| **Suivi et outils** | Rapport HTML avec la courbe des notes, entretien du mois, apprentissage sur ton ordinateur, ce que Vanguard a changé (chaque correction, datée), tous les paramètres au même endroit, tes propres extensions (plugins et scripts, vérifiés avant de tourner) ; vérifier ma clé (fausses clés, vitesse), mes ordinateurs (suivis par la clé), raccourci sur cet ordinateur, Vanguard mis à jour depuis la clé ou depuis GitHub (versions signées par l'auteur), guide des commandes, recherche dans tous les menus. |
+
+<details>
+<summary><b>Le détail, domaine par domaine</b></summary>
 
 #### Dépannage
 
@@ -415,6 +435,23 @@ pas un DNS qui protège (NextDNS, chiffré, filtrant) et annulable.
 - Gaming : sous Windows, composants pour les jeux et réglages de Windows ; sous Linux, Steam, pilotes Vulkan 32 et
   64 bits selon la carte, GameMode, MangoHud, Gamescope, Wine, Lutris, Heroic, ProtonUp-Qt, vm.max_map_count, ntsync ;
   sous macOS, Rosetta 2, Steam, Heroic, Epic Games, GOG Galaxy, Prism Launcher et le compteur d'images de Metal.
+
+#### Données et sauvegarde
+
+**Sauvegarde automatique** — mise en place avec l'outil du système (Déjà Dup ou une copie rsync chaque jour sous
+Linux, Time Machine, Historique des fichiers sous Windows), vers un disque externe, après accord et annulable.
+**Vérifier ma sauvegarde** : la copie rsync relue pour de vrai sur le disque, des fichiers au hasard comparés à leur
+original ; un original modifié depuis, plus récent que sa copie, n'est pas compté comme une erreur, une copie
+différente d'un original inchangé dit un disque qui perd des données, et une copie réécrite après la sauvegarde, plus
+récente que son original, est dite abîmée : c'est ainsi qu'apparaît un rançongiciel qui chiffre le disque de
+sauvegarde. Pour Time Machine, Déjà Dup et l'Historique des fichiers, qui gardent leurs sauvegardes dans leur propre
+format, la marche à suivre pour restaurer un fichier. Rien n'est écrit ni effacé.
+
+**Copier mes fichiers** — Documents, Images, Bureau, Vidéos et Musique vers un disque externe, avant une réparation
+risquée ou une réinstallation : la place est vérifiée avant, chaque fichier relu et comparé à l'original (empreinte
+BLAKE3), rien n'est effacé ni écrasé, et une copie interrompue reprend où elle s'est arrêtée. **Vérifier une
+copie**, plus tard, fait le test de restauration : des fichiers répartis sur toute la copie sont relus sur le disque
+et comparés à leur original ; un disque qui perd des données se voit avant le jour où on en a besoin.
 
 #### Suivi et outils
 
