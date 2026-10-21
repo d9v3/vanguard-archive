@@ -73,7 +73,7 @@ fn adresse_et_port(t: &str) -> Option<(IpAddr, u16)> {
 /// Une adresse de /proc/net : des mots de 32 bits en hexadécimal (un pour IPv4, quatre pour IPv6), chacun écrit tel que
 /// la machine le range en mémoire. Ses octets, dans l'ordre de la machine, sont donc ceux du réseau.
 #[cfg(any(target_os = "linux", test))]
-fn adresse_proc(hex: &str) -> Option<IpAddr> {
+pub(crate) fn adresse_proc(hex: &str) -> Option<IpAddr> {
     if hex.is_empty() || !hex.len().is_multiple_of(8) || !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
         return None;
     }
@@ -119,7 +119,7 @@ fn lire_proc_net(texte: &str) -> Vec<(IpAddr, u16, u64)> {
 /// Le programme de chaque prise réseau : /proc/<pid>/fd/* pointe vers « socket:[inode] ». Sans droits root, seuls
 /// les programmes de ce compte se lisent, comme avec ss : ceux des autres comptes restent sans nom.
 #[cfg(target_os = "linux")]
-fn proprietaires() -> HashMap<u64, u32> {
+pub(crate) fn proprietaires() -> HashMap<u64, u32> {
     let mut liste = HashMap::new();
     let Ok(processus) = std::fs::read_dir("/proc") else {
         return liste;
