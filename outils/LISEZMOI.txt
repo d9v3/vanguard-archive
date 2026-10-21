@@ -5,7 +5,7 @@ English version: README.txt
 Vanguard durcit les ordinateurs, détecte les failles et les intrusions (bilan noté de A à F, audit du réseau,
 chasse aux menaces, analyse YARA, journaux), bloque les menaces trouvées et collecte les traces d'un incident.
 Chaque constat est expliqué ; rien n'est modifié sans accord. En plus : le dépannage, l'optimisation, les
-données et la sauvegarde, et des images qui démarrent un ordinateur en panne (dossier ISO).
+données et la sauvegarde ; en développement, des images qui démarrent un ordinateur en panne (dossier ISO).
 
 Cette clé contient le programme pour Linux, Windows et macOS, sa base de données et son code source.
 
@@ -15,15 +15,15 @@ Cette clé contient le programme pour Linux, Windows et macOS, sa base de donné
   macOS/vanguard        macOS 12 et plus récents (Apple Silicon et Intel) : double-cliquer « Lancer Vanguard.command »
                         à la racine (le Terminal s'ouvre).
   autorun.sh            Linux : GNOME propose de le lancer au branchement ; sinon, double-clic ou ./autorun.sh
-  donnees/              Base des appareils (un carnet par réseau : chez toi, chez chaque ami) et dernier
+  donnees/              Base des appareils (un carnet par réseau : chez soi, chez chaque ami) et dernier
                         rapport (rapport.html, et rapport.md en texte simple, lisible sans navigateur). Elle voyage avec la clé : tout Vanguard qui voit la clé branchée l'utilise. Sur un autre
                         ordinateur, la clé est protégée : la base y est lue, et ce qui est ajouté reste sur cet ordinateur.
   traces/               Traces collectées après une infection (vanguard traces), un dossier daté par collecte ;
                         en clair, avec des données personnelles. Ailleurs que chez le propriétaire, la clé est
                         protégée : elles restent sur l'ordinateur.
   source/               Code source complet (Rust) avec son historique git.
-  ISO/                  Images qui démarrent un ordinateur, par le menu de Ventoy : Omarchy, Arch Linux, Debian,
-                        Fedora, SystemRescue et Windows 11.
+  ISO/                  En développement, absent de certaines clés : images qui démarrent un ordinateur, par le
+                        menu de Ventoy (Omarchy, Arch Linux, Debian, Fedora, SystemRescue et Windows 11).
                         Mode d'emploi : LISEZMOI.txt du dossier Linux, partie 5.
   vanguard.cle          Fichier témoin qui fait reconnaître la clé : ne pas le supprimer.
 
@@ -44,7 +44,7 @@ un autre ordinateur pour lire le carnet des appareils ; Entrée sans rien, il co
 Pour commencer : lancer Vanguard, choisir « 1. Bilan complet », puis « 2. Corriger ».
 
 Menu (↑ ↓ pour choisir, Entrée pour lancer, Échap ou Retour arrière pour revenir ; ou le chiffre, puis Entrée)
-Recherche : dans tout menu, tape un mot (wifi, disque, dns…) : seules les lignes qui le contiennent restent,
+Recherche : dans tout menu, un mot tapé (wifi, disque, dns…) ne laisse que les lignes qui le contiennent ;
 Entrée ouvre celle en surbrillance, Échap efface. Au menu principal, elle trouve aussi chaque outil des sous-menus
 (« 5.3 » : groupe 5, 3e outil, aussi tapable tel quel) et chaque page du guide.
   1  Bilan complet (machine + réseau), avec ce qui a changé depuis le bilan précédent
@@ -56,7 +56,7 @@ Entrée ouvre celle en surbrillance, Échap efface. Au menu principal, elle trou
        Réparer et nettoyer (Internet, navigation détournée, pare-feu, disque plein, mises à jour bloquées…)
        Diagnostic (matériel, plantages et erreurs récents, copie texte sur la clé)
        Intégrité des fichiers critiques (comptes, sudo, SSH, démarrage ; en direct : vanguard integrite --temps-reel)
-       Ce que Vanguard a appris : tes habitudes, et les alertes que tu as déclarées normales (« i » à la correction)
+       Ce que Vanguard a appris : les habitudes, et les alertes déclarées normales (« i » à la correction)
        Pourquoi c'est lent ? (processeur, mémoire, disque, démarrage, programmes à l'ouverture de session ;
        les retirer du démarrage ou les remettre, après accord : vanguard demarrage)
        Fiche de l'ordinateur (modèle, processeur, mémoire, carte graphique, disques ; numéros de série à l'écran)
@@ -78,8 +78,8 @@ Entrée ouvre celle en surbrillance, Échap efface. Au menu principal, elle trou
        Surveillance toutes les heures (appareil inconnu, problème sur cette machine, usurpation de la box,
          empoisonneur de noms, programme arrivé dans Téléchargements)
        Tableau de bord de la surveillance : alertes jour par jour, nouveaux appareils (page locale)
-       Test de connexion pour le jeu (ping, gigue, débit, bufferbloat), comparé à tes habitudes
-       Adresse Internet sur liste noire ? (Spamhaus, SpamCop, DroneBL, PSBL, après ton accord)
+       Test de connexion pour le jeu (ping, gigue, débit, bufferbloat), comparé aux mesures habituelles
+       Adresse Internet sur liste noire ? (Spamhaus, SpamCop, DroneBL, PSBL, après accord)
        Wi-Fi encombré ? (réseaux voisins par canal, et le canal le plus libre à régler sur la box)
        Type de NAT pour le jeu (ouvert, modéré ou strict) · Caméras cachées ? (location, chez quelqu'un)
        Box et objets connectés : modèle de la box, caméras, imprimantes, NAS… et leur mot de passe d'origine
@@ -88,15 +88,15 @@ Entrée ouvre celle en surbrillance, Échap efface. Au menu principal, elle trou
        Analyse rapide · Analyse complète du dossier personnel
        Clé USB ou dossier, avec les pièges des vers de clé (faux raccourcis, autorun)
        Analyse YARA : 308 règles de familles de logiciels malveillants (rançongiciels, voleurs de mots de passe…)
-         et plus d'un million d'empreintes de logiciels malveillants connus (MalwareBazaar)
+         et les empreintes de logiciels malveillants connus de MalwareBazaar (clé abuse.ch gratuite)
        Mémoire des processus : les règles YARA dans la mémoire des programmes qui tournent (malware sans fichier),
          à la demande ; la mémoire de LSASS et des processus protégés n'est jamais lue (vanguard memoire)
-       Fichiers-pièges : des leurres dans tes dossiers ; un rançongiciel qui les touche déclenche l'alerte
+       Fichiers-pièges : des leurres dans les dossiers personnels ; un rançongiciel qui les touche déclenche l'alerte
        Blocages de Windows Defender : vol de mots de passe, pièces jointes piégées, sites dangereux, rançongiciels
-       Bac à sable : lancer un programme inconnu sans réseau, à l'écart de tes fichiers
+       Bac à sable : lancer un programme inconnu sans réseau, à l'écart des fichiers personnels
        Mots de passe : ont-ils fuité ? (seuls 5 caractères de leur empreinte sont envoyés)
        Mots de passe des navigateurs : comptés et leur protection décrite, jamais lus ; la vérification de chacun
-       Courriel : a-t-il fuité ? (l'adresse est envoyée au service de recherche, après ton accord)
+       Courriel : a-t-il fuité ? (l'adresse est envoyée au service de recherche, après accord)
        Qui parle à Internet ? Les connexions de chaque programme, avec le nom du serveur, et les serveurs de
          botnets connus (Feodo Tracker, ThreatFox) ; lecture seule
        Caméra et micro : qui s'en sert ? (Windows : chaque programme et la dernière fois ; lecture seule)
@@ -108,7 +108,8 @@ Entrée ouvre celle en surbrillance, Échap efface. Au menu principal, elle trou
        Secrets dans les projets git : mots de passe et clés oubliés dans l'historique (et gitleaks, s'il est là)
        Failles des images Docker : failles connues, graves ou critiques (trivy, s'il est là)
        Blocage des menaces : « Bloquer » d'un clic pour chaque menace trouvée (geste montré, noté, annulable) ;
-         la protection active, si tu l'acceptes, bloque toute seule le certain (vanguard blocage)
+         la protection active, une fois mise en marche, bloque toute seule ce qui ne fait aucun doute
+         (vanguard blocage)
   7  Installer et jouer ›
        Logiciels : les meilleurs, libres pour la plupart, par catégorie (navigateurs, mots de passe,
        bureautique, vidéo, création, outils système…) et un pack de départ, depuis la source officielle
@@ -135,8 +136,8 @@ Entrée ouvre celle en surbrillance, Échap efface. Au menu principal, elle trou
        Vérifier ma sauvegarde : la sauvegarde rsync relue, des fichiers au hasard comparés à leur original
  10  Guide des commandes › les commandes utiles d'Omarchy, Arch, Fedora, Debian, Windows 11, macOS et de tous les
        systèmes, par programme, chacune expliquée (⚠ : elle change quelque chose), avec des marches à suivre pas à
-       pas (mettre à jour, réparer, réseau, faire de la place…). Tape ce que tu cherches : les
-       commandes paraissent au fil de la frappe ; chacune se copie, ou se lance ici si elle ne fait que lire.
+       pas (mettre à jour, réparer, réseau, faire de la place…). Les commandes paraissent au fil de
+       la frappe ; chacune se copie, ou se lance ici si elle ne fait que lire.
        Et les exemples de tldr-pages, déjà sur la clé et mis à jour chaque semaine : à copier seulement.
        En ligne de commande : vanguard guide fedora, vanguard guide winget, vanguard guide cache dns
  11  Dépanner pas à pas › pas d'Internet, Wi-Fi qui coupe, ordinateur lent, pas de son, imprimante,
@@ -147,7 +148,7 @@ Entrée ouvre celle en surbrillance, Échap efface. Au menu principal, elle trou
        dans un dossier daté avec leurs empreintes, et la chronologie de l'incident (CHRONOLOGIE.txt) : tout ce
        qui est daté, dans l'ordre du temps (lecture seule, rien n'est envoyé ; vanguard traces).
        En ligne de commande : vanguard depanner son
- 12  Extensions › tes propres programmes, hors du code de Vanguard : plugins (un dossier avec plugin.toml, ajouté
+ 12  Extensions › des programmes personnels, hors du code de Vanguard : plugins (un dossier avec plugin.toml, ajouté
        depuis un dossier ou une archive .zip), scripts du labo posés tels quels, et l'interrupteur des restrictions.
        Chacun est analysé (YARA, MalwareBazaar) et approuvé par ses empreintes avant de tourner, jamais tout seul en
        administrateur ; ses constats ne comptent jamais dans la note.
@@ -173,20 +174,20 @@ Menus décalés dans l'ancienne invite de commandes de Windows : set VANGUARD_EM
 Terminal Windows).
 
 Bon à savoir
-  - Les corrections ne sont jamais appliquées sans ta confirmation. Sous Windows, quatorze réglages d'une liste
+  - Les corrections ne sont jamais appliquées sans confirmation. Sous Windows, quatorze réglages d'une liste
     fermée (WDigest, NLA du Bureau à distance, NTLMv2, LLMNR, UAC…) sont faits par Vanguard lui-même, relancé en
     administrateur : la fenêtre de Windows le nomme, et seuls Entrée ou oui les appliquent (le blocage des menaces y
     ajoute la liste de Microsoft qui bloque les pilotes vulnérables). Les autres corrections, et celles choisies avec
     elles, sont d'abord écrites dans un script lisible (le chemin est affiché). Toutes demandent l'accord
     administrateur.
-  - Blocage des menaces : chaque menace trouvée se bloque d'un clic, après ton accord ; la protection active,
-    acceptée une fois, bloque toute seule ce qui est certain (empreinte de MalwareBazaar, outil d'attaque connu,
-    serveur de commande), puis prévient ; en administrateur, elle ne bloque rien seule. Chaque blocage se défait
-    (vanguard blocage annuler), sauf l'arrêt d'un programme.
+  - Blocage des menaces : chaque menace trouvée se bloque d'un clic, après accord ; la protection active, une
+    fois mise en marche, bloque toute seule ce qui ne fait aucun doute (empreinte de MalwareBazaar, outil d'attaque
+    connu, serveur de commande), puis prévient ; en administrateur, elle ne bloque rien seule. Chaque blocage
+    s'annule (vanguard blocage annuler), sauf l'arrêt d'un programme.
   - Avant la première correction, mise à jour ou réparation qui modifie le système, un point de restauration est
-    créé automatiquement (snapper ou timeshift sous Linux, point de restauration sous Windows, instantané local
-    de Time Machine sous macOS).
-  - Si tu aides quelqu'un connecté à distance (Bureau à distance, SSH), Vanguard ne coupe jamais cet accès.
+    créé automatiquement quand le système le permet (snapper ou timeshift configuré sous Linux, point de
+    restauration sous Windows, instantané local de Time Machine sous macOS).
+  - Pour aider quelqu'un connecté à distance (Bureau à distance, SSH) : Vanguard ne coupe jamais cet accès.
   - Le programme n'est pas signé : SmartScreen peut avertir (« Informations complémentaires » > « Exécuter
     quand même ») et Microsoft Defender peut le signaler, car il scanne des ports. Le code source est sur la clé
     et sur GitHub (d9v3/vanguard-beta).
@@ -199,4 +200,4 @@ Bon à savoir
 Vanguard est un logiciel libre (licence GNU GPL v3 ou ultérieure, voir LICENSE.txt), fourni sans garantie.
 Les bibliothèques qu'il inclut sont listées dans LICENCES-TIERCES.txt.
 
-À n'utiliser que sur ton propre réseau, ou un réseau que tu as le droit d'auditer.
+À n'utiliser que sur son propre réseau, ou sur un réseau qu'on a le droit d'auditer.

@@ -4,8 +4,8 @@ Version française : LISEZMOI.txt
 
 Vanguard hardens computers, detects vulnerabilities and intrusions (check graded from A to F, network audit,
 threat hunting, YARA scan, logs), blocks the threats it finds and collects the evidence of an incident. Every
-finding is explained; nothing is changed without consent. In addition: troubleshooting, optimization, data and
-backup, and images that boot a failed computer (ISO folder).
+finding is explained; nothing is changed without consent. Also included: troubleshooting, optimization, data and
+backup; in development, images that start a computer that no longer boots (ISO folder).
 
 This USB key holds the program for Linux, Windows and macOS, its database and its source code.
 
@@ -22,8 +22,8 @@ This USB key holds the program for Linux, Windows and macOS, its database and it
                         in clear text, with personal data. Away from the owner's computer, the key is protected:
                         they stay on that computer.
   source/               Full source code (Rust) with its git history.
-  ISO/                  Images that boot a computer, from the Ventoy menu: Omarchy, Arch Linux, Debian, Fedora,
-                        SystemRescue and Windows 11.
+  ISO/                  In development, missing from some keys: images that boot a computer, from the Ventoy
+                        menu (Omarchy, Arch Linux, Debian, Fedora, SystemRescue and Windows 11).
                         How to: README.txt in the Linux folder, part 5.
   vanguard.cle          Marker file that makes the key recognized: do not delete it.
 
@@ -87,7 +87,7 @@ highlighted one, Esc clears it. In the main menu, it also finds each tool of the
        Quick scan · Full scan of the home folder
        USB drive or folder, with USB worm traps (fake shortcuts, autorun)
        YARA scan: 308 rules for malware families (ransomware, password stealers…)
-         and over a million fingerprints of known malware (MalwareBazaar)
+         and the fingerprints of known malware from MalwareBazaar (free abuse.ch key)
        Process memory: the YARA rules in the memory of running programs (fileless malware), on demand;
          the memory of LSASS and protected processes is never read (vanguard memory)
        Decoy files: decoys in your folders; ransomware touching them triggers the alert
@@ -107,7 +107,7 @@ highlighted one, Esc clears it. In the main menu, it also finds each tool of the
        Secrets in git projects: passwords and keys forgotten in the history (and gitleaks, if present)
        Flaws in Docker images: known serious or critical flaws (trivy, if present)
        Threat blocking: one-click "Block" for each threat found (action shown, written down, undoable);
-         active protection, if you accept it, blocks what is certain by itself (vanguard blocking)
+         active protection, once enabled, blocks clear-cut threats by itself (vanguard blocking)
   7  Install and play ›
        Software: the best ones, mostly open source, by category (browsers, passwords, office, video,
        design, system tools…) plus a starter pack, from the official source
@@ -119,7 +119,7 @@ highlighted one, Esc clears it. In the main menu, it also finds each tool of the
        Performance and reliability (fast startup, SSD…) · Comfort and files (file extensions shown,
        no autorun from USB drives, full right-click menu…)
        Fastest DNS (measured here; a DNS that protects you is kept) · Put everything back
-       Each setting shows its state and is undone exactly: the previous value is put back.
+       Each setting shows its state and can be reverted exactly: the previous value is put back.
   9  Data ›
        Back up or restore (nicknames, network history)
        Copy my files to an external disk (checked copy, nothing deleted, resumes after an interruption)
@@ -170,17 +170,18 @@ Menus shifted in the old Windows command prompt: set VANGUARD_EMOJI=0 (done by d
 Terminal).
 
 Good to know
-  - Fixes are never applied without your consent. On Windows, fourteen settings from a closed list (WDigest,
+  - Fixes are never applied without confirmation. On Windows, fourteen settings from a fixed allowlist (WDigest,
     Remote Desktop NLA, NTLMv2, LLMNR, UAC…) are made by Vanguard itself, relaunched as administrator: Windows'
     prompt names it, and only Enter or yes applies them (threat blocking adds Microsoft's vulnerable driver
     blocklist). The other fixes, and those chosen along with them, are first written to a readable script (its path
     is shown). All of them ask for administrator approval.
-  - Threat blocking: each threat found is blocked with one click, after your consent; active protection, accepted
-    once, blocks what is certain by itself (MalwareBazaar fingerprint, known attack tool, command server), then lets
-    you know; as administrator, it blocks nothing by itself. Each block is undone (vanguard blocking undo), except
-    stopping a program.
-  - Before the first fix, update or repair that changes the system, a restore point is created automatically
-    (snapper or timeshift on Linux, a restore point on Windows, a local Time Machine snapshot on macOS).
+  - Threat blocking: each threat found can be blocked with one click, after consent; active protection, once
+    enabled, blocks clear-cut threats by itself (MalwareBazaar fingerprint, known attack tool, command server), then
+    lets you know; as administrator, it blocks nothing by itself. Each block can be undone (vanguard blocking
+    undo), except stopping a program.
+  - Before the first fix, update or repair that changes the system, a restore point is created automatically when
+    the system allows one (snapper or timeshift configured on Linux, a restore point on Windows, a local Time
+    Machine snapshot on macOS).
   - If you help someone connected remotely (Remote Desktop, SSH), Vanguard never cuts that access.
   - The program is not signed: SmartScreen may warn ("More info" > "Run anyway") and Microsoft Defender may
     flag it, because it scans ports. The source code is on the key and on GitHub (d9v3/vanguard-beta).

@@ -4,9 +4,9 @@
 
 <p align="center">
   <b>Cyber defense for homes and small networks, from a USB key.</b><br>
-  Vanguard hardens computers, detects vulnerabilities and intrusions, blocks the threats it finds<br>
-  and collects the evidence of an incident, on each machine and across the network.<br>
-  Every finding is explained, and nothing is changed without consent. Troubleshooting comes in addition.<br>
+  Vanguard hardens computers and detects vulnerabilities and intrusions, on each machine and across the network;<br>
+  it blocks the threats found on the computer and collects the evidence of an incident.<br>
+  Every finding is explained, and nothing is changed without consent. Troubleshooting tools are included as well.<br>
   Linux, Windows and macOS, nothing to install, in English and French.
 </p>
 
@@ -16,41 +16,41 @@
 
 ## Cyber defense
 
-- **Harden.** Each weakness found is explained with its fix, applied after consent and preceded by a restore point.
-  On Windows, fourteen hardening settings from a closed list are applied by Vanguard itself, without scripts;
-  Microsoft Defender's protections (attack surface reduction, controlled folder access) are turned on after consent
-  and undone exactly.
-- **Detect.** Known vulnerabilities (missing security updates, security advisories of Linux distributions, end of
-  support) and misconfigurations, graded from A to F; the network audit in six grades, every device inventoried and
-  newcomers flagged; live threat hunting; 308 YARA rules and MalwareBazaar's fingerprints (with a free abuse.ch
-  key); Windows event logs and failed SSH login attempts.
-- **Block and respond.** Each threat found is blocked in one click: program stopped and quarantined, connection
-  closed at the firewall, launch removed from startup; everything can be undone, except stopping a program. Active
-  protection, accepted once, blocks by itself what leaves no doubt; real-time protection can be paused for one hour,
-  four hours or until it is turned back on, and the pause stays flagged. After an infection, the evidence is
-  collected before any cleanup, with the incident timeline.
-- **Protect against AI agents.** AI servers open to the network, agents that act without asking and badly protected
-  MCP servers are flagged, the first two blocked in one click. Defense against the new threats of AI agents is in
-  development.
-- **Report** (planned). Reports of new vulnerabilities prepared for vendors, anonymized, which the user reviews and
-  sends themselves: Vanguard sends nothing.
+- **Harden.** Each weakness found is explained with its fix, applied after consent and preceded by a restore point
+  when the system allows one. On Windows, fourteen hardening settings from a fixed allowlist are applied by Vanguard
+  itself, without scripts, when they are not mixed with other fixes; Microsoft Defender's protections (attack
+  surface reduction, controlled folder access) are turned on after consent and can be reverted exactly.
+- **Detect.** Known vulnerabilities (missing security updates, Linux distribution security advisories, end of
+  support) and misconfigurations, graded from A to F; a six-grade network audit, with every device inventoried and
+  newcomers flagged; live threat hunting; 308 YARA rules and MalwareBazaar hashes (with a free abuse.ch key); Windows
+  event logs and failed SSH login attempts.
+- **Block and respond.** Each threat found can be blocked with one click: program stopped and quarantined,
+  connection closed at the firewall, startup entry removed; everything can be undone, except stopping a program.
+  Once enabled, active protection blocks clear-cut threats on its own. Real-time protection (hourly monitoring and
+  active protection) can be paused for one hour, four hours or until it is turned back on; the pause remains
+  flagged. After an infection, the evidence is collected before any cleanup, with the incident timeline.
+- **Protect against AI agents.** AI servers open to the network, agents that act without asking and poorly secured
+  MCP servers are flagged; the first two can be blocked with one click. Defense against emerging threats from AI
+  agents is in development.
+- **Report** (planned). Reports on newly discovered vulnerabilities, prepared for vendors and anonymized, which the
+  user reviews and sends personally: Vanguard sends nothing.
 
-**Where Vanguard is going.** Every fix made by Vanguard itself, in Rust, without scripts and always undoable (in
-development), measured against the CIS and ANSSI benchmarks (planned); known vulnerabilities matched on the machine
-against CISA's catalog of exploited vulnerabilities (KEV) and the OSV database, Windows event logs read by Hayabusa,
-then live observation on Linux with eBPF (planned); defense against the new threats of AI agents (in development);
-reports of vulnerabilities for vendors such as Microsoft or Google (planned). Always defensive: Vanguard attacks no
-device.
+**Where Vanguard is going.** In development: every fix made by Vanguard itself, in Rust, without scripts and always
+reversible; defense against emerging threats from AI agents. Planned: each fix mapped to the CIS and ANSSI
+benchmarks; known vulnerabilities matched on the machine against CISA's Known Exploited Vulnerabilities (KEV) catalog
+and the OSV database; Windows event logs analyzed with Hayabusa; live observation on Linux with eBPF; vulnerability
+reports prepared for vendors (Microsoft, Google…). Always defensive: Vanguard never attacks any device.
 
-## In addition
+## Also included
 
-- **Troubleshooting**: everyday problems step by step (Internet, Wi-Fi, sound, printer, full disk), a relative's
-  computer, the computer diagnostic, “Why is it slow?”.
-- **Optimization**: privacy and performance settings undone exactly, a cleanup with the space gained measured,
-  software installed from its official source, connection for gaming.
-- **Data and backup**: automatic backup with the system's tool and its verification, verified file copy.
-- **Rescue key**: one USB key for every computer, write-protected anywhere but on its owner's computer; it also
-  boots a failed computer.
+- **Troubleshooting**: everyday problems step by step (Internet, Wi-Fi, sound, printer, full disk), help with a
+  relative's computer, the computer diagnostic, “Why is it slow?”
+- **Optimization**: privacy and performance settings that can be reverted exactly, a cleanup that measures the space
+  freed, software installed from its official source, a connection test for gaming.
+- **Data and backup**: automatic backup with the system's tool and its verification (rsync copy), verified file copy.
+- **Follow-up, tools and USB key**: HTML report, all settings in one place, extensions (plugins and scripts checked
+  before they run), command guide; one USB key for every computer, write-protected anywhere but on its owner's
+  computer. A key that can also start computers that no longer boot is in development.
 
 ## Getting started
 
@@ -69,26 +69,26 @@ device.
 - **From the USB key**: `Windows/vanguard.exe`, `Linux/vanguard`, or `Lancer Vanguard.command` on macOS; the key's guide
   is in `README.txt`.
 
-In the menu, choose **1** (full check), then **2** (fix). Arrows, Enter, and Esc or Backspace to go back.
+In the menu, choose **1** (full check), then **2** (fix). Arrow keys and Enter to move and select; Esc or Backspace
+to go back.
 
 ## What Vanguard does
 
 ### Cyber defense, threat by threat
 
 The threats to a home or a small network, one by one: what the router exposes to the Internet, an intruder on the
-Wi-Fi, a vulnerable connected device, an infected computer, a hijacked DNS or certificate, scams, privacy breaches.
-Each problem is explained, with its fix.
+Wi-Fi, a vulnerable connected device, an infected computer, a hijacked DNS or certificate, scams, privacy intrusions.
 
 | Threat or area | What Vanguard does |
 |---|---|
-| **The check** | A grade from A to F on everything below, and also: firewall, updates and known vulnerabilities, encryption, accounts, SSH, shares open to everyone, clock, end of support, forgotten accounts, disk health… Each problem is explained, with its fix, applied once you agree. |
+| **The check** | A grade from A to F on everything below, and also: firewall, updates and known vulnerabilities, encryption, accounts, SSH, shares open to everyone, clock, end of support, forgotten accounts, disk health… Each problem is explained, with its fix, applied after consent. |
 | **Exposure to the Internet** | The network audit in six grades (exposure, Wi-Fi, device separation, DNS and certificates, connected devices, computers); the ports the router opens to the Internet (UPnP), this computer's open ports and firewall, the home's address on a blocklist, the router's admin page over HTTP only. |
 | **Intruders on the Wi-Fi** | Every device on the network, its manufacturer, its open ports and its risks; newcomers flagged every hour, with a dashboard in the browser; the Wi-Fi's protection (WEP, WPA2, WPA3), the fake access point copying its name, Bluetooth devices paired recently. |
 | **Connected devices** | The router and the devices on the network (cameras, printers, NAS, TVs, smart home…) recognized, with their default password to change; hidden cameras, in a rental or at someone's place. |
-| **Infected computer** | Antivirus, 308 YARA rules and over a million fingerprints of known malware (MalwareBazaar), the memory of running programs (on demand), live threat hunting (guessed password, suspicious running programs), threat blocking, with one click or by itself for what is certain (active protection), decoy files against ransomware, Windows Defender blocking, what starts in secret, backdoors, Windows' hidden doors and vulnerable drivers, rootkit signs, suspicious event logs, connections to known botnet servers, a password thief like Responder unmasked, overly permissive AI agents, integrity of critical files, flaws in Docker images (trivy, when installed), reversible quarantine, and the traces collected before cleaning up, with the incident timeline. |
+| **Infected computer** | Antivirus, 308 YARA rules and the fingerprints of known malware from MalwareBazaar (free abuse.ch key), the memory of running programs (on demand), live threat hunting (guessed password, suspicious running programs), threat blocking, with one click or by itself for clear-cut threats (active protection), decoy files against ransomware, Windows Defender blocking, what starts in secret, backdoors, Windows' hidden doors and vulnerable drivers, rootkit signs, suspicious event logs, connections to known botnet servers, a password thief like Responder unmasked, overly permissive AI agents, integrity of critical files, flaws in Docker images (trivy, when installed), reversible quarantine, and the traces collected before cleaning up, with the incident timeline. |
 | **Hijacked DNS and certificates** | The DNS really in use (and made-up answers), added root certificates (HTTPS interception), a forced proxy and sites redirected by the hosts file, automatic proxy discovery (WPAD), browser extensions that read every site. |
 | **Scams and remote control** | Tech-support scam (remote control tools), dangerous links checked without opening them, downloaded files checked, leaked passwords and email addresses, hacked account, a sandbox for an unknown program. |
-| **Privacy and secrets** | Privacy check (who can access location, contacts, camera and microphone), camera and microphone, browser passwords without protection, sensitive files lying around, secrets forgotten in git project history, key data protected by a passphrase. |
+| **Privacy and secrets** | Privacy check (who can access location, contacts, camera and microphone), camera and microphone, browser passwords without protection, sensitive files left in clear text, secrets forgotten in git project history, key data protected by a passphrase. |
 
 <details>
 <summary><b>The details, threat by threat</b></summary>
@@ -124,12 +124,12 @@ Each problem is explained, with its fix.
   the Run keys and the Startup folder (Windows functions and the registry, PowerShell as a fallback); on macOS, the settings,
   launchd agents, the version, the Mac's name, free space and administrators (plists read directly, instead of
   defaults, plutil, sw_vers, sysctl, scutil or df). Faster, and fewer ways to fail.
-- Fixes applied only after confirmation, with a restore point created automatically beforehand (snapper or
-  timeshift on Linux, Windows restore point, Time Machine snapshot on macOS). On Windows, fourteen hardening settings
-  from a closed list (WDigest, Remote Desktop NLA, NTLMv2 only, LLMNR, WPAD, UAC…) are applied by Vanguard itself,
-  relaunched as administrator: Windows' prompt names it, and the previous value is recorded to undo exactly; only
-  Enter or yes applies them. Threat blocking adds, the same way, Microsoft's vulnerable driver blocklist. The other
-  fixes, or those chosen along with them, go through a readable script.
+- Fixes applied only after confirmation, with a restore point created automatically beforehand when the system
+  allows one (snapper or timeshift configured on Linux, Windows restore point, Time Machine snapshot on macOS). On
+  Windows, fourteen hardening settings from a fixed allowlist (WDigest, Remote Desktop NLA, NTLMv2 only, LLMNR, WPAD,
+  UAC…) are applied by Vanguard itself, relaunched as administrator: Windows' prompt names it, and the previous value
+  is recorded to undo exactly; only Enter or yes applies them. Threat blocking adds, the same way, Microsoft's
+  vulnerable driver blocklist. The other fixes, or those chosen along with them, go through a readable script.
 
 #### Exposure to the Internet and the home network
 
@@ -182,7 +182,7 @@ which nobody has a reason to touch. Ransomware that encrypts or renames them tri
 check and hourly through monitoring, with what to do; placed and removed after your consent. And a YARA scan: 308
 ReversingLabs rules that recognize whole families (ransomware, password stealers, trojans, backdoors…), alongside
 the antivirus, applied by YARA-X, compiled into Vanguard: nothing to install. Each file read is also compared with
-MalwareBazaar's SHA-256 fingerprints (abuse.ch, over a million known malware samples): there, it is that very
+the SHA-256 fingerprints of known malware from MalwareBazaar (abuse.ch): there, it is that very
 program, beyond doubt. The full list is downloaded once a week (about 43 MB), the last 48 hours once a day; offline,
 the saved copy is used, and with no copy at all, it says so.
 
@@ -196,21 +196,21 @@ positive.
 exactly by `vanguard blocking undo`; only stopping a program cannot be undone. Depending on the threat: the program
 stopped then quarantined, the connection closed at the firewall (ufw, nftables, Windows Firewall, pf), a launch
 removed from startup, Windows' vulnerable driver blocklist turned on, an AI server's port closed to the network, an
-AI agent set back to asking before it acts. **Active protection**, accepted once, blocks by itself what leaves no
-doubt (a file whose fingerprint is in MalwareBazaar, a known attack tool running, a connection to a known command
+AI agent set back to asking before it acts. **Active protection**, once enabled, blocks clear-cut threats on its
+own (a file whose fingerprint is in MalwareBazaar, a known attack tool running, a connection to a known command
 server), during the check and in the hourly monitoring, then lets you know; what is doubtful stays an alert with its
 button. Four categories (programs, connections, startup and drivers, AI agents), each off, one click or automatic
 (programs and connections). Never Vanguard, a system program, a critical process, a remote session in progress, a
 local address or a public DNS; an interpreter (python3, PowerShell) is never quarantined, at most the script it
 runs. As administrator, nothing is blocked by itself: the blocking settings can be written by any program of the
-account, and what is certain is offered with one click there.
+account, and clear-cut threats are offered with one click there.
 
 **Windows Defender blocking** — on top of its own blocking, Vanguard turns on, after your consent, what Windows blocks
 from its kernel and protects against being turned off. Attack surface reduction rules (password theft from memory,
 vulnerable drivers, booby-trapped Office documents and attachments), network protection against dangerous sites,
-unwanted software, controlled folder access against ransomware. Each rule is named before you agree and is undone
-exactly; those that would block Vanguard on its USB drive or troubleshooting are never turned on, and nothing is
-offered when another antivirus replaces Defender.
+unwanted software, controlled folder access against ransomware. Each rule is named before you agree and can be
+reverted exactly; those that would block Vanguard on its USB drive or troubleshooting are never turned on, and
+nothing is offered when another antivirus replaces Defender.
 
 **Collect the traces** — after an infection, before cleaning up or reinstalling: what a specialist will want to
 see, kept in a dated folder on the VANGUARD key (or in this computer's Vanguard folder), in the order it vanishes.
@@ -268,7 +268,7 @@ sshguard or CrowdSec already blocks the addresses that keep trying.
 - Vanguard also distrusts itself: at startup, it says whether a library is injected into every program of the
   session (LD_PRELOAD, DYLD_INSERT_LIBRARIES, AppInit_DLLs: one from a system package, like GameMode, is mere
   information) and whether it runs as root for no reason, since its results go through there. In the check: the
-  hourly monitoring you had turned on and that disappeared (malware first cuts what watches it), and the check
+  hourly monitoring that was turned on and has disappeared (malware first cuts what watches it), and the check
   history rewritten afterwards (each check carries the previous one's checksum). Each night the code has changed, CI
   builds Vanguard twice and checks that the program is identical down to the byte. Every included library is checked
   at each version and every night (cargo deny: known flaws, compatible licenses, origin), and the released version
@@ -322,21 +322,20 @@ said to be unchecked.
 counted, never read or sent. The browser's built-in check (weak, reused, compromised passwords) is pointed to, and a
 typed password can be looked up in leaks (Have I Been Pwned, only 5 characters of its fingerprint).
 
-- Passwords saved in the browser without protection, sensitive files lying around (passwords or keys in clear text),
-  missing backup with its set-up offered.
+- Passwords saved in the browser without protection, sensitive files left in clear text (passwords or keys).
 
 </details>
 
-### In addition
+### Also included, area by area
 
-Beyond defense: troubleshooting, optimization, data and the key's tools.
+Beyond defense: troubleshooting, optimization, data, then follow-up, tools and the USB key.
 
 | Area | What Vanguard does |
 |---|---|
 | **Troubleshooting** | Computer diagnostic, everyday problems step by step (Internet, Wi-Fi, slowness, sound, printer, full disk), after an infection, new computer, computer leaving, a relative's computer, “Why is it slow?”, computer specs, report to leave behind, repairs. |
-| **Optimizing, software and gaming** | Privacy and performance settings undone exactly, a cleanup checklist with the space gained measured, startup programs; the best software in 8 categories, from its official source, and updating everything at once; connection for gaming (ping, jitter, loss, speed and bufferbloat, compared with your habits), crowded Wi-Fi, NAT type, fastest DNS (without removing a DNS that protects you), settings for gaming. |
-| **Data and backup** | Automatic backup and check my backup (really read back), copy my files (checked copy) and check a copy. |
-| **Follow-up and tools** | HTML report with the grade curve, monthly check-up, learning on your computer, what Vanguard changed (each fix, dated), every setting in one place, your own extensions (plugins and scripts, checked before they run); check my drive (fake drives, speed), my computers (tracked by the key), shortcut on this computer, Vanguard updated from the key or from GitHub (versions signed by the author), command guide, search in every menu. |
+| **Optimizing, software and gaming** | Privacy and performance settings that can be reverted exactly, a cleanup checklist with the space gained measured, startup programs; the best software in 8 categories, from its official source, and updating everything at once; connection for gaming (ping, jitter, loss, speed and bufferbloat, compared with usual measurements), crowded Wi-Fi, NAT type, fastest DNS (without removing a DNS that protects you), settings for gaming. |
+| **Data and backup** | Automatic backup and check my backup (rsync copy actually read back), copy my files (checked copy) and check a copy. |
+| **Follow-up, tools and USB key** | HTML report with the grade curve, monthly check-up, learning on the computer, what Vanguard changed (each fix, dated), every setting in one place, custom extensions (plugins and scripts, checked before they run); a USB key write-protected anywhere but on its owner's computer, check my drive (fake drives, speed), my computers (tracked by the key), shortcut on this computer, Vanguard updated from the key or from GitHub (versions signed by the author), command guide, search in every menu. |
 
 <details>
 <summary><b>The details, area by area</b></summary>
@@ -369,7 +368,7 @@ to the least serious, what is fine and three habits; put on their Desktop, to re
 **Why is it slow?** — a two-second snapshot: what keeps the processor, memory and disk busy, program by program;
 how long startup takes and what delays it; the programs started at login and their weight. Those that work for a
 while then calm down (antivirus scanning, indexing, updates) are named as such. Startup programs are removed from
-there, after your consent: they stay installed, and each removal is undone exactly (`vanguard startup`).
+there, after your consent: they stay installed, and each removal can be reverted exactly (`vanguard startup`).
 
 **Computer specs** — model, motherboard, BIOS, processor, memory (modules, type, speed), graphics card and driver,
 disks: what you are asked on the phone or to buy a part. Serial numbers are shown on screen only, never written.
@@ -382,8 +381,8 @@ disks: what you are asked on the phone or to buy a part. Serial numbers are show
 **Optimize** — privacy, performance and comfort settings written for Vanguard. On Windows: telemetry kept to a
 minimum, ads and tracking off, Recall without screen snapshots, file extensions shown, no autorun from USB drives,
 fast startup, full right-click menu. On Linux: SSD maintenance, journal size, reports sent by GNOME or Ubuntu. On
-macOS: ads, analytics, no .DS_Store on drives. Each setting shows its state and is undone exactly: the previous value
-is recorded, then put back. None of them weakens security.
+macOS: ads, analytics, no .DS_Store on drives. Each setting shows its state and can be reverted exactly: the previous
+value is recorded, then put back. None of them weakens security.
 
 **Clean up the system** — a checklist of what takes space for nothing: downloaded and unneeded packages, old Snap
 versions, unused Flatpak runtimes, AUR builds, old caches, thumbnails, old logs, crash reports (Linux); temporary
@@ -412,7 +411,7 @@ address included; the fastest DNS, measured here, offered only if it does not re
 
 **Automatic backup** — set up with the system's tool (Déjà Dup or a daily rsync copy on Linux, Time Machine, File
 History on Windows), to an external disk, after your consent and undoable. **Check my backup**: the rsync copy
-really read back from the disk, random files compared with their original; an original changed since, newer than
+actually read back from the disk, random files compared with their original; an original changed since, newer than
 its copy, is not counted as an error, a copy that differs from an unchanged original means a disk losing data, and a
 copy rewritten after the backup, newer than its original, is reported as damaged: that is how ransomware encrypting
 the backup disk shows up. For Time Machine, Déjà Dup and File History, which keep their backups in their own format,
@@ -424,11 +423,13 @@ nothing is deleted or overwritten, and an interrupted copy resumes where it stop
 restore test: files spread over the whole copy are read back from the disk and compared with their original; a disk
 that loses data shows up before the day you need it.
 
-#### Follow-up and tools
+- Missing backup: reported by the check, with the way to set one up.
 
-**Learning** — Vanguard learns on your computer, sending nothing. An alert you declare normal for you ("i" when it is
-offered as a fix) drops to information for 90 days, or until it gets worse; each connection test is compared with
-your habits on the same network; a known device that suddenly seems all closed (asleep) is checked again more
+#### Follow-up, tools and USB key
+
+**Learning** — Vanguard learns on the computer, sending nothing. An alert declared normal ("i" when it is offered as
+a fix) drops to information for 90 days, or until it gets worse; each connection test is compared with the usual
+measurements on the same network; a known device that suddenly seems all closed (asleep) is checked again more
 patiently. "What Vanguard has learned" shows everything and lets you forget.
 
 **Settings** (This machine › Settings, "s" in the main menu, `vanguard settings`) — every setting in one place:
@@ -450,7 +451,7 @@ quietly does not go unnoticed. It only concerns Vanguard: Defender, the firewall
 already made stays in place. As administrator, it is not set: its setting belongs to your account (under sudo, the one
 of the account that started it is read).
 
-**Extensions** (menu 12, `vanguard extensions`) — your own programs in Vanguard, without touching its code. A plugin
+**Extensions** (menu 12, `vanguard extensions`) — custom programs in Vanguard, without touching its code. A plugin
 is a folder with a `plugin.toml` manifest, added once from a folder or a .zip archive (`vanguard plugin add`); a lab
 script is a file dropped as it is (`vanguard lab`), to try an idea quickly. A plugin is a script (sh, bash,
 PowerShell, Python) or a compiled program, in Rust for instance with the `extensions/sdk` library. Their findings are
@@ -460,7 +461,8 @@ changed, added or removed, and it must be approved again. The checked copy is wh
 bounded time and output; an archive cannot write anything outside its folder; on Linux, `--isolated` runs it without
 network, the home folder hidden. As administrator, nothing runs by itself and each run is asked for. The
 **Restrictions** switch (Extensions › 3, Settings, or for a single plugin or script) turns these safeguards off for
-what is yours; one rule stays: the extensions folder must be yours, closed to other accounts. How-to (in French):
+custom extensions; one rule stays: the extensions folder must belong to the account, closed to other accounts.
+How-to (in French):
 [extensions/LISEZMOI.md](extensions/LISEZMOI.md).
 
 **Check my drive** — does a USB stick or an external disk hold what it claims? Fake drives (a 16 GB chip sold as
@@ -496,7 +498,7 @@ since Vanguard has not checked them.
 - HTML report with the grade history curve, and what changed since the previous check.
 - Check Vanguard itself: its version, the date of its last commit and its SHA-256 checksum, to compare with the
   release page (Vanguard is not signed: this comparison is what proves it is genuine). A copy older than six months
-  says so in the menu. And the key manifest: at deployment, the checksum of every file on the key is kept on your
+  says so in the menu. And the key manifest: at deployment, the checksum of every file on the key is kept on the owner's
   computer; back from someone's place, the check names what was added, replaced or removed (a planted autorun, a
   replaced program). Data, ISO images and the Ventoy menu, which change normally, are not compared. Each key has
   its own reference (recognized by its volume identifier): a second VANGUARD key does not pass for a modified one.
@@ -568,10 +570,10 @@ Each menu entry is also a command.
 | `vanguard troubleshoot [subject]` | troubleshoot step by step: `internet`, `wifi`, `slow`, `sound`, `printer`, `disk`, `infection`, `new`, `leaving`, `account`, `evidence`, `relative` |
 | `vanguard evidence [folder]` | collect the traces after an infection, before cleaning up: processes, connections, startup, accounts, logs, recent files, in a dated folder with their SHA-256 fingerprints, and the incident timeline (CHRONOLOGIE.txt); read-only |
 | `vanguard slow` | why it is slow: processor, memory, disk, startup, programs at login |
-| `vanguard startup` | startup programs: remove or put them back, after your consent; each removal is undone exactly |
+| `vanguard startup` | startup programs: remove or put them back, after your consent; each removal can be reverted exactly |
 | `vanguard changes` | what Vanguard changed: each fix run here, its date and its result |
 | `vanguard settings [setting value]` | settings (also “s” in the main menu): language, emojis, working without the Internet, real-time protection (`real-time no --for 1h\|4h`, or until turned back on), monitoring, monthly check-up, learned alerts, blocking, extension restrictions, abuse.ch key (masked); the previous value is shown to go back |
-| `vanguard blocking [search\|undo\|auto\|click\|category mode]` | threat blocking: one-click “Block” for each threat (action shown, written down, undoable); active protection, after a consent, that blocks what is certain by itself (MalwareBazaar fingerprint, known attack tool, command server) |
+| `vanguard blocking [search\|undo\|auto\|click\|category mode]` | threat blocking: one-click “Block” for each threat (action shown, written down, undoable); active protection, after a consent, that blocks clear-cut threats by itself (MalwareBazaar fingerprint, known attack tool, command server) |
 | `vanguard handout` | report to leave behind: a simple page for the person you helped |
 | `vanguard relative` | a relative's computer: three questions, the check, a summary in plain words, the fixes, the page to leave behind with its tips |
 | `vanguard auto-backup [--undo]` | automatic backup to an external disk, with the system's tool |
@@ -594,7 +596,7 @@ Each menu entry is also a command.
 | `vanguard cameras` | hidden cameras on the network (rental, someone else's place) |
 | `vanguard iot` | router and connected devices from the last scan kept: the router's model, cameras, printers, NAS… and their default password (nothing is probed) |
 | `vanguard fast-dns` | fastest DNS, measured here and undoable; a DNS that protects you is kept |
-| `vanguard learned` | what Vanguard has learned: your habits, your choices, and forgetting them |
+| `vanguard learned` | what Vanguard has learned: the habits and choices recorded, and forgetting them |
 | `vanguard password` | leaked passwords |
 | `vanguard browser-passwords` | browser passwords: how many and how protected (counted, never read), each browser's built-in check, and a typed password looked up in leaks |
 | `vanguard sandbox <file>` | run an unknown program in a sandbox (bubblewrap or firejail, Windows Sandbox) |
@@ -619,7 +621,7 @@ Each menu entry is also a command.
 | `vanguard backup [file]`, `vanguard restore <file>` | data backup |
 | `vanguard gaming` | packages and settings for gaming (Windows and Linux) |
 | `vanguard guide [system\|program\|words]` | command guide: a system (`omarchy`, `arch`, `fedora`, `debian`, `windows`, `macos`, `all`, or `linux` for the common programs, or `tldr`), a program (`winget`, `systemctl`…) or words to look for (`dns cache`) |
-| `vanguard extensions [--no-restrictions on\|off]` | extensions: the menu of plugins and lab scripts; `--no-restrictions on` turns their safeguards off for what is yours (refused as administrator) |
+| `vanguard extensions [--no-restrictions on\|off]` | extensions: the menu of plugins and lab scripts; `--no-restrictions on` turns their safeguards off for custom extensions (refused as administrator) |
 | `vanguard plugin [add <folder\|archive.zip>\|approve <name>\|list\|remove <name>\|<name> [--report] [--isolated]]` | plugins: added after a scan (YARA, MalwareBazaar) and approved by their SHA-256 fingerprints, run, approved again after a change, removed; outside the grade |
 | `vanguard lab [open\|list\|<file> [--isolated] [arguments]]` | lab: a script dropped as it is, shown and approved by its fingerprint at its first run; outside the grade |
 
