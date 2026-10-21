@@ -205,6 +205,11 @@ pub const PROGRAMMES: &[Programme] = &[
         executable: "lsof",
         commandes: &[
             voir(
+                "lsof -nP -iTCP:11434 -sTCP:LISTEN",
+                "Ollama écoute-t-il au-delà de 127.0.0.1 ? * : ouvert à tout le réseau.",
+                "Does Ollama listen beyond 127.0.0.1? *: open to the whole network.",
+            ),
+            voir(
                 "sudo lsof -nP -iTCP -sTCP:LISTEN",
                 "Les ports en écoute et leur programme.",
                 "Listening ports and their program.",

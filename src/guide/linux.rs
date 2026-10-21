@@ -195,6 +195,11 @@ pub const COMMUNS: &[Programme] = &[
                 "Each card's counters: bytes, errors, drops.",
             ),
             voir(
+                "ss -ltnp | grep -E ':(11434|1234|8188|7860) '",
+                "Un serveur d'IA (Ollama, LM Studio, ComfyUI) ouvert au-delà de 127.0.0.1 ?",
+                "An AI server (Ollama, LM Studio, ComfyUI) open beyond 127.0.0.1?",
+            ),
+            voir(
                 "ss -tulpn",
                 "Les ports en écoute et leur programme (avec sudo : tous les programmes).",
                 "Listening ports and their program (with sudo: every program).",

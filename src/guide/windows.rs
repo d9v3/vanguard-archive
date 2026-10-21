@@ -178,6 +178,11 @@ pub const PROGRAMMES: &[Programme] = &[
         executable: "netsh",
         commandes: &[
             voir(
+                "netsh winsock show catalog",
+                "Le catalogue Winsock : chaque fournisseur réseau et sa DLL (mswsock d'origine).",
+                "The Winsock catalog: each network provider and its DLL (mswsock by default).",
+            ),
+            voir(
                 "netsh wlan show interfaces",
                 "Le Wi-Fi connecté : signal, débit, canal, sécurité.",
                 "The connected Wi-Fi: signal, speed, channel, security.",
@@ -691,6 +696,11 @@ pub const PROGRAMMES: &[Programme] = &[
         executable: "",
         commandes: &[
             voir(
+                "netstat -ano | findstr :11434",
+                "Ollama écoute-t-il au-delà de 127.0.0.1 ? 0.0.0.0 : ouvert à tout le réseau.",
+                "Does Ollama listen beyond 127.0.0.1? 0.0.0.0: open to the whole network.",
+            ),
+            voir(
                 "Get-DnsClientServerAddress -AddressFamily IPv4",
                 "Les serveurs DNS de chaque carte.",
                 "Each card's DNS servers.",
@@ -743,6 +753,11 @@ pub const PROGRAMMES: &[Programme] = &[
                 "The graphics card and its state.",
             ),
             voir("driverquery", "Les pilotes installés.", "Installed drivers."),
+            voir(
+                "driverquery /si",
+                "Les pilotes et leur signature (IsSigned) : un pilote non signé est à regarder.",
+                "Drivers and their signature (IsSigned): an unsigned driver deserves a look.",
+            ),
             voir(
                 "pnputil /enum-drivers",
                 "Les paquets de pilotes ajoutés (oemNN.inf).",
@@ -882,6 +897,16 @@ pub const PROGRAMMES: &[Programme] = &[
                 "reg query <clé>",
                 "Les valeurs d'une clé du registre (HKCU\\Software\\…).",
                 "A registry key's values (HKCU\\Software\\…).",
+            ),
+            voir(
+                r"reg query HKLM\SYSTEM\CurrentControlSet\Control\Lsa",
+                "Paquets de LSA : Notification Packages (filtres de mot de passe) = scecli d'origine.",
+                "LSA packages: Notification Packages (password filters) = scecli by default.",
+            ),
+            voir(
+                r"reg query HKLM\SYSTEM\CurrentControlSet\Control\Print\Monitors /s",
+                "Les moniteurs d'impression et leur DLL (Driver) : un chemin complet est à regarder.",
+                "Print monitors and their DLL (Driver): a full path deserves a look.",
             ),
             changer(
                 "reg export <clé> <fichier>.reg",

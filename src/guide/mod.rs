@@ -436,6 +436,8 @@ const A_REMPLACER: &[(&str, &str)] = &[
 
 /// Les noms de programme qui se traduisent ; les autres sont des noms de commandes, les mêmes dans les deux langues.
 const NOMS_EN: &[(&str, &str)] = &[
+    ("vanguard : sécurité", "vanguard: security"),
+    ("vanguard : dépannage", "vanguard: troubleshooting"),
     ("PowerShell : réseau", "PowerShell: network"),
     ("PowerShell : Defender", "PowerShell: Defender"),
     ("PowerShell : services", "PowerShell: services"),
