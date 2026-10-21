@@ -297,9 +297,17 @@ fn processus_et_parents(racine: u32) -> Vec<(u32, u32)> {
 
 /// Arrête le programme et tout ce qu'il a lancé : sinon un sous-processus (winget sous PowerShell, un outil sous un
 /// script) continuerait en arrière-plan, avec ses verrous. Les descendants sont d'abord tous repérés, puis tués : tué
-/// en premier, le programme laisserait ses enfants rattachés à un autre parent, introuvables.
+/// en premier, le programme laisserait ses enfants rattachés à un autre parent, introuvables. Sous Unix, le programme
+/// est suspendu avant : sinon, entre la mort de ses enfants et la sienne, il continue (un script lance la commande
+/// suivante dès que la précédente meurt), et sa sortie passe la borne ou le délai : « echo apres » écrit après l'arrêt
+/// de « sleep », vu quand l'ordinateur est chargé.
 pub fn arreter(enfant: &mut Child) {
     let racine = enfant.id();
+    #[cfg(unix)]
+    if let Ok(pid) = libc::pid_t::try_from(racine) {
+        // SAFETY : simple envoi d'un signal à un numéro de processus ; SIGKILL arrête aussi un processus suspendu.
+        unsafe { libc::kill(pid, libc::SIGSTOP) };
+    }
     for pid in descendants(&processus_et_parents(racine), racine) {
         #[cfg(windows)]
         crate::machine::windows::processus::terminer(pid);
