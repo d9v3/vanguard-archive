@@ -542,8 +542,11 @@ pub(super) fn demarrage(dossier: &Path) -> Partie {
         }
     } else {
         // L'espace root/subscription ne se lit qu'en administrateur ; sans réponse du tout, PowerShell est en cause.
-        let raison = if sortie.is_none() || administrateur() {
+        // En administrateur, un PowerShell qui a répondu sans WMI_FIN dit que Get-CimInstance a échoué, pas lui.
+        let raison = if sortie.is_none() {
             Raison::SansPowerShell
+        } else if administrateur() {
+            Raison::Erreur("Get-CimInstance root/subscription : échec / failed".into())
         } else {
             Raison::Droits
         };
@@ -602,10 +605,18 @@ pub(super) fn comptes(dossier: &Path) -> Partie {
             f.ajouter(&champs.join("\t"));
         }
     } else {
-        f.ajouter("(PowerShell)");
+        // PowerShell a pu répondre (USR lu) et seul Get-LocalGroupMember échouer : un membre orphelin
+        // (compte de domaine ou Azure AD disparu) le fait lever ; chercher un PowerShell bloqué
+        // serait une fausse piste.
+        let raison = if sortie.is_none() {
+            Raison::SansPowerShell
+        } else {
+            Raison::Erreur("Get-LocalGroupMember : échec / failed".into())
+        };
+        f.ajouter(&raison.note());
         f.manques.push(Manque {
             quoi: Bi::new("Administrateurs", "Administrators"),
-            raison: Raison::SansPowerShell,
+            raison,
         });
     }
     f.commande(&mut console("query user"), 15, false);
