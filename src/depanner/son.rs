@@ -324,10 +324,21 @@ mod systeme {
             lignes.push(format!("{service}|{}", gestionnaire::statut(service)?));
         }
         for carte in peripheriques::presents(&peripheriques::SON)? {
-            let statut = if carte.marche { "OK" } else { "Error" };
-            lignes.push(format!("carte|{}|{statut}", carte.nom.replace('|', " ")));
+            lignes.push(ligne_de_carte(&carte.nom, carte.marche));
         }
         Some(lignes.join("\n"))
+    }
+
+    /// « carte|nom|OK » sur une seule ligne. Le nom vient du pilote ou de l'appareil branché (un casque USB annonce
+    /// le sien) : un saut de ligne y ferait une ligne de plus, lue comme un service arrêté, et une séquence
+    /// d'échappement passée par là arriverait au terminal sans le filtre d'`affichable`. Séparateur et caractères de
+    /// contrôle deviennent des espaces.
+    pub(super) fn ligne_de_carte(nom: &str, marche: bool) -> String {
+        let nom: String = nom
+            .chars()
+            .map(|c| if c == '|' || c.is_control() { ' ' } else { c })
+            .collect();
+        format!("carte|{nom}|{}", if marche { "OK" } else { "Error" })
     }
 
     pub fn verifier(_ou: usize, _voulue: usize) {
@@ -336,7 +347,7 @@ mod systeme {
             .or_else(|| {
                 crate::machine::windows::ps(
                     "@('Audiosrv','AudioEndpointBuilder') | ForEach-Object { $s = Get-Service $_ -ErrorAction SilentlyContinue; \"$_|$($s.Status)\" }; \
-                     @(Get-CimInstance Win32_SoundDevice) | ForEach-Object { \"carte|$($_.Name)|$($_.Status)\" }",
+                     @(Get-CimInstance Win32_SoundDevice) | ForEach-Object { \"carte|$($_.Name -replace '[\\x00-\\x1f\\x7f|]', ' ')|$($_.Status)\" }",
                 )
             })
             .unwrap_or_default();
@@ -356,7 +367,8 @@ mod systeme {
                         )
                     });
                 }
-                [service, statut] => {
+                // Seuls les deux services demandés : une autre ligne à deux champs ne dit rien d'eux.
+                [service @ ("Audiosrv" | "AudioEndpointBuilder"), statut] => {
                     let marche = statut == "Running";
                     arrete |= !marche;
                     Etat::selon(marche).dire(&if marche {
@@ -426,6 +438,23 @@ mod tests {
                 "{t}"
             );
         }
+    }
+
+    /// Un nom de carte piégé (saut de ligne, séquence d'échappement, séparateur) reste une seule ligne à trois champs.
+    #[cfg(windows)]
+    #[test]
+    fn nom_de_carte_piege() {
+        let l = systeme::ligne_de_carte("Casque\n\x1b]52;c;eA==\x07|OK\r\nAudiosrv|Stopped", true);
+        assert_eq!(l.lines().count(), 1, "{l}");
+        assert_eq!(l.split('|').count(), 3, "{l}");
+        assert!(
+            l.starts_with("carte|Casque  ]52;c;eA==  OK  Audiosrv Stopped|OK"),
+            "{l}"
+        );
+        assert_eq!(
+            systeme::ligne_de_carte("Realtek Audio", false),
+            "carte|Realtek Audio|Error"
+        );
     }
 
     #[test]
