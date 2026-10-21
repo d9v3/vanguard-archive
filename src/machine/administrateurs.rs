@@ -69,13 +69,14 @@ fn sans_root(mut membres: Vec<String>) -> Vec<String> {
 /// macOS : les membres du groupe admin rendus par la bibliothèque du système (getgrnam_r, la base que lit dscl),
 /// sans lancer de programme. dscl (sa sortie, demandée par `secours`) ne sert que si cette lecture ne rend personne
 /// d'autre que root : un Mac a toujours un administrateur, une liste vide est une lecture manquée (groupe dont Open
-/// Directory ne remplit pas les noms), pas un groupe vidé. `None` : ni l'une ni l'autre ne se lit.
+/// Directory ne remplit pas les noms), pas un groupe vidé. Il en va de même après dscl : une liste vide y rend `None`,
+/// comme une lecture impossible, sinon le bilan dirait « aucun en dehors de root » sur une liste jamais lue.
 #[cfg(any(target_os = "macos", test))]
 fn admins_macos(natif: Option<Vec<String>>, secours: impl FnOnce() -> Option<String>) -> Option<Vec<String>> {
     natif
         .map(sans_root)
         .filter(|m| !m.is_empty())
-        .or_else(|| secours().map(|t| lire_dscl(&t)))
+        .or_else(|| secours().map(|t| lire_dscl(&t)).filter(|m| !m.is_empty()))
 }
 
 /// Les administrateurs de cet ordinateur ; `None` : la liste ne se lit pas.
@@ -86,12 +87,9 @@ fn lire() -> Option<Vec<String>> {
     }
     #[cfg(target_os = "macos")]
     {
+        // `sortie` exige le code 0 : un dscl en erreur (groupe introuvable, Open Directory muet) ne vaut pas lecture.
         admins_macos(super::macos::membres_admin(), || {
-            crate::commande::lancer(
-                std::process::Command::new("dscl").args([".", "-read", "/Groups/admin", "GroupMembership"]),
-                10,
-            )
-            .map(|r| r.sortie)
+            super::sortie("dscl", &[".", "-read", "/Groups/admin", "GroupMembership"])
         })
     }
     #[cfg(windows)]
@@ -249,11 +247,15 @@ mod tests {
         assert_eq!(admins_macos(None, dscl), Some(noms(&["carol"])));
         // Ni l'une ni l'autre : rien n'est affirmé.
         assert_eq!(admins_macos(None, || None), None);
-        // dscl lisible mais sans membre : une liste vide, que `juger` garde sans rien oublier.
-        assert_eq!(
-            admins_macos(None, || Some("No such key: GroupMembership".into())),
-            Some(Vec::new())
-        );
+        // dscl lisible mais sans personne : une lecture manquée aussi, jamais « aucun en dehors de root ».
+        for texte in ["No such key: GroupMembership", "GroupMembership: root\n", ""] {
+            assert_eq!(admins_macos(None, || Some(texte.into())), None, "{texte:?}");
+            assert_eq!(
+                admins_macos(Some(noms(&["root"])), || Some(texte.into())),
+                None,
+                "{texte:?}"
+            );
+        }
     }
 
     #[test]
