@@ -90,6 +90,67 @@ pub(crate) fn intrusions(tentatives: &[Tentative]) -> Vec<Intrusion> {
     trouvees
 }
 
+/// L'adresse et le port d'origine d'une ligne de sshd : ceux du dernier « port » de la ligne. Avant lui, le nom
+/// d'utilisateur tenté est écrit tel que l'attaquant l'a choisi, et peut contenir un faux « from … port … ». Commun à
+/// Linux (journal de systemd) et à OpenSSH pour Windows (journal OpenSSH/Operational), qui écrivent les mêmes messages.
+#[cfg_attr(target_os = "macos", allow(dead_code))]
+pub(crate) fn origine_ssh(ligne: &str) -> Option<(IpAddr, u16)> {
+    let mots: Vec<&str> = ligne.split_whitespace().collect();
+    let i = mots.iter().rposition(|m| *m == "port")?;
+    let ip = mots.get(i.checked_sub(1)?)?.parse::<IpAddr>().ok()?.to_canonical();
+    let port = mots.get(i + 1)?.trim_end_matches(':').parse().ok()?;
+    Some((ip, port))
+}
+
+/// Les tentatives de connexion à sshd, dans l'ordre du journal, chacune avec ce qui la date (`D` : rien sous Linux,
+/// l'heure de l'événement sous Windows) : chaque mot de passe raté (« Failed password », « Failed
+/// keyboard-interactive »), chaque connexion d'un compte qui n'existe pas où aucun mot de passe n'a été essayé
+/// (« Invalid user » seul : sinon, ses « Failed password » la comptent déjà), et chaque connexion acceptée, avec son
+/// compte. Seuls comptent les messages qui commencent ainsi : un nom d'utilisateur tenté (« Invalid user Accepted
+/// password for … ») vient de l'attaquant.
+#[cfg_attr(target_os = "macos", allow(dead_code))]
+pub(crate) fn tentatives_ssh_datees<D: Copy>(lignes: &[(D, &str)]) -> Vec<(D, Tentative)> {
+    let rate = |l: &str| l.starts_with("Failed password ") || l.starts_with("Failed keyboard-interactive");
+    let essayees: HashSet<(IpAddr, u16)> = lignes
+        .iter()
+        .filter(|(_, l)| rate(l))
+        .filter_map(|(_, l)| origine_ssh(l))
+        .collect();
+    let mut sans_essai = HashSet::new();
+    lignes
+        .iter()
+        .filter_map(|&(quand, l)| {
+            let (adresse, port) = origine_ssh(l)?;
+            let echec = Tentative {
+                adresse,
+                compte: String::new(),
+                reussie: false,
+            };
+            if rate(l) {
+                return Some((quand, echec));
+            }
+            if l.starts_with("Invalid user ") {
+                return (!essayees.contains(&(adresse, port)) && sans_essai.insert((adresse, port)))
+                    .then_some((quand, echec));
+            }
+            // « Accepted password for alice from 203.0.113.5 port 50000 ssh2 » : le compte, entre « for » et le
+            // dernier « from ».
+            let reste = l.strip_prefix("Accepted ")?;
+            let mots: Vec<&str> = reste.split_whitespace().collect();
+            let pour = mots.iter().position(|m| *m == "for")?;
+            let depuis = mots.iter().rposition(|m| *m == "from")?;
+            Some((
+                quand,
+                Tentative {
+                    compte: mots.get(pour + 1..depuis)?.join(" "),
+                    reussie: true,
+                    ..echec
+                },
+            ))
+        })
+        .collect()
+}
+
 /// Les comptes touchés, montrés inoffensifs : le nom vient du journal.
 fn comptes(intrusions: &[Intrusion]) -> String {
     let mut noms: Vec<String> = intrusions.iter().map(|i| affichable(&i.compte)).collect();

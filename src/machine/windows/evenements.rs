@@ -765,7 +765,12 @@ fn requetes_des_reussites(adresses: &[String]) -> Vec<(String, usize)> {
 /// Ce que la lecture n'a pas vu, quand une borne est atteinte : les échecs plus anciens que les `MAX_ECHECS` les plus
 /// récents (une rafale noyée sous les robots qui ont suivi), ou des réussites plus anciennes que celles d'un lot. Dit
 /// avec le constat sain, qui n'est alors jamais sans réserve.
-fn lecture_partielle(echecs: &[Echec], echecs_bornes: bool, reussites_bornees: bool) -> Option<String> {
+fn lecture_partielle(
+    echecs: &[Echec],
+    echecs_bornes: bool,
+    reussites_bornees: bool,
+    openssh: Option<&str>,
+) -> Option<String> {
     let mut manques = Vec::new();
     if echecs_bornes {
         manques.push(match echecs.iter().map(|e| e.quand).min() {
@@ -789,6 +794,7 @@ fn lecture_partielle(echecs: &[Echec], echecs_bornes: bool, reussites_bornees: b
             .to_string(),
         );
     }
+    manques.extend(openssh.map(str::to_string));
     (!manques.is_empty()).then(|| {
         trf!(
             "Lecture partielle : {}.",
@@ -798,8 +804,9 @@ fn lecture_partielle(echecs: &[Echec], echecs_bornes: bool, reussites_bornees: b
     })
 }
 
-/// La ligne d'une connexion réussie (4624) par le réseau (type 3) ou le Bureau à distance (type 10), de la même forme
-/// que celle d'un échec (« date|type|adresse|compte ») : `lire_echecs` la lit. Les autres types (session ouverte au
+/// La ligne d'une connexion réussie (4624) par le réseau (type 3), avec un mot de passe passé en clair (type 8 : un
+/// site web en authentification de base, OpenSSH pour Windows) ou le Bureau à distance (type 10), de la même forme que
+/// celle d'un échec (« date|type|adresse|compte ») : `lire_echecs` la lit. Les autres types (session ouverte au
 /// clavier, services) ne viennent pas d'une adresse : rien.
 fn ligne_reussite(id: u32, date: &str, champs: &[(String, String)]) -> Option<String> {
     let valeur = |nom: &str| champs.iter().find(|(n, _)| n == nom).map(|(_, v)| v);
@@ -812,7 +819,7 @@ fn ligne_reussite(id: u32, date: &str, champs: &[(String, String)]) -> Option<St
             let n = n.trim();
             n.ends_with('$') || n.eq_ignore_ascii_case("ANONYMOUS LOGON")
         });
-    (id == 4624 && matches!(type_, "3" | "10") && !anonyme).then(|| {
+    (id == 4624 && matches!(type_, "3" | "8" | "10") && !anonyme).then(|| {
         format!(
             "{}|{type_}|{}|{}",
             date_locale(date).unwrap_or_default(),
@@ -843,10 +850,95 @@ fn dans_l_ordre(echecs: &[Echec], reussites: &[Echec]) -> Vec<crate::machine::ch
         .collect()
 }
 
+/// Les messages d'OpenSSH lus au plus : un robot en écrit des milliers par jour.
+const MAX_SSH: usize = 5000;
+
+/// Le message de sshd d'un événement du journal OpenSSH/Operational, le même texte que sous Linux (« Accepted
+/// password for alice from 203.0.113.5 port 50000 ssh2 ») : la valeur « payload », ou à défaut la première qui en est
+/// un, sans le préfixe « sshd: » que certaines versions ajoutent. Le message doit commencer là : un nom d'utilisateur
+/// tenté, écrit plus loin, vient de l'attaquant.
+fn message_sshd(champs: &[(String, String)]) -> Option<String> {
+    const DEBUTS: [&str; 4] = [
+        "Failed password ",
+        "Failed keyboard-interactive",
+        "Invalid user ",
+        "Accepted ",
+    ];
+    let message = |v: &str| {
+        let v = v.trim_start();
+        let v = match v.split_once(": ") {
+            Some((tete, reste)) if !tete.contains(' ') && tete.to_ascii_lowercase().starts_with("sshd") => reste,
+            _ => v,
+        };
+        DEBUTS
+            .iter()
+            .any(|d| v.starts_with(d))
+            .then(|| champ(Some(&v.to_string())))
+    };
+    champs
+        .iter()
+        .find(|(n, _)| n.eq_ignore_ascii_case("payload"))
+        .into_iter()
+        .chain(champs.iter())
+        .find_map(|(_, v)| message(v))
+}
+
+/// Les tentatives de connexion d'OpenSSH pour Windows (sshd) des 7 derniers jours, lues dans son journal
+/// OpenSSH/Operational : le journal de la sécurité n'en garde pas l'adresse d'origine. (échecs, réussites, borne
+/// atteinte) ; rien sans le service sshd ; `Err` : sshd est là mais son journal ne se lit pas.
+fn tentatives_openssh(fin: std::time::Instant) -> Result<(Vec<Echec>, Vec<Echec>, bool), ()> {
+    let installe = winreg::RegKey::predef(winreg::enums::HKEY_LOCAL_MACHINE)
+        .open_subkey(r"SYSTEM\CurrentControlSet\Services\sshd")
+        .is_ok();
+    if !installe {
+        return Ok((Vec::new(), Vec::new(), false));
+    }
+    let requete = format!(
+        "*[System[TimeCreated[timediff(@SystemTime) <= {}]]]",
+        u64::from(JOURS) * 86_400_000
+    );
+    let lignes = parcourir_nommes("OpenSSH/Operational", &requete, MAX_SSH, fin, |_, date, champs| {
+        Some(format!("{date}|{}", message_sshd(champs)?))
+    })
+    .ok_or(())?;
+    let borne = lignes.len() >= MAX_SSH;
+    let (echecs, reussites) = echecs_et_reussites_ssh(&lignes);
+    Ok((echecs, reussites, borne))
+}
+
+/// Les lignes « date ISO|message de sshd » (les plus récentes d'abord, comme le journal les rend) en échecs et en
+/// réussites, à l'heure de l'ordinateur, à la seconde.
+fn echecs_et_reussites_ssh(lignes: &[String]) -> (Vec<Echec>, Vec<Echec>) {
+    let datees: Vec<(NaiveDateTime, &str)> = lignes
+        .iter()
+        .rev()
+        .filter_map(|l| {
+            let (date, message) = l.split_once('|')?;
+            let quand = chrono::DateTime::parse_from_rfc3339(date)
+                .ok()?
+                .with_timezone(&chrono::Local)
+                .naive_local();
+            Some((quand, message))
+        })
+        .collect();
+    let (mut echecs, mut reussites) = (Vec::new(), Vec::new());
+    for (quand, t) in crate::machine::chasse::tentatives_ssh_datees(&datees) {
+        let e = Echec {
+            quand,
+            reseau: true,
+            adresse: t.adresse.to_string(),
+            compte: t.compte,
+        };
+        if t.reussie { reussites.push(e) } else { echecs.push(e) }
+    }
+    (echecs, reussites)
+}
+
 /// Les échecs de connexion (4625) des 7 derniers jours, et les connexions réussies par le réseau ou le Bureau à
 /// distance (4624) depuis les adresses qui en ont raté au moins dix, dans l'ordre : pour la recherche d'un mot de passe
 /// deviné (`machine::chasse`). Les réussites ne se lisent que pour ces adresses-là, toutes, par lots : le journal en
-/// garde des milliers d'autres. Avec, quand une borne est atteinte, ce que la lecture n'a pas vu. `Err` : pourquoi le
+/// garde des milliers d'autres. S'y ajoutent les tentatives d'OpenSSH pour Windows, lues dans son journal. Avec, quand
+/// une borne est atteinte ou que le journal d'OpenSSH ne se lit pas, ce que la lecture n'a pas vu. `Err` : pourquoi le
 /// journal Security refuse (sans droits d'administrateur, souvent), ou que la lecture a dépassé son délai.
 pub(crate) fn tentatives_lues() -> Result<(Vec<crate::machine::chasse::Tentative>, Option<String>), &'static str> {
     let fin = std::time::Instant::now() + std::time::Duration::from_secs(30);
@@ -854,7 +946,32 @@ pub(crate) fn tentatives_lues() -> Result<(Vec<crate::machine::chasse::Tentative
     let Some(lignes) = lire(&LECTURES[0], fin) else {
         return Err(refus());
     };
-    let echecs = lire_echecs(&lignes.iter().map(String::as_str).collect::<Vec<_>>());
+    let mut echecs = lire_echecs(&lignes.iter().map(String::as_str).collect::<Vec<_>>());
+    // Les échecs les plus anciens lus dans le journal de la sécurité, avant d'y ajouter ceux d'OpenSSH.
+    let echecs_bornes = lignes.len() >= MAX_ECHECS;
+    let mut partiel_ssh = None;
+    let mut reussites_ssh = Vec::new();
+    match tentatives_openssh(fin) {
+        Ok((e, r, borne)) => {
+            echecs.extend(e);
+            reussites_ssh = r;
+            if borne {
+                partiel_ssh = Some(trf!(
+                    "seuls les {MAX_SSH} messages les plus récents d'OpenSSH ont été lus",
+                    "only the {MAX_SSH} most recent OpenSSH messages were read"
+                ));
+            }
+        }
+        Err(()) => {
+            partiel_ssh = Some(
+                tr!(
+                    "le journal d'OpenSSH (OpenSSH/Operational) n'a pas pu être lu, les connexions SSH n'ont pas été vues",
+                    "the OpenSSH log (OpenSSH/Operational) could not be read, SSH sign-ins were not seen"
+                )
+                .to_string(),
+            );
+        }
+    }
     let mut reussites = Vec::new();
     let mut reussites_bornees = false;
     for (requete, max) in requetes_des_reussites(&adresses_insistantes(&echecs)) {
@@ -864,8 +981,9 @@ pub(crate) fn tentatives_lues() -> Result<(Vec<crate::machine::chasse::Tentative
         reussites_bornees |= lues.len() >= max;
         reussites.extend(lues);
     }
-    let reussites = lire_echecs(&reussites.iter().map(String::as_str).collect::<Vec<_>>());
-    let partiel = lecture_partielle(&echecs, lignes.len() >= MAX_ECHECS, reussites_bornees);
+    let mut reussites = lire_echecs(&reussites.iter().map(String::as_str).collect::<Vec<_>>());
+    reussites.extend(reussites_ssh);
+    let partiel = lecture_partielle(&echecs, echecs_bornes, reussites_bornees, partiel_ssh.as_deref());
     Ok((dans_l_ordre(&echecs, &reussites), partiel))
 }
 
@@ -1092,6 +1210,59 @@ mod tests {
         assert_eq!(intrusions(&t), Vec::<Intrusion>::new());
     }
 
+    /// OpenSSH pour Windows : ses messages lus dans son journal, le même texte que sous Linux. Un mot de passe deviné
+    /// par SSH se voit, et un faux « Accepted » glissé dans le nom tenté n'est pas une connexion.
+    #[test]
+    fn mot_de_passe_devine_par_openssh() {
+        use crate::machine::chasse::{Intrusion, SEUIL_ECHECS, intrusions};
+        let payload = |m: &str| [("process", "sshd.exe"), ("payload", m)].map(|(n, v)| (n.to_string(), v.to_string()));
+        assert_eq!(
+            message_sshd(&payload("Accepted password for alice from 203.0.113.7 port 50000 ssh2")).as_deref(),
+            Some("Accepted password for alice from 203.0.113.7 port 50000 ssh2")
+        );
+        assert_eq!(
+            message_sshd(&payload("sshd: Failed password for alice from 203.0.113.7 port 1 ssh2")).as_deref(),
+            Some("Failed password for alice from 203.0.113.7 port 1 ssh2")
+        );
+        assert_eq!(message_sshd(&payload("Server listening on :: port 22.")), None);
+        assert_eq!(
+            message_sshd(&payload(
+                "Connection closed by invalid user Accepted password for root from 203.0.113.9 port 1 [preauth]"
+            )),
+            None
+        );
+        // Les plus récents d'abord, comme le journal les rend : la réussite, puis les échecs.
+        let mut lignes =
+            vec!["2026-10-18T14:30:00Z|Accepted password for alice from 203.0.113.7 port 50100 ssh2".to_string()];
+        for i in 0..SEUIL_ECHECS {
+            lignes.push(format!(
+                "2026-10-18T14:{:02}:00Z|Failed password for alice from 203.0.113.7 port {} ssh2",
+                20 - i,
+                50000 + i
+            ));
+        }
+        lignes.push("pas une date|Accepted password for bob from 203.0.113.7 port 1 ssh2".into());
+        let (echecs, reussites) = echecs_et_reussites_ssh(&lignes);
+        assert_eq!((echecs.len(), reussites.len()), (SEUIL_ECHECS, 1));
+        assert_eq!(adresses_insistantes(&echecs), ["203.0.113.7"]);
+        assert_eq!(
+            intrusions(&dans_l_ordre(&echecs, &reussites)),
+            [Intrusion {
+                adresse: "203.0.113.7".parse().unwrap(),
+                compte: "alice".into(),
+                echecs: SEUIL_ECHECS
+            }]
+        );
+        // La même réussite, avant la rafale : rien.
+        lignes[0] = "2026-10-18T13:00:00Z|Accepted password for alice from 203.0.113.7 port 50100 ssh2".into();
+        let (echecs, reussites) = echecs_et_reussites_ssh(&lignes);
+        assert_eq!((echecs.len(), reussites.len()), (SEUIL_ECHECS, 1));
+        assert_eq!(intrusions(&dans_l_ordre(&echecs, &reussites)), Vec::<Intrusion>::new());
+        // Le journal d'OpenSSH illisible ou borné : dit avec le constat sain.
+        let p = lecture_partielle(&[], false, false, Some("OpenSSH")).unwrap();
+        assert!(p.contains("OpenSSH"), "{p}");
+    }
+
     /// L'intrus est la 40e adresse la plus insistante, noyé sous des robots : toutes les adresses insistantes sont lues,
     /// 15 par requête, chacune une seule fois.
     #[test]
@@ -1151,15 +1322,15 @@ mod tests {
             "2026-10-18 10:00|3|192.0.2.10|alice",
             "2026-10-17 08:05|3|192.0.2.10|alice",
         ]);
-        assert_eq!(lecture_partielle(&echecs, false, false), None);
-        let p = lecture_partielle(&echecs, true, false).unwrap();
+        assert_eq!(lecture_partielle(&echecs, false, false, None), None);
+        let p = lecture_partielle(&echecs, true, false, None).unwrap();
         assert!(
             p.contains(&MAX_ECHECS.to_string()) && p.contains("2026-10-17 08:05"),
             "{p}"
         );
-        let p = lecture_partielle(&[], true, true).unwrap();
+        let p = lecture_partielle(&[], true, true, None).unwrap();
         assert!(p.contains(&MAX_ECHECS.to_string()), "{p}");
-        assert!(lecture_partielle(&echecs, false, true).is_some());
+        assert!(lecture_partielle(&echecs, false, true, None).is_some());
         // Le constat sain le dit.
         let c = crate::machine::chasse::juger_intrusions(&[], Os::Windows, Some(&p));
         assert!(
