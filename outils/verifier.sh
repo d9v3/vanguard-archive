@@ -96,7 +96,7 @@ hors_ligne() {
 # La bibliothèque des extensions (extensions/sdk) et l'exemple en Rust : des crates à part, hors de l'espace de travail
 # de Vanguard ; leurs propres clippy, tests et compilation, dans un dossier de compilation à eux.
 extensions() {
-  local cible=${CARGO_TARGET_DIR:-$PWD/target}-extensions m
+  local cible=${CARGO_TARGET_DIR:-$PWD/target}/extensions m
   for m in extensions/sdk/Cargo.toml extensions/exemples/rust-exemple/Cargo.toml; do
     CARGO_TARGET_DIR=$cible cargo fmt --check --manifest-path "$m" &&
       CARGO_TARGET_DIR=$cible cargo clippy -q --all-targets --manifest-path "$m" -- -D warnings || return 1
