@@ -71,7 +71,12 @@ pub(crate) fn lecteur(racine: &Path) -> Option<Lecteur> {
     const AMOVIBLE: u32 = 2;
     const SANS_FENETRE_D_ERREUR: u32 = 0x1;
     let r = racine.to_string_lossy();
-    let lettre = r.chars().next().filter(char::is_ascii_alphabetic)?;
+    // Seulement « X: » ou « X:\… » : un chemin réseau (« UNC\nas\partage ») n'est pas le lecteur U:.
+    let mut caracteres = r.chars();
+    let lettre = caracteres.next().filter(char::is_ascii_alphabetic)?;
+    if caracteres.next() != Some(':') {
+        return None;
+    }
     let r = large(&format!("{lettre}:\\"));
     let (mut etiquette, mut format) = (vec![0u16; 261], vec![0u16; 261]);
     let (mut serie, mut longueur, mut drapeaux) = (0u32, 0u32, 0u32);
@@ -178,6 +183,14 @@ fn numero_du_disque(lettre: char) -> Option<u32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Un chemin réseau (ce qu'il reste de « \\?\UNC\nas\partage ») n'est pas le lecteur U:.
+    #[test]
+    fn chemin_reseau_pas_un_lecteur() {
+        assert!(lecteur(Path::new("UNC")).is_none());
+        assert!(lecteur(Path::new(r"UNC\nas\partage")).is_none());
+        assert!(lecteur(Path::new("")).is_none());
+    }
 
     /// Les vraies fonctions de Windows (Wine ici, la VM ensuite) : le lecteur du système est prêt, a une taille, et
     /// les lecteurs listés sont fixes ou amovibles.
