@@ -1,0 +1,43 @@
+# Ce que les dépendances du banc de fuzzing (fuzz/, outils/fuzz.sh) ont le droit d'être, vérifié par cargo deny
+# (outils/verifier.sh, et chaque nuit dans la CI), comme deny.toml pour Vanguard. À part de deny.toml : le banc est
+# une crate à part, jamais compilée avec le programme ni distribuée, et les failles admises de Vanguard (venues de
+# YARA-X) n'ont rien à faire ici.
+
+# Le banc ne tourne qu'ici, sous Linux (libFuzzer, AddressSanitizer de la chaîne nightly).
+[graph]
+targets = ["x86_64-unknown-linux-gnu"]
+
+# Failles connues, bibliothèques abandonnées ou au code défaillant : refusées, dans tout l'arbre, sans exception.
+[advisories]
+unmaintained = "all"
+unsound = "all"
+ignore = []
+
+# Les licences de deny.toml que l'arbre du banc rencontre, permissives. Une de plus demande d'abord une décision
+# (CLAUDE.md, « Nouvelle dépendance »). Le banc lui-même (GPL-3.0-or-later) est nommé. libfuzzer-sys, seul, y ajoute
+# la NCSA (licence d'Illinois, celle de libFuzzer, venue de LLVM) : permissive, du même genre que MIT et BSD, et
+# n'entre que dans les programmes du banc, jamais dans Vanguard (LICENCES-TIERCES.txt ne la porte donc pas).
+[licenses]
+allow = [
+    "Apache-2.0",
+    "MIT",
+    "Unicode-3.0",
+    "Unlicense",
+]
+confidence-threshold = 0.8
+exceptions = [
+    { crate = "vanguard-fuzz", allow = ["GPL-3.0-or-later"] },
+    { crate = "libfuzzer-sys", allow = ["NCSA"] },
+]
+unused-license-exception = "deny"
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+
+# crates.io seulement : ni autre registre, ni dépôt git.
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

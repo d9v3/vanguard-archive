@@ -30,7 +30,8 @@ Réponses à l'utilisateur en français, claires, avec le pourquoi.
   recopie à l'identique ; étape de verifier.sh, sautée sans `cargo-audit` ou sans Internet.
 - Fuzzing (cargo-fuzz, chaîne nightly à côté de la stable) : `outils/fuzz.sh [cible|tout] [secondes]`, banc `fuzz/`
   à part (modules inclus par leur chemin, cales dans `fuzz/cale/`), corpus et plantages dans
-  `~/.cache/vanguard-dev/fuzz/` ; trop long pour verifier.sh.
+  `~/.cache/vanguard-dev/fuzz/` ; trop long pour verifier.sh, qui passe seulement ses dépendances à cargo deny
+  (`fuzz/deny.toml`).
 - Tests Windows sous Wine (pas de PowerShell sous Wine ; le registre, lui, marche) :
   `WINEPREFIX=<dossier jetable> WINEDEBUG=-all CARGO_TARGET_X86_64_PC_WINDOWS_GNU_RUNNER=~/.local/share/Steam/compatibilitytools.d/GE-Proton11-9-x86_64/files/bin/wine cargo test --target x86_64-pc-windows-gnu`
 - macOS : compilé et testé sur un Mac de GitHub (`.github/workflows/macos.yml`), à chaque publication et la nuit si

@@ -138,6 +138,9 @@ dependances() {
     sortie+=$'\n'"$m :"$'\n'$(cargo deny "${options[@]}" --manifest-path "$m" --config extensions/deny.toml check \
       --hide-inclusion-graph "${verifications[@]}" 2>&1) || code=1
   done
+  # Le banc de fuzzing, crate à part aussi (fuzz/deny.toml) : ses dépendances ne vont jamais dans Vanguard.
+  sortie+=$'\n'"fuzz/Cargo.toml :"$'\n'$(cargo deny "${options[@]}" --manifest-path fuzz/Cargo.toml \
+    --config fuzz/deny.toml check --hide-inclusion-graph "${verifications[@]}" 2>&1) || code=1
   printf '%s\n' "$sortie"
   # En échec, le résumé ne montre que la fin du journal, où sont les doublons : chaque erreur y est rappelée, avec la
   # bibliothèque visée (dossier de son Cargo.toml pour une licence, ligne de Cargo.lock pour une faille).

@@ -186,7 +186,7 @@ l'accord de l'auteur.
 
 Fuzzing : `outils/fuzz.sh [cible|tout] [secondes]` (cargo-fuzz et la chaîne nightly), sur les lecteurs de données venues
 d'ailleurs (plist, réponses HTTP et DNS, journaux de la chronologie, XML UPnP de la box), à la main : trop long pour
-`outils/verifier.sh`.
+`outils/verifier.sh`, qui vérifie seulement ses dépendances (cargo deny, `fuzz/deny.toml`).
 
 Liens morts : `outils/liens.py` ouvre tous les liens du dépôt (documentation, code du programme hors tests, scripts,
 licences) et vérifie les liens internes des pages Markdown : fichier visé, titre d'une ancre, téléchargements de la

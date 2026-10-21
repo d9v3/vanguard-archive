@@ -161,6 +161,8 @@ jobs:
           for m in extensions/sdk/Cargo.toml extensions/exemples/rust-exemple/Cargo.toml; do
             cargo deny --locked --manifest-path "$m" --config extensions/deny.toml check --hide-inclusion-graph
           done
+          # Le banc de fuzzing (fuzz/), crate à part : ses propres règles (fuzz/deny.toml).
+          cargo deny --locked --manifest-path fuzz/Cargo.toml --config fuzz/deny.toml check --hide-inclusion-graph
 
   # Windows la nuit seulement si le code a changé depuis le dernier passage réussi (comme macos.yml).
   utile:

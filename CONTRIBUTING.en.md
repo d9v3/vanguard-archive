@@ -185,7 +185,7 @@ approval.
 
 Fuzzing: `outils/fuzz.sh [target|tout] [seconds]` (cargo-fuzz and the nightly toolchain), on the readers of data coming
 from elsewhere (plist, HTTP and DNS replies, timeline logs, the router's UPnP XML), by hand: too long for
-`outils/verifier.sh`.
+`outils/verifier.sh`, which only checks its dependencies (cargo deny, `fuzz/deny.toml`).
 
 Dead links: `outils/liens.py` opens every link of the repository (documentation, the program's code except tests,
 scripts, licenses) and checks the internal links of the Markdown pages: target file, heading of an anchor, downloads
