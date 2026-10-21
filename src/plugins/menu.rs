@@ -594,12 +594,14 @@ mod tests {
         }
         let plugins = vec![Plugin {
             empreinte: None,
-            nom: "salon".into(),
+            nom: "salon\x1b[2J".into(),
             manifeste: None,
             etat: Etat::Invalide("x".into()),
         }];
         for l in &lignes_plugins(&plugins, &reglages) {
             assert!(largeur(l) <= LARGEUR, "{}", textes(std::slice::from_ref(l)));
         }
+        // Un nom de dossier piégé (posé à la main) est montré filtré.
+        assert!(!textes(&lignes_plugins(&plugins, &reglages)).contains("\x1b[2J"));
     }
 }

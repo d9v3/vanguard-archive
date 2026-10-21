@@ -607,3 +607,48 @@ mod labo_unix {
         assert!(!Path::new(&maison).join(".vanguard-isole-essai").exists());
     }
 }
+
+/// En administrateur (ici, la suite refaite dans `unshare -rn`, où le compte est 0) : rien ne tourne tout seul, et
+/// rien ne s'ajoute ni ne s'approuve, quoi que dise le dossier.
+#[cfg(unix)]
+#[test]
+fn en_administrateur_rien_ne_tourne_tout_seul() {
+    if !en_root() {
+        return;
+    }
+    let racine = std::env::temp_dir().join(format!("vanguard-admin-{}", std::process::id()));
+    let auto = Facon {
+        isole: false,
+        auto: Some(Auto::Bilan),
+    };
+    assert!(
+        lancer(&racine, "salon", &[], auto)
+            .err()
+            .unwrap()
+            .contains("administrateur")
+    );
+    assert!(
+        ajouter(&racine, &racine, |_| true)
+            .err()
+            .unwrap()
+            .contains("administrateur")
+    );
+    assert!(
+        approuver(&racine, "salon", |_| true)
+            .err()
+            .unwrap()
+            .contains("administrateur")
+    );
+    assert!(opt_in(false).is_empty() && opt_in(true).is_empty());
+}
+
+/// Un interpréteur n'est pris que s'il est au système : à root, dans des dossiers fermés aux autres.
+#[cfg(unix)]
+#[test]
+fn seul_un_interprete_du_systeme_est_pris() {
+    assert!(du_systeme(Path::new("/bin/sh")) || en_root());
+    let j = Jetable::nouveau();
+    let faux = j.0.join("python3");
+    std::fs::write(&faux, "#!/bin/sh\n").unwrap();
+    assert!(!du_systeme(&faux));
+}
