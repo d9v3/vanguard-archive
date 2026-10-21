@@ -122,8 +122,9 @@ fn box_repond(box_: Ipv4Addr) -> bool {
     }
     let ip = box_.to_string();
     let lancer = |cmd: &str, args: &[&str]| crate::commande::lancer(std::process::Command::new(cmd).args(args), 6);
+    // La table des voisins, demandée au noyau par netlink, comme `ip neigh` le fait, sans le lancer.
     #[cfg(target_os = "linux")]
-    if lancer("ip", &["neigh", "show", &ip]).is_some_and(|r| voisin_confirme(&r.sortie)) {
+    if box_confirmee(crate::reseau::scan::etats_voisins().as_ref(), box_) {
         return true;
     }
     #[cfg(target_os = "linux")]
@@ -135,9 +136,19 @@ fn box_repond(box_: Ipv4Addr) -> bool {
     lancer("ping", &essai).is_some_and(|r| ping_repond(r.code, &r.sortie, cfg!(windows)))
 }
 
-/// Linux, `ip neigh show <adresse>` : un voisin confirmé à l'instant (REACHABLE). Une entrée périmée (STALE), en
-/// échec (FAILED), incomplète, ou en cours de vérification (DELAY, PROBE) ne prouve pas que la box est là.
+/// Linux : la box est un voisin confirmé à l'instant (REACHABLE). Une entrée périmée (STALE), en échec (FAILED),
+/// incomplète, ou en cours de vérification (DELAY, PROBE) ne prouve pas qu'elle est là. Sans table (le noyau
+/// refuse) : rien de prouvé, le ping décide.
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn box_confirmee(voisins: Option<&std::collections::HashMap<Ipv4Addr, String>>, box_: Ipv4Addr) -> bool {
+    voisins
+        .and_then(|v| v.get(&box_))
+        .is_some_and(|etat| etat == "REACHABLE")
+}
+
+/// `ip neigh show <adresse>` : la même chose d'après la sortie d'ip. Ne sert plus qu'à comparer netlink à ip dans
+/// les tests.
+#[cfg(test)]
 fn voisin_confirme(sortie: &str) -> bool {
     sortie.lines().any(|l| l.split_whitespace().last() == Some("REACHABLE"))
 }
@@ -507,6 +518,109 @@ fn signal_airport(texte: &str) -> Option<Signal> {
     })
 }
 
+/// Les cartes Wi-Fi : le noyau donne un dossier « wireless » à chacune dans /sys/class/net (ce que listait
+/// `iw dev`). Triées, pour que la première soit toujours la même.
+#[cfg(target_os = "linux")]
+fn cartes_wifi(dossier: &std::path::Path) -> Vec<String> {
+    let mut cartes: Vec<String> = std::fs::read_dir(dossier)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|e| e.path().join("wireless").is_dir())
+        .filter_map(|e| e.file_name().into_string().ok())
+        .collect();
+    cartes.sort();
+    cartes
+}
+
+/// `/proc/net/wireless` : deux lignes d'en-tête, puis « wlan0: 0000   47.  -63.  -256 … » (état, qualité du
+/// lien, niveau, bruit). Le noyau n'y met une carte que pendant qu'elle est connectée à une borne. Rend la
+/// carte et son niveau en dBm ; un niveau positif n'est pas en dBm (pilote sans mesure) : ignoré.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn niveau_wifi(texte: &str, cartes: &[String]) -> Option<(String, i32)> {
+    texte.lines().skip(2).find_map(|l| {
+        let (nom, reste) = l.split_once(':')?;
+        let nom = nom.trim();
+        if !cartes.iter().any(|c| c == nom) {
+            return None;
+        }
+        let niveau: i32 = reste.split_whitespace().nth(2)?.trim_end_matches('.').parse().ok()?;
+        (niveau < 0).then(|| (nom.to_string(), niveau))
+    })
+}
+
+/// Le pourcentage que montrait nmcli, avec la formule de NetworkManager : −40 dBm et mieux → 100 %,
+/// −100 dBm → 0 %, en ligne droite entre les deux. La garder laisse les seuils (40 %, 60 %) où ils étaient.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn qualite_de_dbm(dbm: i32) -> u8 {
+    let ecart = -(dbm.clamp(-100, -40) + 40);
+    u8::try_from((100 - ecart * 100 / 60).clamp(0, 100)).unwrap_or(0)
+}
+
+/// La fréquence d'une réponse SIOCGIWFREQ, en MHz : m × 10^e hertz. Un petit nombre avec e = 0 est un numéro
+/// de canal (vieux pilotes), pas une fréquence : il ne se convertit pas sans connaître la bande.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn mhz_de(m: i32, e: i16) -> Option<u32> {
+    if e == 0 && m < 1000 {
+        return None;
+    }
+    let m = u64::try_from(m).ok()?;
+    let e = u32::try_from(e).ok()?;
+    let hz = m.checked_mul(10u64.checked_pow(e)?)?;
+    u32::try_from(hz / 1_000_000).ok().filter(|&f| f > 0)
+}
+
+/// La fréquence de la borne connectée, demandée au noyau (SIOCGIWFREQ, que cfg80211 sert à toute carte
+/// récente), sans lancer nmcli ni iw.
+#[cfg(target_os = "linux")]
+fn frequence_wifi(carte: &str) -> Option<u32> {
+    const SIOCGIWFREQ: libc::Ioctl = 0x8B05;
+    // SAFETY : iwreq est une structure C de nombres et d'unions de nombres : tout à zéro est une valeur valide.
+    let mut demande: libc::iwreq = unsafe { std::mem::zeroed() };
+    let nom = carte.as_bytes();
+    if nom.len() >= libc::IFNAMSIZ {
+        return None;
+    }
+    // SAFETY : on écrit dans le seul champ de l'union, un tableau de IFNAMSIZ octets ; le nom, plus court, y
+    // laisse au moins un zéro final.
+    unsafe {
+        for (case, octet) in demande.ifr_ifrn.ifrn_name.iter_mut().zip(nom) {
+            *case = libc::c_char::from_ne_bytes([*octet]);
+        }
+    }
+    // SAFETY : une socket ouverte ici et refermée une seule fois ; ioctl reçoit un pointeur vers la demande, à
+    // nous et vivante pendant l'appel, de la taille qu'attend SIOCGIWFREQ. Lire le champ freq après coup est
+    // sûr : l'union ne contient que des nombres.
+    unsafe {
+        let s = libc::socket(libc::AF_INET, libc::SOCK_DGRAM | libc::SOCK_CLOEXEC, 0);
+        if s < 0 {
+            return None;
+        }
+        let r = libc::ioctl(s, SIOCGIWFREQ, &raw mut demande);
+        libc::close(s);
+        if r < 0 {
+            return None;
+        }
+        mhz_de(demande.u.freq.m, demande.u.freq.e)
+    }
+}
+
+/// Le Wi-Fi connecté, lu sans commande : /proc/net/wireless pour le niveau, le noyau pour la fréquence. Rend
+/// aussi la carte, pour l'économie d'énergie.
+#[cfg(target_os = "linux")]
+fn signal_natif() -> Option<(String, Signal)> {
+    let cartes = cartes_wifi(std::path::Path::new("/sys/class/net"));
+    let (carte, dbm) = niveau_wifi(&std::fs::read_to_string("/proc/net/wireless").ok()?, &cartes)?;
+    let mhz = frequence_wifi(&carte);
+    let signal = Signal {
+        qualite: qualite_de_dbm(dbm),
+        canal: mhz.and_then(crate::machine::wifi::canal_de_frequence).map(u32::from),
+        bande: mhz.and_then(Bande::de_frequence),
+        economie: None,
+    };
+    Some((carte, signal))
+}
+
 fn signal() -> Option<Signal> {
     #[cfg(target_os = "linux")]
     {
@@ -517,23 +631,28 @@ fn signal() -> Option<Signal> {
                 .map(|r| r.sortie)
                 .unwrap_or_default()
         };
-        let mut s = signal_nmcli(&sortie(
-            "nmcli",
-            &"-t -f IN-USE,SIGNAL,FREQ,CHAN dev wifi list --rescan no"
-                .split(' ')
-                .collect::<Vec<_>>(),
-        ))?;
-        // « Interface wlan0 » dans `iw dev`, puis « Power save: on ».
-        let interfaces = sortie("iw", &["dev"]);
-        s.economie = interfaces
-            .lines()
-            .find_map(|l| l.trim().strip_prefix("Interface "))
-            .map(str::trim)
-            .and_then(|i| {
-                let etat = sortie("iw", &["dev", i, "get", "power_save"]);
-                let v = etat.split(':').nth(1)?.trim().to_string();
-                Some(v == "on")
-            });
+        let natif = signal_natif();
+        // nmcli seulement en secours : carte absente de /proc/net/wireless (autre espace réseau, pilote sans
+        // WEXT) ou fréquence inconnue, sans quoi le conseil sur la bande disparaîtrait.
+        let mut s = match natif.as_ref().filter(|(_, s)| s.canal.is_some()) {
+            Some((_, s)) => s.clone(),
+            None => signal_nmcli(&sortie(
+                "nmcli",
+                &"-t -f IN-USE,SIGNAL,FREQ,CHAN dev wifi list --rescan no"
+                    .split(' ')
+                    .collect::<Vec<_>>(),
+            ))
+            .or_else(|| natif.as_ref().map(|(_, s)| s.clone()))?,
+        };
+        // La carte connectée, sinon la première ; puis « Power save: on » d'iw, que seul nl80211 dirait.
+        let carte = natif
+            .map(|(c, _)| c)
+            .or_else(|| cartes_wifi(std::path::Path::new("/sys/class/net")).into_iter().next());
+        s.economie = carte.and_then(|i| {
+            let etat = sortie("iw", &["dev", &i, "get", "power_save"]);
+            let v = etat.split(':').nth(1)?.trim().to_string();
+            Some(v == "on")
+        });
         Some(s)
     }
     #[cfg(windows)]
@@ -786,6 +905,126 @@ mod tests {
         }
         assert!(!voisin_confirme("192.168.1.1 dev wlan0 INCOMPLETE\n"));
         assert!(!voisin_confirme(""));
+    }
+
+    /// La table du noyau, inventée : seule une box REACHABLE est confirmée ; sans table, rien n'est prouvé.
+    #[test]
+    fn box_confirmee_par_le_noyau() {
+        let box_ = Ipv4Addr::new(192, 168, 1, 1);
+        let table = |etat: &str| std::collections::HashMap::from([(box_, etat.to_string())]);
+        assert!(box_confirmee(Some(&table("REACHABLE")), box_));
+        for etat in ["STALE", "FAILED", "DELAY", "PROBE", "INCOMPLETE"] {
+            assert!(!box_confirmee(Some(&table(etat)), box_), "{etat}");
+        }
+        assert!(!box_confirmee(
+            Some(&table("REACHABLE")),
+            Ipv4Addr::new(192, 168, 1, 254)
+        ));
+        assert!(!box_confirmee(None, box_));
+    }
+
+    /// Sur cet ordinateur, netlink et `ip neigh` voient les mêmes voisins ; une box qu'ip dit confirmée est,
+    /// d'après netlink, confirmée ou dans un état qui suit (le noyau a pu la revérifier entre les deux).
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn box_comme_ip() {
+        let Some(r) = crate::commande::lancer(std::process::Command::new("ip").args(["-4", "neigh", "show"]), 5)
+            .filter(|r| r.code == Some(0))
+        else {
+            return;
+        };
+        let Some(natifs) = crate::reseau::scan::etats_voisins() else {
+            return;
+        };
+        for ligne in r.sortie.lines().filter(|l| voisin_confirme(l)) {
+            let Some(ip) = ligne.split_whitespace().next().and_then(|i| i.parse::<Ipv4Addr>().ok()) else {
+                continue;
+            };
+            let etat = natifs.get(&ip).map(String::as_str);
+            assert!(
+                box_confirmee(Some(&natifs), ip) || matches!(etat, Some("STALE" | "DELAY" | "PROBE")),
+                "{ligne} / {etat:?}"
+            );
+        }
+    }
+
+    /// /proc/net/wireless inventé : la carte connectée et son niveau en dBm ; une carte inconnue de
+    /// /sys/class/net ou un niveau positif (pas des dBm) ne comptent pas.
+    #[test]
+    fn niveau_du_wifi_connecte() {
+        let entete = "Inter-| sta-|   Quality        |   Discarded packets               | Missed | WE\n \
+                      face | tus | link level noise |  nwid  crypt   frag  retry   misc | beacon | 22\n";
+        let texte = format!("{entete}wlan0: 0000   47.  -63.  -256        0      0      0     18      0        0\n");
+        let cartes = vec!["wlan0".to_string()];
+        assert_eq!(niveau_wifi(&texte, &cartes), Some(("wlan0".into(), -63)));
+        assert_eq!(niveau_wifi(&texte, &["wlan1".to_string()]), None);
+        assert_eq!(niveau_wifi(entete, &cartes), None);
+        let sans_dbm = format!("{entete}wlan0: 0000   60    55     0        0      0      0      0      0        0\n");
+        assert_eq!(niveau_wifi(&sans_dbm, &cartes), None);
+    }
+
+    /// La formule de NetworkManager : −40 dBm et mieux → 100 %, −100 dBm et moins → 0 %.
+    #[test]
+    fn qualite_comme_networkmanager() {
+        assert_eq!(qualite_de_dbm(-30), 100);
+        assert_eq!(qualite_de_dbm(-40), 100);
+        assert_eq!(qualite_de_dbm(-64), 60);
+        assert_eq!(qualite_de_dbm(-76), 40);
+        assert_eq!(qualite_de_dbm(-100), 0);
+        assert_eq!(qualite_de_dbm(-120), 0);
+    }
+
+    /// Une réponse SIOCGIWFREQ : 5180 × 10^6 Hz (cfg80211), 2,412 × 10^9 écrit autrement, un numéro de canal.
+    #[test]
+    fn frequence_de_la_reponse() {
+        assert_eq!(mhz_de(5180, 6), Some(5180));
+        assert_eq!(mhz_de(2_412_000, 3), Some(2412));
+        assert_eq!(mhz_de(241_200_000, 1), Some(2412));
+        assert_eq!(mhz_de(36, 0), None);
+        assert_eq!(mhz_de(-5, 6), None);
+        assert_eq!(mhz_de(5180, -1), None);
+    }
+
+    /// Les cartes Wi-Fi d'un /sys/class/net inventé : seules celles qui ont un dossier « wireless ».
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn cartes_wifi_selon_sys() {
+        let d = std::env::temp_dir().join(format!("vanguard-cartes-wifi-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        for chemin in ["wlan1/wireless", "eth0", "wlan0/wireless", "lo"] {
+            std::fs::create_dir_all(d.join(chemin)).unwrap();
+        }
+        assert_eq!(cartes_wifi(&d), ["wlan0", "wlan1"]);
+        assert_eq!(cartes_wifi(&d.join("absent")), Vec::<String>::new());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// Sur cet ordinateur, connecté en Wi-Fi, la lecture directe donne le canal et la bande de nmcli, et une
+    /// qualité proche : nmcli prend le niveau du dernier balayage, /proc celui du lien à l'instant.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn signal_comme_nmcli() {
+        let Some(r) = crate::commande::lancer_en_anglais(
+            std::process::Command::new("nmcli").args([
+                "-t",
+                "-f",
+                "IN-USE,SIGNAL,FREQ,CHAN",
+                "dev",
+                "wifi",
+                "list",
+                "--rescan",
+                "no",
+            ]),
+            15,
+        )
+        .filter(|r| r.code == Some(0)) else {
+            return;
+        };
+        let (Some(nm), Some((_, natif))) = (signal_nmcli(&r.sortie), signal_natif()) else {
+            return;
+        };
+        assert_eq!((natif.canal, natif.bande), (nm.canal, nm.bande), "{}", r.sortie);
+        assert!(natif.qualite.abs_diff(nm.qualite) <= 20, "{natif:?} / {nm:?}");
     }
 
     /// Le ping de Windows rend 0 quand cet ordinateur répond lui-même « hôte inaccessible » : seule une réponse avec
