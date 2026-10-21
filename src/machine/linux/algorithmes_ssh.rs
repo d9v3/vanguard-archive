@@ -382,16 +382,65 @@ pub(super) fn version_openssh(texte: &str) -> Option<(u32, u32)> {
     Some((majeure.parse().ok()?, mineure.parse().ok()?))
 }
 
-/// La version du serveur : « sshd -V » la donne (les anciens l'écrivent avec leur aide, en refusant -V) ; sinon celle
-/// du client, du même paquet presque partout.
+/// La version du serveur, sans le lancer : celle du paquet (openssh sous Arch, openssh-server sous Debian, epoch
+/// retirée), sinon la chaîne « OpenSSH_x.y » écrite dans le programme lui-même (rpm, compilé à la main). « sshd -V »
+/// et « ssh -V » ne servent qu'en dernier recours.
 fn version_sshd() -> Option<(u32, u32)> {
     let sshd = ["/usr/sbin/sshd", "/usr/bin/sshd", "/sbin/sshd"]
         .into_iter()
         .find(|p| Path::new(p).exists());
-    sshd.into_iter()
-        .chain(["ssh"])
-        .filter_map(|p| crate::commande::lancer(Command::new(p).arg("-V"), 5))
-        .find_map(|r| version_openssh(&r.erreurs).or_else(|| version_openssh(&r.sortie)))
+    version_du_paquet()
+        .or_else(|| version_dans_le_programme(&std::fs::read(sshd?).ok()?))
+        .or_else(|| {
+            sshd.into_iter()
+                .chain(["ssh"])
+                .filter_map(|p| crate::commande::lancer(Command::new(p).arg("-V"), 5))
+                .find_map(|r| version_openssh(&r.erreurs).or_else(|| version_openssh(&r.sortie)))
+        })
+}
+
+/// La version du paquet d'OpenSSH dans la base de pacman, sinon de dpkg.
+fn version_du_paquet() -> Option<(u32, u32)> {
+    let pacman = || Some(natif::desc_pacman("openssh")?.get("VERSION")?.first()?.clone());
+    let dpkg = || {
+        let paquets = natif::paquets_dpkg()?;
+        ["openssh-server", "openssh-client"]
+            .iter()
+            .find_map(|n| paquets.iter().find(|(p, _)| p == n).map(|(_, v)| v.clone()))
+    };
+    version_de_paquet(&pacman().or_else(dpkg)?)
+}
+
+/// « 10.0p1-2 » (pacman), « 1:9.6p1-3ubuntu13.5 » (dpkg, l'époque avant le deux-points) → (10, 0), (9, 6).
+fn version_de_paquet(version: &str) -> Option<(u32, u32)> {
+    let sans_epoque = version.split_once(':').map_or(version, |(_, v)| v);
+    version_openssh(&format!("OpenSSH_{sans_epoque}"))
+}
+
+/// La version écrite dans le programme sshd (« OpenSSH_9.6p1 », suivie d'un zéro ou d'une espace). Il y garde
+/// aussi des motifs de compatibilité pour reconnaître les vieux clients (« OpenSSH_2.*,OpenSSH_3.0* ») : ceux-là
+/// finissent par « * » ou « , » et ne comptent pas ; parmi les vraies, la plus haute.
+fn version_dans_le_programme(octets: &[u8]) -> Option<(u32, u32)> {
+    const MOTIF: &[u8] = b"OpenSSH_";
+    octets
+        .windows(MOTIF.len())
+        .enumerate()
+        .filter(|(_, f)| *f == MOTIF)
+        .filter_map(|(i, _)| {
+            let reste = &octets[i + MOTIF.len()..];
+            let longueur = reste
+                .iter()
+                .take_while(|o| o.is_ascii_alphanumeric() || **o == b'.')
+                .count();
+            if !matches!(reste.get(longueur), Some(0 | b' ')) {
+                return None;
+            }
+            let texte = std::str::from_utf8(&reste[..longueur]).ok()?;
+            // Une version commence par « chiffres.chiffres » ; « OpenSSH_for_Windows » n'en est pas une.
+            texte.split('.').next()?.parse::<u32>().ok()?;
+            version_openssh(&format!("OpenSSH_{texte}"))
+        })
+        .max()
 }
 
 fn algorithmes_ssh() -> Option<Constat> {
@@ -410,6 +459,42 @@ fn algorithmes_ssh() -> Option<Constat> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn version_lue_sans_lancer_sshd() {
+        assert_eq!(version_de_paquet("10.0p1-2"), Some((10, 0)));
+        assert_eq!(version_de_paquet("1:9.6p1-3ubuntu13.5"), Some((9, 6)));
+        assert_eq!(version_de_paquet("rien"), None);
+        // Les motifs de compatibilité (« * », « , ») ne comptent pas ; la vraie version, suivie d'un zéro, si.
+        let programme = b"\x7fELF..OpenSSH_2.*,OpenSSH_3.0*\0OpenSSH_7.0*\0OpenSSH_for_Windows\0\
+                          OpenSSH_9.6p1\0OpenSSH_9.6\0usage: sshd\0";
+        assert_eq!(version_dans_le_programme(programme), Some((9, 6)));
+        assert_eq!(version_dans_le_programme(b"OpenSSH_2.*\0OpenSSH_"), None);
+    }
+
+    /// Sur cet ordinateur, la version lue sans lancer sshd est celle que « sshd -V » écrit, quand il est là.
+    #[test]
+    fn version_comme_sshd() {
+        let Some(sshd) = ["/usr/sbin/sshd", "/usr/bin/sshd", "/sbin/sshd"]
+            .into_iter()
+            .find(|p| Path::new(p).exists())
+        else {
+            return;
+        };
+        let Some(attendue) = crate::commande::lancer(Command::new(sshd).arg("-V"), 5)
+            .and_then(|r| version_openssh(&r.erreurs).or_else(|| version_openssh(&r.sortie)))
+        else {
+            return;
+        };
+        if let Some(v) = version_du_paquet() {
+            assert_eq!(v, attendue, "paquet");
+        }
+        assert_eq!(
+            version_dans_le_programme(&std::fs::read(sshd).unwrap()),
+            Some(attendue),
+            "programme"
+        );
+    }
 
     /// « sshd -T » d'un OpenSSH 9.6 réglé par défaut (lignes des algorithmes seulement).
     const SSHD_T_DEFAUT: &str = "port 22
