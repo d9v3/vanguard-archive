@@ -1,6 +1,6 @@
 {
   "_lisez-moi": "Page du dépôt sur GitHub, appliquée par outils/github.py après chaque envoi. La version (Cargo.toml) s'ajoute seule au bout de la description ; le nom du dépôt suit celui du programme.",
-  "description": "Security check and repair kit for your PC and home network, run from a USB key. Grades the computer from A to F, explains each problem in plain words and fixes it with your OK, undoably. Finds malware, scams and open doors on the network, guides troubleshooting step by step and explains 30,000 commands. Windows · Linux · macOS · FR/EN",
+  "description": "Home cyber defense from a USB key: audits your network domain by domain (Internet exposure, Wi-Fi, segmentation, DNS, connected devices, computers) and your PCs, explains each risk in plain words and fixes it with your OK, undoably. Finds malware and backdoors; never attacks a device. Windows · Linux · macOS · FR/EN",
   "accueil": "https://claude.ai/code/artifact/d0b6d00e-38d4-4d9d-ad29-75dbdbecf37f",
   "sujets": [
     "security",

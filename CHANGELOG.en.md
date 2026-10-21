@@ -6,6 +6,36 @@ What each day brought to Vanguard, most recent first. Since October 19, 2026, Va
 gathering the day's work. Only the latest version has its download page; every version keeps its tag in the
 repository (`git checkout v0.62.0`, for example), to be rebuilt if needed.
 
+## October 21, 2026: version 0.82
+
+- **Network audit, domain by domain** (`vanguard network-audit`). Six grades: Internet exposure (ports opened by
+  UPnP, read by a UPnP client written in Rust), Wi-Fi (encryption, WPS, neighbouring networks, read through nl80211
+  on Linux and the Windows Wi-Fi API), device separation (connected devices on the computers' network, rogue DHCP
+  server, ARP integrity), DNS and certificates, connected devices, computers. What could not be checked is said and
+  never counts as safe: without enough checked domains, no grade.
+- **Windows read without PowerShell.** Accounts, startup, scheduled tasks, shares, Defender, BitLocker, Windows
+  Update, disk health and slowness are read through Windows APIs (registry, WMI, COM). The check is faster and works
+  even when PowerShell is blocked; PowerShell is only a fallback.
+- **macOS and Linux read without commands.** On macOS, settings are read by a plist reader written for Vanguard; on
+  Linux, through /proc, /sys and system files.
+- **Router and connected devices** (`vanguard iot`): router model and software, HTTP-only administration, cameras,
+  printers, NAS, and a reminder to change their default password. The only request sent to a device is SNMP
+  "describe yourself", with the factory read password "public": it is announced on screen.
+- **A relative's computer** (`vanguard relative`): three questions, the check, a plain-words summary and a page to
+  leave them.
+- **Privacy check** (`vanguard permissions`): who can use location, contacts, camera and microphone, on all three
+  systems.
+- **Backups truly read back** (`vanguard check-backup`) and a **monitoring dashboard** in the browser
+  (`vanguard dashboard`).
+- **Browser passwords** (`vanguard browser-passwords`): counted and their protection described, never read or sent;
+  each browser's built-in check is pointed to.
+- **Canadian Shield** offered among the fast DNS: CIRA's public DNS, which blocks malicious sites.
+- **Windows: a DLL placed next to Vanguard is no longer loaded.** The program only takes its libraries from System32
+  (PE DependentLoadFlags), even when run from a USB key or Downloads; deployment refuses a program without this guard.
+- **PowerShell in a hidden window** in an automatic start: reported as information, no longer as an alert.
+- **A security review** fixed many false "safe" results; the features page now publishes itself with each version
+  (https://d9v3.github.io/vanguard-beta/).
+
 ## October 20, 2026: version 0.81
 
 - **Linux, the check sees further.** ICMP redirects accepted (IPv4 and IPv6) and source address filtering off,
