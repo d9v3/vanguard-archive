@@ -79,6 +79,9 @@ pub(crate) fn imprimantes() -> Vec<Imprimante> {
     const LOCALES_ET_CONNEXIONS: u32 = 0x2 | 0x4;
     const EN_PAUSE: u32 = 0x1;
     const HORS_LIGNE: u32 = 0x80;
+    /// PRINTER_ATTRIBUTE_WORK_OFFLINE : ce que Paramètres affiche « Hors ligne » (« Utiliser l'imprimante hors
+    /// connexion », ou posé par le spouleur quand le port ne répond plus) ; Status reste alors à 0.
+    const TRAVAIL_HORS_LIGNE: u32 = 0x400;
     let defaut = imprimante_par_defaut();
     let (mut requis, mut rendus) = (0u32, 0u32);
     // SAFETY : premier appel sans tampon pour la taille (refus attendu) ; le second écrit au plus `taille` octets dans
@@ -124,7 +127,7 @@ pub(crate) fn imprimantes() -> Vec<Imprimante> {
             .map(|i| {
                 let nom = texte(i.nom);
                 Imprimante {
-                    en_pause: i.etat & (EN_PAUSE | HORS_LIGNE) != 0,
+                    en_pause: i.etat & (EN_PAUSE | HORS_LIGNE) != 0 || i.attributs & TRAVAIL_HORS_LIGNE != 0,
                     hote: hote_du_port(&texte(i.port)),
                     en_attente: usize::try_from(i.travaux).unwrap_or(0),
                     par_defaut: defaut.as_deref() == Some(nom.as_str()),
