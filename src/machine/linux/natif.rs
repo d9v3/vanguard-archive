@@ -628,9 +628,18 @@ fn disques_sous(racine: &Path) -> Vec<Disque> {
             let udev = proprietes_udev(
                 &std::fs::read_to_string(sous(racine, &format!("/run/udev/data/b{}", lire("dev")))).unwrap_or_default(),
             );
-            let modele = Some(lire("device/model"))
+            // L'ordre de lsblk : udev d'abord (ID_MODEL_ENC, puis ID_MODEL). Pour un disque SATA, device/model est le champ « product » de
+            // l'INQUIRY SCSI que libata fabrique, coupé à 16 octets (« Samsung SSD 870 ») ; ata_id met dans
+            // ID_MODEL_ENC le modèle ATA entier. sysfs ne sert que si udev ne dit rien.
+            let modele = udev
+                .get("ID_MODEL_ENC")
+                .map(|m| espaces_normalises(&sans_echappements_x(m)))
                 .filter(|m| !m.is_empty())
-                .or_else(|| udev.get("ID_MODEL").map(|m| m.replace('_', " ")))
+                // ID_MODEL tel quel, comme lsblk : pour un NVMe, udev y met le vrai nom (« WD_BLACK SN7100 »),
+                // dont le « _ » fait partie.
+                .or_else(|| udev.get("ID_MODEL").map(|m| espaces_normalises(m)))
+                .filter(|m| !m.is_empty())
+                .or_else(|| Some(lire("device/model")).filter(|m| !m.is_empty()))
                 .unwrap_or_default();
             // NVMe donne sa série dans sysfs ; pour SATA et USB, seul udev la garde (lisible par tous).
             let serie = Some(lire("device/serial"))
@@ -686,6 +695,30 @@ fn bus(bloc: &Path, udev: &HashMap<String, String>) -> String {
         _ if traverse("ata") => "sata".into(),
         _ => udev.get("ID_BUS").cloned().unwrap_or_default(),
     }
+}
+
+/// « \xNN » remis en octet, comme le fait lsblk (udev écrit ainsi espaces et octets non imprimables) ; le
+/// reste tel quel.
+fn sans_echappements_x(texte: &str) -> String {
+    let o = texte.as_bytes();
+    let mut sortie = Vec::with_capacity(o.len());
+    let mut i = 0;
+    while i < o.len() {
+        let octet = o
+            .get(i..i + 4)
+            .filter(|e| e.starts_with(b"\\x"))
+            .and_then(|e| u8::from_str_radix(std::str::from_utf8(&e[2..]).ok()?, 16).ok());
+        let (b, pas) = octet.map_or((o[i], 1), |b| (b, 4));
+        sortie.push(b);
+        i += pas;
+    }
+    String::from_utf8_lossy(&sortie).into_owned()
+}
+
+/// Les espaces du début et de la fin retirés, ceux du milieu réduits à un : ID_MODEL_ENC garde le bourrage du
+/// champ ATA (« Samsung\x20SSD\x20870\x20EVO\x201TB\x20\x20… »), que lsblk retire de la même façon.
+fn espaces_normalises(texte: &str) -> String {
+    texte.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 /// Les propriétés d'un fichier /run/udev/data : lignes « E:CLÉ=valeur ».
@@ -1249,17 +1282,35 @@ mod tests {
             "/run/udev/data/b8:0",
             "S:disk/by-id/usb-x\nE:ID_BUS=usb\nE:ID_SERIAL_SHORT=ALICE42\n",
         );
+        // Un disque SATA : sysfs coupe le modèle à 16 octets, udev le garde entier (bourré d'espaces).
+        let sata = d.join("sys/devices/pci0000:00/ata1/host0/target0:0:0/0:0:0:0");
+        std::fs::create_dir_all(&sata).unwrap();
+        let bloc = sous(&d, "/sys/block/sdb");
+        std::fs::create_dir_all(bloc.join("queue")).unwrap();
+        symlink(&sata, bloc.join("device")).unwrap();
+        w("/sys/block/sdb/dev", "8:16\n");
+        w("/sys/block/sdb/size", "100\n");
+        w("/sys/block/sdb/device/model", "Disque Essai 870\n");
+        w(
+            "/run/udev/data/b8:16",
+            "E:ID_MODEL=Disque_Essai_870_EVO_1TB\n\
+             E:ID_MODEL_ENC=Disque\\x20Essai\\x20870\\x20EVO\\x201TB\\x20\\x20\\x20\n",
+        );
         w("/sys/block/sr0/size", "2097151\n");
         w("/sys/block/sr0/queue/rotational", "1\n");
         w("/sys/block/sr0/removable", "1\n");
         w("/sys/block/sr0/device/type", "5\n");
-        w("/run/udev/data/b11:0", "E:ID_MODEL=Graveur_DVD\n");
+        w("/run/udev/data/b11:0", "E:ID_MODEL=Graveur_DVD  Essai \n");
         w("/sys/block/dm-0/size", "100\n");
         w("/sys/block/loop0/size", "0\n");
         let l = disques_sous(&d);
         assert_eq!(
             l.iter().map(|x| x.nom.as_str()).collect::<Vec<_>>(),
-            ["dm-0", "loop0", "nvme0n1", "sda", "sr0"]
+            ["dm-0", "loop0", "nvme0n1", "sda", "sdb", "sr0"]
+        );
+        assert_eq!(
+            l[4].modele, "Disque Essai 870 EVO 1TB",
+            "le modèle ATA entier, pas celui de sysfs"
         );
         let nvme = &l[2];
         assert_eq!(
@@ -1282,10 +1333,10 @@ mod tests {
             (true, true, "usb", "ALICE42")
         );
         assert_eq!(cle.modele, "ProductCode");
-        let dvd = &l[4];
+        let dvd = &l[5];
         assert_eq!(
             (dvd.genre.as_str(), dvd.bus.as_str(), dvd.modele.as_str()),
-            ("rom", "sata", "Graveur DVD")
+            ("rom", "sata", "Graveur_DVD Essai")
         );
         assert_eq!((l[0].genre.as_str(), l[0].bus.as_str()), ("dm", ""));
         assert_eq!(l[1].genre, "loop");
