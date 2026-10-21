@@ -203,30 +203,80 @@ mod systeme {
             .collect()
     }
 
+    /// Les plantages d'après `coredumpctl list` : (programme, numéro du processus). Le numéro suit l'heure et
+    /// le fuseau (« Tue 2026-10-20 21:11:28 EDT 9543 … »). Sans numéro lisible, le plantage compte quand même.
+    pub(super) fn plantages_coredumpctl(texte: &str) -> Vec<(String, Option<u32>)> {
+        let noms = programmes_coredumpctl(texte);
+        let pids = texte.lines().filter(|l| l.contains(" /")).map(|l| {
+            // Après l'heure vient le fuseau, en un mot, puis le numéro.
+            let mut mots = l.split_whitespace().skip_while(|m| m.matches(':').count() != 2).skip(2);
+            mots.next().and_then(|m| m.parse().ok())
+        });
+        noms.into_iter().zip(pids).collect()
+    }
+
     /// Où systemd-coredump range les vidages de mémoire des programmes plantés.
     const VIDAGES: &str = "/var/lib/systemd/coredump";
 
-    /// Les programmes plantés depuis `depuis` (microsecondes depuis 1970), d'après les noms des vidages :
-    /// (programme, numéro du processus). `None` si le dossier ne se lit pas (systemd-coredump absent, ou réglé pour
-    /// ne rien garder sur le disque) : coredumpctl, qui lit le journal, prend alors le relais.
-    pub(super) fn plantages_coredump(dossier: &std::path::Path, depuis: u64) -> Option<Vec<(String, u32)>> {
-        let mut plantages: Vec<(u64, String, u32)> = std::fs::read_dir(dossier)
+    /// Les vidages gardés sur le disque depuis `depuis` (microsecondes depuis 1970) : (programme, numéro du
+    /// processus), du plus ancien au plus récent. Ce n'est qu'une borne basse : le dossier existe toujours (tmpfiles
+    /// le crée), même quand coredump.conf dit Storage=journal ou none, et systemd-coredump n'y garde ni un vidage
+    /// trop gros (ExternalSizeMax) ni ceux qu'il efface pour la place (MaxUse, KeepFree). Le programme est la fin
+    /// du chemin de l'attribut « user.coredump.exe » que `exe` lit, comme la colonne EXE de coredumpctl : le nom
+    /// du fichier ne porte que le nom court du fil qui a planté (15 octets, « gnome-keyring-d », « Isolated Web
+    /// Co »). `None` si le dossier ne se lit pas ou si un vidage de la semaine n'a pas cet attribut.
+    pub(super) fn plantages_coredump(
+        dossier: &std::path::Path,
+        depuis: u64,
+        exe: impl Fn(&std::path::Path) -> Option<Vec<u8>>,
+    ) -> Option<Vec<(String, u32)>> {
+        let mut plantages: Vec<(u64, std::path::PathBuf, u32)> = std::fs::read_dir(dossier)
             .ok()?
             .flatten()
-            .filter_map(|e| vidage(&e.file_name().to_string_lossy()))
+            .filter_map(|e| {
+                let (quand, pid) = vidage(&e.file_name().to_string_lossy())?;
+                Some((quand, e.path(), pid))
+            })
             .filter(|(quand, ..)| *quand >= depuis)
             .collect();
         // Du plus ancien au plus récent, comme coredumpctl.
         plantages.sort();
-        Some(plantages.into_iter().map(|(_, nom, pid)| (nom, pid)).collect())
+        plantages
+            .into_iter()
+            .map(|(_, chemin, pid)| {
+                let chemin_exe = String::from_utf8_lossy(&exe(&chemin)?).into_owned();
+                let nom = chemin_exe.rsplit('/').next().unwrap_or_default();
+                (!nom.is_empty()).then(|| (affichable(nom), pid))
+            })
+            .collect()
+    }
+
+    /// L'attribut étendu « user.coredump.exe » qu'écrit systemd-coredump sur chaque vidage (avec .comm, .pid…) :
+    /// le chemin du programme. Lisible par qui peut lire le fichier.
+    pub(super) fn attribut_exe(chemin: &std::path::Path) -> Option<Vec<u8>> {
+        use std::os::unix::ffi::OsStrExt;
+        let c = std::ffi::CString::new(chemin.as_os_str().as_bytes()).ok()?;
+        let mut tampon = vec![0u8; 4096];
+        // SAFETY: c et le nom sont des chaînes C terminées par un octet nul ; le tampon est à nous, de la taille
+        // annoncée.
+        let n = unsafe {
+            libc::getxattr(
+                c.as_ptr(),
+                c"user.coredump.exe".as_ptr(),
+                tampon.as_mut_ptr().cast(),
+                tampon.len(),
+            )
+        };
+        tampon.truncate(usize::try_from(n).ok()?);
+        Some(tampon)
     }
 
     /// Le nom d'un vidage : « core.<programme>.<compte>.<démarrage>.<processus>.<µs depuis 1970> », puis la
     /// compression (« .zst », « .xz », « .lz4 ») ou rien. systemd y écrit les points, barres obliques et espaces du
-    /// nom en « \x2e », « \x2f », « \x20 » : le premier champ est le nom entier. Ce nom est le nom court du
-    /// processus (/proc/<pid>/comm, coupé à 15 octets par le noyau), choisi par le programme : lu prêt à montrer.
+    /// nom en « \x2e », « \x2f », « \x20 ». Ce nom est celui du fil qui a planté, coupé à 15 octets : on n'en
+    /// garde que l'heure et le numéro du processus (le programme vient de l'attribut « user.coredump.exe »).
     /// Un fichier en cours d'écriture (« .#core… ») ou étranger n'a pas cette forme et ne compte pas.
-    pub(super) fn vidage(nom: &str) -> Option<(u64, String, u32)> {
+    pub(super) fn vidage(nom: &str) -> Option<(u64, u32)> {
         let champs: Vec<&str> = nom.strip_prefix("core.")?.split('.').collect();
         let [programme, compte, demarrage, pid, quand, ..] = champs[..] else {
             return None;
@@ -235,42 +285,56 @@ mod systeme {
         if !chiffres(compte) || demarrage.len() != 32 || !demarrage.bytes().all(|o| o.is_ascii_hexdigit()) {
             return None;
         }
-        Some((
-            quand.parse().ok()?,
-            affichable(&sans_echappements_x(programme)),
-            pid.parse().ok()?,
-        ))
-    }
-
-    /// « \xNN » remis en octet ; le reste tel quel.
-    fn sans_echappements_x(texte: &str) -> String {
-        let o = texte.as_bytes();
-        let mut sortie = Vec::with_capacity(o.len());
-        let mut i = 0;
-        while i < o.len() {
-            let octet = o
-                .get(i..i + 4)
-                .filter(|e| e.starts_with(b"\\x"))
-                .and_then(|e| u8::from_str_radix(std::str::from_utf8(&e[2..]).ok()?, 16).ok());
-            let (b, pas) = octet.map_or((o[i], 1), |b| (b, 4));
-            sortie.push(b);
-            i += pas;
+        if programme.is_empty() {
+            return None;
         }
-        String::from_utf8_lossy(&sortie).into_owned()
+        Some((quand.parse().ok()?, pid.parse().ok()?))
     }
 
-    /// Les programmes plantés en 7 jours : les vidages du disque, sinon le journal par coredumpctl.
-    fn plantages_de_la_semaine() -> Vec<String> {
+    /// Les plantages de la semaine, des deux sources réunies. Le journal, que coredumpctl lit, voit les
+    /// plantages sans vidage gardé ; le dossier garde ceux dont le journal a déjà perdu la trace. Un plantage
+    /// des deux côtés (même numéro de processus) ne compte qu'une fois. Sans le journal, le dossier seul ne
+    /// prouve que ce qu'il contient : vide, il ne dit pas « aucun » (`None` : non vérifié).
+    pub(super) fn plantages_reunis(
+        dossier: Option<Vec<(String, u32)>>,
+        journal: Option<Vec<(String, Option<u32>)>>,
+    ) -> Option<Vec<String>> {
+        let dossier = dossier.unwrap_or_default();
+        let Some(journal) = journal else {
+            return (!dossier.is_empty()).then(|| dossier.into_iter().map(|(nom, _)| nom).collect());
+        };
+        let vus: std::collections::HashSet<u32> = journal.iter().filter_map(|(_, pid)| *pid).collect();
+        let mut tous: Vec<String> = journal.into_iter().map(|(nom, _)| nom).collect();
+        tous.extend(
+            dossier
+                .into_iter()
+                .filter(|(_, pid)| !vus.contains(pid))
+                .map(|(nom, _)| nom),
+        );
+        Some(tous)
+    }
+
+    /// La liste de coredumpctl, ou `None` s'il est absent ou en échec. Sans aucun plantage, il sort en code 1
+    /// sans rien écrire (avec -q) : c'est une réponse, « aucun » ; une vraie erreur écrit sur la sortie d'erreur.
+    fn journal_coredumpctl() -> Option<String> {
+        let r = crate::commande::lancer(
+            std::process::Command::new("coredumpctl").args(["list", "--no-pager", "-q", "--since=-7d"]),
+            20,
+        )?;
+        let vide = r.code == Some(1) && r.sortie.trim().is_empty() && r.erreurs.trim().is_empty();
+        (r.code == Some(0) || vide).then_some(r.sortie)
+    }
+
+    /// Les programmes plantés en 7 jours ; `None` si rien ne permet de le savoir.
+    fn plantages_de_la_semaine() -> Option<Vec<String>> {
         let maintenant = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |d| u64::try_from(d.as_micros()).unwrap_or(u64::MAX));
         let depuis = maintenant.saturating_sub(7 * 86_400 * 1_000_000);
-        match plantages_coredump(std::path::Path::new(VIDAGES), depuis) {
-            Some(l) => l.into_iter().map(|(nom, _)| nom).collect(),
-            None => programmes_coredumpctl(
-                &sortie("coredumpctl", &["list", "--no-pager", "-q", "--since=-7d"]).unwrap_or_default(),
-            ),
-        }
+        plantages_reunis(
+            plantages_coredump(std::path::Path::new(VIDAGES), depuis, attribut_exe),
+            journal_coredumpctl().map(|t| plantages_coredumpctl(&t)),
+        )
     }
 
     pub fn sections() -> Vec<Section> {
@@ -386,7 +450,16 @@ mod systeme {
                 tr!("journal illisible sans droits", "journal unreadable without rights"),
             )),
         }
-        problemes.push(super::programmes_plantes(&plantages_de_la_semaine()));
+        problemes.push(match plantages_de_la_semaine() {
+            Some(plantages) => super::programmes_plantes(&plantages),
+            None => ligne(
+                tr!("Programmes plantés", "Crashed programs"),
+                tr!(
+                    "non vérifié (journal des plantages illisible)",
+                    "not verified (crash journal unreadable)"
+                ),
+            ),
+        });
         let en_echec: Vec<String> = sortie("systemctl", &["--failed", "--no-legend", "--plain"])
             .unwrap_or_default()
             .lines()
@@ -1052,14 +1125,21 @@ mod tests {
             systeme::ligne_de_disque(&cle),
             "sdb · 28,9 Go · clé ou disque USB · Cle�]0;x��"
         );
-        let vidage = format!(
-            "core.x\x1b]52;c;eA==\x07.1000.{}.4242.1790000000000000.zst",
-            "0".repeat(32)
-        );
+        // Le chemin du programme planté vient d'un attribut que le programme choisit (son nom de fichier).
+        let d = std::env::temp_dir().join(format!("vanguard-diagnostic-vidage-piege-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        std::fs::write(
+            d.join(format!("core.x.1000.{}.4242.1790000000000000.zst", "0".repeat(32))),
+            "",
+        )
+        .unwrap();
+        let piege = |_: &std::path::Path| Some(b"/opt/x\x1b]52;c;eA==\x07".to_vec());
         assert_eq!(
-            systeme::vidage(&vidage).map(|(_, nom, _)| nom).as_deref(),
-            Some("x�]52;c;eA==�")
+            systeme::plantages_coredump(&d, 0, piege),
+            Some(vec![("x�]52;c;eA==�".to_string(), 4242)])
         );
+        let _ = std::fs::remove_dir_all(&d);
     }
 
     /// Une entrée de plusieurs lignes (la pile d'un programme planté, écrite par systemd-coredump au niveau « crit »)
@@ -1116,21 +1196,21 @@ mod tests {
         );
     }
 
-    /// Les vidages de systemd-coredump : le nom du programme d'abord, ses points et espaces écrits « \x2e » et
-    /// « \x20 » ; un fichier en cours d'écriture ou d'une autre forme ne compte pas.
+    /// Les noms des vidages de systemd-coredump : l'heure et le numéro du processus ; un fichier en cours
+    /// d'écriture ou d'une autre forme ne compte pas.
     #[cfg(target_os = "linux")]
     #[test]
     fn noms_des_vidages() {
         let demarrage = "0123456789abcdef0123456789abcdef";
         assert_eq!(
             systeme::vidage(&format!("core.firefox.1000.{demarrage}.513823.1790000000000000.zst")),
-            Some((1_790_000_000_000_000, "firefox".to_string(), 513_823))
+            Some((1_790_000_000_000_000, 513_823))
         );
         assert_eq!(
             systeme::vidage(&format!(
                 "core.Jeu\\x20Essai\\x2ebin.1000.{demarrage}.42.1790000000000001"
             )),
-            Some((1_790_000_000_000_001, "Jeu Essai.bin".to_string(), 42)),
+            Some((1_790_000_000_000_001, 42)),
             "sans compression"
         );
         for etranger in [
@@ -1144,35 +1224,102 @@ mod tests {
         }
     }
 
-    /// Le dossier des vidages : ceux de la semaine seulement, du plus ancien au plus récent ; un dossier absent ne
-    /// se lit pas (`None` : coredumpctl prend le relais), un dossier vide dit « aucun ».
+    /// Le dossier des vidages : ceux de la semaine seulement, du plus ancien au plus récent, nommés par la fin du
+    /// chemin de « user.coredump.exe » et non par le nom coupé du fichier. Un dossier absent, ou un vidage sans
+    /// cet attribut, ne se lit pas (`None`).
     #[cfg(target_os = "linux")]
     #[test]
     fn vidages_de_la_semaine() {
         let d = std::env::temp_dir().join(format!("vanguard-diagnostic-vidages-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
-        assert_eq!(systeme::plantages_coredump(&d, 0), Some(vec![]));
         let demarrage = "0123456789abcdef0123456789abcdef";
-        for (programme, pid, quand) in [("jeu", 3, 300), ("vieux", 1, 100), ("pwsh", 2, 200)] {
-            std::fs::write(
-                d.join(format!("core.{programme}.1000.{demarrage}.{pid}.{quand}.zst")),
-                "",
-            )
-            .unwrap();
+        let exe = |c: &std::path::Path| -> Option<Vec<u8>> {
+            let nom = c.file_name()?.to_string_lossy().into_owned();
+            let chemin = match nom.split('.').nth(1)? {
+                "gnome-keyring-d" => "/usr/bin/gnome-keyring-daemon",
+                "Isolated\\x20Web\\x20Co" => "/usr/lib/firefox/firefox",
+                "vieux" => "/usr/bin/vieux",
+                _ => return None,
+            };
+            Some(chemin.as_bytes().to_vec())
+        };
+        assert_eq!(systeme::plantages_coredump(&d, 0, exe), Some(vec![]));
+        for (comm, pid, quand) in [
+            ("Isolated Web Co", 3, 300),
+            ("vieux", 1, 100),
+            ("gnome-keyring-d", 2, 200),
+        ] {
+            let comm = comm.replace(' ', "\\x20");
+            std::fs::write(d.join(format!("core.{comm}.1000.{demarrage}.{pid}.{quand}.zst")), "").unwrap();
         }
         assert_eq!(
-            systeme::plantages_coredump(&d, 200),
-            Some(vec![("pwsh".to_string(), 2), ("jeu".to_string(), 3)])
+            systeme::plantages_coredump(&d, 200, exe),
+            Some(vec![
+                ("gnome-keyring-daemon".to_string(), 2),
+                ("firefox".to_string(), 3)
+            ])
         );
-        assert_eq!(systeme::plantages_coredump(&d.join("absent"), 0), None);
+        std::fs::write(d.join(format!("core.sans.1000.{demarrage}.4.400.zst")), "").unwrap();
+        assert_eq!(
+            systeme::plantages_coredump(&d, 200, exe),
+            None,
+            "un vidage sans attribut"
+        );
+        assert_eq!(systeme::plantages_coredump(&d.join("absent"), 0, exe), None);
         let _ = std::fs::remove_dir_all(&d);
     }
 
+    /// Les numéros des processus de `coredumpctl list`, après l'heure, quel que soit le fuseau.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn numeros_de_coredumpctl() {
+        let liste = "Tue 2026-10-20 21:11:28 EDT    9543 1000 1000 SIGSEGV present  /usr/bin/x  10.8M\n\
+                     Tue 2026-10-20 21:12:00 +03     77 1000 1000 SIGABRT missing  /opt/Mon Jeu/jeu  -\n\
+                     Tue 2026-10-20 21:13:00 CEST   abc 1000 1000 SIGABRT none     /usr/bin/z  -\n";
+        let entete = "TIME PID UID GID SIG COREFILE EXE SIZE\n";
+        assert_eq!(
+            systeme::plantages_coredumpctl(&format!("{entete}{liste}")),
+            [
+                ("x".to_string(), Some(9543)),
+                ("jeu".to_string(), Some(77)),
+                ("z".to_string(), None)
+            ]
+        );
+    }
+
+    /// Les deux sources réunies : un dossier vide face à des plantages du journal (Storage=journal, vidage trop
+    /// gros ou effacé) ne dit pas « aucun » ; un plantage des deux côtés compte une fois ; sans journal, un
+    /// dossier vide ou illisible n'est pas une preuve (`None`), un dossier plein si.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn plantages_des_deux_sources() {
+        let journal = vec![("jeu".to_string(), Some(7)), ("jeu".to_string(), Some(8))];
+        assert_eq!(
+            systeme::plantages_reunis(Some(vec![]), Some(journal.clone())),
+            Some(vec!["jeu".to_string(), "jeu".to_string()]),
+            "Storage=journal : le dossier est vide"
+        );
+        assert_eq!(
+            systeme::plantages_reunis(
+                Some(vec![("jeu".to_string(), 8), ("vieux".to_string(), 3)]),
+                Some(journal)
+            ),
+            Some(vec!["jeu".to_string(), "jeu".to_string(), "vieux".to_string()])
+        );
+        assert_eq!(systeme::plantages_reunis(Some(vec![]), Some(vec![])), Some(vec![]));
+        assert_eq!(systeme::plantages_reunis(Some(vec![]), None), None);
+        assert_eq!(systeme::plantages_reunis(None, None), None);
+        assert_eq!(
+            systeme::plantages_reunis(Some(vec![("x".to_string(), 1)]), None),
+            Some(vec!["x".to_string()])
+        );
+    }
+
     /// Sur cet ordinateur, chaque plantage dont coredumpctl a gardé le vidage (« present ») est aussi dans le
-    /// dossier, quand il est là. L'inverse ne se compare pas : le journal, que coredumpctl lit, perd ses plus
-    /// vieilles entrées bien avant que les vidages ne soient effacés. Six jours plutôt que sept : un vidage à la
-    /// limite pourrait sortir de la fenêtre entre les deux lectures.
+    /// dossier, sous le même nom de programme, quand il est là. L'inverse ne se compare pas : le journal, que
+    /// coredumpctl lit, perd ses plus vieilles entrées bien avant que les vidages ne soient effacés. Six jours
+    /// plutôt que sept : un vidage à la limite pourrait sortir de la fenêtre entre les deux lectures.
     #[cfg(target_os = "linux")]
     #[test]
     fn vidages_comme_coredumpctl() {
@@ -1188,17 +1335,22 @@ mod tests {
             .unwrap()
             .as_micros();
         let depuis = u64::try_from(maintenant).unwrap() - 7 * 86_400 * 1_000_000;
-        let Some(natifs) = systeme::plantages_coredump(std::path::Path::new("/var/lib/systemd/coredump"), depuis)
-        else {
+        let Some(natifs) = systeme::plantages_coredump(
+            std::path::Path::new("/var/lib/systemd/coredump"),
+            depuis,
+            systeme::attribut_exe,
+        ) else {
             return;
         };
-        let pids: std::collections::HashSet<u32> = natifs.iter().map(|(_, pid)| *pid).collect();
-        for l in r.sortie.lines().skip(1) {
+        let journal = systeme::plantages_coredumpctl(&r.sortie);
+        for (l, (nom, pid)) in r.sortie.lines().filter(|l| l.contains(" /")).zip(&journal) {
             // « Tue 2026-10-20 21:11:28 EDT 9543 1000 1000 SIGSEGV present /usr/bin/x 10.8M »
-            let c: Vec<&str> = l.split_whitespace().collect();
-            if c.get(8) == Some(&"present") {
-                let pid: u32 = c[4].parse().unwrap();
-                assert!(pids.contains(&pid), "{l} absent du dossier : {natifs:?}");
+            if l.split_whitespace().nth(8) == Some("present") {
+                let pid = pid.unwrap_or_else(|| panic!("{l} : numéro illisible"));
+                assert!(
+                    natifs.contains(&(nom.clone(), pid)),
+                    "{l} absent du dossier : {natifs:?}"
+                );
             }
         }
     }
