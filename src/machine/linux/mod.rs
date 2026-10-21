@@ -16,7 +16,7 @@ mod docker;
 mod durcissement;
 pub(crate) mod ecoute;
 mod maj;
-mod natif;
+pub(crate) mod natif;
 mod persistance;
 mod plateforme;
 mod privileges;
