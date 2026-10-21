@@ -68,21 +68,40 @@ impl Valeur {
     }
 }
 
-/// Un plist binaire que le lecteur refuse : pour ses bornes (trop d'objets, trop profond, références qui bouclent ou
-/// qui multiplient les copies), ou parce qu'il est abîmé ou d'un type inconnu. Les deux sont confondus à dessein :
-/// un fichier qui place un type inconnu avant l'amplification passerait pour « format inconnu » et irait chez
-/// `plutil`, qui développerait les références sans limite. Le texte du bilan dit donc « illisible ou fabriqué ».
-fn hostile(octets: &[u8]) -> bool {
-    octets.starts_with(b"bplist00") && binaire::lire(octets).is_none()
+/// Ce que donne une lecture en mémoire, avec la raison d'un refus.
+enum Lecture {
+    Lue(Valeur),
+    /// Refusé pour ses bornes (trop de valeurs, trop profond, références qui bouclent ou qui multiplient les copies),
+    /// ou plist binaire abîmé ou d'un type inconnu. Pour le binaire, les deux sont confondus à dessein : un fichier
+    /// qui place un type inconnu avant l'amplification passerait pour « format inconnu » et irait chez `plutil`, qui
+    /// développerait les références sans limite. Le texte du bilan dit donc « illisible ou fabriqué ». Un XML qui
+    /// dépasse les bornes l'est aussi : `plutil` le rendrait tel quel, et le même lecteur le refuserait encore.
+    Hostile,
+    /// XML mal formé ou format inconnu : `plutil` peut encore essayer.
+    Inconnue,
+}
+
+fn lecture(octets: &[u8]) -> Lecture {
+    if octets.starts_with(b"bplist00") {
+        return binaire::lire(octets).map_or(Lecture::Hostile, Lecture::Lue);
+    }
+    let Ok(texte) = std::str::from_utf8(octets) else {
+        return Lecture::Inconnue;
+    };
+    let mut hors_bornes = false;
+    match xml::lire(texte.strip_prefix('\u{feff}').unwrap_or(texte), &mut hors_bornes) {
+        Some(v) => Lecture::Lue(v),
+        None if hors_bornes => Lecture::Hostile,
+        None => Lecture::Inconnue,
+    }
 }
 
 /// Un plist en mémoire, binaire ou XML. `None` : format inconnu, fichier abîmé ou hors des bornes.
 pub fn lire(octets: &[u8]) -> Option<Valeur> {
-    if octets.starts_with(b"bplist00") {
-        return binaire::lire(octets);
+    match lecture(octets) {
+        Lecture::Lue(v) => Some(v),
+        Lecture::Hostile | Lecture::Inconnue => None,
     }
-    let texte = std::str::from_utf8(octets).ok()?;
-    xml::lire(texte.strip_prefix('\u{feff}').unwrap_or(texte))
 }
 
 /// Ce qu'un fichier plist a donné. Tout vient d'une seule lecture bornée : le fichier n'est jamais rouvert pour en
@@ -93,9 +112,9 @@ pub enum Lu {
     Plist(Valeur),
     /// Plus de 8 Mo : aucun fichier de réglages ne fait cette taille ; fabriqué pour gêner l'analyse.
     TropGros,
-    /// Plist binaire refusé : par les bornes (références qui bouclent ou qui multiplient les copies), fabriqué pour
-    /// gêner l'analyse, ou abîmé (voir `hostile`). À ne jamais confier à `plutil`, qui développerait les références
-    /// sans limite.
+    /// Refusé par les bornes (XML ou binaire : trop de valeurs, trop profond, références qui bouclent ou qui
+    /// multiplient les copies), fabriqué pour gêner l'analyse, ou binaire abîmé (voir `Lecture::Hostile`). À ne
+    /// jamais confier à `plutil`, qui développerait les références sans limite.
     Hostile,
     /// Format inconnu ou fichier abîmé : `plutil` peut encore essayer en secours.
     Inconnu,
@@ -125,14 +144,14 @@ pub fn lire_fichier(chemin: &Path) -> std::io::Result<Lu> {
     }
     let mut octets = Vec::new();
     fichier.take(TAILLE_MAX + 1).read_to_end(&mut octets)?;
-    Ok(if octets.len() as u64 > TAILLE_MAX {
-        Lu::TropGros
-    } else if let Some(v) = lire(&octets) {
-        Lu::Plist(v)
-    } else if hostile(&octets) {
-        Lu::Hostile
-    } else {
-        Lu::Inconnu
+    if octets.len() as u64 > TAILLE_MAX {
+        return Ok(Lu::TropGros);
+    }
+    // Une seule passe : un fichier piégé n'est pas relu une seconde fois pour savoir pourquoi il a été refusé.
+    Ok(match lecture(&octets) {
+        Lecture::Lue(v) => Lu::Plist(v),
+        Lecture::Hostile => Lu::Hostile,
+        Lecture::Inconnue => Lu::Inconnu,
     })
 }
 
@@ -158,9 +177,9 @@ mod binaire {
         copies: usize,
     }
 
-    impl Lecteur<'_> {
+    impl<'a> Lecteur<'a> {
         /// `n` octets à partir de `debut`, sans déborder sur la table des positions.
-        fn tranche(&self, debut: usize, n: usize) -> Option<&[u8]> {
+        fn tranche(&self, debut: usize, n: usize) -> Option<&'a [u8]> {
             let fin = debut.checked_add(n)?;
             (fin <= self.table).then(|| &self.octets[debut..fin])
         }
@@ -186,13 +205,18 @@ mod binaire {
             (self.copies <= COPIES_MAX).then_some(())
         }
 
-        /// Les objets cités par une suite de `n` références à partir de `debut`.
-        fn references(&self, debut: usize, n: usize) -> Option<Vec<usize>> {
-            let octets = self.tranche(debut, n.checked_mul(self.taille_reference)?)?;
-            octets
-                .chunks_exact(self.taille_reference)
-                .map(|r| usize::try_from(entier(r)?).ok())
-                .collect()
+        /// La suite de `n` références qui commence à `debut`, vérifiée entière dans le fichier mais pas copiée : une
+        /// liste annoncée de 8 millions de références vers elle-même, recopiée à chaque niveau d'imbrication,
+        /// demandait des gigaoctets avant que le compte des valeurs lues ne l'arrête. Chacune est lue au moment de
+        /// s'en servir, et chaque objet cité compte dans `lues`.
+        fn references(&self, debut: usize, n: usize) -> Option<&'a [u8]> {
+            self.tranche(debut, n.checked_mul(self.taille_reference)?)
+        }
+
+        /// La `i`-ième référence d'une suite rendue par `references`.
+        fn reference(&self, suite: &[u8], i: usize) -> Option<usize> {
+            let r = suite.get(i * self.taille_reference..(i + 1) * self.taille_reference)?;
+            usize::try_from(entier(r)?).ok()
         }
 
         fn objet(&mut self, index: usize, profondeur: usize) -> Option<Valeur> {
@@ -250,8 +274,10 @@ mod binaire {
                 // Tableau ou ensemble.
                 (0xA | 0xC, _) => {
                     let (n, d) = self.longueur(info, corps)?;
+                    let suite = self.references(d, n)?;
                     let mut valeurs = Vec::new();
-                    for r in self.references(d, n)? {
+                    for i in 0..n {
+                        let r = self.reference(suite, i)?;
                         valeurs.push(self.objet(r, profondeur + 1)?);
                     }
                     Valeur::Tableau(valeurs)
@@ -259,13 +285,13 @@ mod binaire {
                 (0xD, _) => {
                     let (n, d) = self.longueur(info, corps)?;
                     let cles = self.references(d, n)?;
-                    let valeurs = self.references(d + n * self.taille_reference, n)?;
+                    let valeurs = self.references(d.checked_add(cles.len())?, n)?;
                     let mut paires = Vec::new();
-                    for (c, v) in cles.into_iter().zip(valeurs) {
-                        let Valeur::Texte(cle) = self.objet(c, profondeur + 1)? else {
+                    for i in 0..n {
+                        let Valeur::Texte(cle) = self.objet(self.reference(cles, i)?, profondeur + 1)? else {
                             return None;
                         };
-                        paires.push((cle, self.objet(v, profondeur + 1)?));
+                        paires.push((cle, self.objet(self.reference(valeurs, i)?, profondeur + 1)?));
                     }
                     Valeur::Dico(paires)
                 }
@@ -370,7 +396,9 @@ mod xml {
         })
     }
 
-    pub(super) fn lire(texte: &str) -> Option<Valeur> {
+    /// `hors_bornes` passe à vrai quand le refus vient des bornes (trop de valeurs, trop profond) et non d'un fichier
+    /// mal formé : l'appelant le dit hostile au lieu de le confier à `plutil`, qui le rendrait identique.
+    pub(super) fn lire(texte: &str, hors_bornes: &mut bool) -> Option<Valeur> {
         let mut lecteur = quick_xml::Reader::from_str(texte);
         let mut pile: Vec<Ouvert> = Vec::new();
         let mut racine = None;
@@ -382,7 +410,11 @@ mod xml {
             let evenement = lecteur.read_event().ok()?;
             if matches!(evenement, Event::Start(_) | Event::Empty(_)) {
                 lues += 1;
-                if lues > VALEURS_MAX || pile.len() >= PROFONDEUR_MAX || courant.is_some() {
+                if lues > VALEURS_MAX || pile.len() >= PROFONDEUR_MAX {
+                    *hors_bornes = true;
+                    return None;
+                }
+                if courant.is_some() {
                     return None;
                 }
             }
@@ -598,10 +630,13 @@ mod tests {
         let piege = bplist(&[tableau, donnee], 0);
         assert!(piege.len() < 70_000);
         assert_eq!(lire(&piege), None);
-        assert!(hostile(&piege));
-        // Un plist binaire ordinaire n'est pas hostile ; un XML refusé n'est pas « binaire hostile ».
-        assert!(!hostile(&bplist(&[ascii("ok")], 0)));
-        assert!(!hostile(b"<plist><string>&a;</string></plist>"));
+        assert!(matches!(lecture(&piege), Lecture::Hostile));
+        // Un plist binaire ordinaire n'est pas hostile ; un XML mal formé non plus (plutil peut essayer).
+        assert!(matches!(lecture(&bplist(&[ascii("ok")], 0)), Lecture::Lue(_)));
+        assert!(matches!(
+            lecture(b"<plist><string>&a;</string></plist>"),
+            Lecture::Inconnue
+        ));
         // Le même tableau avec 200 références reste sous le budget : lu.
         let petit = {
             let mut o = vec![0xAF, 0x11];
@@ -616,6 +651,50 @@ mod tests {
             o
         };
         assert!(lire(&bplist(&[petit, donnee], 0)).is_some());
+    }
+
+    /// Un tableau de 8 millions de références vers lui-même (8 Mo) : chaque niveau d'imbrication recopiait toute la
+    /// liste (64 Mo) avant de compter quoi que ce soit, 4 Go en tout. Refusé sans rien copier.
+    #[test]
+    fn longue_liste_de_references_jamais_copiee() {
+        let n: u64 = 8_000_000;
+        let mut o = b"bplist00".to_vec();
+        // Objet 0 : tableau (0xAF), longueur sur un entier de 8 octets (0x13), toutes les références vers l'objet 0.
+        o.extend([0xAF, 0x13]);
+        o.extend(n.to_be_bytes());
+        o.extend(std::iter::repeat_n(0u8, usize::try_from(n).unwrap()));
+        let table = o.len();
+        // Table d'une position sur un octet (l'objet 0 commence à 8), puis la queue.
+        o.push(8);
+        o.extend([0; 6]);
+        o.extend([1, 1]);
+        o.extend(1u64.to_be_bytes());
+        o.extend(0u64.to_be_bytes());
+        o.extend(u64::try_from(table).unwrap().to_be_bytes());
+        assert!(o.len() as u64 <= TAILLE_MAX);
+        let debut = std::time::Instant::now();
+        assert!(matches!(lecture(&o), Lecture::Hostile));
+        assert!(debut.elapsed() < std::time::Duration::from_secs(5));
+        // Une liste annoncée plus longue que le fichier reste refusée d'emblée.
+        let mut tronque = o.clone();
+        tronque[10..18].copy_from_slice(&(n * 2).to_be_bytes());
+        assert_eq!(lire(&tronque), None);
+    }
+
+    /// Un XML valide pour launchd, gonflé d'un tableau de 250 000 <true/> (1,75 Mo) : refusé par les bornes, il est
+    /// hostile, jamais « format inconnu » confié à plutil qui le rendrait identique (et l'agent sauté en silence).
+    #[test]
+    fn xml_hors_bornes_hostile() {
+        let gonfle = format!(
+            "<plist><dict><key>ProgramArguments</key><array><string>/bin/bash</string></array><key>Padding</key><array>{}</array></dict></plist>",
+            "<true/>".repeat(250_000)
+        );
+        assert!(matches!(lecture(gonfle.as_bytes()), Lecture::Hostile));
+        let profond = format!("<plist>{}{}</plist>", "<array>".repeat(100), "</array>".repeat(100));
+        assert!(matches!(lecture(profond.as_bytes()), Lecture::Hostile));
+        // Mal formé : pas hostile, plutil peut encore le lire.
+        assert!(matches!(lecture(b"<plist><array>"), Lecture::Inconnue));
+        assert!(matches!(lecture(b"\xff\xfe pas du texte"), Lecture::Inconnue));
     }
 
     #[test]
@@ -754,6 +833,12 @@ mod tests {
         assert_eq!(lire_fichier(&piege).unwrap(), Lu::Hostile);
         std::fs::write(&piege, b"pas un plist").unwrap();
         assert_eq!(lire_fichier(&piege).unwrap(), Lu::Inconnu);
+        std::fs::write(
+            &piege,
+            format!("<plist><array>{}</array></plist>", "<true/>".repeat(250_000)),
+        )
+        .unwrap();
+        assert_eq!(lire_fichier(&piege).unwrap(), Lu::Hostile);
         assert_eq!(
             lire_fichier(&dossier.join("absent.plist")).unwrap_err().kind(),
             std::io::ErrorKind::NotFound
