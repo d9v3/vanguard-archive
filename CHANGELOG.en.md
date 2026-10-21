@@ -6,6 +6,43 @@ What each day brought to Vanguard, most recent first. Since October 19, 2026, Va
 gathering the day's work. Only the latest version has its download page; every version keeps its tag in the
 repository (`git checkout v0.62.0`, for example), to be rebuilt if needed.
 
+## October 21, 2026, evening: version 0.83
+
+- **Live threat hunting.** A successful sign-in from an address that had just failed at least ten passwords: a guessed
+  password, reported as critical (sshd's log on Linux; on Windows, as administrator, the security log for Remote
+  Desktop and shares, and OpenSSH's log; macOS: not checked). A bounded or overlong read is reported as partial, never
+  as safe without a caveat. Suspicious running programs: known offensive tool (Mimikatz, Rubeus, SharpHound, LaZagne,
+  XMRig…), command line that downloads or hides what it runs, program started from Downloads, a temporary folder or
+  the recycle bin; of the line, only the program and the pattern are shown, never a secret written around them.
+- **Incident timeline** in `vanguard evidence` (CHRONOLOGIE.txt): what the collection read with a date, put back in
+  time order over the last 7 days, with the MITRE ATT&CK technique when it is obvious: accepted or refused sign-ins,
+  sudo, created accounts, added services and tasks, cleared logs, Defender detections, recent files that matter. A log
+  that does not go back the whole week says why.
+- **Windows' hidden doors and kernel drivers**: the DLLs Windows loads by itself (LSA packages, AppCertDlls, print
+  monitors, time providers, Winsock catalog); drivers stored where nothing installed puts one, or known to be
+  vulnerable (the LOLDrivers list, once a week). Read-only, without PowerShell.
+- **Program memory** (`vanguard memory`, on demand): the 308 YARA rules applied to the memory of running programs,
+  where "fileless" malware lives, on Linux and Windows (macOS: not checked). The memory of LSASS and protected
+  processes is never read, nothing read is kept, and what could not be read is said.
+- **AI agents**: a local AI server (Ollama, LM Studio, ComfyUI) open to the network without a password; an agent set
+  to do everything without asking, an MCP server started without a pinned version, reached without encryption or with
+  a key written in clear text, in the settings of Claude Code, Claude Desktop, Cursor, VS Code, Windsurf and Gemini
+  CLI (the key's name only, never its value).
+- **Windows fixes without PowerShell**: fifteen hardening settings from a closed list (WDigest, Remote Desktop NLA,
+  NTLMv2 only, LLMNR, WPAD, UAC…) applied by Vanguard itself, relaunched as administrator: Windows' prompt names
+  Vanguard, the restore point comes first and the previous value is recorded to undo exactly; only Enter or yes
+  applies. Mixed with a fix outside the list, they go through the script, as before.
+- **Check my backup**: a copy rewritten after the backup (newer than its original, and different), as by ransomware
+  encrypting the backup disk, is reported as damaged; it passed as "changed since".
+- **Command guide: 1,085 commands**, including Vanguard's own for defending and troubleshooting, and how to check by
+  hand what the new rules report.
+- **More accurate.** On Windows, Vanguard run as administrator believed it had no rights (Windows refused the reading
+  of its elevation, which Wine accepted): `vanguard evidence` left the security log out there. Without journalctl, the
+  evidence also takes the last rotated /var/log file (auth.log.1…). In what starts by itself on Linux, "nc -e" is
+  caught inside ( … ), after ; or & and behind a path, and so is a downloaded script piped to ash, to "sudo -p x sh",
+  to "sudo -s" or to su. The guard against a DLL placed next to the program is required at build time: it could
+  disappear.
+
 ## October 21, 2026: version 0.82
 
 - **Network audit, domain by domain** (`vanguard network-audit`). Six grades: Internet exposure (ports opened by

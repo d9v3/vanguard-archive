@@ -57,6 +57,8 @@ Entrée ouvre celle en surbrillance, Échap efface. Au menu principal, elle trou
        Entretien du mois : une notification par mois (note, mises à jour, place à libérer, problèmes nouveaux)
   5  Réseau et Internet ›
        Scanner le réseau (et démasquer un voleur de mots de passe comme Responder)
+       Audit du réseau : six notes (exposition à Internet, Wi-Fi, séparation des appareils, DNS et certificats,
+         objets connectés, ordinateurs), sans rien attaquer ; fait aussi par le bilan complet (vanguard audit-reseau)
        Scan approfondi d'un appareil · Nommer un appareil (« imprimante HP »)
        Surveillance toutes les heures (appareil inconnu, problème sur cette machine, usurpation de la box,
          empoisonneur de noms, programme arrivé dans Téléchargements)
@@ -72,10 +74,13 @@ Entrée ouvre celle en surbrillance, Échap efface. Au menu principal, elle trou
        Clé USB ou dossier, avec les pièges des vers de clé (faux raccourcis, autorun)
        Analyse YARA : 308 règles de familles de logiciels malveillants (rançongiciels, voleurs de mots de passe…)
          et plus d'un million d'empreintes de logiciels malveillants connus (MalwareBazaar)
+       Mémoire des processus : les règles YARA dans la mémoire des programmes qui tournent (malware sans fichier),
+         à la demande ; la mémoire de LSASS et des processus protégés n'est jamais lue (vanguard memoire)
        Fichiers-pièges : des leurres dans tes dossiers ; un rançongiciel qui les touche déclenche l'alerte
        Blocages de Windows Defender : vol de mots de passe, pièces jointes piégées, sites dangereux, rançongiciels
        Bac à sable : lancer un programme inconnu sans réseau, à l'écart de tes fichiers
        Mots de passe : ont-ils fuité ? (seuls 5 caractères de leur empreinte sont envoyés)
+       Mots de passe des navigateurs : comptés et leur protection décrite, jamais lus ; la vérification de chacun
        Courriel : a-t-il fuité ? (l'adresse est envoyée au service de recherche, après ton accord)
        Qui parle à Internet ? Les connexions de chaque programme, avec le nom du serveur, et les serveurs de
          botnets connus (Feodo Tracker, ThreatFox) ; lecture seule
@@ -122,7 +127,8 @@ Entrée ouvre celle en surbrillance, Échap efface. Au menu principal, elle trou
        Et : après une infection, nouvel ordinateur, ordinateur qui part (vente, don), compte piraté,
        ordinateur d'un proche (trois questions, un résumé en mots simples, la page à laisser ; vanguard proche).
        Collecter les traces avant de nettoyer : processus, connexions, démarrage, journaux, fichiers récents,
-       dans un dossier daté avec leurs empreintes (lecture seule, rien n'est envoyé ; vanguard traces).
+       dans un dossier daté avec leurs empreintes, et la chronologie de l'incident (CHRONOLOGIE.txt) : tout ce
+       qui est daté, dans l'ordre du temps (lecture seule, rien n'est envoyé ; vanguard traces).
        En ligne de commande : vanguard depanner son
   q  Quitter
   Raccourcis des anciennes versions, depuis le menu principal : u mises à jour, r réparer, o diagnostic,
@@ -130,10 +136,12 @@ Entrée ouvre celle en surbrillance, Échap efface. Au menu principal, elle trou
   g gaming, d données.
 
 Le bilan vérifie notamment : pare-feu, ports ouverts, mises à jour, chiffrement, comptes, SSH (ses tentatives de
-connexion ratées, ses algorithmes cassés), Wi-Fi (et faux point d'accès qui copie son nom), programmes lancés au
-démarrage, portes dérobées de Windows et signes de rootkit sous Linux, journaux d'événements de Windows, DNS,
-certificats racine ajoutés, extensions de navigateur, Bluetooth, heure, fin de support, comptes oubliés,
-mots de passe du navigateur, fichiers sensibles, sauvegardes, santé des disques et de la batterie.
+connexion ratées, ses algorithmes cassés), mot de passe deviné (connexion réussie après une rafale d'échecs),
+Wi-Fi (et faux point d'accès qui copie son nom), programmes lancés au démarrage, programmes en marche suspects,
+portes dérobées et portes cachées de Windows (paquets de LSA, moniteurs d'impression…), pilotes vulnérables, signes
+de rootkit sous Linux, journaux d'événements de Windows, agents d'IA trop permissifs, DNS, certificats racine
+ajoutés, extensions de navigateur, Bluetooth, heure, fin de support, comptes oubliés, mots de passe du navigateur,
+fichiers sensibles, sauvegardes, santé des disques et de la batterie.
 
 Langue : français ou anglais selon le système. Pour forcer le français :
   Linux :   VANGUARD_LANG=fr ./vanguard
@@ -143,8 +151,11 @@ Menus décalés dans l'ancienne invite de commandes de Windows : set VANGUARD_EM
 Terminal Windows).
 
 Bon à savoir
-  - Les corrections ne sont jamais appliquées sans ta confirmation. Sous Windows, chacune est d'abord écrite
-    dans un script lisible (le chemin est affiché) et demande l'accord administrateur.
+  - Les corrections ne sont jamais appliquées sans ta confirmation. Sous Windows, quinze réglages d'une liste
+    fermée (WDigest, NLA du Bureau à distance, NTLMv2, LLMNR, UAC…) sont faits par Vanguard lui-même, relancé en
+    administrateur : la fenêtre de Windows le nomme, et seuls Entrée ou oui les appliquent. Les autres corrections,
+    et celles choisies avec elles, sont d'abord écrites dans un script lisible (le chemin est affiché). Toutes
+    demandent l'accord administrateur.
   - Avant la première correction, mise à jour ou réparation qui modifie le système, un point de restauration est
     créé automatiquement (snapper ou timeshift sous Linux, point de restauration sous Windows, instantané local
     de Time Machine sous macOS).

@@ -27,7 +27,7 @@ modification. Sur GitHub, `@claude` dans un ticket ou une demande de fusion le f
 | `src/plist.rs` | lecteur des plist d'Apple, XML et binaires (« bplist00 »), à la place de defaults et plutil ; borné contre un fichier hostile (taille, profondeur, nombre de valeurs, références qui bouclent) |
 | `src/machine/windows/portes.rs`, `evenements.rs` | portes dérobées classiques (débogueur sur un programme d'accessibilité de l'écran de connexion par IFEO ou SilentProcessExit, sethc et utilman remplacés, Shell et Userinit de Winlogon, AppInit_DLLs, abonnements WMI), corrigées quand l'état d'origine est connu ; journaux d'événements des 7 derniers jours (mots de passe faux en rafale par le réseau, journal de sécurité effacé, comptes créés, services suspects) |
 | `src/machine/linux/dissimulation.rs`, `algorithmes_ssh.rs` | signes de rootkit lus dans /proc et /sys : processus cachés, programmes sans fichier (memfd, effacés, /tmp), module du noyau qui se cache, modules non signés inconnus, carte en mode promiscuité ; algorithmes cassés de sshd (configuration lue dans l'ordre des Include), retirés par `00-vanguard.conf` après `sshd -t` |
-| `src/machine/dns.rs`, `certificats.rs`, `extensions.rs`, `partages.rs`, `sante.rs`, `wifi.rs`, `bluetooth.rs`, `agents_ia.rs` | vérifications communes aux trois systèmes (partages.rs : partages de fichiers ouverts à tout le monde ; bluetooth.rs : ordinateur visible, appareils appairés depuis peu) |
+| `src/machine/dns.rs`, `certificats.rs`, `extensions.rs`, `partages.rs`, `sante.rs`, `wifi.rs`, `bluetooth.rs`, `agents_ia.rs` | vérifications communes aux trois systèmes (partages.rs : partages de fichiers ouverts à tout le monde ; bluetooth.rs : ordinateur visible, appareils appairés depuis peu ; agents_ia.rs : serveur d'IA local ouvert au réseau, réglages risqués des agents de code et de leurs serveurs MCP, lus sans jamais montrer une valeur secrète) |
 | `src/machine/chasse.rs` | chasse aux menaces en direct, sur les trois systèmes : connexion réussie depuis une adresse qui venait de rater au moins dix mots de passe (journal de sshd sous Linux, 4625 puis 4624 sous Windows ; non vérifié sous macOS) ; programmes en marche suspects (outil offensif connu, ligne de commande qui télécharge ou cache ce qu'elle exécute, programme lancé de Téléchargements, d'un dossier temporaire, Public ou de la corbeille), jugés par des fonctions pures, Vanguard et ce qu'il lance mis à part |
 | `src/machine/wifi/elements.rs`, `nl80211.rs`, `wlanapi.rs`, `profils.rs` | Wi-Fi lu sans programme externe : éléments d'information des balises 802.11 (chiffrements RSN et WPA, WPS) décodés octet par octet ; bornes entendues par le noyau Linux (nl80211, dernier balayage) et par Windows (wlanapi) ; réseaux enregistrés (NetworkManager, iwd, macOS, profils Windows) |
 | `src/machine/unix.rs` | vérifications communes à Linux et macOS : fichiers secrets, sudo |
@@ -42,6 +42,7 @@ modification. Sur GitHub, `@claude` dans un ticket ou une demande de fusion le f
 | `src/reseau/connexion.rs` | test de connexion pour le jeu |
 | `src/protection/antivirus.rs` | ClamAV / Defender, quarantaine |
 | `src/protection/yara.rs`, `src/protection/pieges.rs` | analyse YARA (règles intégrées, YARA-X compilé dans le programme) ; fichiers-pièges contre les rançongiciels |
+| `src/protection/memoire.rs`, `src/machine/windows/memoire.rs` | mémoire des programmes (`vanguard memoire`, à la demande) : les règles YARA sur les régions privées ou exécutables des processus en marche, bornées (64 Mio par région, 512 Mio par processus, 4 Gio et 5 minutes en tout) ; /proc/<pid>/maps et mem sous Linux, VirtualQueryEx et ReadProcessMemory sous Windows (LSASS, processus protégés et critiques jamais lus) ; macOS non vérifié ; rien de lu n'est gardé |
 | `src/protection/empreintes.rs` | empreintes SHA-256 de MalwareBazaar (abuse.ch, CC0) : liste complète chaque semaine (archive zip), récentes chaque jour, gardées dans le dossier de Vanguard et triées ; l'analyse YARA y cherche chaque fichier lu |
 | `src/protection/outil.rs`, `src/protection/secrets_git.rs`, `src/protection/conteneurs.rs` | secrets dans l'historique des projets git (règles de Vanguard, gitleaks en plus s'il est là) ; outils libres lancés s'ils sont installés, installation proposée sinon (trivy sur les images Docker ou Podman) |
 | `src/reseau/surveillance.rs` | minuterie systemd / Planificateur de tâches / agent launchd, notifications |
@@ -76,7 +77,7 @@ modification. Sur GitHub, `@claude` dans un ticket ou une demande de fusion le f
 | `src/reseau/cameras.rs` | caméras cachées : fabricant, flux RTSP, recherche ONVIF (WS-Discovery), page web |
 | `src/reseau/objets.rs` | box et objets connectés : ce que la box annonce (SNMP, UPnP, en-tête web), administration en HTTP seul, objets reconnus à leur fabricant, leur nom, leurs ports et leurs annonces ; conseil du mot de passe d'origine, jamais vérifié (aucun essai, rien de sondé en plus) ; section du scan et `vanguard objets` d'après le carnet |
 | `src/depanner/` | dépanner pas à pas : les parcours (`mod.rs`), réseau et Wi-Fi (`reseau.rs`), son (`son.rs`), imprimante (`imprimante.rs`), après une infection (`infection.rs`), nouvel ordinateur (`nouveau.rs`), ordinateur qui part (`depart.rs`), compte piraté (`compte.rs`), ordinateur d'un proche (`proche.rs` : trois questions, résumé de cinq points au plus mis en ordre selon les réponses, conseils de la page à laisser), lent depuis une mise à jour (`depuis_maj.rs`) |
-| `src/traces/` | collecter les traces : processus avec leur SHA-256, réseau, démarrage, bilan JSON, comptes, journaux des 7 jours, fichiers récents, puis LISEZMOI et MANIFESTE (format de `sha256sum -c`), dans un dossier daté ; partie commune (`mod.rs`), par système (`linux.rs`, `windows.rs`, `macos.rs`, `unix.rs`) ; lecture seule |
+| `src/traces/` | collecter les traces : processus avec leur SHA-256, réseau, démarrage, bilan JSON, comptes, journaux des 7 jours, fichiers récents, puis LISEZMOI et MANIFESTE (format de `sha256sum -c`), dans un dossier daté ; partie commune (`mod.rs`), par système (`linux.rs`, `windows.rs`, `macos.rs`, `unix.rs`), chronologie de l'incident (`chronologie.rs` : CHRONOLOGIE.txt, ce qui a été lu de daté remis dans l'ordre du temps sur 7 jours, 5 000 lignes au plus) ; lecture seule |
 | `src/lenteur.rs`, `src/fiche.rs` | pourquoi c'est lent (instantané en deux mesures, démarrage) ; fiche de l'ordinateur |
 | `src/copier.rs` | copier mes fichiers vers un disque externe : copie vérifiée (BLAKE3), reprise, jamais d'écrasement ; vérifier une copie (test de restauration) |
 | `src/verifier_cle.rs` | vérifier ma clé : capacité réelle, vitesses et blocs en erreur, écrits dans le libre et relus sans cache, puis effacés |
@@ -198,14 +199,15 @@ version, compiler avec `rustflags = ["--remap-path-prefix=/home/<compte>=~"]` da
 commit de chaque version depuis la page précédente (titre et puces), la plus récente en tête ; les liens de
 téléchargement du README pointent toujours vers la dernière. `--notes` montre ces notes sans rien publier.
 
-Chaque version va sur la clé, dans la VM et sur GitHub (le code), mais toutes n'ont pas leur page : `deployer.sh`
-publie tout seul une 0.x.0, et une 0.x.y seulement avec `deployer.sh --publier` (un correctif important). Moins de
-pages, c'est moins de minutes de Mac sur GitHub, et moins de programmes neufs que Defender et SmartScreen ne
-connaissent pas encore ; rien ne se perd, puisque la page suivante reprend les versions d'avant. Le Mac de GitHub
-compile la nuit quand le code a changé, et pour chaque page : la version macOS de la clé peut retarder sur les deux
-autres, et le déploiement le dit. Après chaque envoi, il met aussi à jour la page du dépôt (`outils/github.py`) :
-description en anglais suivie de la dernière version publiée, lien, sujets et options, écrits dans
-`.github/depot.json`. Seule l'image de partage se change à la main (Settings > Social preview).
+Chaque publication va sur la clé, dans la VM et sur GitHub (le code), avec sa page, 0.x.0 comme 0.x.y : une par jour,
+puisque moins de pages, c'est moins de minutes de Mac sur GitHub, et moins de programmes neufs que Defender et
+SmartScreen ne connaissent pas encore. Une version intermédiaire d'une série livrée d'affilée
+(`VANGUARD_INTERMEDIAIRE=1 outils/deployer.sh`) va sur la clé et sur GitHub, sans page ni dépôt dans la VM : rien ne
+se perd, puisque la page suivante reprend les versions d'avant. Le Mac de GitHub compile la nuit quand le code a
+changé, et pour chaque page : la version macOS de la clé peut retarder sur les deux autres, et le déploiement le dit.
+Après chaque envoi, il met aussi à jour la page du dépôt (`outils/github.py`) : description en anglais suivie de la
+dernière version publiée, lien, sujets et options, écrits dans `.github/depot.json`. Seule l'image de partage se
+change à la main (Settings > Social preview).
 
 ## La clé USB
 

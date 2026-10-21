@@ -23,11 +23,11 @@ turn on once with `/install-github-app`).
 | `src/machine/regles.rs` | registry of check rules: each one is declared where it is written (`inventory::submit!`), with a stable identifier (“LNX-PLT-001”); `vanguard rules` lists them |
 | `src/machine/linux/plateforme.rs` | platform security according to fwupd (HSI), kernel lockdown, BPF, user namespaces, auditd: the first rules of the registry |
 | `src/machine/linux/natif.rs` | native Linux reads, without launching a program: the PATH (a program's presence and path), systemd units, processes, the pacman, dpkg, Flatpak and Snap databases, disks, the root file system, the account's groups |
-| `src/machine/linux/`, `src/machine/windows/`, `src/machine/macos/` | per-system audit, one file per topic; on Windows, accounts (NetUserEnum, group S-1-5-32-544) and startup (Run keys through winreg, .lnk shortcuts read in Rust) without PowerShell, which stays as a fallback; `windows/corrections.rs` and `windows/eleve.rs`: the closed list of native fixes and the elevated process that applies them ("runas" relaunch, named pipe checked on both sides), PowerShell for the rest; `ancrages.rs`: DLLs loaded by Windows itself (LSA packages, AppCertDlls, print monitors, time providers, Winsock catalog); `pilotes.rs`: kernel drivers (location, known vulnerable drivers from LOLDrivers) |
+| `src/machine/linux/`, `src/machine/windows/`, `src/machine/macos/` | per-system audit, one file per topic; on Windows, accounts (NetUserEnum, group S-1-5-32-544) and startup (Run keys through winreg, .lnk shortcuts read in Rust) without PowerShell, which stays as a fallback; `windows/corrections.rs` and `windows/eleve.rs`: the closed list of native fixes and the elevated process that applies them ("runas" relaunch, named pipe checked on both sides), PowerShell for the rest; `windows/chargement.rs`: imported DLLs taken from System32 only (the PE's Load Config); `ancrages.rs`: DLLs loaded by Windows itself (LSA packages, AppCertDlls, print monitors, time providers, Winsock catalog); `pilotes.rs`: kernel drivers (location, known vulnerable drivers from LOLDrivers) |
 | `src/plist.rs` | reader for Apple plists, XML and binary (“bplist00”), instead of defaults and plutil; bounded against a hostile file (size, depth, number of values, looping references) |
 | `src/machine/windows/portes.rs`, `evenements.rs` | classic backdoors (debugger on a sign-in screen accessibility program through IFEO or SilentProcessExit, sethc and utilman replaced, Winlogon's Shell and Userinit, AppInit_DLLs, WMI subscriptions), fixed when the original state is known; event logs of the last 7 days (bursts of wrong passwords from the network, security log cleared, accounts created, suspicious services) |
 | `src/machine/linux/dissimulation.rs`, `algorithmes_ssh.rs` | rootkit signs read from /proc and /sys: hidden processes, programs without a file (memfd, deleted, /tmp), a kernel module that hides, unknown unsigned modules, a card in promiscuous mode; broken sshd algorithms (configuration read in Include order), removed through `00-vanguard.conf` after `sshd -t` |
-| `src/machine/dns.rs`, `certificats.rs`, `extensions.rs`, `partages.rs`, `sante.rs`, `wifi.rs`, `bluetooth.rs`, `agents_ia.rs` | checks shared by the three systems (partages.rs: file shares open to everyone; bluetooth.rs: visible computer, recently paired devices) |
+| `src/machine/dns.rs`, `certificats.rs`, `extensions.rs`, `partages.rs`, `sante.rs`, `wifi.rs`, `bluetooth.rs`, `agents_ia.rs` | checks shared by the three systems (partages.rs: file shares open to everyone; bluetooth.rs: visible computer, recently paired devices; agents_ia.rs: local AI server open to the network, risky settings of coding agents and their MCP servers, read without ever showing a secret value) |
 | `src/machine/chasse.rs` | live threat hunting, on the three systems: successful sign-in from an address that had just failed at least ten passwords (sshd's log on Linux, 4625 then 4624 on Windows; not checked on macOS); suspicious running programs (known offensive tool, command line that downloads or hides what it runs, program started from Downloads, a temporary folder, Public or the recycle bin), judged by pure functions, Vanguard and what it starts left aside |
 | `src/machine/wifi/elements.rs`, `nl80211.rs`, `wlanapi.rs`, `profils.rs` | Wi-Fi read without an external program: 802.11 beacon information elements (RSN and WPA ciphers, WPS) decoded byte by byte; access points heard by the Linux kernel (nl80211, last scan) and by Windows (wlanapi); saved networks (NetworkManager, iwd, macOS, Windows profiles) |
 | `src/machine/unix.rs` | checks shared by Linux and macOS: secret files, sudo |
@@ -42,6 +42,7 @@ turn on once with `/install-github-app`).
 | `src/reseau/connexion.rs` | connection test for gaming |
 | `src/protection/antivirus.rs` | ClamAV / Defender, quarantine |
 | `src/protection/yara.rs`, `src/protection/pieges.rs` | YARA scan (bundled rules, YARA-X compiled into the program); decoy files against ransomware |
+| `src/protection/memoire.rs`, `src/machine/windows/memoire.rs` | program memory (`vanguard memory`, on demand): the YARA rules on the private or executable regions of running processes, bounded (64 MiB per region, 512 MiB per process, 4 GiB and 5 minutes in all); /proc/<pid>/maps and mem on Linux, VirtualQueryEx and ReadProcessMemory on Windows (LSASS, protected and critical processes never read); macOS not checked; nothing read is kept |
 | `src/protection/empreintes.rs` | MalwareBazaar SHA-256 fingerprints (abuse.ch, CC0): full list every week (zip archive), recent ones every day, kept in Vanguard's folder and sorted; the YARA scan looks up every file it reads |
 | `src/protection/outil.rs`, `src/protection/secrets_git.rs`, `src/protection/conteneurs.rs` | secrets in git project history (Vanguard's rules, plus gitleaks when present); open source tools run when installed, installation offered otherwise (trivy on Docker or Podman images) |
 | `src/reseau/surveillance.rs` | systemd timer / Task Scheduler / launchd agent, notifications |
@@ -76,7 +77,7 @@ turn on once with `/install-github-app`).
 | `src/reseau/cameras.rs` | hidden cameras: maker, RTSP stream, ONVIF discovery (WS-Discovery), web page |
 | `src/reseau/objets.rs` | router and connected devices: what the router announces (SNMP, UPnP, web header), admin over HTTP only, devices recognized by maker, name, ports and announcements; default-password advice, never checked (no attempt, nothing more probed); scan section and `vanguard iot` from the notebook |
 | `src/depanner/` | troubleshoot step by step: the paths (`mod.rs`), network and Wi-Fi (`reseau.rs`), sound (`son.rs`), printer (`imprimante.rs`), after an infection (`infection.rs`), new computer (`nouveau.rs`), computer leaving (`depart.rs`), hacked account (`compte.rs`), a relative's computer (`proche.rs`: three questions, a summary of five points at most ordered by the answers, tips for the page to leave behind), slow since an update (`depuis_maj.rs`) |
-| `src/traces/` | collect the traces: processes with their SHA-256, network, startup, JSON check, accounts, logs of the last 7 days, recent files, then LISEZMOI and MANIFESTE (`sha256sum -c` format), in a dated folder; shared part (`mod.rs`), per system (`linux.rs`, `windows.rs`, `macos.rs`, `unix.rs`); read-only |
+| `src/traces/` | collect the traces: processes with their SHA-256, network, startup, JSON check, accounts, logs of the last 7 days, recent files, then LISEZMOI and MANIFESTE (`sha256sum -c` format), in a dated folder; shared part (`mod.rs`), per system (`linux.rs`, `windows.rs`, `macos.rs`, `unix.rs`), incident timeline (`chronologie.rs`: CHRONOLOGIE.txt, what was read with a date put back in time order over 7 days, 5,000 lines at most); read-only |
 | `src/lenteur.rs`, `src/fiche.rs` | why it is slow (two-sample snapshot, startup); computer specs |
 | `src/copier.rs` | copy my files to an external disk: checked copy (BLAKE3), resume, never overwrites; check a copy (restore test) |
 | `src/verifier_cle.rs` | check my drive: real capacity, speeds and bad blocks, written into the free space and read back without cache, then erased |
@@ -195,13 +196,14 @@ a program that still contains the home folder).
 commit of each version since the previous release (title and bullets), the newest first; the README's download
 links always point to the latest one. `--notes` shows these notes without publishing anything.
 
-Every version goes to the key, the VM and GitHub (the code), but not every one gets a release: `deployer.sh`
-publishes a 0.x.0 by itself, and a 0.x.y only with `deployer.sh --publier` (an important fix). Fewer releases mean
-fewer Mac minutes on GitHub, and fewer new programs that Defender and SmartScreen do not know yet; nothing is lost,
-since the next release takes over the versions before it. GitHub's Mac builds at night when the code changed, and
-for each release: the key's macOS version can lag behind the other two, and the deployment says so. After each push,
-it also updates the repository page (`outils/github.py`): English description followed by the latest published
-version, link, topics and options, written in `.github/depot.json`. Only the social preview image is changed by hand (Settings > Social preview).
+Every release goes to the key, the VM and GitHub (the code), with its page, 0.x.0 as well as 0.x.y: one a day, since
+fewer releases mean fewer Mac minutes on GitHub, and fewer new programs that Defender and SmartScreen do not know yet.
+An intermediate version of a series delivered back to back (`VANGUARD_INTERMEDIAIRE=1 outils/deployer.sh`) goes to the
+key and GitHub, without a page or a drop in the VM: nothing is lost, since the next release takes over the versions
+before it. GitHub's Mac builds at night when the code changed, and for each release: the key's macOS version can lag
+behind the other two, and the deployment says so. After each push, it also updates the repository page
+(`outils/github.py`): English description followed by the latest published version, link, topics and options, written
+in `.github/depot.json`. Only the social preview image is changed by hand (Settings > Social preview).
 
 ## The USB key
 

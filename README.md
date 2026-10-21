@@ -51,10 +51,10 @@ pour revenir.
 | Menace ou domaine | Ce que fait Vanguard |
 |---|---|
 | **Le bilan** | Une note de A à F sur tout ce qui suit, et aussi : pare-feu, mises à jour et failles connues, chiffrement, comptes, SSH, partages ouverts à tous, heure, fin de support, comptes oubliés, santé des disques… Chaque problème est expliqué, avec sa correction, appliquée après ton accord. |
-| **Exposition vers Internet** | Les ports que la box ouvre vers Internet (UPnP), les ports ouverts et le pare-feu de cet ordinateur, l'adresse de la maison sur liste noire, la page d'administration de la box en HTTP seul. |
+| **Exposition vers Internet** | L'audit du réseau en six notes (exposition, Wi-Fi, séparation des appareils, DNS et certificats, objets connectés, ordinateurs) ; les ports que la box ouvre vers Internet (UPnP), les ports ouverts et le pare-feu de cet ordinateur, l'adresse de la maison sur liste noire, la page d'administration de la box en HTTP seul. |
 | **Intrus sur le Wi-Fi** | Chaque appareil du réseau, son fabricant, ses ports ouverts et ses risques ; les nouveaux venus signalés toutes les heures, avec un tableau de bord dans le navigateur ; la protection du Wi-Fi (WEP, WPA2, WPA3), le faux point d'accès qui copie son nom, les appareils Bluetooth appairés depuis peu. |
 | **Objets connectés** | La box et les objets du réseau (caméras, imprimantes, NAS, télés, domotique…) reconnus, avec leur mot de passe d'origine à changer ; les caméras cachées, dans une location ou chez quelqu'un. |
-| **Poste infecté** | Antivirus, 308 règles YARA et plus d'un million d'empreintes de logiciels malveillants connus (MalwareBazaar), fichiers-pièges contre les rançongiciels, blocages de Windows Defender, ce qui se lance en cachette, portes dérobées et signes de rootkit, journaux d'événements suspects, connexions vers des serveurs de botnets connus, un voleur de mots de passe comme Responder démasqué, intégrité des fichiers critiques, failles des images Docker (trivy, s'il est installé), quarantaine réversible, et les traces collectées avant de nettoyer. |
+| **Poste infecté** | Antivirus, 308 règles YARA et plus d'un million d'empreintes de logiciels malveillants connus (MalwareBazaar), la mémoire des programmes qui tournent (à la demande), la chasse aux menaces en direct (mot de passe deviné, programmes en marche suspects), fichiers-pièges contre les rançongiciels, blocages de Windows Defender, ce qui se lance en cachette, portes dérobées, portes cachées de Windows et pilotes vulnérables, signes de rootkit, journaux d'événements suspects, connexions vers des serveurs de botnets connus, un voleur de mots de passe comme Responder démasqué, agents d'IA trop permissifs, intégrité des fichiers critiques, failles des images Docker (trivy, s'il est installé), quarantaine réversible, et les traces collectées avant de nettoyer, avec la chronologie de l'incident. |
 | **DNS et certificats détournés** | Le DNS réellement utilisé (et les réponses inventées), les certificats racine ajoutés (interception du HTTPS), le proxy imposé et les sites redirigés par le fichier hosts, la recherche automatique du proxy (WPAD), les extensions de navigateur qui lisent tous les sites. |
 | **Arnaques et prise de contrôle** | Faux technicien (logiciels de prise de contrôle à distance), liens dangereux examinés sans les ouvrir, fichiers téléchargés vérifiés, mots de passe et adresses courriel fuités, compte piraté, bac à sable pour un programme inconnu. |
 | **Données et vie privée** | Sauvegarde automatique et vérifier ma sauvegarde (relue pour de vrai), copier mes fichiers (copie vérifiée) et vérifier une copie, bilan de confidentialité (qui a accès à la position, aux contacts, à la caméra et au micro), caméra et micro, mots de passe du navigateur sans protection, fichiers sensibles qui traînent, secrets oubliés dans l'historique des projets git, données de la clé protégées par une phrase. |
@@ -101,16 +101,27 @@ pour revenir.
   les agents launchd, la version, le nom du Mac, la place libre et les administrateurs (plist lus directement, au
   lieu de defaults, plutil, sw_vers, sysctl, scutil ou df). Plus rapide, et moins de façons d'échouer.
 - Corrections appliquées seulement après confirmation, avec un point de restauration créé automatiquement avant
-  (snapper ou timeshift sous Linux, point de restauration Windows, instantané Time Machine sous macOS) ; sous
-  Windows, chacune est un script lisible.
+  (snapper ou timeshift sous Linux, point de restauration Windows, instantané Time Machine sous macOS). Sous Windows,
+  quinze réglages de durcissement d'une liste fermée (WDigest, NLA du Bureau à distance, NTLMv2 seul, LLMNR, WPAD,
+  UAC…) sont appliqués par Vanguard lui-même, relancé en administrateur : la fenêtre de Windows le nomme, et la valeur
+  d'avant est notée pour annuler exactement ; seuls Entrée ou oui les appliquent. Les autres corrections, ou celles
+  choisies avec elles, passent par un script lisible.
 
 #### Exposition vers Internet et réseau de la maison
 
+**Audit du réseau, domaine par domaine** (`vanguard audit-reseau`, menu Réseau et Internet › 2, et à la suite du
+bilan complet) — six notes : exposition à Internet (les ports que la box ouvre, demandés à la box elle-même, l'IPv6
+publique sans pare-feu), Wi-Fi (chiffrement, WPS, faux point d'accès, lus dans les balises), séparation des appareils
+(objets connectés sur le réseau des ordinateurs, serveur DHCP qui n'est pas la box, intégrité ARP), DNS et
+certificats, objets connectés, ordinateurs. Rien n'est attaqué. Ce qui n'a pas pu être vérifié est dit et ne compte
+jamais comme sain : sans assez de vérifications, pas de note.
+
 **Réseau local** — tous les appareils, leur fabricant, leurs ports ouverts (TCP, et UDP : SNMP, NetBIOS, UPnP, DNS,
 mDNS) et leurs risques ; les nouveaux venus signalés, un carnet par réseau (chez toi, chez chaque ami), des surnoms
-(« imprimante HP ») ; les ports que des appareils ont ouverts vers Internet sur la box par UPnP (lecture seule, avec
-miniupnpc sous Linux). Après accord, l'adresse Internet de la maison est cherchée dans quatre listes noires
-(Spamhaus, SpamCop, DroneBL, PSBL) : listée pour pourriel ou attaques, un appareil est sans doute infecté.
+(« imprimante HP ») ; les ports que des appareils ont ouverts vers Internet sur la box par UPnP (lecture seule, par un
+client UPnP écrit en Rust, miniupnpc en secours). Après accord, l'adresse Internet de la maison est cherchée dans
+quatre listes noires (Spamhaus, SpamCop, DroneBL, PSBL) : listée pour pourriel ou attaques, un appareil est sans
+doute infecté.
 Pendant le scan, Vanguard demande aussi un nom qui n'existe pas (LLMNR, NetBIOS, mDNS) : personne de légitime n'y
 répond, et l'appareil qui le fait est un empoisonneur comme Responder, qui vole les mots de passe Windows du réseau ;
 la surveillance horaire le signale aussi.
@@ -256,9 +267,11 @@ fail2ban, sshguard ou CrowdSec bloque déjà les adresses qui insistent.
 **Sauvegarde automatique** — mise en place avec l'outil du système (Déjà Dup ou une copie rsync chaque jour sous
 Linux, Time Machine, Historique des fichiers sous Windows), vers un disque externe, après accord et annulable.
 **Vérifier ma sauvegarde** : la copie rsync relue pour de vrai sur le disque, des fichiers au hasard comparés à leur
-original ; un original modifié depuis n'est pas compté comme une erreur, une copie différente d'un original inchangé
-dit un disque qui perd des données. Pour Time Machine, Déjà Dup et l'Historique des fichiers, qui gardent leurs
-sauvegardes dans leur propre format, la marche à suivre pour restaurer un fichier. Rien n'est écrit ni effacé.
+original ; un original modifié depuis, plus récent que sa copie, n'est pas compté comme une erreur, une copie
+différente d'un original inchangé dit un disque qui perd des données, et une copie réécrite après la sauvegarde, plus
+récente que son original, est dite abîmée : c'est ainsi qu'apparaît un rançongiciel qui chiffre le disque de
+sauvegarde. Pour Time Machine, Déjà Dup et l'Historique des fichiers, qui gardent leurs sauvegardes dans leur propre
+format, la marche à suivre pour restaurer un fichier. Rien n'est écrit ni effacé.
 
 **Copier mes fichiers** — Documents, Images, Bureau, Vidéos et Musique vers un disque externe, avant une réparation
 risquée ou une réinstallation : la place est vérifiée avant, chaque fichier relu et comparé à l'original (empreinte
@@ -283,6 +296,11 @@ les tient en ce moment. En lecture seule. **Bilan de confidentialité** : les ap
 position, aux contacts, à la caméra et au micro, et leur dernier usage quand le système le note (registre des
 autorisations sous Windows, Flatpak et Snap sous Linux, base des autorisations de macOS, lisible avec l'accès complet
 au disque). Rien n'est retiré : la marche à suivre est donnée, et ce qui n'a pas pu être lu est dit non vérifié.
+
+**Mots de passe des navigateurs** (`vanguard navigateurs`) — combien chaque navigateur en garde et comment ils sont
+protégés : comptés, jamais lus ni envoyés. La vérification intégrée du navigateur (mots de passe faibles, réutilisés,
+compromis) est indiquée, et un mot de passe tapé peut être cherché dans les fuites (Have I Been Pwned, 5 caractères
+de son empreinte seulement).
 
 - Mots de passe enregistrés dans le navigateur sans protection, fichiers sensibles qui traînent (mots de passe ou
   clés en clair), sauvegarde absente avec la mise en place proposée.
@@ -470,12 +488,13 @@ Chaque entrée du menu existe aussi en commande.
 | `vanguard machine [--json]` | audit de cette machine |
 | `vanguard regles` | les règles du bilan déclarées pour ce système : identifiant, sujet, références |
 | `vanguard reseau [cible] [-p courants\|tous\|22,80,8000-8100] [--json]` | scan du réseau ou d'un appareil |
+| `vanguard audit-reseau [--json] [--html] [--invite]` | audit du réseau par domaine : six notes (exposition, Wi-Fi, séparation des appareils, DNS et certificats, objets connectés, ordinateurs), sans rien attaquer ; `--invite` : sur le réseau invité, vérifie qu'il est bien séparé du réseau principal |
 | `vanguard connexion` | test de connexion pour le jeu |
 | `vanguard nettoyer [--liste]` | nettoyer le système ; `--liste` : la place à gagner, sans rien effacer |
 | `vanguard logiciels [--liste] [--recommandes]` | logiciels à installer par catégorie ; `--liste` : leur état, sans rien installer |
 | `vanguard diagnostic` | diagnostic de l'ordinateur : matériel, système, plantages et erreurs récents |
 | `vanguard depanner [sujet]` | dépanner pas à pas : `internet`, `wifi`, `lent`, `son`, `imprimante`, `disque`, `infection`, `nouveau`, `depart`, `compte`, `traces`, `proche` |
-| `vanguard traces [dossier]` | collecter les traces après une infection, avant de nettoyer : processus, connexions, démarrage, comptes, journaux, fichiers récents, dans un dossier daté avec leurs empreintes SHA-256 (lecture seule) |
+| `vanguard traces [dossier]` | collecter les traces après une infection, avant de nettoyer : processus, connexions, démarrage, comptes, journaux, fichiers récents, dans un dossier daté avec leurs empreintes SHA-256, et la chronologie de l'incident (CHRONOLOGIE.txt) ; lecture seule |
 | `vanguard lenteur` | pourquoi c'est lent : processeur, mémoire, disque, démarrage, programmes à l'ouverture |
 | `vanguard demarrage` | programmes au démarrage : les retirer ou les remettre, après accord ; chaque retrait s'annule |
 | `vanguard changements` | ce que Vanguard a changé : chaque correction lancée ici, sa date et son résultat |
@@ -483,6 +502,7 @@ Chaque entrée du menu existe aussi en commande.
 | `vanguard proche` | ordinateur d'un proche : trois questions, le bilan, un résumé en mots simples, les corrections, la page à laisser avec ses conseils |
 | `vanguard sauvegarde-auto [--annuler]` | sauvegarde automatique vers un disque externe, avec l'outil du système |
 | `vanguard raccourci [on\|off]` | raccourci sur cet ordinateur |
+| `vanguard ordinateurs` | mes ordinateurs : ceux où la clé a fait un bilan, leur note et leurs problèmes restants |
 | `vanguard se-mettre-a-jour` | mettre Vanguard à jour sur cet ordinateur, depuis la clé ou depuis GitHub (versions signées par l'auteur) |
 | `vanguard fiche [--json]` | fiche de l'ordinateur ; `--json` sans les numéros de série |
 | `vanguard copier-fichiers [destination]` | copier mes fichiers vers un disque externe, copie vérifiée |
@@ -502,6 +522,7 @@ Chaque entrée du menu existe aussi en commande.
 | `vanguard dns-rapide` | DNS le plus rapide, mesuré ici et annulable ; un DNS qui protège est gardé |
 | `vanguard appris` | ce que Vanguard a appris : tes habitudes, tes choix, et les oublier |
 | `vanguard motdepasse` | mots de passe fuités |
+| `vanguard navigateurs` | mots de passe des navigateurs : combien et comment protégés (comptés, jamais lus), la vérification intégrée de chaque navigateur, et un mot de passe tapé cherché dans les fuites |
 | `vanguard isoler <fichier>` | lancer un programme inconnu dans un bac à sable (bubblewrap ou firejail, Windows Sandbox) |
 | `vanguard courriel` | fuites d'adresse courriel (XposedOrNot, ou Have I Been Pwned avec `VANGUARD_HIBP_CLE`) |
 | `vanguard sortantes` | qui parle à Internet : les connexions de chaque programme (lecture seule) |

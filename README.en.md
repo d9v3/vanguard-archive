@@ -29,10 +29,10 @@ In the menu, choose **1** (full check), then **2** (fix). Arrows, Enter, and Esc
 | Threat or area | What Vanguard does |
 |---|---|
 | **The check** | A grade from A to F on everything below, and also: firewall, updates and known vulnerabilities, encryption, accounts, SSH, shares open to everyone, clock, end of support, forgotten accounts, disk health… Each problem is explained, with its fix, applied once you agree. |
-| **Exposure to the Internet** | The ports the router opens to the Internet (UPnP), this computer's open ports and firewall, the home's address on a blocklist, the router's admin page over HTTP only. |
+| **Exposure to the Internet** | The network audit in six grades (exposure, Wi-Fi, device separation, DNS and certificates, connected devices, computers); the ports the router opens to the Internet (UPnP), this computer's open ports and firewall, the home's address on a blocklist, the router's admin page over HTTP only. |
 | **Intruders on the Wi-Fi** | Every device on the network, its manufacturer, its open ports and its risks; newcomers flagged every hour, with a dashboard in the browser; the Wi-Fi's protection (WEP, WPA2, WPA3), the fake access point copying its name, Bluetooth devices paired recently. |
 | **Connected devices** | The router and the devices on the network (cameras, printers, NAS, TVs, smart home…) recognized, with their default password to change; hidden cameras, in a rental or at someone's place. |
-| **Infected computer** | Antivirus, 308 YARA rules and over a million fingerprints of known malware (MalwareBazaar), decoy files against ransomware, Windows Defender blocking, what starts in secret, backdoors and rootkit signs, suspicious event logs, connections to known botnet servers, a password thief like Responder unmasked, integrity of critical files, flaws in Docker images (trivy, when installed), reversible quarantine, and the traces collected before cleaning up. |
+| **Infected computer** | Antivirus, 308 YARA rules and over a million fingerprints of known malware (MalwareBazaar), the memory of running programs (on demand), live threat hunting (guessed password, suspicious running programs), decoy files against ransomware, Windows Defender blocking, what starts in secret, backdoors, Windows' hidden doors and vulnerable drivers, rootkit signs, suspicious event logs, connections to known botnet servers, a password thief like Responder unmasked, overly permissive AI agents, integrity of critical files, flaws in Docker images (trivy, when installed), reversible quarantine, and the traces collected before cleaning up, with the incident timeline. |
 | **Hijacked DNS and certificates** | The DNS really in use (and made-up answers), added root certificates (HTTPS interception), a forced proxy and sites redirected by the hosts file, automatic proxy discovery (WPAD), browser extensions that read every site. |
 | **Scams and remote control** | Tech-support scam (remote control tools), dangerous links checked without opening them, downloaded files checked, leaked passwords and email addresses, hacked account, a sandbox for an unknown program. |
 | **Data and privacy** | Automatic backup and check my backup (really read back), copy my files (checked copy) and check a copy, privacy check (who can access location, contacts, camera and microphone), camera and microphone, browser passwords without protection, sensitive files lying around, secrets forgotten in git project history, key data protected by a passphrase. |
@@ -75,14 +75,24 @@ In the menu, choose **1** (full check), then **2** (fix). Arrows, Enter, and Esc
   launchd agents, the version, the Mac's name, free space and administrators (plists read directly, instead of
   defaults, plutil, sw_vers, sysctl, scutil or df). Faster, and fewer ways to fail.
 - Fixes applied only after confirmation, with a restore point created automatically beforehand (snapper or
-  timeshift on Linux, Windows restore point, Time Machine snapshot on macOS); on Windows, each one is a readable
-  script.
+  timeshift on Linux, Windows restore point, Time Machine snapshot on macOS). On Windows, fifteen hardening settings
+  from a closed list (WDigest, Remote Desktop NLA, NTLMv2 only, LLMNR, WPAD, UAC…) are applied by Vanguard itself,
+  relaunched as administrator: Windows' prompt names it, and the previous value is recorded to undo exactly; only
+  Enter or yes applies them. The other fixes, or those chosen along with them, go through a readable script.
 
 #### Exposure to the Internet and the home network
 
+**Network audit, domain by domain** (`vanguard network-audit`, menu Network and Internet › 2, and right after the
+full check) — six grades: Internet exposure (the ports the router opens, asked of the router itself, a public IPv6
+without a firewall), Wi-Fi (encryption, WPS, fake access point, read in the beacons), device separation (connected
+devices on the computers' network, a DHCP server that is not the router, ARP integrity), DNS and certificates,
+connected devices, computers. Nothing is attacked. What could not be checked is said and never counts as safe:
+without enough checks, no grade.
+
 **Local network** — every device, its manufacturer, its open ports (TCP, and UDP: SNMP, NetBIOS, UPnP, DNS, mDNS)
 and its risks; newcomers flagged, one notebook per network (at home, at each friend's), nicknames ("HP printer");
-the ports that devices opened to the Internet on the router through UPnP (read-only, with miniupnpc on Linux).
+the ports that devices opened to the Internet on the router through UPnP (read-only, by a UPnP client written in
+Rust, miniupnpc as a fallback).
 After your consent, the home's Internet address is looked up in four blocklists (Spamhaus, SpamCop, DroneBL, PSBL):
 listed for spam or attacks, a device is probably infected. During the scan, Vanguard also asks for a name that does
 not exist (LLMNR, NetBIOS, mDNS): nobody legitimate answers, and the device that does is a poisoner like Responder,
@@ -219,9 +229,11 @@ sshguard or CrowdSec already blocks the addresses that keep trying.
 
 **Automatic backup** — set up with the system's tool (Déjà Dup or a daily rsync copy on Linux, Time Machine, File
 History on Windows), to an external disk, after your consent and undoable. **Check my backup**: the rsync copy
-really read back from the disk, random files compared with their original; an original changed since is not counted
-as an error, a copy that differs from an unchanged original means a disk losing data. For Time Machine, Déjà Dup and
-File History, which keep their backups in their own format, how to restore one file. Nothing is written or deleted.
+really read back from the disk, random files compared with their original; an original changed since, newer than
+its copy, is not counted as an error, a copy that differs from an unchanged original means a disk losing data, and a
+copy rewritten after the backup, newer than its original, is reported as damaged: that is how ransomware encrypting
+the backup disk shows up. For Time Machine, Déjà Dup and File History, which keep their backups in their own format,
+how to restore one file. Nothing is written or deleted.
 
 **Copy my files** — Documents, Pictures, Desktop, Videos and Music to an external disk, before a risky repair or a
 reinstall: space is checked first, each file is read back and compared with the original (BLAKE3 fingerprint),
@@ -246,6 +258,10 @@ Read-only. **Privacy check**: the apps that can access location, contacts, camer
 when the system records it (the permission store on Windows, Flatpak and Snap on Linux, the macOS permission
 database, readable with Full Disk Access). Nothing is removed: what to do is given, and what could not be read is
 said to be unchecked.
+
+**Browser passwords** (`vanguard browser-passwords`) — how many each browser keeps and how they are protected:
+counted, never read or sent. The browser's built-in check (weak, reused, compromised passwords) is pointed to, and a
+typed password can be looked up in leaks (Have I Been Pwned, only 5 characters of its fingerprint).
 
 - Passwords saved in the browser without protection, sensitive files lying around (passwords or keys in clear text),
   missing backup with its set-up offered.
@@ -421,12 +437,13 @@ Each menu entry is also a command.
 | `vanguard audit [--json]` | audit of this machine |
 | `vanguard rules` | the check rules declared for this system: identifier, subject, references |
 | `vanguard network [target] [-p common\|all\|22,80,8000-8100] [--json]` | scan the network or one device |
+| `vanguard network-audit [--json] [--html] [--guest]` | network audit by domain: six grades (exposure, Wi-Fi, device separation, DNS and certificates, connected devices, computers), attacking nothing; `--guest`: on the guest network, checks that it is really separated from the main one |
 | `vanguard connection` | connection test for gaming |
 | `vanguard clean [--list]` | clean up the system; `--list`: the space to gain, deleting nothing |
 | `vanguard apps [--list] [--recommended]` | software to install by category; `--list`: their state, installing nothing |
 | `vanguard diag` | computer diagnostic: hardware, system, recent crashes and errors |
 | `vanguard troubleshoot [subject]` | troubleshoot step by step: `internet`, `wifi`, `slow`, `sound`, `printer`, `disk`, `infection`, `new`, `leaving`, `account`, `evidence`, `relative` |
-| `vanguard evidence [folder]` | collect the traces after an infection, before cleaning up: processes, connections, startup, accounts, logs, recent files, in a dated folder with their SHA-256 fingerprints (read-only) |
+| `vanguard evidence [folder]` | collect the traces after an infection, before cleaning up: processes, connections, startup, accounts, logs, recent files, in a dated folder with their SHA-256 fingerprints, and the incident timeline (CHRONOLOGIE.txt); read-only |
 | `vanguard slow` | why it is slow: processor, memory, disk, startup, programs at login |
 | `vanguard startup` | startup programs: remove or put them back, after your consent; each removal is undone exactly |
 | `vanguard changes` | what Vanguard changed: each fix run here, its date and its result |
@@ -434,6 +451,7 @@ Each menu entry is also a command.
 | `vanguard relative` | a relative's computer: three questions, the check, a summary in plain words, the fixes, the page to leave behind with its tips |
 | `vanguard auto-backup [--undo]` | automatic backup to an external disk, with the system's tool |
 | `vanguard shortcut [on\|off]` | shortcut on this computer |
+| `vanguard computers` | my computers: those where the key ran a check, their grade and their remaining problems |
 | `vanguard self-update` | update Vanguard on this computer, from the key or from GitHub (versions signed by the author) |
 | `vanguard specs [--json]` | computer specs; `--json` without the serial numbers |
 | `vanguard copy-files [destination]` | copy my files to an external disk, checked copy |
@@ -453,6 +471,7 @@ Each menu entry is also a command.
 | `vanguard fast-dns` | fastest DNS, measured here and undoable; a DNS that protects you is kept |
 | `vanguard learned` | what Vanguard has learned: your habits, your choices, and forgetting them |
 | `vanguard password` | leaked passwords |
+| `vanguard browser-passwords` | browser passwords: how many and how protected (counted, never read), each browser's built-in check, and a typed password looked up in leaks |
 | `vanguard sandbox <file>` | run an unknown program in a sandbox (bubblewrap or firejail, Windows Sandbox) |
 | `vanguard email` | email address leaks (XposedOrNot, or Have I Been Pwned with `VANGUARD_HIBP_CLE`) |
 | `vanguard outbound` | who talks to the Internet: each program's connections (read-only) |

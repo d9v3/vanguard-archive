@@ -6,6 +6,48 @@ Ce que chaque journée a apporté à Vanguard, la plus récente en haut. Depuis 
 publication par jour, qui regroupe le travail de la journée. Seule la dernière version a sa page de téléchargement ;
 chaque version garde son étiquette dans le dépôt (`git checkout v0.62.0`, par exemple), pour être recompilée au besoin.
 
+## 21 octobre 2026, au soir : version 0.83
+
+- **Chasse aux menaces en direct.** Une connexion réussie depuis une adresse qui venait de rater au moins dix mots de
+  passe : un mot de passe deviné, signalé en critique (journal de sshd sous Linux ; sous Windows, en administrateur,
+  le journal de sécurité pour le Bureau à distance et les partages, et celui d'OpenSSH ; macOS : non vérifié). Une
+  lecture bornée ou trop longue est dite partielle, jamais saine sans réserve. Les programmes en marche suspects :
+  outil offensif connu (Mimikatz, Rubeus, SharpHound, LaZagne, XMRig…), ligne de commande qui télécharge ou cache ce
+  qu'elle exécute, programme lancé de Téléchargements, d'un dossier temporaire ou de la corbeille ; de la ligne, seuls
+  le programme et le motif sont montrés, jamais un secret écrit autour.
+- **Chronologie de l'incident** dans `vanguard traces` (CHRONOLOGIE.txt) : ce que la collecte a lu de daté, remis dans
+  l'ordre du temps sur les 7 derniers jours, avec la technique MITRE ATT&CK quand elle est évidente : connexions
+  acceptées ou refusées, sudo, comptes créés, services et tâches ajoutés, journaux effacés, détections de Defender,
+  fichiers récents qui parlent. Un journal qui ne remonte pas la semaine dit pourquoi.
+- **Portes cachées de Windows et pilotes du noyau** : les DLL que Windows charge lui-même (paquets de LSA,
+  AppCertDlls, moniteurs d'impression, fournisseurs de temps, catalogue Winsock) ; les pilotes rangés là où rien
+  d'installé n'en pose, ou connus pour être vulnérables (liste LOLDrivers, une fois par semaine). Lecture seule, sans
+  PowerShell.
+- **Mémoire des programmes** (`vanguard memoire`, à la demande) : les 308 règles YARA appliquées à la mémoire des
+  programmes qui tournent, où vit un logiciel malveillant « sans fichier », sous Linux et Windows (macOS : non
+  vérifié). La mémoire de LSASS et des processus protégés n'est jamais lue, rien de ce qui est lu n'est gardé, et ce
+  qui n'a pas pu l'être est dit.
+- **Agents d'IA** : un serveur d'IA local (Ollama, LM Studio, ComfyUI) ouvert au réseau sans mot de passe ; un agent
+  réglé pour tout faire sans demander, un serveur MCP lancé sans version fixée, joint sans chiffrement ou avec une clé
+  écrite en clair, dans les réglages de Claude Code, Claude Desktop, Cursor, VS Code, Windsurf et Gemini CLI (le nom
+  de la clé seulement, jamais sa valeur).
+- **Corrections Windows sans PowerShell** : quinze réglages de durcissement d'une liste fermée (WDigest, NLA du Bureau
+  à distance, NTLMv2 seul, LLMNR, WPAD, UAC…) appliqués par Vanguard lui-même, relancé en administrateur : la fenêtre
+  de Windows nomme Vanguard, le point de restauration passe d'abord et la valeur d'avant est notée pour annuler
+  exactement ; seuls Entrée ou oui appliquent. Mêlées à une correction hors de la liste, elles passent par le script,
+  comme avant.
+- **Vérifier ma sauvegarde** : une copie réécrite après la sauvegarde (plus récente que son original, et différente),
+  comme par un rançongiciel qui chiffre le disque de sauvegarde, est dite abîmée ; elle passait pour « modifiée
+  depuis ».
+- **Guide des commandes : 1 085 commandes**, dont celles de Vanguard pour se défendre et dépanner, et de quoi vérifier
+  à la main ce que signalent les nouvelles règles.
+- **Plus justes.** Sous Windows, Vanguard lancé en administrateur se croyait sans droits (Windows refusait la lecture
+  de son élévation, que Wine acceptait) : `vanguard traces` y laissait de côté le journal de sécurité. Sans
+  journalctl, les traces reprennent aussi le dernier fichier tourné de /var/log (auth.log.1…). Dans ce qui se lance
+  tout seul sous Linux, « nc -e » est vu dans ( … ), après ; ou & et derrière un chemin, et un script téléchargé passé
+  à ash, à « sudo -p x sh », à « sudo -s » ou à su aussi. La garde contre une DLL posée à côté du programme est exigée
+  à la compilation : elle pouvait disparaître.
+
 ## 21 octobre 2026 : version 0.82
 
 - **Audit du réseau, domaine par domaine** (`vanguard audit-reseau`). Six notes : exposition à Internet (ports

@@ -56,6 +56,8 @@ highlighted one, Esc clears it. In the main menu, it also finds each tool of the
        Monthly check-up: one notification a month (grade, updates, space to free, new problems)
   5  Network and Internet ›
        Scan the network (and unmask a password thief like Responder)
+       Network audit: six grades (Internet exposure, Wi-Fi, device separation, DNS and certificates, connected
+         devices, computers), attacking nothing; also done by the full check (vanguard network-audit)
        Deep scan of one device · Name a device ("HP printer")
        Hourly monitoring (unknown device, problem on this machine, router impersonation,
          name poisoner, program landing in Downloads)
@@ -71,10 +73,13 @@ highlighted one, Esc clears it. In the main menu, it also finds each tool of the
        USB drive or folder, with USB worm traps (fake shortcuts, autorun)
        YARA scan: 308 rules for malware families (ransomware, password stealers…)
          and over a million fingerprints of known malware (MalwareBazaar)
+       Process memory: the YARA rules in the memory of running programs (fileless malware), on demand;
+         the memory of LSASS and protected processes is never read (vanguard memory)
        Decoy files: decoys in your folders; ransomware touching them triggers the alert
        Windows Defender blocking: password theft, booby-trapped attachments, dangerous sites, ransomware
        Sandbox: run an unknown program with no network, away from your files
        Passwords: have they leaked? (only 5 characters of their fingerprint are sent)
+       Browser passwords: counted and their protection described, never read; each browser's own check
        Email address: has it leaked? (sent to the search service, after your consent)
        Who talks to the Internet? Each program's connections, with the server's name, and known botnet
          servers (Feodo Tracker, ThreatFox); read-only
@@ -121,17 +126,19 @@ highlighted one, Esc clears it. In the main menu, it also finds each tool of the
        And: after an infection, new computer, computer leaving (sale, gift), hacked account,
        a relative's computer (three questions, a summary in plain words, the page to leave; vanguard relative).
        Collect the traces before cleaning up: processes, connections, startup, logs, recent files, in a
-       dated folder with their fingerprints (read-only, nothing is sent; vanguard evidence).
+       dated folder with their fingerprints, and the incident timeline (CHRONOLOGIE.txt): everything dated,
+       in time order (read-only, nothing is sent; vanguard evidence).
        From the command line: vanguard troubleshoot sound
   q  Quit
   Shortcuts from earlier versions, in the main menu: u updates, r repair, o diagnostic, i integrity,
   n name, c connection, a USB drive, b sandbox, p passwords, e email, l software, g gaming, d data.
 
 The check covers, among others: firewall, open ports, updates, encryption, accounts, SSH (its failed login
-attempts, its broken algorithms), Wi-Fi (and fake access points copying its name), programs started at boot,
-Windows backdoors and rootkit signs on Linux, Windows event logs, DNS, added root certificates, browser
-extensions, Bluetooth, clock, end of support, forgotten accounts, browser passwords, sensitive files, backups,
-disk and battery health.
+attempts, its broken algorithms), guessed password (successful sign-in after a burst of failures), Wi-Fi (and
+fake access points copying its name), programs started at boot, suspicious running programs, Windows backdoors
+and hidden doors (LSA packages, print monitors…), vulnerable drivers, rootkit signs on Linux, Windows event logs,
+overly permissive AI agents, DNS, added root certificates, browser extensions, Bluetooth, clock, end of support,
+forgotten accounts, browser passwords, sensitive files, backups, disk and battery health.
 
 Language: French or English, following the system. To force English:
   Linux:   VANGUARD_LANG=en ./vanguard
@@ -141,8 +148,10 @@ Menus shifted in the old Windows command prompt: set VANGUARD_EMOJI=0 (done by d
 Terminal).
 
 Good to know
-  - Fixes are never applied without your consent. On Windows, each one is first written to a readable
-    script (its path is shown) and asks for administrator approval.
+  - Fixes are never applied without your consent. On Windows, fifteen settings from a closed list (WDigest,
+    Remote Desktop NLA, NTLMv2, LLMNR, UAC…) are made by Vanguard itself, relaunched as administrator: Windows'
+    prompt names it, and only Enter or yes applies them. The other fixes, and those chosen along with them, are
+    first written to a readable script (its path is shown). All of them ask for administrator approval.
   - Before the first fix, update or repair that changes the system, a restore point is created automatically
     (snapper or timeshift on Linux, a restore point on Windows, a local Time Machine snapshot on macOS).
   - If you help someone connected remotely (Remote Desktop, SSH), Vanguard never cuts that access.
