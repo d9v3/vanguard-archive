@@ -278,6 +278,55 @@ fn connexions() -> Option<Vec<Connexion>> {
     )
 }
 
+/// Les processus qui ont une connexion TCP établie vers une autre machine (ni 127.0.0.1 ni ::1, IPv4 dans IPv6
+/// comprise), lus dans /proc sans lancer ss : pour « Quelqu'un contrôle mon ordi ? ». Chaque processus qui tient la
+/// prise compte, comme ss les montre tous (un programme et l'enfant qui l'a reçue). Sans droits root, seuls ceux de
+/// ce compte se voient, comme avec ss. `None` : ni /proc/net/tcp ni tcp6 lisible.
+#[cfg(target_os = "linux")]
+pub(crate) fn processus_connectes() -> Option<BTreeSet<u32>> {
+    let mut prises = std::collections::HashSet::new();
+    let mut lisible = false;
+    for fichier in ["tcp", "tcp6"] {
+        if let Ok(texte) = std::fs::read_to_string(format!("/proc/net/{fichier}")) {
+            lisible = true;
+            prises.extend(
+                lire_proc_net(&texte)
+                    .into_iter()
+                    .filter(|(ip, _, _)| !ip.to_canonical().is_loopback())
+                    .map(|(_, _, inode)| inode),
+            );
+        }
+    }
+    if !lisible {
+        return None;
+    }
+    let mut pids = BTreeSet::new();
+    if prises.is_empty() {
+        return Some(pids);
+    }
+    for p in std::fs::read_dir("/proc").into_iter().flatten().flatten() {
+        let Some(pid) = p.file_name().to_str().and_then(|n| n.parse::<u32>().ok()) else {
+            continue;
+        };
+        let tient = std::fs::read_dir(p.path().join("fd"))
+            .into_iter()
+            .flatten()
+            .flatten()
+            .any(|d| {
+                std::fs::read_link(d.path()).is_ok_and(|cible| {
+                    cible
+                        .to_str()
+                        .and_then(|c| c.strip_prefix("socket:[")?.strip_suffix(']')?.parse::<u64>().ok())
+                        .is_some_and(|i| prises.contains(&i))
+                })
+            });
+        if tient {
+            pids.insert(pid);
+        }
+    }
+    Some(pids)
+}
+
 #[cfg(windows)]
 mod windows {
     use std::ffi::c_void;
