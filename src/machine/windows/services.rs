@@ -9,9 +9,10 @@ use crate::commande::ps_chaine;
 use crate::risk::Niveau;
 use crate::ui::{affichable, resume, tr, trf};
 
-/// Pour chaque service au chemin sans guillemets : « SVC|nom|programme|arguments|dossier modifiable ». Les comptes
-/// sont reconnus par leur SID (Utilisateurs, Utilisateurs authentifiés, Tout le monde, Interactif), pas par leur nom,
-/// qui change avec la langue de Windows.
+/// Pour chaque service au chemin sans guillemets : « SVC|nom|programme|dossier modifiable|arguments ». Les
+/// arguments viennent en dernier : ils peuvent contenir « | », qu'un chemin Windows n'admet pas, et le dernier champ
+/// garde tout le reste de la ligne. Les comptes sont reconnus par leur SID (Utilisateurs, Utilisateurs authentifiés,
+/// Tout le monde, Interactif), pas par leur nom, qui change avec la langue de Windows.
 const SCRIPT: &str = r#"
 $tous = 'S-1-5-32-545','S-1-5-11','S-1-1-0','S-1-5-4'
 function Modifiable($d) {
@@ -34,7 +35,7 @@ foreach ($s in Get-CimInstance Win32_Service) {
   $parties = $exe -split ' '
   for ($i = 1; $i -lt $parties.Count; $i++) {
     $d = Split-Path -Parent (($parties[0..($i - 1)] -join ' '))
-    if ($d -and (Test-Path -LiteralPath $d) -and (Modifiable $d)) { "SVC|$($s.Name)|$exe|$suite|$d"; break }
+    if ($d -and (Test-Path -LiteralPath $d) -and (Modifiable $d)) { "SVC|$($s.Name)|$exe|$d|$suite"; break }
   }
 }
 'SVC_FIN'
@@ -75,7 +76,7 @@ fn lire_natif() -> Option<String> {
         if let Some(d) = dossier_piege(exe, |d| {
             d.is_dir() && super::securite::du_fichier(d).is_some_and(|o| modifiable_par_tous(&o))
         }) {
-            lignes.push(format!("SVC|{nom}|{exe}|{suite}|{}", d.display()));
+            lignes.push(format!("SVC|{nom}|{exe}|{}|{suite}", d.display()));
         }
     }
     lignes.push("SVC_FIN".into());
@@ -157,7 +158,9 @@ pub(super) fn juger(sortie: &str) -> Option<Constat> {
         .filter_map(|l| l.trim_end_matches('\r').strip_prefix("SVC|"))
     {
         let mut champs = ligne.splitn(4, '|');
-        let (Some(nom), Some(programme), Some(arguments), Some(dossier)) =
+        // Arguments en dernier : « -f a|b » reste entier, et la commande de correction ne
+        // perd rien de la ligne du service.
+        let (Some(nom), Some(programme), Some(dossier), Some(arguments)) =
             (champs.next(), champs.next(), champs.next(), champs.next())
         else {
             continue;
@@ -285,10 +288,10 @@ mod tests {
     #[test]
     fn chemins_sans_guillemets() {
         // Liste pas lue jusqu'au bout : rien.
-        assert!(juger("SVC|Outil|C:\\Mes Outils\\svc.exe| -k|C:\\Mes Outils\n").is_none());
+        assert!(juger("SVC|Outil|C:\\Mes Outils\\svc.exe|C:\\Mes Outils| -k\n").is_none());
         assert!(juger("SVC_FIN\n").is_none());
         let c = juger(
-            "SVC|OutilMaj|C:\\Mes Outils\\Outil Maj\\maj.exe| -service|C:\\Mes Outils\r\nSVC|pi;ege|C:\\A B\\x.exe||C:\\A B\nSVC_FIN\n",
+            "SVC|OutilMaj|C:\\Mes Outils\\Outil Maj\\maj.exe|C:\\Mes Outils| -service\r\nSVC|pi;ege|C:\\A B\\x.exe|C:\\A B|\nSVC_FIN\n",
         )
         .unwrap();
         assert_eq!(c.probleme, Some(Niveau::Eleve));
@@ -305,7 +308,7 @@ mod tests {
         // Espaces, parenthèses et apostrophe dans le nom : signalé, la commande garde le nom entre apostrophes
         // doublées. Un nom qui changerait le chemin du registre est signalé sans commande.
         let c = juger(
-            "SVC|Bonjour Service|C:\\Program Files\\Bonjour\\mDNSResponder.exe||C:\\Program Files\nSVC|Intel(R) l'outil|C:\\A B\\x.exe||C:\\A B\nSVC|a/b|C:\\A B\\y.exe||C:\\A B\nSVC_FIN\n",
+            "SVC|Bonjour Service|C:\\Program Files\\Bonjour\\mDNSResponder.exe|C:\\Program Files|\nSVC|Intel(R) l'outil|C:\\A B\\x.exe|C:\\A B|\nSVC|a/b|C:\\A B\\y.exe|C:\\A B|\nSVC_FIN\n",
         )
         .unwrap();
         assert!(c.message.contains("Bonjour Service (C:\\Program Files)"));
@@ -316,5 +319,19 @@ mod tests {
             "Set-ItemProperty -LiteralPath 'HKLM:\\SYSTEM\\CurrentControlSet\\Services\\Bonjour Service' -Name ImagePath"
         ));
         assert!(k.commandes[1].contains("Services\\Intel(R) l''outil' -Name"));
+    }
+
+    /// Des arguments qui contiennent « | » : le dossier reste juste et la commande garde
+    /// toute la ligne du service.
+    #[test]
+    fn arguments_avec_barre() {
+        let c = juger("SVC|Outil|C:\\Mon Outil\\svc.exe|C:\\Mon Outil| -f a|b\nSVC_FIN\n").unwrap();
+        assert!(c.message.contains("Outil (C:\\Mon Outil)"), "{}", c.message);
+        assert_eq!(
+            c.correctif.unwrap().commandes,
+            [
+                "Set-ItemProperty -LiteralPath 'HKLM:\\SYSTEM\\CurrentControlSet\\Services\\Outil' -Name ImagePath -Value '\"C:\\Mon Outil\\svc.exe\" -f a|b'"
+            ]
+        );
     }
 }
