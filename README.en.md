@@ -376,10 +376,12 @@ consent and the list of what stops, what Vanguard does by itself all the time: t
 watches and notifies) and the active protection of blocking, which no longer blocks anything by itself. For 1 hour, 4
 hours or until you turn it back on (`vanguard settings real-time yes`); it comes back by itself when the time is up, and
 the monitoring checks that itself. Each part's settings do not change: when it comes back, each one is as it was. While
-it is off, this is said again at the top of the main menu, in each check-up (a piece of information, with no effect on
-the grade), in "Who talks to the Internet?" and in blocking. It only concerns Vanguard: Defender, the firewall and UAC
-are never touched, and a block already made stays in place. As administrator, it is not set: its setting belongs to
-your account.
+it is off, this is said again at the top of the main menu and on its Monitoring and Blocking lines, in each check-up (a
+piece of information, with no effect on the grade), in "Who talks to the Internet?", in blocking and on the monitoring
+dashboard, by a notification at the first run then once a day, and in the monthly check-up: a program that turned it off
+quietly does not go unnoticed. It only concerns Vanguard: Defender, the firewall and UAC are never touched, and a block
+already made stays in place. As administrator, it is not set: its setting belongs to your account (under sudo, the one
+of the account that started it is read).
 
 **Extensions** (menu 12, `vanguard extensions`) — your own programs in Vanguard, without touching its code. A plugin
 is a folder with a `plugin.toml` manifest, added once from a folder or a .zip archive (`vanguard plugin add`); a lab

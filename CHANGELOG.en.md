@@ -30,12 +30,13 @@ delivered just before it. Only the latest version has its download page; every v
   restrictions. Each change shows the previous value and the command to put it back; learned alerts and blocking open
   their own screen ("What Vanguard has learned", Threat blocking). Language, emojis and working without the Internet
   stay chosen from one launch to the next (VANGUARD_LANG, VANGUARD_EMOJI and VANGUARD_HORS_LIGNE always win).
-- **Vanguard's real-time protection turns off, for a while or until turned back on** (Settings, or
-  `vanguard settings real-time no --for 1h|4h`): the hourly monitoring and the active protection of blocking stop at
-  once, after your consent and the list of what stops, without their settings changing. It comes back by itself when
-  the time is up; while it is off, this is said again at the top of the menu, in each check-up (with no effect on the
-  grade), in "Who talks to the Internet?" and in blocking. Defender, the firewall and UAC are never touched, and a block
-  already made stays in place.
+- **Vanguard's real-time protection turns off, for a while or until turned back on** (Settings, or `vanguard settings
+  real-time no --for 1h|4h`): the hourly monitoring and the active protection of blocking stop at once, after your
+  consent and the list of what stops, without their settings changing. It comes back by itself when the time is up;
+  while it is off, this is said again at the top of the menu and on its Monitoring and Blocking lines, in each check-up
+  (with no effect on the grade), in "Who talks to the Internet?", in blocking and on the monitoring dashboard, by a
+  notification at the first run then every day, and in the monthly check-up: a program that turned it off quietly would
+  be seen. Defender, the firewall and UAC are never touched, and a block already made stays in place.
 - **Extensions: your own programs in Vanguard, without touching its code** (menu 12 Extensions,
   `vanguard extensions`). A plugin is a folder with a `plugin.toml` manifest, added once from a folder or a .zip
   archive (`vanguard plugin add`); a lab script is a file dropped as it is (`vanguard lab`), to try an idea quickly.

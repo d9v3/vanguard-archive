@@ -109,7 +109,17 @@ fn dire_administrateur() {
 
 /// L'état, court, pour la ligne du menu.
 pub fn etat_court() -> &'static str {
-    match parametres::charger() {
+    etat_court_de(
+        parametres::charger(),
+        crate::protection::temps_reel::coupure().is_some(),
+    )
+}
+
+/// L'état court de `lu` ; `coupee` : la protection en temps réel est coupée, et la protection active ne bloque donc
+/// rien toute seule.
+fn etat_court_de(lu: Result<Parametres, String>, coupee: bool) -> &'static str {
+    match lu {
+        Ok(p) if p.actif() && coupee => tr!("en pause (temps réel coupé)", "paused (real-time off)"),
         Ok(p) if p.actif() => tr!("protection active", "active protection"),
         Ok(p) if p.rien() => tr!("désactivé", "off"),
         Ok(_) => tr!("un clic, avec ton accord", "one click, with your consent"),
@@ -834,5 +844,31 @@ mod tests {
         let admin = pour_agir(p, true);
         assert_eq!(decider(&admin, Categorie::AgentsIa, true), Decision::Rien);
         assert_eq!(categories_actives(&admin).len(), 3);
+    }
+
+    /// La ligne du menu : la protection active en pause quand le temps réel est coupé, pas « protection active ».
+    #[test]
+    fn ligne_du_menu_pendant_une_coupure() {
+        let mut p = Parametres {
+            accord: Some("x".into()),
+            ..Parametres::default()
+        };
+        p.regler(Categorie::Programmes, Mode::Automatique).unwrap();
+        assert_eq!(
+            etat_court_de(Ok(p.clone()), false),
+            tr!("protection active", "active protection")
+        );
+        let pause = etat_court_de(Ok(p), true);
+        assert_eq!(pause, tr!("en pause (temps réel coupé)", "paused (real-time off)"));
+        assert!(crate::ui::largeur_affichee(pause) <= 33);
+        // Sans protection active, la coupure ne change rien à la ligne.
+        assert_eq!(
+            etat_court_de(Ok(Parametres::default()), true),
+            etat_court_de(Ok(Parametres::default()), false)
+        );
+        assert_eq!(
+            etat_court_de(Err("x".into()), true),
+            tr!("réglages illisibles", "settings unreadable")
+        );
     }
 }

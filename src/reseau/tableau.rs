@@ -241,6 +241,9 @@ pub(crate) struct Donnees {
     /// Quand elles ont été vues (la date du fichier) : la passe suivante ne le réécrit pas si la lecture des
     /// connexions échoue, et une liste d'il y a trois jours n'est plus « encore vue ».
     pub botnets_vus: Option<NaiveDateTime>,
+    /// La protection en temps réel coupée, avec son échéance (« jusqu'à 17:30 ») : la minuterie est là, mais aucune
+    /// passe ne se fait.
+    pub temps_reel_coupe: Option<String>,
 }
 
 /// Au-delà, les connexions vues ne sont plus dites en cours : la surveillance repasse chaque heure.
@@ -267,6 +270,7 @@ fn collecter() -> Donnees {
         appareils: reseau::appareils_connus(),
         botnets_en_cours,
         botnets_vus,
+        temps_reel_coupe: crate::protection::temps_reel::coupure().map(|c| crate::protection::temps_reel::echeance(&c)),
     }
 }
 
@@ -379,21 +383,30 @@ fn etat(d: &Donnees) -> String {
         .as_deref()
         .map(|p| trf!("dernière passe le {}", "last run on {}", esc(&quand(p))));
     let mut h = String::from("<div class=carte>");
-    match (d.active, passe) {
-        (true, Some(p)) => {
+    match (d.active, passe, d.temps_reel_coupe.as_deref()) {
+        (true, passe, Some(quand)) => {
+            let _ = trw!(
+                h,
+                "<span class=\"badge moyen\">EN PAUSE</span> Surveillance toutes les heures en pause : la protection en temps réel de Vanguard est coupée ({}), aucune passe ne se fait et rien n'est notifié{}.<div class=fix>Pour la remettre : <code>vanguard parametres temps-reel oui</code>.</div>",
+                "<span class=\"badge moyen\">PAUSED</span> Hourly monitoring paused: Vanguard's real-time protection is off ({}), no run happens and nothing is notified{}.<div class=fix>To turn it back on: <code>vanguard settings real-time yes</code>.</div>",
+                esc(quand),
+                passe.map(|p| format!(" ({p})")).unwrap_or_default()
+            );
+        }
+        (true, Some(p), None) => {
             let _ = trw!(
                 h,
                 "<span class=\"badge ok\">ACTIVE</span> Surveillance toutes les heures : {p}.",
                 "<span class=\"badge ok\">ON</span> Hourly monitoring: {p}."
             );
         }
-        (true, None) => {
+        (true, None, None) => {
             h += tr!(
                 "<span class=\"badge ok\">ACTIVE</span> Surveillance toutes les heures : pas encore de passe, la première vient dans l'heure (5 minutes après le démarrage de l'ordinateur).",
                 "<span class=\"badge ok\">ON</span> Hourly monitoring: no run yet, the first one comes within the hour (5 minutes after the computer starts)."
             );
         }
-        (false, passe) => {
+        (false, passe, _) => {
             let _ = trw!(
                 h,
                 "<span class=\"badge moyen\">COUPÉE</span> La surveillance horaire n'est pas active{} : rien de nouveau n'est noté.<div class=fix>{}</div>",
@@ -742,6 +755,7 @@ mod tests {
             ],
             botnets_en_cours: vec!["<svg onload=alert(3)> → 192.0.2.7:443".into()],
             botnets_vus: Some(date("2026-10-20 14:00:00")),
+            temps_reel_coupe: None,
         }
     }
 
@@ -809,6 +823,7 @@ mod tests {
             appareils: vec![],
             botnets_en_cours: vec![],
             botnets_vus: None,
+            temps_reel_coupe: None,
         };
         let page = html(&vide);
         assert!(page.contains("Rien à montrer pour l'instant") && page.contains("vanguard surveillance on"));
@@ -821,6 +836,18 @@ mod tests {
         let page = html(&coupee);
         assert!(page.contains("COUPÉE") && page.contains("vanguard surveillance on"));
         assert!(page.contains("Nouvel appareil sur ton réseau"));
+        // Active mais la protection en temps réel coupée : en pause, pas « ACTIVE », et la façon de la remettre.
+        let en_pause = Donnees {
+            temps_reel_coupe: Some("jusqu'à reprise".into()),
+            ..donnees()
+        };
+        let page = html(&en_pause);
+        assert!(page.contains("EN PAUSE") && !page.contains("badge ok"), "{page}");
+        assert!(page.contains("jusqu'à reprise") && page.contains("vanguard parametres temps-reel oui"));
+        assert!(
+            page.contains("20/10/2026 à 14:00"),
+            "la dernière vraie passe reste dite"
+        );
         // Active, sans alerte ni appareil : chaque section le dit au lieu d'être vide.
         let calme = Donnees {
             alertes: vec![],

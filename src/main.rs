@@ -1368,6 +1368,16 @@ const OUTILS: &[Outil] = &[
 // Une action ajoutée sans sa ligne décalerait toutes les suivantes : la compilation s'arrête.
 const _: () = assert!(OUTILS.len() == Action::Parametres as usize + 1);
 
+/// La précision de la ligne Surveillance. Le temps réel coupé, la minuterie est là, mais chaque passe s'arrête au
+/// début : « activée » seul le cacherait.
+fn precision_surveillance(active: bool, temps_reel_coupe: bool) -> &'static str {
+    match (active, temps_reel_coupe) {
+        (true, true) => tr!("activée, en pause (temps réel)", "on, paused (real-time off)"),
+        (true, false) => tr!("activée", "on"),
+        (false, _) => tr!("désactivée", "off"),
+    }
+}
+
 impl Action {
     fn outil(self) -> &'static Outil {
         &OUTILS[self as usize]
@@ -1378,8 +1388,10 @@ impl Action {
         let precision = match self {
             Action::Entretien if entretien::active() => tr!("activé : une notification", "on: one notification"),
             Action::Entretien => tr!("désactivé", "off"),
-            Action::Surveillance if reseau::surveillance::active() => tr!("activée", "on"),
-            Action::Surveillance => tr!("désactivée", "off"),
+            Action::Surveillance => precision_surveillance(
+                reseau::surveillance::active(),
+                protection::temps_reel::coupure().is_some(),
+            ),
             Action::Blocage => protection::blocage::etat_court(),
             _ => texte(self.outil().precision),
         };
@@ -2141,6 +2153,18 @@ mod tests_menu {
         assert!(affichees + 2 <= 24, "{affichees} lignes affichées");
         // La recherche voit plus que l'écran : outils des sous-menus et pages du guide.
         assert!(lignes.len() > affichees + 50);
+    }
+
+    /// Le temps réel coupé, la ligne Surveillance dit la pause, dans la largeur d'une précision.
+    #[test]
+    fn surveillance_en_pause_au_menu() {
+        assert_eq!(precision_surveillance(true, false), tr!("activée", "on"));
+        let pause = precision_surveillance(true, true);
+        assert!(
+            pause.contains(tr!("pause", "paused")) && largeur_affichee(pause) <= 33,
+            "{pause}"
+        );
+        assert_eq!(precision_surveillance(false, true), tr!("désactivée", "off"));
     }
 
     /// La protection en temps réel coupée se dit sur la ligne de la clé, à côté de la surveillance, sans jamais

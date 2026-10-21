@@ -447,10 +447,56 @@ pub fn resume(noms: &[impl AsRef<str>], max: usize, separateur: &str) -> String 
     t
 }
 
+/// La question telle qu'elle s'affiche : sa dernière ligne, réponse comprise, tient dans `LARGEUR`. Trop longue
+/// (une durée, un nom mis dedans), elle est coupée aux espaces, la suite sous son début ; les espaces de la fin, après
+/// lesquels la réponse se tape, sont gardés. `print!` ne passe pas par `mettre_en_lignes`, comme `trp!`.
+fn question_en_lignes(question: &str) -> String {
+    let corps = question.trim_end_matches(' ');
+    let fin = &question[corps.len()..];
+    let (avant, derniere) = match corps.rsplit_once('\n') {
+        Some((a, d)) => (Some(a), d),
+        None => (None, corps),
+    };
+    // Une colonne pour la réponse.
+    if largeur_affichee(derniere) + fin.len() < LARGEUR {
+        return question.to_string();
+    }
+    let texte = derniere.trim_start_matches(' ');
+    let retrait = derniere.len() - texte.len();
+    // Une ponctuation seule (« ? », « : ») et l'invite (« [o/N] ») restent avec le mot d'avant : jamais une ligne
+    // qui commence par « : ».
+    let mut morceaux: Vec<String> = Vec::new();
+    for mot in texte.split_whitespace() {
+        let colle = mot.starts_with('[') || mot.chars().all(|c| "?!:;».".contains(c));
+        match morceaux.last_mut() {
+            Some(m) if colle => {
+                m.push(' ');
+                m.push_str(mot);
+            }
+            _ => morceaux.push(mot.to_string()),
+        }
+    }
+    let largeur = LARGEUR.saturating_sub(retrait + fin.len() + 1).max(12);
+    let mut lignes: Vec<String> = Vec::new();
+    for m in morceaux {
+        match lignes.last_mut() {
+            Some(l) if largeur_affichee(l) + 1 + largeur_affichee(&m) <= retrait + largeur => {
+                l.push(' ');
+                l.push_str(&m);
+            }
+            _ => lignes.push(format!("{}{m}", " ".repeat(retrait))),
+        }
+    }
+    match avant {
+        Some(a) => format!("{a}\n{}{fin}", lignes.join("\n")),
+        None => format!("{}{fin}", lignes.join("\n")),
+    }
+}
+
 /// Pose une question dans le terminal et retourne la réponse sans espaces autour.
 pub fn demander(question: &str) -> String {
     use std::io::Write;
-    print!("{question}");
+    print!("{}", question_en_lignes(question));
     let _ = std::io::stdout().flush();
     let mut s = String::new();
     // Fin de l'entrée (Ctrl-D, terminal fermé, entrée redirigée) : on quitte. Le menu reposait sinon la question
@@ -465,6 +511,26 @@ pub fn demander(question: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Une question trop longue est coupée aux espaces : la réponse tapée tombe dans 76 colonnes. Une question qui
+    /// tient ne bouge pas, ses espaces de fin compris.
+    #[test]
+    fn question_dans_la_largeur() {
+        let courte = "\n  Couper la protection en temps réel pendant 1 heure ? [o/N] : ";
+        assert_eq!(question_en_lignes(courte), courte);
+        let longue = "\n  Couper la protection en temps réel jusqu'à ce que tu la remettes ? [o/N] : ";
+        let l = question_en_lignes(longue);
+        assert!(l.starts_with("\n  Couper") && l.ends_with("[o/N] : "), "{l:?}");
+        let lignes: Vec<&str> = l.split('\n').collect();
+        assert_eq!(lignes.len(), 3, "{l:?}");
+        assert!(lignes.iter().all(|x| largeur_affichee(x) < LARGEUR), "{l:?}");
+        assert!(lignes[2].starts_with("  ") && !lignes[2].starts_with("   "), "{l:?}");
+        assert_eq!(
+            l.split_whitespace().collect::<Vec<_>>(),
+            longue.split_whitespace().collect::<Vec<_>>(),
+            "aucun mot perdu"
+        );
+    }
 
     #[test]
     fn une_ligne_trop_longue_est_coupee_entre_les_mots() {

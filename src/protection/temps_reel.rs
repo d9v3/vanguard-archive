@@ -8,8 +8,13 @@
 //! Jamais Defender, le pare-feu ni l'UAC : ce réglage ne concerne que Vanguard. Ce qu'un blocage a déjà posé (règle du
 //! pare-feu, quarantaine) reste en place : couper le temps réel ne défait rien. Un fichier abîmé ne coupe rien : la
 //! protection reste en marche, et c'est dit. En administrateur, il ne se règle pas (comme les restrictions des
-//! extensions) : le fichier est celui du compte, que la surveillance lit sans droits ; lu, il ne change rien à ce
-//! qu'y fait Vanguard, qui n'y bloque déjà rien tout seul (`blocage::pour_agir`).
+//! extensions) : le fichier est celui du compte, que la surveillance lit sans droits ; lu (sous sudo ou pkexec, celui
+//! du compte qui l'a lancé, pas celui de root), il ne change rien à ce qu'y fait Vanguard, qui n'y bloque déjà rien
+//! tout seul (`blocage::pour_agir`).
+//!
+//! Un autre programme du compte peut écrire ce fichier : couper d'abord ce qui surveille est un geste de logiciel
+//! malveillant. Une coupure ne reste donc jamais muette : la surveillance la notifie à sa première passe, puis une
+//! fois par jour tant qu'elle dure, et l'entretien du mois la redit.
 
 use std::path::{Path, PathBuf};
 
@@ -25,6 +30,14 @@ const TAILLE_MAX: u64 = 4 << 10;
 /// Une horloge retardée de plus que cela depuis la coupure (changement d'heure à la main, pile de la carte mère) : une
 /// coupure à durée ne se croit plus sur parole, et la protection reprend.
 const RETARD_TOLERE: i64 = 5 * 60;
+
+/// Avant le 1er janvier 2026, Vanguard n'avait pas ce réglage : une coupure plus ancienne n'est pas la sienne (un
+/// « coupee_le » à 0 ou à i64::MIN ne coupe rien).
+const PLUS_ANCIENNE: i64 = 1_767_225_600;
+
+/// Une coupure qui dure se redit par une notification à peu près une fois par jour (la surveillance passe toutes les
+/// heures, un peu plus tard chaque fois : 23 heures font un rappel quotidien).
+const RAPPEL: i64 = 23 * 3600;
 
 /// Combien de temps la coupure dure.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -116,7 +129,68 @@ impl Etat {
 }
 
 fn fichier() -> PathBuf {
+    #[cfg(unix)]
+    if !cfg!(test)
+        && let Some(d) = dossier_appelant(
+            // SAFETY : geteuid ne prend aucun argument et ne touche aucune mémoire.
+            unsafe { libc::geteuid() },
+            std::env::var("SUDO_UID")
+                .or_else(|_| std::env::var("PKEXEC_UID"))
+                .ok()
+                .as_deref(),
+            dossier_personnel_de,
+        )
+    {
+        return d.join("temps-reel.json");
+    }
     crate::reseau::dossier_local().join("temps-reel.json")
+}
+
+/// Le fichier du rappel : quand la coupure a été notifiée pour la dernière fois.
+fn fichier_rappel() -> PathBuf {
+    crate::reseau::dossier_local().join("temps-reel-rappel.txt")
+}
+
+/// Sous sudo ou pkexec (root, avec le numéro du compte qui l'a lancé) : le dossier de données de ce compte. Sous
+/// « sudo -i » ou « sudo -H », HOME est celui de root, et le réglage lu aurait été celui de root : « pas coupée »
+/// alors que celle du compte l'est. `None` : pas en root, root lui-même, ou un compte inconnu.
+#[cfg(unix)]
+fn dossier_appelant(
+    euid: libc::uid_t,
+    appelant: Option<&str>,
+    dossier_de: impl Fn(libc::uid_t) -> Option<PathBuf>,
+) -> Option<PathBuf> {
+    if euid != 0 {
+        return None;
+    }
+    let uid: libc::uid_t = appelant?.trim().parse().ok().filter(|&u| u != 0)?;
+    let maison = dossier_de(uid).filter(|d| d.is_absolute())?;
+    // Le dossier par défaut de `reseau::dossier_local` (le XDG_DATA_HOME du compte ne se lit pas d'ici).
+    let sous = if cfg!(target_os = "macos") {
+        "Library/Application Support/vanguard"
+    } else {
+        ".local/share/vanguard"
+    };
+    Some(maison.join(sous))
+}
+
+/// Le dossier personnel du compte `uid`, d'après la base des comptes du système.
+#[cfg(unix)]
+fn dossier_personnel_de(uid: libc::uid_t) -> Option<PathBuf> {
+    use std::os::unix::ffi::OsStrExt;
+    let mut tampon: Vec<libc::c_char> = vec![0; 16 << 10];
+    // SAFETY : passwd n'a que des entiers et des pointeurs, valides à zéro ; getpwuid_r les remplit.
+    let mut compte: libc::passwd = unsafe { std::mem::zeroed() };
+    let mut trouve: *mut libc::passwd = std::ptr::null_mut();
+    // SAFETY : `compte`, `tampon` (avec sa vraie longueur) et `trouve` vivent jusqu'à la fin de la fonction ;
+    // getpwuid_r n'écrit que dans eux.
+    let r = unsafe { libc::getpwuid_r(uid, &raw mut compte, tampon.as_mut_ptr(), tampon.len(), &raw mut trouve) };
+    if r != 0 || trouve.is_null() || compte.pw_dir.is_null() {
+        return None;
+    }
+    // SAFETY : pw_dir pointe dans `tampon`, encore vivant, et getpwuid_r l'a terminé par un zéro.
+    let dossier = unsafe { std::ffi::CStr::from_ptr(compte.pw_dir) };
+    Some(PathBuf::from(std::ffi::OsStr::from_bytes(dossier.to_bytes())))
 }
 
 fn maintenant() -> i64 {
@@ -125,17 +199,25 @@ fn maintenant() -> i64 {
 
 /// L'état de `chemin` à l'instant `maintenant`.
 fn lire_de(chemin: &Path, maintenant: i64) -> Etat {
-    match std::fs::metadata(chemin) {
+    use std::io::Read;
+    // Sans suivre de lien : Vanguard écrit un vrai fichier. Un lien, un tube ou un périphérique (qu'un Vanguard en
+    // administrateur lirait sinon sans fin, ou avec ses droits) n'est pas le sien.
+    match std::fs::symlink_metadata(chemin) {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Etat::EnMarche,
         Err(e) => return Etat::Illisible(e.to_string()),
+        Ok(m) if !m.file_type().is_file() => {
+            return Etat::Illisible(tr!("pas un simple fichier", "not a plain file").to_string());
+        }
         Ok(m) if m.len() > TAILLE_MAX => {
             return Etat::Illisible(trf!("plus de {} Kio", "over {} KiB", TAILLE_MAX >> 10));
         }
         Ok(_) => {}
     }
-    let lu = std::fs::read_to_string(chemin)
+    let mut texte = String::new();
+    let lu = std::fs::File::open(chemin)
+        .and_then(|f| f.take(TAILLE_MAX + 1).read_to_string(&mut texte))
         .map_err(|e| e.to_string())
-        .and_then(|t| serde_json::from_str::<Fichier>(t.trim_start_matches('\u{feff}')).map_err(|e| e.to_string()));
+        .and_then(|_| serde_json::from_str::<Fichier>(texte.trim_start_matches('\u{feff}')).map_err(|e| e.to_string()));
     let f = match lu {
         Ok(f) => f,
         Err(e) => return Etat::Illisible(e),
@@ -145,11 +227,15 @@ fn lire_de(chemin: &Path, maintenant: i64) -> Etat {
         jusqu_a: f.jusqu_a,
     };
     match c.jusqu_a {
-        // Une durée que Vanguard ne donne jamais : ce n'est pas lui qui a écrit ce fichier.
+        // Une date ou une durée que Vanguard ne donne jamais : ce n'est pas lui qui a écrit ce fichier.
+        _ if c.depuis < PLUS_ANCIENNE => Etat::Illisible(tr!("date inconnue", "unknown date").to_string()),
         Some(fin) if fin <= c.depuis || fin.saturating_sub(c.depuis) > Duree::PLUS_LONGUE => {
             Etat::Illisible(tr!("durée inconnue", "unknown duration").to_string())
         }
-        Some(fin) if maintenant >= fin || maintenant < c.depuis.saturating_sub(RETARD_TOLERE) => Etat::Echue(c),
+        // Une horloge retardée bien avant la coupure : elle ne se croit plus sur parole, à durée comme jusqu'à
+        // reprise, et la protection reprend.
+        _ if maintenant < c.depuis.saturating_sub(RETARD_TOLERE) => Etat::Echue(c),
+        Some(fin) if maintenant >= fin => Etat::Echue(c),
         _ => Etat::Coupee(c),
     }
 }
@@ -339,6 +425,8 @@ fn phrase(c: &Coupure, maintenant: i64) -> String {
 pub(crate) enum Ou {
     Blocage,
     Sortantes,
+    /// La surveillance qu'on vient d'activer : sa minuterie est posée, mais aucune passe ne se fera avant la reprise.
+    Surveillance,
 }
 
 /// Ce que la coupure change à l'écran `ou`.
@@ -352,6 +440,10 @@ fn phrase_pour(ou: Ou, c: &Coupure, maintenant: i64) -> String {
         Ou::Sortantes => trf!(
             "Protection en temps réel coupée ({quand}) : la surveillance ne notifie ni ne bloque plus une connexion vers un serveur de commande ; cet écran, lui, la montre. Les blocages déjà faits restent en place.",
             "Real-time protection off ({quand}): the monitoring no longer notifies or blocks a connection to a command server; this screen still shows it. The blocks already made stay in place."
+        ),
+        Ou::Surveillance => trf!(
+            "Protection en temps réel coupée ({quand}) : aucune passe ne se fera avant qu'elle reprenne, rien ne sera regardé ni notifié d'ici là. La remettre : vanguard parametres temps-reel oui.",
+            "Real-time protection off ({quand}): no run will happen until it comes back, nothing will be looked at or notified until then. Turn it back on: vanguard settings real-time yes."
         ),
     }
 }
@@ -398,12 +490,53 @@ fn constat_de(e: &Etat, maintenant: i64) -> Constat {
     }
 }
 
-/// Au début de chaque passe de la surveillance : `true` si la passe s'arrête là (coupée). Une échéance passée remet
-/// la protection (le fichier retiré, la reprise notifiée), puis la passe se fait comme d'habitude. Un fichier
-/// illisible ne coupe rien.
+/// Faut-il redire la coupure `c` par une notification, le dernier rappel datant de `dernier` ? À la première passe
+/// d'une coupure, puis une fois par jour tant qu'elle dure (et si l'horloge a reculé depuis le dernier).
+fn rappel_du(c: &Coupure, dernier: Option<i64>, maintenant: i64) -> bool {
+    dernier.is_none_or(|d| d < c.depuis || maintenant < d || maintenant.saturating_sub(d) >= RAPPEL)
+}
+
+/// La notification d'une coupure qui dure : (titre, texte).
+fn texte_du_rappel(c: &Coupure, maintenant: i64) -> (&'static str, String) {
+    (
+        tr!(
+            "Vanguard : protection en temps réel coupée",
+            "Vanguard: real-time protection is off"
+        ),
+        trf!(
+            "Coupée depuis {} ({}) : la surveillance horaire ne regarde plus rien et rien n'est bloqué tout seul. Si ce n'est pas toi, un programme l'a peut-être coupée exprès. La remettre : vanguard parametres temps-reel oui.",
+            "Off since {} ({}): the hourly monitoring no longer looks at anything and nothing is blocked by itself. If it was not you, a program may have turned it off on purpose. Turn it back on: vanguard settings real-time yes.",
+            heure(c.depuis, maintenant),
+            jusqu_a(c, maintenant)
+        ),
+    )
+}
+
+/// Redit la coupure par une notification, si c'est le moment ; le moment du rappel est noté.
+fn rappeler(c: &Coupure) {
+    let maintenant = maintenant();
+    let chemin = fichier_rappel();
+    let dernier = std::fs::read_to_string(&chemin)
+        .ok()
+        .and_then(|t| t.trim().parse::<i64>().ok());
+    if !rappel_du(c, dernier, maintenant) {
+        return;
+    }
+    let (titre, texte) = texte_du_rappel(c, maintenant);
+    crate::reseau::surveillance::alerter(crate::reseau::tableau::Genre::Autre, titre, &texte);
+    // Non noté (disque plein, dossier refusé) : la passe suivante la redit, plutôt que de se taire.
+    let _ = crate::reseau::ecrire_atomique(&chemin, maintenant.to_string());
+}
+
+/// Au début de chaque passe de la surveillance : `true` si la passe s'arrête là (coupée ; c'est notifié à la première
+/// passe, puis une fois par jour). Une échéance passée remet la protection (le fichier retiré, la reprise notifiée),
+/// puis la passe se fait comme d'habitude. Un fichier illisible ne coupe rien.
 pub(crate) fn a_la_passe() -> bool {
     match etat() {
-        Etat::Coupee(_) => true,
+        Etat::Coupee(c) => {
+            rappeler(&c);
+            true
+        }
         Etat::Echue(_) => {
             if reprendre_dans(&fichier(), maintenant()).is_ok() {
                 crate::reseau::surveillance::notifier(
@@ -423,6 +556,19 @@ pub(crate) fn a_la_passe() -> bool {
     }
 }
 
+/// La ligne de l'entretien du mois, s'il y a une coupure : au bilan, elle n'est qu'une information, que l'entretien
+/// ne retient pas avec les problèmes.
+pub(crate) fn pour_entretien() -> Option<String> {
+    let c = coupure()?;
+    let maintenant = maintenant();
+    Some(trf!(
+        "Protection en temps réel de Vanguard coupée depuis {} ({}) : vanguard parametres temps-reel oui la remet.",
+        "Vanguard's real-time protection off since {} ({}): vanguard settings real-time yes turns it back on.",
+        heure(c.depuis, maintenant),
+        jusqu_a(&c, maintenant)
+    ))
+}
+
 /// Ce que la coupure arrête, avec l'état de chacun (rien n'est arrêté qui ne tournait déjà), puis ce qui reste.
 pub(crate) fn ce_qui_s_arrete(surveillance: bool, protection_active: bool) -> Vec<String> {
     let etat = |oui: bool| {
@@ -434,8 +580,8 @@ pub(crate) fn ce_qui_s_arrete(surveillance: bool, protection_active: bool) -> Ve
     };
     vec![
         trf!(
-            "• La surveillance horaire ({}) : plus de scan du réseau ni d'audit de la machine, plus aucune notification (appareil nouveau, port ouvert, box, DNS, Wi-Fi, fichiers critiques, téléchargements, serveurs de botnet, extensions qui veillent).",
-            "• Hourly monitoring ({}): no more network scan or machine audit, no notification at all (new device, open port, router, DNS, Wi-Fi, critical files, downloads, botnet servers, extensions that watch).",
+            "• La surveillance horaire ({}) : plus de scan du réseau ni d'audit de la machine, plus aucune notification (appareil nouveau, port ouvert, box, DNS, Wi-Fi, fichiers critiques, téléchargements, serveurs de botnet, extensions qui veillent), sauf celle qui redit la coupure, une fois par jour.",
+            "• Hourly monitoring ({}): no more network scan or machine audit, no notification at all (new device, open port, router, DNS, Wi-Fi, critical files, downloads, botnet servers, extensions that watch), except the one that recalls the pause, once a day.",
             etat(surveillance)
         ),
         trf!(
@@ -563,17 +709,96 @@ mod tests {
         )
         .unwrap();
         assert!(matches!(lire_de(&f, MIDI), Etat::Illisible(_)));
-        std::fs::write(&f, format!("{{\"coupee_le\": {}}}", i64::MIN)).unwrap();
-        assert!(
-            lire_de(&f, MIDI).coupure().is_some(),
-            "jusqu'à reprise : la date de début ne compte pas"
-        );
+        // Jusqu'à reprise, une date de début que Vanguard ne donne jamais (0, i64::MIN, d'avant le réglage) ne coupe
+        // rien : un autre programme ne coupe pas la surveillance pour toujours avec « coupee_le: 0 ».
+        for debut in [i64::MIN, 0, PLUS_ANCIENNE - 1] {
+            std::fs::write(&f, format!("{{\"coupee_le\": {debut}}}")).unwrap();
+            assert!(matches!(lire_de(&f, MIDI), Etat::Illisible(_)), "{debut}");
+        }
+        std::fs::write(&f, format!("{{\"coupee_le\": {MIDI}}}")).unwrap();
+        assert!(lire_de(&f, MIDI + 365 * 86_400).coupure().is_some());
+        // Jusqu'à reprise, une coupure datée de bien après maintenant (horloge retardée) ne se croit plus.
+        assert!(matches!(lire_de(&f, MIDI - 3600), Etat::Echue(_)));
+        assert!(lire_de(&f, MIDI - 60).coupure().is_some(), "un petit écart est toléré");
+        // Un lien (vers un tube, un périphérique, un fichier de root) n'est pas lu : rien n'est coupé.
+        #[cfg(unix)]
+        {
+            let cible = d.join("ailleurs.json");
+            std::fs::write(&cible, format!("{{\"coupee_le\": {MIDI}}}")).unwrap();
+            std::fs::remove_file(&f).unwrap();
+            std::os::unix::fs::symlink(&cible, &f).unwrap();
+            assert!(matches!(lire_de(&f, MIDI), Etat::Illisible(_)));
+            std::fs::remove_file(&f).unwrap();
+            std::fs::create_dir(&f).unwrap();
+            assert!(matches!(lire_de(&f, MIDI), Etat::Illisible(_)));
+            std::fs::remove_dir(&f).unwrap();
+        }
         // Couper par-dessus un fichier abîmé : l'ancien est gardé à côté, la nouvelle coupure se lit.
         std::fs::write(&f, "{abîmé").unwrap();
         let c = couper_dans(&f, Duree::UneHeure, MIDI).unwrap();
         assert_eq!(lire_de(&f, MIDI), Etat::Coupee(c));
         assert_eq!(de_cote(), 2);
         let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// Une coupure ne reste jamais muette : notifiée à la première passe, puis une fois par jour tant qu'elle dure ;
+    /// une nouvelle coupure, ou une horloge qui a reculé, se notifie aussitôt.
+    #[test]
+    fn coupure_redite_chaque_jour() {
+        let c = Coupure {
+            depuis: MIDI,
+            jusqu_a: None,
+        };
+        assert!(rappel_du(&c, None, MIDI + 60));
+        assert!(!rappel_du(&c, Some(MIDI + 60), MIDI + 3700));
+        assert!(!rappel_du(&c, Some(MIDI + 60), MIDI + 60 + RAPPEL - 1));
+        assert!(rappel_du(&c, Some(MIDI + 60), MIDI + 60 + RAPPEL));
+        // Le rappel d'une coupure d'avant : celle-ci n'a pas encore été dite.
+        assert!(rappel_du(&c, Some(MIDI - 10), MIDI + 60));
+        assert!(rappel_du(&c, Some(MIDI + 7200), MIDI + 3600), "horloge reculée");
+        // Une coupure de quatre heures se dit donc une fois.
+        let courte = Coupure {
+            depuis: MIDI,
+            jusqu_a: Some(MIDI + 4 * 3600),
+        };
+        assert!((1..4).all(|h| !rappel_du(&courte, Some(MIDI + 60), MIDI + h * 3600)));
+        let (titre, texte) = texte_du_rappel(&c, MIDI + 60);
+        assert_ne!(titre, "");
+        assert!(
+            texte.contains("temps-reel oui") || texte.contains("real-time yes"),
+            "{texte}"
+        );
+        assert!(
+            texte.contains(tr!("jusqu'à reprise", "until turned back on")),
+            "{texte}"
+        );
+    }
+
+    /// Sous sudo ou pkexec, le réglage lu est celui du compte qui a lancé Vanguard, pas celui de root ; sans droits,
+    /// ou root lui-même, celui du dossier habituel.
+    #[cfg(unix)]
+    #[test]
+    fn sous_sudo_le_reglage_du_compte() {
+        let maison = |uid| (uid == 1000).then(|| PathBuf::from("/home/alice"));
+        let d = dossier_appelant(0, Some("1000"), maison).unwrap();
+        assert!(
+            d.starts_with("/home/alice") && d.ends_with("vanguard"),
+            "{}",
+            d.display()
+        );
+        assert_eq!(dossier_appelant(1000, Some("1000"), maison), None, "pas en root");
+        assert_eq!(dossier_appelant(0, None, maison), None, "root lui-même");
+        assert_eq!(dossier_appelant(0, Some("0"), maison), None);
+        assert_eq!(dossier_appelant(0, Some("alice"), maison), None);
+        assert_eq!(dossier_appelant(0, Some("1001"), maison), None, "compte inconnu");
+        assert_eq!(
+            dossier_appelant(0, Some("1000"), |_| Some(PathBuf::from("relatif"))),
+            None
+        );
+        // La vraie base des comptes : le compte qui lance les tests y est (root dans « unshare -rn »).
+        // SAFETY : getuid ne prend aucun argument et ne touche aucune mémoire.
+        let moi = unsafe { libc::getuid() };
+        assert!(dossier_personnel_de(moi).is_some_and(|d| d.is_absolute()));
     }
 
     /// Le bilan : toujours un constat, d'information quand elle est coupée, jamais une alerte ; la note reste la même.
@@ -596,6 +821,23 @@ mod tests {
         assert!(coupee.message.contains("temps-reel oui") || coupee.message.contains("real-time yes"));
         assert!(en_marche.probleme.is_none());
         assert_eq!(constat_de(&Etat::Echue(c), MIDI + 3600).probleme, None);
+    }
+
+    /// Chaque écran qui dit la coupure dit son échéance ; la surveillance qu'on active dit qu'aucune passe ne se fera.
+    #[test]
+    fn phrases_de_chaque_ecran() {
+        let c = Coupure {
+            depuis: MIDI,
+            jusqu_a: None,
+        };
+        for ou in [Ou::Blocage, Ou::Sortantes, Ou::Surveillance] {
+            assert!(phrase_pour(ou, &c, MIDI).contains(tr!("jusqu'à reprise", "until turned back on")));
+        }
+        let s = phrase_pour(Ou::Surveillance, &c, MIDI);
+        assert!(
+            s.contains(tr!("aucune passe", "no run")) && s.contains(tr!("temps-reel oui", "real-time yes")),
+            "{s}"
+        );
     }
 
     /// Les mots de « --pendant », et ce que montre Paramètres.

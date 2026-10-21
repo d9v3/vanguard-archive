@@ -46,6 +46,9 @@ struct Examen {
     /// Place que le nettoyage recommandé libérerait, en octets.
     place: u64,
     alertes: Vec<String>,
+    /// La protection en temps réel de Vanguard coupée, telle qu'elle se dit : au bilan, ce n'est qu'une information,
+    /// que les problèmes ci-dessus ne retiennent pas.
+    coupure: Option<String>,
 }
 
 fn examiner() -> Examen {
@@ -60,6 +63,7 @@ fn examiner() -> Examen {
         maj_inconnues: maj.iter().filter(|c| !c.verifie).map(|c| c.categorie).collect(),
         place: crate::nettoyer::place_a_liberer(),
         alertes: autres.iter().filter(|c| probleme(c)).map(alerte).collect(),
+        coupure: crate::protection::temps_reel::pour_entretien(),
     }
 }
 
@@ -112,7 +116,10 @@ fn rediger(e: &Examen, nouvelles: Option<&[String]>) -> (&'static str, Vec<Strin
             categories(n)
         ),
     });
-    if !e.maj.is_empty() || place.is_some() || nouvelles.is_some_and(|n| !n.is_empty()) {
+    if let Some(c) = &e.coupure {
+        lignes.push(c.clone());
+    }
+    if !e.maj.is_empty() || place.is_some() || nouvelles.is_some_and(|n| !n.is_empty()) || e.coupure.is_some() {
         lignes.push(String::from(tr!(
             "Ouvre Vanguard pour t'en occuper : rien n'a été changé.",
             "Open Vanguard to deal with it: nothing was changed."
@@ -372,6 +379,7 @@ mod tests {
             maj_inconnues: Vec::new(),
             place,
             alertes: Vec::new(),
+            coupure: None,
         }
     }
 
@@ -417,6 +425,14 @@ mod tests {
             "{l:?}"
         );
         assert!(!l[1].contains("rien n'attend") && !l[1].contains("nothing waiting"));
+        // La protection en temps réel coupée : redite chaque mois, avec le rappel d'agir.
+        let coupee = Examen {
+            coupure: Some("Protection en temps réel coupée".into()),
+            ..examen(Some(95), &[], 0)
+        };
+        let (_, l) = rediger(&coupee, Some(&[]));
+        assert!(l.iter().any(|t| t.contains("temps réel coupée")), "{l:?}");
+        assert!(l.last().unwrap().contains("rien n'a été changé") || l.last().unwrap().contains("nothing was changed"));
         // Premier passage : rien à comparer.
         let (_, premier) = rediger(&examen(None, &[], 0), None);
         assert!(premier[0].contains("aucune") || premier[0].contains("none"));

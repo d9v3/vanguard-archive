@@ -627,10 +627,14 @@ pub fn activer(oui: bool) {
         noter_voulue(oui);
     }
     match (oui, reussi) {
-        (true, true) => trp!(
-            "  {VERT}✔{RESET} Surveillance activée : scan toutes les heures, notification si un appareil inconnu arrive.",
-            "  {VERT}✔{RESET} Monitoring on: scan every hour, notification if an unknown device shows up."
-        ),
+        (true, true) => {
+            trp!(
+                "  {VERT}✔{RESET} Surveillance activée : scan toutes les heures, notification si un appareil inconnu arrive.",
+                "  {VERT}✔{RESET} Monitoring on: scan every hour, notification if an unknown device shows up."
+            );
+            // Coupée, chaque passe s'arrête au début (`passe`) : « toutes les heures » ne vaut qu'à la reprise.
+            crate::protection::temps_reel::dire_si_coupee(crate::protection::temps_reel::Ou::Surveillance);
+        }
         (true, false) => trp!(
             "  ✖ Impossible d'activer la surveillance.",
             "  ✖ Could not turn monitoring on."
