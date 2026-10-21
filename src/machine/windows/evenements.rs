@@ -809,17 +809,27 @@ fn lecture_partielle(
 /// celle d'un échec (« date|type|adresse|compte ») : `lire_echecs` la lit. Les autres types (session ouverte au
 /// clavier, services) ne viennent pas d'une adresse : rien.
 fn ligne_reussite(id: u32, date: &str, champs: &[(String, String)]) -> Option<String> {
+    let machine = std::env::var("COMPUTERNAME").ok();
+    ligne_reussite_sur(machine.as_deref(), id, date, champs)
+}
+
+/// `ligne_reussite` sur l'ordinateur nommé `machine` (`None` : nom inconnu).
+fn ligne_reussite_sur(machine: Option<&str>, id: u32, date: &str, champs: &[(String, String)]) -> Option<String> {
     let valeur = |nom: &str| champs.iter().find(|(n, _)| n == nom).map(|(_, v)| v);
-    let type_ = valeur("LogonType")?.trim();
-    // Une session anonyme (S-1-5-7, la session nulle d'un partage) ou un compte d'ordinateur (« PC$ ») n'est pas un
-    // mot de passe deviné : sans cette exclusion, une télé qui rate l'accès invité puis ouvre une session nulle
-    // donnait une alerte critique.
-    let anonyme = valeur("TargetUserSid").is_some_and(|s| s.trim() == "S-1-5-7")
-        || valeur("TargetUserName").is_some_and(|n| {
-            let n = n.trim();
-            n.ends_with('$') || n.eq_ignore_ascii_case("ANONYMOUS LOGON")
-        });
-    (id == 4624 && matches!(type_, "3" | "8" | "10") && !anonyme).then(|| {
+    let texte = |nom: &str| valeur(nom).map(|v| v.trim());
+    let type_ = texte("LogonType")?;
+    // Une session anonyme (S-1-5-7, la session nulle d'un partage) n'est pas un mot de passe deviné, quel que soit son
+    // type : sans cette exclusion, une télé qui rate l'accès invité puis ouvre une session nulle donnait une alerte
+    // critique.
+    let anonyme = texte("TargetUserSid") == Some("S-1-5-7")
+        || texte("TargetUserName").is_some_and(|n| n.eq_ignore_ascii_case("ANONYMOUS LOGON"));
+    // Un compte d'ordinateur (« PC$ ») ne s'ouvre que par le réseau (type 3), et au nom du domaine. Un compte local au
+    // nom en « $ » (le truc qui le cache à « net user ») porte le nom de cet ordinateur pour domaine ; au Bureau à
+    // distance ou en clair, un nom en « $ » est toujours un compte d'une personne.
+    let ordinateur = type_ == "3"
+        && texte("TargetUserName").is_some_and(|n| n.ends_with('$'))
+        && !matches!((machine, texte("TargetDomainName")), (Some(m), Some(d)) if m.eq_ignore_ascii_case(d));
+    (id == 4624 && matches!(type_, "3" | "8" | "10") && !anonyme && !ordinateur).then(|| {
         format!(
             "{}|{type_}|{}|{}",
             date_locale(date).unwrap_or_default(),
@@ -1187,6 +1197,43 @@ mod tests {
         };
         assert_eq!(ligne_reussite(4624, "pas une date", &champs("2")), None);
         assert_eq!(ligne_reussite(4625, "pas une date", &champs("10")), None);
+        // Les comptes cachés en « $ », les sessions anonymes et les comptes d'ordinateur, sur un PC nommé « SALON ».
+        let session = |type_: &str, nom: &str, sid: &str, domaine: &str| {
+            let champs = [
+                ("TargetUserName", nom),
+                ("TargetUserSid", sid),
+                ("TargetDomainName", domaine),
+                ("LogonType", type_),
+                ("IpAddress", "203.0.113.7"),
+            ]
+            .map(|(n, v)| (n.to_string(), v.to_string()));
+            ligne_reussite_sur(Some("SALON"), 4624, "2026-10-18T14:05:09Z", &champs)
+        };
+        let alice = "S-1-5-21-1-2-3-1001";
+        // Au Bureau à distance ou en clair, un nom en « $ » est une personne : la réussite reste.
+        assert!(session("10", "support$", alice, "SALON").is_some_and(|l| l.ends_with("|10|203.0.113.7|support$")));
+        assert!(session("8", "support$", alice, "SALON").is_some());
+        // Par le réseau, un compte local caché (domaine : cet ordinateur) reste aussi ; un compte d'ordinateur du
+        // domaine est écarté, comme un nom en « $ » quand le nom de l'ordinateur est inconnu.
+        assert!(session("3", "support$", alice, "salon").is_some());
+        assert_eq!(session("3", "PC$", "S-1-5-21-9-9-9-1105", "MAISON"), None);
+        let champs_pc = [
+            ("TargetUserName", "PC$"),
+            ("TargetDomainName", "SALON"),
+            ("LogonType", "3"),
+        ]
+        .map(|(n, v)| (n.to_string(), v.to_string()));
+        assert_eq!(ligne_reussite_sur(None, 4624, "", &champs_pc), None);
+        // Les sessions anonymes, écartées quel que soit le type.
+        for type_ in ["3", "8", "10"] {
+            assert_eq!(
+                session(type_, "ANONYMOUS LOGON", "S-1-5-7", "NT AUTHORITY"),
+                None,
+                "{type_}"
+            );
+            assert_eq!(session(type_, "alice", " S-1-5-7 ", "SALON"), None, "{type_}");
+            assert_eq!(session(type_, "anonymous logon", "", "NT AUTHORITY"), None, "{type_}");
+        }
         // Le dernier échec est à 10:09 ; la réussite à 10:09, puis une autre à 10:30.
         let reussites = [
             "2026-10-18 10:09|10|203.0.113.7|alice",
