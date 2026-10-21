@@ -138,6 +138,63 @@ pub fn lire_sortie(texte: &str) -> Etat {
     e
 }
 
+/// Les lignes de `SCRIPT`, lues par WMI (les classes de Get-MpComputerStatus et Get-MpPreference) ; `None` si l'une
+/// des deux ne répond pas, comme le script qui s'arrête à la première erreur.
+#[cfg(windows)]
+fn sortie_wmi() -> Option<String> {
+    use crate::machine::windows::wmi::{self, Valeur};
+    const DEFENDER: &str = r"root\Microsoft\Windows\Defender";
+    let s = wmi::requete(
+        DEFENDER,
+        "MSFT_MpComputerStatus",
+        "",
+        &["AMRunningMode", "AntivirusEnabled"],
+    )?
+    .into_iter()
+    .next()?;
+    let p = wmi::requete(
+        DEFENDER,
+        "MSFT_MpPreference",
+        "",
+        &[
+            "EnableControlledFolderAccess",
+            "EnableNetworkProtection",
+            "PUAProtection",
+            "AttackSurfaceReductionRules_Ids",
+            "AttackSurfaceReductionRules_Actions",
+            "ControlledFolderAccessProtectedFolders",
+        ],
+    )?
+    .into_iter()
+    .next()?;
+    // Comme `[int]$null` : une valeur absente vaut 0 ; un booléen comme PowerShell l'écrit.
+    let entier = |v: &Valeur| v.entier().unwrap_or(0);
+    let booleen = match s["AntivirusEnabled"] {
+        Valeur::Booleen(true) => "True",
+        Valeur::Booleen(false) => "False",
+        _ => "",
+    };
+    let mut lignes = vec![
+        format!("mode|{}", s["AMRunningMode"].texte().unwrap_or_default()),
+        format!("av|{booleen}"),
+        format!("cfa|{}", entier(&p["EnableControlledFolderAccess"])),
+        format!("np|{}", entier(&p["EnableNetworkProtection"])),
+        format!("pua|{}", entier(&p["PUAProtection"])),
+    ];
+    let actions = p["AttackSurfaceReductionRules_Actions"].liste();
+    for (i, id) in p["AttackSurfaceReductionRules_Ids"].liste().iter().enumerate() {
+        if let Some(id) = id.texte().filter(|id| !id.is_empty()) {
+            lignes.push(format!("asr|{id}|{}", actions.get(i).map_or(0, entier)));
+        }
+    }
+    for d in p["ControlledFolderAccessProtectedFolders"].liste() {
+        if let Some(d) = d.texte().filter(|d| !d.is_empty()) {
+            lignes.push(format!("protege|{d}"));
+        }
+    }
+    Some(lignes.join("\n"))
+}
+
 static ETAT: Mutex<Option<Arc<Etat>>> = Mutex::new(None);
 
 /// L'état de Defender, lu une fois puis gardé jusqu'à la prochaine écriture. PowerShell muet : Defender inactif.
@@ -145,7 +202,12 @@ pub fn etat() -> Arc<Etat> {
     let mut garde = ETAT.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     garde
         .get_or_insert_with(|| {
-            Arc::new(crate::machine::windows::ps(SCRIPT).map_or_else(Etat::default, |t| lire_sortie(&t)))
+            // WMI d'abord, PowerShell en secours.
+            Arc::new(
+                sortie_wmi()
+                    .or_else(|| crate::machine::windows::ps(SCRIPT))
+                    .map_or_else(Etat::default, |t| lire_sortie(&t)),
+            )
         })
         .clone()
 }

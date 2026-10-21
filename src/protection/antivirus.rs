@@ -288,8 +288,28 @@ fn defender(portee: &Portee) {
             "  {VERT}✔ No malware found.{RESET}"
         ),
         Ok(Some(2)) => {
-            let menaces = ps("Get-MpThreat | ForEach-Object { \"$($_.ThreatName)|$($_.Resources -join ', ')\" }")
-                .unwrap_or_default();
+            // WMI d'abord (la classe que lit Get-MpThreat), PowerShell en secours.
+            let menaces = crate::machine::windows::wmi::requete(
+                r"root\Microsoft\Windows\Defender",
+                "MSFT_MpThreat",
+                "",
+                &["ThreatName", "Resources"],
+            )
+            .map(|l| {
+                l.iter()
+                    .map(|m| {
+                        let fichiers: Vec<&str> = m["Resources"].liste().iter().filter_map(|r| r.texte()).collect();
+                        format!(
+                            "{}|{}",
+                            m["ThreatName"].texte().unwrap_or_default(),
+                            fichiers.join(", ")
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            })
+            .or_else(|| ps("Get-MpThreat | ForEach-Object { \"$($_.ThreatName)|$($_.Resources -join ', ')\" }"))
+            .unwrap_or_default();
             for l in menaces.lines() {
                 let (nom, fichiers) = l.split_once('|').unwrap_or((l, ""));
                 let (nom, fichiers) = (affichable(nom), affichable(fichiers));

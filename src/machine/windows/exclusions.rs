@@ -11,6 +11,28 @@ use crate::ui::{affichable, resume, tr, trf};
 /// Les exclusions de Defender. Sans droits administrateur, Windows les cache (« N/A: Must be an administrator… ») :
 /// rien à conclure. Avec un autre antivirus, Get-MpPreference échoue : rien non plus.
 pub(super) fn exclusions() -> Option<Constat> {
+    // WMI d'abord (la classe que lit Get-MpPreference), PowerShell en secours.
+    if let Some(l) = super::wmi::requete(
+        r"root\Microsoft\Windows\Defender",
+        "MSFT_MpPreference",
+        "",
+        &["ExclusionPath", "ExclusionProcess", "ExclusionExtension"],
+    )
+    .and_then(|l| l.into_iter().next())
+    {
+        let liste = |cle: &str| -> Vec<String> {
+            l[cle]
+                .liste()
+                .iter()
+                .filter_map(|x| x.texte().map(str::to_string))
+                .collect()
+        };
+        return juger(
+            &liste("ExclusionPath"),
+            &liste("ExclusionProcess"),
+            &liste("ExclusionExtension"),
+        );
+    }
     let json = ps(
         "$p = Get-MpPreference; @{c=@($p.ExclusionPath); p=@($p.ExclusionProcess); e=@($p.ExclusionExtension)} | ConvertTo-Json -Compress",
     )?;
