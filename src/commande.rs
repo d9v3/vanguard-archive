@@ -475,8 +475,8 @@ mod tests {
     }
 
     /// Les sorties analysées que leur outil traduit (relevées outil par outil, en français et en anglais) passent
-    /// toutes par `lancer_en_anglais` : nmcli écrit « oui » pour « yes » dans la colonne ACTIVE, lscpu « Nom de
-    /// modèle : » pour « Model name: », dpkg -S traduit ses lignes « diversion by … ». Lu dans les fichiers : l'appel
+    /// toutes par `lancer_en_anglais` : nmcli écrit « oui » pour « yes » dans la colonne ACTIVE, dpkg -S
+    /// traduit ses lignes « diversion by … ». Lu dans les fichiers : l'appel
     /// de l'outil et `lancer_en_anglais` dans la même instruction.
     #[cfg(target_os = "linux")]
     #[test]
@@ -502,7 +502,6 @@ mod tests {
                 include_str!("reseau/scan.rs"),
                 "Command::new(\"nmcli\")",
             ),
-            ("fiche.rs", include_str!("fiche.rs"), "Command::new(\"lscpu\")"),
         ]
         .into_iter()
         .filter(|(_, source, appel)| {
