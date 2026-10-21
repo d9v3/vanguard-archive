@@ -128,37 +128,40 @@ fn analyser_fichiers(
             analyseur.set_timeout(DELAI_PAR_FICHIER);
             analyseur
         },
-        |analyseur, f| {
-            let mut trouves = Vec::new();
-            let lu = match analyseur.scan_file(f) {
-                Ok(r) => {
-                    trouves.extend(r.matching_rules().map(|m| Trouve::nouveau(m.identifier(), f)));
-                    true
-                }
-                Err(_) => false,
-            };
-            // Le fichier vient d'être lu : il est encore en mémoire, l'empreinte coûte peu.
-            if let Some(empreintes) = empreintes {
-                for (chemin, e) in empreintes::connus(empreintes, std::slice::from_ref(f)) {
-                    trouves.push(Trouve::nouveau(&format!("{MALWAREBAZAAR}{e}"), &chemin));
-                }
-            }
-            (trouves, lu)
+        |analyseur, f| match analyseur.scan_file(f) {
+            Ok(r) => (
+                r.matching_rules().map(|m| Trouve::nouveau(m.identifier(), f)).collect(),
+                true,
+            ),
+            Err(_) => (Vec::new(), false),
+        },
+        // Le fichier vient d'être lu : il est encore en mémoire, l'empreinte coûte peu.
+        |f| {
+            empreintes
+                .map(|e| empreintes::connus(e, std::slice::from_ref(f)))
+                .unwrap_or_default()
+                .into_iter()
+                .map(|(chemin, e)| Trouve::nouveau(&format!("{MALWAREBAZAAR}{e}"), &chemin))
+                .collect()
         },
     )
 }
 
-/// `liste` répartie en `FILS` lots, un fil par lot avec son propre analyseur (`nouveau`) ; `un` passe un fichier :
-/// (correspondances, lu jusqu'au bout). Un fichier piégé peut faire paniquer YARA-X : il est alors rendu illisible,
-/// jamais sain, sans emporter les autres fichiers de son lot, et l'analyseur, peut-être resté au milieu de l'analyse
-/// interrompue, n'est plus réutilisé. Un fil qui tombe malgré tout (analyseur impossible à créer) rend tout son lot
+/// `liste` répartie en `FILS` lots, un fil par lot avec son propre analyseur (`nouveau`) ; `un` passe un fichier aux
+/// règles : (correspondances, lu jusqu'au bout) ; `empreinte` le cherche ensuite parmi les empreintes connues. Un
+/// fichier piégé peut faire paniquer YARA-X : il est alors rendu illisible, jamais sain, sans emporter les autres
+/// fichiers de son lot, et l'analyseur, peut-être resté au milieu de l'analyse interrompue, n'est plus réutilisé.
+/// L'empreinte, qui ne dépend pas de YARA-X, a sa propre garde : cherchée même après une panique des règles, elle
+/// garde « logiciel malveillant connu » à un fichier de MalwareBazaar qui ferait aussi paniquer YARA-X, au lieu de
+/// « impossible à vérifier ». Un fil qui tombe malgré tout (analyseur impossible à créer) rend tout son lot
 /// illisible : jeté en silence, ce lot faisait conclure « sain » sans avoir été lu.
 fn par_lots<A>(
     liste: &[PathBuf],
     nouveau: impl Fn() -> A + Sync,
     un: impl Fn(&mut A, &PathBuf) -> (Vec<Trouve>, bool) + Sync,
+    empreinte: impl Fn(&PathBuf) -> Vec<Trouve> + Sync,
 ) -> (Vec<Trouve>, Vec<PathBuf>) {
-    let (nouveau, un) = (&nouveau, &un);
+    let (nouveau, un, empreinte) = (&nouveau, &un, &empreinte);
     let lots: Vec<&[PathBuf]> = liste.chunks(liste.len().div_ceil(FILS).max(1)).collect();
     std::thread::scope(|s| {
         let fils: Vec<_> = lots
@@ -168,16 +171,16 @@ fn par_lots<A>(
                     let mut analyseur = nouveau();
                     let (mut trouves, mut echecs) = (Vec::new(), Vec::new());
                     for f in lot {
-                        let examen = crate::journal::rattraper(std::panic::AssertUnwindSafe(|| un(&mut analyseur, f)));
-                        let Ok((t, lu)) = examen else {
-                            echecs.push(f.clone());
-                            analyseur = nouveau();
-                            continue;
-                        };
-                        trouves.extend(t);
-                        if !lu {
+                        let regles = crate::journal::rattraper(std::panic::AssertUnwindSafe(|| un(&mut analyseur, f)));
+                        let connu = crate::journal::rattraper(std::panic::AssertUnwindSafe(|| empreinte(f)));
+                        if !(matches!(regles, Ok((_, true))) && connu.is_ok()) {
                             echecs.push(f.clone());
                         }
+                        match regles {
+                            Ok((t, _)) => trouves.extend(t),
+                            Err(_) => analyseur = nouveau(),
+                        }
+                        trouves.extend(connu.unwrap_or_default());
                     }
                     (trouves, echecs)
                 });
@@ -616,6 +619,31 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dossier);
     }
 
+    /// Un fichier connu de MalwareBazaar qui fait aussi paniquer YARA-X reste un « logiciel malveillant connu » :
+    /// l'empreinte ne dépend pas de YARA-X. Avant, elle était cherchée après l'analyse, sous la même garde, et la
+    /// panique la sautait : le fichier n'était plus qu'« impossible à vérifier », et une extension qui le portait
+    /// demandait quand même l'accord.
+    #[test]
+    fn une_empreinte_connue_est_trouvee_meme_si_yara_x_panique() {
+        let mut compilateur = yara_x::Compiler::new();
+        compilateur
+            .add_source(r#"import "pe" rule Section { condition: pe.section_index(0) == 0 }"#)
+            .unwrap();
+        let essai = compilateur.build();
+        let dossier = crate::protection::isoler::dossier_jetable().unwrap();
+        let piege = dossier.join("piege.exe");
+        std::fs::write(&piege, pe_dont_la_section_deborde()).unwrap();
+        let connues = Empreintes::depuis(vec![empreintes::sha256(&piege).unwrap()]);
+        let (trouves, _) = analyser_fichiers(&essai, Some(&connues), std::slice::from_ref(&piege));
+        assert!(
+            trouves
+                .iter()
+                .any(|t| t.chemin == piege && t.regle.starts_with(MALWAREBAZAAR)),
+            "{trouves:?}"
+        );
+        let _ = std::fs::remove_dir_all(&dossier);
+    }
+
     /// La garde elle-même, sans YARA-X : une panique ne coûte que son fichier, l'analyseur qui l'a vue est remplacé,
     /// et un fil qui tombe hors de toute analyse (analyseur impossible à créer) rend son lot illisible, sans toucher aux
     /// autres.
@@ -633,6 +661,7 @@ mod tests {
                 assert!(*f != piege, "fichier piégé");
                 (vec![Trouve::nouveau(&vus.to_string(), f)], true)
             },
+            |_| Vec::new(),
         );
         assert_eq!(echecs, std::slice::from_ref(&piege));
         assert_eq!(trouves.len(), 7, "{trouves:?}");
@@ -641,7 +670,12 @@ mod tests {
             "{trouves:?}"
         );
         // Seul, comme examiner() le passe : illisible, donc « impossible à vérifier », et plus « sain ».
-        let (trouves, echecs) = par_lots(std::slice::from_ref(&piege), || (), |(), _| panic!("fichier piégé"));
+        let (trouves, echecs) = par_lots(
+            std::slice::from_ref(&piege),
+            || (),
+            |(), _| panic!("fichier piégé"),
+            |_| Vec::new(),
+        );
         assert_eq!(trouves, []);
         assert_eq!(echecs, std::slice::from_ref(&piege));
         assert!(illisible(Path::new("/home/alice"), &echecs).is_some());
@@ -651,10 +685,47 @@ mod tests {
             &liste,
             || assert!(!premier.swap(false, Ordering::SeqCst), "analyseur impossible à créer"),
             |(), f| (vec![Trouve::nouveau("lu", f)], true),
+            |_| Vec::new(),
         );
         assert_eq!((trouves.len(), echecs.len()), (6, 2));
         echecs.extend(trouves.into_iter().map(|t| t.chemin));
         echecs.sort();
         assert_eq!(echecs, liste);
+    }
+
+    /// Les règles et l'empreinte, chacune sous sa garde : une panique des règles ne saute pas l'empreinte (le fichier
+    /// connu reste trouvé, et dit illisible pour les règles), et une panique de l'empreinte ne jette pas ce que les
+    /// règles ont trouvé, mais rend le fichier illisible : comparé à rien, il n'est pas sain.
+    #[test]
+    fn l_empreinte_ne_depend_pas_des_regles() {
+        let liste: Vec<PathBuf> = (0..8).map(|i| PathBuf::from(format!("/home/alice/f{i}"))).collect();
+        let (connu, piege) = (liste[2].clone(), liste[5].clone());
+        let (trouves, mut echecs) = par_lots(
+            &liste,
+            || (),
+            |(), f| {
+                assert!(*f != connu, "fichier piégé");
+                (vec![Trouve::nouveau("regle", f)], true)
+            },
+            |f| {
+                assert!(*f != piege, "empreinte impossible");
+                if *f == connu {
+                    vec![Trouve::nouveau(&format!("{MALWAREBAZAAR}essai"), f)]
+                } else {
+                    Vec::new()
+                }
+            },
+        );
+        echecs.sort();
+        assert_eq!(echecs, [connu.clone(), piege.clone()]);
+        let regles: Vec<&PathBuf> = trouves
+            .iter()
+            .filter(|t| t.regle == "regle")
+            .map(|t| &t.chemin)
+            .collect();
+        assert_eq!(regles.len(), 7, "{trouves:?}");
+        assert!(regles.contains(&&piege) && !regles.contains(&&connu));
+        let connus: Vec<&Trouve> = trouves.iter().filter(|t| t.regle.starts_with(MALWAREBAZAAR)).collect();
+        assert!(connus.len() == 1 && connus[0].chemin == connu, "{trouves:?}");
     }
 }
