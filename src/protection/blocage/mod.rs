@@ -67,6 +67,31 @@ fn enregistrer(p: &Parametres) -> bool {
     }
 }
 
+/// Les réglages qui décident de ce qui se bloque tout seul. En administrateur, l'accord de blocage.json ne compte
+/// pas : tout processus du compte peut écrire ce fichier (sous Windows, une fenêtre « en tant qu'administrateur »
+/// garde le même %LOCALAPPDATA%), et il ne doit pas faire agir Vanguard avec tous les droits sans une question. Le
+/// certain s'y propose alors d'un clic, comme le reste ; les extensions font de même (en administrateur, leurs
+/// réglages ne lèvent rien).
+fn pour_agir(mut p: Parametres, administrateur: bool) -> Parametres {
+    if administrateur {
+        p.accord = None;
+    }
+    p
+}
+
+/// Ce que la protection active devient en administrateur, dit là où elle tournerait.
+fn dire_administrateur() {
+    afficher_aligne(
+        &format!("  {}⚠{RESET} ", couleur(crate::risk::Niveau::Moyen)),
+        tr!(
+            "Vanguard est en administrateur : la protection active ne bloque rien toute seule (ses réglages peuvent être écrits par n'importe quel programme de ce compte). Le certain se propose d'un clic, comme le reste.",
+            "Vanguard is running as administrator: active protection blocks nothing by itself (its settings can be written by any program of this account). What is certain is offered with one click, like the rest."
+        ),
+        4,
+        "",
+    );
+}
+
 /// L'état, court, pour la ligne du menu.
 pub fn etat_court() -> &'static str {
     match parametres::charger() {
@@ -149,6 +174,9 @@ fn afficher_etat(p: &Parametres) {
             "  Active protection: no. Nothing is blocked without your click."
         ),
     }
+    if p.actif() && gestes::administrateur_ou_inconnu() {
+        dire_administrateur();
+    }
 }
 
 /// Le texte de l'accord, montré une seule fois, avant le premier « automatique ».
@@ -168,8 +196,8 @@ fn demander_accord() -> bool {
             "• a connection to a known botnet command server (Feodo Tracker, ThreatFox): blocked by the firewall."
         ),
         tr!(
-            "Chaque blocage te prévient (notification, tableau de bord), est noté dans « Ce que Vanguard a changé » et s'annule par « vanguard blocage annuler ». Jamais Vanguard, un processus critique, un programme du système ni une connexion à distance en cours. Le douteux reste une alerte avec son bouton. Elle tourne au bilan et dans la surveillance horaire ; sans les droits d'administrateur, ce qui les demande n'est pas fait, et c'est dit.",
-            "Each block warns you (notification, dashboard), is written in “What Vanguard changed” and is undone with “vanguard blocking undo”. Never Vanguard, a critical process, a system program or a remote connection in progress. What is doubtful stays an alert with its button. It runs at the check-up and in the hourly monitoring; without administrator rights, what needs them is not done, and you are told."
+            "Chaque blocage te prévient (notification, tableau de bord), est noté dans « Ce que Vanguard a changé » et s'annule par « vanguard blocage annuler ». Jamais Vanguard, un processus critique, un programme du système ni une connexion à distance en cours. Le douteux reste une alerte avec son bouton. Elle tourne au bilan et dans la surveillance horaire ; sans les droits d'administrateur, ce qui les demande n'est pas fait, et c'est dit. En administrateur, rien n'est bloqué tout seul : le certain s'y propose d'un clic.",
+            "Each block warns you (notification, dashboard), is written in “What Vanguard changed” and is undone with “vanguard blocking undo”. Never Vanguard, a critical process, a system program or a remote connection in progress. What is doubtful stays an alert with its button. It runs at the check-up and in the hourly monitoring; without administrator rights, what needs them is not done, and you are told. As administrator, nothing is blocked by itself: what is certain is offered with one click there."
         ),
     ] {
         afficher_aligne("  ", t, 4, "");
@@ -383,8 +411,9 @@ fn chercher_et_proposer() {
     dire_non_verifie(&t.non_verifie);
 }
 
-/// Au bilan : le certain des catégories automatiques est bloqué tout seul, puis chaque autre menace propose
-/// « Bloquer » (dans un terminal ; sinon elle est seulement dite, sans question).
+/// Au bilan : le certain des catégories automatiques est bloqué tout seul (jamais en administrateur, voir
+/// `pour_agir`), puis chaque autre menace propose « Bloquer » (dans un terminal ; sinon elle est seulement dite, sans
+/// question).
 pub fn au_bilan() {
     let p = parametres();
     if p.rien() {
@@ -397,6 +426,11 @@ pub fn au_bilan() {
     );
     let interactif = std::io::stdin().is_terminal();
     let ctx = Contexte::lire(t.intouchables.clone(), interactif);
+    let administrateur = gestes::administrateur_ou_inconnu();
+    if p.actif() && administrateur {
+        dire_administrateur();
+    }
+    let p = pour_agir(p, administrateur);
     let (auto, un_clic): (Vec<Menace>, Vec<Menace>) = t
         .menaces
         .into_iter()
@@ -498,6 +532,8 @@ pub(crate) fn en_surveillance() {
     let Ok(p) = parametres::charger() else {
         return;
     };
+    // En administrateur, rien ne s'y bloque tout seul (`pour_agir`) : il n'y a rien à chercher.
+    let p = pour_agir(p, gestes::administrateur_ou_inconnu());
     if !p.actif() {
         return;
     }
@@ -729,5 +765,37 @@ pub fn annuler() {
             Ok(_) => trp!("  {VERT}✔{RESET} Annulé.", "  {VERT}✔{RESET} Undone."),
             Err(e) => trp!("  ✖ {e}", "  ✖ {e}"),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// En administrateur, l'accord et les « automatique » de blocage.json (que tout processus du compte peut écrire)
+    /// ne font rien bloquer tout seul : le certain se propose d'un clic. Hors administrateur, ils comptent.
+    #[test]
+    fn en_administrateur_rien_tout_seul() {
+        let mut p = Parametres {
+            accord: Some("x".into()),
+            ..Parametres::default()
+        };
+        p.regler(Categorie::Programmes, Mode::Automatique).unwrap();
+        p.regler(Categorie::Connexions, Mode::Automatique).unwrap();
+        let compte = pour_agir(p.clone(), false);
+        assert!(compte.actif());
+        assert_eq!(decider(&compte, Categorie::Connexions, true), Decision::Auto);
+        let admin = pour_agir(p, true);
+        assert!(!admin.actif());
+        for c in [Categorie::Programmes, Categorie::Connexions] {
+            assert_eq!(decider(&admin, c, true), Decision::UnClic, "{c:?}");
+            assert_eq!(decider(&admin, c, false), Decision::UnClic, "{c:?}");
+        }
+        // Ce qui est désactivé le reste, et ce qui se cherche se cherche encore.
+        let mut p = admin;
+        p.regler(Categorie::AgentsIa, Mode::Desactive).unwrap();
+        let admin = pour_agir(p, true);
+        assert_eq!(decider(&admin, Categorie::AgentsIa, true), Decision::Rien);
+        assert_eq!(categories_actives(&admin).len(), 3);
     }
 }

@@ -280,7 +280,7 @@ fn valeur(r: Reglage) -> String {
         },
         Reglage::Blocage => crate::protection::blocage::etat_court().to_string(),
         Reglage::Restrictions => {
-            texte_restrictions(restrictions_actives(crate::plugins::reglages_lisibles().as_deref()))
+            texte_restrictions(&restrictions_actives(crate::plugins::reglages_lisibles().as_deref()))
         }
     };
     if let Some(v) = r.variable().filter(|v| std::env::var_os(v).is_some()) {
@@ -290,17 +290,24 @@ fn valeur(r: Reglage) -> String {
 }
 
 /// Les restrictions des extensions, lues de leur interrupteur : actives ? Sans dossier à lire (administrateur), oui :
-/// l'interrupteur n'y vaut rien.
-fn restrictions_actives(racine: Option<&Path>) -> bool {
-    racine.is_none_or(|r| !crate::plugins::reglages::charger(r).sans_restrictions)
+/// l'interrupteur n'y vaut rien. `Err` (la raison) : son fichier ne se lit plus, et elles restent actives.
+fn restrictions_actives(racine: Option<&Path>) -> Result<bool, String> {
+    racine.map_or(Ok(true), |r| {
+        crate::plugins::reglages::lire(r).map(|g| !g.sans_restrictions)
+    })
 }
 
-/// Leur valeur montrée : oui (actives), ou non et ce que cela veut dire.
-fn texte_restrictions(actives: bool) -> String {
-    if actives {
-        mot_oui_non(true).to_string()
-    } else {
-        trf!("{} (sans contrôle)", "{} (no checks)", mot_oui_non(false))
+/// Leur valeur montrée : oui (actives), ou non et ce que cela veut dire. Un fichier illisible est dit : il ne vaut
+/// pas un « oui » tranquille (ses confiances « à moi » ne servent plus, et le prochain changement le met de côté).
+fn texte_restrictions(actives: &Result<bool, String>) -> String {
+    match actives {
+        Ok(true) => mot_oui_non(true).to_string(),
+        Ok(false) => trf!("{} (sans contrôle)", "{} (no checks)", mot_oui_non(false)),
+        Err(_) => trf!(
+            "{} (réglages illisibles)",
+            "{} (settings unreadable)",
+            mot_oui_non(true)
+        ),
     }
 }
 
@@ -680,18 +687,19 @@ mod tests {
         use crate::plugins::reglages;
         let d = jetable("restrictions").with_file_name("plugins");
         std::fs::create_dir_all(&d).unwrap();
-        assert!(
+        assert_eq!(
             restrictions_actives(None),
+            Ok(true),
             "sans dossier à lire (administrateur) : actives"
         );
-        assert!(restrictions_actives(Some(&d)), "sans fichier : actives");
-        assert_eq!(texte_restrictions(true), mot_oui_non(true));
+        assert_eq!(restrictions_actives(Some(&d)), Ok(true), "sans fichier : actives");
+        assert_eq!(texte_restrictions(&Ok(true)), mot_oui_non(true));
         // Coupées, la valeur montrée garde le mot tapé devant : le choix au menu reste marqué.
-        assert!(texte_restrictions(false).starts_with(&format!("{} (", mot_oui_non(false))));
+        assert!(texte_restrictions(&Ok(false)).starts_with(&format!("{} (", mot_oui_non(false))));
         // Refusé : rien ne change, rien n'est écrit.
         assert_eq!(restrictions_dans(&d, false, |_| false), Ok((true, true)));
         assert_eq!(reglages::charger(&d), reglages::Reglages::default());
-        assert!(restrictions_actives(Some(&d)));
+        assert_eq!(restrictions_actives(Some(&d)), Ok(true));
         // Accepté : la question est celle de l'interrupteur, et sa réponse est gardée dans son fichier.
         let mut question = String::new();
         let fait = restrictions_dans(&d, false, |q| {
@@ -700,7 +708,7 @@ mod tests {
         });
         assert_eq!(fait, Ok((true, false)));
         assert!(question.contains("/N]"), "{question}");
-        assert!(!restrictions_actives(Some(&d)));
+        assert_eq!(restrictions_actives(Some(&d)), Ok(false));
         assert!(reglages::charger(&d).sans_restrictions && reglages::charger(&d).coupure_confirmee);
         // Déjà coupées : rien n'est demandé ni changé.
         assert_eq!(
@@ -714,10 +722,38 @@ mod tests {
         );
         assert!(!reglages::charger(&d).sans_restrictions);
         assert!(reglages::basculer(&d, |_| panic!("déjà confirmé une fois")).unwrap());
-        assert!(!restrictions_actives(Some(&d)));
+        assert_eq!(restrictions_actives(Some(&d)), Ok(false));
         assert_eq!(restrictions_dans(&d, true, |_| panic!("remettre")), Ok((false, true)));
-        assert!(restrictions_actives(Some(&d)));
+        assert_eq!(restrictions_actives(Some(&d)), Ok(true));
+        // Un fichier qui ne se lit plus : actives, et c'est dit ; le mot tapé reste devant, marqué au menu.
+        std::fs::write(d.join("reglages.json"), "{pas du json").unwrap();
+        let illisible = restrictions_actives(Some(&d));
+        assert!(illisible.is_err());
+        let montre = texte_restrictions(&illisible);
+        assert!(montre.starts_with(&format!("{} (", mot_oui_non(true))), "{montre}");
+        assert_ne!(montre, texte_restrictions(&Ok(true)));
         let _ = std::fs::remove_dir_all(d.parent().unwrap());
+    }
+
+    /// Le guide (« vanguard parametres ») nomme chaque réglage, dans les deux langues, comme l'aide et le README : les
+    /// restrictions des extensions y avaient été oubliées. Un réglage ajouté doit trouver son nom ici.
+    #[test]
+    fn le_guide_nomme_chaque_reglage() {
+        let (fr, en) = crate::guide::explication_vanguard("vanguard parametres").expect("vanguard parametres au guide");
+        for r in Reglage::TOUS {
+            let (nom_fr, nom_en) = match r {
+                Reglage::Langue => ("langue", "language"),
+                Reglage::Emojis => ("emojis", "emojis"),
+                Reglage::HorsLigne => ("sans Internet", "offline"),
+                Reglage::Surveillance => ("surveillance", "monitoring"),
+                Reglage::Entretien => ("entretien", "check-up"),
+                Reglage::Appris => ("alertes apprises", "learned alerts"),
+                Reglage::Blocage => ("blocage", "blocking"),
+                Reglage::Restrictions => ("restrictions des extensions", "extension restrictions"),
+            };
+            assert!(fr.contains(nom_fr), "{r:?} absent du guide : {fr}");
+            assert!(en.contains(nom_en), "{r:?} missing from the guide: {en}");
+        }
     }
 
     #[test]

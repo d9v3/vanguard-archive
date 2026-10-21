@@ -395,6 +395,18 @@ pub const fn traduite(
     }
 }
 
+/// Ce que le guide dit d'une commande de Vanguard (français, anglais) : un test d'un autre module vérifie ainsi que
+/// l'explication suit son code.
+#[cfg(test)]
+pub(crate) fn explication_vanguard(ligne: &str) -> Option<(&'static str, &'static str)> {
+    tous::PROGRAMMES
+        .iter()
+        .filter(|p| p.nom == "vanguard" || p.nom.starts_with("vanguard : "))
+        .flat_map(|p| p.commandes)
+        .find(|c| c.ligne == ligne)
+        .map(|c| c.texte)
+}
+
 /// Les mots à remplacer dans les commandes, et leur nom en anglais.
 const A_REMPLACER: &[(&str, &str)] = &[
     ("<adresse>", "<address>"),

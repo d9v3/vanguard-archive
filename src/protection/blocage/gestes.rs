@@ -450,6 +450,21 @@ pub(super) fn administrateur() -> bool {
     }
 }
 
+/// Comme `administrateur`, pour un garde-fou qui doit échouer fermé : sous Windows, un jeton illisible compte pour
+/// élevé ; sous Unix, un programme setuid aussi (compte effectif différent du compte réel : ses fichiers à lui sont
+/// ceux du compte réel).
+pub(super) fn administrateur_ou_inconnu() -> bool {
+    #[cfg(windows)]
+    {
+        crate::machine::windows::processus::eleve_ou_inconnu()
+    }
+    #[cfg(unix)]
+    {
+        // SAFETY : geteuid et getuid ne prennent aucun argument et ne touchent aucune mémoire.
+        unsafe { libc::geteuid() == 0 || libc::geteuid() != libc::getuid() }
+    }
+}
+
 /// Ce compte peut-il sortir ce fichier de son dossier (la quarantaine le déplace) ? Vérifié avant d'arrêter quoi que
 /// ce soit : un processus arrêté dont le fichier resterait en place serait un geste à moitié fait.
 fn peut_deplacer(chemin: &Path) -> bool {

@@ -13,7 +13,8 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{tr, trf};
+use crate::ui::{GRIS, RESET, chemin_affichable};
+use crate::{tr, trf, trp};
 
 const FICHIER: &str = "reglages.json";
 
@@ -49,17 +50,45 @@ pub struct Confiance {
     pub surveillance: bool,
 }
 
-/// Les réglages ; un fichier illisible laisse les restrictions actives.
-pub fn charger(racine: &Path) -> Reglages {
-    super::lire_sur(&racine.join(FICHIER), 64 << 10)
-        .ok()
-        .and_then(|o| serde_json::from_slice(&o).ok())
-        .unwrap_or_default()
+/// Les réglages ; absent, ceux par défaut ; `Err` (la raison) si le fichier est là mais ne se lit plus.
+pub fn lire(racine: &Path) -> Result<Reglages, String> {
+    let chemin = racine.join(FICHIER);
+    if std::fs::symlink_metadata(&chemin).is_err_and(|e| e.kind() == std::io::ErrorKind::NotFound) {
+        return Ok(Reglages::default());
+    }
+    serde_json::from_slice(&super::lire_sur(&chemin, 64 << 10)?).map_err(|e| e.to_string())
 }
 
+/// Les réglages ; un fichier illisible laisse les restrictions actives.
+pub fn charger(racine: &Path) -> Reglages {
+    lire(racine).unwrap_or_default()
+}
+
+/// Écrit les réglages. Un fichier qui ne se lit plus n'est jamais écrasé en silence (les confiances « à moi » y sont,
+/// et `charger` en a rendu les défauts) : il est d'abord mis de côté, tel quel, et c'est dit ; s'il ne peut pas
+/// l'être, rien n'est écrit.
 pub fn enregistrer(racine: &Path, r: &Reglages) -> Result<(), String> {
+    let chemin = racine.join(FICHIER);
+    if lire(racine).is_err() {
+        let copie = chemin.with_extension(format!(
+            "illisible-{}.json",
+            chrono::Local::now().format("%Y%m%d-%H%M%S")
+        ));
+        // Renommé, pas copié : un lien reste un lien, rien n'est suivi ni relu.
+        std::fs::rename(&chemin, &copie).map_err(|e| {
+            trf!(
+                "Réglage non écrit : l'ancien fichier, illisible, n'a pas pu être mis de côté ({e}).",
+                "Setting not written: the old, unreadable file could not be set aside ({e})."
+            )
+        })?;
+        trp!(
+            "  {GRIS}Ancien fichier des réglages, illisible, gardé : {}{RESET}",
+            "  {GRIS}Old settings file, unreadable, kept: {}{RESET}",
+            chemin_affichable(&copie)
+        );
+    }
     let texte = serde_json::to_string_pretty(r).map_err(|e| e.to_string())?;
-    crate::reseau::ecrire_atomique(&racine.join(FICHIER), texte)
+    crate::reseau::ecrire_atomique(&chemin, texte)
         .map_err(|e| trf!("Réglage impossible à écrire : {e}", "Could not write the setting: {e}"))
 }
 
@@ -217,6 +246,53 @@ mod tests {
         );
         oublier(&d, false, "salon").unwrap();
         assert!(charger(&d).plugin_a_moi("salon", "a1").is_none());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// Un fichier qui ne se lit plus n'est jamais écrasé en silence : couper (menu Extensions, Paramètres,
+    /// --sans-restrictions) le met de côté tel quel, avec les confiances « à moi » qu'il gardait. Tant qu'il est
+    /// illisible, les restrictions restent actives, et couper redemande l'accord.
+    #[test]
+    fn fichier_illisible_mis_de_cote() {
+        let d = std::env::temp_dir().join(format!("vanguard-reglages-illisible-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        super::super::creer_prive(&d).unwrap();
+        assert_eq!(lire(&d), Ok(Reglages::default()), "absent : les défauts, sans erreur");
+        let abime = r#"{"coupure_confirmee": true, "plugins_a_moi": [{"nom": "salon", "empreinte": "a1"}] pas du json"#;
+        std::fs::write(d.join(FICHIER), abime).unwrap();
+        assert!(lire(&d).is_err());
+        assert_eq!(charger(&d), Reglages::default(), "illisible : restrictions actives");
+        let mis_de_cote = || -> Vec<std::path::PathBuf> {
+            std::fs::read_dir(&d)
+                .unwrap()
+                .flatten()
+                .filter(|e| e.file_name().to_string_lossy().starts_with("reglages.illisible-"))
+                .map(|e| e.path())
+                .collect()
+        };
+        // Refusé : rien n'est écrit, le fichier reste à sa place.
+        assert!(!basculer(&d, |_| false).unwrap());
+        assert_eq!(std::fs::read_to_string(d.join(FICHIER)).unwrap(), abime);
+        assert_eq!(mis_de_cote(), Vec::<std::path::PathBuf>::new());
+        // Accepté (l'accord redemandé) : l'ancien fichier est gardé à côté, intact, et le nouveau se lit.
+        let mut demande = false;
+        assert!(
+            basculer(&d, |_| {
+                demande = true;
+                true
+            })
+            .unwrap()
+        );
+        assert!(demande, "l'accord d'un fichier illisible ne compte pas");
+        assert!(lire(&d).is_ok_and(|r| r.sans_restrictions && r.coupure_confirmee));
+        let gardes = mis_de_cote();
+        assert_eq!(gardes.len(), 1, "{gardes:?}");
+        assert_eq!(std::fs::read_to_string(&gardes[0]).unwrap(), abime);
+        // Lisible à nouveau : les écritures suivantes ne mettent plus rien de côté.
+        accorder(&d, false, "salon", "a1", false, false).unwrap();
+        assert!(!basculer(&d, |_| panic!("remettre ne demande rien")).unwrap());
+        assert_eq!(charger(&d).plugins_a_moi.len(), 1);
+        assert_eq!(mis_de_cote(), gardes);
         let _ = std::fs::remove_dir_all(&d);
     }
 }

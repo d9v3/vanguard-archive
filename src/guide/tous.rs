@@ -243,8 +243,8 @@ pub const PROGRAMMES: &[Programme] = &[
             traduite(
                 "vanguard parametres",
                 "vanguard settings",
-                "Tous les réglages : langue, emojis, sans Internet, surveillance, entretien, alertes apprises, blocage.",
-                "All settings: language, emojis, offline, monitoring, check-up, learned alerts, blocking.",
+                "Tous les réglages : langue, emojis, sans Internet, surveillance, entretien, alertes apprises, blocage, restrictions des extensions.",
+                "All settings: language, emojis, offline, monitoring, check-up, learned alerts, blocking, extension restrictions.",
                 false,
             ),
             traduite(
