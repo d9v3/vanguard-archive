@@ -61,17 +61,32 @@ fn present_dans(cmd: &str, path: &OsStr) -> bool {
 /// `systemctl is-enabled` ne les dit pas activées.
 fn dossiers_de_config(racine: &Path, utilisateur: bool) -> Vec<PathBuf> {
     if utilisateur {
-        let maison = crate::nettoyer::maison();
-        let config = std::env::var_os("XDG_CONFIG_HOME").map_or_else(|| maison.join(".config"), PathBuf::from);
-        vec![
-            sous(racine, &config.join("systemd/user").to_string_lossy()),
-            sous(racine, "/etc/systemd/user"),
-            sous(racine, &format!("/run/user/{}/systemd/user", uid())),
-            sous(racine, "/run/systemd/user"),
-        ]
+        let xdg = std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from);
+        dossiers_utilisateur(racine, &crate::nettoyer::maison(), xdg.as_deref(), uid())
     } else {
         vec![sous(racine, "/etc/systemd/system"), sous(racine, "/run/systemd/system")]
     }
+}
+
+/// Les dossiers de l'utilisateur. ~/.config/systemd/user vient toujours en premier : Vanguard y écrit ses unités,
+/// et `systemd --user`, lancé par logind, n'hérite pas du XDG_CONFIG_HOME exporté par le profil du shell, il
+/// garde ~/.config. Chercher seulement sous $XDG_CONFIG_HOME dirait désactivée une minuterie que systemctl dit
+/// activée, et le passage de version la retirerait sans la remettre. $XDG_CONFIG_HOME s'ajoute s'il diffère :
+/// un gestionnaire lancé avec cette variable y pose ses liens.
+fn dossiers_utilisateur(racine: &Path, maison: &Path, xdg: Option<&Path>, uid: u32) -> Vec<PathBuf> {
+    let mut dossiers = vec![sous(racine, &maison.join(".config/systemd/user").to_string_lossy())];
+    if let Some(x) = xdg.filter(|x| x.is_absolute()) {
+        let d = sous(racine, &x.join("systemd/user").to_string_lossy());
+        if !dossiers.contains(&d) {
+            dossiers.push(d);
+        }
+    }
+    dossiers.extend([
+        sous(racine, "/etc/systemd/user"),
+        sous(racine, &format!("/run/user/{uid}/systemd/user")),
+        sous(racine, "/run/systemd/user"),
+    ]);
+    dossiers
 }
 
 fn uid() -> u32 {
@@ -201,6 +216,54 @@ fn processus_nomme_sous(racine: &Path, nom: &str) -> bool {
                 .is_some_and(|n| n.bytes().all(|o| o.is_ascii_digit()))
         })
         .any(|e| std::fs::read_to_string(e.path().join("comm")).is_ok_and(|c| c.trim_end_matches('\n') == cherche))
+}
+
+/// Lesquels de ces services du système tournent (`systemctl is-active`) ? Un seul passage dans /proc pour toute
+/// la liste. `None` : /proc ne montre pas les processus des autres comptes (option hidepid, ou pas de /proc), non
+/// vérifié.
+pub(crate) fn services_actifs(services: &[&str]) -> Option<Vec<bool>> {
+    services_actifs_sous(Path::new(RACINE), services)
+}
+
+/// Un service tourne quand un processus est dans son groupe de contrôle, « /system.slice/<nom>.service », ce que
+/// /proc/<pid>/cgroup dit à tous les comptes. Le nom du processus ne suffit pas : n'importe quel compte peut
+/// appeler un programme « nextdns », un tunnel cloudflared lancé à la main ou dans un conteneur n'est pas le DNS
+/// de la machine, ni le dnsmasq que libvirt ou NetworkManager lancent pour eux. Seul systemd, donc root, place
+/// un processus dans system.slice ; un conteneur est sous « /system.slice/docker-<id>.scope », la session sous
+/// user.slice. Le processus 1 doit se lire : sinon /proc cache les autres comptes et « aucun » serait faux.
+fn services_actifs_sous(racine: &Path, services: &[&str]) -> Option<Vec<bool>> {
+    let proc = sous(racine, "/proc");
+    std::fs::read_to_string(proc.join("1/cgroup")).ok()?;
+    let groupes: Vec<String> = services
+        .iter()
+        .map(|s| format!("/system.slice/{}", nom_complet(s)))
+        .collect();
+    let mut actifs = vec![false; services.len()];
+    for e in std::fs::read_dir(&proc).ok()?.flatten() {
+        if !e
+            .file_name()
+            .to_str()
+            .is_some_and(|n| n.bytes().all(|o| o.is_ascii_digit()))
+        {
+            continue;
+        }
+        let Ok(texte) = std::fs::read_to_string(e.path().join("cgroup")) else {
+            continue;
+        };
+        // Une ligne par hiérarchie, « 0::/chemin » (cgroup v2) ou « 1:name=systemd:/chemin » (v1) ; le chemin
+        // commence par le groupe du service, suivi de rien ou d'un sous-groupe.
+        for chemin in texte.lines().filter_map(|l| l.splitn(3, ':').nth(2)) {
+            for (i, g) in groupes.iter().enumerate() {
+                if chemin
+                    .strip_prefix(g.as_str())
+                    .is_some_and(|reste| reste.is_empty() || reste.starts_with('/'))
+                {
+                    actifs[i] = true;
+                }
+            }
+        }
+    }
+    Some(actifs)
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -1000,6 +1063,74 @@ mod tests {
         );
         assert!(!processus_nomme_sous(&d, ""));
         let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn services_par_le_groupe_de_controle() {
+        let d = jetable("services");
+        let liste = ["nextdns", "cloudflared", "unbound", "dnsmasq", "AdGuardHome"];
+        assert_eq!(services_actifs_sous(&d, &liste), None, "pas de /proc");
+        ecrire(&d, "/proc/1/cgroup", "0::/init.scope\n");
+        // Un compte quelconque nomme son programme « nextdns » : il reste dans sa session.
+        ecrire(&d, "/proc/50/comm", "nextdns\n");
+        ecrire(
+            &d,
+            "/proc/50/cgroup",
+            "0::/user.slice/user-1000.slice/session-2.scope\n",
+        );
+        // Un tunnel dans un conteneur.
+        ecrire(&d, "/proc/60/cgroup", "0::/system.slice/docker-ab12.scope\n");
+        // Le dnsmasq de libvirt, dans le groupe de libvirtd.
+        ecrire(&d, "/proc/70/cgroup", "0::/system.slice/libvirtd.service\n");
+        // Un nom qui commence comme un service n'en est pas un.
+        ecrire(&d, "/proc/80/cgroup", "0::/system.slice/unbound.serviceX\n");
+        assert_eq!(services_actifs_sous(&d, &liste), Some(vec![false; 5]));
+        // Le vrai service, en cgroup v1 avec un sous-groupe, et AdGuard Home en v2.
+        ecrire(
+            &d,
+            "/proc/90/cgroup",
+            "12:pids:/system.slice/unbound.service\n1:name=systemd:/system.slice/unbound.service/aide\n",
+        );
+        ecrire(&d, "/proc/91/cgroup", "0::/system.slice/AdGuardHome.service\n");
+        ecrire(&d, "/proc/self/cgroup", "0::/system.slice/nextdns.service\n");
+        assert_eq!(
+            services_actifs_sous(&d, &liste),
+            Some(vec![false, false, true, false, true]),
+            "seuls les dossiers numériques sont des processus"
+        );
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn dossiers_de_l_utilisateur() {
+        let r = Path::new("/r");
+        let maison = Path::new("/home/a");
+        let attendu = |milieu: &[&str]| {
+            let mut v = vec![PathBuf::from("/r/home/a/.config/systemd/user")];
+            v.extend(milieu.iter().map(PathBuf::from));
+            v.extend(
+                [
+                    "/r/etc/systemd/user",
+                    "/r/run/user/7/systemd/user",
+                    "/r/run/systemd/user",
+                ]
+                .map(PathBuf::from),
+            );
+            v
+        };
+        assert_eq!(dossiers_utilisateur(r, maison, None, 7), attendu(&[]));
+        // XDG_CONFIG_HOME du shell : ~/.config reste, là où Vanguard écrit et où systemd --user regarde.
+        assert_eq!(
+            dossiers_utilisateur(r, maison, Some(Path::new("/home/a/.xdg")), 7),
+            attendu(&["/r/home/a/.xdg/systemd/user"])
+        );
+        assert_eq!(
+            dossiers_utilisateur(r, maison, Some(Path::new("/home/a/.config")), 7),
+            attendu(&[]),
+            "sans doublon"
+        );
+        // Un chemin relatif est ignoré, comme le fait systemd.
+        assert_eq!(dossiers_utilisateur(r, maison, Some(Path::new("rel")), 7), attendu(&[]));
     }
 
     /// Une base pacman inventée : un paquet par (dossier, nom, version, fichiers).

@@ -137,8 +137,7 @@ struct Serveurs {
 #[cfg(target_os = "linux")]
 const RESOLV_CONF_AMONT: &str = "/run/systemd/resolve/resolv.conf";
 
-/// Résolveurs locaux connus : (service systemd, qui est aussi le nom du processus ; nom affiché ; chiffre ses
-/// requêtes).
+/// Résolveurs locaux connus : (service systemd ; nom affiché ; chiffre ses requêtes).
 #[cfg(target_os = "linux")]
 const RESOLVEURS: &[(&str, &str, bool)] = &[
     ("nextdns", "NextDNS", true),
@@ -173,13 +172,21 @@ fn serveurs() -> Option<Serveurs> {
     }
     let mut resolveur_local = None;
     if liste.iter().any(IpAddr::is_loopback) {
-        // Le processus qui tourne, lu dans /proc : vrai aussi pour un résolveur lancé hors de systemd, et
-        // sans dépendre de systemctl. Le premier de la liste gagne, comme avant.
-        if let Some((_, nom, chiffrant)) = RESOLVEURS
-            .iter()
-            .find(|r| crate::machine::linux::natif::processus_nomme(r.0))
-            .copied()
-        {
+        // Le service actif, lu dans les groupes de contrôle de /proc (un seul passage) au lieu de systemctl
+        // is-active, qui ne sert plus qu'en secours quand /proc cache les autres comptes. Un processus du même
+        // nom hors du service (lancé à la main, conteneur, dnsmasq de libvirt) ne compte pas : il n'est pas le
+        // DNS de la machine et ferait dire « chiffré » à tort. Le premier de la liste gagne, comme avant.
+        let noms: Vec<&str> = RESOLVEURS.iter().map(|r| r.0).collect();
+        let actifs = crate::machine::linux::natif::services_actifs(&noms).unwrap_or_else(|| {
+            let mut args = vec!["is-active"];
+            args.extend(&noms);
+            // is-active répond une ligne par service, dans l'ordre ; son code de retour n'est 0 que si tous
+            // tournent.
+            crate::commande::lancer(std::process::Command::new("systemctl").args(&args), 10)
+                .map(|r| r.sortie.lines().map(|l| l.trim() == "active").collect())
+                .unwrap_or_default()
+        });
+        if let Some((_, nom, chiffrant)) = RESOLVEURS.iter().zip(actifs).find(|(_, actif)| *actif).map(|(r, _)| *r) {
             resolveur_local = Some(nom);
             if chiffrant {
                 chiffre = Some(true);
@@ -644,20 +651,27 @@ mod tests {
         );
     }
 
-    /// Un résolveur que systemd dit actif est vu dans /proc. L'inverse n'est pas exigé : le processus peut
-    /// tourner hors de systemd (lancé à la main, par NetworkManager ou libvirt).
+    /// Sur cet ordinateur, les résolveurs actifs lus dans /proc sont ceux de `systemctl is-active`, dans les deux
+    /// sens : un processus du même nom hors du service ne compte pas plus pour l'un que pour l'autre.
     #[cfg(target_os = "linux")]
     #[test]
     fn resolveurs_comme_systemctl() {
-        for (service, _, _) in RESOLVEURS {
+        let noms: Vec<&str> = RESOLVEURS.iter().map(|r| r.0).collect();
+        let Some(natif) = crate::machine::linux::natif::services_actifs(&noms) else {
+            return;
+        };
+        for (service, actif) in noms.iter().zip(natif) {
             let Some(r) =
                 crate::commande::lancer(std::process::Command::new("systemctl").args(["is-active", service]), 10)
             else {
                 return;
             };
-            if r.sortie.trim() == "active" {
-                assert!(crate::machine::linux::natif::processus_nomme(service), "{service}");
+            // Une réponse vide : systemctl n'a pas répondu à temps (machine chargée), rien à comparer.
+            let etat = r.sortie.trim();
+            if etat.is_empty() {
+                continue;
             }
+            assert_eq!(actif, etat == "active", "{service} : {etat}");
         }
     }
 
