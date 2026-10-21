@@ -250,7 +250,7 @@ pub(crate) struct Soupcon {
 const LONGUEUR_EXTRAIT: usize = 60;
 
 /// Le nom de fichier d'un chemin, quel que soit le séparateur, sans guillemets autour.
-fn nom_de_fichier(chemin: &str) -> &str {
+pub(crate) fn nom_de_fichier(chemin: &str) -> &str {
     let chemin = chemin.trim_matches(['"', '\'']);
     chemin.rsplit(['/', '\\']).next().unwrap_or(chemin)
 }
@@ -258,7 +258,7 @@ fn nom_de_fichier(chemin: &str) -> &str {
 /// Les mots d'un texte, chacun avec la position, en octets, de sa fin. Ils sont séparés par des blancs et par ce qui
 /// sépare ou groupe les commandes du shell (« ( ) ; & | ` { } ») : « (curl -fsSL …||wget …)|sh », la ligne de cron
 /// des mineurs, cachait curl dans « (curl » et wget dans « a.sh||wget ».
-fn mots(texte: &str) -> Vec<(&str, usize)> {
+pub(crate) fn mots(texte: &str) -> Vec<(&str, usize)> {
     let separe = |c: char| c.is_whitespace() || matches!(c, '(' | ')' | ';' | '&' | '|' | '`' | '{' | '}');
     let mut mots = Vec::new();
     let mut debut = None;

