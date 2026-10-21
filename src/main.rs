@@ -31,6 +31,7 @@ mod mise_a_jour;
 mod nettoyer;
 mod optimiser;
 mod ordinateurs;
+mod parametres;
 mod passage;
 #[cfg(any(target_os = "macos", test))]
 mod plist;
@@ -294,6 +295,14 @@ enum Commande {
     /// Failles connues des images Docker ou Podman de cet ordinateur, par trivy s'il est installé. Lecture seule.
     #[command(visible_alias = "containers")]
     Conteneurs,
+    /// Paramètres : tous les réglages de Vanguard (langue, emojis, travail sans Internet, surveillance, entretien,
+    /// alertes apprises, blocage). Sans argument : leur état ; avec un réglage et une valeur : le change, la valeur
+    /// d'avant montrée pour revenir.
+    #[command(visible_alias = "settings")]
+    Parametres {
+        /// Un réglage (langue, emojis, sans-internet, surveillance, entretien, appris, blocage) et sa valeur.
+        quoi: Vec<String>,
+    },
     /// Blocage des menaces : chaque menace trouvée propose « Bloquer » (le geste montré, accepté, noté, annulable) ;
     /// la protection active, après un accord donné une fois, bloque toute seule le certain (empreinte de
     /// MalwareBazaar, outil d'attaque connu, serveur de commande), puis prévient. Sans argument : le menu.
@@ -811,7 +820,11 @@ fn lignes_du_menu(etat: Vec<String>) -> Vec<Ligne> {
 
     // « q » suit les groupes, et l'aide le suit, sans ligne vide : avec le 8e groupe (dépanner), le menu tient
     // encore dans un terminal de 24 lignes (macOS, beaucoup de Linux), où les flèches marchent.
-    lignes.push(Ligne::choix("q", tr!("Quitter", "Quit"), ""));
+    lignes.push(Ligne::choix(
+        "q",
+        tr!("Quitter", "Quit"),
+        tr!("s : paramètres", "s: settings"),
+    ));
 
     // Ce que la recherche trouve en plus, sans l'afficher : chaque outil des sous-menus (« 5.2 » : groupe 5, 2e outil,
     // aussi tapable tel quel), chaque parcours de dépannage et chaque page du guide. Les pages du guide en dernier :
@@ -1015,6 +1028,7 @@ enum Action {
     Guide,
     Depanner,
     Extensions,
+    Parametres,
 }
 
 /// Un outil du menu : son groupe (aucun pour 1, 2 et 3, au menu principal), sa lettre des menus d'avant la 0.43
@@ -1320,10 +1334,17 @@ const OUTILS: &[Outil] = &[
         precision: ["plugins et labo, hors Vanguard", "plugins and lab, not Vanguard"],
         mots: "plugin plugins extension module ajouter add expérimental experimental script labo lab laboratoire \
                programme program essai test" },
+    // Au bout de Cette machine, et « s » au menu principal (dit sur la ligne de « q ») : aucune ligne de plus au
+    // menu principal, qui doit tenir dans 24 lignes.
+    Outil { action: Action::Parametres, groupe: Some(Groupe::Machine), lettre: "s",
+        titre: ["Paramètres", "Settings"],
+        precision: ["langue, surveillance, blocage…", "language, monitoring, blocking…"],
+        mots: "paramètres settings réglages options préférences preferences langue language emojis internet \
+               hors ligne offline surveillance monitoring entretien maintenance appris learned blocage blocking" },
 ];
 
 // Une action ajoutée sans sa ligne décalerait toutes les suivantes : la compilation s'arrête.
-const _: () = assert!(OUTILS.len() == Action::Extensions as usize + 1);
+const _: () = assert!(OUTILS.len() == Action::Parametres as usize + 1);
 
 impl Action {
     fn outil(self) -> &'static Outil {
@@ -1361,7 +1382,7 @@ impl Action {
     fn attendre_apres(self) -> bool {
         !matches!(
             self,
-            Action::Guide | Action::Depanner | Action::QuiParle | Action::Extensions
+            Action::Guide | Action::Depanner | Action::QuiParle | Action::Extensions | Action::Parametres
         )
     }
 }
@@ -1594,6 +1615,7 @@ async fn executer(s: &mut Session, action: Action) {
         Action::Guide => guide::menu(),
         Action::Depanner => depanner::menu(),
         Action::Extensions => plugins::extensions(),
+        Action::Parametres => parametres::menu(),
     }
 }
 
@@ -1633,6 +1655,9 @@ const AIDES_EN: &[(&str, &str)] = &[
     ("secrets", "Secrets in the history of the home folder's git projects (passwords, API keys, tokens), searched by \
                  Vanguard, and also by gitleaks if installed. No secret is shown. Read-only"),
     ("conteneurs", "Known flaws in this computer's Docker or Podman images, by trivy if installed. Read-only"),
+    ("parametres", "Settings: all of Vanguard's settings (language, emojis, working without the Internet, monitoring, \
+                    monthly check-up, learned alerts, blocking). No argument: their state; with a setting and a value: \
+                    changes it, showing the previous value to go back"),
     ("blocage", "Threat blocking: each threat found offers “Block” (the action shown, accepted, written down, \
                  undoable); active protection, after a consent given once, blocks what is certain by itself \
                  (MalwareBazaar fingerprint, known attack tool, command server), then warns you. No argument: the menu"),
@@ -1770,6 +1795,8 @@ const OPTIONS_EN: &[(&str, &str, &str)] = &[
     ("extensions", "sans_restrictions", "on: the extensions' restrictions turned off (no consent, fingerprint or scan, \
                                          with all your rights); off: back on. The extensions folder must stay yours \
                                          alone"),
+    ("parametres", "quoi", "A setting (language, emojis, offline, monitoring, maintenance, learned, blocking) and its \
+                              value"),
     ("blocage", "quoi", "“search”, “undo”, “status”, “auto” or “click” (active protection), or a category (programs, \
                            connections, startup, agents) followed by a mode (off, click, auto)"),
     ("depanner", "sujet", "The subject: internet, wifi, slow, sound, printer, disk, infection, new, leaving (or words \
@@ -1821,6 +1848,8 @@ async fn main() {
         };
         std::process::exit(code);
     }
+    // Les réglages du lancement (langue, emojis, travail sans Internet), avant tout affichage.
+    parametres::au_lancement();
     journal::installer();
     #[cfg(unix)]
     protection::cle::proteger_cle();
@@ -1933,6 +1962,7 @@ async fn main() {
         Some(Commande::Secrets) => protection::secrets_git::analyser(),
         Some(Commande::Conteneurs) => protection::conteneurs::analyser(),
         Some(Commande::Blocage { quoi }) => protection::blocage::commande(&quoi),
+        Some(Commande::Parametres { quoi }) => parametres::commande(&quoi),
         Some(Commande::Isoler { fichier }) => protection::isoler::isoler(&fichier),
         Some(Commande::Pieges { retirer }) => protection::pieges::commande(retirer),
         Some(Commande::Durcir) => optimiser::protection(),
@@ -2107,6 +2137,9 @@ mod tests_menu {
         assert!(outil_au_chemin("4.7") == Some(Action::Lenteur));
         assert!(outil_au_chemin("4.8") == Some(Action::Fiche));
         assert!(outil_au_chemin("9.2") == Some(Action::CopierFichiers));
+        // Paramètres : au bout de Cette machine, et « s » au menu principal, sans ligne de plus.
+        assert_eq!(touche_de(Action::Parametres).as_deref(), Some("4.12"));
+        assert!(OUTILS.iter().any(|o| o.action == Action::Parametres && o.lettre == "s"));
         assert!(depanner::chemin("1").is_some());
     }
 }

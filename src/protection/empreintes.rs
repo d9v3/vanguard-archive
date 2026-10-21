@@ -111,7 +111,7 @@ pub(crate) fn age(chemin: &Path) -> Option<Duration> {
 /// Télécharge `adresse` dans `chemin` quand la copie a plus de `apres` (écrite à côté puis renommée : une coupure ne
 /// laisse jamais un fichier à moitié). Rien hors ligne, ni pendant les tests.
 pub(crate) fn rafraichir(adresse: &str, chemin: &Path, apres: Duration, max: u64, secondes: u64) {
-    if cfg!(test) || std::env::var_os("VANGUARD_HORS_LIGNE").is_some() || age(chemin).is_some_and(|a| a < apres) {
+    if cfg!(test) || crate::parametres::hors_ligne() || age(chemin).is_some_and(|a| a < apres) {
         return;
     }
     let reponse = crate::http::envoyer(crate::http::Demande {

@@ -141,6 +141,11 @@ pub fn accepter(c: &Constat) {
     }
 }
 
+/// Combien d'alertes sont déclarées normales ici (`None` : la liste ne se lit plus), pour le menu Paramètres.
+pub fn nombre() -> Option<usize> {
+    charger().ok().map(|a| a.acceptees.len())
+}
+
 /// Applique tes choix au bilan : une alerte acceptée passe au niveau info, avec la date du choix, sans correction
 /// proposée. Rend le nombre d'alertes concernées.
 pub fn appliquer(constats: &mut [Constat]) -> usize {

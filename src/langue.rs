@@ -1,4 +1,5 @@
-//! Langue de l'interface : français ou anglais, choisie d'après le système (variable VANGUARD_LANG pour forcer).
+//! Langue de l'interface : français ou anglais, choisie d'après le système (pour forcer : variable VANGUARD_LANG, ou
+//! menu Paramètres).
 //! Chaque texte est écrit dans les deux langues à l'endroit où il sert : `tr!("Pare-feu actif", "Firewall on")`.
 //! Les noms internes (catégories des constats, clés JSON) restent en français : le code s'en sert pour décider.
 
@@ -40,7 +41,8 @@ fn detecter() -> bool {
     if cfg!(test) {
         return false;
     }
-    let forcee = crate::passage::variable("VANGUARD_LANG").and_then(|v| code(&v));
+    // VANGUARD_LANG, sinon le menu Paramètres (parametres.json).
+    let forcee = crate::parametres::langue().and_then(|v| code(&v));
     forcee.or_else(langue_systeme).is_none_or(|c| c != "fr")
 }
 

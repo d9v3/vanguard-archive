@@ -496,7 +496,7 @@ fn certificat_du_site() -> Tls {
 /// défaut). Hors ligne, rien ne part sur le réseau ; sinon, les questions DNS et la demande HTTPS partent en
 /// parallèle et tout finit en quelques secondes.
 pub fn entree(passerelle: Option<Ipv4Addr>) -> Entree {
-    let hors_ligne = std::env::var_os("VANGUARD_HORS_LIGNE").is_some();
+    let hors_ligne = crate::parametres::hors_ligne();
     let baux = bail::lire();
     let configuration = bail::configuration();
     let utilise = crate::machine::dns::actuel().map(|a| Utilise {

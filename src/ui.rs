@@ -35,10 +35,8 @@ pub fn cle_a_molette() -> &'static str {
 fn emojis() -> bool {
     static EMOJIS: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *EMOJIS.get_or_init(|| {
-        emojis_voulus(
-            crate::passage::variable("VANGUARD_EMOJI").as_deref(),
-            ancienne_console_windows(),
-        )
+        // VANGUARD_EMOJI, sinon le menu Paramètres (parametres.json).
+        emojis_voulus(crate::parametres::emojis().as_deref(), ancienne_console_windows())
     })
 }
 

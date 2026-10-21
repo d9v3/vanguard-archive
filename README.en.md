@@ -447,6 +447,8 @@ Each menu entry is also a command.
 | `vanguard slow` | why it is slow: processor, memory, disk, startup, programs at login |
 | `vanguard startup` | startup programs: remove or put them back, after your consent; each removal is undone exactly |
 | `vanguard changes` | what Vanguard changed: each fix run here, its date and its result |
+| `vanguard settings [setting value]` | settings (also “s” in the main menu): language, emojis, working without the Internet, monitoring, monthly check-up, learned alerts, blocking; the previous value is shown to go back |
+| `vanguard blocking [search\|undo\|auto\|click\|category mode]` | threat blocking: one-click “Block” for each threat (action shown, written down, undoable); active protection, after a consent, that blocks what is certain by itself (MalwareBazaar fingerprint, known attack tool, command server) |
 | `vanguard handout` | report to leave behind: a simple page for the person you helped |
 | `vanguard relative` | a relative's computer: three questions, the check, a summary in plain words, the fixes, the page to leave behind with its tips |
 | `vanguard auto-backup [--undo]` | automatic backup to an external disk, with the system's tool |
@@ -497,15 +499,16 @@ Each menu entry is also a command.
 
 </details>
 
-**Language**: the system's (English or French). To force it: `VANGUARD_LANG=en` or `VANGUARD_LANG=fr`. The commands
-also keep their French names (`complet`, `machine`, `corriger`, `reseau`, `connexion`, `logiciels`, `diagnostic`,
-`motdepasse`, `isoler`, `courriel`, `integrite`, `maj`, `reparer`, `surveillance`, `nommer`, `sauvegarder`,
-`restaurer`, `nettoyer`, `pieges`, `durcir`, `listes-noires`, `appris`, `entretien`, `sortantes`, `lien`,
-`verifier-fichier`, `canaux`, `dns-rapide`, `traces`, `acces`, `tableau`, `verifier-sauvegarde`, `objets`, `proche`).
+**Language**: the system's (English or French). To force it: the Settings menu, or `VANGUARD_LANG=en` or
+`VANGUARD_LANG=fr` (the variable wins). The commands also keep their French names (`complet`, `machine`, `corriger`,
+`reseau`, `connexion`, `logiciels`, `diagnostic`, `motdepasse`, `isoler`, `courriel`, `integrite`, `maj`, `reparer`,
+`surveillance`, `nommer`, `sauvegarder`, `restaurer`, `nettoyer`, `pieges`, `durcir`, `listes-noires`, `appris`,
+`entretien`, `sortantes`, `lien`, `verifier-fichier`, `canaux`, `dns-rapide`, `traces`, `acces`, `tableau`,
+`verifier-sauvegarde`, `objets`, `proche`, `blocage`, `parametres`).
 
 **Emojis**: in the old Windows console (command prompt or PowerShell outside Windows Terminal, common on Windows 10),
 which draws them badly and shifts the menus, 💡 and 🔧 become → and +. `VANGUARD_EMOJI=0` removes them everywhere,
-`VANGUARD_EMOJI=1` keeps them everywhere.
+`VANGUARD_EMOJI=1` keeps them everywhere; the Settings menu does the same.
 
 ## Development
 

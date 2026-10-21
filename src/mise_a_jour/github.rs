@@ -187,7 +187,7 @@ pub(super) fn derniere() -> Result<Publiee, String> {
         )
         .to_string()
     };
-    if std::env::var_os("VANGUARD_HORS_LIGNE").is_some() {
+    if crate::parametres::hors_ligne() {
         return Err(pas_de_reponse());
     }
     let manifeste = recevoir("derniere.txt", MANIFESTE_MAX, 20).ok_or_else(pas_de_reponse)?;

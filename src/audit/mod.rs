@@ -181,9 +181,10 @@ pub struct Contexte<'a> {
     pub internet: Option<exposition::Internet>,
 }
 
-/// Hors ligne demandé (VANGUARD_HORS_LIGNE, les essais sans Internet) : rien ne part vers Internet.
+/// Hors ligne demandé (VANGUARD_HORS_LIGNE, les essais sans Internet, ou le menu Paramètres) : rien ne part vers
+/// Internet.
 fn hors_ligne() -> bool {
-    std::env::var_os("VANGUARD_HORS_LIGNE").is_some()
+    crate::parametres::hors_ligne()
 }
 
 /// L'adresse de cet ordinateur vue d'Internet, par STUN en IPv4 puis en IPv6 : le domaine Exposition en tire
