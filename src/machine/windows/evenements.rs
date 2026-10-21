@@ -704,8 +704,12 @@ regle!(
 
 // ───────────────────────────── Mot de passe deviné ─────────────────────────────
 
-/// Les adresses dont on lit les connexions réussies, au plus : les plus insistantes. Chacune est une lecture du journal.
-const ADRESSES_LUES: usize = 5;
+/// Les adresses dont les connexions réussies se lisent dans une même requête. Chaque adresse y est une condition, et le
+/// journal refuse une requête XPath d'un peu plus de vingt conditions (« The specified query is invalid ») : 15, plus
+/// le numéro et la date, restent en deçà.
+const ADRESSES_PAR_LOT: usize = 15;
+/// Les connexions réussies lues au plus par adresse d'un lot : au-delà, la lecture est dite partielle.
+const REUSSITES_PAR_ADRESSE: usize = 50;
 
 /// Une adresse telle que le journal l'écrit. « ::ffff:192.0.2.5 » (IPv4 dans IPv6) est 192.0.2.5 ; la zone d'une
 /// adresse de lien local (« fe80::1%12 ») ne change pas l'appareil ; « - » (session au clavier) n'en est pas une.
@@ -715,8 +719,9 @@ fn adresse(texte: &str) -> Option<std::net::IpAddr> {
     sans_zone.parse::<std::net::IpAddr>().ok().map(|ip| ip.to_canonical())
 }
 
-/// Les adresses d'où sont venus au moins `chasse::SEUIL_ECHECS` échecs, les plus insistantes d'abord, écrites comme le
-/// journal les écrit : elles entrent telles quelles dans la requête des réussites. Seulement des chiffres, des lettres
+/// Toutes les adresses d'où sont venus au moins `chasse::SEUIL_ECHECS` échecs, les plus insistantes d'abord, écrites
+/// comme le journal les écrit : elles entrent telles quelles dans la requête des réussites. Toutes : un intrus qui
+/// devine un mot de passe se cache bien parmi des robots plus insistants que lui. Seulement des chiffres, des lettres
 /// hexadécimales, « . », « : » et « % » : rien d'autre ne peut sortir de la chaîne XPath.
 fn adresses_insistantes(echecs: &[Echec]) -> Vec<String> {
     let mut nombres: HashMap<&str, usize> = HashMap::new();
@@ -734,11 +739,63 @@ fn adresses_insistantes(echecs: &[Echec]) -> Vec<String> {
         .filter(|(_, n)| *n >= crate::machine::chasse::SEUIL_ECHECS)
         .collect();
     tries.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(b.0)));
-    tries
-        .into_iter()
-        .take(ADRESSES_LUES)
-        .map(|(a, _)| a.to_string())
+    tries.into_iter().map(|(a, _)| a.to_string()).collect()
+}
+
+/// Les requêtes des connexions réussies (4624) des 7 derniers jours depuis ces adresses, `ADRESSES_PAR_LOT` par
+/// requête, chacune avec le nombre de réussites qu'elle lit au plus.
+fn requetes_des_reussites(adresses: &[String]) -> Vec<(String, usize)> {
+    adresses
+        .chunks(ADRESSES_PAR_LOT)
+        .map(|lot| {
+            let depuis = lot
+                .iter()
+                .map(|a| format!("(Data[@Name='IpAddress']='{a}')"))
+                .collect::<Vec<_>>()
+                .join(" or ");
+            let requete = format!(
+                "*[System[(EventID=4624) and TimeCreated[timediff(@SystemTime) <= {}]] and EventData[{depuis}]]",
+                u64::from(JOURS) * 86_400_000
+            );
+            (requete, lot.len() * REUSSITES_PAR_ADRESSE)
+        })
         .collect()
+}
+
+/// Ce que la lecture n'a pas vu, quand une borne est atteinte : les échecs plus anciens que les `MAX_ECHECS` les plus
+/// récents (une rafale noyée sous les robots qui ont suivi), ou des réussites plus anciennes que celles d'un lot. Dit
+/// avec le constat sain, qui n'est alors jamais sans réserve.
+fn lecture_partielle(echecs: &[Echec], echecs_bornes: bool, reussites_bornees: bool) -> Option<String> {
+    let mut manques = Vec::new();
+    if echecs_bornes {
+        manques.push(match echecs.iter().map(|e| e.quand).min() {
+            Some(depuis) => trf!(
+                "seuls les {MAX_ECHECS} échecs de connexion les plus récents ont été lus (depuis le {}), une rafale plus ancienne n'a pas été vue",
+                "only the {MAX_ECHECS} most recent sign-in failures were read (since {}), an older burst was not seen",
+                depuis.format("%Y-%m-%d %H:%M")
+            ),
+            None => trf!(
+                "seuls les {MAX_ECHECS} échecs de connexion les plus récents ont été lus, une rafale plus ancienne n'a pas été vue",
+                "only the {MAX_ECHECS} most recent sign-in failures were read, an older burst was not seen"
+            ),
+        });
+    }
+    if reussites_bornees {
+        manques.push(
+            tr!(
+                "seules les connexions réussies les plus récentes ont été lues depuis les adresses insistantes",
+                "only the most recent successful sign-ins from the persistent addresses were read"
+            )
+            .to_string(),
+        );
+    }
+    (!manques.is_empty()).then(|| {
+        trf!(
+            "Lecture partielle : {}.",
+            "Partial reading: {}.",
+            manques.join(tr!(" ; ", "; "))
+        )
+    })
 }
 
 /// La ligne d'une connexion réussie (4624) par le réseau (type 3) ou le Bureau à distance (type 10), de la même forme
@@ -788,9 +845,10 @@ fn dans_l_ordre(echecs: &[Echec], reussites: &[Echec]) -> Vec<crate::machine::ch
 
 /// Les échecs de connexion (4625) des 7 derniers jours, et les connexions réussies par le réseau ou le Bureau à
 /// distance (4624) depuis les adresses qui en ont raté au moins dix, dans l'ordre : pour la recherche d'un mot de passe
-/// deviné (`machine::chasse`). Les réussites ne se lisent que pour ces adresses-là : le journal en garde des milliers
-/// d'autres. `Err` : pourquoi le journal Security refuse (sans droits d'administrateur, souvent).
-pub(crate) fn tentatives_lues() -> Result<Vec<crate::machine::chasse::Tentative>, &'static str> {
+/// deviné (`machine::chasse`). Les réussites ne se lisent que pour ces adresses-là, toutes, par lots : le journal en
+/// garde des milliers d'autres. Avec, quand une borne est atteinte, ce que la lecture n'a pas vu. `Err` : pourquoi le
+/// journal Security refuse (sans droits d'administrateur, souvent), ou que la lecture a dépassé son délai.
+pub(crate) fn tentatives_lues() -> Result<(Vec<crate::machine::chasse::Tentative>, Option<String>), &'static str> {
     let fin = std::time::Instant::now() + std::time::Duration::from_secs(30);
     let refus = || refus_de_securite(Some(super::processus::eleve()));
     let Some(lignes) = lire(&LECTURES[0], fin) else {
@@ -798,18 +856,17 @@ pub(crate) fn tentatives_lues() -> Result<Vec<crate::machine::chasse::Tentative>
     };
     let echecs = lire_echecs(&lignes.iter().map(String::as_str).collect::<Vec<_>>());
     let mut reussites = Vec::new();
-    for adresse in adresses_insistantes(&echecs) {
-        let requete = format!(
-            "*[System[(EventID=4624) and TimeCreated[timediff(@SystemTime) <= {}]] and EventData[Data[@Name='IpAddress']='{adresse}']]",
-            u64::from(JOURS) * 86_400_000
-        );
-        let Some(lues) = parcourir_nommes("Security", &requete, 50, fin, ligne_reussite) else {
+    let mut reussites_bornees = false;
+    for (requete, max) in requetes_des_reussites(&adresses_insistantes(&echecs)) {
+        let Some(lues) = parcourir_nommes("Security", &requete, max, fin, ligne_reussite) else {
             return Err(refus());
         };
+        reussites_bornees |= lues.len() >= max;
         reussites.extend(lues);
     }
     let reussites = lire_echecs(&reussites.iter().map(String::as_str).collect::<Vec<_>>());
-    Ok(dans_l_ordre(&echecs, &reussites))
+    let partiel = lecture_partielle(&echecs, lignes.len() >= MAX_ECHECS, reussites_bornees);
+    Ok((dans_l_ordre(&echecs, &reussites), partiel))
 }
 
 #[cfg(test)]
@@ -1033,6 +1090,83 @@ mod tests {
         // Une réussite avant la rafale ne dit rien.
         let t = dans_l_ordre(&echecs, &lire_echecs(&["2026-10-18 09:59|10|203.0.113.7|alice"]));
         assert_eq!(intrusions(&t), Vec::<Intrusion>::new());
+    }
+
+    /// L'intrus est la 40e adresse la plus insistante, noyé sous des robots : toutes les adresses insistantes sont lues,
+    /// 15 par requête, chacune une seule fois.
+    #[test]
+    fn reussites_de_toutes_les_adresses() {
+        use crate::machine::chasse::SEUIL_ECHECS;
+        let mut lignes = Vec::new();
+        for i in 1..=39 {
+            lignes.extend(rafale(SEUIL_ECHECS + 50 - i, "3", &format!("192.0.2.{i}")));
+        }
+        lignes.extend(rafale(SEUIL_ECHECS, "10", "10.0.0.20"));
+        let echecs = lire_echecs(&lignes.iter().map(String::as_str).collect::<Vec<_>>());
+        let adresses = adresses_insistantes(&echecs);
+        assert_eq!(adresses.len(), 40);
+        assert_eq!(adresses[0], "192.0.2.1");
+        assert_eq!(adresses[39], "10.0.0.20");
+        let requetes = requetes_des_reussites(&adresses);
+        assert_eq!(
+            requetes.iter().map(|(_, max)| *max).collect::<Vec<_>>(),
+            [
+                15 * REUSSITES_PAR_ADRESSE,
+                15 * REUSSITES_PAR_ADRESSE,
+                10 * REUSSITES_PAR_ADRESSE
+            ]
+        );
+        for (requete, _) in &requetes {
+            assert!(
+                requete.starts_with("*[System[(EventID=4624) and TimeCreated[timediff(@SystemTime) <= 604800000]]"),
+                "{requete}"
+            );
+            assert!(
+                requete.matches("@Name='IpAddress'").count() <= ADRESSES_PAR_LOT,
+                "{requete}"
+            );
+            assert_eq!(requete.matches('[').count(), requete.matches(']').count(), "{requete}");
+            assert_eq!(requete.matches('(').count(), requete.matches(')').count(), "{requete}");
+        }
+        for a in &adresses {
+            let n: usize = requetes
+                .iter()
+                .map(|(r, _)| r.matches(&format!("='{a}')")).count())
+                .sum();
+            assert_eq!(n, 1, "{a}");
+        }
+        assert_eq!(
+            requetes.last().unwrap().0.matches(" or ").count(),
+            9,
+            "{}",
+            requetes.last().unwrap().0
+        );
+        assert_eq!(requetes_des_reussites(&[]), Vec::<(String, usize)>::new());
+    }
+
+    /// Une borne atteinte se dit : les échecs les plus anciens, ou des réussites, n'ont pas été lus.
+    #[test]
+    fn lecture_partielle_dite() {
+        let echecs = lire_echecs(&[
+            "2026-10-18 10:00|3|192.0.2.10|alice",
+            "2026-10-17 08:05|3|192.0.2.10|alice",
+        ]);
+        assert_eq!(lecture_partielle(&echecs, false, false), None);
+        let p = lecture_partielle(&echecs, true, false).unwrap();
+        assert!(
+            p.contains(&MAX_ECHECS.to_string()) && p.contains("2026-10-17 08:05"),
+            "{p}"
+        );
+        let p = lecture_partielle(&[], true, true).unwrap();
+        assert!(p.contains(&MAX_ECHECS.to_string()), "{p}");
+        assert!(lecture_partielle(&echecs, false, true).is_some());
+        // Le constat sain le dit.
+        let c = crate::machine::chasse::juger_intrusions(&[], Os::Windows, Some(&p));
+        assert!(
+            c.verifie && c.probleme.is_none() && c.message.ends_with(&p),
+            "{}",
+            c.message
+        );
     }
 
     #[test]
