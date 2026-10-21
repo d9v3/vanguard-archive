@@ -183,6 +183,67 @@ pub(crate) fn sid() -> Option<String> {
     sid_valide(&sid).then_some(sid)
 }
 
+/// Le compte d'un processus (« DOMAINE\\nom »), lu dans son jeton, comme Get-Process -IncludeUserName ; vide si son
+/// jeton ne s'ouvre pas (processus d'un autre compte sans droits administrateur, processus protégé).
+pub(crate) fn compte_de(pid: u32) -> String {
+    use windows::Win32::Foundation::{CloseHandle, HANDLE};
+    use windows::Win32::Security::{
+        GetTokenInformation, LookupAccountSidW, SID_NAME_USE, TOKEN_QUERY, TOKEN_USER, TokenUser,
+    };
+    use windows::Win32::System::Threading::{OpenProcess, OpenProcessToken, PROCESS_QUERY_LIMITED_INFORMATION};
+    // SAFETY : chaque poignée ouverte est fermée une fois ; le tampon du jeton est aligné (u64) et sa taille rendue
+    // par Windows est vérifiée AVANT d'y lire le TOKEN_USER ; les tampons des noms ont la taille annoncée à Windows.
+    unsafe {
+        let Ok(processus) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) else {
+            return String::new();
+        };
+        let mut jeton = HANDLE::default();
+        let ouvert = OpenProcessToken(processus, TOKEN_QUERY, &raw mut jeton).is_ok();
+        let _ = CloseHandle(processus);
+        if !ouvert {
+            return String::new();
+        }
+        let mut tampon = [0u64; 64];
+        let mut taille = 0u32;
+        let lu = GetTokenInformation(
+            jeton,
+            TokenUser,
+            Some(tampon.as_mut_ptr().cast()),
+            u32::try_from(size_of_val(&tampon)).unwrap_or(0),
+            &raw mut taille,
+        )
+        .is_ok();
+        let _ = CloseHandle(jeton);
+        if !lu || (taille as usize) < size_of::<TOKEN_USER>() {
+            return String::new();
+        }
+        let sid = tampon.as_ptr().cast::<TOKEN_USER>().read().User.Sid;
+        let (mut nom, mut domaine) = ([0u16; 256], [0u16; 256]);
+        let (mut n, mut d) = (256u32, 256u32);
+        let mut sorte = SID_NAME_USE::default();
+        if LookupAccountSidW(
+            None,
+            sid,
+            Some(windows::core::PWSTR(nom.as_mut_ptr())),
+            &raw mut n,
+            Some(windows::core::PWSTR(domaine.as_mut_ptr())),
+            &raw mut d,
+            &raw mut sorte,
+        )
+        .is_err()
+        {
+            return String::new();
+        }
+        let texte = |t: &[u16], longueur: u32| String::from_utf16_lossy(&t[..(longueur as usize).min(t.len())]);
+        let (nom, domaine) = (texte(&nom, n), texte(&domaine, d));
+        if domaine.is_empty() {
+            nom
+        } else {
+            format!("{domaine}\\{nom}")
+        }
+    }
+}
+
 fn sid_valide(sid: &str) -> bool {
     sid.strip_prefix("S-1-")
         .is_some_and(|c| !c.is_empty() && c.chars().all(|c| c.is_ascii_digit() || c == '-'))
@@ -191,6 +252,13 @@ fn sid_valide(sid: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Le compte de ce processus se lit dans son jeton (sous Wine aussi) ; un numéro qui n'existe pas : vide.
+    #[test]
+    fn compte_d_un_processus() {
+        assert_ne!(compte_de(std::process::id()), "");
+        assert_eq!(compte_de(u32::MAX - 3), "");
+    }
 
     #[test]
     fn noms_des_fichiers() {

@@ -64,6 +64,45 @@ pub(crate) const SCRIPT_PROCESSUS: &str = "$u = @{}; \
        'PRC|' + $_.ProcessId + $s + $_.ParentProcessId + $s + (N $c) + $s + $d + $s + (N $_.ExecutablePath) + $s + (N $_.CommandLine) }; \
      'PRC_FIN'";
 
+/// Les lignes « PRC|… » du script des processus, sans PowerShell : Win32_Process par WMI, le compte de chaque processus
+/// lu dans son jeton. `None` si WMI ne répond pas.
+fn lignes_processus() -> Option<String> {
+    let lignes = crate::machine::windows::wmi::requete(
+        r"root\cimv2",
+        "Win32_Process",
+        "",
+        &[
+            "ProcessId",
+            "ParentProcessId",
+            "CreationDate",
+            "ExecutablePath",
+            "CommandLine",
+        ],
+    )?;
+    let mut sortie: Vec<String> = lignes
+        .iter()
+        .filter_map(|p| {
+            let texte = |c: &str| sur_une_ligne(p[c].texte().unwrap_or_default());
+            let pid = u32::try_from(p["ProcessId"].entier()?).ok()?;
+            let parent = p["ParentProcessId"].entier().map(|n| n.to_string()).unwrap_or_default();
+            // La date CIM est à l'heure de l'ordinateur : « yyyy-MM-dd HH:mm:ss », comme le script.
+            let debut = p["CreationDate"]
+                .texte()
+                .and_then(|d| chrono::NaiveDateTime::parse_from_str(d.get(..14)?, "%Y%m%d%H%M%S").ok())
+                .map(|d| d.format("%Y-%m-%d %H:%M:%S").to_string())
+                .unwrap_or_default();
+            let compte = sur_une_ligne(&crate::machine::windows::processus::compte_de(pid));
+            Some(format!(
+                "PRC|{pid}{SEP}{parent}{SEP}{compte}{SEP}{debut}{SEP}{}{SEP}{}",
+                texte("ExecutablePath"),
+                texte("CommandLine")
+            ))
+        })
+        .collect();
+    sortie.push("PRC_FIN".into());
+    Some(sortie.join("\n"))
+}
+
 /// Les lignes « PRC|… » du script des processus : (pid, parent, compte, démarrage, programme, ligne de commande).
 pub(crate) fn lire_processus(lignes: &[&str]) -> Vec<(u32, Option<u32>, String, String, String, String)> {
     lignes
@@ -87,7 +126,8 @@ pub(crate) fn lire_processus(lignes: &[&str]) -> Vec<(u32, Option<u32>, String, 
 
 pub(super) fn processus(dossier: &Path) -> Partie {
     let mut manques = Vec::new();
-    let sortie = crate::machine::windows::ps_delai(&format!("{N}{SCRIPT_PROCESSUS}"), 120);
+    let sortie =
+        lignes_processus().or_else(|| crate::machine::windows::ps_delai(&format!("{N}{SCRIPT_PROCESSUS}"), 120));
     let Some(lignes) = section(sortie.as_deref(), "PRC") else {
         // Sans PowerShell : la liste de tasklist, sans programme ni ligne de commande.
         let mut p = Partie::new(Bi::new("Processus", "Processes"));
@@ -832,6 +872,17 @@ mod tests {
             assert!(l.iter().all(|l| l.split(SEP).count() == champs), "{texte}");
         }
         assert_eq!(n(" a\r\nb\u{1f}c "), "a b c");
+    }
+
+    /// Win32_Process répond sous Wine : des lignes à six champs, ce processus parmi elles, avec son compte.
+    #[test]
+    fn processus_lus_directement() {
+        let texte = lignes_processus().expect("Win32_Process répond");
+        let lignes = section(Some(&texte), "PRC").expect("PRC_FIN");
+        let p = lire_processus(&lignes);
+        assert_eq!(p.len(), lignes.len());
+        let moi = p.iter().find(|x| x.0 == std::process::id()).expect("ce processus");
+        assert_ne!(moi.2, "");
     }
 
     #[test]
