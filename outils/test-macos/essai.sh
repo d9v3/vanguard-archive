@@ -151,7 +151,7 @@ elif cas == "maj-auto":
     comparer("probleme" if coupes else "ok", verdict(vus), coupes, [c["message"] for c in vus])
 elif cas == "bibliotheques":
     valeur = defaults("/Library/Preferences/com.apple.security.libraryvalidation", "DisableLibraryValidation")
-    vus = de("MAC-SYS-001", "alidation des bibliothèques")
+    vus = de("MAC-SYS-002", "alidation des bibliothèques")
     comparer("probleme" if valeur == "1" else "ok", verdict(vus), valeur)
 elif cas == "xprotect":
     bases = [
@@ -379,19 +379,20 @@ verifier "verifier-sauvegarde : « aucune sauvegarde » dit" contient "$RES/veri
 verifier "verifier-sauvegarde : rien écrit" test ! -e "$NOTES"
 # Une sauvegarde comme celle de rsync : la copie du dossier personnel, heures de modification gardées (cp -p), et
 # la note que Vanguard écrit en la mettant en place. Les originaux sont datés d'avant, pour qu'un original réécrit
-# ensuite soit « modifié depuis » et une copie réécrite « abîmée ».
-ORIGINAUX="$HOME/vanguard-essai-sauvegarde"
+# ensuite soit « modifié depuis » et une copie réécrite « abîmée ». Depuis la 0.82, l'original se cherche dans le
+# dossier sauvegardé du même nom (Documents…) : l'essai se range donc dans Documents, comme rsync le pose.
+ORIGINAUX="$HOME/Documents/vanguard-essai-sauvegarde"
 DISQUE="$RES/disque-sauvegarde"
-mkdir -p "$ORIGINAUX" "$DISQUE/vanguard-essai-sauvegarde"
+mkdir -p "$ORIGINAUX" "$DISQUE/Documents/vanguard-essai-sauvegarde"
 for n in a b c; do echo "fichier $n de l'essai" >"$ORIGINAUX/$n.txt"; done
 touch -t 202601010000 "$ORIGINAUX"/*.txt
-cp -p "$ORIGINAUX"/*.txt "$DISQUE/vanguard-essai-sauvegarde/"
+cp -p "$ORIGINAUX"/*.txt "$DISQUE/Documents/vanguard-essai-sauvegarde/"
 python3 -c "import json,sys; json.dump({'mise_en_place': {'Systemd': {'date': '2026-01-01', 'destination': sys.argv[1], 'empreinte_timer': '', 'empreinte_service': ''}}}, open(sys.argv[2], 'w'))" "$DISQUE" "$NOTES"
 lancer verifier-sauvegarde 60 '' verifier-sauvegarde
 verifier "verifier-sauvegarde : 3 fichiers relus, identiques" contient "$RES/verifier-sauvegarde.txt" '3 fichier(s) relu(s) sur le disque de sauvegarde, identiques'
 verifier "verifier-sauvegarde : la sauvegarde se relit" contient "$RES/verifier-sauvegarde.txt" 'La sauvegarde se relit'
 echo "b réécrit après la sauvegarde" >"$ORIGINAUX/b.txt"
-echo "c abîmé sur le disque" >"$DISQUE/vanguard-essai-sauvegarde/c.txt"
+echo "c abîmé sur le disque" >"$DISQUE/Documents/vanguard-essai-sauvegarde/c.txt"
 lancer verifier-sauvegarde-abimee 60 '' verifier-sauvegarde
 verifier "verifier-sauvegarde : original modifié depuis, pas compté comme abîmé" contient "$RES/verifier-sauvegarde-abimee.txt" '1 fichier(s) modifié(s) depuis la sauvegarde'
 verifier "verifier-sauvegarde : copie abîmée nommée" contient "$RES/verifier-sauvegarde-abimee.txt" "c.txt : différent de l'original"

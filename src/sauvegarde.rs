@@ -1115,8 +1115,13 @@ fn comparer(copie: &Path, original: &Path) -> Comparaison {
     }
     let heure = |p: &Path| std::fs::metadata(p).and_then(|m| m.modified()).ok();
     let marge = std::time::Duration::from_secs(2);
+    // Seul un original PLUS RÉCENT que sa copie est normal : on l'a retouché après la sauvegarde. Une copie plus
+    // récente que son original, au contenu différent, a été réécrite sur le disque de sauvegarde : c'est ainsi
+    // qu'apparaît un rançongiciel qui chiffre la sauvegarde. Dite abîmée, même si une ancienne version restaurée
+    // depuis une archive donne le même signe : une vérification de trop coûte moins qu'une sauvegarde chiffrée
+    // passée pour saine.
     match (heure(copie), heure(original)) {
-        (Some(c), Some(o)) if o > c + marge || c > o + marge => Comparaison::ModifieDepuis,
+        (Some(c), Some(o)) if o > c + marge => Comparaison::ModifieDepuis,
         _ => Comparaison::Different,
     }
 }
@@ -1327,7 +1332,7 @@ mod tests {
     use super::*;
 
     /// Une sauvegarde rsync jouée dans un dossier jetable : copie identique, original modifié depuis (plus récent),
-    /// copie abîmée (original inchangé, plus ancien que la copie), fichier sans original.
+    /// copie abîmée (même heure, ou réécrite après la sauvegarde), fichier sans original.
     #[test]
     fn sauvegarde_relue_et_comparee() {
         let base = crate::reseau::dossier_local().join("verifier-sauvegarde");
@@ -1355,16 +1360,17 @@ mod tests {
         ecrire(&maison, "photo.jpg", "original", 86_400);
         ecrire(&sauvegarde, "photo.jpg", "abîmée", 86_400);
         ecrire(&sauvegarde, "efface.txt", "plus d'original", 86_400);
-        // Remplacé par une version plus ancienne après la sauvegarde (restauration, archive) : pas abîmé.
+        // Copie réécrite après la sauvegarde, original inchangé et plus ancien : le signe d'un rançongiciel qui
+        // chiffre la sauvegarde. Abîmée, même si une ancienne version restaurée donnerait le même signe.
         ecrire(&maison, "ancien.txt", "version d'archive", 172_800);
-        ecrire(&sauvegarde, "ancien.txt", "version d'hier", 86_400);
+        ecrire(&sauvegarde, "ancien.txt", "chiffré par un rançongiciel", 86_400);
         // Les Documents peuvent être hors du dossier personnel : la source est nommée, pas devinée.
         let sources = vec![("Documents".to_string(), maison.join("Documents"))];
         let (mut relus, gros) = relire_sauvegarde(&sauvegarde, &sources);
         assert_eq!(gros, 0);
         relus.sort_by(|a, b| a.0.cmp(&b.0));
         let attendu = [
-            ("ancien.txt", Comparaison::ModifieDepuis),
+            ("ancien.txt", Comparaison::Different),
             ("efface.txt", Comparaison::SansOriginal),
             ("facture.pdf", Comparaison::Identique),
             ("notes.txt", Comparaison::ModifieDepuis),
