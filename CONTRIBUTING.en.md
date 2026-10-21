@@ -83,11 +83,32 @@ turn on once with `/install-github-app`).
 | `src/verifier_cle.rs` | check my drive: real capacity, speeds and bad blocks, written into the free space and read back without cache, then erased |
 | `src/passage.rs` | takeover of what a version from before the name change left (data, timers, shortcut, firewall rules); to be removed at 1.0 |
 | `src/ordinateurs.rs` | my computers: each computer's visit noted on VANGUARDLOG (categories and levels only) |
+| `src/plugins/` | extensions: plugins (`mod.rs`: safe folder, approval by SHA-256, checked copy then run, `manifeste.rs`: plugin.toml read by a bounded home-made parser, `archive.rs`: .zip unpacked in Rust), lab (`labo.rs`), findings protocol (`sortie.rs`), restrictions switch (`reglages.rs`), menus (`menu.rs`); see the Extensions section |
+| `extensions/` | Rust library to write a plugin (`sdk/`, crate `vanguard-extension`, outside the workspace) and examples (`exemples/`); how-to (in French): `extensions/LISEZMOI.md` |
 | `src/chiffrement.rs` | protected key data: encrypted record (XChaCha20-Poly1305), data key kept by the owner and wrapped by the passphrase (Argon2id) |
 | `assets/oui.tsv` | manufacturers by MAC prefix (IEEE list), stored as sorted tables at compile time (`build.rs`) |
 | `assets/yara/` | ReversingLabs YARA rules (MIT license), gathered by `outils/maj-yara.sh` |
 | `assets/banniere-blanche.png`, `assets/banniere-noire.png`, `assets/icones/`, `assets/vanguard.ico` | the banner (no background, one per GitHub theme) and the icon (the V), drawn cell by cell in the terminal banner's lettering by `outils/icone.py` |
 | `LICENCES-TIERCES.txt` | license notices of the included libraries (`outils/licences-tierces.py`) |
+
+### Extensions (plugins and lab)
+
+An extension adds a program without touching Vanguard's code: a plugin (folder + `plugin.toml`, a lasting tool) or a
+lab script (dropped as it is). The how-to, the manifest and the findings protocol are in
+[extensions/LISEZMOI.md](extensions/LISEZMOI.md) (in French); a plugin in Rust is written with
+[extensions/sdk](extensions/sdk).
+
+What must not change without rereading the design (`src/plugins/mod.rs`, at the top):
+
+- an extension only runs on request and its findings never touch the grade: neither the audit, the history nor
+  `risk::score` see them (separate section of the HTML report);
+- restrictions on (the default): approval by SHA-256, YARA and MalwareBazaar scan before consent, the hashed copy is
+  the one that runs, no link followed, never as administrator, `commande::lancer_borne`, minimal environment;
+- even with restrictions off, the extensions folder stays yours and closed to other accounts (`dossier_sur`).
+
+The tests (`src/plugins/tests.rs`) run real scripts in throwaway folders, and `tests/programme.rs` adds then runs
+the example plugin through the real program. `outils/verifier.sh` also builds and tests the sdk and the Rust example
+(“extensions” step).
 
 ### Adding a check rule
 

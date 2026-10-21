@@ -1,0 +1,17 @@
+# Bibliothèque pour écrire un plugin de Vanguard en Rust. À part : ce n'est pas une dépendance de Vanguard, et elle
+# n'en a aucune (le JSON du protocole est écrit à la main).
+[package]
+name = "vanguard-extension"
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0-or-later"
+description = "Écrire un plugin de Vanguard en Rust : constats du protocole, langue, lancement borné d'un programme."
+publish = false
+
+[dependencies]
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+
+# Son propre espace de travail : jamais membre de celui de Vanguard.
+[workspace]

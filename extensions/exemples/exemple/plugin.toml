@@ -1,0 +1,14 @@
+# Le manifeste d'un plugin de Vanguard : voir le LISEZMOI.md du dossier extensions.
+nom = "exemple"
+titre_fr = "Exemple de plugin"
+titre_en = "Example plugin"
+description_fr = "Deux constats inventés, pour voir le protocole."
+description_en = "Two made-up findings, to see the protocol."
+auteur = "Vanguard (exemple)"
+systemes = ["linux", "macos", "windows"]
+delai = 20
+commande = "exemple.sh"
+arguments = ["--salut"]
+
+[windows]
+commande = "exemple.ps1"

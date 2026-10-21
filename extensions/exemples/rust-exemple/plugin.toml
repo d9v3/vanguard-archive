@@ -1,0 +1,14 @@
+# Le manifeste d'un plugin de Vanguard écrit en Rust. Le programme est d'abord compilé dans bin/ :
+#   cargo install --path . --root . --no-track
+nom = "rust-exemple"
+titre_fr = "Exemple en Rust"
+titre_en = "Rust example"
+description_fr = "Deux constats inventés et la version du système, écrits avec la bibliothèque vanguard-extension."
+description_en = "Two made-up findings and the system version, written with the vanguard-extension library."
+auteur = "Vanguard (exemple)"
+systemes = ["linux", "macos", "windows"]
+delai = 20
+commande = "bin/rust-exemple"
+
+[windows]
+commande = "bin/rust-exemple.exe"

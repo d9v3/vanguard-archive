@@ -945,3 +945,78 @@ fn tableau_de_bord_sans_surveillance_explique() {
     }
     let _ = std::fs::remove_dir_all(&maison);
 }
+
+/// Le plugin d'exemple ajouté (accord tapé), lancé, puis refusé quand son script change ; un script posé dans le labo,
+/// approuvé au premier lancement. Pour de vrai, dans un dossier personnel jetable.
+#[cfg(unix)]
+#[test]
+fn plugin_d_exemple_et_labo() {
+    // Dans `unshare -rn` (verifier.sh), le compte devient root : Vanguard y refuse à raison les extensions.
+    if std::fs::metadata("/proc/self")
+        .map(|m| std::os::unix::fs::MetadataExt::uid(&m))
+        .ok()
+        == Some(0)
+    {
+        return;
+    }
+    let maison = maison_jetable();
+    let source = maison.join("source");
+    std::fs::create_dir_all(&source).unwrap();
+    let exemple = Path::new(env!("CARGO_MANIFEST_DIR")).join("extensions/exemples/exemple");
+    for f in ["plugin.toml", "exemple.sh", "exemple.ps1"] {
+        std::fs::copy(exemple.join(f), source.join(f)).unwrap();
+    }
+    let programme = Path::new(env!("CARGO_BIN_EXE_vanguard"));
+    let env = [("VANGUARD_HORS_LIGNE", "1")];
+    let source_texte = source.to_string_lossy().into_owned();
+    let s = vanguard_dans_env(
+        programme,
+        &maison,
+        "fr",
+        &["plugin", "ajouter", &source_texte],
+        "o\n",
+        120,
+        &env,
+    );
+    assert_eq!(s.code, Some(0), "{}{}", s.texte, s.erreurs);
+    assert!(
+        s.texte.contains("Empreintes SHA-256") && s.texte.contains("non vérifié par Vanguard"),
+        "{}",
+        s.texte
+    );
+    let s = vanguard_dans_env(programme, &maison, "fr", &["plugin", "exemple"], "", 60, &env);
+    assert_eq!(s.code, Some(0), "{}{}", s.texte, s.erreurs);
+    assert!(
+        s.texte.contains("Bonjour depuis le plugin d'exemple (--salut)"),
+        "{}",
+        s.texte
+    );
+    assert!(
+        s.texte.contains("Une prise connectée inventée") && s.texte.contains("plugin exemple"),
+        "{}",
+        s.texte
+    );
+    let plugins = maison.join("donnees/vanguard/plugins");
+    let mut script = std::fs::read_to_string(plugins.join("exemple/exemple.sh")).unwrap();
+    script.push_str("echo de plus\n");
+    std::fs::write(plugins.join("exemple/exemple.sh"), script).unwrap();
+    let s = vanguard_dans_env(programme, &maison, "fr", &["plugin", "exemple"], "", 60, &env);
+    assert_eq!(s.code, Some(1));
+    assert!(s.texte.contains("a changé depuis son approbation"), "{}", s.texte);
+
+    let s = vanguard_dans_env(programme, &maison, "fr", &["labo", "ouvrir"], "", 30, &env);
+    assert!(s.texte.contains("plugins/labo"), "{}", s.texte);
+    std::fs::copy(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("extensions/exemples/labo-exemple.sh"),
+        plugins.join("labo/labo-exemple.sh"),
+    )
+    .unwrap();
+    let s = vanguard_dans_env(programme, &maison, "fr", &["labo", "labo-exemple.sh"], "o\n", 120, &env);
+    assert_eq!(s.code, Some(0), "{}{}", s.texte, s.erreurs);
+    assert!(
+        s.texte.contains("EXPÉRIMENTAL") && s.texte.contains("labo labo-exemple.sh"),
+        "{}",
+        s.texte
+    );
+    let _ = std::fs::remove_dir_all(&maison);
+}

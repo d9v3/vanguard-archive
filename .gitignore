@@ -1,3 +1,4 @@
 target/
 __pycache__/
 .claude/worktrees/
+extensions/exemples/rust-exemple/bin/

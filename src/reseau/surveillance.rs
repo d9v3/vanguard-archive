@@ -470,6 +470,10 @@ async fn passe() {
     for (titre, texte) in crate::protection::sortantes::botnets_a_signaler() {
         alerter(Genre::Botnet, &titre, &texte);
     }
+    // Les extensions sans restrictions qui l'ont demandé (dans_la_surveillance) : leurs problèmes graves seulement.
+    for (titre, texte) in crate::plugins::a_signaler() {
+        notifier(&titre, &texte);
+    }
     let Ok(r) = reseau::executer(Options {
         silencieux: true,
         ..Options::defaut(None, "courants")

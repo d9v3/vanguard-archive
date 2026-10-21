@@ -64,6 +64,110 @@ pub fn lancer(commande: &mut Command, secondes: u64) -> Option<Resultat> {
     })
 }
 
+/// Ce que `lancer_borne` a lu.
+pub struct Borne {
+    /// Code de retour (`None` : arrêté par la borne, le délai ou un signal).
+    pub code: Option<i32>,
+    pub sortie: String,
+    pub erreurs: String,
+    /// Une sortie a passé la borne : le programme a été arrêté là, la suite manque.
+    pub tronque: bool,
+    /// Le délai est passé : le programme a été arrêté, ce qu'il avait déjà écrit reste.
+    pub delai: bool,
+}
+
+/// Lit `flux` en fond, `borne` octets au plus ; passé la borne, le dit par `plein` et cesse de lire (le programme
+/// bloque ou reçoit SIGPIPE, puis il est arrêté).
+fn lire_borne(
+    mut flux: impl Read + Send + 'static,
+    borne: usize,
+    plein: std::sync::Arc<std::sync::atomic::AtomicBool>,
+) -> mpsc::Receiver<Vec<u8>> {
+    let (envoi, reception) = mpsc::channel();
+    std::thread::spawn(move || {
+        let mut lu = Vec::new();
+        let mut tampon = vec![0u8; 16 << 10];
+        loop {
+            let n = match flux.read(&mut tampon) {
+                Ok(0) | Err(_) => break,
+                Ok(n) => n,
+            };
+            let reste = borne - lu.len();
+            lu.extend_from_slice(&tampon[..n.min(reste)]);
+            if n > reste {
+                plein.store(true, std::sync::atomic::Ordering::Relaxed);
+                break;
+            }
+        }
+        let _ = envoi.send(lu);
+    });
+    reception
+}
+
+/// Comme `lancer`, pour un programme qui n'est pas de confiance (un plugin) : chaque sortie gardée en mémoire jusqu'à
+/// `borne` octets, puis le programme et tout ce qu'il a lancé arrêtés ; le délai passé, de même. Contrairement à
+/// `lancer`, ce qui était déjà écrit reste : un plugin trop bavard ou trop lent montre au moins son début. `None` :
+/// il ne démarre pas.
+pub fn lancer_borne(commande: &mut Command, secondes: u64, borne: usize) -> Option<Borne> {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    commande
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    // Un programme copié à l'instant (la copie vérifiée d'un plugin) peut être refusé « Text file busy » : un autre fil
+    // qui lance un processus au même moment a hérité, le temps de son exec, du fichier encore ouvert en écriture.
+    let mut essais = 0;
+    let mut enfant = loop {
+        match commande.spawn() {
+            Err(e) if e.kind() == std::io::ErrorKind::ExecutableFileBusy && essais < 20 => {
+                essais += 1;
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            r => break r.ok()?,
+        }
+    };
+    let plein = Arc::new(AtomicBool::new(false));
+    let sortie = lire_borne(enfant.stdout.take()?, borne, plein.clone());
+    let erreurs = lire_borne(enfant.stderr.take()?, borne, plein.clone());
+    let limite = Instant::now() + Duration::from_secs(secondes);
+    let mut pause = Duration::from_millis(1);
+    let (mut tronque, mut delai) = (false, false);
+    let code = loop {
+        match enfant.try_wait() {
+            Ok(Some(statut)) => break statut.code(),
+            Ok(None) if plein.load(Ordering::Relaxed) => {
+                tronque = true;
+                arreter(&mut enfant);
+                break None;
+            }
+            Ok(None) if Instant::now() < limite => {
+                std::thread::sleep(pause);
+                pause = (pause * 2).min(Duration::from_millis(50));
+            }
+            _ => {
+                delai = true;
+                arreter(&mut enfant);
+                break None;
+            }
+        }
+    };
+    // Un petit-enfant resté hors de l'arbre peut garder un canal ouvert : on n'attend pas plus que DELAI_LECTURE.
+    let texte = |r: mpsc::Receiver<Vec<u8>>| {
+        r.recv_timeout(DELAI_LECTURE)
+            .map(|o| String::from_utf8_lossy(&o).into_owned())
+            .unwrap_or_default()
+    };
+    let (sortie, erreurs) = (texte(sortie), texte(erreurs));
+    Some(Borne {
+        code,
+        sortie,
+        erreurs,
+        tronque: tronque || plein.load(Ordering::Relaxed),
+        delai,
+    })
+}
+
 /// Comme `lancer`, l'outil répondant en anglais, avec les nombres et les dates du « C » : pour une sortie que Vanguard
 /// analyse et que l'outil traduit (nmcli écrit « oui » pour « yes », lscpu « Nom de modèle » pour « Model name »).
 /// En UTF-8, un nom de réseau accentué reste intact ; sans C.UTF-8, le système se replie sur le « C ». LANGUAGE est
@@ -1031,5 +1135,38 @@ mod tests_lancer_vers {
         let e = lancer_vers(&mut c, 1, &f, 1000, Garder::Debut).unwrap();
         assert!(e.delai && e.code.is_none());
         assert_eq!(std::fs::read_to_string(&chemin).unwrap(), "avant\n");
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests_lancer_borne {
+    use super::*;
+
+    /// Un programme sans fin de sortie (yes) est arrêté à la borne ; un programme trop lent, au délai ; dans les deux
+    /// cas, le début de ce qu'il a écrit reste.
+    #[test]
+    fn sortie_et_delai_bornes() {
+        let debut = Instant::now();
+        let r = lancer_borne(&mut Command::new("yes"), 30, 4096).unwrap();
+        assert!(r.tronque && !r.delai && r.code.is_none());
+        assert!(r.sortie.len() <= 4096 && r.sortie.starts_with("y\ny\n"));
+        assert!(debut.elapsed() < Duration::from_secs(10));
+
+        let debut = Instant::now();
+        let mut c = Command::new("sh");
+        c.args(["-c", "echo avant; sleep 30; echo apres"]);
+        let r = lancer_borne(&mut c, 1, 4096).unwrap();
+        assert!(r.delai && !r.tronque);
+        assert_eq!(r.sortie, "avant\n");
+        assert!(debut.elapsed() < Duration::from_secs(8));
+
+        let mut c = Command::new("sh");
+        c.args(["-c", "echo ok; echo oups >&2; exit 4"]);
+        let r = lancer_borne(&mut c, 5, 4096).unwrap();
+        assert_eq!(
+            (r.code, r.sortie.as_str(), r.erreurs.as_str()),
+            (Some(4), "ok\n", "oups\n")
+        );
+        assert!(lancer_borne(&mut Command::new("/nexiste/pas"), 5, 10).is_none());
     }
 }

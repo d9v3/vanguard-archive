@@ -34,6 +34,7 @@ mod ordinateurs;
 mod passage;
 #[cfg(any(target_os = "macos", test))]
 mod plist;
+mod plugins;
 mod prediction;
 mod protection;
 mod raccourci;
@@ -428,6 +429,33 @@ enum Commande {
         #[arg(long)]
         accepter: bool,
     },
+    /// Plugins : des programmes à toi ajoutés à Vanguard sans changer son code (essais, outils expérimentaux), chacun
+    /// dans un dossier avec un plugin.toml. « ajouter <dossier> » le copie et l'approuve (empreintes SHA-256),
+    /// « approuver <nom> » après un changement, « liste », « retirer <nom> », ou « <nom> [arguments] » pour le
+    /// lancer (« --rapport » : ses constats dans le rapport HTML) ; sans argument, la liste à choisir. Jamais en
+    /// administrateur ; hors de la note.
+    Plugin {
+        /// ajouter <dossier>, approuver <nom>, liste, retirer <nom>, ou <nom> [--rapport] [arguments].
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        quoi: Vec<String>,
+    },
+    /// Laboratoire : un script posé tel quel dans le dossier du labo (.sh, .bash, .ps1, .py ou un programme), pour
+    /// essayer une idée hors du programme de Vanguard. Sans argument : la liste à choisir ; « ouvrir » : le dossier ;
+    /// « <fichier> [arguments] » le lance (approuvé par son empreinte au premier lancement). Jamais en administrateur.
+    #[command(visible_alias = "lab")]
+    Labo {
+        /// ouvrir, liste, ou <fichier> [arguments].
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        quoi: Vec<String>,
+    },
+    /// Extensions : le menu des plugins et des scripts du labo, à choisir et lancer.
+    #[command(visible_alias = "ext")]
+    Extensions {
+        /// on : les restrictions des extensions coupées (sans accord, empreinte ni analyse, avec tous tes droits) ;
+        /// off : remises. Le dossier des extensions doit rester à toi seul.
+        #[arg(long, visible_alias = "no-restrictions", value_parser = ["on", "off"])]
+        sans_restrictions: Option<String>,
+    },
     /// Scan silencieux + notifications (utilisé par la surveillance).
     #[command(hide = true)]
     Surveiller,
@@ -531,6 +559,8 @@ impl Session {
             audit::afficher(&a);
             self.audit_reseau = Some(a);
         }
+        // Les extensions sans restrictions qui l'ont demandé (dans_le_bilan) : à part, hors de la note.
+        plugins::avec_le_bilan();
         titre(tr!("Bilan global", "Overall result"));
         let m = self.audit.as_ref().filter(|a| a.fiable()).map(|a| a.score);
         let r = self.reseau.as_ref().map(|r| r.score_global);
@@ -758,7 +788,8 @@ fn lignes_du_menu(etat: Vec<String>) -> Vec<Ligne> {
         lignes.push(Ligne::choix(&(touche + 1).to_string(), action.libelle().0, a_droite));
     }
 
-    lignes.extend(section_du_menu(tr!("OUTILS", "TOOLS")));
+    // Sans ligne vide au-dessus : avec le 9e groupe (extensions), le menu tient encore dans 24 lignes.
+    lignes.push(Ligne::Texte(ligne_section(tr!("OUTILS", "TOOLS"))));
     for (touche, groupe) in GROUPES.iter().enumerate() {
         lignes.push(Ligne::choix(
             &(touche + 4).to_string(),
@@ -971,6 +1002,7 @@ enum Action {
     VerifierSauvegarde,
     Guide,
     Depanner,
+    Extensions,
 }
 
 /// Un outil du menu : son groupe (aucun pour 1, 2 et 3, au menu principal), sa lettre des menus d'avant la 0.43
@@ -1267,10 +1299,15 @@ const OUTILS: &[Outil] = &[
         titre: ["Dépanner pas à pas", "Troubleshoot step by step"],
         precision: ["Internet, son, imprimante…", "Internet, sound, printer…"],
         mots: "dépanner troubleshoot panne problème internet son imprimante" },
+    Outil { action: Action::Extensions, groupe: Some(Groupe::Extensions), lettre: "",
+        titre: ["Extensions", "Extensions"],
+        precision: ["plugins et labo, hors Vanguard", "plugins and lab, not Vanguard"],
+        mots: "plugin plugins extension module ajouter add expérimental experimental script labo lab laboratoire \
+               programme program essai test" },
 ];
 
 // Une action ajoutée sans sa ligne décalerait toutes les suivantes : la compilation s'arrête.
-const _: () = assert!(OUTILS.len() == Action::Depanner as usize + 1);
+const _: () = assert!(OUTILS.len() == Action::Extensions as usize + 1);
 
 impl Action {
     fn outil(self) -> &'static Outil {
@@ -1305,7 +1342,10 @@ impl Action {
     /// Après l'outil, attendre Entrée avant de revenir au menu ? Pas pour ceux qui ont leurs propres écrans et se
     /// quittent par Échap (le guide, le dépannage) : on y reviendrait deux fois.
     fn attendre_apres(self) -> bool {
-        !matches!(self, Action::Guide | Action::Depanner | Action::QuiParle)
+        !matches!(
+            self,
+            Action::Guide | Action::Depanner | Action::QuiParle | Action::Extensions
+        )
     }
 }
 
@@ -1325,9 +1365,10 @@ enum Groupe {
     Donnees,
     Guide,
     Depanner,
+    Extensions,
 }
 
-const GROUPES: [Groupe; 8] = [
+const GROUPES: [Groupe; 9] = [
     Groupe::Machine,
     Groupe::Reseau,
     Groupe::Protection,
@@ -1336,6 +1377,7 @@ const GROUPES: [Groupe; 8] = [
     Groupe::Donnees,
     Groupe::Guide,
     Groupe::Depanner,
+    Groupe::Extensions,
 ];
 
 impl Groupe {
@@ -1349,6 +1391,7 @@ impl Groupe {
             Groupe::Donnees => tr!("Données", "Data"),
             Groupe::Guide => tr!("Guide des commandes", "Command guide"),
             Groupe::Depanner => tr!("Dépanner pas à pas", "Troubleshoot step by step"),
+            Groupe::Extensions => tr!("Extensions", "Extensions"),
         }
     }
 
@@ -1362,6 +1405,7 @@ impl Groupe {
             Groupe::Donnees => tr!("sauvegarder, copier mes fichiers", "back up, copy my files"),
             Groupe::Guide => tr!("Linux, Windows, macOS, pas à pas", "Linux, Windows, macOS, how-tos"),
             Groupe::Depanner => tr!("Internet, son, imprimante…", "Internet, sound, printer…"),
+            Groupe::Extensions => tr!("plugins et labo, hors Vanguard", "plugins and lab, not Vanguard"),
         }
     }
 
@@ -1531,6 +1575,7 @@ async fn executer(s: &mut Session, action: Action) {
         Action::MettreAJour => mise_a_jour::commande(),
         Action::Guide => guide::menu(),
         Action::Depanner => depanner::menu(),
+        Action::Extensions => plugins::extensions(),
     }
 }
 
@@ -1642,6 +1687,15 @@ const AIDES_EN: &[(&str, &str)] = &[
                 (README, SHA-256 fingerprints). Read-only; nothing goes to the Internet"),
     ("depanner", "Troubleshoot step by step: no Internet, Wi-Fi dropping, slow computer, no sound, printer, disk full; \
                   after an infection, new computer, computer leaving (sale, gift)"),
+    ("plugin", "Plugins: programs of yours added to Vanguard without changing its code (tests, experimental tools), \
+                each in a folder with a plugin.toml. “add <folder>” copies and approves it (SHA-256 fingerprints), \
+                “approve <name>” after a change, “list”, “remove <name>”, or “<name> [arguments]” to run it \
+                (“--report”: its findings in the HTML report); no argument: the list to choose from. Never as \
+                administrator; outside the grade"),
+    ("labo", "Lab: a script put as it is in the lab folder (.sh, .bash, .ps1, .py or a program), to try an idea \
+              outside Vanguard's program. No argument: the list to choose from; “open”: the folder; “<file> \
+              [arguments]” runs it (approved by its fingerprint on the first run). Never as administrator"),
+    ("extensions", "Extensions: the menu of plugins and lab scripts, to choose and run"),
     ("proche", "A relative's computer: three questions (who uses it, why you were asked to look at it, their \
                 network), the check-up, a summary in plain words, the fixes accepted one by one, then the page to \
                 leave with its tips"),
@@ -1690,6 +1744,11 @@ const OPTIONS_EN: &[(&str, &str, &str)] = &[
     ("sauvegarde-auto", "annuler", "Remove the automatic backup set up by Vanguard (the backed-up files stay)"),
     ("traces", "dossier", "The folder where traces-YYYYMMDD-HHMMSS is created (default: the VANGUARD key if Vanguard \
                            runs from it, otherwise this computer's Vanguard folder)"),
+    ("plugin", "quoi", "add <folder>, approve <name>, list, remove <name>, or <name> [--report] [arguments]"),
+    ("labo", "quoi", "open, list, or <file> [arguments]"),
+    ("extensions", "sans_restrictions", "on: the extensions' restrictions turned off (no consent, fingerprint or scan, \
+                                         with all your rights); off: back on. The extensions folder must stay yours \
+                                         alone"),
     ("depanner", "sujet", "The subject: internet, wifi, slow, sound, printer, disk, infection, new, leaving (or words \
                              describing it)"),
 ];
@@ -1895,6 +1954,27 @@ async fn main() {
         Some(Commande::Regles) => machine::regles::afficher(),
         Some(Commande::Depanner { sujet }) => depanner::executer(&sujet.join(" ")),
         Some(Commande::Proche) => depanner::executer("proche"),
+        Some(Commande::Plugin { quoi }) => {
+            let code = plugins::commande(&quoi);
+            if code != 0 {
+                std::process::exit(code);
+            }
+        }
+        Some(Commande::Labo { quoi }) => {
+            let code = plugins::labo::commande(&quoi);
+            if code != 0 {
+                std::process::exit(code);
+            }
+        }
+        Some(Commande::Extensions { sans_restrictions }) => match sans_restrictions {
+            None => plugins::extensions(),
+            Some(etat) => {
+                let code = plugins::regler_restrictions(etat == "on");
+                if code != 0 {
+                    std::process::exit(code);
+                }
+            }
+        },
         Some(Commande::Traces { dossier }) => {
             if !traces::commande(dossier.as_deref()) {
                 std::process::exit(1);
@@ -1996,6 +2076,7 @@ mod tests_menu {
         assert!(outil_au_chemin("4.99").is_none() && outil_au_chemin("x.1").is_none());
         assert!(outil_au_chemin("10.1").is_none(), "le guide a ses propres chemins");
         assert!(outil_au_chemin("11.1").is_none(), "le dépannage a ses propres chemins");
+        assert!(outil_au_chemin("12.1") == Some(Action::Extensions));
         // La place annoncée au menu, dans l'aide et l'historique des versions.
         assert_eq!(touche_de(Action::MettreAJour).as_deref(), Some("9.9"));
         // Les places annoncées : 4.7, 4.8 et 9.2.

@@ -1,0 +1,12 @@
+# Exemple de plugin de Vanguard écrit en Rust, avec la bibliothèque d'extensions/sdk.
+[package]
+name = "rust-exemple"
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0-or-later"
+publish = false
+
+[dependencies]
+vanguard-extension = { path = "../../sdk" }
+
+[workspace]

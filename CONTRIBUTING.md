@@ -83,11 +83,32 @@ modification. Sur GitHub, `@claude` dans un ticket ou une demande de fusion le f
 | `src/verifier_cle.rs` | vérifier ma clé : capacité réelle, vitesses et blocs en erreur, écrits dans le libre et relus sans cache, puis effacés |
 | `src/passage.rs` | reprise de ce qu'une version d'avant le changement de nom a posé (données, minuteries, raccourci, règles du pare-feu) ; à retirer à la 1.0 |
 | `src/ordinateurs.rs` | mes ordinateurs : la visite de chaque ordinateur notée sur VANGUARDLOG (catégories et niveaux seulement) |
+| `src/plugins/` | extensions : plugins (`mod.rs` : dossier sûr, approbation par SHA-256, copie vérifiée puis lancée, `manifeste.rs` : plugin.toml lu par un analyseur maison borné, `archive.rs` : .zip déplié en Rust), laboratoire (`labo.rs`), protocole des constats (`sortie.rs`), interrupteur des restrictions (`reglages.rs`), menus (`menu.rs`) ; voir la section Extensions |
+| `extensions/` | bibliothèque Rust pour écrire un plugin (`sdk/`, crate `vanguard-extension`, hors de l'espace de travail) et exemples (`exemples/`) ; mode d'emploi : `extensions/LISEZMOI.md` |
 | `src/chiffrement.rs` | données de la clé protégées : carnet chiffré (XChaCha20-Poly1305), clé de données gardée chez le propriétaire et enveloppée par la phrase (Argon2id) |
 | `assets/oui.tsv` | fabricants par préfixe MAC (liste IEEE), rangés en tableaux triés à la compilation (`build.rs`) |
 | `assets/yara/` | règles YARA de ReversingLabs (licence MIT), rassemblées par `outils/maj-yara.sh` |
 | `assets/banniere-blanche.png`, `assets/banniere-noire.png`, `assets/icones/`, `assets/vanguard.ico` | la bannière (sans fond, une par thème de GitHub) et l'icône (le V), dessinées case par case dans l'écriture de la bannière du terminal par `outils/icone.py` |
 | `LICENCES-TIERCES.txt` | avis de licence des bibliothèques incluses (`outils/licences-tierces.py`) |
+
+### Extensions (plugins et laboratoire)
+
+Une extension ajoute un programme sans toucher au code de Vanguard : un plugin (dossier + `plugin.toml`, outil
+durable) ou un script du labo (posé tel quel). Le mode d'emploi, le manifeste et le protocole des constats sont dans
+[extensions/LISEZMOI.md](extensions/LISEZMOI.md) ; un plugin en Rust s'écrit avec [extensions/sdk](extensions/sdk).
+
+Ce qui ne doit pas changer sans relire la conception (`src/plugins/mod.rs`, en tête) :
+
+- une extension ne tourne qu'à la demande et ses constats ne touchent jamais la note : ni l'audit, ni
+  l'historique, ni `risk::score` ne les voient (section à part du rapport HTML) ;
+- restrictions actives (par défaut) : approbation par SHA-256, analyse YARA et MalwareBazaar avant l'accord, la
+  copie hachée est celle qui tourne, aucun lien suivi, jamais en administrateur, `commande::lancer_borne`,
+  environnement minimal ;
+- même restrictions coupées, le dossier des extensions reste à soi et fermé aux autres comptes (`dossier_sur`).
+
+Les essais (`src/plugins/tests.rs`) lancent de vrais scripts dans des dossiers jetables, et `tests/programme.rs`
+ajoute puis lance le plugin d'exemple par le vrai programme. `outils/verifier.sh` compile et teste aussi le sdk et
+l'exemple en Rust (étape « extensions »).
 
 ### Ajouter une règle au bilan
 

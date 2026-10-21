@@ -374,7 +374,72 @@ pub fn markdown(audit: Option<&Audit>, reseau: Option<&Rapport>, audit_reseau: O
     if let Some(a) = audit_reseau {
         audit_markdown(&mut m, a);
     }
+    plugins_markdown(&mut m, &crate::plugins::sortie::gardes());
     m
+}
+
+/// La section des plugins (`vanguard plugin <nom> --rapport`) en Markdown : à part, sans note.
+fn plugins_markdown(m: &mut String, gardes: &[crate::plugins::sortie::Gardes]) {
+    if gardes.is_empty() {
+        return;
+    }
+    let _ = trwln!(
+        m,
+        "\n## Plugins (hors code de Vanguard)\n\nCes constats viennent de programmes ajoutés à Vanguard : ils ne comptent pas dans la note.",
+        "\n## Plugins (not Vanguard's code)\n\nThese findings come from programs added to Vanguard: they do not count in the grade."
+    );
+    for g in gardes {
+        let _ = trwln!(
+            m,
+            "\n### {} ({}, le {})\n",
+            "\n### {} ({}, on {})\n",
+            g.titre(),
+            g.nom,
+            g.le
+        );
+        for c in &g.constats {
+            let _ = writeln!(
+                m,
+                "- [{}] **{}** : {}",
+                crate::plugins::sortie::libelle(c),
+                c.categorie,
+                c.message
+            );
+        }
+    }
+}
+
+/// La section des plugins en HTML : leurs constats gardés, échappés, sous un titre qui dit d'où ils viennent ; aucune
+/// carte de note, et rien n'entre dans les notes du haut de la page.
+fn plugins_html(h: &mut String, gardes: &[crate::plugins::sortie::Gardes]) {
+    if gardes.is_empty() {
+        return;
+    }
+    let _ = trw!(
+        h,
+        "<h2>Plugins (hors code de Vanguard)</h2><p class=meta>Ces constats viennent de programmes ajoutés à Vanguard (« vanguard plugin … --rapport ») : ils ne comptent pas dans la note.</p>",
+        "<h2>Plugins (not Vanguard's code)</h2><p class=meta>These findings come from programs added to Vanguard (“vanguard plugin … --report”): they do not count in the grade.</p>"
+    );
+    for g in gardes {
+        let _ = trw!(
+            h,
+            "<div class=carte><h3>{} <span class=meta>plugin {} · le {}</span></h3>",
+            "<div class=carte><h3>{} <span class=meta>plugin {} · on {}</span></h3>",
+            esc(g.titre()),
+            esc(&g.nom),
+            esc(&g.le)
+        );
+        for c in &g.constats {
+            let _ = write!(
+                h,
+                "<div class=ligne>{}<div><span class=cat>{}</span> {}</div></div>",
+                badge(c.probleme()),
+                esc(&c.categorie),
+                esc(&c.message)
+            );
+        }
+        h.push_str("</div>");
+    }
 }
 
 /// La ligne d'un constat : badge, catégorie, message, marche à suivre. Dans l'audit du réseau, un constat non vérifié
@@ -792,6 +857,7 @@ fn html(audit: Option<&Audit>, reseau: Option<&Rapport>, audit_reseau: Option<&A
         }
         h += "</ul></div>";
     }
+    plugins_html(&mut h, &crate::plugins::sortie::gardes());
     h += "</main></body></html>";
     h
 }
@@ -812,6 +878,32 @@ pub fn ouvrir(audit: Option<&Audit>, reseau: Option<&Rapport>, audit_reseau: Opt
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn les_plugins_ont_leur_section_a_part_sans_note() {
+        use crate::plugins::sortie::{ConstatPlugin, Gardes};
+        let g = Gardes {
+            nom: "salon".into(),
+            titre: ["<b>Essai</b>".into(), "Test".into()],
+            le: "2026-10-21 10:00".into(),
+            constats: vec![ConstatPlugin {
+                niveau: "critique".into(),
+                categorie: "Salon".into(),
+                message: "<script>alert(1)</script>".into(),
+            }],
+        };
+        let mut h = String::new();
+        plugins_html(&mut h, std::slice::from_ref(&g));
+        assert!(h.contains("<h2>Plugins (hors code de Vanguard)</h2>"));
+        assert!(h.contains("&lt;script&gt;") && !h.contains("<script>") && h.contains("&lt;b&gt;Essai"));
+        assert!(h.contains("badge critique") && !h.contains("class=\"note"));
+        let mut m = String::new();
+        plugins_markdown(&mut m, &[g]);
+        assert!(m.contains("## Plugins (hors code de Vanguard)") && m.contains("[CRITIQUE] **Salon**"));
+        let mut vide = String::new();
+        plugins_html(&mut vide, &[]);
+        assert_eq!(vide, "");
+    }
 
     #[test]
     fn rapport_texte() {

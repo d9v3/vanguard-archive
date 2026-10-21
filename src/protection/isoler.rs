@@ -92,6 +92,45 @@ fn arguments_bwrap(
     a
 }
 
+/// Les arguments de bubblewrap pour une extension lancée avec `--isole` : la recette du bac à sable (système en
+/// lecture seule, /run et /tmp masqués, pas de réseau, aucune capacité), puis le dossier personnel remis en lecture
+/// seule (une extension lit souvent tes fichiers, elle ne peut plus les changer), son dossier en lecture seule comme
+/// dossier courant, et le dossier jetable seul en écriture. `None` : bubblewrap n'est pas là.
+#[cfg(target_os = "linux")]
+pub(crate) fn arguments_extension(jetable: &Path, dossier: &Path, commande: &[String]) -> Option<Vec<String>> {
+    let programme = commande.first()?;
+    if !present("bwrap") {
+        return None;
+    }
+    let session = std::env::var("XDG_RUNTIME_DIR").ok();
+    let var_run = std::fs::symlink_metadata("/var/run").is_ok_and(|m| m.is_dir());
+    let mut a = arguments_bwrap(jetable, Path::new(programme), session.as_deref(), None, var_run);
+    // Le programme, le dossier courant et HOME de la recette sont remplacés : ceux de l'extension suivent.
+    a.pop();
+    if let Some(i) = a.iter().rposition(|x| x == "--chdir") {
+        a.truncate(i);
+    }
+    let maison = std::env::var("HOME").unwrap_or_default();
+    if !maison.is_empty() {
+        a.extend(["--ro-bind".into(), maison.clone(), maison.clone()]);
+    }
+    let (j, d) = (jetable.display().to_string(), dossier.display().to_string());
+    a.extend([
+        "--ro-bind".into(),
+        d.clone(),
+        d.clone(),
+        "--bind".into(),
+        j.clone(),
+        j.clone(),
+    ]);
+    a.extend(["--chdir".into(), d]);
+    if !maison.is_empty() {
+        a.extend(["--setenv".into(), "HOME".into(), maison]);
+    }
+    a.extend(commande.iter().cloned());
+    Some(a)
+}
+
 /// Fichier de configuration de Windows Sandbox : dossier du programme en lecture seule, réseau coupé, programme
 /// lancé à l'ouverture.
 #[cfg_attr(not(windows), allow(dead_code))]

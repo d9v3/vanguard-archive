@@ -65,7 +65,7 @@ tests_wine() {
 
 scripts_powershell() {
   local erreurs=0 f
-  for f in outils/test-windows/*.ps1; do
+  for f in outils/test-windows/*.ps1 extensions/exemples/*/*.ps1; do
     "$PWSH" -NoProfile -NonInteractive -Command \
       "\$e = \$null; \$t = \$null; [void][System.Management.Automation.Language.Parser]::ParseFile('$PWD/$f', [ref]\$t, [ref]\$e); if (\$e.Count) { \$e | ForEach-Object { '$f : ' + \$_.Message }; exit 1 }" ||
       erreurs=$((erreurs + 1))
@@ -81,7 +81,19 @@ hors_ligne() {
   unshare -rn sh -c 'ip link set lo up && VANGUARD_HORS_LIGNE=1 exec cargo test -q --offline'
 }
 
-scripts_shell() { find outils -name '*.sh' -print0 | xargs -0 -n1 bash -n; }
+# La bibliothèque des extensions (extensions/sdk) et l'exemple en Rust : des crates à part, hors de l'espace de travail
+# de Vanguard ; leurs propres clippy, tests et compilation, dans un dossier de compilation à eux.
+extensions() {
+  local cible=${CARGO_TARGET_DIR:-$PWD/target}-extensions m
+  for m in extensions/sdk/Cargo.toml extensions/exemples/rust-exemple/Cargo.toml; do
+    CARGO_TARGET_DIR=$cible cargo fmt --check --manifest-path "$m" &&
+      CARGO_TARGET_DIR=$cible cargo clippy -q --all-targets --manifest-path "$m" -- -D warnings || return 1
+  done
+  CARGO_TARGET_DIR=$cible cargo test -q --manifest-path extensions/sdk/Cargo.toml &&
+    CARGO_TARGET_DIR=$cible cargo build -q --manifest-path extensions/exemples/rust-exemple/Cargo.toml
+}
+
+scripts_shell() { find outils extensions -name '*.sh' -print0 | xargs -0 -n1 bash -n; }
 
 # Analysés sans être compilés sur disque : py_compile laisserait des __pycache__ dans outils/.
 scripts_python() {
@@ -117,6 +129,7 @@ if [[ $MODE != --rapide ]]; then
   etape powershell scripts_powershell &
   etape rejeu-powershell python3 outils/rejouer-ps.py --pwsh "$PWSH" &
   etape shell scripts_shell &
+  etape extensions extensions &
   etape python scripts_python &
   etape liens python3 outils/liens.py --hors-ligne &
   etape textes textes &
@@ -163,6 +176,7 @@ if [[ $MODE != --rapide ]]; then
   ligne powershell "scripts PowerShell"
   ligne rejeu-powershell "PowerShell du programme rejoué"
   ligne shell "scripts shell"
+  ligne extensions "extensions (sdk, exemple Rust)"
   ligne python "scripts Python"
   ligne liens "liens internes"
   ligne textes "textes FR/EN"
