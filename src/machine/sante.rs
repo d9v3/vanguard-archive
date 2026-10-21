@@ -575,6 +575,8 @@ mod systeme {
     }
 
     /// État de chaque disque (MSFT_PhysicalDisk.HealthStatus), écrit comme Get-PhysicalDisk l'écrit.
+    /// Sous Wine, cette classe n'est qu'une ébauche (« Wine disk », toujours Healthy) : rien à en conclure là-bas,
+    /// et aucun test ne s'appuie sur cet état.
     fn disques_wmi() -> Option<Vec<String>> {
         let lignes = wmi::requete(STOCKAGE, "MSFT_PhysicalDisk", "", &["HealthStatus", "FriendlyName"])?;
         Some(

@@ -9,8 +9,8 @@ use std::time::Duration;
 
 use windows::Win32::Foundation::VARIANT_BOOL;
 use windows::Win32::System::Com::{
-    CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx, CoSetProxyBlanket, CoUninitialize,
-    EOAC_NONE, RPC_C_AUTHN_LEVEL_CALL, RPC_C_IMP_LEVEL_IMPERSONATE, SAFEARRAY,
+    CLSCTX_INPROC_SERVER, COINIT, COINIT_APARTMENTTHREADED, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx,
+    CoSetProxyBlanket, CoUninitialize, EOAC_NONE, RPC_C_AUTHN_LEVEL_CALL, RPC_C_IMP_LEVEL_IMPERSONATE, SAFEARRAY,
 };
 use windows::Win32::System::Ole::{SafeArrayGetDim, SafeArrayGetElement, SafeArrayGetLBound, SafeArrayGetUBound};
 use windows::Win32::System::Variant::{
@@ -121,17 +121,35 @@ pub(crate) fn com_delai<T: Send + 'static>(
     delai: Duration,
     lecture: impl FnOnce() -> windows::core::Result<T> + Send + 'static,
 ) -> Option<T> {
+    dans_un_appartement(nom, quoi, delai, COINIT_MULTITHREADED, lecture)
+}
+
+/// Comme `com`, dans un appartement à fil unique (STA), celui de PowerShell 5.1 : les objets de l'Explorateur
+/// (propriétés d'un volume) sont écrits pour lui.
+pub(crate) fn com_sta<T: Send + 'static>(
+    nom: &str,
+    quoi: &str,
+    lecture: impl FnOnce() -> windows::core::Result<T> + Send + 'static,
+) -> Option<T> {
+    dans_un_appartement(nom, quoi, DELAI, COINIT_APARTMENTTHREADED, lecture)
+}
+
+fn dans_un_appartement<T: Send + 'static>(
+    nom: &str,
+    quoi: &str,
+    delai: Duration,
+    appartement: COINIT,
+    lecture: impl FnOnce() -> windows::core::Result<T> + Send + 'static,
+) -> Option<T> {
     let (envoi, reception) = mpsc::channel();
     std::thread::Builder::new()
         .name("com".into())
         .spawn(move || {
             // SAFETY : fil créé pour cette seule lecture ; l'appartement est rendu par `Appartement` à la sortie.
-            let resultat = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) }
-                .ok()
-                .and_then(|()| {
-                    let _appartement = Appartement;
-                    lecture()
-                });
+            let resultat = unsafe { CoInitializeEx(None, appartement) }.ok().and_then(|()| {
+                let _appartement = Appartement;
+                lecture()
+            });
             let _ = envoi.send(resultat);
         })
         .ok()?;

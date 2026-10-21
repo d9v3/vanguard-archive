@@ -816,13 +816,46 @@ fn mises_a_jour() -> Constat {
     }
 }
 
+/// System.Volume.BitLockerProtection de C:, la propriété que montre l'Explorateur, lue par son magasin de
+/// propriétés : sans droits administrateur, contrairement à Get-BitLockerVolume et à Win32_EncryptableVolume. Vide
+/// si le volume n'en a pas, comme ExtendedProperty dans PowerShell.
+fn protection_bitlocker() -> Option<String> {
+    use windows::Win32::Foundation::PROPERTYKEY;
+    use windows::Win32::System::Com::StructuredStorage::{PropVariantClear, PropVariantToUInt32};
+    use windows::Win32::System::Variant::VT_EMPTY;
+    use windows::Win32::UI::Shell::PropertiesSystem::{
+        GPS_DEFAULT, IPropertyStore, PSGetPropertyKeyFromName, SHGetPropertyStoreFromParsingName,
+    };
+    use windows::core::w;
+    wmi::com_sta("BitLocker", "System.Volume.BitLockerProtection", || {
+        // SAFETY : COM est initialisé dans ce fil (par `wmi::com_sta`) ; chaînes constantes terminées par un zéro ;
+        // le PROPVARIANT rendu par GetValue est à nous et libéré par PropVariantClear.
+        unsafe {
+            let mut cle = PROPERTYKEY::default();
+            PSGetPropertyKeyFromName(w!("System.Volume.BitLockerProtection"), &raw mut cle)?;
+            let magasin: IPropertyStore = SHGetPropertyStoreFromParsingName(w!("C:\\"), None, GPS_DEFAULT)?;
+            let mut valeur = magasin.GetValue(&raw const cle)?;
+            let texte = if valeur.Anonymous.Anonymous.vt == VT_EMPTY {
+                Ok(String::new())
+            } else {
+                PropVariantToUInt32(&raw const valeur).map(|n| n.to_string())
+            };
+            let _ = PropVariantClear(&raw mut valeur);
+            texte
+        }
+    })
+}
+
 fn chiffrement() -> Constat {
-    // Lisible sans droits admin, contrairement à Get-BitLockerVolume.
+    // Lisible sans droits admin, contrairement à Get-BitLockerVolume. PowerShell en secours de la lecture directe.
     juger_bitlocker(
-        ps(
-            "(New-Object -ComObject Shell.Application).NameSpace('C:').Self.ExtendedProperty('System.Volume.BitLockerProtection')",
-        )
-        .as_deref(),
+        protection_bitlocker()
+            .or_else(|| {
+                ps(
+                    "(New-Object -ComObject Shell.Application).NameSpace('C:').Self.ExtendedProperty('System.Volume.BitLockerProtection')",
+                )
+            })
+            .as_deref(),
     )
 }
 
@@ -1180,6 +1213,14 @@ mod tests {
 
     /// Sous Wine, ni Defender ni le Centre de sécurité ni PowerShell : « illisible », jamais « aucun antivirus » (une
     /// alerte critique fausse) ni « Defender actif ».
+    /// La lecture directe rend un des états que juge `juger_bitlocker` (un nombre, ou vide sans BitLocker), ou rien.
+    #[test]
+    fn bitlocker_lu_directement() {
+        if let Some(etat) = protection_bitlocker() {
+            assert!(etat.is_empty() || etat.parse::<u32>().is_ok(), "{etat}");
+        }
+    }
+
     #[test]
     fn antivirus_illisible_sous_wine() {
         if std::path::Path::new(r"C:\windows\system32\wineboot.exe").is_file() {

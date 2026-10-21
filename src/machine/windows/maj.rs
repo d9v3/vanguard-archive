@@ -259,7 +259,7 @@ const LECTURES_RAPIDES: [(&str, &str); 4] = [
 ];
 
 /// Un redémarrage attendu : par Windows Update (son API) ou par la maintenance des composants (la clé du registre que
-/// le script testait).
+/// le script testait). Sous Wine, RebootRequired n'est qu'une ébauche (toujours faux) : aucun test ne s'appuie dessus.
 fn redemarrage_com() -> Option<Vec<String>> {
     use windows::Win32::System::Com::{CLSCTX_INPROC_SERVER, CoCreateInstance};
     use windows::Win32::System::UpdateAgent::{ISystemInformation, SystemInformation};
