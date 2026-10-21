@@ -99,9 +99,8 @@ fn lu_sur(ligne: &str) -> Option<Bi> {
     Some(Bi::new(fr, en))
 }
 
-/// Recopie la fin d'un fichier journal (`borne` octets au plus, à partir d'une ligne entière) dans `nom` ; rend la
-/// taille écrite. Coupé, l'en-tête le dit.
-pub(super) fn copier_la_fin(source: &Path, dossier: &Path, nom: &str, borne: u64) -> std::io::Result<u64> {
+/// La fin d'un fichier journal (`borne` octets au plus, à partir d'une ligne entière), et s'il a été coupé.
+fn fin_de(source: &Path, borne: u64) -> std::io::Result<(Vec<u8>, bool)> {
     let mut f = std::fs::File::open(source)?;
     let taille = f.metadata()?.len();
     let depart = taille.saturating_sub(borne);
@@ -113,13 +112,115 @@ pub(super) fn copier_la_fin(source: &Path, dossier: &Path, nom: &str, borne: u64
     {
         octets.drain(..=i);
     }
+    Ok((octets, depart > 0))
+}
+
+/// Les fichiers tournés d'un journal (« auth.log.1 », « auth.log.2.gz », « secure-20261019 ») : le plus récent, s'il
+/// se lit tel quel ; le plus récent compressé, quand c'est lui le dernier (Vanguard ne lit pas les journaux
+/// compressés) ; s'il y en a d'autres, plus anciens, qui ne sont pas lus.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub(super) struct Tournes {
+    pub lisible: Option<PathBuf>,
+    pub compresse: Option<PathBuf>,
+    pub autres: bool,
+}
+
+/// Les fichiers tournés de `source`, dans son dossier : nommés comme lui, suivis d'un point ou d'un tiret et d'un
+/// chiffre. Un lien n'est pas suivi : il pourrait mener hors des journaux. Le plus récent est celui modifié le
+/// dernier.
+pub(super) fn tournes(source: &Path) -> Tournes {
+    let (Some(dossier), Some(nom)) = (source.parent(), source.file_name()) else {
+        return Tournes::default();
+    };
+    let nom = nom.to_string_lossy().into_owned();
+    let mut trouves: Vec<(std::time::SystemTime, PathBuf)> = std::fs::read_dir(dossier)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|e| {
+            let n = e.file_name().to_string_lossy().into_owned();
+            n.strip_prefix(&nom)
+                .and_then(|reste| reste.strip_prefix(['.', '-']))
+                .is_some_and(|reste| reste.starts_with(|c: char| c.is_ascii_digit()))
+        })
+        .filter_map(|e| {
+            let m = std::fs::symlink_metadata(e.path()).ok()?;
+            m.is_file()
+                .then(|| (m.modified().unwrap_or(std::time::UNIX_EPOCH), e.path()))
+        })
+        .collect();
+    trouves.sort();
+    let Some((_, recent)) = trouves.pop() else {
+        return Tournes::default();
+    };
+    let compresse = recent
+        .extension()
+        .is_some_and(|x| ["gz", "xz", "bz2", "zst", "lz4", "z", "Z"].contains(&x.to_string_lossy().as_ref()));
+    Tournes {
+        autres: !trouves.is_empty(),
+        lisible: (!compresse).then(|| recent.clone()),
+        compresse: compresse.then_some(recent),
+    }
+}
+
+/// Recopie dans `nom` la fin du fichier tourné le plus récent puis celle de `source` (`borne` octets au plus chacune),
+/// dans l'ordre du temps ; rend la taille écrite et, s'il y en a un, ce qui a empêché de lire le fichier tourné. Ce que Vanguard n'a pas lu (une fin
+/// coupée, un fichier tourné plus ancien ou compressé) est dit dans l'en-tête : la chronologie ne dira pas que le
+/// système ne l'a pas gardé.
+pub(super) fn copier_avec_le_tourne(
+    source: &Path,
+    tournes: &Tournes,
+    dossier: &Path,
+    nom: &str,
+    borne: u64,
+) -> std::io::Result<(u64, Option<std::io::Error>)> {
+    let (actuel, coupe) = fin_de(source, borne)?;
+    // Un fichier tourné illisible n'empêche pas de recopier le fichier lui-même : il compte comme non lu.
+    let mut erreur = None;
+    let ancien = tournes.lisible.as_deref().and_then(|t| match fin_de(t, borne) {
+        Ok(lu) => Some((t, lu)),
+        Err(e) => {
+            erreur = Some(e);
+            None
+        }
+    });
+    let taille = mo(borne);
+    let lu_sur = match &ancien {
+        Some((_, (_, coupe_ancien))) if coupe || *coupe_ancien || tournes.autres => Some(Bi::new(
+            format!("la fin du fichier et du dernier tourné ({} chacun au plus)", taille.fr),
+            format!(
+                "the end of the file and of the latest rotated one ({} each at most)",
+                taille.en
+            ),
+        )),
+        Some(_) => None,
+        None if tournes.lisible.is_some() || tournes.compresse.is_some() => Some(Bi::new(
+            "le fichier seul, sans ses fichiers tournés",
+            "the file alone, without its rotated files",
+        )),
+        None => coupe.then_some(taille),
+    };
     let mut sortie = creer_fichier(&dossier.join(nom))?;
     sortie.write_all(entete(&Bi::meme(source.to_string_lossy())).as_bytes())?;
-    if depart > 0 {
-        sortie.write_all(ligne_lu_sur(&mo(borne)).as_bytes())?;
+    if let Some(etendue) = &lu_sur {
+        sortie.write_all(ligne_lu_sur(etendue).as_bytes())?;
     }
-    sortie.write_all(super::texte_sur(&String::from_utf8_lossy(&octets)).as_bytes())?;
-    Ok(octets.len() as u64)
+    let mut ecrit = 0;
+    if let Some((tourne, (octets, _))) = &ancien {
+        writeln!(
+            sortie,
+            "# Avec, avant, la fin de / Preceded by the end of: {}",
+            super::texte_sur(&tourne.to_string_lossy()).replace('\n', " ")
+        )?;
+        let mut texte = super::texte_sur(&String::from_utf8_lossy(octets));
+        if !texte.is_empty() && !texte.ends_with('\n') {
+            texte.push('\n');
+        }
+        sortie.write_all(texte.as_bytes())?;
+        ecrit += octets.len() as u64;
+    }
+    sortie.write_all(super::texte_sur(&String::from_utf8_lossy(&actuel)).as_bytes())?;
+    Ok((ecrit + actuel.len() as u64, erreur))
 }
 
 /// Lance une commande qui écrit un journal dans `nom` (après l'en-tête), `borne` octets au plus ; `etendue` : celle à
@@ -154,8 +255,18 @@ pub(super) fn mo(octets: u64) -> Bi {
     }
 }
 
+/// Pourquoi un fichier journal ne se lit pas.
+fn raison_de(e: &std::io::Error) -> Raison {
+    if e.kind() == std::io::ErrorKind::PermissionDenied {
+        Raison::Droits
+    } else {
+        Raison::Erreur(e.to_string())
+    }
+}
+
 /// Les fichiers journaux classiques, quand le journal du système ne répond pas (pas de systemd, journal vide) : la
-/// fin de chacun.
+/// fin de chacun, précédée de celle de son fichier tourné le plus récent (« auth.log.1 ») : tourné la nuit, le
+/// fichier lui-même ne couvre que la journée.
 pub(super) fn journaux_classiques(p: &mut Partie, dossier: &Path, fichiers: &[&str]) -> u64 {
     let mut total = 0;
     for source in fichiers {
@@ -167,26 +278,36 @@ pub(super) fn journaux_classiques(p: &mut Partie, dossier: &Path, fichiers: &[&s
             "05-{}.txt",
             source.to_string_lossy().trim_start_matches('/').replace('/', "-")
         );
-        match copier_la_fin(source, dossier, &nom, FIN_JOURNAL) {
-            Ok(n) => {
+        let tournes = tournes(source);
+        match copier_avec_le_tourne(source, &tournes, dossier, &nom, FIN_JOURNAL) {
+            Ok((n, erreur_du_tourne)) => {
                 total += n;
-                p.fichiers.push(super::Produit {
-                    nom,
-                    contenu: bi!(
+                let contenu = match tournes.lisible.as_deref().filter(|_| erreur_du_tourne.is_none()) {
+                    Some(tourne) => bi!(
+                        "la fin de {} et de {}, le fichier tourné le plus récent (10 Mo chacun au plus)",
+                        "the end of {} and of {}, the latest rotated file (10 MB each at most)",
+                        source.display(),
+                        tourne.display()
+                    ),
+                    None => bi!(
                         "la fin de {} (10 Mo au plus)",
                         "the end of {} (10 MB at most)",
                         source.display()
                     ),
-                });
+                };
+                p.fichiers.push(super::Produit { nom, contenu });
+                // Le dernier fichier tourné qui n'a pas pu être lu : ce qui précède le fichier manque, et c'est dit.
+                if let (Some(t), Some(e)) = (tournes.lisible.as_deref(), erreur_du_tourne) {
+                    p.manque(Bi::meme(t.to_string_lossy()), raison_de(&e));
+                }
+                if let Some(t) = &tournes.compresse {
+                    p.manque(
+                        Bi::meme(t.to_string_lossy()),
+                        Raison::LuSur(Bi::new("les journaux non compressés", "the uncompressed logs")),
+                    );
+                }
             }
-            Err(e) => p.manque(
-                Bi::meme(source.to_string_lossy()),
-                if e.kind() == std::io::ErrorKind::PermissionDenied {
-                    Raison::Droits
-                } else {
-                    Raison::Erreur(e.to_string())
-                },
-            ),
+            Err(e) => p.manque(Bi::meme(source.to_string_lossy()), raison_de(&e)),
         }
     }
     total
@@ -323,6 +444,11 @@ fn lire_fichier(chemin: &Path, maintenant: chrono::NaiveDateTime) -> std::io::Re
 mod tests {
     use super::*;
 
+    /// La fin d'un fichier seul, sans fichier tourné ; la taille écrite.
+    fn copier_la_fin(source: &Path, dossier: &Path, nom: &str, borne: u64) -> std::io::Result<u64> {
+        copier_avec_le_tourne(source, &Tournes::default(), dossier, nom, borne).map(|(n, _)| n)
+    }
+
     /// Un journal inventé, écrit comme la collecte l'écrit : ses événements repris ; sans journal, c'est dit.
     #[test]
     fn journal_repris_dans_la_chronologie() {
@@ -425,6 +551,101 @@ mod tests {
         let texte = format!("{ligne}{}", ligne_lu_sur(&Bi::new("10 Mo", "10 MB")));
         let l = lire_texte(&texte, chrono::Local::now().naive_local());
         assert_eq!((l.entrees, l.lu_sur), (1, None));
+    }
+
+    /// Un journal tourné la nuit (logrotate, busybox) : la fin du dernier fichier tourné est reprise avant celle du
+    /// fichier, et ce que Vanguard n'a pas lu (plus ancien, compressé) est dit, jamais « pas gardé par le système ».
+    /// Les journaux sont inventés.
+    #[test]
+    fn journal_tourne_repris() {
+        let dossier = crate::reseau::dossier_local().join("journal-tourne");
+        let _ = std::fs::remove_dir_all(&dossier);
+        let sources = dossier.join("log");
+        std::fs::create_dir_all(&sources).unwrap();
+        let ligne = |heures: i64, compte: &str| {
+            let quand = (chrono::Local::now() - chrono::Duration::hours(heures)).format("%Y-%m-%dT%H:%M:%S%:z");
+            format!("{quand} portable sshd[4242]: Accepted password for {compte} from 192.0.2.10 port 1 ssh2\n")
+        };
+        let ecrire = |nom: &str, texte: &str, il_y_a: u64| {
+            let chemin = sources.join(nom);
+            std::fs::write(&chemin, texte).unwrap();
+            let quand = std::time::SystemTime::now() - std::time::Duration::from_secs(il_y_a);
+            std::fs::File::options()
+                .write(true)
+                .open(&chemin)
+                .unwrap()
+                .set_modified(quand)
+                .unwrap();
+        };
+        let auth = sources.join("auth.log");
+        ecrire("auth.log", &ligne(2, "alice"), 0);
+        ecrire("auth.log.1", &ligne(50, "bob"), 3600);
+        // Pas des fichiers tournés de auth.log.
+        ecrire("auth.log.old", &ligne(60, "x"), 10);
+        ecrire("auth.logx.1", &ligne(60, "x"), 10);
+        let t = tournes(&auth);
+        assert_eq!(
+            (t.lisible.as_deref(), t.compresse.as_deref(), t.autres),
+            (Some(sources.join("auth.log.1").as_path()), None, false)
+        );
+        // Le seul fichier tourné, lu en entier : ce qui précède, le système ne l'a pas gardé.
+        let mut p = Partie::new(Bi::new("Journaux", "Logs"));
+        let chemin = auth.to_string_lossy().into_owned();
+        assert!(journaux_classiques(&mut p, &dossier, &[&chemin]) > 0);
+        assert!(p.manques.is_empty(), "{:?}", p.manques);
+        assert!(
+            p.fichiers[0]
+                .contenu
+                .fr
+                .contains("auth.log.1, le fichier tourné le plus récent")
+        );
+        let a = journaux_ecrits(&dossier, None, true, None);
+        let comptes: Vec<String> = a.evenements.iter().map(|e| e.detail.clone()).collect();
+        assert_eq!(a.evenements.len(), 2, "{comptes:?}");
+        assert!(
+            comptes[0].contains("bob") && comptes[1].contains("alice"),
+            "{comptes:?}"
+        );
+        assert!(
+            a.manques.iter().all(|m| m.raison == Raison::NonGarde),
+            "{:?}",
+            a.manques
+        );
+        // Plus ancien, compressé, pas lu : dit comme une limite de Vanguard.
+        ecrire("auth.log.2.gz", "\x1f\u{8b}", 7200);
+        let _ = std::fs::remove_file(dossier.join(&p.fichiers[0].nom));
+        let mut p = Partie::new(Bi::new("Journaux", "Logs"));
+        journaux_classiques(&mut p, &dossier, &[&chemin]);
+        assert!(p.manques.is_empty(), "{:?}", p.manques);
+        let a = journaux_ecrits(&dossier, None, true, None);
+        assert!(
+            a.manques.iter().all(|m| matches!(m.raison, Raison::LuSur(_))) && !a.manques.is_empty(),
+            "{:?}",
+            a.manques
+        );
+        // Le plus récent compressé (logrotate sans delaycompress) : le fichier seul, et le compressé dit non lu.
+        ecrire("auth.log.1.gz", "\x1f\u{8b}", 60);
+        let t = tournes(&auth);
+        assert_eq!(
+            (t.lisible, t.compresse.as_deref()),
+            (None, Some(sources.join("auth.log.1.gz").as_path()))
+        );
+        let _ = std::fs::remove_file(dossier.join(&p.fichiers[0].nom));
+        let mut p = Partie::new(Bi::new("Journaux", "Logs"));
+        journaux_classiques(&mut p, &dossier, &[&chemin]);
+        assert_eq!(p.manques.len(), 1, "{:?}", p.manques);
+        assert!(matches!(p.manques[0].raison, Raison::LuSur(_)));
+        let texte = std::fs::read_to_string(dossier.join(&p.fichiers[0].nom)).unwrap();
+        assert!(texte.contains(LU_SUR) && !texte.contains("bob"), "{texte}");
+        // Un lien n'est jamais suivi.
+        #[cfg(unix)]
+        {
+            let lien = dossier.join("lien");
+            std::fs::create_dir_all(&lien).unwrap();
+            std::os::unix::fs::symlink(&auth, lien.join("auth.log.1")).unwrap();
+            std::fs::write(lien.join("auth.log"), "").unwrap();
+            assert_eq!(tournes(&lien.join("auth.log")), Tournes::default());
+        }
     }
 
     #[test]
