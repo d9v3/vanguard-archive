@@ -13,8 +13,6 @@ pub struct Entree<'a> {
     pub contexte: &'a super::Contexte<'a>,
 }
 
-pub const FICHES: &[super::Fiche] = &[];
-
 pub fn constats(entree: &Entree) -> Vec<Constat> {
     let _ = entree.contexte.scan;
     vec![super::pas_encore_ecrit(super::Domaine::Segmentation)]

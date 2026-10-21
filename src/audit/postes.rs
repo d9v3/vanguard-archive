@@ -8,7 +8,7 @@
 
 use std::net::Ipv4Addr;
 
-use super::{Domaine, Fiche, avec_regle, non_verifie};
+use super::{avec_regle, non_verifie};
 use crate::machine::{Constat, alerte, ok};
 use crate::protection::sortantes;
 use crate::reseau::{Hote, empoisonnement, objets};
@@ -27,42 +27,6 @@ pub struct Entree<'a> {
     pub passerelle: Option<Ipv4Addr>,
     pub adresse_locale: Option<Ipv4Addr>,
 }
-
-pub const FICHES: &[Fiche] = &[
-    Fiche {
-        id: "COM-PST-001",
-        domaine: Domaine::Postes,
-        sujet: ("cet ordinateur vu du réseau", "this computer seen from the network"),
-        references: &[
-            "NIST SP 800-41 Rev. 1",
-            "NIST SP 800-114 Rev. 1",
-            "ANSSI, Guide d'hygiène informatique (2017)",
-            "CISA ST15-002",
-        ],
-    },
-    Fiche {
-        id: "COM-PST-002",
-        domaine: Domaine::Postes,
-        sujet: (
-            "les autres ordinateurs de la maison : partages et bureau à distance",
-            "the other computers of the home: shares and remote desktop",
-        ),
-        references: &["CIS Controls v8 4.4/12.6", "NSA CSI PP-23-0270 (2023)", "CISA ST15-002"],
-    },
-    Fiche {
-        id: "COM-PST-003",
-        domaine: Domaine::Postes,
-        sujet: (
-            "un poste qui rayonne : empoisonneur de noms, botnet, liste noire",
-            "a computer that radiates: name poisoner, botnet, blocklist",
-        ),
-        references: &[
-            "RFC 4795/6762/1002 (LLMNR, mDNS, NetBIOS)",
-            "CIS Controls v8 13.1/13.6",
-            "ANSSI, Guide d'hygiène informatique (2017)",
-        ],
-    },
-];
 
 /// « 10.0.0.30 (portable-alice · Hewlett Packard) », ou l'adresse seule.
 fn nom(h: &Hote) -> String {
@@ -394,7 +358,11 @@ mod tests {
         let pst1 = regle(&c, "COM-PST-001");
         assert!(pst1.len() == 1 && !pst1[0].verifie);
         for c in c.iter().filter(|c| c.regle.starts_with("COM-PST-")) {
-            assert!(FICHES.iter().any(|f| f.id == c.regle), "{} sans fiche", c.regle);
+            assert!(
+                crate::audit::fiches::FICHES.iter().any(|f| f.id == c.regle),
+                "{} sans fiche",
+                c.regle
+            );
         }
     }
 

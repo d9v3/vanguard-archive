@@ -119,15 +119,16 @@ fn interroger(socket: &UdpSocket, serveur: SocketAddr) -> Option<SocketAddr> {
     None
 }
 
-struct Mesure {
+pub(crate) struct Mesure {
     /// Adresse de cet ordinateur sur son réseau.
-    locale: IpAddr,
-    port_local: u16,
+    pub(crate) locale: IpAddr,
+    pub(crate) port_local: u16,
     /// (serveur, adresse et port vus) : deux serveurs à des adresses différentes, au plus.
-    vues: Vec<(&'static str, SocketAddr)>,
+    pub(crate) vues: Vec<(&'static str, SocketAddr)>,
 }
 
-fn mesurer(v6: bool) -> Option<Mesure> {
+/// L'adresse et le port vus d'Internet (`v6` : par l'IPv6), aussi pour l'audit du réseau. `None` : pas de socket.
+pub(crate) fn mesurer(v6: bool) -> Option<Mesure> {
     let liste: Vec<(&str, SocketAddr)> = SERVEURS
         .iter()
         .filter_map(|&(nom, port, operateur)| {
@@ -221,7 +222,7 @@ fn juger(m: &Mesure, upnp: Option<bool>) -> Option<(TypeNat, &'static str)> {
 
 /// Double NAT ou adresse partagée par le fournisseur, d'après l'adresse que la box dit avoir sur Internet. Une box sans
 /// adresse Internet (0.0.0.0, 169.254.x : lien coupé) ne dit rien du partage.
-fn adresse_partagee(box_internet: Option<Ipv4Addr>, publique: IpAddr) -> Option<&'static str> {
+pub(crate) fn adresse_partagee(box_internet: Option<Ipv4Addr>, publique: IpAddr) -> Option<&'static str> {
     let b = box_internet.filter(|b| !b.is_unspecified() && !b.is_link_local())?;
     match b.octets() {
         [100, 64..128, ..] => Some(tr!(

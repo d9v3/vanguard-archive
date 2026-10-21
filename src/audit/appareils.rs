@@ -9,7 +9,7 @@
 use std::collections::BTreeMap;
 use std::net::Ipv4Addr;
 
-use super::{Domaine, Fiche, avec_regle, non_verifie};
+use super::{avec_regle, non_verifie};
 use crate::machine::{Constat, alerte, ok};
 use crate::reseau::{Hote, cameras, objets, upnp};
 use crate::risk::{Niveau, info_port};
@@ -27,64 +27,6 @@ pub struct Entree<'a> {
     pub passerelle: Option<Ipv4Addr>,
     pub adresse_locale: Option<Ipv4Addr>,
 }
-
-pub const FICHES: &[Fiche] = &[
-    Fiche {
-        id: "COM-APP-001",
-        domaine: Domaine::Appareils,
-        sujet: (
-            "objet joignable depuis Internet par une redirection de la box",
-            "device reachable from the Internet through a router forwarding",
-        ),
-        references: &[
-            "OWASP IoT Top 10 (2018) I2/I3",
-            "NISTIR 8259A",
-            "ETSI EN 303 645 5.6",
-            "NSA CSI PP-23-0270 (2023)",
-        ],
-    },
-    Fiche {
-        id: "COM-APP-002",
-        domaine: Domaine::Appareils,
-        sujet: (
-            "services d'administration ouverts sur un objet connecté",
-            "administration services open on a connected device",
-        ),
-        references: &[
-            "ETSI EN 303 645 5.6",
-            "OWASP IoT Top 10 (2018) I2",
-            "CIS Controls v8 4.4",
-        ],
-    },
-    Fiche {
-        id: "COM-APP-003",
-        domaine: Domaine::Appareils,
-        sujet: (
-            "ce que les objets envoient vers Internet",
-            "what the devices send to the Internet",
-        ),
-        references: &["NISTIR 8259A", "CIS Controls v8 13.1/13.6"],
-    },
-    Fiche {
-        id: "COM-APP-004",
-        domaine: Domaine::Appareils,
-        sujet: (
-            "mots de passe d'origine et mises à jour des objets",
-            "devices' default passwords and updates",
-        ),
-        references: &[
-            "ETSI EN 303 645 5.1-1/5.3",
-            "OWASP IoT Top 10 (2018) I1/I4/I9",
-            "NSA CSI PP-23-0270 (2023)",
-        ],
-    },
-    Fiche {
-        id: "COM-APP-005",
-        domaine: Domaine::Appareils,
-        sujet: ("caméras sur le réseau de la maison", "cameras on the home network"),
-        references: &["ETSI EN 303 645 5.1/5.6", "OWASP IoT Top 10 (2018) I2", "NISTIR 8259A"],
-    },
-];
 
 /// Un objet connecté : son adresse, son nom montré et son type.
 pub struct Objet {
@@ -559,7 +501,11 @@ pub(crate) mod tests {
         // Chaque constat porte sa règle, et chaque règle a sa fiche.
         for c in &c {
             assert!(c.regle.starts_with("COM-APP-"), "{}", c.message);
-            assert!(FICHES.iter().any(|f| f.id == c.regle), "{} sans fiche", c.regle);
+            assert!(
+                crate::audit::fiches::FICHES.iter().any(|f| f.id == c.regle),
+                "{} sans fiche",
+                c.regle
+            );
         }
         let admin = regle(&c, "COM-APP-002");
         let niveaux: Vec<(String, Option<Niveau>)> = admin

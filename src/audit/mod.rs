@@ -5,9 +5,9 @@
 //! (`verifie: false`), exclu de la note et jamais compté comme sain.
 //!
 //! Contrat des domaines : un fichier par domaine, une fonction `constats(entree: &Entree) -> Vec<Constat>` avec sa
-//! propre `Entree`, construite ici à partir du `Contexte` commun ; ses fiches de règles dans `FICHES` (identifiant
-//! « COM-XXX-NNN » du cadrage, sujet, références) ; chaque constat porte l'identifiant de sa règle (`regle`) et une
-//! catégorie stable (`langue::categorie` la traduit). Les six tournent en même temps ; un domaine qui plante ou ne
+//! propre `Entree`, construite ici à partir du `Contexte` commun ; chaque constat porte l'identifiant de sa règle
+//! (`regle`, les fiches du cadrage sont dans `fiches.rs` : sujet, références) et une catégorie stable
+//! (`langue::categorie` la traduit). Les six tournent en même temps ; un domaine qui plante ou ne
 //! rend rien est dit « non vérifié ». Hors ligne ou sans réseau local, tout finit en moins d'une minute et dit
 //! « non vérifié ».
 
@@ -25,6 +25,7 @@ use crate::ui::*;
 pub mod appareils;
 pub mod dns_tls;
 pub mod exposition;
+pub mod fiches;
 pub mod postes;
 pub mod score;
 pub mod segmentation;
@@ -137,18 +138,9 @@ impl Fiche {
     }
 }
 
-/// Toutes les fiches, domaine par domaine.
+/// Toutes les fiches du cadrage, par domaine.
 pub fn fiches() -> impl Iterator<Item = &'static Fiche> {
-    [
-        exposition::FICHES,
-        wifi::FICHES,
-        segmentation::FICHES,
-        dns_tls::FICHES,
-        appareils::FICHES,
-        postes::FICHES,
-    ]
-    .into_iter()
-    .flatten()
+    fiches::FICHES.iter()
 }
 
 /// Le contrat commun : ce que l'audit sait au départ, partagé par les six domaines. Chaque domaine en reçoit la part
@@ -173,6 +165,33 @@ pub struct Contexte<'a> {
     pub redirections: Option<&'a [upnp::Redirection]>,
     /// Les programmes de cet ordinateur reliés à un serveur de commande connu ; `None` : connexions illisibles.
     pub botnets: Option<&'a crate::protection::sortantes::EnCours>,
+    /// L'adresse de cet ordinateur vue d'Internet (STUN) ; `None` : pas mesurée (passe rapide, hors ligne).
+    pub internet: Option<exposition::Internet>,
+}
+
+/// Hors ligne demandé (VANGUARD_HORS_LIGNE, les essais sans Internet) : rien ne part vers Internet.
+fn hors_ligne() -> bool {
+    std::env::var_os("VANGUARD_HORS_LIGNE").is_some()
+}
+
+/// L'adresse de cet ordinateur vue d'Internet, par STUN en IPv4 puis en IPv6 : le domaine Exposition en tire
+/// l'adresse publique, le CGNAT et le double NAT. Quelques secondes au plus sans Internet.
+fn internet() -> exposition::Internet {
+    let vue = |v6| reseau::nat::mesurer(v6).and_then(|m| m.vues.first().map(|(_, adresse)| adresse.ip()));
+    exposition::Internet {
+        v4: vue(false),
+        v6: vue(true),
+    }
+}
+
+/// Le pare-feu de cet ordinateur, d'après le constat `*-PFE-001` du bilan : actif quand la règle a répondu sans
+/// alerte (une information ne compte pas) ; `None` quand elle n'a pas pu vérifier, ou n'a rien rendu.
+pub(crate) fn pare_feu_local(machine: &[Constat]) -> Option<bool> {
+    let constats: Vec<&Constat> = machine.iter().filter(|c| c.regle.ends_with("-PFE-001")).collect();
+    if constats.is_empty() || constats.iter().any(|c| !c.verifie) {
+        return None;
+    }
+    Some(constats.iter().all(|c| c.probleme.is_none_or(|n| n == Niveau::Info)))
 }
 
 /// Un constat qui n'a pas pu être vérifié, avec son propre message (le pourquoi, ce qui le vérifierait) : montré,
@@ -399,10 +418,17 @@ fn erreur_interne(d: Domaine) -> Constat {
 /// vérifié, sans emporter les autres.
 fn constats_du_domaine(d: Domaine, c: &Contexte) -> Vec<Constat> {
     let constats = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match d {
-        Domaine::Exposition => exposition::constats(&exposition::Entree { contexte: c }),
+        Domaine::Exposition => {
+            let mut e = exposition::Entree::du_scan(c.scan);
+            e.passerelle = c.passerelle;
+            e.locale = c.adresse_locale;
+            e.internet = c.internet;
+            e.pare_feu_local = pare_feu_local(c.machine);
+            exposition::constats(&e)
+        }
         Domaine::WiFi => wifi::constats(&wifi::Entree { contexte: c }),
         Domaine::Segmentation => segmentation::constats(&segmentation::Entree { contexte: c }),
-        Domaine::DnsTls => dns_tls::constats(&dns_tls::Entree { contexte: c }),
+        Domaine::DnsTls => dns_tls::constats(&dns_tls::entree(c.passerelle)),
         Domaine::Appareils => appareils::constats(&appareils::Entree {
             hotes: &c.scan.hotes,
             carnet: c.carnet,
@@ -462,15 +488,22 @@ pub async fn auditer(scan: &Rapport, machine: Option<Vec<Constat>>, invite: bool
                 .unwrap_or_default(),
         }
     };
-    let lectures = tokio::task::spawn_blocking(|| {
+    // L'adresse vue d'Internet : jamais pendant une passe de la surveillance ni hors ligne.
+    let mesurer_internet = !rapide && !hors_ligne();
+    let lectures = tokio::task::spawn_blocking(move || {
         std::thread::scope(|s| {
             let carnet = s.spawn(|| reseau::carnet_du_reseau().map(|(_, a)| a).unwrap_or_default());
             let botnets = s.spawn(crate::protection::sortantes::botnets_en_cours);
-            (carnet.join().unwrap_or_default(), botnets.join().ok().flatten())
+            let internet = s.spawn(move || mesurer_internet.then(internet));
+            (
+                carnet.join().unwrap_or_default(),
+                botnets.join().ok().flatten(),
+                internet.join().ok().flatten(),
+            )
         })
     });
     let (cameras, machine, lectures) = tokio::join!(cameras, machine, lectures);
-    let (carnet, botnets) = lectures.unwrap_or_default();
+    let (carnet, botnets, internet) = lectures.unwrap_or_default();
     let redirections = redirections_du_scan(scan);
     let nom_reseau = scan.nom_reseau.as_deref();
     let contexte = Contexte {
@@ -485,6 +518,7 @@ pub async fn auditer(scan: &Rapport, machine: Option<Vec<Constat>>, invite: bool
         cameras: cameras.as_ref(),
         redirections: redirections.as_deref(),
         botnets: botnets.as_ref(),
+        internet,
     };
     AuditReseau::de(&contexte, debut.elapsed())
 }
@@ -624,6 +658,19 @@ pub fn afficher(a: &AuditReseau) {
 mod tests {
     use super::*;
 
+    /// Le domaine d'une règle d'après son identifiant (« COM-EXP-001 » → Exposition).
+    fn domaine_de_la_regle(id: &str) -> Option<Domaine> {
+        Some(match id.get(4..7)? {
+            "EXP" => Domaine::Exposition,
+            "WIF" => Domaine::WiFi,
+            "SEG" | "ARP" => Domaine::Segmentation,
+            "DNS" | "TLS" => Domaine::DnsTls,
+            "APP" => Domaine::Appareils,
+            "PST" => Domaine::Postes,
+            _ => return None,
+        })
+    }
+
     /// Chaque fiche : un identifiant unique de la forme « COM-XXX-NNN », un sujet dans les deux langues, dans le
     /// domaine qui la déclare.
     #[test]
@@ -644,13 +691,40 @@ mod tests {
             );
             assert!(!f.sujet.0.is_empty() && !f.sujet.1.is_empty(), "{} sans sujet", f.id);
             assert!(!f.references.is_empty(), "{} sans référence", f.id);
+            assert_eq!(
+                domaine_de_la_regle(f.id),
+                Some(f.domaine),
+                "{} dans le mauvais domaine",
+                f.id
+            );
         }
-        assert!(vus.len() >= 8);
+        assert!(vus.len() >= 32);
+        assert_eq!(domaine_de_la_regle("LNX-PFE-001"), None);
         for d in Domaine::TOUS {
             assert_eq!(Domaine::de(d.nom()), Some(d));
             assert_ne!(d.precision(), "");
         }
         assert_eq!(Domaine::de("autre"), None);
+    }
+
+    /// Le pare-feu local d'après le bilan : actif sans alerte, inactif avec, inconnu sans constat vérifié.
+    #[test]
+    fn pare_feu_local_d_apres_le_bilan() {
+        let regle = |mut c: Constat, id: &'static str| {
+            c.regle = id;
+            c
+        };
+        let actif = regle(crate::machine::ok("Pare-feu", "ufw actif."), "LNX-PFE-001");
+        let coupe = regle(
+            crate::machine::alerte("Pare-feu", Niveau::Eleve, "Aucun pare-feu actif."),
+            "LNX-PFE-001",
+        );
+        let furtif = regle(crate::machine::ok("Pare-feu", "Mode furtif actif."), "MAC-PFE-002");
+        let inconnu = regle(crate::machine::impossible("Pare-feu", "systemd absent"), "LNX-PFE-001");
+        assert_eq!(pare_feu_local(&[actif.clone(), furtif.clone()]), Some(true));
+        assert_eq!(pare_feu_local(&[coupe]), Some(false));
+        assert_eq!(pare_feu_local(&[inconnu, actif]), None);
+        assert_eq!(pare_feu_local(&[furtif]), None);
     }
 
     #[test]
