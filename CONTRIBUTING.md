@@ -271,12 +271,17 @@ même) ; une partition FAT32 `WIN11` installe Windows 11 avec Secure Boot actif,
 Intel ; `VANGUARD` et `VANGUARDLOG` comme avant. `--plan` et `--essai` (sur une image de disque) ne touchent à aucun
 disque ; seul `--ecrire` efface la clé. Ventoy lui-même : sa version sur la clé est lue chaque jour et au branchement
 (`cle-secours.sh --a-jour`) ; plus ancienne que celle épinglée, sa mise à jour, qui n'efface rien
-(`Ventoy2Disk.sh -u`, en root par pkexec, disque et archive revérifiés, journalisée), est proposée par une
-notification. Un Ventoy plus récent sur GitHub est signalé au développeur par la recherche de la semaine, jamais pris
-tout seul : l'archive n'est pas signée, l'épingle change à la main. Windows 11 de plus de six mois (la date des
-fichiers de son image) est signalé par une notification, pas remplacé : Microsoft ne donne qu'un lien de 24 heures, et
-l'empreinte qui vérifie l'image se lit sur sa page. La récupération de macOS n'a pas d'âge qui compte : elle installe
-le dernier macOS, pris chez Apple au moment d'installer.
+(`Ventoy2Disk.sh -u`, journalisée), est proposée par une notification à cliquer. Elle passe par une partie root à
+part, `outils/ventoy-racine.sh`, installée une fois en fichier de root (`cle-secours.sh --installer-racine`, dans
+`/usr/local/libexec/vanguard/`) et lancée par pkexec : le compte ne peut pas la modifier, et c'est elle qui tient
+l'épingle et revérifie tout (la clé et son numéro de série, l'archive, une version plus ancienne sur la clé). Un
+Ventoy plus récent sur GitHub est signalé au développeur par la recherche de la semaine, jamais pris tout seul :
+l'archive n'est pas signée, l'épingle change à la main, puis la partie root se réinstalle. Windows 11 de plus de six
+mois (la date des fichiers de son image) est signalé par une notification, pas remplacé : Microsoft ne donne qu'un
+lien de 24 heures, et l'empreinte qui vérifie l'image se lit sur sa page. La récupération de macOS n'a pas d'âge qui
+compte : elle installe le dernier macOS, pris chez Apple au moment d'installer. `outils/essais-cle.sh` (lancé par
+`outils/verifier.sh`) éprouve ces outils sans rien toucher : espace de noms à part, sans Internet, fausse clé et faux
+disque.
 
 ## Erreurs et plantages
 

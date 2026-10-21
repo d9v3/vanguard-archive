@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Tout vérifier en une commande, avant un commit ou une livraison : mise en forme, clippy sur les quatre cibles, tests
-# Linux et Windows (sous Wine), les tests Linux refaits sans Internet, scripts PowerShell, shell et Python, liens
-# internes, textes français et anglais, dépendances (cargo deny).
+# Linux et Windows (sous Wine), les tests Linux refaits sans Internet, scripts PowerShell, shell et Python, essais des
+# outils de la clé (outils/essais-cle.sh), liens internes, textes français et anglais, dépendances (cargo deny).
 # Chaque cible de compilation a sa chaîne (clippy, puis ses tests) et les quatre tournent en même temps : cargo garde
 # un dossier par cible, elles ne s'attendent presque pas. À la fin, une ligne par étape ; le code de sortie dit si tout
 # est vert.
@@ -178,6 +178,7 @@ if [[ $MODE != --rapide ]]; then
   etape powershell scripts_powershell &
   etape rejeu-powershell python3 outils/rejouer-ps.py --pwsh "$PWSH" &
   etape shell scripts_shell &
+  etape essais-cle bash outils/essais-cle.sh &
   etape extensions extensions &
   etape python scripts_python &
   etape liens python3 outils/liens.py --hors-ligne &
@@ -245,6 +246,7 @@ if [[ $MODE != --rapide ]]; then
   ligne powershell "scripts PowerShell"
   ligne rejeu-powershell "PowerShell du programme rejoué"
   ligne shell "scripts shell"
+  ligne essais-cle "essais des outils de la clé"
   ligne extensions "extensions (sdk, exemple Rust)"
   ligne python "scripts Python"
   ligne liens "liens internes"

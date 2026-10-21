@@ -23,6 +23,10 @@
 # (cle-secours.sh) : Microsoft ne donne qu'un lien de 24 heures, et la récupération de macOS télécharge macOS
 # elle-même.
 set -euo pipefail
+# Ctrl-C (lancé à la main) arrête tout : sans ce piège, bash attendrait la fin de la commande en cours, puis
+# continuerait comme si de rien n'était (aria2c, que Ctrl-C atteint par timeout --foreground, s'arrête proprement et
+# rend un code ordinaire, qui ferait prendre la version d'avant de Kali).
+trap 'trap - INT; kill -INT $$' INT
 cd "$(dirname "$0")/.."
 
 CACHE=${VANGUARD_IMAGES:-${XDG_CACHE_HOME:-$HOME/.cache}/vanguard/images-cle}
@@ -279,8 +283,8 @@ image_prete() { # sorte
 # miroir (cdimage.kali.org renvoie ailleurs) : il est vérifié par la liste signée avant qu'aria2c le lise, et
 # l'image le sera après. Le traceur de Kali refuse un torrent qu'il n'a pas encore enregistré (« not authorized ») :
 # la DHT, amorcée par un point d'entrée connu, trouve les pairs sans lui. Sans débit pendant 10 minutes, aria2c
-# abandonne ; au bout de 5 heures, il est arrêté (le service en laisse 8) ; un torrent coupé reprend où il en était
-# à la recherche suivante (son fichier .aria2).
+# abandonne ; au bout de 5 heures, il est arrêté (le service en laisse 8), et Ctrl-C l'atteint aussi (--foreground,
+# lancé à la main) ; un torrent coupé reprend où il en était à la recherche suivante (son fichier .aria2).
 telecharger() { # sorte url nom dossier
   RAISON="téléchargement interrompu"
   if [[ $1 != kali ]]; then
@@ -302,7 +306,7 @@ telecharger() { # sorte url nom dossier
     return 1
   fi
   rm -f "$4/.aria2.log"
-  timeout --kill-after=1m 5h aria2c --seed-time=0 --bt-stop-timeout=600 --check-integrity=true \
+  timeout --foreground --kill-after=1m 5h aria2c --seed-time=0 --bt-stop-timeout=600 --check-integrity=true \
     --enable-dht=true --dht-entry-point=router.bittorrent.com:6881 --dht-file-path="$CACHE/.dht.dat" \
     --bt-enable-lpd=false --max-overall-upload-limit=500K --file-allocation=none --summary-interval=0 \
     --console-log-level=error --log="$4/.aria2.log" --log-level=warn --dir="$4" "$4/$3.torrent" >/dev/null 2>&1 ||
@@ -333,12 +337,36 @@ ranger() { # sorte dossier nom
   done
 }
 
+# Dossier du téléchargement d'une version. Kali : un par version, pour que le torrent de chacune reprenne où il en
+# était (la dernière, ou la précédente prise à sa place quand la dernière n'a pas de source : le dossier de l'une ne
+# vide pas celui de l'autre). Les autres sortes : un seul, vidé à chaque fois (curl repart de zéro).
+dossier_neuf() { # sorte nom
+  if [[ $1 == kali ]]; then
+    local v=${2#kali-linux-}
+    echo "$CACHE/.nouveau-kali-${v%-live-everything-amd64.iso}"
+  else
+    echo "$CACHE/.nouveau-$1"
+  fi
+}
+
+# Les torrents de Kali en cours, sauf ceux des versions données : plus rien ne les reprendrait, et chacun garde jusqu'à
+# 16 Gio.
+retirer_kali_sauf() { # noms des images dont le torrent reste…
+  local d n garde
+  for d in "$CACHE"/.nouveau-kali-*; do
+    [[ -d $d ]] || continue
+    garde=""
+    for n in "$@"; do [[ $d == "$(dossier_neuf kali "$n")" ]] && garde=1; done
+    [[ -n $garde ]] || rm -rf "$d"
+  done
+}
+
 # Une version d'une sorte : téléchargée avec ses signatures, vérifiée, rangée. Code 1 si le téléchargement échoue,
 # 2 si l'image est refusée (et effacée) ; RAISON dit pourquoi.
 prendre() { # sorte nom url
-  local sorte=$1 nom=$2 url=$3 neuf=$CACHE/.nouveau-$1 f r
-  # Un torrent coupé reprend où il en était, même arrêté avant la vérification (aria2c revérifie chaque morceau) : son
-  # dossier ne se vide que pour une autre version.
+  local sorte=$1 nom=$2 url=$3 neuf f r
+  neuf=$(dossier_neuf "$sorte" "$nom")
+  # Un torrent coupé reprend où il en était, même arrêté avant la vérification (aria2c revérifie chaque morceau).
   [[ $sorte == kali && -e $neuf/$nom ]] || rm -rf "$neuf"
   mkdir -p "$neuf"
   echo "↓ ${NOMS[$sorte]} : $nom"
@@ -372,12 +400,15 @@ chercher() {
     read -r nom url <<<"$ligne"
     if [[ -f $CACHE/$nom && -f $CACHE/$nom.sha256 ]]; then
       echo "✔ ${NOMS[$sorte]} : $nom, déjà prête"
+      # La dernière Kali est prête : plus aucun torrent ne sert.
+      [[ $sorte != kali ]] || retirer_kali_sauf
       continue
     fi
     code=0
     prendre "$sorte" "$nom" "$url" || code=$?
     if ((code == 0)); then
       neuves+=("$nom")
+      [[ $sorte != kali ]] || retirer_kali_sauf
     elif ((code == 2)) || [[ $sorte != kali ]]; then
       echecs+=("${NOMS[$sorte]} : $RAISON")
     else
@@ -387,9 +418,14 @@ chercher() {
       echo "· Kali Linux : $nom pas téléchargée ($raison)"
       # Un torrent sans source n'est pas une image refusée : la notification le dit à part, sans échec.
       if avant=$(image_prete kali); then
+        # Une Kali prête reste : seul le torrent de la dernière peut encore servir.
+        retirer_kali_sauf "$nom"
         replis+=("$nom pas téléchargée ($raison) ; ${avant##*/} reste, nouvel essai à la prochaine recherche.")
-      elif [[ $raison == aucune\ source* && ! -s $CACHE/.nouveau-kali/$nom ]] && ligne=$(precedente_kali "$nom"); then
+      elif [[ $raison == aucune\ source* && ! -s $(dossier_neuf kali "$nom")/$nom ]] &&
+        ligne=$(precedente_kali "$nom"); then
         read -r avant url <<<"$ligne"
+        # Le torrent de la précédente reprend où il en était ; ceux des autres versions ne serviront plus.
+        retirer_kali_sauf "$avant"
         code=0
         prendre kali "$avant" "$url" || code=$?
         if ((code == 0)); then
@@ -401,6 +437,8 @@ chercher() {
           replis+=("$nom pas téléchargée ($raison), ni $avant ($RAISON) ; nouvel essai à la prochaine recherche.")
         fi
       else
+        # La dernière a reçu quelque chose : elle reprendra, et la précédente ne sera plus prise à sa place.
+        if [[ -s $(dossier_neuf kali "$nom")/$nom ]]; then retirer_kali_sauf "$nom"; fi
         replis+=("$nom pas téléchargée ($raison) ; nouvel essai à la prochaine recherche.")
       fi
     fi
@@ -410,7 +448,9 @@ chercher() {
   if ((${#neuves[@]})); then
     avertir "Clé VANGUARD : nouvelles images prêtes" \
       "$(printf '%s\n' "${neuves[@]}")
-La minuterie les copie ensuite sur la clé si elle est branchée ; sinon, elles iront à son prochain branchement."
+Sur la clé, chacune remplace sa version d'avant : aussitôt si la clé est branchée (recherche de la minuterie), sinon à \
+son prochain branchement. Une image que la clé n'a pas encore n'y va pas toute seule : outils/images-cle.sh --toutes \
+POINT."
   fi
   if ((${#replis[@]})); then
     avertir "Clé VANGUARD : Kali Linux pas mise à jour" "$(printf '%s\n' "${replis[@]}")"
@@ -507,10 +547,10 @@ verifier_cache() {
 
 # --- Clé ------------------------------------------------------------------------------------------------------------
 
-# La clé VANGUARD montée (témoin vanguard.cle), comme deployer.sh la cherche.
+# La clé VANGUARD montée (témoin vanguard.cle), comme deployer.sh la cherche. Sans /run/media/$USER (rien de monté
+# depuis le démarrage), find échoue : c'est « pas de clé », pas une erreur qui arrêterait le script en silence.
 point_cle() {
-  find "/run/media/$USER" -maxdepth 2 -name vanguard.cle \
-    -printf '%h\n' 2>/dev/null | head -1
+  find "/run/media/$USER" -maxdepth 2 -name vanguard.cle -printf '%h\n' 2>/dev/null | head -1 || true
 }
 
 # Empreinte d'un fichier de la clé lu sur la clé même, pas dans la mémoire où la copie vient de passer (O_DIRECT,
@@ -531,9 +571,19 @@ copier_sur_cle() { # point (facultatif), toutes (facultatif : aussi les sortes a
   [[ -n $point && -d $point ]] || { echo "Clé VANGUARD non branchée : rien à copier."; return 0; }
   exec 9>"${XDG_RUNTIME_DIR:-/tmp}/vanguard-deployer.lock"
   flock 9
-  local iso=$point/ISO sorte image nom copiees=() manque=() echecs=()
+  local iso=$point/ISO sorte image nom copiees=() manque=() echecs=() p interrompues=" "
   mkdir -p "$iso"
-  # Copies interrompues (clé retirée en route) : jamais montrées par Ventoy, retirées ici.
+  # Copies interrompues (clé retirée en route, ordinateur éteint, relecture différente) : jamais montrées par Ventoy,
+  # retirées ici. Leur sorte compte comme déjà sur la clé : faute de place, son ancienne version a pu partir avant la
+  # copie, et la clé n'en aurait sinon plus aucune jusqu'à un --toutes lancé à la main.
+  for p in "$iso"/.*.part; do
+    [[ -f $p ]] || continue
+    p=${p##*/.}
+    for sorte in "${SORTES[@]}"; do
+      # shellcheck disable=SC2053 # motif voulu
+      if [[ ${p%.part} == ${MOTIFS[$sorte]} ]]; then interrompues+="$sorte "; fi
+    done
+  done
   find "$iso" -maxdepth 1 -name '.*.part' -delete
   for sorte in "${SORTES[@]}"; do
     image=$(image_prete "$sorte") || continue
@@ -547,7 +597,7 @@ copier_sur_cle() { # point (facultatif), toutes (facultatif : aussi les sortes a
       anciennes_mio=$((anciennes_mio + $(taille_mio "$a")))
     done < <(find "$iso" -maxdepth 1 -iname "${MOTIFS[$sorte]}" ! -name "$nom" -print0)
     # Au branchement, seulement ce que la clé a déjà : on ne remplit pas une clé qu'on n'a pas préparée pour ça.
-    if [[ -z $toutes && ! -f $iso/$nom ]] && ((${#anciennes[@]} == 0)); then
+    if [[ -z $toutes && ! -f $iso/$nom && $interrompues != *" $sorte "* ]] && ((${#anciennes[@]} == 0)); then
       continue
     fi
     besoin=$(($(taille_mio "$image") + MARGE_MIO))
@@ -566,8 +616,10 @@ copier_sur_cle() { # point (facultatif), toutes (facultatif : aussi les sortes a
       "Ne retire pas la clé avant la fin (jusqu'à $((($(taille_mio "$image") + 599) / 600)) min sur une clé lente)."
     local part=$iso/.$nom.part
     if ! cp "$image" "$part" || ! sync "$part" || [[ $(empreinte_sur_cle "$part") != "$(cat "$image.sha256")" ]]; then
-      rm -f "$part"
-      echecs+=("${NOMS[$sorte]} : copie différente de l'image vérifiée, retirée")
+      # Vidée, pas retirée : son nom reste la trace de la copie à refaire au prochain passage (l'ancienne version a pu
+      # partir faute de place). Clé retirée en route : la copie y est restée, avec le même effet.
+      : >"$part" 2>/dev/null || true
+      echecs+=("${NOMS[$sorte]} : copie différente de l'image vérifiée, refaite au prochain passage")
       continue
     fi
     mv -f "$part" "$iso/$nom"
@@ -651,6 +703,8 @@ etat() {
   done
 }
 
+# Lu par outils/essais-cle.sh (source) : les fonctions seulement, rien n'est lancé.
+[[ ${BASH_SOURCE[0]} == "$0" ]] || return 0
 case ${1:-} in
   --chercher) chercher ;;
   --importer) importer "${2:?image à importer}" ;;

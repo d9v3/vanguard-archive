@@ -16,6 +16,9 @@ JOURS_COMPILATION=14
 # Les passes de la VM : les plus récentes restent toujours, les autres partent après ce temps.
 JOURS_VM=30
 PASSES_GARDEES=20
+# Un torrent en cours (Kali, outils/images-cle.sh) reprend à la recherche suivante, qui peut ne venir que dans quinze
+# jours : gardé tant qu'il a avancé depuis moins de ce temps.
+JOURS_TORRENT=30
 
 libere=0
 retires=0
@@ -45,10 +48,18 @@ for d in "$DEV"/target-* "$DEV"/repro-target; do
   ((j >= JOURS_COMPILATION)) && retirer "$d" "compilation inutilisée depuis $j jours, se recrée"
 done
 
-# Restes d'essais interrompus (verifier.sh, essais en pty, signatures d'essai…) : plus d'un jour.
+# Restes d'essais interrompus (verifier.sh, essais en pty, signatures d'essai…) : plus d'un jour. Sauf un torrent en
+# cours (son .torrent et l'image commencée) : effacé, il repartirait de zéro, et une image de 16 Gio qui ne se prend pas
+# en une seule passe de 5 heures ne finirait jamais.
 for d in "$DEV"/verifier.* "$DEV"/essai-* "$DEV"/maison-* "$DEV"/vecteur.* "$DEV"/depot-versions.* \
   "$IMAGES"/.nouveau-* "$IMAGES"/.trousseau.* "$IMAGES"/.verification.*; do
   [[ -e $d && ! -L $d ]] || continue
+  if [[ $d == "$IMAGES"/.nouveau-* && -n $(find "$d" -maxdepth 1 -name '*.torrent' -print -quit 2>/dev/null) &&
+    -n $(find "$d" -maxdepth 1 -name '*.iso' -size +0 -print -quit 2>/dev/null) ]]; then
+    j=$(inactif_depuis "$d")
+    ((j >= JOURS_TORRENT)) && retirer "$d" "torrent arrêté depuis $j jours, que rien ne reprendra"
+    continue
+  fi
   [[ -n $(find "$d" -maxdepth 0 -mtime +0 2>/dev/null) ]] && retirer "$d" "reste d'un essai ou d'un téléchargement interrompu"
 done
 

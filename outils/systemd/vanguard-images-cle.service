@@ -7,8 +7,10 @@ After=run-media-%u-VANGUARD.mount vanguard-cle.service
 
 [Service]
 Type=oneshot
-ExecStart=%h/Projects/vanguard/outils/images-cle.sh --cle
-ExecStartPost=-%h/Projects/vanguard/outils/cle-secours.sh --a-jour
+# Deux étapes qui ne s'empêchent pas : une copie ratée (déjà dite par sa notification) ne saute pas la vérification de
+# Ventoy et de Windows 11, comme dans maj-cle.sh (un ExecStartPost ne part qu'après un ExecStart réussi).
+ExecStart=-%h/Projects/vanguard/outils/images-cle.sh --cle
+ExecStart=-%h/Projects/vanguard/outils/cle-secours.sh --a-jour
 # Une image de 1,5 Go s'écrit en une ou deux minutes sur une clé USB 3 ; bien plus sur une clé lente, et Kali Linux
 # (16 Gio, écrite puis relue) près d'une demi-heure. La proposition de Ventoy attend une réponse un quart d'heure.
 TimeoutStartSec=3h

@@ -267,12 +267,16 @@ Windows 11 with Secure Boot on, without adding a key to the PC (`install.wim` sp
 an HFS+ partition holds the macOS recovery of Intel Macs; `VANGUARD` and `VANGUARDLOG` as before. `--plan` and
 `--essai` (on a disk image) touch no disk; only `--ecrire` erases the key. Ventoy itself: its version on the key is
 read every day and on plug-in (`cle-secours.sh --a-jour`); when older than the pinned one, its update, which erases
-nothing (`Ventoy2Disk.sh -u`, as root through pkexec, disk and archive checked again, logged), is offered by a
-notification. A newer Ventoy on GitHub is reported to the developer by the weekly search, never taken on its own: the
-archive is not signed, the pin changes by hand. Windows 11 older than six months (the date of its image's files) is
+nothing (`Ventoy2Disk.sh -u`, logged), is offered by a notification to click. It goes through a separate root part,
+`outils/ventoy-racine.sh`, installed once as a root-owned file (`cle-secours.sh --installer-racine`, in
+`/usr/local/libexec/vanguard/`) and run by pkexec: the account cannot modify it, and it holds the pin and checks
+everything again (the key and its serial number, the archive, an older version on the key). A newer Ventoy on GitHub
+is reported to the developer by the weekly search, never taken on its own: the archive is not signed, the pin changes
+by hand, then the root part is reinstalled. Windows 11 older than six months (the date of its image's files) is
 reported by a notification, not replaced: Microsoft only gives a 24-hour link, and the hash that checks the image is
 read on its page. The macOS recovery has no age that matters: it installs the latest macOS, fetched from Apple at
-install time.
+install time. `outils/essais-cle.sh` (run by `outils/verifier.sh`) tests these tools without touching anything:
+separate namespace, no Internet, fake key and fake disk.
 
 ## Errors and crashes
 
