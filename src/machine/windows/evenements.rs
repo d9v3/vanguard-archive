@@ -747,7 +747,15 @@ fn adresses_insistantes(echecs: &[Echec]) -> Vec<String> {
 fn ligne_reussite(id: u32, date: &str, champs: &[(String, String)]) -> Option<String> {
     let valeur = |nom: &str| champs.iter().find(|(n, _)| n == nom).map(|(_, v)| v);
     let type_ = valeur("LogonType")?.trim();
-    (id == 4624 && matches!(type_, "3" | "10")).then(|| {
+    // Une session anonyme (S-1-5-7, la session nulle d'un partage) ou un compte d'ordinateur (« PC$ ») n'est pas un
+    // mot de passe deviné : sans cette exclusion, une télé qui rate l'accès invité puis ouvre une session nulle
+    // donnait une alerte critique.
+    let anonyme = valeur("TargetUserSid").is_some_and(|s| s.trim() == "S-1-5-7")
+        || valeur("TargetUserName").is_some_and(|n| {
+            let n = n.trim();
+            n.ends_with('$') || n.eq_ignore_ascii_case("ANONYMOUS LOGON")
+        });
+    (id == 4624 && matches!(type_, "3" | "10") && !anonyme).then(|| {
         format!(
             "{}|{type_}|{}|{}",
             date_locale(date).unwrap_or_default(),
