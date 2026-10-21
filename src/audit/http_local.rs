@@ -295,7 +295,9 @@ mod tests {
             // La connexion reste ouverte exprès : la réponse par morceaux doit suffire à finir la lecture.
             c.write_all(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n3\r\n<a/\r\n1\r\n>\r\n0\r\n\r\n")
                 .unwrap();
-            std::thread::sleep(Duration::from_millis(300));
+            // Gardée ouverte bien plus longtemps que la borne ci-dessous : une machine chargée (Wine, tests en parallèle)
+            // ne fait pas passer un client qui attendrait la fermeture.
+            std::thread::sleep(Duration::from_millis(1500));
             String::from_utf8_lossy(&brut).into_owned()
         });
         let debut = Instant::now();
@@ -308,7 +310,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!((r.code, r.texte().as_str()), (200, "<a/>"));
-        assert!(debut.elapsed() < Duration::from_millis(250), "{:?}", debut.elapsed());
+        assert!(debut.elapsed() < Duration::from_millis(1000), "{:?}", debut.elapsed());
         let demande = serveur.join().unwrap();
         assert!(
             demande.starts_with(&format!("POST /ctl HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n")),
