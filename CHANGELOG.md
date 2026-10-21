@@ -31,7 +31,7 @@ chaque version garde son étiquette dans le dépôt (`git checkout v0.62.0`, par
   réglé pour tout faire sans demander, un serveur MCP lancé sans version fixée, joint sans chiffrement ou avec une clé
   écrite en clair, dans les réglages de Claude Code, Claude Desktop, Cursor, VS Code, Windsurf et Gemini CLI (le nom
   de la clé seulement, jamais sa valeur).
-- **Corrections Windows sans PowerShell** : quinze réglages de durcissement d'une liste fermée (WDigest, NLA du Bureau
+- **Corrections Windows sans PowerShell** : quatorze réglages de durcissement d'une liste fermée (WDigest, NLA du Bureau
   à distance, NTLMv2 seul, LLMNR, WPAD, UAC…) appliqués par Vanguard lui-même, relancé en administrateur : la fenêtre
   de Windows nomme Vanguard, le point de restauration passe d'abord et la valeur d'avant est notée pour annuler
   exactement ; seuls Entrée ou oui appliquent. Mêlées à une correction hors de la liste, elles passent par le script,

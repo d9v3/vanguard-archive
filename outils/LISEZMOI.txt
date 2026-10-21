@@ -151,7 +151,7 @@ Menus décalés dans l'ancienne invite de commandes de Windows : set VANGUARD_EM
 Terminal Windows).
 
 Bon à savoir
-  - Les corrections ne sont jamais appliquées sans ta confirmation. Sous Windows, quinze réglages d'une liste
+  - Les corrections ne sont jamais appliquées sans ta confirmation. Sous Windows, quatorze réglages d'une liste
     fermée (WDigest, NLA du Bureau à distance, NTLMv2, LLMNR, UAC…) sont faits par Vanguard lui-même, relancé en
     administrateur : la fenêtre de Windows le nomme, et seuls Entrée ou oui les appliquent. Les autres corrections,
     et celles choisies avec elles, sont d'abord écrites dans un script lisible (le chemin est affiché). Toutes

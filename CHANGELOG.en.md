@@ -28,7 +28,7 @@ repository (`git checkout v0.62.0`, for example), to be rebuilt if needed.
   to do everything without asking, an MCP server started without a pinned version, reached without encryption or with
   a key written in clear text, in the settings of Claude Code, Claude Desktop, Cursor, VS Code, Windsurf and Gemini
   CLI (the key's name only, never its value).
-- **Windows fixes without PowerShell**: fifteen hardening settings from a closed list (WDigest, Remote Desktop NLA,
+- **Windows fixes without PowerShell**: fourteen hardening settings from a closed list (WDigest, Remote Desktop NLA,
   NTLMv2 only, LLMNR, WPAD, UAC…) applied by Vanguard itself, relaunched as administrator: Windows' prompt names
   Vanguard, the restore point comes first and the previous value is recorded to undo exactly; only Enter or yes
   applies. Mixed with a fix outside the list, they go through the script, as before.

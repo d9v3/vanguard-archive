@@ -102,7 +102,7 @@ pour revenir.
   lieu de defaults, plutil, sw_vers, sysctl, scutil ou df). Plus rapide, et moins de façons d'échouer.
 - Corrections appliquées seulement après confirmation, avec un point de restauration créé automatiquement avant
   (snapper ou timeshift sous Linux, point de restauration Windows, instantané Time Machine sous macOS). Sous Windows,
-  quinze réglages de durcissement d'une liste fermée (WDigest, NLA du Bureau à distance, NTLMv2 seul, LLMNR, WPAD,
+  quatorze réglages de durcissement d'une liste fermée (WDigest, NLA du Bureau à distance, NTLMv2 seul, LLMNR, WPAD,
   UAC…) sont appliqués par Vanguard lui-même, relancé en administrateur : la fenêtre de Windows le nomme, et la valeur
   d'avant est notée pour annuler exactement ; seuls Entrée ou oui les appliquent. Les autres corrections, ou celles
   choisies avec elles, passent par un script lisible.
@@ -119,9 +119,9 @@ jamais comme sain : sans assez de vérifications, pas de note.
 **Réseau local** — tous les appareils, leur fabricant, leurs ports ouverts (TCP, et UDP : SNMP, NetBIOS, UPnP, DNS,
 mDNS) et leurs risques ; les nouveaux venus signalés, un carnet par réseau (chez toi, chez chaque ami), des surnoms
 (« imprimante HP ») ; les ports que des appareils ont ouverts vers Internet sur la box par UPnP (lecture seule, par un
-client UPnP écrit en Rust, miniupnpc en secours). Après accord, l'adresse Internet de la maison est cherchée dans
-quatre listes noires (Spamhaus, SpamCop, DroneBL, PSBL) : listée pour pourriel ou attaques, un appareil est sans
-doute infecté.
+client UPnP écrit en Rust ; en secours, miniupnpc sous Linux et macOS, l'interface UPnP de Windows sous Windows).
+Après accord, l'adresse Internet de la maison est cherchée dans quatre listes noires (Spamhaus, SpamCop, DroneBL,
+PSBL) : listée pour pourriel ou attaques, un appareil est sans doute infecté.
 Pendant le scan, Vanguard demande aussi un nom qui n'existe pas (LLMNR, NetBIOS, mDNS) : personne de légitime n'y
 répond, et l'appareil qui le fait est un empoisonneur comme Responder, qui vole les mots de passe Windows du réseau ;
 la surveillance horaire le signale aussi.

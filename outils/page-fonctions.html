@@ -315,7 +315,6 @@ details.cli[open] summary { border-bottom: 1px solid var(--trait); }
           <li><b>Les bases</b> : pare-feu, mises à jour et failles connues, chiffrement du disque, antivirus, comptes et mots de passe, heure, fin de support.</li>
           <li><b>Accès à distance</b> : SSH et ses algorithmes faibles, Bureau à distance, partages ouverts à tous, proxy détourné (WPAD).</li>
           <li><b>Ce qui se cache</b> : portes dérobées de Windows, signes d'un rootkit sous Linux, journaux d'événements suspects.</li>
-          <li><b>Portes cachées de Windows</b> (paquets de LSA, moniteurs d'impression, Winsock…) et <b>pilotes vulnérables</b> du noyau, d'après la liste LOLDrivers. <span class="nouveau">nouveau</span></li>
           <li><b>Chaque problème</b> expliqué avec sa correction, appliquée après ton accord et annulable ; sous Windows, les réglages de durcissement faits par Vanguard lui-même, relancé en administrateur, sans PowerShell. <span class="nouveau">nouveau</span></li>
         </ul>
       </article>
@@ -350,6 +349,7 @@ details.cli[open] summary { border-bottom: 1px solid var(--trait); }
           <li><b>Chasse aux menaces en direct</b> : un mot de passe deviné (une connexion réussie juste après une rafale d'échecs), un outil d'attaque en marche, une commande qui télécharge ce qu'elle lance. <span class="nouveau">nouveau</span></li>
           <li><b>La mémoire des programmes</b> qui tournent, passée aux règles YARA à la demande : un logiciel malveillant « sans fichier » ne vit que là. <span class="nouveau">nouveau</span></li>
           <li><b>Ce qui se lance en cachette</b>, portes dérobées, rootkit, connexions vers des serveurs de botnets, voleur de mots de passe (Responder) démasqué sur le réseau.</li>
+          <li><b>Portes cachées de Windows</b> (paquets de LSA, moniteurs d'impression, Winsock…) et <b>pilotes vulnérables</b> du noyau, d'après la liste LOLDrivers. <span class="nouveau">nouveau</span></li>
           <li><b>Fichiers-pièges</b> contre les rançongiciels, blocages de Defender, intégrité des fichiers critiques, failles des images Docker ; <b>agents d'IA</b> trop permissifs (serveur ouvert au réseau, agent qui fait tout sans demander). <span class="nouveau">nouveau</span></li>
           <li><b>Les traces collectées</b> avant de nettoyer, avec la <b>chronologie de l'incident</b> ; Internet coupé d'abord quand ça presse. <span class="nouveau">nouveau</span></li>
         </ul>
@@ -448,7 +448,7 @@ details.cli[open] summary { border-bottom: 1px solid var(--trait); }
           <li><b>Noyau (sysctl)</b> : redirections ICMP, <code>rp_filter</code>, BPF non privilégié, espaces de noms utilisateur, lockdown et signature des modules, attributs HSI de fwupd.</li>
           <li><b>SSH</b> : <code>sshd_config</code> lu dans l'ordre exact des <code>Include</code>, algorithmes cassés (SHA-1, CBC, 3DES, arcfour, DSA), <code>GatewayPorts</code>, X11 ; correction validée par <code>sshd -t</code>.</li>
           <li><b>Rootkit</b> : PID cachés dans <code>/proc</code>, programmes sans fichier (memfd, supprimés, <code>/tmp</code>, <code>/dev/shm</code>), modules cachés ou non signés, carte en mode promiscuité.</li>
-          <li><b>Mémoire et intrusions</b> : régions anonymes ou effacées lues dans <code>/proc/&lt;pid&gt;/mem</code> pour YARA ; connexion SSH réussie après une rafale d'échecs, lue dans le journal de sshd.</li>
+          <li><b>Mémoire</b> : régions anonymes ou effacées lues dans <code>/proc/&lt;pid&gt;/mem</code> pour YARA.</li>
           <li><b>Natif</b> : Wi-Fi par nl80211, voisins par netlink, horloge par <code>adjtimex</code>, mémoire DNS par varlink, bail DHCP de NetworkManager, minuteries lues dans leurs liens.</li>
         </ul>
       </article>
@@ -546,7 +546,7 @@ vanguard yara --complet</pre>
       <li><b>Portes cachées et pilotes</b><span>Les DLL que Windows charge lui-même (paquets de LSA, moniteurs d'impression, Winsock…) et les pilotes du noyau connus pour être vulnérables (LOLDrivers).</span></li>
       <li><b>Mémoire des programmes</b><span><code>vanguard memoire</code> passe les règles YARA sur la mémoire des programmes qui tournent, à la demande ; celle de LSASS et des processus protégés n'est jamais lue.</span></li>
       <li><b>Agents d'IA</b><span>Serveur d'IA local ouvert au réseau, agent réglé pour tout faire sans demander, serveur MCP sans version fixée ou joint sans chiffrement.</span></li>
-      <li><b>Corrections Windows sans PowerShell</b><span>Quinze réglages de durcissement faits par Vanguard lui-même, relancé en administrateur : la fenêtre de Windows le nomme, la valeur d'avant est notée pour annuler exactement.</span></li>
+      <li><b>Corrections Windows sans PowerShell</b><span>Quatorze réglages de durcissement faits par Vanguard lui-même, relancé en administrateur : la fenêtre de Windows le nomme, la valeur d'avant est notée pour annuler exactement.</span></li>
       <li><b>Sauvegarde plus méfiante</b><span>Une copie réécrite après la sauvegarde, comme par un rançongiciel qui chiffre le disque de sauvegarde, est dite abîmée.</span></li>
     </ul>
   </section>

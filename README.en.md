@@ -75,7 +75,7 @@ In the menu, choose **1** (full check), then **2** (fix). Arrows, Enter, and Esc
   launchd agents, the version, the Mac's name, free space and administrators (plists read directly, instead of
   defaults, plutil, sw_vers, sysctl, scutil or df). Faster, and fewer ways to fail.
 - Fixes applied only after confirmation, with a restore point created automatically beforehand (snapper or
-  timeshift on Linux, Windows restore point, Time Machine snapshot on macOS). On Windows, fifteen hardening settings
+  timeshift on Linux, Windows restore point, Time Machine snapshot on macOS). On Windows, fourteen hardening settings
   from a closed list (WDigest, Remote Desktop NLA, NTLMv2 only, LLMNR, WPAD, UAC…) are applied by Vanguard itself,
   relaunched as administrator: Windows' prompt names it, and the previous value is recorded to undo exactly; only
   Enter or yes applies them. The other fixes, or those chosen along with them, go through a readable script.
@@ -92,7 +92,7 @@ without enough checks, no grade.
 **Local network** — every device, its manufacturer, its open ports (TCP, and UDP: SNMP, NetBIOS, UPnP, DNS, mDNS)
 and its risks; newcomers flagged, one notebook per network (at home, at each friend's), nicknames ("HP printer");
 the ports that devices opened to the Internet on the router through UPnP (read-only, by a UPnP client written in
-Rust, miniupnpc as a fallback).
+Rust; as a fallback, miniupnpc on Linux and macOS, the Windows UPnP interface on Windows).
 After your consent, the home's Internet address is looked up in four blocklists (Spamhaus, SpamCop, DroneBL, PSBL):
 listed for spam or attacks, a device is probably infected. During the scan, Vanguard also asks for a name that does
 not exist (LLMNR, NetBIOS, mDNS): nobody legitimate answers, and the device that does is a poisoner like Responder,

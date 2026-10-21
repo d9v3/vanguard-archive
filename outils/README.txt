@@ -148,7 +148,7 @@ Menus shifted in the old Windows command prompt: set VANGUARD_EMOJI=0 (done by d
 Terminal).
 
 Good to know
-  - Fixes are never applied without your consent. On Windows, fifteen settings from a closed list (WDigest,
+  - Fixes are never applied without your consent. On Windows, fourteen settings from a closed list (WDigest,
     Remote Desktop NLA, NTLMv2, LLMNR, UAC…) are made by Vanguard itself, relaunched as administrator: Windows'
     prompt names it, and only Enter or yes applies them. The other fixes, and those chosen along with them, are
     first written to a readable script (its path is shown). All of them ask for administrator approval.
