@@ -87,6 +87,13 @@ fn repond(hote: &str) -> bool {
         .any(|a| super::reseau::joignable(a, Duration::from_millis(1500)))
 }
 
+/// La liste des imprimantes dit-elle ce qui est installé ? Sous Windows, elle passe par le spouleur : arrêté, elle
+/// revient vide (EnumPrinters comme Get-Printer échouent), et « aucune imprimante installée » serait faux.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn liste_lisible(spouleur: &str, imprimantes: &[Imprimante]) -> bool {
+    spouleur == "Running" || !imprimantes.is_empty()
+}
+
 fn montrer(imprimantes: &[Imprimante]) {
     if imprimantes.is_empty() {
         Etat::Mauvais.dire(tr!(
@@ -302,7 +309,7 @@ mod systeme {
 
 #[cfg(windows)]
 mod systeme {
-    use super::{Etat, Imprimante, fait, montrer};
+    use super::{Etat, Imprimante, fait, liste_lisible, montrer};
     use crate::ui::*;
 
     /// Vérifie et propose ; rend les imprimantes installées, si Windows a pu les dire.
@@ -375,7 +382,12 @@ mod systeme {
         } else {
             tr!("Le spouleur d'impression est arrêté.", "The print spooler is stopped.")
         });
-        montrer(&imprimantes);
+        let lisible = liste_lisible(&spouleur, &imprimantes);
+        if lisible {
+            montrer(&imprimantes);
+        } else {
+            illisible_sans_spouleur();
+        }
         let bloque = imprimantes.iter().any(|i| i.en_attente > 0);
         if (!marche || bloque)
             && demander(tr!(
@@ -393,8 +405,29 @@ mod systeme {
                 "Spouleur relancé, file vidée.",
                 "Spooler restarted, queue cleared."
             ));
+            if !lisible {
+                // La liste lue spouleur arrêté était vide par force : relue maintenant qu'il tourne.
+                return match lire_natif().or_else(lire_par_powershell) {
+                    Some((spouleur, imprimantes)) if liste_lisible(&spouleur, &imprimantes) => {
+                        montrer(&imprimantes);
+                        Some(imprimantes)
+                    }
+                    _ => {
+                        illisible_sans_spouleur();
+                        None
+                    }
+                };
+            }
         }
-        Some(imprimantes)
+        // Spouleur arrêté et liste vide : rien ne dit qu'aucune imprimante n'est installée, aucun conseil d'en ajouter.
+        lisible.then_some(imprimantes)
+    }
+
+    fn illisible_sans_spouleur() {
+        Etat::Info.dire(tr!(
+            "Liste des imprimantes illisible : Windows ne la donne que par le spouleur, arrêté.",
+            "Printer list not readable: Windows only gives it through the spooler, which is stopped."
+        ));
     }
 }
 
@@ -413,6 +446,20 @@ mod tests {
         for absent in [None, Some(std::path::PathBuf::new()), Some(r"\Windows".into())] {
             assert!(systeme::vider_la_file(absent).contains(r"-LiteralPath 'C:\Windows\System32\spool\PRINTERS'"));
         }
+    }
+
+    /// Spouleur arrêté : la liste vide ne veut pas dire « aucune imprimante », elle ne se lit pas.
+    #[test]
+    fn spouleur_arrete_liste_illisible() {
+        let une = [Imprimante {
+            nom: "Salon_Laser".into(),
+            ..Imprimante::default()
+        }];
+        assert!(liste_lisible("Running", &[]));
+        assert!(liste_lisible("Running", &une));
+        assert!(!liste_lisible("Stopped", &[]));
+        assert!(!liste_lisible("", &[]));
+        assert!(liste_lisible("Stopped", &une));
     }
 
     #[test]
