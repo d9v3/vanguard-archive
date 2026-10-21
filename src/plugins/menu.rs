@@ -86,7 +86,7 @@ pub(super) fn lignes_extensions(plugins: usize, scripts: usize, sans: bool) -> V
 }
 
 /// Ce que l'interrupteur vient de devenir, en une ligne.
-pub(super) fn dire_restrictions(sans: bool) {
+pub fn dire_restrictions(sans: bool) {
     if sans {
         crate::trp!(
             "  {}⚠{RESET} Restrictions coupées : les extensions tournent sans accord, sans empreinte ni analyse, avec tous tes droits.",

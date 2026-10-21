@@ -141,6 +141,16 @@ pub fn basculer(racine: &Path, accord: impl FnOnce(&str) -> bool) -> Result<bool
     Ok(r.sans_restrictions)
 }
 
+/// Met l'interrupteur général à `sans` (vrai : coupées) par `basculer`, le seul chemin, avec son accord ; déjà ainsi,
+/// rien ne change et rien n'est demandé. Rend (avant, après) ; refusé, après vaut avant.
+pub fn regler(racine: &Path, sans: bool, accord: impl FnOnce(&str) -> bool) -> Result<(bool, bool), String> {
+    let avant = charger(racine).sans_restrictions;
+    if avant == sans {
+        return Ok((avant, avant));
+    }
+    Ok((avant, basculer(racine, accord)?))
+}
+
 /// Bascule un élément « à moi » tel qu'il est maintenant (`empreinte`), même accord unique que l'interrupteur
 /// général. Rend le nouvel état de l'élément.
 pub fn basculer_element(

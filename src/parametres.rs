@@ -3,14 +3,16 @@
 //! parametres.json, sur cet ordinateur, et lus au lancement, avant tout affichage ; une variable d'environnement
 //! (VANGUARD_LANG, VANGUARD_EMOJI, VANGUARD_HORS_LIGNE) l'emporte toujours sur le fichier. Les autres gardent leur
 //! place et leur code, que ce menu appelle : la surveillance horaire et l'entretien du mois (leurs minuteries), les
-//! alertes apprises (appris.json), le blocage (blocage.json). Chaque changement est montré avec sa valeur d'avant,
-//! et s'annule en la remettant.
+//! alertes apprises (appris.json), le blocage (blocage.json), les restrictions des extensions (plugins/reglages.json,
+//! par leur interrupteur et son accord). Chaque changement est montré avec sa valeur d'avant, et s'annule en la
+//! remettant.
 
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 use serde::{Deserialize, Serialize};
 
+use crate::langue::Reponse;
 use crate::selection::{Ligne, choisir};
 use crate::ui::*;
 
@@ -98,8 +100,8 @@ fn hors_ligne_voulu(variable: Option<&str>, fichier: bool) -> bool {
 }
 
 /// Les réglages de ce menu. Chacun garde sa place et son code ; ce menu ne fait que les montrer et les changer. Les
-/// restrictions des extensions (plugins/reglages.json, de leur module) viendront ici de la même façon, par leur
-/// propre fonction : une ligne de plus dans `TOUS`, rien de copié.
+/// restrictions des extensions passent par leur propre interrupteur (`plugins::reglages::regler`) : le même accord,
+/// le même avertissement, le même fichier que le menu Extensions, rien de copié.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Reglage {
     Langue,
@@ -109,10 +111,11 @@ enum Reglage {
     Entretien,
     Appris,
     Blocage,
+    Restrictions,
 }
 
 impl Reglage {
-    const TOUS: [Reglage; 7] = [
+    const TOUS: [Reglage; 8] = [
         Reglage::Langue,
         Reglage::Emojis,
         Reglage::HorsLigne,
@@ -120,6 +123,7 @@ impl Reglage {
         Reglage::Entretien,
         Reglage::Appris,
         Reglage::Blocage,
+        Reglage::Restrictions,
     ];
 
     /// Le mot de la ligne de commande.
@@ -132,6 +136,7 @@ impl Reglage {
             Reglage::Entretien => tr!("entretien", "maintenance"),
             Reglage::Appris => tr!("appris", "learned"),
             Reglage::Blocage => tr!("blocage", "blocking"),
+            Reglage::Restrictions => "restrictions",
         }
     }
 
@@ -144,6 +149,7 @@ impl Reglage {
             "entretien" | "maintenance" => Some(Reglage::Entretien),
             "appris" | "learned" | "apprentissage" | "learning" => Some(Reglage::Appris),
             "blocage" | "blocking" => Some(Reglage::Blocage),
+            "restrictions" | "restriction" => Some(Reglage::Restrictions),
             _ => None,
         }
     }
@@ -157,6 +163,7 @@ impl Reglage {
             Reglage::Entretien => tr!("Entretien du mois", "Monthly check-up"),
             Reglage::Appris => tr!("Alertes apprises", "Learned alerts"),
             Reglage::Blocage => tr!("Blocage des menaces", "Threat blocking"),
+            Reglage::Restrictions => tr!("Restrictions des extensions", "Extension restrictions"),
         }
     }
 
@@ -178,8 +185,10 @@ impl Reglage {
             Reglage::Langue => &["auto", "fr", "en"],
             Reglage::Emojis if anglais => &["auto", "yes", "no"],
             Reglage::Emojis => &["auto", "oui", "non"],
-            Reglage::HorsLigne | Reglage::Surveillance | Reglage::Entretien if anglais => &["yes", "no"],
-            Reglage::HorsLigne | Reglage::Surveillance | Reglage::Entretien => &["oui", "non"],
+            Reglage::HorsLigne | Reglage::Surveillance | Reglage::Entretien | Reglage::Restrictions if anglais => {
+                &["yes", "no"]
+            }
+            Reglage::HorsLigne | Reglage::Surveillance | Reglage::Entretien | Reglage::Restrictions => &["oui", "non"],
             Reglage::Appris | Reglage::Blocage => &[],
         }
     }
@@ -270,11 +279,36 @@ fn valeur(r: Reglage) -> String {
             None => tr!("liste illisible", "list unreadable").to_string(),
         },
         Reglage::Blocage => crate::protection::blocage::etat_court().to_string(),
+        Reglage::Restrictions => {
+            texte_restrictions(restrictions_actives(crate::plugins::reglages_lisibles().as_deref()))
+        }
     };
     if let Some(v) = r.variable().filter(|v| std::env::var_os(v).is_some()) {
         texte += &trf!(" ({v} l'emporte)", " ({v} wins)");
     }
     texte
+}
+
+/// Les restrictions des extensions, lues de leur interrupteur : actives ? Sans dossier à lire (administrateur), oui :
+/// l'interrupteur n'y vaut rien.
+fn restrictions_actives(racine: Option<&Path>) -> bool {
+    racine.is_none_or(|r| !crate::plugins::reglages::charger(r).sans_restrictions)
+}
+
+/// Leur valeur montrée : oui (actives), ou non et ce que cela veut dire.
+fn texte_restrictions(actives: bool) -> String {
+    if actives {
+        mot_oui_non(true).to_string()
+    } else {
+        trf!("{} (sans contrôle)", "{} (no checks)", mot_oui_non(false))
+    }
+}
+
+/// Les restrictions mises à `actives` par leur interrupteur (`plugins::reglages::regler` : l'accord demandé une seule
+/// fois, comme au menu Extensions) ; refusé, rien ne change. Rend (avant, après) : actives ?
+fn restrictions_dans(racine: &Path, actives: bool, accord: impl FnOnce(&str) -> bool) -> Result<(bool, bool), String> {
+    let (avant, apres) = crate::plugins::reglages::regler(racine, !actives, accord)?;
+    Ok((!avant, !apres))
 }
 
 /// `vanguard parametres` : l'état ; avec un réglage et une valeur, le change ; « appris » et « blocage » ouvrent leur
@@ -361,6 +395,29 @@ fn changer(r: Reglage, saisie: &str) -> bool {
             }
             (mot_oui_non(actif).to_string(), mot_oui_non(voulu).to_string())
         }
+        Reglage::Restrictions => {
+            let Some(actives) = oui_non(saisie) else {
+                return inconnue();
+            };
+            let fait = crate::plugins::dossier_des_reglages()
+                .and_then(|racine| restrictions_dans(&racine, actives, |q| demander(q).oui()));
+            match fait {
+                Err(e) => {
+                    afficher_aligne(
+                        &format!("  {}✖{RESET} ", couleur(crate::risk::Niveau::Eleve)),
+                        &e,
+                        4,
+                        "",
+                    );
+                    return false;
+                }
+                Ok((_, apres)) if apres != actives => {
+                    trp!("  Rien n'a changé.", "  Nothing changed.");
+                    return false;
+                }
+                Ok((avant, apres)) => (mot_oui_non(avant).to_string(), mot_oui_non(apres).to_string()),
+            }
+        }
         Reglage::Appris | Reglage::Blocage => return false,
     };
     trp!(
@@ -368,6 +425,11 @@ fn changer(r: Reglage, saisie: &str) -> bool {
         "  {VERT}✔{RESET} {}: {avant} → {apres}",
         r.titre()
     );
+    if r == Reglage::Restrictions && apres == mot_oui_non(false) {
+        // Le même avertissement qu'au menu Extensions, et ce qui reste même coupées.
+        crate::plugins::dire_restrictions(true);
+        afficher_aligne("  ", crate::plugins::reglages::ce_qui_reste(), 2, GRIS);
+    }
     if r.variable().is_some() {
         trp!(
             "  {GRIS}Effectif au prochain lancement de Vanguard.{RESET}",
@@ -438,6 +500,10 @@ fn explication(r: Reglage) -> &'static str {
             "Une notification par mois : note, mises à jour, place, problèmes nouveaux.",
             "One notification a month: grade, updates, space, new problems."
         ),
+        Reglage::Restrictions => tr!(
+            "Oui : une extension demande ton accord, son empreinte est vérifiée, elle est analysée et bornée, jamais en administrateur. Non : elle tourne comme un de tes programmes, sans contrôle ; couper demande ton accord une fois.",
+            "Yes: an extension asks for your consent, its fingerprint is checked, it is scanned and limited, never as administrator. No: it runs like one of your programs, without checks; turning them off asks for your consent once."
+        ),
         Reglage::Appris | Reglage::Blocage => "",
     }
 }
@@ -490,6 +556,13 @@ fn choisir_valeur(r: Reglage) {
             .into_iter()
             .map(|l| Ligne::Texte(format!("  {GRIS}{l}{RESET}"))),
     );
+    if r == Reglage::Restrictions {
+        lignes.extend(
+            envelopper(crate::plugins::reglages::ce_qui_reste(), LARGEUR - 4)
+                .into_iter()
+                .map(|l| Ligne::Texte(format!("  {GRIS}{l}{RESET}"))),
+        );
+    }
     lignes.push(Ligne::Texte(String::new()));
     for (i, v) in r.valeurs().iter().enumerate() {
         let en_cours = actuelle == *v || actuelle.starts_with(&format!("{v} ("));
@@ -600,6 +673,53 @@ mod tests {
         assert_eq!(oui_non("peut-être"), None);
     }
 
+    /// Les restrictions des extensions : lues de leur interrupteur et changées par lui seul, dans le même fichier que
+    /// le menu Extensions ; couper passe par son accord (refusé : rien ne change), remettre ne demande rien.
+    #[test]
+    fn restrictions_par_leur_interrupteur() {
+        use crate::plugins::reglages;
+        let d = jetable("restrictions").with_file_name("plugins");
+        std::fs::create_dir_all(&d).unwrap();
+        assert!(
+            restrictions_actives(None),
+            "sans dossier à lire (administrateur) : actives"
+        );
+        assert!(restrictions_actives(Some(&d)), "sans fichier : actives");
+        assert_eq!(texte_restrictions(true), mot_oui_non(true));
+        // Coupées, la valeur montrée garde le mot tapé devant : le choix au menu reste marqué.
+        assert!(texte_restrictions(false).starts_with(&format!("{} (", mot_oui_non(false))));
+        // Refusé : rien ne change, rien n'est écrit.
+        assert_eq!(restrictions_dans(&d, false, |_| false), Ok((true, true)));
+        assert_eq!(reglages::charger(&d), reglages::Reglages::default());
+        assert!(restrictions_actives(Some(&d)));
+        // Accepté : la question est celle de l'interrupteur, et sa réponse est gardée dans son fichier.
+        let mut question = String::new();
+        let fait = restrictions_dans(&d, false, |q| {
+            question = q.to_string();
+            true
+        });
+        assert_eq!(fait, Ok((true, false)));
+        assert!(question.contains("/N]"), "{question}");
+        assert!(!restrictions_actives(Some(&d)));
+        assert!(reglages::charger(&d).sans_restrictions && reglages::charger(&d).coupure_confirmee);
+        // Déjà coupées : rien n'est demandé ni changé.
+        assert_eq!(
+            restrictions_dans(&d, false, |_| panic!("rien à demander")),
+            Ok((false, false))
+        );
+        // Remettre ne demande rien ; le menu Extensions voit la même chose, et sa bascule est lue ici.
+        assert_eq!(
+            restrictions_dans(&d, true, |_| panic!("remettre ne demande rien")),
+            Ok((false, true))
+        );
+        assert!(!reglages::charger(&d).sans_restrictions);
+        assert!(reglages::basculer(&d, |_| panic!("déjà confirmé une fois")).unwrap());
+        assert!(!restrictions_actives(Some(&d)));
+        assert_eq!(restrictions_dans(&d, true, |_| panic!("remettre")), Ok((false, true)));
+        assert!(restrictions_actives(Some(&d)));
+        let _ = std::fs::remove_dir_all(d.parent().unwrap());
+    }
+
     #[test]
     fn mots_des_reglages() {
         for r in Reglage::TOUS {
@@ -608,7 +728,7 @@ mod tests {
             for v in r.valeurs() {
                 let mut f = Fichier::default();
                 let ok = match r {
-                    Reglage::Surveillance | Reglage::Entretien => oui_non(v).is_some(),
+                    Reglage::Surveillance | Reglage::Entretien | Reglage::Restrictions => oui_non(v).is_some(),
                     _ => changer_dans(&mut f, r, v).is_ok(),
                 };
                 assert!(ok, "{r:?} {v}");

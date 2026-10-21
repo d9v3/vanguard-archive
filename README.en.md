@@ -447,7 +447,7 @@ Each menu entry is also a command.
 | `vanguard slow` | why it is slow: processor, memory, disk, startup, programs at login |
 | `vanguard startup` | startup programs: remove or put them back, after your consent; each removal is undone exactly |
 | `vanguard changes` | what Vanguard changed: each fix run here, its date and its result |
-| `vanguard settings [setting value]` | settings (also “s” in the main menu): language, emojis, working without the Internet, monitoring, monthly check-up, learned alerts, blocking; the previous value is shown to go back |
+| `vanguard settings [setting value]` | settings (also “s” in the main menu): language, emojis, working without the Internet, monitoring, monthly check-up, learned alerts, blocking, extension restrictions; the previous value is shown to go back |
 | `vanguard blocking [search\|undo\|auto\|click\|category mode]` | threat blocking: one-click “Block” for each threat (action shown, written down, undoable); active protection, after a consent, that blocks what is certain by itself (MalwareBazaar fingerprint, known attack tool, command server) |
 | `vanguard handout` | report to leave behind: a simple page for the person you helped |
 | `vanguard relative` | a relative's computer: three questions, the check, a summary in plain words, the fixes, the page to leave behind with its tips |

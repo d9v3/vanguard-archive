@@ -296,11 +296,12 @@ enum Commande {
     #[command(visible_alias = "containers")]
     Conteneurs,
     /// Paramètres : tous les réglages de Vanguard (langue, emojis, travail sans Internet, surveillance, entretien,
-    /// alertes apprises, blocage). Sans argument : leur état ; avec un réglage et une valeur : le change, la valeur
-    /// d'avant montrée pour revenir.
+    /// alertes apprises, blocage, restrictions des extensions). Sans argument : leur état ; avec un réglage et une
+    /// valeur : le change, la valeur d'avant montrée pour revenir.
     #[command(visible_alias = "settings")]
     Parametres {
-        /// Un réglage (langue, emojis, sans-internet, surveillance, entretien, appris, blocage) et sa valeur.
+        /// Un réglage (langue, emojis, sans-internet, surveillance, entretien, appris, blocage, restrictions) et sa
+        /// valeur.
         quoi: Vec<String>,
     },
     /// Blocage des menaces : chaque menace trouvée propose « Bloquer » (le geste montré, accepté, noté, annulable) ;
@@ -1340,7 +1341,8 @@ const OUTILS: &[Outil] = &[
         titre: ["Paramètres", "Settings"],
         precision: ["langue, surveillance, blocage…", "language, monitoring, blocking…"],
         mots: "paramètres settings réglages options préférences preferences langue language emojis internet \
-               hors ligne offline surveillance monitoring entretien maintenance appris learned blocage blocking" },
+               hors ligne offline surveillance monitoring entretien maintenance appris learned blocage blocking \
+               restrictions" },
 ];
 
 // Une action ajoutée sans sa ligne décalerait toutes les suivantes : la compilation s'arrête.
@@ -1656,8 +1658,8 @@ const AIDES_EN: &[(&str, &str)] = &[
                  Vanguard, and also by gitleaks if installed. No secret is shown. Read-only"),
     ("conteneurs", "Known flaws in this computer's Docker or Podman images, by trivy if installed. Read-only"),
     ("parametres", "Settings: all of Vanguard's settings (language, emojis, working without the Internet, monitoring, \
-                    monthly check-up, learned alerts, blocking). No argument: their state; with a setting and a value: \
-                    changes it, showing the previous value to go back"),
+                    monthly check-up, learned alerts, blocking, extension restrictions). No argument: their state; \
+                    with a setting and a value: changes it, showing the previous value to go back"),
     ("blocage", "Threat blocking: each threat found offers “Block” (the action shown, accepted, written down, \
                  undoable); active protection, after a consent given once, blocks what is certain by itself \
                  (MalwareBazaar fingerprint, known attack tool, command server), then warns you. No argument: the menu"),
@@ -1795,8 +1797,8 @@ const OPTIONS_EN: &[(&str, &str, &str)] = &[
     ("extensions", "sans_restrictions", "on: the extensions' restrictions turned off (no consent, fingerprint or scan, \
                                          with all your rights); off: back on. The extensions folder must stay yours \
                                          alone"),
-    ("parametres", "quoi", "A setting (language, emojis, offline, monitoring, maintenance, learned, blocking) and its \
-                              value"),
+    ("parametres", "quoi", "A setting (language, emojis, offline, monitoring, maintenance, learned, blocking, \
+                              restrictions) and its value"),
     ("blocage", "quoi", "“search”, “undo”, “status”, “auto” or “click” (active protection), or a category (programs, \
                            connections, startup, agents) followed by a mode (off, click, auto)"),
     ("depanner", "sujet", "The subject: internet, wifi, slow, sound, printer, disk, infection, new, leaving (or words \

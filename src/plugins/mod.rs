@@ -1693,24 +1693,27 @@ pub fn a_signaler() -> Vec<(String, String)> {
         .collect()
 }
 
-/// `vanguard extensions --sans-restrictions on|off`. En administrateur, refusé : l'interrupteur n'y vaut rien.
-pub fn regler_restrictions(sans: bool) -> i32 {
+/// Où lire l'interrupteur des restrictions sans créer le dossier (Paramètres le montre) ; `None` en administrateur,
+/// où les réglages ne lèvent rien, ou sans dossier local connu.
+pub fn reglages_lisibles() -> Option<PathBuf> {
+    let local = crate::reseau::dossier_local();
+    (!eleve() && local.is_absolute()).then(|| local.join("plugins"))
+}
+
+/// Le dossier où l'interrupteur se règle (`dossier`), refusé en administrateur : l'interrupteur n'y vaut rien.
+pub fn dossier_des_reglages() -> Result<PathBuf, String> {
     if eleve() {
-        return echec(&refus_eleve());
+        return Err(refus_eleve());
     }
-    let racine = match dossier() {
-        Ok(r) => r,
-        Err(e) => {
-            trp!("  Le réglage reste inactif : {}", "  The setting stays off: {}", e);
-            return 1;
-        }
-    };
-    if reglages::charger(&racine).sans_restrictions == sans {
-        menu::dire_restrictions(sans);
-        return 0;
-    }
-    match reglages::basculer(&racine, |q| demander(q).oui()) {
-        Ok(etat) => {
+    dossier().map_err(|e| trf!("Le réglage reste inactif : {e}", "The setting stays off: {e}"))
+}
+
+pub use menu::dire_restrictions;
+
+/// `vanguard extensions --sans-restrictions on|off`, par `reglages::regler` comme Paramètres.
+pub fn regler_restrictions(sans: bool) -> i32 {
+    match dossier_des_reglages().and_then(|racine| reglages::regler(&racine, sans, |q| demander(q).oui())) {
+        Ok((_, etat)) => {
             menu::dire_restrictions(etat);
             i32::from(etat != sans)
         }
