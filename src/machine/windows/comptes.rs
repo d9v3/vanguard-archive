@@ -110,7 +110,7 @@ fn juger_comptes(utilisateurs: &[&str], moi: Option<&str>, lbp: Option<u32>) -> 
                     "Réserver les comptes sans mot de passe à l'écran de connexion",
                     "Restrict password-less accounts to the sign-in screen"
                 ),
-                &["Set-ItemProperty -Path 'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Lsa' -Name LimitBlankPasswordUse -Value 1"],
+                &[&super::corrections::id("comptes-sans-mdp-limites")],
             ),
         );
     }

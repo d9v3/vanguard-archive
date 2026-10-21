@@ -721,8 +721,6 @@ pub fn session_a_distance() -> bool {
     distante || std::env::var("SESSIONNAME").is_ok_and(|s| s.to_ascii_uppercase().starts_with("RDP-"))
 }
 
-const CLE_UAC: &str = r"HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System";
-
 fn uac() -> Constat {
     let cle = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System";
     let lire = |v: &str| registre::<u32>(winreg::enums::HKEY_LOCAL_MACHINE, cle, v).map(|n| n.to_string());
@@ -753,7 +751,7 @@ fn juger_uac(lua: Option<&str>, consentement: Option<&str>) -> Option<Constat> {
                     "Réactiver l'UAC (effectif après redémarrage)",
                     "Turn UAC back on (effective after a restart)"
                 ),
-                &[&format!("Set-ItemProperty '{CLE_UAC}' -Name EnableLUA -Value 1")],
+                &[&corrections::id("uac-active")],
             ),
         );
     }
@@ -774,9 +772,7 @@ fn juger_uac(lua: Option<&str>, consentement: Option<&str>) -> Option<Constat> {
                     "Remettre la demande de l'UAC (le réglage de Windows)",
                     "Bring back the UAC prompt (the Windows setting)"
                 ),
-                &[&format!(
-                    "Set-ItemProperty '{CLE_UAC}' -Name ConsentPromptBehaviorAdmin -Value 5"
-                )],
+                &[&corrections::id("uac-demande")],
             ),
         );
     }
@@ -1186,10 +1182,7 @@ fn lire_ports_udp(liste: &str, pare_feu_actif: bool, ip_lan: Option<&str>) -> Ve
                 ),
                 // Clé créée seulement si elle manque : « New-Item -Force » sur une clé existante l'écraserait, avec
                 // les autres stratégies DNS qu'elle contient.
-                &[
-                    "if (-not (Test-Path 'HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows NT\\DNSClient')) { New-Item -Path 'HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows NT\\DNSClient' -Force | Out-Null }",
-                    "Set-ItemProperty -Path 'HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows NT\\DNSClient' -Name EnableMulticast -Value 0 -Type DWord",
-                ],
+                &[&corrections::id("llmnr-coupe")],
             ),
             137 | 138 if !vus.contains(&if port == 137 { 138 } else { 137 }) => constat.corriger(
                 tr!(
@@ -1251,7 +1244,7 @@ mod tests {
         assert_eq!(probleme(Some("0"), Some("5")), Some(Niveau::Eleve));
         assert!(juger_uac(None, None).is_none() && juger_uac(Some(""), Some("5")).is_none());
         let c = juger_uac(Some("1"), Some("0")).unwrap();
-        assert!(c.correctif.unwrap().commandes[0].ends_with("-Name ConsentPromptBehaviorAdmin -Value 5"));
+        assert_eq!(c.correctif.unwrap().commandes[0], "vanguard:uac-demande");
     }
 
     #[test]
@@ -1296,7 +1289,7 @@ mod tests {
         assert_eq!(corrigibles, [true, true, false, true]);
         // LLMNR : la clé des stratégies DNS n'est créée que si elle manque, jamais écrasée.
         let llmnr = &c[0].correctif.as_ref().unwrap().commandes[0];
-        assert!(llmnr.starts_with("if (-not (Test-Path ") && llmnr.contains("New-Item"));
+        assert_eq!(llmnr, "vanguard:llmnr-coupe");
         let c = lire_ports_udp("LLMNR|0\n0.0.0.0|5355|svchost", false, None);
         assert!(c.len() == 1 && c[0].correctif.is_none() && c[0].probleme == Some(Niveau::Info));
         // Un programme au nom piégé : rendu inoffensif dans le message.

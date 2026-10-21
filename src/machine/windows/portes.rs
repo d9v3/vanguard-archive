@@ -543,10 +543,7 @@ fn juger_appinit(lues: &[(&str, Option<u32>, Option<String>)]) -> Vec<Constat> {
                     "Ne plus charger ces DLL (LoadAppInit_DLLs = 0, le réglage d'origine de Windows ; la liste reste notée)",
                     "Stop loading these DLLs (LoadAppInit_DLLs = 0, Windows' original setting; the list stays written down)"
                 ),
-                &[format!(
-                    "Set-ItemProperty -LiteralPath 'HKLM:\\{}' -Name LoadAppInit_DLLs -Value 0 -Type DWord",
-                    ps_texte(cle)
-                )],
+                &[super::corrections::id(if *cle == APPINIT[1] { "appinit-coupe-32" } else { "appinit-coupe" })],
             ),
         );
     }
@@ -1105,7 +1102,7 @@ mod tests {
         assert_eq!(c[1].probleme, Some(Niveau::Eleve));
         assert_eq!(
             c[1].correctif.as_ref().unwrap().commandes[0],
-            r"Set-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows NT\CurrentVersion\Windows' -Name LoadAppInit_DLLs -Value 0 -Type DWord"
+            "vanguard:appinit-coupe-32"
         );
     }
 

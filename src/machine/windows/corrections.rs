@@ -34,8 +34,6 @@ pub(crate) struct Correction {
     pub geste: Geste,
     fr: &'static str,
     en: &'static str,
-    /// L'équivalent PowerShell, pour le chemin par script.
-    powershell: fn() -> String,
 }
 
 impl Correction {
@@ -44,13 +42,25 @@ impl Correction {
         if anglais() { self.en } else { self.fr }
     }
 
+    /// L'équivalent PowerShell, pour le chemin par script. La clé n'est créée que si elle manque : « New-Item -Force »
+    /// sur une clé existante l'écraserait avec ses autres valeurs.
     pub(crate) fn powershell(&self) -> String {
-        (self.powershell)()
+        match self.geste {
+            Geste::Dword { cle, valeur, donnee } => format!(
+                "if (-not (Test-Path -LiteralPath 'HKLM:\\{cle}')) {{ New-Item -Path 'HKLM:\\{cle}' -Force | Out-Null }}; \
+                 Set-ItemProperty -LiteralPath 'HKLM:\\{cle}' -Name {valeur} -Value {donnee} -Type DWord"
+            ),
+            Geste::PointDeRestauration => crate::reparer::point_restauration_powershell(),
+        }
     }
 }
 
 const WDIGEST: &str = r"SYSTEM\CurrentControlSet\Control\SecurityProviders\WDigest";
 const RDP_TCP: &str = r"SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp";
+const LSA: &str = r"SYSTEM\CurrentControlSet\Control\Lsa";
+const UAC: &str = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System";
+const APPINIT: &str = r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Windows";
+const APPINIT_32: &str = r"SOFTWARE\WOW6432Node\Microsoft\Windows NT\CurrentVersion\Windows";
 
 /// La liste fermée. Chaque entrée renforce la sécurité ; aucune ne coupe un pare-feu, Defender, BitLocker ou l'UAC,
 /// ni une connexion à distance en cours (`rdp-nla` exige une authentification, il ne ferme pas le Bureau à distance).
@@ -60,7 +70,6 @@ static TABLE: &[Correction] = &[
         geste: Geste::PointDeRestauration,
         fr: "Point de restauration, pour pouvoir revenir en arrière",
         en: "Restore point, so you can go back",
-        powershell: crate::reparer::point_restauration_powershell,
     },
     Correction {
         id: "wdigest-coupe",
@@ -71,9 +80,6 @@ static TABLE: &[Correction] = &[
         },
         fr: "Couper WDigest : plus de mot de passe en clair dans la mémoire (HKLM\\…\\WDigest, UseLogonCredential = 0)",
         en: "Turn WDigest off: no more clear-text password in memory (HKLM\\...\\WDigest, UseLogonCredential = 0)",
-        powershell: || {
-            format!("Set-ItemProperty -LiteralPath 'HKLM:\\{WDIGEST}' -Name UseLogonCredential -Value 0 -Type DWord")
-        },
     },
     Correction {
         id: "rdp-nla",
@@ -84,11 +90,129 @@ static TABLE: &[Correction] = &[
         },
         fr: "Exiger l'authentification au niveau réseau (NLA) pour le Bureau à distance (HKLM\\…\\RDP-Tcp, UserAuthentication = 1)",
         en: "Require Network Level Authentication (NLA) for Remote Desktop (HKLM\\...\\RDP-Tcp, UserAuthentication = 1)",
-        powershell: || {
-            format!("Set-ItemProperty -LiteralPath 'HKLM:\\{RDP_TCP}' -Name UserAuthentication -Value 1 -Type DWord")
-        },
     },
+    dword(
+        "comptes-sans-mdp-limites",
+        LSA,
+        "LimitBlankPasswordUse",
+        1,
+        "Réserver les comptes sans mot de passe à l'écran de connexion (HKLM\\…\\Lsa, LimitBlankPasswordUse = 1)",
+        "Restrict password-less accounts to the sign-in screen (HKLM\\...\\Lsa, LimitBlankPasswordUse = 1)",
+    ),
+    dword(
+        "ntlmv2-seul",
+        LSA,
+        "LmCompatibilityLevel",
+        3,
+        "NTLMv2 seulement, le réglage par défaut de Windows (HKLM\\…\\Lsa, LmCompatibilityLevel = 3)",
+        "NTLMv2 only, the Windows default (HKLM\\...\\Lsa, LmCompatibilityLevel = 3)",
+    ),
+    dword(
+        "sam-anonyme-ferme",
+        LSA,
+        "RestrictAnonymousSAM",
+        1,
+        "Refuser la liste des comptes aux connexions anonymes (HKLM\\…\\Lsa, RestrictAnonymousSAM = 1)",
+        "Refuse the account list to anonymous connections (HKLM\\...\\Lsa, RestrictAnonymousSAM = 1)",
+    ),
+    dword(
+        "anonyme-hors-tous",
+        LSA,
+        "EveryoneIncludesAnonymous",
+        0,
+        "Sortir l'anonyme du groupe « Tout le monde » (HKLM\\…\\Lsa, EveryoneIncludesAnonymous = 0)",
+        "Take anonymous out of the Everyone group (HKLM\\...\\Lsa, EveryoneIncludesAnonymous = 0)",
+    ),
+    dword(
+        "lmhash-coupe",
+        LSA,
+        "NoLMHash",
+        1,
+        "Ne plus garder l'ancienne forme LM des mots de passe (HKLM\\…\\Lsa, NoLMHash = 1)",
+        "Stop keeping the old LM form of passwords (HKLM\\...\\Lsa, NoLMHash = 1)",
+    ),
+    dword(
+        "appinit-coupe",
+        APPINIT,
+        "LoadAppInit_DLLs",
+        0,
+        "Ne plus charger les DLL AppInit, le réglage d'origine (HKLM\\…\\Windows, LoadAppInit_DLLs = 0)",
+        "Stop loading AppInit DLLs, the original setting (HKLM\\...\\Windows, LoadAppInit_DLLs = 0)",
+    ),
+    dword(
+        "appinit-coupe-32",
+        APPINIT_32,
+        "LoadAppInit_DLLs",
+        0,
+        "Ne plus charger les DLL AppInit des programmes 32 bits (HKLM\\…\\WOW6432Node\\…\\Windows, LoadAppInit_DLLs = 0)",
+        "Stop loading AppInit DLLs in 32-bit programs (HKLM\\...\\WOW6432Node\\...\\Windows, LoadAppInit_DLLs = 0)",
+    ),
+    dword(
+        "wpad-coupe",
+        r"SYSTEM\CurrentControlSet\Services\WinHttp\Parameters",
+        "DisableWpad",
+        1,
+        "Couper la découverte automatique du proxy (WPAD) (HKLM\\…\\WinHttp\\Parameters, DisableWpad = 1)",
+        "Turn proxy auto-discovery (WPAD) off (HKLM\\...\\WinHttp\\Parameters, DisableWpad = 1)",
+    ),
+    dword(
+        "smb-invite-coupe",
+        r"SYSTEM\CurrentControlSet\Services\LanmanWorkstation\Parameters",
+        "AllowInsecureGuestAuth",
+        0,
+        "Couper les connexions invité aux partages (HKLM\\…\\LanmanWorkstation\\Parameters, AllowInsecureGuestAuth = 0)",
+        "Turn guest connections to shares off (HKLM\\...\\LanmanWorkstation\\Parameters, AllowInsecureGuestAuth = 0)",
+    ),
+    dword(
+        "journal-powershell",
+        r"SOFTWARE\Policies\Microsoft\Windows\PowerShell\ScriptBlockLogging",
+        "EnableScriptBlockLogging",
+        1,
+        "Journaliser les scripts PowerShell (HKLM\\…\\ScriptBlockLogging, EnableScriptBlockLogging = 1)",
+        "Log PowerShell scripts (HKLM\\...\\ScriptBlockLogging, EnableScriptBlockLogging = 1)",
+    ),
+    dword(
+        "uac-active",
+        UAC,
+        "EnableLUA",
+        1,
+        "Réactiver l'UAC, effectif après redémarrage (HKLM\\…\\Policies\\System, EnableLUA = 1)",
+        "Turn UAC back on, effective after a restart (HKLM\\...\\Policies\\System, EnableLUA = 1)",
+    ),
+    dword(
+        "uac-demande",
+        UAC,
+        "ConsentPromptBehaviorAdmin",
+        5,
+        "Remettre la demande de l'UAC, le réglage de Windows (HKLM\\…\\Policies\\System, ConsentPromptBehaviorAdmin = 5)",
+        "Bring back the UAC prompt, the Windows setting (HKLM\\...\\Policies\\System, ConsentPromptBehaviorAdmin = 5)",
+    ),
+    dword(
+        "llmnr-coupe",
+        r"SOFTWARE\Policies\Microsoft\Windows NT\DNSClient",
+        "EnableMulticast",
+        0,
+        "Couper LLMNR, la résolution de noms par diffusion (HKLM\\…\\DNSClient, EnableMulticast = 0)",
+        "Turn LLMNR (broadcast name resolution) off (HKLM\\...\\DNSClient, EnableMulticast = 0)",
+    ),
 ];
+
+/// Une entrée de la table qui met une valeur DWORD sous HKLM.
+const fn dword(
+    id: &'static str,
+    cle: &'static str,
+    valeur: &'static str,
+    donnee: u32,
+    fr: &'static str,
+    en: &'static str,
+) -> Correction {
+    Correction {
+        id,
+        geste: Geste::Dword { cle, valeur, donnee },
+        fr,
+        en,
+    }
+}
 
 /// L'identifiant complet d'une correction de la table (« vanguard:wdigest-coupe »), à mettre dans un `Correctif`.
 pub(crate) fn id(court: &str) -> String {
@@ -271,13 +395,32 @@ mod tests {
             assert!(!c.powershell().is_empty() && !c.texte().is_empty());
             // Aucun geste de la table n'affaiblit la sécurité : les valeurs écrites sont celles du durcissement.
             if let Geste::Dword { valeur, donnee, .. } = c.geste {
-                assert!(matches!(
-                    (valeur, donnee),
-                    ("UseLogonCredential", 0) | ("UserAuthentication", 1)
-                ));
+                const DURCIES: &[(&str, u32)] = &[
+                    ("UseLogonCredential", 0),
+                    ("UserAuthentication", 1),
+                    ("LimitBlankPasswordUse", 1),
+                    ("LmCompatibilityLevel", 3),
+                    ("RestrictAnonymousSAM", 1),
+                    ("EveryoneIncludesAnonymous", 0),
+                    ("NoLMHash", 1),
+                    ("LoadAppInit_DLLs", 0),
+                    ("DisableWpad", 1),
+                    ("AllowInsecureGuestAuth", 0),
+                    ("EnableScriptBlockLogging", 1),
+                    ("EnableLUA", 1),
+                    ("ConsentPromptBehaviorAdmin", 5),
+                    ("EnableMulticast", 0),
+                ];
+                assert!(DURCIES.contains(&(valeur, donnee)), "{valeur} = {donnee}");
             }
         }
         assert_eq!(analyser(POINT).map(|c| c.id), Some("point-de-restauration"));
+        // Le chemin par script crée la clé seulement si elle manque, puis écrit un vrai DWORD.
+        let llmnr = analyser(&id("llmnr-coupe")).unwrap().powershell();
+        assert!(llmnr.starts_with(
+            "if (-not (Test-Path -LiteralPath 'HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows NT\\DNSClient'))"
+        ));
+        assert!(llmnr.ends_with("-Name EnableMulticast -Value 0 -Type DWord"));
     }
 
     /// Tout ce qui n'est pas exactement un identifiant de la table est refusé : du PowerShell, un identifiant

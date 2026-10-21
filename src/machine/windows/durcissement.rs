@@ -293,7 +293,7 @@ pub(super) fn juger_ntlm(niveau: Option<u32>) -> Option<Constat> {
                 "Revenir au réglage par défaut de Windows : NTLMv2 seulement (un très vieux NAS peut ne plus répondre : il faudra le mettre à jour)",
                 "Go back to Windows' default: NTLMv2 only (a very old NAS may stop answering: it will need an update)"
             ),
-            &[r"Set-ItemProperty -LiteralPath 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa' -Name LmCompatibilityLevel -Value 3 -Type DWord"],
+            &[&super::corrections::id("ntlmv2-seul")],
         ),
     )
 }
@@ -415,17 +415,12 @@ pub(super) fn juger_anonyme(restreint_sam: Option<u32>, tous_inclut_anonyme: Opt
     if !sam_ouvert && !anonyme_dans_tous {
         return None;
     }
-    let lsa = r"HKLM:\SYSTEM\CurrentControlSet\Control\Lsa";
     let mut commandes = Vec::new();
     if sam_ouvert {
-        commandes.push(format!(
-            "Set-ItemProperty -LiteralPath '{lsa}' -Name RestrictAnonymousSAM -Value 1 -Type DWord"
-        ));
+        commandes.push(super::corrections::id("sam-anonyme-ferme"));
     }
     if anonyme_dans_tous {
-        commandes.push(format!(
-            "Set-ItemProperty -LiteralPath '{lsa}' -Name EveryoneIncludesAnonymous -Value 0 -Type DWord"
-        ));
+        commandes.push(super::corrections::id("anonyme-hors-tous"));
     }
     let message = if sam_ouvert {
         tr!(
@@ -464,7 +459,7 @@ pub(super) fn juger_empreinte_lm(sans_lm: Option<u32>) -> Option<Constat> {
                 "Ne plus garder cette forme (réglage de Windows) ; changer ensuite son mot de passe efface l'ancienne",
                 "Stop keeping this form (Windows' setting); changing your password afterwards erases the old one"
             ),
-            &[r"Set-ItemProperty -LiteralPath 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa' -Name NoLMHash -Value 1 -Type DWord"],
+            &[&super::corrections::id("lmhash-coupe")],
         )
     })
 }
@@ -519,10 +514,7 @@ pub(super) fn juger_wpad(desactive: Option<u32>, domaine: bool) -> Option<Consta
                 "Turn off Windows' automatic proxy discovery (takes effect at the next restart); for the browser, also untick “Automatically detect settings” (Settings > Network > Proxy)"
             ),
             // Clé créée seulement si elle manque, comme pour LLMNR : « New-Item -Force » écraserait ses autres valeurs.
-            &[
-                "if (-not (Test-Path 'HKLM:\\SYSTEM\\CurrentControlSet\\Services\\WinHttp\\Parameters')) { New-Item -Path 'HKLM:\\SYSTEM\\CurrentControlSet\\Services\\WinHttp\\Parameters' -Force | Out-Null }",
-                "Set-ItemProperty -Path 'HKLM:\\SYSTEM\\CurrentControlSet\\Services\\WinHttp\\Parameters' -Name DisableWpad -Value 1 -Type DWord",
-            ],
+            &[&super::corrections::id("wpad-coupe")],
         )
     })
 }
@@ -725,7 +717,7 @@ pub(super) fn juger_invite_smb(strategie: Option<u32>, reglage: Option<u32>) -> 
                     "Si aucun vieux NAS ne s'ouvre sans mot de passe : couper la connexion invité (commande ci-dessous, en administrateur)",
                     "If no old NAS opens without a password: turn guest connections off (command below, as administrator)"
                 ),
-                &[r"Set-ItemProperty -LiteralPath 'HKLM:\SYSTEM\CurrentControlSet\Services\LanmanWorkstation\Parameters' -Name AllowInsecureGuestAuth -Value 0"],
+                &[&super::corrections::id("smb-invite-coupe")],
             )
         }
     })
@@ -843,10 +835,7 @@ pub(super) fn juger_journal_powershell(valeur: Option<u32>) -> Constat {
             "Journaliser les scripts PowerShell (journal Microsoft-Windows-PowerShell/Operational)",
             "Log PowerShell scripts (Microsoft-Windows-PowerShell/Operational log)"
         ),
-        &[
-            &format!("if (-not (Test-Path 'HKLM:\\{JOURNAL_PS}')) {{ New-Item -Path 'HKLM:\\{JOURNAL_PS}' -Force | Out-Null }}"),
-            &format!("Set-ItemProperty -LiteralPath 'HKLM:\\{JOURNAL_PS}' -Name EnableScriptBlockLogging -Value 1 -Type DWord"),
-        ],
+        &[&super::corrections::id("journal-powershell")],
     )
 }
 
@@ -1120,7 +1109,7 @@ mod tests {
         assert_eq!(coupe.probleme, Some(Niveau::Info));
         // La clé n'est créée que si elle manque, puis la valeur est posée.
         let commandes = &coupe.correctif.as_ref().unwrap().commandes;
-        assert!(commandes[0].starts_with("if (-not (Test-Path") && commandes[1].contains("EnableScriptBlockLogging"));
+        assert_eq!(commandes, &["vanguard:journal-powershell"]);
         // Credential Guard : seulement en Entreprise ou Éducation.
         assert!(juger_credential_guard(Some("Core"), Some("")).is_none());
         assert!(juger_credential_guard(Some("Professional"), Some("")).is_none());
@@ -1236,7 +1225,10 @@ mod tests {
         assert!(!imposee.correctif.as_ref().unwrap().automatique);
         assert!(juger_strategie_ps(Some(("RemoteSigned".into(), false)), "x").is_none());
         assert_eq!(juger_ntlm(Some(1)).unwrap().probleme, Some(Niveau::Eleve));
-        assert!(juger_ntlm(Some(1)).unwrap().correctif.unwrap().commandes[0].contains("-Value 3"));
+        assert_eq!(
+            juger_ntlm(Some(1)).unwrap().correctif.unwrap().commandes[0],
+            "vanguard:ntlmv2-seul"
+        );
         assert!(juger_ntlm(Some(3)).is_none() && juger_ntlm(Some(5)).is_none() && juger_ntlm(None).is_none());
         assert_eq!(juger_signature_smb(Some(0)).unwrap().probleme, Some(Niveau::Info));
         assert!(juger_signature_smb(Some(1)).is_none() && juger_signature_smb(None).is_none());
@@ -1271,7 +1263,7 @@ mod tests {
         // Empreintes LM : seulement NoLMHash à 0 ; absent ou 1, rien.
         assert!(juger_empreinte_lm(None).is_none() && juger_empreinte_lm(Some(1)).is_none());
         let lm = juger_empreinte_lm(Some(0)).unwrap();
-        assert!(lm.probleme == Some(Niveau::Eleve) && lm.correctif.unwrap().commandes[0].contains("NoLMHash -Value 1"));
+        assert!(lm.probleme == Some(Niveau::Eleve) && lm.correctif.unwrap().commandes[0] == "vanguard:lmhash-coupe");
         // Registre à distance : seulement démarré avec Windows (2) ; manuel (3) ou désactivé (4), rien.
         assert!(
             [None, Some(3), Some(4)]
@@ -1334,19 +1326,16 @@ mod tests {
         assert_eq!(sam.probleme, Some(Niveau::Moyen));
         let remise = sam.correctif.unwrap();
         assert!(
-            remise.automatique
-                && remise.commandes.len() == 1
-                && remise.commandes[0].contains("RestrictAnonymousSAM -Value 1")
+            remise.automatique && remise.commandes.len() == 1 && remise.commandes[0] == "vanguard:sam-anonyme-ferme"
         );
         let les_deux = juger_anonyme(Some(0), Some(1)).unwrap().correctif.unwrap();
-        assert!(les_deux.commandes.len() == 2 && les_deux.commandes[1].contains("EveryoneIncludesAnonymous -Value 0"));
-        assert!(les_deux.commandes[0].contains(r"'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa'"));
+        assert!(les_deux.commandes.len() == 2 && les_deux.commandes[1] == "vanguard:anonyme-hors-tous");
         // Connexion invité : la stratégie passe avant le réglage ; imposée, rien à lancer d'ici.
         assert!(juger_invite_smb(None, None).is_none() && juger_invite_smb(None, Some(0)).is_none());
         assert!(juger_invite_smb(Some(0), Some(1)).is_none());
         let c = juger_invite_smb(None, Some(1)).unwrap();
         assert_eq!(c.probleme, Some(Niveau::Moyen));
-        assert!(c.correctif.unwrap().commandes[0].ends_with("-Name AllowInsecureGuestAuth -Value 0"));
+        assert_eq!(c.correctif.unwrap().commandes[0], "vanguard:smb-invite-coupe");
         let impose = juger_invite_smb(Some(1), Some(0)).unwrap().correctif.unwrap();
         assert_eq!(impose.commandes.len(), 0);
         assert!(
@@ -1364,7 +1353,7 @@ mod tests {
             let c = juger_wpad(valeur, false).unwrap();
             assert_eq!(c.probleme, Some(Niveau::Moyen));
             let k = c.correctif.unwrap();
-            assert!(k.automatique && k.commandes[1].contains("-Name DisableWpad -Value 1"));
+            assert!(k.automatique && k.commandes == ["vanguard:wpad-coupe"]);
         }
     }
 }
