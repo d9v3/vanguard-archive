@@ -3,7 +3,7 @@
 **Français** · [English](#security)
 
 Vanguard protège des ordinateurs : une faille dans Vanguard lui-même toucherait ceux qui l'utilisent. Si tu en trouves
-une, **ne l'écris pas dans un ticket public**, ni ailleurs en public, avant que sa correction soit publiée.
+une, **ne l'écris pas dans un ticket public**, ni ailleurs en public, avant la publication de l'avis.
 
 ## Signaler une faille
 
@@ -88,8 +88,8 @@ Par exemple :
 - **Ed25519** : chaque version publiée est décrite par un manifeste (taille et empreinte SHA-256 de chaque programme)
   signé en Ed25519 sur l'ordinateur de l'auteur. Vanguard porte la clé publique et refuse une mise à jour mal signée,
   plus ancienne, ou dont la taille ou l'empreinte diffère.
-- **Compilation reproductible**, vérifiée la nuit sur GitHub : le même code donne exactement le même programme, et
-  l'empreinte de la page de la version se retrouve avec les mêmes outils.
+- **Compilation reproductible** des programmes Linux et Windows, vérifiée la nuit sur GitHub quand le code a changé :
+  le même code, compilé deux fois, donne exactement le même programme.
 
 ---
 
@@ -98,7 +98,7 @@ Par exemple :
 [Français](#sécurité) · **English**
 
 Vanguard protects computers: a flaw in Vanguard itself would hit the people who use it. If you find one, **do not
-write it in a public issue**, or anywhere public, before its fix is published.
+write it in a public issue**, or anywhere public, before the advisory is published.
 
 ## Reporting a vulnerability
 
@@ -180,5 +180,5 @@ For example:
 - **Ed25519**: each published version is described by a manifest (size and SHA-256 checksum of each program) signed
   with Ed25519 on the author's computer. Vanguard carries the public key and refuses an update that is badly signed,
   older, or whose size or checksum differs.
-- **Reproducible build**, checked nightly on GitHub: the same code gives exactly the same program, and the checksum on
-  the release page can be found again with the same tools.
+- **Reproducible build** of the Linux and Windows programs, checked nightly on GitHub when the code changed: the same
+  code, built twice, gives exactly the same program.
