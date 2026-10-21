@@ -705,9 +705,9 @@ regle!(
 // ───────────────────────────── Mot de passe deviné ─────────────────────────────
 
 /// Les adresses dont les connexions réussies se lisent dans une même requête. Chaque adresse y est une condition, et le
-/// journal refuse une requête XPath d'un peu plus de vingt conditions (« The specified query is invalid ») : 15, plus
-/// le numéro et la date, restent en deçà.
-const ADRESSES_PAR_LOT: usize = 15;
+/// journal refuse une requête XPath d'un peu plus de vingt conditions (« The specified query is invalid ») : 14, plus
+/// le numéro, la date et la session anonyme écartée, font les 17 conditions déjà vues acceptées.
+const ADRESSES_PAR_LOT: usize = 14;
 /// Les connexions réussies lues au plus par adresse d'un lot : au-delà, la lecture est dite partielle.
 const REUSSITES_PAR_ADRESSE: usize = 50;
 
@@ -753,8 +753,11 @@ fn requetes_des_reussites(adresses: &[String]) -> Vec<(String, usize)> {
                 .map(|a| format!("(Data[@Name='IpAddress']='{a}')"))
                 .collect::<Vec<_>>()
                 .join(" or ");
+            // Les sessions anonymes (S-1-5-7) écartées dès la requête : une télé qui en ouvre des milliers depuis une
+            // adresse insistante remplirait sinon la borne `max`, ou le délai, d'événements que `ligne_reussite` jette.
+            // `ligne_reussite` les écarte aussi, au cas où le journal écrirait le SID autrement.
             let requete = format!(
-                "*[System[(EventID=4624) and TimeCreated[timediff(@SystemTime) <= {}]] and EventData[{depuis}]]",
+                "*[System[(EventID=4624) and TimeCreated[timediff(@SystemTime) <= {}]] and EventData[({depuis}) and (Data[@Name='TargetUserSid']!='S-1-5-7')]]",
                 u64::from(JOURS) * 86_400_000
             );
             (requete, lot.len() * REUSSITES_PAR_ADRESSE)
@@ -1311,7 +1314,7 @@ mod tests {
     }
 
     /// L'intrus est la 40e adresse la plus insistante, noyé sous des robots : toutes les adresses insistantes sont lues,
-    /// 15 par requête, chacune une seule fois.
+    /// 14 par requête, chacune une seule fois, sans les sessions anonymes.
     #[test]
     fn reussites_de_toutes_les_adresses() {
         use crate::machine::chasse::SEUIL_ECHECS;
@@ -1329,9 +1332,9 @@ mod tests {
         assert_eq!(
             requetes.iter().map(|(_, max)| *max).collect::<Vec<_>>(),
             [
-                15 * REUSSITES_PAR_ADRESSE,
-                15 * REUSSITES_PAR_ADRESSE,
-                10 * REUSSITES_PAR_ADRESSE
+                14 * REUSSITES_PAR_ADRESSE,
+                14 * REUSSITES_PAR_ADRESSE,
+                12 * REUSSITES_PAR_ADRESSE
             ]
         );
         for (requete, _) in &requetes {
@@ -1343,6 +1346,12 @@ mod tests {
                 requete.matches("@Name='IpAddress'").count() <= ADRESSES_PAR_LOT,
                 "{requete}"
             );
+            // Les sessions anonymes écartées par le journal lui-même, et pas plus de conditions qu'il n'en accepte.
+            assert!(
+                requete.contains("(Data[@Name='TargetUserSid']!='S-1-5-7')"),
+                "{requete}"
+            );
+            assert!(requete.matches("(Data[").count() + 2 <= 17, "{requete}");
             assert_eq!(requete.matches('[').count(), requete.matches(']').count(), "{requete}");
             assert_eq!(requete.matches('(').count(), requete.matches(')').count(), "{requete}");
         }
@@ -1355,7 +1364,7 @@ mod tests {
         }
         assert_eq!(
             requetes.last().unwrap().0.matches(" or ").count(),
-            9,
+            11,
             "{}",
             requetes.last().unwrap().0
         );
