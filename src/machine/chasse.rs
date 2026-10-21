@@ -436,7 +436,9 @@ fn programme_du_morceau(morceau: &str) -> Option<&str> {
 /// s'exécute ne touche jamais le disque. Le motif est le mot curl ou wget, ou base64 et son option : l'adresse qui
 /// suit, qui peut porter un jeton, n'est pas montrée.
 pub(crate) fn passe_a_un_shell(ligne: &str) -> Option<Motif> {
-    const INTERPRETES: [&str; 8] = ["sh", "bash", "zsh", "dash", "ksh", "python", "python3", "perl"];
+    // ash : le shell de busybox, celui d'Alpine, des routeurs et des images Docker légères (« | ash »,
+    // « | busybox ash »).
+    const INTERPRETES: [&str; 9] = ["sh", "ash", "bash", "zsh", "dash", "ksh", "python", "python3", "perl"];
     let bas = ligne.to_ascii_lowercase();
     let morceaux = morceaux_du_tube(&bas);
     let interprete =
@@ -1311,6 +1313,9 @@ mod tests {
             "env -u HISTFILE bash",
             "busybox sh",
             "/bin/busybox sh -s",
+            "ash",
+            "busybox ash",
+            "/bin/ash -s",
             "exec bash",
             "HISTFILE=/dev/null bash",
             "sudo env X=1 /usr/bin/python3",
@@ -1319,7 +1324,7 @@ mod tests {
             assert!(passe_a_un_shell(&ligne).is_some(), "{ligne}");
         }
         // Le programme reçu est lu au bout des relais : jq et grep ne sont pas des interpréteurs.
-        for tube in ["sudo -u sh jq .", "env SH=1 grep x", "busybox wc -l"] {
+        for tube in ["sudo -u sh jq .", "env SH=1 grep x", "busybox wc -l", "hash", "flash"] {
             let ligne = format!("curl -s http://192.0.2.7/a.sh | {tube}");
             assert!(passe_a_un_shell(&ligne).is_none(), "{ligne}");
         }
