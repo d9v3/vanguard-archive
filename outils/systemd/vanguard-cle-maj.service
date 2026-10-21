@@ -1,0 +1,17 @@
+[Unit]
+Description=Vanguard : mettre à jour la clé VANGUARD restée branchée
+# Une clé qui reste branchée ne reçoit rien entre deux branchements : chaque jour, son programme et ses images
+# (outils/maj-cle.sh). Seulement si elle est montée, et si c'est bien la clé VANGUARD (son témoin) : sinon le service
+# est sauté, sans erreur. Après les unités du branchement, si les deux partent ensemble ; le verrou de deployer.sh
+# empêche de toute façon deux écritures de la clé à la fois.
+ConditionPathIsMountPoint=/run/media/%u/VANGUARD
+ConditionPathExists=/run/media/%u/VANGUARD/vanguard.cle
+After=network-online.target run-media-%u-VANGUARD.mount vanguard-cle.service vanguard-images-cle.service
+
+[Service]
+Type=oneshot
+ExecStart=%h/Projects/vanguard/outils/maj-cle.sh
+# Une compilation (quelques minutes), puis les images neuves, Kali Linux comprise (16 Gio écrits puis relus, près
+# d'une demi-heure sur une clé lente).
+TimeoutStartSec=3h
+Nice=10

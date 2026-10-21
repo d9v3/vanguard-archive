@@ -4,12 +4,14 @@
 # mémoire) et Kali Linux en live complète (tous ses outils de sécurité, sans rien installer ; publiée en torrent
 # seulement : aria2c la télécharge, puis elle est vérifiée comme les autres par la liste signée du projet).
 #   outils/images-cle.sh --chercher     dernières versions téléchargées dans le cache et vérifiées (minuterie
-#                                       hebdomadaire vanguard-images.timer) ; une image mal signée est effacée
+#                                       hebdomadaire vanguard-images.timer, qui les copie ensuite sur la clé si elle
+#                                       est branchée) ; une image mal signée est effacée
 #   outils/images-cle.sh --importer FICHIER  fait entrer dans le cache une image déjà téléchargée ailleurs (client
 #                                       torrent, autre ordinateur), vérifiée de la même façon ; le fichier reste là
 #   outils/images-cle.sh --verifier     revérifie signature et empreinte des images du cache
 #   outils/images-cle.sh --cle [POINT]  met à jour sur la clé VANGUARD les images qu'elle a déjà : la nouvelle version
-#                                       copiée, puis l'ancienne retirée (au branchement : vanguard-images-cle.service)
+#                                       copiée, puis l'ancienne retirée (au branchement : vanguard-images-cle.service ;
+#                                       chaque jour si la clé reste branchée : vanguard-cle-maj.timer)
 #   outils/images-cle.sh --toutes POINT pose aussi celles qui manquent (nouvelle clé : cle-secours.sh --ecrire ; ou
 #                                       Kali Linux ajoutée à une clé qui ne l'a pas encore)
 #   outils/images-cle.sh --menu POINT   réécrit ventoy/ventoy.json d'après les images de ISO/
@@ -405,7 +407,7 @@ chercher() {
   if ((${#neuves[@]})); then
     avertir "Clé VANGUARD : nouvelles images prêtes" \
       "$(printf '%s\n' "${neuves[@]}")
-Elles iront sur la clé à son prochain branchement."
+La minuterie les copie ensuite sur la clé si elle est branchée ; sinon, elles iront à son prochain branchement."
   fi
   if ((${#replis[@]})); then
     avertir "Clé VANGUARD : Kali Linux pas mise à jour" "$(printf '%s\n' "${replis[@]}")"
@@ -654,5 +656,5 @@ case ${1:-} in
   --toutes) copier_sur_cle "${2:?point de montage de la clé}" toutes ;;
   --menu) menu "${2:?point de montage de la clé}" ;;
   --etat) etat ;;
-  *) sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
+  *) sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
 esac

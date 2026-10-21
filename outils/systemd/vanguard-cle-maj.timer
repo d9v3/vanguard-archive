@@ -1,0 +1,11 @@
+[Unit]
+Description=Vanguard : mettre à jour chaque jour la clé VANGUARD restée branchée
+
+[Timer]
+OnCalendar=daily
+# Ordinateur éteint à l'heure prévue : rattrapé au démarrage suivant, à un moment tiré au hasard.
+Persistent=true
+RandomizedDelaySec=1h
+
+[Install]
+WantedBy=timers.target
