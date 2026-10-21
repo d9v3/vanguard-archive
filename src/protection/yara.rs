@@ -26,7 +26,7 @@ const FILS: usize = 4;
 
 /// Les règles, compilées une fois par lancement (une seconde et demie) ; les analyses suivantes les reprennent.
 /// `Err` : elles ne se compilent pas, ce qu'un test empêche d'arriver jusqu'à une version livrée.
-fn regles() -> Result<&'static yara_x::Rules, &'static str> {
+pub(crate) fn regles() -> Result<&'static yara_x::Rules, &'static str> {
     static COMPILEES: OnceLock<Result<yara_x::Rules, String>> = OnceLock::new();
     COMPILEES
         .get_or_init(|| {
@@ -172,7 +172,7 @@ fn illisible(cible: &Path, echecs: &[PathBuf]) -> Option<String> {
 const MALWAREBAZAAR: &str = "MalwareBazaar sha256:";
 
 /// La famille d'une règle de ReversingLabs, lue dans son nom (« ByteCode_MSIL_Ransomware_Apis »).
-fn famille(regle: &str) -> &'static str {
+pub(crate) fn famille(regle: &str) -> &'static str {
     if regle.starts_with(MALWAREBAZAAR) {
         return tr!(
             "logiciel malveillant connu, empreinte exacte",

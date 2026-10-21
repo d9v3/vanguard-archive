@@ -232,6 +232,10 @@ enum Commande {
         /// Une clé USB, un disque externe ou un dossier à analyser en entier.
         dossier: Option<std::path::PathBuf>,
     },
+    /// Mémoire des processus en marche passée aux 308 règles YARA : un logiciel malveillant sans fichier ne vit que
+    /// là. Lecture seule, à la demande ; LSASS et les processus protégés ne sont jamais ouverts, rien n'est gardé.
+    #[command(visible_alias = "memory")]
+    Memoire,
     /// Lance un programme inconnu dans un bac à sable : pas de réseau, dossier personnel invisible.
     #[command(visible_alias = "sandbox")]
     Isoler {
@@ -928,6 +932,7 @@ enum Action {
     AntivirusComplet,
     AntivirusDossier,
     Yara,
+    Memoire,
     Pieges,
     Protection,
     Bac,
@@ -1097,6 +1102,10 @@ const OUTILS: &[Outil] = &[
         titre: ["Analyse YARA", "YARA scan"],
         precision: ["règles de logiciels malveillants", "malware detection rules"],
         mots: "yara règles rules malware" },
+    Outil { action: Action::Memoire, groupe: Some(Groupe::Protection), lettre: "",
+        titre: ["Mémoire des processus", "Process memory"],
+        precision: ["YARA sur ce qui tourne", "YARA on what is running"],
+        mots: "mémoire memory yara processus sans fichier fileless" },
     Outil { action: Action::Pieges, groupe: Some(Groupe::Protection), lettre: "",
         titre: ["Fichiers-pièges", "Decoy files"],
         precision: ["alerte si un rançongiciel chiffre", "early ransomware warning"],
@@ -1477,6 +1486,7 @@ async fn executer(s: &mut Session, action: Action) {
         Action::AntivirusComplet => protection::antivirus::analyser(protection::antivirus::Portee::Complete),
         Action::AntivirusDossier => protection::antivirus::choisir(),
         Action::Yara => protection::yara::menu(),
+        Action::Memoire => protection::memoire::analyser(),
         Action::Pieges => protection::pieges::menu(),
         Action::Bac => {
             let chemin = demander(tr!("  Programme à isoler (chemin) : ", "  Program to isolate (path): "));
@@ -1554,6 +1564,8 @@ const AIDES_EN: &[(&str, &str)] = &[
                        device is probably infected. After your consent: the lists see the address"),
     ("yara", "YARA scan: 308 rules for malware families (ReversingLabs) and MalwareBazaar's fingerprints, alongside \
               the antivirus. Without a folder: downloads, desktop, startup. Read-only"),
+    ("memoire", "Memory of running processes passed through the 308 YARA rules: fileless malware lives nowhere else. \
+                 Read-only, on demand; LSASS and protected processes are never opened, nothing is kept"),
     ("secrets", "Secrets in the history of the home folder's git projects (passwords, API keys, tokens), searched by \
                  Vanguard, and also by gitleaks if installed. No secret is shown. Read-only"),
     ("conteneurs", "Known flaws in this computer's Docker or Podman images, by trivy if installed. Read-only"),
@@ -1841,6 +1853,7 @@ async fn main() {
         Some(Commande::Pieges { retirer }) => protection::pieges::commande(retirer),
         Some(Commande::Durcir) => optimiser::protection(),
         Some(Commande::Yara { complet, dossier }) => protection::yara::analyser(&portee(dossier, complet)),
+        Some(Commande::Memoire) => protection::memoire::analyser(),
         Some(Commande::ListesNoires) => reseau::listes_noires::verifier(),
         Some(Commande::Canaux) => reseau::canaux::analyser(),
         Some(Commande::Nat) => reseau::nat::tester(),

@@ -28,6 +28,7 @@ pub(crate) mod installes;
 pub(crate) mod lecteurs;
 pub(crate) mod magasins;
 mod maj;
+pub(crate) mod memoire;
 pub(crate) mod partages;
 pub(crate) mod peripheriques;
 mod persistance;
