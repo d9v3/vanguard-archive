@@ -1714,6 +1714,18 @@ async fn main() {
     // Couleurs ANSI dans l'ancienne console Windows (Windows Terminal les gère déjà).
     #[cfg(windows)]
     let _ = enable_ansi_support::enable_ansi_support();
+    // Le processus élevé ne fait que sa liste : rien d'autre ne doit tourner avec le jeton administrateur (journal,
+    // passage, reconnaissance de la clé écrivent dans des dossiers que le compte contrôle).
+    #[cfg(windows)]
+    if std::env::args_os().nth(1).is_some_and(|a| a == "appliquer-eleve") {
+        let code = match Args::from_arg_matches(&ligne_de_commande().get_matches()) {
+            Ok(Args {
+                commande: Some(Commande::AppliquerEleve { canal, parent }),
+            }) => machine::windows::eleve::executer(&canal, parent),
+            _ => 2,
+        };
+        std::process::exit(code);
+    }
     journal::installer();
     #[cfg(unix)]
     protection::cle::proteger_cle();

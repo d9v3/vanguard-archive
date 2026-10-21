@@ -42,7 +42,8 @@ unsafe extern "system" {
     fn GetLastError() -> u32;
     fn GetProcessId(processus: *mut c_void) -> u32;
     fn WaitForSingleObject(objet: *mut c_void, delai: u32) -> u32;
-    fn LoadLibraryW(nom: *const u16) -> *mut c_void;
+    fn LoadLibraryExW(nom: *const u16, fichier: *mut c_void, drapeaux: u32) -> *mut c_void;
+    fn SetDefaultDllDirectories(drapeaux: u32) -> i32;
     fn GetProcAddress(module: *mut c_void, nom: *const u8) -> *mut c_void;
 }
 
@@ -169,6 +170,16 @@ pub(crate) fn appliquer(lignes: &[String]) -> Option<Vec<Reponse>> {
     });
     let serveur = Serveur::creer(&canal)?;
     let exe = std::env::current_exe().ok()?;
+    // Les DLL qu'importe le programme, hors des DLL connues de Windows, sont cherchées d'abord à côté de lui, avant
+    // même sa première ligne : une DLL posée là (clé USB, Téléchargements) tournerait en administrateur. Dans ce cas,
+    // le script PowerShell, lancé depuis System32, prend le relais.
+    if let Some(dll) = exe.parent().and_then(dll_a_cote) {
+        trp!(
+            "    {GRIS}{dll} est à côté de Vanguard : la correction passe par PowerShell, pas par Vanguard en administrateur.{RESET}",
+            "    {GRIS}{dll} sits next to Vanguard: the fix goes through PowerShell, not Vanguard as administrator.{RESET}"
+        );
+        return None;
+    }
     // Ouvert sans partage de suppression tant que le fils n'a pas répondu : ni renommage ni remplacement possibles.
     let _verrou = {
         use std::os::windows::fs::OpenOptionsExt;
@@ -241,10 +252,27 @@ fn appliquer_en_place(lignes: &[String]) -> Vec<Reponse> {
     let mut arret = false;
     for c in liste {
         let r = if arret { refusee() } else { faire(c) };
-        arret |= !r.reussi && matches!(c.geste, corrections::Geste::PointDeRestauration);
+        arret |=
+            !r.reussi && matches!(c.geste, corrections::Geste::PointDeRestauration) && r.raison != sans_point_accepte();
         reponses.push(lire_reponse(&ligne_resultat(&r)));
     }
     reponses
+}
+
+/// Le nom d'une bibliothèque (.dll, .drv) dans ce dossier, s'il y en a une ; un dossier illisible compte comme suspect.
+fn dll_a_cote(dossier: &std::path::Path) -> Option<String> {
+    let Ok(entrees) = std::fs::read_dir(dossier) else {
+        return Some(dossier.display().to_string());
+    };
+    entrees
+        .flatten()
+        .map(|e| e.path())
+        .find(|chemin| {
+            chemin
+                .extension()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("dll") || ext.eq_ignore_ascii_case("drv"))
+        })
+        .map(|chemin| chemin.file_name().unwrap_or_default().to_string_lossy().into_owned())
 }
 
 /// Le processus lancé élevé, à attendre.
@@ -428,8 +456,17 @@ fn lire_lignes(source: impl Read) -> Option<Vec<String>> {
 
 // ------------------------------------------------------------------ le fils
 
+/// LOAD_LIBRARY_SEARCH_SYSTEM32 : une DLL cherchée par son nom ne vient que de System32.
+const CHARGER_DE_SYSTEM32: u32 = 0x800;
+
 /// La sous-commande `appliquer-eleve` : rend le code de sortie du processus.
 pub(crate) fn executer(canal: &str, parent: u32) -> i32 {
+    // Le programme tourne souvent depuis une clé USB ou Téléchargements : une DLL posée à côté de lui ne doit jamais
+    // être chargée avec les droits d'administrateur. Toute charge à venir, même par une bibliothèque, ira dans System32.
+    // SAFETY : simple réglage du processus, sans pointeur.
+    unsafe {
+        SetDefaultDllDirectories(CHARGER_DE_SYSTEM32);
+    }
     trp!(
         "Vanguard applique une correction (administrateur).",
         "Vanguard is applying a fix (administrator)."
@@ -482,10 +519,12 @@ pub(crate) fn executer(canal: &str, parent: u32) -> i32 {
         if !r.reussi {
             code = 1;
             // Sans point de restauration, et la personne ne veut pas continuer sans : tout le reste est abandonné.
-            arret |= matches!(c.geste, corrections::Geste::PointDeRestauration);
+            arret |= matches!(c.geste, corrections::Geste::PointDeRestauration) && r.raison != sans_point_accepte();
         }
         if tube.write_all(format!("{}\n", ligne_resultat(&r)).as_bytes()).is_err() {
+            // Le parent n'entend plus : ce qui suivrait serait changé sans être noté dans « Ce que Vanguard a changé ».
             code = CANAL_REFUSE;
+            break;
         }
     }
     let _ = tube.write_all(format!("{FIN}\n").as_bytes());
@@ -570,6 +609,11 @@ fn ouvrir_le_canal(canal: &str, parent: u32) -> Option<std::fs::File> {
     (empreinte(&moi)? == empreinte(&chemin_parent)?).then_some(tube)
 }
 
+/// La raison d'un point de restauration manquant que la personne a accepté : la suite continue.
+pub(crate) fn sans_point_accepte() -> &'static str {
+    tr!("sans point de restauration, accepté", "no restore point, accepted")
+}
+
 /// Point de restauration par srclient.dll (chargée à la demande : absente, rien ne manque au programme). Impossible
 /// (protection du système coupée sur C:) : on le dit et on demande s'il faut continuer sans. Windows ne crée qu'un
 /// point par 24 h : le plus récent sert alors, l'appel réussit sans en créer.
@@ -594,7 +638,7 @@ pub(crate) fn point_de_restauration() -> (bool, String) {
     // SRSetRestorePointW ; les deux structures ont la disposition attendue et vivent pendant l'appel. Un deuxième appel
     // ferme le changement (séquence rendue par le premier).
     let pose = unsafe {
-        let module = LoadLibraryW(bibliotheque.as_ptr());
+        let module = LoadLibraryExW(bibliotheque.as_ptr(), std::ptr::null_mut(), CHARGER_DE_SYSTEM32);
         if module.is_null() {
             return (false, "srclient.dll absente".into());
         }
@@ -624,7 +668,8 @@ pub(crate) fn point_de_restauration() -> (bool, String) {
         "  Continue without a restore point? [y/N]: "
     ));
     if crate::langue::oui(&reponse) {
-        (true, String::new())
+        // Pas de point : c'est un échec, dit comme tel dans « Ce que Vanguard a changé », mais la suite continue.
+        (false, sans_point_accepte().to_string())
     } else {
         (false, tr!("arrêté à ta demande", "stopped as you asked").to_string())
     }
@@ -633,6 +678,18 @@ pub(crate) fn point_de_restauration() -> (bool, String) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn une_dll_a_cote_du_programme_se_voit() {
+        let dossier = std::env::temp_dir().join(format!("vanguard-dll-{}", std::process::id()));
+        std::fs::create_dir_all(&dossier).unwrap();
+        std::fs::write(dossier.join("vanguard.exe"), b"").unwrap();
+        assert_eq!(dll_a_cote(&dossier), None);
+        std::fs::write(dossier.join("USERENV.DLL"), b"").unwrap();
+        assert_eq!(dll_a_cote(&dossier).as_deref(), Some("USERENV.DLL"));
+        std::fs::remove_dir_all(&dossier).unwrap();
+        assert!(dll_a_cote(&dossier).is_some());
+    }
 
     #[test]
     fn le_canal_a_une_forme_fixe() {

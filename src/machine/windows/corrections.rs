@@ -181,14 +181,43 @@ pub(crate) fn appliquer(c: &Correction) -> Resultat {
     }
 }
 
+/// La valeur d'avant, telle qu'on saura la remettre : un DWORD (« 1 »), « absent » (valeur absente) ou « clé absente ».
+/// Autre type, ou lecture en échec : rien n'est changé, puisque le retour arrière effacerait une valeur qui existait.
+fn valeur_d_avant(racine: &winreg::RegKey, cle: &str, valeur: &str) -> Result<String, String> {
+    use std::io::ErrorKind::NotFound;
+    use winreg::enums::{KEY_READ, RegType};
+    let k = match racine.open_subkey_with_flags(cle, KEY_READ) {
+        Ok(k) => k,
+        Err(e) if e.kind() == NotFound => return Ok("clé absente".into()),
+        Err(e) => return Err(format!("valeur d'avant illisible, rien changé : {e}")),
+    };
+    match k.get_raw_value(valeur) {
+        Err(e) if e.kind() == NotFound => Ok("absent".into()),
+        Err(e) => Err(format!("valeur d'avant illisible, rien changé : {e}")),
+        Ok(brute) if brute.vtype == RegType::REG_DWORD && brute.bytes.len() == 4 => {
+            let octets: [u8; 4] = brute.bytes[..4].try_into().unwrap_or_default();
+            Ok(u32::from_le_bytes(octets).to_string())
+        }
+        Ok(brute) => Err(format!(
+            "valeur d'avant de type inattendu ({:?}), rien changé",
+            brute.vtype
+        )),
+    }
+}
+
 fn ecrire_dword(cle: &str, valeur: &str, donnee: u32) -> Resultat {
     use winreg::enums::{HKEY_LOCAL_MACHINE, KEY_READ, KEY_WRITE};
     let racine = winreg::RegKey::predef(HKEY_LOCAL_MACHINE);
-    let avant = racine
-        .open_subkey(cle)
-        .ok()
-        .and_then(|k| k.get_value::<u32, _>(valeur).ok())
-        .map_or_else(|| "absent".to_string(), |v| v.to_string());
+    let avant = match valeur_d_avant(&racine, cle, valeur) {
+        Ok(avant) => avant,
+        Err(raison) => {
+            return Resultat {
+                reussi: false,
+                avant: None,
+                raison,
+            };
+        }
+    };
     // RegCreateKeyEx ouvre une clé qui existe sans toucher à ses valeurs (au contraire de New-Item -Force).
     let ecrit = racine
         .create_subkey_with_flags(cle, KEY_READ | KEY_WRITE)
@@ -216,6 +245,24 @@ fn ecrire_dword(cle: &str, valeur: &str, donnee: u32) -> Resultat {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Lecture seule : rien n'est écrit dans le registre de la machine de test.
+    #[test]
+    fn valeur_d_avant_exacte_ou_refus() {
+        let hklm = winreg::RegKey::predef(winreg::enums::HKEY_LOCAL_MACHINE);
+        let nt = r"SOFTWARE\Microsoft\Windows NT\CurrentVersion";
+        assert_eq!(
+            valeur_d_avant(&hklm, r"SOFTWARE\VanguardInexistante", "X").unwrap(),
+            "clé absente"
+        );
+        assert_eq!(valeur_d_avant(&hklm, nt, "VanguardInexistante").unwrap(), "absent");
+        // Une chaîne (REG_SZ) ne se remet pas comme un DWORD : refusée, rien n'est changé.
+        assert!(
+            valeur_d_avant(&hklm, nt, "ProductName")
+                .unwrap_err()
+                .contains("type inattendu")
+        );
+    }
 
     #[test]
     fn la_table_est_bien_formee() {
