@@ -32,15 +32,17 @@ unsafe extern "system" {
 
 /// Les lignes des deux magasins « Root », ordinateur d'abord ; `None` si celui de l'ordinateur ne se lit pas jusqu'au
 /// bout, ou se lit vide : un vrai Windows a toujours des racines dans ce magasin, et « 0 certificat, aucun ajouté »
-/// serait une lecture ratée comptée saine. PowerShell reprend alors.
+/// serait une lecture ratée comptée saine. `None` aussi si celui du compte refuse de s'ouvrir : c'est là qu'un outil
+/// d'interception installe sa racine sans droits administrateur. PowerShell reprend alors, comme le script qui
+/// s'arrêtait sur l'un ou l'autre.
 pub(crate) fn racines() -> Option<String> {
     let mut lignes = lire("LocalMachine", 2 << 16).filter(|l| !l.is_empty())?;
-    lignes.extend(lire("CurrentUser", 1 << 16).unwrap_or_default());
+    lignes.extend(lire("CurrentUser", 1 << 16)?);
     Some(lignes.join("\n"))
 }
 
 /// Les certificats du magasin « Root » d'un emplacement (CERT_SYSTEM_STORE_LOCAL_MACHINE ou CURRENT_USER), ouvert en
-/// lecture seule ; `None` s'il ne s'ouvre pas ou si l'énumération s'arrête sur une erreur.
+/// lecture seule ; vide s'il n'existe pas, `None` s'il refuse de s'ouvrir ou si l'énumération s'arrête sur une erreur.
 fn lire(nom: &str, emplacement: u32) -> Option<Vec<String>> {
     const SYSTEME: usize = 10;
     const EXISTANT_LECTURE_SEULE: u32 = 0x4000 | 0x8000;
@@ -65,7 +67,10 @@ fn lire(nom: &str, emplacement: u32) -> Option<Vec<String>> {
             racine.as_ptr().cast(),
         );
         if magasin.is_null() {
-            return None;
+            // Magasin absent (sa clé du registre n'existe pas, ERROR_FILE_NOT_FOUND) : aucun certificat ne peut y
+            // être, une vraie liste vide. Tout autre refus : non lu.
+            const ABSENT: i32 = 2;
+            return (std::io::Error::last_os_error().raw_os_error() == Some(ABSENT)).then(Vec::new);
         }
         let mut certificat = std::ptr::null();
         let complet = loop {
