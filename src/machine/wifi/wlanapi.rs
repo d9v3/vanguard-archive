@@ -298,7 +298,7 @@ mod natif {
 
     #[link(name = "kernel32")]
     unsafe extern "system" {
-        fn LoadLibraryW(nom: *const u16) -> *mut c_void;
+        fn LoadLibraryExW(nom: *const u16, fichier: *mut c_void, drapeaux: u32) -> *mut c_void;
         fn GetProcAddress(module: *mut c_void, nom: *const u8) -> *mut c_void;
         fn FreeLibrary(module: *mut c_void) -> i32;
     }
@@ -359,7 +359,7 @@ mod natif {
 
     impl Drop for Api {
         fn drop(&mut self) {
-            // SAFETY : le module vient de LoadLibraryW et n'est libéré qu'ici, une fois ; plus aucun pointeur de
+            // SAFETY : le module vient de LoadLibraryExW et n'est libéré qu'ici, une fois ; plus aucun pointeur de
             // fonction n'est appelé après.
             unsafe {
                 FreeLibrary(self.module);
@@ -377,11 +377,17 @@ mod natif {
     impl Api {
         /// `None` : la bibliothèque manque ou n'a pas toutes les fonctions (Windows Server sans la fonction WLAN).
         fn charger() -> Option<Api> {
+            /// LOAD_LIBRARY_SEARCH_SYSTEM32.
+            const CHERCHER_DANS_SYSTEM32: u32 = 0x800;
             let nom: Vec<u16> = "wlanapi.dll\0".encode_utf16().collect();
-            // SAFETY : le nom est terminé par un zéro ; chaque nom de fonction aussi. Un pointeur nul est vérifié
-            // avant d'être converti ; les signatures sont celles de wlanapi.h. Le module est libéré par Drop.
+            // Seulement depuis System32 : wlanapi.dll n'est pas une « KnownDLL », et un LoadLibraryW par son seul nom
+            // la chercherait d'abord dans le dossier de vanguard.exe (clé USB, Téléchargements), où n'importe qui peut
+            // poser une fausse DLL qui s'exécuterait dans Vanguard.
+            // SAFETY : le nom est terminé par un zéro ; chaque nom de fonction aussi ; aucun fichier n'est passé
+            // (pointeur nul permis). Un pointeur nul est vérifié avant d'être converti ; les signatures sont celles
+            // de wlanapi.h. Le module est libéré par Drop.
             unsafe {
-                let module = LoadLibraryW(nom.as_ptr());
+                let module = LoadLibraryExW(nom.as_ptr(), std::ptr::null_mut(), CHERCHER_DANS_SYSTEM32);
                 if module.is_null() {
                     return None;
                 }
