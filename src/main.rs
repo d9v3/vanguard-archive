@@ -109,6 +109,9 @@ enum Commande {
     AuditReseau {
         #[arg(long)]
         json: bool,
+        /// Tu es sur le réseau invité : Vanguard vérifie qu'il est bien séparé du réseau principal.
+        #[arg(long, visible_alias = "guest")]
+        invite: bool,
     },
     /// Recherche de malwares : ClamAV (Linux, macOS) ou Microsoft Defender (Windows).
     Antivirus {
@@ -453,7 +456,7 @@ impl Session {
 
     /// L'audit du réseau par domaine : le scan de la session s'il a moins de dix minutes, sinon un scan silencieux ;
     /// puis les six domaines, à l'écran ou en JSON. Sans réseau local, six domaines « non vérifié ».
-    async fn audit_reseau(&mut self, json: bool) {
+    async fn audit_reseau(&mut self, json: bool, invite: bool) {
         let recent = self
             .scan_le
             .is_some_and(|t| t.elapsed() < std::time::Duration::from_secs(600));
@@ -483,7 +486,7 @@ impl Session {
             }
         }
         let Some(scan) = &self.reseau else { return };
-        let a = audit::auditer(scan, None, false, false).await;
+        let a = audit::auditer(scan, None, invite, false).await;
         audit::rendre(&a, json);
         self.audit_reseau = Some(a);
     }
@@ -491,9 +494,24 @@ impl Session {
     async fn complet(&mut self) {
         self.audit = Some(machine::executer(false));
         self.scanner_reseau(None, "courants").await;
+        // L'audit du réseau par domaine, après le scan : les constats réseau du bilan qui vient de finir lui servent
+        // tels quels (le domaine Postes), sans relancer ces règles.
+        if let Some(scan) = &self.reseau {
+            let machine = self.audit.as_ref().map(|a| {
+                a.constats
+                    .iter()
+                    .filter(|c| audit::regle_du_reseau(c.regle))
+                    .cloned()
+                    .collect()
+            });
+            let a = audit::auditer(scan, machine, false, false).await;
+            audit::afficher(&a);
+            self.audit_reseau = Some(a);
+        }
         titre(tr!("Bilan global", "Overall result"));
         let m = self.audit.as_ref().filter(|a| a.fiable()).map(|a| a.score);
         let r = self.reseau.as_ref().map(|r| r.score_global);
+        let audit_reseau = self.audit_reseau.as_ref().and_then(|a| a.score);
         match m {
             Some(m) => afficher_note(tr!("Cette machine", "This machine"), m),
             None => trp!(
@@ -504,7 +522,15 @@ impl Session {
         if let Some(r) = r {
             afficher_note(tr!("Réseau", "Network"), r);
         }
-        if let Some(g) = [m, r].into_iter().flatten().min() {
+        match (self.audit_reseau.as_ref(), audit_reseau) {
+            (Some(_), Some(s)) => afficher_note(tr!("Audit du réseau", "Network audit"), s),
+            (Some(_), None) => trp!(
+                "  Audit du réseau : pas de note (domaines non vérifiés)",
+                "  Network audit: no grade (domains not checked)"
+            ),
+            (None, _) => {}
+        }
+        if let Some(g) = [m, r, audit_reseau].into_iter().flatten().min() {
             afficher_note(tr!("Global", "Overall"), g);
         }
         let (precedent, nouveau) = historique::enregistrer(self.audit.as_ref(), self.reseau.as_ref());
@@ -868,6 +894,7 @@ enum Action {
     Changements,
     Entretien,
     Scanner,
+    AuditReseau,
     Appareil,
     Nommer,
     Surveillance,
@@ -992,6 +1019,11 @@ const OUTILS: &[Outil] = &[
         titre: ["Scanner le réseau", "Scan the network"],
         precision: ["appareils, ports, nouveautés", "devices, ports, changes"],
         mots: "appareils devices ports réseau network lan nmap" },
+    Outil { action: Action::AuditReseau, groupe: Some(Groupe::Reseau), lettre: "",
+        titre: ["Audit du réseau", "Network audit"],
+        precision: ["six notes : box, Wi-Fi, DNS…", "six grades: router, Wi-Fi, DNS…"],
+        mots: "audit réseau network exposition exposure wifi dns tls segmentation appareils devices objets postes \
+               computers upnp redirection note grade cyberdéfense cyberdefense box routeur router" },
     Outil { action: Action::Appareil, groupe: Some(Groupe::Reseau), lettre: "",
         titre: ["Scan approfondi d'un appareil", "Deep scan of one device"], precision: ["tous les ports", "all ports"],
         mots: "appareils devices ports réseau network lan nmap" },
@@ -1395,6 +1427,7 @@ async fn executer(s: &mut Session, action: Action) {
         Action::Maj => maj::executer(),
         Action::Reparer => reparer::menu(),
         Action::Scanner => s.scanner_reseau(None, "courants").await,
+        Action::AuditReseau => s.audit_reseau(false, false).await,
         Action::Appareil => {
             let ip = demander(tr!(
                 "Adresse IP de l'appareil (ex. 10.0.0.1) : ",
@@ -1597,6 +1630,8 @@ const OPTIONS_EN: &[(&str, &str, &str)] = &[
     ("reseau", "ports", "“courants”/“common” (default), “tous”/“all” (1-65535) or a list “22,80,8000-8100”"),
     ("reseau", "timeout", "Connection timeout per port, in milliseconds"),
     ("reseau", "parallele", "Number of simultaneous connections"),
+    ("audit-reseau", "invite", "You are on the guest network: Vanguard checks that it is really separated from the main \
+                                one"),
     ("antivirus", "complet", "The whole home folder instead of the risky places"),
     ("antivirus", "dossier", "A USB drive, external disk or folder to scan entirely"),
     ("isoler", "fichier", "Program or script to run"),
@@ -1707,7 +1742,7 @@ async fn main() {
                 std::process::exit(1);
             }
         }
-        Some(Commande::AuditReseau { json }) => Session::default().audit_reseau(json).await,
+        Some(Commande::AuditReseau { json, invite }) => Session::default().audit_reseau(json, invite).await,
         Some(Commande::Antivirus { complet, dossier }) => protection::antivirus::analyser(portee(dossier, complet)),
         Some(Commande::Surveillance { etat }) => reseau::surveillance::activer(etat == "on"),
         Some(Commande::Tableau { sans_ouvrir }) => reseau::tableau::ouvrir(sans_ouvrir),

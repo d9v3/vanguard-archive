@@ -1307,8 +1307,8 @@ fn afficher(r: &Rapport) {
     afficher_aligne(
         "  ",
         tr!(
-            "Astuce : menu 5 › 3 pour nommer un appareil (vanguard nommer <ip> <surnom>), 5 › 2 pour scanner tous ses ports (vanguard reseau <ip> -p tous).",
-            "Tip: menu 5 › 3 to name a device (vanguard name <ip> <nickname>), 5 › 2 to scan all its ports (vanguard network <ip> -p all)."
+            "Astuce : menu 5 › 4 pour nommer un appareil (vanguard nommer <ip> <surnom>), 5 › 3 pour scanner tous ses ports (vanguard reseau <ip> -p tous).",
+            "Tip: menu 5 › 4 to name a device (vanguard name <ip> <nickname>), 5 › 3 to scan all its ports (vanguard network <ip> -p all)."
         ),
         2,
         DISCRET,
