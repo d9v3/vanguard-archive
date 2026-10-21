@@ -168,7 +168,7 @@ fn par_lots<A>(
                     let mut analyseur = nouveau();
                     let (mut trouves, mut echecs) = (Vec::new(), Vec::new());
                     for f in lot {
-                        let examen = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| un(&mut analyseur, f)));
+                        let examen = crate::journal::rattraper(std::panic::AssertUnwindSafe(|| un(&mut analyseur, f)));
                         let Ok((t, lu)) = examen else {
                             echecs.push(f.clone());
                             analyseur = nouveau();

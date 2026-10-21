@@ -65,11 +65,15 @@ notify = { version = "8.2.0", default-features = false, features = ["macos_fseve
 strip = true
 lto = true
 codegen-units = 1
-# Dépassements de capacité vérifiés aussi dans la version publiée (guide Rust sécurisé de l'ANSSI, règle LANG-ARITH) :
-# sans cela, une taille ou un décalage lu dans une donnée hostile (paquet réseau, bail, journal, fichier PE) qui
-# déborde repart à zéro en silence et fausse la suite de la lecture. Ici, il panique, comme en développement. Les
-# paniques restent rattrapées (catch_unwind autour de chaque règle et de chaque domaine du bilan, qui deviennent
-# « non vérifié ») : panic garde donc sa valeur par défaut, « unwind », jamais « abort ».
+# Dépassements de capacité vérifiés aussi dans la version publiée : l'option que cite la note du chapitre « Traitement
+# des entiers » du guide Rust sécurisé de l'ANSSI. Elle ne remplace pas sa règle LANG-ARITH, qui veut des opérations
+# explicites (checked_, saturating_, wrapping_…) partout où un entier peut déborder, quel que soit le profil : c'est
+# un filet pour celles qu'on oublie. Sans lui, une taille ou un décalage lu dans une donnée hostile (paquet réseau,
+# bail, journal, fichier PE) qui déborde repart à zéro en silence et fausse la suite de la lecture ; ici, il panique,
+# comme en développement. Une panique n'est rattrapée qu'autour de chaque règle et de chaque domaine du bilan et de
+# chaque fichier analysé par YARA (« non vérifié », journal::rattraper) : panic garde donc sa valeur par défaut,
+# « unwind », jamais « abort ». Ailleurs, elle arrête la commande : une somme de données que n'importe quel programme
+# peut poser (tailles de fichiers creux à nettoyer ou à copier) sature donc, au lieu de compter sur ce filet.
 overflow-checks = true
 
 # Les bibliothèques en développement : seulement les numéros de ligne (les traces d'erreur restent lisibles). Avec toutes

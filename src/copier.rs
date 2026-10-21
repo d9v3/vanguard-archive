@@ -473,9 +473,11 @@ fn lire_lecteurs(texte: &str, systeme: &str) -> Vec<Disque> {
         .collect()
 }
 
-/// Nombre de fichiers et octets d'un dossier, sous-dossiers compris, sans suivre les liens.
+/// Nombre de fichiers et octets d'un dossier, sous-dossiers compris, sans suivre les liens. Les octets sont plafonnés
+/// à `u64::MAX` : quelques fichiers creux, qui annoncent des exaoctets sans rien occuper, feraient paniquer la somme
+/// dans la version publiée (`nettoyer::somme`).
 fn mesurer(dossier: &Path) -> (u64, u64) {
-    let (mut fichiers, mut octets) = (0, 0);
+    let (mut fichiers, mut octets) = (0, 0_u64);
     let mut a_voir = vec![dossier.to_path_buf()];
     while let Some(d) = a_voir.pop() {
         for e in std::fs::read_dir(&d).into_iter().flatten().flatten() {
@@ -484,7 +486,7 @@ fn mesurer(dossier: &Path) -> (u64, u64) {
                 a_voir.push(e.path());
             } else if m.is_file() {
                 fichiers += 1;
-                octets += m.len();
+                octets = octets.saturating_add(m.len());
             }
         }
     }
@@ -714,7 +716,9 @@ fn copier_fichier(source: &Path, dossier: &Path, bilan: &mut Bilan) {
             .any(|p| identiques(&p, source));
         if deja_copie {
             bilan.deja += 1;
-            bilan.octets += std::fs::metadata(source).map_or(0, |m| m.len());
+            bilan.octets = bilan
+                .octets
+                .saturating_add(std::fs::metadata(source).map_or(0, |m| m.len()));
             return;
         }
         cible = nom_libre(dossier, &nom);
@@ -735,7 +739,9 @@ fn copier_fichier(source: &Path, dossier: &Path, bilan: &mut Bilan) {
     match essai {
         Ok(()) => {
             bilan.copies += 1;
-            bilan.octets += std::fs::metadata(&cible).map_or(0, |m| m.len());
+            bilan.octets = bilan
+                .octets
+                .saturating_add(std::fs::metadata(&cible).map_or(0, |m| m.len()));
             if cible.file_name() != source.file_name() {
                 bilan.renommes.push((source.to_path_buf(), cible));
             }
@@ -761,7 +767,7 @@ fn copier_arbre(source: &Path, cible: &Path, bilan: &mut Bilan, avancement: &mut
             } else if m.is_file() {
                 copier_fichier(&chemin, &vers, bilan);
                 avancement.fichiers += 1;
-                avancement.octets += m.len();
+                avancement.octets = avancement.octets.saturating_add(m.len());
                 avancement.montrer(false);
             }
         }
@@ -989,7 +995,9 @@ pub fn commande(destination: Option<&Path>) {
         .zip(coches)
         .filter_map(|(choisi, coche)| coche.then_some(choisi))
         .unzip();
-    let total = tailles.iter().fold((0, 0), |(n, o), (f, b)| (n + f, o + b));
+    let total = tailles.iter().fold((0_u64, 0_u64), |(n, o), (f, b)| {
+        (n.saturating_add(*f), o.saturating_add(*b))
+    });
     if choisis.is_empty() {
         trp!("  Rien à copier.", "  Nothing to copy.");
         return;
@@ -1651,6 +1659,24 @@ mod tests {
         );
         assert_eq!(mesurer(&source), (1, 3));
         let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// Quatre fichiers creux de 4 Eio chacun (sans rien occuper : tmpfs, btrfs, XFS, APFS) dépassent un u64. La mesure
+    /// d'avant la copie les plafonne : sa somme ordinaire paniquait dans les tests comme dans la version publiée, qui
+    /// vérifie les dépassements. Un système de fichiers qui refuse une telle taille (ext4, NTFS) : rien à mesurer.
+    #[cfg(unix)]
+    #[test]
+    fn des_fichiers_creux_ne_font_pas_deborder_la_mesure() {
+        let d = jetable("creux");
+        let creux = (0..4).all(|i| {
+            std::fs::File::create(d.join(format!("creux{i}")))
+                .and_then(|f| f.set_len(1 << 62))
+                .is_ok()
+        });
+        if creux {
+            assert_eq!(mesurer(&d), (4, u64::MAX));
+        }
+        let _ = std::fs::remove_dir_all(&d);
     }
 
     #[test]

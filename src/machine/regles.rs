@@ -113,7 +113,7 @@ pub(super) fn verifications<'a>() -> Vec<Verification<'a>> {
 /// interne » non vérifiée, qui dit laquelle et que `Audit::fiable` voit).
 pub(super) fn verification<'a>(r: &'static Regle) -> Verification<'a> {
     Box::new(move || {
-        std::panic::catch_unwind(r.verifier)
+        crate::journal::rattraper(r.verifier)
             .unwrap_or_else(|_| {
                 vec![super::impossible(
                     "Audit",

@@ -433,7 +433,7 @@ fn erreur_interne(d: Domaine) -> Constat {
 /// Les constats d'un domaine, son entrée tirée du contexte ; un domaine qui plante ou ne rend rien est dit non
 /// vérifié, sans emporter les autres.
 fn constats_du_domaine(d: Domaine, c: &Contexte) -> Vec<Constat> {
-    let constats = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match d {
+    let constats = crate::journal::rattraper(std::panic::AssertUnwindSafe(|| match d {
         Domaine::Exposition => {
             let mut e = exposition::Entree::du_scan(c.scan);
             e.passerelle = c.passerelle;

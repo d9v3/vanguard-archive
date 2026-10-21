@@ -36,7 +36,7 @@ fn taille_corbeille() -> Option<u64> {
         .ok()?
         .flatten()
         .filter_map(|e| taille_dossier(&e.path(), Age::Tout, &[]))
-        .reduce(|a, b| a + b)
+        .reduce(u64::saturating_add)
 }
 
 pub fn elements() -> Vec<Element> {

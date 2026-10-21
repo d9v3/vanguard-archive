@@ -661,10 +661,12 @@ fn bail_macos(plist: &crate::plist::Valeur) -> Option<Bail> {
     let Some(Valeur::Donnees(paquet)) = plist.cle("PacketData") else {
         return None;
     };
-    // Dates d'Apple : secondes depuis le 1er janvier 2001.
+    // Dates d'Apple : secondes depuis le 1er janvier 2001. Un plist binaire abîmé peut en porter une démesurée
+    // (1e300, l'infini) : passé 1e11 s (vers l'an 5170), elle est ignorée, comme absente. Ajoutée telle quelle, elle
+    // débordait, et la version publiée, qui vérifie les dépassements, perdait les domaines Segmentation et DNS/TLS.
     let debut = match plist.cle("LeaseStartDate") {
         #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // une date, pas un calcul
-        Some(Valeur::Date(d)) if *d > 0.0 => Some(*d as u64 + 978_307_200),
+        Some(Valeur::Date(d)) if *d > 0.0 && *d < 1e11 => Some((*d as u64).saturating_add(978_307_200)),
         _ => None,
     };
     let mut bail = paquet_dhcp(paquet, debut)?;
@@ -912,6 +914,16 @@ mod tests {
         assert_eq!(b.dns, [ip("10.0.0.1"), ip("203.0.113.53")]);
         assert_eq!(b.expire, Some(800_000_000 + 978_307_200 + 86_400));
         assert!(bail_macos(&Valeur::Dico(vec![])).is_none());
+        // Une date démesurée (plist binaire abîmé) : ignorée, le reste du bail lu. Elle débordait (« as u64 » sature,
+        // puis l'addition), et le domaine entier devenait une erreur interne.
+        for demesuree in [1e300, f64::INFINITY] {
+            let bail = Valeur::Dico(vec![
+                ("LeaseStartDate".into(), Valeur::Date(demesuree)),
+                ("PacketData".into(), Valeur::Donnees(paquet())),
+            ]);
+            let b = bail_macos(&bail).unwrap();
+            assert_eq!((b.expire, b.dns.len()), (None, 2), "{demesuree}");
+        }
         let preferences = Valeur::Dico(vec![(
             "NetworkServices".into(),
             Valeur::Dico(vec![

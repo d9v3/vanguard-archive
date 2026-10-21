@@ -70,6 +70,15 @@ pub fn maison() -> PathBuf {
     PathBuf::from(std::env::var_os("HOME").unwrap_or_default())
 }
 
+/// Somme de tailles, plafonnée à `u64::MAX`. Un fichier creux (btrfs, XFS, tmpfs, APFS) annonce jusqu'à 8 Eio sans
+/// rien occuper, et n'importe quel programme du compte peut en poser dans un cache ou dans la corbeille : trois
+/// suffisent à dépasser un u64. La version publiée vérifie les dépassements de capacité : une somme ordinaire y
+/// paniquerait (nettoyer, entretien du mois, dépannage, copie), là où le total plafonné reste un minimum vrai, comme
+/// celui d'une mesure interrompue à l'échéance.
+fn somme(tailles: impl IntoIterator<Item = u64>) -> u64 {
+    tailles.into_iter().fold(0, u64::saturating_add)
+}
+
 /// Ce que mesurer dans un dossier.
 #[derive(Clone, Copy)]
 pub enum Age {
@@ -81,14 +90,14 @@ pub enum Age {
 
 /// Taille d'un dossier en octets, sous-dossiers compris, sans ceux de `exclus` ; `None` s'il ne peut pas être lu du
 /// tout (droits) : « vide » et « illisible » ne se confondent pas. Arrêt après deux secondes (un cache de millions
-/// de fichiers) : le total est alors un minimum.
+/// de fichiers) : le total est alors un minimum, comme quand il atteint `u64::MAX` (voir `somme`).
 pub fn taille_dossier(dossier: &Path, age: Age, exclus: &[PathBuf]) -> Option<u64> {
     let echeance = Instant::now() + Duration::from_secs(2);
     let limite = match age {
         Age::Tout => None,
         Age::NonModifieDepuis(j) => Some(SystemTime::now() - Duration::from_secs(j * 86_400)),
     };
-    let mut total = 0;
+    let mut total = 0_u64;
     let mut a_voir = vec![std::fs::read_dir(dossier).ok()?];
     while let Some(entrees) = a_voir.pop() {
         if Instant::now() > echeance {
@@ -107,7 +116,7 @@ pub fn taille_dossier(dossier: &Path, age: Age, exclus: &[PathBuf]) -> Option<u6
                     a_voir.push(sous);
                 }
             } else if limite.is_none_or(|l| m.modified().is_ok_and(|d| d < l)) {
-                total += m.len();
+                total = total.saturating_add(m.len());
             }
         }
     }
@@ -145,7 +154,7 @@ fn caches_endormis(dossier: &Path, jours: u64, exclus: &[&str]) -> Vec<(String, 
 /// lit pas ou si l'échéance passe avant la fin. Les dates des dossiers ne comptent pas : les parcourir les change.
 #[cfg(unix)]
 fn dernier_usage(chemin: &Path, echeance: Instant) -> Option<(u64, SystemTime)> {
-    let mut total = 0;
+    let mut total = 0_u64;
     let mut recent = SystemTime::UNIX_EPOCH;
     let mut a_voir = vec![chemin.to_path_buf()];
     while let Some(p) = a_voir.pop() {
@@ -159,7 +168,7 @@ fn dernier_usage(chemin: &Path, echeance: Instant) -> Option<(u64, SystemTime)> 
         if m.is_dir() {
             a_voir.extend(std::fs::read_dir(&p).ok()?.flatten().map(|e| e.path()));
         } else {
-            total += m.len();
+            total = total.saturating_add(m.len());
             recent = [m.accessed(), m.modified()]
                 .into_iter()
                 .flatten()
@@ -211,8 +220,12 @@ pub fn volume(chemin: &Path) -> Option<(u64, u64)> {
     let s = statvfs(chemin)?;
     #[allow(clippy::useless_conversion)] // les types de statvfs changent d'un système à l'autre
     let bloc = u64::from(s.f_frsize);
+    // Plafonnés comme les tailles de fichiers : un volume réseau ou FUSE (sshfs) dit ce que son serveur veut.
     #[allow(clippy::useless_conversion)]
-    Some((u64::from(s.f_bavail) * bloc, u64::from(s.f_blocks) * bloc))
+    Some((
+        u64::from(s.f_bavail).saturating_mul(bloc),
+        u64::from(s.f_blocks).saturating_mul(bloc),
+    ))
 }
 
 /// La date de dernière lecture est-elle tenue à jour sur le volume de `chemin` ? Monté en `noatime` (conseil courant
@@ -258,7 +271,7 @@ pub fn caches_inutilises(cache: &Path, affiche: &str, exclus: &[&str], lectures_
         )
         .into(),
         prudence: None,
-        taille: Some(endormis.iter().map(|(_, t)| t).sum()),
+        taille: Some(somme(endormis.iter().map(|(_, t)| *t))),
         commandes: vec![effacer_caches(affiche, &endormis)],
         recommande: true,
         admin: false,
@@ -307,11 +320,12 @@ fn mesurer() -> Vec<Element> {
 /// Place que le nettoyage recommandé (ce qui se refait seul) libérerait, mesurée sans rien afficher ni effacer :
 /// pour l'entretien du mois.
 pub fn place_a_liberer() -> u64 {
-    systeme::elements()
-        .iter()
-        .filter(|e| e.recommande && !e.propre())
-        .filter_map(|e| e.taille)
-        .sum()
+    somme(
+        systeme::elements()
+            .iter()
+            .filter(|e| e.recommande && !e.propre())
+            .filter_map(|e| e.taille),
+    )
 }
 
 /// Ce qui va être nettoyé, montré avant de demander : titre et place, commandes, et le revers coupé pour tenir dans
@@ -379,7 +393,7 @@ pub fn menu() {
     for l in a_nettoyer(&choisis) {
         println!("{l}");
     }
-    let connu: u64 = choisis.iter().filter_map(|e| e.taille).sum();
+    let connu = somme(choisis.iter().filter_map(|e| e.taille));
     if connu >= PRESQUE_RIEN {
         trp!(
             "\n  Au moins {} à libérer.",
@@ -434,18 +448,19 @@ pub fn liste() {
         };
         println!("    {marque} {}{GRIS}{}{RESET}", ajuster(e.titre, 40), precision(e));
     }
-    let somme = |reco: bool| -> u64 {
-        elements
-            .iter()
-            .filter(|e| !e.propre() && (e.recommande || !reco))
-            .filter_map(|e| e.taille)
-            .sum()
+    let a_liberer = |reco: bool| {
+        somme(
+            elements
+                .iter()
+                .filter(|e| !e.propre() && (e.recommande || !reco))
+                .filter_map(|e| e.taille),
+        )
     };
     let bilan = trf!(
         "« + » : coché d'office, au moins {} à libérer ({} avec le reste).",
         "“+”: checked by default, at least {} to free ({} with the rest).",
-        taille_lisible(somme(true)),
-        taille_lisible(somme(false))
+        taille_lisible(a_liberer(true)),
+        taille_lisible(a_liberer(false))
     );
     println!();
     afficher_aligne("  ", &bilan, 2, "");
@@ -481,6 +496,41 @@ mod tests {
         // Rien d'assez vieux : des fichiers écrits à l'instant.
         assert_eq!(taille_dossier(&racine, Age::NonModifieDepuis(7), &[]), Some(0));
         assert_eq!(taille_dossier(&racine.join("absent"), Age::Tout, &[]), None);
+        std::fs::remove_dir_all(&racine).unwrap();
+    }
+
+    /// Des fichiers creux annoncent chacun 4 Eio sans rien occuper (tmpfs, btrfs, XFS, APFS) : à quatre, leur somme
+    /// dépasse un u64. Les tests vérifient les dépassements comme la version publiée : une somme ordinaire paniquait
+    /// ici, et avec elle nettoyer, l'entretien du mois (corbeille et caches sont toujours mesurés) et le dépannage.
+    /// Un système de fichiers qui refuse une telle taille (ext4, NTFS) ne peut pas porter le piège : rien à mesurer.
+    #[cfg(unix)]
+    #[test]
+    fn des_fichiers_creux_ne_font_pas_deborder_les_tailles() {
+        assert_eq!(somme([u64::MAX - 1, 1, u64::MAX]), u64::MAX);
+        let racine = std::env::temp_dir().join(format!("vanguard-creux-{}", std::process::id()));
+        let cache = racine.join("cache");
+        let oublie = SystemTime::now() - Duration::from_hours(200 * 24);
+        let creux = |f: &str| {
+            let chemin = cache.join(f);
+            std::fs::create_dir_all(chemin.parent().unwrap()).unwrap();
+            std::fs::File::create(&chemin)
+                .and_then(|fichier| {
+                    fichier.set_len(1 << 62)?;
+                    fichier.set_times(std::fs::FileTimes::new().set_accessed(oublie).set_modified(oublie))
+                })
+                .is_ok()
+        };
+        if ["a/1", "a/2", "a/3", "a/4", "b/1"].into_iter().all(creux) {
+            assert_eq!(taille_dossier(&racine, Age::Tout, &[]), Some(u64::MAX));
+            let echeance = Instant::now() + Duration::from_secs(10);
+            assert_eq!(
+                dernier_usage(&cache.join("a"), echeance).map(|(t, _)| t),
+                Some(u64::MAX)
+            );
+            // Deux caches oubliés, dont un déjà plafonné : leur somme l'est aussi.
+            let e = caches_inutilises(&cache, "~/.cache", &[], true).unwrap();
+            assert_eq!(e.taille, Some(u64::MAX));
+        }
         std::fs::remove_dir_all(&racine).unwrap();
     }
 

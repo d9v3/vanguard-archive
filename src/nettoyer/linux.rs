@@ -9,7 +9,7 @@ use std::os::unix::fs::MetadataExt;
 use std::path::Path;
 use std::process::Command;
 
-use super::{Age, Element, caches_inutilises, lectures_datees, maison, taille_dossier, volume};
+use super::{Age, Element, caches_inutilises, lectures_datees, maison, somme, taille_dossier, volume};
 use crate::machine::linux::natif::{self, Snap};
 use crate::machine::linux::{Atomique, Paquets, atomique};
 use crate::ui::*;
@@ -44,26 +44,24 @@ fn octets(nombre: &str, unite: &str) -> Option<u64> {
 
 /// Simulation de paccache : « ==> finished dry run: 2 candidates (disk space saved: 80.47 MiB) », ou rien à faire.
 fn lire_paccache(sortie: &str) -> u64 {
-    sortie
-        .lines()
-        .filter_map(|l| {
-            let reste = l.split("disk space saved: ").nth(1)?;
-            let mut mots = reste.split_whitespace();
-            octets(mots.next()?, mots.next()?)
-        })
-        .sum()
+    somme(sortie.lines().filter_map(|l| {
+        let reste = l.split("disk space saved: ").nth(1)?;
+        let mut mots = reste.split_whitespace();
+        octets(mots.next()?, mots.next()?)
+    }))
 }
 
 /// « Installed Size  : 1.23 MiB » dans `pacman -Qi`, pour chaque paquet.
 fn lire_tailles_pacman(sortie: &str) -> u64 {
-    sortie
-        .lines()
-        .filter(|l| l.starts_with("Installed Size"))
-        .filter_map(|l| {
-            let mut mots = l.split(':').nth(1)?.split_whitespace();
-            octets(mots.next()?, mots.next()?)
-        })
-        .sum()
+    somme(
+        sortie
+            .lines()
+            .filter(|l| l.starts_with("Installed Size"))
+            .filter_map(|l| {
+                let mut mots = l.split(':').nth(1)?.split_whitespace();
+                octets(mots.next()?, mots.next()?)
+            }),
+    )
 }
 
 /// `snap list --all` : les révisions désactivées (anciennes versions gardées), en (nom, révision).
@@ -157,7 +155,7 @@ fn orphelins_pacman_dans(base: &Path) -> Option<Vec<(String, u64)>> {
 /// l'ouvrir. `None` si aucun des deux dossiers ne se lit.
 fn taille_journaux(racines: &[&Path], machine: Option<&str>) -> Option<u64> {
     let mut lisible = false;
-    let mut total = 0;
+    let mut total = 0_u64;
     for r in racines {
         let Ok(dossiers) = std::fs::read_dir(r) else {
             continue;
@@ -174,7 +172,7 @@ fn taille_journaux(racines: &[&Path], machine: Option<&str>) -> Option<u64> {
                 if (nom.ends_with(".journal") || nom.ends_with(".journal~"))
                     && let Ok(m) = f.metadata()
                 {
-                    total += m.blocks() * 512;
+                    total = total.saturating_add(m.blocks().saturating_mul(512));
                 }
             }
         }
@@ -189,7 +187,7 @@ fn paquets_telecharges(gestion: Paquets) -> Element {
         Paquets::Pacman if present("paccache") => (
             Some(
                 lire_paccache(&sortie("paccache", &["-dk2"]).unwrap_or_default())
-                    + lire_paccache(&sortie("paccache", &["-duk0"]).unwrap_or_default()),
+                    .saturating_add(lire_paccache(&sortie("paccache", &["-duk0"]).unwrap_or_default())),
             ),
             vec!["sudo paccache -rk2", "sudo paccache -ruk0"],
         ),
@@ -203,7 +201,7 @@ fn paquets_telecharges(gestion: Paquets) -> Element {
             ["/var/cache/libdnf5", "/var/cache/dnf"]
                 .iter()
                 .filter_map(|d| taille_dossier(Path::new(d), Age::Tout, &[]))
-                .reduce(|a, b| a + b),
+                .reduce(u64::saturating_add),
             vec!["sudo dnf clean all"],
         ),
         Paquets::Zypper => (
@@ -231,7 +229,7 @@ fn paquets_inutiles(gestion: Paquets) -> Option<Element> {
         Paquets::Pacman => {
             // pacman en secours seulement, quand sa base ne se lit pas.
             let taille = orphelins_pacman_dans(Path::new(PACMAN_LOCAL))
-                .map(|o| o.iter().map(|(_, t)| t).sum())
+                .map(|o| somme(o.iter().map(|(_, t)| *t)))
                 .or_else(|| {
                     let orphelins = sortie("pacman", &["-Qdtq"]).unwrap_or_default();
                     let noms: Vec<&str> = orphelins.split_whitespace().collect();
@@ -285,11 +283,12 @@ fn snap() -> Option<Element> {
         Some(snaps) => revisions_desactivees_de(&snaps),
         None => revisions_desactivees(&sortie("snap", &["list", "--all"])?),
     };
-    let taille = anciennes
-        .iter()
-        .filter_map(|(nom, rev)| std::fs::metadata(format!("/var/lib/snapd/snaps/{nom}_{rev}.snap")).ok())
-        .map(|m| m.len())
-        .sum();
+    let taille = somme(
+        anciennes
+            .iter()
+            .filter_map(|(nom, rev)| std::fs::metadata(format!("/var/lib/snapd/snaps/{nom}_{rev}.snap")).ok())
+            .map(|m| m.len()),
+    );
     Some(Element {
         titre: tr!("Anciennes versions des Snap", "Old Snap versions"),
         effet: tr!(
@@ -478,7 +477,7 @@ pub fn elements() -> Vec<Element> {
 pub fn place() -> Option<(u64, u64, u64)> {
     let (libre, total) = volume(Path::new("/"))?;
     let cumul = match volume(&maison()) {
-        Some((l, t)) if t != total => libre + l,
+        Some((l, t)) if t != total => libre.saturating_add(l),
         _ => libre,
     };
     Some((libre, total, cumul))
@@ -501,6 +500,11 @@ mod tests {
             84_378_910
         );
         assert_eq!(lire_paccache("==> no candidate packages found for pruning\n"), 0);
+        // Deux tailles démesurées : plafonnées, sans paniquer (la version publiée vérifie les dépassements).
+        assert_eq!(
+            lire_paccache("disk space saved: 1e19 B)\ndisk space saved: 1e19 B)\n"),
+            u64::MAX
+        );
         let qi = "Name            : a\nInstalled Size  : 1.50 MiB\nName            : b\nInstalled Size  : 512.00 KiB\n";
         assert_eq!(lire_tailles_pacman(qi), (3 << 19) + (512 << 10));
         let snaps = "Name    Version   Rev    Tracking       Publisher   Notes\n\

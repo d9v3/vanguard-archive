@@ -871,16 +871,64 @@ fn sortie_coupee(message: &str) -> bool {
             .any(|m| message.contains(m))
 }
 
+thread_local! {
+    /// Les gardes (`rattraper`) ouvertes sur ce fil : une panique y sera rattrapée par l'appelant.
+    static GARDES: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+}
+
+/// Lance `f` sous une garde (catch_unwind) : une panique n'arrête que `f`, et l'appelant en fait un résultat non
+/// vérifié (règle du bilan, domaine de l'audit du réseau, fichier analysé par YARA). Le crochet de panique, appelé
+/// avant que la garde ne la rattrape, le sait ainsi : pas de plantage affiché ni noté, le programme continue.
+pub fn rattraper<R>(f: impl FnOnce() -> R + std::panic::UnwindSafe) -> std::thread::Result<R> {
+    GARDES.with(|g| g.set(g.get().saturating_add(1)));
+    let resultat = std::panic::catch_unwind(f);
+    GARDES.with(|g| g.set(g.get().saturating_sub(1)));
+    resultat
+}
+
+/// Une garde est-elle ouverte sur ce fil ? Non, si le fil est déjà en train de finir (ses variables sont parties).
+fn sous_garde() -> bool {
+    GARDES.try_with(|g| g.get() > 0).unwrap_or(false)
+}
+
+/// Ce que le crochet fait d'une panique.
+#[derive(Debug, PartialEq)]
+enum Panique {
+    /// Le lecteur a fermé la sortie : fin sans bruit.
+    SortieCoupee,
+    /// Sous une garde : notée comme erreur interne rattrapée, avec sa position, sans message à l'écran (l'appelant
+    /// dit déjà « non vérifié »).
+    Rattrapee,
+    /// Le programme s'arrête : noté, puis le message habituel.
+    Plantage,
+}
+
+fn nature(message: &str, sous_garde: bool) -> Panique {
+    if sortie_coupee(message) {
+        Panique::SortieCoupee
+    } else if sous_garde {
+        Panique::Rattrapee
+    } else {
+        Panique::Plantage
+    }
+}
+
 /// Les plantages (panic) sont aussi notés, avant le message habituel. Une sortie coupée par le lecteur finit sans bruit,
-/// comme les autres commandes (code 141, celui d'un tube fermé).
+/// comme les autres commandes (code 141, celui d'un tube fermé). Une panique rattrapée (`rattraper`) n'est pas un
+/// plantage : un débordement dans une seule règle du bilan, que la version publiée vérifie, ne fait plus croire à un
+/// arrêt du programme, ni à l'écran ni dans le journal.
 pub fn installer() {
     let defaut = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
-        if sortie_coupee(&info.to_string()) {
-            std::process::exit(141);
+        let message = info.to_string();
+        match nature(&message, sous_garde()) {
+            Panique::SortieCoupee => std::process::exit(141),
+            Panique::Rattrapee => erreur("erreur interne rattrapée", &message),
+            Panique::Plantage => {
+                erreur("plantage", &message);
+                defaut(info);
+            }
         }
-        erreur("plantage", &info.to_string());
-        defaut(info);
     }));
 }
 
@@ -900,6 +948,25 @@ mod tests {
         assert!(!sortie_coupee(
             "failed printing to stdout: Disk quota exceeded (os error 122)"
         ));
+    }
+
+    /// Une panique rattrapée par une garde (règle du bilan, domaine, fichier de YARA) n'est pas un plantage : elle
+    /// s'affichait comme tel au milieu de l'écran et entrait au journal sous « plantage ». La garde se lève même quand
+    /// `f` panique, et une garde imbriquée ne lève pas celle qui l'entoure.
+    #[test]
+    fn une_panique_rattrapee_n_est_pas_un_plantage() {
+        assert!(!sous_garde());
+        assert_eq!(rattraper(sous_garde).ok(), Some(true));
+        let imbriquees = rattraper(|| (rattraper(sous_garde).ok(), sous_garde()));
+        assert_eq!(imbriquees.ok(), Some((Some(true), true)));
+        let tombee: std::thread::Result<()> = rattraper(|| panic!("attempt to add with overflow"));
+        assert!(tombee.is_err());
+        assert!(!sous_garde(), "garde restée ouverte après une panique");
+        let debordement = "panicked at src/nettoyer/mod.rs:110:17:\nattempt to add with overflow";
+        assert_eq!(nature(debordement, true), Panique::Rattrapee);
+        assert_eq!(nature(debordement, false), Panique::Plantage);
+        let coupee = "failed printing to stdout: Broken pipe (os error 32)";
+        assert_eq!(nature(coupee, true), Panique::SortieCoupee);
     }
 
     /// La partition des journaux n'est prise qu'avec le jeton d'une clé connue : témoin seul, ou jeton inconnu,
