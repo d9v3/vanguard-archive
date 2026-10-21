@@ -116,18 +116,50 @@ fn empreintes_de_la_liste(texte: &str) -> HashSet<[u8; 32]> {
         .collect()
 }
 
-/// `liste` : les empreintes connues, `None` si la liste manque. `empreinte` : celle d'un fichier, `None` s'il est
-/// illisible ou absent (pilote déclaré mais pas installé, cas courant : il n'est pas compté).
-fn juger_pilotes(pilotes: &[(Pilote, Option<[u8; 32]>)], liste: Option<&HashSet<[u8; 32]>>) -> Vec<Constat> {
+/// Ce que donne le fichier d'un pilote.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Fichier {
+    /// Déclaré mais pas installé, cas courant : il n'est pas compté.
+    Absent,
+    /// Présent mais fermé à la lecture (droits, partage) : son emplacement compte toujours, car un attaquant qui pose
+    /// un pilote peut aussi en refuser la lecture.
+    Illisible,
+    Lu([u8; 32]),
+}
+
+impl Fichier {
+    fn empreinte(self) -> Option<[u8; 32]> {
+        match self {
+            Fichier::Lu(e) => Some(e),
+            _ => None,
+        }
+    }
+}
+
+/// Lit le fichier d'un pilote. Seuls « fichier introuvable » et « chemin introuvable » (code 3 de Windows) disent
+/// qu'il est absent ; toute autre erreur le dit illisible.
+fn lire_fichier(fichier: &Path) -> Fichier {
+    if let Some(e) = crate::protection::empreintes::sha256(fichier) {
+        return Fichier::Lu(e);
+    }
+    match std::fs::metadata(fichier) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound || e.raw_os_error() == Some(3) => Fichier::Absent,
+        _ => Fichier::Illisible,
+    }
+}
+
+/// `liste` : les empreintes connues, `None` si la liste manque.
+fn juger_pilotes(pilotes: &[(Pilote, Fichier)], liste: Option<&HashSet<[u8; 32]>>) -> Vec<Constat> {
     let mut constats = Vec::new();
     let suspects: Vec<String> = pilotes
         .iter()
-        .filter(|(_, e)| e.is_some())
+        .filter(|(_, f)| *f != Fichier::Absent)
         .filter_map(|(p, _)| {
             emplacement_suspect(&p.fichier).map(|r| format!("{} : {} ({r})", p.nom, p.fichier.display()))
         })
         .collect();
-    let lus = pilotes.iter().filter(|(_, e)| e.is_some()).count();
+    let lus = pilotes.iter().filter(|(_, f)| *f != Fichier::Absent).count();
+    let illisibles = pilotes.iter().filter(|(_, f)| *f == Fichier::Illisible).count();
     if suspects.is_empty() {
         constats.push(ok(
             CAT,
@@ -159,11 +191,12 @@ fn juger_pilotes(pilotes: &[(Pilote, Option<[u8; 32]>)], liste: Option<&HashSet<
     };
     let vulnerables: Vec<String> = pilotes
         .iter()
-        .filter(|(_, e)| e.is_some_and(|e| liste.contains(&e)))
+        .filter(|(_, f)| f.empreinte().is_some_and(|e| liste.contains(&e)))
         .map(|(p, _)| format!("{} ({})", p.nom, p.fichier.display()))
         .collect();
     if vulnerables.is_empty() {
         let n = liste.len();
+        let lus = lus - illisibles;
         constats.push(ok(
             CAT,
             trf!(
@@ -171,6 +204,15 @@ fn juger_pilotes(pilotes: &[(Pilote, Option<[u8; 32]>)], liste: Option<&HashSet<
                 "Known vulnerable drivers: none among {lus} (LOLDrivers list, {n} fingerprints)",
             ),
         ));
+        if illisibles > 0 {
+            constats.push(impossible(
+                CAT,
+                &trf!(
+                    "pilotes vulnérables connus : {illisibles} fichier(s) de pilote illisible(s), comparés à aucune liste",
+                    "known vulnerable drivers: {illisibles} unreadable driver file(s), compared with no list"
+                ),
+            ));
+        }
     } else {
         let noms = couper(&affichable(&vulnerables.join(", ")), 240);
         constats.push(alerte(
@@ -221,11 +263,11 @@ fn pilotes() -> Vec<Constat> {
     let Some(pilotes) = lire_pilotes() else {
         return vec![registre_illisible(CAT)];
     };
-    let avec: Vec<(Pilote, Option<[u8; 32]>)> = pilotes
+    let avec: Vec<(Pilote, Fichier)> = pilotes
         .into_iter()
         .map(|p| {
-            let e = crate::protection::empreintes::sha256(&p.fichier);
-            (p, e)
+            let f = lire_fichier(&p.fichier);
+            (p, f)
         })
         .collect();
     juger_pilotes(&avec, liste_loldrivers().as_ref())
@@ -252,6 +294,21 @@ mod tests {
             .filter(|p| crate::protection::empreintes::sha256(&p.fichier).is_some())
             .count();
         println!("{} pilotes déclarés, {lus} fichiers lus", pilotes.len());
+    }
+
+    /// Un fichier absent, ou dans un dossier absent (code 3 de Windows), est dit absent ; un fichier lu donne son
+    /// empreinte. Un dossier se lit comme un fichier refusé : présent, donc jamais pris pour absent.
+    #[test]
+    fn absent_ou_illisible() {
+        let d = std::env::temp_dir().join(format!("vanguard-pilotes-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        assert_eq!(lire_fichier(&d.join("absent.sys")), Fichier::Absent);
+        assert_eq!(lire_fichier(&d.join("dossier-absent").join("x.sys")), Fichier::Absent);
+        std::fs::write(d.join("x.sys"), b"MZ").unwrap();
+        assert!(matches!(lire_fichier(&d.join("x.sys")), Fichier::Lu(_)));
+        assert_eq!(lire_fichier(&d), Fichier::Illisible);
+        let _ = std::fs::remove_dir_all(&d);
     }
 
     #[test]
@@ -304,18 +361,40 @@ mod tests {
         let liste = empreintes_de_la_liste(&csv);
         assert_eq!(liste.len(), 1);
         let e = [0xab; 32];
-        let sains = [(p("disque", r"C:\Windows\System32\drivers\disque.sys"), Some([1; 32]))];
+        let sains = [(
+            p("disque", r"C:\Windows\System32\drivers\disque.sys"),
+            Fichier::Lu([1; 32]),
+        )];
         let c = juger_pilotes(&sains, Some(&liste));
         assert!(c.iter().all(|c| c.probleme.is_none() && c.verifie));
         let vieux = [
-            (p("disque", r"C:\Windows\System32\drivers\disque.sys"), Some([1; 32])),
-            (p("vieuxoutil", r"C:\Program Files\Vieux\outil.sys"), Some(e)),
-            (p("absent", r"C:\Windows\System32\drivers\absent.sys"), None),
+            (
+                p("disque", r"C:\Windows\System32\drivers\disque.sys"),
+                Fichier::Lu([1; 32]),
+            ),
+            (p("vieuxoutil", r"C:\Program Files\Vieux\outil.sys"), Fichier::Lu(e)),
+            (p("absent", r"C:\Windows\System32\drivers\absent.sys"), Fichier::Absent),
         ];
         let c = juger_pilotes(&vieux, Some(&liste));
         assert!(c[1].probleme == Some(Niveau::Eleve) && c[1].message.contains("vieuxoutil"));
-        let cache = [(p("cache", r"C:\Users\alice\AppData\Local\Temp\x.sys"), Some([2; 32]))];
+        let cache = [(
+            p("cache", r"C:\Users\alice\AppData\Local\Temp\x.sys"),
+            Fichier::Lu([2; 32]),
+        )];
         assert_eq!(juger_pilotes(&cache, Some(&liste))[0].probleme, Some(Niveau::Eleve));
+        // Présent mais illisible (droits refusés par l'attaquant ou par le profil d'un autre compte) : toujours jugé
+        // sur son emplacement, et dit non comparé à la liste.
+        for f in [r"C:\Users\bob\AppData\Local\x.sys", r"C:\Windows\Temp\x.sys"] {
+            let c = juger_pilotes(&[(p("cache", f), Fichier::Illisible)], Some(&liste));
+            assert_eq!(c[0].probleme, Some(Niveau::Eleve), "{f}");
+            assert!(c.iter().any(|c| !c.verifie), "{f}");
+        }
+        // Absent (déclaré, pas installé) : ni compté ni signalé.
+        let c = juger_pilotes(
+            &[(p("absent", r"C:\Windows\Temp\x.sys"), Fichier::Absent)],
+            Some(&liste),
+        );
+        assert!(c.iter().all(|c| c.probleme.is_none() && c.verifie));
         // Sans la liste : dit non vérifié, jamais sain.
         let c = juger_pilotes(&sains, None);
         assert!(!c[1].verifie);
