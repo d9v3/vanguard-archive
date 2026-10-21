@@ -1,9 +1,10 @@
 [Unit]
 Description=Vanguard : télécharger et vérifier les nouvelles images Linux de la clé de secours
-# Omarchy, Arch, Debian, Fedora, SystemRescue et Kali Linux : la dernière version de chacune, vérifiée par la signature
-# de son projet, dans ~/.cache/vanguard/images-cle ; puis copiée aussitôt sur la clé si elle est branchée (sinon à son
-# prochain branchement, vanguard-images-cle.service). Une image refusée ne bloque pas la copie des autres :
-# images-cle.sh la signale lui-même par une notification.
+# Omarchy, Arch, Debian, Fedora et SystemRescue (et Kali Linux, seulement si le réglage local de l'ordinateur la
+# demande) : la dernière version de chacune, vérifiée par la signature de son projet, dans ~/.cache/vanguard/images-cle
+# (un lien vers un autre disque, au besoin : disque absent, rien n'est fait ni recréé ailleurs) ; puis copiée aussitôt
+# sur la clé si elle est branchée (sinon à son prochain branchement, vanguard-images-cle.service). Une image refusée
+# ne bloque pas la copie des autres : images-cle.sh la signale lui-même par une notification.
 After=network-online.target
 
 [Service]
@@ -12,8 +13,8 @@ ExecStart=-%h/Projects/vanguard/outils/images-cle.sh --chercher
 # Clé absente : « rien à copier », sans erreur. Le même verrou que deployer.sh.
 ExecStart=%h/Projects/vanguard/outils/images-cle.sh --cle
 # En arrière-plan, sans gêner le reste de l'ordinateur : quelques gigaoctets, et 16 Gio de plus pour une nouvelle Kali
-# Linux, en torrent (images-cle.sh arrête aria2c au bout de 5 heures ; il reprend la semaine suivante), puis la copie
-# sur la clé (une demi-heure pour Kali sur une clé lente).
+# Linux, en torrent (images-cle.sh arrête aria2c au bout de 5 heures ; il reprend à la recherche suivante), puis la
+# copie sur la clé (une demi-heure pour Kali sur une clé lente).
 Nice=19
 IOSchedulingClass=idle
 TimeoutStartSec=8h

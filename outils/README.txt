@@ -18,7 +18,7 @@ This USB key holds the program for Linux, Windows and macOS, its database and it
                         they stay on that computer.
   source/               Full source code (Rust) with its git history.
   ISO/                  Images that boot a computer, from the Ventoy menu: Omarchy, Arch Linux, Debian, Fedora,
-                        SystemRescue, Kali Linux (security tools, nothing to install) and Windows 11.
+                        SystemRescue and Windows 11.
                         How to: README.txt in the Linux folder, part 5.
   vanguard.cle          Marker file that makes the key recognized: do not delete it.
 

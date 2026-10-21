@@ -259,24 +259,27 @@ Windows; on Linux and macOS, Vanguard remounts it read-only itself), and `VANGUA
 log, anonymized. `outils/preparer-cle.sh` prepares a new key.
 
 In preparation, a rescue key that also boots computers: `outils/cle-secours.sh`. Ventoy boots the Omarchy installer,
-Arch, Debian and Fedora as network installers, SystemRescue, the full Kali Linux live image if there is room left
-(16 GiB, published as a torrent only: aria2c) and Windows 11 as a fallback, kept up to date by `outils/images-cle.sh`
-(each project's signature checked, weekly timer that copies right away to a plugged-in key, copy on plug-in; an image
-downloaded elsewhere enters the cache through `--importer`, checked the same way); a FAT32 `WIN11` partition installs
-Windows 11 with Secure Boot on, without adding a key to the PC (`install.wim` split by wimlib under the 4 GB limit);
-an HFS+ partition holds the macOS recovery of Intel Macs; `VANGUARD` and `VANGUARDLOG` as before. `--plan` and
-`--essai` (on a disk image) touch no disk; only `--ecrire` erases the key. Ventoy itself: its version on the key is
-read every day and on plug-in (`cle-secours.sh --a-jour`); when older than the pinned one, its update, which erases
-nothing (`Ventoy2Disk.sh -u`, logged), is offered by a notification to click. It goes through a separate root part,
-`outils/ventoy-racine.sh`, installed once as a root-owned file (`cle-secours.sh --installer-racine`, in
+Arch, Debian and Fedora as network installers, SystemRescue and Windows 11 as a fallback, kept up to date by
+`outils/images-cle.sh` (each project's signature checked, timer on the 1st and 15th of the month that copies right
+away to a plugged-in key, copy on plug-in, a notification when each download starts and when nothing is new; an image
+downloaded elsewhere enters the cache through `--importer`, checked the same way; the cache may be a link to another
+disk: with that disk absent, nothing is recreated elsewhere). Optional, off by default: the full Kali Linux live image
+if there is room left (16 GiB, published as a torrent only: aria2c), only on a computer whose local setting asks for
+it (`IMAGES_EN_PLUS="kali"` in `~/.config/vanguard/images-cle.conf`, read without being run); a FAT32 `WIN11`
+partition installs Windows 11 with Secure Boot on, without adding a key to the PC (`install.wim` split by wimlib under
+the 4 GB limit); an HFS+ partition holds the macOS recovery of Intel Macs; `VANGUARD` and `VANGUARDLOG` as before.
+`--plan` and `--essai` (on a disk image) touch no disk; only `--ecrire` erases the key. Ventoy itself: its version on
+the key is read every day and on plug-in (`cle-secours.sh --a-jour`); when older than the pinned one, its update,
+which erases nothing (`Ventoy2Disk.sh -u`, logged), is offered by a notification to click. It goes through a separate
+root part, `outils/ventoy-racine.sh`, installed once as a root-owned file (`cle-secours.sh --installer-racine`, in
 `/usr/local/libexec/vanguard/`) and run by pkexec: the account cannot modify it, and it holds the pin and checks
 everything again (the key and its serial number, the archive, an older version on the key). A newer Ventoy on GitHub
-is reported to the developer by the weekly search, never taken on its own: the archive is not signed, the pin changes
-by hand, then the root part is reinstalled. Windows 11 older than six months (the date of its image's files) is
-reported by a notification, not replaced: Microsoft only gives a 24-hour link, and the hash that checks the image is
-read on its page. The macOS recovery has no age that matters: it installs the latest macOS, fetched from Apple at
-install time. `outils/essais-cle.sh` (run by `outils/verifier.sh`) tests these tools without touching anything:
-separate namespace, no Internet, fake key and fake disk.
+is reported to the developer by the search on the 1st and 15th, never taken on its own: the archive is not signed, the
+pin changes by hand, then the root part is reinstalled. Windows 11 older than six months (the date of its image's
+files) is reported by a notification, not replaced: Microsoft only gives a 24-hour link, and the hash that checks the
+image is read on its page. The macOS recovery has no age that matters: it installs the latest macOS, fetched from
+Apple at install time. `outils/essais-cle.sh` (run by `outils/verifier.sh`) tests these tools without touching
+anything: separate namespace, no Internet, fake key and fake disk.
 
 ## Errors and crashes
 

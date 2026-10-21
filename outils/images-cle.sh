@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 # Images Linux de la clé de secours, tenues à jour toutes seules : Omarchy (son installateur complet, sans Internet),
 # Arch Linux, Debian et Fedora en installateurs par Internet, SystemRescue (réparer, sauver des fichiers, tester la
-# mémoire) et Kali Linux en live complète (tous ses outils de sécurité, sans rien installer ; publiée en torrent
-# seulement : aria2c la télécharge, puis elle est vérifiée comme les autres par la liste signée du projet).
+# mémoire). En option, coupée par défaut : Kali Linux en live complète (ses outils de sécurité, sans rien installer ;
+# publiée en torrent seulement : aria2c la télécharge, puis elle est vérifiée comme les autres par la liste signée du
+# projet). Seul un réglage local de l'ordinateur l'allume, hors du dépôt : IMAGES_EN_PLUS="kali" dans
+# ~/.config/vanguard/images-cle.conf.
 #   outils/images-cle.sh --chercher     dernières versions téléchargées dans le cache et vérifiées (minuterie
-#                                       hebdomadaire vanguard-images.timer, qui les copie ensuite sur la clé si elle
-#                                       est branchée) ; une image mal signée est effacée
+#                                       vanguard-images.timer, le 1er et le 15 du mois, qui les copie ensuite sur la
+#                                       clé si elle est branchée) ; une image mal signée est effacée
 #   outils/images-cle.sh --importer FICHIER  fait entrer dans le cache une image déjà téléchargée ailleurs (client
 #                                       torrent, autre ordinateur), vérifiée de la même façon ; le fichier reste là
 #   outils/images-cle.sh --verifier     revérifie signature et empreinte des images du cache
@@ -13,9 +15,12 @@
 #                                       copiée, puis l'ancienne retirée (au branchement : vanguard-images-cle.service ;
 #                                       chaque jour si la clé reste branchée : vanguard-cle-maj.timer)
 #   outils/images-cle.sh --toutes POINT pose aussi celles qui manquent (nouvelle clé : cle-secours.sh --ecrire ; ou
-#                                       Kali Linux ajoutée à une clé qui ne l'a pas encore)
+#                                       une image en option ajoutée à une clé qui ne l'a pas encore)
 #   outils/images-cle.sh --menu POINT   réécrit ventoy/ventoy.json d'après les images de ISO/
 #   outils/images-cle.sh --etat         ce qui est dans le cache et sur la clé
+#   outils/images-cle.sh --sortes       les sortes d'images tenues sur cet ordinateur (lu par cle-secours.sh)
+# Le cache peut être un lien vers un autre disque : disque absent, rien n'est fait ni recréé ailleurs, et une
+# notification le dit.
 # Chaque image est vérifiée par la signature de son projet, avec une clé fixée ici (outils/cles-images/ et les
 # empreintes ci-dessous) : jamais une clé lue sur le serveur qui sert l'image, qu'un serveur piégé fournirait avec
 # son image. Une nouvelle clé (Fedora en change à chaque version) arrive avec une mise à jour de Vanguard ; d'ici là,
@@ -34,11 +39,28 @@ CLES=$PWD/outils/cles-images
 MIO=$((1024 * 1024))
 # Place gardée sur la clé pour Vanguard, sa base et ses rapports.
 MARGE_MIO=512
-# Ordre de copie quand la place manque : la plus utile d'abord. Kali Linux (16 Gio) en dernier : elle ne va sur la clé
-# que s'il reste la place après les autres.
-SORTES=(systemrescue arch omarchy debian fedora kali)
+# Ordre de copie quand la place manque : la plus utile d'abord.
+SORTES=(systemrescue arch omarchy debian fedora)
+# En option, coupées par défaut : ni téléchargées, ni copiées, ni proposées, sauf sur un ordinateur dont le réglage
+# local les demande : Kali Linux (16 Gio) n'est voulue que sur certains ordinateurs. Le réglage, hors du dépôt : une
+# ligne IMAGES_EN_PLUS="kali" dans ~/.config/vanguard/images-cle.conf. Lu, jamais sourcé : rien de ce fichier ne
+# s'exécute. Allumée, Kali va en dernier : sur la clé seulement s'il reste la place après les autres.
+EN_OPTION="kali"
+REGLAGE=${XDG_CONFIG_HOME:-$HOME/.config}/vanguard/images-cle.conf
+en_plus_demandees() {
+  [[ -r $REGLAGE ]] || return 0
+  sed -n 's/#.*//; s/^[[:space:]]*IMAGES_EN_PLUS[[:space:]]*=//p' "$REGLAGE" | tail -1 | tr -d "\"'" | tr ',' ' '
+}
+read -ra demandees <<<"$(en_plus_demandees)"
+for s in "${demandees[@]}"; do
+  if [[ " $EN_OPTION " == *" $s "* && " ${SORTES[*]} " != *" $s "* ]]; then
+    SORTES+=("$s")
+  else
+    echo "· $REGLAGE : « $s » n'est pas une image en option (en option : $EN_OPTION), ignorée." >&2
+  fi
+done
 # Facultatives : leur absence du cache n'empêche pas de faire une clé (cle-secours.sh --ecrire vérifie le cache).
-FACULTATIVES=" kali "
+FACULTATIVES=" $EN_OPTION "
 
 # Clés principales qui signent les images de chaque projet. Arch : celle de son responsable des images (trousseau
 # archlinux-keyring, « PGP fingerprint » de archlinux.org/download). Debian : « Debian CD signing key »
@@ -71,7 +93,42 @@ declare -A NOMS=([arch]="Arch Linux" [debian]=Debian [fedora]=Fedora [systemresc
 erreur() { echo "✖ $*" >&2; exit 1; }
 lire() { curl -fsSL --retry 3 --connect-timeout 20 --max-time 120 "$1"; }
 avertir() { # titre texte
-  command -v notify-send >/dev/null && notify-send -a Vanguard -i vanguard "$1" "$2" || true
+  command -v notify-send >/dev/null && notify-send -a Vanguard -i vanguard -- "$1" "$2" || true
+}
+
+# Taille lisible : « 1,5 Gio », « 820 Mio ».
+lisible() { # octets
+  awk -v o="$1" 'BEGIN {
+    if (o >= 1073741824) s = sprintf("%.1f Gio", o / 1073741824); else s = sprintf("%d Mio", (o + 1048575) / 1048576)
+    sub(/\./, ",", s); print s }'
+}
+
+# Le cache (comme le dossier de cle-secours.sh) peut être un lien vers un autre disque. Disque débranché : le lien
+# mène nulle part. Rien n'est alors recréé à sa place, ni dans ~/.cache ni à côté du point de montage (sur le tmpfs de
+# /run/media, en mémoire, où 16 Gio d'images rempliraient la RAM) : le lien mort est écrit, code 0 ; code 1 si le
+# dossier est là, ou simplement pas encore créé (première recherche).
+lien_mort() { # dossier
+  local d=$1
+  while [[ ! -e $d ]]; do
+    if [[ -L $d ]]; then
+      echo "$d"
+      return 0
+    fi
+    [[ $d == */* ]] || return 1
+    d=${d%/*}
+    [[ -n $d ]] || return 1
+  done
+  return 1
+}
+
+# Le cache absent : dit, et une notification. Code 0 si le cache est là.
+cache_present() { # ce qui n'est pas fait, sans lui
+  local lien
+  lien=$(lien_mort "$CACHE") || return 0
+  echo "✖ Cache des images introuvable : $lien mène à $(readlink "$lien"), absent (disque débranché ?). $1" >&2
+  avertir "Images de la clé : cache absent" "$lien mène à $(readlink "$lien"), introuvable : disque débranché ? $1 \
+Rien n'est recréé ailleurs ; une fois le disque rebranché, la minuterie reprend d'elle-même."
+  return 1
 }
 
 # --- Dernières versions ----------------------------------------------------------------------------------------------
@@ -278,6 +335,30 @@ image_prete() { # sorte
 
 # --- Cache : télécharger et vérifier ----------------------------------------------------------------------------------
 
+# Taille d'un fichier à télécharger, d'après les en-têtes du serveur (celle du dernier, après les redirections) ;
+# rien si le serveur ne la dit pas.
+taille_distante() { # url
+  curl -fsSIL --retry 2 --connect-timeout 20 --max-time 60 "$1" 2>/dev/null | tr -d '\r' |
+    awk 'tolower($1) ~ /^http\// {t = ""}
+      tolower($1) == "content-length:" {t = $2}
+      END {if (t ~ /^[0-9]+$/) print t}' || true
+}
+
+# Taille de l'image d'un .torrent : la somme des « length » de ses fichiers (un seul pour Kali).
+taille_torrent() { # fichier
+  grep -aoE '6:lengthi[0-9]+e' "$1" 2>/dev/null | tr -dc '0-9\n' | sed 's/^6//' |
+    awk '{s += $1} END {if (s > 0) printf "%d\n", s}' || true
+}
+
+# Au début de chaque téléchargement, une notification : quoi, et combien (16 Gio de Kali ne passent pas inaperçus
+# sur une connexion lente ou facturée au volume).
+annoncer() { # sorte nom octets (vide : inconnue) reprise (vide, ou « reprise »)
+  local taille=${3:+$(lisible "$3")} torrent=""
+  [[ $1 != kali ]] || torrent=" (torrent, jusqu'à 5 heures)"
+  echo "  ${4:+reprise, }${taille:-taille inconnue}"
+  avertir "Images de la clé : ${4:+reprise du }téléchargement" "${NOMS[$1]} : $2, ${taille:-taille inconnue}$torrent."
+}
+
 # Télécharge l'image dans le dossier de la version, où sont déjà ses signatures ; en échec, RAISON dit pourquoi.
 # Kali ne publie sa live complète qu'en torrent : aria2c la prend, sans la repartager ensuite. Le .torrent vient d'un
 # miroir (cdimage.kali.org renvoie ailleurs) : il est vérifié par la liste signée avant qu'aria2c le lise, et
@@ -288,6 +369,7 @@ image_prete() { # sorte
 telecharger() { # sorte url nom dossier
   RAISON="téléchargement interrompu"
   if [[ $1 != kali ]]; then
+    annoncer "$1" "$3" "$(taille_distante "$2$3")" ""
     curl -fL --retry 3 --connect-timeout 20 --progress-bar -o "$4/$3" "$2$3"
     return
   fi
@@ -305,6 +387,7 @@ telecharger() { # sorte url nom dossier
     RAISON="torrent refusé : $r"
     return 1
   fi
+  annoncer kali "$3" "$(taille_torrent "$4/$3.torrent")" "$([[ -s $4/$3 ]] && echo reprise)"
   rm -f "$4/.aria2.log"
   timeout --foreground --kill-after=1m 5h aria2c --seed-time=0 --bt-stop-timeout=600 --check-integrity=true \
     --enable-dht=true --dht-entry-point=router.bittorrent.com:6881 --dht-file-path="$CACHE/.dht.dat" \
@@ -389,17 +472,19 @@ prendre() { # sorte nom url
 }
 
 chercher() {
+  cache_present "Rien n'est cherché ni téléchargé." || return 0
   mkdir -p "$CACHE"
-  local sorte ligne nom url neuves=() echecs=() replis=() joignables=0 code
+  local sorte ligne nom url neuves=() echecs=() replis=() prets=() perdus=() code
   for sorte in "${SORTES[@]}"; do
     if ! ligne=$("derniere_$sorte" 2>/dev/null); then
       echo "· ${NOMS[$sorte]} : dernière version introuvable (pas d'Internet, ou site changé)"
+      perdus+=("${NOMS[$sorte]}")
       continue
     fi
-    joignables=$((joignables + 1))
     read -r nom url <<<"$ligne"
     if [[ -f $CACHE/$nom && -f $CACHE/$nom.sha256 ]]; then
       echo "✔ ${NOMS[$sorte]} : $nom, déjà prête"
+      prets+=("${NOMS[$sorte]}")
       # La dernière Kali est prête : plus aucun torrent ne sert.
       [[ $sorte != kali ]] || retirer_kali_sauf
       continue
@@ -459,7 +544,24 @@ POINT."
     avertir "Clé VANGUARD : image refusée" "$(printf '%s\n' "${echecs[@]}")"
     return 1
   fi
-  ((joignables > 0)) || echo "Rien de vérifié : nouvel essai à la prochaine minuterie."
+  # Rien de neuf, ni refusé ni en retard : dit aussi, pour qu'une recherche faite se distingue d'une minuterie arrêtée.
+  if ((${#neuves[@]} + ${#replis[@]} == 0)); then
+    local texte=""
+    ((${#prets[@]} == 0)) || texte="Déjà à jour : $(joindre "${prets[@]}")."
+    if ((${#perdus[@]})); then
+      texte+="${texte:+$'\n'}Pas jointes (pas d'Internet, ou site changé) : $(joindre "${perdus[@]}") ; nouvel \
+essai à la prochaine recherche."
+    fi
+    ((${#prets[@]})) || echo "Rien de vérifié : nouvel essai à la prochaine minuterie."
+    avertir "Images de la clé : rien de nouveau" "$texte"
+  fi
+}
+
+# Des noms séparés par des virgules.
+joindre() { # nom…
+  local IFS=,
+  local texte="$*"
+  echo "${texte//,/, }"
 }
 
 # Une image téléchargée ailleurs (client torrent, autre ordinateur) entre dans le cache vérifiée comme les autres : sa
@@ -469,12 +571,15 @@ POINT."
 importer() { # fichier
   local fichier=$1 nom sorte="" s prete url trouve="" d f ok r
   [[ -f $fichier ]] || erreur "$fichier : pas un fichier."
+  cache_present "Rien n'est importé." || exit 1
   nom=${fichier##*/}
+  local attendus=()
   for s in "${SORTES[@]}"; do
+    attendus+=("${MOTIFS[$s]}")
     # shellcheck disable=SC2053 # motif voulu
     if [[ $nom == ${MOTIFS[$s]} ]]; then sorte=$s; fi
   done
-  [[ -n $sorte ]] || erreur "$nom : pas une image que la clé tient (noms attendus : ${MOTIFS[*]})."
+  [[ -n $sorte ]] || erreur "$nom : pas une image que la clé tient sur cet ordinateur (noms attendus : ${attendus[*]})."
   if [[ -f $CACHE/$nom && -f $CACHE/$nom.sha256 ]]; then
     echo "✔ ${NOMS[$sorte]} : $nom, déjà prête dans le cache"
     return 0
@@ -516,7 +621,11 @@ en a déjà une version (sinon : outils/images-cle.sh --toutes POINT)."
 # Revérifie chaque image prête du cache avec les signatures gardées à côté. Une facultative absente est dite, sans
 # compter comme une erreur.
 verifier_cache() {
-  local sorte image tout=0
+  local sorte image tout=0 lien
+  if lien=$(lien_mort "$CACHE"); then
+    echo "  ✖ Images Linux : cache introuvable ($lien mène à $(readlink "$lien"), absent : disque débranché ?)"
+    return 1
+  fi
   for sorte in "${SORTES[@]}"; do
     if ! image=$(image_prete "$sorte"); then
       if [[ $FACULTATIVES == *" $sorte "* ]]; then
@@ -569,6 +678,12 @@ copier_sur_cle() { # point (facultatif), toutes (facultatif : aussi les sortes a
   local point=${1:-} toutes=${2:-}
   [[ -n $point ]] || point=$(point_cle)
   [[ -n $point && -d $point ]] || { echo "Clé VANGUARD non branchée : rien à copier."; return 0; }
+  # Au branchement, un cache absent n'est pas une erreur de la clé : dit, puis arrêt sans rien toucher. Demandé à la
+  # main (--toutes, nouvelle clé), il en est une.
+  if ! cache_present "La clé n'est pas mise à jour."; then
+    [[ -z $toutes ]] || return 1
+    return 0
+  fi
   exec 9>"${XDG_RUNTIME_DIR:-/tmp}/vanguard-deployer.lock"
   flock 9
   local iso=$point/ISO sorte image nom copiees=() manque=() echecs=() p interrompues=" "
@@ -674,8 +789,11 @@ print(json.dumps({"control": [{"VTOY_DEFAULT_SEARCH_ROOT": "/ISO"}, {"VTOY_MENU_
 }
 
 etat() {
-  local sorte image point
+  local sorte image point lien
   echo "Cache ($CACHE) :"
+  if lien=$(lien_mort "$CACHE"); then
+    echo "  ✖ introuvable : $lien mène à $(readlink "$lien"), absent (disque débranché ?)"
+  fi
   for sorte in "${SORTES[@]}"; do
     if image=$(image_prete "$sorte"); then echo "  ✔ ${NOMS[$sorte]} : ${image##*/}"
     else echo "  · ${NOMS[$sorte]} : rien de prêt"; fi
@@ -713,5 +831,6 @@ case ${1:-} in
   --toutes) copier_sur_cle "${2:?point de montage de la clé}" toutes ;;
   --menu) menu "${2:?point de montage de la clé}" ;;
   --etat) etat ;;
-  *) sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
+  --sortes) echo "${SORTES[*]}" ;;
+  *) sed -n '2,29p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
 esac

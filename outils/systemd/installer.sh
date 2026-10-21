@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Installe (ou réinstalle) sur le PC de développement les unités systemd de l'utilisateur qui tiennent la clé USB à
 # jour : vanguard-compilation.path (après chaque compilation) lance vanguard-copie.service, et vanguard-cle.service part
-# au branchement de la clé. Les images Linux de la clé (outils/images-cle.sh) : vanguard-images.timer les cherche
-# chaque semaine (et les copie aussitôt si la clé est branchée), vanguard-images-cle.service les copie au branchement.
+# au branchement de la clé. Les images Linux de la clé (outils/images-cle.sh) : vanguard-images.timer les cherche le
+# 1er et le 15 du mois (et les copie aussitôt si la clé est branchée), vanguard-images-cle.service les copie au
+# branchement.
 # vanguard-cle-maj.timer remet chaque jour la clé restée branchée à jour (outils/maj-cle.sh : programme et images).
 # vanguard-menage.timer fait chaque semaine le ménage des fichiers de développement devenus inutiles
 # (outils/menage-dev.sh).

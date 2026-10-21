@@ -1,8 +1,10 @@
 [Unit]
-Description=Vanguard : chercher chaque semaine les nouvelles images Linux de la clé de secours
+Description=Vanguard : chercher aux deux semaines les nouvelles images Linux de la clé de secours
 
 [Timer]
-OnCalendar=weekly
+# Aux deux semaines, le 1er et le 15 du mois : Arch publie son image au début du mois, les autres projets plus
+# rarement ; chercher chaque semaine ne prenait guère plus, pour deux fois plus de passages.
+OnCalendar=*-*-01,15 04:00
 # Ordinateur éteint à l'heure prévue : rattrapé au démarrage suivant, à un moment tiré au hasard.
 Persistent=true
 RandomizedDelaySec=6h

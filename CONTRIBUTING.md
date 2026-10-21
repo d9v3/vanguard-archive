@@ -262,11 +262,14 @@ respecté par Windows ; sous Linux et macOS, Vanguard la remonte lui-même en le
 reçoit que le journal des erreurs, anonymisé. `outils/preparer-cle.sh` prépare une nouvelle clé.
 
 En préparation, une clé de secours qui démarre aussi les ordinateurs : `outils/cle-secours.sh`. Ventoy démarre
-l'installateur d'Omarchy, Arch, Debian et Fedora en installateurs par Internet, SystemRescue, Kali Linux en live
-complète s'il reste la place (16 Gio, publiée en torrent seulement : aria2c) et Windows 11 en secours, tenus à jour
-par `outils/images-cle.sh` (signature de chaque projet vérifiée, minuterie hebdomadaire qui copie aussitôt sur la clé
-branchée, copie au branchement ; une image téléchargée ailleurs entre dans le cache par `--importer`, vérifiée de
-même) ; une partition FAT32 `WIN11` installe Windows 11 avec Secure Boot actif, sans ajouter de clé au PC
+l'installateur d'Omarchy, Arch, Debian et Fedora en installateurs par Internet, SystemRescue et Windows 11 en secours,
+tenus à jour par `outils/images-cle.sh` (signature de chaque projet vérifiée, minuterie du 1er et du 15 du mois qui
+copie aussitôt sur la clé branchée, copie au branchement, une notification au début de chaque téléchargement et quand
+rien n'est nouveau ; une image téléchargée ailleurs entre dans le cache par `--importer`, vérifiée de même ; le cache
+peut être un lien vers un autre disque : disque absent, rien n'est recréé ailleurs). En option, coupée par défaut :
+Kali Linux en live complète s'il reste la place (16 Gio, publiée en torrent seulement : aria2c), seulement sur un
+ordinateur dont le réglage local la demande (`IMAGES_EN_PLUS="kali"` dans `~/.config/vanguard/images-cle.conf`, lu
+sans être exécuté) ; une partition FAT32 `WIN11` installe Windows 11 avec Secure Boot actif, sans ajouter de clé au PC
 (`install.wim` découpé par wimlib sous la limite de 4 Go) ; une partition HFS+ porte la récupération de macOS des Mac
 Intel ; `VANGUARD` et `VANGUARDLOG` comme avant. `--plan` et `--essai` (sur une image de disque) ne touchent à aucun
 disque ; seul `--ecrire` efface la clé. Ventoy lui-même : sa version sur la clé est lue chaque jour et au branchement
@@ -275,7 +278,7 @@ disque ; seul `--ecrire` efface la clé. Ventoy lui-même : sa version sur la cl
 part, `outils/ventoy-racine.sh`, installée une fois en fichier de root (`cle-secours.sh --installer-racine`, dans
 `/usr/local/libexec/vanguard/`) et lancée par pkexec : le compte ne peut pas la modifier, et c'est elle qui tient
 l'épingle et revérifie tout (la clé et son numéro de série, l'archive, une version plus ancienne sur la clé). Un
-Ventoy plus récent sur GitHub est signalé au développeur par la recherche de la semaine, jamais pris tout seul :
+Ventoy plus récent sur GitHub est signalé au développeur par la recherche du 1er et du 15, jamais pris tout seul :
 l'archive n'est pas signée, l'épingle change à la main, puis la partie root se réinstalle. Windows 11 de plus de six
 mois (la date des fichiers de son image) est signalé par une notification, pas remplacé : Microsoft ne donne qu'un
 lien de 24 heures, et l'empreinte qui vérifie l'image se lit sur sa page. La récupération de macOS n'a pas d'âge qui

@@ -431,6 +431,148 @@ code=$?
 voir "--etat sans /run/media/\$USER : « pas branchée », sans erreur" \
   eval '((code == 0)) && dit "$BANC/sortie" "pas branchée"' || montrer "$BANC/sortie"
 
+# Kali Linux, coupée par défaut : seul le réglage local de l'ordinateur l'allume, lu sans être exécuté.
+REGLAGE=$BANC/config/vanguard/images-cle.conf
+mkdir -p "${REGLAGE%/*}"
+rm -f "$REGLAGE"
+sortes() { bash outils/images-cle.sh --sortes 2>"$BANC/sortie-erreurs"; }
+voir "Kali coupée par défaut : ni cherchée, ni copiée, ni proposée" \
+  eval '[[ $(sortes) == "systemrescue arch omarchy debian fedora" ]]' || montrer "$BANC/sortie-erreurs"
+mkdir -p "$BANC/cache8" "$BANC/cle8/ISO" "$BANC/cle8/ventoy"
+IMAGE8=$BANC/cache8/kali-linux-2026.3-live-everything-amd64.iso
+echo kali >"$IMAGE8"
+sha256sum "$IMAGE8" | cut -d' ' -f1 >"$IMAGE8.sha256"
+echo ancienne >"$BANC/cle8/ISO/kali-linux-2026.2-live-everything-amd64.iso"
+rm -f "$BANC/aria2c.log" "$BANC/notifications.log"
+chercher8() { # tout est « nouveau » : derniere_* répond pour chaque sorte, rien ne se télécharge
+  (
+    source outils/images-cle.sh
+    for s in arch debian fedora systemrescue omarchy; do eval "derniere_$s() { return 1; }"; done
+    derniere_kali() { echo "kali-linux-2026.4-live-everything-amd64.iso https://exemple.invalid/kali-2026.4/"; }
+    lire() { echo "faux $1"; }
+    verifier_image() { return 0; }
+    chercher
+  ) >"$BANC/sortie" 2>&1
+}
+VANGUARD_IMAGES=$BANC/cache8 chercher8
+VANGUARD_IMAGES=$BANC/cache8 bash outils/images-cle.sh --cle "$BANC/cle8" >>"$BANC/sortie" 2>&1
+VANGUARD_IMAGES=$BANC/cache8 bash outils/images-cle.sh --importer "$IMAGE8" >"$BANC/sortie-import" 2>&1
+code=$?
+( source outils/cle-secours.sh; IMAGES_LINUX=$BANC/cache8 place_vanguard 30000 7534 ) >"$BANC/sortie-place" 2>&1
+voir "Kali coupée : aucun torrent, la Kali du cache pas copiée sur la clé, une image de Kali pas importée" \
+  eval '[[ ! -s $BANC/aria2c.log ]] && ! compgen -G "$BANC/cache8/.nouveau-kali-*" >/dev/null &&
+    [[ ! -e $BANC/cle8/ISO/${IMAGE8##*/} && -f $BANC/cle8/ISO/kali-linux-2026.2-live-everything-amd64.iso ]] &&
+    ((code == 1)) && dit "$BANC/sortie-import" "pas une image que la clé tient sur cet ordinateur"' ||
+  { montrer "$BANC/sortie"; montrer "$BANC/sortie-import"; }
+voir "Kali coupée : le plan de la clé ne la compte pas" \
+  eval 'pas_dit "$BANC/sortie-place" Kali && dit "$BANC/sortie-place" "Windows 11 aussi"' ||
+  montrer "$BANC/sortie-place"
+voir "Kali coupée : le menu de Ventoy garde son nom si l'image est déjà sur la clé" \
+  dit "$BANC/cle8/ventoy/ventoy.json" '"alias": "Kali Linux' || montrer "$BANC/cle8/ventoy/ventoy.json"
+
+# Le réglage : une ligne, des guillemets ou non, un commentaire ; jamais exécuté (une commande dedans ne part pas).
+printf '# images en plus\nIMAGES_EN_PLUS="kali" # pour moi\n$(touch %s/execute)\n' "$BANC" >"$REGLAGE"
+voir "réglage IMAGES_EN_PLUS=\"kali\" : Kali allumée, en dernier ; le fichier lu sans être exécuté" \
+  eval '[[ $(sortes) == "systemrescue arch omarchy debian fedora kali" && ! -e $BANC/execute ]]' ||
+  montrer "$BANC/sortie-erreurs"
+printf "IMAGES_EN_PLUS='kali,windows'\n" >"$REGLAGE"
+voir "réglage avec une image inconnue : ignorée et dite, Kali allumée quand même" \
+  eval '[[ $(sortes) == "systemrescue arch omarchy debian fedora kali" ]] &&
+    dit "$BANC/sortie-erreurs" "« windows »"' ||
+  montrer "$BANC/sortie-erreurs"
+rm -f "$BANC/aria2c.log"
+VANGUARD_IMAGES=$BANC/cache8 chercher8
+VANGUARD_IMAGES=$BANC/cache8 bash outils/images-cle.sh --cle "$BANC/cle8" >>"$BANC/sortie" 2>&1
+voir "Kali allumée : son torrent lancé, la Kali du cache copiée sur la clé à la place de l'ancienne" \
+  eval 'dit "$BANC/aria2c.log" "kali-linux-2026.4-live-everything-amd64.iso" &&
+    cmp -s "$BANC/cle8/ISO/${IMAGE8##*/}" "$IMAGE8" &&
+    [[ ! -e $BANC/cle8/ISO/kali-linux-2026.2-live-everything-amd64.iso ]]' || montrer "$BANC/sortie"
+( source outils/cle-secours.sh; IMAGES_LINUX=$BANC/cache8 place_vanguard 30000 7534 ) >"$BANC/sortie-place" 2>&1
+voir "Kali allumée : le plan de la clé la compte" dit "$BANC/sortie-place" "Kali Linux aussi" ||
+  montrer "$BANC/sortie-place"
+
+# Le cache, lien vers un autre disque débranché : jamais recréé, ni à sa place ni au bout du lien.
+rm -f "$REGLAGE"
+mkdir -p "$BANC/cle9/ISO"
+ln -s "$BANC/disque2/vanguard-images" "$BANC/lien-images"
+ln -s "$BANC/disque2/cle-secours" "$BANC/lien-secours"
+rm -f "$BANC/notifications.log"
+images9() { VANGUARD_IMAGES=$BANC/lien-images bash outils/images-cle.sh "$@" >>"$BANC/sortie9" 2>&1; }
+: >"$BANC/sortie9"
+images9 --chercher
+c1=$?
+images9 --cle "$BANC/cle9"
+c2=$?
+images9 --toutes "$BANC/cle9"
+c3=$?
+images9 --verifier
+c4=$?
+images9 --importer "$IMAGE8"
+c5=$?
+VANGUARD_IMAGES=$BANC/lien-images/sous bash outils/images-cle.sh --chercher >>"$BANC/sortie9" 2>&1
+c6=$?
+VANGUARD_IMAGES=$BANC/lien-images bash outils/cle-secours.sh --telecharger "$BANC/lien-secours" >>"$BANC/sortie9" 2>&1
+c7=$?
+voir "cache sur un disque débranché : arrêt propre (0 tout seul, 1 demandé à la main), une notification" \
+  eval '((c1 == 0 && c2 == 0 && c3 == 1 && c4 == 1 && c5 == 1 && c6 == 0 && c7 == 1)) &&
+    dit "$BANC/notifications.log" "Images de la clé : cache absent" &&
+    dit "$BANC/sortie9" "dossier des images introuvable : $BANC/lien-secours mène à"' ||
+  { echo "      codes $c1 $c2 $c3 $c4 $c5 $c6 $c7"; montrer "$BANC/sortie9"; }
+voir "cache sur un disque débranché : aucun dossier recréé, ni au bout du lien, ni à sa place" \
+  eval '[[ -L $BANC/lien-images && -L $BANC/lien-secours && ! -e $BANC/disque2 ]] &&
+    [[ -z $(ls -A "$BANC/cle9/ISO") ]] && ! compgen -G "$BANC/xdg-cache/vanguard/images-cle*" >/dev/null' ||
+  { ls -la "$BANC" "$BANC/cle9/ISO"; }
+
+# Une recherche sans rien de neuf, et le début d'un téléchargement : chacun sa notification.
+mkdir -p "$BANC/cache10"
+echo arch >"$BANC/cache10/archlinux-2026.11.01-x86_64.iso"
+echo x >"$BANC/cache10/archlinux-2026.11.01-x86_64.iso.sha256"
+rm -f "$BANC/notifications.log"
+chercher10() { # date de la dernière Arch
+  local date=$1
+  (
+    source outils/images-cle.sh
+    for s in debian fedora systemrescue omarchy; do eval "derniere_$s() { return 1; }"; done
+    derniere_arch() { echo "archlinux-$date-x86_64.iso https://exemple.invalid/arch/"; }
+    lire() { echo "faux $1"; }
+    curl() { # les en-têtes : une redirection, puis la taille (1,5 Gio) ; le téléchargement, lui, échoue
+      if [[ $* == *-fsSIL* ]]; then
+        printf 'HTTP/2 302\r\ncontent-length: 0\r\n\r\nHTTP/2 200\r\nContent-Length: 1610612736\r\n\r\n'
+      else
+        return 22
+      fi
+    }
+    chercher
+  ) >"$BANC/sortie" 2>&1
+}
+VANGUARD_IMAGES=$BANC/cache10 chercher10 2026.11.01
+voir "recherche sans rien de neuf : « rien de nouveau », ce qui est à jour et ce qui n'a pas répondu" \
+  eval 'dit "$BANC/notifications.log" "|Images de la clé : rien de nouveau|Déjà à jour : Arch Linux." &&
+    dit "$BANC/notifications.log" "Pas jointes (pas d'"'"'Internet, ou site changé) : SystemRescue, Omarchy,"' ||
+  { montrer "$BANC/notifications.log"; montrer "$BANC/sortie"; }
+rm -f "$BANC/notifications.log"
+VANGUARD_IMAGES=$BANC/cache10 chercher10 2026.12.01
+voir "début d'un téléchargement : son nom et sa taille, avant curl ; « rien de nouveau » pas dit" \
+  eval 'dit "$BANC/notifications.log" \
+    "|Images de la clé : téléchargement|Arch Linux : archlinux-2026.12.01-x86_64.iso, 1,5 Gio.|" &&
+    pas_dit "$BANC/notifications.log" "rien de nouveau"' ||
+  { montrer "$BANC/notifications.log"; montrer "$BANC/sortie"; }
+mkdir -p "$BANC/kali10"
+printf 'd8:announce0:4:infod6:lengthi16852080640e4:name42:kali-linux-2026.4-live-everything-amd64.isoee' \
+  >"$BANC/kali10/kali-linux-2026.4-live-everything-amd64.iso.torrent"
+echo morceau >"$BANC/kali10/kali-linux-2026.4-live-everything-amd64.iso"
+rm -f "$BANC/notifications.log"
+( source outils/images-cle.sh; verifier_image() { return 0; }
+  telecharger kali https://exemple.invalid/ kali-linux-2026.4-live-everything-amd64.iso "$BANC/kali10" ) \
+  >"$BANC/sortie" 2>&1
+voir "début d'un torrent de Kali : sa taille lue dans le .torrent, et « reprise » s'il était commencé" \
+  dit "$BANC/notifications.log" \
+  "|Images de la clé : reprise du téléchargement|Kali Linux : kali-linux-2026.4-live-everything-amd64.iso, 15,7 Gio (" ||
+  { montrer "$BANC/notifications.log"; montrer "$BANC/sortie"; }
+
+# Les essais de Kali qui suivent : allumée par le réglage.
+echo 'IMAGES_EN_PLUS="kali"' >"$REGLAGE"
+
 # Une fausse Kali de 8 Mio : avec les 512 Mio gardés, la nouvelle (520 Mio) ne tient sur la clé de 524 Mio que si
 # l'ancienne part d'abord, comme la vraie Kali sur la vraie clé.
 mkdir -p "$BANC/cache5" "$BANC/cle5"

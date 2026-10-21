@@ -2,10 +2,11 @@
 # Clé de secours : la clé VANGUARD démarre aussi les ordinateurs, pour réparer ou réinstaller Linux, Windows et macOS.
 #   1 VANGUARD     partition de Ventoy, exFAT : Vanguard comme avant (témoin vanguard.cle), et ses images dans ISO/ :
 #                 Omarchy (installateur complet), Arch Linux, Debian et Fedora en installateurs par Internet, SystemRescue
-#                 (réparer, sauver des fichiers, tester la mémoire), puis, s'il reste la place, Kali Linux (live
-#                 complète, 16 Gio) et Windows 11 en secours. Les images Linux viennent de outils/images-cle.sh, qui
-#                 les vérifie et les tient à jour au branchement. Attribut GPT « lecture seule » (bit 60) : Windows la
-#                 monte en lecture seule.
+#                 (réparer, sauver des fichiers, tester la mémoire), puis, s'il reste la place, Windows 11 en
+#                 secours. Les images Linux viennent de outils/images-cle.sh, qui les vérifie et les tient à jour au
+#                 branchement ; en option, Kali Linux (live complète, 16 Gio, avant Windows), seulement sur un
+#                 ordinateur dont le réglage local la demande (voir images-cle.sh). Attribut GPT « lecture seule »
+#                 (bit 60) : Windows la monte en lecture seule.
 #   2 VTOYEFI     32 Mio, démarrage de Ventoy (UEFI) ; ne jamais y toucher.
 #   3 VANGUARDLOG  64 Mio, exFAT, modifiable partout : le journal des erreurs (src/journal.rs).
 #   4 MACOS       HFS+ : la récupération de macOS, téléchargée chez Apple (BaseSystem), pour les Mac Intel.
@@ -35,6 +36,8 @@
 #   outils/cle-secours.sh --installer-racine      une fois, et après chaque changement d'épingle : la partie root de
 #                                                 --ventoy-maj (outils/ventoy-racine.sh), copiée en fichier de root
 #   outils/cle-secours.sh --ventoy-publie         (développement) GitHub a-t-il un Ventoy plus récent que l'épingle ?
+# Le dossier des images (DOSSIER) et le cache d'images-cle.sh peuvent être des liens vers un autre disque : disque
+# absent, rien n'est recréé à leur place.
 # Essais : VANGUARD_VTOYEFI et VANGUARD_WIN11, des dossiers lus à la place des partitions VTOYEFI et WIN11 de la clé ;
 # outils/essais-cle.sh.
 set -euo pipefail
@@ -120,6 +123,33 @@ linux_mio() {
   read -r n octets < <(find -H "$IMAGES_LINUX" -maxdepth 1 -name '*.iso' ! -name 'kali-linux-*' \
     -exec test -f {}.sha256 \; -printf '%s\n' 2>/dev/null | awk '{s += $1; n++} END {printf "%d %d\n", n, s}')
   if ((n == 5)); then echo $(((octets + MIO - 1) / MIO + 256)); else echo "$LINUX_MIO_ESTIME"; fi
+}
+
+# Kali Linux est-elle tenue sur cet ordinateur ? Coupée par défaut : seul le réglage local d'images-cle.sh l'allume.
+kali_voulue() { [[ " $(outils/images-cle.sh --sortes 2>/dev/null) " == *" kali "* ]]; }
+
+# Un dossier d'images qui est un lien vers un autre disque, débranché : le lien mort, et code 0 (comme dans
+# images-cle.sh). Rien n'est alors recréé à sa place : un mkdir -p le referait vide, dans ~/.cache ou sur le tmpfs de
+# /run/media, et les images s'y téléchargeraient.
+lien_mort() { # dossier
+  local d=$1
+  while [[ ! -e $d ]]; do
+    if [[ -L $d ]]; then
+      echo "$d"
+      return 0
+    fi
+    [[ $d == */* ]] || return 1
+    d=${d%/*}
+    [[ -n $d ]] || return 1
+  done
+  return 1
+}
+dossier_joignable() { # dossier
+  local lien
+  if lien=$(lien_mort "$1"); then
+    erreur "dossier des images introuvable : $lien mène à $(readlink "$lien") (disque débranché ?). Rien n'est recréé \
+ailleurs."
+  fi
 }
 
 # Place de Kali Linux : celle prête dans le cache, sinon l'estimation.
@@ -328,6 +358,8 @@ place_vanguard() { # vanguard_mio iso_windows_mio
   if ((libre < 0)); then
     echo "✖ Clé trop petite : il manque $((-libre)) Mio pour Vanguard et les images Linux."
     return 1
+  elif ! kali_voulue; then
+    :
   elif ((libre >= kali)); then
     echo "Kali Linux aussi dans ISO/ (live complète, $kali Mio)."
     libre=$((libre - kali))
@@ -762,7 +794,11 @@ ventoy_de() { # disque
 # L'archive de Ventoy épinglée, rangée avec les images (téléchargée au besoin), vérifiée par son empreinte : son chemin,
 # ou code 1.
 archive_ventoy() {
-  local a=$IMAGES_LINUX/ventoy-$VENTOY-linux.tar.gz
+  local a=$IMAGES_LINUX/ventoy-$VENTOY-linux.tar.gz lien
+  if lien=$(lien_mort "$IMAGES_LINUX"); then
+    echo "  Cache des images introuvable : $lien mène à $(readlink "$lien") (disque débranché ?)." >&2
+    return 1
+  fi
   if ! empreinte_ok "$a" "$VENTOY_SHA256"; then
     mkdir -p "$IMAGES_LINUX"
     rm -f "$a.part"
@@ -1041,6 +1077,13 @@ a_jour() { # point de la clé (facultatif)
 
 # Lu par outils/essais-cle.sh (source) : les fonctions seulement, rien n'est lancé.
 [[ ${BASH_SOURCE[0]} == "$0" ]] || return 0
+# Le dossier des images, s'il est donné : jamais recréé à la place d'un lien mort.
+case ${1:-} in
+  --plan) [[ -z ${3:-} ]] || dossier_joignable "$3" ;;
+  --essai) [[ -z ${2:-} ]] || dossier_joignable "$2" ;;
+  --telecharger | --verifier) dossier_joignable "${2:?dossier des images}" ;;
+  --ecrire | --windows) dossier_joignable "${3:?dossier des images vérifiées}" ;;
+esac
 case ${1:-} in
   --plan) plan "${2:-}" "${3:-}" ;;
   --essai) essai "${2:-}" ;;
@@ -1053,5 +1096,5 @@ case ${1:-} in
   --ventoy-maj) ventoy_maj "${2:-}" ;;
   --installer-racine) installer_racine ;;
   --ventoy-publie) ventoy_publie ;;
-  *) sed -n '2,39p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
+  *) sed -n '2,42p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
 esac
