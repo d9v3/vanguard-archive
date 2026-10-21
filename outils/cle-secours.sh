@@ -919,6 +919,9 @@ ventoy_racine() { # disque serie octets archive
   [[ $(lsblk -dno SERIAL "$disque") == "$serie" && $(lsblk -bdno SIZE "$disque") == "$octets" ]] ||
     erreur "$disque n'est plus la clé choisie : rien n'a été écrit."
   tmp=$(mktemp -d)
+  # Le dossier de root ne reste pas derrière, même après une erreur ; son nom est pris tout de suite (tmp est locale).
+  # shellcheck disable=SC2064
+  trap "rm -rf '$tmp'" EXIT
   cp "$archive" "$tmp/ventoy.tar.gz"
   if ! empreinte_ok "$tmp/ventoy.tar.gz" "$VENTOY_SHA256"; then
     rm -rf "$tmp"
