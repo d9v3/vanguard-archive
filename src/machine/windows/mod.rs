@@ -16,7 +16,7 @@ mod comptes;
 pub(crate) mod connexions;
 pub(crate) mod correctifs;
 mod durcissement;
-mod ecoute;
+pub(crate) mod ecoute;
 pub(crate) mod evenements;
 mod exclusions;
 pub(crate) mod gestionnaire;

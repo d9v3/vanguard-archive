@@ -9,6 +9,7 @@ use crate::risk::Niveau;
 use crate::ui::*;
 
 mod administrateurs;
+pub(crate) mod agents_ia;
 mod bluetooth;
 pub(crate) mod certificats;
 mod comptes_oublies;

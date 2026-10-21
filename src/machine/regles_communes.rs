@@ -222,3 +222,24 @@ regle!(
     &[],
     || crate::sauvegarde::constats().into_iter().collect()
 );
+
+regle!(
+    "COM-AGT-001",
+    Os::Tous,
+    730,
+    ("serveurs d'IA ouverts au réseau", "AI servers open to the network"),
+    &["OWASP Top 10 for LLM Applications"],
+    super::agents_ia::exposition
+);
+
+regle!(
+    "COM-AGT-002",
+    Os::Tous,
+    740,
+    (
+        "réglages des agents d'IA (permissions, serveurs MCP, clés en clair)",
+        "AI agent settings (permissions, MCP servers, clear-text keys)"
+    ),
+    &["OWASP Top 10 for LLM Applications", "MCP Security Best Practices"],
+    super::agents_ia::reglages
+);
