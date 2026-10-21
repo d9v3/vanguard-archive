@@ -76,7 +76,7 @@ fn fournisseur() {
 /// Une redirection ne quitte jamais HTTPS : sinon quelqu'un sur le chemin pourrait répondre à la place du service (le
 /// registre d'un domaine, une liste d'abuse.ch). Dix au plus. Avec `meme_hote`, jamais vers un autre hôte : reqwest n'y
 /// retire que les en-têtes d'authentification qu'il connaît, une clé d'API (« Auth-Key », « hibp-api-key ») suivrait.
-fn client(delai: Duration, meme_hote: bool) -> Option<reqwest::Client> {
+fn client(delai: Duration, meme_hote: bool, certificat: bool) -> Option<reqwest::Client> {
     fournisseur();
     let redirections = reqwest::redirect::Policy::custom(move |essai| {
         let autre_hote = essai.previous().first().and_then(|u| u.host_str()) != essai.url().host_str();
@@ -91,6 +91,8 @@ fn client(delai: Duration, meme_hote: bool) -> Option<reqwest::Client> {
         .redirect(redirections)
         .connect_timeout(delai.min(Duration::from_secs(15)))
         .timeout(delai)
+        // Le certificat présenté par le serveur, gardé avec la réponse (audit du HTTPS intercepté).
+        .tls_info(certificat)
         .build()
         .ok()
 }
@@ -112,7 +114,7 @@ pub(crate) fn envoyer(demande: Demande) -> Option<Reponse> {
     let adresse = adresse.to_string();
     let entetes: Vec<(String, String)> = entetes.into_iter().map(|(n, v)| (n.to_string(), v)).collect();
     a_part(async move {
-        let client = client(delai, !entetes.is_empty())?;
+        let client = client(delai, !entetes.is_empty(), false)?;
         let mut requete = match corps {
             Some(corps) => client.post(&adresse).body(corps),
             None => client.get(&adresse),
@@ -146,6 +148,64 @@ pub(crate) fn texte(adresse: &str, delai: Duration) -> Option<String> {
         .map(|r| r.texte())
 }
 
+/// Pourquoi un site n'a pas rendu son certificat.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum Refus {
+    /// La connexion a été refusée à cause du certificat présenté (autorité inconnue du système, nom qui ne
+    /// correspond pas, certificat expiré) : le texte de l'erreur, tel que le vérificateur l'a dit.
+    Certificat(String),
+    /// Pas de réponse : hors ligne, délai, adresse qui n'est pas en HTTPS, ou réponse sans certificat.
+    Reseau,
+}
+
+/// Ce qu'un site HTTPS a présenté : le certificat de feuille (DER), tel que reçu, et le code de la réponse.
+pub(crate) struct Presente {
+    pub code: u16,
+    pub certificat: Vec<u8>,
+}
+
+/// Dans la chaîne des causes d'une erreur de reqwest, celle qui parle du certificat, s'il y en a une.
+fn cause_certificat(erreur: &reqwest::Error) -> Option<String> {
+    let mut cause: Option<&(dyn std::error::Error + 'static)> = Some(erreur);
+    while let Some(e) = cause {
+        let texte = e.to_string();
+        let bas = texte.to_lowercase();
+        if bas.contains("certificate") || bas.contains("certificat") || bas.contains("unknownissuer") {
+            return Some(texte);
+        }
+        cause = e.source();
+    }
+    None
+}
+
+/// Demande `adresse` (HTTPS seulement, sans suivre de redirection vers un autre hôte : le certificat jugé est celui
+/// du site demandé) et rend le certificat que le serveur a présenté, accepté par le vérificateur du système, avec
+/// le code de sa réponse ; le corps n'est pas lu. `Err(Refus::Certificat)` : le système l'a refusé.
+pub(crate) fn certificat_presente(adresse: &str, delai: Duration) -> Result<Presente, Refus> {
+    if !adresse.starts_with("https://") {
+        return Err(Refus::Reseau);
+    }
+    let adresse = adresse.to_string();
+    a_part(async move {
+        let client = client(delai, true, true)?;
+        let reponse = match client.get(&adresse).send().await {
+            Ok(r) => r,
+            Err(e) => return Some(Err(cause_certificat(&e).map_or(Refus::Reseau, Refus::Certificat))),
+        };
+        let code = reponse.status().as_u16();
+        let certificat = reponse
+            .extensions()
+            .get::<reqwest::tls::TlsInfo>()
+            .and_then(|t| t.peer_certificate().map(<[u8]>::to_vec));
+        let Some(certificat) = certificat else {
+            return Some(Err(Refus::Reseau));
+        };
+        Some(Ok(Presente { code, certificat }))
+    })
+    .flatten()
+    .unwrap_or(Err(Refus::Reseau))
+}
+
 /// Pour la mesure du débit : reçoit `adresse` en comptant les octets au fil de l'eau dans `octets`, jusqu'à la fin de
 /// la réponse, `fin` ou `arret`. `false` : rien n'est arrivé.
 pub(crate) fn recevoir_en_comptant(adresse: &str, fin: Instant, octets: &AtomicU64, arret: &AtomicBool) -> bool {
@@ -160,7 +220,7 @@ pub(crate) fn recevoir_en_comptant(adresse: &str, fin: Instant, octets: &AtomicU
                 .build()
                 .ok()?;
             let resultat = moteur.block_on(async {
-                let mut reponse = client(reste, false)?.get(adresse).send().await.ok()?;
+                let mut reponse = client(reste, false, false)?.get(adresse).send().await.ok()?;
                 let mut recus = 0u64;
                 while Instant::now() < fin && !arret.load(Ordering::Relaxed) {
                     let Ok(Some(morceau)) = reponse.chunk().await else {

@@ -10,7 +10,7 @@ use crate::ui::*;
 
 mod administrateurs;
 mod bluetooth;
-mod certificats;
+pub(crate) mod certificats;
 mod comptes_oublies;
 pub(crate) mod dns;
 mod extensions;

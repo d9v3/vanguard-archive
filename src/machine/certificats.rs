@@ -10,7 +10,7 @@ const CAT: &str = "Certificats";
 
 /// Ce qu'on sait d'un certificat d'après son nom.
 #[derive(Debug, PartialEq, Clone, Copy)]
-enum Famille {
+pub(crate) enum Famille {
     /// Logiciel connu pour avoir installé une racine dont la clé privée est la même partout (Superfish…).
     Compromis,
     /// Outil d'interception du trafic (débogage, test d'intrusion) : quiconque a sa clé lit tout.
@@ -22,7 +22,7 @@ enum Famille {
     Autre,
 }
 
-fn famille(nom: &str) -> Famille {
+pub(crate) fn famille(nom: &str) -> Famille {
     let n = nom.to_lowercase();
     let contient = |motifs: &[&str]| motifs.iter().any(|m| n.contains(m));
     if contient(&["superfish", "edellroot", "dsdtestprovider", "komodia", "privdog"]) {
@@ -70,7 +70,7 @@ fn famille(nom: &str) -> Famille {
 }
 
 /// Un élément DER : (étiquette, contenu, reste après lui).
-fn tlv(octets: &[u8]) -> Option<(u8, &[u8], &[u8])> {
+pub(crate) fn tlv(octets: &[u8]) -> Option<(u8, &[u8], &[u8])> {
     let (&etiquette, reste) = octets.split_first()?;
     let (&premier, reste) = reste.split_first()?;
     let (longueur, reste) = if premier < 0x80 {
@@ -87,7 +87,7 @@ fn tlv(octets: &[u8]) -> Option<(u8, &[u8], &[u8])> {
 }
 
 /// Valeur d'un attribut d'un nom X.500 (CN = 2.5.4.3, O = 2.5.4.10…), donné par le dernier octet de son OID.
-fn attribut(nom: &[u8], code: u8) -> Option<String> {
+pub(crate) fn attribut(nom: &[u8], code: u8) -> Option<String> {
     let mut ensembles = nom;
     while let Some((_, ensemble, suite)) = tlv(ensembles) {
         ensembles = suite;
@@ -112,7 +112,7 @@ fn attribut(nom: &[u8], code: u8) -> Option<String> {
 }
 
 /// Nom du sujet d'un certificat DER : son CN, sinon son organisation, sinon son unité.
-fn sujet(der: &[u8]) -> Option<String> {
+pub(crate) fn sujet(der: &[u8]) -> Option<String> {
     let (_, certificat, _) = tlv(der)?;
     let (_, tbs, _) = tlv(certificat)?;
     let mut champs = tbs;
@@ -130,7 +130,7 @@ fn sujet(der: &[u8]) -> Option<String> {
 }
 
 /// Le base64 d'un certificat : un dernier bloc d'un seul caractère (texte tronqué) le rend illisible.
-fn base64(texte: &str) -> Option<Vec<u8>> {
+pub(crate) fn base64(texte: &str) -> Option<Vec<u8>> {
     let utiles = texte.bytes().filter(|c| !c.is_ascii_whitespace() && *c != b'=').count();
     if utiles % 4 == 1 {
         return None;
