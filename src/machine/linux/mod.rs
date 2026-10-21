@@ -14,6 +14,7 @@ pub(crate) mod dissimulation;
 mod docker;
 mod durcissement;
 mod maj;
+mod natif;
 mod persistance;
 mod plateforme;
 mod privileges;
