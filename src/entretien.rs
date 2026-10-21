@@ -209,7 +209,7 @@ static ETAT: AtomicU8 = AtomicU8::new(0);
 pub fn active() -> bool {
     if ETAT.load(Ordering::Relaxed) == 0 {
         #[cfg(target_os = "linux")]
-        let installe = reussit("systemctl", &["--user", "is-enabled", &format!("{NOM}.timer")]);
+        let installe = crate::reseau::surveillance::minuterie_activee(&format!("{NOM}.timer"));
         #[cfg(target_os = "macos")]
         let installe = reussit("launchctl", &["print", &format!("{}/{AGENT_MACOS}", domaine_launchd())]);
         #[cfg(windows)]
