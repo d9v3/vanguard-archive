@@ -666,7 +666,9 @@ mod linux {
             let surcharges: Vec<String> = [PathBuf::from("/var/lib/flatpak"), donnees.join("flatpak")]
                 .iter()
                 .flat_map(|i| [i.join("overrides/global"), i.join("overrides").join(id)])
-                .filter_map(|f| std::fs::read_to_string(f).ok())
+                // Celles du compte se posent sans droits : un tube nommé ou un lien vers /dev/zero ne doit ni
+                // bloquer ni remplir la mémoire. Un vrai fichier de surcharge fait quelques centaines d'octets.
+                .filter_map(|f| natif::lire_borne(&f, 1 << 20))
                 .collect();
             return Some(fusionner(&metadata, &surcharges));
         }

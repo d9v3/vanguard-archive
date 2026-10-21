@@ -81,7 +81,7 @@ fn dans_le_path(commande: &str) -> bool {
 /// (AUR, paquet de l'éditeur, Snap) compte aussi : son programme est là.
 #[cfg(target_os = "linux")]
 fn lire() -> Result<Etat, String> {
-    use crate::gaming::linux::{applications_flatpak, installer_flatpak, installes, present};
+    use crate::gaming::linux::{applications_flatpak, installer_flatpak, installes_parmi, noms_installes, present};
     use crate::machine::linux::Paquets;
     let gestion = Paquets::detecter();
     let flatpak = present("flatpak");
@@ -101,6 +101,8 @@ fn lire() -> Result<Etat, String> {
     };
     // Debian n'a que firefox-esr ; Ubuntu et ses dérivées ont firefox.
     let ubuntu = gestion == Some(Paquets::Apt) && crate::machine::linux::famille_ubuntu();
+    // La base des paquets lue une fois, au premier logiciel qui n'est pas dans le PATH, et non à chacun.
+    let noms = std::cell::OnceCell::new();
     let mut offres = Vec::new();
     for l in CATALOGUE {
         let paquets: &[&str] = match gestion {
@@ -113,7 +115,7 @@ fn lire() -> Result<Etat, String> {
         match (gestion, l.flatpak) {
             (Some(g), _) if !paquets.is_empty() => offres.push(Offre {
                 logiciel: l,
-                installe: vu || installes(g, paquets),
+                installe: vu || installes_parmi(noms.get_or_init(|| noms_installes(g)).as_ref(), g, paquets),
                 commandes: vec![g.installer(&paquets.join(" "))],
                 source: trf!(
                     "paquet de la distribution, {}",

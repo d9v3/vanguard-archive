@@ -46,10 +46,12 @@ pub(crate) fn present(cmd: &str) -> bool {
     natif::present(cmd)
 }
 
-/// Tous les paquets de la liste sont-ils installés ? Les bases de pacman et de dpkg se lisent directement ; leur
-/// commande ne sert qu'en secours, quand la base ne se lit pas. rpm garde la sienne : sa base est du SQLite.
-pub(crate) fn installes(gestion: Paquets, paquets: &[&str]) -> bool {
-    let connus = match gestion {
+/// Les noms de paquets installés, lus une fois dans la base : un menu qui teste des dizaines de logiciels la
+/// relirait sinon à chaque test (des milliers de fichiers sous pacman, un status de plusieurs Mo sous dpkg).
+/// Pas de cache pour tout le programme : le menu des jeux relit l'état après une installation. `None` : base
+/// illisible, ou rpm (sa base est du SQLite).
+pub(crate) fn noms_installes(gestion: Paquets) -> Option<HashSet<String>> {
+    match gestion {
         Paquets::Pacman => noms_pacman(),
         Paquets::Apt => paquets_dpkg_installes().map(|l| {
             l.into_iter()
@@ -57,7 +59,13 @@ pub(crate) fn installes(gestion: Paquets, paquets: &[&str]) -> bool {
                 .collect()
         }),
         Paquets::Dnf | Paquets::Zypper => None,
-    };
+    }
+}
+
+/// Tous les paquets de la liste sont-ils installés ? Les bases de pacman et de dpkg se lisent directement
+/// (`connus`, de `noms_installes`) ; leur commande ne sert qu'en secours, quand la base ne se lit pas. rpm garde
+/// la sienne : sa base est du SQLite.
+pub(crate) fn installes_parmi(connus: Option<&HashSet<String>>, gestion: Paquets, paquets: &[&str]) -> bool {
     if let Some(connus) = connus {
         return paquets.iter().all(|p| connus.contains(*p));
     }
@@ -134,6 +142,16 @@ fn installe_selon_dpkg(statut: &str) -> bool {
 /// défaut (installations ajoutées dans /etc/flatpak/installations.d, variables FLATPAK_*_DIR) : leurs
 /// applications ne se verraient pas. `None` : ni lecture ni commande n'ont abouti.
 pub(crate) fn applications_flatpak() -> Option<Vec<String>> {
+    applications_flatpak_si(natif::present("flatpak"))
+}
+
+fn applications_flatpak_si(flatpak_present: bool) -> Option<Vec<String>> {
+    // Sans le programme flatpak, rien, comme la commande d'avant : les dossiers restés après sa
+    // désinstallation (pacman ne retire que ses fichiers) ne sont plus des applications qui démarrent, et
+    // `flatpak uninstall`, proposé pour les retirer, ne pourrait pas se lancer.
+    if !flatpak_present {
+        return None;
+    }
     if flatpak_par_defaut() {
         return Some(natif::flatpak_apps());
     }
@@ -164,6 +182,10 @@ pub(crate) fn flatpak_par_defaut() -> bool {
 
 /// Application Flatpak installée (pour l'utilisateur ou pour le système) ? Son fichier metadata en service le dit.
 pub(crate) fn flatpak_installe(id: &str) -> bool {
+    // Sans flatpak, ses dossiers restés sur le disque ne lancent rien (voir `applications_flatpak`).
+    if !natif::present("flatpak") {
+        return false;
+    }
     if flatpak_par_defaut() {
         return natif::flatpak_metadata(id).is_some();
     }
@@ -216,6 +238,7 @@ pub(crate) fn installer_flatpak(id: &str) -> Vec<String> {
 /// Un composant en paquets de la distribution : `None` si la distribution n'en a pas de nom connu.
 fn composant(
     gestion: Paquets,
+    connus: Option<&HashSet<String>>,
     titre: &str,
     pourquoi: &str,
     noms: (&[&str], &[&str], &[&str], &[&str]),
@@ -232,7 +255,7 @@ fn composant(
     Some(element(
         titre,
         pourquoi,
-        Some(installes(gestion, paquets)),
+        Some(installes_parmi(connus, gestion, paquets)),
         vec![gestion.installer(&paquets.join(" "))],
     ))
 }
@@ -243,6 +266,9 @@ fn multilib_actif(pacman_conf: &str) -> bool {
 }
 
 fn composants(gestion: Paquets) -> Vec<Element> {
+    // La base des paquets lue une fois pour tous les composants.
+    let noms = noms_installes(gestion);
+    let connus = noms.as_ref();
     let mut l = Vec::new();
     // Paquets 32 bits : Steam et la plupart des jeux en ont besoin.
     match gestion {
@@ -290,6 +316,7 @@ fn composants(gestion: Paquets) -> Vec<Element> {
     match gestion {
         Paquets::Pacman | Paquets::Apt => l.extend(composant(
             gestion,
+            connus,
             "Steam",
             tr!(
                 "La bibliothèque de jeux, avec Proton pour lancer les jeux Windows.",
@@ -314,9 +341,10 @@ fn composants(gestion: Paquets) -> Vec<Element> {
     );
     match (gestion, carte_graphique()) {
         (Paquets::Pacman, Carte::Nvidia) => {
-            if installes(gestion, &["nvidia-utils"]) {
+            if installes_parmi(connus, gestion, &["nvidia-utils"]) {
                 l.extend(composant(
                     gestion,
+                    connus,
                     tr!("Vulkan NVIDIA 32 bits", "NVIDIA Vulkan 32-bit"),
                     vulkan,
                     (&["lib32-nvidia-utils", "lib32-vulkan-icd-loader"], &[], &[], &[]),
@@ -340,6 +368,7 @@ fn composants(gestion: Paquets) -> Vec<Element> {
         }
         (Paquets::Pacman, Carte::Amd) => l.extend(composant(
             gestion,
+            connus,
             "Vulkan AMD (RADV)",
             vulkan,
             (
@@ -356,6 +385,7 @@ fn composants(gestion: Paquets) -> Vec<Element> {
         )),
         (Paquets::Pacman, Carte::Intel) => l.extend(composant(
             gestion,
+            connus,
             "Vulkan Intel",
             vulkan,
             (
@@ -372,6 +402,7 @@ fn composants(gestion: Paquets) -> Vec<Element> {
         )),
         (Paquets::Apt | Paquets::Dnf | Paquets::Zypper, Carte::Amd | Carte::Intel) => l.extend(composant(
             gestion,
+            connus,
             "Vulkan (Mesa)",
             vulkan,
             (
@@ -395,6 +426,7 @@ fn composants(gestion: Paquets) -> Vec<Element> {
     }
     l.extend(composant(
         gestion,
+        connus,
         "GameMode",
         tr!(
             "Donne la priorité au jeu (processeur, carte graphique) pendant qu'il tourne.",
@@ -409,6 +441,7 @@ fn composants(gestion: Paquets) -> Vec<Element> {
     ));
     l.extend(composant(
         gestion,
+        connus,
         "MangoHud",
         tr!(
             "Affiche en jeu les images par seconde, les températures et la charge.",
@@ -423,6 +456,7 @@ fn composants(gestion: Paquets) -> Vec<Element> {
     ));
     l.extend(composant(
         gestion,
+        connus,
         "Gamescope",
         tr!(
             "Fenêtre de jeu dédiée (mise à l'échelle, limite d'images, HDR), celle du Steam Deck.",
@@ -432,6 +466,7 @@ fn composants(gestion: Paquets) -> Vec<Element> {
     ));
     l.extend(composant(
         gestion,
+        connus,
         "Wine + winetricks",
         tr!(
             "Pour les jeux et lanceurs hors Steam (Battle.net, Ubisoft…).",
@@ -446,6 +481,7 @@ fn composants(gestion: Paquets) -> Vec<Element> {
     ));
     l.extend(composant(
         gestion,
+        connus,
         "Lutris",
         tr!(
             "Installe et lance les jeux hors Steam (Battle.net, EA, Ubisoft, émulateurs).",
@@ -456,6 +492,7 @@ fn composants(gestion: Paquets) -> Vec<Element> {
     if !present("flatpak") {
         l.extend(composant(
             gestion,
+            connus,
             tr!("Flatpak (pour Heroic et ProtonUp-Qt)", "Flatpak (for Heroic and ProtonUp-Qt)"),
             tr!(
                 "Magasin d'applications de toutes les distributions : Heroic (Epic, GOG) et ProtonUp-Qt s'y installent sans mot de passe.",
@@ -493,6 +530,7 @@ fn composants(gestion: Paquets) -> Vec<Element> {
     // Règles udev des manettes (Steam, PlayStation, Xbox) : le paquet steam d'Arch les fournit déjà.
     l.extend(composant(
         gestion,
+        connus,
         tr!("Règles des manettes", "Controller rules"),
         tr!(
             "Permet aux jeux de reconnaître les manettes (Steam, PlayStation, Xbox, Switch).",
@@ -863,5 +901,29 @@ mod tests {
         assert!(!multilib_actif(
             "[core]\n#[multilib]\n#Include = /etc/pacman.d/mirrorlist\n"
         ));
+    }
+    /// Sans le programme flatpak, aucune application : les dossiers restés après sa désinstallation ne se
+    /// lisent même pas.
+    #[test]
+    fn sans_flatpak_aucune_application() {
+        assert_eq!(applications_flatpak_si(false), None);
+    }
+
+    /// Les noms lus une fois servent à chaque test ; un nom avec son architecture vient de dpkg.
+    #[test]
+    fn installes_parmi_les_noms_lus() {
+        let connus: HashSet<String> = ["steam", "mesa-vulkan-drivers", "mesa-vulkan-drivers:i386"]
+            .iter()
+            .map(|n| (*n).to_string())
+            .collect();
+        assert!(installes_parmi(Some(&connus), Paquets::Apt, &["steam"]));
+        assert!(installes_parmi(
+            Some(&connus),
+            Paquets::Apt,
+            &["mesa-vulkan-drivers", "mesa-vulkan-drivers:i386"]
+        ));
+        assert!(!installes_parmi(Some(&connus), Paquets::Apt, &["steam", "lutris"]));
+        assert!(installes_parmi(Some(&connus), Paquets::Pacman, &[]));
+        assert!(noms_installes(Paquets::Dnf).is_none());
     }
 }

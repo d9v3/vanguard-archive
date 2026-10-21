@@ -450,6 +450,7 @@ fn paquets(t: &mut Vec<Trouvaille>) {
 #[cfg(target_os = "linux")]
 fn flatpaks(t: &mut Vec<Trouvaille>, maison: &std::path::Path) {
     // Lues dans les dossiers de Flatpak ; sa commande en secours, quand d'autres installations sont réglées.
+    // Sans le programme flatpak, `applications_flatpak` ne rend rien (voir là).
     let Some(liste) = crate::gaming::linux::applications_flatpak() else {
         return;
     };
@@ -477,17 +478,9 @@ fn flatpaks(t: &mut Vec<Trouvaille>, maison: &std::path::Path) {
 #[cfg(target_os = "linux")]
 fn snaps(t: &mut Vec<Trouvaille>) {
     // Les fichiers de snapd disent les snaps installés ; `snap list` en secours, quand ils ne se lisent pas.
-    let liste: Vec<String> = if let Some(snaps) = crate::machine::linux::natif::snaps() {
-        snaps.into_iter().map(|s| s.nom).collect()
-    } else {
-        let Some(sortie) = sortie_de("snap", &["list"], 60) else {
-            return;
-        };
-        sortie
-            .lines()
-            .skip(1)
-            .filter_map(|l| Some(l.split_whitespace().next()?.to_string()))
-            .collect()
+    let natif = crate::machine::linux::natif::snaps;
+    let Some(liste) = liste_snaps(crate::machine::linux::natif::present("snap"), natif) else {
+        return;
     };
     for nom in liste.iter().map(String::as_str) {
         let Some(i) = reconnu(nom) else {
@@ -502,6 +495,30 @@ fn snaps(t: &mut Vec<Trouvaille>) {
             arret: Vec::new(),
         });
     }
+}
+
+/// Les noms des snaps installés. Sans le programme snap, rien : les fichiers restés dans /var/lib/snapd après
+/// la désinstallation de snapd ne sont plus des logiciels qui démarrent, et le retrait proposé
+/// (`snap remove`) ne pourrait pas se lancer ; `snap list` d'avant ne trouvait rien non plus.
+#[cfg(target_os = "linux")]
+fn liste_snaps(
+    snap_present: bool,
+    lire: impl FnOnce() -> Option<Vec<crate::machine::linux::natif::Snap>>,
+) -> Option<Vec<String>> {
+    if !snap_present {
+        return None;
+    }
+    if let Some(snaps) = lire() {
+        return Some(snaps.into_iter().map(|s| s.nom).collect());
+    }
+    let sortie = sortie_de("snap", &["list"], 60)?;
+    Some(
+        sortie
+            .lines()
+            .skip(1)
+            .filter_map(|l| Some(l.split_whitespace().next()?.to_string()))
+            .collect(),
+    )
 }
 
 /// Installations à la main dans /opt (archive décompressée), quand aucun paquet ne les fournit.
@@ -726,7 +743,9 @@ fn nom_active(lien: &str, chemin: &std::path::Path) -> String {
         |_| chemin.to_path_buf(),
         |c| chemin.parent().map_or_else(|| c.clone(), |p| p.join(&c)),
     );
-    let defaut = std::fs::read_to_string(fichier).ok().and_then(|t| {
+    // Le lien peut venir du compte (~/.config/systemd/user) et pointer n'importe où : un fichier d'unité fait
+    // quelques Ko, la borne écarte un tube nommé ou /dev/zero, qui bloqueraient ou rempliraient la mémoire.
+    let defaut = crate::machine::linux::natif::lire_borne(&fichier, 64 * 1024).and_then(|t| {
         crate::machine::linux::natif::section_ini(&t, "Install")
             .into_iter()
             .find(|(c, _)| *c == "DefaultInstance")
@@ -1698,6 +1717,45 @@ mod tests {
             ]
         );
         let _ = std::fs::remove_dir_all(d);
+    }
+
+    /// Un lien d'activation posé par le compte vers /dev/zero ou un tube nommé : le nom reste celui du lien,
+    /// sans lecture sans fin (mémoire remplie) ni blocage.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn lien_d_activation_vers_un_fichier_special() {
+        use std::os::unix::fs::symlink;
+        let d = jetable("special");
+        let wants = d.join("default.target.wants");
+        std::fs::create_dir_all(&wants).unwrap();
+        let tube = std::ffi::CString::new(d.join("tube").to_str().unwrap()).unwrap();
+        // SAFETY : chemin C terminé par un zéro, vivant pendant l'appel ; mkfifo ne touche aucune mémoire du
+        // programme.
+        assert_eq!(unsafe { libc::mkfifo(tube.as_ptr(), 0o600) }, 0);
+        let (zero, fifo) = (instance("x", "y", "service"), instance("x", "z", "service"));
+        symlink("/dev/zero", wants.join(&zero)).unwrap();
+        symlink(d.join("tube"), wants.join(&fifo)).unwrap();
+        let depart = std::time::Instant::now();
+        assert_eq!(nom_active(&zero, &wants.join(&zero)), zero);
+        assert_eq!(nom_active(&fifo, &wants.join(&fifo)), fifo);
+        assert!(depart.elapsed() < std::time::Duration::from_secs(5));
+        let _ = std::fs::remove_dir_all(d);
+    }
+
+    /// Sans le programme snap, les fichiers restés dans /var/lib/snapd ne donnent aucun snap.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn sans_snap_aucun_snap() {
+        use crate::machine::linux::natif::Snap;
+        let restes = || {
+            Some(vec![Snap {
+                nom: "anydesk".into(),
+                courante: None,
+                revisions: vec!["12".into()],
+            }])
+        };
+        assert_eq!(liste_snaps(false, restes), None);
+        assert_eq!(liste_snaps(true, restes), Some(vec!["anydesk".to_string()]));
     }
 
     /// Sur cet ordinateur, chaque unité que systemctl dit activée se retrouve dans les liens lus ; en plus, seules

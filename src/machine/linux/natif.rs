@@ -474,6 +474,24 @@ fn flatpak_apps_dans(installations: &[PathBuf]) -> Vec<String> {
     apps
 }
 
+/// Un fichier ordinaire lu jusqu'à `max` octets. Les fichiers que le compte peut poser (unités de
+/// ~/.config/systemd, surcharges et applications Flatpak du compte) ne se lisent pas tels quels : un tube nommé
+/// bloquerait la lecture pour toujours, un lien vers /dev/zero remplirait la mémoire. `None` pour tout ce qui
+/// n'est pas un fichier ordinaire (le lien est suivi) ou ne se lit pas.
+pub(crate) fn lire_borne(chemin: &Path, max: u64) -> Option<String> {
+    use std::io::Read;
+    if !std::fs::metadata(chemin).is_ok_and(|m| m.is_file()) {
+        return None;
+    }
+    let mut texte = String::new();
+    std::fs::File::open(chemin)
+        .ok()?
+        .take(max)
+        .read_to_string(&mut texte)
+        .ok()?;
+    Some(texte)
+}
+
 /// Le fichier « metadata » d'une application (ses permissions statiques, `[Context]`), celle du compte d'abord :
 /// `flatpak run` prend la sienne quand l'application est installée deux fois.
 pub(crate) fn flatpak_metadata(id: &str) -> Option<String> {
@@ -488,7 +506,8 @@ fn flatpak_metadata_dans(installations: &[PathBuf], id: &str) -> Option<String> 
     installations
         .iter()
         .rev()
-        .find_map(|i| std::fs::read_to_string(i.join("app").join(id).join("current/active/metadata")).ok())
+        // Quelques Ko d'habitude ; celui du compte se pose sans droits, d'où la borne.
+        .find_map(|i| lire_borne(&i.join("app").join(id).join("current/active/metadata"), 1 << 20))
 }
 
 /// Les clés d'une section d'un fichier INI comme metadata (« [Context] » : sockets=…;devices=…), dans l'ordre.
@@ -1485,5 +1504,31 @@ mod tests {
         if let Some(t) = commande("getconf", &["PAGESIZE"]) {
             assert_eq!(t.trim(), taille_page().to_string());
         }
+    }
+    /// Un tube nommé, un lien vers /dev/zero ou un dossier ne se lisent pas ; un fichier trop long s'arrête à la
+    /// borne. Sans la vérification, le tube bloquerait le test pour toujours.
+    #[test]
+    fn lecture_bornee_aux_fichiers_ordinaires() {
+        let d = jetable("borne");
+        std::fs::write(d.join("unite.service"), "[Install]\nDefaultInstance=tty1\n").unwrap();
+        std::fs::write(d.join("long"), "x".repeat(5000)).unwrap();
+        let tube = std::ffi::CString::new(d.join("tube").to_str().unwrap()).unwrap();
+        // SAFETY : chemin C terminé par un zéro, vivant pendant l'appel ; mkfifo ne touche aucune mémoire du
+        // programme.
+        assert_eq!(unsafe { libc::mkfifo(tube.as_ptr(), 0o600) }, 0);
+        symlink("/dev/zero", d.join("zero")).unwrap();
+        symlink(d.join("unite.service"), d.join("lien.service")).unwrap();
+        let depart = std::time::Instant::now();
+        assert_eq!(
+            lire_borne(&d.join("lien.service"), 1024).as_deref(),
+            Some("[Install]\nDefaultInstance=tty1\n")
+        );
+        assert_eq!(lire_borne(&d.join("long"), 1024).map(|t| t.len()), Some(1024));
+        for n in ["tube", "zero", "absent"] {
+            assert_eq!(lire_borne(&d.join(n), 1024), None, "{n}");
+        }
+        assert_eq!(lire_borne(&d, 1024), None);
+        assert!(depart.elapsed() < std::time::Duration::from_secs(5));
+        let _ = std::fs::remove_dir_all(&d);
     }
 }
