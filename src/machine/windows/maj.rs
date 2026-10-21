@@ -456,12 +456,22 @@ fn commandes_winget(programmes: &[(String, String)]) -> Vec<String> {
         .collect()
 }
 
+/// Le winget du Store, par son chemin complet. Par son seul nom, Windows chercherait d'abord dans le dossier de
+/// Vanguard (Téléchargements, une clé passée sur une autre machine) : un winget.exe posé là serait lancé à la place
+/// du vrai, et son tableau vide ferait dire « Programmes à jour ». C'est un alias d'exécution (point d'analyse) :
+/// son entrée se lit sans le suivre. `LOCALAPPDATA` absent ou relatif : pas de chemin sûr, `None`.
+fn winget_du_store(local: Option<&std::ffi::OsStr>) -> Option<std::path::PathBuf> {
+    let chemin = std::path::Path::new(local?).join(r"Microsoft\WindowsApps\winget.exe");
+    (chemin.is_absolute() && std::fs::symlink_metadata(&chemin).is_ok()).then_some(chemin)
+}
+
 /// Programmes installés que winget sait mettre à jour (navigateurs, 7-Zip, Discord, Steam…).
 fn programmes() -> Constat {
-    // winget lancé directement, sans PowerShell autour ; PowerShell seulement s'il ne démarre pas.
-    let direct = if super::installes::winget_present() {
+    // winget lancé directement, sans PowerShell autour ; PowerShell seulement s'il ne démarre pas, ou s'il n'est
+    // pas à la place de celui du Store (installé autrement : PowerShell le trouve par le PATH, comme avant).
+    let direct = if let Some(winget) = winget_du_store(std::env::var_os("LOCALAPPDATA").as_deref()) {
         crate::commande::lancer(
-            std::process::Command::new("winget").args([
+            std::process::Command::new(winget).args([
                 "upgrade",
                 "--accept-source-agreements",
                 "--disable-interactivity",
@@ -475,6 +485,8 @@ fn programmes() -> Constat {
                 r.code.map_or_else(String::new, |c| c.to_string())
             )
         })
+    } else if super::installes::winget_present() {
+        None
     } else {
         Some("WINGET_ABSENT".to_string())
     };
@@ -742,6 +754,21 @@ mod tests {
                 cartes_graphiques(Some(l)),
             );
         }
+    }
+
+    /// winget n'est lancé que par le chemin du Store, jamais par son nom ; sans `LOCALAPPDATA` sûr, pas de lancement
+    /// direct (PowerShell reprend, par le PATH).
+    #[test]
+    fn winget_par_son_chemin_complet() {
+        let local = std::env::temp_dir().join(format!("vanguard-winget-{}", std::process::id()));
+        let apps = local.join(r"Microsoft\WindowsApps");
+        std::fs::create_dir_all(&apps).unwrap();
+        assert_eq!(winget_du_store(Some(local.as_os_str())), None);
+        std::fs::write(apps.join("winget.exe"), b"").unwrap();
+        assert_eq!(winget_du_store(Some(local.as_os_str())), Some(apps.join("winget.exe")));
+        assert_eq!(winget_du_store(Some(std::ffi::OsStr::new(r"Microsoft"))), None);
+        assert_eq!(winget_du_store(None), None);
+        let _ = std::fs::remove_dir_all(&local);
     }
 
     #[test]
