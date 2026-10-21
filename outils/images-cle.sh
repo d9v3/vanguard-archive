@@ -44,7 +44,8 @@ SORTES=(systemrescue arch omarchy debian fedora)
 # En option, coupées par défaut : ni téléchargées, ni copiées, ni proposées, sauf sur un ordinateur dont le réglage
 # local les demande : Kali Linux (16 Gio) n'est voulue que sur certains ordinateurs. Le réglage, hors du dépôt : une
 # ligne IMAGES_EN_PLUS="kali" dans ~/.config/vanguard/images-cle.conf. Lu, jamais sourcé : rien de ce fichier ne
-# s'exécute. Allumée, Kali va en dernier : sur la clé seulement s'il reste la place après les autres.
+# s'exécute. Allumée, Kali va en dernier : sur la clé seulement s'il reste la place après les autres, et retirée de
+# la clé quand une nouvelle version d'une autre image n'y tient plus (copier_sur_cle).
 EN_OPTION="kali"
 REGLAGE=${XDG_CONFIG_HOME:-$HOME/.config}/vanguard/images-cle.conf
 en_plus_demandees() {
@@ -53,10 +54,11 @@ en_plus_demandees() {
 }
 read -ra demandees <<<"$(en_plus_demandees)"
 for s in "${demandees[@]}"; do
-  if [[ " $EN_OPTION " == *" $s "* && " ${SORTES[*]} " != *" $s "* ]]; then
-    SORTES+=("$s")
-  else
+  if [[ " $EN_OPTION " != *" $s "* ]]; then
     echo "· $REGLAGE : « $s » n'est pas une image en option (en option : $EN_OPTION), ignorée." >&2
+  elif [[ " ${SORTES[*]} " != *" $s "* ]]; then
+    # Écrite deux fois (« kali,kali ») : comptée une fois, sans rien dire, ce n'est pas une erreur.
+    SORTES+=("$s")
   fi
 done
 # Facultatives : leur absence du cache n'empêche pas de faire une clé (cle-secours.sh --ecrire vérifie le cache).
@@ -90,6 +92,8 @@ declare -A MOTIFS=(
 declare -A NOMS=([arch]="Arch Linux" [debian]=Debian [fedora]=Fedora [systemrescue]=SystemRescue [omarchy]=Omarchy
   [kali]="Kali Linux")
 
+ETAT=${XDG_STATE_HOME:-$HOME/.local/state}/vanguard
+
 erreur() { echo "✖ $*" >&2; exit 1; }
 lire() { curl -fsSL --retry 3 --connect-timeout 20 --max-time 120 "$1"; }
 avertir() { # titre texte
@@ -121,13 +125,24 @@ lien_mort() { # dossier
   return 1
 }
 
-# Le cache absent : dit, et une notification. Code 0 si le cache est là.
+# Le cache absent : dit à chaque fois, et une notification, une fois par semaine au plus : la recherche puis la copie
+# du même service, la mise à jour du jour et chaque branchement la redonneraient sinon, tant que le disque manque
+# (comme deja_dit de cle-secours.sh). Le cache revenu, la note part : une nouvelle absence se redit aussitôt. Code 0
+# si le cache est là.
+CACHE_ABSENT=$ETAT/images-cache-absent
 cache_present() { # ce qui n'est pas fait, sans lui
-  local lien
-  lien=$(lien_mort "$CACHE") || return 0
-  echo "✖ Cache des images introuvable : $lien mène à $(readlink "$lien"), absent (disque débranché ?). $1" >&2
-  avertir "Images de la clé : cache absent" "$lien mène à $(readlink "$lien"), introuvable : disque débranché ? $1 \
-Rien n'est recréé ailleurs ; une fois le disque rebranché, la minuterie reprend d'elle-même."
+  local lien quoi
+  if ! lien=$(lien_mort "$CACHE"); then
+    rm -f "$CACHE_ABSENT"
+    return 0
+  fi
+  quoi="$lien mène à $(readlink "$lien")"
+  echo "✖ Cache des images introuvable : $quoi, absent (disque débranché ?). $1" >&2
+  if [[ $(cat "$CACHE_ABSENT" 2>/dev/null) != "$quoi" || -z $(find "$CACHE_ABSENT" -mmin -10080 2>/dev/null) ]]; then
+    mkdir -p "$ETAT" && printf '%s\n' "$quoi" >"$CACHE_ABSENT"
+    avertir "Images de la clé : cache absent" "$quoi, introuvable : disque débranché ? $1 Rien n'est recréé \
+ailleurs ; une fois le disque rebranché, la minuterie reprend d'elle-même."
+  fi
   return 1
 }
 
@@ -591,6 +606,10 @@ importer() { # fichier
   d=$CACHE/.import-$sorte
   rm -rf "$d"
   mkdir -p "$d"
+  # Retiré à la sortie, quelle qu'elle soit : refus, copie ratée (disque plein, image illisible), Ctrl-C. Une copie
+  # depuis un autre disque garde sinon jusqu'à 16 Gio dans le cache, jusqu'au prochain import de la même sorte.
+  # shellcheck disable=SC2064 # le chemin, fixé maintenant
+  trap "rm -rf $(printf %q "$d")" EXIT
   for url in $(dossiers_version "$sorte" "$nom"); do
     ok=1
     for f in $(signatures "$sorte" "$nom"); do
@@ -602,17 +621,16 @@ importer() { # fichier
     fi
   done
   if [[ -z $trouve ]]; then
-    rm -rf "$d"
     erreur "signatures de $nom introuvables chez ${NOMS[$sorte]} (pas d'Internet, ou version retirée) : rien d'importé."
   fi
   echo "→ ${NOMS[$sorte]} : $nom copiée dans le cache, puis vérifiée (signatures de $trouve)…"
   cp --reflink=auto "$fichier" "$d/$nom"
   if ! r=$(verifier_image "$sorte" "$d" "$nom" 2>&1); then
-    rm -rf "$d"
     erreur "${NOMS[$sorte]} : $nom, $r : rien d'importé (téléchargement pas fini, ou image abîmée)."
   fi
   ranger "$sorte" "$d" "$nom"
   rm -rf "$d"
+  trap - EXIT
   echo "✔ ${NOMS[$sorte]} : $nom vérifiée (signature du projet), prête dans le cache"
   avertir "Clé VANGUARD : image importée" "$nom vérifiée. Elle ira sur la clé à son prochain branchement si la clé \
 en a déjà une version (sinon : outils/images-cle.sh --toutes POINT)."
@@ -673,7 +691,8 @@ taille_mio() { echo $((($(stat -c %s "$1") + MIO - 1) / MIO)); }
 
 # Copie les images neuves sur la clé : sous un nom temporaire (que Ventoy ne montre pas), relue, puis renommée ;
 # l'ancienne version n'est retirée qu'après. Si la place manque, l'ancienne est retirée d'abord (la clé reste
-# démarrable avec les autres images). Le même verrou que deployer.sh : les deux partent au branchement.
+# démarrable avec les autres images) ; si ça ne suffit pas, une image en option de cet ordinateur (Kali) part pour
+# une image tenue par défaut, plus utile en secours. Le même verrou que deployer.sh : les deux partent au branchement.
 copier_sur_cle() { # point (facultatif), toutes (facultatif : aussi les sortes absentes de la clé)
   local point=${1:-} toutes=${2:-}
   [[ -n $point ]] || point=$(point_cle)
@@ -686,7 +705,7 @@ copier_sur_cle() { # point (facultatif), toutes (facultatif : aussi les sortes a
   fi
   exec 9>"${XDG_RUNTIME_DIR:-/tmp}/vanguard-deployer.lock"
   flock 9
-  local iso=$point/ISO sorte image nom copiees=() manque=() echecs=() p interrompues=" "
+  local iso=$point/ISO sorte image nom copiees=() manque=() echecs=() cedees=() p interrompues=" "
   mkdir -p "$iso"
   # Copies interrompues (clé retirée en route, ordinateur éteint, relecture différente) : jamais montrées par Ventoy,
   # retirées ici. Leur sorte compte comme déjà sur la clé : faute de place, son ancienne version a pu partir avant la
@@ -717,12 +736,30 @@ copier_sur_cle() { # point (facultatif), toutes (facultatif : aussi les sortes a
     fi
     besoin=$(($(taille_mio "$image") + MARGE_MIO))
     if (($(libre_mio "$point") < besoin)); then
-      if (($(libre_mio "$point") + anciennes_mio < besoin)); then
-        manque+=("${NOMS[$sorte]} (il manque $((besoin - $(libre_mio "$point") - anciennes_mio)) Mio)")
+      # Les images en option vont en dernier : une image tenue par défaut qui ne tient pas, même sans son ancienne
+      # version, prend leur place. Seulement celles que cet ordinateur tient : une Kali posée par un autre reste.
+      local options=() options_mio=0 o s
+      if [[ $FACULTATIVES != *" $sorte "* ]] && (($(libre_mio "$point") + anciennes_mio < besoin)); then
+        for s in "${SORTES[@]}"; do
+          [[ $FACULTATIVES == *" $s "* ]] || continue
+          while IFS= read -r -d '' o; do
+            options+=("$o")
+            options_mio=$((options_mio + $(taille_mio "$o")))
+          done < <(find "$iso" -maxdepth 1 -iname "${MOTIFS[$s]}" -print0)
+        done
+      fi
+      if (($(libre_mio "$point") + anciennes_mio + options_mio < besoin)); then
+        manque+=("${NOMS[$sorte]} (il manque $((besoin - $(libre_mio "$point") - anciennes_mio - options_mio)) Mio)")
         continue
       fi
-      rm -f "${anciennes[@]}"
-      anciennes=()
+      if ((${#options[@]})); then
+        rm -f "${options[@]}"
+        for o in "${options[@]}"; do cedees+=("${o##*/}, pour ${NOMS[$sorte]}"); done
+      fi
+      if (($(libre_mio "$point") < besoin)); then
+        rm -f "${anciennes[@]}"
+        anciennes=()
+      fi
     fi
     echo "→ ${NOMS[$sorte]} : $nom sur la clé…"
     # Écriture puis relecture : une dizaine de Mio par seconde en tout sur une clé USB lente (l'image de Kali, 16 Gio,
@@ -748,6 +785,10 @@ copier_sur_cle() { # point (facultatif), toutes (facultatif : aussi les sortes a
   fi
   if ((${#manque[@]})); then
     avertir "Clé VANGUARD : pas la place" "$(printf '%s\n' "${manque[@]}")"
+  fi
+  if ((${#cedees[@]})); then
+    avertir "Clé VANGUARD : image en option retirée" "$(printf '%s\n' "${cedees[@]}")
+Les images en option passent après les autres. La remettre s'il reste la place : outils/images-cle.sh --toutes POINT."
   fi
   if ((${#echecs[@]})); then
     avertir "Clé VANGUARD : copie ratée" "$(printf '%s\n' "${echecs[@]}")"

@@ -8,7 +8,8 @@
 #      rien, est proposée par une notification, et faite sur accord).
 # deployer.sh et images-cle.sh prennent le même verrou : jamais deux écritures de la clé à la fois, même avec un
 # déploiement lancé à la main ou un branchement en même temps. Une étape ratée n'empêche pas la suivante ; la
-# notification dit laquelle, et le code de sortie aussi. Clé absente : rien à faire, sans erreur.
+# notification dit laquelle (sauf des programmes refusés, que deployer.sh a déjà dits), et le code de sortie aussi.
+# Clé absente : rien à faire, sans erreur.
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 1
 
@@ -30,19 +31,33 @@ copié. À vérifier puis réparer, et la rebrancher."
   exit 1
 fi
 
-RATEES=()
+RATEES=() DEJA_DITES=()
 etape() { # libellé commande…
   local libelle=$1
   shift
   echo "== $libelle"
-  "$@" || RATEES+=("$libelle")
+  "$@"
 }
-etape "programme" outils/deployer.sh --branchement
-etape "images" outils/images-cle.sh --cle
-etape "démarrage" outils/cle-secours.sh --a-jour
+# Des programmes refusés pour une faille connue : deployer.sh le dit déjà par sa notification (refuser), et note son
+# repère à ce moment-là ; il ne la redonne pas pendant 5 minutes. Un repère de moins de 5 minutes après l'échec : la
+# notification est partie, la redire ici ferait deux notifications pour une seule cause.
+REFUS=${XDG_RUNTIME_DIR:-/tmp}/vanguard-refus.empreinte
+if ! etape "programme" outils/deployer.sh --branchement; then
+  if [[ -n $(find "$REFUS" -mmin -5 2>/dev/null) ]]; then
+    DEJA_DITES+=("programme (refusé)")
+  else
+    RATEES+=(programme)
+  fi
+fi
+etape "images" outils/images-cle.sh --cle || RATEES+=(images)
+etape "démarrage" outils/cle-secours.sh --a-jour || RATEES+=("démarrage")
 if ((${#RATEES[@]})); then
-  avertir "Clé VANGUARD : mise à jour du jour incomplète" "Raté : ${RATEES[*]}. Le détail : journalctl --user -u \
-vanguard-cle-maj"
+  avertir "Clé VANGUARD : mise à jour du jour incomplète" "Raté : ${RATEES[*]}${DEJA_DITES[*]:+ ; déjà dit : \
+${DEJA_DITES[*]}}. Le détail : journalctl --user -u vanguard-cle-maj"
+  exit 1
+fi
+if ((${#DEJA_DITES[@]})); then
+  echo "Clé VANGUARD pas tout à fait à jour : ${DEJA_DITES[*]}, déjà dit par sa notification."
   exit 1
 fi
 echo "Clé VANGUARD à jour : programme, images et démarrage."

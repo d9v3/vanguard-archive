@@ -480,6 +480,10 @@ voir "réglage avec une image inconnue : ignorée et dite, Kali allumée quand m
   eval '[[ $(sortes) == "systemrescue arch omarchy debian fedora kali" ]] &&
     dit "$BANC/sortie-erreurs" "« windows »"' ||
   montrer "$BANC/sortie-erreurs"
+printf 'IMAGES_EN_PLUS="kali,kali"\n' >"$REGLAGE"
+voir "réglage avec Kali en double : comptée une fois, sans message" \
+  eval '[[ $(sortes) == "systemrescue arch omarchy debian fedora kali" && ! -s $BANC/sortie-erreurs ]]' ||
+  montrer "$BANC/sortie-erreurs"
 rm -f "$BANC/aria2c.log"
 VANGUARD_IMAGES=$BANC/cache8 chercher8
 VANGUARD_IMAGES=$BANC/cache8 bash outils/images-cle.sh --cle "$BANC/cle8" >>"$BANC/sortie" 2>&1
@@ -513,15 +517,23 @@ VANGUARD_IMAGES=$BANC/lien-images/sous bash outils/images-cle.sh --chercher >>"$
 c6=$?
 VANGUARD_IMAGES=$BANC/lien-images bash outils/cle-secours.sh --telecharger "$BANC/lien-secours" >>"$BANC/sortie9" 2>&1
 c7=$?
-voir "cache sur un disque débranché : arrêt propre (0 tout seul, 1 demandé à la main), une notification" \
+voir "cache sur un disque débranché : arrêt propre (0 tout seul, 1 demandé à la main), une seule notification" \
   eval '((c1 == 0 && c2 == 0 && c3 == 1 && c4 == 1 && c5 == 1 && c6 == 0 && c7 == 1)) &&
-    dit "$BANC/notifications.log" "Images de la clé : cache absent" &&
+    [[ $(grep -c "Images de la clé : cache absent" "$BANC/notifications.log") == 1 ]] &&
     dit "$BANC/sortie9" "dossier des images introuvable : $BANC/lien-secours mène à"' ||
   { echo "      codes $c1 $c2 $c3 $c4 $c5 $c6 $c7"; montrer "$BANC/sortie9"; }
 voir "cache sur un disque débranché : aucun dossier recréé, ni au bout du lien, ni à sa place" \
   eval '[[ -L $BANC/lien-images && -L $BANC/lien-secours && ! -e $BANC/disque2 ]] &&
     [[ -z $(ls -A "$BANC/cle9/ISO") ]] && ! compgen -G "$BANC/xdg-cache/vanguard/images-cle*" >/dev/null' ||
   { ls -la "$BANC" "$BANC/cle9/ISO"; }
+# Le disque revenu, puis reparti : la nouvelle absence se redit aussitôt.
+mkdir -p "$BANC/disque2/vanguard-images"
+images9 --cle "$BANC/cle9"
+rm -rf "$BANC/disque2"
+images9 --cle "$BANC/cle9"
+voir "cache revenu puis reparti : la nouvelle absence se redit" \
+  eval '[[ $(grep -c "Images de la clé : cache absent" "$BANC/notifications.log") == 2 ]]' ||
+  montrer "$BANC/notifications.log"
 
 # Une recherche sans rien de neuf, et le début d'un téléchargement : chacun sa notification.
 mkdir -p "$BANC/cache10"
@@ -603,6 +615,60 @@ voir "et la copie se refait au passage suivant" \
   eval '((code == 0)) && cmp -s "$NEUVE" "$IMAGE5"' || montrer "$BANC/sortie"
 /usr/bin/umount "$BANC/cle5"
 
+# Kali cède sa place : une nouvelle SystemRescue (14 Mio) ne tient pas sur la clé de 530 Mio, même sans l'ancienne
+# (1 Mio), à cause de la Kali (12 Mio) ; la Kali part, pas une image tenue par défaut.
+mkdir -p "$BANC/cache11" "$BANC/cle11"
+/usr/bin/mount -t tmpfs -o size=530M tmpfs "$BANC/cle11"
+mkdir -p "$BANC/cle11/ISO"
+SR11=$BANC/cache11/systemrescue-12.03-amd64.iso
+KALI11=$BANC/cache11/kali-linux-2026.3-live-everything-amd64.iso
+head -c $((14 * 1024 * 1024)) /dev/urandom >"$SR11"
+head -c $((12 * 1024 * 1024)) /dev/urandom >"$KALI11"
+for f in "$SR11" "$KALI11"; do sha256sum "$f" | cut -d' ' -f1 >"$f.sha256"; done
+cle11() { # Kali sur la clé, une ancienne SystemRescue ; puis --cle
+  rm -f "$BANC/cle11/ISO"/*.iso "$BANC/notifications.log"
+  cp "$KALI11" "$BANC/cle11/ISO/"
+  head -c $((1024 * 1024)) /dev/urandom >"$BANC/cle11/ISO/systemrescue-12.02-amd64.iso"
+  VANGUARD_IMAGES=$BANC/cache11 bash outils/images-cle.sh --cle "$BANC/cle11" >"$BANC/sortie" 2>&1
+}
+cle11
+code=$?
+voir "Kali allumée : retirée de la clé pour une nouvelle SystemRescue qui n'y tenait pas, et dit" \
+  eval '((code == 0)) && cmp -s "$BANC/cle11/ISO/${SR11##*/}" "$SR11" &&
+    [[ ! -e $BANC/cle11/ISO/${KALI11##*/} && ! -e $BANC/cle11/ISO/systemrescue-12.02-amd64.iso ]] &&
+    dit "$BANC/notifications.log" "|Clé VANGUARD : image en option retirée|${KALI11##*/}, pour SystemRescue" &&
+    pas_dit "$BANC/notifications.log" "pas la place"' || { montrer "$BANC/sortie"; montrer "$BANC/notifications.log"; }
+mv "$REGLAGE" "$REGLAGE.essai"
+cle11
+code=$?
+mv "$REGLAGE.essai" "$REGLAGE"
+voir "Kali coupée sur cet ordinateur : la Kali de la clé reste, la SystemRescue « pas la place »" \
+  eval '((code == 0)) && [[ -e $BANC/cle11/ISO/${KALI11##*/} && ! -e $BANC/cle11/ISO/${SR11##*/} ]] &&
+    dit "$BANC/notifications.log" "|Clé VANGUARD : pas la place|SystemRescue (il manque"' ||
+  { montrer "$BANC/sortie"; montrer "$BANC/notifications.log"; }
+/usr/bin/umount "$BANC/cle11"
+
+# Un import interrompu (copie ratée, Ctrl-C) ne laisse rien dans le cache : jusqu'à 16 Gio pour Kali.
+mkdir -p "$BANC/cache12" "$BANC/import12"
+echo arch >"$BANC/import12/archlinux-2026.10.01-x86_64.iso"
+importer12() { # ce que fait cp
+  # SIGINT remis par défaut, comme au terminal : lancé en arrière-plan (verifier.sh), il est ignoré dès le départ, et
+  # bash ne peut alors pas le piéger.
+  VANGUARD_IMAGES=$BANC/cache12 python3 -I -c 'import os, signal, sys
+signal.signal(signal.SIGINT, signal.SIG_DFL)
+os.execvp(sys.argv[1], sys.argv[1:])' bash -c 'source outils/images-cle.sh; lire() { echo faux; }; '"cp() { $1; }"'
+    importer "$0"' "$BANC/import12/archlinux-2026.10.01-x86_64.iso" >"$BANC/sortie" 2>&1
+}
+importer12 "echo 'cp: disque plein' >&2; return 1"
+c1=$?
+# Dans un sous-shell : le shell qui attend un programme tué par Ctrl-C s'arrête lui aussi, comme au terminal.
+(importer12 'kill -INT $$; sleep 5')
+c2=$?
+voir "import interrompu (copie ratée, Ctrl-C) : le dossier de l'import retiré" \
+  eval '((c1 == 1 && c2 == 130)) && [[ -d $BANC/cache12 && -z $(ls -A "$BANC/cache12") ]] &&
+    [[ -f $BANC/import12/archlinux-2026.10.01-x86_64.iso ]]' ||
+  { echo "      codes $c1 $c2"; ls -la "$BANC/cache12"; montrer "$BANC/sortie"; }
+
 # Kali dont la dernière version n'a aucune source : la précédente est prise à sa place, et son torrent reprend.
 mkdir -p "$BANC/cache7/.nouveau-kali-2026.1"
 echo vieux >"$BANC/cache7/.nouveau-kali-2026.1/kali-linux-2026.1-live-everything-amd64.iso"
@@ -628,6 +694,44 @@ voir "Kali : le torrent de la précédente, prise à la place de la dernière, r
   { montrer "$BANC/aria2c.log"; montrer "$BANC/sortie7"; }
 voir "Kali : le torrent d'une version qui ne servira plus est retiré" \
   eval '[[ ! -e $BANC/cache7/.nouveau-kali-2026.1 ]]'
+
+# --- Mise à jour du jour (maj-cle.sh) -------------------------------------------------------------------------------
+
+echo "Mise à jour du jour :"
+# Une copie de maj-cle.sh dans un faux dépôt : ses trois étapes y sont fausses. deployer.sh refuse comme le vrai
+# (refuser) : son repère noté, sa notification ; ESSAI_DEPLOYER=rate : un autre échec, sans repère.
+M=$BANC/depot-maj
+mkdir -p "$M/outils" /run/media/alice/VANGUARD
+: >/run/media/alice/VANGUARD/vanguard.cle
+cp outils/maj-cle.sh "$M/outils/"
+cat >"$M/outils/deployer.sh" <<'FIN'
+#!/usr/bin/env bash
+[[ ${ESSAI_DEPLOYER:-} == rate ]] && exit 1
+echo empreinte >"$XDG_RUNTIME_DIR/vanguard-refus.empreinte"
+notify-send -a Vanguard -i vanguard "Vanguard : programmes refusés" "Faille connue"
+exit 1
+FIN
+printf '#!/bin/sh
+exit 0
+' >"$M/outils/images-cle.sh"
+printf '#!/bin/sh
+exit 0
+' >"$M/outils/cle-secours.sh"
+chmod +x "$M"/outils/*.sh
+rm -f "$BANC/notifications.log" "$BANC/run/vanguard-refus.empreinte"
+bash "$M/outils/maj-cle.sh" >"$BANC/sortie" 2>&1
+code=$?
+voir "programmes refusés par deployer.sh : une seule notification, la sienne ; code 1" \
+  eval '((code == 1)) && [[ $(wc -l <"$BANC/notifications.log") == 1 ]] &&
+    dit "$BANC/notifications.log" "programmes refusés" && dit "$BANC/sortie" "déjà dit par sa notification"' ||
+  { montrer "$BANC/sortie"; montrer "$BANC/notifications.log"; }
+rm -f "$BANC/notifications.log" "$BANC/run/vanguard-refus.empreinte"
+ESSAI_DEPLOYER=rate bash "$M/outils/maj-cle.sh" >"$BANC/sortie" 2>&1
+code=$?
+voir "programme raté pour une autre raison : la notification du jour le dit" \
+  eval '((code == 1)) && dit "$BANC/notifications.log" "mise à jour du jour incomplète|Raté : programme."' ||
+  { montrer "$BANC/sortie"; montrer "$BANC/notifications.log"; }
+rm -rf /run/media/alice
 
 # --- Ménage (menage-dev.sh) ------------------------------------------------------------------------------------------
 

@@ -48,11 +48,11 @@ for d in "$DEV"/target-* "$DEV"/repro-target; do
   ((j >= JOURS_COMPILATION)) && retirer "$d" "compilation inutilisée depuis $j jours, se recrée"
 done
 
-# Restes d'essais interrompus (verifier.sh, essais en pty, signatures d'essai…) : plus d'un jour. Sauf un torrent en
-# cours (son .torrent et l'image commencée) : effacé, il repartirait de zéro, et une image de 16 Gio qui ne se prend pas
-# en une seule passe de 5 heures ne finirait jamais.
+# Restes d'essais interrompus (verifier.sh, essais en pty, signatures d'essai, un --importer tué…) : plus d'un jour.
+# Sauf un torrent en cours (son .torrent et l'image commencée) : effacé, il repartirait de zéro, et une image de 16 Gio
+# qui ne se prend pas en une seule passe de 5 heures ne finirait jamais.
 for d in "$DEV"/verifier.* "$DEV"/essai-* "$DEV"/maison-* "$DEV"/vecteur.* "$DEV"/depot-versions.* \
-  "$IMAGES"/.nouveau-* "$IMAGES"/.trousseau.* "$IMAGES"/.verification.*; do
+  "$IMAGES"/.nouveau-* "$IMAGES"/.import-* "$IMAGES"/.trousseau.* "$IMAGES"/.verification.*; do
   [[ -e $d && ! -L $d ]] || continue
   if [[ $d == "$IMAGES"/.nouveau-* && -n $(find "$d" -maxdepth 1 -name '*.torrent' -print -quit 2>/dev/null) &&
     -n $(find "$d" -maxdepth 1 -name '*.iso' -size +0 -print -quit 2>/dev/null) ]]; then
