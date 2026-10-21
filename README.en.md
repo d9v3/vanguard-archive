@@ -9,7 +9,7 @@
   Linux, Windows and macOS, nothing to install, in English or French.
 </p>
 
-<p align="center"><b>In active development · written in Rust · defensive</b></p>
+<p align="center"><b>In active development · all in Rust (under way) · defensive</b></p>
 
 ![Vanguard's security check: a grade from A to F, each problem explained with its fix](assets/captures/bilan-en.png)
 

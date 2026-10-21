@@ -9,7 +9,7 @@
   Linux, Windows et macOS, sans installation, en français ou en anglais.
 </p>
 
-<p align="center"><b>En développement actif · écrit en Rust · défensif</b></p>
+<p align="center"><b>En développement actif · tout en Rust (en cours) · défensif</b></p>
 
 ![Bilan de sécurité de Vanguard : une note de A à F, chaque problème expliqué avec sa correction](assets/captures/bilan.png)
 
