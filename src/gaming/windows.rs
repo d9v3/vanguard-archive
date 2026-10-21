@@ -440,9 +440,18 @@ fn composants(e: &Etat) -> Vec<Element> {
     // Pilote graphique : celui du fabricant, plus récent que celui de Windows Update.
     for carte in &e.gpu {
         let nom = carte.nom.to_lowercase();
-        let pilote = trf!("pilote {} du {}", "driver {} from {}", carte.version, carte.date);
+        // Nom, version et date viennent du pilote (registre, SetupAPI ou Win32_VideoController) :
+        // montrés rendus inoffensifs, comme dans maj.rs ; le nom brut sert seulement à reconnaître
+        // le fabricant.
+        let affichable = crate::ui::affichable;
+        let (vu, version, date) = (
+            affichable(&carte.nom),
+            affichable(&carte.version),
+            affichable(&carte.date),
+        );
+        let pilote = trf!("pilote {} du {}", "driver {} from {}", version, date);
         let mut el = element(
-            trf!("Pilote graphique : {}", "Graphics driver: {}", carte.nom),
+            trf!("Pilote graphique : {}", "Graphics driver: {}", vu),
             trf!(
                 "Installé : {pilote}. Le pilote du fabricant est plus récent et mieux optimisé que celui de Windows Update.",
                 "Installed: {pilote}. The manufacturer's driver is newer and better optimized than the Windows Update one."
@@ -670,6 +679,23 @@ mod tests {
         assert_eq!(l[1].commandes.len(), 10);
         assert!(l[0].commandes[0].contains("--id Microsoft.VCRedist.2015+.x64 --exact"));
         assert!(l.iter().all(|el| !el.commandes.is_empty()));
+    }
+
+    /// Une carte au nom, à la version ou à la date piégés arrive inoffensive dans la liste.
+    #[test]
+    fn carte_au_nom_piege() {
+        let mut e = etat_vide();
+        e.gpu = vec![Carte {
+            nom: "NVIDIA GeForce\x1b]52;c;eA==\x07\u{202e}".into(),
+            version: "32.0\x1b[2K".into(),
+            date: "2026-01-01\x1b[8m".into(),
+        }];
+        let l = composants(&e);
+        let el = l.iter().find(|el| el.titre.contains("NVIDIA GeForce")).unwrap();
+        assert!(!crate::ui::contient_un_piege(&el.titre), "{}", el.titre);
+        assert!(!crate::ui::contient_un_piege(&el.pourquoi), "{}", el.pourquoi);
+        // Le fabricant reste reconnu : le lien de son pilote est donné.
+        assert!(el.lien.is_some());
     }
 
     #[test]
