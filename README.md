@@ -413,10 +413,10 @@ veille) est revérifié plus patiemment. « Ce que Vanguard a appris » montre t
 
 **Paramètres** (Cette machine › Paramètres, « s » au menu principal, `vanguard parametres`) — tous les réglages au même
 endroit : langue, emojis, travail sans Internet, protection en temps réel, surveillance horaire, entretien du mois,
-alertes apprises, blocage des menaces et restrictions des extensions. Chaque changement montre la valeur d'avant et la
-commande pour la remettre ; les alertes apprises et le blocage ouvrent leur propre écran (« Ce que Vanguard a appris »,
-Blocage des menaces). La langue, les emojis et le travail sans Internet restent choisis d'un lancement à l'autre
-(VANGUARD_LANG, VANGUARD_EMOJI et VANGUARD_HORS_LIGNE l'emportent toujours).
+alertes apprises, blocage des menaces, restrictions des extensions et clé abuse.ch. Chaque changement montre la valeur
+d'avant et la commande pour la remettre ; les alertes apprises et le blocage ouvrent leur propre écran (« Ce que
+Vanguard a appris », Blocage des menaces). La langue, les emojis et le travail sans Internet restent choisis d'un
+lancement à l'autre (VANGUARD_LANG, VANGUARD_EMOJI et VANGUARD_HORS_LIGNE l'emportent toujours).
 
 **Protection en temps réel** (Paramètres, `vanguard parametres temps-reel non [--pendant 1h|4h]`) — coupe d'un coup,
 après ton accord et la liste de ce qui s'arrête, ce que Vanguard fait tout seul en continu : la surveillance horaire (et
@@ -556,7 +556,7 @@ Chaque entrée du menu existe aussi en commande.
 | `vanguard lenteur` | pourquoi c'est lent : processeur, mémoire, disque, démarrage, programmes à l'ouverture |
 | `vanguard demarrage` | programmes au démarrage : les retirer ou les remettre, après accord ; chaque retrait s'annule |
 | `vanguard changements` | ce que Vanguard a changé : chaque correction lancée ici, sa date et son résultat |
-| `vanguard parametres [réglage valeur]` | paramètres (aussi « s » au menu principal) : langue, emojis, travail sans Internet, surveillance, protection en temps réel (`temps-reel non --pendant 1h\|4h`, ou jusqu'à reprise), entretien du mois, alertes apprises, blocage, restrictions des extensions, clé abuse.ch (masquée) ; la valeur d'avant est montrée pour revenir |
+| `vanguard parametres [réglage valeur]` | paramètres (aussi « s » au menu principal) : langue, emojis, travail sans Internet, protection en temps réel (`temps-reel non --pendant 1h\|4h`, ou jusqu'à reprise), surveillance, entretien du mois, alertes apprises, blocage, restrictions des extensions, clé abuse.ch (masquée) ; la valeur d'avant est montrée pour revenir |
 | `vanguard blocage [chercher\|annuler\|auto\|clic\|catégorie mode]` | blocage des menaces : « Bloquer » d'un clic pour chaque menace (geste montré, noté, annulable) ; protection active, après un accord, qui bloque toute seule le certain (empreinte de MalwareBazaar, outil d'attaque connu, serveur de commande) |
 | `vanguard a-laisser` | rapport à laisser : une page simple pour la personne dépannée |
 | `vanguard proche` | ordinateur d'un proche : trois questions, le bilan, un résumé en mots simples, les corrections, la page à laisser avec ses conseils |

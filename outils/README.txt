@@ -58,8 +58,9 @@ highlighted one, Esc clears it. In the main menu, it also finds each tool of the
        What Vanguard changed: each fix run here, dated, successful or not
        Monthly check-up: one notification a month (grade, updates, space to free, new problems)
        Settings (also "s" in the main menu): language, emojis, working without the Internet, real-time
-         protection, monitoring, check-up, learned alerts, blocking, extension restrictions; the previous value is
-         shown, except for learned alerts and blocking, which open their own screen (vanguard settings)
+         protection, monitoring, check-up, learned alerts, blocking, extension restrictions, abuse.ch key
+         (masked); the previous value is shown, except for learned alerts and blocking, which open their own
+         screen (vanguard settings)
        Real-time protection: the hourly monitoring and the active protection of blocking turned off at once,
          after your consent, for 1 h, 4 h or until turned back on; never Defender, the firewall or UAC, and a
          block already made stays in place (vanguard settings real-time no --for 1h)

@@ -366,10 +366,10 @@ patiently. "What Vanguard has learned" shows everything and lets you forget.
 
 **Settings** (This machine › Settings, "s" in the main menu, `vanguard settings`) — every setting in one place:
 language, emojis, working without the Internet, real-time protection, hourly monitoring, monthly check-up, learned
-alerts, threat blocking and extension restrictions. Each change shows the previous value and the command to put it
-back; learned alerts and blocking open their own screen ("What Vanguard has learned", Threat blocking). Language, emojis
-and working without the Internet stay chosen from one launch to the next (VANGUARD_LANG, VANGUARD_EMOJI and
-VANGUARD_HORS_LIGNE always win).
+alerts, threat blocking, extension restrictions and the abuse.ch key. Each change shows the previous value and the
+command to put it back; learned alerts and blocking open their own screen ("What Vanguard has learned", Threat
+blocking). Language, emojis and working without the Internet stay chosen from one launch to the next (VANGUARD_LANG,
+VANGUARD_EMOJI and VANGUARD_HORS_LIGNE always win).
 
 **Real-time protection** (Settings, `vanguard settings real-time no [--for 1h|4h]`) — turns off at once, after your
 consent and the list of what stops, what Vanguard does by itself all the time: the hourly monitoring (and everything it
@@ -503,7 +503,7 @@ Each menu entry is also a command.
 | `vanguard slow` | why it is slow: processor, memory, disk, startup, programs at login |
 | `vanguard startup` | startup programs: remove or put them back, after your consent; each removal is undone exactly |
 | `vanguard changes` | what Vanguard changed: each fix run here, its date and its result |
-| `vanguard settings [setting value]` | settings (also “s” in the main menu): language, emojis, working without the Internet, monitoring, real-time protection (`real-time no --for 1h\|4h`, or until turned back on), monthly check-up, learned alerts, blocking, extension restrictions, abuse.ch key (masked); the previous value is shown to go back |
+| `vanguard settings [setting value]` | settings (also “s” in the main menu): language, emojis, working without the Internet, real-time protection (`real-time no --for 1h\|4h`, or until turned back on), monitoring, monthly check-up, learned alerts, blocking, extension restrictions, abuse.ch key (masked); the previous value is shown to go back |
 | `vanguard blocking [search\|undo\|auto\|click\|category mode]` | threat blocking: one-click “Block” for each threat (action shown, written down, undoable); active protection, after a consent, that blocks what is certain by itself (MalwareBazaar fingerprint, known attack tool, command server) |
 | `vanguard handout` | report to leave behind: a simple page for the person you helped |
 | `vanguard relative` | a relative's computer: three questions, the check, a summary in plain words, the fixes, the page to leave behind with its tips |
