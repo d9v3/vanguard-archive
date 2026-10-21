@@ -241,6 +241,94 @@ for cas in airdrop session-auto invite maj-auto bibliotheques xprotect time-mach
   verifier "Rust contre Apple : $cas" python3 -I "$COMPARER" "$cas" "$RES"
 done
 
+section "Persistance (0.82) : un dossier d'agents illisible est dit « non vérifié », en le nommant"
+# Un dossier d'agents refusé (un intrus devenu root peut le mettre en 000 : launchd le lit toujours) n'est plus parcouru
+# comme vide : le bilan le nomme, non vérifié, et ne dit jamais « aucun programme tiers ». Droits remis aussitôt.
+AGENTS="$HOME/Library/LaunchAgents"
+AGENTS_CREE=0
+[ -d "$AGENTS" ] || { mkdir -p "$AGENTS"; AGENTS_CREE=1; }
+DROITS_AGENTS=$(stat -f '%Lp' "$AGENTS")
+chmod 000 "$AGENTS"
+lancer machine-agents-illisibles 300 '' machine --json
+chmod "$DROITS_AGENTS" "$AGENTS"
+[ "$AGENTS_CREE" = 1 ] && rmdir "$AGENTS"
+verifier "persistance : $AGENTS dit illisible, non vérifié" python3 -I -c "
+import json, sys
+a = json.load(open(sys.argv[1], encoding='utf-8'))
+c = [x for x in a['constats'] if x['categorie'] == 'Persistance' and not x['verifie'] and 'illisibles' in x['message'] and sys.argv[2] in x['message']]
+print(c); sys.exit(0 if c else 1)" "$RES/machine-agents-illisibles.txt" "$AGENTS"
+verifier "persistance : jamais « aucun programme tiers » avec un dossier illisible" python3 -I -c "
+import json, sys
+a = json.load(open(sys.argv[1], encoding='utf-8'))
+sys.exit(1 if any('Aucun programme tiers' in x['message'] for x in a['constats']) else 0)" "$RES/machine-agents-illisibles.txt"
+verifier "persistance : droits du dossier d'agents remis" bash -c "[ ! -e '$AGENTS' ] || [ \"\$(stat -f '%Lp' '$AGENTS')\" = '$DROITS_AGENTS' ]"
+
+section "Administrateurs (0.82) : la liste lue, montrée comme avant"
+# Une liste vide passe à dscl, puis « impossible » : ici, le compte du runner (administrateur) doit être cité, le
+# constat vérifié, et l'écran dire la même chose que le JSON.
+verifier "administrateurs : MAC-CPT-001 vérifié, à l'écran comme dans le JSON" python3 -I -c "
+import json, re, subprocess, sys
+a = json.load(open(sys.argv[1], encoding='utf-8'))
+c = [x for x in a['constats'] if x.get('regle') == 'MAC-CPT-001']
+ecran = ' '.join(re.sub(r'\x1b\[[0-9;]*m', '', open(sys.argv[2], encoding='utf-8').read()).split())
+admin = 'admin' in subprocess.run(['id', '-Gn'], capture_output=True, text=True).stdout.split()
+ok = bool(c) and all(x['verifie'] for x in c) and not any('aucune personne' in x['message'] for x in c)
+ok = ok and (not admin or any(sys.argv[3] in x['message'] for x in c))
+ok = ok and all(' '.join(x['message'].split()) in ecran for x in c)
+print(admin, c); sys.exit(0 if ok else 1)" "$RES/machine-json.txt" "$RES/machine.txt" "$USER"
+
+section "Audit du réseau (0.82), sans rien envoyer hors de ce Mac : six domaines, Wi-Fi dit illisible d'ici"
+# Le réseau de GitHub ne nous appartient pas : l'audit tourne dans un bac à sable sans réseau (sandbox-exec, le profil
+# d'« isoler »), il ne sonde personne. Les lectures locales se font ; ce qui demande le réseau doit être dit non vérifié.
+SANS_RESEAU="$RES/sans-reseau.sb"
+printf '(version 1)\n(allow default)\n(deny network*)\n' >"$SANS_RESEAU"
+ISOLE="$RES/vanguard-sans-reseau.sh"
+printf '#!/bin/sh\nexec sandbox-exec -f "%s" "%s" "$@"\n' "$SANS_RESEAU" "$VANGUARD" >"$ISOLE"
+chmod +x "$ISOLE"
+VANGUARD="$ISOLE" lancer audit-reseau 300 '' audit-reseau
+VANGUARD="$ISOLE" lancer audit-reseau-json 300 '' audit-reseau --json
+verifier "audit-reseau : code 0 (texte et JSON)" python3 -I -c "
+import re, sys
+l = [x for x in open(sys.argv[1], encoding='utf-8') if re.match(r'vanguard audit-reseau( --json)? -> code', x)]
+sys.exit(0 if len(l) == 2 and all(' -> code 0,' in x for x in l) else 1)" "$JOURNAL"
+AUDIT_RESEAU="$RES/audit-reseau.py"
+cat >"$AUDIT_RESEAU" <<'FIN'
+import json, re, sys
+
+cas, res = sys.argv[1], sys.argv[2]
+ecran = [re.sub(r"\x1b\[[0-9;]*m", "", l).rstrip() for l in open(f"{res}/audit-reseau.txt", encoding="utf-8")]
+if cas == "colonnes":
+    larges = [l for l in ecran if len(l) > 76]
+    print(larges)
+    sys.exit(1 if larges else 0)
+if cas == "faux-verts":
+    faux = [l for l in ecran if "✔" in l and "Impossible de vérifier" in l]
+    print(faux)
+    sys.exit(1 if faux else 0)
+a = json.load(open(f"{res}/audit-reseau-json.txt", encoding="utf-8"))
+constats = [c for d in a["domaines"] for c in d["constats"]]
+if cas == "domaines":
+    noms = [d["domaine"] for d in a["domaines"]]
+    print(a.get("reseau"), noms, [(d["domaine"], d["score"], d["non_verifies"]) for d in a["domaines"]])
+    sys.exit(0 if noms == ["Exposition", "Wi-Fi", "Segmentation", "DNS et TLS", "Appareils", "Postes"] else 1)
+if cas == "rien-de-sain":
+    faux = [c for c in constats if not c["verifie"] and c["probleme"] is None]
+    print(faux)
+    sys.exit(1 if faux else 0)
+if cas == "wifi":
+    mauvais = []
+    for regle in ("COM-WIF-001", "COM-WIF-002", "COM-WIF-003"):
+        c = [x for x in constats if x.get("regle") == regle]
+        if not c or any(x["verifie"] or "ne se lisent pas d'ici" not in x["message"] for x in c):
+            mauvais.append((regle, [x["message"] for x in c]))
+    print(mauvais)
+    sys.exit(1 if mauvais else 0)
+FIN
+for cas in domaines rien-de-sain wifi colonnes faux-verts; do
+  verifier "audit-reseau : $cas" python3 -I "$AUDIT_RESEAU" "$cas" "$RES"
+done
+note "audit-reseau : $(python3 -I "$AUDIT_RESEAU" domaines "$RES" 2>&1 | head -c 600)"
+
 section "Intégrité (référence, vérification, modification détectée)"
 lancer integrite-reference 60 '' integrite
 lancer integrite-verification 60 '' integrite
