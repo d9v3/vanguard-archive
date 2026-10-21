@@ -51,6 +51,14 @@ const ARGUMENT_MAX: usize = 1000;
 /// voyage pas, et un dossier que d'autres comptes peuvent écrire leur ferait lancer ce qu'ils veulent sous ce compte.
 pub fn dossier() -> Result<PathBuf, String> {
     let local = crate::reseau::dossier_local();
+    // Sans HOME ni XDG_DATA_HOME (LOCALAPPDATA sous Windows), le dossier local serait relatif : le dossier courant.
+    if !local.is_absolute() {
+        return Err(tr!(
+            "Dossier local de Vanguard inconnu (ni HOME ni XDG_DATA_HOME, ou LOCALAPPDATA) : extensions refusées.",
+            "Vanguard's local folder is unknown (no HOME nor XDG_DATA_HOME, or LOCALAPPDATA): extensions refused."
+        )
+        .to_string());
+    }
     let d = local.join("plugins");
     creer_prive(&d).map_err(|e| {
         trf!(
@@ -117,7 +125,9 @@ fn dossier_sur(d: &Path) -> Result<(), String> {
             "other accounts can write to it (chmod go-w)"
         )));
     }
-    for parent in d.ancestors().skip(1).filter(|p| !p.as_os_str().is_empty()) {
+    // Les parents du chemin réel : un élément qui est un lien (/home → /var/home) mène à d'autres parents.
+    let reel = std::fs::canonicalize(d).map_err(|e| refus(&e.to_string()))?;
+    for parent in reel.ancestors().skip(1).filter(|p| !p.as_os_str().is_empty()) {
         let Ok(m) = std::fs::metadata(parent) else {
             return Err(refus(&trf!("{} illisible", "{} unreadable", chemin_affichable(parent))));
         };
@@ -177,7 +187,7 @@ fn eleve() -> bool {
     }
     #[cfg(windows)]
     {
-        crate::machine::windows::processus::eleve()
+        crate::machine::windows::processus::eleve_ou_inconnu()
     }
 }
 
@@ -189,7 +199,8 @@ fn refus_eleve() -> String {
     .to_string()
 }
 
-/// Ce que la personne a approuvé : pour chaque plugin, l'empreinte de son manifeste et de chacun de ses programmes.
+/// Ce que la personne a approuvé : pour chaque plugin, l'empreinte de tout son dossier (chaque fichier, pas seulement
+/// le programme : un script qui lit `./lib.sh`, un programme qui charge une DLL posée à côté, changeraient sans cela).
 #[derive(Serialize, Deserialize, Default, Debug)]
 struct Approbations {
     #[serde(default)]
@@ -201,11 +212,15 @@ struct Approbations {
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 struct Approbation {
-    manifeste: String,
-    /// Chemin relatif du programme → son SHA-256.
-    programmes: BTreeMap<String, String>,
+    /// L'empreinte de l'arbre (`empreinte_arbre`).
+    arbre: String,
+    /// Chemin relatif → SHA-256 de chaque fichier : pour dire ce qui a changé.
+    fichiers: Fichiers,
     le: String,
 }
+
+/// Les fichiers d'un plugin : chemin relatif (séparateur « / ») → SHA-256.
+pub(crate) type Fichiers = BTreeMap<String, String>;
 
 /// Les approbations ; un fichier illisible n'approuve rien (tout est alors refusé, jamais tout permis).
 fn approbations(racine: &Path) -> Approbations {
@@ -225,11 +240,11 @@ fn enregistrer(racine: &Path, a: &Approbations) -> Result<(), String> {
     })
 }
 
-/// Ouvre un fichier du plugin sans suivre de lien (Unix : O_NOFOLLOW ; Windows : le point d'analyse lui-même, puis
-/// refusé), sans bloquer sur un tube nommé (O_NONBLOCK), et le refuse s'il n'est pas un fichier ordinaire, ou (Unix)
-/// s'il est à un autre compte ou modifiable par d'autres. Les vérifications portent sur le fichier ouvert, pas sur son
-/// nom : celui-ci peut changer entre deux appels.
-fn ouvrir_sur(chemin: &Path) -> Result<std::fs::File, String> {
+/// Ouvre un fichier sans suivre de lien (Unix : O_NOFOLLOW ; Windows : le point d'analyse lui-même, puis refusé), sans
+/// bloquer sur un tube nommé (O_NONBLOCK), et le refuse s'il n'est pas un fichier ordinaire ; avec `proprietaire`
+/// (Unix), aussi s'il est à un autre compte ou modifiable par d'autres. Les vérifications portent sur le fichier
+/// ouvert, pas sur son nom : celui-ci peut changer entre deux appels.
+fn ouvrir_sans_lien(chemin: &Path, proprietaire: bool) -> Result<std::fs::File, String> {
     let refus = |pourquoi: &str| {
         trf!(
             "{} refusé : {pourquoi}",
@@ -251,7 +266,7 @@ fn ouvrir_sur(chemin: &Path) -> Result<std::fs::File, String> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::MetadataExt;
-        if m.uid() != moi() || m.mode() & 0o022 != 0 {
+        if proprietaire && (m.uid() != moi() || m.mode() & 0o022 != 0) {
             return Err(refus(tr!(
                 "à un autre compte, ou modifiable par d'autres",
                 "owned by another account, or writable by others"
@@ -261,11 +276,16 @@ fn ouvrir_sur(chemin: &Path) -> Result<std::fs::File, String> {
     #[cfg(windows)]
     {
         use std::os::windows::fs::MetadataExt;
+        let _ = proprietaire;
         if m.file_attributes() & 0x400 != 0 {
             return Err(refus(tr!("un lien", "a link")));
         }
     }
     Ok(f)
+}
+
+fn ouvrir_sur(chemin: &Path) -> Result<std::fs::File, String> {
+    ouvrir_sans_lien(chemin, true)
 }
 
 /// Le fichier entier, `max` octets au plus.
@@ -290,9 +310,9 @@ fn hex(octets: &[u8]) -> String {
 }
 
 /// Copie `source` vers `copie` (créé, jamais écrasé) en la hachant au passage ; `None` pour `copie` : seulement haché.
-/// Rend l'empreinte de ce qui a été lu, donc de ce qui a été écrit.
-fn hacher_et_copier(source: &Path, copie: Option<&Path>) -> Result<String, String> {
-    let mut f = ouvrir_sur(source)?;
+/// `max` octets au plus. Rend l'empreinte de ce qui a été lu, donc de ce qui a été écrit, et sa taille.
+fn copier_hache(source: &Path, copie: Option<&Path>, proprietaire: bool, max: u64) -> Result<(String, u64), String> {
+    let mut f = ouvrir_sans_lien(source, proprietaire)?;
     let mut vers = match copie {
         None => None,
         Some(c) => {
@@ -312,7 +332,7 @@ fn hacher_et_copier(source: &Path, copie: Option<&Path>) -> Result<String, Strin
             break;
         }
         total += n as u64;
-        if total > PROGRAMME_MAX {
+        if total > max {
             return Err(trf!("{} : trop gros", "{}: too large", chemin_affichable(source)));
         }
         h.update(&tampon[..n]);
@@ -323,7 +343,125 @@ fn hacher_et_copier(source: &Path, copie: Option<&Path>) -> Result<String, Strin
     if let Some(v) = vers {
         v.sync_all().map_err(|e| e.to_string())?;
     }
-    Ok(hex(&h.finalize()))
+    Ok((hex(&h.finalize()), total))
+}
+
+/// Un seul fichier à soi (un script du labo), haché et copié si `copie` est donnée.
+fn hacher_et_copier(source: &Path, copie: Option<&Path>) -> Result<String, String> {
+    copier_hache(source, copie, true, PROGRAMME_MAX).map(|(e, _)| e)
+}
+
+/// Parcourt le dossier d'un plugin, sans suivre de lien (refusé), et rend l'empreinte de chaque fichier ; avec `vers`,
+/// le recopie en même temps (seulement des fichiers et des dossiers ordinaires). Borné en fichiers, en octets et en
+/// profondeur. Ce que la compilation ou git laissent à sa racine (`target/`, `.git/`) n'en fait pas partie.
+/// `proprietaire` (Unix) : chaque fichier doit être à soi et fermé aux autres (le dossier des plugins) ; pas pour une
+/// source à ajouter (une clé USB, une archive dépliée).
+fn arbre(d: &Path, vers: Option<&Path>, proprietaire: bool) -> Result<Fichiers, String> {
+    let mut fichiers = Fichiers::new();
+    let mut compte = (0usize, 0u64);
+    parcourir(d, "", vers, proprietaire, &mut fichiers, &mut compte, 0)?;
+    Ok(fichiers)
+}
+
+fn parcourir(
+    de: &Path,
+    relatif: &str,
+    vers: Option<&Path>,
+    proprietaire: bool,
+    fichiers: &mut Fichiers,
+    compte: &mut (usize, u64),
+    profondeur: usize,
+) -> Result<(), String> {
+    if profondeur > PROFONDEUR_MAX {
+        return Err(tr!("dossiers trop imbriqués", "folders nested too deep").to_string());
+    }
+    let entrees = std::fs::read_dir(de).map_err(|e| format!("{} : {e}", chemin_affichable(de)))?;
+    for entree in entrees {
+        let entree = entree.map_err(|e| e.to_string())?;
+        let nom = entree.file_name().into_string().map_err(|n| {
+            trf!(
+                "nom de fichier illisible : {}",
+                "unreadable file name: {}",
+                affichable(&n.to_string_lossy())
+            )
+        })?;
+        if profondeur == 0 && matches!(nom.as_str(), "target" | ".git") {
+            continue;
+        }
+        let source = entree.path();
+        let chemin = if relatif.is_empty() {
+            nom.clone()
+        } else {
+            format!("{relatif}/{nom}")
+        };
+        let cible = vers.map(|v| v.join(&nom));
+        let meta = std::fs::symlink_metadata(&source).map_err(|e| e.to_string())?;
+        compte.0 += 1;
+        if compte.0 > COPIE_FICHIERS_MAX {
+            return Err(trf!(
+                "plus de {COPIE_FICHIERS_MAX} fichiers",
+                "more than {COPIE_FICHIERS_MAX} files"
+            ));
+        }
+        if meta.file_type().is_symlink() {
+            return Err(trf!(
+                "{} est un lien : refusé",
+                "{} is a link: refused",
+                chemin_affichable(&source)
+            ));
+        } else if meta.is_dir() {
+            if let Some(c) = &cible {
+                creer_prive(c).map_err(|e| e.to_string())?;
+            }
+            parcourir(
+                &source,
+                &chemin,
+                cible.as_deref(),
+                proprietaire,
+                fichiers,
+                compte,
+                profondeur + 1,
+            )?;
+        } else if meta.is_file() {
+            let reste = COPIE_OCTETS_MAX.saturating_sub(compte.1);
+            // Le reste des octets permis : un fichier qui grossit pendant la lecture ne passe pas la borne.
+            let (empreinte, octets) = copier_hache(&source, cible.as_deref(), proprietaire, reste)?;
+            compte.1 += octets;
+            fichiers.insert(chemin, empreinte);
+        } else {
+            return Err(trf!(
+                "{} n'est pas un fichier ordinaire : refusé",
+                "{} is not a regular file: refused",
+                chemin_affichable(&source)
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// L'empreinte d'un arbre : le SHA-256 de la liste triée « empreinte  chemin », une ligne par fichier.
+fn empreinte_arbre(fichiers: &Fichiers) -> String {
+    let mut h = sha2::Sha256::new();
+    for (chemin, empreinte) in fichiers {
+        h.update(format!("{empreinte}  {chemin}\n").as_bytes());
+    }
+    hex(&h.finalize())
+}
+
+/// Ce qui a changé entre deux arbres : fichiers changés, ajoutés ou retirés.
+fn changements(avant: &Fichiers, apres: &Fichiers) -> Vec<String> {
+    let mut c: Vec<String> = apres
+        .iter()
+        .filter(|(f, e)| avant.get(*f) != Some(*e))
+        .map(|(f, _)| affichable(f))
+        .collect();
+    c.extend(
+        avant
+            .keys()
+            .filter(|f| !apres.contains_key(*f))
+            .map(|f| trf!("{} (retiré)", "{} (removed)", affichable(f))),
+    );
+    c
 }
 
 /// Le manifeste d'un dossier de plugin, lu une seule fois : l'empreinte est celle des octets mêmes qui sont analysés.
@@ -341,19 +479,16 @@ fn chemin_du_programme(d: &Path, programme: &str) -> PathBuf {
     programme.split(['/', '\\']).fold(d.to_path_buf(), |c, p| c.join(p))
 }
 
-/// Les empreintes des programmes déclarés. Celui de ce système doit exister ; celui d'un autre système peut manquer
-/// (un programme Rust compilé ici n'a pas son .exe) : absent de l'approbation, il sera refusé s'il apparaît.
-fn empreintes(d: &Path, m: &Manifeste) -> Result<BTreeMap<String, String>, String> {
-    let ici = m.commande(Systeme::ici()).map(|c| c.programme.as_str());
-    let mut e = BTreeMap::new();
-    for p in m.programmes() {
-        let chemin = chemin_du_programme(d, p);
-        if Some(p) != ici && std::fs::symlink_metadata(&chemin).is_err() {
-            continue;
-        }
-        e.insert(p.to_string(), hacher_et_copier(&chemin, None)?);
+/// Sans restrictions, le programme lancé est l'original : chaque élément de son chemin sous `d` doit être un vrai
+/// dossier (ni lien ni jonction qui mènerait ailleurs), fermé aux autres comptes, et le programme un fichier à soi.
+fn verifier_chemin(d: &Path, programme: &str) -> Result<(), String> {
+    let mut ici = d.to_path_buf();
+    let parties: Vec<&str> = programme.split(['/', '\\']).collect();
+    for p in &parties[..parties.len().saturating_sub(1)] {
+        ici.push(p);
+        dossier_sur(&ici)?;
     }
-    Ok(e)
+    ouvrir_sur(&chemin_du_programme(d, programme)).map(|_| ())
 }
 
 /// L'état d'un plugin du dossier.
@@ -361,7 +496,7 @@ fn empreintes(d: &Path, m: &Manifeste) -> Result<BTreeMap<String, String>, Strin
 pub enum Etat {
     Pret,
     NonApprouve,
-    /// Une empreinte a changé depuis l'approbation.
+    /// Un fichier a changé (ou a été ajouté, retiré) depuis l'approbation.
     Change,
     /// Il ne vise pas ce système.
     AutreSysteme,
@@ -371,6 +506,8 @@ pub enum Etat {
 pub struct Plugin {
     pub nom: String,
     pub manifeste: Option<Manifeste>,
+    /// L'empreinte de son dossier tel qu'il est maintenant.
+    pub empreinte: Option<String>,
     pub etat: Etat,
 }
 
@@ -393,7 +530,9 @@ pub fn inventaire(racine: &Path) -> Vec<Plugin> {
         .map(|nom| {
             let d = racine.join(&nom);
             let lu = if manifeste::nom_valide(&nom) {
-                dossier_sur(&d).and_then(|()| lire_manifeste(&d))
+                dossier_sur(&d)
+                    .and_then(|()| lire_manifeste(&d))
+                    .and_then(|(m, _)| Ok((m, empreinte_arbre(&arbre(&d, None, true)?))))
             } else {
                 Err(tr!("nom de dossier refusé", "folder name refused").to_string())
             };
@@ -401,26 +540,28 @@ pub fn inventaire(racine: &Path) -> Vec<Plugin> {
                 Err(e) => Plugin {
                     nom,
                     manifeste: None,
+                    empreinte: None,
                     etat: Etat::Invalide(e),
                 },
                 Ok((m, empreinte)) => {
                     let etat = if m.nom == nom {
                         match approuves.plugins.get(&nom) {
                             None => Etat::NonApprouve,
-                            Some(a) if a.manifeste != empreinte => Etat::Change,
-                            Some(a) => match empreintes(&d, &m) {
-                                Ok(e) if e != a.programmes => Etat::Change,
-                                Ok(_) if m.commande(Systeme::ici()).is_none() => Etat::AutreSysteme,
-                                Ok(_) => Etat::Pret,
-                                Err(e) => Etat::Invalide(e),
-                            },
+                            Some(a) if a.arbre != empreinte => Etat::Change,
+                            Some(_) if m.commande(Systeme::ici()).is_none() => Etat::AutreSysteme,
+                            Some(_) => Etat::Pret,
                         }
                     } else {
-                        Etat::Invalide(trf!("le manifeste dit « {} »", "the manifest says “{}”", m.nom))
+                        Etat::Invalide(trf!(
+                            "le manifeste dit « {} »",
+                            "the manifest says “{}”",
+                            affichable(&m.nom)
+                        ))
                     };
                     Plugin {
                         nom,
                         manifeste: Some(m),
+                        empreinte: Some(empreinte),
                         etat,
                     }
                 }
@@ -496,11 +637,32 @@ fn dans_le_path_systeme(nom: &str) -> Option<PathBuf> {
     path_systeme()
         .split(separateur)
         .map(|d| Path::new(d).join(&nom))
-        .find(|p| p.is_file())
+        .find(|p| p.is_file() && du_systeme(p))
 }
 
+/// Un interpréteur du système : sous Unix, lui et chacun de ses dossiers (chemin réel) à root et fermés aux autres
+/// comptes ; un pwsh ou un python3 qu'un compte peut remplacer n'est pas pris.
+fn du_systeme(programme: &Path) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        let Ok(reel) = std::fs::canonicalize(programme) else {
+            return false;
+        };
+        reel.ancestors()
+            .all(|p| std::fs::metadata(p).is_ok_and(|m| m.uid() == 0 && m.mode() & 0o022 == 0))
+    }
+    #[cfg(windows)]
+    {
+        let _ = programme;
+        true
+    }
+}
+
+// Sans /usr/local/bin ni /opt/homebrew/bin : sous macOS, Homebrew les donne au compte qui l'a installé, qui y
+// poserait un faux pwsh ou python3 lancé ensuite sous un autre compte.
 #[cfg(target_os = "macos")]
-const PATH_SYSTEME: &str = "/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:/opt/homebrew/bin";
+const PATH_SYSTEME: &str = "/usr/bin:/bin:/usr/sbin:/sbin";
 #[cfg(all(unix, not(target_os = "macos")))]
 const PATH_SYSTEME: &str = "/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/usr/sbin:/sbin";
 
@@ -665,21 +827,15 @@ fn rappel(texte: &str) {
 }
 
 /// Ce que l'approbation montre : nom, auteur et source (non vérifiés), ce qu'il lancera, ses fichiers et leur taille,
-/// les empreintes notées et le résultat de l'analyse. `copie` : le dossier tel qu'il sera approuvé.
-fn presenter(
-    copie: &Path,
-    destination: &Path,
-    m: &Manifeste,
-    manifeste: &str,
-    programmes: &BTreeMap<String, String>,
-    analyse: &str,
-) {
+/// les empreintes notées, ce que le manifeste demande, et le résultat de l'analyse. `copie` : le dossier tel qu'il
+/// sera approuvé.
+fn presenter(copie: &Path, destination: &Path, m: &Manifeste, fichiers: &Fichiers, analyse: &str) {
     println!();
     trp!(
         "  {GRAS}Plugin « {} »{RESET} ({})",
         "  {GRAS}Plugin “{}”{RESET} ({})",
         affichable(m.titre()),
-        m.nom
+        affichable(&m.nom)
     );
     afficher_aligne("  ", &affichable(m.description()), 2, GRIS);
     let non_verifie = tr!("non vérifié par Vanguard", "not checked by Vanguard");
@@ -718,25 +874,59 @@ fn presenter(
         15,
         "",
     );
-    let fichiers = fichiers_et_tailles(copie);
+    let tailles = fichiers_et_tailles(copie);
     trp!(
         "  Fichiers ({}, {}) :",
         "  Files ({}, {}):",
-        fichiers.len(),
-        taille(fichiers.iter().map(|f| f.1).sum())
+        tailles.len(),
+        taille(tailles.iter().map(|f| f.1).sum())
     );
-    for (f, o) in fichiers.iter().take(30) {
+    for (f, o) in tailles.iter().take(30) {
         println!("    {}  {GRIS}{}{RESET}", couper(&affichable(f), 56), taille(*o));
     }
-    if fichiers.len() > 30 {
-        trp!("    … et {} autre(s)", "    … and {} more", fichiers.len() - 30);
+    if tailles.len() > 30 {
+        trp!("    … et {} autre(s)", "    … and {} more", tailles.len() - 30);
     }
-    trp!("  Empreintes SHA-256 :", "  SHA-256 fingerprints:");
-    println!("    {MANIFESTE}");
-    println!("      {GRIS}{manifeste}{RESET}");
-    for (p, e) in programmes {
-        println!("    {}", affichable(p));
-        println!("      {GRIS}{e}{RESET}");
+    trp!(
+        "  Empreinte du dossier (SHA-256 de chaque fichier) :",
+        "  Folder fingerprint (SHA-256 of each file):"
+    );
+    println!("    {GRIS}{}{RESET}", empreinte_arbre(fichiers));
+    if let Some(c) = m.commande(Systeme::ici())
+        && let Some(e) = fichiers.get(&c.programme)
+    {
+        trp!("  Programme  : {}", "  Program    : {}", affichable(&c.programme));
+        println!("    {GRIS}{e}{RESET}");
+    }
+    // Ce que le manifeste demande n'est jamais accordé par lui : une question à part, après l'approbation.
+    let mut demandes = Vec::new();
+    if m.confiance_totale {
+        demandes.push(tr!(
+            "la confiance totale (sans restrictions)",
+            "full trust (no restrictions)"
+        ));
+    }
+    if m.dans_le_bilan {
+        demandes.push(tr!("tourner avec le bilan", "running with the check-up"));
+    }
+    if m.dans_la_surveillance {
+        demandes.push(tr!("tourner avec la surveillance", "running with monitoring"));
+    }
+    if !demandes.is_empty() {
+        afficher_aligne(
+            &format!(
+                "  {}{}{RESET}",
+                couleur(crate::risk::Niveau::Eleve),
+                tr!("Il demande : ", "It asks for: ")
+            ),
+            &trf!(
+                "{} — rien de cela n'est accordé sans ta réponse à une question à part",
+                "{} — none of it is granted without your answer to a separate question",
+                demandes.join(", ")
+            ),
+            15,
+            "",
+        );
     }
     afficher_aligne(&trf!("  Analyse    : ", "  Scan       : "), analyse, 15, "");
     println!();
@@ -784,74 +974,13 @@ fn menage(racine: &Path) {
     }
 }
 
-/// Copie le dossier `de` dans `vers` (qui existe) : seulement des fichiers et des dossiers ordinaires, jamais un lien
-/// (il ferait lire ou lancer autre chose que ce qui a été copié), dans les bornes.
-fn copier_arbre(de: &Path, vers: &Path, compte: &mut (usize, u64), profondeur: usize) -> Result<(), String> {
-    if profondeur > PROFONDEUR_MAX {
-        return Err(tr!("dossiers trop imbriqués", "folders nested too deep").to_string());
-    }
-    let entrees = std::fs::read_dir(de).map_err(|e| format!("{} : {e}", chemin_affichable(de)))?;
-    for entree in entrees {
-        let entree = entree.map_err(|e| e.to_string())?;
-        // Ce que la compilation ou git laissent à la racine d'un plugin (target/ d'un plugin en Rust, des centaines de
-        // Mo) n'en fait pas partie : son programme est dans bin/ (voir extensions/LISEZMOI.md).
-        if profondeur == 0 && matches!(entree.file_name().to_str(), Some("target" | ".git")) {
-            continue;
-        }
-        let source = entree.path();
-        let cible = vers.join(entree.file_name());
-        let meta = std::fs::symlink_metadata(&source).map_err(|e| e.to_string())?;
-        compte.0 += 1;
-        if compte.0 > COPIE_FICHIERS_MAX {
-            return Err(trf!(
-                "plus de {COPIE_FICHIERS_MAX} fichiers",
-                "more than {COPIE_FICHIERS_MAX} files"
-            ));
-        }
-        if meta.file_type().is_symlink() {
-            return Err(trf!(
-                "{} est un lien : refusé",
-                "{} is a link: refused",
-                chemin_affichable(&source)
-            ));
-        } else if meta.is_dir() {
-            creer_prive(&cible).map_err(|e| e.to_string())?;
-            copier_arbre(&source, &cible, compte, profondeur + 1)?;
-        } else if meta.is_file() {
-            compte.1 += meta.len();
-            if compte.1 > COPIE_OCTETS_MAX {
-                return Err(trf!("plus de {} Mo", "more than {} MB", COPIE_OCTETS_MAX >> 20));
-            }
-            let mut lecture = std::fs::File::open(&source).map_err(|e| e.to_string())?;
-            let mut options = std::fs::OpenOptions::new();
-            options.write(true).create_new(true);
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                let droits = if meta.permissions().mode() & 0o111 != 0 {
-                    0o700
-                } else {
-                    0o600
-                };
-                std::os::unix::fs::OpenOptionsExt::mode(&mut options, droits);
-            }
-            let mut ecriture = options.open(&cible).map_err(|e| e.to_string())?;
-            std::io::copy(&mut lecture, &mut ecriture).map_err(|e| e.to_string())?;
-        } else {
-            return Err(trf!(
-                "{} n'est pas un fichier ordinaire : refusé",
-                "{} is not a regular file: refused",
-                chemin_affichable(&source)
-            ));
-        }
-    }
-    Ok(())
-}
-
 /// `vanguard plugin ajouter <dossier ou archive.zip>` : copie le plugin dans le dossier des plugins, l'analyse, montre
 /// ce qu'il lancera, et l'approuve sur accord. Ce qui est montré, analysé et haché est la copie, pas l'original : c'est
 /// elle qui tournera. Une archive est d'abord dépliée à l'écart (`archive`). Rend le nom.
-fn ajouter(racine: &Path, source: &Path, accord: impl FnOnce(&str) -> bool) -> Result<String, String> {
+fn ajouter(racine: &Path, source: &Path, accord: impl FnMut(&str) -> bool) -> Result<String, String> {
+    if eleve() {
+        return Err(refus_eleve());
+    }
     menage(racine);
     let est_zip = source.extension().is_some_and(|e| e.eq_ignore_ascii_case("zip"));
     if !est_zip {
@@ -884,21 +1013,16 @@ fn ajouter(racine: &Path, source: &Path, accord: impl FnOnce(&str) -> bool) -> R
     ajouter_dossier(racine, &d, accord)
 }
 
-fn ajouter_dossier(racine: &Path, source: &Path, accord: impl FnOnce(&str) -> bool) -> Result<String, String> {
-    let (m, _) = lire_manifeste(source)?;
+fn ajouter_dossier(racine: &Path, source: &Path, mut accord: impl FnMut(&str) -> bool) -> Result<String, String> {
     let essai = Temporaire::creer(racine, "ajout")?;
-    let copie = essai.0.join(&m.nom);
+    let copie = essai.0.join("plugin");
     creer_prive(&copie).map_err(|e| e.to_string())?;
-    copier_arbre(source, &copie, &mut (0, 0), 0)
-        .map_err(|e| trf!("Plugin non ajouté : {e}.", "Plugin not added: {e}."))?;
-    let (m, empreinte) = lire_manifeste(&copie)?;
-    let programmes = empreintes(&copie, &m)?;
+    let fichiers =
+        arbre(source, Some(&copie), false).map_err(|e| trf!("Plugin non ajouté : {e}.", "Plugin not added: {e}."))?;
+    let (m, _) = lire_manifeste(&copie)?;
     let destination = racine.join(&m.nom);
-    let libre = reglages::charger(racine).sans_restrictions;
-    if !libre {
-        let analyse = analyser_avant_accord(&copie)?;
-        presenter(&copie, &destination, &m, &empreinte, &programmes, &analyse);
-    }
+    let analyse = analyser_avant_accord(&copie)?;
+    presenter(&copie, &destination, &m, &fichiers, &analyse);
     let question = if destination.exists() {
         trf!(
             "\n  Un plugin « {} » est déjà là : le remplacer par celui-ci et l'approuver ? [o/N] : ",
@@ -911,7 +1035,7 @@ fn ajouter_dossier(racine: &Path, source: &Path, accord: impl FnOnce(&str) -> bo
             "\n  Add this plugin and approve it? [y/N]: "
         )
     };
-    if !libre && !accord(&question) {
+    if !accord(&question) {
         return Err(tr!("Rien n'a été ajouté.", "Nothing was added.").to_string());
     }
     if destination.exists() {
@@ -919,60 +1043,98 @@ fn ajouter_dossier(racine: &Path, source: &Path, accord: impl FnOnce(&str) -> bo
         std::fs::rename(&destination, ancien.0.join("ancien")).map_err(|e| e.to_string())?;
     }
     std::fs::rename(&copie, &destination).map_err(|e| e.to_string())?;
-    noter(racine, &m.nom, empreinte, programmes)?;
+    // Un plugin remplacé perd la confiance de l'ancien.
+    reglages::oublier(racine, false, &m.nom)?;
+    noter(racine, &m.nom, fichiers.clone())?;
+    demander_confiance(racine, &m, &empreinte_arbre(&fichiers), &mut accord)?;
     Ok(m.nom)
 }
 
-fn noter(racine: &Path, nom: &str, manifeste: String, programmes: BTreeMap<String, String>) -> Result<(), String> {
+/// Ce que le manifeste demande (confiance totale, bilan, surveillance), accordé seulement par une question à part, et
+/// noté avec l'empreinte du dossier : s'il change, la confiance tombe.
+fn demander_confiance(
+    racine: &Path,
+    m: &Manifeste,
+    empreinte: &str,
+    accord: &mut impl FnMut(&str) -> bool,
+) -> Result<(), String> {
+    if !(m.confiance_totale || m.dans_le_bilan || m.dans_la_surveillance) {
+        return Ok(());
+    }
+    let mut quoi = vec![tr!("sans restrictions", "without restrictions")];
+    if m.dans_le_bilan {
+        quoi.push(tr!("avec chaque bilan complet", "with each full check-up"));
+    }
+    if m.dans_la_surveillance {
+        quoi.push(tr!("avec chaque passe de la surveillance", "with each monitoring pass"));
+    }
+    if accord(&trf!(
+        "  Ce plugin demande de tourner {}, avec tous tes droits. L'accorder (tant qu'il ne change pas) ? [o/N] : ",
+        "  This plugin asks to run {}, with all your rights. Grant it (as long as it does not change)? [y/N]: ",
+        quoi.join(", ")
+    )) {
+        reglages::accorder(
+            racine,
+            false,
+            &m.nom,
+            empreinte,
+            m.dans_le_bilan,
+            m.dans_la_surveillance,
+        )?;
+    }
+    Ok(())
+}
+
+fn noter(racine: &Path, nom: &str, fichiers: Fichiers) -> Result<(), String> {
     let mut a = approbations(racine);
     a.plugins.insert(
         nom.to_string(),
         Approbation {
-            manifeste,
-            programmes,
+            arbre: empreinte_arbre(&fichiers),
+            fichiers,
             le: chrono::Local::now().format("%Y-%m-%d %H:%M").to_string(),
         },
     );
     enregistrer(racine, &a)
 }
 
-/// `vanguard plugin approuver <nom>` : le plugin tel qu'il est maintenant dans son dossier, remontré, puis approuvé.
-fn approuver(racine: &Path, nom: &str, accord: impl FnOnce(&str) -> bool) -> Result<(), String> {
+/// `vanguard plugin approuver <nom>` : le plugin tel qu'il est maintenant dans son dossier, copié, remontré, puis
+/// approuvé (ce qui est approuvé est ce qui a été montré).
+fn approuver(racine: &Path, nom: &str, mut accord: impl FnMut(&str) -> bool) -> Result<(), String> {
+    if eleve() {
+        return Err(refus_eleve());
+    }
     let d = dossier_du_plugin(racine, nom)?;
-    let (m, empreinte) = lire_manifeste(&d)?;
+    menage(racine);
+    let essai = Temporaire::creer(racine, "ajout")?;
+    let copie = essai.0.join(nom);
+    creer_prive(&copie).map_err(|e| e.to_string())?;
+    let fichiers = arbre(&d, Some(&copie), true)?;
+    let (m, _) = lire_manifeste(&copie)?;
     if m.nom != nom {
         return Err(trf!(
             "Le manifeste de « {nom} » dit « {} » : refusé.",
             "The manifest of “{nom}” says “{}”: refused.",
-            m.nom
+            affichable(&m.nom)
         ));
     }
-    let programmes = empreintes(&d, &m)?;
     let avant = approbations(racine).plugins.get(nom).cloned();
-    let analyse = analyser_avant_accord(&d)?;
-    presenter(&d, &d, &m, &empreinte, &programmes, &analyse);
+    let analyse = analyser_avant_accord(&copie)?;
+    presenter(&copie, &d, &m, &fichiers, &analyse);
     if let Some(a) = &avant {
-        let mut changes: Vec<String> = Vec::new();
-        if a.manifeste != empreinte {
-            changes.push(MANIFESTE.to_string());
-        }
-        for (p, e) in &programmes {
-            if a.programmes.get(p) != Some(e) {
-                changes.push(affichable(p));
-            }
-        }
+        let changes = changements(&a.fichiers, &fichiers);
         if changes.is_empty() {
             trp!(
                 "\n  Rien n'a changé depuis l'approbation du {}.",
                 "\n  Nothing changed since the approval of {}.",
-                a.le
+                affichable(&a.le)
             );
             return Ok(());
         }
         trp!(
             "\n  Changé depuis l'approbation du {} : {}",
             "\n  Changed since the approval of {}: {}",
-            a.le,
+            affichable(&a.le),
             changes.join(", ")
         );
     }
@@ -982,7 +1144,9 @@ fn approuver(racine: &Path, nom: &str, accord: impl FnOnce(&str) -> bool) -> Res
     )) {
         return Err(tr!("Rien n'a été approuvé.", "Nothing was approved.").to_string());
     }
-    noter(racine, nom, empreinte, programmes)
+    let empreinte = empreinte_arbre(&fichiers);
+    noter(racine, nom, fichiers)?;
+    demander_confiance(racine, &m, &empreinte, &mut accord)
 }
 
 /// Le dossier d'un plugin, jugé : un nom valide, un dossier sûr.
@@ -1005,7 +1169,7 @@ fn dossier_du_plugin(racine: &Path, nom: &str) -> Result<PathBuf, String> {
     Ok(d)
 }
 
-/// `vanguard plugin retirer <nom>` : son dossier, son approbation et ses constats gardés, sur accord.
+/// `vanguard plugin retirer <nom>` : son dossier, son approbation, sa confiance et ses constats gardés, sur accord.
 fn retirer(racine: &Path, nom: &str, accord: impl FnOnce(&str) -> bool) -> Result<bool, String> {
     if !manifeste::nom_valide(nom) {
         return Err(trf!(
@@ -1032,6 +1196,7 @@ fn retirer(racine: &Path, nom: &str, accord: impl FnOnce(&str) -> bool) -> Resul
         Err(_) => {}
     }
     let _ = std::fs::remove_file(racine.join(CONSTATS).join(format!("{nom}.json")));
+    reglages::oublier(racine, false, nom)?;
     if a.plugins.remove(nom).is_some() {
         enregistrer(racine, &a)?;
     }
@@ -1044,15 +1209,26 @@ pub struct Issue {
     pub borne: crate::commande::Borne,
 }
 
-/// Comment lancer : `isole` (Linux, bubblewrap) sans réseau ni écriture hors d'un dossier jetable.
+/// Lancé tout seul, avec le bilan complet ou la surveillance : seulement si la personne l'a accordé pour ce plugin
+/// tel qu'il est.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Auto {
+    Bilan,
+    Surveillance,
+}
+
+/// Comment lancer : `isole` (Linux, bubblewrap) sans réseau, dossier personnel invisible ; `auto`, sans personne
+/// devant l'écran.
 #[derive(Clone, Copy, Default, Debug, PartialEq, Eq)]
 pub struct Facon {
     pub isole: bool,
+    pub auto: Option<Auto>,
 }
 
 /// La commande d'un programme d'extension : son interpréteur, ses arguments, son dossier comme dossier courant ;
 /// l'environnement minimal sauf sans restrictions (`libre`) ; dans bubblewrap avec `isole` (alors `jetable` reçoit
-/// la seule écriture permise).
+/// la seule écriture permise). Le programme perd le terminal (nouvelle session sous Unix, pas de console sous
+/// Windows) : il ne peut plus y écrire en passant à côté du filtre de sa sortie, ni y lire les frappes.
 fn commande_de(
     programme: &Path,
     arguments: &[String],
@@ -1095,30 +1271,56 @@ fn commande_de(
     if !libre {
         environnement(&mut c);
     }
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        // SAFETY : entre fork et exec, seul setsid est appelé ; il est sûr dans ce contexte (async-signal-safe, il
+        // n'alloue rien et ne prend aucun verrou). Son échec (déjà chef de groupe) ne change rien : on continue.
+        unsafe {
+            c.pre_exec(|| {
+                libc::setsid();
+                Ok(())
+            });
+        }
+    }
+    #[cfg(windows)]
+    std::os::windows::process::CommandExt::creation_flags(&mut c, 0x0800_0000); // CREATE_NO_WINDOW
     Ok(c)
 }
 
-/// Sans restrictions et en administrateur : permis, mais dit.
-fn avertir_eleve_libre() {
-    if eleve() {
-        trp!(
-            "  {}⚠{RESET} Sans restrictions et en administrateur : cette extension a tous les droits sur l'ordinateur.",
-            "  {}⚠{RESET} Without restrictions and as administrator: this extension has every right on the computer.",
-            couleur(crate::risk::Niveau::Eleve)
-        );
-    }
+/// En administrateur, rien de ce que contient le dossier des extensions ne peut lever une garde (tout processus du
+/// compte peut l'écrire, sous Windows même sans élévation) : chaque lancement est montré, avec son empreinte, et
+/// demandé à la personne, à chaque fois.
+fn accord_administrateur(nom: &str, empreinte: &str) -> bool {
+    trp!(
+        "\n  {}⚠ Vanguard est en administrateur.{RESET} « {} » tournerait avec tous les droits sur l'ordinateur.",
+        "\n  {}⚠ Vanguard is running as administrator.{RESET} “{}” would run with every right on the computer.",
+        couleur(crate::risk::Niveau::Eleve),
+        affichable(nom)
+    );
+    trp!("  Empreinte : {}", "  Fingerprint: {}", empreinte);
+    demander(tr!(
+        "  Le lancer quand même, cette fois seulement ? [o/N] : ",
+        "  Run it anyway, this time only? [y/N]: "
+    ))
+    .oui()
 }
 
-/// Lance le plugin `nom`, avec `arguments` après ses arguments fixes. Restrictions actives, chaque garde-fou dans
-/// l'ordre : pas en administrateur, dossier sûr, manifeste lu une fois et comparé à son empreinte, programme copié
-/// en étant haché puis comparé, copie lancée (environnement minimal, son dossier comme dossier courant, délai et sortie
-/// bornés). Sans restrictions (`reglages`) : le dossier sûr seulement, puis le programme lui-même.
+/// Lance le plugin `nom`, avec `arguments` après ses arguments fixes. Tout son dossier est copié en étant haché, et
+/// c'est la copie qui tourne, son dossier comme dossier courant : l'empreinte doit être celle de l'approbation, ou
+/// celle que la personne a marquée « à moi » (alors sans restrictions : environnement complet, bornes larges).
+/// En administrateur : rien n'est lancé tout seul, et chaque lancement est demandé (`accord_administrateur`).
+/// Interrupteur général coupé (jamais en administrateur, jamais tout seul) : l'original, sans copie ni empreinte.
 pub fn lancer(racine: &Path, nom: &str, arguments: &[String], facon: Facon) -> Result<Issue, String> {
     if arguments.len() > ARGUMENTS_MAX || arguments.iter().any(|a| a.len() > ARGUMENT_MAX || a.contains('\0')) {
         return Err(trf!(
             "Trop d'arguments, ou trop longs ({ARGUMENTS_MAX} de {ARGUMENT_MAX} caractères au plus).",
             "Too many arguments, or too long ({ARGUMENTS_MAX} of {ARGUMENT_MAX} characters at most)."
         ));
+    }
+    let administrateur = eleve();
+    if administrateur && facon.auto.is_some() {
+        return Err(refus_eleve());
     }
     let d = dossier_du_plugin(racine, nom)?;
     let refuse_change = || {
@@ -1127,46 +1329,84 @@ pub fn lancer(racine: &Path, nom: &str, arguments: &[String], facon: Facon) -> R
             "The plugin “{nom}” changed since it was approved: refused. Review it, then “vanguard plugin approve {nom}”."
         )
     };
-    let (m, empreinte) = lire_manifeste(&d)?;
-    if m.nom != nom {
-        return Err(refuse_change());
-    }
-    let Some(c) = m.commande(Systeme::ici()).cloned() else {
-        return Err(trf!(
-            "Le plugin « {nom} » ne vise pas ce système ({}).",
-            "The plugin “{nom}” does not target this system ({}).",
-            Systeme::ici().nom()
-        ));
+    let commande_ici = |m: &Manifeste| {
+        if m.nom != nom {
+            return Err(refuse_change());
+        }
+        m.commande(Systeme::ici()).cloned().ok_or_else(|| {
+            trf!(
+                "Le plugin « {nom} » ne vise pas ce système ({}).",
+                "The plugin “{nom}” does not target this system ({}).",
+                Systeme::ici().nom()
+            )
+        })
     };
-    let libre = reglages::charger(racine).plugin_libre(&m);
-    let tous: Vec<String> = c.arguments.iter().chain(arguments).cloned().collect();
+    // En administrateur, les réglages (écrits par n'importe quel processus du compte) ne lèvent rien.
+    let reglages = if administrateur {
+        reglages::Reglages::default()
+    } else {
+        reglages::charger(racine)
+    };
     menage(racine);
     let essai = Temporaire::creer(racine, "lancement")?;
-    let source = chemin_du_programme(&d, &c.programme);
-    let (programme, delai, sortie) = if libre {
-        avertir_eleve_libre();
-        (source, reglages::DELAI_LIBRE.max(m.delai), reglages::SORTIE_LIBRE)
+    let isole = facon.isole.then_some(essai.0.as_path());
+    let mut commande;
+    let (manifeste, delai, sortie);
+    if reglages.sans_restrictions && facon.auto.is_none() {
+        let (m, _) = lire_manifeste(&d)?;
+        let c = commande_ici(&m)?;
+        verifier_chemin(&d, &c.programme)?;
+        let tous: Vec<String> = c.arguments.iter().chain(arguments).cloned().collect();
+        commande = commande_de(&chemin_du_programme(&d, &c.programme), &tous, &d, true, isole)?;
+        (delai, sortie) = (reglages::DELAI_LIBRE.max(m.delai), reglages::SORTIE_LIBRE);
+        manifeste = m;
     } else {
-        if eleve() {
-            return Err(refus_eleve());
-        }
-        let Some(approuve) = approbations(racine).plugins.remove(nom) else {
-            return Err(trf!(
-                "Le plugin « {nom} » n'est pas approuvé : « vanguard plugin approuver {nom} » montre ce qu'il lancera.",
-                "The plugin “{nom}” is not approved: “vanguard plugin approve {nom}” shows what it will run."
-            ));
+        let copie = essai.0.join(nom);
+        creer_prive(&copie).map_err(|e| e.to_string())?;
+        let fichiers = arbre(&d, Some(&copie), true)?;
+        let empreinte = empreinte_arbre(&fichiers);
+        let (m, _) = lire_manifeste(&copie)?;
+        let c = commande_ici(&m)?;
+        let confiance = reglages.plugin_a_moi(nom, &empreinte);
+        let approuve = approbations(racine).plugins.get(nom).map(|a| a.arbre == empreinte);
+        let libre = match facon.auto {
+            Some(quand) => {
+                let accorde = confiance.is_some_and(|k| match quand {
+                    Auto::Bilan => k.bilan && m.dans_le_bilan,
+                    Auto::Surveillance => k.surveillance && m.dans_la_surveillance,
+                });
+                if !accorde {
+                    return Err(tr!("non accordé", "not granted").to_string());
+                }
+                true
+            }
+            None if administrateur => {
+                if !accord_administrateur(nom, &empreinte) {
+                    return Err(tr!("Non lancé.", "Not run.").to_string());
+                }
+                false
+            }
+            None if confiance.is_some() => true,
+            None => match approuve {
+                Some(true) => false,
+                Some(false) => return Err(refuse_change()),
+                None => {
+                    return Err(trf!(
+                        "Le plugin « {nom} » n'est pas approuvé : « vanguard plugin approuver {nom} » montre ce qu'il lancera.",
+                        "The plugin “{nom}” is not approved: “vanguard plugin approve {nom}” shows what it will run."
+                    ));
+                }
+            },
         };
-        if empreinte != approuve.manifeste {
-            return Err(refuse_change());
-        }
-        let attendue = approuve.programmes.get(&c.programme).ok_or_else(refuse_change)?;
-        let copie = essai.0.join(source.file_name().unwrap_or_default());
-        if hacher_et_copier(&source, Some(&copie))? != *attendue {
-            return Err(refuse_change());
-        }
-        (copie, m.delai, SORTIE_MAX)
-    };
-    let mut commande = commande_de(&programme, &tous, &d, libre, facon.isole.then_some(essai.0.as_path()))?;
+        let tous: Vec<String> = c.arguments.iter().chain(arguments).cloned().collect();
+        commande = commande_de(&chemin_du_programme(&copie, &c.programme), &tous, &copie, libre, isole)?;
+        (delai, sortie) = if libre {
+            (reglages::DELAI_LIBRE.max(m.delai), reglages::SORTIE_LIBRE)
+        } else {
+            (m.delai, SORTIE_MAX)
+        };
+        manifeste = m;
+    }
     let borne = crate::commande::lancer_borne(&mut commande, delai, sortie).ok_or_else(|| {
         trf!(
             "Le plugin « {nom} » n'a pas pu démarrer.",
@@ -1174,7 +1414,7 @@ pub fn lancer(racine: &Path, nom: &str, arguments: &[String], facon: Facon) -> R
         )
     })?;
     drop(essai);
-    Ok(Issue { manifeste: m, borne })
+    Ok(Issue { manifeste, borne })
 }
 
 /// `vanguard plugin …` : rend le code de sortie (celui du plugin lancé, sinon 0 ou 1).
@@ -1197,17 +1437,11 @@ pub fn commande(quoi: &[String]) -> i32 {
             Err(e) => echec(&e),
         };
     }
-    // Retirer reste permis en administrateur : ça n'exécute rien.
+    // Ajouter et approuver refusent l'administrateur d'eux-mêmes ; retirer reste permis : ça n'exécute rien.
     let racine = match dossier() {
         Ok(r) => r,
         Err(e) => return echec(&e),
     };
-    if matches!(mot, "ajouter" | "add" | "approuver" | "approve")
-        && eleve()
-        && !reglages::charger(&racine).sans_restrictions
-    {
-        return echec(&refus_eleve());
-    }
     let accord = |q: &str| demander(q).oui();
     let deuxieme = quoi.get(1).map(String::as_str);
     let resultat = match (mot, deuxieme) {
@@ -1371,32 +1605,43 @@ fn liste(racine: &Path) {
 
 fn aide_ajout() {
     trp!(
-        "  Aucun plugin. Un plugin est un programme à toi (script, programme) dans un dossier avec un plugin.toml ; « vanguard plugin ajouter <dossier> » le copie ici et l'approuve. Un exemple : outils/plugins/exemple dans les sources de Vanguard.",
-        "  No plugin. A plugin is a program of yours (script, program) in a folder with a plugin.toml; “vanguard plugin add <folder>” copies it here and approves it. An example: outils/plugins/exemple in Vanguard's sources."
+        "  Aucun plugin. Un plugin est un programme à toi (script, programme) dans un dossier avec un plugin.toml ; « vanguard plugin ajouter <dossier> » le copie ici et l'approuve. Un exemple : extensions/exemples/exemple dans les sources de Vanguard.",
+        "  No plugin. A plugin is a program of yours (script, program) in a folder with a plugin.toml; “vanguard plugin add <folder>” copies it here and approves it. An example: extensions/exemples/exemple in Vanguard's sources."
     );
 }
 
-/// Les plugins sans restrictions dont le manifeste demande `dans_le_bilan` ou `dans_la_surveillance` (selon
-/// `surveillance`), lancés l'un après l'autre. Jamais un plugin aux restrictions actives : c'est la personne qui a
-/// levé les garde-fous pour lui. Rien si le dossier n'est pas sûr.
+/// Les plugins à qui la personne a accordé de tourner avec le bilan (ou la surveillance, selon `surveillance`) et
+/// qui le demandent encore, tels qu'ils étaient quand elle l'a accordé (`Facon::auto`), lancés l'un après l'autre.
+/// Jamais en administrateur : le dossier serait alors un moyen de faire lancer du code avec tous les droits. Rien si
+/// le dossier n'est pas sûr.
 fn opt_in(surveillance: bool) -> Vec<(Manifeste, Vec<sortie::ConstatPlugin>)> {
+    if eleve() {
+        return Vec::new();
+    }
     let Ok(racine) = dossier() else {
         return Vec::new();
     };
     let reglages = reglages::charger(&racine);
+    let quand = if surveillance { Auto::Surveillance } else { Auto::Bilan };
     inventaire(&racine)
         .into_iter()
-        .filter_map(|p| p.manifeste)
-        .filter(|m| reglages.plugin_libre(m) && m.commande(Systeme::ici()).is_some())
-        .filter(|m| {
-            if surveillance {
-                m.dans_la_surveillance
-            } else {
-                m.dans_le_bilan
-            }
+        .filter(|p| {
+            p.empreinte
+                .as_deref()
+                .and_then(|e| reglages.plugin_a_moi(&p.nom, e))
+                .is_some_and(|k| if surveillance { k.surveillance } else { k.bilan })
         })
-        .filter_map(|m| {
-            let issue = lancer(&racine, &m.nom, &[], Facon::default()).ok()?;
+        .filter_map(|p| {
+            let issue = lancer(
+                &racine,
+                &p.nom,
+                &[],
+                Facon {
+                    isole: false,
+                    auto: Some(quand),
+                },
+            )
+            .ok()?;
             let lu = sortie::analyser(&issue.borne.sortie);
             if !surveillance {
                 let _ = sortie::garder(&racine, &issue.manifeste, &lu.constats);
@@ -1426,7 +1671,13 @@ pub fn a_signaler() -> Vec<(String, String)> {
                         Some(crate::risk::Niveau::Eleve | crate::risk::Niveau::Critique)
                     )
                 })
-                .map(|c| format!("{} : {}", c.categorie, c.message))
+                // Le corps d'une notification est du balisage pour la plupart des serveurs (lien, image) : échappé.
+                .map(|c| {
+                    format!("{} : {}", c.categorie, c.message)
+                        .replace('&', "&amp;")
+                        .replace('<', "&lt;")
+                        .replace('>', "&gt;")
+                })
                 .collect();
             (!graves.is_empty()).then(|| {
                 (
@@ -1442,8 +1693,11 @@ pub fn a_signaler() -> Vec<(String, String)> {
         .collect()
 }
 
-/// `vanguard extensions --sans-restrictions on|off`.
+/// `vanguard extensions --sans-restrictions on|off`. En administrateur, refusé : l'interrupteur n'y vaut rien.
 pub fn regler_restrictions(sans: bool) -> i32 {
+    if eleve() {
+        return echec(&refus_eleve());
+    }
     let racine = match dossier() {
         Ok(r) => r,
         Err(e) => {

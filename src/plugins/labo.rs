@@ -37,6 +37,8 @@ pub enum Etat {
 
 pub struct Script {
     pub fichier: String,
+    /// Son empreinte tel qu'il est maintenant (aucune s'il est refusé).
+    pub empreinte: Option<String>,
     pub etat: Etat,
 }
 
@@ -100,6 +102,7 @@ pub fn scripts(racine: &Path) -> Vec<Script> {
             if m.is_dir() {
                 return None;
             }
+            let mut empreinte = None;
             let etat = if !nom_valide(&fichier) {
                 Etat::Refuse(tr!("nom refusé", "name refused").to_string())
             } else if m.file_type().is_symlink() {
@@ -107,14 +110,24 @@ pub fn scripts(racine: &Path) -> Vec<Script> {
             } else if !lancable(&chemin, &m) {
                 Etat::Refuse(tr!("rien à lancer", "nothing to run").to_string())
             } else {
-                match (approuves.get(&fichier), hacher_et_copier(&chemin, None)) {
-                    (_, Err(e)) => Etat::Refuse(e),
-                    (None, Ok(_)) => Etat::NonApprouve,
-                    (Some(a), Ok(e)) if a.empreinte != e => Etat::Change,
-                    (Some(_), Ok(_)) => Etat::Approuve,
+                match hacher_et_copier(&chemin, None) {
+                    Err(e) => Etat::Refuse(e),
+                    Ok(e) => {
+                        let etat = match approuves.get(&fichier) {
+                            None => Etat::NonApprouve,
+                            Some(a) if a.empreinte != e => Etat::Change,
+                            Some(_) => Etat::Approuve,
+                        };
+                        empreinte = Some(e);
+                        etat
+                    }
                 }
             };
-            Some(Script { fichier, etat })
+            Some(Script {
+                fichier,
+                empreinte,
+                etat,
+            })
         })
         .collect();
     liste.sort_by(|a, b| a.fichier.cmp(&b.fichier));
@@ -182,42 +195,34 @@ fn presenter(chemin: &Path, copie: &Path, empreinte: &str, avant: Option<&Approb
     ));
 }
 
-/// Le script `fichier` copié en étant haché, dans un dossier temporaire ; approuvé d'avance, ou montré puis approuvé
-/// sur accord (la première fois, et après chaque changement). Rend la copie à lancer, qui vit autant que le dossier.
+/// Le script `fichier` copié en étant haché, dans un dossier temporaire. Rend la copie à lancer (qui vit autant que le
+/// dossier) et si elle tourne sans restrictions (marquée « à moi » telle quelle). Sinon il doit être approuvé tel
+/// quel, ou il est montré puis approuvé sur accord (la première fois, et après chaque changement). En administrateur,
+/// rien du dossier ne vaut : chaque lancement est demandé, avec l'empreinte.
 fn copie_approuvee(
     racine: &Path,
     fichier: &str,
     et_lancer: bool,
     accord: impl FnOnce(&str) -> bool,
-) -> Result<(Temporaire, PathBuf), String> {
-    if eleve() {
+) -> Result<(Temporaire, PathBuf, bool), String> {
+    let administrateur = eleve();
+    if administrateur && !et_lancer {
         return Err(refus_eleve());
     }
-    if !nom_valide(fichier) {
-        return Err(trf!(
-            "« {} » n'est pas un nom de script du labo.",
-            "“{}” is not a lab script name.",
-            affichable(fichier)
-        ));
-    }
-    let d = dossier_labo(racine)?;
-    let chemin = d.join(fichier);
-    let m = std::fs::symlink_metadata(&chemin).map_err(|_| {
-        trf!(
-            "Aucun script « {fichier} » dans le labo : « vanguard labo ».",
-            "No script “{fichier}” in the lab: “vanguard lab”."
-        )
-    })?;
-    if !m.file_type().is_symlink() && !lancable(&chemin, &m) {
-        return Err(trf!(
-            "« {fichier} » : Vanguard ne sait pas le lancer (.sh, .bash, .ps1, .py ou un programme).",
-            "“{fichier}”: Vanguard cannot run it (.sh, .bash, .ps1, .py or a program)."
-        ));
-    }
+    let chemin = chemin_du_script(racine, fichier)?;
     menage(racine);
     let essai = Temporaire::creer(racine, "lancement")?;
     let copie = essai.0.join(fichier);
     let empreinte = hacher_et_copier(&chemin, Some(&copie))?;
+    if administrateur {
+        if !accord_administrateur(fichier, &empreinte) {
+            return Err(tr!("Non lancé.", "Not run.").to_string());
+        }
+        return Ok((essai, copie, false));
+    }
+    if et_lancer && reglages::charger(racine).labo_a_moi(fichier, &empreinte) {
+        return Ok((essai, copie, true));
+    }
     let mut a = approbations(racine);
     let avant = a.labo.get(fichier).cloned();
     if avant.as_ref().is_none_or(|x| x.empreinte != empreinte) {
@@ -250,11 +255,38 @@ fn copie_approuvee(
         );
         enregistrer(racine, &a)?;
     }
-    Ok((essai, copie))
+    Ok((essai, copie, false))
 }
 
-/// Lance un script du laboratoire (approuvé, ou approuvé sur accord) : son dossier comme dossier courant,
-/// environnement minimal, délai et sortie bornés.
+/// Le chemin d'un script du labo : un nom valide, présent, que Vanguard sait lancer (un lien est refusé plus loin,
+/// à l'ouverture sans suivi).
+fn chemin_du_script(racine: &Path, fichier: &str) -> Result<PathBuf, String> {
+    if !nom_valide(fichier) {
+        return Err(trf!(
+            "« {} » n'est pas un nom de script du labo.",
+            "“{}” is not a lab script name.",
+            affichable(fichier)
+        ));
+    }
+    let chemin = dossier_labo(racine)?.join(fichier);
+    let m = std::fs::symlink_metadata(&chemin).map_err(|_| {
+        trf!(
+            "Aucun script « {fichier} » dans le labo : « vanguard labo ».",
+            "No script “{fichier}” in the lab: “vanguard lab”."
+        )
+    })?;
+    if !m.file_type().is_symlink() && !lancable(&chemin, &m) {
+        return Err(trf!(
+            "« {fichier} » : Vanguard ne sait pas le lancer (.sh, .bash, .ps1, .py ou un programme).",
+            "“{fichier}”: Vanguard cannot run it (.sh, .bash, .ps1, .py or a program)."
+        ));
+    }
+    Ok(chemin)
+}
+
+/// Lance un script du laboratoire : la copie hachée (approuvée, approuvée sur accord, ou « à moi » telle quelle),
+/// le dossier du labo comme dossier courant, environnement minimal sauf « à moi », délai et sortie bornés.
+/// Interrupteur général coupé (jamais en administrateur) : le script lui-même, sans copie ni accord.
 pub fn lancer(
     racine: &Path,
     fichier: &str,
@@ -268,17 +300,21 @@ pub fn lancer(
             "Too many arguments, or too long ({ARGUMENTS_MAX} of {ARGUMENT_MAX} characters at most)."
         ));
     }
-    let libre = nom_valide(fichier) && reglages::charger(racine).labo_libre(fichier);
     let d = dossier_labo(racine)?;
-    // Sans restrictions : le script lui-même, sans accord, sans copie, avec de très larges bornes.
-    let (essai, programme, delai, sortie) = if libre {
-        avertir_eleve_libre();
+    let general = !eleve() && reglages::charger(racine).sans_restrictions;
+    let (essai, programme, libre) = if general {
+        let chemin = chemin_du_script(racine, fichier)?;
+        // L'original : un vrai fichier à soi, jamais un lien qui mènerait ailleurs.
+        ouvrir_sur(&chemin)?;
         menage(racine);
-        let essai = Temporaire::creer(racine, "lancement")?;
-        (essai, d.join(fichier), reglages::DELAI_LIBRE, reglages::SORTIE_LIBRE)
+        (Temporaire::creer(racine, "lancement")?, chemin, true)
     } else {
-        let (essai, copie) = copie_approuvee(racine, fichier, true, accord)?;
-        (essai, copie, DELAI, SORTIE_MAX)
+        copie_approuvee(racine, fichier, true, accord)?
+    };
+    let (delai, sortie) = if libre {
+        (reglages::DELAI_LIBRE, reglages::SORTIE_LIBRE)
+    } else {
+        (DELAI, SORTIE_MAX)
     };
     let mut commande = commande_de(
         &programme,
@@ -356,6 +392,7 @@ pub fn retirer(racine: &Path, fichier: &str, accord: impl FnOnce(&str) -> bool) 
     if std::fs::symlink_metadata(&chemin).is_ok() {
         std::fs::remove_file(&chemin).map_err(|e| e.to_string())?;
     }
+    reglages::oublier(racine, true, fichier)?;
     if a.labo.remove(fichier).is_some() {
         enregistrer(racine, &a)?;
     }

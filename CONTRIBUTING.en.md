@@ -102,8 +102,12 @@ What must not change without rereading the design (`src/plugins/mod.rs`, at the 
 
 - an extension only runs on request and its findings never touch the grade: neither the audit, the history nor
   `risk::score` see them (separate section of the HTML report);
-- restrictions on (the default): approval by SHA-256, YARA and MalwareBazaar scan before consent, the hashed copy is
-  the one that runs, no link followed, never as administrator, `commande::lancer_borne`, minimal environment;
+- restrictions on (the default): approval by SHA-256 of the whole folder, YARA and MalwareBazaar scan before
+  consent, the hashed copy is the one that runs, no link followed, never as administrator, no terminal (setsid,
+  CREATE_NO_WINDOW), `commande::lancer_borne`, minimal environment;
+- a manifest only asks (`confiance`, `dans_le_bilan`, `dans_la_surveillance`): only the person grants, and the grant
+  is tied to the fingerprint (`reglages::Confiance`);
+- as administrator, nothing in the folder lifts a guard: never by itself, and each run is asked;
 - even with restrictions off, the extensions folder stays yours and closed to other accounts (`dossier_sur`).
 
 The tests (`src/plugins/tests.rs`) run real scripts in throwaway folders, and `tests/programme.rs` adds then runs

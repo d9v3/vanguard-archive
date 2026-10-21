@@ -83,7 +83,10 @@ fn ecrire_source(j: &Jetable, delai: u64, script: &str) {
 fn options_pour_vanguard_et_pour_le_plugin() {
     let a = |v: &[&str]| v.iter().map(ToString::to_string).collect::<Vec<_>>();
     let f = Facon::default();
-    let isole = Facon { isole: true };
+    let isole = Facon {
+        isole: true,
+        auto: None,
+    };
     assert_eq!(
         options_de_lancement(&a(&["x", "--rapport", "y"])),
         (true, f, a(&["x", "y"]))
@@ -152,15 +155,16 @@ mod unix {
         assert_eq!((p.len(), &p[0].etat), (1, &Etat::Pret));
         let a = approbations(&racine);
         let ap = &a.plugins["salon"];
-        assert_eq!(ap.programmes.len(), 2, "le .sh et le .ps1 ont leur empreinte");
+        // Tout le dossier a son empreinte : le .sh, le .ps1, le manifeste et les données.
+        assert_eq!(ap.fichiers.len(), 4, "{:?}", ap.fichiers);
 
         let issue = lancer(&racine, "salon", &["--salut".to_string()], Facon::default()).unwrap();
         let s = &issue.borne.sortie;
         assert_eq!(issue.borne.code, Some(0), "{s} {}", issue.borne.erreurs);
         assert!(s.contains("bonjour alice --salut"), "{s}");
-        // Son dossier comme dossier courant ; c'est la copie qui tourne, retirée ensuite.
-        let reel = std::fs::canonicalize(racine.join("salon")).unwrap();
-        assert!(s.contains(&format!("dossier {}", reel.display())), "{s}");
+        // C'est la copie de tout le dossier qui tourne, dans ce dossier copié, retirée ensuite.
+        let dossier = s.lines().find_map(|l| l.strip_prefix("dossier ")).unwrap();
+        assert!(dossier.contains("/.lancement-") && dossier.ends_with("/salon"), "{s}");
         assert!(s.contains("/.lancement-"), "{s}");
         assert!(
             !std::fs::read_dir(&racine)
@@ -304,7 +308,7 @@ mod unix {
         // Un plugin posé à la main, jamais approuvé : refusé, et dit comme tel.
         ecrire_source(&j, 20, "echo un\n");
         creer_prive(&racine.join("salon")).unwrap();
-        copier_arbre(&j.source(), &racine.join("salon"), &mut (0, 0), 0).unwrap();
+        arbre(&j.source(), Some(&racine.join("salon")), false).unwrap();
         assert_eq!(inventaire(&racine)[0].etat, Etat::NonApprouve);
         assert!(
             lancer(&racine, "salon", &[], Facon::default())
@@ -317,6 +321,114 @@ mod unix {
             ajouter(&racine, &racine.join("salon"), |_| true)
                 .unwrap_err()
                 .contains("approuver")
+        );
+    }
+
+    /// Un manifeste ne peut que demander : `confiance = "totale"` et `dans_le_bilan` ne lèvent rien tout seuls, ni posés
+    /// à la main ni ajoutés ; seule la réponse à la question à part les accorde, liée à l'empreinte du dossier.
+    #[test]
+    fn un_manifeste_demande_la_confiance_sans_jamais_l_obtenir_seul() {
+        if en_root() {
+            return;
+        }
+        let j = Jetable::nouveau();
+        ecrire_source(&j, 20, "echo confiance\n");
+        let m = manifeste(20).replace("delai = 20", "delai = 20\nconfiance = \"totale\"\ndans_le_bilan = true");
+        std::fs::write(j.source().join(MANIFESTE), m).unwrap();
+        let racine = j.racine();
+        let bilan = Facon {
+            isole: false,
+            auto: Some(Auto::Bilan),
+        };
+        // Posé à la main : ni lancé à la main, ni avec le bilan.
+        creer_prive(&racine.join("salon")).unwrap();
+        arbre(&j.source(), Some(&racine.join("salon")), false).unwrap();
+        assert!(lancer(&racine, "salon", &[], Facon::default()).is_err());
+        assert!(lancer(&racine, "salon", &[], bilan).is_err());
+        std::fs::remove_dir_all(racine.join("salon")).unwrap();
+        // Ajouté, approuvé, mais la confiance refusée : restreint, jamais avec le bilan.
+        let mut questions = Vec::new();
+        ajouter(&racine, &j.source(), |q| {
+            questions.push(q.to_string());
+            !q.contains("demande de tourner")
+        })
+        .unwrap();
+        assert_eq!(questions.len(), 2, "{questions:?}");
+        assert!(questions[1].contains("sans restrictions") && questions[1].contains("bilan"));
+        assert!(lancer(&racine, "salon", &[], Facon::default()).is_ok());
+        assert!(lancer(&racine, "salon", &[], bilan).is_err());
+        // Accordée : il tourne avec le bilan, tel quel.
+        approuver(&racine, "salon", |_| true).unwrap();
+        std::fs::write(racine.join("salon/donnees/liste.txt"), "Cuisine\n").unwrap();
+        approuver(&racine, "salon", |_| true).unwrap();
+        assert_eq!(
+            lancer(&racine, "salon", &[], bilan).unwrap().borne.sortie,
+            "confiance\n"
+        );
+        // Un seul fichier change (pas le programme) : la confiance tombe, et le lancement à la main est refusé.
+        std::fs::write(racine.join("salon/donnees/liste.txt"), "Garage\n").unwrap();
+        assert!(lancer(&racine, "salon", &[], bilan).is_err());
+        assert!(
+            lancer(&racine, "salon", &[], Facon::default())
+                .err()
+                .unwrap()
+                .contains("a changé")
+        );
+        // Retiré puis remis : la confiance d'avant ne revient pas.
+        assert!(retirer(&racine, "salon", |_| true).unwrap());
+        assert_eq!(reglages::charger(&racine).plugins_a_moi.len(), 0);
+    }
+
+    /// « À moi » vaut pour le dossier tel qu'il était : un fichier ajouté ou changé le rend restreint (et refusé).
+    #[test]
+    fn a_moi_tombe_quand_le_dossier_change() {
+        if en_root() {
+            return;
+        }
+        let j = Jetable::nouveau();
+        ecrire_source(&j, 20, ". ./lib.sh\necho \"$NOM\"\n");
+        std::fs::write(j.source().join("lib.sh"), "NOM=salon\n").unwrap();
+        let racine = j.racine();
+        ajouter(&racine, &j.source(), |_| true).unwrap();
+        let empreinte = inventaire(&racine)[0].empreinte.clone().unwrap();
+        reglages::accorder(&racine, false, "salon", &empreinte, false, false).unwrap();
+        // À moi : l'environnement complet (les variables de cargo comprises).
+        assert_eq!(
+            lancer(&racine, "salon", &[], Facon::default()).unwrap().borne.sortie,
+            "salon\n"
+        );
+        // Le fichier lu par le script change : refusé, plus à moi.
+        std::fs::write(racine.join("salon/lib.sh"), "NOM=piege\n").unwrap();
+        assert!(
+            lancer(&racine, "salon", &[], Facon::default())
+                .err()
+                .unwrap()
+                .contains("a changé")
+        );
+        // Un fichier ajouté : de même.
+        std::fs::write(racine.join("salon/lib.sh"), "NOM=salon\n").unwrap();
+        assert!(lancer(&racine, "salon", &[], Facon::default()).is_ok());
+        std::fs::write(racine.join("salon/aide.dll"), "MZ").unwrap();
+        assert!(lancer(&racine, "salon", &[], Facon::default()).is_err());
+    }
+
+    /// Le plugin n'a plus de terminal : il ne peut ni y écrire à côté du filtre ni y lire les frappes.
+    #[test]
+    fn le_plugin_perd_le_terminal() {
+        if en_root() {
+            return;
+        }
+        let j = Jetable::nouveau();
+        ecrire_source(
+            &j,
+            20,
+            "if (exec 3>/dev/tty) 2>/dev/null; then echo tty; else echo sans; fi\n",
+        );
+        let racine = j.racine();
+        ajouter(&racine, &j.source(), |_| true).unwrap();
+        assert_eq!(
+            lancer(&racine, "salon", &[], Facon::default()).unwrap().borne.sortie,
+            "sans\n"
         );
     }
 
@@ -406,7 +518,7 @@ mod labo_unix {
         // Un plugin jamais approuvé tourne aussi, avec tout l'environnement (les variables de cargo comprises).
         ecrire_source(&j, 20, "env | grep -c CARGO\n");
         creer_prive(&racine.join("salon")).unwrap();
-        copier_arbre(&j.source(), &racine.join("salon"), &mut (0, 0), 0).unwrap();
+        arbre(&j.source(), Some(&racine.join("salon")), false).unwrap();
         let issue = lancer(&racine, "salon", &[], Facon::default()).unwrap();
         assert_ne!(issue.borne.sortie.trim(), "0");
         // Le seul contrôle qui reste : un dossier ouvert aux autres comptes refuse tout.
@@ -470,10 +582,28 @@ mod labo_unix {
         poser(
             &j,
             "isole.sh",
-            "grep -c : /proc/net/dev; touch \"$HOME/.vanguard-isole-essai\" 2>/dev/null && echo ecrit || echo refuse\n",
+            "grep -c : /proc/net/dev; ls -A \"$1\" | wc -l; touch \"$1/.vanguard-isole-essai\" 2>/dev/null && echo ecrit\n",
         );
-        let b = labo::lancer(&racine, "isole.sh", &[], Facon { isole: true }, |_| true).unwrap();
-        // Une seule interface (lo) dans /proc/net/dev : pas de réseau.
-        assert_eq!(b.sortie, "1\nrefuse\n", "{}", b.erreurs);
+        let maison = std::env::var("HOME").unwrap_or_default();
+        let b = labo::lancer(
+            &racine,
+            "isole.sh",
+            std::slice::from_ref(&maison),
+            Facon {
+                isole: true,
+                auto: None,
+            },
+            |_| true,
+        )
+        .unwrap();
+        // Une seule interface (lo) dans /proc/net/dev : pas de réseau ; le vrai dossier personnel est vide, vu d'ici
+        // (masqué : ni ses fichiers, ni ses sockets, ni ses tubes), et rien n'y reste.
+        assert_eq!(
+            b.sortie.split_whitespace().collect::<Vec<_>>(),
+            ["1", "0", "ecrit"],
+            "{}",
+            b.erreurs
+        );
+        assert!(!Path::new(&maison).join(".vanguard-isole-essai").exists());
     }
 }

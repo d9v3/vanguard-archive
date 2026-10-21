@@ -54,8 +54,10 @@ arguments = ["--court"]            # arguments fixes, avant ceux tapés à la li
 commande = "mon-script.ps1"
 ```
 
-Clés facultatives de plus : `confiance = "totale"` (ce plugin tourne sans restrictions, voir plus bas),
-`dans_le_bilan = true` et `dans_la_surveillance = true` (seulement sans restrictions).
+Clés facultatives de plus, qui ne sont que des **demandes** : `confiance = "totale"` (tourner sans
+restrictions), `dans_le_bilan = true` et `dans_la_surveillance = true` (tourner tout seul avec le bilan complet ou
+la surveillance). Le récapitulatif les montre, et rien n'est accordé sans ta réponse à une question à part, après
+l'approbation. L'accord vaut pour le dossier tel qu'il est : un fichier qui change, et il tombe.
 
 L'interpréteur vient de l'extension : `.sh` par `/bin/sh`, `.bash` par `/bin/bash`, `.ps1` par le PowerShell de
 System32 (`pwsh` ailleurs), `.py` par le `python3` du système ; le reste est lancé tel quel. Le dossier courant
@@ -67,7 +69,7 @@ Commandes :
 vanguard plugin ajouter extensions/exemples/exemple   copie, analyse, montre, demande l'accord
 vanguard plugin exemple                                le lance
 vanguard plugin exemple --rapport                      ses constats dans le rapport HTML (section Plugins)
-vanguard plugin exemple --isole                        Linux : sans réseau, dossier personnel en lecture seule
+vanguard plugin exemple --isole                        Linux : sans réseau, dossier personnel masqué
 vanguard plugin liste                                  chaque plugin et son état
 vanguard plugin approuver exemple                      après un changement, le remontre et le réapprouve
 vanguard plugin retirer exemple
@@ -126,20 +128,30 @@ vanguard plugin rust-exemple
 
 Restrictions **actives** (par défaut) :
 
-- approbation par l'empreinte SHA-256 du manifeste et de chaque programme (ou du script) ; changé : refusé
-  jusqu'à une nouvelle approbation ;
+- approbation par l'empreinte SHA-256 de **tout** le dossier du plugin (chaque fichier, pas seulement le programme)
+  ou du script ; un fichier changé, ajouté ou retiré : refusé jusqu'à une nouvelle approbation ;
 - avant l'accord : l'analyse YARA et les empreintes MalwareBazaar de Vanguard (une correspondance : refus) ;
-- le programme copié en étant haché, et c'est la copie vérifiée qui tourne ;
-- aucun lien suivi ; une archive ne peut rien écrire hors de son dossier (50 Mo au plus) ;
+- le dossier copié en étant haché, et c'est la copie vérifiée qui tourne ;
+- aucun lien suivi ; une archive ne peut rien écrire hors de son dossier (50 Mo au plus, ni « .. », ni nom de
+  périphérique Windows comme CON ou COM1) ;
 - jamais en administrateur ; jamais dans le bilan, la surveillance, l'entretien ni `complet` ;
-- délai et sortie bornés (1 Mio), puis l'arbre de processus arrêté ; environnement minimal (PATH du système,
-  LANG, HOME), aucune variable de Vanguard.
+- le terminal retiré à l'extension (elle ne peut ni y écrire à côté du filtre ni y lire les frappes) ; délai et
+  sortie bornés (1 Mio), puis tout ce qu'elle a lancé arrêté ; environnement minimal (PATH du système, LANG, HOME),
+  aucune variable de Vanguard.
 
-Restrictions **coupées** (menu Extensions › 3, `vanguard extensions --sans-restrictions on`, ou pour un seul
-élément : « Restrictions d'un plugin », « Marquer un script comme à moi », `confiance = "totale"`) : ni accord, ni
-empreinte, ni analyse, bornes très larges, tout l'environnement, administrateur permis (averti), et
-`dans_le_bilan` / `dans_la_surveillance` honorés. La première coupure demande une confirmation, une seule fois ;
-remettre les restrictions est immédiat.
+Restrictions **coupées** :
+
+- pour tout (menu Extensions › 3, `vanguard extensions --sans-restrictions on`) : ni accord, ni empreinte, ni
+  analyse, bornes très larges, tout l'environnement, à la main seulement ;
+- pour un élément (« Restrictions d'un plugin », « Marquer un script comme à moi », ou la question à part quand un
+  manifeste demande la confiance) : le même, pour lui seul et tel qu'il est (son empreinte) ; c'est le seul moyen de
+  le faire tourner tout seul avec le bilan ou la surveillance, s'il le demande.
+
+La première coupure demande une confirmation, une seule fois ; remettre les restrictions est immédiat.
+
+**En administrateur**, rien de ce qui est dans le dossier des extensions ne lève une garde (sous Windows, tout
+programme du compte peut l'écrire, même sans élévation) : aucune extension ne tourne avec le bilan, la
+surveillance ou l'entretien, et chaque lancement à la main est montré avec son empreinte et demandé, à chaque fois.
 
 Une seule chose reste, même sans restrictions : le dossier des extensions doit être à toi et fermé aux autres
 comptes. Sinon un programme d'un autre compte pourrait y poser du code qui tournerait comme toi, sans rien demander.

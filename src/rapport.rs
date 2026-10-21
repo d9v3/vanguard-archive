@@ -378,6 +378,19 @@ pub fn markdown(audit: Option<&Audit>, reseau: Option<&Rapport>, audit_reseau: O
     m
 }
 
+/// Un texte d'une extension dans le Markdown : chaque caractère qui met en forme (lien, image, gras, balise, tableau)
+/// échappé, pour qu'un constat ne se présente pas comme le texte de Vanguard une fois le rapport collé ailleurs.
+fn md(texte: &str) -> String {
+    let mut s = String::with_capacity(texte.len());
+    for c in texte.chars() {
+        if "\\`*_[]()<>#|!~{}".contains(c) {
+            s.push('\\');
+        }
+        s.push(c);
+    }
+    s
+}
+
 /// La section des plugins (`vanguard plugin <nom> --rapport`) en Markdown : à part, sans note.
 fn plugins_markdown(m: &mut String, gardes: &[crate::plugins::sortie::Gardes]) {
     if gardes.is_empty() {
@@ -393,17 +406,17 @@ fn plugins_markdown(m: &mut String, gardes: &[crate::plugins::sortie::Gardes]) {
             m,
             "\n### {} ({}, le {})\n",
             "\n### {} ({}, on {})\n",
-            g.titre(),
-            g.nom,
-            g.le
+            md(g.titre()),
+            md(&g.nom),
+            md(&g.le)
         );
         for c in &g.constats {
             let _ = writeln!(
                 m,
                 "- [{}] **{}** : {}",
                 crate::plugins::sortie::libelle(c),
-                c.categorie,
-                c.message
+                md(&c.categorie),
+                md(&c.message)
             );
         }
     }
@@ -900,6 +913,12 @@ mod tests {
         let mut m = String::new();
         plugins_markdown(&mut m, &[g]);
         assert!(m.contains("## Plugins (hors code de Vanguard)") && m.contains("[CRITIQUE] **Salon**"));
+        // Échappé : ni balise ni lien ni image d'un constat ne se rend.
+        assert!(m.contains("\\<script\\>alert\\(1\\)\\</script\\>"), "{m}");
+        assert_eq!(
+            md("![x](http://e/p.png) **a**"),
+            "\\!\\[x\\]\\(http://e/p.png\\) \\*\\*a\\*\\*"
+        );
         let mut vide = String::new();
         plugins_html(&mut vide, &[]);
         assert_eq!(vide, "");

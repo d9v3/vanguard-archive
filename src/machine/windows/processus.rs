@@ -167,6 +167,13 @@ pub(crate) fn eleve() -> bool {
     jeton(ELEVATION).is_some_and(|t| t.first().is_some_and(|&m| m & 0xFFFF_FFFF != 0))
 }
 
+/// Comme `eleve`, mais un jeton illisible compte pour élevé : pour un garde-fou, qui doit échouer fermé (les
+/// extensions ne tournent jamais en administrateur sans qu'on le demande).
+pub(crate) fn eleve_ou_inconnu() -> bool {
+    const ELEVATION: u32 = 20;
+    jeton(ELEVATION).is_none_or(|t| t.first().is_none_or(|&m| m & 0xFFFF_FFFF != 0))
+}
+
 /// Le SID du compte de ce processus (« S-1-5-21-… »), comme « whoami /user » le donne. Seulement des chiffres et des
 /// tirets après « S-1- » : il entre tel quel dans une commande PowerShell.
 pub(crate) fn sid() -> Option<String> {

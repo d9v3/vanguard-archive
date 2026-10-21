@@ -980,7 +980,7 @@ fn plugin_d_exemple_et_labo() {
     );
     assert_eq!(s.code, Some(0), "{}{}", s.texte, s.erreurs);
     assert!(
-        s.texte.contains("Empreintes SHA-256") && s.texte.contains("non vérifié par Vanguard"),
+        s.texte.contains("Empreinte du dossier") && s.texte.contains("non vérifié par Vanguard"),
         "{}",
         s.texte
     );

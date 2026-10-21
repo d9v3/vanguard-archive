@@ -93,9 +93,12 @@ fn arguments_bwrap(
 }
 
 /// Les arguments de bubblewrap pour une extension lancée avec `--isole` : la recette du bac à sable (système en
-/// lecture seule, /run et /tmp masqués, pas de réseau, aucune capacité), puis le dossier personnel remis en lecture
-/// seule (une extension lit souvent tes fichiers, elle ne peut plus les changer), son dossier en lecture seule comme
-/// dossier courant, et le dossier jetable seul en écriture. `None` : bubblewrap n'est pas là.
+/// lecture seule, /home, /tmp et /run masqués, pas de réseau, aucune capacité), puis le dossier personnel masqué lui
+/// aussi (où qu'il soit) : un montage en lecture seule n'empêcherait ni de joindre une socket (Bitwarden, Docker
+/// Desktop, un agent SSH) ni d'écrire dans un tube (celui de Steam), et un programme hors du bac agirait pour
+/// l'extension. Seuls restent le dossier jetable (la seule écriture permise, HOME) et le dossier de l'extension, en
+/// lecture seule, comme dossier courant. Une socket posée dans le dossier de l'extension elle-même resterait
+/// joignable : il est à la personne, et une copie (celle qui tourne) n'en a pas. `None` : bubblewrap n'est pas là.
 #[cfg(target_os = "linux")]
 pub(crate) fn arguments_extension(jetable: &Path, dossier: &Path, commande: &[String]) -> Option<Vec<String>> {
     let programme = commande.first()?;
@@ -110,23 +113,23 @@ pub(crate) fn arguments_extension(jetable: &Path, dossier: &Path, commande: &[St
     if let Some(i) = a.iter().rposition(|x| x == "--chdir") {
         a.truncate(i);
     }
-    let maison = std::env::var("HOME").unwrap_or_default();
-    if !maison.is_empty() {
-        a.extend(["--ro-bind".into(), maison.clone(), maison.clone()]);
-    }
     let (j, d) = (jetable.display().to_string(), dossier.display().to_string());
+    if let Ok(maison) = std::env::var("HOME")
+        && !maison.is_empty()
+    {
+        a.extend(["--tmpfs".into(), maison]);
+    }
+    // Après le masquage (le jetable et le dossier sont souvent dans le dossier personnel) : d'abord le jetable en
+    // écriture, puis le dossier de l'extension par-dessus, en lecture seule.
     a.extend([
-        "--ro-bind".into(),
-        d.clone(),
-        d.clone(),
         "--bind".into(),
         j.clone(),
         j.clone(),
+        "--ro-bind".into(),
+        d.clone(),
+        d.clone(),
     ]);
-    a.extend(["--chdir".into(), d]);
-    if !maison.is_empty() {
-        a.extend(["--setenv".into(), "HOME".into(), maison]);
-    }
+    a.extend(["--chdir".into(), d, "--setenv".into(), "HOME".into(), j]);
     a.extend(commande.iter().cloned());
     Some(a)
 }

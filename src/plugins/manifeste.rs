@@ -115,19 +115,6 @@ impl Manifeste {
             .map(|(_, c)| c)
             .or(self.commune.as_ref())
     }
-
-    /// Les programmes de tous les systèmes visés, sans doublon : chacun a son empreinte dans l'approbation.
-    pub fn programmes(&self) -> Vec<&str> {
-        let mut p: Vec<&str> = self
-            .systemes
-            .iter()
-            .filter_map(|s| self.commande(*s))
-            .map(|c| c.programme.as_str())
-            .collect();
-        p.sort_unstable();
-        p.dedup();
-        p
-    }
 }
 
 /// Une clé lue : sa section, son nom, sa valeur, sa ligne.
@@ -163,7 +150,19 @@ pub fn chemin_valide(chemin: &str) -> bool {
         && !chemin.starts_with(['/', '\\'])
         && chemin
             .split(['/', '\\'])
-            .all(|p| !p.is_empty() && p != "." && p != "..")
+            .all(|p| !p.is_empty() && p != "." && p != ".." && !nom_reserve(p))
+}
+
+/// Un nom que Windows prend pour un périphérique (CON, NUL, COM1…, aussi avec une extension : « CON.txt »), ou qui finit
+/// par « . » ou une espace (Windows les retire, et deux noms deviennent un) : écrire dedans écrirait sur la console ou
+/// sur un port, avant tout récapitulatif.
+fn nom_reserve(partie: &str) -> bool {
+    let base = partie.split('.').next().unwrap_or("").trim_end().to_ascii_uppercase();
+    let peripherique = matches!(base.as_str(), "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$")
+        || ((base.starts_with("COM") || base.starts_with("LPT"))
+            && base.len() == 4
+            && base[3..].chars().all(|c| c.is_ascii_digit() || "¹²³".contains(c)));
+    peripherique || partie.ends_with(['.', ' '])
 }
 
 /// Le texte du manifeste, analysé et vérifié. L'erreur dit quoi et où, dans la langue de l'interface.
@@ -652,7 +651,6 @@ commande = 'essai.ps1'
         // La section remplace la commande commune, arguments compris.
         let windows = m.commande(Systeme::Windows).unwrap();
         assert_eq!((windows.programme.as_str(), windows.arguments.len()), ("essai.ps1", 0));
-        assert_eq!(m.programmes(), ["essai.ps1", "essai.sh"]);
     }
 
     #[test]
@@ -674,6 +672,10 @@ commande = 'essai.ps1'
             assert!(lire(&texte).is_err(), "{refuse}");
         }
         assert!(chemin_valide("bin/essai.sh") && chemin_valide("outils\\essai.exe"));
+        for reserve in ["CON", "x/nul", "con.txt", "a/COM1", "LPT9.log", "CONOUT$", "a.", "b "] {
+            assert!(!chemin_valide(reserve), "{reserve}");
+        }
+        assert!(chemin_valide("console.sh") && chemin_valide("com10/x") && chemin_valide("nullite.txt"));
     }
 
     #[test]

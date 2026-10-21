@@ -104,6 +104,39 @@ fn lire_borne(
     reception
 }
 
+/// Le programme `pid` a-t-il fini ? Sans le récolter (WNOWAIT) : son numéro reste à lui, et celui de son groupe aussi.
+#[cfg(target_os = "linux")]
+fn fini_sans_recolter(pid: u32) -> bool {
+    let id: libc::id_t = pid;
+    // SAFETY : siginfo_t est une structure C sans pointeur, valide remplie de zéros ; waitid l'écrit (taille connue) et
+    // ne garde rien. P_PID vise ce seul enfant, WNOHANG ne bloque pas, WNOWAIT laisse l'enfant à récolter par wait.
+    unsafe {
+        let mut info: libc::siginfo_t = std::mem::zeroed();
+        libc::waitid(
+            libc::P_PID,
+            id,
+            &raw mut info,
+            libc::WEXITED | libc::WNOHANG | libc::WNOWAIT,
+        ) == 0
+            && info.si_pid() != 0
+    }
+}
+
+/// Arrête tout le groupe dont `pid` est le chef (la session créée pour un plugin par `setsid`) : ses descendants, même
+/// rattachés à un autre parent, y sont encore. Rien si `pid` n'est pas chef de son groupe (un programme ordinaire).
+#[cfg(unix)]
+fn tuer_le_groupe(pid: u32) {
+    if let Ok(p) = libc::pid_t::try_from(pid) {
+        // SAFETY : getpgid lit le groupe d'un processus pas encore récolté ; kill envoie SIGKILL au groupe dont il est
+        // le chef, celui que setsid a créé pour lui : aucun autre processus que les siens.
+        unsafe {
+            if libc::getpgid(p) == p {
+                libc::kill(-p, libc::SIGKILL);
+            }
+        }
+    }
+}
+
 /// Comme `lancer`, pour un programme qui n'est pas de confiance (un plugin) : chaque sortie gardée en mémoire jusqu'à
 /// `borne` octets, puis le programme et tout ce qu'il a lancé arrêtés ; le délai passé, de même. Contrairement à
 /// `lancer`, ce qui était déjà écrit reste : un plugin trop bavard ou trop lent montre au moins son début. `None` :
@@ -133,11 +166,21 @@ pub fn lancer_borne(commande: &mut Command, secondes: u64, borne: usize) -> Opti
     let limite = Instant::now() + Duration::from_secs(secondes);
     let mut pause = Duration::from_millis(1);
     let (mut tronque, mut delai) = (false, false);
+    let pid = enfant.id();
     let code = loop {
+        // Linux : fini, il n'est pas encore récolté ; ce qu'il a laissé derrière lui dans sa session est arrêté avant
+        // (un petit-enfant détaché continuerait sinon après « Terminé »), tant que son numéro ne peut pas resservir.
+        #[cfg(target_os = "linux")]
+        if fini_sans_recolter(pid) {
+            tuer_le_groupe(pid);
+            break enfant.wait().ok().and_then(|s| s.code());
+        }
         match enfant.try_wait() {
             Ok(Some(statut)) => break statut.code(),
             Ok(None) if plein.load(Ordering::Relaxed) => {
                 tronque = true;
+                #[cfg(unix)]
+                tuer_le_groupe(pid);
                 arreter(&mut enfant);
                 break None;
             }
@@ -147,11 +190,15 @@ pub fn lancer_borne(commande: &mut Command, secondes: u64, borne: usize) -> Opti
             }
             _ => {
                 delai = true;
+                #[cfg(unix)]
+                tuer_le_groupe(pid);
                 arreter(&mut enfant);
                 break None;
             }
         }
     };
+    #[cfg(not(unix))]
+    let _ = pid;
     // Un petit-enfant resté hors de l'arbre peut garder un canal ouvert : on n'attend pas plus que DELAI_LECTURE.
     let texte = |r: mpsc::Receiver<Vec<u8>>| {
         r.recv_timeout(DELAI_LECTURE)
@@ -1168,5 +1215,30 @@ mod tests_lancer_borne {
             (Some(4), "ok\n", "oups\n")
         );
         assert!(lancer_borne(&mut Command::new("/nexiste/pas"), 5, 10).is_none());
+    }
+
+    /// Un programme dans sa propre session (comme un plugin) qui laisse un petit-enfant détaché : celui-ci est arrêté
+    /// avec lui, il n'écrit plus rien ensuite.
+    #[test]
+    fn un_petit_enfant_detache_ne_survit_pas() {
+        use std::os::unix::process::CommandExt;
+        let temoin = std::env::temp_dir().join(format!("vanguard-groupe-{}", std::process::id()));
+        let _ = std::fs::remove_file(&temoin);
+        let mut c = Command::new("sh");
+        c.arg("-c").arg(format!(
+            "(sleep 2; touch {}) >/dev/null 2>&1 & echo parti",
+            temoin.display()
+        ));
+        // SAFETY : seul setsid entre fork et exec (sûr dans ce contexte, comme pour un plugin).
+        unsafe {
+            c.pre_exec(|| {
+                libc::setsid();
+                Ok(())
+            });
+        }
+        let r = lancer_borne(&mut c, 10, 4096).unwrap();
+        assert_eq!((r.code, r.sortie.as_str()), (Some(0), "parti\n"));
+        std::thread::sleep(Duration::from_secs(3));
+        assert!(!temoin.exists(), "le petit-enfant a survécu");
     }
 }

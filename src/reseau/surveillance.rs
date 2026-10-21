@@ -70,7 +70,8 @@ pub(crate) fn notifier(titre: &str, corps: &str) {
     // Délai : sans service de notifications qui réponde, notify-send attendrait sans fin, et la surveillance avec.
     #[cfg(target_os = "linux")]
     let _ = crate::commande::lancer(
-        Command::new("notify-send").args(["-a", "Vanguard", "-i", "vanguard", "-u", "critical", titre, corps]),
+        // « -- » : un titre ou un corps qui commence par « - » (venu d'une extension) n'est jamais lu comme une option.
+        Command::new("notify-send").args(["-a", "Vanguard", "-i", "vanguard", "-u", "critical", "--", titre, corps]),
         10,
     );
     // macOS : notification du Centre de notifications, par AppleScript (texte entre guillemets échappés).

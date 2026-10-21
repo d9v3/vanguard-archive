@@ -121,15 +121,22 @@ pub fn lire(archive: &[u8]) -> Result<Vec<Entree>, String> {
 /// Déplie l'archive dans `vers` (qui existe, vide, réservé à son compte) : seulement des fichiers et des dossiers
 /// ordinaires, jamais écrasés.
 pub fn deplier(archive: &Path, vers: &Path) -> Result<(), String> {
-    let m = std::fs::symlink_metadata(archive).map_err(|e| e.to_string())?;
-    if !m.is_file() || m.len() > OCTETS_MAX as u64 {
-        return Err(trf!(
+    // Ouverte sans suivre de lien ni bloquer sur un tube, puis lue par une borne : remplacée entre deux appels par un
+    // lien vers /dev/zero, elle ne remplirait ni la mémoire ni le disque.
+    let refus = || {
+        trf!(
             "archive refusée : pas un fichier ordinaire, ou plus de {} Mo",
             "archive refused: not a regular file, or over {} MB",
             OCTETS_MAX >> 20
-        ));
+        )
+    };
+    let f = super::ouvrir_sans_lien(archive, false).map_err(|_| refus())?;
+    let mut octets = Vec::new();
+    std::io::Read::read_to_end(&mut std::io::Read::take(f, OCTETS_MAX as u64 + 1), &mut octets)
+        .map_err(|e| e.to_string())?;
+    if octets.len() > OCTETS_MAX {
+        return Err(refus());
     }
-    let octets = std::fs::read(archive).map_err(|e| e.to_string())?;
     for e in lire(&octets)? {
         let cible = e.chemin.split('/').fold(vers.to_path_buf(), |c, p| c.join(p));
         let parent = if e.contenu.is_none() {

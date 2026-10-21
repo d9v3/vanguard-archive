@@ -101,9 +101,12 @@ Ce qui ne doit pas changer sans relire la conception (`src/plugins/mod.rs`, en t
 
 - une extension ne tourne qu'à la demande et ses constats ne touchent jamais la note : ni l'audit, ni
   l'historique, ni `risk::score` ne les voient (section à part du rapport HTML) ;
-- restrictions actives (par défaut) : approbation par SHA-256, analyse YARA et MalwareBazaar avant l'accord, la
-  copie hachée est celle qui tourne, aucun lien suivi, jamais en administrateur, `commande::lancer_borne`,
-  environnement minimal ;
+- restrictions actives (par défaut) : approbation par SHA-256 de tout le dossier, analyse YARA et MalwareBazaar
+  avant l'accord, la copie hachée est celle qui tourne, aucun lien suivi, jamais en administrateur, sans terminal
+  (setsid, CREATE_NO_WINDOW), `commande::lancer_borne`, environnement minimal ;
+- un manifeste ne fait que demander (`confiance`, `dans_le_bilan`, `dans_la_surveillance`) : seule la personne
+  accorde, et l'accord est lié à l'empreinte (`reglages::Confiance`) ;
+- en administrateur, rien du dossier ne lève une garde : jamais tout seul, et chaque lancement est demandé ;
 - même restrictions coupées, le dossier des extensions reste à soi et fermé aux autres comptes (`dossier_sur`).
 
 Les essais (`src/plugins/tests.rs`) lancent de vrais scripts dans des dossiers jetables, et `tests/programme.rs`

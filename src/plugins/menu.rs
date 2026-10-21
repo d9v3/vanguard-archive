@@ -121,14 +121,14 @@ pub(super) fn lignes_plugins(plugins: &[Plugin], reglages: &super::reglages::Reg
         paragraphe(
             &mut l,
             tr!(
-                "Aucun plugin : « a » copie ici un dossier qui contient ton programme et son plugin.toml (exemple : outils/plugins/exemple dans les sources de Vanguard).",
-                "No plugin: “a” copies here a folder holding your program and its plugin.toml (example: outils/plugins/exemple in Vanguard's sources)."
+                "Aucun plugin : « a » copie ici un dossier qui contient ton programme et son plugin.toml (exemple : extensions/exemples/exemple dans les sources de Vanguard).",
+                "No plugin: “a” copies here a folder holding your program and its plugin.toml (example: extensions/exemples/exemple in Vanguard's sources)."
             ),
         );
     }
     for (i, p) in plugins.iter().enumerate() {
         let texte = p.manifeste.as_ref().map_or_else(
-            || p.nom.clone(),
+            || affichable(&p.nom),
             |m| {
                 format!(
                     "{} {GRIS}· {}{RESET}",
@@ -137,8 +137,13 @@ pub(super) fn lignes_plugins(plugins: &[Plugin], reglages: &super::reglages::Reg
                 )
             },
         );
-        let libre = p.manifeste.as_ref().is_some_and(|m| reglages.plugin_libre(m));
-        let etat = if libre && !matches!(p.etat, Etat::Invalide(_) | Etat::AutreSysteme) {
+        let a_moi = p
+            .empreinte
+            .as_deref()
+            .and_then(|e| reglages.plugin_a_moi(&p.nom, e))
+            .is_some();
+        let etat = if (a_moi || reglages.sans_restrictions) && !matches!(p.etat, Etat::Invalide(_) | Etat::AutreSysteme)
+        {
             tr!("sans restrictions", "without restrictions").to_string()
         } else {
             etat_court(&p.etat)
@@ -198,7 +203,11 @@ pub(super) fn lignes_labo(
         paragraphe(&mut l, &chemin_affichable(dossier));
     }
     for (i, s) in scripts.iter().enumerate() {
-        let etat = if reglages.labo_libre(&s.fichier) && !matches!(s.etat, labo::Etat::Refuse(_)) {
+        let a_moi = s
+            .empreinte
+            .as_deref()
+            .is_some_and(|e| reglages.labo_a_moi(&s.fichier, e));
+        let etat = if (a_moi || reglages.sans_restrictions) && !matches!(s.etat, labo::Etat::Refuse(_)) {
             tr!("à moi, sans restrictions", "mine, without restrictions").to_string()
         } else {
             labo::libelle(&s.etat)
@@ -265,6 +274,11 @@ pub fn extensions() {
             "2" => labo(&racine),
             "3" => {
                 println!();
+                if super::eleve() {
+                    super::echec(&super::refus_eleve());
+                    attendre();
+                    continue;
+                }
                 match super::reglages::basculer(&racine, |q| demander(q).oui()) {
                     Ok(etat) if etat != sans => dire_restrictions(etat),
                     Ok(_) => crate::trp!("  Rien n'a changé.", "  Nothing changed."),
@@ -302,7 +316,7 @@ pub fn plugins(racine: &Path) {
                 if chemin.is_empty() {
                     continue;
                 }
-                super::ajouter(racine, Path::new(chemin), accord).map(|nom| {
+                super::ajouter(racine, Path::new(chemin), |q: &str| demander(q).oui()).map(|nom| {
                     crate::trp!(
                         "  {VERT}✔{RESET} Plugin « {nom} » ajouté et approuvé.",
                         "  {VERT}✔{RESET} Plugin “{nom}” added and approved."
@@ -319,7 +333,7 @@ pub fn plugins(racine: &Path) {
                 match c.as_str() {
                     "p" => super::approuver(racine, nom, accord),
                     "r" => super::retirer(racine, nom, accord).map(|_| ()),
-                    _ => basculer_element(racine, false, nom, &liste),
+                    _ => basculer_plugin(racine, nom, &liste),
                 }
             }
             n => {
@@ -344,38 +358,91 @@ pub fn plugins(racine: &Path) {
     }
 }
 
-/// L'interrupteur d'un élément : « à moi » (restrictions coupées pour lui seul) ou remis. Un plugin dont le manifeste
-/// dit `confiance = "totale"` le reste : c'est son manifeste qu'il faut changer.
-fn basculer_element(racine: &Path, labo: bool, nom: &str, plugins: &[Plugin]) -> Result<(), String> {
-    let par_manifeste = plugins
-        .iter()
-        .any(|p| p.nom == nom && p.manifeste.as_ref().is_some_and(|m| m.confiance_totale));
-    let etat = super::reglages::basculer_element(racine, labo, nom, |q| demander(q).oui())?;
-    if etat {
+/// Ce que dit l'interrupteur d'un élément qui vient de basculer.
+fn dire_element(nom: &str, a_moi: bool) {
+    if a_moi {
         dire_restrictions(true);
-    } else if par_manifeste {
-        crate::trp!(
-            "  Son plugin.toml dit confiance = \"totale\" : il reste sans restrictions tant que son manifeste le dit.",
-            "  Its plugin.toml says confiance = \"totale\": it stays without restrictions as long as its manifest says so."
-        );
     } else {
         crate::trp!(
             "  {VERT}✔{RESET} Restrictions remises pour « {} ».",
             "  {VERT}✔{RESET} Restrictions back on for “{}”.",
-            nom
+            affichable(nom)
         );
     }
+}
+
+/// « À moi » pour un plugin, tel qu'il est approuvé maintenant (son empreinte) : il doit l'être, sans changement.
+/// S'il demande de tourner avec le bilan ou la surveillance, c'est une question de plus. En administrateur, refusé :
+/// rien de ce qu'on y note ne vaudrait.
+fn basculer_plugin(racine: &Path, nom: &str, plugins: &[Plugin]) -> Result<(), String> {
+    if super::eleve() {
+        return Err(super::refus_eleve());
+    }
+    let Some(p) = plugins.iter().find(|p| p.nom == nom) else {
+        return Ok(());
+    };
+    let (Etat::Pret, Some(empreinte), Some(m)) = (&p.etat, &p.empreinte, &p.manifeste) else {
+        return Err(trf!(
+            "« {} » doit d'abord être approuvé tel qu'il est (« p »).",
+            "“{}” must first be approved as it is (“p”).",
+            affichable(nom)
+        ));
+    };
+    let a_moi = super::reglages::basculer_element(racine, false, nom, empreinte, |q| demander(q).oui())?;
+    if a_moi && (m.dans_le_bilan || m.dans_la_surveillance) {
+        let mut quoi = Vec::new();
+        if m.dans_le_bilan {
+            quoi.push(tr!("avec chaque bilan complet", "with each full check-up"));
+        }
+        if m.dans_la_surveillance {
+            quoi.push(tr!("avec chaque passe de la surveillance", "with each monitoring pass"));
+        }
+        if demander(&trf!(
+            "  Il demande aussi de tourner tout seul {}. L'accorder ? [o/N] : ",
+            "  It also asks to run by itself {}. Grant it? [y/N]: ",
+            quoi.join(", ")
+        ))
+        .oui()
+        {
+            super::reglages::accorder(racine, false, nom, empreinte, m.dans_le_bilan, m.dans_la_surveillance)?;
+        }
+    }
+    dire_element(nom, a_moi);
     Ok(())
 }
 
-/// Lance un plugin choisi dans la liste : approuvé, il tourne ; sinon il est d'abord montré et approuvé sur accord.
+/// « À moi » pour un script du labo, tel qu'il est approuvé maintenant.
+fn basculer_script(racine: &Path, fichier: &str, scripts: &[labo::Script]) -> Result<(), String> {
+    if super::eleve() {
+        return Err(super::refus_eleve());
+    }
+    let Some(s) = scripts.iter().find(|s| s.fichier == fichier) else {
+        return Ok(());
+    };
+    let (labo::Etat::Approuve, Some(empreinte)) = (&s.etat, &s.empreinte) else {
+        return Err(trf!(
+            "« {} » doit d'abord être approuvé tel qu'il est (« p »).",
+            "“{}” must first be approved as it is (“p”).",
+            affichable(fichier)
+        ));
+    };
+    let a_moi = super::reglages::basculer_element(racine, true, fichier, empreinte, |q| demander(q).oui())?;
+    dire_element(fichier, a_moi);
+    Ok(())
+}
+
+/// Lance un plugin choisi dans la liste : approuvé (ou « à moi », ou l'interrupteur général coupé), il tourne ; sinon
+/// il est d'abord montré et approuvé sur accord. En administrateur, `lancer` demande lui-même à chaque fois.
 fn lancer_plugin(racine: &Path, p: &Plugin) {
-    let libre = p
-        .manifeste
-        .as_ref()
-        .is_some_and(|m| super::reglages::charger(racine).plugin_libre(m));
+    let reglages = super::reglages::charger(racine);
+    let a_moi = p
+        .empreinte
+        .as_deref()
+        .and_then(|e| reglages.plugin_a_moi(&p.nom, e))
+        .is_some();
+    let libre = !super::eleve() && (a_moi || reglages.sans_restrictions);
     match &p.etat {
-        Etat::Pret | Etat::NonApprouve | Etat::Change if libre => {
+        Etat::Pret | Etat::NonApprouve | Etat::Change if libre || super::eleve() => {
             super::executer(racine, &p.nom, &[], false, super::Facon::default());
         }
         Etat::Pret => {
@@ -393,11 +460,11 @@ fn lancer_plugin(racine: &Path, p: &Plugin) {
             super::echec(&trf!(
                 "« {} » ne vise pas ce système.",
                 "“{}” does not target this system.",
-                p.nom
+                affichable(&p.nom)
             ));
         }
         Etat::Invalide(e) => {
-            super::echec(&trf!("« {} » : {}", "“{}”: {}", p.nom, affichable(e)));
+            super::echec(&trf!("« {} » : {}", "“{}”: {}", affichable(&p.nom), affichable(e)));
         }
     }
 }
@@ -437,7 +504,7 @@ pub fn labo(racine: &Path) {
                 match c.as_str() {
                     "p" => labo::approuver(racine, f, accord),
                     "r" => labo::retirer(racine, f, accord).map(|_| ()),
-                    _ => basculer_element(racine, true, f, &[]),
+                    _ => basculer_script(racine, f, &liste),
                 }
             }
             n => {
@@ -512,10 +579,12 @@ mod tests {
         // Des noms très longs : coupés, jamais plus larges que l'écran.
         let scripts = vec![
             labo::Script {
+                empreinte: None,
                 fichier: "un-script-au-nom-vraiment-tres-tres-long-pour-voir.sh".into(),
                 etat: labo::Etat::Change,
             },
             labo::Script {
+                empreinte: None,
                 fichier: "essai.py".into(),
                 etat: labo::Etat::Refuse("un lien : jamais suivi, et une raison bien trop longue".into()),
             },
@@ -524,6 +593,7 @@ mod tests {
             assert!(largeur(l) <= LARGEUR, "{}", textes(std::slice::from_ref(l)));
         }
         let plugins = vec![Plugin {
+            empreinte: None,
             nom: "salon".into(),
             manifeste: None,
             etat: Etat::Invalide("x".into()),
