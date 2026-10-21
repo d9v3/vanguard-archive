@@ -410,9 +410,25 @@ fn redemarrage_en_attente(lectures: Option<&str>) -> Constat {
 /// pas d'identifiant ni de source (« 3 mises à niveau disponibles. », ou le second tableau des programmes épinglés).
 fn lire_winget(sortie: &str) -> Option<Vec<(String, String)>> {
     // La barre de progression de winget se réécrit avec des retours chariot : seul le dernier état compte.
+    // winget aligne ses colonnes sur la largeur affichée : un idéogramme y prend deux colonnes. Chaque caractère
+    // large est suivi d'un bouche-trou, pour que l'index d'une case soit sa colonne à l'écran.
+    const BOUCHE_TROU: char = '\u{0}';
     let lignes: Vec<Vec<char>> = sortie
         .lines()
-        .map(|l| l.rsplit('\r').next().unwrap_or("").trim_end().chars().collect())
+        .map(|l| {
+            l.rsplit('\r')
+                .next()
+                .unwrap_or("")
+                .trim_end()
+                .chars()
+                // Un caractère sans largeur (accent combiné) n'occupe aucune colonne : écarté de la grille.
+                .filter(|&c| crate::ui::largeur_car(c) > 0)
+                .flat_map(|c| {
+                    let large = crate::ui::largeur_car(c) > 1;
+                    std::iter::once(c).chain(large.then_some(BOUCHE_TROU))
+                })
+                .collect()
+        })
         .collect();
     let tirets = lignes
         .iter()
@@ -427,7 +443,12 @@ fn lire_winget(sortie: &str) -> Option<Vec<(String, String)>> {
     let champ = |l: &[char], n: usize| -> String {
         let debut = debuts[n].min(l.len());
         let fin = debuts.get(n + 1).map_or(l.len(), |&f| f.min(l.len()));
-        l[debut..fin].iter().collect::<String>().trim().to_string()
+        l[debut..fin]
+            .iter()
+            .filter(|&&c| c != BOUCHE_TROU)
+            .collect::<String>()
+            .trim()
+            .to_string()
     };
     let mut noms = Vec::new();
     for l in &lignes[tirets + 1..] {
@@ -469,7 +490,10 @@ fn winget_du_store(local: Option<&std::ffi::OsStr>) -> Option<std::path::PathBuf
 fn programmes() -> Constat {
     // winget lancé directement, sans PowerShell autour ; PowerShell seulement s'il ne démarre pas, ou s'il n'est
     // pas à la place de celui du Store (installé autrement : PowerShell le trouve par le PATH, comme avant).
+    let debut = std::time::Instant::now();
+    let mut lance = false;
     let direct = if let Some(winget) = winget_du_store(std::env::var_os("LOCALAPPDATA").as_deref()) {
+        lance = true;
         crate::commande::lancer(
             std::process::Command::new(winget).args([
                 "upgrade",
@@ -490,6 +514,11 @@ fn programmes() -> Constat {
     } else {
         Some("WINGET_ABSENT".to_string())
     };
+    // winget a démarré mais n'a pas répondu à temps (réseau lent, source muette) : le relancer par PowerShell
+    // doublerait l'attente pour le même résultat. Un démarrage raté, lui, est immédiat.
+    if direct.is_none() && lance && debut.elapsed() >= std::time::Duration::from_secs(140) {
+        return impossible("Programmes", tr!("winget ne répond pas", "winget is not responding"));
+    }
     let Some(sortie) = direct.or_else(|| {
         ps_delai(
             "if (-not (Get-Command winget -ErrorAction SilentlyContinue)) { 'WINGET_ABSENT' } \
@@ -777,6 +806,20 @@ mod tests {
         if std::path::Path::new(r"C:\windows\system32\wineboot.exe").is_file() {
             assert!(!matches!(r, Some(Recherche::Faite(_))));
         }
+    }
+
+    /// Des noms en idéogrammes : winget leur donne deux colonnes chacun, les colonnes suivantes restent lues.
+    #[test]
+    fn tableau_de_winget_en_ideogrammes() {
+        let sortie = "名称         ID               版本    可用    源\r\n\
+-------------------------------------------------------\r\n\
+腾讯QQ       Tencent.QQ       9.7     9.8     winget\r\n\
+微软 Edge    Microsoft.Edge   130.0   131.0   winget\r\n\
+7-Zip        7zip.7zip        24.07   24.08   winget\r\n";
+        let ids: Vec<String> = lire_winget(sortie).unwrap().into_iter().map(|(_, id)| id).collect();
+        assert_eq!(ids, ["Tencent.QQ", "Microsoft.Edge", "7zip.7zip"]);
+        let noms: Vec<String> = lire_winget(sortie).unwrap().into_iter().map(|(n, _)| n).collect();
+        assert_eq!(noms[0], "腾讯QQ");
     }
 
     #[test]
