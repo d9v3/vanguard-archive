@@ -135,15 +135,6 @@ mod systeme {
             .map(str::to_string)
     }
 
-    /// Valeur d'une colonne d'une ligne de `lsblk -P` (`NAME="sda" SIZE="31004295168" …`). Le modèle vient du disque
-    /// lui-même (une clé USB dit ce qu'elle veut) : chaque valeur est lue prête à montrer, comme tout ce que ce
-    /// diagnostic lit du système.
-    pub(super) fn champ_lsblk(ligne: &str, cle: &str) -> Option<String> {
-        let debut = format!("{cle}=\"");
-        let reste = &ligne[ligne.find(&debut)? + debut.len()..];
-        Some(affichable(reste[..reste.find('"')?].trim()))
-    }
-
     /// Le journal du système se lit-il ? Sans être root ni dans les groupes adm, systemd-journal ou wheel,
     /// journalctl ne montre que les messages de la session, sans le dire (-q) : « aucune erreur » serait faux.
     fn journal_systeme_lisible() -> bool {
@@ -168,21 +159,27 @@ mod systeme {
         Some(affichable(source.split('[').next()?.trim())).filter(|s| !s.is_empty())
     }
 
-    /// Cartes graphiques de `lspci -mm` (« 01:00.0 "VGA compatible controller" "NVIDIA Corporation" "GB205 …" … ») :
-    /// fabricant et modèle. Classes VGA, 3D et Display, comme la fiche : bien des cartes AMD de portable sont des
-    /// « Display controller ».
-    pub(super) fn cartes_lspci(texte: &str) -> Vec<String> {
-        texte
-            .lines()
-            .filter_map(|l| {
-                let champs: Vec<&str> = l.split('"').collect();
-                let classe = champs.get(1).copied().unwrap_or_default();
-                ["VGA", "3D", "Display"].iter().any(|c| classe.contains(c)).then(|| {
-                    let nom = format!("{} {}", champs.get(3).unwrap_or(&""), champs.get(5).unwrap_or(&""));
-                    affichable(nom.trim())
-                })
-            })
-            .collect()
+    /// Le nom d'une carte graphique comme le donnait `lspci -mm` : le fabricant, puis la puce. Les deux viennent de
+    /// pci.ids, sinon des numéros : lus prêts à montrer, comme tout ce que ce diagnostic lit du système.
+    pub(super) fn nom_de_carte(carte: &crate::fiche::CartePci) -> String {
+        affichable(format!("{} {}", carte.fabricant, carte.puce).trim())
+    }
+
+    /// « nvme0n1 · 1,8 To · SSD · WD Essai » : le modèle vient du disque lui-même (une clé USB dit ce qu'elle veut),
+    /// lu prêt à montrer.
+    pub(super) fn ligne_de_disque(d: &crate::machine::linux::natif::Disque) -> String {
+        // Une clé USB se déclare souvent « rotative » : le transport dit la vérité.
+        let sorte = match (d.bus.as_str(), d.rotatif) {
+            ("usb", _) => tr!("clé ou disque USB", "USB stick or drive"),
+            (_, true) => tr!("disque dur", "hard drive"),
+            _ => "SSD",
+        };
+        format!(
+            "{} · {} · {sorte} · {}",
+            affichable(&d.nom),
+            go(d.octets),
+            affichable(&d.modele)
+        )
     }
 
     /// Programmes plantés d'après `coredumpctl list` : le nom du programme, à la fin du chemin de la colonne EXE. Ce
@@ -204,6 +201,76 @@ mod systeme {
                 Some(affichable(exe.rsplit('/').next().unwrap_or(exe)))
             })
             .collect()
+    }
+
+    /// Où systemd-coredump range les vidages de mémoire des programmes plantés.
+    const VIDAGES: &str = "/var/lib/systemd/coredump";
+
+    /// Les programmes plantés depuis `depuis` (microsecondes depuis 1970), d'après les noms des vidages :
+    /// (programme, numéro du processus). `None` si le dossier ne se lit pas (systemd-coredump absent, ou réglé pour
+    /// ne rien garder sur le disque) : coredumpctl, qui lit le journal, prend alors le relais.
+    pub(super) fn plantages_coredump(dossier: &std::path::Path, depuis: u64) -> Option<Vec<(String, u32)>> {
+        let mut plantages: Vec<(u64, String, u32)> = std::fs::read_dir(dossier)
+            .ok()?
+            .flatten()
+            .filter_map(|e| vidage(&e.file_name().to_string_lossy()))
+            .filter(|(quand, ..)| *quand >= depuis)
+            .collect();
+        // Du plus ancien au plus récent, comme coredumpctl.
+        plantages.sort();
+        Some(plantages.into_iter().map(|(_, nom, pid)| (nom, pid)).collect())
+    }
+
+    /// Le nom d'un vidage : « core.<programme>.<compte>.<démarrage>.<processus>.<µs depuis 1970> », puis la
+    /// compression (« .zst », « .xz », « .lz4 ») ou rien. systemd y écrit les points, barres obliques et espaces du
+    /// nom en « \x2e », « \x2f », « \x20 » : le premier champ est le nom entier. Ce nom est le nom court du
+    /// processus (/proc/<pid>/comm, coupé à 15 octets par le noyau), choisi par le programme : lu prêt à montrer.
+    /// Un fichier en cours d'écriture (« .#core… ») ou étranger n'a pas cette forme et ne compte pas.
+    pub(super) fn vidage(nom: &str) -> Option<(u64, String, u32)> {
+        let champs: Vec<&str> = nom.strip_prefix("core.")?.split('.').collect();
+        let [programme, compte, demarrage, pid, quand, ..] = champs[..] else {
+            return None;
+        };
+        let chiffres = |t: &str| !t.is_empty() && t.bytes().all(|o| o.is_ascii_digit());
+        if !chiffres(compte) || demarrage.len() != 32 || !demarrage.bytes().all(|o| o.is_ascii_hexdigit()) {
+            return None;
+        }
+        Some((
+            quand.parse().ok()?,
+            affichable(&sans_echappements_x(programme)),
+            pid.parse().ok()?,
+        ))
+    }
+
+    /// « \xNN » remis en octet ; le reste tel quel.
+    fn sans_echappements_x(texte: &str) -> String {
+        let o = texte.as_bytes();
+        let mut sortie = Vec::with_capacity(o.len());
+        let mut i = 0;
+        while i < o.len() {
+            let octet = o
+                .get(i..i + 4)
+                .filter(|e| e.starts_with(b"\\x"))
+                .and_then(|e| u8::from_str_radix(std::str::from_utf8(&e[2..]).ok()?, 16).ok());
+            let (b, pas) = octet.map_or((o[i], 1), |b| (b, 4));
+            sortie.push(b);
+            i += pas;
+        }
+        String::from_utf8_lossy(&sortie).into_owned()
+    }
+
+    /// Les programmes plantés en 7 jours : les vidages du disque, sinon le journal par coredumpctl.
+    fn plantages_de_la_semaine() -> Vec<String> {
+        let maintenant = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| u64::try_from(d.as_micros()).unwrap_or(u64::MAX));
+        let depuis = maintenant.saturating_sub(7 * 86_400 * 1_000_000);
+        match plantages_coredump(std::path::Path::new(VIDAGES), depuis) {
+            Some(l) => l.into_iter().map(|(nom, _)| nom).collect(),
+            None => programmes_coredumpctl(
+                &sortie("coredumpctl", &["list", "--no-pager", "-q", "--since=-7d"]).unwrap_or_default(),
+            ),
+        }
     }
 
     pub fn sections() -> Vec<Section> {
@@ -269,7 +336,7 @@ mod systeme {
                 trf!("{} ({} libres)", "{} ({} free)", go(total), go(dispo)),
             ));
         }
-        for nom in cartes_lspci(&sortie("lspci", &["-mm"]).unwrap_or_default()) {
+        for nom in crate::fiche::cartes_graphiques().iter().map(nom_de_carte) {
             let pilote = lire("/proc/driver/nvidia/version")
                 .filter(|_| nom.contains("NVIDIA"))
                 .and_then(|v| version_nvidia(&v))
@@ -277,29 +344,11 @@ mod systeme {
                 .unwrap_or_default();
             materiel.push(ligne(tr!("Carte graphique", "Graphics card"), format!("{nom}{pilote}")));
         }
-        for l in sortie("lsblk", &["-dnbP", "-o", "NAME,SIZE,ROTA,TYPE,TRAN,MODEL"])
-            .unwrap_or_default()
-            .lines()
-        {
-            let champ = |cle: &str| champ_lsblk(l, cle).unwrap_or_default();
-            let nom = champ("NAME");
-            if champ("TYPE") != "disk" || nom.starts_with("zram") || nom.starts_with("loop") {
+        for d in crate::machine::linux::natif::disques() {
+            if !crate::fiche::disque_entier(&d) || d.nom.starts_with("zram") || d.nom.starts_with("loop") {
                 continue;
             }
-            // Une clé USB se déclare souvent « rotative » : le transport dit la vérité.
-            let sorte = match (champ("TRAN").as_str(), champ("ROTA").as_str()) {
-                ("usb", _) => tr!("clé ou disque USB", "USB stick or drive"),
-                (_, "1") => tr!("disque dur", "hard drive"),
-                _ => "SSD",
-            };
-            materiel.push(ligne(
-                tr!("Disque", "Disk"),
-                format!(
-                    "{nom} · {} · {sorte} · {}",
-                    go(champ("SIZE").parse().unwrap_or(0)),
-                    champ("MODEL")
-                ),
-            ));
+            materiel.push(ligne(tr!("Disque", "Disk"), ligne_de_disque(&d)));
         }
 
         let mut problemes: Vec<Ligne> = Vec::new();
@@ -337,10 +386,7 @@ mod systeme {
                 tr!("journal illisible sans droits", "journal unreadable without rights"),
             )),
         }
-        let plantages = programmes_coredumpctl(
-            &sortie("coredumpctl", &["list", "--no-pager", "-q", "--since=-7d"]).unwrap_or_default(),
-        );
-        problemes.push(super::programmes_plantes(&plantages));
+        problemes.push(super::programmes_plantes(&plantages_de_la_semaine()));
         let en_echec: Vec<String> = sortie("systemctl", &["--failed", "--no-legend", "--plain"])
             .unwrap_or_default()
             .lines()
@@ -970,9 +1016,6 @@ mod tests {
         );
         let v = "NVRM version: NVIDIA UNIX Open Kernel Module for x86_64  610.57.04  Release Build  (root@builder)";
         assert_eq!(systeme::version_nvidia(v).as_deref(), Some("610.57.04"));
-        let disque = r#"NAME="sda" SIZE="31004295168" ROTA="1" TYPE="disk" TRAN="usb" MODEL="USB Flash Disk""#;
-        assert_eq!(systeme::champ_lsblk(disque, "TRAN").as_deref(), Some("usb"));
-        assert_eq!(systeme::champ_lsblk(disque, "MODEL").as_deref(), Some("USB Flash Disk"));
         assert_eq!(go(2_000_398_934_016), "1,8 To");
     }
 
@@ -989,11 +1032,34 @@ mod tests {
         let coredumpctl = "TIME                            PID  UID  GID SIG     COREFILE EXE\n\
                            Sun 2026-09-27 11:30:12 UTC  513823 1000 1000 SIGSEGV missing  /tmp/x\x1b]52;c;eA==\x07\u{202e}\n";
         assert_eq!(systeme::programmes_coredumpctl(coredumpctl), ["x�]52;c;eA==��"]);
-        let lspci = "01:00.0 \"VGA compatible controller\" \"Faux\x1b[2K\" \"Carte\u{2066}\" -r01\n";
-        assert_eq!(systeme::cartes_lspci(lspci), ["Faux�[2K Carte�"]);
-        let lsblk = "NAME=\"sdb\" SIZE=\"1\" ROTA=\"0\" TYPE=\"disk\" TRAN=\"usb\" MODEL=\"Cle\x1b]0;x\x07\u{200b}\"";
-        assert_eq!(systeme::champ_lsblk(lsblk, "MODEL").as_deref(), Some("Cle�]0;x��"));
-        assert_eq!(systeme::champ_lsblk(lsblk, "TYPE").as_deref(), Some("disk"));
+        let carte = crate::fiche::CartePci {
+            fabricant: "Faux\x1b[2K".into(),
+            puce: "Carte\u{2066}".into(),
+            pilote: String::new(),
+        };
+        assert_eq!(systeme::nom_de_carte(&carte), "Faux�[2K Carte�");
+        let cle = crate::machine::linux::natif::Disque {
+            nom: "sdb".into(),
+            octets: 31_004_295_168,
+            rotatif: true,
+            amovible: true,
+            modele: "Cle\x1b]0;x\x07\u{200b}".into(),
+            serie: String::new(),
+            bus: "usb".into(),
+            genre: "disk".into(),
+        };
+        assert_eq!(
+            systeme::ligne_de_disque(&cle),
+            "sdb · 28,9 Go · clé ou disque USB · Cle�]0;x��"
+        );
+        let vidage = format!(
+            "core.x\x1b]52;c;eA==\x07.1000.{}.4242.1790000000000000.zst",
+            "0".repeat(32)
+        );
+        assert_eq!(
+            systeme::vidage(&vidage).map(|(_, nom, _)| nom).as_deref(),
+            Some("x�]52;c;eA==�")
+        );
     }
 
     /// Une entrée de plusieurs lignes (la pile d'un programme planté, écrite par systemd-coredump au niveau « crit »)
@@ -1050,25 +1116,90 @@ mod tests {
         );
     }
 
-    /// Les cartes graphiques de lspci : « VGA », « 3D » (la carte NVIDIA d'un portable), et aussi « Display
-    /// controller », la classe de bien des cartes AMD de portable, comme dans la fiche de l'ordinateur.
+    /// Les vidages de systemd-coredump : le nom du programme d'abord, ses points et espaces écrits « \x2e » et
+    /// « \x20 » ; un fichier en cours d'écriture ou d'une autre forme ne compte pas.
     #[cfg(target_os = "linux")]
     #[test]
-    fn cartes_graphiques_de_lspci() {
-        let lspci = [
-            r#"00:02.0 "VGA compatible controller" "Intel Corporation" "Alder Lake-P GT2" -r0c "Lenovo" "Device 3b2f""#,
-            r#"01:00.0 "3D controller" "NVIDIA Corporation" "AD107M [GeForce RTX 4060]" -ra1 "Lenovo" "Device 3b2f""#,
-            r#"03:00.0 "Display controller" "Advanced Micro Devices, Inc. [AMD/ATI]" "Navi 24 [Radeon RX 6500M]" -rc3"#,
-            r#"04:00.0 "Network controller" "Intel Corporation" "Wi-Fi 6E AX211 160MHz" -r01 "Intel Corporation" "0094""#,
-        ]
-        .join("\n");
+    fn noms_des_vidages() {
+        let demarrage = "0123456789abcdef0123456789abcdef";
         assert_eq!(
-            systeme::cartes_lspci(&lspci),
-            [
-                "Intel Corporation Alder Lake-P GT2",
-                "NVIDIA Corporation AD107M [GeForce RTX 4060]",
-                "Advanced Micro Devices, Inc. [AMD/ATI] Navi 24 [Radeon RX 6500M]"
-            ]
+            systeme::vidage(&format!("core.firefox.1000.{demarrage}.513823.1790000000000000.zst")),
+            Some((1_790_000_000_000_000, "firefox".to_string(), 513_823))
         );
+        assert_eq!(
+            systeme::vidage(&format!(
+                "core.Jeu\\x20Essai\\x2ebin.1000.{demarrage}.42.1790000000000001"
+            )),
+            Some((1_790_000_000_000_001, "Jeu Essai.bin".to_string(), 42)),
+            "sans compression"
+        );
+        for etranger in [
+            format!(".#core.firefox.1000.{demarrage}.1.1790000000000000.zst"),
+            format!("core.firefox.alice.{demarrage}.1.1790000000000000.zst"),
+            "core.firefox.1000.court.1.1790000000000000".to_string(),
+            format!("core.firefox.1000.{demarrage}.1"),
+            "notes.txt".to_string(),
+        ] {
+            assert_eq!(systeme::vidage(&etranger), None, "{etranger}");
+        }
+    }
+
+    /// Le dossier des vidages : ceux de la semaine seulement, du plus ancien au plus récent ; un dossier absent ne
+    /// se lit pas (`None` : coredumpctl prend le relais), un dossier vide dit « aucun ».
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn vidages_de_la_semaine() {
+        let d = std::env::temp_dir().join(format!("vanguard-diagnostic-vidages-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        assert_eq!(systeme::plantages_coredump(&d, 0), Some(vec![]));
+        let demarrage = "0123456789abcdef0123456789abcdef";
+        for (programme, pid, quand) in [("jeu", 3, 300), ("vieux", 1, 100), ("pwsh", 2, 200)] {
+            std::fs::write(
+                d.join(format!("core.{programme}.1000.{demarrage}.{pid}.{quand}.zst")),
+                "",
+            )
+            .unwrap();
+        }
+        assert_eq!(
+            systeme::plantages_coredump(&d, 200),
+            Some(vec![("pwsh".to_string(), 2), ("jeu".to_string(), 3)])
+        );
+        assert_eq!(systeme::plantages_coredump(&d.join("absent"), 0), None);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// Sur cet ordinateur, chaque plantage dont coredumpctl a gardé le vidage (« present ») est aussi dans le
+    /// dossier, quand il est là. L'inverse ne se compare pas : le journal, que coredumpctl lit, perd ses plus
+    /// vieilles entrées bien avant que les vidages ne soient effacés. Six jours plutôt que sept : un vidage à la
+    /// limite pourrait sortir de la fenêtre entre les deux lectures.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn vidages_comme_coredumpctl() {
+        let Some(r) = crate::commande::lancer(
+            std::process::Command::new("coredumpctl").args(["list", "--no-pager", "-q", "--since=-6d"]),
+            20,
+        )
+        .filter(|r| r.code == Some(0)) else {
+            return;
+        };
+        let maintenant = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_micros();
+        let depuis = u64::try_from(maintenant).unwrap() - 7 * 86_400 * 1_000_000;
+        let Some(natifs) = systeme::plantages_coredump(std::path::Path::new("/var/lib/systemd/coredump"), depuis)
+        else {
+            return;
+        };
+        let pids: std::collections::HashSet<u32> = natifs.iter().map(|(_, pid)| *pid).collect();
+        for l in r.sortie.lines().skip(1) {
+            // « Tue 2026-10-20 21:11:28 EDT 9543 1000 1000 SIGSEGV present /usr/bin/x 10.8M »
+            let c: Vec<&str> = l.split_whitespace().collect();
+            if c.get(8) == Some(&"present") {
+                let pid: u32 = c[4].parse().unwrap();
+                assert!(pids.contains(&pid), "{l} absent du dossier : {natifs:?}");
+            }
+        }
     }
 }
