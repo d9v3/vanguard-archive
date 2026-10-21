@@ -236,14 +236,22 @@ impl Drop for Appartement {
 /// Droits d'appel sur un mandataire vers le service WMI : se faire passer pour l'utilisateur (impersonate), comme
 /// Get-CimInstance. L'échec est sans suite : un objet sans mandataire (le WMI de Wine, dans le processus) n'en a pas
 /// besoin, et un vrai refus se voit à la requête.
+///
+/// Les droits se règlent interface par interface : c'est le pointeur de `T` lui-même qui est passé, jamais celui de
+/// son IUnknown (obtenu par `cast`), qui laissait IWbemServices au niveau par défaut (identify). Sur un vrai Windows,
+/// les fournisseurs qui se font passer pour l'appelant (Win32_OperatingSystem, Win32_Process,
+/// Win32_QuickFixEngineering, compteurs Win32_PerfRawData_*) échouaient alors ; Wine, sans mandataire, ne le montre pas.
 fn droits_d_appel<T: Interface>(objet: &T) {
-    let Ok(objet) = objet.cast::<IUnknown>() else {
+    let brut = objet.as_raw();
+    // SAFETY : `brut` est le pointeur vivant de `objet`, emprunté le temps de l'appel ; toute interface COM commence
+    // par IUnknown. Les autres paramètres sont des constantes ou nuls.
+    let Some(objet) = (unsafe { IUnknown::from_raw_borrowed(&brut) }) else {
         return;
     };
-    // SAFETY : objet est une interface COM vivante ; les autres paramètres sont des constantes ou nuls.
+    // SAFETY : voir plus haut.
     let _ = unsafe {
         CoSetProxyBlanket(
-            &objet,
+            objet,
             RPC_C_AUTHN_WINNT,
             RPC_C_AUTHZ_NONE,
             None,

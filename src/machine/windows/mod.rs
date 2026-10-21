@@ -27,7 +27,7 @@ mod maj;
 pub(crate) mod partages;
 pub(crate) mod peripheriques;
 mod persistance;
-mod planificateur;
+pub(crate) mod planificateur;
 mod portes;
 pub(crate) mod processus;
 mod regles;

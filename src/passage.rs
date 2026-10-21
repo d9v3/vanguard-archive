@@ -187,6 +187,12 @@ fn retirer_minuterie(nom: &str) -> bool {
     {
         // « gardien-surveillance » → la tâche « … - surveillance du reseau » (le nom lisible de la tâche).
         let tache = tache_windows(nom);
+        // Absente pour le planificateur : rien à retirer, sans PowerShell.
+        if crate::machine::windows::planificateur::etat(&[&tache])
+            == Some(crate::machine::windows::planificateur::EtatTache::Absente)
+        {
+            return false;
+        }
         let e = crate::commande::ps_texte(&tache);
         crate::machine::windows::ps(&format!(
             "$t = Get-ScheduledTask -ErrorAction SilentlyContinue | Where-Object {{ $_.TaskName -eq '{e}' }}; \

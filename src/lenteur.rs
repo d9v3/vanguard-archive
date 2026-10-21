@@ -534,6 +534,12 @@ fn afficher(i: &Instantane) {
 }
 
 /// L'écran : l'en-tête, la mesure de deux secondes, puis ce qu'elle veut dire. Rend les conseils.
+/// « Rien ne force » se conclut seulement sur une mesure : sans processeur ni mémoire mesurés, ce n'est pas sain,
+/// c'est non vérifié.
+fn mesure_complete(i: &Instantane) -> bool {
+    i.processeur.is_some() && i.memoire.is_some()
+}
+
 fn mesurer() -> Vec<Conseil> {
     println!();
     cadre(
@@ -548,7 +554,13 @@ fn mesurer() -> Vec<Conseil> {
     afficher(&i);
     let c = conseils(&i);
     section(tr!("CE QUE ÇA VEUT DIRE", "WHAT IT MEANS"));
-    if c.is_empty() {
+    if c.is_empty() && !mesure_complete(&i) {
+        let rien = tr!(
+            "Mesure incomplète (processeur ou mémoire non mesurés) : rien n'est conclu, non vérifié.",
+            "Incomplete measurement (processor or memory not measured): nothing concluded, not verified."
+        );
+        afficher_aligne(&format!("  {}⚠{RESET} ", couleur(Niveau::Moyen)), rien, 4, "");
+    } else if c.is_empty() {
         let rien = tr!(
             "Rien ne force en ce moment : si c'est lent par moments, relance la mesure à ce moment-là.",
             "Nothing is straining right now: if it is slow at times, run the measurement again at that moment."
@@ -1160,7 +1172,7 @@ mod systeme {
 
     /// Tout ce que lisait le script, sans PowerShell : WMI (compteurs bruts, système, fichier d'échange, programmes au
     /// démarrage), le journal des performances (wevtapi), le registre et le lecteur système. `None` sans les
-    /// compteurs des processus.
+    /// compteurs des processus, du processeur ou du système : PowerShell refait alors tout le relevé.
     #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
     fn lecture_directe() -> Option<LectureWindows> {
         let fils = std::thread::available_parallelism().map_or(1, std::num::NonZero::get);
@@ -1177,7 +1189,7 @@ mod systeme {
             .processeur
             .as_ref()
             .zip(apres.processeur.as_ref())
-            .and_then(|(a, b)| occupe(a, b, "PercentProcessorTime"));
+            .and_then(|(a, b)| occupe(a, b, "PercentProcessorTime"))?;
         let disque = apres
             .disques
             .iter()
@@ -1193,7 +1205,7 @@ mod systeme {
             "",
             &["TotalVisibleMemorySize", "LastBootUpTime"],
         )
-        .and_then(|l| l.into_iter().next());
+        .and_then(|l| l.into_iter().next())?;
         let disponible = wmi::requete(CIMV2, "Win32_PerfRawData_PerfOS_Memory", "", &["AvailableBytes"])
             .and_then(|l| l.first().and_then(|m| m["AvailableBytes"].entier()));
         let echange =
@@ -1209,8 +1221,9 @@ mod systeme {
         let (demarrage_ms, apres_ms, demarrage_illisible, lents) = demarrage();
         let systeme = std::env::var("SystemDrive").unwrap_or_else(|_| "C:".into());
         let lecteur = crate::machine::windows::lecteurs::lecteur(std::path::Path::new(&format!("{systeme}\\")));
+        let os = Some(os);
         Some(LectureWindows {
-            processeur,
+            processeur: Some(processeur),
             fils,
             memoire: os
                 .as_ref()
@@ -1655,6 +1668,14 @@ mod tests {
             ..Instantane::default()
         };
         assert!(conseils(&i).is_empty());
+        assert!(mesure_complete(&i));
+        // Rien de mesuré : aucun conseil, mais jamais « rien ne force ».
+        let vide = Instantane::default();
+        assert!(conseils(&vide).is_empty() && !mesure_complete(&vide));
+        assert!(!mesure_complete(&Instantane {
+            processeur: Some(5.0),
+            ..Instantane::default()
+        }));
         assert_eq!(secondes_lisibles(75.4), "1 min 15 s");
         assert_eq!(secondes_lisibles(5.04), "5,0 s");
     }

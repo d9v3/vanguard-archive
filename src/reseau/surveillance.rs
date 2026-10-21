@@ -726,6 +726,10 @@ const TACHE_WINDOWS: &str = "vanguard - surveillance du reseau";
 /// La tâche existe et n'est pas désactivée : une tâche désactivée ne surveille plus rien.
 #[cfg(windows)]
 fn tache_active(nom: &str) -> bool {
+    // Le planificateur d'abord, PowerShell en secours.
+    if let Some(e) = crate::machine::windows::planificateur::etat(&[nom]) {
+        return e == crate::machine::windows::planificateur::EtatTache::Active;
+    }
     crate::machine::windows::ps(&format!(
         "if (Get-ScheduledTask -ErrorAction SilentlyContinue | Where-Object {{ $_.TaskName -eq '{}' -and $_.State -ne 'Disabled' }}) {{ 'oui' }}",
         crate::commande::ps_texte(nom)
@@ -736,6 +740,9 @@ fn tache_active(nom: &str) -> bool {
 /// Une de ces tâches existe-t-elle ? Sans erreur quand aucune n'existe : un échec de PowerShell irait au journal.
 #[cfg(windows)]
 pub(crate) fn tache_existe(noms: &[&str]) -> bool {
+    if let Some(e) = crate::machine::windows::planificateur::etat(noms) {
+        return e != crate::machine::windows::planificateur::EtatTache::Absente;
+    }
     let liste = noms.iter().map(|n| format!("'{n}'")).collect::<Vec<_>>().join(",");
     crate::machine::windows::ps(&format!(
         "if (Get-ScheduledTask -ErrorAction SilentlyContinue | Where-Object {{ $_.TaskName -in @({liste}) }}) {{ 'oui' }}"
