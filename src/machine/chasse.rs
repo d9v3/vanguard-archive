@@ -512,7 +512,7 @@ pub(crate) fn dossier_douteux(chemin: &str, systeme: Os) -> Option<&'static str>
         }
         Os::Linux | Os::Tous => false,
     };
-    if temporaire {
+    if temporaire && !maintenance_de_windows(&c) {
         return Some(tr!(
             "lancé depuis un dossier temporaire",
             "started from a temporary folder"
@@ -525,6 +525,28 @@ pub(crate) fn dossier_douteux(chemin: &str, systeme: Os) -> Option<&'static str>
         return Some(tr!("lancé depuis la corbeille", "started from the recycle bin"));
     }
     None
+}
+
+/// Les outils de maintenance de Windows qui tournent d'un dossier temporaire nommé par un GUID pendant une mise à jour
+/// (DISM pour les composants, MpSigStub pour les définitions de Defender) : sans cette exception, chaque mise à jour
+/// donnerait une alerte. Le nom seul ne suffit pas : il faut aussi le dossier au nom de GUID qui le contient.
+const MAINTENANCE: [&str; 2] = ["dismhost.exe", "mpsigstub.exe"];
+
+fn maintenance_de_windows(chemin: &str) -> bool {
+    let mut morceaux = chemin.rsplit('/');
+    let (Some(fichier), Some(dossier)) = (morceaux.next(), morceaux.next()) else {
+        return false;
+    };
+    let guid = dossier.trim_start_matches('{').trim_end_matches('}');
+    let forme = guid.len() == 36
+        && guid.char_indices().all(|(i, c)| {
+            if matches!(i, 8 | 13 | 18 | 23) {
+                c == '-'
+            } else {
+                c.is_ascii_hexdigit()
+            }
+        });
+    forme && MAINTENANCE.contains(&fichier)
 }
 
 /// Le dossier temporaire d'un compte sous macOS : /private/var/folders/<xx>/<…>/T/ (« C » et « X », à côté, sont des
@@ -890,6 +912,23 @@ mod tests {
 
     /// Dix échecs puis une réussite depuis la même adresse : une intrusion. Neuf, une autre adresse, une réussite
     /// avant les échecs ou la machine elle-même : rien.
+    #[test]
+    fn maintenance_de_windows_epargnee() {
+        let dism = r"C:\Windows\Temp\{0A1B2C3D-4E5F-6789-ABCD-EF0123456789}\DismHost.exe";
+        assert!(dossier_douteux(dism, Os::Windows).is_none());
+        let defender = r"C:\Users\alice\AppData\Local\Temp\0a1b2c3d-4e5f-6789-abcd-ef0123456789\MpSigStub.exe";
+        assert!(dossier_douteux(defender, Os::Windows).is_none());
+        // Le même nom ailleurs, ou un autre programme dans un dossier GUID : toujours signalé.
+        assert!(dossier_douteux(r"C:\Windows\Temp\DismHost.exe", Os::Windows).is_some());
+        assert!(
+            dossier_douteux(
+                r"C:\Windows\Temp\{0A1B2C3D-4E5F-6789-ABCD-EF0123456789}\x.exe",
+                Os::Windows
+            )
+            .is_some()
+        );
+    }
+
     #[test]
     fn mot_de_passe_devine() {
         let mut t: Vec<Tentative> = (0..SEUIL_ECHECS).map(|_| echec("203.0.113.7")).collect();
