@@ -61,6 +61,8 @@ The program: "vanguard", in this folder. Any 64-bit distribution (x86_64), nothi
    - Omarchy: pick "Omarchy": its installer sets up everything (encrypted disk included), no Internet.
      By hand from Arch Linux (archinstall, then "curl -fsSL https://omarchy.org/install | bash"):
      https://learn.omacom.io/2/the-omarchy-manual/96/manual-installation
+   - Kali Linux: pick "Kali Linux": its security tools, nothing installed, the disk left untouched
+     (full live image, there if the key has room for it).
    - The images update themselves when the key is plugged into the computer that prepares it.
 
 Full guide (menu, key protection, language): README.txt at the root of the key.

@@ -1,13 +1,15 @@
 [Unit]
 Description=Vanguard : télécharger et vérifier les nouvelles images Linux de la clé de secours
-# Omarchy, Arch, Debian, Fedora et SystemRescue : la dernière version de chacune, vérifiée par la signature de son projet,
-# dans ~/.cache/vanguard/images-cle. Elles vont sur la clé à son prochain branchement (vanguard-images-cle.service).
+# Omarchy, Arch, Debian, Fedora, SystemRescue et Kali Linux : la dernière version de chacune, vérifiée par la signature
+# de son projet, dans ~/.cache/vanguard/images-cle. Elles vont sur la clé à son prochain branchement
+# (vanguard-images-cle.service).
 After=network-online.target
 
 [Service]
 Type=oneshot
 ExecStart=%h/Projects/vanguard/outils/images-cle.sh --chercher
-# En arrière-plan : quelques gigaoctets au plus, sans gêner le reste de l'ordinateur.
+# En arrière-plan, sans gêner le reste de l'ordinateur : quelques gigaoctets, et 16 Gio de plus pour une nouvelle Kali
+# Linux, en torrent (images-cle.sh arrête aria2c au bout de 5 heures ; il reprend la semaine suivante).
 Nice=19
 IOSchedulingClass=idle
-TimeoutStartSec=3h
+TimeoutStartSec=8h

@@ -7,8 +7,9 @@ After=run-media-%u-VANGUARD.mount vanguard-cle.service
 [Service]
 Type=oneshot
 ExecStart=%h/Projects/vanguard/outils/images-cle.sh --cle
-# Une image de 1,5 Go s'écrit en une ou deux minutes sur une clé USB 3 ; bien plus sur une clé lente.
-TimeoutStartSec=60min
+# Une image de 1,5 Go s'écrit en une ou deux minutes sur une clé USB 3 ; bien plus sur une clé lente, et Kali Linux
+# (16 Gio, écrite puis relue) près d'une demi-heure.
+TimeoutStartSec=3h
 Nice=10
 
 [Install]

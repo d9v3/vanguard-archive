@@ -61,6 +61,8 @@ Le programme : « vanguard », dans ce dossier. Toutes les distributions 64 bits
    - Omarchy : choisir « Omarchy » : son installateur règle tout (disque chiffré compris), sans Internet.
      À la main depuis Arch Linux (archinstall, puis « curl -fsSL https://omarchy.org/install | bash ») :
      https://learn.omacom.io/2/the-omarchy-manual/96/manual-installation
+   - Kali Linux : choisir « Kali Linux » : ses outils de sécurité, sans rien installer ni toucher au disque
+     (live complète, présente si la clé a la place).
    - Les images se mettent à jour toutes seules quand la clé est branchée sur l'ordinateur qui la prépare.
 
 Guide complet (menu, protection de la clé, langue) : LISEZMOI.txt à la racine de la clé.

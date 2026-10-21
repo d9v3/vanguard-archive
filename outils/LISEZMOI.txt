@@ -17,6 +17,9 @@ Cette clé contient le programme pour Linux, Windows et macOS, sa base de donné
                         en clair, avec des données personnelles. Ailleurs que chez le propriétaire, la clé est
                         protégée : elles restent sur l'ordinateur.
   source/               Code source complet (Rust) avec son historique git.
+  ISO/                  Images qui démarrent un ordinateur, par le menu de Ventoy : Omarchy, Arch Linux, Debian,
+                        Fedora, SystemRescue, Kali Linux (outils de sécurité, sans rien installer) et Windows 11.
+                        Mode d'emploi : LISEZMOI.txt du dossier Linux, partie 5.
   vanguard.cle          Fichier témoin qui fait reconnaître la clé : ne pas le supprimer.
 
 Mode d'emploi de chaque version, ligne de commande comprise (Terminal, PowerShell, invite de commandes) :

@@ -2,9 +2,10 @@
 # Clé de secours : la clé VANGUARD démarre aussi les ordinateurs, pour réparer ou réinstaller Linux, Windows et macOS.
 #   1 VANGUARD     partition de Ventoy, exFAT : Vanguard comme avant (témoin vanguard.cle), et ses images dans ISO/ :
 #                 Omarchy (installateur complet), Arch Linux, Debian et Fedora en installateurs par Internet, SystemRescue
-#                 (réparer, sauver des fichiers, tester la mémoire), et Windows 11 en secours s'il reste la place.
-#                 Les images Linux viennent de outils/images-cle.sh, qui les vérifie et les tient à jour au
-#                 branchement. Attribut GPT « lecture seule » (bit 60) : Windows la monte en lecture seule.
+#                 (réparer, sauver des fichiers, tester la mémoire), puis, s'il reste la place, Kali Linux (live
+#                 complète, 16 Gio) et Windows 11 en secours. Les images Linux viennent de outils/images-cle.sh, qui
+#                 les vérifie et les tient à jour au branchement. Attribut GPT « lecture seule » (bit 60) : Windows la
+#                 monte en lecture seule.
 #   2 VTOYEFI     32 Mio, démarrage de Ventoy (UEFI) ; ne jamais y toucher.
 #   3 VANGUARDLOG  64 Mio, exFAT, modifiable partout : le journal des erreurs (src/journal.rs).
 #   4 MACOS       HFS+ : la récupération de macOS, téléchargée chez Apple (BaseSystem), pour les Mac Intel.
@@ -43,6 +44,9 @@ MACOS_MIO_ESTIME=2816
 # le cache de images-cle.sh quand elles y sont. Windows 11 : l'ISO multi-édition, de 7,2 à 7,9 Go selon la langue.
 LINUX_MIO_ESTIME=12032
 WINDOWS_ISO_MIO_ESTIME=7534
+# Kali Linux, live complète : 15 694 Mio en 2026.2, 16 066 en 2026.3. À part des autres images Linux : elle ne va dans
+# ISO/ que s'il reste la place après elles (images-cle.sh la copie en dernier), et une clé se fait sans elle.
+KALI_MIO_ESTIME=16384
 IMAGES_LINUX=${VANGUARD_IMAGES:-${XDG_CACHE_HOME:-$HOME/.cache}/vanguard/images-cle}
 # Partition WIN11 sans l'image sous la main : de quoi tenir l'ISO la plus grosse.
 WINDOWS_MIO_ESTIME=8192
@@ -67,8 +71,9 @@ taille_mio() { # fichier valeur_par_defaut
 
 # --- Images -------------------------------------------------------------------------------------------------------
 
-# L'image de Windows : « Win11_25H2_French_x64.iso » autrefois, « Windows11_Client_x64_fr-ca_….iso » maintenant.
-fichier_windows() { find "$1" -maxdepth 1 \( -iname 'Win11*.iso' -o -iname 'Windows11*.iso' \) -print -quit; }
+# L'image de Windows : « Win11_25H2_French_x64.iso » autrefois, « Windows11_Client_x64_fr-ca_….iso » maintenant. Les
+# dossiers d'images peuvent être des liens vers un autre disque : find -H les suit.
+fichier_windows() { find -H "$1" -maxdepth 1 \( -iname 'Win11*.iso' -o -iname 'Windows11*.iso' \) -print -quit; }
 fichier_macos() { echo "$1/macos/BaseSystem.dmg"; }
 
 empreinte_ok() { # fichier empreinte_attendue
@@ -99,12 +104,20 @@ fichiers_iso() { # image
     END { sortir() }'
 }
 
-# Place des images Linux : celles prêtes dans le cache (toutes les cinq), sinon l'estimation.
+# Place des images Linux, sans Kali : celles prêtes dans le cache (toutes les cinq), sinon l'estimation.
 linux_mio() {
   local octets n
-  read -r n octets < <(find "$IMAGES_LINUX" -maxdepth 1 -name '*.iso' -exec test -f {}.sha256 \; -printf '%s\n' \
-    2>/dev/null | awk '{s += $1; n++} END {printf "%d %d\n", n, s}')
+  read -r n octets < <(find -H "$IMAGES_LINUX" -maxdepth 1 -name '*.iso' ! -name 'kali-linux-*' \
+    -exec test -f {}.sha256 \; -printf '%s\n' 2>/dev/null | awk '{s += $1; n++} END {printf "%d %d\n", n, s}')
   if ((n == 5)); then echo $(((octets + MIO - 1) / MIO + 256)); else echo "$LINUX_MIO_ESTIME"; fi
+}
+
+# Place de Kali Linux : celle prête dans le cache, sinon l'estimation.
+kali_mio() {
+  local octets
+  octets=$(find -H "$IMAGES_LINUX" -maxdepth 1 -name 'kali-linux-*-live-everything-amd64.iso' \
+    -exec test -f {}.sha256 \; -printf '%s\n' 2>/dev/null | head -1)
+  if [[ -n $octets ]]; then echo $(((octets + MIO - 1) / MIO)); else echo "$KALI_MIO_ESTIME"; fi
 }
 
 # Volume HFS+ de la récupération de macOS dans l'image d'Apple : (nom dans l'image, taille en octets).
@@ -296,14 +309,22 @@ partitions_ajoutees() { # macos_mio windows_mio
   printf 'size=%dMiB, type=%s, name="WIN11"\n' "$2" "$TYPE_DONNEES"
 }
 
-# La place de VANGUARD : d'abord Vanguard et sa base (marge), les images Linux ; Windows en secours ensuite, s'il tient
-# (c'est la première image laissée de côté). Une ligne pour --plan ; code 1 si même Linux ne tient pas.
+# La place de VANGUARD : d'abord Vanguard et sa base (marge), les images Linux ; Kali Linux, puis Windows en secours,
+# s'ils tiennent (dans l'ordre où images-cle.sh --toutes et --ecrire les copient). Les lignes pour --plan ; code 1 si
+# même les images Linux ne tiennent pas.
 place_vanguard() { # vanguard_mio iso_windows_mio
-  local libre=$(($1 - MARGE_VANGUARD_MIO - $(linux_mio)))
+  local libre=$(($1 - MARGE_VANGUARD_MIO - $(linux_mio))) kali
+  kali=$(kali_mio)
   if ((libre < 0)); then
     echo "✖ Clé trop petite : il manque $((-libre)) Mio pour Vanguard et les images Linux."
     return 1
-  elif ((libre >= $2)); then
+  elif ((libre >= kali)); then
+    echo "Kali Linux aussi dans ISO/ (live complète, $kali Mio)."
+    libre=$((libre - kali))
+  else
+    echo "Pas la place pour Kali Linux dans ISO/ (il manque $((kali - libre)) Mio) : la clé se fait sans elle."
+  fi
+  if ((libre >= $2)); then
     echo "Windows 11 aussi dans ISO/, en secours ($2 Mio) : il restera ~$(((libre - $2) / 1024)) Gio."
   else
     echo "Pas la place pour Windows 11 en secours dans ISO/ (il manque $(($2 - libre)) Mio) : il ne démarrera que"

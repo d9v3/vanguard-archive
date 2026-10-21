@@ -260,12 +260,13 @@ respecté par Windows ; sous Linux et macOS, Vanguard la remonte lui-même en le
 reçoit que le journal des erreurs, anonymisé. `outils/preparer-cle.sh` prépare une nouvelle clé.
 
 En préparation, une clé de secours qui démarre aussi les ordinateurs : `outils/cle-secours.sh`. Ventoy démarre
-l'installateur d'Omarchy, Arch, Debian et Fedora en installateurs par Internet, SystemRescue (et Windows 11 en
-secours), tenus à jour par `outils/images-cle.sh` (signature de chaque projet vérifiée, minuterie hebdomadaire, copie
-au branchement) ; une partition FAT32 `WIN11` installe Windows 11 avec Secure Boot actif,
-sans ajouter de clé au PC (`install.wim` découpé par wimlib sous la limite de 4 Go) ; une partition HFS+ porte la
-récupération de macOS des Mac Intel ; `VANGUARD` et `VANGUARDLOG` comme avant. `--plan` et `--essai` (sur une image de
-disque) ne touchent à aucun disque ; seul `--ecrire` efface la clé.
+l'installateur d'Omarchy, Arch, Debian et Fedora en installateurs par Internet, SystemRescue, Kali Linux en live
+complète s'il reste la place (16 Gio, publiée en torrent seulement : aria2c) et Windows 11 en secours, tenus à jour
+par `outils/images-cle.sh` (signature de chaque projet vérifiée, minuterie hebdomadaire, copie au branchement ; une
+image téléchargée ailleurs entre dans le cache par `--importer`, vérifiée de même) ; une partition FAT32 `WIN11`
+installe Windows 11 avec Secure Boot actif, sans ajouter de clé au PC (`install.wim` découpé par wimlib sous la limite
+de 4 Go) ; une partition HFS+ porte la récupération de macOS des Mac Intel ; `VANGUARD` et `VANGUARDLOG` comme avant.
+`--plan` et `--essai` (sur une image de disque) ne touchent à aucun disque ; seul `--ecrire` efface la clé.
 
 ## Erreurs et plantages
 

@@ -1,13 +1,17 @@
 #!/usr/bin/env bash
 # Images Linux de la clé de secours, tenues à jour toutes seules : Omarchy (son installateur complet, sans Internet),
-# Arch Linux, Debian et Fedora en installateurs par Internet, et SystemRescue (réparer, sauver des fichiers, tester la
-# mémoire).
+# Arch Linux, Debian et Fedora en installateurs par Internet, SystemRescue (réparer, sauver des fichiers, tester la
+# mémoire) et Kali Linux en live complète (tous ses outils de sécurité, sans rien installer ; publiée en torrent
+# seulement : aria2c la télécharge, puis elle est vérifiée comme les autres par la liste signée du projet).
 #   outils/images-cle.sh --chercher     dernières versions téléchargées dans le cache et vérifiées (minuterie
 #                                       hebdomadaire vanguard-images.timer) ; une image mal signée est effacée
+#   outils/images-cle.sh --importer FICHIER  fait entrer dans le cache une image déjà téléchargée ailleurs (client
+#                                       torrent, autre ordinateur), vérifiée de la même façon ; le fichier reste là
 #   outils/images-cle.sh --verifier     revérifie signature et empreinte des images du cache
 #   outils/images-cle.sh --cle [POINT]  met à jour sur la clé VANGUARD les images qu'elle a déjà : la nouvelle version
 #                                       copiée, puis l'ancienne retirée (au branchement : vanguard-images-cle.service)
-#   outils/images-cle.sh --toutes POINT pose aussi celles qui manquent (nouvelle clé : cle-secours.sh --ecrire)
+#   outils/images-cle.sh --toutes POINT pose aussi celles qui manquent (nouvelle clé : cle-secours.sh --ecrire ; ou
+#                                       Kali Linux ajoutée à une clé qui ne l'a pas encore)
 #   outils/images-cle.sh --menu POINT   réécrit ventoy/ventoy.json d'après les images de ISO/
 #   outils/images-cle.sh --etat         ce qui est dans le cache et sur la clé
 # Chaque image est vérifiée par la signature de son projet, avec une clé fixée ici (outils/cles-images/ et les
@@ -24,14 +28,19 @@ CLES=$PWD/outils/cles-images
 MIO=$((1024 * 1024))
 # Place gardée sur la clé pour Vanguard, sa base et ses rapports.
 MARGE_MIO=512
-# Ordre de copie quand la place manque : la plus utile d'abord.
-SORTES=(systemrescue arch omarchy debian fedora)
+# Ordre de copie quand la place manque : la plus utile d'abord. Kali Linux (16 Gio) en dernier : elle ne va sur la clé
+# que s'il reste la place après les autres.
+SORTES=(systemrescue arch omarchy debian fedora kali)
+# Facultatives : leur absence du cache n'empêche pas de faire une clé (cle-secours.sh --ecrire vérifie le cache).
+FACULTATIVES=" kali "
 
 # Clés principales qui signent les images de chaque projet. Arch : celle de son responsable des images (trousseau
 # archlinux-keyring, « PGP fingerprint » de archlinux.org/download). Debian : « Debian CD signing key »
 # (debian.org/CD/verify). Fedora : une clé par version, 43 à 46 (fedoraproject.org/fedora.gpg et le paquet
 # fedora-repos). SystemRescue : celle de son auteur (system-rescue.org/security). Omarchy : celle de ses paquets
-# (la clé « Omarchy » du paquet omarchy-keyring), qui signe aussi son image.
+# (la clé « Omarchy » du paquet omarchy-keyring), qui signe aussi son image. Kali : « Kali Linux Archive Automatic
+# Signing Key (2025) », la même empreinte sur archive.kali.org et dans sa documentation (« Download official Kali Linux
+# images »), vérifiée le 21 oct. 2026.
 declare -A SIGNATAIRES=(
   [arch]="3E80CA1A8B89F69CBA57D98A76A5EF9054449A5C"
   [debian]="DF9B9C49EAA9298432589D76DA87E80D6294BE9B 10460DAD76165AD81FBC0CE9988021A964E6EA7D"
@@ -39,6 +48,7 @@ declare -A SIGNATAIRES=(
             4F50A6114CD5C6976A7F1179655A4B02F577861E D924B10D3E810DABDD8B56B596E7E91491211FCE"
   [systemrescue]="0FF11AF081E98345594812037091115F8320B897"
   [omarchy]="40DFB630FF42BCFFB047046CF0134EE680CAC571"
+  [kali]="827C8569F2518CC677FECA1AED65462EC8D5E4C5"
 )
 # Noms des images de chaque sorte : les anciennes versions se reconnaissent sur la clé et dans le cache.
 declare -A MOTIFS=(
@@ -47,8 +57,10 @@ declare -A MOTIFS=(
   [fedora]='Fedora-Everything-netinst-x86_64-*.iso'
   [systemrescue]='systemrescue-*-amd64.iso'
   [omarchy]='omarchy-*.iso'
+  [kali]='kali-linux-*-live-everything-amd64.iso'
 )
-declare -A NOMS=([arch]="Arch Linux" [debian]=Debian [fedora]=Fedora [systemrescue]=SystemRescue [omarchy]=Omarchy)
+declare -A NOMS=([arch]="Arch Linux" [debian]=Debian [fedora]=Fedora [systemrescue]=SystemRescue [omarchy]=Omarchy
+  [kali]="Kali Linux")
 
 erreur() { echo "✖ $*" >&2; exit 1; }
 lire() { curl -fsSL --retry 3 --connect-timeout 20 --max-time 120 "$1"; }
@@ -112,12 +124,70 @@ derniere_omarchy() {
   echo "$nom https://iso.omarchy.org/"
 }
 
+# Kali : la live complète (« everything »), dans le dossier de sa version (cdimage.kali.org/kali-AAAA.N/). current/
+# ne liste que les .torrent : le nom de l'image en est tiré.
+derniere_kali() {
+  local nom
+  nom=$(lire https://cdimage.kali.org/current/ |
+    grep -oE 'kali-linux-[0-9]{4}\.[0-9]+[a-z]?-live-everything-amd64\.iso' | sort -uV | tail -1)
+  [[ -n $nom ]] || return 1
+  local version=${nom#kali-linux-}
+  echo "$nom https://cdimage.kali.org/kali-${version%-live-everything-amd64.iso}/"
+}
+
+# Kali, la version d'avant la dernière : son dossier reste sur cdimage.kali.org quelque temps. Le repli quand le torrent
+# de la nouvelle n'a encore aucune source (le traceur de Kali refuse un torrent qu'il n'a pas encore enregistré).
+precedente_kali() { # nom de la dernière
+  local derniere=${1#kali-linux-} version
+  derniere=${derniere%-live-everything-amd64.iso}
+  version=$(lire https://cdimage.kali.org/ | grep -oE 'kali-[0-9]{4}\.[0-9]+[a-z]?/' | sed 's|^kali-||; s|/$||' |
+    sort -uV | awk -v d="$derniere" '$0 == d {exit} {p = $0} END {print p}')
+  [[ -n $version && $version != "$derniere" ]] || return 1
+  echo "kali-linux-$version-live-everything-amd64.iso https://cdimage.kali.org/kali-$version/"
+}
+
+# Dossiers où le projet range une version précise, pour une image importée : le dossier des versions publiées,
+# puis celui des archives, où partent les anciennes.
+dossiers_version() { # sorte nom
+  local v
+  case $1 in
+    arch)
+      v=${2#archlinux-}
+      v=${v%-x86_64.iso}
+      echo "https://geo.mirror.pkgbuild.com/iso/$v/ https://archive.archlinux.org/iso/$v/"
+      ;;
+    debian)
+      v=${2#debian-}
+      v=${v%-amd64-netinst.iso}
+      echo "https://cdimage.debian.org/debian-cd/$v/amd64/iso-cd/" \
+        "https://cdimage.debian.org/cdimage/archive/$v/amd64/iso-cd/"
+      ;;
+    fedora)
+      v=${2#Fedora-Everything-netinst-x86_64-}
+      v=${v%%-*}
+      echo "https://dl.fedoraproject.org/pub/fedora/linux/releases/$v/Everything/x86_64/iso/" \
+        "https://archives.fedoraproject.org/pub/archive/fedora/linux/releases/$v/Everything/x86_64/iso/"
+      ;;
+    systemrescue)
+      v=${2#systemrescue-}
+      echo "https://fastly-cdn.system-rescue.org/releases/${v%-amd64.iso}/"
+      ;;
+    omarchy) echo "https://iso.omarchy.org/" ;;
+    kali)
+      v=${2#kali-linux-}
+      v=${v%-live-everything-amd64.iso}
+      echo "https://cdimage.kali.org/kali-$v/ https://old.kali.org/kali-images/kali-$v/"
+      ;;
+  esac
+}
+
 # Fichiers de signature à télécharger avec l'image (noms dans le dossier de la version).
 signatures() { # sorte nom
   case $1 in
     arch | omarchy) echo "$2.sig" ;;
     systemrescue) echo "$2.asc" ;;
     debian) echo "SHA512SUMS SHA512SUMS.sign" ;;
+    kali) echo "SHA256SUMS SHA256SUMS.gpg" ;;
     fedora)
       local v=${2#Fedora-Everything-netinst-x86_64-}
       echo "Fedora-Everything-${v%.iso}-x86_64-CHECKSUM"
@@ -138,7 +208,7 @@ signe_par() { # sorte statut_gpg
 }
 
 # Vérifie une image et ses signatures, rangées dans un même dossier. Code 0 si tout est bon ; sinon la raison sur la
-# sortie d'erreur.
+# sortie d'erreur. Pour Kali, le même contrôle vaut pour son .torrent, qui est aussi dans la liste signée.
 verifier_image() { # sorte dossier nom
   local sorte=$1 d=$2 nom=$3 trousseau statut attendue
   trousseau=$(mktemp -d "$CACHE/.trousseau.XXXX")
@@ -154,6 +224,11 @@ verifier_image() { # sorte dossier nom
       statut=$(gpg --homedir "$trousseau" --status-fd 1 --verify "$d/SHA512SUMS.sign" "$d/SHA512SUMS" 2>/dev/null ||
         true)
       attendue=$(awk -v n="$nom" '$2 == n || $2 == "*" n {print $1}' "$d/SHA512SUMS")
+      ;;
+    kali)
+      statut=$(gpg --homedir "$trousseau" --status-fd 1 --verify "$d/SHA256SUMS.gpg" "$d/SHA256SUMS" 2>/dev/null ||
+        true)
+      attendue=$(awk -v n="$nom" '$2 == n || $2 == "*" n {print $1}' "$d/SHA256SUMS" 2>/dev/null || true)
       ;;
     fedora)
       # La liste signée en clair : seules les lignes que gpg a vérifiées (sa sortie) sont lues, pas le fichier.
@@ -178,7 +253,7 @@ verifier_image() { # sorte dossier nom
       [[ $attendue =~ ^[0-9a-f]{128}$ && $(sha512sum "$d/$nom" | cut -d' ' -f1) == "$attendue" ]] ||
         { echo "empreinte différente de la liste signée" >&2; return 1; }
       ;;
-    fedora)
+    fedora | kali)
       [[ $attendue =~ ^[0-9a-f]{64}$ && $(sha256sum "$d/$nom" | cut -d' ' -f1) == "$attendue" ]] ||
         { echo "empreinte différente de la liste signée" >&2; return 1; }
       ;;
@@ -197,9 +272,94 @@ image_prete() { # sorte
 
 # --- Cache : télécharger et vérifier ----------------------------------------------------------------------------------
 
+# Télécharge l'image dans le dossier de la version, où sont déjà ses signatures ; en échec, RAISON dit pourquoi.
+# Kali ne publie sa live complète qu'en torrent : aria2c la prend, sans la repartager ensuite. Le .torrent vient d'un
+# miroir (cdimage.kali.org renvoie ailleurs) : il est vérifié par la liste signée avant qu'aria2c le lise, et
+# l'image le sera après. Le traceur de Kali refuse un torrent qu'il n'a pas encore enregistré (« not authorized ») :
+# la DHT, amorcée par un point d'entrée connu, trouve les pairs sans lui. Sans débit pendant 10 minutes, aria2c
+# abandonne ; au bout de 5 heures, il est arrêté (le service en laisse 8) ; un torrent coupé reprend où il en était
+# à la recherche suivante (son fichier .aria2).
+telecharger() { # sorte url nom dossier
+  RAISON="téléchargement interrompu"
+  if [[ $1 != kali ]]; then
+    curl -fL --retry 3 --connect-timeout 20 --progress-bar -o "$4/$3" "$2$3"
+    return
+  fi
+  if ! command -v aria2c >/dev/null; then
+    RAISON="aria2c manque (paquet aria2) : Kali n'est publiée qu'en torrent"
+    return 1
+  fi
+  if [[ ! -s $4/$3.torrent ]] && ! lire "$2$3.torrent" >"$4/$3.torrent"; then
+    RAISON="torrent introuvable"
+    return 1
+  fi
+  local r code=0
+  if ! r=$(verifier_image kali "$4" "$3.torrent" 2>&1); then
+    rm -f "$4/$3.torrent"
+    RAISON="torrent refusé : $r"
+    return 1
+  fi
+  rm -f "$4/.aria2.log"
+  timeout --kill-after=1m 5h aria2c --seed-time=0 --bt-stop-timeout=600 --check-integrity=true \
+    --enable-dht=true --dht-entry-point=router.bittorrent.com:6881 --dht-file-path="$CACHE/.dht.dat" \
+    --bt-enable-lpd=false --max-overall-upload-limit=500K --file-allocation=none --summary-interval=0 \
+    --console-log-level=error --log="$4/.aria2.log" --log-level=warn --dir="$4" "$4/$3.torrent" >/dev/null 2>&1 ||
+    code=$?
+  if ((code == 0)) && [[ -s $4/$3 && ! -e $4/$3.aria2 ]]; then
+    return 0
+  fi
+  case $code in
+    0) RAISON="torrent incomplet" ;;
+    124 | 137) RAISON="plus de 5 heures de téléchargement : il reprendra à la prochaine recherche" ;;
+    9) RAISON="pas la place dans le cache (16 Gio)" ;;
+    *) RAISON="aucune source en 10 minutes : traceur qui refuse ce torrent, aucun pair" ;;
+  esac
+  tail -n 3 "$4/.aria2.log" 2>/dev/null | sed 's/^/    aria2c : /' || true
+  return 1
+}
+
+# Range dans le cache une image vérifiée avec ses signatures (pour --verifier), puis son empreinte, le témoin d'une
+# image vérifiée ; les versions d'avant de cette sorte partent ensuite, avec leurs signatures.
+ranger() { # sorte dossier nom
+  local sorte=$1 d=$2 nom=$3 f
+  for f in $(signatures "$sorte" "$nom"); do mv -f "$d/$f" "$CACHE/$nom.${f##*.}"; done
+  mv -f "$d/$nom" "$CACHE/$nom"
+  sha256sum "$CACHE/$nom" | cut -d' ' -f1 >"$CACHE/$nom.sha256.part"
+  mv -f "$CACHE/$nom.sha256.part" "$CACHE/$nom.sha256"
+  for f in "$CACHE"/${MOTIFS[$sorte]}; do
+    if [[ -f $f && $f != "$CACHE/$nom" ]]; then rm -f "$f" "$f".*; fi
+  done
+}
+
+# Une version d'une sorte : téléchargée avec ses signatures, vérifiée, rangée. Code 1 si le téléchargement échoue,
+# 2 si l'image est refusée (et effacée) ; RAISON dit pourquoi.
+prendre() { # sorte nom url
+  local sorte=$1 nom=$2 url=$3 neuf=$CACHE/.nouveau-$1 f r
+  # Un torrent coupé reprend où il en était : son dossier ne se vide que pour une autre version.
+  [[ -e $neuf/$nom.aria2 ]] || rm -rf "$neuf"
+  mkdir -p "$neuf"
+  echo "↓ ${NOMS[$sorte]} : $nom"
+  for f in $(signatures "$sorte" "$nom"); do
+    lire "$url$f" >"$neuf/$f" || true
+  done
+  if ! telecharger "$sorte" "$url" "$nom" "$neuf"; then
+    [[ -e $neuf/$nom.aria2 ]] || rm -rf "$neuf"
+    return 1
+  fi
+  if ! r=$(verifier_image "$sorte" "$neuf" "$nom" 2>&1); then
+    rm -rf "$neuf"
+    RAISON="$r, image effacée"
+    echo "✖ ${NOMS[$sorte]} : $RAISON"
+    return 2
+  fi
+  ranger "$sorte" "$neuf" "$nom"
+  rm -rf "$neuf"
+  echo "✔ ${NOMS[$sorte]} : $nom vérifiée (signature du projet)"
+}
+
 chercher() {
   mkdir -p "$CACHE"
-  local sorte ligne nom url neuves=() echecs=() joignables=0
+  local sorte ligne nom url neuves=() echecs=() replis=() joignables=0 code
   for sorte in "${SORTES[@]}"; do
     if ! ligne=$("derniere_$sorte" 2>/dev/null); then
       echo "· ${NOMS[$sorte]} : dernière version introuvable (pas d'Internet, ou site changé)"
@@ -211,40 +371,44 @@ chercher() {
       echo "✔ ${NOMS[$sorte]} : $nom, déjà prête"
       continue
     fi
-    echo "↓ ${NOMS[$sorte]} : $nom"
-    local neuf=$CACHE/.nouveau-$sorte f raison
-    rm -rf "$neuf"
-    mkdir -p "$neuf"
-    if ! curl -fL --retry 3 --connect-timeout 20 --progress-bar -o "$neuf/$nom" "$url$nom"; then
-      rm -rf "$neuf"
-      echecs+=("${NOMS[$sorte]} : téléchargement interrompu")
-      continue
-    fi
-    for f in $(signatures "$sorte" "$nom"); do
-      lire "$url$f" >"$neuf/$f" || true
-    done
-    if raison=$(verifier_image "$sorte" "$neuf" "$nom" 2>&1); then
-      # Rangée avec ses signatures (pour --verifier), puis son empreinte, le témoin d'une image vérifiée.
-      for f in $(signatures "$sorte" "$nom"); do mv -f "$neuf/$f" "$CACHE/$nom.${f##*.}"; done
-      mv -f "$neuf/$nom" "$CACHE/$nom"
-      sha256sum "$CACHE/$nom" | cut -d' ' -f1 >"$CACHE/$nom.sha256.part"
-      mv -f "$CACHE/$nom.sha256.part" "$CACHE/$nom.sha256"
-      # Les versions d'avant de cette sorte, avec leurs signatures.
-      for f in "$CACHE"/${MOTIFS[$sorte]}; do
-        [[ -f $f && $f != "$CACHE/$nom" ]] && rm -f "$f" "$f".*
-      done
-      echo "✔ ${NOMS[$sorte]} : $nom vérifiée (signature du projet)"
+    code=0
+    prendre "$sorte" "$nom" "$url" || code=$?
+    if ((code == 0)); then
       neuves+=("$nom")
+    elif ((code == 2)) || [[ $sorte != kali ]]; then
+      echecs+=("${NOMS[$sorte]} : $RAISON")
     else
-      echecs+=("${NOMS[$sorte]} : $raison, image effacée")
-      echo "✖ ${NOMS[$sorte]} : $raison ; image effacée"
+      # Kali sans source : la version d'avant reste (sur la clé, et dans le cache s'il l'a). Un cache sans Kali prend
+      # la précédente, seulement si le torrent n'a rien reçu : un torrent qui avançait reprendra là où il en est.
+      local avant raison=$RAISON
+      echo "· Kali Linux : $nom pas téléchargée ($raison)"
+      # Un torrent sans source n'est pas une image refusée : la notification le dit à part, sans échec.
+      if avant=$(image_prete kali); then
+        replis+=("$nom pas téléchargée ($raison) ; ${avant##*/} reste, nouvel essai à la prochaine recherche.")
+      elif [[ $raison == aucune\ source* && ! -s $CACHE/.nouveau-kali/$nom ]] && ligne=$(precedente_kali "$nom"); then
+        read -r avant url <<<"$ligne"
+        code=0
+        prendre kali "$avant" "$url" || code=$?
+        if ((code == 0)); then
+          neuves+=("$avant")
+          replis+=("$nom pas téléchargée ($raison) ; la version d'avant, $avant, prise à sa place.")
+        elif ((code == 2)); then
+          echecs+=("Kali Linux : $avant : $RAISON")
+        else
+          replis+=("$nom pas téléchargée ($raison), ni $avant ($RAISON) ; nouvel essai à la prochaine recherche.")
+        fi
+      else
+        replis+=("$nom pas téléchargée ($raison) ; nouvel essai à la prochaine recherche.")
+      fi
     fi
-    rm -rf "$neuf"
   done
   if ((${#neuves[@]})); then
     avertir "Clé VANGUARD : nouvelles images prêtes" \
       "$(printf '%s\n' "${neuves[@]}")
 Elles iront sur la clé à son prochain branchement."
+  fi
+  if ((${#replis[@]})); then
+    avertir "Clé VANGUARD : Kali Linux pas mise à jour" "$(printf '%s\n' "${replis[@]}")"
   fi
   if ((${#echecs[@]})); then
     avertir "Clé VANGUARD : image refusée" "$(printf '%s\n' "${echecs[@]}")"
@@ -253,13 +417,69 @@ Elles iront sur la clé à son prochain branchement."
   ((joignables > 0)) || echo "Rien de vérifié : nouvel essai à la prochaine minuterie."
 }
 
-# Revérifie chaque image prête du cache avec les signatures gardées à côté.
+# Une image téléchargée ailleurs (client torrent, autre ordinateur) entre dans le cache vérifiée comme les autres : sa
+# sorte d'après son nom, les signatures de sa version prises chez son projet, puis la même vérification, faite sur la
+# copie rangée dans le cache et non sur le fichier d'origine, qui reste où il est (un client torrent continue de le
+# partager). Sur le même disque, la copie ne prend pas de place (reflink) ; sinon, elle en prend autant que l'image.
+importer() { # fichier
+  local fichier=$1 nom sorte="" s prete url trouve="" d f ok r
+  [[ -f $fichier ]] || erreur "$fichier : pas un fichier."
+  nom=${fichier##*/}
+  for s in "${SORTES[@]}"; do
+    # shellcheck disable=SC2053 # motif voulu
+    if [[ $nom == ${MOTIFS[$s]} ]]; then sorte=$s; fi
+  done
+  [[ -n $sorte ]] || erreur "$nom : pas une image que la clé tient (noms attendus : ${MOTIFS[*]})."
+  if [[ -f $CACHE/$nom && -f $CACHE/$nom.sha256 ]]; then
+    echo "✔ ${NOMS[$sorte]} : $nom, déjà prête dans le cache"
+    return 0
+  fi
+  if prete=$(image_prete "$sorte") && [[ $(printf '%s\n' "$nom" "${prete##*/}" | sort -V | tail -1) != "$nom" ]]; then
+    erreur "le cache a déjà ${prete##*/}, plus récente que $nom : rien d'importé."
+  fi
+  mkdir -p "$CACHE"
+  d=$CACHE/.import-$sorte
+  rm -rf "$d"
+  mkdir -p "$d"
+  for url in $(dossiers_version "$sorte" "$nom"); do
+    ok=1
+    for f in $(signatures "$sorte" "$nom"); do
+      lire "$url$f" >"$d/$f" 2>/dev/null || ok=0
+    done
+    if ((ok)); then
+      trouve=$url
+      break
+    fi
+  done
+  if [[ -z $trouve ]]; then
+    rm -rf "$d"
+    erreur "signatures de $nom introuvables chez ${NOMS[$sorte]} (pas d'Internet, ou version retirée) : rien d'importé."
+  fi
+  echo "→ ${NOMS[$sorte]} : $nom copiée dans le cache, puis vérifiée (signatures de $trouve)…"
+  cp --reflink=auto "$fichier" "$d/$nom"
+  if ! r=$(verifier_image "$sorte" "$d" "$nom" 2>&1); then
+    rm -rf "$d"
+    erreur "${NOMS[$sorte]} : $nom, $r : rien d'importé (téléchargement pas fini, ou image abîmée)."
+  fi
+  ranger "$sorte" "$d" "$nom"
+  rm -rf "$d"
+  echo "✔ ${NOMS[$sorte]} : $nom vérifiée (signature du projet), prête dans le cache"
+  avertir "Clé VANGUARD : image importée" "$nom vérifiée. Elle ira sur la clé à son prochain branchement si la clé \
+en a déjà une version (sinon : outils/images-cle.sh --toutes POINT)."
+}
+
+# Revérifie chaque image prête du cache avec les signatures gardées à côté. Une facultative absente est dite, sans
+# compter comme une erreur.
 verifier_cache() {
   local sorte image tout=0
   for sorte in "${SORTES[@]}"; do
     if ! image=$(image_prete "$sorte"); then
-      echo "  ✖ ${NOMS[$sorte]} : pas d'image prête (outils/images-cle.sh --chercher)"
-      tout=1
+      if [[ $FACULTATIVES == *" $sorte "* ]]; then
+        echo "  · ${NOMS[$sorte]} : pas d'image prête (facultative : outils/images-cle.sh --chercher ou --importer)"
+      else
+        echo "  ✖ ${NOMS[$sorte]} : pas d'image prête (outils/images-cle.sh --chercher)"
+        tout=1
+      fi
       continue
     fi
     local d nom f raison
@@ -335,7 +555,10 @@ copier_sur_cle() { # point (facultatif), toutes (facultatif : aussi les sortes a
       anciennes=()
     fi
     echo "→ ${NOMS[$sorte]} : $nom sur la clé…"
-    avertir "Clé VANGUARD : copie de ${NOMS[$sorte]}" "Ne retire pas la clé avant la fin (une ou deux minutes)."
+    # Écriture puis relecture : une dizaine de Mio par seconde en tout sur une clé USB lente (l'image de Kali, 16 Gio,
+    # y prend près d'une demi-heure).
+    avertir "Clé VANGUARD : copie de ${NOMS[$sorte]}" \
+      "Ne retire pas la clé avant la fin (jusqu'à $((($(taille_mio "$image") + 599) / 600)) min sur une clé lente)."
     local part=$iso/.$nom.part
     if ! cp "$image" "$part" || ! sync "$part" || [[ $(empreinte_sur_cle "$part") != "$(cat "$image.sha256")" ]]; then
       rm -f "$part"
@@ -361,7 +584,8 @@ copier_sur_cle() { # point (facultatif), toutes (facultatif : aussi les sortes a
 }
 
 # ventoy.json : Ventoy ne cherche que dans ISO/ (pas dans les dossiers de Vanguard), menu en français, un nom clair pour
-# chaque image présente. Écrit à côté puis renommé : une clé retirée en route garde l'ancien menu.
+# chaque image présente. Écrit à côté puis renommé : une clé retirée en route garde l'ancien menu ; et seulement s'il
+# change (chaque écriture use un peu la clé, et la mise à jour du jour repasse sur une clé restée branchée).
 menu() { # point
   local point=$1
   mkdir -p "$point/ventoy"
@@ -374,6 +598,7 @@ noms = [
     (["Fedora-Everything-netinst-*.iso"], "Fedora : installer par Internet"),
     (["systemrescue-*.iso"], "SystemRescue : réparer, sauver des fichiers, tester la mémoire"),
     (["omarchy-*.iso"], "Omarchy : installer (sans Internet)"),
+    (["kali-linux-*-live-everything-*.iso"], "Kali Linux : outils de sécurité (live complète)"),
 ]
 alias = []
 for image in sys.stdin.read().split("\n"):
@@ -384,7 +609,11 @@ for image in sys.stdin.read().split("\n"):
 print(json.dumps({"control": [{"VTOY_DEFAULT_SEARCH_ROOT": "/ISO"}, {"VTOY_MENU_LANGUAGE": "fr_FR"}],
                   "menu_alias": alias}, ensure_ascii=False, indent=2))
 ' >"$point/ventoy/ventoy.json.part"
-  mv -f "$point/ventoy/ventoy.json.part" "$point/ventoy/ventoy.json"
+  if cmp -s "$point/ventoy/ventoy.json.part" "$point/ventoy/ventoy.json"; then
+    rm -f "$point/ventoy/ventoy.json.part"
+  else
+    mv -f "$point/ventoy/ventoy.json.part" "$point/ventoy/ventoy.json"
+  fi
 }
 
 etat() {
@@ -419,10 +648,11 @@ etat() {
 
 case ${1:-} in
   --chercher) chercher ;;
+  --importer) importer "${2:?image à importer}" ;;
   --verifier) verifier_cache ;;
   --cle) copier_sur_cle "${2:-}" ;;
   --toutes) copier_sur_cle "${2:?point de montage de la clé}" toutes ;;
   --menu) menu "${2:?point de montage de la clé}" ;;
   --etat) etat ;;
-  *) sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
+  *) sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
 esac
