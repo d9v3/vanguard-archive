@@ -23,6 +23,15 @@ pub(crate) fn reussit(cmd: &str, args: &[&str]) -> bool {
     crate::commande::lancer(Command::new(cmd).args(args), 30).is_some_and(|r| r.code == Some(0))
 }
 
+/// La minuterie de l'utilisateur (« nom.timer ») est-elle activée ? Lu dans les liens que pose
+/// `systemctl --user enable`, sans le lancer : un bus de session muet ne fige plus le menu. La commande ne
+/// sert qu'en secours, quand aucun dossier d'unités de l'utilisateur n'existe.
+#[cfg(target_os = "linux")]
+pub(crate) fn minuterie_activee(timer: &str) -> bool {
+    crate::machine::linux::natif::unite_activee(timer, true)
+        .unwrap_or_else(|| reussit("systemctl", &["--user", "is-enabled", timer]))
+}
+
 /// Programme à planifier. Lancé depuis la clé USB, on en installe d'abord une copie locale :
 /// sinon la surveillance (et l'entretien du mois) s'arrêterait dès que la clé est débranchée.
 pub(crate) fn executable() -> String {
@@ -555,7 +564,7 @@ pub fn active() -> bool {
 /// La minuterie, la tâche planifiée (non désactivée) ou l'agent existent-ils ?
 fn installee() -> bool {
     #[cfg(target_os = "linux")]
-    return reussit("systemctl", &["--user", "is-enabled", &format!("{NOM}.timer")]);
+    return minuterie_activee(&format!("{NOM}.timer"));
     #[cfg(windows)]
     return tache_active(TACHE_WINDOWS);
     #[cfg(target_os = "macos")]
@@ -779,6 +788,30 @@ fn desinstaller() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Sur cet ordinateur, chaque minuterie de l'utilisateur activée ou non selon systemctl l'est aussi
+    /// d'après ses liens. Les états à part (static, indirect, generated…) ne se comparent pas : nos
+    /// minuteries ont toujours une section [Install].
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn minuteries_comme_systemctl() {
+        let Some(r) = crate::commande::lancer_en_anglais(
+            Command::new("systemctl").args(["--user", "list-unit-files", "--type=timer", "--no-legend"]),
+            10,
+        )
+        .filter(|r| r.code == Some(0)) else {
+            return;
+        };
+        for ligne in r.sortie.lines() {
+            let mut mots = ligne.split_whitespace();
+            let (Some(nom), Some(etat)) = (mots.next(), mots.next()) else {
+                continue;
+            };
+            if matches!(etat, "enabled" | "disabled" | "masked") {
+                assert_eq!(minuterie_activee(nom), etat == "enabled", "{ligne}");
+            }
+        }
+    }
 
     #[test]
     fn agent_launchd() {
