@@ -305,16 +305,20 @@ fn lignes_natives() -> Option<String> {
         .into_iter()
         .filter(|c| c.active && !c.cachee)
     {
-        let fixe: String = winreg::RegKey::predef(HKEY_LOCAL_MACHINE)
-            .open_subkey(format!(
-                r"SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces\{}",
-                carte.guid
-            ))
-            .and_then(|c| c.get_value("NameServer"))
-            .unwrap_or_default();
+        // IPv4 dans Tcpip, IPv6 dans Tcpip6 : Windows écrit chaque pile à part, et une carte sans IPv6 peut ne pas
+        // avoir la seconde clé (aucun serveur fixé, donc).
+        let fixe = |pile: &str| -> String {
+            winreg::RegKey::predef(HKEY_LOCAL_MACHINE)
+                .open_subkey(format!(
+                    r"SYSTEM\CurrentControlSet\Services\{pile}\Parameters\Interfaces\{}",
+                    carte.guid
+                ))
+                .and_then(|c| c.get_value("NameServer"))
+                .unwrap_or_default()
+        };
+        let (fixe4, fixe6) = (fixe("Tcpip"), fixe("Tcpip6"));
         for ip in &carte.dns {
-            let ip = ip.to_string();
-            let manuel = !fixe.is_empty() && fixe.contains(&ip);
+            let manuel = reglee_a_la_main(&fixe4, &fixe6, *ip);
             lignes.push(format!("DNS|{}|{ip}|{manuel}", carte.index));
         }
     }
@@ -326,9 +330,21 @@ fn lignes_powershell() -> Option<String> {
     super::windows::ps(
         "Get-NetAdapter | Where-Object Status -eq 'Up' | ForEach-Object { $i = $_.InterfaceIndex; \
          $fixe = (Get-ItemProperty \"HKLM:\\SYSTEM\\CurrentControlSet\\Services\\Tcpip\\Parameters\\Interfaces\\$($_.InterfaceGuid)\" -ErrorAction SilentlyContinue).NameServer; \
-         (Get-DnsClientServerAddress -InterfaceIndex $i -ErrorAction SilentlyContinue).ServerAddresses | ForEach-Object { \
-         \"DNS|$i|$_|$([bool]($fixe -and $fixe.Contains($_)))\" } }",
+         $fixe6 = (Get-ItemProperty \"HKLM:\\SYSTEM\\CurrentControlSet\\Services\\Tcpip6\\Parameters\\Interfaces\\$($_.InterfaceGuid)\" -ErrorAction SilentlyContinue).NameServer; \
+         (Get-DnsClientServerAddress -InterfaceIndex $i -ErrorAction SilentlyContinue).ServerAddresses | ForEach-Object { $a = $_ -as [ipaddress]; \
+         $f = if ($_ -match ':') { $fixe6 } else { $fixe }; \
+         $m = $a -and @(\"$f\" -split '[ ,;]' | Where-Object { $_ -and ($_ -as [ipaddress]) -and ($_ -as [ipaddress]).Equals($a) }).Count -gt 0; \
+         \"DNS|$i|$_|$m\" } }",
     )
+}
+
+/// `ip` est-elle écrite dans le NameServer de sa pile (Tcpip pour une IPv4, Tcpip6 pour une IPv6) ? Comparée adresse à
+/// adresse, pas comme un morceau de texte : « 1.1.1.1 » n'est pas réglée à la main parce que « 1.1.1.10 » l'est, et
+/// une IPv6 écrite autrement (zéros, majuscules) reste la même adresse.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn reglee_a_la_main(fixe4: &str, fixe6: &str, ip: IpAddr) -> bool {
+    let fixe = if ip.is_ipv6() { fixe6 } else { fixe4 };
+    fixe.split([',', ' ', ';']).filter_map(adresse).any(|f| f == ip)
 }
 
 /// Ce que l'outil « DNS le plus rapide » doit savoir des serveurs DNS de cette machine.
@@ -504,6 +520,24 @@ pub fn dns() -> Vec<Constat> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Un DNS IPv6 fixé à la main est dans Tcpip6, pas dans Tcpip : il doit compter pour manuel ; et une adresse qui
+    /// n'est qu'un morceau d'une autre (« 1.1.1.1 » dans « 1.1.1.10 ») ne compte pas.
+    #[test]
+    fn dns_regle_a_la_main_selon_la_pile() {
+        let ip = |t: &str| t.parse::<IpAddr>().unwrap();
+        assert!(reglee_a_la_main("", "2001:db8::53", ip("2001:db8::53")));
+        assert!(reglee_a_la_main(
+            "",
+            "2001:DB8:0:0::53,2001:db8::54",
+            ip("2001:db8::53")
+        ));
+        assert!(!reglee_a_la_main("2001:db8::53", "", ip("2001:db8::53")));
+        assert!(reglee_a_la_main("192.0.2.53 192.0.2.54", "", ip("192.0.2.54")));
+        assert!(!reglee_a_la_main("1.1.1.10", "", ip("1.1.1.1")));
+        assert!(!reglee_a_la_main("192.0.2.53", "2001:db8::53", ip("192.0.2.1")));
+        assert!(!reglee_a_la_main("", "", ip("2001:db8::53")));
+    }
 
     /// Les vraies fonctions de Windows (Wine ici, la VM ensuite), sans PowerShell : chaque ligne a la forme lue par
     /// `serveurs`.
