@@ -80,12 +80,21 @@ jobs:
       # .cargo/config.toml vise Linux par défaut : la cible est toujours donnée.
       - name: Tests
         run: cargo test --target aarch64-apple-darwin
+      # cargo-auditable et cargo-audit comme dans ci.yml (versions épinglées, empreintes vérifiées, aucun repli),
+      # posés en quelques secondes après les tests : un passage en échec ne les télécharge pas.
+      - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
+        with:
+          tool: cargo-auditable@0.7.7,cargo-audit@0.22.2
+          fallback: none
       # Les deux Mac d'un seul cargo : l'optimisation finale (LTO, une seule unité de code) n'occupe qu'un cœur par
       # programme, et cargo les mène de front. L'un après l'autre, elles prenaient 140 s, soit plus de la moitié du
-      # passage, et chaque minute de Mac en compte dix.
+      # passage, et chaque minute de Mac en compte dix. Chacun porte la liste de ses dépendances, versions comprises
+      # (cargo auditable) ; cargo audit ne lit pas un programme universel : les deux moitiés sont vérifiées avant lipo.
       - name: Compilation
         run: |
-          cargo build --release --target aarch64-apple-darwin --target x86_64-apple-darwin
+          cargo auditable build --release --target aarch64-apple-darwin --target x86_64-apple-darwin
+          bash outils/failles-programmes.sh target/aarch64-apple-darwin/release/vanguard \
+            target/x86_64-apple-darwin/release/vanguard
           lipo -create -output vanguard \
             target/aarch64-apple-darwin/release/vanguard target/x86_64-apple-darwin/release/vanguard
           lipo -info vanguard
