@@ -1228,7 +1228,9 @@ mod tests_lancer_borne {
     }
 
     /// Un programme dans sa propre session (comme un plugin) qui laisse un petit-enfant détaché : celui-ci est arrêté
-    /// avec lui, il n'écrit plus rien ensuite.
+    /// avec lui, il n'écrit plus rien ensuite. Linux seulement : c'est waitid (WNOWAIT) qui laisse arrêter le groupe
+    /// avant que son numéro ne resserve, et macOS ne le permet pas (le CHANGELOG le dit ; vu sur le Mac de GitHub).
+    #[cfg(target_os = "linux")]
     #[test]
     fn un_petit_enfant_detache_ne_survit_pas() {
         use std::os::unix::process::CommandExt;
