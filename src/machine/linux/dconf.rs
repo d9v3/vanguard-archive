@@ -83,16 +83,26 @@ pub(crate) fn gsettings_get(schema: &str, cle: &str) -> Option<String> {
 
 /// Un fichier GVDB : `Ok(None)` s'il n'existe pas, `Err` s'il ne se lit pas ou n'est pas du GVDB.
 fn ouvrir(chemin: &Path) -> Result<Option<Table>, ()> {
-    match std::fs::read(chemin) {
-        Ok(octets) => Gvdb::depuis(octets).and_then(|g| g.racine()).map(Some).ok_or(()),
-        Err(e) if e.kind() == ErrorKind::NotFound => Ok(None),
-        Err(_) => Err(()),
+    match Gvdb::ouvrir(chemin)? {
+        Some(g) => g.racine().map(Some).ok_or(()),
+        None => Ok(None),
     }
 }
 
 /// La valeur de la clé, comme GSettings la rendrait.
 pub(crate) fn lire(lieux: &Lieux, schema: &str, cle: &str) -> Option<Variante> {
     if lieux.moteur.as_deref().is_some_and(|m| m != "dconf") {
+        return None;
+    }
+    // Un dossier relatif (HOME vide, variable XDG relative) se lirait depuis le dossier courant, où la base de
+    // l'utilisateur manque : sa valeur passerait pour celle du schéma. gsettings, lui, trouve le vrai dossier
+    // personnel.
+    let relatif = |d: &Path| !d.is_absolute();
+    if relatif(&lieux.config)
+        || relatif(&lieux.etc)
+        || lieux.schemas.iter().chain(&lieux.donnees_systeme).any(|d| relatif(d))
+        || lieux.execution.as_deref().is_some_and(relatif)
+    {
         return None;
     }
     // Les schémas compilés, dans l'ordre ; un fichier présent mais illisible ici pourrait cacher le bon schéma.
@@ -115,11 +125,13 @@ pub(crate) fn lire(lieux: &Lieux, schema: &str, cle: &str) -> Option<Variante> {
 /// Le schéma `id` dans la première source qui l'a, à partir du rang `depuis` (GLib cherche ainsi les schémas
 /// qu'un autre étend).
 fn chercher_schema(sources: &[Table], depuis: usize, id: &str) -> Option<(usize, Table)> {
-    sources
-        .iter()
-        .enumerate()
-        .skip(depuis)
-        .find_map(|(i, s)| s.table(id).map(|t| (i, t)))
+    for (i, s) in sources.iter().enumerate().skip(depuis) {
+        // Un schéma présent mais illisible : on ne sait pas ce que GLib en tire.
+        if let Some(t) = s.table(id).ok()? {
+            return Some((i, t));
+        }
+    }
+    None
 }
 
 /// Ce que le schéma dit d'une clé : sa valeur par défaut, et ce qui borne les valeurs permises.
@@ -134,6 +146,10 @@ struct InfosCle {
 
 fn infos_de_cle(sources: &[Table], rang: usize, table: &Table, cle: &str, profondeur: usize) -> Option<InfosCle> {
     let Some(brute) = table.valeur(cle) else {
+        // Présente mais illisible ici : ce n'est pas au schéma étendu de répondre.
+        if table.contient_valeur(cle) {
+            return None;
+        }
         // La clé peut venir du schéma que celui-ci étend.
         if profondeur > 8 {
             return None;
@@ -190,12 +206,24 @@ fn infos_de_cle(sources: &[Table], rang: usize, table: &Table, cle: &str, profon
     Some(infos)
 }
 
-/// Une chaîne fait partie des choix : GLib la range en « 0xff, la chaîne, 0 » au début d'un mot de 4 octets.
-fn dans_les_choix(choix: &[u8], s: &str) -> bool {
-    let mut motif = vec![0xff];
-    motif.extend_from_slice(s.as_bytes());
-    motif.push(0);
-    (0..choix.len()).step_by(4).any(|p| choix[p..].starts_with(&motif))
+/// Mots que GLib accepte au plus pour une chaîne cherchée dans les choix (`STRINFO_MAX_WORDS`).
+const CHOIX_MOTS_MAX: usize = 17;
+
+/// Une chaîne fait partie des choix, comme `strinfo_is_string_valid` le dit : GLib la range sur des mots entiers,
+/// « 0xff, la chaîne, 0 », des zéros, puis 0xff en dernier octet ; elle cherche ces mots entiers, à partir du
+/// deuxième mot. Comparer seulement le début confondait une valeur (255 : ff 00 00 00) avec la chaîne vide. `None`
+/// pour une chaîne plus longue que ce que GLib cherche : elle la dit alors valide sans regarder, laissé à gsettings.
+fn dans_les_choix(choix: &[u8], s: &str) -> Option<bool> {
+    let mots = 2.max((s.len() + 6) >> 2);
+    if mots > CHOIX_MOTS_MAX {
+        return None;
+    }
+    let mut motif = vec![0u8; 4 * mots];
+    motif[0] = 0xff;
+    motif[1..=s.len()].copy_from_slice(s.as_bytes());
+    motif[4 * mots - 1] = 0xff;
+    let choix = choix.get(4..).unwrap_or_default();
+    Some((0..choix.len() / 4).any(|i| choix[4 * i..].starts_with(&motif)))
 }
 
 fn nombre(v: &Variante) -> Option<i128> {
@@ -215,8 +243,14 @@ fn nombre(v: &Variante) -> Option<i128> {
 fn valide(infos: &InfosCle, v: &Variante) -> Option<bool> {
     if let Some(choix) = &infos.choix {
         return match v {
-            Variante::Chaine(s) => Some(dans_les_choix(choix, s)),
-            Variante::Tableau(..) => Some(v.chaines()?.iter().all(|s| dans_les_choix(choix, s))),
+            Variante::Chaine(s) => dans_les_choix(choix, s),
+            Variante::Tableau(..) => {
+                let mut tous = true;
+                for s in v.chaines()? {
+                    tous &= dans_les_choix(choix, s)?;
+                }
+                Some(tous)
+            }
             _ => None,
         };
     }
@@ -235,15 +269,16 @@ fn lire_dconf(lieux: &Lieux, chemin: &str) -> Result<Option<Variante>, ()> {
     }
     // Un verrou dans une base du système fait ignorer celles d'avant (la première, celle de l'utilisateur, ne
     // verrouille rien) : le plus profond l'emporte.
-    let depuis = (1..bases.len())
-        .rev()
-        .find(|&i| {
-            bases[i]
-                .as_ref()
-                .and_then(|b| b.table(".locks"))
-                .is_some_and(|v| v.contient_valeur(chemin))
-        })
-        .unwrap_or(0);
+    let mut depuis = 0;
+    for i in (1..bases.len()).rev() {
+        let Some(b) = &bases[i] else {
+            continue;
+        };
+        if b.table(".locks")?.is_some_and(|v| v.contient_valeur(chemin)) {
+            depuis = i;
+            break;
+        }
+    }
     for b in bases[depuis..].iter().flatten() {
         if b.contient_valeur(chemin) {
             return b.valeur(chemin).map(Some).ok_or(());
@@ -520,6 +555,82 @@ mod tests {
         // Base illisible : on ne sait pas.
         ecrire(&r.join("config/dconf/user"), b"pas du GVDB");
         assert_eq!(texte(&l, "org.gnome.desktop.screensaver", "lock-enabled"), None);
+    }
+
+    /// Deux éléments du même nom dans la base de l'utilisateur : GLib, donc GNOME, applique le premier ; le
+    /// dernier (verrouillage actif) ne doit pas passer pour la valeur.
+    #[test]
+    fn doublon_le_premier_compte() {
+        let r = jetable("doublon");
+        ecrire(&r.join("usr/glib-2.0/schemas/gschemas.compiled"), &schemas());
+        let cle = "/org/gnome/desktop/screensaver/lock-enabled";
+        ecrire(
+            &r.join("config/dconf/user"),
+            &base_dconf(&[(cle, Variante::Booleen(false)), (cle, Variante::Booleen(true))], &[]),
+        );
+        assert_eq!(
+            texte(&lieux(&r), "org.gnome.desktop.screensaver", "lock-enabled").as_deref(),
+            Some("false")
+        );
+    }
+
+    /// HOME vide ou variable XDG relative : la base serait cherchée dans le dossier courant, absente, et la valeur
+    /// du schéma passerait pour vérifiée. À gsettings.
+    #[test]
+    fn dossiers_relatifs_laisses_a_gsettings() {
+        let r = jetable("relatifs");
+        ecrire(&r.join("usr/glib-2.0/schemas/gschemas.compiled"), &schemas());
+        let l = lieux(&r);
+        assert_eq!(
+            texte(&l, "org.gnome.desktop.screensaver", "lock-enabled").as_deref(),
+            Some("true")
+        );
+        let relatif = Lieux {
+            config: PathBuf::from(".config"),
+            ..lieux(&r)
+        };
+        assert_eq!(texte(&relatif, "org.gnome.desktop.screensaver", "lock-enabled"), None);
+        let mut schemas_relatifs = lieux(&r);
+        schemas_relatifs
+            .schemas
+            .insert(0, PathBuf::from(".local/share/glib-2.0/schemas"));
+        assert_eq!(
+            texte(&schemas_relatifs, "org.gnome.desktop.screensaver", "lock-enabled"),
+            None
+        );
+    }
+
+    /// Les choix comparés comme `strinfo_is_string_valid` : des mots entiers, la valeur n'est pas une chaîne.
+    #[test]
+    fn choix_comme_strinfo() {
+        // La valeur 255 (ff 00 00 00), puis la chaîne « a ».
+        let choix = b"\xff\0\0\0\xffa\0\0\0\0\0\xff";
+        assert_eq!(dans_les_choix(choix, ""), Some(false), "la valeur 255 n'est pas « »");
+        assert_eq!(dans_les_choix(choix, "a"), Some(true));
+        assert_eq!(dans_les_choix(choix, "b"), Some(false));
+        assert_eq!(dans_les_choix(&[], ""), Some(false));
+        let Variante::Tableau(_, mots) = choix_du_proxy() else {
+            panic!()
+        };
+        let proxy: Vec<u8> = mots
+            .iter()
+            .flat_map(|m| match m {
+                Variante::Naturel32(n) => n.to_le_bytes(),
+                _ => panic!(),
+            })
+            .collect();
+        for (s, attendu) in [
+            ("none", true),
+            ("manual", true),
+            ("auto", true),
+            ("non", false),
+            ("manu", false),
+        ] {
+            assert_eq!(dans_les_choix(&proxy, s), Some(attendu), "{s}");
+        }
+        // Plus de 17 mots : GLib ne cherche pas et dit valide ; laissé à gsettings.
+        assert_eq!(dans_les_choix(&proxy, &"a".repeat(66)), None);
+        assert_eq!(dans_les_choix(&proxy, &"a".repeat(65)), Some(false));
     }
 
     #[test]

@@ -8,22 +8,39 @@
 //!
 //! GVDB : un en-tête (« GVariant », version, racine), puis des tables de hachage. Chaque élément d'une table a un
 //! nom (dont le début peut se trouver chez un élément parent : dconf range ainsi `/org/gnome/` puis `desktop/`), un
-//! genre (`v` une valeur, `H` une table imbriquée, `L` une liste) et un pointeur vers ses données. Les noms sont
-//! rebâtis en entier une fois pour toutes, plutôt que de refaire le hachage de GLib : une table de ces fichiers a
-//! au plus quelques milliers d'éléments.
+//! genre (`v` une valeur, `H` une table imbriquée, `L` une liste) et un pointeur vers ses données. Une clé se
+//! cherche comme dans GLib (`gvdb-reader.c`) : hachage de djb, filtre de Bloom, seau, premier élément du seau dont le
+//! hachage, le nom (comparé depuis la fin, parent par parent) et le genre conviennent, données alignées (8 pour une
+//! valeur, 4 pour une table). Ranger tous les noms dans une table à soi donnait, sur un fichier forgé, une autre
+//! valeur que celle que GNOME applique (un doublon, un hachage faux, une valeur mal alignée) et une mémoire sans
+//! borne (des noms rebâtis par leurs parents).
 //!
 //! GVariant : la forme sérialisée de GLib (types de taille fixe alignés, chaînes terminées par un zéro, décalages de
 //! fin rangés en queue des tableaux et des n-uplets). Tout est vérifié : un fichier tronqué ou forgé rend `None`,
-//! jamais une valeur inventée ni une panique. Seuls les fichiers petit-boutistes sont lus (ceux qu'écrit un PC ou un
-//! ARM sous Linux) ; un autre rend `None` et la commande prend le relais.
+//! jamais une valeur inventée ni une panique. Le travail aussi est borné (taille du fichier, nombre de valeurs
+//! décodées) : une donnée forgée ne bloque pas Vanguard des minutes. Seuls les fichiers petit-boutistes sont lus
+//! (ceux qu'écrit un PC ou un ARM sous Linux) ; un autre rend `None` et la commande prend le relais.
 
-use std::collections::HashMap;
 use std::fmt::Write;
+use std::io::{ErrorKind, Read};
+use std::path::Path;
 use std::rc::Rc;
 
 /// Profondeur d'imbrication des types et des valeurs au-delà de laquelle une donnée est refusée : GLib n'en
 /// produit pas d'aussi profondes, et une donnée forgée ne doit pas épuiser la pile.
 const PROFONDEUR_MAX: usize = 64;
+
+/// Taille au-delà de laquelle un fichier n'est pas lu : un `gschemas.compiled` de GNOME fait quelques centaines de
+/// Ko, une base de dconf moins encore.
+const FICHIER_MAX: u64 = 32 << 20;
+
+/// Octets des noms complets que `noms_des_valeurs` rebâtit au plus : des éléments chaînés par leur parent qui
+/// répètent chacun un long morceau de nom coûteraient sinon n² octets.
+const NOMS_OCTETS_MAX: usize = 4 << 20;
+
+/// Valeurs qu'un décodage produit au plus (copies de types comprises) : les réglages lus ici en ont quelques
+/// dizaines, et une valeur forgée de 1 Mo en ferait des dizaines de millions.
+const NOEUDS_MAX: usize = 1 << 18;
 
 // ---------------------------------------------------------------------------------------------------------------
 // Fichier et tables
@@ -33,18 +50,30 @@ pub(crate) struct Gvdb {
     octets: Rc<[u8]>,
 }
 
-/// Un élément d'une table : son genre et l'étendue de ses données dans le fichier.
+/// Un élément d'une table, tel qu'il est rangé (24 octets).
 #[derive(Clone, Copy)]
 struct Element {
+    hachage: u32,
+    parent: u32,
+    debut_nom: usize,
+    longueur_nom: usize,
     genre: u8,
     debut: usize,
     fin: usize,
 }
 
-/// Une table de hachage du fichier, ses éléments rangés par nom complet.
+/// Une table de hachage du fichier : son en-tête vérifié, ses éléments lus à la demande.
 pub(crate) struct Table {
     octets: Rc<[u8]>,
-    elements: HashMap<String, Element>,
+    /// Position du filtre de Bloom, et son nombre de mots.
+    bloom: usize,
+    mots_bloom: usize,
+    /// Position des seaux, et leur nombre.
+    seaux: usize,
+    n_seaux: usize,
+    /// Position des éléments, et leur nombre.
+    elements: usize,
+    n: usize,
 }
 
 fn u32_le(octets: &[u8], position: usize) -> Option<u32> {
@@ -57,6 +86,14 @@ fn u16_le(octets: &[u8], position: usize) -> Option<u16> {
     Some(u16::from_le_bytes(mot.try_into().ok()?))
 }
 
+/// Le hachage de djb que GLib calcule sur les noms, octet par octet comme des `signed char`.
+pub(crate) fn hachage(nom: &[u8]) -> u32 {
+    nom.iter().fold(5381u32, |h, &c| {
+        h.wrapping_mul(33)
+            .wrapping_add(i32::from(c.cast_signed()).cast_unsigned())
+    })
+}
+
 impl Gvdb {
     /// `None` : pas un fichier GVDB lisible ici (signature, version, ou ordre des octets d'une autre machine).
     pub(crate) fn depuis(octets: Vec<u8>) -> Option<Gvdb> {
@@ -64,6 +101,28 @@ impl Gvdb {
             return None;
         }
         Some(Gvdb { octets: octets.into() })
+    }
+
+    /// Le fichier `chemin` : `Ok(None)` s'il n'existe pas ; `Err` s'il ne se lit pas, n'est pas un fichier ordinaire
+    /// (un tube nommé bloquerait la lecture), dépasse `FICHIER_MAX` ou n'est pas du GVDB lisible ici.
+    pub(crate) fn ouvrir(chemin: &Path) -> Result<Option<Gvdb>, ()> {
+        let mut options = std::fs::OpenOptions::new();
+        options.read(true);
+        std::os::unix::fs::OpenOptionsExt::custom_flags(&mut options, libc::O_NONBLOCK);
+        let fichier = match options.open(chemin) {
+            Ok(f) => f,
+            Err(e) if e.kind() == ErrorKind::NotFound => return Ok(None),
+            Err(_) => return Err(()),
+        };
+        if !fichier.metadata().map_err(|_| ())?.is_file() {
+            return Err(());
+        }
+        let mut octets = Vec::new();
+        fichier.take(FICHIER_MAX + 1).read_to_end(&mut octets).map_err(|_| ())?;
+        if octets.len() as u64 > FICHIER_MAX {
+            return Err(());
+        }
+        Gvdb::depuis(octets).map(Some).ok_or(())
     }
 
     pub(crate) fn racine(&self) -> Option<Table> {
@@ -74,91 +133,206 @@ impl Gvdb {
 }
 
 impl Table {
+    /// L'en-tête de la table rangée de `debut` à `fin`, vérifié comme `gvdb_table_setup_root`. Là où GLib se
+    /// contente d'une table vide (en-tête faux, place qui n'est pas un nombre entier d'éléments), `None` : la
+    /// commande dira mieux ce que GNOME en fait.
     fn lire(octets: Rc<[u8]>, debut: usize, fin: usize) -> Option<Table> {
-        if !debut.is_multiple_of(4) || debut > fin {
+        if !debut.is_multiple_of(4) || debut > fin || fin > octets.len() {
             return None;
         }
-        let zone = octets.get(debut..fin)?;
-        // Les 5 bits du haut du premier mot donnent le décalage du filtre de Bloom, inutile à qui lit tout.
-        let mots_bloom = (u32_le(zone, 0)? & ((1 << 27) - 1)) as usize;
-        let seaux = u32_le(zone, 4)? as usize;
-        let debut_elements = mots_bloom.checked_add(seaux)?.checked_mul(4)?.checked_add(8)?;
-        let place = zone.len().checked_sub(debut_elements)?;
-        let n = place / 24;
-        let mut bruts = Vec::with_capacity(n);
-        for i in 0..n {
-            let e = debut_elements + 24 * i;
-            let parent = u32_le(zone, e + 4)?;
-            let debut_nom = u32_le(zone, e + 8)? as usize;
-            let longueur_nom = usize::from(u16_le(zone, e + 12)?);
-            let nom = octets.get(debut_nom..debut_nom.checked_add(longueur_nom)?)?;
-            let element = Element {
-                genre: zone[e + 14],
-                debut: u32_le(zone, e + 16)? as usize,
-                fin: u32_le(zone, e + 20)? as usize,
-            };
-            bruts.push((parent, nom, element));
+        // Les 5 bits du haut du premier mot portent un décalage que GLib ne lit pas.
+        let mots_bloom = (u32_le(&octets, debut)? & ((1 << 27) - 1)) as usize;
+        let n_seaux = u32_le(&octets, debut + 4)? as usize;
+        let place = (fin - debut)
+            .checked_sub(8)?
+            .checked_sub(mots_bloom.checked_mul(4)?)?
+            .checked_sub(n_seaux.checked_mul(4)?)?;
+        if !place.is_multiple_of(24) {
+            return None;
         }
-        let mut elements = HashMap::with_capacity(n);
-        for (i, (_, _, element)) in bruts.iter().enumerate() {
-            // Le nom complet, des parents vers l'élément ; une boucle de parents forgée s'arrête à n pas.
-            let mut morceaux = Vec::new();
-            let mut courant = i;
-            loop {
-                let (parent, nom, _) = bruts[courant];
-                morceaux.push(nom);
-                if parent == u32::MAX {
-                    break;
-                }
-                courant = parent as usize;
-                if courant >= n || morceaux.len() > n {
-                    return None;
-                }
-            }
-            let complet: Vec<u8> = morceaux.iter().rev().flat_map(|m| m.iter().copied()).collect();
-            let Ok(nom) = String::from_utf8(complet) else {
-                continue;
-            };
-            elements.insert(nom, *element);
-        }
-        drop(bruts);
-        Some(Table { octets, elements })
+        let bloom = debut + 8;
+        let seaux = bloom + 4 * mots_bloom;
+        Some(Table {
+            octets,
+            bloom,
+            mots_bloom,
+            seaux,
+            n_seaux,
+            elements: seaux + 4 * n_seaux,
+            n: place / 24,
+        })
     }
 
-    fn donnees(&self, nom: &str, genre: u8) -> Option<(&[u8], Element)> {
-        let e = *self.elements.get(nom).filter(|e| e.genre == genre)?;
-        if e.debut > e.fin {
+    fn element(&self, i: usize) -> Option<Element> {
+        let e = self.elements.checked_add(i.checked_mul(24)?)?;
+        let o = &self.octets;
+        Some(Element {
+            hachage: u32_le(o, e)?,
+            parent: u32_le(o, e + 4)?,
+            debut_nom: u32_le(o, e + 8)? as usize,
+            longueur_nom: usize::from(u16_le(o, e + 12)?),
+            genre: *o.get(e + 14)?,
+            debut: u32_le(o, e + 16)? as usize,
+            fin: u32_le(o, e + 20)? as usize,
+        })
+    }
+
+    /// Le morceau de nom que l'élément porte lui-même.
+    fn morceau(&self, e: &Element) -> Option<&[u8]> {
+        self.octets.get(e.debut_nom..e.debut_nom.checked_add(e.longueur_nom)?)
+    }
+
+    /// Le nom complet de `e` est `cle` : comparé depuis la fin, morceau par morceau en remontant les parents, comme
+    /// `gvdb_table_check_name`. Chaque pas mange au moins un octet de la clé : rien ne coûte plus que sa longueur, et
+    /// une boucle de parents s'arrête d'elle-même.
+    fn nom_est(&self, mut e: Element, cle: &[u8]) -> bool {
+        let mut reste = cle.len();
+        loop {
+            let Some(morceau) = self.morceau(&e) else {
+                return false;
+            };
+            let Some(avant) = reste.checked_sub(morceau.len()) else {
+                return false;
+            };
+            if cle[avant..reste] != *morceau {
+                return false;
+            }
+            reste = avant;
+            if reste == 0 && e.parent == u32::MAX {
+                return true;
+            }
+            let parent = e.parent as usize;
+            if parent >= self.n || morceau.is_empty() {
+                return false;
+            }
+            let Some(p) = self.element(parent) else {
+                return false;
+            };
+            e = p;
+        }
+    }
+
+    /// L'élément que GLib trouverait pour `cle` et `genre` (`gvdb_table_lookup`).
+    fn chercher(&self, cle: &str, genre: u8) -> Option<Element> {
+        if self.n_seaux == 0 || self.n == 0 {
             return None;
         }
-        Some((self.octets.get(e.debut..e.fin)?, e))
+        let cle = cle.as_bytes();
+        let h = hachage(cle);
+        if self.mots_bloom > 0 {
+            let mot = u32_le(&self.octets, self.bloom + 4 * ((h / 32) as usize % self.mots_bloom))?;
+            // GLib n'affecte jamais son `bloom_shift`, qui reste à 0 : ses deux bits du filtre n'en font qu'un.
+            let masque = 1u32 << (h & 31);
+            if mot & masque != masque {
+                return None;
+            }
+        }
+        let seau = h as usize % self.n_seaux;
+        let premier = u32_le(&self.octets, self.seaux + 4 * seau)? as usize;
+        let dernier = if seau + 1 == self.n_seaux {
+            self.n
+        } else {
+            (u32_le(&self.octets, self.seaux + 4 * (seau + 1))? as usize).min(self.n)
+        };
+        (premier..dernier)
+            .map_while(|i| self.element(i))
+            .find(|e| e.hachage == h && self.nom_est(*e, cle) && e.genre == genre)
+    }
+
+    /// Les données de l'élément, refusées si elles débordent du fichier ou ne sont pas alignées comme GLib l'exige
+    /// (`gvdb_table_dereference`).
+    fn donnees(&self, e: &Element, alignement: usize) -> Option<&[u8]> {
+        if e.debut > e.fin || !e.debut.is_multiple_of(alignement) {
+            return None;
+        }
+        self.octets.get(e.debut..e.fin)
     }
 
     /// La valeur rangée sous `nom` (genre `v`), avec son type ; `None` si elle manque ou ne se lit pas.
     pub(crate) fn valeur(&self, nom: &str) -> Option<Variante> {
-        let (octets, _) = self.donnees(nom, b'v')?;
-        match decoder(&Genre::Variante, octets, 0)? {
+        let e = self.chercher(nom, b'v')?;
+        match decoder(&Genre::Variante, self.donnees(&e, 8)?)? {
             Variante::Boite(v) => Some(*v),
             _ => None,
         }
     }
 
-    /// La table imbriquée rangée sous `nom` (genre `H`).
-    pub(crate) fn table(&self, nom: &str) -> Option<Table> {
-        let (_, e) = self.donnees(nom, b'H')?;
-        Table::lire(Rc::clone(&self.octets), e.debut, e.fin)
+    /// La table imbriquée rangée sous `nom` (genre `H`) : `Ok(None)` si elle n'y est pas, `Err` si elle ne se lit
+    /// pas.
+    pub(crate) fn table(&self, nom: &str) -> Result<Option<Table>, ()> {
+        let Some(e) = self.chercher(nom, b'H') else {
+            return Ok(None);
+        };
+        Table::lire(Rc::clone(&self.octets), e.debut, e.fin).map(Some).ok_or(())
     }
 
-    /// Un élément de genre `v` porte ce nom (ce que regarde dconf dans la table des verrous).
+    /// GLib trouve une valeur sous ce nom (`gvdb_table_has_value`, ce que regarde dconf dans chaque base et dans la
+    /// table des verrous) ; `valeur` peut encore ne pas la décoder.
     pub(crate) fn contient_valeur(&self, nom: &str) -> bool {
-        self.elements.get(nom).is_some_and(|e| e.genre == b'v')
+        self.chercher(nom, b'v').is_some_and(|e| self.donnees(&e, 8).is_some())
     }
 
-    /// Les noms des valeurs de la table (genre `v`), dans un ordre quelconque.
-    pub(crate) fn noms_des_valeurs(&self) -> impl Iterator<Item = &str> {
-        self.elements
-            .iter()
-            .filter(|(_, e)| e.genre == b'v')
-            .map(|(n, _)| n.as_str())
+    /// Les noms complets des valeurs de la table (genre `v`), triés et sans doublon, comme `gvdb_table_get_names` les
+    /// rebâtit : un nom n'existe que si la chaîne de ses parents mène à la racine. `None` : noms trop longs en tout,
+    /// ou qui ne sont pas de l'UTF-8.
+    pub(crate) fn noms_des_valeurs(&self) -> Option<Vec<String>> {
+        enum Nom {
+            Inconnu,
+            EnCours,
+            Aucun,
+            Connu(Vec<u8>),
+        }
+        let mut noms: Vec<Nom> = (0..self.n).map(|_| Nom::Inconnu).collect();
+        let mut total = 0usize;
+        for i in 0..self.n {
+            // Monter jusqu'à un nom déjà rebâti, la racine ou une impasse ; chaque élément n'est rebâti qu'une fois.
+            let mut pile = Vec::new();
+            let mut courant = i;
+            let mut debut: Option<Vec<u8>> = loop {
+                match &noms[courant] {
+                    Nom::Connu(n) => break Some(n.clone()),
+                    // Une boucle de parents, ou une chaîne déjà sans issue.
+                    Nom::EnCours | Nom::Aucun => break None,
+                    Nom::Inconnu => {}
+                }
+                noms[courant] = Nom::EnCours;
+                pile.push(courant);
+                let parent = self.element(courant)?.parent;
+                if parent == u32::MAX {
+                    break Some(Vec::new());
+                }
+                if parent as usize >= self.n {
+                    break None;
+                }
+                courant = parent as usize;
+            };
+            for &j in pile.iter().rev() {
+                let e = self.element(j)?;
+                debut = match (debut, self.morceau(&e)) {
+                    (Some(mut nom), Some(morceau)) => {
+                        nom.extend_from_slice(morceau);
+                        total = total.checked_add(nom.len())?;
+                        if total > NOMS_OCTETS_MAX {
+                            return None;
+                        }
+                        Some(nom)
+                    }
+                    _ => None,
+                };
+                noms[j] = debut.clone().map_or(Nom::Aucun, Nom::Connu);
+            }
+        }
+        let mut valeurs = Vec::new();
+        for (i, nom) in noms.into_iter().enumerate() {
+            if let Nom::Connu(nom) = nom
+                && self.element(i)?.genre == b'v'
+            {
+                valeurs.push(String::from_utf8(nom).ok()?);
+            }
+        }
+        valeurs.sort_unstable();
+        valeurs.dedup();
+        Some(valeurs)
     }
 }
 
@@ -197,44 +371,68 @@ impl Genre {
         }
     }
 
+    /// L'alignement d'une valeur de ce type (pour la fabrique et les tests ; le décodage lit celui de son `Plan`).
+    #[cfg(test)]
     fn alignement(&self) -> usize {
-        match self {
-            Genre::Simple(b'n' | b'q') => 2,
-            Genre::Simple(b'i' | b'u' | b'h') => 4,
-            Genre::Simple(b'x' | b't' | b'd') | Genre::Variante => 8,
-            Genre::Simple(_) => 1,
-            Genre::Tableau(e) | Genre::Peut(e) => e.alignement(),
-            Genre::Tuple(m) => m.iter().map(Genre::alignement).max().unwrap_or(1),
-            Genre::Entree(k, v) => k.alignement().max(v.alignement()),
-        }
+        Plan::de(self).alignement
     }
 
     /// La taille d'une valeur de ce type quand elle est fixe ; `None` pour les chaînes, tableaux, variantes…
+    #[cfg(test)]
     fn taille_fixe(&self) -> Option<usize> {
-        match self {
-            Genre::Simple(b'b' | b'y') => Some(1),
-            Genre::Simple(b'n' | b'q') => Some(2),
-            Genre::Simple(b'i' | b'u' | b'h') => Some(4),
-            Genre::Simple(b'x' | b't' | b'd') => Some(8),
-            Genre::Simple(_) | Genre::Variante | Genre::Tableau(_) | Genre::Peut(_) => None,
-            Genre::Tuple(m) => taille_membres(m.iter(), self.alignement()),
-            Genre::Entree(k, v) => taille_membres([k.as_ref(), v.as_ref()].into_iter(), self.alignement()),
-        }
+        Plan::de(self).taille
     }
+}
 
-    fn membres(&self) -> Vec<&Genre> {
-        match self {
-            Genre::Tuple(m) => m.iter().collect(),
-            Genre::Entree(k, v) => vec![k, v],
-            _ => Vec::new(),
+/// Ce que le décodage d'un type demande, calculé une fois par type plutôt qu'à chaque valeur : la taille et
+/// l'alignement d'un n-uplet imbriqué, recalculés à chaque élément et à chaque niveau, coûtaient le cube de sa
+/// profondeur pour chaque élément d'un tableau.
+struct Plan<'g> {
+    genre: &'g Genre,
+    taille: Option<usize>,
+    alignement: usize,
+    /// Nœuds du type : ce que coûte une copie de `genre`.
+    noeuds: usize,
+    /// L'élément (tableau, « peut-être ») ou les membres (n-uplet, entrée).
+    enfants: Vec<Plan<'g>>,
+}
+
+impl<'g> Plan<'g> {
+    fn de(genre: &'g Genre) -> Plan<'g> {
+        let enfants: Vec<Plan<'g>> = match genre {
+            Genre::Simple(_) | Genre::Variante => Vec::new(),
+            Genre::Tableau(e) | Genre::Peut(e) => vec![Plan::de(e)],
+            Genre::Tuple(m) => m.iter().map(Plan::de).collect(),
+            Genre::Entree(k, v) => vec![Plan::de(k), Plan::de(v)],
+        };
+        let (taille, alignement) = match genre {
+            Genre::Simple(b'b' | b'y') => (Some(1), 1),
+            Genre::Simple(b'n' | b'q') => (Some(2), 2),
+            Genre::Simple(b'i' | b'u' | b'h') => (Some(4), 4),
+            Genre::Simple(b'x' | b't' | b'd') => (Some(8), 8),
+            Genre::Simple(_) => (None, 1),
+            Genre::Variante => (None, 8),
+            Genre::Tableau(_) | Genre::Peut(_) => (None, enfants[0].alignement),
+            Genre::Tuple(_) | Genre::Entree(..) => {
+                let alignement = enfants.iter().map(|m| m.alignement).max().unwrap_or(1);
+                (taille_membres(&enfants, alignement), alignement)
+            }
+        };
+        let noeuds = enfants.iter().fold(1usize, |n, e| n.saturating_add(e.noeuds));
+        Plan {
+            genre,
+            taille,
+            alignement,
+            noeuds,
+            enfants,
         }
     }
 }
 
-fn taille_membres<'a>(membres: impl Iterator<Item = &'a Genre>, alignement: usize) -> Option<usize> {
+fn taille_membres(membres: &[Plan], alignement: usize) -> Option<usize> {
     let mut taille = 0;
     for m in membres {
-        taille = aligner(taille, m.alignement())? + m.taille_fixe()?;
+        taille = aligner(taille, m.alignement)?.checked_add(m.taille?)?;
     }
     // Un n-uplet vide occupe tout de même un octet.
     Some(aligner(taille, alignement)?.max(1))
@@ -505,12 +703,25 @@ fn lire_decalage(octets: &[u8]) -> Option<usize> {
 }
 
 /// Décode `octets`, sérialisés comme le type `genre`. `None` : données qui ne sont pas sous la forme normale que
-/// GLib écrit (taille fausse, chaîne sans zéro final, décalage hors du conteneur…).
-pub(crate) fn decoder(genre: &Genre, octets: &[u8], profondeur: usize) -> Option<Variante> {
+/// GLib écrit (taille fausse, chaîne sans zéro final, décalage hors du conteneur…), ou qui produiraient plus de
+/// `NOEUDS_MAX` valeurs.
+pub(crate) fn decoder(genre: &Genre, octets: &[u8]) -> Option<Variante> {
+    let mut budget = NOEUDS_MAX;
+    decoder_plan(&Plan::de(genre), octets, 0, &mut budget)
+}
+
+/// Retire `n` du budget de valeurs ; `None` quand il est épuisé.
+fn depenser(budget: &mut usize, n: usize) -> Option<()> {
+    *budget = budget.checked_sub(n)?;
+    Some(())
+}
+
+fn decoder_plan(plan: &Plan, octets: &[u8], profondeur: usize, budget: &mut usize) -> Option<Variante> {
     if profondeur > PROFONDEUR_MAX {
         return None;
     }
-    if let Some(taille) = genre.taille_fixe()
+    depenser(budget, 1)?;
+    if let Some(taille) = plan.taille
         && octets.len() != taille
     {
         return None;
@@ -520,7 +731,7 @@ pub(crate) fn decoder(genre: &Genre, octets: &[u8], profondeur: usize) -> Option
         m.get_mut(..o.len())?.copy_from_slice(o);
         Some(m)
     };
-    Some(match genre {
+    Some(match plan.genre {
         Genre::Simple(c) => match c {
             b'b' => match octets[0] {
                 0 => Variante::Booleen(false),
@@ -552,33 +763,40 @@ pub(crate) fn decoder(genre: &Genre, octets: &[u8], profondeur: usize) -> Option
         Genre::Variante => {
             let zero = octets.iter().rposition(|&o| o == 0)?;
             let interieur = Genre::depuis(&octets[zero + 1..])?;
-            Variante::Boite(Box::new(decoder(&interieur, &octets[..zero], profondeur + 1)?))
+            let p = Plan::de(&interieur);
+            depenser(budget, p.noeuds)?;
+            Variante::Boite(Box::new(decoder_plan(&p, &octets[..zero], profondeur + 1, budget)?))
         }
         Genre::Peut(e) => {
+            let pe = &plan.enfants[0];
+            depenser(budget, pe.noeuds)?;
             let valeur = if octets.is_empty() {
                 None
-            } else if e.taille_fixe().is_some() {
-                Some(decoder(e, octets, profondeur + 1)?)
+            } else if pe.taille.is_some() {
+                Some(decoder_plan(pe, octets, profondeur + 1, budget)?)
             } else {
                 let (zero, reste) = octets.split_last()?;
                 if *zero != 0 {
                     return None;
                 }
-                Some(decoder(e, reste, profondeur + 1)?)
+                Some(decoder_plan(pe, reste, profondeur + 1, budget)?)
             };
             Variante::Peut((**e).clone(), valeur.map(Box::new))
         }
-        Genre::Tableau(e) => Variante::Tableau((**e).clone(), elements(e, octets, profondeur)?),
+        Genre::Tableau(e) => {
+            let pe = &plan.enfants[0];
+            depenser(budget, pe.noeuds)?;
+            Variante::Tableau((**e).clone(), elements(pe, octets, profondeur, budget)?)
+        }
         Genre::Tuple(_) | Genre::Entree(..) => {
-            let membres = genre.membres();
-            let n = membres.len();
+            let n = plan.enfants.len();
             let tde = taille_decalage(octets.len());
             let mut fin_decalages = octets.len();
             let mut position = 0;
             let mut valeurs = Vec::with_capacity(n);
-            for (i, m) in membres.into_iter().enumerate() {
-                position = aligner(position, m.alignement())?;
-                let fin = match m.taille_fixe() {
+            for (i, m) in plan.enfants.iter().enumerate() {
+                position = aligner(position, m.alignement)?;
+                let fin = match m.taille {
                     Some(t) => position.checked_add(t)?,
                     None if i + 1 == n => fin_decalages,
                     None => {
@@ -589,10 +807,10 @@ pub(crate) fn decoder(genre: &Genre, octets: &[u8], profondeur: usize) -> Option
                 if position > fin || fin > fin_decalages {
                     return None;
                 }
-                valeurs.push(decoder(m, &octets[position..fin], profondeur + 1)?);
+                valeurs.push(decoder_plan(m, &octets[position..fin], profondeur + 1, budget)?);
                 position = fin;
             }
-            match genre {
+            match plan.genre {
                 Genre::Entree(..) => {
                     let mut v = valeurs.into_iter();
                     Variante::Entree(Box::new(v.next()?), Box::new(v.next()?))
@@ -603,12 +821,15 @@ pub(crate) fn decoder(genre: &Genre, octets: &[u8], profondeur: usize) -> Option
     })
 }
 
-fn elements(e: &Genre, octets: &[u8], profondeur: usize) -> Option<Vec<Variante>> {
-    if let Some(taille) = e.taille_fixe() {
-        if !octets.len().is_multiple_of(taille) {
+fn elements(e: &Plan, octets: &[u8], profondeur: usize, budget: &mut usize) -> Option<Vec<Variante>> {
+    if let Some(taille) = e.taille {
+        if !octets.len().is_multiple_of(taille) || octets.len() / taille > *budget {
             return None;
         }
-        return octets.chunks(taille).map(|o| decoder(e, o, profondeur + 1)).collect();
+        return octets
+            .chunks(taille)
+            .map(|o| decoder_plan(e, o, profondeur + 1, budget))
+            .collect();
     }
     if octets.is_empty() {
         return Some(Vec::new());
@@ -616,18 +837,18 @@ fn elements(e: &Genre, octets: &[u8], profondeur: usize) -> Option<Vec<Variante>
     let tde = taille_decalage(octets.len());
     let debut_decalages = lire_decalage(&octets[octets.len() - tde..])?;
     let place = octets.len().checked_sub(debut_decalages)?;
-    if place % tde != 0 {
+    if place % tde != 0 || place / tde > *budget {
         return None;
     }
     let mut valeurs = Vec::with_capacity(place / tde);
     let mut position = 0;
     for mot in octets[debut_decalages..].chunks(tde) {
         let fin = lire_decalage(mot)?;
-        position = aligner(position, e.alignement())?;
+        position = aligner(position, e.alignement)?;
         if position > fin || fin > debut_decalages {
             return None;
         }
-        valeurs.push(decoder(e, &octets[position..fin], profondeur + 1)?);
+        valeurs.push(decoder_plan(e, &octets[position..fin], profondeur + 1, budget)?);
         position = fin;
     }
     Some(valeurs)
@@ -638,7 +859,7 @@ fn elements(e: &Genre, octets: &[u8], profondeur: usize) -> Option<Vec<Variante>
 
 #[cfg(test)]
 pub(crate) mod fabrique {
-    use super::{Genre, Variante, aligner, taille_decalage};
+    use super::{Genre, Variante, aligner, hachage, taille_decalage};
 
     fn completer(sortie: &mut Vec<u8>, alignement: usize) {
         sortie.resize(aligner(sortie.len(), alignement).expect("taille"), 0);
@@ -737,14 +958,6 @@ pub(crate) mod fabrique {
 
     pub(crate) fn valeur(nom: &str, v: Variante) -> (String, Contenu) {
         (nom.to_string(), Contenu::Valeur(v))
-    }
-
-    fn hachage(nom: &[u8]) -> u32 {
-        // Le hachage de djb, sur des `signed char` comme dans GLib.
-        nom.iter().fold(5381u32, |h, &c| {
-            h.wrapping_mul(33)
-                .wrapping_add(i32::from(c.cast_signed()).cast_unsigned())
-        })
     }
 
     fn mot(sortie: &mut [u8], position: usize, valeur: usize) {
@@ -888,7 +1101,7 @@ mod tests {
 
     fn aller_retour(v: &Variante) {
         let octets = serialiser(v);
-        assert_eq!(decoder(&v.genre(), &octets, 0).as_ref(), Some(v), "{v:?} : {octets:?}");
+        assert_eq!(decoder(&v.genre(), &octets).as_ref(), Some(v), "{v:?} : {octets:?}");
     }
 
     #[test]
@@ -977,7 +1190,7 @@ mod tests {
     /// Octets écrits par GLib (gschemas.compiled de GNOME, base de dconf) : le décodage les relit tels quels.
     #[test]
     fn octets_ecrits_par_glib() {
-        let v = |o: &[u8]| decoder(&Genre::Variante, o, 0);
+        let v = |o: &[u8]| decoder(&Genre::Variante, o);
         assert_eq!(
             v(b",\x01\x00\x00\x00(u)"),
             Some(Variante::Boite(Box::new(Variante::Tuple(vec![Variante::Naturel32(
@@ -1009,7 +1222,7 @@ mod tests {
 
     #[test]
     fn donnees_forgees_refusees() {
-        let s = |g: &str, o: &[u8]| decoder(&Genre::depuis(g.as_bytes()).unwrap(), o, 0);
+        let s = |g: &str, o: &[u8]| decoder(&Genre::depuis(g.as_bytes()).unwrap(), o);
         assert_eq!(s("s", b"abc"), None, "sans zéro final");
         assert_eq!(s("s", b"a\0c\0"), None, "zéro au milieu");
         assert_eq!(s("s", b"\xff\0"), None, "pas de l'UTF-8");
@@ -1090,12 +1303,17 @@ mod tests {
         );
         assert_eq!(racine.valeur("/system/proxy/"), None, "un dossier n'est pas une valeur");
         assert_eq!(racine.valeur("/absente"), None);
-        let verrous = racine.table(".locks").expect("verrous");
+        let verrous = racine.table(".locks").expect("lisible").expect("verrous");
         assert!(verrous.contient_valeur("/org/gnome/desktop/screensaver/lock-enabled"));
         assert!(!verrous.contient_valeur("/system/proxy/mode"));
-        let mut noms: Vec<&str> = racine.noms_des_valeurs().collect();
-        noms.sort_unstable();
-        assert_eq!(noms.len(), 3);
+        assert_eq!(
+            racine.noms_des_valeurs().expect("noms"),
+            [
+                "/org/gnome/desktop/screensaver/lock-enabled",
+                "/org/gnome/desktop/session/idle-delay",
+                "/system/proxy/mode"
+            ]
+        );
     }
 
     /// Une base écrite par `dconf compile` (dconf 51.0 d'Arch), avec un verrou : la même lecture.
@@ -1118,9 +1336,169 @@ mod tests {
         assert!(
             racine
                 .table(".locks")
+                .expect("lisible")
                 .expect("verrous")
                 .contient_valeur("/org/gnome/desktop/screensaver/lock-enabled")
         );
+    }
+
+    /// Un élément d'une table écrite à la main ; positions comptées depuis le début de la queue du fichier.
+    struct Brut {
+        hachage: u32,
+        parent: u32,
+        nom: (usize, usize),
+        genre: u8,
+        donnees: (usize, usize),
+    }
+
+    /// Un fichier GVDB écrit à la main, pour les formes que la fabrique n'écrit pas (filtre de Bloom, éléments
+    /// chaînés, positions fausses) : la table racine, puis `queue`, rangée sur 8 octets.
+    fn gvdb_brut(bloom: &[u32], seaux: &[u32], elements: &[Brut], queue: &[u8]) -> Vec<u8> {
+        let debut = 24;
+        let fin = debut + 8 + 4 * (bloom.len() + seaux.len()) + 24 * elements.len();
+        let base = aligner(fin, 8).unwrap();
+        let u = |n: usize| u32::try_from(n).unwrap().to_le_bytes();
+        let mut o = b"GVariant".to_vec();
+        o.resize(16, 0);
+        o.extend(u(debut));
+        o.extend(u(fin));
+        o.extend(u(bloom.len()));
+        o.extend(u(seaux.len()));
+        for m in bloom.iter().chain(seaux) {
+            o.extend(m.to_le_bytes());
+        }
+        for e in elements {
+            o.extend(e.hachage.to_le_bytes());
+            o.extend(e.parent.to_le_bytes());
+            o.extend(u(base + e.nom.0));
+            o.extend(u16::try_from(e.nom.1).unwrap().to_le_bytes());
+            o.extend([e.genre, 0]);
+            o.extend(u(base + e.donnees.0));
+            o.extend(u(base + e.donnees.1));
+        }
+        o.resize(base, 0);
+        o.extend_from_slice(queue);
+        o
+    }
+
+    /// La queue des tests à la main : `true` boîté en 0..3, `false` en 8..11, puis le texte `noms` en 16.
+    fn queue(noms: &[u8]) -> Vec<u8> {
+        let mut q = b"\x01\0b\0\0\0\0\0\0\0b\0\0\0\0\0".to_vec();
+        q.extend_from_slice(noms);
+        q
+    }
+
+    /// Des éléments chaînés par leur parent, qui portent chacun le même nom de 65 535 octets : rebâtir leurs noms
+    /// coûterait n² × 65 535 octets (33 Go pour 1 000 éléments). La recherche, elle, ne coûte que la clé.
+    #[test]
+    fn noms_chaines_bornes() {
+        let long = vec![b'a'; 65_535];
+        let elements: Vec<Brut> = (0..1000u32)
+            .map(|i| Brut {
+                hachage: if i == 0 { hachage(&long) } else { i },
+                parent: i.checked_sub(1).unwrap_or(u32::MAX),
+                nom: (16, long.len()),
+                genre: b'v',
+                donnees: (0, 3),
+            })
+            .collect();
+        let fichier = gvdb_brut(&[], &[0], &elements, &queue(&long));
+        let debut = std::time::Instant::now();
+        let racine = Gvdb::depuis(fichier).unwrap().racine().expect("racine");
+        assert_eq!(
+            racine.valeur(std::str::from_utf8(&long).unwrap()),
+            Some(Variante::Booleen(true))
+        );
+        assert_eq!(racine.valeur("x"), None);
+        assert_eq!(racine.noms_des_valeurs(), None, "noms trop longs en tout");
+        assert!(debut.elapsed().as_secs() < 10, "{:?}", debut.elapsed());
+    }
+
+    /// La recherche de GLib : le premier élément du seau l'emporte sur un doublon, un hachage faux, une valeur mal
+    /// alignée ou un filtre de Bloom qui exclut la clé ne laissent rien trouver.
+    #[test]
+    fn recherche_comme_glib() {
+        let k = |hachage: u32, donnees: (usize, usize)| Brut {
+            hachage,
+            parent: u32::MAX,
+            nom: (16, 1),
+            genre: b'v',
+            donnees,
+        };
+        let h = hachage(b"k");
+        let lire = |bloom: &[u32], elements: &[Brut]| {
+            let t = Gvdb::depuis(gvdb_brut(bloom, &[0], elements, &queue(b"k")))
+                .unwrap()
+                .racine()
+                .expect("racine");
+            (t.contient_valeur("k"), t.valeur("k"))
+        };
+        let faux = (false, None);
+        assert_eq!(
+            lire(&[], &[k(h, (8, 11)), k(h, (0, 3))]),
+            (true, Some(Variante::Booleen(false))),
+            "le premier doublon, comme GLib"
+        );
+        assert_eq!(lire(&[], &[k(h ^ 1, (0, 3))]), faux, "hachage faux");
+        assert_eq!(
+            lire(&[], &[k(h ^ 1, (0, 3)), k(h, (8, 11))]),
+            (true, Some(Variante::Booleen(false))),
+            "le seul au bon hachage"
+        );
+        assert_eq!(lire(&[], &[k(h, (1, 3))]), faux, "valeur mal alignée");
+        assert_eq!(
+            lire(&[1 << (h & 31)], &[k(h, (0, 3))]),
+            (true, Some(Variante::Booleen(true))),
+            "admise par le filtre de Bloom"
+        );
+        assert_eq!(lire(&[!(1 << (h & 31))], &[k(h, (0, 3))]), faux, "exclue par le filtre");
+        let mut table = k(h, (0, 3));
+        table.genre = b'H';
+        assert_eq!(lire(&[], &[table]), faux, "pas une valeur");
+    }
+
+    /// Un tableau d'éléments d'un octet dont le type est un n-uplet imbriqué sur 60 niveaux : 1 Mo de fichier en
+    /// faisait 2,7 Go de mémoire et 8 minutes de calcul. Refusé tout de suite ; un petit se lit.
+    #[test]
+    fn valeur_forgee_bornee() {
+        let genre = format!("a{}{}", "(".repeat(60), ")".repeat(60));
+        let boite = |n: usize| {
+            let mut o = vec![0u8; n];
+            o.push(0);
+            o.extend_from_slice(genre.as_bytes());
+            o
+        };
+        let debut = std::time::Instant::now();
+        assert_eq!(decoder(&Genre::Variante, &boite(1_000_000)), None);
+        assert_eq!(decoder(&Genre::Variante, &boite(10_000)), None, "60 × 10 000 valeurs");
+        assert!(debut.elapsed().as_secs() < 10, "{:?}", debut.elapsed());
+        let Some(Variante::Boite(petit)) = decoder(&Genre::Variante, &boite(100)) else {
+            panic!("petit tableau illisible");
+        };
+        assert!(matches!(*petit, Variante::Tableau(_, ref v) if v.len() == 100));
+    }
+
+    /// Un fichier trop gros ou qui n'est pas un fichier ordinaire (un tube nommé bloquerait) n'est pas lu.
+    #[test]
+    fn fichiers_refuses_a_l_ouverture() {
+        let d = std::env::temp_dir().join(format!("vanguard-gvdb-ouvrir-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        assert!(matches!(Gvdb::ouvrir(&d.join("absent")), Ok(None)));
+        let bon = d.join("bon");
+        std::fs::write(&bon, fichier(&[valeur("k", Variante::Booleen(true))], false)).unwrap();
+        let lu = Gvdb::ouvrir(&bon).unwrap().unwrap().racine().unwrap().valeur("k");
+        assert_eq!(lu, Some(Variante::Booleen(true)));
+        let gros = std::fs::File::create(d.join("gros")).unwrap();
+        gros.set_len(FICHIER_MAX + 1).unwrap();
+        assert!(Gvdb::ouvrir(&d.join("gros")).is_err());
+        assert!(Gvdb::ouvrir(&d).is_err(), "un dossier");
+        let tube = std::ffi::CString::new(d.join("tube").into_os_string().into_encoded_bytes()).unwrap();
+        // SAFETY : chemin terminé par un zéro, valable le temps de l'appel.
+        if unsafe { libc::mkfifo(tube.as_ptr(), 0o600) } == 0 {
+            assert!(Gvdb::ouvrir(&d.join("tube")).is_err(), "un tube nommé");
+        }
+        let _ = std::fs::remove_dir_all(&d);
     }
 
     #[test]
@@ -1146,7 +1524,7 @@ mod tests {
             if let Some(b) = Gvdb::depuis(bon[..longueur].to_vec()) {
                 let _ = b
                     .racine()
-                    .map(|t| (t.valeur("cle"), t.table("t").map(|x| x.valeur("x"))));
+                    .map(|t| (t.valeur("cle"), t.table("t").ok().flatten().map(|x| x.valeur("x"))));
             }
         }
         for i in 0..bon.len() {
@@ -1156,7 +1534,7 @@ mod tests {
                 if let Some(b) = Gvdb::depuis(abime) {
                     let _ = b
                         .racine()
-                        .map(|t| (t.valeur("cle"), t.table("t").map(|x| x.valeur("x"))));
+                        .map(|t| (t.valeur("cle"), t.table("t").ok().flatten().map(|x| x.valeur("x"))));
                 }
             }
         }
@@ -1171,7 +1549,17 @@ mod tests {
             let p = elements + 24 * e + 4;
             boucle[p..p + 4].copy_from_slice(&u32::try_from(e).unwrap().to_le_bytes());
         }
-        assert!(Gvdb::depuis(boucle).unwrap().racine().is_none());
+        let racine = Gvdb::depuis(boucle.clone()).unwrap().racine().unwrap();
+        assert_eq!(racine.valeur("/a/b"), None, "sans chemin jusqu'à la racine, pas de nom");
+        assert_eq!(racine.noms_des_valeurs(), Some(Vec::new()));
+        // Deux éléments parents l'un de l'autre.
+        for (e, parent) in [(0, 1u32), (1, 0)] {
+            let p = elements + 24 * e + 4;
+            boucle[p..p + 4].copy_from_slice(&parent.to_le_bytes());
+        }
+        let racine = Gvdb::depuis(boucle).unwrap().racine().unwrap();
+        assert_eq!(racine.valeur("/a/b"), None);
+        assert!(racine.noms_des_valeurs().is_some());
     }
 
     /// `dconf compile` d'un dossier : lock-enabled=false (verrouillé), idle-delay=uint32 600, mode='manual'.

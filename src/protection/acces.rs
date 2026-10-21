@@ -602,19 +602,15 @@ mod linux {
     pub(super) fn lire_magasin_flatpak(dossier: &std::path::Path) -> Option<Vec<Acces>> {
         let mut acces = Vec::new();
         for table in ["devices", "location"] {
-            let octets = match std::fs::read(dossier.join(table)) {
-                Ok(o) => o,
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
-                Err(_) => return None,
-            };
-            // Chaque objet (« camera », « location ») : ses données, puis la liste des permissions par application.
-            let Some(principale) = Gvdb::depuis(octets)?.racine()?.table("main") else {
+            let Some(base) = Gvdb::ouvrir(&dossier.join(table)).ok()? else {
                 continue;
             };
-            let mut objets: Vec<&str> = principale.noms_des_valeurs().collect();
-            objets.sort_unstable();
-            for objet in objets {
-                let Variante::Tuple(m) = principale.valeur(objet)? else {
+            // Chaque objet (« camera », « location ») : ses données, puis la liste des permissions par application.
+            let Some(principale) = base.racine()?.table("main").ok()? else {
+                continue;
+            };
+            for objet in principale.noms_des_valeurs()? {
+                let Variante::Tuple(m) = principale.valeur(&objet)? else {
                     return None;
                 };
                 let [Variante::Boite(_), Variante::Tableau(Genre::Entree(..), applications)] = m.as_slice() else {
@@ -625,22 +621,29 @@ mod linux {
                         return None;
                     };
                     let premiere = permissions.chaines()?.first().copied().unwrap_or("");
-                    acces.extend(acces_portail(table, objet, application.chaine()?, premiere));
+                    acces.extend(acces_portail(table, &objet, application.chaine()?, premiere));
                 }
             }
         }
         Some(acces)
     }
 
-    fn dossier_magasin_flatpak() -> std::path::PathBuf {
-        std::env::var_os("XDG_DATA_HOME")
+    /// Le dossier du magasin des permissions ; `None` s'il serait relatif (HOME vide, XDG_DATA_HOME relatif) : lu
+    /// depuis le dossier courant, il y manquerait, et « rien n'a été accordé » passerait pour vérifié.
+    pub(super) fn dossier_magasin_flatpak(
+        donnees: Option<std::ffi::OsString>,
+        maison: &std::path::Path,
+    ) -> Option<std::path::PathBuf> {
+        let dossier = donnees
             .filter(|d| !d.is_empty())
-            .map_or_else(|| crate::nettoyer::maison().join(".local/share"), PathBuf::from)
-            .join("flatpak/db")
+            .map_or_else(|| maison.join(".local/share"), PathBuf::from)
+            .join("flatpak/db");
+        dossier.is_absolute().then_some(dossier)
     }
 
     fn flatpak(b: &mut Bilan) {
-        match lire_magasin_flatpak(&dossier_magasin_flatpak())
+        match dossier_magasin_flatpak(std::env::var_os("XDG_DATA_HOME"), &crate::nettoyer::maison())
+            .and_then(|d| lire_magasin_flatpak(&d))
             .or_else(|| sortie("flatpak", &["permissions"]).map(|t| lire_flatpak_portails(&t)))
         {
             Some(a) => b.ajouter(a),
@@ -1123,6 +1126,26 @@ mod tests {
         std::fs::write(dossier.join("location"), abimee).unwrap();
         assert_eq!(linux::lire_magasin_flatpak(&dossier), None);
         let _ = std::fs::remove_dir_all(&dossier);
+    }
+
+    /// Le magasin n'est cherché que dans un dossier absolu : HOME vide le ferait chercher dans le dossier courant.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn dossier_du_magasin_absolu() {
+        let d = |x: Option<&str>, maison: &str| {
+            linux::dossier_magasin_flatpak(x.map(Into::into), std::path::Path::new(maison))
+        };
+        assert_eq!(d(None, ""), None);
+        assert_eq!(d(Some(""), ""), None);
+        assert_eq!(d(Some("donnees"), "/home/alice"), None);
+        assert_eq!(
+            d(None, "/home/alice"),
+            Some(std::path::PathBuf::from("/home/alice/.local/share/flatpak/db"))
+        );
+        assert_eq!(
+            d(Some("/srv/d"), ""),
+            Some(std::path::PathBuf::from("/srv/d/flatpak/db"))
+        );
     }
 
     /// `~/.local/share/flatpak/db/devices` écrit par le xdg-permission-store de xdg-desktop-portal 1.22 (applications inventées).
