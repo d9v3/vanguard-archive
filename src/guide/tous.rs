@@ -108,6 +108,13 @@ pub const PROGRAMMES: &[Programme] = &[
                 false,
             ),
             traduite(
+                "vanguard memoire",
+                "vanguard memory",
+                "YARA dans la mémoire des programmes qui tournent (malware sans fichier), à la demande.",
+                "YARA in the memory of running programs (fileless malware), on demand.",
+                false,
+            ),
+            traduite(
                 "vanguard --help",
                 "vanguard --help",
                 "Toutes les commandes de Vanguard et leurs options.",
