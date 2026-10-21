@@ -65,10 +65,21 @@ fn fichier_du_pilote(nom: &str, image: Option<&str>, racine: &str) -> PathBuf {
     PathBuf::from(image)
 }
 
+/// Les dossiers de ProgramData que seul le système peut modifier.
+const PROTEGES: [&str; 2] = [
+    "\\programdata\\microsoft\\windows defender\\",
+    "\\programdata\\microsoft\\windows defender advanced threat protection\\",
+];
+
 /// Pourquoi l'emplacement d'un pilote est suspect, ou `None` : le dossier de Windows (dont DriverStore) et les dossiers
 /// de programmes sont normaux.
 fn emplacement_suspect(fichier: &Path) -> Option<&'static str> {
     let f = fichier.to_string_lossy().to_lowercase().replace('/', "\\");
+    // Defender range son pilote d'analyse (MpKslDrv) dans ses mises à jour de définitions, sous ProgramData : un dossier
+    // que seul le système peut modifier, contrairement au reste de ProgramData.
+    if PROTEGES.iter().any(|p| f.contains(p)) {
+        return None;
+    }
     if f.contains("\\temp\\") || f.contains("\\users\\public\\") || f.contains("\\$recycle.bin\\") {
         return Some(tr!("dossier temporaire ou public", "temporary or public folder"));
     }
@@ -269,6 +280,10 @@ mod tests {
         assert!(emplacement_suspect(Path::new(r"C:\Users\alice\AppData\Local\d.sys")).is_some());
         assert!(emplacement_suspect(Path::new(r"C:\Windows\Temp\e.sys")).is_some());
         assert!(emplacement_suspect(Path::new(r"C:\ProgramData\x\f.sys")).is_some());
+        let defender = r"C:\ProgramData\Microsoft\Windows Defender\Definition Updates\{0A1B}\MpKslDrv.sys";
+        assert!(emplacement_suspect(Path::new(defender)).is_none());
+        // Un faux dossier « Windows Defender » ailleurs ne passe pas.
+        assert!(emplacement_suspect(Path::new(r"C:\Users\alice\Windows Defender\x.sys")).is_some());
     }
 
     #[test]
