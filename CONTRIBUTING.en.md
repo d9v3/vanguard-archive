@@ -171,9 +171,11 @@ the four targets and the tests, on Linux; on a real Windows (PowerShell, registr
 on each pull request and on demand (`gh workflow run ci.yml`). Not Windows or Mac on each push: on a private
 repository, their minutes count double and tenfold.
 
-Dependencies: `cargo deny` (`deny.toml`: known RustSec vulnerabilities, GPL-3.0-compatible licenses, crates.io only,
+Dependencies: `cargo deny` (`deny.toml`: known RustSec vulnerabilities, licenses from its list, crates.io only,
 duplicates; `extensions/deny.toml` for the extensions library and the Rust example, which have no dependencies), in
-`outils/verifier.sh` (skipped without the tool) and every night in CI.
+`outils/verifier.sh` (skipped without the tool) and every night in CI. The list only keeps permissive licenses (MIT,
+Apache-2.0, BSD, ISC…), compatible with the GPL-3.0-or-later and with a possible dual license of Vanguard: any other,
+even free and GPL-compatible (MPL, LGPL), first needs the author's approval.
 
 Dead links: `outils/liens.py` opens every link of the repository (documentation, the program's code except tests,
 scripts, licenses) and checks the internal links of the Markdown pages: target file, heading of an anchor, downloads

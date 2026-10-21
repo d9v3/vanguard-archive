@@ -8,9 +8,11 @@ Réponses à l'utilisateur en français, claires, avec le pourquoi.
 ## Commandes
 
 - Tout vérifier en une commande : `outils/verifier.sh` (mise en forme, clippy ×4, tests Linux et Wine, la suite Linux
-  refaite sans Internet, scripts PowerShell, shell et Python, liens internes, textes FR/EN ; les cibles en parallèle,
-  une ligne par étape à la fin). Les scripts PowerShell du programme y sont analysés et rejoués sous Linux dans un
-  bac à sable, depuis un dossier courant à témoins (`outils/rejouer-ps.py`) : un chemin vide qui le lirait se voit. `--rapide` : Linux seulement, avec Internet ; `--sans-wine`. Le détail suit.
+  refaite sans Internet, scripts PowerShell, shell et Python, extensions, liens internes, textes FR/EN, dépendances par
+  cargo deny ; les cibles en parallèle, une ligne par étape à la fin, avec les avertissements de cargo deny). Les
+  scripts PowerShell du programme y sont analysés et rejoués sous Linux dans un bac à sable, depuis un dossier
+  courant à témoins (`outils/rejouer-ps.py`) : un chemin vide qui le lirait se voit. `--rapide` : Linux seulement,
+  avec Internet ; `--sans-wine`. Le détail suit.
 - Sans Internet : `unshare -rn` (sans root, la boucle locale seule) et `VANGUARD_HORS_LIGNE=1` ; chaque outil qui
   dépend d'Internet doit s'y arrêter de lui-même, en moins d'une minute, et dire pourquoi il ne conclut pas.
 - Tests : `cargo test` (cible par défaut x86_64-unknown-linux-musl, voir `.cargo/config.toml`). Unitaires dans chaque
@@ -28,9 +30,9 @@ Réponses à l'utilisateur en français, claires, avec le pourquoi.
 - macOS : compilé et testé sur un Mac de GitHub (`.github/workflows/macos.yml`), à chaque publication et la nuit si
   le code a changé ; ici, clippy seulement.
 - CI (`.github/workflows/ci.yml`) : Linux à chaque envoi sur master (fmt, clippy -D warnings ×4, tests) ; la nuit,
-  si le code a changé, vrai Windows et compilation reproductible ; chaque nuit, `cargo audit`. GitHub lance la nuit
-  avec souvent des heures de retard : `gh run list --workflow ci.yml --event schedule` avant de la croire absente. À
-  la demande (des minutes facturées) : `gh workflow run ci.yml --ref master`.
+  si le code a changé, vrai Windows et compilation reproductible ; chaque nuit, `cargo audit` et `cargo deny`. GitHub
+  lance la nuit avec souvent des heures de retard : `gh run list --workflow ci.yml --event schedule` avant de la croire
+  absente. À la demande (des minutes facturées) : `gh workflow run ci.yml --ref master`.
 - Publication du jour : `outils/livrer-branche.sh <branche> <worktree>` (commit de version en tête : garde-fou, Mac
   de GitHub, vérification complète pendant qu'il compile, fusion rapide, puis `outils/deployer.sh`). Entre deux
   publications, sans rien envoyer : `outils/deployer.sh --local` (binaire local, clé USB ; avec
@@ -55,8 +57,10 @@ Réponses à l'utilisateur en français, claires, avec le pourquoi.
   `machine::appliquer` ou `appliquer_chacune` (montrée, confirmée ; sous Windows, une seule fenêtre administrateur).
 - Menus : `selection::choisir` et `selection::cocher` (flèches, Entrée, Échap ou Retour arrière ; lignes lues sans terminal). Une
   précision de menu fait 33 caractères au plus ; tout tient dans 76 colonnes (`ui::LARGEUR`).
-- Nouvelle dépendance : licence compatible GPL-3.0 (MIT, Apache, BSD…), puis `python3 outils/licences-tierces.py`
-  et committer LICENCES-TIERCES.txt.
+- Nouvelle dépendance : sa licence, et celles de ce qu'elle amène, parmi celles de `deny.toml` (permissives : MIT,
+  Apache, BSD…). Toute autre, même compatible avec la GPL-3.0 (MPL, LGPL), demande d'abord l'accord de l'auteur, à
+  cause de la double licence possible, puis son ajout à `deny.toml`. Ensuite `python3 outils/licences-tierces.py` et
+  committer LICENCES-TIERCES.txt.
 - `unsafe` seulement avec un commentaire `// SAFETY :`.
 - Le programme s'appelle Vanguard, point : aucun ancien nom dans le code, les textes, les commits ni sur GitHub. Seule
   exception : `src/passage.rs`, qui reprend ce qu'une version d'avant a posé sur un ordinateur (à retirer à la 1.0).
