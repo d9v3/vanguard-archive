@@ -12,20 +12,29 @@ targets = [
     "x86_64-apple-darwin",
 ]
 
-# Failles connues, bibliothèques abandonnées ou au code défaillant : refusées, sans exception.
+# Failles connues, bibliothèques abandonnées ou au code défaillant : refusées, dans tout l'arbre (sans « all »,
+# cargo deny ne regarde le code défaillant que dans les dépendances directes), sans exception.
 [advisories]
+unmaintained = "all"
+unsound = "all"
 ignore = []
 
 # Aucune licence de tiers permise d'avance : une dépendance demande d'abord une décision (CLAUDE.md, « Nouvelle
-# dépendance »), puis sa licence ici. La bibliothèque et l'exemple eux-mêmes (GPL-3.0-or-later, jamais publiés sur
-# crates.io : publish = false) ne sont pas vérifiés.
+# dépendance »), puis sa licence ici. La bibliothèque et l'exemple eux-mêmes (GPL-3.0-or-later) sont nommés : toute
+# autre crate passe par la liste, même locale et jamais publiée (publish = false), comme du code de tiers copié dans
+# le dépôt. Le passage de la bibliothèque seule ne voit pas l'exemple : son exception n'y sert pas, sans remarque.
 [licenses]
 allow = []
 confidence-threshold = 0.8
-private = { ignore = true }
+exceptions = [
+    { crate = "vanguard-extension", allow = ["GPL-3.0-or-later"] },
+    { crate = "rust-exemple", allow = ["GPL-3.0-or-later"] },
+]
+unused-license-exception = "allow"
 
-# L'exemple prend la bibliothèque par son chemin (../../sdk), sans version : admis pour une crate jamais publiée,
-# refusé pour toute autre dépendance.
+# L'exemple prend la bibliothèque par son chemin (../../sdk), sans version : cargo deny l'admet parce que l'exemple
+# n'est jamais publié, et admet de même toute dépendance par chemin d'une crate jamais publiée ; une dépendance de
+# crates.io sans version reste refusée. Ce qu'un chemin amène passe quand même par les licences, plus haut.
 [bans]
 multiple-versions = "warn"
 wildcards = "deny"

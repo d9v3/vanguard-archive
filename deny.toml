@@ -11,21 +11,28 @@ targets = [
     "x86_64-apple-darwin",
 ]
 
-# Failles connues, bibliothèques abandonnées ou au code défaillant (unsound) : refusées. Une version retirée de
-# crates.io (yanked) est seulement signalée : elle n'est pas forcément dangereuse. Une faille s'ôte en mettant la
-# dépendance à jour ; une exception n'est admise que sans correctif publié et pour un défaut que Vanguard ne peut pas
-# atteindre, dite ici avec sa preuve, affichée à chaque passage (outils/verifier.sh) et à relire à chaque mise à jour
-# de YARA-X : dès qu'elle disparaît de l'arbre, cargo deny le signale (advisory-not-detected). La raison commence
-# par le nom de la bibliothèque et une virgule : outils/verifier.sh la cite dans son résumé.
+# Failles connues, bibliothèques abandonnées ou au code défaillant (unsound) : refusées, dans tout l'arbre (sans
+# « all », cargo deny ne regarde le code défaillant que dans les dépendances directes). Une version retirée de
+# crates.io (yanked) est seulement signalée, dans le résumé d'outils/verifier.sh : elle n'est pas forcément
+# dangereuse. Une faille s'ôte en mettant la dépendance à jour ; une exception n'est admise que sans correctif publié
+# et pour un défaut que Vanguard ne peut pas atteindre, dite ici avec sa preuve, affichée à chaque passage
+# (outils/verifier.sh) et à relire à chaque mise à jour de YARA-X. Elle vaut pour l'avis dans tout l'arbre : [bans]
+# réserve la bibliothèque à YARA-X. Dès qu'elle disparaît de l'arbre, l'exception devenue inutile fait échouer
+# (advisory-not-detected), pour qu'on l'ôte. La raison commence par le nom de la bibliothèque et une virgule :
+# outils/verifier.sh la cite dans son résumé.
 [advisories]
+unmaintained = "all"
+unsound = "all"
+unused-ignored-advisory = "deny"
 ignore = [
-    { id = "RUSTSEC-2023-0071", reason = "rsa, par YARA-X seulement, sans version corrigée : l'attaque Marvin vise les opérations à clé privée (déchiffrement), YARA-X ne fait que vérifier des signatures Authenticode avec une clé publique (modules/utils/crypto.rs, RsaPublicKey)" },
-    { id = "RUSTSEC-2025-0141", reason = "bincode, par YARA-X seulement, abandonné mais sans faille connue : il ne sert qu'à sérialiser des règles compilées, et Vanguard n'en relit jamais (pas de Rules::deserialize)" },
+    { id = "RUSTSEC-2023-0071", reason = "rsa, par YARA-X seulement ([bans]), sans version corrigée : l'attaque Marvin vise les opérations à clé privée (déchiffrement), YARA-X ne fait que vérifier des signatures Authenticode avec une clé publique (modules/utils/crypto.rs, RsaPublicKey)" },
+    { id = "RUSTSEC-2025-0141", reason = "bincode, par YARA-X seulement ([bans]) et sans réglage qui l'ôte, abandonné mais sans faille connue : YARA-X n'y encode puis n'y relit que ses propres variables globales (compilation des règles intégrées, puis chaque Scanner::new), dans le même processus ; Vanguard n'appelle jamais Rules::deserialize : aucune donnée venue d'ailleurs ne passe par bincode" },
 ]
 
-# Les licences déjà présentes parmi les dépendances (LICENCES-TIERCES.txt), toutes compatibles avec la GPL-3.0-or-later
-# de Vanguard et avec une double licence. Toute autre, même libre (MPL, LGPL, GPL…), demande d'abord une décision :
-# CLAUDE.md, « Nouvelle dépendance ».
+# Les licences déjà présentes parmi les dépendances (LICENCES-TIERCES.txt), toutes permissives : compatibles avec la
+# GPL-3.0-or-later de Vanguard comme avec la double licence qu'il garde possible (CLAUDE.md). Toute autre, même libre
+# et compatible avec la GPL (MPL, LGPL, GPL…), demande d'abord une décision : CLAUDE.md, « Nouvelle dépendance ». Une
+# exception devenue inutile fait échouer.
 [licenses]
 allow = [
     "0BSD",
@@ -46,12 +53,20 @@ confidence-threshold = 0.8
 exceptions = [
     { crate = "vanguard", allow = ["GPL-3.0-or-later"] },
 ]
+unused-license-exception = "deny"
 
 # Les doublons (deux versions d'une même bibliothèque) sont dits, sans faire échouer : ils grossissent le programme,
 # mais viennent presque tous de dépendances de dépendances, hors de portée.
 [bans]
 multiple-versions = "warn"
 wildcards = "deny"
+# Les bibliothèques aux failles admises plus haut, seulement sous YARA-X : une exception vaut pour son avis dans tout
+# l'arbre, et une autre bibliothèque qui tirerait rsa (pour déchiffrer avec une clé privée, que l'attaque Marvin vise)
+# passerait sinon sans un mot.
+deny = [
+    { crate = "rsa", wrappers = ["yara-x"], reason = "RUSTSEC-2023-0071 admise pour YARA-X seulement ([advisories])" },
+    { crate = "bincode", wrappers = ["yara-x"], reason = "RUSTSEC-2025-0141 admise pour YARA-X seulement ([advisories])" },
+]
 
 # crates.io seulement : ni autre registre, ni dépôt git, d'où un code non relu pourrait entrer.
 [sources]

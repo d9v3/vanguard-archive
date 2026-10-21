@@ -216,7 +216,8 @@ ligne() {
 }
 
 # Ce que cargo deny laisse passer sans le taire : les failles admises dans deny.toml (leur raison commence par le nom
-# de la bibliothèque), les doublons, la base de failles hors ligne.
+# de la bibliothèque), les doublons, la base de failles hors ligne, et tout autre avertissement (version retirée de
+# crates.io, cible inconnue…) : l'étape reste verte, et son journal part à la fin, il ne se lirait nulle part ailleurs.
 remarques_dependances() {
   local journal=$TRAVAIL/dependances.log admises doublons
   [[ -f $journal && $(head -c6 "$TRAVAIL/dependances.etat" 2>/dev/null) != sautee ]] || return 0
@@ -226,6 +227,9 @@ remarques_dependances() {
   [[ -n $admises ]] && echo "      failles admises (deny.toml) : $admises"
   doublons=$(grep -c '^warning\[duplicate\]' "$journal")
   ((doublons == 0)) || echo "      $doublons bibliothèques en plusieurs versions (doublons)"
+  grep -E '^warning(\[[a-z-]+\])?:' "$journal" | grep -v '^warning\[duplicate\]' | sort | uniq -c |
+    sed -E 's/^ *([0-9]+) /      \1 × /'
+  return 0
 }
 
 echo
