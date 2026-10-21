@@ -300,8 +300,54 @@ fn cles_deja_dup(destination: &Path) -> Vec<(&'static str, &'static str, String)
 #[cfg(target_os = "linux")]
 fn deja_dup_present() -> bool {
     dans_le_path("deja-dup").is_some()
-        && crate::machine::sortie("gsettings", &["list-keys", "org.gnome.DejaDup"])
-            .is_some_and(|t| t.contains("periodic"))
+        && schema_gsettings("org.gnome.DejaDup", Some("periodic")).unwrap_or_else(|| {
+            crate::machine::sortie("gsettings", &["list-keys", "org.gnome.DejaDup"])
+                .is_some_and(|t| t.contains("periodic"))
+        })
+}
+
+/// Le schéma de réglages `schema` est-il installé, avec la clé `cle` quand elle est donnée (ce que disait
+/// `gsettings list-keys`) ? Lu dans sa description XML (<schéma>.gschema.xml), que le paquet installe à côté de la
+/// base compilée que lit gsettings. `None` si aucun fichier de ce nom n'est trouvé : la base compilée, au format
+/// binaire, peut tout de même le connaître (un schéma rangé dans le fichier d'un autre) ; gsettings tranche alors.
+#[cfg(target_os = "linux")]
+pub(crate) fn schema_gsettings(schema: &str, cle: Option<&str>) -> Option<bool> {
+    schema_gsettings_dans(&dossiers_de_schemas(), schema, cle)
+}
+
+/// Les dossiers où GLib cherche les schémas : GSETTINGS_SCHEMA_DIR, celui du compte, puis ceux de XDG_DATA_DIRS
+/// (/usr/local/share et /usr/share par défaut ; Flatpak y ajoute les siens).
+#[cfg(target_os = "linux")]
+fn dossiers_de_schemas() -> Vec<PathBuf> {
+    let maison = crate::nettoyer::maison();
+    let donnees = std::env::var_os("XDG_DATA_HOME").map_or_else(|| maison.join(".local/share"), PathBuf::from);
+    let systeme = std::env::var("XDG_DATA_DIRS")
+        .ok()
+        .filter(|d| !d.is_empty())
+        .unwrap_or_else(|| "/usr/local/share:/usr/share".into());
+    std::env::var_os("GSETTINGS_SCHEMA_DIR")
+        .map(PathBuf::from)
+        .into_iter()
+        .chain(
+            std::iter::once(donnees)
+                .chain(systeme.split(':').filter(|d| !d.is_empty()).map(PathBuf::from))
+                .map(|d| d.join("glib-2.0/schemas")),
+        )
+        .collect()
+}
+
+/// Un fichier peut décrire plusieurs schémas (« org.gnome.DejaDup » et « org.gnome.DejaDup.Local ») : la clé se
+/// cherche dans l'élément du bon schéma, de son `id="…"` (guillemet compris : « …DejaDup.Local » n'est pas
+/// « …DejaDup ») jusqu'à sa fermeture.
+#[cfg(target_os = "linux")]
+fn schema_gsettings_dans(dossiers: &[PathBuf], schema: &str, cle: Option<&str>) -> Option<bool> {
+    let texte = dossiers
+        .iter()
+        .find_map(|d| std::fs::read_to_string(d.join(format!("{schema}.gschema.xml"))).ok())?;
+    let debut = texte.find(&format!("id=\"{schema}\""))?;
+    let element = &texte[debut..];
+    let element = &element[..element.find("</schema>").unwrap_or(element.len())];
+    Some(cle.is_none_or(|c| element.contains(&format!("name=\"{c}\""))))
 }
 
 // ───────────────────────────── macOS : Time Machine ─────────────────────────────
@@ -1619,5 +1665,73 @@ mod tests {
         let n = nom_machine();
         assert!(!n.is_empty() && n.chars().all(|c| c.is_alphanumeric() || c == '-'));
         assert!(constats().len() <= 1);
+    }
+
+    /// Un schéma décrit dans son fichier XML : la clé se cherche dans le bon schéma du fichier ; le premier dossier
+    /// qui a le fichier l'emporte ; sans fichier, ou un fichier qui ne le décrit pas, rien n'est conclu.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn schemas_de_reglages() {
+        let d = std::env::temp_dir().join(format!("vanguard-sauvegarde-schemas-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        let (compte, systeme) = (d.join("compte"), d.join("systeme"));
+        for dossier in [&compte, &systeme] {
+            std::fs::create_dir_all(dossier).unwrap();
+        }
+        std::fs::write(
+            systeme.join("org.exemple.Copie.gschema.xml"),
+            "<schemalist>\n  <schema id=\"org.exemple.Copie\" path=\"/org/exemple/copie/\">\n    \
+             <key name=\"periodic\" type=\"b\"><default>false</default></key>\n  </schema>\n  \
+             <schema id=\"org.exemple.Copie.Local\">\n    <key name=\"folder\" type=\"s\"/>\n  </schema>\n\
+             </schemalist>\n",
+        )
+        .unwrap();
+        let dossiers = [compte.clone(), systeme.clone()];
+        assert_eq!(
+            schema_gsettings_dans(&dossiers, "org.exemple.Copie", Some("periodic")),
+            Some(true)
+        );
+        assert_eq!(
+            schema_gsettings_dans(&dossiers, "org.exemple.Copie", Some("folder")),
+            Some(false)
+        );
+        assert_eq!(schema_gsettings_dans(&dossiers, "org.exemple.Copie", None), Some(true));
+        assert_eq!(schema_gsettings_dans(&dossiers, "org.exemple.Autre", None), None);
+        // Le dossier du compte passe avant celui du système.
+        std::fs::write(
+            compte.join("org.exemple.Copie.gschema.xml"),
+            "<schemalist><schema id=\"org.exemple.Copie\"></schema></schemalist>",
+        )
+        .unwrap();
+        assert_eq!(
+            schema_gsettings_dans(&dossiers, "org.exemple.Copie", Some("periodic")),
+            Some(false)
+        );
+        std::fs::write(compte.join("org.exemple.Vide.gschema.xml"), "<schemalist/>").unwrap();
+        assert_eq!(schema_gsettings_dans(&dossiers, "org.exemple.Vide", None), None);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// Sur cet ordinateur, les clés que `gsettings list-keys` donne se trouvent dans le fichier du schéma, quand
+    /// gsettings et le fichier sont là.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn schemas_comme_gsettings() {
+        for schema in ["org.gnome.desktop.privacy", "org.gnome.desktop.interface"] {
+            let Some(cles) =
+                crate::commande::lancer(std::process::Command::new("gsettings").args(["list-keys", schema]), 10)
+                    .filter(|r| r.code == Some(0))
+                    .map(|r| r.sortie)
+            else {
+                continue;
+            };
+            if schema_gsettings(schema, None).is_none() {
+                continue;
+            }
+            for cle in cles.split_whitespace() {
+                assert_eq!(schema_gsettings(schema, Some(cle)), Some(true), "{schema} {cle}");
+            }
+            assert_eq!(schema_gsettings(schema, Some("cle-qui-n-existe-pas")), Some(false));
+        }
     }
 }
