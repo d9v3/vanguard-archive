@@ -177,6 +177,17 @@ fn juger(nom: &str, ou: &str, cle_privee: bool, retirer: &[String]) -> Constat {
             ),
             true,
         ),
+        // « localhost » est le nom que .NET et IIS Express donnent à leur certificat de développement ; mais ce nom
+        // est écrit par qui fabrique le certificat, et la ligne lue ne dit pas si c'est une autorité (CA) capable de
+        // signer d'autres sites : dit, jamais passé sous silence.
+        _ if cle_privee && nom.eq_ignore_ascii_case("localhost") => (
+            Niveau::Info,
+            trf!(
+                "Certificat racine « localhost » ({ou}) dont la clé privée est sur cette machine : celui de .NET ou d'IIS Express si tu développes ; sinon, retire-le, un nom ne prouve rien.",
+                "Root certificate “localhost” ({ou}) whose private key is on this machine: .NET's or IIS Express's if you develop; otherwise remove it, a name proves nothing."
+            ),
+            false,
+        ),
         _ if cle_privee => (
             Niveau::Eleve,
             trf!(
@@ -364,9 +375,7 @@ pub fn certificats() -> Vec<Constat> {
             continue;
         }
         total += 1;
-        let cle_privee = cle.eq_ignore_ascii_case("true")
-            // Certificats de développement de Visual Studio / .NET : valables pour localhost seulement.
-            && !nom.eq_ignore_ascii_case("localhost");
+        let cle_privee = cle.eq_ignore_ascii_case("true");
         if famille(nom) == Famille::Autre && !cle_privee {
             continue;
         }
@@ -474,5 +483,22 @@ xo1zjuQ=
             juger("Mon entreprise CA", "/x", true, &retirer).probleme,
             Some(Niveau::Eleve)
         );
+    }
+
+    /// Une racine nommée « localhost » avec sa clé privée n'est plus passée sous silence : le nom est choisi par qui
+    /// fabrique le certificat, et une fausse autorité peut le porter. Dite en information, avec le pourquoi.
+    #[test]
+    fn localhost_avec_cle_privee_est_dit() {
+        let retirer = vec!["Remove-Item -Path 'Cert:\\CurrentUser\\Root\\0A1B'".to_string()];
+        let c = juger("localhost", "magasin de l'utilisateur", true, &retirer);
+        assert_eq!(c.probleme, Some(Niveau::Info));
+        assert!(c.message.contains("localhost") && c.message.contains("clé privée"));
+        assert!(
+            c.correctif
+                .as_ref()
+                .is_some_and(|k| !k.automatique && k.commandes == retirer)
+        );
+        // Sans clé privée, c'est un certificat ajouté comme un autre.
+        assert_eq!(juger("LOCALHOST", "/x", false, &retirer).probleme, Some(Niveau::Info));
     }
 }
