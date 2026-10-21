@@ -250,10 +250,8 @@ details.cli[open] summary { border-bottom: 1px solid var(--trait); }
           <span class="systeme">Windows 10 · 11</span><span class="systeme">Linux</span><span class="systeme">macOS</span><span class="systeme">Français · English</span>
         </div>
         <div class="boutons">
-          <a class="bouton principal" href="https://github.com/d9v3/vanguard-beta/releases/latest/download/vanguard-windows-x86_64.exe"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0l-4-4m4 4l4-4M4 17v3h16v-3"/></svg>Windows</a>
-          <a class="bouton" href="https://github.com/d9v3/vanguard-beta/releases/latest/download/vanguard-linux-x86_64">Linux</a>
-          <a class="bouton" href="https://github.com/d9v3/vanguard-beta/releases/latest/download/vanguard-macos">macOS</a>
-          <a class="bouton" href="https://github.com/d9v3/vanguard-beta">Code source et notes de version</a>
+          <a class="bouton" href="#installer">Comment l'installer ↓</a>
+          <a class="bouton" href="https://github.com/d9v3/vanguard-beta">Code source</a>
         </div>
         <div class="faits">
           <div class="fait"><b>A → F</b><span>une note pour l'ordinateur, une par domaine du réseau</span></div>
@@ -610,6 +608,51 @@ vanguard yara --complet</pre>
       <div class="chiffre"><b>{{VM}}</b><span>vérifications sur un vrai Windows</span></div>
     </div>
     <p class="note">Chaque version passe par des relectures de sécurité indépendantes, par un vrai Windows qui se teste tout seul et par un vrai Mac. Cette page est refaite par le script de publication à chaque version.</p>
+  </section>
+  <section id="installer">
+    <div class="tete-section">
+      <p class="surtitre">Télécharger et installer</p>
+      <h2>Avant de télécharger</h2>
+      <p>Les liens sont en bas de page à dessein : un outil de sécurité se télécharge en sachant ce qu'il fait.</p>
+    </div>
+    <div class="audit">
+      <div><b>Ce que fait Vanguard</b><span>Il audite la machine et le réseau, détecte les failles et les intrusions, puis bloque et corrige seulement après accord.</span></div>
+      <div><b>Ce qu'il ne fait jamais</b><span>Attaquer un appareil, changer quoi que ce soit sans le montrer d'abord, ou envoyer des données personnelles.</span></div>
+      <div><b>Ce qu'il demande</b><span>Les droits d'administrateur seulement pour certaines corrections, par la fenêtre du système (UAC sous Windows, polkit sous Linux).</span></div>
+      <div><b>Pourquoi un avertissement</b><span>Le programme n'est pas encore signé ; la signature est prévue. D'ici là, comparer son empreinte SHA-256 à celle de la page de la version.</span></div>
+    </div>
+    <h3 class="sous-titre">Télécharger</h3>
+    <p class="note">La <a href="https://github.com/d9v3/vanguard-beta/releases/latest">page de la dernière version</a> donne les notes et les empreintes SHA-256. Programmes : <a href="https://github.com/d9v3/vanguard-beta/releases/latest/download/vanguard-windows-x86_64.exe">Windows</a> · <a href="https://github.com/d9v3/vanguard-beta/releases/latest/download/vanguard-linux-x86_64">Linux</a> · <a href="https://github.com/d9v3/vanguard-beta/releases/latest/download/vanguard-macos">macOS</a>. Rien à installer : un seul exécutable.</p>
+    <div class="os">
+      <article>
+        <h4>Windows <span>10 · 11</span></h4>
+        <ul>
+          <li><b>Lancer</b> : double-clic. SmartScreen peut avertir d'un éditeur inconnu : « Informations complémentaires », puis « Exécuter quand même ».</li>
+          <li><b>Defender</b> peut le prendre à tort pour un virus (détection automatique d'un programme neuf) : vérifier l'empreinte avant tout.</li>
+        </ul>
+      </article>
+      <article>
+        <h4>Linux <span>toutes distributions</span></h4>
+        <ul>
+          <li><b>Lancer</b> : <code>chmod +x vanguard-linux-x86_64</code>, puis <code>./vanguard-linux-x86_64</code> dans un terminal.</li>
+          <li><b>Programme statique</b> : aucune bibliothèque à installer.</li>
+        </ul>
+      </article>
+      <article>
+        <h4>macOS <span>12 et plus</span></h4>
+        <ul>
+          <li><b>Lancer</b> : copié depuis Internet, il est bloqué la première fois : <code>xattr -d com.apple.quarantine vanguard-macos</code>, puis <code>./vanguard-macos</code> dans le Terminal.</li>
+        </ul>
+      </article>
+    </div>
+    <h3 class="sous-titre">Vérifier, puis prendre en main</h3>
+    <ol class="chaine">
+      <li><b>Empreinte</b>Comparer la sortie de <code>sha256sum</code> (ou <code>Get-FileHash</code>) à la page de la version.</li>
+      <li><b>Vanguard lui-même</b><code>vanguard verifier-moi</code> donne sa version et son empreinte.</li>
+      <li><b>Failles connues</b><code>cargo audit bin &lt;programme&gt;</code> lit la liste des dépendances gravée dedans.</li>
+      <li><b>Premier bilan</b>Lancer <code>vanguard</code>, choisir 1 (bilan complet), puis 2 pour corriger, après accord.</li>
+      <li><b>Au clavier</b>Flèches et Entrée pour choisir ; Échap ou Retour arrière pour revenir ; <code>--json</code> pour un script.</li>
+    </ol>
   </section>
 </main>
 

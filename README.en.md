@@ -439,16 +439,16 @@ command to put it back; learned alerts and blocking open their own screen ("What
 blocking). Language, emojis and working without the Internet stay chosen from one launch to the next (VANGUARD_LANG,
 VANGUARD_EMOJI and VANGUARD_HORS_LIGNE always win).
 
-**Real-time protection** (Settings, `vanguard settings real-time no [--for 1h|4h]`) — turns off at once, after your
+**Real-time protection** (Settings, `vanguard settings real-time no [--for 1h|4h]`) — turns off at once, after
 consent and the list of what stops, what Vanguard does by itself all the time: the hourly monitoring (and everything it
 watches and notifies) and the active protection of blocking, which no longer blocks anything by itself. For 1 hour, 4
-hours or until you turn it back on (`vanguard settings real-time yes`); it comes back by itself when the time is up, and
+hours or until it is turned back on (`vanguard settings real-time yes`); it comes back by itself when the time is up, and
 the monitoring checks that itself. Each part's settings do not change: when it comes back, each one is as it was. While
 it is off, this is said again at the top of the main menu and on its Monitoring and Blocking lines, in each check-up (a
 piece of information, with no effect on the grade), in "Who talks to the Internet?", in blocking and on the monitoring
 dashboard, by a notification at the first run then once a day, and in the monthly check-up: a program that turned it off
 quietly does not go unnoticed. It only concerns Vanguard: Defender, the firewall and UAC are never touched, and a block
-already made stays in place. As administrator, it is not set: its setting belongs to your account (under sudo, the one
+already made stays in place. As administrator, it is not set: its setting belongs to the user account (under sudo, the one
 of the account that started it is read).
 
 **Extensions** (menu 12, `vanguard extensions`) — custom programs in Vanguard, without touching its code. A plugin

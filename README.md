@@ -474,16 +474,16 @@ Vanguard a appris », Blocage des menaces). La langue, les emojis et le travail 
 lancement à l'autre (VANGUARD_LANG, VANGUARD_EMOJI et VANGUARD_HORS_LIGNE l'emportent toujours).
 
 **Protection en temps réel** (Paramètres, `vanguard parametres temps-reel non [--pendant 1h|4h]`) — coupe d'un coup,
-après ton accord et la liste de ce qui s'arrête, ce que Vanguard fait tout seul en continu : la surveillance horaire (et
+après accord et la liste de ce qui s'arrête, ce que Vanguard fait tout seul en continu : la surveillance horaire (et
 tout ce qu'elle regarde et notifie) et la protection active du blocage, qui ne bloque plus rien toute seule. Pendant 1
-heure, 4 heures ou jusqu'à ce que tu la remettes (`vanguard parametres temps-reel oui`) ; la reprise est automatique à
+heure, 4 heures ou jusqu'à sa remise en marche (`vanguard parametres temps-reel oui`) ; la reprise est automatique à
 l'échéance, et la surveillance la constate elle-même. Les réglages de chacun ne changent pas : à la reprise, chacun
 retrouve son état d'avant. Tant qu'elle est coupée, c'est redit en tête du menu principal et sur ses lignes Surveillance
 et Blocage, dans chaque bilan (une information, sans effet sur la note), dans « Qui parle à Internet ? », dans le
 blocage et sur le tableau de la surveillance, par une notification à la première passe puis une fois par jour, et dans
 l'entretien du mois : un programme qui la couperait en douce ne passe pas inaperçu. Elle ne concerne que Vanguard :
 Defender, le pare-feu et l'UAC ne sont jamais touchés, et un blocage déjà fait reste en place. En administrateur, elle
-ne se règle pas : son réglage est celui de ton compte (sous sudo, celui du compte qui l'a lancé est lu).
+ne se règle pas : son réglage est celui du compte (sous sudo, celui du compte qui l'a lancé est lu).
 
 **Extensions** (menu 12, `vanguard extensions`) — des programmes personnels dans Vanguard, sans toucher à son code. Un
 plugin est un dossier avec un manifeste `plugin.toml`, ajouté une fois depuis un dossier ou une archive .zip
