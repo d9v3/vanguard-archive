@@ -172,7 +172,28 @@ n'a pas pu être lu, MANIFESTE.txt donne leurs empreintes (`sha256sum -c MANIFES
 arrêté, déplacé ni envoyé. Le dossier contient des données personnelles, à ne confier qu'à quelqu'un de confiance.
 C'est aussi la première étape d'« Après une infection », cochée d'office : couper le réseau ou nettoyer efface ces
 traces. Devant un rançongiciel ou une prise de contrôle encore reliés à Internet, la coupure passe d'abord : chaque
-minute compte.
+minute compte. Depuis la 0.83, une chronologie de l'incident (CHRONOLOGIE.txt) remet tout dans l'ordre du temps,
+du plus ancien au plus récent : connexions acceptées ou refusées, comptes créés, services et tâches ajoutés,
+journaux effacés, détections de Defender, fichiers récents qui parlent (programmes, scripts, fichiers cachés).
+
+**Chasse aux menaces en direct** — une connexion réussie depuis une adresse qui venait de rater au moins dix mots
+de passe (journal de sshd sous Linux, du Bureau à distance sous Windows) : le signe d'un mot de passe deviné. Et les
+programmes en marche suspects : un outil offensif connu (mimikatz, xmrig…), une ligne de commande qui télécharge ou
+cache ce qu'elle exécute (PowerShell encodé, mshta, certutil, curl envoyé à un shell), un programme lancé de
+Téléchargements, d'un dossier temporaire ou de la corbeille.
+
+**Portes cachées de Windows et pilotes du noyau** — les DLL que Windows charge lui-même, souvent avec les droits du
+système : paquets de LSA (un filtre de mot de passe reçoit chaque nouveau mot de passe en clair), AppCertDlls,
+moniteurs d'impression, fournisseurs de temps, catalogue Winsock. Et les pilotes du noyau : rangés là où rien
+d'installé n'en pose, ou connus pour être vulnérables (liste LOLDrivers) : signés, ils servent à désarmer l'antivirus.
+
+**Mémoire des programmes** (`vanguard memoire`, à la demande) — les règles YARA appliquées à la mémoire des programmes
+qui tournent : un logiciel malveillant « sans fichier » ne vit que là. LSASS et les processus protégés ne sont
+jamais ouverts, rien de la mémoire lue n'est gardé, et ce qui n'a pas pu être lu est dit.
+
+**Agents d'IA** — un serveur d'IA local (Ollama, LM Studio, ComfyUI) ouvert à tout le réseau sans mot de passe, un
+agent réglé pour tout faire sans demander, un serveur MCP lancé sans version fixée, joint sans chiffrement ou avec
+une clé écrite en clair (le nom de la clé seulement, jamais sa valeur).
 
 **Outils libres reconnus, s'ils sont installés** — Vanguard les lance et explique ce qu'ils trouvent, sans rien
 modifier ; absents, il propose de les installer par l'outil du système. trivy dit les failles connues, graves ou
@@ -470,6 +491,7 @@ Chaque entrée du menu existe aussi en commande.
 | `vanguard verifier-sauvegarde` | vérifier ma sauvegarde : la sauvegarde rsync relue, des fichiers au hasard comparés à leur original (lecture seule) |
 | `vanguard antivirus [--complet] [dossier]` | analyse antivirus (ordinateur, ou une clé / un dossier) |
 | `vanguard yara [--complet] [dossier]` | analyse YARA : 308 règles de familles de logiciels malveillants, et les empreintes de MalwareBazaar |
+| `vanguard memoire` | analyse YARA de la mémoire des programmes qui tournent (malware sans fichier), à la demande ; LSASS et processus protégés jamais ouverts |
 | `vanguard pieges [--retirer]` | fichiers-pièges contre les rançongiciels : les poser, les vérifier, les retirer |
 | `vanguard durcir` | blocages de Windows Defender : règles ASR, protection réseau, logiciels indésirables, accès contrôlé aux dossiers ; chacun après accord, annulable (Windows) |
 | `vanguard listes-noires` | l'adresse Internet de la maison sur liste noire ? (après accord) |

@@ -140,7 +140,27 @@ LISEZMOI.txt, in French and English, tells what each file holds and what could n
 their fingerprints (`sha256sum -c MANIFESTE.txt`). Read-only: nothing is stopped, moved or sent. The folder holds
 personal data, to hand only to someone you trust. It is also the first step of “After an infection”, ticked by
 default: cutting the network or cleaning up erases these traces. With ransomware or a remote control still connected to
-the Internet, cutting comes first: every minute counts.
+the Internet, cutting comes first: every minute counts. Since 0.83, an incident timeline (CHRONOLOGIE.txt) puts
+everything in time order, oldest first: accepted or refused sign-ins, created accounts, added services and tasks,
+cleared logs, Defender detections, recent files that matter (programs, scripts, hidden files).
+
+**Live threat hunting** — a successful sign-in from an address that had just failed at least ten passwords (sshd's log
+on Linux, Remote Desktop on Windows): the sign of a guessed password. And suspicious running programs: a known
+offensive tool (mimikatz, xmrig…), a command line that downloads or hides what it runs (encoded PowerShell, mshta,
+certutil, curl piped to a shell), a program started from Downloads, a temporary folder or the recycle bin.
+
+**Windows' hidden doors and kernel drivers** — the DLLs Windows loads by itself, often with system rights: LSA
+packages (a password filter receives every new password in clear text), AppCertDlls, print monitors, time providers,
+the Winsock catalog. And kernel drivers stored where nothing installed puts one, or known to be vulnerable (the
+LOLDrivers list): being signed, they are used to disarm the antivirus.
+
+**Program memory** (`vanguard memory`, on demand) — the YARA rules applied to the memory of running programs:
+"fileless" malware lives nowhere else. LSASS and protected processes are never opened, nothing read is kept, and
+what could not be read is said.
+
+**AI agents** — a local AI server (Ollama, LM Studio, ComfyUI) open to the whole network without a password, an agent
+set to do everything without asking, an MCP server started without a pinned version, reached without encryption or
+with a key written in clear text (the key's name only, never its value).
 
 **Recognized open source tools, when installed** — Vanguard runs them and explains what they find, without
 changing anything; when missing, it offers to install them with the system's tool. trivy tells the known serious or
@@ -422,6 +442,7 @@ Each menu entry is also a command.
 | `vanguard check-backup` | check my backup: the rsync backup read back, random files compared with their original (read-only) |
 | `vanguard antivirus [--full] [folder]` | antivirus scan (computer, or a key / a folder) |
 | `vanguard yara [--full] [folder]` | YARA scan: 308 rules for malware families, and MalwareBazaar's fingerprints |
+| `vanguard memory` | YARA scan of the memory of running programs (fileless malware), on demand; LSASS and protected processes never opened |
 | `vanguard decoys [--remove]` | decoy files against ransomware: place them, check them, remove them |
 | `vanguard harden` | Windows Defender blocking: ASR rules, network protection, unwanted software, controlled folder access; each after your consent, undoable (Windows) |
 | `vanguard blocklists` | the home's Internet address on a blocklist? (after your consent) |
