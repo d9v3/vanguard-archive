@@ -141,24 +141,40 @@ fn dans_un_appartement<T: Send + 'static>(
     appartement: COINIT,
     lecture: impl FnOnce() -> windows::core::Result<T> + Send + 'static,
 ) -> Option<T> {
-    let (envoi, reception) = mpsc::channel();
-    std::thread::Builder::new()
-        .name("com".into())
-        .spawn(move || {
-            // SAFETY : fil créé pour cette seule lecture ; l'appartement est rendu par `Appartement` à la sortie.
-            let resultat = unsafe { CoInitializeEx(None, appartement) }.ok().and_then(|()| {
-                let _appartement = Appartement;
-                lecture()
-            });
-            let _ = envoi.send(resultat);
-        })
-        .ok()?;
-    if let Ok(resultat) = reception.recv_timeout(delai) {
+    if let Some(resultat) = dans_un_fil(delai, appartement, lecture) {
         resultat.ok()
     } else {
         crate::journal::erreur(nom, &format!("délai de {} s dépassé\n{quoi}", delai.as_secs()));
         None
     }
+}
+
+/// La lecture dans son fil et son appartement ; `None` si elle n'a pas répondu dans le délai. Une erreur ne sort du
+/// fil que par son code : une `windows::core::Error` garde l'IErrorInfo du fil (GetErrorInfo, un objet COM), et la
+/// libérer ailleurs, l'appartement fermé et la DLL qui l'a créée peut-être déchargée, plantait Vanguard sur un vrai
+/// Windows (violation d'accès, 0xC0000005, au hasard des règles lancées en parallèle). `map_err` la détruit avant
+/// `Appartement`, dans son appartement.
+fn dans_un_fil<T: Send + 'static>(
+    delai: Duration,
+    appartement: COINIT,
+    lecture: impl FnOnce() -> windows::core::Result<T> + Send + 'static,
+) -> Option<Result<T, windows::core::HRESULT>> {
+    let (envoi, reception) = mpsc::channel();
+    std::thread::Builder::new()
+        .name("com".into())
+        .spawn(move || {
+            // SAFETY : fil créé pour cette seule lecture ; l'appartement est rendu par `Appartement` à la sortie.
+            let resultat = unsafe { CoInitializeEx(None, appartement) }
+                .ok()
+                .map_err(|e| e.code())
+                .and_then(|()| {
+                    let _appartement = Appartement;
+                    lecture().map_err(|e| e.code())
+                });
+            let _ = envoi.send(resultat);
+        })
+        .ok()?;
+    reception.recv_timeout(delai).ok()
 }
 
 /// Un entier dans un VARIANT, pour les collections COM qui s'indexent ainsi (`get_Item`, à partir de 1).
@@ -365,6 +381,30 @@ mod tests {
         );
         assert_eq!(Valeur::Nul.liste(), []);
         assert_eq!(Valeur::Liste(vec![Valeur::Entier(2)]).liste(), &[Valeur::Entier(2)]);
+    }
+
+    /// Une erreur COM avec sa description (IErrorInfo posée par SetErrorInfo, comme le fait WMI) : captée par
+    /// `windows::core::Error` dans le fil, elle n'en sort que par son code, et le fil appelant n'en hérite pas.
+    #[test]
+    fn erreur_rendue_sans_son_objet_com() {
+        use windows::Win32::Foundation::E_FAIL;
+        use windows::Win32::System::Com::{GetErrorInfo, IErrorInfo, SetErrorInfo};
+        use windows::Win32::System::Ole::CreateErrorInfo;
+        let r = dans_un_fil(DELAI, COINIT_MULTITHREADED, || -> windows::core::Result<()> {
+            // SAFETY : COM est initialisé dans ce fil ; l'objet créé est rendu à COM par SetErrorInfo.
+            unsafe {
+                let createur = CreateErrorInfo()?;
+                createur.SetDescription(windows::core::w!("erreur d'essai"))?;
+                SetErrorInfo(0, &createur.cast::<IErrorInfo>()?)?;
+            }
+            let erreur = windows::core::Error::from(E_FAIL);
+            // La preuve que l'objet COM a bien été capté, puis libéré ici, dans son appartement.
+            assert_eq!(erreur.message(), "erreur d'essai");
+            Err(erreur)
+        });
+        assert_eq!(r, Some(Err(E_FAIL)));
+        // SAFETY : simple lecture de l'IErrorInfo de ce fil.
+        assert!(unsafe { GetErrorInfo(0) }.is_err());
     }
 
     /// Le WMI de Wine connaît Win32_OperatingSystem : la requête aboutit sans PowerShell, comme sous Windows.
