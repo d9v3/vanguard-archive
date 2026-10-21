@@ -135,6 +135,8 @@ fn empreinte(chemin: &std::path::Path) -> Option<String> {
 fn ligne_resultat(r: &Resultat) -> String {
     match (&r.reussi, &r.avant) {
         (true, Some(avant)) => format!("ok avant={avant}"),
+        // Fait, mais sans point de restauration : la personne l'a accepté ; c'est noté, ce n'est pas un échec.
+        (true, None) if r.raison == sans_point_accepte() => SANS_POINT.to_string(),
         (true, None) => "ok".to_string(),
         (false, _) => format!("echec {}", r.raison.replace(['\r', '\n'], " ")),
     }
@@ -144,12 +146,18 @@ fn ligne_resultat(r: &Resultat) -> String {
 pub(crate) struct Reponse {
     pub reussi: bool,
     pub avant: Option<String>,
+    /// À noter à côté de la commande (point de restauration manquant, accepté).
+    pub note: Option<&'static str>,
 }
+
+/// La réponse d'un point de restauration manquant que la personne a accepté.
+const SANS_POINT: &str = "ok sans-point";
 
 fn lire_reponse(ligne: &str) -> Reponse {
     let reussi = ligne == "ok" || ligne.starts_with("ok ");
     let avant = ligne.strip_prefix("ok avant=").map(str::to_string);
-    Reponse { reussi, avant }
+    let note = (ligne == SANS_POINT).then(sans_point_accepte);
+    Reponse { reussi, avant, note }
 }
 
 // ---------------------------------------------------------------- le parent
@@ -170,9 +178,9 @@ pub(crate) fn appliquer(lignes: &[String]) -> Option<Vec<Reponse>> {
     });
     let serveur = Serveur::creer(&canal)?;
     let exe = std::env::current_exe().ok()?;
-    // Les DLL qu'importe le programme, hors des DLL connues de Windows, sont cherchées d'abord à côté de lui, avant
-    // même sa première ligne : une DLL posée là (clé USB, Téléchargements) tournerait en administrateur. Dans ce cas,
-    // le script PowerShell, lancé depuis System32, prend le relais.
+    // La vraie garde contre une DLL posée à côté du programme est dans le PE lui-même (chargement.rs : imports pris
+    // dans System32 seulement). Elle n'existe qu'à partir de Windows 10 1607 : en plus, une DLL déjà là fait passer
+    // la correction par le script PowerShell, lancé depuis System32.
     if let Some(dll) = exe.parent().and_then(dll_a_cote) {
         trp!(
             "    {GRIS}{dll} est à côté de Vanguard : la correction passe par PowerShell, pas par Vanguard en administrateur.{RESET}",
@@ -203,6 +211,7 @@ pub(crate) fn appliquer(lignes: &[String]) -> Option<Vec<Reponse>> {
                     .map(|_| Reponse {
                         reussi: false,
                         avant: None,
+                        note: None,
                     })
                     .collect(),
             );
@@ -232,6 +241,7 @@ pub(crate) fn appliquer(lignes: &[String]) -> Option<Vec<Reponse>> {
             .map(|_| Reponse {
                 reussi: false,
                 avant: None,
+                note: None,
             })
             .collect()
     }))
@@ -245,6 +255,7 @@ fn appliquer_en_place(lignes: &[String]) -> Vec<Reponse> {
             .map(|_| Reponse {
                 reussi: false,
                 avant: None,
+                note: None,
             })
             .collect();
     };
@@ -252,8 +263,7 @@ fn appliquer_en_place(lignes: &[String]) -> Vec<Reponse> {
     let mut arret = false;
     for c in liste {
         let r = if arret { refusee() } else { faire(c) };
-        arret |=
-            !r.reussi && matches!(c.geste, corrections::Geste::PointDeRestauration) && r.raison != sans_point_accepte();
+        arret |= !r.reussi && matches!(c.geste, corrections::Geste::PointDeRestauration);
         reponses.push(lire_reponse(&ligne_resultat(&r)));
     }
     reponses
@@ -519,7 +529,7 @@ pub(crate) fn executer(canal: &str, parent: u32) -> i32 {
         if !r.reussi {
             code = 1;
             // Sans point de restauration, et la personne ne veut pas continuer sans : tout le reste est abandonné.
-            arret |= matches!(c.geste, corrections::Geste::PointDeRestauration) && r.raison != sans_point_accepte();
+            arret |= matches!(c.geste, corrections::Geste::PointDeRestauration);
         }
         if tube.write_all(format!("{}\n", ligne_resultat(&r)).as_bytes()).is_err() {
             // Le parent n'entend plus : ce qui suivrait serait changé sans être noté dans « Ce que Vanguard a changé ».
@@ -609,7 +619,7 @@ fn ouvrir_le_canal(canal: &str, parent: u32) -> Option<std::fs::File> {
     (empreinte(&moi)? == empreinte(&chemin_parent)?).then_some(tube)
 }
 
-/// La raison d'un point de restauration manquant que la personne a accepté : la suite continue.
+/// Ce qui est noté quand la personne a accepté de continuer sans point de restauration.
 pub(crate) fn sans_point_accepte() -> &'static str {
     tr!("sans point de restauration, accepté", "no restore point, accepted")
 }
@@ -668,8 +678,8 @@ pub(crate) fn point_de_restauration() -> (bool, String) {
         "  Continue without a restore point? [y/N]: "
     ));
     if crate::langue::oui(&reponse) {
-        // Pas de point : c'est un échec, dit comme tel dans « Ce que Vanguard a changé », mais la suite continue.
-        (false, sans_point_accepte().to_string())
+        // Pas de point, accepté : la suite continue, et « Ce que Vanguard a changé » le note.
+        (true, sans_point_accepte().to_string())
     } else {
         (false, tr!("arrêté à ta demande", "stopped as you asked").to_string())
     }
@@ -715,6 +725,14 @@ mod tests {
         assert!(r.reussi && r.avant.is_none());
         assert!(!lire_reponse("echec relu 0 au lieu de 1").reussi);
         assert!(!lire_reponse("okay").reussi);
+        let sans_point = Resultat {
+            reussi: true,
+            avant: None,
+            raison: sans_point_accepte().into(),
+        };
+        let r = lire_reponse(&ligne_resultat(&sans_point));
+        assert!(r.reussi && r.avant.is_none() && r.note == Some(sans_point_accepte()));
+        assert!(lire_reponse("ok").note.is_none());
         assert!(!lire_reponse("").reussi);
         let aller_retour = ligne_resultat(&Resultat {
             reussi: false,

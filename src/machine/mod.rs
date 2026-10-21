@@ -733,9 +733,10 @@ fn lancer_chacune(correctifs: &[Vec<String>]) -> (Vec<bool>, Vec<Vec<String>>) {
                     for c in commandes {
                         let r = reponses.next();
                         reussi &= r.as_ref().is_some_and(|r| r.reussi);
-                        note.push(match r.and_then(|r| r.avant) {
-                            Some(avant) => format!("{c} (avant : {avant})"),
-                            None => c.clone(),
+                        note.push(match r.map(|r| (r.avant, r.note)) {
+                            Some((Some(avant), _)) => format!("{c} (avant : {avant})"),
+                            Some((None, Some(n))) => format!("{c} ({n})"),
+                            _ => c.clone(),
                         });
                     }
                     resultats.push(reussi);
