@@ -102,6 +102,13 @@ fn cle_vue(vus: &BTreeMap<String, String>, nom: &str, sans_casse: bool) -> Strin
 fn juger(admins: &[String], avant: Option<&Vus>, aujourd_hui: NaiveDate) -> (Constat, Vus) {
     let mut vus = avant.map(|v| v.vus.clone()).unwrap_or_default();
     let cles: Vec<String> = admins.iter().map(|a| cle_vue(&vus, a, cfg!(windows))).collect();
+    // Un administrateur sorti du groupe est oublié : remis plus tard (par un intrus, souvent un compte dormant), il
+    // repart de la date du jour et se signale comme un nouveau. Gardé, sa vieille date le faisait passer pour connu.
+    // Une liste lue vide n'efface rien : ce peut être une lecture incomplète plutôt qu'un groupe vidé, et tout oublier
+    // ferait signaler chacun comme nouveau au bilan suivant.
+    if !admins.is_empty() {
+        vus.retain(|k, _| cles.contains(k));
+    }
     for cle in &cles {
         let date = if avant.is_some() {
             aujourd_hui.format("%Y-%m-%d").to_string()
@@ -219,5 +226,22 @@ mod tests {
         assert!(c.message.contains("intrus") && !c.message.contains("alice"));
         assert_eq!(juger(&deux, Some(&vus), jour(18)).0.probleme, Some(Niveau::Eleve));
         assert!(juger(&deux, Some(&vus), jour(19)).0.probleme.is_none());
+    }
+
+    #[test]
+    fn administrateur_retire_puis_remis_signale() {
+        let (alice, deux) = (vec!["alice".to_string()], vec!["alice".to_string(), "bob".to_string()]);
+        // bob est connu dès le premier passage (date vide), puis retiré du groupe.
+        let (_, vus) = juger(&deux, None, jour(1));
+        let (c, vus) = juger(&alice, Some(&vus), jour(2));
+        assert!(c.probleme.is_none());
+        assert!(!vus.vus.contains_key("bob"));
+        // Remis des semaines plus tard : signalé comme un nouveau.
+        let (c, _) = juger(&deux, Some(&vus), jour(25));
+        assert_eq!(c.probleme, Some(Niveau::Eleve));
+        assert!(c.message.contains("bob") && !c.message.contains("alice"));
+        // Une liste lue vide n'oublie personne.
+        let (_, vides) = juger(&[], Some(&vus), jour(26));
+        assert_eq!(vides, vus);
     }
 }
