@@ -125,6 +125,27 @@ fn soupcon(programme: &str, arguments: &str) -> Option<&'static str> {
     None
 }
 
+/// Les commandes qui arrêtent l'agent et mettent son fichier à la corbeille. Seuls les daemons
+/// (/Library/LaunchDaemons) vivent dans le domaine `system` ; un agent, même posé dans
+/// /Library/LaunchAgents, est chargé dans la session de la personne (gui/<uid>) : `bootout system`
+/// ne le trouverait pas et il tournerait jusqu'à la déconnexion. `$(id -u)` est développé avant
+/// `sudo` : c'est le compte de la personne, pas root.
+fn arret_et_retrait(chemin: &Path, dossier: &Path, systeme: bool) -> (String, String) {
+    let plist = crate::commande::sh_chaine(&chemin.display().to_string());
+    if !systeme {
+        return (
+            format!("launchctl bootout gui/$(id -u) {plist}"),
+            format!("mv {plist} ~/.Trash/"),
+        );
+    }
+    let arret = if dossier.ends_with("LaunchDaemons") {
+        format!("sudo launchctl bootout system {plist}")
+    } else {
+        format!("sudo launchctl bootout gui/$(id -u) {plist}")
+    };
+    (arret, format!("sudo mv {plist} ~/.Trash/"))
+}
+
 pub fn persistance() -> Vec<Constat> {
     let maison = PathBuf::from(std::env::var_os("HOME").unwrap_or_default());
     persistance_dans([
@@ -197,18 +218,7 @@ fn persistance_dans(dossiers: impl IntoIterator<Item = (PathBuf, bool)>) -> Vec<
             tiers.push(nom.clone());
             let Some(raison) = soupcon(&prog, &args) else { continue };
             let prog = crate::ui::affichable(&prog);
-            let plist = crate::commande::sh_chaine(&chemin.display().to_string());
-            let (arret, retrait) = if systeme {
-                (
-                    format!("sudo launchctl bootout system {plist}"),
-                    format!("sudo mv {plist} ~/.Trash/"),
-                )
-            } else {
-                (
-                    format!("launchctl bootout gui/$(id -u) {plist}"),
-                    format!("mv {plist} ~/.Trash/"),
-                )
-            };
+            let (arret, retrait) = arret_et_retrait(&chemin, &dossier, systeme);
             constats.push(
                 alerte(
                     CAT,
@@ -345,6 +355,24 @@ mod tests {
         );
         std::fs::set_permissions(&refuse, std::fs::Permissions::from_mode(0o700)).unwrap();
         std::fs::remove_dir_all(&racine).unwrap();
+    }
+
+    /// Un agent de /Library/LaunchAgents s'arrête dans la session, un daemon dans `system`.
+    #[test]
+    fn domaine_de_l_arret() {
+        let agent = Path::new("/Library/LaunchAgents/com.exemple.a.plist");
+        let (arret, retrait) = arret_et_retrait(agent, Path::new("/Library/LaunchAgents"), true);
+        assert_eq!(
+            arret,
+            "sudo launchctl bootout gui/$(id -u) '/Library/LaunchAgents/com.exemple.a.plist'"
+        );
+        assert!(retrait.starts_with("sudo mv "));
+        let daemon = Path::new("/Library/LaunchDaemons/com.exemple.d.plist");
+        let (arret, _) = arret_et_retrait(daemon, Path::new("/Library/LaunchDaemons"), true);
+        assert!(arret.starts_with("sudo launchctl bootout system "), "{arret}");
+        let perso = Path::new("/Users/alice/Library/LaunchAgents/com.exemple.p.plist");
+        let (arret, retrait) = arret_et_retrait(perso, Path::new("/Users/alice/Library/LaunchAgents"), false);
+        assert!(arret.starts_with("launchctl bootout gui/$(id -u) ") && retrait.starts_with("mv "));
     }
 
     #[test]
