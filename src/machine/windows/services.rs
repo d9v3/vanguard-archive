@@ -162,15 +162,22 @@ pub(super) fn juger(sortie: &str) -> Option<Constat> {
         else {
             continue;
         };
-        // Le nom du service entre dans un chemin du registre : seulement des caractères de nom de service.
-        if nom.is_empty() || !nom.chars().all(|c| c.is_ascii_alphanumeric() || "_-.".contains(c)) {
+        if nom.is_empty() {
             continue;
         }
+        // Un nom de service peut avoir des espaces et des parenthèses (« Bonjour Service », « Intel(R) … ») : écarté,
+        // le service exploitable passait pour sain. Il est toujours signalé ; seule la commande est retenue quand le
+        // nom changerait le chemin du registre (séparateur ou caractère de contrôle). Entre apostrophes doublées,
+        // le reste ne peut rien injecter.
         noms.push(format!("{} ({})", affichable(nom), affichable(dossier)));
+        if nom.chars().any(|c| c == '\\' || c == '/' || c.is_control()) {
+            continue;
+        }
         let chemin = format!(r"HKLM:\SYSTEM\CurrentControlSet\Services\{nom}");
         let valeur = format!("\"{programme}\"{arguments}");
         commandes.push(format!(
-            "Set-ItemProperty -LiteralPath '{chemin}' -Name ImagePath -Value {}",
+            "Set-ItemProperty -LiteralPath {} -Name ImagePath -Value {}",
+            ps_chaine(&chemin),
             ps_chaine(&valeur)
         ));
     }
@@ -285,14 +292,29 @@ mod tests {
         )
         .unwrap();
         assert_eq!(c.probleme, Some(Niveau::Eleve));
-        assert!(c.message.contains("OutilMaj (C:\\Mes Outils)") && !c.message.contains("pi;ege"));
+        assert!(c.message.contains("OutilMaj (C:\\Mes Outils)") && c.message.contains("pi;ege"));
         let k = c.correctif.unwrap();
         assert!(!k.automatique);
         assert_eq!(
             k.commandes,
             [
-                "Set-ItemProperty -LiteralPath 'HKLM:\\SYSTEM\\CurrentControlSet\\Services\\OutilMaj' -Name ImagePath -Value '\"C:\\Mes Outils\\Outil Maj\\maj.exe\" -service'"
+                "Set-ItemProperty -LiteralPath 'HKLM:\\SYSTEM\\CurrentControlSet\\Services\\OutilMaj' -Name ImagePath -Value '\"C:\\Mes Outils\\Outil Maj\\maj.exe\" -service'",
+                "Set-ItemProperty -LiteralPath 'HKLM:\\SYSTEM\\CurrentControlSet\\Services\\pi;ege' -Name ImagePath -Value '\"C:\\A B\\x.exe\"'"
             ]
         );
+        // Espaces, parenthèses et apostrophe dans le nom : signalé, la commande garde le nom entre apostrophes
+        // doublées. Un nom qui changerait le chemin du registre est signalé sans commande.
+        let c = juger(
+            "SVC|Bonjour Service|C:\\Program Files\\Bonjour\\mDNSResponder.exe||C:\\Program Files\nSVC|Intel(R) l'outil|C:\\A B\\x.exe||C:\\A B\nSVC|a/b|C:\\A B\\y.exe||C:\\A B\nSVC_FIN\n",
+        )
+        .unwrap();
+        assert!(c.message.contains("Bonjour Service (C:\\Program Files)"));
+        assert!(c.message.contains("Intel(R) l'outil") && c.message.contains("a/b"));
+        let k = c.correctif.unwrap();
+        assert_eq!(k.commandes.len(), 2);
+        assert!(k.commandes[0].starts_with(
+            "Set-ItemProperty -LiteralPath 'HKLM:\\SYSTEM\\CurrentControlSet\\Services\\Bonjour Service' -Name ImagePath"
+        ));
+        assert!(k.commandes[1].contains("Services\\Intel(R) l''outil' -Name"));
     }
 }
