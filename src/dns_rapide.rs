@@ -30,7 +30,7 @@ struct Public {
 }
 
 #[rustfmt::skip] // deux lignes par DNS, que rustfmt étalerait sur six
-const PUBLICS: [Public; 4] = [
+const PUBLICS: [Public; 5] = [
     Public { nom: "Cloudflare", v4: ["1.1.1.1", "1.0.0.1"], v6: ["2606:4700:4700::1111", "2606:4700:4700::1001"],
         bloque: Bloque::Rien },
     Public { nom: "Quad9", v4: ["9.9.9.9", "149.112.112.112"], v6: ["2620:fe::fe", "2620:fe::9"],
@@ -39,6 +39,10 @@ const PUBLICS: [Public; 4] = [
         bloque: Bloque::Rien },
     Public { nom: "AdGuard DNS", v4: ["94.140.14.14", "94.140.15.15"], v6: ["2a10:50c0::ad1:ff", "2a10:50c0::ad2:ff"],
         bloque: Bloque::Publicites },
+    // Le Bouclier canadien de l'ACEI, version « Protégé » (.20) : sans frais, sans profilage, il bloque les logiciels
+    // malveillants et l'hameçonnage ; le « Privé » (.10) ne filtre rien et n'est donc pas proposé.
+    Public { nom: "Bouclier canadien", v4: ["149.112.121.20", "149.112.122.20"], v6: ["2620:10a:80bb::20", "2620:10a:80bc::20"],
+        bloque: Bloque::Malveillants },
 ];
 
 /// Des sites très visités, que tout DNS a souvent déjà en mémoire, comme lors d'une vraie navigation.

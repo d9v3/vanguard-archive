@@ -482,7 +482,7 @@ details.cli[open] summary { border-bottom: 1px solid var(--trait); }
         <h4>La box</h4>
         <ul>
           <li><b>Client UPnP IGD en Rust</b> : SSDP, description, SOAP en lecture seule ; les redirections de ports jusqu'au bout de la liste, l'adresse publique, le modèle et le logiciel.</li>
-          <li><b>Rien d'autre n'est envoyé</b> : aucune sonde de mot de passe, aucun identifiant par défaut essayé.</li>
+          <li><b>Rien d'autre n'est envoyé</b> : aucun mot de passe essayé. Seule exception, annoncée : une demande SNMP « décris-toi » avec le mot de passe de lecture d'usine « public », en lecture seule ; un appareil qui y répond est signalé.</li>
         </ul>
       </article>
       <article>
@@ -555,7 +555,7 @@ vanguard yara --complet</pre>
     <div class="principes">
       <div class="principe"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7"/></svg><div><b>Rien sans ton accord</b><span>Chaque changement est montré avant d'être fait.</span></div></div>
       <div class="principe"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7"/></svg><div><b>Jamais « sain » par défaut</b><span>Ce qui n'a pas pu être vérifié est dit clairement.</span></div></div>
-      <div class="principe"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7"/></svg><div><b>Jamais d'attaque</b><span>Il observe et mesure ton réseau ; aucun exploit, aucun mot de passe essayé sur un appareil.</span></div></div>
+      <div class="principe"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7"/></svg><div><b>Jamais d'attaque</b><span>Il observe et mesure ton réseau ; aucun exploit, aucun mot de passe essayé sur un appareil (seule la lecture SNMP « public », annoncée).</span></div></div>
       <div class="principe"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7"/></svg><div><b>Rien d'envoyé en cachette</b><span>Le journal des erreurs est anonymisé ; rien ne part sans le dire.</span></div></div>
     </div>
   </section>

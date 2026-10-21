@@ -1400,6 +1400,11 @@ pub async fn executer(o: Options) -> Result<Rapport, String> {
             "{GRIS}{} device(s) found. Scanning ports…{RESET}",
             vivantes.len()
         );
+        // La seule demande qui porte un identifiant par défaut est dite (lecture seule ; choix de l'auteur).
+        tre!(
+            "{GRIS}SNMP : une demande « décris-toi », mot de passe de lecture d'usine « public ».{RESET}",
+            "{GRIS}SNMP: one “describe yourself” request, factory read password “public”.{RESET}"
+        );
         if ips.iter().all(std::net::Ipv4Addr::is_loopback) {
             tre!(
                 "{GRIS}Note : 127.0.0.1 montre aussi les services réservés à cette machine. Pour ce qui est vraiment exposé au réseau : vanguard machine.{RESET}",

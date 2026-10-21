@@ -106,7 +106,9 @@ which steals the network's Windows passwords; the hourly monitoring flags it too
 says about itself (often its model and software version), an admin page over HTTP only, and the cameras, printers,
 NAS, TVs, speakers, consoles and smart home devices, recognized by their manufacturer, name, ports and
 announcements. For the router, cameras, printers and NAS, the advice to change the default password: nothing more is
-probed and no password is tried.
+probed and no password is tried. One exception, announced during the scan: a single SNMP “describe yourself”
+request with the factory read password “public”, read-only, which gives the model of printers and NAS; a device that
+answers it is reported, since anyone on the network can then read it.
 
 **Hidden cameras** — in a rental or at someone's place, the devices on the network that look like cameras (maker,
 video stream, ONVIF), without turning anything off or watching anything.

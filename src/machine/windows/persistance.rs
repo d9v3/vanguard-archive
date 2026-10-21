@@ -612,6 +612,37 @@ pub(super) fn persistance() -> Vec<Constat> {
     constats
 }
 
+/// PowerShell lancé en fenêtre cachée (« -w hidden », « -WindowStyle Hidden ») sans autre signe : dit en information
+/// seulement. Des outils légitimes le font (mises à jour, outils d'entreprise), mais c'est aussi un réflexe de logiciel
+/// malveillant : la personne regarde si elle le reconnaît.
+fn fenetre_cachee(exe: &str, args: &str) -> bool {
+    let exe = exe.trim().trim_matches('"').to_lowercase().replace('/', "\\");
+    let programme = exe.rsplit('\\').next().unwrap_or(&exe).trim_end_matches(".exe");
+    if !matches!(programme, "powershell" | "pwsh") {
+        return false;
+    }
+    let jetons: Vec<String> = args
+        .to_lowercase()
+        .split_whitespace()
+        .map(|j| j.trim_matches('"').replacen('/', "-", 1))
+        .collect();
+    jetons
+        .windows(2)
+        .any(|p| p[0].len() >= 2 && "-windowstyle".starts_with(p[0].as_str()) && (p[1] == "hidden" || p[1] == "h"))
+}
+
+/// Le constat d'information d'un lancement automatique en fenêtre cachée.
+fn info_fenetre_cachee(ou: &str, commande: &str) -> Constat {
+    alerte(
+        "Persistance",
+        Niveau::Info,
+        trf!(
+            "{ou} lance PowerShell en fenêtre cachée ({commande}) : des outils légitimes le font, mais c'est aussi un réflexe de logiciel malveillant. Vérifie que tu le reconnais.",
+            "{ou} starts PowerShell in a hidden window ({commande}): legitimate tools do this, but so does malware. Check that you recognize it."
+        ),
+    )
+}
+
 fn juger_persistance(taches: &[&str], run: &[ValeurRun], demarrage: &[&str]) -> Vec<Constat> {
     let ps_texte = crate::commande::ps_texte;
     // Noms, chemins et commandes sont choisis par le programme qui se fait relancer : les corrections visent le vrai
@@ -651,6 +682,14 @@ fn juger_persistance(taches: &[&str], run: &[ValeurRun], demarrage: &[&str]) -> 
                     )],
                 ),
             );
+        } else if fenetre_cachee(exe_brut, args_brut) {
+            let lieu = trf!(
+                "La tâche planifiée « {}{} »",
+                "Scheduled task “{}{}”",
+                montre(chemin_brut),
+                montre(nom_brut)
+            );
+            constats.push(info_fenetre_cachee(&lieu, &montre(&format!("{exe_brut} {args_brut}"))));
         }
     }
     for r in run {
@@ -673,6 +712,15 @@ fn juger_persistance(taches: &[&str], run: &[ValeurRun], demarrage: &[&str]) -> 
                 ),
                 None => constat,
             });
+        } else if fenetre_cachee(&exe, &args) {
+            let nom = if r.nom.is_empty() { "(default)" } else { &r.nom };
+            let lieu = trf!(
+                "Le lancement automatique « {} » ({})",
+                "Autostart “{}” ({})",
+                montre(nom),
+                montre(r.cle)
+            );
+            constats.push(info_fenetre_cachee(&lieu, &montre(&r.valeur)));
         }
     }
     for d in demarrage {
@@ -696,6 +744,13 @@ fn juger_persistance(taches: &[&str], run: &[ValeurRun], demarrage: &[&str]) -> 
                     &[&format!("Remove-Item -LiteralPath '{}'", ps_texte(fichier_brut))],
                 ),
             );
+        } else if fenetre_cachee(&exe, &args) {
+            let lieu = trf!(
+                "Le raccourci du dossier Démarrage « {} »",
+                "Startup folder shortcut “{}”",
+                montre(fichier_brut)
+            );
+            constats.push(info_fenetre_cachee(&lieu, &montre(cible_brute)));
         }
     }
     if constats.is_empty() {
@@ -715,6 +770,41 @@ fn juger_persistance(taches: &[&str], run: &[ValeurRun], demarrage: &[&str]) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn powershell_en_fenetre_cachee_dit_en_information() {
+        assert!(fenetre_cachee("powershell.exe", "-w hidden -File C:\\Outils\\maj.ps1"));
+        assert!(fenetre_cachee(
+            "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+            "-WindowStyle Hidden -NoProfile"
+        ));
+        assert!(fenetre_cachee("pwsh", "/win h -c x"));
+        assert!(!fenetre_cachee("powershell.exe", "-NoProfile -File maj.ps1"));
+        assert!(!fenetre_cachee("notepad.exe", "-w hidden"));
+        // Dans le bilan : une information, pas une alerte, et pas de correction proposée.
+        let run = [ValeurRun {
+            cle: "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+            nom: "OutilMaj".into(),
+            mots: None,
+            valeur: "powershell.exe -w hidden -File C:\\Outils\\maj.ps1".into(),
+        }];
+        let c = juger_persistance(&[], &run, &[]);
+        let info: Vec<&Constat> = c.iter().filter(|c| c.probleme == Some(Niveau::Info)).collect();
+        assert_eq!(info.len(), 1);
+        assert!(info[0].message.contains("fenêtre cachée") || info[0].message.contains("hidden window"));
+        // Encodée en base64, la même commande reste une alerte élevée.
+        let run = [ValeurRun {
+            cle: run[0].cle,
+            nom: "OutilMaj".into(),
+            mots: None,
+            valeur: "powershell.exe -w hidden -enc SQBFAFgA".into(),
+        }];
+        assert!(
+            juger_persistance(&[], &run, &[])
+                .iter()
+                .any(|c| c.probleme == Some(Niveau::Eleve))
+        );
+    }
 
     #[test]
     fn dossier_demarrage_absent_ne_lit_pas_le_dossier_courant() {

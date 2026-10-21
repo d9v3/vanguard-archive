@@ -134,7 +134,10 @@ la surveillance horaire le signale aussi.
 que la box dit d'elle-même (souvent son modèle et la version de son logiciel), une page d'administration en HTTP
 seul, et les caméras, imprimantes, NAS, télés, enceintes, consoles et objets de domotique, reconnus à leur
 fabricant, à leur nom, à leurs ports et à leurs annonces. Pour la box, les caméras, les imprimantes et les NAS, le
-conseil de changer le mot de passe d'origine : rien n'est sondé en plus et aucun mot de passe n'est essayé.
+conseil de changer le mot de passe d'origine : rien n'est sondé en plus et aucun mot de passe n'est essayé. Une
+seule exception, annoncée au scan : une demande SNMP « décris-toi » avec le mot de passe de lecture d'usine
+« public », en lecture seule, qui donne le modèle des imprimantes et des NAS ; un appareil qui y répond est signalé,
+puisque n'importe qui sur le réseau peut alors le lire.
 
 **Caméras cachées** — dans une location ou chez quelqu'un, les appareils du réseau qui ressemblent à des caméras
 (fabricant, flux vidéo, ONVIF), sans rien couper ni regarder.
