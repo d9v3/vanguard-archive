@@ -41,7 +41,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import confidentialite as conf  # noqa: E402
 
 COLONNES = 80
-RANGEES = 400
+RANGEES = 1200  # le bilan complet de la 0.82 dépasse 400 lignes : son début sortait de l'écran
 DOSSIER = Path("assets/captures")
 PARTAGE = Path("assets/partage.png")
 NOM_RESEAU = "Salon"
