@@ -99,6 +99,56 @@ function LancerAvec($fichier, [string[]]$arguments, [string]$entree) {
 
 function Sortie($fichier) { Get-Content (Join-Path $res "$fichier.out.txt") -Raw -Encoding UTF8 }
 
+# Le début d'un script PowerShell lancé par Vanguard, d'après sa ligne de commande : sans l'en-tête commun
+# (encodage, $ErrorActionPreference) ni la fonction N des traces.
+function Script-Court([string]$ligne) {
+    if (-not $ligne) { return '(fini avant d''être lu)' }
+    $s = if ($ligne -match "ErrorActionPreference='Stop'; (.*)") { $Matches[1] } else { $ligne }
+    $s = (($s -replace '^\$s = \[char\]31; function N\(\$v\) \{.*?\}; ', '') -replace '\s+', ' ').Trim()
+    if ($s.Length -gt 90) { $s.Substring(0, 89) + '…' } else { $s }
+}
+
+# Comme LancerAvec (entrée facultative), en guettant toutes les 100 ms les powershell.exe qui apparaissent : depuis la
+# 0.82, beaucoup de lectures se font sans PowerShell, qui ne sert plus qu'en secours. Les scripts lancés vont dans
+# $script:powershells (leur début). Un PowerShell fini avant d'être lu (moins de 100 ms) compte aussi, sans son texte.
+function LancerSurveille($fichier, [string[]]$arguments, [string]$entree = '') {
+    $avant = @([Diagnostics.Process]::GetProcessesByName('powershell') | ForEach-Object Id)
+    $options = @{ FilePath = $exe; NoNewWindow = $true; PassThru = $true
+        RedirectStandardOutput = (Join-Path $res "$fichier.out.txt"); RedirectStandardError = (Join-Path $res "$fichier.err.txt") }
+    if ($arguments) { $options.ArgumentList = $arguments }
+    if ($entree) {
+        $f = Join-Path $res "$fichier.entree.txt"
+        [IO.File]::WriteAllText($f, $entree.Replace("`n", "`r`n"))
+        $options.RedirectStandardInput = $f
+    }
+    $debut = Get-Date
+    $p = Start-Process @options
+    # Sans garder le handle tout de suite, PowerShell ne sait plus lire le code de sortie.
+    $null = $p.Handle
+    $vus = @{}
+    while (-not $p.HasExited) {
+        foreach ($q in [Diagnostics.Process]::GetProcessesByName('powershell')) {
+            if ($q.Id -in $avant -or $vus.ContainsKey($q.Id)) { continue }
+            $c = Get-CimInstance Win32_Process -Filter "ProcessId = $($q.Id)" -ErrorAction SilentlyContinue
+            $vus[$q.Id] = [pscustomobject]@{ Parent = $c.ParentProcessId; Ligne = "$($c.CommandLine)" }
+        }
+        Start-Sleep -Milliseconds 100
+    }
+    $p.WaitForExit()
+    $tape = if ($entree) { $entree.Replace("`n", ' ⏎ ').Trim() } else { $null }
+    Noter-Commande $fichier $arguments $p.ExitCode ((Get-Date) - $debut).TotalSeconds $tape
+    # Ceux de Vanguard : son enfant, ou fini trop vite pour qu'on lise son parent.
+    $script:powershells = @($vus.Values | Where-Object { $null -eq $_.Parent -or $_.Parent -eq $p.Id } | ForEach-Object { Script-Court $_.Ligne })
+    Journal "PowerShell lancés : $($script:powershells.Count)$(if ($script:powershells.Count) { ' : ' + ($script:powershells -join ' | ') })"
+}
+
+# Après LancerSurveille : aucun PowerShell attendu (lecture native), sinon le début des scripts lancés en secours.
+function Sans-PowerShell($quoi) {
+    $liste = @($script:powershells)
+    if (-not $liste.Count) { Ok "$quoi : aucun PowerShell lancé" }
+    else { Bug "$quoi : $($liste.Count) PowerShell lancé(s) en secours : $((@($liste | Select-Object -Unique) | Select-Object -First 3) -join ' / ')" }
+}
+
 # Les touches tapées pendant une étape longue (test de connexion…) restent dans la console : sans les vider, un
 # Entrée en trop répond à la place de la personne (mot de passe vide, question sans réponse).
 function Vider-Clavier { try { $Host.UI.RawUI.FlushInputBuffer() } catch { } }
@@ -125,7 +175,7 @@ function Constat($texte) {
 # Référence : chaque valeur lue directement, pour comparer avec les conclusions de Vanguard.
 # Dans un espace d'exécution à part, avec un délai : une commande de Windows bloquée (Get-ScheduledTask, CIM…) ne
 # fige plus toute la passe. Bloquée, elle est laissée de côté (l'arrêter pourrait bloquer aussi) et finit avec la passe.
-function Ref($nom, [scriptblock]$bloc, [int]$delai = 30) {
+function Lire-Windows([scriptblock]$bloc, [int]$delai = 30) {
     $ps = [powershell]::Create()
     try {
         # Les variables du test dont un bloc a besoin.
@@ -146,6 +196,11 @@ function Ref($nom, [scriptblock]$bloc, [int]$delai = 30) {
         while ($e.InnerException) { $e = $e.InnerException }
         $v = "ERREUR : $($e.Message)"
     }
+    $v
+}
+# La valeur de Lire-Windows, gardée dans reference.txt sous son nom.
+function Ref($nom, [scriptblock]$bloc, [int]$delai = 30) {
+    $v = Lire-Windows $bloc $delai
     Add-Content -Path (Join-Path $res 'reference.txt') -Value "### $nom`r`n$v`r`n" -Encoding UTF8
 }
 
@@ -365,6 +420,22 @@ try {
     } else { Bug 'Programmes au démarrage : nombre absent du bilan' }
 } catch { Bug "Comparaison impossible : $($_.Exception.Message)" }
 
+Etape 'Plantage du 20 octobre (0.82) : vanguard machine trois fois de suite, code 0 chaque fois'
+# Le bilan lit WMI dans des fils en parallèle : une erreur COM libérée hors de son fil faisait planter Vanguard au
+# hasard des règles (0xC0000005, code -1073741819), jamais sous Wine. Trois passes de suite pour la débusquer.
+$codesMachine = @()
+foreach ($n in 1..3) {
+    LancerSurveille "machine-suite-$n" @('machine')
+    $codesMachine += $script:etape.Commandes[-1].Code
+    if ($n -eq 1) { $psMachine = @($script:powershells) }
+}
+$negatifs = @($codesMachine | Where-Object { $_ -lt 0 })
+if ($negatifs.Count) { Bug "plantage : codes $($codesMachine -join ', ') ($(($negatifs | ForEach-Object { '0x{0:X8}' -f $_ }) -join ', '))" }
+elseif (@($codesMachine | Where-Object { $_ -ne 0 }).Count) { Bug "Bilan : codes $($codesMachine -join ', ') au lieu de 0" }
+else { Ok 'Trois bilans de suite, code 0 chaque fois' }
+# Ce que le bilan lance encore par PowerShell : pour suivre ce qui reste à passer en lecture native.
+Info "PowerShell lancé(s) par un bilan : $($psMachine.Count)$(if ($psMachine.Count) { ' : ' + ((@($psMachine | Select-Object -Unique) | Select-Object -First 6) -join ' / ') })"
+
 Etape 'Scan du réseau de la VM'
 Lancer 'reseau' @('reseau')
 Lancer 'reseau-json' @('reseau', '--json')
@@ -411,6 +482,80 @@ try {
         if ($larges.Count) { Bug "Scan : section des objets au-delà de 76 colonnes : $($larges[0].Trim())" } else { Ok 'Scan : section des objets en 76 colonnes' }
     }
 } catch { Bug "Scan illisible ($($_.Exception.Message))" }
+
+Etape 'Audit du réseau (0.82) : six domaines, rien de sain sans lecture, en 76 colonnes, sans invite du pare-feu'
+# Une invite du pare-feu (« autoriser l'accès ») répondue ou refusée laisse une règle au nom du programme.
+function Regles-Pare-Feu {
+    try { @(Get-NetFirewallApplicationFilter -ErrorAction Stop | Where-Object { $_.Program -like '*vanguard*' }).Count } catch { -1 }
+}
+$reglesAvant = Regles-Pare-Feu
+Lancer 'audit-reseau' @('audit-reseau')
+Lancer 'audit-reseau-json' @('audit-reseau', '--json')
+$codesAudit = @($script:etape.Commandes | ForEach-Object Code)
+if (@($codesAudit | Where-Object { $_ -lt 0 }).Count) { Bug "plantage de l'audit du réseau : codes $($codesAudit -join ', ')" }
+elseif (@($codesAudit | Where-Object { $_ -ne 0 }).Count) { Bug "audit-reseau : codes $($codesAudit -join ', ') au lieu de 0" }
+else { Ok 'audit-reseau : code 0 (texte et JSON)' }
+$texteAudit = Lignes (Sortie 'audit-reseau')
+$larges = Trop-Larges $texteAudit
+if ($larges.Count) { Bug "audit-reseau : $($larges.Count) ligne(s) au-delà de 76 colonnes : $($larges[0].Trim())" } else { Ok 'audit-reseau : tout tient en 76 colonnes' }
+# À l'écran, une vérification impossible est un « ? » gris, jamais un « ✔ ».
+$fauxVerts = @($texteAudit | Where-Object { $_ -match '✔' -and $_ -match 'Could not check|Impossible de vérifier' })
+if ($fauxVerts.Count) { Bug "Vérification impossible marquée ✔ : $($fauxVerts[0].Trim())" } else { Ok 'Aucun ✔ sur une vérification impossible' }
+try {
+    $ar = Sortie 'audit-reseau-json' | ConvertFrom-Json
+    $noms = @($ar.domaines | ForEach-Object domaine) -join ', '
+    if ($noms -eq 'Exposition, Wi-Fi, Segmentation, DNS et TLS, Appareils, Postes') { Ok "Six domaines dans le JSON ($noms), réseau $($ar.reseau)" } else { Bug "Domaines du JSON : $noms" }
+    Info ('Notes : ' + (($ar.domaines | ForEach-Object { "$($_.domaine) $(if ($null -ne $_.score) { "$($_.note) ($($_.score))" } else { "incomplet ($($_.non_verifies) non vérifiés)" })" }) -join ', '))
+    $tous = @($ar.domaines | ForEach-Object { $_.constats })
+    # Ce qui n'a pas pu être lu porte un niveau (info) : jamais un constat sain, que la note compterait.
+    $fauxOk = @($tous | Where-Object { -not $_.verifie -and $null -eq $_.probleme })
+    if ($fauxOk.Count) { Bug "Non vérifié compté sain : $($fauxOk[0].regle) $($fauxOk[0].message)" }
+    else { Ok "$($tous.Count) constats, dont $(@($tous | Where-Object { -not $_.verifie }).Count) non vérifiés : aucun compté sain" }
+    function Regle-Audit($id) { @($tous | Where-Object regle -eq $id) }
+    function Messages-Audit($id) { (@(Regle-Audit $id) | ForEach-Object message) -join ' / ' }
+    # Wi-Fi : la VM n'a pas de carte Wi-Fi (ou son service WLAN est arrêté) : les trois règles des bornes non vérifiées.
+    $wlan = Get-Service WlanSvc -ErrorAction SilentlyContinue
+    $cartesWifi = @(Get-NetAdapter -ErrorAction SilentlyContinue | Where-Object NdisPhysicalMedium -eq 9)
+    if (-not $wlan -or $wlan.Status -ne 'Running' -or -not $cartesWifi.Count) {
+        foreach ($id in 'COM-WIF-001', 'COM-WIF-002', 'COM-WIF-003') {
+            $c = @(Regle-Audit $id)
+            $dits = @($c | Where-Object { -not $_.verifie -and $_.message -match 'no Wi-Fi card|WLAN service is stopped|pas de carte Wi-Fi|service WLAN de Windows est arrêté' })
+            if ($c.Count -and $dits.Count -eq $c.Count) { Ok "$id : impossible de vérifier, dit pourquoi ($($c[0].message))" }
+            else { Bug "$id sans Wi-Fi : « $(Messages-Audit $id) »" }
+        }
+    } else { Info "Cette VM a une carte Wi-Fi ($($cartesWifi[0].Name)) : COM-WIF-001 « $(Messages-Audit 'COM-WIF-001') »" }
+    # Exposition : le routeur virtuel ne parle pas UPnP (« coupé ou absent ») ; s'il répond, « actif » est un faux
+    # positif admis.
+    $exp = Messages-Audit 'COM-EXP-001'
+    if ($exp -match 'UPnP off or absent|UPnP coupé ou absent') { Ok 'Exposition : UPnP coupé ou absent' }
+    elseif ($exp -match 'UPnP is on|UPnP est actif') { Info "Exposition : UPnP dit actif (faux positif admis si le routeur virtuel répond) : $exp" }
+    else { Bug "Exposition : ni « UPnP off or absent » ni « UPnP is on » : « $exp »" }
+    # DNS et TLS : sans DohFlags dans le registre (aucun DoH déclaré à Windows), le DNS du système part en clair.
+    $doh = @(Get-ChildItem 'HKLM:\SYSTEM\CurrentControlSet\Services\Dnscache\InterfaceSpecificParameters' -Recurse -ErrorAction SilentlyContinue |
+        Where-Object { $null -ne $_.GetValue('DohFlags') } | ForEach-Object PSChildName)
+    $dns3 = @(Regle-Audit 'COM-DNS-003')
+    if ($doh.Count) { Info "DoH déclaré à Windows ($($doh -join ', ')) : COM-DNS-003 « $(Messages-Audit 'COM-DNS-003') »" }
+    elseif (@($dns3 | Where-Object { $_.verifie -and $_.message -match 'leave unencrypted|partent en clair' }).Count) { Ok 'DNS et TLS : DohFlags absent, DNS dit « en clair »' }
+    else { Bug "DNS et TLS : DohFlags absent, mais COM-DNS-003 dit « $(Messages-Audit 'COM-DNS-003') »" }
+    # Segmentation : le serveur DHCP du bail, lu par Vanguard dans le registre (DhcpServer), comme ici.
+    $dhcp = @(Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces\*' -ErrorAction SilentlyContinue |
+        ForEach-Object DhcpServer | Where-Object { $_ -and $_ -ne '255.255.255.255' } | Sort-Object -Unique)
+    $seg = Messages-Audit 'COM-SEG-004'
+    if (-not $dhcp.Count) { Info "Aucun serveur DHCP dans le registre (adresse fixe ?) : COM-SEG-004 « $seg »" }
+    elseif (-not @(Regle-Audit 'COM-SEG-004' | Where-Object verifie).Count) { Bug "COM-SEG-004 : serveur DHCP pas lu (registre : $($dhcp -join ', ')) : « $seg »" }
+    elseif (@($dhcp | Where-Object { $seg -match "\b$([regex]::Escape($_))\b" }).Count) { Ok "Segmentation : serveur DHCP $($dhcp -join ', '), comme DhcpServer du registre" }
+    else { Bug "COM-SEG-004 : registre $($dhcp -join ', '), Vanguard « $seg »" }
+} catch { Bug "audit-reseau --json illisible : $($_.Exception.Message)" }
+Lancer 'audit-reseau-invite' @('audit-reseau', '--invite')
+if (((Sortie 'audit-reseau-invite') -replace '\s+', ' ') -match 'From the guest network|Depuis le réseau invité') { Ok '--invite : vérifie la séparation du réseau principal' } else { Bug '--invite : phrase du réseau invité ABSENTE' }
+# Menu Réseau et Internet (5), outil 2 : l'audit, Entrée pour revenir, Entrée pour le menu principal, q.
+LancerAvec 'menu-audit-reseau' @() "5`n2`n`n`nq`n"
+if ((Sortie 'menu-audit-reseau') -match "Audit grade|Note de l.audit") { Ok 'Menu Réseau › 2 : audit du réseau lancé' } else { Bug 'Menu Réseau › 2 : audit du réseau PAS lancé' }
+$reglesApres = Regles-Pare-Feu
+if ($reglesAvant -lt 0 -or $reglesApres -lt 0) { Info 'Règles du pare-feu illisibles ici : invite non vérifiée par les règles' }
+elseif ($reglesApres -eq $reglesAvant) { Ok "Aucune règle du pare-feu ajoutée pour Vanguard ($reglesApres) : pas d'invite répondue" }
+else { Bug "Pare-feu : $($reglesApres - $reglesAvant) règle(s) ajoutée(s) pour Vanguard pendant l'audit (une invite s'est ouverte)" }
+Constat 'Aucune fenêtre du pare-feu Windows (« autoriser l''accès ») ne s''est ouverte pendant l''audit du réseau ?'
 
 Etape 'Tous les ports de cette machine (127.0.0.1)'
 Lancer 'local-tous' @('reseau', '127.0.0.1', '-p', 'tous')
@@ -493,7 +638,37 @@ Etape 'Réparer (liste), mises à jour (vérification seule), gaming, courriel r
 LancerAvec 'reparer' @('reparer') "`n"
 $n = ([regex]::Matches(((Sortie 'reparer') -replace '\x1b\[[0-9;]*m', ''), '(?m)^\s+\d+\s{2,}\S')).Count
 if ($n -gt 0) { Ok "$n réparation(s) proposée(s)" } else { Bug 'Liste des réparations vide' }
-LancerAvec 'maj' @('maj') "n`nn`nn`nn`nn`n"
+LancerSurveille 'maj' @('maj') "n`nn`nn`nn`nn`n"
+# 0.82 : winget lancé par son chemin complet (celui du Store), sans PowerShell autour ; Windows Update par son API.
+$mj = ((Sortie 'maj') -replace '\x1b\[[0-9;]*m', '') -replace '\s+', ' '
+if ($mj -match 'Programs up to date \(winget\)|Programmes à jour \(winget\)|\d+ (program\(s\) to update|programme\(s\) à mettre à jour)') { Ok "Programmes lus par winget : $($Matches[0])" }
+elseif ($mj -match 'winget is not responding|winget ne répond pas|winget failed \(code [^)]*\)|winget en erreur \(code [^)]*\)|winget absent') { Bug "Programmes : $($Matches[0])" }
+else { Bug 'Programmes (winget) : rien dit' }
+$wingetStore = Join-Path $env:LOCALAPPDATA 'Microsoft\WindowsApps\winget.exe'
+if (Get-Item -LiteralPath $wingetStore -Force -ErrorAction SilentlyContinue) {
+    $wingetPs = @($script:powershells | Where-Object { $_ -match 'winget' })
+    if ($wingetPs.Count) { Bug "winget relancé par PowerShell : $($wingetPs[0])" } else { Ok 'winget lancé par son chemin complet, sans PowerShell' }
+} else { Info "winget du Store absent ($wingetStore) : PowerShell en secours, comme prévu" }
+Info "maj : $(@($script:powershells).Count) PowerShell lancé(s) en secours$(if ($script:powershells) { ' : ' + ((@($script:powershells | Select-Object -Unique) | Select-Object -First 4) -join ' / ') })"
+# Windows Update : la même recherche, faite ici par l'API COM ; une recherche qui échoue n'est jamais « à jour ».
+$rechercheWu = Lire-Windows { $r = (New-Object -ComObject Microsoft.Update.Session).CreateUpdateSearcher().Search("IsInstalled=0 and IsHidden=0 and Type='Software'"); "$($r.ResultCode)|$($r.Updates.Count)" } 240
+Info "Recherche Windows Update faite ici (code|nombre, 2 = réussie) : $rechercheWu"
+$wuFaite = $rechercheWu -match '^[23]\|(\d+)$'
+$wuNombre = if ($wuFaite) { [int]$Matches[1] } else { -1 }
+if ($mj -match 'search failed, offline\?|recherche impossible, hors ligne') {
+    if ($wuFaite) { Bug "Windows Update : Vanguard dit la recherche impossible, Windows l'a faite ($wuNombre trouvée(s))" }
+    else { Ok 'Windows Update : recherche impossible, dite impossible (jamais « à jour »)' }
+} elseif ($mj -match 'Windows up to date|Windows à jour') {
+    if ($wuNombre -eq 0) { Ok 'Windows à jour : la recherche de Windows Update n''en trouve aucune non plus' }
+    elseif ($wuNombre -gt 0) { Bug "Vanguard dit Windows à jour, Windows Update en trouve $wuNombre" }
+    else { Bug "Vanguard dit « à jour » alors que la recherche de Windows Update échoue ici ($rechercheWu)" }
+} elseif ($mj -match '(\d+) (update\(s\) pending|mise\(s\) à jour en attente)') {
+    $vuesVanguard = [int]$Matches[1]
+    if ($wuNombre -eq 0) { Bug "Vanguard : $vuesVanguard mise(s) à jour en attente, Windows Update aucune" }
+    elseif ($wuNombre -eq $vuesVanguard) { Ok "Windows Update : $vuesVanguard en attente, comme la recherche faite ici" }
+    else { Info "Windows Update : Vanguard $vuesVanguard, recherche faite ici $wuNombre (la liste change d'une recherche à l'autre)" }
+} else { Bug 'Windows Update : rien dit' }
+Info 'Recherche hors ligne pas essayée : couper le réseau de la VM demande les droits d''administrateur (à la main : « impossible », jamais « à jour »).'
 LancerAvec 'gaming' @('gaming') "`n"
 LancerAvec 'courriel' @('courriel') "test@example.com`nn`n"
 if ((Sortie 'courriel') -match 'XposedOrNot|accord|consent') { Ok 'Accord demandé avant d''envoyer l''adresse' } else { Bug 'Accord NON demandé avant l''envoi' }
@@ -693,7 +868,7 @@ Etape 'Collecter les traces (0.79) : dossier daté, LISEZMOI, manifeste juste, r
 $dossierTraces = Join-Path $env:TEMP 'vanguard-traces-test'
 Remove-Item $dossierTraces -Recurse -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force $dossierTraces | Out-Null
-Lancer 'traces' @('traces', $dossierTraces)
+LancerSurveille 'traces' @('traces', $dossierTraces)
 $tr = Sortie 'traces'
 if ($tr -match 'Collecter les traces|Collect the traces') { Ok 'Collecte lancée' } else { Bug 'Collecte PAS lancée' }
 $dates = @(Get-ChildItem -LiteralPath $dossierTraces -Directory -Filter 'traces-*')
@@ -716,6 +891,15 @@ if ($dates.Count -eq 1) {
     $avecEmpreinte = @($processus | Where-Object { ($_ -split "`t")[4] -match '^[0-9a-f]{64}$' })
     if ($processus.Count -gt 20 -and $avecEmpreinte.Count -gt 5) { Ok "$($processus.Count) processus, $($avecEmpreinte.Count) avec empreinte" }
     else { Bug "Processus : $($processus.Count), avec empreinte : $($avecEmpreinte.Count)" }
+    # 0.82 : les processus lus par WMI, le compte de chacun dans son jeton, sans PowerShell.
+    $moi = @($processus | Where-Object { ($_ -split "`t")[0] -eq "$PID" }) | Select-Object -First 1
+    $compteMoi = if ($moi) { ($moi -split "`t")[2] } else { '' }
+    if (-not $moi) { Bug "Ce test (PID $PID) absent de 01-processus.txt" }
+    elseif ($compteMoi -match "(^|\\)$([regex]::Escape($env:USERNAME))$") { Ok "Colonne du compte : ce test tourne sous « $compteMoi »" }
+    else { Bug "Colonne du compte : « $compteMoi » pour ce test, au lieu de $env:USERNAME" }
+    Info "$(@($processus | Where-Object { ($_ -split "`t")[2] }).Count) processus sur $($processus.Count) avec leur compte (sans droits : ceux des autres comptes cachés)"
+    $processusPs = @($script:powershells | Where-Object { $_ -match 'Win32_Process|IncludeUserName' })
+    if ($processusPs.Count) { Bug "Processus relus par PowerShell : $($processusPs[0])" } else { Ok 'Processus lus sans PowerShell (WMI et jetons)' }
 } else { Bug "Dossier daté : $($dates.Count) trouvé(s) au lieu d'un" }
 Remove-Item $dossierTraces -Recurse -Force -ErrorAction SilentlyContinue
 if (Test-Path $dossierTraces) { Bug 'Dossier des traces ENCORE là' } else { Ok 'Dossier des traces retiré' }
@@ -746,6 +930,54 @@ if (Question 'Faire une vraie copie de tes dossiers vers le dossier partagé (da
     Remove-Item $temoin -Force -ErrorAction SilentlyContinue
     Remove-Item $vers -Recurse -Force -ErrorAction SilentlyContinue
 } else { Sautee 'Vraie copie sautée.' }
+
+Etape 'Corrections de la relecture (0.82) : petite copie relue sans cache, puis abîmée ; DNS IPv6 réglé à la main'
+# Une copie fabriquée comme celle de « Copier mes fichiers » (dossier daté, compte rendu, originaux datés d'avant),
+# sur le disque de la VM puis sur le dossier partagé (réseau). Des tailles hors des multiples du secteur : la relecture
+# sans cache (FILE_FLAG_NO_BUFFERING) lit par blocs alignés. Puis un octet changé dans la copie : elle doit être abîmée.
+function Copie-Fabriquee($base) {
+    Remove-Item -LiteralPath $base -Recurse -Force -ErrorAction SilentlyContinue
+    $originaux = Join-Path $base 'originaux'
+    $copie = Join-Path $base 'Vanguard-copy-essai'
+    New-Item -ItemType Directory -Force $originaux, (Join-Path $copie 'originaux') | Out-Null
+    $hasard = New-Object Random 82
+    foreach ($f in @(@('a.txt', 13), @('b.bin', 5000), @('c.bin', 70001))) {
+        $octets = New-Object byte[] $f[1]
+        $hasard.NextBytes($octets)
+        [IO.File]::WriteAllBytes((Join-Path $originaux $f[0]), $octets)
+        [IO.File]::WriteAllBytes((Join-Path $copie "originaux\$($f[0])"), $octets)
+        (Get-Item -LiteralPath (Join-Path $originaux $f[0])).LastWriteTime = (Get-Date).AddDays(-2)
+    }
+    # Le compte rendu : deux lignes d'en-tête, puis « dossier : chemin de l'original », une ligne vide.
+    [IO.File]::WriteAllText((Join-Path $copie 'vanguard-copie.txt'), "File copy — Vanguard essai — $(Get-Date -Format 'yyyy-MM-dd HH:mm')`r`n`r`nDocuments : $originaux`r`n`r`n3 file(s) copied.`r`n")
+    $copie
+}
+foreach ($lieu in @(@('disque de la VM', (Join-Path $env:TEMP 'vanguard-copie-relue')), @('dossier partagé', (Join-Path $res 'copie-relue')))) {
+    $copie = Copie-Fabriquee $lieu[1]
+    $nom = if ($lieu[0] -eq 'disque de la VM') { 'local' } else { 'partage' }
+    LancerAvec "verifier-copie-$nom" @('verifier-copie', $copie) "`n"
+    $vc = (Sortie "verifier-copie-$nom") -replace '\s+', ' '
+    if ($vc -match '3 identical to the original|3 identique\(s\) à l.original' -and $vc -match 'The copy reads back|La copie se relit') { Ok "Copie relue sans cache ($($lieu[0])) : 3 fichiers identiques" }
+    else {
+        # Le premier fichier dit abîmé, avec sa raison (relecture sans cache refusée par ce disque, par exemple).
+        $raison = [regex]::Match($vc, '✖ [^✖]{0,150}').Value
+        Bug "Petite copie PAS relue comme identique ($($lieu[0]))$(if ($raison) { " : $raison" })"
+    }
+    $c = Join-Path $copie 'originaux\c.bin'
+    $octets = [IO.File]::ReadAllBytes($c)
+    $octets[70000] = $octets[70000] -bxor 0xFF
+    [IO.File]::WriteAllBytes($c, $octets)
+    LancerAvec "verifier-copie-$nom-abimee" @('verifier-copie', $copie) "`n"
+    $vc = (Sortie "verifier-copie-$nom-abimee") -replace '\s+', ' '
+    if ($vc -match 'c\.bin' -and $vc -match 'do not read back|ne se relisent pas') { Ok "Copie abîmée repérée ($($lieu[0])) : c.bin" } else { Bug "Copie abîmée PAS repérée ($($lieu[0]))" }
+    Remove-Item -LiteralPath $lieu[1] -Recurse -Force -ErrorAction SilentlyContinue
+}
+# DNS IPv6 réglé à la main (Tcpip6\…\NameServer) : le poser demande les droits d'administrateur, que la passe n'a pas.
+$dns6 = @(Get-ChildItem 'HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip6\Parameters\Interfaces' -ErrorAction SilentlyContinue |
+    ForEach-Object { (Get-ItemProperty -LiteralPath $_.PSPath -ErrorAction SilentlyContinue).NameServer } | Where-Object { $_ })
+try { $dnsVu = (@((Sortie 'machine-json' | ConvertFrom-Json).constats | Where-Object categorie -eq 'DNS') | ForEach-Object message) -join ' / ' } catch { $dnsVu = '?' }
+if ($dns6.Count) { Info "DNS IPv6 réglé à la main : $($dns6 -join ', ') ; Vanguard : « $dnsVu »" }
+else { Info "DNS IPv6 manuel pas essayé : le poser (Set-DnsClientServerAddress) demande les droits d'administrateur ; Vanguard : « $dnsVu »" }
 
 Etape 'Dépanner : pas de son, et les réglages du son ouverts par Vanguard'
 # Un lien ouvert par Vanguard (ms-settings:sound), sauf en arrière-plan : rien ne doit surgir à l'écran.
@@ -804,7 +1036,18 @@ if (Test-Path $base) {
     $json | ConvertTo-Json -Depth 10 | Set-Content $base -Encoding UTF8
     Info "Appareil retiré de la base de test : $retire"
     if (-not $Auto) { Write-Host '      Regarde le coin de l''écran : une notification « Nouvel appareil » doit apparaître…' -ForegroundColor Yellow }
+    # 0.82 : après le scan, l'audit rapide du réseau ; son état d'avant retiré, c'est son premier passage : il ne fait
+    # que mémoriser, sans alerte.
+    $etatAudit = Join-Path $env:LOCALAPPDATA 'vanguard\surveillance-audit.json'
+    Remove-Item -LiteralPath $etatAudit -Force -ErrorAction SilentlyContinue
+    $avantSurveiller = (Get-Date).AddSeconds(-1).ToString('yyyy-MM-dd HH:mm:ss')
     Lancer 'surveiller' @('surveiller')
+    if (Test-Path -LiteralPath $etatAudit) { Ok 'Audit du réseau mémorisé (surveillance-audit.json)' } else { Bug 'surveillance-audit.json PAS écrit' }
+    $alertesPasse = @(Get-Content -LiteralPath (Join-Path $env:LOCALAPPDATA 'vanguard\surveillance-alertes.jsonl') -Encoding UTF8 -ErrorAction SilentlyContinue |
+        ForEach-Object { try { $_ | ConvertFrom-Json } catch { } } | Where-Object { $_.date -ge $avantSurveiller })
+    $alertesAudit = @($alertesPasse | Where-Object { $_.titre -match 'opens a port to the Internet|ouvre un port vers Internet|DNS handed out by the router changed|DNS distribué par la box a changé|DNS answers hijacked|réponses DNS détournées|exposed over IPv6|exposé en IPv6|Wi-Fi less protected|Wi-Fi moins protégé' })
+    if ($alertesAudit.Count) { Bug "Alerte de l'audit dès son premier passage : $($alertesAudit[0].titre)" }
+    else { Ok "Premier passage de l'audit : aucune alerte ($($alertesPasse.Count) autre(s) alerte(s) de la passe)" }
     Start-Sleep -Seconds 3
     Constat 'As-tu vu la notification « Nouvel appareil sur ton réseau » ?'
 } else {
@@ -883,15 +1126,22 @@ if ($poserPage) {
 }
 
 Etape 'Rapport HTML de Vanguard'
+$avantComplet = Get-Date
 if ($SansOuvrir) {
     # En arrière-plan, le navigateur ne doit pas surgir : le bilan complet, en texte.
     Lancer 'complet' @('complet', '--texte')
     Info 'Rapport HTML pas ouvert : test en arrière-plan.'
+    if ((Sortie 'complet') -match '(?m)^## (Audit du réseau|Network audit)') { Ok 'Rapport en texte : section de l''audit du réseau' } else { Bug 'Rapport en texte : section « Network audit » ABSENTE' }
 } else {
     Lancer 'complet-html' @('complet', '--html')
     Start-Sleep -Seconds 3
     Constat 'Le rapport s''est-il ouvert dans le navigateur, lisible, avec les accents corrects ?'
 }
+# 0.82 : le bilan complet enchaîne l'audit du réseau, et le rapport écrit (rapport.html, dans les deux cas) en a la section.
+$rapportHtml = Join-Path $env:LOCALAPPDATA 'vanguard\rapport.html'
+if ((Test-Path -LiteralPath $rapportHtml) -and (Get-Item -LiteralPath $rapportHtml).LastWriteTime -ge $avantComplet) {
+    if ((Get-Content -LiteralPath $rapportHtml -Raw -Encoding UTF8) -match '<h2>(Audit du réseau|Network audit)') { Ok 'rapport.html : section « Audit du réseau »' } else { Bug 'rapport.html : section « Audit du réseau » ABSENTE' }
+} else { Bug "rapport.html PAS écrit par le bilan complet ($rapportHtml)" }
 
 Etape 'Antivirus (analyse rapide Microsoft Defender)'
 if (Question 'Lancer l''analyse rapide Defender (quelques minutes) ?') {
@@ -942,6 +1192,132 @@ if ($numeroDefender) {
     if ($modeDefender -eq 'Normal' -and $t -match "n'est pas l'antivirus actif|is not the active antivirus") { Bug 'Defender actif, mais dit inactif' }
     if ((Etat-Defender) -eq $defAvant) { Ok 'Rien changé sans accord' } else { Bug "Defender modifié sans accord : $(Etat-Defender)" }
 } else { Bug 'Outil « Blocages de Windows Defender » ABSENT du groupe' }
+
+Etape 'Windows sans PowerShell (0.82) : Defender, santé, BitLocker, mises à jour, lenteur, diagnostic et fiche, comparés à PowerShell'
+# Depuis la 0.82, ces lectures passent par WMI, les journaux et les fonctions de Windows ; PowerShell ne sert plus qu'en
+# secours. Chaque commande est lancée en guettant les PowerShell qu'elle ouvre, et ce qu'elle dit est comparé à ce que
+# PowerShell lit ici (les mêmes classes).
+try {
+    $audit = Sortie 'machine-json' | ConvertFrom-Json
+    function Messages-Bilan($categorie) { (@($audit.constats | Where-Object categorie -eq $categorie) | ForEach-Object message) -join ' / ' }
+    # BitLocker : la propriété de l'Explorateur, lue ici par Shell.Application (1, 3, 6 actif ; 5 suspendu ; 8 en attente).
+    $bl = "$((New-Object -ComObject Shell.Application).NameSpace('C:').Self.ExtendedProperty('System.Volume.BitLockerProtection'))".Trim()
+    $attenduBl = switch -regex ($bl) {
+        '^(1|3|6)$' { 'Disk C: encrypted|Disque C: chiffré'; break }
+        '^5$' { 'suspended on C:|suspendu sur C:'; break }
+        '^8$' { 'waiting to be turned on|attend d.être activé'; break }
+        '^$' { 'BitLocker state unreadable|état BitLocker illisible'; break }
+        default { 'Disk C: not encrypted|Disque C: non chiffré' }
+    }
+    $chiffre = Messages-Bilan 'Chiffrement'
+    if ($chiffre -match $attenduBl) { Ok "BitLocker de C: (valeur $(if ($bl) { $bl } else { 'vide' })) : « $chiffre »" }
+    else { Bug "BitLocker de C: (valeur $(if ($bl) { $bl } else { 'vide' })) : Vanguard dit « $chiffre »" }
+    # Santé : la place libre de C:, lue par WMI, à 15 % près de Get-Volume.
+    $libreC = (Get-Volume -DriveLetter C -ErrorAction SilentlyContinue).SizeRemaining
+    $sante = Messages-Bilan 'Santé'
+    if ($sante -match 'C:\D{0,12}?(\d+(?:[.,]\d+)?) (GB|TB|Go|To)') {
+        $lu = [double]($Matches[1] -replace ',', '.') * [math]::Pow(1024, $(if ($Matches[2] -in 'TB', 'To') { 4 } else { 3 }))
+        if ($libreC -and [math]::Abs($lu / $libreC - 1) -lt 0.15) { Ok "Place libre de C: : « $($Matches[0]) », comme Get-Volume ($([math]::Round($libreC / 1GB, 1)) Gio)" }
+        else { Bug "Place libre de C: : Vanguard « $($Matches[0]) », Get-Volume $([math]::Round($libreC / 1GB, 1)) Gio" }
+    } else { Bug "Place libre de C: absente de la santé : « $sante »" }
+    # Mises à jour installées : Win32_QuickFixEngineering par WMI, comme Get-HotFix.
+    $correctifs = @(Get-HotFix | Where-Object InstalledOn | Sort-Object InstalledOn -Descending)
+    $majBilan = Messages-Bilan 'Mises à jour'
+    if (-not $correctifs.Count) { Info "Get-HotFix ne donne aucune mise à jour datée ; Vanguard : « $majBilan »" }
+    elseif ($majBilan -match '(\d+) (days ago|jours)') {
+        $jours = ((Get-Date).Date - $correctifs[0].InstalledOn.Date).Days
+        if ([math]::Abs([int]$Matches[1] - $jours) -le 1) { Ok "Dernière mise à jour il y a $($Matches[1]) jours, comme Get-HotFix ($($correctifs[0].HotFixID))" }
+        else { Bug "Dernière mise à jour : Vanguard $($Matches[1]) jours, Get-HotFix $jours ($($correctifs[0].HotFixID))" }
+    } else { Bug "Dernière mise à jour absente du bilan : « $majBilan »" }
+} catch { Bug "machine --json illisible : $($_.Exception.Message)" }
+
+# Defender : MSFT_MpComputerStatus et MSFT_MpPreference par WMI (l'outil « Blocages de Windows Defender »).
+if ($numeroDefender) {
+    LancerSurveille 'protection-sans-ps' @() "6.$numeroDefender`n`n`nq`n"
+    $t = Sortie 'protection-sans-ps'
+    $modeDefender = (Get-MpComputerStatus -ErrorAction SilentlyContinue).AMRunningMode
+    if ($modeDefender -eq 'Normal' -and $t -match "n'est pas l'antivirus actif|is not the active antivirus") { Bug 'Defender actif selon Get-MpComputerStatus, dit inactif par la lecture WMI' }
+    elseif ($t -match 'Protection réseau de Defender|Defender network protection') { Ok "Réglages de Defender lus (Get-MpComputerStatus : $modeDefender)" }
+    else { Bug 'Réglages de Defender ABSENTS' }
+    Sans-PowerShell 'Blocages de Windows Defender'
+} else { Sautee 'Blocages de Windows Defender absents du groupe : lecture WMI pas essayée' }
+
+# Mises à jour installées, encore : « lent › depuis peu » montre les huit dernières, autant que Get-HotFix en a.
+LancerSurveille 'depanner-lent' @('depanner', 'lent') "1`n2`nn`n`n`n`n"
+$dl = (Sortie 'depanner-lent') -replace '\x1b\[[0-9;]*m', ''
+$kb = @([regex]::Matches($dl, '(?m)^\s+(\d{4}-\d{2}-\d{2})\s+(KB\d+)') | ForEach-Object { [pscustomobject]@{ Date = $_.Groups[1].Value; Numero = $_.Groups[2].Value } })
+$correctifs = @(Get-HotFix | Where-Object InstalledOn | Sort-Object InstalledOn -Descending)
+$attendus = [math]::Min(8, $correctifs.Count)
+if ($kb.Count -eq $attendus) { Ok "Dernières mises à jour : $($kb.Count) KB, comme Get-HotFix ($($correctifs.Count) datées en tout)" }
+else { Bug "Dernières mises à jour : Vanguard $($kb.Count) KB, Get-HotFix $attendus" }
+$inconnus = @($kb | Where-Object { $_.Numero -notin $correctifs.HotFixID })
+if ($inconnus.Count) { Bug "KB inconnus de Get-HotFix : $(($inconnus | ForEach-Object Numero) -join ', ')" }
+if ($kb.Count -and $correctifs.Count) {
+    $plusRecente = $correctifs[0].InstalledOn.ToString('yyyy-MM-dd')
+    if ($kb[0].Date -eq $plusRecente) { Ok "La plus récente le $plusRecente, comme Get-HotFix" } else { Bug "La plus récente : Vanguard $($kb[0].Date), Get-HotFix $plusRecente" }
+}
+Sans-PowerShell 'Dépanner › lent › depuis peu'
+
+# Lenteur : compteurs bruts par WMI lus deux fois, démarrage par le journal des performances.
+LancerSurveille 'lenteur-sans-ps' @('lenteur') "`n"
+$t = (Sortie 'lenteur-sans-ps') -replace '\x1b\[[0-9;]*m', ''
+$plat = $t -replace '\s+', ' '
+if ($plat -match '(Processor|Processeur) .{0,40}?\d+ ?% \((\d+) (threads|fils)\)') { Ok "Processeur mesuré : $($Matches[0])" } else { Bug 'Processeur PAS mesuré' }
+if ($plat -match '(Memory|Mémoire) .{0,40}?\d+ ?% \(.{1,30}? (free out of|libres sur) [^)]+\)') { Ok "Mémoire mesurée : $($Matches[0])" } else { Bug 'Mémoire PAS mesurée' }
+if ($plat -match '(Disk|Disque) .{0,40}?(busy|occupé) \d+ ?% (of the time|du temps)') { Ok "Disque mesuré : $($Matches[0])" }
+elseif ($plat -match 'activity not measurable here|activité non mesurable ici') { Bug 'Disque : activité dite non mesurable' }
+else { Bug 'Disque PAS mesuré' }
+if ($plat -match '(WHAT WEIGHS THE MOST|CE QUI PÈSE LE PLUS) .*?(Memory|Mémoire) (?!nothing notable|rien de notable)(\S+)') { Ok "Programmes : en tête de la mémoire, $($Matches[3])" }
+else { Bug 'Programmes : rien dans « ce qui pèse le plus » pour la mémoire' }
+# Le nom d'instance des compteurs (« svchost#2 ») ne doit pas sortir : un programme, un nom.
+$suffixes = @([regex]::Matches($t, '[\w.-]+#\d+\b') | ForEach-Object Value)
+if ($suffixes.Count) { Bug "Programme nommé avec un suffixe des compteurs : $($suffixes -join ', ')" } else { Ok 'Aucun nom de programme en « #2 »' }
+Sans-PowerShell 'Pourquoi c''est lent ?'
+
+# Diagnostic : Win32_OperatingSystem, ComputerSystem, Processor, BIOS, VideoController ; les mêmes champs qu'ici.
+LancerSurveille 'diagnostic-sans-ps' @('diagnostic')
+$d = ((Sortie 'diagnostic-sans-ps') -replace '\x1b\[[0-9;]*m', '') -replace '\s+', ' '
+$osRef = Get-CimInstance Win32_OperatingSystem
+$cpuRef = @(Get-CimInstance Win32_Processor)
+$biosRef = Get-CimInstance Win32_BIOS
+$champsDiag = [ordered]@{
+    'système' = "$($osRef.Caption)"; 'version' = "$($osRef.Version)"; 'nom' = "$env:COMPUTERNAME"; 'BIOS' = "$($biosRef.SMBIOSBIOSVersion)"
+    'processeur' = "$($cpuRef[0].Name)"
+}
+foreach ($g in @(Get-CimInstance Win32_VideoController)) { $champsDiag["carte $($g.Name)"] = "$($g.Name)" }
+$differents = @($champsDiag.Keys | Where-Object { $v = ($champsDiag[$_] -replace '\s+', ' ').Trim(); $v -and -not $d.Contains($v) })
+$filsDiag = $cpuRef[0].NumberOfLogicalProcessors
+if ($d -notmatch "\($filsDiag (threads|fils)\)") { $champsDiag['fils'] = "$filsDiag"; $differents += 'fils' }
+if ($differents.Count) { Bug "Diagnostic : différent de Get-CimInstance pour $(($differents | ForEach-Object { "$_ (« $($champsDiag[$_].Trim()) »)" }) -join ', ')" }
+else { Ok "Diagnostic : système, version, nom, BIOS, processeur, fils et $(@(Get-CimInstance Win32_VideoController).Count) carte(s) graphique(s) comme Get-CimInstance" }
+if ($d -match 'PowerShell is not responding|PowerShell ne répond pas') { Bug 'Diagnostic : « PowerShell ne répond pas »' }
+Sans-PowerShell 'Diagnostic'
+
+# Fiche : les mêmes classes, rendues dans le JSON qu'écrivait le script.
+LancerSurveille 'fiche-json-sans-ps' @('fiche', '--json')
+try {
+    $fj = Sortie 'fiche-json-sans-ps' | ConvertFrom-Json
+    $csRef = Get-CimInstance Win32_ComputerSystem
+    $barrettesRef = @(Get-CimInstance Win32_PhysicalMemory)
+    $ecarts = @()
+    $norme = { param($x) ("$x" -replace '\s+', ' ').Trim() }
+    if ((& $norme $fj.processeur) -ne (& $norme $cpuRef[0].Name)) { $ecarts += "processeur « $($fj.processeur) » / « $($cpuRef[0].Name) »" }
+    $filsRef = ($cpuRef | Measure-Object NumberOfLogicalProcessors -Sum).Sum
+    $coeursRef = ($cpuRef | Measure-Object NumberOfCores -Sum).Sum
+    if ($fj.fils -ne $filsRef) { $ecarts += "fils $($fj.fils) / $filsRef" }
+    if ($fj.coeurs -ne $coeursRef) { $ecarts += "cœurs $($fj.coeurs) / $coeursRef" }
+    $sommeBarrettes = ($barrettesRef | Measure-Object Capacity -Sum).Sum
+    if ($fj.memoire -ne $csRef.TotalPhysicalMemory -and $fj.memoire -ne $sommeBarrettes) { $ecarts += "mémoire $($fj.memoire) / $($csRef.TotalPhysicalMemory) (barrettes $sommeBarrettes)" }
+    if (-not $fj.barrettes_illisibles -and @($fj.barrettes).Count -ne $barrettesRef.Count) { $ecarts += "barrettes $(@($fj.barrettes).Count) / $($barrettesRef.Count)" }
+    $cartesRef = @(Get-CimInstance Win32_VideoController).Count
+    if (@($fj.graphique).Count -ne $cartesRef) { $ecarts += "cartes graphiques $(@($fj.graphique).Count) / $cartesRef" }
+    $disquesRef = @(Get-PhysicalDisk -ErrorAction SilentlyContinue).Count
+    if (@($fj.disques).Count -ne $disquesRef) { $ecarts += "disques $(@($fj.disques).Count) / $disquesRef" }
+    if ($biosRef.SMBIOSBIOSVersion -and -not "$($fj.bios)".Contains("$($biosRef.SMBIOSBIOSVersion)".Trim())) { $ecarts += "BIOS « $($fj.bios) » / « $($biosRef.SMBIOSBIOSVersion) »" }
+    if ($ecarts.Count) { Bug "Fiche différente de Get-CimInstance : $($ecarts -join ' ; ')" }
+    else { Ok "Fiche comme Get-CimInstance : processeur, $filsRef fils, $coeursRef cœurs, mémoire, $($barrettesRef.Count) barrette(s), $cartesRef carte(s) graphique(s), $disquesRef disque(s), BIOS" }
+} catch { Bug "fiche --json illisible : $($_.Exception.Message)" }
+Sans-PowerShell 'Fiche de l''ordinateur'
 
 Etape 'Blocages de Windows Defender : protection réseau changée puis remise (UAC)'
 # Defender applique une préférence quelques instants après la fenêtre administrateur : relue jusqu'à 10 s.
