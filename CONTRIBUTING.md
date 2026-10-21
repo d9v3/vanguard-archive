@@ -96,6 +96,7 @@ Une faille de sécurité ? Pas de ticket ni de demande de fusion publics : signa
 | `assets/yara/` | règles YARA de ReversingLabs (licence MIT), rassemblées par `outils/maj-yara.sh` |
 | `assets/banniere-blanche.png`, `assets/banniere-noire.png`, `assets/icones/`, `assets/vanguard.ico` | la bannière (sans fond, une par thème de GitHub) et l'icône (le V), dessinées case par case dans l'écriture de la bannière du terminal par `outils/icone.py` |
 | `LICENCES-TIERCES.txt` | avis de licence des bibliothèques incluses (`outils/licences-tierces.py`) |
+| `fuzz/` | banc de fuzzing, hors de la compilation du programme : une cible par lecteur, qui inclut son module de `src/` par son chemin (`fuzz/cale/` pour le reste), graines aux valeurs inventées (`outils/fuzz.sh`) |
 
 ### Extensions (plugins et laboratoire)
 
@@ -182,6 +183,10 @@ dans `outils/verifier.sh` (sautés sans l'outil, cargo audit aussi sans Internet
 ne garde que des licences permissives (MIT, Apache-2.0, BSD, ISC…), compatibles avec la GPL-3.0-or-later et avec une
 double licence possible de Vanguard : toute autre, même libre et compatible avec la GPL (MPL, LGPL), demande d'abord
 l'accord de l'auteur.
+
+Fuzzing : `outils/fuzz.sh [cible|tout] [secondes]` (cargo-fuzz et la chaîne nightly), sur les lecteurs de données venues
+d'ailleurs (plist, réponses HTTP et DNS, journaux de la chronologie, XML UPnP de la box), à la main : trop long pour
+`outils/verifier.sh`.
 
 Liens morts : `outils/liens.py` ouvre tous les liens du dépôt (documentation, code du programme hors tests, scripts,
 licences) et vérifie les liens internes des pages Markdown : fichier visé, titre d'une ancre, téléchargements de la

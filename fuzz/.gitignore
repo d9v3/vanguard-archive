@@ -1,0 +1,6 @@
+# Le corpus et les plantages vont dans ~/.cache/vanguard-dev/fuzz/ (outils/fuzz.sh) ; ceux d'un « cargo fuzz run »
+# lancé à la main, et la compilation, restent hors du dépôt.
+target/
+corpus/
+artifacts/
+coverage/

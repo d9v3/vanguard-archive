@@ -1,0 +1,9 @@
+HTTP/1.1 500 Internal Server Error
+Transfer-Encoding: chunked
+
+4
+<a/>
+3;x=y
+efg
+0
+

@@ -44,7 +44,7 @@ jobs:
           if [ "${{ github.event_name }}" != "schedule" ]; then echo "compiler=oui" >> "$GITHUB_OUTPUT"; exit 0; fi
           # Le code a changé : un fichier hors de la documentation, des captures et des outils de développement, que le
           # programme n'intègre pas. Comparaison impossible (commit disparu, plus de 300 fichiers) : on compile.
-          HORS_CODE='^(.*\.md|\.claude/.*|\.relecture/.*|outils/.*|assets/captures/.*|assets/partage\.png|\.github/depot\.json|LICENCES-TIERCES\.txt|\.gitignore)$'
+          HORS_CODE='^(.*\.md|\.claude/.*|\.relecture/.*|outils/.*|assets/captures/.*|assets/partage\.png|\.github/depot\.json|LICENCES-TIERCES\.txt|\.gitignore|fuzz/.*|deny\.toml|\.cargo/audit\.toml)$'
           depot="${{ github.repository }}"
           ici="${{ github.sha }}"
           compiler=oui

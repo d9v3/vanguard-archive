@@ -95,6 +95,7 @@ A security flaw? No public issue or pull request: report it privately, see [SECU
 | `assets/yara/` | ReversingLabs YARA rules (MIT license), gathered by `outils/maj-yara.sh` |
 | `assets/banniere-blanche.png`, `assets/banniere-noire.png`, `assets/icones/`, `assets/vanguard.ico` | the banner (no background, one per GitHub theme) and the icon (the V), drawn cell by cell in the terminal banner's lettering by `outils/icone.py` |
 | `LICENCES-TIERCES.txt` | license notices of the included libraries (`outils/licences-tierces.py`) |
+| `fuzz/` | fuzzing bench, outside the program's build: one target per reader, which includes its `src/` module by path (`fuzz/cale/` for the rest), seeds with made-up values (`outils/fuzz.sh`) |
 
 ### Extensions (plugins and lab)
 
@@ -181,6 +182,10 @@ copies), in `outils/verifier.sh` (skipped without the tool, cargo audit also wit
 The list only keeps permissive licenses (MIT, Apache-2.0, BSD, ISC…), compatible with the GPL-3.0-or-later and with
 a possible dual license of Vanguard: any other, even free and GPL-compatible (MPL, LGPL), first needs the author's
 approval.
+
+Fuzzing: `outils/fuzz.sh [target|tout] [seconds]` (cargo-fuzz and the nightly toolchain), on the readers of data coming
+from elsewhere (plist, HTTP and DNS replies, timeline logs, the router's UPnP XML), by hand: too long for
+`outils/verifier.sh`.
 
 Dead links: `outils/liens.py` opens every link of the repository (documentation, the program's code except tests,
 scripts, licenses) and checks the internal links of the Markdown pages: target file, heading of an anchor, downloads

@@ -1,0 +1,6 @@
+HTTP/1.1 200 OK
+CACHE-CONTROL: max-age=120
+ST: urn:schemas-upnp-org:device:InternetGatewayDevice:1
+LOCATION: http://10.0.0.1:5000/rootDesc.xml
+SERVER: Exemple/1.0 UPnP/1.1 Box/2.0
+

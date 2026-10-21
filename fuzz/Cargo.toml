@@ -1,0 +1,58 @@
+# Banc de fuzzing de Vanguard (cargo-fuzz, libFuzzer) : à part, jamais compilé avec le programme. Il a son propre
+# espace de travail (« [workspace] » ci-dessous) ; chaque cible inclut un module de ../src par son chemin, avec une
+# petite cale pour les quelques `crate::` dont il a besoin (cale/). Lancer : outils/fuzz.sh (chaîne nightly).
+[package]
+name = "vanguard-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+license = "GPL-3.0-or-later"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4.12"
+# Les mêmes que Vanguard (../Cargo.toml) pour les modules inclus.
+chrono = { version = "0.4.45", default-features = false, features = ["clock"] }
+quick-xml = { version = "0.42.0", features = ["serialize"] }
+serde = { version = "1.0.229", features = ["derive"] }
+libc = "0.2.191"
+
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "plist"
+path = "fuzz_targets/plist.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "http_local"
+path = "fuzz_targets/http_local.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "dns_client"
+path = "fuzz_targets/dns_client.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "chronologie"
+path = "fuzz_targets/chronologie.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "igd"
+path = "fuzz_targets/igd.rs"
+test = false
+doc = false
+bench = false

@@ -60,7 +60,7 @@ PAR_SITE = 3
 AGENT = "Mozilla/5.0 (X11; Linux x86_64; rv:140.0) Gecko/20100101 Firefox/140.0"
 
 # Cargo.lock nomme la source des paquets (« registry+https://… ») : pas des liens à ouvrir.
-PAS_DES_LIENS = {"Cargo.lock"}
+PAS_DES_LIENS = {"Cargo.lock", "fuzz/Cargo.lock"}
 BINAIRES = (".png", ".ico", ".icns", ".jpg", ".jpeg", ".gif", ".webp", ".pdf", ".gz", ".zip", ".exe", ".ttf", ".woff2")
 URL = re.compile(r"https?://[^\s<>\"'`(){}\[\]|\\^]+")
 PONCTUATION = ".,;:!?»”’'\""
@@ -137,8 +137,13 @@ def liens_md(texte):
 def lire_depot(suivis, web, internes):
     """Les liens web de tous les fichiers suivis par git, et les liens relatifs des pages Markdown."""
     for fichier in sorted(suivis):
-        # Les tests du programme (tests/) inventent leurs adresses, comme les modules de tests du code.
-        if fichier in PAS_DES_LIENS or fichier.startswith("tests/") or fichier.lower().endswith(BINAIRES):
+        # Les tests du programme (tests/) inventent leurs adresses, comme les modules de tests du code et les graines du
+        # fuzzing (fuzz/graines/), des réponses de box et des plists d'exemple.
+        if (
+            fichier in PAS_DES_LIENS
+            or fichier.startswith(("tests/", "fuzz/graines/"))
+            or fichier.lower().endswith(BINAIRES)
+        ):
             continue
         try:
             brut = Path(fichier).read_bytes()

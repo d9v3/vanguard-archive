@@ -1,0 +1,7 @@
+2026-10-20T14:03:22-04:00 portable sshd-session[4242]: Accepted publickey for alice from 192.0.2.10 port 52222 ssh2: ED25519 SHA256:abc
+2026-10-20 14:03:22.123456-0400 portable sshd[4242]: Failed password for invalid user admin from 192.0.2.7 port 4444 ssh2
+Oct 20 14:03:22 portable sudo[77]:     alice : TTY=pts/0 ; PWD=/home/alice ; USER=root ; COMMAND=/usr/bin/id -u
+Oct 20 14:05:00 portable useradd[9]: new user: name=bob, UID=1001, GID=1001, home=/home/bob, shell=/bin/bash, from=/dev/pts/1
+Oct 20 14:06:00 portable usermod[9]: add 'bob' to group 'wheel'
+Oct 20 14:07:00 portable gpasswd[9]: user bob added by root to group wheel
+Oct 20 14:08:00 portable kernel: [   12.345678] salon: loading out-of-tree module taints kernel.

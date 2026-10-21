@@ -1,0 +1,4 @@
+alice    pts/3        192.0.2.10       Tue Oct 20 14:03:22 2026 - Tue Oct 20 15:00:00 2026  (00:56)
+reboot   system boot  6.17.1-arch1-1   Tue Oct 20 08:00:00 2026   still running
+bob      ttys001      192.0.2.11       Tue Oct 20 14:03   still logged in
+wtmp begins Thu Oct  1 13:50:52 2026
