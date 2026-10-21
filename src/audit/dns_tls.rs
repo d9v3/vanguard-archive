@@ -178,6 +178,8 @@ pub struct Entree {
     pub configuration: Configuration,
     pub passerelle: Option<IpAddr>,
     pub mesures: Vec<Mesure>,
+    /// Les résolveurs dont la mesure s'est interrompue (erreur interne dans son fil) : non vérifiés, pour cette raison.
+    pub interrompues: Vec<(Role, IpAddr)>,
     pub dnssec: Vec<Dnssec>,
     pub ddr: Vec<Ddr>,
     /// DNS chiffré des navigateurs : (navigateur, activé / coupé / `None` = par défaut).
@@ -199,6 +201,7 @@ impl Entree {
             configuration: Configuration::default(),
             passerelle: None,
             mesures: Vec::new(),
+            interrompues: Vec::new(),
             dnssec: Vec::new(),
             ddr: Vec::new(),
             navigateurs_doh: Vec::new(),
@@ -519,6 +522,7 @@ pub fn entree(passerelle: Option<Ipv4Addr>) -> Entree {
         configuration,
         passerelle,
         mesures: Vec::new(),
+        interrompues: Vec::new(),
         dnssec: Vec::new(),
         ddr: Vec::new(),
         navigateurs_doh: navigateurs.doh,
@@ -558,24 +562,49 @@ pub fn entree(passerelle: Option<Ipv4Addr>) -> Entree {
         }
     }
     let (mesures, tls) = std::thread::scope(|s| {
-        let fils: Vec<_> = cibles
-            .iter()
-            .map(|(role, ip)| {
-                let (role, ip) = (*role, *ip);
-                s.spawn(move || interroger(role, ip))
-            })
-            .collect();
         let tls = s.spawn(certificat_du_site);
-        let mesures: Vec<_> = fils.into_iter().filter_map(|f| f.join().ok()).collect();
-        (mesures, tls.join().unwrap_or(Tls::Muet))
+        (mesurer(&cibles, interroger), tls.join().unwrap_or(Tls::Muet))
     });
-    for (mesure, dnssec, ddr) in mesures {
-        e.mesures.push(mesure);
-        e.dnssec.extend(dnssec);
-        e.ddr.extend(ddr);
+    for m in mesures {
+        match m {
+            Ok((mesure, dnssec, ddr)) => {
+                e.mesures.push(mesure);
+                e.dnssec.extend(dnssec);
+                e.ddr.extend(ddr);
+            }
+            Err(interrompue) => e.interrompues.push(interrompue),
+        }
     }
     e.tls = tls;
     e
+}
+
+/// Les résolveurs interrogés en même temps, un fil chacun : ce que chacun a répondu, ou son rôle et son adresse si sa
+/// mesure est tombée (une panique dans la lecture d'une réponse). Jetée en silence, la mesure du DNS de la box faisait
+/// disparaître le contrôle de ses réponses sans « non vérifié », et celle du DNS utilisé le disait « non interrogeable
+/// d'ici ». Chaque mesure a sa garde (journal::rattraper) : la garde du domaine, propre au fil qui l'a ouverte, ne
+/// couvre pas ceux-ci, et leur panique s'affichait et se notait encore comme un plantage.
+fn mesurer<R: Send>(
+    cibles: &[(Role, IpAddr)],
+    interroger: impl Fn(Role, IpAddr) -> R + Sync,
+) -> Vec<Result<R, (Role, IpAddr)>> {
+    let interroger = &interroger;
+    std::thread::scope(|s| {
+        let fils: Vec<_> = cibles
+            .iter()
+            .map(|&(role, ip)| {
+                let fil =
+                    s.spawn(move || crate::journal::rattraper(std::panic::AssertUnwindSafe(|| interroger(role, ip))));
+                (role, ip, fil)
+            })
+            .collect();
+        fils.into_iter()
+            .map(|(role, ip, fil)| match fil.join() {
+                Ok(Ok(mesure)) => Ok(mesure),
+                _ => Err((role, ip)),
+            })
+            .collect()
+    })
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -852,7 +881,20 @@ fn constats_divergence(e: &Entree) -> Vec<Constat> {
         .all(|m| m.reponses.iter().all(|(_, r)| r.is_none()));
     for role in [Role::Utilise, Role::Bail] {
         let Some(m) = e.mesures.iter().find(|m| m.role == role) else {
-            if role == Role::Utilise {
+            if let Some(&(_, ip)) = e.interrompues.iter().find(|(r, _)| *r == role) {
+                let message = if role == Role::Bail {
+                    trf!(
+                        "DNS que la box distribue ({ip}) : mesure interrompue par une erreur interne, réponses non comparées",
+                        "DNS the router hands out ({ip}): measurement interrupted by an internal error, answers not compared"
+                    )
+                } else {
+                    trf!(
+                        "DNS utilisé ({ip}) : mesure interrompue par une erreur interne, réponses non comparées",
+                        "DNS in use ({ip}): measurement interrupted by an internal error, answers not compared"
+                    )
+                };
+                constats.push(regle(impossible(CAT_DNS, &message), ID));
+            } else if role == Role::Utilise {
                 constats.push(regle(
                     impossible(
                         CAT_DNS,
@@ -970,16 +1012,18 @@ fn constat_dnssec(e: &Entree) -> Constat {
         .find(|d| d.role == Role::Utilise)
         .or_else(|| e.dnssec.iter().find(|d| d.role == Role::Bail))
     else {
-        return regle(
-            impossible(
-                CAT_DNS,
-                tr!(
-                    "DNSSEC non testé : le DNS utilisé n'a pas répondu",
-                    "DNSSEC not tested: the DNS in use did not answer"
-                ),
-            ),
-            ID,
-        );
+        let raison = if e.interrompues.iter().any(|(r, _)| *r == Role::Utilise) {
+            tr!(
+                "DNSSEC non testé : la mesure du DNS utilisé s'est interrompue (erreur interne)",
+                "DNSSEC not tested: the measurement of the DNS in use was interrupted (internal error)"
+            )
+        } else {
+            tr!(
+                "DNSSEC non testé : le DNS utilisé n'a pas répondu",
+                "DNSSEC not tested: the DNS in use did not answer"
+            )
+        };
+        return regle(impossible(CAT_DNS, raison), ID);
     };
     let serveur = nommer(d.serveur, e);
     let (Some(signe), Some(casse)) = (&d.signe, &d.casse) else {
@@ -1736,6 +1780,69 @@ mod tests {
         assert_eq!(d[0].probleme, None);
         assert_eq!(d[1].probleme, Some(Niveau::Eleve));
         assert!(d[1].message.contains("toute la maison"));
+    }
+
+    /// Un fil de mesure qui tombe n'emporte plus sa mesure en silence : le résolveur est rendu avec son rôle, puis jugé
+    /// non vérifié pour cette raison. Avant, la mesure du DNS de la box disparaissait sans constat, et son contrôle de
+    /// réécriture avec elle ; le DNS utilisé, lui, était dit « non interrogeable d'ici ».
+    #[test]
+    fn mesure_interrompue_dite_non_verifiee() {
+        let cibles = [
+            (Role::Utilise, ip("1.1.1.1")),
+            (Role::Bail, ip("203.0.113.53")),
+            (Role::Public("Quad9"), ip("9.9.9.9")),
+        ];
+        let resultats = mesurer(&cibles, |role, serveur| {
+            assert!(crate::journal::sous_garde(), "mesure hors de toute garde");
+            assert!(role != Role::Bail, "réponse illisible");
+            serveur
+        });
+        assert_eq!(
+            resultats,
+            [
+                Ok(ip("1.1.1.1")),
+                Err((Role::Bail, ip("203.0.113.53"))),
+                Ok(ip("9.9.9.9"))
+            ]
+        );
+        // Le DNS de la box sans mesure : non vérifié, avec la vraie raison.
+        let mut e = maison();
+        e.utilise = Some(Utilise {
+            serveurs: vec![(ip("1.1.1.1"), true)],
+            chiffre: None,
+            resolveur_local: None,
+        });
+        e.mesures[0] = mesure(Role::Utilise, "1.1.1.1", justes());
+        e.interrompues = vec![(Role::Bail, ip("203.0.113.53"))];
+        let c = constats(&e);
+        let d = par_regle(&c, "COM-DNS-004");
+        assert_eq!(d.len(), 2);
+        assert!(d[0].verifie);
+        assert!(
+            !d[1].verifie
+                && d[1].message.contains("box distribue (203.0.113.53)")
+                && d[1].message.contains("interrompue"),
+            "{}",
+            d[1].message
+        );
+        // Le DNS utilisé sans mesure : la même raison, et plus « non interrogeable d'ici » ; DNSSEC de même.
+        e.mesures.remove(0);
+        e.dnssec.clear();
+        e.interrompues = vec![(Role::Utilise, ip("1.1.1.1"))];
+        let c = constats(&e);
+        let d = par_regle(&c, "COM-DNS-004");
+        assert_eq!(d.len(), 1);
+        assert!(
+            !d[0].verifie && d[0].message.contains("interrompue") && !d[0].message.contains("interrogeable"),
+            "{}",
+            d[0].message
+        );
+        let s = par_regle(&c, "COM-DNS-005");
+        assert!(
+            !s[0].verifie && s[0].message.contains("interrompue"),
+            "{}",
+            s[0].message
+        );
     }
 
     #[test]

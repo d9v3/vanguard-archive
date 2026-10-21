@@ -887,7 +887,7 @@ pub fn rattraper<R>(f: impl FnOnce() -> R + std::panic::UnwindSafe) -> std::thre
 }
 
 /// Une garde est-elle ouverte sur ce fil ? Non, si le fil est déjà en train de finir (ses variables sont parties).
-fn sous_garde() -> bool {
+pub(crate) fn sous_garde() -> bool {
     GARDES.try_with(|g| g.get() > 0).unwrap_or(false)
 }
 
