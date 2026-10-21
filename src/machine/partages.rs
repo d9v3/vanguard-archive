@@ -19,6 +19,10 @@ enum Nuance {
     /// Windows : « Tout le monde » désigne les comptes connus de l'ordinateur tant que le compte invité est désactivé.
     #[cfg_attr(not(windows), allow(dead_code))]
     InviteDesactive,
+    /// Windows : l'état du compte invité n'a pas pu être lu. Rien n'est tempéré : une lecture qui
+    /// n'a pas eu lieu ne vaut pas « invité désactivé ».
+    #[cfg_attr(not(windows), allow(dead_code))]
+    InviteNonLu,
 }
 
 /// Un partage ouvert sans mot de passe.
@@ -57,8 +61,8 @@ fn juger(partages: &[Partage], illisibles: &[Illisible], service_vu_arrete: bool
         .iter()
         .map(|p| {
             let niveau = match (p.ecriture, p.nuance) {
-                (Some(false), Nuance::Aucune) => Niveau::Moyen,
-                (_, Nuance::Aucune) => Niveau::Eleve,
+                (Some(false), Nuance::Aucune | Nuance::InviteNonLu) => Niveau::Moyen,
+                (_, Nuance::Aucune | Nuance::InviteNonLu) => Niveau::Eleve,
                 (Some(false), _) => un_cran_plus_bas(Niveau::Moyen),
                 (_, _) => un_cran_plus_bas(Niveau::Eleve),
             };
@@ -76,6 +80,10 @@ fn juger(partages: &[Partage], illisibles: &[Illisible], service_vu_arrete: bool
                 Nuance::InviteDesactive => tr!(
                     " Le compte invité est désactivé : il faut encore un compte de cet ordinateur ; l'activer ouvrirait ce partage sans mot de passe.",
                     " The guest account is disabled: an account of this computer is still required; enabling it would open this share without a password."
+                ),
+                Nuance::InviteNonLu => tr!(
+                    " L'état du compte invité n'a pas pu être lu : compté comme activé.",
+                    " The guest account state could not be read: counted as enabled."
                 ),
             };
             let (nom, chemin, a_qui) = (montre(&p.nom), montre(&p.chemin), montre(&p.a_qui));
@@ -367,17 +375,29 @@ mod systeme {
 fn lire_windows(sortie: &str) -> Option<Releve> {
     use crate::commande::{ps_chaine, section};
     let acces = section(Some(sortie), "ACC")?;
-    let invite_actif = section(Some(sortie), "INV").is_some_and(|l| l.first().is_some_and(|v| v.trim() == "True"));
+    // « INV|True » : activé ; « INV|False » ou « INV| » (pas de compte invité) : désactivé. Sans la
+    // section (lecture refusée, Get-LocalUser en échec), l'état n'est pas connu.
+    let invite_actif = section(Some(sortie), "INV").and_then(|l| l.first().map(|v| v.trim() == "True"));
     let service_lance = section(Some(sortie), "SRV").is_none_or(|l| l.first().is_none_or(|v| v.trim() == "Running"));
-    let nuance = if !service_lance {
-        Nuance::ServiceArrete
-    } else if invite_actif {
-        Nuance::Aucune
-    } else {
-        Nuance::InviteDesactive
+    let nuance = match (service_lance, invite_actif) {
+        (false, _) => Nuance::ServiceArrete,
+        (true, Some(true)) => Nuance::Aucune,
+        (true, Some(false)) => Nuance::InviteDesactive,
+        (true, None) => Nuance::InviteNonLu,
     };
     let mut partages: Vec<Partage> = Vec::new();
     let mut illisibles: Vec<Illisible> = Vec::new();
+    // Un refus prime sur une autorisation, quel que soit l'ordre des règles : relevés d'abord.
+    let refus: Vec<(&str, &str, &str)> = acces
+        .iter()
+        .filter_map(|l| {
+            let champs: Vec<&str> = l.splitn(6, '|').collect();
+            let [nom, _, _, sid, genre, droit] = champs[..] else {
+                return None;
+            };
+            genre.eq_ignore_ascii_case("Deny").then(|| (nom, sid, droit.trim()))
+        })
+        .collect();
     for l in acces {
         let champs: Vec<&str> = l.splitn(6, '|').collect();
         let [nom, chemin, compte, sid, genre, droit] = champs[..] else {
@@ -394,7 +414,17 @@ fn lire_windows(sortie: &str) -> Option<Releve> {
         if !ouvert || !genre.eq_ignore_ascii_case("Allow") {
             continue;
         }
-        let ecriture = matches!(droit.trim(), "Full" | "Change");
+        let refuse = |droits: &[&str]| {
+            refus
+                .iter()
+                .any(|&(n, s, d)| n == nom && couvre(s, sid) && droits.contains(&d))
+        };
+        // Tout refusé : fermé. Écriture refusée : lecture seule. Un refus de lecture ou sur mesure
+        // n'est pas interprété : le partage reste signalé tel qu'autorisé.
+        if refuse(&["Full"]) {
+            continue;
+        }
+        let ecriture = matches!(droit.trim(), "Full" | "Change") && !refuse(&["Change"]);
         let fermeture = format!(
             "Revoke-SmbShareAccess -Name {} -AccountName {} -Force",
             ps_chaine(nom),
@@ -422,6 +452,14 @@ fn lire_windows(sortie: &str) -> Option<Releve> {
         illisibles,
         service_vu_arrete: !service_lance,
     })
+}
+
+/// Un refus visant `refuse` s'applique-t-il à `compte` ? Tout le monde (S-1-1-0) contient les
+/// Invités et le compte invité, pas les connexions anonymes (S-1-5-7) : Windows ne les y met plus
+/// par défaut, et les y compter pourrait taire un partage ouvert.
+#[cfg(any(windows, test))]
+fn couvre(refuse: &str, compte: &str) -> bool {
+    refuse == compte || (refuse == "S-1-1-0" && compte != "S-1-5-7")
 }
 
 #[cfg(windows)]
@@ -669,7 +707,7 @@ mod tests {
         let sortie = "ACC|Public|C:\\Users\\Public|Tout le monde|S-1-1-0|Allow|Full\n\
                       ACC|Public|C:\\Users\\Public|BUREAU\\alice|S-1-5-21-1-2-3-1001|Allow|Full\n\
                       ACC|Docs|D:\\Docs|Invités|S-1-5-32-546|Allow|Read\n\
-                      ACC|Docs|D:\\Docs|Tout le monde|S-1-1-0|Deny|Full\n\
+                      ACC|Docs|D:\\Docs|BUREAU\\alice|S-1-5-21-1-2-3-1001|Deny|Full\n\
                       ACC|Prive|D:\\Prive|BUREAU\\alice|S-1-5-21-1-2-3-1001|Allow|Change\n\
                       ACC|Cache|D:\\Cache|?|?|?|?\n\
                       ACC_FIN\nINV|False\nINV_FIN\nSRV|Running\nSRV_FIN\n";
@@ -714,6 +752,49 @@ mod tests {
         assert_eq!(r.partages[0].fermeture.len(), 2);
         // Sans la section des accès (PowerShell tombé), rien n'est conclu.
         assert!(lire_windows("INV|True\nINV_FIN\n").is_none());
+    }
+
+    /// Section INV absente : l'invité n'est pas dit désactivé et rien n'est tempéré ; « INV| »
+    /// (pas de compte invité) vaut désactivé.
+    #[test]
+    fn invite_non_lu() {
+        let r = lire_windows("ACC|P|C:\\P|Everyone|S-1-1-0|Allow|Full\nACC_FIN\nSRV|Running\nSRV_FIN\n").unwrap();
+        assert_eq!(r.partages[0].nuance, Nuance::InviteNonLu);
+        let c = juger(&r.partages, &[], false);
+        assert_eq!(c[0].probleme, Some(Niveau::Eleve));
+        assert!(c[0].message.contains("n'a pas pu être lu") && !c[0].message.contains("est désactivé"));
+        let r = lire_windows("ACC|P|C:\\P|Everyone|S-1-1-0|Allow|Read\nACC_FIN\nINV|\nINV_FIN\n").unwrap();
+        assert_eq!(r.partages[0].nuance, Nuance::InviteDesactive);
+    }
+
+    /// Un refus prime, avant comme après l'autorisation ; Tout le monde couvre les Invités, pas
+    /// les connexions anonymes.
+    #[test]
+    fn refus_sur_un_partage() {
+        let sortie = "ACC|Bloque|D:\\B|Everyone|S-1-1-0|Allow|Read\n\
+                      ACC|Bloque|D:\\B|Everyone|S-1-1-0|Deny|Full\n\
+                      ACC|Invites|D:\\I|Deny|S-1-1-0|Deny|Full\n\
+                      ACC|Invites|D:\\I|Guests|S-1-5-32-546|Allow|Full\n\
+                      ACC|Lecture|D:\\L|Everyone|S-1-1-0|Deny|Change\n\
+                      ACC|Lecture|D:\\L|Everyone|S-1-1-0|Allow|Full\n\
+                      ACC|Anonyme|D:\\A|Everyone|S-1-1-0|Deny|Full\n\
+                      ACC|Anonyme|D:\\A|ANONYMOUS LOGON|S-1-5-7|Allow|Read\n\
+                      ACC|Ailleurs|D:\\X|Everyone|S-1-1-0|Allow|Read\n\
+                      ACC|Autre|D:\\Y|Everyone|S-1-1-0|Deny|Full\n\
+                      ACC|Mesure|D:\\M|Everyone|S-1-1-0|Deny|Read\n\
+                      ACC|Mesure|D:\\M|Everyone|S-1-1-0|Allow|Change\n\
+                      ACC_FIN\nINV|True\nINV_FIN\n";
+        let r = lire_windows(sortie).unwrap();
+        let vus: Vec<(&str, Option<bool>)> = r.partages.iter().map(|p| (p.nom.as_str(), p.ecriture)).collect();
+        assert_eq!(
+            vus,
+            [
+                ("Lecture", Some(false)),
+                ("Anonyme", Some(false)),
+                ("Ailleurs", Some(false)),
+                ("Mesure", Some(true))
+            ]
+        );
     }
 
     #[test]
