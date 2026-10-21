@@ -106,6 +106,12 @@ pub(crate) enum Raison {
     LienNonSuivi(String),
     /// Tant de lignes de plus, au-delà de la borne de la chronologie : pas gardées.
     Lignes(usize),
+    /// Coupé à tant d'entrées, les plus récentes gardées.
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+    Entrees(usize),
+    /// Le système ne l'a pas gardé (journal tourné ou vidé, ou lu sur moins de jours).
+    #[cfg_attr(windows, allow(dead_code))]
+    NonGarde,
     /// Ce que le système a répondu.
     Erreur(String),
 }
@@ -147,6 +153,11 @@ impl Raison {
                 "{n} more lines are not kept ({} at most)",
                 chronologie::MAX_LIGNES
             ),
+            Raison::Entrees(n) => bi!(
+                "coupé à {n} entrées, les plus anciennes ne sont pas gardées",
+                "cut at {n} entries, the oldest are not kept"
+            ),
+            Raison::NonGarde => Bi::new("le système ne l'a pas gardé", "the system did not keep it"),
             Raison::Erreur(e) => Bi::meme(e.clone()),
         }
     }
@@ -876,6 +887,8 @@ pub(crate) struct Entree {
     /// Droits sous Linux et macOS (« 0755 »), « l » pour un lien ; vide sous Windows.
     pub mode: String,
     pub empreinte: Option<Empreinte>,
+    /// Caché par son attribut (Windows) ; sous Linux et macOS, un nom en « . » le dit déjà.
+    pub cache: bool,
 }
 
 pub(crate) const ENTETE_FICHIERS: &str =
@@ -995,6 +1008,11 @@ fn decrire(chemin: &Path, m: &std::fs::Metadata) -> Entree {
     };
     #[cfg(windows)]
     let (change, mode) = (None, String::new());
+    // FILE_ATTRIBUTE_HIDDEN.
+    #[cfg(windows)]
+    let cache = std::os::windows::fs::MetadataExt::file_attributes(m) & 0x2 != 0;
+    #[cfg(unix)]
+    let cache = false;
     Entree {
         chemin: chemin.to_string_lossy().into_owned(),
         taille: m.len(),
@@ -1003,6 +1021,7 @@ fn decrire(chemin: &Path, m: &std::fs::Metadata) -> Entree {
         cree: m.created().ok(),
         mode,
         empreinte: None,
+        cache,
     }
 }
 
@@ -1063,23 +1082,36 @@ fn fichiers_recents(dossier: &Path) -> Partie {
         }
     }
     parcours.entrees.sort_by(|a, b| a.chemin.cmp(&b.chemin));
-    // Pour la chronologie : la date de modification de chaque fichier, et son empreinte si elle a été calculée.
-    p.evenements = parcours
+    // Pour la chronologie : la date de modification de chaque fichier, et son empreinte si elle a été calculée ; un
+    // fichier « parlant » (programme, script, caché, dans un dossier de démarrage) a sa ligne, les autres sont
+    // comptés par dossier sous l'endroit à risque et par heure.
+    let fichiers: Vec<chronologie::FichierRecent> = parcours
         .entrees
         .iter()
         .filter_map(|e| {
-            let empreinte = match &e.empreinte {
-                Some(Empreinte::Sha256(h)) => Some(h.as_str()),
-                _ => None,
+            let chemin = Path::new(&e.chemin);
+            let racine = racines.iter().find(|r| chemin.starts_with(r))?;
+            let relatif = chemin.strip_prefix(racine).ok()?;
+            // Le dossier du compte : celui sous l'endroit à risque (/tmp/x pour /tmp/x/y/z), ou l'endroit lui-même.
+            let dossier = match relatif.components().next() {
+                Some(premier) if relatif.components().nth(1).is_some() => racine.join(premier),
+                _ => racine.clone(),
             };
-            Some(chronologie::Evenement::fichier(
-                chronologie::secondes(e.modifie?)?,
-                &e.chemin,
-                e.taille,
-                empreinte,
-            ))
+            let executable = u32::from_str_radix(&e.mode, 8).is_ok_and(|m| m & 0o111 != 0);
+            Some(chronologie::FichierRecent {
+                parlant: chronologie::parlant(&e.chemin, relatif, executable, e.cache),
+                chemin: e.chemin.clone(),
+                dossier: dossier.to_string_lossy().into_owned(),
+                quand: chronologie::secondes(e.modifie?)?,
+                taille: e.taille,
+                empreinte: match &e.empreinte {
+                    Some(Empreinte::Sha256(h)) => Some(h.clone()),
+                    _ => None,
+                },
+            })
         })
         .collect();
+    p.evenements = chronologie::evenements_des_fichiers(&fichiers, &chrono::Local);
     let mut texte = entete(&p.titre);
     let _ = writeln!(
         texte,
@@ -1735,6 +1767,7 @@ mod tests {
             cree: Some(t),
             mode: "0755".into(),
             empreinte: Some(Empreinte::Sha256("0f".repeat(32))),
+            cache: false,
         };
         assert_eq!(
             ligne_fichier(&e),

@@ -101,6 +101,8 @@ pub(crate) enum Genre {
     ServiceSystemd,
     Lancement,
     Fichier,
+    FichiersGroupes,
+    ProgrammesGroupes,
 }
 
 impl Genre {
@@ -135,6 +137,14 @@ impl Genre {
             Genre::ServiceSystemd => ("Service systemd ajouté ou activé", "systemd service added or enabled"),
             Genre::Lancement => ("Lancement automatique modifié", "Autostart entry modified"),
             Genre::Fichier => ("Fichier modifié", "File modified"),
+            Genre::FichiersGroupes => (
+                "Fichiers modifiés (dossier et sous-dossiers)",
+                "Files modified (folder and subfolders)",
+            ),
+            Genre::ProgrammesGroupes => (
+                "Programmes, scripts ou fichiers cachés modifiés en nombre (dossier et sous-dossiers)",
+                "Many programs, scripts or hidden files modified (folder and subfolders)",
+            ),
         }
     }
 
@@ -165,7 +175,9 @@ impl Genre {
             | Genre::MotDePasseDefini
             | Genre::FichierDesComptes
             | Genre::Lancement
-            | Genre::Fichier => return None,
+            | Genre::Fichier
+            | Genre::FichiersGroupes
+            | Genre::ProgrammesGroupes => return None,
         })
     }
 }
@@ -219,6 +231,126 @@ impl Evenement {
             ..Evenement::new(quand, Source::Fichier, Genre::Fichier, detail)
         }
     }
+}
+
+/// Les extensions d'un fichier qui se lance ou se charge : il a sa ligne dans la chronologie.
+const EXTENSIONS_PARLANTES: &[&str] = &[
+    "exe", "dll", "sys", "scr", "ps1", "bat", "cmd", "vbs", "js", "hta", "lnk", "msi", "jar", "sh", "py", "so",
+];
+
+/// Un fichier récent, tel que la chronologie le reprend.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct FichierRecent {
+    pub chemin: String,
+    /// Le dossier où il est compté s'il n'est pas parlant : celui juste sous l'endroit à risque, ou l'endroit.
+    pub dossier: String,
+    /// Sa date de modification, en secondes depuis 1970.
+    pub quand: i64,
+    pub taille: u64,
+    pub empreinte: Option<String>,
+    pub parlant: bool,
+}
+
+/// Un fichier « parlant » a sa propre ligne : un programme ou un script (droit d'exécution, extension qui se lance
+/// ou se charge), un fichier caché (son nom ou un dossier sous l'endroit à risque commence par « . », ou l'attribut
+/// de Windows), ou rangé dans un dossier de démarrage. Les autres (caches, compilations, documents) se comptent par
+/// dossier et par heure : sur un ordinateur de développeur, /tmp en change des milliers par jour, et ils noyaient le
+/// reste. `relatif` : le chemin sous l'endroit à risque.
+pub(crate) fn parlant(chemin: &str, relatif: &Path, executable: bool, cache: bool) -> bool {
+    let extension = Path::new(chemin)
+        .extension()
+        .map(|e| e.to_string_lossy().to_lowercase())
+        .unwrap_or_default();
+    let cache = cache
+        || relatif
+            .components()
+            .any(|c| matches!(c, std::path::Component::Normal(n) if n.to_string_lossy().starts_with('.')));
+    executable || cache || EXTENSIONS_PARLANTES.contains(&extension.as_str()) || mitre_du_chemin(chemin).is_some()
+}
+
+/// Au-delà de tant de fichiers parlants dans le même dossier et la même heure, c'est une installation ou une archive
+/// dépliée (un préfixe de Wine, des centaines de DLL) : une ligne qui les compte par extension en dit plus que des
+/// centaines. La liste entière, avec les empreintes, reste dans 06-fichiers-recents.txt.
+const MAX_PARLANTS_PAR_HEURE: usize = 20;
+
+/// L'heure locale d'une date (« 2026-10-20 14 ») : la clé des regroupements.
+fn heure_locale<Tz: TimeZone>(quand: i64, fuseau: &Tz) -> Option<String> {
+    let d = chrono::DateTime::from_timestamp(quand, 0)?;
+    Some(d.with_timezone(fuseau).naive_local().format("%Y-%m-%d %H").to_string())
+}
+
+/// « 3 dans/in /tmp/a, entre/between 14:00 et/and 15:00 », daté du premier fichier modifié.
+fn ligne_de_groupe(genre: Genre, dossier: &str, heure: &str, membres: &[&FichierRecent], suite: &str) -> Evenement {
+    let premier = membres.iter().map(|f| f.quand).min().unwrap_or_default();
+    let h: u32 = heure.get(11..).and_then(|h| h.parse().ok()).unwrap_or_default();
+    Evenement::new(
+        premier,
+        Source::Fichier,
+        genre,
+        format!(
+            "{} dans/in {dossier}, entre/between {h:02}:00 et/and {:02}:00{suite}",
+            membres.len(),
+            (h + 1) % 24
+        ),
+    )
+}
+
+/// Les extensions les plus nombreuses d'un groupe : « (dll 3999, exe 698, py 18) ».
+fn extensions(membres: &[&FichierRecent]) -> String {
+    let mut par: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
+    for f in membres {
+        let e = Path::new(&f.chemin)
+            .extension()
+            .map_or_else(|| "-".to_string(), |e| e.to_string_lossy().to_lowercase());
+        *par.entry(e).or_default() += 1;
+    }
+    let mut v: Vec<(String, usize)> = par.into_iter().collect();
+    v.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    let liste: Vec<String> = v.iter().take(5).map(|(e, n)| format!("{e} {n}")).collect();
+    format!(" ({}{})", liste.join(", "), if v.len() > 5 { ", …" } else { "" })
+}
+
+/// Les événements des fichiers récents : une ligne par fichier parlant, les autres comptés en une ligne par dossier
+/// et par heure (à l'heure locale), datée du premier modifié. Seul dans son heure, un fichier garde sa ligne : elle
+/// en dit plus que « 1 fichier ». Plus de `MAX_PARLANTS_PAR_HEURE` fichiers parlants dans le même dossier et la même
+/// heure sont comptés aussi, par extension ; jamais ceux d'un dossier de démarrage, qui ont toujours leur ligne.
+pub(crate) fn evenements_des_fichiers<Tz: TimeZone>(fichiers: &[FichierRecent], fuseau: &Tz) -> Vec<Evenement> {
+    type Groupes<'a> = std::collections::BTreeMap<(&'a str, String), Vec<&'a FichierRecent>>;
+    let fichier = |f: &FichierRecent| Evenement::fichier(f.quand, &f.chemin, f.taille, f.empreinte.as_deref());
+    let mut v = Vec::new();
+    let (mut parlants, mut autres) = (Groupes::new(), Groupes::new());
+    for f in fichiers {
+        if f.parlant && mitre_du_chemin(&f.chemin).is_some() {
+            v.push(fichier(f));
+            continue;
+        }
+        let Some(heure) = heure_locale(f.quand, fuseau) else {
+            continue;
+        };
+        let groupes = if f.parlant { &mut parlants } else { &mut autres };
+        groupes.entry((f.dossier.as_str(), heure)).or_default().push(f);
+    }
+    for ((dossier, heure), membres) in parlants {
+        if membres.len() > MAX_PARLANTS_PAR_HEURE {
+            v.push(ligne_de_groupe(
+                Genre::ProgrammesGroupes,
+                dossier,
+                &heure,
+                &membres,
+                &extensions(&membres),
+            ));
+        } else {
+            v.extend(membres.into_iter().map(fichier));
+        }
+    }
+    for ((dossier, heure), membres) in autres {
+        if let [seul] = membres[..] {
+            v.push(fichier(seul));
+        } else {
+            v.push(ligne_de_groupe(Genre::FichiersGroupes, dossier, &heure, &membres, ""));
+        }
+    }
+    v
 }
 
 /// Ce que les journaux donnent à la chronologie, et ce qui n'a pas pu en être lu.
@@ -478,8 +610,8 @@ pub(crate) fn partie(dossier: &Path, parties: &[Partie], apport: Apport, mainten
         NOM,
         &contenu,
         bi!(
-            "la chronologie de l'incident : ce que les autres fichiers ont de daté (journaux : connexions, sudo ou ouvertures de session, comptes créés, services, tâches, journaux effacés, modules du noyau, Defender ; ce qui se lance tout seul ; comptes ; fichiers récents), remis dans l'ordre du temps, du plus ancien au plus récent, sur les {JOURS} derniers jours, {MAX_LIGNES} lignes au plus ; une ligne par événement : heure locale, source, ce qui s'est passé, technique MITRE ATT&CK quand elle est évidente",
-            "the incident timeline: what the other files hold with a date (logs: logins, sudo or logons, accounts created, services, tasks, logs cleared, kernel modules, Defender; what starts by itself; accounts; recent files), put back in time order, oldest first, over the last {JOURS} days, {MAX_LIGNES} lines at most; one line per event: local time, source, what happened, MITRE ATT&CK technique when obvious"
+            "la chronologie de l'incident : ce que les autres fichiers ont de daté (journaux : connexions, sudo ou ouvertures de session, comptes créés, services, tâches, journaux effacés, modules du noyau, Defender ; ce qui se lance tout seul ; comptes ; fichiers récents, un par ligne s'il est exécutable, caché ou dans un dossier de démarrage, les autres comptés par dossier et par heure, comme les programmes dépliés par centaines), remis dans l'ordre du temps, du plus ancien au plus récent, sur les {JOURS} derniers jours, {MAX_LIGNES} lignes au plus ; une ligne par événement : heure locale, source, ce qui s'est passé, technique MITRE ATT&CK quand elle est évidente",
+            "the incident timeline: what the other files hold with a date (logs: logins, sudo or logons, accounts created, services, tasks, logs cleared, kernel modules, Defender; what starts by itself; accounts; recent files, one per line if executable, hidden or in a startup folder, the others counted per folder and per hour, like programs unpacked by the hundred), put back in time order, oldest first, over the last {JOURS} days, {MAX_LIGNES} lines at most; one line per event: local time, source, what happened, MITRE ATT&CK technique when obvious"
         ),
     ) {
         p.compte = Some(bi!(
@@ -1070,6 +1202,86 @@ mod tests {
         let l = lancements(&[("/proc/modules".into(), t), ("/etc/rc.local".into(), t)]);
         assert_eq!(l.len(), 1);
         assert_eq!(l[0].quand, 1000);
+    }
+
+    #[test]
+    fn fichiers_parlants_et_regroupes() {
+        let p = |chemin: &str, relatif: &str, x: bool| parlant(chemin, Path::new(relatif), x, false);
+        assert!(p("/tmp/x/outil", "x/outil", true));
+        assert!(p("/tmp/x/a.SH", "x/a.SH", false));
+        assert!(p(r"C:\Users\alice\Downloads\facture.pdf.exe", "facture.pdf.exe", false));
+        assert!(p("/tmp/.x/donnees", ".x/donnees", false));
+        assert!(p("/dev/shm/.cache", ".cache", false));
+        assert!(p("/home/alice/.config/autostart/x.desktop", "x.desktop", false));
+        assert!(parlant(r"C:\Users\Public\note.txt", Path::new("note.txt"), false, true));
+        assert!(!p("/tmp/cargo/build/lib.rlib", "cargo/build/lib.rlib", false));
+        assert!(!p("/home/alice/Téléchargements/photo.jpg", "photo.jpg", false));
+        let f = |chemin: &str, dossier: &str, quand: i64, parlant: bool| FichierRecent {
+            chemin: chemin.into(),
+            dossier: dossier.into(),
+            quand,
+            taille: 10,
+            empreinte: None,
+            parlant,
+        };
+        // T est 14:03:22 à −4 h : trois fichiers de /tmp/a dans l'heure de 14 h, un à 15 h, un seul dans /tmp/b, un
+        // programme.
+        let v = evenements_des_fichiers(
+            &[
+                f("/tmp/a/1", "/tmp/a", T + 100, false),
+                f("/tmp/a/x/2", "/tmp/a", T, false),
+                f("/tmp/a/3", "/tmp/a", T + 1000, false),
+                f("/tmp/a/4", "/tmp/a", T + 3600, false),
+                f("/tmp/b/seul.txt", "/tmp/b", T, false),
+                f("/tmp/a/mineur", "/tmp/a", T + 5, true),
+            ],
+            &fuseau(),
+        );
+        let vus: Vec<(i64, Genre, &str)> = v.iter().map(|e| (e.quand, e.genre, e.detail.as_str())).collect();
+        assert_eq!(
+            vus,
+            [
+                (T + 5, Genre::Fichier, "/tmp/a/mineur (10 octets/bytes)"),
+                (
+                    T,
+                    Genre::FichiersGroupes,
+                    "3 dans/in /tmp/a, entre/between 14:00 et/and 15:00"
+                ),
+                (T + 3600, Genre::Fichier, "/tmp/a/4 (10 octets/bytes)"),
+                (T, Genre::Fichier, "/tmp/b/seul.txt (10 octets/bytes)"),
+            ]
+        );
+        assert!(v.iter().all(|e| e.source == Source::Fichier && e.mitre.is_none()));
+        // Des centaines de DLL dépliées dans la même heure : comptées par extension ; un raccourci du dossier
+        // Démarrage garde sa ligne.
+        let mut dlls: Vec<FichierRecent> = (0..30)
+            .map(|i| f(&format!("/tmp/w/sys/{i}.dll"), "/tmp/w", T + i, true))
+            .collect();
+        dlls.push(f("/tmp/w/sys/a.exe", "/tmp/w", T + 40, true));
+        dlls.push(f(
+            "/home/alice/.config/autostart/x.desktop",
+            "/home/alice/.config/autostart",
+            T,
+            true,
+        ));
+        let v = evenements_des_fichiers(&dlls, &fuseau());
+        assert_eq!(v.len(), 2, "{v:?}");
+        assert_eq!(v[0].mitre, Some("T1547.013"));
+        assert_eq!(v[1].genre, Genre::ProgrammesGroupes);
+        assert_eq!(
+            v[1].detail,
+            "31 dans/in /tmp/w, entre/between 14:00 et/and 15:00 (dll 30, exe 1)"
+        );
+        // Le passage de 23 h à minuit.
+        let tard = T + 9 * 3600 + 1800;
+        let v = evenements_des_fichiers(
+            &[
+                f("/tmp/a/1", "/tmp/a", tard, false),
+                f("/tmp/a/2", "/tmp/a", tard, false),
+            ],
+            &fuseau(),
+        );
+        assert_eq!(v[0].detail, "2 dans/in /tmp/a, entre/between 23:00 et/and 00:00");
     }
 
     #[test]

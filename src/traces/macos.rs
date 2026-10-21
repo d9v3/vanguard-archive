@@ -5,7 +5,6 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-pub(super) use super::unix::evenements_des_journaux;
 use super::unix::{cron, journal_vers, journaux_classiques, maison, mo, shell_et_ssh};
 use super::{Bi, Empreinte, Feuille, Manque, Partie, Processus, Raison, bi, chronologie, lire_args, lire_ps};
 use crate::commande::Garder;
@@ -237,6 +236,12 @@ pub(super) fn journaux(dossier: &Path) -> Partie {
     }
     journaux_classiques(&mut p, dossier, &["/var/log/install.log"]);
     p
+}
+
+/// Les événements des journaux pour la chronologie : repris dans le journal unifié et le journal des installations
+/// que la collecte vient d'écrire (log show n'a pas de filtre aussi simple que journalctl, et il est lent).
+pub(super) fn evenements_des_journaux(dossier: &Path) -> super::chronologie::Apport {
+    super::unix::journaux_ecrits(dossier, None, true)
 }
 
 /// Les dossiers temporaires et le dossier partagé, où un programme dépose ce qu'il lance.

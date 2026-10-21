@@ -166,9 +166,9 @@ pub(super) fn journaux_classiques(p: &mut Partie, dossier: &Path, fichiers: &[&s
 }
 
 /// Les événements de la chronologie dans les journaux texte que la collecte vient d'écrire (05-*.txt : journal de
-/// systemd, fin des fichiers de /var/log, journal unifié de macOS) : ces fichiers sont relus, pas l'ordinateur. Aucun
-/// journal écrit (place, droits, commande absente) : c'est dit.
-pub(super) fn evenements_des_journaux(dossier: &Path) -> Apport {
+/// systemd, fin des fichiers de /var/log, journal unifié de macOS), sauf `sauf` : ces fichiers sont relus, pas
+/// l'ordinateur. Aucun journal écrit (place, droits, commande absente) : dit si `signaler_absence`.
+pub(super) fn journaux_ecrits(dossier: &Path, sauf: Option<&str>, signaler_absence: bool) -> Apport {
     let mut apport = Apport::default();
     let mut journaux: Vec<PathBuf> = std::fs::read_dir(dossier)
         .into_iter()
@@ -176,12 +176,13 @@ pub(super) fn evenements_des_journaux(dossier: &Path) -> Apport {
         .flatten()
         .filter(|e| {
             let chemin = e.path();
-            e.file_name().to_string_lossy().starts_with("05-") && chemin.extension().is_some_and(|x| x == "txt")
+            let nom = e.file_name().to_string_lossy().into_owned();
+            nom.starts_with("05-") && chemin.extension().is_some_and(|x| x == "txt") && sauf != Some(nom.as_str())
         })
         .map(|e| e.path())
         .collect();
     journaux.sort();
-    if journaux.is_empty() {
+    if journaux.is_empty() && signaler_absence {
         apport.manques.push(Manque {
             quoi: Bi::new(
                 "Chronologie : journal du système (pas écrit, voir Journaux)",
@@ -194,12 +195,12 @@ pub(super) fn evenements_des_journaux(dossier: &Path) -> Apport {
     let debut = chronologie::secondes(std::time::SystemTime::now()).unwrap_or(0) - chronologie::JOURS * 86_400;
     for chemin in journaux {
         let nom = chemin.file_name().unwrap_or_default().to_string_lossy().into_owned();
-        match evenements_du_journal(&chemin, maintenant) {
-            Ok((mut v, plus_ancienne)) => {
-                apport.evenements.append(&mut v);
+        match lire_fichier(&chemin, maintenant) {
+            Ok(mut lecture) => {
+                apport.evenements.append(&mut lecture.evenements);
                 // Un journal qui ne couvre pas la semaine (borne de 50 Mo sur un ordinateur bavard, journal tourné
                 // ou vidé, macOS lu sur un jour) : ce qui précède manque à la chronologie, et c'est dit.
-                if let Some(q) = plus_ancienne.filter(|q| *q > debut + 3600) {
+                if let Some(q) = lecture.plus_ancienne.filter(|q| *q > debut + 3600) {
                     let depuis = chronologie::date_locale(q, &chrono::Local);
                     let borne = std::fs::metadata(&chemin).is_ok_and(|m| m.len() >= super::BORNE_JOURNAL);
                     apport.manques.push(Manque {
@@ -210,7 +211,7 @@ pub(super) fn evenements_des_journaux(dossier: &Path) -> Apport {
                         raison: if borne {
                             Raison::Borne(super::BORNE_JOURNAL)
                         } else {
-                            Raison::Introuvable
+                            Raison::NonGarde
                         },
                     });
                 }
@@ -224,30 +225,50 @@ pub(super) fn evenements_des_journaux(dossier: &Path) -> Apport {
     apport
 }
 
-/// Les événements d'un journal texte, ligne à ligne (50 Mo au plus, jamais tout en mémoire), et la date de sa ligne
-/// la plus ancienne : jusqu'où il remonte.
-fn evenements_du_journal(
-    chemin: &Path,
-    maintenant: chrono::NaiveDateTime,
-) -> std::io::Result<(Vec<Evenement>, Option<i64>)> {
+/// Ce qu'un journal texte donne à la chronologie : ses événements, la date de sa ligne la plus ancienne (jusqu'où il
+/// remonte) et le nombre de ses lignes datées (ses entrées).
+#[derive(Debug, Default)]
+pub(super) struct Lecture {
+    pub evenements: Vec<Evenement>,
+    pub plus_ancienne: Option<i64>,
+    pub entrees: usize,
+}
+
+impl Lecture {
+    fn ligne(&mut self, ligne: &str, maintenant: chrono::NaiveDateTime) {
+        if let Some(q) = chronologie::quand_de_ligne(ligne, maintenant, &chrono::Local) {
+            self.entrees += 1;
+            self.plus_ancienne = Some(self.plus_ancienne.map_or(q, |p| p.min(q)));
+        }
+        if let Some(e) = lire_ligne_journal(ligne, maintenant, &chrono::Local) {
+            self.evenements.push(e);
+        }
+    }
+}
+
+/// Un journal en texte, déjà en mémoire (la sortie bornée de journalctl).
+#[cfg_attr(target_os = "macos", allow(dead_code))]
+pub(super) fn lire_texte(texte: &str, maintenant: chrono::NaiveDateTime) -> Lecture {
+    let mut lecture = Lecture::default();
+    for l in texte.lines() {
+        lecture.ligne(l, maintenant);
+    }
+    lecture
+}
+
+/// Un journal écrit, ligne à ligne (50 Mo au plus, jamais tout en mémoire).
+fn lire_fichier(chemin: &Path, maintenant: chrono::NaiveDateTime) -> std::io::Result<Lecture> {
     let mut lecteur = std::io::BufReader::new(std::fs::File::open(chemin)?);
-    let mut v = Vec::new();
-    let mut plus_ancienne: Option<i64> = None;
+    let mut lecture = Lecture::default();
     let mut octets = Vec::new();
     loop {
         octets.clear();
         if lecteur.read_until(b'\n', &mut octets)? == 0 {
             break;
         }
-        let ligne = String::from_utf8_lossy(&octets);
-        if let Some(q) = chronologie::quand_de_ligne(&ligne, maintenant, &chrono::Local) {
-            plus_ancienne = Some(plus_ancienne.map_or(q, |p| p.min(q)));
-        }
-        if let Some(e) = lire_ligne_journal(&ligne, maintenant, &chrono::Local) {
-            v.push(e);
-        }
+        lecture.ligne(&String::from_utf8_lossy(&octets), maintenant);
     }
-    Ok((v, plus_ancienne))
+    Ok(lecture)
 }
 
 #[cfg(test)]
@@ -260,7 +281,7 @@ mod tests {
         let dossier = crate::reseau::dossier_local().join("chronologie-journal");
         let _ = std::fs::remove_dir_all(&dossier);
         std::fs::create_dir_all(&dossier).unwrap();
-        let vide = evenements_des_journaux(&dossier);
+        let vide = journaux_ecrits(&dossier, None, true);
         assert_eq!(vide.evenements, Vec::new());
         assert_eq!(vide.manques.len(), 1);
         assert_eq!(vide.manques[0].raison, Raison::Introuvable);
@@ -279,7 +300,10 @@ mod tests {
             "2026-10-20T14:03:22-04:00 h sshd[1]: Failed x for y from z\n",
         )
         .unwrap();
-        let a = evenements_des_journaux(&dossier);
+        // Le journal complet écarté (Linux l'a lu filtré) : rien d'autre, et rien à dire.
+        let sans = journaux_ecrits(&dossier, Some("05-journal.txt"), false);
+        assert_eq!((sans.evenements.len(), sans.manques.len()), (0, 0));
+        let a = journaux_ecrits(&dossier, None, true);
         // Le journal inventé est daté : selon le jour où le test tourne, il couvre la semaine ou ne remonte qu'au
         // 20 octobre 2026 (à l'heure de l'ordinateur), et c'est dit.
         assert!(

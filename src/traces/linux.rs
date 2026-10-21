@@ -5,9 +5,9 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-pub(super) use super::unix::evenements_des_journaux;
+use super::chronologie::Apport;
 use super::unix::{cron, journal_vers, journaux_classiques, maison, mo, shell_et_ssh};
-use super::{Bi, Empreinte, Feuille, Partie, Processus, Raison, bi, chronologie};
+use super::{Bi, Empreinte, Feuille, Manque, Partie, Processus, Raison, bi, chronologie};
 use crate::commande::Garder;
 use crate::machine::linux::dissimulation::{SansFichier, juger_exe, proc_masque};
 
@@ -451,6 +451,143 @@ pub(super) fn journaux(dossier: &Path) -> Partie {
     p
 }
 
+/// Les entrées gardées au plus par lecture ciblée du journal (quelques Mo) : de quoi couvrir la semaine même quand un
+/// robot essaie des mots de passe par milliers.
+const ENTREES_CIBLEES: usize = 20_000;
+
+/// Les lectures ciblées du journal pour la chronologie : les programmes qui disent une connexion, une élévation ou un
+/// compte (par leur identifiant), puis le noyau. Le noyau par son transport plutôt que par -k, qui se limite au
+/// démarrage en cours : un module chargé avant le dernier redémarrage compte aussi.
+const LECTURES_CIBLEES: [(&str, &str, &[&str]); 2] = [
+    (
+        "SSH, sudo, comptes",
+        "SSH, sudo, accounts",
+        &[
+            "-t",
+            "sshd",
+            "-t",
+            "sshd-session",
+            "-t",
+            "sshd-auth",
+            "-t",
+            "sudo",
+            "-t",
+            "useradd",
+            "-t",
+            "usermod",
+            "-t",
+            "gpasswd",
+        ],
+    ),
+    ("noyau", "kernel", &["_TRANSPORT=kernel"]),
+];
+
+/// journalctl sur les 7 derniers jours, en sortie courte datée avec l'année, en anglais.
+fn journalctl_7_jours() -> Command {
+    let mut c = Command::new("journalctl");
+    c.args(["--since=-7d", "--no-pager", "-o", "short-iso"])
+        .env("LC_ALL", "C.UTF-8");
+    c
+}
+
+/// Le journal refuse ce qui n'est pas du compte (ni root, ni groupe systemd-journal ou wheel).
+fn journal_reserve(erreurs: &str) -> bool {
+    erreurs.contains("not seeing messages from other users") || erreurs.contains("insufficient permissions")
+}
+
+/// Les événements du journal pour la chronologie, lus par journalctl filtré (60 s et 20 000 entrées au plus par
+/// lecture) : toute la semaine en quelques Mo, là où le journal complet (05-journal.txt, 50 Mo) ne couvre parfois
+/// que les dernières minutes d'un ordinateur bavard. Jusqu'où le journal remonte est dit s'il ne couvre pas la
+/// semaine. Sans journalctl, la chronologie reprend les journaux écrits, et dit leur limite.
+pub(super) fn evenements_des_journaux(dossier: &Path) -> Apport {
+    let maintenant = chrono::Local::now().naive_local();
+    let debut = chronologie::secondes(std::time::SystemTime::now()).unwrap_or(0) - chronologie::JOURS * 86_400;
+    let mut apport = Apport::default();
+    let mut lu = false;
+    let mut reserve = false;
+    for (fr, en, filtres) in LECTURES_CIBLEES {
+        let quoi = bi!("Chronologie : journal ciblé ({fr})", "Timeline: targeted log ({en})");
+        let mut c = journalctl_7_jours();
+        c.arg(format!("--lines={ENTREES_CIBLEES}")).args(filtres);
+        let depart = std::time::Instant::now();
+        match crate::commande::lancer(&mut c, 60) {
+            None if depart.elapsed().as_secs() >= 60 => apport.manques.push(Manque {
+                quoi,
+                raison: Raison::Delai(60),
+            }),
+            None => {
+                apport.manques.push(Manque {
+                    quoi: Bi::new(
+                        "Chronologie : journal ciblé (repris dans les journaux écrits)",
+                        "Timeline: targeted log (taken from the written logs)",
+                    ),
+                    raison: Raison::Absente("journalctl".into()),
+                });
+                break;
+            }
+            Some(r) if r.code != Some(0) => {
+                let premiere = r.erreurs.lines().next().unwrap_or_default().trim().to_string();
+                apport.manques.push(Manque {
+                    quoi,
+                    raison: Raison::Erreur(premiere),
+                });
+            }
+            Some(r) => {
+                lu = true;
+                reserve |= journal_reserve(&r.erreurs);
+                let mut lecture = super::unix::lire_texte(&r.sortie, maintenant);
+                if lecture.entrees >= ENTREES_CIBLEES {
+                    apport.manques.push(Manque {
+                        quoi,
+                        raison: Raison::Entrees(ENTREES_CIBLEES),
+                    });
+                }
+                apport.evenements.append(&mut lecture.evenements);
+            }
+        }
+    }
+    if reserve {
+        apport.manques.push(Manque {
+            quoi: Bi::new(
+                "Chronologie : journal, messages du système et des autres comptes",
+                "Timeline: log, messages of the system and other accounts",
+            ),
+            raison: Raison::Droits,
+        });
+    }
+    let mut ecrits = if lu {
+        // Jusqu'où le journal remonte : sa plus ancienne entrée de la semaine (« --lines=+1 », systemd 255 et après ;
+        // avant, rien n'est affirmé). Un journal tourné tôt sur un ordinateur bavard ne garde qu'un jour ou deux.
+        let mut c = journalctl_7_jours();
+        c.arg("--lines=+1");
+        let plus_ancienne = crate::commande::lancer(&mut c, 30)
+            .filter(|r| r.code == Some(0))
+            .and_then(|r| {
+                r.sortie
+                    .lines()
+                    .find_map(|l| chronologie::quand_de_ligne(l, maintenant, &chrono::Local))
+            });
+        if let Some(q) = plus_ancienne.filter(|q| *q > debut + 3600) {
+            let depuis = chronologie::date_locale(q, &chrono::Local);
+            apport.manques.push(Manque {
+                quoi: bi!(
+                    "Chronologie : le journal du système ne remonte qu'au {depuis}",
+                    "Timeline: the system log only goes back to {depuis}"
+                ),
+                raison: Raison::NonGarde,
+            });
+        }
+        // Le journal complet est déjà lu, en mieux ; la fin des fichiers de /var/log, écrite sans journal de
+        // systemd, reste à reprendre.
+        super::unix::journaux_ecrits(dossier, Some("05-journal.txt"), false)
+    } else {
+        super::unix::journaux_ecrits(dossier, None, true)
+    };
+    apport.evenements.append(&mut ecrits.evenements);
+    apport.manques.append(&mut ecrits.manques);
+    apport
+}
+
 /// Les dossiers temporaires du système, où un programme dépose ce qu'il lance.
 pub(super) fn endroits_temporaires() -> Vec<PathBuf> {
     ["/tmp", "/var/tmp", "/dev/shm"].iter().map(PathBuf::from).collect()
@@ -478,6 +615,32 @@ pub(super) fn place_des_journaux() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Le vrai journal de cet ordinateur, lu filtré : jamais le journal écrit en plus (il ferait des doublons), et
+    /// chaque limite dite ; sans journalctl, le journal écrit est repris et l'absence dite.
+    #[test]
+    fn journal_cible_de_cette_machine() {
+        let dossier = crate::reseau::dossier_local().join("journal-cible");
+        let _ = std::fs::remove_dir_all(&dossier);
+        std::fs::create_dir_all(&dossier).unwrap();
+        std::fs::write(
+            dossier.join("05-journal.txt"),
+            "2026-10-20T14:03:22-04:00 portable sshd[1]: Accepted password for alice from 192.0.2.10 port 1 ssh2\n",
+        )
+        .unwrap();
+        let a = evenements_des_journaux(&dossier);
+        let absent = a
+            .manques
+            .iter()
+            .any(|m| m.raison == Raison::Absente("journalctl".into()));
+        let invente = a.evenements.iter().any(|e| e.detail.contains("192.0.2.10"));
+        assert_eq!(absent, invente, "{:?}", a.manques);
+        assert!(a.evenements.iter().all(|e| e.source == chronologie::Source::Journal));
+        assert!(journal_reserve(
+            "Hint: You are currently not seeing messages from other users and the system."
+        ));
+        assert!(!journal_reserve(""));
+    }
 
     #[test]
     fn points_de_montage_lus() {
