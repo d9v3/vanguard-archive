@@ -586,15 +586,14 @@ fn afficher_constat(c: &Constat) {
         } else {
             trf!("{} à faire", "{} to do", ampoule())
         };
+        // Comme au bilan de la machine : la phrase seule. Les commandes (PowerShell d'une ligne, souvent bien plus
+        // larges que 76 colonnes) sont montrées au moment de corriger, pas dans le rendu de l'audit.
         afficher_aligne(
             &format!("  {:18}", ""),
             &trf!("{marque} : {}", "{marque}: {}", k.action),
             23,
             GRIS,
         );
-        for cmd in &k.commandes {
-            println!("{:21}{GRIS}{}{RESET}", "", commande_affichable(cmd));
-        }
     }
 }
 
