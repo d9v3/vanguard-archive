@@ -107,13 +107,10 @@ fn configuration_wsb(dossier: &str, nom: &str) -> String {
     )
 }
 
+/// Le bac à sable (bwrap, firejail) est-il dans le PATH ? Lu sur le disque, sans lancer de shell.
 #[cfg(target_os = "linux")]
 fn present(cmd: &str) -> bool {
-    crate::commande::lancer(
-        std::process::Command::new("sh").args(["-c", &format!("command -v {cmd}")]),
-        5,
-    )
-    .is_some_and(|o| o.code == Some(0))
+    crate::machine::linux::natif::present(cmd)
 }
 
 /// « vanguard isoler <fichier> » : lance le programme dans un bac à sable.
@@ -313,6 +310,21 @@ fn lancer(source: &Path) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Sur cet ordinateur, le PATH lu trouve les mêmes bacs à sable que `command -v`.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn present_comme_command_v() {
+        for cmd in ["bwrap", "firejail", "sh", "vanguard-introuvable"] {
+            let Some(r) = crate::commande::lancer(
+                std::process::Command::new("sh").args(["-c", &format!("command -v {cmd}")]),
+                5,
+            ) else {
+                return;
+            };
+            assert_eq!(present(cmd), r.code == Some(0), "{cmd}");
+        }
+    }
 
     #[test]
     fn profil_de_sandbox_exec() {
