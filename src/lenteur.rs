@@ -693,6 +693,7 @@ mod systeme {
 
     use super::*;
     use crate::commande::lancer;
+    use crate::machine::linux::natif;
 
     /// Durée entre les deux mesures : assez pour lisser un pic, assez courte pour qu'on attende sans s'impatienter.
     /// (Windows et macOS mesurent eux-mêmes sur deux secondes : PowerShell, top.)
@@ -704,11 +705,6 @@ mod systeme {
         /// pid → (nom, temps processeur, mémoire en pages, octets lus et écrits)
         processus: HashMap<u32, (String, u64, u64, Option<u64>)>,
         disques: HashMap<String, u64>,
-    }
-
-    fn getconf(variable: &str, defaut: u64) -> u64 {
-        let r = lancer(Command::new("getconf").arg(variable), 5);
-        r.and_then(|r| r.sortie.trim().parse().ok()).unwrap_or(defaut)
     }
 
     /// La sortie d'une commande qui a réussi (« systemd-analyze critical-chain --no-pager »).
@@ -791,24 +787,41 @@ mod systeme {
                 vus.push(nom);
             }
         }
-        let services = config.join("systemd/user");
-        let actives = sortie("systemctl --user list-unit-files --type=service --state=enabled --no-legend --no-pager")
-            .unwrap_or_default();
-        for unite in actives.lines().filter_map(|l| l.split_whitespace().next()) {
-            let fichier = services.join(unite);
-            if fichier.is_file() && lance_a_l_ouverture(&read_to_string(&fichier).unwrap_or_default()) {
-                let nom = unite.trim_end_matches(".service").to_string();
-                liste.push((nom.clone(), nom));
-            }
+        let activee = |u: &str| natif::unite_activee(u, true) == Some(true);
+        for unite in services_actives(&config.join("systemd/user"), activee) {
+            let nom = unite.trim_end_matches(".service").to_string();
+            liste.push((nom.clone(), nom));
         }
         liste
+    }
+
+    /// Les services que l'utilisateur a ajoutés (`dossier` : ~/.config/systemd/user) et activés pour l'ouverture de
+    /// session, triés. `activee` : un lien à son nom dans un dossier « *.wants » (ce que `systemctl --user
+    /// list-unit-files --state=enabled` disait), lu par natif dans les dossiers de systemd sans le lancer.
+    pub(super) fn services_actives(dossier: &Path, activee: impl Fn(&str) -> bool) -> Vec<String> {
+        let mut unites: Vec<String> = read_dir(dossier)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|u| {
+                let fichier = dossier.join(u);
+                Path::new(u).extension().is_some_and(|e| e == "service")
+                    && fichier.is_file()
+                    && activee(u)
+                    && lance_a_l_ouverture(&read_to_string(&fichier).unwrap_or_default())
+            })
+            .collect();
+        unites.sort();
+        unites
     }
 
     #[allow(clippy::cast_precision_loss)]
     pub fn instantane() -> Instantane {
         let disques = disques();
-        let horloge = getconf("CLK_TCK", 100).max(1);
-        let page = getconf("PAGESIZE", 4096);
+        // sysconf, ce que getconf lisait lui-même.
+        let horloge = natif::tics().max(1);
+        let page = natif::taille_page();
         let fils = std::thread::available_parallelism().map_or(1, std::num::NonZero::get);
         let a = echantillon(&disques);
         std::thread::sleep(ECART);
@@ -1678,5 +1691,73 @@ mod tests {
         }));
         assert_eq!(secondes_lisibles(75.4), "1 min 15 s");
         assert_eq!(secondes_lisibles(5.04), "5,0 s");
+    }
+
+    /// Les services ajoutés par l'utilisateur et activés pour l'ouverture de session : ni un service activé pour
+    /// autre chose (une minuterie), ni un désactivé, ni un lien (dotfiles), ni ce qui n'est pas un service.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn services_ajoutes_et_actives() {
+        let d = std::env::temp_dir().join(format!("vanguard-lenteur-services-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        let session = "[Service]\nExecStart=/usr/bin/essai\n[Install]\nWantedBy=default.target\n";
+        for (nom, texte) in [
+            ("synchro.service", session),
+            ("agenda.service", session),
+            ("eteint.service", session),
+            ("minute.service", "[Install]\nWantedBy=timers.target\n"),
+            ("synchro.timer", session),
+        ] {
+            std::fs::write(d.join(nom), texte).unwrap();
+        }
+        std::os::unix::fs::symlink(d.join("agenda.service"), d.join("lien.service")).unwrap();
+        let activee = |u: &str| u != "eteint.service";
+        let vus = systeme::services_actives(&d, activee);
+        // Le lien vers un fichier ordinaire est un fichier pour is_file : il compte, comme pour systemctl.
+        assert_eq!(vus, ["agenda.service", "lien.service", "synchro.service"]);
+        assert_eq!(
+            systeme::services_actives(&d.join("absent"), activee),
+            Vec::<String>::new()
+        );
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// Sur cet ordinateur, les services de ~/.config/systemd/user activés pour la session sont ceux que dit
+    /// `systemctl --user list-unit-files`, quand il répond.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn services_comme_systemctl() {
+        let Some(r) = crate::commande::lancer(
+            std::process::Command::new("systemctl").args([
+                "--user",
+                "list-unit-files",
+                "--type=service",
+                "--state=enabled",
+                "--no-legend",
+                "--no-pager",
+            ]),
+            20,
+        )
+        .filter(|r| r.code == Some(0)) else {
+            return;
+        };
+        let maison = std::path::PathBuf::from(std::env::var_os("HOME").unwrap_or_default());
+        let config =
+            std::env::var_os("XDG_CONFIG_HOME").map_or_else(|| maison.join(".config"), std::path::PathBuf::from);
+        let dossier = config.join("systemd/user");
+        let mut attendus: Vec<String> = r
+            .sortie
+            .lines()
+            .filter_map(|l| l.split_whitespace().next())
+            .filter(|u| {
+                let f = dossier.join(u);
+                f.is_file() && lance_a_l_ouverture(&std::fs::read_to_string(&f).unwrap_or_default())
+            })
+            .map(str::to_string)
+            .collect();
+        attendus.sort();
+        let activee = |u: &str| crate::machine::linux::natif::unite_activee(u, true) == Some(true);
+        assert_eq!(systeme::services_actives(&dossier, activee), attendus);
     }
 }
