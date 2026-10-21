@@ -77,23 +77,11 @@ fn dans_le_path(commande: &str) -> bool {
         .any(|d| d.join(commande).is_file())
 }
 
-/// Applications Flatpak installées (pour l'utilisateur ou pour le système), lues d'un coup.
-#[cfg(target_os = "linux")]
-fn applications_flatpak() -> Vec<String> {
-    crate::commande::lancer(
-        std::process::Command::new("flatpak").args(["list", "--app", "--columns=application"]),
-        30,
-    )
-    .filter(|r| r.code == Some(0))
-    .map(|r| r.sortie.lines().map(|l| l.trim().to_string()).collect())
-    .unwrap_or_default()
-}
-
 /// Linux : le paquet de la distribution quand elle a le logiciel, sinon Flathub. Un logiciel installé autrement
 /// (AUR, paquet de l'éditeur, Snap) compte aussi : son programme est là.
 #[cfg(target_os = "linux")]
 fn lire() -> Result<Etat, String> {
-    use crate::gaming::linux::{installer_flatpak, installes, present};
+    use crate::gaming::linux::{applications_flatpak, installer_flatpak, installes, present};
     use crate::machine::linux::Paquets;
     let gestion = Paquets::detecter();
     let flatpak = present("flatpak");
@@ -104,7 +92,13 @@ fn lire() -> Result<Etat, String> {
         )
         .into());
     }
-    let flatpaks = if flatpak { applications_flatpak() } else { Vec::new() };
+    // Lues dans les dossiers de Flatpak (sa commande en secours) ; illisibles, elles ne cachent rien : chaque
+    // logiciel se cherche encore par son programme et par son paquet.
+    let flatpaks = if flatpak {
+        applications_flatpak().unwrap_or_default()
+    } else {
+        Vec::new()
+    };
     // Debian n'a que firefox-esr ; Ubuntu et ses dérivées ont firefox.
     let ubuntu = gestion == Some(Paquets::Apt) && crate::machine::linux::famille_ubuntu();
     let mut offres = Vec::new();
