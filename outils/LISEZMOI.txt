@@ -56,7 +56,8 @@ Entrée ouvre celle en surbrillance, Échap efface. Au menu principal, elle trou
        Ce que Vanguard a changé : chaque correction lancée ici, datée, réussie ou non
        Entretien du mois : une notification par mois (note, mises à jour, place à libérer, problèmes nouveaux)
        Paramètres (aussi « s » au menu principal) : langue, emojis, travail sans Internet, surveillance, entretien,
-         alertes apprises, blocage, restrictions des extensions ; la valeur d'avant est montrée (vanguard parametres)
+         alertes apprises, blocage, restrictions des extensions ; la valeur d'avant est montrée, sauf pour les
+         alertes apprises et le blocage, qui ouvrent leur propre écran (vanguard parametres)
   5  Réseau et Internet ›
        Scanner le réseau (et démasquer un voleur de mots de passe comme Responder)
        Audit du réseau : six notes (exposition à Internet, Wi-Fi, séparation des appareils, DNS et certificats,
@@ -162,9 +163,10 @@ Terminal Windows).
 Bon à savoir
   - Les corrections ne sont jamais appliquées sans ta confirmation. Sous Windows, quatorze réglages d'une liste
     fermée (WDigest, NLA du Bureau à distance, NTLMv2, LLMNR, UAC…) sont faits par Vanguard lui-même, relancé en
-    administrateur : la fenêtre de Windows le nomme, et seuls Entrée ou oui les appliquent. Les autres corrections,
-    et celles choisies avec elles, sont d'abord écrites dans un script lisible (le chemin est affiché). Toutes
-    demandent l'accord administrateur.
+    administrateur : la fenêtre de Windows le nomme, et seuls Entrée ou oui les appliquent (le blocage des menaces y
+    ajoute la liste de Microsoft qui bloque les pilotes vulnérables). Les autres corrections, et celles choisies avec
+    elles, sont d'abord écrites dans un script lisible (le chemin est affiché). Toutes demandent l'accord
+    administrateur.
   - Blocage des menaces : chaque menace trouvée se bloque d'un clic, après ton accord ; la protection active,
     acceptée une fois, bloque toute seule ce qui est certain (empreinte de MalwareBazaar, outil d'attaque connu,
     serveur de commande), puis prévient ; en administrateur, elle ne bloque rien seule. Chaque blocage se défait

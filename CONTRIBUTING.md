@@ -234,11 +234,11 @@ version, compiler avec `rustflags = ["--remap-path-prefix=/home/<compte>=~"]` da
 commit de chaque version depuis la page précédente (titre et puces), la plus récente en tête ; les liens de
 téléchargement du README pointent toujours vers la dernière. `--notes` montre ces notes sans rien publier.
 
-Chaque publication va sur la clé, dans la VM et sur GitHub (le code), avec sa page, 0.x.0 comme 0.x.y : une par jour,
-puisque moins de pages, c'est moins de minutes de Mac sur GitHub, et moins de programmes neufs que Defender et
-SmartScreen ne connaissent pas encore. Une version intermédiaire d'une série livrée d'affilée
-(`VANGUARD_INTERMEDIAIRE=1 outils/deployer.sh`) va sur la clé et sur GitHub, sans page ni dépôt dans la VM : rien ne
-se perd, puisque la page suivante reprend les versions d'avant. Le Mac de GitHub compile la nuit quand le code a
+Chaque publication va sur la clé, dans la VM et sur GitHub (le code), avec sa page, 0.x.0 comme 0.x.y : une par jour en
+règle générale, puisque moins de pages, c'est moins de minutes de Mac sur GitHub, et moins de programmes neufs que
+Defender et SmartScreen ne connaissent pas encore. Une version intermédiaire d'une série livrée d'affilée
+(`VANGUARD_INTERMEDIAIRE=1 outils/deployer.sh`) va sur la clé et sur GitHub, sans page ni dépôt dans la VM : rien ne se
+perd, puisque la page suivante reprend les versions d'avant. Le Mac de GitHub compile la nuit quand le code a
 changé, et pour chaque page : la version macOS de la clé peut retarder sur les deux autres, et le déploiement le dit.
 Après chaque envoi, il met aussi à jour la page du dépôt (`outils/github.py`) : description en anglais suivie de la
 dernière version publiée, lien, sujets et options, écrits dans `.github/depot.json`. Seule l'image de partage se

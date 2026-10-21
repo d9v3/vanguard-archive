@@ -55,7 +55,8 @@ highlighted one, Esc clears it. In the main menu, it also finds each tool of the
        What Vanguard changed: each fix run here, dated, successful or not
        Monthly check-up: one notification a month (grade, updates, space to free, new problems)
        Settings (also "s" in the main menu): language, emojis, working without the Internet, monitoring, check-up,
-         learned alerts, blocking, extension restrictions; the previous value is shown (vanguard settings)
+         learned alerts, blocking, extension restrictions; the previous value is shown, except for learned alerts
+         and blocking, which open their own screen (vanguard settings)
   5  Network and Internet ›
        Scan the network (and unmask a password thief like Responder)
        Network audit: six grades (Internet exposure, Wi-Fi, device separation, DNS and certificates, connected
@@ -159,8 +160,9 @@ Terminal).
 Good to know
   - Fixes are never applied without your consent. On Windows, fourteen settings from a closed list (WDigest,
     Remote Desktop NLA, NTLMv2, LLMNR, UAC…) are made by Vanguard itself, relaunched as administrator: Windows'
-    prompt names it, and only Enter or yes applies them. The other fixes, and those chosen along with them, are
-    first written to a readable script (its path is shown). All of them ask for administrator approval.
+    prompt names it, and only Enter or yes applies them (threat blocking adds Microsoft's vulnerable driver
+    blocklist). The other fixes, and those chosen along with them, are first written to a readable script (its path
+    is shown). All of them ask for administrator approval.
   - Threat blocking: each threat found is blocked with one click, after your consent; active protection, accepted
     once, blocks what is certain by itself (MalwareBazaar fingerprint, known attack tool, command server), then lets
     you know; as administrator, it blocks nothing by itself. Each block is undone (vanguard blocking undo), except

@@ -134,9 +134,11 @@ Restrictions **actives** (par défaut) :
 - le dossier copié en étant haché, et c'est la copie vérifiée qui tourne ;
 - aucun lien suivi ; une archive ne peut rien écrire hors de son dossier (50 Mo au plus, ni « .. », ni nom de
   périphérique Windows comme CON ou COM1) ;
-- jamais en administrateur ; jamais dans le bilan, la surveillance, l'entretien ni `complet` ;
+- jamais tout seul en administrateur (chaque lancement y est demandé, voir plus bas) ; jamais dans le bilan, la
+  surveillance, l'entretien ni `complet` ;
 - le terminal retiré à l'extension (elle ne peut ni y écrire à côté du filtre ni y lire les frappes) ; délai et
-  sortie bornés (1 Mio), puis tout ce qu'elle a lancé arrêté ; environnement minimal (PATH du système, LANG, HOME),
+  sortie bornés (1 Mio) : au-delà, elle est arrêtée avec tout ce qu'elle a lancé (sous Linux, ce qui reste de son
+  groupe l'est aussi quand elle finit d'elle-même) ; environnement minimal (PATH du système, LANG, HOME),
   aucune variable de Vanguard.
 
 Restrictions **coupées** :

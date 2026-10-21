@@ -2,9 +2,10 @@
 
 *[Français](CHANGELOG.md)*
 
-What each day brought to Vanguard, most recent first. Since October 19, 2026, Vanguard has a single release a day,
-gathering the day's work. Only the latest version has its download page; every version keeps its tag in the
-repository (`git checkout v0.62.0`, for example), to be rebuilt if needed.
+What each day brought to Vanguard, most recent first. Since October 19, 2026, Vanguard has, as a rule, a single release
+a day, gathering the day's work; October 21 had two, 0.82 in the morning and 0.84 in the evening, which takes over 0.83,
+delivered just before it. Only the latest version has its download page; every version keeps its tag in the repository
+(`git checkout v0.62.0`, for example), to be rebuilt if needed.
 
 ## October 21, 2026, evening: version 0.84
 
@@ -26,23 +27,24 @@ repository (`git checkout v0.62.0`, for example), to be rebuilt if needed.
   rights needed, nothing is done halfway.
 - **Settings, all in one place** (This machine › Settings, "s" in the main menu, or `vanguard settings`): language,
   emojis, working without the Internet, hourly monitoring, monthly check-up, learned alerts, blocking and extension
-  restrictions. Each change shows the previous value and the command to put it back; language, emojis and working
-  without the Internet stay chosen from one launch to the next (VANGUARD_LANG, VANGUARD_EMOJI and VANGUARD_HORS_LIGNE
-  always win).
+  restrictions. Each change shows the previous value and the command to put it back; learned alerts and blocking open
+  their own screen ("What Vanguard has learned", Threat blocking). Language, emojis and working without the Internet
+  stay chosen from one launch to the next (VANGUARD_LANG, VANGUARD_EMOJI and VANGUARD_HORS_LIGNE always win).
 - **Extensions: your own programs in Vanguard, without touching its code** (menu 12 Extensions,
   `vanguard extensions`). A plugin is a folder with a `plugin.toml` manifest, added once from a folder or a .zip
   archive (`vanguard plugin add`); a lab script is a file dropped as it is (`vanguard lab`), to try an idea quickly.
   Their findings are shown apart, never count in the grade, and go into a separate section of the HTML report with
   `--report`. To write a plugin in Rust: the `extensions/sdk` library, with no dependency, and a complete example.
 - **An extension is checked before it runs.** Before your consent, its whole folder or archive is scanned (YARA,
-  MalwareBazaar fingerprints) and every file hashed (SHA-256): a file changed, added or removed, and it must be
-  approved again. The checked copy is what runs, without access to the terminal, with a bounded time and output, and
-  everything it started is stopped at the end; an archive cannot write anything outside its folder. On Linux,
-  `--isolated` runs it without network, the home folder hidden. A manifest can only ask for full trust or to run with
-  the check or the monitoring: it is granted by a separate question, and the consent falls at the slightest change. As
-  administrator, nothing in the extensions folder lifts a safeguard: nothing there runs by itself, and each run is
-  asked for. The **Restrictions** switch (Extensions › 3, Settings, or for a single plugin or script) turns these
-  safeguards off for what is yours; one thing stays: the extensions folder must be yours, closed to other accounts.
+  MalwareBazaar fingerprints) and every file hashed (SHA-256): a file changed, added or removed, and it must be approved
+  again. The checked copy is what runs, without access to the terminal, with a bounded time and output: beyond them, it
+  is stopped along with everything it started; on Linux, what it leaves behind is stopped as well when it ends by
+  itself. An archive cannot write anything outside its folder. On Linux, `--isolated` runs it without network, the home
+  folder hidden. A manifest can only ask for full trust or to run with the check or the monitoring: it is granted by a
+  separate question, and the consent falls at the slightest change. As administrator, nothing in the extensions folder
+  lifts a safeguard: nothing there runs by itself, and each run is asked for. The **Restrictions** switch
+  (Extensions › 3, Settings, or for a single plugin or script) turns these safeguards off for what is yours; one thing
+  stays: the extensions folder must be yours, closed to other accounts.
 - **YARA-X 1.22.0**, which fixes eight known flaws in wasmtime, the library YARA runs on, one of them on Apple silicon
   Macs. Every library used is now checked at each version and every night (cargo deny): known flaws, licenses
   compatible with the GPL, origin (crates.io only). The two remaining advisories, with no published fix, come from
@@ -50,12 +52,13 @@ repository (`git checkout v0.62.0`, for example), to be rebuilt if needed.
 - **Calculations checked in the released version** (ANSSI guide, LANG-ARITH): a number that overflows on hostile data
   (a size read in a network packet, a log, a Windows program) stops the check concerned instead of silently wrapping
   to zero and skewing what follows; the rest of the check goes on.
-- **Security review.** An attack tool is certain only by the name of the program itself: an argument that looks like
-  it (python3 sharphound_parser.py) is only a doubt. The program is checked again at the very moment it is stopped
+- **Security review.** An attack tool is certain only by the name of the program itself: a script run by an interpreter
+  that bears the tool's exact name (python3 laZagne.py) is only a doubt, and a name that merely starts like the tool
+  (python3 sharphound_parser.py) is no longer reported. The program is checked again at the very moment it is stopped
   (its number could have passed to another one). The ufw rule that closes a port goes before the allow rules, and the
   port is reported closed only once checked. In automatic mode, an address where another account has an established
-  connection is never blocked. An unreadable settings file (settings, blocking, extensions) is set aside as it is,
-  never silently overwritten.
+  connection is never blocked. An unreadable settings file (settings, blocking, extensions) is first copied aside, as it
+  is, before being rewritten; for extensions, nothing is written until it could be set aside.
 
 ## October 21, 2026, evening: version 0.83
 

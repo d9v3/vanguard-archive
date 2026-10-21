@@ -79,7 +79,8 @@ In the menu, choose **1** (full check), then **2** (fix). Arrows, Enter, and Esc
   timeshift on Linux, Windows restore point, Time Machine snapshot on macOS). On Windows, fourteen hardening settings
   from a closed list (WDigest, Remote Desktop NLA, NTLMv2 only, LLMNR, WPAD, UAC…) are applied by Vanguard itself,
   relaunched as administrator: Windows' prompt names it, and the previous value is recorded to undo exactly; only
-  Enter or yes applies them. The other fixes, or those chosen along with them, go through a readable script.
+  Enter or yes applies them. Threat blocking adds, the same way, Microsoft's vulnerable driver blocklist. The other
+  fixes, or those chosen along with them, go through a readable script.
 
 #### Exposure to the Internet and the home network
 
@@ -360,10 +361,10 @@ your habits on the same network; a known device that suddenly seems all closed (
 patiently. "What Vanguard has learned" shows everything and lets you forget.
 
 **Settings** (This machine › Settings, "s" in the main menu, `vanguard settings`) — every setting in one place:
-language, emojis, working without the Internet, hourly monitoring, monthly check-up, learned alerts, threat blocking
-and extension restrictions. Each change shows the previous value and the command to put it back; language, emojis and
-working without the Internet stay chosen from one launch to the next (VANGUARD_LANG, VANGUARD_EMOJI and
-VANGUARD_HORS_LIGNE always win).
+language, emojis, working without the Internet, hourly monitoring, monthly check-up, learned alerts, threat blocking and
+extension restrictions. Each change shows the previous value and the command to put it back; learned alerts and blocking
+open their own screen ("What Vanguard has learned", Threat blocking). Language, emojis and working without the Internet
+stay chosen from one launch to the next (VANGUARD_LANG, VANGUARD_EMOJI and VANGUARD_HORS_LIGNE always win).
 
 **Extensions** (menu 12, `vanguard extensions`) — your own programs in Vanguard, without touching its code. A plugin
 is a folder with a `plugin.toml` manifest, added once from a folder or a .zip archive (`vanguard plugin add`); a lab
@@ -542,11 +543,13 @@ Each menu entry is also a command.
 
 **Language**: the system's (English or French). To force it: the Settings menu, or `VANGUARD_LANG=en` or
 `VANGUARD_LANG=fr` (the variable wins). The commands also keep their French names (`complet`, `machine`, `corriger`,
-`reseau`, `connexion`, `logiciels`, `diagnostic`, `motdepasse`, `isoler`, `courriel`, `integrite`, `maj`, `reparer`,
-`surveillance`, `nommer`, `sauvegarder`, `restaurer`, `nettoyer`, `pieges`, `durcir`, `listes-noires`, `appris`,
-`entretien`, `sortantes`, `lien`, `verifier-fichier`, `canaux`, `dns-rapide`, `traces`, `acces`, `tableau`,
-`verifier-sauvegarde`, `objets`, `proche`, `blocage`, `parametres`, `memoire`, `audit-reseau`, `navigateurs`,
-`ordinateurs`, `labo`).
+`reseau`, `audit-reseau`, `surveillance`, `tableau`, `entretien`, `maj`, `reparer`, `diagnostic`, `logiciels`,
+`nettoyer`, `appris`, `connexion`, `listes-noires`, `canaux`, `objets`, `dns-rapide`, `integrite`, `pieges`, `durcir`,
+`memoire`, `isoler`, `courriel`, `motdepasse`, `navigateurs`, `sortantes`, `distance`, `lien`, `verifier-fichier`,
+`camera-micro`, `acces`, `quarantaine`, `conteneurs`, `parametres`, `blocage`, `sauvegarder`, `restaurer`, `nommer`,
+`lenteur`, `demarrage`, `fiche`, `copier-fichiers`, `verifier-copie`, `verifier-sauvegarde`, `verifier-cle`,
+`a-laisser`, `changements`, `sauvegarde-auto`, `raccourci`, `ordinateurs`, `se-mettre-a-jour`, `regles`, `traces`,
+`depanner`, `proche`, `verifier-moi`, `labo`, `extensions`).
 
 **Emojis**: in the old Windows console (command prompt or PowerShell outside Windows Terminal, common on Windows 10),
 which draws them badly and shifts the menus, 💡 and 🔧 become → and +. `VANGUARD_EMOJI=0` removes them everywhere,

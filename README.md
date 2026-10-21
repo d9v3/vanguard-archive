@@ -105,7 +105,8 @@ pour revenir.
   (snapper ou timeshift sous Linux, point de restauration Windows, instantané Time Machine sous macOS). Sous Windows,
   quatorze réglages de durcissement d'une liste fermée (WDigest, NLA du Bureau à distance, NTLMv2 seul, LLMNR, WPAD,
   UAC…) sont appliqués par Vanguard lui-même, relancé en administrateur : la fenêtre de Windows le nomme, et la valeur
-  d'avant est notée pour annuler exactement ; seuls Entrée ou oui les appliquent. Les autres corrections, ou celles
+  d'avant est notée pour annuler exactement ; seuls Entrée ou oui les appliquent. Le blocage des menaces y ajoute,
+  de la même façon, la liste de Microsoft qui bloque les pilotes vulnérables. Les autres corrections, ou celles
   choisies avec elles, passent par un script lisible.
 
 #### Exposition vers Internet et réseau de la maison
@@ -406,11 +407,12 @@ toi (« i » à la correction) passe au niveau info pendant 90 jours, ou jusqu'�
 connexion se compare à tes habitudes sur le même réseau ; un appareil connu qui paraît soudain tout fermé (en
 veille) est revérifié plus patiemment. « Ce que Vanguard a appris » montre tout et permet d'oublier.
 
-**Paramètres** (Cette machine › Paramètres, « s » au menu principal, `vanguard parametres`) — tous les réglages au
-même endroit : langue, emojis, travail sans Internet, surveillance horaire, entretien du mois, alertes apprises,
-blocage des menaces et restrictions des extensions. Chaque changement montre la valeur d'avant et la commande pour la
-remettre ; la langue, les emojis et le travail sans Internet restent choisis d'un lancement à l'autre
-(VANGUARD_LANG, VANGUARD_EMOJI et VANGUARD_HORS_LIGNE l'emportent toujours).
+**Paramètres** (Cette machine › Paramètres, « s » au menu principal, `vanguard parametres`) — tous les réglages au même
+endroit : langue, emojis, travail sans Internet, surveillance horaire, entretien du mois, alertes apprises, blocage des
+menaces et restrictions des extensions. Chaque changement montre la valeur d'avant et la commande pour la remettre ; les
+alertes apprises et le blocage ouvrent leur propre écran (« Ce que Vanguard a appris », Blocage des menaces). La langue,
+les emojis et le travail sans Internet restent choisis d'un lancement à l'autre (VANGUARD_LANG, VANGUARD_EMOJI et
+VANGUARD_HORS_LIGNE l'emportent toujours).
 
 **Extensions** (menu 12, `vanguard extensions`) — tes propres programmes dans Vanguard, sans toucher à son code. Un
 plugin est un dossier avec un manifeste `plugin.toml`, ajouté une fois depuis un dossier ou une archive .zip
@@ -595,11 +597,12 @@ Chaque entrée du menu existe aussi en commande.
 
 **Langue** : celle du système (français ou anglais). Pour forcer : menu Paramètres, ou `VANGUARD_LANG=fr` ou
 `VANGUARD_LANG=en` (la variable l'emporte). Les commandes ont aussi un nom anglais (`full`, `audit`, `fix`, `network`,
-`connection`, `apps`, `diag`, `password`, `sandbox`, `email`, `integrity`, `update`, `repair`, `monitor`, `name`,
-`backup`, `restore`, `clean`, `decoys`, `harden`, `blocklists`, `learned`, `channels`, `fast-dns`, `outbound`, `link`,
-`check-file`, `maintenance`, `slow`, `startup`, `specs`, `copy-files`, `troubleshoot`, `evidence`, `permissions`,
-`dashboard`, `check-backup`, `iot`, `relative`, `blocking`, `settings`, `memory`, `network-audit`,
-`browser-passwords`, `computers`, `lab`, `ext`).
+`network-audit`, `monitor`, `dashboard`, `maintenance`, `update`, `repair`, `diag`, `apps`, `clean`, `learned`,
+`connection`, `blocklists`, `channels`, `iot`, `fast-dns`, `integrity`, `decoys`, `harden`, `memory`, `sandbox`,
+`email`, `password`, `browser-passwords`, `outbound`, `remote-access`, `link`, `check-file`, `camera-mic`,
+`permissions`, `quarantine`, `containers`, `settings`, `blocking`, `backup`, `restore`, `name`, `slow`, `startup`,
+`specs`, `copy-files`, `check-copy`, `check-backup`, `check-drive`, `handout`, `changes`, `auto-backup`, `shortcut`,
+`computers`, `self-update`, `rules`, `evidence`, `troubleshoot`, `relative`, `self-check`, `lab`, `ext`).
 
 **Emojis** : dans l'ancienne console de Windows (invite de commandes ou PowerShell hors du Terminal Windows, courant
 sous Windows 10), qui les dessine mal et décale les menus, 💡 et 🔧 deviennent → et +. `VANGUARD_EMOJI=0` les retire

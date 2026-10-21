@@ -232,10 +232,10 @@ a program that still contains the home folder).
 commit of each version since the previous release (title and bullets), the newest first; the README's download
 links always point to the latest one. `--notes` shows these notes without publishing anything.
 
-Every release goes to the key, the VM and GitHub (the code), with its page, 0.x.0 as well as 0.x.y: one a day, since
-fewer releases mean fewer Mac minutes on GitHub, and fewer new programs that Defender and SmartScreen do not know yet.
-An intermediate version of a series delivered back to back (`VANGUARD_INTERMEDIAIRE=1 outils/deployer.sh`) goes to the
-key and GitHub, without a page or a drop in the VM: nothing is lost, since the next release takes over the versions
+Every release goes to the key, the VM and GitHub (the code), with its page, 0.x.0 as well as 0.x.y: one a day as a rule,
+since fewer releases mean fewer Mac minutes on GitHub, and fewer new programs that Defender and SmartScreen do not know
+yet. An intermediate version of a series delivered back to back (`VANGUARD_INTERMEDIAIRE=1 outils/deployer.sh`) goes to
+the key and GitHub, without a page or a drop in the VM: nothing is lost, since the next release takes over the versions
 before it. GitHub's Mac builds at night when the code changed, and for each release: the key's macOS version can lag
 behind the other two, and the deployment says so. After each push, it also updates the repository page
 (`outils/github.py`): English description followed by the latest published version, link, topics and options, written
