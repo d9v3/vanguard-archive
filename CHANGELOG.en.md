@@ -37,11 +37,12 @@ repository (`git checkout v0.62.0`, for example), to be rebuilt if needed.
 - **Command guide: 1,085 commands**, including Vanguard's own for defending and troubleshooting, and how to check by
   hand what the new rules report.
 - **More accurate.** On Windows, Vanguard run as administrator believed it had no rights (Windows refused the reading
-  of its elevation, which Wine accepted): `vanguard evidence` left the security log out there. Without journalctl, the
-  evidence also takes the last rotated /var/log file (auth.log.1…). In what starts by itself on Linux, "nc -e" is
-  caught inside ( … ), after ; or & and behind a path, and so is a downloaded script piped to ash, to "sudo -p x sh",
-  to "sudo -s" or to su. The guard against a DLL placed next to the program is required at build time: it could
-  disappear.
+  of its elevation, which Wine accepted): `vanguard evidence` left the security log out there, and the administrator
+  window for fixes closed without doing anything. A YARA scan thread that crashed made the scan conclude "clean"
+  without reading its files: they are now reported as not scanned. Without journalctl, the evidence also takes the
+  last rotated /var/log file (auth.log.1…). In what starts by itself on Linux, "nc -e" is caught inside ( … ), after ;
+  or & and behind a path, and so is a downloaded script piped to ash, to "sudo -p x sh", to "sudo -s" or to su. The
+  guard against a DLL placed next to the program is required at build time: it could disappear.
 
 ## October 21, 2026: version 0.82
 

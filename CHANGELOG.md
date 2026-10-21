@@ -42,11 +42,13 @@ chaque version garde son étiquette dans le dépôt (`git checkout v0.62.0`, par
 - **Guide des commandes : 1 085 commandes**, dont celles de Vanguard pour se défendre et dépanner, et de quoi vérifier
   à la main ce que signalent les nouvelles règles.
 - **Plus justes.** Sous Windows, Vanguard lancé en administrateur se croyait sans droits (Windows refusait la lecture
-  de son élévation, que Wine acceptait) : `vanguard traces` y laissait de côté le journal de sécurité. Sans
-  journalctl, les traces reprennent aussi le dernier fichier tourné de /var/log (auth.log.1…). Dans ce qui se lance
-  tout seul sous Linux, « nc -e » est vu dans ( … ), après ; ou & et derrière un chemin, et un script téléchargé passé
-  à ash, à « sudo -p x sh », à « sudo -s » ou à su aussi. La garde contre une DLL posée à côté du programme est exigée
-  à la compilation : elle pouvait disparaître.
+  de son élévation, que Wine acceptait) : `vanguard traces` y laissait de côté le journal de sécurité, et la fenêtre
+  administrateur des corrections se refermait sans rien faire. Un fil de l'analyse YARA qui plantait faisait conclure
+  « sain » sans avoir lu ses fichiers : ils sont maintenant dits non analysés. Sans journalctl, les traces reprennent
+  aussi le dernier fichier tourné de /var/log (auth.log.1…). Dans ce qui se lance tout seul sous Linux, « nc -e » est
+  vu dans ( … ), après ; ou & et derrière un chemin, et un script téléchargé passé à ash, à « sudo -p x sh », à
+  « sudo -s » ou à su aussi. La garde contre une DLL posée à côté du programme est exigée à la compilation : elle
+  pouvait disparaître.
 
 ## 21 octobre 2026 : version 0.82
 
