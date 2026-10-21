@@ -337,15 +337,16 @@ ranger() { # sorte dossier nom
 # 2 si l'image est refusée (et effacée) ; RAISON dit pourquoi.
 prendre() { # sorte nom url
   local sorte=$1 nom=$2 url=$3 neuf=$CACHE/.nouveau-$1 f r
-  # Un torrent coupé reprend où il en était : son dossier ne se vide que pour une autre version.
-  [[ -e $neuf/$nom.aria2 ]] || rm -rf "$neuf"
+  # Un torrent coupé reprend où il en était, même arrêté avant la vérification (aria2c revérifie chaque morceau) : son
+  # dossier ne se vide que pour une autre version.
+  [[ $sorte == kali && -e $neuf/$nom ]] || rm -rf "$neuf"
   mkdir -p "$neuf"
   echo "↓ ${NOMS[$sorte]} : $nom"
   for f in $(signatures "$sorte" "$nom"); do
     lire "$url$f" >"$neuf/$f" || true
   done
   if ! telecharger "$sorte" "$url" "$nom" "$neuf"; then
-    [[ -e $neuf/$nom.aria2 ]] || rm -rf "$neuf"
+    [[ $sorte == kali && -s $neuf/$nom ]] || rm -rf "$neuf"
     return 1
   fi
   if ! r=$(verifier_image "$sorte" "$neuf" "$nom" 2>&1); then
