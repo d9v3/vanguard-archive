@@ -466,7 +466,7 @@ fn connexions() -> Option<Vec<Connexion>> {
 // ───────────────────────────── Jugement ─────────────────────────────
 
 /// Un serveur sur Internet, pas un appareil de la maison (réseau privé, adresses partagées des fournisseurs, VPN).
-fn sur_internet(ip: IpAddr) -> bool {
+pub(crate) fn sur_internet(ip: IpAddr) -> bool {
     match ip {
         IpAddr::V4(v4) => {
             let [a, b, ..] = v4.octets();

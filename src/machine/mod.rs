@@ -12,6 +12,7 @@ mod administrateurs;
 pub(crate) mod agents_ia;
 mod bluetooth;
 pub(crate) mod certificats;
+mod chasse;
 mod comptes_oublies;
 pub(crate) mod dns;
 pub(crate) mod extensions;

@@ -227,7 +227,7 @@ pub fn lancer_vers(
 /// Les descendants de `racine` (enfants, petits-enfants…) dans une liste de (processus, parent), sans `racine`
 /// elle-même. Une boucle dans la liste (un numéro réutilisé, le processus 0 parent de lui-même) ne fait pas tourner
 /// sans fin ; 1 000 au plus.
-fn descendants(liste: &[(u32, u32)], racine: u32) -> Vec<u32> {
+pub(crate) fn descendants(liste: &[(u32, u32)], racine: u32) -> Vec<u32> {
     let mut vus = vec![racine];
     let mut i = 0;
     while let Some(&pid) = vus.get(i)
@@ -367,8 +367,8 @@ pub fn section<'a>(sortie: Option<&'a str>, nom: &str) -> Option<Vec<&'a str>> {
 }
 
 /// Programme et arguments d'une ligne de commande Windows (« "C:\Program Files\x.exe" -a », « x.exe -a »,
-/// « C:\Program Files\x.exe -a » sans guillemets).
-#[cfg(any(windows, test))]
+/// « C:\Program Files\x.exe -a » sans guillemets). Sur les trois systèmes : `machine::chasse` y lit le programme
+/// de chaque ligne de commande en marche.
 pub fn decouper_commande(ligne: &str) -> (String, String) {
     let ligne = ligne.trim();
     if let Some(reste) = ligne.strip_prefix('"')

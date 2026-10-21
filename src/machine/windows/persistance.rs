@@ -32,73 +32,10 @@ pub(super) fn lancement_suspect(exe: &str, args: &str) -> Option<&'static str> {
             "program stored in the Public folder or the recycle bin"
         ));
     }
-    let jetons: Vec<String> = args
-        .split_whitespace()
-        .map(|j| j.trim_matches('"').replacen('/', "-", 1))
-        .collect();
-    let a = |m: &str| jetons.iter().any(|j| j == m);
-    match programme {
-        "powershell" | "pwsh" => {
-            let cache = jetons.iter().any(|j| {
-                j == "-e" || j == "-ec" || (j.starts_with("-en") && "-encodedcommand".starts_with(j.as_str()))
-            });
-            if cache {
-                return Some(tr!(
-                    "commande PowerShell cachée en base64",
-                    "PowerShell command hidden in base64"
-                ));
-            }
-            let execute = ["iex", "invoke-expression"].iter().any(|m| args.contains(m));
-            let telecharge = [
-                "downloadstring",
-                "downloadfile",
-                "invoke-webrequest",
-                "iwr ",
-                "net.webclient",
-                "invoke-restmethod",
-                "irm ",
-            ]
-            .iter()
-            .any(|m| args.contains(m));
-            if execute && telecharge {
-                return Some(tr!(
-                    "télécharge un script et l'exécute aussitôt",
-                    "downloads a script and runs it right away"
-                ));
-            }
-        }
-        "mshta"
-            if ["http:", "https:", "javascript:", "vbscript:"]
-                .iter()
-                .any(|m| args.contains(m)) =>
-        {
-            return Some(tr!(
-                "mshta lance un script venu d'Internet",
-                "mshta runs a script from the Internet"
-            ));
-        }
-        "regsvr32" if args.contains("scrobj.dll") || args.contains("-i:http") || args.contains("/i:http") => {
-            return Some(tr!(
-                "regsvr32 charge un script distant",
-                "regsvr32 loads a remote script"
-            ));
-        }
-        "rundll32" if args.contains("javascript:") => {
-            return Some(tr!("rundll32 exécute du JavaScript", "rundll32 runs JavaScript"));
-        }
-        "certutil" if a("-urlcache") || a("-decode") => {
-            return Some(tr!(
-                "certutil détourné pour télécharger ou décoder un fichier",
-                "certutil misused to download or decode a file"
-            ));
-        }
-        "bitsadmin" if a("-transfer") => {
-            return Some(tr!(
-                "bitsadmin détourné pour télécharger un fichier",
-                "bitsadmin misused to download a file"
-            ));
-        }
-        _ => {}
+    // PowerShell caché, mshta, regsvr32, rundll32, certutil, bitsadmin détournés : le même jugement que pour les
+    // programmes en marche.
+    if let Some(motif) = crate::machine::chasse::detournement(programme, &args) {
+        return Some(motif.raison);
     }
     // Interpréteurs et outils système qui lancent un script ou une bibliothèque rangés dans un dossier temporaire ou public.
     let relais = [

@@ -843,8 +843,9 @@ fn ports_ssh() -> Option<Constat> {
     juger_ports_ssh(&configuration_sshd()?)
 }
 
-/// Quelqu'un essaie-t-il de deviner un mot de passe SSH ? Tentatives ratées des dernières 24 h, dans le journal.
-fn ssh_echecs() -> Option<Constat> {
+/// Le journal de sshd des dernières 24 h, un message par ligne, ou le constat qui dit pourquoi il ne se lit pas. `None` :
+/// pas de serveur SSH ici (ou pas de systemd pour le dire), rien à lire.
+fn journal_sshd() -> Option<Result<String, Constat>> {
     if !systemd() || !sshd_actif() {
         return None;
     }
@@ -861,19 +862,35 @@ fn ssh_echecs() -> Option<Constat> {
             "--no-pager",
         ]),
         20,
-    )?;
+    );
+    // journalctl absent ou bloqué : le dire, plutôt que de laisser croire qu'il n'y a rien.
+    let Some(r) = r else {
+        return Some(Err(impossible(
+            "SSH",
+            tr!("journalctl n'a pas répondu", "journalctl did not answer"),
+        )));
+    };
     // Hors des groupes adm, wheel ou systemd-journal, journalctl ne montre que le journal de l'utilisateur : zéro
     // échec passerait pour rien à signaler.
     if r.erreurs.contains("other users and the system") || r.erreurs.contains("insufficient permissions") {
-        return Some(impossible(
+        return Some(Err(impossible(
             "SSH",
             tr!(
                 "journal du système réservé aux groupes adm, wheel et systemd-journal",
                 "system journal reserved for the adm, wheel and systemd-journal groups"
             ),
-        ));
+        )));
     }
-    let (tentatives, adresses) = echecs_ssh(&r.sortie);
+    Some(Ok(r.sortie))
+}
+
+/// Quelqu'un essaie-t-il de deviner un mot de passe SSH ? Tentatives ratées des dernières 24 h, dans le journal.
+fn ssh_echecs() -> Option<Constat> {
+    let journal = match journal_sshd()? {
+        Ok(journal) => journal,
+        Err(constat) => return Some(constat),
+    };
+    let (tentatives, adresses) = echecs_ssh(&journal);
     let internet = adresses.iter().filter(|ip| d_internet(ip)).count();
     // Configuration illisible : on suppose les mots de passe permis (la valeur par défaut de sshd).
     let mots_de_passe = configuration_sshd().is_none_or(|c| mots_de_passe_sshd(&c));
@@ -953,21 +970,74 @@ fn echecs_ssh(journal: &str) -> (usize, std::collections::BTreeSet<std::net::IpA
         "Invalid user",
         "maximum authentication attempts",
     ];
-    let mut tentatives = std::collections::BTreeSet::new();
-    for l in journal.lines().filter(|l| ECHECS.iter().any(|e| l.contains(e))) {
-        let mots: Vec<&str> = l.split_whitespace().collect();
-        if let Some(i) = mots.iter().rposition(|m| *m == "port")
-            && i > 0
-            && let Ok(ip) = mots[i - 1].parse::<std::net::IpAddr>()
-            && let Some(port) = mots
-                .get(i + 1)
-                .and_then(|p| p.trim_end_matches(':').parse::<u16>().ok())
-        {
-            tentatives.insert((ip, port));
-        }
-    }
+    let tentatives: std::collections::BTreeSet<(std::net::IpAddr, u16)> = journal
+        .lines()
+        .filter(|l| ECHECS.iter().any(|e| l.contains(e)))
+        .filter_map(origine_ssh)
+        .collect();
     let adresses = tentatives.iter().map(|(ip, _)| *ip).collect();
     (tentatives.len(), adresses)
+}
+
+/// L'adresse et le port d'origine d'une ligne de sshd : ceux du dernier « port » de la ligne. Avant lui, le nom
+/// d'utilisateur tenté est écrit tel que l'attaquant l'a choisi, et peut contenir un faux « from … port … ».
+fn origine_ssh(ligne: &str) -> Option<(std::net::IpAddr, u16)> {
+    let mots: Vec<&str> = ligne.split_whitespace().collect();
+    let i = mots.iter().rposition(|m| *m == "port")?;
+    let ip = mots
+        .get(i.checked_sub(1)?)?
+        .parse::<std::net::IpAddr>()
+        .ok()?
+        .to_canonical();
+    let port = mots.get(i + 1)?.trim_end_matches(':').parse().ok()?;
+    Some((ip, port))
+}
+
+/// Les tentatives de connexion à sshd, dans l'ordre du journal : chaque mot de passe raté (« Failed password »,
+/// « Failed keyboard-interactive »), chaque connexion d'un compte qui n'existe pas où aucun mot de passe n'a été
+/// essayé (« Invalid user » seul : sinon, ses « Failed password » la comptent déjà), et chaque connexion acceptée,
+/// avec son compte. Seuls comptent les messages qui commencent ainsi : un nom d'utilisateur tenté (« Invalid user
+/// Accepted password for … ») vient de l'attaquant.
+fn tentatives_ssh(journal: &str) -> Vec<crate::machine::chasse::Tentative> {
+    use crate::machine::chasse::Tentative;
+    let rate = |l: &str| l.starts_with("Failed password ") || l.starts_with("Failed keyboard-interactive");
+    let essayees: std::collections::HashSet<(std::net::IpAddr, u16)> =
+        journal.lines().filter(|l| rate(l)).filter_map(origine_ssh).collect();
+    let mut sans_essai = std::collections::HashSet::new();
+    journal
+        .lines()
+        .filter_map(|l| {
+            let (adresse, port) = origine_ssh(l)?;
+            let echec = Tentative {
+                adresse,
+                compte: String::new(),
+                reussie: false,
+            };
+            if rate(l) {
+                return Some(echec);
+            }
+            if l.starts_with("Invalid user ") {
+                return (!essayees.contains(&(adresse, port)) && sans_essai.insert((adresse, port))).then_some(echec);
+            }
+            // « Accepted password for alice from 203.0.113.5 port 50000 ssh2 » : le compte, entre « for » et le
+            // dernier « from ».
+            let reste = l.strip_prefix("Accepted ")?;
+            let mots: Vec<&str> = reste.split_whitespace().collect();
+            let pour = mots.iter().position(|m| *m == "for")?;
+            let depuis = mots.iter().rposition(|m| *m == "from")?;
+            Some(Tentative {
+                compte: mots.get(pour + 1..depuis)?.join(" "),
+                reussie: true,
+                ..echec
+            })
+        })
+        .collect()
+}
+
+/// Les tentatives de connexion SSH des dernières 24 h, pour la recherche d'un mot de passe deviné (`machine::chasse`) ;
+/// `Err` : le journal ne se lit pas. `None` : pas de serveur SSH.
+pub(crate) fn tentatives_ssh_lues() -> Option<Result<Vec<crate::machine::chasse::Tentative>, Constat>> {
+    Some(journal_sshd()?.map(|journal| tentatives_ssh(&journal)))
 }
 
 /// Adresse d'Internet, pas du réseau local (privé, lien local, partagé du fournisseur, la machine elle-même).
@@ -2333,6 +2403,47 @@ Failed password for alice from 10.0.0.12 port 50001 ssh2";
         assert_eq!(
             niveau_echecs_ssh(30, d_internet(&ip("203.0.113.5")), true),
             Some(Niveau::Eleve)
+        );
+    }
+
+    /// Un mot de passe deviné : dix échecs depuis une adresse, puis une connexion acceptée depuis la même. La connexion
+    /// d'un compte qui n'existe pas compte une fois, ou pas du tout quand ses mots de passe ratés la comptent déjà ; un
+    /// faux « Accepted » glissé dans un nom d'utilisateur tenté n'est pas une connexion.
+    #[test]
+    fn mot_de_passe_ssh_devine() {
+        use crate::machine::chasse::{Intrusion, intrusions};
+        let mut journal = String::new();
+        for port in 40000..40004 {
+            writeln!(journal, "Invalid user admin from 203.0.113.5 port {port}").unwrap();
+            for _ in 0..2 {
+                writeln!(
+                    journal,
+                    "Failed password for invalid user admin from 203.0.113.5 port {port} ssh2"
+                )
+                .unwrap();
+            }
+        }
+        journal += "Invalid user test from 203.0.113.5 port 41000\n\
+                    Connection closed by invalid user test 203.0.113.5 port 41000 [preauth]\n";
+        // Neuf échecs : une connexion acceptée n'est pas encore suspecte.
+        journal += "Accepted password for alice from 203.0.113.5 port 42000 ssh2\n";
+        // Le dixième, avec un faux « Accepted » dans le nom tenté.
+        journal += "Invalid user Accepted password for root from 203.0.113.5 port 1 from 203.0.113.5 port 41001\n";
+        journal += "Accepted publickey for alice from 203.0.113.5 port 42001 ssh2: ED25519 SHA256:abc\n";
+        // Ailleurs : des échecs sans réussite, une réussite après un seul échec.
+        journal += &"Failed password for root from 198.51.100.7 port 50000 ssh2\n".repeat(12);
+        journal += "Failed password for alice from 10.0.0.12 port 50001 ssh2\n\
+                    Accepted password for alice from 10.0.0.12 port 50002 ssh2\n";
+        let t = tentatives_ssh(&journal);
+        assert_eq!(t.iter().filter(|t| t.reussie).count(), 3);
+        assert_eq!(t.iter().filter(|t| !t.reussie).count(), 10 + 12 + 1);
+        assert_eq!(
+            intrusions(&t),
+            [Intrusion {
+                adresse: "203.0.113.5".parse().unwrap(),
+                compte: "alice".into(),
+                echecs: 10
+            }]
         );
     }
 

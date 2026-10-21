@@ -109,7 +109,7 @@ fn quelques(liste: &[String], n: usize) -> String {
 // ───────────────────────────── Processus cachés ─────────────────────────────
 
 /// Les PID que montre la lecture du dossier /proc.
-fn pids_listes() -> Option<BTreeSet<u32>> {
+pub(crate) fn pids_listes() -> Option<BTreeSet<u32>> {
     Some(
         std::fs::read_dir("/proc")
             .ok()?

@@ -129,6 +129,16 @@ pub const COMMUNS: &[Programme] = &[
                 "Le détail du dernier plantage de ce programme.",
                 "Details of this program's last crash.",
             ),
+            voir(
+                "journalctl -u sshd | grep Failed",
+                "Les mots de passe SSH ratés (ssh au lieu de sshd sous Debian et Ubuntu ; sudo si rien ne s'affiche).",
+                "Failed SSH passwords (ssh instead of sshd on Debian and Ubuntu; sudo if nothing shows).",
+            ),
+            voir(
+                "journalctl -u sshd | grep Accepted",
+                "Les connexions SSH acceptées : depuis une adresse qui ratait juste avant, un mot de passe deviné.",
+                "Accepted SSH sign-ins: from an address that was failing just before, a guessed password.",
+            ),
         ],
     },
     Programme {
@@ -498,6 +508,11 @@ pub const COMMUNS: &[Programme] = &[
                 "pkill <nom>",
                 "Ferme tous les programmes de ce nom.",
                 "Closes every program with this name.",
+            ),
+            voir(
+                "ps -eo pid,args",
+                "Chaque programme avec sa ligne de commande : curl ou wget passé à sh, base64 -d, lancé de /tmp.",
+                "Each program with its command line: curl or wget piped to sh, base64 -d, started from /tmp.",
             ),
         ],
     },

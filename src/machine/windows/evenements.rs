@@ -648,6 +648,19 @@ fn juger_services(lignes: &[&str]) -> Vec<Constat> {
     constats
 }
 
+/// Pourquoi le journal Security a refusé. `admin` : Vanguard tourne-t-il en administrateur ? Sans, c'est la raison, et
+/// le remède.
+fn refus_de_securite(admin: Option<bool>) -> &'static str {
+    if admin == Some(false) {
+        tr!(
+            "journal de sécurité lisible seulement en administrateur : relancer Vanguard en administrateur",
+            "security log readable only as administrator: run Vanguard again as administrator"
+        )
+    } else {
+        tr!("journal de sécurité illisible", "security log unreadable")
+    }
+}
+
 fn juger_evenements(sortie: Option<&str>) -> Vec<Constat> {
     let Some(sortie) = sortie else {
         return vec![illisible("Journaux")];
@@ -659,17 +672,7 @@ fn juger_evenements(sortie: Option<&str>) -> Vec<Constat> {
         constats.extend(juger_securite(&securite));
     } else {
         let admin = s("ADM").and_then(|l| l.first().map(|v| v.trim().eq_ignore_ascii_case("true")));
-        constats.push(impossible(
-            "Journaux",
-            if admin == Some(false) {
-                tr!(
-                    "journal de sécurité lisible seulement en administrateur : relancer Vanguard en administrateur",
-                    "security log readable only as administrator: run Vanguard again as administrator"
-                )
-            } else {
-                tr!("journal de sécurité illisible", "security log unreadable")
-            },
-        ));
+        constats.push(impossible("Journaux", refus_de_securite(admin)));
     }
     match s("SRV") {
         Some(services) => constats.extend(juger_services(&services)),
@@ -698,6 +701,108 @@ regle!(
     // 30 s : la lecture est bornée ; au-delà, PowerShell ou le service des journaux est bloqué.
     || juger_evenements(Some(&lire_journaux()))
 );
+
+// ───────────────────────────── Mot de passe deviné ─────────────────────────────
+
+/// Les adresses dont on lit les connexions réussies, au plus : les plus insistantes. Chacune est une lecture du journal.
+const ADRESSES_LUES: usize = 5;
+
+/// Une adresse telle que le journal l'écrit. « ::ffff:192.0.2.5 » (IPv4 dans IPv6) est 192.0.2.5 ; la zone d'une
+/// adresse de lien local (« fe80::1%12 ») ne change pas l'appareil ; « - » (session au clavier) n'en est pas une.
+fn adresse(texte: &str) -> Option<std::net::IpAddr> {
+    let texte = texte.trim();
+    let sans_zone = texte.split_once('%').map_or(texte, |(a, _)| a);
+    sans_zone.parse::<std::net::IpAddr>().ok().map(|ip| ip.to_canonical())
+}
+
+/// Les adresses d'où sont venus au moins `chasse::SEUIL_ECHECS` échecs, les plus insistantes d'abord, écrites comme le
+/// journal les écrit : elles entrent telles quelles dans la requête des réussites. Seulement des chiffres, des lettres
+/// hexadécimales, « . », « : » et « % » : rien d'autre ne peut sortir de la chaîne XPath.
+fn adresses_insistantes(echecs: &[Echec]) -> Vec<String> {
+    let mut nombres: HashMap<&str, usize> = HashMap::new();
+    for e in echecs {
+        let sure = e
+            .adresse
+            .chars()
+            .all(|c| c.is_ascii_hexdigit() || matches!(c, '.' | ':' | '%'));
+        if sure && adresse(&e.adresse).is_some_and(|ip| !ip.is_loopback()) {
+            *nombres.entry(e.adresse.as_str()).or_default() += 1;
+        }
+    }
+    let mut tries: Vec<(&str, usize)> = nombres
+        .into_iter()
+        .filter(|(_, n)| *n >= crate::machine::chasse::SEUIL_ECHECS)
+        .collect();
+    tries.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(b.0)));
+    tries
+        .into_iter()
+        .take(ADRESSES_LUES)
+        .map(|(a, _)| a.to_string())
+        .collect()
+}
+
+/// La ligne d'une connexion réussie (4624) par le réseau (type 3) ou le Bureau à distance (type 10), de la même forme
+/// que celle d'un échec (« date|type|adresse|compte ») : `lire_echecs` la lit. Les autres types (session ouverte au
+/// clavier, services) ne viennent pas d'une adresse : rien.
+fn ligne_reussite(id: u32, date: &str, champs: &[(String, String)]) -> Option<String> {
+    let valeur = |nom: &str| champs.iter().find(|(n, _)| n == nom).map(|(_, v)| v);
+    let type_ = valeur("LogonType")?.trim();
+    (id == 4624 && matches!(type_, "3" | "10")).then(|| {
+        format!(
+            "{}|{type_}|{}|{}",
+            date_locale(date).unwrap_or_default(),
+            champ(valeur("IpAddress")),
+            champ(valeur("TargetUserName"))
+        )
+    })
+}
+
+/// Échecs et réussites dans l'ordre où ils ont eu lieu. À la même minute, l'échec passe avant : le journal ne date
+/// qu'à la minute ici, et une rafale finit souvent par la réussite.
+fn dans_l_ordre(echecs: &[Echec], reussites: &[Echec]) -> Vec<crate::machine::chasse::Tentative> {
+    let mut toutes: Vec<(NaiveDateTime, bool, &Echec)> = echecs
+        .iter()
+        .map(|e| (e.quand, false, e))
+        .chain(reussites.iter().map(|r| (r.quand, true, r)))
+        .collect();
+    toutes.sort_by_key(|(quand, reussie, _)| (*quand, *reussie));
+    toutes
+        .into_iter()
+        .filter_map(|(_, reussie, e)| {
+            Some(crate::machine::chasse::Tentative {
+                adresse: adresse(&e.adresse)?,
+                compte: e.compte.clone(),
+                reussie,
+            })
+        })
+        .collect()
+}
+
+/// Les échecs de connexion (4625) des 7 derniers jours, et les connexions réussies par le réseau ou le Bureau à
+/// distance (4624) depuis les adresses qui en ont raté au moins dix, dans l'ordre : pour la recherche d'un mot de passe
+/// deviné (`machine::chasse`). Les réussites ne se lisent que pour ces adresses-là : le journal en garde des milliers
+/// d'autres. `Err` : pourquoi le journal Security refuse (sans droits d'administrateur, souvent).
+pub(crate) fn tentatives_lues() -> Result<Vec<crate::machine::chasse::Tentative>, &'static str> {
+    let fin = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    let refus = || refus_de_securite(Some(super::processus::eleve()));
+    let Some(lignes) = lire(&LECTURES[0], fin) else {
+        return Err(refus());
+    };
+    let echecs = lire_echecs(&lignes.iter().map(String::as_str).collect::<Vec<_>>());
+    let mut reussites = Vec::new();
+    for adresse in adresses_insistantes(&echecs) {
+        let requete = format!(
+            "*[System[(EventID=4624) and TimeCreated[timediff(@SystemTime) <= {}]] and EventData[Data[@Name='IpAddress']='{adresse}']]",
+            u64::from(JOURS) * 86_400_000
+        );
+        let Some(lues) = parcourir_nommes("Security", &requete, 50, fin, ligne_reussite) else {
+            return Err(refus());
+        };
+        reussites.extend(lues);
+    }
+    let reussites = lire_echecs(&reussites.iter().map(String::as_str).collect::<Vec<_>>());
+    Ok(dans_l_ordre(&echecs, &reussites))
+}
 
 #[cfg(test)]
 mod tests {
@@ -861,6 +966,65 @@ mod tests {
         let texte = lire_journaux();
         assert!(texte.starts_with("ADM|"), "{texte}");
         let _ = juger_evenements(Some(&texte));
+        // Lu, ou refusé avec sa raison (Wine, sans droits d'administrateur).
+        if let Err(raison) = tentatives_lues() {
+            assert_ne!(raison, "");
+        }
+    }
+
+    /// Dix échecs (4625) depuis une adresse, puis une connexion réussie (4624, Bureau à distance) depuis la même : un
+    /// mot de passe deviné. Une session ouverte au clavier ne vient d'aucune adresse ; la machine elle-même, une
+    /// adresse qui n'en est pas une ou qui sortirait de la requête XPath ne sont pas lues.
+    #[test]
+    fn adresses_du_journal() {
+        let ip = |t: &str| t.parse::<std::net::IpAddr>().ok();
+        assert_eq!(adresse("192.0.2.5"), ip("192.0.2.5"));
+        assert_eq!(adresse(" ::ffff:192.0.2.5 "), ip("192.0.2.5"));
+        assert_eq!(adresse("fe80::1%12"), ip("fe80::1"));
+        assert_eq!(adresse("-"), None);
+        assert_eq!(adresse(""), None);
+    }
+
+    #[test]
+    fn mot_de_passe_devine_sous_windows() {
+        use crate::machine::chasse::{Intrusion, SEUIL_ECHECS, intrusions};
+        let mut lignes = rafale(SEUIL_ECHECS, "10", "203.0.113.7");
+        lignes.extend(rafale(25, "3", "127.0.0.1"));
+        lignes.extend(rafale(30, "3", "203.0.113.7' or '1'='1"));
+        lignes.extend(rafale(SEUIL_ECHECS - 1, "3", "::ffff:192.0.2.9"));
+        let echecs = lire_echecs(&lignes.iter().map(String::as_str).collect::<Vec<_>>());
+        assert_eq!(adresses_insistantes(&echecs), ["203.0.113.7"]);
+        let champs = |type_: &str| {
+            [
+                ("TargetUserName", "alice"),
+                ("LogonType", type_),
+                ("IpAddress", "203.0.113.7"),
+            ]
+            .map(|(n, v)| (n.to_string(), v.to_string()))
+        };
+        assert_eq!(ligne_reussite(4624, "pas une date", &champs("2")), None);
+        assert_eq!(ligne_reussite(4625, "pas une date", &champs("10")), None);
+        // Le dernier échec est à 10:09 ; la réussite à 10:09, puis une autre à 10:30.
+        let reussites = [
+            "2026-10-18 10:09|10|203.0.113.7|alice",
+            "2026-10-18 10:30|10|203.0.113.7|alice",
+        ];
+        assert!(
+            ligne_reussite(4624, "2026-10-18T14:05:09Z", &champs("10"))
+                .is_some_and(|l| l.ends_with("|10|203.0.113.7|alice"))
+        );
+        let t = dans_l_ordre(&echecs, &lire_echecs(&reussites));
+        assert_eq!(
+            intrusions(&t),
+            [Intrusion {
+                adresse: "203.0.113.7".parse().unwrap(),
+                compte: "alice".into(),
+                echecs: SEUIL_ECHECS
+            }]
+        );
+        // Une réussite avant la rafale ne dit rien.
+        let t = dans_l_ordre(&echecs, &lire_echecs(&["2026-10-18 09:59|10|203.0.113.7|alice"]));
+        assert_eq!(intrusions(&t), Vec::<Intrusion>::new());
     }
 
     #[test]

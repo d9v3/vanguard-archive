@@ -102,16 +102,9 @@ pub(super) fn commande_suspecte(commande: &str, lancement: bool) -> Option<&'sta
             "netcat giving a shell (reverse shell)"
         ));
     }
-    if (commande.contains("curl") || commande.contains("wget"))
-        && commande.split('|').skip(1).any(|suite| {
-            let prog = suite.split_whitespace().next().unwrap_or("");
-            ["sh", "bash", "zsh", "dash", "python", "python3", "perl"].contains(&prog.rsplit('/').next().unwrap_or(""))
-        })
-    {
-        return Some(tr!(
-            "télécharge un script et l'exécute aussitôt",
-            "downloads a script and runs it right away"
-        ));
+    // Téléchargé ou décodé puis passé à un interpréteur : le même jugement que pour les programmes en marche.
+    if let Some(motif) = crate::machine::chasse::passe_a_un_shell(commande) {
+        return Some(motif.raison);
     }
     if commande.contains("base64 -d") || commande.contains("base64 --decode") {
         return Some(tr!("commande cachée en base64", "command hidden in base64"));

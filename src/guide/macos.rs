@@ -404,6 +404,11 @@ pub const PROGRAMMES: &[Programme] = &[
                 "Restarts the Finder when it is frozen.",
             ),
             changer("killall Dock", "Relance le Dock.", "Restarts the Dock."),
+            voir(
+                "ps -axww -o pid,args",
+                "Chaque programme avec sa ligne de commande : curl passé à sh, base64 -D, lancé de /tmp.",
+                "Each program with its command line: curl piped to sh, base64 -D, started from /tmp.",
+            ),
         ],
     },
     Programme {

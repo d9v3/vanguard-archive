@@ -366,6 +366,11 @@ pub const PROGRAMMES: &[Programme] = &[
                 "Force un programme figé à se fermer.",
                 "Forces a frozen program to close.",
             ),
+            voir(
+                "Get-CimInstance Win32_Process | Select-Object ProcessId,Name,CommandLine",
+                "Chaque programme avec sa ligne de commande : PowerShell caché (-enc), script téléchargé (DownloadString).",
+                "Each program with its command line: hidden PowerShell (-enc), downloaded script (DownloadString).",
+            ),
         ],
     },
     Programme {
@@ -525,6 +530,12 @@ pub const PROGRAMMES: &[Programme] = &[
                 "Event Viewer, in a window.",
             )
             .sauf(Obstacle::Fenetre),
+            voir(
+                "Get-WinEvent -FilterHashtable @{LogName='Security';Id=4625} -MaxEvents 9",
+                "Les derniers mots de passe ratés (administrateur) : une rafale depuis une même adresse, c'est quelqu'un qui essaie.",
+                "The latest failed passwords (administrator): a burst from one address is someone trying.",
+            )
+            .sauf(Obstacle::Administrateur),
         ],
     },
     Programme {
