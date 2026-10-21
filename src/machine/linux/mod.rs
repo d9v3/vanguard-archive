@@ -18,12 +18,14 @@ mod docker;
 mod durcissement;
 pub(crate) mod ecoute;
 pub(crate) mod gvdb;
+pub(crate) mod journal_systemd;
 mod maj;
 pub(crate) mod natif;
 mod persistance;
 mod plateforme;
 mod privileges;
 mod regles;
+pub(crate) mod zstd;
 
 use docker::*;
 use durcissement::*;
@@ -852,7 +854,11 @@ fn journal_sshd() -> Option<Result<String, Constat>> {
     if !systemd() || !sshd_actif() {
         return None;
     }
-    // « sshd-session » : depuis OpenSSH 9.8, c'est lui qui écrit les échecs de connexion.
+    // « sshd-session » : depuis OpenSSH 9.8, c'est lui qui écrit les échecs de connexion. Les fichiers du journal
+    // d'abord ; journalctl en secours, quand ils ne se lisent pas (droits, xz, format plus récent).
+    if let Some(messages) = journal_systemd::messages_de(&["sshd", "sshd-session"], 24 * 3600) {
+        return Some(Ok(comme_journalctl_cat(&messages)));
+    }
     let r = crate::commande::lancer(
         Command::new("journalctl").args([
             "_COMM=sshd",
@@ -885,6 +891,11 @@ fn journal_sshd() -> Option<Result<String, Constat>> {
         )));
     }
     Some(Ok(r.sortie))
+}
+
+/// Les messages comme les écrit `journalctl -o cat` : chacun suivi d'un saut de ligne.
+fn comme_journalctl_cat(messages: &[String]) -> String {
+    messages.iter().flat_map(|m| [m.as_str(), "\n"]).collect()
 }
 
 /// Quelqu'un essaie-t-il de deviner un mot de passe SSH ? Tentatives ratées des dernières 24 h, dans le journal.
@@ -2342,6 +2353,10 @@ pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser
 Accepted publickey for alice from 10.0.0.12 port 50000 ssh2
 Failed password for alice from 10.0.0.12 port 50001 ssh2";
         let (n, adresses) = echecs_ssh(journal);
+        // Lus dans les fichiers du journal, un message par entrée : la même chose que la sortie de journalctl.
+        let messages: Vec<String> = journal.lines().map(str::to_string).collect();
+        assert_eq!(comme_journalctl_cat(&messages), format!("{journal}\n"));
+        assert_eq!(echecs_ssh(&comme_journalctl_cat(&messages)), (n, adresses.clone()));
         assert_eq!(n, 4);
         assert_eq!(adresses.len(), 4);
         assert_eq!(adresses.iter().filter(|ip| d_internet(ip)).count(), 3);

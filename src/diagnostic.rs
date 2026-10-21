@@ -147,6 +147,25 @@ mod systeme {
         })
     }
 
+    /// Le programme de chaque erreur du démarrage en cours : lu dans les fichiers du journal, journalctl en secours
+    /// (format ou droits que la lecture native ne prend pas). `None` : le journal du système ne se lit pas.
+    fn sources_des_erreurs() -> Option<Vec<String>> {
+        if let Some(entrees) = crate::machine::linux::journal_systemd::erreurs_du_demarrage() {
+            return Some(entrees.iter().filter_map(source_entree).collect());
+        }
+        let j = journal_systeme_lisible()
+            .then(|| sortie("journalctl", &["-b", "-p", "err", "-q", "--no-pager", "-o", "short"]))
+            .flatten()?;
+        Some(j.lines().filter_map(source_journal).collect())
+    }
+
+    /// Le nom qu'affiche journalctl pour une entrée : celui que le programme s'est donné (SYSLOG_IDENTIFIER), sinon
+    /// celui du processus ; lu prêt à montrer, comme `source_journal`.
+    pub(super) fn source_entree(e: &crate::machine::linux::journal_systemd::Entree) -> Option<String> {
+        let nom = e.champ("SYSLOG_IDENTIFIER").or_else(|| e.champ("_COMM"))?;
+        Some(affichable(nom.trim())).filter(|s| !s.is_empty())
+    }
+
     /// Source d'une ligne du journal (« Oct 17 15:29:32 portable NetworkManager[1334]: … » → « NetworkManager »). Une
     /// ligne en retrait continue l'entrée d'avant (la pile d'un programme planté) : elle n'en est pas une autre. Tout
     /// programme choisit le nom sous lequel il écrit au journal : lu prêt à montrer.
@@ -432,12 +451,8 @@ mod systeme {
         }
 
         let mut problemes: Vec<Ligne> = Vec::new();
-        let journal = journal_systeme_lisible()
-            .then(|| sortie("journalctl", &["-b", "-p", "err", "-q", "--no-pager", "-o", "short"]))
-            .flatten();
-        match journal {
-            Some(j) => {
-                let sources: Vec<String> = j.lines().filter_map(source_journal).collect();
+        match sources_des_erreurs() {
+            Some(sources) => {
                 if sources.is_empty() {
                     problemes.push(ligne(
                         tr!("Erreurs du journal", "Journal errors"),
@@ -1108,6 +1123,22 @@ mod tests {
         let coredumpctl = "TIME                            PID  UID  GID SIG     COREFILE EXE\n\
                            Sun 2026-09-27 11:30:12 UTC  513823 1000 1000 SIGSEGV missing  /tmp/x\x1b]52;c;eA==\x07\u{202e}\n";
         assert_eq!(systeme::programmes_coredumpctl(coredumpctl), ["x�]52;c;eA==��"]);
+        // Lu dans les fichiers du journal : le nom choisi par le programme d'abord, celui du processus sinon.
+        let entree = |champs: &[(&str, &str)]| crate::machine::linux::journal_systemd::Entree {
+            quand: 0,
+            champs: champs
+                .iter()
+                .map(|(n, v)| ((*n).to_string(), (*v).to_string()))
+                .collect(),
+        };
+        let piege = entree(&[("SYSLOG_IDENTIFIER", "\x1b]52;c;eA==\x07x"), ("_COMM", "kworker")]);
+        assert_eq!(systeme::source_entree(&piege).as_deref(), Some("�]52;c;eA==�x"));
+        assert_eq!(
+            systeme::source_entree(&entree(&[("_COMM", "pipewire")])).as_deref(),
+            Some("pipewire")
+        );
+        assert_eq!(systeme::source_entree(&entree(&[("_COMM", "  ")])), None);
+        assert_eq!(systeme::source_entree(&entree(&[])), None);
         let carte = crate::fiche::CartePci {
             fabricant: "Faux\x1b[2K".into(),
             puce: "Carte\u{2066}".into(),

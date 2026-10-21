@@ -983,8 +983,8 @@ fn rpmvercmp(a: &str, b: &str) -> std::cmp::Ordering {
 
 /// Les paquets installés qu'aucun dépôt de pacman.conf ne fournit, ce que liste « pacman -Qmq » : les noms de la
 /// base locale absents de toutes les bases sync/*.db. La commande ne reste qu'en secours, quand une base ne se lit
-/// pas en Rust (compressée en zstd ou en xz, ce que nos dépendances ne savent pas ouvrir) : compter un paquet comme
-/// étranger parce que sa base est illisible ferait interroger l'AUR pour un paquet qui n'y est pas.
+/// pas en Rust (abîmée, ou compressée en xz, que rien ici ne sait ouvrir) : compter un paquet comme étranger parce que
+/// sa base est illisible ferait interroger l'AUR pour un paquet qui n'y est pas.
 fn paquets_etrangers() -> Option<Vec<String>> {
     static ETRANGERS: std::sync::OnceLock<Option<Vec<String>>> = std::sync::OnceLock::new();
     ETRANGERS
@@ -1042,11 +1042,15 @@ fn depots_configures(conf: &str) -> Vec<String> {
         .collect()
 }
 
-/// Les noms des paquets d'une base sync (une archive tar, en gzip ou sans compression), lus dans le %NAME% de
-/// chaque « desc » comme pour la base locale. `None` pour un autre format (zstd, xz) ou une archive abîmée.
+/// Les noms des paquets d'une base sync (une archive tar, en gzip, en zstd ou sans compression), lus dans le %NAME%
+/// de chaque « desc » comme pour la base locale. `None` pour un autre format (xz) ou une archive abîmée.
 fn noms_base_sync(octets: &[u8]) -> Option<Vec<String>> {
     let tar = if octets.starts_with(&[0x1f, 0x8b]) {
         degzip(octets)?
+    } else if octets.starts_with(&super::zstd::SIGNATURE) {
+        // repo-add écrit en zstd quand on le lui demande (omarchy.db) ; la base d'extra fait 10 Mo décompressée, la
+        // borne de degzip vaut ici aussi.
+        super::zstd::decompresser(octets, 256 << 20)?
     } else if octets.get(257..262) == Some(b"ustar") {
         octets.to_vec()
     } else {
@@ -1233,13 +1237,20 @@ mod tests {
         let mut gz = vec![0x1f, 0x8b, 8, 0, 0, 0, 0, 0, 0, 3];
         gz.extend(miniz_oxide::deflate::compress_to_vec(&tar, 6));
         gz.extend([0u8; 8]);
-        assert_eq!(noms_base_sync(&gz), Some(attendu));
+        assert_eq!(noms_base_sync(&gz), Some(attendu.clone()));
+        // Une trame zstd à la main (un seul bloc en clair), comme repo-add en écrit avec --zstd.
+        let mut zst = vec![0x28, 0xb5, 0x2f, 0xfd, 0, 0x50];
+        zst.extend(&(1 | (u32::try_from(tar.len()).unwrap() << 3)).to_le_bytes()[..3]);
+        zst.extend(&tar);
+        assert_eq!(noms_base_sync(&zst), Some(attendu));
     }
 
     #[test]
     fn base_sync_illisible_dit_qu_on_ne_sait_pas() {
-        // zstd (omarchy.db) : pas de décodeur, la commande prendra le relais.
+        // zstd abîmé (omarchy.db coupée) : la commande prendra le relais.
         assert_eq!(noms_base_sync(&[0x28, 0xb5, 0x2f, 0xfd, 4, 0x58]), None);
+        // xz : aucun décodeur ici.
+        assert_eq!(noms_base_sync(&[0xfd, b'7', b'z', b'X', b'Z', 0]), None);
         // Archive coupée au milieu d'un contenu.
         let tar = base_inventee();
         assert_eq!(noms_base_sync(&tar[..512 * 3 + 10]), None);
@@ -1293,28 +1304,32 @@ mod tests {
         );
     }
 
-    /// Sur cet ordinateur, la base sync lue en Rust donne les mêmes noms que « pacman -Slq », quand les deux sont là.
+    /// Sur cet ordinateur, chaque base sync lue en Rust (gzip ou zstd) donne les mêmes noms que « pacman -Slq », quand
+    /// les deux sont là.
     #[test]
     fn base_sync_comme_pacman_sl() {
-        let Ok(octets) = std::fs::read("/var/lib/pacman/sync/core.db") else {
+        let Ok(conf) = std::fs::read_to_string("/etc/pacman.conf") else {
             return;
         };
-        let Some(mut noms) = noms_base_sync(&octets) else {
-            return;
-        };
-        let Some(r) = crate::commande::lancer_en_anglais(Command::new("pacman").args(["-Slq", "core"]), 30)
-            .filter(|r| r.code == Some(0))
-        else {
-            return;
-        };
-        let mut attendu: Vec<&str> = r.sortie.lines().collect();
-        attendu.sort_unstable();
-        noms.sort();
-        assert_eq!(noms, attendu);
+        for depot in depots_configures(&conf) {
+            let Ok(octets) = std::fs::read(format!("/var/lib/pacman/sync/{depot}.db")) else {
+                continue;
+            };
+            let Some(r) = crate::commande::lancer_en_anglais(Command::new("pacman").args(["-Slq", &depot]), 30)
+                .filter(|r| r.code == Some(0))
+            else {
+                continue;
+            };
+            let mut attendu: Vec<&str> = r.sortie.lines().collect();
+            attendu.sort_unstable();
+            let mut noms = noms_base_sync(&octets).unwrap_or_else(|| panic!("{depot}.db illisible"));
+            noms.sort();
+            assert_eq!(noms, attendu, "{depot}");
+        }
     }
 
     /// Sur cet ordinateur, les paquets étrangers lus en Rust sont ceux de « pacman -Qmq », quand la lecture native
-    /// est possible (aucune base en zstd) et que pacman est là.
+    /// est possible (aucune base en xz) et que pacman est là.
     #[test]
     fn etrangers_comme_pacman_qm() {
         let Some(natifs) = etrangers_lus() else {
