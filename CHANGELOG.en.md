@@ -7,6 +7,19 @@ a day, gathering the day's work; October 21 had two, 0.82 in the morning and 0.8
 delivered just before it. Only the latest version has its download page; every version keeps its tag in the repository
 (`git checkout v0.62.0`, for example), to be rebuilt if needed.
 
+## October 22, 2026: version 0.84.1
+
+- **AI servers open to the network, now seen on Macs too.** The rule that spots a local AI server (Ollama, LM Studio,
+  llama.cpp…) reachable from the network now reads the Mac's listening ports; until now it was always reported as not
+  checked on macOS. Programs are named in full: a name cut at nine characters was not recognized, and an open server
+  would have passed as safe. Threat blocking benefits too.
+- **Forced SSH login, on Macs.** With no Remote Login listening, there is nothing to read and Vanguard says so, instead
+  of marking the rule not checked at every check-up; with it, the rule stays not checked (macOS's unified log is not
+  read), never safe.
+- **Test benches without an abuse.ch key.** On GitHub's Mac, on Linux and in the Windows VM, the YARA scan passes when
+  Vanguard reports the MalwareBazaar fingerprints as not checked for lack of a key, and the exact-fingerprint match is
+  tried on a copy laid down for the test, then removed: nothing depends any more on the lists closed on October 21.
+
 ## October 21, 2026, evening: version 0.84
 
 - **Threat blocking, in one click.** Each threat found offers "Block": the action is shown, carried out after your

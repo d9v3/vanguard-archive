@@ -7,6 +7,19 @@ une seule publication par jour, qui regroupe le travail de la journée ; le 21 o
 la 0.84 au soir, qui reprend la 0.83 livrée juste avant elle. Seule la dernière version a sa page de téléchargement ;
 chaque version garde son étiquette dans le dépôt (`git checkout v0.62.0`, par exemple), pour être recompilée au besoin.
 
+## 22 octobre 2026 : version 0.84.1
+
+- **Serveurs d'IA ouverts au réseau, vus aussi sur Mac.** La règle qui repère un serveur d'IA local (Ollama, LM Studio,
+  llama.cpp…) joignable depuis le réseau lit maintenant les ports en écoute du Mac ; elle était jusqu'ici toujours dite
+  non vérifiée sous macOS. Les programmes sont nommés en entier : un nom coupé à neuf caractères ne se reconnaissait
+  pas, et un serveur ouvert serait passé pour sain. Le blocage des menaces en profite.
+- **Connexion forcée par SSH, sur Mac.** Sans Session à distance en écoute, il n'y a rien à lire et Vanguard le dit,
+  au lieu de marquer la règle non vérifiée à chaque bilan ; avec elle, la règle reste non vérifiée (le journal unifié
+  de macOS n'est pas lu), jamais saine.
+- **Bancs d'essai sans clé abuse.ch.** Sur le Mac de GitHub, sous Linux et dans la VM Windows, l'analyse YARA passe
+  quand Vanguard dit les empreintes de MalwareBazaar non vérifiées faute de clé, et la reconnaissance par empreinte
+  exacte s'essaie sur une copie posée pour l'essai, puis retirée : plus rien ne dépend des listes fermées le 21 octobre.
+
 ## 21 octobre 2026, au soir : version 0.84
 
 - **Blocage des menaces, en un clic.** Chaque menace trouvée propose « Bloquer » : le geste est montré, fait après ton
