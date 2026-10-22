@@ -17,9 +17,9 @@ delivered just before it. Only the latest version has its download page; every v
   the current account's programs are named, and "no AI server" says so; if lsof does not answer, the rule stays not
   checked. Threat blocking benefits too.
 - **Forced SSH login, on Macs.** With no sshd, neither listening on port 22 or on the ssh port of /etc/services, nor
-  running (a Homebrew sshd on another port), there is nothing to read and Vanguard says so, instead of marking the
-  rule not checked at every check-up; with one, the rule stays not checked (macOS's unified log is not read), never
-  safe.
+  running (a Homebrew sshd on another port), nor started by a launchd plist, there is nothing to read and Vanguard
+  says so, instead of marking the rule not checked at every check-up; with one, the rule stays not checked (macOS's
+  unified log is not read), never safe.
 - **Test benches without an abuse.ch key.** On GitHub's Mac, on Linux and in the Windows VM, the YARA scan passes when
   Vanguard reports the MalwareBazaar fingerprints as not checked for lack of a key, and the exact-fingerprint match is
   tried on a copy laid down for the test, then removed: nothing depends any more on the lists closed on October 21.
