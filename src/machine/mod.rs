@@ -799,24 +799,36 @@ fn lancer_chacune(correctifs: &[Vec<String>]) -> (Vec<bool>, Vec<Vec<String>>) {
     }
 }
 
-/// Ports en écoute de `lsof -nP -iTCP -sTCP:LISTEN` → nom du programme. « COMMAND PID USER FD TYPE DEVICE SIZE/OFF
-/// NODE NAME » … « llama-server 512 alice 9u IPv4 … TCP *:8080 (LISTEN) ».
+/// Prises en écoute de `lsof -nP -iTCP -sTCP:LISTEN`, chacune avec son adresse (crochets d'IPv6 ôtés), son port et
+/// le nom de son programme. « COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME » … « llama-server 512 alice 9u
+/// IPv4 … TCP *:8080 (LISTEN) » → (« * », 8080, « llama-server »). Deux programmes peuvent tenir le même port sur
+/// deux adresses (127.0.0.1:8080 et *:8080).
 #[cfg(any(target_os = "macos", test))]
-fn lire_lsof(sortie: &str) -> std::collections::HashMap<u16, String> {
-    let mut map = std::collections::HashMap::new();
+pub(crate) fn lire_lsof_prises(sortie: &str) -> Vec<(String, u16, String)> {
+    let mut prises = Vec::new();
     for l in sortie.lines().skip(1) {
         let c: Vec<&str> = l.split_whitespace().collect();
-        let port = c
-            .iter()
-            .rev()
-            .find_map(|m| m.rsplit_once(':'))
-            .and_then(|(_, p)| p.parse::<u16>().ok());
-        if let (Some(port), Some(nom)) = (port, c.first()) {
+        let prise = c.iter().rev().find_map(|m| {
+            let (adresse, port) = m.rsplit_once(':')?;
+            Some((adresse.trim_matches(['[', ']']).to_string(), port.parse::<u16>().ok()?))
+        });
+        if let (Some((adresse, port)), Some(nom)) = (prise, c.first()) {
             // lsof échappe les espaces des noms : « Google\x20Chrome ».
-            map.insert(port, affichable(&nom.replace("\\x20", " ")));
+            prises.push((adresse, port, affichable(&nom.replace("\\x20", " "))));
         }
     }
-    map
+    prises
+}
+
+/// macOS : les prises en écoute nommées par lsof, sans droits admin (les programmes du compte seulement). `None` :
+/// lsof absent ou en échec. Sans aucune prise à montrer, lsof répond 1 sans rien écrire : une liste vide, pas un échec.
+#[cfg(target_os = "macos")]
+pub(crate) fn prises_lsof() -> Option<Vec<(String, u16, String)>> {
+    let r = crate::commande::lancer(
+        Command::new("lsof").args(["+c", "0", "-nP", "-iTCP", "-sTCP:LISTEN"]),
+        30,
+    )?;
+    (r.code == Some(0) || (r.code == Some(1) && r.sortie.trim().is_empty())).then(|| lire_lsof_prises(&r.sortie))
 }
 
 /// Programme qui écoute sur chaque port TCP de cette machine (port → nom du programme, que chaque programme choisit :
@@ -838,9 +850,12 @@ pub fn programmes_en_ecoute() -> std::collections::HashMap<u16, String> {
     // Sans droits admin, lsof ne montre que les programmes de l'utilisateur. « +c 0 » : le nom entier, sans quoi lsof
     // le coupe à 9 caractères (« llama-ser ») et un serveur d'IA ne se reconnaît plus.
     #[cfg(target_os = "macos")]
-    map.extend(lire_lsof(
-        &sortie("lsof", &["+c", "0", "-nP", "-iTCP", "-sTCP:LISTEN"]).unwrap_or_default(),
-    ));
+    map.extend(
+        prises_lsof()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(_, port, nom)| (port, nom)),
+    );
     // netstat et tasklist, sans PowerShell ; PowerShell seulement s'ils ne répondent pas.
     #[cfg(windows)]
     let paires = windows::ports_tcp_et_noms().unwrap_or_else(|| {
@@ -1004,13 +1019,34 @@ mod tests {
 
     #[test]
     fn noms_entiers_de_lsof() {
-        let l = lire_lsof(
+        let l = lire_lsof_prises(
             "COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME\n\
              llama-server 512 alice 9u IPv4 0x1 0t0 TCP *:8080 (LISTEN)\n\
              LM\\x20Studio 600 alice 12u IPv6 0x2 0t0 TCP [::1]:1234 (LISTEN)\n",
         );
-        assert_eq!(l.get(&8080).map(String::as_str), Some("llama-server"));
-        assert_eq!(l.get(&1234).map(String::as_str), Some("LM Studio"));
+        let nom = |port: u16| l.iter().find(|(_, p, _)| *p == port).map(|(_, _, n)| n.as_str());
+        assert_eq!(nom(8080), Some("llama-server"));
+        assert_eq!(nom(1234), Some("LM Studio"));
+    }
+
+    /// Le même port sur deux adresses : chaque prise garde son programme ; l'IPv6 perd ses crochets.
+    #[test]
+    fn prises_de_lsof_par_adresse() {
+        let p = lire_lsof_prises(
+            "COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME\n\
+             nginx 300 alice 6u IPv4 0x1 0t0 TCP 127.0.0.1:8080 (LISTEN)\n\
+             llama-server 512 alice 9u IPv4 0x2 0t0 TCP 192.168.1.20:8080 (LISTEN)\n\
+             LM\\x20Studio 600 alice 12u IPv6 0x3 0t0 TCP [::1]:1234 (LISTEN)\n",
+        );
+        let vues: Vec<(&str, u16, &str)> = p.iter().map(|(a, port, n)| (a.as_str(), *port, n.as_str())).collect();
+        assert_eq!(
+            vues,
+            [
+                ("127.0.0.1", 8080, "nginx"),
+                ("192.168.1.20", 8080, "llama-server"),
+                ("::1", 1234, "LM Studio")
+            ]
+        );
     }
 
     #[test]
