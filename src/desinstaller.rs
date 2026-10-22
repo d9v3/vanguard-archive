@@ -1211,6 +1211,26 @@ struct Execution<'a> {
     cle: Option<&'a Path>,
     gardes: Vec<(PathBuf, String)>,
     a_faire: Vec<String>,
+    /// Posé quand le retrait du veilleur a échoué : les gardes, calculés avant, le supposaient retiré.
+    veilleur_reste: Option<VeilleurReste>,
+}
+
+/// Un veilleur qui n'a pas pu être retiré (encore en marche, encore activé, unité restée) : à chaque battement il
+/// réécrit son état, ce qui recrée le dossier de données, et il relancerait sa copie du programme en redémarrant.
+/// Les deux restent donc.
+struct VeilleurReste {
+    /// Le programme qu'il lance ; `None` s'il n'a pas été lu, et alors toute copie du programme reste.
+    lance: Option<PathBuf>,
+}
+
+/// Le résultat du retrait du veilleur, au bilan ; un échec est noté dans `x` pour les éléments qui suivent. Rien de
+/// vu en marche (non vérifié) laisse continuer : rien ne montre qu'il recréerait quoi que ce soit.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn issue_du_veilleur(e: &Element, issue: Result<(), Echec>, x: &mut Execution) -> Result<String, Echec> {
+    if let Err(Echec::Echoue(_)) = &issue {
+        x.veilleur_reste = Some(VeilleurReste { lance: e.lance.clone() });
+    }
+    issue.map(|()| e.texte.clone())
 }
 
 /// Pourquoi un élément n'est pas compté comme retiré.
@@ -1269,11 +1289,12 @@ fn retirer(e: &Element, x: &mut Execution) -> Result<String, Echec> {
         #[cfg(target_os = "linux")]
         Retrait::Veilleur(p) => {
             use crate::machine::linux::veilleur::{Retire, retirer_sans_question};
-            match retirer_sans_question(p, false) {
-                Retire::Fait => Ok(e.texte.clone()),
+            let issue = match retirer_sans_question(p, false) {
+                Retire::Fait => Ok(()),
                 Retire::Echoue(raison) => Err(Echec::Echoue(raison)),
                 Retire::NonVerifie(raison) => Err(Echec::NonVerifie(raison)),
-            }
+            };
+            issue_du_veilleur(e, issue, x)
         }
         #[cfg(not(target_os = "linux"))]
         Retrait::Veilleur(_) => Err(Echec::Echoue(
@@ -1324,8 +1345,15 @@ fn retirer(e: &Element, x: &mut Execution) -> Result<String, Echec> {
             })
         }
         Retrait::Fichiers(fichiers) => {
+            // La copie que lance un veilleur resté en marche reste : redémarré, il lancerait un programme effacé.
+            let (lancees, fichiers): (Vec<&PathBuf>, Vec<&PathBuf>) =
+                fichiers.iter().partition(|f| match &x.veilleur_reste {
+                    None => false,
+                    Some(VeilleurReste { lance: Some(l) }) => *f == l || meme(f, l),
+                    Some(VeilleurReste { lance: None }) => e.genre == Genre::Programme,
+                });
             let mut echecs = Vec::new();
-            for f in fichiers {
+            for f in &fichiers {
                 if let Err(x) = std::fs::remove_file(f)
                     && x.kind() != std::io::ErrorKind::NotFound
                 {
@@ -1345,12 +1373,28 @@ fn retirer(e: &Element, x: &mut Execution) -> Result<String, Echec> {
             if let Some(bin) = fichiers.first().and_then(|f| f.parent()) {
                 let _ = std::fs::remove_dir(bin);
             }
+            if let Some(l) = lancees.first() {
+                echecs.push(trf!(
+                    "copie gardée ({}) : le veilleur n'a pas pu être arrêté et la lance ; « vanguard veilleur off » puis réessaie",
+                    "copy kept ({}): the watcher could not be stopped and starts it; “vanguard watcher off” then try again",
+                    chemin_affichable(l)
+                ));
+            }
             if echecs.is_empty() {
                 Ok(e.texte.clone())
             } else {
                 Err(Echec::Echoue(echecs.join(", ")))
             }
         }
+        // Un veilleur resté en marche réécrit son état à chaque battement : le dossier reviendrait aussitôt effacé,
+        // et le bilan le dirait retiré. Rien n'y est touché.
+        Retrait::Dossier(_) if e.genre == Genre::Donnees && x.veilleur_reste.is_some() => Err(Echec::Echoue(
+            tr!(
+                "gardé : le veilleur n'a pas pu être arrêté et le recréerait ; « vanguard veilleur off » puis réessaie",
+                "kept: the watcher could not be stopped and would create it again; “vanguard watcher off” then try again"
+            )
+            .to_string(),
+        )),
         Retrait::Avant(r) => passage::retirer_reste(r)
             .map(|()| e.texte.clone())
             .map_err(Echec::Echoue),
@@ -1815,6 +1859,7 @@ pub fn commande(liste: bool) {
         cle: lieux.cle.as_deref(),
         gardes,
         a_faire: Vec::new(),
+        veilleur_reste: None,
     };
     let mut bilan = Bilan::default();
     let mut donnees_touchees = false;
@@ -1824,7 +1869,8 @@ pub fn commande(liste: bool) {
             bilan.garde.push(e.texte.clone());
             continue;
         }
-        donnees_touchees |= e.genre == Genre::Donnees;
+        // Gardé à cause du veilleur, le dossier n'est pas touché : de quoi défaire les changements y reste.
+        donnees_touchees |= e.genre == Genre::Donnees && x.veilleur_reste.is_none();
         match retirer(e, &mut x) {
             Ok(fait) => {
                 afficher_aligne(&format!("  {VERT}✔{RESET} "), &e.texte, 4, "");
@@ -2163,6 +2209,7 @@ mod tests {
             cle: l.cle.as_deref(),
             gardes,
             a_faire: Vec::new(),
+            veilleur_reste: None,
         };
         let fait = retirer(&rec.elements[i], &mut x).expect("effacé");
         // bin/vanguard reste : la surveillance gardée le lance ; le reste des données part.
@@ -2242,6 +2289,84 @@ mod tests {
         let _ = std::fs::remove_dir_all(r);
     }
 
+    /// Un veilleur qui n'a pas pu être arrêté : la copie du programme qu'il lance et le dossier de données qu'il
+    /// recréerait restent, et c'est dit en échec ; les autres copies partent. Seulement non vérifié, tout part.
+    /// (`retirer_sans_question` lance systemctl : son issue est donnée à la main.)
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn veilleur_reste_garde_programme_et_donnees() {
+        use crate::machine::linux::veilleur::unite_d_essai;
+        let r = racine("veilleur-reste");
+        let l = Lieux::jetable(&r);
+        let exe = l.donnees.join("bin").join(crate::mise_a_jour::NOM);
+        let autre = l.donnees.join("bin/vanguard-ancien");
+        let poser = || {
+            ecrire(&exe, "programme");
+            ecrire(&autre, "copie d'avant");
+            ecrire(&l.donnees.join("appareils.json"), "[]");
+            ecrire(
+                l.veilleur.as_ref().unwrap(),
+                unite_d_essai(&exe.display().to_string(), false),
+            );
+        };
+        poser();
+        let rec = recenser(&l);
+        assert_eq!(genres(&rec)[0], Genre::Veilleur, "{:?}", rec.elements);
+        let veilleur = &rec.elements[0];
+        let programme = Element {
+            retrait: Retrait::Fichiers(vec![exe.clone(), autre.clone()]),
+            ..rec
+                .elements
+                .iter()
+                .find(|e| e.genre == Genre::Programme)
+                .unwrap()
+                .clone()
+        };
+        let donnees = rec.elements.iter().find(|e| e.genre == Genre::Donnees).unwrap();
+        let execution = || Execution {
+            donnees: &l.donnees,
+            en_marche: None,
+            cle: None,
+            gardes: Vec::new(),
+            a_faire: Vec::new(),
+            veilleur_reste: None,
+        };
+        let echoue = || Err(Echec::Echoue("toujours en marche (processus 4242)".into()));
+        // Toujours en marche : la copie qu'il lance et le dossier restent, l'autre copie part.
+        let mut x = execution();
+        assert!(matches!(
+            issue_du_veilleur(veilleur, echoue(), &mut x),
+            Err(Echec::Echoue(_))
+        ));
+        let Err(Echec::Echoue(raison)) = retirer(&programme, &mut x) else {
+            panic!("copie lancée par le veilleur retirée");
+        };
+        assert!(
+            raison.contains("veilleur off") || raison.contains("watcher off"),
+            "{raison}"
+        );
+        assert!(exe.is_file() && !autre.exists());
+        assert!(matches!(retirer(donnees, &mut x), Err(Echec::Echoue(_))));
+        assert!(l.donnees.join("appareils.json").is_file());
+        // Ce qu'il lance n'a pas été lu : toute copie du programme reste.
+        poser();
+        let mut x = execution();
+        let sans_lance = Element {
+            lance: None,
+            ..veilleur.clone()
+        };
+        let _ = issue_du_veilleur(&sans_lance, echoue(), &mut x);
+        assert!(retirer(&programme, &mut x).is_err());
+        assert!(exe.is_file() && autre.is_file());
+        // Rien vu en marche, l'arrêt seulement non confirmé : rien ne le recréerait, tout part.
+        let mut x = execution();
+        let issue = issue_du_veilleur(veilleur, Err(Echec::NonVerifie("pas de réponse".into())), &mut x);
+        assert!(matches!(issue, Err(Echec::NonVerifie(_))) && x.veilleur_reste.is_none());
+        assert!(retirer(&programme, &mut x).is_ok() && !exe.exists());
+        assert!(retirer(donnees, &mut x).is_ok() && !l.donnees.exists());
+        let _ = std::fs::remove_dir_all(r);
+    }
+
     #[test]
     fn ancien_dossier_avec_une_quarantaine_jamais_efface() {
         let r = racine("avant-quarantaine");
@@ -2292,6 +2417,7 @@ mod tests {
             cle: None,
             gardes: Vec::new(),
             a_faire: Vec::new(),
+            veilleur_reste: None,
         };
         let fait = retirer(e, &mut x).unwrap();
         assert!(fait.contains("autre-disque"), "{fait}");

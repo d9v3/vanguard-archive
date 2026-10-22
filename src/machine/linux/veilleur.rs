@@ -1783,7 +1783,7 @@ pub(crate) enum Retire {
 /// n'a pas posée n'est jamais effacée ; elle est seulement arrêtée si `arreter_l_etrangere` (« off » l'a annoncé),
 /// sinon rien n'y est fait. Le retrait est constaté ensuite (unité relue, plus activée, service plus en marche),
 /// jamais supposé. La note du choix et l'état partent avec, sans quoi le bilan dirait le veilleur disparu sans avoir
-/// été coupé.
+/// été coupé, sauf si quelque chose reste (voir `oublier_le_choix`).
 pub(crate) fn retirer_sans_question(chemin: &std::path::Path, arreter_l_etrangere: bool) -> Retire {
     // Relue juste avant : une unité étrangère posée depuis ce qui a été montré n'est pas effacée.
     let presente = std::fs::symlink_metadata(chemin).is_ok();
@@ -1837,10 +1837,20 @@ pub(crate) fn retirer_sans_question(chemin: &std::path::Path, arreter_l_etranger
     } else {
         Retire::Fait
     };
-    let _ = std::fs::remove_file(fichier_voulu());
-    let _ = std::fs::remove_file(fichier_etat());
+    oublier_le_choix(&issue, &crate::reseau::dossier_local());
     crate::changements::noter(&[commandes], &[issue == Retire::Fait]);
     issue
+}
+
+/// Efface la note du choix et l'état du dossier `dossier`, seulement si rien ne reste. Un veilleur encore en marche
+/// ou activé, privé de sa note, serait dit « coupé, comme par défaut » au bilan : le retrait raté compterait comme
+/// fait. Gardés, le bilan dit l'écart (unité retirée mais voulue, service vivant). Le choix compte aussi pour la
+/// désinstallation, qui peut garder le dossier de données.
+fn oublier_le_choix(issue: &Retire, dossier: &std::path::Path) {
+    if !matches!(issue, Retire::Echoue(_)) {
+        let _ = std::fs::remove_file(dossier.join(VOULU));
+        let _ = std::fs::remove_file(dossier.join(ETAT));
+    }
 }
 
 // ───────────────────────────── Commande, menu, bilan ─────────────────────────────
@@ -2739,6 +2749,31 @@ mod tests {
             partis: 6,
             ..Etat::default()
         }
+    }
+
+    /// Un retrait raté garde la note du choix et l'état : le bilan dit alors l'écart, jamais « coupé ». Réussi ou
+    /// seulement non confirmé, ils partent. Dans un dossier à lui, pas celui des autres tests.
+    #[test]
+    fn retrait_rate_garde_le_choix() {
+        let d = crate::reseau::dossier_local().join("veilleur-oublier-le-choix");
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        let poser = || {
+            std::fs::write(d.join(VOULU), b"").unwrap();
+            std::fs::write(d.join(ETAT), b"{}").unwrap();
+        };
+        poser();
+        oublier_le_choix(&Retire::Echoue("toujours en marche (processus 4242)".into()), &d);
+        assert!(d.join(VOULU).is_file() && d.join(ETAT).is_file());
+        // La note gardée, l'unité retirée : le bilan le dit, au lieu de « coupé, comme par défaut ».
+        let ecart = juger_etat(d.join(VOULU).is_file(), Some(false), None, false, Some(true));
+        assert!(ecart.probleme.is_some(), "{}", ecart.message);
+        for issue in [Retire::Fait, Retire::NonVerifie("pas de réponse".into())] {
+            poser();
+            oublier_le_choix(&issue, &d);
+            assert!(!d.join(VOULU).exists() && !d.join(ETAT).exists(), "{issue:?}");
+        }
+        let _ = std::fs::remove_dir_all(d);
     }
 
     #[test]
