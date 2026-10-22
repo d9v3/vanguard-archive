@@ -78,6 +78,8 @@ Entrée ouvre celle en surbrillance, Échap efface. Au menu principal, elle trou
        Surveillance toutes les heures (appareil inconnu, problème sur cette machine, usurpation du routeur,
          empoisonneur de noms, programme arrivé dans Téléchargements)
        Tableau de bord de la surveillance : alertes jour par jour, nouveaux appareils (page locale)
+       Veilleur (Linux) : programmes lancés et connexions fermées vus sur le moment, coupé par défaut
+         (vanguard veilleur on)
        Test de connexion pour le jeu (ping, gigue, débit, bufferbloat), comparé aux mesures habituelles
        Adresse Internet sur liste noire ? (Spamhaus, SpamCop, DroneBL, PSBL, après accord)
        Wi-Fi encombré ? (réseaux voisins par canal, et le canal le plus libre à régler sur le routeur)

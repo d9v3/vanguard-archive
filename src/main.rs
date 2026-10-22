@@ -140,6 +140,16 @@ enum Commande {
         #[arg(long, visible_alias = "no-open")]
         sans_ouvrir: bool,
     },
+    /// Veilleur (Linux 6.6 et plus) : chaque programme lancé et chaque connexion fermée, vus sur le moment et jugés
+    /// comme au bilan ; il observe et n'arrête rien. Coupé par défaut. Sans argument : son état.
+    #[command(visible_alias = "watcher")]
+    Veilleur {
+        #[arg(value_parser = ["on", "off"])]
+        etat: Option<String>,
+        /// Le service lui-même, lancé par systemd.
+        #[arg(long, hide = true)]
+        servir: bool,
+    },
     /// Entretien du mois : une fois par mois, en silence, la note, les mises à jour en attente, la place à libérer et
     /// les problèmes nouveaux, en une notification ; rien n'est changé. Sans argument : ce qu'il dirait maintenant.
     #[command(visible_alias = "maintenance")]
@@ -999,6 +1009,7 @@ enum Action {
     Nommer,
     Surveillance,
     Tableau,
+    Veilleur,
     Connexion,
     ListesNoires,
     WifiCanaux,
@@ -1142,6 +1153,10 @@ const OUTILS: &[Outil] = &[
         precision: ["alertes, nouveaux appareils", "alerts, new devices"],
         mots: "tableau dashboard historique history alertes alerts nouveaux new appareils devices botnet \
                connexions suspectes suspicious connections" },
+    Outil { action: Action::Veilleur, groupe: Some(Groupe::Reseau), lettre: "",
+        titre: ["Veilleur : lancements et connexions", "Watcher: launches and connections"], precision: ["", ""],
+        mots: "veilleur watcher lancements launches processus processes connexions connections brèves brief \
+               connecteur connector temps réel live" },
     Outil { action: Action::Connexion, groupe: Some(Groupe::Reseau), lettre: "c",
         titre: ["Test de connexion pour le jeu", "Connection test for gaming"],
         precision: ["ping, gigue, débit, bufferbloat", "ping, jitter, speed, bufferbloat"],
@@ -1378,6 +1393,28 @@ fn precision_surveillance(active: bool, temps_reel_coupe: bool) -> &'static str 
     }
 }
 
+/// La précision de la ligne du veilleur, qui n'existe que sous Linux.
+fn precision_veilleur() -> &'static str {
+    #[cfg(target_os = "linux")]
+    return machine::linux::veilleur::precision();
+    #[cfg(not(target_os = "linux"))]
+    ""
+}
+
+/// Le veilleur : il lit deux flux du noyau Linux ; ailleurs, la commande le dit.
+fn veilleur(etat: Option<&str>, servir: bool) {
+    #[cfg(target_os = "linux")]
+    machine::linux::veilleur::commande(etat, servir);
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = (etat, servir);
+        trp!(
+            "Le veilleur n'existe que sous Linux : il lit deux flux du noyau Linux (programmes lancés, connexions fermées). Ici, la surveillance horaire prend une photo par heure : vanguard surveillance on.",
+            "The watcher exists only on Linux: it reads two Linux kernel streams (programs started, connections closed). Here, hourly monitoring takes one snapshot an hour: vanguard monitor on."
+        );
+    }
+}
+
 impl Action {
     fn outil(self) -> &'static Outil {
         &OUTILS[self as usize]
@@ -1393,6 +1430,7 @@ impl Action {
                 protection::temps_reel::coupure().is_some(),
             ),
             Action::Blocage => protection::blocage::etat_court(),
+            Action::Veilleur => precision_veilleur(),
             _ => texte(self.outil().precision),
         };
         (texte(self.outil().titre), precision)
@@ -1407,6 +1445,8 @@ impl Action {
             Action::OptimiserConfort => reglages_disponibles(optimiser::Categorie::Confort),
             // Lire l'état de Defender lance PowerShell : vérifié seulement à l'ouverture (`optimiser::protection`).
             Action::Protection => cfg!(windows),
+            // Deux flux du noyau Linux : ailleurs, la ligne ne serait que du bruit.
+            Action::Veilleur => cfg!(target_os = "linux"),
             _ => true,
         }
     }
@@ -1593,6 +1633,7 @@ async fn executer(s: &mut Session, action: Action) {
         }
         Action::Surveillance => reseau::surveillance::activer(!reseau::surveillance::active()),
         Action::Tableau => reseau::tableau::ouvrir(false),
+        Action::Veilleur => veilleur(None, false),
         Action::Connexion => reseau::connexion::tester().await,
         Action::ListesNoires => reseau::listes_noires::verifier(),
         Action::WifiCanaux => reseau::canaux::analyser(),
@@ -1668,6 +1709,9 @@ const AIDES_EN: &[(&str, &str)] = &[
     ("surveillance", "Turn hourly network monitoring on or off (notification for unknown devices)"),
     ("tableau", "Monitoring dashboard in the browser: its state, the alerts day by day, the new devices and the \
                  suspicious connections. Local page, nothing is sent"),
+    ("veilleur", "Watcher (Linux 6.6 and later): each program started and each connection closed, seen as they \
+                   happen and judged as in the check; it observes and stops nothing. Off by default. Without \
+                   argument: its state"),
     ("entretien", "Monthly check-up: once a month, silently, the grade, waiting updates, space to free and new \
                    problems, in one notification; nothing is changed. Without argument: what it would say now"),
     ("maj", "Updates: system, programs, drivers and firmware checked at once, then installed with your consent"),
@@ -1945,6 +1989,7 @@ async fn main() {
         Some(Commande::Antivirus { complet, dossier }) => protection::antivirus::analyser(portee(dossier, complet)),
         Some(Commande::Surveillance { etat }) => reseau::surveillance::activer(etat == "on"),
         Some(Commande::Tableau { sans_ouvrir }) => reseau::tableau::ouvrir(sans_ouvrir),
+        Some(Commande::Veilleur { etat, servir }) => veilleur(etat.as_deref(), servir),
         Some(Commande::Surveiller) => reseau::surveillance::surveiller().await,
         Some(Commande::Entretien { etat }) => match etat {
             Some(e) => entretien::activer(e == "on"),

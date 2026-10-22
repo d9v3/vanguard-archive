@@ -578,7 +578,7 @@ pub(crate) fn ce_qui_s_arrete(surveillance: bool, protection_active: bool) -> Ve
             tr!("déjà coupée", "already off")
         }
     };
-    vec![
+    let mut lignes = vec![
         trf!(
             "• La surveillance horaire ({}) : plus de scan du réseau ni d'audit de la machine, plus aucune notification (appareil nouveau, port ouvert, box, DNS, Wi-Fi, fichiers critiques, téléchargements, serveurs de botnet, extensions qui veillent), sauf celle qui redit la coupure, une fois par jour.",
             "• Hourly monitoring ({}): no more network scan or machine audit, no notification at all (new device, open port, router, DNS, Wi-Fi, critical files, downloads, botnet servers, extensions that watch), except the one that recalls the pause, once a day.",
@@ -593,8 +593,20 @@ pub(crate) fn ce_qui_s_arrete(surveillance: bool, protection_active: bool) -> Ve
                 tr!("pas activée", "not turned on")
             }
         ),
-        ce_qui_reste().to_string(),
-    ]
+    ];
+    // Le veilleur lit cette coupure toutes les minutes : il continue de tourner, mais ne note ni ne notifie plus rien.
+    #[cfg(target_os = "linux")]
+    if crate::machine::linux::veilleur::voulu() {
+        lignes.push(
+            tr!(
+                "• Le veilleur des lancements et des connexions (allumé) : il reste en marche, mais ne note ni ne notifie plus rien jusqu'à la reprise.",
+                "• The watcher of launches and connections (on): it keeps running, but notes and notifies nothing until it comes back."
+            )
+            .to_string(),
+        );
+    }
+    lignes.push(ce_qui_reste().to_string());
+    lignes
 }
 
 /// Ce que la coupure ne touche jamais.

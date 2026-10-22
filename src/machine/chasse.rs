@@ -1007,7 +1007,7 @@ pub(crate) fn en_marche() -> Option<(Vec<EnMarche>, HashSet<u32>)> {
 
 /// Un programme repéré, tel qu'il est montré : son nom (choisi par qui l'a lancé, rendu inoffensif), son numéro, la
 /// raison, et ce qu'on montre de lui.
-fn montrer(p: &EnMarche, s: &Soupcon) -> String {
+pub(crate) fn montrer(p: &EnMarche, s: &Soupcon) -> String {
     let efface = if s.efface {
         tr!(", effacé depuis", ", deleted since")
     } else {

@@ -25,6 +25,7 @@ mod persistance;
 mod plateforme;
 mod privileges;
 mod regles;
+pub(crate) mod veilleur;
 pub(crate) mod zstd;
 
 use docker::*;

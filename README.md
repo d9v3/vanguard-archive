@@ -176,6 +176,12 @@ la surveillance horaire le signale aussi.
   Son tableau de bord, une page locale ouverte dans le navigateur : son état, les alertes jour par jour (gardées
   même quand la notification de la nuit a disparu), les appareils apparus et les connexions vers des serveurs de
   botnets. Rien n'est envoyé.
+- Le veilleur (Linux 6.6 et plus, coupé par défaut, `vanguard veilleur on`) : entre deux passes de la surveillance,
+  chaque programme lancé, même de quelques millisecondes, et chaque connexion TCP ou UDP au moment où elle se ferme.
+  Les programmes sont jugés comme au bilan, les connexions contre les serveurs de commande de botnets déjà
+  téléchargés ; le grave va au tableau de bord et en notification. Sans root ni code chargé dans le noyau, il
+  n'arrête rien. Un programme parti avant d'être lu est compté tel quel, jamais jugé sain, et le programme d'une
+  connexion fermée n'est pas connu (le noyau ne le donne pas).
 
 #### Objets connectés
 
@@ -654,6 +660,7 @@ Chaque entrée du menu existe aussi en commande.
 | `vanguard maj` | mises à jour |
 | `vanguard reparer` | réparations et nettoyage |
 | `vanguard surveillance on\|off` | surveillance horaire |
+| `vanguard veilleur [on\|off]` | veilleur (Linux 6.6 et plus) : programmes lancés et connexions fermées, vus sur le moment ; coupé par défaut |
 | `vanguard tableau [--sans-ouvrir]` | tableau de bord de la surveillance : page locale ouverte dans le navigateur ; `--sans-ouvrir` l'écrit seulement |
 | `vanguard entretien [on\|off]` | entretien du mois ; sans argument : ce qu'il dirait maintenant |
 | `vanguard nommer <ip\|mac> <surnom>` | nommer un appareil |

@@ -7,6 +7,18 @@ une seule publication par jour, qui regroupe le travail de la journée ; le 21 o
 la 0.84 au soir, qui reprend la 0.83 livrée juste avant elle. Seule la dernière version a sa page de téléchargement ;
 chaque version garde son étiquette dans le dépôt (`git checkout v0.62.0`, par exemple), pour être recompilée au besoin.
 
+## Prochaine version
+
+- **Le veilleur (Linux).** Entre deux passes de la surveillance horaire, un programme ou une connexion de quelques
+  minutes passait inaperçu. Le veilleur, coupé par défaut et allumé seulement après avoir montré son unité
+  (`vanguard veilleur on`, ou menu Réseau et Internet), écoute deux flux que Linux 6.6 et plus ouvre aux comptes
+  ordinaires : chaque programme lancé, même de quelques millisecondes, et chaque connexion TCP ou UDP au moment où
+  elle se ferme. Les programmes sont jugés comme au bilan (outil offensif connu, commande qui télécharge ou cache ce
+  qu'elle lance, avec leur lignée : « npm → node → sh »), les connexions contre les serveurs de commande de botnets
+  déjà téléchargés ; le grave va au tableau de bord et en notification, à débit borné. Il n'arrête rien, sans root
+  ni code chargé dans le noyau. Un programme parti avant d'être lu est compté tel quel, jamais jugé sain ; le
+  programme d'une connexion fermée n'est pas connu. Le bilan dit s'il est coupé, allumé, ou allumé mais à l'arrêt.
+
 ## 22 octobre 2026 : version 0.84.1
 
 - **Serveurs d'IA ouverts au réseau, vus aussi sur Mac.** La règle qui repère un serveur d'IA local (Ollama, LM Studio,

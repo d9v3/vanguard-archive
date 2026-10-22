@@ -996,6 +996,93 @@ fn botnets() -> (Botnets, Vec<String>) {
     (botnets, absentes)
 }
 
+/// Les serveurs de commande connus, pour qui n'a que l'adresse et le port d'une connexion (le veilleur, à la fin d'une
+/// connexion brève : le noyau n'y donne pas le programme).
+#[cfg(target_os = "linux")]
+pub(crate) struct ServeursDeCommande(Botnets);
+
+#[cfg(target_os = "linux")]
+impl ServeursDeCommande {
+    /// Le serveur tel qu'il est montré (« 203.0.113.7:443 (Emotet, ThreatFox) »), s'il est sur une des listes.
+    pub(crate) fn serveur(&self, ip: IpAddr, port: u16) -> Option<String> {
+        self.0.serveur(&Connexion::vers(ip, port))
+    }
+
+    /// Des listes inventées, pour les tests du veilleur.
+    #[cfg(test)]
+    pub(crate) fn pour_essai(feodo: &[IpAddr], threatfox: &[(IpAddr, u16, &str)]) -> ServeursDeCommande {
+        ServeursDeCommande(Botnets {
+            feodo: feodo.iter().copied().collect(),
+            threatfox: threatfox
+                .iter()
+                .map(|&(ip, port, famille)| ((ip, port), famille.to_string()))
+                .collect(),
+            domaines: None,
+        })
+    }
+}
+
+/// Les listes déjà téléchargées par la surveillance ou le bilan, relues sans réseau : le veilleur tourne dans une
+/// unité qui n'a pas le droit d'ouvrir une prise Internet (RestrictAddressFamilies), et ces listes sont déjà
+/// rafraîchies par les autres. Leur âge est celui du fichier ; jugées comme à la passe (`verifiee`), et ce qui ne sert
+/// pas est dit, jamais compté comme sain.
+#[cfg(target_os = "linux")]
+pub(crate) fn serveurs_gardes() -> (ServeursDeCommande, Vec<String>) {
+    let garde = |sous_dossier: &str, nom: &str| {
+        let fichier = crate::reseau::dossier_local().join(sous_dossier).join(nom);
+        let age = std::fs::metadata(&fichier)
+            .and_then(|m| m.modified())
+            .ok()?
+            .elapsed()
+            .unwrap_or_default();
+        Some((std::fs::read(&fichier).ok()?, age))
+    };
+    let pas_encore = |nom: &str| {
+        trf!(
+            "liste de {nom} pas encore téléchargée : la surveillance ou le bilan la prennent",
+            "{nom} list not downloaded yet: the monitoring or the check fetches it"
+        )
+    };
+    let avec_cle = crate::protection::abuse_ch::cle().is_some();
+    let mut botnets = Botnets::default();
+    let mut absentes = Vec::new();
+    match garde("feodo", "botnets.txt") {
+        Some(copie) => match verifiee("Feodo Tracker", Ok(copie), en_texte(analyser_feodo)) {
+            Ok(liste) => botnets.feodo = liste,
+            Err(raison) => absentes.push(raison),
+        },
+        None => absentes.push(pas_encore("Feodo Tracker")),
+    }
+    if avec_cle {
+        match garde("threatfox", "export.zip") {
+            Some(copie) => match verifiee("ThreatFox", Ok(copie), analyser_export_threatfox) {
+                Ok((serveurs, domaines)) => {
+                    botnets.threatfox.extend(serveurs);
+                    botnets.domaines = Some(domaines);
+                }
+                Err(raison) => absentes.push(raison),
+            },
+            None => absentes.push(pas_encore("ThreatFox")),
+        }
+        let api = tr!("ThreatFox (7 jours)", "ThreatFox (7 days)");
+        match garde("threatfox", crate::protection::abuse_ch::FICHIER_API) {
+            Some(copie) => match verifiee(api, Ok(copie), en_texte(analyser_threatfox_api)) {
+                Ok(serveurs) => botnets.threatfox.extend(serveurs),
+                Err(raison) => absentes.push(raison),
+            },
+            None => absentes.push(pas_encore(api)),
+        }
+    } else {
+        // Sans clé, comme à la passe : la copie d'une ancienne clé ne sert pas, et c'est dit une fois.
+        absentes.push(trf!(
+            "liste de ThreatFox non vérifiée : {}",
+            "ThreatFox list not checked: {}",
+            crate::protection::abuse_ch::Echec::Manquante.raison()
+        ));
+    }
+    (ServeursDeCommande(botnets), absentes)
+}
+
 /// Les connexions d'une passe qui n'étaient pas déjà signalées à la passe d'avant (`avant` : une par ligne).
 fn nouvelles_alertes<'a>(avant: &str, actuelles: &'a BTreeSet<String>) -> Vec<&'a String> {
     let deja: BTreeSet<&str> = avant.lines().collect();

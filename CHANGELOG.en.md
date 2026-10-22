@@ -7,6 +7,18 @@ a day, gathering the day's work; October 21 had two, 0.82 in the morning and 0.8
 delivered just before it. Only the latest version has its download page; every version keeps its tag in the repository
 (`git checkout v0.62.0`, for example), to be rebuilt if needed.
 
+## Next version
+
+- **The watcher (Linux).** Between two hourly monitoring runs, a program or a connection lasting a few minutes went
+  unnoticed. The watcher, off by default and turned on only after its unit is shown (`vanguard watcher on`, or the
+  Network and Internet menu), listens to two streams that Linux 6.6 and later opens to ordinary accounts: each
+  program started, even one of a few milliseconds, and each TCP or UDP connection as it closes. Programs are judged
+  as in the check (known offensive tool, command that downloads or hides what it runs, with their lineage:
+  “npm → node → sh”), connections against the botnet command servers already downloaded; what is serious goes to
+  the dashboard and as a notification, at a bounded rate. It stops nothing, without root or code loaded into the
+  kernel. A program gone before it could be read is counted as such, never judged safe; the program of a closed
+  connection is not known. The check says whether it is off, on, or on but stopped.
+
 ## October 22, 2026: version 0.84.1
 
 - **AI servers open to the network, now seen on Macs too.** The rule that spots a local AI server (Ollama, LM Studio,
