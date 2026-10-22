@@ -236,31 +236,21 @@ pub fn constat() -> Option<crate::machine::Constat> {
     juger_tache(
         Planifie::Entretien,
         &lire_planifie(Planifie::Entretien),
-        std::path::Path::is_file,
+        crate::reseau::cle_usb().as_deref(),
+        std::path::Path::exists,
     )
 }
 
-/// Retire l'entretien sans rien demander (la désinstallation l'a déjà montré et fait accepter) ; rend la raison d'un
-/// échec.
-pub(crate) fn retirer() -> Result<(), String> {
-    let ok = desinstaller();
+/// Retire l'entretien sans rien demander (la désinstallation l'a déjà montré et fait accepter). `trouves` : ses
+/// fichiers, là où la désinstallation les a trouvés. Rend la raison d'un échec, jamais un succès supposé.
+pub(crate) fn retirer(trouves: &[std::path::PathBuf]) -> Result<(), String> {
+    let r = crate::reseau::surveillance::retirer_planifie(crate::reseau::surveillance::Planifie::Entretien, trouves);
     ETAT.store(0, Ordering::Relaxed);
-    if ok {
-        return Ok(());
-    }
-    Err(if cfg!(windows) {
-        tr!(
-            "PowerShell n'a pas pu retirer la tâche : « vanguard entretien off » pour réessayer",
-            "PowerShell could not remove the task: “vanguard maintenance off” to try again"
-        )
-        .to_string()
-    } else {
-        tr!(
-            "fichiers retirés, mais systemctl --user n'a pas répondu : la minuterie peut rester chargée jusqu'à la prochaine ouverture de session, où elle disparaît",
-            "files removed, but systemctl --user did not answer: the timer may stay loaded until the next sign-in, where it goes away"
-        )
-        .to_string()
-    })
+    r
+}
+
+fn desinstaller() -> Result<(), String> {
+    crate::reseau::surveillance::retirer_planifie(crate::reseau::surveillance::Planifie::Entretien, &[])
 }
 
 /// Reprise d'un entretien actif sous l'ancien nom (`passage`).
@@ -271,7 +261,8 @@ pub(crate) fn reprendre(exe: &str) -> bool {
 }
 
 pub fn activer(oui: bool) {
-    let reussi = if oui { installer(&executable()) } else { desinstaller() };
+    let retrait = if oui { Ok(()) } else { desinstaller() };
+    let reussi = if oui { installer(&executable()) } else { retrait.is_ok() };
     ETAT.store(0, Ordering::Relaxed);
     match (oui, reussi) {
         (true, true) => trp!(
@@ -282,7 +273,17 @@ pub fn activer(oui: bool) {
             "  ✖ Impossible d'activer l'entretien du mois.",
             "  ✖ Could not turn the monthly check-up on."
         ),
-        (false, _) => trp!("  Entretien du mois coupé.", "  Monthly check-up off."),
+        (false, true) => trp!("  Entretien du mois coupé.", "  Monthly check-up off."),
+        (false, false) => afficher_aligne(
+            "  ✖ ",
+            &trf!(
+                "Entretien du mois coupé, mais pas entièrement retiré : {}",
+                "Monthly check-up off, but not fully removed: {}",
+                retrait.err().unwrap_or_default()
+            ),
+            4,
+            "",
+        ),
     }
 }
 
@@ -317,14 +318,6 @@ fn installer(exe: &str) -> bool {
         && std::fs::write(dossier.join(format!("{NOM}.timer")), minuterie).is_ok()
         && reussit("systemctl", &["--user", "daemon-reload"])
         && reussit("systemctl", &["--user", "enable", "--now", &format!("{NOM}.timer")])
-}
-
-#[cfg(target_os = "linux")]
-fn desinstaller() -> bool {
-    reussit("systemctl", &["--user", "disable", "--now", &format!("{NOM}.timer")]);
-    let _ = std::fs::remove_file(dossier_systemd().join(format!("{NOM}.service")));
-    let _ = std::fs::remove_file(dossier_systemd().join(format!("{NOM}.timer")));
-    reussit("systemctl", &["--user", "daemon-reload"])
 }
 
 /// Agent launchd : le 1er du mois à midi (au réveil suivant si le Mac dormait).
@@ -364,15 +357,6 @@ fn installer(exe: &str) -> bool {
     reussit("launchctl", &["bootstrap", &domaine_launchd(), &chemin])
 }
 
-#[cfg(target_os = "macos")]
-fn desinstaller() -> bool {
-    let plist = plist_agent();
-    let chemin = plist.display().to_string();
-    let _ = reussit("launchctl", &["bootout", &domaine_launchd(), &chemin]);
-    let _ = std::fs::remove_file(&plist);
-    true
-}
-
 /// Tâche du Planificateur : toutes les quatre semaines, le samedi à midi, et dès que possible si l'ordinateur était
 /// éteint (New-ScheduledTaskTrigger ne sait pas faire « chaque mois »).
 #[cfg(any(windows, test))]
@@ -395,16 +379,6 @@ fn script_tache(exe: &str, nom: &str) -> String {
 #[cfg(windows)]
 fn installer(exe: &str) -> bool {
     crate::machine::windows::ps(&script_tache(exe, TACHE_WINDOWS)).is_some()
-}
-
-#[cfg(windows)]
-fn desinstaller() -> bool {
-    // Arrêté d'abord : un examen en cours n'écrit plus dans le dossier de données qu'une désinstallation efface.
-    crate::machine::windows::ps(&format!(
-        "Stop-ScheduledTask -TaskName '{TACHE_WINDOWS}' -ErrorAction SilentlyContinue; \
-         Unregister-ScheduledTask -TaskName '{TACHE_WINDOWS}' -Confirm:$false"
-    ))
-    .is_some()
 }
 
 #[cfg(test)]

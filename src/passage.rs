@@ -68,7 +68,8 @@ pub(crate) fn au_lancement() {
     }
     let nouveau = crate::reseau::dossier_local();
     let vieux = nouveau.with_file_name(ancien("vanguard"));
-    if !vieux.is_dir() {
+    // Un dossier du même nom sans rien de la version d'avant est à une autre application : jamais repris.
+    if !donnees_d_avant(&vieux) {
         return;
     }
     eprintln!(
@@ -272,9 +273,7 @@ fn retirer_raccourci() -> Option<PathBuf> {
     let nouveau = crate::raccourci::chemin()?;
     let nom = nouveau.file_name()?.to_string_lossy().to_string();
     let vieux = nouveau.with_file_name(ancien(&nom));
-    let a_lui =
-        cfg!(windows) || std::fs::read_to_string(&vieux).is_ok_and(|t| t.contains(&ancien(crate::raccourci::MARQUE)));
-    if !vieux.exists() || !a_lui {
+    if !vieux.exists() || !raccourci_d_avant(&vieux) {
         return None;
     }
     std::fs::remove_file(&vieux).ok()?;
@@ -283,6 +282,44 @@ fn retirer_raccourci() -> Option<PathBuf> {
         let _ = std::fs::remove_file(icone);
     }
     (!nouveau.exists()).then_some(nouveau)
+}
+
+/// Ce raccourci a-t-il été posé par la version d'avant ? Un .desktop ou un .command porte sa marque ; un .lnk, qui ne
+/// se lit pas comme du texte, doit viser son programme (le nom s'y trouve en octets simples ou en UTF-16) : l'ancien
+/// nom est un mot courant, et un raccourci de ce nom vers un autre programme n'est pas à elle.
+fn raccourci_d_avant(vieux: &Path) -> bool {
+    let Ok(octets) = std::fs::read(vieux) else {
+        return false;
+    };
+    if !vieux.extension().is_some_and(|e| e.eq_ignore_ascii_case("lnk")) {
+        return String::from_utf8_lossy(&octets).contains(&ancien(crate::raccourci::MARQUE));
+    }
+    let bas: Vec<u8> = octets.iter().map(u8::to_ascii_lowercase).collect();
+    let cible = format!("{}.exe", ancien("vanguard"));
+    let large: Vec<u8> = cible.bytes().flat_map(|o| [o, 0]).collect();
+    bas.windows(cible.len()).any(|f| f == cible.as_bytes()) || bas.windows(large.len()).any(|f| f == large.as_slice())
+}
+
+/// Ce dossier est-il celui des données de la version d'avant ? Il doit en garder un témoin (carnet, historique,
+/// quarantaine, réglages, copie du programme) : un dossier du même nom venu d'une autre application n'est ni repris
+/// ni proposé à l'effacement.
+pub(crate) fn donnees_d_avant(vieux: &Path) -> bool {
+    let programme = format!("bin/{}{}", ancien("vanguard"), std::env::consts::EXE_SUFFIX);
+    // Le carnet chiffré a pu porter l'un ou l'autre nom.
+    let chiffre = format!("appareils.json.{}", ancien("vanguard"));
+    vieux.is_dir()
+        && [
+            "appareils.json",
+            crate::chiffrement::CARNET_CHIFFRE,
+            chiffre.as_str(),
+            "historique.json",
+            "quarantaine/quarantaine.json",
+            "reglages.json",
+            "parametres.json",
+            programme.as_str(),
+        ]
+        .iter()
+        .any(|t| std::fs::symlink_metadata(vieux.join(t)).is_ok())
 }
 
 /// L'icône posée par la version d'avant à côté du raccourci du menu des applications (Linux), si elle est là et
@@ -410,9 +447,7 @@ pub(crate) fn restes(l: &crate::desinstaller::Lieux) -> Vec<(Reste, PathBuf)> {
         && let Some(nom) = nouveau.file_name()
     {
         let vieux = nouveau.with_file_name(ancien(&nom.to_string_lossy()));
-        let a_lui = vieux.extension().is_some_and(|e| e.eq_ignore_ascii_case("lnk"))
-            || std::fs::read_to_string(&vieux).is_ok_and(|t| t.contains(&ancien(crate::raccourci::MARQUE)));
-        if vieux.is_file() && a_lui {
+        if vieux.is_file() && raccourci_d_avant(&vieux) {
             restes.push((Reste::Raccourci(vieux.clone()), vieux));
         }
         if let Some(icone) = icone_d_avant(nouveau) {
@@ -427,10 +462,16 @@ pub(crate) fn restes(l: &crate::desinstaller::Lieux) -> Vec<(Reste, PathBuf)> {
         restes.push((Reste::Programme(programme.clone()), programme));
     }
     let vieux = l.donnees.with_file_name(ancien("vanguard"));
-    if vieux.is_dir() {
+    if donnees_d_avant(&vieux) {
         restes.push((Reste::Donnees(vieux.clone()), vieux));
     }
     restes
+}
+
+/// Un dossier au nom de celui de la version d'avant, mais sans rien d'elle : à une autre application, jamais touché.
+pub(crate) fn dossier_d_un_autre(l: &crate::desinstaller::Lieux) -> Option<PathBuf> {
+    let vieux = l.donnees.with_file_name(ancien("vanguard"));
+    (vieux.is_dir() && !donnees_d_avant(&vieux)).then_some(vieux)
 }
 
 /// Retire un reste d'une version d'avant, sans rien demander (la désinstallation l'a montré et fait accepter) ; rend
@@ -619,7 +660,7 @@ mod tests {
                 Reste::Raccourci(vieux.clone()),
                 Reste::Icone(icone.clone()),
                 Reste::Programme(bin),
-                Reste::Donnees(donnees),
+                Reste::Donnees(donnees.clone()),
             ]
         );
         assert!(trouves.iter().all(|r| r.quoi().chars().count() <= 26));
@@ -631,6 +672,20 @@ mod tests {
             !apres.iter().any(|r| matches!(r, Reste::Raccourci(_) | Reste::Icone(_))),
             "{apres:?}"
         );
+        // Un dossier du même nom sans rien de la version d'avant : à une autre application, jamais proposé.
+        std::fs::remove_file(donnees.join("historique.json")).unwrap();
+        ecrire(&donnees.join("notes-d-une-autre-appli.txt"), b"x");
+        assert!(!restes(&l).iter().any(|(r, _)| matches!(r, Reste::Donnees(_))));
+        assert_eq!(dossier_d_un_autre(&l), Some(donnees.clone()));
+        // Un .lnk au nom d'avant : seulement s'il vise le programme d'avant (en octets simples ou en UTF-16).
+        let lnk = racine.join("Bureau").join("Gardien.lnk");
+        ecrire(&lnk, b"L\0\0\0C:\\Program Files\\Autre\\autre.exe");
+        assert!(!raccourci_d_avant(&lnk));
+        ecrire(&lnk, b"L\0\0\0E:\\Windows\\GARDIEN.EXE");
+        assert!(raccourci_d_avant(&lnk));
+        let large: Vec<u8> = "C:\\x\\gardien.exe".bytes().flat_map(|o| [o, 0]).collect();
+        ecrire(&lnk, &[b"L\0\0\0".as_slice(), &large].concat());
+        assert!(raccourci_d_avant(&lnk));
         // Des tâches de Windows lues : celles d'avant seulement.
         let mut w = crate::desinstaller::Lieux::jetable(&racine.join("w"));
         w.taches = Some(

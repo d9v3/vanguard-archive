@@ -51,7 +51,7 @@ pub(crate) fn executable() -> String {
     let Some(exe) = exe else {
         return "vanguard".into();
     };
-    if reseau::cle_usb().is_some_and(|cle| exe.starts_with(&cle)) {
+    if reseau::cle_usb().is_some_and(|cle| sous(&exe, &cle)) {
         let dest = reseau::dossier_local()
             .join("bin")
             .join(exe.file_name().unwrap_or_default());
@@ -71,6 +71,26 @@ pub(crate) fn executable() -> String {
         }
     }
     exe.display().to_string()
+}
+
+/// Un chemin sans le préfixe « \\?\ » que `canonicalize` met sous Windows (sauf « \\?\UNC\ », qui n'a pas de forme
+/// courte équivalente) : PowerShell et un raccourci veulent la forme courante, et `Path::starts_with` tient
+/// « \\?\E:\ » et « E:\ » pour deux débuts différents.
+pub(crate) fn sans_verbatim(p: &Path) -> PathBuf {
+    p.to_str()
+        .and_then(|s| s.strip_prefix(r"\\?\"))
+        .filter(|s| !s.starts_with(r"UNC\"))
+        .map_or_else(|| p.to_path_buf(), PathBuf::from)
+}
+
+/// `p` est-il sous `d` ? Comparés sous leur forme courante, puis canonique : la clé se situe par `canonicalize`
+/// (« \\?\E:\ »), le programme par `current_exe` (« E:\… »).
+pub(crate) fn sous(p: &Path, d: &Path) -> bool {
+    let canon = |x: &Path| {
+        x.canonicalize()
+            .map_or_else(|_| sans_verbatim(x), |c| sans_verbatim(&c))
+    };
+    sans_verbatim(p).starts_with(sans_verbatim(d)) || canon(p).starts_with(canon(d))
 }
 
 pub(crate) fn notifier(titre: &str, corps: &str) {
@@ -556,8 +576,12 @@ async fn passe() {
 
 /// Le choix de la personne, noté quand la surveillance est activée (ou vue active) : si la minuterie ou la tâche
 /// disparaît ensuite sans qu'elle l'ait coupée, le bilan le dit.
+/// Le choix noté de la surveillance, dans le dossier de données : c'est lui qui fait dire au bilan qu'une surveillance
+/// voulue a disparu.
+pub(crate) const VOULUE: &str = "surveillance-voulue";
+
 fn fichier_voulue() -> std::path::PathBuf {
-    reseau::dossier_local().join("surveillance-voulue")
+    reseau::dossier_local().join(VOULUE)
 }
 
 fn noter_voulue(oui: bool) {
@@ -603,7 +627,8 @@ pub fn constat() -> Option<crate::machine::Constat> {
     juger_tache(
         Planifie::Surveillance,
         &lire_planifie(Planifie::Surveillance),
-        Path::is_file,
+        reseau::cle_usb().as_deref(),
+        Path::exists,
     )
 }
 
@@ -646,6 +671,15 @@ impl Planifie {
             ),
         }
     }
+
+    /// Son nom dans une phrase : les deux tâches partagent la catégorie « Surveillance », et un « non vérifié » doit
+    /// dire laquelle n'a pas pu être lue.
+    fn dans_une_phrase(self) -> &'static str {
+        match self {
+            Planifie::Surveillance => tr!("la surveillance horaire", "the hourly monitoring"),
+            Planifie::Entretien => tr!("l'entretien du mois", "the monthly check-up"),
+        }
+    }
 }
 
 /// Ce que le planificateur du système dit d'une tâche de Vanguard : absente, le programme qu'elle lance (et si elle
@@ -658,8 +692,9 @@ pub(crate) enum Lecture {
 }
 
 /// Lit la tâche planifiée `quoi` de cet ordinateur : le programme qu'elle lance. Linux : la ligne ExecStart= du
-/// service (le minuteur a déjà OnBootSec et Persistent : toujours à jour) ; macOS : le plist de l'agent, et son
-/// RunAtLoad ; Windows : le planificateur lui-même, PowerShell en secours, et ses deux réglages de rattrapage.
+/// service ; le minuteur n'a pas changé d'une version à l'autre (OnBootSec, puis toutes les heures), donc rien ne
+/// distingue une minuterie d'avant : toujours « à jour ». macOS : le plist de l'agent, et son RunAtLoad ; Windows :
+/// le planificateur lui-même, PowerShell en secours, et son réglage de rattrapage.
 pub(crate) fn lire_planifie(quoi: Planifie) -> Lecture {
     let (nom, agent, tache) = quoi.noms();
     #[cfg(target_os = "linux")]
@@ -703,25 +738,86 @@ pub(crate) fn lire_planifie(quoi: Planifie) -> Lecture {
                     .find(|(n, _)| n.eq_ignore_ascii_case(tache))
                     .map_or(Lecture::Absente, |(_, d)| Lecture::Lue {
                         programme: PathBuf::from(d.programme.trim().trim_matches('"')),
-                        a_jour: d.des_que_possible && d.a_l_ouverture,
+                        a_jour: a_jour_windows(&d),
                     })
             }
         }
     }
 }
 
+/// Une tâche de Windows est-elle d'aujourd'hui ? Jugé sur « dès que possible » seul : les tâches d'avant ne l'ont
+/// jamais eu, celles d'aujourd'hui toujours, même quand Windows refuse le déclencheur d'ouverture de session (la tâche
+/// est alors posée sans lui, et ce n'est pas une version d'avant : la refaire retomberait sur le même refus).
+#[cfg(any(windows, test))]
+fn a_jour_windows(d: &Definition) -> bool {
+    d.des_que_possible
+}
+
+/// Le programme absent est-il sur un lecteur débranché, ou sur la clé branchée à une autre place ? La tâche lance
+/// alors le programme de la clé, ce qui n'est ni un dossier effacé ni un logiciel malveillant : la raison est autre.
+/// `cle` : la clé VANGUARD branchée ; `existe` : ce qui existe sur cet ordinateur.
+fn sur_un_lecteur_absent(programme: &Path, cle: Option<&Path>, existe: &impl Fn(&Path) -> bool) -> bool {
+    if let Some(cle) = cle
+        && !sous(programme, cle)
+    {
+        // La clé à une autre lettre (Windows) ou montée ailleurs : le même programme, sous la clé d'aujourd'hui.
+        let reste: PathBuf = programme
+            .components()
+            .skip_while(|c| matches!(c, std::path::Component::Prefix(_) | std::path::Component::RootDir))
+            .collect();
+        if !reste.as_os_str().is_empty() && existe(&cle.join(&reste)) {
+            return true;
+        }
+        if let Some(etiquette) = cle.file_name() {
+            for a in programme.ancestors().skip(1) {
+                if a.file_name() == Some(etiquette)
+                    && let Ok(r) = programme.strip_prefix(a)
+                    && existe(&cle.join(r))
+                {
+                    return true;
+                }
+            }
+        }
+    }
+    // Le plus proche dossier qui existe encore : aucun (une lettre de lecteur qui n'existe plus), ou l'endroit où se
+    // montent les lecteurs amovibles.
+    let Some(present) = programme
+        .ancestors()
+        .skip(1)
+        .find(|a| !a.as_os_str().is_empty() && existe(a))
+    else {
+        return programme
+            .components()
+            .next()
+            .is_some_and(|c| matches!(c, std::path::Component::Prefix(_)));
+    };
+    let montage = |a: &Path| {
+        ["/media", "/run/media", "/Volumes", "/mnt"]
+            .iter()
+            .any(|m| a == Path::new(m))
+    };
+    montage(present) || present.parent().is_some_and(montage)
+}
+
 /// Le constat d'une tâche planifiée lue : rien si elle est absente (la disparition se juge à part) ou si tout va bien ;
-/// une alerte si le programme qu'elle lance n'existe plus (`existe`) : la tâche est là, mais elle ne tourne plus ; une
-/// information si la surveillance a été posée par une version d'avant ; « non vérifié » si rien n'a pu être lu.
-pub(crate) fn juger_tache(quoi: Planifie, l: &Lecture, existe: impl Fn(&Path) -> bool) -> Option<Constat> {
+/// une alerte si le programme qu'elle lance n'existe plus (`existe`) : la tâche est là, mais elle ne tourne plus, ou
+/// seulement quand la clé (`cle`) est branchée à la même place ; une information si la surveillance a été posée par
+/// une version d'avant ; « non vérifié » si rien n'a pu être lu.
+pub(crate) fn juger_tache(
+    quoi: Planifie,
+    l: &Lecture,
+    cle: Option<&Path>,
+    existe: impl Fn(&Path) -> bool,
+) -> Option<Constat> {
+    let tache = quoi.dans_une_phrase();
     let (programme, a_jour) = match l {
         Lecture::Absente => return None,
         Lecture::Illisible(e) => {
             return Some(crate::machine::impossible(
                 "Surveillance",
                 &trf!(
-                    "programme lancé par la tâche non lu : {e}",
-                    "program started by the task not read: {e}"
+                    "programme lancé par {tache} non lu : {e}",
+                    "program started by {tache} not read: {e}"
                 ),
             ));
         }
@@ -733,13 +829,42 @@ pub(crate) fn juger_tache(quoi: Planifie, l: &Lecture, existe: impl Fn(&Path) ->
         return Some(crate::machine::impossible(
             "Surveillance",
             &trf!(
-                "programme lancé par la tâche sans chemin : {}",
-                "program started by the task without a path: {}",
+                "programme lancé par {tache} sans chemin : {}",
+                "program started by {tache} without a path: {}",
                 programme.display()
             ),
         ));
     }
     let chemin = chemin_affichable(programme);
+    if !existe(programme) && sur_un_lecteur_absent(programme, cle, &existe) {
+        let (niveau, remettre) = match quoi {
+            Planifie::Surveillance => (
+                Niveau::Moyen,
+                tr!(
+                    "La refaire depuis la clé : « vanguard surveillance on » (Vanguard est recopié sur cet ordinateur et la tâche refaite)",
+                    "Redo it from the key: “vanguard monitor on” (Vanguard is copied onto this computer and the task redone)"
+                ),
+            ),
+            Planifie::Entretien => (
+                Niveau::Info,
+                tr!(
+                    "Le refaire depuis la clé : « vanguard entretien on » (Vanguard est recopié sur cet ordinateur)",
+                    "Redo it from the key: “vanguard maintenance on” (Vanguard is copied onto this computer)"
+                ),
+            ),
+        };
+        return Some(
+            crate::machine::alerte(
+                "Surveillance",
+                niveau,
+                trf!(
+                    "Le programme que lance {tache} est sur un lecteur débranché ou qui a changé de place ({chemin}) : sans lui, la tâche ne tourne pas. Posée depuis la clé, elle aurait dû lancer une copie sur cet ordinateur.",
+                    "The program {tache} starts is on a drive that is unplugged or has moved ({chemin}): without it, it does not run. Set up from the key, the task should have started a copy on this computer."
+                ),
+            )
+            .manuel(remettre, &[]),
+        );
+    }
     if !existe(programme) {
         return Some(match quoi {
             Planifie::Surveillance => crate::machine::alerte(
@@ -827,10 +952,11 @@ pub fn activer(oui: bool) {
             lire_planifie(Planifie::Surveillance),
             Lecture::Lue { a_jour: false, .. }
         );
+    let retrait = if oui { Ok(()) } else { desinstaller() };
     let reussi = if oui {
         installer(&executable(), Reglages::Aujourdhui)
     } else {
-        desinstaller()
+        retrait.is_ok()
     };
     if !oui || reussi {
         noter_voulue(oui);
@@ -854,31 +980,158 @@ pub fn activer(oui: bool) {
             "  ✖ Impossible d'activer la surveillance.",
             "  ✖ Could not turn monitoring on."
         ),
-        (false, _) => trp!("  Surveillance désactivée.", "  Monitoring off."),
+        (false, true) => trp!("  Surveillance désactivée.", "  Monitoring off."),
+        (false, false) => afficher_aligne(
+            "  ✖ ",
+            &trf!(
+                "Surveillance désactivée, mais pas entièrement retirée : {}",
+                "Monitoring off, but not fully removed: {}",
+                retrait.err().unwrap_or_default()
+            ),
+            4,
+            "",
+        ),
     }
 }
 
 /// Retire la surveillance sans rien demander (la désinstallation l'a déjà montrée et fait accepter), et l'oublie.
-/// Rend la raison d'un échec, jamais un succès supposé.
-pub(crate) fn retirer() -> Result<(), String> {
-    let ok = desinstaller();
+/// `trouves` : ses fichiers, là où la désinstallation les a trouvés. Rend la raison d'un échec, jamais un succès
+/// supposé.
+pub(crate) fn retirer(trouves: &[PathBuf]) -> Result<(), String> {
+    let r = retirer_planifie(Planifie::Surveillance, trouves);
     noter_voulue(false);
-    if ok {
-        return Ok(());
+    r
+}
+
+fn desinstaller() -> Result<(), String> {
+    retirer_planifie(Planifie::Surveillance, &[])
+}
+
+/// Retire la tâche `quoi` : arrêtée (la minuterie et une passe déjà lancée, qui écrirait encore dans le dossier de
+/// données qu'une désinstallation efface), ses fichiers retirés là où Vanguard les pose et là où ils ont été trouvés
+/// (`trouves`), le planificateur rechargé, puis relus : un fichier encore là est un échec, avec son chemin. Rend la
+/// raison d'un échec, jamais un succès supposé.
+pub(crate) fn retirer_planifie(quoi: Planifie, trouves: &[PathBuf]) -> Result<(), String> {
+    let (nom, agent, tache) = quoi.noms();
+    #[cfg(target_os = "linux")]
+    {
+        let _ = (agent, tache);
+        let dossier = dossier_unites_maison();
+        let mut fichiers = vec![
+            dossier.join(format!("{nom}.timer")),
+            dossier.join(format!("{nom}.service")),
+        ];
+        for f in trouves {
+            if !fichiers.contains(f) {
+                fichiers.push(f.clone());
+            }
+        }
+        let present = |ext: &str| {
+            fichiers
+                .iter()
+                .any(|f| f.extension().is_some_and(|e| e == ext) && std::fs::symlink_metadata(f).is_ok())
+        };
+        // Rien de posé : rien à arrêter ni à recharger, et pas d'échec à dire (un bus de session absent, comme dans
+        // une session sans bureau, ferait échouer systemctl pour rien).
+        if !present("timer") && !present("service") {
+            return Ok(());
+        }
+        // Sans son fichier, systemctl dirait « unité inconnue » : une unité absente n'est pas à arrêter.
+        let arretee =
+            !present("timer") || reussit("systemctl", &["--user", "disable", "--now", &format!("{nom}.timer")]);
+        let passe = !present("service") || reussit("systemctl", &["--user", "stop", &format!("{nom}.service")]);
+        let mut echecs = retirer_fichiers(&fichiers);
+        let recharge = reussit("systemctl", &["--user", "daemon-reload"]);
+        echecs.extend(encore_la(&fichiers));
+        if !echecs.is_empty() {
+            return Err(trf!("non retiré : {}", "not removed: {}", echecs.join(", ")));
+        }
+        if !(arretee && passe && recharge) {
+            return Err(tr!(
+                "fichiers retirés (vérifié), mais systemctl --user n'a pas répondu : la minuterie, ou une passe en cours, peut rester chargée jusqu'à la prochaine ouverture de session, où elle disparaît",
+                "files removed (checked), but systemctl --user did not answer: the timer, or a run in progress, may stay loaded until the next sign-in, where it goes away"
+            )
+            .to_string());
+        }
+        Ok(())
     }
-    Err(if cfg!(windows) {
-        tr!(
-            "PowerShell n'a pas pu retirer la tâche : « vanguard surveillance off » pour réessayer",
-            "PowerShell could not remove the task: “vanguard monitor off” to try again"
-        )
-        .to_string()
-    } else {
-        tr!(
-            "fichiers retirés, mais systemctl --user n'a pas répondu : la minuterie peut rester chargée jusqu'à la prochaine ouverture de session, où elle disparaît",
-            "files removed, but systemctl --user did not answer: the timer may stay loaded until the next sign-in, where it goes away"
-        )
-        .to_string()
-    })
+    #[cfg(target_os = "macos")]
+    {
+        let _ = (nom, tache);
+        let mut fichiers = vec![plist_agent_nomme(agent)];
+        for f in trouves {
+            if !fichiers.contains(f) {
+                fichiers.push(f.clone());
+            }
+        }
+        // bootout échoue aussi pour un agent déjà déchargé : son résultat ne dit rien, l'état relu ensuite si.
+        for f in &fichiers {
+            let _ = reussit("launchctl", &["bootout", &domaine_launchd(), &f.display().to_string()]);
+        }
+        let mut echecs = retirer_fichiers(&fichiers);
+        echecs.extend(encore_la(&fichiers));
+        if !echecs.is_empty() {
+            return Err(trf!("non retiré : {}", "not removed: {}", echecs.join(", ")));
+        }
+        if reussit("launchctl", &["print", &format!("{}/{agent}", domaine_launchd())]) {
+            return Err(tr!(
+                "fichier retiré (vérifié), mais l'agent reste chargé jusqu'à la prochaine ouverture de session",
+                "file removed (checked), but the agent stays loaded until the next sign-in"
+            )
+            .to_string());
+        }
+        Ok(())
+    }
+    #[cfg(windows)]
+    {
+        let _ = (nom, agent, trouves);
+        // Le planificateur dit qu'elle n'existe pas : rien à retirer, et Unregister-ScheduledTask échouerait pour rien.
+        // Illisible, on essaie quand même : son échec sera dit.
+        if crate::machine::windows::planificateur::etat(&[tache])
+            == Some(crate::machine::windows::planificateur::EtatTache::Absente)
+        {
+            return Ok(());
+        }
+        let t = crate::commande::ps_texte(tache);
+        // Arrêtée d'abord : une passe en cours n'écrit plus dans le dossier de données qu'une désinstallation efface.
+        crate::machine::windows::ps(&format!(
+            "Stop-ScheduledTask -TaskName '{t}' -ErrorAction SilentlyContinue; \
+             Unregister-ScheduledTask -TaskName '{t}' -Confirm:$false"
+        ))
+        .map(|_| ())
+        .ok_or_else(|| {
+            trf!(
+                "PowerShell n'a pas pu retirer la tâche : « {} » pour réessayer",
+                "PowerShell could not remove the task: “{}” to try again",
+                match quoi {
+                    Planifie::Surveillance => tr!("vanguard surveillance off", "vanguard monitor off"),
+                    Planifie::Entretien => tr!("vanguard entretien off", "vanguard maintenance off"),
+                }
+            )
+        })
+    }
+}
+
+/// Retire ces fichiers ; rend ceux qui n'ont pas pu partir, avec la raison (un fichier déjà absent n'en est pas un).
+#[cfg(unix)]
+pub(crate) fn retirer_fichiers(fichiers: &[PathBuf]) -> Vec<String> {
+    fichiers
+        .iter()
+        .filter_map(|f| match std::fs::remove_file(f) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => Some(format!("{} ({e})", chemin_affichable(f))),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Ceux de ces fichiers qui existent encore, relus après le retrait : un retrait se constate, il ne se suppose pas.
+#[cfg(unix)]
+pub(crate) fn encore_la(fichiers: &[PathBuf]) -> Vec<String> {
+    fichiers
+        .iter()
+        .filter(|f| std::fs::symlink_metadata(f).is_ok())
+        .map(|f| trf!("{} (encore là)", "{} (still there)", chemin_affichable(f)))
+        .collect()
 }
 
 /// Le dossier des unités systemd de l'utilisateur où Vanguard pose la surveillance et l'entretien.
@@ -887,8 +1140,10 @@ pub(crate) fn dossier_unites_maison() -> PathBuf {
     PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".config/systemd/user")
 }
 
-/// Les deux unités systemd : le service, puis le minuteur (cinq minutes après le démarrage, puis toutes les heures ;
-/// une heure manquée, ordinateur éteint, est rattrapée).
+/// Les deux unités systemd : le service, puis le minuteur (cinq minutes après le démarrage, puis une heure après
+/// chaque passe). Persistent= n'agit que sur un OnCalendar= : il ne rattrape rien ici. Après un arrêt, c'est
+/// OnBootSec qui fait la passe ; après une veille, l'horloge du minuteur s'est arrêtée avec l'ordinateur, et la passe
+/// vient au bout du reste de l'heure entamée, sans rattrapage au réveil.
 #[cfg(any(target_os = "linux", test))]
 pub(crate) fn unites_systemd(exe: &str) -> (String, &'static str) {
     // Chemin entre guillemets (un dossier personnel peut contenir une espace), « % » doublé (spécificateurs de
@@ -941,7 +1196,7 @@ pub(crate) fn premier_mot_cite(valeur: &str) -> Option<PathBuf> {
 
 #[cfg(target_os = "linux")]
 fn installer(exe: &str, r: Reglages) -> bool {
-    // Le minuteur a toujours eu OnBootSec et Persistent : rien ne distingue une tâche d'avant sous Linux.
+    // Le minuteur n'a pas changé depuis les versions d'avant : rien ne distingue une tâche d'avant sous Linux.
     let _ = r;
     let dossier = dossier_unites_maison();
     let _ = std::fs::create_dir_all(&dossier);
@@ -950,20 +1205,6 @@ fn installer(exe: &str, r: Reglages) -> bool {
     let _ = std::fs::write(dossier.join(format!("{NOM}.timer")), timer);
     reussit("systemctl", &["--user", "daemon-reload"])
         && reussit("systemctl", &["--user", "enable", "--now", &format!("{NOM}.timer")])
-}
-
-#[cfg(target_os = "linux")]
-fn desinstaller() -> bool {
-    retirer_minuterie(NOM)
-}
-
-#[cfg(target_os = "linux")]
-fn retirer_minuterie(nom: &str) -> bool {
-    let dossier = dossier_unites_maison();
-    reussit("systemctl", &["--user", "disable", "--now", &format!("{nom}.timer")]);
-    let _ = std::fs::remove_file(dossier.join(format!("{nom}.service")));
-    let _ = std::fs::remove_file(dossier.join(format!("{nom}.timer")));
-    reussit("systemctl", &["--user", "daemon-reload"])
 }
 
 #[cfg(target_os = "macos")]
@@ -1028,21 +1269,6 @@ fn installer(exe: &str, r: Reglages) -> bool {
     // Déjà chargé (réactivation) : on le retire d'abord, sinon bootstrap refuse.
     let _ = reussit("launchctl", &["bootout", &domaine_launchd(), &chemin]);
     reussit("launchctl", &["bootstrap", &domaine_launchd(), &chemin])
-}
-
-#[cfg(target_os = "macos")]
-fn retirer_agent(plist: &std::path::Path) {
-    let _ = reussit(
-        "launchctl",
-        &["bootout", &domaine_launchd(), &plist.display().to_string()],
-    );
-    let _ = std::fs::remove_file(plist);
-}
-
-#[cfg(target_os = "macos")]
-fn desinstaller() -> bool {
-    retirer_agent(&plist_agent());
-    true
 }
 
 /// La tâche existe et n'est pas désactivée : une tâche désactivée ne surveille plus rien.
@@ -1190,16 +1416,6 @@ fn installer(exe: &str, r: Reglages) -> bool {
     true
 }
 
-#[cfg(windows)]
-fn desinstaller() -> bool {
-    // Arrêtée d'abord : une passe en cours n'écrit plus dans le dossier de données qu'une désinstallation efface.
-    crate::machine::windows::ps(&format!(
-        "Stop-ScheduledTask -TaskName '{TACHE_WINDOWS}' -ErrorAction SilentlyContinue; \
-         Unregister-ScheduledTask -TaskName '{TACHE_WINDOWS}' -Confirm:$false"
-    ))
-    .is_some()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1318,16 +1534,19 @@ mod tests {
 
     #[test]
     fn programme_planifie_disparu_ou_d_avant() {
+        let programme = PathBuf::from(if cfg!(windows) {
+            r"C:\vanguard\vanguard.exe"
+        } else {
+            "/opt/vanguard/vanguard"
+        });
         let lue = |a_jour| Lecture::Lue {
-            programme: PathBuf::from(if cfg!(windows) {
-                r"C:\vanguard\vanguard.exe"
-            } else {
-                "/opt/vanguard/vanguard"
-            }),
+            programme: programme.clone(),
             a_jour,
         };
+        // Tout existe, sauf le programme : son dossier est encore là.
+        let parti = |p: &Path| p != programme;
         // Le programme parti : la tâche est là, mais ne tourne plus.
-        let c = juger_tache(Planifie::Surveillance, &lue(true), |_| false).expect("constat");
+        let c = juger_tache(Planifie::Surveillance, &lue(true), None, parti).expect("constat");
         assert_eq!(c.probleme, Some(Niveau::Eleve));
         assert!(c.verifie && !c.correctif.as_ref().unwrap().automatique);
         assert!(
@@ -1335,30 +1554,175 @@ mod tests {
                 || c.correctif.as_ref().unwrap().action.contains("monitor on")
         );
         // Présent, posé par une version d'avant : une information, et la remise à jour proposée.
-        let c = juger_tache(Planifie::Surveillance, &lue(false), |_| true).expect("constat");
+        let c = juger_tache(Planifie::Surveillance, &lue(false), None, |_| true).expect("constat");
         assert_eq!(c.probleme, Some(Niveau::Info));
         let action = &c.correctif.as_ref().unwrap().action;
         assert!(
             action.contains("surveillance on") || action.contains("monitor on"),
             "{action}"
         );
-        // Illisible : non vérifié, jamais compté comme sain.
-        let c = juger_tache(Planifie::Surveillance, &Lecture::Illisible("refus".into()), |_| true).expect("constat");
+        // Illisible : non vérifié, jamais compté comme sain ; et le message dit de quelle tâche il s'agit.
+        let c = juger_tache(
+            Planifie::Surveillance,
+            &Lecture::Illisible("refus".into()),
+            None,
+            |_| true,
+        )
+        .expect("constat");
         assert!(!c.verifie);
-        // Un nom sans chemin : non vérifié non plus.
+        let e = juger_tache(Planifie::Entretien, &Lecture::Illisible("refus".into()), None, |_| true).unwrap();
+        assert!(
+            e.message.contains("entretien") || e.message.contains("check-up"),
+            "{}",
+            e.message
+        );
+        assert_ne!(c.message, e.message);
+        // Un nom sans chemin : non vérifié non plus, avec le nom de la tâche.
         let relatif = Lecture::Lue {
             programme: PathBuf::from("vanguard"),
             a_jour: true,
         };
-        assert!(!juger_tache(Planifie::Surveillance, &relatif, |_| true).unwrap().verifie);
+        assert!(
+            !juger_tache(Planifie::Surveillance, &relatif, None, |_| true)
+                .unwrap()
+                .verifie
+        );
+        let e = juger_tache(Planifie::Entretien, &relatif, None, |_| true).unwrap();
+        assert!(
+            e.message.contains("entretien") || e.message.contains("check-up"),
+            "{}",
+            e.message
+        );
         // Tout va bien, ou rien de planifié : rien à dire.
-        assert!(juger_tache(Planifie::Surveillance, &lue(true), |_| true).is_none());
-        assert!(juger_tache(Planifie::Surveillance, &Lecture::Absente, |_| false).is_none());
+        assert!(juger_tache(Planifie::Surveillance, &lue(true), None, |_| true).is_none());
+        assert!(juger_tache(Planifie::Surveillance, &Lecture::Absente, None, |_| false).is_none());
         // L'entretien : moyen, et jamais « d'une version d'avant » (il a déjà son rattrapage).
-        let c = juger_tache(Planifie::Entretien, &lue(true), |_| false).expect("constat");
+        let c = juger_tache(Planifie::Entretien, &lue(true), None, parti).expect("constat");
         assert_eq!(c.probleme, Some(Niveau::Moyen));
         assert!(c.message.contains("entretien") || c.message.contains("check-up"));
-        assert!(juger_tache(Planifie::Entretien, &lue(false), |_| true).is_none());
+        assert!(juger_tache(Planifie::Entretien, &lue(false), None, |_| true).is_none());
+    }
+
+    #[test]
+    fn tache_sans_declencheur_d_ouverture_reste_d_aujourd_hui() {
+        // Windows a refusé -AtLogOn : la tâche d'aujourd'hui est posée avec StartWhenAvailable seul.
+        let lues = lire_definitions_ps("vanguard - surveillance du reseau|C:\\vanguard.exe|True|0|Ready\n");
+        let d = &lues[0].1;
+        assert!(d.des_que_possible && !d.a_l_ouverture);
+        assert!(a_jour_windows(d));
+        let l = Lecture::Lue {
+            programme: PathBuf::from(if cfg!(windows) {
+                r"C:\vanguard.exe"
+            } else {
+                "/opt/vanguard/vanguard"
+            }),
+            a_jour: a_jour_windows(d),
+        };
+        assert!(juger_tache(Planifie::Surveillance, &l, None, |_| true).is_none());
+        // Une tâche d'avant n'a jamais eu StartWhenAvailable.
+        let avant = lire_definitions_ps("x|C:\\vanguard.exe|False|0|Ready\n");
+        assert!(!a_jour_windows(&avant[0].1));
+    }
+
+    #[test]
+    fn programme_de_la_cle_sur_un_lecteur_absent() {
+        // Le préfixe « \\?\ » de canonicalize, retiré pour PowerShell et le raccourci ; UNC gardé tel quel.
+        assert_eq!(
+            sans_verbatim(Path::new(r"\\?\E:\Windows\vanguard.exe")),
+            PathBuf::from(r"E:\Windows\vanguard.exe")
+        );
+        assert_eq!(
+            sans_verbatim(Path::new(r"\\?\UNC\serveur\x")),
+            PathBuf::from(r"\\?\UNC\serveur\x")
+        );
+        #[cfg(windows)]
+        {
+            // La clé se situe par canonicalize (« \\?\E:\ »), le programme par current_exe (« E:\… ») : le même
+            // début.
+            assert!(sous(Path::new(r"E:\Windows\vanguard.exe"), Path::new(r"\\?\E:\")));
+            assert!(sous(Path::new(r"\\?\E:\Windows\vanguard.exe"), Path::new(r"E:\")));
+            assert!(!sous(Path::new(r"C:\Windows\vanguard.exe"), Path::new(r"\\?\E:\")));
+            // La clé revenue en F: : le même programme y est ; un lecteur E: qui n'existe plus.
+            let e = Path::new(r"E:\Windows\vanguard.exe");
+            let f = Path::new(r"F:\");
+            assert!(sur_un_lecteur_absent(e, Some(f), &|p: &Path| p == Path::new(r"F:\Windows\vanguard.exe")));
+            assert!(sur_un_lecteur_absent(e, None, &|_: &Path| false));
+            assert!(!sur_un_lecteur_absent(e, None, &|p: &Path| p == Path::new(r"E:\")));
+        }
+        #[cfg(unix)]
+        {
+            // La clé remontée ailleurs, ou débranchée : la raison est le lecteur, pas un logiciel malveillant.
+            let p = Path::new("/run/media/alice/VANGUARD/Linux/vanguard");
+            let ailleurs = Path::new("/media/alice/VANGUARD");
+            let la = |q: &Path| q == Path::new("/media/alice/VANGUARD/Linux/vanguard");
+            assert!(sur_un_lecteur_absent(p, Some(ailleurs), &la));
+            let monte = |q: &Path| {
+                ["/", "/run", "/run/media", "/run/media/alice"]
+                    .iter()
+                    .any(|m| q == Path::new(m))
+            };
+            assert!(sur_un_lecteur_absent(p, None, &monte));
+            // Un dossier effacé sur le disque de l'ordinateur : l'alerte d'un programme disparu.
+            let local = Path::new("/home/alice/.local/share/vanguard/bin/vanguard");
+            let maison = |q: &Path| q == Path::new("/") || q == Path::new("/home") || q == Path::new("/home/alice");
+            assert!(!sur_un_lecteur_absent(local, None, &maison));
+            assert!(!sur_un_lecteur_absent(local, Some(ailleurs), &maison));
+            let c = juger_tache(
+                Planifie::Surveillance,
+                &Lecture::Lue {
+                    programme: p.to_path_buf(),
+                    a_jour: true,
+                },
+                Some(ailleurs),
+                la,
+            )
+            .expect("constat");
+            assert_eq!(c.probleme, Some(Niveau::Moyen));
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn retrait_de_fichiers_constate() {
+        use std::os::unix::fs::PermissionsExt;
+        let d = crate::reseau::dossier_local().join("retrait-constate");
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        let (parti, bloque, absent) = (d.join("a.timer"), d.join("b.service"), d.join("c.timer"));
+        std::fs::write(&parti, "x").unwrap();
+        std::fs::write(&bloque, "x").unwrap();
+        // Un dossier en lecture seule : ses fichiers ne s'effacent pas (sauf pour root, qui passe outre).
+        let verrou = d.join("verrou");
+        std::fs::create_dir_all(&verrou).unwrap();
+        let dedans = verrou.join("d.timer");
+        std::fs::write(&dedans, "x").unwrap();
+        std::fs::set_permissions(&verrou, std::fs::Permissions::from_mode(0o555)).unwrap();
+        let fichiers = [parti.clone(), absent, dedans.clone()];
+        let echecs = retirer_fichiers(&fichiers);
+        let restes = encore_la(&fichiers);
+        let root = est_root();
+        assert!(!parti.exists());
+        if !root {
+            assert_eq!(echecs.len(), 1, "{echecs:?}");
+            assert_eq!(restes.len(), 1, "{restes:?}");
+            assert!(restes[0].contains("d.timer"));
+        }
+        assert_eq!(encore_la(&[bloque]).len(), 1);
+        std::fs::set_permissions(&verrou, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// Root efface même dans un dossier en lecture seule : le cas ne se vérifie alors pas.
+    #[cfg(unix)]
+    fn est_root() -> bool {
+        std::fs::read_to_string("/proc/self/status")
+            .ok()
+            .and_then(|t| {
+                t.lines()
+                    .find_map(|l| l.strip_prefix("Uid:"))
+                    .map(|u| u.split_whitespace().nth(1) == Some("0"))
+            })
+            .unwrap_or(false)
     }
 
     #[test]

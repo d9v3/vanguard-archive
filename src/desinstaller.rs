@@ -143,8 +143,10 @@ pub(crate) enum Genre {
 /// Comment le retirer.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Retrait {
-    Surveillance,
-    Entretien,
+    /// Avec ses fichiers trouvés (unités systemd dans chacun des dossiers, agent launchd) : tous sont retirés, pas
+    /// seulement ceux du dossier où Vanguard les pose aujourd'hui.
+    Surveillance(Vec<PathBuf>),
+    Entretien(Vec<PathBuf>),
     /// La note de ce qui a été mis en place (`None` : unités trouvées par leur nom, sans note), et les unités trouvées.
     Sauvegarde(Option<MiseEnPlace>, Vec<PathBuf>),
     Pieges,
@@ -253,12 +255,19 @@ fn programme_d_un_agent(_: &Path) -> Option<PathBuf> {
 fn planifie(l: &Lieux, quoi: Planifie) -> Option<Element> {
     let (nom, agent, tache) = quoi.noms();
     let mut trouve: Vec<String> = Vec::new();
+    let mut fichiers: Vec<PathBuf> = Vec::new();
     let mut lance: Option<PathBuf> = None;
     for d in &l.unites {
         let service = d.join(format!("{nom}.service"));
         let timer = d.join(format!("{nom}.timer"));
         if service.exists() || timer.exists() {
             trouve.push(chemin_affichable(if timer.exists() { &timer } else { &service }));
+            fichiers.extend(
+                [&timer, &service]
+                    .into_iter()
+                    .filter(|p| std::fs::symlink_metadata(p).is_ok())
+                    .cloned(),
+            );
             if lance.is_none() {
                 lance = std::fs::read_to_string(&service)
                     .ok()
@@ -271,6 +280,7 @@ fn planifie(l: &Lieux, quoi: Planifie) -> Option<Element> {
         if plist.is_file() {
             trouve.push(chemin_affichable(&plist));
             lance = lance.or_else(|| programme_d_un_agent(&plist));
+            fichiers.push(plist);
         }
     }
     if let Some(t) = l.taches.iter().flatten().find(|t| t.nom.eq_ignore_ascii_case(tache)) {
@@ -288,11 +298,12 @@ fn planifie(l: &Lieux, quoi: Planifie) -> Option<Element> {
     let lance_montre = lance
         .as_deref()
         .map_or_else(|| tr!("non lu", "not read").to_string(), chemin_affichable);
-    let (genre, retrait, texte, detail) = match quoi {
+    let (genre, retrait, texte, precision, detail) = match quoi {
         Planifie::Surveillance => (
             Genre::Surveillance,
-            Retrait::Surveillance,
+            Retrait::Surveillance(fichiers),
             tr!("Surveillance horaire", "Hourly monitoring"),
+            tr!("désactivée puis retirée", "turned off, then removed"),
             trf!(
                 "Arrêtée, puis retirée du planificateur : {}. Elle lance : {lance_montre}",
                 "Stopped, then removed from the scheduler: {}. It starts: {lance_montre}",
@@ -301,8 +312,9 @@ fn planifie(l: &Lieux, quoi: Planifie) -> Option<Element> {
         ),
         Planifie::Entretien => (
             Genre::Entretien,
-            Retrait::Entretien,
+            Retrait::Entretien(fichiers),
             tr!("Entretien du mois", "Monthly check-up"),
+            tr!("désactivé puis retiré", "turned off, then removed"),
             trf!(
                 "Arrêté, puis retiré du planificateur : {}. Il lance : {lance_montre}",
                 "Stopped, then removed from the scheduler: {}. It starts: {lance_montre}",
@@ -313,7 +325,7 @@ fn planifie(l: &Lieux, quoi: Planifie) -> Option<Element> {
     Some(Element {
         genre,
         texte: texte.to_string(),
-        precision: tr!("désactivée puis retirée", "turned off, then removed").to_string(),
+        precision: precision.to_string(),
         detail,
         coche: true,
         retrait,
@@ -444,7 +456,7 @@ pub(crate) fn recenser(l: &Lieux) -> Recensement {
                 "Decoy files (Documents, Pictures, Desktop)"
             )
             .to_string(),
-            precision: trf!("{n} retirés, sauf les modifiés", "{n} removed, except changed ones"),
+            precision: trf!("{n} retiré(s), sauf les modifiés", "{n} removed, except changed ones"),
             detail: tr!(
                 "Les fichiers « !Vanguard » posés dans tes dossiers partent ; un fichier modifié ou renommé reste : c'est la preuve d'un passage.",
                 "The “!Vanguard” files placed in your folders go; a changed or renamed one stays: it is the evidence of an attack."
@@ -470,7 +482,13 @@ pub(crate) fn recenser(l: &Lieux) -> Recensement {
         });
         let menu = p.extension().is_some_and(|e| e == "desktop");
         if a_lui {
-            let lance = programme_du_raccourci(p);
+            // Un .lnk ne se lit pas comme du texte : il vise la copie de bin/ que `raccourci::poser` lui donne
+            // (`executable`). Au pire, cette copie est gardée sans nécessité, et c'est dit.
+            let lance = programme_du_raccourci(p).or_else(|| {
+                p.extension()
+                    .is_some_and(|e| e.eq_ignore_ascii_case("lnk"))
+                    .then(|| l.donnees.join("bin").join(crate::mise_a_jour::NOM))
+            });
             let avec = icone
                 .as_deref()
                 .map(|i| trf!(" et son icône {}", " and its icon {}", chemin_affichable(i)))
@@ -549,15 +567,22 @@ pub(crate) fn recenser(l: &Lieux) -> Recensement {
     }
     if !fichiers.is_empty() {
         let liste: Vec<String> = fichiers.iter().map(|f| chemin_affichable(f)).collect();
+        // La copie en marche reste (dit dans « à faire ») : l'élément ne nomme que ce qui part vraiment.
+        let (texte, precision) = if garde.is_some() {
+            (
+                tr!("Restes du programme (bin/)", "Program leftovers (bin/)"),
+                tr!("effacés, sauf la copie en marche", "erased, except the running copy"),
+            )
+        } else {
+            (
+                tr!("Copie du programme (bin/)", "Program copy (bin/)"),
+                tr!("effacée", "erased"),
+            )
+        };
         r.elements.push(Element {
             genre: Genre::Programme,
-            texte: tr!("Copie du programme (bin/)", "Program copy (bin/)").to_string(),
-            precision: if garde.is_some() {
-                tr!("en marche : à supprimer après", "running: delete it afterwards")
-            } else {
-                tr!("effacée", "erased")
-            }
-            .to_string(),
+            texte: texte.to_string(),
+            precision: precision.to_string(),
             detail: trf!(
                 "Efface {} ; le dossier bin/ part s'il est vide ensuite, rien d'autre de bin/ n'est touché.",
                 "Erases {}; the bin/ folder goes if it is empty afterwards, nothing else in bin/ is touched.",
@@ -587,42 +612,35 @@ pub(crate) fn recenser(l: &Lieux) -> Recensement {
     }
 
     if let Some(d) = donnees_d_avant {
-        r.elements.push(Element {
-            genre: Genre::DonneesAvant,
-            texte: trf!(
-                "Ancien dossier de données ({})",
-                "Old data folder ({})",
-                crate::nettoyer::taille_lisible(taille(&d))
-            ),
-            precision: tr!("gardé, sauf si tu le coches", "kept unless you check it").to_string(),
-            detail: trf!(
+        r.elements.push(dossier_de_donnees(
+            &d,
+            Genre::DonneesAvant,
+            &trf!(
                 "L'ancien dossier de données ({}), qui n'a pas pu être repris : effacé seulement après une seconde question.",
                 "The old data folder ({}), which could not be taken over: erased only after a second question.",
                 chemin_affichable(&d)
             ),
-            coche: false,
-            lance: None,
-            retrait: Retrait::Dossier(d),
-        });
+            &mut r.pas_a_lui,
+        ));
+    }
+    if let Some(d) = passage::dossier_d_un_autre(l) {
+        r.pas_a_lui.push(trf!(
+            "Un dossier porte le nom de celui d'une version d'avant ({}), mais rien de Vanguard n'y est : il reste.",
+            "A folder has the name of an earlier version's one ({}), but nothing of Vanguard is in it: it stays.",
+            chemin_affichable(&d)
+        ));
     }
     if std::fs::symlink_metadata(&l.donnees).is_ok() {
-        r.elements.push(Element {
-            genre: Genre::Donnees,
-            texte: trf!(
-                "Dossier de données ({})",
-                "Data folder ({})",
-                crate::nettoyer::taille_lisible(taille(&l.donnees))
-            ),
-            precision: tr!("gardé, sauf si tu le coches", "kept unless you check it").to_string(),
-            detail: trf!(
+        r.elements.push(dossier_de_donnees(
+            &l.donnees,
+            Genre::Donnees,
+            &trf!(
                 "Carnet des appareils, historique, apprentissage, quarantaine : {}. Effacé seulement après une seconde question.",
                 "Device record, history, learning, quarantine: {}. Erased only after a second question.",
                 chemin_affichable(&l.donnees)
             ),
-            coche: false,
-            lance: None,
-            retrait: Retrait::Dossier(l.donnees.clone()),
-        });
+            &mut r.pas_a_lui,
+        ));
     }
 
     // La clé n'est jamais touchée, quoi qu'on ait trouvé : un chemin qui y mène est écarté, et c'est dit.
@@ -642,11 +660,59 @@ pub(crate) fn recenser(l: &Lieux) -> Recensement {
     r
 }
 
+/// La cible d'un dossier de données qui est un lien (déplacé sur un autre disque, un lien laissé à sa place) : seul
+/// le lien part, jamais ce qu'il désigne.
+fn lien_vers(d: &Path) -> Option<PathBuf> {
+    std::fs::symlink_metadata(d)
+        .is_ok_and(|m| m.is_symlink())
+        .then(|| std::fs::read_link(d).unwrap_or_default())
+}
+
+/// L'élément d'un dossier de données, jamais coché d'office. Un lien est nommé comme tel, sans la taille de sa cible,
+/// qui ne part pas : c'est dit dans `pas_a_lui`.
+fn dossier_de_donnees(d: &Path, genre: Genre, detail: &str, pas_a_lui: &mut Vec<String>) -> Element {
+    let avant = genre == Genre::DonneesAvant;
+    let taille_ou_lien = match lien_vers(d) {
+        Some(cible) => {
+            pas_a_lui.push(trf!(
+                "{} est un lien vers {} : coché, seul le lien part ; {} reste, avec tout ce qu'il contient (quarantaine comprise).",
+                "{} is a link to {}: checked, only the link goes; {} stays, with everything in it (quarantine included).",
+                chemin_affichable(d),
+                chemin_affichable(&cible),
+                chemin_affichable(&cible)
+            ));
+            tr!("lien", "link").to_string()
+        }
+        None => crate::nettoyer::taille_lisible(taille(d)),
+    };
+    Element {
+        genre,
+        texte: if avant {
+            trf!(
+                "Ancien dossier de données ({taille_ou_lien})",
+                "Old data folder ({taille_ou_lien})"
+            )
+        } else {
+            trf!(
+                "Dossier de données ({taille_ou_lien})",
+                "Data folder ({taille_ou_lien})"
+            )
+        },
+        precision: tr!("gardé, sauf si tu le coches", "kept unless you check it").to_string(),
+        detail: detail.to_string(),
+        coche: false,
+        lance: None,
+        retrait: Retrait::Dossier(d.to_path_buf()),
+    }
+}
+
 /// Les fichiers et dossiers qu'un élément touche.
 fn chemins(e: &Element) -> Vec<PathBuf> {
     match &e.retrait {
-        Retrait::Surveillance | Retrait::Entretien | Retrait::Pieges => Vec::new(),
-        Retrait::Sauvegarde(_, f) | Retrait::Fichiers(f) => f.clone(),
+        Retrait::Pieges => Vec::new(),
+        Retrait::Surveillance(f) | Retrait::Entretien(f) | Retrait::Sauvegarde(_, f) | Retrait::Fichiers(f) => {
+            f.clone()
+        }
         Retrait::Raccourci(p) | Retrait::Dossier(p) => vec![p.clone()],
         Retrait::Avant(r) => r.chemins(),
     }
@@ -693,11 +759,50 @@ fn garder_les_dependances(e: &[Element], etats: &mut [bool]) -> Vec<String> {
     messages
 }
 
+/// Ce que des éléments gardés demandent encore dans le dossier `d`, qu'on efface : la copie du programme qu'ils
+/// lancent (bin/ est dans le dossier de données), leurs propres fichiers, et, pour le dossier d'aujourd'hui
+/// (`actuel`), leur note (le choix de la surveillance, qui fait dire au bilan qu'elle a disparu ; la note de la
+/// sauvegarde et la liste des pièges, sans lesquelles ils ne se défont plus exactement). Avec l'élément qui en a
+/// besoin.
+fn gardes_dans(d: &Path, actuel: bool, e: &[Element], etats: &[bool]) -> Vec<(PathBuf, String)> {
+    let mut gardes: Vec<(PathBuf, String)> = Vec::new();
+    for (x, &coche) in e.iter().zip(etats) {
+        if coche || matches!(x.genre, Genre::Donnees | Genre::DonneesAvant) {
+            continue;
+        }
+        let mut besoins: Vec<PathBuf> = x.lance.iter().cloned().collect();
+        besoins.extend(chemins(x));
+        if actuel {
+            match (&x.genre, &x.retrait) {
+                (Genre::Surveillance, _) => besoins.push(d.join(surveillance::VOULUE)),
+                (_, Retrait::Sauvegarde(Some(_), _)) => besoins.push(d.join(crate::sauvegarde::NOTES)),
+                (Genre::Pieges, _) => besoins.push(d.join(crate::protection::pieges::LISTE)),
+                _ => {}
+            }
+        }
+        for p in besoins {
+            if std::fs::symlink_metadata(&p).is_ok()
+                && surveillance::sous(&p, d)
+                && !gardes.iter().any(|(q, _)| *q == p)
+            {
+                gardes.push((p, x.texte.clone()));
+            }
+        }
+    }
+    gardes
+}
+
 /// Efface le dossier `d` en entier, sans jamais suivre un lien ni une jonction (le lien lui-même part, pas ce qu'il
 /// désigne). Sous Windows, la lecture seule est retirée d'abord (la quarantaine pose ses fichiers ainsi). `garder` :
-/// le programme en marche (Windows ne l'efface pas). Refusé pour un chemin relatif ou sur la clé. Rend ce qui n'a pas
-/// pu partir, avec la raison.
-pub(crate) fn effacer_dossier(d: &Path, garder: Option<&Path>, cle: Option<&Path>) -> Vec<(PathBuf, String)> {
+/// le programme en marche (Windows ne l'efface pas), compté comme non effacé ; `aussi` : ce qu'un élément gardé
+/// demande encore, gardé exprès (la personne l'a vu à la seconde question). Refusé pour un chemin relatif ou sur la
+/// clé. Rend ce qui n'a pas pu partir, avec la raison.
+pub(crate) fn effacer_dossier(
+    d: &Path,
+    garder: Option<&Path>,
+    aussi: &[PathBuf],
+    cle: Option<&Path>,
+) -> Vec<(PathBuf, String)> {
     if !d.is_absolute() {
         return vec![(
             d.to_path_buf(),
@@ -711,13 +816,20 @@ pub(crate) fn effacer_dossier(d: &Path, garder: Option<&Path>, cle: Option<&Path
         )];
     }
     let garder = garder.and_then(|g| g.canonicalize().ok());
+    let aussi: Vec<PathBuf> = aussi.iter().filter_map(|a| a.canonicalize().ok()).collect();
     let mut restes = Vec::new();
-    effacer(d, garder.as_deref(), &mut restes, 0);
+    effacer(d, garder.as_deref(), &aussi, &mut restes, 0);
     restes
 }
 
 /// Efface `p` (un fichier, un lien ou un dossier) ; dit si quelque chose y est resté.
-fn effacer(p: &Path, garder: Option<&Path>, restes: &mut Vec<(PathBuf, String)>, profondeur: usize) -> bool {
+fn effacer(
+    p: &Path,
+    garder: Option<&Path>,
+    aussi: &[PathBuf],
+    restes: &mut Vec<(PathBuf, String)>,
+    profondeur: usize,
+) -> bool {
     let meta = match std::fs::symlink_metadata(p) {
         Ok(m) => m,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return true,
@@ -743,7 +855,7 @@ fn effacer(p: &Path, garder: Option<&Path>, restes: &mut Vec<(PathBuf, String)>,
         match std::fs::read_dir(p) {
             Ok(entrees) => {
                 for e in entrees.flatten() {
-                    vide &= effacer(&e.path(), garder, restes, profondeur + 1);
+                    vide &= effacer(&e.path(), garder, aussi, restes, profondeur + 1);
                 }
             }
             Err(e) => {
@@ -751,7 +863,7 @@ fn effacer(p: &Path, garder: Option<&Path>, restes: &mut Vec<(PathBuf, String)>,
                 return false;
             }
         }
-        // Ce qui est resté dedans est déjà dit : le dossier qui le contient ne s'ajoute pas à la liste.
+        // Ce qui est resté dedans est déjà dit, ou gardé exprès : le dossier qui le contient ne s'ajoute pas à la liste.
         if !vide {
             return false;
         }
@@ -768,6 +880,9 @@ fn effacer(p: &Path, garder: Option<&Path>, restes: &mut Vec<(PathBuf, String)>,
             p.to_path_buf(),
             tr!("programme en marche : gardé", "running program: kept").to_string(),
         ));
+        return false;
+    }
+    if !aussi.is_empty() && p.canonicalize().is_ok_and(|c| aussi.contains(&c)) {
         return false;
     }
     #[cfg(windows)]
@@ -842,7 +957,7 @@ fn defaire_d_abord(liste: bool) {
     );
     if liste {
         for (texte, precision) in entrees_annulables(&a) {
-            println!("  • {texte} : {precision}");
+            imprimer(&trf!("  • {texte} : {precision}", "  • {texte}: {precision}"));
         }
     } else if !a.menu_vide() {
         loop {
@@ -959,9 +1074,12 @@ struct Bilan {
     garde: Vec<String>,
     echoue: Vec<(String, String)>,
     a_faire: Vec<String>,
+    /// Ce qui n'a pas pu être cherché (le planificateur muet, la liste des pièges illisible) : peut-être encore là.
+    non_verifie: Vec<String>,
 }
 
-/// Le texte du bilan. Un échec n'est jamais compté comme retiré, ni la fin dite « faite » s'il y en a un.
+/// Le texte du bilan. Un échec n'est jamais compté comme retiré, ni la fin dite « faite » s'il y en a un ; ce qui n'a
+/// pas pu être cherché non plus : il peut encore tourner, ou rester dans les dossiers.
 fn rediger_bilan(b: &Bilan) -> Vec<String> {
     let mut l = Vec::new();
     let mut partie = |titre: &str, lignes: Vec<String>| {
@@ -990,41 +1108,75 @@ fn rediger_bilan(b: &Bilan) -> Vec<String> {
         tr!("Reste à faire toi-même", "Left for you to do"),
         b.a_faire.iter().map(|x| format!("  → {x}")).collect(),
     );
+    partie(
+        tr!("Non vérifié", "Not checked"),
+        b.non_verifie.iter().map(|x| format!("  ? {x}")).collect(),
+    );
     l.push(String::new());
-    if b.echoue.is_empty() {
+    if b.echoue.is_empty() && b.non_verifie.is_empty() {
         l.push(trf!(
             "  {VERT}✔{RESET} Fait : rien d'autre de Vanguard ne reste ici, sauf ce qui est gardé ou à faire ci-dessus.",
             "  {VERT}✔{RESET} Done: nothing else of Vanguard stays here, except what is kept or left to do above."
         ));
-    } else {
+    }
+    if !b.echoue.is_empty() {
         l.push(trf!(
             "  ✖ {} élément(s) non retiré(s) : ils sont dits ci-dessus, avec quoi faire.",
             "  ✖ {} item(s) not removed: they are listed above, with what to do.",
             b.echoue.len()
         ));
     }
+    if !b.non_verifie.is_empty() {
+        l.push(trf!(
+            "  ✖ {} point(s) non vérifié(s) : dit(s) ci-dessus ; ce qu'ils couvrent peut encore être là.",
+            "  ✖ {} point(s) not checked: listed above; what they cover may still be there.",
+            b.non_verifie.len()
+        ));
+    }
     l
 }
 
+/// Ce qu'il faut pour retirer : où sont le programme en marche et la clé, et ce qui s'accumule en route (un fichier
+/// du dossier de données à garder pour un élément laissé en place, ce qui reste à faire soi-même).
+struct Execution<'a> {
+    donnees: &'a Path,
+    en_marche: Option<&'a Path>,
+    cle: Option<&'a Path>,
+    gardes: Vec<(PathBuf, String)>,
+    a_faire: Vec<String>,
+}
+
 /// Retire un élément, sans rien demander (montré et accepté avant) ; rend ce qui est fait, ou la raison d'un échec.
-fn retirer(e: &Element, garder: Option<&Path>, cle: Option<&Path>) -> Result<String, String> {
+fn retirer(e: &Element, x: &mut Execution) -> Result<String, String> {
     match &e.retrait {
-        Retrait::Surveillance => surveillance::retirer().map(|()| e.texte.clone()),
-        Retrait::Entretien => crate::entretien::retirer().map(|()| e.texte.clone()),
+        Retrait::Surveillance(trouves) => surveillance::retirer(trouves).map(|()| e.texte.clone()),
+        Retrait::Entretien(trouves) => crate::entretien::retirer(trouves).map(|()| e.texte.clone()),
         Retrait::Sauvegarde(Some(m), _) => {
-            if crate::sauvegarde::annuler_sans_question(m) {
-                Ok(trf!(
-                    "{} (tes copies restent sur le disque)",
-                    "{} (your copies stay on the disk)",
-                    e.texte
-                ))
-            } else {
-                Err(tr!(
+            let (ok, laissees) = crate::sauvegarde::annuler_sans_question(m);
+            if !ok {
+                return Err(tr!(
                     "une étape a échoué, sa note est gardée : « vanguard sauvegarde-auto --annuler » pour réessayer",
                     "a step failed, its note is kept: “vanguard auto-backup --undo” to try again"
                 )
-                .to_string())
+                .to_string());
             }
+            // Une unité modifiée depuis sa pose reste, et sa note avec elle, même si le dossier de données part.
+            for u in &laissees {
+                x.a_faire.push(trf!(
+                    "{} : modifié depuis sa pose, laissé en place ; supprime-le toi-même si tu n'en veux plus. Sa note est gardée : « vanguard sauvegarde-auto --annuler » le retrouve.",
+                    "{}: changed since it was placed, left in place; delete it yourself if you no longer want it. Its note is kept: “vanguard auto-backup --undo” finds it.",
+                    chemin_affichable(u)
+                ));
+            }
+            if !laissees.is_empty() {
+                x.gardes
+                    .push((x.donnees.join(crate::sauvegarde::NOTES), e.texte.clone()));
+            }
+            Ok(trf!(
+                "{} (tes copies restent sur le disque)",
+                "{} (your copies stay on the disk)",
+                e.texte
+            ))
         }
         Retrait::Sauvegarde(None, fichiers) => crate::sauvegarde::retirer_sans_note(fichiers).map(|()| e.texte.clone()),
         Retrait::Pieges => match crate::protection::pieges::retirer_sans_question() {
@@ -1099,81 +1251,115 @@ fn retirer(e: &Element, garder: Option<&Path>, cle: Option<&Path>) -> Result<Str
         }
         Retrait::Avant(r) => passage::retirer_reste(r).map(|()| e.texte.clone()),
         Retrait::Dossier(d) => {
-            let restes = effacer_dossier(d, garder, cle);
-            match restes.first() {
-                None => Ok(e.texte.clone()),
-                Some((p, raison)) => Err(trf!(
+            let lien = lien_vers(d);
+            let gardes: Vec<&(PathBuf, String)> = x.gardes.iter().filter(|(p, _)| surveillance::sous(p, d)).collect();
+            let fichiers: Vec<PathBuf> = gardes.iter().map(|(p, _)| p.clone()).collect();
+            let restes = effacer_dossier(d, x.en_marche, &fichiers, x.cle);
+            if let Some((p, raison)) = restes.first() {
+                return Err(trf!(
                     "{} élément(s) non effacé(s), dont {} ({raison})",
                     "{} item(s) not erased, including {} ({raison})",
                     restes.len(),
                     chemin_affichable(p)
-                )),
+                ));
             }
+            if !gardes.is_empty() {
+                let liste: Vec<String> = gardes
+                    .iter()
+                    .map(|(p, pour)| format!("{} ({pour})", chemin_affichable(p)))
+                    .collect();
+                return Ok(trf!(
+                    "{} ; gardé, pour ce que tu gardes : {}",
+                    "{}; kept, for what you keep: {}",
+                    e.texte,
+                    liste.join(", ")
+                ));
+            }
+            // Une passe déjà lancée a pu écrire de nouveau pendant l'effacement : un dossier revenu n'est pas retiré.
+            if std::fs::symlink_metadata(d).is_ok() {
+                return Err(tr!(
+                    "revenu pendant l'effacement : une passe de Vanguard encore en cours y a écrit ; réessaie dans une minute",
+                    "back during the erasing: a Vanguard run still in progress wrote into it; try again in a minute"
+                )
+                .to_string());
+            }
+            Ok(match lien {
+                Some(cible) => trf!(
+                    "{} (le lien seul : {} reste)",
+                    "{} (the link only: {} stays)",
+                    e.texte,
+                    chemin_affichable(&cible)
+                ),
+                None => e.texte.clone(),
+            })
         }
     }
 }
 
-/// Le second accord pour un dossier de données coché : ce qu'il garde, la quarantaine à remettre d'abord, une
-/// sauvegarde du carnet, puis la question. Rend la réponse.
-fn accord_donnees(e: &Element, a: &Annulables) -> bool {
+/// Le second accord pour un dossier de données coché : ce qu'il garde (extensions, traces, quarantaine, de quoi
+/// défaire les changements, le relevé des corrections), ce qui y reste pour un élément gardé (`gardes`), une
+/// sauvegarde du carnet, puis la question. Le même chemin pour le dossier d'une version d'avant, qui peut lui aussi
+/// garder une quarantaine. Rend la réponse.
+fn accord_donnees(e: &Element, a: &Annulables, gardes: &[(PathBuf, String)]) -> bool {
     let Retrait::Dossier(d) = &e.retrait else {
         return false;
     };
+    let avant = e.genre == Genre::DonneesAvant;
     let montre = chemin_affichable(d);
-    let place = crate::nettoyer::taille_lisible(taille(d));
     println!();
-    if e.genre == Genre::DonneesAvant {
+    // Un lien : rien de ce qu'il désigne ne part, il n'y a rien d'autre à dire.
+    if let Some(cible) = lien_vers(d) {
         afficher_aligne(
             "  ",
             &trf!(
-                "Les données d'une version d'avant ({montre}, {place}) gardent son carnet des appareils et son historique.",
-                "The data of an earlier version ({montre}, {place}) keeps its device record and its history."
+                "{montre} est un lien vers {} : seul le lien part ; ce qu'il désigne reste, quarantaine comprise.",
+                "{montre} is a link to {}: only the link goes; what it points to stays, quarantine included.",
+                chemin_affichable(&cible)
             ),
             2,
             "",
         );
-        return demander(tr!(
-            "  Effacer aussi ce dossier pour de bon ? [o/N] : ",
-            "  Erase this folder too, for good? [y/N]: "
-        ))
-        .oui();
+        return demander(tr!("  Retirer ce lien ? [o/N] : ", "  Remove this link? [y/N]: ")).oui();
     }
-    afficher_aligne(
-        "  ",
-        &trf!(
+    let place = crate::nettoyer::taille_lisible(taille(d));
+    let dire = |texte: &str| afficher_aligne("  ", texte, 2, "");
+    if avant {
+        dire(&trf!(
+            "Les données d'une version d'avant ({montre}, {place}) gardent son carnet des appareils et son historique.",
+            "The data of an earlier version ({montre}, {place}) keeps its device record and its history."
+        ));
+    } else {
+        dire(&trf!(
             "Le dossier de données ({montre}, {place}) garde le carnet des appareils, l'historique des bilans et ce que Vanguard a appris.",
             "The data folder ({montre}, {place}) keeps the device record, the check-up history and what Vanguard has learned."
-        ),
-        2,
-        "",
-    );
+        ));
+    }
     let compter = |filtre: &dyn Fn(&std::fs::DirEntry) -> bool, dossier: &Path| {
         std::fs::read_dir(dossier).map_or(0, |l| l.flatten().filter(|x| filtre(x)).count())
     };
     let extensions = compter(&|x| x.path().is_dir(), &d.join("plugins"));
     let traces = compter(&|x| x.file_name().to_string_lossy().starts_with("traces-"), d);
     if extensions + traces > 0 {
-        afficher_aligne(
-            "  ",
-            &trf!(
-                "Tes extensions ({extensions}) et les traces collectées ({traces}) y sont aussi.",
-                "Your extensions ({extensions}) and the collected traces ({traces}) are there too."
-            ),
-            2,
-            "",
-        );
+        dire(&trf!(
+            "Tes extensions ({extensions}) et les traces collectées ({traces}) y sont aussi.",
+            "Your extensions ({extensions}) and the collected traces ({traces}) are there too."
+        ));
     }
-    if a.quarantaine > 0 {
-        afficher_aligne(
-            "  ",
-            &trf!(
-                "Il garde aussi {} fichier(s) en quarantaine. Une détection peut se tromper : remets d'abord ceux qui sont à toi, ou garde le dossier.",
-                "It also holds {} quarantined file(s). A detection can be wrong: first put back those that are yours, or keep the folder.",
-                a.quarantaine
-            ),
-            2,
-            "",
-        );
+    let quarantaine = crate::protection::quarantaine::nombre_dans(&d.join("quarantaine"));
+    if quarantaine > 0 && avant {
+        // Le menu de la quarantaine ne remet que celle d'aujourd'hui : ces fichiers-là ne pourraient plus revenir.
+        dire(&trf!(
+            "Il garde {quarantaine} fichier(s) en quarantaine, qui ne se remettent pas d'ici : le dossier est gardé. Une détection peut se tromper : remets d'abord ceux qui sont à toi (dans {}), puis efface ce dossier toi-même.",
+            "It holds {quarantaine} quarantined file(s), which cannot be put back from here: the folder is kept. A detection can be wrong: first put back those that are yours (in {}), then erase this folder yourself.",
+            chemin_affichable(&d.join("quarantaine"))
+        ));
+        return false;
+    }
+    if quarantaine > 0 {
+        dire(&trf!(
+            "Il garde aussi {quarantaine} fichier(s) en quarantaine. Une détection peut se tromper : remets d'abord ceux qui sont à toi, ou garde le dossier.",
+            "It also holds {quarantaine} quarantined file(s). A detection can be wrong: first put back those that are yours, or keep the folder."
+        ));
         if demander(tr!(
             "  Ouvrir la quarantaine maintenant ? [o/N] : ",
             "  Open the quarantine now? [y/N]: "
@@ -1183,33 +1369,101 @@ fn accord_donnees(e: &Element, a: &Annulables) -> bool {
             crate::protection::quarantaine::menu();
         }
     }
-    if a.a_defaire() > 0 {
-        afficher_aligne(
-            "  ",
-            &trf!(
-                "Il garde aussi de quoi défaire {} changement(s) : effacé, Vanguard ne pourra plus les défaire.",
-                "It also keeps what undoes {} change(s): erased, Vanguard can no longer undo them.",
-                a.a_defaire()
-            ),
-            2,
-            "",
-        );
+    if !avant && a.a_defaire() > 0 {
+        dire(&trf!(
+            "Il garde aussi de quoi défaire {} changement(s) : effacé, Vanguard ne pourra plus les défaire.",
+            "It also keeps what undoes {} change(s): erased, Vanguard can no longer undo them.",
+            a.a_defaire()
+        ));
     }
-    if demander(tr!(
-        "\n  Faire d'abord une sauvegarde du carnet des appareils (vanguard sauvegarder) ? [O/n] : ",
-        "\n  First back up the device record (vanguard backup)? [Y/n]: "
-    ))
-    .chars()
-    .next()
-    .is_none_or(|c| matches!(c, 'o' | 'O' | 'y' | 'Y'))
+    let releve = d.join(crate::changements::RELEVE);
+    if !avant && !a.a_la_main.is_empty() {
+        dire(&trf!(
+            "Il garde aussi le relevé des {} correction(s) faites ici ({}), le seul endroit où leurs commandes sont notées : effacé, il disparaît. Elles sont redites à la fin.",
+            "It also keeps the record of the {} fix(es) made here ({}), the only place where their commands are written down: erased, it is gone. They are listed again at the end.",
+            a.a_la_main.len(),
+            crate::changements::RELEVE
+        ));
+        let dossier = crate::donnees::dossier_par_defaut();
+        if demander(&trf!(
+            "\n  Copier ce relevé dans {} ? [O/n] : ",
+            "\n  Copy this record into {}? [Y/n]: ",
+            chemin_affichable(&dossier)
+        ))
+        .chars()
+        .next()
+        .is_none_or(|c| matches!(c, 'o' | 'O' | 'y' | 'Y'))
+        {
+            match copier_releve(&releve, &dossier) {
+                Ok(copie) => dire(&trf!(
+                    "{VERT}✔{RESET} Relevé copié : {}",
+                    "{VERT}✔{RESET} Record copied: {}",
+                    chemin_affichable(&copie)
+                )),
+                Err(raison) => dire(&trf!("✖ Relevé non copié : {raison}", "✖ Record not copied: {raison}")),
+            }
+        }
+    }
+    if !gardes.is_empty() {
+        dire(tr!(
+            "Ce qui y reste, parce qu'un élément que tu gardes s'en sert :",
+            "What stays in it, because an item you keep uses it:"
+        ));
+        for (p, pour) in gardes {
+            afficher_aligne("    • ", &format!("{} ({pour})", chemin_affichable(p)), 6, "");
+        }
+    }
+    if !avant
+        && demander(tr!(
+            "\n  Faire d'abord une sauvegarde du carnet des appareils (vanguard sauvegarder) ? [O/n] : ",
+            "\n  First back up the device record (vanguard backup)? [Y/n]: "
+        ))
+        .chars()
+        .next()
+        .is_none_or(|c| matches!(c, 'o' | 'O' | 'y' | 'Y'))
     {
         crate::donnees::sauvegarder(None);
     }
-    demander(tr!(
-        "\n  Effacer le dossier de données pour de bon ? [o/N] : ",
-        "\n  Erase the data folder for good? [y/N]: "
-    ))
+    demander(if avant {
+        tr!(
+            "\n  Effacer aussi ce dossier pour de bon ? [o/N] : ",
+            "\n  Erase this folder too, for good? [y/N]: "
+        )
+    } else {
+        tr!(
+            "\n  Effacer le dossier de données pour de bon ? [o/N] : ",
+            "\n  Erase the data folder for good? [y/N]: "
+        )
+    })
     .oui()
+}
+
+/// Copie le relevé des corrections hors du dossier de données, sous un nom daté, sans jamais écraser un fichier déjà
+/// là. Rend la copie.
+fn copier_releve(releve: &Path, dossier: &Path) -> Result<PathBuf, String> {
+    if !dossier.is_absolute() {
+        return Err(tr!("dossier inconnu", "unknown folder").to_string());
+    }
+    let mut source = std::fs::File::open(releve).map_err(|e| e.to_string())?;
+    let date = chrono::Local::now().format("%Y-%m-%d");
+    for n in 1..100 {
+        let nom = if n == 1 {
+            format!("vanguard-changements-{date}.jsonl")
+        } else {
+            format!("vanguard-changements-{date}-{n}.jsonl")
+        };
+        let copie = dossier.join(nom);
+        match std::fs::OpenOptions::new().write(true).create_new(true).open(&copie) {
+            Ok(mut f) => {
+                return std::io::copy(&mut source, &mut f)
+                    .map(|_| copie)
+                    .map_err(|e| e.to_string());
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(e) => return Err(e.to_string()),
+        }
+    }
+    Err(tr!("trop de copies du même jour", "too many copies from the same day").to_string())
 }
 
 /// Ce qui reste des changements faits sur le système, pour la fin : avec la commande qui les défait, ou dit perdu si
@@ -1223,6 +1477,17 @@ fn changements_restants(a: &Annulables, donnees_effacees: bool) -> Vec<String> {
                 "{} change(s) made by Vanguard stay on the system, with nothing left here to undo them.",
                 a.a_defaire()
             ));
+        }
+        // Leur relevé est parti avec les données : c'est la dernière fois qu'ils peuvent être lus.
+        if !a.a_la_main.is_empty() {
+            l.push(trf!(
+                "{} correction(s) faites ici ne se défont pas toutes seules, et leur relevé est effacé. Les voici, chacune à défaire avec la commande inverse :",
+                "{} fix(es) made here do not undo themselves, and their record is erased. Here they are, each to undo with the opposite command:",
+                a.a_la_main.len()
+            ));
+            for (date, commande) in &a.a_la_main {
+                l.push(format!("{date}  {}", commande_affichable(commande)));
+            }
         }
         return l;
     }
@@ -1281,8 +1546,11 @@ pub fn commande(liste: bool) {
     };
     let rec = recenser(&lieux);
     println!();
-    for m in rec.pas_a_lui.iter().chain(&rec.non_verifie) {
+    for m in &rec.pas_a_lui {
         afficher_aligne("  • ", m, 4, "");
+    }
+    for m in &rec.non_verifie {
+        afficher_aligne("  ? ", m, 4, "");
     }
     if crate::protection::blocage::protection_active() {
         afficher_aligne(
@@ -1296,15 +1564,21 @@ pub fn commande(liste: bool) {
         );
     }
     if rec.elements.is_empty() {
-        afficher_aligne(
-            "  ",
+        // Ce qui n'a pas pu être cherché n'est jamais compté comme absent.
+        let fin = if rec.non_verifie.is_empty() {
             tr!(
                 "Vanguard n'a rien posé sur cet ordinateur, ou tout a déjà été retiré.",
                 "Vanguard placed nothing on this computer, or everything was already removed."
-            ),
-            2,
-            "",
-        );
+            )
+            .to_string()
+        } else {
+            trf!(
+                "Rien de Vanguard n'a été trouvé, mais {} point(s) n'ont pas pu être cherchés (ci-dessus) : ce qu'ils couvrent peut encore être là.",
+                "Nothing of Vanguard was found, but {} point(s) could not be looked for (above): what they cover may still be there.",
+                rec.non_verifie.len()
+            )
+        };
+        afficher_aligne("  ", &fin, 2, "");
         for x in &rec.a_faire {
             afficher_aligne("  → ", x, 4, "");
         }
@@ -1389,8 +1663,25 @@ pub fn commande(liste: bool) {
         afficher_aligne("  • ", &format!("{} → {action}", e.texte), 4, "");
     }
     let a = annulables();
+    // Ce que des éléments gardés demandent encore dans les dossiers de données : vu à la seconde question, gardé à
+    // l'effacement.
+    let mut gardes: Vec<(PathBuf, String)> = Vec::new();
+    for e in &rec.elements {
+        if let (Genre::Donnees | Genre::DonneesAvant, Retrait::Dossier(d)) = (e.genre, &e.retrait) {
+            gardes.extend(gardes_dans(d, e.genre == Genre::Donnees, &rec.elements, &etats));
+        }
+    }
     for (i, e) in rec.elements.iter().enumerate() {
-        if etats[i] && matches!(e.genre, Genre::Donnees | Genre::DonneesAvant) && !accord_donnees(e, &a) {
+        if !etats[i] || !matches!(e.genre, Genre::Donnees | Genre::DonneesAvant) {
+            continue;
+        }
+        let Retrait::Dossier(d) = &e.retrait else { continue };
+        let les_siens: Vec<(PathBuf, String)> = gardes
+            .iter()
+            .filter(|(p, _)| surveillance::sous(p, d))
+            .cloned()
+            .collect();
+        if !accord_donnees(e, &a, &les_siens) {
             etats[i] = false;
             trp!("  Dossier de données gardé.", "  Data folder kept.");
         }
@@ -1408,10 +1699,16 @@ pub fn commande(liste: bool) {
         trp!("  Rien n'a été retiré.", "  Nothing was removed.");
         return;
     }
-    let garder = if cfg!(windows) {
-        lieux.programme.as_deref()
-    } else {
-        None
+    let mut x = Execution {
+        donnees: &lieux.donnees,
+        en_marche: if cfg!(windows) {
+            lieux.programme.as_deref()
+        } else {
+            None
+        },
+        cle: lieux.cle.as_deref(),
+        gardes,
+        a_faire: Vec::new(),
     };
     let mut bilan = Bilan::default();
     let mut donnees_touchees = false;
@@ -1422,7 +1719,7 @@ pub fn commande(liste: bool) {
             continue;
         }
         donnees_touchees |= e.genre == Genre::Donnees;
-        match retirer(e, garder, lieux.cle.as_deref()) {
+        match retirer(e, &mut x) {
             Ok(fait) => {
                 afficher_aligne(&format!("  {VERT}✔{RESET} "), &e.texte, 4, "");
                 bilan.retire.push(fait);
@@ -1435,7 +1732,9 @@ pub fn commande(liste: bool) {
     }
     bilan.garde.extend(rec.pas_a_lui.iter().cloned());
     bilan.a_faire.extend(rec.a_faire.iter().cloned());
+    bilan.a_faire.append(&mut x.a_faire);
     bilan.a_faire.extend(changements_restants(&a, donnees_touchees));
+    bilan.non_verifie.extend(rec.non_verifie.iter().cloned());
     for l in rediger_bilan(&bilan) {
         imprimer(&l);
     }
@@ -1662,7 +1961,7 @@ mod tests {
         std::os::unix::fs::symlink(&dehors, d.join("a/lien-dossier")).unwrap();
         let en_marche = d.join("bin/vanguard");
         ecrire(&en_marche, "x");
-        let restes = effacer_dossier(&d, Some(&en_marche), None);
+        let restes = effacer_dossier(&d, Some(&en_marche), &[], None);
         // Les cibles des liens restent intactes ; le programme gardé reste, et c'est dit.
         assert_eq!(std::fs::read_to_string(dehors.join("garde.txt")).unwrap(), "à moi");
         assert!(en_marche.is_file());
@@ -1670,14 +1969,14 @@ mod tests {
         assert_eq!(restes[0].0, en_marche);
         assert!(!d.join("a").exists() && !d.join("lien-fichier").exists());
         // Sans rien à garder : tout part.
-        assert_eq!(effacer_dossier(&d, None, None), Vec::new());
+        assert_eq!(effacer_dossier(&d, None, &[], None), Vec::new());
         assert!(!d.exists());
         // Sur la clé, ou un chemin relatif : refusé, rien n'est touché.
         let cle = r.join("cle");
         ecrire(&cle.join("donnees/x"), "x");
-        assert_eq!(effacer_dossier(&cle.join("donnees"), None, Some(&cle)).len(), 1);
+        assert_eq!(effacer_dossier(&cle.join("donnees"), None, &[], Some(&cle)).len(), 1);
         assert!(cle.join("donnees/x").is_file());
-        assert_eq!(effacer_dossier(Path::new("relatif"), None, None).len(), 1);
+        assert_eq!(effacer_dossier(Path::new("relatif"), None, &[], None).len(), 1);
         let _ = std::fs::remove_dir_all(r);
     }
 
@@ -1690,7 +1989,7 @@ mod tests {
         let mut droits = std::fs::metadata(&f).unwrap().permissions();
         droits.set_readonly(true);
         std::fs::set_permissions(&f, droits).unwrap();
-        assert_eq!(effacer_dossier(&r, None, None), Vec::new());
+        assert_eq!(effacer_dossier(&r, None, &[], None), Vec::new());
         assert!(!r.exists());
     }
 
@@ -1701,6 +2000,7 @@ mod tests {
             garde: vec!["Dossier de données".into()],
             echoue: vec![("Surveillance horaire".into(), "systemctl".into())],
             a_faire: vec!["vanguard blocage annuler".into()],
+            non_verifie: Vec::new(),
         };
         let texte = rediger_bilan(&b).join("\n");
         let retire = texte.split(tr!("Gardé", "Kept")).next().unwrap();
@@ -1714,6 +2014,194 @@ mod tests {
         };
         let texte = rediger_bilan(&tout_bon).join("\n");
         assert!(texte.contains("Fait :") || texte.contains("Done:"), "{texte}");
+        // Le planificateur muet : rien n'a échoué, mais la fin n'est pas dite « faite » ; le point est redit.
+        let muet = Bilan {
+            non_verifie: vec!["Tâches planifiées non lues".into()],
+            ..tout_bon
+        };
+        let texte = rediger_bilan(&muet).join("\n");
+        assert!(!texte.contains("Fait :") && !texte.contains("Done:"), "{texte}");
+        assert!(texte.contains("? Tâches planifiées non lues"), "{texte}");
+        assert!(
+            texte.contains("non vérifié") || texte.contains("not checked"),
+            "{texte}"
+        );
+    }
+
+    #[test]
+    fn dossier_de_donnees_coche_garde_ce_que_demande_un_element_garde() {
+        let (r, l) = ordinateur("dependances-dossier");
+        ecrire(&l.donnees.join(surveillance::VOULUE), "");
+        let rec = recenser(&l);
+        let mut etats: Vec<bool> = rec.elements.iter().map(|e| e.coche).collect();
+        // La surveillance gardée, le dossier de données coché.
+        etats[0] = false;
+        let i = rec.elements.iter().position(|e| e.genre == Genre::Donnees).unwrap();
+        etats[i] = true;
+        let _ = garder_les_dependances(&rec.elements, &mut etats);
+        let gardes = gardes_dans(&l.donnees, true, &rec.elements, &etats);
+        let exe = l.donnees.join("bin").join(crate::mise_a_jour::NOM);
+        let voulue = l.donnees.join(surveillance::VOULUE);
+        assert!(gardes.iter().any(|(p, _)| *p == exe), "{gardes:?}");
+        assert!(gardes.iter().any(|(p, _)| *p == voulue), "{gardes:?}");
+        assert!(gardes.iter().all(|(_, pour)| !pour.is_empty()));
+        let mut x = Execution {
+            donnees: &l.donnees,
+            en_marche: None,
+            cle: l.cle.as_deref(),
+            gardes,
+            a_faire: Vec::new(),
+        };
+        let fait = retirer(&rec.elements[i], &mut x).expect("effacé");
+        // bin/vanguard reste : la surveillance gardée le lance ; le reste des données part.
+        assert!(exe.is_file() && voulue.is_file());
+        assert!(!l.donnees.join("appareils.json").exists() && !l.donnees.join("quarantaine").exists());
+        assert!(fait.contains("gardé") || fait.contains("kept"), "{fait}");
+        // Sans rien de gardé : tout part, et le dossier est vérifié absent.
+        x.gardes.clear();
+        assert!(retirer(&rec.elements[i], &mut x).is_ok());
+        assert!(!l.donnees.exists());
+        let _ = std::fs::remove_dir_all(r);
+    }
+
+    #[test]
+    fn ancien_dossier_avec_une_quarantaine_jamais_efface() {
+        let r = racine("avant-quarantaine");
+        let d = r.join("ancien");
+        ecrire(&d.join("historique.json"), "[]");
+        ecrire(&d.join("quarantaine/x.vanguard-quarantaine"), "x");
+        ecrire(
+            &d.join("quarantaine/journal.txt"),
+            "2026-10-18 10:00:00\tTest\t/home/alice/x\tx.vanguard-quarantaine\n",
+        );
+        let mut pas_a_lui = Vec::new();
+        let e = dossier_de_donnees(&d, Genre::DonneesAvant, "", &mut pas_a_lui);
+        let a = Annulables {
+            optimiser: 0,
+            blocages: 0,
+            jeux: 0,
+            quarantaine: 0,
+            a_la_main: Vec::new(),
+        };
+        // Refusé avant toute question : ces fichiers ne se remettent pas d'ici.
+        assert!(!accord_donnees(&e, &a, &[]));
+        assert!(d.join("quarantaine/x.vanguard-quarantaine").is_file());
+        let _ = std::fs::remove_dir_all(r);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn dossier_de_donnees_qui_est_un_lien() {
+        let r = racine("donnees-lien");
+        let cible = r.join("autre-disque/vanguard");
+        ecrire(&cible.join("appareils.json"), "{}");
+        let mut l = Lieux::jetable(&r);
+        std::fs::create_dir_all(l.donnees.parent().unwrap()).unwrap();
+        std::os::unix::fs::symlink(&cible, &l.donnees).unwrap();
+        l.raccourci = None;
+        let rec = recenser(&l);
+        let e = rec.elements.iter().find(|e| e.genre == Genre::Donnees).unwrap();
+        // Nommé comme un lien, sans la taille de sa cible ; dit que la cible reste.
+        assert!(e.texte.contains("lien") || e.texte.contains("link"), "{}", e.texte);
+        assert!(
+            rec.pas_a_lui.iter().any(|m| m.contains("autre-disque")),
+            "{:?}",
+            rec.pas_a_lui
+        );
+        let mut x = Execution {
+            donnees: &l.donnees,
+            en_marche: None,
+            cle: None,
+            gardes: Vec::new(),
+            a_faire: Vec::new(),
+        };
+        let fait = retirer(e, &mut x).unwrap();
+        assert!(fait.contains("autre-disque"), "{fait}");
+        assert!(std::fs::symlink_metadata(&l.donnees).is_err());
+        assert!(cible.join("appareils.json").is_file());
+        let _ = std::fs::remove_dir_all(r);
+    }
+
+    #[test]
+    fn corrections_redites_quand_leur_releve_part() {
+        let a = Annulables {
+            optimiser: 0,
+            blocages: 0,
+            jeux: 0,
+            quarantaine: 0,
+            a_la_main: vec![
+                ("2026-10-01 10:00".into(), "ufw enable".into()),
+                ("2026-10-02 11:00".into(), "systemctl disable --now cups".into()),
+            ],
+        };
+        let restes = changements_restants(&a, true).join("\n");
+        assert!(restes.contains("ufw enable") && restes.contains("cups"), "{restes}");
+        assert!(restes.contains("2026-10-02 11:00"), "{restes}");
+        // Données gardées : le relevé est là, la commande qui le montre suffit.
+        assert!(!changements_restants(&a, false).join("\n").contains("ufw enable"));
+    }
+
+    #[test]
+    fn releve_copie_sans_rien_ecraser() {
+        let r = racine("releve");
+        let releve = r.join(crate::changements::RELEVE);
+        ecrire(&releve, "{\"commande\":\"ufw enable\"}\n");
+        let dest = r.join("maison");
+        std::fs::create_dir_all(&dest).unwrap();
+        let premiere = copier_releve(&releve, &dest).unwrap();
+        let seconde = copier_releve(&releve, &dest).unwrap();
+        assert_ne!(premiere, seconde);
+        assert_eq!(
+            std::fs::read_to_string(&premiere).unwrap(),
+            std::fs::read_to_string(&releve).unwrap()
+        );
+        assert!(copier_releve(&releve, Path::new("relatif")).is_err());
+        let _ = std::fs::remove_dir_all(r);
+    }
+
+    #[test]
+    fn precisions_accordees_et_programme_d_un_lnk() {
+        let (r, mut l) = ordinateur("precisions");
+        let rec = recenser(&l);
+        // « Entretien du mois » est masculin.
+        assert!(
+            !rec.elements[1].precision.contains("retirée"),
+            "{}",
+            rec.elements[1].precision
+        );
+        // Les fichiers trouvés (les deux unités, l'agent launchd) vont avec la tâche, pour être tous retirés.
+        let Retrait::Surveillance(f) = &rec.elements[0].retrait else {
+            panic!("{:?}", rec.elements[0]);
+        };
+        assert_eq!(f.len(), 3, "{f:?}");
+        // Un raccourci .lnk ne se lit pas : il vise la copie de bin/, qui reste s'il est gardé.
+        let lnk = r.join("Bureau/Vanguard.lnk");
+        ecrire(&lnk, b"L\0\0\0binaire");
+        l.raccourci = Some(lnk);
+        let rec = recenser(&l);
+        let e = rec.elements.iter().find(|e| e.genre == Genre::Raccourci).unwrap();
+        assert_eq!(e.lance, Some(l.donnees.join("bin").join(crate::mise_a_jour::NOM)));
+        let _ = std::fs::remove_dir_all(r);
+    }
+
+    #[test]
+    fn copie_en_marche_nommee_d_apres_ce_qui_part() {
+        let (r, mut l) = ordinateur("en-marche");
+        l.programme = Some(l.donnees.join("bin").join(crate::mise_a_jour::NOM));
+        let rec = recenser(&l);
+        let e = rec.elements.iter().find(|e| e.genre == Genre::Programme).unwrap();
+        if cfg!(windows) {
+            // La copie en marche reste : l'élément dit « restes », jamais « copie effacée ».
+            assert!(
+                e.texte.contains("Restes") || e.texte.contains("leftovers"),
+                "{}",
+                e.texte
+            );
+            assert_ne!(rec.a_faire, Vec::<String>::new());
+        } else {
+            assert!(e.texte.contains("Copie") || e.texte.contains("copy"), "{}", e.texte);
+        }
+        let _ = std::fs::remove_dir_all(r);
     }
 
     #[test]

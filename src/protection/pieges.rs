@@ -38,8 +38,12 @@ enum Etat {
     Illisible,
 }
 
+/// La liste exacte des fichiers-pièges posés, dans le dossier de données : sans elle, ils ne se retirent plus
+/// exactement.
+pub(crate) const LISTE: &str = "pieges.json";
+
 fn fichier() -> PathBuf {
-    crate::reseau::dossier_local().join("pieges.json")
+    crate::reseau::dossier_local().join(LISTE)
 }
 
 /// Les fichiers-pièges posés ; `Err` si la liste existe mais ne se lit plus.
@@ -360,7 +364,7 @@ fn retirer_tous(pieges: &[Piege], liste: &Path) -> (Vec<PathBuf>, Vec<PathBuf>) 
 
 /// Le nombre de fichiers-pièges posés, d'après la liste du dossier de données `donnees` ; `Err` si elle ne se lit plus.
 pub(crate) fn nombre_dans(donnees: &Path) -> Result<usize, ()> {
-    charger_de(&donnees.join("pieges.json")).map(|p| p.len())
+    charger_de(&donnees.join(LISTE)).map(|p| p.len())
 }
 
 /// Retire les fichiers-pièges sans question (la désinstallation l'a montré et fait accepter) : rend ceux qui n'ont

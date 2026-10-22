@@ -59,8 +59,11 @@ struct Notes {
     mise_en_place: Option<MiseEnPlace>,
 }
 
+/// La note de ce qui a été mis en place, dans le dossier de données.
+pub(crate) const NOTES: &str = "sauvegarde.json";
+
 fn fichier_notes() -> PathBuf {
-    crate::reseau::dossier_local().join("sauvegarde.json")
+    crate::reseau::dossier_local().join(NOTES)
 }
 
 fn charger_de(chemin: &Path) -> Notes {
@@ -504,17 +507,19 @@ fn juger_rsync(rsync: &Path, existe: bool) -> Option<Constat> {
 
 /// Ce que Vanguard a mis en place, d'après la note du dossier de données `donnees`.
 pub(crate) fn mise_en_place_de(donnees: &Path) -> Option<MiseEnPlace> {
-    charger_de(&donnees.join("sauvegarde.json")).mise_en_place
+    charger_de(&donnees.join(NOTES)).mise_en_place
 }
 
 /// Retire ce que Vanguard a mis en place, sans question (la désinstallation l'a montré et fait accepter), puis oublie
-/// la note ; elle reste si une étape a échoué, pour réessayer.
-pub(crate) fn annuler_sans_question(m: &MiseEnPlace) -> bool {
-    let ok = annuler_mise_en_place(m);
-    if ok {
+/// la note. Elle reste si une étape a échoué, pour réessayer, ou si une unité modifiée depuis sa pose est laissée en
+/// place : sans elle, « vanguard sauvegarde-auto --annuler » ne la retrouverait plus. Rend si tout s'est bien passé,
+/// et les unités laissées en place.
+pub(crate) fn annuler_sans_question(m: &MiseEnPlace) -> (bool, Vec<PathBuf>) {
+    let (ok, gardees) = annuler_mise_en_place(m);
+    if ok && gardees.is_empty() {
         let _ = ecrire_dans(&fichier_notes(), &Notes::default());
     }
-    ok
+    (ok, gardees)
 }
 
 /// Les unités de la sauvegarde trouvées sans note (une note perdue) : retirées par leur nom exact, minuterie arrêtée.
@@ -955,8 +960,9 @@ fn mettre_en_place() -> Option<MiseEnPlace> {
     None
 }
 
-/// Retire exactement ce que Vanguard a mis en place.
-fn annuler_mise_en_place(m: &MiseEnPlace) -> bool {
+/// Retire exactement ce que Vanguard a mis en place. Rend si tout s'est bien passé, et les unités laissées en place
+/// parce qu'elles ont été modifiées depuis leur pose (ce n'est plus seulement celle de Vanguard).
+fn annuler_mise_en_place(m: &MiseEnPlace) -> (bool, Vec<PathBuf>) {
     match m {
         MiseEnPlace::Systemd {
             empreinte_timer,
@@ -966,12 +972,13 @@ fn annuler_mise_en_place(m: &MiseEnPlace) -> bool {
             #[cfg(not(target_os = "linux"))]
             {
                 let _ = (empreinte_timer, empreinte_service);
-                false
+                (false, Vec::new())
             }
             #[cfg(target_os = "linux")]
             {
                 let dossier = dossier_unites();
                 let mut ok = crate::machine::appliquer(&[format!("systemctl --user disable --now {TIMER}")]);
+                let mut gardees = Vec::new();
                 for (nom, attendu) in [(TIMER, empreinte_timer), (SERVICE, empreinte_service)] {
                     let chemin = dossier.join(nom);
                     match std::fs::read_to_string(&chemin) {
@@ -986,19 +993,20 @@ fn annuler_mise_en_place(m: &MiseEnPlace) -> bool {
                                 "{} was modified since: left in place.",
                                 chemin_affichable(&chemin)
                             ));
+                            gardees.push(chemin);
                         }
                         Err(_) => {}
                     }
                 }
                 let _ = crate::machine::sortie("systemctl", &["--user", "daemon-reload"]);
-                ok
+                (ok, gardees)
             }
         }
         MiseEnPlace::DejaDup { avant, .. } => {
             #[cfg(not(target_os = "linux"))]
             {
                 let _ = avant;
-                false
+                (false, Vec::new())
             }
             #[cfg(target_os = "linux")]
             {
@@ -1012,7 +1020,7 @@ fn annuler_mise_en_place(m: &MiseEnPlace) -> bool {
                         ok = false;
                     }
                 }
-                ok
+                (ok, Vec::new())
             }
         }
         MiseEnPlace::TimeMachine {
@@ -1032,7 +1040,10 @@ fn annuler_mise_en_place(m: &MiseEnPlace) -> bool {
             if !deja_actif {
                 commandes.push("sudo tmutil disable".to_string());
             }
-            commandes.is_empty() || crate::machine::appliquer(&commandes)
+            (
+                commandes.is_empty() || crate::machine::appliquer(&commandes),
+                Vec::new(),
+            )
         }
     }
 }
@@ -1057,7 +1068,19 @@ pub fn annuler() {
     {
         return;
     }
-    if annuler_mise_en_place(m) {
+    let (ok, gardees) = annuler_mise_en_place(m);
+    if ok && !gardees.is_empty() {
+        // Une unité de Vanguard reste : sa note aussi, sinon plus rien ne la retrouverait.
+        mauvais(&trf!(
+            "Retiré, sauf {} : modifié(s) depuis la pose, laissé(s) en place. Supprime-les toi-même si tu n'en veux plus ; la note est gardée.",
+            "Removed, except {}: changed since they were placed, left in place. Delete them yourself if you no longer want them; the note is kept.",
+            gardees
+                .iter()
+                .map(|p| chemin_affichable(p))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    } else if ok {
         let _ = ecrire_dans(&chemin, &Notes::default());
         bon(tr!(
             "Retiré. Les fichiers sauvegardés restent sur le disque externe.",

@@ -26,7 +26,7 @@ struct Sauvegarde {
 }
 
 /// Dossier proposé : Documents sous Windows, le dossier personnel sous Linux.
-fn dossier_par_defaut() -> PathBuf {
+pub(crate) fn dossier_par_defaut() -> PathBuf {
     #[cfg(windows)]
     {
         let profil = PathBuf::from(std::env::var_os("USERPROFILE").unwrap_or_default());

@@ -64,8 +64,11 @@ pub(crate) enum Annulation {
     Demarrage { id: String },
 }
 
+/// Le relevé des corrections faites ici, dans le dossier de données : le seul endroit où leurs commandes sont notées.
+pub(crate) const RELEVE: &str = "changements.jsonl";
+
 fn fichier() -> std::path::PathBuf {
-    crate::reseau::dossier_local().join("changements.jsonl")
+    crate::reseau::dossier_local().join(RELEVE)
 }
 
 /// Note des corrections lancées (une liste de commandes chacune) et leur résultat.
